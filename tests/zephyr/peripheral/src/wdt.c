@@ -36,6 +36,44 @@ ZTEST(alp_peripheral, test_wdt_out_of_range_id_rejected)
 	zassert_equal(alp_last_error(), ALP_ERR_INVAL);
 }
 
+static void _unused_expiry_cb(alp_wdt_t *wdt, void *user)
+{
+	ARG_UNUSED(wdt);
+	ARG_UNUSED(user);
+}
+
+ZTEST(alp_peripheral, test_wdt_interrupt_only_without_callback_rejected)
+{
+	/* #1637: ALP_WDT_INTERRUPT_ONLY used to be accepted with no way to
+     * observe the interrupt -- a watchdog that neither resets nor
+     * notifies anyone.  This check runs in the dispatcher before any
+     * backend is consulted, so it is exercised here regardless of
+     * which backend this build selects. */
+	alp_wdt_t *w = alp_wdt_open(&(alp_wdt_config_t){ .wdt_id     = 0,
+	                                                 .timeout_ms = 1000u,
+	                                                 .on_timeout = ALP_WDT_INTERRUPT_ONLY,
+	                                                 .on_expire  = NULL });
+	zassert_is_null(w, "INTERRUPT_ONLY with no on_expire must be refused");
+	zassert_equal(alp_last_error(), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_peripheral, test_wdt_interrupt_only_with_callback_passes_validation)
+{
+	/* The same request WITH a callback must clear the dispatcher's
+     * validation -- this build's zephyr_drv backend then fails with
+     * NOT_READY (no alp-wdt0 DT alias on native_sim, per this suite's
+     * prj.conf comment), which is enough to prove the INVAL check
+     * above is not simply rejecting every INTERRUPT_ONLY request. */
+	alp_wdt_t *w = alp_wdt_open(&(alp_wdt_config_t){ .wdt_id     = 0,
+	                                                 .timeout_ms = 1000u,
+	                                                 .on_timeout = ALP_WDT_INTERRUPT_ONLY,
+	                                                 .on_expire  = _unused_expiry_cb });
+	zassert_is_null(w);
+	zassert_not_equal(alp_last_error(),
+	                  ALP_ERR_INVAL,
+	                  "a well-formed INTERRUPT_ONLY request must not fail dispatcher validation");
+}
+
 ZTEST(alp_peripheral, test_wdt_feed_null_handle_not_ready)
 {
 	/* §C.22: feeding a closed / NULL watchdog should fail safely;

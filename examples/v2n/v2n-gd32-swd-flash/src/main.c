@@ -107,9 +107,13 @@ int main(void)
 	}
 
 	/* Connect: line reset + JTAG-to-SWD switch + DPIDR read.
-     * On a real GD32G553 we expect IDCODE = 0x6BA02477 (Cortex-M33
-     * r0p1 SW-DPv2).  Anything else means a different silicon
-     * answered or the wire is mis-routed. */
+     * GD32_SWD_GENERIC_CM33_R0P1_IDCODE (0x6BA02477) is the GENERIC
+     * Cortex-M33 r0p1 SW-DPv2 architectural default, never measured on
+     * a GD32G553 with a probe attached (see the @warning on the macro
+     * in include/alp/chips/gd32_swd.h). Whether a real GD32G553 matches
+     * it or not is UNKNOWN (#1440, #1369) -- logged for information
+     * only; neither a match nor a mismatch here is evidence of correct
+     * or wrong silicon. */
 	s = gd32_swd_connect(&swd);
 	if (s != ALP_OK) {
 		printf("[swd] gd32_swd_connect -> %d "
@@ -117,14 +121,17 @@ int main(void)
 		       (int)s);
 		goto deinit;
 	}
-	printf("[swd] connected -- IDCODE = 0x%08X (expected 0x%08X)\n",
+	printf("[swd] connected -- IDCODE = 0x%08X (generic reference 0x%08X)\n",
 	       (unsigned)swd.idcode,
-	       (unsigned)GD32_SWD_EXPECTED_IDCODE);
-	if (swd.idcode != GD32_SWD_EXPECTED_IDCODE) {
-		printf("[swd] WARN: IDCODE mismatch -- this isn't a GD32G553?\n");
-		/* Continue anyway -- the FMC layout might still match if
-         * the silicon is a pin-compatible variant.  Real production
-         * test should refuse to proceed on a mismatch.   */
+	       (unsigned)GD32_SWD_GENERIC_CM33_R0P1_IDCODE);
+	if (swd.idcode != GD32_SWD_GENERIC_CM33_R0P1_IDCODE) {
+		printf("[swd] note: IDCODE != generic reference -- this is not a "
+		       "wrong-board signal, the reference value is unattested "
+		       "on a GD32 (#1440, #1369)\n");
+		/* Continue anyway: GD32_SWD_GENERIC_CM33_R0P1_IDCODE is not a
+         * GD32 measurement, so a mismatch proves nothing.  Real
+         * production test should refuse to proceed on a mismatch
+         * against a value it has measured on its own board. */
 	}
 
 	/* Halt the Cortex-M33 so any running application stops

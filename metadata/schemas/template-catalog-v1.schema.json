@@ -285,6 +285,16 @@
             }
           }
         }
+      },
+      "if": {
+        "required": ["constraints"],
+        "properties": {
+          "constraints": { "anyOf": [{ "required": ["minimum"] }, { "required": ["maximum"] }] }
+        }
+      },
+      "then": {
+        "description": "#1916: constraints.minimum/maximum are numeric bounds -- only meaningful (and only crash-free at runtime) on type integer.",
+        "properties": { "type": { "const": "integer" } }
       }
     }
   }

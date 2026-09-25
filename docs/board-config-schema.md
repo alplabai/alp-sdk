@@ -74,16 +74,68 @@ in the matching SoC JSON: `cortex-m*` -> `zephyr`, `cortex-a*`
 `_default_os_from_core_type()` in
 [`scripts/alp_orchestrate/`](../scripts/alp_orchestrate/).
 
-The OS is **not** user-selectable: the runtime follows the core
-class, full stop.  A `board.yaml` may only **disable** a core
-(`os: off`) or drop it to **no-OS** (`os: baremetal`); selecting the
-*other* class's OS — `zephyr` on a Cortex-A, `yocto` on a Cortex-M —
-is **rejected by the loader** (`OrchestratorError`).  We support
-exactly two OSes — Yocto for Linux, Zephyr for the RTOS — mapped to
-the silicon class, not chosen.  (The check lives in the loader, not
-the schema, because it's cross-file: board.yaml `os:` vs the SoC
-`cores[].type`.)  Custom SoMs ported via
-[`docs/porting-new-som.md`](porting-new-som.md) get this for free as
+#### The refusal is a support policy, not a hardware limit
+
+Stated plainly, because the SDK's own wording has said otherwise and a
+customer reading "not selectable" deserves to know which kind of "not"
+it is.
+
+A `board.yaml` may **disable** a core (`os: off`) or drop it to **no-OS**
+(`os: baremetal`).  Selecting the *other* class's OS — `zephyr` on a
+Cortex-A, `yocto` on a Cortex-M — is **refused**, at
+`scripts/alp_orchestrate/validate.py:270-282`
+(`_enforce_os_matches_core_class`), with this exact message:
+
+```text
+core '<id>' (<type>): its runtime is determined by the core class
+(Cortex-A -> Yocto/Linux, Cortex-M -> Zephyr/RTOS) and is not
+selectable. Set os: 'off' to disable it or 'baremetal' for no-OS
+firmware -- got os: '<os>'.
+```
+
+**"Determined by the core class" is how the SDK reports it, not why it
+is true.**  Zephyr runs on Cortex-A: upstream Zephyr at the pinned
+[v4.4.1](zephyr-version-policy.md) ships `arch/arm/core/cortex_a_r/` and
+`include/zephyr/arch/arm/cortex_a_r/`.  So `zephyr` on an A-class core
+is not physically impossible — **alp-sdk has chosen not to support that
+combination**.  We carry exactly two OSes, Yocto for Linux and Zephyr
+for the RTOS, and pair one to each core class so that a SoM swap within
+a family keeps the same runtime per core.  That pairing is a product
+decision about what this SDK carries, tests and ships, and it is a
+defensible one; it is simply not a fact about the silicon.
+(`scripts/alp_orchestrate/topology.py:92`'s "A Cortex-A can't run
+Zephyr" overstates it the same way, and is inaccurate as written.)
+
+What that means in practice:
+
+- For a supported build, the refusal is telling you the truth about
+  **this SDK**: pick `off` or `baremetal`, or use the class's runtime.
+- A genuine Zephyr-on-Cortex-A requirement is a **support request**, not
+  a bug report, and it is decidable — file it rather than patching the
+  loader, because the pairing reaches board files, sysbuild, the Yocto
+  machine layer and the OS support matrix, not just this one check.
+
+Two mechanical notes:
+
+- The check lives in the loader, not the schema, because it is
+  cross-file: `board.yaml` `os:` against the SoC `cores[].type`.
+- An **unclassified** core type (empty, or matching neither prefix)
+  makes the refusal reject *both* real runtimes, because the "other
+  class's OS" set becomes `{yocto, zephyr}`; the error then reads
+  `(unclassified)`.  That is **deliberate, and it is what tan does too** —
+  `cross_class_os` carries no guard in either implementation, and
+  declining both runtimes for a core whose class nobody established is the
+  conservative answer on a refusal path.
+  [#1852](https://github.com/alplabai/alp-sdk/issues/1852) is a
+  *different* half of the same area and does not change this behaviour:
+  what diverged was the **advertised** `allowed_os` set, which offered
+  `["baremetal", "off"]` for such a core where tan offered `[]`, and a
+  non-string `cores[].type`, which raised `AttributeError` instead of
+  resolving to the unresolved sentinel.  Both were corrected in #1888,
+  merged 2026-09-01.
+
+Custom SoMs ported via
+[`docs/porting-new-som.md`](porting-new-som.md) inherit all of this as
 long as their SoC JSON declares core types correctly.
 
 **Querying it (for IDEs / tooling).**  Rather than re-deriving the
@@ -252,7 +304,7 @@ with one `#define <MACRO> ALP_E1M_<…>` line per entry.
 #### Preset mode (SDK-internal shortcut)
 
 Most example projects under `examples/` target the EVK or X-EVK
-(99 do today — 74 on `e1m-evk`, 25 on `e1m-x-evk`), so they share a
+(100 do today — 76 on `e1m-evk`, 24 on `e1m-x-evk`), so they share a
 single board definition each via the `preset:` field:
 
 ```yaml
@@ -267,13 +319,15 @@ rejects mixing.
 
 A preset file may also carry `i2c_devices:` (on-board I2C device
 addresses, and for power-monitor chips their shunt/max-current
-calibration) and `overlay_pins:` (board-repurposed pads exposed
+calibration), `overlay_pins:` (board-repurposed pads exposed
 past the standard E1M pinout to an `alp,pin-array` devicetree
-overlay).  These aren't part of the customer-facing `board.yaml`
-schema -- `scripts/gen_board_header.py` reads them straight from
-the preset YAML and emits their macros into the generated
-`alp_<preset>_routes.h` alongside the `e1m_routes:` ones.  See
-`metadata/boards/e1m-evk.yaml` for a worked example of both.
+overlay), and `mux_enums:` (board mux-select / IO-expander-pin
+`typedef enum` blocks).  These aren't part of the customer-facing
+`board.yaml` schema -- `scripts/gen_board_header.py` reads them
+straight from the preset YAML and emits their macros/enums into
+the generated `alp_<preset>_routes.h` alongside the `e1m_routes:`
+ones.  See `metadata/boards/e1m-evk.yaml` for a worked example of
+all three.
 
 `preset:` is a shortcut for the SDK's own demos; customer
 projects don't need it -- the inline form keeps your `board.yaml`
@@ -379,10 +433,13 @@ metadata/
 │   ├── E1M-AEN601.yaml      # partial_hw_config: true
 │   ├── E1M-AEN701.yaml      # lower-priority E7 preset
 │   ├── E1M-AEN801.yaml      # lead AEN E8 preset
+│   ├── E1M-AEN803.yaml      # AEN E8, dual external memory BOM; preliminary
 │   ├── E1M-V2N101.yaml      # v0.3 fully-populated worked example
 │   ├── E1M-V2N102.yaml      # partial_hw_config: true
+│   ├── E1M-V2N103.yaml      # 4 GB / 16 GB memory tier
 │   ├── E1M-V2M101.yaml      # V2N-M1 SKU (DEEPX-DXM1 populated)
 │   ├── E1M-V2M102.yaml      # V2N-M1 SKU
+│   ├── E1M-V2M103.yaml      # V2N-M1 SKU, 4 GB / 16 GB memory tier
 │   └── E1M-NX9101.yaml      # i.MX 93 placeholder MPN (production E1M-NX9xxx TBD)
 └── boards/
     ├── e1m-evk.yaml            # 35x35 EVK (AEN / N93)

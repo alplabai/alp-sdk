@@ -32,6 +32,14 @@
  *      ALP_OK / ALP_ERR_TIMEOUT with no Zephyr-subsystem touch.
  *      call() returns immediately with timeout regardless of the
  *      caller's timeout_ms -- the stub does NOT block.
+ *
+ * @par Link state (issue #1643): always ALP_RPC_LINK_DOWN.  This
+ *      backend never calls the dispatcher's alp_rpc_notify_link()
+ *      (rpc_ops.h), so a channel's link_state stays at its pool-slot
+ *      default (ALP_RPC_LINK_DOWN) for the whole channel lifetime --
+ *      no synthetic peer ever binds under native_sim, so DOWN (never
+ *      a spurious LOST) is the honest report without touching this
+ *      file at all.
  */
 
 #include <stddef.h>

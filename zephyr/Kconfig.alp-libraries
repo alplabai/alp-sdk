@@ -56,12 +56,6 @@ config ALP_TFLM_ETHOS_U65
 	  N93-specific driver shim that complements this kernel-level
 	  knob.
 
-config ALP_TFLM_DRP_AI
-	bool "TFLite-Micro on Renesas DRP-AI NPU"
-	depends on ALP_SOC_RENESAS_RZV2N_N44
-	help
-	  Compile TFLite-Micro kernels against the Renesas DRP-AI3 NPU.
-
 config ALP_TFLM_HELIUM
 	bool "TFLite-Micro CMSIS-NN with Helium MVE (Cortex-M55)"
 	depends on ALP_SOC_ALIF_ENSEMBLE_E3 || ALP_SOC_ALIF_ENSEMBLE_E4 || \
@@ -334,6 +328,94 @@ config ALP_LITTLEFS_SYNC_IO
 	default y
 
 endmenu  # "Alp SDK per-library HW-accelerator wiring"
+
+# ----------------------------------------------------------------------
+# mbedTLS PSA-crypto floor (issue #2173)
+# ----------------------------------------------------------------------
+# `libraries: [mbedtls]` emits CONFIG_MBEDTLS=y + CONFIG_MBEDTLS_BUILTIN=y
+# (metadata/libraries/mbedtls.yaml's integration.zephyr.kconfig) and nothing
+# else, which builds the SSL sources with PSA crypto OFF.  That does not
+# compile: the pinned mbedtls' own internal header uses a PSA type
+# unconditionally --
+#
+#     modules/crypto/mbedtls/library/ssl_misc.h:24
+#       extern const mbedtls_error_pair_t psa_to_ssl_errors[7];
+#
+# -- while `mbedtls_error_pair_t` is declared inside
+# `#if defined(MBEDTLS_PSA_CRYPTO_CLIENT)` in tf-psa-crypto's
+# psa_util_internal.h, so every TU that pulls in ssl_misc.h fails with
+# `unknown type name 'mbedtls_error_pair_t'`.  Upstream mbedtls has no
+# non-PSA TLS path left to fall back to, so PSA crypto is a floor for any
+# build that compiles TLS, not a tuning knob.
+#
+# MBEDTLS_PSA_CRYPTO_CLIENT (the symbol the header actually tests) is not
+# directly assignable: it is a non-prompt bool that defaults y on
+# `BUILD_WITH_TFM || MBEDTLS_PSA_CRYPTO_C`
+# ($ZEPHYR_BASE/modules/mbedtls/Kconfig.tf-psa-crypto).  So a TF-M build
+# already has it and must NOT select MBEDTLS_PSA_CRYPTO_C (which itself
+# `depends on !BUILD_WITH_TFM` -- TF-M owns the crypto partition); every
+# other build has to turn PSA crypto on itself.  Hence the condition on the
+# default rather than an unconditional select.
+#
+# Scoped to MBEDTLS_BUILTIN deliberately.  The break above is a property of
+# the mbedtls sources Zephyr vendors; a build that selects a custom
+# implementation instead (the other leg of Zephyr's mbedtls choice) supplies
+# its own headers and must not inherit Zephyr's PSA policy from us.
+config ALP_SDK_MBEDTLS_PSA_CRYPTO
+	bool
+	depends on MBEDTLS && MBEDTLS_BUILTIN
+	default y if !BUILD_WITH_TFM
+	select MBEDTLS_PSA_CRYPTO_C
+	help
+	  Turn on mbedTLS' PSA crypto core whenever this SDK builds Zephyr's
+	  in-tree mbedtls without TF-M.  Not a user knob: without it the
+	  pinned mbedtls does not compile its SSL sources at all (issue #2173).
+
+# ----------------------------------------------------------------------
+# Weak-RNG policy for the PSA core above (issue #2192)
+# ----------------------------------------------------------------------
+# Turning the PSA core on selects CSPRNG_NEEDED, and Zephyr will happily
+# satisfy that with a generator it documents as not random: on a target with
+# no entropy driver the random subsystem falls back to
+# TEST_RANDOM_GENERATOR, and native_sim's FAKE_ENTROPY_NATIVE_SIM says in its
+# own help text that it "does not generate real entropy".  Either way TLS
+# links, runs, negotiates, and derives key material from a non-cryptographic
+# source.  There is no Alif Ensemble entropy driver in this tree or upstream,
+# so every AEN target is in exactly that state today.
+#
+# A boot-time WARNING and a changelog note do not stop that shipping, so the
+# build refuses it instead (zephyr/CMakeLists.txt).  Opting in is one visible
+# line in the configuration that put the target there, which is where a
+# reviewer of that target will see it.
+config ALP_SDK_MBEDTLS_WEAK_RNG
+	bool
+	default y if ALP_SDK_MBEDTLS_PSA_CRYPTO && \
+		     (!CSPRNG_ENABLED || FAKE_ENTROPY_NATIVE_SIM || TEST_RANDOM_GENERATOR)
+	help
+	  Non-prompt result symbol: y when this build compiles mbedTLS' PSA
+	  crypto core against randomness that is not cryptographically secure.
+
+	  CSPRNG_ENABLED is Zephyr's own "a true entropy driver is in this
+	  build" signal (it `depends on ENTROPY_HAS_DRIVER`).  The two extra
+	  terms cover the drivers that set ENTROPY_HAS_DRIVER while stating
+	  they are not real entropy sources, so a fake does not read as a
+	  pass here.
+
+config ALP_SDK_ALLOW_TEST_ENTROPY
+	bool "Allow mbedTLS PSA crypto to run on a non-cryptographic RNG"
+	default n
+	help
+	  Acknowledge that this configuration builds TLS on randomness that is
+	  not cryptographically secure, and build it anyway.
+
+	  Say y only for a simulator, a test, or a bring-up image that never
+	  leaves a bench.  Saying y in an image that talks to a real broker
+	  means its session keys, nonces and IVs are predictable.
+
+	  Without this, a build whose ALP_SDK_MBEDTLS_WEAK_RNG is y fails at
+	  CMake time naming the target and this symbol.  On AEN the real fix
+	  is an entropy driver over the Secure Enclave TRNG, not this opt-in
+	  (issue #2192).
 
 # ----------------------------------------------------------------------
 # .alpmodel package reader (<alp/model.h>)

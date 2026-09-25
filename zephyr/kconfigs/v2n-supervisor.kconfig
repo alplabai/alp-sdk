@@ -1,7 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# V2N GD32G553 supervisor singleton (bus routing, timing) and DEEPX rail-
-# management auxiliary.
+# V2N GD32G553 supervisor singleton (bus routing, timing).  SPI-only:
+# RIIC8/BRD_I2C is Cortex-A55/Linux-exclusive (maintainer decision,
+# metadata/e1m_modules/v2n/core-ownership.yaml) -- the CM33 must never
+# master it, so there is no I2C bridge transport and no DEEPX
+# rail-management auxiliary here.  DEEPX rail bring-up (DA9292 CH2 +
+# P64/P65) is owned entirely by U-Boot's board_late_init(); see
+# meta-alp-sdk/recipes-bsp/u-boot/u-boot/
+# 0004-rzv2n-dev-ALP-E1M-DEEPX-rail-bringup.patch.
 
 config ALP_SDK_V2N_SUPERVISOR
 	bool "V2N supervisor singleton (GD32G553 bridge auto-init)"
@@ -20,12 +26,10 @@ config ALP_SDK_V2N_SUPERVISOR
 	  docs/adr/0024-v2n-analog-and-counter-classes-stay-on-the-gd32-bridge.md
 	  for why no native RZ/V2N leg exists alongside it.
 
-	  Set CONFIG_ALP_SDK_V2N_SUPERVISOR_SPI_BUS_ID and / or
-	  CONFIG_ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID to the alp_spi /
-	  alp_i2c bus ids carrying the bridge transport(s).  At least
-	  one must be non-negative for the singleton to come up; when
-	  both are set the GD32 driver picks the SPI fast path by
-	  default.
+	  Set CONFIG_ALP_SDK_V2N_SUPERVISOR_SPI_BUS_ID to the alp_spi
+	  bus id carrying the bridge's SPI transport -- the CM33 reaches
+	  the GD32 over SPI only (RIIC8/BRD_I2C is Cortex-A55/Linux-
+	  exclusive; see the file header above).
 
 	  Off-V2N builds (native_sim, AEN, i.MX 93) leave this off and
 	  the backends route through the per-class DT aliases as usual.
@@ -36,35 +40,12 @@ config ALP_SDK_V2N_SUPERVISOR_SPI_BUS_ID
 	int "alp_spi bus_id carrying the GD32 SPI fast path (-1 = disabled)"
 	default -1
 	help
-	  alp_spi_open()'s bus_id field.  Resolves to the Renesas RSPI
-	  controller on V2N pads P76/P77/P96/P97 -- typically E1M SPI1
-	  (per the studio's gd32-io-mcu-map.tsv routing) but board
-	  files may override.  Set to -1 to disable the SPI path; the
-	  I2C management path alone is fast enough for low-rate
-	  telemetry but loses the dedicated-link latency win.
-
-config ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID
-	int "alp_i2c bus_id carrying the GD32 I2C management path (-1 = disabled)"
-	default -1
-	help
-	  alp_i2c_open()'s bus_id field.  Resolves to the Renesas RIIC8
-	  controller on V2N pads P07/P06 (BRD_I2C).  Set to -1 to
-	  disable the I2C path; the SPI fast path alone covers every
-	  bridge call but loses the cold-boot / multi-master probe
-	  flexibility.  At least one of SPI_BUS_ID / I2C_BUS_ID MUST
-	  be non-negative.
-
-config ALP_SDK_V2N_SUPERVISOR_I2C_ADDR
-	hex "GD32G553 firmware 7-bit I2C slave address"
-	default 0x70
-	range 0x08 0x77
-	depends on ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID >= 0
-	help
-	  GD32G553_BRIDGE_DEFAULT_I2C_ADDR is 0x70 and the production
-	  V2N firmware will ship at that address.  Override only when
-	  a specific carrier reconfigures the GD32 firmware to dodge a
-	  bus-address collision (the firmware tree's
-	  CONFIG_GD32G553_BRIDGE_I2C_ADDR + this Kconfig MUST match).
+	  alp_spi_open()'s bus_id field.  When set to 1 (DT alias
+	  alp-spi1 = &gd32_spi on the in-tree boards), resolves to the
+	  SCI7 Simple-SPI on V2N pads P76/P77/P96 with P97 as GPIO
+	  chip-select.  This is the CM33's ONLY transport to the GD32 --
+	  set to -1 and the singleton never comes up (RIIC8/BRD_I2C is
+	  Cortex-A55/Linux-exclusive, see the file header above).
 
 config ALP_SDK_V2N_SUPERVISOR_SPI_FREQ_HZ
 	int "GD32 SPI clock frequency (Hz)"
@@ -76,14 +57,6 @@ config ALP_SDK_V2N_SUPERVISOR_SPI_FREQ_HZ
 	  ceiling and gives ~1 us per byte at the wire.  Raise toward
 	  25 MHz on boards with short, well-terminated SPI traces.
 
-config ALP_SDK_V2N_SUPERVISOR_I2C_BITRATE_HZ
-	int "GD32 I2C management-path bitrate (Hz)"
-	default 400000
-	depends on ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID >= 0
-	help
-	  Standard-mode 100 kHz, fast-mode 400 kHz, or fast-mode+ 1 MHz
-	  -- pick the highest the shared BRD_I2C devices all support.
-
 config ALP_SDK_V2N_SUPERVISOR_ACQUIRE_TIMEOUT_MS
 	int "Max wait for the supervisor mutex on each bridge op (ms)"
 	default 100
@@ -93,33 +66,10 @@ config ALP_SDK_V2N_SUPERVISOR_ACQUIRE_TIMEOUT_MS
 	  mutex.  Each portable alp_pwm_* / alp_adc_* / alp_dac_* /
 	  alp_qenc_* / alp_counter_* op on V2N takes this mutex for the
 	  duration of the underlying gd32g553_* call (~1 ms typical on
-	  SPI, ~5 ms typical on I2C).  When a thread is mid-init against
-	  a hung GD32 the bus call inside gd32g553_init() can block much
-	  longer; this timeout prevents subsequent acquirers from piling
-	  up behind it -- they get ALP_ERR_BUSY back at the portable
-	  surface and can retry.  Default 100 ms is well above any
-	  steady-state op; raise for builds where the GD32 firmware
-	  uses long clock-stretching cycles on I2C.
-
-config ALP_SDK_V2N_POWER_MGMT
-	bool "V2N DEEPX rail-management auxiliary"
-	default y if ALP_SOC_RENESAS_RZV2N_N44 && ALP_SDK_CHIP_DA9292
-	depends on ALP_SDK_CHIP_DA9292
-	help
-	  Compile src/zephyr/v2n_power_mgmt.c.  Listens on
-	  v2n-deepx-pwr-en-req-gpios (Renesas P65) for a rising edge,
-	  then brings up the DEEPX 0.75 V rail by programming the
-	  DA9292 PMIC CH2 over BRD_I2C (via the supervisor
-	  singleton's borrowed I2C handle) + drives
-	  v2n-deepx-core-0p75-en-gpios (P64) high once CH2 reaches
-	  power-good.
-
-	  Carrier boards that don't have the DEEPX rail (V2N base
-	  SoMs without the M1 DEEPX add-on) can leave the DT aliases
-	  unpopulated; the module compiles in but returns NOSUPPORT
-	  from its init hook.
-
-	  Defaults on for V2N + DA9292 builds; turn off to suppress
-	  the IRQ handler if the carrier wires DEEPX from elsewhere.
+	  SPI).  When a thread is mid-init against a hung GD32 the bus
+	  call inside gd32g553_init() can block much longer; this
+	  timeout prevents subsequent acquirers from piling up behind
+	  it -- they get ALP_ERR_BUSY back at the portable surface and
+	  can retry.  Default 100 ms is well above any steady-state op.
 
 endif # ALP_SDK_V2N_SUPERVISOR

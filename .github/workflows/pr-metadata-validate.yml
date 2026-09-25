@@ -23,12 +23,23 @@ on:
       - 'zephyr/kconfigs/**'
       - 'scripts/alp_project_emit/**'
       - 'scripts/check_chip_subsystems_parity.py'
+      - 'chips/**'
+      - 'scripts/check_delay_us_literal.py'
       - '.github/workflows/pr-metadata-validate.yml'
       - 'scripts/validate_metadata.py'
       - 'scripts/validate_board_yaml.py'
       - 'scripts/check_board_target_tree_parity.py'
+      - 'scripts/check_yocto_machine_tree_parity.py'
       - 'scripts/check_atoc_reservation.py'
+      # check 4 reads aen_atoc.SLOT0_WINDOWS, so an aen_atoc-only PR must fire it too (#1981)
+      - 'scripts/aen_atoc.py'
       - 'scripts/check_example_board_overlay_parity.py'
+      - 'scripts/check_example_board_overlay_content_parity.py'
+      # The #2101 platform_allow-parity half reads examples/**/boards/*
+      # content directly, not just testcase.yaml/board.yaml -- a PR that
+      # only adds/renames/deletes a boards/ overlay must fire this job too
+      # (the #1585 defect class this file's other comments already name).
+      - 'examples/**/boards/**'
       - 'scripts/check_example_sdk_root.py'
       - 'scripts/check_som_topology_parity.py'
       - 'scripts/check_helper_firmware_path.py'
@@ -64,6 +75,8 @@ on:
       - 'docs/**/*.md'
       - 'examples/**/*.md'
       - 'examples/**/*.c'
+      - 'examples/**/*.h'
+      - 'scripts/check_cc3501e_bridge_copies.py'
       - 'west.yml'
       - 'metadata/libraries/**'
       - 'meta-alp-sdk/**'
@@ -76,6 +89,8 @@ on:
       - 'scripts/assemble_changelog.py'
       - 'scripts/check_changelog_fragments.py'
       - 'scripts/check_changelog_citations.py'
+      - 'scripts/check_changelog_fragment_issue.py'
+      - 'scripts/check_silicon_claim_provenance.py'
       # check_no_committed_doxygen_output.py (#1573) reads OUTPUT_DIRECTORY out
       # of the Doxyfile and sweeps what is tracked under it, so both are its
       # inputs -- a gate absent from its own trigger is the #1585 defect class.
@@ -83,6 +98,15 @@ on:
       - 'doxygen-out/**'
       - 'scripts/check_no_committed_doxygen_output.py'
       - 'scripts/check_doxyfile_single_source.py'
+      # check_issue_citations.py (#1950) reads driver-status prose out of
+      # metadata/**/*.yaml and include/alp/chips/*.h against its committed
+      # snapshot, metadata/issue-state-snapshot.json. All three inputs are
+      # already covered by the metadata/** and include/alp/chips/**
+      # triggers above -- only the script itself is genuinely new coverage;
+      # the snapshot's own explicit entry below is redundant but kept, same
+      # as this file's style elsewhere.
+      - 'scripts/check_issue_citations.py'
+      - 'metadata/issue-state-snapshot.json'
   push:
     branches: [main, dev]
     paths:
@@ -96,10 +120,21 @@ on:
       - 'zephyr/kconfigs/**'
       - 'scripts/alp_project_emit/**'
       - 'scripts/check_chip_subsystems_parity.py'
+      - 'chips/**'
+      - 'scripts/check_delay_us_literal.py'
       - 'scripts/validate_board_yaml.py'
       - 'scripts/check_board_target_tree_parity.py'
+      - 'scripts/check_yocto_machine_tree_parity.py'
       - 'scripts/check_atoc_reservation.py'
+      # check 4 reads aen_atoc.SLOT0_WINDOWS, so an aen_atoc-only PR must fire it too (#1981)
+      - 'scripts/aen_atoc.py'
       - 'scripts/check_example_board_overlay_parity.py'
+      - 'scripts/check_example_board_overlay_content_parity.py'
+      # The #2101 platform_allow-parity half reads examples/**/boards/*
+      # content directly, not just testcase.yaml/board.yaml -- a PR that
+      # only adds/renames/deletes a boards/ overlay must fire this job too
+      # (the #1585 defect class this file's other comments already name).
+      - 'examples/**/boards/**'
       - 'scripts/check_example_sdk_root.py'
       - 'scripts/check_som_topology_parity.py'
       - 'scripts/check_helper_firmware_path.py'
@@ -132,6 +167,8 @@ on:
       - 'docs/**/*.md'
       - 'examples/**/*.md'
       - 'examples/**/*.c'
+      - 'examples/**/*.h'
+      - 'scripts/check_cc3501e_bridge_copies.py'
       - 'west.yml'
       - 'metadata/libraries/**'
       - 'meta-alp-sdk/**'
@@ -144,6 +181,8 @@ on:
       - 'scripts/assemble_changelog.py'
       - 'scripts/check_changelog_fragments.py'
       - 'scripts/check_changelog_citations.py'
+      - 'scripts/check_changelog_fragment_issue.py'
+      - 'scripts/check_silicon_claim_provenance.py'
       # check_no_committed_doxygen_output.py (#1573) reads OUTPUT_DIRECTORY out
       # of the Doxyfile and sweeps what is tracked under it, so both are its
       # inputs -- a gate absent from its own trigger is the #1585 defect class.
@@ -151,6 +190,15 @@ on:
       - 'doxygen-out/**'
       - 'scripts/check_no_committed_doxygen_output.py'
       - 'scripts/check_doxyfile_single_source.py'
+      # check_issue_citations.py (#1950) reads driver-status prose out of
+      # metadata/**/*.yaml and include/alp/chips/*.h against its committed
+      # snapshot, metadata/issue-state-snapshot.json. All three inputs are
+      # already covered by the metadata/** and include/alp/chips/**
+      # triggers above -- only the script itself is genuinely new coverage;
+      # the snapshot's own explicit entry below is redundant but kept, same
+      # as this file's style elsewhere.
+      - 'scripts/check_issue_citations.py'
+      - 'metadata/issue-state-snapshot.json'
   workflow_dispatch:
 
 concurrency:
@@ -180,6 +228,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
+          # No `ref:`, so a pull_request run checks out the PR's MERGE commit
+          # (refs/pull/N/merge). Depth 2 fetches its parents as well, so the
+          # changelog-citations step can name HEAD^1 -- the base branch as
+          # merged -- as the base its new-citation rule diffs against
+          # (alp-sdk#2186).
+          fetch-depth: 2
         timeout-minutes: 5
 
       - name: Set up Python
@@ -523,11 +577,17 @@ jobs:
       - name: "Gate — SoM preset board: targets resolve to a real board tree"
         run: python3 scripts/check_board_target_tree_parity.py
 
-      - name: "Gate — AEN App MRAM top is reserved for the SE-owned ATOC (#1289)"
+      - name: "Gate — SoM preset machine: targets resolve to a real conf or a declared gap (#1982)"
+        run: python3 scripts/check_yocto_machine_tree_parity.py
+
+      - name: "Gate — AEN ATOC reservation, aperture tiling/class, and slot0 address (#1289, #1365)"
         run: python3 scripts/check_atoc_reservation.py
 
       - name: Gate — example board.yaml declared cores match their boards/ overlays
         run: python3 scripts/check_example_board_overlay_parity.py
+
+      - name: Gate — same-PCB SKU board overlays carry the same content (#2198)
+        run: python3 scripts/check_example_board_overlay_content_parity.py
 
       - name: Gate — chip header driver-status labels match metadata
         run: python3 scripts/check_chip_header_status.py
@@ -542,7 +602,27 @@ jobs:
         run: python3 scripts/check_changelog_fragments.py
 
       - name: "Gate — changelog.d/ path:line citations still resolve (#1416)"
+        # HEAD is the merge commit, so this already grades the tree that will
+        # land. On a PR into dev, DIFF_BASE=HEAD^1 turns on the new-citation
+        # rule: a citation on a line this PR adds must be anchored
+        # (alp-sdk#2186). NOT on a PR into main: HEAD^1 is main there, and
+        # every line of every fragment dev has not folded yet would count
+        # as new (272 errors measured). Empty falls back to origin/dev, which
+        # a PR checkout does not have, so the gate warns the rule did not
+        # run; on a workflow_dispatch of dev, origin/dev IS HEAD and the rule
+        # runs vacuously (0 citations on added lines).
+        env:
+          DIFF_BASE: ${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'HEAD^1' || '' }}
         run: python3 scripts/check_changelog_citations.py
+
+      - name: "Gate — changelog.d/ fragment's heading issue matches its filename (#1957)"
+        run: python3 scripts/check_changelog_fragment_issue.py
+
+      - name: "Gate — a changelog.d/ hex/serial silicon claim is corroborated in docs/ or metadata/ (#1993)"
+        run: python3 scripts/check_silicon_claim_provenance.py
+
+      - name: "Gate — driver-status prose doesn't cite a closed issue as an open blocker (#1950)"
+        run: python3 scripts/check_issue_citations.py
 
       - name: Gate — scripts/ and firmware/ write_text() writers pass newline=""
         run: python3 scripts/check_write_text_newline.py
@@ -558,6 +638,9 @@ jobs:
 
       - name: "Gate — apt-get update/install goes through scripts/ci/apt-bounded.sh (#1575)"
         run: python3 scripts/check_apt_bounded.py
+
+      - name: "Gate — no fixed-literal alp_delay_us(N>=1000) under chips/ (#1621)"
+        run: python3 scripts/check_delay_us_literal.py
 
       - name: alp.lock generator self-check
         # alp.lock is generated on demand, not committed (#1576): its
@@ -629,6 +712,18 @@ jobs:
       # examples shared the copied block.
       - name: Gate — examples resolve alp_project.py under ALP_SDK_ROOT
         run: python3 scripts/check_example_sdk_root.py
+
+      # Issue #2163: cc3501e_bridge.{c,h} is copied per example -- 16 copies --
+      # and nothing asserted the copies stay in sync. It is hardware-sequencing
+      # code (LP-GPIO pad writes for WIFI_EN / nRESET, the reset pulse timing,
+      # the silicon-tuned RX_SAMPLE_DLY poke), so a fix applied to one copy and
+      # missed in the rest is invisible in CI and shows up only on silicon --
+      # the same shape as #1859's drifted cc3501e_gpio_routes.c pad map. The
+      # copies stay copies on purpose (the header is a customer-facing template
+      # and `tan init --from-example` copies one directory), so this detects
+      # drift rather than removing the duplication.
+      - name: Gate — cc3501e_bridge copies are in sync
+        run: python3 scripts/check_cc3501e_bridge_copies.py
 
       # Public-API test-coverage audit -- per the VERSIONS.md
       # "Quality bar" entry, every public function should have at

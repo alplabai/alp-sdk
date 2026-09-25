@@ -1,0 +1,231 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Quadrature-decoder overlay for the E1M-AEN803 (E8, M55-HE).
+ *
+ * Adds an "alif,utimer-qdec" CHILD under a UTIMER channel-12 parent
+ * (utimer@4800d000, timer-id 12) -- channel 12 IS the QEC0 quadrature block.
+ * Confirmed against the Alif DFP AE822FA0E5597 (Device/soc/AE822FA0E5597/
+ * include/rtss_he/soc.h): QEC0_CMPA_IRQ_IRQn = 369 "Channel 12 interrupt
+ * request at driver A".  So the QEC0 X/Y pads muxed below (P3_0/P3_1) are
+ * decoded by UTIMER channel 12, NOT channel 0 -- binding the qdec under
+ * utimer0/timer-id 0 reads a counter that never sees the encoder edges.
+ *
+ * Channel base 0x4800d000 = UTIMER_BASE 0x48000000 + (12 + 1) * 0x1000 (each
+ * channel config block is 0x1000, DFP UTIMER_UTIMER_CHANNEL_CFG_Type "Size =
+ * 4096 (0x1000)"; the dtsi utimer11/timer-id 11 = 0x4800c000 confirms the
+ * stride).  The global common region stays 0x48000000 + 0x24, as on every
+ * other utimer node.  Channel 12 is NOT defined in
+ * zephyr/dts/alif/ensemble_e8_peripherals.dtsi (only 0/3/6/10/11 are), so the
+ * full parent node is declared here.
+ *
+ * The parent carries a `clocks` phandle: the qdec driver reaches clk_dev/clkid
+ * via DT_CLOCKS_CTLR/CELL(DT_INST_PARENT), and reads the "global"/"timer" reg
+ * regions and timer-id from the parent too.
+ *
+ * PADS / TIMER MAPPING: the SoC exposes four dedicated quadrature blocks
+ * QEC0..QEC3 (header ensemble-e4-e6-e8-pinctrl.h), which are UTIMER channels
+ * 12..15 (DFP QEC{0..3}_CMPA_IRQn = 369/371/373/375):
+ *   QEC0 P3_0 / P3_1 / P3_2 (pin mux names them X/Y/Z)   <- used here
+ *   QEC1 P3_3/P3_4/P3_5 ; QEC2 P3_6/P3_7/P4_0 ; QEC3 P4_1/P4_2/P4_3
+ * The encoder's wiring to the QEC0 pads is a schematic detail -- CONFIRM the
+ * board harness before trusting the count.
+ *
+ * "chan A"/"chan B" was this comment's earlier, WRONG reading of the pin
+ * names above: on a QEC channel (12-15) the pad's peripheral function is
+ * QEC_TRIGGER0/1/2, driven into UTIMER's SRC_0 registers -- there is no
+ * "channel input A/B" on these four channels at all.  SRC_1 ("channel input
+ * A/B") only exists on the lputimer0/1/2 instances Alif's own tree binds
+ * this same qdec driver to.  An attended bench run measured the old SRC_1
+ * programming leaving UTIMER_CNTR stuck at 0x00000000 while the raw pads
+ * toggled through all four quadrature states under a hand -- see
+ * zephyr/drivers/sensor/qdec_alif/qdec_alif_utimer.c for the SRC_0 fix and
+ * its citations (#2037).
+ *
+ * The QEC0 X/Y channel inputs carry `input-enable` (= the upstream pad REN bit
+ * 16, set by soc/alif/ensemble/pinctrl_soc.h) so their input buffers actually
+ * sense the encoder edges -- without it the count stays static regardless of
+ * motion.
+ *
+ * counts-per-revolution = 96, not the encoder's PPR: the qdec driver
+ * programs this value straight into the hardware counter's reload register,
+ * so it sets the real per-revolution wraparound, not just a display scale
+ * factor. The carrier's rotary encoder is 24 PPR (metadata/boards/
+ * e1m-evk.yaml: "PEC11R-4215K-S0024 ... 24 PPR"), so 96 = 24 * 4 assumes x4
+ * quadrature decode. The previous 1000 was an arbitrary round number: it
+ * stretched one real revolution across only ~35 of the 0-359 reported
+ * degrees, and truncated any count below ceil(1000/360) = 3 raw ticks to a
+ * printed 0 -- indistinguishable from no motion at all. At 96, one raw tick
+ * is already 3.75 degrees, so it never silently rounds to 0.
+ *
+ * MEASURED (2026-09-13, attended, E1M-AEN803 2026W36-0002): the SRC_0 arming
+ * IS live -- UTIMER_CNTR moved, where before it never left 0x00000000 -- but
+ * it is NOT a quadrature decode. 120000 unaliased CNTR reads over 25 s of
+ * continuous hand motion gave up +2385 / down -1731, net +654, unwrapped
+ * range -33..+710, and 293 of 734 non-zero steps were |step| >= 2 inside a
+ * single 0.21 ms sample window. For a genuine quadrature pair this mapping
+ * counts 24 X-rising and 24 Y-rising edges per revolution in EITHER
+ * direction, so a clean signal must net 0 per revolution at any speed and
+ * stay within +-1 of its start forever -- the measured drift is contact
+ * bounce accumulating on an up-only-or-down-only edge counter, not motion.
+ * Confirmed against the register map and Alif's own demo, not just the
+ * count: AE822 SVD UTIMER_UP_0_SRC/UTIMER_DOWN_0_SRC (:29960-29967,
+ * :30254-30261) describe bits [23:0] only as "Rising/Falling edge of
+ * QEC_TRIGGERn causes counter to increment/decrement" -- no level
+ * qualification of the OTHER trigger input anywhere in that description.
+ * The only level-qualified matrix in the whole register map ("input A rising
+ * AND input B = 0") is SRC_1, which is measured not to reach these channels
+ * at all (see the "chan A"/"chan B" correction above). Alif's own
+ * demo_qec.c:306,317,328 drives X, Y and Z as three INDEPENDENT GPIOs and
+ * describes counting their edges -- it is an edge-count test, not a
+ * quadrature test, and nothing in the DFP's utimer sources ever mentions
+ * "decode" or "quadrature". So counts-per-revolution stays undefined for
+ * this hardware channel: there IS no reload value that turns an
+ * unqualified, undirected edge counter into a position, and 96 (left
+ * UNCHANGED below, not because it is believed correct but because there is
+ * nothing better to put there) must not be read as bench-confirmed.
+ *
+ * GAP, recorded not resolved: whether FILTER_CTRL_A/FILTER_CTRL_B (0x84/0x88,
+ * "input A"/"input B") do anything to the QEC_TRIGGER0..2 inputs on these
+ * channels is UNPROVEN. If they do not touch QEC_TRIGGER at all, the
+ * 0x00100101 filter this driver programs is inert on channel 12 and fully
+ * explains the bounce above (an unfiltered mechanical contact bouncing
+ * straight into an unqualified edge counter). If they do, but asymmetrically
+ * between the two inputs, that is a second candidate for the +654 bias. Not
+ * chased further here -- see qdec_alif_utimer.c.
+ *
+ * SOFTWARE DECODE: the hardware channel's own defect is exactly what
+ * Zephyr's gpio-qdec input driver is built to fix -- a sampled state
+ * machine over the SAME two physical pads, debounced by construction
+ * (idle/active sampling with a timeout, not raw edge counting). `qdec_sw`
+ * below binds it to &gpio3 pins 0/1 -- the SAME P3_0/P3_1 pads, with NO
+ * pinctrl change: `pinctrl_qec0` above still muxes them to
+ * QEC0_X_A/QEC0_Y_A, not GPIO. It samples through gpio_pin_get_dt ->
+ * gpio_dw_port_get_raw -> EXT_PORTA (0x49003050) -- the same register this
+ * example's own raw-pad read already measures live under the QEC0 mux, so
+ * this is NOT an unverified assumption about a separate interrupt path.
+ *
+ * `idle-poll-time-us` below is load-bearing, not a tuning knob: WITHOUT it,
+ * this driver runs interrupt-driven (gpio_qdec_idle_mode(),
+ * zephyr/drivers/input/input_gpio_qdec.c:114-116, calls
+ * gpio_qdec_irq_setup(dev, true), which requests GPIO_INT_EDGE_BOTH,
+ * :67) -- and `snps,designware-gpio` (zephyr/drivers/gpio/gpio_dw.c:204-208)
+ * returns -ENOTSUP for that exact combination ("Does not support both
+ * edges"). `gpio_qdec_irq_setup()` returns void and only LOG_ERRs the
+ * failure, this example's prj.conf has no CONFIG_LOG=y, and
+ * gpio_qdec_init() still returns 0 regardless -- so device_is_ready() reads
+ * true, the app prints "ready=1", and the sample timer that would ever call
+ * gpio_pin_get_dt() simply never starts: sw_ticks stays 0 forever, RESULT
+ * PASS becomes unreachable, and an attended bench slot would produce a
+ * statically predetermined FAIL. WITH idle-poll-time-us set,
+ * gpio_qdec_idle_polling_mode() is true, gpio_qdec_irq_setup() is never
+ * called at all (:97-99,114-116), the callback registration this would
+ * otherwise need is skipped (:281-283), and the driver polls through
+ * gpio_pin_get_dt() on a k_timer instead -- the read path this example's
+ * own raw-pad read already proved live under this exact pad mux.
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
+#include <zephyr/dt-bindings/timer/alif_utimer.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+
+/ {
+	chosen {
+		zephyr,flash = &itcm; /* bench RAM/SES-load; path-ref form */
+		/delete-property/ zephyr,code-partition;
+	};
+	aliases {
+		alp-qenc0 = &utimer12_qdec;
+	};
+
+	/*
+	 * Software quadrature decoder, see the file header's SOFTWARE DECODE
+	 * paragraph. Same P3_0/P3_1 pads as utimer12_qdec above, reached
+	 * through &gpio3 (SoC GPIO controller, NOT the UTIMER) instead of the
+	 * hardware QEC0 channel -- no pinctrl change, pinctrl_qec0 keeps
+	 * muxing the pads to QEC0_X_A/QEC0_Y_A. steps-per-period = 4 is a
+	 * real x4 quadrature decode (unlike the hardware channel's
+	 * unqualified edge count): the driver only posts an event every 4
+	 * phase transitions, i.e. once per mechanical detent on this 24-PPR
+	 * encoder.
+	 *
+	 * idle-poll-time-us is REQUIRED, not a tuning knob -- see the SOFTWARE
+	 * DECODE paragraph above: without it this node is interrupt-driven,
+	 * and snps,designware-gpio (gpio3's compatible) cannot deliver the
+	 * GPIO_INT_EDGE_BOTH this driver's interrupt path requires, silently
+	 * (device_is_ready() still reads true). Its own value (2000 us, 500
+	 * Hz idle-poll rate) is not the sensitive one; sample-time-us is.
+	 *
+	 * sample-time-us = 500, not the gpio-qdec binding example's 2000: at
+	 * 2000 us (500 Hz) the sample period is 2.08 ms, wider than the
+	 * 2.08 ms edge spacing a 5 rev/s flick of this 24-PPR part produces
+	 * (96 edges/rev), so a fast flick can lose a state transition --
+	 * input_gpio_qdec.c's decode table treats an unrecognised transition
+	 * as an undercount, never a wrong direction (it cannot invent a
+	 * direction it didn't sample), but it can still miss real detents.
+	 * 500 us (2 kHz) gives better than 4x margin at that speed.
+	 */
+	qdec_sw: qdec-sw {
+		compatible = "gpio-qdec";
+		gpios = <&gpio3 0 GPIO_ACTIVE_HIGH>, <&gpio3 1 GPIO_ACTIVE_HIGH>;
+		steps-per-period = <4>;
+		zephyr,axis = <INPUT_REL_WHEEL>;
+		sample-time-us = <500>;
+		idle-poll-time-us = <2000>;
+		idle-timeout-ms = <200>;
+	};
+};
+
+&gpio3 {
+	/* Enables the gpio_dw device for qdec_sw above. P3_0/P3_1 stay muxed
+	 * to QEC0_X_A/QEC0_Y_A (pinctrl_qec0) -- gpio_dw does not touch the
+	 * pad mux (see examples/aen/aen-gpio-bench/prj.conf's own comment on
+	 * this), and this node's read/interrupt path is the one the
+	 * SOFTWARE DECODE paragraph above is relying on to work regardless.
+	 */
+	status = "okay";
+};
+
+&pinctrl {
+	pinctrl_qec0: pinctrl_qec0 {
+		/* QEC0 X/Y = QEC_TRIGGER0/1 INPUTS, not "channel A/B" -> input-enable
+		 * (pad REN) is what makes their input buffers sense the encoder edges
+		 * at all -- see the "chan A"/"chan B" correction in the file header.
+		 */
+		group0 {
+			pinmux = <PIN_P3_0__QEC0_X_A>, <PIN_P3_1__QEC0_Y_A>;
+			input-enable;
+		};
+	};
+};
+
+&soc {
+	/* QEC0 = UTIMER channel 12 (DFP: QEC0_CMPA_IRQn 369 = "Channel 12"). */
+	utimer12: utimer@4800d000 {
+		compatible = "alif,utimer";
+		reg = <0x4800D000 0x1000 0x48000000 0x24>;
+		reg-names = "timer", "global";
+		timer-id = <12>;
+		counter-direction = <ALIF_UTIMER_COUNTER_DIRECTION_UP>;
+		clocks = <&clockctrl ALIF_UTIMER_CLK>;
+		status = "okay";
+
+		utimer12_qdec: qdec {
+			compatible = "alif,utimer-qdec";
+			/* 24 PPR * x4 -- carried over from the old SRC_1 assumption,
+			 * NOT bench-confirmed for this hardware channel: measured, it
+			 * is an unqualified, undirected edge counter, for which no
+			 * reload value produces a real per-revolution wraparound. See
+			 * the MEASURED paragraph in the file header. */
+			counts-per-revolution = <96>;
+			input-filter-enable;
+			filter-prescaler = <16>;
+			filter-taps = <1>;
+			pinctrl-0 = <&pinctrl_qec0>;
+			pinctrl-names = "default";
+			status = "okay";
+		};
+	};
+};

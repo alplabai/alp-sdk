@@ -148,6 +148,35 @@
       "ci": null
     },
     {
+      "id": "cc3501e-bridge-copies",
+      "description": "Every cc3501e_bridge.{c,h} copied into an example is byte-identical to examples/aen/aen-cc3501e-bringup/src, except the copies the gate declares divergent by name, so a silicon fix cannot land in one copy of this hardware-sequencing code and silently miss the other fifteen (#2163).",
+      "runner": "check-script",
+      "script": "scripts/check_cc3501e_bridge_copies.py",
+      "gate": true,
+      "profiles": [
+        "quick",
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "changelog-fragment-issue",
+      "description": "A changelog.d/*.md fragment's filename leading digits match the single issue its own heading cites (where decidable), so the leading digits stay the join key back to the issue instead of silently drifting (#1957).",
+      "runner": "check-script",
+      "script": "scripts/check_changelog_fragment_issue.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "changelog-fragments",
       "description": "Every changelog.d/*.md fragment is well-formed (foldable filename, non-empty, starts with its own ### heading) so a malformed fragment fails the PR instead of the release cut (#1395).",
       "runner": "check-script",
@@ -164,7 +193,7 @@
     },
     {
       "id": "changelog-citations",
-      "description": "Every `path:line` citation in a changelog.d/*.md fragment resolves to a real file and an in-range line, and an anchored citation's quoted text is still inside the cited range, so a release note cannot point at code that moved (#1416).",
+      "description": "Every `path:line` citation in a changelog.d/*.md fragment resolves to a real file and an in-range line, and an anchored citation's quoted text is still inside the cited range, so a release note cannot point at code that moved (#1416); a citation added since DIFF_BASE must be anchored, and a near-miss anchor the gate cannot parse is an error (#2186).",
       "runner": "check-script",
       "script": "scripts/check_changelog_citations.py",
       "gate": true,
@@ -252,7 +281,7 @@
     },
     {
       "id": "cross-platform",
-      "description": "Lint repo content for Linux-only idioms in customer-facing surfaces.",
+      "description": "Lint repo content for cross-platform hazards: Linux-only idioms in customer-facing surfaces, and implicit text encodings in the SDK's own Python under scripts/, tests/, and examples/.",
       "runner": "check-script",
       "script": "scripts/check_cross_platform.py",
       "gate": false,
@@ -261,6 +290,20 @@
       ],
       "output": "none",
       "ci": "cross-platform-zephyr.yml:python-smoke"
+    },
+    {
+      "id": "delay-us-literal",
+      "description": "No chips/**.c passes a fixed literal >= 1000 to the non-yielding alp_delay_us() -- use alp_delay_ms() so the calling thread yields (#1621).",
+      "runner": "check-script",
+      "script": "scripts/check_delay_us_literal.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
     },
     {
       "id": "diagnostic-emission-coverage",
@@ -483,8 +526,22 @@
       "ci": "pr-metadata-validate.yml:validate"
     },
     {
+      "id": "example-board-overlay-content-parity",
+      "description": "Same-PCB SKU board overlays in an example (e.g. alp_e1m_aen801_* vs alp_e1m_aen803_*) carry identical devicetree/Kconfig content, comments and each file's own SKU name excluded, bar an explicit BOM-population allowlist; an alp_e1m_<sku>_ file with no resolvable SoM preset, or an app CMakeLists.txt naming one SKU's paired file outside an if() on that SKU, is an error (issue #2198).",
+      "runner": "check-script",
+      "script": "scripts/check_example_board_overlay_content_parity.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "example-board-overlay-parity",
-      "description": "Every example board.yaml core declared via cores.<core>.app: has a matching boards/ overlay wherever the example ships qualified overlays (issue #1009).",
+      "description": "Every example board.yaml core declared via cores.<core>.app: (issue #1009), and every testcase.yaml alp_e1m_* platform_allow entry (issue #2101), has a matching boards/ overlay wherever the example ships qualified overlays; every examples/**/boards/ directory sits next to a CMakeLists.txt (issue #2207).",
       "runner": "check-script",
       "script": "scripts/check_example_board_overlay_parity.py",
       "gate": true,
@@ -590,6 +647,20 @@
       "gate": true,
       "profiles": [
         "quick",
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "issue-citations",
+      "description": "A `#NNNN` cited inside a driver_status-family YAML comment block or an `@par Driver status:` header paragraph must not name a closed/merged issue as an apparent open blocker (#1950); checked offline against the committed metadata/issue-state-snapshot.json (refreshed manually via scripts/refresh_issue_state_snapshot.py), degrading to a non-blocking warning only when the snapshot is entirely missing/unparsable or has no record of the cited number yet -- a stale-but-present snapshot still enforces every citation it can resolve.",
+      "runner": "check-script",
+      "script": "scripts/check_issue_citations.py",
+      "gate": true,
+      "profiles": [
         "pr",
         "full",
         "release"
@@ -726,6 +797,20 @@
       ],
       "output": "none",
       "ci": null
+    },
+    {
+      "id": "silicon-claim-provenance",
+      "description": "A changelog.d/ fragment asserting bench/silicon verification of a specific hex address or bench serial must have that value corroborated under docs/ or metadata/ outside changelog.d/ itself (#1993).",
+      "runner": "check-script",
+      "script": "scripts/check_silicon_claim_provenance.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
     },
     {
       "id": "slot-claim-atomic",
@@ -949,6 +1034,21 @@
       "script": "scripts/check_write_text_newline.py",
       "gate": true,
       "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "yocto-machine-tree-parity",
+      "description": "Every SoM preset's topology.<core>.machine: Yocto MACHINE resolves to a real meta-alp-sdk/conf/machine/ conf, or is a declared entry in orchestrator.YOCTO_MACHINE_UNBUILDABLE (issue #1982 follow-up).",
+      "runner": "check-script",
+      "script": "scripts/check_yocto_machine_tree_parity.py",
+      "gate": true,
+      "profiles": [
+        "quick",
         "pr",
         "full",
         "release"

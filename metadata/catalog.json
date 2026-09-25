@@ -260,6 +260,35 @@
           "models": false,
           "peripherals": true
         },
+        "name": "aen-eeprom-provision",
+        "osSet": [
+          "zephyr"
+        ],
+        "path": "examples/aen/aen-eeprom-provision",
+        "som": "E1M-AEN801",
+        "summary": "**Write** the 128-byte Alp hardware-info manifest into the on-module **24C128 EEPROM** on the E1M-AEN (Alif Ensemble) SoM, then read it back and verify. The write sibling of [`aen-eeprom-manifest`](../aen-eeprom-manifest), which reads the same bytes."
+      },
+      {
+        "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "aen-secure-element-sign",
         "osSet": [
           "zephyr"
@@ -882,10 +911,39 @@
         ],
         "path": "examples/camera-vision/ai-object-detection-realtime",
         "som": "E1M-V2M101",
-        "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** Builds clean on > `native_sim/native/64` + the AEN fallback target against the full > `<alp/camera.h>` / `<alp/inference.h>` / `<alp/display.h>` surfaces, > which all ship today -- DEEPX DX-M1 dispatch runs through > `alp_inference_open(...)` same as any other backend. What's still > missing is a real Vela-/DXNN-compiled YOLOv8-tiny model (see \"Adding > the model\" below) and V2N-M1 HiL bench validation."
+        "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** Builds clean on > `native_sim/native/64` + the AEN fallback target against the full > `<alp/camera.h>` / `<alp/inference.h>` / `<alp/display.h>` surfaces. > The checked-in V2M101 project enables only its M33/Zephyr slice, so TFLM > CPU is its only inference backend; the placeholder DXNN request remains > an intentional NOSUPPORT skeleton. A real DX-M1 run still needs an > A55/Yocto app, a compiled YOLOv8-tiny model, and V2N-M1 HiL validation."
       }
     ],
     "connectivity": [
+      {
+        "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
+        "name": "camera-mjpeg-stream",
+        "osSet": [
+          "zephyr"
+        ],
+        "path": "examples/connectivity/camera-mjpeg-stream",
+        "som": "E1M-AEN803",
+        "summary": "Capture, JPEG-encode, and serve an MJPEG stream from the board over a plain Zephyr BSD TCP socket — `<alp/camera.h>` → `<alp/jpeg.h>` → HTTP `multipart/x-mixed-replace`, no host tool required."
+      },
       {
         "board": "e1m-evk",
         "coreCount": 3,
@@ -943,7 +1001,7 @@
         ],
         "path": "examples/connectivity/iot-connected-camera",
         "som": "E1M-V2N101",
-        "summary": "Connected-camera reference application for the **E1M EVK** populated with an **E1M-V2N101 / E1M-V2N102** SoM (Renesas RZ/V2N)."
+        "summary": "Connected-camera reference application for the **E1M EVK** populated with an **E1M-V2N101 / E1M-V2N102 / E1M-V2N103** SoM (Renesas RZ/V2N)."
       },
       {
         "board": "e1m-evk",
@@ -990,10 +1048,10 @@
           }
         ],
         "declares": {
-          "chips": false,
+          "chips": true,
           "ipc": false,
           "models": false,
-          "peripherals": false
+          "peripherals": true
         },
         "name": "iot-fleet-ota",
         "osSet": [
@@ -1089,10 +1147,10 @@
           }
         ],
         "declares": {
-          "chips": false,
+          "chips": true,
           "ipc": false,
           "models": false,
-          "peripherals": false
+          "peripherals": true
         },
         "name": "mqtt-telemetry",
         "osSet": [
@@ -1753,7 +1811,7 @@
         ],
         "path": "examples/peripheral-io/drone-autopilot",
         "som": "E1M-AEN801",
-        "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Compiles on > `native_sim/native/64` + cross-compiles to `ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp`. > **Do NOT fly this build.** The PID gains, sensor scales, > failsafe thresholds, and motor mapping are starting-point > values that need bench tuning + ground-tied throttle tests > before a real airframe goes near them."
+        "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Compiles on > `native_sim/native/64` + cross-compiles to `alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`. > **Do NOT fly this build.** The PID gains, sensor scales, > failsafe thresholds, and motor mapping are starting-point > values that need bench tuning + ground-tied throttle tests > before a real airframe goes near them."
       },
       {
         "board": "e1m-evk",
@@ -2756,10 +2814,15 @@
       },
       {
         "board": "e1m-x-evk",
-        "coreCount": 1,
+        "coreCount": 2,
         "cores": [
           {
             "app": "./src",
+            "id": "a55_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
             "id": "m33_sm",
             "os": "zephyr"
           }
@@ -2772,11 +2835,12 @@
         },
         "name": "v2n-brd-i2c-bringup",
         "osSet": [
+          "yocto",
           "zephyr"
         ],
         "path": "examples/v2n/v2n-brd-i2c-bringup",
         "som": "E1M-V2N101",
-        "summary": "Patch-day diagnostic for the V2N SoM's BRD_I2C management bus (Renesas RIIC8). Scans the bus, distinguishes a bus-level electrical fault (line held low / missing pull-ups / wrong pinmux) from per-device failures, then probes every populated IC read-only and prints a PASS/FAIL/SKIP table."
+        "summary": "Patch-day diagnostic for the V2N SoM's BRD_I2C management bus (Renesas RIIC8), run from a Linux/Yocto user-space app on the V2N Cortex-A55 cluster. Scans the bus, distinguishes a bus-level electrical fault (line held low / missing pull-ups / wrong pinmux) from per-device failures, then probes every populated IC read-only and prints a PASS/FAIL/SKIP table."
       },
       {
         "board": "e1m-x-evk",
@@ -3080,34 +3144,15 @@
       },
       {
         "board": "e1m-x-evk",
-        "coreCount": 1,
+        "coreCount": 2,
         "cores": [
           {
             "app": "./src",
-            "id": "m33_sm",
-            "os": "zephyr"
-          }
-        ],
-        "declares": {
-          "chips": true,
-          "ipc": false,
-          "models": false,
-          "peripherals": true
-        },
-        "name": "v2n-rtc-multi-alarm",
-        "osSet": [
-          "zephyr"
-        ],
-        "path": "examples/v2n/v2n-rtc-multi-alarm",
-        "som": "E1M-V2N101",
-        "summary": "Exercises the RV-3028-C7's **multi-source event dispatcher**: the RTC has seven distinct interrupt sources (PORF, EXT_EVENT, ALARM, COUNTDOWN, PERIODIC, BSF, CLKF) that all latch into a single STATUS register and route to one physical INT pin. The driver fans the single IRQ out into per-source callbacks so the application's state-machine cleanly separates concerns."
-      },
-      {
-        "board": "e1m-x-evk",
-        "coreCount": 1,
-        "cores": [
+            "id": "a55_cluster",
+            "os": "yocto"
+          },
           {
-            "app": "./src",
+            "app": "alp-stock-shim",
             "id": "m33_sm",
             "os": "zephyr"
           }
@@ -3120,18 +3165,24 @@
         },
         "name": "v2n-secure-element-sign",
         "osSet": [
+          "yocto",
           "zephyr"
         ],
         "path": "examples/v2n/v2n-secure-element-sign",
         "som": "E1M-V2N101",
-        "summary": "Probe the OPTIGA Trust M on V2N's BRD_I2C and confirm the current probe-only driver contract. The driver reads I2C_STATE to prove the part is reachable; product-info and raw-APDU helpers return `ALP_ERR_NOSUPPORT` until the Infineon host-library transport is integrated."
+        "summary": "Probe the OPTIGA Trust M on V2N's BRD_I2C and confirm the current probe-only driver contract, from a Linux/Yocto user-space app on the V2N Cortex-A55 cluster. The driver reads I2C_STATE to prove the part is reachable; product-info and raw-APDU helpers return `ALP_ERR_NOSUPPORT` until the Infineon host-library transport is integrated."
       },
       {
         "board": "e1m-x-evk",
-        "coreCount": 1,
+        "coreCount": 2,
         "cores": [
           {
             "app": "./src",
+            "id": "a55_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
             "id": "m33_sm",
             "os": "zephyr"
           }
@@ -3144,11 +3195,12 @@
         },
         "name": "v2n-temp-sensor",
         "osSet": [
+          "yocto",
           "zephyr"
         ],
         "path": "examples/v2n/v2n-temp-sensor",
         "som": "E1M-V2N101",
-        "summary": "Reads the on-module TMP112 once per second and prints the temperature in degrees Celsius (with 0.001 °C resolution). Classic V2N starter app -- one I²C bus open, one chip init, a ten-sample loop."
+        "summary": "Reads the on-module TMP112 once per second and prints the temperature in degrees Celsius (with 0.001 °C resolution), from a Linux/Yocto user-space app on the V2N Cortex-A55 cluster. Classic V2N starter app -- one I²C bus open, one chip init, a ten-sample loop."
       },
       {
         "board": "e1m-x-evk",
@@ -3218,8 +3270,16 @@
       "script": "scripts/check_build_receipt.py"
     },
     {
-      "purpose": "Verify every `path:line` citation in `changelog.d/` still resolves.",
+      "purpose": "CI gate: every in-tree copy of `cc3501e_bridge.{c,h}` under `examples/**` is byte-identical to the canonical pair, except the copies this gate declares divergent by name.",
+      "script": "scripts/check_cc3501e_bridge_copies.py"
+    },
+    {
+      "purpose": "Verify every `path:line` citation in `changelog.d/` still resolves, and that every new one is anchored.",
       "script": "scripts/check_changelog_citations.py"
+    },
+    {
+      "purpose": "Guard: a changelog.d/ fragment's leading digits match the issue its own heading cites (#1957).",
+      "script": "scripts/check_changelog_fragment_issue.py"
     },
     {
       "purpose": "Guard: every `changelog.d/*.md` fragment is well-formed (#1395).",
@@ -3246,8 +3306,12 @@
       "script": "scripts/check_core_cmakelists_mapping.py"
     },
     {
-      "purpose": "Lint repo content for Linux-only idioms in customer-facing surfaces.",
+      "purpose": "Lint repo content for cross-platform hazards: Linux-only idioms in customer-facing surfaces, and implicit text encodings in the SDK's own Python under scripts/, tests/, and examples/.",
       "script": "scripts/check_cross_platform.py"
+    },
+    {
+      "purpose": "Reject a fixed-literal `alp_delay_us(N)` with N >= 1000 under chips/.",
+      "script": "scripts/check_delay_us_literal.py"
     },
     {
       "purpose": "Assert every ALP-Bxxx code scripts/alp_cli/validator.py can emit has a docs/diagnostics/ALP-Bxxx.md landing page (issue #1569).",
@@ -3306,7 +3370,11 @@
       "script": "scripts/check_emit_snapshots.py"
     },
     {
-      "purpose": "CI gate: if an example ships >=1 board-qualified overlay/conf under `boards/`, then every core its `board.yaml` declares via `cores.<core>.app:` must have its OWN matching qualified overlay there too -- a declared core with no matching file, while qualified overlays exist for other core(s), means the core the app actually builds silently loses its overlay.",
+      "purpose": "CI gate: same-PCB SKU board overlays in an example must say the same thing.",
+      "script": "scripts/check_example_board_overlay_content_parity.py"
+    },
+    {
+      "purpose": "CI gate covering four related silent-overlay-drop defects:",
       "script": "scripts/check_example_board_overlay_parity.py"
     },
     {
@@ -3336,6 +3404,10 @@
     {
       "purpose": "Inference backend/format <-> dispatcher canonicalisation gate.",
       "script": "scripts/check_inference_backend_parity.py"
+    },
+    {
+      "purpose": "Flag a closed/merged GitHub issue cited as an open blocker in a driver-status prose block (issue #1950).",
+      "script": "scripts/check_issue_citations.py"
     },
     {
       "purpose": "Recipe-vs-west pin-parity gate (issue #1281).",
@@ -3380,6 +3452,10 @@
     {
       "purpose": "CI gate: gen_sbom.py produces a valid, deterministic CycloneDX SBOM (#610 §7).",
       "script": "scripts/check_sbom.py"
+    },
+    {
+      "purpose": "Require a hardware-value-backed silicon/bench-verification claim in a changelog.d/ fragment to be corroborated somewhere outside that fragment (issue #1993).",
+      "script": "scripts/check_silicon_claim_provenance.py"
     },
     {
       "purpose": "Reject the unlocked check-then-set slot claim (issue #1630).",
@@ -3444,6 +3520,10 @@
     {
       "purpose": "Guard: every scripts/ and firmware/ write_text() of a repo-tree text artifact passes newline=\"\".",
       "script": "scripts/check_write_text_newline.py"
+    },
+    {
+      "purpose": "CI gate: every `topology.<core>.machine:` Yocto MACHINE declared in a `metadata/e1m_modules/E1M-*.yaml` SoM preset must either ship a real conf under `meta-alp-sdk/conf/machine/` or be explicitly named, with a reason, in `alp_orchestrate.orchestrator.YOCTO_MACHINE_UNBUILDABLE`.",
+      "script": "scripts/check_yocto_machine_tree_parity.py"
     },
     {
       "purpose": "Byte-parity gate: a Zephyr example's own `CMakeLists.txt` (which shells `alp_project.py --emit zephyr-conf --core <id>` at configure time) and the SDK reference build-plan `configArtefacts` MUST materialise the identical `alp.conf` for the same core; Python Tan tests its relocated producer against the same contract.",
@@ -3620,6 +3700,9 @@
         "alp_dsp_chain_capabilities",
         "alp_dsp_chain_close",
         "alp_dsp_chain_open",
+        "alp_dsp_decimator_init",
+        "alp_dsp_decimator_process",
+        "alp_dsp_decimator_reset",
         "alp_dsp_stats_f32"
       ],
       "header": "include/alp/dsp.h"
@@ -3653,6 +3736,7 @@
       "functions": [
         "alp_hw_info_assert_matches_build",
         "alp_hw_info_read",
+        "alp_secure_page_mirror_classify",
         "alp_soc_info_read",
         "alp_soc_secure_fw_ping"
       ],
@@ -3800,7 +3884,8 @@
         "alp_uart_rx_ringbuf_count",
         "alp_uart_rx_ringbuf_detach",
         "alp_uart_rx_ringbuf_pop",
-        "alp_uart_write"
+        "alp_uart_write",
+        "alp_uptime_ms"
       ],
       "header": "include/alp/peripheral.h"
     },
@@ -3846,8 +3931,10 @@
         "alp_rpc_call",
         "alp_rpc_capabilities",
         "alp_rpc_close",
+        "alp_rpc_link_state",
         "alp_rpc_open",
         "alp_rpc_send",
+        "alp_rpc_set_link_callback",
         "alp_rpc_subscribe",
         "alp_rpc_unsubscribe"
       ],
@@ -3896,6 +3983,12 @@
         "alp_storage_write"
       ],
       "header": "include/alp/storage.h"
+    },
+    {
+      "functions": [
+        "alp_temperature_read_milli_c"
+      ],
+      "header": "include/alp/temperature.h"
     },
     {
       "functions": [
@@ -3964,6 +4057,11 @@
   "schema_version": 2,
   "soms": [
     {
+      "boot": {
+        "allowed_swap_algorithms": [],
+        "default_swap_algorithm": "none",
+        "single_slot": true
+      },
       "capabilities": {
         "cryptocell": true,
         "dma2d": true,
@@ -4018,6 +4116,11 @@
       }
     },
     {
+      "boot": {
+        "allowed_swap_algorithms": [],
+        "default_swap_algorithm": "none",
+        "single_slot": true
+      },
       "capabilities": {
         "cryptocell": true,
         "dma2d": true,
@@ -4073,6 +4176,11 @@
       }
     },
     {
+      "boot": {
+        "allowed_swap_algorithms": [],
+        "default_swap_algorithm": "none",
+        "single_slot": true
+      },
       "capabilities": {
         "cryptocell": true,
         "dma2d": true,
@@ -4134,6 +4242,11 @@
       }
     },
     {
+      "boot": {
+        "allowed_swap_algorithms": [],
+        "default_swap_algorithm": "none",
+        "single_slot": true
+      },
       "capabilities": {
         "cryptocell": true,
         "dave2d": true,
@@ -4198,6 +4311,11 @@
       }
     },
     {
+      "boot": {
+        "allowed_swap_algorithms": [],
+        "default_swap_algorithm": "none",
+        "single_slot": true
+      },
       "capabilities": {
         "cau": false,
         "cryptocell": true,
@@ -4262,6 +4380,11 @@
       }
     },
     {
+      "boot": {
+        "allowed_swap_algorithms": [],
+        "default_swap_algorithm": "none",
+        "single_slot": true
+      },
       "capabilities": {
         "cryptocell": true,
         "dave2d": true,
@@ -4326,6 +4449,84 @@
       }
     },
     {
+      "boot": {
+        "allowed_swap_algorithms": [],
+        "default_swap_algorithm": "none",
+        "single_slot": true
+      },
+      "capabilities": {
+        "cryptocell": true,
+        "dave2d": true,
+        "dma2d": true,
+        "ethos_u55_count": 2,
+        "ethos_u85_count": 1,
+        "gpu2d": true,
+        "helium_mve": true,
+        "hexspi_dma": true,
+        "inline_aes": true,
+        "neon": true
+      },
+      "family": "alif-ensemble",
+      "silicon": "alif:ensemble:e8",
+      "sku": "E1M-AEN803",
+      "soc_part": "E8",
+      "soc_peripherals": {
+        "adc": true,
+        "can": true,
+        "dac": true,
+        "ethernet": true,
+        "i2c": true,
+        "i2s": true,
+        "i3c": true,
+        "mipi_csi": true,
+        "mipi_dsi": true,
+        "npu": true,
+        "pcie": false,
+        "pdm": true,
+        "pwm": false,
+        "quadrature_encoder": true,
+        "rtc": true,
+        "sd1": false,
+        "sdio_emmc": true,
+        "spi": true,
+        "timer": true,
+        "uart": true,
+        "usb": true,
+        "watchdog": true,
+        "wifi_sdio": false,
+        "xspi_ospi": true
+      },
+      "topology": {
+        "a32_cluster": {
+          "app": "alp-image-edge",
+          "machine": "e1m-aen803-a32",
+          "os": "yocto",
+          "toolchain": "poky-glibc"
+        },
+        "m55_he": {
+          "app": "alp-stock-shim",
+          "board": "alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he",
+          "os": "zephyr",
+          "toolchain": "arm-zephyr-eabi"
+        },
+        "m55_hp": {
+          "app": "alp-stock-shim",
+          "board": "alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp",
+          "os": "zephyr",
+          "toolchain": "arm-zephyr-eabi"
+        }
+      }
+    },
+    {
+      "boot": {
+        "allowed_swap_algorithms": [
+          "scratch",
+          "move",
+          "overwrite"
+        ],
+        "default_swap_algorithm": "scratch",
+        "single_slot": false
+      },
       "capabilities": {
         "emmc_dma": true,
         "ethos_u65_count": 1,
@@ -4377,6 +4578,15 @@
       }
     },
     {
+      "boot": {
+        "allowed_swap_algorithms": [
+          "scratch",
+          "move",
+          "overwrite"
+        ],
+        "default_swap_algorithm": "scratch",
+        "single_slot": false
+      },
       "capabilities": {
         "drp_ai": true,
         "emmc_dma": true,
@@ -4428,6 +4638,15 @@
       }
     },
     {
+      "boot": {
+        "allowed_swap_algorithms": [
+          "scratch",
+          "move",
+          "overwrite"
+        ],
+        "default_swap_algorithm": "scratch",
+        "single_slot": false
+      },
       "capabilities": {
         "drp_ai": true,
         "emmc_dma": true,
@@ -4479,6 +4698,75 @@
       }
     },
     {
+      "boot": {
+        "allowed_swap_algorithms": [
+          "scratch",
+          "move",
+          "overwrite"
+        ],
+        "default_swap_algorithm": "scratch",
+        "single_slot": false
+      },
+      "capabilities": {
+        "drp_ai": true,
+        "emmc_dma": true,
+        "neon": true
+      },
+      "family": "renesas-rzv2n-deepx",
+      "silicon": "renesas:rzv2n:n44",
+      "sku": "E1M-V2M103",
+      "soc_part": "R9A09G056N44GBG",
+      "soc_peripherals": {
+        "adc": true,
+        "can": true,
+        "dac": false,
+        "ethernet": true,
+        "i2c": true,
+        "i2s": true,
+        "i3c": true,
+        "mipi_csi": true,
+        "mipi_dsi": true,
+        "npu": true,
+        "pcie": true,
+        "pdm": true,
+        "pwm": false,
+        "quadrature_encoder": false,
+        "rtc": true,
+        "sd1": true,
+        "sdio_emmc": true,
+        "spi": true,
+        "timer": true,
+        "uart": true,
+        "usb": true,
+        "watchdog": true,
+        "wifi_sdio": true,
+        "xspi_ospi": true
+      },
+      "topology": {
+        "a55_cluster": {
+          "app": "alp-image-edge",
+          "machine": "e1m-v2m103-a55",
+          "os": "yocto",
+          "toolchain": "poky-glibc"
+        },
+        "m33_sm": {
+          "app": "alp-stock-shim",
+          "board": "alp_e1m_v2m103_m33_sm",
+          "os": "zephyr",
+          "toolchain": "arm-zephyr-eabi"
+        }
+      }
+    },
+    {
+      "boot": {
+        "allowed_swap_algorithms": [
+          "scratch",
+          "move",
+          "overwrite"
+        ],
+        "default_swap_algorithm": "scratch",
+        "single_slot": false
+      },
       "capabilities": {
         "drp_ai": true,
         "emmc_dma": true,
@@ -4530,6 +4818,15 @@
       }
     },
     {
+      "boot": {
+        "allowed_swap_algorithms": [
+          "scratch",
+          "move",
+          "overwrite"
+        ],
+        "default_swap_algorithm": "scratch",
+        "single_slot": false
+      },
       "capabilities": {
         "drp_ai": true,
         "emmc_dma": true,
@@ -4575,6 +4872,66 @@
         "m33_sm": {
           "app": "alp-stock-shim",
           "board": "alp_e1m_v2n102_m33_sm",
+          "os": "zephyr",
+          "toolchain": "arm-zephyr-eabi"
+        }
+      }
+    },
+    {
+      "boot": {
+        "allowed_swap_algorithms": [
+          "scratch",
+          "move",
+          "overwrite"
+        ],
+        "default_swap_algorithm": "scratch",
+        "single_slot": false
+      },
+      "capabilities": {
+        "drp_ai": true,
+        "emmc_dma": true,
+        "neon": true
+      },
+      "family": "renesas-rzv2n",
+      "silicon": "renesas:rzv2n:n44",
+      "sku": "E1M-V2N103",
+      "soc_part": "R9A09G056N44GBG",
+      "soc_peripherals": {
+        "adc": true,
+        "can": true,
+        "dac": false,
+        "ethernet": true,
+        "i2c": true,
+        "i2s": true,
+        "i3c": true,
+        "mipi_csi": true,
+        "mipi_dsi": true,
+        "npu": true,
+        "pcie": true,
+        "pdm": true,
+        "pwm": false,
+        "quadrature_encoder": false,
+        "rtc": true,
+        "sd1": true,
+        "sdio_emmc": true,
+        "spi": true,
+        "timer": true,
+        "uart": true,
+        "usb": true,
+        "watchdog": true,
+        "wifi_sdio": true,
+        "xspi_ospi": true
+      },
+      "topology": {
+        "a55_cluster": {
+          "app": "alp-image-edge",
+          "machine": "e1m-v2n103-a55",
+          "os": "yocto",
+          "toolchain": "poky-glibc"
+        },
+        "m33_sm": {
+          "app": "alp-stock-shim",
+          "board": "alp_e1m_v2n103_m33_sm",
           "os": "zephyr",
           "toolchain": "arm-zephyr-eabi"
         }

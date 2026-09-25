@@ -18,24 +18,24 @@ and [`aen-provisioning.md`](aen-provisioning.md).
 | **Dual-core deferred-TOC release** | ✅ bench-proven on E8, both directions (2026-07-31, 2026-08-01) | Releasing a peer M55 has two working recipes and they are **not interchangeable by direction**: plain `["load","boot"]` + `se_service_boot_cpu()` (service 501) works HP-master→HE-peer (proven 2026-06-17 and re-confirmed 2026-08-01) but a real Alif silicon defect makes it fail HE-master→HP-peer (`CFSR=0x00000101` IACCVIOL+IBUSERR, `PC=0xEFFFFFFE` — Alif's SE Host Services API docs, v1.109.0 p.115, name "the M55-HP core in Ensemble devices" as a case where "resetting the core also invalidates its TCM content"). `["load","boot","deferred"]` + `se_service_process_toc_entry()` (service 500, loads at runtime AFTER the reset instead of before it, per p.115's own reset→reload→release remedy; ships unpatched in hal_alif v2.3.0) works **both** directions — bench-proven HP-master→HE-peer (2026-08-01, 16/16 pongs, `uLs  D`→released) and is the only proven way to do HE-master→HP-peer. Portable surface: `CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC` in `src/backends/mproc/alif_se_boot.c`, default **ON when the peer is HP** (501 is vendor-documented broken there) and **OFF when the peer is HE** (501 proven fine there, twice). See § Flow A — Dual-core deferred-TOC boot below for the full asymmetry table and vendor citations. |
 | **UTIMER counter** (Tier-1.5) | ✅ PASS *after a fix* | As-merged it never counted (read 0); fixed in **PR #158** (missing `alif_utimer_enable_soft_counter_ctrl`). Re-validated: counter advances. |
 | **GPIO** (`gpio_dw`, Tier-1) | ✅ PASS *(re-proven 2026-07-27 on silicon; earlier same-day CKEN theory REFUTED — see below)* | DDR/DR set+readback correct via the Zephyr GPIO API (J-Link ground truth) — but that alone is only the gpio_dw controller-register path: the original PASS criterion also read `EXT_PORTA` and treated it as pad-level proof, and on this controller `EXT_PORTA` mirrors `SWPORTA_DR` for an OUTPUT-direction pin (Synopsys DW_apb_gpio databook), so it could never independently fail and proved nothing beyond DR/DDR — **this half still stands.** Earlier the same day, `CLKCTL_PER_SLV->GPIO_CTRL[n]` bit 16 (`GPIO_CTRL_CKEN`, the per-port GPIO functional-clock enable) — clear on every port and never written by alp-sdk — was suspected as the reason a pad looked electrically dark, and a fix was added (`zephyr/drivers/gpio/gpio_clk_alif.c`, PR-tracked). **That theory is REFUTED, decisively, on the same bench**: after a cold reset with CKEN still clear, driving `SWPORTA_DDR`/`SWPORTA_DR` from the debugger moved the pad — `0x49002050 = 0x00000010` with `0x4902F088 = 0x00000100` (bit 16 unset). CKEN is not required for pad drive. The real explanation for "the LED was dark": the old `blink` example toggled ~10 times over ~2 s and returned with the pad left LOW — a window nobody was watching, not a pad that couldn't move. Once `blink` was changed to loop forever, the maintainer confirmed **by eye that the LED blinks** — GPIO output on the E8 pad is now proven on real silicon, with REN enabled at `0x1A603050`, `EXT_PORTA` following `SWPORTA_DR` 12/12 on P2_4 while `blink` ran. **Not yet proven:** the colour is wrong (`EVK_PIN_LED_RED` lights GREEN) — still being measured, no colour conclusion asserted here — and until `gpio11`–`gpio14` landed (§ this doc, dtsi), the green/blue RGB channels (P12_7/P12_6) had no controller to reach at all. `gpio_clk_alif.c`'s CKEN write is kept (it matches Alif's own documented `enable_gpio_clk()` init) but is no longer claimed to fix a dark pad. See `examples/aen/aen-gpio-bench/src/main.c`. |
-| **I2C2 + 24C128 EEPROM** (`i2c_dw`, Tier-1) | ✅ PASS | EEPROM ACKs at 0x50 and returns a **populated Alp manifest** (not blank) — magic `ALPH`, SKU, serial, mfg date, CRC-32 all decode; one of 12 devices on the bus — once the pinctrl carries the **pad config** Alif's reference uses — `input-enable` (REN) + `bias-pull-down` (DSC=2). See §3. |
+| **I2C2 + 24C128 EEPROM** (`i2c_dw`, Tier-1) | ✅ PASS | EEPROM ACKs at 0x50 and returns a **populated Alp manifest** (not blank) — magic `ALPH`, SKU, serial, mfg date, CRC-32 all decode; one of 12 devices on the bus (the same N24S128 part also answers its `1011` second device-select header at 0x58 — see §3) — once the pinctrl carries the **pad config** Alif's reference uses — `input-enable` (REN) + `bias-pull-down` (DSC=2). See §3. |
 | **PWM** (Tier-1.5) | ✅ PASS | pwm_set_cycles reg readback matches (CNTR_PTR/COMPARE/CTRL), shares the hal_alif UTIMER start-path the counter fix validated. |
 | **SPI** (`alif,dwc-ssi-spi`, Tier-2) | ✅ PASS *after a fix* | DWC-SSI stayed in slave mode → `spi_transceive` -116 (TX FIFO full, no SCLK). The Alif SoC gates master mode behind `CLKCTRL_PER_SLV.SSI_CTRL` (`0x4902F028`), which upstream never sets. **PR #162** sets it in the driver. Re-validated: `rc=0`, internal-loopback `rx==tx`, CTRLR0=`0x80002007`. See §3. |
-| **Ethernet** (`alif,ethernet` / `eth_dwmac`, Tier-1.5) | ✅ PASS *after a fix* | Real cause of the long no-link: the GMAC DMA descriptor rings + net_buf pool sat in the M55 **DTCM** (`zephyr,sram = &dtcm`), which is **not** on the GMAC DMA bus. Fix: `zephyr,sram = &sram0` (global on-chip SRAM `0x02000000`, CPU addr == DMA addr) + `CONFIG_DCACHE=n`. The PHY power (`E_PHY_PWRDWN` = P15_4), reset (`E_PHY_RESET` = P11_6), and RCSR bit7 `REF_CLK_SEL=1` were already correct. Re-validated end-to-end: DHCP lease `192.168.10.137` (server-side dnsmasq lease + ARP `REACHABLE`). See §3. |
+| **Ethernet** (`alif,ethernet` / `eth_dwmac`, Tier-1.5) | ✅ PASS *after a fix* | Real cause of the long no-link: the GMAC DMA descriptor rings + net_buf pool sat in the M55 **DTCM** (`zephyr,sram = &dtcm`), which is **not** on the GMAC DMA bus. Fix: `zephyr,sram = &sram0` (global on-chip SRAM `0x02000000`, CPU addr == DMA addr) + `CONFIG_DCACHE=n` -- moved ALL of main RAM to SRAM0. The PHY power (`E_PHY_PWRDWN` = P15_4), reset (`E_PHY_RESET` = P11_6), and RCSR bit7 `REF_CLK_SEL=1` were already correct. Re-validated end-to-end: DHCP lease `192.168.10.137` (server-side dnsmasq lease + ARP `REACHABLE`). **Silicon-verified on E1M-AEN803 (bench run 202)**: only the Ethernet-owned buffers move now -- the ethernet node's `memory-region = <&sram0>;` (descriptor rings) + `CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION` (net_buf pool, `subsys/net/ip/net_pkt.c`) -- while main RAM stays on DTCM; DHCP lease `192.168.10.123`, ping 5/5 (avg 0.271 ms), rings resolving into `net_buf_data_rx/tx_bufs` in SRAM0, main RAM on DTCM. E1M-AEN801 is build-verified only. An earlier, different prototype of the same idea ran on silicon in scratch bench run 200 (a different app-level relocation, `CONFIG_NOCACHE_MEMORY=y`, and different ring addresses), not this exact mechanism. See §3. |
 | **UART3** (`ns16550`, Tier-1) | ✅ PASS | Internal loopback. |
 | **Counter** (`utimer0`, Tier-1.5) | ✅ PASS | UTIMER0 counter advances. |
 | **Counter alarm** (`utimer0` COMPARE-A, Tier-1.5) | ✅ PASS *after a fix* (RAM-run, 2026-06-17) | The COMPARE-A one-shot **alarm** fires + re-arms (`fired=2`). Two bring-up bugs fixed in `counter_alif_utimer.c`: (1) the match interrupt compares the `COMPARE_A_BUF1` **shadow** register (`0xD4`), not the `COMPARE_A` reg (`0xD0`) the driver wrote — so the shadow stayed 0 and bit2 only matched at the start `CNTR==0` tick; (2) the alarm's NVIC line is `comp_a_buf1` (the bit2 event), not `comp_capt_a` (bit0/CAPTURE_A) — so even once bit2 latched its line was never enabled. Regression: `examples/aen/aen-counter-alarm-regcheck`. |
 | **WDT** (CMSDK, Tier-1) | ✅ PASS | CMSDK watchdog. |
 | **ADC** (`adc_alif`, Tier-2) | ✅ PASS | Single-shot read. |
 | **DAC** (`dac_alif`, Tier-2) | ✅ PASS | Write path holds (code-side; analog output bench-unverified). |
-| **Camera stack** (`cam`/`csi`/`dphy`/`arx3a0`) | ✅ PASS *(bind)* | All four nodes BIND + the v4.4-ported drivers load; `cam` instantiation is DT-blocked and live capture is HW-blocked (no sensor wired). |
+| **Camera stack** (`cam`/`csi`/`dphy`/`arx3a0`) | ✅ PASS *(bind)* | All four nodes BIND + the v4.4-ported drivers load. **Update (2026-09-21, an E1M-AEN803 on the E1M-EVK): the `innomaker_cam_ov9281` shield's live capture is bench-verified in all three modes** -- real GREY8 frames (640x400, 1280x720, 1280x800), each at its configured frame rate, with the sensor test pattern also verified in all three, once a P/N-crossing camera-connector adapter is fitted (see `docs/boards/e1m-evk.md`'s Camera section) and `CONFIG_VIDEO_ALIF_CAM_EXTENDED=y` is set (now default on for the E8). The `raspberry_pi_camera_module_1` (OV5647) shield's live capture is also bench-verified (2026-09-22, an E1M-AEN803 on the E1M-EVK, RAW10 640x480, issue #2248) -- see `docs/camera-shields.md`'s OV5647 driver section. |
 | **Ethos-U85** (NPU) | ✅ PASS | ID `0x20007001`. |
 | **Ethos-U55-HE** (NPU) | ✅ PASS | ID `0x10104201`. |
 | **NPU inference** (TFLM + Ethos-U85) | ✅ PASS | Tiny fixture runs to completion. Real models from MRAM slot0: **person_detect** (100% NPU) + **keyword_scrambled** (mixed 6-NPU/9-CPU, via the `<6>` op-resolver) both `runJob=OK` (2026-06-17). See `examples/aen/aen-npu-inference-person-mram`. |
-| **PDM mics** | ✅ PASS | Live varying PCM = real audio. |
-| **I2S TX** (`i2s3`) | ✅ PASS | Clocks the tone out with the 76.8 MHz audio clock (audible amp output pends the 74LVC157 mux + TAS2563 config). |
+| **PDM mics** | 🟡 PARTIAL *(mic ch0/ch1 only; full-scale headroom unmeasured)* | Register-level configuration and 48 kHz mode 7 rate verified exact (`measured_rate_hz=48000`, `slab_missed=0`, `overrun=0`, commit `68a169977`), via `examples/aen/aen-pdm-mic-alif`. Acoustic capture at 48 kHz on mic ch0/ch1 (PDM controller 0) ONLY is separately VERIFIED, not by that example, but by a speaker-to-mic loopback -- the `PROBE_LOOPBACK` mode of `examples/aen/aen-i2s-tas2563-probe` on branch `test/u46-i2s-tas2563-on-reworked-mux` (commit `56631094d`, issue #2143), E1M-AEN803 serial 2026W36-0002, 2026-09-15 14:49Z, TAS2563 speakers, gain `0x200` readback-confirmed: the 1 kHz Goertzel bin went from 9.3/0.1 dB (ch0/ch1) in silence to 43.4/48.8 dB at volume 16 and 57.8/57.6 dB at volume 48, a 500 Hz bin at 54.7/56.6 dB lit up only during the 500 Hz stimulus, peak-to-peak (per channel, 960 ms window, after `zephyr_drv.c`'s `dc_block_s16()` high-pass, hence not a multiple of 32) went from 128/128 in silence to 266/292 at 1 kHz/volume 16 and 651/652 at 1 kHz/volume 48. The D2 pair (HW 4/5) is register-level verified only, never acoustically tested. Gain was `0x0D` (0.8125x, -1.8 dB vs unity, 31.9 dB below the provisional `0x200`); `0x800` clipped on silicon; now a provisional `0x200` default (issue #2143) -- full-scale headroom is unmeasured. |
+| **I2S TX** (`i2s3`) | ✅ PASS | Clocks the tone out with the 76.8 MHz audio clock. **Update (2026-09-15, E1M-AEN803 serial 2026W36-0002): audible amp output** verified 🟡 PARTIAL with U46 replaced by a 3257-type bus switch powered from `+3V3` (the as-built 74LVC157 is a one-way mux, never passes SoC→amp I2S at any VCC) + TAS2563 config; an open TDM clock-error latch and open issue #2146 (amp auto-shutdown after I2S stop) remain. |
 | **Quadrature encoder** (`qenc`) | 🟡 PARTIAL *(HW-gated)* | Driver reads clean; count is static until the encoder is physically spun. Not a code/Flow-D bug. |
-| **SD card** (DWC SDHC) | 🟡 PARTIAL *(HW-gated)* | SDHC inits but the card is unreachable until the EVK SDIO 74LVC157 mux (EN=IO20 / SEL=IO21, both CC3501E-side) is routed and a card is inserted. Not a code/Flow-D bug. |
+| **SD card** (DWC SDHC) | 🟡 PARTIAL | **Update (2026-09-15, E1M-AEN803 serial 2026W36-0002, at 25 MHz, after a U38 solder fix):** 4-bit SD read proven with U38/U39/U46 hand-reworked to 3257-type, but only with the unmerged enable path (#2122, clock gate) plus the unmerged `test/2051-sdhc-enable-on-reworked-mux` branch (ADMA address translation, system RAM in SRAM0) -- dev's SD path is unverified until that lands. EN=IO20, CC3501E-side on both hw revisions; SEL=IO21, CC3501E-side on r1 only -- unrouted/hardware-strapped on r2. |
 | **GPU2D** (`<alp/gpu2d.h>` sw_fallback) | ✅ PASS (RAM-run, 2026-06-17) | Portable 2D surface on the M55-HE via the priority-0 pure-C software fallback (the D/AVE 2D HW backend is opt-in + bench-unverified). `fill_rect` + clip, `blit`, and all four `blend` modes (REPLACE/SRC_OVER/ADDITIVE/MULTIPLY) produce **exact** expected pixels on silicon. Example: `examples/aen/aen-gpu2d-bench`. The D/AVE 2D hardware backend (`alif_dave2d.c`) is the separate bucket-C item. |
 | **Low-power (WFI/SysTick)** | ✅ PASS (RAM-run, 2026-06-17) | Stage-A baseline: the M55-HE enters architectural `__WFI()` via the kernel idle path (a k_timer beats the wake cadence; SysTick wakes it) for N rounds — proven by an advancing SRAM0 beacon + uptime (8 sleeps, 0→420 ms). No `CONFIG_PM` (pinned Zephyr 4.4 ships no Alif PM); the deep IWIC `pm_state_set` path (WICCONTROL HE `0x1A604010`) is the documented Stage-B follow-on. Example: `examples/aen/aen-power-smoke`. |
 | **SE CryptoCell compute** (`<alp/security.h>` SHA / AES-GCM) | ✅ PASS (RAM-run, 2026-06-19) | The portable hash/AEAD surface runs **inside the Secure Enclave's CryptoCell** on the E8: the `se_cryptocell` backend binds at priority 110 and pushes SHA-256 / AES-128-GCM into the SE over the RTSS-HE↔SE MHUv2 pair (the new public `se_service_send_request()` transport, hal_alif patch `0002`). Bench: SHA-256(`"abc"`) matched the NIST known-answer (`s=0`, MATCH) and the AES-128-GCM encrypt→decrypt round-trip matched (`enc=0 dec=0`, MATCH) — both computed in the SE, plus SE TRNG. `CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM` now defaults ON; algs the SE declines fall through to MbedTLS-PSA. Example: `examples/aen/aen-se-crypto`. |
@@ -432,6 +432,20 @@ r
 g
 exit
 ```
+> **alp-sdk#2233 — two hazards in the raw session above, if you type it by hand.**
+> SEGGER's built-in loader rewrites the WHOLE 16 KiB sector either `loadbin` touches
+> and never reads its prior contents first, so any blob that doesn't start and end on
+> a sector (`0x4000`) boundary silently turns the REST of that sector to `0xFF`.
+> Separately, `verifybin` here only ever compares against J-Link's own in-process
+> flash cache, not a fresh chip read — `Verify successful.` is not proof. The scripted
+> path (`scripts/bench/aen/flash-jlink-mramxip.sh`) handles both: it reads the touched
+> sectors first, overlays each blob on them (`scripts/bench/aen/flowd_sector_pad.py`),
+> `loadbin`s the padded image instead, and proves the write with a FRESH read-only
+> session rather than `verifybin`. Prefer the script; if you must type this by hand,
+> at minimum confirm with a fresh-session `savebin`/cold-cycle read as the "Confirm
+> with a cold-cycle read, never with `verifybin` alone" guidance elsewhere in this
+> doc set already says.
+
 Invoke: `JLinkExe -CommanderScript <script>` (Linux) / `JLink.exe -CommandFile <script>`
 (Windows). On success J-Link prints `Program & Verify` + `Verify successful.` for both blobs and
 `mem32 0x80010000 = … 80012…`. The post-`r` "connect under reset / Attach to CPU failed"
@@ -472,12 +486,19 @@ secure-boot verification — always write both consistent blobs.
 > that is **normal** (the pin reset reboots the SE, the app is running, J-Link can't
 > re-halt the secure core); read a witness back over the generic device.
 >
-> Helper: `scripts/bench/aen/flash-jlink.sh <build-dir> [read-bytes]` runs this whole
-> flow (gen-toc → AE822 connect → loadbin/verify the package at its per-build start
-> address from `app-package-map.txt` → `RSetType 2`/`r`/`g` → RAM-console read-back). It
+> Helper: `scripts/bench/aen/flash-jlink.sh [--replace-atoc] [--atoc-unqueryable]
+> <build-dir> [read-bytes]` runs this whole flow (gen-toc → AE822 connect →
+> loadbin/verify the package at its per-build start address from
+> `app-package-map.txt` → `RSetType 2`/`r`/`g` → RAM-console read-back). It
 > writes the **single self-contained `AppTocPackage.bin`** (our ITCM-load-via-ATOC apps),
-> not the slot0-XIP two-blob variant above. See
-> `scripts/bench/aen/README.md` for all four flows.
+> not the slot0-XIP two-blob variant above. **Since alp-sdk#2027, this write is
+> gated on a resident-ATOC check** (`bench_flowd_atoc_guard()`): with `SE_UART`
+> exported it queries what is already resident and refuses (exit 5) on a
+> foreign entry unless `--replace-atoc` is also passed; with `SE_UART` unset
+> (Flow D's normal case) it instead refuses (exit 8) unless
+> `--atoc-unqueryable` acknowledges there is no way to check on this bench
+> slot. See `scripts/bench/aen/README.md` for all four flows and the full
+> flag/exit-code table.
 >
 > **Two-blob (slot0-XIP) helper — validated 2026-06-17.** For an app linked into MRAM
 > slot0 (a real NPU model that overflows ITCM), `scripts/bench/aen/flash-jlink-mramxip.sh`
@@ -503,12 +524,23 @@ secure-boot verification — always write both consistent blobs.
   **`input-enable`** (sets the pad REN bit so `i2c_dw` can read SDA/SCL — ACK
   detect + clock-stretch) and **`bias-pull-down`** (upstream `pinctrl_soc.h`
   encodes this as the pad driver-state-control field **DSC=2**, exactly Alif's
-  I2C value — `bias-pull-up` gives DSC=1 and a dead bus; the upstream binding's
-  pull naming is effectively inverted vs the Alif pad HW). With that,
+  I2C value). This is a REAL pull-down, not an inverted encoding:
+  `pinctrl_soc.h`'s `ALIF_PINCTRL_BIAS_CFG()` macro
+  (`soc/alif/ensemble/pinctrl_soc.h:44-48`) maps `bias-pull-up` → DSC=1 and
+  `bias-pull-down` → DSC=2 unconditionally, matching the field comment at line
+  24. It is harmless here because the EVK carrier's R137/R144 pull-ups
+  dominate a weak internal pull-down. Switching to `bias-pull-up` was earlier
+  reported to give a dead bus, blamed on a nonexistent encoding inversion —
+  that report is unconfirmed, not disproven, absent a fresh bench trial
+  (alp-sdk#2046). With that,
   `examples/aen/aen-eeprom-manifest` reads the EEPROM at 0x50 — which ACKs and
   returns a **populated Alp manifest** (not blank): magic `ALPH`, SKU, serial,
   mfg date, and a matching CRC-32 all decode (the EEPROM is one of 12 devices on
-  the bus). External pull-ups are only needed for fast-mode (400 kHz); 100 kHz
+  the bus). The same physical part additionally answers its `1011` second
+  device-select header at 0x58, exposing its Secure Data Page / Unique ID /
+  Lock Status / Device Configuration Register — see `eeprom_24c128_read_identity()`
+  and `examples/aen/aen-eeprom-manifest`'s identity section, not a second chip.
+  External pull-ups are only needed for fast-mode (400 kHz); 100 kHz
   works on the internal pulls.
 - **UTIMER tick rate ≈ 400 MHz, not the 100 MHz placeholder.** The counter
   advanced ~800 k ticks per 2 ms busy-wait → real input ≈ 400 MHz, 4× the
@@ -535,14 +567,34 @@ secure-boot verification — always write both consistent blobs.
 - **Ethernet DMA buffers must live in global SRAM0, not the M55 DTCM.** The long
   no-link was traced to the GMAC DMA descriptor rings + net_buf pool sitting in
   the M55 **DTCM** (`zephyr,sram = &dtcm`), which is **not** reachable on the GMAC
-  DMA bus — so the MAC never saw valid descriptors. Fix: `zephyr,sram = &sram0`
-  (global on-chip SRAM `0x02000000`, where the CPU address equals the DMA address)
-  + `CONFIG_DCACHE=n`. The PHY power (`E_PHY_PWRDWN` = P15_4 lpgpio), PHY reset
-  (`E_PHY_RESET` = P11_6 gpio11), and the RCSR bit7 `REF_CLK_SEL=1` ref-clock
-  select were all already correct — the earlier "PHY RX path / `ANLPAR=0` / scope
-  the REF_CLK" diagnosis was a red herring (a bad cable plus the DTCM starvation).
+  DMA bus — so the MAC never saw valid descriptors. Fix: `zephyr,sram =
+  &sram0` (global on-chip SRAM `0x02000000`, where the CPU address equals the
+  DMA address) + `CONFIG_DCACHE=n` — moved ALL of main RAM to SRAM0. The PHY
+  power (`E_PHY_PWRDWN` = P15_4 lpgpio), PHY reset (`E_PHY_RESET` = P11_6
+  gpio11), and the RCSR bit7 `REF_CLK_SEL=1` ref-clock select were all already
+  correct — the earlier "PHY RX path / `ANLPAR=0` / scope the REF_CLK"
+  diagnosis was a red herring (a bad cable plus the DTCM starvation).
   Re-validated end-to-end: DHCP lease `192.168.10.137` (server-side dnsmasq lease
   + ARP `REACHABLE`).
+
+  **Silicon-verified on E1M-AEN803 (bench run 202)** narrower follow-up: pin
+  only the Ethernet-owned buffers into SRAM0 instead of moving all of main
+  RAM, which is slower than DTCM for everything that is not Ethernet-DMA
+  traffic and intermittently broke the ISP — the descriptor rings via the
+  ethernet node's `memory-region` DT property, and the net_buf pool via
+  `CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION` relocating
+  `subsys/net/ip/net_pkt.c` — while main RAM stays on DTCM. Bench run 202
+  re-ran `aen-ethernet-link` (`b240f01cb`) on E1M-AEN803 with this exact
+  mechanism: DHCP lease `192.168.10.123`, `PHY link UP after 2000 ms`, host
+  ping 5/5 (avg 0.271 ms), neighbour `REACHABLE`, and the live descriptor
+  rings resolved into `net_buf_data_rx/tx_bufs` (both in SRAM0) while
+  `_kernel` and main RAM stayed on DTCM. E1M-AEN801 is build-verified only
+  (same E8 memory map, not itself benched); aen-evk-demo's use of this same
+  mechanism (sharing its 64 KiB SRAM0 window with separate JPEG buffers) is
+  build-verified only, not benched. An earlier, different prototype of the
+  same placement idea ran on silicon in scratch bench run 200, but that
+  scratch used a different app-level relocation, `CONFIG_NOCACHE_MEMORY=y`,
+  and different ring addresses than this mechanism.
 - **Generalizable: any DMA-master block needs its buffers in global SRAM.** On the
   E8 M55, any DMA-master block (GMAC, the Ethos-U NPU, the SDHC) needs its
   DMA-visible buffers in global **SRAM0/SRAM1**, never the default DTCM.
@@ -579,10 +631,10 @@ secure-boot verification — always write both consistent blobs.
 | J-Link `Could not connect to the target device` (Alif part device) | For **read/attach/RAM-run** use the generic `-device Cortex-M55` (attaches to the live core). For **MRAM flash** (flow D) the `AE822FA0E5597LS0_M55_HE` part device is required — it unlocks the built-in MRAM loader (J-Link V9.46+ DLL) (§ Flow D). |
 | Link error `region FLASH overflowed` on a RAM-run app | The overlay used `zephyr,flash = <&itcm>` — use the path-reference form `&itcm` (else `FLASH_SIZE=0`). |
 | I2C2 probe times out (`-ETIMEDOUT`) | Bus stuck — pads not driving. Add the I2C pinctrl pad config (§3): `input-enable` + `bias-pull-down`; run at 100 kHz. |
-| I2C2 clean NACKs but no device ACKs | The pinctrl is missing **`input-enable`** (REN) so the controller can't sense SDA, or it used `bias-pull-up` (DSC=1) instead of `bias-pull-down` (DSC=2). Match Alif's reference (§3) — then the EEPROM ACKs at 0x50. |
+| I2C2 clean NACKs but no device ACKs | The pinctrl is missing **`input-enable`** (REN) so the controller can't sense SDA, or it used `bias-pull-up` (DSC=1) instead of `bias-pull-down` (DSC=2). Match Alif's reference (§3) — then the EEPROM ACKs at 0x50 (and its second device-select header at 0x58 — same part, not a second device). |
 | `spi_transceive` returns `-116` (TX FIFO full, no SCLK) | SoC master-mode not set — `CLKCTRL_PER_SLV.SSI_CTRL` (`0x4902F028`) per-instance master bit. The alp-sdk driver sets it in init (PR #162); if you forked the driver, replicate it. |
 | `spi_transceive` returns `-EINVAL` with no register programming | No `clock-frequency` for the BAUDR divider and the alif clock controller has no `get_rate`. Set `clock-frequency` on the SPI node (§3). |
-| Ethernet links but never gets a lease / no traffic | GMAC DMA descriptor rings + net_buf pool are in the M55 **DTCM** (`zephyr,sram = &dtcm`), off the DMA bus. Move them to global SRAM0: `zephyr,sram = &sram0` + `CONFIG_DCACHE=n` (§3). Applies to any DMA-master block (GMAC/NPU/SDHC). |
+| Ethernet links but never gets a lease / no traffic | GMAC DMA descriptor rings + net_buf pool are in the M55 **DTCM** (`zephyr,sram = &dtcm`), off the DMA bus. Narrower fix, **silicon-verified on E1M-AEN803** (bench run 202: DHCP lease + ping, rings/pools in SRAM0, main RAM on DTCM) — build-verified only on AEN801: give the ethernet node a `memory-region` (default: `&sram0`, set by the SoC dtsi) + enable `CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION` + `CONFIG_DCACHE=n` (§3), main RAM stays on DTCM. Older whole-RAM fix: `zephyr,sram = &sram0` + `CONFIG_DCACHE=n` — but do NOT combine it with a `memory-region` still pointing at the same `&sram0` node: `zephyr/CMakeLists.txt` now FATAL_ERRORs on that combination (aliases main RAM on top of the relocated buffers with no linker warning); delete the `memory-region` property first if you go this route. Applies to any DMA-master block (GMAC/NPU/SDHC). |
 | I2S TX never clocks out / PDM `dmic_read` → `-EAGAIN` (FIFO=0) | The CGU master **76.8 MHz** source and (for the HP PDM) the `EXPMST0_CTRL` IPCLK/PCLK force bits are not set. These are now enabled by the Tier-1.5 clockctrl west-patch (`west patch apply`; §3) on `clock_control_on()` — confirm the patch is applied. The 76.8 MHz oscillator itself is SE-managed, so the PDM may also need the `se_services`/MHU clock request even with the CGU bit set. |
 | I2S sample rate looks wrong (pitch off) | The `I2Sx_CTRL` `CKDIV` divider the clockctrl `.set_rate` programs is **BENCH-UNVERIFIED** (field layout from the Alif `i2s_sync` reference, not the DFP/TRM). Confirm the divider width/position + N-vs-(N-1) convention against the Alif DFP/TRM; the hunk is separable in the patch so it can be held. |
 | **LPRTC** (`snps,dw-apb-rtc`, Tier-2) | ✅ PASS (RAM-run, 2026-06-17) | The always-on `lprtc@42000000` free-running 32-bit counter advances (delta 3467 ticks / ~100 ms at 32768 Hz) via the portable Zephyr counter API over the vendored `counter_dw_rtc` driver. `counter_start` returns `-EALREADY` → the **VBAT clock-gate is already on** (no `VBAT_LPRTC0_CLK_EN` write needed on the upstream-Zephyr build path). Fixed two driver bugs the link-only check missed: the missing `.get_top_value` (faulted PC=0x0) + `max_top_value`. It is a **counter**, not a calendar RTC — the `alp_rtc_*` calendar shim is still TBD. Example: `examples/aen/aen-rtc-regcheck`. |

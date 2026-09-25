@@ -270,6 +270,19 @@ def _check_constraints(template_id: str, spec: dict[str, Any], value: Any) -> No
         raise ParameterError(
             f"{template_id}: {spec['name']}={value!r} not in "
             f"{constraints['enum']}")
+    for bound in ("minimum", "maximum"):
+        if bound not in constraints:
+            continue
+        # `minimum`/`maximum` only make sense for a numeric (integer)
+        # value -- on string/enum a bare `<`/`>` raises TypeError on a
+        # schema-VALID catalog record (#1916), and on boolean it silently
+        # never fires (bool < int never raises) but is still meaningless.
+        # Refuse with a curated error instead of crashing or no-opping.
+        if spec["type"] != "integer":
+            raise ParameterError(
+                f"{template_id}: {spec['name']}={value!r} is type "
+                f"{spec['type']!r}; constraints.{bound} "
+                f"({constraints[bound]}) only applies to type 'integer'")
     if "minimum" in constraints and value < constraints["minimum"]:
         raise ParameterError(
             f"{template_id}: {spec['name']}={value!r} < minimum "
@@ -830,7 +843,7 @@ def _derive_pin_doc_renames(
     entry's `doc:` field to the TARGET route's own `doc:` (issue #876
     review MAJOR 2) -- a renamed pin's `doc:` otherwise keeps
     describing the SOURCE board's physical pad/electricals (e.g.
-    e1m-evk's encoder-switch doc names a PEC12R-4222F-S0024 debounce
+    e1m-evk's encoder-switch doc names a PEC11R-4215K-S0024 debounce
     network; e1m-x-evk's own doc for the same role describes a
     different part with RC debounce), which is actively wrong prose
     once the pad itself has changed -- the same "copy the target's
@@ -1781,7 +1794,7 @@ def validate(
             dst.write_bytes(src.read_bytes())
 
         outdir = tmp / "twister-out"
-        env = os.environ.copy()
+        env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
         env["ZEPHYR_BASE"] = zephyr_base
         # CMakeLists.txt resolves ALP_SDK_ROOT from this env var when set
         # (see examples/*/CMakeLists.txt) -- required here since the temp
@@ -1808,7 +1821,7 @@ def validate(
             "--outdir", str(outdir),
         ]
         proc = subprocess.run(
-            cmd, cwd=tmp, env=env, capture_output=True, text=True, check=False)
+            cmd, cwd=tmp, env=env, capture_output=True, text=True, encoding="utf-8", check=False)
         passed_count = _count_passed(outdir)
         return ValidateResult(
             template_id=template_id,

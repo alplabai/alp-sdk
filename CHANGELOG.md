@@ -7,6 +7,34 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.17.0 candidate
 
+### Fixed — `cc3501e_ble_enable()` honours the caller's timeout instead of flooring it to 90 s
+
+`cc3501e_ble_enable()` raised any budget below `CC3501E_BLE_ENABLE_WINDOW_MS`
+(90000 ms) to that value before polling. All three in-tree callers pass 30000,
+so every one of them silently waited three times as long as it asked, and that
+is where `alplabai/cc3501e-bridge-firmware#82`'s headline reading comes from:
+`ble enable failed (-4)` after **90.5 s** against a `CC3501E_BLE_ENABLE_TIMEOUT_MS`
+of 30000 — the floor plus one attempt, not a device still working. The comment
+above the define described a 30 s floor; the value had been 90000 since it was
+introduced.
+
+The floor's premise — a BLE-controller cold-init that "can take ~10-15 s" — does
+not match the silicon. Bench-measured on an E1M-AEN801 at `fw 0.6.0 (wire 3.1)`,
+a cold `ble enable` on a fresh boot completes in **0.67 s** end to end and a
+repeat completes at the measurement floor (0.20 s). `cc3501e-bridge-firmware#112`
+separately removed the two pointless bridge-SPI teardowns an already-enabled
+`BLE_ENABLE` was doing, which is what made the operation take minutes.
+
+`@p timeout_ms` is now the budget, as the parameter always claimed to be. No
+wire change, no ABI change.
+
+**Known limitation, unchanged by this fix, fixed separately by #1953:**
+`poll_by_repeat()`'s budget counted only the back-off sleeps it performs, not the
+time spent inside each attempt, so `timeout_ms` was a floor on wall time rather
+than a bound. Fixing that needed a portable monotonic millisecond clock, and
+`chips/cc3501e/*.c` is deliberately OS-agnostic (no Zephyr/vendor headers) so it
+had none available -- see the new `alp_uptime_ms()` entry below.
+
 ### Changed — CC3501E wire protocol 7 to 8: request identity for every worker-routed opcode
 
 **HELD: needs `cc3501e-bridge-firmware` v0.6.0 (protocol 8) to be released and a
@@ -216,7 +244,7 @@ big-endian into a 16-bit frame puts exactly the same bits on the wire as two
 8-bit frames — the peer cannot tell the difference, and no firmware change is
 needed on the other end.
 
-Measured on E1M-AEN801 (`e1m-aen-evk-01`), 512 x 4092 B framed and ACKed over the
+Measured on an E1M-AEN801 AEN EVK bench unit, 512 x 4092 B framed and ACKed over the
 CC3501E bridge: **912 KB/s -> 1139 KB/s**, reproducible to within 30 us across
 runs, with `RESULT PASS: cc3501e link stable over 20 soak PINGs (ping_fail=0)`.
 
@@ -1787,7 +1815,7 @@ preflight and by-eye DPIDR comparison, then flash immediately with the
 same selector, then re-read after any re-plug or intervening
 invocation. The `CHANGELOG.md:1727-1731` citation for the V2N CM33 DAP
 measurement — a line range that shifts every release — is replaced
-with the `e1mx-v2n-m1-01` probe table under CHANGELOG.md's "### Fixed
+with the V2N bench unit's probe table under CHANGELOG.md's "### Fixed
 — Flow C wrote and executed on a target it never identified (#1312)"
 heading (a heading, not a line number, since CHANGELOG line numbers
 shift every release just as the citation being replaced did),
@@ -1832,7 +1860,7 @@ unattested-`0x0BE12477` claim still stands, uncorrected, in:
   — fix the source, not this file)
 - `metadata/chips/gd32_swd.yaml:49` (`target_expected_idcode:
   "0x6BA02477"`)
-- `docs/bring-up-aen.md:87` (calls `0x6BA02477` "the generic ...
+- `docs/bring-up-aen.md:111` (calls `0x6BA02477` "the generic ...
   [value] this repo reads for the GD32/Cortex-M33")
 - `docs/superpowers/specs/2026-06-01-gd32-flash-release-design.md:34,84,160,187`
 - `docs/superpowers/plans/2026-06-01-gd32-flash-release.md:544,703`
@@ -2256,7 +2284,7 @@ when nothing else works. Its copy-pasteable snippet `abort()`ed unless the SW-DP
 IDCODE equalled `GD32_SWD_EXPECTED_IDCODE` (`0x6BA02477`), and told the reader a
 mismatch "means mis-wiring or a non-G5x3 part".
 
-The bench measures otherwise. Both on place `e1mx-v2n-m1-01`
+The bench measures otherwise. Both on the V2N bench unit
 (`scripts/bench/aen/bench-env.sh`): the GD32 bridge answers `0x0BE12477`, and
 `0x6BA02477` is the **V2N CM33 DAP** — whose measurement also reported `Found
 Cortex-M33 r0p4`, not the `r0p1` the constant's comment claims. On those
@@ -5934,7 +5962,7 @@ Also removed:
 **The DPIDR contradiction is carried forward, not dropped** — and it is worse
 than the "two unmeasured candidates" #1439 described.
 `metadata/chips/gd32_swd.yaml:49` arms the GD32 wrong-board guard with `0x6BA02477`, which `CHANGELOG.md` records as a
-measurement of the **V2N CM33 DAP** on `e1mx-v2n-m1-01` (`Found SW-DP with ID
+measurement of the **V2N CM33 DAP** on a V2N bench unit (`Found SW-DP with ID
 0x6BA02477`, `Found Cortex-M33 r0p4` — also contradicting the `r0p1`
 annotation). Filed as #1440; needs one reading on a GD32 with a probe attached.
 No value was picked here.
@@ -7304,7 +7332,7 @@ channel mask is the wrong shape: the CM33 configures DMAC0 by writing FSP config
 structs directly, so there is no DT-expressible partition to publish on that
 side.
 
-**Confirmed on the live board** (`e1mx-v2n-m1-01`, 2026-08-08), which is what
+**Confirmed on the live board** (a V2N bench unit, 2026-08-08), which is what
 the ADR needed to assert the mitigation still holds:
 
 ```
@@ -7363,7 +7391,7 @@ captured out of `PIPESTATUS[0]` so the failure message can report it.
 `zephyr.bin` remains the assertion: it is the artefact every downstream flow
 consumes, and it is absent for every failure mode, not just a configure error.
 
-Verified on `e1m-aen-evk-01`'s gateway, both directions:
+Verified on an AEN EVK bench unit's gateway, both directions:
 
 ```
 FAILING app:     EXIT=1   BUILD FAILED: no zephyr.bin at .../aen-analog-validate/... (west exit 1)
@@ -7567,11 +7595,11 @@ now that all three probes are known:
 
 | probe | SW-DP IDR | place |
 |---|---|---|
-| AEN E8 | `0x4C013477` | `e1m-aen-evk-01` |
-| GD32 bridge | `0x0BE12477` | `e1mx-v2n-m1-01` |
-| V2N CM33 DAP | `0x6BA02477` | `e1mx-v2n-m1-01` |
+| AEN E8 | `0x4C013477` | an AEN EVK bench place |
+| GD32 bridge | `0x0BE12477` | a V2N bench unit |
+| V2N CM33 DAP | `0x6BA02477` | a V2N bench unit |
 
-`V2N_CM33_DPIDR` is new, measured on `e1mx-v2n-m1-01` — `Found SW-DP with ID
+`V2N_CM33_DPIDR` is new, measured on a V2N bench unit — `Found SW-DP with ID
 0x6BA02477`, `Found Cortex-M33 r0p4`. That core answers on **SWD, not JTAG**.
 
 ### Fixed — the new J-Link guard tests reddened `python-smoke (windows-latest)` on every PR
@@ -7720,7 +7748,7 @@ the parametrised checks cannot silently cover nothing.
 
 ### Fixed — a failed J-Link connect was reported as an empty RAM console (#1318)
 
-Found by an end-to-end Flow C run on the physical `e1m-aen-evk-01` bench.
+Found by an end-to-end Flow C run on a physical AEN EVK bench unit.
 `scripts/bench/aen/ram-run.sh` printed its normal header and an empty
 console block:
 
@@ -10311,7 +10339,7 @@ maps over the SAME physical App MRAM (`mram_storage@80000000`,
 `slot0_partition` at offset `0x10000`), so a dual-core project's `west
 flash` (or a hand-assembled two-entry ATOC) wrote two images to one
 `mramAddress` and the second silently overwrote the first — bench-confirmed
-on `e1m-aen-evk-01`: an `m55_hp` build and an `m55_he` build both resolved
+on an AEN EVK bench unit: an `m55_hp` build and an `m55_he` build both resolved
 to `mramAddress 0x80010000` in their staged ATOC. Decided layout (deferring
 OTA rather than shrinking either slot, since a swap-sized secondary slot on
 both cores would break the ~2.6 MiB NPU MRAM-model budget; every
@@ -12202,7 +12230,7 @@ second walk of the same tree.
 compiled devicetree, not that it was instantiated. A board whose overlay
 aliases `alp-<periph>N` to a disabled node passed the guard and then failed
 to link against a `struct device` that was never created (bench-confirmed on
-E1M-AEN801, `e1m-aen-evk-01`). `src/zephyr/v2n_power_mgmt.c:56` already used
+an E1M-AEN801 AEN EVK bench unit). `src/zephyr/v2n_power_mgmt.c:56` already used
 the correct guard, `DT_NODE_HAS_STATUS(..., okay)`, and is the reference this
 fix matches.
 

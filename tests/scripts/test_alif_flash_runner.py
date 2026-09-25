@@ -192,6 +192,22 @@ def test_select_app_shape_vector_in_sibling_window_raises() -> None:
         alif_flash._select_app_shape(0x802b0000, "HE")
 
 
+def test_select_app_shape_vector_in_a32_window_margin_raises() -> None:
+    # scripts/aen_atoc.SLOT0_WINDOWS['A32_0'] (0x80002000..0x80578000)
+    # covers a margin above M55_HP's ceiling (0x80550000) that belongs to
+    # neither M55 window. Regression guard: this Zephyr-only runner must
+    # still refuse a vector landing in that margin, not silently mis-map
+    # it onto M55_HP's window base -- this is the gap the else-branch's
+    # old 'HE'-or-else-'HP' ternary left open the moment SLOT0_WINDOWS
+    # grew a third key. #1981 review: A32_0 is now excluded from this
+    # runner's window lookup entirely (it never stages an A32 image), so
+    # the refusal is the plain "outside every declared slot0 window"
+    # message, not an A32-specific one that used to mislabel a genuine
+    # M55 mis-link as "staged by a different flash path".
+    with pytest.raises(RuntimeError, match="outside every declared slot0 window"):
+        alif_flash._select_app_shape(0x80560000, "HP")
+
+
 def test_select_app_shape_vector_at_he_window_returns_unchanged_address() -> None:
     # HE keeps the pre-#1069 address unchanged (#1069 decided layout).
     shape = alif_flash._select_app_shape(0x80011F15, "HE")

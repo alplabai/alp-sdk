@@ -14,6 +14,17 @@
  * poll-by-repeat over the bridge like the Wi-Fi getters.  v1 is
  * IPv4-only; addresses are 4 octets in network (big-endian) order.
  *
+ * @note **Handles carry the link epoch, and `timeout_ms` does not bound a
+ *       recovery (issue #2126).**  A handle's upper byte is the link epoch it
+ *       was opened under, so print it as `0x%04x` and mask with `& 0xFF`
+ *       before comparing it against a firmware-side number.  After the driver
+ *       warm-resets a wedged bridge, every handle from before that reset fails
+ *       closed with `ALP_ERR_NOT_READY` instead of addressing whichever socket
+ *       now holds that number; open new ones.  A call that fails with nothing
+ *       decoded off the wire can also run ~12-18 s of probing plus ~3.5 s of
+ *       reset past its own @p timeout_ms before returning -- see
+ *       `CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER`.
+ *
  * SERVING (protocol v9).  @ref cc3501e_sock_bind + @ref cc3501e_sock_listen
  * turn a socket into a passive one so an application on the host can serve
  * over the module's own soft-AP -- an embedded web console on a product with
@@ -40,7 +51,7 @@
  * {
  *         alp_cc3501e_sock_accepted_evt_t ev;
  *         if (opcode != ALP_CC3501E_EVT_SOCK_ACCEPTED) return;
- *         if (cc3501e_sock_accepted_decode(payload, len, &ev) != ALP_OK) return;
+ *         if (cc3501e_sock_accepted_decode(payload, len, ctx->link_epoch, &ev) != ALP_OK) return;
  *         // ev.handle is a normal socket: recv the request, send the reply,
  *         // then cc3501e_sock_close() it.  The host owns it from here.
  * }
@@ -180,6 +191,13 @@ cc3501e_sock_listen(cc3501e_t *ctx, uint16_t handle, uint8_t backlog, uint32_t t
  *
  * @param payload  Event payload bytes as delivered to the callback.
  * @param len      Payload length as delivered to the callback.
+ * @param epoch    The bridge ctx's CURRENT @c link_epoch (issue #2126) --
+ *                 encoded into @p out's @c listen_handle and @c handle, the
+ *                 same as every OTHER fresh firmware handle this driver
+ *                 hands out (see cc3501e_sock_open()). Pass @c fw->link_epoch
+ *                 (the ctx this event's companion was registered on); a
+ *                 mismatched or stale value here would make cc3501e_sock_recv()
+ *                 etc. refuse handles this call just minted.
  * @param out      Receives the decoded event.
  * @return ALP_OK on success; ALP_ERR_INVAL if @p payload or @p out is NULL, or
  *         @p len is shorter than the event (a truncated entry -- do not use
@@ -187,24 +205,76 @@ cc3501e_sock_listen(cc3501e_t *ctx, uint16_t handle, uint8_t backlog, uint32_t t
  */
 alp_status_t cc3501e_sock_accepted_decode(const uint8_t                   *payload,
                                           size_t                           len,
+                                          uint8_t                          epoch,
                                           alp_cc3501e_sock_accepted_evt_t *out);
 
 /**
  * @brief Send bytes on a socket (SOCK_SEND, opcode 0x22).
  *
- * Queues @p len bytes on the socket and reports how many the stack accepted in
- * @p sent_out.  @p len is bounded by one frame
- * (<= ALP_CC3501E_MAX_PAYLOAD - 8, the send-header size); larger buffers must be
- * split by the caller.  Worker-routed poll-by-repeat.
+ * Queues @p len bytes on the socket, re-issuing the remainder as its own
+ * short transaction until every byte is queued or @p timeout_ms elapses --
+ * the firmware's SOCK_SEND is non-blocking (MSG_DONTWAIT), so a full peer
+ * receive buffer reports 0 bytes queued rather than blocking, and a short
+ * queue is the normal outcome under backpressure, not an edge case. @p len is
+ * bounded by one frame (<= ALP_CC3501E_MAX_PAYLOAD - 8, the send-header
+ * size); larger buffers must be split by the caller.  Worker-routed
+ * poll-by-repeat, looped.
+ *
+ * If a frame's own attempt times out while the firmware may genuinely have
+ * accepted it and not finished, this function does not simply abandon it:
+ * it re-polls that SAME frame for a short additional bounded grace to
+ * collect the outcome before giving up (this grace is NOT entered for a
+ * lock-acquire timeout on the very first attempt -- that means no frame
+ * reached the bridge at all, an unambiguous @c ALP_ERR_BUSY returned
+ * directly). Without the grace, the bridge's single worker slot could hand
+ * an abandoned-but-later-completed job to the NEXT, unrelated call instead;
+ * a bridge with cc3501e-bridge-firmware#107 (PR #134) discards such a job
+ * once a different-seq request arrives, so a later call is never handed a
+ * stale count, but that job's
+ * bytes were still queued -- this grace is the only way left to learn how
+ * many. If even the grace expires, @p sent_out is a LOWER BOUND, not an
+ * exact count, and the socket's stream position from here on is UNKNOWN:
+ * do not resume from a lower bound -- retrying assuming it is exact
+ * duplicates bytes the bridge already queued. Close the socket instead. If
+ * the grace instead collects a genuine, definitive non-OK status (e.g. a
+ * decoded device-side error), that status is returned directly -- but
+ * @p sent_out is NOT exact even then: the bridge's own lwIP stack can queue
+ * bytes and still fail the send afterwards (tcp_write() succeeding, a later
+ * tcp_output() returning an error), so a decoded device error on THIS frame
+ * means @p sent_out only covers the earlier, already-collected frames, this
+ * frame's own byte count is unknowable, and the stream position from here on
+ * is just as unknown as the lower-bound case above -- close the socket
+ * instead of resuming.
  *
  * @param ctx         Initialised driver context.
  * @param handle      Socket handle from @ref cc3501e_sock_open.
  * @param data        Payload bytes to send.
  * @param len         Number of bytes in @p data.
- * @param sent_out    Receives the accepted byte count (may be NULL).
- * @param timeout_ms  Upper bound on the send poll budget.
- * @return ALP_OK once queued; ALP_ERR_INVAL if @p len exceeds one frame;
- *         ALP_ERR_NOT_READY on the stub build; mapped error otherwise.
+ * @param sent_out    Receives the TOTAL accepted byte count across every
+ *                    iteration (may be NULL) -- @p len on ALP_OK; on
+ *                    ALP_ERR_TIMEOUT, an EXACT partial count if the last
+ *                    in-flight frame's outcome was collected (see above), or
+ *                    a LOWER BOUND -- safe only to report, NOT to resume
+ *                    from -- if even the collection grace expired; on a
+ *                    decoded device error, covers only the earlier frames
+ *                    already collected -- the failing frame's own count is
+ *                    unknowable (the bridge's lwIP stack can queue bytes and
+ *                    still fail the send), so treat it like the LOWER BOUND
+ *                    case: safe to report, not to resume from.
+ * @param timeout_ms  Upper bound on the total send budget, across every
+ *                    iteration -- may be modestly exceeded by one bounded
+ *                    collection grace (see above) to avoid leaving a job
+ *                    uncollected.
+ * @return ALP_OK only once all @p len bytes are queued; ALP_ERR_TIMEOUT with
+ *         @p sent_out as described above if the budget (plus at most one
+ *         grace) elapses first -- only resume sending from an EXACT
+ *         @p sent_out; a LOWER BOUND means the stream position is unknown,
+ *         so close the socket instead; ALP_ERR_BUSY if a transport-lock
+ *         timeout on the very first attempt meant nothing was sent;
+ *         ALP_ERR_IO if a decoded reply's queued-byte count is malformed;
+ *         ALP_ERR_INVAL if @p len exceeds one frame; ALP_ERR_NOT_READY on
+ *         the stub build; mapped error otherwise, with @p sent_out again only
+ *         a LOWER BOUND -- close the socket, do not resume.
  */
 alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
                                uint16_t       handle,
@@ -216,11 +286,20 @@ alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
 /**
  * @brief Receive bytes from a socket (SOCK_RECV, opcode 0x23).
  *
- * Requests up to @p cap bytes from the socket's receive queue into @p buf.  A
- * zero-length result (@p recv_len_out set to 0 with ALP_OK) means no data was
- * available within the firmware's receive window, or the peer closed the
- * connection -- the caller polls again to distinguish (or stops on a subsequent
- * zero after a close).  Worker-routed poll-by-repeat over the bridge.
+ * Requests up to @p cap bytes from the socket's receive queue into @p buf.
+ * What a zero-length result (@p recv_len_out set to 0 with ALP_OK) MEANS
+ * depends on which bridge is on the other end of the link:
+ *   - Against v0.8.0 (`prebuilt/cc3501e-v0.8.0.bin`, what `prebuilt/`
+ *     actually publishes today, predates cc3501e-bridge-firmware#140):
+ *     zero is AMBIGUOUS -- no data was available within the firmware's
+ *     receive window, or the peer closed the connection. The caller polls
+ *     again to distinguish (or stops on a subsequent zero after a close).
+ *   - Against a bridge carrying #140 (merged to `main`; cut as v0.9.0 but
+ *     not yet released or bench-verified): EOF is sticky on the worker
+ *     path and a reset is reported on the ring socket, so a zero-length
+ *     result is UNAMBIGUOUS -- it means the peer actually closed. No
+ *     poll-again dance is needed.
+ * Worker-routed poll-by-repeat over the bridge.
  *
  * @param ctx           Initialised driver context.
  * @param handle        Socket handle from @ref cc3501e_sock_open.

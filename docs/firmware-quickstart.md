@@ -32,8 +32,8 @@ own quickstart.
 | If your hardware is...                      | `som.sku` to declare | Board default     | One-pager                                         | Bring-up doc | Reference examples |
 |---------------------------------------------|----------------------|---------------------|---------------------------------------------------|--------------|---------------------|
 | E1M-AEN3..801 SoM on E1M EVK                | `E1M-AEN801` (etc.)  | `E1M-EVK`           | [`docs/soms/aen.md`](soms/aen.md)                 | [`docs/bring-up-aen.md`](bring-up-aen.md) | `examples/peripheral-io/gpio-button-led`, `i2c-scanner`, `rtc-clock`, `hello-world` |
-| E1M-X V2N101 / V2N102 SoM on E1M-X-EVK      | `E1M-V2N101`         | `E1M-X-EVK`         | [`docs/soms/v2n.md`](soms/v2n.md)                 | [`docs/bring-up-v2n.md`](bring-up-v2n.md) | `examples/v2n/v2n-gd32-bridge-ping`, `v2n-board-id-readout`, `v2n-ethernet-dual`, `dac-waveform` |
-| E1M-X V2N-M1 (V2M101 / V2M102) SoM          | `E1M-V2M101`         | `E1M-X-EVK`         | [`docs/soms/v2n-m1.md`](soms/v2n-m1.md)           | [`docs/bring-up-v2n-m1.md`](bring-up-v2n-m1.md) | DEEPX bring-up delta on top of V2N |
+| E1M-X V2N101 / V2N102 / V2N103 SoM on E1M-X-EVK | `E1M-V2N101`     | `E1M-X-EVK`         | [`docs/soms/v2n.md`](soms/v2n.md)                 | [`docs/bring-up-v2n.md`](bring-up-v2n.md) | `examples/v2n/v2n-gd32-bridge-ping`, `v2n-board-id-readout`, `v2n-ethernet-dual`, `dac-waveform` |
+| E1M-X V2N-M1 (V2M101 / V2M102 / V2M103) SoM | `E1M-V2M101`         | `E1M-X-EVK`         | [`docs/soms/v2n-m1.md`](soms/v2n-m1.md)           | [`docs/bring-up-v2n-m1.md`](bring-up-v2n-m1.md) | DEEPX bring-up delta on top of V2N |
 | E1M-NX9101 (NXP i.MX 93)                    | `E1M-NX9101`         | `E1M-EVK`           | [`docs/soms/imx93.md`](soms/imx93.md)             | [`docs/getting-started.md`](getting-started.md) §4-5 | same cross-family examples as AEN |
 
 The per-SoM one-pager covers what's populated, which examples
@@ -54,7 +54,7 @@ modules.
 You'll also need `tan`, the standalone Python planner and build executor -- a
 separate public repo, not installed by `bootstrap.sh`. As of `tan-cli`
 [v0.5.0](https://github.com/alplabai/tan-cli/releases/tag/v0.5.0) (current
-release: [v0.5.1](https://github.com/alplabai/tan-cli/releases/tag/v0.5.1)),
+release: [v0.6.0](https://github.com/alplabai/tan-cli/releases/tag/v0.6.0)),
 the published installer (`install.sh`/`install.ps1`) installs the real Python
 `tan` directly -- it no longer resolves the frozen Rust v0.4.1 release. This
 guide instead installs from `tan-cli`'s `dev` branch in a Python 3.12+ venv,

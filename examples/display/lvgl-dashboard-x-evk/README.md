@@ -15,7 +15,7 @@ A minimal LVGL 9 dashboard on the E1M-X V2N MIPI-DSI panel
   is reachable from Linux (see note below).
 - The example is intentionally board-specific (`som.sku: E1M-V2N101`);
   any V2x SKU works -- the PCB and panel path are the same across
-  V2N101 / V2N102 / V2M101 / V2M102.
+  V2N101 / V2N102 / V2N103 / V2M101 / V2M102 / V2M103.
 
 ## Hardware needed
 

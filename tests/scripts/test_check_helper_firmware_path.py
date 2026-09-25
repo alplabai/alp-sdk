@@ -1,5 +1,6 @@
 """Unit tests for scripts/check_helper_firmware_path.py (issue #1372)."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -10,14 +11,15 @@ SCRIPT = REPO / "scripts" / "check_helper_firmware_path.py"
 
 def _run(*args, **kw):
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, **kw,
+        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, encoding="utf-8",
+        env={**(kw.pop("env", None) or os.environ), "PYTHONIOENCODING": "utf-8"}, **kw,
     )
 
 
 def _write_preset(tmp_path: Path, sku: str, body: str) -> None:
     d = tmp_path / "metadata" / "e1m_modules"
     d.mkdir(parents=True, exist_ok=True)
-    (d / f"{sku}.yaml").write_text(f"sku: {sku}\n{body}")
+    (d / f"{sku}.yaml").write_text(f"sku: {sku}\n{body}", encoding="utf-8")
 
 
 def test_empty_tree_passes(tmp_path):

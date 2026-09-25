@@ -41,37 +41,42 @@ on_module:
   # metadata/e1m_modules/E1M-AEN801.yaml + metadata/chips/dp83825.yaml for
   # the bench evidence and the order-code caveat (#1241 "Blocked on").
   ethernet_phy:         dp83825
-  # OSPI-bus external memories.  NOT POPULATED on any currently shipping AEN
-  # SKU -- `assembled: false` on all three entries below, and `memory:` further
-  # down reads 0/0 to match.  Boot and app storage run from on-die MRAM only;
-  # the generated board DTS, zephyr/kconfigs/vendor-alif-peripherals.kconfig,
-  # docs/bring-up-aen.md and examples/aen/aen-ospi-regcheck already say so.
-  # What survives here is the DESIGN -- which controller, which chip-select,
-  # and the part each footprint was drawn around -- so a populated BOM variant
-  # would flip one flag rather than re-derive the bus.  `capacity_mbit` is that
-  # designed-in part's capacity, NOT a capacity this module carries.
+  # Both OSPI0 devices below share the single OSPI0 octal bus, separated
+  # only by chip-select. Per metadata/e1m_modules/E1M-AEN801.yaml (the
+  # E1M-AEN-2626-R2 netlist -- one shared PCB across the family, so PCB
+  # routing does not change with SoC tier or population): U9 (RAM
+  # footprint) -> OSPI0_SS0 => CS0; U10 (NOR footprint) -> OSPI0_SS1 => CS1.
   ospi_memories:
     ospi0:
       chip:           MX25UM25645GXDI00   # Macronix OctaFlash (xSPI NOR)
-      assembled:      false               # NOT populated on any SKU
-      capacity_mbit:  256                 # 256 Mbit (32 MiB) if ever fitted
-      chip_select:    0                   # OSPI0 CS0
+      assembled:      optional            # BOM variant
+      capacity_mbit:  256                 # 256 Mbit (32 MiB)
+      chip_select:    1                   # OSPI0 CS1 -- U10 -> OSPI0_SS1 per the R2 netlist
       role:           app_storage
     ospi1:
       chip:           TBD            # OSPI1 controller unused on this SoM: both OSPI devices
-      assembled:      false          # would share the OSPI0 octal bus (NOR = CS0, HyperRAM = CS1)
+      assembled:      optional       # share the OSPI0 octal bus (HyperRAM = CS0, NOR = CS1)
       capacity_mbit:  TBD
       role:           data_log
-  # External HyperRAM -- volatile XIP / scratch RAM, separate from the NOR
-  # flash above.  NOT POPULATED either: it would share the OSPI0 octal
-  # controller with the flash, separated only by chip-select (NOR flash = CS0,
-  # HyperRAM = CS1), but no SKU fits it.
+  # External HyperRAM -- volatile XIP / scratch RAM, separate from the
+  # NOR flash above.  Shares the OSPI0 octal controller with the flash,
+  # separated only by chip-select (HyperRAM = CS0, NOR = CS1).
   hyperram:
     chip:           W958D8NBYA5I    # Winbond OctalRAM (HyperBus)
-    assembled:      false           # NOT populated on any SKU
-    capacity_mbit:  256             # 256 Mbit (32 MiB) if ever fitted
+    # UNCONFIRMED, not `true` (round-2 correction, #1990): the prior
+    # `assembled: true` here cited this file's own "populated on every AEN
+    # BOM variant" memory-derivation note as its source -- that note is
+    # boilerplate shared verbatim across the whole AEN family and is
+    # directly falsified by E1M-AEN801.yaml, which shares this SoM's PCB
+    # and the same family invariant yet ships HyperRAM `assembled: false`
+    # (DNI). No BOM, netlist, or bench measurement confirms population on
+    # THIS SKU either way, so `optional` (per-BOM-variant, same shape as
+    # ospi0 NOR above) replaces the unsupported `true`. Do not set this
+    # back to `true` without a per-row source.
+    assembled:      optional
+    capacity_mbit:  256             # 256 Mbit (32 MiB) -- the part, if fitted
     interface:      ospi0
-    chip_select:    1
+    chip_select:    0                 # OSPI0 CS0 -- U9 -> OSPI0_SS0 per the R2 netlist
 
   i2c_devices:
     # HELD, NOT the disproven LPI2C0 claim (#1848, ADR 0017 amended
@@ -93,7 +98,8 @@ on_module:
       devices:
         - { chip: rv3028c7,         role: rtc,             address_7bit: "0x52" }
         - { chip: optiga_trust_m,   role: secure_element,  address_7bit: "0x30" }
-        - { chip: tmp112,           role: temp_sensor,     address_7bit: "0x48" }
+        - { chip: tmp112,           role: temp_sensor,     address_7bit: "0x40",
+            notes: "Address per TI SBOS473L. The BOM's exact orderable MPN TMP112DIDPWR is X2SON (DPW), 5 pins only (SBOS473L p.44) -- no SOT563-6 orderable carries that MPN (those are TMP112AIDRLR / TMP112BIDRLR / TMP112NAIDRLR). Per SBOS473L Table 7-4 the X2SON-5 'Address Variant Only' TMP112D row straps ADD0->GND to 0x40, so 0x40 is the design address for the part this board specifies. Bench agrees on 3 of 3 modules: 0x48 silent, 0x40 answering with the three-of-three TMP112 register fingerprint (CONFIG=0x60a0, T_LOW=0x4b00, T_HIGH=0x5000, the datasheet power-on defaults) and a plausible temperature. The earlier declared 0x48 was an error in this metadata, and it is why the stock CONFIG_TMP112 driver never bound -- the emitted devicetree node sat at an address nothing answers (alp-sdk#1978)." }
     # SoC I2C2, bridge/DNP-selected onto the E1M portable I2C0 pads -- the
     # SoM-manifest EEPROM only, a SEPARATE bus from the trio above (see
     # docs/bring-up-aen.md §5.1: "Two separate buses -- don't assume a
@@ -102,23 +108,28 @@ on_module:
       bus_master: alif-ensemble
       devices:
         - { chip: eeprom_24c128,    role: eeprom,          address_7bit: "0x50" }
+        # SAME PHYSICAL PART as the 0x50 entry above, not a second chip --
+        # the E1M-AEN line is one shared PCB differing only in SoC MPN, so
+        # every AEN SKU carries the same onsemi N24S128C4DYT3G decoding
+        # `1010` -> 0x50 and `1011` -> 0x58 (Secure Data Page / Unique ID /
+        # lock byte / Device Configuration Register).  Listed so the
+        # unclaimed 0x58 ACK doesn't collide with a future part
+        # (alp-sdk#1976).  Measured on E1M-AEN803 serial 2026W36-0003.
+        - { chip: eeprom_24c128,    role: eeprom_identity, address_7bit: "0x58" }
 
 # Off-SoC module memory in the canonical cross-family shape (see
 # som-preset-v1.schema.json `memory:`).  Values are DERIVED from the
 # on_module facts above, never invented:
-#   dram_mbit  <- 0: on_module.hyperram is `assembled: false`.  No AEN SKU
-#                 fits the HyperRAM, so the module carries no external
-#                 volatile memory at all.
-#   flash_mbit <- 0: on_module.ospi_memories.ospi0 (the 256 Mbit NOR) and
-#                 .ospi1 are `assembled: false` too, so there is no external
-#                 non-volatile memory either.  On-die MRAM is NOT counted
-#                 here -- it derives from `silicon_variant:`.
-# 0 is a RESOLVED fact, not a TBD: the population question has an answer (no).
-# Contrast E1M-NX9101, whose capacities are genuinely still unknown and so
-# stay TBD -- a consumer must be able to tell those two states apart.
+#   dram_mbit  <- TBD: on_module.hyperram is `assembled: optional` above --
+#                 whether this SKU's HyperRAM ships fitted is unconfirmed
+#                 (#1990), so a single number would be wrong for the DNI
+#                 variant.
+#   flash_mbit <- TBD: the OSPI0 NOR (256 Mbit) is `assembled: optional`
+#                 (per-BOM variant), so a single number would be wrong
+#                 for the DNI variant.
 memory:
-  dram_mbit:            0
-  flash_mbit:           0
+  dram_mbit:            TBD
+  flash_mbit:           TBD
 
 inference:
   preferred_backend:    ethos_u
@@ -171,13 +182,13 @@ topology:
 # #1289 split. Change one of these only with a reason that is specific to
 # THIS SKU.
 memory_map:
-  - { name: mcuboot,   base: 0x80000000, size_kib: 64,   accessible_from: [m55_he, m55_hp], cacheable: true, carveout: false }
-  - { name: he_slot0,  base: 0x80010000, size_kib: 2688, accessible_from: [m55_he],          cacheable: true, carveout: false }
-  - { name: hp_slot0,  base: 0x802b0000, size_kib: 2688, accessible_from: [m55_hp],          cacheable: true, carveout: false }
-  - { name: reserved,  base: 0x80550000, size_kib: 64,   accessible_from: [m55_he, m55_hp],                  carveout: false }
-  - { name: storage,   base: 0x80560000, size_kib: 96,   accessible_from: [m55_he, m55_hp],                  carveout: false }
-  - { name: atoc,      base: 0x80578000, size_kib: 32,   accessible_from: [m55_he, m55_hp],                  carveout: false }
-  - { name: mram_main, base: "TBD",      size_kib: 5632, accessible_from: [a32_cluster, m55_he, m55_hp], cacheable: true }
+  - { name: mcuboot,   base: 0x80000000, size_kib: 64,   accessible_from: [m55_he, m55_hp], cacheable: true, carveout: false, write_authority: vendor_image }
+  - { name: he_slot0,  base: 0x80010000, size_kib: 2688, accessible_from: [m55_he],          cacheable: true, carveout: false, write_authority: customer_image }
+  - { name: hp_slot0,  base: 0x802b0000, size_kib: 2688, accessible_from: [m55_hp],          cacheable: true, carveout: false, write_authority: customer_image }
+  - { name: reserved,  base: 0x80550000, size_kib: 64,   accessible_from: [m55_he, m55_hp],                  carveout: false, write_authority: none }
+  - { name: storage,   base: 0x80560000, size_kib: 96,   accessible_from: [m55_he, m55_hp],                  carveout: false, write_authority: customer_runtime }
+  - { name: atoc,      base: 0x80578000, size_kib: 32,   accessible_from: [m55_he, m55_hp],                  carveout: false, write_authority: secure_enclave }
+  - { name: mram_main, base: 0x80000000, size_kib: 5632, accessible_from: [a32_cluster, m55_he, m55_hp], cacheable: true, write_authority: composite }
 
 # Inter-core mailbox IP: ARM MHUv2.  The controller token matches alp-sdk's
 # `alif,mhuv2-mbox` Zephyr MBOX driver; endpoint-specific overlays select the

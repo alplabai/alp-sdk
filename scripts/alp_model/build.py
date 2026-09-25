@@ -11,6 +11,8 @@ import hashlib
 import re
 from pathlib import Path
 
+from alp_project_loader import resolve_targets
+
 from .adapters import CompilerAdapter
 from .adapters.cpu import CpuAdapter
 from .adapters.ethos_u import VelaAdapter
@@ -19,7 +21,6 @@ from .adapters.deepx import DeepxAdapter
 from .adapters.executorch import ExecutorchAdapter
 from .manifest import Manifest, Target, Coverage
 from .package import write_package
-from .targets import resolve_targets
 from .tensorio import extract_io
 
 # Default adapter registry. Each is detect-and-skip (is_available() False when

@@ -79,7 +79,10 @@ config ALP_SDK_GPIO_CC3501E_PROXY
 	  e.g. AEN r2's IO21; #1854).  Enable on AEN boards that populate the
 	  route table from the SoM pad map; with the shipped weak EMPTY
 	  tables (and until alp_gpio_cc3501e_attach() is called) every pin
-	  delegates -- a no-op.
+	  delegates -- except the revision-dependent E1M pins (IO8/IO10/IO21),
+	  which are refused with ALP_ERR_NOSUPPORT until a CRC-valid manifest
+	  confirms the module's hw_rev matches CONFIG_ALP_SDK_SOM_HW_REV
+	  (#2144).
 
 config ALP_SDK_MAX_PWM_HANDLES
 	int "Maximum concurrent alp_pwm_t handles"
@@ -194,8 +197,9 @@ config ALP_SDK_STORAGE_ALIF_SECAES
 	  (which defaults ON because that path bench-PASSED,
 	  docs/aen-bench-bringup.md): this one is UNVERIFIED ON SILICON --
 	  no bench unit reachable at implementation time has an OSPI
-	  SecAES-relevant part populated (R2 BOM only; see the file
-	  header).  About eight in-tree AEN examples set
+	  SecAES-relevant part populated (E1M-AEN801 populates neither
+	  external OSPI memory on any revision; see the file header for
+	  which SKU does).  About eight in-tree AEN examples set
 	  CONFIG_HAS_ALIF_SE_SERVICES=y (aen-aipm-read, aen-alp-rpc,
 	  aen-dualcore-doorbell/-ipc/-master/-he-master, aen-rpc-pingpong,
 	  aen-se-service-*), so this stays an opt-in gate -- flipping the

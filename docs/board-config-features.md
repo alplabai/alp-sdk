@@ -278,6 +278,89 @@ Devicetree label of its own. Naming one as `flash_device:` refuses
 with a reason instead of silently decorating a DT label that doesn't
 exist on the board.
 
+Each of those six regions also carries a `write_authority:` value --
+WHO may write the region, and when, a different axis from `carveout:`
+(whether the allocator may land shared memory there). On E1M-AEN301..801,
+`mcuboot` is `vendor_image`, `he_slot0`/`hp_slot0` are `customer_image`,
+`reserved` is `none`, `storage` is `customer_runtime`, and `atoc` is
+`secure_enclave` (`mram_main` is `composite`, spanning all six); see
+`docs/porting-new-som.md`'s "Field rules" section for the full six-value
+enum and the absent-means-unresolved rule.
+
+As of #1365 split B, **`carveout:` is a LEGACY OVERRIDE that must AGREE
+with the derived class, not the only signal the allocator reads.**
+`scripts/alp_orchestrate/carveout.py` (`resolve_carve_outs()`) and
+`scripts/alp_orchestrate/partition.py` (the flash-device resolver) now
+derive a region's class against the SoC's declared on-die MRAM aperture
+(`scripts/alp_orchestrate/aperture.py`, the same math
+`scripts/check_atoc_reservation.py` validates every region against in
+CI): a region CONTAINED in the aperture is `flash` regardless of what
+`carveout:` says, and is refused as an IPC carve-out target
+unconditionally -- no `write_authority:` value makes a contained region
+eligible. A region OUTSIDE the aperture that the SoM preset authored
+itself needs `write_authority: customer_runtime` to land an IPC
+carve-out there. A region the loader DERIVED (SoC-level
+`memory_regions`, or the silicon-variant fallback, e.g. every V2N/V2M/NX9101
+row) needs no authority at all: it is RAM by construction. The legacy
+`carveout:` flag is honoured VERBATIM only where the derivation can't
+resolve an answer -- no aperture declared for this SoC (every non-Alif
+SoM), or the region's own `base:` is unresolved (a `"TBD"` placeholder;
+every AEN preset's `mram_main` used to be the standing example until
+#2053 resolved it, so this fallback has no shipped-preset producer today
+-- see `tests/scripts/test_orchestrate_carveout_aperture_ordering.py`'s
+`TestUnresolvedLegOrdering` for its direct-call coverage) -- which is
+also what keeps every non-Alif SoM's resolution byte-identical to before
+this change. In that fallback,
+`carveout:` decides BEFORE `write_authority:`: when a region's `base:`
+is unresolved and the preset authors both fields, `carveout:` wins (the
+conservative, pre-split-B signal), and `write_authority:` is consulted
+only when `carveout:` is absent. `carveout: false` is
+NOT deprecated or removed by this (doing so would break every existing
+`carveout: false` row and any customer copy of the schema); it becomes
+the fallback answer instead of the primary one, and a `carveout:` value
+that DISAGREES with a resolvable derived class -- `flash`, `ram`, or an
+`unclassified` row's `write_authority`-derived answer -- is a metadata
+bug, refused loudly and naming both facts, not a silently-honoured
+override.
+
+**#2088: `write_authority:` is also enforced, not just derived-from, at
+the `flash_device:` resolution step.** `_resolve_flash_device()`
+(`scripts/alp_orchestrate/partition.py`) refuses a `memory_map:` region
+whose authored `write_authority` is anything other than
+`customer_runtime` or `composite` -- `customer_image`/`vendor_image`/
+`secure_enclave`/`none` name a region something else owns writes to, and
+naming one directly as `flash_device:` is refused with the region, the
+value, and the remedy. An ABSENT `write_authority` on an authored region
+is refused too, but only where an on-die MRAM aperture resolves for the
+SoM (every Alif SoC/variant that declares `soc_flash_base:`) -- mirrors
+`carveout.py`'s own `_region_ipc_eligibility()` gate, which enforces the
+identical rule the same way; a no-op on every non-Alif SoM (V2N/V2M/
+NX9101), none of which author `write_authority` on a derived region in
+the first place. `composite` -- the tag a whole-device alias like
+`mram_main` carries, meaning "consult the contained rows instead" -- is
+not an unconditional pass either: every OTHER `memory_map:` row that
+resolves to an address CONTAINED in the alias's own window must declare
+its own `write_authority`, and together the contained rows must
+CONTIGUOUSLY tile the alias's capacity -- no gap, no overlap -- before
+the alias is accepted; summing sizes is not enough, since an overlap of
+N bytes plus a hole of N bytes sums correctly while the hole itself
+stays unprotected. A resolved row that can't be attributed (a gap none
+of the contained rows cover, or two rows overlapping) refuses the whole
+alias rather than let a `storage:` entry land unprotected in whatever
+band the metadata didn't account for (potentially the
+Secure-Enclave-owned `atoc` window). A row whose base or size DOESN'T
+resolve at all (`atoc`'s `base: "TBD"` before a SoM is HW-mapped is
+exactly this shape) is not immediately fatal on its own: only rows that
+DO resolve are walked for the contiguity check, and an unresolved row
+is named as a candidate ONLY when a gap remains for it to plausibly
+explain. A row whose resolved extent lies OUTSIDE the alias's window is
+not the alias's business and is ignored, so an unrelated device sharing
+the same `memory_map:` list does not block it -- but if that unrelated
+row also confuses `_reserved_spans()`'s own (separate, older) window
+derivation into degrading to zero reserved spans, the alias is refused
+on that basis too: contained rows that verify safe are worthless if
+placement can't actually reserve them.
+
 No AEN SKU has a working `storage[].flash_device:` target today. Neither
 candidate the resolver will accept resolves to a verified DT label:
 
@@ -288,7 +371,7 @@ candidate the resolver will accept resolves to a verified DT label:
   now refuses to emit `status: ok` for an entry on an unverified
   `memory_map:` device -- a `storage:` entry targeting `mram_main` blocks
   with a reason naming the unverified label, not just a fabricated
-  `dt_label`. (`mram_main` is ALSO 100% tiled on all six AEN presets --
+  `dt_label`. (`mram_main` is ALSO 100% tiled on all seven AEN presets --
   `mcuboot` + `he_slot0` + `hp_slot0` + `reserved` + `storage` + `atoc`,
   all `carveout: false`, summing to exactly its own 5632 KiB capacity --
   so on a real preset an entry there blocks on capacity first; the

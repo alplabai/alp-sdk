@@ -1,30 +1,27 @@
 # SPDX-License-Identifier: Apache-2.0
+#
+# Plain C build for the v2n-secure-element-sign demo.  Layered on
+# top of the standard alp-sdk runtime (libalp_sdk.so) + on-board
+# chip drivers (libalp_chips.a), both installed by the Yocto image's
+# meta-alp-sdk layer.  Build inside a Yocto SDK environment that
+# has sourced its environment-setup script (see README.md).
 
 cmake_minimum_required(VERSION 3.20)
-
-if(DEFINED ENV{ALP_SDK_ROOT})
-    set(ALP_SDK_ROOT $ENV{ALP_SDK_ROOT})
-else()
-    get_filename_component(ALP_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../.. ABSOLUTE)
-endif()
-
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
-set(_alp_generated ${CMAKE_BINARY_DIR}/generated/alp.conf)
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${ALP_SDK_ROOT}/scripts/alp_project.py
-            --input ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml
-            --emit zephyr-conf --core m33_sm
-            --output ${_alp_generated}
-    RESULT_VARIABLE _alp_rv
-    OUTPUT_VARIABLE _alp_stdout
-    ERROR_VARIABLE  _alp_stderr
-)
-if(NOT _alp_rv EQUAL 0)
-    message(FATAL_ERROR "alp_project.py failed (rv=${_alp_rv})\nstderr: ${_alp_stderr}")
-endif()
-list(APPEND EXTRA_CONF_FILE ${_alp_generated})
-
-find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(v2n_secure_element_sign LANGUAGES C)
 
-target_sources(app PRIVATE src/main.c)
+if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_C_COMPILER_ID MATCHES "Clang")
+    add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+# libalp_chips.a must link BEFORE libalp_sdk.so so the chip
+# objects' alp_* peripheral callbacks resolve against the shared lib.
+find_library(ALP_SDK_LIB alp_sdk REQUIRED)
+find_library(ALP_CHIPS_LIB alp_chips REQUIRED)
+find_path(ALP_SDK_INC alp/peripheral.h REQUIRED)
+
+add_executable(v2n-secure-element-sign src/main.c)
+
+target_include_directories(v2n-secure-element-sign PRIVATE ${ALP_SDK_INC})
+target_link_libraries(v2n-secure-element-sign ${ALP_CHIPS_LIB} ${ALP_SDK_LIB})
+
+install(TARGETS v2n-secure-element-sign DESTINATION bin)

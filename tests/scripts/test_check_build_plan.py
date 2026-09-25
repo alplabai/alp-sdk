@@ -6,6 +6,7 @@ CLI / alp-sdk-vscode 'Wave C' consumer reads (see #610). These lock the
 emitter <-> contract lockstep and the gate behaviour.
 """
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -22,7 +23,8 @@ from alp_orchestrate import emit_build_plan, load_board_yaml  # noqa: E402
 
 def _run(*args):
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True)
+        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"})
 
 
 def test_schema_is_valid_draft202012():
@@ -183,7 +185,13 @@ def test_generated_output_with_tool_path_rejected_by_gate(monkeypatch):
 
     def _tampered(*args, **kwargs):
         doc = json.loads(real_emit(*args, **kwargs))
-        doc["slices"][0]["command"]["tool"] = "/usr/bin/west"
+        # First slice that actually HAS a command -- not necessarily
+        # index 0: an AEN A32-cluster slice's command is `null` (issue
+        # #1982, `yocto-machine-unbuildable`), so a fixed index 0 can
+        # land on a slice with nothing to tamper.
+        slice_with_cmd = next(
+            s for s in doc["slices"] if s["command"] is not None)
+        slice_with_cmd["command"]["tool"] = "/usr/bin/west"
         return json.dumps(doc)
 
     monkeypatch.setattr(alp_orchestrate, "emit_build_plan", _tampered)

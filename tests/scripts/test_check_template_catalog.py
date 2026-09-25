@@ -8,6 +8,7 @@ gate, including the #448/#520 known-content-quality-gap rule.
 """
 import copy
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -22,7 +23,8 @@ CATALOG = REPO / "metadata" / "templates" / "catalog-v1.json"
 
 def _run(*args):
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True)
+        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"})
 
 
 def _catalog() -> dict:
@@ -292,6 +294,21 @@ def test_unknown_top_level_key_rejected(tmp_path):
 def test_bad_archetype_enum_rejected(tmp_path):
     doc = copy.deepcopy(_catalog())
     doc["templates"][0]["archetype"] = "galaxy"
+    p = _write(tmp_path, doc)
+    proc = _run("--catalog", str(p))
+    assert proc.returncode != 0
+
+
+def test_minimum_constraint_on_non_integer_parameter_rejected_by_schema(tmp_path):
+    # #1916: {"type": "string", "constraints": {"minimum": 5}} used to
+    # validate clean and crash scripts/alp_template.py with a bare
+    # TypeError. The schema now refuses it outright.
+    doc = copy.deepcopy(_catalog())
+    rec = next(t for t in doc["templates"] if t["parameters"])
+    rec["parameters"][0] = {
+        "name": "knob", "type": "string", "description": "x",
+        "default": "a", "constraints": {"minimum": 5},
+    }
     p = _write(tmp_path, doc)
     proc = _run("--catalog", str(p))
     assert proc.returncode != 0

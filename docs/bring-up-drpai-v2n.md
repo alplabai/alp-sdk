@@ -109,7 +109,7 @@ only when **both** `meta-rz-drpai` is in `bblayers.conf` **and**
 `ALP_ENABLE_DRPAI = "1"` is set (default `"0"`).  The layer alone is
 deliberately not enough: it ships bundled in the AI SDK BSP, so keying off its
 presence would turn the NPU on for every V2N/V2M image.  It is declared
-`ALP_ENABLE_DRPAI ?= "0"` in all four V2N/V2M machine confs; set it to
+`ALP_ENABLE_DRPAI ?= "0"` in all six V2N/V2M machine confs; set it to
 `"1"` in `local.conf` to opt in. Without it the build installs a comment-only stub and the node
 stays `disabled`.
 
@@ -117,7 +117,7 @@ The layer half of the gate exists because that layer creates the `drpai0`
 label: referencing it without the layer fails in dtc, and the same SoM dtsi
 is included by the V2M board dts, so it would take that dtb down too.
 
-**Silicon confirms the node is not on by default.** `e1mx-v2n-m1-01`'s current
+**Silicon confirms the node is not on by default.** The V2N bench unit's current
 dtb, `/boot/r9a09g056n44-dev.dtb`, carries **zero** `drpai` nodes — the
 enablement on that board comes from a different, already-loaded
 `/boot/uio-683.dtb`, not from anything this repo builds. Our own dtb,
@@ -141,7 +141,7 @@ degrading to a single-region mode.
 
 **Never point `memory-region` at `mmp_reserved` (`0x80000000`).** That is the
 mmngr video buffer pool — now measured, not just reasoned: on
-`e1mx-v2n-m1-01`, `rgnmm_drv mmngr: assigned reserved memory node
+the V2N bench unit, `rgnmm_drv mmngr: assigned reserved memory node
 linux,multimedia` reports that node's `reg` as base `0x80000000` size
 `0x10000000`, exactly the deleted `kDrpAiMemStart` constant this driver used
 to hard-code. The NPU DMAs against the DRP-AI base directly, so pointing it
@@ -157,7 +157,7 @@ resets the DRP-AI when it is the sole opener. It runs once at open, never per
 inference.
 
 **Fresh-fd is confirmed safe here, but not proven load-bearing.**
-`e1mx-v2n-m1-01` has only one DRP-AI region, and two `DRPAI_GET_DRPAI_AREA`
+The V2N bench unit has only one DRP-AI region, and two `DRPAI_GET_DRPAI_AREA`
 calls on the *same* fd returned identical values on that board — but with a
 single region a per-fd alternating cursor and no cursor at all look
 identical from the outside. Whether the fresh-fd-per-call approach is
@@ -351,7 +351,7 @@ already, via the `CONFIG_BOOTCOMMAND` override in
 
 > **Flash-plan warning.** Don't assume the dtb your image built is the one a
 > board will actually boot. On
-> `e1mx-v2n-m1-01`, the running kernel's `bootargs` carry
+> the V2N bench unit, the running kernel's `bootargs` carry
 > `uio_pdrv_genirq.of_id=generic-uio` — a string that appears nowhere in the
 > `bootcmd` currently stored in `mtd1`. That means the live kernel/dtb/cmdline
 > did **not** come from that stored bootcmd, and reading `mtd1` alone cannot
@@ -367,12 +367,12 @@ In order:
    checking: `ALP_ENABLE_DRPAI` was not set to `"1"` (the default, and now the
    most likely cause); `meta-rz-drpai` was not in `bblayers.conf`; or the DT
    override otherwise did not land. Nothing else will work. (This
-   node already exists on `e1mx-v2n-m1-01`'s current, non-ALP-built image, so
+   node already exists on the V2N bench unit's current, non-ALP-built image, so
    its presence alone doesn't prove *this* image's DT override worked — check
    the dtb in use, per §3.)
 2. `dmesg | grep -i drpai` — a probe failing `-ENOMEM` means
    `memory-shared-for-drpai-ext-cont` is missing. Confirmed good on
-   `e1mx-v2n-m1-01`: `drpai-rz 17000000.drpai: DRP-AI Driver version : 1.40
+   the V2N bench unit: `drpai-rz 17000000.drpai: DRP-AI Driver version : 1.40
    rel.3 V2N`, correct region prints, zero errors.
 3. Confirm the memory-base ioctl resolves to the DT region, not to
    `mmp_reserved` (§3). Needs only `python3`:
@@ -385,12 +385,12 @@ In order:
        addr, size = struct.unpack("QQ", buf)
        print(f"ADDR=0x{addr:016x} SIZE=0x{size:016x}")
    ```
-   On `e1mx-v2n-m1-01` this returns `ADDR=0x00000000d0000000
+   On the V2N bench unit this returns `ADDR=0x00000000d0000000
    SIZE=0x0000000020000000`, matching the driver's own boot print, the DT
    `reg`, and `/proc/iomem` (`d0000000-efffffff : reserved`).
 4. `ls /usr/lib/libtvm_runtime.so*` and `ls /usr/lib/libmera2_runtime.so*` —
    absent means the image did not get the vendor payload (§4); on
-   `e1mx-v2n-m1-01`'s current image neither exists yet (`ls
+   the V2N bench unit's current image neither exists yet (`ls
    /usr/lib/libdrpai*` also finds nothing) — that userspace gap is what this
    branch's packaging is meant to close, once run through a `drpai`-enabled
    bake (§4).

@@ -15,9 +15,39 @@ project(alp_sdk_chips_test LANGUAGES C)
 # only so test_sensors.c can directly exercise bme280_unpack_h4_h5(),
 # the #797 H4/H5 shared-nibble unpack the disabled i2c-emul fake can't
 # reach (see the fake-fixtures note below).
+#
+# bmp581_verdict.h (examples/aen/aen-evk-demo/src/) is the pure BMP581
+# health-verdict logic pulled out of that example's main.c (#2035) so
+# test_sensors.c can exercise it here -- main.c itself only builds
+# against the real E1M-AEN801 board target.
+#
+# cc3501e_link_verdict.h (examples/aen/aen-evk-demo/src/) is the same
+# example's GET_VERSION link verdict, pulled out for the same reason
+# (#2035) so test_cc3501e.c can exercise it here.
+#
+# sound_verdict.h (examples/aen/aen-evk-demo/src/) is the same example's
+# Phase 11 sound-out/PDM-in energy-correlation verdict, pulled out for the
+# same reason (#2037) so test_sound_verdict.c can exercise it here.
+#
+# ioexp_verdict.h (examples/aen/aen-evk-demo/src/) is the same example's
+# Phase 4 I/O-expander polarity round-trip verdict, pulled out for the
+# same reason (#2098 review follow-up) so test_ioexp_verdict.c can
+# exercise it here.
+#
+# amp_fault_verdict.h (examples/aen/aen-evk-demo/src/) is the same
+# example's Phase 11 AMP_FAULT raw-pin mapping, pulled out for the same
+# reason (#2097 review follow-up) so test_audio.c can exercise it here.
+#
+# hw_rev_verdict.h (examples/aen/aen-evk-demo/src/) is the same example's
+# Phase 11 r1/r2 IO8-safety gate, pulled out for the same reason (#2138) so
+# test_hw_rev_verdict.c can exercise it here against
+# alp_hw_info_classify_manifest() (hw_info_manifest.h, already reachable
+# app-wide via zephyr/CMakeLists.txt's zephyr_include_directories(src/common)
+# -- the same internal header tests/zephyr/hw_info/src/main.c uses).
 target_include_directories(app PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../chips/da9292
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../chips/bme280)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../chips/bme280
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../examples/aen/aen-evk-demo/src)
 
 target_sources(app PRIVATE
     src/main.c
@@ -35,6 +65,9 @@ target_sources(app PRIVATE
     src/test_power.c
     src/test_security.c
     src/test_sensors.c
+    src/test_sound_verdict.c
+    src/test_ioexp_verdict.c
+    src/test_hw_rev_verdict.c
 )
 
 # Fake i2c-emul fixtures (fake_lsm6dso / fake_ssd1306 / fake_bme280)
@@ -51,3 +84,20 @@ target_sources(app PRIVATE
 #     src/fake_ssd1306.c
 #     src/fake_bme280.c
 # )
+
+# Fake i2c-emul fixtures for the 2026-09 chip-driver session's new
+# register-protocol coverage -- these stay ACTIVE (their overlay DT
+# nodes are NOT commented out): there is no real-silicon substitute
+# test for rv3028c7 / tcal9538 / icm42670 / bmi323 / bmp581 / ina236 /
+# tas2563 yet, unlike the three chips retired above.  Do not fold these into
+# the dormant block above -- see each fake_*.c file header for the
+# protocol it models.
+target_sources(app PRIVATE
+    src/fake_rv3028c7.c
+    src/fake_tcal9538.c
+    src/fake_icm42670.c
+    src/fake_bmi323.c
+    src/fake_bmp581.c
+    src/fake_ina236.c
+    src/fake_tas2563.c
+)

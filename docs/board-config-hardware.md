@@ -43,16 +43,25 @@ for this hardware" two ways:
   (`CONFIG_ALP_SDK_BANNER`, on by default) now does a narrower version
   of this automatically: it compares the live manifest's `hw_rev`
   against `CONFIG_ALP_SDK_SOM_HW_REV` (the hw_rev this firmware build
-  resolved -- nothing in the compiled firmware derives a pad-routing
-  table from it; some E1M pads physically route to a different chip
-  depending on `hw_rev`, e.g. the AEN family's IO8/IO10/IO21, and
-  application code that hardcodes a pin-to-chip map is what can
-  actually mis-target one -- see
-  [#1859](https://github.com/alplabai/alp-sdk/issues/1859)) and
+  resolved; some E1M pads physically route to a different chip
+  depending on `hw_rev`, e.g. the AEN family's IO8/IO10/IO21) and
   prints a loud warning on a disagreement, without refusing to boot; a
   factory-fresh module's NOT_PROVISIONED read never reaches this check.
   A production build that would rather halt than risk driving a pad on
   the wrong chip opts in via `CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL`.
+  On an AEN target with the CC3501E GPIO proxy enabled
+  (`CONFIG_ALP_SDK_GPIO_CC3501E_PROXY`), IO8/IO10/IO21 get a STRONGER,
+  per-pin runtime guard on top of this boot-banner warning:
+  `src/backends/gpio/cc3501e_proxy.c`'s `px_open()` refuses
+  `ALP_ERR_NOSUPPORT` on any of those three pads unless a CRC-valid
+  manifest confirms the SAME `hw_rev` match this banner check tests,
+  failing CLOSED (not just warning) on a missing, unprovisioned, or
+  mismatched manifest -- see
+  [#2144](https://github.com/alplabai/alp-sdk/issues/2144), which
+  replaced the earlier all-or-nothing guard
+  ([#1859](https://github.com/alplabai/alp-sdk/issues/1859)) that
+  dropped every proxied pin, including revision-independent ones, on
+  any disagreement.
   There is no SoM-side ADC cross-check (`<alp/hw_info.h>`).  A
   carrier/EVK board may
   separately encode its own revision on a board-side BOARD_ID

@@ -1,0 +1,13 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Fake ICM-42670-P emul target.  Lives in this test only.
+
+description: |
+  Fake TDK ICM-42670-P i2c-emul target used by the alp-sdk chips
+  ztest.  Pre-populates WHO_AM_I = 0x67 so icm42670_init() succeeds,
+  and echoes register writes back on subsequent reads.
+
+compatible: "alp,fake-icm42670"
+
+include: i2c-device.yaml

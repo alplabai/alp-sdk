@@ -24,7 +24,7 @@ import check_no_committed_doxygen_output as gate  # noqa: E402
 
 
 def _git(root: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True)
+    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True, encoding="utf-8")
 
 
 def _init_repo(root: Path) -> None:

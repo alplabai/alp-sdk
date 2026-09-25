@@ -30,15 +30,16 @@ gd32_swd_init(&swd, swdio_pin, swclk_pin, nrst_pin);
 
 /* 1. Link up -- line reset + JTAG-to-SWD switch + DPIDR read. */
 gd32_swd_connect(&swd);
-if (swd.idcode != GD32_SWD_EXPECTED_IDCODE) {
+if (swd.idcode != GD32_SWD_GENERIC_CM33_R0P1_IDCODE) {
     /* Log and CONTINUE -- do not abort here.  See the IDCODE
-     * caveat below: on this bench a healthy GD32 answers
-     * 0x0BE12477, not GD32_SWD_EXPECTED_IDCODE's 0x6BA02477,
-     * so a hard stop refuses exactly the board you came to
-     * recover.  Match the shipped example, which warns and
+     * caveat below: whether a real GD32 matches
+     * GD32_SWD_GENERIC_CM33_R0P1_IDCODE is UNKNOWN (#1369), so a
+     * hard stop here could refuse exactly the board you came to
+     * recover.  Match the shipped example, which logs and
      * proceeds. */
-    printf("[swd] WARN: IDCODE mismatch -- got 0x%08X, expected 0x%08X\n",
-           (unsigned)swd.idcode, (unsigned)GD32_SWD_EXPECTED_IDCODE);
+    printf("[swd] note: IDCODE != generic reference -- this is not a "
+           "wrong-board signal, the reference value is unattested on "
+           "a GD32 (#1369)\n");
 }
 
 /* 2. Stop the running firmware so it doesn't trash FMC concurrently. */
@@ -59,44 +60,52 @@ gd32_swd_reset_and_run(&swd);
 
 ## The IDCODE caveat -- read this before you trust step 1
 
-`GD32_SWD_EXPECTED_IDCODE` is `0x6BA02477`, and **that value has
+`GD32_SWD_GENERIC_CM33_R0P1_IDCODE` is `0x6BA02477`, and **that value has
 never been measured on a GD32.** It is the generic ADIv5
 expectation for a Cortex-M33 r0p1 SW-DPv2, carried over from the
 part's core, not read off the part.
 
-What the bench actually records at place `e1mx-v2n-m1-01`
-(`scripts/bench/aen/bench-env.sh`) -- only the V2N CM33 DAP row is
-measured; the GD32 row is the claimed-but-unattested value carried over
-unchanged (see #1369, #1440):
+What the bench actually records for the V2N bench unit
+(`scripts/bench/aen/bench-env.sh`) -- only the V2N CM33 DAP row below
+is a measurement; the GD32 row is a claimed-but-unattested candidate
+value, not a bench reading (see #1369):
 
-| probe        | SW-DP IDR    |
-|--------------|--------------|
-| GD32 bridge  | `0x0BE12477` |
-| V2N CM33 DAP | `0x6BA02477` |
+| probe        | SW-DP IDR    | status                              |
+|--------------|--------------|--------------------------------------|
+| GD32 bridge  | `0x0BE12477` | **unattested** -- no bench transcript, no datasheet reference, no commit message |
+| V2N CM33 DAP | `0x6BA02477` | bench-measured, `scripts/bench/aen/bench-env.sh` |
 
-So `0x6BA02477` is this bench's **V2N CM33 DAP** -- and the
-measurement that produced it also reported `Found Cortex-M33
-r0p4`, not the `r0p1` the constant's comment claims. A healthy,
-correctly-wired GD32 answers `0x0BE12477` and therefore *fails*
-the `GD32_SWD_EXPECTED_IDCODE` comparison.
+So `0x6BA02477` is this bench's **measured V2N CM33 DAP** value -- and
+the measurement that produced it also reported `Found Cortex-M33
+r0p4`, not the `r0p1` the constant's comment describes. Whether a
+healthy, correctly-wired GD32 answers `0x0BE12477`, `0x6BA02477`, or
+something else entirely is UNKNOWN: neither value has been read off a
+GD32 with a probe attached, so a comparison against
+`GD32_SWD_GENERIC_CM33_R0P1_IDCODE` proves nothing about the target
+either way.
 
 Consequences for anyone writing a recovery tool from this page:
 
 * **A mismatch here is not evidence of mis-wiring or a wrong
-  part.** Until the constant is settled against a probe on a
-  GD32, the comparison tells you almost nothing. Check the wiring
-  because the link failed, not because the IDCODE differed.
+  part -- and neither is a match.** Until a real GD32's IDR is
+  measured, the comparison tells you almost nothing. Check the wiring
+  because the link failed, not because the IDCODE differed or matched.
 * **Do not turn the comparison into a hard stop**, which is what
   this tutorial used to do (#1512). Nothing shipped does:
   `gd32_swd_connect()` deliberately does not reject a mismatch
   (`chips/gd32_swd/gd32_swd.c`), and
-  `examples/v2n/v2n-gd32-swd-flash/src/main.c` warns and
+  `examples/v2n/v2n-gd32-swd-flash/src/main.c` logs and
   continues. A production test that *wants* to refuse on a
   mismatch should opt into that explicitly, against a value it
   has measured on its own hardware.
 
-Settling the constant needs a probe on a GD32 and is tracked at
-#1440 (`needs-silicon`) with #1369.
+Settling which value (if either) a real GD32 answers needs a probe on
+one and is tracked at #1369 (`needs-silicon`).
+`metadata/chips/gd32_swd.yaml` deliberately carries no
+`target_expected_idcode` for this reason (#1440) -- same stance
+`metadata/schemas/soc-spec-v1.schema.json`'s own `expect_dpidr`
+guidance takes for every Alif Ensemble SoC variant: an absent key is
+the correct published "unknown", not a guessed value.
 
 ## Status of this flow
 
@@ -123,13 +132,16 @@ silicon) or you need to slow it down for noisy boards.
 
 ## Cross-reference -- the wrong-board recovery hazard
 
-This tutorial's IDCODE caveat names `0x0BE12477` as the value a
-healthy, correctly-wired GD32 answers.  [`docs/gd32-bridge.md`](../gd32-bridge.md)'s
-"Recovering a bricked bridge" section disagrees: it treats
-`0x0BE12477` as an unattested, claimed-but-unmeasured value (see
-#1369) and its DPIDR preflight refuses to accept it as a pass
-condition.  Both claims are live in this repo at once -- do not pick
-a winner by reading only one of the two documents.
+This tutorial's IDCODE caveat table now agrees with
+[`docs/gd32-bridge.md`](../gd32-bridge.md)'s "Recovering a bricked
+bridge" section: both treat `0x0BE12477` as an unattested,
+claimed-but-unmeasured value (see #1369), and neither presents it as
+what a healthy GD32 answers. That was not always true -- this
+tutorial previously stated `0x0BE12477` as the value a healthy,
+correctly-wired GD32 answers, contradicting `docs/gd32-bridge.md`'s
+DPIDR preflight, which refuses to accept that same value as a pass
+condition. #1369 is why: neither candidate value is measured, so
+neither document gets to assert one as ground truth.
 
 **`docs/gd32-bridge.md`'s hazard section governs the recovery-flash
 decision for the J-Link/external-probe path it documents** (this
@@ -137,14 +149,14 @@ tutorial's on-SoM bit-bang route, `chips/gd32_swd/` -- SWDIO/SWCLK/NRST
 on P70/P71/P74, no J-Link, no cloned serial -- is unaffected by that
 section's detach / `lsusb -t` / `SelectEmuBySN` procedure), because it
 is the section an operator follows immediately before a J-Link write
-that can reach the wrong board.  This tutorial's table is the weaker
-claim: it reproduces `scripts/bench/aen/bench-env.sh`'s `GD32_DPIDR`
-export, and that export formerly carried its own "BENCH-VERIFIED"
-banner covering `GD32_DPIDR` too; that banner cited
-`docs/aen-bench-bringup.md`, a document that does not mention the GD32
-at all, and is now hedged (`scripts/bench/aen/bench-env.sh:148-151`).
-Whether `0x0BE12477` was ever read off a GD32 with a probe attached is
-open at #1440 and #1369 and needs silicon to close, not doc surgery.
+that can reach the wrong board.  This tutorial's table reproduces
+`scripts/bench/aen/bench-env.sh`'s `GD32_DPIDR` export, and that export
+formerly carried its own "BENCH-VERIFIED" banner covering `GD32_DPIDR`
+too; that banner cited `docs/aen-bench-bringup.md`, a document that
+does not mention the GD32 at all, and is now hedged
+(`scripts/bench/aen/bench-env.sh:148-151`).
+Whether `0x0BE12477` was ever read off a GD32 with a probe attached
+remains open at #1369 and needs silicon to close, not doc surgery.
 
 ## See also
 

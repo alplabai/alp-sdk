@@ -94,6 +94,30 @@ def test_slugs_from_on_module_aen701() -> None:
     assert "W958D8NBYA5I" not in slugs, "HyperRAM MPN must not be a chip slug"
 
 
+def test_slugs_from_on_module_aen801_excludes_hard_dnp_i2c_device() -> None:
+    """AEN801 on_module: optiga_trust_m must NOT auto-enable -- the
+    `secure_element:` scalar field names the chip the design carries,
+    but its `i2c_devices:` `brd_i2c:` entry is `assembled: false` (DNP=1
+    on this batch, "must never reach a shipped devicetree"). Contrast
+    with AEN701 above, whose Optiga IS assembled and DOES appear (#1980
+    follow-up: fixing only the `i2c_devices:` loop's `"optional"` check
+    left this scalar-field path still leaking `optiga_trust_m` into the
+    always-True SoM-intrinsic set -- CONFIG_ALP_SDK_CHIP_OPTIGA_TRUST_M
+    used to land =y on a board that never has the part)."""
+    import yaml
+    with open(REPO / "metadata" / "e1m_modules" / "E1M-AEN801.yaml",
+              encoding="utf-8") as f:
+        preset = yaml.safe_load(f)
+    slugs = _slugs_from_on_module(preset["on_module"])
+
+    assert "optiga_trust_m" not in slugs, (
+        "hard-DNP (assembled: false) i2c_devices chip must not auto-enable, "
+        "even when a scalar on_module field also names it"
+    )
+    for expected in ("cc3501e", "eeprom_24c128", "rv3028c7", "tmp112"):
+        assert expected in slugs, f"missing expected slug: {expected}"
+
+
 def test_slugs_from_on_module_nx9101_tbd_filtered() -> None:
     """NX9101 on_module: TBD wifi_ble and ethernet_phy are filtered out;
     only pca9451a (the one non-TBD scalar chip) survives."""

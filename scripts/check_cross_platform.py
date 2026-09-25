@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """
-Lint repo content for Linux-only idioms in customer-facing surfaces.
+Lint repo content for cross-platform hazards: Linux-only idioms in
+customer-facing surfaces, and implicit text encodings in the SDK's
+own Python under scripts/, tests/, and examples/.
 
 Per ADR 0012 (docs/adr/0012-cross-platform-developer-host.md) the
 Alp SDK promises Win + Mac + Linux as first-class developer hosts
@@ -9,12 +11,21 @@ for the Zephyr-on-M-class workflow.  This script mechanically
 enforces that promise by flagging Linux-only idioms that creep
 into docs, scripts, examples, and tests.
 
-Two finding categories are emitted:
+Three finding categories are emitted:
 
   - LINUX-ONLY-IDIOM -- a doc / markdown idiom that doesn't render
     on at least one of Win + Mac.
   - BASH-ONLY-SHEBANG -- a shell script with a bash shebang that
     customers might be expected to invoke on Win or Mac.
+  - IMPLICIT-ENCODING -- a Python text-IO call with no explicit
+    `encoding=` keyword.  Python resolves the default text encoding
+    from the platform locale -- UTF-8 on our Linux/Mac hosts, cp1252
+    on the `windows-latest` CI runner -- so a call that never states
+    its encoding works on every host the author tested on and raises
+    `UnicodeDecodeError` the moment non-ASCII content reaches
+    Windows.  Not hypothetical: this is what turned PR #2194's
+    curly-quote fixtures into a red Windows leg while
+    `scripts/test-all.sh` (Linux-only) stayed green throughout.
 
 Patterns detected (1-1 with the ADR's "operational consequences"
 list):
@@ -44,6 +55,28 @@ list):
      /home/user/...) in markdown code examples.  These don't
      render correctly on Windows.  Use placeholders or per-OS
      code-tabs.
+  6. IMPLICIT-ENCODING: a Python call under scripts/**, tests/**, or
+     examples/** that decodes/encodes text with no `encoding=` keyword --
+     `Path.read_text(`/`Path.write_text(`; bare `open(` or
+     `Path.open(` or `os.fdopen(` in text mode (no `"b"` in the mode
+     argument -- `open(file, mode)`'s and `m.open(file, mode)`'s second
+     positional, `Path.open(mode)`'s first -- or no mode argument at
+     all -- Python's default is text mode);
+     `subprocess.run`/`check_output`/`Popen` with `text=True` or
+     `universal_newlines=True`, even when a `**kwargs` unpack rides
+     along.  Binary-mode IO (`"rb"`/`"wb"`,
+     `read_bytes`/`write_bytes`) is correct and never flagged, nor is
+     `.open()` on a module whose `open` takes no `encoding=`
+     (`tokenize`, `tarfile`, `os`, including `import ... as`
+     aliases and a module-level `from ... import open`); and
+     any call that already passes `encoding=` (including
+     `encoding=locale.getpreferredencoding()`) passes as-is -- this
+     linter checks for the keyword's presence, not for a rationale
+     comment on it.  Checked with `ast.parse`, not a regex: these
+     calls routinely spread their keyword args across several lines,
+     and "does this Call node have an `encoding=` keyword anywhere"
+     is not something a line-oriented regex can answer reliably.
+     Recommendation: pass `encoding="utf-8"` explicitly.
 
 Suppression mechanisms:
 
@@ -64,6 +97,12 @@ Suppression mechanisms:
   maintainer can still spot pathological growth without drowning
   in noise.  Allowlist summaries are NOT findings -- they do not
   flip --fail-on-warning to exit 1.
+
+  IMPLICIT-ENCODING has no skip-marker mechanism: the fix IS the
+  suppression -- add the `encoding=` keyword the finding names.
+  There's no legitimate reason for a call under scripts/, tests/, or
+  examples/ to depend on the platform locale, so no per-call escape
+  hatch is offered.
 
 Operating mode:
 
@@ -89,15 +128,21 @@ Scope:
   side helper dirs (e.g. meta-alp-sdk/ --
   the Linux-only Yocto layer).
 
-  Markdown files (.md) get all 5 pattern checks.
+  Markdown files (.md) get all 5 LINUX-ONLY-IDIOM pattern checks.
   Shell scripts (.sh) get the bash-shebang check (intentionally
   Bash scripts must carry a header note explaining their OS scope;
   the lint does NOT object to *.sh existing, only to silent
   bash-onlyness).
 
-  Python files (.py) are out of scope for this text-idiom linter;
-  emitted-artifact portability (e.g. Windows-only escape sequences
-  produced by a generator script) is covered by tests, not this scan.
+  Python files (.py) get the IMPLICIT-ENCODING check (pattern 6
+  above), but only under scripts/**, tests/**, and examples/** (see
+  PY_SCAN_ROOTS) -- the trees that actually ship or run Python as
+  part of the SDK's own tooling, test surface, and customer-facing
+  examples, where a locale-dependent decode fails a CI runner (or a
+  customer's build) rather than staying silent.  Python elsewhere
+  (docs/) is out of scope for this linter; emitted-artifact
+  portability (e.g. Windows-only escape sequences produced by a
+  generator script) is covered by tests, not this scan.
 
 Output format:
 
@@ -133,6 +178,7 @@ Local invocation:
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import sys
@@ -180,6 +226,17 @@ DEFAULT_ROOTS: tuple[str, ...] = (
     "CODE_OF_CONDUCT.md",
 )
 
+# Top-level (repo-relative) trees a *.py file must sit under for the
+# IMPLICIT-ENCODING check to consider it during a default/root-scoped
+# walk.  scripts/ and tests/ are the SDK's own tooling + test surface
+# -- exactly where a locale-dependent decode fails a CI runner.
+# examples/ is included too: every tracked *.py file outside scripts/
+# and tests/ lives there (the customer-facing gen_model.py generators),
+# so it is just as exposed to the cp1252-on-windows-latest failure mode
+# as the SDK's own tooling.  An explicit `--path some/other.py` still
+# scans a file outside these roots regardless of this restriction.
+PY_SCAN_ROOTS: tuple[str, ...] = ("scripts", "tests", "examples")
+
 # Bash-only scripts that are intentionally Linux-side helpers per
 # ADR 0012 §7.6 carve-out.  These are exempt from the bash-shebang
 # warning provided their first ~15 lines contain a phrase that
@@ -212,6 +269,7 @@ INTENTIONALLY_BASH_HELPERS: frozenset[str] = frozenset({
     "scripts/bench/aen/flash-update-log-dual.sh",
     "scripts/bench/aen/flash-update-log-firewall-probe.sh",
     "scripts/bench/aen/ram-run.sh",
+    "scripts/bench/aen/openocd-ram-run.sh",
     "scripts/bench/aen/read-update-log-proof.sh",
     "scripts/bench/aen/reread.sh",
     "scripts/bench/aen/flash-all-flowd.sh",
@@ -402,6 +460,234 @@ PATTERNS: tuple[Pattern, ...] = (
 
 
 # ---------------------------------------------------------------------
+# IMPLICIT-ENCODING (Python, AST-based)
+# ---------------------------------------------------------------------
+#
+# Unlike the LINUX-ONLY-IDIOM / BASH-ONLY-SHEBANG patterns above, this
+# check is NOT a `Pattern` in the regex-driven table: the calls it
+# flags routinely spread their keyword arguments across several
+# lines (e.g. a `subprocess.run(...)` with one kwarg per line), and
+# the only accurate question -- "does this Call node have an
+# `encoding=` keyword anywhere, in any order" -- is exactly what
+# `ast.parse` answers for free and a line-oriented regex cannot.
+
+_SUBPROCESS_TEXT_CALLS: frozenset[str] = frozenset({"run", "check_output", "Popen"})
+_ENCODING_TEXT_METHODS: frozenset[str] = frozenset({"read_text", "write_text"})
+
+
+def _call_name(node: ast.Call) -> str | None:
+    """Bare function/attribute name of a Call node's target, e.g.
+    `open` for `open(...)`, `run` for `subprocess.run(...)`, `open`
+    for `p.open(...)`.  None for anything else (subscripts, a call
+    returning a call, etc.) -- those aren't a shape this check
+    recognises."""
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
+def _kwarg_value(node: ast.Call, name: str) -> ast.expr | None:
+    for kw in node.keywords:
+        if kw.arg == name:
+            return kw.value
+    return None
+
+
+# Modules whose `open` takes no `encoding=` at all, so the finding's
+# fix would raise TypeError: tokenize.open() reads the PEP 263 cookie
+# itself, tarfile.open()'s "r"/"w" are tar modes, os.open() returns a
+# raw fd.
+_OPEN_WITHOUT_ENCODING_MODULES: frozenset[str] = frozenset({"tokenize", "tarfile", "os"})
+# Function names this check treats as a file open.  `fdopen` only counts
+# when it resolves to `os` (`os.fdopen(fd, mode)`, builtin-shaped).
+_OPEN_CALL_NAMES: frozenset[str] = frozenset({"open", "fdopen"})
+
+
+def _module_aliases(tree: ast.AST) -> dict[str, str]:
+    """Local name -> module name for every `import m` / `import m as a`
+    in the file, at module AND function scope, plus every module-level
+    `from m import open` / `from m import fdopen` (the bare name then
+    resolves to `m`).
+
+    ponytail: scope-blind -- an alias bound in one function resolves
+    file-wide, and a variable that shadows an imported module name is
+    misread as the module.  `from m import open` is honoured at module
+    level only, because file-wide it would exempt every builtin
+    `open()` in the file; inside a function it is still flagged.
+    Per-scope resolution if either ever bites.
+    """
+    out: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                if a.asname:
+                    out[a.asname] = a.name
+                else:
+                    top = a.name.split(".")[0]
+                    out[top] = top
+    for node in getattr(tree, "body", []):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            for a in node.names:
+                if a.name in _OPEN_CALL_NAMES:
+                    out[a.asname or a.name] = node.module
+    return out
+
+
+def _open_mode_is_binary(node: ast.Call, mode_index: int) -> bool | None:
+    """Inspect an open()/Path.open() call's mode argument.
+
+    `mode_index` is the mode's positional slot: 1 for the builtin
+    `open(file, mode)` and every module-level `m.open(file, mode)`, 0
+    for a one-argument method call like `Path.open(mode)`.  True if
+    binary ("b" in a string-literal mode), False if text (string-literal
+    mode without "b", or no mode argument at all -- Python's own default
+    is text mode "r"), None if the mode isn't a string literal we can
+    read statically (a variable, an f-string, ...) -- callers should
+    skip flagging rather than guess.
+    """
+    if len(node.args) > mode_index:
+        mode_expr = node.args[mode_index]
+    else:
+        mode_expr = _kwarg_value(node, "mode")
+    if mode_expr is None:
+        return False
+    if isinstance(mode_expr, ast.Constant) and isinstance(mode_expr.value, str):
+        return "b" in mode_expr.value
+    return None
+
+
+def _py_call_source(text: str, node: ast.Call) -> str:
+    """First line of the call's source text, truncated like the
+    regex patterns truncate a multi-line match (see `matched_line`
+    in `scan_file`)."""
+    seg = ast.get_source_segment(text, node)
+    if not seg:
+        seg = _call_name(node) or "<call>"
+    return seg.splitlines()[0].strip()
+
+
+def scan_python_encoding(text: str) -> list[tuple[int, int, str, str]]:
+    """Return (line, col, matched_text, suggestion) for every
+    implicit-encoding call in a Python source string.
+
+    Flags, when no `encoding=` keyword is present on the call:
+      - `Path.read_text(` / `Path.write_text(`
+      - bare `open(` or `Path.open(` in text mode
+      - `subprocess.run` / `check_output` / `Popen` with
+        `text=True` or `universal_newlines=True`
+
+    Out of scope by construction: binary-mode `open()`/`Path.open()`
+    (`"rb"`/`"wb"` et al.), `read_bytes`/`write_bytes` (different
+    method names, never matched), and any call that already passes
+    `encoding=` -- including `encoding=locale.getpreferredencoding()`,
+    which passes because the keyword is present; this check verifies
+    the keyword's presence, not a rationale comment on it.
+
+    Also out of scope: `.open()` on a module whose `open` takes no
+    `encoding=` (`tokenize`, `tarfile`, `os`), resolved through
+    `import m` / `import m as a` at any scope and a module-level
+    `from m import open`.  An `.open()` on any other owner (a `Path`,
+    an unknown object) is still flagged, and so is `os.fdopen(fd, mode)`
+    in text mode.
+
+    A `**kwargs` unpack on `read_text`/`write_text`/`open` could carry
+    `encoding=` this scan can't see into -- those calls are skipped
+    rather than guessed at.  A subprocess call is NOT skipped: its
+    explicit `text=True` proves text mode, and the `**kwargs` of a
+    `_run(*args, **kw)` helper forwards cwd/env/check, not an
+    encoding.  A file that fails to parse returns no findings; a
+    syntax error isn't this linter's job to report.
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+
+    aliases = _module_aliases(tree)
+    out: list[tuple[int, int, str, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if any(kw.arg == "encoding" for kw in node.keywords):
+            continue
+
+        name = _call_name(node)
+        if name is None:
+            continue
+        if name not in _SUBPROCESS_TEXT_CALLS and any(
+            kw.arg is None for kw in node.keywords
+        ):
+            continue  # **kwargs -- might carry encoding=, don't guess
+
+        suggestion: str | None = None
+
+        if name in _ENCODING_TEXT_METHODS and isinstance(node.func, ast.Attribute):
+            suggestion = (
+                f"implicit text encoding on .{name}() -- Python "
+                f"resolves the default from the platform locale "
+                f'(UTF-8 on Linux, cp1252 on windows-latest); pass '
+                f'encoding="utf-8" explicitly'
+            )
+        elif name in _OPEN_CALL_NAMES:
+            func = node.func
+            if isinstance(func, ast.Name):
+                owner = aliases.get(func.id)  # `from m import open`
+            elif isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+                owner = aliases.get(func.value.id)
+            else:
+                owner = None
+            # A module-level `m.open(file, mode)` and any 2+-positional
+            # call are builtin-shaped; only a one-argument method call
+            # like `Path.open(mode)` carries its mode first.
+            # ponytail: gzip/bz2/lzma.open default to "rb", so a bare
+            # `gzip.open(p)` is still flagged as text; a default-binary
+            # module set if one lands.
+            builtin_shape = (
+                isinstance(func, ast.Name)
+                or owner is not None
+                or len(node.args) >= 2
+            )
+            if name == "fdopen" and owner != "os":
+                pass
+            elif name == "open" and owner in _OPEN_WITHOUT_ENCODING_MODULES:
+                pass
+            elif _open_mode_is_binary(node, 1 if builtin_shape else 0) is False:
+                if owner:
+                    caller = f"{owner}.{name}()"
+                else:
+                    caller = "open()" if builtin_shape else "Path.open()"
+                suggestion = (
+                    f"implicit text encoding on {caller} -- Python "
+                    f"resolves the default from the platform locale "
+                    f'(UTF-8 on Linux, cp1252 on windows-latest); pass '
+                    f'encoding="utf-8" explicitly, or open in binary '
+                    f'mode ("rb"/"wb") if that is the real intent'
+                )
+        elif name in _SUBPROCESS_TEXT_CALLS:
+            for kw in node.keywords:
+                if kw.arg not in ("text", "universal_newlines"):
+                    continue
+                if isinstance(kw.value, ast.Constant) and kw.value.value is False:
+                    continue
+                suggestion = (
+                    f"implicit text encoding on subprocess.{name}"
+                    f'(..., {kw.arg}=...) -- pass encoding="utf-8", and make '
+                    f"sure the child WRITES UTF-8: a Python child writes its "
+                    f"locale (cp1252 on Windows) unless PYTHONIOENCODING=utf-8"
+                )
+                break
+
+        if suggestion is not None:
+            line, col = node.lineno, node.col_offset + 1
+            out.append((line, col, _py_call_source(text, node), suggestion))
+
+    return out
+
+
+# ---------------------------------------------------------------------
 # Finding model
 # ---------------------------------------------------------------------
 
@@ -477,11 +763,17 @@ def discover_files(
         for p in root.rglob("*"):
             if not p.is_file():
                 continue
-            # Only scan files matching at least one pattern's
-            # applies_to glob.  This keeps the walk cheap.
-            if not (p.name.endswith(".md") or p.name.endswith(".sh")):
-                continue
             rel = p.relative_to(base) if base in p.parents else p
+            if p.name.endswith(".py"):
+                # IMPLICIT-ENCODING is scoped to PY_SCAN_ROOTS
+                # (scripts/**, tests/**, examples/**) -- skip .py
+                # files outside those trees during an implicit walk.
+                if not rel.parts or rel.parts[0] not in PY_SCAN_ROOTS:
+                    continue
+            elif not (p.name.endswith(".md") or p.name.endswith(".sh")):
+                # Only scan files matching at least one pattern's
+                # applies_to glob.  This keeps the walk cheap.
+                continue
             if _is_excluded(rel, excludes):
                 continue
             result.append(p)
@@ -685,6 +977,24 @@ def scan_file(
                     column=col,
                     category=pat.category,
                     matched_text=matched_line,
+                    suggestion=suggestion,
+                )
+            )
+
+    # IMPLICIT-ENCODING is AST-driven, not regex-driven -- see the
+    # comment above `scan_python_encoding`.  It has no skip-marker /
+    # allowlist mechanism (the fix IS the suppression: add
+    # `encoding=`), so it runs unconditionally for every .py file
+    # `discover_files` handed us.
+    if path.name.endswith(".py"):
+        for line, col, matched_text, suggestion in scan_python_encoding(text):
+            out.append(
+                Finding(
+                    path=rel_posix,
+                    line=line,
+                    column=col,
+                    category="IMPLICIT-ENCODING",
+                    matched_text=matched_text,
                     suggestion=suggestion,
                 )
             )
@@ -893,7 +1203,8 @@ def main() -> int:
     _print_summary(findings, summaries, as_json=args.json)
 
     # Allowlist summaries DO NOT flip the exit code -- they are
-    # informational by design.  Only real findings count.
+    # informational by design.  Every real finding, including
+    # IMPLICIT-ENCODING, fails --fail-on-warning.
     if findings and args.fail_on_warning:
         return 1
     return 0

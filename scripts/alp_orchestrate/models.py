@@ -446,6 +446,7 @@ class SystemManifest:
     partitions: list[ResolvedPartition] = field(default_factory=list)
     boot_order: list[dict[str, Any]] = field(default_factory=list)
     helper_mcus: list[dict[str, Any]] = field(default_factory=list)
+    memory_regions: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         hw_info: dict[str, Any] = {
@@ -475,4 +476,12 @@ class SystemManifest:
         }
         if self.partitions:
             out["storage"] = [p.to_manifest_entry() for p in self.partitions]
+        # `memory` is OMITTED, never emitted empty (#1365 item 3): the schema
+        # makes an absent pane mean "this producer does not emit it yet",
+        # so `memory: []` would tell a consumer a SoM whose silicon_variant
+        # is still `TBD` has no memory regions.  Rows arrive already shaped
+        # by memory.resolve_memory_regions() -- unlike ipc/storage there is
+        # no per-row dataclass, matching the helper_mcus precedent.
+        if self.memory_regions:
+            out["memory"] = list(self.memory_regions)
         return out

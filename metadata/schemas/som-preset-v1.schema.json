@@ -5,9 +5,18 @@
   "description": "Schema for the per-SKU SoM preset.  The SDK's loader resolves the customer's board.yaml `som.sku` to the matching preset here.  Every released-MPN preset shares ONE canonical shape: the top-level key set, `memory:`, `on_module:`, `inference:`, and `status:` are closed (additionalProperties: false) so cross-family key drift fails validation instead of passing silently.  The only deliberately-open spots are the ones where genuine per-family variance is legitimate, and each carries its own description saying why: `capabilities:` (open set of accelerator flags matched against each library's `integration.zephyr.hw_backends:` block in metadata/libraries/*.yaml), `i2c_devices` bus KEYS (bus identifiers differ per family), and `helper_firmware[].flash_args` (shape follows the flash backend).",
   "type": "object",
   "required": [
-    "schema_version", "sku", "family", "silicon", "display_name",
-    "on_module", "memory", "inference", "topology",
-    "default_hw_rev", "default_board", "status"
+    "schema_version",
+    "sku",
+    "family",
+    "silicon",
+    "display_name",
+    "on_module",
+    "memory",
+    "inference",
+    "topology",
+    "default_hw_rev",
+    "default_board",
+    "status"
   ],
   "additionalProperties": false,
   "allOf": [
@@ -19,16 +28,27 @@
             "additionalProperties": {
               "type": "object",
               "properties": {
-                "os": { "enum": ["zephyr", "baremetal"] }
+                "os": {
+                  "enum": [
+                    "zephyr",
+                    "baremetal"
+                  ]
+                }
               },
-              "required": ["os"]
+              "required": [
+                "os"
+              ]
             }
           }
         },
-        "required": ["topology"]
+        "required": [
+          "topology"
+        ]
       },
       "then": {
-        "required": ["mailbox"]
+        "required": [
+          "mailbox"
+        ]
       }
     }
   ],
@@ -51,10 +71,16 @@
     },
     "silicon_variant": {
       "oneOf": [
-        { "type": "string", "pattern": "^[A-Za-z0-9-]{8,}$" },
-        { "type": "string", "const": "TBD" }
+        {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9-]{8,}$"
+        },
+        {
+          "type": "string",
+          "const": "TBD"
+        }
       ],
-      "description": "SoC variant order code matching the vendor's datasheet (e.g. `AE302F80F55D5LE` for Alif E3, `R9A09G056N44GBG` for Renesas RZ/V2N, `MIMX9352xxxxM` for NXP i.MX 93 — the latter is partial pending the HW config writeup, encoded as `silicon_variant: TBD` per the project's no-inventing-values rule). Enables forward lookup of per-variant memory, optional features, and package-specific GPIO counts without reverse-scanning all SoC JSON files. Optional; when absent the loader falls back to reverse lookup via `alp_module_skus` in the SoC JSON."
+      "description": "SoC variant order code matching the vendor's datasheet (e.g. `AE302F80F55D5LE` for Alif E3, `R9A09G056N44GBG` for Renesas RZ/V2N, `MIMX9352xxxxM` for NXP i.MX 93 \u2014 the latter is partial pending the HW config writeup, encoded as `silicon_variant: TBD` per the project's no-inventing-values rule). Enables forward lookup of per-variant memory, optional features, and package-specific GPIO counts without reverse-scanning all SoC JSON files. Optional; when absent the loader falls back to reverse lookup via `alp_module_skus` in the SoC JSON."
     },
     "display_name": {
       "type": "string"
@@ -62,7 +88,9 @@
     "on_module": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["silicon"],
+      "required": [
+        "silicon"
+      ],
       "description": "Populated on-module chips + I2C bus topology.  The key set is CLOSED: every legal on-module role is enumerated below (union of all released families), so a new family inventing a synonym key (e.g. `pmic` for `pmic_main`) fails validation.  Adding a genuinely new on-module role means extending this enumeration deliberately, in the schema, with review.",
       "properties": {
         "silicon": {
@@ -70,40 +98,80 @@
           "pattern": "^[a-z0-9_-]+:[a-z0-9_-]+:[a-z0-9_-]+$",
           "description": "Main silicon triple ref -- repeats the top-level `silicon:` for self-contained reads of the block."
         },
-        "pmic_main":          { "$ref": "#/$defs/chip_ref", "description": "Primary PMIC.  Canonical key on every family that populates one (imx93's former `pmic:` normalised to this)." },
-        "pmic_secondary":     { "$ref": "#/$defs/chip_ref", "description": "Secondary PMIC (e.g. V2N's DA9292).  Absent on single-PMIC families." },
-        "clock_generator":    { "$ref": "#/$defs/chip_ref" },
-        "rtc_external":       { "$ref": "#/$defs/chip_ref" },
-        "temperature_sensor": { "$ref": "#/$defs/chip_ref" },
-        "eeprom":             { "$ref": "#/$defs/chip_ref" },
-        "secure_element":     { "$ref": "#/$defs/chip_ref" },
-        "wifi_ble":           { "$ref": "#/$defs/chip_ref" },
-        "supervisor_mcu":     { "$ref": "#/$defs/chip_ref", "description": "On-module supervisor / IO MCU (V2N family's GD32G553).  Absent on families without one." },
-        "ethernet_phy":       { "$ref": "#/$defs/chip_ref" },
+        "pmic_main": {
+          "$ref": "#/$defs/chip_ref",
+          "description": "Primary PMIC.  Canonical key on every family that populates one (imx93's former `pmic:` normalised to this)."
+        },
+        "pmic_secondary": {
+          "$ref": "#/$defs/chip_ref",
+          "description": "Secondary PMIC (e.g. V2N's DA9292).  Absent on single-PMIC families."
+        },
+        "clock_generator": {
+          "$ref": "#/$defs/chip_ref"
+        },
+        "rtc_external": {
+          "$ref": "#/$defs/chip_ref"
+        },
+        "temperature_sensor": {
+          "$ref": "#/$defs/chip_ref"
+        },
+        "eeprom": {
+          "$ref": "#/$defs/chip_ref"
+        },
+        "secure_element": {
+          "$ref": "#/$defs/chip_ref"
+        },
+        "wifi_ble": {
+          "$ref": "#/$defs/chip_ref"
+        },
+        "supervisor_mcu": {
+          "$ref": "#/$defs/chip_ref",
+          "description": "On-module supervisor / IO MCU (V2N family's GD32G553).  Absent on families without one."
+        },
+        "ethernet_phy": {
+          "$ref": "#/$defs/chip_ref"
+        },
         "ethernet_phy_count": {
           "type": "integer",
           "minimum": 1,
           "description": "Number of populated Ethernet PHY instances.  Only meaningful alongside `ethernet_phy:`; families with a single PHY (or none) omit it."
         },
-        "nor_flash":          { "$ref": "#/$defs/chip_ref", "description": "SoC controller / peripheral name that reaches the on-module NOR flash (routing annotation, not a chip slug -- e.g. `xspi`)." },
+        "nor_flash": {
+          "$ref": "#/$defs/chip_ref",
+          "description": "SoC controller / peripheral name that reaches the on-module NOR flash (routing annotation, not a chip slug -- e.g. `xspi`)."
+        },
         "nor_flash_driver_status": {
           "$ref": "#/$defs/driver_status",
           "description": "alp-sdk driver maturity for the on-module NOR flash reached via `nor_flash:`. `nor_flash:` names the SoC controller, not a chip slug, so there is no `chips/<part>/` driver to tier -- `none` is the honest (not aspirational) value per ADR 0017 (#1169)."
         },
-        "emmc":               { "$ref": "#/$defs/chip_ref", "description": "SoC controller / peripheral name that reaches the on-module eMMC (routing annotation -- e.g. `sd0`)." },
+        "emmc": {
+          "$ref": "#/$defs/chip_ref",
+          "description": "SoC controller / peripheral name that reaches the on-module eMMC (routing annotation -- e.g. `sd0`)."
+        },
         "emmc_driver_status": {
           "$ref": "#/$defs/driver_status",
           "description": "alp-sdk driver maturity for the on-module eMMC reached via `emmc:`. `emmc:` names the SoC controller, not a chip slug, so there is no `chips/<part>/` driver to tier -- `none` is the honest (not aspirational) value per ADR 0017 (#1169)."
         },
-        "npu":                { "$ref": "#/$defs/chip_ref", "description": "Discrete on-module NPU chip (V2M's DEEPX DX-M1).  On-die NPUs (Ethos-U, DRP-AI) are silicon facts and do NOT appear here." },
-        "pcie_mux":           { "$ref": "#/$defs/chip_ref" },
+        "npu": {
+          "$ref": "#/$defs/chip_ref",
+          "description": "Discrete on-module NPU chip (V2M's DEEPX DX-M1).  On-die NPUs (Ethos-U, DRP-AI) are silicon facts and do NOT appear here."
+        },
+        "pcie_mux": {
+          "$ref": "#/$defs/chip_ref"
+        },
         "ospi_memories": {
           "type": "object",
-          "propertyNames": { "pattern": "^ospi[0-9]+$" },
-          "additionalProperties": { "$ref": "#/$defs/ospi_memory" },
+          "propertyNames": {
+            "pattern": "^ospi[0-9]+$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/ospi_memory"
+          },
           "description": "Per-OSPI-instance external memory population (AEN family).  Keys are OSPI controller instances (`ospi0`, `ospi1`)."
         },
-        "hyperram": { "$ref": "#/$defs/hyperram" },
+        "hyperram": {
+          "$ref": "#/$defs/hyperram"
+        },
         "i2c_devices": {
           "type": "object",
           "additionalProperties": {
@@ -138,7 +206,9 @@
     "inference": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["preferred_backend"],
+      "required": [
+        "preferred_backend"
+      ],
       "description": "Inference-accelerator selection.  `preferred_backend` is always required; `ethos_u_variant` (the primary variant) is required whenever the preferred backend is `ethos_u`.  Which Ethos-U variants the part carries is silicon-determined -- derived from the SoC JSON `npus[]` / capability counts -- so the SoM preset does NOT enumerate them (`npu_population` is deprecated, see below).  Non-Ethos backends (drpai, deepx_dxm1) have no per-instance table.",
       "properties": {
         "preferred_backend": {
@@ -154,31 +224,49 @@
         "npu_population": {
           "type": "array",
           "minItems": 1,
-          "items": { "$ref": "#/$defs/npu_instance" },
+          "items": {
+            "$ref": "#/$defs/npu_instance"
+          },
           "deprecated": true,
-          "description": "DEPRECATED — no longer read by the SDK.  Which Ethos-U instances a part carries is silicon-determined and sourced from the SoC JSON `npus[]` (+ the `ethos_u{55,65,85}_count` capabilities); an on-die NPU cannot be depopulated at the SoM level, so restating it here duplicated the SoC.  Retained as an optional field for back-compat with older consumers; do not author it in new presets.  Scheduled for removal in som-preset v2."
+          "description": "DEPRECATED \u2014 no longer read by the SDK.  Which Ethos-U instances a part carries is silicon-determined and sourced from the SoC JSON `npus[]` (+ the `ethos_u{55,65,85}_count` capabilities); an on-die NPU cannot be depopulated at the SoM level, so restating it here duplicated the SoC.  Retained as an optional field for back-compat with older consumers; do not author it in new presets.  Scheduled for removal in som-preset v2."
         }
       },
       "allOf": [
         {
           "if": {
-            "properties": { "preferred_backend": { "const": "ethos_u" } },
-            "required": ["preferred_backend"]
+            "properties": {
+              "preferred_backend": {
+                "const": "ethos_u"
+              }
+            },
+            "required": [
+              "preferred_backend"
+            ]
           },
-          "then": { "required": ["ethos_u_variant"] }
+          "then": {
+            "required": [
+              "ethos_u_variant"
+            ]
+          }
         }
       ]
     },
     "capabilities": {
       "type": "object",
-      "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
-      "additionalProperties": { "type": "boolean" },
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "type": "boolean"
+      },
       "description": "Per-SoM hardware-accelerator / feature capability flags.  DELIBERATELY OPEN keys (values pinned to booleans): the key set is matched against each library's `integration.zephyr.hw_backends:` block in metadata/libraries/<name>.yaml, which grows with the library catalogue -- enumerating it here would couple the preset schema to every library release.  ADDITIVE direction only: declare capabilities the SoM ADDS on top of the silicon (on-module chips, bridge features).  Removing a silicon capability the SKU leaves unpopulated goes in `silicon_capabilities.unpopulated` instead, never as a `false` here."
     },
     "silicon_capabilities": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["unpopulated"],
+      "required": [
+        "unpopulated"
+      ],
       "description": "SKU-level RESTRICTION of the referenced silicon's capability set.  A SKU can only remove (mark unpopulated / not-bonded-out) what its SoC JSON `capabilities:` block offers -- never add; additions belong in `capabilities:`.  Optional; when absent the SKU inherits the SoC's full capability set (the default for every current SKU).  Semantic cross-check (scripts/validate_metadata.py): every listed name must resolve to a truthy entry in the referenced SoC JSON's `capabilities:` block and must not also appear in this preset's `capabilities:` block.",
       "properties": {
         "unpopulated": {
@@ -203,24 +291,37 @@
     "memory_map": {
       "type": "array",
       "description": "OPTIONAL declarative memory-region table. Stock SoMs whose memory layout matches the silicon default omit this block; the loader derives effective regions from the SoC JSON variant's `sram_banks_kb` + `mram_mb` (resolved via `silicon_variant`). Declare entries here ONLY for non-stock partitioning (e.g. reserving SRAM for a hardware secure enclave outside the default layout). Per-app IPC carve-outs live in the customer's `board.yaml` `ipc:` block, not here.",
-      "items": { "$ref": "#/$defs/memory_region" }
+      "items": {
+        "$ref": "#/$defs/memory_region"
+      }
     },
     "mailbox": {
       "type": "object",
       "description": "Vendor mailbox / IPC controller + channel reservations.  Required when any topology entry runs Zephyr or baremetal.  Per the project's standing convention, AEN / iMX93 controller name may be TBD until the user supplies the HW-config writeup.",
-      "required": ["controller", "channels"],
+      "required": [
+        "controller",
+        "channels"
+      ],
       "additionalProperties": false,
       "properties": {
         "controller": {
           "oneOf": [
-            { "type": "string", "pattern": "^[a-z][a-z0-9_]+$" },
-            { "type": "string", "const": "TBD" }
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]+$"
+            },
+            {
+              "type": "string",
+              "const": "TBD"
+            }
           ],
           "description": "Vendor mailbox controller identifier (e.g. `renesas_mhu`, `nxp_mu`, `alif_mhuv2`).  TBD when the hand-written HW config still owes the value."
         },
         "channels": {
           "type": "array",
-          "items": { "$ref": "#/$defs/mailbox_channel" }
+          "items": {
+            "$ref": "#/$defs/mailbox_channel"
+          }
         },
         "driver_status": {
           "$ref": "#/$defs/driver_status",
@@ -234,12 +335,24 @@
       "allOf": [
         {
           "if": {
-            "properties": { "driver_status": { "const": "partial" } },
-            "required": ["driver_status"]
+            "properties": {
+              "driver_status": {
+                "const": "partial"
+              }
+            },
+            "required": [
+              "driver_status"
+            ]
           },
           "then": {
-            "required": ["notes"],
-            "properties": { "notes": { "minLength": 1 } }
+            "required": [
+              "notes"
+            ],
+            "properties": {
+              "notes": {
+                "minLength": 1
+              }
+            }
           }
         }
       ]
@@ -247,17 +360,23 @@
     "pad_routes": {
       "type": "array",
       "description": "E1M pads / peripheral instances whose dispatch is worth recording explicitly: routed through a SoM-side mediator chip (e.g., CC3501E coprocessor on AEN, GD32G553 IO MCU on V2N), or -- via `dispatch: unrouted` -- physically open on this revision (reaches neither a mediator nor the main silicon). Pads NOT listed here are assumed to route directly to the main silicon's GPIO / peripheral -- that default is only ever `direct`; a pad that goes nowhere MUST carry an explicit `unrouted` entry rather than falling out of the list silently (#1854). The SDK loader composes this list with the board's `e1m_routes:` block at codegen time: when an E1M pad appears in both blocks, the board supplies the role (e.g., `bmi323_int1`) and the SoM supplies the dispatch path (e.g., CC3501E GPIO 14).",
-      "items": { "$ref": "#/$defs/pad_route_entry" }
+      "items": {
+        "$ref": "#/$defs/pad_route_entry"
+      }
     },
     "soc_peripheral_instances": {
       "type": "array",
       "description": "On-die SoC peripheral instances with pads routed on the module's edge (metadata/e1m_modules/<family>/*.tsv) but no dedicated `on_module:` role -- they are bus/interface instances, not populated parts (no MPN, no chips/*.yaml manifest). Declared here purely so the instance is VISIBLE to the SoM model (a prerequisite for #655's DT/pinctrl generation and for board.yaml requests to bind to) -- this block does NOT itself generate anything and does NOT duplicate the pad list, which stays single-sourced in the TSV. `driver_status: none` is the honest default for an instance with no alp-sdk driver behind it yet; do not mark a tier here that the driver files don't back. `instance` slugs must be unique within a preset -- `uniqueItems` on this array only catches two byte-identical entries, so the real check (same slug, differing class/driver_status) is a semantic cross-check in scripts/validate_metadata.py, not this schema (#1170).",
-      "items": { "$ref": "#/$defs/soc_peripheral_instance" }
+      "items": {
+        "$ref": "#/$defs/soc_peripheral_instance"
+      }
     },
     "helper_firmware": {
       "type": "array",
       "description": "On-module helper MCUs whose firmware images the orchestrator registers into the system manifest.  These are NOT heterogeneous-compute peers (they don't appear in `topology:`).  An entry describes a helper along three INDEPENDENT axes: how it is written locally (`flash_method`/`flash_args`, no preset declares one today), how it is updated in the FIELD (`update_channel`, e.g. AEN's `cc3501e_otp` via `alp_ota_spi_otp` or the GD32 bridge's `alp_ota_spi_bridge`), and WHO may invoke the flash method and when (`flash_policy`).  A helper may declare any combination -- the GD32 bridge carries a field-update channel and a `recovery_only` policy with NO local flash method at all, and AEN's `cc3501e_otp` is the same shape.  See `$defs/helper_firmware_entry`.",
-      "items": { "$ref": "#/$defs/helper_firmware_entry" }
+      "items": {
+        "$ref": "#/$defs/helper_firmware_entry"
+      }
     },
     "default_hw_rev": {
       "type": "string",
@@ -269,7 +388,10 @@
     "status": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["preliminary", "partial_hw_config"],
+      "required": [
+        "preliminary",
+        "partial_hw_config"
+      ],
       "properties": {
         "preliminary": {
           "type": "boolean",
@@ -285,7 +407,12 @@
   "$defs": {
     "driver_status": {
       "type": "string",
-      "enum": ["none", "planned", "partial", "complete"],
+      "enum": [
+        "none",
+        "planned",
+        "partial",
+        "complete"
+      ],
       "description": "Shared alp-sdk driver-maturity vocabulary, reused wherever a preset tracks it (`soc_peripheral_instance.driver_status`, `mailbox.driver_status`, `on_module.nor_flash_driver_status`, `on_module.emmc_driver_status`) so the tiers can't drift apart per field. `none` is the honest default absent a matching driver; do not write an aspirational tier (#1169)."
     },
     "chip_ref": {
@@ -305,7 +432,10 @@
     "ospi_memory": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["chip", "role"],
+      "required": [
+        "chip",
+        "role"
+      ],
       "properties": {
         "chip": {
           "type": "string",
@@ -314,20 +444,35 @@
         },
         "assembled": {
           "oneOf": [
-            { "type": "boolean" },
-            { "type": "string", "enum": ["optional"] }
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "optional"
+              ]
+            }
           ],
           "description": "Population status: true (default), false (DNI), or \"optional\" (assembled per BOM variant)."
         },
         "capacity_mbit": {
           "oneOf": [
-            { "type": "integer", "minimum": 1 },
-            { "type": "string", "const": "TBD" }
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "string",
+              "const": "TBD"
+            }
           ]
         },
         "chip_select": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 1,
+          "description": "OSPI0 chip-select index. Every AEN preset's shared OSPI0 octal bus has exactly two chip-select lines wired (OSPI0_SS0/OSPI0_SS1 per the E1M-AEN-2626-R2 netlist) -- 0 or 1, never more."
         },
         "role": {
           "type": "string",
@@ -339,7 +484,10 @@
     "hyperram": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["chip", "capacity_mbit"],
+      "required": [
+        "chip",
+        "capacity_mbit"
+      ],
       "properties": {
         "chip": {
           "type": "string",
@@ -355,8 +503,14 @@
         },
         "capacity_mbit": {
           "oneOf": [
-            { "type": "integer", "minimum": 1 },
-            { "type": "string", "const": "TBD" }
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "string",
+              "const": "TBD"
+            }
           ]
         },
         "interface": {
@@ -366,19 +520,37 @@
         },
         "chip_select": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 1,
+          "description": "OSPI0 chip-select index. Mirrors ospi_memory.chip_select: the shared OSPI0 octal bus has exactly two chip-select lines wired (OSPI0_SS0/OSPI0_SS1 per the E1M-AEN-2626-R2 netlist) -- 0 or 1, never more."
+        },
+        "assembled": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "optional"
+              ]
+            }
+          ],
+          "description": "Population status: true (default), false (DNI), or \"optional\" (assembled per BOM variant).  Mirrors ospi_memory.assembled deliberately: without this key the default true silently claimed a HyperRAM on every SKU that merely declared the footprint, which is how E1M-AEN801 came to advertise 256 Mbit of external RAM it does not populate."
         }
       }
     },
     "npu_instance": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["variant"],
+      "required": [
+        "variant"
+      ],
       "properties": {
         "variant": {
           "type": "string",
           "pattern": "^u[0-9]+$",
-          "description": "Ethos-U variant of this instance (`u55`, `u65`, `u85`).  The instance's role/subtype, MAC size, and the host core it pairs with are silicon facts and live once in the SoC JSON (`npus[].subtype` / `mac_per_cycle` / `paired_core`) — a SoM preset does not restate them."
+          "description": "Ethos-U variant of this instance (`u55`, `u65`, `u85`).  The instance's role/subtype, MAC size, and the host core it pairs with are silicon facts and live once in the SoC JSON (`npus[].subtype` / `mac_per_cycle` / `paired_core`) \u2014 a SoM preset does not restate them."
         }
       }
     },
@@ -389,7 +561,12 @@
       "properties": {
         "os": {
           "type": "string",
-          "enum": ["yocto", "zephyr", "baremetal", "off"],
+          "enum": [
+            "yocto",
+            "zephyr",
+            "baremetal",
+            "off"
+          ],
           "description": "Default runtime for this core.  Customer's board.yaml `cores.<id>.os` overrides."
         },
         "app": {
@@ -419,28 +596,56 @@
         "zephyr_twister_name": {
           "type": "string",
           "description": "Twister board-metadata `name:` field for `os: zephyr` entries, when it differs from `zephyr_full_name` (some families drop the SoC parenthetical here). Defaults to `zephyr_full_name` when absent."
+        },
+        "openamp_ipc": {
+          "type": "boolean",
+          "description": "True when this core's board `.dts` (V2N/V2M family, `--emit zephyr-board`'s `_v2n_dts()`, issue #655 slice 2) carries the OpenAMP/MHU-B reserved-memory block and the CAN-FD-unavailable analysis comment.  A board-tree-content fact, not a claim that OpenAMP is unsupported where absent: E1M-V2M101 simply does not carry either block in the currently-committed tree yet, and this flag lets the generator reproduce that gap byte-for-byte instead of inventing content for a board nobody wrote it for. Absent defaults to false."
         }
       },
       "allOf": [
         {
           "if": {
-            "properties": { "os": { "const": "yocto" } },
-            "required": ["os"]
+            "properties": {
+              "os": {
+                "const": "yocto"
+              }
+            },
+            "required": [
+              "os"
+            ]
           },
-          "then": { "required": ["machine"] }
+          "then": {
+            "required": [
+              "machine"
+            ]
+          }
         },
         {
           "if": {
-            "properties": { "os": { "const": "zephyr" } },
-            "required": ["os"]
+            "properties": {
+              "os": {
+                "const": "zephyr"
+              }
+            },
+            "required": [
+              "os"
+            ]
           },
-          "then": { "required": ["board"] }
+          "then": {
+            "required": [
+              "board"
+            ]
+          }
         }
       ]
     },
     "memory_region": {
       "type": "object",
-      "required": ["name", "base", "accessible_from"],
+      "required": [
+        "name",
+        "base",
+        "accessible_from"
+      ],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -450,22 +655,40 @@
         },
         "base": {
           "oneOf": [
-            { "type": "integer", "minimum": 0 },
-            { "type": "string", "const": "TBD" }
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "const": "TBD"
+            }
           ],
           "description": "Physical base address.  TBD when the hand-written HW config still owes the value."
         },
         "size_mib": {
           "oneOf": [
-            { "type": "integer", "minimum": 1 },
-            { "type": "string", "const": "TBD" }
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "string",
+              "const": "TBD"
+            }
           ],
           "description": "Region size in MiB.  Provide either size_mib or size_kib."
         },
         "size_kib": {
           "oneOf": [
-            { "type": "integer", "minimum": 1 },
-            { "type": "string", "const": "TBD" }
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "string",
+              "const": "TBD"
+            }
           ],
           "description": "Region size in KiB.  Provide either size_mib or size_kib."
         },
@@ -484,19 +707,37 @@
         },
         "carveout": {
           "type": "boolean",
-          "description": "When explicitly false, this region is excluded from IPC carve-out allocation (scripts/alp_orchestrate/carveout.py resolve_carve_outs) even though it declares a real `base`.  For a flash-class region (e.g. an MRAM MCUboot/slot0/reserved/storage sub-region that must publish a base so the board generator can lay out its partition table) that base is NOT byte-addressable shared memory a raw_shmem/rpmsg carve-out can safely land in.  Defaults to true (eligible).  Setting this false ALSO removes the region from `_known_flash_devices()` and refuses it as a board.yaml `storage[].flash_device:` target (#1484) -- a second, overloaded meaning; #1365 tracks giving carveout eligibility and flash-device eligibility their own, principled fields instead of sharing this flag."
+          "description": "LEGACY OVERRIDE (#1365 split B) that MUST AGREE with the region's DERIVED class where one is resolvable; it is no longer the primary signal.  `scripts/alp_orchestrate/carveout.py` (IPC carve-out eligibility) and `scripts/alp_orchestrate/partition.py` (flash-device eligibility) now derive a region's class against the SoC's declared on-die MRAM aperture (`scripts/alp_orchestrate/aperture.py`) -- a region CONTAINED in the aperture is flash-class regardless of this flag.  This field is honoured VERBATIM only as a fallback: where the SoC declares no aperture at all (every non-Alif SoM), or this region's own `base` is unresolved (e.g. `mram_main`'s `\"TBD\"`), there is nothing to derive a class from, so the authored value here decides -- and it decides BEFORE `write_authority:` in that fallback: when a region's base is unresolved and BOTH fields are authored, `carveout:` wins (the conservative, pre-split-B signal) and `write_authority:` is consulted only when this field is absent.  Historically (pre-split-B): when explicitly false, the region was excluded from IPC carve-out allocation and from `_known_flash_devices()`/`storage[].flash_device:` (#1484) even though it declares a real `base` -- for a flash-class region (e.g. an MRAM MCUboot/slot0/reserved/storage sub-region that must publish a base so the board generator can lay out its partition table) that base is NOT byte-addressable shared memory a raw_shmem/rpmsg carve-out can safely land in.  Defaults to true (eligible).  NOT deprecated or removed -- `additionalProperties: false` would break every existing `carveout: false` row and any customer copy -- but a value that DISAGREES with a resolvable derived class is a metadata bug to fix, not a silently-honoured override."
+        },
+        "write_authority": {
+          "type": "string",
+          "enum": ["customer_image", "vendor_image", "customer_runtime", "secure_enclave", "none", "composite"],
+          "description": "WHO may write this region, and WHEN.  Modelled on `helper_firmware_entry.flash_policy`, and deliberately two-axis: a one-axis customer/vendor/secure split collapses `he_slot0` onto `storage` (both customer) and cannot separate flash-time from runtime, which is the distinction the hazard needs.  `customer_image` = written only by the flash tool, never by running code (`he_slot0`, `hp_slot0`).  `vendor_image` = a factory-provisioned image (`mcuboot`).  `customer_runtime` = runtime-writable by the application, and the ONLY value a row may claim DIRECTLY for an IPC carve-out or a runtime mount to land on (`storage`).  `secure_enclave` = written by the Secure Enclave at provisioning (`atoc`); the SE is not a `topology:` core, so it can never appear in `accessible_from` and no core id can express this.  `none` = nobody writes it (`reserved` headroom) -- an explicit no-writer, not a catch-all.  `composite` = a whole-device alias spanning contained rows of DIFFERENT authority (`mram_main`), where a single value would be false by construction; consult the contained rows -- `scripts/alp_orchestrate/partition.py`'s `flash_device:` resolver is the one consumer that accepts `composite` as an explicit-pin target, and only once EVERY contained row independently resolves a concrete span, declares its own `write_authority`, and together they contiguously tile the alias with no gap and no overlap (alp-sdk#2088); every other consumer (an IPC carve-out, `carveout.py`) refuses a `composite` row outright, never descending into it.  ABSENT MEANS UNRESOLVED, NEVER `customer_runtime` -- a consumer must treat an authored region carrying no `write_authority` as ineligible for both IPC carve-out and runtime write, and say so, rather than defaulting permissively (ADR-0034 clause 4).  Not in `required` for som-preset v1 because `docs/porting-new-som.md` is a public porting guide and a customer preset that authored `memory_map:` rows would break at `tan validate` on upgrade; `scripts/validate_metadata.py` enforces presence semantically instead, and v2 promotes it.  NOTE `accessible_from:` is read/execute reachability only and says nothing about write authority: `atoc` lists `[m55_he, m55_hp]` and neither may write it (#1365).",
+          "$comment": "ADR-0027's role->region mapping must consume this field rather than growing a parallel flag: a `role:` may only resolve onto a `customer_runtime` region -- never `composite`, unlike the explicit-pin `flash_device:` path (`scripts/alp_orchestrate/partition.py`, alp-sdk#2088), which DOES accept a `composite` whole-device alias, but only once every row it contains is independently verified `customer_runtime`-safe. `role:` is not implemented yet (ADR-0027 status: Proposed); when it is, it should resolve directly to the verified `customer_runtime` row itself, not to a `composite` alias it would then have to re-verify."
         },
         "access_windows": {
           "type": "object",
           "description": "OPTIONAL per-core addressable sub-window of this region, keyed by core id.  `accessible_from:` is a yes/no per core and cannot express \"this core reaches only PART of the region\" -- the RZ/V2N Cortex-M33 does exactly that (FSP bsp_slave_address.h: CM33-secure 0x80000000 / CM33-non-secure 0x90000000 -> A55 0x40000000, 256 MiB) while ddr_main spans 4 GiB.  Declare the reachable slice here and scripts/alp_orchestrate/carveout.py confines that core's IPC carve-outs to it instead of allocating at the region top, where the address does not exist for that core.  Omit for regions every accessible_from core reaches in full.",
-          "propertyNames": { "pattern": "^[a-z][a-z0-9_]+$" },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]+$"
+          },
           "additionalProperties": {
             "type": "object",
-            "required": ["base"],
+            "required": [
+              "base"
+            ],
             "additionalProperties": false,
             "anyOf": [
-              { "required": ["size_kib"] },
-              { "required": ["size_mib"] }
+              {
+                "required": [
+                  "size_kib"
+                ]
+              },
+              {
+                "required": [
+                  "size_mib"
+                ]
+              }
             ],
             "properties": {
               "base": {
@@ -504,8 +745,14 @@
                 "minimum": 0,
                 "description": "Window base in the SAME address space as the region's own `base` (i.e. the physical/host view), NOT the aliased address the core issues."
               },
-              "size_kib": { "type": "integer", "minimum": 1 },
-              "size_mib": { "type": "integer", "minimum": 1 },
+              "size_kib": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "size_mib": {
+                "type": "integer",
+                "minimum": 1
+              },
               "note": {
                 "type": "string",
                 "description": "Provenance for the window -- name the vendor header/manual it was read from."
@@ -522,7 +769,10 @@
     },
     "mailbox_channel": {
       "type": "object",
-      "required": ["id", "reserved_for"],
+      "required": [
+        "id",
+        "reserved_for"
+      ],
       "additionalProperties": false,
       "properties": {
         "id": {
@@ -539,7 +789,11 @@
     },
     "helper_firmware_entry": {
       "type": "object",
-      "required": ["name", "chip", "flash_policy"],
+      "required": [
+        "name",
+        "chip",
+        "flash_policy"
+      ],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -560,33 +814,54 @@
         "flash_method": {
           "type": "string",
           "anyOf": [
-            { "pattern": "^[a-z][a-z0-9_]+$" },
-            { "const": "TBD" }
+            {
+              "pattern": "^[a-z][a-z0-9_]+$"
+            },
+            {
+              "const": "TBD"
+            }
           ],
           "description": "Backend tool key naming the transport by which this helper's image is WRITTEN locally.  TBD pending the authoritative flow.  Independent of `update_channel` (which answers how the device is updated in the FIELD): an entry may carry both.  It says nothing about who is allowed to invoke it -- that is `flash_policy`, which is REQUIRED on every helper entry regardless of which of these two keys it carries.  NO SoM preset declares this key today: `swd_probe` was removed from the four E1M-X GD32 bridge entries when GD32 programming was separated out of `tan` (#1439, tan-cli#732)."
         },
         "flash_args": {
           "oneOf": [
-            { "type": "object", "additionalProperties": true },
-            { "type": "string", "const": "TBD" }
+            {
+              "type": "object",
+              "additionalProperties": true
+            },
+            {
+              "type": "string",
+              "const": "TBD"
+            }
           ],
           "description": "Backend-specific args (interface, target, base address, ...) forwarded verbatim to the flash backend.  DELIBERATELY OPEN object: the shape follows `flash_method`'s backend contract, which this schema cannot enumerate; TBD when the method is TBD.  Only meaningful alongside `flash_method`."
         },
         "flash_policy": {
           "type": "string",
-          "enum": ["customer", "factory", "recovery_only"],
+          "enum": [
+            "customer",
+            "factory",
+            "recovery_only"
+          ],
           "description": "WHO may invoke `flash_method`, and WHEN.  REQUIRED on every helper entry -- there is no absent-means-`customer` default; a helper with no local flash path at all (no `flash_method`) still states who may reach it if one is ever added.  `customer`: a genuine customer flash target.  `factory`: programmed by Alp Lab in production, never a customer flash target.  `recovery_only`: programmed by Alp Lab in production, and customer-flashable ONLY to recover a bricked device, with Alp Lab-supplied binaries.  Independent of `update_channel`, which answers how the device is updated in the FIELD -- a helper can carry both, and the GD32 bridge does."
         },
         "update_channel": {
           "type": "string",
-          "enum": ["alp_ota_spi_otp", "alp_ota_spi_bridge"],
+          "enum": [
+            "alp_ota_spi_otp",
+            "alp_ota_spi_bridge"
+          ],
           "description": "How this helper's firmware is updated in the FIELD, once the module is in a customer's hands.  `alp_ota_spi_otp` (AEN's `cc3501e_otp`): Alp-released firmware applied over the bridge SPI link, programming the chip's own OTP.  `alp_ota_spi_bridge` (the GD32 bridge): streamed over the bridge link into a slot-A/B application bootloader with commit + rollback -- a DIFFERENT value on purpose, because the GD32 has no OTP to program.  Independent of `flash_method`; declaring a channel does not by itself make the helper un-flashable, and does not imply anything about who may flash it -- that is `flash_policy`."
         }
       }
     },
     "soc_peripheral_instance": {
       "type": "object",
-      "required": ["instance", "class", "silicon_peripheral"],
+      "required": [
+        "instance",
+        "class",
+        "silicon_peripheral"
+      ],
       "additionalProperties": false,
       "properties": {
         "instance": {
@@ -615,7 +890,10 @@
     },
     "pad_route_entry": {
       "type": "object",
-      "required": ["e1m", "dispatch"],
+      "required": [
+        "e1m",
+        "dispatch"
+      ],
       "additionalProperties": false,
       "properties": {
         "e1m": {
@@ -625,13 +903,25 @@
         },
         "dispatch": {
           "type": "string",
-          "enum": ["cc3501e", "gd32_bridge", "direct", "unrouted", "TBD"],
+          "enum": [
+            "cc3501e",
+            "gd32_bridge",
+            "direct",
+            "unrouted",
+            "TBD"
+          ],
           "description": "SoM-side mediator the pad routes through. `direct` is the default for pads not in the list; an explicit `direct` entry is allowed for clarity. `unrouted` marks a pad that is physically open on this hardware revision -- it reaches neither a mediator nor the main silicon's GPIO / peripheral -- and MUST be listed here explicitly; there is no implicit `unrouted` default (an absent entry always means `direct`). The SDK's GPIO dispatch path refuses to open an `unrouted` pad with ALP_ERR_NOSUPPORT instead of silently driving a pin that goes nowhere (#1854). `TBD` marks pads whose routing is pending the user's HW-config writeup (per the no-inventing-values rule)."
         },
         "dispatch_pin": {
           "oneOf": [
-            { "type": "integer", "minimum": 0 },
-            { "type": "string", "pattern": "^[A-Za-z0-9_./]+$" }
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_./]+$"
+            }
           ],
           "description": "Mediator-local pin or bus identifier. Forms: integer (CC3501E GPIO index, e.g. `14`); single pad name (`\"PA11\"` for a GD32 port pad); bus pin (`\"SPI1.MISO\"`); or a slash-joined pair for multi-pin peripherals (`\"PA0/PB3\"` for a quadrature encoder's X/Y pads). Meaningless for `dispatch: unrouted` (there is no mediator pin to name); omit it there."
         },
@@ -643,19 +933,33 @@
       "allOf": [
         {
           "if": {
-            "properties": { "dispatch": { "const": "unrouted" } },
-            "required": ["dispatch"]
+            "properties": {
+              "dispatch": {
+                "const": "unrouted"
+              }
+            },
+            "required": [
+              "dispatch"
+            ]
           },
           "then": {
-            "required": ["doc"],
-            "properties": { "doc": { "minLength": 1 } }
+            "required": [
+              "doc"
+            ],
+            "properties": {
+              "doc": {
+                "minLength": 1
+              }
+            }
           }
         }
       ]
     },
     "i2c_bus": {
       "type": "object",
-      "required": ["devices"],
+      "required": [
+        "devices"
+      ],
       "additionalProperties": false,
       "properties": {
         "bus_master": {
@@ -673,7 +977,10 @@
     },
     "i2c_device": {
       "type": "object",
-      "required": ["chip", "role"],
+      "required": [
+        "chip",
+        "role"
+      ],
       "additionalProperties": false,
       "properties": {
         "chip": {
@@ -707,8 +1014,15 @@
         },
         "assembled": {
           "oneOf": [
-            { "type": "boolean" },
-            { "type": "string", "enum": ["optional"] }
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "optional"
+              ]
+            }
           ],
           "description": "Population status: true (default), false (DNI), or \"optional\" (assembled per BOM variant)."
         },

@@ -68,7 +68,7 @@ def test_source_paths_are_not_touched(path):
 
 def _git(repo: Path, *args: str) -> str:
     return subprocess.run(
-        ["git", *args], cwd=repo, capture_output=True, text=True, check=True
+        ["git", *args], cwd=repo, capture_output=True, text=True, encoding="utf-8", check=True
     ).stdout
 
 
@@ -105,7 +105,7 @@ def _repo_with_conflict(tmp_path: Path) -> Path:
     _git(repo, "commit", "-q", "-m", "main")
 
     subprocess.run(["git", "merge", "side"], cwd=repo,
-                   capture_output=True, text=True)  # conflicts, non-zero
+                   capture_output=True, text=True, encoding="utf-8", errors="replace")  # conflicts, non-zero
     return repo
 
 

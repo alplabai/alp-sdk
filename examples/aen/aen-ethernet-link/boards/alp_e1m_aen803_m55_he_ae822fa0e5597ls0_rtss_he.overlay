@@ -1,0 +1,97 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Ethernet (GMAC) bring-up overlay for the E1M-AEN803 (E8, M55-HE).
+ *
+ * The ethernet@48100000 node (eth_dwmac core + the alp-sdk alif,ethernet glue,
+ * fixed-link RMII PHY) already lives in zephyr/dts/alif/ensemble_e8_peripherals.dtsi
+ * as status="disabled"; this overlay enables it and supplies the RMII pin group +
+ * a real MAC address.
+ *
+ * RMII PADS: the AUTHORITATIVE E1M-AEN803 routing from
+ * metadata/e1m_modules/aen/alif-ethernet-phy.tsv (NOT the fork's reference route,
+ * which the first cut wrongly used):
+ *   REFCLK P11_0 | RXD0 P11_3 | RXD1 P1_1 | CRS_DV P6_7  (inputs)
+ *   TXD0  P10_4  | TXD1 P10_5 | TXEN  P1_5               (outputs)
+ * The input pads carry `input-enable` (the upstream pad REN bit, set by
+ * soc/alif/ensemble/pinctrl_soc.h) so the RMII RX buffers actually sense. The PHY
+ * is unmanaged (fixed-link) so MDC/MDIO (P11_2/P11_1) are not muxed.
+ *
+ * PHY POWER/RESET are ALIF pins (per the SoM TSV), NOT CC3501E as the first cut
+ * claimed: E_PHY_PWRDWN = P15_4 (lpgpio) and E_PHY_RESET = P11_6 (gpio11). Both
+ * are driven by main(); the alp-sdk E8 dtsi already carries gpio0..gpio9 AND
+ * lpgpio, so lpgpio just needs status="okay" -- only gpio11 is newly created
+ * here (reg/IRQ/ngpios from the fork dtsi).
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+
+/ {
+	chosen {
+		zephyr,flash = &itcm; /* bench RAM/SES-load; path-ref form */
+		/delete-property/ zephyr,code-partition;
+		/*
+		 * Main RAM stays on the generated default `zephyr,sram = &dtcm` --
+		 * unlike the first cut, this overlay does NOT move all of RAM to
+		 * SRAM0 (slower, and intermittently broke the ISP). The GMAC DMA
+		 * still cannot reach DTCM, so only the Ethernet-owned buffers move:
+		 * the ethernet node's `memory-region = <&sram0>;` (SoC dtsi) places
+		 * the descriptor rings there, and CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION
+		 * (prj.conf) relocates the net_buf packet pool (subsys/net/ip/net_pkt.c)
+		 * into the same region. See eth_dwmac_alif_ensemble.c's file header
+		 * for the full placement rationale; CONFIG_DCACHE=n (prj.conf) keeps
+		 * the CPU and the DMA coherent.
+		 */
+	};
+};
+
+&pinctrl {
+	pinctrl_eth: pinctrl_eth {
+		/* RMII inputs (REFCLK + RX) + MDIO (bidirectional, read during MDIO
+		 * transactions) -- input-enable sets the pad REN bit so they sense.
+		 * MDC/MDIO = P11_2/P11_1 (SoM TSV) let us read the PHY status registers. */
+		group0 {
+			pinmux = <PIN_P11_0__ETH_REFCLK_B>, <PIN_P11_3__ETH_RXD0_B>,
+				 <PIN_P1_1__ETH_RXD1_C>, <PIN_P6_7__ETH_CRS_DV_A>,
+				 <PIN_P11_1__ETH_MDIO_B>;
+			input-enable;
+		};
+		/* RMII outputs (TX) + MDC (MDIO clock). */
+		group1 {
+			pinmux = <PIN_P10_4__ETH_TXD0_B>, <PIN_P10_5__ETH_TXD1_B>,
+				 <PIN_P1_5__ETH_TXEN_C>, <PIN_P11_2__ETH_MDC_B>;
+		};
+	};
+};
+
+/* PHY reset line E_PHY_RESET = P11_6 (gpio11 pin 6). gpio11@4900b000 from the
+ * fork dts (snps,designware-gpio, ngpios 8, IRQ 267..). */
+&{/soc} {
+	gpio11: gpio@4900b000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x4900B000 0x1000>;
+		ngpios = <8>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "okay";
+	};
+};
+
+/* PHY power-down line E_PHY_PWRDWN = P15_4 (lpgpio pin 4). lpgpio@42002000
+ * (AON/LP domain) already exists in the alp-sdk E8 dtsi; just enable it. */
+&lpgpio {
+	status = "okay";
+};
+
+&ethernet {
+	pinctrl-0 = <&pinctrl_eth>;
+	pinctrl-names = "default";
+	/* Station MAC: inherits zephyr,random-mac-address from the SoC dtsi
+	 * (per-boot random locally-administered 02:01:56:xx:xx:xx) -- DHCP
+	 * doesn't care which MAC asks, and a random one means two boards on
+	 * the same bench switch never collide.  To pin a fixed per-unit MAC
+	 * instead:
+	 *   /delete-property/ zephyr,random-mac-address;
+	 *   local-mac-address = [ .. ]; */
+	status = "okay";
+};

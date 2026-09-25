@@ -35,10 +35,10 @@ extern "C" {
 /* ------------------------------------------------------------------ */
 
 #define EVK_PIN_CAM_MUX_SEL    ALP_E1M_GPIO_IO2  /**< PI3WVR626 SEL pin; see `evk_cam_select_*` enum + chips/cam_mux_pi3wvr626. */
-#define EVK_PIN_ENCODER_SW     ALP_E1M_GPIO_IO4  /**< Rotary encoder push switch (PEC12R-4222F-S0024), 10k pull-up + 0.1uF debounce. Active-low. */
+#define EVK_PIN_ENCODER_SW     ALP_E1M_GPIO_IO4  /**< Rotary encoder push switch (PEC11R-4215K-S0024), 10k pull-up + 0.1uF debounce. Active-low. */
 #define EVK_PIN_CAM_RST        ALP_E1M_GPIO_IO5  /**< Camera reset (active-low). Active-low. */
 #define EVK_PIN_PCIE_IOEXP_INT ALP_E1M_GPIO_IO7  /**< INT input from the PCIe IO expander. */
-#define EVK_PIN_I2S_MUX_EN     ALP_E1M_GPIO_IO8  /**< I2S0 74LVC157 /E (Alif side P7.1); drive low to enable mux. Active-low. */
+#define EVK_PIN_I2S_MUX_EN     ALP_E1M_GPIO_IO8  /**< I2S0 74LVC157 /E, active low. CC3501E-proxied, not an Alif pin. Active-low. */
 #define EVK_PIN_PCIE_IOEXP_RST ALP_E1M_GPIO_IO9  /**< Reset output to the PCIe IO expander. */
 #define EVK_PIN_PCIE0_I2C_EN   ALP_E1M_GPIO_IO10  /**< Drive high to enable I2C mux to the PCIe slot. */
 #define EVK_PIN_USB2_MUX_SEL   ALP_E1M_GPIO_IO11  /**< USB2 TMUXHS221 select: 0 = USB connector, 1 = M.2 E-key USB. */
@@ -49,7 +49,7 @@ extern "C" {
 #define EVK_PIN_M2E_SDIO_WAKE  ALP_E1M_GPIO_IO18  /**< M.2 E-key SDIO-path wake (active-low). Active-low. */
 #define EVK_PIN_M2E_UART_WAKE  ALP_E1M_GPIO_IO19  /**< M.2 E-key UART-path wake (active-low). Active-low. */
 #define EVK_PIN_SDIO_MUX_EN    ALP_E1M_GPIO_IO20  /**< SDIO 74LVC157 /E; drive low to enable mux. Active-low. */
-#define EVK_PIN_SDIO_MUX_SEL   ALP_E1M_GPIO_IO21  /**< SDIO 74LVC157 S; 0 = M.2 E-key SDIO, 1 = microSD slot. */
+#define EVK_PIN_SDIO_MUX_SEL   ALP_E1M_GPIO_IO21  /**< SDIO mux S; 0 = microSD slot, 1 = M.2 E-key SDIO (works only via the 3257-type bus-switch rework, see alp_e1m_evk.h). r2: not firmware-driven (dispatch: unrouted, #1854); strapped via R198/R27 to header P18, P18 open pulls S low = microSD. r1: firmware-drivable via CC3501E GPIO_30 (hw-revisions.yaml pad_route_overrides) -- never drive it LOW with P18's jumper fitted, R198 ties GPIO_30 to P18 pin 2/+3V3 through the jumper. */
 #define EVK_PIN_PCIE_MUX_PD    ALP_E1M_GPIO_IO22  /**< Drive HIGH to power down all four PCIe lane muxes. */
 #define EVK_PIN_PCIE_MUX_SEL   ALP_E1M_GPIO_IO23  /**< Selects M-key vs E-key routing on the PCIe lane muxes. */
 #define EVK_PIN_LED_GREEN      ALP_E1M_GPIO_PWM3  /**< RGB LED green -- the PWM3 pad driven as a digital GPIO. */
@@ -104,7 +104,7 @@ extern "C" {
 /* I2S instances (ALP_E1M_I2S<N> -> board-side codec / mic role) */
 /* ------------------------------------------------------------------ */
 
-#define EVK_I2S_AUDIO_CODEC ALP_E1M_I2S0  /**< Routed through the 74LVC157 mux to either the TAS2563 amps (default) or the M.2 E-key I2S; see EVK_PIN_I2S_MUX_SEL. */
+#define EVK_I2S_AUDIO_CODEC ALP_E1M_I2S0  /**< Routed through the 74LVC157 mux to either the TAS2563 amps (default select) or the M.2 E-key I2S; see EVK_PIN_I2S_MUX_SEL. On EVK rev 2626-R2 the mux is wired backwards for this direction regardless of SEL -- confirmed against the netlist, I2S0_WS/SCLK/SDO are the mux's Y OUTPUTS, not inputs, so enabling it (EVK_PIN_I2S_MUX_EN low) cannot route audio out to either destination and instead contends with the SoC's own I2S3 TX pads; alp-sdk#2077. */
 #define EVK_I2S_PDM_MIC     ALP_E1M_I2S1  /**< PDM mic capture (4x MP34DT05 mics). */
 
 /* ------------------------------------------------------------------ */
@@ -117,27 +117,27 @@ extern "C" {
 /* Quadrature encoder channels (ALP_E1M_ENC<N> -> board-side encoder) */
 /* ------------------------------------------------------------------ */
 
-#define EVK_ENC_ROTARY ALP_E1M_ENC0  /**< PEC12R-4222F-S0024 rotary encoder: ENC0_X = A phase, ENC0_Y = B phase, 24 PPR; push switch on EVK_PIN_ENCODER_SW (E1M_GPIO_IO4). */
+#define EVK_ENC_ROTARY ALP_E1M_ENC0  /**< PEC11R-4215K-S0024 rotary encoder (designator E1, 2626-R2 EVK schematic netlist): ENC0_X = A phase, ENC0_Y = B phase, 24 PPR; push switch on EVK_PIN_ENCODER_SW (E1M_GPIO_IO4). */
 
 /* ------------------------------------------------------------------ */
 /* On-board I2C device addresses (from `i2c_devices:`) */
 /* ------------------------------------------------------------------ */
 
-#define EVK_I2C_ADDR_ICM42670      0x69u  /**< U12 IMU (AD0->VIO). Collides with U13 @0x69 until the respin. BENCH-CONFIRMED 2026-06-16 (E1M-AEN801): U12 + U13 both answer at 0x69 and collide -- see EVK_I2C_ADDR_BMI323. */
-#define EVK_I2C_ADDR_BMI323        0x68u  /**< U13 IMU; respin target (SDO->GND = datasheet default). Pre-respin batch mis-straps it to 0x69 (collides w/ U12, see EVK_I2C_ADDR_ICM42670). */
-#define EVK_I2C_ADDR_BMP581        0x47u  /**< U14 barometer (SDO->VIO; 0x46 if SDO->GND). */
-#define EVK_I2C_ADDR_TCAL9538_MAIN 0x72u  /**< U35 main I/O expander (A1=1, A0=0). Handles LCD/camera/capacitive-touch control + four sensor interrupt inputs. */
-#define EVK_I2C_ADDR_TCAL9538      EVK_I2C_ADDR_TCAL9538_MAIN  /**< Alias for EVK_I2C_ADDR_TCAL9538_MAIN. */
-#define EVK_I2C_ADDR_TCAL9538_PCIE 0x71u  /**< U37 PCIe I/O expander (A0=1, A1=0). Handles the I2C-mux SEL + PCIe slot RST/WAKE/CLKREQ signals + M2E_ALERT. */
-#define EVK_I2C_ADDR_TCA6408A_MAIN 0x20u  /**< U35 main I/O expander, TCA6408ARSVR alternative (R112 fitted, R145 DNP). PCA9538-register-compatible, so chips/tcal9538 drives it unchanged. BENCH-CONFIRMED 2026-06-16: read back config=0xFF + a live input port. */
-#define EVK_I2C_ADDR_TAS2563_LOW   0x4Du  /**< U27 smart amp (AD0 = 10k to GND). */
-#define EVK_I2C_ADDR_TAS2563_HIGH  0x4Eu  /**< U28 smart amp (AD0 = 10k to VDD). The TAS2563 broadcast address (0x48) was occupied on PRE-RESPIN boards by U32 INA236B (+V_CAM0 rail); the U32 re-strap to 0x4B from the next batch freed 0x48 at the hardware level. That does not make it usable from the SDK: 0x48 doesn't pin down one physical chip the way a strap address does, and tas2563_init() rejects 0x48 on every board revision regardless of direction, so firmware must unconditionally issue two targeted unit-address writes rather than a 0x48 broadcast. */
-#define EVK_I2C_ADDR_INA236_3V3    0x40u  /**< U21 INA236A, +3V3 rail (20 mOhm shunt, 4.0 A max). A0 = GND. */
-#define EVK_I2C_ADDR_INA236_1V8    0x41u  /**< U31 INA236A, +1V8 rail (20 mOhm shunt, 4.0 A max). A0 = V+. */
-#define EVK_I2C_ADDR_INA236_VIO    0x42u  /**< U33 INA236A, +VIO rail (50 mOhm shunt, 1.6 A max). A0 = SDA. */
-#define EVK_I2C_ADDR_INA236_VCAM0  0x4Bu  /**< U32 INA236B, +V_CAM0 rail (50 mOhm shunt, 1.6 A max). Re-strapped A0=SCL -> 0x4B from the next batch; PRE-RESPIN boards had it at 0x48, which collides with the TAS2563 broadcast address (unreadable there). */
-#define EVK_I2C_ADDR_INA236_VCAM1  0x49u  /**< U34 INA236B, +V_CAM1 rail (50 mOhm shunt, 1.6 A max). A0 = V+. */
-#define EVK_I2C_ADDR_INA236_5V     0x4Au  /**< U30 INA236B, +5V rail (20 mOhm shunt, 4.0 A max). A0 = SDA. */
+#define EVK_I2C_ADDR_ICM42670                    0x69u  /**< U12 IMU (AD0->VIO). The 0x69 collision with U13 is PRE-RESPIN ONLY and does NOT apply to the 2026W36 batch: bench-confirmed 2026-06-16 on an E1M-AEN801 that U12 + U13 both answered at 0x69 and collided, but on E1M-AEN803 serial 2026W36-0002 (2026-09-07) U12 answers 0x69 with WHO_AM_I(0x75)=0x67 while U13 answers 0x68 separately -- the two are distinct. See EVK_I2C_ADDR_BMI323. */
+#define EVK_I2C_ADDR_BMI323                      0x68u  /**< U13 IMU (SDO->GND = datasheet default). The 2026W36 batch carries the respin: 0x68 ACKs on E1M-AEN803 serial 2026W36-0002 (2026-09-07) with 0x69 answering U12 separately -- no collision. Pre-respin boards mis-strapped U13 to 0x69 (see EVK_I2C_ADDR_ICM42670). Chip ID was NOT confirmed by that census, but not for the reason first recorded: the sweep read reg 0x00 as 0x0000 and that was the TWO DUMMY BYTES the BMI323 read protocol prepends (BST-BMI323-DS000-13 Rev 1.7 Table 53 p.204), unstripped by a raw sweep -- not a POR state. CHIP_ID's reset value is already 0x0043 (Table 36 p.61), readable straight out of POR with no soft reset. Corollary that cost a bench session: a correct CHIP_ID read proves only that the READ path works. It is not evidence that a soft reset or any configuration write landed, because the part ACKs writes it does not apply. */
+#define EVK_I2C_ADDR_BMP581                      0x47u  /**< U14 barometer. SDO is connected to VIO on this EVK (maintainer-confirmed 2026-09-05), which is the 0x47 strap; 0x46 would be SDO->GND. Matches 3 of 3 boards, which ACK at 0x47 with CHIP_ID(0x01)=0x50 (2026W36-0001 and -0003 on 2026-09-05; -0002 on 2026-09-07, with 0x46 silent). NOTE: the maintainer's EVK I2C schedule lists U14 at 0x46; reviewed 2026-09-07 and confirmed a slip in the schedule, not a strap the boards carry -- do not 'correct' this back to 0x46. */
+#define EVK_I2C_ADDR_TCAL9538_MAIN               0x73u  /**< U35 main I/O expander (A1=1, A0=1). Handles LCD/camera/capacitive-touch control + four sensor interrupt inputs. CORRECTED 2026-09-05 from 0x72 / A1=1,A0=0 (alp-sdk#1974): the maintainer's EVK I2C schedule gives 1110011 = 0x73, and 2 of 2 boards answer there and are silent at 0x72. */
+#define EVK_I2C_ADDR_TCAL9538                    EVK_I2C_ADDR_TCAL9538_MAIN  /**< Alias for EVK_I2C_ADDR_TCAL9538_MAIN. */
+#define EVK_I2C_ADDR_TCAL9538_PCIE_NOT_ASSEMBLED 0x71u  /**< U37 PCIe I/O expander (A0=1, A1=0). NOT ASSEMBLED on this EVK revision -- confirmed by the maintainer 2026-09-05 (alp-sdk#1974): this revision, built for Alif, does not need the second expander. Consistent with the evidence: never observed on either board, and absent from the maintainer EVK I2C schedule, which lists only ONE TCAL9538 (U35, at 0x73). The entry is kept, not deleted, because it describes a real footprint that earlier/other revisions populate. Anything that would have used it -- the I2C-mux SEL, PCIe slot RST/WAKE/CLKREQ, M2E_ALERT -- has no expander behind it here. */
+#define EVK_I2C_ADDR_TCA6408A_MAIN_NOT_ASSEMBLED 0x20u  /**< U35 main I/O expander, TCA6408ARSVR alternative (R112 fitted, R145 DNP). PCA9538-register-compatible, so chips/tcal9538 drives it unchanged. BENCH-CONFIRMED 2026-06-16 on an EARLIER EVK revision: read back config=0xFF + a live input port. NOT ASSEMBLED on this EVK revision: NOT OBSERVED on either 2026-09-05 board (0x20 a clean NACK on both) and absent from the maintainer EVK I2C schedule for this revision, which places U35 at 0x73. Treat 0x20 as an earlier-revision population; do not expect it on an Alif-revision EVK. */
+#define EVK_I2C_ADDR_TAS2563_LOW                 0x4Du  /**< U27 smart amp (AD0 = 10k to GND). CONFIRMED 2026-09-05: 0x4D, ACKing on 2 of 2 boards, and confirmed correct by the maintainer. AMP.ENABLE (SD_N) and AMP.FAULT (IRQZ) are each a SINGLE net shared with U28 -- U27 pin 7 + U28 pin 7 + Alif P5_2 for SD_N, U27 pin 18 + U28 pin 18 + Alif P5_0 for IRQZ -- per the authoritative carrier netlist, unlike TI's stereo reference design (SLAA920 Figure 22), which keeps each amp's shutdown independent. SD_N carries a 10 kOhm pull-up (R138, fitted) to +VIO, so both amps leave hardware shutdown on their own at power-up regardless of firmware. Per the 2626-R2 netlist, U27 drives J14 (nets LEFT_P/LEFT_N) -- the LEFT channel speaker output. */
+#define EVK_I2C_ADDR_TAS2563_HIGH                0x4Eu  /**< U28 smart amp (AD0 = 10k to VDD). CONFIRMED 2026-09-05: 0x4E, ACKing on 2 of 2 boards, and confirmed correct by the maintainer. The TAS2563 GLOBAL address is 0x48 per the datasheet, so 0x48 ACKs on any board with a TAS2563 fitted -- CONFIRMED on 2 of 2 EVKs 2026-09-05 (alp-sdk#1976): 0x48 answers, MFG_ID(0x3E)=0x1000 rules out an INA236, and REVID(0x7D)=0x10 is byte-identical to both fitted amps at 0x4D/0x4E. An I2C census will always list 0x48 here; it is NOT an undocumented extra device. It was additionally occupied on PRE-RESPIN boards by U32 INA236B (+V_CAM0 rail); the U32 re-strap to 0x4B from the next batch freed 0x48 at the hardware level. That does not make it usable from the SDK: 0x48 doesn't pin down one physical chip the way a strap address does, and tas2563_init() rejects 0x48 on every board revision regardless of direction, so firmware must unconditionally issue two targeted unit-address writes rather than a 0x48 broadcast. Per the 2626-R2 netlist, U28 drives J21 (nets RIGHT_P/RIGHT_N) -- the RIGHT channel speaker output. */
+#define EVK_I2C_ADDR_INA236_3V3                  0x40u  /**< U21 INA236A, +3V3 rail (20 mOhm shunt, 4.0 A max). A0 = GND. */
+#define EVK_I2C_ADDR_INA236_1V8                  0x41u  /**< U31 INA236A, +1V8 rail (20 mOhm shunt, 4.0 A max). A0 = V+. */
+#define EVK_I2C_ADDR_INA236_VIO                  0x42u  /**< U33 INA236A, +VIO rail (50 mOhm shunt, 1.6 A max). A0 = SDA. */
+#define EVK_I2C_ADDR_INA236_VCAM0                0x4Bu  /**< U32 INA236B, +V_CAM0 rail (50 mOhm shunt, 1.6 A max). Re-strapped A0=SCL -> 0x4B from the next batch; PRE-RESPIN boards had it at 0x48, which collides with the TAS2563 broadcast address (unreadable there). */
+#define EVK_I2C_ADDR_INA236_VCAM1                0x49u  /**< U34 INA236B, +V_CAM1 rail (50 mOhm shunt, 1.6 A max). A0 = V+. */
+#define EVK_I2C_ADDR_INA236_5V                   0x4Au  /**< U30 INA236B, +5V rail (20 mOhm shunt, 4.0 A max). A0 = SDA. A MISSING INA236 IS PER-UNIT, NOT A BATCH TRAIT -- an earlier reading of this data claimed 'five-of-six looks batch-wide' and that is DISPROVEN: E1M-AEN803 serial 2026W36-0002 answers on ALL SIX (2026-09-07), each reading MFG_ID(0x3E)=0x5449. The two prior boards each missed a different one: 0x4A (U30) not observed on 2026W36-0001 (alp-sdk#1975), 0x41 (U31, +1V8) not observed on 2026W36-0003. So six-of-six is achievable on this batch, 'U30 unpopulated' explains neither absence, and power characterisation must check which rails actually answer on the board in hand rather than assuming one is always missing. RE-CONFIRMED 2026-09-12, same physical unit (still serial 2026W36-0002): a read-only I2C census again found all six INA236 answering -- 0x40, 0x41, 0x42, 0x49, 0x4A, 0x4B -- each confirmed by reading MFG_ID(0x3E)=0x5449 (part identity, not a bare ACK), which is what makes the condition demonstrably PER-UNIT rather than batch-wide or design-level. Two boards, not the whole batch: serial 2026W36-0001 (the #1975 board) was not censused in this round. */
 
 /* ------------------------------------------------------------------ */
 /* INA236 calibration constants (from `i2c_devices[].calibration`) */
@@ -162,10 +162,10 @@ extern "C" {
 
 #define EVK_PIN_OVERLAY_BASE ALP_E1M_GPIO_COUNT
 
-#define EVK_PIN_IO_EXP_INT (EVK_PIN_OVERLAY_BASE + 0u)  /**< AUDIO_CLK pad (E1M Z2 / Alif P9_6) repurposed as the I/O expander INT line on this EVK. When the audio path is in use the IO expander interrupt is unavailable; firmware should poll the expander instead. */
+#define EVK_PIN_IO_EXP_INT (EVK_PIN_OVERLAY_BASE + 0u)  /**< AUDIO_CLK pad (E1M Z2 / Alif P9_6) carries the I/O expander \\INT line (active low). Netlist-confirmed on E1M-EVK-2626-R2: net IO_EXP.INT has exactly three members -- U35 pin 11 (\\INT), E2 pin Z2 (pad AUDIO_CLK) and R140 pin 1 (10k pull-up, fitted). The pad assignment is UNCHANGED from R1. What changed on R2 is contention: the audio path no longer claims this pad, so the expander interrupt is available and firmware need not fall back to polling. On R1 the two shared the pad, and the interrupt was unavailable whenever audio was active. Polling the expander over I2C (register 0x00 input port) remains valid on both. */
 #define EVK_PIN_IO_EXP_RST (EVK_PIN_OVERLAY_BASE + 1u)  /**< SPI0_CS1 pad (E1M N1 / Alif P3_6) repurposed as the I/O expander reset line. When SPI0 is used with two chip-selects this pin can't double as IO_EXP_RST -- the EVK assumes SPI0 is in single-CS mode at most. */
-#define EVK_PIN_AMP_FAULT  (EVK_PIN_OVERLAY_BASE + 2u)  /**< SPI0_MISO pad (E1M L1 / Alif P5_0) repurposed as the audio amplifier fault output (open-drain input from the amp). */
-#define EVK_PIN_AMP_ENABLE (EVK_PIN_OVERLAY_BASE + 3u)  /**< SPI0_CS0 pad (E1M M1 / Alif P5_2) repurposed as the audio amplifier enable input (active-high). */
+#define EVK_PIN_AMP_FAULT  (EVK_PIN_OVERLAY_BASE + 2u)  /**< SPI0_MISO pad (E1M L1 / Alif P5_0) repurposed as the audio amplifier fault output (open-drain input from the amp). Shared: per the authoritative 2626-R2 netlist, this single net is E2.L1 + R124.1 + U27.18 + U28.18 -- IRQZ on BOTH U27 and U28 -- with R124 a fitted 10 kOhm pull-up to +VIO (see EVK_I2C_ADDR_TAS2563_LOW's doc for the SD_N-side facts). */
+#define EVK_PIN_AMP_ENABLE (EVK_PIN_OVERLAY_BASE + 3u)  /**< SPI0_CS0 pad (E1M M1 / Alif P5_2) repurposed as the audio amplifier enable input (active-high). Shared: this single net is SD_N on BOTH U27 and U28 (see EVK_I2C_ADDR_TAS2563_LOW's doc for the netlist facts and the R138 pull-up), so driving it low resets both amps together. */
 #define EVK_PIN_MB_INT     (EVK_PIN_OVERLAY_BASE + 4u)  /**< I2S1_SDI pad (E1M AH6 / Alif P13_4) repurposed as the mikroBUS click INT pin. Was earlier (mis)documented as CTP_INT; the user has since clarified that CTP_INT is on SPI1_CS1 (see EVK_PIN_CTP_INT below) and I2S1_SDI is the mikroBUS INT line. */
 #define EVK_PIN_CK_DIO4    (EVK_PIN_OVERLAY_BASE + 5u)  /**< SPI0_MOSI pad (E1M M2 / Alif P5_1) repurposed as Arduino CK_DIO4 (digital I/O 4 on the Arduino UNO header). */
 #define EVK_PIN_CK_DIO3    (EVK_PIN_OVERLAY_BASE + 6u)  /**< SPI0_SCLK pad (E1M N2) repurposed as Arduino CK_DIO3. NB: the Alif-side pad mapping for SPI0_SCLK is left blank in metadata/e1m_modules/aen/from-alif.tsv (user-supplied) and needs filling once the EVK schematic is cross-checked. */
@@ -173,6 +173,53 @@ extern "C" {
 #define EVK_PIN_CK_DIO1    (EVK_PIN_OVERLAY_BASE + 8u)  /**< I2S1_SDO pad (E1M AG6 / Alif P13_5) repurposed as Arduino CK_DIO1. */
 #define EVK_PIN_CK_RST     (EVK_PIN_OVERLAY_BASE + 9u)  /**< I2S1_SCLK pad (E1M AH7 / Alif P2_6) repurposed as Arduino CK_RST (the Arduino UNO header's RESET signal -- shields can pulse it low to force a reboot). */
 #define EVK_PIN_CTP_INT    (EVK_PIN_OVERLAY_BASE + 10u)  /**< SPI1_CS1 pad (E1M AH8 -- CC3501E side, GPIO_15) repurposed as the capacitive touch panel interrupt input. Routed through the on-module CC3501E -- firmware reads CTP touches by registering an interrupt callback on the CC3501E's GPIO_15 via ALP_CC3501E_CMD_GPIO_SET_INTERRUPT. */
+
+/* ------------------------------------------------------------------ */
+/* Board mux-select enums (from `mux_enums:`) */
+/* ------------------------------------------------------------------ */
+
+typedef enum {
+	EVK_SDIO_SDCARD  = 0, /**< MUX_SEL.SDIO low. */
+	EVK_SDIO_M2E_KEY = 1, /**< MUX_SEL.SDIO high. */
+} evk_sdio_select_t;
+
+typedef enum {
+	EVK_I2S_AMP     = 0, /**< I2S0 routed to the TAS2563 amplifiers. */
+	EVK_I2S_M2E_KEY = 1, /**< I2S0 routed to the M.2 E-key slot. */
+} evk_i2s_select_t;
+
+typedef enum {
+	EVK_USB2_CONNECTOR = 0, /**< External USB-A jack. */
+	EVK_USB2_M2E_KEY   = 1, /**< M.2 E-key USB. */
+} evk_usb2_select_t;
+
+typedef enum {
+	EVK_PCIE_E_KEY = 0, /**< Lanes 0 routed to PCIe E-key (Wi-Fi/BT modules). */
+	EVK_PCIE_M_KEY = 1, /**< Lanes 0..3 routed to PCIe M-key (NVMe SSD). */
+} evk_pcie_select_t;
+
+/** PCIe IO expander pin layout (TCAL9538 #2 on I2C0 at 0x71). */
+typedef enum {
+	EVK_PCIE_IOEXP_I2C_SEL        = 0, /**< P0: PCIE0_I2C.SEL -- selects which slot the I2C mux routes to. */
+	EVK_PCIE_IOEXP_M2E_ALERT      = 1, /**< P1: M.2 E-key alert input. */
+	EVK_PCIE_IOEXP_E_PCIE0_RST    = 2, /**< P2: E-key PCIe reset output. */
+	EVK_PCIE_IOEXP_E_PCIE0_WAKE   = 3, /**< P3: E-key PCIe wake input. */
+	EVK_PCIE_IOEXP_E_PCIE0_CLKREQ = 4, /**< P4: E-key PCIe clock-request input. */
+	EVK_PCIE_IOEXP_M_PCIE0_RST    = 5, /**< P5: M-key PCIe reset output. */
+	EVK_PCIE_IOEXP_M_PCIE0_WAKE   = 6, /**< P6: M-key PCIe wake input. */
+	EVK_PCIE_IOEXP_M_PCIE0_CLKREQ = 7, /**< P7: M-key PCIe clock-request input. */
+} evk_pcie_ioexp_pin_t;
+
+typedef enum {
+	EVK_IOEXP_LCD_PWR_EN     = 0, /**< P0: LCD power enable. */
+	EVK_IOEXP_LCD_RST        = 1, /**< P1: LCD reset. */
+	EVK_IOEXP_CAM_EN         = 2, /**< P2: Camera-module enable (drives the camera sensor's EN/STBY pin -- NOT the +V_CAM0/+V_CAM1 power rails, which are gated separately). */
+	EVK_IOEXP_CTP_RST        = 3, /**< P3: Capacitive touch panel reset. */
+	EVK_IOEXP_ICM42670_INT1  = 4, /**< P4: ICM-42670 INT1 input. */
+	EVK_IOEXP_ICM42670_INT2  = 5, /**< P5: ICM-42670 INT2 input. */
+	EVK_IOEXP_ICM42670_FSYNC = 6, /**< P6: ICM-42670 frame-sync input. */
+	EVK_IOEXP_BMP581_INT1    = 7, /**< P7: BMP581 INT1 input. */
+} evk_ioexp_pin_t;
 
 /* ------------------------------------------------------------------ */
 /* Portable cross-EVK aliases (e1m-spec STANDARD.md §7.2 common set). */

@@ -21,8 +21,13 @@ bridge image, factory first-flash, dev-board bring-up).
    idle state.
 3. `gd32_swd_connect` line-resets the link, performs the
    JTAG-to-SWD switch sequence, reads DPIDR.  Logs whether the
-   IDCODE matches the expected `0x6BA02477` (Cortex-M33 r0p1
-   SW-DPv2 — the GD32G553's documented value).
+   IDCODE matches `GD32_SWD_GENERIC_CM33_R0P1_IDCODE` (`0x6BA02477`) —
+   informational only.  That constant is the **generic** Cortex-M33
+   r0p1 SW-DPv2 architectural default, never measured on a GD32G553
+   with a probe attached (see the `@warning` on it in
+   `include/alp/chips/gd32_swd.h`) — whether a real GD32G553 matches
+   it is unknown, so neither a match nor a mismatch here is treated
+   as a pass/fail signal.
 4. `gd32_swd_halt` puts the Cortex-M33 into debug-halt via DHCSR
    DBGKEY + C_HALT.
 5. `gd32_swd_flash_erase` erases the enclosing 2 KiB sector.
@@ -62,10 +67,11 @@ same SWD driver pointing at the right address.
 Adjust `WRITE_ADDR` and `WRITE_BYTES` for a different target
 sector; the driver rounds out to sector boundaries automatically.
 
-## Expected output (real silicon)
+## Illustrative output (real silicon -- the exact IDCODE line is unattested, #1440 / #1369)
 
 ```
-[swd] connected -- IDCODE = 0x6BA02477 (expected 0x6BA02477)
+[swd] connected -- IDCODE = 0x???????? (generic reference 0x6BA02477)
+[swd] note: IDCODE != generic reference -- this is not a wrong-board signal, the reference value is unattested on a GD32 (#1440, #1369)
 [swd] target halted
 [swd] flash_verify -> 0 (OK)
 [swd] target reset + running

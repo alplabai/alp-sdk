@@ -77,6 +77,9 @@ On-module (E1M-AEN801 `i2c_devices:` `e1m_i2c0:` block):
 
 ```
 0x50 ACK   -- 24C128 EEPROM
+0x58 ACK   -- SAME 24C128 EEPROM (onsemi N24S128), its second device-select
+              header -- `1010` -> 0x50, `1011` -> 0x58, same A2/A1/A0 straps.
+              Not a second chip; nothing to source (alp-sdk#1976).
 ```
 
 The SoM's three other I²C parts -- OPTIGA Trust M (`0x30`), TMP112
@@ -92,8 +95,6 @@ rail) on PRE-RESPIN carriers, not the TMP112.
 E1M-EVK board-populated (`metadata/boards/e1m-evk.yaml` `i2c_devices:`):
 
 ```
-0x20 ACK   -- TCA6408A U35 alt I/O expander (BOM variant -- ACKs INSTEAD
-              OF 0x72, not alongside it: R112/R145 are mutually exclusive)
 0x40 ACK   -- INA236 U21, +3V3 rail current monitor
 0x41 ACK   -- INA236 U31, +1V8 rail current monitor
 0x42 ACK   -- INA236 U33, +VIO rail current monitor
@@ -107,10 +108,19 @@ E1M-EVK board-populated (`metadata/boards/e1m-evk.yaml` `i2c_devices:`):
 0x69 ACK   -- ICM-42670 U12 IMU (collides with BMI323 on pre-respin
               boards, which mis-strap U13 to 0x69 too -- BENCH-CONFIRMED
               2026-06-16)
-0x71 ACK   -- TCAL9538 U37 PCIe I/O expander
-0x72 ACK   -- TCAL9538 U35 main I/O expander (BOM default -- see the
-              0x20 note above)
+0x73 ACK   -- TCAL9538 U35 main I/O expander.  CORRECTED 2026-09-05
+              from 0x72 (alp-sdk#1974): the maintainer's EVK I2C
+              schedule gives 1110011 = 0x73, and 2 of 2 boards answer
+              there and are silent at 0x72.
 ```
+
+Do NOT expect an ACK at `0x71` or `0x20` on this EVK revision: both are
+genuine footprints (`EVK_I2C_ADDR_TCAL9538_PCIE_NOT_ASSEMBLED` for U37,
+`EVK_I2C_ADDR_TCA6408A_MAIN_NOT_ASSEMBLED` for U35's TCA6408ARSVR
+alternative -- R112/R145 are mutually exclusive, so at most one of
+TCAL9538-at-`0x73` / TCA6408A-at-`0x20` is ever populated) but neither
+is assembled here (alp-sdk#1974) -- confirmed silent (clean `-EIO`
+NACK) on both 2026-09-05 bench boards.
 
 ## On V2N's on-board sensor bus
 
@@ -159,6 +169,10 @@ Expected:
               (metadata/boards/e1m-x-evk.yaml:262)
 0x50 ACK   -- 24C128 EEPROM, the SoM's `e1m_i2c0:` block
               (metadata/e1m_modules/E1M-V2N101.yaml:56-59)
+0x58 ACK   -- SAME 24C128 EEPROM, its second device-select header
+              (`1010` -> 0x50, `1011` -> 0x58, same A2/A1/A0 straps) --
+              not a second chip, nothing to source (alp-sdk#1976)
+              (metadata/e1m_modules/E1M-V2N101.yaml:69)
 0x68 ACK   -- BMI323 U13 IMU (alternate)
               (include/alp/boards/alp_e1m_x_evk.h:48)
 0x69 ACK   -- ICM-42670 U12 IMU (canonical primary)
@@ -187,13 +201,15 @@ anomaly pending the next respin, not a sixth/seventh rail monitor.
 BRD_I2C is the SoM's RIIC8 housekeeping bus -- DA9292, ACT88760, OPTIGA,
 TMP112, the clock generator, and the GD32 supervisor all sit here
 (`metadata/e1m_modules/E1M-V2N101.yaml:41-55`), but `BOARD_I2C_SENSORS`
-does not reach it (see above).  On the V2N M33 Zephyr target it's
-numeric bus 0, opened directly rather than through a `<alp/board.h>`
-alias (`examples/v2n/v2n-brd-i2c-bringup/src/main.c:350-353`) -- this
+does not reach it (see above).  RIIC8/BRD_I2C is Cortex-A55/Linux-
+exclusive (`metadata/e1m_modules/v2n/core-ownership.yaml`) -- there is
+no CM33/Zephyr path to it at all.  On Linux it is numeric bus 8
+(`/dev/i2c-8`), opened directly rather than through a `<alp/board.h>`
+alias (`examples/v2n/v2n-brd-i2c-bringup/src/main.c:79`) -- this
 tutorial's code does not scan it.  Use
 [`examples/v2n/v2n-brd-i2c-bringup`](../../examples/v2n/v2n-brd-i2c-bringup/)
-instead: it opens bus 0 directly and probes each device with its real
-chip driver.
+instead: a Linux/Yocto user-space app that opens `/dev/i2c-8` directly
+and probes each device with its real chip driver.
 
 If a documented address doesn't show up, the chip is missing or
 mis-strapped -- compare against `metadata/e1m_modules/<SKU>.yaml`'s

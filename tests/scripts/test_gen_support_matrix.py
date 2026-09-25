@@ -4,6 +4,7 @@ Covers determinism, the --check gate, and a few known-true / known-false
 presence cells anchored to the committed metadata.
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -45,7 +46,8 @@ def test_committed_file_matches_generator():
 def test_check_mode_passes_on_committed_file():
     proc = subprocess.run(
         [sys.executable, str(SCRIPT), "--check"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
     assert proc.returncode == 0, proc.stderr
 
@@ -79,6 +81,9 @@ def test_known_presence_cells():
 def test_every_module_resolves_to_a_soc():
     socs = gsm.load_socs()
     mods = gsm.load_modules()
-    assert len(mods) == 11
+    # Derived, not hardcoded -- see the note in test_gen_catalog.py: a literal
+    # count makes every new SKU look like a regression.
+    n_presets = len(list((REPO / "metadata" / "e1m_modules").glob("E1M-*.yaml")))
+    assert len(mods) == n_presets
     rows = gsm.build_rows(mods, socs)  # raises if any ref is unresolved
-    assert len(rows) == 11
+    assert len(rows) == n_presets

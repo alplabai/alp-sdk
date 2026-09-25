@@ -211,6 +211,138 @@ def test_extra_libraries_profile_file_missing(tmp_path: Path) -> None:
     assert "does not resolve" in msg
 
 
+def test_extra_libraries_profile_symlink_loop_clean_error(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A `profile:` path that hits a symlink loop (ELOOP) must fail
+    with a clean `OrchestratorError`, not an unhandled `RuntimeError`
+    out of `load_board_yaml` (issue #1961's reachable half:
+    `_validate_consistency` runs this identical
+    `(REPO / prof).resolve()` on the same user-supplied path on
+    *every* `load_board_yaml` call -- i.e. every `--emit` mode,
+    including `--emit build-plan`, tan-cli's documented planner
+    fallback -- strictly BEFORE `_emit_extra_library_profile`'s own
+    never-raises fix in `kconfig.py` is ever reached).
+
+    Windows has no unprivileged `os.symlink` (confirmed on this host:
+    `OSError: [WinError 1314] A required privilege is not held`), so
+    this reproduces the ELOOP `RuntimeError` deterministically by
+    monkeypatching `pathlib.Path.resolve` for this one profile path
+    only -- the same exception CPython's own `check_eloop` raises,
+    without disturbing every other `.resolve()` call `load_board_yaml`
+    makes along the way."""
+    prof_name = "loopy-hw-backends.yaml"
+    real_resolve = Path.resolve
+
+    def _raise_eloop_for_profile(self, strict=False):
+        if self.name == prof_name:
+            raise RuntimeError(f"Symlink loop from {str(self)!r}")
+        return real_resolve(self, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", _raise_eloop_for_profile)
+
+    body = _v2n_with_extra(
+        "    extra_libraries:\n"
+        "      - name: loopy\n"
+        f"        profile: {prof_name}\n")
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "loopy" in msg
+    assert "could not be resolved" in msg
+
+
+def test_extra_libraries_profile_permission_denied_clean_error(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A `profile:` path that hits EACCES must also fail with a clean
+    `OrchestratorError`, not an unhandled `PermissionError`.
+
+    `pathlib.Path.is_file()` swallows `ENOENT`/`ENOTDIR`/`EBADF`/
+    `ELOOP` but re-raises `PermissionError` on EACCES -- the "same
+    defect class" note in issue #1961 -- a DIFFERENT branch of the
+    `except (RuntimeError, PermissionError)` clause than the
+    symlink-loop test above, which only exercises the `RuntimeError`
+    half. `chmod 000` doesn't restrict owner-read on Windows, so this
+    reproduces EACCES deterministically by monkeypatching
+    `pathlib.Path.is_file` for this one profile path only, the same
+    technique used for the symlink-loop shape above."""
+    prof_name = "denied-hw-backends.yaml"
+    real_is_file = Path.is_file
+
+    def _raise_eacces_for_profile(self):
+        if self.name == prof_name:
+            raise PermissionError(13, "Permission denied", str(self))
+        return real_is_file(self)
+
+    monkeypatch.setattr(Path, "is_file", _raise_eacces_for_profile)
+
+    body = _v2n_with_extra(
+        "    extra_libraries:\n"
+        "      - name: denied\n"
+        f"        profile: {prof_name}\n")
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "denied" in msg
+    assert "could not be resolved" in msg
+
+
+def test_extra_libraries_profile_windows_shape_clean_error(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The two tests above encode the POSIX exception SHAPES
+    (`RuntimeError` from `.resolve()`, `PermissionError` from
+    `.is_file()`) as the thing under test -- round-12b review finding
+    #6. That is structurally blind to what a REAL symlink loop raises
+    on Windows: driving the actual CLI against a real WSL-created
+    symlink loop on an NTFS drive with Windows CPython 3.11.3 shows
+    `.resolve()` returns *without* raising at all, and it is
+    `.is_file()` that raises a plain `OSError` (`WinError 1920`, "The
+    file cannot be accessed by the system") -- not a `RuntimeError`
+    and not a `PermissionError`. Both tests above passed while that
+    real CLI invocation was dying unhandled, because neither one
+    exercises this shape.
+
+    This is the CONTRACT check the other two should have been: any
+    resolve-time failure -- whatever exception class the platform
+    happens to raise -- must surface as a clean `OrchestratorError`,
+    not the CLI crashing. Reverting the `except` clause to the
+    POSIX-only `(RuntimeError, PermissionError)` turns this test red
+    while leaving the two tests above green, which is exactly how
+    blocker #1 shipped unseen."""
+    prof_name = "winloop-hw-backends.yaml"
+    real_is_file = Path.is_file
+
+    def _raise_windows_shape_for_profile(self):
+        if self.name == prof_name:
+            # `OSError(22, msg)` alone only sets `.errno` -- `winerror`
+            # stays `None` regardless of the first positional value
+            # (confirmed: CPython's OSError has no 2-arg form that
+            # derives one from the other). Set it explicitly so this
+            # actually reproduces the real WSL-symlink-loop shape
+            # (errno=22, winerror=1920), not just an errno match.
+            err = OSError(22, "The file cannot be accessed by the system")
+            err.winerror = 1920
+            raise err
+        return real_is_file(self)
+
+    monkeypatch.setattr(Path, "is_file", _raise_windows_shape_for_profile)
+
+    body = _v2n_with_extra(
+        "    extra_libraries:\n"
+        "      - name: winloop\n"
+        f"        profile: {prof_name}\n")
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "winloop" in msg
+    assert "could not be resolved" in msg
+
+
 # ---------------------------------------------------------------------
 # #1485 follow-up -- the ADR-0018 library layer (scripts/alp_orchestrate/
 # libraries.py) is a SECOND resolver family the original #1485 fix missed:

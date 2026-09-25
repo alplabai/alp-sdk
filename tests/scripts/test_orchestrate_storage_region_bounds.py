@@ -32,6 +32,7 @@ Run locally:
 
 from __future__ import annotations
 
+import copy
 import sys
 from pathlib import Path
 
@@ -46,8 +47,11 @@ from alp_orchestrate import (  # noqa: E402
     load_board_yaml,
     resolve_storage_partitions,
 )
+from alp_orchestrate.models import StorageEntry  # noqa: E402
 from alp_orchestrate.partition import (  # noqa: E402
+    _is_flash_sub_partition,
     _known_flash_devices,
+    _reserved_spans,
     _resolve_flash_device,
 )
 from alp_orchestrate.paths import METADATA_ROOT  # noqa: E402
@@ -297,21 +301,50 @@ class TestReservedBytesLessThanCapacity:
       - { name: logs, size_kib: 32, fs: littlefs, flash_device: mram_main, offset_kib: 0, mount: /lfs/logs }
     """))
         project = load_board_yaml(path)
-        # A synthetic second device.  `base: "TBD"` keeps it out of
-        # `_reserved_spans()`'s address-window derivation for `mram_main`
-        # (only integer bases enter that computation), while it still
-        # resolves via `_resolve_flash_device()` since `size_kib` is an int.
-        project.som_preset["memory_map"] = list(
-            project.som_preset["memory_map"]) + [{
+        # `mram_main` is given its OWN resolved base (0x80000000, same
+        # as `mcuboot`'s -- legal: a SoM CAN author one) so
+        # `_reserved_spans()` takes the `self_region has a base` branch
+        # directly and reserves every sibling with a resolved base by
+        # name (6 spans: mcuboot/he_slot0/hp_slot0/reserved/storage/
+        # atoc) WITHOUT computing the fragile `origin + capacity ==
+        # window_top` identity a synthetic out-of-window sibling would
+        # otherwise poison (alp-sdk#2088 review round 2, Major 3: an
+        # earlier version of this fixture instead resolved
+        # `test_alt_device`'s own base, which pushed it into that
+        # identity check and degraded `_reserved_spans()` to `[]` --
+        # losing this test's actual target, the reserved-overlap-with-
+        # a-verified-alternative branch, since NOTHING was reserved to
+        # overlap). `test_alt_device` keeps its ORIGINAL `base: "TBD"`,
+        # which is what keeps it OUT of `_reserved_spans()`'s `sized`
+        # list (only integer bases enter that computation) while still
+        # resolving via `_resolve_flash_device()` since `size_kib` is an
+        # int; `write_authority: customer_runtime` is required for that
+        # resolve now that the aperture resolves for this SoM
+        # (alp-sdk#2088 round 1).
+        project.som_preset["memory_map"] = [
+            dict(r, base=0x80000000) if r["name"] == "mram_main" else r
+            for r in project.som_preset["memory_map"]] + [{
                 "name": "test_alt_device",
                 "base": "TBD",
                 "size_kib": 64,
                 "accessible_from": ["m55_he", "m55_hp"],
                 "cacheable": True,
+                "write_authority": "customer_runtime",
                 "dt_label": "test_alt_device",
             }]
+        # Regression pin for review round 2, Major 3: `_reserved_spans()`
+        # must actually reserve `mram_main`'s 6 real siblings here, not
+        # degrade to `[]` -- the overlap-with-a-verified-alternative
+        # branch this test targets has zero coverage if nothing is
+        # reserved for `offset_kib: 0` to collide with.
+        spans, spans_reason = _reserved_spans(
+            "mram_main", 5632 * 1024, project.som_preset,
+            project.effective_metadata_root())
+        assert spans_reason is None, spans_reason
+        assert len(spans) == 6, spans
         parts = resolve_storage_partitions(project)
         reason = _by_name(parts)["logs"].reason or ""
+        assert "mcuboot" in reason, reason
         assert "use a different flash_device:" in reason, reason
         assert "test_alt_device" in reason, reason
 
@@ -437,3 +470,81 @@ class TestNoFalsePositives:
         settings = _by_name(parts)["settings"]
         assert getattr(settings, "status", None) != "blocked", settings.reason
         assert settings.base_kib == 0, settings
+
+
+class TestLegacyCarveoutFallback:
+    """P1 (#2010): `_is_flash_sub_partition()`'s legacy `carveout: false`
+    fallback (`if inside is None: return region.get("carveout") is False`)
+    has no test at all -- it is what the docstring's "MAJOR 3" and the
+    non-Alif no-op argument both rest on. No non-Alif preset in
+    `metadata/e1m_modules/*.yaml` authors `carveout: false` today
+    (`git grep -rn "carveout:" metadata/e1m_modules/` is AEN-only), so
+    this is a direct-call pin with an explicit `aperture=None` -- the
+    exact value `resolve_aperture()` returns for every non-Alif SoM,
+    bypassing the `_APERTURE_UNSET` sentinel's own re-resolution."""
+
+    def test_carveout_false_still_excludes_when_aperture_is_none(self):
+        region = {"name": "legacy_subpart", "base": 0x1000, "size_kib": 64,
+                   "carveout": False}
+        assert _is_flash_sub_partition(
+            region, {}, METADATA_ROOT, aperture=None) is True, (
+            "a carveout: false region was NOT treated as a flash "
+            "sub-partition when no aperture is declared -- the legacy "
+            "fallback every non-Alif SoM depends on did not fire")
+
+
+class TestDerivedVerdictLoadBearingEndToEnd:
+    """P4 (#2010): `resolve_storage_partitions()` hoists ONE real aperture
+    per call and threads it through every helper it calls -- mutating that
+    hoisted value to `None` (silently bypassing split B in the actual
+    production entry point) survived every gate, because the P2/P3 fixes
+    were proven only via a direct `_resolve_flash_device()` /
+    `_is_flash_sub_partition()` call, never through `resolve_storage_
+    partitions()` itself. No SHIPPED preset makes the derived and legacy
+    (`carveout:`-only) verdicts disagree -- every AEN flash-class sub-
+    region already authors an explicit, agreeing `carveout: false` -- so
+    this fixture adds ONE synthetic `memory_map:` row, in-memory only
+    (never touching tracked YAML), that the two verdicts read differently:
+    strictly INSIDE the declared aperture (derived: flash-class, by
+    containment) but carrying NO `carveout:` key at all (legacy-only
+    fallback: not `False`, so "not a sub-partition" -- treated as a real
+    device). This is exactly the #1365 hazard shape (an unflagged row
+    silently becoming a customer-writable target) with the roles of
+    `mram_main` played by a plain synthetic row instead."""
+
+    def test_undeclared_row_inside_the_aperture_is_still_refused(self, tmp_path):
+        path = _write_board(tmp_path, """
+        name: test-aen801-p4-fixture
+        som:
+          sku: E1M-AEN801
+          hw_rev: r2
+
+        cores:
+          m55_hp:
+            os: zephyr
+            app: ./m55_hp
+        """)
+        project = load_board_yaml(path)
+        project.som_preset = copy.deepcopy(project.som_preset)
+        project.som_preset["memory_map"].append({
+            "name": "undeclared_sub_region",
+            "base": 0x80000000 + 0x100000,   # strictly inside the aperture
+            "size_kib": 64,
+            "accessible_from": ["m55_hp", "m55_he"],
+        })
+        project.storage = [StorageEntry(
+            name="leak_test", size_kib=32, fs="littlefs",
+            flash_device="undeclared_sub_region")]
+
+        parts = resolve_storage_partitions(project)
+        entry = _by_name(parts)["leak_test"]
+
+        assert entry.status == "blocked", (
+            f"a memory_map row strictly inside the declared aperture, "
+            f"with no carveout: key authored, resolved status "
+            f"{entry.status!r} -- the legacy-only fallback silently "
+            f"treated it as a real, customer-writable device")
+        assert "partition inside a flash-class region" in (entry.reason or ""), (
+            f"blocked for the wrong reason -- the DERIVED (aperture-"
+            f"containment) verdict must be the one that decided this, "
+            f"not some other check: {entry.reason!r}")

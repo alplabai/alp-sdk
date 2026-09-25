@@ -5,8 +5,8 @@
 # SE-service MHUv2 transport, UTIMER PWM/counter, DW RTC/LPTIMER counters,
 # UTIMER QDEC, DWC SDHC, ADC/DAC analog, CRC, comparator, PDM mic, DesignWare
 # I2S, camera/video (CPI + MIPI D-PHY/CSI-2 + ARX3A0 + ISP-Pico), CAN-FD, and
-# OSPI/HexSPI (Octal-SPI + HyperBus XIP controller, BUILD-ONLY / HW-BLOCKED --
-# no octal-NOR/HyperBus part is populated on ANY AEN SKU).
+# OSPI/HexSPI (Octal-SPI + HyperBus XIP controller, BUILD-ONLY / HW-BLOCKED
+# this batch -- no octal-NOR/HyperBus part populated).
 
 # Alif Ensemble ARM MHUv2 inter-core mailbox driver -- vendor-ext,
 # BENCH-UNVERIFIED.  Carried here (not upstream Zephyr) so it survives a
@@ -65,7 +65,6 @@ config ETH_DWMAC_ALIF
 	depends on DT_HAS_ALIF_ETHERNET_ENABLED
 	select ETH_DWMAC
 	select PINCTRL
-	select NOCACHE_MEMORY if ARCH_HAS_NOCACHE_MEMORY_SUPPORT
 	help
 	  Alif Ensemble platform glue (compatible "alif,ethernet") backing the
 	  UPSTREAM eth_dwmac (Synopsys DesignWare GMAC) core.  Enables the
@@ -81,10 +80,42 @@ config ETH_DWMAC_ALIF
 	  translation), so the descriptor rings AND the net_buf packet pool MUST
 	  live in the global on-chip SRAM0 (sram@2000000, @0x02000000, CPU addr ==
 	  DMA addr), NEVER in the M55 DTCM (CPU-local, not on the GMAC AXI path --
-	  buffers there are invisible to the DMA and no frame moves).  Pin this in
-	  the board overlay via `chosen { zephyr,sram = &sram0; }` and keep
-	  CONFIG_DCACHE=n (or a nocache region) so CPU and DMA share a coherent
-	  view; the driver BUILD_ASSERTs the cache-coherency half of this.
+	  buffers there are invisible to the DMA and no frame moves).  The
+	  2026-06-17 bench run above used the whole-RAM-move mechanism,
+	  `chosen { zephyr,sram = &sram0; }`, which is slower than DTCM for
+	  everything that is not Ethernet-DMA traffic and intermittently breaks
+	  the ISP.
+
+	  A narrower alternative: give the ethernet node a `memory-region` (e.g.
+	  `&sram0`, the SoC dtsi default) and enable
+	  ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION below so only the Ethernet-owned
+	  buffers move to SRAM0 while main RAM stays on DTCM. Silicon-verified on
+	  E1M-AEN803 (bench run 202: DHCP lease + ping, rings/pools in SRAM0, main
+	  RAM on DTCM, aen-ethernet-link). E1M-AEN801 is build-verified only (same
+	  E8 memory map, not itself benched); aen-evk-demo's use of this same
+	  mechanism (sharing its 64 KiB SRAM0 window with separate JPEG buffers)
+	  is build-verified only, not benched. An earlier, different prototype of
+	  this same idea ran on silicon in scratch bench run 200 (a different
+	  app-level relocation, CONFIG_NOCACHE_MEMORY=y, and different ring
+	  addresses than this mechanism uses).
+	  Deliberately does NOT `select NOCACHE_MEMORY`: its nocache section
+	  lands in the DTCM, which the GMAC DMA cannot see -- keep
+	  CONFIG_DCACHE=n instead (the driver BUILD_ASSERTs it unconditionally;
+	  the E8 D-cache maintenance loop hangs on this silicon, see
+	  scripts/bench/aen/aen-bench-shared.conf).
+
+	  HAZARD: do NOT leave the ethernet node's `memory-region` set AND ALSO
+	  point `chosen { zephyr,sram = ...; }` at that same node -- the linker
+	  would place main RAM and the DMA-relocated buffers in the identical
+	  address window with no warning. zephyr/CMakeLists.txt FATAL_ERRORs at
+	  configure time if it detects that combination while
+	  ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION=y.
+
+	  LIMIT: ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION only relocates
+	  subsys/net/ip/net_pkt.c's own net_buf pools. A net_buf pool an
+	  application declares itself (e.g. NET_PKT_DATA_POOL_DEFINE via
+	  net_context_setup_pools) still lands wherever `zephyr,sram` puts it --
+	  DTCM by default -- and the DMA would silently fail against it.
 
 	  ADR 0017 Tier-1.5 (in-tree thin glue over an UPSTREAM core): kept
 	  in-tree, NOT retired onto the fork -- the sdk-alif fork forked the
@@ -92,6 +123,76 @@ config ETH_DWMAC_ALIF
 	  Kconfig.dwmac offers no Ensemble path (STM32-only / MMU-gated; the M55
 	  has an MPU).  Retiring would be an unconditional silent Ethernet loss.
 	  See docs/adr/0017.
+
+config ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION
+	bool "Relocate net_pkt.c's net_buf pools into the ethernet node's DMA region"
+	default y
+	depends on ETH_DWMAC_ALIF
+	depends on NETWORKING
+	select CODE_DATA_RELOCATION
+	help
+	  Silicon-verified on E1M-AEN803 (bench run 202: DHCP lease + ping,
+	  rings/pools in SRAM0, main RAM on DTCM, aen-ethernet-link). E1M-AEN801
+	  is build-verified only (same E8 memory map, not itself benched); the
+	  same relocation applied to aen-evk-demo's SRAM0-window-sharing layout
+	  is build-verified only, not benched. An earlier, different prototype of
+	  this same idea ran on silicon in scratch bench run 200. The GMAC DMA
+	  cannot reach the M55 DTCM, so the net_buf pools in
+	  subsys/net/ip/net_pkt.c (__noinit) must live in the same region as the
+	  descriptor rings.  zephyr/CMakeLists.txt resolves that region from the
+	  ethernet node's `memory-region` DT property (e.g. SRAM0) and relocates
+	  net_pkt.c's DATA/BSS/NOINIT sections into it via zephyr_code_relocate(),
+	  instead of moving all of main RAM there with
+	  `chosen { zephyr,sram = &sram0; }`.  Prints a CMake WARNING (does not
+	  fail the build) when the ethernet node has no usable `memory-region`;
+	  FATAL_ERRORs at configure time instead if `memory-region` AND chosen
+	  `zephyr,sram` resolve to the SAME node (see ETH_DWMAC_ALIF's HAZARD
+	  note above).
+
+	  LIMIT: only relocates subsys/net/ip/net_pkt.c's own net_buf pools. A
+	  pool an application declares itself (e.g. NET_PKT_DATA_POOL_DEFINE via
+	  net_context_setup_pools) still lands wherever `zephyr,sram` puts it --
+	  DTCM by default -- and the DMA would silently fail against it.
+
+# Standard Zephyr pattern: redefine a subsys symbol's default from a module
+# Kconfig (upstream subsys/net/ip/Kconfig's `config NET_BUF_DATA_SIZE`
+# otherwise defaults to 128). This works because Kconfig's rule for multiple
+# `default` lines on one symbol is "first matching condition, in the order
+# the Kconfig files were parsed, wins" -- and zephyr/Kconfig `rsource`s this
+# file, which Kconfig.zephyr sources via `source "modules/Kconfig"` (line 42)
+# BEFORE `source "subsys/Kconfig"` (line 52), which is what eventually pulls
+# in subsys/net/ip/Kconfig's `default 128`. Confirmed in a built
+# aen-ethernet-link .config: CONFIG_NET_BUF_DATA_SIZE=1536.
+#
+# Silicon-verified on E1M-AEN803 (bench runs 203/204, ETH_DWMAC_ALIF): with
+# the Zephyr-default CONFIG_NET_BUF_DATA_SIZE=128, every Ethernet frame
+# needing more than 7 fixed 128-byte net_bufs was silently dropped -- ICMP
+# payloads of 56 and 868 B passed, 869/1000/1400/1472 B lost 100%, and any
+# TCP body segment was lost too (HTTP headers arrived over a 13737-byte JPEG
+# body that never did). Changing ONLY this default to 1536 made every one of
+# those ping sizes pass at 0% loss, and a TCP MJPEG stream then ran at
+# 17 fps, ~12.8 KB/frame. DWMAC_NB_TX_DESCS/DWMAC_NB_RX_DESCS were 16 (the
+# Kconfig.dwmac default) in both builds -- upstream's own help text for those
+# says "there must be enough descriptors to hold all fragments of a full-size
+# packet ... or the packet will be dropped" (Kconfig.dwmac), which is
+# consistent with SOME per-fragment limit mattering, but the bench's failure
+# point (>7 fragments at 128 B/fragment) is well under the 16-descriptor
+# ring capacity, so descriptor-count exhaustion alone does not explain it.
+# The upstream core's fragment handling, read (not bisected against
+# silicon): RX allocates exactly one CONFIG_NET_BUF_DATA_SIZE-sized fragment
+# per descriptor on refill (`RX_FRAG_SIZE CONFIG_NET_BUF_DATA_SIZE`,
+# `net_pkt_get_reserve_rx_data(RX_FRAG_SIZE, ...)` in
+# dwmac_rx_refill_thread(), eth_dwmac.c) and chains fragments across
+# descriptors via the RDES3_FD/RDES3_LD first/last-descriptor bits
+# (dwmac_receive()); TX consumes exactly one descriptor per net_buf fragment
+# of the outgoing packet (`k_sem_take(&p->free_tx_descs, ...)` once per loop
+# iteration in dwmac_send(), eth_dwmac.c) and aborts the whole packet
+# (-ENOMEM) if it runs out mid-frame. Neither of those, on their own,
+# accounts for a failure specifically above 7 fragments rather than above 16
+# -- the exact root cause, in the upstream dwmac chaining versus the
+# descriptor count, is NOT bisected here.
+config NET_BUF_DATA_SIZE
+	default 1536 if ETH_DWMAC_ALIF
 
 choice ETH_DWMAC_ALIF_RMII_REFCLK
 	prompt "Alif GMAC RMII 50 MHz reference-clock source"
@@ -424,6 +525,12 @@ config QDEC_ALIF
 	  silicon-validated.  ADR 0017 Tier-2 (INTERIM).
 	  Driver: zephyr/drivers/sensor/qdec_alif/qdec_alif_utimer.c.
 
+# ALP-SDK DELTA (#2051), not upstream: indirection so the compat string's own
+# comma ("snps,dwc-sdhc") does not get split as a second dt_compat_any_has_prop
+# argument below -- := is the Kconfig preprocessor's literal-string assignment,
+# the same pattern subsys/pm/Kconfig's DT_POWER_STATE_COMPAT uses.
+SDHC_DWC_COMPAT := snps,dwc-sdhc
+
 config SDHC_DWC
 	bool "Alif Ensemble DesignWare SD Host Controller (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
 	default y
@@ -431,6 +538,12 @@ config SDHC_DWC
 	depends on DT_HAS_SNPS_DWC_SDHC_ENABLED
 	select SDHC_SUPPORTS_NATIVE_MODE
 	select EVENTS
+	# ALP-SDK DELTA (#2051), not upstream: only a node with a `clocks`
+	# property (e.g. the Alif alif,clockctrl ALIF_SDC_CLK gate) needs the
+	# clock_control_on() call sdhc_dwc_init() makes -- a board where this
+	# gate is always-on, or has no such controller, omits `clocks` and
+	# does not need CLOCK_CONTROL pulled in at all.
+	select CLOCK_CONTROL if $(dt_compat_any_has_prop,$(SDHC_DWC_COMPAT),clocks)
 	help
 	  Synopsys DesignWare Core SD Host Controller driver (compatible
 	  "snps,dwc-sdhc"), vendored VERBATIM from the Apache-2.0 zephyr_alif fork
@@ -495,6 +608,22 @@ config SDHC_DWC_DMA_ADDR_TRANSLATE
 	  Pulls in the hal_alif soc_memory_map.h (needs itcm/dtcm `global_base`
 	  props absent from the alp-sdk E8 dtsi).  Leave disabled until a card is
 	  reachable and DMA is validated.
+
+config SDHC_RSP_136_HAS_CRC
+	bool "Realign 136-bit R2 responses stored without their CRC byte"
+	default y
+	help
+	  The DWC_mshc response registers hold a 136-bit R2 response (CID, CSD)
+	  without its CRC byte, so sdhc_dwc.c must shift the four RESP words
+	  left by 8 bits to put every field where the SD stack expects it.
+	  The driver has always gated that shift on this symbol, but nothing
+	  defined it, so IS_ENABLED() was 0 and the shift was dead code.
+	  Confirmed on the bench (E1M-AEN803 serial 2026W36-0002), same card, same MBR ending at
+	  sector 0x0EEC0000 (250347520): with the symbol undefined the stack
+	  reported 524800 sectors; with the symbol defined but the realign
+	  loop's carry direction still wrong (#2131) it reported 49020928
+	  (CSD C_SIZE 0x3BAFF truncated to 0xBAFF); with both fixes it
+	  reports the correct 250347520 sectors.
 
 endif # SDHC_DWC
 
@@ -681,11 +810,13 @@ endif # I2S_DW
 # the v4.4 API by Alp Lab AB (each API-shim change is marked at its call site;
 # see the per-driver provenance headers); the former ALP_VIDEO_ALIF_BROKEN gate
 # is RETIRED and the driver TUs build in directly when their DT node is enabled.
-# Runtime capture stays HW-blocked on this batch (no camera sensor wired).
-# vendor-ext, BENCH-UNVERIFIED.
+# The J5 innomaker_cam_ov9281 shield is bench-verified (live GREY8 capture,
+# an E1M-AEN803 on the E1M-EVK, 2026-09-21).  The J5
+# raspberry_pi_camera_module_1 (OV5647) shield is bench-verified too (live
+# RAW10 capture, 2026-09-22, issue #2248).  vendor-ext.
 # ---------------------------------------------------------------------------
 config VIDEO_ALIF_CAM
-	bool "Alif Ensemble CPI camera-capture controller (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
+	bool "Alif Ensemble CPI camera-capture controller (ADR 0017 Tier-2 INTERIM)"
 	default y
 	depends on VIDEO
 	depends on DT_HAS_ALIF_CAM_ENABLED
@@ -710,10 +841,14 @@ config VIDEO_ALIF_CAM_INIT_PRIORITY
 
 config VIDEO_ALIF_CAM_EXTENDED
 	bool "CPI has extended registers and ports (ISP / memory-dump endpoints)"
+	default y if SOC_SERIES_E8
 	depends on VIDEO_ALIF_CAM
 	help
 	  The CPI has extended registers and ports to forward video signals to the
-	  ISP and dump the frame to memory.
+	  ISP and dump the frame to memory.  The E8 CPI has them (Alif's own E8 DK
+	  sample/test board confs set this), and without it the driver never sets
+	  CAM_CFG.AXI_PORT_EN: the CPI still raises STOP per frame, so capture
+	  reports success over a buffer nothing was written to.
 
 config DISPLAY_CDC200
 	bool "TES CDC-2.1 (CDC200) DPI/RGB display controller for Alif (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
@@ -737,13 +872,14 @@ config FB_USES_DTCM_REGION
 	bool "CDC200 framebuffer lives in DTCM (needs the hal_alif local_to_global map)"
 	depends on DISPLAY_CDC200
 	help
-	  Selects the DTCM-resident framebuffer path in display_cdc200.c, which
-	  pulls in hal_alif's <soc_memory_map.h> (local_to_global) to translate
-	  the DTCM address for the CDC200 DMA engine.  Neither upstream Zephyr
-	  nor hal_alif declare this symbol -- it is alp-sdk's own gate around a
-	  vendored TU.  Leave off (default n) for the default SRAM0 framebuffer
-	  path, which needs neither the header nor the hal_alif common include
-	  dir.
+	  Set when the cdc200 node's framebuffer memory-region is a CPU-local
+	  DTCM address: display_cdc200.c then pulls in hal_alif's
+	  <soc_memory_map.h> (local_to_global) to translate it for the CDC200
+	  DMA engine.  Neither upstream Zephyr nor hal_alif declare this symbol
+	  -- it is alp-sdk's own gate around a vendored TU.  Leave off (default
+	  n) for a memory-region in global SRAM (the e1m_evk_rk055hdmipi4ma0
+	  shield's), which needs neither the header nor the hal_alif common
+	  include dir.
 
 config MIPI_DPHY
 	bool "MIPI-DPHY host controllers (vendored, ADR 0017 Tier-2 INTERIM)"
@@ -771,6 +907,14 @@ config MIPI_DPHY_INIT_PRIORITY
 	depends on MIPI_DPHY_DW
 	help
 	  MIPI-DPHY host-controller init priority (ahead of the CSI bridge at 41).
+
+# dphy_dw.c registers its log module against CONFIG_MIPI_DPHY_LOG_LEVEL; with
+# no upstream mipi_dphy class to define it, any CONFIG_LOG=y build failed.
+if MIPI_DPHY
+module = MIPI_DPHY
+module-str = mipi_dphy
+source "subsys/logging/Kconfig.template.log_config"
+endif # MIPI_DPHY
 
 config MIPI_DSI_DW
 	bool "DesignWare MIPI-DSI host controller for Alif (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
@@ -847,14 +991,15 @@ config VIDEO_ARX3A0
 # The header itself was never published by hal_alif -- closed by vendoring
 # isp-vsi.h + its isp_ctrl_params.h dependency VERBATIM (Apache-2.0) from
 # alifsemi/zephyr_alif @ v2.3.0 into zephyr/include/zephyr/drivers/video/.  The
-# wrapper does not export isp_vsi_set_param / isp_vsi_get_param, but the v4.4
-# port dropped their only callers, so that is not a compile blocker.
-# COMPILE + LINK now PROVEN (examples/aen/aen-isp-regcheck,
-# CONFIG_VIDEO_ISP_VSI=y, links against libisp_gcc.a).  Stays default n /
-# OPT-IN here: RUNTIME is still BENCH-BLOCKED -- no camera sensor is wired on
-# this hardware batch, so the m2m capture graph never runs; enabling it is a
-# build-only proof until a sensor is available.
-# vendor-ext, BENCH-BLOCKED (runtime only).
+# wrapper DOES export isp_vsi_set_param / isp_vsi_get_param
+# (isp_api_wrapper.c:880, :1242); the v4.4 port just dropped their only
+# callers porting the ctrl API, so there is no compile blocker either way.
+# COMPILE + LINK + RUNTIME now PROVEN on real silicon
+# (examples/aen/aen-isp-ov5647-capture, CONFIG_VIDEO_ISP_VSI=y, a real
+# OV5647 sensor through the full camera->csi->isp->memory graph with
+# AE/AWB running). Stays default n / OPT-IN here regardless -- links the
+# proprietary Vivante blob.
+# vendor-ext.
 # ---------------------------------------------------------------------------
 config VIDEO_ISP_VSI
 	bool "Alif Ensemble ISP-Pico (Verisilicon, ADR 0017 Tier-2 INTERIM, OPT-IN)"
@@ -870,10 +1015,10 @@ config VIDEO_ISP_VSI
 
 	  OPT-IN, default n.  Compiles + links against hal_alif v2.3.0 (isp-vsi.h +
 	  isp_ctrl_params.h vendored VERBATIM from zephyr_alif v2.3.0 into
-	  zephyr/include/zephyr/drivers/video/) -- proven by
-	  examples/aen/aen-isp-regcheck.  RUNTIME stays BENCH-BLOCKED: no camera
-	  sensor is wired on this hardware batch, so the m2m capture graph never
-	  runs.
+	  zephyr/include/zephyr/drivers/video/) and runs end to end on real
+	  silicon (examples/aen/aen-isp-ov5647-capture: a real OV5647 sensor
+	  through the full camera->csi->isp->memory graph, AE/AWB via the
+	  standard Zephyr video ctrl registry).
 	  Driver: zephyr/drivers/video/isp_pico.c.
 
 config VIDEO_ISP_VSI_INIT_PRIORITY
@@ -882,6 +1027,143 @@ config VIDEO_ISP_VSI_INIT_PRIORITY
 	depends on VIDEO_ISP_VSI
 	help
 	  System initialization priority for the Alif ISP-Pico driver.
+
+config VIDEO_ISP_VSI_FRAME_STATS
+	bool "ISP-Pico frame-end diagnostic counter"
+	default n
+	depends on VIDEO_ISP_VSI
+	help
+	  Compiles in isp_mi_frame_end_count, a global volatile counter of
+	  MI_INTR_MP_FRAME_END events (i.e. the ISP's own "frame complete"
+	  interrupt actually firing, not just any interrupt bit) -- readable
+	  by a bench app via `extern`, or by a debugger directly over SWD
+	  post-mortem, independent of whatever the app's own dequeue loop
+	  believes happened. Off by default: debug-only bench instrumentation,
+	  not something every build of this driver needs.
+
+config VIDEO_ISP_VSI_CALIB_OV5647
+	bool "ISP-Pico AWB/CCM/AE calibration: use OV5647's own tables, not ARX3A0's"
+	default y if VIDEO_OV5647
+	depends on VIDEO_ISP_VSI
+	help
+	  hal_alif's isp_param_conf.h compiles in ONE static AWB/CCM/AE
+	  calibration blob per build (.wb.autoAttr.calibParam's centLine/rgMin/
+	  rgMax/wpRange0/wpRange1/illuminant[] gains, .ccm.autoAttr.illuminantCCM[],
+	  and -- as of patch 0011 -- .ae's manualAttr/autoAttr ranges), loaded
+	  once by patch 0007's SetCalib guard. Alif's stock table (kept as the
+	  #else arm, patches 0008/0011) is ARX3A0's -- a different sensor's
+	  silicon than the OV5647 this branch runs, and bench run 140
+	  (E1M-AEN803, AE+AWB running after 1c3d8ccc9) showed the WB/CCM
+	  mismatch as a strong magenta cast on a ceiling-white target (RGB mean
+	  [195, 109, 247], AWB converging to rGain 0x19e bGain 0x26a); the AE
+	  mismatch (ARX3A0's expTimeRange.max 3000000 us, #2271) showed up as
+	  the per-frame AE writeback saturating against a ceiling far past
+	  OV5647's real one. Selecting this symbol switches isp_param_conf.h's
+	  #if/#else to OV5647-derived AWB/CCM/AE calibration instead.
+
+	  Source data (manufacturer-side tuning, BSD-2-Clause): Raspberry Pi
+	  libcamera's src/ipa/rpi/vc4/data/ov5647.json
+	  (github.com/raspberrypi/libcamera). This library works in
+	  white-balance GAIN space (gain = 1/(R/G), 1/(B/G)), so every
+	  wbGain/centLine/wpRange value is the RPi ct_curve's (R/G, B/G) ratios
+	  inverted, not a direct transcription -- cross-checked against
+	  ARX3A0's own internal relation (rgParam*gR + bgParam*gB =
+	  distParam*1e6, verified holding for its A/D50/D65 illuminant gains)
+	  before applying the same derivation to OV5647's. illuminantCCM is the
+	  RPi CCMs interpolated by colour temperature onto this struct's
+	  fixed-point scale (128 = 1.0, rows sum to 128). See patch 0008's own
+	  comment for the wpRange dist-width caveat (a starting heuristic, not
+	  a direct derivation like the rest of the table).
+
+	  default y whenever CONFIG_VIDEO_OV5647 (the sensor driver this
+	  calibration matches) is enabled -- ARX3A0's table is never the right
+	  default on a board running this sensor.
+
+config VIDEO_ISP_VSI_AE_TARGET
+	int "ISP-Pico AE target luminance [0, 255]"
+	default 90
+	depends on VIDEO_ISP_VSI
+	help
+	  isp_apply_ae()'s struct isp_ae_param.ae_target (isp_pico.c),
+	  hal_alif's own sensor_attributes.h reference table's .aeTarget, and
+	  -- as of patch 0011 -- isp_param_conf.h's OV5647 .ae.autoAttr.aeTarget
+	  all read this ONE Kconfig value (Zephyr's Kconfig namespace is
+	  global, so a hal_alif-side compiled patch can read a symbol declared
+	  here without any extra plumbing) -- kept as a single source of truth
+	  so the readers never drift the way isp_pico.c's own ae_target=50
+	  literal and sensor_attributes.h's separate .aeTarget=50 literal did
+	  before this Kconfig existed.
+
+	  UPDATED (bench run 85): the library's meanLum statistic is an 8-bit
+	  mean scaled by 1000 (VSI_ISP_EXPM_STATIC_BLOCK_NUM blocks averaged,
+	  library INFO log), and ae_target is compared on that SAME 8-bit
+	  scale internally -- 20 and 50 (runs 81/83/84's diagnostic values)
+	  are both below the bench's ACTUAL black level of ~16 (run 85:
+	  meanLum=16000, i.e. mean8=16), so AE was correctly satisfied at the
+	  sensor's exposure/gain floor -- "AE never stabilises" in those runs
+	  was AE doing exactly what it was told, not a bug.
+
+	  UPDATED (bench run 140, daylight): meanLum tracks ae_target * 1000
+	  fairly linearly -- target 80 -> lib meanLum 82120, frame Y mean 122,
+	  0% clipped; target 120 -> meanLum ~123000, Y mean 145; target 255
+	  (this symbol's OLD default) saturated the frame (Y mean 230-233,
+	  clipped highlights). 90 sits just above the 80 data point -- close to
+	  a Y mean of ~130, comfortably mid-range and unclipped -- and replaces
+	  255 as the default: asking AE to drive for the scale's brightest
+	  reachable point was correct back when meanLum read near-zero (run 85,
+	  before the AEM/WBM window fix made it a real measurement); with a
+	  working measurement it just saturates the frame.
+
+config VIDEO_ISP_VSI_WB_MANUAL_GAIN
+	bool "ISP-Pico: force manual WB gains instead of AWB's calib value"
+	default n
+	depends on VIDEO_ISP_VSI
+	help
+	  Diagnostic-only escape hatch: when set, isp_apply_wb() (isp_pico.c)
+	  forces ISP_OP_MANUAL and writes the four VIDEO_ISP_VSI_WB_GAIN_*
+	  values below via isp_vsi_set_param() instead of round-tripping
+	  whatever gain isp_vsi_update_cfg()'s SetCalib() last loaded. Run 84:
+	  used to prove the downstream colour pipeline (CCM/gamma/output)
+	  works correctly once WB gains are right, independent of whether AWB
+	  itself has converged -- NOT a production auto-white-balance
+	  replacement, and NOT sensor-agnostic (the correct gains are a
+	  lighting-condition fact, not a driver fact); off by default.
+
+config VIDEO_ISP_VSI_WB_GAIN_R
+	int "Manual WB red channel gain (256 = 1.0x)"
+	default 256
+	range 256 1023
+	depends on VIDEO_ISP_VSI_WB_MANUAL_GAIN
+	help
+	  struct isp_wb_param.r_gain when VIDEO_ISP_VSI_WB_MANUAL_GAIN is set.
+	  Range per vsi_comm_awb.h's ISP_WB_GAIN_S ("Range [256, 1023]").
+
+config VIDEO_ISP_VSI_WB_GAIN_GR
+	int "Manual WB green-in-red-lines channel gain (256 = 1.0x)"
+	default 256
+	range 256 1023
+	depends on VIDEO_ISP_VSI_WB_MANUAL_GAIN
+	help
+	  struct isp_wb_param.gr_gain when VIDEO_ISP_VSI_WB_MANUAL_GAIN is
+	  set. Range per vsi_comm_awb.h's ISP_WB_GAIN_S ("Range [256, 1023]").
+
+config VIDEO_ISP_VSI_WB_GAIN_GB
+	int "Manual WB green-in-blue-lines channel gain (256 = 1.0x)"
+	default 256
+	range 256 1023
+	depends on VIDEO_ISP_VSI_WB_MANUAL_GAIN
+	help
+	  struct isp_wb_param.gb_gain when VIDEO_ISP_VSI_WB_MANUAL_GAIN is
+	  set. Range per vsi_comm_awb.h's ISP_WB_GAIN_S ("Range [256, 1023]").
+
+config VIDEO_ISP_VSI_WB_GAIN_B
+	int "Manual WB blue channel gain (256 = 1.0x)"
+	default 256
+	range 256 1023
+	depends on VIDEO_ISP_VSI_WB_MANUAL_GAIN
+	help
+	  struct isp_wb_param.b_gain when VIDEO_ISP_VSI_WB_MANUAL_GAIN is set.
+	  Range per vsi_comm_awb.h's ISP_WB_GAIN_S ("Range [256, 1023]").
 
 # ---------------------------------------------------------------------------
 # Alif Ensemble VeriSilicon Hantro VC9000E JPEG hardware encoder (compatible
@@ -985,14 +1267,14 @@ config CAN_RBUF_AFWL
 # / USE_ALIF_HAL_ANALOG precedent) so OSPI_ALIF can select it and actually pull
 # the library in.
 #
-# vendor-ext, HW-BLOCKED, BUILD-ONLY: NO octal-NOR/HyperBus part is populated on
-# ANY AEN SKU (`assembled: false` in every metadata/e1m_modules/E1M-AEN*.yaml,
-# with memory.dram_mbit / .flash_mbit both 0), so there is nothing on the bus to
-# silicon-verify against -- this only proves the ospi0 node BINDS + the hal_alif
-# init/XiP-enable entry points COMPILE and LINK (zephyr/drivers/flash/
-# flash_ospi_alif.c calls both at init; see examples/aen/aen-ospi-regcheck).
-# Not a full flash_driver_api (read/write/erase/SFDP) -- that is a larger
-# silicon-gated follow-up, gated on a BOM change and not on a later batch.
+# vendor-ext, HW-BLOCKED, BUILD-ONLY this batch: the E1M-AEN801 (Ensemble E8)
+# has NO octal-NOR/HyperBus part populated on this hardware batch, so there is
+# nothing on the bus to silicon-verify against -- this only proves the ospi0
+# node BINDS + the hal_alif init/XiP-enable entry points COMPILE and LINK
+# (zephyr/drivers/flash/flash_ospi_alif.c calls both at driver init; see
+# examples/aen/aen-ospi-regcheck).  Not a full flash_driver_api (read/write/
+# erase/SFDP) -- that is a larger silicon-gated follow-up once a part is
+# populated, not this batch.
 # ---------------------------------------------------------------------------
 config USE_ALIF_HAL_OSPI
 	bool
@@ -1014,12 +1296,11 @@ config OSPI_ALIF
 	  controller; this driver programs the controller (ospi_init) and the XiP
 	  window (xip_enable) only -- no read/write/erase flash_driver_api yet.
 
-	  HW-BLOCKED, BUILD-ONLY: no octal-NOR/HyperBus part is populated on ANY
-	  AEN SKU -- not a per-batch or per-BOM-variant caveat -- so live XiP reads
-	  are unverifiable, and this gate proves DT binding + hal_alif linkage only.
+	  HW-BLOCKED, BUILD-ONLY: no octal-NOR/HyperBus part is populated on the
+	  E1M-AEN801 this batch, so live XiP reads are unverifiable here -- this
+	  gate proves the DT node binds and the hal_alif entry points link.
 	  Driver: zephyr/drivers/flash/flash_ospi_alif.c.
 
 	  ADR 0017 Tier-1.5 (in-tree thin driver over an Apache-2.0 hal_alif HW
 	  library, not a fork-driver copy -- the fork ships no OSPI Zephyr class
 	  driver either, only the DT binding).  See docs/adr/0017.
-

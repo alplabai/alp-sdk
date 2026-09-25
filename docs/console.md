@@ -291,9 +291,18 @@ rebooting...
 ### V2N (RZ/V2N + GD32 supervisor)
 
 The GD32 supervisor is a **singleton** managed inside the SDK.  When
-`CONFIG_ALP_SDK_V2N_SUPERVISOR=y` is set (auto-enabled for V2N SoMs),
+`CONFIG_ALP_SDK_V2N_SUPERVISOR=y` is set (auto-enabled for V2N SoMs) **and**
+`CONFIG_ALP_SDK_V2N_SUPERVISOR_SPI_BUS_ID` names the bridge's SPI bus,
 `alp companion ver` / `alp companion ping` / `alp companion gpio *` work
-without any application code.
+without any application code.  SPI is the CM33's only transport to the
+GD32 -- RIIC8/BRD_I2C is Cortex-A55/Linux-exclusive, so there is no I2C
+bus ID to set here.  The SPI bus ID defaults to `-1` and no in-tree board
+sets it yet, so on a stock build these commands would fail with
+`supervisor acquire failed (-2)` (`ALP_ERR_NOT_READY`, per
+`src/zephyr/console/alp_console_companion.c` and
+`alp_console_companion_gpio.c`; derived from source, not observed on
+silicon -- the in-tree M33 boards also ship with no CM33 shell
+console by default).  Tracked in #2044.
 
 ### Alif (AEN801 + CC3501E)
 

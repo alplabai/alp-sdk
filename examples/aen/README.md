@@ -60,10 +60,10 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 
 | Directory                                          | What it shows                                                                |
 |----------------------------------------------------|------------------------------------------------------------------------------|
-| [`aen-camera-regcheck`](aen-camera-regcheck/)      | **staging** -- camera-capture stack (`alif,cam` / DesignWare CSI-2 + D-PHY / ON Semi ARX3A0) binds; sensor not wired this batch. |
+| [`aen-camera-firstlight`](aen-camera-firstlight/)  | **bench** -- Raspberry-Pi-style CSI-2 camera first light (OV5647 / OV9281 on the E1M-EVK's J5) through the portable `<alp/camera.h>` API; OV9281 bench-verified on an E1M-AEN803 on the E1M-EVK (2026-09-21, all three modes); OV5647 bench-verified (2026-09-22, RAW10 640x480, issue #2248). |
 | [`aen-isp-regcheck`](aen-isp-regcheck/)            | **staging** -- VeriSilicon ISP Pico (`vsi,isp-pico`) bind-only staging check. |
 | [`aen-dsi-regcheck`](aen-dsi-regcheck/)            | **staging** -- Alif C2-MIPI-DSI display stack bind-only check (the TX twin of the CSI camera path). |
-| [`aen-dsi-display`](aen-dsi-display/)              | **bench** -- live RK055HDMIPI4MA0 pixels-on-glass path through CDC200 + DesignWare MIPI-DSI + D-PHY. |
+| [`aen-dsi-display`](aen-dsi-display/)              | **bench** -- live RK055HDMIPI4MA0 pixels-on-glass path through CDC200 + DesignWare MIPI-DSI + D-PHY, via the `e1m_evk_rk055hdmipi4ma0` shield. |
 | [`aen-i2s-amp-alif`](aen-i2s-amp-alif/)            | Drive a tone out of the E8 audio I2S (`i2s3`) over the vendored DesignWare I2S driver (Zephyr I2S API). |
 | [`aen-pdm-mic-alif`](aen-pdm-mic-alif/)            | Capture PCM from the EVK's PDM mics (MP34DT05) through the HP PDM block + the vendored `alif,alif-pdm` DMIC driver (Zephyr DMIC API). |
 
@@ -76,7 +76,7 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 | [`aen-cc3501e-companion-tour`](aen-cc3501e-companion-tour/) | **capstone** -- full-surface tour of the CC3501E companion API: init -> ping -> diag -> Wi-Fi scan/connect/IP -> TCP socket -> BLE enable/scan -> proxied-GPIO read. |
 | [`aen-cc3501e-ble-gatt`](aen-cc3501e-ble-gatt/)    | **bench** -- CC3501E BLE GATT-SERVER path (#480) through the portable `<alp/ble.h>` surface: register/advertise/gatt read-write-notify, server-only, no live central peer. |
 | [`aen-can-regcheck`](aen-can-regcheck/)            | **staging** -- Alif CAN-FD controller bind-only staging check (bus wiring HW-blocked). |
-| [`aen-sdcard-readout`](aen-sdcard-readout/)        | Probe a microSD over the E8 SD Host Controller (`snps,dwc-sdhc` + SDMMC disk) via the disk-access API. |
+| [`aen-sdhc-probe`](aen-sdhc-probe/)        | Register-level bring-up probes for the E8 SD Host Controller (`snps,dwc-sdhc`) -- **on the E1M-EVK 2626-R2, `sdhc0` stays disabled; the card-path probes compile out to a pad-free clock-gate proof instead** (#2051, SD mux hardware defect); see the example's own README. Renamed from `aen-sdcard-readout` (#2051). |
 | [`aen-spi-regcheck`](aen-spi-regcheck/)            | **bench** -- Alif DWC_ssi SPI driver (`alif,dwc-ssi-spi`, spi0 @ 0x48103000) register validation. |
 | [`aen-uart-ns16550-loopback`](aen-uart-ns16550-loopback/) | **bench** -- upstream ns16550 UART (Alif uart3 @ 0x4901b000) loopback validation. |
 
@@ -86,6 +86,7 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 |----------------------------------------------------|------------------------------------------------------------------------------|
 | [`aen-eeprom-manifest`](aen-eeprom-manifest/)      | Read + decode the on-module 24C128 Alp hardware-info manifest over SoC I2C2 (upstream `i2c_dw`) via `<alp/*>`. |
 | [`aen-i2c2-eeprom-regcheck`](aen-i2c2-eeprom-regcheck/) | **regcheck** -- I2C2 + EEPROM over the upstream DesignWare `i2c_dw` driver (Tier-1, `snps,designware-i2c`). |
+| [`aen-temp-sensor`](aen-temp-sensor/)              | Read the on-module TMP112 through the upstream Zephyr sensor API (`CONFIG_SENSOR` + `CONFIG_TMP112`, `SENSOR_CHAN_AMBIENT_TEMP`), in integer milli-degrees C. |
 | [`aen-gpio-bench`](aen-gpio-bench/)                | **bench** -- GPIO over the upstream DesignWare `gpio_dw` driver (Tier-1, `snps,designware-gpio`). |
 | [`aen-dma-regcheck`](aen-dma-regcheck/)            | **bench** -- ARM PL330 DMA (`arm,dma-pl330`, Tier-1): a real memory-to-memory copy through RTSS-HE local DMA2 in global SRAM0. |
 | [`aen-hwsem-regcheck`](aen-hwsem-regcheck/)        | **regcheck** -- HWSEM instance 0 (`alif,hwsem`) take/give readout over the in-tree driver. |

@@ -82,7 +82,7 @@
 #define METHOD_PONG "pong"
 
 /* Core-role selection (HP vs HE build of this app), not a peripheral-presence gate. */
-#if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HP)
+#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP)
 #define ROLE        "HP"
 #define SELF_BEACON ((volatile uint32_t *)0x02000010U)
 #define B_OPENED    ((volatile uint32_t *)0x02000048U)
@@ -113,6 +113,24 @@ static volatile uint32_t  g_cnt; /* HP: pongs received | HE: pings received */
  * alp_rpc_send, for the FAIL message if every echo fails. */
 static volatile uint32_t     g_echoed;
 static volatile alp_status_t g_last_send_rc;
+
+/*
+ * Link-liveness demo (<alp/rpc.h>, issue #1643): alp_rpc_set_link_callback()
+ * registers a callback that fires on every ALP_RPC_LINK_DOWN/_UP/_LOST
+ * transition, so a real app can stop calling alp_rpc_send()/alp_rpc_call()
+ * the moment it learns the peer is gone instead of finding out from a
+ * timeout.  Just logged here -- this example's own PASS/FAIL verdict still
+ * rests on the ping/pong counters above, not on this callback, since on
+ * THIS board (an M55<->M55 pair, both sides Zephyr) the pinned ipc_service
+ * RPMsg backend only ever calls `bound`, never `unbound`/`error` -- so in
+ * this revision only ALP_RPC_LINK_UP is ever actually observed here.  See
+ * src/backends/rpc/zephyr_drv.c's `@par Link liveness` file comment for why.
+ */
+static void on_link_state(alp_rpc_link_state_t state, void *user)
+{
+	ARG_UNUSED(user);
+	printk("[%s] link state -> %d\n", ROLE, (int)state);
+}
 
 #if IS_HOST
 /*
@@ -213,6 +231,11 @@ int main(void)
 	}
 	*B_OPENED = 1U;
 	printk("[%s] alp_rpc_open OK\n", ROLE);
+
+	/* Register the link-liveness callback -- see on_link_state()'s doc
+	 * comment above.  Best-effort: a NOSUPPORT rc here (e.g. a bare-metal
+	 * stub build) doesn't change this example's verdict either way. */
+	(void)alp_rpc_set_link_callback(g_ch, on_link_state, NULL);
 
 	/*
 	 * Subscribe to the direction this core consumes.  alp_rpc_subscribe()

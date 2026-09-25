@@ -22,33 +22,125 @@ from typing import Any, Optional
 from alp_project import resolve_memory_map
 from sentinels import is_tbd
 
+from .aperture import is_partition_inside_aperture, resolve_aperture
 from .memregion import _PAGE, _region_size_bytes
 from .models import BoardProject, ResolvedPartition, StorageEntry
+
+# Sentinel distinguishing "caller has no hoisted aperture yet, resolve it"
+# from a genuinely-resolved `aperture is None` ("this SoC declares none").
+# `resolve_storage_partitions()` resolves the aperture ONCE and threads it
+# through every helper below (the way `carveout.py:218` hoists it once per
+# `resolve_carve_outs()` call) instead of each helper -- and each region a
+# helper loops over -- re-parsing the SoC JSON and re-resolving the silicon
+# variant on its own. Callers outside this module (`loader.py`'s eager
+# cross-check, and the direct-call pytest suite) don't pass `aperture` at
+# all, so they keep resolving it themselves via this sentinel's default --
+# unchanged behaviour, just no longer redundant inside one resolve.
+_APERTURE_UNSET: Any = object()
+
+# `write_authority` value that means "writable by the application at
+# runtime" -- the ONLY value a `memory_map` row may itself claim for a
+# runtime mount (#2088). Same value, same rationale, as
+# `check_atoc_reservation._RUNTIME_WRITABLE_AUTHORITY` (#2086); duplicated
+# rather than imported since the two live in separate top-level scripts.
+_RUNTIME_WRITABLE_AUTHORITY = "customer_runtime"
+
+# `write_authority` value meaning "whole-device alias spanning contained
+# rows of DIFFERENT authority -- consult the contained rows instead" (the
+# schema's own words for `memory_region.write_authority`, `mram_main`'s tag
+# on every AEN preset today). A composite row does NOT claim
+# customer-runtime-writable for itself, but it is also not an unconditional
+# pass: `_composite_alias_coverage_gap()` below is what actually "consults
+# the contained rows" this value promises -- refusing the alias outright
+# whenever a contained row can't be verified (unresolved base/size, absent
+# write_authority, or a gap none of them cover). Treating `composite` the
+# same as `customer_image`/`vendor_image`/`secure_enclave`/`none` --
+# refusing it unconditionally -- would refuse `mram_main` on every AEN
+# preset, the only whole-device alias any of them declares, even though it
+# is the intended `flash_device:` target
+# (docs/adr/0027-storage-regions-are-declared-by-role.md); this value
+# exists so that shape can still be verified rather than rubber-stamped.
+_DEFERRING_ALIAS_AUTHORITY = "composite"
+
+
+def _resolve_aperture_arg(
+    som_preset: dict[str, Any],
+    metadata_root: Path,
+    aperture: Any,
+) -> Optional[tuple[int, int]]:
+    """Return `aperture` verbatim when a caller already hoisted it;
+    resolve it fresh only when `aperture` is the `_APERTURE_UNSET`
+    sentinel (no caller has resolved it yet for this call)."""
+    if aperture is _APERTURE_UNSET:
+        return resolve_aperture(som_preset, metadata_root)
+    return aperture
+
+
+def _is_flash_sub_partition(
+    region: dict[str, Any],
+    som_preset: dict[str, Any],
+    metadata_root: Path,
+    aperture: Any = _APERTURE_UNSET,
+) -> bool:
+    """#1365 split B (P2): is `region` a partition INSIDE a flash device,
+    not a device of its own?
+
+    Derives the verdict against the SoC's declared on-die MRAM aperture
+    (`aperture.is_partition_inside_aperture`) instead of trusting the
+    legacy `carveout:` flag outright. Falls back to the legacy flag
+    verbatim whenever the derivation can't resolve a definite verdict --
+    no aperture declared for this SoC (every non-Alif SoM), this region's
+    own `base` still unresolved (e.g. AEN's `mram_main`), OR this region's
+    resolved extent lying OUTSIDE the declared aperture (containment is
+    one-sided: outside proves nothing, so it does not by itself mean
+    "this is a device", #1365 split B review MAJOR 3): this is what keeps
+    split B a no-op everywhere it can't prove a better answer (ADR-0034
+    clause 4).
+
+    `aperture` defaults to the `_APERTURE_UNSET` sentinel, resolving it
+    fresh per call; pass an already-resolved aperture to avoid re-parsing
+    the SoC JSON when a caller is looping over many regions/devices in one
+    resolve.
+    """
+    aperture = _resolve_aperture_arg(som_preset, metadata_root, aperture)
+    inside = is_partition_inside_aperture(region, aperture)
+    if inside is None:
+        return region.get("carveout") is False
+    return inside
 
 
 def _known_flash_devices(
     som_preset: dict[str, Any],
     metadata_root: Path,
+    aperture: Any = _APERTURE_UNSET,
 ) -> list[str]:
     """Enumerate every flash-device name a `storage[].flash_device:` may
     reference for the given SoM preset.
 
     Today this is the union of:
       - `memory_map:` region names (explicit override or derived from
-        the SoC variant), excluding any region marked `carveout: false`
-        (a partition INSIDE a flash-class node, not a device of its
-        own, #1484), AND
+        the SoC variant), excluding any region `_is_flash_sub_partition()`
+        calls a partition INSIDE a flash-class node rather than a device
+        of its own (#1484) -- derived against the SoC's declared on-die
+        MRAM aperture, falling back to the legacy `carveout: false` flag
+        wherever containment can't prove a verdict (#1365 split B), AND
       - `on_module.ospi_memories:` keys (when declared on the SoM).
 
     Kept as a list so the loader's "did you mean..." message can sort
     it deterministically.
+
+    `aperture` defaults to `_APERTURE_UNSET`, resolving it once for this
+    call (rather than once per region, as a call embedded in the loop
+    used to); pass an already-resolved aperture to share it across many
+    calls in one resolve (see `_APERTURE_UNSET`'s module comment).
     """
+    aperture = _resolve_aperture_arg(som_preset, metadata_root, aperture)
     names: set[str] = set()
     for region in resolve_memory_map(som_preset, metadata_root):
         n = region.get("name")
         if not isinstance(n, str):
             continue
-        if region.get("carveout") is False:
+        if _is_flash_sub_partition(region, som_preset, metadata_root, aperture):
             # A flash-class SUB-region -- an MRAM partition living inside a
             # `mram_storage`-class flash node, not a flash device of its own
             # (see the schema's `memory_region.carveout` description). On
@@ -57,6 +149,9 @@ def _known_flash_devices(
             # and decorating one with a `partitions { }` child targets a
             # node the board tree never defines (#1484). Keep it out of the
             # advertised set and out of `_resolve_flash_device()` below.
+            # #1365 split B: derived against the SoC's declared on-die MRAM
+            # aperture (containment), not the legacy `carveout:` flag --
+            # see `_is_flash_sub_partition()`.
             continue
         names.add(n)
     om = som_preset.get("on_module") or {}
@@ -90,13 +185,22 @@ def _reserved_spans(
     The device base is DERIVED, then VERIFIED, never assumed:
 
       - If the device is itself a `memory_map:` region with an integer
-        `base`, that base is the origin.
-      - Otherwise (a whole-window alias like `mram_main`, which declares
-        `base: TBD` deliberately) take the lowest integer base among the
-        sibling regions and require `lowest + capacity == highest region
-        top`. That identity is what proves the alias really spans the same
-        window the fine-grained regions tile; if it does not hold, refuse to
-        convert.
+        `base`, that base is the origin -- authoritative, no further check
+        needed. On every AEN preset today this is the branch `mram_main`
+        takes: #2053 resolved its `base` to `0x80000000`, an ordinary
+        integer like any other region's.
+      - Otherwise (a device with no `base` of its own, e.g. a whole-window
+        alias whose `base:` is still an unresolved `"TBD"` placeholder --
+        no shipped AEN preset has this shape today; `mram_main` was the
+        standing example before #2053) take the lowest integer base among
+        the sibling regions and require `lowest + capacity == highest
+        region top`. That identity is what proves the alias really spans
+        the same window the fine-grained regions tile; if it does not
+        hold, refuse to convert. This is the ONLY leg that ever ran the
+        identity check -- it exists to substitute for a missing origin,
+        so it is unreachable (and its absence is safe, not a gap) once
+        the device carries a real `base` and takes the branch above
+        instead.
 
     `_resolve_flash_device`'s descriptor deliberately carries no physical
     base (Zephyr's flash-mapping layer derives it from the DT controller
@@ -167,10 +271,191 @@ def _first_free(
     return base_bytes
 
 
+def _composite_alias_coverage_gap(
+    alias_name: str,
+    alias_base: Any,
+    capacity_bytes: int,
+    som_preset: dict[str, Any],
+    metadata_root: Path,
+    aperture: Optional[tuple[int, int]],
+) -> Optional[str]:
+    """#2088: what "`write_authority: composite` means consult the
+    contained rows" actually has to DO, not just claim.
+
+    Returns `None` when the `memory_map:` rows CONTAINED in
+    `alias_name`'s own `[origin, origin+capacity_bytes)` window --
+    resolved, `write_authority`-bearing, non-overlapping -- CONTIGUOUSLY
+    tile that window with no gap (review round 2, Major 1: an earlier
+    version of this function summed sizes rather than walking spans, so
+    an overlap of N bytes plus a hole of N bytes passed the sum check
+    while the hole itself stayed unprotected -- reproduced by deleting
+    `atoc` and widening `he_slot0` by exactly `atoc`'s size). Returns a
+    refusal reason otherwise, naming the gap or the overlapping pair.
+
+    A row whose resolved extent lies OUTSIDE the window (a genuinely
+    unrelated device that merely happens to share this SoM's
+    `memory_map:` list) is ignored -- containment, not mere co-listing,
+    is what makes a row this alias's business.
+
+    A row whose base or size DOESN'T resolve is not immediately fatal on
+    its own (review round 2, Major 3: an earlier version refused for
+    ANY such row unconditionally, which also refused a genuinely
+    unrelated device parked at a TBD-but-clearly-different address
+    purely because its address wasn't resolved yet -- indistinguishable
+    from `atoc`'s real pre-HW-mapped shape without more information).
+    Instead: walk only the rows that DO resolve; if they alone already
+    tile the window with no gap, an unresolved-base sibling can only be
+    something else entirely (resolving it into an overlap would be a
+    SEPARATE metadata bug for a different gate to catch, not evidence
+    this alias is unsafe today) -- but if a gap remains, an unresolved
+    sibling is named as a candidate that might explain it (never ruled
+    out, per ADR-0034 clause 4), while an alias with NO unresolved
+    sibling AND a gap has nothing left to blame but a genuinely missing
+    row.
+
+    `origin` is `alias_base` when the alias's own base has resolved;
+    else `aperture[0]` when an aperture resolves for this SoM (`mram_main`
+    itself carries `base: "TBD"` on every AEN preset today, so this is
+    the common case, not the exception -- using the SoC's own declared
+    aperture start here, rather than the lowest resolved sibling base,
+    avoids anchoring the window at a fabricated address when a resolved
+    but genuinely-unrelated sibling happens to sit below every real
+    contained row, review round 2 Minor); else the lowest resolved base
+    among sibling rows, for a non-Alif SoM with no aperture to anchor to.
+
+    Without this whole function, a sibling with an unresolved `base` or
+    a sibling missing from `memory_map:` altogether contributes NO span
+    to `_reserved_spans()`, which reserves only what it can see -- so
+    the bump allocator treats the unaccounted band as free. On
+    `mram_main`, that band can be the Secure-Enclave-owned `atoc` window
+    (bench-observed live at 0x80578000..0x80580000, `carveout.py:100-104`).
+    `aperture` gates the same absent-write_authority leniency
+    `_resolve_flash_device()`'s own guard applies just above this call --
+    a non-Alif sibling with no `write_authority` at all is not itself
+    the hazard.
+    """
+    siblings = [r for r in resolve_memory_map(som_preset, metadata_root)
+                if isinstance(r, dict) and r.get("name") != alias_name]
+
+    def _resolved_int(value: Any) -> bool:
+        return isinstance(value, int) and not isinstance(value, bool)
+
+    if _resolved_int(alias_base):
+        origin = alias_base
+    elif aperture is not None:
+        origin = aperture[0]
+    else:
+        resolved_bases = [r["base"] for r in siblings if _resolved_int(r.get("base"))]
+        if not resolved_bases:
+            return (
+                f"flash device '{alias_name}' declares "
+                f"write_authority: {_DEFERRING_ALIAS_AUTHORITY!r} on SoM "
+                f"{som_preset.get('sku', '<unknown>')}, which defers "
+                f"eligibility to its contained memory_map rows -- but "
+                f"neither '{alias_name}' itself nor any sibling row has a "
+                f"resolved base, and no SoC aperture resolves either, so "
+                f"its window cannot be anchored to verify anything inside "
+                f"it. Resolve at least one memory_map row's base before "
+                f"targeting '{alias_name}' with a storage[].flash_device: "
+                f"(#2088)")
+        origin = min(resolved_bases)
+    top = origin + capacity_bytes
+
+    contained: "list[tuple[int, int, str]]" = []
+    ambiguous_names: "list[str]" = []
+    for region in siblings:
+        name = region.get("name")
+        base = region.get("base")
+        if not _resolved_int(base):
+            ambiguous_names.append(str(name))
+            continue
+        size_bytes = _region_size_bytes(region)
+        if size_bytes is None:
+            ambiguous_names.append(str(name))
+            continue
+        hi = base + size_bytes
+        if base >= top or hi <= origin:
+            continue  # Disjoint -- a different device, not this alias's business.
+        if not (base >= origin and hi <= top):
+            # Partial overlap with the WINDOW boundary -- neither cleanly
+            # inside nor cleanly outside. Rare/malformed; refuse rather
+            # than guess which side of the boundary the bytes belong to.
+            return (
+                f"flash device '{alias_name}' declares "
+                f"write_authority: {_DEFERRING_ALIAS_AUTHORITY!r} on SoM "
+                f"{som_preset.get('sku', '<unknown>')}, which defers "
+                f"eligibility to its contained memory_map rows -- but "
+                f"region {name!r} [0x{base:x}, 0x{hi:x}) only partially "
+                f"overlaps '{alias_name}'s 0x{origin:x}..0x{top:x} "
+                f"window, so it can't be cleanly attributed as contained "
+                f"or disjoint. Fix the addresses before targeting "
+                f"'{alias_name}' with a storage[].flash_device: (#2088)")
+        wa = region.get("write_authority")
+        if wa is None and aperture is not None:
+            return (
+                f"flash device '{alias_name}' declares "
+                f"write_authority: {_DEFERRING_ALIAS_AUTHORITY!r} on SoM "
+                f"{som_preset.get('sku', '<unknown>')}, which defers "
+                f"eligibility to its contained memory_map rows -- but "
+                f"region {name!r}, contained in '{alias_name}'s window, "
+                f"carries no write_authority, so whether it may host a "
+                f"runtime mount cannot be verified. Author "
+                f"write_authority: on {name!r} before targeting "
+                f"'{alias_name}' with a storage[].flash_device: (#2088)")
+        contained.append((base, hi, str(name)))
+
+    # Walk the CONTAINED, resolved spans in address order and require
+    # exact contiguity -- an overlap of N bytes plus a hole of N bytes
+    # must not cancel out in a sum (review round 2, Major 1).
+    contained.sort()
+    cursor = origin
+    prev_name = None
+    for lo, hi, name in contained:
+        if lo < cursor:
+            return (
+                f"flash device '{alias_name}' declares "
+                f"write_authority: {_DEFERRING_ALIAS_AUTHORITY!r} on SoM "
+                f"{som_preset.get('sku', '<unknown>')}, which defers "
+                f"eligibility to its contained memory_map rows -- but "
+                f"region {name!r} [0x{lo:x}, 0x{hi:x}) overlaps "
+                f"{prev_name!r}, which ends at 0x{cursor:x}, by "
+                f"{(cursor - lo) // 1024} KiB. Two rows claiming the same "
+                f"bytes means at most one of their `write_authority` "
+                f"values actually applies there; fix the addresses before "
+                f"targeting '{alias_name}' with a storage[].flash_device: "
+                f"(#2088)")
+        if lo > cursor:
+            break  # Gap -- reported below, naming any candidate that might fill it.
+        cursor = hi
+        prev_name = name
+
+    if cursor < top:
+        gap_lo, gap_hi = cursor, top
+        candidate_note = (
+            f" -- {', '.join(sorted(ambiguous_names))} carries an "
+            f"unresolved base or size and cannot be ruled out as the "
+            f"row that belongs there"
+            if ambiguous_names else
+            f" and no memory_map row with an unresolved base or size "
+            f"exists either, so this is a genuinely undeclared row")
+        return (
+            f"flash device '{alias_name}' declares "
+            f"write_authority: {_DEFERRING_ALIAS_AUTHORITY!r} on SoM "
+            f"{som_preset.get('sku', '<unknown>')} "
+            f"({capacity_bytes // 1024} KiB, window 0x{origin:x}.."
+            f"0x{top:x}), but its contained memory_map rows leave a gap "
+            f"at 0x{gap_lo:x}..0x{gap_hi:x} ({(gap_hi - gap_lo) // 1024} "
+            f"KiB) unaccounted for{candidate_note}. Declare the missing "
+            f"row(s) before targeting '{alias_name}' with a "
+            f"storage[].flash_device: (#2088)")
+    return None
+
+
 def _resolve_flash_device(
     flash_device: str,
     som_preset: dict[str, Any],
     metadata_root: Path,
+    aperture: Any = _APERTURE_UNSET,
 ) -> tuple[Optional[dict[str, Any]], Optional[str]]:
     """Resolve a board.yaml `flash_device:` reference to a device descriptor.
 
@@ -185,26 +470,88 @@ def _resolve_flash_device(
     NOT carry a physical base because Zephyr's flash-mapping layer
     derives that from the DT controller node.  The emitted overlay
     references `&<dt_label>` and lets Zephyr handle the physical mapping.
+
+    `aperture` defaults to `_APERTURE_UNSET` (resolve fresh); pass an
+    already-resolved aperture to share it across many calls in one
+    resolve (see `_APERTURE_UNSET`'s module comment).
     """
+    aperture = _resolve_aperture_arg(som_preset, metadata_root, aperture)
     # memory_map: region match first (covers the auto-derived MRAM /
     # SRAM region table from resolve_memory_map()).
     for region in resolve_memory_map(som_preset, metadata_root):
         if region.get("name") != flash_device:
             continue
-        if region.get("carveout") is False:
+        if _is_flash_sub_partition(region, som_preset, metadata_root, aperture):
             # Defense in depth for a hand-built project that skips the
             # loader's `_known_flash_devices()` check: refuse rather than
             # fabricate a `dt_label` from the region name.  This region is
             # a partition INSIDE a flash-class node (e.g. AEN's
             # `mram_storage`), not a flash device -- it has no Devicetree
             # label of its own and a `partitions { }` child on it targets
-            # a node the board tree never defines (#1484).
+            # a node the board tree never defines (#1484). #1365 split B:
+            # derived against the declared MRAM aperture, not the legacy
+            # `carveout:` flag -- see `_is_flash_sub_partition()`.
             return None, (
                 f"flash device '{flash_device}' is a partition inside a "
                 f"flash-class region on SoM "
                 f"{som_preset.get('sku', '<unknown>')}, not a flash device "
                 f"of its own -- it has no Devicetree label and cannot take "
                 f"a `partitions {{ }}` child")
+        # #2088: a resolved memory_map region is not automatically
+        # customer-writable at runtime -- that includes a whole-device
+        # alias (e.g. `mram_main`), which `_is_flash_sub_partition()`
+        # above correctly does NOT treat as a sub-partition, so it would
+        # otherwise fall straight through to a resolved descriptor. Per
+        # the schema (`memory_region.write_authority`), a row may take a
+        # runtime mount only when it claims `customer_runtime` directly,
+        # OR defers as a `composite` alias (see `_DEFERRING_ALIAS_AUTHORITY`
+        # above) AND every contained row it defers to is independently
+        # verified safe below -- every other AUTHORED value
+        # (customer_image/vendor_image/secure_enclave/none) means
+        # something else owns writes to this region and refuses outright.
+        wa = region.get("write_authority")
+        if wa is not None and wa not in (
+                _RUNTIME_WRITABLE_AUTHORITY, _DEFERRING_ALIAS_AUTHORITY):
+            return None, (
+                f"flash device '{flash_device}' declares "
+                f"write_authority: {wa!r} on SoM "
+                f"{som_preset.get('sku', '<unknown>')}, which is not "
+                f"customer-writable at runtime -- only a region declaring "
+                f"write_authority: {_RUNTIME_WRITABLE_AUTHORITY!r} (or "
+                f"{_DEFERRING_ALIAS_AUTHORITY!r} for a whole-device alias "
+                f"that defers to contained rows) may take a runtime mount "
+                f"(storage[].flash_device:). Either give '{flash_device}' "
+                f"write_authority: {_RUNTIME_WRITABLE_AUTHORITY!r} if it "
+                f"truly is the customer's runtime storage, or point "
+                f"flash_device: at the region that is (#2088)")
+        # An ABSENT value is different: the schema and ADR-0034 clause 4
+        # both say absent means UNRESOLVED, never `customer_runtime` -- "a
+        # consumer must treat an authored region carrying no
+        # write_authority as ineligible for ... runtime write ... rather
+        # than defaulting permissively" (`docs/porting-new-som.md`
+        # repeats this verbatim). `carveout.py`'s equivalent guard
+        # (`_region_ipc_eligibility`'s "unclassified"/"unresolved" legs)
+        # enforces this the same way -- refuse -- but ONLY once an
+        # on-die MRAM aperture actually resolves for this SoM (every
+        # non-Alif SoM, and any Alif SoC/variant that hasn't declared
+        # one, short-circuits before this rule even runs -- see
+        # `_candidate_regions()`). Mirrored here: refusing
+        # unconditionally would fire on every V2N/V2M/NX9101 preset's
+        # `memory_map:` rows, none of which author `write_authority` at
+        # all and none of which a customer can fix by authoring a field
+        # this guard doesn't even apply to.
+        if wa is None and aperture is not None:
+            return None, (
+                f"flash device '{flash_device}' on SoM "
+                f"{som_preset.get('sku', '<unknown>')} carries no "
+                f"write_authority -- ADR-0034 clause 4 and the schema "
+                f"both say an absent value means unresolved, not "
+                f"'customer_runtime': treat it as ineligible for a "
+                f"runtime write rather than defaulting permissively. "
+                f"Author write_authority: {_RUNTIME_WRITABLE_AUTHORITY!r} "
+                f"on '{flash_device}' if it is meant to take a runtime "
+                f"mount, or point flash_device: at a region that already "
+                f"declares it (#2088)")
         size_bytes = _region_size_bytes(region)
         if size_bytes is None:
             return None, (
@@ -212,6 +559,54 @@ def _resolve_flash_device(
                 f"region but size_mib / size_kib is unset or TBD on "
                 f"SoM {som_preset.get('sku', '<unknown>')}; the SoM "
                 f"hasn't been HW-mapped yet")
+        if wa == _DEFERRING_ALIAS_AUTHORITY:
+            # `composite` means "consult the contained rows instead" --
+            # so actually consult them, rather than trusting the alias's
+            # own tag as a pass. Every OTHER row in this SoM's memory_map
+            # must resolve to a concrete [base, base+size) span AND
+            # declare its own write_authority, and together they must
+            # fully tile this alias's capacity, before the alias can be
+            # called safe: a row this can't account for (unresolved base
+            # or size, absent authority, or a gap none of them cover) is
+            # exactly the #2088 hazard (a storage[] entry silently
+            # landing in the unaccounted-for band, e.g. the SE-owned
+            # `atoc` window when its base is still TBD) -- refuse the
+            # whole alias rather than resolve permissively around a hole
+            # this function can't see the shape of.
+            gap_reason = _composite_alias_coverage_gap(
+                flash_device, region.get("base"), size_bytes, som_preset,
+                metadata_root, aperture)
+            if gap_reason is not None:
+                return None, gap_reason
+            # #2088 review round 2, Major 2: the coverage-gap walk above
+            # proves the CONTAINED rows are individually sound, but
+            # placement itself runs through `_reserved_spans()` --  a
+            # SEPARATE, older function with its own (weaker) origin/
+            # window derivation. An out-of-window sibling (correctly
+            # ignored as disjoint above) can still push
+            # `_reserved_spans()`'s own `window_top = max(hi for sized)`
+            # past this alias's real top, failing its
+            # `origin + capacity == window_top` identity check and
+            # degrading it to `([], reason)` -- silently reserving
+            # NOTHING, including `mcuboot`, for any caller that placed a
+            # storage[] entry here. An alias whose contained rows can't
+            # actually be RESERVED is exactly as unconsultable as one
+            # whose rows can't be VERIFIED (the same principle already
+            # applied to an unresolved base above) -- refuse rather than
+            # let a caller believe the window this function just proved
+            # safe stays protected at placement time.
+            _reserved_probe, reserved_degraded_reason = _reserved_spans(
+                flash_device, size_bytes, som_preset, metadata_root)
+            if reserved_degraded_reason is not None:
+                return None, (
+                    f"flash device '{flash_device}' declares "
+                    f"write_authority: {_DEFERRING_ALIAS_AUTHORITY!r} on "
+                    f"SoM {som_preset.get('sku', '<unknown>')} -- its "
+                    f"contained memory_map rows verify safe, but "
+                    f"{reserved_degraded_reason}, so placement cannot "
+                    f"actually reserve them: an alias whose contained "
+                    f"rows can't be reserved can't be consulted either "
+                    f"(#2088)")
         dt_label = (region.get("dt_label")
                     if isinstance(region.get("dt_label"), str)
                     else flash_device)
@@ -343,6 +738,7 @@ def _verified_alt_devices(
     exclude: str,
     som_preset: dict[str, Any],
     metadata_root: Path,
+    aperture: Any = _APERTURE_UNSET,
 ) -> list[str]:
     """Every known flash device other than `exclude` that both resolves
     (`_resolve_flash_device()`) and carries a verified Devicetree label
@@ -355,12 +751,17 @@ def _verified_alt_devices(
     also excludes the SoM's own reserved region names, which don't apply
     here) rather than risk a shared-helper refactor rippling into that
     already-reviewed code path.
+
+    `aperture` defaults to `_APERTURE_UNSET` (resolve fresh); pass an
+    already-resolved aperture to share it across many calls in one
+    resolve (see `_APERTURE_UNSET`'s module comment).
     """
+    aperture = _resolve_aperture_arg(som_preset, metadata_root, aperture)
     return sorted(
-        d for d in _known_flash_devices(som_preset, metadata_root)
+        d for d in _known_flash_devices(som_preset, metadata_root, aperture)
         if d != exclude
         and _has_real_dt_label(d, som_preset, metadata_root)
-        and _resolve_flash_device(d, som_preset, metadata_root)[0] is not None)
+        and _resolve_flash_device(d, som_preset, metadata_root, aperture)[0] is not None)
 
 
 def _blocked_partition(
@@ -434,11 +835,22 @@ def resolve_storage_partitions(
             f"declared; add one referencing a SoM memory_map region "
             f"or an on_module.ospi_memories key")))
 
+    # #1365 split B (Also fix): hoist the aperture ONCE for this whole
+    # resolve, the way `carveout.py:218` hoists it once per
+    # `resolve_carve_outs()` call -- every downstream helper below
+    # (`_resolve_flash_device`, `_known_flash_devices` via
+    # `_verified_alt_devices`, the alt-device scan inlined in `_place()`)
+    # otherwise re-parses the SoC JSON and re-resolves the silicon variant
+    # once per region AND once per storage entry / alt-device enumeration.
+    aperture = resolve_aperture(
+        project.som_preset, project.effective_metadata_root())
+
     # Iterate flash devices in alphabetical order; within each device,
     # entries are name-sorted for byte-stable allocation.
     for device_name in sorted(by_device.keys()):
         descriptor, block_reason = _resolve_flash_device(
-            device_name, project.som_preset, project.effective_metadata_root())
+            device_name, project.som_preset,
+            project.effective_metadata_root(), aperture)
         if descriptor is None:
             for entry in by_device[device_name]:
                 resolved.append(_blocked_partition(
@@ -590,7 +1002,7 @@ def resolve_storage_partitions(
                     alt_devices = [
                         d for d in _known_flash_devices(
                             project.som_preset,
-                            project.effective_metadata_root())
+                            project.effective_metadata_root(), aperture)
                         if d != device_name
                         and d not in reserved_names
                         and _has_real_dt_label(
@@ -598,7 +1010,7 @@ def resolve_storage_partitions(
                             project.effective_metadata_root())
                         and _resolve_flash_device(
                             d, project.som_preset,
-                            project.effective_metadata_root())[0]
+                            project.effective_metadata_root(), aperture)[0]
                         is not None]
                     # Only lead with "pick an offset on <device>" when the
                     # device actually has free room outside its reserved
@@ -665,7 +1077,7 @@ def resolve_storage_partitions(
                 # gets that more actionable reason instead.
                 alt = _verified_alt_devices(
                     device_name, project.som_preset,
-                    project.effective_metadata_root())
+                    project.effective_metadata_root(), aperture)
                 remedy = (
                     f"use a different flash_device: ({', '.join(alt)})"
                     if alt else

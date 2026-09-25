@@ -251,6 +251,22 @@ manifest:
           # littlefs-keyvalue
           # actually builds; see the Task 0 completion report.
           - littlefs
+          # ELM FatFs (modules/fs/fatfs, group "fs" in Zephyr's own
+          # west.yml).  Backs CONFIG_FAT_FILESYSTEM_ELM, whose Kconfig
+          # `depends on ZEPHYR_FATFS_MODULE` -- set only by Zephyr's
+          # module-resolution pass once the module is actually present.
+          # Without this entry that dependency is unmet and BOTH
+          # CONFIG_FILE_SYSTEM=y and CONFIG_FAT_FILESYSTEM_ELM=y are
+          # dropped from the solve SILENTLY: no warning, no error, and an
+          # app links with no filesystem in the image at all (measured on
+          # examples/aen/aen-evk-demo before this entry landed -- the
+          # .config simply had neither symbol).  FAT is the format a
+          # removable SD card in someone's hand actually carries, so this
+          # is what phase 9 of aen-evk-demo mounts.  NOTE, same caveat as
+          # littlefs and hal_ethos_u below: a workspace set up before this
+          # entry landed needs a `west update` in its own topdir before
+          # aen-evk-demo builds.
+          - fatfs
           - cmsis
           # cmsis_6 provides cmsis_core.h for Cortex-M targets on Zephyr
           # v4.4 (the legacy `cmsis` module now serves Cortex-A/R only).

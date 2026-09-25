@@ -60,15 +60,16 @@ prose and survives regeneration.
 
 | SKU \ Example | Silicon | i2c-scanner | gpio-button-led | pwm-led-fade | Notes (from metadata) |
 | --- | --- | :---: | :---: | :---: | --- |
-| E1M-AEN301 | `alif:ensemble:e3` | ✅ | ✅ | ✅ | no external DRAM · no external flash · Ethos-U U55 · `partial_hw_config: true` |
-| E1M-AEN401 | `alif:ensemble:e4` | ✅ | ✅ | ✅ | no external DRAM · no external flash · Ethos-U U55+U85 · `partial_hw_config: true` |
-| E1M-AEN501 | `alif:ensemble:e5` | ✅ | ✅ | ✅ | no external DRAM · no external flash · Ethos-U U55 · `partial_hw_config: true` |
-| E1M-AEN601 | `alif:ensemble:e6` | ✅ | ✅ | ✅ | no external DRAM · no external flash · Ethos-U U55+U85 · `partial_hw_config: true` |
-| E1M-AEN701 | `alif:ensemble:e7` | ✅ | ✅ | ✅ | no external DRAM · no external flash · Ethos-U U55 · `partial_hw_config: true` |
-| E1M-AEN801 | `alif:ensemble:e8` | ✅ | ✅ | ✅ | no external DRAM · no external flash · Ethos-U U55+U85 · `partial_hw_config: true` |
+| E1M-AEN301 | `alif:ensemble:e3` | ✅ | ✅ | ✅ | Ethos-U U55 · `partial_hw_config: true` |
+| E1M-AEN401 | `alif:ensemble:e4` | ✅ | ✅ | ✅ | Ethos-U U55+U85 · `partial_hw_config: true` |
+| E1M-AEN501 | `alif:ensemble:e5` | ✅ | ✅ | ✅ | Ethos-U U55 · `partial_hw_config: true` |
+| E1M-AEN601 | `alif:ensemble:e6` | ✅ | ✅ | ✅ | Ethos-U U55+U85 · `partial_hw_config: true` |
+| E1M-AEN701 | `alif:ensemble:e7` | ✅ | ✅ | ✅ | Ethos-U U55 · `partial_hw_config: true` |
+| E1M-AEN801 | `alif:ensemble:e8` | ✅ | ✅ | ✅ | Ethos-U U55+U85 · `partial_hw_config: true` |
+| E1M-AEN803 | `alif:ensemble:e8` | ✅ | ✅ | ✅ | 512 Mbit DRAM · Ethos-U U55+U85 · `partial_hw_config: true` |
 | E1M-NX9101 | `nxp:imx9:imx93` | ❌ | ❌ | ❌ | Ethos-U U65 · `partial_hw_config: true` |
 
-**18 / 21 cells generate cleanly (3 FAILING — see the ❌ cells; run `python3 scripts/gen_portability_matrix.py` locally for the per-cell diagnostics).**
+**21 / 24 cells generate cleanly (3 FAILING — see the ❌ cells; run `python3 scripts/gen_portability_matrix.py` locally for the per-cell diagnostics).**
 
 ## E1M-X family (Cortex-A55 + Cortex-M33)
 
@@ -76,10 +77,12 @@ prose and survives regeneration.
 | --- | --- | :---: | :---: | :---: | --- |
 | E1M-V2M101 | `renesas:rzv2n:n44` | ❌ | ✅ | ✅ | 32 Gbit DRAM · NPU `deepx_dxm1` · PCIe mux `pi3dbs12212` |
 | E1M-V2M102 | `renesas:rzv2n:n44` | ❌ | ✅ | ✅ | 64 Gbit DRAM · NPU `deepx_dxm1` · PCIe mux `pi3dbs12212` |
+| E1M-V2M103 | `renesas:rzv2n:n44` | ❌ | ✅ | ✅ | 32 Gbit DRAM · NPU `deepx_dxm1` · PCIe mux `pi3dbs12212` |
 | E1M-V2N101 | `renesas:rzv2n:n44` | ❌ | ✅ | ✅ | 32 Gbit DRAM |
 | E1M-V2N102 | `renesas:rzv2n:n44` | ❌ | ✅ | ✅ | 64 Gbit DRAM |
+| E1M-V2N103 | `renesas:rzv2n:n44` | ❌ | ✅ | ✅ | 32 Gbit DRAM |
 
-**8 / 12 cells generate cleanly (4 FAILING — see the ❌ cells; run `python3 scripts/gen_portability_matrix.py` locally for the per-cell diagnostics).**
+**12 / 18 cells generate cleanly (6 FAILING — see the ❌ cells; run `python3 scripts/gen_portability_matrix.py` locally for the per-cell diagnostics).**
 
 Legend: ✅ `--emit zephyr-conf` succeeds for every app-carrying core · ❌ it does not.
 <!-- END GENERATED: gen_portability_matrix -->
@@ -123,87 +126,87 @@ reports before a build.
 
 ### E1M family
 
-| Library | Tier | Version | License | E1M-AEN301 | E1M-AEN401 | E1M-AEN501 | E1M-AEN601 | E1M-AEN701 | E1M-AEN801 | E1M-NX9101 |
-| --- | :---: | --- | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| `arm-2d` | B | `v1.2.6` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `aws-iot` | B | `v3.1.5` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `azure-iot` | B | `1.5.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `bearssl` | B | `7bea48e5e850ab4cafbe68d3765cdaba13a86d6f` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `canopennode` | B | `dec12fa3f0d790cafa8414a4c2930ea71ab72ffd` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `catch2` | B | `3.7.1` | BSL-1.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `cmsis-cv` | B | `25c6c111ee04dcfb0ae9093fd6dee4586872982c` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `cmsis-dsp` | A | `97512610ec92058f0119450b9e743eeb7e95b5c8` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `cmsis-nn` | A | `d20117c9e88cf9018d6fa06744dddac700c3e3a1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `cmsis-stream` | B | `v3.2.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `coap` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `doctest` | B | `2.4.11` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `etl` | B | `20.39.4` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `fmt` | B | `11.0.2` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `gfx-compat` | B | `1a7b16034ec123e92c25e9ec13fb3508e7041a23` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `jsmn` | B | `1.1.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `libwebsockets` | B | `v4.3.4` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `littlefs` | B | `2.11` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `lvgl` | A | `9.5.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `lwm2m` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `madgwick-ahrs` | B | `v1.3.2` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `mbedtls` | B | `4.1.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `micro-ros` | B | `humble` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `micropython` | B | `v1.24.1` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `minimp3` | B | `ea99364f61c14656440e8d77e9c233ccf3124633` | CC0-1.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `modbus` | A | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `nanopb` | A | `0.4.9.1` | Zlib | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `nlohmann-json` | B | `3.11.3` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `onnxruntime` | B | `1.28.0` | MIT & Apache-2.0 | ❌ core_class `a` | ❌ core_class `a` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `opus` | B | `v1.5.2` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `pid` | B | `0.9.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `ros2` | B | `humble` | Apache-2.0 | ❌ core_class `a` | ❌ core_class `a` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `tflite-micro` | B | `fcc760af130f3a595b5802cdebcc77461e54f382` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `u8g2` | B | `2.36.5` | BSD-2-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `zcbor` | A | `0.9.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Library | Tier | Version | License | E1M-AEN301 | E1M-AEN401 | E1M-AEN501 | E1M-AEN601 | E1M-AEN701 | E1M-AEN801 | E1M-AEN803 | E1M-NX9101 |
+| --- | :---: | --- | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| `arm-2d` | B | `v1.2.6` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `aws-iot` | B | `v3.1.5` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `azure-iot` | B | `1.5.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `bearssl` | B | `7bea48e5e850ab4cafbe68d3765cdaba13a86d6f` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `canopennode` | B | `dec12fa3f0d790cafa8414a4c2930ea71ab72ffd` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `catch2` | B | `3.7.1` | BSL-1.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `cmsis-cv` | B | `25c6c111ee04dcfb0ae9093fd6dee4586872982c` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `cmsis-dsp` | A | `97512610ec92058f0119450b9e743eeb7e95b5c8` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `cmsis-nn` | A | `d20117c9e88cf9018d6fa06744dddac700c3e3a1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `cmsis-stream` | B | `v3.2.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `coap` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `doctest` | B | `2.4.11` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `etl` | B | `20.39.4` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `fmt` | B | `11.0.2` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `gfx-compat` | B | `1a7b16034ec123e92c25e9ec13fb3508e7041a23` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `jsmn` | B | `1.1.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `libwebsockets` | B | `v4.3.4` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `littlefs` | B | `2.11` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `lvgl` | A | `9.5.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `lwm2m` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `madgwick-ahrs` | B | `v1.3.2` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `mbedtls` | B | `4.1.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `micro-ros` | B | `humble` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `micropython` | B | `v1.24.1` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `minimp3` | B | `ea99364f61c14656440e8d77e9c233ccf3124633` | CC0-1.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `modbus` | A | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `nanopb` | A | `0.4.9.1` | Zlib | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `nlohmann-json` | B | `3.11.3` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `onnxruntime` | B | `1.28.0` | MIT & Apache-2.0 | ❌ core_class `a` | ❌ core_class `a` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `opus` | B | `v1.5.2` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `pid` | B | `0.9.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `ros2` | B | `humble` | Apache-2.0 | ❌ core_class `a` | ❌ core_class `a` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `tflite-micro` | B | `fcc760af130f3a595b5802cdebcc77461e54f382` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `u8g2` | B | `2.36.5` | BSD-2-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `zcbor` | A | `0.9.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-**241 / 245 (library × SKU) cells compatible (4 incompatible, 0 n/a).**
+**276 / 280 (library × SKU) cells compatible (4 incompatible, 0 n/a).**
 
 ### E1M-X family (Cortex-A55 + Cortex-M33)
 
-| Library | Tier | Version | License | E1M-V2M101 | E1M-V2M102 | E1M-V2N101 | E1M-V2N102 |
-| --- | :---: | --- | --- | :---: | :---: | :---: | :---: |
-| `arm-2d` | B | `v1.2.6` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `aws-iot` | B | `v3.1.5` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `azure-iot` | B | `1.5.0` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `bearssl` | B | `7bea48e5e850ab4cafbe68d3765cdaba13a86d6f` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `canopennode` | B | `dec12fa3f0d790cafa8414a4c2930ea71ab72ffd` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `catch2` | B | `3.7.1` | BSL-1.0 | ✅ | ✅ | ✅ | ✅ |
-| `cmsis-cv` | B | `25c6c111ee04dcfb0ae9093fd6dee4586872982c` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `cmsis-dsp` | A | `97512610ec92058f0119450b9e743eeb7e95b5c8` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `cmsis-nn` | A | `d20117c9e88cf9018d6fa06744dddac700c3e3a1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `cmsis-stream` | B | `v3.2.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `coap` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `doctest` | B | `2.4.11` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `etl` | B | `20.39.4` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `fmt` | B | `11.0.2` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `gfx-compat` | B | `1a7b16034ec123e92c25e9ec13fb3508e7041a23` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `jsmn` | B | `1.1.0` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `libwebsockets` | B | `v4.3.4` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `littlefs` | B | `2.11` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ |
-| `lvgl` | A | `9.5.0` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `lwm2m` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `madgwick-ahrs` | B | `v1.3.2` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `mbedtls` | B | `4.1.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `micro-ros` | B | `humble` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `micropython` | B | `v1.24.1` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `minimp3` | B | `ea99364f61c14656440e8d77e9c233ccf3124633` | CC0-1.0 | ✅ | ✅ | ✅ | ✅ |
-| `modbus` | A | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `nanopb` | A | `0.4.9.1` | Zlib | ✅ | ✅ | ✅ | ✅ |
-| `nlohmann-json` | B | `3.11.3` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `onnxruntime` | B | `1.28.0` | MIT & Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `opus` | B | `v1.5.2` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ |
-| `pid` | B | `0.9.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `ros2` | B | `humble` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `tflite-micro` | B | `fcc760af130f3a595b5802cdebcc77461e54f382` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `u8g2` | B | `2.36.5` | BSD-2-Clause | ✅ | ✅ | ✅ | ✅ |
-| `zcbor` | A | `0.9.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
+| Library | Tier | Version | License | E1M-V2M101 | E1M-V2M102 | E1M-V2M103 | E1M-V2N101 | E1M-V2N102 | E1M-V2N103 |
+| --- | :---: | --- | --- | :---: | :---: | :---: | :---: | :---: | :---: |
+| `arm-2d` | B | `v1.2.6` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `aws-iot` | B | `v3.1.5` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `azure-iot` | B | `1.5.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `bearssl` | B | `7bea48e5e850ab4cafbe68d3765cdaba13a86d6f` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `canopennode` | B | `dec12fa3f0d790cafa8414a4c2930ea71ab72ffd` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `catch2` | B | `3.7.1` | BSL-1.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `cmsis-cv` | B | `25c6c111ee04dcfb0ae9093fd6dee4586872982c` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `cmsis-dsp` | A | `97512610ec92058f0119450b9e743eeb7e95b5c8` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `cmsis-nn` | A | `d20117c9e88cf9018d6fa06744dddac700c3e3a1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `cmsis-stream` | B | `v3.2.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `coap` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `doctest` | B | `2.4.11` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `etl` | B | `20.39.4` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `fmt` | B | `11.0.2` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `gfx-compat` | B | `1a7b16034ec123e92c25e9ec13fb3508e7041a23` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `jsmn` | B | `1.1.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `libwebsockets` | B | `v4.3.4` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `littlefs` | B | `2.11` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `lvgl` | A | `9.5.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `lwm2m` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `madgwick-ahrs` | B | `v1.3.2` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `mbedtls` | B | `4.1.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `micro-ros` | B | `humble` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `micropython` | B | `v1.24.1` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `minimp3` | B | `ea99364f61c14656440e8d77e9c233ccf3124633` | CC0-1.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `modbus` | A | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `nanopb` | A | `0.4.9.1` | Zlib | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `nlohmann-json` | B | `3.11.3` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `onnxruntime` | B | `1.28.0` | MIT & Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `opus` | B | `v1.5.2` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `pid` | B | `0.9.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `ros2` | B | `humble` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `tflite-micro` | B | `fcc760af130f3a595b5802cdebcc77461e54f382` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `u8g2` | B | `2.36.5` | BSD-2-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `zcbor` | A | `0.9.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-**140 / 140 (library × SKU) cells compatible.**
+**210 / 210 (library × SKU) cells compatible.**
 
 Legend: ✅ `requires:` satisfied and wireable on the SoM · ❌ incompatible (the named `requires:` constraint fails) · — not applicable (no `integration:` for any OS this SoM runs).
 <!-- END GENERATED: gen_portability_matrix_libraries -->
@@ -219,11 +222,32 @@ lines — are hand-maintained against the swap-test evidence under
 
 ### E1M family
 
-After stripping the `CONFIG_ALP_SOC_*=y` line and the one identity
-comment, **all 6 AEN SKUs produce byte-identical `alp.conf` for every
-example.**  That is the load-bearing intra-AEN portability proof, and
-it is a claim about the *emitted Kconfig content*, unaffected by the
-paragraph below. E1M-NX9101 is currently NOT buildable at all
+**Every AEN SKU's `alp.conf` differs from every other AEN SKU's, for a
+given example, only in the documented family-wide expected-diff lines
+below** — it is not a byte-identity claim; measured directly (steps 1–5
+of the Method, run by hand across all seven AEN SKUs against
+`examples/peripheral-io/i2c-scanner`, `m55_hp`, since the tables above
+only prove each cell *generates*, not that sibling cells agree). Beyond
+the `CONFIG_ALP_SOC_*=y` line, the two SoM-identity comments (`# SoM
+silicon (...)` and `# SoM-intrinsic chip drivers (...)`, not one — see
+the E1M-X section below, which already had this right), and the
+`CONFIG_ALP_SDK_SOC_{NAME,CPUS,NPUS,SRAM_KB}` per-silicon identity
+block, AEN301/401/501/601/701 additionally carry
+`CONFIG_ALP_SDK_CHIP_OPTIGA_TRUST_M=y` where AEN801/AEN803 do not (the
+OPTIGA Trust M secure element is DNP on this batch for both —
+`assembled: false` in their presets — while the other five SKUs' presets
+default it `assembled: true`), and AEN803 additionally emits two more,
+`CONFIG_ALP_SDK_SOM_DRAM_MBIT=512` and `CONFIG_ALP_SDK_SOM_FLASH_MBIT=256`
+— a legitimate, silicon-population-derived diff, the same class as the
+U85 lines in Gap G-1 below: AEN803 is the only AEN SKU whose external
+OSPI0 memories are `assembled: true` (both external
+`hyperram`/`ospi_memories.ospi0` fitted; #2084), so it is the only one
+whose `memory:` block resolves non-TBD `dram_mbit`/`flash_mbit` for the
+loader to emit. All five line families are now rows in the Expected
+diffs table below. That set of documented lines is still the
+load-bearing intra-AEN portability proof, and it is a claim about the
+*emitted Kconfig content*, unaffected by the paragraph below. E1M-NX9101
+is currently NOT buildable at all
 (`partial_hw_config: true` — see the generated Notes column — and, as
 of #1025, its only hw_rev, imx93 r1, is `status: tbd`, which the
 hw_rev-buildable gate refuses outright); the diff-family rows below
@@ -271,14 +295,17 @@ Expected diffs (legitimate — driven by silicon / SoM facts):
 
 | Line family                                       | Differs how                                         |
 | ------------------------------------------------- | --------------------------------------------------- |
-| `CONFIG_ALP_SOC_ALIF_ENSEMBLE_{E3..E8}=y`         | one variant per AEN SKU                             |
+| `CONFIG_ALP_SOC_ALIF_ENSEMBLE_{E3..E8}=y`         | one per silicon variant, not one per AEN SKU -- AEN801 and AEN803 share E8 silicon and both emit `CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8=y` (#2084) |
+| `CONFIG_ALP_SDK_SOC_{NAME,CPUS,NPUS,SRAM_KB}`     | per-silicon-variant identity block; differs across every SoC part (E3..E8, imx93) |
+| `CONFIG_ALP_SDK_CHIP_OPTIGA_TRUST_M=y`            | present when `optiga_trust_m` is `assembled: true` -- AEN301/401/501/601/701 default it true; AEN801/AEN803 both carry `assembled: false` (DNP this batch) |
+| `CONFIG_ALP_SDK_SOM_{DRAM,FLASH}_MBIT`            | only on E1M-AEN803 -- the only AEN SKU whose external OSPI0 memories (`hyperram`/`ospi_memories.ospi0`) are `assembled: true`, so the only one whose `memory:` block resolves non-TBD (#2084) |
 | `CONFIG_ALP_SOC_NXP_IMX9_IMX93=y`                 | only on E1M-NX9101                                  |
 | `CONFIG_ALP_SDK_CHIP_CC3501E=y`                   | on all AEN (on-module Wi-Fi/BLE coprocessor)        |
 | `CONFIG_ALP_SDK_CHIP_PCA9451A=y`                  | only on E1M-NX9101 (its on-module PMIC)             |
 | `CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93=y`          | only on E1M-NX9101                                  |
 | `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y`          | on every AEN (every E3..E8 carries a U55 pair) + NX9101 fallback (none) |
 | `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65=y`          | only on E1M-NX9101                                  |
-| `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y`          | AEN401 / AEN601 / AEN801 only (E4 / E6 / E8 silicon) |
+| `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y`          | AEN401 / AEN601 / AEN801 / AEN803 only (E4 / E6 / E8 silicon; AEN803 shares AEN801's E8 -- measured on `examples/ai/wearable-activity-fall`, m55_hp, #2084) |
 | `CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_HELIUM=y`          | every AEN m55_hp / m55_he slice (ARMv8.1-M Helium)  |
 | `CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_REF=y`             | every NX9101 m33 slice (baseline ARMv8-M, no MVE)   |
 | `CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_NEON=y`            | every cortex-a* slice across all SoMs               |
@@ -291,7 +318,7 @@ population, as designed.
 
 ### E1M-X family
 
-All four SKUs share one PCB and one silicon part, RZ/V2N
+All six SKUs share one PCB and one silicon part, RZ/V2N
 R9A09G056N44GBG (rendered as `renesas:rzv2n:n44` in the generated
 Silicon column).  E1M-V2N101 is the swap-test baseline.  Within each
 example, `alp.conf` differs only by:
@@ -303,20 +330,21 @@ example, `alp.conf` differs only by:
    - `CONFIG_ALP_SDK_CHIP_TPS628640=y` (DEEPX rail buck;
      `assembled: optional` on V2N so the orchestrator omits it there)
 
-V2N101 vs V2N102, and V2M101 vs V2M102, are byte-identical save
-the identity comments — the DRAM density delta (32 vs 64 Gbit in the
-generated Notes column) lives at the metadata level and intentionally
-does NOT leak into application-facing CONFIG.
+V2N101 vs V2N102 vs V2N103, and V2M101 vs V2M102 vs V2M103, are
+byte-identical save the identity comments — the DRAM/eMMC density
+delta (32 vs 64 Gbit DRAM in the generated Notes column) lives at
+the metadata level and intentionally does NOT leak into
+application-facing CONFIG.
 
 Expected diffs (legitimate):
 
 | Line family                                       | Differs how                                         |
 | ------------------------------------------------- | --------------------------------------------------- |
-| `CONFIG_ALP_SOC_RENESAS_RZV2N_N44=y`              | identical on all four (same silicon)                |
-| `CONFIG_ALP_SDK_CHIP_GD32G553=y`                  | identical on all four (every E1M-X has the GD32 bridge) |
+| `CONFIG_ALP_SOC_RENESAS_RZV2N_N44=y`              | identical on all six (same silicon)                 |
+| `CONFIG_ALP_SDK_CHIP_GD32G553=y`                  | identical on all six (every E1M-X has the GD32 bridge) |
 | `CONFIG_ALP_SDK_CHIP_DEEPX_DXM1=y`                | V2M only                                            |
 | `CONFIG_ALP_SDK_CHIP_PI3DBS12212=y`               | V2M only                                            |
-| `-DALP_SDK_USE_DRPAI_V2N=ON` (`--emit cmake-args`)  | identical on all four (silicon-determined) — DRP-AI3 lives on the Linux/A55 path, not Zephyr |
+| `-DALP_SDK_USE_DRPAI_V2N=ON` (`--emit cmake-args`)  | identical on all six (silicon-determined) — DRP-AI3 lives on the Linux/A55 path, not Zephyr |
 | `-DALP_SDK_USE_DEEPX_DXM1=ON` (`--emit cmake-args`) | V2M only — DEEPX lives on the Linux PCIe path, not Zephyr |
 
 ## Gaps surfaced by Phase A (tracked in Phase B)

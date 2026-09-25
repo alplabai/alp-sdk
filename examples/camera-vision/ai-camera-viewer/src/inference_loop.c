@@ -74,10 +74,10 @@ void inference_loop_run(viewer_state_t *state)
 		(void)alp_camera_start(cam);
 	}
 
-	/* Inference setup.  AUTO routes to the best available backend
-     * for the active SoM (ETHOS_U85 on AEN401 / AEN601 / AEN801,
-     * U65 on NX9101, DRPAI on V2N,
-     * CPU on native_sim). */
+	/* Inference setup.  AUTO routes to the best backend available to
+     * this Zephyr slice (ETHOS_U85 on AEN401 / AEN601 / AEN801,
+     * U65 on NX9101, TFLM CPU on V2N M33 and native_sim).  V2N's
+     * DRP-AI3 engine is available only to its A55/Yocto slice. */
 	alp_inference_t *inf = alp_inference_open(&(alp_inference_config_t){
 	    .backend     = ALP_INFERENCE_BACKEND_AUTO,
 	    .format      = ALP_INFERENCE_MODEL_VELA,

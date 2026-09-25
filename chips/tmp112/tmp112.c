@@ -52,7 +52,15 @@ static alp_status_t tmp112_write_reg16(tmp112_t *ctx, uint8_t reg, uint16_t val)
 alp_status_t tmp112_init(tmp112_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit)
 {
 	if (ctx == NULL || bus == NULL) return ALP_ERR_INVAL;
-	if (addr_7bit < TMP112_I2C_ADDR_GND || addr_7bit > TMP112_I2C_ADDR_SCL) {
+	/* Both strap ranges from SBOS473L Table 7-4 (p.16) are legal: the
+	 * Address-Variant-Only X2SON-5 part (0x40..0x43) and the
+	 * Address+Alert SOT563-6 part, which shares its strapped range
+	 * with the Alert-Variant-Only X2SON-5 parts' fixed addresses
+	 * (0x48..0x4B). */
+	bool in_addrvar_range =
+	    addr_7bit >= TMP112_I2C_ADDR_ADDRVAR_GND && addr_7bit <= TMP112_I2C_ADDR_ADDRVAR_SCL;
+	bool in_addr_alert_range = addr_7bit >= TMP112_I2C_ADDR_GND && addr_7bit <= TMP112_I2C_ADDR_SCL;
+	if (!in_addrvar_range && !in_addr_alert_range) {
 		return ALP_ERR_INVAL;
 	}
 	memset(ctx, 0, sizeof(*ctx));

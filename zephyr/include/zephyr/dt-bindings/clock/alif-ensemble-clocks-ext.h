@@ -67,6 +67,26 @@
 	ALIF_CLK_CFG(CLKCTL_PER_MST, PERIPH_CLK_ENA, 12U, 1U, 0U, 0U, 0U,       \
 		     ALIF_PARENT_CLK_SYST_HCLK)
 
+/* ALP-SDK DELTA (#2051), not upstream: SD/SDMMC peripheral clock gate --
+ * bit 16 of PERIPH_CLK_ENA in CLKCTL_PER_MST -> sets bit 16 of 0x4903F00C
+ * (SDC_CKEN). Same register/module as ALIF_ETHERNET_CLK above, different bit.
+ * Register offset + bit carried from the fork's alif_ensemble_clocks.h
+ * (ALIF_SDC_CLK) and cross-checked against the DFP's own
+ * PERIPH_CLK_ENA_SDC_CKEN (drivers/include/sys_ctrl_sd.h:30, `(1U << 16)`,
+ * set with `|=` at :40). Bench-confirmed the BROKEN state this id fixes:
+ * on E1M-AEN803 serial 2026W36-0002 CLKCTL_PER_MST.PERIPH_CLK_ENA at 0x4903F00C read
+ * 0x00000000 and EVERY SDHC register -- including read-only CAPABILITIES1
+ * -- read back 0x00000000 with this gate clear. That setting this id via
+ * clock_control_on() actually clears that symptom on real silicon has NOT
+ * been run on this head -- BENCH-UNVERIFIED, same as this file's other
+ * entries; expected, not confirmed, until a bench load proves it.
+ * parent_clk is unused (SDC has no src_field in this encoding; the SD bus
+ * clock divider is programmed separately by sdhc_dwc_clock_set()), so
+ * SYST_HCLK is a safe filler, matching ALIF_ETHERNET_CLK's choice. */
+#define ALIF_SDC_CLK                                                          \
+	ALIF_CLK_CFG(CLKCTL_PER_MST, PERIPH_CLK_ENA, 16U, 1U, 0U, 0U, 0U,       \
+		     ALIF_PARENT_CLK_SYST_HCLK)
+
 /* Regular SPI0-3 (DesignWare SSI on the AHB) -- frequency-only dummy clock. */
 #define ALIF_SPI_CLK ALIF_CLK(2U)
 
@@ -129,22 +149,52 @@
 		     ALIF_PARENT_CLK_SYST_HCLK)
 
 /*
- * CAMERA CAPTURE clocks (CPI / CSI / D-PHY) -- FREQUENCY-ONLY DUMMY PLACEHOLDERS.
- * The fork drives these blocks with ALIF_CPI_CLK / ALIF_CSI_CLK /
- * ALIF_CSI_PIX_SYST_ACLK / ALIF_MIPI_{PLLREF,BYPASS,TXDPHY,RXDPHY}_CLK in the
- * fork's 7-arg encoding.  Per [[reference_alif_clock_encoding_fork_vs_upstream]]
- * those packed values MUST NOT be copied onto the upstream clockctrl, and the
- * upstream-encoding gate/offset/parent for the camera clocks are a TRM/bench
- * unknown -- NOT re-authored here.  These IDs use the dummy clock (ALIF_CLK,
- * module 0x0 / en_mask 0 -> alif_clock_control_on() returns at the !EN_MASK
- * guard, touches no register), so the camera DT nodes are well-formed without
- * inventing a register gate.  The drivers are now PORTED to the v4.4 video API
- * (the ALP_VIDEO_ALIF_BROKEN gate is retired), but no real clock is programmed
- * (the dummy clock above).  Re-author the real IDs when the camera stack is
- * bench-brought-up.  vendor-ext, BENCH-UNVERIFIED.
+ * CAMERA CAPTURE clocks (CPI / CSI / D-PHY RX), re-authored in the upstream
+ * 8-arg ALIF_CLK_CFG() encoding from the AE822 DFP CMSIS (sys_ctrl_cpi.h,
+ * sys_ctrl_csi.h, sys_ctrl_dphy.h + the CLKCTL_PER_MST register map in
+ * soc.h), cross-checked against the E8 HWRM CLKCTL_PER_MST register
+ * descriptions and the zephyr_alif fork's alif_ensemble_clocks.h (same
+ * register/bit per ID; the fork's 7-arg packed values are NOT copied, per
+ * [[reference_alif_clock_encoding_fork_vs_upstream]]).  All in
+ * CLKCTL_PER_MST (base 0x4903F000).  parent_clk SYST_ACLK is the real
+ * source (CLK_SEL=0 selects the 400 MHz SYST_ACLK).
+ *
+ * The *_PIXCLK_CTRL divisor field [24:16] (DFP *_PIXCLK_CTRL_DIVISOR_Msk) is
+ * not expressible in this encoding; clock_control_set_rate() programs it
+ * through zephyr/patches/zephyr/0001-clock_control_alif-*.patch (pixel-clock
+ * hunk), and clock_control_get_rate() reports source / divisor.
+ * vendor-ext, BENCH-UNVERIFIED.
  */
-#define ALIF_CPI_CLK      ALIF_CLK(2U)
-#define ALIF_CSI_CLK      ALIF_CLK(2U)
+#define ALIF_CAMERA_PIXCLK_CTRL_REG 0x00U /* CPI pixel-clock control */
+#define ALIF_CSI_PIXCLK_CTRL_REG    0x08U /* CSI pixel-clock control */
+/* CPI gate: PERIPH_CLK_ENA(0x4903F00C) bit0 CPI_CKEN.  DFP sys_ctrl_cpi.h:28. */
+#define ALIF_CPI_CLK                                                         \
+	ALIF_CLK_CFG(CLKCTL_PER_MST, PERIPH_CLK_ENA, 0U, 1U, 0U, 0U, 0U,     \
+		     ALIF_PARENT_CLK_SYST_ACLK)
+/* CSI host gate: PERIPH_CLK_ENA(0x4903F00C) bit24 CSI_CKEN.  DFP sys_ctrl_csi.h:29. */
+#define ALIF_CSI_CLK                                                         \
+	ALIF_CLK_CFG(CLKCTL_PER_MST, PERIPH_CLK_ENA, 24U, 1U, 0U, 0U, 0U,    \
+		     ALIF_PARENT_CLK_SYST_ACLK)
+/* CSI IPI pixel clk: CSI_PIXCLK_CTRL(0x4903F008) CLK_ENA bit0, CLK_SEL bit4
+ * (src_val 0 = SYST_ACLK 400 MHz).  DFP sys_ctrl_csi.h:31-32. */
+#define ALIF_CSI_PIX_SYST_ACLK                                               \
+	ALIF_CLK_CFG(CLKCTL_PER_MST, CSI_PIXCLK_CTRL, 0U, 1U, 0U, 1U, 4U,    \
+		     ALIF_PARENT_CLK_SYST_ACLK)
+/* CPI pixel clk: CAMERA_PIXCLK_CTRL(0x4903F000) CLK_ENA bit0, CLK_SEL bit4
+ * (src_val 0 = SYST_ACLK 400 MHz).  DFP sys_ctrl_cpi.h:31-32.  The same
+ * divider also feeds the CAM_XVCLK sensor-clock output; video_alif.c runs it
+ * at the CSI pixel-clock rate in CSI mode. */
+#define ALIF_CAM_PIX_SYST_ACLK                                               \
+	ALIF_CLK_CFG(CLKCTL_PER_MST, CAMERA_PIXCLK_CTRL, 0U, 1U, 0U, 1U, 4U, \
+		     ALIF_PARENT_CLK_SYST_ACLK)
+/* D-PHY RX config-clk gate: MIPI_CKEN(0x4903F040) bit4 RXDPHY_CKEN.  DFP
+ * sys_ctrl_dphy.h:72.  dphy_dw.c enables it (rx-dphy-clk) for D-PHY id 0. */
+#define ALIF_MIPI_RXDPHY_CLK                                                 \
+	ALIF_CLK_CFG(CLKCTL_PER_MST, MIPI_CKEN, 4U, 1U, 0U, 0U, 0U,          \
+		     ALIF_PARENT_CLK_SYST_ACLK)
+/* Frequency-only dummy (touches no register).  The SoC dphy node now carries
+ * the real per-gate IDs (ALIF_MIPI_{PLLREF,BYPASS,TXDPHY,RXDPHY}_CLK); this
+ * stays defined only for out-of-tree overlays that still name it. */
 #define ALIF_CSI_DPHY_CLK ALIF_CLK(2U)
 
 /*
@@ -276,11 +326,9 @@
  * the AE822 HWRM section 8.3.9.3.5 HE_CLK_ENA Register, bit 12 CPI_CKEN
  * ("Enable clock for LPCPI").  parent_clk is a filler: the alif,cam driver
  * (video_alif.c) only clock_control_on()s this id, never get_rate()s it, so
- * the parent is unused.  NOTE this is a REAL register gate, unlike the
- * main-domain cam node's ALIF_CPI_CLK, which is the register-less
- * ALIF_CLK(2U) dummy (module 0x0, en_mask 0 -- touches no register at all,
- * per that id's own definition above) standing in for a camera clock ID the
- * upstream encoding does not yet have.  HE-core only.  vendor-ext,
+ * the parent is unused.  This is the LP-domain gate; the main-domain cam
+ * node's ALIF_CPI_CLK gates PERIPH_CLK_ENA bit0 in CLKCTL_PER_MST instead (see
+ * the CAMERA CAPTURE block above).  HE-core only.  vendor-ext,
  * BENCH-UNVERIFIED. */
 #define ALIF_LPCPI_CLK                                                          \
 	ALIF_CLK_CFG(M55HE_CFG, HE_CLK_ENA, 12U, 1U, 0U, 0U, 0U,                \

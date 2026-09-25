@@ -23,9 +23,11 @@ tests:
   alp_sdk.examples.production_deployment.native_sim:
     platform_allow: native_sim/native/64
     # native_sim.conf loads LAST (after alp.conf's EXTRA_CONF_FILE
-    # emit) so it can flip CONFIG_MBEDTLS off -- works around the
-    # Zephyr 4.4 / mbedtls 3.6 ssl_misc.h include-order bug; see
-    # native_sim.conf for the full rationale.
+    # emit) so it wins over the alp.conf-emitted defaults.  It no
+    # longer flips CONFIG_MBEDTLS off -- that break is fixed at its
+    # root (#2173) and this target now builds the same TLS-enabled
+    # configuration the SoM does.  What is left is the littlefs block
+    # and the native_sim weak-RNG opt-in; see native_sim.conf.
     extra_args:
       - "EXTRA_CONF_FILE=native_sim.conf"
   alp_sdk.examples.production_deployment.aen:

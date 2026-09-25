@@ -47,6 +47,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import tempfile
@@ -349,7 +350,8 @@ def run_cell(example_dir: Path, sku: str, presets: dict[str, dict],
              "--input", str(tmp_yaml),
              "--core", core,
              "--emit", "zephyr-conf"],
-            capture_output=True, text=True, cwd=REPO,
+            capture_output=True, text=True, encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=REPO,
         )
         if proc.returncode != 0:
             # Console gets the full diagnostic; the doc cell stays a

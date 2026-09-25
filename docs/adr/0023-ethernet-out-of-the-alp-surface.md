@@ -218,7 +218,7 @@ recurring probes the real `ETHERNET_COUNT` lambda rather than a copy
 of the key list, because the first version hardcoded that copy and
 stayed green when the generator was reverted.
 
-Also filed from this ADR's research: **#1241**, still open (every AEN
+Also filed from this ADR's research: **#1241**, now closed (every AEN
 preset omitted `ethernet_phy`, and no `metadata/chips/dp83825`
 manifest existed; this change adds both across the family, but the
 exact order code stays TBD pending the netlist/BOM, and the C driver

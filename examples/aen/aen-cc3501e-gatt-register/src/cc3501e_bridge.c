@@ -7,7 +7,7 @@
 
 #include "cc3501e_bridge.h"
 
-#if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HE)
+#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HE)
 #include <zephyr/arch/cpu.h>
 #include <zephyr/sys/sys_io.h>
 /*
@@ -78,7 +78,14 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 	 * data round-trip.  Zephyr spi_dw never writes it (leaves 0), so without this
 	 * >1 MHz mis-samples MISO (cold reqhdr_rx=0xFFFFFFFF).  Written with SSI disabled
 	 * (SSIENR=0); persists across the driver's per-transfer configure.  Value is
-	 * silicon-tuned -- sweep CC3501E_BRIDGE_RX_SAMPLE_DLY at the target SCLK. */
+	 * silicon-tuned -- sweep CC3501E_BRIDGE_RX_SAMPLE_DLY at the target SCLK.
+	 *
+	 * SWEEP TRAP -- read before setting the constant to 0: the `#if > 0` above
+	 * compiles this block out, so 0 does not mean "no delay", it means the SPI
+	 * node's `rx-delay` devicetree value is left in place.  aen-cc3501e-bringup
+	 * and aen-evk-demo declare rx-delay = <2>, so a naive N=0 sweep point on
+	 * those two silently measures 2.  Read 0x481040F0 back to see what the link
+	 * is actually running at. */
 	{
 		volatile uint32_t *ssienr =
 		    (volatile uint32_t *)(uintptr_t)(CC3501E_BRIDGE_SPI1_BASE + 0x08u);
@@ -96,14 +103,10 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 	(void)cc3501e_init(fw, spi);
 	fw->enable_pin = wifi_en;
 	fw->reset_pin  = nrst;
-	/* Optional host-IRQ/READY line (r2 SS0+IRQ bridge): CC35 GPIO17 -> Alif P2_6.
-	 * Open + configure as input; if the board doesn't wire it (alp_pins[2] absent),
-	 * alp_gpio_open returns NULL and the driver keeps the fixed-gap fallback. */
-	alp_gpio_t *ready = alp_gpio_open(CC3501E_BRIDGE_PIN_READY);
-	if (ready != NULL) {
-		(void)alp_gpio_configure(ready, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE);
-		fw->ready_pin = ready;
-	}
+	/* READY (CC35 GPIO17) is NOT wired here by default on this R2 module --
+	 * see chips/cc3501e/cc3501e_core.c's cc3501e_reply_gate() comment for the
+	 * pin-routing fact, the bench evidence, and how a board that genuinely
+	 * wires it can opt back in via fw->ready_pin. */
 #ifdef CONFIG_ALP_SDK_GPIO_CC3501E_PROXY
 	(void)alp_gpio_cc3501e_attach(fw);
 #endif

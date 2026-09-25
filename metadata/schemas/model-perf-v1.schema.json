@@ -55,7 +55,7 @@
         },
         "accel_config": {
           "type": "string",
-          "description": "vela `--accelerator-config` string for an `ethos_u` target (e.g. `ethos-u55-256`, matching scripts/alp_model/targets.py's `TargetSpec.accel_config`); empty string for backends with no per-target accel-config (`cpu`, `drpai`, `deepx_dxm1`)."
+          "description": "vela `--accelerator-config` string for an `ethos_u` target (e.g. `ethos-u55-256`, matching scripts/alp_project_loader.py's `TargetSpec.accel_config`); empty string for backends with no per-target accel-config (`cpu`, `drpai`, `deepx_dxm1`)."
         },
         "core": {
           "type": "string",
@@ -121,7 +121,7 @@
               "description": "Inference count backing mean/p50/p95. scripts/validate_metadata.py enforces a floor (30) below which a p95 is noise, not a percentile."
             }
           },
-          "description": "Timing stats for this target. Deliberately OPTIONAL at the schema level: no AEN example times an inference today and `<alp/inference.h>` exposes no latency accessor (issue #1520 blocker), so the first capture campaign can record fit/SRAM alone until a timing harness exists. Once present, every field below is required together -- a partial latency block is worse than none."
+          "description": "Timing stats for this target. Deliberately OPTIONAL at the schema level: `<alp/inference.h>`'s `alp_inference_last_invoke_latency_us()` (landed #1541) supplies the reading, but no bench capture has run yet, so a point may still record fit/SRAM alone until one does -- see docs/bench/model-perf-capture.md's recipe step 4. Once present, every field below is required together -- a partial latency block is worse than none."
         }
       }
     },
@@ -143,7 +143,7 @@
         "bench_id": {
           "type": "string",
           "minLength": 1,
-          "description": "Which physical bench/rig captured this point (e.g. `e1m-aen-evk-01`) -- lets a bad point be traced back to a specific board without re-deriving it from the CHANGELOG."
+          "description": "Which physical bench/rig captured this point, identified by module SKU + serial (e.g. `E1M-AEN801/2026W36-0003`, illustrative) -- lets a bad point be traced back to a specific board without re-deriving it from the CHANGELOG."
         },
         "notes": {
           "type": "string",

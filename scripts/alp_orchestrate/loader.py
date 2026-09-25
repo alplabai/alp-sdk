@@ -60,7 +60,24 @@ def _silicon_to_soc_path(silicon: str, metadata_root: Path) -> Path:
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
-    if not path.is_file():
+    try:
+        path_is_file = path.is_file()
+    except (OSError, RuntimeError) as e:
+        # Same defect class as validate.py's `profile:` guard (#1961):
+        # a bad `--input` board.yaml path must not crash the loader
+        # with an unhandled exception.  `Path.is_file()`'s own
+        # `_ignore_error` list swallows ENOENT/ENOTDIR/EBADF/ELOOP on
+        # POSIX -- a symlink loop returns `False` there, no raise --
+        # but re-raises `PermissionError` on EACCES (an `OSError`
+        # subclass) rather than swallowing it, same as the `profile:`
+        # gap.  On Windows, a real WSL-made symlink loop driven through
+        # the real CLI with CPython 3.11.3 shows `.is_file()` raise a
+        # plain `OSError` (`WinError 1920`, "The file cannot be
+        # accessed by the system") instead -- confirmed, not a mock.
+        # `RuntimeError` is caught too for parity with `.resolve()`'s
+        # own ELOOP shape elsewhere in this module.
+        raise OrchestratorError(f"could not access {path}: {e}") from e
+    if not path_is_file:
         raise OrchestratorError(f"file not found: {path}")
     try:
         data = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)

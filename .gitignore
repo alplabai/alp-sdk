@@ -58,6 +58,19 @@ tan-cli/
 *.bin
 *.hex
 
+# EXCEPTION: the CI build fixture for examples/aen/aen-eeprom-provision.  That
+# app refuses to build without a manifest blob (it writes a module identity and
+# must never invent one), so twister has to supply one -- and `*.bin` above
+# silently excluded it, which made the committed example unbuildable in CI while
+# passing locally.  The blob is 128 bytes and carries the deliberately unusable
+# serial CI-FIXTURE-DO-NOT-USE, dated 2000-01-01; it is build-only and never
+# reaches hardware.
+!examples/aen/aen-eeprom-provision/ci-fixture-manifest.bin
+
+# Same exception, for the Secure Data Page mirror fixture: 64 bytes, same
+# deliberately unusable serial + date, build-only, never reaches hardware.
+!examples/aen/aen-eeprom-provision/ci-fixture-secure-page.bin
+
 # Libraries
 *.a
 *.lib
@@ -98,6 +111,10 @@ Makefile
 # via `doxygen docs/doxygen/Doxyfile`, never committed (#1573: a stale
 # committed snapshot drifted from source docs with nothing to catch it).
 doxygen-out/
+# Doxygen's WARN_LOGFILE (docs/doxygen/Doxyfile:32) -- the same local run
+# drops this beside doxygen-out/.  `doxygen-out/` was already ignored; this
+# one was not, so running the doxygen gate locally left a dirty tree.
+doxygen-warnings.log
 
 # Test results
 Testing/
@@ -144,11 +161,13 @@ notes/
 dist/
 *.dist-info/
 
-# meta-alp-sdk: the private LPDDR4X DDR param is OVERLAID into this public layer
+# meta-alp-sdk: the private LPDDR4X DDR params are OVERLAID into this public layer
 # tree at build time from alp-sdk-internal (see that repo's conf/bblayers-overlay.md).
-# It is Renesas-gen_tool-derived, SoM-hardware-specific config and MUST NOT be
-# committed to the public repo.
-meta-alp-sdk/recipes-bsp/trusted-firmware-a/trusted-firmware-a/ddr_param_def_lpddr4-alp.c
+# They are Renesas-gen_tool-derived, SoM-hardware-specific config and MUST NOT be
+# committed to the public repo. Glob, not a fixed list, so a future config variant
+# (any ddr_param_def_lpddr4-alp*.c) is covered without another edit here.
+# -alp.c is the D16S32 default; -alp-d8s32.c is the E1M-V2N103/V2M103 memory tier.
+meta-alp-sdk/recipes-bsp/trusted-firmware-a/trusted-firmware-a/ddr_param_def_lpddr4-alp*.c
 
 # Local ARM Vela / NPU toolchain virtualenv (not redistributed)
 .venv-vela/

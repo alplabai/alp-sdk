@@ -116,7 +116,7 @@ To reproduce CI byte-for-byte, match the pin locally — `pyenv` and `uv` pick
 ### 1.2 Installing Tan from source
 
 As of `tan-cli` [v0.5.0](https://github.com/alplabai/tan-cli/releases/tag/v0.5.0)
-(current release: [v0.5.1](https://github.com/alplabai/tan-cli/releases/tag/v0.5.1)),
+(current release: [v0.6.0](https://github.com/alplabai/tan-cli/releases/tag/v0.6.0)),
 the published installer (`install.sh`/`install.ps1`) installs the real Python
 `tan` directly -- it no longer resolves the frozen Rust v0.4.1 release.
 alp-sdk `dev` tracks `tan-cli/dev` instead, to stay ahead of the last tagged
@@ -678,11 +678,25 @@ python3 scripts/check_cross_platform.py
 python scripts\check_cross_platform.py
 ```
 
-Expected: exits 0; may print warnings about Linux-only idioms in
-docs.  These warnings are informational today (the lint is soft);
-they document drift for future cleanup.  See
-[ADR 0012](adr/0012-cross-platform-developer-host.md) for why the
-lint is soft initially.
+Expected: exits 0, with `check_cross_platform: 0 finding(s)` plus
+four informational `allowlisted` lines for the docs that
+intentionally discuss per-OS paths (`INTENTIONALLY_DISCUSSES_OS_PATHS`).
+The #2195 `IMPLICIT-ENCODING` backlog (478 sites across 139 files
+when the rule landed) was fully drained file by file under #2197 —
+every Python text-IO call under `scripts/`, `tests/`, and `examples/`
+(`PY_SCAN_ROOTS`) now states its `encoding=` explicitly, so there is
+nothing left to grandfather.
+
+The lint itself is **not** soft: CI runs it as
+`--fail-on-warning` on every runner (since #1032 A5), and that flag
+fails on any finding, `IMPLICIT-ENCODING` included — there is no
+carve-out any more.  `python3 scripts/check_cross_platform.py
+--fail-on-warning` exits 0 on a clean tree exactly like the
+no-flag form above.  So a new Linux-only idiom, or a new implicit
+encoding under `scripts/`, `tests/`, or `examples/` (or anywhere
+else via an explicit `--path`), breaks the build.  See
+[ADR 0012](adr/0012-cross-platform-developer-host.md) for the
+cross-platform promise this lint enforces.
 
 ### 6.3 Native_sim example build
 

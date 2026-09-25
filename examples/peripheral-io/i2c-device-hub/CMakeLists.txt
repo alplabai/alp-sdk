@@ -11,7 +11,13 @@ else()
     get_filename_component(ALP_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../.. ABSOLUTE)
 endif()
 
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
+# Version floor MUST match Zephyr's own PYTHON_MINIMUM_REQUIRED
+# (cmake/modules/python.cmake, currently 3.12). Without it, CMake caches
+# whatever python3 resolves first in PATH; on a host where an older
+# python3.x precedes 3.12 there, find_package(Zephyr) below then fails
+# with "Could NOT find Python3: Found unsuitable version" against the
+# CACHED (too-old) interpreter instead of picking a newer one itself.
+find_package(Python3 3.12 REQUIRED COMPONENTS Interpreter)
 
 set(_alp_generated ${CMAKE_BINARY_DIR}/generated/alp.conf)
 execute_process(

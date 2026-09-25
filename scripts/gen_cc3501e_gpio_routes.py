@@ -32,6 +32,24 @@ regenerating this file, not a runtime ALP_ERR_INVAL from
 cc3501e_gpio_configure() on a device.  See RESERVED_CC3501E_PADS below;
 each excluded row is printed, not silently dropped.
 
+This script also writes ONE further file, unconditionally, regardless of
+how many (if any) per-app route tables it wrote above:
+src/backends/gpio/cc3501e_rev_dependent_pins.c, carrying
+cc3501e_gpio_rev_dependent[] -- the set of E1M pads hw-revisions.yaml's
+`pad_route_overrides:` moves between chips on at least one hw_rev (see
+REVISION_DEPENDENT_E1M_PADS / _revision_dependent_e1m_pads() below), so
+src/backends/gpio/cc3501e_proxy.c can refuse one of them per pin, at
+runtime, unless a CRC-valid identity manifest confirms the running module
+is the hw_rev the CALLING board's own route table was built for (issue
+#2144) -- replacing the old all-or-nothing hw_rev guard (#1859).  This list
+is identical for every AEN board regardless of hw_rev or carrier (it names
+WHICH pads move, not where any one board's table put them), so it is
+generated once into a file compiled whenever cc3501e_proxy.c itself is
+(zephyr/CMakeLists.txt) instead of once per app -- the
+per-app-copy design #2144 originally shipped with was exactly the
+triplication issue #1859 already removed once for cc3501e_gpio_routes[]
+itself.
+
 Run:
 
     python3 scripts/gen_cc3501e_gpio_routes.py
@@ -45,16 +63,20 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
+import yaml
+
 REPO = Path(__file__).resolve().parent.parent
 EXAMPLES_DIR = REPO / "examples" / "aen"
 ALP_PROJECT = REPO / "scripts" / "alp_project.py"
 FROM_CC3501E_TSV = REPO / "metadata" / "e1m_modules" / "aen" / "from-cc3501e.tsv"
+AEN_HW_REVISIONS_YAML = REPO / "metadata" / "e1m_modules" / "aen" / "hw-revisions.yaml"
 
 _TSV_IO_RE = re.compile(r"IO\d+")
 _PLAIN_GPIO_RE = re.compile(r"GPIO_?(\d+)")
@@ -98,6 +120,32 @@ def _reserved_pads_from_tsv() -> frozenset[int]:
 RESERVED_CC3501E_PADS = _reserved_pads_from_tsv()
 
 _E1M_GPIO_RE = re.compile(r"E1M_GPIO_IO\d+")
+_E1M_IO_NUM_RE = re.compile(r"IO(\d+)$")
+
+
+def _revision_dependent_e1m_pads() -> frozenset[str]:
+    """E1M pads AEN_HW_REVISIONS_YAML moves between chips on at least one
+    hw_rev -- IO8/IO10/IO21 today, via r1's `pad_route_overrides` (r2 is the
+    base pad_routes table every override is relative to).  A route-table
+    entry for one of these pads is only ever correct on the ONE revision its
+    target pin/chip was resolved for -- on any other revision it silently
+    drives a DIFFERENT physical pin/chip (issue #2144: r1's IO21 reaches
+    CC3501E GPIO_30, the E1M-EVK SDIO mux SELECT, tied to +3V3 through R198
+    and a fitted P18 jumper -- a contention hazard, not just a functional
+    miss).  The single source of this set: both the generator (below, for
+    every AEN board's emitted cc3501e_gpio_rev_dependent[]) and
+    tests/scripts/test_aen_cc3501e_routes.py (which imports this function
+    rather than recomputing it) resolve through it, so the two can never
+    disagree."""
+    doc = yaml.safe_load(AEN_HW_REVISIONS_YAML.read_text(encoding="utf-8"))
+    pads: set[str] = set()
+    for rev in (doc.get("hw_revisions") or {}).values():
+        for row in rev.get("pad_route_overrides") or []:
+            pads.add(row["e1m"])
+    return frozenset(pads)
+
+
+REVISION_DEPENDENT_E1M_PADS = _revision_dependent_e1m_pads()
 
 # Declarative "this example uses the GPIO proxy" signal: the Kconfig the
 # proxy backend is gated on (zephyr/CMakeLists.txt
@@ -124,7 +172,8 @@ def _composed_routes(board_yaml: Path) -> dict:
     proc = subprocess.run(
         [sys.executable, str(ALP_PROJECT), "--input", str(board_yaml),
          "--emit", "composed-route-table"],
-        capture_output=True, text=True, check=False,
+        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
     )
     if proc.returncode != 0:
         sys.exit(
@@ -207,8 +256,14 @@ def _emit(app_name: str, hw_rev: str, rows: list[tuple[str, int, str]]) -> str:
         " * lines) are never emitted here -- the firmware's gpio_pad_reserved()",
         " * would refuse them at runtime, so the generator excludes them at",
         " * generation time instead (issue #1859).",
+        " *",
+        " * The revision-dependent pin guard (issue #2144) is NOT emitted here --",
+        " * it does not depend on this board's own routes, so it lives in ONE",
+        " * SDK-owned generated file instead of a per-app copy:",
+        " * src/backends/gpio/cc3501e_rev_dependent_pins.c.",
         " */",
         "",
+        "#include <stdint.h>",
         "#include <stddef.h>",
         "",
         "#include <alp/chips/cc3501e.h>",
@@ -224,6 +279,72 @@ def _emit(app_name: str, hw_rev: str, rows: list[tuple[str, int, str]]) -> str:
         "",
         "const size_t cc3501e_gpio_route_count =",
         "    sizeof(cc3501e_gpio_routes) / sizeof(cc3501e_gpio_routes[0]);",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+# SDK-owned home of the revision-dependent pin list (issue #2144).  Unlike
+# cc3501e_gpio_routes[]/cc3501e_gpio_unrouted[] (genuinely per-board: they
+# depend on which pads a board's own pad_routes/pad_route_overrides
+# actually populate), REVISION_DEPENDENT_E1M_PADS is the SAME set on every
+# AEN board regardless of hw_rev or carrier -- it names which E1M pads
+# hw-revisions.yaml moves between chips, not where any one board's table
+# put them.  A per-app copy of an identical list (the original #2144 PR)
+# is exactly the triplication #1859 already removed once for
+# cc3501e_gpio_routes[] -- so this list is generated ONCE, into a file
+# compiled whenever the proxy backend itself is
+# (zephyr/CMakeLists.txt, alongside cc3501e_proxy.c), never overridden by
+# a board.
+REV_DEPENDENT_OUT_PATH = (
+    REPO / "src" / "backends" / "gpio" / "cc3501e_rev_dependent_pins.c"
+)
+
+
+def _emit_rev_dependent_pins() -> str:
+    lines = [
+        "/*",
+        " * SPDX-License-Identifier: Apache-2.0",
+        " * Copyright 2026 Alp Lab AB",
+        " *",
+        " * Auto-generated by scripts/gen_cc3501e_gpio_routes.py from",
+        " * metadata/e1m_modules/aen/hw-revisions.yaml `pad_route_overrides:`.",
+        " * DO NOT EDIT BY HAND -- regenerate:",
+        " *   python3 scripts/gen_cc3501e_gpio_routes.py",
+        " *",
+        " * The E1M pads whose target chip (CC3501E vs the Alif SoC) moves",
+        " * between AEN hw_revs -- IO8/IO10/IO21 today.  ONE copy for every AEN",
+        " * board regardless of hw_rev or carrier (this list names WHICH pads",
+        " * move, not where any one board's route table put them) -- compiled",
+        " * whenever src/backends/gpio/cc3501e_proxy.c itself is",
+        " * (zephyr/CMakeLists.txt), never a per-board override.  Replaced the",
+        " * per-app copy of this same list (originally issue #2144) that",
+        " * triplicated across every board's cc3501e_gpio_routes.c -- the exact",
+        " * pattern issue #1859 already removed once for cc3501e_gpio_routes[]",
+        " * itself.",
+        " *",
+        " * src/backends/gpio/cc3501e_proxy.c's px_open() refuses",
+        " * alp_gpio_open() on a listed pin_id with ALP_ERR_NOSUPPORT unless a",
+        " * CRC-valid identity-EEPROM manifest confirms the running module's",
+        " * hw_rev equals CONFIG_ALP_SDK_SOM_HW_REV -- the hw_rev the CALLING",
+        " * board's OWN cc3501e_gpio_routes[] was built for -- failing CLOSED on",
+        " * a missing/unreadable/mismatched manifest.",
+        " */",
+        "",
+        "#include <stdint.h>",
+        "#include <stddef.h>",
+        "",
+        "#include <alp/e1m_pinout.h>",
+        "",
+        "const uint32_t cc3501e_gpio_rev_dependent[] = {",
+    ]
+    for e1m in sorted(REVISION_DEPENDENT_E1M_PADS, key=lambda p: int(_E1M_IO_NUM_RE.search(p).group(1))):
+        lines.append(f"\tALP_{e1m},")
+    lines += [
+        "};",
+        "",
+        "const size_t cc3501e_gpio_rev_dependent_count =",
+        "    sizeof(cc3501e_gpio_rev_dependent) / sizeof(cc3501e_gpio_rev_dependent[0]);",
         "",
     ]
     return "\n".join(lines)
@@ -275,6 +396,14 @@ def _out_path_for(app_dir: Path) -> Path:
     return app_dir / "src" / "cc3501e_gpio_routes.c"
 
 
+def _rev_dependent_out_path() -> Path:
+    """Where the SDK-owned revision-dependent pin list is written -- one
+    file, not one per app (issue #2144 design review).  A function, not a
+    bare use of REV_DEPENDENT_OUT_PATH, for the same monkeypatch reason as
+    _out_path_for() above."""
+    return REV_DEPENDENT_OUT_PATH
+
+
 def main() -> int:
     targets = _discover_targets()
     if not targets:
@@ -298,6 +427,13 @@ def main() -> int:
         out_path.write_text(out_text, encoding="utf-8", newline="")
         _clang_format(out_path, exe)
         print(f"wrote {out_path} ({len(rows)} routes, hw_rev={composed['hw_rev']})")
+
+    # ONE SDK-owned file, not one per app -- see _emit_rev_dependent_pins().
+    rev_out_path = _rev_dependent_out_path()
+    rev_out_path.parent.mkdir(parents=True, exist_ok=True)
+    rev_out_path.write_text(_emit_rev_dependent_pins(), encoding="utf-8", newline="")
+    _clang_format(rev_out_path, exe)
+    print(f"wrote {rev_out_path} ({len(REVISION_DEPENDENT_E1M_PADS)} pads)")
 
     return 0
 

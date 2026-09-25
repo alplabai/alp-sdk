@@ -1,0 +1,42 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-isp-regcheck overlay for the E1M-AEN803 (Ensemble E8, M55-HE) RAM-run.
+ *
+ * Enables the Alif ISP-Pico node so it BINDS on silicon AND runs its
+ * self-contained Test-Pattern Generator (TPG) -- no camera controller or CSI
+ * port is wired (this hardware batch has no sensor), but the TPG needs none:
+ * it is an internal pattern source inside the ISP block, independent of the
+ * ACQ external-pin path.
+ *   - isp (vsi,isp-pico @ 0x49046000, IRQs 367 "isp" / 368 "mi-isp")
+ *     tpg-image-idx = "3x3-Color-Block" (the only image libisp implements),
+ *     tpg-pix-width = <1> (10-bit, matching the VIDEO_PIX_FMT_SBGGR10 output
+ *     format src/main.c requests), tpg-bayer-pattern = "BGGR".
+ *
+ * SCOPE: stage 1 of the ISP bring-up -- "ISP alive, MI writes".  Proves the
+ * node BINDS (DT_HAS_VSI_ISP_PICO_ENABLED + the reg/irq match), builds+links
+ * the isp_pico.c driver TU (CONFIG_VIDEO_ISP_VSI=y, see prj.conf) against
+ * hal_alif v2.3.0, AND drives one real TPG-sourced frame through the ISP's MI
+ * (memory interface) DMA to a buffer in SRAM0 -- see src/main.c.  Live
+ * SENSOR capture (camera->csi->isp->memory) stays BENCH-BLOCKED on this
+ * batch (no sensor wired); the TPG path does not need one.
+ */
+
+/*
+ * RAM-run: retarget ROM to ITCM (path-reference form &itcm; the phandle-array
+ * form makes FLASH_SIZE=0 and overflows the link).
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+&isp {
+	status = "okay";
+	tpg-image-idx = "3x3-Color-Block";
+	tpg-pix-width = <1>;
+	tpg-bayer-pattern = "BGGR";
+};

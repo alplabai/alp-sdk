@@ -16,10 +16,17 @@
  * the CGU master source and divides it down to SCLK (the same master-source fix
  * that made the PDM mics capture).  The controller then clocks a tone out on
  * SCLK/WS/SDO.  On the EVK that signal reaches the two TAS2563
- * smart-amplifiers through a 74LVC157 2:1 mux: /E = Alif P7.1 (drivable) and the
- * SELECT = CC3501E GPIO13 (over the inter-chip SPI bridge, currently
- * firmware-gated). So this example validates the I2S controller + clock path; the
- * AUDIBLE amp output additionally needs the mux routed + the TAS2563 configured.
+ * smart-amplifiers through a 2:1 mux (U46): SELECT = CC3501E GPIO13 (over the
+ * inter-chip SPI bridge, currently firmware-gated), both hw revisions; ENABLE
+ * is REVISION-DEPENDENT -- Alif P7.1 (direct GPIO) on r1, CC3501E GPIO_30 on
+ * r2 -- see include/alp/boards/alp_e1m_evk.h's I2S mux block.  AUDIBLE amp
+ * output additionally needs U46 to be a 3257-type bus switch with VCC on
+ * +3V3, OR a switch rated for 1.8 V VCC (untested)
+ * (on E1M-AEN803 serial 2026W36-0002, VCC was moved to +3V3 between a silent run and
+ * an audible run, not established as the only difference; the as-built
+ * 74LVC157 can never pass this direction regardless, see the same header)
+ * + the mux routed + the TAS2563 configured; this example validates only
+ * the I2S controller + clock path.
  *
  * PASS gate: device ready, i2s_configure + i2s_write(s) + i2s_trigger(START) all
  * return 0 and the TX FIFO DRAINs cleanly with the 76.8 MHz clock ON (the
@@ -34,7 +41,24 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/i2s.h>
 
-#define I2S_NODE       DT_ALIAS(alp_i2s0)
+#define I2S_NODE DT_ALIAS(alp_i2s0)
+/* i2s3 ships "disabled" by default on EVK rev 2626-R2 -- see the SAFETY
+ * note in boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay.
+ * DEVICE_DT_GET() on a disabled node fails to LINK, not just to run, so
+ * this has to be a compile-time branch: with the node disabled (the
+ * default), i2s_dev() returns NULL and main() prints why and exits
+ * before touching the Zephyr I2S API at all. */
+#if DT_NODE_HAS_STATUS(I2S_NODE, okay)
+static const struct device *i2s_dev(void)
+{
+	return DEVICE_DT_GET(I2S_NODE);
+}
+#else
+static const struct device *i2s_dev(void)
+{
+	return NULL;
+}
+#endif
 #define SAMPLE_RATE_HZ 48000
 #define WORD_BITS      16
 #define NUM_CHANNELS   2 /* stereo: L/R interleaved */
@@ -72,7 +96,19 @@ static void fill_triangle(int16_t *frames)
 
 int main(void)
 {
-	const struct device *i2s = DEVICE_DT_GET(I2S_NODE);
+	const struct device *i2s = i2s_dev();
+
+	if (i2s == NULL) {
+		printf("[i2s] SOUND: playback skipped -- EVK 2626-R2 U46 has no Hi-Z state and "
+		       "routes SoC I2S outputs into mux outputs (a working, audible mux "
+		       "requires U46 to be a 3257-type switch powered from +3V3, or a "
+		       "1.8 V-rated switch (untested); see alp_e1m_evk.h); i2s3 is left "
+		       "\"disabled\" in the "
+		       "board overlay so no pinctrl is applied and no clock is emitted\n"
+		       "[i2s] RESULT SKIPPED: i2s3 disabled by default on this "
+		       "board revision\n[i2s] done\n");
+		return 0;
+	}
 
 	printf("[i2s] open %s (audio I2S = i2s3, %d ch @ %d Hz, %d-bit TX)\n",
 	       i2s->name,
@@ -165,8 +201,9 @@ int main(void)
 	printf("[i2s] RESULT %s: %s\n",
 	       drained ? "PASS" : "PARTIAL",
 	       drained ? "i2s3 TX clocked the tone out with the 76.8MHz audio clock ON (SCLK/WS/SDO "
-	                 "on P9_3/4/5). For AUDIBLE amp out: route the 74LVC157 mux (EN=Alif P7.1 + "
-	                 "SEL=CC3501E GPIO13) to the TAS2563 + configure the amp (ACTIVE)"
+	                 "on P9_3/4/5). For AUDIBLE amp out: U46 needs a 3257-type switch on +3V3, "
+	                 "OR a switch rated for 1.8V VCC (untested) "
+	                 "(not the stock 74LVC157), routed + the TAS2563 configured (ACTIVE)"
 	               : "configured but TX did not drain cleanly (check clock/pinctrl)");
 	printf("[i2s] done\n");
 	return 0;

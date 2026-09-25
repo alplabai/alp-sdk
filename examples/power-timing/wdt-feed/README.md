@@ -9,7 +9,9 @@ watchdog timeout and feeds it from a background loop.
   is selected by `wdt_id` inside `alp_wdt_config_t`) with the
   `ALP_WDT_RESET_SOC` action.
 - The "feed before timeout or the chip resets" contract.
-- Graceful close (where the SoC supports it).
+- Graceful close (where the SoC supports it) -- and reopening the same
+  `wdt_id` right after, this time with `ALP_WDT_INTERRUPT_ONLY` and a
+  required `on_expire` callback.
 
 ## Build
 

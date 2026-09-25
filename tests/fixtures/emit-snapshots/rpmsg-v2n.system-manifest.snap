@@ -45,6 +45,33 @@ helper_mcus:
   flash_policy: recovery_only
   update_channel: alp_ota_spi_bridge
 boot_order: []
+memory:
+- name: ddr_main
+  source: soc_derived
+  kind: unresolved
+  status: ok
+  base: 1207959552
+  size_bytes: 4294967296
+  accessible_from:
+  - a55_cluster
+  - m33_sm
+- name: ocram_low
+  source: soc_derived
+  kind: unresolved
+  status: ok
+  base: 65536
+  size_bytes: 524288
+  accessible_from:
+  - a55_cluster
+  - m33_sm
+- name: m33_tcm
+  source: soc_derived
+  kind: unresolved
+  status: ok
+  base: 2147483648
+  size_bytes: 131072
+  accessible_from:
+  - m33_sm
 
 # boot_order is empty -- add a `boot_order:` list to metadata/e1m_modules/E1M-V2N101.yaml when the
 # bring-up order is finalised.

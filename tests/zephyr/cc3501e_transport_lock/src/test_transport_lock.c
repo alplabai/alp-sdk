@@ -50,6 +50,7 @@
 
 #include "alp/chips/cc3501e.h"
 #include "alp/protocol/cc3501e.h"
+#include "cc3501e_reply_model.h"
 
 /* ---- software model of the (single, physical, CS-less) firmware slave ----- */
 
@@ -62,8 +63,8 @@ enum slave_phase {
 static struct {
 	enum slave_phase phase;
 	uint8_t          cmd;
-	uint8_t  reply_pl[8]; /* status(1) + up to 7 data bytes -- plenty for PING/GET_VERSION */
-	uint16_t reply_len;
+	uint8_t          reply_pl[8]; /* MAJOR-4 padded reply -- PING and GET_VERSION both pad to 8 B */
+	uint16_t         reply_len;
 } slave;
 
 static void slave_reset(void)
@@ -79,15 +80,16 @@ static void slave_dispatch(void)
 {
 	switch (slave.cmd) {
 	case ALP_CC3501E_CMD_PING:
-		slave.reply_pl[0] = ALP_CC3501E_RESP_OK;
-		slave.reply_len   = 1u;
+		slave.reply_len =
+		    cc3501e_model_stage_reply(slave.reply_pl, slave.cmd, ALP_CC3501E_RESP_OK, NULL, 0u);
 		break;
-	case ALP_CC3501E_CMD_GET_VERSION:
-		slave.reply_pl[0] = ALP_CC3501E_RESP_OK;
-		slave.reply_pl[1] = 0xABu; /* version LE lo -- the value the test asserts on */
-		slave.reply_pl[2] = 0xCDu; /* version LE hi */
-		slave.reply_len   = 3u;
+	case ALP_CC3501E_CMD_GET_VERSION: {
+		/* version LE16 -- the value the test asserts on (0xCDAB). */
+		const uint8_t ver[2] = { 0xABu, 0xCDu };
+		slave.reply_len      = cc3501e_model_stage_reply(
+		    slave.reply_pl, slave.cmd, ALP_CC3501E_RESP_OK, ver, sizeof(ver));
 		break;
+	}
 	default:
 		/* A cmd byte this model never issued (the corrupted-parse case
 		 * below) -- stage SOME terminal reply so a caller that reads it
@@ -187,6 +189,13 @@ void alp_delay_us(uint32_t us)
 void alp_delay_ms(uint32_t ms)
 {
 	k_msleep((int32_t)ms);
+}
+/* This suite genuinely sleeps (above), so the real Zephyr monotonic clock
+ * answers poll_by_repeat()'s alp_uptime_ms() deadline (issue #1953) exactly
+ * as the production Zephyr backend does -- no fake clock needed here. */
+uint64_t alp_uptime_ms(void)
+{
+	return (uint64_t)k_uptime_get();
 }
 alp_gpio_t *alp_gpio_open(uint32_t pin_id)
 {

@@ -134,8 +134,8 @@ arrives over the in-system OTA path above.  Direct SWD flashing exists
 for one customer case only: **recovering a bricked bridge**, with Alp
 Lab-supplied binaries.
 
-The four V2N / V2M SoM presets state exactly that, but as **two** keys,
-not three -- `flash_method` and `flash_args` are absent from all four
+The six V2N / V2M SoM presets state exactly that, but as **two** keys,
+not three -- `flash_method` and `flash_args` are absent from all six
 entries, on purpose:
 
 ```yaml
@@ -190,12 +190,19 @@ programming header and flash an Alp Lab-supplied binary with
 `flash_args` block removed by #1439 used to carry (partitioned images
 also need the factory A/B metadata record at `0x08008000` -- see
 [`gd32-bridge-firmware:README.md`](https://github.com/alplabai/gd32-bridge-firmware#readme)).
-Note the SW-DP ID guard is **unarmed** on that
-procedure: `metadata/chips/gd32_swd.yaml` currently arms its
-wrong-board guard with `0x6BA02477`, but that value is not a GD32
-reading -- it is the bench-measured SW-DP ID of the V2N CM33 DAP, a
-third J-Link on this rack (`scripts/bench/aen/bench-env.sh:145-147`,
-measured 2026-08-08, `Found Cortex-M33 r0p4`; the `e1mx-v2n-m1-01`
+Note the SW-DP ID guard is **unarmed** on that procedure, and on the
+on-SoM path too: `metadata/chips/gd32_swd.yaml`'s `target_expected_idcode`
+is deliberately absent -- same stance `metadata/schemas/soc-spec-v1.schema.json`'s
+own `expect_dpidr` field guidance takes for every Alif Ensemble SoC
+variant (#1355): an absent key is the correct published "unknown", and a
+guessed value is strictly worse than absent because a wrong-board guard
+armed with it can pass on exactly the board it exists to exclude (see
+`metadata/socs/alif/ensemble/e8.json`'s `expect_dpidr` note for the live,
+actually-measured instance of that stance).
+The manifest previously carried `0x6BA02477` there, but that value is
+not a GD32 reading -- it is the bench-measured SW-DP ID of the V2N CM33
+DAP, a third J-Link on this rack (`scripts/bench/aen/bench-env.sh:145-147`,
+measured 2026-08-08, `Found Cortex-M33 r0p4`; the V2N bench unit's
 probe table, `CHANGELOG.md:3364` and `CHANGELOG.md:3367`), tracked as
 #1440.  An
 unattributed `0x0BE12477` elsewhere in this repo is the only GD32
@@ -203,30 +210,36 @@ candidate on record, and it too **has not been measured on a GD32
 with a probe attached**.  See #1369 for the open issue tracking that
 measurement, and #1440 for the `0x6BA02477` mislabeling above.
 
-**This disagrees with `docs/tutorials/07-recovering-a-bricked-bridge.md`'s
-"IDCODE caveat" section**, which tables `0x0BE12477` as a bench-measured
-fact ("A healthy, correctly-wired GD32 answers `0x0BE12477`").  Do not
-silently pick a winner between the two documents: whether `0x0BE12477`
-was ever read off a GD32 with a probe attached is #1440's and #1369's
-open question, and it needs silicon to close, not doc surgery.  Until it
-does, **this section governs the J-Link/external-probe recovery-flash
-decision** (the alternative to this tutorial's on-SoM bit-bang route,
-`chips/gd32_swd/` -- SWDIO/SWCLK/NRST on P70/P71/P74, no J-Link, no
-cloned serial) -- it is the one an operator follows immediately before a
-write that can reach the wrong board, which is exactly the moment
-treating an unattested value as a pass condition would matter.  The
-tutorial's table is the weaker claim: it reproduces
-`scripts/bench/aen/bench-env.sh`'s `GD32_DPIDR` export, and that export
-formerly carried its own "BENCH-VERIFIED" banner covering `GD32_DPIDR`
-too; that banner cited `docs/aen-bench-bringup.md`, which does not
-mention the GD32 at all, and is now hedged
-(`scripts/bench/aen/bench-env.sh:148-151`) -- so the tutorial's "fact"
-traces back to a since-hedged, uncited assertion, not an independent
-measurement.
+**`docs/tutorials/07-recovering-a-bricked-bridge.md`'s "IDCODE caveat"
+section now agrees with this one**: both treat `0x0BE12477` as an
+unattested, claimed-but-unmeasured value, and neither presents it as
+what a healthy GD32 answers. That was not always true -- the tutorial
+previously tabled `0x0BE12477` as a bench-measured fact ("A healthy,
+correctly-wired GD32 answers `0x0BE12477`"), which is what this
+paragraph used to warn readers not to pick a winner between. #1369 is
+why the disagreement existed: neither candidate value is measured, so
+neither document got to assert one as ground truth.  **This section
+still governs the J-Link/external-probe recovery-flash decision** (the
+alternative to that tutorial's on-SoM bit-bang route, `chips/gd32_swd/`
+-- SWDIO/SWCLK/NRST on P70/P71/P74, no J-Link, no cloned serial) -- it
+is the one an operator follows immediately before a write that can
+reach the wrong board, which is exactly the moment treating an
+unattested value as a pass condition would matter.  The tutorial's
+table reproduces `scripts/bench/aen/bench-env.sh`'s `GD32_DPIDR`
+export, and that export formerly carried its own "BENCH-VERIFIED"
+banner covering `GD32_DPIDR` too; that banner cited
+`docs/aen-bench-bringup.md`, which does not mention the GD32 at all,
+and is now hedged (`scripts/bench/aen/bench-env.sh:148-151`).
 
 **Required step on the alplab-gw bench: read the DPIDR by hand before
 flashing, and abort on a match to either of two known-wrong boards.**
-The GD32 probe (USB path `3-4.2`) and the AEN E8 probe (`3-4.4.3`)
+The GD32 probe (USB path `3-4.2`) and the AEN E8 probe (USB path
+resolved per-board from labgrid, e.g. `labgrid-client -p <your-bench-place>
+show` -- **do not hardcode a path here**: all three AEN EVK boards on
+this bench answer the same DPIDR `0x4c013477`, so the USB path is the
+only thing that tells them apart, and it is per-board, not a fixed
+"AEN E8" constant; `3-4.4.3` was observed on one specific bench board
+and is NOT another board's path)
 enumerate the same J-Link serial `603000869`, and `JLinkExe` selects
 an adapter only by serial -- with no port selector and no armed
 DPIDR guard on this out-of-`tan` path, probe choice for the cloned
@@ -256,11 +269,15 @@ cloned-serial ambiguity for every invocation that follows:
    ambiguity for every invocation from here on.
 
    Identify the two probes at the connector before pulling either
-   one: run `lsusb -t` and match USB path `3-4.4.3` to the AEN E8
-   against `3-4.2` for the GD32 (both enumerate under the shared
-   J-Link serial `603000869`; those USB paths are recorded at
-   `CHANGELOG.md:2736` and `CHANGELOG.md:3339`, not in
-   `bench-env.sh`).  After detaching, re-run `lsusb -t` and confirm
+   one: run `lsusb -t` and match the AEN E8's USB path -- resolved for
+   the specific board on the bench via `labgrid-client -p
+   <your-bench-place> show` (never a hardcoded path: with three AEN EVK
+   boards sharing DPIDR `0x4c013477`, the USB path is the only board
+   selector, and it is per-board, not a fixed constant -- `3-4.4.3`,
+   as recorded at `CHANGELOG.md:2736` and `CHANGELOG.md:3339`, is one
+   specific board's path, not another board's) -- against `3-4.2`
+   for the GD32 (both enumerate under the shared J-Link serial
+   `603000869`).  After detaching, re-run `lsusb -t` and confirm
    exactly one `603000869` probe still enumerates before moving on to
    step 2.
 

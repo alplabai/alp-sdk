@@ -528,7 +528,14 @@ def test_diff_still_reports_removed_without_the_reachability_include(tmp_path):
     assert any(m.startswith(("REMOVED", "CHANGED")) for m in msgs)  # gate would fire
 
 
-def test_diff_does_not_collapse_a_move_that_also_changed_value(tmp_path):
+def test_diff_reports_moved_and_changed_when_value_also_changed(tmp_path):
+    """Issue #2139: a header split that ALSO changes the symbol's value
+    (the #2129 shape -- an enumerator swap riding along with a routes-
+    header move) must still read as MOVED, since a consumer of the old
+    header still reaches the symbol -- plus an accompanying CHANGED
+    detail, not a plain REMOVED + ADDED that hides the value swap and
+    forces a false removed-symbols.json entry to get past the freeze
+    gate."""
     prev_headers = _macro_snap(
         tmp_path, "alp/board.h", "prev_board3.h", "#define FOO_MACRO 1\n"
     )
@@ -550,9 +557,181 @@ def test_diff_does_not_collapse_a_move_that_also_changed_value(tmp_path):
 
     msgs = abi.diff(prev, curr, include_graph=include_graph)
 
+    assert any(
+        m.startswith("MOVED   macro FOO_MACRO: alp/board.h -> alp/board_routes.h")
+        for m in msgs
+    ), msgs
+    assert not any(m.startswith("REMOVED") for m in msgs), msgs
+    assert not any(m.startswith("ADDED") for m in msgs), msgs
+    assert (
+        "CHANGED macro alp/board_routes.h::FOO_MACRO (moved from alp/board.h)" in msgs
+    ), msgs
+    assert any("value of alp/board_routes.h::FOO_MACRO" in m and "'1'" in m and "'2'" in m for m in msgs), msgs
+    # The freeze gate blocks only on a literal REMOVED line (existing
+    # pre-1.0 policy, docs/abi/README.md) -- a moved+changed symbol must
+    # never match `grep -q '^  REMOVED '`.
+    assert not any(re.match(r"^  REMOVED ", f"  {m}") for m in msgs)
+    # But diff()'s own exit-code rule DOES still trip on CHANGED -- same
+    # existing policy a same-header value change already gets, not a
+    # new gate invented for the moved case.
+    assert any(m.startswith(("REMOVED", "CHANGED")) for m in msgs)
+
+
+def test_diff_reports_enumerator_detail_for_moved_and_changed_typedef(tmp_path):
+    """The concrete #2129 shape: `evk_sdio_select_t` swaps its
+    enumerator values while ALSO moving from `alp_e1m_evk.h` into
+    `alp_e1m_evk_routes.h`.  Must report MOVED + CHANGED with the
+    enumerator-level detail `_field_diff` already gives a same-header
+    CHANGED, not a bare REMOVED + ADDED that hides the swap."""
+    prev_src = "typedef enum { EVK_SDIO_SDCARD = 1, EVK_SDIO_M2E_KEY = 0 } evk_sdio_select_t;\n"
+    curr_src = "typedef enum { EVK_SDIO_SDCARD = 0, EVK_SDIO_M2E_KEY = 1 } evk_sdio_select_t;\n"
+    prev = {
+        "headers": {
+            "alp/boards/alp_e1m_evk.h": _extract_src(tmp_path, prev_src, "prev_evk.h"),
+            "alp/boards/alp_e1m_evk_routes.h": _extract_src(tmp_path, "", "prev_routes.h"),
+        }
+    }
+    curr = {
+        "headers": {
+            "alp/boards/alp_e1m_evk.h": _extract_src(tmp_path, "", "curr_evk.h"),
+            "alp/boards/alp_e1m_evk_routes.h": _extract_src(tmp_path, curr_src, "curr_routes.h"),
+        }
+    }
+    include_graph = {"alp/boards/alp_e1m_evk.h": ["alp/boards/alp_e1m_evk_routes.h"]}
+
+    msgs = abi.diff(prev, curr, include_graph=include_graph)
+
+    assert (
+        "MOVED   typedef evk_sdio_select_t: alp/boards/alp_e1m_evk.h -> "
+        "alp/boards/alp_e1m_evk_routes.h" in msgs
+    ), msgs
+    assert not any(m.startswith("REMOVED") for m in msgs), msgs
+    assert not any(m.startswith("ADDED") for m in msgs), msgs
+    assert (
+        "CHANGED typedef alp/boards/alp_e1m_evk_routes.h::evk_sdio_select_t "
+        "(moved from alp/boards/alp_e1m_evk.h)" in msgs
+    ), msgs
+    assert any("EVK_SDIO_SDCARD = 1" in m and "EVK_SDIO_SDCARD = 0" in m for m in msgs), msgs
+    assert any("EVK_SDIO_M2E_KEY = 0" in m and "EVK_SDIO_M2E_KEY = 1" in m for m in msgs), msgs
+
+
+def test_diff_falls_back_when_moved_name_is_ambiguous(tmp_path):
+    """Several headers losing the same name at once must not be guessed
+    at: #2139's value-may-differ relaxation only fires when the move is
+    UNAMBIGUOUS (exactly one loser, exactly one gainer for that name).
+    Two headers (`a.h`, `b.h`) both losing `FOO_MACRO` -- with different
+    values, so neither exact-hash-matches the single gainer (`c.h`) --
+    must fall back to plain REMOVED + ADDED for all three, exactly the
+    pre-#2139 behaviour, rather than guessing which loser the gainer
+    replaced."""
+    prev_headers = {}
+    prev_headers.update(_macro_snap(tmp_path, "alp/a.h", "prev_a.h", "#define FOO_MACRO 1\n"))
+    prev_headers.update(_macro_snap(tmp_path, "alp/b.h", "prev_b.h", "#define FOO_MACRO 2\n"))
+    prev_headers.update(_macro_snap(tmp_path, "alp/c.h", "prev_c.h", ""))
+    prev = {"headers": prev_headers}
+
+    curr_headers = {}
+    curr_headers.update(_macro_snap(tmp_path, "alp/a.h", "curr_a.h", ""))
+    curr_headers.update(_macro_snap(tmp_path, "alp/b.h", "curr_b.h", ""))
+    curr_headers.update(_macro_snap(tmp_path, "alp/c.h", "curr_c.h", "#define FOO_MACRO 3\n"))
+    curr = {"headers": curr_headers}
+
+    include_graph = {"alp/a.h": ["alp/c.h"], "alp/b.h": ["alp/c.h"]}
+
+    msgs = abi.diff(prev, curr, include_graph=include_graph)
+
     assert not any(m.startswith("MOVED") for m in msgs), msgs
-    assert "REMOVED macro alp/board.h::FOO_MACRO" in msgs, msgs
-    assert "ADDED   macro alp/board_routes.h::FOO_MACRO" in msgs, msgs
+    assert "REMOVED macro alp/a.h::FOO_MACRO" in msgs, msgs
+    assert "REMOVED macro alp/b.h::FOO_MACRO" in msgs, msgs
+    assert "ADDED   macro alp/c.h::FOO_MACRO" in msgs, msgs
+
+
+def test_diff_reports_removed_added_when_typedef_kind_changes_across_headers(tmp_path):
+    """#2139 follow-up (review round 2): the value-may-differ MOVED
+    pairing keyed only on (category, symbol) over-matched a struct
+    `alp_x_t` REMOVED from `alp/a.h` against an unrelated ENUM
+    `alp_x_t` ADDED in the header `alp/a.h` still reaches -- a same
+    NAME is not a same SYMBOL when the typedef `kind` differs (struct
+    vs enum here). That must stay REMOVED + ADDED, not collapse into a
+    false MOVED + CHANGED that hides a genuine removal from the freeze
+    gate's `^  REMOVED ` check."""
+    prev = {
+        "headers": {
+            "alp/a.h": _extract_src(tmp_path, "typedef struct { int a; } alp_x_t;\n", "prev_a.h"),
+            "alp/b.h": _extract_src(tmp_path, "", "prev_b.h"),
+        }
+    }
+    curr = {
+        "headers": {
+            "alp/a.h": _extract_src(tmp_path, "", "curr_a.h"),
+            "alp/b.h": _extract_src(
+                tmp_path, "typedef enum { A = 0, B = 1 } alp_x_t;\n", "curr_b.h"
+            ),
+        }
+    }
+    include_graph = {"alp/a.h": ["alp/b.h"]}
+
+    msgs = abi.diff(prev, curr, include_graph=include_graph)
+
+    assert not any(m.startswith("MOVED") for m in msgs), msgs
+    assert "REMOVED typedef alp/a.h::alp_x_t" in msgs, msgs
+    assert "ADDED   typedef alp/b.h::alp_x_t" in msgs, msgs
+
+
+def test_diff_reports_removed_added_when_struct_becomes_fnptr_across_headers(tmp_path):
+    """Same hazard as above, the other kind pair the review named: a
+    struct disappearing and a function-pointer typedef of the same
+    name appearing in a reachable header must not pair either."""
+    prev = {
+        "headers": {
+            "alp/a.h": _extract_src(
+                tmp_path, "typedef struct { int a; } alp_x_t;\n", "prev_a2.h"
+            ),
+            "alp/b.h": _extract_src(tmp_path, "", "prev_b2.h"),
+        }
+    }
+    curr = {
+        "headers": {
+            "alp/a.h": _extract_src(tmp_path, "", "curr_a2.h"),
+            "alp/b.h": _extract_src(tmp_path, "typedef void (*alp_x_t)(int);\n", "curr_b2.h"),
+        }
+    }
+    include_graph = {"alp/a.h": ["alp/b.h"]}
+
+    msgs = abi.diff(prev, curr, include_graph=include_graph)
+
+    assert not any(m.startswith("MOVED") for m in msgs), msgs
+    assert "REMOVED typedef alp/a.h::alp_x_t" in msgs, msgs
+    assert "ADDED   typedef alp/b.h::alp_x_t" in msgs, msgs
+
+
+def test_diff_reports_moved_and_changed_for_same_kind_enum_across_headers(tmp_path):
+    """The positive case alongside the two negatives above: the new
+    `kind` check must refuse a MISMATCHED kind, not typedefs in
+    general -- an enum moving to another enum of the same name, with
+    its enumerator values also changed, still gets MOVED + CHANGED."""
+    prev_src = "typedef enum { A = 0, B = 1 } alp_x_t;\n"
+    curr_src = "typedef enum { A = 1, B = 0 } alp_x_t;\n"
+    prev = {
+        "headers": {
+            "alp/a.h": _extract_src(tmp_path, prev_src, "prev_a3.h"),
+            "alp/b.h": _extract_src(tmp_path, "", "prev_b3.h"),
+        }
+    }
+    curr = {
+        "headers": {
+            "alp/a.h": _extract_src(tmp_path, "", "curr_a3.h"),
+            "alp/b.h": _extract_src(tmp_path, curr_src, "curr_b3.h"),
+        }
+    }
+    include_graph = {"alp/a.h": ["alp/b.h"]}
+
+    msgs = abi.diff(prev, curr, include_graph=include_graph)
+
+    assert "MOVED   typedef alp_x_t: alp/a.h -> alp/b.h" in msgs, msgs
+    assert not any(m.startswith("REMOVED") for m in msgs), msgs
+    assert not any(m.startswith("ADDED") for m in msgs), msgs
+    assert "CHANGED typedef alp/b.h::alp_x_t (moved from alp/a.h)" in msgs, msgs
 
 
 def test_diff_reports_genuine_deletion_as_removed(tmp_path):
@@ -828,9 +1007,10 @@ def test_include_graph_excludes_a_conditional_include(tmp_path):
         "#endif\n"
         "#endif /* ALP_FACADE_H */\n",
         newline="",
+        encoding="utf-8",
     )
     for name in ("always.h", "board_a.h", "board_b.h"):
-        (root / name).write_text("#define X 1\n", newline="")
+        (root / name).write_text("#define X 1\n", newline="", encoding="utf-8")
 
     graph = abi.build_include_graph(root)
 
@@ -898,9 +1078,10 @@ def test_include_graph_handles_a_pragma_once_header(tmp_path):
         '#include "alp/board_a.h"\n'
         "#endif\n",
         newline="",
+        encoding="utf-8",
     )
     for name in ("always.h", "board_a.h"):
-        (root / name).write_text("#define X 1\n", newline="")
+        (root / name).write_text("#define X 1\n", newline="", encoding="utf-8")
 
     graph = abi.build_include_graph(root)
 
@@ -924,8 +1105,9 @@ def test_include_graph_handles_a_top_level_if_above_the_guard(tmp_path):
         "#endif\n"
         "#endif\n",
         newline="",
+        encoding="utf-8",
     )
-    (root / "always.h").write_text("#define X 1\n", newline="")
+    (root / "always.h").write_text("#define X 1\n", newline="", encoding="utf-8")
 
     graph = abi.build_include_graph(root)
 

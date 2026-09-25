@@ -116,7 +116,7 @@ struct ipc_msg {
 
 /* Per-core liveness beacon (same scheme as master/doorbell).  The board #if
  * is core-role selection (HP vs HE build), not a peripheral-presence gate. */
-#if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HP)
+#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP)
 #define ROLE        "HP"
 #define SELF_BEACON ((volatile uint32_t *)0x02000010U)
 #define SELF_MAGIC  0xB1B10090U
@@ -172,7 +172,7 @@ static inline void zero_mbox(volatile struct ipc_msg *m)
 	}
 }
 
-#if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HP)
+#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP)
 /* HP: service ONE pending request if REQ_MBOX carries a seq we haven't served
  * yet. Shared by the bounded verdict window and the trailing idle-serve loop
  * so both use exactly the same serve logic. Returns true if a request was
@@ -220,7 +220,7 @@ int main(void)
 	zero_mbox(REQ_MBOX);
 	zero_mbox(RPL_MBOX);
 
-#if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HP)
+#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP)
 	/*
 	 * HP master + responder. Release HE FIRST (it is loaded but not booted by
 	 * the SES), then service requests: for each HE doorbell, read REQ_MBOX,

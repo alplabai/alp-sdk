@@ -46,7 +46,29 @@ signals:
   - { name: NRST,  type: open_drain,   v2n_route: "P74 <-> GD32 NRST",
       notes: "shared with primary PMIC reset out; host pad MUST be open-drain" }
 
-target_expected_idcode:  "0x6BA02477"   # Cortex-M33 r0p1 SW-DPv2
+# target_expected_idcode is deliberately ABSENT, not just unset to a
+# placeholder -- same stance metadata/schemas/soc-spec-v1.schema.json's
+# own `expect_dpidr` field guidance takes for every Alif Ensemble SoC
+# variant (#1355): an absent key is the correct published "unknown",
+# and a guessed value is strictly worse than absent, because a
+# wrong-board guard armed with it can pass on exactly the board it
+# exists to exclude (see metadata/socs/alif/ensemble/e8.json's
+# `expect_dpidr` note for the live, actually-measured instance of that
+# stance). This field is not consumed as a guard by anything today --
+# neither gd32_swd_connect() (chips/gd32_swd/gd32_swd.c) nor the field
+# itself is read by any generator or validate_metadata.py check -- so
+# leaving it absent breaks no consumer.
+#
+# Two candidate values circulate elsewhere in this repo, neither
+# attested on a GD32 with a probe attached: `0x0BE12477` (no
+# attribution at all -- no bench transcript, no datasheet reference, no
+# commit message) and `0x6BA02477` (the bench-measured V2N CM33 DAP on
+# a V2N bench unit, and separately the generic architectural default for
+# ANY Cortex-M33 r0p1 SW-DPv2 part -- retained for that reason as
+# GD32_SWD_GENERIC_CM33_R0P1_IDCODE in include/alp/chips/gd32_swd.h,
+# which `chips/gd32_swd/gd32_swd.c` and the v2n-gd32-swd-flash example
+# log informationally and never gate on). Do not repopulate this field
+# from either candidate; it needs a measurement (#1369).
 
 physical:
   # gd32_swd is a host-side bit-bang SWD *controller*, not a physical

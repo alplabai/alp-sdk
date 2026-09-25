@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+cmake_minimum_required(VERSION 3.20.0)
+find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+project(test_cc3501e_poll_deadline)
+
+# Link the REAL Alif-side host driver (chips/cc3501e/cc3501e_*.c), so the
+# poll_by_repeat() deadline logic under test (issue #1953) is the production
+# code path -- sibling of tests/zephyr/cc3501e_host_driver, but this suite
+# supplies its own alp_uptime_ms()/alp_delay_ms() fake clock instead of a
+# real one, so the deadline math is exercised without any real sleeping.
+set(CHIPS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../chips)
+file(GLOB CC3501E_DRIVER_SOURCES ${CHIPS_DIR}/cc3501e/cc3501e_*.c)
+
+target_sources(app PRIVATE
+    src/test_poll_deadline.c
+    ${CC3501E_DRIVER_SOURCES}
+)
+target_include_directories(app PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../include)
+
+# This suite compiles chips/cc3501e/*.c directly, outside the SDK's Kconfig,
+# so CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER is undefined here and IS_ENABLED()
+# would read it as OFF -- silently testing a configuration no real build
+# ships (issue #2126 review). Force the shipping default ON.
+target_compile_definitions(app PRIVATE CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER=1)

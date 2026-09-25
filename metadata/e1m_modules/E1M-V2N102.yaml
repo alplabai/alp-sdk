@@ -43,11 +43,13 @@ on_module:
       devices:
         - { chip: rv3028c7,         role: rtc,                       address_7bit: "0x52" }
         - { chip: optiga_trust_m,   role: secure_element,            address_7bit: "0x30" }
-        # 0x48 = ADD0 strapped to GND (chip default) per metadata/chips/tmp112.yaml;
-        # 0x40 was outside the physically possible 0x48..0x4B strap range.
-        # Bench verification on real silicon still pending.
-        - { chip: tmp112,           role: temp_sensor,               address_7bit: "0x48" }
-        - { chip: clk_5l35023b,     role: clock_generator,           address_7bit: "0x68" }
+        # 0x40 = ADD0 strapped to GND on the fitted TMP112DIDPWR (X2SON-5) --
+        # maintainer-confirmed 2026-09-24 (same class of bug as AEN's #1978:
+        # the naive datasheet ADD0=GND->0x48 strap-table read doesn't match
+        # this package's real strap).
+        - { chip: tmp112,           role: temp_sensor,               address_7bit: "0x40" }
+        # I2C_addr[1:0]=01 (8-bit 0xD2) -- maintainer-confirmed 2026-09-24.
+        - { chip: clk_5l35023b,     role: clock_generator,           address_7bit: "0x69" }
         - { chip: gd32g553,         role: supervisor_mcu_i2c_slave,  address_7bit: "0x70" }
         - { chip: act8760,          role: pmic_main_page0,           address_7bit: "0x25" }
         - { chip: act8760,          role: pmic_main_page1,           address_7bit: "0x26" }
@@ -57,10 +59,20 @@ on_module:
       bus_master: renesas-rzv2n
       devices:
         - { chip: eeprom_24c128,    role: eeprom,                    address_7bit: "0x50" }
+        # SAME PHYSICAL PART as the 0x50 entry above, not a second chip --
+        # this line's default population is the onsemi N24S128C4DYT3G (see
+        # metadata/chips/eeprom_24c128.yaml mpn_population), which decodes
+        # `1010` -> 0x50 and `1011` -> 0x58 (Secure Data Page / Unique ID /
+        # lock byte / Device Configuration Register).  The
+        # footprint-compatible M24128-BFMH6TG is an alternate/DNP part, not
+        # the fitted default.  Listed so the unclaimed 0x58 ACK doesn't
+        # collide with a future part (alp-sdk#1976).  Measured on
+        # E1M-AEN803 serial 2026W36-0003.
+        - { chip: eeprom_24c128,    role: eeprom_identity,           address_7bit: "0x58" }
 
 memory:
   dram_mbit:            65536                  # 64 Gbit LPDDR4X
-  flash_mbit:           65536                  # 64 Gbit eMMC 5.1
+  flash_mbit:           131072                 # 128 Gbit eMMC 5.1 (16 GB)
 
 inference:
   preferred_backend:    drpai

@@ -100,6 +100,62 @@ def test_load_board_yaml_v2n_happy(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------
+# 1b. load_board_yaml -- the `--input` board.yaml path itself must never
+# crash the loader with an unhandled exception (#1961's `loader.py`
+# half: `_load_yaml`'s `path.is_file()` carried the identical unguarded
+# shape already closed for `extra_libraries[].profile:` in validate.py).
+# ---------------------------------------------------------------------
+
+
+def test_load_board_yaml_input_permission_denied_clean_error(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A `--input` board.yaml that `Path.is_file()` can't stat because
+    of EACCES (the POSIX shape -- `_ignore_error`'s ELOOP/ENOENT/
+    ENOTDIR/EBADF ignore-list does not cover PermissionError) must
+    raise a clean `OrchestratorError`, not propagate the `OSError`
+    subclass out of `load_board_yaml`."""
+    path = _write_board(tmp_path, V2N_HAPPY)
+    real_is_file = Path.is_file
+
+    def _raise_eacces(self):
+        if self.name == path.name:
+            raise PermissionError(13, "Permission denied")
+        return real_is_file(self)
+
+    monkeypatch.setattr(Path, "is_file", _raise_eacces)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    assert "could not access" in str(excinfo.value)
+
+
+def test_load_board_yaml_input_windows_symlink_loop_clean_error(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The real Windows shape of a symlink-loop `--input` path: a real
+    WSL-made symlink loop driven through the real CLI with Windows
+    CPython 3.11.3 shows `Path.is_file()` raise a plain `OSError`
+    (`WinError 1920`, "The file cannot be accessed by the system"),
+    not a `PermissionError` and not a `RuntimeError`. Reproduced here
+    by monkeypatching (real unprivileged `os.symlink` needs Developer
+    Mode/admin on Windows -- confirmed on this host)."""
+    path = _write_board(tmp_path, V2N_HAPPY)
+    real_is_file = Path.is_file
+
+    def _raise_windows_shape(self):
+        if self.name == path.name:
+            err = OSError("The file cannot be accessed by the system")
+            err.winerror = 1920
+            raise err
+        return real_is_file(self)
+
+    monkeypatch.setattr(Path, "is_file", _raise_windows_shape)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    assert "could not access" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------
 # 2. Loader topology fallback
 # ---------------------------------------------------------------------
 

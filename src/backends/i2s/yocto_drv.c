@@ -17,15 +17,15 @@
  *     bus_id == 0 -> "default"        (the per-user ALSA default;
  *                                      honours /etc/asound.conf)
  *     bus_id == N -> "hw:<N-1>,0"     (card N-1, device 0)
- * This mirrors src/yocto/audio_yocto.c's resolve_device_name() so the
+ * This mirrors src/backends/audio/yocto_drv.c's resolve_device_name() so the
  * audio and raw-I²S surfaces share one numbering convention.
  *
  * STATUS: real implementation; Yocto-link + on-target run BENCH-UNVERIFIED
  * (no sysroot / no real I²S DAI device node available in this tree).
  *
  * CMake-gated behind pkg_check_modules(ALSA libasound) exactly like
- * audio_yocto.c -- when libasound is absent the class stays on the stub
- * and this TU is not compiled.
+ * src/backends/audio/yocto_drv.c -- when libasound is absent the class
+ * stays on the stub and this TU is not compiled.
  */
 
 #if defined(__linux__)
@@ -132,8 +132,10 @@ static int _resolve_device_name(uint32_t bus_id, char *out, size_t cap)
 
 /* Apply hw params (access / format / channels / rate / period) to a
  * freshly-opened PCM handle from the alp_i2s config.  Mirrors the
- * configure_pcm() flow in audio_yocto.c.  Returns ALP_OK or an
- * alp_status_t on failure. */
+ * configure_pcm() flow in src/backends/audio/yocto_drv.c.  Returns ALP_OK, or
+ * ALP_ERR_NOSUPPORT when the DAI can't honour the requested sample
+ * rate (see the rate-mismatch check below), or another alp_status_t
+ * on failure. */
 static alp_status_t
 _configure_pcm(snd_pcm_t *pcm, const alp_i2s_config_t *cfg, snd_pcm_format_t fmt)
 {
@@ -155,12 +157,43 @@ _configure_pcm(snd_pcm_t *pcm, const alp_i2s_config_t *cfg, snd_pcm_format_t fmt
 	unsigned int rate = cfg->sample_rate_hz;
 	rc                = snd_pcm_hw_params_set_rate_near(pcm, hw, &rate, NULL);
 	if (rc < 0) return _alsa_to_alp(rc);
+	if (rate != cfg->sample_rate_hz) {
+		/* alp_i2s_open()'s doc comment promises "an unsupported sample
+         * rate ... returns NULL here, not later" -- _near() substitutes
+         * the nearest rate the DAI actually supports instead of failing,
+         * so a silent accept here would break that contract: every frame
+         * would stream at the wrong speed with alp_i2s_open() reporting
+         * success (#1648 tier 1). The sibling audio/yocto_drv.c has the
+         * identical set_rate_near-discards-&rate shape and is not yet
+         * fixed -- that's a separate, still-open change (PR #1790). */
+		fprintf(stderr,
+		        "alp_i2s: rate %u Hz unsupported, device negotiated %u Hz\n",
+		        cfg->sample_rate_hz,
+		        rate);
+		return ALP_ERR_NOSUPPORT;
+	}
 
 	/* block_frames is the alp_i2s DMA-block unit; map it to the ALSA
      * period size so each writei/readi corresponds to one block. */
 	snd_pcm_uframes_t period = cfg->block_frames;
 	rc                       = snd_pcm_hw_params_set_period_size_near(pcm, hw, &period, NULL);
 	if (rc < 0) return _alsa_to_alp(rc);
+	/* Unlike rate, a period mismatch is not refused: snd_pcm_writei/readi
+     * accept any frame count per call regardless of the negotiated period
+     * (y_write below already loops to handle that; y_read reports
+     * whatever count snd_pcm_readi() actually returns via bytes_out, per
+     * its own doc comment -- it does not loop), and a `default` device
+     * commonly negotiates its own fixed period (e.g. a dmix plugin)
+     * regardless of what block_frames asks for. Refusing here would fail
+     * ALP_I2S_CONFIG_DEFAULT's 256-frame request against exactly that
+     * kind of device. Adopt whatever ALSA negotiates for buffer sizing
+     * below and only log the mismatch. */
+	if (period != (snd_pcm_uframes_t)cfg->block_frames) {
+		fprintf(stderr,
+		        "alp_i2s: block_frames %u requested, device negotiated %lu frames\n",
+		        (unsigned)cfg->block_frames,
+		        (unsigned long)period);
+	}
 
 	/* Buffer = 4 periods: enough to absorb scheduling jitter without
      * bloating RAM.  Apps that need different sizing tune block_frames. */
@@ -264,7 +297,7 @@ y_open(const alp_i2s_config_t *cfg, alp_i2s_backend_state_t *st, alp_capabilitie
  * additionally kicks the DAI so frames start accumulating; a PLAYBACK
  * stream auto-starts on the first writei once the buffer threshold is
  * reached, so an explicit start there is unnecessary (and mirrors
- * audio_yocto.c's out path).
+ * src/backends/audio/yocto_drv.c's out path).
  */
 static alp_status_t y_start(alp_i2s_backend_state_t *st)
 {

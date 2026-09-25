@@ -29,10 +29,10 @@ for the SKU breakdown:
 - **E1M-AEN family** — `E1M-AEN301` … `E1M-AEN801` (Alif Ensemble
   E3–E8).  E3 / E4 are RTOS-only (no A-class); E5..E8 carry an
   A32 cluster alongside the M55 pair.
-- **E1M-X V2N family** — `E1M-V2N101`, `E1M-V2N102` (Renesas RZ/V2N):
-  A55 cluster + M33-SM.
-- **E1M-X V2N-M1 family** — `E1M-V2M101`, `E1M-V2M102` (RZ/V2N +
-  DEEPX DX-M1): same topology as V2N.
+- **E1M-X V2N family** — `E1M-V2N101`, `E1M-V2N102`, `E1M-V2N103`
+  (Renesas RZ/V2N): A55 cluster + M33-SM.
+- **E1M-X V2N-M1 family** — `E1M-V2M101`, `E1M-V2M102`, `E1M-V2M103`
+  (RZ/V2N + DEEPX DX-M1): same topology as V2N.
 - **E1M-N93 family** — iMX93: A55 cluster + M33.
 
 Because the per-core matrix is 11 columns wide, the per-version
@@ -227,7 +227,7 @@ hasn't been measured.
 
 | Surface | Header(s) | Cores / backing | Status |
 |---------|-----------|-----------------|--------|
-| Display class | `display.h` | M (Zephyr `display_*` driver-class wrapper, `alp-display0..3` DT aliases, issue #23); A (Yocto) + baremetal: NOSUPPORT stub | Zephyr backend **code complete (untested on silicon)** — native_sim ZTESTs against the upstream dummy display cover open/get_caps/blit/clear/close + degrade paths; a build-only native_sim scenario instantiates Zephyr MIPI DBI Type C (`zephyr,mipi-dbi-spi`) with an ST7789V child panel and proves the DT/Kconfig/backend wiring.  No panel has been driven on real hardware through this class yet.  V2N DSI / parallel-RGB + Alif LCD-IF vendor backends still pending |
+| Display class | `display.h` | M (Zephyr `display_*` driver-class wrapper, `alp-display0..3` DT aliases, issue #23); A (Yocto) + baremetal: NOSUPPORT stub | Zephyr backend **code complete (untested on silicon)** — native_sim ZTESTs against the upstream dummy display cover open/get_caps/blit/clear/close + degrade paths; a build-only native_sim scenario instantiates Zephyr MIPI DBI Type C (`zephyr,mipi-dbi-spi`) with an ST7789V child panel and proves the DT/Kconfig/backend wiring.  No panel has been driven on real hardware through this class yet.  AEN (Alif E8): no vendor backend needed -- the `e1m_evk_rk055hdmipi4ma0` shield turns the CDC200 -> DesignWare MIPI-DSI -> D-PHY chain into a Zephyr display device behind `alp-display0` (build-verified on E1M-AEN801/803; pixels on glass not yet observed).  V2N DSI / parallel-RGB backends still pending |
 | GUI/LVGL bridge | `gui.h` (`alp_gui_lvgl_attach`, issue #23) | M (Zephyr): real LVGL v9 hand-off (`src/gui_lvgl.c`) — creates an `lv_display_t` over any `alp_display_t`, wires LVGL's flush callback to `alp_display_blit()`; `ALP_HAS_LVGL` auto-derives from `CONFIG_LVGL` via `CONFIG_ALP_SDK_HAS_LVGL`. A (Yocto) + baremetal / no-LVGL builds: guard-clause NOSUPPORT | **code complete, native_sim-tested** (`tests/zephyr/gui_lvgl/`) — a priority-255 test-double display backend proves a forced LVGL refresh reaches `alp_display_blit()`, plus NULL/unsupported-pixel-format/no-LVGL-build degrade paths. RGB565/RGB888/ARGB8888 mapped; `ALP_PIXFMT_MONO_VLSB` has no LVGL v9 equivalent and is refused. No real panel driven through this bridge yet — real-silicon bench run still pending |
 | Inference dispatcher | `inference.h` + `backend.h` | M (Zephyr): registry over `tflm` / `ethos_u`; A (Yocto): dispatcher over `ort` (CPU) / `drpai` / `deepx_dxm1` | surface + registry present; the A55 **DeepX (`dxrt::InferenceEngine`)** + **DRP-AI (`MeraDrpRuntimeWrapper`)** + **CPU (ONNX Runtime, `src/yocto/inference_ort.cpp`)** backend bodies are **real, bench-unverified** (link needs the Yocto sysroot; default-off CMake options — `ALP_SDK_USE_ORT_CPU` off by default); `resolve_auto()` orders CPU strictly last so an NPU-bearing SoM never silently falls back to it; the former M-class DRP-AI/DEEPX stubs are removed — all three A55 engines are A55-only, M-class runs TFLM (code-complete) — #58/#59; `tflm`/`ethos_u` paths still untested. No `.alpmodel` → ORT route exists yet (`CONFIG_ALP_SDK_MODEL_READER` undefined on Yocto): ORT is reachable only via a hand-built `alp_inference_config_t` |
 | DSP / math offload | `dsp.h` + `tmu.h` | M + A; CMSIS-DSP / libm SW fallback, GD32 FAC/CORDIC HW path on V2N | surface present; **untested** on HW |

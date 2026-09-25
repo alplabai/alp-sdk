@@ -5,6 +5,7 @@ generated status page must reflect docs/test-plan.md's ACTUAL row status,
 not a hand-typed opinion that can drift out of sync with it.
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -50,7 +51,8 @@ def test_committed_file_matches_generator(generated):
 def test_check_mode_passes_on_committed_file():
     proc = subprocess.run(
         [sys.executable, str(SCRIPT), "--check"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
     assert proc.returncode == 0, proc.stderr
 

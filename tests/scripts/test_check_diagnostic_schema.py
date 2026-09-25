@@ -15,6 +15,7 @@ traceback out of `Path.is_file()`/`machine_json_for_board_yaml()`.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -26,7 +27,8 @@ SCRIPT = REPO / "scripts" / "check_diagnostic_schema.py"
 def _run(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(SCRIPT), *args],
-        cwd=REPO, capture_output=True, text=True, check=False,
+        cwd=REPO, capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
     )
 
 

@@ -152,6 +152,16 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/jpeg/zephyr_stub.c
 )
 
+# Word-copy memcpy() override for -Os Ensemble images (issue #2285).  The
+# core loop (src/common/alp_fast_memcpy_core.c) is OS-agnostic and also
+# linked directly into the host unit test (tests/unit/fast_memcpy); this
+# TU is just the memcpy()/__aeabi_memcpy*() aliases onto it, so it is
+# gated separately and only compiled into real Zephyr/picolibc images.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_FAST_MEMCPY
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/common/alp_fast_memcpy_core.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/fast_memcpy.c
+)
+
 # JPEG software baseline fallback (Task 2): portable TooJpeg-derived
 # encoder, silicon_ref="*" priority 50 -- outranks the NOT_IMPLEMENTED
 # stub above on every board.  Default y (see zephyr/kconfigs/jpeg.kconfig)
@@ -342,13 +352,87 @@ endif()
 # (compatible alif,ethernet); driver: zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c,
 # binding: zephyr/dts/bindings/ethernet/alif,ethernet.yaml.  The clock id it
 # enables (ALIF_ETHERNET_CLK) is re-encoded for the upstream alif,clockctrl in
-# zephyr/include/zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h.  bench-unverified.
+# zephyr/include/zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h.
+# BENCH-VERIFIED E8 2026-06-17 (real DHCP lease, server-side REACHABLE).
 zephyr_library_sources_ifdef(CONFIG_ETH_DWMAC_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c)
 # The glue uses the eth_dwmac core's private header (struct dwmac_priv); upstream
 # keeps it co-located in drivers/ethernet/, so expose that dir on the include path.
 if(CONFIG_ETH_DWMAC_ALIF)
     zephyr_include_directories(${ZEPHYR_BASE}/drivers/ethernet)
+endif()
+
+# Silicon-verified on E1M-AEN803 (bench run 202: DHCP lease + ping, rings/pools
+# in SRAM0, main RAM on DTCM, aen-ethernet-link). E1M-AEN801 is build-verified
+# only (same E8 memory map, not itself benched); aen-evk-demo's use of this
+# same mechanism -- sharing its 64 KiB SRAM0 window between the relocated
+# rings/pools and separate JPEG buffers -- is build-verified only, not
+# benched. The GMAC DMA cannot reach the M55 DTCM, so
+# subsys/net/ip/net_pkt.c's net_buf pools (__noinit) must land in the same
+# SRAM region as the descriptor rings the driver places via the ethernet
+# node's `memory-region` (zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c) --
+# rather than moving ALL of main RAM there with `chosen { zephyr,sram =
+# &sram0; }`, which is slower and intermittently breaks the ISP.  Resolve the
+# region name from DT at configure time, the same way the driver resolves the
+# node (DT_INST_PHANDLE(0, memory_region) on the sole `alif,ethernet`
+# instance): the ethernet node's memory-region phandle (exported as that
+# node's path, single phandle props per gen_dts_cmake.py), then that node's
+# zephyr,memory-region string (e.g. "SRAM0").  LIMIT: only net_pkt.c's own
+# pools are relocated -- an application's own net_buf pool (e.g.
+# NET_PKT_DATA_POOL_DEFINE via net_context_setup_pools) still lands on DTCM
+# and the DMA would silently fail against it.  With
+# CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION unset this whole block is
+# skipped (net_pkt.c keeps its default placement); with it set but no usable
+# memory-region resolving, this prints a CMake WARNING -- not a silent no-op.
+if(CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION)
+    dt_comp_path(alif_eth_node_path COMPATIBLE "alif,ethernet" INDEX 0)
+    if(alif_eth_node_path)
+        dt_prop(alif_eth_dma_region_path PATH "${alif_eth_node_path}" PROPERTY "memory-region")
+    endif()
+
+    # HAZARD GUARD. The SoC dtsi now sets `memory-region = <&sram0>;`
+    # unconditionally on this node. If a board/app overlay ALSO points
+    # `chosen { zephyr,sram = ...; }` at that SAME node (e.g. the old
+    # whole-RAM-move `&sram0`), the linker allocates BOTH the whole
+    # system-RAM region AND the separately-named memory-region linker
+    # region into the identical address window, independently, with NO
+    # link-time warning -- main RAM's .data/.bss/.noinit/stacks silently
+    # alias on top of the DMA-relocated net_buf pools and the descriptor
+    # rings. This is the exact class of corruption
+    # examples/aen/aen-evk-demo's overlay documents and works around by
+    # giving the two consumers disjoint windows; catch the unguarded case
+    # at configure time instead of at a garbled bench run.
+    if(alif_eth_dma_region_path)
+        dt_chosen(alif_chosen_sram_path PROPERTY "zephyr,sram")
+        if(DEFINED alif_chosen_sram_path AND alif_chosen_sram_path STREQUAL alif_eth_dma_region_path)
+            message(FATAL_ERROR
+                "CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION is set and the ethernet "
+                "node's memory-region resolves to the SAME node as chosen "
+                "zephyr,sram (${alif_chosen_sram_path}). The linker would place main "
+                "RAM (.data/.bss/.noinit, stacks) and the DMA-region-relocated "
+                "net_buf pools/descriptor rings in the SAME address window with NO "
+                "warning. Fix ONE of: (1) drop the `chosen { zephyr,sram = ...; }` "
+                "override so main RAM stays on its generated default (DTCM), or "
+                "(2) `/delete-property/ memory-region;` on the ethernet node AND set "
+                "CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION=n to fall back to the "
+                "whole-RAM-move mechanism cleanly.")
+        endif()
+    endif()
+
+    if(alif_eth_dma_region_path)
+        dt_prop(alif_eth_dma_region_name PATH "${alif_eth_dma_region_path}"
+            PROPERTY "zephyr,memory-region")
+    endif()
+    if(alif_eth_dma_region_name)
+        foreach(alif_eth_dma_region_loc DATA BSS NOINIT)
+            zephyr_code_relocate(FILES ${ZEPHYR_BASE}/subsys/net/ip/net_pkt.c
+                LOCATION ${alif_eth_dma_region_name}_${alif_eth_dma_region_loc})
+        endforeach()
+    else()
+        message(WARNING "CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION is set but the "
+            "ethernet node has no usable memory-region -- net_pkt.c's net_buf pools "
+            "stay on DTCM, unreachable by the GMAC DMA.")
+    endif()
 endif()
 
 # Alif Ensemble GMAC embedded Clause-22 MDIO (compatible snps,designware-mdio);
@@ -614,14 +698,39 @@ zephyr_library_sources_ifdef(CONFIG_MIPI_DPHY_DW
 zephyr_library_sources_ifdef(CONFIG_VIDEO_ISP_VSI
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/isp_pico.c)
 
+# Raspberry-Pi-style MIPI CSI-2 camera-module sensor drivers -- board-agnostic
+# (no Alif/EVK specifics), consumed via a camera shield
+# (zephyr/boards/shields/raspberry_pi_camera_module_1,
+# zephyr/boards/shields/innomaker_cam_ov9281) on top of whatever CSI-2 host
+# is on the board (e.g. the Alif video_csi_dw.c bridge above).  Both use the
+# upstream video_common.c CCI helpers (video_read_cci_reg /
+# video_write_cci_multiregs*), so the private drivers/video include dir is
+# needed here too.
+#
+# OV5647 (compatible "ovti,ov5647"): ADR 0017 Tier-1 (upstream-PENDING
+# backport of zephyrproject-rtos/zephyr#119301, INTERIM) -- see
+# zephyr/drivers/video/ov5647.c for the retirement note.
+#
+# OV9281 (compatible "ovti,ov9281"): ADR 0017 Tier-1.5 (port of the Apache-2.0
+# Espressif esp-video-components esp_cam_sensor ov9281 driver onto the v4.4
+# video API), BENCH-VERIFIED 2026-09-21 on an E1M-AEN803 on the E1M-EVK --
+# see zephyr/drivers/video/ov9281.c.
+if(CONFIG_VIDEO_OV5647 OR CONFIG_VIDEO_OV9281)
+    zephyr_include_directories(${ZEPHYR_BASE}/drivers/video)
+endif()
+zephyr_library_sources_ifdef(CONFIG_VIDEO_OV5647
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/ov5647.c)
+zephyr_library_sources_ifdef(CONFIG_VIDEO_OV9281
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/ov9281.c)
+
 # Alif Ensemble DISPLAY path -- TES CDC-2.1 (CDC200) DPI/RGB display controller
 # (compatible "tes,cdc-2.1"), vendored from the Apache-2.0 zephyr_alif fork
 # (drivers/display/display_cdc200.c) + PORTED to the v4.4 display API by Alp Lab
 # AB.  Upstream Zephyr v4.4 + hal_alif ship no tes,cdc-2.1 or DPI display
 # driver, so the source is carried in-tree to survive a `west update`.  The TU
-# uses hal_alif's <soc_memory_map.h> only under CONFIG_FB_USES_DTCM_REGION; the
-# default SRAM0 framebuffer path needs neither it nor the hal_alif common include
-# dir.  ADR 0017 Tier-2 (INTERIM).
+# uses hal_alif's <soc_memory_map.h> only under CONFIG_FB_USES_DTCM_REGION; a
+# framebuffer memory-region in global SRAM needs neither it nor the hal_alif
+# common include dir.  ADR 0017 Tier-2 (INTERIM).
 if(CONFIG_DISPLAY_CDC200 AND CONFIG_FB_USES_DTCM_REGION)
     zephyr_include_directories(${ZEPHYR_ALIF_MODULE_DIR}/common/include)
 endif()
@@ -639,6 +748,18 @@ if(CONFIG_MIPI_DSI_DW)
 endif()
 zephyr_library_sources_ifdef(CONFIG_MIPI_DSI_DW
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mipi_dsi/dsi_dw.c)
+
+# ADR-0017-ADJACENT glue: the Alif E8 SoC-level setup the MIPI D-PHY and the
+# display chain need and no driver performs -- D-PHY clock sources + analog
+# power (CGU / VBAT), the CDC200 pixel-clock divider, and the DSI panel
+# backlight pad mux.  E8-only (the gate mirrors the GPIO clock-enable glue
+# above) and only when the D-PHY, DSI or CDC200 driver is configured, so a
+# CSI-camera build gets the D-PHY power-up too; each hook inside is further
+# gated on its DT node being okay.
+if(CONFIG_SOC_SERIES_E8 AND (CONFIG_MIPI_DPHY_DW OR CONFIG_MIPI_DSI_DW OR CONFIG_DISPLAY_CDC200))
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif/mipi_display_e8.c)
+endif()
 
 # Alif Ensemble CAN-FD controller (CAST CAN-CTRL IP, compatible "cast,can",
 # CANFD0 base 0x49036000), vendored VERBATIM from the Apache-2.0 zephyr_alif
@@ -1029,6 +1150,18 @@ add_subdirectory(${ZEPHYR_CURRENT_MODULE_DIR}/src/lib/gfx_compat
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_HW_INFO
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/hw_info_zephyr.c)
 
+# <alp/temperature.h> -- on-module ambient-temperature read.  No dedicated
+# Kconfig: this file gates itself internally on CONFIG_SENSOR + the
+# `alp-temp0` DT alias's own status, so it ships unconditionally on
+# Zephyr (issue #2066) and every build without that alias just takes the
+# ALP_ERR_NOSUPPORT branch.  Zephyr-ONLY -- it binds through Zephyr's own
+# devicetree/sensor API with no portable fallback, so baremetal/Yocto get
+# src/common/stub/stub_temperature.c instead (see that file + this one's
+# header comment for why this differs from hw_info_zephyr.c above, which
+# IS shared with plain CMake).
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/temperature_zephyr.c)
+
 # SoC-identity class ("soc_info" -- the alp_soc_info_read /
 # alp_soc_secure_fw_ping half of <alp/hw_info.h>).  Dispatcher +
 # wildcard sw_fallback ship unconditionally: the dispatcher stamps the
@@ -1105,6 +1238,11 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_PI3DBS12212
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/pi3dbs12212/pi3dbs12212.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_GD32G553
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/gd32g553/gd32g553.c)
+# gd32g553_ota_image_crc32() -- kept out of the Zephyr-agnostic chip driver
+# TU above; HW (Alif E8 CRC engine, CONFIG_CRC_ALIF) + SW dual path, SW
+# always available.  See src/zephyr/gd32g553_ota_crc_zephyr.c.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_GD32G553
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/gd32g553_ota_crc_zephyr.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_RTL8211FDI
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/rtl8211fdi/rtl8211fdi.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_CLK_5L35023B
@@ -1234,13 +1372,11 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/v2n_supervisor.c
 )
 
-# V2N DEEPX rail-mgmt auxiliary.  Driven by P65 rising-edge IRQ;
-# brings up DA9292 CH2 = 0.75 V via BRD_I²C + drives P64 high to
-# release the rail.  Compiles to a NOSUPPORT stub when either the
-# supervisor or the power-mgmt feature is disabled.
-zephyr_library_sources(
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/v2n_power_mgmt.c
-)
+# No V2N DEEPX rail-mgmt auxiliary here: U-Boot's board_late_init() (see
+# meta-alp-sdk/recipes-bsp/u-boot/u-boot/
+# 0004-rzv2n-dev-ALP-E1M-DEEPX-rail-bringup.patch) is the sole owner of
+# the DA9292 PMIC and of P64/P65 -- RIIC8/BRD_I2C is Cortex-A55/Linux-
+# exclusive, so the CM33 must never bring this rail up itself.
 
 # LwRB: publish the vendor stub headers on the include path so SDK
 # code compiles against <lwrb/lwrb.h> regardless of whether the
@@ -1461,9 +1597,14 @@ zephyr_library_sources_ifdef(CONFIG_GPIO
 # cc3501e_proxy_routes_weak.c is the WEAK empty route-table default, split
 # into its own TU so cc3501e_proxy.c never sees a same-TU `const` definition
 # to constant-fold a board's strong override away at -Os (issue #1860).
+# cc3501e_rev_dependent_pins.c is the SDK-owned (never board-overridden)
+# generated revision-dependent pin list (scripts/gen_cc3501e_gpio_routes.py,
+# issue #2144) -- identical on every AEN board, so unlike the weak file
+# above it compiles whenever the proxy is compiled, not per board.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_GPIO_CC3501E_PROXY
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/cc3501e_proxy.c
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/cc3501e_proxy_routes_weak.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/cc3501e_proxy_routes_weak.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/cc3501e_rev_dependent_pins.c)
 
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/sw_fallback.c)
 # PWM class dispatcher + backends.
@@ -1545,6 +1686,28 @@ zephyr_library_sources_ifdef(CONFIG_UHC_XHCI_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/usb/uhc/xhci_core.c)
 if(CONFIG_UHC_XHCI_ALIF)
     zephyr_include_directories(${ZEPHYR_BASE}/drivers/usb/uhc)
+endif()
+
+# Weak-RNG refusal for mbedTLS' PSA crypto core (issues #2173, #2192).
+# CONFIG_ALP_SDK_MBEDTLS_WEAK_RNG is y when this build compiles the PSA core
+# against a generator Zephyr itself documents as not random -- no entropy
+# driver at all (TEST_RANDOM_GENERATOR), or a fake one that admits it in its
+# own Kconfig help.  Kconfig cannot refuse a configuration, so the refusal
+# lives here: without it the AEN TLS and OTA examples build, link, run and
+# derive session keys from a predictable source, with nothing but a boot-log
+# WARNING between that and a shipped product.
+if(CONFIG_ALP_SDK_MBEDTLS_WEAK_RNG AND NOT CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY)
+    message(FATAL_ERROR
+        "${BOARD} builds mbedTLS' PSA crypto core with no cryptographically "
+        "secure random source: CONFIG_CSPRNG_ENABLED is not set, or the only "
+        "entropy driver in this build declares itself a fake. TLS would "
+        "negotiate and derive key material from a predictable generator.\n"
+        "  Fix it: bind a real entropy driver for this target (on Alif "
+        "Ensemble that is the Secure Enclave TRNG -- open work, issue "
+        "#2192).\n"
+        "  Or, for a simulator, a test, or a bench-only bring-up image that "
+        "never ships, acknowledge it explicitly with "
+        "CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y.")
 endif()
 
 # <alp/testing/*> virtual-backend test doubles (epic #610).  Hard-gated

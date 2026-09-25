@@ -15,12 +15,15 @@
  * dphy node is repointed AND bench-verified.
  * ==================================================================
  *
- * Vendored VERBATIM from the fork (only this provenance header is added).
- * Unlike the video drivers this driver does NOT touch the video API, so it was
- * never blocked by the v4.4 video-API rework; it compiles unchanged.  It is now
- * built alongside the (ported) CSI driver -- the ALP_VIDEO_ALIF_BROKEN gate is
- * retired across the whole stack.  Its sole consumer is video_csi_dw.c
- * (dphy_dw_slave_setup).  vendor-ext, BENCH-UNVERIFIED.
+ * Vendored from the fork with two local changes: the PLL is programmed through
+ * the SoC shadow registers (dphy_dw_config_pll()), and dphy_dw_init() powers
+ * the D-PHY and enables its upstream clocks (dphy_dw_power_on()) -- the fork
+ * leaves both of those to the application.  This driver does NOT touch the
+ * video API, so it was never blocked by the v4.4 video-API rework.  Consumers:
+ * video_csi_dw.c (dphy_dw_slave_setup, camera RX) and dsi_dw.c
+ * (dphy_dw_master_setup, DSI TX).  vendor-ext.  Equivalent power/clock writes,
+ * made from aen-dsi-display's SYS_INIT, got the TX PLL to lock on an
+ * E1M-AEN801; from this driver, and on the CSI RX path, BENCH-UNVERIFIED.
  */
 #define DT_DRV_COMPAT snps_designware_dphy
 
@@ -32,6 +35,7 @@
 #include <zephyr/kernel.h>
 
 #include <zephyr/drivers/mipi_dphy/dphy_dw.h>
+#include <soc_common.h>
 #include "dphy_dw.h"
 
 LOG_MODULE_REGISTER(dphy_dw, CONFIG_MIPI_DPHY_LOG_LEVEL);
@@ -377,6 +381,23 @@ int dphy_dw_master_setup(const struct device *dev, struct dphy_dsi_settings *phy
 		       DSI_PHY_IF_CFG_PHY_N_LANES_MASK, DSI_PHY_IF_CFG_PHY_N_LANES_SHIFT);
 
 	/*
+	 * ALP-SDK PORT FIX: PHY_STOP_WAIT_TIME was left at its reset value of 0.
+	 * Per the E8 SVD, the field is the minimum time the PHY must dwell in
+	 * Stop state BEFORE it is allowed to request a high-speed transmission
+	 * -- not a wait for Stop to be reached, a floor on how long it stays
+	 * there first.  Linux's dw-mipi-dsi always writes
+	 * PHY_STOP_WAIT_TIME(0x20) alongside N_LANES here; this is that parity,
+	 * plus a latent-bug fix: the old SHIFT for this field was 0, the same
+	 * shift as `DSI_PHY_IF_CFG_PHY_N_LANES_SHIFT` above, so a write here
+	 * would have landed on N_LANES instead.  It is not a fix for the
+	 * #2199 LP-command stall and had no measured effect on it -- see
+	 * dsi_dw.c's dsi_dw_pwr_up_once() for that history.
+	 */
+	reg_write_part(dsi_regs + DSI_PHY_IF_CFG, DSI_PHY_IF_CFG_PHY_STOP_WAIT_TIME_VAL,
+		       DSI_PHY_IF_CFG_PHY_STOP_WAIT_TIME_MASK,
+		       DSI_PHY_IF_CFG_PHY_STOP_WAIT_TIME_SHIFT);
+
+	/*
 	 * Put D-PHY in shutdown mode prior to configuring the D-PHY.
 	 * Set RSTZ = 0, SHUTDOWNZ = 0
 	 */
@@ -528,9 +549,30 @@ int dphy_dw_master_setup(const struct device *dev, struct dphy_dsi_settings *phy
 		return -ETIMEDOUT;
 	}
 
-	/* Wait for LP11 state to be driven. */
+	/*
+	 * Wait for LP11 state to be driven.
+	 *
+	 * ALP-SDK PORT FIX: the second line used to ASSIGN, not OR --
+	 *   tmp = (phy->num_lanes == 2) ? DSI_PHY_STATUS_STOPSTATE1LANE : tmp;
+	 * so a two-lane panel (this shield) waited on lane 1's stop state ALONE
+	 * and never checked data lane 0 (bit 4) or the clock lane (bit 2).  This
+	 * function could then return 0 with lane 0 and/or the clock lane not yet
+	 * in LP-11, and dsi_dw_attach_locked() would go on to program the DPI
+	 * registers and mark the host attached over a PHY in an invalid state.
+	 *
+	 * That matters beyond tidiness here: HX8394-F Fig 5.28 requires "MIPI
+	 * Data Lane and CLK Lane must set LP11 before HW reset go high", and the
+	 * panel's RESX is released just after this returns.  Checking one data
+	 * lane is not checking the condition the panel actually needs.
+	 *
+	 * The CSI twin in this same file already ORs correctly -- see the
+	 * CSI_PHY_STOPSTATE_PHY_STOPSTATEDATA_1 case -- so the master path was
+	 * the outlier.  Inherited verbatim from the zephyr_alif fork.
+	 */
 	tmp = DSI_PHY_STATUS_STOPSTATE0LANE | DSI_PHY_STATUS_STOPSTATECLKLANE;
-	tmp = (phy->num_lanes == 2) ? DSI_PHY_STATUS_STOPSTATE1LANE : tmp;
+	if (phy->num_lanes == 2) {
+		tmp |= DSI_PHY_STATUS_STOPSTATE1LANE;
+	}
 	for (int i = 0; (i < 1000000) && (sys_read32(dsi_regs + DSI_PHY_STATUS) & tmp) != tmp;
 	     i++) {
 		k_busy_wait(1);
@@ -813,6 +855,43 @@ static int dphy_dw_enable_clocks(const struct device *dev)
 
 }
 
+/*
+ * E8 HWRM CGU CLK_ENA / VBAT PWR_CTRL fields the D-PHY depends on upstream of
+ * its own MIPI_CKEN gates (CGU_CLK_ENA / VBAT_PWR_CTRL from <soc_common.h>).
+ * CLK_ENA: HFOSC_CLK (38.4 MHz) is the PLL reference and resets OFF; 100M_CLK
+ * (/4 = the 25 MHz D-PHY CFG_CLK) resets on.
+ */
+#define DPHY_CGU_CLK_ENA_CLK100M   BIT(7)
+#define DPHY_CGU_CLK_ENA_CLK38P4M  BIT(23)
+#define DPHY_VBAT_TX_DPHY_PWR_MASK BIT(0)
+#define DPHY_VBAT_TX_DPHY_ISO      BIT(1)
+#define DPHY_VBAT_RX_DPHY_PWR_MASK BIT(4)
+#define DPHY_VBAT_RX_DPHY_ISO      BIT(5)
+#define DPHY_VBAT_PLL_PWR_MASK     BIT(8)
+#define DPHY_VBAT_PLL_ISO          BIT(9)
+#define DPHY_VBAT_VPH_1P8_BYP_EN   BIT(12)
+
+#define DPHY_VBAT_PWR_BITS \
+	(DPHY_VBAT_TX_DPHY_PWR_MASK | DPHY_VBAT_RX_DPHY_PWR_MASK | DPHY_VBAT_PLL_PWR_MASK | \
+	 DPHY_VBAT_VPH_1P8_BYP_EN)
+#define DPHY_VBAT_ISO_BITS (DPHY_VBAT_TX_DPHY_ISO | DPHY_VBAT_RX_DPHY_ISO | DPHY_VBAT_PLL_ISO)
+
+/*
+ * At reset the TX / RX D-PHY and the MIPI PLL are power-masked and isolated,
+ * and the 1.8 V supply is in bypass with BYP_VAL = 0 (off).  Without this the
+ * CSI RX side never reaches Stop-state and the DSI TX PLL never locks.  The
+ * SE does not do it on a RAM-run, so the driver does, for both roles.  Pure
+ * RMW set/clear: idempotent, and a no-op when the SE already did it.
+ */
+static void dphy_dw_power_on(void)
+{
+	sys_set_bits(CGU_CLK_ENA, DPHY_CGU_CLK_ENA_CLK38P4M | DPHY_CGU_CLK_ENA_CLK100M);
+
+	/* Un-mask the rails first, then drop the isolation. */
+	sys_clear_bits(VBAT_PWR_CTRL, DPHY_VBAT_PWR_BITS);
+	sys_clear_bits(VBAT_PWR_CTRL, DPHY_VBAT_ISO_BITS);
+}
+
 static int dphy_dw_init(const struct device *dev)
 {
 	const struct dphy_dw_config *config = dev->config;
@@ -821,6 +900,8 @@ static int dphy_dw_init(const struct device *dev)
 	DEVICE_MMIO_NAMED_MAP(dev, expmst_reg, K_MEM_CACHE_NONE);
 	DEVICE_MMIO_NAMED_MAP(dev, dsi_reg, K_MEM_CACHE_NONE);
 	DEVICE_MMIO_NAMED_MAP(dev, csi_reg, K_MEM_CACHE_NONE);
+
+	dphy_dw_power_on();
 
 	ret = dphy_dw_enable_clocks(dev);
 	if (ret) {

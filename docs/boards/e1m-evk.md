@@ -46,9 +46,21 @@ E1M-X SoMs (`E1M-V2N101/102`, `E1M-V2M101/102`) target the separate
   `USB2_VBUS` and CC-pin straps).  Don't drive multiple inputs
   simultaneously during early bring-up — the power-OR / eFuse
   topology hasn't been verified on every assembled revision.
-- **Internal rails:** `+5V`, `+3V3`, `+1V8`, `+VIO` (selectable
-  +1V8 / +V_ANA / +3V3 / +5V via header **P17** for the user
-  interface and Arduino expansion).
+- **Internal rails:** `+5V`, `+3V3`, `+1V8`, `+VIO` (the plugged-in
+  SoM's `VIO_OUT`, NOT carrier-selectable -- measures 1.8 V with the
+  E1M-AEN SoM), `+V_ANA` (jumper-selectable from `+5V` / `+3V3` /
+  `+1V8` via header **P17**; feeds only DAC header J15 and the
+  OPA189 DAC buffers U23/U24 -- NOT the Arduino/mikroBUS expansion),
+  `+VARD` (same jumper shape on header **P9**) -- not only the
+  Arduino/mikroBUS expansion: it feeds the LSF0108 level shifters'
+  `VREF_B` side through R176/R177/R178 (`VREF_A` on those shifters is
+  `+VIO`), and directly supplies Arduino UART header J17 pin 1,
+  encoder header J18 pin 1, header P3 pin 2, the `CK_SCL`/
+  `CK_SDA` pull-ups R146/R147, U16/U17's `REFB` through R173/R174, and
+  a pull-up on `CK_RST` through R175 (`CK_RST` reaches mikroBUS
+  header P7 pin 2, P3 pin 3, and U17 pin B1).
+  Setting P9 to `+5V` puts 5 V on J17, J18, `CK_RST`, and those I2C
+  pull-ups too, not just the Arduino/mikroBUS shifters.
 - **SuperCap rail:** present on `+SCAP`; useful for hold-up during
   brown-outs; `<alp/iot.h>`-level state-persistence policies should
   consult this rail when shipping examples that survive power loss.
@@ -87,8 +99,8 @@ schematic (UG-E1M-001) and exposed as `EVK_I2C_ADDR_*` macros in
 | `0x4E`          | TAS2563 (U28)            | `EVK_I2C_ADDR_TAS2563_HIGH`        | Smart-amp #2 (AD0 = 10 kΩ to VDD)                   |
 | `0x68`          | BMI323 (U13)             | `EVK_I2C_ADDR_BMI323`              | Secondary 6-axis IMU (SDO=0; no collision with ICM) |
 | `0x69`          | ICM-42670-P (U12)        | `EVK_I2C_ADDR_ICM42670`            | Primary 6-axis IMU (AD0=1)                          |
-| `0x71`          | TCAL9538 PCIe (U37)      | `EVK_I2C_ADDR_TCAL9538_PCIE`       | PCIe-side I/O expander (PCIe slot RST/WAKE/CLKREQ)  |
-| `0x72`          | TCAL9538 main (U35)      | `EVK_I2C_ADDR_TCAL9538_MAIN`       | Main I/O expander (LCD/cam/CTP control + IMU IRQs)  |
+| `0x71`          | TCAL9538 PCIe (U37)      | `EVK_I2C_ADDR_TCAL9538_PCIE_NOT_ASSEMBLED` | **NOT ASSEMBLED** on this EVK revision (alp-sdk#1974) -- would be the PCIe-side I/O expander (PCIe slot RST/WAKE/CLKREQ). The generator (#1980) renames the macro so the plain `EVK_I2C_ADDR_TCAL9538_PCIE` name is not defined. |
+| `0x73`          | TCAL9538 main (U35)      | `EVK_I2C_ADDR_TCAL9538_MAIN`       | Main I/O expander (LCD/cam/CTP control + IMU IRQs). CORRECTED 2026-09-05 from `0x72` (alp-sdk#1974): the maintainer's EVK I2C schedule gives 1110011 = `0x73`, and 2 of 2 boards answer there and are silent at `0x72`. |
 
 > **TMUX121 is not in this table.**  It's a passive analog/digital
 > I²C bus switch — addressless, controlled via dedicated pins
@@ -110,7 +122,7 @@ The TCAL9538 IO expander (U35) drives:
 | `LCD_PWR_EN`  | output        | Display 1V8 / 3V3 enable                            |
 | `LCD_RST`     | output        | Display panel reset                                 |
 | `CTP_RST`     | output        | Capacitive touch reset                              |
-| `CAM_EN`      | output        | Camera-module enable (drives the camera sensor's EN/STBY pin, NOT the camera power rails) |
+| `CAM_EN`      | output        | Camera-module enable line, NOT the camera power rails. On the RPi connector (J5), the `CAM_EN_#` net has exactly three nodes: J5 pin 11, `Q1` pin 3 (drain), and `D45` pin 2. `Q1` is a `BSS138PW,115` N-channel MOSFET with its gate on `CAM_EN` and its source on `0V`; `R2` is a 10k gate pull-down; `D45` is a `D5V0L1B2S9-7` bidirectional 5V TVS -- an ESD clamp, not a pull-up. Nothing on this EVK can source current into pin 11: `0` (reset default, R2 holds the gate low) leaves pin 11 floating; `1` turns `Q1` on and pulls pin 11 to `0V`. **Driving pin 11 HIGH from firmware is not reachable on this carrier.** Leave `CAM_EN` at `0` so a module with its own pull-up self-enables; a module with no pull-up of its own (e.g. the InnoMaker CAM-OV5647) needs the [J5 pin 11 pull-up rework](#j5-pin-11-pull-up-rework) below, and must still see `CAM_EN = 0` afterward. |
 | `S_42670.INT1`| input         | ICM-42670-P interrupt 1                             |
 | `S_42670.INT2`| input         | ICM-42670-P interrupt 2                             |
 | `S_42670.FSYNC`| input        | ICM-42670-P FSYNC                                   |
@@ -119,15 +131,49 @@ The TCAL9538 IO expander (U35) drives:
 The expander itself signals back via `IO_EXP.INT` (interrupt out)
 and is reset via `IO_EXP.RST`.  Both are routed to the module.
 
+### J5 pin 11 pull-up rework {#j5-pin-11-pull-up-rework}
+
+Bench-proven 2026-09-22 on an E1M-AEN803 (serial 2026W36-0001) on an
+E1M-EVK (hw_rev 2626-r2). Some RPi-style camera modules carry their
+own pull-up on pin 11 and self-enable as soon as `CAM_EN` leaves it
+floating; others do not, and stay in power-down with pin 11 floating.
+Because nothing on this EVK can drive pin 11 high (see the `CAM_EN`
+row above), a module without its own pull-up needs one fitted
+externally, from J5 pin 11 to J5 pin 15 (`+3V3`).
+
+Measured effect on the InnoMaker CAM-OV5647, which has no pull-up of
+its own: before the rework, a full `0x08`..`0x77` sweep of the camera
+I2C bus found zero devices and `alp_camera_open` returned
+`ALP_ERR_IO`. With the pull-up fitted, the sensor answers at `0x36`
+with chip ID `0x5647` (registers `0x300a`/`0x300b` read `56 47`), and
+the board's draw rises from 0.065-0.067 A to 0.074-0.080 A at 16.0 V.
+The InnoMaker CAM-OV9281 self-enables and needs no rework.
+
+Two cautions:
+
+- **Size the pull-up against the module's own pull-down.** Measure
+  pin 11 to GND with the board off and the cable seated. Size the
+  added resistor to roughly a quarter of that measured value -- a 10k
+  pull-up against a 10k pull-down divides to 1.65 V, below VIH, and
+  looks like a failed rework rather than a wrong ratio.
+- **Use a resistor, never a bare wire to `+3V3`.** With pin 11
+  hard-tied, any firmware that asserts `CAM_EN` turns `Q1` on and
+  shorts `+3V3` to ground through it.
+
+`CAM_EN` must stay `0` after the rework too: asserting it powers the
+module back down -- bench-confirmed, the I2C sweep went from 1
+responder to 0 and back with `CAM_EN`.
+
 ## User interface
 
 | Item             | Description                                                             |
 |------------------|-------------------------------------------------------------------------|
-| Rotary encoder   | PEC12R-4222F-S0024 — quadrature on `ENC0_X`/`ENC0_Y` plus an integrated push switch. |
+| Rotary encoder   | PEC11R-4215K-S0024 — quadrature on `ENC0_X`/`ENC0_Y` plus an integrated push switch. |
 | RGB LED          | 150505M173300, transistor-driven, on a `+5V` rail.                      |
 | DAC outputs      | `DAC0_OUT` and `DAC1_OUT` buffered through OPA189 op-amps to header J15.|
-| Comparator       | `CMP0`, `CMP1` exposed on header J18.                                   |
-| IO-voltage select| Header **P17**: jumper between `+1V8`, `+V_ANA`, `+3V3`, `+5V`.         |
+| Comparator       | `CMP0`/`CMP1` are not broken out on a dedicated header.                 |
+| `+V_ANA` select  | Header **P17**: jumper connects one of `+5V`/`+3V3`/`+1V8` (pins 1/3/5) to `+V_ANA` (pins 2/4/6); feeds only DAC header J15 and the OPA189 DAC buffers -- does not reach the Arduino/mikroBUS expansion or `+VIO`, which comes from the SoM's `VIO_OUT`. |
+| `+VARD` select   | Header **P9**, same shape as P17 (pins 1/3/5 = `+5V`/`+3V3`/`+1V8`, pins 2/4/6 = `+VARD`). NOT only the Arduino/mikroBUS expansion rail: sets `VREF_B` on the LSF0108 level shifters U18/U22/U40 (through R176/R177/R178, `VREF_A` = `+VIO`), and directly supplies Arduino UART header J17 pin 1, encoder header J18 pin 1, header P3 pin 2, the `CK_SCL`/`CK_SDA` pull-ups R146/R147 and U16/U17 `REFB` (through R173/R174), and a pull-up on `CK_RST` through R175 (`CK_RST` reaches mikroBUS header P7 pin 2, P3 pin 3, and U17 pin B1). Setting P9 to `+5V` puts 5 V on all of those, not just the shifters. |
 
 ## Networking & I/O at a glance
 
@@ -136,8 +182,19 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   jack stays dark.  Each jack carries the standard activity LEDs
   (`ETH*_LED0`, `ETH*_LED1`).
 - **CAN bus:** TCAN1044A transceiver, jumpers JP1–JP4, header J9.
-- **microSD:** standard slot multiplexed via 74LVC157 with the M.2
-  Key E SDIO interface — software must pick which one is active.
+- **microSD:** standard slot multiplexed via a 2:1 mux (U38/U39) with
+  the M.2 Key E SDIO interface. As-built, U38/U39 are stock 74LVC157
+  and can NEVER pass SD through at any `VCC` -- they contend with the
+  SoC's own host controller in BOTH `/E` states (same directional
+  failure as the I2S mux, U46); a 3257-type bus-switch swap is
+  required (see `include/alp/boards/alp_e1m_evk.h`). The select is
+  hardware-strapped on r2 (not software-drivable — the default is the
+  microSD slot); r1 can drive it from firmware over the CC3501E GPIO
+  proxy, but doing so while header P18's jumper is fitted is a
+  hardware hazard. **Disabled on 2626-R2 (#2051):** `sdhc0` stays
+  `status = "disabled"` in the shared SoC dtsi rather than fight the
+  mux's held-low/contending pads with the SoC's own drivers; see
+  `examples/aen/aen-sdhc-probe`'s README.
 - **Camera:** three options — Raspberry-Pi-compatible 15-pin CSI,
   standard MIPI B2B 34-pin, parallel DVP 24-pin — multiplexed via
   the **PI3WVR626XEBEX** 2:1 MIPI CSI mux.  Camera rails
@@ -156,6 +213,93 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   to switch inputs at runtime.  The `/OE` pin is hardwired to GND
   on this board, so the output is always live.
 
+  **Raspberry Pi camera connector (J5).**  J5 is the RPi 15-pin
+  CSI-2 connector and sits on mux input **A** (`SEL = 0`).  It
+  carries **2 data lanes** (the most the 15-pin pinout has), no reset
+  line and no sensor clock -- RPi modules carry their own
+  oscillator.  Its control I2C is E1M `I2C1` (`EVK_I2C_BUS_DSI_CSI`
+  = SoC I2C1, SCL `P3_7` / SDA `P7_2`), level-shifted to 3.3 V on the
+  carrier and shared with the DSI connector's touch controller.  Pin
+  11 (module enable) is driven by `CAM_EN` (see the expander table
+  above): keep `CAM_EN = 0` so a module with its own pull-up
+  self-enables. A module with no pull-up of its own needs the
+  [J5 pin 11 pull-up rework](#j5-pin-11-pull-up-rework) above fitted
+  first, and must still see `CAM_EN = 0` afterward.
+
+  > **A P/N-crossing adapter is required on E1M-AEN hw_rev r2 (2626-R2).**
+  > The E1M-AEN SoM's camera connector wiring swaps the P and N wires of all
+  > three MIPI CSI-2 differential pairs (clock lane and both data lanes)
+  > relative to the EVK. A camera plugged straight into J5 never
+  > synchronizes: the D-PHY leaves Stop-state and the sensor still answers
+  > its I2C chip-ID probe, but no frame ever arrives. J4 shares the same
+  > SoM pads and is expected to be affected too (not bench-tested). Build a
+  > short adapter that crosses J5's 15-pin camera-connector pins 2↔3, 5↔6
+  > and 8↔9 (every other pin -- the four grounds and the power/control pins
+  > -- stays straight; this crossing is for J5's 15-pin RPi connector only,
+  > not J4's 34-pin MIPI B2B connector); match lane lengths given the
+  > 800 Mbit/s/lane rate. A future SoM revision is expected to fix this
+  > at the source.
+
+  On an E1M-AEN SoM, build a camera app with the board-side shield
+  `e1m_evk_rpi_csi` paired with a sensor shield that follows
+  Zephyr's Raspberry Pi camera contract, e.g. the InnoMaker CAM-OV9281
+  or the RPi Camera Module 1 (OV5647) -- both bench-verified, see below:
+
+      west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <app> -- \
+        -DSHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"
+      # ... or:
+      west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <app> -- \
+        -DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1"
+
+  `e1m_evk_rpi_csi` wires J5 to the E8's dedicated CSI-2 receive
+  D-PHY, hogs `IO2` low (input A), enables SoC I2C1 as the sensor
+  bus, and points `alp-camera0` / `zephyr,camera` at the CPI.  The
+  SoC side lives in the shield's per-target overlays
+  (`boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay` and
+  the AEN803 twin, both including `boards/e1m_aen.dtsi`), so the
+  shield builds for the AEN801 and AEN803 M55-HE targets.  The D-PHY
+  clocks are the SoC `dphy` node's four real `MIPI_CKEN` gates, so
+  the shield composes with a DSI panel app without either overriding
+  them.  What feeds those gates is also the D-PHY driver's job: at
+  init `dphy_dw.c` enables the CGU `CLK_ENA` HFOSC (38.4 MHz PLL
+  reference) and 100 MHz (CFG clock) sources and clears the VBAT
+  `PWR_CTRL` D-PHY power masks, isolation and 1.8 V bypass.  At reset
+  those leave the D-PHY unpowered, and the CSI-2 receiver then times
+  out waiting for Stop-state.  The sensor shields and their drivers are described in
+  [`docs/camera-shields.md`](../camera-shields.md), whose "Supported camera
+  modules" table near the top gives the per-module mode list and bench
+  status at a glance.  The
+  app needs `CONFIG_ALP_SDK=y` and `CONFIG_VIDEO=y`, and a video
+  buffer pool that fits in RAM (the Zephyr 2 MB default does not fit
+  the HE core's DTCM).  A pool over 262136 B also needs
+  `CONFIG_SYS_HEAP_AUTO=y`: Zephyr's default `SYS_HEAP_SMALL_ONLY`
+  heap on the M55-HE (SRAM <= 256 KB) cannot span a bigger pool, and
+  the build fails a `BUILD_ASSERT` rather than misbehave at run time.
+  The E8's CPI also needs `CONFIG_VIDEO_ALIF_CAM_EXTENDED=y` (default on for
+  `SOC_SERIES_E8`) to set `CAM_CFG.AXI_PORT_EN`: without it the CPI still
+  raises STOP per frame but never writes one to memory, so a capture
+  reports success over an untouched buffer instead of failing. RAW10
+  sensors (e.g. OV5647) are delivered to memory as unpacked 16-bit samples
+  (`VIDEO_PIX_FMT_SBGGR10`, pitch = width x 2), not the packed wire format.
+  The CSI-2 pixel clock ceiling this board's D-PHY divider programs is
+  200 MHz (400 MHz source / 2); the divider is programmed by the Alif
+  clock-control patch in `zephyr/patches.yml`, so the workspace must be
+  patched (`scripts/bootstrap.sh` does it).
+
+  [`examples/aen/aen-camera-firstlight`](../../examples/aen/aen-camera-firstlight/)
+  is the bench first-light app for this connector: it opens the OV9281 or
+  the OV5647 shield through `<alp/camera.h>`, starts the
+  stream, and waits for one frame with a 2 s timeout, printing a CRC32
+  + histogram + sample row bytes on success or a diagnosed failure
+  otherwise. See its README for what each printed line means. Both shields
+  are bench-verified: OV9281 (2026-09-21, an E1M-AEN803 on the E1M-EVK):
+  live GREY8 frames land in memory in all three modes (640x400, 1280x720,
+  1280x800), each at its configured frame rate, with the sensor test
+  pattern also verified in all three; OV5647 (2026-09-22, needing the
+  [J5 pin 11 pull-up rework](#j5-pin-11-pull-up-rework) above), RAW10
+  640x480 -- see [`docs/camera-shields.md`](../camera-shields.md)'s
+  OV5647 driver section.
+
   > **Important.**  E1M `IO2` was previously documented as the RGB
   > LED-blue channel.  That was a placeholder guess; the EVK
   > schematic confirms `IO2` is the camera mux SEL line.  The
@@ -163,24 +307,46 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   > matrix wiring.
 - **Audio:** two PDM microphones (MP34DT05TR-A) and two TAS2563
   Class-D amps (U27 + U28; each drives a mono speaker) with JST
-  speaker headers; I²S source selectable via 74LVC157.  The shared
-  `I²S0` link carries both channels in a stereo frame -- U27 picks
-  the left slot, U28 picks the right slot via TAS2563 time-slot
-  configuration.  The amps' diagnostic feedback returns on
+  speaker headers, reachable over `I²S0` only through a mux (U46).
+  As originally built, U46 is a `74LVC157ABQ,115` -- its `VCC` range
+  (1.2-3.6 V) makes `+VIO` at 1.8 V IN SPEC, but the part is a
+  ONE-WAY mux whose `Y` outputs drive the SoC side, so it can NEVER
+  pass SoC-to-amp I2S at any `VCC`; moving its `VCC` to `+3V3` alone
+  does NOT make it work, and re-enabling `i2s3` on a stock board puts
+  the SoC's own I2S3 TX in contention with U46's driven outputs.  A
+  working U46 needs BOTH a 3257-type bus-switch swap AND `VCC` on
+  `+3V3` -- on E1M-AEN803 serial 2026W36-0002 (2026-09-15), a fitted 3257-type
+  part's `VCC` was moved to `+3V3` between a silent run and an
+  audible run; not established as the only difference between the
+  two -- or a switch rated for 1.8 V `VCC` (untested).  Only
+  amp playback audibility was checked this way; PDM mic capture and
+  M.2 E-key I2S are unverified, disabling the mux or selecting M.2
+  (`/E`/`S` HIGH) may not switch reliably at `+3V3`, and the same run
+  showed an open TDM clock-error latch during playback plus an open
+  amp auto-shutdown-after-stop issue (#2146) -- see
+  `include/alp/boards/alp_e1m_evk.h`'s I2S mux block for the full
+  finding.  The shared `I²S0` link is designed to carry both channels
+  in a stereo frame -- U27 the left slot, U28 the right, via TAS2563
+  time-slot configuration.  The amps' diagnostic feedback returns on
   `I²S0_SDI`.
 - **Expansion:** Arduino headers + mikroBUS click headers, level-shifted
-  through LSF0108 / LSF0102 to the IO-voltage select rail.
+  through LSF0108 / LSF0102 to `+VARD`, the header-**P9**-selectable
+  expansion IO rail (NOT `+V_ANA`/P17, which only feeds the DAC path).
 - **PCIe / M.2:** Key M and Key E with PI3DBS12212A lane mux,
   SY75602 refclk buffer, **TMUX121NKGR** passive I²C mux
   (pin-controlled, no I²C address), and a second TCAL9538 (`0x71`)
   for the PCIe-side resets/WAKE/CLKREQ signals.
 - **Display:** 40-pin MIPI DSI connector for the **RK055HDMIPI4MA0**
   720p panel (NXP-supplied reference panel; drivers are available
-  from NXP's MIPI-DSI panel collection).  Backlight rails + the
-  capacitive-touch controller sit on `EVK_I2C_BUS_DSI_CSI`
-  (`ALP_E1M_I2C1`).
+  from NXP's MIPI-DSI panel collection).  With an E1M-AEN SoM, add the
+  `e1m_evk_rk055hdmipi4ma0` Zephyr shield (`zephyr/boards/shields/`)
+  to drive it -- see `examples/aen/aen-dsi-display`, which renders at
+  40.0 Hz.  The panel intermittently fails to init on cold boot
+  (roughly 1 in 8-10 boots, #2199, no recovery once it happens).  The
+  capacitive-touch controller sits on `EVK_I2C_BUS_DSI_CSI`
+  (`ALP_E1M_I2C1`) and is not driven yet.
 - **Rotary encoder phase pads:** `ENC0_X` (A) and `ENC0_Y` (B) for
-  the PEC12R-4222F-S0024 quadrature signals.  The push-switch
+  the PEC11R-4215K-S0024 quadrature signals.  The push-switch
   (SW) is on E1M `IO4` -- `EVK_PIN_ENCODER_SW`.
 
 ## Bring-up checklist (firmware perspective)

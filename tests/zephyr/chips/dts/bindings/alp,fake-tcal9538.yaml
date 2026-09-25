@@ -1,0 +1,15 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Fake TCAL9538 / TCA6408A emul target.  Lives in this test only.
+
+description: |
+  Fake TI TCAL9538 (and register-compatible TCA6408A alt-part) i2c-
+  emul target used by the alp-sdk chips ztest.  Two instances are
+  wired in the overlay, at the TCAL9538 strap (0x73) and the TCA6408A
+  alt-strap (0x20), so the ztest can exercise both `has_latched_irq`
+  branches of tcal9538_init() against a live target.
+
+compatible: "alp,fake-tcal9538"
+
+include: i2c-device.yaml

@@ -24,8 +24,8 @@ for E1M-X).  `scripts/check_e1m_pinout.py` cross-checks every non-`TBD`
 |--------|-------------------------------|-----------------------------------|
 | AEN    | `E1M-AEN301..801`             | Alif Ensemble E3..E8              |
 | imx93  | `E1M-NX9101` [^imx93-tbd]     | NXP i.MX 93 (i.MX 9352 variant)   |
-| v2n    | `E1M-V2N101`, `E1M-V2N102`    | Renesas RZ/V2N                    |
-| v2n-m1 | `E1M-V2M101`, `E1M-V2M102`    | Renesas RZ/V2N + DEEPX DX-M1      |
+| v2n    | `E1M-V2N101`, `E1M-V2N102`, `E1M-V2N103` | Renesas RZ/V2N          |
+| v2n-m1 | `E1M-V2M101`, `E1M-V2M102`, `E1M-V2M103` | Renesas RZ/V2N + DEEPX DX-M1 |
 
 [^imx93-tbd]: `E1M-NX9101` is a **placeholder MPN** — the production SKU is
 TBD pending the hand-written HW config (see the header of
@@ -132,9 +132,9 @@ The six SKUs must stay in lockstep (same `update_channel`, same
 
 ### V2N / V2M / `gd32_bridge`
 
-All four E1M-X presets (`E1M-V2N101`, `E1M-V2N102`, `E1M-V2M101`,
-`E1M-V2M102` — one PCB, variant-populated) carry a byte-identical
-`gd32_bridge` entry declaring **two** axes:
+All six E1M-X presets (`E1M-V2N101`, `E1M-V2N102`, `E1M-V2N103`,
+`E1M-V2M101`, `E1M-V2M102`, `E1M-V2M103` — one PCB, variant-populated)
+carry a byte-identical `gd32_bridge` entry declaring **two** axes:
 `flash_policy: recovery_only` + `update_channel: alp_ota_spi_bridge`.
 Field updates stream over the bridge link into the slot-A/B application
 bootloader (protocol v0.6 Path A).
@@ -152,11 +152,18 @@ or without a `flash_method` — it answers who may reach a local flash
 path if one is ever added.  The six AEN `cc3501e_otp` entries are the
 same shape (`recovery_only`, no `flash_method`).
 
-The GD32's SW-DP ID remains unsettled: `metadata/chips/gd32_swd.yaml`
-expects `0x6BA02477`, which `CHANGELOG.md` records as a measurement of
-the **V2N CM33 DAP**, while `0x0BE12477` appears elsewhere with
-conflicting provenance.  Neither is a confirmed GD32 reading — see
-#1440.
+The GD32's SW-DP ID remains unsettled and `metadata/chips/gd32_swd.yaml`
+deliberately does not carry a `target_expected_idcode` for it — same
+stance `metadata/schemas/soc-spec-v1.schema.json`'s own `expect_dpidr`
+field guidance takes for every Alif Ensemble SoC variant (#1355): an
+absent key is the correct published "unknown", and a guessed value is
+strictly worse than absent (see `metadata/socs/alif/ensemble/e8.json`'s
+`expect_dpidr` note for the live, actually-measured instance of that
+stance). `0x6BA02477` (`CHANGELOG.md` records it as a measurement of
+the **V2N CM33 DAP**, not the GD32) and `0x0BE12477` (no attribution at
+all — no bench transcript, no datasheet reference, no commit message)
+both circulate elsewhere in this repo; neither is a confirmed GD32
+reading — see #1440, #1369.
 
 See `metadata/schemas/som-preset-v1.schema.json`
 `$defs/helper_firmware_entry` for the full contract.

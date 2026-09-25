@@ -82,6 +82,16 @@ int main(void)
      *     alp_uart_config_t cfg = ALP_UART_CONFIG_DEFAULT(ALP_E1M_UART0);
      *     cfg.baudrate = 9600;   // then pass &cfg to alp_uart_open
      *
+     * The default also leaves `.flow_control = ALP_UART_FLOW_NONE`, the
+     * right choice for a plain USB-UART bridge (2-wire, no RTS/CTS lines).
+     * Attaching a peer with a shallow FIFO above ~230400 baud is the case
+     * to set `cfg.flow_control = ALP_UART_FLOW_RTS_CTS` for instead -- and
+     * the contract is strict about it (issue #1639): a backend that
+     * cannot honour RTS/CTS on real hardware fails alp_uart_open() with
+     * ALP_ERR_NOSUPPORT rather than silently opening with no flow control,
+     * so `u == NULL` below is the signal to check for, not a byte quietly
+     * dropped later at the far end's FIFO.
+     *
      * The ALP_E1M_UART0 instance ID is portable across every
      * E1M-conformant SoM (E1M-AEN, E1M-V2N, ...): the SDK's loader
      * resolves it to the right SoC USART node at build time via the

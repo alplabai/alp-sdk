@@ -60,10 +60,14 @@ extern "C" {
  *
  * The bump IS required here.  The counter-precedent -- OTA_STATUS reserved[1]
  * deliberately not bumping -- applies only to reusing a byte that already rode the
- * wire; a new opcode is not that.  Note cc3501e_core.c's version gate fails on ANY
- * difference and permanently clears ctx->initialised, so header, firmware and host
- * driver ship together: a bench unit still on v4 firmware must be reflashed before
- * a v5 host driver touches it.
+ * wire; a new opcode is not that.  Note cc3501e_core.c's version gate -- at the
+ * time this was written, a single raw-integer exact-equality check -- fails on
+ * ANY difference and permanently clears ctx->initialised, so header, firmware and
+ * host driver ship together: a bench unit still on v4 firmware must be reflashed
+ * before a v5 host driver touches it.  (Since ADR 0033 -- see the MAJOR.MINOR
+ * split below -- the gate compares MAJOR only; a MINOR-only difference no longer
+ * refuses the link.  This paragraph is historical: it describes why the v4 -> v5
+ * bump was needed under the exact-equality rule that was in force at the time.)
  *
  * v5 ALSO carries ALP_CC3501E_MAX_PAYLOAD 512 -> 4096 (below).  That went through
  * an intermediate 2048 while this work was in progress, which briefly numbered
@@ -91,10 +95,12 @@ extern "C" {
  * exactly the problem: v5 firmware falls through its dispatch default and
  * answers RESP_ERR_INVALID, which the host maps to ALP_ERR_INVAL -- which is
  * indistinguishable from "you sent a bad mode byte".  Under the bump,
- * cc3501e_core.c's GET_VERSION gate refuses the link outright and permanently
- * clears ctx->initialised, so "this firmware has no SPI1 passthrough" is
- * reported ONCE, at attach, instead of masquerading as an argument error on
- * every transfer.
+ * cc3501e_core.c's GET_VERSION gate -- at the time exact-equality on the raw
+ * integer -- refuses the link outright and permanently clears ctx->initialised,
+ * so "this firmware has no SPI1 passthrough" is reported ONCE, at attach,
+ * instead of masquerading as an argument error on every transfer.  (Historical,
+ * like the v4 -> v5 note above: post-ADR-0033 this would have been a MINOR bump
+ * and would NOT have refused the link, since it was purely additive.)
  *
  * AND IT IS 6, NOT A COLLAPSE INTO 5.  The v5 note above records the escape
  * hatch that let unreleased changes fold into a single bump; that hatch is now
@@ -107,9 +113,11 @@ extern "C" {
  * Three sites move in ONE change or the build breaks: this define,
  * cc3501e-bridge-firmware:protocol-version.txt, and that repo's
  * src/protocol_meta.c CC3501E_FW_IMPLEMENTS_PROTOCOL.  And, as at v4 -> v5, the
- * host gate fails on ANY difference, so header, firmware image and host driver
- * ship together and every bench unit still on v5 is reflashed before a v6 host
- * driver touches it. */
+ * host gate -- at the time -- fails on ANY difference, so header, firmware
+ * image and host driver ship together and every bench unit still on v5 is
+ * reflashed before a v6 host driver touches it.  (Historical: this was the
+ * exact-equality raw-integer gate; see the ADR-0033 MAJOR.MINOR split below,
+ * which would have let this particular bump be MINOR-only.) */
 /* v7 repurposes CMD_SOCK_SEND's alp_cc3501e_sock_send_t::reserved (offset 3,
  * always written 0 through v6) as a retry seq -- SAME offset SPI1 already uses
  * for its own seq (protocol_spi.c), and NOT a layout change: the byte was
@@ -128,9 +136,12 @@ extern "C" {
  * host always writes reserved = 0.  A NEW firmware that read byte 3 as a seq
  * WITHOUT the version gate would see seq == 0 on every request from that old
  * host and could serve its cached reply for a genuinely new send -- silently
- * dropping it.  The GET_VERSION gate in cc3501e_core.c refuses the link
- * outright on any mismatch, which is what stops a v7 firmware from ever
- * misreading a v6 host's always-zero byte as a real retry.
+ * dropping it.  The GET_VERSION gate in cc3501e_core.c -- at the time -- refuses
+ * the link outright on any mismatch, which is what stops a v7 firmware from ever
+ * misreading a v6 host's always-zero byte as a real retry.  (This one really is
+ * the kind of change MAJOR still means post-ADR-0033: an unchanged host would be
+ * misread.  The "any mismatch" phrasing is the stale part -- today the gate
+ * compares MAJOR only, not the whole version.)
  *
  * SOCK_RECV is NOT touched.  alp_cc3501e_sock_recv_t is { handle | max_len }
  * with no spare byte -- giving it request identity would be an actual layout
@@ -179,7 +190,9 @@ extern "C" {
  *
  * THE BUMP IS STRUCTURAL THIS TIME (new opcodes), so the usual gate applies
  * unchanged: the three sites listed above move together, and cc3501e_core.c's
- * GET_VERSION check refuses any host/firmware mismatch outright.
+ * GET_VERSION check -- at the time, exact-equality on the raw integer --
+ * refuses any host/firmware mismatch outright.  (Stale as of ADR 0033, same as
+ * the notes above: the gate is MAJOR-only now, not "any mismatch".)
  *
  * ===================================================================
  * v5..v9 WERE A SINGLE RAW INTEGER.  From here the wire version is
@@ -196,6 +209,69 @@ extern "C" {
  * The current wire is 3.1 and is BYTE-IDENTICAL to what shipped as "v9" --
  * this renames the contract, it does not change a frame. */
 
+/* v4.0 (#2035) moves ALP_CC3501E_RESP_OK off 0x00 and adds a CRC-16/CCITT-FALSE
+ * trailer to every frame, both directions --
+ *
+ * NORMATIVE RULE, stated here up front because a firmware that gets this
+ * ONE carve-out wrong deadlocks the whole migration with no way out (see
+ * "THE HOST IS BILINGUAL" below for why): a CMD_GET_VERSION REQUEST MUST be
+ * accepted by the firmware WITH OR WITHOUT a CRC trailer.  Every other
+ * opcode, request and reply alike, requires one under MAJOR 4.  The reason
+ * is ordering: the host cannot know a peer's major before GET_VERSION has
+ * answered, so cc3501e_reset()'s very first request to a 4.0 peer is
+ * necessarily sent CRC-less (fw_proto_major is still 0 at that point) --
+ * see cc3501e_core.c's cc3501e_request_locked(), `want_req_crc`.  A
+ * firmware that rejects a CRC-less GET_VERSION literally, because it read
+ * "every frame, both directions" and stopped there, can never let a host
+ * learn its major, so the host can never negotiate up to 4 and OTA (which
+ * rides the same gated calls) has no path to run.  GET_VERSION REPLIES are
+ * likewise decoded shape-tolerantly, not CRC-required, for the same
+ * before-the-major-is-known reason (see cc3501e_reply_verdict()'s
+ * fw_proto_major == 0 branch, cc3501e_core.c).
+ *
+ * MAJOR by definition: an unchanged
+ * 3.1 host reading a 4.0 reply would misread the status byte on every call (a
+ * REAL error code -- ERR_INVALID is 0x01, etc. -- looks no different from
+ * before, but a 4.0 SUCCESS reply now carries 0x5A where a 3.1 host expects
+ * 0x00, so it would read every successful 4.0 reply as garbage).
+ *
+ * Root cause this closes: 0x00 was both ALP_CC3501E_RESP_OK and the literal
+ * byte a dead SPI phase clocks back for every byte it touches, so a link that
+ * stopped shifting mid-reply was byte-identical to a genuine, zero-payload
+ * success (#1378, generalised by #2035's dead-phase guard immediately
+ * preceding this bump).  0x5A (see ALP_CC3501E_RESP_OK below) and the CRC
+ * trailer are the structural fix that guard's own commit message named:
+ * "Moving RESP_OK off 0x00 and adding a frame CRC is the structural fix and
+ * is a separate firmware-paired change."  This is that change.
+ *
+ * THE HOST IS BILINGUAL, on purpose.  cc3501e_reset()'s version gate
+ * (cc3501e_core.c) accepts fw_major 3 OR 4, not 4 only -- it decodes a 3.1
+ * reply with the legacy (no-CRC, 0x00-is-OK) rules and a 4.0 reply with the
+ * new (CRC-required, 0x5A-is-OK) rules, keyed off the negotiated
+ * ctx->fw_proto_major.  GET_VERSION itself runs BEFORE that major is known, so
+ * its own decode is shape-tolerant by inspecting the status byte directly
+ * (0x00 -> legacy shape, 0x5A -> new shape) -- see cc3501e_reply_verdict() in
+ * cc3501e_core.c.  Outgoing REQUESTS mirror this: a request built for a
+ * fw_major-3 peer (or before the peer's major is known at all) stays
+ * BYTE-IDENTICAL to 3.1 -- no CRC trailer -- because old firmware validates
+ * `HEADER + payload_len == req_len` per-handler and rejects an unexpected
+ * trailer with RESP_ERR_INVALID; only a fw_major-4 peer gets the +2-byte CRC
+ * appended to its requests.
+ *
+ * MIGRATION ORDER (do this in this order, every fleet, every time):
+ *   1. Roll the HOST image (this driver) first.  It lands via MCUboot + the
+ *      ATOC, so it does not depend on the coprocessor at all, and a 4.0 host
+ *      still talks to 3.1-firmware boards correctly (bilingual, above).
+ *   2. OTA the coprocessors to 4.0 THROUGH that already-bilingual host.
+ *   3. Only a release AFTER the fleet is confirmed on 4.0 firmware may drop
+ *      the fw_major-3 legacy decode branch.
+ *
+ * NEVER SHIP A HOST THAT REFUSES fw_major 3 BEFORE THE FLEET IS ON 4.  Doing
+ * so strands every board still running 3.1 firmware: OTA is the only way to
+ * get a board from 3.1 to 4.0, and OTA needs a host that can still talk to
+ * it.  Whoever eventually removes the legacy branch (step 3) must confirm the
+ * whole fleet reports fw_major 4 first -- this paragraph is that warning. */
+
 /** Wire-protocol MAJOR: bumped ONLY when an existing host, unchanged, would be
  *  MISREAD by the new firmware (or would misread its replies) -- reusing a
  *  reserved byte or flag bit, changing a struct layout, changing framing, or
@@ -203,7 +279,15 @@ extern "C" {
  *
  *  A MAJOR mismatch is what @ref cc3501e_reset refuses on; it is the safety
  *  property the v7 and v8 bumps needed, kept exactly as strict as before. */
-#define ALP_CC3501E_PROTOCOL_MAJOR 3
+#define ALP_CC3501E_PROTOCOL_MAJOR 4
+
+/** Oldest MAJOR this host still speaks, per the migration order documented
+ *  above -- the version gate in @ref cc3501e_reset accepts exactly
+ *  @ref ALP_CC3501E_PROTOCOL_MAJOR and this value, nothing else.  Bumped to 4
+ *  only once a release confirms the whole fleet is on 4.0 firmware (step 3 of
+ *  the migration order); until then this MUST stay 3, or a host that has not
+ *  yet OTA'd a board strands itself talking to it. */
+#define ALP_CC3501E_PROTOCOL_MAJOR_LEGACY 3
 
 /** Wire-protocol MINOR: bumped for everything ADDITIVE -- new opcodes, new
  *  optional request fields whose absent form keeps its old meaning, new event
@@ -215,7 +299,7 @@ extern "C" {
  *  safe BECAUSE minor is defined as additive: the host never sends what it does
  *  not know, and the firmware never spontaneously emits an event nobody armed.
  *  A change that cannot honour that is MAJOR by definition. */
-#define ALP_CC3501E_PROTOCOL_MINOR 1
+#define ALP_CC3501E_PROTOCOL_MINOR 0
 
 /** The composed value @ref ALP_CC3501E_CMD_GET_VERSION carries on the wire:
  *  `(MAJOR << 8) | MINOR`, still a 2-byte LE reply.
@@ -234,6 +318,45 @@ extern "C" {
 
 /** Frame header in bytes, before the payload. */
 #define ALP_CC3501E_HEADER_BYTES 4
+
+/** Reply-payload padding granularity: a reply's wire payload (status + data,
+ *  and from MAJOR 4 the CRC trailer too) is zero-padded up to a multiple of
+ *  this many bytes for DMA burst alignment (firmware protocol.c, #1610/#1655;
+ *  see chips/cc3501e/cc3501e_events.c for the host-side consequence on a
+ *  self-delimiting payload).  MAJOR 4 places its 2-byte CRC trailer at the
+ *  LAST 2 bytes of that padded payload -- see ALP_CC3501E_CRC_BYTES -- so a
+ *  reply whose unpadded (status + data) length already lands within 6 bytes
+ *  of a pad boundary (`1 + data_len mod ALP_CC3501E_REPLY_PAD <=
+ *  ALP_CC3501E_REPLY_PAD - 2`) carries the CRC for free: the pad bytes it
+ *  already had just become CRC bytes instead. */
+#define ALP_CC3501E_REPLY_PAD 8u
+
+/** CRC-16/CCITT-FALSE trailer size, both directions, from wire MAJOR 4.  See
+ *  <alp/protocol/crc16.h> for the algorithm (shared with the gd32-bridge
+ *  protocol) and the MAJOR-4 paragraph above ALP_CC3501E_PROTOCOL_MAJOR for
+ *  the span it covers: the frame's own 4 header bytes plus every payload byte
+ *  EXCEPT these trailing 2.
+ *
+ *  SOFTWARE, BY CHOICE: neither the Alif Ensemble side (no CRC device-tree
+ *  node / register library outside the BLE stack in hal_alif, no CRC block in
+ *  metadata/socs/alif/ensemble/e8.json) nor the CC3501E firmware side (no CRC
+ *  reference anywhere under cc3501e-bridge-firmware's hal/ or vendor/) plumbs
+ *  a CRC peripheral today -- that is a statement about what either tree
+ *  exposes, not a claim about what either part's silicon does or does not
+ *  have.  A software CRC over an 8..16-byte typical reply costs on the order
+ *  of 640 cycles, noise against the 250 us inter-phase settle this transport
+ *  already pays per phase; the 4096-byte ALP_CC3501E_MAX_PAYLOAD ceiling is
+ *  the size where hardware would matter, and the path that approaches it
+ *  (OTA) moves in 256-byte chunks, not one 4 KB burst.  More importantly, the
+ *  firmware builds replies inside the SPI callback (ISR context) -- a CRC
+ *  peripheral shared with application code touched from there needs a lock
+ *  or save/restore around every use, and getting that wrong yields a
+ *  silently WRONG CRC on a link whose whole problem is undetected
+ *  corruption.  If a measurement ever justifies hardware, it goes behind
+ *  <alp/protocol/crc16.h>'s alp_crc16_ccitt_false() call (ADR 0017's
+ *  portable-hardware-offload-with-software-fallback pattern) -- one place to
+ *  change, both repos pick it up. */
+#define ALP_CC3501E_CRC_BYTES 2u
 
 /** Maximum payload size per frame.  Larger transactions must split
  *  across multiple frames using the FRAME_CONTINUATION flag (bit 2,
@@ -523,13 +646,40 @@ typedef enum {
 	ALP_CC3501E_CMD_DIAG_LOG_LEVEL = 0x71,
 } alp_cc3501e_cmd_t;
 
+/** Legacy (wire MAJOR 3 and earlier) success status byte.  0x00 was also what
+ *  a dead SPI phase clocks back for every byte it touches, so it could never
+ *  be told apart from a link that stopped shifting mid-reply (#1378).  MAJOR
+ *  4 replaces it with @ref ALP_CC3501E_RESP_OK (0x5A); this value survives
+ *  only as the legacy decode's OK byte -- see the bilingual-host note above
+ *  ALP_CC3501E_PROTOCOL_MAJOR. */
+#define ALP_CC3501E_RESP_OK_LEGACY 0x00u
+
 /**
  * @brief Response status codes carried in the first byte of every
  *        response payload.  Maps cleanly onto the SDK's alp_status_t
  *        when the host adapts the value.
  */
 typedef enum {
-	ALP_CC3501E_RESP_OK            = 0x00,
+	/* v4.0 (#2035): RESP_OK moved from 0x00 (see ALP_CC3501E_RESP_OK_LEGACY)
+	 * to 0x5A, chosen for Hamming distance from every value a stuck link can
+	 * forge:
+	 *
+	 *   - distance 4 from 0x00 (weight of 0x5A = 4 -- 0101 1010) and distance
+	 *     4 from 0xFF, the two "wire stuck" patterns (a dead-low or dead-high
+	 *     phase clocks back a constant byte; both are 4 bit-flips away, not 1).
+	 *   - distance 8 from 0xA5 (ALP_CC3501E_SYNC_IDLE, the header-idle marker
+	 *     the slave drives at a clean frame boundary) -- 0x5A is 0xA5's
+	 *     bitwise complement, so a reply payload phase that is actually a
+	 *     misaligned read of the idle marker can never decode as success.
+	 *   - its eight single-bit neighbours -- 0x5B 0x58 0x5E 0x52 0x4A 0x7A
+	 *     0x1A 0xDA -- are RESERVED and must never be assigned to a real
+	 *     status code.  That is what makes the distance-1 property useful in
+	 *     both directions: a single bit-flip of a healthy 0x5A can never land
+	 *     on a valid status (so a corrupted OK is never silently read as some
+	 *     other defined outcome), and a single bit-flip of any CURRENT error
+	 *     code (0x01..0x09, 0xFF) can never land on 0x5A either (so a
+	 *     corrupted error can never be silently read as success). */
+	ALP_CC3501E_RESP_OK            = 0x5A,
 	ALP_CC3501E_RESP_ERR_INVALID   = 0x01, /**< Bad cmd / bad payload. */
 	ALP_CC3501E_RESP_ERR_BUSY      = 0x02, /**< Subsystem in use. */
 	ALP_CC3501E_RESP_ERR_TIMEOUT   = 0x03,
@@ -591,11 +741,113 @@ typedef enum {
 	ALP_CC3501E_ROLE_DUAL_WIFI_BLE  = 5u,
 } alp_cc3501e_role_t;
 
+/** Bridge-radio event ids that may appear in
+ *  @ref alp_cc3501e_diag_info_t::reserved "reserved[0]" -- the LOW BYTE OF THE
+ *  VENDOR TI SDK'S `WlanEvent_t.Id`, exactly as the bridge firmware's Wi-Fi
+ *  callback last saw it (`hal/ti/cc3501e_hw_ti_wifi.c`,
+ *  `wifi_cb_last_id = (uint32_t)event->Id;`).
+ *
+ *  THIS IS NOT AN @ref ALP_CC3501E_EVT_WIFI_SCAN_RESULT and its family
+ *  opcode.  The alp async-event-ring opcodes (EVT_WIFI_* 0x18..0x1A) and
+ *  these radio-event ids are two unrelated namespaces that DO COLLIDE --
+ *  they are NOT segregated by range.  The vendor's `WlanEventId_e`
+ *  (`wlan_if.h`, simplelink_wifi_sdk_10_10_01_08) assigns genuine ids
+ *  1..31 (`WLAN_EVENT_CONNECT` = 1 .. `WLAN_EVENT_ERROR` = 31, then
+ *  `WLAN_EVENT_MAX` = 0xFFFF), and three of those genuine ids --
+ *  `WLAN_EVENT_P2P_PEER_NOT_FOUND` = 24 (0x18), `_PERIODIC_SCAN_COMPLETE`
+ *  = 25 (0x19), `WLAN_EVENT_FW_CRASH` = 26 (0x1A) -- alias
+ *  EVT_WIFI_SCAN_RESULT / _CONNECTED / _DISCONNECTED exactly.  A reader who
+ *  decodes reserved[0] against the opcode namespace can land on a real,
+ *  wrong match: a genuine `WLAN_EVENT_FW_CRASH` (0x1A) reads as
+ *  EVT_WIFI_DISCONNECTED, reporting a radio firmware crash as "associated
+ *  then dropped" (alp-sdk#2035).  The two namespaces must never be decoded
+ *  against each other.  These constants exist so a host can act on the byte
+ *  without that confusion; the `ALP_CC3501E_RADIO_EVT_` prefix is
+ *  deliberately distinct from `ALP_CC3501E_EVT_`.
+ *
+ *  This list mirrors the subset of the vendor's `WlanEventId_e` enum
+ *  (`wlan_if.h`, simplelink_wifi_sdk_10_10_01_08) that a host can usefully
+ *  branch on.  It is NOT exhaustive -- the vendor enum runs 1..31 before
+ *  `WLAN_EVENT_MAX`, and a value not listed here is a LEGAL radio event
+ *  that this header simply does not name; treat it as "some other radio
+ *  event", not as corruption.  Pin the SDK version above if you re-derive
+ *  this list: the enum is positional, so an upstream release that inserts a
+ *  member silently renumbers everything after it. */
+typedef enum {
+	ALP_CC3501E_RADIO_EVT_CONNECT                 = 1u,
+	ALP_CC3501E_RADIO_EVT_DISCONNECT              = 2u,
+	ALP_CC3501E_RADIO_EVT_SCAN_RESULT             = 3u,
+	ALP_CC3501E_RADIO_EVT_AUTHENTICATION_REJECTED = 6u,
+	ALP_CC3501E_RADIO_EVT_CONNECTING              = 7u,
+	ALP_CC3501E_RADIO_EVT_ASSOCIATION_REJECTED    = 8u,
+	ALP_CC3501E_RADIO_EVT_ASSOCIATED              = 10u,
+	ALP_CC3501E_RADIO_EVT_EXTENDED_SCAN_RESULT    = 19u,
+	/* Radio-fault events: the firmware's Wi-Fi stack faulted, not that it
+	 * failed to associate.  A host reading one of these alongside a failed
+	 * RSSI read must not conclude "L2 association failure" -- see the
+	 * companion-tour verdict ladder. */
+	ALP_CC3501E_RADIO_EVT_FW_CRASH        = 26u,
+	ALP_CC3501E_RADIO_EVT_COMMAND_TIMEOUT = 27u,
+	ALP_CC3501E_RADIO_EVT_ERROR           = 31u,
+} alp_cc3501e_radio_evt_t;
+
+/** lwIP DHCP client state codes for @ref alp_cc3501e_diag_info_t::dhcp_state.
+ *
+ *  These are the WIRE values -- lwIP's `dhcp->state` PLUS ONE.  0 is
+ *  reserved to mean "not reported" (no lwIP linked, or the netif has no
+ *  `dhcp` struct because DHCP never started -- itself the interesting case,
+ *  which must not be misread as a real @ref ALP_CC3501E_DHCP_STATE_OFF, the
+ *  whole reason for the offset).  Compare the raw byte against these names
+ *  directly; do not subtract 1.
+ *
+ *  Named `ALP_CC3501E_DHCP_STATE_*`, deliberately distinct from the
+ *  `ALP_CC3501E_RADIO_EVT_*` family above -- these mirror lwIP's
+ *  `prot/dhcp.h` `dhcp_state_enum_t`, NOT the vendor TI `WlanEvent_t` ids
+ *  that RADIO_EVT decodes.  Not exhaustive: lwIP defines more states
+ *  (REQUESTING, RENEWING, REBINDING, ...); only the ones a host commonly
+ *  branches on are named here.  An unlisted nonzero value is a legal DHCP
+ *  state this header simply does not name. */
+typedef enum {
+	ALP_CC3501E_DHCP_STATE_NOT_REPORTED = 0u,
+	ALP_CC3501E_DHCP_STATE_OFF          = 1u,  /**< lwIP DHCP_STATE_OFF (0) + 1 */
+	ALP_CC3501E_DHCP_STATE_SELECTING    = 7u,  /**< lwIP DHCP_STATE_SELECTING (6) + 1 */
+	ALP_CC3501E_DHCP_STATE_BOUND        = 11u, /**< lwIP DHCP_STATE_BOUND (10) + 1 */
+} alp_cc3501e_dhcp_state_t;
+
+/** Bit flags for @ref alp_cc3501e_diag_info_t::netif_status (byte 17 on the
+ *  wire).  Bits 2..7 are `dhcp->tries` saturated at 63 -- not a bitmask
+ *  member, so it is extracted with @ref ALP_CC3501E_NETIF_DHCP_TRIES rather
+ *  than listed as a flag here. */
+#define ALP_CC3501E_NETIF_UP      (1u << 0) /**< netif_is_up()      */
+#define ALP_CC3501E_NETIF_LINK_UP (1u << 1) /**< netif_is_link_up() */
+
+/** Extract `dhcp->tries` (saturated at 63) from @ref
+ *  alp_cc3501e_diag_info_t::netif_status. */
+#define ALP_CC3501E_NETIF_DHCP_TRIES(netif_status) ((uint8_t)((netif_status) >> 2))
+
 /** Reply payload for CMD_GET_DIAG_INFO (opcode 0x04).  Firmware
  *  populates these fields once per request from its in-RAM
  *  bookkeeping; reading is non-disturbing (no side effects on
- *  the radio state).  Sized at 16 bytes (one cache line on the
- *  M33) so the SPI reply fits in a single short envelope.
+ *  the radio state).  Was 16 WIRE bytes (one cache line on the M33) through
+ *  v2 firmware; grew to 18 WIRE bytes ADDITIVELY when dhcp_state/netif_status
+ *  were appended (alp-sdk#2035) -- NOTE: `sizeof(alp_cc3501e_diag_info_t)` is
+ *  20, not 18, because of 4-byte tail padding after this pair; 18 is the wire
+ *  byte count, not the in-memory struct size.  A v2-firmware reply is still a
+ *  complete, valid answer, just without the two new fields (see
+ *  cc3501e_diag_info() for the backward-compat decode, and its own doc
+ *  comment for why NEITHER firmware can be told apart by wire length -- both
+ *  frame the identical padded 24-byte payload).
+ *
+ *  Deliberately NOT a PROTOCOL_MINOR bump: a host disambiguates "talking to
+ *  old firmware" from "DHCP never started" (both read dhcp_state as 0, see
+ *  the field-level note below) by `fw_version`, ALSO in this same reply, not
+ *  by the new fields' own value -- so no version check is needed to use them
+ *  safely. A MINOR bump would force a lockstep change in the firmware's
+ *  `protocol-version.txt` -- and because that job checks out alp-sdk's
+ *  DEFAULT BRANCH, a bump on `dev` would not even redden firmware PRs until
+ *  the next `dev`-to-`main` release, not immediately as originally
+ *  estimated -- for no behavioural gain either way; do not "fix" this into
+ *  a bump.
  *  Field-level meanings:
  *   - fw_version: the firmware *release* version the device reports
  *     (its own semver from firmware-version.txt; tracked separately
@@ -617,11 +869,36 @@ typedef enum {
  *   - last_error: last @ref alp_cc3501e_resp_t the firmware
  *     emitted on the wire; @ref ALP_CC3501E_RESP_OK if no error
  *     since last reset.
- *   - reserved[0]: low byte of the last Wi-Fi event ID the firmware's
- *     event callback saw; 0 = none since reset (also what pre-#1562
- *     firmware put here, so an old host reading 0 is not misled).  An
- *     ap_start that leaves this at 0 never received a WLAN event at all.
- *   - reserved[1..2]: still reserved, always 0. */
+ *   - reserved[0]: the bridge radio's OWN event id -- the low byte of the
+ *     vendor TI SDK's `WlanEvent_t.Id` that the firmware's Wi-Fi callback
+ *     last saw.  It is NOT @ref ALP_CC3501E_EVT_WIFI_SCAN_RESULT and its
+ *     family; those alp opcodes and this vendor id DO COLLIDE numerically
+ *     (0x18..0x1A) and must never be decoded against each other -- decode
+ *     this byte only with @ref alp_cc3501e_radio_evt_t
+ *     (`ALP_CC3501E_RADIO_EVT_*`), which mirrors the vendor enum and
+ *     documents which values a host can act on.  0 = none since reset (also
+ *     what pre-#1562 firmware put here, so an old host reading 0 is not
+ *     misled).  An ap_start that leaves this at 0 never received a WLAN
+ *     event at all.  A value outside @ref alp_cc3501e_radio_evt_t is legal
+ *     and simply means some other vendor radio event fired.
+ *   - reserved[1]: low byte of the `psa_status_t` from the last OTA flush
+ *     fault (#1610); 0 if no OTA flush has failed since last reset.  Already
+ *     surfaced by the console as `diag info`'s `otafault:` line.
+ *   - reserved[2]: update-mode boot mark -- bit7 set means the firmware is
+ *     currently running because it booted into UPDATE_MODE (see @ref
+ *     ALP_CC3501E_CMD_OTA_UPDATE_MODE); bits[6:0] are a warm-boot counter,
+ *     modulo 128.
+ *   - dhcp_state: one of @ref alp_cc3501e_dhcp_state_t, i.e. lwIP's
+ *     `dhcp->state` PLUS ONE.  0 means "not reported" -- no lwIP linked, or
+ *     the netif has no `dhcp` struct because DHCP never started; that case
+ *     must not be read as @ref ALP_CC3501E_DHCP_STATE_OFF, which is exactly
+ *     why 0 is reserved rather than aliasing the real OFF state.  Absent on
+ *     a v2-firmware 16-byte reply, in which case cc3501e_diag_info() sets
+ *     this to 0 (not-reported), same as the "never started" case.
+ *   - netif_status: bit 0 = netif UP, bit 1 = netif LINK_UP (see @ref
+ *     ALP_CC3501E_NETIF_UP / @ref ALP_CC3501E_NETIF_LINK_UP), bits 2..7 =
+ *     `dhcp->tries` saturated at 63 (see @ref ALP_CC3501E_NETIF_DHCP_TRIES).
+ *     Also 0 on a v2-firmware 16-byte reply. */
 typedef struct {
 	uint16_t fw_version;
 	uint8_t  reset_cause;
@@ -630,6 +907,8 @@ typedef struct {
 	uint32_t free_heap_bytes;
 	uint8_t  last_error;
 	uint8_t  reserved[3];
+	uint8_t  dhcp_state;
+	uint8_t  netif_status;
 } alp_cc3501e_diag_info_t;
 
 /* ------------------------------------------------------------------ */
@@ -830,7 +1109,7 @@ typedef enum {
 /** Reply payload of CMD_WIFI_STATUS (opcode 0x1B): a NON-BLOCKING snapshot of the
  *  STA connection state, read off a firmware latch (no radio op, ISR-safe) -- how
  *  the host collects an async connect result without blocking.  Fixed 4-byte wire
- *  layout (no padding): state | fail_reason | rssi_dbm | reserved. */
+ *  layout (no padding): state | fail_reason | rssi_dbm | last_reason. */
 typedef struct {
 	uint8_t state;       /**< @ref alp_cc3501e_wifi_conn_state_t. */
 	uint8_t fail_reason; /**< @ref alp_cc3501e_wifi_fail_t (when state == FAILED). */
@@ -841,12 +1120,65 @@ typedef struct {
 	 *  blocks that worker), so the byte has only ever held 0.  0 dBm is a LEGAL
 	 *  int8 RSSI, so there is no in-band sentinel a reader can test to tell
 	 *  "unmeasured" from a real 0 -- do NOT report this byte as a signal level
-	 *  (issue #1387).  A real reading comes only from CMD_WIFI_GET_RSSI (0x16),
-	 *  a worker-routed radio read.  Populating this byte honestly needs either a
-	 *  bench answer on whether the post-DHCP read is safe, or a validity flag on
-	 *  the wire (the @c reserved byte) -- both open; neither is decided here. */
-	int8_t  rssi_dbm;
-	uint8_t reserved;
+	 *  (issue #1387, closed with the gap itself still undecided).  A real
+	 *  reading comes only from CMD_WIFI_GET_RSSI (0x16), a worker-routed radio
+	 *  read.  Populating this byte honestly still needs a bench answer on
+	 *  whether the post-DHCP read is safe -- the wire slot that would have
+	 *  carried a validity flag (the byte formerly named @c reserved) is now
+	 *  @ref alp_cc3501e_wifi_status_t::last_reason, so a validity flag is no
+	 *  longer an available option on THIS reply; no replacement channel is
+	 *  decided here. */
+	int8_t rssi_dbm;
+	/** The reason/status code for the MOST RECENT connect attempt: the low
+	 *  byte of the 802.11 REASON code from a DISCONNECT event, or the 802.11
+	 *  STATUS code from an ASSOCIATION_REJECTED / AUTHENTICATION_REJECTED
+	 *  event -- two DIFFERENT code tables, and nothing on the wire says
+	 *  which one, so @c fail_reason == REJECTED does NOT disambiguate them.
+	 *
+	 *  Recorded ONLY while that attempt's state is CONNECTING; frozen at its
+	 *  terminal result and PERSISTS through every later state publish --
+	 *  including a subsequent @ref cc3501e_wifi_disconnect() call
+	 *  (WIFI_DISCONNECT, 0x13), which republishes this same frozen value
+	 *  rather than a fresh one -- until the NEXT connect attempt starts and
+	 *  clears it back to 0.  0 means NOTHING WAS RECORDED for that attempt,
+	 *  not "no cause": a clean success, or a bare TIMEOUT with no DISCONNECT/
+	 *  REJECTED event of its own, also reads 0.  Note @ref cc3501e_wifi_connect
+	 *  itself issues that same disconnect at ENTRY, before submitting the new
+	 *  attempt, whenever the latch it reads first still shows a FAILED
+	 *  attempt (#1435/#1437 stale-association cleanup) -- so that internal
+	 *  disconnect can republish the OLD attempt's value too, same as an
+	 *  explicit one would.
+	 *
+	 *  CONNECTED always publishes 0, unconditionally -- even if a since-
+	 *  succeeded retry (below) recorded a transient rejection earlier in the
+	 *  same attempt -- and clears the underlying live value too, so it stays
+	 *  0 for any later republish of that same session.
+	 *
+	 *  Never holds vendor reason 200 (WLAN_DISCONNECT_USER_INITIATED) -- a
+	 *  vendor placeholder, not a real 802.11 code.
+	 *
+	 *  @warning KNOWN RESIDUAL: the value is cleared to 0 twice for a new
+	 *  attempt -- at submit and again immediately before the vendor connect
+	 *  call -- but neither reset is the exact instant the vendor begins
+	 *  processing that attempt.  A late event from the PREVIOUS attempt
+	 *  landing in the narrow remaining window can still be recorded against
+	 *  the new one (any reason/status code, not one in particular).  The
+	 *  converse also holds: a reject arriving after an attempt has already
+	 *  been declared TIMEOUT is lost, because the attempt is already
+	 *  terminal by then.  The firmware also runs one bounded, transparent
+	 *  retry when the FIRST pass rejects with status 30 (an AP-issued
+	 *  comeback-time hint): the retry normally reports its OWN outcome (the
+	 *  value is reset again before the retry's own connect call), but if the
+	 *  retry's own connect call is itself refused, the byte instead reports
+	 *  the FIRST pass's outcome (e.g. REJECTED/30) rather than a generic
+	 *  KICK/0.
+	 *
+	 *  Scope is the connect attempt only: a deauth AFTER a successful
+	 *  CONNECTED is not recorded, because the state is no longer CONNECTING.
+	 *  Formerly an unused @c reserved byte, always 0 -- older bridge
+	 *  firmware that never populates it still sends 0, so this is purely
+	 *  additive and needs no wire-version bump (alp-sdk#2099). */
+	uint8_t last_reason;
 } alp_cc3501e_wifi_status_t;
 
 /** Async event for CMD_WIFI_SCAN_START and friends. */
@@ -998,15 +1330,20 @@ typedef struct {
  *   - handle: socket from CMD_SOCK_OPEN.
  *   - flags: send flags (bit 0 = MORE; further bits reserved 0).
  *   - seq: retry identity (proto v7).  The host assigns a per-context
- *     free-running counter ONCE per logical send and holds it constant
- *     across every poll_by_repeat() retry of that same call (see
- *     cc3501e_sock_send()).  The firmware caches the (seq, reply) of the
- *     last completed send and serves it back on a matching seq instead of
- *     re-submitting -- without this, a retry that lands after the worker
- *     already finished is indistinguishable from a new request and
- *     re-transmits the payload (alp-sdk#1746, cc3501e-bridge-firmware#88).
- *     Through v6 this byte was always written 0 and carried no meaning;
- *     the field keeps its wire offset, only the semantics changed.
+ *     free-running counter ONCE per FRAME -- one chunk of a logical send,
+ *     i.e. one iteration of cc3501e_sock_send()'s remainder-retry loop
+ *     (cc3501e-bridge-firmware#107) -- and holds it constant across every
+ *     poll_by_repeat() retry (including its own bounded post-timeout
+ *     collection grace) of that same chunk (see cc3501e_sock_send()).  A
+ *     chunk carrying different remaining bytes than the previous one is a
+ *     NEW frame and gets a NEW seq.  The firmware caches the (seq, reply)
+ *     of the last completed send and serves it back on a matching seq
+ *     instead of re-submitting -- without this, a retry that lands after
+ *     the worker already finished is indistinguishable from a new request
+ *     and re-transmits the payload (alp-sdk#1746,
+ *     cc3501e-bridge-firmware#88).  Through v6 this byte was always
+ *     written 0 and carried no meaning; the field keeps its wire offset,
+ *     only the semantics changed.
  *   - data_len: number of payload bytes that follow inline. */
 typedef struct {
 	uint16_t handle;

@@ -416,8 +416,10 @@ code written against this byte works unchanged when a future HW rev
 lets the bridge serve it.  This byte is **not** `PMC_STATUS_00` and
 does not mirror its bit layout.  For register-level PMIC status
 (`PMC_STATUS_00` etc.) the host reads the DA9292 directly over
-`BRD_I2C` from the CM33 via `da9292_get_status()` in the
-`chips/da9292` driver — see `<alp/chips/da9292.h>`.
+`BRD_I2C` from the Cortex-A55 (Linux, or U-Boot for the DEEPX-rail
+bring-up sequence) via `da9292_get_status()` in the `chips/da9292`
+driver — RIIC8/BRD_I2C is Cortex-A55-exclusive, and the CM33 must
+never master it — see `<alp/chips/da9292.h>`.
 
 ### 3.5 DAC outputs (`v0.2+`)
 
@@ -462,8 +464,15 @@ On V2N every E1M PWM channel maps to a TIMER0 / TIMER7 channel
 (see `metadata/chips/gd32g553.yaml` `pwm_routing:` for the table).
 Both timers are 16-bit advanced timers running at the 216 MHz
 CK_TIMER (= CK_APB at DIV1 = the core clock; this part has no
-separate timer PLL), so the achievable resolution is ~4.63 ns LSB
-and the longest single-counter period is ~303 us.  `CMD_PWM_GET` reads the live
+separate timer PLL).  Unprescaled that would be a ~4.63 ns LSB and a
+~303 us longest single-counter period -- but **the firmware never runs
+the timer unprescaled**, so neither figure is the achievable limit.  It
+programs a fixed 216:1 prescale to a 1 MHz counter tick
+(`PWM_TIMER_PRESCALER` / `PWM_TIMER_TICK_NS` in the `gd32-bridge-firmware`
+repo), giving a **1 us LSB and a 65.536 ms** longest period at full
+16-bit count.  The 65.536 ms figure is the one this document already
+quotes below as the boot default, and the one an over-long `PWM_SET` is
+silently clamped to (#1730).  `CMD_PWM_GET` reads the live
 timer registers (auto-reload + compare) and converts ticks back to
 nanoseconds -- it reports what the pad is actually generating, never
 an echo of the request.  Two consequences of the hardware truth:
@@ -793,7 +802,13 @@ clocks back out on the *next* CS transaction within
 | CMD     | 1     | Opcode from §3.                                                                                |
 | STATUS  | 1     | Reply only.  Bits `[3:0]` = status code (`0x0` = OK, §6).  Bits `[7:4]` = the v0.7 **sequence stamp** — zero until `LINK_FEATURES` negotiates `STATUS_SEQ` (§4.3), so the legacy wire is unchanged. |
 | PAYLOAD | N / M | Length is **opcode-derived** — both ends know the byte count from the opcode + status pair.   |
-| CRC     | 2     | CRC-16/CCITT-FALSE (poly `0x1021`, init `0xFFFF`, xor-out 0x0000, **non-reflected**), MSB first |
+| CRC     | 2     | CRC-16/CCITT-FALSE (poly `0x1021`, init `0xFFFF`, xor-out 0x0000, **non-reflected**), LSB first |
+
+The CRC is transmitted **LSB first** (low byte on the wire first, then the
+high byte) — e.g. CRC-16/CCITT-FALSE over the PING request body `A5 00` is
+`0xFF84`, which goes on the wire as `84 FF`. This is the one field in the
+envelope that is little-endian; every other multi-byte field in this protocol
+is big-endian, and that asymmetry is exactly what makes it easy to get wrong.
 
 Length is **not** carried on the wire because a single opcode has a
 fixed request-payload width and a status-code-determined reply-payload
@@ -1102,7 +1117,12 @@ firmware in `gd32-bridge-firmware:src/ota.c`):
 Value encodings: `state` = 0 IDLE / 1 READY / 2 BUSY / 3 VERIFIED /
 4 ERROR; slot bytes = 0 A / 1 B / `0xFF` none-pending.  `WRITE_CHUNK`
 offsets must land on 8-byte (FMC doubleword) boundaries; the image
-CRC-32 is IEEE 802.3 reflected (zlib-compatible).  `WRITE_CHUNK` and
+CRC-32 is IEEE 802.3 reflected (zlib-compatible) -- host code computes
+the `expected_crc32` BEGIN wants (and cross-checks VERIFY's
+`computed_crc32`) with `gd32g553_ota_image_crc32()`
+(`<alp/chips/gd32g553.h>`), which is hardware-accelerated on a build
+that instantiates the Alif Ensemble E8 CRC engine and otherwise falls
+back to portable software producing the same value.  `WRITE_CHUNK` and
 `VERIFY` without a BEGIN-opened session answer `STATUS_NOT_READY`
 (0x02), as does `COMMIT` before a successful `VERIFY`.
 
@@ -1161,7 +1181,8 @@ header.
 * DA9292 fault pins / PMIC alarms — on the current SoM revision the
   `DA9292_INT`/`DA9292_TW` nets reach only the Renesas (P37/P36), so
   the host reads the pin state directly (`da9292_get_fault_pins()`)
-  and full PMIC register status over `BRD_I2C` from the CM33 via the
+  and full PMIC register status over `BRD_I2C` from the Cortex-A55
+  (Linux, or U-Boot for DEEPX-rail bring-up), not the CM33, via the
   `chips/da9292` driver; `DA9292_STATUS_FORWARD` answers `0xFF` until
   a HW rev wires the nets to the GD32 (see §3.4).
 * Streaming workloads (audio, video) — not in scope; use the

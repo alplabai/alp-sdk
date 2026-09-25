@@ -70,6 +70,9 @@ into the topic-specific docs.
   silicon-gated; GPU2D and SecAES are also HAL-pack gated, ISP Pico's
   pack has already landed and is blocked by other reasons (see that
   doc's *Silicon scope — which E-part has what* section).
+- [camera-shields.md](camera-shields.md) — the two board-agnostic
+  Raspberry-Pi-style MIPI CSI-2 camera-module sensor drivers (OV5647,
+  OV9281) and their Zephyr shields; build command form + supported modes.
 - [glossary.md](glossary.md) — terms.
 - [adr/README.md](adr/README.md) — Architecture Decision Records
   index (33 ADRs; recount with `ls docs/adr/[0-9]*.md | wc -l`).

@@ -57,14 +57,18 @@
 #include "alp/e1m_pinout.h"
 
 /* GENERATED board route bindings (EVK_PIN_*, EVK_*_BUS_*,
- * EVK_UART_PORT_*, EVK_PWM_*, EVK_ARD_PWM*, EVK_MB_PWM) and
+ * EVK_UART_PORT_*, EVK_PWM_*, EVK_ARD_PWM*, EVK_MB_PWM),
  * GENERATED on-board I2C device facts (EVK_I2C_ADDR_*,
- * EVK_INA236_SHUNT_*_OHMS, EVK_INA236_MAX_*_A).
+ * EVK_INA236_SHUNT_*_OHMS, EVK_INA236_MAX_*_A), GENERATED
+ * overlay-pad indices (EVK_PIN_OVERLAY_BASE + friends), and
+ * GENERATED mux-select enums (evk_sdio_select_t,
+ * evk_pcie_ioexp_pin_t, ...).
  * Source of truth: metadata/boards/e1m-evk.yaml
- * `e1m_routes:` and `i2c_devices:` blocks. Regenerate via:
+ * `e1m_routes:`, `i2c_devices:`, `overlay_pins:` and `mux_enums:`
+ * blocks. Regenerate via:
  *     python scripts/gen_board_header.py
- * The prose blocks below describe the hardware those macros bind
- * to; the macro values themselves come from the included header. */
+ * The prose blocks below describe the hardware those macros/enums
+ * bind to; the values themselves come from the included header. */
 #include "alp/boards/alp_e1m_evk_routes.h"
 
 #ifdef __cplusplus
@@ -89,42 +93,143 @@ extern "C" {
 /* describe the hardware those macros bind to.                        */
 /* ================================================================== */
 
-/* SDIO 74LVC157 multiplexer (M.2 E-key SDIO vs microSD card slot).
+/* SDIO multiplexer (M.2 E-key SDIO vs microSD card slot).
  *
- * Two 74LVC157 quad 2:1 muxes (U38 for data lines, U39 for CLK/CMD/RST)
- * pick which device drives the SoM's single SDIO bus.  Control pins:
+ * Two 2:1 mux/switch ICs (U38 for data lines, U39 for CLK/CMD/RST) pick
+ * which device drives the SoM's single SDIO bus.  Control pins:
  *
  *   /E (active-low enable) = E1M IO20 -- both U38 and U39 share /E
  *   S  (select)            = E1M IO21
  *
- * Per the 74LVC157 truth table:
- *   /E = 0, S = 0  ->  M.2 E-key SDIO routed to SoM
- *   /E = 0, S = 1  ->  microSD card slot routed to SoM
- *   /E = 1         ->  outputs Hi-Z (both buses isolated; safe-default)
+ * U38/U39 shipped as 74LVC157 on the original 2626-R2 BOM; the standard
+ * fit going forward is a 3257-type FET bus-switch rework.  SD, and
+ * SoC-to-amp I2S (the same-shape mux on U46, below), CAN NEVER WORK
+ * through the stock 74LVC157, on EITHER `/E` state -- not just when
+ * disabled.  Per the authoritative 2626-R2 carrier netlist, the mux's
+ * `Y` pins land on the SoC-side nets, which are the SAME physical nets
+ * the SoC's own peripheral pins are wired to (U39 `3Y` = `E1M_CLK`,
+ * `4Y` = `E1M_CMD`, `2Y` = `E1M_SDIO_RST`; U38 `1Y`..`4Y` =
+ * `E1M_D3`..`E1M_D0`).  A 74LVC157 is UNIDIRECTIONAL and always
+ * actively drives `Y`: the selected `A`/`B` input when `/E` = 0, or
+ * forced LOW when `/E` = 1.  Either way, that fights the SD host
+ * controller's own CLK/CMD output (and the SD_RST GPIO output some
+ * apps drive on `E1M_SDIO_RST`, see aen-sdcard-readout) directly on the
+ * wire -- there is no `/E` state on a 74LVC157 that avoids contention.
+ * Only a 3257-type rework is a genuine bidirectional switch: at
+ * `/E` = 0 it CONNECTS (does not drive) the selected side, so the
+ * SoC's own driver passes through cleanly with no contention; at
+ * `/E` = 1 it is real Hi-Z.
+ *
+ * With a 3257-type switch fitted, the truth table is:
+ *   /E = 0, S = 0  ->  microSD card slot routed to SoM
+ *   /E = 0, S = 1  ->  M.2 E-key SDIO routed to SoM
+ *   /E = 1         ->  Hi-Z, both buses isolated
  *
  * IMPORTANT: per the user-supplied wiring + this repo's
- * metadata/e1m_modules/aen/from-cc3501e.tsv, BOTH IO20 and IO21 are
- * proxied through the on-module CC3501E (GPIO26 and GPIO30 on the
- * CC3501E side).  Firmware drives the mux by dispatching
- * GPIO_WRITE commands to the CC3501E over the inter-chip SPI1
- * (see <alp/protocol/cc3501e.h>'s ALP_CC3501E_CMD_GPIO_WRITE),
- * NOT via Alif's GPIO peripheral.
+ * metadata/e1m_modules/aen/from-cc3501e.tsv, IO20 (/E) is proxied
+ * through the on-module CC3501E (GPIO_26 on the CC3501E side) on BOTH
+ * hardware revisions, and firmware drives it by dispatching GPIO_WRITE
+ * commands over the inter-chip SPI1 (see <alp/protocol/cc3501e.h>'s
+ * ALP_CC3501E_CMD_GPIO_WRITE), NOT via Alif's GPIO peripheral.  IO21
+ * (S) is REVISION-DEPENDENT
+ * (metadata/e1m_modules/aen/hw-revisions.yaml `pad_route_overrides`):
+ *
+ *   - r1: IO21 IS CC3501E-proxied (GPIO_30) and firmware-drivable the
+ *     same way as /E.  HAZARD: the same select net also reaches header
+ *     P18 pin 2 (`NetP18_2`) through R198 (0 ohm); P18's jumper, when
+ *     fitted, ties pin 1 (`+3V3`) to pin 2 -- so fitting the jumper
+ *     while firmware drives IO21 LOW makes CC3501E GPIO_30 sink the
+ *     +3V3 rail.  Fit the jumper or drive the pin, never both.
+ *   - r2: IO21 is `dispatch: unrouted` -- it is NOT proxied at all
+ *     (physically open, no CC3501E or Alif termination; #1854) and is
+ *     instead hardware-strapped to a fixed level via R198/R27/header
+ *     P18 (microSD by default on this EVK), so firmware cannot change
+ *     the SDIO select at runtime.
+ *
+ * Take the revision from the module, not from this comment: `alp board`
+ * prints it out of the EEPROM manifest.  Portable code should not
+ * branch on it by hand -- open the pin by its E1M_* id and let the SDK
+ * apply the per-rev `pad_route_overrides`.
  *
  * EVK_PIN_SDIO_MUX_EN (= ALP_E1M_GPIO_IO20) and EVK_PIN_SDIO_MUX_SEL
- * (= ALP_E1M_GPIO_IO21) are defined in the generated routes header. */
+ * (= ALP_E1M_GPIO_IO21), and the `evk_sdio_select_t` enum, are
+ * defined in the generated routes header `alp_e1m_evk_routes.h`
+ * (from `mux_enums:` in metadata/boards/e1m-evk.yaml, issue #637). */
 
-typedef enum {
-	EVK_SDIO_M2E_KEY = 0, /**< MUX_SEL.SDIO low. */
-	EVK_SDIO_SDCARD  = 1, /**< MUX_SEL.SDIO high. */
-} evk_sdio_select_t;
-
-/* I2S0 74LVC157 multiplexer (TAS2563 amplifier vs M.2 E-key I2S).
+/* I2S0 multiplexer (TAS2563 amplifier vs M.2 E-key I2S).
  *
- * Same shape as the SDIO mux: a 74LVC157 quad 2:1 picks which
+ * Same shape as the SDIO mux above: a 2:1 mux/switch (U46) picks which
  * device drives the SoM's single I2S0 bus.  Control pins:
  *
  *   /E (active-low enable) = E1M IO8   -- REVISION-DEPENDENT, see below
  *   S  (select)            = E1M IO13  -- CC3501E side (GPIO13), both revisions
+ *
+ * U46 shipped as a `74LVC157ABQ,115` on the original 2626-R2 BOM
+ * (2626-R2 components list).  That part's `VCC` range is 1.2-3.6 V, so
+ * `+VIO` at 1.8 V is IN SPEC for it -- undervoltage is NOT why the
+ * stock part fails.  The stock 74LVC157 fails by DIRECTION: its `Y`
+ * outputs (`I2S0_WS`/`SCLK`/`SDO`) are the SoC-side nets, wired
+ * straight to the SoC's own I2S3 TX pads, so it can NEVER pass
+ * SoC-to-amp I2S at any `VCC` -- enabling the mux (`/E` = 0) does not
+ * route audio out to either destination, it instead directly contends
+ * with the SoC's own I2S3 TX drive on those same pads (#2077).
+ * `/E` = 1 forces those `Y` outputs LOW, which is likewise not
+ * isolation from an active I2S3 TX (same reasoning as the SDIO block
+ * above).  Moving the STOCK part's `VCC` to `+3V3` alone changes
+ * NOTHING -- it is still a one-way mux driving the wrong direction, and
+ * re-enabling `i2s3` still creates driver contention.
+ *
+ * A working U46 needs the part REPLACED with a genuine bidirectional
+ * 3257-type bus switch -- same as U38/U39's rework, though this is NOT
+ * (yet) "the standard fit going forward" for U46 the way it is for
+ * U38/U39, see above -- AND that switch's `VCC` on a rail within its
+ * spec.  A 3257-type part was fitted at U46 on E1M-AEN803 serial 2026W36-0002 with
+ * `VCC` initially left on `+VIO`.  `+VIO` is NOT a carrier-selected
+ * rail -- it is the plugged-in SoM's own `VIO_OUT` (2626-R2 netlist:
+ * `E2` pins P1/P2 `VIO_OUT` feed `+VIO_C`, which reaches `+VIO`
+ * through U33's shunt monitor, IN+/IN-).  MEASURED on E1M-AEN803 serial 2026W36-0002
+ * with the E1M-AEN SoM fitted (maintainer, 2026-09-15): `+VIO` =
+ * 1.8 V, below a 3257-type bus switch's 2.3-3.6 V `VCC` spec (unlike
+ * the stock 74LVC157, which tolerates 1.8 V), and with both amps
+ * ACTIVE, every I2S/I2C call returned `ALP_OK` but the TAS2563 amps
+ * produced NO audible output.
+ *
+ * OBSERVED ON SILICON (E1M-AEN803 serial 2026W36-0002, maintainer,
+ * 2026-09-15 ~14:05Z): the fitted 3257-type part's `VCC` was re-wired
+ * from `+VIO` to `+3V3` between a silent run and an audible run.  A
+ * PROBE_LISTEN image (continuous 1 kHz tone through I2S3 -> U46 ->
+ * both TAS2563 amps) was then clearly audible at the speakers,
+ * confirmed by ear.  MEASURED: the `VCC` move happened between the
+ * two runs.  INFERRED, NOT established as the only difference: that
+ * the `VCC` move is what made playback audible.  NOT verified: that
+ * undervoltage was the ONLY difference between the silent and audible
+ * runs, or that no other change was made.  SCOPE: only amp PLAYBACK
+ * audibility was checked -- PDM mic capture and the M.2 E-key I2S
+ * path through this same mux remain unverified.  The SAME run also
+ * showed an `INT_LTCH0` bit 2 (TDM clock error) latch during
+ * playback, and separately, issue #2146: the amps auto-shut down ~1 s
+ * after I2S stops and stay off after restart.  BOTH ARE OPEN -- a
+ * 3257-type part on `+3V3` being associated with audible amps in this
+ * one run does not mean the audio path is otherwise clean.
+ *
+ * CAVEAT, UNTESTED: at `VCC` = 3.3 V, a CBT-type switch's control-input
+ * VIH (~2.0 V) may not reliably register a 1.8 V HIGH on `/E` or `S`
+ * driven from the CC3501E (which itself still runs at 1.8 V logic).
+ * The amp playback path above only needs BOTH control pins LOW
+ * (mux enabled, amps selected), which is why it worked -- but
+ * DISABLING the mux (`/E` HIGH) or selecting the M.2 E-key side
+ * (`S` HIGH) may not switch reliably at this `VCC`.  Not exercised on
+ * silicon either way.
+ *
+ * A working U46 therefore needs BOTH a 3257-type swap AND its `VCC`
+ * on `+3V3` (observed above, subject to the `/E`/`S` HIGH caveat and
+ * the open TDM-latch/#2146 findings) -- gating on `VCC` alone is not
+ * enough, since a STOCK 74LVC157 on `+3V3` still fails by direction.
+ * The untested alternative is a switch rated for 1.8 V `VCC` -- e.g.
+ * TI TMUX1574 (1.5-5.5 V, keeps the SN74CBTLV3257 pin numbering ONLY
+ * in TSSOP-16/SOT-23-THIN-16; its other packages don't match, and
+ * NONE of them fit U46's NXP DHVQFN-16 2.5x3mm land pattern without
+ * an adapter or flying leads) -- UNTESTED in-house.
  *
  * NOTE: the enable line MOVED between board revisions, so neither answer is
  * unconditionally true (#913).  Per
@@ -141,19 +246,18 @@ typedef enum {
  * hand -- open the pin by its E1M_* id and let the SDK apply the per-rev
  * `pad_route_overrides`.
  *
- * IMPORTANT: the two control pins live on DIFFERENT chips on
- * this EVK -- I2S_EN is driven from Alif via alp_gpio_*, but
- * I2S_SELECT is on the CC3501E side and must be driven via
- * ALP_CC3501E_CMD_GPIO_WRITE on the inter-chip SPI1.  Apps that
- * switch the I2S routing need both code paths.
+ * IMPORTANT: which chip owns I2S_EN is REVISION-DEPENDENT, same as
+ * above.  r1: I2S_EN is driven from Alif via alp_gpio_*, on a
+ * DIFFERENT chip from I2S_SELECT (CC3501E-side, via
+ * ALP_CC3501E_CMD_GPIO_WRITE on the inter-chip SPI1).  r2: BOTH
+ * control pins are CC3501E-side, so both are driven via
+ * ALP_CC3501E_CMD_GPIO_WRITE.  Apps that switch the I2S routing need
+ * to branch on revision for which code path drives EN.
  *
  * EVK_PIN_I2S_MUX_EN (= ALP_E1M_GPIO_IO8) and EVK_PIN_I2S_MUX_SEL
- * (= ALP_E1M_GPIO_IO13) are defined in the generated routes header. */
-
-typedef enum {
-	EVK_I2S_AMP     = 0, /**< I2S0 routed to the TAS2563 amplifiers. */
-	EVK_I2S_M2E_KEY = 1, /**< I2S0 routed to the M.2 E-key slot. */
-} evk_i2s_select_t;
+ * (= ALP_E1M_GPIO_IO13), and the `evk_i2s_select_t` enum, are
+ * defined in the generated routes header `alp_e1m_evk_routes.h`
+ * (from `mux_enums:` in metadata/boards/e1m-evk.yaml, issue #637). */
 
 /* USB2 TMUXHS221 multiplexer (USB-A connector vs M.2 E-key USB).
  *
@@ -170,13 +274,10 @@ typedef enum {
  * drives the mux via ALP_CC3501E_CMD_GPIO_WRITE on the inter-chip
  * SPI1, NOT via Alif's GPIO peripheral.
  *
- * EVK_PIN_USB2_MUX_SEL (= ALP_E1M_GPIO_IO11) is defined in the
- * generated routes header. */
-
-typedef enum {
-	EVK_USB2_CONNECTOR = 0, /**< External USB-A jack. */
-	EVK_USB2_M2E_KEY   = 1, /**< M.2 E-key USB.        */
-} evk_usb2_select_t;
+ * EVK_PIN_USB2_MUX_SEL (= ALP_E1M_GPIO_IO11), and the
+ * `evk_usb2_select_t` enum, are defined in the generated routes
+ * header `alp_e1m_evk_routes.h` (from `mux_enums:` in
+ * metadata/boards/e1m-evk.yaml, issue #637). */
 
 /* M.2 E-key wake signals.  Asserted by the M.2 module to request
  * the host come out of low-power state.  Two independent lines:
@@ -265,25 +366,13 @@ typedef enum {
  * to think about that; the level shifter is transparent.
  *
  * EVK_PIN_PCIE_MUX_PD (= ALP_E1M_GPIO_IO22) and EVK_PIN_PCIE_MUX_SEL
- * (= ALP_E1M_GPIO_IO23) are defined in the generated routes header. */
-
-typedef enum {
-	EVK_PCIE_E_KEY = 0, /**< Lanes 0 routed to PCIe E-key (Wi-Fi/BT modules). */
-	EVK_PCIE_M_KEY = 1, /**< Lanes 0..3 routed to PCIe M-key (NVMe SSD).      */
-} evk_pcie_select_t;
-
-/** PCIe IO expander pin layout (TCAL9538 #2 on I2C0 at 0x71). */
-typedef enum {
-	EVK_PCIE_IOEXP_I2C_SEL =
-	    0, /**< P0: PCIE0_I2C.SEL -- selects which slot the I2C mux routes to. */
-	EVK_PCIE_IOEXP_M2E_ALERT      = 1, /**< P1: M.2 E-key alert input.        */
-	EVK_PCIE_IOEXP_E_PCIE0_RST    = 2, /**< P2: E-key PCIe reset output.       */
-	EVK_PCIE_IOEXP_E_PCIE0_WAKE   = 3, /**< P3: E-key PCIe wake input.         */
-	EVK_PCIE_IOEXP_E_PCIE0_CLKREQ = 4, /**< P4: E-key PCIe clock-request input.*/
-	EVK_PCIE_IOEXP_M_PCIE0_RST    = 5, /**< P5: M-key PCIe reset output.       */
-	EVK_PCIE_IOEXP_M_PCIE0_WAKE   = 6, /**< P6: M-key PCIe wake input.         */
-	EVK_PCIE_IOEXP_M_PCIE0_CLKREQ = 7, /**< P7: M-key PCIe clock-request input.*/
-} evk_pcie_ioexp_pin_t;
+ * (= ALP_E1M_GPIO_IO23), and the `evk_pcie_select_t` enum, are
+ * defined in the generated routes header `alp_e1m_evk_routes.h`
+ * (from `mux_enums:` in metadata/boards/e1m-evk.yaml, issue #637).
+ *
+ * The PCIe IO expander pin layout (`evk_pcie_ioexp_pin_t`, TCAL9538
+ * #2 on I2C0 at 0x71) is also defined in the generated routes
+ * header, same source. */
 
 /* The rotary encoder's quadrature signals run through the SoC's
  * hardware quadrature counter on E1M's `ENC0_X` / `ENC0_Y` pads.
@@ -394,13 +483,15 @@ typedef enum {
 /* ================================================================== */
 /* TCAL9538 I/O expander pin layout                                   */
 /*                                                                    */
-/* The TCAL9538 sits on ALP_E1M_I2C0 at 7-bit address 0x72 (A1=1, A0=0    */
-/* per the EVK schematic).  Its 8 GPIO pins fan out to the LCD /      */
+/* The TCAL9538 sits on ALP_E1M_I2C0 at 7-bit address 0x73 (A1=1, A0=1),   */
+/* CORRECTED 2026-09-05 from 0x72 (alp-sdk#1974): the maintainer's EVK    */
+/* I2C schedule gives 1110011 = 0x73, and 2 of 2 boards answer there and  */
+/* are silent at 0x72.  Its 8 GPIO pins fan out to the LCD /          */
 /* camera / capacitive-touch control lines and four sensor interrupt  */
 /* inputs.  Apps drive them via the chips/tcal9538 driver:            */
 /*                                                                    */
 /*    tcal9538_t io_exp;                                              */
-/*    tcal9538_init(&io_exp, i2c_bus, 0x72);                          */
+/*    tcal9538_init(&io_exp, i2c_bus, EVK_I2C_ADDR_TCAL9538_MAIN);    */
 /*    tcal9538_set_direction(&io_exp,                                 */
 /*        BIT(EVK_IOEXP_LCD_PWR_EN) |                             */
 /*        BIT(EVK_IOEXP_LCD_RST) |                                */
@@ -408,19 +499,11 @@ typedef enum {
 /*        BIT(EVK_IOEXP_CTP_RST),                                 */
 /*        TCAL9538_DIR_OUTPUT);                                       */
 /*    tcal9538_set(&io_exp, EVK_IOEXP_CAM_EN, true);              */
+/*                                                                    */
+/* The `evk_ioexp_pin_t` enum is defined in the generated routes      */
+/* header `alp_e1m_evk_routes.h` (from `mux_enums:` in                */
+/* metadata/boards/e1m-evk.yaml, issue #637).                         */
 /* ================================================================== */
-
-typedef enum {
-	EVK_IOEXP_LCD_PWR_EN = 0, /**< P0: LCD power enable.            */
-	EVK_IOEXP_LCD_RST    = 1, /**< P1: LCD reset.                    */
-	EVK_IOEXP_CAM_EN =
-	    2, /**< P2: Camera-module enable (drives the camera sensor's EN/STBY pin -- NOT the +V_CAM0/+V_CAM1 power rails, which are gated separately). */
-	EVK_IOEXP_CTP_RST        = 3, /**< P3: Capacitive touch panel reset. */
-	EVK_IOEXP_ICM42670_INT1  = 4, /**< P4: ICM-42670 INT1 input.         */
-	EVK_IOEXP_ICM42670_INT2  = 5, /**< P5: ICM-42670 INT2 input.         */
-	EVK_IOEXP_ICM42670_FSYNC = 6, /**< P6: ICM-42670 frame-sync input.   */
-	EVK_IOEXP_BMP581_INT1    = 7, /**< P7: BMP581 INT1 input.            */
-} evk_ioexp_pin_t;
 
 /* ================================================================== */
 /* EVK bus assignments  -- GENERATED, see alp_e1m_evk_routes.h        */
@@ -536,20 +619,27 @@ typedef enum {
 /* of truth is the `i2c_devices:` block in                            */
 /* metadata/boards/e1m-evk.yaml -- do not hand-edit the generated      */
 /* macros below:                                                       */
-/*   - ICM-42670-P  (U12) AD0 -> VIO   -> 0x69  *** COLLISION, see note ***  */
-/*   - BMI323       (U13) SDO -> VIO   -> 0x69  *** COLLISION, see note ***  */
+/*   - ICM-42670-P  (U12) AD0 -> VIO   -> 0x69  (pre-respin only: collided) */
+/*   - BMI323       (U13) SDO -> GND   -> 0x68  (pre-respin: mis-strapped)  */
 /*   - BMP581       (U14) SDO -> VIO   -> 0x47  (SDO must not float)    */
-/*   - TCAL9538     A1=1, A0=0         -> 0x72                          */
+/*   - TCAL9538 MAIN  (U35) A1=1, A0=1  -> 0x73                          */
+/*   - TCAL9538 PCIE  (U37) A0=1, A1=0  -> 0x71  NOT ASSEMBLED (#1974)   */
 /* ================================================================== */
 
-/* BENCH-CONFIRMED (2026-06-16, E1M-AEN801): U12 (ICM-42670) and U13 (BMI323) BOTH
- * have their address pins tied to VIO, so both answer at 0x69 and COLLIDE on the bus
- * -- each ACKs with a different read framing (ICM 8-bit direct vs BMI323 2-dummy-byte),
- * so a read returns wired-AND garbage (seen: 0x0001) and neither IMU is individually
- * addressable. Nothing answers at 0x68. The next batch must re-strap ONE of them -- e.g.
- * tie the BMI323 SDO pin to GND -> 0x68 (its datasheet default). The macros carry
- * that de-conflicted target so firmware is correct post-respin; on the pre-respin batch
- * the IMUs cannot be read (HW conflict, not a driver bug).
+/* THE RESPIN HAPPENED -- the IMU collision below is HISTORY, not the current board.
+ * BENCH-CONFIRMED (2026-09-07, E1M-AEN803 serial 2026W36-0002): U12 answers 0x69 with
+ * WHO_AM_I(0x75) = 0x67 and U13 answers 0x68 SEPARATELY. Both are individually
+ * addressable; the macros below are correct as written. (U13's chip ID was not read on
+ * that pass: BMI323 reg 0x00 returns 0x0000 until a soft-reset CMD <- 0xDEAF, and the
+ * census was read-only.)
+ *
+ * PRE-RESPIN BOARDS ONLY (bench-confirmed 2026-06-16, E1M-AEN801): U12 and U13 BOTH had
+ * their address pins tied to VIO, so both answered at 0x69 and COLLIDED on the bus --
+ * each ACKing with a different read framing (ICM 8-bit direct vs BMI323 2-dummy-byte),
+ * so a read returned wired-AND garbage (seen: 0x0001) and neither IMU was individually
+ * addressable, with nothing at 0x68. The fix shipped: BMI323 SDO is now tied to GND ->
+ * 0x68 (its datasheet default). On a pre-respin board the IMUs still cannot be read --
+ * that is the HW conflict, not a driver bug.
  *
  * EVK_I2C_ADDR_ICM42670, EVK_I2C_ADDR_BMI323 and EVK_I2C_ADDR_BMP581 are
  * defined in the generated routes header. */
@@ -568,27 +658,38 @@ typedef enum {
  * EVK_PIN_BMI323_INT1 (= ALP_E1M_GPIO_IO15) is defined in the generated
  * routes header. */
 
-/* The EVK populates TWO TCAL9538 I/O expanders, both on ALP_E1M_I2C0
- * but at different strap-selected addresses:
+/* The EVK footprint has TWO TCAL9538 I/O expanders on ALP_E1M_I2C0,
+ * but only the first is assembled on this revision:
  *   - The "main" expander handles LCD / camera / capacitive-touch
- *     control + four sensor interrupt inputs (see
- *     evk_ioexp_pin_t).  Strap A1=1, A0=0 -> 0x72.
+ *     control + four sensor interrupt inputs (see the generated
+ *     `evk_ioexp_pin_t`).  Strap A1=1, A0=1 -> 0x73.  CORRECTED
+ *     2026-09-05 from 0x72 / A1=1,A0=0 (alp-sdk#1974): the
+ *     maintainer's EVK I2C schedule gives 1110011 = 0x73, and 2 of 2
+ *     boards answer there and are silent at 0x72.
  *   - The "PCIe" expander handles the I2C-mux SEL + PCIe slot
- *     RST/WAKE/CLKREQ signals + M2E_ALERT (see
- *     evk_pcie_ioexp_pin_t above).  Strap A0=1, A1=0 -> 0x71.
+ *     RST/WAKE/CLKREQ signals + M2E_ALERT (see the generated
+ *     `evk_pcie_ioexp_pin_t`).  Strap A0=1, A1=0 -> 0x71.  NOT
+ *     ASSEMBLED on this EVK revision (alp-sdk#1974) -- the generator
+ *     (#1980) renames its macro to EVK_I2C_ADDR_TCAL9538_PCIE_NOT_ASSEMBLED
+ *     so the plain name below does not compile against nonexistent
+ *     silicon.
  *
- * EVK_I2C_ADDR_TCAL9538_MAIN and EVK_I2C_ADDR_TCAL9538_PCIE are defined
- * in the generated routes header. */
+ * EVK_I2C_ADDR_TCAL9538_MAIN is defined in the generated routes header;
+ * EVK_I2C_ADDR_TCAL9538_PCIE_NOT_ASSEMBLED per the note above. */
 
-/* BENCH-CONFIRMED (2026-06-16): U35 can be assembled with the TCA6408ARSVR
- * alternative (R112 fitted, R145 DNP) instead of the TCAL9538, which moves it to
- * 0x20. It is PCA9538-register-compatible (0x00 input / 0x01 output / 0x02 polarity
- * / 0x03 config), so the chips/tcal9538 driver drives it unchanged at 0x20 -- read
- * back config=0xFF + a live input port on the bench.
+/* BENCH-CONFIRMED (2026-06-16, on an EARLIER EVK revision): U35 can be
+ * assembled with the TCA6408ARSVR alternative (R112 fitted, R145 DNP)
+ * instead of the TCAL9538, which moves it to 0x20. It is PCA9538-
+ * register-compatible (0x00 input / 0x01 output / 0x02 polarity / 0x03
+ * config), so the chips/tcal9538 driver drives it unchanged at 0x20 --
+ * read back config=0xFF + a live input port on that earlier bench.  NOT
+ * ASSEMBLED on the current EVK revision (alp-sdk#1974): a clean NACK at
+ * 0x20 on both 2026-09-05 bench boards.
  *
- * EVK_I2C_ADDR_TCA6408A_MAIN (the TCA6408A-populated variant) and
- * EVK_I2C_ADDR_TCAL9538 (convenience alias for EVK_I2C_ADDR_TCAL9538_MAIN)
- * are defined in the generated routes header. */
+ * EVK_I2C_ADDR_TCA6408A_MAIN_NOT_ASSEMBLED (the TCA6408A-populated
+ * variant) and EVK_I2C_ADDR_TCAL9538 (convenience alias for
+ * EVK_I2C_ADDR_TCAL9538_MAIN) are defined in the generated routes
+ * header. */
 
 /* Two TAS2563RPP smart-amp ICs share the same I2C0 bus.  AD0
  * strap selects address per TAS2563 datasheet table 7-3:

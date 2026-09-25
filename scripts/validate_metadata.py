@@ -21,7 +21,7 @@ import hashlib
 import json
 import re
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import jsonschema
 
@@ -38,9 +38,14 @@ REPO = Path(__file__).resolve().parent.parent
 # check_system_manifest.py / check_emit_snapshots.py already use.
 sys.path.insert(0, str(REPO / "scripts"))
 
-from alp_project_loader import _sku_family, resolve_soc_path  # noqa: E402
+from alp_project_loader import (  # noqa: E402
+    _sku_family,
+    accel_config as _resolve_accel_config,
+    npu_backend,
+    resolve_soc_path,
+    resolve_targets,
+)
 from alp_orchestrate.sdk_compat import assert_exclusion_still_not_buildable  # noqa: E402
-from alp_model.targets import resolve_targets, _npu_backend, _accel_config  # noqa: E402
 from strict_loaders import strict_json_loads, strict_yaml_load  # noqa: E402
 
 # Power/ground nets are allowed as pin signals without a signals[] entry.
@@ -703,6 +708,68 @@ def _check_som_memory_population(som_files) -> list:
     return failures
 
 
+def _check_som_write_authority_present(som_files) -> list:
+    """Refuse a `memory_map:` region that carries no `write_authority`
+    (#1365 split A).
+
+    `metadata/schemas/som-preset-v1.schema.json`'s `memory_region.
+    write_authority` is deliberately NOT in `required` for som-preset v1
+    (`docs/porting-new-som.md` is a public porting guide; making it
+    `required` there would break a customer-ported preset on upgrade --
+    see the field's own description). That means the schema alone cannot
+    catch an author who forgets it, so this is the semantic gate the
+    schema defers, exactly like `_check_som_slot0_address_resolved` above
+    is the semantic gate for `*_slot0` regions the schema can't express.
+
+    Per ADR-0034 clause 4 ("no `default` or catch-all entry -- absence is
+    a validation failure"), an authored region with no `write_authority`
+    is UNRESOLVED, never `customer_runtime` -- the schema's own
+    description says so in terms ("ABSENT MEANS UNRESOLVED, NEVER
+    `customer_runtime`") a consumer must honour, and this check is what
+    makes that non-negotiable instead of a comment nobody reads. Returns
+    a failure list shaped like `_check_files()`. Presets with no
+    `memory_map:` are skipped.
+    """
+    failures: list[tuple[str, list[str]]] = []
+    for path in som_files:
+        rel = path.relative_to(REPO).as_posix()
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+        memory_map = doc.get("memory_map")
+        if not isinstance(memory_map, list):
+            continue
+
+        msgs: list[str] = []
+        checked = 0
+        for region in memory_map:
+            if not isinstance(region, dict):
+                continue
+            name = region.get("name")
+            checked += 1
+            if "write_authority" not in region:
+                msgs.append(
+                    f"memory_map: region `{name}` carries no "
+                    f"`write_authority` -- absence means UNRESOLVED, "
+                    f"never `customer_runtime` (ADR-0034 clause 4); a "
+                    f"consumer must treat this region as ineligible for "
+                    f"both IPC carve-out and runtime write until the "
+                    f"field is authored")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+        elif checked:
+            print(f"OK   {rel}  (memory_map: {checked} region(s) all "
+                  f"carry write_authority)")
+    return failures
+
+
 def _check_silicon_kconfig() -> list:
     """Validate the silicon->Kconfig registry and its socs/ correspondence.
 
@@ -1349,6 +1416,173 @@ def _check_soc_debug_probe_identity(soc_files) -> list:
     return failures
 
 
+#: Where ADR 0032 puts vendored register descriptions. A `debug.svd` value
+#: under this prefix ASSERTS the repository carries the file, so
+#: `_check_soc_debug_svd_shape` holds it to that; any other value is the
+#: customer-supplied `ALP_SVD_DIR` case, which no gate here can see.
+_VENDORED_SVD_ROOT = PurePosixPath("metadata/svd")
+
+
+def _check_soc_debug_svd_shape(soc_files) -> list:
+    """`variants[].debug.svd` maps a `cores[].id` to a BARE RELATIVE PATH,
+    and that path must exist only when it resolves inside the repo (#948).
+
+    **Keyed by core, like the sibling `jlink_device`.** An SVD is a register
+    map for one core's view of the SoC, not for the part: the Alif DFP ships
+    `<order_code>_CM55_HE_View.svd` and `<order_code>_CM55_HP_View.svd` as
+    separate files (cited at `metadata/socs/alif/ensemble/e3.json:225` and
+    `e5.json:173`), and `scripts/gen_rzv2n_cm33_svd.py` emits a CM33-only
+    view for a SoC that also has A55s. A single per-variant string could not
+    carry that, and the failure it invites -- attaching the HE register map
+    to an HP session -- is the one this key's own description calls worse
+    than shipping none, because a register map from the wrong core reads
+    plausibly. `expect_dpidr` and `jlink_flash_device` are per-variant and
+    each argues why in its description; this one cannot make that argument,
+    so it takes the shape the data has (#1890 review).
+
+    The value resolves in two places: the repository directory first, then
+    `ALP_SVD_DIR` -- the same shape `SETOOLS_DIR` already has for genuinely
+    licence-gated vendor tooling.  That split is why this gate cannot be a
+    single rule, and why getting it wrong in either direction is worse than
+    not having it:
+
+      * SHAPE is always checkable, and is what actually protects a
+        consumer.  An absolute path bakes one machine's layout into
+        published metadata; a `..` escapes whichever root resolved it, so a
+        value that looks repo-relative can reach outside the checkout; a
+        URL is not a path at all and a consumer would hand it to the
+        debugger verbatim.  All three are refused regardless of where the
+        file would come from.
+      * EXISTENCE is checkable ONLY for a path that resolves inside the
+        repo.  A value satisfied through `ALP_SVD_DIR` names a file on the
+        customer's machine, which this gate cannot see and must not call
+        missing -- that would fail a correctly-configured project on any
+        build host without the vendor SDK installed.
+
+    Shape is judged with `PureWindowsPath`, which treats BOTH `/` and `\\`
+    as separators. `PurePosixPath` does not: it reads `..\\outside\\x.svd` as
+    one filename, so every rule above was unenforced for a backslash
+    spelling while its POSIX twin was refused -- and `metadata\\svd\\...`
+    slipped the existence half too. The likeliest way to type that is on
+    this repo's own Windows maintainer host (#1890 review).
+
+    No SoC declares `svd` today, deliberately: ADR 0032 records the
+    mechanism for carrying vendor data under its own terms, not an
+    authorisation to carry any particular vendor's, so whether Alif's SVDs
+    are redistributed here is still a maintainer decision.  The gate ships
+    ahead of the data on purpose -- the first value to land is then checked
+    by an already-reviewed rule instead of arriving with its own.
+
+    Returns a failure list shaped like `_check_files()`, and PRINTS each
+    message, as every sibling checker does -- a gate whose diagnostics only
+    reach a return value makes CI red with no file, no core and no reason.
+    """
+    failures: list[tuple[str, list[str]]] = []
+    for path in soc_files:
+        try:
+            doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue  # non-object top level; schema pass already flags it
+        variants = _dict_entries(doc.get("variants"))
+        if not variants:
+            continue
+        rel = path.relative_to(REPO).as_posix()
+        core_ids = {
+            c.get("id") for c in _dict_entries(doc.get("cores"))
+            if isinstance(c.get("id"), str)
+        }
+        msgs: list[str] = []
+
+        for i, v in enumerate(variants):
+            debug = v.get("debug")
+            if not isinstance(debug, dict) or "svd" not in debug:
+                continue  # absent is a published "unknown", not a defect
+            where = f"variants[{i}] ({v.get('order_code', '<no order_code>')})"
+            svd_map = debug.get("svd")
+            if not isinstance(svd_map, dict) or not svd_map:
+                msgs.append(
+                    f"{where}: `debug.svd` must be a non-empty object keyed "
+                    f"by `cores[].id` (like `debug.jlink_device`), not "
+                    f"{type(svd_map).__name__} -- an SVD is one core's "
+                    f"register view, not the part's")
+                continue
+
+            for core_id, svd in svd_map.items():
+                at = f"{where} core {core_id!r}"
+                if core_id not in core_ids:
+                    msgs.append(
+                        f"{at}: `debug.svd` key is not a cores[].id "
+                        f"(known: {sorted(x for x in core_ids if x)})")
+                    continue
+                if not isinstance(svd, str) or not svd:
+                    # The schema says this too; repeat it so the rest of this
+                    # loop cannot raise on a bad value when the schema pass
+                    # has not run first.
+                    msgs.append(f"{at}: `debug.svd` must be a non-empty string")
+                    continue
+                if "://" in svd:
+                    msgs.append(
+                        f"{at}: `debug.svd` is a URL ({svd!r}); it must be a "
+                        "bare relative path -- a consumer passes this straight "
+                        "to the debugger as `svdFile`, which cannot fetch one")
+                    continue
+                # PureWindowsPath, not PurePosixPath: it is the only one of
+                # the two that treats `\\` as a separator, so a backslash
+                # spelling is judged by the same rules as its POSIX twin.
+                win = PureWindowsPath(svd)
+                if win.drive or win.root or win.is_absolute():
+                    msgs.append(
+                        f"{at}: `debug.svd` is an absolute path ({svd!r}); it "
+                        "must be relative, or this published metadata carries "
+                        "one machine's layout")
+                    continue
+                if ".." in win.parts:
+                    msgs.append(
+                        f"{at}: `debug.svd` contains `..` ({svd!r}); a "
+                        "relative path that escapes its own root defeats the "
+                        "repo-then-ALP_SVD_DIR resolution order")
+                    continue
+                # Existence, but only for a value that CLAIMS to be in-repo.
+                #
+                # The two cases cannot be told apart from the string itself --
+                # a path that is simply absent looks identical to one meant
+                # for ALP_SVD_DIR -- so the discriminator is the declared
+                # convention, not the filesystem: ADR 0032 puts vendored
+                # register descriptions under `metadata/svd/<vendor>/`. A
+                # value under that prefix asserts the repo carries the file
+                # and must be held to it; anything else is the
+                # customer-supplied case this gate cannot see and must not
+                # fail.
+                #
+                # An earlier draft keyed this on "does the parent directory
+                # exist", which inverted the check: a value naming a subtree
+                # nobody had created yet -- exactly the first mistake a
+                # vendoring PR would make -- passed silently.
+                #
+                # Normalised to POSIX first, or `metadata\\svd\\alif\\x.svd`
+                # claims the prefix in prose and escapes the check.
+                posix = PurePosixPath(svd.replace("\\", "/"))
+                if posix.parts[:2] == _VENDORED_SVD_ROOT.parts:
+                    if not (REPO / posix).is_file():
+                        msgs.append(
+                            f"{at}: `debug.svd` claims the repository carries "
+                            f"the file ({svd!r}, under {_VENDORED_SVD_ROOT}/) "
+                            "but it is not present -- either add it in the "
+                            "segregated subtree ADR 0032 describes, with the "
+                            "vendor's unmodified licence file beside it, or "
+                            "move the value out of that prefix so it resolves "
+                            "through ALP_SVD_DIR")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
 def _check_soc_jlink_flash_device_declared(soc_files) -> list:
     """Every Alif Ensemble variant must publish `debug.jlink_flash_device`,
     as a string or explicit `null` -- never omit the key.
@@ -1581,13 +1815,17 @@ def _check_supervisor_links_cross_refs(supervisor_links_files) -> list:
     the `gd32_spi.gpio_chip_select` entry -- must resolve to EXACTLY one
     `owner: "renesas"` row in metadata/pinmux/v2n.yaml.  Zero matches or
     more than one is a hard error naming the offending pair.  Where that
-    matched row itself carries a `core:` key, the value MUST be "m33" --
-    but a matched row with NO `core:` key is not an error: the console's
-    UART0_TXD0/UART0_RXD0 rows legitimately carry no `core:` attribution
-    in metadata/pinmux/v2n.yaml (see
+    matched row itself carries a `core:` key, the value MUST match the
+    link's owning core -- "m33" for gd32_spi and console (both CM33-
+    side), "a55" for brd_i2c (RIIC8/BRD_I2C is Cortex-A55/Linux-
+    exclusive; the CM33 must never master it -- maintainer decision,
+    metadata/e1m_modules/v2n/core-ownership.yaml).  A matched row with
+    NO `core:` key is not an error: the console's UART0_TXD0/UART0_RXD0
+    rows legitimately carry no `core:` attribution in
+    metadata/pinmux/v2n.yaml (see
     metadata/e1m_modules/v2n/core-ownership.yaml's own note on why
-    absence is never treated as "a55 by elimination"), so requiring
-    `core: "m33"` unconditionally would fail the console link.
+    absence is never treated as "a55 by elimination"), so requiring a
+    `core:` value unconditionally would fail the console link.
 
     Also cross-checks `brd_i2c.peer_address_7bit` against
     metadata/chips/gd32g553.yaml `i2c.default_address_7bit` -- the value
@@ -1646,7 +1884,8 @@ def _check_supervisor_links_cross_refs(supervisor_links_files) -> list:
                 if isinstance(sp, str) and isinstance(pad, str):
                     pads_by_pair.setdefault((sp, pad), []).append(row)
 
-    def _check_pair(sp: object, pad: object, where: str) -> None:
+    def _check_pair(sp: object, pad: object, where: str,
+                     expected_core: str = "m33") -> None:
         if not isinstance(sp, str) or not isinstance(pad, str):
             return  # already a schema-shape violation reported elsewhere
         matches = [r for r in pads_by_pair.get((sp, pad), [])
@@ -1658,11 +1897,11 @@ def _check_supervisor_links_cross_refs(supervisor_links_files) -> list:
                 f"metadata/pinmux/v2n.yaml (need exactly 1)")
             return
         core = matches[0].get("core")
-        if core is not None and core != "m33":
+        if core is not None and core != expected_core:
             msgs.append(
                 f"{where}: (silicon_peripheral={sp!r}, silicon_pad={pad!r}) "
                 f"resolves to a metadata/pinmux/v2n.yaml row with "
-                f"core={core!r}, expected \"m33\"")
+                f"core={core!r}, expected \"{expected_core}\"")
 
     _PAD_SHAPE = re.compile(r"^P([0-9])([0-9])$")
 
@@ -1690,15 +1929,26 @@ def _check_supervisor_links_cross_refs(supervisor_links_files) -> list:
     for link_name, link in sorted(links.items()):
         if not isinstance(link, dict):
             continue
+        # brd_i2c is Cortex-A55/Linux-exclusive (maintainer decision,
+        # metadata/e1m_modules/v2n/core-ownership.yaml) -- every other
+        # link here (gd32_spi, console) is CM33-side, hence "m33".
+        # Left as a name check, not derived from metadata/pinmux/v2n.yaml's
+        # own `core:` field per pin: this check's whole POINT is to catch
+        # supervisor-links.yaml drifting out of sync with that file, so
+        # deriving "expected" from the same file being cross-checked would
+        # make it tautological.  The link-name set is closed (this file's
+        # schema only ever defines gd32_spi / brd_i2c / console), so the
+        # hardcode is stable, not a maintenance trap.
+        expected_core = "a55" if link_name == "brd_i2c" else "m33"
         for pin in _dict_entries(link.get("pins")):
             sp, pad = pin.get("silicon_peripheral"), pin.get("silicon_pad")
-            _check_pair(sp, pad, f"supervisor_links.{link_name}.pins")
+            _check_pair(sp, pad, f"supervisor_links.{link_name}.pins", expected_core)
             _check_pad_derivation(pad, pin.get("pfc_port"), pin.get("pfc_pin"),
                                    f"supervisor_links.{link_name}.pins")
         gcs = link.get("gpio_chip_select")
         if isinstance(gcs, dict):
             _check_pair(gcs.get("silicon_peripheral"), gcs.get("silicon_pad"),
-                        f"supervisor_links.{link_name}.gpio_chip_select")
+                        f"supervisor_links.{link_name}.gpio_chip_select", expected_core)
 
     brd_i2c = links.get("brd_i2c")
     if isinstance(brd_i2c, dict) and "peer_address_7bit" in brd_i2c:
@@ -2440,7 +2690,7 @@ def _model_perf_target_context(sku: str):
     separately as "SKU exists").
 
     target_pairs -- the (backend, accel_config) pairs
-    `alp_model.targets.resolve_targets()` actually resolves for this SKU --
+    `alp_project_loader.resolve_targets()` actually resolves for this SKU --
     the SAME resolver `alp model check` uses, so a perf point can't name a
     target the tiered resolution could never route a compile to.
 
@@ -2452,10 +2702,10 @@ def _model_perf_target_context(sku: str):
     accel_config) target is allowed to name.  An NPU entry with no
     `paired_core` (accessible from more than one core, or not yet known)
     imposes no stricter constraint than "any topology core id" here --
-    `accel_config`'s one-line format mirrors `targets.py::_soc_targets()`,
-    the only other place this string is built, deliberately kept in sync by
-    hand rather than by extending that function's return shape for one
-    caller.
+    `accel_config`'s one-line format mirrors
+    `alp_project_loader.py::_soc_targets()`, the only other place this
+    string is built, deliberately kept in sync by hand rather than by
+    extending that function's return shape for one caller.
     """
     preset_path = SOM_PRESETS / f"{sku}.yaml"
     try:
@@ -2482,10 +2732,10 @@ def _model_perf_target_context(sku: str):
             pc = npu.get("paired_core")
             if not isinstance(pc, str) or not pc:
                 continue
-            backend = _npu_backend(str(npu.get("type", "")), str(npu.get("subtype", "")))
+            backend = npu_backend(str(npu.get("type", "")), str(npu.get("subtype", "")))
             if backend is None:
                 continue
-            accel = _accel_config(npu, backend)
+            accel = _resolve_accel_config(npu, backend)
             paired[(backend, accel)] = pc
 
     return target_pairs, core_ids, paired
@@ -2584,7 +2834,7 @@ def _check_model_perf_semantics(model_perf_files) -> list:
                 msgs.append(
                     f"target: (backend={backend!r}, accel_config="
                     f"{accel_config!r}) is not a target `{sku}` actually "
-                    f"resolves (alp_model.targets.resolve_targets) -- valid: "
+                    f"resolves (alp_project_loader.resolve_targets) -- valid: "
                     f"{sorted(target_pairs)}")
             if not isinstance(core, str) or not core:
                 msgs.append("target.core: missing/not a string")
@@ -2741,6 +2991,9 @@ def main() -> int:
     soc_failures += _check_soc_debug_probe_identity(soc_files)
     # #1295: every Alif Ensemble variant must declare debug.jlink_flash_device (string or null) -- never omit it.
     soc_failures += _check_soc_jlink_flash_device_declared(soc_files)
+    # #948: `debug.svd` is a bare relative path; it exists only when it
+    # resolves inside the repo (the ALP_SVD_DIR case is user-local).
+    soc_failures += _check_soc_debug_svd_shape(soc_files)
     # #1444: Alp Lab modules are BGA only -- no Alif Ensemble variant may declare a WLCSP package.
     soc_failures += _check_soc_no_wlcsp_variants(soc_files)
 
@@ -2961,6 +3214,12 @@ def main() -> int:
         print()
         memory_population_failures = _check_som_memory_population(som_files)
 
+    # SoM `memory_map:` regions must all carry `write_authority` (#1365).
+    write_authority_failures: list = []
+    if som_files:
+        print()
+        write_authority_failures = _check_som_write_authority_present(som_files)
+
     # SoM `on_module.i2c_devices.<bus>.devices[]` (bus, address_7bit) uniqueness (#1845).
     i2c_collision_failures: list = []
     if som_files:
@@ -2988,6 +3247,7 @@ def main() -> int:
                       + len(instance_uniqueness_failures)
                       + len(slot0_address_failures)
                       + len(memory_population_failures)
+                      + len(write_authority_failures)
                       + len(i2c_collision_failures)
                       + len(silicon_kconfig_failures)
                       + len(peripheral_kconfig_failures)

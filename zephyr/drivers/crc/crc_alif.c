@@ -21,6 +21,16 @@
  * The engine is a POLLED memory-mapped block -- no interrupt, no DMA (the DFP
  * exposes an optional DMA path; this driver uses the simple register feed).
  *
+ * PD-6 caveat (HWRM Table 15-26): both CRC0 and CRC1 live in power domain
+ * PD-6, which HWRM Section 8 documents as unavailable in STANDBY/STOP.  This
+ * driver has NO runtime PD-6 power-state read -- it is a bare register
+ * client, so an access while PD-6 is down is a bus error, not a graceful
+ * -EIO.  A caller on a core that can reach a low-power mode (the M55-HE's
+ * whole purpose) must not treat this engine as a hard dependency; every
+ * caller in this tree (e.g. gd32g553_ota_image_crc32(),
+ * src/zephyr/gd32g553_ota_crc_zephyr.c) gates on device_is_ready() and
+ * keeps a software fallback for exactly this reason.
+ *
  * Mapping of the upstream enum crc_type onto the Alif hardware algorithms
  * (drivers/include/crc.h algorithm selects):
  *   CRC8_CCITT  -> CRC_8_CCITT     (8-bit, poly 0x07,       seed 0xFF)

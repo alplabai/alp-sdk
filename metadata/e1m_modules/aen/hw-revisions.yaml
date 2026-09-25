@@ -3,6 +3,24 @@
 family: aen
 display_name: "E1M-AEN (Alif Ensemble)"
 
+# Altium board-number datecode (YYWW), shared by every revision of this module's
+# PCB -- the board is `E1M-AEN-2626-R1`, `E1M-AEN-2626-R2`, and so on.  It is a
+# family property, not a per-revision one, exactly as the `rN == board 2626-RN`
+# note below says.
+#
+# This is the SINGLE SOURCE for the datecode.  Before it existed, `2626` lived
+# only in prose comments scattered across the SKU YAMLs, so the identity written
+# into a module's EEPROM said `r2` and the datecode was lost -- a provisioned unit
+# could not be tied back to its board number.  scripts/program_eeprom.py now
+# composes `<board_datecode>-<rev key>` into the manifest's hw_rev field.
+#
+# BUDGET: the manifest's hw_rev field is ALP_HW_INFO_HW_REV_LEN = 8 bytes, so the
+# composed string may be at most 7 characters plus its NUL.  `2626-r2` is exactly
+# 7 -- there is NO slack.  A future revision key of `r10` (`2626-r10`, 8 chars)
+# will not fit and program_eeprom.py will refuse to pack it.  Widening the field
+# is a schema_version bump; see docs/board-id.md.
+board_datecode: "2626"
+
 hw_revisions:
   # SDK rev key tracks the Altium board rev (rN == board 2626-RN) so there
   # is no label offset.  Per the family invariant, all AEN SKUs (E3..E8)
