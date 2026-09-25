@@ -263,6 +263,18 @@ exception -- those are real Apache-2.0.
   image want clarity on whether they can redistribute the
   layer.  Carry as an open item.
 
+**Decision 2026-09-25 (§C.43)**: meta-alp-sdk now consumes DEEPX's
+official `meta-deepx-m1` layer directly (verified commit
+`8d09b25f20f81104c16c7de90928ff8920eb482d`, branch `scarthgap`) as an
+OPTIONAL external layer for the V2M SKUs, replacing the unbuildable
+in-tree `recipes-deepx/dx-rt/dx-rt_2.4.bb` placeholder (now deleted).
+meta-alp-sdk ships no DEEPX code either way -- the placeholder never
+did, and the real layer is fetched by the licensed customer at build
+time -- so the redistribution question below is now moot for our own
+layer; it remains an open question only for a customer who wants to
+redistribute `meta-deepx-m1` itself, which is between them and DEEPX.
+Closes alp-sdk issue #482.
+
 **Open items**:
 
 - 📋 **`meta-deepx-m1` LICENSE clarification.**  The Yocto

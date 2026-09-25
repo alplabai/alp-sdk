@@ -55,9 +55,6 @@ meta-alp-sdk/
 ├── recipes-examples/
 │   └── alp-edgeai/
 │       └── alp-edgeai_0.6.bb            # End-to-end EdgeAI demo (camera → NPU → display).
-├── recipes-deepx/
-│   └── dx-rt/
-│       └── dx-rt_2.4.bb                 # Pins the DEEPX runtime (vendor-licensed).
 ├── recipes-images/
 │   ├── alp-image-common.inc            # Shared runtime for both images below.
 │   ├── alp-image-edge.bb                # Dev image: common + debug-tweaks + bench tooling.
@@ -189,8 +186,10 @@ bitbake-layers add-layer ../meta-ros/meta-ros2-humble
 git clone https://github.com/alplabai/alp-sdk ../alp-sdk
 bitbake-layers add-layer ../alp-sdk/meta-alp-sdk
 
-# 6. For V2N-M1, also add meta-deepx-m1 (DEEPX's M1 recipes):
-git clone https://github.com/DEEPX-AI/meta-deepx-m1 ../meta-deepx-m1
+# 6. For V2N-M1 / V2M, also add DEEPX's own official meta-deepx-m1
+#    layer (verified commit 8d09b25f20f81104c16c7de90928ff8920eb482d
+#    on branch scarthgap):
+git clone -b scarthgap https://github.com/DEEPX-AI/meta-deepx-m1.git ../meta-deepx-m1
 bitbake-layers add-layer ../meta-deepx-m1
 
 # 7. Pick the MACHINE in conf/local.conf:
@@ -198,7 +197,10 @@ MACHINE = "e1m-v2n101-a55"     # plain V2N
 # or
 MACHINE = "e1m-v2m101-a55"     # V2N + DEEPX
 
-# 8. Build the image:
+# 8. Enable the DEEPX runtime (opt-in; requires step 6's layer):
+ALP_ENABLE_DEEPX_DXM1 = "1"
+
+# 9. Build the image:
 bitbake alp-image-edge                 # dev image (passwordless root, bench tooling)
 # or the hardened production image, against the Alp distro identity:
 DISTRO=alp bitbake alp-image-prod      # key-only SSH, no debug tooling, "Alp SDK" branding
@@ -308,16 +310,18 @@ backend the SoM preset's `capabilities:` block declares
 (silicon-determined), but the **vendor NPU runtimes are not build-time
 dependencies of the `alp-sdk` library** — the Yocto build links only
 the dispatcher + portable stubs.  Where a runtime userspace package
-exists, the **image** recipe installs it (e.g. `alp-image-edge`'s
-`IMAGE_INSTALL:append:e1m-v2m101 = "dx-rt"`); DRP-AI3 is driven through
-the in-kernel driver + UAPI headers from `meta-rz-drpai` (see below).
+exists, the **image** recipe installs it (e.g.
+`conf/machine/include/e1m-v2m-deepx.inc` appending `dx-driver dx-rt
+dx-rt-cli` when `ALP_ENABLE_DEEPX_DXM1 = "1"`); DRP-AI3 is driven
+through the in-kernel driver + UAPI headers from `meta-rz-drpai` (see
+below).
 
 | MACHINE              | NPU backend            | Runtime source                              |
 |----------------------|------------------------|---------------------------------------------|
 | `e1m-v2n101-a55`     | DRP-AI3                | in-kernel driver + `meta-rz-drpai` headers  |
 | `e1m-v2n102-a55`     | DRP-AI3                | Same as V2N101 (memory variant)             |
 | `e1m-v2n103-a55`     | DRP-AI3                | Same as V2N101 (memory variant)             |
-| `e1m-v2m101-a55`     | DRP-AI3 + DEEPX DX-M1  | DRP-AI3 as above; `dx-rt` via the image     |
+| `e1m-v2m101-a55`     | DRP-AI3 + DEEPX DX-M1  | DRP-AI3 as above; `dx-driver`/`dx-rt` via `meta-deepx-m1` |
 | `e1m-v2m102-a55`     | Same as V2M101         | Same as V2M101 (memory variant)             |
 | `e1m-v2m103-a55`     | Same as V2M101         | Same as V2M101 (memory variant)             |
 | `e1m-nx9101-a55`     | Ethos-U65              | NXP i.MX 93 Ethos-U userspace via the image |
@@ -436,16 +440,21 @@ updates ride the `.mender` artefact through the Mender server.
 
 ## Licence
 
-Apache-2.0 (umbrella).  Vendor-licensed components (`dx-rt`,
-`drp-ai-tvm`) follow their upstream licences and are flagged as
-such in the matching recipes' `LICENSE` field.
+Apache-2.0 (umbrella).  Vendor-licensed components (`drp-ai-tvm`)
+follow their upstream licences and are flagged as such in the
+matching recipes' `LICENSE` field.  The DEEPX DX-M1 driver + runtime
+(`dx-driver`, `dx-rt`, `dx-rt-cli`) are **DEEPX-proprietary**,
+provided by DEEPX to its own DX-M1 NPU customers under DEEPX's own
+licence terms via DEEPX's own `meta-deepx-m1` layer
+(github.com/DEEPX-AI/meta-deepx-m1) — this public `meta-alp-sdk`
+layer ships **no DEEPX code**.  It only references DEEPX's own
+public repos by URL; a licensed DEEPX NPU customer fetches them
+themselves at build time by adding the layer to their own
+bblayers.conf.  See [`docs/vendor-partnerships.md`](../docs/vendor-partnerships.md)'s
+DEEPX section for the full licensing detail.
 
 ## What's deferred
 
-- `dx-rt_*.bb` is a skeleton — the DEEPX SDK signed-licence
-  acknowledgement closes the legal review per
-  [`docs/vendor-partnerships.md`](../docs/vendor-partnerships.md)
-  §C.31.
 - AEN A32-class MACHINE carrier scaffolding ships for five SKUs
   (`e1m-aen{501,601,701,801,803}-a32`), but NONE of the five build
   today -- `e1m-aen801-a32` / `e1m-aen701-a32` carry a broken or

@@ -85,19 +85,40 @@ PACKAGECONFIG[audio]    = ",,alsa-lib"
 PACKAGECONFIG[rpc]      = ",,open-amp libmetal"
 PACKAGECONFIG[drpai]    = "-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=ON,-DALP_SDK_USE_DRPAI_V2N=OFF,mera2-drpai-tvm drpai lib-tvm,"
 
+# deepx-dxm1 -> dx-rt (DEEPX's own meta-deepx-m1 layer; see
+#               conf/machine/include/e1m-v2m-deepx.inc).  Same
+#               REQUIRED-flag shape as `drpai` above: turning this on
+#               makes src/yocto/inference_deepx.cpp compile against the
+#               real dx_rt headers/libdxrt instead of degrading to the
+#               portable stub.  NOT default-on unconditionally -- only
+#               when the MACHINE actually carries the DEEPX silicon
+#               (MACHINE_FEATURES `deepx-dxm1`, set by the V2M machine
+#               confs) AND the build has opted in to the license-gated
+#               runtime (ALP_ENABLE_DEEPX_DXM1 = "1", same opt-in the
+#               image recipe gates its dx-rt IMAGE_INSTALL on).  A V2M
+#               build that leaves ALP_ENABLE_DEEPX_DXM1 unset still
+#               builds -- it links only the dispatcher + portable stub,
+#               same as today.
+PACKAGECONFIG[deepx-dxm1] = "-DALP_SDK_USE_DEEPX_DXM1=ON -DALP_SDK_DEEPX_REQUIRED=ON,-DALP_SDK_USE_DEEPX_DXM1=OFF,dx-rt,"
+PACKAGECONFIG:append = "${@bb.utils.contains('MACHINE_FEATURES', 'deepx-dxm1', ' deepx-dxm1' if d.getVar('ALP_ENABLE_DEEPX_DXM1') == '1' else '', '', d)}"
+
 # Inference backends are NOT build-time dependencies of the SDK
 # library.  The Yocto build (src/yocto/) links only the
 # <alp/inference.h> dispatcher + the portable stubs; the vendor NPU
 # backends are gated (the DRP-AI3 backend is real MeraDrpRuntimeWrapper
 # code since #1145, but compiles in only under the `drpai` PACKAGECONFIG
 # above and has never run on DRP-AI silicon; the DEEPX DX-M1 backend is
-# behind ALP_SDK_USE_DEEPX_DXM1 and compiles against an in-tree stub
-# header).
+# real dx_rt-API code since #482 and compiles in only under the
+# `deepx-dxm1` PACKAGECONFIG above, auto-enabled only on a MACHINE that
+# carries `deepx-dxm1` in MACHINE_FEATURES with ALP_ENABLE_DEEPX_DXM1 =
+# "1" -- it too has never run on DX-M1 silicon).
 # Where a per-machine NPU userspace runtime package exists it is
-# installed by the *image* recipe (DEEPX's dx-rt is opted in per the
-# e1m-v2m10{1,2}-a55 MACHINE confs, gated on ALP_ENABLE_DEEPX_DXM1 --
-# see alp-image-common.inc's DEEPX note); this recipe pulls the DEEPX
-# runtime not at all.
+# installed by the *image* recipe (DEEPX's dx-rt/dx-driver/dx-rt-cli are
+# opted in per the e1m-v2m10{1,2,3}-a55 MACHINE confs via
+# conf/machine/include/e1m-v2m-deepx.inc, gated on
+# ALP_ENABLE_DEEPX_DXM1); this recipe's own `deepx-dxm1` PACKAGECONFIG
+# only pulls the `dx-rt` BUILD dependency (headers + libdxrt), not the
+# runtime install.
 #
 # DRP-AI3 is the exception, and only when PACKAGECONFIG[drpai] is on: its
 # DEPENDS field names `drpai` and `lib-tvm` explicitly.  That is required,
