@@ -43,13 +43,19 @@ A 1440x1080 image is a crop the application takes from that frame.
    runtime (``-ENOTSUP``) rather than silently mis-clocking the sensor.
 
 .. note::
-   Bench status (issue #2287, bench run 229, an E1M-AEN803 on the E1M-EVK):
-   the sensor's I2C identity is silicon-verified -- a real INNO-MAKER
+   Bench status (issue #2287, an E1M-AEN803 on the E1M-EVK): the sensor's
+   I2C identity is silicon-verified (bench run 229) -- a real INNO-MAKER
    CAM-IMX296RAW-TRIGGER module answers at CCI address 0x1A and the
    driver's SENSOR_INFO probe reads back the expected colour-IMX296LQR-C
-   signature. The CSI-2 streaming path (mode-register programming, D-PHY
-   lock, a captured frame) has not run on this silicon yet -- see
-   ``docs/camera-shields.md``.
+   signature. On a later bench pass, on the same silicon, the sensor also
+   streams: the CSI-2 host's frame counter advances once master-mode
+   free-run starts. **No frame has been captured yet -- the Alif IPI emits
+   no line.** This sensor has no known register to park its CSI-2 CLOCK
+   lane at LP-11 short of full streaming (unlike OV5647), so the CSI-2
+   host's D-PHY Stop-state wait skips only that one lane's check for this
+   sensor via a new DT property, ``no-lp11-clock-lane-park`` -- an
+   inference from the datasheet, not a bench measurement of the D-PHY's
+   Stop-state register. See ``docs/camera-shields.md``.
 
 Requirements
 ************

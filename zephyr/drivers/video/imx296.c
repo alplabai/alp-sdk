@@ -10,21 +10,46 @@
  * upstream Zephyr v4.4.1 ships no "sony,imx296" driver, hal_alif carries no
  * IMX296 register lib, and Espressif esp_cam_sensor has no IMX296 port (it
  * has ov9281, consumed separately in ov9281.c). The only other IMX296
- * drivers known to exist are Linux's (GPL-2.0, not consumable) and
- * libcamera's helpers (also not consumable) -- neither was opened, fetched
- * or read while writing this file; every register address, value and
- * per-INCK table below is cited to a datasheet section/table in the comment
- * above it, not copied from any other driver.
+ * drivers known to exist are Linux's (GPL-2.0) and libcamera's helpers
+ * (also GPL/LGPL) -- neither is consumable under this project's licence.
+ * Linux's imx296.c was used strictly as a REGISTER-NAME reference for a
+ * handful of names this datasheet leaves unnamed (e.g. SENSOR_INFO,
+ * 0x3148) -- it was not opened for, and no code, text or table from it was
+ * copied into, this file; every register address, value and per-INCK table
+ * below is independently cited to a datasheet section/table in the comment
+ * above it.
  *
- * BENCH STATUS (issue #2287, bench run 229, E1M-AEN803 2026W36-0001,
- * csi_i2c = I2C1 @ 0x49011000): the I2C identity path IS silicon-verified --
- * a real INNO-MAKER CAM-IMX296RAW-TRIGGER module answers at 0x1A and the
- * SENSOR_INFO probe below (added by this bench pass) reads back the exact
- * colour-IMX296LQR signature this driver expects. The CSI-2 streaming path
- * (mode-register programming, D-PHY lock, a captured frame) has NOT been
- * run on this silicon yet -- treat every register value below the
- * SENSOR_INFO check as paper-correct-from-datasheet only, same as before
- * this bench pass.
+ * BENCH STATUS (issue #2287, E1M-AEN803 2026W36-0001, csi_i2c = I2C1 @
+ * 0x49011000): the I2C identity path is silicon-verified (bench run 229 --
+ * SENSOR_INFO reads 0x4A00, the colour-IMX296LQR signature this driver
+ * expects). On a later bench pass, on the same silicon, the sensor also
+ * streams -- the CSI-2 host's frame counter advances once XMSTA starts
+ * master-mode free-run. No frame has been captured yet: the Alif IPI emits
+ * no line. Whether the clock-lane LP-11 workaround below
+ * (`no-lp11-clock-lane-park`, see zephyr/drivers/mipi_dphy/dphy_dw.c) is
+ * what let streaming start, versus some other factor, is NOT independently
+ * isolated on this silicon -- treat every register value below the
+ * SENSOR_INFO check, and the capture path end to end, as unproven past
+ * "the frame counter moves".
+ *
+ * LANE-PARK / D-PHY BEHAVIOUR: unlike OV5647 (issue #2248,
+ * ov5647_lane_park()), this datasheet documents no register that forces the
+ * CSI-2 CLOCK lane to Stop-state (LP-11) short of exiting STANDBY into full
+ * master-mode streaming -- imx296_init() leaves the sensor in STANDBY (no
+ * MIPI output at all), so the CSI-2 host's D-PHY Stop-state wait
+ * (dphy_dw_slave_setup(), called from csi2_dw_configure() at set_format
+ * time) would otherwise time out fatally before streaming ever starts, the
+ * same shape OV5647 hit before ov5647_lane_park() fixed it there. This is
+ * an INFERENCE from the datasheet and this driver's own init() ordering,
+ * not a bench measurement of the D-PHY's Stop-state register during
+ * STANDBY. Because no sensor-side fix is available, the shield instead sets
+ * `no-lp11-clock-lane-park` on this sensor's own CSI-2 endpoint (see
+ * raspberry_pi_global_shutter_camera.overlay and the property's doc comment
+ * in zephyr/dts/bindings/video/sony,imx296.yaml) so the D-PHY wait skips
+ * only the clock-lane Stop-state bit for this sensor; the data-lane
+ * Stop-state check and the wait's timeout stay fatal for this sensor and
+ * every other, including OV5647 -- that fatality is what caught OV5647's
+ * own silicon defect (#2248) and must not be weakened globally.
  *
  * RETIREMENT: upstream this driver to Zephyr (drivers/video/) the moment a
  * native "sony,imx296" driver lands there, and delete this file + its
@@ -175,7 +200,9 @@ LOG_MODULE_REGISTER(imx296, CONFIG_VIDEO_LOG_LEVEL);
  * (page 56): GAIN[8:0] at 0x3204 (LSB), reflect "V". Combined analogue +
  * digital gain, 0.1 dB step, 0 (0 dB) to 480 (48.0 dB) -- "Register List of
  * Gain setting" (page 56) gives the valid range as 000h to 1E0h (0 to 480
- * decimal).
+ * decimal). This driver exposes the whole combined value as a single
+ * control, VIDEO_CID_ANALOGUE_GAIN -- there is no separate digital-gain
+ * control or register in this datasheet to split it against.
  */
 #define IMX296_REG_GAIN IMX296_REG16(0x3204)
 #define IMX296_GAIN_MAX 480
@@ -693,6 +720,34 @@ static int imx296_init(const struct device *dev)
 	}
 
 	ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_CSI_TIMING, inck->csi_timing);
+	if (ret < 0) {
+		return ret;
+	}
+
+	/*
+	 * imx296_init_ctrls() below only creates the v4.4 video-control-registry
+	 * entries with their default VALUES -- it never touches hardware. On a
+	 * cold boot the sensor's own POR defaults already agree with these (SHS
+	 * POR default matches IMX296_SHS_DEFAULT, GAIN POR default is 0, REVERSE
+	 * POR default is 0 -- see each register's own comment above), but on a
+	 * warm SoC reset (this module stays powered across one, see the STANDBY
+	 * comment above imx296_init()) the sensor can already carry a PRIOR
+	 * session's SHS/GAIN/REVERSE values while the control registry resets to
+	 * its defaults -- silently disagreeing with hardware until the next
+	 * explicit video_set_ctrl() call. Write all three here so control cache
+	 * and hardware start in agreement regardless of boot history.
+	 */
+	ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_SHS, IMX296_VMAX - IMX296_SHS_DEFAULT);
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_GAIN, 0);
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_REVERSE, 0);
 	if (ret < 0) {
 		return ret;
 	}

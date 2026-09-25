@@ -19,7 +19,8 @@
 
 #include "imx296_emul.h"
 
-#define IMX296_NODE DT_NODELABEL(imx296_test)
+#define IMX296_NODE        DT_NODELABEL(imx296_test)
+#define IMX296_BAD_ID_NODE DT_NODELABEL(imx296_bad_id_test)
 
 /* Register addresses this test peeks/pokes -- kept local rather than pulling imx296.c's private
  * IMX296_REG*()-wrapped values, which also encode CCI address/data-size metadata this test
@@ -32,6 +33,20 @@
 #define REG_SHS_MSB  0x308f
 #define REG_GAIN_LSB 0x3204
 #define REG_GAIN_MSB 0x3205
+
+/* VMAX (24-bit LE), HMAX (16-bit LE), INCKSEL0..3 and CSI_TIMING -- see imx296.c's
+ * IMX296_REG_VMAX / IMX296_REG_HMAX / IMX296_REG_INCKSEL0..3 / IMX296_REG_CSI_TIMING and
+ * imx296_inck_table[]'s 54 MHz row. */
+#define REG_VMAX_LSB   0x3010
+#define REG_VMAX_MID   0x3011
+#define REG_VMAX_MSB   0x3012
+#define REG_HMAX_LSB   0x3014
+#define REG_HMAX_MSB   0x3015
+#define REG_INCKSEL0   0x3089
+#define REG_INCKSEL1   0x308a
+#define REG_INCKSEL2   0x308b
+#define REG_INCKSEL3   0x308c
+#define REG_CSI_TIMING 0x418c
 
 #define STANDBY_STANDBY  BIT(0)
 #define XMSTA_STOP       BIT(0)
@@ -60,6 +75,152 @@ ZTEST(imx296, test_device_is_ready)
 	/* Only reachable if imx296_init()'s SENSOR_INFO probe matched the bench-confirmed
 	 * colour-IMX296LQR-C signature imx296_emul.c seeds -- see that file's header comment. */
 	zassert_true(device_is_ready(imx296_dev()), "IMX296 device not ready");
+}
+
+ZTEST(imx296, test_sensor_info_mismatch_leaves_device_not_ready)
+{
+	/* imx296_bad_id_test (app.overlay) shares this driver but its emulator instance
+	 * (imx296_emul.c, matched by CCI address 0x1b) seeds a SENSOR_INFO that does NOT match
+	 * IMX296_SENSOR_INFO_LQR_COLOUR -- imx296_init() must reject it with -ENODEV rather than
+	 * silently proceeding to program VMAX/HMAX/INCKSEL against unidentified silicon. */
+	zassert_false(device_is_ready(DEVICE_DT_GET(IMX296_BAD_ID_NODE)),
+	              "device with a mismatched SENSOR_INFO should not be ready");
+}
+
+ZTEST(imx296, test_init_register_values)
+{
+	/* Final register state left by imx296_init() for the 54 MHz INCK the app.overlay's
+	 * imx296_input_clock fixed-clock provides -- imx296_inck_table[]'s 54 MHz row. Read as
+	 * final values (not log order -- see test_init_quiesce_order below for that), so this
+	 * survives regardless of what earlier tests in this suite have done since boot. */
+	const struct emul *emul = imx296_emul();
+	uint8_t            val;
+
+	/* VMAX = 1118 = 0x00045E, 24-bit LE */
+	zassert_ok(imx296_emul_get_reg(emul, REG_VMAX_LSB, &val));
+	zassert_equal(val, 0x5e, "VMAX LSB");
+	zassert_ok(imx296_emul_get_reg(emul, REG_VMAX_MID, &val));
+	zassert_equal(val, 0x04, "VMAX mid byte");
+	zassert_ok(imx296_emul_get_reg(emul, REG_VMAX_MSB, &val));
+	zassert_equal(val, 0x00, "VMAX MSB");
+
+	/* HMAX = 1100 = 0x044C, 16-bit LE */
+	zassert_ok(imx296_emul_get_reg(emul, REG_HMAX_LSB, &val));
+	zassert_equal(val, 0x4c, "HMAX LSB");
+	zassert_ok(imx296_emul_get_reg(emul, REG_HMAX_MSB, &val));
+	zassert_equal(val, 0x04, "HMAX MSB");
+
+	zassert_ok(imx296_emul_get_reg(emul, REG_INCKSEL0, &val));
+	zassert_equal(val, 0xb0, "INCKSEL0 (54 MHz row)");
+	zassert_ok(imx296_emul_get_reg(emul, REG_INCKSEL1, &val));
+	zassert_equal(val, 0x0f, "INCKSEL1 (54 MHz row)");
+	zassert_ok(imx296_emul_get_reg(emul, REG_INCKSEL2, &val));
+	zassert_equal(val, 0xb0, "INCKSEL2 (54 MHz row)");
+	zassert_ok(imx296_emul_get_reg(emul, REG_INCKSEL3, &val));
+	zassert_equal(val, 0x0c, "INCKSEL3 (54 MHz row)");
+
+	zassert_ok(imx296_emul_get_reg(emul, REG_CSI_TIMING, &val));
+	zassert_equal(val, 0xa8, "CSI_TIMING (54 MHz row)");
+}
+
+/* Find the FIRST recorded write to @p reg since boot (or the last imx296_emul_clear_log()) --
+ * used below to inspect imx296_init()'s own default write, even if a LATER-run test (ztest does
+ * not guarantee declaration order between suites -- see ZTEST_SUITE's own docs) has since
+ * overwritten that register via video_set_ctrl(). The register's FINAL value is not a safe check
+ * here for that reason; its first logged write is. */
+static bool imx296_test_first_write(const struct emul *emul, uint16_t reg, uint8_t *value)
+{
+	struct imx296_emul_write w;
+
+	for (size_t i = 0; i < imx296_emul_log_count(emul); i++) {
+		if (imx296_emul_log_get(emul, i, &w) == 0 && w.reg == reg) {
+			*value = w.value;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+ZTEST(imx296, test_shs_gain_reverse_defaults_written_at_init)
+{
+	/* imx296_init() now writes SHS/GAIN/REVERSE to their control-registry default values
+	 * (see the comment above these writes in imx296.c) so hardware and the control cache
+	 * agree from boot, not just after the first explicit video_set_ctrl(). Checked via the
+	 * FIRST logged write to each register (see imx296_test_first_write() above), not the
+	 * final register value, because ztest test order is not declaration order and another
+	 * test's video_set_ctrl() may have since overwritten these same registers. */
+	const struct emul *emul = imx296_emul();
+	uint8_t            val;
+
+	/* SHS default = VMAX - IMX296_SHS_DEFAULT = 1118 - 14 = 1104 = 0x000450, 24-bit LE */
+	zassert_true(imx296_test_first_write(emul, REG_SHS_LSB, &val), "no write to SHS LSB logged");
+	zassert_equal(val, 0x50, "SHS LSB default");
+	zassert_true(imx296_test_first_write(emul, REG_SHS_MID, &val), "no write to SHS mid logged");
+	zassert_equal(val, 0x04, "SHS mid byte default");
+	zassert_true(imx296_test_first_write(emul, REG_SHS_MSB, &val), "no write to SHS MSB logged");
+	zassert_equal(val, 0x00, "SHS MSB default");
+
+	zassert_true(imx296_test_first_write(emul, REG_GAIN_LSB, &val), "no write to GAIN LSB logged");
+	zassert_equal(val, 0x00, "GAIN LSB default (0 dB)");
+	zassert_true(imx296_test_first_write(emul, REG_GAIN_MSB, &val), "no write to GAIN MSB logged");
+	zassert_equal(val, 0x00, "GAIN MSB default (0 dB)");
+
+	zassert_true(imx296_test_first_write(emul, REG_REVERSE, &val), "no write to REVERSE logged");
+	zassert_equal(val, 0x00, "REVERSE default (no flip)");
+}
+
+ZTEST(imx296, test_init_quiesce_order)
+{
+	/* "Slave Mode and Master Mode" (page 55) + "Standby mode" (page 54): imx296_init() must
+	 * stop master-mode (XMSTA=stop) and arm STANDBY before touching anything else, then
+	 * briefly CANCEL standby to read SENSOR_INFO, then RE-ARM standby before writing the
+	 * "S" (standby-only) registers VMAX/HMAX/INCKSEL/CSI_TIMING -- a values-only check (see
+	 * test_init_register_values above) cannot see this ordering, only the write log can.
+	 * This must run before any test clears the log (i.e. before test_stream_start_... below)
+	 * so it observes the pristine boot-time sequence.
+	 */
+	const struct emul       *emul = imx296_emul();
+	struct imx296_emul_write w;
+
+	zassert_true(imx296_emul_log_count(emul) >= 6,
+	             "expected at least 6 writes by the end of imx296_init()'s quiesce+identity "
+	             "round trip, got %zu",
+	             imx296_emul_log_count(emul));
+
+	zassert_ok(imx296_emul_log_get(emul, 0, &w));
+	zassert_equal(w.reg, REG_XMSTA, "write 0 should be XMSTA (stop)");
+	zassert_equal(w.value, XMSTA_STOP, "write 0: XMSTA should be set to stop");
+
+	zassert_ok(imx296_emul_log_get(emul, 1, &w));
+	zassert_equal(w.reg, REG_STANDBY, "write 1 should be STANDBY (arm)");
+	zassert_equal(w.value, STANDBY_STANDBY, "write 1: STANDBY should be armed");
+
+	zassert_ok(imx296_emul_log_get(emul, 2, &w));
+	zassert_equal(w.reg, REG_STANDBY, "write 2 should be STANDBY (cancel, to read SENSOR_INFO)");
+	zassert_equal(w.value, 0, "write 2: STANDBY should be cancelled");
+
+	zassert_ok(imx296_emul_log_get(emul, 3, &w));
+	zassert_equal(w.reg,
+	              REG_STANDBY,
+	              "write 3 should be STANDBY (re-arm, before the VMAX/HMAX/INCKSEL 'S' "
+	              "registers)");
+	zassert_equal(w.value, STANDBY_STANDBY, "write 3: STANDBY should be re-armed");
+
+	/* Every VMAX/HMAX/INCKSEL/CSI_TIMING write must come AFTER the re-arm at index 3 --
+	 * writing an "S" register while standby is still cancelled would not be what the
+	 * datasheet's "S" (set during standby) annotation documents. */
+	for (size_t i = 0; i < imx296_emul_log_count(emul); i++) {
+		zassert_ok(imx296_emul_log_get(emul, i, &w));
+		if (w.reg == REG_VMAX_LSB || w.reg == REG_HMAX_LSB || w.reg == REG_INCKSEL0 ||
+		    w.reg == REG_CSI_TIMING) {
+			zassert_true(i > 3,
+			             "write %zu (reg 0x%04x) is an 'S' register but landed before "
+			             "the standby re-arm at index 3",
+			             i,
+			             w.reg);
+		}
+	}
 }
 
 ZTEST(imx296, test_get_caps_lists_exactly_one_mode)

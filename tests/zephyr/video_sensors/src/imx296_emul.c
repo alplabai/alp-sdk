@@ -156,9 +156,17 @@ imx296_emul_transfer_i2c(const struct emul *target, struct i2c_msg msgs[], int n
 	return 0;
 }
 
+/* Config data: whether this instance should seed a WRONG SENSOR_INFO, to exercise
+ * imx296_init()'s identity-mismatch -ENODEV path from imx296_test.c. Set per-instance from the
+ * node's own CCI address below -- see IMX296_EMUL(n) and app.overlay's imx296_bad_id_test node. */
+struct imx296_emul_cfg {
+	bool seed_bad_sensor_info;
+};
+
 static int imx296_emul_init(const struct emul *target, const struct device *parent)
 {
-	struct imx296_emul_data *data = target->data;
+	struct imx296_emul_data      *data = target->data;
+	const struct imx296_emul_cfg *cfg  = target->cfg;
 
 	ARG_UNUSED(parent);
 
@@ -173,9 +181,15 @@ static int imx296_emul_init(const struct emul *target, const struct device *pare
 
 	/* SENSOR_INFO (IMX296_REG_SENSOR_INFO = IMX296_REG16(0x3148), little-endian): bench run
 	 * 229's confirmed colour-IMX296LQR-C signature 0x4a00 -- see this file's header comment
-	 * for the byte order. */
-	data->regs[0x3148] = 0x00;
-	data->regs[0x3149] = 0x4a;
+	 * for the byte order. imx296_bad_id_test seeds an arbitrary WRONG value instead, to prove
+	 * imx296_init() rejects a signature that isn't this exact one. */
+	if (cfg != NULL && cfg->seed_bad_sensor_info) {
+		data->regs[0x3148] = 0x00;
+		data->regs[0x3149] = 0x00;
+	} else {
+		data->regs[0x3148] = 0x00;
+		data->regs[0x3149] = 0x4a;
+	}
 
 	return 0;
 }
@@ -185,8 +199,15 @@ static const struct i2c_emul_api imx296_emul_api_i2c = {
 };
 
 #define IMX296_EMUL(n) \
-	static struct imx296_emul_data imx296_emul_data_##n; \
-	EMUL_DT_INST_DEFINE( \
-	    n, imx296_emul_init, &imx296_emul_data_##n, NULL, &imx296_emul_api_i2c, NULL)
+	static struct imx296_emul_data      imx296_emul_data_##n; \
+	static const struct imx296_emul_cfg imx296_emul_cfg_##n = { \
+		.seed_bad_sensor_info = (DT_INST_REG_ADDR(n) != 0x1a), \
+	}; \
+	EMUL_DT_INST_DEFINE(n, \
+	                    imx296_emul_init, \
+	                    &imx296_emul_data_##n, \
+	                    &imx296_emul_cfg_##n, \
+	                    &imx296_emul_api_i2c, \
+	                    NULL)
 
 DT_INST_FOREACH_STATUS_OKAY(IMX296_EMUL)

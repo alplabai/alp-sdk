@@ -3,10 +3,11 @@ schema_version:   1
 chip_id:          imx296
 driver_status:    none              # no chips/imx296/ portable chip-ID stub exists (unlike
                                      # OV9281's chips/ov9281/ov9281.c) -- streaming lives entirely
-                                     # in the Zephyr driver, zephyr/drivers/video/imx296.c, the
-                                     # same shape OV5647 uses (also driver_status: none, no
-                                     # chips/ entry). This manifest is catalogue-only, allowlisted
-                                     # in scripts/check_chip_manifest_parity.py's
+                                     # in the Zephyr driver, zephyr/drivers/video/imx296.c. OV5647
+                                     # takes the shape one step further: it has no metadata/chips/
+                                     # manifest at all, catalogue-only or otherwise. This manifest
+                                     # IS one (driver_status: none, no chips/ entry) -- catalogue-
+                                     # only, allowlisted in scripts/check_chip_manifest_parity.py's
                                      # KNOWN_MANIFEST_NO_DRIVER.
 display_name:     "Sony IMX296LQR-C 1.58 MP global-shutter colour MIPI CSI-2 sensor"
 vendor:           sony

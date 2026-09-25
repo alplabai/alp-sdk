@@ -80,4 +80,25 @@
 			};
 		};
 	};
+
+	/* Second instance at a distinct CCI address, purely to give
+	 * imx296_test.c a device whose emulator seeds a WRONG SENSOR_INFO
+	 * (imx296_emul.c matches this node by its reg address) -- exercises
+	 * imx296_init()'s identity-mismatch -ENODEV path, which the real
+	 * imx296_test node above (seeded with the bench-confirmed signature)
+	 * cannot reach.
+	 */
+	imx296_bad_id_test: imx296@1b {
+		compatible = "sony,imx296";
+		reg = <0x1b>;
+		clocks = <&imx296_input_clock>;
+		status = "okay";
+
+		port {
+			imx296_bad_id_test_ep: endpoint {
+				remote-endpoint-label = "";
+				data-lanes = <1>;
+			};
+		};
+	};
 };

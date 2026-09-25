@@ -943,6 +943,9 @@ static int csi2_dw_init(const struct device *dev)
 						link_frequencies),                                 \
 					(DT_PROP_LAST(REMOTE_EP(i, 0, 0), link_frequencies)),      \
 					(DT_INST_PROP(i, rx_ddr_clk1))),                           \
+			/* issue #2287: see dphy_dw.h's skip_clk_lane_stopstate comment */         \
+			.skip_clk_lane_stopstate = DT_PROP_OR(REMOTE_EP(i, 0, 0),                 \
+					no_lp11_clock_lane_park, 0),                               \
 		},                                                                                 \
                                                                                                    \
 		.phy[1] =  {                                                                       \
@@ -954,6 +957,9 @@ static int csi2_dw_init(const struct device *dev)
 						link_frequencies),                                 \
 					(DT_PROP_LAST(REMOTE_EP(i, 1, 0), link_frequencies)),      \
 					(DT_INST_PROP(i, rx_ddr_clk2))),                           \
+			/* issue #2287: see dphy_dw.h's skip_clk_lane_stopstate comment */         \
+			.skip_clk_lane_stopstate = DT_PROP_OR(REMOTE_EP(i, 1, 0),                 \
+					no_lp11_clock_lane_park, 0),                               \
 		},                                                                                 \
                                                                                                    \
 		.time[0] = {                                                                       \

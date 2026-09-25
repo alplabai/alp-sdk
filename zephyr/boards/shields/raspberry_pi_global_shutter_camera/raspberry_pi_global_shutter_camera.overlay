@@ -59,6 +59,12 @@
 				remote-endpoint-label = "csi_ep_in";
 				bus-type = <VIDEO_BUS_TYPE_CSI2_DPHY>;
 				data-lanes = <1>;
+				/* issue #2287: this sensor has no known register that
+				 * parks its CLOCK lane at LP-11 short of full
+				 * streaming -- see the property's own doc comment in
+				 * zephyr/dts/bindings/video/sony,imx296.yaml.
+				 */
+				no-lp11-clock-lane-park;
 			};
 		};
 	};

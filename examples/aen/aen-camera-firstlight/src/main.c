@@ -13,9 +13,10 @@
  * OV9281 is bench-verified (an E1M-AEN803 on the E1M-EVK, 2026-09-21): real
  * GREY8 frames land in memory in all three of the driver's modes.  The
  * OV5647 path is bench-verified too (runs 52/61/62, issue #2248).  The
- * IMX296 path (issue #2287, bench run 229) is bench-verified for I2C
- * identity only -- streaming through this app has not run on real silicon
- * yet -- see docs/camera-shields.md for the full write-up on all three.
+ * IMX296 path (issue #2287) is bench-verified for I2C identity (bench run
+ * 229) and, on a later pass, streaming (the CSI-2 host's frame counter
+ * advances) -- no frame has been captured through this app yet -- see
+ * docs/camera-shields.md for the full write-up on all three.
  * This app still prints enough detail on every path (including a failed
  * open() or a capture TIMEOUT) that a bench engineer can tell which stage
  * broke if the sensor isn't seated or the shield stack is wrong.
