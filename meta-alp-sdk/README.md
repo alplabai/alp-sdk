@@ -397,8 +397,12 @@ dependency of the recipe.
 | `e1m-aen701-a32`     | 2x Ethos-U55                         | Ethos-U path inside the alp-sdk library                               |
 
 See `docs/bring-up-drpai-v2n.md` section 4 for the full DRP-AI3 two-switch
-contract (what each of `ALP_ENABLE_DRPAI` / `PACKAGECONFIG[drpai]` installs,
-and what omitting either one does).
+contract (what each of `ALP_ENABLE_DRPAI` / `PACKAGECONFIG[drpai]` actually
+controls -- `ALP_ENABLE_DRPAI` gates the `&drpai0` devicetree node and,
+`alp-image-edge` only, the demo install; `PACKAGECONFIG[drpai]` compiles the
+SDK backend; neither installs the `lib-tvm` + `kernel-module-mmngr`
+userspace pair, which is `alp-image-common.inc`'s job -- and what omitting
+either switch does).
 
 Customer apps still pick the active backend per-handle at runtime via
 `alp_inference_open(.backend = ALP_INFERENCE_BACKEND_AUTO)` (or an

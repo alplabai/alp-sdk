@@ -8,8 +8,8 @@
 # alp-edgeai and alp-lvgl-dashboard package theirs), boot, run
 # `v2n-drpai-inference <model.tar> <frame0.bin> [frame1.bin ...]`.
 #
-# DRP-AI3 is on-die in every RZ/V2N-family SKU (V2N101/102 AND V2M101/102
-# -- DEEPX is an addition on V2M, not a replacement, per
+# DRP-AI3 is on-die in every RZ/V2N-family SKU (V2N101/102/103 AND
+# V2M101/102/103 -- DEEPX is an addition on V2M, not a replacement, per
 # docs/bring-up-drpai-v2n.md's intro).  E1M-V2N101 is the plain base SKU,
 # so it is the narrowest board.yaml that still reaches the on-die NPU;
 # any V2x SKU runs the same binary unchanged.

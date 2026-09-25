@@ -106,8 +106,24 @@ not done here. Until that lands, produce a bundle for the first
 argument by compiling one **outside this SDK**, directly with the
 Renesas DRP-AI TVM (RUHMI) toolchain (see
 [`docs/bring-up-drpai-v2n.md`](../../../docs/bring-up-drpai-v2n.md)
-Sec 2 and Sec 5), then tarring its object directory the same way
-`adapters/drpai.py` does.
+Sec 2 and Sec 5), then tar the compiler's object directory yourself,
+e.g.:
+
+```sh
+tar -cf model.tar -C <obj_dir> .
+```
+
+Any flat, relative-path layout works: `open()` extracts with
+`tar -xf - -C <mkdtemp dir>`
+([`src/yocto/inference_drpai.cpp:264`](../../../src/yocto/inference_drpai.cpp)),
+so it does not care how the tar was produced, only that entries are
+relative to the object dir with no leading path component.
+[`scripts/alp_model/adapters/drpai.py`](../../../scripts/alp_model/adapters/drpai.py)'s
+own `_tar_dir()` (lines 113-131) does the same thing for the models it
+*can* compile: it packs regular files only (symlinks/dirs skipped),
+with names relative to the object dir and zeroed `mtime`/`uid`/`gid`
+for a byte-reproducible archive -- match that if you want the bundle to
+diff cleanly, but it is not required for `open()` to accept it.
 
 ## Output: raw scores, not decoded detections
 
@@ -189,7 +205,7 @@ gcc -I include -o v2n-drpai-inference \
 
 ## Hardware needed
 
-- E1M-V2N101/102 or E1M-V2M101/102 SoM (DRP-AI3 is on-die in every
+- E1M-V2N101/102/103 or E1M-V2M101/102/103 SoM (DRP-AI3 is on-die in every
   RZ/V2N-family SKU, per
   [`docs/bring-up-drpai-v2n.md`](../../../docs/bring-up-drpai-v2n.md)'s
   intro -- DEEPX on V2M is an addition, not a replacement).

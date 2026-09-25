@@ -128,8 +128,11 @@ not the distro.
 
 The bootloader's `bootcmd` (rzv2n-dev config + the Alp 0002 patch)
 loads `Image` from the ext4 rootfs `/boot` and then **reloads the
-per-MACHINE board dtb** — `boot/e1m-v2n101-x-evk.dtb` on V2N101/V2N102,
-`boot/e1m-v2m101-x-evk.dtb` on V2M101/V2M102 (issue #1175, closed as
+per-MACHINE board dtb** — `boot/e1m-v2n101-x-evk.dtb` on V2N101/V2N102/
+V2N103, `boot/e1m-v2m101-x-evk.dtb` on V2M101/V2M102/V2M103 (each x103
+MACHINE's `KERNEL_DEVICETREE` reuses its x101 sibling's dtb by design --
+see the memory-tier rationale in `e1m-v2n103-a55.conf` /
+`e1m-v2m103-a55.conf`) (issue #1175, closed as
 #1252). The vendor env's hardcoded `boot/r9a09g056n44-dev.dtb` is a
 filename **no Alp image builds**, on the eMMC branch as well as the SD
 one, which is why the reload exists. If the dtb is missing from

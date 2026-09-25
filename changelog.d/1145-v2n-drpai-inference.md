@@ -16,17 +16,19 @@ silicon.** Bench sign-off is tracked as #1268.
   scores + timing. `[UNTESTED on silicon]`. `src/top_scores.c` (the top-N
   selection helper) is unit-tested by `tests/unit/top_scores/`.
 - **`ALP_ENABLE_DRPAI`** (default `"0"`; the flag itself predates this change
-  — added by `cbea0e29`, gating only the `&drpai0` devicetree node) on all
-  four RZ/V2N-family machine confs (`e1m-v2n101-a55.conf`,
-  `e1m-v2n102-a55.conf`, `e1m-v2m101-a55.conf`, `e1m-v2m102-a55.conf`) stays
-  scoped to that one job. An earlier revision of this change also had it
-  gate a machine-conf `IMAGE_INSTALL:append` (`lib-tvm
-  kernel-module-mmngr`); review caught that this duplicated
-  `alp-image-common.inc`'s existing unconditional `ALP_RZ_DRPAI_INSTALL`
-  (#1176) pair-for-pair, so it was always a no-op alongside it, never a
-  drift guard -- the four appends are dropped from this change, and
-  `alp-image-common.inc` is the userspace pair's single packaging
-  authority. The demo binary, **`alp-drpai-inference`**,
+  — added by `cbea0e29`) is declared on all six RZ/V2N-family machine confs
+  (`e1m-v2n101-a55.conf`, `e1m-v2n102-a55.conf`, `e1m-v2n103-a55.conf`,
+  `e1m-v2m101-a55.conf`, `e1m-v2m102-a55.conf`, `e1m-v2m103-a55.conf`) and
+  does two things: it gates the `&drpai0` devicetree node, and -- on
+  `alp-image-edge` only -- gates installing the demo binary below. It
+  installs no userspace runtime package itself. An earlier revision of this
+  change also had the four v2n101/102 + v2m101/102 confs gate a machine-conf
+  `IMAGE_INSTALL:append` (`lib-tvm kernel-module-mmngr`); review caught that
+  this duplicated `alp-image-common.inc`'s existing `ALP_RZ_DRPAI_INSTALL`
+  (#1176) pair-for-pair for every `alp-image-*` image, so it was always a
+  no-op there, never a drift guard -- the four appends are dropped from this
+  change, and `alp-image-common.inc` is the userspace pair's single
+  packaging authority for `alp-image-*` builds. The demo binary, **`alp-drpai-inference`**,
   rides the same `ALP_ENABLE_DRPAI` opt-in but from a separate, IMAGE-level
   append in `alp-image-edge.bb` (not the machine confs), gated on the same
   `rzv2n-family` `MACHINEOVERRIDES` check as the `bb.fatal()` guard below,
@@ -64,16 +66,30 @@ silicon.** Bench sign-off is tracked as #1268.
 
 **Reviewer question, resolved in this round:** the four RZ/V2N-family
 machine confs' own `ALP_ENABLE_DRPAI`-gated `IMAGE_INSTALL:append`
-(`lib-tvm kernel-module-mmngr`) overlapped `dev`'s existing unconditional
-`ALP_RZ_DRPAI_INSTALL` in `alp-image-common.inc` (#1176) — both installed the
-same `lib-tvm kernel-module-mmngr` pair, one unconditionally and one
-opt-in. `bitbake` dedupes the repeated package names, so it was never a
-build break, but it was also never a drift guard: `ALP_ENABLE_DRPAI = "0"`
-still left the pair installed via `alp-image-common.inc` whenever the layer
-+ MACHINE_FEATURES matched, so the two mechanisms couldn't drift relative to
-each other and the four appends bought nothing. Removed; the corresponding
-comments in each machine conf and in `alp-image-edge.bb` are corrected to
-name `alp-image-common.inc` as the single packaging authority.
+(`lib-tvm kernel-module-mmngr`) overlapped `dev`'s existing
+`ALP_RZ_DRPAI_INSTALL` in `alp-image-common.inc` (#1176) — both installed
+the same `lib-tvm kernel-module-mmngr` pair on every `alp-image-*` image
+(the three recipes that `require alp-image-common.inc`), one
+unconditionally there and one opt-in. `bitbake` dedupes the repeated
+package names, so it was never a build break, but it was also never a
+drift guard for `alp-image-*` builds: `ALP_ENABLE_DRPAI = "0"` still left
+the pair installed via `alp-image-common.inc` whenever the layer +
+MACHINE_FEATURES matched, so the two mechanisms couldn't drift relative to
+each other there and the four appends bought nothing. Removed; the
+corresponding comments in each machine conf and in `alp-image-edge.bb` are
+corrected to name `alp-image-common.inc` as the single packaging authority
+for `alp-image-*` builds.
+
+**Behavioural change, stated honestly, not glossed over:**
+`alp-image-common.inc` is required only by `alp-image-base`/`-edge`/`-prod`
+(the three `alp-image-*` recipes), whereas the removed machine-conf
+`IMAGE_INSTALL:append` reached EVERY image built for those four MACHINEs --
+including a bare `core-image-*` or any other non-`alp-image-*` recipe. A
+non-`alp-image-*` build that relied on `ALP_ENABLE_DRPAI = "1"` alone to
+pull in `lib-tvm` + `kernel-module-mmngr` must now add that pair itself
+(its own `IMAGE_INSTALL`), or rely on the vendor layer's own `core-image`
+bbappend for it -- no such bbappend exists anywhere in this tree today, so
+there is currently no fallback install path for a non-alp image here.
 
 **Reviewer finding, resolved in this round:** the example's README and
 `main.c` taught `python3 -m alp_model build --target drpai --product V2N

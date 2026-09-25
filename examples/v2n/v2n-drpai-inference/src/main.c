@@ -97,8 +97,20 @@
  *   not done here. Until that lands, produce a bundle for argv[1] by
  *   compiling one outside this SDK, directly with the Renesas DRP-AI
  *   TVM (RUHMI) toolchain (docs/bring-up-drpai-v2n.md Sec 2 and Sec 5),
- *   then tarring its object directory the same way adapters/drpai.py
- *   does.
+ *   then tar the compiler's object directory yourself, e.g.:
+ *
+ *       tar -cf model.tar -C <obj_dir> .
+ *
+ *   Any flat, relative-path layout works: open() extracts with
+ *   `tar -xf - -C <mkdtemp dir>` (inference_drpai.cpp:264), so it does
+ *   not care how the tar was produced, only that entries are relative
+ *   to the object dir with no leading path component.
+ *   scripts/alp_model/adapters/drpai.py's own _tar_dir() (lines
+ *   113-131) does the same thing for the models it CAN compile: packs
+ *   regular files only, names relative to the object dir, zeroed
+ *   mtime/uid/gid for a byte-reproducible archive -- match that if you
+ *   want the bundle to diff cleanly, but it is not required for open()
+ *   to accept it.
  *
  * Output: raw scores, not decoded detections
  * ===========================================
