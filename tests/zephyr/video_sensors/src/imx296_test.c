@@ -71,7 +71,7 @@
 
 /* Mirrors imx296.c's IMX296_CID_TRIGGER_MODE -- not a public header, so redefined here from the
  * same VIDEO_CID_PRIVATE_BASE convention (see that macro's comment in imx296.c). */
-#define IMX296_CID_TRIGGER_MODE     (VIDEO_CID_PRIVATE_BASE + 0x01)
+#define IMX296_CID_TRIGGER_MODE      (VIDEO_CID_PRIVATE_BASE + 0x01)
 #define IMX296_TRIGGER_MODE_FREE_RUN 0
 #define IMX296_TRIGGER_MODE_EXTERNAL 1
 
@@ -407,8 +407,8 @@ ZTEST(imx296, test_trigger_mode_ctrl_rejects_while_streaming)
 	 * already streaming, so imx296_set_ctrl() must reject with -EBUSY rather than silently
 	 * queuing the change for a later stop/start.
 	 */
-	struct video_control trigger_on = { .id = IMX296_CID_TRIGGER_MODE,
-		                            .val = IMX296_TRIGGER_MODE_EXTERNAL };
+	struct video_control trigger_on = { .id  = IMX296_CID_TRIGGER_MODE,
+		                                .val = IMX296_TRIGGER_MODE_EXTERNAL };
 	struct video_control readback   = { .id = IMX296_CID_TRIGGER_MODE, .val = -1 };
 
 	zassert_ok(video_stream_start(imx296_dev(), VIDEO_BUF_TYPE_OUTPUT));
@@ -436,11 +436,11 @@ ZTEST(imx296, test_trigger_mode_writes_trigen_and_lowlagtrg_on_next_stream_start
 	 * This also exercises "switching back": stopping and restarting with the ctrl reset to
 	 * free-run must restore TRIGEN=0/LOWLAGTRG=0.
 	 */
-	const struct emul       *emul = imx296_emul();
+	const struct emul       *emul        = imx296_emul();
 	struct video_control     trigger_on  = { .id  = IMX296_CID_TRIGGER_MODE,
-	                                         .val = IMX296_TRIGGER_MODE_EXTERNAL };
+		                                     .val = IMX296_TRIGGER_MODE_EXTERNAL };
 	struct video_control     trigger_off = { .id  = IMX296_CID_TRIGGER_MODE,
-	                                         .val = IMX296_TRIGGER_MODE_FREE_RUN };
+		                                     .val = IMX296_TRIGGER_MODE_FREE_RUN };
 	struct imx296_emul_write w;
 	uint8_t                  val;
 

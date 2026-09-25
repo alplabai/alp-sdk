@@ -44,8 +44,10 @@
  * 1456x1088 frames with zero IPI-FIFO-overflow events across a full
  * capture run (csi-hsd 503, see the overlay). Current state (Stage A, bench
  * run 292): a single free-run capture reads a clean, faint but real image
- * (mean pixel value 61.19, no HLINE_ERR in the console, no RAW10
- * byte-phase-slip pattern). Continuous streaming, ISP-Pico, AE and
+ * (mean pixel value 61.19, no RAW10 byte-phase-slip pattern). Run 292's
+ * build had CONFIG_LOG unset, so its clean console says nothing about
+ * INT_IPI_PIXEL_IF_HLINE_ERR/_FIFO_OVERFLOW -- their status on the product
+ * build is UNKNOWN, not "not seen". Continuous streaming, ISP-Pico, AE and
  * fast-trigger mode are not yet bench-verified. See changelog.d/2287.md
  * (issue #2287) for the full bring-up history and every bench number.
  *
