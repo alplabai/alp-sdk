@@ -381,6 +381,15 @@ static void isp_bottom_half(const struct device *dev)
 	const struct isp_config *config = dev->config;
 	struct isp_data *data = dev->data;
 	struct video_buffer *vbuf = NULL;
+	/*
+	 * #2287 Stage B unit 3, reviewer fix (bench run 301): the CPI-only-pause-vs-full-stop
+	 * decision below used to key off `signal_status == VIDEO_BUF_DONE`, which the
+	 * isp_attach_buffer_to_hw() failure branch (below) ALSO set -- a real hardware-attach
+	 * failure would then get the gentle pause instead of a full stop. This local is set true
+	 * ONLY by the genuine "no more empty buffers" starvation branch; isp_bottom_done uses it,
+	 * not signal_status, to choose.
+	 */
+	bool starved = false;
 
 	int ret;
 
@@ -434,6 +443,7 @@ static void isp_bottom_half(const struct device *dev)
 			"Stopping video capture. If re-queued, restart stream.");
 		data->is_streaming = false;
 		signal_status = VIDEO_BUF_DONE;
+		starved = true;
 		goto isp_bottom_done;
 	}
 	data->curr_vid_buf = (uint32_t) vbuf->buffer;
@@ -442,7 +452,7 @@ static void isp_bottom_half(const struct device *dev)
 	if (ret) {
 		LOG_ERR("Failed to attach buffer to hardware!");
 		data->is_streaming = false;
-		signal_status = VIDEO_BUF_DONE;
+		signal_status = VIDEO_BUF_ERROR;
 		goto isp_bottom_done;
 	}
 
@@ -460,25 +470,32 @@ isp_bottom_done:
 		 * `enum video_buf_type`; the controller is the capture source ->
 		 * VIDEO_BUF_TYPE_OUTPUT.
 		 *
-		 * #2287 Stage B unit 3 (bench runs 298-300): VIDEO_BUF_DONE here
-		 * means genuine buffer starvation (the ONLY non-error path that
-		 * reaches this label with is_streaming already false, above) --
-		 * NOT a real error. A full video_stream_stop() drives the CSI-2
-		 * endpoint + sensor into STANDBY every time the app doesn't
-		 * re-enqueue an ISP output buffer before the next frame, which
-		 * for IMX296 also restarts its ~9-frame init period (datasheet
-		 * p54) on every resume -- the AE loop then never sees two
-		 * consecutive real frames. alif_cam_cpi_pause() (video_alif.c)
-		 * instead pauses only the CPI capture engine, leaving the
-		 * endpoint + sensor (and the ISP's own AE/AWB library state --
-		 * nothing here touches isp_vsi_stop()) running across the pause.
-		 * A genuine error (VIDEO_BUF_ERROR, the other branches above)
-		 * still gets the full stop: something is actually wrong, not
-		 * just backpressure, and this driver has no evidence a CPI-only
+		 * #2287 Stage B unit 3 (bench runs 298-301): `starved` (set ONLY by the genuine "no
+		 * more empty buffers" branch above -- NOT by signal_status, which
+		 * isp_attach_buffer_to_hw() failure also used to set to VIDEO_BUF_DONE, wrongly
+		 * routing a real hardware failure down this same gentle path; reviewer fix, bench
+		 * run 301) means genuine buffer starvation, not a real error. A full
+		 * video_stream_stop() drives the CSI-2 endpoint + sensor into STANDBY every time the
+		 * app doesn't re-enqueue an ISP output buffer before the next frame, which for
+		 * IMX296 also restarts its ~9-frame init period (datasheet p54) on every resume --
+		 * bench run 301 confirms the STANDBY-cycling removal itself: "masked after 16"
+		 * appears once instead of every restart, and frame rate rose ~4x (0.8 -> 3.4 fps
+		 * app-side). alif_cam_cpi_pause() (video_alif.c) instead pauses only the CPI capture
+		 * engine, leaving the endpoint + sensor (and the ISP's own AE/AWB library state --
+		 * nothing here touches isp_vsi_stop()) running across the pause. A genuine error
+		 * (VIDEO_BUF_ERROR, the other branches above) still gets the full stop: something is
+		 * actually wrong, not just backpressure, and this driver has no evidence a CPI-only
 		 * pause is safe to resume from after one.
+		 *
+		 * Whether AE itself now converges is a SEPARATE, still-open question run 301 did NOT
+		 * answer: SHS stayed at its exposure-lines floor (2 lines) and GAIN at 0 for all 60
+		 * frames even with the STANDBY-cycling gone -- isp_stream_start()'s restart still
+		 * re-runs isp_vsi_update_cfg()/isp_vsi_start() on every app re-queue (unchanged by
+		 * this fix), and whether THAT resets the AE library's own convergence state each
+		 * time is not established either way yet.
 		 */
 		if (config->controller) {
-			if (signal_status == VIDEO_BUF_DONE) {
+			if (starved) {
 				alif_cam_cpi_pause(config->controller);
 				data->controller_cpi_paused = true;
 			} else {
@@ -1124,16 +1141,24 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 	/*
 	 * #2287 Stage B unit 3, Fix B (bench runs 299/300): unconditional now -- this used to be
 	 * gated on `!enable` (manual mode only), leaving int_time/again/dgain at struct isp_params
-	 * params = {0}'s zero-init for AUTO mode. Bench evidence the library reads THESE fields as
-	 * an initial AE seed even in auto mode, not just the manual-mode fixed values: with the
-	 * gate in place, AE ON parked at SHS 0x00045C (2 lines, isp_apply_ae()'s clamp of a 0-line
-	 * seed) and GAIN 0 for all 60 frames of runs 299/300, ae_stable never set, meanLum printed
-	 * only 3 times across 60 frames (frame counter resetting -- AE restarting from scratch on
-	 * every ISP stream restart, see isp_bottom_half()'s starvation-pause fix above). For MANUAL
-	 * mode (enable=false) this is still exactly the fixed value that gets applied and held;
-	 * for AUTO mode it is only the STARTING point the library's own convergence loop then moves
-	 * away from -- int_time_max/2 (half of the same sensor-derived ceiling) at the 1x gain
-	 * floor, not zero.
+	 * params = {0}'s zero-init for AUTO mode. INFERENCE, not confirmed against the closed
+	 * VSI_MPI_ISP library's source: the library reads THESE fields as an initial AE seed even
+	 * in auto mode, not just the manual-mode fixed values. Observed with the gate in place
+	 * (runs 299/300): AE ON parked at SHS register 0x45C (1116 decimal -- exposure =
+	 * lines_per_frame - SHS = 1118 - 1116 = 2 LINES, not SHS itself) and GAIN 0 for all 60
+	 * frames, ae_stable never set, meanLum printed only 3 times across 60 frames (its own
+	 * frame counter resetting -- AE restarting from scratch on every ISP stream restart, see
+	 * isp_bottom_half()'s starvation-pause fix above). Bench run 301 (this Fix B + Fix C
+	 * together) still shows the SAME SHS 0x45C/GAIN 0 parking despite Fix C removing the
+	 * sensor STANDBY-cycling (confirmed separately: "masked after 16" now logs once instead
+	 * of every restart, ~4x fps) -- so whether THIS seed hoist is actually the fix, versus
+	 * isp_stream_start() still re-running isp_vsi_update_cfg()/isp_vsi_start() on every app
+	 * re-queue and resetting AE's convergence state some other way, remains open; see the AE
+	 * diagnostic run in progress on the bench. For MANUAL mode (enable=false) this is still
+	 * exactly the fixed value that gets applied and held; for AUTO mode it is only the
+	 * STARTING point the library's own convergence loop is asserted (not proven) to move away
+	 * from -- int_time_max/2 (half of the same sensor-derived ceiling) at the 1x gain floor,
+	 * not zero.
 	 */
 	params.ae.int_time = params.ae.int_time_max / 2;
 	params.ae.again    = again_min;
@@ -1676,6 +1701,60 @@ static int isp_stream_start(const struct device *dev)
 
 	data->curr_vid_buf = POINTER_TO_UINT(vbuf->buffer);
 
+	/*
+	 * #2287 Stage B unit 3, Fix D (bench run 302): resuming from a CPI-only starvation pause
+	 * (data->controller_cpi_paused, set by isp_bottom_half()'s starvation handler, above) must
+	 * NOT go through the full restart sequence below -- isp_vsi_update_cfg()/isp_vsi_start()
+	 * (VSI_MPI_ISP_EnableDev/EnablePort/EnableChn, isp_api_wrapper.c) run UNCONDITIONALLY on
+	 * every call to this function, even though the starvation pause never called isp_vsi_stop()
+	 * (see isp_bottom_half()'s own comment: "nothing here touches isp_vsi_stop()") -- so the
+	 * ISP DEV/PORT/CHN are STILL enabled from the PREVIOUS isp_vsi_start(), and this call would
+	 * enable them AGAIN. Bench run 302 (AE INF logs): the library's own meanLum frame counter
+	 * resets to "Frame 1" on (almost) every app re-queue -- consistent with, though not proven
+	 * against the closed VSI_MPI_ISP library's source, VSI_MPI_ISP_EnableChn/EnablePort/EnableDev
+	 * (the only calls in this function's normal path that run unconditionally on every restart
+	 * AND plausibly (re)initialize per-channel state -- isp_vsi_update_cfg()'s own SetCalib is
+	 * separately once-guarded, patch 0007, so it is not this call's candidate) re-initializing
+	 * the AE 3A module's accumulated statistics on every redundant re-enable.
+	 *
+	 * The FIX: skip isp_vsi_update_cfg()/isp_apply_aem_wbm()/the ACQ_PROP pin-mapping write/
+	 * isp_vsi_enqueue()/isp_apply_ae_sensor_gate()/isp_vsi_start()/isp_apply_mrsz()/the wb_dirty
+	 * and ae_dirty applies entirely on this path -- none of them are needed (the ISP's own
+	 * config, calibration and AE/AWB enable state are unchanged since the pause) -- and instead
+	 * do only what isp_bottom_half() ITSELF already does for every ordinary continuing frame
+	 * (the steady-state case that never resets AE): isp_attach_buffer_to_hw() (a pure MI
+	 * register write -- MI_MP_*_BASE_AD_INIT + MI_INIT_CFG_UPD, no VSI library call at all) to
+	 * hand the ISP its next destination buffer, then alif_cam_cpi_resume() to re-arm the CPI.
+	 * A first start (data->controller_cpi_paused == false, e.g. the very first
+	 * video_stream_start() or any restart after a REAL video_stream_stop()) is untouched --
+	 * falls through to the existing full sequence below.
+	 */
+	if (data->controller_cpi_paused) {
+		ret = isp_attach_buffer_to_hw(dev, vbuf);
+		if (ret) {
+			LOG_ERR("Fix D resume: failed to attach buffer to hardware! ret=%d", ret);
+			data->curr_vid_buf = 0;
+			return ret;
+		}
+
+		data->is_streaming = true;
+
+		if (config->controller) {
+			ret = alif_cam_cpi_resume(config->controller);
+			data->controller_cpi_paused = false;
+			if (ret) {
+				LOG_ERR("Fix D resume: alif_cam_cpi_resume failed! ret=%d", ret);
+				data->is_streaming = false;
+				data->curr_vid_buf = 0;
+				return ret;
+			}
+		} else {
+			data->controller_cpi_paused = false;
+		}
+
+		return 0;
+	}
+
 	/* Update ISP configuration to the middleware */
 	switch (port->port_fmt.pixelformat) {
 	case VIDEO_PIX_FMT_YUYV:
@@ -1889,7 +1968,18 @@ static int isp_stream_stop(const struct device *dev)
 	struct isp_data *data = dev->data;
 	int ret;
 
-	if (!data->is_streaming) {
+	/*
+	 * #2287 Stage B unit 3, reviewer fix (bench run 301, blocker): a starvation pause
+	 * (isp_bottom_half()) already sets is_streaming=false WITHOUT touching the controller --
+	 * it is only CPI-paused (alif_cam_cpi_pause(), video_alif.c: CSI-2 endpoint + sensor still
+	 * physically streaming), not truly stopped, and the ISP library itself is still in its
+	 * isp_vsi_start()'d state (isp_bottom_half() never calls isp_vsi_stop()). The OLD early
+	 * `if (!data->is_streaming) return 0;` here treated that as "already fully stopped" and
+	 * returned WITHOUT ever reaching video_stream_stop(controller) below -- a user stop()/
+	 * close() landing right after a starvation pause left the sensor + CSI-2 endpoint running
+	 * indefinitely, invisibly. Tear down for real whenever EITHER is true.
+	 */
+	if (!data->is_streaming && !data->controller_cpi_paused) {
 		LOG_DBG("Already stopped streaming!");
 		return 0;
 	}
@@ -1903,7 +1993,10 @@ static int isp_stream_stop(const struct device *dev)
 	 * isp_vsi_stop() below, so the ISP hardware never actually stopped.
 	 * v4.4 video-API shim (Alp Lab AB): video_stream_stop gained an
 	 * `enum video_buf_type`; the controller is the capture source ->
-	 * VIDEO_BUF_TYPE_OUTPUT.
+	 * VIDEO_BUF_TYPE_OUTPUT. Called unconditionally here (not gated on
+	 * controller_cpi_paused) -- a CPI-only pause never stopped the endpoint,
+	 * so the endpoint is ALWAYS still live to tear down, whether this is a
+	 * normal is_streaming=true stop or the was-paused case above.
 	 */
 	if (config->controller) {
 		ret = video_stream_stop(config->controller, VIDEO_BUF_TYPE_OUTPUT);
@@ -1914,13 +2007,19 @@ static int isp_stream_stop(const struct device *dev)
 		}
 	}
 	/*
-	 * #2287 Stage B unit 3: a real user stop tears the controller all the way down above
-	 * regardless of any in-flight CPI-only starvation pause -- clear the flag so a LATER
-	 * isp_stream_start() calls a real video_stream_start() instead of mistakenly resuming a
-	 * pause this stop already cleared.
+	 * A real user stop tears the controller all the way down above regardless of any
+	 * in-flight CPI-only starvation pause -- clear the flag so a LATER isp_stream_start()
+	 * calls a real video_stream_start() instead of mistakenly resuming a pause this stop
+	 * already cleared.
 	 */
 	data->controller_cpi_paused = false;
 
+	/*
+	 * isp_vsi_stop() unconditionally: even in the was-paused (!is_streaming) case, the ISP
+	 * library itself was never isp_vsi_stop()'d by the starvation pause (see above) -- its
+	 * internal state is still "started" from isp_vsi_start()'s perspective regardless of this
+	 * driver's own is_streaming bookkeeping, so a real stop must still close it out.
+	 */
 	ret = isp_vsi_stop(&data->init_cfg);
 	if (ret) {
 		LOG_ERR("Failed to stop ISP from streaming! isp_vsi_stop=%d", ret);

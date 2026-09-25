@@ -414,6 +414,14 @@ static inline void hw_cam_cpi_only_stop(uintptr_t regs)
  * the two would let a genuine ISP-triggered pause be misread as a memory-capture starvation by
  * code that path doesn't reach in this configuration anyway, but keeping them independent means
  * that invariant doesn't have to be proven to stay correct.
+ *
+ * `data->cpi_paused` IS new bookkeeping these two touch (set/cleared under `lock`) -- reviewer
+ * fix (bench run 301, race): alif_cam_work_helper()'s non-AXI (ISP-consumer) branch,
+ * `hw_cam_start_video_capture(dev)` on every STOP-interrupt bottom half with no lock and no
+ * paused check, can race a pause queued from this device's own ISR just before
+ * alif_cam_cpi_pause() runs -- the STOP work item, still pending, would then re-arm the CPI
+ * moments after this call just stopped it, undoing the pause. That branch now takes `lock` and
+ * skips the restart while `cpi_paused` is set (video_alif.c, alif_cam_work_helper()).
  */
 int alif_cam_cpi_pause(const struct device *dev)
 {
@@ -421,6 +429,7 @@ int alif_cam_cpi_pause(const struct device *dev)
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
 
 	k_mutex_lock(&data->lock, K_FOREVER);
+	data->cpi_paused = true;
 	hw_cam_cpi_only_stop(regs);
 	k_mutex_unlock(&data->lock);
 
@@ -433,6 +442,7 @@ int alif_cam_cpi_resume(const struct device *dev)
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
 
 	k_mutex_lock(&data->lock, K_FOREVER);
+	data->cpi_paused = false;
 	/* Same re-arm sequence alif_cam_enqueue()'s own starved-resume uses (~:1163-1172), minus
 	 * the CAM_FRAME_ADDR reprogram: the ISP consumer mode never changes which buffer the CPI
 	 * writes into (that address is set once, at alif_cam_stream_start()), so nothing here needs
@@ -735,8 +745,19 @@ done:
 		}
 #endif /* defined(CONFIG_POLL) */
 	} else {
-		/* Restart video capture. */
-		hw_cam_start_video_capture(dev);
+		/*
+		 * #2287 Stage B unit 3, reviewer fix (bench run 301, race): take `lock` and check
+		 * `cpi_paused` before restarting -- a STOP interrupt bottom half queued just before
+		 * isp_pico.c's own starvation handler calls alif_cam_cpi_pause() would otherwise
+		 * reach this unconditional restart moments later and undo the pause it just asked
+		 * for. `alif_cam_cpi_pause()`/`_resume()` set/clear `cpi_paused` under this SAME
+		 * lock (see their own comment), so this check is race-free against them.
+		 */
+		k_mutex_lock(&data->lock, K_FOREVER);
+		if (!data->cpi_paused) {
+			hw_cam_start_video_capture(dev);
+		}
+		k_mutex_unlock(&data->lock);
 	}
 }
 

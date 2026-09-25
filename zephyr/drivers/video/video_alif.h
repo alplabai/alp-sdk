@@ -157,6 +157,17 @@ struct video_cam_data {
 	 * k_mutex, not a spinlock). */
 	bool starved;
 	struct k_mutex lock;
+	/*
+	 * #2287 Stage B unit 3, reviewer fix (bench run 301, race): distinct from `starved`
+	 * (that's the memory-capture path's OWN fifo_in bookkeeping, alif_cam_enqueue()'s resume
+	 * check -- unreachable in ISP-consumer mode). `cpi_paused` instead tracks
+	 * alif_cam_cpi_pause()/_resume() (isp_pico.c's OWN starvation-triggered CPI-only pause) --
+	 * set/cleared under `lock`. Needed because alif_cam_work_helper()'s non-AXI (ISP-consumer)
+	 * branch unconditionally restarts the CPI on every STOP interrupt bottom half; without this
+	 * flag a STOP interrupt already queued when alif_cam_cpi_pause() runs would re-arm the CPI
+	 * moments later, undoing the pause isp_pico.c just asked for.
+	 */
+	bool cpi_paused;
 };
 
 #endif /* _VIDEO_ALIF_H_ */

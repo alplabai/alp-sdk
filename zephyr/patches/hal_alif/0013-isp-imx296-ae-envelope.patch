@@ -1,9 +1,9 @@
 diff --git a/drivers/isp/isp_wrapper/inc/imx296_ae_envelope.h b/drivers/isp/isp_wrapper/inc/imx296_ae_envelope.h
 new file mode 100644
-index 0000000..d73690a
+index 0000000..008ae00
 --- /dev/null
 +++ b/drivers/isp/isp_wrapper/inc/imx296_ae_envelope.h
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,102 @@
 +/*
 + * Copyright (C) 2026 Alif Semiconductor.
 + * SPDX-License-Identifier: Apache-2.0
@@ -37,8 +37,12 @@ index 0000000..d73690a
 + *     header) keeps ONE extra decimal digit (603 = 60.3*10) so the
 + *     microsecond conversion below stays integer-only without losing the
 + *     fractional frame rate OV5647's integer-fps envelope didn't need.
-+ *   - minIntLine/maxIntLine (p.49, SHS constraint "1 <= SHS <= VMAX - 4"):
-+ *     1 and 1118 - 4 = 1114.
++ *   - minIntLine/maxIntLine: exposure LINES (this library's own unit, VIDEO_CID_EXPOSURE),
++ *     1 and VMAX - 4 = 1114, NOT the sensor's SHS register directly -- SHS is inversely
++ *     related (exposure_lines = VMAX - SHS, p.60) and has its OWN, DIFFERENT legal range,
++ *     4 <= SHS <= VMAX - 1 (p.60's "Register List of Shutter setting"), which inverts to
++ *     exactly this 1..VMAX-4 exposure-lines range: SHS=VMAX-1 (its floor) gives exposure=1,
++ *     SHS=4 (its ceiling on THIS driver's read of p.60) gives exposure=VMAX-4=1114.
 + *   - minAgain/maxAgain (p.56, GAIN register 0x3204-0x3205, 0.1 dB/count,
 + *     0-480 = 0.0-48.0 dB): 1024 (0 dB = 1.0x, library units) and
 + *     round(1024 * 10^(480/200)) = 257217 (48.0 dB) -- computed the SAME
@@ -55,7 +59,7 @@ index 0000000..d73690a
 + */
 +#define IMX296_AE_FULL_LINES 1118 /* VMAX, master-mode timing example */
 +#define IMX296_AE_FPS_X10    603  /* 60.3 fps * 10 -- see header comment */
-+#define IMX296_AE_MAX_INT_LINE 1114 /* VMAX - 4 (SHS upper bound, p.49) */
++#define IMX296_AE_MAX_INT_LINE 1114 /* VMAX - 4, exposure LINES (inverts SHS's own 4..VMAX-1 range, p.60) */
 +#define IMX296_AE_MIN_AGAIN     1024   /* 1x floor, library units (1x = 1024) */
 +#define IMX296_AE_MAX_AGAIN     257217 /* 48.0 dB -- see header comment */
 +#define IMX296_AE_MIN_DGAIN     1024   /* unity -- no separate digital gain register */
