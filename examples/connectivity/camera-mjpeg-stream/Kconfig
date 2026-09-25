@@ -1,0 +1,40 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Resolution select for this example.  Off (default) keeps the
+# bench-proven 640x480@30fps path; on switches src/main.c and
+# mjpeg_http.h over to the 1280x960 path (issue #2286) -- see
+# boards/overlay-1280x960.conf for the matching ISP-buffer-count and
+# video-pool-size deltas that resolution needs on the
+# E1M-AEN801/AEN803's 4 MiB SRAM0 bank.  Bench run 243
+# (E1M-AEN803 2026W36-0001, Stage A's crop mode -- NOT yet re-run
+# against Stage B's binned mode below): board encodes 15 fps
+# capture/encode (encode ~2 ms), but the HTTP send path is the
+# bottleneck -- host receives ~7.5 fps / ~997,544 B/s delivered.  See
+# README.md.
+
+config CAMERA_MJPEG_STREAM_1280X960
+	bool "Stream at 1280x960 (15 fps capture/encode, ~7.5 fps delivered, send-bound) instead of 640x480@30fps"
+	default n
+	help
+	  Selects the OV5647's full-FOV 2x2-binned 1280x960 mode (issue
+	  #2286 Stage B, ov5647.c's ov5647_set_mode_regs() -- Stage A's
+	  narrower centre crop at this same output size/rate is retired,
+	  see ov5647_hts_for()'s mode-selection comment). Still requests
+	  15 fps by default even though the sensor mode also reaches
+	  30 fps now -- unbenched at 30 fps so far. Bench run 243
+	  (E1M-AEN803 2026W36-0001, Stage A's crop mode) measured 15 fps
+	  capture/encode (encode ~2 ms) but only ~7.5 fps delivered to the
+	  HTTP client -- the send path, not capture/encode, is the
+	  bottleneck (~997,544 B/s, ~1 MB/s).  Two 1,843,200 B NV12 frames
+	  plus two ~160 KiB JPEG output buffers no longer fit alongside a
+	  third raw ISP buffer and the synthetic-frame fallback in the
+	  AEN's 4 MiB SRAM0 bank, so this build variant also drops the
+	  synthetic-frame fallback path entirely (src/main.c) and pairs
+	  with boards/overlay-1280x960.conf, which lowers
+	  CONFIG_ALP_SDK_CAMERA_ALIF_ISP_VBUF_COUNT to 2 and resizes the
+	  video buffer pool.  1920x1080 and 2592x1944 are out of scope
+	  (infeasible per the issue's feasibility note -- two NV12 frames
+	  at either size don't fit SRAM0 at all).
+
+source "Kconfig.zephyr"

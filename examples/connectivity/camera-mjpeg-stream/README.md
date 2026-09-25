@@ -31,6 +31,76 @@ your DHCP server):
 [camera-mjpeg-stream]   snapshot: http://192.0.2.10:8080/snapshot.jpg
 ```
 
+### 1280x960 build variant (E1M-AEN801/AEN803, full-FOV 2x2-binned, 15 fps capture/encode)
+
+`CONFIG_CAMERA_MJPEG_STREAM_1280X960` (this directory's `Kconfig`) switches
+`src/main.c` to 1280x960 at 15 fps capture/encode and raises the JPEG
+output cap to 160 KiB — see `boards/overlay-1280x960.conf` for the
+matching ISP-buffer-count and SRAM0-sizing deltas that resolution needs
+(same on both SKUs — AEN801 and AEN803 are the same PCB/SoC), and
+`src/main.c`'s `FRAME_W`/`FRAME_H` comment for why the synthetic-frame
+fallback is compiled out entirely at this size (no SRAM0 budget left for
+it). Delivered rate is lower than the 15 fps capture/encode rate — see
+bench run 243 below: the HTTP send path is the bottleneck. Not meaningful
+on native_sim.
+
+Sensor mode (issue #2286): this build now programs the OV5647's real
+full-FOV 2x2-binned mode (`zephyr/drivers/video/ov5647.c`,
+`ov5647_set_mode_regs()`) instead of Stage A's 1280x960 centre crop — the
+delivered output size and the 15 fps request here are UNCHANGED, but the
+field of view is now the whole sensor array, not a ~49%-width crop. The
+sensor mode also newly supports 30 fps (`OV5647_HTS_1280X960_BINNED`);
+this example still requests 15 fps by default, pending a bench pass to
+confirm SRAM0/JPEG/send-path headroom at 30 fps. Bench runs 242/243 below
+were measured under Stage A's crop mode; this driver-mode change (#2286)
+has since been re-benched on E1M-AEN803 2026W36-0001, full-FOV 2x2-binned
+1280x960 at 15 fps: delivered rate depends on JPEG size — 15.00 fps at
+~35 KB frames in a daylight scene, 13.80 fps at ~39 KB (~0.54 MB/s) after
+the send-window fix below, and 7.50 fps at ~109-133 KB frames in earlier
+runs — always 0 CSI/IPI errors and no banding.
+
+```bash
+west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
+    examples/connectivity/camera-mjpeg-stream -- \
+    "-DEXTRA_ZEPHYR_MODULES=<path-to-alp-sdk>;<path-to-hal_alif>" \
+    "-DSHIELD=e1m_evk_rpi_csi raspberry_pi_camera_module_1" \
+    "-DEXTRA_CONF_FILE=boards/overlay-1280x960.conf"
+# flash + run per docs/aen-bench-bringup.md.
+```
+
+Bench run 242 (E1M-AEN803 + OV5647, **1280x960**, 15 fps request): capture
+path clean (0 CSI/IPI fatals, 0 ISP auto-stop), frames 0-11 encoded (~130 KB
+JPEG, dark scene while AE converged) — then every later encode failed with
+`alp_jpeg_encode failed (rc=-7 ...)` (`ALP_ERR_NOMEM`) as the scene
+brightened: quality 80 (the 640x480 default) routinely exceeded
+`MJPEG_HTTP_MAX_JPEG` (160 KiB) at this pixel count, and 160 KiB has no
+SRAM0 headroom left to grow (98.5% bank usage). Every `GET /stream` client
+also got re-served one stale frame and disconnected after ~2.1 s —
+`wait_and_claim()`'s single 2 s wait for a new frame gave up and dropped
+the client the moment one encode-failure burst outlasted it, even with the
+capture pipeline still alive.
+
+Both fixed: `src/main.c` now starts 1280x960 encodes at quality 60 (still
+comfortably under the cap for a typical frame) and retries a failing encode
+once at a lower quality (`src/jpeg_quality_ladder.h`, floor 40) instead of
+dropping the frame outright; `src/mjpeg_http.c`'s `wait_and_claim()` now
+gives a `/stream` client up to `STREAM_STALL_TIMEOUT_S` (30 s) total, spent
+across multiple shorter waits, instead of disconnecting after one
+`IDLE_TIMEOUT_S` (2 s) miss — a transient encode-retry burst no longer
+looks like a dead client. `src/main.c` also prints a once-a-second stats
+line (fps, encoded/failed/retried counts, JPEG size min/avg/max, encode
++ send ms) to make the next bench run's numbers easy to read off the
+console.
+
+Bench run 243 (E1M-AEN803 2026W36-0001, re-ran against these fixes): 0
+CSI/IPI fatals, 0 JPEG buffer-full, board encodes ~15 fps capture/encode
+(encode ~2 ms), JPEG 131-135 KB at quality 60 against the 163,840 B cap —
+the encode-retry ladder never triggered (0 retries; every frame encoded
+under cap on the first attempt at quality 60). Delivered rate is lower:
+the host receives ~7.50 fps / 997,544 B/s — the HTTP send path, not
+capture/encode, is the bottleneck (~1 MB/s), and `STREAM_STALL_TIMEOUT_S`
+(30 s) comfortably covers it with 0 dropped `/stream` clients.
+
 ## Watch it
 
 - **Browser** — open the `stream` URL directly; any modern browser renders
@@ -69,6 +139,35 @@ end to end through this pipeline. AE settled around intLine ~331-351
 (boot readback `AE readback: int_time_max=32667 ...`, matching the 30 fps
 frame period), no `E:`/`W:` log lines.
 
+Bench runs 224-228 (E1M-AEN803 + OV5647, **640×480**, #2285): a timing
+probe in run 223 found the camera loop itself keeping up with 60 fps
+while `/stream`'s HTTP send took 24-30 ms per 32-41 KB frame, dropping
+45-51% of frames -- so the bottleneck was the send path, not the camera
+or JPEG encode. `boards/alp_e1m_aen80{1,3}_..._rtss_he.conf`'s Ethernet
+TX/RX buffer sizing alone took drops to 0%; combined with
+`CONFIG_ALP_SDK_FAST_MEMCPY` (the word-copy `memcpy()` override for -Os
+images, `zephyr/kconfigs/core.kconfig`) on top, that configuration
+reached **60.1 fps**, the OV5647 sensor's own rate -- 1803 frames in
+30 s, interval stdev 0.1 ms. The PHY was confirmed at 100 Mbit full
+duplex; disabling TCP congestion avoidance had no effect. That 60.1 fps
+figure is not attributable to the `memcpy()` override on its own --
+see the follow-up A/B below.
+
+**Not a clean A/B against runs 205/220/223 above**: the 60.1 fps run
+used a simpler scene with a smaller mean frame (14.7 KB) than those
+runs.
+
+**`CONFIG_ALP_SDK_FAST_MEMCPY` same-scene A/B** (E1M-AEN803, module
+2026W36-0001, **640×480 @ 30 fps**, camera-bound, against the
+buffer-sizing-only baseline): A1 (memcpy ON) 30.03 fps / 1,089,750 B/s,
+B1 (memcpy OFF) 30.03 fps / 1,092,219 B/s, A2 (memcpy ON) 30.03 fps /
+1,088,302 B/s, 0 drops in every leg -- **no measurable memcpy gain** in
+this camera-bound scene. `CONFIG_ALP_SDK_FAST_MEMCPY` defaults to `n`
+for this reason; this example's AEN801/AEN803 board confs enable it
+explicitly, on the strength of the combined 60.1 fps figure above, not
+this A/B. The send-bound case (the one run 223 actually hit, with its
+24-30 ms sends) is still unmeasured -- open follow-up work.
+
 ## Limits
 
 This is a teaching example, not a production camera server:
@@ -90,7 +189,13 @@ This is a teaching example, not a production camera server:
   640×480 (~37 KB/frame, dark scene, pre-#2276) is an older measurement
   at the 15 fps request this example used before #2276 raised the
   default, and predates the ISP/Hantro fixes noted above -- not a target
-  this example tries to hit.
+  this example tries to hit. Runs 224-228 (#2285) show the "send"
+  side of that bound is itself movable: the AEN board confs' Ethernet
+  buffer sizing alone (bench-proven) plus `CONFIG_ALP_SDK_FAST_MEMCPY`
+  reached 60.1 fps combined, the sensor's own cap -- see the Measured
+  section above for both the non-A/B caveat on that number and the
+  separate `CONFIG_ALP_SDK_FAST_MEMCPY` same-scene A/B, which found no
+  measurable memcpy gain in this camera-bound scene.
 
 **Fixed since run 205:** the bottom two rows of every frame rendered solid
 green -- an ISP main-resizer chroma-row rounding bug (`ISP_MRSZ_SCALE_VC`
@@ -143,11 +248,14 @@ the body):
 |---|---|
 | `src/main.c` | Camera-capture + JPEG-encode loop (the app's main thread); pixfmt selection from `alp_jpeg_caps_t::pixfmt_mask`; DHCP kick-off + lease/URL printing. |
 | `src/mjpeg_http.c` | The HTTP server: `GET /stream` + `GET /snapshot.jpg`, its own thread, `zsock_*` sockets, zero-copy ping-pong frame hand-off (two SRAM0 buffers, `mjpeg_http_claim_write_buffer()`/`mjpeg_http_publish_frame()`), `SO_RCVTIMEO`/`SO_SNDTIMEO` on every accepted socket. |
-| `src/mjpeg_http.h` | The hand-off API + `MJPEG_HTTP_MAX_JPEG` — the one shared cap both this file's buffers and main.c's `alp_jpeg_encode()` call use. |
+| `src/mjpeg_http.h` | The hand-off API + `MJPEG_HTTP_MAX_JPEG` — the one shared cap both this file's buffers and main.c's `alp_jpeg_encode()` call use — plus `mjpeg_http_get_stats()`, main.c's window into `mjpeg_http.c`'s own last-send timing. |
+| `src/jpeg_quality_ladder.h` | `jpeg_quality_step_down()` — the pure, native_sim-testable retry-ladder step `src/main.c` uses on an `ALP_ERR_NOMEM` encode failure (`tests/unit/mjpeg_quality_ladder`). |
 | `src/aen_eth_phy.c` | AEN-only, interim: PHY power/reset + refclk-mode bring-up; not linked on other targets. |
 | `src/selftest.c` | native_sim-only CI selftest (`GET /snapshot.jpg` JPEG marker check, `GET /stream` multipart-framing check). |
 | `boards/alp_e1m_aen80{1,3}_..._rtss_he.overlay` | ISP graph rewiring (mirrors `aen-isp-ov5647-viewfinder`) + interim Ethernet RMII/PHY DT wiring (mirrors `aen-ethernet-link`). Content-identical across the two SKUs. |
 | `boards/alp_e1m_aen80{1,3}_..._rtss_he.conf` | AEN hardware-path Kconfig (ISP pipeline sized for 640×480 NV12, Hantro JPEG encoder, Ethernet DMA-region glue, `CONFIG_DCACHE=n`) — board-scoped so native_sim stays clean of undefined-symbol Kconfig warnings. Content-identical across the two SKUs. |
+| `boards/overlay-1280x960.conf` | 1280x960 variant (AEN801 or AEN803, same PCB/SoC): sets `CONFIG_CAMERA_MJPEG_STREAM_1280X960`, drops the ISP raw-buffer count to 2, resizes the video buffer pool for the larger NV12 frame, and resets `CONFIG_NET_TCP_MAX_SEND_WINDOW_SIZE` to 0 (auto) — the board confs' 64 KiB window starves this overlay's 16/8 TX pools — layered on top of either board conf via `EXTRA_CONF_FILE`. |
+| `Kconfig` | `CONFIG_CAMERA_MJPEG_STREAM_1280X960` — the resolution select `src/main.c` and `src/mjpeg_http.h` both key off. |
 | `boards/native_sim.conf` + `boards/native_sim_native_64.conf` | Content-identical pair (Zephyr resolves a different filename per qualifier string, so one file alone doesn't cover both `native_sim` and `native_sim/native/64`): `CONFIG_NET_LOOPBACK` + a zeroed `CONFIG_NET_TCP_TIME_WAIT_DELAY` so `src/selftest.c`'s two back-to-back loopback connections don't collide on a lingering TIME_WAIT port. |
 
 ## Portability

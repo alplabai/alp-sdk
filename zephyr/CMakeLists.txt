@@ -152,6 +152,16 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/jpeg/zephyr_stub.c
 )
 
+# Word-copy memcpy() override for -Os Ensemble images (issue #2285).  The
+# core loop (src/common/alp_fast_memcpy_core.c) is OS-agnostic and also
+# linked directly into the host unit test (tests/unit/fast_memcpy); this
+# TU is just the memcpy()/__aeabi_memcpy*() aliases onto it, so it is
+# gated separately and only compiled into real Zephyr/picolibc images.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_FAST_MEMCPY
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/common/alp_fast_memcpy_core.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/fast_memcpy.c
+)
+
 # JPEG software baseline fallback (Task 2): portable TooJpeg-derived
 # encoder, silicon_ref="*" priority 50 -- outranks the NOT_IMPLEMENTED
 # stub above on every board.  Default y (see zephyr/kconfigs/jpeg.kconfig)
@@ -1369,13 +1379,11 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/v2n_supervisor.c
 )
 
-# V2N DEEPX rail-mgmt auxiliary.  Driven by P65 rising-edge IRQ;
-# brings up DA9292 CH2 = 0.75 V via BRD_I²C + drives P64 high to
-# release the rail.  Compiles to a NOSUPPORT stub when either the
-# supervisor or the power-mgmt feature is disabled.
-zephyr_library_sources(
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/v2n_power_mgmt.c
-)
+# No V2N DEEPX rail-mgmt auxiliary here: U-Boot's board_late_init() (see
+# meta-alp-sdk/recipes-bsp/u-boot/u-boot/
+# 0004-rzv2n-dev-ALP-E1M-DEEPX-rail-bringup.patch) is the sole owner of
+# the DA9292 PMIC and of P64/P65 -- RIIC8/BRD_I2C is Cortex-A55/Linux-
+# exclusive, so the CM33 must never bring this rail up itself.
 
 # LwRB: publish the vendor stub headers on the include path so SDK
 # code compiles against <lwrb/lwrb.h> regardless of whether the

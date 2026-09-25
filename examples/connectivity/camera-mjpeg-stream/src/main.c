@@ -41,6 +41,7 @@
  */
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -54,25 +55,56 @@
 #include "alp/camera.h"
 #include "alp/cap.h"
 #include "alp/jpeg.h"
+#include "jpeg_quality_ladder.h"
 #include "mjpeg_http.h"
 
 #define HTTP_PORT 8080
 
-/* 640x480: the resolution both the real-camera path and the synthetic
- * fallback request. mjpeg_http.h's MJPEG_HTTP_MAX_JPEG (128 KiB) is the
- * physical size of the two SRAM0 buffers that output lands in -- see
- * boards/alp_e1m_aen80{1,3}_..._rtss_he.conf for how the AEN video
- * buffer pool is sized for this resolution. */
-#define FRAME_W 640
-#define FRAME_H 480
-
-/* Requested camera frame rate. The OV5647 backend (alif_isp_pico.c) honors
- * this via cfg->fps and settles on the closest rate it can actually reach
- * (ov5647_framerates[] in ov5647.c: 10/15/30/45/60/90/120, VTS-clamped) --
- * confirmed end to end at FRAME_W x FRAME_H (bench run 220, E1M-AEN803 +
- * OV5647, module 2026W36-0001, bright daylight): 901 complete JPEGs streamed in each of
- * three 30 s captures = 30.03 fps. See README.md's Limits section. */
-#define FRAME_FPS 30
+/* Resolution + frame rate, CONFIG_CAMERA_MJPEG_STREAM_1280X960-selected
+ * (Kconfig, this directory) -- see issue #2286.  Default: 640x480
+ * @ 30 fps, the bench-proven path both the real camera and the synthetic
+ * fallback request. mjpeg_http.h's MJPEG_HTTP_MAX_JPEG scales with this
+ * same symbol; see boards/alp_e1m_aen80{1,3}_..._rtss_he.conf for how the
+ * AEN video buffer pool is sized for 640x480, and
+ * boards/overlay-1280x960.conf for the 1280x960 sizing.
+ *
+ * 1280x960 @ 15 fps is the OV5647's full-sensor 2x2-binned mode (issue
+ * #2286 Stage B, ov5647.c's ov5647_set_mode_regs()) -- the field of view
+ * is the WHOLE sensor array, not Stage A's narrower centre crop at this
+ * same output size (retired: the binned mode delivers identical output
+ * pixels from a wider FOV and a faster per-mode line time, so there is no
+ * remaining reason to request the crop at exactly 1280x960). Still
+ * requested at 15 fps here, not the sensor mode's now-reachable 30 fps:
+ * two 1,843,200 B NV12 frames already consume most of the AEN's 4 MiB
+ * SRAM0 bank alongside the JPEG output buffers (see
+ * boards/overlay-1280x960.conf), leaving no SRAM0 budget for the
+ * synthetic-frame fallback below -- CAMERA_MJPEG_STREAM_1280X960 compiles
+ * that fallback path out entirely, not just moves it. Raising the request
+ * to 30 fps would also need a fresh bench pass (encode time, send-path
+ * bandwidth) not done yet. */
+#if defined(CONFIG_CAMERA_MJPEG_STREAM_1280X960)
+#define FRAME_W   1280
+#define FRAME_H   960
+#define FRAME_FPS 15
+/*
+ * Starting quality for this resolution -- bench run 242 (issue #2286):
+ * quality 80 (the 640x480 default below) blew MJPEG_HTTP_MAX_JPEG
+ * (mjpeg_http.h, 160 KiB) on every frame once AE converged past the
+ * first ~12 dark ones, and 160 KiB has no SRAM0 headroom left to grow
+ * (98.5% bank usage, see boards/overlay-1280x960.conf). 60 keeps
+ * a typical frame well under the cap; a frame that still overflows at
+ * 60 retries once at JPEG_QUALITY_FLOOR (jpeg_quality_ladder.h) rather
+ * than being dropped outright.
+ */
+#define JPEG_QUALITY_DEFAULT 60u
+#else
+#define FRAME_W              640
+#define FRAME_H              480
+#define FRAME_FPS            30
+/* Unchanged from before #2286 -- bench run 220 measured this comfortably
+ * under the 640x480 128 KiB cap (mjpeg_http.h) even in bright daylight. */
+#define JPEG_QUALITY_DEFAULT 80u
+#endif
 
 /*
  * The full physical output buffer (mjpeg_http_claim_write_buffer(),
@@ -109,8 +141,17 @@
  * ever fills it with a luma gradient plus NEUTRAL (grey, memset 128)
  * chroma, so the exact sub-layout of that neutral fill never matters.
  * __aligned(32): matches the Hantro AXI master's/D-cache maintenance's
- * cache-line granularity, same reasoning as mjpeg_http.c's buffers. */
+ * cache-line granularity, same reasoning as mjpeg_http.c's buffers.
+ *
+ * DROPPED ENTIRELY at 1280x960 (issue #2286 Stage A): a second
+ * JPEG_DMA_MEM buffer at this size (1,843,200 B) has no SRAM0 budget left
+ * once the two real ISP buffers and the two ~160 KiB JPEG output buffers
+ * are paid for -- see boards/overlay-1280x960.conf. A real camera
+ * that stalls at this resolution therefore has no fallback frame to serve;
+ * the capture loop just keeps retrying instead (see the main loop below). */
+#if !defined(CONFIG_CAMERA_MJPEG_STREAM_1280X960)
 static uint8_t synth_frame[FRAME_W * FRAME_H + (FRAME_W * FRAME_H) / 2] JPEG_DMA_MEM __aligned(32);
+#endif
 
 /* Build one alp_jpeg_encode_req_t against a single contiguous W*H*3/2
  * buffer, in whichever layout `fmt` names.  Used both for the synthetic
@@ -120,7 +161,8 @@ static void jpeg_req_from_packed(alp_jpeg_encode_req_t *req,
                                  alp_pixfmt_t           fmt,
                                  void                  *base,
                                  uint16_t               w,
-                                 uint16_t               h)
+                                 uint16_t               h,
+                                 uint8_t                quality)
 {
 	uint8_t *y     = base;
 	size_t   y_len = (size_t)w * h;
@@ -130,7 +172,7 @@ static void jpeg_req_from_packed(alp_jpeg_encode_req_t *req,
 	req->height    = h;
 	req->format    = fmt;
 	req->subsample = ALP_JPEG_SUBSAMPLE_420;
-	req->quality   = 80;
+	req->quality   = quality;
 	req->y_plane   = y;
 	req->y_stride  = w;
 	if (fmt == ALP_PIXFMT_NV12) {
@@ -144,6 +186,7 @@ static void jpeg_req_from_packed(alp_jpeg_encode_req_t *req,
 	}
 }
 
+#if !defined(CONFIG_CAMERA_MJPEG_STREAM_1280X960)
 static void build_synthetic_frame(alp_pixfmt_t fmt, alp_jpeg_encode_req_t *req)
 {
 	static uint8_t phase; /* advances each call so the stream visibly moves */
@@ -155,8 +198,9 @@ static void build_synthetic_frame(alp_pixfmt_t fmt, alp_jpeg_encode_req_t *req)
 	}
 	memset(synth_frame + (FRAME_W * FRAME_H), 128, (FRAME_W * FRAME_H) / 2);
 	phase += 4;
-	jpeg_req_from_packed(req, fmt, synth_frame, FRAME_W, FRAME_H);
+	jpeg_req_from_packed(req, fmt, synth_frame, FRAME_W, FRAME_H, JPEG_QUALITY_DEFAULT);
 }
+#endif
 
 /* Print the DHCP lease + the stream/snapshot URLs once bound -- runs on
  * the net-mgmt callback's own context, never inside the capture loop, so
@@ -198,6 +242,56 @@ static bool rate_limited(int64_t *last_log_ms, uint32_t *count)
 	}
 	*last_log_ms = now;
 	return true;
+}
+
+/* Once-a-second diagnostic line (issue #2286 bench run 242): fps and
+ * per-window JPEG-size/encode-time stats reset every print (so a
+ * regression shows up in the NEXT line, not diluted into a lifetime
+ * average); encoded/fail/retry stay cumulative for the whole run, same as
+ * capture_fail_count/encode_fail_count already are above. send_ms comes
+ * from mjpeg_http.c's own last-send timer (mjpeg_http_get_stats()) -- this
+ * loop never touches a socket itself, see the file header. */
+static void print_stats_if_due(int64_t  *last_print_ms,
+                               uint32_t  total_encoded,
+                               uint32_t  encode_fail_count,
+                               uint32_t  encode_retry_count,
+                               uint32_t *win_frames,
+                               uint32_t *win_size_min,
+                               uint32_t *win_size_max,
+                               uint64_t *win_size_sum,
+                               uint64_t *win_encode_ms_sum)
+{
+	int64_t now = k_uptime_get();
+
+	if (now - *last_print_ms < 1000) {
+		return;
+	}
+
+	mjpeg_http_stats_t hstats;
+
+	mjpeg_http_get_stats(&hstats);
+
+	uint32_t avg_size      = *win_frames ? (uint32_t)(*win_size_sum / *win_frames) : 0;
+	uint32_t avg_encode_ms = *win_frames ? (uint32_t)(*win_encode_ms_sum / *win_frames) : 0;
+
+	printf("[camera-mjpeg-stream] stats: fps=%u encoded=%u fail=%u retry=%u "
+	       "jpeg_size_min=%u avg=%u max=%u B encode_ms=%u send_ms=%u\n",
+	       *win_frames,
+	       total_encoded,
+	       encode_fail_count,
+	       encode_retry_count,
+	       *win_frames ? *win_size_min : 0,
+	       avg_size,
+	       *win_size_max,
+	       avg_encode_ms,
+	       hstats.send_ms);
+
+	*last_print_ms     = now;
+	*win_frames        = 0;
+	*win_size_min      = UINT32_MAX;
+	*win_size_max      = 0;
+	*win_size_sum      = 0;
+	*win_encode_ms_sum = 0;
 }
 
 /* After this many CONSECUTIVE capture failures, stop trying the camera
@@ -261,16 +355,27 @@ int main(void)
 		ccfg.format = pixfmt;
 		camera      = alp_camera_open(&ccfg);
 		if (camera == NULL || alp_camera_start(camera) != ALP_OK) {
+#if defined(CONFIG_CAMERA_MJPEG_STREAM_1280X960)
+			printf("[camera-mjpeg-stream] alp_camera_open/start failed (err=%d); no "
+			       "synthetic fallback at this resolution, will keep retrying\n",
+			       (int)alp_last_error());
+#else
 			printf("[camera-mjpeg-stream] alp_camera_open/start failed (err=%d); "
 			       "serving a synthetic frame instead\n",
 			       (int)alp_last_error());
+#endif
 			alp_camera_close(camera);
 			camera = NULL;
 		} else {
 			printf("[camera-mjpeg-stream] camera open + streaming, %ux%u\n", FRAME_W, FRAME_H);
 		}
 	} else {
+#if defined(CONFIG_CAMERA_MJPEG_STREAM_1280X960)
+		printf("[camera-mjpeg-stream] no MIPI-CSI on this SoC; nothing to stream at this "
+		       "resolution\n");
+#else
 		printf("[camera-mjpeg-stream] no MIPI-CSI on this SoC; serving a synthetic frame\n");
+#endif
 	}
 
 	/* HTTP server thread -- serves whatever mjpeg_http_publish_frame()
@@ -300,20 +405,39 @@ int main(void)
 	int64_t  capture_fail_last_log = 0;
 	uint32_t encode_fail_count     = 0;
 	int64_t  encode_fail_last_log  = 0;
+	uint32_t encode_retry_count    = 0;
+
+	/* Once-a-second stats line (issue #2286 bench run 242): win_* reset
+	 * every print, so fps/size/encode_ms report THIS window, not a
+	 * lifetime average that would hide a regression under a long-running
+	 * good stretch; encoded/fail/retry stay cumulative -- see the printf
+	 * below. */
+	int64_t  stats_last_print_ms = 0;
+	uint32_t total_encoded       = 0;
+	uint32_t win_frames          = 0;
+	uint32_t win_size_min        = UINT32_MAX;
+	uint32_t win_size_max        = 0;
+	uint64_t win_size_sum        = 0;
+	uint64_t win_encode_ms_sum   = 0;
 
 	/* The camera-capture loop.  Every iteration either captures a real
 	 * frame (bounded timeout -- never wait forever on a wedged sensor)
-	 * or rebuilds the synthetic one, encodes it directly into the HTTP
-	 * server's write buffer (mjpeg_http_claim_write_buffer() --
-	 * zero-copy, no memcpy on either side of the hand-off) and
-	 * publishes it; it never opens a socket, never blocks on
-	 * mjpeg_http_publish_frame() (a short mutex hold, no I/O), and
-	 * never waits on the network. A capture or encode failure is
-	 * logged (rate-limited) and counted rather than silently skipped;
+	 * or, at 640x480 only, rebuilds the synthetic one; either way the
+	 * frame is encoded directly into the HTTP server's write buffer
+	 * (mjpeg_http_claim_write_buffer() -- zero-copy, no memcpy on either
+	 * side of the hand-off) and published; it never opens a socket,
+	 * never blocks on mjpeg_http_publish_frame() (a short mutex hold, no
+	 * I/O), and never waits on the network. A capture or encode failure
+	 * is logged (rate-limited) and counted rather than silently skipped;
 	 * a capture failure also backs off (k_msleep) so an error loop
-	 * can't spin and starve the lower-priority HTTP thread, and falls
-	 * back to the synthetic frame after CAPTURE_FAIL_LIMIT consecutive
-	 * failures (a wedged sensor is not coming back on its own). */
+	 * can't spin and starve the lower-priority HTTP thread. After
+	 * CAPTURE_FAIL_LIMIT consecutive failures (a wedged sensor is not
+	 * coming back on its own) the camera handle is closed and, at
+	 * 640x480, the loop falls back to the synthetic frame; at 1280x960
+	 * there is no fallback buffer (see synth_frame's comment above) --
+	 * the loop just keeps skipping frames, `camera` stays NULL, and
+	 * nothing new is published until an operator power-cycles the
+	 * sensor. */
 	for (;;) {
 		alp_jpeg_encode_req_t req;
 		alp_camera_frame_t    frame;
@@ -324,7 +448,8 @@ int main(void)
 
 			if (rc == ALP_OK) {
 				capture_fail_consec = 0;
-				jpeg_req_from_packed(&req, pixfmt, frame.data, FRAME_W, FRAME_H);
+				jpeg_req_from_packed(
+				    &req, pixfmt, frame.data, FRAME_W, FRAME_H, JPEG_QUALITY_DEFAULT);
 				have_frame = true;
 			} else {
 				if (rate_limited(&capture_fail_last_log, &capture_fail_count)) {
@@ -336,37 +461,93 @@ int main(void)
 				capture_fail_consec++;
 				k_msleep(CAPTURE_FAIL_BACKOFF_MS);
 				if (capture_fail_consec >= CAPTURE_FAIL_LIMIT) {
+#if defined(CONFIG_CAMERA_MJPEG_STREAM_1280X960)
+					printf("[camera-mjpeg-stream] camera stalled (%u "
+					       "consecutive failures); no synthetic fallback at "
+					       "this resolution, giving up on the camera\n",
+					       capture_fail_consec);
+#else
 					printf("[camera-mjpeg-stream] camera stalled (%u "
 					       "consecutive failures); falling back to the "
 					       "synthetic frame\n",
 					       capture_fail_consec);
+#endif
 					alp_camera_stop(camera);
 					alp_camera_close(camera);
 					camera = NULL;
 				}
 			}
 		} else {
+#if defined(CONFIG_CAMERA_MJPEG_STREAM_1280X960)
+			k_msleep(CAPTURE_FAIL_BACKOFF_MS); /* nothing to publish; don't spin */
+#else
 			build_synthetic_frame(pixfmt, &req);
 			have_frame = true;
 			k_msleep(1000 / FRAME_FPS); /* matches the requested camera fps above */
+#endif
 		}
 
 		if (have_frame) {
-			size_t       out_len = 0;
-			alp_status_t erc     = alp_jpeg_encode(
+			size_t       out_len   = 0;
+			int64_t      encode_t0 = k_uptime_get();
+			alp_status_t erc       = alp_jpeg_encode(
 			    jpeg, &req, mjpeg_http_claim_write_buffer(), JPEG_OUT_CAP, &out_len);
+
+			/* Bounded ladder, ONE retry -- gated on out_len, not just the
+			 * error code: alp_jpeg_encode() returns ALP_ERR_NOMEM for
+			 * more than one backend-internal reason (src/backends/jpeg/
+			 * alif_hantro.c) -- the Hantro backend's output-buffer overrun
+			 * (done->bytesused > out_cap) sets *out_len to the REQUIRED
+			 * size on that specific path, but a pool-exhaustion NOMEM
+			 * (video_import_buffer() -ENOBUFS, no free pool slot) leaves
+			 * out_len at its prior value (0 on the first attempt) --
+			 * re-encoding at a lower quality only helps the former, so
+			 * out_len > JPEG_OUT_CAP is the signal this checks, not the
+			 * error code alone (issue #2286 bench run 242). req.quality >
+			 * JPEG_QUALITY_FLOOR guards against retrying with the exact
+			 * quality that just failed, which jpeg_quality_step_down()'s
+			 * floor would otherwise do. Bench run 243 never exercised this
+			 * ladder on real silicon: 0 retries, every frame encoded
+			 * under cap at quality 60 on the first attempt. */
+			if (erc == ALP_ERR_NOMEM && out_len > JPEG_OUT_CAP &&
+			    req.quality > JPEG_QUALITY_FLOOR) {
+				encode_retry_count++;
+				req.quality = jpeg_quality_step_down(req.quality);
+				out_len     = 0;
+				erc         = alp_jpeg_encode(
+				    jpeg, &req, mjpeg_http_claim_write_buffer(), JPEG_OUT_CAP, &out_len);
+			}
+
+			uint32_t encode_ms = (uint32_t)(k_uptime_get() - encode_t0);
 
 			if (erc == ALP_OK) {
 				mjpeg_http_publish_frame(out_len);
+				total_encoded++;
+				win_frames++;
+				win_size_min = (uint32_t)out_len < win_size_min ? (uint32_t)out_len : win_size_min;
+				win_size_max = (uint32_t)out_len > win_size_max ? (uint32_t)out_len : win_size_max;
+				win_size_sum += out_len;
+				win_encode_ms_sum += encode_ms;
 			} else if (rate_limited(&encode_fail_last_log, &encode_fail_count)) {
 				printf("[camera-mjpeg-stream] alp_jpeg_encode failed (rc=%d, "
-				       "total=%u)\n",
+				       "total=%u, retries=%u)\n",
 				       (int)erc,
-				       encode_fail_count);
+				       encode_fail_count,
+				       encode_retry_count);
 			}
 			if (camera != NULL) {
 				alp_camera_release(camera, &frame);
 			}
 		}
+
+		print_stats_if_due(&stats_last_print_ms,
+		                   total_encoded,
+		                   encode_fail_count,
+		                   encode_retry_count,
+		                   &win_frames,
+		                   &win_size_min,
+		                   &win_size_max,
+		                   &win_size_sum,
+		                   &win_encode_ms_sum);
 	}
 }

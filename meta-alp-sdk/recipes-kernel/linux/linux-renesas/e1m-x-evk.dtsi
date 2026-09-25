@@ -133,7 +133,6 @@
 		i2c1 = &i2c1;
 		i2c6 = &i2c6;
 		i2c7 = &i2c7;
-		i2c8 = &i2c8;
 		mmc0 = &sdhi0;
 		mmc1 = &sdhi1;
 		serial0 = &scif;
@@ -155,37 +154,52 @@
 			wakeup-source;
 		};
 	};
-
-	/* Carrier microSD (SDHI1) VccQ level-shifter. */
-	vqmmc_sdhi1: regulator-vqmmc-sdhi1 {
-		compatible = "regulator-gpio";
-		regulator-name = "SDHI1 VqmmC";
-		gpios = <&pinctrl RZV2N_GPIO(A, 2) GPIO_ACTIVE_HIGH>;
-		regulator-min-microvolt = <1800000>;
-		regulator-max-microvolt = <3300000>;
-		gpios-states = <0>;
-		states = <3300000 0>, <1800000 1>;
-	};
 };
 
 &qextal_clk {
 	clock-frequency = <24000000>;
 };
 
-&rtxin_clk {
-	clock-frequency = <32768>;
-};
-
-&rtc_clk {
-	clock-frequency = <32768>;
-};
-
-&rtc {
-	status = "okay";
-};
+/* RTXIN/rtc_clk/&rtc are intentionally left untouched here: the SoC
+ * RTC is enabled and rtc_clk fixed at 32.768 kHz at the SoM layer
+ * (e1m-v2n-som.dtsi, which composes before this carrier dtsi) -- do not
+ * add an &rtc/&rtc_clk override here, it would silently fight that
+ * setting. RTXIN has no discrete 32.768 kHz crystal; it is fed by SE1
+ * of the on-module 5L35023B clock generator instead, corrected from
+ * its as-shipped 24.576 MHz by U-Boot on every boot (see
+ * e1m-v2n-som.dtsi's own comment and the meta-alp-sdk u-boot 0007
+ * patch). The on-module RV-3028-C7 remains the RTC of record (rtc0
+ * alias) -- the SoC RTC is a second, SoC-internal timebase, not a
+ * replacement. Per this file's own convention ("only ENABLE what the
+ * carrier populates"), a carrier has nothing to enable here either
+ * way. */
 
 /* Carrier microSD slot (SDHI1). The bench dev image roots from this card
- * (root=/dev/mmcblk1p2); on-module eMMC (SDHI0) is the production boot. */
+ * (root=/dev/mmcblk1p2); on-module eMMC (SDHI0) is the production boot.
+ *
+ * cd-gpios: SD1_SD1CD/PA1 runs straight to the socket's card-detect
+ * switch to GND (not through the carrier SDIO mux), pulled up to the
+ * switched card rail. Active-low: 0 = card present.
+ *
+ * vqmmc: vqmmc_sdhi1 (e1m-v2n-som.dtsi) switches the SD1 IO rail to
+ * 1.8 V for UHS, up to SDR104 (200 MHz). The SD1 pads run at
+ * output-impedance 2, one step weaker than the eMMC: at 3 (strongest)
+ * SDR104 through the carrier SDIO mux fails the data phase with CRC
+ * errors (-84); at 2 it is clean.
+ *
+ * vmmc: card power (PA3/SD1_SD1PWEN) is an always-on hog, not a
+ * regulator the MMC core may switch off. The card-detect pull-up sits on
+ * that same switched rail, so cutting card power would make an empty
+ * slot read as "card present".
+ *
+ * SDCARD_RST (PA4) is not a microSD signal: it is the M.2 E-key Wi-Fi
+ * SDIO reset carried through the carrier SDIO mux, so it is left
+ * undriven here.
+ *
+ * The carrier SDIO mux (MUX_SEL.SDIO / SD_MUX_EN, driven by the GD32
+ * IO-MCU on E1M IO27/IO29) selects microSD vs M.2 Wi-Fi SDIO; its
+ * undriven default selects the microSD socket. See
+ * docs/boards/e1m-x-evk.md. */
 &sdhi1 {
 	pinctrl-0 = <&sdhi1_pins>;
 	pinctrl-1 = <&sdhi1_pins>;
@@ -195,6 +209,7 @@
 	bus-width = <4>;
 	sd-uhs-sdr50;
 	sd-uhs-sdr104;
+	cd-gpios = <&pinctrl RZV2N_GPIO(A, 1) GPIO_ACTIVE_LOW>;
 	status = "okay";
 };
 
@@ -386,9 +401,26 @@
 		output-enable;
 	};
 
-	/* Unlike the Renesas EVK (external pull-ups on RIIC0/1), the ALP
-	 * board has none on RIIC0 (on-module EEPROM bus), RIIC1, or RIIC8
-	 * (BRD_I2C); enable the SoC internal pull-ups so SCL/SDA idle high. */
+	/* Unlike the Renesas EVK (external pull-ups on RIIC0/1), external
+	 * pull-up population on this ALP module for RIIC0 (on-module EEPROM
+	 * bus) or RIIC1 is TBD -- not yet confirmed against the
+	 * schematic/BOM. RIIC8 (BRD_I2C) IS populated: external 2.2 kOhm
+	 * pull-ups to the 1.8 V rail are fitted, confirmed on the same
+	 * bench pass that root-caused the arbitration-lost failure below.
+	 * Enable the SoC internal pull-ups on all three regardless, so
+	 * SCL/SDA idle high even where population is unconfirmed.
+	 * For RIIC8/BRD_I2C the internal pull-up was bench-confirmed
+	 * required at the unpatched (faster) RIIC8 clock (E1M-V2M103,
+	 * U-Boot bcf29d98) -- without it, reads failed with
+	 * arbitration-lost (ICSR2 AL) on the very first read, the external
+	 * pull-ups above notwithstanding. It is carried alongside the
+	 * slower CKS(5) clock now shipped for RIIC8 rather than re-tested
+	 * for necessity at that clock. A slower RIIC8 SCL is separately
+	 * required for burst reads on this same bus (loaded with ~13
+	 * populated branches): see the matching U-Boot fix,
+	 * meta-alp-sdk/recipes-bsp/u-boot/u-boot/
+	 * 0006-rzv2n-dev-i2c-rzg2l_riic-p06-p07-pullup-clock-fix.patch, and
+	 * changelog.d/2045-v2m-deepx-rail-uboot.md for the bench matrix. */
 	i2c0_pins: i2c0 {
 		pinmux = <RZV2N_PORT_PINMUX(3, 0, 1)>, /* I2C0_SDA */
 			 <RZV2N_PORT_PINMUX(3, 1, 1)>; /* I2C0_SCL */
@@ -424,22 +456,34 @@
 		renesas,output-impedance = <1>;
 	};
 
-	/* SD1 CLK/CMD/DAT are dedicated (hardwired) balls on the carrier and
-	 * don't need pin config.
+	/* SD1 CLK/CMD/DAT need explicit dedicated-pin config, same as SDHI0
+	 * eMMC in e1m-v2n-som.dtsi's sdhi0_emmc_pins -- pinctrl-rzg2l has no
+	 * default mapping for dedicated balls without one. Names + bank/pin
+	 * per the kernel's pinctrl-rzg2l.c r9a09g056 dedicated-pin table:
+	 * SD1CLK (0xb/0), SD1CMD (0xb/1), SD1DAT0-3 (0xc/0-3).
 	 *
-	 * SD1_CD (card-detect) on P94 is DELIBERATELY NOT muxed here: P94 shares
-	 * the port-9 PMC9/PM9 control registers with P96 (SCK7) and P97 (CS) of the
-	 * on-module GD32 supervisor SPI, which the CM33 owns across the AMP split.
-	 * Linux's boot-time byte/half-word write to mux SD1_CD wiped the CM33's
-	 * P96/P97 bits (no SCK / no CS framing) -- the on-silicon root cause that
-	 * the bench /dev/mem poke worked around.  Dropping the SD1_CD claim removes
-	 * the clobber at the source so the CM33's own pin setup sticks.  (If carrier
-	 * microSD hot-plug detect is needed later, route it to a non-port-9 pin or
-	 * mark &sdhi1 broken-cd/non-removable.) */
+	 * SD1_CD needs no pin entry: PA1 is read as a plain GPIO through
+	 * &sdhi1's cd-gpios. */
 	sdhi1_pins: sd1 {
+		sd1-clk {
+			pins = "SD1CLK";
+			renesas,output-impedance = <2>;
+			slew-rate = <0>;
+		};
+
+		sd1-dat-cmd {
+			pins = "SD1DAT0", "SD1DAT1", "SD1DAT2", "SD1DAT3", "SD1CMD";
+			input-enable;
+			renesas,output-impedance = <2>;
+			slew-rate = <0>;
+		};
 	};
 
-	/* microSD slot power enable. */
+	/* microSD slot power enable (PA3/SD1_SD1PWEN). Always-on by design,
+	 * not a placeholder for a PWEN-gated regulator: SD1_CD's pull-up
+	 * sits on this same switched rail (see &sdhi1's comment above), so
+	 * gating it off from the MMC core would read an absent card as
+	 * present whenever power is off. */
 	sd1-pwr-en-hog {
 		gpio-hog;
 		gpios = <RZV2N_GPIO(A, 3) GPIO_ACTIVE_HIGH>;

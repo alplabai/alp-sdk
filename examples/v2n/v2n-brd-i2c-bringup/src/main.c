@@ -13,35 +13,60 @@
  *   0x25  act8760 ADD1    primary PMIC: system + Buck1..6 + GPIOs
  *   0x26  act8760 ADD2    primary PMIC: Buck7 + LDO1..6
  *   0x30  optiga_trust_m  secure element
- *   0x48  tmp112          temp sensor  (see address note below)
+ *   0x40  tmp112          temp sensor (maintainer-confirmed 2026-09-24)
  *   0x4D  tps628640       LPDDR4X 0.6 V buck (assembly OPTION)
- *   0x52  rv3028c7        RTC
- *   0x68  clk_5l35023b    clock generator
- *   0x70  gd32g553        IO-MCU bridge, I2C slave transport
+ *   0x52  rv3028c7        RTC (Linux kernel-bound: rtc-rv3028)
+ *   0x69  clk_5l35023b    clock generator (maintainer-confirmed 2026-09-24)
+ *   0x70  gd32g553        IO-MCU bridge, I2C slave transport (Linux
+ *                         kernel-bound: alplab,gd32-bridge-gpio)
+ *
+ * RIIC8/BRD_I2C is Cortex-A55/Linux-exclusive (metadata/e1m_modules/
+ * v2n/core-ownership.yaml) -- the CM33 must never master it.  This is
+ * a Linux/Yocto user-space app on the V2N Cortex-A55, following the
+ * same `alp_i2c_*` + chip-driver pattern as
+ * examples/v2n/v2n-power-monitor.  BRD_I2C = Linux /dev/i2c-8:
+ * meta-alp-sdk's e1m-v2n-som.dtsi aliases `i2c8 = &i2c8;`.
+ *
+ * KNOWN LIMITATION on a running target: the kernel already binds real
+ * drivers to 0x52 (rv3028 RTC, bound as rtc0) and 0x70
+ * (alplab,gd32-bridge-gpio) -- see meta-alp-sdk's e1m-v2n-som.dtsi
+ * `&i2c8` node.  A userspace i2c-dev transaction to an address a
+ * kernel driver already owns fails with EBUSY, but only via the
+ * I2C_SLAVE ioctl (src/yocto/peripheral_i2c.c) -- the raw I2C_RDWR
+ * path a chip driver's own protocol uses does not see that
+ * ownership and will never return EBUSY.  Both probes below
+ * therefore front-load a plain probe_addr() read (I2C_SLAVE) before
+ * ever touching the chip's own protocol, and report SKIP
+ * (kernel-owned), not FAIL -- `probe_rtc()` then reads the live time
+ * through /dev/rtc0 instead.
  *
  * The flow:
  *   Phase 0 -- bus health: full 0x08..0x77 scan.  Zero ACKs anywhere
  *              means a BUS-level fault (a line held low, missing
  *              pull-ups, wrong pinmux) rather than missing chips;
  *              the report says so explicitly instead of printing
- *              nine cryptic per-device NAKs.
- *   Phase 1 -- per-IC probe, strictly READ-ONLY toward the PMICs:
- *              nothing in this example ever writes a voltage, enable,
- *              or control register.  (The RTC init does clear its
- *              power-on flag and select 24 h mode -- that is the
- *              documented, side-effect-free bring-up handshake.)
- *
- * TMP112 address note: the SoM metadata used to say 0x40, which TI's
- * TMP112 cannot decode (only 0x48..0x4B via the ADD0 strap); it now
- * says 0x48 (ADD0 = GND, per metadata/chips/tmp112.yaml), but that
- * fix is still bench-unverified.  Until silicon confirms, this
- * example probes BOTH and reports which one ACKs -- whichever way it
- * lands, fix metadata or BOM, not this file first.
+ *              nine cryptic per-device NAKs.  A kernel-owned address
+ *              (EBUSY) is reported as present, not as a NAK.
+ *   Phase 1 -- per-IC probe, strictly READ-ONLY: nothing in this
+ *              example ever writes a voltage, enable, or control
+ *              register, and the RTC is read through /dev/rtc0 rather
+ *              than the chip driver's own init handshake (which would
+ *              both EBUSY against the kernel and, if it ever won that
+ *              race, clear the RTC's power-on flag as a side effect --
+ *              see probe_rtc()).
  */
 
+#include <errno.h>
+#include <fcntl.h>
+#include <linux/rtc.h>
 #include <stdarg.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
-#include <zephyr/kernel.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
 
 #include <alp/peripheral.h>
 #include <alp/chips/rv3028c7.h>
@@ -53,6 +78,10 @@
 #include <alp/chips/optiga_trust_m.h>
 #include <alp/chips/gd32g553.h>
 
+/* BRD_I2C = Linux /dev/i2c-8 -- see the file header for the DT-alias
+ * citation. */
+#define V2N_BRD_I2C_BUS_ID 8u
+
 /* One row of the final report. */
 typedef enum { R_PASS, R_FAIL, R_SKIP } result_t;
 
@@ -60,7 +89,8 @@ struct report_row {
 	const char *name;
 	uint8_t     addr;
 	result_t    result;
-	char        detail[64];
+	char        detail[96]; /* long enough for the PROBE_ACK/no-kernel-driver
+	                          * sentence below without vsnprintf truncation */
 };
 
 #define ROW_MAX 10
@@ -84,12 +114,24 @@ static void report(const char *name, uint8_t addr, result_t res, const char *fmt
 
 /* A 1-byte read is the least-invasive ACK probe: every chip on this
  * bus tolerates a register-pointer read, and unlike a write it can
- * never alter device state.  The portable backend maps a NAK (or any
- * bus fault) to ALP_ERR_IO. */
+ * never alter device state.  Distinguishes a real NAK from EBUSY (the
+ * kernel already owns this address via I2C_SLAVE -- src/yocto/
+ * peripheral_i2c.c) so a kernel-owned chip is never misreported as
+ * absent. */
+typedef enum { PROBE_NAK, PROBE_ACK, PROBE_BUSY } probe_result_t;
+
+static probe_result_t probe_addr(alp_i2c_t *bus, uint8_t addr)
+{
+	uint8_t      b = 0;
+	alp_status_t s = alp_i2c_read(bus, addr, &b, 1);
+	if (s == ALP_OK) return PROBE_ACK;
+	if (s == ALP_ERR_BUSY) return PROBE_BUSY;
+	return PROBE_NAK;
+}
+
 static bool acks(alp_i2c_t *bus, uint8_t addr)
 {
-	uint8_t b = 0;
-	return alp_i2c_read(bus, addr, &b, 1) == ALP_OK;
+	return probe_addr(bus, addr) == PROBE_ACK;
 }
 
 /* ------------------------------------------------------------------ */
@@ -100,10 +142,14 @@ static int scan_bus(alp_i2c_t *bus)
 {
 	int hits = 0;
 
-	printk("Phase 0: scanning 0x08..0x77 ...\n");
+	printf("Phase 0: scanning 0x08..0x77 ...\n");
 	for (uint8_t a = 0x08; a <= 0x77; a++) {
-		if (acks(bus, a)) {
-			printk("  ACK at 0x%02X\n", a);
+		probe_result_t r = probe_addr(bus, a);
+		if (r == PROBE_ACK) {
+			printf("  ACK at 0x%02X\n", a);
+			hits++;
+		} else if (r == PROBE_BUSY) {
+			printf("  0x%02X kernel-owned (EBUSY) -- present, see per-IC probe\n", a);
 			hits++;
 		}
 	}
@@ -112,13 +158,13 @@ static int scan_bus(alp_i2c_t *bus)
 		 * to diagnose: with pull-ups healthy and the mux right, at
 		 * least the PMICs always ACK (they are powered whenever the
 		 * SoM runs at all).  Zero ACKs = electrical problem. */
-		printk("  !! ZERO devices ACK.  This is a BUS-level fault:\n");
-		printk("     - a device or short holding SDA/SCL low,\n");
-		printk("     - missing/disconnected pull-ups, or\n");
-		printk("     - the RIIC8 pinmux not selected on P07/P06.\n");
-		printk("     Scope the lines before trusting any result below.\n");
+		printf("  !! ZERO devices ACK.  This is a BUS-level fault:\n");
+		printf("     - a device or short holding SDA/SCL low,\n");
+		printf("     - missing/disconnected pull-ups, or\n");
+		printf("     - the RIIC8 pinmux not selected on P07/P06.\n");
+		printf("     Scope the lines before trusting any result below.\n");
 	} else {
-		printk("  %d device(s) ACK.\n", hits);
+		printf("  %d device(s) ACK.\n", hits);
 	}
 	return hits;
 }
@@ -129,79 +175,85 @@ static int scan_bus(alp_i2c_t *bus)
 
 static void probe_rtc(alp_i2c_t *bus)
 {
-	rv3028c7_t rtc;
-
-	if (rv3028c7_init(&rtc, bus) != ALP_OK) {
-		report("rv3028c7 RTC", RV3028C7_I2C_ADDR, R_FAIL, "no ACK / status read failed");
+	/* Never call rv3028c7_init() here: on a running target the kernel
+	 * already owns 0x52 (rtc-rv3028, bound as rtc0), so init() would
+	 * just EBUSY at the I2C_SLAVE ioctl -- and if it ever won that
+	 * race instead, it clears the RTC's power-on flag as a bring-up
+	 * side effect (chips/rv3028c7/rv3028c7.c) this read-only
+	 * diagnostic must not have.  Read the live time through the
+	 * kernel's rtc0 device instead.
+	 *
+	 * Exactly one row per device: PROBE_NAK/PROBE_ACK report and
+	 * return immediately; only PROBE_BUSY (kernel-owned) falls
+	 * through to /dev/rtc0, which then emits its own single row. */
+	probe_result_t r = probe_addr(bus, RV3028C7_I2C_ADDR);
+	if (r == PROBE_NAK) {
+		report("rv3028c7 RTC", RV3028C7_I2C_ADDR, R_FAIL, "no ACK");
 		return;
 	}
-	rv3028c7_time_t t;
-	if (rv3028c7_get_time(&rtc, &t) == ALP_OK) {
-		/* A wildly implausible year usually means the backup supply
-		 * never charged -- worth knowing on first power-up. */
+	if (r == PROBE_ACK) {
 		report("rv3028c7 RTC",
 		       RV3028C7_I2C_ADDR,
-		       R_PASS,
-		       "%04u-%02u-%02u %02u:%02u:%02u%s",
-		       t.year,
-		       t.month,
-		       t.day,
-		       t.hour,
-		       t.minute,
-		       t.second,
-		       (t.year < 2026 || t.year > 2099) ? " (time not set)" : "");
-	} else {
-		report("rv3028c7 RTC", RV3028C7_I2C_ADDR, R_FAIL, "probe OK but time read failed");
+		       R_FAIL,
+		       "RV3028 answers but no kernel RTC driver is bound (rtc-rv3028 "
+		       "missing from the DT/kernel)");
+		return;
 	}
-	rv3028c7_deinit(&rtc);
+
+	/* r == PROBE_BUSY: kernel-owned -- read the live time through rtc0. */
+	int fd = open("/dev/rtc0", O_RDONLY | O_CLOEXEC);
+	if (fd < 0) {
+		report("rv3028c7 RTC", RV3028C7_I2C_ADDR, R_FAIL, "/dev/rtc0 open: %s", strerror(errno));
+		return;
+	}
+	struct rtc_time rt;
+	if (ioctl(fd, RTC_RD_TIME, &rt) < 0) {
+		report("rv3028c7 RTC", RV3028C7_I2C_ADDR, R_FAIL, "RTC_RD_TIME: %s", strerror(errno));
+		close(fd);
+		return;
+	}
+	close(fd);
+
+	/* A wildly implausible year usually means the backup supply never
+	 * charged -- worth knowing on first power-up. */
+	int year = rt.tm_year + 1900;
+	report("rv3028c7 RTC",
+	       RV3028C7_I2C_ADDR,
+	       R_PASS,
+	       "kernel rtc-rv3028 owns it, %04d-%02d-%02d %02d:%02d:%02d%s",
+	       year,
+	       rt.tm_mon + 1,
+	       rt.tm_mday,
+	       rt.tm_hour,
+	       rt.tm_min,
+	       rt.tm_sec,
+	       (year < 2026 || year > 2099) ? " (unset)" : "");
 }
 
 static void probe_tmp112(alp_i2c_t *bus)
 {
-	/* Address discrepancy under test: metadata said 0x40 before the
-	 * issue-#41 fix to 0x48 (bench-unverified); the TMP112 datasheet
-	 * decodes only 0x48..0x4B.  Find where (and whether) it ACKs. */
-	const uint8_t candidates[] = { 0x40, TMP112_I2C_ADDR_GND, 0x49, 0x4A, 0x4B };
-	uint8_t       found        = 0;
-
-	for (size_t i = 0; i < ARRAY_SIZE(candidates); i++) {
-		if (acks(bus, candidates[i])) {
-			found = candidates[i];
-			break;
-		}
-	}
-	if (found == 0) {
-		report("tmp112 temp", 0x40, R_FAIL, "no ACK at 0x40 nor 0x48..0x4B");
-		return;
-	}
-	if (found == 0x40) {
-		/* ACKs at the old (pre-#41) metadata address -- the driver
-		 * (faithfully to the datasheet) refuses 0x40.  Surface the
-		 * conflict; do NOT quietly loosen the driver. */
-		report("tmp112 temp",
-		       0x40,
-		       R_FAIL,
-		       "ACKs at 0x40 -- not a TMP112 address; fix metadata or BOM");
-		return;
-	}
+	/* Address confirmed 2026-09-24 (metadata/chips/tmp112.yaml):
+	 * ADD0=GND on the fitted TMP112DIDPWR (X2SON-5) straps 0x40, not
+	 * the naive-datasheet TMP112_I2C_ADDR_GND=0x48 -- same class of
+	 * bug already fixed for AEN (#1978). */
 	tmp112_t sens;
 
-	if (tmp112_init(&sens, bus, found) != ALP_OK) {
-		report("tmp112 temp", found, R_FAIL, "ACKs but CONF fingerprint mismatch");
+	if (tmp112_init(&sens, bus, TMP112_I2C_ADDR_ADDRVAR_GND) != ALP_OK) {
+		report("tmp112 temp", TMP112_I2C_ADDR_ADDRVAR_GND, R_FAIL, "no ACK at 0x40");
 		return;
 	}
 	int32_t mc = 0;
 
 	if (tmp112_read_temp_milli_c(&sens, &mc) == ALP_OK) {
 		report("tmp112 temp",
-		       found,
+		       TMP112_I2C_ADDR_ADDRVAR_GND,
 		       R_PASS,
 		       "%s%d.%03d degC",
 		       (mc < 0) ? "-" : "",
 		       (int)((mc < 0 ? -mc : mc) / 1000),
 		       (int)((mc < 0 ? -mc : mc) % 1000));
 	} else {
-		report("tmp112 temp", found, R_FAIL, "temperature read failed");
+		report("tmp112 temp", TMP112_I2C_ADDR_ADDRVAR_GND, R_FAIL, "temperature read failed");
 	}
 	tmp112_deinit(&sens);
 }
@@ -251,6 +303,12 @@ static void probe_act8760(alp_i2c_t *bus)
 
 static void probe_da9292(alp_i2c_t *bus)
 {
+	/* Read-only here: U-Boot's board_late_init() is the sole writer of
+	 * this PMIC's CH2 (DEEPX rail) -- see
+	 * meta-alp-sdk/recipes-bsp/u-boot/u-boot/
+	 * 0004-rzv2n-dev-ALP-E1M-DEEPX-rail-bringup.patch.  This probe
+	 * only reads DEV_ID/REV_ID + STATUS, matching the "strictly
+	 * READ-ONLY toward the PMICs" rule in the file header. */
 	da9292_t pmic;
 
 	if (da9292_init(&pmic, bus, DA9292_I2C_ADDR_V2N) != ALP_OK) {
@@ -321,14 +379,33 @@ static void probe_gd32(alp_i2c_t *bus)
 {
 	/* The supervisor MCU speaks the bridge protocol over BRD_I2C as
 	 * its management transport (SPI is the fast path).  init() runs
-	 * PING + GET_VERSION and enforces the protocol-major match. */
+	 * PING + GET_VERSION and enforces the protocol-major match.
+	 *
+	 * On a running target this address is ALSO bound to the kernel's
+	 * alplab,gd32-bridge-gpio driver.  gd32g553_init() talks I2C
+	 * through alp_i2c_write_read(), which uses the I2C_RDWR ioctl --
+	 * unlike I2C_SLAVE, I2C_RDWR does not check against a bound
+	 * kernel driver and never returns ALP_ERR_BUSY
+	 * (src/yocto/peripheral_i2c.c).  So ownership has to be checked
+	 * with a plain probe_addr() (I2C_SLAVE, via alp_i2c_read())
+	 * before ever touching the chip -- mirroring probe_rtc(). */
+	probe_result_t r = probe_addr(bus, GD32G553_BRIDGE_DEFAULT_I2C_ADDR);
+	if (r == PROBE_BUSY) {
+		report("gd32g553 bridge",
+		       GD32G553_BRIDGE_DEFAULT_I2C_ADDR,
+		       R_SKIP,
+		       "kernel-owned (alplab,gd32-bridge-gpio bound) -- not probed");
+		return;
+	}
+
 	gd32g553_t mcu;
 
-	if (gd32g553_init(&mcu, NULL, bus, GD32G553_BRIDGE_DEFAULT_I2C_ADDR) != ALP_OK) {
+	alp_status_t s = gd32g553_init(&mcu, NULL, bus, GD32G553_BRIDGE_DEFAULT_I2C_ADDR);
+	if (s != ALP_OK) {
 		report("gd32g553 bridge",
 		       GD32G553_BRIDGE_DEFAULT_I2C_ADDR,
 		       R_FAIL,
-		       "PING/GET_VERSION failed (firmware running? major match?)");
+		       "PING/GET_VERSION failed -- firmware running? major match?");
 		return;
 	}
 	report("gd32g553 bridge",
@@ -345,21 +422,22 @@ static void probe_gd32(alp_i2c_t *bus)
 
 int main(void)
 {
-	printk("\n=== V2N BRD_I2C bring-up diagnostic ===\n");
+	printf("\n=== V2N BRD_I2C bring-up diagnostic ===\n");
 
 	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-	    .bus_id     = 0u,      /* BRD_I2C = bus 0 on the V2N M33 target */
-	    .bitrate_hz = 400000u, /* every IC on this bus is FM-capable    */
+	    .bus_id     = V2N_BRD_I2C_BUS_ID, /* BRD_I2C = Linux /dev/i2c-8 */
+	    .bitrate_hz = 400000u,            /* every IC on this bus is FM-capable */
 	});
 	if (bus == NULL) {
-		printk("FATAL: alp_i2c_open(bus 0) failed -- check the board "
-		       "overlay wires the alp-i2c0 alias.\n");
+		printf("FATAL: alp_i2c_open(bus %u) failed -- check /dev/i2c-8 exists "
+		       "and this user has permission to open it.\n",
+		       V2N_BRD_I2C_BUS_ID);
 		return 1;
 	}
 
 	int hits = scan_bus(bus);
 
-	printk("\nPhase 1: per-IC probes (read-only)\n");
+	printf("\nPhase 1: per-IC probes (read-only)\n");
 	probe_rtc(bus);
 	probe_tmp112(bus);
 	probe_clkgen(bus);
@@ -369,8 +447,8 @@ int main(void)
 	probe_optiga(bus);
 	probe_gd32(bus);
 
-	printk("\n==== BRD_I2C report ====\n");
-	printk("%-16s %-5s %-5s %s\n", "device", "addr", "res", "detail");
+	printf("\n==== BRD_I2C report ====\n");
+	printf("%-16s %-5s %-5s %s\n", "device", "addr", "res", "detail");
 	int fails = 0;
 
 	for (int i = 0; i < row_count; i++) {
@@ -381,17 +459,17 @@ int main(void)
 		if (rows[i].result == R_FAIL) {
 			fails++;
 		}
-		printk("%-16s 0x%02X  %-5s %s\n", rows[i].name, rows[i].addr, res, rows[i].detail);
+		printf("%-16s 0x%02X  %-5s %s\n", rows[i].name, rows[i].addr, res, rows[i].detail);
 	}
-	printk("========================\n");
+	printf("========================\n");
 	if (hits == 0) {
-		printk("VERDICT: bus-level fault -- fix the electrical problem first.\n");
+		printf("VERDICT: bus-level fault -- fix the electrical problem first.\n");
 	} else if (fails == 0) {
-		printk("VERDICT: BRD_I2C fully alive.\n");
+		printf("VERDICT: BRD_I2C fully alive.\n");
 	} else {
-		printk("VERDICT: bus alive, %d device(s) failing -- see rows above.\n", fails);
+		printf("VERDICT: bus alive, %d device(s) failing -- see rows above.\n", fails);
 	}
 
 	alp_i2c_close(bus);
-	return 0;
+	return fails > 0 ? 1 : 0;
 }

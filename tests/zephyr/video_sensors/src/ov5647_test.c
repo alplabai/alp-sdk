@@ -39,6 +39,13 @@
 #define REG_MIPI_CTRL00   0x4800
 #define REG_FRAME_OFF_NUM 0x4202
 #define REG_PAD_OUT       0x300d
+/* OV5647_MANUAL_CTRL (ov5647.c) -- kept local like the quartet above. AEC/AGC-manual are
+ * BIT(0)/BIT(1); VTS-manual (the only bit ov5647_init_regs[] sets, #2277) is BIT(2).
+ */
+#define REG_MANUAL_CTRL 0x3503
+#define MANUAL_CTRL_VTS 0x04
+#define MANUAL_CTRL_AEC 0x01
+#define MANUAL_CTRL_AGC 0x02
 
 /* The three PLL registers of AUTHORIZED LOCAL DIVERGENCE #2's eight-register init set (issue
  * #2248, bench run 52) -- kept local for the same reason as the quartet above. */
@@ -74,7 +81,9 @@
  * HTS (1852 / 2700) needs both bytes checked since neither fits in one byte. */
 #define REG_TIMING_X_ADDR_START_LO 0x3801
 #define REG_TIMING_Y_ADDR_START_LO 0x3803
+#define REG_TIMING_X_ADDR_END_HI   0x3804
 #define REG_TIMING_X_ADDR_END_LO   0x3805
+#define REG_TIMING_Y_ADDR_END_HI   0x3806
 #define REG_TIMING_Y_ADDR_END_LO   0x3807
 #define REG_TIMING_X_OUTPUT_HI     0x3808
 #define REG_TIMING_X_OUTPUT_LO     0x3809
@@ -188,16 +197,82 @@
  * crop size. 0x3a0d/0x3a0e (max bands per frame) are PER MODE instead (issue #2248 fix-up round
  * 5): floor(VTS/band) with VTS = height + OV5647_VBLANK_MIN, the requested height's OWN
  * minimum-blanking VTS -- not a constant pinned to OV5647_FULL_HEIGHT. The values below are for
- * the 1280x960 crop this file's tests use; see test_crop_aec_max_bands_computed_per_mode for the
- * 2592x1944 case (VTS 1968), the same rule mainline's own 0x08/0x06 reproduce. */
+ * the 1920x1080 crop this file's tests use (issue #2286 Stage B moved 1280x960 to its own binned
+ * mode below, so it no longer exercises the crop path); see
+ * test_crop_aec_max_bands_computed_per_mode for the 2592x1944 case (VTS 1968), the same rule
+ * mainline's own 0x08/0x06 reproduce. */
 #define AEC_CROP_BANDSTEP_3A08_VAL 0x00
 #define AEC_CROP_BANDSTEP_3A09_VAL 0xd0
 #define AEC_CROP_BANDSTEP_3A0A_VAL 0x00
 #define AEC_CROP_BANDSTEP_3A0B_VAL 0xad
-/* 1280x960: min-blanking VTS 960 + 24 = 984 -> floor(984/173) = 5, floor(984/208) = 4. */
-#define AEC_CROP_BANDSTEP_3A0D_VAL 0x05
-#define AEC_CROP_BANDSTEP_3A0E_VAL 0x04
+/* 1920x1080: min-blanking VTS 1080 + 24 = 1104 -> floor(1104/173) = 6, floor(1104/208) = 5. */
+#define AEC_CROP_BANDSTEP_3A0D_VAL 0x06
+#define AEC_CROP_BANDSTEP_3A0E_VAL 0x05
 #define BLC_CROP_4004_VAL          0x04
+
+/*
+ * The NEW 1280x960 2x2-binned full-FOV mode (issue #2286 Stage B, AUTHORIZED LOCAL DIVERGENCE #4
+ * in ov5647.c) -- kept local for the same reason as the 640x480 quartet/PLL trio above. Window is
+ * the whole pixel array (2624x1956, read out then halved by the 2x2 bin below), NOT the 640x480
+ * mode's own full-array window -- both cover the full sensor, but the per-mode HTS/AEC-band-step
+ * differ, so the two modes are not interchangeable in these tests.
+ */
+#define BINNED1280_X_ADDR_START 0
+#define BINNED1280_Y_ADDR_START 0
+/* 0x0a3f / 0x07a3 -- unlike FULLFOV_X_ADDR_END_LO above, both the high AND low bytes are
+ * checked here (issue #2286): the low byte alone (0x3f / 0xa3) is enough to distinguish this
+ * window from the crop path's or 640x480's, so an earlier version of this file checked only the
+ * low byte -- but that leaves a driver bug that writes the WRONG high byte (a
+ * transposed 0x3800-series address, say) invisible to this test.
+ */
+#define BINNED1280_X_ADDR_END_HI 0x0a
+#define BINNED1280_X_ADDR_END_LO 0x3f /* 0x0a3f = 2623 */
+#define BINNED1280_Y_ADDR_END_HI 0x07
+#define BINNED1280_Y_ADDR_END_LO 0xa3 /* 0x07a3 = 1955 */
+#define OUTPUT_1280_HI           0x05
+#define OUTPUT_1280_LO           0x00
+#define OUTPUT_960_HI            0x03
+#define OUTPUT_960_LO            0xc0
+#define REG_TIMING_ISP_X_OFFSET  0x3811
+#define REG_TIMING_ISP_Y_OFFSET  0x3813
+#define BINNED1280_X_OFFSET      16
+#define BINNED1280_Y_OFFSET      8
+/* Datasheet power-on values for 0x3811/0x3813 -- every mode OTHER than 1280x960 must write these
+ * back explicitly now (fix-first review, issue #2286 BLOCKER): a prior 1280x960 selection leaves
+ * BINNED1280_X_OFFSET/BINNED1280_Y_OFFSET (16/8) programmed, and no other mode used to touch
+ * these two registers at all, so its non-default crop stayed armed against the new window.
+ */
+#define ISP_X_OFFSET_DEFAULT    0x04
+#define ISP_Y_OFFSET_DEFAULT    0x02
+#define SUBSAMPLE_2X2BINNED     0x31
+#define SENSOR_CTRL09_2X2BINNED 0x12
+/* HTS 1896 (0x0768) -- the reference's OWN 2x2-binned-mode HTS, used unscaled; see
+ * ov5647.c's OV5647_HTS_1280X960_BINNED comment for the resulting line time at this driver's
+ * global pixel rate.
+ */
+#define HTS_1280X960_BINNED_HI 0x07
+#define HTS_1280X960_BINNED_LO 0x68
+/* VTS = cfg->pixel_rate / (HTS_1280X960_BINNED * frmrate) -- 2051 (0x0803) at 15 fps, 1025
+ * (0x0401) at 30 fps, both computed the same way as VTS_640X480_15FPS_HI/LO above.
+ */
+#define VTS_1280X960_15FPS_HI 0x08
+#define VTS_1280X960_15FPS_LO 0x03
+#define VTS_1280X960_30FPS_HI 0x04
+#define VTS_1280X960_30FPS_LO 0x01
+/* 50/60 Hz AEC band step -- 308/256 lines, recomputed for this driver's actual 32.503us line
+ * time (fix-first review correction, issue #2286: NOT the reference's own binned-mode 296/246,
+ * the wrong real-time period at this line time -- see ov5647.c's
+ * OV5647_AEC_BAND_50HZ_1280X960BIN comment for the arithmetic). Both now exceed one byte, so
+ * both high bytes are 0x01 (296/246 needed only one). Max bands per frame: min-blanking VTS
+ * 960 + 24 = 984 -> floor(984/256) = 3, floor(984/308) = 3.
+ */
+#define AEC_BINNED1280_BANDSTEP_3A08_VAL 0x01
+#define AEC_BINNED1280_BANDSTEP_3A09_VAL 0x34
+#define AEC_BINNED1280_BANDSTEP_3A0A_VAL 0x01
+#define AEC_BINNED1280_BANDSTEP_3A0B_VAL 0x00
+#define AEC_BINNED1280_BANDSTEP_3A0D_VAL 0x03
+#define AEC_BINNED1280_BANDSTEP_3A0E_VAL 0x03
+#define BLC_BINNED1280_4004_VAL          0x04
 
 /*
  * Every entry ov5647_init_regs[] (ov5647.c) writes in software standby, EXCLUDING only the
@@ -615,25 +690,231 @@ ZTEST(ov5647, test_set_format_640x480_binned_fullfov_before_park)
 	             running_idx);
 }
 
-/* Same name-sorting reason as test_set_format_640x480_binned_fullfov_before_park above. */
+/*
+ * The full 1280x960 2x2-binned-mode register block ov5647_set_mode_regs() writes (issue #2286
+ * Stage B, AUTHORIZED LOCAL DIVERGENCE #4) -- same shape as binned_mode_regs[] above (window,
+ * output size, per-mode HTS, subsample, binning-enable/orientation, binned-mode analog, AEC band
+ * step), PLUS the two ISP crop-offset registers (0x3811/0x3813) this mode is the first to write
+ * explicitly.
+ */
+static const struct ov5647_emul_write binned1280_mode_regs[] = {
+	{ REG_TIMING_X_ADDR_START_LO, BINNED1280_X_ADDR_START },
+	{ REG_TIMING_Y_ADDR_START_LO, BINNED1280_Y_ADDR_START },
+	{ REG_TIMING_X_ADDR_END_HI, BINNED1280_X_ADDR_END_HI },
+	{ REG_TIMING_X_ADDR_END_LO, BINNED1280_X_ADDR_END_LO },
+	{ REG_TIMING_Y_ADDR_END_HI, BINNED1280_Y_ADDR_END_HI },
+	{ REG_TIMING_Y_ADDR_END_LO, BINNED1280_Y_ADDR_END_LO },
+	{ REG_TIMING_X_OUTPUT_HI, OUTPUT_1280_HI },
+	{ REG_TIMING_X_OUTPUT_LO, OUTPUT_1280_LO },
+	{ REG_TIMING_Y_OUTPUT_HI, OUTPUT_960_HI },
+	{ REG_TIMING_Y_OUTPUT_LO, OUTPUT_960_LO },
+	{ REG_TIMING_ISP_X_OFFSET, BINNED1280_X_OFFSET },
+	{ REG_TIMING_ISP_Y_OFFSET, BINNED1280_Y_OFFSET },
+	{ REG_TIMING_HTS_HI, HTS_1280X960_BINNED_HI },
+	{ REG_TIMING_HTS_LO, HTS_1280X960_BINNED_LO },
+	{ REG_TIMING_X_INC, SUBSAMPLE_2X2BINNED },
+	{ REG_TIMING_Y_INC, SUBSAMPLE_2X2BINNED },
+	{ REG_TIMING_TC_REG20, TC_REG20_BINNED },
+	{ REG_TIMING_TC_REG21, TC_REG21_BINNED },
+	{ REG_ANALOG_CTRL12, ANALOG_CTRL12_BINNED },
+	{ REG_ANALOG_CTRL18, ANALOG_CTRL18_BINNED },
+	{ REG_SENSOR_CTRL08, SENSOR_CTRL08_BINNED },
+	{ REG_SENSOR_CTRL09, SENSOR_CTRL09_2X2BINNED },
+	{ REG_AEC_RSVD_3A08, AEC_BINNED1280_BANDSTEP_3A08_VAL },
+	{ REG_AEC_RSVD_3A09, AEC_BINNED1280_BANDSTEP_3A09_VAL },
+	{ REG_AEC_RSVD_3A0A, AEC_BINNED1280_BANDSTEP_3A0A_VAL },
+	{ REG_AEC_RSVD_3A0B, AEC_BINNED1280_BANDSTEP_3A0B_VAL },
+	{ REG_AEC_RSVD_3A0D, AEC_BINNED1280_BANDSTEP_3A0D_VAL },
+	{ REG_AEC_RSVD_3A0E, AEC_BINNED1280_BANDSTEP_3A0E_VAL },
+	{ REG_BLC_RSVD_4004, BLC_BINNED1280_4004_VAL },
+};
+
+/*
+ * issue #2286 Stage B: the NEW full-FOV 2x2-binned 1280x960 mode -- same coherent-block-before-
+ * park shape as test_set_format_640x480_binned_fullfov_before_park above, so it fails the same
+ * way that test would if the block were split or misordered. Also pins the per-mode HTS/VTS
+ * math this mode needs for ov5647_hts_for() (and, once issue #2277 lands, the exposure clamp
+ * that reads it) to be correct: HTS 1896 and VTS 2051 at the ambient 15 fps default.
+ */
+ZTEST(ov5647, test_set_format_1280x960_binned_fullfov_before_park)
+{
+	const struct emul  *emul = ov5647_emul();
+	struct video_format fmt  = {
+		.type        = VIDEO_BUF_TYPE_OUTPUT,
+		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
+		.width       = 1280,
+		.height      = 960,
+	};
+	size_t bitmode_idx, running_idx, vts_hi_idx, vts_lo_idx;
+
+	zassert_ok(video_stream_stop(ov5647_dev(), VIDEO_BUF_TYPE_OUTPUT));
+	ov5647_emul_clear_log(emul);
+
+	zassert_ok(video_set_format(ov5647_dev(), &fmt), "video_set_format(1280x960) failed");
+
+	zassert_true(find_write_index(emul, REG_SC_PLL_CTRL0, MIPI_BIT_MODE_RAW10, &bitmode_idx),
+	             "1280x960 set_fmt() never wrote 0x3034's RAW10 bit-mode field");
+	zassert_true(find_write_index(emul, REG_MODE_SELECT, MODE_SELECT_RUNNING, &running_idx),
+	             "no write set MODE_SELECT running after 1280x960 set_fmt() -- the lane park "
+	             "must not have run");
+	zassert_true(find_write_index(emul, REG_TIMING_VTS_HI, VTS_1280X960_15FPS_HI, &vts_hi_idx),
+	             "1280x960 set_fmt() never wrote VTS high byte 0x%02x (2051/0x0803 at 15 fps)",
+	             VTS_1280X960_15FPS_HI);
+	zassert_true(find_write_index(emul, REG_TIMING_VTS_LO, VTS_1280X960_15FPS_LO, &vts_lo_idx),
+	             "1280x960 set_fmt() never wrote VTS low byte 0x%02x (2051/0x0803 at 15 fps)",
+	             VTS_1280X960_15FPS_LO);
+
+	for (size_t i = 0; i < ARRAY_SIZE(binned1280_mode_regs); i++) {
+		size_t idx;
+
+		zassert_true(find_write_index(
+		                 emul, binned1280_mode_regs[i].reg, binned1280_mode_regs[i].value, &idx),
+		             "1280x960 set_fmt() never wrote register 0x%04x = 0x%02x (entry %zu "
+		             "of binned1280_mode_regs[])",
+		             binned1280_mode_regs[i].reg,
+		             binned1280_mode_regs[i].value,
+		             i);
+		zassert_true(idx < running_idx,
+		             "0x%04x written at log index %zu, at/after the lane park's running "
+		             "write at index %zu",
+		             binned1280_mode_regs[i].reg,
+		             idx,
+		             running_idx);
+		zassert_true(idx > bitmode_idx,
+		             "0x%04x written at log index %zu, at/before the 0x3034 bit-mode "
+		             "write at index %zu -- the mode block must follow it",
+		             binned1280_mode_regs[i].reg,
+		             idx,
+		             bitmode_idx);
+	}
+
+	zassert_true(vts_hi_idx < running_idx && vts_lo_idx < running_idx,
+	             "VTS written at log index %zu/%zu, at/after the lane park's running write "
+	             "at index %zu",
+	             vts_hi_idx,
+	             vts_lo_idx,
+	             running_idx);
+}
+
+/*
+ * issue #2286 Stage B: ov5647_hts_for()/ov5647_frmrate_to_vts() must use HTS 1896 for 1280x960,
+ * not the crop path's 2700 -- checked at the SECOND rate point the task calls out (30 fps, VTS
+ * 1025/0x0401) rather than repeating the 15 fps default test_set_format_1280x960_binned_fullfov_
+ * before_park above already covers.
+ */
+ZTEST(ov5647, test_set_format_1280x960_binned_30fps_vts)
+{
+	const struct emul  *emul = ov5647_emul();
+	struct video_format fmt  = {
+		.type        = VIDEO_BUF_TYPE_OUTPUT,
+		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
+		.width       = 1280,
+		.height      = 960,
+	};
+	struct video_frmival frmival = { .numerator = 1, .denominator = 30 };
+	uint8_t              val;
+
+	zassert_ok(video_stream_stop(ov5647_dev(), VIDEO_BUF_TYPE_OUTPUT));
+	zassert_ok(video_set_format(ov5647_dev(), &fmt), "video_set_format(1280x960) failed");
+	zassert_ok(video_set_frmival(ov5647_dev(), &frmival), "set_frmival(30fps) failed");
+	zassert_equal(frmival.denominator,
+	              30,
+	              "set_frmival(30fps) at 1280x960 clamped to %u/%u -- 30 fps must be "
+	              "reachable (VTS 1025 >= 960 + 24)",
+	              frmival.denominator,
+	              frmival.numerator);
+
+	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_VTS_HI, &val));
+	zassert_equal(val,
+	              VTS_1280X960_30FPS_HI,
+	              "0x380e = 0x%02x at 1280x960/30fps, want 0x%02x (1025/0x0401)",
+	              val,
+	              VTS_1280X960_30FPS_HI);
+	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_VTS_LO, &val));
+	zassert_equal(val,
+	              VTS_1280X960_30FPS_LO,
+	              "0x380f = 0x%02x at 1280x960/30fps, want 0x%02x (1025/0x0401)",
+	              val,
+	              VTS_1280X960_30FPS_LO);
+}
+
+/*
+ * issue #2286 Stage B, same shape as test_enum_frmival_640x480_accepts_60_rejects_90: 30 fps must
+ * be accepted at 1280x960 (VTS 1025 >= 960 + 24, HTS 1896) and 45 fps must be rejected (VTS 683 <
+ * 984) -- the "30 fps reachable" claim from issue #2286's plan, and the boundary just past it.
+ */
+ZTEST(ov5647, test_enum_frmival_1280x960_accepts_30_rejects_45)
+{
+	struct video_format fmt = {
+		.type        = VIDEO_BUF_TYPE_OUTPUT,
+		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
+		.width       = 1280,
+		.height      = 960,
+	};
+	struct video_frmival_enum fie_30 = {
+		.index  = 2, /* ov5647_framerates[] = {10, 15, 30, 45, 60, 90, 120} */
+		.format = &fmt,
+	};
+	struct video_frmival_enum fie_45 = {
+		.index  = 3,
+		.format = &fmt,
+	};
+
+	zassert_ok(video_enum_frmival(ov5647_dev(), &fie_30),
+	           "30 fps rejected at 1280x960 -- want accepted (VTS 1025 >= 960 + 24)");
+	zassert_equal(fie_30.discrete.denominator, 30, "enum_frmival index 2 is not 30 fps");
+
+	zassert_true(video_enum_frmival(ov5647_dev(), &fie_45) < 0,
+	             "45 fps accepted at 1280x960 -- want rejected (VTS 683 < 960 + 24)");
+}
+
+/*
+ * Same name-sorting reason as test_set_format_640x480_binned_fullfov_before_park above.
+ *
+ * Extended (fix-first review, issue #2286 BLOCKER): 1280x960 is now the ONLY mode that arms a
+ * non-default 0x3811/0x3813 ISP crop offset (16/8) -- every other mode must write these two back
+ * to their datasheet power-on default (ISP_X_OFFSET_DEFAULT/ISP_Y_OFFSET_DEFAULT, 0x04/0x02)
+ * rather than leave the 1280x960 mode's crop armed, the same "never leaves binning on" discipline
+ * this test already checks for 0x3814/0x3815/0x380c..0x3821. Both the 640x480-binned and the
+ * generic crop paths are checked, from a starting 1280x960 selection, since either path could
+ * independently forget the writeback. This is a BLOCKER FIX regression test: it FAILS against
+ * commit 22a9ecbe6 (0x3811/0x3813 stay at 16/8 after switching away from 1280x960).
+ */
 ZTEST(ov5647, test_set_format_switch_never_leaves_binning_on_crop_window)
 {
-	const struct emul  *emul    = ov5647_emul();
+	const struct emul  *emul         = ov5647_emul();
+	struct video_format fmt_1280x960 = {
+		.type        = VIDEO_BUF_TYPE_OUTPUT,
+		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
+		.width       = 1280,
+		.height      = 960,
+	};
 	struct video_format fmt_640 = {
 		.type        = VIDEO_BUF_TYPE_OUTPUT,
 		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
 		.width       = 640,
 		.height      = 480,
 	};
-	struct video_format fmt_1280 = {
+	struct video_format fmt_1920x1080 = {
 		.type        = VIDEO_BUF_TYPE_OUTPUT,
 		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
-		.width       = 1280,
-		.height      = 960,
+		.width       = 1920,
+		.height      = 1080,
 	};
 	uint8_t val;
 
 	zassert_ok(video_stream_stop(ov5647_dev(), VIDEO_BUF_TYPE_OUTPUT));
+
+	/* Arm the 1280x960 mode's non-default ISP crop offset, then switch to 640x480 and confirm
+	 * it is written back to the power-on default, not left at 16/8.
+	 */
+	zassert_ok(video_set_format(ov5647_dev(), &fmt_1280x960));
+	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_ISP_X_OFFSET, &val));
+	zassert_equal(val,
+	              BINNED1280_X_OFFSET,
+	              "0x3811 = 0x%02x after 1280x960, want the binned offset 0x%02x",
+	              val,
+	              BINNED1280_X_OFFSET);
 
 	zassert_ok(video_set_format(ov5647_dev(), &fmt_640));
 	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_X_INC, &val));
@@ -642,38 +923,54 @@ ZTEST(ov5647, test_set_format_switch_never_leaves_binning_on_crop_window)
 	              "0x3814 = 0x%02x after 640x480, want binned 0x%02x",
 	              val,
 	              SUBSAMPLE_BINNED);
+	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_ISP_X_OFFSET, &val));
+	zassert_equal(val,
+	              ISP_X_OFFSET_DEFAULT,
+	              "0x3811 = 0x%02x after switching 1280x960 -> 640x480, want the power-on "
+	              "default 0x%02x, not the binned mode's 0x%02x left armed",
+	              val,
+	              ISP_X_OFFSET_DEFAULT,
+	              BINNED1280_X_OFFSET);
+	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_ISP_Y_OFFSET, &val));
+	zassert_equal(val,
+	              ISP_Y_OFFSET_DEFAULT,
+	              "0x3813 = 0x%02x after switching 1280x960 -> 640x480, want the power-on "
+	              "default 0x%02x, not the binned mode's 0x%02x left armed",
+	              val,
+	              ISP_Y_OFFSET_DEFAULT,
+	              BINNED1280_Y_OFFSET);
 
 	/* The run-54 trap: switching to a crop size must not leave binning armed against the
 	 * new crop window -- see ov5647.c's ORDERING TRAP note in the file header.
 	 */
-	zassert_ok(video_set_format(ov5647_dev(), &fmt_1280));
+	zassert_ok(video_set_format(ov5647_dev(), &fmt_1920x1080));
 
 	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_X_INC, &val));
 	zassert_equal(val,
 	              SUBSAMPLE_1TO1,
-	              "0x3814 = 0x%02x after switching to 1280x960, want 1:1 0x%02x -- the "
+	              "0x3814 = 0x%02x after switching to 1920x1080, want 1:1 0x%02x -- the "
 	              "run-54 trap: binning must never be left on with a crop window",
 	              val,
 	              SUBSAMPLE_1TO1);
 	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_Y_INC, &val));
 	zassert_equal(
-	    val, SUBSAMPLE_1TO1, "0x3815 = 0x%02x after 1280x960, want 0x%02x", val, SUBSAMPLE_1TO1);
+	    val, SUBSAMPLE_1TO1, "0x3815 = 0x%02x after 1920x1080, want 0x%02x", val, SUBSAMPLE_1TO1);
 	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_TC_REG20, &val));
 	zassert_equal(
-	    val, TC_REG20_1TO1, "0x3820 = 0x%02x after 1280x960, want 0x%02x", val, TC_REG20_1TO1);
+	    val, TC_REG20_1TO1, "0x3820 = 0x%02x after 1920x1080, want 0x%02x", val, TC_REG20_1TO1);
 	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_TC_REG21, &val));
 	zassert_equal(
-	    val, TC_REG21_1TO1, "0x3821 = 0x%02x after 1280x960, want 0x%02x", val, TC_REG21_1TO1);
+	    val, TC_REG21_1TO1, "0x3821 = 0x%02x after 1920x1080, want 0x%02x", val, TC_REG21_1TO1);
 
 	/* AUTHORIZED LOCAL DIVERGENCE #3, run 61: a crop size must write the crop-path HTS
 	 * (2700 / 0x0a8c), not leave the binned mode's 1852 armed.
 	 */
 	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_HTS_HI, &val));
 	zassert_equal(
-	    val, HTS_CROP_HI, "0x380c = 0x%02x after 1280x960, want crop 0x%02x", val, HTS_CROP_HI);
+	    val, HTS_CROP_HI, "0x380c = 0x%02x after 1920x1080, want crop 0x%02x", val, HTS_CROP_HI);
 	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_HTS_LO, &val));
 	zassert_equal(
-	    val, HTS_CROP_LO, "0x380d = 0x%02x after 1280x960, want crop 0x%02x", val, HTS_CROP_LO);
+	    val, HTS_CROP_LO, "0x380d = 0x%02x after 1920x1080, want crop 0x%02x", val, HTS_CROP_LO);
 
 	/* issue #2248, item 2(b): the VTS actually PROGRAMMED for a crop size must be computed
 	 * with HTS_CROP (2700), not the binned mode's 1852 -- 1440 (0x05a0) at the ambient 15
@@ -684,13 +981,13 @@ ZTEST(ov5647, test_set_format_switch_never_leaves_binning_on_crop_window)
 	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_VTS_HI, &val));
 	zassert_equal(val,
 	              VTS_CROP_15FPS_HI,
-	              "0x380e = 0x%02x after 1280x960, want crop-HTS VTS 0x%02x",
+	              "0x380e = 0x%02x after 1920x1080, want crop-HTS VTS 0x%02x",
 	              val,
 	              VTS_CROP_15FPS_HI);
 	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_VTS_LO, &val));
 	zassert_equal(val,
 	              VTS_CROP_15FPS_LO,
-	              "0x380f = 0x%02x after 1280x960, want crop-HTS VTS 0x%02x",
+	              "0x380f = 0x%02x after 1920x1080, want crop-HTS VTS 0x%02x",
 	              val,
 	              VTS_CROP_15FPS_LO);
 
@@ -718,7 +1015,7 @@ ZTEST(ov5647, test_set_format_switch_never_leaves_binning_on_crop_window)
 
 		zassert_true(
 		    find_write_index(emul, crop_bandstep_regs[i].reg, crop_bandstep_regs[i].value, &idx),
-		    "crop-path set_format(1280x960) never wrote register 0x%04x = 0x%02x "
+		    "crop-path set_format(1920x1080) never wrote register 0x%04x = 0x%02x "
 		    "(entry %zu of crop_bandstep_regs[]) -- either it was dropped, or it "
 		    "still has the binned mode's line-time-scaled value",
 		    crop_bandstep_regs[i].reg,
@@ -729,13 +1026,13 @@ ZTEST(ov5647, test_set_format_switch_never_leaves_binning_on_crop_window)
 	zassert_ok(ov5647_emul_get_reg(emul, REG_AEC_RSVD_3A08, &val));
 	zassert_equal(val,
 	              AEC_CROP_BANDSTEP_3A08_VAL,
-	              "0x3a08 = 0x%02x after 1280x960, want the crop path's own 0x%02x",
+	              "0x3a08 = 0x%02x after 1920x1080, want the crop path's own 0x%02x",
 	              val,
 	              AEC_CROP_BANDSTEP_3A08_VAL);
 	zassert_ok(ov5647_emul_get_reg(emul, REG_AEC_RSVD_3A09, &val));
 	zassert_equal(val,
 	              AEC_CROP_BANDSTEP_3A09_VAL,
-	              "0x3a09 = 0x%02x after 1280x960, want the crop path's own 0x%02x, not the "
+	              "0x3a09 = 0x%02x after 1920x1080, want the crop path's own 0x%02x, not the "
 	              "binned-mode value 0x%02x",
 	              val,
 	              AEC_CROP_BANDSTEP_3A09_VAL,
@@ -743,13 +1040,13 @@ ZTEST(ov5647, test_set_format_switch_never_leaves_binning_on_crop_window)
 	zassert_ok(ov5647_emul_get_reg(emul, REG_AEC_RSVD_3A0A, &val));
 	zassert_equal(val,
 	              AEC_CROP_BANDSTEP_3A0A_VAL,
-	              "0x3a0a = 0x%02x after 1280x960, want the crop path's own 0x%02x",
+	              "0x3a0a = 0x%02x after 1920x1080, want the crop path's own 0x%02x",
 	              val,
 	              AEC_CROP_BANDSTEP_3A0A_VAL);
 	zassert_ok(ov5647_emul_get_reg(emul, REG_AEC_RSVD_3A0B, &val));
 	zassert_equal(val,
 	              AEC_CROP_BANDSTEP_3A0B_VAL,
-	              "0x3a0b = 0x%02x after 1280x960, want the crop path's own 0x%02x, not the "
+	              "0x3a0b = 0x%02x after 1920x1080, want the crop path's own 0x%02x, not the "
 	              "binned-mode value 0x%02x",
 	              val,
 	              AEC_CROP_BANDSTEP_3A0B_VAL,
@@ -757,7 +1054,7 @@ ZTEST(ov5647, test_set_format_switch_never_leaves_binning_on_crop_window)
 	zassert_ok(ov5647_emul_get_reg(emul, REG_AEC_RSVD_3A0D, &val));
 	zassert_equal(val,
 	              AEC_CROP_BANDSTEP_3A0D_VAL,
-	              "0x3a0d = 0x%02x after 1280x960, want the crop path's own 0x%02x, not the "
+	              "0x3a0d = 0x%02x after 1920x1080, want the crop path's own 0x%02x, not the "
 	              "binned-mode (max-bands) value 0x%02x",
 	              val,
 	              AEC_CROP_BANDSTEP_3A0D_VAL,
@@ -765,7 +1062,7 @@ ZTEST(ov5647, test_set_format_switch_never_leaves_binning_on_crop_window)
 	zassert_ok(ov5647_emul_get_reg(emul, REG_AEC_RSVD_3A0E, &val));
 	zassert_equal(val,
 	              AEC_CROP_BANDSTEP_3A0E_VAL,
-	              "0x3a0e = 0x%02x after 1280x960, want the crop path's own 0x%02x, not the "
+	              "0x3a0e = 0x%02x after 1920x1080, want the crop path's own 0x%02x, not the "
 	              "binned-mode (max-bands) value 0x%02x",
 	              val,
 	              AEC_CROP_BANDSTEP_3A0E_VAL,
@@ -773,9 +1070,34 @@ ZTEST(ov5647, test_set_format_switch_never_leaves_binning_on_crop_window)
 	zassert_ok(ov5647_emul_get_reg(emul, REG_BLC_RSVD_4004, &val));
 	zassert_equal(val,
 	              BLC_CROP_4004_VAL,
-	              "0x4004 = 0x%02x after 1280x960, want the crop path's own 0x%02x",
+	              "0x4004 = 0x%02x after 1920x1080, want the crop path's own 0x%02x",
 	              val,
 	              BLC_CROP_4004_VAL);
+
+	/* Re-arm from 1280x960 and switch STRAIGHT to the generic crop path -- the block above
+	 * only exercised 640x480 -> 1920x1080, which was ALREADY at the power-on default before
+	 * that switch (this test's earlier 1280x960 -> 640x480 block reset it). This is the
+	 * generic crop path's OWN independent writeback, a separate code path from the 640x480
+	 * block, starting from the armed 16/8 value (fix-first review, issue #2286 BLOCKER).
+	 */
+	zassert_ok(video_set_format(ov5647_dev(), &fmt_1280x960));
+	zassert_ok(video_set_format(ov5647_dev(), &fmt_1920x1080));
+	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_ISP_X_OFFSET, &val));
+	zassert_equal(val,
+	              ISP_X_OFFSET_DEFAULT,
+	              "0x3811 = 0x%02x after switching 1280x960 -> 1920x1080 (crop), want the "
+	              "power-on default 0x%02x, not the binned mode's 0x%02x left armed",
+	              val,
+	              ISP_X_OFFSET_DEFAULT,
+	              BINNED1280_X_OFFSET);
+	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_ISP_Y_OFFSET, &val));
+	zassert_equal(val,
+	              ISP_Y_OFFSET_DEFAULT,
+	              "0x3813 = 0x%02x after switching 1280x960 -> 1920x1080 (crop), want the "
+	              "power-on default 0x%02x, not the binned mode's 0x%02x left armed",
+	              val,
+	              ISP_Y_OFFSET_DEFAULT,
+	              BINNED1280_Y_OFFSET);
 
 	/* Switching back to 640x480 must re-apply the binned set, not leave the 1:1 crop
 	 * values from the size in between. */
@@ -826,19 +1148,19 @@ ZTEST(ov5647, test_set_format_switch_never_leaves_binning_on_crop_window)
  * 2592x1944 crop's own minimum-blanking VTS (1968) for EVERY crop size -- a smaller crop got the
  * SAME 11/9-band figures even though they overstate what that smaller frame can hold: see
  * ov5647_set_mode_regs()'s block comment (11 * 173 = 1903, 9 * 208 = 1872, both bigger than
- * 1280x960's own ~984-line minimum-blanking VTS). Checked for two DIFFERENT crop sizes in one
+ * 1920x1080's own ~1104-line minimum-blanking VTS). Checked for two DIFFERENT crop sizes in one
  * test, so a regression back to one constant pair for both cannot hide behind whichever size a
  * test happens to check alone (test_set_format_switch_never_leaves_binning_on_crop_window above
- * only ever exercises 1280x960).
+ * only ever exercises 1920x1080).
  */
 ZTEST(ov5647, test_crop_aec_max_bands_computed_per_mode)
 {
-	const struct emul  *emul     = ov5647_emul();
-	struct video_format fmt_1280 = {
+	const struct emul  *emul          = ov5647_emul();
+	struct video_format fmt_1920x1080 = {
 		.type        = VIDEO_BUF_TYPE_OUTPUT,
 		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
-		.width       = 1280,
-		.height      = 960,
+		.width       = 1920,
+		.height      = 1080,
 	};
 	struct video_format fmt_full = {
 		.type        = VIDEO_BUF_TYPE_OUTPUT,
@@ -850,14 +1172,14 @@ ZTEST(ov5647, test_crop_aec_max_bands_computed_per_mode)
 
 	zassert_ok(video_stream_stop(ov5647_dev(), VIDEO_BUF_TYPE_OUTPUT));
 
-	/* 1280x960: min-blanking VTS 960 + 24 = 984 -> floor(984/173) = 5, floor(984/208) = 4. */
-	zassert_ok(video_set_format(ov5647_dev(), &fmt_1280));
+	/* 1920x1080: min-blanking VTS 1080 + 24 = 1104 -> floor(1104/173) = 6, floor(1104/208) = 5. */
+	zassert_ok(video_set_format(ov5647_dev(), &fmt_1920x1080));
 	zassert_ok(ov5647_emul_get_reg(emul, REG_AEC_RSVD_3A0D, &val));
 	zassert_equal(
-	    val, 0x05, "0x3a0d = 0x%02x after 1280x960, want 0x05 (floor((960+24)/173))", val);
+	    val, 0x06, "0x3a0d = 0x%02x after 1920x1080, want 0x06 (floor((1080+24)/173))", val);
 	zassert_ok(ov5647_emul_get_reg(emul, REG_AEC_RSVD_3A0E, &val));
 	zassert_equal(
-	    val, 0x04, "0x3a0e = 0x%02x after 1280x960, want 0x04 (floor((960+24)/208))", val);
+	    val, 0x05, "0x3a0e = 0x%02x after 1920x1080, want 0x05 (floor((1080+24)/208))", val);
 
 	/* 2592x1944: min-blanking VTS 1944 + 24 = 1968 -> floor(1968/173) = 11, floor(1968/208) =
 	 * 9 -- unchanged from before round 5, since 1968 is the VTS the pre-round-5 constant was
@@ -1123,6 +1445,15 @@ ZTEST(ov5647, test_stream_start_unparks)
 		{ REG_MIPI_CTRL00, MIPI_CTRL00_STREAMING },
 		{ REG_FRAME_OFF_NUM, FRAME_OFF_NUM_STREAMING },
 		{ REG_PAD_OUT, PAD_OUT_STREAMING },
+		/* #2277: ov5647_set_stream(true) re-asserts both AEC/AGC-manual bits from the
+		 * ctrls cache (ov5647_set_ctrl_gain() then ov5647_set_ctrl_exposure(), each an
+		 * unconditional read-modify-write) right before MODE_SELECT below -- two writes
+		 * to the SAME register, both landing on MANUAL_CTRL_VTS alone (0x04) here because
+		 * ov5647_test_before() resets both ctrls to their AUTO/AUTO defaults, and VTS-manual
+		 * is already set from boot.
+		 */
+		{ REG_MANUAL_CTRL, MANUAL_CTRL_VTS },
+		{ REG_MANUAL_CTRL, MANUAL_CTRL_VTS },
 		{ REG_MODE_SELECT, MODE_SELECT_RUNNING },
 	};
 
@@ -1726,6 +2057,280 @@ ZTEST(ov5647, test_set_fmt_unsupported_restores_callers_pixelformat)
 }
 
 /*
+ * #2277: reproduces the ISP AE write-back path verbatim -- isp_pico.c's isp_apply_ae_sensor_gate()
+ * sets VIDEO_CID_EXPOSURE_AUTO=VIDEO_EXPOSURE_MANUAL once at stream start, then hal_alif's
+ * isp_vsi_bottom_half() (isp_api_wrapper.c) drives VIDEO_CID_EXPOSURE = intLine*16 every time the
+ * library's AE algorithm moves the clamped line count -- 1045*16 = 0x4150 is bench run 246's own
+ * clamped intLine. Regression test for the AE write-back path: VIDEO_CID_EXPOSURE must reach the
+ * sensor's 0x3500..0x3502 registers rather than staying pinned at OV5647_EXPOSURE_DEFAULT
+ * (0x0fff), the failure bench observed before this driver applied the write-back.
+ */
+ZTEST(ov5647, test_ae_writeback_exposure_auto_then_exposure_lands_in_registers)
+{
+	const struct emul   *emul                 = ov5647_emul();
+	struct video_control exposure_auto_manual = { .id  = VIDEO_CID_EXPOSURE_AUTO,
+		                                          .val = VIDEO_EXPOSURE_MANUAL };
+	struct video_control autogain_off         = { .id = VIDEO_CID_AUTOGAIN, .val = 0 };
+	/* Bench run 246's own clamped intLine (1045), *16'd exactly like isp_api_wrapper.c's
+	 * sns_config.intLine * 16 write-back convention (ov5647.c's own 1/16-line format).
+	 */
+	struct video_control exposure = { .id = VIDEO_CID_EXPOSURE, .val = 1045 * 16 };
+	uint8_t              hi, mid, lo, manual_ctrl;
+
+	/* isp_apply_ae_sensor_gate()'s own two calls, in its own order -- see isp_pico.c. */
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure_auto_manual));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &autogain_off));
+
+	/* isp_vsi_bottom_half()'s exposure write-back (isp_api_wrapper.c) -- a NEW value, not a
+	 * no-op against ctrls->exposure's still-default val.
+	 */
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure));
+
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3503, &manual_ctrl));
+	/* OV5647_MANUAL_CTRL_AEC (ov5647.c) = BIT(0) -- kept as a literal here, not the driver's
+	 * private macro, matching this file's own existing convention (see the file header).
+	 */
+	zassert_true(
+	    manual_ctrl & 0x01,
+	    "0x3503 AEC bit not set after VIDEO_CID_EXPOSURE_AUTO=MANUAL -- manual_ctrl=0x%02x",
+	    manual_ctrl);
+
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3500, &hi));
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3501, &mid));
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3502, &lo));
+	zassert_equal(((uint32_t)hi << 16) | ((uint32_t)mid << 8) | lo,
+	              (uint32_t)exposure.val,
+	              "0x3500..0x3502 = 0x%06x after VIDEO_CID_EXPOSURE=%d, want 0x%06x -- the "
+	              "AE write-back never reached the sensor's exposure registers",
+	              ((uint32_t)hi << 16) | ((uint32_t)mid << 8) | lo,
+	              exposure.val,
+	              (uint32_t)exposure.val);
+}
+
+/*
+ * #2277 (bench run 247): extends the test above with the ONE step it didn't cover -- a stream
+ * start AFTER the AE gate + write-back, with something (bench: "the sensor's own on-chip
+ * AEC/AGC" once the manual bits went inactive; exact external source not pinned down --
+ * ov5647_emul_set_reg() stands in for whatever it is, see that function's own comment) having
+ * clobbered 0x3503 back to VTS-manual-only and driven 0x3500..0x3502 to its own value in the
+ * meantime. Bench evidence: last_ret=0/last_ctrl_val=0x4150 (both sides agreed the write
+ * succeeded) yet a live readback found 0x3503=0x04 (BIT(0)/BIT(1) clear) and 0x3500..0x3502=
+ * 0x000200 (32 lines, not the 1045 lines*16 the ISP believed it had set) -- i.e. the AE gate's
+ * effect did not survive to when frames actually started flowing.
+ */
+ZTEST(ov5647, test_stream_start_heals_ae_sensor_gate_clobbered_by_something_else)
+{
+	const struct emul   *emul                 = ov5647_emul();
+	struct video_control exposure_auto_manual = { .id  = VIDEO_CID_EXPOSURE_AUTO,
+		                                          .val = VIDEO_EXPOSURE_MANUAL };
+	struct video_control autogain_off         = { .id = VIDEO_CID_AUTOGAIN, .val = 0 };
+	/* Bench run 246/247's own clamped intLine (1045), *16'd like isp_api_wrapper.c's
+	 * sns_config.intLine * 16 write-back convention (ov5647.c's own 1/16-line format).
+	 */
+	struct video_control exposure = { .id = VIDEO_CID_EXPOSURE, .val = 1045 * 16 };
+	uint8_t              hi, mid, lo, manual_ctrl;
+
+	/* isp_apply_ae_sensor_gate()'s own two calls, in its own order (isp_pico.c), then
+	 * isp_vsi_bottom_half()'s own exposure write-back (isp_api_wrapper.c) -- both already
+	 * covered by the test above, repeated here as the setup for the NEW step below.
+	 */
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure_auto_manual));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &autogain_off));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure));
+
+	/* THE NEW STEP: something clobbers 0x3503 back to VTS-manual-only and drives the sensor's
+	 * own exposure registers to a value the ISP never asked for, sometime between the gate/
+	 * write-back above and the stream actually going live -- bench run 247's own readback
+	 * (32 lines, 0x000200). ov5647_set_stream(true) (video_stream_start(), below) is the ISP's
+	 * own next call after the gate (isp_pico.c's isp_stream_start(): isp_apply_ae_sensor_gate()
+	 * then video_stream_start(config->controller)), so it is the LAST point this driver gets a
+	 * chance to notice and correct this before frames flow.
+	 */
+	zassert_ok(ov5647_emul_set_reg(emul, REG_MANUAL_CTRL, MANUAL_CTRL_VTS));
+	zassert_ok(ov5647_emul_set_reg(emul, 0x3500, 0x00));
+	zassert_ok(ov5647_emul_set_reg(emul, 0x3501, 0x02));
+	zassert_ok(ov5647_emul_set_reg(emul, 0x3502, 0x00));
+
+	zassert_ok(video_stream_start(ov5647_dev(), VIDEO_BUF_TYPE_OUTPUT));
+
+	zassert_ok(ov5647_emul_get_reg(emul, REG_MANUAL_CTRL, &manual_ctrl));
+	zassert_equal((manual_ctrl & (MANUAL_CTRL_AEC | MANUAL_CTRL_AGC)),
+	              (MANUAL_CTRL_AEC | MANUAL_CTRL_AGC),
+	              "0x3503 = 0x%02x after video_stream_start() -- AEC/AGC-manual did not "
+	              "survive to stream start, the sensor's own on-chip AEC/AGC will run and "
+	              "override every exposure/gain write for the whole session",
+	              manual_ctrl);
+
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3500, &hi));
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3501, &mid));
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3502, &lo));
+	zassert_equal(((uint32_t)hi << 16) | ((uint32_t)mid << 8) | lo,
+	              (uint32_t)exposure.val,
+	              "0x3500..0x3502 = 0x%06x after video_stream_start(), want 0x%06x -- the "
+	              "exposure the ISP already sent did not survive to stream start either",
+	              ((uint32_t)hi << 16) | ((uint32_t)mid << 8) | lo,
+	              (uint32_t)exposure.val);
+}
+
+/*
+ * #2277: ov5647_set_ctrl_exposure() clamps VIDEO_CID_EXPOSURE to the ACTIVE mode's VTS - 4 lines
+ * (register units, so *16) instead of writing an out-of-range request straight through -- an
+ * unclamped write just silently rails against the sensor's own VTS-manual frame length (0x3503
+ * bit2) without taking effect. Table-driven across the three HTS values (640x480 binned, 1280x960
+ * binned, crop size) and three frame rates -- confirms the clamp tracks the ACTIVE mode/rate,
+ * not a single driver-wide constant (the bug this replaces: an ISP-side ceiling
+ * hard-coded to 640x480's HTS was ~1.46x too loose at 1280x960/full-res). Every VTS below is
+ * pixel_rate(58333333) / (hts * fps), floored -- ov5647_frmrate_to_vts()'s own formula; see this
+ * file's header comment for why 58333333 is the fixed assumption. Must FAIL without the clamp in
+ * ov5647_set_ctrl_exposure(): the request (OV5647_EXPOSURE_MAX) would land in the registers
+ * unchanged instead of at (vts - 4) * 16.
+ */
+ZTEST(ov5647, test_exposure_clamps_to_active_vts_margin)
+{
+	static const struct {
+		uint16_t width;
+		uint16_t height;
+		uint32_t fps;
+		uint32_t vts; /* pixel_rate / (hts * fps), floored */
+	} cases[] = {
+		{ 640, 480, 30, 1049 },   /* binned HTS 1852 */
+		{ 1280, 960, 15, 2051 },  /* 2x2-binned full-FOV HTS 1896 */
+		{ 1920, 1080, 15, 1440 }, /* crop HTS 2700 */
+		{ 640, 480, 10, 3149 },   /* binned HTS 1852, the driver's boot-default rate */
+	};
+	const struct emul *emul = ov5647_emul();
+
+	for (size_t i = 0; i < ARRAY_SIZE(cases); i++) {
+		struct video_format fmt = {
+			.type        = VIDEO_BUF_TYPE_OUTPUT,
+			.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
+			.width       = cases[i].width,
+			.height      = cases[i].height,
+		};
+		struct video_frmival frmival              = { .numerator = 1, .denominator = cases[i].fps };
+		struct video_control exposure_auto_manual = { .id  = VIDEO_CID_EXPOSURE_AUTO,
+			                                          .val = VIDEO_EXPOSURE_MANUAL };
+		struct video_control autogain_off         = { .id = VIDEO_CID_AUTOGAIN, .val = 0 };
+		/* Deliberately above every case's ceiling -- OV5647_EXPOSURE_MAX (ov5647.c) is the
+		 * ctrl's own top of range, so the video-ctrl framework itself does not pre-clamp
+		 * this before ov5647_set_ctrl_exposure() ever runs. Varies per case (- i) so each
+		 * request differs from the last: video_set_ctrl() (video_ctrls.c) no-ops a request
+		 * whose value matches the ctrl's already-cached one, which would leave a later
+		 * case's write never reaching the driver at all.
+		 */
+		struct video_control exposure   = { .id = VIDEO_CID_EXPOSURE, .val = 0xFFFFF - (int32_t)i };
+		uint32_t             want_lines = cases[i].vts - 4;
+		uint32_t             want_reg   = want_lines * 16;
+		uint8_t              hi, mid, lo;
+		uint32_t             got;
+
+		zassert_ok(video_set_format(ov5647_dev(), &fmt));
+		zassert_ok(video_set_frmival(ov5647_dev(), &frmival));
+		zassert_ok(video_set_ctrl(ov5647_dev(), &exposure_auto_manual));
+		zassert_ok(video_set_ctrl(ov5647_dev(), &autogain_off));
+		zassert_ok(video_set_ctrl(ov5647_dev(), &exposure));
+
+		zassert_ok(ov5647_emul_get_reg(emul, 0x3500, &hi));
+		zassert_ok(ov5647_emul_get_reg(emul, 0x3501, &mid));
+		zassert_ok(ov5647_emul_get_reg(emul, 0x3502, &lo));
+		got = ((uint32_t)hi << 16) | ((uint32_t)mid << 8) | lo;
+
+		zassert_equal(got,
+		              want_reg,
+		              "case %zu (%ux%u@%u fps, VTS %u): 0x3500..0x3502 = 0x%06x, want "
+		              "0x%06x (VTS-4 = %u lines) -- the out-of-range exposure request was "
+		              "not clamped to the active mode's ceiling",
+		              i,
+		              cases[i].width,
+		              cases[i].height,
+		              cases[i].fps,
+		              cases[i].vts,
+		              got,
+		              want_reg,
+		              want_lines);
+	}
+}
+
+/*
+ * #2277: the flip side of the clamp test above -- a request already WITHIN the active mode's VTS
+ * - 4 margin must land in the registers exactly as requested, not floored/rounded to some other
+ * value. Uses the suite's default mode (640x480 @ 15 fps, VTS 2099 -- see ov5647_test_before()),
+ * well under its 2095-line ceiling.
+ */
+ZTEST(ov5647, test_exposure_below_vts_margin_lands_unchanged)
+{
+	const struct emul   *emul                 = ov5647_emul();
+	struct video_control exposure_auto_manual = { .id  = VIDEO_CID_EXPOSURE_AUTO,
+		                                          .val = VIDEO_EXPOSURE_MANUAL };
+	struct video_control autogain_off         = { .id = VIDEO_CID_AUTOGAIN, .val = 0 };
+	struct video_control exposure             = { .id = VIDEO_CID_EXPOSURE, .val = 500 * 16 };
+	uint8_t              hi, mid, lo;
+	uint32_t             got;
+
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure_auto_manual));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &autogain_off));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure));
+
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3500, &hi));
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3501, &mid));
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3502, &lo));
+	got = ((uint32_t)hi << 16) | ((uint32_t)mid << 8) | lo;
+
+	zassert_equal(got,
+	              (uint32_t)exposure.val,
+	              "0x3500..0x3502 = 0x%06x, want the unclamped request 0x%06x -- a request "
+	              "already within the active mode's ceiling must not be altered",
+	              got,
+	              (uint32_t)exposure.val);
+}
+
+/*
+ * #2277: a frame-rate INCREASE shrinks the active mode's VTS, so an exposure value that was legal
+ * at the OLD (looser) rate can end up above the NEW, tighter VTS - 4 ceiling unless
+ * ov5647_set_frmival() re-applies the clamp after writing the new TIMING_VTS. Sets exposure to
+ * the 10 fps ceiling ((3149 - 4) * 16, the same 640x480/10 fps VTS
+ * test_exposure_clamps_to_active_vts_margin's own table uses), then switches to 30 fps
+ * (VTS 1049). Must FAIL without ov5647_set_frmival()'s re-clamp call: the stale 10 fps value
+ * (50320) is well above the 30 fps ceiling ((1049 - 4) * 16 = 16720).
+ */
+ZTEST(ov5647, test_frmival_increase_reclamps_stale_exposure)
+{
+	const struct emul   *emul                 = ov5647_emul();
+	struct video_control exposure_auto_manual = { .id  = VIDEO_CID_EXPOSURE_AUTO,
+		                                          .val = VIDEO_EXPOSURE_MANUAL };
+	struct video_control autogain_off         = { .id = VIDEO_CID_AUTOGAIN, .val = 0 };
+	struct video_frmival req10                = { .numerator = 1, .denominator = 10 };
+	struct video_frmival req30                = { .numerator = 1, .denominator = 30 };
+	/* The 10 fps ceiling itself (640x480 binned HTS, VTS 3149) -- the FIRST clamp is a no-op
+	 * at this value, so the value that actually reaches the registers is the stale one this
+	 * test is trying to trip up on the SECOND (30 fps) set_frmival().
+	 */
+	struct video_control exposure  = { .id = VIDEO_CID_EXPOSURE, .val = (3149 - 4) * 16 };
+	uint32_t             max_30fps = (1049 - 4) * 16;
+	uint8_t              hi, mid, lo;
+	uint32_t             got;
+
+	zassert_ok(video_set_frmival(ov5647_dev(), &req10));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure_auto_manual));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &autogain_off));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure));
+
+	zassert_ok(video_set_frmival(ov5647_dev(), &req30));
+
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3500, &hi));
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3501, &mid));
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3502, &lo));
+	got = ((uint32_t)hi << 16) | ((uint32_t)mid << 8) | lo;
+
+	zassert_true(got <= max_30fps,
+	             "0x3500..0x3502 = 0x%06x after switching to 30 fps, want <= 0x%06x "
+	             "((1049 - 4) * 16) -- the stale 10 fps exposure value was not re-clamped to "
+	             "the new, tighter VTS ceiling",
+	             got,
+	             max_30fps);
+}
+
+/*
  * ZTEST_SUITE before-hook (issue #2248 fix-up round 4): resets the state every test in this suite
  * implicitly assumes as its starting point -- both flip ctrls unset, the default {1, 15} frame
  * interval, and 640x480 SBGGR10P -- instead of relying on in-test cleanup at the END of whichever
@@ -1749,8 +2354,19 @@ static void ov5647_test_before(void *fixture)
 {
 	struct video_control hflip_off = { .id = VIDEO_CID_HFLIP, .val = 0 };
 	struct video_control vflip_off = { .id = VIDEO_CID_VFLIP, .val = 0 };
-	struct video_frmival frmival   = { .numerator = 1, .denominator = 15 };
-	struct video_format  fmt       = {
+	/* #2277: reset to the same AUTO/AUTO defaults ov5647_init_ctrls() seeds (VIDEO_EXPOSURE_AUTO,
+	 * autogain=1) -- without this, test_ae_writeback_exposure_auto_then_exposure_lands_in_
+	 * registers()'s own MANUAL/off writes (name-sorted to run before every test whose name
+	 * follows "ae_..." alphabetically) leaked into every later test's starting ctrl state, making
+	 * ov5647_set_stream(true)'s new AEC/AGC re-assert (below) write a DIFFERENT register sequence
+	 * depending on execution order -- exactly the ordering hazard this hook exists to close for
+	 * hflip/vflip/frmival/format already.
+	 */
+	struct video_control exposure_auto_auto = { .id  = VIDEO_CID_EXPOSURE_AUTO,
+		                                        .val = VIDEO_EXPOSURE_AUTO };
+	struct video_control autogain_on        = { .id = VIDEO_CID_AUTOGAIN, .val = 1 };
+	struct video_frmival frmival            = { .numerator = 1, .denominator = 15 };
+	struct video_format  fmt                = {
 		.type        = VIDEO_BUF_TYPE_OUTPUT,
 		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
 		.width       = 640,
@@ -1773,6 +2389,8 @@ static void ov5647_test_before(void *fixture)
 	zassert_ok(video_stream_stop(ov5647_dev(), VIDEO_BUF_TYPE_OUTPUT));
 	zassert_ok(video_set_ctrl(ov5647_dev(), &hflip_off));
 	zassert_ok(video_set_ctrl(ov5647_dev(), &vflip_off));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure_auto_auto));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &autogain_on));
 	zassert_ok(video_set_frmival(ov5647_dev(), &frmival));
 	zassert_ok(video_set_format(ov5647_dev(), &fmt));
 }
