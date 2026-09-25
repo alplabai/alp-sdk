@@ -211,7 +211,7 @@ dxm1:
   uart_boot: null          # path to the vendor uart_boot binary
   fw_uart_boot: null       # path to the pinned fw_uart_boot.bin
   fw: null                 # path to the pinned fw.bin
-  pcie_vendor_id: null     # optional, e.g. "0x1f4b"; narrows the PCIe endpoint match
+  pcie_vendor_id: null     # optional, e.g. "0xXXXX" (real ID TBD); narrows the PCIe endpoint match
 ```
 
 ### Lock preconditions (`run --lock`)

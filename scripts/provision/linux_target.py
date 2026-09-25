@@ -501,32 +501,74 @@ def clkgen_diff(image: bytes) -> list[str]:
             for i in range(CLKGEN_REG_COUNT) if image[i] != want[i]]
 
 
-def clkgen_fixup_applied(image: bytes) -> bool:
-    return all(image[reg] == val for reg, val in CLKGEN_FIXUP_REGS.items())
-
-
-def clkgen_otp_sha256(image: bytes) -> str:
-    """sha256 of the 37-byte image with reg 0x21/0x24 normalized back to
-    their factory OTP values (the U-Boot fixup rewrites both every boot, so
-    the raw post-boot bytes would otherwise hash differently unit to unit)."""
-    img = bytearray(image)
-    for reg in CLKGEN_FIXUP_REGS:
-        img[reg] = CLKGEN_OTP_IMAGE[reg]
-    return hashlib.sha256(bytes(img)).hexdigest()
-
-
 # --- DX-M1 NPU (V2M-only): SPI-NAND recovery boot over UART -------------------------------
 
-PCIE_ROOT_PORT = "0000:00:00.0"
+# PCI-to-PCI bridge class (root ports and any intermediate switch port share
+# it); anything else enumerated under /sys/bus/pci/devices is an endpoint.
+PCI_CLASS_BRIDGE_PREFIX = "0x0604"
 
 
 def _gpioset_is_v2(t: LinuxTarget) -> bool:
-    """libgpiod v2's `gpioset` takes `-c <chip> -z <line>=<val>` (background hold
-    while the process runs); v1 takes a positional chip and needs
-    `--mode=signal` to hold instead of setting-then-exiting."""
+    """libgpiod v2's `gpioset` HOLDS the line (blocks until signalled) by
+    default -- unlike v1, whose default is set-then-exit and needs
+    `--mode=signal` to hold instead. v2 also offers `-z`/`--daemonize` to
+    background itself, but that forks gpioset and lets its immediate parent
+    exit right away -- when the shell backgrounds that command with `&`,
+    `$!` then names the already-exited parent, not the daemonized holder, so
+    callers here never pass `-z` (see dxm1_uart_boot / dxm1_reset_pulse)."""
     out = t.run("gpioset --version", check=False).stdout
     m = re.search(r"(\d+)\.\d+", out)
     return bool(m) and int(m[1]) >= 2
+
+
+def _gpioset_hold_start(t: LinuxTarget, chip: str, assignment: str, is_v2: bool) -> str:
+    """Start a `gpioset` that holds `assignment` (e.g. "5=1") backgrounded
+    via the shell, and return its real PID. v2 holds by default (no flag
+    needed, and NEVER `-z` -- see `_gpioset_is_v2`); v1 needs `--mode=signal`
+    to hold instead of setting-then-exiting. `is_v2` is resolved once by the
+    caller (not re-queried per call) to keep this to one ssh round trip."""
+    cmd = (f"gpioset -c {shlex.quote(chip)} {assignment}" if is_v2 else
+           f"gpioset --mode=signal {shlex.quote(chip)} {assignment}")
+    try:
+        pid = t.run(f"{cmd} >/dev/null 2>&1 & echo $!").stdout.strip()
+    except BenchError:
+        # the ssh call itself failed (e.g. timed out) after gpioset may
+        # already have started remotely -- scope the cleanup to this exact
+        # chip + line assignment so we don't kill an unrelated hold.
+        line = assignment.split("=", 1)[0]
+        t.run(f"pkill -f {shlex.quote(f'gpioset.*{chip}.*{line}=')}", check=False)
+        raise
+    if not pid.isdigit():
+        raise BenchError(f"could not start the gpioset hold ({cmd!r}): got {pid!r}")
+    return pid
+
+
+def _gpioset_hold_stop(t: LinuxTarget, pid: str) -> None:
+    r = t.run(f"kill {shlex.quote(pid)}", check=False)
+    if r.rc != 0:
+        raise BenchError(f"failed to kill the gpioset hold pid {pid} (rc={r.rc}): "
+                          f"{r.stderr.strip()[-200:]} -- it may still be holding the line")
+
+
+def dxm1_reset_pulse(t: LinuxTarget, chip: str, reset_line: int, is_v2: bool) -> None:
+    """Pulse PA6 (active-low M1_RESET) low for 100 ms then release it high.
+    v1: `--mode=time --usec=100000` holds the low level for exactly that
+    duration on its own, then a plain (set-then-exit) `gpioset` asserts high.
+    v2 has no per-call duration flag that holds-then-auto-releases, so both
+    edges use the same background-then-kill pattern as the P75 UART-mux hold
+    (`_gpioset_hold_start`/`_gpioset_hold_stop`) -- background, sleep for the
+    pulse width, kill to release."""
+    low, high = f"{reset_line}=0", f"{reset_line}=1"
+    if is_v2:
+        pid = _gpioset_hold_start(t, chip, low, is_v2)
+        t.run("sleep 0.1")
+        _gpioset_hold_stop(t, pid)
+        pid = _gpioset_hold_start(t, chip, high, is_v2)
+        t.run("sleep 0.05")
+        _gpioset_hold_stop(t, pid)
+    else:
+        t.run(f"gpioset --mode=time --usec=100000 {shlex.quote(chip)} {low}; "
+              f"gpioset {shlex.quote(chip)} {high}")
 
 
 def dxm1_uart_boot(t: LinuxTarget, chip: str, uart_line: int, reset_line: int,
@@ -538,35 +580,39 @@ def dxm1_uart_boot(t: LinuxTarget, chip: str, uart_line: int, reset_line: int,
     an empty NAND): once for the bootloader stage, once for the application
     firmware (`-d <uart_device>` on both -- the vendor tool needs the device
     path for either transfer mode). Kills the P75 hold before returning
-    (even on failure). Never touches V2N P64/P65 (the DEEPX 0.75 V rail):
-    this mechanism is a UART mux line and a reset line only."""
-    hold = (f"gpioset -c {shlex.quote(chip)} -z {uart_line}=1" if _gpioset_is_v2(t) else
-            f"gpioset --mode=signal {shlex.quote(chip)} {uart_line}=1")
-    pid = t.run(f"{hold} >/dev/null 2>&1 & echo $!").stdout.strip()
-    if not pid.isdigit():
-        raise BenchError(f"could not start the P75 hold ({hold!r}): got {pid!r}")
+    (even on failure), and checks that the kill actually landed. Never
+    touches V2N P64/P65 (the DEEPX 0.75 V rail): this mechanism is a UART mux
+    line and a reset line only."""
+    is_v2 = _gpioset_is_v2(t)
+    pid = _gpioset_hold_start(t, chip, f"{uart_line}=1", is_v2)
     try:
-        t.run(f"gpioset {shlex.quote(chip)} {reset_line}=0; sleep 0.1; "
-              f"gpioset {shlex.quote(chip)} {reset_line}=1")
+        dxm1_reset_pulse(t, chip, reset_line, is_v2)
         out1 = t.run(f"{shlex.quote(tool)} -d {shlex.quote(uart_device)} "
                      f"-f {shlex.quote(fw_uart_boot)} -b 115200", timeout=120.0).stdout
         out2 = t.run(f"{shlex.quote(tool)} -d {shlex.quote(uart_device)} "
                      f"-F {shlex.quote(fw)} -U -b 115200", timeout=300.0).stdout
     finally:
-        t.run(f"kill {shlex.quote(pid)}", check=False)
+        _gpioset_hold_stop(t, pid)
     return out1 + out2
 
 
 def dxm1_pcie_present(t: LinuxTarget, vendor_id: str | None = None) -> bool:
-    """A DEEPX PCIe *endpoint* is enumerated, not just the SoC's own root
-    port: every boot lists the root port itself (`0000:00:00.0`); at least
-    one OTHER entry must be present. When `vendor_id` is given (bench.yaml
-    `dxm1.pcie_vendor_id`, e.g. "0x1f4b"), an endpoint must also match it via
-    `/sys/bus/pci/devices/*/vendor`. DEEPX has not published the DX-M1's PCI
-    vendor/device ID in any vendor material seen so far; until a bench.yaml
-    supplies one, any non-root-port entry counts."""
+    """A DEEPX PCIe *endpoint* is enumerated, not just a bridge: every boot
+    lists the SoC's own root port, and any intermediate switch port shares
+    its PCI class (0x0604xx, read from `/sys/bus/pci/devices/*/class`); at
+    least one entry whose class does NOT start with that prefix must be
+    present. When `vendor_id` is given (bench.yaml `dxm1.pcie_vendor_id`,
+    e.g. "0xXXXX" -- the real ID is TBD, DEEPX has not published the DX-M1's
+    PCI vendor/device ID in any vendor material seen so far), an endpoint
+    must also match it via `/sys/bus/pci/devices/*/vendor`; until a
+    bench.yaml supplies one, any non-bridge entry counts."""
     out = t.run("ls /sys/bus/pci/devices", check=False).stdout.split()
-    endpoints = [d for d in out if d != PCIE_ROOT_PORT]
+    endpoints = []
+    for d in out:
+        r = t.run(f"cat /sys/bus/pci/devices/{shlex.quote(d)}/class", check=False)
+        if r.rc == 0 and r.stdout.strip().lower().startswith(PCI_CLASS_BRIDGE_PREFIX):
+            continue
+        endpoints.append(d)
     if not endpoints:
         return False
     if vendor_id is None:

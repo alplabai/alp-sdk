@@ -342,15 +342,12 @@ def test_clkgen_read_image_matches_fixed_up_otp():
     got = lt.clkgen_read_image(t, 8)
     assert got == bytes(image)
     assert lt.clkgen_diff(got) == []
-    assert lt.clkgen_fixup_applied(got)
-    assert lt.clkgen_otp_sha256(got) == hashlib.sha256(lt.CLKGEN_OTP_IMAGE).hexdigest()
 
 
 def test_clkgen_diff_reports_mismatch_and_missing_fixup():
     factory = bytes(lt.CLKGEN_OTP_IMAGE)  # OTP image with the U-Boot fixup NOT applied
     bad = lt.clkgen_diff(factory)
     assert any("reg 0x21" in b for b in bad) and any("reg 0x24" in b for b in bad)
-    assert not lt.clkgen_fixup_applied(factory)
 
 
 def test_clkgen_diff_rejects_wrong_length():
@@ -369,11 +366,11 @@ def test_gpioset_is_v2_by_version_string():
     assert not lt._gpioset_is_v2(t)
 
 
-def test_dxm1_uart_boot_sequence_holds_p75_and_passes_d_on_both_calls():
+def test_dxm1_uart_boot_v1_holds_p75_via_mode_signal_and_pulses_reset_via_mode_time():
     t, fake = target([
         ("gpioset --version", "gpioset (libgpiod) v1.6.3\n"),
-        (r"gpioset --mode=signal chip0 5=1.*echo \$!", "4242\n"),
-        ("gpioset chip0 6=0; sleep 0.1; gpioset chip0 6=1", ""),
+        (r"^gpioset --mode=signal chip0 5=1 >/dev/null 2>&1 & echo \$!$", "4242\n"),
+        (r"^gpioset --mode=time --usec=100000 chip0 6=0; gpioset chip0 6=1$", ""),
         (r"uart_boot -d /dev/ttySC1 -f fw_uart_boot.bin -b 115200", "bootloader ok\n"),
         (r"uart_boot -d /dev/ttySC1 -F fw.bin -U -b 115200", "app ok\n"),
         ("kill 4242", ""),
@@ -382,14 +379,23 @@ def test_dxm1_uart_boot_sequence_holds_p75_and_passes_d_on_both_calls():
                             "fw_uart_boot.bin", "fw.bin")
     assert out == "bootloader ok\napp ok\n"
     assert fake.commands[-1] == "kill 4242"
-    assert any("gpioset --mode=signal chip0 5=1" in c for c in fake.commands)
+    assert "gpioset --mode=signal chip0 5=1 >/dev/null 2>&1 & echo $!" in fake.commands
+    assert "gpioset --mode=time --usec=100000 chip0 6=0; gpioset chip0 6=1" in fake.commands
 
 
-def test_dxm1_uart_boot_v2_uses_dash_c_dash_z_and_kills_on_failure():
+def test_dxm1_uart_boot_v2_never_passes_dash_z_and_kills_on_failure():
+    # v2's `-z`/`--daemonize` forks gpioset and its immediate shell parent
+    # exits right away, so a backgrounded `-z` command's `$!` would name an
+    # already-exited PID -- assert it never appears on any gpioset call.
     t, fake = target([
         ("gpioset --version", "gpioset (libgpiod) v2.1\n"),
-        (r"gpioset -c chip0 -z 5=1.*echo \$!", "9001\n"),
-        ("gpioset chip0 6=0; sleep 0.1; gpioset chip0 6=1", ""),
+        (r"^gpioset -c chip0 5=1 >/dev/null 2>&1 & echo \$!$", "9001\n"),
+        (r"^gpioset -c chip0 6=0 >/dev/null 2>&1 & echo \$!$", "8001\n"),
+        ("sleep 0.1", ""),
+        ("kill 8001", ""),
+        (r"^gpioset -c chip0 6=1 >/dev/null 2>&1 & echo \$!$", "8002\n"),
+        ("sleep 0.05", ""),
+        ("kill 8002", ""),
         (r"uart_boot -d", (1, "no ROM response")),
         ("kill 9001", ""),
     ])
@@ -397,22 +403,55 @@ def test_dxm1_uart_boot_v2_uses_dash_c_dash_z_and_kills_on_failure():
         lt.dxm1_uart_boot(t, "chip0", 5, 6, "/dev/ttySC1", "uart_boot",
                           "fw_uart_boot.bin", "fw.bin")
     assert fake.commands[-1] == "kill 9001"
+    assert not any("-z" in c for c in fake.commands)
 
 
-def test_dxm1_pcie_present_requires_an_endpoint_not_just_the_root_port():
-    t, _ = target([("ls /sys/bus/pci/devices", "0000:00:00.0\n")])
-    assert not lt.dxm1_pcie_present(t)              # root port only: no endpoint
+def test_gpioset_hold_stop_raises_loudly_when_the_kill_fails():
+    t, _ = target([("kill 4242", (1, ""))])
+    with pytest.raises(BenchError, match="failed to kill"):
+        lt._gpioset_hold_stop(t, "4242")
+
+
+def test_gpioset_hold_start_pkills_the_scoped_line_when_the_launch_ssh_call_raises():
+    def runner(argv, **kw):
+        cmd = argv[-1]
+        if "echo $!" in cmd:
+            raise subprocess.TimeoutExpired(argv, 1)
+        assert "pkill -f" in cmd and "gpioset.*chip0.*5=" in cmd
+        return subprocess.CompletedProcess(argv, 0, "", "")
+    t = lt.LinuxTarget("unit", runner=runner)
+    with pytest.raises(BenchError, match="timed out"):
+        lt._gpioset_hold_start(t, "chip0", "5=1", is_v2=True)
+
+
+def test_dxm1_pcie_present_excludes_bridges_and_root_ports_by_pci_class():
+    # root port only (bridge class): no endpoint
+    t, _ = target([("ls /sys/bus/pci/devices", "0000:00:00.0\n"),
+                   ("0000:00:00.0/class", "0x060400\n")])
+    assert not lt.dxm1_pcie_present(t)
+    # root port + an intermediate switch port, both bridge-class: still no endpoint
+    t, _ = target([("ls /sys/bus/pci/devices", "0000:00:00.0\n0000:01:00.0\n"),
+                   ("0000:00:00.0/class", "0x060400\n"),
+                   ("0000:01:00.0/class", "0x060400\n")])
+    assert not lt.dxm1_pcie_present(t)
+    # a real (non-bridge) endpoint
+    t, _ = target([("ls /sys/bus/pci/devices", "0000:00:00.0\n0000:01:00.0\n"),
+                   ("0000:00:00.0/class", "0x060400\n"),
+                   ("0000:01:00.0/class", "0x020000\n")])
+    assert lt.dxm1_pcie_present(t)
     t, _ = target([("ls /sys/bus/pci/devices", "")])
     assert not lt.dxm1_pcie_present(t)
-    t, _ = target([("ls /sys/bus/pci/devices", "0000:00:00.0\n0000:01:00.0\n")])
-    assert lt.dxm1_pcie_present(t)                  # a real endpoint, no vendor id required
 
 
 def test_dxm1_pcie_present_matches_vendor_id_when_given():
     t, _ = target([("ls /sys/bus/pci/devices", "0000:00:00.0\n0000:01:00.0\n"),
+                   ("0000:00:00.0/class", "0x060400\n"),
+                   ("0000:01:00.0/class", "0x020000\n"),
                    ("0000:01:00.0/vendor", "0x1f4b\n")])
     assert lt.dxm1_pcie_present(t, "0x1f4b")
     t, _ = target([("ls /sys/bus/pci/devices", "0000:00:00.0\n0000:01:00.0\n"),
+                   ("0000:00:00.0/class", "0x060400\n"),
+                   ("0000:01:00.0/class", "0x020000\n"),
                    ("0000:01:00.0/vendor", "0xdead\n")])
     assert not lt.dxm1_pcie_present(t, "0x1f4b")
 

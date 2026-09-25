@@ -572,7 +572,7 @@ class BootSdLinux(Step):
             root, emmc = lt.root_device(t), lt.resolve_emmc(t)
             if root.startswith(emmc):
                 raise Refused(f"Linux root {root} is on the eMMC, not the microSD "
-                              "(SDHI1 not up? SD mux? check U-Boot patch 0007)")
+                              "(SDHI1 not up? SD mux? check U-Boot patch 0008)")
         return self.result(ctx, f"Linux up on {getattr(t, 'host', '?')}", ev)
 
 
