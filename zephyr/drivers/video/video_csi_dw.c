@@ -596,6 +596,29 @@ static int csi2_dw_validate_data(const struct device *dev)
 			return -EINVAL;
 		}
 
+		/*
+		 * Alp Lab AB (issue #2287 Stage B, reviewer minor): CSI_IPI_HSD_TIME /
+		 * CSI_IPI_VFP_LINES are hardware fields narrower than the 32-bit arithmetic
+		 * above -- CSI_IPI_HSD_TIME_MASK is 12 bits (0-4095), CSI_IPI_VFP_LINES_MASK is
+		 * 10 bits (0-1023). csi2_dw_ipi_set_timings() below masks silently
+		 * (`timing->hsd & CSI_IPI_HSD_TIME_MASK`), which would truncate an
+		 * out-of-range derived value into the WRONG in-range one instead of failing --
+		 * reject here instead, at the one place that knows this was a Stage-B DERIVED
+		 * value (a plain fixed csi-hsd/csi-vfp DT value is never checked against these
+		 * masks either, same as before this change).
+		 */
+		if (hsd > CSI_IPI_HSD_TIME_MASK || vfp > CSI_IPI_VFP_LINES_MASK) {
+			/* GENMASK() (CSI_IPI_HSD_TIME_MASK/CSI_IPI_VFP_LINES_MASK's own
+			 * definition) is `unsigned long`, not `unsigned int` -- cast down for
+			 * %u rather than widen every other field in this LOG_ERR to %lu. */
+			LOG_ERR("csi-hline %u / csi-vtotal %u derived hsd %d / vfp %d out of "
+				"range for this format (hact %u, vact %u): hsd max %u, vfp max %u",
+				config->hline, config->vtotal, hsd, vfp, timing->hact,
+				timing->vact, (unsigned int)CSI_IPI_HSD_TIME_MASK,
+				(unsigned int)CSI_IPI_VFP_LINES_MASK);
+			return -EINVAL;
+		}
+
 		timing->hsd = (uint16_t)hsd;
 		timing->vfp = (uint16_t)vfp;
 	}
@@ -1051,6 +1074,21 @@ static int csi2_dw_init(const struct device *dev)
 	DT_PHA_BY_IDX(node_id, prop, idx, id)
 
 #define ALIF_MIPI_CSI_DEVICE(i)                                                                    \
+	/* issue #2287 Stage B, reviewer minor: catch a DT authoring mistake at build time \
+	 * rather than silently keeping the pre-Stage-B fixed-csi-hsd/csi-vfp behaviour for \
+	 * half of a csi-hline/csi-vtotal pair -- see snps,designware-csi.yaml's own doc \
+	 * comment. NOT also asserting "csi-hsd/csi-vfp absent when csi-hline/csi-vtotal \
+	 * are set" (the reviewer's original ask): zephyr/dts/alif/ensemble_e8_peripherals.dtsi's \
+	 * shared &csi node sets BOTH unconditionally (csi-hsd = <280>, csi-vfp = <4>) for \
+	 * every board -- DT_INST_NODE_HAS_PROP(i, csi_hsd) is unconditionally true \
+	 * whether or not a shield overlay itself sets it, so that check would fail-build \
+	 * every board that ever sets csi-hline/csi-vtotal, including this one's own \
+	 * shield overlay. Harmless either way: csi2_dw_validate_data() (video_csi_dw.c) \
+	 * only ever READS the base dtsi's csi-hsd/csi-vfp when csi-hline/csi-vtotal are \
+	 * ABSENT; when present, it overwrites timing->hsd/vfp before either is used. */ \
+	BUILD_ASSERT(DT_INST_NODE_HAS_PROP(i, csi_hline) == DT_INST_NODE_HAS_PROP(i, csi_vtotal), \
+		     "csi-hline and csi-vtotal must both be set, or both left unset"); \
+	                                                                                                   \
 	static void csi2_dw_config_func_##i(const struct device *dev);                             \
 	static const struct csi2_dw_config config_##i = {                                          \
 		DEVICE_MMIO_ROM_INIT(DT_DRV_INST(i)),                                              \

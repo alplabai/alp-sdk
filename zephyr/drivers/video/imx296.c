@@ -395,6 +395,21 @@ LOG_MODULE_REGISTER(imx296, CONFIG_VIDEO_LOG_LEVEL);
  * this crop keeps the same 60.3 frame/s as the full-frame mode as long as
  * VMAX stays >= ROIWV1 + 30 (page 53's ROI-mode floor): 1118 >= 960 + 30 =
  * 990, satisfied with margin.
+ *
+ * Page 53's formula gives "ROIWV1 + 30" as the MINIMUM VMAX for this
+ * ROIWV1 -- the floor of a range, not a value this driver is required to
+ * use. Keeping VMAX at the driver's existing fixed 1118 rather than
+ * dropping it to the ROI-mode floor (990, which the datasheet's formula
+ * would make the FASTER end of that range -- a smaller VMAX is fewer
+ * lines per frame, hence a higher frame rate) was originally an
+ * INFERENCE from that formula, not a bench measurement: reusing the same
+ * VMAX both modes already shared was the smaller, more conservative
+ * change. Bench runs 294 (full-frame)/295 (ROI, E1M-AEN803
+ * 2026W36-0001) confirm the inference in practice -- run 295 captured a
+ * clean 1280x960 frame (no mod-4-column RAW10 byte-phase-slip) at this
+ * unchanged VMAX, so 60.3 frame/s ROI capture is now bench-observed, not
+ * just datasheet-derived; see changelog.d/2287.md's Stage B section for
+ * the full run 294/295 write-up.
  */
 #define IMX296_ROI_WIDTH  1280
 #define IMX296_ROI_HEIGHT 960
@@ -751,6 +766,18 @@ static int imx296_set_stream(const struct device *dev, bool on, enum video_buf_t
 		 * The position/size registers are written UNCONDITIONALLY to the one supported
 		 * crop whenever ROI mode is selected -- there is no second ROI geometry to choose
 		 * between, so nothing here needs to persist across a full-frame stream start.
+		 *
+		 * "ROI mode" (page 51): "One invalid frame is generated when the ROI area
+		 * changing size or cropping address." This driver never leaves the sensor
+		 * streaming while switching between the full-frame and ROI formats --
+		 * video_set_format() (imx296_set_fmt()) only updates `data->fmt`, and these
+		 * writes only reach hardware from THIS function, on the next stream start, with
+		 * the sensor already in STANDBY -- so any ROI-vs-full-frame switch is always a
+		 * stop/change-format/start sequence, never a live switch while streaming. The
+		 * one-invalid-frame cost this note warns about is covered by the SAME
+		 * IMX296_INIT_PERIOD_MS wait below that already covers the sensor's normal
+		 * post-STANDBY-cancel init period (150 ms, 9 frames of margin -- comfortably
+		 * more than the single frame this note describes), not a separate wait.
 		 */
 		if (data->fmt.width == IMX296_ROI_WIDTH && data->fmt.height == IMX296_ROI_HEIGHT) {
 			ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_ROI_POS_H, IMX296_ROI_POS_H);
