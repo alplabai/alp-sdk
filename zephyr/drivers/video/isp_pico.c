@@ -456,6 +456,24 @@ static void isp_bottom_half(const struct device *dev)
 		goto isp_bottom_done;
 	}
 
+	/*
+	 * #2287 Stage B unit 3 (bench runs 307/308, advisor code analysis): re-arm the CPI HERE,
+	 * now that isp_attach_buffer_to_hw() (above) has told the ISP's own MI where the NEXT
+	 * frame goes -- alif_cam_cpi_resume() (video_alif.c) is a pure SNAPSHOT-mode re-arm (one
+	 * frame per call); calling it before the ISP has a destination buffer ready is exactly
+	 * what used to happen (alif_cam_work_helper()'s own STOP-work re-arming unconditionally,
+	 * racing this decision) and corrupted the buffer just handed to the app. A failure here is
+	 * logged, not fatal to the frame already retired above (fifo_out) -- it does mean the NEXT
+	 * frame will not arrive; nothing in this driver currently detects and recovers from that
+	 * beyond the app's own bench-observable frame-rate stall.
+	 */
+	if (config->controller) {
+		ret = alif_cam_cpi_resume(config->controller);
+		if (ret) {
+			LOG_ERR("Failed to re-arm CPI capture for the next frame! ret=%d", ret);
+		}
+	}
+
 isp_bottom_done:
 	if (!data->is_streaming) {
 		/*
@@ -480,12 +498,17 @@ isp_bottom_done:
 		 * IMX296 also restarts its ~9-frame init period (datasheet p54) on every resume --
 		 * bench run 301 confirms the STANDBY-cycling removal itself: "masked after 16"
 		 * appears once instead of every restart, and frame rate rose ~4x (0.8 -> 3.4 fps
-		 * app-side). alif_cam_cpi_pause() (video_alif.c) instead pauses only the CPI capture
-		 * engine, leaving the endpoint + sensor (and the ISP's own AE/AWB library state --
-		 * nothing here touches isp_vsi_stop()) running across the pause. A genuine error
-		 * (VIDEO_BUF_ERROR, the other branches above) still gets the full stop: something is
-		 * actually wrong, not just backpressure, and this driver has no evidence a CPI-only
-		 * pause is safe to resume from after one.
+		 * app-side). On genuine starvation, this driver simply does NOT re-arm the CPI (see
+		 * isp_attach_buffer_to_hw()'s own success-path comment, above -- there is no active
+		 * register action for a pause any more, advisor code analysis after bench runs
+		 * 307/308: alif_cam_cpi_pause()/hw_cam_cpi_only_stop() used to actively interrupt a
+		 * capture that alif_cam_work_helper()'s own STOP-work had ALREADY wrongly re-armed
+		 * behind this decision's back -- that race is gone now that only THIS function ever
+		 * re-arms the CPI in ISP-consumer mode), leaving the endpoint + sensor (and the ISP's
+		 * own AE/AWB library state -- nothing here touches isp_vsi_stop()) running, simply
+		 * idle, across the pause. A genuine error (VIDEO_BUF_ERROR, the other branches above)
+		 * still gets the full stop: something is actually wrong, not just backpressure, and
+		 * this driver has no evidence a CPI-only pause is safe to resume from after one.
 		 *
 		 * Whether AE itself now converges is a SEPARATE, still-open question run 301 did NOT
 		 * answer: SHS stayed at its exposure-lines floor (2 lines) and GAIN at 0 for all 60
@@ -496,7 +519,6 @@ isp_bottom_done:
 		 */
 		if (config->controller) {
 			if (starved) {
-				alif_cam_cpi_pause(config->controller);
 				data->controller_cpi_paused = true;
 			} else {
 				video_stream_stop(config->controller, VIDEO_BUF_TYPE_OUTPUT);
@@ -520,6 +542,30 @@ static void isp_cb_work(struct k_work *work)
 
 	/* Call a helper to process the things further. */
 	isp_bottom_half(data->dev);
+}
+
+/*
+ * #2287 Stage B unit 3 (bench runs 307/308): re-arms the CPI ONLY, for isp_isr_handler()'s
+ * corrupted-frame path -- see struct isp_data's own cpi_rearm_work comment (isp_pico.h) for why
+ * this needs to be a separate, minimal work item rather than calling alif_cam_cpi_resume()
+ * directly from ISR context (it takes a k_mutex) or reusing cb_work (which retires a real,
+ * successfully-captured frame -- there isn't one here).
+ */
+static void isp_cpi_rearm_work(struct k_work *work)
+{
+	struct isp_data *data = CONTAINER_OF(work, struct isp_data, cpi_rearm_work);
+	const struct device *dev = data->dev;
+	const struct isp_config *config = dev->config;
+	int ret;
+
+	if (!data->is_streaming || !config->controller) {
+		return;
+	}
+
+	ret = alif_cam_cpi_resume(config->controller);
+	if (ret) {
+		LOG_ERR("Failed to re-arm CPI after a corrupted frame! ret=%d", ret);
+	}
 }
 
 /*
@@ -619,6 +665,16 @@ static void isp_isr_handler(const struct device *dev)
 		if (is_not_corrupted_frame) {
 			k_work_submit_to_queue(&data->cb_workq, &data->cb_work);
 		} else {
+			/*
+			 * #2287 Stage B unit 3 (bench runs 307/308): a corrupted frame skips
+			 * cb_work (no valid data for isp_bottom_half() to retire) -- but with
+			 * the ISP now the ONLY thing that ever re-arms the CPI, skipping
+			 * cb_work also skips the re-arm the next frame needs, stalling the
+			 * stream. cpi_rearm_work does ONLY that (isp_pico.h's own comment) --
+			 * submitted here instead of calling alif_cam_cpi_resume() directly
+			 * (it takes a k_mutex, unsafe from this ISR context).
+			 */
+			k_work_submit_to_queue(&data->cb_workq, &data->cpi_rearm_work);
 			is_not_corrupted_frame = true;
 		}
 	}
@@ -1713,6 +1769,13 @@ static int isp_stream_start(const struct device *dev)
 	 * half of a stream this call isn't actually going to (re)start.
 	 */
 	k_work_cancel_sync(&data->cb_work, &sync);
+	/*
+	 * #2287 Stage B unit 3: cpi_rearm_work (isp_pico.h) can also still be pending/running here
+	 * (a corrupted-frame ISR submitted it, isp_isr_handler()) -- cancel it too, same reasoning
+	 * as cb_work just above: a stale re-arm firing after this function has already decided
+	 * whether to take the light or full start path would re-arm the CPI unexpectedly.
+	 */
+	k_work_cancel_sync(&data->cpi_rearm_work, &sync);
 
 	vbuf = k_fifo_peek_head(&data->fifo_in);
 	if (vbuf == NULL) {
@@ -1982,23 +2045,17 @@ static int isp_stream_start(const struct device *dev)
 	 * `enum video_buf_type`; the controller is the capture source ->
 	 * VIDEO_BUF_TYPE_OUTPUT.
 	 *
-	 * #2287 Stage B unit 3: if isp_bottom_half()'s own starvation handler
-	 * (above) CPI-paused the controller instead of fully stopping it
-	 * (data->controller_cpi_paused), the endpoint + sensor never stopped --
-	 * a plain video_stream_start() here would -EBUSY against
-	 * alif_cam_stream_start()'s own `if (data->is_streaming) return -EBUSY`
-	 * (video_alif.c), since the controller never went through
-	 * alif_cam_stream_stop(). alif_cam_cpi_resume() instead re-arms just
-	 * the CPI capture engine the pause halted -- see video_alif.c's own
-	 * comment on the pair.
+	 * #2287 Stage B unit 3: by the time this line runs, data->controller_cpi_paused is always
+	 * false -- either it was never true, the light-resume path above already returned early
+	 * (true && !dirty), or the dirty-ctrl unwind block above already cleared it (true && dirty
+	 * -> a real video_stream_stop() first). A plain video_stream_start() is therefore always
+	 * correct here; an earlier revision had a now-dead `if (data->controller_cpi_paused) {
+	 * alif_cam_cpi_resume(...) }` branch at this exact point that could never execute -- see
+	 * the light-resume path (above, `if (data->controller_cpi_paused && ...)`) for where that
+	 * re-arm actually happens now.
 	 */
 	if (config->controller) {
-		if (data->controller_cpi_paused) {
-			ret = alif_cam_cpi_resume(config->controller);
-			data->controller_cpi_paused = false;
-		} else {
-			ret = video_stream_start(config->controller, VIDEO_BUF_TYPE_OUTPUT);
-		}
+		ret = video_stream_start(config->controller, VIDEO_BUF_TYPE_OUTPUT);
 		if (ret) {
 			LOG_ERR("Failed to start stream for Endpoint device: %s! "
 				"ret=%d",
@@ -2039,8 +2096,9 @@ static int isp_stream_stop(const struct device *dev)
 	/*
 	 * #2287 Stage B unit 3, reviewer fix (bench run 301, blocker): a starvation pause
 	 * (isp_bottom_half()) already sets is_streaming=false WITHOUT touching the controller --
-	 * it is only CPI-paused (alif_cam_cpi_pause(), video_alif.c: CSI-2 endpoint + sensor still
-	 * physically streaming), not truly stopped, and the ISP library itself is still in its
+	 * it only sets controller_cpi_paused (this driver simply stops calling
+	 * alif_cam_cpi_resume(), video_alif.c -- CSI-2 endpoint + sensor still physically
+	 * streaming), not truly stopped, and the ISP library itself is still in its
 	 * isp_vsi_start()'d state (isp_bottom_half() never calls isp_vsi_stop()). The OLD early
 	 * `if (!data->is_streaming) return 0;` here treated that as "already fully stopped" and
 	 * returned WITHOUT ever reaching video_stream_stop(controller) below -- a user stop()/
@@ -2199,6 +2257,9 @@ static int isp_flush(const struct device *dev, bool cancel)
 		 * k_work_cancel_sync() of the same work item.
 		 */
 		k_work_cancel_sync(&data->cb_work, &sync);
+		/* #2287 Stage B unit 3: same reasoning as isp_stream_start()'s own cancel of this
+		 * work item -- a corrupted-frame re-arm must not fire after this flush. */
+		k_work_cancel_sync(&data->cpi_rearm_work, &sync);
 
 		for (int i = 0; (i < 20) &&
 				(sys_read32(regs + ISP_MI_RIS) & MI_INTR_MP_FRAME_END); i++) {
@@ -2302,6 +2363,9 @@ static int isp_flush(const struct device *dev, bool cancel)
 		 * cancel path's cancel_sync just above.
 		 */
 		k_work_flush(&data->cb_work, &sync);
+		/* #2287 Stage B unit 3: same reasoning -- see the cancel=true path's own comment
+		 * on cpi_rearm_work above. */
+		k_work_flush(&data->cpi_rearm_work, &sync);
 	}
 
 	data->curr_vid_buf = 0;
@@ -2568,6 +2632,7 @@ int video_isp_init(const struct device *dev)
 	 * Setup the ISR callback work.
 	 */
 	k_work_init(&data->cb_work, isp_cb_work);
+	k_work_init(&data->cpi_rearm_work, isp_cpi_rearm_work);
 	k_work_queue_init(&data->cb_workq);
 	k_work_queue_start(&data->cb_workq, isp_cb_workq, K_KERNEL_STACK_SIZEOF(isp_cb_workq),
 			   K_PRIO_COOP(WORKQ_PRIORITY), NULL);

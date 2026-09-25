@@ -360,6 +360,19 @@ struct isp_data {
 	struct k_work cb_work;
 	struct k_work_q cb_workq;
 
+	/*
+	 * #2287 Stage B unit 3 (bench runs 307/308, advisor code analysis): isp_isr_handler()'s
+	 * corrupted-frame path (INTR_SIZE_ERR/INTR_DATALOSS/isp_intr_err_mask) skips cb_work
+	 * entirely for that frame (there is no valid data for isp_bottom_half() to retire) -- but
+	 * with the ISP now the ONLY thing that re-arms the CPI (alif_cam_cpi_resume(), which takes
+	 * a k_mutex and so cannot be called from ISR context), skipping cb_work also skips the
+	 * re-arm, stalling the stream after one bad frame. This separate, minimal work item does
+	 * ONLY the re-arm (no fifo/VSI-library processing -- the ISP's own MI target buffer is
+	 * unchanged from before the corrupted frame, so nothing needs re-attaching), submitted
+	 * from ISR context instead of calling alif_cam_cpi_resume() directly.
+	 */
+	struct k_work cpi_rearm_work;
+
 	struct k_poll_signal *signal;
 
 	struct isp_config_params init_cfg;

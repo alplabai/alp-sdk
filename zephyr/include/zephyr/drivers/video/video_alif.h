@@ -236,14 +236,17 @@ int fourcc_to_numplanes(uint32_t fourcc);
 unsigned int pix_fmt_bpp(uint32_t fourcc);
 
 /*
- * #2287 Stage B unit 3: pause/resume ONLY the CPI capture engine, leaving the CSI-2 endpoint and
- * sensor streaming -- for an ISP consumer's OWN output-buffer starvation (isp_pico.c), as distinct
- * from a full video_stream_stop()/_start() (which always tears the endpoint + sensor down, by
- * design, for a real stop()/close()). See video_alif.c's own comment on these two for why this is
- * a separate pair rather than reusing alif_cam_work_helper()'s `starved` memory-capture-path
- * bookkeeping. `dev` is this CPI controller device (the ISP's `config->controller`).
+ * #2287 Stage B unit 3 (advisor code analysis after bench runs 307/308): re-arms ONLY the CPI
+ * capture engine (SNAPSHOT mode -- one frame per call) for an ISP consumer's next frame
+ * (isp_pico.c), as distinct from a full video_stream_stop()/_start() (which always tears the
+ * CSI-2 endpoint + sensor down, by design, for a real stop()/close()). The CALLER (isp_pico.c's
+ * isp_bottom_half()) MUST have already attached its own next destination buffer
+ * (isp_attach_buffer_to_hw()) before calling this -- re-arming the CPI before the ISP has a
+ * destination ready is exactly the bug runs 307/308 found (see video_alif.c's own comment on
+ * this function for the full mechanism). There is no longer a matching "pause" function: with
+ * nothing else ever re-arming the CPI behind isp_pico.c's back, a pause is simply isp_pico.c
+ * choosing not to call this. `dev` is this CPI controller device (the ISP's `config->controller`).
  */
-int alif_cam_cpi_pause(const struct device *dev);
 int alif_cam_cpi_resume(const struct device *dev);
 
 #ifdef __cplusplus

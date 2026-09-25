@@ -395,58 +395,53 @@ static inline void hw_cam_cpi_only_stop(uintptr_t regs)
 }
 
 /*
- * #2287 Stage B unit 3 (bench runs 298/299/300): hw_cam_cpi_only_stop() above was written for
- * alif_cam_work_helper()'s OWN starvation pause (the cam port@1/AXI-memory capture path) -- but
- * isp_pico.c's OWN starvation handler (its output-buffer IN-FIFO running empty, a SEPARATE queue
- * from this driver's fifo_in) called a full video_stream_stop()/_start() on this controller every
- * time the app didn't re-enqueue an ISP output buffer before the next frame, cycling the sensor
- * through STANDBY every restart -- exactly the mechanism hw_cam_cpi_only_stop()'s own comment
- * already diagnosed and fixed for the OTHER starvation path. These two wrappers expose the SAME
- * CPI-only pause/resume to isp_pico.c (a different translation unit) instead of it either
- * duplicating the register sequence or continuing to call the full video_stream_stop()/_start()
- * API, which always tears down the CSI-2 endpoint + sensor (alif_cam_stream_stop() does this
- * unconditionally, by design, for a real user stop()/close()).
+ * #2287 Stage B unit 3 (bench runs 298-306, advisor code analysis after runs 307/308): this pair
+ * used to be pause+resume (alif_cam_cpi_pause() called hw_cam_cpi_only_stop() -- CAM_CTRL=0 +
+ * soft reset -- to actively interrupt an in-progress capture). That was WRONG for this CPI: it
+ * runs in SNAPSHOT mode (hw_cam_start_video_capture()'s CAM_CTRL_SNAPSHOT bit,
+ * ensemble_e8_peripherals.dtsi has no capture-mode override), which captures exactly ONE frame
+ * per START and then auto-stops itself in hardware -- there is nothing "in progress" to
+ * interrupt AT THE POINT isp_pico.c decides to pause, UNLESS something already re-armed the CPI
+ * for a frame the ISP never asked for. That something was alif_cam_work_helper()'s own non-AXI
+ * STOP-work branch (below), which used to re-arm the CPI unconditionally and immediately on
+ * every STOP interrupt -- racing isp_pico.c's own frame-end interrupt/bottom-half decision on
+ * whether to keep capturing. hw_cam_cpi_only_stop() then cut THAT unwanted, already-running
+ * capture mid-frame (no frame-boundary wait), and the ISP's own MI stayed targeting the buffer
+ * just handed to the app -- an extra frame partially overwrote it (bench runs 307/308:
+ * frame_end_count ~2x the app-visible frame count, and a captured frame visibly straddling two
+ * sensor frames, a real scene in one horizontal band, streaky texture elsewhere).
+ *
+ * The fix moves CPI re-arm responsibility to the ISP: alif_cam_work_helper()'s non-AXI branch no
+ * longer re-arms at all (see its own comment) -- only isp_pico.c calls alif_cam_cpi_resume() now,
+ * and only AFTER it has itself attached the NEXT destination buffer to its own MI
+ * (isp_attach_buffer_to_hw(), a pure register write, no VSI library call) -- so the CPI is never
+ * re-armed for a frame the ISP hasn't already prepared to receive. With nothing re-arming the CPI
+ * behind isp_pico.c's back, "pause" no longer needs an active register action at all -- it is
+ * simply isp_pico.c choosing not to call alif_cam_cpi_resume() (see isp_bottom_half()'s own
+ * starvation branch) -- so alif_cam_cpi_pause() and `data->cpi_paused` are GONE (both from this
+ * file and struct video_cam_data, video_alif.h): there is no longer a race for `cpi_paused` to
+ * guard against, since the thing that used to race it (the STOP-work branch's own re-arm) no
+ * longer exists.
  *
  * Deliberately NOT touching `data->starved`/`data->fifo_in` here: those belong to the memory-
  * capture path's OWN buffer bookkeeping (alif_cam_enqueue()'s resume check, ~:1153) which the ISP
  * consumer mode never exercises (ISP never calls video_enqueue() on this controller -- config->
- * axi_bus_ep is unset/CONFIG_VIDEO_ALIF_CAM_EXTENDED is off on the ISP-consumer boards). Mixing
- * the two would let a genuine ISP-triggered pause be misread as a memory-capture starvation by
- * code that path doesn't reach in this configuration anyway, but keeping them independent means
- * that invariant doesn't have to be proven to stay correct.
- *
- * `data->cpi_paused` IS new bookkeeping these two touch (set/cleared under `lock`) -- reviewer
- * fix (bench run 301, race): alif_cam_work_helper()'s non-AXI (ISP-consumer) branch,
- * `hw_cam_start_video_capture(dev)` on every STOP-interrupt bottom half with no lock and no
- * paused check, can race a pause queued from this device's own ISR just before
- * alif_cam_cpi_pause() runs -- the STOP work item, still pending, would then re-arm the CPI
- * moments after this call just stopped it, undoing the pause. That branch now takes `lock` and
- * skips the restart while `cpi_paused` is set (video_alif.c, alif_cam_work_helper()).
+ * axi_bus_ep is unset/CONFIG_VIDEO_ALIF_CAM_EXTENDED is off on the ISP-consumer boards).
  */
-int alif_cam_cpi_pause(const struct device *dev)
-{
-	struct video_cam_data *data = dev->data;
-	uintptr_t regs = DEVICE_MMIO_GET(dev);
-
-	k_mutex_lock(&data->lock, K_FOREVER);
-	data->cpi_paused = true;
-	hw_cam_cpi_only_stop(regs);
-	k_mutex_unlock(&data->lock);
-
-	return 0;
-}
-
 int alif_cam_cpi_resume(const struct device *dev)
 {
 	struct video_cam_data *data = dev->data;
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
 
 	k_mutex_lock(&data->lock, K_FOREVER);
-	data->cpi_paused = false;
-	/* Same re-arm sequence alif_cam_enqueue()'s own starved-resume uses (~:1163-1172), minus
+	/* Re-arms the CPI for the frame isp_pico.c just attached a destination buffer for (via
+	 * isp_attach_buffer_to_hw(), which the caller is required to have already called -- see
+	 * this function's own header comment). Same register sequence alif_cam_enqueue()'s own
+	 * starved-resume uses (~:1163-1172) for the memory-capture path's equivalent re-arm, minus
 	 * the CAM_FRAME_ADDR reprogram: the ISP consumer mode never changes which buffer the CPI
-	 * writes into (that address is set once, at alif_cam_stream_start()), so nothing here needs
-	 * updating -- only the interrupt-mask + capture-engine restart the pause above undid. */
+	 * writes into (that address is set once, at alif_cam_stream_start()) -- only the ISP's OWN
+	 * MI target (isp_attach_buffer_to_hw()) changes per frame.
+	 */
 	hw_enable_interrupts(regs, INTR_VSYNC | INTR_BRESP_ERR | INTR_OUTFIFO_OVERRUN |
 					   INTR_INFIFO_OVERRUN | INTR_STOP);
 	hw_cam_start_video_capture(dev);
@@ -746,18 +741,22 @@ done:
 #endif /* defined(CONFIG_POLL) */
 	} else {
 		/*
-		 * #2287 Stage B unit 3, reviewer fix (bench run 301, race): take `lock` and check
-		 * `cpi_paused` before restarting -- a STOP interrupt bottom half queued just before
-		 * isp_pico.c's own starvation handler calls alif_cam_cpi_pause() would otherwise
-		 * reach this unconditional restart moments later and undo the pause it just asked
-		 * for. `alif_cam_cpi_pause()`/`_resume()` set/clear `cpi_paused` under this SAME
-		 * lock (see their own comment), so this check is race-free against them.
+		 * #2287 Stage B unit 3 (bench runs 307/308, advisor code analysis): this branch used
+		 * to re-arm the CPI itself (hw_cam_start_video_capture()) unconditionally, on every
+		 * STOP interrupt -- racing isp_pico.c's own frame-end interrupt and bottom half,
+		 * which decides (per frame) whether there IS a next destination buffer to capture
+		 * into at all. In ISP-consumer mode (this branch, config->axi_bus_ep unset) the CPI
+		 * is in SNAPSHOT mode (one frame per START, auto-stopping itself in hardware after --
+		 * see alif_cam_cpi_resume()'s own comment) -- re-arming here, before the ISP has
+		 * decided and attached its next buffer, captured a frame the ISP never asked for and
+		 * partially overwrote the buffer just handed to the app (runs 307/308's horizontal-
+		 * band/streak symptom). This branch now does NOTHING: isp_pico.c's own bottom half
+		 * (isp_bottom_half(), isp_pico.c) is the ONLY thing that re-arms the CPI in this mode
+		 * now, via alif_cam_cpi_resume() -- and only after successfully attaching the next
+		 * buffer to its own MI first. This STOP interrupt itself is otherwise unused in
+		 * ISP-consumer mode (no fifo_in/fifo_out bookkeeping happens here either, see the
+		 * `if (config->axi_bus_ep)` branch above for that).
 		 */
-		k_mutex_lock(&data->lock, K_FOREVER);
-		if (!data->cpi_paused) {
-			hw_cam_start_video_capture(dev);
-		}
-		k_mutex_unlock(&data->lock);
 	}
 }
 
@@ -976,17 +975,6 @@ static int alif_cam_stream_start(const struct device *dev)
 
 	data->is_streaming = true;
 	data->starved = false;
-	/*
-	 * #2287 Stage B unit 3, reviewer fix (bench run 303, blocker): `cpi_paused` used to be
-	 * cleared ONLY in alif_cam_cpi_resume() -- a REAL stop/start cycle (pause -> user stop ->
-	 * user start) never went through that function, so a stale `cpi_paused = true` from before
-	 * the stop survived into this fresh start. alif_cam_work_helper()'s own paused check (its
-	 * non-AXI branch, added the same reviewer round) then wrongly skipped re-arming the CPI on
-	 * this fresh stream's very first STOP interrupt -- one frame captured, then a permanent
-	 * stall (nothing else ever calls hw_cam_start_video_capture() again on this path). Cleared
-	 * here too so a genuine fresh start always starts with a clean slate.
-	 */
-	data->cpi_paused = false;
 
 	k_mutex_unlock(&data->lock);
 
@@ -1055,14 +1043,6 @@ static int alif_cam_stream_stop(const struct device *dev)
 
 	data->is_streaming = false;
 	data->starved = false;
-	/* #2287 Stage B unit 3, reviewer fix (bench run 303, blocker): same reasoning as
-	 * alif_cam_stream_start()'s own clear -- a real stop tears the endpoint + sensor down for
-	 * real regardless of any in-flight CPI-only pause (see the comment above, "stop the
-	 * endpoint even while starved"), so any pause this stop is unwinding is now moot; clearing
-	 * here (not just in alif_cam_cpi_resume()) stops a stale `cpi_paused = true` from surviving
-	 * into whatever stream starts next.
-	 */
-	data->cpi_paused = false;
 
 	k_mutex_unlock(&data->lock);
 
