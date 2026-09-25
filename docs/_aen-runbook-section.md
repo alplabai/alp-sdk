@@ -122,11 +122,70 @@ Two host prerequisites:
   as a faster SWD-only alternative that skips the SE-UART reset race, not a
   requirement.
 
+**The ATOC-replace guard (#2262).** `app-write-mram -p` REPLACES the whole
+resident ATOC — it is not a merge — so before burning, `west flash` now reads
+the resident ATOC back over the SE-UART (`maintenance -opt getbanner`/`gettoc`,
+the same non-destructive query the bench scripts use) and refuses to burn if
+that would silently delist a resident app entry outside this build's own
+`ALP-HE`/`ALP-HP` section, or if the read could not be verified. Pass
+`--replace-atoc` once you have confirmed losing the other entry is intended —
+same flag spelling as `flash-run.sh`'s Flow A guard, and distinct from Flow D's
+`--atoc-unqueryable`. Every run leaves `<build_dir>/alif_flash/atoc-before.txt`
+(the raw transcript, NOT removed between runs — its value is being the last
+successfully-read resident ATOC, whether or not the current attempt got far
+enough to read a new one) and `<build_dir>/alif_flash/atoc-guard.json` (the
+machine-readable verdict, written BEFORE any refusal is raised; a run that
+fails EARLIER than the guard step — e.g. no SETOOLS, no `zephyr.bin` —
+removes any verdict left by a previous run instead, so its mere absence
+means "the guard did not reach a verdict this attempt", never a stale
+success read as this run's own).
+
+**The verdict contract, frozen as `alp-sdk.alif-flash-atoc-guard.v1`** (this
+is the canonical description; `changelog.d/2262.md` points back here rather
+than duplicating it — any field change bumps the schema string):
+
+| Field | Type | Value |
+|---|---|---|
+| `schema` | string | the literal `alp-sdk.alif-flash-atoc-guard.v1` |
+| `status` | string | one of `clear`, `empty`, `refused-foreign`, `refused-unverified`, `replaced` |
+| `foreign` | array of strings | the resident entry names foreign to this run's own section; `[]` when none |
+| `transcript` | string | absolute path to the paired `atoc-before.txt`, always present |
+| `allowed` | array of strings, sorted | the section name(s) this run is itself about to (re)write (today always exactly one) |
+| `query_status` | string | one of `unverified`, `empty`, `ok` — the raw pre-decision read outcome, BEFORE `--replace-atoc` is applied |
+
+`status == "replaced"` alone doesn't say what `--replace-atoc` overrode:
+`query_status == "unverified"` (with `foreign == []`) means it overrode an
+unverified read; any other `query_status` with a non-empty `foreign` means
+it overrode a genuinely foreign entry.
+
+> **Sysbuild multi-domain caveat (alp-sdk#2274).** `alif_flash` runs once
+> PER DOMAIN, not once per `west flash` invocation, so a sysbuild build
+> (MCUboot domain + app domain) runs this guard twice. MCUboot and the HE
+> app both map to the same ATOC section name `ALP-HE`, so the guard cannot
+> tell the second invocation's own resident `ALP-HE` (written by the
+> first) from a legitimate re-write of its own entry — it reports `clear`
+> and silently replaces it. Not a regression (the pre-`#2262` runner did
+> the same unconditionally); see `zephyr/sysbuild/aen/README.md`'s own
+> warning next to its two-domain flash example.
+
 > **Pre-provisioned modules from Alp Lab** already carry a dev-signed MCUboot +
-> self-test in slot0 (LCS=DM), so the core is already released and `west flash`
-> works day-1 with no manual SETOOLS step. You only need the manual path above
-> to re-key to your own production key or to recover a wiped/bare module. See
-> [`aen-provisioning.md`](aen-provisioning.md) §0.5.
+> self-test in slot0 (LCS=DM), so the core is already released and SWD/`west
+> debug` attach just works day-1. **`west flash`'s `alif_flash` runner is NOT
+> the day-1 path for these modules, though** — since #2262 it reads the
+> factory ATOC back first and finds the resident `MCUBOOT-` entry (the
+> factory-provisioned bootloader — `zephyr/sysbuild/aen/README.md`'s
+> provisioning section) foreign to whatever `ALP-HE`/`ALP-HP` section your
+> own build stages, and REFUSES rather than silently delisting it. This is
+> the guard doing its job, not a regression to work around with
+> `--replace-atoc`: that flag deletes the factory MCUboot ATOC entry and
+> leaves the module unable to boot until MCUboot is reprovisioned. Load your
+> app onto a pre-provisioned module via **Option B** instead — a plain
+> J-Link `loadbin` of your `imgtool`-signed image straight to slot0, no
+> SETOOLS/ATOC/SE-UART at all, verified and chainloaded by the resident
+> MCUboot — see [`aen-provisioning.md`](aen-provisioning.md) §0.5. The manual
+> SETOOLS path above (or `alif_flash` with `--replace-atoc`) is for
+> re-keying to your own production key or recovering a wiped/bare module,
+> where losing/replacing the factory ATOC is the intended outcome.
 
 ---
 

@@ -108,9 +108,16 @@ cd "$SETOOLS_DIR"
 `flags ["load","boot"]`, `signed true`.  The SES banner then shows
 `| MCUBOOT- | M55-HE | ... | uLVB |` -- slot0 is no longer an SES boot
 entry; MCUboot owns it from here.)  Shipped modules then boot
-out-of-box, and customers load apps into slot0 via `west flash` **or**
-a plain J-Link with no SETOOLS/SE-UART of their own (see
-[`docs/aen-provisioning.md`](../../../docs/aen-provisioning.md) §0.5).
+out-of-box, and customers load apps into slot0 with a plain J-Link (no
+SETOOLS/SE-UART of their own -- see
+[`docs/aen-provisioning.md`](../../../docs/aen-provisioning.md) §0.5,
+Option B). **Not `west flash`'s `alif_flash` runner**: since alp-sdk#2262
+it reads this resident `MCUBOOT-` entry back before burning and REFUSES
+(it is foreign to whatever `ALP-HE`/`ALP-HP` section the customer's own
+build stages), because burning would otherwise silently delist this
+factory bootloader -- see `docs/aen-provisioning.md` §0.5's Option A
+warning before pointing a customer at `west flash` on a pre-provisioned
+module.
 
 ## Usage
 
@@ -130,6 +137,24 @@ west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
 west flash --bin-file build/mcuboot/zephyr/zephyr.bin --domain mcuboot
 west flash --bin-file build/zephyr/zephyr.signed.bin
 ```
+
+> **Not the `alif_flash` runner (SETOOLS/SE-UART) for BOTH of the above --
+> see alp-sdk#2274.** `alif_flash` runs once per domain (Zephyr's own
+> `flash.py`/`run_common.py` resolve one runner invocation per
+> `--domain`, or per entry in `domains.yaml` in flash order for a plain
+> multi-domain `west flash`). The `#2262` ATOC guard identifies a
+> resident entry by NAME ONLY, and both the MCUboot domain (ITCM
+> `0x58000000`) and the HE app domain map to the SAME ATOC section name
+> `ALP-HE` (`_atoc_section_name`) -- so the SECOND `alif_flash` invocation
+> sees the first's own `ALP-HE` entry as already-allowed, not foreign, and
+> reports `clear`. It still burns a fresh single-entry ATOC, silently
+> replacing whatever the first invocation wrote. This is not a regression
+> (the pre-`#2262` runner did the same with no check at all): the guard
+> only ever detects a FOREIGN name, never a same-name overwrite. Two
+> `alif_flash` invocations at ATOC-writing SETOOLS/SE-UART targets are
+> unsupported for this reason until alp-sdk#2274 lands; the plain J-Link
+> path above (Option B, `docs/aen-provisioning.md` §0.5) never touches
+> the ATOC and is unaffected.
 
 ## Key management
 

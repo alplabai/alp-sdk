@@ -58,20 +58,30 @@ so the check never fires for it. For a PURE A32_0 config the window
 bounds below are the entire guard: they are what stop an A32 mramAddress
 entry from wandering into the SE-owned `atoc` band.
 
-Two known gaps, NOT closed by this guard (see #1069's PR body):
-  - A sequential single-core `west flash` writes a whole fresh TOC each
-    run, so the previous core's entry is invisible to this guard by the
-    time the second `west flash` runs -- catching that needs a pre-burn
-    TOC read-back over the SE-UART.
+One remaining gap, NOT closed by this guard (see #1069's PR body):
   - The J-Link customer path (loadbin straight to slot0) has no ATOC
     assembly step at all; for that path the disjoint DTS windows ARE
     the guard (the link address itself moves per core).
+
+(#2262 closed the other gap this docstring used to name: a sequential
+single-core `west flash` writing a whole fresh TOC each run, invisible
+to THIS window/overlap guard by the time the second `west flash` runs.
+`scripts/west_commands/runners/alif_flash.py`'s ``do_run`` now reads the
+resident TOC back over the SE-UART with `maintenance -opt gettoc`
+*before* burning, and refuses the burn when that would silently delist a
+foreign entry -- see the ATOC-replace guard functions below
+(`compute_query_status`, `foreign_resident_entries`,
+`decide_atoc_guard`), which mirror `bench_atoc_replace_guard` in
+``scripts/bench/aen/bench-env.sh`` (alp-sdk#2025) so the two guards never
+drift apart.)
 """
 
 from __future__ import annotations
 
 import json
+import re
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -205,6 +215,229 @@ def validate_atoc_config_file(path: "str | Path") -> None:
     """Load + validate a staged ATOC JSON config file."""
     data = json.loads(Path(path).read_text(encoding='utf-8'))
     validate_atoc_entries(data)
+
+
+# ---------------------------------------------------------------------------
+# ATOC-replace guard (#2262): the query-side parser + verdict logic shared
+# with `scripts/west_commands/runners/alif_flash.py`'s pre-burn guard.
+#
+# This is a PORT, not a rewrite, of `bench_atoc_replace_guard` in
+# `scripts/bench/aen/bench-env.sh` -- every quirk below traces to a comment
+# in that function, bench-verified on real AEN EVK captures (2026-09-07).
+# `bench-env.sh` itself is NOT touched by this port (still bash, still the
+# thing that runs on the bench today); a parity test
+# (`tests/scripts/test_atoc_guard_parity.py`) feeds the SAME fixture
+# transcripts through both implementations and asserts identical verdicts,
+# so the two copies cannot silently drift apart. Unit tests for these
+# functions on their own live in `tests/scripts/test_aen_atoc.py`. All
+# functions here are pure (no subprocess, no file IO) -- the runner does
+# the SE-UART query and handles these results.
+# ---------------------------------------------------------------------------
+
+# Strip any CSI (ANSI escape) sequence -- not just SGR colour (`...m`): a
+# real SETOOLS capture also carries a cursor-show sequence (`\x1b[?25h`) and
+# an erase-in-line (`\x1b[K`), and an unstripped one landing inside a Name
+# cell would survive an SGR-only strip and read as a foreign entry (the
+# false-alarm direction). Mirrors bench-env.sh's
+# `sed -E 's/\x1b\[[0-9;?]*[a-zA-Z]//g'`.
+_CSI_RE = re.compile(r'\x1b\[[0-9;?]*[a-zA-Z]')
+
+# Bench-verified 2026-09-07: a real `getbanner` capture reads
+# " SES A1 v1.110.0 Mar  4 2026 19:06:23" after ANSI stripping -- SETOOLS'
+# own padding puts a LEADING SPACE on the line (not a terminal artifact), so
+# a bare `^SES` anchor rejects every real banner. Tolerate leading
+# whitespace, same as bench-env.sh's `^[[:space:]]*SES [^[:space:]]+ v[^[:space:]]+`
+# -- POSIX `[[:space:]]` is space/tab/newline/CR/FF/VT; `\n` never appears
+# mid-match here (this pattern is applied per already-split line via
+# `re.MULTILINE`'s `^` anchor), so `[ \t\r\v\f]` covers the same set that
+# can actually occur before `SES` on one line.
+_SES_BANNER_RE = re.compile(r'^[ \t\r\v\f]*SES \S+ v\S+', re.MULTILINE)
+
+# SETOOLS' exact "board is blank" message (`app-write-mram`'s own gettoc
+# reply) -- matched case-insensitively as a WHOLE LINE, mirroring
+# bench-env.sh's `grep -qix "no atoc found on target device."`. Anchoring to
+# this exact text (not a bare substring) keeps an error line that merely
+# CONTAINS "no atoc" (e.g. "no ATOC response from target") from decoding as
+# a genuinely empty board.
+#
+# Deliberate deviation from the bash guard: bash's `grep` (POSIX BRE, no
+# `-E`/`-F`) treats the trailing `.` as "any character", not a literal
+# period, so bash would ALSO read e.g. "no atoc found on target deviceX"
+# (any char in that position) as the empty-board line. Python's `==`
+# below requires the literal `.` SETOOLS actually emits. This is a
+# narrowing, fail-CLOSED divergence, not a bug to fix: the only way it can
+# disagree with bash is a transcript bash would call "empty" that Python
+# instead sends into the table parse (worst case, `unverified` or a
+# legitimate-looking table with no rows -> still `unverified`, never a
+# false "clear"). LOW-8 review (alp-sdk#2262): kept as-is, documented here
+# rather than widened to match bash's wildcard.
+_NO_ATOC_LINE = 'no atoc found on target device.'
+
+# Table rows look like "|   DEVICE |  CM0+  | 0x... | ... |" -- SETOOLS
+# colours the WHOLE LINE, not just the cell text, so a real ANSI-stripped
+# row keeps a LEADING SPACE before the pipe (bench-env.sh: a bare `/^\|/`
+# anchor never matched a single real row). Rows may also carry a leading tab.
+_ROW_RE = re.compile(r'^[ \t]*\|')
+_DASH_ONLY_RE = re.compile(r'^-+$')
+
+# DEVICE plus the two SE firmware banks (SERAM0/SERAM1 -- one marked
+# "* SERAM0" as the currently-booted bank) are baseline SE state, never
+# touched by `app-write-mram -p`: only a System Package update rewrites
+# SERAM. Exempt ONLY when the CPU column is CM0+ (bench-env.sh cross-checks
+# the CPU column too -- a same-named row on a DIFFERENT core is a
+# coincidentally-named app entry, not SE firmware, and must still trip the
+# guard).
+_BASELINE_NAMES = frozenset({'DEVICE', 'SERAM0', 'SERAM1'})
+_BASELINE_CPU = 'CM0+'
+
+
+def strip_csi(text: str) -> str:
+    """Strip every ANSI CSI escape sequence from *text* (see `_CSI_RE`)."""
+    return _CSI_RE.sub('', text)
+
+
+def is_valid_ses_banner(banner_text: str) -> bool:
+    """True if *banner_text* (raw `maintenance -opt getbanner` stdout)
+    contains a line that parses as an SES banner after ANSI stripping."""
+    return bool(_SES_BANNER_RE.search(strip_csi(banner_text)))
+
+
+def is_no_atoc_found(gettoc_text: str) -> bool:
+    """True if *gettoc_text* (raw `maintenance -opt gettoc` stdout) is the
+    exact, case-insensitive "No ATOC found on target device." line SETOOLS
+    prints for a genuinely blank board."""
+    stripped = strip_csi(gettoc_text).replace('\r', '')
+    return any(line.casefold() == _NO_ATOC_LINE for line in stripped.split('\n'))
+
+
+def _awk_field(fields: "list[str]", index: int) -> str:
+    """awk's own semantics for a field past `NF`: `$n` for `n > NF` is the
+    empty string, never an error/exception -- `fields` here is a 0-indexed
+    Python `str.split('|')` result, so awk's `$2`/`$3` are `fields[1]`/
+    `fields[2]`. A row with only ONE `|` (e.g. `" |  A32_APP"`, no closing
+    `|` at all -- a real truncated-serial-read shape) still gives awk a
+    non-empty `$2` ("A32_APP") and an empty `$3` ("") rather than being
+    skipped outright; HIGH-1 review (alp-sdk#2262): an earlier version of
+    this function `continue`d on `len(fields) < 3`, which SKIPPED that row
+    entirely -- fail-OPEN relative to bash, since the resident entry it
+    named then never reached `foreign_resident_entries` at all."""
+    return fields[index] if index < len(fields) else ''
+
+
+def parse_resident_atoc_table(gettoc_text: str) -> "list[tuple[str, str]]":
+    """Parse *gettoc_text* (raw `maintenance -opt gettoc` stdout) into a
+    list of `(name, cpu)` tuples, one per resident ATOC entry -- Name is
+    field 2, CPU is field 3, both trimmed; the header ("Name") and the
+    `+---+` separator rows are skipped. Mirrors bench-env.sh's awk table
+    parse exactly, including its ANSI + CR handling, a short row (see
+    `_awk_field`), and awk's OWN trim -- `gsub(/^[ \\t]+|[ \\t]+$/, "", ...)`
+    strips only ASCII space/tab, never Python `str.strip()`'s full Unicode
+    whitespace set (HIGH-1 review: a name cell of e.g. bare NBSP chars is
+    non-empty, and thus a real -- if oddly named -- resident entry, to
+    awk's gsub; `str.strip()` would fold it to `""` and DROP the row,
+    again fail-open relative to bash)."""
+    stripped = strip_csi(gettoc_text).replace('\r', '')
+    resident: "list[tuple[str, str]]" = []
+    for line in stripped.split('\n'):
+        if not _ROW_RE.match(line):
+            continue
+        fields = line.split('|')
+        name = _awk_field(fields, 1).strip(' \t')
+        cpu = _awk_field(fields, 2).strip(' \t')
+        if name and name != 'Name' and not _DASH_ONLY_RE.match(name):
+            resident.append((name, cpu))
+    return resident
+
+
+def compute_query_status(
+    maintenance_available: bool,
+    banner_text: "str | None",
+    banner_rc: "int | None",
+    gettoc_text: "str | None",
+    gettoc_rc: "int | None",
+) -> str:
+    """Return "unverified" / "empty" / "ok" for a completed (or not even
+    attempted) resident-ATOC query -- mirrors bench-env.sh's
+    `query_status` computation:
+
+    - no `maintenance` binary at all -> unverified (never assume safety);
+    - a missing/garbled/non-zero-exit banner forces the query unverified
+      REGARDLESS of what `gettoc` itself returned -- a gettoc read off the
+      wrong serial device (the SE-UART vs. the app console) is not a safe
+      verdict;
+    - a non-zero `gettoc` exit (e.g. a serial timeout mid-table) is never
+      "ok" from the partial text alone;
+    - the exact "No ATOC found" line means a genuinely empty board;
+    - otherwise "ok" only if at least one resident row parsed -- rc=0 with
+      neither the "No ATOC" line nor any parsed row stays unverified rather
+      than silently defaulting to a pass.
+    """
+    if not maintenance_available:
+        return 'unverified'
+    banner_ok = banner_rc == 0 and is_valid_ses_banner(banner_text or '')
+    effective_rc = gettoc_rc if banner_ok else 1
+    if effective_rc != 0:
+        return 'unverified'
+    if is_no_atoc_found(gettoc_text or ''):
+        return 'empty'
+    if parse_resident_atoc_table(gettoc_text or ''):
+        return 'ok'
+    return 'unverified'
+
+
+def foreign_resident_entries(
+    resident: "list[tuple[str, str]]", allowed: "list[str] | set[str]"
+) -> "list[str]":
+    """Return the resident entry NAMES that are neither the DEVICE/SERAM0/
+    SERAM1 baseline (on CM0+ only) nor in *allowed* -- the set of entries
+    this run is itself about to (re)write. A leading "* " current-bank
+    marker (e.g. "* SERAM0") is stripped ONLY for the baseline check; the
+    membership check against *allowed* still uses the raw name, matching
+    bench-env.sh exactly."""
+    allowed_set = set(allowed)
+    foreign: "list[str]" = []
+    for name, cpu in resident:
+        nbase = name[2:] if name.startswith('* ') else name
+        if nbase in _BASELINE_NAMES and cpu == _BASELINE_CPU:
+            continue
+        if name not in allowed_set:
+            foreign.append(name)
+    return foreign
+
+
+@dataclass(frozen=True)
+class AtocGuardVerdict:
+    """The pre-burn guard's decision. `status` is one of "clear" (nothing
+    foreign, verified query), "empty" (verified query, genuinely blank
+    board), "refused-foreign" (a foreign entry would be delisted),
+    "refused-unverified" (the query could not be trusted), or "replaced"
+    (--replace-atoc overrode a foreign or unverified finding). `refused`
+    is True exactly when the caller must abort before burning."""
+    status: str
+    foreign: "list[str]" = field(default_factory=list)
+    refused: bool = False
+
+
+def decide_atoc_guard(
+    query_status: str, foreign: "list[str]", replace_atoc: bool
+) -> AtocGuardVerdict:
+    """Turn a query outcome into the final verdict -- mirrors
+    bench-env.sh's `bench_atoc_replace_guard` tail: an unverified query is
+    checked BEFORE the foreign-entry check (an unverified query's `foreign`
+    list is not trustworthy either way), and --replace-atoc overrides both,
+    landing on "replaced" only when there was actually something to
+    override (a clean, verified board with --replace-atoc still reports
+    "clear"/"empty", never "replaced")."""
+    if query_status == 'unverified':
+        if replace_atoc:
+            return AtocGuardVerdict(status='replaced')
+        return AtocGuardVerdict(status='refused-unverified', refused=True)
+    if foreign:
+        if replace_atoc:
+            return AtocGuardVerdict(status='replaced', foreign=list(foreign))
+        return AtocGuardVerdict(
+            status='refused-foreign', foreign=list(foreign), refused=True)
+    return AtocGuardVerdict(status='empty' if query_status == 'empty' else 'clear')
 
 
 def main(argv: "list[str] | None" = None) -> int:
