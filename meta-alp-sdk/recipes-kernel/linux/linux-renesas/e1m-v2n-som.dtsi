@@ -329,10 +329,16 @@
 	 * is asserted (driven to its ACTIVE level) in .pre_power_on and
 	 * deasserted in .post_power_on, so ACTIVE_LOW here reproduces the
 	 * required sequence: REG_ON low through card power-up, then high.
-	 * post-power-on-delay-ms mirrors the >=10 ms REG_ON-low hold the
-	 * bring-up notes call for before the rising edge; NOT bench-tuned
-	 * against real silicon yet (module has never enumerated on this
-	 * board -- see docs/soms/v2n.md's Wi-Fi/BT section). */
+	 * mmc_power_up() holds REG_ON low for host->ios.power_delay_ms
+	 * between .pre_power_on and .post_power_on -- that MMC-core delay
+	 * is the >=10 ms REG_ON-low hold the bring-up notes call for, not
+	 * anything set here. post-power-on-delay-ms instead runs AFTER
+	 * .post_power_on drives REG_ON high (pwrseq_simple.c:
+	 * mmc_pwrseq_simple_post_power_on() deasserts, then sleeps this
+	 * many ms) -- a settle time for the module post-power-up. Neither
+	 * value is bench-tuned against real silicon yet (module has never
+	 * enumerated on this board -- see docs/soms/v2n.md's Wi-Fi/BT
+	 * section). */
 	wlan_pwrseq: wlan-pwrseq {
 		compatible = "mmc-pwrseq-simple";
 		reset-gpios = <&gd32_gpio 19 GPIO_ACTIVE_LOW>;
@@ -369,9 +375,8 @@
 
 /* On-module Wi-Fi: Murata LBEE5HY2FY-922 (Infineon CYW55513) on SDHI2,
  * 4-bit SDIO, non-removable (it is a soldered-down module, not a card
- * slot). Ground truth (bench-derived 2026-06, see [[project-v2n-wifi-
- * ble-lbee5hy2fy]]): PB0=CLK, PB1-PB4=DAT0-3, PB5=CMD (RZ/V2N datasheet
- * Table 2.2-2, Func1 -- the ONLY SD2 routing).
+ * slot). Ground truth (bench-derived 2026-06): PB0=CLK, PB1-PB4=DAT0-3,
+ * PB5=CMD (RZ/V2N datasheet Table 2.2-2, Func1 -- the ONLY SD2 routing).
  *
  * IOVS (SD_STATUS pad-voltage-mode bit) MUST be set for a 1.8 V-only
  * part like this one: the SoC SDHI2 pads reset into 3.3 V receiver
@@ -386,9 +391,12 @@
  * board this was found on. `regulator-always-on` is the proven-safe
  * fix: it makes regulator_late_cleanup's own early-return trigger
  * (`if (c->always_on) return 0;`) fire BEFORE the crashing read. Do
- * NOT drop regulator-always-on from sdhi2_vqmmc below -- see the
- * bench facts file for the exact oops signature if this needs
- * revisiting.
+ * NOT drop regulator-always-on from sdhi2_vqmmc below. A second,
+ * independent guard against the same class of read-while-suspended
+ * crash (a manual sysfs/debugfs regulator read, which always_on does
+ * NOT cover) lives in
+ * meta-alp-sdk/recipes-kernel/linux/linux-renesas/
+ * 0007-mmc-renesas_sdhi-pm_runtime-guard-the-vqmmc-regulato.patch.
  *
  * mmc-pwrseq drives WL_REG_ON (GD32 bridge line 19) through the
  * required low-then-high sequence (wlan_pwrseq, above). The `wifi@1`
@@ -423,6 +431,7 @@
 		regulator-min-microvolt = <1800000>;
 		regulator-max-microvolt = <1800000>;
 		regulator-always-on;
+		status = "okay";
 	};
 
 	wifi@1 {
@@ -437,8 +446,19 @@
  * binding: hci_uart's Broadcom vendor extension drives it through the
  * same low-then-high sequence as WL_REG_ON before the .hcd firmware
  * patch load and baud-rate ramp (default baud 115200, bench-confirmed
- * 2026-06 -- see the ground-truth memory note). uart-has-rtscts
- * matches the 4-wire P40-43 wiring (TXD/RXD/CTS/RTS).
+ * 2026-06). uart-has-rtscts matches the 4-wire P40-43 wiring
+ * (TXD/RXD/CTS/RTS).
+ *
+ * compatible is deliberately "brcm,bcm43438-bt", not the CYW555xx-family
+ * "infineon,cyw55572-bt" hci_bcm.c also carries: that entry's ONLY
+ * effect (cyw55572_device_data.max_autobaud_speed) is gated behind
+ * bcm_of_probe()'s "brcm,requires-autobaud-mode" DT property, which
+ * this node does not set (fixed-baud 115200, bench-proven, not
+ * autobaud) -- so switching would change nothing there while silently
+ * dropping bcm43438_device_data's drive_rts_on_open (RTS driven on
+ * ->open(), used by hci_bcm.c's `else if` branch precisely when
+ * autobaud is off), which our 4-wire RTS/CTS wiring above can exercise.
+ * Revisit only alongside actually enabling autobaud mode.
  *
  * PFC funcs per the e2 studio PinMux tool (authoritative over the
  * EVK reference dts, which does not populate RSCI4 at all): P40=f2

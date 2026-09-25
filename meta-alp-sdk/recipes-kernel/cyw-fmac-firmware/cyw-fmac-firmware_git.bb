@@ -18,6 +18,15 @@
 #   4) CYW55500A1_...FCC...2FY.2GY.hcd   BT patch, FCC region (cyw-bt-patch)
 #   5) CYW55500A1_...CE.JP...2FY.2GY.hcd BT patch, CE/JP region (cyw-bt-patch)
 #
+# BT firmware naming: the in-tree btbcm.c subver table (6.1) has no
+# CYW55500 entry, so hci_bcm's autobaud load never resolves a hw_name --
+# it requests "brcm/BCM.<board>.hcd" then falls back to plain
+# "brcm/BCM.hcd" (see btbcm_initialize()); hci_bcm.c itself has no
+# firmware-name/DT override to point that lookup at either
+# module-suffixed CYW55500A1_*.hcd file. CYW_BT_REGION picks which
+# regional patch gets installed a second time, under the plain name
+# btbcm actually asks for.
+#
 # The WLAN radio firmware (.trxse) is NOT bundled in any murata-wireless
 # repo; it comes from Infineon ifx-linux-firmware, pinned in LOCKSTEP
 # with the cyw-fmac backports base (release-v6.1.97-2024_1115, the
@@ -34,12 +43,22 @@ module on the Alp Lab E1M V2N / V2M SoM. Paired with the cyw-fmac driver."
 HOMEPAGE    = "https://github.com/murata-wireless"
 SECTION     = "kernel"
 
-# Cypress firmware licence (identical across all four upstream repos).
-# The on-disk filename differs per repo (LICENCE vs LICENCE.cypress);
-# the checksum is the same. No generic mapping exists for it.
+# Cypress firmware licence (byte-identical across all four upstream
+# repos at their pinned SRCREVs -- verified 2026-09-25). The on-disk
+# filename differs per repo (LICENCE vs LICENCE.cypress) but the
+# checksum is the same. No generic mapping exists for it. Each of the
+# four unpacked trees is checksummed separately, not just the one
+# do_install() actually reads glue from, so a licence change in any
+# single upstream repo is caught even if its blob install path never
+# changes.
 LICENSE                          = "Firmware-cypress"
 NO_GENERIC_LICENSE[Firmware-cypress] = "LICENCE"
-LIC_FILES_CHKSUM = "file://${CYW_FW_S}/LICENCE;md5=cbc5f665d04f741f1e006d2096236ba7"
+LIC_FILES_CHKSUM = " \
+    file://${CYW_FW_S}/LICENCE;md5=cbc5f665d04f741f1e006d2096236ba7 \
+    file://${CYW_NVRAM_S}/LICENCE.cypress;md5=cbc5f665d04f741f1e006d2096236ba7 \
+    file://${CYW_BT_S}/LICENCE.cypress;md5=cbc5f665d04f741f1e006d2096236ba7 \
+    file://${IFX_FW_S}/LICENCE;md5=cbc5f665d04f741f1e006d2096236ba7 \
+"
 
 # Four upstream repos, each unpacked into its own destsuffix so the
 # do_install picks the right blob from the right tree.
@@ -81,6 +100,12 @@ NVRAM_SRC = "cyfmac55500-sdio.2FY.txt"
 HCD_FCC   = "CYW55500A1_001.002.032.0040.0033.FCC.2FY.2GY.hcd"
 HCD_CEJP  = "CYW55500A1_001.002.032.0040.0032.CE.JP.2FY.2GY.hcd"
 
+# Regulatory region for the plain "brcm/BCM.hcd" btbcm actually requests
+# (see the header comment above). Override per-MACHINE/distro if a board
+# ships outside FCC territory: HCD_FCC for FCC, HCD_CEJP for CE/JP.
+CYW_BT_REGION ?= "FCC"
+CYW_HCD_DEFAULT = "${@ d.getVar('HCD_FCC') if d.getVar('CYW_BT_REGION') == 'FCC' else d.getVar('HCD_CEJP')}"
+
 do_install() {
     # WLAN: radio firmware + regulatory CLM + NVRAM -> /lib/firmware/cypress/
     # (brcmfmac loads the generic chip+bus names; rename CLM/NVRAM on install.)
@@ -92,13 +117,19 @@ do_install() {
     install -m 0644 ${CYW_NVRAM_S}/${NVRAM_SRC} \
         ${D}${nonarch_base_libdir}/firmware/cypress/cyfmac55500-sdio.txt
 
-    # Bluetooth: both regulatory .hcd variants -> /lib/firmware/brcm/
-    # (DT firmware-name or the userspace BT load flow picks the region).
+    # Bluetooth: both regulatory .hcd variants -> /lib/firmware/brcm/,
+    # kept under their full module-suffixed names for provenance/manual
+    # region switching. Neither name is what hci_bcm/btbcm actually asks
+    # for at runtime (see the header comment) -- also install the
+    # CYW_BT_REGION-selected variant under the plain "BCM.hcd" name so
+    # the in-tree autobaud load path finds it.
     install -d ${D}${nonarch_base_libdir}/firmware/brcm
     install -m 0644 ${CYW_BT_S}/${HCD_FCC} \
         ${D}${nonarch_base_libdir}/firmware/brcm/${HCD_FCC}
     install -m 0644 ${CYW_BT_S}/${HCD_CEJP} \
         ${D}${nonarch_base_libdir}/firmware/brcm/${HCD_CEJP}
+    install -m 0644 ${CYW_BT_S}/${CYW_HCD_DEFAULT} \
+        ${D}${nonarch_base_libdir}/firmware/brcm/BCM.hcd
 }
 
 FILES:${PN} = "${nonarch_base_libdir}/firmware"

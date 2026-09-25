@@ -340,6 +340,24 @@ pad output register is done with interrupts disabled around the
 masked update so a concurrent `GPIO_WRITE` on the other transport
 cannot interleave a partial state.
 
+At protocol minor `>= 11` (firmware `0.2.12`), the pad map grows from
+18 to 20 lines, adding the on-module Murata LBEE5HY2FY-922 (Infineon
+CYW55513) Wi-Fi+BT module's two REG_ON enables:
+
+| Bit | Name       | GD32 pad | Boot state   | Host macro |
+|-----|------------|----------|--------------|------------|
+| 18  | `bt-reg-on` | `PE14`  | OUTPUT LOW   | `GD32G553_GPIO_LINE_BT_REG_ON` |
+| 19  | `wl-reg-on` | `PE15`  | OUTPUT LOW   | `GD32G553_GPIO_LINE_WL_REG_ON` |
+
+A bridge below minor 11 never learned these two bits; a host driving
+`GPIO_WRITE` against them on such a bridge silently powers nothing
+while the firmware reports success. The Linux `gpio-gd32-bridge`
+kernel driver resolves this at first *consumer* request rather than
+once at `probe()` (a single best-effort `GET_VERSION` at boot
+consistently races the bridge's own startup) -- see
+`GD32G553_REG_ON_MIN_PROTOCOL_MINOR` in
+[`include/alp/chips/gd32g553.h`](../include/alp/chips/gd32g553.h).
+
 ### 3.2 PWM channels
 
 PWM channel ids are an **opaque enum** assigned by the GD32 firmware.
@@ -1056,7 +1074,22 @@ the ADC-stream DSP pipeline's already-existing `chain_open` /
 actually filters or spectralizes the stream instead of the chain
 sitting unbound — and adds the new opcode `CMD_ADC_SPECTRUM_READ`
 (`0x3A`, §3.x) to pull the FFT terminal's spectrum; a v0.8 host that
-never binds a chain sees no behaviour change.
+never binds a chain sees no behaviour change.  **v0.11** (firmware
+`0.2.12`, `gd32-bridge-firmware` commit `d555cfa`) grows the GPIO
+expander pad map from 18 to 20 lines, adding `bt-reg-on` (bit 18,
+`PE14`) and `wl-reg-on` (bit 19, `PE15`) for the on-module Murata
+LBEE5HY2FY-922 (Infineon CYW55513) Wi-Fi+BT module's REG_ON enables —
+both boot OUTPUT LOW; the host drives REG_ON low for >= 10 ms then
+high (§3.1). No opcode changed shape; a host below
+`GD32G553_REG_ON_MIN_PROTOCOL_MINOR` (11) simply never learns bits
+18/19 exist. `GET_VERSION`'s SPI reply for `0.11.0` is `A5 00 00 0B 00 C5 C4`
+(`SOF STATUS major minor patch CRClo CRChi`, CRC-16/CCITT-FALSE over
+`SOF..PAYLOAD` per §9) — this corrects a garbled `A50000B00C5C4`
+review-note copy (wrong length, digits transposed); recompute from the
+algorithm rather than hand-copying, and cross-check any other
+hand-copied `GET_VERSION` vector before relying on it (see
+`extending-the-gd32-bridge-protocol`'s note on inlined wire hex going
+stale across a `PROTOCOL_VERSION` bump).
 
 ## 9. Reference vectors
 

@@ -71,6 +71,7 @@ SRC_URI:append = " \
     file://0004-drm-panel-add-himax-hx8394-with-rocktech-rk055hdmipi.patch \
     file://0005-gpio-add-gd32-bridge-expander-driver.patch \
     file://0006-input-goodix-fall-back-to-polling-without-an-irq.patch \
+    file://0007-mmc-renesas_sdhi-pm_runtime-guard-the-vqmmc-regulato.patch \
 "
 
 # AMP clock ownership: RSCI7 belongs to the Cortex-M33 system manager
@@ -108,6 +109,16 @@ SRC_URI:append = " \
 # documents it in generic-ohci.yaml.  Both &ehci0 and &ohci0 carry
 # spurious-oc in e1m-x-evk.dtsi.  Cold-boot-verified 2026-06-12 on
 # E1M-V2M101: zero over-current lines.
+
+# 0007 (SDHI vqmmc regulator read while runtime-suspended): the vqmmc
+# regulator this recipe's &sdhi2 WLAN node registers (see e1m-v2n-som.dtsi's
+# sdhi2_vqmmc) reads CTL_SD_STATUS directly in is_enabled()/get_voltage(),
+# with no pm_runtime claim on the SDHI host.  regulator-always-on only
+# short-circuits regulator_late_cleanup()'s OWN call to is_enabled() (its
+# `if (c->always_on) return 0;` early-return); a later sysfs/debugfs
+# regulator read still hits the raw register access and can take a
+# synchronous external abort while the controller is clock-gated.  0007
+# wraps both ops in pm_runtime_resume_and_get()/pm_runtime_put().
 
 # DRP-AI3 NPU overlay -- CONDITIONAL on the OPTIONAL meta-rz-drpai layer.
 #

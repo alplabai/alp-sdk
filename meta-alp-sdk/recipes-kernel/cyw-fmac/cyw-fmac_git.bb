@@ -111,8 +111,8 @@ EXTRA_OEMAKE = " \
 # '(' unexpected"). do_compile's own module build never touches kconf/
 # again, so this override has nothing to leak into there.
 do_configure() {
-    chmod -R +x ${S}/scripts/ || true
-    chmod +x ${S}/kconf/lxdialog/check-lxdialog.sh || true
+    chmod -R +x ${S}/scripts/
+    chmod +x ${S}/kconf/lxdialog/check-lxdialog.sh
     oe_runmake \
         ARCH=${ARCH} \
         CROSS_COMPILE=${TARGET_PREFIX} \
