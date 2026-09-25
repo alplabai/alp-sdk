@@ -29,4 +29,11 @@ rsource "../drivers/video/Kconfig.ov5647"
 # zephyr/drivers/video/ov9281.c for the source commit and retirement note.
 rsource "../drivers/video/Kconfig.ov9281"
 
+# ADR-0017-ADJACENT (authored from the Sony IMX296 datasheet -- no
+# permissive-licence IMX296 driver exists to consume), PARTIALLY
+# BENCH-VERIFIED (I2C identity only -- issue #2287, bench run 229). See
+# zephyr/drivers/video/imx296.c for the datasheet-section citations and
+# retirement note.
+rsource "../drivers/video/Kconfig.imx296"
+
 endif # VIDEO
