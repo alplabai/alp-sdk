@@ -146,6 +146,15 @@ into the topic-specific docs.
   (`metadata/model_perf/<SKU>/<hash>.yaml`); the contract ships in
   #1520, `metadata/model_perf/` stays empty until a real capture runs.
 
+## Models / edge-AI
+
+- [measuring-inference-energy.md](measuring-inference-energy.md) — the
+  measured millijoules per inference on E1M-AEN801 silicon: the
+  method (rail scan, conversion-ready sampling, idle-subtracted
+  window integration), the whole-board PSU cross-check, a measured
+  error budget, and the explicit list of what the figure is NOT
+  (not NPU energy, not silicon energy, not vendor-comparable).
+
 ## Security & release
 
 - [secure-boot.md](secure-boot.md) — MCUboot + OPTIGA flow; the

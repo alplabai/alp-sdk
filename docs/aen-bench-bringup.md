@@ -279,6 +279,21 @@ J-Link, then ASCII-decode. Have each test print one `RESULT PASS: ...` /
 `RESULT FAIL: ...` line. SEGGER **RTT** is the live-terminal alternative over the
 same SWD link.
 
+> **A single `mem8` may not exceed `0x10000`.** Beyond that JLinkExe answers
+> `NumBytes should be <= 0x10000` and reads NOTHING, while the CommanderScript
+> keeps going — so an app with a large `CONFIG_RAM_CONSOLE_BUFFER_SIZE` reads
+> back empty on the first try and looks like it crashed. `ram-run.sh` and
+> `reread.sh` do **not** currently split a read across the `0x10000` boundary
+> (checked against this repo's scripts, not assumed) — an app like
+> `examples/aen/aen-inference-energy`, whose 80 KB `CONFIG_RAM_CONSOLE_BUFFER_SIZE`
+> exceeds it, needs a manual multi-`mem8` session, or the helpers extended to
+> chunk, until that lands.
+>
+> **Also note a J-Link `qc` leaves the core HALTED.** Every read here ends in
+> `qc`, so reading a still-running app freezes it part-way and truncates its
+> console. For an app that runs for seconds, let it finish — or reset it
+> (`RSetType 2; r; g`) and wait out the full run — before reading.
+
 ### Flow C — J-Link RAM-run (no MRAM write)
 
 The SoC `select`s XIP, so retarget the ROM region to ITCM — **as a bench-only
