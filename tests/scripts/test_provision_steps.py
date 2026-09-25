@@ -558,6 +558,31 @@ def test_build_dir_unit_defaults_to_bench_only(tmp_path):
     assert "disposition: bench-only" in text and "--build-dir" in res[-1].detail
 
 
+def test_record_keeps_clkgen_and_dxm1_keys_when_the_catalogue_lists_them(tmp_path):
+    """Record only merges a fact whose key is in the catalogue; the clkgen
+    raw-image/i2c-addr and dxm1 md5/version keys must be present there (the
+    private v2n.keys.yaml catalogue -- see docs/provisioning-v2n.md)."""
+    ctx = _ctx(tmp_path, execute=True)
+    new_keys = {
+        "clkgen_otp_raw": {"group": "clocks_rtc", "source": "", "mode": "auto", "ship_required": False},
+        "clkgen_i2c_addr": {"group": "clocks_rtc", "source": "", "mode": "auto", "ship_required": False},
+        "dxm1_fw_uart_boot_md5": {"group": "firmware", "source": "", "mode": "auto", "ship_required": False},
+        "dxm1_fw_md5": {"group": "firmware", "source": "", "mode": "auto", "ship_required": False},
+        "dxm1_fw_version": {"group": "firmware", "source": "", "mode": "auto", "ship_required": False},
+        "dxm1_uart_boot_tool_md5": {"group": "firmware", "source": "", "mode": "auto", "ship_required": False},
+    }
+    cat = dict(CATALOGUE["keys"], **new_keys)
+    (ctx.ledger_root / "schema" / "v2n.keys.yaml").write_text(
+        yaml.safe_dump({"schema": 1, "family": "v2n", "keys": cat}), encoding="utf-8")
+    ctx.facts.update(clkgen_otp_raw="aa bb cc", clkgen_i2c_addr="0x69",
+                     dxm1_fw_uart_boot_md5=lt.DXM1_FW_UART_BOOT_MD5, dxm1_fw_md5=lt.DXM1_FW_MD5,
+                     dxm1_fw_version=lt.DXM1_FW_VERSION, dxm1_uart_boot_tool_md5=lt.DXM1_UART_BOOT_TOOL_MD5)
+    steps.run_steps(ctx, only=["record"])
+    text = (ctx.unit_dir / f"{SERIAL}.unit.yaml").read_text(encoding="utf-8")
+    for key in new_keys:
+        assert f"{key}:" in text, text
+
+
 def test_override_reaches_the_ledger_fact(tmp_path):
     ctx = _ctx(tmp_path)
     steps._record_override(ctx, "tier_triangle", "bench fix")
@@ -593,9 +618,8 @@ def test_clkgen_verify_pass(tmp_path):
     res = steps.run_steps(ctx, only=["clkgen_verify"])
     r = res[-1]
     assert r.name == "clkgen_verify" and r.status == "done", r.detail
-    assert r.evidence["clkgen_dash_code"] == "0x00"
-    assert r.evidence["clkgen_fixup_applied"] == "true"
-    assert r.evidence["clkgen_otp_sha256"] == hashlib.sha256(lt.CLKGEN_OTP_IMAGE).hexdigest()
+    assert r.evidence["clkgen_i2c_addr"] == "0x69"
+    assert r.evidence["clkgen_otp_raw"] == " ".join(f"{b:02x}" for b in image)
 
 
 def test_clkgen_verify_fails_on_mismatch_and_missing_boot_line(tmp_path):
@@ -608,6 +632,7 @@ def test_clkgen_verify_fails_on_mismatch_and_missing_boot_line(tmp_path):
     r = res[-1]
     assert r.status == "failed"
     assert "reg 0x21" in r.detail and "5L35023B clock" in r.detail
+    assert "#2293" in r.detail and "patch 0007" in r.detail
 
 
 # --- dxm1_npu_flash (BENCH-PENDING) ------------------------------------------------------
@@ -648,3 +673,114 @@ def test_dxm1_npu_flash_refuses_wrong_firmware_md5(tmp_path):
     ctx = _ctx(tmp_path, bench=bench, dxm1_flash=True, execute=True)
     with pytest.raises(steps.Refused, match="md5"):
         steps.Dxm1NpuFlash().run(ctx)
+
+
+@pytest.mark.parametrize("line_key,value,match", [
+    ("uart_mux_line", "5", "must be an int"),
+    ("uart_mux_line", 52, "P64"),
+    ("reset_line", 53, "P65"),
+])
+def test_dxm1_npu_flash_refuses_bad_gpio_lines(tmp_path, line_key, value, match):
+    bench = _bench()
+    bench.raw["dxm1"] = {"gpio_chip": "chip0", "uart_mux_line": 61, "reset_line": 86,
+                         "uart_device": "/dev/ttySC1", "uart_boot": "uart_boot",
+                         "fw_uart_boot": "fw_uart_boot.bin", "fw": "fw.bin"}
+    bench.raw["dxm1"][line_key] = value
+    ctx = _ctx(tmp_path, bench=bench, dxm1_flash=True, execute=True)
+    with pytest.raises(steps.Refused, match=match):
+        steps.Dxm1NpuFlash().run(ctx)
+
+
+def test_dxm1_npu_flash_refuses_equal_mux_and_reset_lines(tmp_path):
+    bench = _bench()
+    bench.raw["dxm1"] = {"gpio_chip": "chip0", "uart_mux_line": 61, "reset_line": 61,
+                         "uart_device": "/dev/ttySC1", "uart_boot": "uart_boot",
+                         "fw_uart_boot": "fw_uart_boot.bin", "fw": "fw.bin"}
+    ctx = _ctx(tmp_path, bench=bench, dxm1_flash=True, execute=True)
+    with pytest.raises(steps.Refused, match="uart_mux_line == dxm1.reset_line"):
+        steps.Dxm1NpuFlash().run(ctx)
+
+
+def test_dxm1_npu_flash_refuses_wrong_uart_boot_tool_md5(tmp_path):
+    fw_dir = tmp_path / "dxm1fw"
+    fw_dir.mkdir()
+    (fw_dir / "fw_uart_boot.bin").write_bytes(bytes.fromhex("00" * 4))
+    (fw_dir / "fw.bin").write_bytes(bytes.fromhex("00" * 4))
+    (fw_dir / "uart_boot").write_bytes(b"not the vendor tool")
+    # patch the pinned firmware md5s to match our placeholder files so only
+    # the uart_boot tool's md5 mismatch is exercised
+    want_boot = hashlib.md5((fw_dir / "fw_uart_boot.bin").read_bytes()).hexdigest()
+    want_fw = hashlib.md5((fw_dir / "fw.bin").read_bytes()).hexdigest()
+    orig_boot, orig_fw = lt.DXM1_FW_UART_BOOT_MD5, lt.DXM1_FW_MD5
+    lt.DXM1_FW_UART_BOOT_MD5, lt.DXM1_FW_MD5 = want_boot, want_fw
+    try:
+        bench = _bench()
+        bench.raw["dxm1"] = {"gpio_chip": "chip0", "uart_mux_line": 61, "reset_line": 86,
+                             "uart_device": "/dev/ttySC1", "uart_boot": str(fw_dir / "uart_boot"),
+                             "fw_uart_boot": str(fw_dir / "fw_uart_boot.bin"),
+                             "fw": str(fw_dir / "fw.bin")}
+        ctx = _ctx(tmp_path, bench=bench, dxm1_flash=True, execute=True)
+        with pytest.raises(steps.Refused, match="uart_boot.*md5"):
+            steps.Dxm1NpuFlash().run(ctx)
+    finally:
+        lt.DXM1_FW_UART_BOOT_MD5, lt.DXM1_FW_MD5 = orig_boot, orig_fw
+
+
+def test_dxm1_npu_flash_execute_fails_when_pcie_endpoint_absent(tmp_path):
+    """The real-firmware execute path: only the PCIe verify should fail."""
+    fw_dir = tmp_path / "dxm1fw"
+    fw_dir.mkdir()
+    boot_bin = fw_dir / "fw_uart_boot.bin"
+    fw_bin = fw_dir / "fw.bin"
+    tool_bin = fw_dir / "uart_boot"
+    boot_bin.write_bytes(b"boot")
+    fw_bin.write_bytes(b"fw")
+    tool_bin.write_bytes(b"tool")
+    orig = (lt.DXM1_FW_UART_BOOT_MD5, lt.DXM1_FW_MD5, lt.DXM1_UART_BOOT_TOOL_MD5)
+    lt.DXM1_FW_UART_BOOT_MD5 = hashlib.md5(boot_bin.read_bytes()).hexdigest()
+    lt.DXM1_FW_MD5 = hashlib.md5(fw_bin.read_bytes()).hexdigest()
+    lt.DXM1_UART_BOOT_TOOL_MD5 = hashlib.md5(tool_bin.read_bytes()).hexdigest()
+    try:
+        board = Board()
+        board.host = "10.0.0.2"
+        console = _login_console()
+        bench = _bench(console=console)
+        # gpioset --version, background hold + echo $!, reset pulse, two
+        # uart_boot calls, then the kill -- all scripted permissively so
+        # only the PCIe-empty cold boot causes the failure.
+        console_hooks = {"n": 0}
+
+        def on_power():
+            console.feed("NOTICE:  BL2: v2.10\nDRAM:  3.9 GiB\n\ne1m login: ")
+        bench.power.on_hook = on_power
+        board._answer_orig = board._answer
+
+        def answer(cmd):
+            if cmd == "gpioset --version":
+                return 0, "gpioset (libgpiod) v2.1\n"
+            if re.search(r"gpioset -c chip0 -z 61=1", cmd):
+                return 0, "4242\n"
+            if cmd.startswith("gpioset chip0 86="):
+                return 0, ""
+            if re.search(r"uart_boot -d /dev/ttySC1 -f", cmd):
+                return 0, "bootloader ok\n"
+            if re.search(r"uart_boot -d /dev/ttySC1 -F", cmd):
+                return 0, "app ok\n"
+            if cmd == "kill 4242":
+                return 0, ""
+            if cmd == "ls /sys/bus/pci/devices":
+                return 0, "0000:00:00.0\n"       # root port only: no DEEPX endpoint
+            if cmd.startswith("chmod +x"):
+                return 0, ""
+            return board._answer_orig(cmd)
+        board._answer = answer
+        bench.raw["dxm1"] = {"gpio_chip": "chip0", "uart_mux_line": 61, "reset_line": 86,
+                             "uart_device": "/dev/ttySC1", "uart_boot": str(tool_bin),
+                             "fw_uart_boot": str(boot_bin), "fw": str(fw_bin)}
+        ctx = _ctx(tmp_path, bench=bench, linux=board, dxm1_flash=True, execute=True)
+        r = steps.Dxm1NpuFlash().run(ctx)
+        raise AssertionError("expected Refused, got a result: " + repr(r))
+    except steps.Refused as e:
+        assert "DEEPX endpoint" in str(e)
+    finally:
+        lt.DXM1_FW_UART_BOOT_MD5, lt.DXM1_FW_MD5, lt.DXM1_UART_BOOT_TOOL_MD5 = orig

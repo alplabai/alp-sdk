@@ -867,11 +867,16 @@ class Gd32Flash(Step):
         return self.result(ctx, "GD32 flashed and verified" if ctx.execute else "would flash the GD32", ev)
 
 
+DXM1_REFUSED_GPIO_LINES = {52: "P64", 53: "P65"}   # the DEEPX 0.75 V rail; never a UART-mux/reset line
+
+
 class Dxm1NpuFlash(Step):
-    """BENCH-PENDING: the E1M-X V2N EVK's DX-M1 boot-mode straps currently
-    pull QSPI NOR (mode 7), not the on-module SPI-NAND (mode 0) this step
-    programs -- a pending hardware rework. Skipped unless the caller passes
-    --enable-dxm1-flash, and only for a v2n-m1 (DEEPX) family bundle."""
+    """BENCH-PENDING: DX-M1 SPI-NAND-over-UART recovery has never run on
+    silicon and cannot succeed on the first V2M bench unit yet (its DX-M1
+    does not start its reference clock). Skipped unless the caller passes
+    --enable-dxm1-flash, and only for a v2n-m1 (DEEPX) family bundle. The
+    DX-M1 must be strapped for SPI-NAND/UART boot per the internal hardware
+    notes before this step can run for real."""
     name = "dxm1_npu_flash"
     always_run = True
 
@@ -880,8 +885,9 @@ class Dxm1NpuFlash(Step):
             return self.result(ctx, "not a V2M/DEEPX SKU: no DX-M1 to flash", status="skipped")
         if not ctx.dxm1_flash:
             return self.result(
-                ctx, "BENCH-PENDING: the EVK's DX-M1 boot straps pull QSPI NOR, not SPI-NAND "
-                "(hardware rework not yet done); pass --enable-dxm1-flash once validated",
+                ctx, "BENCH-PENDING: DX-M1 SPI-NAND-over-UART recovery has never run on silicon "
+                "and cannot succeed on the first V2M bench unit yet (its DX-M1 does not start its "
+                "reference clock); pass --enable-dxm1-flash once bench-verified",
                 status="skipped")
         b = ctx.need_bench()
         d = b.raw.get("dxm1") or {}
@@ -889,9 +895,22 @@ class Dxm1NpuFlash(Step):
                     "uart_boot", "fw_uart_boot", "fw"):
             if d.get(key) is None:
                 raise Refused(f"bench.yaml dxm1.{key} is TBD (null)")
+        for key in ("uart_mux_line", "reset_line"):
+            line = d[key]
+            if not isinstance(line, int) or isinstance(line, bool):
+                raise Refused(f"bench.yaml dxm1.{key} must be an int gpiochip line number, got {line!r}")
+            if line in DXM1_REFUSED_GPIO_LINES:
+                raise Refused(f"bench.yaml dxm1.{key} = {line} is {DXM1_REFUSED_GPIO_LINES[line]} "
+                              "(the DEEPX 0.75 V rail): gpiolib reconfigures a pin on read and would "
+                              "kill the rail; refusing")
+        if d["uart_mux_line"] == d["reset_line"]:
+            raise Refused(f"bench.yaml dxm1.uart_mux_line == dxm1.reset_line ({d['uart_mux_line']}); "
+                          "these must be distinct gpiochip lines")
         fw_boot_local, fw_local = Path(d["fw_uart_boot"]), Path(d["fw"])
+        uart_boot_local = Path(d["uart_boot"])
         for path, want, label in ((fw_boot_local, lt.DXM1_FW_UART_BOOT_MD5, "fw_uart_boot"),
-                                  (fw_local, lt.DXM1_FW_MD5, "fw")):
+                                  (fw_local, lt.DXM1_FW_MD5, "fw"),
+                                  (uart_boot_local, lt.DXM1_UART_BOOT_TOOL_MD5, "uart_boot")):
             got = _md5(path.read_bytes())
             if got != want:
                 raise Refused(f"{label} {path.name}: md5 {got} != pinned {want} "
@@ -906,16 +925,17 @@ class Dxm1NpuFlash(Step):
             t.run(f"chmod +x {remote_tool}")
             return lt.dxm1_uart_boot(t, d["gpio_chip"], d["uart_mux_line"], d["reset_line"],
                                      d["uart_device"], remote_tool, remote_boot, remote_fw)
-        ctx.mutate(f"drive P75 high, pulse PA6, run vendor uart_boot (bootloader then "
-                   f"firmware {lt.DXM1_FW_VERSION}), drive P75 low", flash)
+        ctx.mutate(f"hold P75 high, pulse PA6, run vendor uart_boot (bootloader then "
+                   f"firmware {lt.DXM1_FW_VERSION}), release P75", flash)
 
         def verify():
             boot_to_linux(ctx)
-            if not lt.dxm1_pcie_present(ctx.linux):
-                raise Refused("cold boot: /sys/bus/pci/devices is empty; no DEEPX PCIe link")
-        ctx.mutate("cold boot; verify /sys/bus/pci/devices is non-empty (DEEPX link up)", verify)
+            if not lt.dxm1_pcie_present(ctx.linux, d.get("pcie_vendor_id")):
+                raise Refused("cold boot: /sys/bus/pci/devices shows no DEEPX endpoint "
+                              "(root port only, or none at all); no DEEPX PCIe link")
+        ctx.mutate("cold boot; verify a DEEPX PCIe endpoint enumerates (not just the root port)", verify)
         ev = {"dxm1_fw_uart_boot_md5": lt.DXM1_FW_UART_BOOT_MD5, "dxm1_fw_md5": lt.DXM1_FW_MD5,
-              "dxm1_fw_version": lt.DXM1_FW_VERSION}
+              "dxm1_fw_version": lt.DXM1_FW_VERSION, "dxm1_uart_boot_tool_md5": lt.DXM1_UART_BOOT_TOOL_MD5}
         return self.result(ctx, "DX-M1 SPI-NAND programmed over UART recovery and verified "
                            "(PCIe link up)" if ctx.execute
                            else "would program the DX-M1 over UART recovery", ev)
@@ -1055,7 +1075,7 @@ class ColdBootTest(Step):
 
 class ClkgenVerify(Step):
     """The on-SoM 5L35023B (BRD_I2C, 0x69) OTP image against U-Boot's
-    fixup (fix/v2n-u25-lpo-clock). Read after the provisioned unit has
+    fixup (U-Boot patch 0007, #2293). Read after the provisioned unit has
     booted: the fixup runs every boot, so a unit shipped without it (or with
     a wrong OTP image) is caught here rather than downstream."""
     name = "clkgen_verify"
@@ -1071,14 +1091,13 @@ class ClkgenVerify(Step):
         bad = lt.clkgen_diff(image)
         line = uboot.parse_clkgen_line(ctx.boot_text)
         if line is None:
-            bad.append(f"no {uboot.CLKGEN_LINE_PREFIX!r} line in the last boot console capture")
+            bad.append(f"U-Boot lacks the 5L35023B clkgen fixup (patch 0007, #2293): no "
+                       f"{uboot.CLKGEN_LINE_PREFIX!r} line in the last boot console capture")
         ctx.step_logs[self.name] = "\n".join(bad) if bad else f"OTP image ok; boot line: {line!r}"
         if bad:
             raise Refused("5L35023B verification failed: " + "; ".join(bad))
-        ev = {"clkgen_otp_sha256": lt.clkgen_otp_sha256(image),
-              "clkgen_dash_code": f"{image[0x01]:#04x}",
-              "clkgen_i2c_addr": f"{lt.CLKGEN_5L35023B_ADDR:#04x}",
-              "clkgen_fixup_applied": "true" if lt.clkgen_fixup_applied(image) else "false"}
+        ev = {"clkgen_otp_raw": " ".join(f"{b:02x}" for b in image),
+              "clkgen_i2c_addr": f"{lt.CLKGEN_5L35023B_ADDR:#04x}"}
         return self.result(ctx, f"5L35023B OTP image matches (dash code {image[0x01]:#04x}); "
                            f"boot line: {line!r}", ev, status="done")
 

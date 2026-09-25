@@ -154,40 +154,65 @@ Selector `0x06` (device configuration) is only ever read, as one combined
 
 The on-SoM Renesas 5L35023B (`BRD_I2C` / Linux `i2c-8` on the reference
 bench, 7-bit `0x69`) ships with a fixed factory OTP image that cannot be
-re-burned in-system. U-Boot's `fix/v2n-u25-lpo-clock` patch rewrites reg
-`0x21` and `0x24` every boot (a volatile fixup, not an OTP change); the step
-reads reg `0x00..0x24` **one byte at a time** (`i2cget`, never a combined
-`i2ctransfer` read -- this part bit-slips on those) and compares against the
+re-burned in-system. U-Boot patch 0007 (#2293) rewrites reg `0x21` and
+`0x24` every boot (a volatile fixup, not an OTP change); the step reads reg
+`0x00..0x24` **one byte at a time** (`i2cget`, never a combined
+`i2ctransfer` read -- this part bit-slips on those), compares against the
 OTP image with `0x21`/`0x24` expected at their post-fixup values, and
 confirms the boot console showed U-Boot's own `ALP: 5L35023B clock:` line.
-Ledger facts: `clkgen_otp_sha256` (the 37 bytes with `0x21`/`0x24`
-normalized back to their OTP values, so the hash is the same on every unit
-regardless of the fixup), `clkgen_dash_code` (reg `0x01`), `clkgen_i2c_addr`,
-`clkgen_fixup_applied`.
+**A boot log without that line means the unit's U-Boot lacks patch 0007
+(#2293)** -- the step keeps failing (a production unit without the fixup is
+a real defect, not a soft warning it can look past). Ledger facts:
+`clkgen_otp_raw` (all 37 bytes as read, hex), `clkgen_i2c_addr`.
 
 ### `dxm1_npu_flash`: the DX-M1 NPU (V2M only) -- BENCH-PENDING
 
-The DX-M1 boots from an on-module SPI-NAND; the boot-mode straps
-(`{GPIO00_02,01,00}`) must read `0`. The reference EVK currently pulls them
-to `7` (QSPI NOR) -- a pending hardware rework -- so this step is **skipped
-by default** and needs `--enable-dxm1-flash` once that lands. When enabled,
-from Linux it drives V2N `P75` high (UART mux to the DX-M1 UART0, default
-low), pulses `PA6` (DX-M1 reset: low 100 ms, high), and -- with the NAND
-empty, the ROM's XMODEM fallback ('C' prompt @115200) -- runs the vendor
-`uart_boot` (aarch64) twice: the bootloader stage
-(`-d <dev> -f fw_uart_boot.bin -b 115200`), then the application firmware
-(`-F fw.bin -U -b 115200`); `P75` is driven low again afterward. Verification
-is a cold boot followed by a non-empty `/sys/bus/pci/devices` (the DEEPX
-device enumerates). **Never runs `sf_erase`** (vendor docs disagree on its
-size) and **never touches V2N `P64`/`P65`** (the DEEPX 0.75 V rail --
-`gpiolib` reconfigures a pin on read and would kill it; see
-`e8c91c616`/`ff2467142`). The vendor `uart_boot` tool and firmware binaries
-are DEEPX files and are never committed here: their paths come from
-`bench.yaml` `dxm1.{uart_boot,fw_uart_boot,fw}` (alongside
+The DX-M1 must be strapped for SPI-NAND/UART recovery boot per the internal
+hardware notes before this step can do anything real, so it is **skipped by
+default** and needs `--enable-dxm1-flash`. **This path has never run on
+silicon and cannot succeed on the first V2M bench unit yet** (its DX-M1
+does not start its reference clock) -- do not pass `--enable-dxm1-flash` on
+that unit. When enabled, from Linux it drives V2N `P75` high (UART mux to
+the DX-M1 UART0, default low; held for the whole transfer -- a plain
+foreground `gpioset` would set the line then exit and release it), pulses
+`PA6` (DX-M1 reset: low 100 ms, high), and -- with the NAND empty, the
+ROM's XMODEM fallback ('C' prompt @115200) -- runs the vendor `uart_boot`
+(aarch64) twice against `-d <dev>`: the bootloader stage
+(`-f fw_uart_boot.bin -b 115200`), then the application firmware
+(`-F fw.bin -U -b 115200`); the `P75` hold is released afterward.
+Verification is a cold boot followed by a DEEPX PCIe **endpoint**
+enumerating under `/sys/bus/pci/devices` -- the root port alone
+(`0000:00:00.0`) never counts; an optional `dxm1.pcie_vendor_id` in
+bench.yaml narrows the match further once DEEPX publishes the DX-M1's PCI
+IDs. **Never runs `sf_erase`** (vendor docs disagree on its size) and
+**never touches V2N `P64`/`P65`** (the DEEPX 0.75 V rail -- `gpiolib`
+reconfigures a pin on read and would kill it; see #2288). The vendor
+`uart_boot` tool and firmware binaries are DEEPX files and are never
+committed here: their paths come from `bench.yaml`
+`dxm1.{uart_boot,fw_uart_boot,fw}` (alongside
 `dxm1.{gpio_chip,uart_mux_line,reset_line,uart_device}`), each `TBD (null)`
-until a bench has them. The step verifies both files' md5 against the pinned
-release before touching hardware and records `dxm1_fw_uart_boot_md5`,
-`dxm1_fw_md5`, `dxm1_fw_version` in the ledger.
+until a bench has them. `uart_mux_line`/`reset_line` are **within-chip
+gpiochip line numbers** (`port * 8 + pin`, e.g. `P75` = 61, `PA6` = 86 --
+not the legacy sysfs `/sys/class/gpio/gpio<N>` numbering, which adds a
+per-SoC base offset), must be distinct ints, and the tool refuses `52`/`53`
+(`P64`/`P65`, the DEEPX rail) outright. The step verifies both firmware
+files' md5 and the vendor `uart_boot` binary's own md5 against pinned
+values before touching hardware, and records `dxm1_fw_uart_boot_md5`,
+`dxm1_fw_md5`, `dxm1_fw_version`, `dxm1_uart_boot_tool_md5` in the ledger.
+
+Example `bench.yaml` shape (every value `TBD (null)` until a bench has one):
+
+```yaml
+dxm1:
+  gpio_chip: null          # e.g. "gpiochip0"
+  uart_mux_line: null      # int, within-chip line number (P75 = 61)
+  reset_line: null         # int, within-chip line number (PA6 = 86); != uart_mux_line
+  uart_device: null        # e.g. "/dev/ttySC1"
+  uart_boot: null          # path to the vendor uart_boot binary
+  fw_uart_boot: null       # path to the pinned fw_uart_boot.bin
+  fw: null                 # path to the pinned fw.bin
+  pcie_vendor_id: null     # optional, e.g. "0x1f4b"; narrows the PCIe endpoint match
+```
 
 ### Lock preconditions (`run --lock`)
 
@@ -216,10 +241,11 @@ serial. After the lock frame, only a re-read with bit 1 set counts.
   `--reprovision-from`, and never while the identity header is locked.
 - **The 5L35023B cannot be re-burned in-system.** `clkgen_verify` only reads;
   a bad OTP image means a bad unit, not a fixable one.
-- **`dxm1_npu_flash` is bench-pending and defaults off.** Do not pass
-  `--enable-dxm1-flash` until the boot-strap rework lands and the mechanism
-  is bench-verified; the DX-M1 UART mux and reset lines are otherwise
-  untested on real hardware.
+- **`dxm1_npu_flash` is bench-pending and defaults off.** It has never run on
+  silicon and cannot succeed on the first V2M bench unit yet (its DX-M1 does
+  not start its reference clock). Do not pass `--enable-dxm1-flash` until the
+  mechanism is bench-verified; the DX-M1 UART mux and reset lines are
+  otherwise untested on real hardware.
 
 ## Testing
 

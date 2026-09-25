@@ -154,7 +154,7 @@ CLKGEN_LINE_PREFIX = "ALP: 5L35023B clock:"
 
 def parse_clkgen_line(text: str) -> str | None:
     """The 5L35023B fixup's own boot-time report line (success or skip),
-    printed by the U-Boot patch on fix/v2n-u25-lpo-clock. None if absent."""
+    printed by U-Boot patch 0007 (#2293). None if absent."""
     return next((ln for ln in alp_lines(text) if ln.startswith(CLKGEN_LINE_PREFIX)), None)
 
 

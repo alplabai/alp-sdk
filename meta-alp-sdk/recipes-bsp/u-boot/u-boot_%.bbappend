@@ -287,9 +287,12 @@ SRC_URI:append:rzv2n-family = " file://0007-rzv2n-dev-ALP-E1M-clkgen-otp-fixup.p
 #
 # Numbered 0008, not 0007: U-Boot patch 0007 (#2293, the 5L35023B OTP
 # fixup docs/provisioning-v2n.md's clkgen_verify step checks for) already
-# claims that slot on dev. This patch was regenerated (git format-patch)
-# on top of 0007 so its hunks carry the post-0007 line offsets; it does
-# not itself depend on 0007's code, only on the slot ordering.
+# claims that slot. The real dependency is a text conflict in THIS
+# bbappend's own SRC_URI patch list -- two "file://0007-....patch" entries
+# for the same recipe would collide -- not a build-order or code
+# dependency; do_patch applies both patches successfully in either merge
+# order. This patch was regenerated (git format-patch) on top of #2293's
+# 0007 so its hunks carry the correct post-0007 line offsets.
 SRC_URI:append:rzv2n-family = " file://0008-rzv2n-dev-ALP-E1M-sdhi1-microsd.patch"
 
 # Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot

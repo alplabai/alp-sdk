@@ -59,14 +59,16 @@ CLKGEN_OTP_IMAGE = bytes.fromhex(
     "a0 00 bb 04 32 08 cc 21 19 4c f2 16 5f 22 f0 3e 00 80 00 00 00 00 00 00 "
     "0e 0c 19 12 3f f0 90 46 a0 80 b0 b0 9c")
 CLKGEN_REG_COUNT = len(CLKGEN_OTP_IMAGE)  # 0x25 (37): reg 0x00..0x24 inclusive
-# U-Boot's 5L35023B fixup (fix/v2n-u25-lpo-clock) rewrites these two OTP
+# U-Boot's 5L35023B fixup (U-Boot patch 0007, #2293) rewrites these two OTP
 # registers every boot; a post-boot read must expect the fixed-up values, not
 # the factory ones.
 CLKGEN_FIXUP_REGS = {0x21: 0xC0, 0x24: 0x8E}
-# DX-M1 (V2M-only) vendor firmware, pinned by md5 -- see docs/provisioning-v2n.md.
+# DX-M1 (V2M-only) vendor firmware + the vendor uart_boot (aarch64) tool
+# binary itself, all pinned by md5 -- see docs/provisioning-v2n.md.
 DXM1_FW_UART_BOOT_MD5 = "ae449610ca72f4ebd431e4e2f7ebe0ab"
 DXM1_FW_MD5 = "88641281169f35de5ed7e33c072c93a9"
 DXM1_FW_VERSION = "2.4.0"
+DXM1_UART_BOOT_TOOL_MD5 = "5971694fb5b616bffcadcc5e6d32c1db"
 
 # preset i2c_devices bus name -> bench.yaml i2c_bus key
 PRESET_BUS_TO_BENCH = {"e1m_i2c0": "eeprom", "brd_i2c": "brd"}
@@ -412,8 +414,9 @@ def i2c_get(t: LinuxTarget, bus: int, addr: int, reg: int) -> int:
 
 
 def i2c_set(t: LinuxTarget, bus: int, addr: int, reg: int, value: int) -> None:
-    if addr in (EEPROM_ADDR, IDENTITY_ADDR):
-        raise ValueError(f"i2c_set refuses {addr:#04x}: EEPROM traffic only through the EEPROM helpers")
+    if addr in (EEPROM_ADDR, IDENTITY_ADDR, CLKGEN_5L35023B_ADDR):
+        raise ValueError(f"i2c_set refuses {addr:#04x}: EEPROM/clkgen traffic only through their "
+                         "dedicated helpers (the 5L35023B OTP image cannot be re-burned in-system)")
     if not 0 <= value <= 0xFF or not 0 <= reg <= 0xFF:
         raise ValueError(f"reg/value out of range: {reg:#x}/{value:#x}")
     t.run(f"i2cset -y {bus} {addr:#04x} {reg:#04x} {value:#04x}")
@@ -514,30 +517,66 @@ def clkgen_otp_sha256(image: bytes) -> str:
 
 # --- DX-M1 NPU (V2M-only): SPI-NAND recovery boot over UART -------------------------------
 
+PCIE_ROOT_PORT = "0000:00:00.0"
+
+
+def _gpioset_is_v2(t: LinuxTarget) -> bool:
+    """libgpiod v2's `gpioset` takes `-c <chip> -z <line>=<val>` (background hold
+    while the process runs); v1 takes a positional chip and needs
+    `--mode=signal` to hold instead of setting-then-exiting."""
+    out = t.run("gpioset --version", check=False).stdout
+    m = re.search(r"(\d+)\.\d+", out)
+    return bool(m) and int(m[1]) >= 2
+
+
 def dxm1_uart_boot(t: LinuxTarget, chip: str, uart_line: int, reset_line: int,
                    uart_device: str, tool: str, fw_uart_boot: str, fw: str) -> str:
-    """Mux V2N P75 to the DX-M1 UART0, pulse the PA6 reset (low 100 ms, high),
-    then run the vendor `uart_boot` twice against the ROM's XMODEM fallback
-    ('C' prompt on an empty NAND): once for the bootloader stage, once for
-    the application firmware. Drives P75 low again before returning (even on
-    failure). Never touches V2N P64/P65 (the DEEPX 0.75 V rail): this
-    mechanism is a UART mux line and a reset line only."""
-    t.run(f"gpioset {shlex.quote(chip)} {uart_line}=1")
+    """Mux V2N P75 to the DX-M1 UART0 (held high, backgrounded, for the whole
+    transfer -- a plain foreground `gpioset` sets the line then exits and
+    releases it), pulse the PA6 reset (low 100 ms, high), then run the
+    vendor `uart_boot` twice against the ROM's XMODEM fallback ('C' prompt on
+    an empty NAND): once for the bootloader stage, once for the application
+    firmware (`-d <uart_device>` on both -- the vendor tool needs the device
+    path for either transfer mode). Kills the P75 hold before returning
+    (even on failure). Never touches V2N P64/P65 (the DEEPX 0.75 V rail):
+    this mechanism is a UART mux line and a reset line only."""
+    hold = (f"gpioset -c {shlex.quote(chip)} -z {uart_line}=1" if _gpioset_is_v2(t) else
+            f"gpioset --mode=signal {shlex.quote(chip)} {uart_line}=1")
+    pid = t.run(f"{hold} >/dev/null 2>&1 & echo $!").stdout.strip()
+    if not pid.isdigit():
+        raise BenchError(f"could not start the P75 hold ({hold!r}): got {pid!r}")
     try:
         t.run(f"gpioset {shlex.quote(chip)} {reset_line}=0; sleep 0.1; "
               f"gpioset {shlex.quote(chip)} {reset_line}=1")
         out1 = t.run(f"{shlex.quote(tool)} -d {shlex.quote(uart_device)} "
                      f"-f {shlex.quote(fw_uart_boot)} -b 115200", timeout=120.0).stdout
-        out2 = t.run(f"{shlex.quote(tool)} -F {shlex.quote(fw)} -U -b 115200",
-                     timeout=300.0).stdout
+        out2 = t.run(f"{shlex.quote(tool)} -d {shlex.quote(uart_device)} "
+                     f"-F {shlex.quote(fw)} -U -b 115200", timeout=300.0).stdout
     finally:
-        t.run(f"gpioset {shlex.quote(chip)} {uart_line}=0", check=False)
+        t.run(f"kill {shlex.quote(pid)}", check=False)
     return out1 + out2
 
 
-def dxm1_pcie_present(t: LinuxTarget) -> bool:
-    """Non-empty /sys/bus/pci/devices after a cold boot: the DEEPX PCIe link is up."""
-    return bool(t.run("ls /sys/bus/pci/devices", check=False).stdout.split())
+def dxm1_pcie_present(t: LinuxTarget, vendor_id: str | None = None) -> bool:
+    """A DEEPX PCIe *endpoint* is enumerated, not just the SoC's own root
+    port: every boot lists the root port itself (`0000:00:00.0`); at least
+    one OTHER entry must be present. When `vendor_id` is given (bench.yaml
+    `dxm1.pcie_vendor_id`, e.g. "0x1f4b"), an endpoint must also match it via
+    `/sys/bus/pci/devices/*/vendor`. DEEPX has not published the DX-M1's PCI
+    vendor/device ID in any vendor material seen so far; until a bench.yaml
+    supplies one, any non-root-port entry counts."""
+    out = t.run("ls /sys/bus/pci/devices", check=False).stdout.split()
+    endpoints = [d for d in out if d != PCIE_ROOT_PORT]
+    if not endpoints:
+        return False
+    if vendor_id is None:
+        return True
+    want = vendor_id.lower()
+    for d in endpoints:
+        r = t.run(f"cat /sys/bus/pci/devices/{shlex.quote(d)}/vendor", check=False)
+        if r.rc == 0 and r.stdout.strip().lower() == want:
+            return True
+    return False
 
 
 # --- census ----------------------------------------------------------------------------

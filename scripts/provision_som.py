@@ -386,8 +386,9 @@ def _v2n_parser() -> argparse.ArgumentParser:
                       help="dir with bootloader.bin, ota-meta.bin, slot-a.bin")
     work.add_argument("--enable-dxm1-flash", action="store_true",
                       help="BENCH-PENDING: program the DX-M1 NPU's SPI-NAND over the UART "
-                           "recovery path (v2n-m1 only); needs bench.yaml dxm1.* and a strap "
-                           "rework not yet on the EVK -- default skip until validated")
+                           "recovery path (v2n-m1 only); needs bench.yaml dxm1.* -- has never "
+                           "run on silicon and cannot succeed on the first V2M bench unit yet "
+                           "-- default skip until bench-verified")
     work.add_argument("--mfg-date", type=date.fromisoformat,
                       help="default: Monday of the serial's ISO week (a different date is "
                            "recorded as an override)")
