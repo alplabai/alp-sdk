@@ -103,7 +103,7 @@ def _find_vela(explicit: str | None) -> str:
 
 def _vela_version(vela: str) -> str:
     proc = subprocess.run([vela, "--version"], capture_output=True,
-                          text=True, check=True)
+                          text=True, encoding="utf-8", check=True)
     return proc.stdout.strip()
 
 
@@ -112,7 +112,7 @@ def _run_vela_report(vela: str, workdir: Path) -> str:
     text. No --output-dir exists for this report -- it always lands at
     ./SUPPORTED_OPS.md relative to the process cwd, hence the scratch dir."""
     subprocess.run([vela, "--supported-ops-report"], cwd=workdir, check=True,
-                    capture_output=True, text=True)
+                    capture_output=True, text=True, encoding="utf-8")
     report = workdir / "SUPPORTED_OPS.md"
     if not report.is_file():
         raise SystemExit("gen_npu_ops: vela did not write SUPPORTED_OPS.md")

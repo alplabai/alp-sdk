@@ -29,7 +29,7 @@ _ALL_TABLES = sorted(_NPU_OPS.glob("**/*.json"))
 
 
 def _load(path: Path) -> dict:
-    return json.loads(path.read_text("utf-8"))
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _ids(path: Path) -> str:
