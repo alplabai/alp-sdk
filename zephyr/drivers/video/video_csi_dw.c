@@ -311,33 +311,12 @@ static void csi2_dw_irq(const struct device *dev)
 
 	/*
 	 * Alp Lab AB (issue #2287, E1M-AEN803 2026W36-0001): this handler used to soft-reset
-	 * CSI_IPI_SOFTRSTN here on any of the fatal events above. Deleted, on a CORRELATION, not
-	 * a confirmed mechanism: bench run 271, WITH this reset, panicked at buffer close -- the
-	 * CPI DMA wrote ~2744 bytes (measured; less than one 2912-byte frame row) past a
-	 * 3,168,256-byte buffer's end (0x02305880), corrupting the next sys_heap chunk header
-	 * (sys_heap_free() hardening caught it at release). Bench runs 272-276, WITHOUT this
-	 * reset (same HSD 503 timing), all 5 completed capture+close with no panic; a 4 KiB 0xA5
-	 * guard fill placed past the buffer end showed only 16 bytes changed, identical every
-	 * run -- consistent with ordinary heap bookkeeping, not a pixel-data overrun. That is 1
-	 * overrun in 1 run with the reset present vs. 0 overruns in 5 runs without it: suggestive,
-	 * not proof. The SUSPECTED mechanism (the Alif CPI gates its write on HSYNC only,
-	 * VSYNC_EN=0, so a soft reset that cuts a line mid-frame makes the CPI write one row LATE,
-	 * past the buffer's FCFG row count) is NOT independently confirmed -- run 271's own
-	 * logging was disabled, so which specific IPI-fatal event fired that run is unknown.
-	 * Earlier diagnostic runs at the same HSD 503 timing (logging enabled) recorded IPI
-	 * status 0x10 (bit 4, HLINE error) 37-80 times per capture and a separate frame-sync
-	 * error, but ZERO FIFO-overflow (bit 1) events -- i.e. the failure mode this reset was
-	 * originally meant to recover from was not observed firing in those runs either. The Alif
-	 * DFP reference (Driver_MIPI_CSI2.c's IPI-fatal handler) only reads status and reports
-	 * the event; it never soft-resets IPI at runtime, which is the practice this change
-	 * matches regardless of the exact mechanism. Recovery for a genuinely wedged IPI is now
-	 * stream-level -- csi2_dw_stream_stop() then csi2_dw_stream_start() re-arms (see
-	 * csi2_dw_irq_on()) -- but that this actually un-wedges a stuck IPI is NOT itself
-	 * bench-verified; it is simply the only recovery path left once the runtime reset is
-	 * gone. This hazard is not IMX296-specific in principle -- OV5647/OV9281 use the same
-	 * zero-slack frame buffers and are LIKELY exposed to the same latent overrun -- but that
-	 * has not been bench-reproduced on either sensor. Do not add frame-buffer padding as a
-	 * band-aid; if the mechanism above turns out wrong, padding would hide the real bug.
+	 * CSI_IPI_SOFTRSTN here on every IPI/CSI fatal source above, including the
+	 * INT_IPI_PIXEL_IF_HLINE_ERR events seen 37-80 times per capture (video_csi_dw.h).
+	 * Deleted: correlated with, but not a confirmed cause of, a frame-buffer overrun +
+	 * heap corruption -- see changelog.d/2287.md for the full bench evidence and the
+	 * suspected (unconfirmed) mechanism. The vendored Alif DFP reference
+	 * (Driver_MIPI_CSI2.c's IPI-fatal handler) never soft-resets IPI at runtime either.
 	 */
 }
 
