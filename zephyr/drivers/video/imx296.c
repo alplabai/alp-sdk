@@ -393,8 +393,10 @@ LOG_MODULE_REGISTER(imx296, CONFIG_VIDEO_LOG_LEVEL);
  * always-master-mode operation "lines per frame" IS the VMAX register
  * (IMX296_VMAX, unchanged by ROI mode -- see its own comment below), so
  * this crop keeps the same 60.3 frame/s as the full-frame mode as long as
- * VMAX stays >= ROIWV1 + 30 (page 53's ROI-mode floor): 1118 >= 960 + 30 =
- * 990, satisfied with margin.
+ * VMAX stays >= ROIWV1 + 30 (page 53's datasheet max-rate setting for this
+ * ROIWV1 -- treating it as a MINIMUM VMAX here is this driver's own
+ * inference, not a datasheet statement, see below): 1118 >= 960 + 30 = 990,
+ * satisfied with margin.
  *
  * Page 53's "ROIWV1 + 30" is the MAX-RATE setting for a given ROIWV1 --
  * the smallest legal VMAX, hence the fewest lines per frame and the
