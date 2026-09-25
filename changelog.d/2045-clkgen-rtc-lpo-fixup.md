@@ -57,7 +57,7 @@ a corrected "Real-time clock" section) and `docs/bring-up-v2n-m1.md` cross-
 references it from the DEEPX-rail step, noting the fixup's log line appears
 first and is unrelated to DEEPX sequencing.
 
-**Patch md5 (current):** `0007` `792b599bd99c0cd7c35e6a7aa0c97108`. Applies
+**Patch md5 (current):** `0007` `a7f3840c1019c7c64face1687e8dbbce`. Applies
 cleanly on top of `0006`, against `renesas-u-boot-cip` `bcf29d98` plus the
 meta-renesas PMIC-I2C-removal patch and `0001`-`0006`. Cross-built
 (`ARCH=arm CROSS_COMPILE=aarch64-linux-gnu- rzv2n-dev_defconfig` +
