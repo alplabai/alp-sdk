@@ -54,6 +54,18 @@
  * programs the values below verbatim into CSI_IPI_H*_TIME /
  * CSI_IPI_V*_LINES -- csi2_dw_ipi_set_timings()).
  *
+ * The IPI pixel clock itself is 400 MHz / 3 = 133.33 MHz, NOT the
+ * bandwidth-margined rate video_csi_dw.c normally requests: in Controller
+ * mode, csi2_dw_validate_data() (zephyr/drivers/video/video_csi_dw.c)
+ * requests the BARE pixel rate -- pll_fin 594000000 * 2 * 1 lane / 10 bpp =
+ * 118800000 Hz -- because here the DT timings below set the IPI drain rate,
+ * not a margin over the sensor. Confirmed on the bench (E1M-AEN803
+ * 2026W36-0001): CSI_PIXCLK_CTRL (0x4903f008) read back 0x00030001, i.e.
+ * divisor 3 off the 400 MHz source = 133.33 MHz. See the comment on that
+ * request in csi2_dw_validate_data() for why the normal 1.2x margin would
+ * pick divisor 2 (200 MHz) instead and starve the IPI relative to the
+ * sensor.
+ *
  * Derivation (must be recomputed if IMX296_HMAX/VMAX or the CSI IPI pixel
  * clock change -- see the matching comment next to those constants in
  * zephyr/drivers/video/imx296.c):

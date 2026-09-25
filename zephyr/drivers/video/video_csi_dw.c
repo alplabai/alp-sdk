@@ -486,7 +486,35 @@ static int csi2_dw_validate_data(const struct device *dev)
 	 * balanced pixel clock = pix_clk * 1.2
 	 */
 	pixrate = ((float)(phy->pll_fin << 1) * phy->num_lanes) / bpp;
-	pixclock = pixrate * (float)CSI2_BANDWIDTH_SCALER;
+
+	if (config->ipi_mode == CSI2_IPI_MODE_TIMINGS_CTRL) {
+		/*
+		 * Alp Lab AB (issue #2287): the 20% margin above exists to keep
+		 * the IPI drain rate safely ahead of the sensor in Camera mode,
+		 * where HSD is DERIVED from the programmed pixel clock
+		 * (csi2_dw_validate_data()'s CAM branch, below). In Controller
+		 * mode the causality is reversed: the shield overlay's fixed
+		 * csi-hsd was bench-swept against whatever clock the BARE
+		 * pixrate request actually lands on, so requesting a margined
+		 * (faster) clock here would silently invalidate that overlay's
+		 * derivation instead of just missing a margin. Request the bare
+		 * rate and let the DT HLINE/VTOTAL set the drain rate.
+		 *
+		 * Bench evidence (E1M-AEN803 2026W36-0001, IMX296, pll_fin
+		 * 594000000, bpp 10 -> pixrate 118800000): requesting the bare
+		 * 118.8 MHz landed CSI_PIXCLK_CTRL (0x4903f008) on 0x00030001
+		 * (div 3) = 400 MHz / 3 = 133.33 MHz -- the value the shield
+		 * overlay's csi-hsd derivation assumes. Requesting the margined
+		 * 142.56 MHz instead lands on div 2 = 200 MHz: IPI line time
+		 * becomes 1972 / 200 MHz = 9.86 us, well under the sensor's
+		 * 14.815 us line time, i.e. the IPI starves waiting on a sensor
+		 * that cannot keep up -- not the FIFO-overflow failure margin
+		 * mode guards against, but just as unusable.
+		 */
+		pixclock = pixrate;
+	} else {
+		pixclock = pixrate * (float)CSI2_BANDWIDTH_SCALER;
+	}
 	LOG_DBG("pll_fin - %d, Check pixclock = %d (CSI_PIXCLK_CTRL)", phy->pll_fin,
 		(uint32_t)pixclock);
 
