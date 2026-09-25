@@ -77,30 +77,37 @@ np.asarray(img, dtype=np.float32).transpose(2, 0, 1)[None].tofile("frame0.bin")
 
 ## Model bundle
 
-The first argument is a path to a `drpai_dir` bundle **tar** --
-notionally the output of
-
-```sh
-python3 -m alp_model build --target drpai --product V2N <model.onnx>
-```
-
-(`scripts/alp_model/adapters/drpai.py`; see
-[`docs/bring-up-drpai-v2n.md`](../../../docs/bring-up-drpai-v2n.md)
-Sec 5). The target is **YOLOX-S trained on VOC**
+The first argument is a path to a `drpai_dir` bundle **tar**: a tar of
+the DRP-AI TVM compiler's object directory (`drp_desc.bin` /
+`weight.bin` / `addr_map.txt` / `deploy.json` / `deploy.so` /
+`preprocess/` ...), paths relative to that directory so `tar -xf`
+lands them flat -- exactly what
+[`src/yocto/inference_drpai.cpp`](../../../src/yocto/inference_drpai.cpp)'s
+`open()` extracts into a private staging directory before handing it
+to the vendor runtime. The target is **YOLOX-S trained on VOC**
 (RUHMI's `how-to/sample_app_v2h/app_yolox_cam/yolox-S_VOC.onnx`, ONNX
-input `1,3,640,640` -- NCHW). **That command cannot actually compile
-this target model today, though**: the adapter's `--images`
-calibration path only preprocesses to the 224x224 ImageNet-classifier
-geometry the vendor tutorial hard-codes, rejects a 1,3,640,640 detector
-shape up front, and has no random-frame fallback
-(`scripts/alp_model/adapters/drpai.py`). **No compiled `drpai_dir`
-bundle exists in this checkout** -- only the ONNX source does; Sec 5 of
-that doc confirms no `drp_desc.bin`/`weight.bin`/`addr_map.txt`/
-`deploy.json` set exists anywhere in a fresh checkout. Deriving real
-preprocessing from the vendor's `app_yolox_cam` sample, compiling a
-bundle, and checking this example's frame generator byte-for-byte
-against that bundle's own sample `input_0.bin` are all tracked in
-alp-sdk#2236, not done here.
+input `1,3,640,640` -- NCHW).
+
+**There is no supported path in this SDK today to produce that bundle
+for this model.** `scripts/alp_model/adapters/drpai.py` exists, but its
+`--images` calibration path only preprocesses to the 224x224
+ImageNet-classifier geometry the vendor tutorial hard-codes, rejects
+this model's `1,3,640,640` detector shape up front, and has no
+random-frame fallback. **No compiled `drpai_dir` bundle exists in this
+checkout** -- only the ONNX source does; Sec 5 of
+[`docs/bring-up-drpai-v2n.md`](../../../docs/bring-up-drpai-v2n.md)
+confirms no `drp_desc.bin`/`weight.bin`/`addr_map.txt`/`deploy.json`
+set exists anywhere in a fresh checkout. Deriving real preprocessing
+from the vendor's `app_yolox_cam` sample, compiling a bundle with it,
+and checking this example's frame generator byte-for-byte against that
+bundle's own sample `input_0.bin` are all tracked in
+[alplabai/alp-sdk#2236](https://github.com/alplabai/alp-sdk/issues/2236),
+not done here. Until that lands, produce a bundle for the first
+argument by compiling one **outside this SDK**, directly with the
+Renesas DRP-AI TVM (RUHMI) toolchain (see
+[`docs/bring-up-drpai-v2n.md`](../../../docs/bring-up-drpai-v2n.md)
+Sec 2 and Sec 5), then tarring its object directory the same way
+`adapters/drpai.py` does.
 
 ## Output: raw scores, not decoded detections
 

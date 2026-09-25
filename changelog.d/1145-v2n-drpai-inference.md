@@ -18,10 +18,15 @@ silicon.** Bench sign-off is tracked as #1268.
 - **`ALP_ENABLE_DRPAI`** (default `"0"`; the flag itself predates this change
   — added by `cbea0e29`, gating only the `&drpai0` devicetree node) on all
   four RZ/V2N-family machine confs (`e1m-v2n101-a55.conf`,
-  `e1m-v2n102-a55.conf`, `e1m-v2m101-a55.conf`, `e1m-v2m102-a55.conf`) now
-  also gates `IMAGE_INSTALL:append` (`lib-tvm kernel-module-mmngr`) — new
-  with this change — so the kernel's claim of the NPU and its userspace
-  runtime can't drift out of sync. The demo binary, **`alp-drpai-inference`**,
+  `e1m-v2n102-a55.conf`, `e1m-v2m101-a55.conf`, `e1m-v2m102-a55.conf`) stays
+  scoped to that one job. An earlier revision of this change also had it
+  gate a machine-conf `IMAGE_INSTALL:append` (`lib-tvm
+  kernel-module-mmngr`); review caught that this duplicated
+  `alp-image-common.inc`'s existing unconditional `ALP_RZ_DRPAI_INSTALL`
+  (#1176) pair-for-pair, so it was always a no-op alongside it, never a
+  drift guard -- the four appends are dropped from this change, and
+  `alp-image-common.inc` is the userspace pair's single packaging
+  authority. The demo binary, **`alp-drpai-inference`**,
   rides the same `ALP_ENABLE_DRPAI` opt-in but from a separate, IMAGE-level
   append in `alp-image-edge.bb` (not the machine confs), gated on the same
   `rzv2n-family` `MACHINEOVERRIDES` check as the `bb.fatal()` guard below,
@@ -57,16 +62,35 @@ silicon.** Bench sign-off is tracked as #1268.
   incompatible ... when searching for -lmera2_runtime", an architecture
   mismatch, not proof of symbol resolution).
 
-**Open reviewer question, not resolved by this change:** the four RZ/V2N-family
+**Reviewer question, resolved in this round:** the four RZ/V2N-family
 machine confs' own `ALP_ENABLE_DRPAI`-gated `IMAGE_INSTALL:append`
-(`lib-tvm kernel-module-mmngr`) overlaps `dev`'s existing unconditional
-`ALP_RZ_DRPAI_INSTALL` in `alp-image-common.inc` (#1176) — both install the
+(`lib-tvm kernel-module-mmngr`) overlapped `dev`'s existing unconditional
+`ALP_RZ_DRPAI_INSTALL` in `alp-image-common.inc` (#1176) — both installed the
 same `lib-tvm kernel-module-mmngr` pair, one unconditionally and one
-opt-in. `bitbake` dedupes the repeated package names, so this is not a build
-break, but which mechanism should own the userspace install long-term is an
-open question, left to review rather than picked here.
+opt-in. `bitbake` dedupes the repeated package names, so it was never a
+build break, but it was also never a drift guard: `ALP_ENABLE_DRPAI = "0"`
+still left the pair installed via `alp-image-common.inc` whenever the layer
++ MACHINE_FEATURES matched, so the two mechanisms couldn't drift relative to
+each other and the four appends bought nothing. Removed; the corresponding
+comments in each machine conf and in `alp-image-edge.bb` are corrected to
+name `alp-image-common.inc` as the single packaging authority.
+
+**Reviewer finding, resolved in this round:** the example's README and
+`main.c` taught `python3 -m alp_model build --target drpai --product V2N
+<model.onnx>` as the way to produce the `drpai_dir` bundle `argv[1]` loads,
+but `scripts/alp_model` has no `__main__`, so the command fails outright —
+and even a working invocation could not compile this model, since the
+adapter's calibration path rejects a `1,3,640,640` detector shape. The dead
+command is dropped everywhere (README.md, `main.c`'s teaching comment and
+`usage()` string) and replaced with an honest statement: there is no
+supported path in this SDK today to produce this bundle; producing one is
+tracked in [alplabai/alp-sdk#2236](https://github.com/alplabai/alp-sdk/issues/2236);
+until then the bundle has to be compiled outside the SDK, directly with the
+Renesas DRP-AI TVM (RUHMI) toolchain, and tarred the same way
+`adapters/drpai.py` would.
 
 `docs/board-config-schema.md`'s example preset count is corrected to match:
-101 examples target a preset today (75 on `e1m-evk`, 26 on `e1m-x-evk`,
-counted directly off `examples/**/board.yaml`, not carried over from either
-side of the merge).
+after merging `dev` (which added its own new examples in parallel), 101
+examples target a preset today (76 on `e1m-evk`, 25 on `e1m-x-evk`), counted
+directly off `examples/**/board.yaml` post-merge, not carried over from
+either side's pre-merge count.

@@ -50,23 +50,23 @@ IMAGE_INSTALL += " alp-lvgl-dashboard"
 IMAGE_INSTALL += "${@' alp-drpai-inference' if d.getVar('ALP_ENABLE_DRPAI') == '1' and \
     'rzv2n-family' in (d.getVar('MACHINEOVERRIDES') or '').split(':') else ''}"
 
-# NOTE: two DIFFERENT mechanisms feed the DRP-AI userspace RUNTIME
-# PACKAGES (lib-tvm + kernel-module-mmngr), and a third, independent
-# switch feeds the SDK BACKEND compiled into libalp_sdk.so -- see
+# NOTE: the DRP-AI userspace RUNTIME PACKAGES (lib-tvm +
+# kernel-module-mmngr) and the SDK BACKEND compiled into libalp_sdk.so
+# are two separate, independent concerns -- see
 # docs/bring-up-drpai-v2n.md section 4 for the full two-switch contract:
-#   1. alp-image-common.inc's ALP_RZ_DRPAI_INSTALL (issue #1176) installs
-#      the runtime packages UNCONDITIONALLY whenever the rz-drpai layer
-#      is in BBFILE_COLLECTIONS AND 'v2n' is in MACHINE_FEATURES.
-#   2. Each RZ/V2N machine conf's ALP_ENABLE_DRPAI-gated
-#      IMAGE_INSTALL:append installs the SAME pair a second time
-#      (bitbake dedupes, so this is not a build break) -- redundant with
-#      #1 whenever ALP_ENABLE_DRPAI = "1", a no-op otherwise. Reconcile
-#      which of #1/#2 owns this before both land for good.
-#   3. `PACKAGECONFIG[drpai]` on the alp-sdk recipe compiles the SDK
+#   1. alp-image-common.inc's ALP_RZ_DRPAI_INSTALL (issue #1176) is the
+#      SOLE install site for the runtime packages: it installs them
+#      UNCONDITIONALLY whenever the rz-drpai layer is in
+#      BBFILE_COLLECTIONS AND 'v2n' is in MACHINE_FEATURES, independent
+#      of ALP_ENABLE_DRPAI. Each RZ/V2N machine conf used to carry a
+#      second, ALP_ENABLE_DRPAI-gated IMAGE_INSTALL:append that
+#      installed the SAME pair a second time; that append was always a
+#      no-op alongside this one and has been removed (#2212 review).
+#   2. `PACKAGECONFIG[drpai]` on the alp-sdk recipe compiles the SDK
 #      backend in; it installs no userspace package and neither this
 #      file nor alp-image-common.inc touches it.
 #
-# drpai_1.4.0 is NOT listed in mechanisms 1-2 above either: it is a
+# drpai_1.4.0 is NOT covered by mechanism 1 above either: it is a
 # headers-only recipe (${includedir}/linux/drpai.h) and belongs in
 # DEPENDS, which alp-sdk's PACKAGECONFIG[drpai] already carries. The
 # DRP-AI kernel driver itself is not a package either -- it is patched
@@ -95,16 +95,18 @@ IMAGE_INSTALL += "${@' alp-drpai-inference' if d.getVar('ALP_ENABLE_DRPAI') == '
 # even though neither machine conf defines ALP_ENABLE_DRPAI at all and
 # neither wants the RZ layer.
 #
-# Note this is no longer "the" install site for lib-tvm, only the guard
-# for it: the actual `IMAGE_INSTALL:append = "...lib-tvm..."` lives in
-# each RZ/V2N machine conf (e1m-v2n101/102-a55.conf, e1m-v2m101/102-a55.conf),
-# gated on the same ALP_ENABLE_DRPAI, and a MACHINE-level IMAGE_INSTALL:append
-# reaches EVERY image built for that MACHINE -- alp-image-base,
-# alp-image-prod, core-image-minimal -- not just alp-image-edge. The guard
-# still belongs in a recipe (for the ConfHandler reason above), and this
-# recipe is as good a place as any recipe that is guaranteed to parse
-# whenever the machine confs do; it does not mean the install is scoped
-# to this image.
+# lib-tvm's install site is alp-image-common.inc alone (see the NOTE
+# above): each RZ/V2N machine conf (e1m-v2n101/102-a55.conf,
+# e1m-v2m101/102-a55.conf) used to carry its own ALP_ENABLE_DRPAI-gated
+# IMAGE_INSTALL:append for the same pair; it was always a no-op
+# alongside alp-image-common.inc's unconditional install and has been
+# removed (#2212 review). The guard below still belongs in a recipe
+# (for the ConfHandler reason above), and this recipe is as good a
+# place as any recipe that is guaranteed to parse whenever the machine
+# confs do; it protects the alp-drpai-inference install above (and the
+# DT node's own ALP_DRPAI_LAYER gate) from a misconfigured
+# ALP_ENABLE_DRPAI = "1" with no rz-drpai layer present -- not a
+# packaging install site of its own.
 #
 # Gated on the 'rzv2n-family' MACHINEOVERRIDES override rather than on
 # ALP_ENABLE_DRPAI's mere existence, because ALP_ENABLE_DRPAI is set with

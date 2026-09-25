@@ -174,12 +174,17 @@ both default OFF, deliberately not merged into one"):
   `local.conf` as `PACKAGECONFIG:append:pn-alp-sdk = " drpai"`) compiles the
   DRP-AI3 backend into `libalp_sdk`. Nothing else sets it.
 - **`ALP_ENABLE_DRPAI = "1"`** (a MACHINE-conf variable) enables the
-  `&drpai0` devicetree node (§3); redundantly re-installs `lib-tvm` +
-  `kernel-module-mmngr` at MACHINE level, redundant because
-  `alp-image-common.inc`'s `ALP_RZ_DRPAI_INSTALL` (lines 81-85) already
-  installs that same pair unconditionally, gated only on `rz-drpai` being in
-  `BBFILE_COLLECTIONS` and `v2n` being in `MACHINE_FEATURES` (issue #1176,
-  open question, not resolved here); and installs `alp-drpai-inference`
+  `&drpai0` devicetree node (§3) — that is now its only job. The four
+  RZ/V2N-family machine confs used to carry a second,
+  `ALP_ENABLE_DRPAI`-gated `IMAGE_INSTALL:append` that re-installed
+  `lib-tvm` + `kernel-module-mmngr` at MACHINE level; that append was
+  always a no-op alongside `alp-image-common.inc`'s `ALP_RZ_DRPAI_INSTALL`
+  (lines 81-85), which already installs that same pair unconditionally,
+  gated only on `rz-drpai` being in `BBFILE_COLLECTIONS` and `v2n` being
+  in `MACHINE_FEATURES` (issue #1176) — independent of `ALP_ENABLE_DRPAI`.
+  The redundant append is removed (#2212 review); the userspace pair's
+  single packaging authority is `alp-image-common.inc`. `ALP_ENABLE_DRPAI`
+  separately still gates `alp-drpai-inference`
   (`meta-alp-sdk/recipes-images/alp-image-edge.bb:50-51`) into
   `alp-image-edge` only, and only on an `rzv2n-family` MACHINE (`'rzv2n-family'
   in (d.getVar('MACHINEOVERRIDES') or '').split(':')`) -- never
