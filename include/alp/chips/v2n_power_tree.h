@@ -54,57 +54,57 @@
 		                         .max_mv           = 3450u, \
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
-		                         .enable_writable  = true }, \
+		                         .enable_writable  = false }, \
 		[ACT8760_RAIL_BUCK2] = { .min_mv           = 1725u, \
 		                         .max_mv           = 1875u, \
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
-		                         .enable_writable  = true }, \
+		                         .enable_writable  = false }, \
 		[ACT8760_RAIL_BUCK3] = { .min_mv           = 1050u, \
 		                         .max_mv           = 1150u, \
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
-		                         .enable_writable  = true }, \
+		                         .enable_writable  = false }, \
 		[ACT8760_RAIL_BUCK4] = { .min_mv           = 1725u, \
 		                         .max_mv           = 1875u, \
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
-		                         .enable_writable  = true }, \
+		                         .enable_writable  = false }, \
 		[ACT8760_RAIL_BUCK5] = { .min_mv           = 725u, \
 		                         .max_mv           = 775u, \
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
-		                         .enable_writable  = true }, \
+		                         .enable_writable  = false }, \
 		[ACT8760_RAIL_BUCK6] = { .min_mv           = 775u, \
 		                         .max_mv           = 825u, \
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
-		                         .enable_writable  = true }, \
+		                         .enable_writable  = false }, \
 		[ACT8760_RAIL_BUCK7] = { .min_mv           = 855u, \
 		                         .max_mv           = 945u, \
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
-		                         .enable_writable  = true }, \
+		                         .enable_writable  = false }, \
 		[ACT8760_RAIL_LDO1]  = { .min_mv           = 763u, \
 		                         .max_mv           = 837u, \
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
-		                         .enable_writable  = true }, \
+		                         .enable_writable  = false }, \
 		[ACT8760_RAIL_LDO2]  = { .min_mv           = 1150u, \
 		                         .max_mv           = 1250u, \
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
-		                         .enable_writable  = true }, \
+		                         .enable_writable  = false }, \
 		[ACT8760_RAIL_LDO3]  = { .min_mv           = 3150u, \
 		                         .max_mv           = 3450u, \
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
-		                         .enable_writable  = true }, \
+		                         .enable_writable  = false }, \
 		[ACT8760_RAIL_LDO4]  = { .min_mv           = 1750u, \
 		                         .max_mv           = 1850u, \
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
-		                         .enable_writable  = true }, \
+		                         .enable_writable  = false }, \
 		[ACT8760_RAIL_LDO5]  = { .min_mv           = 0u, \
 		                         .max_mv           = 0u, \
 		                         .critical         = true, \
@@ -170,57 +170,57 @@
 		                         .max_mv           = 3450u, \
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
-		                         .enable_writable  = true }, \
+		                         .enable_writable  = false }, \
 		[ACT8760_RAIL_BUCK2] = { .min_mv           = 1725u, \
 		                         .max_mv           = 1875u, \
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
-		                         .enable_writable  = true }, \
+		                         .enable_writable  = false }, \
 		[ACT8760_RAIL_BUCK3] = { .min_mv           = 1050u, \
 		                         .max_mv           = 1150u, \
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
-		                         .enable_writable  = true }, \
+		                         .enable_writable  = false }, \
 		[ACT8760_RAIL_BUCK4] = { .min_mv           = 1725u, \
 		                         .max_mv           = 1875u, \
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
-		                         .enable_writable  = true }, \
+		                         .enable_writable  = false }, \
 		[ACT8760_RAIL_BUCK5] = { .min_mv           = 725u, \
 		                         .max_mv           = 775u, \
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
-		                         .enable_writable  = true }, \
+		                         .enable_writable  = false }, \
 		[ACT8760_RAIL_BUCK6] = { .min_mv           = 775u, \
 		                         .max_mv           = 825u, \
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
-		                         .enable_writable  = true }, \
+		                         .enable_writable  = false }, \
 		[ACT8760_RAIL_BUCK7] = { .min_mv           = 855u, \
 		                         .max_mv           = 945u, \
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
-		                         .enable_writable  = true }, \
+		                         .enable_writable  = false }, \
 		[ACT8760_RAIL_LDO1]  = { .min_mv           = 763u, \
 		                         .max_mv           = 837u, \
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
-		                         .enable_writable  = true }, \
+		                         .enable_writable  = false }, \
 		[ACT8760_RAIL_LDO2]  = { .min_mv           = 1150u, \
 		                         .max_mv           = 1250u, \
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
-		                         .enable_writable  = true }, \
+		                         .enable_writable  = false }, \
 		[ACT8760_RAIL_LDO3]  = { .min_mv           = 3150u, \
 		                         .max_mv           = 3450u, \
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
-		                         .enable_writable  = true }, \
+		                         .enable_writable  = false }, \
 		[ACT8760_RAIL_LDO4]  = { .min_mv           = 1750u, \
 		                         .max_mv           = 1850u, \
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
-		                         .enable_writable  = true }, \
+		                         .enable_writable  = false }, \
 		[ACT8760_RAIL_LDO5]  = { .min_mv           = 0u, \
 		                         .max_mv           = 0u, \
 		                         .critical         = true, \

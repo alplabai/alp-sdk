@@ -24,8 +24,16 @@
 #include "fakes.h"
 
 #define REG_VOUT1   0x01u
+#define REG_VOUT2   0x02u
 #define REG_CONTROL 0x03u
 #define REG_STATUS  0x05u
+
+/* CONTROL bit7 -- TPS628640_CTRL_RESET in the real driver's header.  A
+ * write with this bit set is a one-shot device reset: every register
+ * reverts to its POR/OTP default and the bit self-clears, so the fake
+ * must not just store the written byte the way every other register
+ * write does. */
+#define REG_CONTROL_RESET_BIT 0x80u
 
 struct fake_tps628640_data {
 	uint8_t  addr;
@@ -45,12 +53,30 @@ static struct fake_tps628640_data *slot_find(uint8_t addr)
 	return NULL;
 }
 
+/* POR/OTP values a real device reset (or a fresh power-up) puts VOUT1 and
+ * CONTROL back to.  Split out of slot_reset_state() so a live RESET-bit
+ * write can revert just the registers, leaving the write-count log intact
+ * for the ztest to inspect. */
+static void regs_revert_to_por(struct fake_tps628640_data *d)
+{
+	const uint8_t por_vout = d->addr == 0x44u ? 0x82u : d->addr == 0x48u ? 0x5Au : 0x14u;
+	d->regs[REG_VOUT1]     = por_vout;
+	/* VOUT2 has no bench reading of its own (only VOUT1 was probed) --
+	 * mirror VOUT1's per-address POR value rather than the datasheet's
+	 * generic 0x64, since the OTP that sets VOUT1's startup target per
+	 * instance plausibly sets VOUT2 the same way.  TBD-verify on real
+	 * silicon; tps628640_software_enable() checks both registers
+	 * because the driver cannot read the VID strap that picks which one
+	 * is live. */
+	d->regs[REG_VOUT2]   = por_vout;
+	d->regs[REG_CONTROL] = 0x6Fu;
+}
+
 static void slot_reset_state(struct fake_tps628640_data *d)
 {
 	memset(d->regs, 0, sizeof d->regs);
 	memset(d->write_count, 0, sizeof d->write_count);
-	d->regs[REG_VOUT1]   = d->addr == 0x44u ? 0x82u : d->addr == 0x48u ? 0x5Au : 0x14u;
-	d->regs[REG_CONTROL] = 0x6Fu;
+	regs_revert_to_por(d);
 }
 
 static int
@@ -62,8 +88,13 @@ fake_tps628640_transfer(const struct emul *target, struct i2c_msg *msgs, int num
 	if (num_msgs == 1 && (msgs[0].flags & I2C_MSG_READ) == 0) {
 		if (msgs[0].len != 2) return -EIO;
 		const uint8_t reg = msgs[0].buf[0];
+		const uint8_t val = msgs[0].buf[1];
 		d->write_count[reg]++;
-		d->regs[reg] = reg == REG_CONTROL ? (uint8_t)(msgs[0].buf[1] & 0x7Fu) : msgs[0].buf[1];
+		if (reg == REG_CONTROL && (val & REG_CONTROL_RESET_BIT) != 0u) {
+			regs_revert_to_por(d);
+			return 0;
+		}
+		d->regs[reg] = reg == REG_CONTROL ? (uint8_t)(val & 0x7Fu) : val;
 		return 0;
 	}
 	if (num_msgs == 2 && (msgs[0].flags & I2C_MSG_READ) == 0 &&

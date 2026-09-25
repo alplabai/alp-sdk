@@ -24,6 +24,8 @@
 #include "alp/e1m_pinout.h"
 #include "alp/peripheral.h"
 
+#include "fakes.h"
+
 /* ------------------------------------------------------------------ */
 /* rtl8211fdi -- Realtek PHY driver, NULL-arg validation              */
 /* ------------------------------------------------------------------ */
@@ -137,6 +139,58 @@ ZTEST(alp_chips, test_clk_5l35023b_register_dump_rejects_invalid)
 
 	/* NULL out -> INVAL even with a positive count. */
 	zassert_equal(clk_5l35023b_register_dump(&ctx, 0u, NULL, 1u), ALP_ERR_INVAL);
+
+	/* start_reg + count running past the one-byte 0x00..0xFF register
+	 * space must be rejected, not silently wrap start_reg + i back to
+	 * 0x00 mid-dump. */
+	zassert_equal(clk_5l35023b_register_dump(&ctx, 0xFEu, out, 3u),
+	              ALP_ERR_INVAL,
+	              "0xFE + 3 = 0x101 overruns the register space");
+	zassert_equal(clk_5l35023b_register_dump(&ctx, 0xFFu, out, 2u),
+	              ALP_ERR_INVAL,
+	              "0xFF + 2 = 0x101 overruns the register space");
+}
+
+/* #<PMIC review>: clk_5l35023b_register_dump() must issue one single-byte
+ * read transaction per register (see the driver's file-level comment on
+ * the i2c-riic multi-byte-read corruption this works around), not a single
+ * combined burst -- prove it against the fake's per-transaction log rather
+ * than trusting the resulting byte VALUES, which would look identical
+ * either way. */
+ZTEST(alp_chips, test_clk_5l35023b_register_dump_is_one_transaction_per_register)
+{
+	fake_clk_5l35023b_reset();
+	fake_clk_5l35023b_set_reg(0x10u, 0xAAu);
+	fake_clk_5l35023b_set_reg(0x11u, 0xBBu);
+	fake_clk_5l35023b_set_reg(0x12u, 0xCCu);
+	fake_clk_5l35023b_set_reg(0x13u, 0xDDu);
+
+	clk_5l35023b_t ctx;
+	alp_i2c_t     *bus = alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = ALP_E1M_I2C0,
+	    .bitrate_hz = 100000,
+	});
+	zassert_not_null(bus);
+	zassert_ok(clk_5l35023b_init(&ctx, bus, 0x6Au));
+
+	uint8_t out[4] = { 0 };
+	zassert_ok(clk_5l35023b_register_dump(&ctx, 0x10u, out, sizeof out));
+	zassert_equal(out[0], 0xAAu);
+	zassert_equal(out[1], 0xBBu);
+	zassert_equal(out[2], 0xCCu);
+	zassert_equal(out[3], 0xDDu);
+
+	/* init() itself issues 2 reads (GENERAL_CTRL + DASHCODE_ID); the
+	 * dump must add exactly `sizeof out` more, each of length 1 -- a
+	 * single 4-byte burst would instead log one transaction of length
+	 * 4. */
+	zassert_equal(fake_clk_5l35023b_read_log_len(), 2u + sizeof(out));
+	for (size_t i = 2; i < fake_clk_5l35023b_read_log_len(); i++) {
+		zassert_equal(fake_clk_5l35023b_read_log_at(i), 1u, "each dump read must be one byte");
+	}
+
+	clk_5l35023b_deinit(&ctx);
+	alp_i2c_close(bus);
 }
 
 ZTEST(alp_chips, test_clk_5l35023b_typed_helpers_reject_uninitialised)

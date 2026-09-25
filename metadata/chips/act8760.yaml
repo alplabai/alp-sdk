@@ -112,7 +112,7 @@ register_table:
   - { slave: add1, addr: 0x11, name: "MODE5_MUX5", type: rw, write: guarded, summary: "as MODE1" }
   - { slave: add1, addr: 0x12, name: "MODE6_MUX6", type: rw, write: guarded, summary: "as MODE1" }
   - { slave: add1, addr: 0x13, name: "MODE7_MUX7", type: rw, write: guarded, summary: "as MODE1" }
-  - { slave: add1, addr: 0x14, name: "POK_OV_VSYSWARN", type: rw, write: allow, summary: "VIN POK_OV[2:0] / VSYSWARN[4:0]" }
+  - { slave: add1, addr: 0x14, name: "POK_OV_VSYSWARN", type: rw, write: deny, summary: "VIN POK_OV[2:0] / VSYSWARN[4:0] -- a bad value can trip PMIC shutdown; deny until a typed, value-validated API needs it" }
   - { slave: add1, addr_range: [0x15, 0x26], name: "FACTORY", type: rw, write: deny, summary: "factory (non-)volatile incl. 0x16 ADD1 / 0x23 ADD2 address select" }
   - { slave: add1, addr: 0x27, name: "MODE8_MUX8", type: rw, write: guarded, summary: "as MODE1" }
   - { slave: add1, addr: 0x28, name: "MODE9_MUX9", type: rw, write: guarded, summary: "as MODE1" }

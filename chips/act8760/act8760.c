@@ -116,15 +116,19 @@ static const struct rail_loc rail_table[ACT8760_RAIL_COUNT] = {
 	[ACT8760_RAIL_LDO6]  = LDO(0x60u, 0x80u, LDO36_SCALE),
 };
 
-/* Raw-write allow-list (ADD1 only): IRQ masks and thresholds.  Every
- * other address -- including the hard-deny set MSTR 0x07 (MR / SLEEP /
- * DPSLP / POWER OFF / watchdog), 0x08, 0x09, 0x0A, 0x0B/0x0C (IO delays
- * that retime PMIC_RSTOUT / V2N_BOOT_CPU_SEL / DEEPX_PWR_EN_REQ; 0x0C
- * bits1:0 are WDTIME / RETRY TIME), 0x15..0x26, 0x2C, 0x2D..0x32, 0x34,
- * every MODEx, every tile register and all of ADD2 -- is refused.  An
- * allow-list, so an address nobody thought about is denied by
+/* Raw-write allow-list (ADD1 only): IRQ masks and LED current only.  0x14
+ * (POK_OV[2:0] / VSYSWARN[4:0]) is deliberately NOT here even though the
+ * chip lets it be written: a bad threshold there can trip an unwanted
+ * PMIC shutdown, and nothing in this tree writes it -- deny by default,
+ * add it back only alongside a typed, value-validated API if a real use
+ * shows up.  Every other address -- including the hard-deny set MSTR 0x07
+ * (MR / SLEEP / DPSLP / POWER OFF / watchdog), 0x08, 0x09, 0x0A, 0x0B/0x0C
+ * (IO delays that retime PMIC_RSTOUT / V2N_BOOT_CPU_SEL / DEEPX_PWR_EN_REQ;
+ * 0x0C bits1:0 are WDTIME / RETRY TIME), 0x15..0x26, 0x2C, 0x2D..0x32,
+ * 0x34, every MODEx, every tile register and all of ADD2 -- is refused.
+ * An allow-list, so an address nobody thought about is denied by
  * construction. */
-static const uint8_t raw_write_allow[] = { 0x01u, 0x05u, 0x14u, 0x2Bu, 0x33u };
+static const uint8_t raw_write_allow[] = { 0x01u, 0x05u, 0x2Bu, 0x33u };
 
 static uint8_t addr_for(const act8760_t *ctx, act8760_page_t page)
 {
@@ -420,6 +424,23 @@ alp_status_t act8760_rail_set_enable(act8760_t *ctx, act8760_rail_t rail, bool e
 	if (!enable && lim->critical) return ALP_ERR_NOSUPPORT;
 
 	const struct rail_loc *loc = &rail_table[rail];
+
+	/* Enabling energizes the rail at its CURRENTLY programmed setpoint --
+	 * refuse instead of blindly powering up a live VSET the guard window
+	 * no longer covers.  Same rule pmic_rail_limit.h documents and
+	 * da9292_set_enable() / tps628640_software_enable() already apply;
+	 * lim->max_mv == 0 is the generator's "no window" sentinel (an
+	 * enable-only rail such as a load switch has no VSET to check). */
+	if (enable && lim->max_mv != 0u) {
+		uint8_t      vset = 0, range = 0;
+		alp_status_t s = read_setpoint(ctx, loc, &vset, &range);
+		if (s != ALP_OK) return s;
+		uint32_t enc_uv = decode_uv(&loc->scale[range], vset & loc->vset_mask);
+		if (enc_uv < (uint32_t)lim->min_mv * 1000u || enc_uv > (uint32_t)lim->max_mv * 1000u) {
+			return ALP_ERR_OUT_OF_RANGE;
+		}
+	}
+
 	return reg_update_verify(
 	    ctx, loc->page, loc->en_reg, ACT8760_TILE_ON, enable ? ACT8760_TILE_ON : 0u);
 }

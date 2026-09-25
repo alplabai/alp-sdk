@@ -44,10 +44,12 @@ Per-SKU populated parts: [`metadata/e1m_modules/E1M-V2N10{1,2,3}.yaml`](../../me
 
 The on-module RV-3028-C7 is the RTC of record, bound as `/dev/rtc0`
 (kernel `rtc-rv3028`, `CONFIG_RTC_DRV_RV3028=y`) -- use `hwclock`/`date`
-from userspace. **CA55 (Linux) is the sole master of the whole
-RIIC8/BRD_I2C bus** the RTC and every other BRD_I2C device sit on
-(`metadata/e1m_modules/v2n/core-ownership.yaml`); the CM33 must never
-issue I2C transactions there. No `trickle-resistor-ohms` is configured
+from userspace. **CA55 (Linux) is the sole master, in `a55_boot` mode, of
+the whole RIIC8/BRD_I2C bus** the RTC and every other BRD_I2C device sit
+on (`metadata/e1m_modules/v2n/core-ownership.yaml`); outside its
+`cm33_boot` pre-handoff window (see "Reach the GD32 supervisor" below)
+the CM33 does not issue I2C transactions there. No `trickle-resistor-ohms`
+is configured
 (the RV-3028-C7's VBACKUP/backup-cap wiring isn't confirmed on this
 SoM's schematic) and the alarm INT line isn't wired to a kernel
 interrupt yet -- both are open follow-ups.

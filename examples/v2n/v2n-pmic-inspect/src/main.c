@@ -251,15 +251,41 @@ static struct {
 	size_t          rail_count;
 	struct gpio_row gpios[ACT8760_GPIO_COUNT];
 
-	char   mismatch[8][96];
-	size_t mismatch_count;
+	char        mismatch[8][96];
+	const char *mismatch_subject[8]; /* the `a` each mismatch[] was built from,
+	                                   * e.g. a rail id -- lets the write gate
+	                                   * tell "this rail's own mismatch" apart
+	                                   * from every other one. */
+	size_t      mismatch_count;
+	size_t      mismatch_dropped; /* add_mismatch() calls past the array cap:
+	                               * must be counted, not silently lost. */
 } g;
+
+/* Common cap/drop bookkeeping for both arities below: returns the slot to
+ * snprintf() into, or NULL (having counted the drop) once mismatch[] is
+ * full. */
+static char *mismatch_slot(const char *subject)
+{
+	if (g.mismatch_count >= sizeof(g.mismatch) / sizeof(g.mismatch[0])) {
+		g.mismatch_dropped++;
+		return NULL;
+	}
+	g.mismatch_subject[g.mismatch_count] = subject;
+	return g.mismatch[g.mismatch_count++];
+}
 
 static void add_mismatch(const char *fmt, const char *a, unsigned x, unsigned y)
 {
-	if (g.mismatch_count < sizeof(g.mismatch) / sizeof(g.mismatch[0])) {
-		snprintf(g.mismatch[g.mismatch_count++], sizeof(g.mismatch[0]), fmt, a, x, y);
-	}
+	char *slot = mismatch_slot(a);
+	if (slot != NULL) snprintf(slot, sizeof(g.mismatch[0]), fmt, a, x, y);
+}
+
+/* Same as add_mismatch(), one more %u -- used by check_windows() to report
+ * the live reading alongside the window bounds. */
+static void add_mismatch3(const char *fmt, const char *a, unsigned x, unsigned y, unsigned z)
+{
+	char *slot = mismatch_slot(a);
+	if (slot != NULL) snprintf(slot, sizeof(g.mismatch[0]), fmt, a, x, y, z);
 }
 
 /* ------------------------------------------------------------------ */
@@ -529,7 +555,11 @@ static void collect_tps(alp_i2c_t *bus)
  * failure); every chip family's real voltage floor is well above 0 mV, so
  * it never collides with a genuine reading.  Only rails with a real
  * window (voltage_writable; non-writable rails carry min_mv=max_mv=0) are
- * checked. */
+ * checked.  A rail confirmed OFF (enabled_known && !enabled) is skipped
+ * too -- its live setpoint register can still read whatever it was last
+ * programmed to (or a floating/discharging value) while the converter
+ * itself is not regulating, so "outside the window" says nothing about a
+ * disabled rail; the per-rail table's on/off column already labels it. */
 static void check_windows(void)
 {
 	for (size_t i = 0; i < g.rail_count; i++) {
@@ -537,17 +567,22 @@ static void check_windows(void)
 		const pmic_rail_limit_t *l = r->limit;
 
 		if (r->mv == 0u || !l->voltage_writable) continue;
+		if (r->enabled_known && !r->enabled) continue;
 		if (r->mv < l->min_mv || r->mv > l->max_mv) {
-			add_mismatch(
-			    "%s: reading outside its window (min %u, max %u mV)", r->id, l->min_mv, l->max_mv);
+			add_mismatch3("%s: reading %u mV outside its window (min %u, max %u mV)",
+			              r->id,
+			              r->mv,
+			              l->min_mv,
+			              l->max_mv);
 		}
 	}
 }
 
 static void collect(alp_i2c_t *bus)
 {
-	g.rail_count     = 0;
-	g.mismatch_count = 0;
+	g.rail_count       = 0;
+	g.mismatch_count   = 0;
+	g.mismatch_dropped = 0;
 	collect_act(bus);
 	collect_da(bus);
 	collect_tps(bus);
@@ -666,6 +701,10 @@ static void print_text(void)
 	printf("\n");
 	for (size_t i = 0; i < g.mismatch_count; i++)
 		printf("MISMATCH: %s\n", g.mismatch[i]);
+	if (g.mismatch_dropped) {
+		printf("MISMATCH: (%zu more mismatch(es) not shown -- mismatch[] cap reached)\n",
+		       g.mismatch_dropped);
+	}
 	printf("VERDICT: %s\n",
 	       g.mismatch_count ? "silicon disagrees with metadata" : "matches metadata");
 }
@@ -748,7 +787,7 @@ static void print_json(void)
 	printf("],\"mismatches\":[");
 	for (size_t i = 0; i < g.mismatch_count; i++)
 		printf("%s\"%s\"", i ? "," : "", g.mismatch[i]);
-	printf("]}\n");
+	printf("],\"mismatches_dropped\":%zu}\n", g.mismatch_dropped);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1178,10 +1217,23 @@ int main(int argc, char **argv)
 		return g.mismatch_count ? EXIT_MISMATCH : EXIT_OK;
 	}
 
-	/* Writes only on a board that matches its metadata.  The one allowed
-	 * mismatch is the GPIO4 defect, when fixing it is the action. */
+	/* Writes only on a board that matches its metadata.  Two allowed
+	 * exceptions: the GPIO4 defect, when fixing it is the action; and,
+	 * for --set-mv specifically, this exact rail's own out-of-window
+	 * setpoint mismatch -- fixing THAT mismatch is the whole point of
+	 * --set-mv, so refusing to write because of it would make the flag
+	 * unable to ever do its job.  Any OTHER mismatch (a different rail,
+	 * an identity/GPIO mismatch) still blocks, matching check_windows()'s
+	 * add_mismatch3() subject being exactly the rail id. */
 	size_t tolerated = (act == A_FIX_GPIO4 && g.gpios[3].st.mode_raw == 0x88u) ? 1u : 0u;
-	int    rc        = EXIT_ACTION;
+	if (act == A_SET_MV) {
+		for (size_t i = 0; i < g.mismatch_count; i++) {
+			if (g.mismatch_subject[i] != NULL && strcmp(g.mismatch_subject[i], rail_name) == 0) {
+				tolerated++;
+			}
+		}
+	}
+	int rc = EXIT_ACTION;
 
 	if (g.mismatch_count > tolerated) {
 		print_text();

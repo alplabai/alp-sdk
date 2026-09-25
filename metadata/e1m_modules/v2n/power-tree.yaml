@@ -20,7 +20,13 @@
 #     its boot media depends on) can never be disabled by software --
 #     enabling / re-programming inside the window stays allowed;
 #   * a rail whose target is not confirmed has `target_mv: null`,
-#     `window_mv: null`, `control: none` -- never an invented value.
+#     `window_mv: null`, `control: none` -- never an invented value;
+#   * `control: voltage` grants ONLY a voltage write, never enable/disable --
+#     every ACT88760 rail below is the PMIC's own CMI hardware sequence, not
+#     a software on/off switch.  `control: voltage_enable` is the explicit
+#     opt-in for a rail whose enable IS a documented guarded API (the four
+#     TPS628640 bucks, whose SOFTWARE_ENABLE bit tps628640_software_enable()
+#     exposes) -- reviewed per rail, never the default.
 #
 # Net names are PUBLIC (maintainer decision 2026-09-24).
 #
@@ -335,7 +341,7 @@ rails:
     range: null
     window_mv: [810, 890]
     critical: false
-    control: voltage
+    control: voltage_enable
     owner: { a55_boot: hardware, cm33_boot: hardware }   # OTP default, enabled via P64
     populated_on: [v2n-m1]
     evidence: "bench E1M-V2M103 2026-09-24: VOUT1 0x01 reads 0x5a (0.85 V)"
@@ -349,7 +355,7 @@ rails:
     range: null
     window_mv: [1000, 1100]
     critical: false
-    control: voltage
+    control: voltage_enable
     owner: { a55_boot: hardware, cm33_boot: hardware }   # OTP default, enabled via P64
     populated_on: [v2n-m1]
     evidence: "bench E1M-V2M103 2026-09-24: VOUT1 0x01 reads 0x82 (1.05 V)"
@@ -363,7 +369,7 @@ rails:
     range: null
     window_mv: [475, 525]
     critical: false
-    control: voltage
+    control: voltage_enable
     owner: { a55_boot: hardware, cm33_boot: hardware }   # OTP default, enabled via P64
     populated_on: [v2n-m1]
     evidence: "bench E1M-V2M103 2026-09-24: VOUT1 0x01 reads 0x14 (0.50 V)"
@@ -377,7 +383,7 @@ rails:
     range: null
     window_mv: [570, 630]
     critical: true
-    control: voltage
+    control: voltage_enable
     owner: { a55_boot: hardware, cm33_boot: hardware }
     populated_on: [v2n, v2n-m1]
     assembled: optional
@@ -403,13 +409,15 @@ gpios:
   - gpio: 5
     net: V2N_BOOT_CPU_SEL
     role: "boot-CPU select strap (A55 vs CM33); CMI sequencing trigger for Buck1/Buck7/LDO4"
-    # Output of the PMIC, not an input to it: the CMI DRIVES this net (see
-    # the file header, "the CMI drives it HIGH at ~8.6 ms after MODULE_EN").
-    # EN_PUSH_PULL (0x34, metadata/chips/act8760.yaml) lists a push-pull
-    # enable bit for GPIO8,7,6,4,3,2,1 but explicitly has no GPIO5 bit, so
-    # its output stage is not push-pull-configurable -- output_od, same
-    # default as the other CMI-driven pins with no PP-enable bit (GPIO1/2).
-    direction: output_od
+    # direction TBD-verify: inferred, not measured, from EN_PUSH_PULL (0x34,
+    # metadata/chips/act8760.yaml) listing no GPIO5 push-pull-enable bit --
+    # the same reasoning used for GPIO1/2 above.  That inference is actually
+    # self-contradicting for THIS pin: an open-drain output can only sink,
+    # it cannot by itself drive BOOTSELCPU HIGH (see the file header, "the
+    # CMI drives it HIGH at ~8.6 ms after MODULE_EN") without an external
+    # pull-up this file has no evidence for.  Do not treat output_od as
+    # settled here until the real output stage (or a pull-up) is confirmed.
+    direction: output_od # TBD-verify -- see comment above, not schematic-confirmed
     writable: []
   - { gpio: 6,  net: MODULE_EN,        role: "PWRON input -- starts / stops the power sequence", direction: input, writable: [] }
   - { gpio: 7,  net: DEEPX_PWR_EN_REQ, role: "Buck5 POK -> RZ/V2N P65 (CMI name CORE_0P75_EN)", direction: output_pp, writable: [] }

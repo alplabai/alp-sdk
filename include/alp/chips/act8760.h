@@ -104,13 +104,15 @@
  *   typed API owns (each tile's status / VSET0..3 / ON / range registers,
  *   MSTR MODE1..11) and the hard-deny set: MSTR 0x00, 0x02..0x04, 0x06,
  *   0x07 (MR / SLEEP / DPSLP / POWER OFF / watchdog), 0x08 (factory
- *   password), 0x09, 0x0A, 0x15..0x26, 0x2C, 0x2D..0x32, 0x34 and every
- *   tile's factory registers (buck tile +0x08..+0x1F, LDO dual tile
- *   +0x0B..+0x1F).  MSTR 0x0B / 0x0C are denied too: they retime
- *   PMIC_RSTOUT / V2N_BOOT_CPU_SEL / DEEPX_PWR_EN_REQ, and 0x0C bits1:0
- *   are the watchdog WDTIME / RETRY TIME.  Raw writes stay possible only
- *   to MSTR 0x01, 0x05, 0x14, 0x2B, 0x33 (IRQ masks, thresholds) -- the
- *   `write: allow` rows of `metadata/chips/act8760.yaml`.
+ *   password), 0x09, 0x0A, 0x14 (POK_OV / VSYSWARN thresholds -- a bad
+ *   value can trip PMIC shutdown, deny until a typed API validates it),
+ *   0x15..0x26, 0x2C, 0x2D..0x32, 0x34 and every tile's factory registers
+ *   (buck tile +0x08..+0x1F, LDO dual tile +0x0B..+0x1F).  MSTR 0x0B /
+ *   0x0C are denied too: they retime PMIC_RSTOUT / V2N_BOOT_CPU_SEL /
+ *   DEEPX_PWR_EN_REQ, and 0x0C bits1:0 are the watchdog WDTIME / RETRY
+ *   TIME.  Raw writes stay possible only to MSTR 0x01, 0x05, 0x2B, 0x33
+ *   (IRQ masks, LED current) -- the `write: allow` rows of
+ *   `metadata/chips/act8760.yaml`.
  * DVS (VSET1..VSET3, MSTR 0x2C) stays out of scope.
  *
  * @par Volatile vs non-volatile
@@ -286,9 +288,9 @@ alp_status_t act8760_read_reg(act8760_t *ctx, act8760_page_t page, uint8_t reg, 
  * @brief Raw register write on either slave -- deny-listed.
  *
  * Only the `write: allow` registers of `metadata/chips/act8760.yaml`
- * (ADD1 0x01, 0x05, 0x14, 0x2B, 0x33) are ever written.
+ * (ADD1 0x01, 0x05, 0x2B, 0x33) are ever written.
  * Every register a typed API owns, the power-state / factory set (MSTR
- * 0x07, 0x08, 0x09, 0x0A, 0x15..0x26, 0x2D..0x32, ...) and every
+ * 0x07, 0x08, 0x09, 0x0A, 0x14, 0x15..0x26, 0x2D..0x32, ...) and every
  * unlisted address are refused -- see the file-level "Guarded control"
  * section for the full set.
  *

@@ -71,6 +71,10 @@ clk_5l35023b_register_dump(clk_5l35023b_t *ctx, uint8_t start_reg, uint8_t *out,
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (out == NULL || count == 0u) return ALP_ERR_INVAL;
+	/* Register address space is one byte (0x00..0xFF): a range that
+	 * runs off the end would silently wrap start_reg + i back to 0x00
+	 * instead of reporting the caller's mistake. */
+	if ((size_t)start_reg + count > 0x100u) return ALP_ERR_INVAL;
 	/* Datasheet: "data bytes are accessed in sequential order from
      * the lowest to the highest byte" -- the chip itself supports one
      * combined multi-byte transfer.  This driver still reads one byte

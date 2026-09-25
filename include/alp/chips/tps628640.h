@@ -63,10 +63,12 @@
  *
  * @par CONTROL register bit layout
  *
- * Bench (E1M-V2M103) reads 0x03 back as 0x6F.  tps628640_init() seeds
- * the software shadow (@c control_shadow) from that read when it has
- * SOFTWARE_ENABLE set, otherwise from @ref TPS628640_CTRL_DEFAULT, and
- * the typed helpers read-modify-write the shadow.
+ * Bench (E1M-V2M103) reads 0x03 back as 0x6F.  tps628640_init() seeds the
+ * software shadow (@c control_shadow) from that read whenever it lands a
+ * non-zero byte -- including a disabled rail's byte (SOFTWARE_ENABLE
+ * clear) -- falling back to @ref TPS628640_CTRL_DEFAULT only when the read
+ * itself fails or comes back exactly 0x00; the typed helpers read-modify-
+ * write the shadow.
  *
  * | Bit   | Field                                  | Default | Notes                                      |
  * |-------|----------------------------------------|---------|--------------------------------------------|
@@ -265,18 +267,21 @@ alp_status_t tps628640_get_status(tps628640_t *ctx, uint8_t *status_byte);
  * init).  Setting @p enable to false stops
  * the converter but preserves every register (per datasheet
  * §8.4.10); setting it back to true re-runs soft-start without the
- * usual tDelay.  Enabling first re-reads VOUT1 and refuses
- * (::ALP_ERR_OUT_OF_RANGE) unless it lies inside the installed window --
- * the chip energizes whatever VOUT1 currently holds, so this guards
- * against turning on a stale or never-validated setpoint.
+ * usual tDelay.  Enabling first re-reads VOUT1 *and* VOUT2 and refuses
+ * (::ALP_ERR_OUT_OF_RANGE) unless BOTH lie inside the installed window --
+ * the VID pin, not this driver, selects which one the chip actually
+ * energizes, and the driver cannot read that strap, so it guards against
+ * turning on either a stale or a never-validated setpoint.  Checked
+ * whenever the entry has a window installed, independent of
+ * @ref pmic_rail_limit_t::voltage_writable (see `pmic_rail_limit.h`).
  *
  * @param ctx     TPS628640 context handle (must be initialised first).
  * @param enable  true = converter on.
  * @return ALP_OK; ALP_ERR_NOT_READY if uninitialised; ALP_ERR_NOSUPPORT if
  *         no entry is installed, the instance is not enable-writable, or
  *         @p enable is false on a `critical` instance; ALP_ERR_OUT_OF_RANGE
- *         if @p enable is true and the live VOUT1 setpoint lies outside the
- *         installed window; the bus status on I2C failure.
+ *         if @p enable is true and the live VOUT1 or VOUT2 setpoint lies
+ *         outside the installed window; the bus status on I2C failure.
  */
 alp_status_t tps628640_software_enable(tps628640_t *ctx, bool enable);
 
@@ -322,10 +327,21 @@ alp_status_t tps628640_set_ramp_speed(tps628640_t *ctx, tps628640_ramp_speed_t s
  * captured beforehand and re-applied once the reset lands, so a rail
  * needing forced PWM does not silently come back up in PFM mode.
  *
+ * The chip's own reset always re-enables the converter (CTRL_DEFAULT has
+ * SOFTWARE_ENABLE=1) at whatever VOUT1 it restarts with -- neither of
+ * which this driver controls.  After the reset lands, this call re-reads
+ * VOUT1 and switches SOFTWARE_ENABLE back off (leaving CONTROL otherwise
+ * as just written) when either the rail was disabled going in, or the
+ * post-reset VOUT1 falls outside the installed window; the latter case
+ * additionally reports ::ALP_ERR_OUT_OF_RANGE so the caller knows the
+ * rail did not come back up clean, not just that it was switched off.
+ *
  * @param ctx  TPS628640 context handle (must be initialised first).
  * @return ALP_OK; ALP_ERR_NOT_READY if uninitialised; ALP_ERR_NOSUPPORT if
  *         no entry is installed, the instance is not enable-writable, or it
- *         is `critical`; the bus status on I2C failure.
+ *         is `critical`; ALP_ERR_OUT_OF_RANGE if the post-reset VOUT1 falls
+ *         outside the installed window (the rail is left disabled); the
+ *         bus status on I2C failure.
  */
 alp_status_t tps628640_reset_to_defaults(tps628640_t *ctx);
 

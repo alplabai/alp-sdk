@@ -47,6 +47,17 @@ static bool ready(const tps628640_t *ctx)
 	return ctx != NULL && ctx->initialised;
 }
 
+/* pmic_rail_limit.h's ONE enable rule: refuse when a window exists (0 = no
+ * window, the shared sentinel every driver -- DA9292, ACT88760, this one --
+ * uses) and the live setpoint lies outside it.  A window can exist even
+ * when !voltage_writable (a rail whose voltage is fixed but still worth
+ * bounding before energizing it), so this checks the window itself, never
+ * voltage_writable. */
+static bool in_window(const pmic_rail_limit_t *l, uint16_t mv)
+{
+	return l->max_mv != 0u && mv >= l->min_mv && mv <= l->max_mv;
+}
+
 /* Enable/disable permission shared by software_enable() and
  * reset_to_defaults() (a reset is a momentary rail drop). */
 static alp_status_t check_enable(const tps628640_t *ctx, bool enable)
@@ -115,13 +126,18 @@ tps628640_init(tps628640_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, uint16_t def
 	uint8_t v = 0;
 	if (reg_read(ctx, TPS628640_REG_VOUT1, &v) != ALP_OK) return ALP_ERR_NOT_READY;
 
-	/* Seed the shadow from the live CONTROL byte when it reads back
-	 * plausibly (bench V2M103 reads 0x6F).  A converter that answers
-	 * here is running, so a byte without SOFTWARE_ENABLE means CONTROL
-	 * did not read back (0x00) -- keep the datasheet default. */
+	/* Seed the shadow from the live CONTROL byte whenever the read
+	 * actually lands something (bench V2M103 reads 0x6F).  Shadow ANY
+	 * readable non-0x00 byte -- including one with SOFTWARE_ENABLE
+	 * clear.  The earlier version only trusted a byte with
+	 * SOFTWARE_ENABLE set, on the theory that a byte without it means
+	 * CONTROL did not really read back; that is wrong for a rail that
+	 * is genuinely disabled (SOFTWARE_ENABLE cleared, other bits
+	 * non-zero) -- it left the shadow at CTRL_DEFAULT (SOFTWARE_ENABLE
+	 * set), so the very next set_fpwm_mode()/set_ramp_speed() call
+	 * would silently re-enable a rail init found off. */
 	uint8_t ctrl = 0;
-	if (reg_read(ctx, TPS628640_REG_CONTROL, &ctrl) == ALP_OK &&
-	    (ctrl & TPS628640_CTRL_SOFTWARE_ENABLE) != 0u) {
+	if (reg_read(ctx, TPS628640_REG_CONTROL, &ctrl) == ALP_OK && ctrl != 0x00u) {
 		ctx->control_shadow = (uint8_t)(ctrl & (uint8_t)~TPS628640_CTRL_RESET);
 	}
 
@@ -177,19 +193,26 @@ alp_status_t tps628640_software_enable(tps628640_t *ctx, bool enable)
 	if (s != ALP_OK) return s;
 
 	if (enable) {
-		/* Enabling energizes the chip's CURRENTLY programmed VOUT1 --
-		 * refuse instead of blindly turning on an unconfirmed setpoint
-		 * (stale POR value, or a window that shrank after the last
-		 * write).  VOUT1 always reads back once the chip answers on the
-		 * bus at all (bench-confirmed on every populated instance,
-		 * including 0x4F/DDR5_VDDQ_0V5 at 0x14 = 500 mV), so there is no
-		 * "not populated yet" excuse to skip this. */
+		/* Enabling energizes the chip's CURRENTLY programmed VOUT1 *and*
+		 * VOUT2 (the VID-pin selects which one is live, and the driver
+		 * cannot read the VID strap) -- refuse instead of blindly
+		 * turning on an unconfirmed setpoint (stale POR value, or a
+		 * window that shrank after the last write).  Checked whenever a
+		 * window exists, per pmic_rail_limit.h's rule, not gated on
+		 * voltage_writable: a read-only-voltage rail can still have a
+		 * window worth enforcing before it is energized.  VOUT1/VOUT2
+		 * always read back once the chip answers on the bus at all
+		 * (bench-confirmed on every populated instance, including
+		 * 0x4F/DDR5_VDDQ_0V5 at 0x14 = 500 mV), so there is no "not
+		 * populated yet" excuse to skip this. */
 		const pmic_rail_limit_t *l = ctx->limit;
-		if (l->voltage_writable) {
-			uint16_t mv = 0;
-			s           = get_vout(ctx, TPS628640_REG_VOUT1, &mv);
+		if (l->max_mv != 0u) {
+			uint16_t mv1 = 0, mv2 = 0;
+			s = get_vout(ctx, TPS628640_REG_VOUT1, &mv1);
 			if (s != ALP_OK) return s;
-			if (mv < l->min_mv || mv > l->max_mv) return ALP_ERR_OUT_OF_RANGE;
+			s = get_vout(ctx, TPS628640_REG_VOUT2, &mv2);
+			if (s != ALP_OK) return s;
+			if (!in_window(l, mv1) || !in_window(l, mv2)) return ALP_ERR_OUT_OF_RANGE;
 		}
 	}
 
@@ -223,15 +246,20 @@ alp_status_t tps628640_reset_to_defaults(tps628640_t *ctx)
 	alp_status_t s = check_enable(ctx, false);
 	if (s != ALP_OK) return s;
 
+	const pmic_rail_limit_t *l = ctx->limit; /* non-NULL: check_enable() just confirmed it */
+	/* Remember whether the rail was on going in -- the chip's reset is
+	 * about to re-enable it unconditionally, and a rail this driver (or
+	 * its caller) left disabled must come back disabled, not springing
+	 * to life just because a reset happened to run. */
+	const bool was_enabled = (ctx->control_shadow & TPS628640_CTRL_SOFTWARE_ENABLE) != 0u;
+
 	/* The chip's own reset re-enables the converter (CTRL_DEFAULT has
 	 * SOFTWARE_ENABLE=1) at the datasheet-default FPWM/ramp settings
 	 * (FPWM off, slowest ramp) -- silently dropping whatever a prior
 	 * tps628640_set_fpwm_mode()/set_ramp_speed() call configured right
 	 * as the rail re-energizes.  Capture them before the reset and
-	 * restore them after, through the same guard check_enable() already
-	 * cleared (ctx->limit is non-NULL whenever check_enable() succeeds),
-	 * so e.g. a DEEPX buck that needs FPWM for load-transient stability
-	 * doesn't come back up in PFM mode. */
+	 * restore them after, so e.g. a DEEPX buck that needs FPWM for
+	 * load-transient stability doesn't come back up in PFM mode. */
 	const uint8_t fpwm_bit  = (uint8_t)(ctx->control_shadow & TPS628640_CTRL_FPWM_MODE);
 	const uint8_t ramp_bits = (uint8_t)(ctx->control_shadow & TPS628640_CTRL_RAMP_SPEED_MASK);
 
@@ -245,8 +273,27 @@ alp_status_t tps628640_reset_to_defaults(tps628640_t *ctx)
 	    (uint8_t)((ctx->control_shadow &
 	               (uint8_t)~(TPS628640_CTRL_FPWM_MODE | TPS628640_CTRL_RAMP_SPEED_MASK)) |
 	              fpwm_bit | ramp_bits);
-	if (want != ctx->control_shadow) s = write_control(ctx, want);
-	return s;
+	if (want != ctx->control_shadow) {
+		s = write_control(ctx, want);
+		if (s != ALP_OK) return s;
+	}
+
+	/* The reset can also revert VOUT1 to its POR default, which may no
+	 * longer sit inside a window installed after that POR value was
+	 * read -- re-check it exactly like software_enable() would, and
+	 * disable the rail again (fail-closed) when either the window
+	 * disagrees or the rail was off before this call, rather than
+	 * leaving it energized against the window or the caller's intent. */
+	uint16_t     mv = 0;
+	alp_status_t vs = get_vout(ctx, TPS628640_REG_VOUT1, &mv);
+	if (vs != ALP_OK) return vs;
+	const bool out_of_window = l->max_mv != 0u && !in_window(l, mv);
+	if (out_of_window || !was_enabled) {
+		alp_status_t ds = write_control(
+		    ctx, (uint8_t)(ctx->control_shadow & (uint8_t)~TPS628640_CTRL_SOFTWARE_ENABLE));
+		if (ds != ALP_OK) return ds;
+	}
+	return out_of_window ? ALP_ERR_OUT_OF_RANGE : ALP_OK;
 }
 
 alp_status_t tps628640_read_reg(tps628640_t *ctx, uint8_t reg, uint8_t *val)

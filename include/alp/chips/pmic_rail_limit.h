@@ -28,10 +28,28 @@
  *     (::ALP_ERR_OUT_OF_RANGE) unless the ENCODED setpoint the driver
  *     would program lies inside [@ref pmic_rail_limit_t::min_mv,
  *     @ref pmic_rail_limit_t::max_mv];
- *   - enable: refused unless @ref pmic_rail_limit_t::enable_writable;
- *   - disable: refused unless @ref pmic_rail_limit_t::enable_writable AND
- *     NOT @ref pmic_rail_limit_t::critical -- a critical rail can never be
+ *   - enable: refused (::ALP_ERR_NOSUPPORT) unless
+ *     @ref pmic_rail_limit_t::enable_writable;
+ *   - disable: refused (::ALP_ERR_NOSUPPORT) unless
+ *     @ref pmic_rail_limit_t::enable_writable AND NOT
+ *     @ref pmic_rail_limit_t::critical -- a critical rail can never be
  *     turned off by software, whatever else the table says.
+ *
+ * @par The ONE enable-time window rule
+ * Every driver applies exactly this rule when @p enable is `true`:
+ * **enable refuses (::ALP_ERR_OUT_OF_RANGE) when a window exists
+ * (`max_mv != 0` -- `min_mv`/`max_mv` both `0` means "no window", e.g. an
+ * enable-only load switch) and the live setpoint(s) the chip would
+ * energize is outside it.**  This check runs independent of
+ * @ref pmic_rail_limit_t::voltage_writable -- a rail can have a window
+ * worth enforcing before it is switched on even when software is not
+ * allowed to reprogram its voltage.  ACT88760 (act8760_rail_set_enable()),
+ * DA9292 (da9292_set_enable()) and TPS628640 (tps628640_software_enable(),
+ * which checks VOUT1 *and* VOUT2 because the VID pin picks which one is
+ * live) all read the rail's actual live setpoint(s) back over I2C and
+ * check them against the window before energizing anything -- never skip
+ * this check on the theory that the rail "isn't voltage-writable so
+ * there's nothing to validate".
  */
 
 #ifndef ALP_CHIPS_PMIC_RAIL_LIMIT_H

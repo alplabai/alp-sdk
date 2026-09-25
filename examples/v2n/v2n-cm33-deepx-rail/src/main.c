@@ -123,12 +123,24 @@ int main(void)
 	}
 
 	/* P64 DEEPX_CORE_0P75_EN: output, start low (rail stays down until
-	 * the sequence below confirms CH2 power-good). */
+	 * the sequence below confirms CH2 power-good).  Write false BEFORE
+	 * configure, then again after -- the same write-before-configure-
+	 * then-write-after pattern chips/tas2563/tas2563.c's SD_N handling
+	 * uses (see the long comment above its `if (sd_n != NULL)` block)
+	 * for the identical reason: `alp_gpio_configure(..., ALP_GPIO_OUTPUT,
+	 * ...)` deliberately does not force a level (see `_to_gpio_flags()`,
+	 * src/backends/gpio/zephyr_drv.c), so on a backend whose direction
+	 * switch alone can glitch the data register, only a write already in
+	 * flight before that switch closes the window; the second write
+	 * covers a backend (gpio_emul among them) that drops a write issued
+	 * before the pin is configured as output. */
 	alp_gpio_t  *core_en = alp_gpio_open(PIN_ID_DEEPX_CORE_0P75_EN);
-	alp_status_t s       = (core_en != NULL)
-	                           ? alp_gpio_configure(core_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE)
-	                           : ALP_ERR_NOT_READY;
-	if (s == ALP_OK) s = alp_gpio_write(core_en, false);
+	alp_status_t s       = ALP_ERR_NOT_READY;
+	if (core_en != NULL) {
+		s = alp_gpio_write(core_en, false);
+		if (s == ALP_OK) s = alp_gpio_configure(core_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+		if (s == ALP_OK) s = alp_gpio_write(core_en, false);
+	}
 	if (s != ALP_OK) {
 		printf("[cm33-deepx-rail] P64 (DEEPX_CORE_0P75_EN) open/configure failed: %d\n", (int)s);
 		goto out_core_en; /* alp_gpio_close(NULL) is a safe no-op if open() itself failed */

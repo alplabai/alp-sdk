@@ -448,9 +448,10 @@ ZTEST(alp_chips, test_act8760_write_reg_deny_and_allow)
 	    act8760_set_limits(&ctx, act_v2n_limits, V2N_POWER_ACT8760_GPIO_POLARITY_WRITABLE_MASK));
 
 	/* Hard-deny: MSTR 0x07 (MR / SLEEP / DPSLP / POWER OFF / watchdog),
-	 * 0x09, 0x0A, the IO-delay / WDTIME registers 0x0B / 0x0C, factory
-	 * 0x15..0x26 and 0x2D..0x32. */
-	static const uint8_t deny[] = { 0x07u, 0x09u, 0x0Au, 0x0Bu, 0x0Cu };
+	 * 0x09, 0x0A, the IO-delay / WDTIME registers 0x0B / 0x0C, 0x14
+	 * (POK_OV / VSYSWARN thresholds -- a bad value can trip PMIC
+	 * shutdown), factory 0x15..0x26 and 0x2D..0x32. */
+	static const uint8_t deny[] = { 0x07u, 0x09u, 0x0Au, 0x0Bu, 0x0Cu, 0x14u };
 	for (size_t i = 0; i < ARRAY_SIZE(deny); i++) {
 		zassert_equal(act8760_write_reg(&ctx, ACT8760_PAGE_SYSTEM, deny[i], 0x00u),
 		              ALP_ERR_NOSUPPORT,
@@ -474,7 +475,7 @@ ZTEST(alp_chips, test_act8760_write_reg_deny_and_allow)
 	zassert_equal(fake_act8760_log_len(), 0u, "a refused write must never reach the bus");
 
 	/* The allow-list lands, one byte each. */
-	static const uint8_t allow[] = { 0x01u, 0x05u, 0x14u, 0x2Bu, 0x33u };
+	static const uint8_t allow[] = { 0x01u, 0x05u, 0x2Bu, 0x33u };
 	for (size_t i = 0; i < ARRAY_SIZE(allow); i++) {
 		const uint8_t val = (uint8_t)(0x5Au + i);
 		zassert_ok(act8760_write_reg(&ctx, ACT8760_PAGE_SYSTEM, allow[i], val));
@@ -617,6 +618,43 @@ ZTEST(alp_chips, test_act8760_noncritical_disable_hits_add2)
 	alp_i2c_close(bus);
 }
 
+/* act8760_rail_set_enable(true) must refuse a live VSET the guard window no
+ * longer covers, the same rule da9292_set_enable() / software_enable()
+ * already apply -- exercised through a synthetic voltage+enable-writable
+ * entry, since no real V2N rail combines both (every ACT88760 "voltage"
+ * rail in the power tree is CMI-hardware-sequenced and enable_writable is
+ * false there by design; see power-tree.yaml's control-class comment). */
+ZTEST(alp_chips, test_act8760_rail_set_enable_refuses_vout_outside_window)
+{
+	act8760_t  ctx;
+	alp_i2c_t *bus = act_setup(&ctx);
+
+	static const pmic_rail_limit_t buck1_ve[ACT8760_RAIL_COUNT] = {
+		[ACT8760_RAIL_BUCK1] = { .min_mv           = 3150u,
+		                         .max_mv           = 3450u,
+		                         .voltage_writable = true,
+		                         .enable_writable  = true },
+	};
+	zassert_ok(act8760_set_limits(&ctx, buck1_ve, 0u));
+
+	/* Bench-programmed VSET0 (0xF0, range 1) decodes to 3300 mV, inside
+	 * [3150, 3450]: enabling succeeds. */
+	zassert_ok(act8760_rail_set_enable(&ctx, ACT8760_RAIL_BUCK1, true));
+	zassert_equal(fake_act8760_get_reg(0u, 0x44u), 0x80u);
+
+	/* Move VSET outside the window via a direct fake write (as if a
+	 * stale/POR value never went through the guarded setter) and confirm
+	 * a fresh enable now refuses without ever touching ON. */
+	fake_act8760_set_reg(0u, 0x44u, 0x00u); /* start from OFF to observe the refusal */
+	fake_act8760_set_reg(0u, 0x42u, 0x00u); /* VSET 0 -> 500 mV, outside [3150, 3450] */
+	zassert_equal(act8760_rail_set_enable(&ctx, ACT8760_RAIL_BUCK1, true), ALP_ERR_OUT_OF_RANGE);
+	zassert_equal(fake_act8760_get_reg(0u, 0x44u), 0x00u, "refused enable must never touch ON");
+	zassert_equal(fake_act8760_write_count(0u, 0x44u), 0u);
+
+	act8760_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
 /* ---- TPS628640 ----------------------------------------------------- */
 
 static const pmic_rail_limit_t tps_l44  = V2N_M1_POWER_TPS628640_DDR5_VDD2H_1V05_LIMIT_INIT;
@@ -698,8 +736,11 @@ ZTEST(alp_chips, test_tps628640_software_enable_gating)
 	/* b44 (addr 0x44) is on-the-bench at 1050 mV, outside tps_crit's
 	 * [570, 630] LPD4x_0V6 window borrowed here for the critical-flag
 	 * check -- program a live setpoint inside that window first, since
-	 * enabling now validates VOUT1 against the installed window. */
+	 * enabling now validates VOUT1 *and* VOUT2 against the installed
+	 * window (the driver can't read the VID strap that picks which one
+	 * is live, so both must be confirmed). */
 	zassert_ok(tps628640_set_voltage_mv(&b44, 600u));
+	zassert_ok(tps628640_set_voltage2_mv(&b44, 600u));
 	zassert_ok(tps628640_software_enable(&b44, true));
 
 	tps628640_deinit(&b44);
@@ -732,6 +773,112 @@ ZTEST(alp_chips, test_tps628640_enable_refuses_vout_outside_window)
 	    fake_tps628640_write_count(0x4Fu, TPS628640_REG_CONTROL),
 	    2u,
 	    "the earlier enable+disable wrote CONTROL twice; the refused re-enable adds none");
+
+	tps628640_deinit(&b44);
+	tps628640_deinit(&b48);
+	tps628640_deinit(&b4f);
+	alp_i2c_close(bus);
+}
+
+/* The VID pin -- not the driver -- picks whether VOUT1 or VOUT2 is live, and
+ * the driver cannot read that strap, so enabling must refuse when EITHER
+ * setpoint is outside the window, not just VOUT1. */
+ZTEST(alp_chips, test_tps628640_enable_refuses_vout2_outside_window)
+{
+	tps628640_t b44, b48, b4f;
+	alp_i2c_t  *bus = tps_setup(&b44, &b48, &b4f);
+
+	zassert_ok(tps628640_set_limits(&b4f, &tps_l4f));
+
+	/* VOUT1 stays at its in-window POR value; only VOUT2 moves outside
+	 * [475, 525]. */
+	fake_tps628640_set_reg(0x4Fu, TPS628640_REG_VOUT2, 0x00u /* 400 mV */);
+	zassert_equal(tps628640_software_enable(&b4f, true), ALP_ERR_OUT_OF_RANGE);
+	zassert_equal(fake_tps628640_write_count(0x4Fu, TPS628640_REG_CONTROL), 0u);
+
+	tps628640_deinit(&b44);
+	tps628640_deinit(&b48);
+	tps628640_deinit(&b4f);
+	alp_i2c_close(bus);
+}
+
+/* #<PMIC review> init(): a rail found DISABLED (CONTROL reads back non-zero
+ * with SOFTWARE_ENABLE clear) must shadow that state, not silently seed
+ * CTRL_DEFAULT (SOFTWARE_ENABLE=1) -- otherwise the next set_fpwm_mode()
+ * (a call that has nothing to do with enable) writes the shadow back and
+ * re-enables a rail init found off. */
+ZTEST(alp_chips, test_tps628640_init_shadows_disabled_control)
+{
+	tps628640_t b44, b48, b4f;
+	fake_tps628640_reset(0x44u);
+	fake_tps628640_reset(0x48u);
+	fake_tps628640_reset(0x4Fu);
+	/* A disabled rail: SOFTWARE_ENABLE (bit5) clear, everything else at
+	 * its datasheet default -- readable, non-zero, not the "no answer"
+	 * 0x00 case. */
+	fake_tps628640_set_reg(0x4Fu, TPS628640_REG_CONTROL, 0x4Fu);
+
+	alp_i2c_t *bus = pmic_bus_open();
+	zassert_not_null(bus);
+	zassert_ok(tps628640_init(&b44, bus, 0x44u, 1050u));
+	zassert_ok(tps628640_init(&b48, bus, 0x48u, 850u));
+	zassert_ok(tps628640_init(&b4f, bus, 0x4Fu, 500u));
+
+	zassert_ok(tps628640_set_limits(&b4f, &tps_l4f));
+	zassert_ok(tps628640_set_fpwm_mode(&b4f, true));
+	zassert_equal(fake_tps628640_get_reg(0x4Fu, TPS628640_REG_CONTROL),
+	              0x5Fu,
+	              "FPWM bit (0x10) added to the disabled shadow (0x4F); "
+	              "SOFTWARE_ENABLE (0x20) must stay clear");
+
+	tps628640_deinit(&b44);
+	tps628640_deinit(&b48);
+	tps628640_deinit(&b4f);
+	alp_i2c_close(bus);
+}
+
+/* A reset must not spring a previously-disabled rail back to life: the
+ * chip's own reset always re-enables the converter (CTRL_DEFAULT has
+ * SOFTWARE_ENABLE=1), so the driver must notice the rail was off going in
+ * and switch it back off once the reset lands. */
+ZTEST(alp_chips, test_tps628640_reset_keeps_a_disabled_rail_disabled)
+{
+	tps628640_t b44, b48, b4f;
+	alp_i2c_t  *bus = tps_setup(&b44, &b48, &b4f);
+
+	zassert_ok(tps628640_set_limits(&b4f, &tps_l4f));
+	zassert_ok(tps628640_software_enable(&b4f, false));
+	zassert_equal(fake_tps628640_get_reg(0x4Fu, TPS628640_REG_CONTROL), 0x4Fu);
+
+	zassert_ok(tps628640_reset_to_defaults(&b4f));
+	zassert_equal(
+	    (fake_tps628640_get_reg(0x4Fu, TPS628640_REG_CONTROL) & TPS628640_CTRL_SOFTWARE_ENABLE),
+	    0u,
+	    "reset must not leave a previously-off rail energized");
+
+	tps628640_deinit(&b44);
+	tps628640_deinit(&b48);
+	tps628640_deinit(&b4f);
+	alp_i2c_close(bus);
+}
+
+/* A reset must also refuse to leave the rail energized at an out-of-window
+ * VOUT1 -- the chip's reset can revert VOUT1 to its POR default, which may
+ * no longer be inside a window installed after that POR value was set.
+ * Non-critical b48 (POR VOUT1 0x5A = 850 mV) with 0x44's foreign
+ * [1000, 1100] window installed on it exercises that mismatch without
+ * hitting the critical-rail NOSUPPORT check_enable() already refuses on. */
+ZTEST(alp_chips, test_tps628640_reset_disables_out_of_window_vout)
+{
+	tps628640_t b44, b48, b4f;
+	alp_i2c_t  *bus = tps_setup(&b44, &b48, &b4f);
+
+	zassert_ok(tps628640_set_limits(&b48, &tps_l44));
+	zassert_equal(tps628640_reset_to_defaults(&b48), ALP_ERR_OUT_OF_RANGE);
+	zassert_equal(
+	    (fake_tps628640_get_reg(0x48u, TPS628640_REG_CONTROL) & TPS628640_CTRL_SOFTWARE_ENABLE),
+	    0u,
+	    "reset must disable a rail it cannot confirm is in-window");
 
 	tps628640_deinit(&b44);
 	tps628640_deinit(&b48);

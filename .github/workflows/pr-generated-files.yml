@@ -318,7 +318,7 @@ jobs:
                         docs/verification-status.md \
                         examples/aen \
                         src/backends/gpio/cc3501e_rev_dependent_pins.c \
-                        include/alp/chips/v2n_power_tree.h
+                        include/alp/chips/*_power_tree.h
           # No line-mask here: abi_snapshot.py's own write-skip guard
           # (above) is what keeps a no-op rerun from touching the
           # "generated" line at all, so this diff sees zero lines
@@ -340,7 +340,7 @@ jobs:
                      docs/verification-status.md \
                      examples/aen \
                      src/backends/gpio/cc3501e_rev_dependent_pins.c \
-                     include/alp/chips/v2n_power_tree.h; then
+                     include/alp/chips/*_power_tree.h; then
             echo "::error::Generated files are stale.  Run:"
             echo "::error::  python3 scripts/gen_soc_caps.py"
             echo "::error::  python3 scripts/gen_status_strings.py"

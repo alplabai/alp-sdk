@@ -50,9 +50,17 @@ OUT_DIR = REPO / "include" / "alp" / "chips"
 
 CHIP_IDS = ("act8760", "da9292", "tps628640")
 
-# control class -> (voltage_writable, enable_writable)
+# control class -> (voltage_writable, enable_writable).  "voltage" grants
+# ONLY a voltage write -- it does NOT imply enable_writable, because most
+# "voltage" rails (every ACT88760 CMI-sequenced rail in the V2N power tree)
+# are switched by the PMIC's own hardware sequence and were never meant to
+# be software-enabled/disabled over I2C.  A rail that genuinely needs both
+# (e.g. a TPS628640 buck whose SOFTWARE_ENABLE bit is a documented guarded
+# API) opts in explicitly with "voltage_enable" -- reviewed per rail, not a
+# default.
 _CONTROL_FLAGS = {
-    "voltage": (True, True),
+    "voltage": (True, False),
+    "voltage_enable": (True, True),
     "sequence": (True, True),
     "enable": (False, True),
     "none": (False, False),
@@ -229,7 +237,7 @@ def cross_check(tree: dict, chips: dict, som_presets: dict[str, dict],
             if not any(d.get("chip") == c and int(str(d.get("address_7bit")), 0) == rail["i2c_addr"] for d in devs):
                 errs.append(f"rail {rid}: {sku} declares no {c} at 0x{rail['i2c_addr']:02X} on {tree['bus']}")
         # window policy
-        writable = rail["control"] in ("voltage", "sequence")
+        writable = rail["control"] in ("voltage", "voltage_enable", "sequence")
         if rail["target_mv"] is None or rail["window_mv"] is None:
             if writable:
                 errs.append(f"rail {rid}: control '{rail['control']}' needs target_mv and window_mv (TBD => control: none)")

@@ -7,9 +7,10 @@ electrical fault (line held low / missing pull-ups / wrong pinmux)
 from per-device failures, then probes every populated IC read-only
 and prints a PASS/FAIL/SKIP table.
 
-> RIIC8/BRD_I2C is Cortex-A55/Linux-exclusive
-> (`metadata/e1m_modules/v2n/core-ownership.yaml`) -- the CM33 must
-> never master it. This app runs on the A55, following the same
+> RIIC8/BRD_I2C is Cortex-A55/Linux-exclusive in `a55_boot` mode
+> (`metadata/e1m_modules/v2n/core-ownership.yaml`) -- the CM33 masters it
+> only transiently during its own `cm33_boot` rail sequence
+> (`examples/v2n/v2n-cm33-deepx-rail`), never here. This app runs on the A55, following the same
 > pattern as [`v2n-power-monitor`](../v2n-power-monitor/) (portable
 > `<alp/i2c.h>` + natural-name chip drivers, Linux `/dev/i2c-8`
 > backend).

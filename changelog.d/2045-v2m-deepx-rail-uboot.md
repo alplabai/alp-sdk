@@ -35,7 +35,12 @@ names a possible EN2-gates-CH2 hardware-wiring question (see
 
 **Maintainer decision carried through in full:** Cortex-A55/Linux is the
 sole master of RIIC8/BRD_I2C; the CM33 must never master it or claim
-P64/P65.
+P64/P65. (Superseded in part by `changelog.d/2045-cm33-boot-deepx-rail.md`
+in this same release: `cm33_boot` mode now time-slices that mastership --
+the CM33 masters RIIC8/BRD_I2C and P64/P65 UNTIL it releases the CA55,
+after which this decision's "sole master" holds exactly as stated here.
+Never concurrent, so no contradiction, but "must never master it" is no
+longer true unqualified.)
 
 - `src/zephyr/v2n_power_mgmt.c` / `.h`, `CONFIG_ALP_SDK_V2N_POWER_MGMT`, and
   the V2N supervisor's BRD_I2C transport

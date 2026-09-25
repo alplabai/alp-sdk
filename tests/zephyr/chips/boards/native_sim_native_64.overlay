@@ -122,6 +122,14 @@
                 compatible = "alp,fake-tps628640";
                 reg = <0x4f>;
             };
+            /* 0x6A: strap_field 2 of the 0x68..0x6B clk_5l35023b range
+             * (0x68/0x69/0x6D unused here, and 0x69 is fake_bmi323
+             * above) -- clk_5l35023b_register_dump()'s one-transaction-
+             * per-register proof. */
+            fake_clk_5l35023b: fake_clk_5l35023b@6a {
+                compatible = "alp,fake-clk_5l35023b";
+                reg = <0x6a>;
+            };
         };
     };
 

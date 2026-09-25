@@ -46,8 +46,10 @@ EN line) or address-strapped wrong.
 
 ### 2. DA9292 DEEPX rail (CH2) -- owned by U-Boot, nothing to do here
 
-**U-Boot performs this step; no firmware you write needs to.** Before
-this, the same `board_late_init()` also runs the on-module
+**U-Boot performs this step outside its `cm33_boot` pre-handoff window; no
+firmware you write needs to.**  In `a55_boot` mode (and in `a55_boot`'s
+share of `cm33_boot` mode, after the CM33 hands the CA55 off), before
+this DEEPX step the same `board_late_init()` also runs the on-module
 clock-generator fixup, unconditionally on every boot of any V2N/V2M
 SKU (not just V2N-M1) --
 `meta-alp-sdk/recipes-bsp/u-boot/u-boot/0007-rzv2n-dev-ALP-E1M-clkgen-otp-fixup.patch`,
@@ -62,9 +64,14 @@ U-Boot's `board_late_init()`
 sequences CH2 to 0.75 V and confirms power-good over RIIC8/BRD_I2C
 BEFORE Linux or the CM33 image ever starts, and only then releases
 `M1_RESET` (step 3 below).  RIIC8/BRD_I2C is Cortex-A55/Linux-exclusive
-(`metadata/e1m_modules/v2n/core-ownership.yaml`) -- the CM33 must never
-master it, so there is no CM33 code path that could run this sequence
-even if you wanted it to.
+in `a55_boot` mode
+(`metadata/e1m_modules/v2n/core-ownership.yaml`) -- but ownership is
+TIME-SLICED, not a blanket exclusion: in `cm33_boot` mode the CM33 masters
+RIIC8 first and runs this same sequence itself
+(`examples/v2n/v2n-cm33-deepx-rail`, see below) before it releases the
+CA55, at which point U-Boot's copy of the sequence runs again as a
+warm/idempotent verify, not a re-sequence. "No CM33 code path" was true
+before #2045 and is stale now.
 
 At the U-Boot prompt (or in its serial log) you should see:
 

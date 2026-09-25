@@ -263,6 +263,19 @@ void     fake_tps628640_set_reg(uint8_t addr, uint8_t reg, uint8_t val);
 uint32_t fake_tps628640_write_count(uint8_t addr, uint8_t reg);
 void     fake_tps628640_reset(uint8_t addr);
 
+/* ------------------------------------------------------------------ */
+/* fake clk_5l35023b                                                    */
+/* ------------------------------------------------------------------ */
+/* Fixed at 0x6A (GENERAL_CTRL strap_field = 2).  read_log records the
+ * length of every READ transaction the driver issues, so a ztest can
+ * confirm clk_5l35023b_register_dump() sends one single-byte read per
+ * register instead of one combined multi-byte burst. */
+
+void    fake_clk_5l35023b_set_reg(uint8_t reg, uint8_t val);
+size_t  fake_clk_5l35023b_read_log_len(void);
+uint8_t fake_clk_5l35023b_read_log_at(size_t i);
+void    fake_clk_5l35023b_reset(void);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

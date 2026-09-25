@@ -186,10 +186,20 @@ _ZEPHYR_DRIVER_INCLUDE_RE = re.compile(
 # Headers under include/alp/chips/ that are NOT chip drivers, so they have
 # no metadata/chips/<name>.yaml and no board.yaml `chips:` entry.  Each is
 # a shared type or a generated per-family table the chip drivers consume.
+#
+# gen_power_tree.py names its output "<family_dir>_power_tree.h" for
+# WHATEVER family directory sits under metadata/e1m_modules/ (today just
+# "v2n" -> v2n_power_tree.h) -- match that whole family, not one hardcoded
+# family name, so a second family's power-tree.yaml doesn't need a matching
+# edit here to stay portability-clean.
+_NON_CHIP_HEADER_SUFFIXES: tuple[str, ...] = ("_power_tree",)
 _NON_CHIP_HEADERS: dict[str, str] = {
     "pmic_rail_limit": "shared guard-entry type for the PMIC drivers",
-    "v2n_power_tree": "generated from metadata/e1m_modules/v2n/power-tree.yaml",
 }
+
+
+def _is_non_chip_header(chip: str) -> bool:
+    return chip in _NON_CHIP_HEADERS or chip.endswith(_NON_CHIP_HEADER_SUFFIXES)
 
 # Pre-existing examples that #include <zephyr/drivers/...> directly with no
 # portable <alp/*.h> surface to route through today.  Keyed by the example's
@@ -366,7 +376,7 @@ def check_chip_includes_declared(example_dir: pathlib.Path,
             if not match:
                 continue
             chip = match.group(1)
-            if chip in declared or chip in seen or chip in _NON_CHIP_HEADERS:
+            if chip in declared or chip in seen or _is_non_chip_header(chip):
                 continue
             seen.add(chip)
             errors.append(
