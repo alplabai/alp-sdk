@@ -66,6 +66,14 @@ fatals, 0 picture-size violations, 0 encode failures and no row/column banding, 
 settle on the scene; the 640x480 mode on the same branch still delivers 30.03 fps with no
 errors. 30 fps at 1280x960 is not benched yet.
 
+**The 1280x960 stream variant resets the TCP send window to auto.** After #2285 the
+AEN board confs set `CONFIG_NET_TCP_MAX_SEND_WINDOW_SIZE=65535` for the larger 640x480
+buffer pools, and the 1280x960 overlay inherited it while keeping 16/8 TX buffers; the
+stream then sent only its multipart headers and every JPEG send stalled to the 2 s socket
+timeout. `boards/overlay-1280x960.conf` now sets the window to 0, and the merged tree
+streams 1280x960 again on E1M-AEN803 2026W36-0001 (13.80 fps over 60 s at ~39 KB JPEG,
+send-bound at ~0.54 MB/s; 0 errors; frames distinct).
+
 `tests/zephyr/video_sensors/src/ov5647_test.c` gains `test_set_format_1280x960_binned_
 fullfov_before_park` (the coherent register block, ordered before the lane park, mirroring
 the existing 640x480 test), `test_set_format_1280x960_binned_30fps_vts` and
