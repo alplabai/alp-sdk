@@ -64,11 +64,16 @@
  * @par CONTROL register bit layout
  *
  * Bench (E1M-V2M103) reads 0x03 back as 0x6F.  tps628640_init() seeds the
- * software shadow (@c control_shadow) from that read whenever it lands a
- * non-zero byte -- including a disabled rail's byte (SOFTWARE_ENABLE
- * clear) -- falling back to @ref TPS628640_CTRL_DEFAULT only when the read
- * itself fails or comes back exactly 0x00; the typed helpers read-modify-
- * write the shadow.
+ * software shadow (@c control_shadow) from that read verbatim (RESET
+ * masked off, since it self-clears and must never be shadowed as sticky)
+ * -- a SUCCESSFUL read is trusted exactly as it comes back, including a
+ * genuine 0x00 (every bit clear is a real CONTROL state, e.g. a disabled
+ * rail with SOFTWARE_ENABLE clear, not evidence the read secretly
+ * failed).  A FAILED read makes tps628640_init() itself return
+ * ::ALP_ERR_NOT_READY rather than guessing @ref TPS628640_CTRL_DEFAULT --
+ * there is no live CONTROL state to shadow, and shipping a guessed shadow
+ * risks silently re-enabling a rail the driver never actually confirmed.
+ * The typed helpers read-modify-write the shadow from there.
  *
  * | Bit   | Field                                  | Default | Notes                                      |
  * |-------|----------------------------------------|---------|--------------------------------------------|
@@ -159,10 +164,11 @@ typedef struct {
 /**
  * @brief Probe the chip at @p addr and record its design-target voltage.
  *
- * Seeds @c control_shadow from a live CONTROL read (falling back to
- * `TPS628640_CTRL_DEFAULT`) so the typed helpers read-modify-write
- * against the chip's actual state.  Clears the guard entry: call
- * tps628640_set_limits() afterwards.
+ * Seeds @c control_shadow from a live CONTROL read (trusted verbatim on
+ * success, RESET masked off; a failed read fails this call outright --
+ * see the file-level "CONTROL register bit layout" section) so the typed
+ * helpers read-modify-write against the chip's actual state.  Clears the
+ * guard entry: call tps628640_set_limits() afterwards.
  *
  * @param ctx                 Driver context.
  * @param bus                 BRD_I2C handle.
@@ -173,7 +179,8 @@ typedef struct {
  *                            instance.  Used only as metadata; the
  *                            chip self-regulates to its R2D-selected
  *                            voltage at power-on.
- * @return ALP_OK / ALP_ERR_NOT_READY (no ACK) / ALP_ERR_INVAL.
+ * @return ALP_OK / ALP_ERR_NOT_READY (no ACK on the VOUT1 probe, or the
+ *         CONTROL read fails) / ALP_ERR_INVAL.
  */
 alp_status_t
 tps628640_init(tps628640_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, uint16_t default_voltage_mv);

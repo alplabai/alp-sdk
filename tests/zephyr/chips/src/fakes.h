@@ -266,13 +266,22 @@ void     fake_tps628640_reset(uint8_t addr);
 /** Arm a one-shot NACK for the next READ of @p reg on the instance at
  *  @p addr (writes are unaffected). Self-disarms after firing once. */
 void fake_tps628640_fail_next_read(uint8_t addr, uint8_t reg);
-/** Testing-only knob: when @p independent is true, a RESET-bit write no
- *  longer mirrors VOUT1's POR value into VOUT2 for the instance at
- *  @p addr, so a value set on VOUT2 with fake_tps628640_set_reg()
- *  beforehand survives the reset -- lets a ztest prove a VOUT2 check is
- *  real by making it diverge from VOUT1, which the normal mirrored
- *  default can never do. Cleared back to false by fake_tps628640_reset(). */
-void fake_tps628640_set_vout2_por_independent(uint8_t addr, bool independent);
+/** Arm a one-shot NACK for the next WRITE of exactly (@p reg, @p val) on
+ *  the instance at @p addr -- matched on the byte VALUE too, not just the
+ *  register, so a specific write (e.g. the FPWM/ramp-restore byte inside
+ *  tps628640_reset_to_defaults()) can be failed without also failing the
+ *  RESET-bit write that always lands on REG_CONTROL first. Self-disarms
+ *  after firing once; a NACK'd write is never counted or applied. */
+void fake_tps628640_fail_next_write(uint8_t addr, uint8_t reg, uint8_t val);
+/** Testing-only knob: a RESET-bit write normally mirrors VOUT1's POR
+ *  value into VOUT2 (see fake_tps628640.c's regs_revert_to_por()) --
+ *  this overrides VOUT2's OWN post-reset code for the instance at
+ *  @p addr, modelling a real silicon fact this fake can't otherwise
+ *  observe (no bench reading of VOUT2 exists).  Lets a ztest prove the
+ *  driver's VOUT2 check is real by giving it a genuinely different
+ *  post-reset value from VOUT1, which the mirrored default can never
+ *  produce. Cleared back to the mirrored default by fake_tps628640_reset(). */
+void fake_tps628640_set_vout2_por(uint8_t addr, uint8_t code);
 
 /* ------------------------------------------------------------------ */
 /* fake clk_5l35023b                                                    */

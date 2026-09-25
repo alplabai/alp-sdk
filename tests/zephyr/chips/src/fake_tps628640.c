@@ -42,7 +42,11 @@ struct fake_tps628640_data {
 	uint32_t write_count[256];
 	bool     fail_next_read_armed;
 	uint8_t  fail_next_read_reg;
-	bool     vout2_por_independent; /* test hook, see the setter below */
+	bool     fail_next_write_armed;
+	uint8_t  fail_next_write_reg;
+	uint8_t  fail_next_write_val;
+	bool     vout2_por_set;  /* test hook, see fake_tps628640_set_vout2_por() */
+	uint8_t  vout2_por_code; /* valid only when vout2_por_set */
 };
 
 #define FAKE_TPS628640_MAX_SLOTS 4
@@ -66,17 +70,19 @@ static void regs_revert_to_por(struct fake_tps628640_data *d)
 	const uint8_t por_vout = d->addr == 0x44u ? 0x82u : d->addr == 0x48u ? 0x5Au : 0x14u;
 	d->regs[REG_VOUT1]     = por_vout;
 	/* VOUT2 has no bench reading of its own (only VOUT1 was probed) --
-	 * mirror VOUT1's per-address POR value rather than the datasheet's
-	 * generic 0x64, since the OTP that sets VOUT1's startup target per
-	 * instance plausibly sets VOUT2 the same way.  TBD-verify on real
-	 * silicon; tps628640_software_enable() checks both registers
+	 * default to mirroring VOUT1's per-address POR value rather than the
+	 * datasheet's generic 0x64, since the OTP that sets VOUT1's startup
+	 * target per instance plausibly sets VOUT2 the same way.  TBD-verify
+	 * on real silicon; tps628640_software_enable() checks both registers
 	 * because the driver cannot read the VID strap that picks which one
-	 * is live.  fake_tps628640_set_vout2_por_independent() turns this
-	 * mirroring off for one instance -- a testing knob only, so a ztest
-	 * can prove that check is real by making VOUT2 genuinely diverge
-	 * from VOUT1 across a reset, something the mirrored default can
-	 * never do. */
-	if (!d->vout2_por_independent) d->regs[REG_VOUT2] = por_vout;
+	 * is live.  fake_tps628640_set_vout2_por(addr, code) models real
+	 * silicon more literally: VOUT2 has its OWN independent OTP-set POR
+	 * code, which just happens to equal VOUT1's on every instance this
+	 * fake's default models -- the setter overrides that code for one
+	 * instance, so a ztest can prove the VOUT2 check is real by giving it
+	 * a genuinely different post-reset value from VOUT1, something the
+	 * mirrored default can never produce on its own. */
+	d->regs[REG_VOUT2]   = d->vout2_por_set ? d->vout2_por_code : por_vout;
 	d->regs[REG_CONTROL] = 0x6Fu;
 }
 
@@ -85,7 +91,8 @@ static void slot_reset_state(struct fake_tps628640_data *d)
 	memset(d->regs, 0, sizeof d->regs);
 	memset(d->write_count, 0, sizeof d->write_count);
 	d->fail_next_read_armed  = false;
-	d->vout2_por_independent = false;
+	d->fail_next_write_armed = false;
+	d->vout2_por_set         = false;
 	regs_revert_to_por(d);
 }
 
@@ -99,6 +106,17 @@ fake_tps628640_transfer(const struct emul *target, struct i2c_msg *msgs, int num
 		if (msgs[0].len != 2) return -EIO;
 		const uint8_t reg = msgs[0].buf[0];
 		const uint8_t val = msgs[0].buf[1];
+		/* Checked (and consumed) BEFORE the write_count bump / any state
+		 * change: a NACK'd transaction never lands and never counts as a
+		 * write the ztest could mistake for a successful one. Matched on
+		 * (reg, val), not just reg, so a specific byte (e.g. the FPWM/
+		 * ramp-restore write) can be failed without also failing the
+		 * RESET-bit write that always lands on REG_CONTROL first. */
+		if (d->fail_next_write_armed && reg == d->fail_next_write_reg &&
+		    val == d->fail_next_write_val) {
+			d->fail_next_write_armed = false;
+			return -EIO;
+		}
 		d->write_count[reg]++;
 		if (reg == REG_CONTROL && (val & REG_CONTROL_RESET_BIT) != 0u) {
 			regs_revert_to_por(d);
@@ -182,8 +200,19 @@ void fake_tps628640_fail_next_read(uint8_t addr, uint8_t reg)
 	d->fail_next_read_reg   = reg;
 }
 
-void fake_tps628640_set_vout2_por_independent(uint8_t addr, bool independent)
+void fake_tps628640_fail_next_write(uint8_t addr, uint8_t reg, uint8_t val)
 {
 	struct fake_tps628640_data *d = slot_find(addr);
-	if (d) d->vout2_por_independent = independent;
+	if (d == NULL) return;
+	d->fail_next_write_armed = true;
+	d->fail_next_write_reg   = reg;
+	d->fail_next_write_val   = val;
+}
+
+void fake_tps628640_set_vout2_por(uint8_t addr, uint8_t code)
+{
+	struct fake_tps628640_data *d = slot_find(addr);
+	if (d == NULL) return;
+	d->vout2_por_set  = true;
+	d->vout2_por_code = code;
 }

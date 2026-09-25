@@ -510,7 +510,24 @@ static void collect_tps(alp_i2c_t *bus)
 			/* Same -EBUSY race as collect_act() -- re-probe so a
 			 * kernel-claimed chip reports as kernel-owned, not
 			 * silently folded into "absent". */
-			if (kernel_owned(bus, d->addr)) g.tps_p[i] = P_KERNEL;
+			if (kernel_owned(bus, d->addr)) {
+				g.tps_p[i] = P_KERNEL;
+				continue;
+			}
+			/* tps628640_init() fails NOT_READY either way, so a bare
+			 * "absent" here can't tell "nothing answered VOUT1" (the
+			 * ordinary not-populated-yet case) apart from "VOUT1
+			 * ACKed but the follow-up CONTROL read faulted" (a chip
+			 * IS there and something is genuinely wrong) -- re-probe
+			 * VOUT1 alone, read-only, to tell them apart in the
+			 * diagnostic even though both still report absent here. */
+			uint8_t vout1_reg = TPS628640_REG_VOUT1, vout1_val = 0;
+			if (alp_i2c_write_read(bus, d->addr, &vout1_reg, 1u, &vout1_val, 1u) == ALP_OK) {
+				fprintf(stderr,
+				        "tps628640 0x%02X: VOUT1 ACKed but init() still failed "
+				        "(CONTROL read fault) -- reporting absent\n",
+				        d->addr);
+			}
 			continue;
 		}
 		g.tps_p[i] = P_PRESENT;

@@ -836,7 +836,7 @@ ZTEST(alp_chips, test_tps628640_init_shadows_disabled_control)
 	alp_i2c_close(bus);
 }
 
-/* #7 (verify-review follow-up): a genuine CONTROL == 0x00 read is a real
+/* #1165: a genuine CONTROL == 0x00 read is a real
  * chip state (every bit clear -- SOFTWARE_ENABLE included), not evidence
  * the read secretly failed; init() must shadow it verbatim rather than
  * falling back to CTRL_DEFAULT (SOFTWARE_ENABLE=1). */
@@ -933,21 +933,20 @@ ZTEST(alp_chips, test_tps628640_reset_disables_out_of_window_vout)
  * The fake normally mirrors VOUT2 to VOUT1's POR byte on every reset
  * (documented TBD-verify -- no bench reading of VOUT2 exists), which
  * makes the two registers byte-identical and so never independently
- * out-of-window after a real reset; fake_tps628640_set_vout2_por_independent()
- * is a test-only hook that turns that mirroring off for one instance, so
- * a pre-armed VOUT2 value survives the reset unmirrored and this test can
- * prove the VOUT2 check is real, not just VOUT1 read twice. */
+ * out-of-window after a real reset; fake_tps628640_set_vout2_por() is a
+ * test-only hook that overrides VOUT2's own post-reset code for one
+ * instance, so this test can prove the VOUT2 check is real, not just
+ * VOUT1 read twice. */
 ZTEST(alp_chips, test_tps628640_reset_disables_out_of_window_vout2)
 {
 	tps628640_t b44, b48, b4f;
 	alp_i2c_t  *bus = tps_setup(&b44, &b48, &b4f);
 
 	zassert_ok(tps628640_set_limits(&b4f, &tps_l4f));
-	fake_tps628640_set_vout2_por_independent(0x4Fu, true);
-	fake_tps628640_set_reg(0x4Fu, TPS628640_REG_VOUT2, 0x00u /* 400 mV, outside [475, 525] */);
+	fake_tps628640_set_vout2_por(0x4Fu, 0x00u /* 400 mV, outside [475, 525] */);
 
 	/* VOUT1 still reverts to its in-window POR (0x14 = 500 mV); only the
-	 * pre-armed VOUT2 (400 mV) is out of range. */
+	 * overridden VOUT2 POR (400 mV) is out of range. */
 	zassert_equal(tps628640_reset_to_defaults(&b4f), ALP_ERR_OUT_OF_RANGE);
 	zassert_equal(
 	    (fake_tps628640_get_reg(0x4Fu, TPS628640_REG_CONTROL) & TPS628640_CTRL_SOFTWARE_ENABLE),
@@ -960,7 +959,7 @@ ZTEST(alp_chips, test_tps628640_reset_disables_out_of_window_vout2)
 	alp_i2c_close(bus);
 }
 
-/* #2 (verify-review follow-up): a later error after the reset write has
+/* #1165: a later error after the reset write has
  * already landed (a failed post-reset VOUT1 read here) must not leave the
  * rail fail-open -- the chip already re-enabled it at CTRL_DEFAULT before
  * this point.  reset_to_defaults() must attempt the SOFTWARE_ENABLE-clear
@@ -973,11 +972,53 @@ ZTEST(alp_chips, test_tps628640_reset_disables_on_post_reset_read_failure)
 
 	zassert_ok(tps628640_set_limits(&b4f, &tps_l4f));
 	fake_tps628640_fail_next_read(0x4Fu, TPS628640_REG_VOUT1);
-	zassert_not_equal(tps628640_reset_to_defaults(&b4f), ALP_OK);
+	/* The fake's -EIO reaches alp_status_from_zephyr_errno() (src/common/
+	 * alp_errno.h) with no dedicated arm, landing on the ALP_ERR_IO
+	 * default -- assert that EXACT value, not just "not OK", to actually
+	 * prove this is the ORIGINAL bus error propagating through, rather
+	 * than some other failure the fail-open bug could also produce. */
+	zassert_equal(tps628640_reset_to_defaults(&b4f), ALP_ERR_IO);
 	zassert_equal(
 	    (fake_tps628640_get_reg(0x4Fu, TPS628640_REG_CONTROL) & TPS628640_CTRL_SOFTWARE_ENABLE),
 	    0u,
 	    "a failed post-reset VOUT1 read must not leave the rail fail-open");
+
+	tps628640_deinit(&b44);
+	tps628640_deinit(&b48);
+	tps628640_deinit(&b4f);
+	alp_i2c_close(bus);
+}
+
+/* #1165: same fail-open concern as the read-failure test above, but for
+ * the OTHER error path in reset_to_defaults() -- the FPWM/ramp-restore
+ * write itself failing.  The chip has already re-enabled the converter
+ * by the time this write is attempted; a failure here must still clear
+ * SOFTWARE_ENABLE and return the original error, not leave the rail
+ * energized with an unrestored FPWM/ramp config AND an unconfirmed
+ * window. */
+ZTEST(alp_chips, test_tps628640_reset_disables_on_restore_write_failure)
+{
+	tps628640_t b44, b48, b4f;
+	alp_i2c_t  *bus = tps_setup(&b44, &b48, &b4f);
+
+	zassert_ok(tps628640_set_limits(&b4f, &tps_l4f));
+	zassert_ok(tps628640_set_fpwm_mode(&b4f, true));
+	zassert_ok(tps628640_set_ramp_speed(&b4f, TPS628640_RAMP_20_MV_PER_US));
+	zassert_equal(fake_tps628640_get_reg(0x4Fu, TPS628640_REG_CONTROL),
+	              0x7Cu,
+	              "FPWM set (bit4), ramp 00 (bits1:0), rest at CTRL_DEFAULT");
+
+	/* Fail exactly the restore write's byte (0x7C).  The RESET-bit write
+	 * that always lands on REG_CONTROL first (CTRL_DEFAULT | RESET) is a
+	 * different byte, so it is unaffected by this arm and the reset
+	 * itself still lands before the restore write is attempted and
+	 * fails. */
+	fake_tps628640_fail_next_write(0x4Fu, TPS628640_REG_CONTROL, 0x7Cu);
+	zassert_equal(tps628640_reset_to_defaults(&b4f), ALP_ERR_IO);
+	zassert_equal(
+	    (fake_tps628640_get_reg(0x4Fu, TPS628640_REG_CONTROL) & TPS628640_CTRL_SOFTWARE_ENABLE),
+	    0u,
+	    "a failed FPWM/ramp-restore write must not leave the rail fail-open");
 
 	tps628640_deinit(&b44);
 	tps628640_deinit(&b48);

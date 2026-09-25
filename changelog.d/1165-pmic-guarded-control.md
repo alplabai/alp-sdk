@@ -29,13 +29,15 @@ The three drivers now read everything and control only through that table:
   a bad value can trip PMIC shutdown, deny until a typed API needs it),
   `0x15`-`0x26`, `0x2D`-`0x32`, every MODEx, every tile register and all
   of ADD2. The DA9292 raw path reaches only `0x02`-`0x05`. The TPS628640
-  has no raw write path. No ACT88760 VSET (voltage-controlled) rail is
-  enable-writable either: every one of them is the PMIC's own CMI
-  hardware sequence, not a software on/off switch -- only an
-  enable-only entry (no VSET at all) can be enable_writable, and
-  `act8760_rail_set_enable(true)` still refuses
-  (`ALP_ERR_OUT_OF_RANGE`) whenever such an entry has a window and its
-  live VSET reads outside it, the same rule DA9292 / TPS628640 apply.
+  has no raw write path. No ACT88760 rail on V2N / V2N-M1 is
+  enable-writable: every one of them is the PMIC's own CMI hardware
+  sequence, not a software on/off switch, so `act8760_rail_set_enable()`
+  returns `ALP_ERR_NOSUPPORT` on every rail regardless of `true`/`false`.
+  That is a fact about this power tree's installed table, not the driver:
+  `act8760_rail_set_enable(true)` itself still refuses
+  (`ALP_ERR_OUT_OF_RANGE`) on ANY caller-installed table entry that has
+  both `enable_writable` and a window whose live VSET reads outside it,
+  the same rule DA9292 / TPS628640 apply.
 - **ACT88760 Buck3 / Buck4 range** is decoded from tile +1 bit3 (`0x81` /
   `0xA1`), per the AA82BZ register-map workbook. `metadata/chips/act8760.yaml`
   said `0x86` / `0xA6` bit1, which is DBSTBY: decoding that as the range is
