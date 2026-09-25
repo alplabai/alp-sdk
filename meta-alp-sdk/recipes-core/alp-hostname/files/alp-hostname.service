@@ -1,0 +1,14 @@
+[Unit]
+Description=Set the Linux hostname from the SoM SKU U-Boot published to /chosen
+Documentation=https://github.com/alplabai/alp-sdk
+DefaultDependencies=no
+After=local-fs.target
+Before=network-pre.target systemd-hostnamed.service sysinit.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/alp-hostname-set.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target

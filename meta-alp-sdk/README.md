@@ -40,6 +40,8 @@ meta-alp-sdk/
 │   │   └── alp-sdk_0.6.bb               # libalp_sdk.so + headers.
 │   ├── alp-chips/
 │   │   └── alp-chips_0.6.bb             # libalp_chips.a + per-chip PACKAGECONFIG.
+│   ├── alp-hostname/
+│   │   └── alp-hostname_0.1.bb          # Hostname from the SoM SKU (/chosen/alp,sku).
 │   └── alp-system/
 │       ├── alp-dts-reservations_0.6.bb  # Orchestrator-emitted DT reservations.
 │       ├── alp-network-defaults_0.7.bb  # Wired-DHCP networkd story pinned in the layer.
