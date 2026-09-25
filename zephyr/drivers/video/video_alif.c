@@ -93,8 +93,11 @@ BUILD_ASSERT(!IS_ENABLED(CONFIG_VIDEO_ALIF_CAM) || !IS_ENABLED(CONFIG_SOC_SERIES
 	     "never writes a captured frame to memory (CAM_CFG.AXI_PORT_EN stays clear), "
 	     "so alp_camera_capture() reports success over an untouched buffer");
 
-/* Alp Lab AB: 512 -> 1024: the helper now stops the CSI endpoint (sensor I2C
- * write + error logging) on every buffer-starvation pause. */
+/* Alp Lab AB: 512 -> 1024, kept at 1024 (issue #2287): the helper still does
+ * register-level CPI work (hw_cam_cpi_only_stop()) plus logging on every
+ * buffer-starvation pause -- it no longer calls video_stream_stop() on the
+ * CSI endpoint (which would run sensor I2C traffic from this workqueue), but
+ * the stack headroom that added is still worth keeping. */
 #define WORKQ_STACK_SIZE 1024
 #define WORKQ_PRIORITY   7
 K_KERNEL_STACK_DEFINE(alif_isr_cb_workq, WORKQ_STACK_SIZE);
@@ -329,6 +332,66 @@ static inline void hw_cam_start_video_capture(const struct device *dev)
 	} else {
 		sys_write32(CAM_CTRL_FIFO_CLK_SEL | CAM_CTRL_START, regs + CAM_CTRL);
 	}
+}
+
+/**
+ * @brief Pause the CPI capture engine only, for a buffer-starvation stall
+ *
+ * Issue #2287 (IMX296 on E1M-AEN803 2026W36-0001): the starvation pause in
+ * alif_cam_work_helper() used to also call video_stream_stop()/_start() on
+ * the CSI-2 endpoint, which drives the sensor into STANDBY on every pause
+ * and back to RUN on every resume. The IMX296 datasheet (p54) says a
+ * normal image is output only from the 9th frame after STANDBY cancel, so
+ * every frame the app kept right after a resume was still an
+ * initialization-period frame; the endpoint restart is SUSPECTED (not
+ * confirmed) to also have left the CPI's frame-boundary tracking unsynced
+ * from the CSI-2 IPI stream, which would show up as IPI FIFO overflow and a
+ * RAW10 byte-phase slip (a 4-column contrast pattern in the captured
+ * image) -- that mechanism has not been independently isolated from the
+ * STANDBY-cycling effect above. Pausing only the CPI -- CAM_CTRL stop,
+ * BUSY poll, soft reset, clear latched interrupts, the same steps
+ * alif_cam_stream_stop() applies to the CPI side of its own teardown --
+ * leaves the CSI-2 endpoint and sensor streaming across the pause, so the
+ * resumed capture picks up mid-stream instead of restarting the sensor.
+ * Bench-observed on IMX296 only, diag run 285 (1 kept frame, 15 discarded;
+ * that diag build did NOT include the later 150 ms sensor init-period wait
+ * added to imx296_set_stream() -- see IMX296_INIT_PERIOD_MS): 0 IPI
+ * FIFO-overflow events over 32 VSYNCs and a clean Bayer frame vs. the
+ * 4-column slip pattern beforehand, counted by diag instrumentation
+ * (uncapped counters), not the shipped ISR (csi2_dw_irq(), which masks all
+ * IPI fatal reporting after CSI2_DW_IPI_FATAL_LOG_LIMIT events). While
+ * paused, the sensor, D-PHY and CSI-2 host keep running (and drawing
+ * power); frames the sensor sends during the pause are simply dropped at
+ * the stopped CPI. Whether a paused 2-lane sensor (OV5647, OV9281) can
+ * back-pressure the IPI into overflow during a longer pause is untested --
+ * they share this CPI but have not been re-benched against this change.
+ *
+ * alif_cam_stream_stop() is unaffected: a user stop()/close() still calls
+ * video_stream_stop() on the endpoint unconditionally, tearing down the
+ * sensor correctly even if a starvation pause is in effect when it runs.
+ *
+ * @param regs CPI register base address
+ */
+static inline void hw_cam_cpi_only_stop(uintptr_t regs)
+{
+	uint32_t mask;
+
+	hw_disable_interrupts(regs, INTR_VSYNC | INTR_BRESP_ERR | INTR_OUTFIFO_OVERRUN |
+					     INTR_INFIFO_OVERRUN | INTR_STOP);
+
+	/* Stop the CPI capture engine (mirrors alif_cam_stream_stop()). */
+	sys_write32(0, regs + CAM_CTRL);
+
+	/* Poll BUSY before the reset, same as alif_cam_stream_stop(). */
+	mask = CAM_CTRL_BUSY;
+	for (int i = 0; (i < 1000) && (sys_read32(regs + CAM_CTRL) & mask) == mask; i++) {
+		k_msleep(1);
+	}
+
+	hw_cam_soft_reset(regs);
+
+	/* Clear any stale latched interrupts after reset. */
+	sys_write32(sys_read32(regs + CAM_INTR), regs + CAM_INTR);
 }
 
 static int32_t fourcc_to_csi_data_type(uint32_t fourcc)
@@ -581,7 +644,8 @@ static void alif_cam_work_helper(const struct device *dev)
 		 * enqueue() just queued (capture continues below, no pause) or
 		 * enqueue() sees `starved` already set once this function
 		 * releases the lock (enqueue() then reprograms CAM_FRAME_ADDR and
-		 * restarts the endpoint + CPI). Capture must PAUSE here, not stop
+		 * restarts the CPI -- the endpoint + sensor stay streaming across
+		 * the pause, #2287). Capture must PAUSE here, not stop
 		 * for good -- a consumer holding its one buffer past a frame
 		 * period used to kill the stream permanently (bench-proven
 		 * 2026-09-21).
@@ -592,7 +656,9 @@ static void alif_cam_work_helper(const struct device *dev)
 					"Pausing Video Capture. Next enqueue() resumes it.");
 			data->curr_vid_buf = 0;
 			data->starved = true;
-			video_stream_stop(config->endpoint_dev, VIDEO_BUF_TYPE_OUTPUT);
+			/* CPI-only pause (#2287): leave the CSI-2 endpoint + sensor
+			 * streaming across the stall -- see hw_cam_cpi_only_stop(). */
+			hw_cam_cpi_only_stop(regs);
 			signal_status = VIDEO_BUF_DONE;
 			k_mutex_unlock(&data->lock);
 			goto done;
@@ -861,12 +927,14 @@ static int alif_cam_stream_stop(const struct device *dev)
 	}
 
 	/*
-	 * Alp Lab AB: stop the endpoint even while `starved`.  The work helper
-	 * already stopped it for the pause, but the CSI stop is idempotent (it
-	 * returns early when not streaming) and the helper ignores that stop's
-	 * result -- if it failed, this is the only stop that reaches the sensor.
-	 * Clearing `starved` below is what keeps a LATER enqueue() from
-	 * mistaking this user stop for a starvation pause and auto-restarting.
+	 * Alp Lab AB (issue #2287): stop the endpoint even while `starved`. A
+	 * starvation pause (alif_cam_work_helper()) only stops the CPI, via
+	 * hw_cam_cpi_only_stop() -- the CSI-2 endpoint and sensor keep streaming
+	 * across it -- so this is the ONLY stop that ever reaches the endpoint
+	 * and sensor while `starved` is set; there is no earlier stop for this
+	 * one to be idempotent against. Clearing `starved` below is what keeps a
+	 * LATER enqueue() from mistaking this user stop for a starvation pause
+	 * and auto-restarting.
 	 */
 	ret = video_stream_stop(config->endpoint_dev, VIDEO_BUF_TYPE_OUTPUT);
 	if (ret) {
@@ -1011,7 +1079,6 @@ static int alif_cam_enqueue(const struct device *dev, struct video_buffer *buf)
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
 	uint32_t to_read;
 	uint32_t tmp;
-	int ret;
 
 	if (IS_ENABLED(CONFIG_VIDEO_ALIF_CAM_EXTENDED)) {
 		if (!config->axi_bus_ep) {
@@ -1065,10 +1132,11 @@ static int alif_cam_enqueue(const struct device *dev, struct video_buffer *buf)
 	/*
 	 * Buffer-starvation/resume contract (Alp Lab AB): a STOP interrupt
 	 * that found the IN-FIFO empty pauses capture instead of stopping it
-	 * for good (alif_cam_work_helper() sets `starved` and stops the
-	 * endpoint). data->lock serializes the put + `starved` check here
-	 * against that empty-check + pause decision, so a buffer racing the
-	 * pause is never lost -- see the comment at the work helper.
+	 * for good (alif_cam_work_helper() sets `starved` and pauses the CPI
+	 * only, via hw_cam_cpi_only_stop() -- #2287). data->lock serializes
+	 * the put + `starved` check here against that empty-check + pause
+	 * decision, so a buffer racing the pause is never lost -- see the
+	 * comment at the work helper.
 	 */
 	/* Clean+invalidate BEFORE the buffer is handed to the hardware -- and on
 	 * the resume path below that hand-over starts the DMA immediately -- so no
@@ -1092,19 +1160,9 @@ static int alif_cam_enqueue(const struct device *dev, struct video_buffer *buf)
 		sys_write32(local_to_global(UINT_TO_POINTER(data->curr_vid_buf)),
 				regs + CAM_FRAME_ADDR);
 
-		ret = video_stream_start(config->endpoint_dev, VIDEO_BUF_TYPE_OUTPUT);
-		if (ret) {
-			LOG_ERR("Failed to resume streaming after buffer starvation! ret - %d",
-				ret);
-			/* Undo the hand-over: the caller still owns the buffer and may
-			 * retry the enqueue -- putting a node that is already in the
-			 * fifo would corrupt it.  Stay starved so a later enqueue
-			 * retries the resume. */
-			(void)k_fifo_get(&data->fifo_in, K_NO_WAIT);
-			data->curr_vid_buf = 0;
-			k_mutex_unlock(&data->lock);
-			return ret;
-		}
+		/* CPI-only pause (#2287): the endpoint + sensor were never stopped
+		 * for this pause (see hw_cam_cpi_only_stop()), so only the CPI
+		 * needs restarting -- no video_stream_start() here. */
 
 		/* A flush(cancel) may have masked the interrupts while starved. */
 		hw_enable_interrupts(regs, INTR_VSYNC | INTR_BRESP_ERR | INTR_OUTFIFO_OVERRUN |

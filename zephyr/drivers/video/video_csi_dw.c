@@ -165,8 +165,16 @@ static void csi2_dw_irq_off(uintptr_t regs)
 	sys_write32(0, regs + CSI_INT_MSK_ECC_CORRECT);
 }
 
-static void csi2_dw_irq_on(uintptr_t regs)
+static void csi2_dw_irq_on(uintptr_t regs, struct csi2_dw_data *data)
 {
+	/*
+	 * Alp Lab AB: fresh unmask, fresh IPI-fatal WINDOW count -- see
+	 * CSI2_DW_IPI_FATAL_LOG_LIMIT. Called from csi2_dw_configure() (set_format time) AND
+	 * from csi2_dw_stream_start() (every stream (re)start, below) so a restart always gets
+	 * its own cap window; ipi_fatal_total (video_csi_dw.h) is the one NOT reset here.
+	 */
+	data->ipi_fatal_count = 0;
+
 	/*
 	 * Review round (post-3511cd180): the CSI_INT_ST_* registers are
 	 * read-to-clear (csi2_dw_irq() reads each one to decode which event
@@ -207,16 +215,38 @@ static void csi2_dw_irq_on(uintptr_t regs)
 
 static void csi2_dw_irq(const struct device *dev)
 {
+	struct csi2_dw_data *data = dev->data;
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
 	uint32_t global_st = 0;
 	uint32_t event_st = 0;
-	bool reset_ipi = false;
 
 	global_st = sys_read32(regs + CSI_INT_ST_MAIN);
 	if (global_st & CSI_INT_ST_MAIN_IPI_FATAL) {
 		event_st = sys_read32(regs + CSI_INT_ST_IPI_FATAL);
-		LOG_ERR("Fatal Interrupt at IPI interface. status - 0x%x", event_st);
-		reset_ipi = true;
+		data->ipi_fatal_count++;
+		data->ipi_fatal_total++;
+
+		/*
+		 * Alp Lab AB: a sensor stuck emitting bad IPI framing fires this once per line --
+		 * uncapped LOG_ERR floods the log (see CSI2_DW_IPI_FATAL_LOG_LIMIT). This is
+		 * LOG-ONLY reporting (issue #2287: csi2_dw_irq() no longer soft-resets IPI here).
+		 * Log only the first CSI2_DW_IPI_FATAL_LOG_LIMIT occurrences of the CURRENT unmask
+		 * window, then mask the source and log once that it went quiet. ipi_fatal_count
+		 * (this window) resets on the next csi2_dw_irq_on() -- now called from every
+		 * csi2_dw_stream_start(), not just the first set_format -- so masking from a
+		 * previous stream no longer hides a later stream's own overflow; ipi_fatal_total
+		 * (video_csi_dw.h) is never reset, and is read back into the "masked after N" line
+		 * below -- that LOG_ERR is the only place it is surfaced, there is no separate
+		 * diagnostic dump.
+		 */
+		if (data->ipi_fatal_count <= CSI2_DW_IPI_FATAL_LOG_LIMIT) {
+			LOG_ERR("Fatal Interrupt at IPI interface. status - 0x%x", event_st);
+		}
+		if (data->ipi_fatal_count == CSI2_DW_IPI_FATAL_LOG_LIMIT) {
+			LOG_ERR("IPI fatal interrupts masked after %d (total %u since driver init)",
+				CSI2_DW_IPI_FATAL_LOG_LIMIT, data->ipi_fatal_total);
+			sys_write32(0, regs + CSI_INT_MSK_IPI_FATAL);
+		}
 	}
 	if (global_st & CSI_INT_ST_MAIN_LINE) {
 		event_st = sys_read32(regs + CSI_INT_ST_LINE);
@@ -247,50 +277,47 @@ static void csi2_dw_irq(const struct device *dev)
 		LOG_ERR("Fatal Interrupt due to payload checksum error."
 			"status - 0x%x",
 			event_st);
-		reset_ipi = true;
 	}
 	if (global_st & CSI_INT_ST_MAIN_FRAME_CRC) {
 		event_st = sys_read32(regs + CSI_INT_ST_CRC_FRAME_FATAL);
 		LOG_ERR("Fatal Interrupt due to frames with at least one CRC "
 			"error. status - 0x%x",
 			event_st);
-		reset_ipi = true;
 	}
 	if (global_st & CSI_INT_ST_MAIN_FRAME_SEQ) {
 		event_st = sys_read32(regs + CSI_INT_ST_SEQ_FRAME_FATAL);
 		LOG_ERR("Fatal Interrupt due to incorrect frame sequence for "
 			"a specific VC. status - 0x%x",
 			event_st);
-		reset_ipi = true;
 	}
 	if (global_st & CSI_INT_ST_MAIN_FRAME_BNDRY) {
 		event_st = sys_read32(regs + CSI_INT_ST_BNDRY_FRAME_FATAL);
 		LOG_ERR("Fatal Interrupt due to mismatch of Frame Start and "
 			"Frame End for a specific VC. status - 0x%x",
 			event_st);
-		reset_ipi = true;
 	}
 	if (global_st & CSI_INT_ST_MAIN_PKT) {
 		event_st = sys_read32(regs + CSI_INT_ST_PKT_FATAL);
 		LOG_ERR("Fatal Interrupt related to Packet construction. "
 			"Packet discarded. status - 0x%x",
 			event_st);
-		reset_ipi = true;
 	}
 	if (global_st & CSI_INT_ST_MAIN_PHY_FATAL) {
 		event_st = sys_read32(regs + CSI_INT_ST_PHY_FATAL);
 		LOG_ERR("Fatal Interrupt due to PHY Packet discard. "
 			"status - 0x%x",
 			event_st);
-		reset_ipi = true;
 	}
 
-	if (reset_ipi) {
-		LOG_ERR("Review the Timings programmed to IPI. "
-			"Resetting the IPI for now.");
-		sys_clear_bits(regs + CSI_IPI_SOFTRSTN, CSI_IPI_SOFTRSTN_RSTN);
-		sys_set_bits(regs + CSI_IPI_SOFTRSTN, CSI_IPI_SOFTRSTN_RSTN);
-	}
+	/*
+	 * Alp Lab AB (issue #2287, E1M-AEN803 2026W36-0001): this handler used to soft-reset
+	 * CSI_IPI_SOFTRSTN here on every IPI/CSI fatal source above, including the
+	 * INT_IPI_PIXEL_IF_HLINE_ERR events seen 37-80 times per capture (video_csi_dw.h).
+	 * Deleted: correlated with, but not a confirmed cause of, a frame-buffer overrun +
+	 * heap corruption -- see changelog.d/2287.md for the full bench evidence and the
+	 * suspected (unconfirmed) mechanism. The vendored Alif DFP reference
+	 * (Driver_MIPI_CSI2.c's IPI-fatal handler) never soft-resets IPI at runtime either.
+	 */
 }
 
 static int csi2_dw_ipi_advanced_features(const struct device *dev)
@@ -382,7 +409,7 @@ static int csi2_dw_config_host(const struct device *dev)
 	sys_write32(phy->num_lanes - 1, regs + CSI_N_LANES);
 
 	/* Enable Interrupts. */
-	csi2_dw_irq_on(regs);
+	csi2_dw_irq_on(regs, data);
 
 	/*
 	 * Configuring IPI.
@@ -463,7 +490,37 @@ static int csi2_dw_validate_data(const struct device *dev)
 	 * balanced pixel clock = pix_clk * 1.2
 	 */
 	pixrate = ((float)(phy->pll_fin << 1) * phy->num_lanes) / bpp;
-	pixclock = pixrate * (float)CSI2_BANDWIDTH_SCALER;
+
+	if (config->ipi_mode == CSI2_IPI_MODE_TIMINGS_CTRL) {
+		/*
+		 * Alp Lab AB (issue #2287): the 20% margin above exists to keep
+		 * the IPI drain rate safely ahead of the sensor in Camera mode,
+		 * where HSD is DERIVED from the programmed pixel clock
+		 * (csi2_dw_validate_data()'s CAM branch, below). In Controller
+		 * mode the causality is reversed: the shield overlay's fixed
+		 * csi-hsd was bench-swept against whatever clock the BARE
+		 * pixrate request actually lands on, so requesting a margined
+		 * (faster) clock here would silently invalidate that overlay's
+		 * derivation instead of just missing a margin. Request the bare
+		 * rate and let the DT HLINE/VTOTAL set the drain rate.
+		 *
+		 * Bench evidence (E1M-AEN803 2026W36-0001, IMX296, pll_fin
+		 * 594000000, bpp 10 -> pixrate 118800000): requesting the bare
+		 * 118.8 MHz landed CSI_PIXCLK_CTRL (0x4903f008) on 0x00030001
+		 * (div 3) = 400 MHz / 3 = 133.33 MHz -- the value the shield
+		 * overlay's csi-hsd derivation assumes. Requesting the margined
+		 * 142.56 MHz instead is CALCULATED (not bench-observed -- this is
+		 * exactly the request this branch exists to avoid) to land on div
+		 * 2 = 200 MHz per the same clock-control divisor rule: IPI line
+		 * time would become 1972 / 200 MHz = 9.86 us, well under the
+		 * sensor's 14.815 us line time, i.e. the IPI would starve waiting
+		 * on a sensor that cannot keep up -- not the FIFO-overflow failure
+		 * margin mode guards against, but just as unusable.
+		 */
+		pixclock = pixrate;
+	} else {
+		pixclock = pixrate * (float)CSI2_BANDWIDTH_SCALER;
+	}
 	LOG_DBG("pll_fin - %d, Check pixclock = %d (CSI_PIXCLK_CTRL)", phy->pll_fin,
 		(uint32_t)pixclock);
 
@@ -506,8 +563,33 @@ static int csi2_dw_validate_data(const struct device *dev)
 	}
 
 	/* Use the rate actually programmed (a divider rounds up) for the timings. */
-	if (clock_control_get_rate(config->clk_dev, config->pixclk, &tmp) == 0) {
+	ret = clock_control_get_rate(config->clk_dev, config->pixclk, &tmp);
+	if (ret == 0) {
 		pixclock = tmp;
+	}
+
+	if (config->ipi_mode == CSI2_IPI_MODE_TIMINGS_CTRL && ret == 0) {
+		/*
+		 * Alp Lab AB (issue #2287): log the IPI line time this ACTUAL
+		 * programmed clock produces (not the pixclock this branch
+		 * requested above) against the DT-fixed HLINE, so a future
+		 * clock-control divisor-policy change that lands on a different
+		 * divisor -- silently invalidating the overlay's HSD derivation,
+		 * see raspberry_pi_global_shutter_camera.overlay -- shows up in
+		 * the log instead of only as a re-appeared FIFO overflow. This
+		 * function runs from csi2_dw_configure(), called from
+		 * set_format -- i.e. every time the app (re)configures the
+		 * stream, NOT once at boot -- so expect one line per
+		 * set_format call, not a single boot-time line. Gated on the
+		 * clock_control_get_rate() readback actually succeeding (tmp
+		 * is only the ACTUAL divided rate in that case; on failure
+		 * tmp still holds the earlier REQUESTED rate, which would be
+		 * a misleading thing to log as "the" line time).
+		 */
+		uint32_t hline = timing->hsa + timing->hbp + timing->hsd + timing->hact;
+
+		LOG_INF("CSI IPI Controller-mode: pixclk %u Hz, HLINE %u px -> line time %u ns",
+			tmp, hline, (uint32_t)(((uint64_t)hline * 1000000000ULL) / tmp));
 	}
 
 	if (config->ipi_mode == CSI2_IPI_MODE_TIMINGS_CAM) {
@@ -577,6 +659,30 @@ static int csi2_dw_stream_start(const struct device *dev)
 		LOG_DBG("Already Streaming.");
 		return 0;
 	}
+
+	/*
+	 * Alp Lab AB (issue #2287): re-arm the IPI-fatal mask/count here, not just once from
+	 * csi2_dw_configure() (set_format time). csi2_dw_irq_on() used to run ONLY from
+	 * set_format, so once CSI2_DW_IPI_FATAL_LOG_LIMIT startup transients masked
+	 * CSI_INT_MSK_IPI_FATAL, every later real fatal on this same configured stream went
+	 * silent -- no LOG_ERR at all, this is log-only reporting (csi2_dw_irq() does not
+	 * soft-reset IPI). Re-arming on every stream (re)start bounds the blind window to "at
+	 * most LOG_LIMIT events since THIS start", which is the guarantee the masking scheme is
+	 * supposed to give. This function only runs from a USER stream start
+	 * (alif_cam_stream_start(), video_alif.c) -- a starvation-pause resume
+	 * (alif_cam_enqueue()'s starved path) no longer calls video_stream_start() on this
+	 * endpoint at all (issue #2287: it now only restarts the CPI, leaving this device's
+	 * `streaming_map` set and this function unentered), so the window this re-arm bounds
+	 * spans one whole user stream, including the sensor's own post-start initialization
+	 * period (IMX296_INIT_PERIOD_MS, imx296.c) -- LOG_LIMIT budget is not replenished by a
+	 * starvation pause/resume within that stream. csi2_dw_irq_on() also discards every
+	 * latched CSI_INT_ST_* status register (see its own comment) before unmasking, which is
+	 * controller-wide, not per-sensor -- today only one sensor is ever wired to a given &csi
+	 * controller (CSI2_NUM_SENSORS is 2 in the struct, but this shield uses one), so that
+	 * breadth is currently a non-issue; a second sensor sharing this controller would need
+	 * this re-arm's scope reconsidered.
+	 */
+	csi2_dw_irq_on(regs, data);
 
 	/* Enable CSI streaming */
 	sys_set_bits(regs + CSI_IPI_MODE, CSI_IPI_MODE_ENABLE);
@@ -943,6 +1049,9 @@ static int csi2_dw_init(const struct device *dev)
 						link_frequencies),                                 \
 					(DT_PROP_LAST(REMOTE_EP(i, 0, 0), link_frequencies)),      \
 					(DT_INST_PROP(i, rx_ddr_clk1))),                           \
+			/* issue #2287: see dphy_dw.h's skip_clk_lane_stopstate comment */         \
+			.skip_clk_lane_stopstate = DT_PROP_OR(REMOTE_EP(i, 0, 0),                 \
+					no_lp11_clock_lane_park, 0),                               \
 		},                                                                                 \
                                                                                                    \
 		.phy[1] =  {                                                                       \
@@ -954,6 +1063,9 @@ static int csi2_dw_init(const struct device *dev)
 						link_frequencies),                                 \
 					(DT_PROP_LAST(REMOTE_EP(i, 1, 0), link_frequencies)),      \
 					(DT_INST_PROP(i, rx_ddr_clk2))),                           \
+			/* issue #2287: see dphy_dw.h's skip_clk_lane_stopstate comment */         \
+			.skip_clk_lane_stopstate = DT_PROP_OR(REMOTE_EP(i, 1, 0),                 \
+					no_lp11_clock_lane_park, 0),                               \
 		},                                                                                 \
                                                                                                    \
 		.time[0] = {                                                                       \
