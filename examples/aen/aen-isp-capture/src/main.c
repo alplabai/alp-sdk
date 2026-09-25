@@ -521,6 +521,69 @@ int main(void)
 	}
 #endif
 
+#if defined(AEN_ISP_IMX296) && DT_NODE_EXISTS(IMX296_NODE) &&                                    \
+	(defined(AEN_ISP_IMX296_EXPOSURE_LINES) || defined(AEN_ISP_IMX296_GAIN))
+	/*
+	 * Bench run 303 control captures (#2287 Stage B unit 3): AE now runs (lib Frame 1..61,
+	 * intLine/again writeback confirmed matching SHS/GAIN readback exactly) but the frame
+	 * stayed pure noise even at SHS=4 (1114 lines, the datasheet-permitted exposure ceiling)
+	 * + gain 0x1E0 (48 dB, the AE envelope's own ceiling) -- the SAME symptom raw (non-ISP)
+	 * captures at SHS=4/gain=480 showed earlier. SHS and gain are confounded in every failing
+	 * run so far (both always moved together, via AE); pin a SPECIFIC manual exposure/gain
+	 * combination directly on the sensor here -- independent of whatever AE would have
+	 * converged to -- to separate the two. AE-off only (CMakeLists.txt's own comment): with
+	 * the AE library compiled in, isp_apply_ae()'s own per-frame writeback
+	 * (isp_api_wrapper.c) would immediately overwrite whatever this sets on the very next
+	 * frame.
+	 */
+	const struct device *imx296_dev = DEVICE_DT_GET(IMX296_NODE);
+
+	if (device_is_ready(imx296_dev)) {
+#if defined(AEN_ISP_IMX296_EXPOSURE_LINES)
+		struct video_control imx296_exp_ctrl = {
+			.id  = VIDEO_CID_EXPOSURE,
+			.val = AEN_ISP_IMX296_EXPOSURE_LINES,
+		};
+		int rc_imx296_exp = video_set_ctrl(imx296_dev, &imx296_exp_ctrl);
+
+		printk("imx296 EXPOSURE=%d lines rc=%d\n", imx296_exp_ctrl.val, rc_imx296_exp);
+#endif
+#if defined(AEN_ISP_IMX296_GAIN)
+		struct video_control imx296_gain_ctrl = {
+			.id  = VIDEO_CID_ANALOGUE_GAIN,
+			.val = AEN_ISP_IMX296_GAIN,
+		};
+		int rc_imx296_gain = video_set_ctrl(imx296_dev, &imx296_gain_ctrl);
+
+		printk("imx296 ANALOGUE_GAIN=%d (0.1 dB tenths) rc=%d\n",
+		       imx296_gain_ctrl.val,
+		       rc_imx296_gain);
+#endif
+		/* Readback: the SAME registers print_imx296_ae_regs() (below) reads every printed
+		 * frame -- printed once here, right after the writes above and before
+		 * video_stream_start(), so the bench log has a clean before-first-frame snapshot
+		 * of what the sensor actually latched. */
+		const struct i2c_dt_spec i2c        = I2C_DT_SPEC_GET(IMX296_NODE);
+		uint8_t                  shs_le[3]  = { 0 };
+		uint8_t                  gain_le[2] = { 0 };
+		int rc_shs  = imx296_read_reg_le(&i2c, 0x308D, shs_le, sizeof(shs_le));
+		int rc_gain = imx296_read_reg_le(&i2c, 0x3204, gain_le, sizeof(gain_le));
+		uint32_t shs =
+			(uint32_t)shs_le[0] | ((uint32_t)shs_le[1] << 8) | ((uint32_t)shs_le[2] << 16);
+		uint32_t gain = (uint32_t)gain_le[0] | ((uint32_t)gain_le[1] << 8);
+
+		printk("imx296 control-capture readback: SHS(0x308d-f)=0x%06x (rc=%d) "
+		       "GAIN(0x3204-5)=0x%04x (rc=%d)\n",
+		       shs,
+		       rc_shs,
+		       gain,
+		       rc_gain);
+	} else {
+		printk("imx296 device not ready; skipping control-capture manual exposure/gain\n");
+	}
+#endif /* defined(AEN_ISP_IMX296) && DT_NODE_EXISTS(IMX296_NODE) &&
+	  (defined(AEN_ISP_IMX296_EXPOSURE_LINES) || defined(AEN_ISP_IMX296_GAIN)) */
+
 #if defined(AEN_ISP_IMX296)
 	/*
 	 * issue #2287 Stage B: AWB OFF (manual) for this first IMX296-through-ISP pass -- there is

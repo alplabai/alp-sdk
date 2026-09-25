@@ -65,3 +65,31 @@ set(AEN_ISP_N_FRAMES "0" CACHE STRING "Override N_FRAMES for the IMX296 variant 
 if(AEN_ISP_IMX296 AND NOT AEN_ISP_N_FRAMES STREQUAL "0")
     target_compile_definitions(app PRIVATE AEN_ISP_N_FRAMES=${AEN_ISP_N_FRAMES})
 endif()
+
+# Bench run 303 control captures (#2287 Stage B unit 3): AE now runs (lib Frame 1..61,
+# intLine/again writeback confirmed matching SHS/GAIN readback exactly) but the frame stayed pure
+# noise even at SHS=4 (1114 lines, the datasheet-permitted exposure ceiling) + gain 0x1E0 (48 dB,
+# the AE envelope's own ceiling) -- the SAME symptom raw (non-ISP) captures at SHS=4/gain=480
+# showed earlier. SHS and gain are confounded in every failing run so far (both always moved
+# together, via AE); these two options independently PIN one manual (exposure lines) + gain (0.1
+# dB tenths, this driver's own IMX296 dB-tenths scale -- see isp_sns_gain_conv.h) value on the
+# SENSOR directly -- not the ISP's own AE seed (isp_apply_ae(), which only applies with the AE
+# library compiled in) -- so a specific SHS/gain combination can be held for a whole capture run
+# independent of whatever the AE loop would have converged to. Unset (the default) leaves
+# src/main.c's existing behaviour untouched. Only meaningful with AE off (overlay-no-ae.conf) --
+# with AE on, isp_apply_ae()'s own per-frame writeback would immediately overwrite whatever these
+# set.
+#   -DAEN_ISP_IMX296_EXPOSURE_LINES=<n>  (VIDEO_CID_EXPOSURE lines, 1..1114; sentinel 0 = unset --
+#                                         0 is never a legal exposure, isp_pico.h's minIntLine=1)
+#   -DAEN_ISP_IMX296_GAIN=<n>            (VIDEO_CID_ANALOGUE_GAIN, 0.1 dB tenths, 0..480;
+#                                         sentinel -1 = unset -- 0 dB IS a legal, meaningful gain
+#                                         value this bench round explicitly wants to hold (build
+#                                         C1), so it cannot double as "unset" the way 0 lines can)
+set(AEN_ISP_IMX296_EXPOSURE_LINES "0" CACHE STRING "Manual IMX296 exposure (lines) control capture, AE off only (0 = unset)")
+set(AEN_ISP_IMX296_GAIN "-1" CACHE STRING "Manual IMX296 gain (0.1 dB tenths) control capture, AE off only (-1 = unset)")
+if(AEN_ISP_IMX296 AND NOT AEN_ISP_IMX296_EXPOSURE_LINES STREQUAL "0")
+    target_compile_definitions(app PRIVATE AEN_ISP_IMX296_EXPOSURE_LINES=${AEN_ISP_IMX296_EXPOSURE_LINES})
+endif()
+if(AEN_ISP_IMX296 AND NOT AEN_ISP_IMX296_GAIN STREQUAL "-1")
+    target_compile_definitions(app PRIVATE AEN_ISP_IMX296_GAIN=${AEN_ISP_IMX296_GAIN})
+endif()
