@@ -167,9 +167,13 @@ static void csi2_dw_irq_off(uintptr_t regs)
 
 static void csi2_dw_irq_on(uintptr_t regs, struct csi2_dw_data *data)
 {
-	/* Alp Lab AB: fresh unmask, fresh IPI-fatal count -- see CSI2_DW_IPI_FATAL_LOG_LIMIT. */
+	/*
+	 * Alp Lab AB: fresh unmask, fresh IPI-fatal WINDOW count -- see
+	 * CSI2_DW_IPI_FATAL_LOG_LIMIT. Called from csi2_dw_configure() (set_format time) AND
+	 * from csi2_dw_stream_start() (every stream (re)start, below) so a restart always gets
+	 * its own cap window; ipi_fatal_total (video_csi_dw.h) is the one NOT reset here.
+	 */
 	data->ipi_fatal_count = 0;
-
 
 	/*
 	 * Review round (post-3511cd180): the CSI_INT_ST_* registers are
@@ -221,23 +225,26 @@ static void csi2_dw_irq(const struct device *dev)
 	if (global_st & CSI_INT_ST_MAIN_IPI_FATAL) {
 		event_st = sys_read32(regs + CSI_INT_ST_IPI_FATAL);
 		data->ipi_fatal_count++;
+		data->ipi_fatal_total++;
 
 		/*
 		 * Alp Lab AB: a sensor stuck emitting bad IPI framing fires this once per line --
 		 * uncapped LOG_ERR + IPI soft-reset floods the log and storms the reset line (see
 		 * CSI2_DW_IPI_FATAL_LOG_LIMIT). Log + reset only the first
-		 * CSI2_DW_IPI_FATAL_LOG_LIMIT occurrences, then mask the source and log once that
-		 * it went quiet. The count itself is NOT capped, so a later diagnostic dump can
-		 * still report the true total; it resets on the next csi2_dw_irq_on() (fresh
-		 * unmask, e.g. a subsequent stream (re)start).
+		 * CSI2_DW_IPI_FATAL_LOG_LIMIT occurrences of the CURRENT unmask window, then mask
+		 * the source and log once that it went quiet. ipi_fatal_count (this window) resets
+		 * on the next csi2_dw_irq_on() -- now called from every csi2_dw_stream_start(), not
+		 * just the first set_format -- so masking from a previous stream no longer hides a
+		 * later stream's own overflow; ipi_fatal_total (video_csi_dw.h) is never reset, so
+		 * a later diagnostic dump can still report the true lifetime total.
 		 */
 		if (data->ipi_fatal_count <= CSI2_DW_IPI_FATAL_LOG_LIMIT) {
 			LOG_ERR("Fatal Interrupt at IPI interface. status - 0x%x", event_st);
 			reset_ipi = true;
 		}
 		if (data->ipi_fatal_count == CSI2_DW_IPI_FATAL_LOG_LIMIT) {
-			LOG_ERR("IPI fatal interrupts masked after %d",
-				CSI2_DW_IPI_FATAL_LOG_LIMIT);
+			LOG_ERR("IPI fatal interrupts masked after %d (total %u since driver init)",
+				CSI2_DW_IPI_FATAL_LOG_LIMIT, data->ipi_fatal_total);
 			sys_write32(0, regs + CSI_INT_MSK_IPI_FATAL);
 		}
 	}
@@ -505,11 +512,13 @@ static int csi2_dw_validate_data(const struct device *dev)
 		 * 118.8 MHz landed CSI_PIXCLK_CTRL (0x4903f008) on 0x00030001
 		 * (div 3) = 400 MHz / 3 = 133.33 MHz -- the value the shield
 		 * overlay's csi-hsd derivation assumes. Requesting the margined
-		 * 142.56 MHz instead lands on div 2 = 200 MHz: IPI line time
-		 * becomes 1972 / 200 MHz = 9.86 us, well under the sensor's
-		 * 14.815 us line time, i.e. the IPI starves waiting on a sensor
-		 * that cannot keep up -- not the FIFO-overflow failure margin
-		 * mode guards against, but just as unusable.
+		 * 142.56 MHz instead is CALCULATED (not bench-observed -- this is
+		 * exactly the request this branch exists to avoid) to land on div
+		 * 2 = 200 MHz per the same clock-control divisor rule: IPI line
+		 * time would become 1972 / 200 MHz = 9.86 us, well under the
+		 * sensor's 14.815 us line time, i.e. the IPI would starve waiting
+		 * on a sensor that cannot keep up -- not the FIFO-overflow failure
+		 * margin mode guards against, but just as unusable.
 		 */
 		pixclock = pixrate;
 	} else {
@@ -559,6 +568,22 @@ static int csi2_dw_validate_data(const struct device *dev)
 	/* Use the rate actually programmed (a divider rounds up) for the timings. */
 	if (clock_control_get_rate(config->clk_dev, config->pixclk, &tmp) == 0) {
 		pixclock = tmp;
+	}
+
+	if (config->ipi_mode == CSI2_IPI_MODE_TIMINGS_CTRL) {
+		/*
+		 * Alp Lab AB (issue #2287): log the IPI line time this ACTUAL
+		 * programmed clock produces (not the pixclock this branch
+		 * requested above) against the DT-fixed HLINE, so a future
+		 * clock-control divisor-policy change that lands on a different
+		 * divisor -- silently invalidating the overlay's HSD derivation,
+		 * see raspberry_pi_global_shutter_camera.overlay -- shows up in
+		 * the boot log instead of only as a re-appeared FIFO overflow.
+		 */
+		uint32_t hline = timing->hsa + timing->hbp + timing->hsd + timing->hact;
+
+		LOG_INF("CSI IPI Controller-mode: pixclk %u Hz, HLINE %u px -> line time %u ns",
+			tmp, hline, (uint32_t)(((uint64_t)hline * 1000000000ULL) / tmp));
 	}
 
 	if (config->ipi_mode == CSI2_IPI_MODE_TIMINGS_CAM) {
@@ -628,6 +653,17 @@ static int csi2_dw_stream_start(const struct device *dev)
 		LOG_DBG("Already Streaming.");
 		return 0;
 	}
+
+	/*
+	 * Alp Lab AB (issue #2287): re-arm the IPI-fatal mask/count here, not just once from
+	 * csi2_dw_configure() (set_format time). csi2_dw_irq_on() used to run ONLY from
+	 * set_format, so once CSI2_DW_IPI_FATAL_LOG_LIMIT startup transients masked
+	 * CSI_INT_MSK_IPI_FATAL, every later real overflow on this same configured stream went
+	 * silent -- no LOG_ERR, no soft-reset, and the frame just corrupts quietly. Re-arming on
+	 * every stream (re)start bounds the blind window to "at most LOG_LIMIT events since THIS
+	 * start", which is the guarantee the masking scheme is supposed to give.
+	 */
+	csi2_dw_irq_on(regs, data);
 
 	/* Enable CSI streaming */
 	sys_set_bits(regs + CSI_IPI_MODE, CSI_IPI_MODE_ENABLE);

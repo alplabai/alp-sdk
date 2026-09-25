@@ -15,9 +15,12 @@
  * Linux's imx296.c was used strictly as a REGISTER-NAME reference for a
  * handful of names this datasheet leaves unnamed (e.g. SENSOR_INFO,
  * 0x3148) -- it was not opened for, and no code, text or table from it was
- * copied into, this file; every register address, value and per-INCK table
- * below is independently cited to a datasheet section/table in the comment
- * above it.
+ * copied into, this file; every register address and value below is
+ * independently cited to a datasheet section/table in the comment above it,
+ * with ONE bench-derived exception: IMX296_REG_CSI_LANE_HS (0x3005 = 0xF0,
+ * see that macro's own comment) has no datasheet citation at all -- it is a
+ * silicon fact found by sweeping an undocumented register address, not a
+ * documented one this driver merely transcribes.
  *
  * BENCH STATUS (issue #2287, E1M-AEN803 2026W36-0001, csi_i2c = I2C1 @
  * 0x49011000): the I2C identity path is silicon-verified (bench run 229 --
@@ -27,14 +30,27 @@
  * master-mode free-run. A further bench pass isolated the data lane
  * specifically: WITHOUT IMX296_REG_CSI_LANE_HS (0x3005 = 0xF0, see that
  * macro's comment above) the data lane never leaves LP-11 at all -- no HS
- * output whatsoever; WITH it written (bench runs #263/#264, a diagnostic
- * test-image mode), HS data does arrive at the CSI-2 host. Even so, the Alif
- * IPI still emits no line with that HS data flowing -- so either the
- * sensor's frame/line framing or timing is wrong (this driver writes almost
- * none of the ~50 registers Linux's imx296.c programs at stream start,
- * 0x3005 being the first of those), or a separate IPI-side issue exists.
- * Treat every register value below the SENSOR_INFO check, and the capture
- * path end to end, as unproven past "HS data arrives at the host".
+ * output whatsoever; WITH it written (bench runs #263/#264), HS data does
+ * arrive at the CSI-2 host. Whether 0xF0 selects some diagnostic/test-pattern
+ * mode versus normal operation is NOT established from the datasheet (this
+ * register is undocumented) or from image content (see below) -- it is
+ * simply the value that was swept and found to unblock HS output.
+ *
+ * With the DW CSI-2 host's IPI switched to Controller timing mode (fixed
+ * HLINE/VTOTAL matched to this sensor's HMAX/VMAX, see
+ * raspberry_pi_global_shutter_camera.overlay's &csi node and its
+ * derivation comment) the earlier "Camera" timing mode's complete failure
+ * to emit any IPI line is RESOLVED: Controller mode captures full
+ * 1456x1088 frames with zero IPI-FIFO-overflow events across a full
+ * capture run (csi-hsd 503, see the overlay). Frame content has NOT been
+ * visually verified against a real scene, though: every capture so far, at
+ * maximum exposure and gain, has shown flat noise around the sensor's
+ * black level -- consistent with no light reaching the array (optics/
+ * lighting not yet set up on this bench), but also consistent with the
+ * data path still being wrong somewhere. Do NOT treat this driver's
+ * capture path as producing verified image data; treat it as "captures a
+ * frame-shaped buffer, mechanically consistent (correct size, zero FIFO
+ * errors), with unverified scene content."
  *
  * LANE-PARK / D-PHY BEHAVIOUR: unlike OV5647 (issue #2248,
  * ov5647_lane_park()), this datasheet documents no register that forces the
@@ -160,11 +176,16 @@ LOG_MODULE_REGISTER(imx296, CONFIG_VIDEO_LOG_LEVEL);
  * described" gap, the same category as SENSOR_INFO (0x3148) above. The
  * datasheet says nothing about this address's bits, name or reset value.
  * On the bench: with this byte left at its POR value the CSI-2 data lane
- * never leaves LP-11 (no HS output on the data lane at all, confirmed with
- * a J-Link CSI-2 D-PHY probe); writing 0xF0 here (a diagnostic-image test
- * run, #263/#264 in the issue's bench log) is what makes HS data start
- * arriving. Written unconditionally in imx296_init() below on that basis --
- * a silicon fact, not a documented register write.
+ * never leaves LP-11 (no HS output on the data lane at all, confirmed by
+ * reading the D-PHY RX lane-status / Stop-state registers over SWD --
+ * CSI_PHY_RX at 0x49033048 and CSI_PHY_STOPSTATE at 0x4903304C); writing
+ * 0xF0 here (bench runs #263/#264 in the issue's bench log) is what makes
+ * HS data start arriving. Whether 0xF0 selects some diagnostic/test-pattern
+ * mode, or is simply the normal operating value for this undocumented
+ * register, is NOT established -- it is the value that was swept and found
+ * to unblock HS output, nothing more. Written unconditionally in
+ * imx296_init() below on that basis -- a silicon fact, not a documented
+ * register write.
  */
 #define IMX296_REG_CSI_LANE_HS IMX296_REG8(0x3005)
 #define IMX296_CSI_LANE_HS_VAL 0xF0u

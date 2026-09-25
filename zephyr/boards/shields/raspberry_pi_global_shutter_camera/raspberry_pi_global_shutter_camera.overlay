@@ -81,6 +81,14 @@
  * frame every ~80 rows (14.815 us / 0.185 us-per-row-drift predicts 80);
  * HSD 520 gave ~139-row bands; HSD 503 (below) gave zero IPI-FIFO overflow
  * events over a full capture run.
+ *
+ * SCOPE: these properties (ipi-mode, csi-h* / csi-v*) live on the shared &csi
+ * CONTROLLER node, not on the imx296 sensor node -- they are IMX296-specific
+ * derivations applied to a controller-wide register set. A second sensor
+ * wired to the same &csi controller (this Alif CSI-2 host has two PHY/sensor
+ * slots, CSI2_NUM_SENSORS in video_csi_dw.h) would INHERIT these Controller-
+ * mode timings too, which is almost certainly wrong for a different sensor's
+ * HMAX/VMAX/pixel-clock. Revisit if/when a second sensor is ever wired here.
  */
 &csi {
 	ipi-mode = "Controller";

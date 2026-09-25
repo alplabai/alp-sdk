@@ -57,16 +57,6 @@
 #define CSI_INT_ST_IPI_FATAL            0x140 /* IPI ifx INT-Status */
 #define CSI_INT_MSK_IPI_FATAL           0x144 /* IPI ifx INT-Mask */
 #define CSI_INT_FORCE_IPI_FATAL         0x148 /* IPI ifx INT-Force */
-
-/*
- * Alp Lab AB: a sensor stuck emitting bad IPI framing can fire
- * CSI_INT_ST_MAIN_IPI_FATAL once per line -- csi2_dw_irq() LOG_ERRs and
- * IPI-soft-resets on every one of those uncapped, which floods the log and
- * storms the reset line. Cap the LOG_ERR + reset to the first this many
- * occurrences, then mask CSI_INT_MSK_IPI_FATAL so the source goes quiet
- * (see csi2_dw_data.ipi_fatal_count).
- */
-#define CSI2_DW_IPI_FATAL_LOG_LIMIT 16
 #define CSI_INT_ST_BNDRY_FRAME_FATAL    0x280 /* Frame Boundary ERR INT-Status */
 #define CSI_INT_MSK_BNDRY_FRAME_FATAL   0x284 /* Frame Boundary ERR INT-Mask */
 #define CSI_INT_FORCE_BNDRY_FRAME_FATAL 0x288 /* Frame Boundary ERR INT-Force */
@@ -328,6 +318,16 @@
 #define CSI2_IPI_FIFO_DEPTH   1024
 #define CSI2_BANDWIDTH_SCALER (1.2)
 
+/*
+ * Alp Lab AB: a sensor stuck emitting bad IPI framing can fire
+ * CSI_INT_ST_MAIN_IPI_FATAL once per line -- csi2_dw_irq() LOG_ERRs and
+ * IPI-soft-resets on every one of those uncapped, which floods the log and
+ * storms the reset line. Cap the LOG_ERR + reset to the first this many
+ * occurrences, then mask CSI_INT_MSK_IPI_FATAL so the source goes quiet
+ * (see csi2_dw_data.ipi_fatal_count / ipi_fatal_total).
+ */
+#define CSI2_DW_IPI_FATAL_LOG_LIMIT 16
+
 #define CSI2_NUM_SENSORS 2
 
 enum csi2_ipi_mode_timings {
@@ -378,14 +378,24 @@ struct csi2_dw_data {
 	struct dphy_csi2_settings phy[CSI2_NUM_SENSORS];
 
 	/*
-	 * Alp Lab AB: count of CSI_INT_ST_MAIN_IPI_FATAL events seen by csi2_dw_irq() since the
-	 * interrupt was last unmasked (csi2_dw_irq_on()). A misprogrammed/misbehaving sensor can
+	 * Alp Lab AB: count of CSI_INT_ST_MAIN_IPI_FATAL events seen by csi2_dw_irq() in the
+	 * CURRENT unmask window -- reset to 0 by csi2_dw_irq_on(), which now runs both from
+	 * csi2_dw_configure() (set_format time) AND from csi2_dw_stream_start() (every stream
+	 * (re)start), so a stream restart always gets a fresh cap window instead of inheriting
+	 * a mask a previous, unrelated stream left set. A misprogrammed/misbehaving sensor can
 	 * fire this once per line (a per-fatal LOG_ERR + IPI soft-reset storm) -- csi2_dw_irq()
 	 * stops logging and masks CSI_INT_MSK_IPI_FATAL once this reaches
-	 * CSI2_DW_IPI_FATAL_LOG_LIMIT. Kept (not reset on mask) so the eventual "masked" line and
-	 * any future diagnostics can report the true total.
+	 * CSI2_DW_IPI_FATAL_LOG_LIMIT.
 	 */
 	uint32_t ipi_fatal_count;
+
+	/*
+	 * Alp Lab AB: lifetime count of CSI_INT_ST_MAIN_IPI_FATAL events, NEVER reset (unlike
+	 * ipi_fatal_count above) -- so a diagnostic dump after several stream restarts still
+	 * reports how many fatals happened in total, even though each restart's own window only
+	 * ever logs the first CSI2_DW_IPI_FATAL_LOG_LIMIT of its own.
+	 */
+	uint32_t ipi_fatal_total;
 };
 
 #endif /* _CSI_DW_H_ */
