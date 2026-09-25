@@ -273,7 +273,9 @@ did, and the real layer is fetched by the licensed customer at build
 time -- so the redistribution question below is now moot for our own
 layer; it remains an open question only for a customer who wants to
 redistribute `meta-deepx-m1` itself, which is between them and DEEPX.
-Closes alp-sdk issue #482.
+Refs alp-sdk issue #482 -- partially addresses it (the layer swap +
+PACKAGECONFIG wiring); #482's build-check-lane, vendor-extension
+NOSUPPORT knobs, and V2M HIL acceptance items remain open.
 
 **Open items**:
 

@@ -34,7 +34,13 @@ meta-alp-sdk/
 │       ├── e1m-v2m101-a55.conf          # V2N + DEEPX DX-M1.
 │       ├── e1m-v2m102-a55.conf          # V2N + DEEPX variant.
 │       ├── e1m-v2m103-a55.conf          # V2N + DEEPX variant (4 GB / 16 GB).
-│       └── e1m-nx9101-a55.conf          # NXP i.MX 93.
+│       ├── e1m-nx9101-a55.conf          # NXP i.MX 93.
+│       └── include/
+│           └── e1m-v2m-deepx.inc        # Shared DEEPX block `require`d by the three V2M confs above.
+├── dynamic-layers/
+│   └── meta-deepx-m1/
+│       └── recipes-runtime/dx-driver/
+│           └── dx-driver_%.bbappend     # Tightens the 99-dx-dma.rules udev MODE (parsed only when meta-deepx-m1 is in bblayers.conf).
 ├── recipes-core/
 │   ├── alp-sdk/
 │   │   └── alp-sdk_0.6.bb               # libalp_sdk.so + headers.
@@ -187,9 +193,9 @@ git clone https://github.com/alplabai/alp-sdk ../alp-sdk
 bitbake-layers add-layer ../alp-sdk/meta-alp-sdk
 
 # 6. For V2N-M1 / V2M, also add DEEPX's own official meta-deepx-m1
-#    layer (verified commit 8d09b25f20f81104c16c7de90928ff8920eb482d
-#    on branch scarthgap):
+#    layer, pinned to the verified commit:
 git clone -b scarthgap https://github.com/DEEPX-AI/meta-deepx-m1.git ../meta-deepx-m1
+git -C ../meta-deepx-m1 checkout 8d09b25f20f81104c16c7de90928ff8920eb482d
 bitbake-layers add-layer ../meta-deepx-m1
 
 # 7. Pick the MACHINE in conf/local.conf:
@@ -311,10 +317,11 @@ backend the SoM preset's `capabilities:` block declares
 dependencies of the `alp-sdk` library** — the Yocto build links only
 the dispatcher + portable stubs.  Where a runtime userspace package
 exists, the **image** recipe installs it (e.g.
-`conf/machine/include/e1m-v2m-deepx.inc` appending `dx-driver dx-rt
-dx-rt-cli` when `ALP_ENABLE_DEEPX_DXM1 = "1"`); DRP-AI3 is driven
-through the in-kernel driver + UAPI headers from `meta-rz-drpai` (see
-below).
+`conf/machine/include/e1m-v2m-deepx.inc` appending `dx-driver dx-rt`
+when `ALP_ENABLE_DEEPX_DXM1 = "1"` -- `dxrt-cli` ships inside the
+`dx-rt` package itself at this pin, not as a separate recipe);
+DRP-AI3 is driven through the in-kernel driver + UAPI headers from
+`meta-rz-drpai` (see below).
 
 | MACHINE              | NPU backend            | Runtime source                              |
 |----------------------|------------------------|---------------------------------------------|
@@ -443,14 +450,19 @@ updates ride the `.mender` artefact through the Mender server.
 Apache-2.0 (umbrella).  Vendor-licensed components (`drp-ai-tvm`)
 follow their upstream licences and are flagged as such in the
 matching recipes' `LICENSE` field.  The DEEPX DX-M1 driver + runtime
-(`dx-driver`, `dx-rt`, `dx-rt-cli`) are **DEEPX-proprietary**,
-provided by DEEPX to its own DX-M1 NPU customers under DEEPX's own
-licence terms via DEEPX's own `meta-deepx-m1` layer
-(github.com/DEEPX-AI/meta-deepx-m1) — this public `meta-alp-sdk`
-layer ships **no DEEPX code**.  It only references DEEPX's own
-public repos by URL; a licensed DEEPX NPU customer fetches them
-themselves at build time by adding the layer to their own
-bblayers.conf.  See [`docs/vendor-partnerships.md`](../docs/vendor-partnerships.md)'s
+(`dx-driver`, `dx-rt`) come from DEEPX's own
+`meta-deepx-m1` layer (github.com/DEEPX-AI/meta-deepx-m1); those
+recipes declare `LICENSE = "Proprietary"`, and the `dx_rt` /
+`dx_rt_npu_linux_driver` source they fetch carries DEEPX's own
+customer-only licence terms ("provided exclusively to customers who
+are supplied with DEEPX NPU" — the driver source also carries SPDX
+GPL-2.0 headers in places, an ambiguity in DEEPX's own upstream that
+this repo does not attempt to resolve).  `meta-deepx-m1` itself ships
+no LICENSE file.  This public `meta-alp-sdk` layer ships **no DEEPX
+code** — it only references DEEPX's own public repos by URL, and a
+DEEPX NPU customer fetches them themselves at build time by adding
+the layer to their own bblayers.conf.  See
+[`docs/vendor-partnerships.md`](../docs/vendor-partnerships.md)'s
 DEEPX section for the full licensing detail.
 
 ## What's deferred

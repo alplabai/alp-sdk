@@ -107,14 +107,16 @@ PACKAGECONFIG:append = "${@bb.utils.contains('MACHINE_FEATURES', 'deepx-dxm1', '
 # <alp/inference.h> dispatcher + the portable stubs; the vendor NPU
 # backends are gated (the DRP-AI3 backend is real MeraDrpRuntimeWrapper
 # code since #1145, but compiles in only under the `drpai` PACKAGECONFIG
-# above and has never run on DRP-AI silicon; the DEEPX DX-M1 backend is
-# real dx_rt-API code since #482 and compiles in only under the
-# `deepx-dxm1` PACKAGECONFIG above, auto-enabled only on a MACHINE that
-# carries `deepx-dxm1` in MACHINE_FEATURES with ALP_ENABLE_DEEPX_DXM1 =
-# "1" -- it too has never run on DX-M1 silicon).
+# above and has never run on DRP-AI silicon; the DEEPX DX-M1 backend
+# (src/yocto/inference_deepx.cpp) is real dx_rt-API code and compiles in
+# only under the `deepx-dxm1` PACKAGECONFIG below -- #482 wired that
+# PACKAGECONFIG + its auto-enable, not the backend body itself -- and
+# it too has never run on DX-M1 silicon, auto-enabled only on a MACHINE
+# that carries `deepx-dxm1` in MACHINE_FEATURES with
+# ALP_ENABLE_DEEPX_DXM1 = "1").
 # Where a per-machine NPU userspace runtime package exists it is
-# installed by the *image* recipe (DEEPX's dx-rt/dx-driver/dx-rt-cli are
-# opted in per the e1m-v2m10{1,2,3}-a55 MACHINE confs via
+# installed by the *image* recipe (DEEPX's dx-rt/dx-driver are opted in
+# per the e1m-v2m10{1,2,3}-a55 MACHINE confs via
 # conf/machine/include/e1m-v2m-deepx.inc, gated on
 # ALP_ENABLE_DEEPX_DXM1); this recipe's own `deepx-dxm1` PACKAGECONFIG
 # only pulls the `dx-rt` BUILD dependency (headers + libdxrt), not the
