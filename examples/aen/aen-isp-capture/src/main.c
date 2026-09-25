@@ -165,10 +165,10 @@ extern volatile uint32_t isp_mi_frame_end_count;
  * 60 frames, letting the AE loop settle against real IMX296 SHS/GAIN register writeback before
  * the last frame is kept -- AWB stays manual (no IMX296 AWB/CCM calibration yet, #2287 unit 4).
  *
- * Bench run 298 diagnostic: AEN_ISP_N_FRAMES (CMakeLists.txt's -DAEN_ISP_N_FRAMES=<n> option)
- * overrides the AE-on/off default above when set (nonzero) -- e.g. a 60-frame AE-OFF run, to
- * check whether a flat SHS/GAIN readback is specific to the AE loop or shows up even under a
- * fixed manual exposure held over the same number of frames.
+ * AEN_ISP_N_FRAMES (CMakeLists.txt's -DAEN_ISP_N_FRAMES=<n> option) overrides the AE-on/off
+ * default above when set (nonzero) -- lets an AE-off run capture more than one frame, to check
+ * whether a symptom is specific to the AE loop or also shows up under a fixed manual exposure
+ * held over more frames. See README.md.
  */
 #define FRAME_WIDTH  1280
 #define FRAME_HEIGHT 960
@@ -389,14 +389,12 @@ static void print_imx296_ae_regs(int f)
 	       gain % 10);
 
 	/*
-	 * Bench run 298: AE never moved (SHS parked at the 32 us int_time_min floor, GAIN 0) --
-	 * advisor hypothesis is either the AE loop never runs at all (EXPM measurement window
-	 * overflow -- IMX296's 1280-wide ROI / 5 = 256 exceeds an 8-bit ISP_EXP_H_SIZE) or it runs
-	 * and parks on a genuinely black measurement. Same EXPM/g_ae_stable dump
-	 * print_ov5647_ae_regs() prints above (run 85's h_size/v_size unit verification) -- ADDs
-	 * the same readback for the IMX296 path so this can be told apart on the bench: h_size/
-	 * v_size == 0 or an obviously wrong value points at the EXPM window; a nonzero, plausible
-	 * h_size/v_size with mean_22 == 0 points at a genuinely black measurement region instead.
+	 * Same EXPM/g_ae_stable dump print_ov5647_ae_regs() prints above, for the IMX296 path:
+	 * an unmoving SHS/GAIN readback can mean either the AE loop never runs (EXPM measurement
+	 * window overflow -- IMX296's 1280-wide ROI / 5 = 256 exceeds an 8-bit ISP_EXP_H_SIZE) or
+	 * it runs and parks on a genuinely black measurement -- h_size/v_size == 0 or an obviously
+	 * wrong value points at the former; a nonzero, plausible h_size/v_size with mean_22 == 0
+	 * points at the latter.
 	 */
 	printk("f%d DGAIN_RB=0x%08x DGAIN_G=0x%08x ae_stable=%u\n",
 	       f,
@@ -524,17 +522,12 @@ int main(void)
 #if defined(AEN_ISP_IMX296) && DT_NODE_EXISTS(IMX296_NODE) &&                                    \
 	(defined(AEN_ISP_IMX296_EXPOSURE_LINES) || defined(AEN_ISP_IMX296_GAIN))
 	/*
-	 * Bench run 303 control captures (#2287 Stage B unit 3): AE now runs (lib Frame 1..61,
-	 * intLine/again writeback confirmed matching SHS/GAIN readback exactly) but the frame
-	 * stayed pure noise even at SHS=4 (1114 lines, the datasheet-permitted exposure ceiling)
-	 * + gain 0x1E0 (48 dB, the AE envelope's own ceiling) -- the SAME symptom raw (non-ISP)
-	 * captures at SHS=4/gain=480 showed earlier. SHS and gain are confounded in every failing
-	 * run so far (both always moved together, via AE); pin a SPECIFIC manual exposure/gain
-	 * combination directly on the sensor here -- independent of whatever AE would have
-	 * converged to -- to separate the two. AE-off only (CMakeLists.txt's own comment): with
-	 * the AE library compiled in, isp_apply_ae()'s own per-frame writeback
-	 * (isp_api_wrapper.c) would immediately overwrite whatever this sets on the very next
-	 * frame.
+	 * Pin a SPECIFIC manual exposure/gain combination directly on the sensor -- independent
+	 * of whatever AE would have converged to -- since SHS and gain otherwise always move
+	 * together via AE, making the two impossible to separate on a failing capture. AE-off
+	 * only (CMakeLists.txt's own comment): with the AE library compiled in, isp_apply_ae()'s
+	 * own per-frame writeback (isp_api_wrapper.c) would immediately overwrite whatever this
+	 * sets on the very next frame.
 	 */
 	const struct device *imx296_dev = DEVICE_DT_GET(IMX296_NODE);
 

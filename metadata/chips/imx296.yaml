@@ -45,12 +45,24 @@ notes: |
   not been bench-run on the product (logging-enabled) build, so whether
   HLINE_ERR/FIFO_OVERFLOW (or anything else) shows up there is open.
 
-  NOT yet bench-verified, tracked for a later stage: continuous streaming,
-  the ISP-Pico colour path, auto-exposure, and the driver's fast-trigger
-  exposure mode (IMX296_CID_TRIGGER_MODE) -- compiles clean but has not run
-  with a trigger pulse; its GPIO wiring's electrical polarity is also
+  Issue #2287, Stage B, bench-verified: a 1280x960 ROI crop mode (runs
+  294/295), the ISP-Pico data path (SRGGB10P -> ISP-Pico -> YUV420, run
+  297), auto-exposure through the ISP-Pico AE library (runs 309/310, after
+  fixing a CPI snapshot-mode re-arm race that corrupted frames -- see
+  changelog.d/2287.md), and continuous MJPEG streaming through
+  examples/connectivity/camera-mjpeg-stream (runs 312-314: 61 fps encode,
+  0 encode failures, up to 28.3 fps / 885 KB/s delivered to one client).
+
+  NOT yet bench-verified: colour (AWB/CCM) -- no IMX296-fitted calibration
+  table exists yet, every IMX296 build falls through to the stock ARX3A0
+  defaults; the driver's fast-trigger exposure mode
+  (IMX296_CID_TRIGGER_MODE) -- compiles clean but has not run with a
+  trigger pulse, and its GPIO wiring's electrical polarity is also
   unconfirmed against the module's own documentation, so do not wire its
-  trigger header yet.
+  trigger header yet; SHS < 14 in ROI mode (the datasheet's own tabulated
+  frame-rate floor vs. this driver's fixed VMAX is an open discrepancy);
+  and OV5647/OV9281 re-bench of the CPI/ISP changes Stage B made to the
+  code those sensors also share.
 
 bus:              i2c
 i2c:
@@ -76,12 +88,13 @@ families:
   - aen
 
 verification:
-  hil_silicon:    partial           # Stage A: I2C identity, CSI-2 streaming, and ONE captured
-                                     # 1456x1088 RAW10 frame (bench run 292) -- see notes above.
-                                     # Partial, not verified: frame rate was not measured,
-                                     # continuous streaming has not been bench-run on the product
-                                     # build, and ISP-Pico, AE and fast-trigger mode are separate,
-                                     # later-stage surfaces that remain unverified.
+  hil_silicon:    partial           # Stage A+B bench-verified: I2C identity, CSI-2 streaming, a
+                                     # captured raw frame (full-frame + 1280x960 ROI), the
+                                     # ISP-Pico data path, auto-exposure, and continuous MJPEG
+                                     # streaming -- see notes above. STILL partial, not full:
+                                     # colour (AWB/CCM) is uncalibrated and fast-trigger mode is
+                                     # unbenched -- both remain open, so this stays "partial"
+                                     # rather than moving to a full-verification status.
   smoke_tests:    none               # no chips/ portable driver surface exists to unit-test;
                                      # the streaming driver's coverage is
                                      # tests/zephyr/video_sensors/src/imx296_test.c.

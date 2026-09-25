@@ -361,7 +361,7 @@ struct isp_data {
 	struct k_work_q cb_workq;
 
 	/*
-	 * #2287 Stage B unit 3 (bench runs 307/308, advisor code analysis): isp_isr_handler()'s
+	 * #2287 Stage B unit 3 (bench runs 307/308): isp_isr_handler()'s
 	 * corrupted-frame path (INTR_SIZE_ERR/INTR_DATALOSS/isp_intr_err_mask) skips cb_work
 	 * entirely for that frame (there is no valid data for isp_bottom_half() to retire) -- but
 	 * with the ISP now the ONLY thing that re-arms the CPI (alif_cam_cpi_resume(), which takes
@@ -379,7 +379,7 @@ struct isp_data {
 	struct isp_ctrls ctrls;
 
 	/*
-	 * #2287 Stage B unit 3 (advisor code analysis after bench runs 307/308: alif_cam_cpi_pause()
+	 * #2287 Stage B unit 3 (bench runs 307/308: alif_cam_cpi_pause()
 	 * no longer exists -- see video_alif.c's own comment on alif_cam_cpi_resume() for why):
 	 * set directly by isp_bottom_half() on its own IN-FIFO starvation, WITHOUT any call into
 	 * video_alif.c -- a starvation pause is now simply this driver choosing not to call

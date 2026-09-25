@@ -236,7 +236,7 @@ int fourcc_to_numplanes(uint32_t fourcc);
 unsigned int pix_fmt_bpp(uint32_t fourcc);
 
 /*
- * #2287 Stage B unit 3 (advisor code analysis after bench runs 307/308): re-arms ONLY the CPI
+ * #2287 Stage B unit 3 (bench runs 307/308): re-arms ONLY the CPI
  * capture engine (SNAPSHOT mode -- one frame per call) for an ISP consumer's next frame
  * (isp_pico.c), as distinct from a full video_stream_stop()/_start() (which always tears the
  * CSI-2 endpoint + sensor down, by design, for a real stop()/close()). The CALLER (isp_pico.c's

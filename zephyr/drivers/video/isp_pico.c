@@ -457,7 +457,7 @@ static void isp_bottom_half(const struct device *dev)
 	}
 
 	/*
-	 * #2287 Stage B unit 3 (bench runs 307/308, advisor code analysis): re-arm the CPI HERE,
+	 * #2287 Stage B unit 3 (bench runs 307/308): re-arm the CPI HERE,
 	 * now that isp_attach_buffer_to_hw() (above) has told the ISP's own MI where the NEXT
 	 * frame goes -- alif_cam_cpi_resume() (video_alif.c) is a pure SNAPSHOT-mode re-arm (one
 	 * frame per call); calling it before the ISP has a destination buffer ready is exactly
@@ -500,8 +500,8 @@ isp_bottom_done:
 		 * appears once instead of every restart, and frame rate rose ~4x (0.8 -> 3.4 fps
 		 * app-side). On genuine starvation, this driver simply does NOT re-arm the CPI (see
 		 * isp_attach_buffer_to_hw()'s own success-path comment, above -- there is no active
-		 * register action for a pause any more, advisor code analysis after bench runs
-		 * 307/308: alif_cam_cpi_pause()/hw_cam_cpi_only_stop() used to actively interrupt a
+		 * register action for a pause any more (bench runs 307/308):
+		 * alif_cam_cpi_pause()/hw_cam_cpi_only_stop() used to actively interrupt a
 		 * capture that alif_cam_work_helper()'s own STOP-work had ALREADY wrongly re-armed
 		 * behind this decision's back -- that race is gone now that only THIS function ever
 		 * re-arms the CPI in ISP-consumer mode), leaving the endpoint + sensor (and the ISP's

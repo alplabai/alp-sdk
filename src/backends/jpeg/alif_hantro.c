@@ -490,23 +490,8 @@ static alp_status_t hantro_encode(alp_jpeg_backend_state_t    *state,
 			st->streaming = false;
 		}
 		(void)video_buffer_release(&vbuf);
-		/*
-		 * -ENOSPC here IS the JPEG_BUFFER_FULL failure examples/connectivity/
-		 * camera-mjpeg-stream/src/main.c's quality-ladder retry exists for
-		 * (bench run 312, #2287): the driver's dequeue() sets
-		 * data->current_buf = NULL and returns -ENOSPC BEFORE ever writing
-		 * done->bytesused, so unlike the done->bytesused > out_cap path below,
-		 * *out_len is never touched here -- it stays at the caller's own
-		 * pre-call value. A bench run 312 fix briefly had this path fabricate
-		 * *out_len = out_cap + 1 ("too big, amount unknown") so a caller's
-		 * out_len > out_cap gate would fire -- reverted, bench run 313: the
-		 * caller no longer needs it (main.c's retry gate now keys off the
-		 * error code alone, jpeg_quality_should_retry(), not out_len -- see
-		 * jpeg_quality_ladder.h), and <alp/jpeg.h>'s alp_jpeg_encode() only
-		 * documents *out_len as "the required size, WHEN KNOWN" -- it is
-		 * genuinely not known on this path, so leaving it untouched is the
-		 * honest answer, not a fabricated one.
-		 */
+		/* -ENOSPC (JPEG_BUFFER_FULL): required size unknown; *out_len left
+		 * untouched per <alp/jpeg.h>. */
 		return _errno_to_alp(err); /* -EAGAIN -> ALP_ERR_TIMEOUT, see alp_errno.h. */
 	}
 	if (done == NULL) {

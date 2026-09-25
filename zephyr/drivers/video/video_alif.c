@@ -395,7 +395,7 @@ static inline void hw_cam_cpi_only_stop(uintptr_t regs)
 }
 
 /*
- * #2287 Stage B unit 3 (bench runs 298-306, advisor code analysis after runs 307/308): this pair
+ * #2287 Stage B unit 3 (bench runs 298-306, root-caused by runs 307/308): this pair
  * used to be pause+resume (alif_cam_cpi_pause() called hw_cam_cpi_only_stop() -- CAM_CTRL=0 +
  * soft reset -- to actively interrupt an in-progress capture). That was WRONG for this CPI: it
  * runs in SNAPSHOT mode (hw_cam_start_video_capture()'s CAM_CTRL_SNAPSHOT bit,
@@ -782,7 +782,7 @@ done:
 #endif /* defined(CONFIG_POLL) */
 	} else {
 		/*
-		 * #2287 Stage B unit 3 (bench runs 307/308, advisor code analysis): this branch used
+		 * #2287 Stage B unit 3 (bench runs 307/308): this branch used
 		 * to re-arm the CPI itself (hw_cam_start_video_capture()) unconditionally, on every
 		 * STOP interrupt -- racing isp_pico.c's own frame-end interrupt and bottom half,
 		 * which decides (per frame) whether there IS a next destination buffer to capture
