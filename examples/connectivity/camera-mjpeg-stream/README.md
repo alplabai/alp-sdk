@@ -31,7 +31,7 @@ your DHCP server):
 [camera-mjpeg-stream]   snapshot: http://192.0.2.10:8080/snapshot.jpg
 ```
 
-### 1280x960 build variant (E1M-AEN801/AEN803, 15 fps capture/encode, ~7.5 fps delivered)
+### 1280x960 build variant (E1M-AEN801/AEN803, full-FOV 2x2-binned, 15 fps capture/encode)
 
 `CONFIG_CAMERA_MJPEG_STREAM_1280X960` (this directory's `Kconfig`) switches
 `src/main.c` to 1280x960 at 15 fps capture/encode and raises the JPEG
@@ -52,8 +52,12 @@ field of view is now the whole sensor array, not a ~49%-width crop. The
 sensor mode also newly supports 30 fps (`OV5647_HTS_1280X960_BINNED`);
 this example still requests 15 fps by default, pending a bench pass to
 confirm SRAM0/JPEG/send-path headroom at 30 fps. Bench runs 242/243 below
-were measured under Stage A's crop mode; this driver-mode change has NOT
-yet been re-benched.
+were measured under Stage A's crop mode; this driver-mode change (#2286)
+has since been re-benched on E1M-AEN803 2026W36-0001, full-FOV 2x2-binned
+1280x960 at 15 fps: delivered rate depends on JPEG size — 15.00 fps at
+~35 KB frames in a daylight scene, 13.80 fps at ~39 KB (~0.54 MB/s) after
+the send-window fix below, and 7.50 fps at ~109-133 KB frames in earlier
+runs — always 0 CSI/IPI errors and no banding.
 
 ```bash
 west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
@@ -250,7 +254,7 @@ the body):
 | `src/selftest.c` | native_sim-only CI selftest (`GET /snapshot.jpg` JPEG marker check, `GET /stream` multipart-framing check). |
 | `boards/alp_e1m_aen80{1,3}_..._rtss_he.overlay` | ISP graph rewiring (mirrors `aen-isp-ov5647-viewfinder`) + interim Ethernet RMII/PHY DT wiring (mirrors `aen-ethernet-link`). Content-identical across the two SKUs. |
 | `boards/alp_e1m_aen80{1,3}_..._rtss_he.conf` | AEN hardware-path Kconfig (ISP pipeline sized for 640×480 NV12, Hantro JPEG encoder, Ethernet DMA-region glue, `CONFIG_DCACHE=n`) — board-scoped so native_sim stays clean of undefined-symbol Kconfig warnings. Content-identical across the two SKUs. |
-| `boards/overlay-1280x960.conf` | 1280x960 variant (AEN801 or AEN803, same PCB/SoC): sets `CONFIG_CAMERA_MJPEG_STREAM_1280X960`, drops the ISP raw-buffer count to 2, and resizes the video buffer pool for the larger NV12 frame — layered on top of either board conf via `EXTRA_CONF_FILE`. |
+| `boards/overlay-1280x960.conf` | 1280x960 variant (AEN801 or AEN803, same PCB/SoC): sets `CONFIG_CAMERA_MJPEG_STREAM_1280X960`, drops the ISP raw-buffer count to 2, resizes the video buffer pool for the larger NV12 frame, and resets `CONFIG_NET_TCP_MAX_SEND_WINDOW_SIZE` to 0 (auto) — the board confs' 64 KiB window starves this overlay's 16/8 TX pools — layered on top of either board conf via `EXTRA_CONF_FILE`. |
 | `Kconfig` | `CONFIG_CAMERA_MJPEG_STREAM_1280X960` — the resolution select `src/main.c` and `src/mjpeg_http.h` both key off. |
 | `boards/native_sim.conf` + `boards/native_sim_native_64.conf` | Content-identical pair (Zephyr resolves a different filename per qualifier string, so one file alone doesn't cover both `native_sim` and `native_sim/native/64`): `CONFIG_NET_LOOPBACK` + a zeroed `CONFIG_NET_TCP_TIME_WAIT_DELAY` so `src/selftest.c`'s two back-to-back loopback connections don't collide on a lingering TIME_WAIT port. |
 

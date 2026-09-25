@@ -1688,8 +1688,8 @@ static int ov5647_set_ctrl_exposure(const struct device *dev)
 	 * matches the datasheet's minimum VTS-to-exposure margin (registers 0x3500..0x3502 vs
 	 * 0x380E/0x380F). data->fmt/data->frmrate are the ACTIVE mode/rate (ov5647_set_fmt()/
 	 * ov5647_set_frmival() keep them current), so this tracks whichever mode is actually
-	 * streaming -- ov5647_hts_for() is per-mode (640x480 binned vs every crop-path size use
-	 * different HTS), unlike a single driver-wide constant. This is the sensor driver's own
+	 * streaming -- ov5647_hts_for() is per-mode (640x480 binned HTS 1852, 1280x960 binned
+	 * HTS 1896, crop HTS 2700), unlike a single driver-wide constant. This is the sensor driver's own
 	 * VTS math (ov5647_hts_for()/ov5647_frmrate_to_vts(), both already used by
 	 * ov5647_set_frmival() to program TIMING_VTS in the first place), not duplicated
 	 * elsewhere -- an ISP layer clamping exposure needs to stay sensor-agnostic and has no

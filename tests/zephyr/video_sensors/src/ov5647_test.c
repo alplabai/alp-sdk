@@ -2193,10 +2193,10 @@ ZTEST(ov5647, test_exposure_clamps_to_active_vts_margin)
 		uint32_t fps;
 		uint32_t vts; /* pixel_rate / (hts * fps), floored */
 	} cases[] = {
-		{ 640, 480, 30, 1049 },  /* binned HTS 1852 */
-		{ 1280, 960, 15, 2051 }, /* 2x2-binned full-FOV HTS 1896 */
+		{ 640, 480, 30, 1049 },   /* binned HTS 1852 */
+		{ 1280, 960, 15, 2051 },  /* 2x2-binned full-FOV HTS 1896 */
 		{ 1920, 1080, 15, 1440 }, /* crop HTS 2700 */
-		{ 640, 480, 10, 3149 },  /* binned HTS 1852, the driver's boot-default rate */
+		{ 640, 480, 10, 3149 },   /* binned HTS 1852, the driver's boot-default rate */
 	};
 	const struct emul *emul = ov5647_emul();
 

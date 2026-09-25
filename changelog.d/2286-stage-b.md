@@ -72,7 +72,7 @@ buffer pools, and the 1280x960 overlay inherited it while keeping 16/8 TX buffer
 stream then sent only its multipart headers and every JPEG send stalled to the 2 s socket
 timeout. `boards/overlay-1280x960.conf` now sets the window to 0, and the merged tree
 streams 1280x960 again on E1M-AEN803 2026W36-0001 (13.80 fps over 60 s at ~39 KB JPEG,
-send-bound at ~0.54 MB/s; 0 errors; frames distinct).
+at ~0.54 MB/s; 0 errors; frames distinct).
 
 `tests/zephyr/video_sensors/src/ov5647_test.c` gains `test_set_format_1280x960_binned_
 fullfov_before_park` (the coherent register block, ordered before the lane park, mirroring
