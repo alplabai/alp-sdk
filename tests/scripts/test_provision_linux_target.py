@@ -42,7 +42,10 @@ def _i2cdetect(addrs: set[int]) -> str:
 
 class FakeSSH:
     """subprocess.run stand-in. responses: [(regex over the remote command,
-    stdout | (rc, stdout) | list of those, popped per call | callable(cmd))]."""
+    stdout | (rc, stdout) | (rc, stdout, stderr) | list of those, popped per
+    call | callable(cmd))]. A 2-tuple gets a default "boom" stderr on
+    failure; a 3-tuple names its own stderr (e.g. a specific sysfs error
+    message a caller needs to match on)."""
 
     def __init__(self, responses):
         self.responses = [(re.compile(p), r) for p, r in responses]
@@ -61,8 +64,14 @@ class FakeSSH:
                     resp = resp.pop(0) if len(resp) > 1 else resp[0]
                 if callable(resp):
                     resp = resp(cmd)
-                rc, out = resp if isinstance(resp, tuple) else (0, resp)
-                return subprocess.CompletedProcess(argv, rc, out, "" if rc == 0 else "boom")
+                if isinstance(resp, tuple) and len(resp) == 3:
+                    rc, out, err = resp
+                elif isinstance(resp, tuple):
+                    rc, out = resp
+                    err = "" if rc == 0 else "boom"
+                else:
+                    rc, out, err = 0, resp, ""
+                return subprocess.CompletedProcess(argv, rc, out, err)
         raise AssertionError(f"unexpected command: {cmd}")
 
 
@@ -360,6 +369,20 @@ def test_clkgen_diff_rejects_wrong_length():
 # so lines are driven via /sys/class/gpio. P75/PA6 = "10410000.pinctrl" chip,
 # base 416, within-chip lines 61/86 -> global 477/502 (silicon-verified).
 
+# a chip's own device dir + a named line whose device resolves under it --
+# the "belongs to this chip" shape most tests below reuse (both P75 and PA6
+# live under the same gpiochip0 hog on the real board).
+_CHIP_DEV = "/sys/devices/platform/soc/10410000.pinctrl"
+_HOG_DEV = _CHIP_DEV + "/gpiochip0"
+
+
+def _named_ownership_responses(named: str, named_dev: str = _HOG_DEV):
+    return [
+        (rf"^readlink -f /sys/class/gpio/gpiochip416/device$", _CHIP_DEV + "\n"),
+        (rf"^readlink -f {re.escape(named)}/device$", named_dev + "\n"),
+    ]
+
+
 def test_sysfs_gpio_line_name():
     assert lt._sysfs_gpio_line_name(61) == "P75"
     assert lt._sysfs_gpio_line_name(86) == "PA6"
@@ -383,6 +406,15 @@ def test_pinctrl_chip_base_raises_when_label_not_found():
         lt._pinctrl_chip_base(t, "10410000.pinctrl")
 
 
+@pytest.mark.parametrize("line,name", [(52, "P64"), (53, "P65")])
+def test_sysfs_gpio_dir_refuses_the_deepx_rail_before_any_ssh_call(line, name):
+    def runner(argv, **kw):
+        raise AssertionError(f"must not touch hardware for a refused line, got: {argv}")
+    t = lt.LinuxTarget("unit", runner=runner)
+    with pytest.raises(BenchError, match=name):
+        lt._sysfs_gpio_dir(t, "10410000.pinctrl", line)
+
+
 def test_sysfs_gpio_dir_uses_the_already_named_export_without_writing_export():
     # matches the real V2N board: P75/PA6 are pre-exported by the pinctrl
     # driver under their DT name; gpio<N> never appears.
@@ -391,9 +423,29 @@ def test_sysfs_gpio_dir_uses_the_already_named_export_without_writing_export():
         (r"^cat /sys/class/gpio/gpiochip416/base$", "416\n"),
         (r"^test -e /sys/class/gpio/gpio477/value$", (1, "")),
         (r"^test -e /sys/class/gpio/P75/value$", (0, "")),
+        *_named_ownership_responses("/sys/class/gpio/P75"),
     ])
     assert lt._sysfs_gpio_dir(t, "10410000.pinctrl", 61) == "/sys/class/gpio/P75"
     assert not any("export" in c for c in fake.commands)
+
+
+def test_sysfs_gpio_dir_rejects_a_named_dir_owned_by_a_different_chip():
+    # same name, but its device symlink resolves under some OTHER chip --
+    # must not be trusted, so the resolver falls through to export.
+    t, fake = target([
+        (r"^for d in /sys/class/gpio/gpiochip\*", "/sys/class/gpio/gpiochip416 10410000.pinctrl\n"),
+        (r"^cat /sys/class/gpio/gpiochip416/base$", "416\n"),
+        (r"^test -e /sys/class/gpio/gpio477/value$", (1, "")),
+        (r"^test -e /sys/class/gpio/P75/value$", (0, "")),
+        (r"^readlink -f /sys/class/gpio/gpiochip416/device$", _CHIP_DEV + "\n"),
+        (r"^readlink -f /sys/class/gpio/P75/device$", "/sys/devices/platform/soc/other-chip\n"),
+        (r"^echo 477 > /sys/class/gpio/export$", ""),
+    ])
+    with pytest.raises(BenchError, match="exported but neither"):
+        # numeric never appears post-export either in this scripted case,
+        # so it should raise rather than silently trust the foreign P75.
+        lt._sysfs_gpio_dir(t, "10410000.pinctrl", 61)
+    assert "echo 477 > /sys/class/gpio/export" in fake.commands
 
 
 def test_sysfs_gpio_dir_exports_when_neither_form_exists_yet():
@@ -408,6 +460,33 @@ def test_sysfs_gpio_dir_exports_when_neither_form_exists_yet():
     assert "echo 426 > /sys/class/gpio/export" in fake.commands
 
 
+def test_sysfs_gpio_dir_finds_the_named_dir_after_an_ebusy_export():
+    # export fails EBUSY (already owned by the pinctrl hog) but the named
+    # dir now appears -- must be trusted once ownership checks out.
+    t, fake = target([
+        (r"^for d in /sys/class/gpio/gpiochip\*", "/sys/class/gpio/gpiochip416 10410000.pinctrl\n"),
+        (r"^cat /sys/class/gpio/gpiochip416/base$", "416\n"),
+        (r"^test -e /sys/class/gpio/gpio477/value$", (1, "")),
+        (r"^test -e /sys/class/gpio/P75/value$", [(1, ""), (0, "")]),
+        (r"^echo 477 > /sys/class/gpio/export$", (1, "", "sh: write error: Device or resource busy")),
+        *_named_ownership_responses("/sys/class/gpio/P75"),
+    ])
+    assert lt._sysfs_gpio_dir(t, "10410000.pinctrl", 61) == "/sys/class/gpio/P75"
+    assert "echo 477 > /sys/class/gpio/export" in fake.commands
+
+
+def test_sysfs_gpio_dir_raises_when_ebusy_and_the_dir_never_appears():
+    t, _ = target([
+        (r"^for d in /sys/class/gpio/gpiochip\*", "/sys/class/gpio/gpiochip416 10410000.pinctrl\n"),
+        (r"^cat /sys/class/gpio/gpiochip416/base$", "416\n"),
+        (r"^test -e /sys/class/gpio/gpio477/value$", (1, "")),
+        (r"^test -e /sys/class/gpio/P75/value$", (1, "")),
+        (r"^echo 477 > /sys/class/gpio/export$", (1, "", "sh: write error: Device or resource busy")),
+    ])
+    with pytest.raises(BenchError, match="exported but neither"):
+        lt._sysfs_gpio_dir(t, "10410000.pinctrl", 61)
+
+
 def test_sysfs_gpio_dir_raises_if_export_fails_for_a_real_reason():
     t, _ = target([
         (r"^for d in /sys/class/gpio/gpiochip\*", "/sys/class/gpio/gpiochip416 10410000.pinctrl\n"),
@@ -420,17 +499,18 @@ def test_sysfs_gpio_dir_raises_if_export_fails_for_a_real_reason():
         lt._sysfs_gpio_dir(t, "10410000.pinctrl", 10)
 
 
-def test_dxm1_reset_pulse_is_one_ssh_round_trip():
+def test_dxm1_reset_pulse_is_one_ssh_round_trip_chained_with_and():
     t, fake = target([
         (r"^for d in /sys/class/gpio/gpiochip\*", "/sys/class/gpio/gpiochip416 10410000.pinctrl\n"),
         (r"^cat /sys/class/gpio/gpiochip416/base$", "416\n"),
         (r"^test -e /sys/class/gpio/gpio502/value$", (1, "")),
         (r"^test -e /sys/class/gpio/PA6/value$", (0, "")),
-        (r"^echo low > /sys/class/gpio/PA6/direction; sleep 0\.1; echo high > /sys/class/gpio/PA6/direction$", ""),
+        *_named_ownership_responses("/sys/class/gpio/PA6"),
+        (r"^echo low > /sys/class/gpio/PA6/direction && sleep 0\.1 && echo high > /sys/class/gpio/PA6/direction$", ""),
     ])
     lt.dxm1_reset_pulse(t, "10410000.pinctrl", 86)
-    assert fake.commands[-1] == ("echo low > /sys/class/gpio/PA6/direction; "
-                                 "sleep 0.1; echo high > /sys/class/gpio/PA6/direction")
+    assert fake.commands[-1] == ("echo low > /sys/class/gpio/PA6/direction && "
+                                 "sleep 0.1 && echo high > /sys/class/gpio/PA6/direction")
 
 
 def test_dxm1_uart_boot_drives_p75_via_sysfs_and_releases_it_afterward():
@@ -439,10 +519,12 @@ def test_dxm1_uart_boot_drives_p75_via_sysfs_and_releases_it_afterward():
         (r"^cat /sys/class/gpio/gpiochip416/base$", "416\n"),
         (r"^test -e /sys/class/gpio/gpio477/value$", (1, "")),
         (r"^test -e /sys/class/gpio/P75/value$", (0, "")),
+        *_named_ownership_responses("/sys/class/gpio/P75"),
         (r"^echo high > /sys/class/gpio/P75/direction$", ""),
         (r"^test -e /sys/class/gpio/gpio502/value$", (1, "")),
         (r"^test -e /sys/class/gpio/PA6/value$", (0, "")),
-        (r"^echo low > /sys/class/gpio/PA6/direction; sleep 0\.1; echo high > /sys/class/gpio/PA6/direction$", ""),
+        *_named_ownership_responses("/sys/class/gpio/PA6"),
+        (r"^echo low > /sys/class/gpio/PA6/direction && sleep 0\.1 && echo high > /sys/class/gpio/PA6/direction$", ""),
         (r"^uart_boot -d /dev/ttySC1 -f fw_uart_boot\.bin -b 115200$", "bootloader ok\n"),
         (r"^uart_boot -d /dev/ttySC1 -F fw\.bin -U -b 115200$", "app ok\n"),
         (r"^echo low > /sys/class/gpio/P75/direction$", ""),
@@ -459,14 +541,60 @@ def test_dxm1_uart_boot_releases_p75_even_if_the_transfer_fails():
         (r"^cat /sys/class/gpio/gpiochip416/base$", "416\n"),
         (r"^test -e /sys/class/gpio/gpio477/value$", (1, "")),
         (r"^test -e /sys/class/gpio/P75/value$", (0, "")),
+        *_named_ownership_responses("/sys/class/gpio/P75"),
         (r"^echo high > /sys/class/gpio/P75/direction$", ""),
         (r"^test -e /sys/class/gpio/gpio502/value$", (1, "")),
         (r"^test -e /sys/class/gpio/PA6/value$", (0, "")),
-        (r"^echo low > /sys/class/gpio/PA6/direction; sleep 0\.1; echo high > /sys/class/gpio/PA6/direction$", ""),
-        (r"^uart_boot -d /dev/ttySC1 -f fw_uart_boot\.bin -b 115200$", (1, "no ROM response")),
+        *_named_ownership_responses("/sys/class/gpio/PA6"),
+        (r"^echo low > /sys/class/gpio/PA6/direction && sleep 0\.1 && echo high > /sys/class/gpio/PA6/direction$", ""),
+        (r"^uart_boot -d /dev/ttySC1 -f fw_uart_boot\.bin -b 115200$", (1, "", "no ROM response")),
         (r"^echo low > /sys/class/gpio/P75/direction$", ""),
     ])
-    with pytest.raises(BenchError):
+    with pytest.raises(BenchError, match="no ROM response"):
+        lt.dxm1_uart_boot(t, "10410000.pinctrl", 61, 86, "/dev/ttySC1", "uart_boot",
+                          "fw_uart_boot.bin", "fw.bin")
+    assert fake.commands[-1] == "echo low > /sys/class/gpio/P75/direction"
+
+
+def test_dxm1_uart_boot_raises_if_release_fails_and_no_earlier_exception():
+    t, fake = target([
+        (r"^for d in /sys/class/gpio/gpiochip\*", "/sys/class/gpio/gpiochip416 10410000.pinctrl\n"),
+        (r"^cat /sys/class/gpio/gpiochip416/base$", "416\n"),
+        (r"^test -e /sys/class/gpio/gpio477/value$", (1, "")),
+        (r"^test -e /sys/class/gpio/P75/value$", (0, "")),
+        *_named_ownership_responses("/sys/class/gpio/P75"),
+        (r"^echo high > /sys/class/gpio/P75/direction$", ""),
+        (r"^test -e /sys/class/gpio/gpio502/value$", (1, "")),
+        (r"^test -e /sys/class/gpio/PA6/value$", (0, "")),
+        *_named_ownership_responses("/sys/class/gpio/PA6"),
+        (r"^echo low > /sys/class/gpio/PA6/direction && sleep 0\.1 && echo high > /sys/class/gpio/PA6/direction$", ""),
+        (r"^uart_boot -d /dev/ttySC1 -f fw_uart_boot\.bin -b 115200$", "bootloader ok\n"),
+        (r"^uart_boot -d /dev/ttySC1 -F fw\.bin -U -b 115200$", "app ok\n"),
+        (r"^echo low > /sys/class/gpio/P75/direction$", (1, "", "write error")),
+    ])
+    with pytest.raises(BenchError, match="could not release"):
+        lt.dxm1_uart_boot(t, "10410000.pinctrl", 61, 86, "/dev/ttySC1", "uart_boot",
+                          "fw_uart_boot.bin", "fw.bin")
+    assert fake.commands[-1] == "echo low > /sys/class/gpio/P75/direction"
+
+
+def test_dxm1_uart_boot_logs_but_does_not_mask_the_original_failure_when_release_also_fails():
+    t, fake = target([
+        (r"^for d in /sys/class/gpio/gpiochip\*", "/sys/class/gpio/gpiochip416 10410000.pinctrl\n"),
+        (r"^cat /sys/class/gpio/gpiochip416/base$", "416\n"),
+        (r"^test -e /sys/class/gpio/gpio477/value$", (1, "")),
+        (r"^test -e /sys/class/gpio/P75/value$", (0, "")),
+        *_named_ownership_responses("/sys/class/gpio/P75"),
+        (r"^echo high > /sys/class/gpio/P75/direction$", ""),
+        (r"^test -e /sys/class/gpio/gpio502/value$", (1, "")),
+        (r"^test -e /sys/class/gpio/PA6/value$", (0, "")),
+        *_named_ownership_responses("/sys/class/gpio/PA6"),
+        (r"^echo low > /sys/class/gpio/PA6/direction && sleep 0\.1 && echo high > /sys/class/gpio/PA6/direction$", ""),
+        (r"^uart_boot -d /dev/ttySC1 -f fw_uart_boot\.bin -b 115200$", (1, "", "no ROM response")),
+        (r"^echo low > /sys/class/gpio/P75/direction$", (1, "", "write error")),
+    ])
+    # the transfer's own error must win -- not the release failure.
+    with pytest.raises(BenchError, match="no ROM response"):
         lt.dxm1_uart_boot(t, "10410000.pinctrl", 61, 86, "/dev/ttySC1", "uart_boot",
                           "fw_uart_boot.bin", "fw.bin")
     assert fake.commands[-1] == "echo low > /sys/class/gpio/P75/direction"

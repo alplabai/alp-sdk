@@ -746,9 +746,9 @@ def test_dxm1_npu_flash_execute_fails_when_pcie_endpoint_absent(tmp_path):
         console = _login_console()
         bench = _bench(console=console)
         # pinctrl chip-base lookup, sysfs P75/PA6 dir resolution (already
-        # named, no export needed), the reset pulse, two uart_boot calls,
-        # then P75 released -- all scripted permissively so only the
-        # PCIe-empty cold boot causes the failure.
+        # named + ownership-verified, no export needed), the reset pulse,
+        # two uart_boot calls, then P75 released -- all scripted
+        # permissively so only the PCIe-empty cold boot causes the failure.
         console_hooks = {"n": 0}
 
         def on_power():
@@ -765,13 +765,19 @@ def test_dxm1_npu_flash_execute_fails_when_pcie_endpoint_absent(tmp_path):
                 return 1, ""
             if cmd == "test -e /sys/class/gpio/P75/value":
                 return 0, ""
+            if cmd == "readlink -f /sys/class/gpio/gpiochip416/device":
+                return 0, "/sys/devices/platform/soc/10410000.pinctrl\n"
+            if cmd == "readlink -f /sys/class/gpio/P75/device":
+                return 0, "/sys/devices/platform/soc/10410000.pinctrl/gpiochip0\n"
             if cmd == "echo high > /sys/class/gpio/P75/direction":
                 return 0, ""
             if cmd == "test -e /sys/class/gpio/gpio502/value":
                 return 1, ""
             if cmd == "test -e /sys/class/gpio/PA6/value":
                 return 0, ""
-            if re.search(r"echo low > /sys/class/gpio/PA6/direction; sleep 0\.1; "
+            if cmd == "readlink -f /sys/class/gpio/PA6/device":
+                return 0, "/sys/devices/platform/soc/10410000.pinctrl/gpiochip0\n"
+            if re.search(r"echo low > /sys/class/gpio/PA6/direction && sleep 0\.1 && "
                          r"echo high > /sys/class/gpio/PA6/direction", cmd):
                 return 0, ""
             if re.search(r"uart_boot -d /dev/ttySC1 -f", cmd):

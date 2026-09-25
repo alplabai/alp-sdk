@@ -14,6 +14,7 @@ import hashlib
 import re
 import shlex
 import subprocess
+import sys
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
@@ -507,6 +508,11 @@ def clkgen_diff(image: bytes) -> list[str]:
 # it); anything else enumerated under /sys/bus/pci/devices is an endpoint.
 PCI_CLASS_BRIDGE_PREFIX = "0x0604"
 
+# the DEEPX 0.75 V rail; never a UART-mux/reset line -- gpiolib reconfigures
+# a pin on read and would kill it. Enforced at the single sysfs choke point
+# (_sysfs_gpio_dir) as well as steps.py's own bench.yaml validation.
+DXM1_REFUSED_GPIO_LINES = {52: "P64", 53: "P65"}
+
 
 def _sysfs_gpio_line_name(line: int) -> str:
     """RZ/V2N pinctrl naming convention: within-chip `line` = port*8+pin ->
@@ -535,38 +541,61 @@ def _pinctrl_chip_base(t: LinuxTarget, label: str) -> int:
 
 def _sysfs_gpio_dir(t: LinuxTarget, label: str, line: int) -> str:
     """Resolve the sysfs dir for within-chip `line` on the gpiochip labelled
-    `label`, exporting it if needed. Some lines on this board are already
-    exported by the pinctrl driver under their DT name (e.g.
-    "/sys/class/gpio/P75") rather than the numeric "gpio<N>" -- a sysfs
-    holds direction+value without a background process, so unlike gpioset
-    this needs no PID bookkeeping."""
+    `label`, exporting it if needed. This is the single choke point every
+    DX-M1 GPIO helper goes through, so the DEEPX-rail refusal
+    (`DXM1_REFUSED_GPIO_LINES`) is enforced right here, first -- before
+    `_pinctrl_chip_base` or any `t.run` at all -- not just at steps.py's
+    bench.yaml validation. Some lines on this board are already exported by
+    the pinctrl driver under their DT name (e.g. "/sys/class/gpio/P75")
+    rather than the numeric "gpio<N>"; if so, verify that named entry's
+    `device` symlink actually resolves under THIS chip's own device (not a
+    same-named line some other chip happens to export) before trusting it.
+    A sysfs GPIO holds direction+value without a background process, so
+    unlike gpioset this needs no PID bookkeeping."""
+    if line in DXM1_REFUSED_GPIO_LINES:
+        raise BenchError(f"gpio line {line} is {DXM1_REFUSED_GPIO_LINES[line]} "
+                          "(the DEEPX 0.75 V rail): refusing to touch it")
     base = _pinctrl_chip_base(t, label)
     num = base + line
     numeric = f"/sys/class/gpio/gpio{num}"
     named = f"/sys/class/gpio/{_sysfs_gpio_line_name(line)}"
-    for d in (numeric, named):
-        if t.run(f"test -e {d}/value", check=False).rc == 0:
-            return d
+    chip_entry = f"/sys/class/gpio/gpiochip{base}"
+
+    def named_exists_and_belongs_to_chip() -> bool:
+        if t.run(f"test -e {named}/value", check=False).rc != 0:
+            return False
+        chip_dev = t.run(f"readlink -f {chip_entry}/device", check=False).stdout.strip()
+        named_dev = t.run(f"readlink -f {named}/device", check=False).stdout.strip()
+        return bool(chip_dev) and named_dev.startswith(chip_dev)
+
+    if t.run(f"test -e {numeric}/value", check=False).rc == 0:
+        return numeric
+    if named_exists_and_belongs_to_chip():
+        return named
     r = t.run(f"echo {num} > /sys/class/gpio/export", check=False)
     if r.rc != 0 and "busy" not in r.stderr.lower():
         raise BenchError(f"could not export sysfs gpio {num} ({label} line {line}): "
                           f"{r.stderr.strip()[-200:]}")
-    for d in (numeric, named):
-        if t.run(f"test -e {d}/value", check=False).rc == 0:
-            return d
+    if t.run(f"test -e {numeric}/value", check=False).rc == 0:
+        return numeric
+    if named_exists_and_belongs_to_chip():
+        return named
     raise BenchError(f"gpio {num} ({label} line {line}) exported but neither "
                      f"{numeric} nor {named} appeared")
 
 
 def dxm1_reset_pulse(t: LinuxTarget, label: str, reset_line: int) -> None:
-    """Pulse PA6 (active-low M1_RESET) low for 100 ms then release it high,
-    in one ssh round trip so the 100 ms hold is timed by the board's own
-    `sleep`, not host-to-board latency. `direction`'s "high"/"low" values set
-    direction and value atomically (no separate value write to glitch on).
-    The final high level is the pin being released: DX-M1 PORES_N has an
-    internal pull-up, so released == reset deasserted."""
+    """Pulse PA6 (active-low M1_RESET) low for 100 ms then drive it high
+    again, in one ssh round trip so the 100 ms hold is timed by the board's
+    own `sleep`, not host-to-board latency. `direction`'s "high"/"low"
+    values set direction and value atomically (no separate value write to
+    glitch on). Chained with `&&` so a failed `echo low` short-circuits
+    instead of silently proceeding straight to the final `echo high`. DX-M1
+    PORES_N has an internal pull-up, so the final driven-high level is an
+    active drive that happens to match the pin's idle (deasserted) state,
+    not a "release" of the line."""
     d = _sysfs_gpio_dir(t, label, reset_line)
-    t.run(f"echo low > {d}/direction; sleep 0.1; echo high > {d}/direction")
+    t.run(f"echo low > {d}/direction && sleep 0.1 && echo high > {d}/direction")
 
 
 def dxm1_uart_boot(t: LinuxTarget, label: str, uart_line: int, reset_line: int,
@@ -577,19 +606,32 @@ def dxm1_uart_boot(t: LinuxTarget, label: str, uart_line: int, reset_line: int,
     `uart_boot` twice against the ROM's XMODEM fallback ('C' prompt on an
     empty NAND): once for the bootloader stage, once for the application
     firmware (`-d <uart_device>` on both -- the vendor tool needs the device
-    path for either transfer mode). Releases P75 (drives it low) before
-    returning, even on failure. Never touches V2N P64/P65 (the DEEPX 0.75 V
-    rail): this mechanism is a UART mux line and a reset line only."""
+    path for either transfer mode). Drives P75 low again before returning,
+    even on failure (the mux-high write is inside the `try` too, so a
+    resolve-then-mux failure still runs the release). If the release itself
+    fails: raise loudly when it's the only failure (silently leaving the
+    DX-M1 UART0 muxed in would strand the console), but never mask an
+    already-propagating exception from the transfer -- that one is the real
+    root cause, so the release failure is only logged. Never touches V2N
+    P64/P65 (the DEEPX 0.75 V rail): this mechanism is a UART mux line and a
+    reset line only, enforced in `_sysfs_gpio_dir`."""
     mux_dir = _sysfs_gpio_dir(t, label, uart_line)
-    t.run(f"echo high > {mux_dir}/direction")
     try:
+        t.run(f"echo high > {mux_dir}/direction")
         dxm1_reset_pulse(t, label, reset_line)
         out1 = t.run(f"{shlex.quote(tool)} -d {shlex.quote(uart_device)} "
                      f"-f {shlex.quote(fw_uart_boot)} -b 115200", timeout=120.0).stdout
         out2 = t.run(f"{shlex.quote(tool)} -d {shlex.quote(uart_device)} "
                      f"-F {shlex.quote(fw)} -U -b 115200", timeout=300.0).stdout
     finally:
-        t.run(f"echo low > {mux_dir}/direction", check=False)
+        r = t.run(f"echo low > {mux_dir}/direction", check=False)
+        if r.rc != 0:
+            msg = (f"could not release {mux_dir} (P75 UART mux) after the DX-M1 "
+                   f"transfer (rc={r.rc}): {r.stderr.strip()[-200:]}")
+            if sys.exc_info()[0] is None:
+                raise BenchError(msg)
+            print(f"WARNING: {msg} -- not raised, masking an in-flight exception",
+                  file=sys.stderr)
     return out1 + out2
 
 

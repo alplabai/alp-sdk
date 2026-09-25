@@ -867,7 +867,7 @@ class Gd32Flash(Step):
         return self.result(ctx, "GD32 flashed and verified" if ctx.execute else "would flash the GD32", ev)
 
 
-DXM1_REFUSED_GPIO_LINES = {52: "P64", 53: "P65"}   # the DEEPX 0.75 V rail; never a UART-mux/reset line
+DXM1_REFUSED_GPIO_LINES = lt.DXM1_REFUSED_GPIO_LINES  # single source: linux_target's sysfs choke point
 
 
 class Dxm1NpuFlash(Step):

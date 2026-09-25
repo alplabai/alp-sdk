@@ -199,7 +199,14 @@ than trusting a fixed number, which shifts across kernel/DT revisions.
 (`port * 8 + pin`, e.g. `P75` = 61, `PA6` = 86 -- add the chip's `base` to
 get the sysfs global number), must be distinct ints, and the tool refuses
 `52`/`53` (`P64`/`P65`, the DEEPX rail) outright, before any export or
-direction write. The step verifies both firmware files' md5 and the vendor
+direction write -- at BOTH the `steps.py` bench.yaml-validation layer and,
+belt-and-braces, at `_sysfs_gpio_dir`, the single choke point every DX-M1
+GPIO helper resolves a line through (so any future caller that bypasses
+`steps.py` still can't reach the rail). A line the kernel already exports
+under its DT name (e.g. `/sys/class/gpio/P75` on this board) is only
+trusted after confirming that named entry's `device` symlink actually
+resolves under the labelled chip's own device, not a same-named line on
+some other chip. The step verifies both firmware files' md5 and the vendor
 `uart_boot` binary's own md5 against pinned values before touching
 hardware, and records `dxm1_fw_uart_boot_md5`, `dxm1_fw_md5`,
 `dxm1_fw_version`, `dxm1_uart_boot_tool_md5` in the ledger.
