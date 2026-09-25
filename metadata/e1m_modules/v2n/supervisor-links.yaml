@@ -26,8 +26,12 @@
 # `owner: "renesas"` row, and where that row carries a `core:` key, the
 # value must match the link's OWNING core -- "m33" for gd32_spi (the
 # CM33's only transport to the GD32), "a55" for brd_i2c (RIIC8/BRD_I2C
-# is Cortex-A55/Linux-exclusive; the CM33 must never master it -- see
-# metadata/e1m_modules/v2n/core-ownership.yaml).  console rows
+# is Cortex-A55/Linux-exclusive in a55_boot mode and after this app's
+# handoff in cm33_boot mode -- see core-ownership.yaml's `boot_mode_core`
+# and examples/v2n/v2n-cm33-deepx-rail for the one time-sliced
+# exception; the GD32 BRIDGE transport THIS FILE's `brd_i2c` link
+# describes is unaffected either way, since the CM33's only GD32
+# transport stays SPI).  console rows
 # legitimately carry no `core:` key and neither check requires one.
 # brd_i2c's own `status:` stays `disabled` (below) for exactly the same
 # reason: its pin/electrical facts are still real and still generated

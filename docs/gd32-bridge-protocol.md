@@ -418,8 +418,10 @@ does not mirror its bit layout.  For register-level PMIC status
 (`PMC_STATUS_00` etc.) the host reads the DA9292 directly over
 `BRD_I2C` from the Cortex-A55 (Linux, or U-Boot for the DEEPX-rail
 bring-up sequence) via `da9292_get_status()` in the `chips/da9292`
-driver — RIIC8/BRD_I2C is Cortex-A55-exclusive, and the CM33 must
-never master it — see `<alp/chips/da9292.h>`.
+driver — RIIC8/BRD_I2C is Cortex-A55-exclusive in `a55_boot` mode, and
+outside its `cm33_boot` pre-handoff window (`examples/v2n/v2n-cm33-deepx-rail`
+masters it briefly, in `cm33_boot` mode, before releasing the CA55) the
+CM33 never masters it — see `<alp/chips/da9292.h>`.
 
 ### 3.5 DAC outputs (`v0.2+`)
 

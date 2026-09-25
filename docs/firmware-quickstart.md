@@ -254,8 +254,10 @@ Walk-through: [`docs/bring-up-v2n.md`](bring-up-v2n.md) §5.
 
 Three steps in the V2N-M1 bring-up that V2N base skips:
 
-1. `da9292_v2n_m1_enable_deepx_rail(&pmic, 50000)` -- the 0.75 V
-   DEEPX rail on the secondary PMIC's CH2.
+1. `da9292_ch2_sequence(&pmic, &cfg, &res)` -- the 0.75 V DEEPX rail on
+   the secondary PMIC's CH2 (run by U-Boot in A55-boot mode; call it only
+   in CM33-boot mode, after `da9292_set_limits()` with
+   `V2N_M1_POWER_DA9292_CH_LIMITS_INIT`).
 2. ACK-probe the three DEEPX TPS628640 instances at `0x44 / 0x48 /
    0x4F` to confirm population.
 3. `deepx_dxm1_bring_up(&dxm1, DEEPX_DXM1_DEFAULT_BOOT_US)` -- the

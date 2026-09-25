@@ -44,10 +44,12 @@ Per-SKU populated parts: [`metadata/e1m_modules/E1M-V2N10{1,2,3}.yaml`](../../me
 
 The on-module RV-3028-C7 is the RTC of record, bound as `/dev/rtc0`
 (kernel `rtc-rv3028`, `CONFIG_RTC_DRV_RV3028=y`) -- use `hwclock`/`date`
-from userspace. **CA55 (Linux) is the sole master of the whole
-RIIC8/BRD_I2C bus** the RTC and every other BRD_I2C device sit on
-(`metadata/e1m_modules/v2n/core-ownership.yaml`); the CM33 must never
-issue I2C transactions there. No `trickle-resistor-ohms` is configured
+from userspace. **CA55 (Linux) is the sole master, in `a55_boot` mode, of
+the whole RIIC8/BRD_I2C bus** the RTC and every other BRD_I2C device sit
+on (`metadata/e1m_modules/v2n/core-ownership.yaml`); outside its
+`cm33_boot` pre-handoff window (see "Reach the GD32 supervisor" below)
+the CM33 does not issue I2C transactions there. No `trickle-resistor-ohms`
+is configured
 (the RV-3028-C7's VBACKUP/backup-cap wiring isn't confirmed on this
 SoM's schematic) and the alarm INT line isn't wired to a kernel
 interrupt yet -- both are open follow-ups.
@@ -122,6 +124,43 @@ Two PMICs cooperate to bring V2N up:
    (strap-enabled at boot).  CH2 is **disabled on V2N base**;
    only V2N-M1 firmware brings it up (DEEPX rail).
 
+### Runtime readings and guarded control
+
+The three drivers (`<alp/chips/act8760.h>`, `<alp/chips/da9292.h>`,
+`<alp/chips/tps628640.h>`) read every rail, status bit and ACT88760
+GPIO at any time.  **Every control write is fail-closed:** with no limits
+table installed it returns `ALP_ERR_NOSUPPORT`.  The tables come from
+`metadata/e1m_modules/v2n/power-tree.yaml` (net names, targets, windows,
+critical flags, per-boot-mode owners), generated into
+`<alp/chips/v2n_power_tree.h>` (`V2N_POWER_*` for V2N, `V2N_M1_POWER_*`
+for V2N-M1), and installed with `act8760_set_limits()` /
+`da9292_set_limits()` / `tps628640_set_limits()`.  With a table installed:
+
+- a voltage write must encode inside the rail's window (default target
+  +/-5 %, rounded inward to the chip's step) and is read back;
+- a `critical` rail (every ACT88760 rail, DA9292 CH1, TPS628640 `0x4D`)
+  can never be disabled by software;
+- the ACT88760 raw write path reaches only MSTR `0x01`, `0x05`,
+  `0x2B`, `0x33`; `0x07` (MR / SLEEP / DPSLP / POWER OFF / watchdog),
+  `0x09`, `0x0A`, the IO-delay / WDTIME registers `0x0B` / `0x0C`, `0x14`
+  (POK_OV / VSYSWARN thresholds -- a bad value can trip PMIC shutdown),
+  the factory ranges `0x15`-`0x26` and `0x2D`-`0x32`, every MODEx, every
+  tile register and all of ADD2 are refused;
+- the only ACT88760 GPIO polarity that may be written is GPIO4
+  `GD32_NRST` (MODE4 `0x10`: some units' OTP reads `0x88`, holding the
+  GD32 in reset; the volatile fix is `0x08`).
+
+The DEEPX DA9292 CH2 sequence is `da9292_ch2_sequence()`.  In `a55_boot` mode
+U-Boot runs it, after which the CM33 must not master RIIC8 (see above).  In
+`cm33_boot` mode (RZ/V2N `BOOTSELCPU` strapped low -- RZ/V2N HW manual
+R01UH1071EJ0110 Rev.1.10 Sec.1.9 Table 1.9-1) the CM33 masters RIIC8 and runs
+the sequence itself, time-sliced BEFORE it releases the CA55 -- see
+`examples/v2n/v2n-cm33-deepx-rail`.  Ownership per boot mode is recorded in
+`metadata/e1m_modules/v2n/power-tree.yaml` (`boot_modes:`) and
+`metadata/e1m_modules/v2n/core-ownership.yaml` (`boot_mode_core`); a real
+dual-master config still hard-fails `gen_power_tree.py`'s `cross_check()`.
+Bench tool: [`examples/v2n/v2n-pmic-inspect/`](../../examples/v2n/v2n-pmic-inspect/).
+
 ## Boot + identification
 
 SoM identification is EEPROM-authoritative:
@@ -179,7 +218,7 @@ See [`examples/README.md`](../../examples/README.md).
 | Boot console silent                           | Check the primary PMIC's `nRESET` -- should release within a few ms of `V_IN`. See [`docs/troubleshooting.md`](../troubleshooting.md). |
 | Ethernet PHY won't ACK on MDIO                | 1.8 V rail not up, or the 1 kΩ pull-ups missing.                                              |
 | `gd32g553_init` returns `ALP_ERR_NOSUPPORT`   | Firmware major version mismatch; reflash bridge firmware from matching commit.               |
-| `da9292_v2n_m1_enable_deepx_rail` -> TIMEOUT  | This call is V2N-M1 only -- the V2N base SoM doesn't have a DEEPX load.                       |
+| `da9292_ch2_sequence` -> NOSUPPORT            | V2N base: the CH2 limits entry is all-zero (no DEEPX load), so the sequence is refused.       |
 | Ethernet PHY ID reads `0x0000`                | Wrong PHY address; check strap on schematic (default `0x00` after reset).                     |
 | SoC RTC (`&rtc`) fails to probe, `-ETIMEDOUT` | The on-module clock-generator fixup didn't apply (old/bypassed U-Boot). See [On-module clock-generator fixup](#on-module-clock-generator-fixup) above. |
 

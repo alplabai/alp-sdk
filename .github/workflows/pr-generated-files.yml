@@ -31,6 +31,12 @@
 #     doesn't match is asking reviewers to accept a stale, or
 #     bridge-reserved-pad, route (issue #1859).
 #
+#   - V2N-family power-tree edits that didn't trigger a regeneration of
+#     the PMIC guard tables.  scripts/gen_power_tree.py projects
+#     metadata/e1m_modules/<family>/power-tree.yaml into
+#     include/alp/chips/<family>_power_tree.h; a stale copy would install
+#     the wrong voltage window / critical flag into the drivers.
+#
 #   - Public-header additions/removals that didn't bump the ABI
 #     snapshot at docs/abi/v<N>-snapshot.json.  The snapshot's
 #     fingerprint diff is the cheapest way to spot accidental
@@ -66,6 +72,7 @@ on:
       - 'scripts/gen_error_catalog.py'
       - 'scripts/gen_cc3501e_gpio_routes.py'
       - 'src/backends/gpio/cc3501e_rev_dependent_pins.c'
+      - 'scripts/gen_power_tree.py'
       # The portability matrix re-runs the som.sku swap-test through
       # scripts/alp_project.py + the alp_orchestrate/ package, so any
       # emit-pipeline change can move its generated block.
@@ -177,6 +184,12 @@ jobs:
       # (installed above) to match the committed formatting.
       - name: Regenerate CC3501E GPIO proxy route tables from metadata
         run: python3 scripts/gen_cc3501e_gpio_routes.py
+
+      # PMIC guard tables: include/alp/chips/<family>_power_tree.h is
+      # projected from metadata/e1m_modules/<family>/power-tree.yaml by
+      # scripts/gen_power_tree.py.  Needs clang-format (installed above).
+      - name: Regenerate PMIC power-tree guard tables from metadata
+        run: python3 scripts/gen_power_tree.py
 
       - name: Regenerate pin-mux capability tables from the pinout TSVs
         run: python3 scripts/gen_pinmux_capability.py
@@ -304,7 +317,8 @@ jobs:
                         docs/portability-matrix.md \
                         docs/verification-status.md \
                         examples/aen \
-                        src/backends/gpio/cc3501e_rev_dependent_pins.c
+                        src/backends/gpio/cc3501e_rev_dependent_pins.c \
+                        include/alp/chips/*_power_tree.h
           # No line-mask here: abi_snapshot.py's own write-skip guard
           # (above) is what keeps a no-op rerun from touching the
           # "generated" line at all, so this diff sees zero lines
@@ -325,12 +339,14 @@ jobs:
                      docs/portability-matrix.md \
                      docs/verification-status.md \
                      examples/aen \
-                     src/backends/gpio/cc3501e_rev_dependent_pins.c; then
+                     src/backends/gpio/cc3501e_rev_dependent_pins.c \
+                     include/alp/chips/*_power_tree.h; then
             echo "::error::Generated files are stale.  Run:"
             echo "::error::  python3 scripts/gen_soc_caps.py"
             echo "::error::  python3 scripts/gen_status_strings.py"
             echo "::error::  python3 scripts/gen_board_header.py"
             echo "::error::  python3 scripts/gen_cc3501e_gpio_routes.py"
+            echo "::error::  python3 scripts/gen_power_tree.py"
             echo "::error::  python3 scripts/gen_pinmux_capability.py"
             echo "::error::  python3 scripts/gen_support_matrix.py"
             echo "::error::  python3 scripts/gen_portability_matrix.py"

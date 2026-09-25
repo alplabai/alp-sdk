@@ -71,10 +71,25 @@ clk_5l35023b_register_dump(clk_5l35023b_t *ctx, uint8_t start_reg, uint8_t *out,
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (out == NULL || count == 0u) return ALP_ERR_INVAL;
+	/* Register address space is one byte (0x00..0xFF): a range that
+	 * runs off the end would silently wrap start_reg + i back to 0x00
+	 * instead of reporting the caller's mistake. */
+	if ((size_t)start_reg + count > 0x100u) return ALP_ERR_INVAL;
 	/* Datasheet: "data bytes are accessed in sequential order from
-     * the lowest to the highest byte" -- a single write_read with
-     * one register-address byte returns N consecutive registers. */
-	return alp_i2c_write_read(ctx->bus, ctx->addr, &start_reg, 1u, out, count);
+     * the lowest to the highest byte" -- the chip itself supports one
+     * combined multi-byte transfer.  This driver still reads one byte
+     * per transaction: on RZ/V2N Linux, the i2c-riic kernel driver has
+     * been bench-observed to slip a bit per byte after the first byte
+     * of a multi-byte read from this part (single-byte reads are
+     * reliable) -- and this function's whole purpose is a bit-exact
+     * dump for production QC comparison, where that corruption would
+     * silently produce a false mismatch. */
+	for (size_t i = 0; i < count; i++) {
+		const uint8_t reg = (uint8_t)(start_reg + i);
+		alp_status_t  s   = alp_i2c_write_read(ctx->bus, ctx->addr, &reg, 1u, &out[i], 1u);
+		if (s != ALP_OK) return s;
+	}
+	return ALP_OK;
 }
 
 alp_status_t clk_5l35023b_read_dashcode_id(clk_5l35023b_t *ctx, uint8_t *dashcode)

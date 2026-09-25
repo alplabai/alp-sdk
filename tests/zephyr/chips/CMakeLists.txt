@@ -89,8 +89,10 @@ target_sources(app PRIVATE
 # register-protocol coverage -- these stay ACTIVE (their overlay DT
 # nodes are NOT commented out): there is no real-silicon substitute
 # test for rv3028c7 / tcal9538 / icm42670 / bmi323 / bmp581 / ina236 /
-# tas2563 yet, unlike the three chips retired above.  Do not fold these into
-# the dormant block above -- see each fake_*.c file header for the
+# tas2563 yet, unlike the three chips retired above, and the act8760 /
+# da9292 / tps628640 fakes guard the PMIC write paths (a wrong write
+# there can drop a live rail).  Do not fold these into the dormant
+# block above -- see each fake_*.c file header for the
 # protocol it models.
 target_sources(app PRIVATE
     src/fake_rv3028c7.c
@@ -100,4 +102,8 @@ target_sources(app PRIVATE
     src/fake_bmp581.c
     src/fake_ina236.c
     src/fake_tas2563.c
+    src/fake_act8760.c
+    src/fake_da9292.c
+    src/fake_tps628640.c
+    src/fake_clk_5l35023b.c
 )

@@ -11,9 +11,10 @@
  * argument validation.  This example keeps the historical name while
  * making that probe-only contract explicit.
  *
- * RIIC8/BRD_I2C is Cortex-A55/Linux-exclusive
- * (metadata/e1m_modules/v2n/core-ownership.yaml) -- the CM33 must
- * never master it.  This is a Linux/Yocto user-space app on the
+ * RIIC8/BRD_I2C is Cortex-A55/Linux-exclusive in a55_boot mode
+ * (metadata/e1m_modules/v2n/core-ownership.yaml) -- the CM33 masters it
+ * only transiently during its own cm33_boot rail sequence
+ * (examples/v2n/v2n-cm33-deepx-rail), never here.  This is a Linux/Yocto user-space app on the
  * V2N Cortex-A55, following the same `alp_i2c_*` + chip-driver
  * pattern as examples/v2n/v2n-power-monitor.
  */

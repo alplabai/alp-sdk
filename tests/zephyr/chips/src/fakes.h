@@ -10,6 +10,7 @@
 #ifndef ALP_TEST_FAKES_H
 #define ALP_TEST_FAKES_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -198,6 +199,102 @@ void fake_tas2563_fail_write_at(uint8_t book, uint8_t page, uint8_t reg);
 /** Reset registers to their datasheet POR values, clear the write
  *  log, the counters, the book/page selection and any armed fault. */
 void fake_tas2563_reset(void);
+
+/* ------------------------------------------------------------------ */
+/* fake ACT88760                                                       */
+/* ------------------------------------------------------------------ */
+/* Two i2c-emul nodes (ADD1 0x25 = page 0, ADD2 0x26 = page 1) share one
+ * register image -- see fake_act8760.c.  Every accessor takes the page. */
+
+/** One write the driver put on the bus, in order. */
+struct fake_act8760_write {
+	uint8_t page;
+	uint8_t reg;
+	uint8_t val;
+};
+
+/** Write-log capacity; writes past it are counted but not logged. */
+#define FAKE_ACT8760_LOG_MAX 64
+
+uint8_t                          fake_act8760_get_reg(uint8_t page, uint8_t reg);
+void                             fake_act8760_set_reg(uint8_t page, uint8_t reg, uint8_t val);
+uint32_t                         fake_act8760_write_count(uint8_t page, uint8_t reg);
+size_t                           fake_act8760_log_len(void);
+const struct fake_act8760_write *fake_act8760_log(size_t i);
+/** Zero both pages, the counters and the log. */
+void fake_act8760_reset(void);
+
+/* ------------------------------------------------------------------ */
+/* fake DA9292                                                         */
+/* ------------------------------------------------------------------ */
+/* Stateful CTRL_01 / CH2_PG / W1C-event model -- see fake_da9292.c. */
+
+/** One write the driver put on the bus (applied or ignored), in order. */
+struct fake_da9292_write {
+	uint8_t reg;
+	uint8_t val;
+};
+
+/** Write-log capacity; writes past it are counted but not logged. */
+#define FAKE_DA9292_LOG_MAX 64
+
+uint8_t fake_da9292_get_reg(uint8_t reg);
+/** Set a register directly, bypassing the CTRL_01 / W1C rules (models
+ *  the chip changing under the driver). */
+void                            fake_da9292_force_reg(uint8_t reg, uint8_t val);
+uint32_t                        fake_da9292_write_count(uint8_t reg);
+size_t                          fake_da9292_log_len(void);
+const struct fake_da9292_write *fake_da9292_log(size_t i);
+/** Clear the write log and counters, keep the registers. */
+void fake_da9292_log_reset(void);
+/** CH2_PG asserts on this many-th STATUS_00 read after CH2_EN rises
+ *  (0 = the first read); UINT32_MAX = never. */
+void fake_da9292_set_pg_delay(uint32_t reads);
+/** Restore the V2N OTP power-on image, PG delay 2, clear the log. */
+void fake_da9292_reset(void);
+
+/* ------------------------------------------------------------------ */
+/* fake TPS628640                                                      */
+/* ------------------------------------------------------------------ */
+/* One instance per address (0x44, 0x48, 0x4F); every accessor takes
+ * the 7-bit address. */
+
+uint8_t  fake_tps628640_get_reg(uint8_t addr, uint8_t reg);
+void     fake_tps628640_set_reg(uint8_t addr, uint8_t reg, uint8_t val);
+uint32_t fake_tps628640_write_count(uint8_t addr, uint8_t reg);
+void     fake_tps628640_reset(uint8_t addr);
+/** Arm a one-shot NACK for the next READ of @p reg on the instance at
+ *  @p addr (writes are unaffected). Self-disarms after firing once. */
+void fake_tps628640_fail_next_read(uint8_t addr, uint8_t reg);
+/** Arm a one-shot NACK for the next WRITE of exactly (@p reg, @p val) on
+ *  the instance at @p addr -- matched on the byte VALUE too, not just the
+ *  register, so a specific write (e.g. the FPWM/ramp-restore byte inside
+ *  tps628640_reset_to_defaults()) can be failed without also failing the
+ *  RESET-bit write that always lands on REG_CONTROL first. Self-disarms
+ *  after firing once; a NACK'd write is never counted or applied. */
+void fake_tps628640_fail_next_write(uint8_t addr, uint8_t reg, uint8_t val);
+/** Testing-only knob: a RESET-bit write normally mirrors VOUT1's POR
+ *  value into VOUT2 (see fake_tps628640.c's regs_revert_to_por()) --
+ *  this overrides VOUT2's OWN post-reset code for the instance at
+ *  @p addr, modelling a real silicon fact this fake can't otherwise
+ *  observe (no bench reading of VOUT2 exists).  Lets a ztest prove the
+ *  driver's VOUT2 check is real by giving it a genuinely different
+ *  post-reset value from VOUT1, which the mirrored default can never
+ *  produce. Cleared back to the mirrored default by fake_tps628640_reset(). */
+void fake_tps628640_set_vout2_por(uint8_t addr, uint8_t code);
+
+/* ------------------------------------------------------------------ */
+/* fake clk_5l35023b                                                    */
+/* ------------------------------------------------------------------ */
+/* Fixed at 0x6A (GENERAL_CTRL strap_field = 2).  read_log records the
+ * length of every READ transaction the driver issues, so a ztest can
+ * confirm clk_5l35023b_register_dump() sends one single-byte read per
+ * register instead of one combined multi-byte burst. */
+
+void    fake_clk_5l35023b_set_reg(uint8_t reg, uint8_t val);
+size_t  fake_clk_5l35023b_read_log_len(void);
+uint8_t fake_clk_5l35023b_read_log_at(size_t i);
+void    fake_clk_5l35023b_reset(void);
 
 #ifdef __cplusplus
 } /* extern "C" */

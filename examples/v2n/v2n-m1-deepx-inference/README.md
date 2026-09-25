@@ -22,12 +22,17 @@ customer-only licence -- see
    releases `M1_RESET` (`PA6`) and enables the PCIe mux.  By the time
    this `m33_sm` image's `main()` runs, the rail and the PCIe link are
    already up (or the SoM was never V2N-M1 hardware and neither is
-   touched).  RIIC8/BRD_I2C is Cortex-A55/Linux-exclusive
-   (`metadata/e1m_modules/v2n/core-ownership.yaml`) -- the CM33 must
-   never master it, so there is no Zephyr-side rail path; the
-   `src/zephyr/v2n_power_mgmt.c` module (a P65-IRQ-driven attempt at
-   the same sequence, never wired on any in-tree board) does not
-   exist in this tree.
+   touched).  This image only ever runs in `a55_boot` mode (or in
+   `a55_boot`'s share of `cm33_boot` mode, after the CM33 has already
+   handed the CA55 off), where RIIC8/BRD_I2C is Cortex-A55/Linux-exclusive
+   (`metadata/e1m_modules/v2n/core-ownership.yaml`) -- so THIS image never
+   masters it and has no rail path of its own; the `src/zephyr/
+   v2n_power_mgmt.c` module (a P65-IRQ-driven attempt at the same
+   sequence, never wired on any in-tree board) does not exist in this
+   tree.  That is not true of every CM33 image on this SoM: in
+   `cm33_boot` mode's pre-handoff window, the CM33 DOES master RIIC8 and
+   run this same sequence -- see
+   [`examples/v2n/v2n-cm33-deepx-rail`](../v2n-cm33-deepx-rail).
 2. **PCIe mux + `M1_RESET` release -- already done by the time this
    image runs.**  The [`chips/deepx_dxm1/`](../../../chips/deepx_dxm1/)
    host driver wraps the PI3DBS12212 PCIe mux routing + the Renesas

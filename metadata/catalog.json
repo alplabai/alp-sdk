@@ -2858,6 +2858,30 @@
           "models": false,
           "peripherals": true
         },
+        "name": "v2n-cm33-deepx-rail",
+        "osSet": [
+          "zephyr"
+        ],
+        "path": "examples/v2n/v2n-cm33-deepx-rail",
+        "som": "E1M-V2M101",
+        "summary": "Sequence the DEEPX DX-M1 core rail (DA9292 CH2, `VDD_0P75`, 0.75 V) from the CM33 system-manager, in **CM33-boot mode only**."
+      },
+      {
+        "board": "e1m-x-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "v2n-eeprom-manifest-dump",
         "osSet": [
           "zephyr"
@@ -3087,6 +3111,36 @@
         "path": "examples/v2n/v2n-m1-ros-perception",
         "som": "E1M-V2M101",
         "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Builds against a > Yocto SDK that includes ROS 2 + the alp-sdk runtime. Real > bring-up (V2N-M1 + DEEPX runtime + camera capture pipeline) > gates on v0.8 V2M HiL."
+      },
+      {
+        "board": "e1m-x-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "a55_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
+        "name": "v2n-pmic-inspect",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
+        "path": "examples/v2n/v2n-pmic-inspect",
+        "som": "E1M-V2N101",
+        "summary": "Inspector for the V2N SoM's on-module power chips, run from a Linux/Yocto user-space app on the V2N Cortex-A55 cluster. It is read-only unless you pass `--write` together with one action flag."
       },
       {
         "board": "e1m-x-evk",

@@ -1,0 +1,13 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Fake Renesas/IDT 5L35023B VersaClock emul target.  Lives in this test only.
+
+description: |
+  Fake Renesas/IDT 5L35023B VersaClock i2c-emul target used by the alp-sdk
+  chips ztest to verify clk_5l35023b_register_dump() issues one
+  single-byte read transaction per register.
+
+compatible: "alp,fake-clk_5l35023b"
+
+include: i2c-device.yaml

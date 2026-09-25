@@ -201,9 +201,11 @@ Either:
 * The firmware is from a different protocol epoch -- rebuild
   the firmware from the matching alp-sdk commit.
 
-### `da9292_v2n_m1_enable_deepx_rail` returns `ALP_ERR_TIMEOUT`
+### `da9292_ch2_sequence` returns `ALP_ERR_TIMEOUT`
 
-The DEEPX rail (DA9292 CH2 to 0.75 V) isn't reaching power-good.
+The DEEPX rail (DA9292 CH2 to 0.75 V) isn't reaching power-good
+(`res.step == DA9292_SEQ_ERR_PG_TIMEOUT`; `res.status_00` / `res.event_00`
+hold the last reads).
 Likely a downstream short on the 0.75 V plane.  Probe:
 
 * CH2 output pin on the DA9292 -- should reach 0.75 V within a

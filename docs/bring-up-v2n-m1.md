@@ -46,8 +46,10 @@ EN line) or address-strapped wrong.
 
 ### 2. DA9292 DEEPX rail (CH2) -- owned by U-Boot, nothing to do here
 
-**U-Boot performs this step; no firmware you write needs to.** Before
-this, the same `board_late_init()` also runs the on-module
+**U-Boot performs this step outside its `cm33_boot` pre-handoff window; no
+firmware you write needs to.**  In `a55_boot` mode (and in `a55_boot`'s
+share of `cm33_boot` mode, after the CM33 hands the CA55 off), before
+this DEEPX step the same `board_late_init()` also runs the on-module
 clock-generator fixup, unconditionally on every boot of any V2N/V2M
 SKU (not just V2N-M1) --
 `meta-alp-sdk/recipes-bsp/u-boot/u-boot/0007-rzv2n-dev-ALP-E1M-clkgen-otp-fixup.patch`,
@@ -62,9 +64,14 @@ U-Boot's `board_late_init()`
 sequences CH2 to 0.75 V and confirms power-good over RIIC8/BRD_I2C
 BEFORE Linux or the CM33 image ever starts, and only then releases
 `M1_RESET` (step 3 below).  RIIC8/BRD_I2C is Cortex-A55/Linux-exclusive
-(`metadata/e1m_modules/v2n/core-ownership.yaml`) -- the CM33 must never
-master it, so there is no CM33 code path that could run this sequence
-even if you wanted it to.
+in `a55_boot` mode
+(`metadata/e1m_modules/v2n/core-ownership.yaml`) -- but ownership is
+TIME-SLICED, not a blanket exclusion: in `cm33_boot` mode the CM33 masters
+RIIC8 first and runs this same sequence itself
+(`examples/v2n/v2n-cm33-deepx-rail`, see below) before it releases the
+CA55, at which point U-Boot's copy of the sequence runs again as a
+warm/idempotent verify, not a re-sequence. "No CM33 code path" was true
+before #2045 and is stale now.
 
 At the U-Boot prompt (or in its serial log) you should see:
 
@@ -100,12 +107,38 @@ silicon, confirm with a scope whether CH2 tracks P64 or the I2C
 `CH2_EN` bit, and file a follow-up against #2045 rather than assuming
 a rail fault.
 
-`da9292_v2n_m1_enable_deepx_rail()` and `da9292_init()` still exist in
-`chips/da9292/` and are safe to call from a bench diagnostic app for
-**read-only verification** (`da9292_get_status()`,
-`da9292_read_and_clear_events()`) -- but never to re-run the enable
-sequence from the CM33, which would be a second, uncoordinated writer
-of the same PMIC U-Boot already programmed.
+The same sequence exists as an OS-agnostic driver function,
+`da9292_ch2_sequence()` in `chips/da9292/` (caller-opened GPIOs + a delay
+callback; it also checks CH2 OV / OC after P64 goes high, because the OTP
+masks OV out of PG).  **CM33-boot mode now runs it too, time-sliced against
+the CA55** (`examples/v2n/v2n-cm33-deepx-rail`): the boot-CPU choice is a
+hardware strap, not a software decision -- RZ/V2N HW manual
+R01UH1071EJ0110 Rev.1.10 Sec.1.9 Table 1.9-1, pin `BOOTSELCPU`
+(LOW = CM33 cold boot, HIGH = CA55 cold boot, driven by ACT88760 GPIO5 net
+`V2N_BOOT_CPU_SEL`, which the CMI drives HIGH by default ~8.6 ms after
+`MODULE_EN`).  CM33-cold-boot supports only xSPI/SCIF download boot
+sources and the CM33 always boots first and releases the CA55 later, so
+ownership is time-sliced, not concurrent: in `cm33_boot` mode the CM33
+masters RIIC8 and drives P64/P65 UNTIL it releases the CA55; the A55/Linux
+takes over exclusively after that (and for the whole of `a55_boot` mode),
+same as before.  `boot_modes:` in `metadata/e1m_modules/v2n/power-tree.yaml`
+records `cm33_boot: bus_master: cm33, deepx_sequence_owner: cm33` plus a
+`handover` note; `core-ownership.yaml`'s new `boot_mode_core` qualifier on
+RIIC8_SCL8/SDA8 and P64/P65 backs it per boot mode, and
+`gen_power_tree.py`'s `cross_check()` (reached from `validate_metadata.py`)
+still rejects any boot mode naming `cm33` that qualifier doesn't back --
+a real dual-master config still hard-fails.  Releasing the CA55 itself is
+NOT yet implemented (no confirmed RZ/V2N CPU-reset-control register) --
+tracked in alp-sdk#2289.
+
+The DA9292-AROVx OTP enables the EN2 / VSEL2 pin functions (PMC_CFG_00
+`0x0E` = `0xFF`; `da9292_ch2_sequence()` reports it in `res.pmc_cfg_00`).
+Anything that drives the EN2 pin before the sequence finishes brings CH2 up
+at the OTP default (VSTEP=1, 1.80 V) on the 0.75 V DEEPX core.  Resolve the
+EN2 / VSEL2 nets before running a bench build that touches them.  A bench diagnostic app may use the read-only
+calls (`da9292_get_status()`, `da9292_get_channel_state()`,
+`da9292_peek_events()`) at any time; every control write is refused unless a
+limits table is installed with `da9292_set_limits()`.
 
 ### 3. Sequence M1_RESET + PCIe muxes
 

@@ -37,10 +37,15 @@ is not confirmed on the schematic. RTC_ALARM (INT) is not wired to an
 `interrupts` property either; the SoC-side pin/mux isn't confirmed yet —
 both are follow-ups, not guessed here.
 
-**Maintainer decision:** CA55/Linux is the sole master of the *whole*
-RIIC8/BRD_I2C bus — every device on it (the RTC, DA9292, the GD32 I2C
-slave, TMP112, the clock generator), not just the RTC this fix touches —
-the CM33 must not master RIIC8 at all.
+**Maintainer decision:** CA55/Linux is the sole master, in `a55_boot`
+mode, of the *whole* RIIC8/BRD_I2C bus — every device on it (the RTC,
+DA9292, the GD32 I2C slave, TMP112, the clock generator), not just the
+RTC this fix touches — the CM33 does not master RIIC8 outside its
+`cm33_boot` pre-handoff window. (Superseded in part by
+`changelog.d/2045-cm33-boot-deepx-rail.md` in this same release, which
+adds that qualified `cm33_boot` window; never concurrent with the A55, so
+no contradiction, but "must not master RIIC8 at all" is no longer true
+unqualified.)
 `metadata/e1m_modules/v2n/core-ownership.yaml` (`core: "a55"` on
 `RIIC8_SCL8`/`RIIC8_SDA8`) records that. The rest of the reconciliation —
 `supervisor-links.yaml`'s `brd_i2c` link, the generated CM33 Zephyr

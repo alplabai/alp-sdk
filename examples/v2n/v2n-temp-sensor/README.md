@@ -6,9 +6,10 @@ Linux/Yocto user-space app on the V2N Cortex-A55 cluster.
 Classic V2N starter app -- one I²C bus open, one chip init, a
 ten-sample loop.
 
-> RIIC8/BRD_I2C is Cortex-A55/Linux-exclusive
-> (`metadata/e1m_modules/v2n/core-ownership.yaml`) -- the CM33 must
-> never master it. This app runs on the A55, following the same
+> RIIC8/BRD_I2C is Cortex-A55/Linux-exclusive in `a55_boot` mode
+> (`metadata/e1m_modules/v2n/core-ownership.yaml`) -- the CM33 masters it
+> only transiently during its own `cm33_boot` rail sequence
+> (`examples/v2n/v2n-cm33-deepx-rail`), never here. This app runs on the A55, following the same
 > pattern as [`v2n-power-monitor`](../v2n-power-monitor/) (portable
 > `<alp/i2c.h>` + a natural-name chip driver, Linux `/dev/i2c-N`
 > backend).

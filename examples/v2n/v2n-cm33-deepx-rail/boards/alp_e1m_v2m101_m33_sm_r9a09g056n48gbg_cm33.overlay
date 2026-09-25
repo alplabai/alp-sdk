@@ -1,0 +1,96 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * v2n-cm33-deepx-rail -- CM33-boot board overlay for the E1M-V2M101 EVK
+ * (m33_sm cluster).  Re-enables what the DEFAULT AMP board configuration
+ * (zephyr/boards/alp/e1m_v2m101_m33_sm/, CA55-cold-boot config) leaves
+ * disabled for every other CM33 app: RIIC8 / BRD_I2C (&i2c8) and the
+ * two DEEPX rail GPIOs, P64 (DEEPX_CORE_0P75_EN) and P65
+ * (DEEPX_PWR_EN_REQ).
+ *
+ * Safe ONLY in cm33_boot mode, and ONLY before this app hands RIIC8 off
+ * to the CA55 (metadata/e1m_modules/v2n/power-tree.yaml
+ * boot_modes.cm33_boot; metadata/e1m_modules/v2n/core-ownership.yaml
+ * boot_mode_core).  RZ/V2N HW manual R01UH1071EJ0110 Rev.1.10 S1.9 Table
+ * 1.9-1: BOOTSELCPU low = CM33 cold boot (this app's own boot mode),
+ * high = CA55 cold boot (the power-on DEFAULT -- BOOTSELCPU is driven by
+ * ACT88760 GPIO5 net V2N_BOOT_CPU_SEL, which the CMI drives high at
+ * ~8.6 ms after MODULE_EN).  In a55_boot mode, or after this app's own
+ * handoff, the A55/Linux is the SOLE master of this bus -- building this
+ * overlay into any OTHER CM33 app would be exactly the dual-master
+ * hazard core-ownership.yaml's cross_check() exists to catch at the
+ * metadata level (see scripts/gen_power_tree.py's _check_boot_modes()).
+ *
+ * The &i2c8 pinctrl group below does NOT just restore the pre-ownership-move
+ * config verbatim: it also carries the two RIIC8/BRD_I2C fixes U-Boot's
+ * board_late_init() needed to talk to this same bus reliably
+ * (meta-alp-sdk/recipes-bsp/u-boot/u-boot/
+ * 0006-rzv2n-dev-i2c-rzg2l_riic-p06-p07-pullup-clock-fix.patch;
+ * changelog.d/2045-v2m-deepx-rail-uboot.md).  BRD_I2C is the
+ * most heavily-loaded bus on the module (~13 populated branches):
+ * external 2.2 kOhm pull-ups to the 1.8 V rail are fitted, and the
+ * SoC-internal pull-up (bias-pull-up below) is bench-confirmed
+ * ADDITIONALLY required at the faster (unpatched) clock, so both are
+ * carried here too, same as 0006.  Standard-mode `clock-frequency`
+ * (below) mirrors 0006's slower RIIC8 SCL (CKS(5)), bench-confirmed
+ * needed for clean burst reads over this bus -- Fast mode (the
+ * pre-ownership-move board file's setting) is what 0006 slowed down
+ * FROM, not a value to restore.
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
+
+/ {
+	aliases {
+		alp-i2c0 = &i2c8;
+	};
+
+	/*
+	 * P64 / P65 are SoM-internal DEEPX-sequencing pads, not E1M edge
+	 * pins -- they carry no e1m_pinout.h canonical index, so this app's
+	 * alp,pin-array is its OWN small 2-entry table (index 0 = P64,
+	 * index 1 = P65), not the EVK's usual positional 30-entry array.
+	 * This REPLACES the base board's 1-entry array (index 0 = the GD32
+	 * SPI chip-select, P97/gpio9); this app never opens the GD32 SPI
+	 * bus, so nothing else reads that index.  gpio6 = port 6 (P6n),
+	 * following the same "gpio<port-digit>" pattern the base board
+	 * file already uses for P97 (&gpio9).
+	 */
+	alp_pins: alp-pins {
+		compatible = "alp,pin-array";
+		gpios = <&gpio6 4 GPIO_ACTIVE_HIGH>,   /* [0] P64 DEEPX_CORE_0P75_EN (output) */
+		        <&gpio6 5 GPIO_ACTIVE_HIGH>;   /* [1] P65 DEEPX_PWR_EN_REQ   (input)  */
+	};
+};
+
+/*
+ * RIIC8 / BRD_I2C -- P06 SDA / P07 SCL, DA9292 @ 0x1E (also GD32 slave @
+ * 0x70, unused here).  Time-sliced to the CM33 in cm33_boot mode ONLY
+ * (see the file header).  bias-pull-up enables the SoC-internal pull-up
+ * on P06/P07 (matching U-Boot 0006's rzv2n-dev.c s_init() PUPD_H write
+ * and what Linux's own i2c8_pins already sets) -- bench-confirmed
+ * required at this bus's clock, on top of the external 2.2 kOhm
+ * pull-ups already fitted.
+ */
+&i2c8_pins {
+	i2c8-pinmux {
+		bias-pull-up;
+	};
+};
+
+&i2c8 {
+	pinctrl-0 = <&i2c8_pins>;
+	pinctrl-names = "default";
+	/* Standard mode, not the pre-ownership-move board file's Fast mode:
+	 * mirrors U-Boot 0006's RIIC8 clock slowdown (CKS(5)), bench-needed
+	 * for clean reads over this heavily-loaded bus -- see the file
+	 * header. */
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+	status = "okay";
+};
+
+&gpio6 {
+	status = "okay";
+};

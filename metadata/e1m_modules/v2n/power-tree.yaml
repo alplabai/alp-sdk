@@ -1,0 +1,427 @@
+# E1M-X V2N / V2N-M1 on-module power tree (Alp Lab hand-authored source).
+#
+# Family-scoped: ONE file shared by all six V2N-family SKUs
+# (E1M-V2N101/102/103, E1M-V2M101/102/103 -- one PCB, variant-populated).
+# Rails that only exist when the DEEPX DX-M1 is fitted carry
+# `populated_on: [v2n-m1]`.
+#
+# This file is the single source of the runtime GUARD policy for the three
+# BRD_I2C (RIIC8) power chips -- ACT88760 (0x25/0x26), DA9292 (0x1E) and the
+# TPS628640 bucks (0x44/0x48/0x4D/0x4F).  scripts/gen_power_tree.py projects
+# it into include/alp/chips/v2n_power_tree.h (DO-NOT-EDIT), which firmware
+# installs into the drivers via act8760_set_limits() / da9292_set_limits() /
+# tps628640_set_limits().  A driver with NO table installed refuses every
+# control write (ALP_ERR_NOSUPPORT) -- fail-closed.
+#
+# Guard policy (maintainer decision 2026-09-24):
+#   * every voltage write must land inside the rail's `window_mv`
+#     (default = target +/-5 %, rounded INWARD to the chip's VSET grid);
+#   * `critical: true` rails (anything the running RZ/V2N SoC, its DDR or
+#     its boot media depends on) can never be disabled by software --
+#     enabling / re-programming inside the window stays allowed;
+#   * a rail whose target is not confirmed has `target_mv: null`,
+#     `window_mv: null`, `control: none` -- never an invented value;
+#   * `control: voltage` grants ONLY a voltage write, never enable/disable --
+#     every ACT88760 rail below is the PMIC's own CMI hardware sequence, not
+#     a software on/off switch.  `control: voltage_enable` is the explicit
+#     opt-in for a rail whose enable IS a documented guarded API (the four
+#     TPS628640 bucks, whose SOFTWARE_ENABLE bit tps628640_software_enable()
+#     exposes) -- reviewed per rail, never the default.
+#
+# Net names are PUBLIC (maintainer decision 2026-09-24).
+#
+# Provenance (Alp Lab design documents; not redistributed):
+#   - ACT88760 CMI 120 Rev E1 input matrix (Alp Lab / Qorvo, 2025-08-25):
+#     per-rail VSET0 voltage, range bit, sequencing trigger + delay, GPIO
+#     modes and functions.
+#   - E1M-X V2N-M1 power-sequence report (2026-04-02): net names, targets,
+#     on/off delays and dependency chain.  The ACT88760 rail -> net mapping
+#     below matches each CMI rail's voltage + trigger + startup delay to
+#     exactly one report net; LDO3 -> VDD_eMMC_3V3 is the one match made by
+#     elimination (the only remaining 3.3 V net) -- see its `evidence:`.
+#   - AA82BZ register-map workbook Rev 1.1 (bit fields; see
+#     metadata/chips/act8760.yaml).
+#   - Bench, E1M-V2M103, 2026-09-24 (RIIC8 = /dev/i2c-8): DA9292 identity,
+#     TPS628640 VOUT reads, ACT88760 MODE4 OTP defect.
+schemaVersion: power-tree-v1
+families:
+  - v2n
+  - v2n-m1
+
+bus: brd_i2c   # RIIC8; pads P06 (SDA8) / P07 (SCL8)
+
+# Who masters BRD_I2C and who runs the DEEPX rail sequence, per boot mode.
+# The boot mode is strapped on the RZ/V2N pin BOOTSELCPU: LOW = CM33 cold
+# boot, HIGH = CA55 cold boot, internal pull-down (RZ/V2N HW manual
+# R01UH1071EJ0110 Rev.1.10 S1.9 Table 1.9-1).  BOOTSELCPU is driven by
+# ACT88760 GPIO5 (net V2N_BOOT_CPU_SEL -- the CMI drives it HIGH at
+# ~8.6 ms after MODULE_EN, i.e. CA55 cold boot is the power-on default)
+# and is also routed to the E1 connector as an external override net.
+#
+# Ownership is TIME-SLICED, not concurrent, because CM33-cold-boot mode
+# supports only xSPI or SCIF download boot sources and the CM33 always
+# boots FIRST and releases the CA55 later (same HW-manual table): in
+# cm33_boot the CM33 is RIIC8 master and runs da9292_ch2_sequence()
+# BEFORE it releases the CA55; once released, the A55/Linux takes RIIC8
+# over exclusively, same as a55_boot.  U-Boot 0004
+# (meta-alp-sdk/recipes-bsp/u-boot/u-boot/0004-rzv2n-dev-ALP-E1M-DEEPX-rail-bringup.patch)
+# is already idempotent on its warm path (CH2 already at 0.75 V / VSTEP=0
+# -> skip the program phase, zero CTRL_01 writes), so running it again in
+# cm33_boot mode's a55_boot tail is a verify, not a re-sequence.  The
+# per-boot-mode qualifier that backs `bus_master: cm33` /
+# `deepx_sequence_owner: cm33` below at the pad level lives in
+# metadata/e1m_modules/v2n/core-ownership.yaml's `boot_mode_core` field
+# (RIIC8_SCL8 / RIIC8_SDA8 / DEEPX_CORE_0P75_EN / DEEPX_PWR_EN_REQ);
+# cross_check() rejects any boot mode naming cm33 that isn't backed there,
+# so a real concurrent (non-time-sliced) claim still hard-fails.
+boot_modes:
+  a55_boot:
+    status: supported
+    bus_master: a55          # U-Boot board_late_init(), then Linux
+    deepx_sequence_owner: u-boot
+  cm33_boot:
+    status: supported
+    bus_master: cm33          # CM33 masters RIIC8 until it releases the CA55 -- see handover
+    deepx_sequence_owner: cm33
+    handover: "CM33 releases RIIC8 mastership + the DEEPX sequence to the CA55/Linux before releasing the CA55 core itself (see the comment above); examples/v2n/v2n-cm33-deepx-rail runs this side, U-Boot 0004 verifies (warm/idempotent) once the A55 boots"
+
+window_policy:
+  default_tolerance_pct: 5
+  rounding: inward           # min rounded UP, max rounded DOWN to the VSET grid
+
+chips:
+  act8760:
+    addr_add1: 0x25          # MSTR + GPIO + Buck1..6
+    addr_add2: 0x26          # Buck7 + LDO1..6
+  da9292:
+    addr: 0x1E
+    identity:                # bench-read E1M-V2M103 2026-09-24
+      dev_id: 0xEA
+      rev_id: 0x42
+      cfg_rev: 0x11
+
+rails:
+  # ---- ACT88760 (CMI 120.E1): hardware-sequenced by the PMIC itself ----
+  - id: vdd_3v3
+    chip: act8760
+    channel: buck1
+    i2c_addr: 0x25
+    net: VDD_3V3
+    role: "3.3 V IO supply"
+    target_mv: 3300
+    range: 1
+    window_mv: [3150, 3450]
+    critical: true
+    control: voltage
+    owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
+    populated_on: [v2n, v2n-m1]
+    evidence: "CMI Buck1 3.3 V range 1, trigger GPIO5 +8 ms == report VDD_3V3 (+8 ms after V2N_BOOT_CPU_SEL)"
+  - id: vdd1g_1p8
+    chip: act8760
+    channel: buck2
+    i2c_addr: 0x25
+    net: VDD1G_1P8
+    role: "1.8 V always-on group supply; feeds LDO1/LDO2/LSW5"
+    target_mv: 1800
+    range: 1
+    window_mv: [1725, 1875]
+    critical: true
+    control: voltage
+    owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
+    populated_on: [v2n, v2n-m1]
+    evidence: "CMI Buck2 1.8 V range 1, trigger MODULE_EN (GPIO6) +2 ms == report VDD1G_1P8"
+  - id: lpd4x_1v1
+    chip: act8760
+    channel: buck3
+    i2c_addr: 0x25
+    net: LPD4x_1V1
+    role: "RZ/V2N LPDDR4X VDD2 1.1 V"
+    target_mv: 1100
+    range: 1
+    window_mv: [1050, 1150]
+    critical: true
+    control: voltage
+    owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
+    populated_on: [v2n, v2n-m1]
+    evidence: "CMI Buck3 1.1 V range 1, trigger Buck7 +4 ms == report LPD4x_1V1 (+4 ms after VDD09_CA55)"
+  - id: lpddr_1v8
+    chip: act8760
+    channel: buck4
+    i2c_addr: 0x25
+    net: LPDDR_1V8
+    role: "RZ/V2N LPDDR4X VDD1 1.8 V"
+    target_mv: 1800
+    range: 1
+    window_mv: [1725, 1875]
+    critical: true
+    control: voltage
+    owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
+    populated_on: [v2n, v2n-m1]
+    evidence: "CMI Buck4 1.8 V range 1, trigger Buck7 +2 ms == report LPDDR_1V8 (+2 ms after VDD09_CA55)"
+  - id: vdd_core_0p75
+    chip: act8760
+    channel: buck6
+    i2c_addr: 0x25
+    net: VDD_CORE_0P75
+    role: "0.75 V DEEPX DX-M1 core-domain supply in the PWEN2 (RZ/V2N PMU) domain; its POK drives GPIO7"
+    target_mv: 750
+    range: 1
+    window_mv: [725, 775]
+    critical: true
+    control: voltage
+    owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
+    populated_on: [v2n, v2n-m1]
+    evidence: >-
+      Settled 2026-09-25: confirmed against the module design data, and the
+      ACT88760 register map puts BUCK6 at tile 0xE0..0xE7 on 0x25; a live
+      read of 0xE2 = 0x0A (750 mV, 25 mV range) with 0xE0 POK set. Tile 0xE4 = 0x3E (ON bit 0,
+      AUXIN_EN 1): the rail is held up by the PWEN2 sequencer trigger, not
+      the ON bit. The CMI report labels this rail "Buck5"; that CMI numbering
+      is one off from the pin/register numbering for Buck5/Buck6, so the
+      earlier buck5 attribution here was wrong.
+  - id: vdd08_ddr
+    chip: act8760
+    channel: buck5
+    i2c_addr: 0x25
+    net: VDD08_DDR
+    role: "RZ/V2N DDR PHY 0.8 V"
+    target_mv: 800
+    range: 1
+    window_mv: [775, 825]
+    critical: true
+    control: voltage
+    owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
+    populated_on: [v2n, v2n-m1]
+    evidence: >-
+      Settled 2026-09-25: confirmed against the module design data, and a live read of tile 0xC2 = 0x0C (800 mV, 25 mV range)
+      with 0xC0 POK set and 0xC4 ON bit 1. The CMI report labels this rail
+      "Buck6" (one off from pin/register numbering, see vdd_core_0p75).
+  - id: vdd09_ca55
+    chip: act8760
+    channel: buck7
+    i2c_addr: 0x26
+    net: VDD09_CA55
+    role: "RZ/V2N Cortex-A55 cluster 0.9 V"
+    target_mv: 900
+    range: 0
+    window_mv: [855, 945]
+    critical: true
+    control: voltage
+    owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
+    populated_on: [v2n, v2n-m1]
+    evidence: "CMI Buck7 0.9 V range 0, trigger GPIO5 +16 ms == report VDD09_CA55"
+  - id: vdd1g_0p8
+    chip: act8760
+    channel: ldo1
+    i2c_addr: 0x26
+    net: VDD1G_0P8
+    role: "0.8 V always-on group supply"
+    target_mv: 800
+    range: 0
+    window_mv: [763, 837]
+    critical: true
+    control: voltage
+    owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
+    populated_on: [v2n, v2n-m1]
+    evidence: "CMI LDO1 0.8 V range 0, trigger MODULE_EN +4 ms == report VDD1G_0P8"
+  - id: ldo_1v2
+    chip: act8760
+    channel: ldo2
+    i2c_addr: 0x26
+    net: LDO_1V2
+    role: "1.2 V LDO; feeds LSW6"
+    target_mv: 1200
+    range: 0
+    window_mv: [1150, 1250]
+    critical: true
+    control: voltage
+    owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
+    populated_on: [v2n, v2n-m1]
+    evidence: "CMI LDO2 1.2 V range 0 == report LDO_1V2 (only 1.2 V LDO net)"
+  - id: vdd_emmc_3v3
+    chip: act8760
+    channel: ldo3
+    i2c_addr: 0x26
+    net: VDD_eMMC_3V3
+    role: "eMMC 3.3 V (boot media)"
+    target_mv: 3300
+    range: 1
+    window_mv: [3150, 3450]
+    critical: true
+    control: voltage
+    owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
+    populated_on: [v2n, v2n-m1]
+    evidence: "CMI LDO3 3.3 V range 1 (trigger Buck3 +16 ms); report VDD_eMMC_3V3 is the only 3.3 V net left after Buck1=VDD_3V3 -- mapping by elimination, confirm against the schematic"
+  - id: vdd_1v8
+    chip: act8760
+    channel: ldo4
+    i2c_addr: 0x26
+    net: VDD_1V8
+    role: "1.8 V IO supply"
+    target_mv: 1800
+    range: 1
+    window_mv: [1750, 1850]
+    critical: true
+    control: voltage
+    owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
+    populated_on: [v2n, v2n-m1]
+    evidence: "CMI LDO4 1.8 V range 1, trigger GPIO5 +16 ms == report VDD_1V8"
+  - id: vdd5g_1p8
+    chip: act8760
+    channel: ldo5
+    i2c_addr: 0x26
+    net: VDD5G_1P8
+    role: "load switch 5 (fed from VDD1G_1P8); RZ/V2N PWEN1 domain"
+    target_mv: null            # NLSW load switch -- no VSET
+    range: null
+    window_mv: null
+    critical: true
+    control: none              # PWEN1-triggered CMI hardware sequence, not a software switch
+    owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
+    populated_on: [v2n, v2n-m1]
+    evidence: "CMI LDO5 = NLSW, trigger PWEN1 (GPIO9) == report VDD5G_1P8"
+  - id: vdd6g_1p2
+    chip: act8760
+    channel: ldo6
+    i2c_addr: 0x26
+    net: VDD6G_1P2
+    role: "load switch 6 (fed from LDO_1V2); RZ/V2N PWEN2 domain"
+    target_mv: null
+    range: null
+    window_mv: null
+    critical: true
+    control: none              # PWEN2-triggered CMI hardware sequence, not a software switch
+    owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
+    populated_on: [v2n, v2n-m1]
+    evidence: "CMI LDO6 = NLSW, trigger PWEN2 (GPIO10) == report VDD6G_1P2"
+
+  # ---- DA9292 (0x1E) ----
+  - id: da9292_ch1
+    chip: da9292
+    channel: ch1
+    i2c_addr: 0x1E
+    net: TBD
+    role: "RZ/V2N 0.8 V rail; enabled at power-up by the EN1 strap"
+    target_mv: null            # OTP default not bench-confirmed; never touched by software
+    range: null
+    window_mv: null
+    critical: true
+    control: none
+    owner: { a55_boot: hardware, cm33_boot: hardware }
+    populated_on: [v2n, v2n-m1]
+    evidence: "da9292.h channel map; net + target not in the power-sequence report"
+  - id: vdd_0p75
+    chip: da9292
+    channel: ch2
+    i2c_addr: 0x1E
+    net: VDD_0P75
+    role: "DEEPX DX-M1 core 0.75 V"
+    target_mv: 750
+    range: 0                   # CH2_VSTEP = 0 (5 mV grid); OTP boots VSTEP=1
+    window_mv: [715, 785]
+    critical: false
+    control: sequence
+    owner: { a55_boot: u-boot, cm33_boot: cm33 }
+    populated_on: [v2n-m1]
+    evidence: >-
+      report VDD_0P75 0.75 V after CORE_0P75_EN; U-Boot 0004 patch programs
+      0x0C/0x0D = 0x96.  cm33_boot owner is da9292_ch2_sequence() called
+      from examples/v2n/v2n-cm33-deepx-rail, BEFORE the CM33 releases the
+      CA55 (see the boot_modes comment above); U-Boot 0004 then runs again
+      on the A55 as a warm/idempotent verify, not a re-sequence.
+
+  # ---- TPS628640 bucks (appear on BRD_I2C once DEEPX_CORE_0P75_EN is high) ----
+  - id: vdd0v85_lpddr
+    chip: tps628640
+    channel: vout1
+    i2c_addr: 0x48
+    net: VDD0V85_LPDDR
+    role: "DEEPX LPDDR 0.85 V"
+    target_mv: 850
+    range: null
+    window_mv: [810, 890]
+    critical: false
+    control: voltage_enable
+    owner: { a55_boot: hardware, cm33_boot: hardware }   # OTP default, enabled via P64
+    populated_on: [v2n-m1]
+    evidence: "bench E1M-V2M103 2026-09-24: VOUT1 0x01 reads 0x5a (0.85 V)"
+  - id: ddr5_vdd2h_1v05
+    chip: tps628640
+    channel: vout1
+    i2c_addr: 0x44
+    net: DDR5_VDD2H_1V05
+    role: "DEEPX DDR5 VDD 1.05 V"
+    target_mv: 1050
+    range: null
+    window_mv: [1000, 1100]
+    critical: false
+    control: voltage_enable
+    owner: { a55_boot: hardware, cm33_boot: hardware }   # OTP default, enabled via P64
+    populated_on: [v2n-m1]
+    evidence: "bench E1M-V2M103 2026-09-24: VOUT1 0x01 reads 0x82 (1.05 V)"
+  - id: ddr5_vddq_0v5
+    chip: tps628640
+    channel: vout1
+    i2c_addr: 0x4F
+    net: DDR5_VDDQ_0V5
+    role: "DEEPX DDR5 VDDQ 0.5 V"
+    target_mv: 500
+    range: null
+    window_mv: [475, 525]
+    critical: false
+    control: voltage_enable
+    owner: { a55_boot: hardware, cm33_boot: hardware }   # OTP default, enabled via P64
+    populated_on: [v2n-m1]
+    evidence: "bench E1M-V2M103 2026-09-24: VOUT1 0x01 reads 0x14 (0.50 V)"
+  - id: lpd4x_0v6
+    chip: tps628640
+    channel: vout1
+    i2c_addr: 0x4D
+    net: LPD4x_0V6
+    role: "RZ/V2N LPDDR4X VDDQ 0.6 V"
+    target_mv: 600
+    range: null
+    window_mv: [570, 630]
+    critical: true
+    control: voltage_enable
+    owner: { a55_boot: hardware, cm33_boot: hardware }
+    populated_on: [v2n, v2n-m1]
+    assembled: optional
+    evidence: "SoM presets list 0x4D as assembled: optional; not seen on the E1M-V2M103 bench scan"
+
+# ACT88760 GPIOs (MSTR MODE1..7 = 0x0D..0x13, MODE8..11 = 0x27..0x2A;
+# bit7 = polarity, bits3:0 = MUX, bits6:4 factory).  Only the polarity bit
+# is ever software-writable, and only where listed in `writable:`.
+gpios:
+  - { gpio: 1,  net: PMIC_RSTOUT,      role: "nRESET to the RZ/V2N (40 ms after Buck2)", direction: output_od, writable: [] }
+  - { gpio: 2,  net: PMIC_nINT,        role: "nIRQ to the RZ/V2N", direction: output_od, writable: [] }
+  - { gpio: 3,  net: DDR4_VDDQ_EN,     role: "EXT_EN for the optional LPDDR4 VDDQ buck (not populated)", direction: output_pp, writable: [] }
+  - gpio: 4
+    net: GD32_NRST
+    role: "GD32G553 supervisor reset release (active-high intended)"
+    direction: output_od
+    expected_mode: 0x08
+    writable: [polarity]
+    quirk: >-
+      OTP defect on some units: MODE4 (0x10) reads 0x88 -- polarity inverted,
+      open-drain output holding the GD32 in reset.  Volatile fix: write 0x08
+      (polarity bit cleared) -- reverts at the next power cycle.
+  - gpio: 5
+    net: V2N_BOOT_CPU_SEL
+    role: "boot-CPU select strap (A55 vs CM33); CMI sequencing trigger for Buck1/Buck7/LDO4"
+    # direction TBD-verify: inferred, not measured, from EN_PUSH_PULL (0x34,
+    # metadata/chips/act8760.yaml) listing no GPIO5 push-pull-enable bit --
+    # the same reasoning used for GPIO1/2 above.  That inference is actually
+    # self-contradicting for THIS pin: an open-drain output can only sink,
+    # it cannot by itself drive BOOTSELCPU HIGH (see the file header, "the
+    # CMI drives it HIGH at ~8.6 ms after MODULE_EN") without an external
+    # pull-up this file has no evidence for.  Do not treat output_od as
+    # settled here until the real output stage (or a pull-up) is confirmed.
+    direction: output_od # TBD-verify -- see comment above, not schematic-confirmed
+    writable: []
+  - { gpio: 6,  net: MODULE_EN,        role: "PWRON input -- starts / stops the power sequence", direction: input, writable: [] }
+  - { gpio: 7,  net: DEEPX_PWR_EN_REQ, role: "Buck6 (VDD_CORE_0P75) POK -> RZ/V2N P65 (CMI name CORE_0P75_EN)", direction: output_pp, writable: [] }
+  - { gpio: 8,  net: SD1_EN,           role: "SD1 supply enable", direction: output_pp, writable: [] }
+  - { gpio: 9,  net: PWEN1,            role: "RZ/V2N PWEN1 -> LSW5 (VDD5G_1P8)", direction: input, writable: [] }
+  - { gpio: 10, net: PWEN2,            role: "RZ/V2N PWEN2 -> LSW6 + Buck6 (VDD_CORE_0P75)", direction: input, writable: [] }
+  - { gpio: 11, net: MODULE_STBY,      role: "SLEEP input (standby)", direction: input, writable: [] }

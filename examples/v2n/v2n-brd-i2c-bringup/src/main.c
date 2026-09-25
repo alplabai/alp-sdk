@@ -20,8 +20,10 @@
  *   0x70  gd32g553        IO-MCU bridge, I2C slave transport (Linux
  *                         kernel-bound: alplab,gd32-bridge-gpio)
  *
- * RIIC8/BRD_I2C is Cortex-A55/Linux-exclusive (metadata/e1m_modules/
- * v2n/core-ownership.yaml) -- the CM33 must never master it.  This is
+ * RIIC8/BRD_I2C is Cortex-A55/Linux-exclusive in a55_boot mode
+ * (metadata/e1m_modules/v2n/core-ownership.yaml) -- the CM33 masters it
+ * only transiently during its own cm33_boot rail sequence
+ * (examples/v2n/v2n-cm33-deepx-rail), never here.  This is
  * a Linux/Yocto user-space app on the V2N Cortex-A55, following the
  * same `alp_i2c_*` + chip-driver pattern as
  * examples/v2n/v2n-power-monitor.  BRD_I2C = Linux /dev/i2c-8:

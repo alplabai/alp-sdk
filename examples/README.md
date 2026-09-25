@@ -242,6 +242,7 @@ SoM EEPROM manifest).
 | `v2n/v2n-gd32-bridge-functional` | Single-pass functional validation of the GD32G553 supervisor-MCU bridge, followed by a forever PWM7 duty staircase as a live oscilloscope observable. **(V2N-M1)** |
 | `v2n/v2n-gd32-bridge-hil-soak`  | Pass/fail soak of the whole GD32 bridge command set over the 25 MHz SPI fast path -- every opcode round-trips each cycle with self-contained verification. **(V2N-M1)** |
 | `v2n/v2n-gd32-bridge-loopback`  | Jumpered Tier-B loopback validation of the GD32 supervisor bridge -- three physical jumpers close the analog + timer signal paths on real silicon. **(V2N-M1)** |
+| `v2n/v2n-pmic-inspect`          | Read-only-by-default inspector for the on-module power chips (ACT88760, DA9292, TPS628640) from Linux/Yocto user-space on the V2N A55 -- rails, GPIOs, identity vs metadata; guarded `--write` actions (window-checked setpoint, enable/disable with critical rails refused, GPIO4 OTP fix, DEEPX rail sequence). |
 | `v2n/v2n-power-monitor`         | Live per-rail power table from the E1M-X EVK's on-board INA236 current/voltage monitors, read from Linux/Yocto user-space on the V2N Cortex-A55. |
 
 ### AEN platform

@@ -155,7 +155,9 @@ alp_status_t clk_5l35023b_read_reg(clk_5l35023b_t *ctx, uint8_t reg, uint8_t *va
  *         effect immediately; they revert to the OTP defaults on the
  *         next power-cycle unless the OTP itself is burned (out of
  *         scope for this driver -- requires the Renesas / IDT
- *         programming flow on `OE1` with `VDDDIFF1` raised to 6.5 V). */
+ *         programming flow with `OE1` (pin 15, the VPP pin) itself
+ *         raised to 6.5 V; `VDDDIFF1` is unrelated -- it sets the
+ *         DIFF1 output voltage level). */
 alp_status_t clk_5l35023b_write_reg(clk_5l35023b_t *ctx, uint8_t reg, uint8_t val);
 
 /**
@@ -164,9 +166,13 @@ alp_status_t clk_5l35023b_write_reg(clk_5l35023b_t *ctx, uint8_t reg, uint8_t va
  * Useful for production-test logging (dump the chip's full register
  * file for QC comparison against the factory-known-good state).
  * Datasheet documents the protocol as "data bytes are accessed in
- * sequential order from the lowest to the highest byte" so a single
- * write_read with one register-address byte returns N consecutive
- * registers.
+ * sequential order from the lowest to the highest byte", so the chip
+ * itself supports one combined multi-byte transfer -- but this driver
+ * issues one single-byte read per register instead. On RZ/V2N Linux,
+ * the i2c-riic kernel driver has been bench-observed to slip a bit per
+ * byte after the first byte of a multi-byte read from this part
+ * (single-byte reads are reliable); a QC dump is exactly the case
+ * where that corruption would silently produce a false mismatch.
  */
 alp_status_t
 clk_5l35023b_register_dump(clk_5l35023b_t *ctx, uint8_t start_reg, uint8_t *out, size_t count);

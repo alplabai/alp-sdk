@@ -108,6 +108,20 @@ static void _free_side(alp_z_gpio_side_t *s)
 
 static gpio_flags_t _to_gpio_flags(alp_gpio_dir_t dir, alp_gpio_pull_t pull)
 {
+	/* Deliberately bare GPIO_OUTPUT, not GPIO_OUTPUT_INACTIVE: this
+	 * function backs EVERY alp_gpio_configure(..., ALP_GPIO_OUTPUT, ...)
+	 * caller in the tree, and chips/tas2563/tas2563.c's SD_N handling
+	 * depends on configure() NOT touching the data register at all --
+	 * its own write-before-configure-then-write-after sequence (see the
+	 * long comment above tas2563_init()'s `if (sd_n != NULL)` block)
+	 * exists BECAUSE forcing a level at configure time reintroduces the
+	 * exact glitch that sequence closes, on a net shared with another
+	 * device on the AEN801 EVK.  A pin needing a specific initial level
+	 * (e.g. DA9292 CH2's DEEPX_CORE_0P75_EN/P64, which must start low)
+	 * gets a pin-specific fix at its own call site instead of a
+	 * backend-wide default: see examples/v2n/v2n-cm33-deepx-rail/src/
+	 * main.c, which applies tas2563's same write-before-configure-then-
+	 * write-after pattern to P64. */
 	gpio_flags_t f = (dir == ALP_GPIO_OUTPUT) ? GPIO_OUTPUT : GPIO_INPUT;
 	if (pull == ALP_GPIO_PULL_UP) f |= GPIO_PULL_UP;
 	if (pull == ALP_GPIO_PULL_DOWN) f |= GPIO_PULL_DOWN;
