@@ -172,39 +172,43 @@ hardware notes before this step can do anything real, so it is **skipped by
 default** and needs `--enable-dxm1-flash`. **This path has never run on
 silicon and cannot succeed on the first V2M bench unit yet** (its DX-M1
 does not start its reference clock) -- do not pass `--enable-dxm1-flash` on
-that unit. When enabled, from Linux it drives V2N `P75` high (UART mux to
-the DX-M1 UART0, default low; held for the whole transfer -- a plain
-foreground `gpioset` would set the line then exit and release it), pulses
-`PA6` (DX-M1 reset: low 100 ms, high), and -- with the NAND empty, the
-ROM's XMODEM fallback ('C' prompt @115200) -- runs the vendor `uart_boot`
-(aarch64) twice against `-d <dev>`: the bootloader stage
+that unit. When enabled, from Linux it drives V2N `P75` high via sysfs
+(UART mux to the DX-M1 UART0, default low; a sysfs `direction`/`value` write
+holds on its own for the whole transfer, no backgrounded process needed),
+pulses `PA6` (DX-M1 reset: low 100 ms, high), and -- with the NAND empty,
+the ROM's XMODEM fallback ('C' prompt @115200) -- runs the vendor
+`uart_boot` (aarch64) twice against `-d <dev>`: the bootloader stage
 (`-f fw_uart_boot.bin -b 115200`), then the application firmware
-(`-F fw.bin -U -b 115200`); the `P75` hold is released afterward.
-Verification is a cold boot followed by a DEEPX PCIe **endpoint**
-enumerating under `/sys/bus/pci/devices` -- the root port alone
-(`0000:00:00.0`) never counts; an optional `dxm1.pcie_vendor_id` in
-bench.yaml narrows the match further once DEEPX publishes the DX-M1's PCI
-IDs. **Never runs `sf_erase`** (vendor docs disagree on its size) and
-**never touches V2N `P64`/`P65`** (the DEEPX 0.75 V rail -- `gpiolib`
-reconfigures a pin on read and would kill it; see #2288). The vendor
-`uart_boot` tool and firmware binaries are DEEPX files and are never
-committed here: their paths come from `bench.yaml`
+(`-F fw.bin -U -b 115200`); `P75` is driven low again afterward. Verification
+is a cold boot followed by a DEEPX PCIe **endpoint** enumerating under
+`/sys/bus/pci/devices` -- the root port alone (`0000:00:00.0`) never counts;
+an optional `dxm1.pcie_vendor_id` in bench.yaml narrows the match further
+once DEEPX publishes the DX-M1's PCI IDs. **Never runs `sf_erase`** (vendor
+docs disagree on its size) and **never touches V2N `P64`/`P65`** (the DEEPX
+0.75 V rail -- `gpiolib` reconfigures a pin on read and would kill it; see
+#2288). The vendor `uart_boot` tool and firmware binaries are DEEPX files
+and are never committed here: their paths come from `bench.yaml`
 `dxm1.{uart_boot,fw_uart_boot,fw}` (alongside
 `dxm1.{gpio_chip,uart_mux_line,reset_line,uart_device}`), each `TBD (null)`
-until a bench has them. `uart_mux_line`/`reset_line` are **within-chip
-gpiochip line numbers** (`port * 8 + pin`, e.g. `P75` = 61, `PA6` = 86 --
-not the legacy sysfs `/sys/class/gpio/gpio<N>` numbering, which adds a
-per-SoC base offset), must be distinct ints, and the tool refuses `52`/`53`
-(`P64`/`P65`, the DEEPX rail) outright. The step verifies both firmware
-files' md5 and the vendor `uart_boot` binary's own md5 against pinned
-values before touching hardware, and records `dxm1_fw_uart_boot_md5`,
-`dxm1_fw_md5`, `dxm1_fw_version`, `dxm1_uart_boot_tool_md5` in the ledger.
+until a bench has them. There is no `libgpiod`/`gpioset` on the shipping V2N
+image (`CONFIG_GPIO_SYSFS=y` only), so lines are driven via
+`/sys/class/gpio`: `gpio_chip` is the pinctrl device's sysfs **label**
+(e.g. `"10410000.pinctrl"`), used to read that chip's live `base` rather
+than trusting a fixed number, which shifts across kernel/DT revisions.
+`uart_mux_line`/`reset_line` are **within-chip line numbers**
+(`port * 8 + pin`, e.g. `P75` = 61, `PA6` = 86 -- add the chip's `base` to
+get the sysfs global number), must be distinct ints, and the tool refuses
+`52`/`53` (`P64`/`P65`, the DEEPX rail) outright, before any export or
+direction write. The step verifies both firmware files' md5 and the vendor
+`uart_boot` binary's own md5 against pinned values before touching
+hardware, and records `dxm1_fw_uart_boot_md5`, `dxm1_fw_md5`,
+`dxm1_fw_version`, `dxm1_uart_boot_tool_md5` in the ledger.
 
 Example `bench.yaml` shape (every value `TBD (null)` until a bench has one):
 
 ```yaml
 dxm1:
-  gpio_chip: null          # e.g. "gpiochip0"
+  gpio_chip: null          # e.g. "10410000.pinctrl" (pinctrl chip's sysfs label)
   uart_mux_line: null      # int, within-chip line number (P75 = 61)
   reset_line: null         # int, within-chip line number (PA6 = 86); != uart_mux_line
   uart_device: null        # e.g. "/dev/ttySC1"

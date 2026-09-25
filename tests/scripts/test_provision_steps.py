@@ -745,9 +745,10 @@ def test_dxm1_npu_flash_execute_fails_when_pcie_endpoint_absent(tmp_path):
         board.host = "10.0.0.2"
         console = _login_console()
         bench = _bench(console=console)
-        # gpioset --version, background hold + echo $!, reset pulse, two
-        # uart_boot calls, then the kill -- all scripted permissively so
-        # only the PCIe-empty cold boot causes the failure.
+        # pinctrl chip-base lookup, sysfs P75/PA6 dir resolution (already
+        # named, no export needed), the reset pulse, two uart_boot calls,
+        # then P75 released -- all scripted permissively so only the
+        # PCIe-empty cold boot causes the failure.
         console_hooks = {"n": 0}
 
         def on_power():
@@ -756,19 +757,28 @@ def test_dxm1_npu_flash_execute_fails_when_pcie_endpoint_absent(tmp_path):
         board._answer_orig = board._answer
 
         def answer(cmd):
-            if cmd == "gpioset --version":
-                return 0, "gpioset (libgpiod) v2.1\n"
-            if re.search(r"gpioset -c chip0 61=1 >/dev/null 2>&1 & echo \$!", cmd):
-                return 0, "4242\n"
-            if re.search(r"gpioset -c chip0 -t 100ms,0 86=0", cmd):
+            if cmd.startswith("for d in /sys/class/gpio/gpiochip*"):
+                return 0, "/sys/class/gpio/gpiochip416 10410000.pinctrl\n"
+            if cmd == "cat /sys/class/gpio/gpiochip416/base":
+                return 0, "416\n"
+            if cmd == "test -e /sys/class/gpio/gpio477/value":
+                return 1, ""
+            if cmd == "test -e /sys/class/gpio/P75/value":
                 return 0, ""
-            if cmd.startswith("sleep "):
+            if cmd == "echo high > /sys/class/gpio/P75/direction":
+                return 0, ""
+            if cmd == "test -e /sys/class/gpio/gpio502/value":
+                return 1, ""
+            if cmd == "test -e /sys/class/gpio/PA6/value":
+                return 0, ""
+            if re.search(r"echo low > /sys/class/gpio/PA6/direction; sleep 0\.1; "
+                         r"echo high > /sys/class/gpio/PA6/direction", cmd):
                 return 0, ""
             if re.search(r"uart_boot -d /dev/ttySC1 -f", cmd):
                 return 0, "bootloader ok\n"
             if re.search(r"uart_boot -d /dev/ttySC1 -F", cmd):
                 return 0, "app ok\n"
-            if cmd == "kill 4242":
+            if cmd == "echo low > /sys/class/gpio/P75/direction":
                 return 0, ""
             if cmd == "ls /sys/bus/pci/devices":
                 return 0, "0000:00:00.0\n"       # root port only: no DEEPX endpoint
@@ -778,7 +788,7 @@ def test_dxm1_npu_flash_execute_fails_when_pcie_endpoint_absent(tmp_path):
                 return 0, ""
             return board._answer_orig(cmd)
         board._answer = answer
-        bench.raw["dxm1"] = {"gpio_chip": "chip0", "uart_mux_line": 61, "reset_line": 86,
+        bench.raw["dxm1"] = {"gpio_chip": "10410000.pinctrl", "uart_mux_line": 61, "reset_line": 86,
                              "uart_device": "/dev/ttySC1", "uart_boot": str(tool_bin),
                              "fw_uart_boot": str(boot_bin), "fw": str(fw_bin)}
         ctx = _ctx(tmp_path, bench=bench, linux=board, dxm1_flash=True, execute=True)

@@ -356,80 +356,120 @@ def test_clkgen_diff_rejects_wrong_length():
 
 
 # --- DX-M1 NPU (V2M-only) --------------------------------------------------------------
+# The shipping V2N image has no libgpiod/gpioset (CONFIG_GPIO_SYSFS=y only),
+# so lines are driven via /sys/class/gpio. P75/PA6 = "10410000.pinctrl" chip,
+# base 416, within-chip lines 61/86 -> global 477/502 (silicon-verified).
 
-def test_gpioset_is_v2_by_version_string():
-    t, _ = target([("gpioset --version", "gpioset (libgpiod) v2.1\n")])
-    assert lt._gpioset_is_v2(t)
-    t, _ = target([("gpioset --version", "gpioset (libgpiod) v1.6.3\n")])
-    assert not lt._gpioset_is_v2(t)
-    t, _ = target([("gpioset --version", (1, ""))])
-    assert not lt._gpioset_is_v2(t)
+def test_sysfs_gpio_line_name():
+    assert lt._sysfs_gpio_line_name(61) == "P75"
+    assert lt._sysfs_gpio_line_name(86) == "PA6"
+    assert lt._sysfs_gpio_line_name(52) == "P64"
 
 
-def test_dxm1_uart_boot_v1_holds_p75_via_mode_signal_and_pulses_reset_via_mode_time():
-    t, fake = target([
-        ("gpioset --version", "gpioset (libgpiod) v1.6.3\n"),
-        (r"^gpioset --mode=signal chip0 5=1 >/dev/null 2>&1 & echo \$!$", "4242\n"),
-        ("sleep 0.05; kill -0 4242", ""),
-        (r"^gpioset --mode=time --usec=100000 chip0 6=0; gpioset chip0 6=1$", ""),
-        (r"uart_boot -d /dev/ttySC1 -f fw_uart_boot.bin -b 115200", "bootloader ok\n"),
-        (r"uart_boot -d /dev/ttySC1 -F fw.bin -U -b 115200", "app ok\n"),
-        ("kill 4242", ""),
+def test_pinctrl_chip_base_reads_live_base_by_label():
+    t, _ = target([
+        (r"^for d in /sys/class/gpio/gpiochip\*", "/sys/class/gpio/gpiochip416 10410000.pinctrl\n"
+                                                    "/sys/class/gpio/gpiochip398 gd32-bridge-gpio\n"),
+        (r"^cat /sys/class/gpio/gpiochip416/base$", "416\n"),
     ])
-    out = lt.dxm1_uart_boot(t, "chip0", 5, 6, "/dev/ttySC1", "uart_boot",
+    assert lt._pinctrl_chip_base(t, "10410000.pinctrl") == 416
+
+
+def test_pinctrl_chip_base_raises_when_label_not_found():
+    t, _ = target([
+        (r"^for d in /sys/class/gpio/gpiochip\*", "/sys/class/gpio/gpiochip398 gd32-bridge-gpio\n"),
+    ])
+    with pytest.raises(BenchError, match="no /sys/class/gpio/gpiochip"):
+        lt._pinctrl_chip_base(t, "10410000.pinctrl")
+
+
+def test_sysfs_gpio_dir_uses_the_already_named_export_without_writing_export():
+    # matches the real V2N board: P75/PA6 are pre-exported by the pinctrl
+    # driver under their DT name; gpio<N> never appears.
+    t, fake = target([
+        (r"^for d in /sys/class/gpio/gpiochip\*", "/sys/class/gpio/gpiochip416 10410000.pinctrl\n"),
+        (r"^cat /sys/class/gpio/gpiochip416/base$", "416\n"),
+        (r"^test -e /sys/class/gpio/gpio477/value$", (1, "")),
+        (r"^test -e /sys/class/gpio/P75/value$", (0, "")),
+    ])
+    assert lt._sysfs_gpio_dir(t, "10410000.pinctrl", 61) == "/sys/class/gpio/P75"
+    assert not any("export" in c for c in fake.commands)
+
+
+def test_sysfs_gpio_dir_exports_when_neither_form_exists_yet():
+    t, fake = target([
+        (r"^for d in /sys/class/gpio/gpiochip\*", "/sys/class/gpio/gpiochip416 10410000.pinctrl\n"),
+        (r"^cat /sys/class/gpio/gpiochip416/base$", "416\n"),
+        (r"^test -e /sys/class/gpio/gpio426/value$", [(1, ""), (0, "")]),
+        (r"^test -e /sys/class/gpio/P12/value$", (1, "")),
+        (r"^echo 426 > /sys/class/gpio/export$", ""),
+    ])
+    assert lt._sysfs_gpio_dir(t, "10410000.pinctrl", 10) == "/sys/class/gpio/gpio426"
+    assert "echo 426 > /sys/class/gpio/export" in fake.commands
+
+
+def test_sysfs_gpio_dir_raises_if_export_fails_for_a_real_reason():
+    t, _ = target([
+        (r"^for d in /sys/class/gpio/gpiochip\*", "/sys/class/gpio/gpiochip416 10410000.pinctrl\n"),
+        (r"^cat /sys/class/gpio/gpiochip416/base$", "416\n"),
+        (r"^test -e /sys/class/gpio/gpio426/value$", (1, "")),
+        (r"^test -e /sys/class/gpio/P12/value$", (1, "")),
+        (r"^echo 426 > /sys/class/gpio/export$", (1, "")),
+    ])
+    with pytest.raises(BenchError, match="could not export"):
+        lt._sysfs_gpio_dir(t, "10410000.pinctrl", 10)
+
+
+def test_dxm1_reset_pulse_is_one_ssh_round_trip():
+    t, fake = target([
+        (r"^for d in /sys/class/gpio/gpiochip\*", "/sys/class/gpio/gpiochip416 10410000.pinctrl\n"),
+        (r"^cat /sys/class/gpio/gpiochip416/base$", "416\n"),
+        (r"^test -e /sys/class/gpio/gpio502/value$", (1, "")),
+        (r"^test -e /sys/class/gpio/PA6/value$", (0, "")),
+        (r"^echo low > /sys/class/gpio/PA6/direction; sleep 0\.1; echo high > /sys/class/gpio/PA6/direction$", ""),
+    ])
+    lt.dxm1_reset_pulse(t, "10410000.pinctrl", 86)
+    assert fake.commands[-1] == ("echo low > /sys/class/gpio/PA6/direction; "
+                                 "sleep 0.1; echo high > /sys/class/gpio/PA6/direction")
+
+
+def test_dxm1_uart_boot_drives_p75_via_sysfs_and_releases_it_afterward():
+    t, fake = target([
+        (r"^for d in /sys/class/gpio/gpiochip\*", "/sys/class/gpio/gpiochip416 10410000.pinctrl\n"),
+        (r"^cat /sys/class/gpio/gpiochip416/base$", "416\n"),
+        (r"^test -e /sys/class/gpio/gpio477/value$", (1, "")),
+        (r"^test -e /sys/class/gpio/P75/value$", (0, "")),
+        (r"^echo high > /sys/class/gpio/P75/direction$", ""),
+        (r"^test -e /sys/class/gpio/gpio502/value$", (1, "")),
+        (r"^test -e /sys/class/gpio/PA6/value$", (0, "")),
+        (r"^echo low > /sys/class/gpio/PA6/direction; sleep 0\.1; echo high > /sys/class/gpio/PA6/direction$", ""),
+        (r"^uart_boot -d /dev/ttySC1 -f fw_uart_boot\.bin -b 115200$", "bootloader ok\n"),
+        (r"^uart_boot -d /dev/ttySC1 -F fw\.bin -U -b 115200$", "app ok\n"),
+        (r"^echo low > /sys/class/gpio/P75/direction$", ""),
+    ])
+    out = lt.dxm1_uart_boot(t, "10410000.pinctrl", 61, 86, "/dev/ttySC1", "uart_boot",
                             "fw_uart_boot.bin", "fw.bin")
     assert out == "bootloader ok\napp ok\n"
-    assert fake.commands[-1] == "kill 4242"
-    assert "gpioset --mode=signal chip0 5=1 >/dev/null 2>&1 & echo $!" in fake.commands
-    assert "gpioset --mode=time --usec=100000 chip0 6=0; gpioset chip0 6=1" in fake.commands
+    assert fake.commands[-1] == "echo low > /sys/class/gpio/P75/direction"
 
 
-def test_dxm1_uart_boot_v2_never_passes_dash_z_and_kills_on_failure():
-    # v2's `-z`/`--daemonize` forks gpioset and its immediate shell parent
-    # exits right away, so a backgrounded `-z` command's `$!` would name an
-    # already-exited PID -- assert it never appears on any gpioset call.
+def test_dxm1_uart_boot_releases_p75_even_if_the_transfer_fails():
     t, fake = target([
-        ("gpioset --version", "gpioset (libgpiod) v2.1\n"),
-        (r"^gpioset -c chip0 5=1 >/dev/null 2>&1 & echo \$!$", "9001\n"),
-        ("sleep 0.05; kill -0 9001", ""),
-        (r"^gpioset -c chip0 -t 100ms,0 6=0$", ""),
-        (r"uart_boot -d", (1, "no ROM response")),
-        ("kill 9001", ""),
+        (r"^for d in /sys/class/gpio/gpiochip\*", "/sys/class/gpio/gpiochip416 10410000.pinctrl\n"),
+        (r"^cat /sys/class/gpio/gpiochip416/base$", "416\n"),
+        (r"^test -e /sys/class/gpio/gpio477/value$", (1, "")),
+        (r"^test -e /sys/class/gpio/P75/value$", (0, "")),
+        (r"^echo high > /sys/class/gpio/P75/direction$", ""),
+        (r"^test -e /sys/class/gpio/gpio502/value$", (1, "")),
+        (r"^test -e /sys/class/gpio/PA6/value$", (0, "")),
+        (r"^echo low > /sys/class/gpio/PA6/direction; sleep 0\.1; echo high > /sys/class/gpio/PA6/direction$", ""),
+        (r"^uart_boot -d /dev/ttySC1 -f fw_uart_boot\.bin -b 115200$", (1, "no ROM response")),
+        (r"^echo low > /sys/class/gpio/P75/direction$", ""),
     ])
     with pytest.raises(BenchError):
-        lt.dxm1_uart_boot(t, "chip0", 5, 6, "/dev/ttySC1", "uart_boot",
+        lt.dxm1_uart_boot(t, "10410000.pinctrl", 61, 86, "/dev/ttySC1", "uart_boot",
                           "fw_uart_boot.bin", "fw.bin")
-    assert fake.commands[-1] == "kill 9001"
-    assert not any("-z" in c for c in fake.commands)
-
-
-def test_gpioset_hold_stop_raises_loudly_when_the_kill_fails():
-    t, _ = target([("kill 4242", (1, ""))])
-    with pytest.raises(BenchError, match="failed to kill"):
-        lt._gpioset_hold_stop(t, "4242")
-
-
-def test_gpioset_hold_start_pkills_the_scoped_line_when_the_launch_ssh_call_raises():
-    def runner(argv, **kw):
-        cmd = argv[-1]
-        if "echo $!" in cmd:
-            raise subprocess.TimeoutExpired(argv, 1)
-        # anchored with a leading space so line 5's pkill can't also match
-        # a live hold on line 15 or 25.
-        assert "pkill -f" in cmd and "gpioset.*chip0.* 5=" in cmd
-        return subprocess.CompletedProcess(argv, 0, "", "")
-    t = lt.LinuxTarget("unit", runner=runner)
-    with pytest.raises(BenchError, match="timed out"):
-        lt._gpioset_hold_start(t, "chip0", "5=1", is_v2=True)
-
-
-def test_gpioset_hold_start_raises_when_the_process_is_dead_on_arrival():
-    t, fake = target([
-        (r"^gpioset -c chip0 5=1 >/dev/null 2>&1 & echo \$!$", "9001\n"),
-        ("sleep 0.05; kill -0 9001", (1, "")),
-    ])
-    with pytest.raises(BenchError, match="already dead"):
-        lt._gpioset_hold_start(t, "chip0", "5=1", is_v2=True)
+    assert fake.commands[-1] == "echo low > /sys/class/gpio/P75/direction"
 
 
 def test_dxm1_pcie_present_excludes_bridges_and_root_ports_by_pci_class():

@@ -508,96 +508,88 @@ def clkgen_diff(image: bytes) -> list[str]:
 PCI_CLASS_BRIDGE_PREFIX = "0x0604"
 
 
-def _gpioset_is_v2(t: LinuxTarget) -> bool:
-    """libgpiod v2's `gpioset` HOLDS the line (blocks until signalled) by
-    default -- unlike v1, whose default is set-then-exit and needs
-    `--mode=signal` to hold instead. v2 also offers `-z`/`--daemonize` to
-    background itself, but that forks gpioset and lets its immediate parent
-    exit right away -- when the shell backgrounds that command with `&`,
-    `$!` then names the already-exited parent, not the daemonized holder, so
-    callers here never pass `-z` (see dxm1_uart_boot / dxm1_reset_pulse)."""
-    out = t.run("gpioset --version", check=False).stdout
-    m = re.search(r"(\d+)\.\d+", out)
-    return bool(m) and int(m[1]) >= 2
+def _sysfs_gpio_line_name(line: int) -> str:
+    """RZ/V2N pinctrl naming convention: within-chip `line` = port*8+pin ->
+    "P<port><pin>", port 0-9 as a digit, port >=10 as a letter (A=10, ...) --
+    e.g. line 61 -> "P75", line 86 -> "PA6". Matches the DT line names this
+    board's pinctrl driver pre-exports some lines under in sysfs (see
+    `_sysfs_gpio_dir`)."""
+    port, pin = divmod(line, 8)
+    p = str(port) if port < 10 else chr(ord("A") + port - 10)
+    return f"P{p}{pin}"
 
 
-def _gpioset_hold_start(t: LinuxTarget, chip: str, assignment: str, is_v2: bool) -> str:
-    """Start a `gpioset` that holds `assignment` (e.g. "5=1") backgrounded
-    via the shell, and return its real PID. v2 holds by default (no flag
-    needed, and NEVER `-z` -- see `_gpioset_is_v2`); v1 needs `--mode=signal`
-    to hold instead of setting-then-exiting. `is_v2` is resolved once by the
-    caller (not re-queried per call) to keep this to one ssh round trip.
-    Verifies the backgrounded process is actually still alive before handing
-    the PID back -- a `gpioset` that dies immediately (bad chip/line, busy
-    line) would otherwise look identical to a live hold until the caller's
-    much-later `kill` fails."""
-    cmd = (f"gpioset -c {shlex.quote(chip)} {assignment}" if is_v2 else
-           f"gpioset --mode=signal {shlex.quote(chip)} {assignment}")
-    line = assignment.split("=", 1)[0]
-    try:
-        pid = t.run(f"{cmd} >/dev/null 2>&1 & echo $!").stdout.strip()
-    except BenchError:
-        # the ssh call itself failed (e.g. timed out) after gpioset may
-        # already have started remotely -- scope the cleanup to this exact
-        # chip + line assignment so we don't kill an unrelated hold.
-        t.run(f"pkill -f {shlex.quote(f'gpioset.*{chip}.* {line}=')}", check=False)
-        raise
-    if not pid.isdigit():
-        raise BenchError(f"could not start the gpioset hold ({cmd!r}): got {pid!r}")
-    r = t.run(f"sleep 0.05; kill -0 {shlex.quote(pid)}", check=False)
-    if r.rc != 0:
-        raise BenchError(f"gpioset hold ({cmd!r}) pid {pid} was already dead "
-                          f"right after starting (rc={r.rc})")
-    return pid
+def _pinctrl_chip_base(t: LinuxTarget, label: str) -> int:
+    """Global sysfs GPIO base for the gpiochip whose /sys/class/gpio label
+    matches `label` (e.g. "10410000.pinctrl") -- read from the live chip
+    list rather than trusting a fixed base number, which shifts across
+    kernel/DT revisions."""
+    out = t.run('for d in /sys/class/gpio/gpiochip*; do '
+                'echo "$d $(cat "$d/label")"; done', check=False).stdout
+    for ln in out.splitlines():
+        parts = ln.split(None, 1)
+        if len(parts) == 2 and parts[1].strip() == label:
+            return int(t.run(f"cat {parts[0]}/base").stdout.strip())
+    raise BenchError(f"no /sys/class/gpio/gpiochip* with label {label!r} found")
 
 
-def _gpioset_hold_stop(t: LinuxTarget, pid: str) -> None:
-    r = t.run(f"kill {shlex.quote(pid)}", check=False)
-    if r.rc != 0:
-        raise BenchError(f"failed to kill the gpioset hold pid {pid} (rc={r.rc}): "
-                          f"{r.stderr.strip()[-200:]} -- it may still be holding the line")
+def _sysfs_gpio_dir(t: LinuxTarget, label: str, line: int) -> str:
+    """Resolve the sysfs dir for within-chip `line` on the gpiochip labelled
+    `label`, exporting it if needed. Some lines on this board are already
+    exported by the pinctrl driver under their DT name (e.g.
+    "/sys/class/gpio/P75") rather than the numeric "gpio<N>" -- a sysfs
+    holds direction+value without a background process, so unlike gpioset
+    this needs no PID bookkeeping."""
+    base = _pinctrl_chip_base(t, label)
+    num = base + line
+    numeric = f"/sys/class/gpio/gpio{num}"
+    named = f"/sys/class/gpio/{_sysfs_gpio_line_name(line)}"
+    for d in (numeric, named):
+        if t.run(f"test -e {d}/value", check=False).rc == 0:
+            return d
+    r = t.run(f"echo {num} > /sys/class/gpio/export", check=False)
+    if r.rc != 0 and "busy" not in r.stderr.lower():
+        raise BenchError(f"could not export sysfs gpio {num} ({label} line {line}): "
+                          f"{r.stderr.strip()[-200:]}")
+    for d in (numeric, named):
+        if t.run(f"test -e {d}/value", check=False).rc == 0:
+            return d
+    raise BenchError(f"gpio {num} ({label} line {line}) exported but neither "
+                     f"{numeric} nor {named} appeared")
 
 
-def dxm1_reset_pulse(t: LinuxTarget, chip: str, reset_line: int, is_v2: bool) -> None:
-    """Pulse PA6 (active-low M1_RESET) low for 100 ms then release it high.
-    v1: `--mode=time --usec=100000` holds the low level for exactly that
-    duration on its own, then a plain (set-then-exit) `gpioset` asserts high.
-    v2's `-t, --toggle=PERIOD[,PERIOD]...` does the whole pulse in one call:
-    `-t 100ms,0` sets the line low, toggles it high after 100 ms, and the
-    trailing 0-length period ends the command immediately instead of holding
-    the final level -- no background/sleep/kill needed. The final high level
-    is the pin being released: DX-M1 PORES_N has an internal pull-up, so
-    released == reset deasserted."""
-    low, high = f"{reset_line}=0", f"{reset_line}=1"
-    if is_v2:
-        t.run(f"gpioset -c {shlex.quote(chip)} -t 100ms,0 {low}")
-    else:
-        t.run(f"gpioset --mode=time --usec=100000 {shlex.quote(chip)} {low}; "
-              f"gpioset {shlex.quote(chip)} {high}")
+def dxm1_reset_pulse(t: LinuxTarget, label: str, reset_line: int) -> None:
+    """Pulse PA6 (active-low M1_RESET) low for 100 ms then release it high,
+    in one ssh round trip so the 100 ms hold is timed by the board's own
+    `sleep`, not host-to-board latency. `direction`'s "high"/"low" values set
+    direction and value atomically (no separate value write to glitch on).
+    The final high level is the pin being released: DX-M1 PORES_N has an
+    internal pull-up, so released == reset deasserted."""
+    d = _sysfs_gpio_dir(t, label, reset_line)
+    t.run(f"echo low > {d}/direction; sleep 0.1; echo high > {d}/direction")
 
 
-def dxm1_uart_boot(t: LinuxTarget, chip: str, uart_line: int, reset_line: int,
+def dxm1_uart_boot(t: LinuxTarget, label: str, uart_line: int, reset_line: int,
                    uart_device: str, tool: str, fw_uart_boot: str, fw: str) -> str:
-    """Mux V2N P75 to the DX-M1 UART0 (held high, backgrounded, for the whole
-    transfer -- a plain foreground `gpioset` sets the line then exits and
-    releases it), pulse the PA6 reset (low 100 ms, high), then run the
-    vendor `uart_boot` twice against the ROM's XMODEM fallback ('C' prompt on
-    an empty NAND): once for the bootloader stage, once for the application
+    """Mux V2N P75 to the DX-M1 UART0 (driven high via sysfs for the whole
+    transfer -- a sysfs value write holds on its own, no background process
+    needed), pulse the PA6 reset (low 100 ms, high), then run the vendor
+    `uart_boot` twice against the ROM's XMODEM fallback ('C' prompt on an
+    empty NAND): once for the bootloader stage, once for the application
     firmware (`-d <uart_device>` on both -- the vendor tool needs the device
-    path for either transfer mode). Kills the P75 hold before returning
-    (even on failure), and checks that the kill actually landed. Never
-    touches V2N P64/P65 (the DEEPX 0.75 V rail): this mechanism is a UART mux
-    line and a reset line only."""
-    is_v2 = _gpioset_is_v2(t)
-    pid = _gpioset_hold_start(t, chip, f"{uart_line}=1", is_v2)
+    path for either transfer mode). Releases P75 (drives it low) before
+    returning, even on failure. Never touches V2N P64/P65 (the DEEPX 0.75 V
+    rail): this mechanism is a UART mux line and a reset line only."""
+    mux_dir = _sysfs_gpio_dir(t, label, uart_line)
+    t.run(f"echo high > {mux_dir}/direction")
     try:
-        dxm1_reset_pulse(t, chip, reset_line, is_v2)
+        dxm1_reset_pulse(t, label, reset_line)
         out1 = t.run(f"{shlex.quote(tool)} -d {shlex.quote(uart_device)} "
                      f"-f {shlex.quote(fw_uart_boot)} -b 115200", timeout=120.0).stdout
         out2 = t.run(f"{shlex.quote(tool)} -d {shlex.quote(uart_device)} "
                      f"-F {shlex.quote(fw)} -U -b 115200", timeout=300.0).stdout
     finally:
-        _gpioset_hold_stop(t, pid)
+        t.run(f"echo low > {mux_dir}/direction", check=False)
     return out1 + out2
 
 
