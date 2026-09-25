@@ -51,3 +51,17 @@ target_sources(app PRIVATE src/main.c)
 if(AEN_ISP_IMX296)
     target_compile_definitions(app PRIVATE AEN_ISP_IMX296=1)
 endif()
+
+# Bench run 298 diagnostic: AE never moved on the IMX296 AE-on scenario. Being able to run an
+# AE-OFF 60-frame IMX296 capture (rather than only the original 1-frame first-light proof) isolates
+# whether the flat readback is specific to the AE loop or would also show up on a longer manual-
+# exposure run -- not implied by CONFIG_ISP_LIB_AE_MODULE the way N_FRAMES's AE-on/off default is
+# (src/main.c's own N_FRAMES #define), so this is a separate, explicit override:
+#   -DAEN_ISP_N_FRAMES=60
+# Applies to BOTH the AE-on and AE-off IMX296 builds; unset (0) leaves src/main.c's own
+# IS_ENABLED(CONFIG_ISP_LIB_AE_MODULE) ? 60 : 1 default in place. No effect on the OV5647 path
+# (its own N_FRAMES is a separate, unconditional 30).
+set(AEN_ISP_N_FRAMES "0" CACHE STRING "Override N_FRAMES for the IMX296 variant (0 = use the AE-on/off default)")
+if(AEN_ISP_IMX296 AND NOT AEN_ISP_N_FRAMES STREQUAL "0")
+    target_compile_definitions(app PRIVATE AEN_ISP_N_FRAMES=${AEN_ISP_N_FRAMES})
+endif()

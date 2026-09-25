@@ -163,10 +163,19 @@ extern volatile uint32_t isp_mi_frame_end_count;
  * no overlay-no-ae.conf -- unit 3's AE-on scenario, hal_alif patch 0013's IMX296 AE envelope):
  * 60 frames, letting the AE loop settle against real IMX296 SHS/GAIN register writeback before
  * the last frame is kept -- AWB stays manual (no IMX296 AWB/CCM calibration yet, #2287 unit 4).
+ *
+ * Bench run 298 diagnostic: AEN_ISP_N_FRAMES (CMakeLists.txt's -DAEN_ISP_N_FRAMES=<n> option)
+ * overrides the AE-on/off default above when set (nonzero) -- e.g. a 60-frame AE-OFF run, to
+ * check whether a flat SHS/GAIN readback is specific to the AE loop or shows up even under a
+ * fixed manual exposure held over the same number of frames.
  */
-#define FRAME_WIDTH      1280
-#define FRAME_HEIGHT     960
-#define N_FRAMES         (IS_ENABLED(CONFIG_ISP_LIB_AE_MODULE) ? 60 : 1)
+#define FRAME_WIDTH  1280
+#define FRAME_HEIGHT 960
+#if defined(AEN_ISP_N_FRAMES)
+#define N_FRAMES AEN_ISP_N_FRAMES
+#else
+#define N_FRAMES (IS_ENABLED(CONFIG_ISP_LIB_AE_MODULE) ? 60 : 1)
+#endif
 #define ISP_INPUT_FOURCC VIDEO_PIX_FMT_SRGGB10P
 #else
 #define FRAME_WIDTH      640
@@ -377,6 +386,27 @@ static void print_imx296_ae_regs(int f)
 	       rc_gain,
 	       gain / 10,
 	       gain % 10);
+
+	/*
+	 * Bench run 298: AE never moved (SHS parked at the 32 us int_time_min floor, GAIN 0) --
+	 * advisor hypothesis is either the AE loop never runs at all (EXPM measurement window
+	 * overflow -- IMX296's 1280-wide ROI / 5 = 256 exceeds an 8-bit ISP_EXP_H_SIZE) or it runs
+	 * and parks on a genuinely black measurement. Same EXPM/g_ae_stable dump
+	 * print_ov5647_ae_regs() prints above (run 85's h_size/v_size unit verification) -- ADDs
+	 * the same readback for the IMX296 path so this can be told apart on the bench: h_size/
+	 * v_size == 0 or an obviously wrong value points at the EXPM window; a nonzero, plausible
+	 * h_size/v_size with mean_22 == 0 points at a genuinely black measurement region instead.
+	 */
+	printk("f%d DGAIN_RB=0x%08x DGAIN_G=0x%08x ae_stable=%u\n",
+	       f,
+	       reg32(ISP_DGAIN_RB),
+	       reg32(ISP_DGAIN_G),
+	       g_ae_stable);
+	printk("f%d ISP_EXP_H_SIZE=%u ISP_EXP_V_SIZE=%u ISP_EXP_MEAN_22=%u\n",
+	       f,
+	       reg32(ISP_EXP_H_SIZE),
+	       reg32(ISP_EXP_V_SIZE),
+	       reg32(ISP_EXP_MEAN_22));
 }
 #endif
 
