@@ -377,10 +377,9 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	 * scoped to the OV5647 shield's own DT node; a future sensor on this
 	 * ISP path needs its own branch here.
 	 *
-	 * NOTE (issue #2277): the OV5647 calibration AE block's own exposure
-	 * ceiling is still hard-pinned to the 10 fps VTS regardless of the
-	 * rate requested here -- unverified interaction in a dim scene at a
-	 * faster rate. */
+	 * The sensor driver owns the exposure ceiling: ov5647_set_ctrl_exposure()
+	 * (ov5647.c) clamps every VIDEO_CID_EXPOSURE write to the active mode's
+	 * VTS - 4 lines. */
 	const struct device *sensor_dev = DEVICE_DT_GET(DT_NODELABEL(ov5647));
 	if (device_is_ready(sensor_dev)) {
 		uint8_t              requested_fps = (cfg->fps != 0u) ? cfg->fps : 10u;

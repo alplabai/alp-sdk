@@ -152,6 +152,16 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/jpeg/zephyr_stub.c
 )
 
+# Word-copy memcpy() override for -Os Ensemble images (issue #2285).  The
+# core loop (src/common/alp_fast_memcpy_core.c) is OS-agnostic and also
+# linked directly into the host unit test (tests/unit/fast_memcpy); this
+# TU is just the memcpy()/__aeabi_memcpy*() aliases onto it, so it is
+# gated separately and only compiled into real Zephyr/picolibc images.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_FAST_MEMCPY
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/common/alp_fast_memcpy_core.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/fast_memcpy.c
+)
+
 # JPEG software baseline fallback (Task 2): portable TooJpeg-derived
 # encoder, silicon_ref="*" priority 50 -- outranks the NOT_IMPLEMENTED
 # stub above on every board.  Default y (see zephyr/kconfigs/jpeg.kconfig)

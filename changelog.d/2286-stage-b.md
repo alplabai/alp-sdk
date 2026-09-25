@@ -2,7 +2,7 @@
 
 Stage B of #2286: 1280x960 on E1M-AEN801/AEN803 + OV5647 now reads out the sensor's WHOLE
 pixel array and bins it 2x2, instead of Stage A's ~49%-width centre crop at the same
-output size. `ov5647_set_mode_regs()`'s new branch at `zephyr/drivers/video/ov5647.c:994`
+output size. `ov5647_set_mode_regs()`'s new branch at `zephyr/drivers/video/ov5647.c:1002`
 ("if (width == OV5647_MODE_1280X960_WIDTH && height == OV5647_MODE_1280X960_HEIGHT) {")
 writes the new mode's window, output size, subsample/binning, analog, HTS and AEC
 band-step registers as one coherent block, the same discipline AUTHORIZED LOCAL DIVERGENCE
@@ -32,7 +32,7 @@ line time here is 32.503 us, the AEC 50/60 Hz band-step line counts are NOT the 
 own 296/246 lines (those are its binned-mode line counts, the wrong real-time period at
 this line time) — they are recomputed the same way the crop path's own band step already
 is, to 308/256 (`OV5647_AEC_BAND_50HZ_1280X960BIN`/`OV5647_AEC_BAND_60HZ_1280X960BIN`).
-`ov5647_hts_for()` at `zephyr/drivers/video/ov5647.c:894`
+`ov5647_hts_for()` at `zephyr/drivers/video/ov5647.c:902`
 ("static uint32_t ov5647_hts_for(uint32_t width, uint32_t height)") now returns this HTS
 for 1280x960, which the frame-rate math below and any future VTS-derived exposure-limit
 logic both depend on.

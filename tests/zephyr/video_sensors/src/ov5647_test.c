@@ -39,6 +39,13 @@
 #define REG_MIPI_CTRL00   0x4800
 #define REG_FRAME_OFF_NUM 0x4202
 #define REG_PAD_OUT       0x300d
+/* OV5647_MANUAL_CTRL (ov5647.c) -- kept local like the quartet above. AEC/AGC-manual are
+ * BIT(0)/BIT(1); VTS-manual (the only bit ov5647_init_regs[] sets, #2277) is BIT(2).
+ */
+#define REG_MANUAL_CTRL 0x3503
+#define MANUAL_CTRL_VTS 0x04
+#define MANUAL_CTRL_AEC 0x01
+#define MANUAL_CTRL_AGC 0x02
 
 /* The three PLL registers of AUTHORIZED LOCAL DIVERGENCE #2's eight-register init set (issue
  * #2248, bench run 52) -- kept local for the same reason as the quartet above. */
@@ -1438,6 +1445,15 @@ ZTEST(ov5647, test_stream_start_unparks)
 		{ REG_MIPI_CTRL00, MIPI_CTRL00_STREAMING },
 		{ REG_FRAME_OFF_NUM, FRAME_OFF_NUM_STREAMING },
 		{ REG_PAD_OUT, PAD_OUT_STREAMING },
+		/* #2277: ov5647_set_stream(true) re-asserts both AEC/AGC-manual bits from the
+		 * ctrls cache (ov5647_set_ctrl_gain() then ov5647_set_ctrl_exposure(), each an
+		 * unconditional read-modify-write) right before MODE_SELECT below -- two writes
+		 * to the SAME register, both landing on MANUAL_CTRL_VTS alone (0x04) here because
+		 * ov5647_test_before() resets both ctrls to their AUTO/AUTO defaults, and VTS-manual
+		 * is already set from boot.
+		 */
+		{ REG_MANUAL_CTRL, MANUAL_CTRL_VTS },
+		{ REG_MANUAL_CTRL, MANUAL_CTRL_VTS },
 		{ REG_MODE_SELECT, MODE_SELECT_RUNNING },
 	};
 
@@ -2041,6 +2057,279 @@ ZTEST(ov5647, test_set_fmt_unsupported_restores_callers_pixelformat)
 }
 
 /*
+ * #2277: reproduces the ISP AE write-back path verbatim -- isp_pico.c's isp_apply_ae_sensor_gate()
+ * sets VIDEO_CID_EXPOSURE_AUTO=VIDEO_EXPOSURE_MANUAL once at stream start, then hal_alif's
+ * isp_vsi_bottom_half() (isp_api_wrapper.c) drives VIDEO_CID_EXPOSURE = intLine*16 every time the
+ * library's AE algorithm moves the clamped line count -- 1045*16 = 0x4150 is bench run 246's own
+ * clamped intLine. Regression test for the AE write-back path: VIDEO_CID_EXPOSURE must reach the
+ * sensor's 0x3500..0x3502 registers rather than staying pinned at OV5647_EXPOSURE_DEFAULT
+ * (0x0fff), the failure bench observed before this driver applied the write-back.
+ */
+ZTEST(ov5647, test_ae_writeback_exposure_auto_then_exposure_lands_in_registers)
+{
+	const struct emul   *emul                 = ov5647_emul();
+	struct video_control exposure_auto_manual = { .id  = VIDEO_CID_EXPOSURE_AUTO,
+		                                          .val = VIDEO_EXPOSURE_MANUAL };
+	struct video_control autogain_off         = { .id = VIDEO_CID_AUTOGAIN, .val = 0 };
+	/* Bench run 246's own clamped intLine (1045), *16'd exactly like isp_api_wrapper.c's
+	 * sns_config.intLine * 16 write-back convention (ov5647.c's own 1/16-line format).
+	 */
+	struct video_control exposure = { .id = VIDEO_CID_EXPOSURE, .val = 1045 * 16 };
+	uint8_t              hi, mid, lo, manual_ctrl;
+
+	/* isp_apply_ae_sensor_gate()'s own two calls, in its own order -- see isp_pico.c. */
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure_auto_manual));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &autogain_off));
+
+	/* isp_vsi_bottom_half()'s exposure write-back (isp_api_wrapper.c) -- a NEW value, not a
+	 * no-op against ctrls->exposure's still-default val.
+	 */
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure));
+
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3503, &manual_ctrl));
+	/* OV5647_MANUAL_CTRL_AEC (ov5647.c) = BIT(0) -- kept as a literal here, not the driver's
+	 * private macro, matching this file's own existing convention (see the file header).
+	 */
+	zassert_true(
+	    manual_ctrl & 0x01,
+	    "0x3503 AEC bit not set after VIDEO_CID_EXPOSURE_AUTO=MANUAL -- manual_ctrl=0x%02x",
+	    manual_ctrl);
+
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3500, &hi));
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3501, &mid));
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3502, &lo));
+	zassert_equal(((uint32_t)hi << 16) | ((uint32_t)mid << 8) | lo,
+	              (uint32_t)exposure.val,
+	              "0x3500..0x3502 = 0x%06x after VIDEO_CID_EXPOSURE=%d, want 0x%06x -- the "
+	              "AE write-back never reached the sensor's exposure registers",
+	              ((uint32_t)hi << 16) | ((uint32_t)mid << 8) | lo,
+	              exposure.val,
+	              (uint32_t)exposure.val);
+}
+
+/*
+ * #2277 (bench run 247): extends the test above with the ONE step it didn't cover -- a stream
+ * start AFTER the AE gate + write-back, with something (bench: "the sensor's own on-chip
+ * AEC/AGC" once the manual bits went inactive; exact external source not pinned down --
+ * ov5647_emul_set_reg() stands in for whatever it is, see that function's own comment) having
+ * clobbered 0x3503 back to VTS-manual-only and driven 0x3500..0x3502 to its own value in the
+ * meantime. Bench evidence: last_ret=0/last_ctrl_val=0x4150 (both sides agreed the write
+ * succeeded) yet a live readback found 0x3503=0x04 (BIT(0)/BIT(1) clear) and 0x3500..0x3502=
+ * 0x000200 (32 lines, not the 1045 lines*16 the ISP believed it had set) -- i.e. the AE gate's
+ * effect did not survive to when frames actually started flowing.
+ */
+ZTEST(ov5647, test_stream_start_heals_ae_sensor_gate_clobbered_by_something_else)
+{
+	const struct emul   *emul                 = ov5647_emul();
+	struct video_control exposure_auto_manual = { .id  = VIDEO_CID_EXPOSURE_AUTO,
+		                                          .val = VIDEO_EXPOSURE_MANUAL };
+	struct video_control autogain_off         = { .id = VIDEO_CID_AUTOGAIN, .val = 0 };
+	/* Bench run 246/247's own clamped intLine (1045), *16'd like isp_api_wrapper.c's
+	 * sns_config.intLine * 16 write-back convention (ov5647.c's own 1/16-line format).
+	 */
+	struct video_control exposure = { .id = VIDEO_CID_EXPOSURE, .val = 1045 * 16 };
+	uint8_t              hi, mid, lo, manual_ctrl;
+
+	/* isp_apply_ae_sensor_gate()'s own two calls, in its own order (isp_pico.c), then
+	 * isp_vsi_bottom_half()'s own exposure write-back (isp_api_wrapper.c) -- both already
+	 * covered by the test above, repeated here as the setup for the NEW step below.
+	 */
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure_auto_manual));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &autogain_off));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure));
+
+	/* THE NEW STEP: something clobbers 0x3503 back to VTS-manual-only and drives the sensor's
+	 * own exposure registers to a value the ISP never asked for, sometime between the gate/
+	 * write-back above and the stream actually going live -- bench run 247's own readback
+	 * (32 lines, 0x000200). ov5647_set_stream(true) (video_stream_start(), below) is the ISP's
+	 * own next call after the gate (isp_pico.c's isp_stream_start(): isp_apply_ae_sensor_gate()
+	 * then video_stream_start(config->controller)), so it is the LAST point this driver gets a
+	 * chance to notice and correct this before frames flow.
+	 */
+	zassert_ok(ov5647_emul_set_reg(emul, REG_MANUAL_CTRL, MANUAL_CTRL_VTS));
+	zassert_ok(ov5647_emul_set_reg(emul, 0x3500, 0x00));
+	zassert_ok(ov5647_emul_set_reg(emul, 0x3501, 0x02));
+	zassert_ok(ov5647_emul_set_reg(emul, 0x3502, 0x00));
+
+	zassert_ok(video_stream_start(ov5647_dev(), VIDEO_BUF_TYPE_OUTPUT));
+
+	zassert_ok(ov5647_emul_get_reg(emul, REG_MANUAL_CTRL, &manual_ctrl));
+	zassert_equal((manual_ctrl & (MANUAL_CTRL_AEC | MANUAL_CTRL_AGC)),
+	              (MANUAL_CTRL_AEC | MANUAL_CTRL_AGC),
+	              "0x3503 = 0x%02x after video_stream_start() -- AEC/AGC-manual did not "
+	              "survive to stream start, the sensor's own on-chip AEC/AGC will run and "
+	              "override every exposure/gain write for the whole session",
+	              manual_ctrl);
+
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3500, &hi));
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3501, &mid));
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3502, &lo));
+	zassert_equal(((uint32_t)hi << 16) | ((uint32_t)mid << 8) | lo,
+	              (uint32_t)exposure.val,
+	              "0x3500..0x3502 = 0x%06x after video_stream_start(), want 0x%06x -- the "
+	              "exposure the ISP already sent did not survive to stream start either",
+	              ((uint32_t)hi << 16) | ((uint32_t)mid << 8) | lo,
+	              (uint32_t)exposure.val);
+}
+
+/*
+ * #2277: ov5647_set_ctrl_exposure() clamps VIDEO_CID_EXPOSURE to the ACTIVE mode's VTS - 4 lines
+ * (register units, so *16) instead of writing an out-of-range request straight through -- an
+ * unclamped write just silently rails against the sensor's own VTS-manual frame length (0x3503
+ * bit2) without taking effect. Table-driven across three VTS-affecting axes: 640x480 binned HTS
+ * vs 1280x960 crop HTS, and three different frame rates -- confirms the clamp tracks the ACTIVE
+ * mode/rate, not a single driver-wide constant (the bug this replaces: an ISP-side ceiling
+ * hard-coded to 640x480's HTS was ~1.46x too loose at 1280x960/full-res). Every VTS below is
+ * pixel_rate(58333333) / (hts * fps), floored -- ov5647_frmrate_to_vts()'s own formula; see this
+ * file's header comment for why 58333333 is the fixed assumption. Must FAIL without the clamp in
+ * ov5647_set_ctrl_exposure(): the request (OV5647_EXPOSURE_MAX) would land in the registers
+ * unchanged instead of at (vts - 4) * 16.
+ */
+ZTEST(ov5647, test_exposure_clamps_to_active_vts_margin)
+{
+	static const struct {
+		uint16_t width;
+		uint16_t height;
+		uint32_t fps;
+		uint32_t vts; /* pixel_rate / (hts * fps), floored */
+	} cases[] = {
+		{ 640, 480, 30, 1049 },  /* binned HTS 1852 */
+		{ 1280, 960, 15, 1440 }, /* crop HTS 2700 */
+		{ 640, 480, 10, 3149 },  /* binned HTS 1852, the driver's boot-default rate */
+	};
+	const struct emul *emul = ov5647_emul();
+
+	for (size_t i = 0; i < ARRAY_SIZE(cases); i++) {
+		struct video_format fmt = {
+			.type        = VIDEO_BUF_TYPE_OUTPUT,
+			.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
+			.width       = cases[i].width,
+			.height      = cases[i].height,
+		};
+		struct video_frmival frmival              = { .numerator = 1, .denominator = cases[i].fps };
+		struct video_control exposure_auto_manual = { .id  = VIDEO_CID_EXPOSURE_AUTO,
+			                                          .val = VIDEO_EXPOSURE_MANUAL };
+		struct video_control autogain_off         = { .id = VIDEO_CID_AUTOGAIN, .val = 0 };
+		/* Deliberately above every case's ceiling -- OV5647_EXPOSURE_MAX (ov5647.c) is the
+		 * ctrl's own top of range, so the video-ctrl framework itself does not pre-clamp
+		 * this before ov5647_set_ctrl_exposure() ever runs. Varies per case (- i) so each
+		 * request differs from the last: video_set_ctrl() (video_ctrls.c) no-ops a request
+		 * whose value matches the ctrl's already-cached one, which would leave a later
+		 * case's write never reaching the driver at all.
+		 */
+		struct video_control exposure   = { .id = VIDEO_CID_EXPOSURE, .val = 0xFFFFF - (int32_t)i };
+		uint32_t             want_lines = cases[i].vts - 4;
+		uint32_t             want_reg   = want_lines * 16;
+		uint8_t              hi, mid, lo;
+		uint32_t             got;
+
+		zassert_ok(video_set_format(ov5647_dev(), &fmt));
+		zassert_ok(video_set_frmival(ov5647_dev(), &frmival));
+		zassert_ok(video_set_ctrl(ov5647_dev(), &exposure_auto_manual));
+		zassert_ok(video_set_ctrl(ov5647_dev(), &autogain_off));
+		zassert_ok(video_set_ctrl(ov5647_dev(), &exposure));
+
+		zassert_ok(ov5647_emul_get_reg(emul, 0x3500, &hi));
+		zassert_ok(ov5647_emul_get_reg(emul, 0x3501, &mid));
+		zassert_ok(ov5647_emul_get_reg(emul, 0x3502, &lo));
+		got = ((uint32_t)hi << 16) | ((uint32_t)mid << 8) | lo;
+
+		zassert_equal(got,
+		              want_reg,
+		              "case %zu (%ux%u@%u fps, VTS %u): 0x3500..0x3502 = 0x%06x, want "
+		              "0x%06x (VTS-4 = %u lines) -- the out-of-range exposure request was "
+		              "not clamped to the active mode's ceiling",
+		              i,
+		              cases[i].width,
+		              cases[i].height,
+		              cases[i].fps,
+		              cases[i].vts,
+		              got,
+		              want_reg,
+		              want_lines);
+	}
+}
+
+/*
+ * #2277: the flip side of the clamp test above -- a request already WITHIN the active mode's VTS
+ * - 4 margin must land in the registers exactly as requested, not floored/rounded to some other
+ * value. Uses the suite's default mode (640x480 @ 15 fps, VTS 2099 -- see ov5647_test_before()),
+ * well under its 2095-line ceiling.
+ */
+ZTEST(ov5647, test_exposure_below_vts_margin_lands_unchanged)
+{
+	const struct emul   *emul                 = ov5647_emul();
+	struct video_control exposure_auto_manual = { .id  = VIDEO_CID_EXPOSURE_AUTO,
+		                                          .val = VIDEO_EXPOSURE_MANUAL };
+	struct video_control autogain_off         = { .id = VIDEO_CID_AUTOGAIN, .val = 0 };
+	struct video_control exposure             = { .id = VIDEO_CID_EXPOSURE, .val = 500 * 16 };
+	uint8_t              hi, mid, lo;
+	uint32_t             got;
+
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure_auto_manual));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &autogain_off));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure));
+
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3500, &hi));
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3501, &mid));
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3502, &lo));
+	got = ((uint32_t)hi << 16) | ((uint32_t)mid << 8) | lo;
+
+	zassert_equal(got,
+	              (uint32_t)exposure.val,
+	              "0x3500..0x3502 = 0x%06x, want the unclamped request 0x%06x -- a request "
+	              "already within the active mode's ceiling must not be altered",
+	              got,
+	              (uint32_t)exposure.val);
+}
+
+/*
+ * #2277: a frame-rate INCREASE shrinks the active mode's VTS, so an exposure value that was legal
+ * at the OLD (looser) rate can end up above the NEW, tighter VTS - 4 ceiling unless
+ * ov5647_set_frmival() re-applies the clamp after writing the new TIMING_VTS. Sets exposure to
+ * the 10 fps ceiling ((3149 - 4) * 16, the same 640x480/10 fps VTS
+ * test_exposure_clamps_to_active_vts_margin's own table uses), then switches to 30 fps
+ * (VTS 1049). Must FAIL without ov5647_set_frmival()'s re-clamp call: the stale 10 fps value
+ * (50320) is well above the 30 fps ceiling ((1049 - 4) * 16 = 16720).
+ */
+ZTEST(ov5647, test_frmival_increase_reclamps_stale_exposure)
+{
+	const struct emul   *emul                 = ov5647_emul();
+	struct video_control exposure_auto_manual = { .id  = VIDEO_CID_EXPOSURE_AUTO,
+		                                          .val = VIDEO_EXPOSURE_MANUAL };
+	struct video_control autogain_off         = { .id = VIDEO_CID_AUTOGAIN, .val = 0 };
+	struct video_frmival req10                = { .numerator = 1, .denominator = 10 };
+	struct video_frmival req30                = { .numerator = 1, .denominator = 30 };
+	/* The 10 fps ceiling itself (640x480 binned HTS, VTS 3149) -- the FIRST clamp is a no-op
+	 * at this value, so the value that actually reaches the registers is the stale one this
+	 * test is trying to trip up on the SECOND (30 fps) set_frmival().
+	 */
+	struct video_control exposure  = { .id = VIDEO_CID_EXPOSURE, .val = (3149 - 4) * 16 };
+	uint32_t             max_30fps = (1049 - 4) * 16;
+	uint8_t              hi, mid, lo;
+	uint32_t             got;
+
+	zassert_ok(video_set_frmival(ov5647_dev(), &req10));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure_auto_manual));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &autogain_off));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure));
+
+	zassert_ok(video_set_frmival(ov5647_dev(), &req30));
+
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3500, &hi));
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3501, &mid));
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3502, &lo));
+	got = ((uint32_t)hi << 16) | ((uint32_t)mid << 8) | lo;
+
+	zassert_true(got <= max_30fps,
+	             "0x3500..0x3502 = 0x%06x after switching to 30 fps, want <= 0x%06x "
+	             "((1049 - 4) * 16) -- the stale 10 fps exposure value was not re-clamped to "
+	             "the new, tighter VTS ceiling",
+	             got,
+	             max_30fps);
+}
+
+/*
  * ZTEST_SUITE before-hook (issue #2248 fix-up round 4): resets the state every test in this suite
  * implicitly assumes as its starting point -- both flip ctrls unset, the default {1, 15} frame
  * interval, and 640x480 SBGGR10P -- instead of relying on in-test cleanup at the END of whichever
@@ -2064,8 +2353,19 @@ static void ov5647_test_before(void *fixture)
 {
 	struct video_control hflip_off = { .id = VIDEO_CID_HFLIP, .val = 0 };
 	struct video_control vflip_off = { .id = VIDEO_CID_VFLIP, .val = 0 };
-	struct video_frmival frmival   = { .numerator = 1, .denominator = 15 };
-	struct video_format  fmt       = {
+	/* #2277: reset to the same AUTO/AUTO defaults ov5647_init_ctrls() seeds (VIDEO_EXPOSURE_AUTO,
+	 * autogain=1) -- without this, test_ae_writeback_exposure_auto_then_exposure_lands_in_
+	 * registers()'s own MANUAL/off writes (name-sorted to run before every test whose name
+	 * follows "ae_..." alphabetically) leaked into every later test's starting ctrl state, making
+	 * ov5647_set_stream(true)'s new AEC/AGC re-assert (below) write a DIFFERENT register sequence
+	 * depending on execution order -- exactly the ordering hazard this hook exists to close for
+	 * hflip/vflip/frmival/format already.
+	 */
+	struct video_control exposure_auto_auto = { .id  = VIDEO_CID_EXPOSURE_AUTO,
+		                                        .val = VIDEO_EXPOSURE_AUTO };
+	struct video_control autogain_on        = { .id = VIDEO_CID_AUTOGAIN, .val = 1 };
+	struct video_frmival frmival            = { .numerator = 1, .denominator = 15 };
+	struct video_format  fmt                = {
 		.type        = VIDEO_BUF_TYPE_OUTPUT,
 		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
 		.width       = 640,
@@ -2088,6 +2388,8 @@ static void ov5647_test_before(void *fixture)
 	zassert_ok(video_stream_stop(ov5647_dev(), VIDEO_BUF_TYPE_OUTPUT));
 	zassert_ok(video_set_ctrl(ov5647_dev(), &hflip_off));
 	zassert_ok(video_set_ctrl(ov5647_dev(), &vflip_off));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure_auto_auto));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &autogain_on));
 	zassert_ok(video_set_frmival(ov5647_dev(), &frmival));
 	zassert_ok(video_set_format(ov5647_dev(), &fmt));
 }
