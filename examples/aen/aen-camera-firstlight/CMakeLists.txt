@@ -22,7 +22,7 @@ elseif(BOARD MATCHES "^alp_e1m_aen803_m55_he")
 endif()
 
 # Opt-in external-trigger demo (issue #2287): IMX296's fast-trigger exposure
-# mode plus a GPIO pulse on carrier J3 Trig+ (see boards/trigger_gpio.overlay
+# mode plus a GPIO pulse on the sensor module's J3 Trig+ (see boards/trigger_gpio.overlay
 # for the pin chain and its own header comment). OFF by default -- a normal
 # firstlight run stays exactly the free-run capture it always was, on every
 # shield, not just IMX296's. Only meaningful with

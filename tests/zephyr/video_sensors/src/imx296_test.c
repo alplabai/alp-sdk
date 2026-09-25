@@ -350,7 +350,7 @@ ZTEST(imx296, test_stream_start_cancels_standby_then_starts_master_mode)
 	 * the master-mode clock generator while the analog block is still in standby. The
 	 * TRIGEN/LOWLAGTRG/SYNCSEL writes (issue #2287, see imx296.c's imx296_set_stream())
 	 * land first, before STANDBY, since "Mode Transitions of Global Shutter Operation"
-	 * (page 65) requires them to be set "via sensor standby". */
+	 * (page 66) requires them to be set "via sensor standby". */
 	zassert_equal(imx296_emul_log_count(emul), 5, "expected exactly 5 writes to start streaming");
 
 	zassert_ok(imx296_emul_log_get(emul, 0, &w));
@@ -393,6 +393,32 @@ ZTEST(imx296, test_trigger_mode_ctrl_rejects_out_of_range)
 	              "trigger-mode ctrl only has two valid values, 0 and 1");
 }
 
+ZTEST(imx296, test_trigger_mode_ctrl_rejects_while_streaming)
+{
+	/*
+	 * "Mode Transitions of Global Shutter Operation" (page 66): the TRIGEN/LOWLAGTRG switch
+	 * can only be made "via sensor standby" -- there is no standby to make it through while
+	 * already streaming, so imx296_set_ctrl() must reject with -EBUSY rather than silently
+	 * queuing the change for a later stop/start.
+	 */
+	struct video_control trigger_on = { .id = IMX296_CID_TRIGGER_MODE,
+		                            .val = IMX296_TRIGGER_MODE_EXTERNAL };
+	struct video_control readback   = { .id = IMX296_CID_TRIGGER_MODE, .val = -1 };
+
+	zassert_ok(video_stream_start(imx296_dev(), VIDEO_BUF_TYPE_OUTPUT));
+
+	zassert_equal(video_set_ctrl(imx296_dev(), &trigger_on),
+	              -EBUSY,
+	              "trigger-mode ctrl must reject a change while streaming");
+
+	zassert_ok(video_get_ctrl(imx296_dev(), &readback));
+	zassert_equal(readback.val,
+	              IMX296_TRIGGER_MODE_FREE_RUN,
+	              "a rejected set_ctrl must leave the control's cached value unchanged");
+
+	zassert_ok(video_stream_stop(imx296_dev(), VIDEO_BUF_TYPE_OUTPUT));
+}
+
 ZTEST(imx296, test_trigger_mode_writes_trigen_and_lowlagtrg_on_next_stream_start)
 {
 	/*
@@ -400,7 +426,7 @@ ZTEST(imx296, test_trigger_mode_writes_trigen_and_lowlagtrg_on_next_stream_start
 	 * (page 64): TRIGEN=1 (0x300B) + LOWLAGTRG=1 (0x30AE) select fast trigger mode. Setting
 	 * the ctrl alone (video_set_ctrl()) must NOT touch hardware yet -- imx296.c's
 	 * IMX296_CID_TRIGGER_MODE case is a deferred no-op, since the datasheet requires the
-	 * switch to happen "via sensor standby" (page 65), i.e. only from imx296_set_stream().
+	 * switch to happen "via sensor standby" (page 66), i.e. only from imx296_set_stream().
 	 * This also exercises "switching back": stopping and restarting with the ctrl reset to
 	 * free-run must restore TRIGEN=0/LOWLAGTRG=0.
 	 */

@@ -5,48 +5,92 @@
  * Opt-in overlay for the AEN_CAMERA_TRIGGER build mode (see CMakeLists.txt
  * -- only merged in when `-DAEN_CAMERA_TRIGGER=ON` is passed). Adds the GPIO
  * this app drives to pulse IMX296's XTRIG line, per issue #2287's bench
- * wiring: carrier J3 Trig+ -> Arduino D4 (EVK_PIN_CK_DIO4,
- * metadata/boards/e1m-evk.yaml) -> E1M pad M2 -> Alif pad P5_1
- * (metadata/e1m_modules/aen/from-alif.tsv: `M2 SPI0_MOSI SPI0_MOSI_B P5_1`).
+ * wiring: the sensor module's own J3 Trig+ header (on the INNO-MAKER
+ * CAM-IMX296RAW-TRIGGER module itself, separate from both the E1M-EVK
+ * carrier and the 15-pin CSI FFC that connects them) -> Arduino D4
+ * (EVK_PIN_CK_DIO4, metadata/boards/e1m-evk.yaml) -> E1M pad M2 -> Alif pad
+ * P5_1 (metadata/e1m_modules/aen/from-alif.tsv:
+ * `M2 SPI0_MOSI SPI0_MOSI_B P5_1`).
+ *
  * No existing DT alias/label names this pin -- EVK_PIN_CK_DIO4 is a
  * portable-GPIO-API pin id (include/alp/boards/alp_e1m_evk_routes.h), not a
  * devicetree label, and no shield/board file in this tree declares an
  * "arduino_header" nexus or per-pin label for it. Rather than hand-writing
  * the ~58-entry `alp,pin-array` alp_gpio_open() would need to reach index
- * EVK_PIN_CK_DIO4 (ALP_E1M_GPIO_COUNT + 5), this ad hoc node + raw
- * GPIO_DT_SPEC_GET() mirrors examples/aen/aen-dsi-display/src/main.c's
- * bl_gpios precedent: a board-specific signal the portable <alp/*> surface
- * has no concept of gets a direct DT property, not a fabricated pin id.
+ * EVK_PIN_CK_DIO4 (ALP_E1M_GPIO_COUNT + 5), this puts the phandle-array
+ * property directly on the special `/zephyr,user` node: gen_edt.py
+ * hard-codes exactly that one path (alongside "/cpus") in
+ * `infer_binding_for_paths`, so edtlib types a `*-gpios`/`pinctrl-N`
+ * property there from its raw DT form with no `compatible`/binding needed
+ * at all -- the officially-supported ad hoc-properties idiom, and simpler
+ * than carrying a one-off `alp,gpio-output.yaml` binding for a single pin
+ * (an earlier version of this overlay did exactly that; dropped after
+ * review). See examples/aen/aen-analog-validate's board overlay for the
+ * same reasoning written out for `io-channels` instead of `gpios`.
+ *
+ * PINMUX IS EXPLICIT, not left to the pad's reset-default alt function:
+ * `pinctrl_imx296_trigger` below selects `PIN_P5_1__GPIO` regardless of
+ * whatever from-alif.tsv's SPI0_MOSI_B default would otherwise leave it at.
+ * Unlike a real peripheral device, `/zephyr,user` has no init hook to apply
+ * this pinctrl state automatically -- main.c's trigger_arm() applies it at
+ * runtime with `pinctrl_apply_state()` before the GPIO is ever touched (see
+ * PINCTRL_DT_DEV_CONFIG_DECLARE's own doc comment in
+ * <zephyr/drivers/pinctrl.h> for this being the sanctioned pattern for
+ * exactly this "runtime pin control from an app" case).
+ *
+ * !!! ELECTRICAL POLARITY IS UNVERIFIED -- DO NOT WIRE J3 YET !!!
+ * The INNO-MAKER module's J3 Trig+/Trig- input circuit (opto-isolated?
+ * logic-level XTRIG pad? which voltage rail? current-limiting on the E1M
+ * side?) has NOT been checked against that module's own documentation --
+ * only the Sony IMX296 datasheet's SENSOR-SIDE XTRIG behaviour is cited
+ * anywhere in this change (see main.c). Driving P5_1 from the E1M SoC
+ * straight into an unknown input circuit risks the wrong voltage, the
+ * wrong polarity, or no current limiting at all. GPIO_ACTIVE_HIGH below is
+ * a PLACEHOLDER, not a confirmed fact, and is the ONE place to flip if/when
+ * the module's documentation (or a bench measurement) says otherwise --
+ * main.c's trigger_pulse() only ever asserts/deasserts the logical GPIO
+ * state, never hardcodes a physical level, so this DT flag is the single
+ * point of truth for idle-vs-pulse polarity. Confirm J3's input circuit
+ * from the module's own documentation before wiring anything to it.
  *
  * P5_1's default (POR) pad function is GPIO (alt-0 is GPIO on every pad on
  * this SoC -- see examples/peripheral-io/blink's board overlay comment for
  * the general rule) even though from-alif.tsv lists SPI0_MOSI_B as the
- * pad's assigned peripheral function; no &pinctrl group is needed to claim
- * it as GPIO, matching blink's P12_7 case. UNVERIFIED ON SILICON (issue
- * #2287 benches this later, with a GPIO trigger) -- this overlay has not
- * been flashed or scoped.
+ * pad's assigned peripheral function; the explicit pinmux group below makes
+ * that a stated fact of this build rather than an assumption about what the
+ * pad happens to reset to. UNVERIFIED ON SILICON (issue #2287 benches this
+ * later, with a GPIO trigger) -- this overlay has not been flashed or
+ * scoped, and PIN_P5_1__GPIO has not been confirmed to exist under that
+ * exact name in the vendored alif-ensemble-pinctrl.h (it follows the same
+ * `PIN_P<port>_<pin>__GPIO` convention as PIN_P12_7__GPIO /
+ * PIN_P12_5__GPIO, both used elsewhere in this tree).
  */
 
 #include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+
+&pinctrl {
+	pinctrl_imx296_trigger: pinctrl_imx296_trigger {
+		group0 {
+			pinmux = <PIN_P5_1__GPIO>;
+		};
+	};
+};
 
 &gpio5 {
 	status = "okay";
 };
 
 / {
-	/*
-	 * compatible = "alp,gpio-output" (zephyr/dts/bindings/gpio/
-	 * alp,gpio-output.yaml) -- required for edtlib to type `gpios` as a
-	 * phandle-array at all; see that binding's own comment.
-	 */
-	imx296_trigger: imx296-trigger {
-		compatible = "alp,gpio-output";
-		/* GPIO_ACTIVE_HIGH: the line idles high (matching XTRIG's
-		 * documented idle level in the Fast Trigger Mode timing
-		 * diagram, "Image Drawing of Global Shutter (Fast Trigger
-		 * Mode)", IMX296 datasheet page 64) and main.c pulses it LOW
-		 * to trigger -- "Fast trigger mode is the trigger mode that
-		 * starts exposure at fall of XTRIG immediately" (page 64). */
-		gpios = <&gpio5 1 GPIO_ACTIVE_HIGH>;
+	zephyr_user: zephyr,user {
+		pinctrl-0 = <&pinctrl_imx296_trigger>;
+		pinctrl-names = "default";
+
+		/*
+		 * !!! POLARITY UNVERIFIED, PLACEHOLDER -- see this file's header
+		 * comment. Flip GPIO_ACTIVE_HIGH <-> GPIO_ACTIVE_LOW here, and
+		 * nowhere else, once the module's J3 input circuit is confirmed.
+		 */
+		imx296-trigger-gpios = <&gpio5 1 GPIO_ACTIVE_HIGH>;
 	};
 };

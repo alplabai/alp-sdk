@@ -77,11 +77,35 @@ RESULT: capture ok
 `-DAEN_CAMERA_TRIGGER=ON` (issue #2287) puts IMX296 in its datasheet Fast
 Trigger Mode instead of free-run, and pulses a GPIO (Alif P5_1 / Arduino D4 /
 `EVK_PIN_CK_DIO4`, see `boards/trigger_gpio.overlay`) that must be wired to
-the carrier's J3 Trig+ header to capture and timestamp `TRIGGER_FRAME_COUNT`
-(3) frames instead of one free-run capture. Only meaningful with the IMX296
-shield; compiles clean (0 warnings) with any other shield, since
-`CONFIG_VIDEO_IMX296` gates the trigger code path too. **Not benched by this
-change** -- see `docs/camera-shields.md`'s IMX296 driver section.
+the **sensor module's own** J3 Trig+ header (on the INNO-MAKER module itself,
+not the E1M-EVK carrier) to capture, timestamp (pulse time vs. frame arrival
+time) and content-check `TRIGGER_FRAME_COUNT` (3) frames instead of one
+free-run capture. Only meaningful with the IMX296 shield; compiles clean (0
+warnings) with any other shield, since `CONFIG_VIDEO_IMX296` gates the
+trigger code path too. **Not benched by this change** -- see
+`docs/camera-shields.md`'s IMX296 driver section.
+
+> **HARDWARE CAUTION -- do not wire J3 yet.** This mode's electrical
+> polarity is unverified: the INNO-MAKER module's J3 Trig+/Trig- input
+> circuit (opto-isolated? logic-level? which voltage? current-limited on the
+> E1M side?) has not been checked against that module's own documentation.
+> `boards/trigger_gpio.overlay`'s `GPIO_ACTIVE_HIGH` flag on
+> `imx296-trigger-gpios` is a placeholder, not a confirmed fact, and is the
+> one place to flip if the module's documentation (or a bench measurement)
+> says the polarity is inverted. Confirm the module's own J3 documentation
+> before connecting anything to it.
+
+A `RESULT: capture ok` line alone does **not** prove the trigger actually
+worked -- it only means `alp_camera_capture()` returned a frame-shaped
+buffer before its timeout, which free-run capture on a mis-wired/unwired
+trigger line could also do if the sensor happens to still be streaming from
+a prior state. This mode's per-frame print instead reports the pulse
+timestamp against the frame's own arrival timestamp (a frame that arrives
+close to the pulse, not just at some arbitrary free-running interval, is
+better evidence) and a content check that flags two stuck-data signatures
+(every sample `0x3FF`, or every sample identical) -- still not proof of a
+real triggered image, only a cheaper way to rule out the most obvious
+failure modes before trusting the capture.
 
 ```bash
 ... -DSHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera" -DAEN_CAMERA_TRIGGER=ON

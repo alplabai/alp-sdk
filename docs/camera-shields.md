@@ -618,16 +618,28 @@ unchanged behaviour) that switches the sensor into the datasheet's Global
 Shutter **Fast Trigger Mode** (`TRIGEN` at `0x300B` + `LOWLAGTRG` at `0x30AE`,
 "Global Shutter (Fast Trigger Mode) Operation", page 64) -- the only one of
 the datasheet's two trigger sub-modes this hardware can reach, since
-Sequential Trigger Mode is "slave mode only" (page 61) and this sensor, like
+Sequential Trigger Mode is "slave mode only" (page 62) and this sensor, like
 every part on the RPi-style 15-pin CSI connector, has no XVS/XHS lines wired.
 The mode switch only takes effect on the next `video_stream_start()`, per
-"Mode Transitions of Global Shutter Operation" (page 65): "In case of Fast
-Trigger mode, the mode transition must be done via sensor standby." UNTESTED
-ON SILICON -- issue #2287 benches it later with a GPIO pulse on the carrier's
-opto-isolated J3 Trig+ header (separate from the 15-pin CSI FFC), routed to
-Arduino D4 / `EVK_PIN_CK_DIO4` (E1M pad M2, Alif P5_1); see
+"Mode Transitions of Global Shutter Operation" (page 66): "In case of Fast
+Trigger mode, the mode transition must be done via sensor standby." Setting
+the control while already streaming is rejected `-EBUSY` rather than
+silently deferred. UNTESTED ON SILICON -- issue #2287 benches it later with
+a GPIO pulse on the sensor module's own opto-isolated J3 Trig+ header (on
+the INNO-MAKER camera module itself, separate from both the E1M-EVK carrier
+and the 15-pin CSI FFC that connects them), routed to Arduino D4 /
+`EVK_PIN_CK_DIO4` (E1M pad M2, Alif P5_1); see
 `examples/aen/aen-camera-firstlight`'s `AEN_CAMERA_TRIGGER` CMake option and
 `boards/trigger_gpio.overlay` for the (also unbenched) bench-app wiring.
+
+**HARDWARE CAUTION, do not wire J3 yet:** the electrical polarity of this
+trigger path is unverified -- the INNO-MAKER module's J3 input circuit
+(opto-isolation? logic level? which voltage rail? current limiting on the
+E1M side?) has not been checked against that module's own documentation,
+only the Sony datasheet's SENSOR-side XTRIG behaviour is cited anywhere in
+this change. `boards/trigger_gpio.overlay`'s `GPIO_ACTIVE_HIGH` flag on
+`imx296-trigger-gpios` is a placeholder pending that check, and is the
+single point to flip if the real polarity turns out to be inverted.
 
 No portable `chips/imx296/` chip-ID stub exists (unlike OV9281's
 `chips/ov9281/ov9281.c`) -- streaming lives entirely in this Zephyr driver,
@@ -684,9 +696,10 @@ addition) `IMX296_CID_TRIGGER_MODE`: the free-run default's `TRIGEN`/
 `LOWLAGTRG`/`SYNCSEL` writes land unchanged on `video_stream_start()`, setting
 the ctrl writes nothing to the emulator until the NEXT stream start (proving
 the deferred-write contract "Mode Transitions ... must be done via sensor
-standby" requires), fast-trigger mode's `TRIGEN`/`LOWLAGTRG` values land on
-that next start, and switching back to free-run and restarting restores both
-registers to 0. Since this driver's CSI-2 streaming is BENCH-UNVERIFIED (see
+standby" requires), setting the ctrl while already streaming is rejected
+`-EBUSY`, fast-trigger mode's `TRIGEN`/`LOWLAGTRG` values land on that next
+start, and switching back to free-run and restarting restores both registers
+to 0. Since this driver's CSI-2 streaming is BENCH-UNVERIFIED (see
 the driver section above), this test suite is the only executable proof its
 register-level logic behaves as written; it does not substitute for a real
 capture.
@@ -706,6 +719,6 @@ what has and has not run.
 The example also has an opt-in `-DAEN_CAMERA_TRIGGER=ON` CMake build mode
 (issue #2287): arms `IMX296_CID_TRIGGER_MODE`, then pulses a GPIO
 (`boards/trigger_gpio.overlay`, Alif P5_1 / EVK_PIN_CK_DIO4) to capture and
-timestamp a few frames off the carrier's J3 Trig+ header, instead of one
+timestamp a few frames off the sensor module's J3 Trig+ header, instead of one
 free-run capture. Compiles clean with 0 warnings against both variants; it
 has not been benched -- see the IMX296 driver section above.

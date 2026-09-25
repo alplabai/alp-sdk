@@ -59,9 +59,12 @@
 /*
  * Opt-in bench mode (issue #2287, `-DAEN_CAMERA_TRIGGER=ON`, see
  * CMakeLists.txt + boards/trigger_gpio.overlay): drives IMX296's fast
- * trigger mode and pulses the carrier's J3 Trig+ line instead of free-run
+ * trigger mode and pulses the sensor module's own J3 Trig+ line (on the
+ * INNO-MAKER module itself, not the E1M-EVK carrier) instead of free-run
  * capture. UNVERIFIED ON SILICON -- not benched by this change; issue #2287
- * benches it later.
+ * benches it later. **Electrical polarity is UNVERIFIED too -- see
+ * boards/trigger_gpio.overlay's header comment. Do not wire J3 until that
+ * module's input circuit is confirmed from its own documentation.**
  *
  * This is the one place in this file that steps outside the portable
  * <alp/camera.h> surface: neither <alp/camera.h> nor src/backends/camera/
@@ -71,13 +74,13 @@
  * convention instead of a new portable control). Reaching the sensor's
  * Zephyr device directly, by the same DT alias src/backends/camera/
  * zephyr_video.c itself resolves (`alp-camera0`), is the smallest way to
- * reach a control the portable API does not carry -- see this file's
- * header comment for the portable-<alp/camera.h>-trigger-API shape this
- * change's report proposes instead of inventing one here.
+ * reach a control the portable API does not carry, without adding one to
+ * <alp/camera.h> on the strength of a single sensor's need.
  */
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/pinctrl.h>
 #include <zephyr/drivers/video-controls.h>
 #include <zephyr/drivers/video.h>
 
@@ -89,27 +92,49 @@
 #define TRIGGER_CID           (VIDEO_CID_PRIVATE_BASE + 0x01)
 #define TRIGGER_MODE_EXTERNAL 1
 
-#define TRIGGER_GPIO_NODE    DT_NODELABEL(imx296_trigger)
-#define TRIGGER_PULSE_LOW_MS 5u
-#define TRIGGER_FRAME_COUNT  3u
+/* boards/trigger_gpio.overlay puts the pin + its pinctrl state on the
+ * special `/zephyr,user` node (see that overlay's header comment for why:
+ * no binding/compatible needed for edtlib to type its phandle-array
+ * properties, unlike any other devicetree path). */
+#define TRIGGER_GPIO_NODE   DT_PATH(zephyr_user)
+#define TRIGGER_PULSE_MS    5u
+#define TRIGGER_FRAME_COUNT 3u
 
-static const struct gpio_dt_spec trigger_gpio = GPIO_DT_SPEC_GET(TRIGGER_GPIO_NODE, gpios);
+static const struct gpio_dt_spec trigger_gpio =
+    GPIO_DT_SPEC_GET(TRIGGER_GPIO_NODE, imx296_trigger_gpios);
+
+/* Defines the pin control config for TRIGGER_GPIO_NODE's `pinctrl-0`
+ * (PIN_P5_1__GPIO, boards/trigger_gpio.overlay) -- `/zephyr,user` is not a
+ * real device with an init hook to apply it automatically, so trigger_arm()
+ * applies it explicitly below; see PINCTRL_DT_DEV_CONFIG_DECLARE's own doc
+ * comment in <zephyr/drivers/pinctrl.h> for this being the intended use of
+ * runtime pin control from an app rather than a device driver. */
+PINCTRL_DT_DEFINE(TRIGGER_GPIO_NODE);
 
 /* Sets fast-trigger mode on the sensor (must land before alp_camera_start(),
- * see imx296.c's IMX296_CID_TRIGGER_MODE comment) and readies the XTRIG
- * pulse line, idling high. */
+ * see imx296.c's IMX296_CID_TRIGGER_MODE comment), muxes P5_1 to GPIO
+ * explicitly (not relying on its reset-default alt function), and readies
+ * the XTRIG pulse line in its logical-inactive (idle) state -- see
+ * boards/trigger_gpio.overlay for why GPIO_ACTIVE_HIGH/_LOW there, not a
+ * hardcoded level here, is the single polarity flip point. */
 static int trigger_arm(void)
 {
 	const struct device *sensor = DEVICE_DT_GET(DT_ALIAS(alp_camera0));
 	struct video_control ctrl   = { .id = TRIGGER_CID, .val = TRIGGER_MODE_EXTERNAL };
 	int                  ret;
 
+	ret = pinctrl_apply_state(PINCTRL_DT_DEV_CONFIG_GET(TRIGGER_GPIO_NODE), PINCTRL_STATE_DEFAULT);
+	if (ret < 0) {
+		printk("[camfl]   trigger GPIO pinctrl apply failed: %d\n", ret);
+		return ret;
+	}
+
 	if (!gpio_is_ready_dt(&trigger_gpio)) {
 		printk("[camfl]   trigger GPIO not ready\n");
 		return -ENODEV;
 	}
 
-	ret = gpio_pin_configure_dt(&trigger_gpio, GPIO_OUTPUT_ACTIVE);
+	ret = gpio_pin_configure_dt(&trigger_gpio, GPIO_OUTPUT_INACTIVE);
 	if (ret < 0) {
 		printk("[camfl]   trigger GPIO configure failed: %d\n", ret);
 		return ret;
@@ -124,19 +149,69 @@ static int trigger_arm(void)
 	return 0;
 }
 
-/* One XTRIG pulse: "Fast trigger mode ... starts exposure at fall of XTRIG
- * immediately" (IMX296 datasheet page 64) -- drive the (idle-high) line low
- * for TRIGGER_PULSE_LOW_MS, then release it. */
-static void trigger_pulse(void)
+/*
+ * One XTRIG pulse: "Fast trigger mode ... starts exposure at fall of XTRIG
+ * immediately" (IMX296 datasheet page 64) -- assert the line (logical
+ * active, whatever GPIO_ACTIVE_HIGH/_LOW in the overlay makes that
+ * physically) for TRIGGER_PULSE_MS, then deassert it back to idle. Returns
+ * the k_uptime_get() timestamp (us) the pulse was asserted at, so the
+ * caller can compare it against the frame's own arrival timestamp.
+ */
+static uint64_t trigger_pulse(void)
 {
-	gpio_pin_set_dt(&trigger_gpio, 0);
-	k_msleep(TRIGGER_PULSE_LOW_MS);
+	uint64_t pulse_us = (uint64_t)k_uptime_get() * 1000u;
+
 	gpio_pin_set_dt(&trigger_gpio, 1);
+	k_msleep(TRIGGER_PULSE_MS);
+	gpio_pin_set_dt(&trigger_gpio, 0);
+
+	return pulse_us;
 }
 
-/* Pulses XTRIG TRIGGER_FRAME_COUNT times, capturing and timestamping one
- * frame per pulse. Returns true iff every frame arrived before its own
- * CAM_CAPTURE_TIMEOUT_MS window. */
+/*
+ * Weak, best-effort sanity check on a captured frame's content -- NOT proof
+ * of a real triggered image (see README.md: "capture ok" alone doesn't
+ * prove triggering worked, only that alp_camera_capture() returned a
+ * frame-shaped buffer before its timeout). Flags the two cheapest failure
+ * signatures to rule out: every RAW10 sample pinned at the 10-bit maximum
+ * (0x3FF, a saturated/stuck-high bus), and every sample identical to the
+ * first (stuck-at-some-other-value, or a frame that never moved at all).
+ * Mirrors the histogram in the free-run path below, at pulse-loop scale.
+ */
+static const char *trigger_frame_content_check(const alp_camera_frame_t *frame)
+{
+	const uint8_t *bytes     = (const uint8_t *)frame->data;
+	size_t         n_samples = frame->size / 2u;
+	bool           all_3ff   = true;
+	bool           all_first = true;
+	uint16_t       first;
+
+	if (n_samples == 0) {
+		return "empty frame";
+	}
+
+	first = (uint16_t)bytes[0] | ((uint16_t)bytes[1] << 8);
+
+	for (size_t i = 0; i < n_samples; i++) {
+		uint16_t sample = (uint16_t)bytes[2u * i] | ((uint16_t)bytes[2u * i + 1u] << 8);
+
+		all_3ff   = all_3ff && (sample == 0x3FFu);
+		all_first = all_first && (sample == first);
+		if (!all_3ff && !all_first) {
+			return "varies (not proof of a real triggered image, but not stuck)";
+		}
+	}
+
+	if (all_3ff) {
+		return "SUSPECT: every sample is 0x3FF (saturated / stuck-high bus)";
+	}
+
+	return "SUSPECT: every sample is identical (stuck data, or nothing moved)";
+}
+
+/* Pulses XTRIG TRIGGER_FRAME_COUNT times, capturing, timestamping (pulse vs.
+ * frame arrival) and content-checking one frame per pulse. Returns true iff
+ * every frame arrived before its own CAM_CAPTURE_TIMEOUT_MS window. */
 static bool trigger_capture_loop(alp_camera_t *cam)
 {
 	bool all_ok = true;
@@ -144,8 +219,7 @@ static bool trigger_capture_loop(alp_camera_t *cam)
 	for (unsigned i = 0; i < TRIGGER_FRAME_COUNT; i++) {
 		alp_camera_frame_t frame;
 		alp_status_t       s;
-
-		trigger_pulse();
+		uint64_t           pulse_us = trigger_pulse();
 
 		s = alp_camera_capture(cam, &frame, CAM_CAPTURE_TIMEOUT_MS);
 		if (s != ALP_OK) {
@@ -154,10 +228,14 @@ static bool trigger_capture_loop(alp_camera_t *cam)
 			continue;
 		}
 
-		printk("[camfl]   trigger frame %u: %u bytes @ %llu us\n",
+		printk("[camfl]   trigger frame %u: pulse @ %llu us, frame @ %llu us (delta %lld us), "
+		       "%u bytes\n",
 		       i,
-		       (unsigned)frame.size,
-		       (unsigned long long)frame.timestamp_us);
+		       (unsigned long long)pulse_us,
+		       (unsigned long long)frame.timestamp_us,
+		       (long long)(frame.timestamp_us - pulse_us),
+		       (unsigned)frame.size);
+		printk("[camfl]     content check: %s\n", trigger_frame_content_check(&frame));
 		alp_camera_release(cam, &frame);
 	}
 
