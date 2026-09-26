@@ -171,16 +171,47 @@ def test_vela_adapter_compile_raises_when_output_file_missing(tmp_path, monkeypa
 
 
 def test_parse_vela_summary_extracts_sram_and_arena(tmp_path):
+    # vela's sram_memory_used column is already KiB (real vela 5.x row, arena
+    # only -- see test_parse_vela_summary_real_vela5x_row below).
     (tmp_path / "m_summary_internal.csv").write_text(
-        "network,sram_memory_used,arena_cache_size\n"
-        "m,262144,131072\n", encoding="utf-8")
+        "network,sram_memory_used,on_chip_flash_memory_used\n"
+        "m,72.0,235.265625\n", encoding="utf-8")
     arena, sram_kib = _parse_vela_summary(tmp_path, "m")
-    assert sram_kib == 256        # 262144 bytes -> 256 KiB
-    assert arena == 131072
+    assert sram_kib == 72
+    assert arena == 73728          # 72 KiB * 1024, ceil-rounded
+
+
+def test_parse_vela_summary_rounds_kib_up_never_down(tmp_path):
+    # 0.03125 KiB (measured Sram_Only arena on tiny_int8.tflite) must NOT
+    # floor/truncate to 0 -- that would pass the on-device fit gate for free.
+    (tmp_path / "m_summary_internal.csv").write_text(
+        "network,sram_memory_used,on_chip_flash_memory_used\n"
+        "m,0.03125,0.234375\n", encoding="utf-8")
+    arena, sram_kib = _parse_vela_summary(tmp_path, "m")
+    assert sram_kib == 1
+
+
+def test_parse_vela_summary_never_counts_on_chip_flash(tmp_path):
+    # The const/weights region is carried in the model blob (sized by
+    # blob_len), never summed into req_sram_kib -- regardless of its size.
+    (tmp_path / "m_summary_internal.csv").write_text(
+        "network,sram_memory_used,on_chip_flash_memory_used\n"
+        "m,72.0,999999.0\n", encoding="utf-8")
+    _, sram_kib = _parse_vela_summary(tmp_path, "m")
+    assert sram_kib == 72
 
 
 def test_parse_vela_summary_absent_returns_zeros(tmp_path):
     assert _parse_vela_summary(tmp_path, "missing") == (0, 0)
+
+
+def test_parse_vela_summary_full_cpu_fallback_is_zero_zero(tmp_path):
+    # A full CPU fallback (no operators placed on the NPU) reports 0 SRAM;
+    # (0, 0) is the correct, consistent-with-tan reading, not a parse failure.
+    (tmp_path / "m_summary_internal.csv").write_text(
+        "network,sram_memory_used,on_chip_flash_memory_used\n"
+        "m,0.0,0.0\n", encoding="utf-8")
+    assert _parse_vela_summary(tmp_path, "m") == (0, 0)
 
 
 @pytest.mark.skipif(shutil.which("vela") is None, reason="vela (ethos-u-vela) not installed")

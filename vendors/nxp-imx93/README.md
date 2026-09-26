@@ -138,6 +138,16 @@ embedded in the Vela output is variant-specific.  Mismatch surfaces
 as a runtime ALP_ERR_IO from `alp_inference_invoke` once the v0.4
 i.MX 93 bring-up wires the NPU.
 
+**E1M-NX9101 DRAM capacity -- TBD, deliberately (issue #2312 item 2).**
+`metadata/e1m_modules/E1M-NX9101.yaml`'s `memory.dram_mbit` stays `TBD`
+pending the authoritative hardware config (the maintainer's own
+decision to make, not one this pipeline should guess at). Until that
+lands, the `--memory-mode Shared_Sram` invocation above relies on
+vela's own DEFAULT `--system-config` (no `imx93.json`
+`npu_toolchain.vela.system_config` is set) -- `imx93.json` names no
+vendor `System_Config` today, so nothing is invented here; see the
+provenance note above for why `Shared_Sram` itself is already pinned.
+
 ### A55-side path (Linux / Yocto)
 
 In NXP's own shipped software stack, Linux on the Cortex-A55 does not

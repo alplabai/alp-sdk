@@ -5,9 +5,18 @@ Wraps the `vela` CLI from `ethos-u-vela` (the `model-compile` optional
 dependency). is_available() is True when `vela` is on PATH; compile() shells out
 for the given accelerator-config and reads back `<stem>_vela.tflite`. The
 arena/peak-SRAM footprint is parsed best-effort from vela's summary CSV (column
-names drift across vela versions, so matching is tolerant; 0 when unavailable)."""
+names drift across vela versions, so matching is tolerant; 0 when unavailable).
+
+req_sram_kib is the tensor ARENA only (vela's `sram_memory_used` column),
+never the const/weights region (`on_chip_flash_memory_used`) -- see
+_parse_vela_summary. The const region is carried in the model blob itself and
+sized by the integrator from the blob's own byte length (`blob_len`); it is
+never summed into req_sram_kib. This mirrors tan-cli's `_footprint()`
+(tan-cli#1011, `python/tan/model/adapters/ethos_u.py`) and the SRAM-port
+pinning in `src/backends/inference/ethos_u_aen.cpp`."""
 from __future__ import annotations
 import csv
+import math
 import os
 import shutil
 import subprocess
@@ -27,8 +36,18 @@ def _vela_version() -> str:
 
 
 def _parse_vela_summary(out_dir: Path, stem: str) -> tuple[int, int]:
-    """Best-effort (arena_bytes, peak_sram_kib) from vela's <stem>_summary_*.csv.
-    Returns (0, 0) when the summary is missing or unparseable."""
+    """Best-effort (arena_bytes, req_sram_kib) from vela's <stem>_summary_*.csv.
+
+    vela's `sram_memory_used` column is ALREADY in KiB (not bytes, despite
+    looking byte-scale at a glance -- e.g. `72.0`); this is the tensor ARENA
+    only. req_sram_kib is rounded UP (ceil, never floor/truncate): the
+    device-side fit gate (`src/backends/inference/alp_model_select.c`) must
+    never under-report a model's requirement. arena_bytes mirrors it in bytes.
+    on_chip_flash_memory_used (the const/weights region) is deliberately never
+    read here -- it is carried in the model blob, sized by blob_len.
+
+    Returns (0, 0) when the summary is missing or unparseable, or when vela
+    reported no SRAM at all (a full CPU fallback)."""
     matches = sorted(out_dir.glob(f"{stem}_summary_*.csv"))
     if not matches:
         return 0, 0
@@ -47,9 +66,10 @@ def _parse_vela_summary(out_dir: Path, stem: str) -> tuple[int, int]:
                     continue
         return 0.0
 
-    sram_bytes = _num(lambda k: "sram" in k and "used" in k)
-    arena = _num(lambda k: "arena" in k) or sram_bytes
-    return int(arena), int(sram_bytes // 1024)
+    sram_kib = _num(lambda k: "sram" in k and "used" in k)
+    if sram_kib <= 0:
+        return 0, 0
+    return round(sram_kib * 1024), math.ceil(sram_kib)
 
 
 class VelaAdapter(CompilerAdapter):
