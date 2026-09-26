@@ -43,10 +43,22 @@ arrives). Build a short adapter that crosses camera-connector pins 2<->3,
 5<->6 and 8<->9 (every other pin stays straight); match lane lengths given
 the 800 Mbit/s/lane rate. See ``docs/camera-shields.md``.
 
+Compatible sensor shields
+*************************
+
+Three in-tree sensor shields carry this connector's label contract (see
+``docs/camera-shields.md`` for their modes, controls and bench status):
+
+- ``innomaker_cam_ov9281`` -- InnoMaker CAM-OV9281 (OV9281, 2 data lanes)
+- ``raspberry_pi_camera_module_1`` -- RPi Camera Module 1 / InnoMaker
+  CAM-OV5647 (OV5647, 2 data lanes)
+- ``raspberry_pi_global_shutter_camera`` -- INNO-MAKER CAM-IMX296RAW-TRIGGER
+  (IMX296, 1 data lane)
+
 Programming
 ***********
 
 Set ``-DSHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"`` (carrier shield
 first, camera shield second). Any sensor shield that follows the same
 label contract works in place of ``innomaker_cam_ov9281``, e.g. upstream's
-``raspberry_pi_camera_module_2``.
+``raspberry_pi_camera_module_2`` or the other two shields listed above.
