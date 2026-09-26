@@ -31,7 +31,7 @@ import subprocess
 import tarfile
 from pathlib import Path
 
-from . import CompilerAdapter, Blob
+from . import CompilerAdapter, Blob, TargetSpec
 
 # The TVM/MERA build runs quantization + DRP-AI translation; minutes for a real
 # model, bounded so CI (when it ever runs) can't hang.
@@ -142,7 +142,7 @@ class DrpaiAdapter(CompilerAdapter):
         return src_format == "onnx"          # DRP-AI TVM ingests ONNX
 
     def compile(self, source: Path, *, accel_config: str, out_dir: Path,
-                opts: dict | None = None) -> Blob:
+                opts: dict | None = None, target: TargetSpec | None = None) -> Blob:
         tvm_home = _tvm_home()
         if tvm_home is None:
             raise RuntimeError(

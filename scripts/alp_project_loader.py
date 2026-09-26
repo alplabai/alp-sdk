@@ -669,10 +669,21 @@ def som_unpopulated_capabilities(sku_preset: dict[str, Any]) -> list[str]:
 
 @dataclass(frozen=True)
 class TargetSpec:
-    """One `.alpmodel` compile target: backend + owning silicon + vela accel-config."""
+    """One `.alpmodel` compile target: backend + owning silicon + vela accel-config.
+
+    The three `vela_*` fields are the SoC spec's `npu_toolchain.vela` block
+    (metadata/schemas/soc-spec-v1.schema.json), resolved HERE from the open
+    SoC JSON and threaded to the ethos_u compiler adapter -- never re-read
+    from metadata/ inside the adapter, so a fact resolved once cannot
+    disagree with itself between the target and the artifact it produced
+    (mirrors tan-cli's `TargetSpec.vela_memory_mode`). All three are "" / None
+    for a non-ethos_u target."""
     backend: str            # cpu | ethos_u | drpai | deepx_dxm1
     silicon_ref: str        # SoC ref e.g. "alif:ensemble:e7" | "deepx:dx:m1" | "*"
     accel_config: str       # vela accel-config e.g. "ethos-u55-256"; "" when N/A
+    vela_memory_mode: str = ""              # vela --memory-mode, e.g. "Sram_Only"; "" when unknown
+    vela_system_config: str | None = None   # vela --system-config name; None when unnamed
+    vela_vendor_config_filename: str | None = None  # basename only, e.g. "ensemble_vela.ini"
 
 
 def npu_backend(npu_type: str, subtype: str) -> str | None:
@@ -715,6 +726,7 @@ def accel_config(npu: dict, backend: str) -> str:
 
 def _soc_targets(soc: dict, silicon_ref: str) -> list[TargetSpec]:
     """One TargetSpec per mappable NPU in a SoC's npus[] (deduped by the caller)."""
+    vela = soc.get("npu_toolchain", {}).get("vela", {})
     out: list[TargetSpec] = []
     for npu in soc.get("npus", []):
         npu_type = npu.get("type", "")
@@ -722,7 +734,14 @@ def _soc_targets(soc: dict, silicon_ref: str) -> list[TargetSpec]:
         if backend is None:
             continue
         accel = accel_config(npu, backend)
-        out.append(TargetSpec(backend=backend, silicon_ref=silicon_ref, accel_config=accel))
+        kwargs = {}
+        if backend == "ethos_u":
+            kwargs = dict(
+                vela_memory_mode=vela.get("memory_mode", ""),
+                vela_system_config=vela.get("system_config"),
+                vela_vendor_config_filename=vela.get("vendor_config_filename"),
+            )
+        out.append(TargetSpec(backend=backend, silicon_ref=silicon_ref, accel_config=accel, **kwargs))
     return out
 
 

@@ -10,8 +10,19 @@ from alp_model.adapters.drpai import DrpaiAdapter
 from alp_model.adapters.deepx import DeepxAdapter
 from alp_model.adapters.ethos_u import VelaAdapter, _parse_vela_summary
 from alp_model.adapters.executorch import ExecutorchAdapter
+from alp_project_loader import TargetSpec
 
 _ROOT = Path(__file__).resolve().parents[2]
+
+#: The E1M-AEN801 (Alif Ensemble E8)'s real npu_toolchain.vela profile
+#: (metadata/socs/alif/ensemble/e8.json) -- issue #2312: a `TargetSpec` with
+#: no vela profile at all made vela fall back to its DRAM-backed built-in
+#: default and report zero SRAM for a model that DID place operators on the
+#: NPU, which is now a refusal (`_refuse_zero_sram_footprint`), not a silent
+#: pass. Real compiles below thread this so they exercise the fixed path.
+_E8_TARGET = TargetSpec(backend="ethos_u", silicon_ref="alif:ensemble:e8", accel_config="",
+                        vela_memory_mode="Sram_Only", vela_system_config=None,
+                        vela_vendor_config_filename="ensemble_vela.ini")
 
 
 def test_onnx_is_an_accepted_blob_format():
@@ -178,7 +189,7 @@ def test_parse_vela_summary_extracts_sram_and_arena(tmp_path):
         "m,72.0,235.265625\n", encoding="utf-8")
     arena, sram_kib = _parse_vela_summary(tmp_path, "m")
     assert sram_kib == 72
-    assert arena == 73728          # 72 KiB * 1024, ceil-rounded
+    assert arena == 73728          # 72 KiB * 1024, exact (arena_bytes uses round(), not ceil())
 
 
 def test_parse_vela_summary_rounds_kib_up_never_down(tmp_path):
@@ -218,7 +229,8 @@ def test_parse_vela_summary_full_cpu_fallback_is_zero_zero(tmp_path):
 def test_vela_real_compile_of_tiny_fixture(tmp_path):
     src = tmp_path / "tiny.tflite"
     shutil.copy(_ROOT / "tests/fixtures/models/tiny_int8.tflite", src)
-    blob = VelaAdapter().compile(src, accel_config="ethos-u55-128", out_dir=tmp_path)
+    blob = VelaAdapter().compile(src, accel_config="ethos-u55-128", out_dir=tmp_path,
+                                 target=_E8_TARGET)
     assert blob.format == "vela_tflite"
     assert blob.payload[4:8] == b"TFL3"        # vela emits a .tflite flatbuffer
     assert blob.compiler_version.startswith("vela")
@@ -227,7 +239,10 @@ def test_vela_real_compile_of_tiny_fixture(tmp_path):
 @pytest.mark.skipif(shutil.which("vela") is None, reason="vela (ethos-u-vela) not installed")
 @pytest.mark.parametrize("accel_config", ["ethos-u85-256", "ethos-u55-256", "ethos-u55-128"])
 def test_vela_real_compile_for_e8_accel_configs(tmp_path, accel_config):
-    """Compile the committed fixture for each E1M-AEN801 (E8) accel config.
+    """Compile the committed fixture for each E1M-AEN801 (E8) accel config,
+    threading the E8's real vela profile (issue #2312 -- the U85 config in
+    particular places operators on the NPU and needs `--memory-mode
+    Sram_Only` or its footprint is refused, not silently zeroed).
 
     Proves the shipped Vela accepts every metadata-derived config string for
     the arriving part -- including the E8-only ``ethos-u85-256`` generative NPU
@@ -237,10 +252,128 @@ def test_vela_real_compile_for_e8_accel_configs(tmp_path, accel_config):
     """
     src = tmp_path / "tiny.tflite"
     shutil.copy(_ROOT / "tests/fixtures/models/tiny_int8.tflite", src)
-    blob = VelaAdapter().compile(src, accel_config=accel_config, out_dir=tmp_path)
+    blob = VelaAdapter().compile(src, accel_config=accel_config, out_dir=tmp_path,
+                                 target=_E8_TARGET)
     assert blob.format == "vela_tflite"
     assert blob.payload[4:8] == b"TFL3"
     assert blob.compiler_version.startswith("vela")
+
+
+# --- issue #2312: the memory profile actually reaches vela's command line,
+# and a zero-SRAM-with-NPU-ops footprint is refused, not shipped as a zero
+# ("arena-only sram kib" -- the real bug: no --memory-mode/--system-config
+# meant vela's DRAM-backed built-in default reported sram_memory_used=0.0
+# for a model that DID place operators on the NPU, and that zero passed the
+# on-device fit gate against any arena). ---------------------------------
+
+@pytest.mark.skipif(shutil.which("vela") is None, reason="vela (ethos-u-vela) not installed")
+def test_vela_real_compile_with_alif_profile_reports_a_real_sram_footprint(tmp_path):
+    src = tmp_path / "tiny.tflite"
+    shutil.copy(_ROOT / "tests/fixtures/models/tiny_int8.tflite", src)
+    blob = VelaAdapter().compile(src, accel_config="ethos-u85-256", out_dir=tmp_path,
+                                 target=_E8_TARGET)
+    assert blob.req_sram_kib >= 1
+
+
+def test_vela_compile_passes_memory_mode_for_an_alif_target(tmp_path, monkeypatch):
+    src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
+    seen = {}
+
+    def fake_run(cmd, capture_output, text, encoding, env, timeout):
+        seen["cmd"] = cmd
+        (tmp_path / "m_vela.tflite").write_bytes(b"VELA-OUT")
+        class _R: returncode = 0; stdout = ""; stderr = ""
+        return _R()
+
+    monkeypatch.setattr("alp_model.adapters.ethos_u.subprocess.run", fake_run)
+    VelaAdapter().compile(src, accel_config="ethos-u85-256", out_dir=tmp_path, target=_E8_TARGET)
+    assert "--memory-mode" in seen["cmd"] and "Sram_Only" in seen["cmd"]
+    # No vendor .ini on this host (ALP_VELA_CONFIG unset) -- the E8's
+    # system_config is unnamed anyway, but even a named one must never reach
+    # vela without a --config alongside it (a hard rc=1).
+    assert "--system-config" not in seen["cmd"] and "--config" not in seen["cmd"]
+
+
+def test_vela_compile_withholds_a_named_system_config_with_no_vendor_ini(tmp_path, monkeypatch):
+    # A profile that DOES name a system_config but has no vendor .ini on this
+    # host must still withhold --system-config -- naming a vendor-only
+    # section with no --config is vela's own hard rc=1.
+    src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
+    seen = {}
+    named_target = TargetSpec(backend="ethos_u", silicon_ref="alif:ensemble:e8", accel_config="",
+                              vela_memory_mode="Sram_Only", vela_system_config="Ethos_U85_SRAM_Only",
+                              vela_vendor_config_filename="ensemble_vela.ini")
+
+    def fake_run(cmd, capture_output, text, encoding, env, timeout):
+        seen["cmd"] = cmd
+        (tmp_path / "m_vela.tflite").write_bytes(b"VELA-OUT")
+        class _R: returncode = 0; stdout = ""; stderr = ""
+        return _R()
+
+    monkeypatch.setattr("alp_model.adapters.ethos_u.subprocess.run", fake_run)
+    monkeypatch.delenv("ALP_VELA_CONFIG", raising=False)
+    VelaAdapter().compile(src, accel_config="ethos-u85-256", out_dir=tmp_path, target=named_target)
+    assert "--system-config" not in seen["cmd"] and "--config" not in seen["cmd"]
+
+
+def test_vela_compile_passes_system_config_when_a_vendor_ini_is_supplied(tmp_path, monkeypatch):
+    ini = tmp_path / "ensemble_vela.ini"; ini.write_text("[Memory_Mode.Sram_Only]\n", encoding="utf-8")
+    src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
+    seen = {}
+    named_target = TargetSpec(backend="ethos_u", silicon_ref="alif:ensemble:e8", accel_config="",
+                              vela_memory_mode="Sram_Only", vela_system_config="Ethos_U85_SRAM_Only",
+                              vela_vendor_config_filename="ensemble_vela.ini")
+
+    def fake_run(cmd, capture_output, text, encoding, env, timeout):
+        seen["cmd"] = cmd
+        (tmp_path / "m_vela.tflite").write_bytes(b"VELA-OUT")
+        class _R: returncode = 0; stdout = ""; stderr = ""
+        return _R()
+
+    monkeypatch.setattr("alp_model.adapters.ethos_u.subprocess.run", fake_run)
+    monkeypatch.setenv("ALP_VELA_CONFIG", str(ini))
+    VelaAdapter().compile(src, accel_config="ethos-u85-256", out_dir=tmp_path, target=named_target)
+    assert seen["cmd"][seen["cmd"].index("--config") + 1] == str(ini)
+    assert seen["cmd"][seen["cmd"].index("--system-config") + 1] == "Ethos_U85_SRAM_Only"
+
+
+def test_vela_compile_refuses_a_zero_sram_footprint_when_npu_placed_ops(tmp_path, monkeypatch):
+    src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
+
+    def fake_run(cmd, capture_output, text, encoding, env, timeout):
+        (tmp_path / "m_vela.tflite").write_bytes(b"VELA-OUT")
+        (tmp_path / "m_summary_internal.csv").write_text(
+            "network,sram_memory_used,dram_memory_used\nm,0.0,5.359375\n", encoding="utf-8")
+        class _R:
+            returncode = 0
+            stdout = "NPU operators = 6 (40.0%)\nCPU operators = 9 (60.0%)\n"
+            stderr = ""
+        return _R()
+
+    monkeypatch.setattr("alp_model.adapters.ethos_u.subprocess.run", fake_run)
+    with pytest.raises(RuntimeError, match="placed 6 operator"):
+        VelaAdapter().compile(src, accel_config="ethos-u85-256", out_dir=tmp_path)
+
+
+def test_vela_compile_keeps_the_zero_zero_full_cpu_fallback(tmp_path, monkeypatch):
+    # No operator placed on the NPU at all -- zero SRAM is the CORRECT
+    # reading (a full CPU fallback), never a refusal.
+    src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
+
+    def fake_run(cmd, capture_output, text, encoding, env, timeout):
+        (tmp_path / "m_vela.tflite").write_bytes(b"VELA-OUT")
+        (tmp_path / "m_summary_internal.csv").write_text(
+            "network,sram_memory_used,dram_memory_used\nm,0.0,0.0\n", encoding="utf-8")
+        class _R:
+            returncode = 0
+            stdout = "NPU operators = 0 (0.0%)\nCPU operators = 15 (100.0%)\n"
+            stderr = ""
+        return _R()
+
+    monkeypatch.setattr("alp_model.adapters.ethos_u.subprocess.run", fake_run)
+    blob = VelaAdapter().compile(src, accel_config="ethos-u85-256", out_dir=tmp_path)
+    assert blob.req_sram_kib == 0
+    assert blob.arena_bytes == 0
 
 
 def test_cpu_and_vela_do_not_require_compile_opts():

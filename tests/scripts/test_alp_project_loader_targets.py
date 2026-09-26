@@ -31,6 +31,19 @@ def test_resolve_targets_dedupes_identical_accel_configs():
     assert len(ethos) == 2                                     # one per distinct accel_config
 
 
+def test_resolve_targets_threads_the_soc_specs_vela_profile_onto_ethos_u_targets():
+    # Issue #2312: the SoC spec's `npu_toolchain.vela` block is resolved HERE
+    # (metadata/socs/alif/ensemble/e7.json) and threaded onto every ethos_u
+    # TargetSpec -- never re-read from metadata/ inside the compiler adapter.
+    specs = resolve_targets("E1M-AEN701", metadata_root=_META)
+    eu = next(s for s in specs if s.backend == "ethos_u")
+    assert eu.vela_memory_mode == "Sram_Only"
+    assert eu.vela_vendor_config_filename == "ensemble_vela.ini"
+    # A non-ethos_u target carries no vela profile at all.
+    cpu = next(s for s in specs if s.backend == "cpu")
+    assert cpu.vela_memory_mode == "" and cpu.vela_system_config is None
+
+
 def test_resolve_targets_for_v2n101_yields_drpai_plus_cpu():
     # E1M-V2N101 -> renesas:rzv2n:n44 -> DRP-AI NPU + cpu
     specs = resolve_targets("E1M-V2N101", metadata_root=_META)

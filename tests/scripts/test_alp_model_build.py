@@ -164,7 +164,7 @@ def test_build_model_passes_compile_opts_to_adapter(tmp_path):
         requires_compile_opts = True
         def is_available(self): return True
         def accepts(self, src_format): return src_format == "tflite"
-        def compile(self, source, *, accel_config, out_dir, opts=None):
+        def compile(self, source, *, accel_config, out_dir, opts=None, target=None):
             seen["opts"] = opts
             return Blob(format="drpai_dir", payload=b"RT", arena_bytes=0)
     src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
