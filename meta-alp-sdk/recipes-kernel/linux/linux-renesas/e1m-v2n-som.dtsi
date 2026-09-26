@@ -275,9 +275,15 @@
 };
 
 /* GD32G553 supervisor MCU bridge -- I2C slave transport on BRD_I2C.
- * Exposes the GD32-routed E1M IO pads (logical bridge map, 18 lines)
- * as a Linux gpiochip: line 5 = IO13/LCD1_RST, line 3 = IO11/CTP1_RST,
- * line 1 = IO9/CTP1_INT (input only -- the GT911 drives it).
+ * Exposes the GD32-routed E1M IO pads plus sideband control lines
+ * (logical bridge map, 21 lines) as a Linux gpiochip: line 5 =
+ * IO13/LCD1_RST, line 3 = IO11/CTP1_RST, line 1 = IO9/CTP1_INT (input
+ * only -- the GT911 drives it), line 18 = bt-reg-on (the `bluetooth`
+ * node's shutdown-gpios below), line 19 = wl-reg-on (the
+ * mmc-pwrseq-simple node's reset-gpios below), line 20 = can-stby
+ * (sideband, not an E1M pad -- see the gpio-hog below; requires
+ * bridge protocol MINOR >= 13, gated the same way as 18/19 in the
+ * 0005 kernel patch).
  * Same physical chip as the CM33's SCI7 SPI link peer; Linux only
  * issues short GPIO frames here.
  *
@@ -310,6 +316,27 @@
 		reg = <0x70>;
 		gpio-controller;
 		#gpio-cells = <2>;
+
+		/* CAN_STBY (bridge line 20, GD32 PB13, gd32-bridge-firmware
+		 * gd32-io-mcu-map.csv:38): the shared standby line for the
+		 * two on-module TCAN1044 CAN-FD transceivers (U15/U16). STB
+		 * HIGH = standby, STB LOW = normal -- the bridge firmware
+		 * boots the pad HIGH (bus held in standby) as its own safe
+		 * default; this hog is Linux actively taking the bus out of
+		 * standby at boot. Gated exactly like lines 18/19 in the
+		 * 0005 kernel patch: requires bridge protocol MINOR >= 13
+		 * (gd32-bridge-firmware feat/can-stby-bridge-gpio); an older
+		 * bridge defers this hog's probe via .request() rather than
+		 * silently no-op the write. No device node consumes this
+		 * line the way `bluetooth`/mmc-pwrseq-simple consume 18/19
+		 * above, so a gpio-hog (not a *-gpios property) is how Linux
+		 * asserts it. */
+		can-stby-hog {
+			gpio-hog;
+			gpios = <20 GPIO_ACTIVE_HIGH>;
+			output-low;
+			line-name = "can-stby";
+		};
 	};
 
 	rv3028: rtc@52 {
@@ -741,5 +768,56 @@
 			 <RZV2N_PORT_PINMUX(4, 1, 2)>, /* P41 = RXD4 */
 			 <RZV2N_PORT_PINMUX(4, 2, 4)>, /* P42 = CTS4 */
 			 <RZV2N_PORT_PINMUX(4, 3, 2)>; /* P43 = RTS4 */
+	};
+
+	/* CAN-FD: two on-module TCAN1044 transceivers (U15/U16, SoM
+	 * rev 2625-R2 schematic sheet "CAN-BUS - Encoder"), each on its own
+	 * SoC canfd channel. Mapping is transceiver-to-channel, NOT
+	 * connector-to-channel-in-numeric-order:
+	 *   - U15 TxD/RxD = CANFD3_CTX3/CANFD3_CRX3 (P86/P87) -> CAN0_H/L
+	 *     -> carrier E1M_X_CAN0 (metadata/boards/e1m-x-evk.yaml).
+	 *   - U16 TxD/RxD = CANFD2_CTX2/CANFD2_CRX2 (P84/P85) -> CAN1_H/L
+	 *     -> carrier E1M_X_CAN1.
+	 * i.e. E1M_X_CAN0 is SoC channel3, E1M_X_CAN1 is SoC channel2.
+	 * Series-0R links R290/R291/R347/R6 are fitted per BOM, so the PHY
+	 * path is live. Pin syntax follows Renesas's own RZ/V2N EVK
+	 * reference dts (kernel-source
+	 * arch/arm64/boot/dts/renesas/r9a09g056n48-rzv2n-evk.dts,
+	 * can2_pins/can3_pins). Both transceivers share one STB net,
+	 * driven via the gd32_gpio can-stby-hog above -- see that comment
+	 * for the standby/normal polarity and the protocol-version gate. */
+	canfd_pins: can_pins {
+		can2_pins: can2 {
+			pinmux = <RZV2N_PORT_PINMUX(8, 4, 5)>, /* CANFD2_CTX2 (TX) */
+				 <RZV2N_PORT_PINMUX(8, 5, 5)>;  /* CANFD2_CRX2 (RX) */
+		};
+
+		can3_pins: can3 {
+			pinmux = <RZV2N_PORT_PINMUX(8, 6, 5)>, /* CANFD3_CTX3 (TX) */
+				 <RZV2N_PORT_PINMUX(8, 7, 5)>;  /* CANFD3_CRX3 (RX) */
+		};
+	};
+};
+
+/* CAN-FD controller: both on-module channels (see the canfd_pins
+ * comment above for the transceiver-to-channel mapping and the
+ * schematic source). No `phys` (transceiver PHY) property on either
+ * channel: the TCAN1044 is not in this kernel's
+ * Documentation/devicetree/bindings/phy/ti,tcan104x-can.yaml compatible
+ * enum (ti,tcan1042 / ti,tcan1043 only), so claiming one of those
+ * compatibles for a TCAN1044 would misrepresent the populated part.
+ * The gd32_gpio can-stby-hog above drives the shared STB line instead
+ * -- an honest static hog beats a dishonest phy binding. */
+&canfd {
+	pinctrl-0 = <&canfd_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	channel2 {
+		status = "okay";
+	};
+
+	channel3 {
+		status = "okay";
 	};
 };
