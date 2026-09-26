@@ -265,11 +265,15 @@
 	tas2563_left: codec@4d {
 		compatible = "ti,tas2563";
 		reg = <0x4d>;
+		sound-name-prefix = "Left";
 		#sound-dai-cells = <0>;
 		/* AMP.ENABLE (\SD_N), shared -- see header comment. SSIU3_SSI3_SCK
 		 * / P12 (E1M-X I2S1_SCLK repurposed as plain GPIO, not an SSI
 		 * function here). */
-		shutdown-gpios = <&pinctrl RZV2N_GPIO(1, 2) GPIO_ACTIVE_LOW>;
+		/* The 6.1 tas2562 driver drives shutdown-gpios to logical 1 to power the
+		 * amp up (SDZ is active-low shutdown), so the line is ACTIVE_HIGH:
+		 * ACTIVE_LOW held both amps in shutdown (they NACK I2C while SDZ is low). */
+		shutdown-gpios = <&pinctrl RZV2N_GPIO(1, 2) GPIO_ACTIVE_HIGH>;
 		/* AMP.FAULT (IRQ_N), shared -- see header comment. SSIU4_SSI4_
 		 * SDATA / P15 (E1M-X I2S1_SDI repurposed as plain GPIO). */
 		interrupt-parent = <&pinctrl>;
@@ -280,6 +284,7 @@
 	tas2563_right: codec@4e {
 		compatible = "ti,tas2563";
 		reg = <0x4e>;
+		sound-name-prefix = "Right";
 		#sound-dai-cells = <0>;
 		ti,imon-slot-no = <1>;
 	};
