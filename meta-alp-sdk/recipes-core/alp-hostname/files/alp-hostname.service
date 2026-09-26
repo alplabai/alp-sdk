@@ -1,0 +1,13 @@
+[Unit]
+Description=Set the hostname from the SoM SKU in /chosen/alp,sku
+DefaultDependencies=no
+After=local-fs.target
+Before=sysinit.target network-pre.target systemd-hostnamed.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/alp-hostname-set.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target

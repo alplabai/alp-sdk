@@ -133,6 +133,12 @@ blank module returns `ALP_ERR_NOT_PROVISIONED`; a corrupt one returns
 `ALP_ERR_IO`. The EEPROM is the sole source of the SoM revision (no
 ADC cross-check).
 
+U-Boot validates the same manifest at boot and publishes its SKU to the
+kernel as `/chosen/alp,sku`; the `alp-hostname` unit in every ALP image
+turns it into the hostname (for example `e1m-v2m103`). An unprovisioned
+module, or a bootloader older than u-boot patch 0009, publishes nothing
+and keeps the distro default hostname `alp-e1m`.
+
 Full procedure: [`docs/board-id.md`](../board-id.md).
 Example: [`examples/v2n/v2n-board-id-readout/`](../../examples/v2n/v2n-board-id-readout/).
 
