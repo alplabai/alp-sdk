@@ -67,12 +67,15 @@ families:
 
 verification:
   hil_silicon:    partial           # Bench-verified (runs 52/61/62/63): CSI-2 streaming, a
-                                     # captured RAW10 frame, and a maintainer-confirmed colour
-                                     # render at 640x480 -- see notes above. STILL partial, not
-                                     # full: RAW8 is unverified, and re-bench after issue #2287
-                                     # Stage B's shared CPI-driver change is pending, so this
-                                     # stays "partial" rather than moving to a full-verification
-                                     # status.
+                                     # captured RAW10 frame at 640x480, run 62's captured frame
+                                     # confirmed the correct image (BGGR, unmirrored) -- see
+                                     # notes above. STILL partial, not full: RAW8 is unverified
+                                     # -- that is the primary reason this stays "partial" rather
+                                     # than "verified" (contrast metadata/chips/ov9281.yaml,
+                                     # kept "verified" since all of ITS modes are fully
+                                     # bench-verified). Re-bench after issue #2287 Stage B's
+                                     # shared CPI-driver change is also pending, noted here as
+                                     # an open item, not an additional reason for "partial".
   smoke_tests:    none               # no chips/ portable driver surface exists to unit-test;
                                      # the streaming driver's coverage is
                                      # tests/zephyr/video_sensors/src/ov5647_test.c.

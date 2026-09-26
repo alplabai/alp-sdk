@@ -244,7 +244,8 @@ responder to 0 and back with `CAM_EN`.
   `e1m_evk_rpi_csi` paired with a sensor shield that follows
   Zephyr's Raspberry Pi camera contract, e.g. the InnoMaker CAM-OV9281,
   the RPi Camera Module 1 (OV5647), or the INNO-MAKER CAM-IMX296RAW-TRIGGER
-  (IMX296) -- all three bench-verified, see below:
+  (IMX296) -- all three bench-verified (OV9281/OV5647 due for a re-bench
+  after issue #2287 Stage B's shared CPI driver change, see below):
 
       west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <app> -- \
         -DSHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"
@@ -302,13 +303,20 @@ responder to 0 and back with `CAM_EN`.
   test pattern also verified in all three; OV5647 (2026-09-22, needing the
   [J5 pin 11 pull-up rework](#j5-pin-11-pull-up-rework) above), RAW10
   640x480 -- see [`docs/camera-shields.md`](../camera-shields.md)'s
-  OV5647 driver section; IMX296 (issue #2287, Stage A + Stage B
-  bench-verified) -- see [`docs/camera-shields.md`](../camera-shields.md)'s
-  IMX296 driver section for the full bench history. Issue #2287's bench
-  history documents no J5 pin-11 pull-up rework for the IMX296 module;
-  whether it self-enables like the OV9281 or was benched with the rework
-  already fitted from the OV5647 work is not recorded either way in that
-  history.
+  OV5647 driver section. Both OV9281 and OV5647 are due for a re-bench
+  after issue #2287 Stage B changed the shared CPI driver's
+  buffer-starvation-pause behaviour -- re-bench on these two sensors is
+  pending, see [`docs/camera-shields.md`](../camera-shields.md). IMX296
+  (issue #2287) is Stage A + Stage B bench-verified, Stage B via
+  `examples/aen/aen-isp-capture` and
+  `examples/connectivity/camera-mjpeg-stream` -- see
+  [`docs/camera-shields.md`](../camera-shields.md)'s IMX296 driver section
+  for the full bench history. Issue #2287's IMX296 bench ran on an
+  E1M-AEN803 (serial 2026W36-0001) on an E1M-EVK carrying the
+  [J5 pin-11 pull-up rework](#j5-pin-11-pull-up-rework) above (the rework
+  is on the EVK's J5, not the SoM, and was fitted for the OV5647 bench on
+  the same board); whether the IMX296 module self-enables without that
+  rework is not established.
 
   > **Important.**  E1M `IO2` was previously documented as the RGB
   > LED-blue channel.  That was a placeholder guess; the EVK

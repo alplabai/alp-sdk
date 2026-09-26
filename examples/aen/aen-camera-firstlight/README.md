@@ -9,11 +9,16 @@ bench-verified**: OV9281 (2026-09-21, an E1M-AEN803 on the E1M-EVK: real
 GREY8 frames land in memory in all three modes -- 640x400, 1280x720,
 1280x800 -- each at its configured frame rate, with the sensor test pattern
 also verified in all three) and OV5647 (2026-09-22, an E1M-AEN803 on the
-E1M-EVK, issue #2248, RAW10 640x480). **IMX296 is Stage A bench-verified**
-(issue #2287) -- I2C identity (bench run 229), CSI-2 streaming, and a real
-1456x1088 RAW10 frame captured through this app (bench run 292; 0.98
-correlation against a diag control capture). ISP-Pico, AE, continuous
-streaming and fast-trigger mode are not yet bench-verified. See
+E1M-EVK, issue #2248, RAW10 640x480). Both are due for a re-bench after
+issue #2287 Stage B changed the shared CPI driver's buffer-starvation-pause
+behaviour -- re-bench on these two sensors is pending. **IMX296 is Stage A
++ Stage B bench-verified** (issue #2287): Stage A through this app --
+I2C identity (bench run 229), CSI-2 streaming, and a real 1456x1088 RAW10
+frame (bench run 292; 0.98 correlation against a diag control capture);
+Stage B through `examples/aen/aen-isp-capture` (ISP-Pico data path, run 297;
+auto-exposure, runs 309/310) and `examples/connectivity/camera-mjpeg-stream`
+(continuous MJPEG streaming, runs 312-314). Fast-trigger mode is added but
+unbenched, and IMX296 colour (AWB/CCM) is not calibrated. See
 `docs/boards/e1m-evk.md`'s Camera section and `docs/camera-shields.md`.
 
 **This SoM/EVK combination needs a P/N-crossing adapter on the camera
