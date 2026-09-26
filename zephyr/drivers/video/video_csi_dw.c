@@ -471,6 +471,7 @@ static int csi2_dw_validate_data(const struct device *dev)
 	float pixrate;
 	uint32_t bpp;
 	uint32_t tmp;
+	bool explicit_pixclk;
 	int ret;
 
 	bpp = data->csi_cpi_settings[data->current_sensor]->bits_per_pixel;
@@ -496,16 +497,15 @@ static int csi2_dw_validate_data(const struct device *dev)
 	pixrate = ((float)(phy->pll_fin << 1) * phy->num_lanes) / bpp;
 
 	/*
-	 * Alp Lab AB (issue #2327, reviewer): csi-pixclk-hz only has an effect in
-	 * Controller mode (the branch below) -- a board/shield that sets it under
-	 * Camera mode (e.g. a copy-paste from a Controller-mode shield) would
-	 * otherwise silently get the ordinary margined-pixrate request with no
-	 * indication the property was ignored.
+	 * Alp Lab AB (issue #2327, bench runs 316-330): csi-pixclk-hz is honoured
+	 * in EITHER ipi-mode now (originally Controller-only) -- a 2-lane sensor's
+	 * bare Camera-mode margined request can ALSO exceed alif_pixclk_set_rate()'s
+	 * reachable range (IMX335's own case: 594e6*2*2/10*1.2 = 285.12 MHz, no
+	 * lower Camera-mode request is available the way Controller mode's bare
+	 * rate was tried first), so a shield needs the same explicit override
+	 * either way. `explicit_pixclk` below picks the branch that applies it.
 	 */
-	if (config->pixclk_hz != 0 && config->ipi_mode != CSI2_IPI_MODE_TIMINGS_CTRL) {
-		LOG_WRN("csi-pixclk-hz (%u Hz) is set but ipi-mode is not \"Controller\" -- "
-			"ignored", config->pixclk_hz);
-	}
+	explicit_pixclk = config->pixclk_hz != 0;
 
 	if (config->ipi_mode == CSI2_IPI_MODE_TIMINGS_CTRL) {
 		/*
@@ -545,7 +545,20 @@ static int csi2_dw_validate_data(const struct device *dev)
 		 * of leaving it to fall out of whichever divisor the bare request
 		 * happens to round to.
 		 */
-		pixclock = config->pixclk_hz != 0 ? (float)config->pixclk_hz : pixrate;
+		pixclock = explicit_pixclk ? (float)config->pixclk_hz : pixrate;
+	} else if (explicit_pixclk) {
+		/*
+		 * Alp Lab AB (issue #2327, bench runs 316-330): Camera mode's own
+		 * margined request (below, the un-taken branch) can ALSO exceed the
+		 * pixel-clock divider's reachable range for a 2-lane sensor -- IMX335's
+		 * bare Camera-mode rate is 594e6*2*2/10 = 237.6 MHz, and even that (no
+		 * margin) already exceeds it, so the margined 285.12 MHz has nowhere to
+		 * round down to the way IMX296's Controller-mode bare rate did. Same
+		 * override shape as Controller mode above: an explicit csi-pixclk-hz
+		 * bypasses the margin entirely (integer pass-through below, -ERANGE
+		 * fatal) instead of trying a rate the shield never asked for.
+		 */
+		pixclock = (float)config->pixclk_hz;
 	} else {
 		pixclock = pixrate * (float)CSI2_BANDWIDTH_SCALER;
 	}
@@ -560,22 +573,20 @@ static int csi2_dw_validate_data(const struct device *dev)
 	 * (200 MHz) instead of 3 (133.33 MHz). Bench-observed on
 	 * E1M-AEN803 2026W36-0001: CSI_PIXCLK_CTRL read 0x00020001.
 	 */
-	tmp = (config->ipi_mode == CSI2_IPI_MODE_TIMINGS_CTRL && config->pixclk_hz != 0)
-		      ? config->pixclk_hz
-		      : (uint32_t)pixclock;
+	tmp = explicit_pixclk ? config->pixclk_hz : (uint32_t)pixclock;
 	ret = clock_control_set_rate(config->clk_dev, config->pixclk,
 			(clock_control_subsys_rate_t)tmp);
-	if (ret == -ERANGE && config->ipi_mode == CSI2_IPI_MODE_TIMINGS_CTRL &&
-	    config->pixclk_hz != 0) {
+	if (ret == -ERANGE && explicit_pixclk) {
 		/*
-		 * Alp Lab AB (issue #2327, reviewer): an EXPLICIT csi-pixclk-hz that
+		 * Alp Lab AB (issue #2327): an EXPLICIT csi-pixclk-hz that
 		 * does not fit under the pixel-clock divider's maximum is a shield
 		 * authoring mistake (the whole point of stating this rate explicitly
-		 * is that the shield's own IPI timing -- csi-hsa/hbp/hline/vtotal --
-		 * was derived AGAINST this exact rate; silently falling back to the
-		 * bare derived pixrate below would run different, undocumented
-		 * timing than what the shield's own comment claims). Fail loudly
-		 * instead of retrying at a rate the shield was never derived for.
+		 * is that the shield's own IPI timing was derived AGAINST this exact
+		 * rate; silently falling back to the bare/margined derived pixrate
+		 * below would run different, undocumented timing than what the
+		 * shield's own comment claims). Fatal in EITHER ipi-mode -- fail
+		 * loudly instead of retrying at a rate the shield was never derived
+		 * for.
 		 */
 		LOG_ERR("csi-pixclk-hz %u Hz exceeds the CSI pixel-clock max (practical "
 			"ceiling ~200 MHz, see snps,designware-csi.yaml) -- fix the shield's "
@@ -703,6 +714,8 @@ static int csi2_dw_validate_data(const struct device *dev)
 	}
 
 	if (config->ipi_mode == CSI2_IPI_MODE_TIMINGS_CAM) {
+		int32_t hsd;
+
 		/*
 		 * FV(VSYNC) comes at least 3 pixel clocks before
 		 * LV(HSYNC/DATA_EN). Hence, setting HSA as 3.
@@ -714,13 +727,61 @@ static int csi2_dw_validate_data(const struct device *dev)
 		 * HSD should be such that when the PPI interface should
 		 * collect last pixel and send to memory before IPI interface
 		 * is collecting the last pixel of Horizontal Active Area.
+		 *
+		 * Alp Lab AB (issue #2327, bench runs 316-330): this legacy formula
+		 * divides the reception time by (pll_fin<<1) ALONE -- it omits
+		 * num_lanes, unlike pixrate's own derivation a few lines up. Left
+		 * UNCHANGED when csi-pixclk-hz is absent: OV5647 and OV9281 both run
+		 * Camera mode by default with no explicit pixclk, and both are
+		 * bench-proven against exactly this formula (issue #2248 / the
+		 * 2026-09-21 OV9281 bench) -- changing it for them needs its own
+		 * re-bench, not a silent fix bundled with the IMX335 work that found
+		 * it. Signed arithmetic + a floor at 0 (was implicit uint16_t
+		 * wraparound before this change; a negative computed value would have
+		 * silently become a huge unsigned HSD instead of failing or clamping).
 		 */
-		timing->hsd = ((pixclock * bpp * timing->hact) / (phy->pll_fin << 1)) -
-			    (timing->hact + timing->hsa) + 1;
+		if (explicit_pixclk) {
+			/*
+			 * Alp Lab AB (issue #2327): the DFP-correct form of the same
+			 * reception-time-vs-D-PHY-bit-rate comparison -- divides by
+			 * (pll_fin<<1)*num_lanes (Driver_MIPI_CSI2.c's own HSD
+			 * derivation), not by (pll_fin<<1) alone. Used only when
+			 * csi-pixclk-hz is explicit: a shield stating its own IPI
+			 * pixel clock has no bench history tied to the legacy,
+			 * lanes-omitting formula the way OV5647/OV9281 do, so there is
+			 * no compatibility reason to keep the historical omission for
+			 * it -- IMX335 bench runs 329/330 (0 IPI-fatal events, correct
+			 * stride, 6/6 clean captures) exercise this branch, not the
+			 * legacy one.
+			 */
+			int64_t reception_time = (int64_t)pixclock * bpp * timing->hact;
+			int64_t divisor = (int64_t)(phy->pll_fin << 1) * phy->num_lanes;
+
+			hsd = (int32_t)(reception_time / divisor) -
+			      (int32_t)(timing->hact + timing->hsa) + 1;
+		} else {
+			hsd = (int32_t)((pixclock * bpp * timing->hact) / (phy->pll_fin << 1)) -
+			      (int32_t)(timing->hact + timing->hsa) + 1;
+		}
+		timing->hsd = (uint16_t)(hsd < 0 ? 0 : hsd);
 		timing->vsa = 0;
 		timing->vbp = 0;
 		timing->vfp = 0;
 		timing->vact = 0;
+
+		if (explicit_pixclk && ret == 0) {
+			/*
+			 * Alp Lab AB (issue #2327): same diagnostic shape as the
+			 * Controller-mode LOG_INF above, for Camera mode's own explicit
+			 * csi-pixclk-hz path (innomaker_cam_imx335's shield) -- logs the
+			 * ACTUAL programmed clock and the HLINE/line-time it produces.
+			 */
+			uint32_t hline = timing->hsa + timing->hbp + timing->hsd + timing->hact;
+
+			LOG_INF("CSI IPI Camera-mode (explicit csi-pixclk-hz): pixclk %u Hz, "
+				"HLINE %u px -> line time %u ns",
+				tmp, hline, (uint32_t)(((uint64_t)hline * 1000000000ULL) / tmp));
+		}
 	}
 	return 0;
 }

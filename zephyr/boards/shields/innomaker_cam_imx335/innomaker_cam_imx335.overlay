@@ -18,24 +18,27 @@
  * Driver: upstream Zephyr v4.4.1 drivers/video/imx335.c (CONFIG_VIDEO_IMX335,
  * compatible "sony,imx335") -- reused as-is, NOT vendored into alp-sdk (ADR
  * 0017 Tier 1, upstream-native). It carries one repo patch
- * (zephyr/patches/zephyr/0004-imx335-link-freq.patch, zephyr/patches.yml,
- * applied per-module by scripts/bootstrap.sh at `west update` time and
- * checked by scripts/verify_west_patches.py) that registers
- * VIDEO_CID_LINK_FREQ so video_get_csi_link_freq() (video_common.c) does not
- * fall back to mis-approximating the D-PHY link rate from the driver's own
- * (untouched) VIDEO_CID_PIXEL_RATE -- see that patch's own comment.
+ * (zephyr/patches/zephyr/0004-imx335-2lane-link-freq-and-binning.patch,
+ * zephyr/patches.yml, applied per-module by scripts/bootstrap.sh at `west
+ * update` time and checked by scripts/verify_west_patches.py) that registers
+ * VIDEO_CID_LINK_FREQ, writes the SYSMODE + MIPI output-timing registers this
+ * lane count/bit rate needs, and fixes the 2x2-binned mode's HNUM/Y_OUT_SIZE
+ * -- see that patch's own comment in zephyr/patches.yml for the full
+ * derivation and bench evidence (runs 316-330).
  *
- * Silicon facts established on unit E1M-AEN803 2026W36-0001 (I2C identity
- * probe only, see metadata/chips/imx335.yaml): the module answered at CCI
- * 0x1A (the only device on the J5 camera bus) with CAM_EN untouched, and its
- * registers read back at their power-on-reset defaults (STANDBY
- * 0x3000=0x01, VMAX 0x3030-0x3032=0x001194=4500, HMAX 0x3034=0x0226=550,
- * LANEMODE 0x3a01=0x03). That bench unit's E1M-EVK carries the J5 pin-11
- * pull-up rework (docs/boards/e1m-evk.md, originally fitted for OV5647) --
- * whether this module self-enables on a STOCK carrier (no rework) is NOT
- * established by this result.
- * CSI-2 streaming, D-PHY lock, and frame capture are NOT bench-verified --
- * see this shield's doc/index.rst for the full not-verified list.
+ * Silicon facts established on unit E1M-AEN803 2026W36-0001 (bench runs
+ * 316-330; see metadata/chips/imx335.yaml and changelog.d/2327.md for the
+ * full history): the module answered at CCI 0x1A (the only device on the J5
+ * camera bus) with CAM_EN untouched -- that bench unit's E1M-EVK carries the
+ * J5 pin-11 pull-up rework (docs/boards/e1m-evk.md, originally fitted for
+ * OV5647), so whether this module self-enables on a STOCK carrier (no
+ * rework) is NOT established. With the patch above applied, this shield
+ * bench-verified 6/6 consecutive clean 1296x972 RAW10 raw captures (run
+ * 330): 0 CSI CRC errors, 0 IPI-fatal events, correct stride, no overrun.
+ * NOT bench-verified: frame rate/fps (not measured), ISP/AE/colour, the
+ * sensor's full-resolution mode, and D-PHY lock through the E1M SoM R2
+ * pinout adapter at anything other than the lane count this shield uses (see
+ * this shield's doc/index.rst for the full not-verified list).
  */
 
 #include <zephyr/dt-bindings/gpio/raspberrypi-csi-connector.h>
@@ -58,102 +61,59 @@
 };
 
 /*
- * Issue #2327: IPI controller-timing mode, same shape as
- * raspberry_pi_global_shutter_camera.overlay's IMX296 derivation (see that
- * overlay's own comment for the general reasoning) -- NONE of this is
- * bench-verified for IMX335, only carried through the same arithmetic.
+ * Issue #2327, bench runs 316-330 (E1M-AEN803 2026W36-0001): Camera mode with
+ * an explicit csi-pixclk-hz -- Controller mode (this overlay's own earlier
+ * revision) could NOT be made to match this sensor's measured timing and is
+ * no longer used here.
  *
- * Why Controller mode at all: the DW CSI-2 host's default "Camera" IPI mode
- * derives its pixel clock from the D-PHY bit rate with a 20% bandwidth
- * margin (csi2_dw_validate_data()'s CAM branch, zephyr/drivers/video/
- * video_csi_dw.c) -- for this 2-lane sensor that margined request
- * (594e6 * 2 * 2 / 10 * 1.2 = 285.12 MHz) exceeds alif_pixclk_set_rate()'s
- * 200 MHz ceiling outright (-ERANGE), so Camera mode cannot configure this
- * sensor at all, unlike IMX296's single-lane case where the margined rate
- * still fits.
+ * Why not Controller mode: it requires stating this sensor's own line/frame
+ * length as fixed IPI-pixclk-cycle counts (csi-hline/csi-vtotal), derived
+ * from an assumed line pacing this driver's own registers never expose
+ * directly. Bench measurement (runs 329/330, VSYNC/HSYNC counters read back
+ * over the CSI-2 host) found the sensor's ACTUAL binned-mode line period is
+ * 29.63 us (~4H at HMAX 550 -- not the earlier 2H-pacing guess this overlay
+ * used to carry) with 972 HSYNC pulses per frame -- a measured fact, not an
+ * inference, but one this driver's own imx335.c never surfaces as a control
+ * or register read, so a shield can't derive a Controller-mode csi-hline/
+ * csi-vtotal pair from it without hand-verifying against a bench capture on
+ * every future change. Camera mode instead lets the DW CSI-2 host derive its
+ * own H/V timing from the D-PHY bit rate + an explicit pixel clock, with no
+ * fixed line/frame-length DT constants to re-derive.
  *
- * csi-pixclk-hz (issue #2327, snps,designware-csi.yaml): Controller mode's
- * own BARE derived request (no margin: 594e6 * 2 * 2 / 10 = 237.6 MHz) ALSO
- * exceeds the 200 MHz ceiling for this 2-lane sensor -- unlike IMX296's
- * single-lane bare rate (118.8 MHz), which fits and happens to land the
- * clock-control divisor near the sensor's own line rate. There is no
- * request csi2_dw_validate_data() can derive that both fits under 200 MHz
- * and keeps the IPI ahead of the sensor, so this property states the
- * intended IPI pixel clock explicitly instead: 133.333 MHz (400 MHz / 3,
- * the same divisor IMX296 bench-confirmed CSI_PIXCLK_CTRL lands on for a
- * bare request in its own range -- reused here by explicit request, not by
- * having a bare rate that happens to round to it).
+ * Why csi-pixclk-hz is still needed under Camera mode: the DW CSI-2 host's
+ * default Camera-mode pixel-clock request (pll_fin * 2 * lanes / bpp * 1.2
+ * bandwidth margin, csi2_dw_validate_data()'s CAM branch, video_csi_dw.c) is
+ * 594e6 * 2 * 2 / 10 * 1.2 = 285.12 MHz for this 2-lane sensor -- and even
+ * the BARE rate without the margin (237.6 MHz) already exceeds
+ * alif_pixclk_set_rate()'s ~200 MHz practical ceiling, unlike IMX296's
+ * single-lane case where the margined rate still fits. csi-pixclk-hz (issue
+ * #2327, snps,designware-csi.yaml, now effective in Camera mode too) states
+ * 200 MHz explicitly instead -- the highest rate this clock actually
+ * reaches -- bypassing both the margined and bare derived requests.
  *
- * Derivation (INFERRED from the datasheet HMAX/VMAX register values read
- * back at POR on the bench unit, NOT a datasheet MIPI-timing-table citation
- * -- unlike raspberry_pi_global_shutter_camera.overlay's IMX296 numbers,
- * which cite datasheet page 44/49 tables directly):
- *   sensor 1H = HMAX 550 / 74.25 MHz sensor-internal clock = 7.4074 us
- *     (74.25 MHz: the IMX335 datasheet's own internal H/V-counter clock,
- *     same role as IMX296_HMAX/VMAX's "normalised to a fixed INCK-
- *     independent rate" -- imx335.c never exposes this rate directly, so it
- *     is carried here rather than re-derived from an INCK-dependent
- *     register).
- *   ASSUMED 2H output-line pacing (2x2-binned readout takes two sensor rows
- *     per output line) = 2 * 7.4074 us = 14.815 us -- INFERRED, not read
- *     from the datasheet's own binned-mode timing table; the fallback noted
- *     below applies if this assumption is wrong on the bench.
- *   IPI line time = csi-hline / csi-pixclk-hz = 1972 / 133.333 MHz = 14.79 us
- *     -- slightly FASTER than the assumed 14.815 us sensor line, same
- *     drain-ahead-of-sensor margin shape as IMX296's own derivation.
- *   csi-hsa/csi-hbp = 3/10 (unchanged from IMX296 -- these are DW CSI-2 host
- *     IPI protocol constants, not sensor-specific).
- *   hsd = csi-hline - csi-hsa - csi-hbp - hact(1296) = 1972-3-10-1296 = 663.
- *   frame period @ 30 fps = 33.33 ms = VMAX 4500 * HMAX 550 / 74.25 MHz
- *     (matches the sensor's own read-back VMAX/HMAX POR defaults).
- *   csi-vtotal = frame period / IPI line time = 33.33 ms / 14.79 us ~= 2250
- *     IPI lines.
- *   csi-vsa/csi-vbp = 1/254 (csi-vbp scaled up from IMX296's 4 -- IMX335's
- *     VMAX 4500 is ~4x IMX296's VMAX 1118, and csi-vbp here absorbs that
- *     difference so vfp below stays in the 10-bit CSI_IPI_VFP_LINES_MASK
- *     range; not itself a datasheet-cited constant).
- *   vfp = csi-vtotal - csi-vsa - csi-vbp - vact(972) = 2250-1-254-972 = 1023
- *     (the CSI_IPI_VFP_LINES_MASK 10-bit maximum, exactly -- there is no
- *     margin left in this derivation; if bench testing shows FIFO/line
- *     errors, csi-vbp is the knob to revisit first).
+ * Bench-verified (runs 329/330, this exact configuration): 0 IPI-fatal
+ * events, correct 1296x972 stride, no FIFO overflow, 6/6 consecutive clean
+ * raw captures (run 330). Frame rate/fps was NOT measured. D-PHY Stop-state
+ * check (STOPSTATE 0x00010003 before stream start) passed normally once the
+ * patch's MIPI-timing registers were written -- no no-lp11-clock-lane-park-
+ * style skip property was needed for this sensor.
  *
- * REVIEWER CAUTION (issue #2327, not yet bench-checked): the DW CSI-2 IPI's
- * Controller-mode vertical timing is anchored at Frame Start, so a large
- * csi-vbp (254 here, vs. IMX296's bench-proven 4) delays the first active
- * line by (csi-vsa+csi-vbp) IPI lines after FS -- 255 * 14.79 us (this
- * overlay's own derived IPI line time) ~= 3.77 ms. Whether the DW CSI-2 IPI
- * actually tolerates that delay, or instead overflows waiting for it, is
- * NOT established from the code alone (video_csi_dw.c has no runtime
- * comment or bench note on Controller-mode vertical-delay tolerance).
- * innomaker_cam_imx335-vbp4.overlay (this shield's own directory) carries an
- * alternative csi-vbp=4/csi-vtotal=2000 candidate -- see that file's own
- * comment. The FIRST bench step for this shield must compare BOTH
- * candidates (this file's default, and that file's alternative, selected
- * via -DEXTRA_DTC_OVERLAY_FILE, see that file's usage comment) and record
- * which one, if either, achieves D-PHY lock and a captured frame without
- * IPI-FIFO overflow or HLINE errors -- neither is claimed correct here.
+ * The first captured frame after STANDBY release had darkened lower rows in
+ * one run (329) but not the next (330) -- see aen-camera-firstlight's own
+ * fix discarding the first frame for this sensor (src/main.c) rather than
+ * claiming this is understood.
  *
  * ipi-fs-sync: unset (default false, unchanged controller behaviour) --
  * issue #2287's own bench investigation of this bit on IMX296 found no
- * effect; not worth carrying speculatively onto an unbenched sensor.
- * no-lp11-clock-lane-park: NOT set -- IMX335's LP-11 clock-lane-park
- * behaviour is unconfirmed (see docs/camera-shields.md); add only if bench
- * testing shows the D-PHY not locking to Stop-state.
- *
- * FALLBACK (documented for the bench, NOT implemented here): if 2H output-
- * line pacing turns out wrong on silicon, the alternative is 1H pacing --
- * csi-pixclk-hz 200000000, csi-hline 1478 -- which needs either Camera mode
- * or a VMAX change to reach; out of scope for this Stage A overlay.
+ * effect; not worth carrying speculatively onto an unbenched sensor, and
+ * moot for Camera mode regardless (only read by the Controller-mode path
+ * this shield no longer uses).
+ * no-lp11-clock-lane-park: NOT set -- not needed; see the D-PHY Stop-state
+ * result above.
  */
 &csi {
-	ipi-mode = "Controller";
-	csi-pixclk-hz = <133333333>;
-	csi-hsa = <3>;
-	csi-hbp = <10>;
-	csi-hline = <1972>;
-	csi-vsa = <1>;
-	csi-vbp = <254>;
-	csi-vtotal = <2250>;
+	ipi-mode = "Camera";
+	csi-pixclk-hz = <200000000>;
 };
 
 &csi_ep_in {

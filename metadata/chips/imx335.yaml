@@ -22,34 +22,49 @@ notes: |
   Streaming driver: upstream Zephyr v4.4.1 drivers/video/imx335.c
   (CONFIG_VIDEO_IMX335), NOT vendored -- consumed as-is per ADR 0017 Tier 1
   (upstream-native). One repo-carried patch on top, zephyr/patches/zephyr/
-  0004-imx335-link-freq.patch (zephyr/patches.yml): registers
-  VIDEO_CID_LINK_FREQ so video_get_csi_link_freq() (video_common.c) reads
-  the sensor's real 594 MHz D-PHY link frequency instead of mis-approximating
-  it from the upstream driver's own (untouched) VIDEO_CID_PIXEL_RATE -- the
-  same ERRSOTSYNCHS/PHY_FATAL failure signature OV5647 hit (issue #2248)
-  before its own fix. Shield: zephyr/boards/shields/innomaker_cam_imx335/.
-  See docs/camera-shields.md for the full driver/shield/control reference.
+  0004-imx335-2lane-link-freq-and-binning.patch (zephyr/patches.yml), fixing
+  three real bugs bench-found at this sensor's 2-lane/10-bit/1188
+  Mbps-per-lane configuration: (1) registers VIDEO_CID_LINK_FREQ so
+  video_get_csi_link_freq() (video_common.c) reads the sensor's real 594 MHz
+  D-PHY link frequency instead of mis-approximating it from the upstream
+  driver's own (untouched) VIDEO_CID_PIXEL_RATE -- the same
+  ERRSOTSYNCHS/PHY_FATAL failure signature OV5647 hit (issue #2248) before
+  its own fix; (2) writes the SYSMODE/MIPI output-timing registers this lane
+  count/bit rate needs (upstream writes neither, for any configuration) --
+  without them, a payload-checksum/CRC error storm; (3) fixes the
+  2x2-binned mode's HNUM/Y_OUT_SIZE, which upstream leaves at values that
+  transmit a 1308x984 frame into this driver's own 1296x972 buffer (a
+  12-pixel/12-line overrun). Shield: zephyr/boards/shields/
+  innomaker_cam_imx335/. See docs/camera-shields.md for the full
+  driver/shield/control reference and changelog.d/2327.md for the bench
+  history.
 
-  Issue #2327, Stage A (E1M-AEN803 2026W36-0001, E1M-EVK, csi_i2c = I2C1 @
-  0x49011000), bench-verified: I2C identity ONLY -- the module answered at
-  CCI 0x1A (the only device on the J5 camera bus) with CAM_EN (J5 pin 11)
-  untouched, and STANDBY (0x3000), VMAX (0x3030-0x3032), HMAX (0x3034) and
-  LANEMODE (0x3a01) all read back at their power-on-reset defaults (0x01,
-  0x001194 = 4500, 0x0226 = 550, 0x03 respectively). That bench unit's
-  E1M-EVK carries the J5 pin-11 pull-up rework (docs/boards/e1m-evk.md,
-  originally fitted for OV5647) -- whether the IMX335 module self-enables on
-  a STOCK carrier (no pull-up rework) is NOT established by this bench
-  result.
+  Issue #2327 (E1M-AEN803 2026W36-0001, E1M-EVK, csi_i2c = I2C1 @
+  0x49011000), bench-verified (bench runs 316-330): raw capture, 2x2-binned
+  1296x972 RAW10, through <alp/camera.h> -- 6/6 consecutive clean captures
+  (run 330), 0 CSI CRC errors, 0 IPI-fatal events, correct stride, no
+  overrun. The module answered at CCI 0x1A (the only device on the J5
+  camera bus) with CAM_EN (J5 pin 11) untouched, and STANDBY (0x3000), VMAX
+  (0x3030-0x3032), HMAX (0x3034) and LANEMODE (0x3a01) all read back at
+  their power-on-reset defaults (0x01, 0x001194 = 4500, 0x0226 = 550, 0x03
+  respectively) before the patch's config writes. That bench unit's E1M-EVK
+  carries the J5 pin-11 pull-up rework (docs/boards/e1m-evk.md, originally
+  fitted for OV5647) -- whether the IMX335 module self-enables on a STOCK
+  carrier (no pull-up rework) is NOT established by this bench result. The
+  D-PHY Stop-state check (STOPSTATE 0x00010003 before stream start) passed
+  normally once the patch's MIPI-timing registers were written -- no
+  no-lp11-clock-lane-park-style skip property was needed. The first
+  captured frame after STANDBY release had darkened lower rows in one run
+  (329) but not the next (330) -- aen-camera-firstlight discards the first
+  frame for this sensor rather than claiming this is understood.
 
   NOT bench-verified -- do not claim any of the following happened on
-  silicon: CSI-2 D-PHY lock at 1188 Mbps/lane on a 2-lane sensor through the
-  E1M SoM R2 pinout adapter -- 1188 Mbps/lane itself IS bench-proven, but
-  only on data lane D0 (IMX296, 1 lane, run 292); D1 through the adapter is
-  untested; this sensor's 2x2-binned-mode line pacing (the shield
-  overlay's Controller-mode IPI timing derivation assumes 2H output-line
-  pacing, INFERRED from the sensor's own read-back HMAX/VMAX values, not a
-  datasheet MIPI-timing-table citation); LP-11 clock-lane-park behaviour;
-  and any frame capture, at any resolution.
+  silicon: frame rate/fps (not measured); CSI-2 D-PHY lock at 1188 Mbps/lane
+  on a 2-lane sensor through the E1M SoM R2 pinout adapter specifically --
+  1188 Mbps/lane itself IS bench-proven, but only on data lane D0 (IMX296,
+  1 lane, run 292); D1 through the adapter is untested; ISP/AE/colour (no
+  ISP path exists for this sensor); and the sensor's full-resolution
+  (non-binned) mode.
 
 bus:              i2c
 i2c:
@@ -76,8 +91,11 @@ families:
   - aen
 
 verification:
-  hil_silicon:    partial           # Stage A bench-verified: I2C identity ONLY -- see notes
-                                     # above for everything else that remains unverified.
+  hil_silicon:    partial           # Bench-verified: 2x2-binned 1296x972 RAW10 raw capture
+                                     # through <alp/camera.h>, 6/6 consecutive clean frames, 0
+                                     # CSI/IPI errors (bench runs 316-330) -- STILL partial, not
+                                     # full: frame rate/fps, ISP/AE/colour, and full-resolution
+                                     # mode all remain unverified, see notes above.
   smoke_tests:    none               # no chips/ portable driver surface exists to unit-test; see
                                      # docs/camera-shields.md's "Build coverage" section for this
                                      # sensor's Zephyr-level coverage decision (why no

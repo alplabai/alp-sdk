@@ -32,9 +32,8 @@
  *   ... -DSHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"         # OV9281, GREY8
  *   ... -DSHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera" # IMX296, RAW10
  *   ... -DSHIELD="e1m_evk_rpi_csi innomaker_cam_imx335"                # IMX335, RAW10 (issue
- *                                                                      # #2327, Stage A -- I2C
- *                                                                      # identity probe ONLY,
- *                                                                      # see
+ *                                                                      # #2327, bench-verified
+ *                                                                      # raw capture only, see
  *                                                                      # zephyr/boards/shields/
  *                                                                      # innomaker_cam_imx335/
  *                                                                      # doc/index.rst)
@@ -321,9 +320,11 @@ static bool trigger_capture_loop(alp_camera_t *cam)
  * mode EXPLICITLY -- the upstream driver (drivers/video/imx335.c) boots at its native
  * 2592x1944, and alp_camera_open() below sets cfg.width/height from these constants, which
  * zephyr_video.c forwards as a video_set_format() call the driver honours before streaming
- * starts. RAW10 (SRGGB10P Bayer), 2 CSI-2 lanes. Only the I2C identity probe is bench-verified
- * for this sensor (metadata/chips/imx335.yaml) -- CSI-2 streaming and frame capture on this path
- * are UNVERIFIED, see zephyr/boards/shields/innomaker_cam_imx335/doc/index.rst. */
+ * starts. RAW10 (SRGGB10P Bayer), 2 CSI-2 lanes. Bench-verified (runs 316-330, E1M-AEN803
+ * 2026W36-0001): 6/6 consecutive clean 1296x972 RAW10 raw captures, 0 CSI/IPI errors -- see
+ * metadata/chips/imx335.yaml and zephyr/boards/shields/innomaker_cam_imx335/doc/index.rst for
+ * the full bench history and what remains UNVERIFIED (frame rate/fps, ISP/AE/colour,
+ * full-resolution mode). */
 #define CAM_FORMAT          ALP_PIXFMT_RAW10
 #define CAM_WIDTH           1296
 #define CAM_HEIGHT          972
@@ -407,6 +408,30 @@ int main(void)
 #else
 	/* --- 3. wait for one frame, with a timeout ----------------------- */
 	alp_camera_frame_t frame;
+
+#if defined(CONFIG_VIDEO_IMX335)
+	/*
+	 * Alp Lab AB (issue #2327, bench runs 329/330): the first frame captured
+	 * right after STANDBY release had darkened lower rows in one bench run
+	 * (329) but not the next (330) under otherwise identical settings -- not
+	 * understood well enough to claim a cause (a plausible guess is exposure/
+	 * AGC settling before the sensor's first full frame, but that is NOT
+	 * confirmed). Discard it rather than risk reporting a dark frame as this
+	 * sensor's "first-light" result; the SECOND capture is what this example
+	 * reports below.
+	 */
+	alp_camera_frame_t discard_frame;
+
+	printk("[camfl] IMX335: discarding the first post-start frame (bench runs 329/330 -- "
+	       "may have darkened lower rows) ...\n");
+	s = alp_camera_capture(cam, &discard_frame, CAM_CAPTURE_TIMEOUT_MS);
+	if (s == ALP_OK) {
+		alp_camera_release(cam, &discard_frame);
+	} else {
+		printk("[camfl] IMX335: discard capture -> %s\n", alp_status_name(s));
+	}
+#endif
+
 	printk("[camfl] alp_camera_capture: waiting up to %u ms for one frame ...\n",
 	       CAM_CAPTURE_TIMEOUT_MS);
 	s = alp_camera_capture(cam, &frame, CAM_CAPTURE_TIMEOUT_MS);

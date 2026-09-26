@@ -135,36 +135,47 @@ properties:
     type: int
     required: false
     description: |
-      Issue #2327. Optional, Controller-mode only ("ipi-mode" = "Controller"):
-      the IPI pixel clock rate to request, in Hz, REPLACING
-      csi2_dw_validate_data()'s (video_csi_dw.c) normal Controller-mode
-      request -- the sensor's bare derived pixel rate (pll_fin * 2 * lanes /
-      bpp, no bandwidth margin, see that branch's own comment). That bare-rate
-      request assumes the reachable clock-control divisor it lands on happens
-      to keep the IPI line time close to the sensor's own line time -- true
-      for IMX296's 118.8 MHz -> 133.33 MHz (raspberry_pi_global_shutter_camera
-      .overlay's own comment walks through the margin this leaves), but not
-      guaranteed for every sensor: a 2-lane sensor's bare rate can exceed the
-      pixel-clock divider's reachable range outright (alif_pixclk_set_rate()
-      rejects above 200 MHz with -ERANGE), in which case there is no
-      derivable rate this binding can fall back to, and the shield must state
-      its own intended IPI pixel clock explicitly instead. When absent (0),
-      behaviour is byte-identical to before this property existed: the bare
-      derived pixrate is requested exactly as before. Requires csi-hline /
-      csi-vtotal to also be set in practice (the IPI timing is only
-      meaningful once its drain rate is one this property, not the
-      derivation, controls) -- this binding does not itself enforce that
-      pairing.
+      Issue #2327. Optional, effective in EITHER "ipi-mode": the IPI pixel
+      clock rate to request, in Hz, REPLACING csi2_dw_validate_data()'s
+      (video_csi_dw.c) normal request for that mode -- Controller mode's
+      bare derived pixel rate, or Camera mode's 20%-margined one (pll_fin * 2
+      * lanes / bpp [* 1.2 in Camera mode], no bandwidth margin in Controller
+      mode -- see that function's own comments on each branch). Both of those
+      normal requests assume the reachable clock-control divisor they land on
+      happens to keep the IPI line time close to the sensor's own line time
+      -- true for IMX296's Controller-mode bare rate (118.8 MHz -> 133.33 MHz,
+      raspberry_pi_global_shutter_camera.overlay's own comment walks through
+      the margin this leaves), but not guaranteed for every sensor: a 2-lane
+      sensor's bare OR margined rate can exceed the pixel-clock divider's
+      reachable range outright (alif_pixclk_set_rate() rejects above ~200 MHz
+      with -ERANGE) in EITHER mode -- IMX335's own case, bench runs 316-330:
+      its Camera-mode margined request (285.12 MHz) and even its bare one
+      (237.6 MHz) both exceed the ceiling, and its measured line timing could
+      not be matched in Controller mode either (see
+      innomaker_cam_imx335.overlay), so the shield states its own intended
+      IPI pixel clock explicitly under Camera mode instead. When absent (0),
+      behaviour is byte-identical to before this property existed in either
+      mode: the bare (Controller) or margined (Camera) derived pixrate is
+      requested exactly as before. In Camera mode, an explicit csi-pixclk-hz
+      also changes the HSD derivation (csi2_dw_validate_data()'s CAM branch)
+      to a lanes-aware formula -- see that branch's own comment; the legacy,
+      lanes-omitting formula is UNCHANGED when this property is absent, since
+      OV5647/OV9281 are both bench-proven against it. In Controller mode,
+      csi-hline / csi-vtotal are ALSO required in practice for this property
+      to be meaningful (the IPI timing is only meaningful once its drain rate
+      is one this property, not the derivation, controls) -- Camera mode
+      never uses csi-hsa/csi-hbp/csi-hline/csi-vsa/csi-vbp/csi-vtotal at all
+      (csi2_dw_validate_data()'s CAM branch always derives hsa/hbp/vsa/vbp/vfp/
+      vact itself); this binding does not itself enforce either pairing.
 
       Practical ceiling: ~200 MHz. This is alif_pixclk_set_rate()'s own
       reachable-divisor limit off its 400 MHz source (divisor 2), not a limit
       this property enforces itself -- a value above that is a shield
       authoring mistake and fails the build's clock_control_set_rate() call
       at runtime with an explicit LOG_ERR naming this property, not a
-      silent fallback to the derived bare pixrate (see
-      csi2_dw_validate_data()'s own comment on that -ERANGE path). Only
-      effective when "ipi-mode" is "Controller" -- set under "Camera" mode
-      it is ignored, with a LOG_WRN.
+      silent fallback to the derived bare/margined pixrate (see
+      csi2_dw_validate_data()'s own comment on that -ERANGE path), in EITHER
+      ipi-mode.
 
   ipi-fs-sync:
     type: boolean

@@ -7,7 +7,7 @@
 # the pool for it -- 3.5 MiB, the frame plus room for the
 # VIDEO_BUFFER_POOL_ALIGN padding and the heap's own bookkeeping.
 #
-# Issue #2327 (reviewer BLOCKER): the IMX335 shield's requested 2x2-binned
+# Issue #2327: the IMX335 shield's requested 2x2-binned
 # frame is 1296 x 972 x 2 = 2,519,424 bytes unpacked -- with the plain
 # defaults (two buffers, 2 MiB pool, same as every other shield below) the
 # pool cannot even fit ONE frame, let alone VBUF_COUNT's default two, so the
