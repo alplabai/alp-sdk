@@ -38,6 +38,7 @@
 #include <alp/peripheral.h>
 
 #include "../../../../src/backends/camera/camera_ops.h"
+#include "../../../../src/common/alp_slot_claim.h"
 
 ZTEST_SUITE(alp_camera_registry, NULL, NULL, NULL, NULL, NULL);
 
@@ -326,4 +327,92 @@ ZTEST(alp_camera_registry, test_alif_vendor_ext_validates_input_ranges_then_nosu
 	zassert_equal(alp_alif_camera_isp_gain_table_load(&fake, ALP_ALIF_CAMERA_CHANNEL_R, table, 16u),
 	              ALP_ERR_NOSUPPORT);
 	zassert_equal(alp_alif_camera_isp_lsc_lut_load(&fake, table, 64u), ALP_ERR_NOSUPPORT);
+}
+
+/* ---------- alp_camera_set_trigger_mode (issue #2287) --------------- */
+
+ZTEST(alp_camera_registry, test_set_trigger_mode_rejects_invalid_mode)
+{
+	/* Dispatcher's mode-range gate fires ahead of the NULL-handle check,
+     * same ordering as test_camera_configure_isp_rejects_null_isp's
+     * NULL-isp-before-NULL-handle gate above -- a NULL handle here would
+     * otherwise also be a valid ALP_ERR_NOT_READY result, so this only
+     * proves the INVAL gate by using a value outside alp_camera_trigger_t
+     * that a handle-touching path would never see. */
+	zassert_equal(alp_camera_set_trigger_mode(NULL, (alp_camera_trigger_t)7), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_camera_registry, test_set_trigger_mode_null_handle_not_ready)
+{
+	zassert_equal(alp_camera_set_trigger_mode(NULL, ALP_CAMERA_TRIGGER_EXTERNAL),
+	              ALP_ERR_NOT_READY);
+}
+
+ZTEST(alp_camera_registry, test_set_trigger_mode_unopened_handle_not_ready)
+{
+	/* Zero-initialised handle: lifecycle == ALP_HANDLE_LC_UNOPENED (0),
+     * so alp_handle_op_enter() rejects it exactly like a never-opened or
+     * already-closed handle would -- never reaches state.ops at all. */
+	struct alp_camera fake = { 0 };
+
+	zassert_equal(alp_camera_set_trigger_mode(&fake, ALP_CAMERA_TRIGGER_EXTERNAL),
+	              ALP_ERR_NOT_READY);
+}
+
+/* Fake ops vtable: only set_trigger_mode is ever called by the tests
+ * below, so every other slot stays NULL (the dispatcher never
+ * dereferences an op this suite doesn't exercise on this handle). */
+static alp_status_t _fake_set_trigger_mode(alp_camera_backend_state_t *state,
+                                           alp_camera_trigger_t        mode)
+{
+	/* Smuggle the desired return value through be_data -- the tests
+     * below stash it there before calling, avoiding a global. */
+	(void)mode;
+	return (alp_status_t)(intptr_t)state->be_data;
+}
+
+static const alp_camera_ops_t _fake_trigger_ops = {
+	.set_trigger_mode = _fake_set_trigger_mode,
+};
+
+ZTEST(alp_camera_registry, test_set_trigger_mode_passes_through_backend_status)
+{
+	/* Proves the dispatcher forwards whatever its backend's
+     * set_trigger_mode returns unmodified -- BUSY (stream running,
+     * IMX296-style "only via standby") and NOSUPPORT (no sensor in the
+     * chain has a trigger control at all, requested EXTERNAL) are two of
+     * the statuses every backend's real body (zephyr_video.c /
+     * v2n_n44_isp.c / alif_isp_pico.c) can produce from a mapped errno;
+     * this fake stands in for all three without requiring CONFIG_VIDEO on
+     * this native_sim build. NOTE: a real backend given FREE_RUN against a
+     * sensor with no trigger control returns ALP_OK instead of NOSUPPORT
+     * (already free-running, issue #2287 dev review) -- that translation
+     * lives inside each backend's own -ENOTSUP handling, not here, so this
+     * fake (which returns whatever be_data says regardless of mode) does
+     * not exercise it; EXTERNAL is used below specifically so this test
+     * doesn't assert the one combination real backends now special-case. */
+	struct alp_camera fake = {
+		.lifecycle = ALP_HANDLE_LC_OPEN,
+		.state     = { .ops = &_fake_trigger_ops, .be_data = (void *)(intptr_t)ALP_ERR_BUSY },
+	};
+	zassert_equal(alp_camera_set_trigger_mode(&fake, ALP_CAMERA_TRIGGER_EXTERNAL), ALP_ERR_BUSY);
+
+	fake.state.be_data = (void *)(intptr_t)ALP_ERR_NOSUPPORT;
+	zassert_equal(alp_camera_set_trigger_mode(&fake, ALP_CAMERA_TRIGGER_EXTERNAL),
+	              ALP_ERR_NOSUPPORT);
+}
+
+ZTEST(alp_camera_registry, test_set_trigger_mode_null_op_is_nosupport)
+{
+	/* A backend that never wires up set_trigger_mode at all (camera_ops_t
+     * field left NULL, e.g. a future silicon-specific backend that adds
+     * the vtable without every op) gets NOSUPPORT from the dispatcher
+     * itself, not a NULL-pointer call. */
+	static const alp_camera_ops_t no_trigger_ops = { 0 };
+	struct alp_camera             fake           = {
+		.lifecycle = ALP_HANDLE_LC_OPEN,
+		.state     = { .ops = &no_trigger_ops },
+	};
+	zassert_equal(alp_camera_set_trigger_mode(&fake, ALP_CAMERA_TRIGGER_EXTERNAL),
+	              ALP_ERR_NOSUPPORT);
 }

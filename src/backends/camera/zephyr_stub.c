@@ -76,14 +76,23 @@ static alp_status_t stub_configure_isp(alp_camera_backend_state_t    *state,
 	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
+static alp_status_t stub_set_trigger_mode(alp_camera_backend_state_t *state,
+                                          alp_camera_trigger_t        mode)
+{
+	(void)state;
+	(void)mode;
+	return ALP_ERR_NOT_IMPLEMENTED;
+}
+
 static const alp_camera_ops_t _ops = {
-	.open          = stub_open,
-	.start         = stub_start,
-	.stop          = stub_stop,
-	.capture       = stub_capture,
-	.release       = stub_release,
-	.configure_isp = stub_configure_isp,
-	.close         = NULL,
+	.open             = stub_open,
+	.start            = stub_start,
+	.stop             = stub_stop,
+	.capture          = stub_capture,
+	.release          = stub_release,
+	.configure_isp    = stub_configure_isp,
+	.set_trigger_mode = stub_set_trigger_mode,
+	.close            = NULL,
 };
 
 ALP_BACKEND_ANCHOR_DEFINE(camera);

@@ -74,16 +74,15 @@
  * trigger_gpio.overlay's header comment. Do not wire J3 until that
  * module's input circuit is confirmed from its own documentation.**
  *
- * This is the one place in this file that steps outside the portable
- * <alp/camera.h> surface: neither <alp/camera.h> nor src/backends/camera/
- * has any concept of "trigger mode" today (checked before writing this --
- * see the driver-level comment in zephyr/drivers/video/imx296.c on
- * IMX296_CID_TRIGGER_MODE for why it rides Zephyr's driver-private-CID
- * convention instead of a new portable control). Reaching the sensor's
- * Zephyr device directly, by the same DT alias src/backends/camera/
- * zephyr_video.c itself resolves (`alp-camera0`), is the smallest way to
- * reach a control the portable API does not carry, without adding one to
- * <alp/camera.h> on the strength of a single sensor's need.
+ * As of issue #2287's trigger-through-the-portable-API work, this app has a
+ * portable path too -- alp_camera_set_trigger_mode(cam, ALP_CAMERA_TRIGGER_EXTERNAL)
+ * before alp_camera_start() -- see examples/connectivity/camera-mjpeg-stream
+ * for that version. This file keeps the lower-level Zephyr video_set_ctrl()
+ * path below instead, since it also drives the raw XTRIG GPIO pulse and does
+ * its own per-pulse frame content checking -- both stay outside anything
+ * <alp/camera.h> exposes. The trigger CID itself is no longer driver-private:
+ * <zephyr/drivers/video/alp_video_ctrls.h> is the same shared SDK control
+ * alp_camera_set_trigger_mode()'s Zephyr-video backends now set.
  */
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
@@ -91,14 +90,12 @@
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/drivers/video-controls.h>
 #include <zephyr/drivers/video.h>
+#include <zephyr/drivers/video/alp_video_ctrls.h>
 
 #define AEN_CAMERA_TRIGGER_ACTIVE 1
 
-/* Mirrors zephyr/drivers/video/imx296.c's IMX296_CID_TRIGGER_MODE -- not a
- * public header (driver-private CID), so redefined here from the same
- * VIDEO_CID_PRIVATE_BASE convention; see that macro's comment in imx296.c. */
-#define TRIGGER_CID           (VIDEO_CID_PRIVATE_BASE + 0x01)
-#define TRIGGER_MODE_EXTERNAL 1
+#define TRIGGER_CID           VIDEO_CID_ALP_TRIGGER_MODE
+#define TRIGGER_MODE_EXTERNAL VIDEO_ALP_TRIGGER_MODE_EXTERNAL
 
 /* trigger_gpio.overlay puts the pin + its pinctrl state on the
  * special `/zephyr,user` node (see that overlay's header comment for why:

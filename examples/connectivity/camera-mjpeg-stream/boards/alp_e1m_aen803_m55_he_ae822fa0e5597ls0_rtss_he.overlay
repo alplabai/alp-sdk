@@ -29,6 +29,7 @@
  * note.
  */
 
+#include <zephyr/dt-bindings/gpio/gpio.h>
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 
 / {
@@ -114,4 +115,47 @@
 	 * doesn't care which MAC asks, and a random one means two boards on
 	 * the same network never collide. */
 	status = "okay";
+};
+
+/*
+ * Opt-in trigger-mode demo wiring (CONFIG_APP_CAMERA_TRIGGER, issue #2287
+ * unit 4, see Kconfig + README.md): reserves the same GPIO
+ * examples/aen/aen-camera-firstlight/trigger_gpio.overlay uses to pulse an
+ * IMX296 module's external XTRIG input -- P5_1 (Arduino D4,
+ * EVK_PIN_CK_DIO4) -- so main.c's trigger loop has a pin to drive when the
+ * Kconfig option is on. PRESENT UNCONDITIONALLY in this board overlay
+ * (there is no Kconfig-conditional devicetree in this build system: the
+ * Kconfig symbol is evaluated after CMake has already picked the overlay
+ * set), but INERT unless CONFIG_APP_CAMERA_TRIGGER=y -- nothing else in
+ * this file or main.c's non-trigger path reads gpio5 or `/zephyr,user`, so
+ * reserving the pin costs nothing on a normal (non-trigger) build.
+ *
+ * !!! ELECTRICAL POLARITY IS UNVERIFIED, SAME CAVEAT AS trigger_gpio.overlay
+ * !!! -- the INNO-MAKER module's J3 Trig+ input circuit has not been
+ * checked against its own documentation.  GPIO_ACTIVE_HIGH below is a
+ * PLACEHOLDER, not a confirmed fact.  Do not wire J3 until that circuit is
+ * confirmed -- see trigger_gpio.overlay's full header comment for the two
+ * possible cases this flag chooses between.  NOTHING in this example has
+ * been benched with a real trigger pulse.
+ */
+&pinctrl {
+	pinctrl_app_camera_trigger: pinctrl_app_camera_trigger {
+		group0 {
+			pinmux = <PIN_P5_1__GPIO>;
+		};
+	};
+};
+
+&gpio5 {
+	status = "okay";
+};
+
+/ {
+	zephyr_user: zephyr,user {
+		pinctrl-0 = <&pinctrl_app_camera_trigger>;
+		pinctrl-names = "default";
+
+		/* Placeholder polarity -- see this block's header comment. */
+		app-camera-trigger-gpios = <&gpio5 1 GPIO_ACTIVE_HIGH>;
+	};
 };

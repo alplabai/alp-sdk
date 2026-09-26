@@ -15,6 +15,7 @@
 #include <zephyr/drivers/emul.h>
 #include <zephyr/drivers/video-controls.h>
 #include <zephyr/drivers/video.h>
+#include <zephyr/drivers/video/alp_video_ctrls.h>
 #include <zephyr/ztest.h>
 
 #include "imx296_emul.h"
@@ -82,11 +83,12 @@
 #define LOWLAGTRG_FAST   BIT(0)
 #define SYNCSEL_NORMAL   0xc0
 
-/* Mirrors imx296.c's IMX296_CID_TRIGGER_MODE -- not a public header, so redefined here from the
- * same VIDEO_CID_PRIVATE_BASE convention (see that macro's comment in imx296.c). */
-#define IMX296_CID_TRIGGER_MODE      (VIDEO_CID_PRIVATE_BASE + 0x01)
-#define IMX296_TRIGGER_MODE_FREE_RUN 0
-#define IMX296_TRIGGER_MODE_EXTERNAL 1
+/* Shared SDK control (issue #2287): imx296.c registers VIDEO_CID_ALP_TRIGGER_MODE
+ * (<zephyr/drivers/video/alp_video_ctrls.h>) rather than a driver-private CID -- see that
+ * header's own comment. Local aliases here just keep this file's existing IMX296_* test names. */
+#define IMX296_CID_TRIGGER_MODE      VIDEO_CID_ALP_TRIGGER_MODE
+#define IMX296_TRIGGER_MODE_FREE_RUN VIDEO_ALP_TRIGGER_MODE_FREE_RUN
+#define IMX296_TRIGGER_MODE_EXTERNAL VIDEO_ALP_TRIGGER_MODE_EXTERNAL
 
 /* Sony IMX296 datasheet "Register List of All-pixel scan mode" (page 49): VMAX = 1118 lines/frame
  * -- see IMX296_VMAX in imx296.c. Exposure is in lines of integration (VMAX - SHS); the

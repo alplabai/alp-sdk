@@ -101,7 +101,9 @@
 #include <string.h>
 
 #include <zephyr/device.h>
+#include <zephyr/drivers/video-controls.h>
 #include <zephyr/drivers/video.h>
+#include <zephyr/drivers/video/alp_video_ctrls.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
 
@@ -429,27 +431,67 @@ static alp_status_t isp_configure_isp(alp_camera_backend_state_t    *state,
 	return ALP_OK;
 }
 
+/*
+ * VIDEO_CID_ALP_TRIGGER_MODE (issue #2287) set directly on `st->dev` -- for
+ * this backend, as for zephyr_video.c, `st->dev` IS the sensor node
+ * (isp_open() above resolves the same alp-camera0..3 alias straight to the
+ * sensor; the N44 on-die ISP has no wired CSI path of its own yet). Same
+ * errno mapping as zephyr_video.c: -ENOTSUP -> ALP_ERR_NOSUPPORT, -EBUSY ->
+ * ALP_ERR_BUSY.
+ */
+static alp_status_t isp_set_trigger_mode(alp_camera_backend_state_t *state,
+                                         alp_camera_trigger_t        mode)
+{
+	alp_v2n_n44_isp_state_t *st = (alp_v2n_n44_isp_state_t *)state->be_data;
+	if (st == NULL) return ALP_ERR_NOT_READY;
+	if (st->streaming) return ALP_ERR_BUSY;
+
+	struct video_control ctrl = { .id = VIDEO_CID_ALP_TRIGGER_MODE, .val = (int32_t)mode };
+	int                  err  = video_set_ctrl(st->dev, &ctrl);
+	if (err == -ENOTSUP && mode == ALP_CAMERA_TRIGGER_FREE_RUN) {
+		/* Already free-running with no trigger control to switch off --
+		 * see zephyr_video.c's z_set_trigger_mode() for the rationale. */
+		return ALP_OK;
+	}
+	return _errno_to_alp(err);
+}
+
 static void isp_close(alp_camera_backend_state_t *state)
 {
 	alp_v2n_n44_isp_state_t *st = (alp_v2n_n44_isp_state_t *)state->be_data;
 	if (st == NULL) return;
 	st->streaming = false;
+
 	/* Stop + drain + release every buffer this handle allocated --
 	 * _release_vbufs stops the stream itself (harmless when already
-	 * stopped), so the pool is whole again for the next open (#246). */
+	 * stopped), so the pool is whole again for the next open (#246). MUST
+	 * run before the trigger-mode reset just below -- see zephyr_video.c's
+	 * z_close() for why (issue #2287 dev review): a close() without a
+	 * prior stop() still has the real Zephyr stream running at this point,
+	 * and a streaming sensor can reject the reset with -EBUSY. */
 	_release_vbufs(st);
+
+	/* Reset trigger mode to FREE_RUN before the handle goes away -- see
+	 * zephyr_video.c's z_close() for the full rationale. Ignore the
+	 * result: -ENOTSUP is expected on any sensor with no trigger
+	 * control. */
+	struct video_control ctrl = { .id  = VIDEO_CID_ALP_TRIGGER_MODE,
+		                          .val = VIDEO_ALP_TRIGGER_MODE_FREE_RUN };
+	(void)video_set_ctrl(st->dev, &ctrl);
+
 	_free_state(st);
 	state->be_data = NULL;
 }
 
 static const alp_camera_ops_t _ops = {
-	.open          = isp_open,
-	.start         = isp_start,
-	.stop          = isp_stop,
-	.capture       = isp_capture,
-	.release       = isp_release,
-	.configure_isp = isp_configure_isp,
-	.close         = isp_close,
+	.open             = isp_open,
+	.start            = isp_start,
+	.stop             = isp_stop,
+	.capture          = isp_capture,
+	.release          = isp_release,
+	.configure_isp    = isp_configure_isp,
+	.set_trigger_mode = isp_set_trigger_mode,
+	.close            = isp_close,
 };
 
 ALP_BACKEND_REGISTER(camera,

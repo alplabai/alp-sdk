@@ -93,6 +93,7 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/video.h>
 #include <zephyr/drivers/video-controls.h>
+#include <zephyr/drivers/video/alp_video_ctrls.h>
 #include <zephyr/drivers/video/isp_frame_size.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -699,6 +700,44 @@ static alp_status_t isp_configure_isp(alp_camera_backend_state_t    *state,
 	return ALP_OK;
 }
 
+/*
+ * `st->dev` here is the ISP m2m device, not the sensor -- the sensor sits
+ * UPSTREAM of the ISP in this backend's pipeline (isp_open()'s own header
+ * comment). This still reaches the sensor: Zephyr v4.4's
+ * `video_find_ctrl()` (`video_ctrls.c`) walks a device's `src_dev` chain --
+ * ISP -> CAM -> CSI -> sensor, `isp_pico.c`'s own `REMOTE_DEVICE` chase --
+ * looking for the first device whose OWN registry has the requested CID, so
+ * `video_set_ctrl(st->dev, ...)` on the ISP handle lands on the sensor
+ * several links away without this backend needing to name it. No sensor
+ * anywhere in the chain that registers VIDEO_CID_ALP_TRIGGER_MODE ->
+ * `video_find_ctrl()` returns NULL -> `-ENOTSUP`, mapped to
+ * ALP_ERR_NOSUPPORT below same as every other backend.
+ */
+static alp_status_t isp_set_trigger_mode(alp_camera_backend_state_t *state,
+                                         alp_camera_trigger_t        mode)
+{
+	alp_alif_isp_pico_state_t *st = (alp_alif_isp_pico_state_t *)state->be_data;
+	if (st == NULL) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (st->streaming) {
+		/* Same standby-only restriction the sensor's own set_ctrl()
+		 * enforces (imx296_set_ctrl() -EBUSY) -- caught here too so a
+		 * chain with no sensor-level guard of its own still refuses
+		 * the switch while this backend's own stream is running. */
+		return ALP_ERR_BUSY;
+	}
+
+	struct video_control ctrl = { .id = VIDEO_CID_ALP_TRIGGER_MODE, .val = (int32_t)mode };
+	int                  err  = video_set_ctrl(st->dev, &ctrl);
+	if (err == -ENOTSUP && mode == ALP_CAMERA_TRIGGER_FREE_RUN) {
+		/* Already free-running with no trigger control to switch off --
+		 * see zephyr_video.c's z_set_trigger_mode() for the rationale. */
+		return ALP_OK;
+	}
+	return _errno_to_alp(err);
+}
+
 static void isp_close(alp_camera_backend_state_t *state)
 {
 	alp_alif_isp_pico_state_t *st = (alp_alif_isp_pico_state_t *)state->be_data;
@@ -706,10 +745,24 @@ static void isp_close(alp_camera_backend_state_t *state)
 		return;
 	}
 	st->streaming = false;
+
 	/* Stop + drain + release every buffer this handle allocated --
 	 * _release_vbufs stops the stream itself (harmless when already
-	 * stopped), so the pool is whole again for the next open (#246). */
+	 * stopped), so the pool is whole again for the next open (#246). MUST
+	 * run before the trigger-mode reset just below -- see zephyr_video.c's
+	 * z_close() for why (issue #2287 dev review): a close() without a
+	 * prior stop() still has the real Zephyr stream running at this point,
+	 * and a streaming sensor can reject the reset with -EBUSY. */
 	_release_vbufs(st);
+
+	/* Reset trigger mode to FREE_RUN before the handle goes away -- see
+	 * zephyr_video.c's z_close() for the full rationale. Ignore the
+	 * result: -ENOTSUP is expected whenever no sensor in this chain
+	 * (isp -> cam -> csi -> sensor) has a trigger control. */
+	struct video_control trig_ctrl = { .id  = VIDEO_CID_ALP_TRIGGER_MODE,
+		                               .val = VIDEO_ALP_TRIGGER_MODE_FREE_RUN };
+	(void)video_set_ctrl(st->dev, &trig_ctrl);
+
 	if (st->rgb565_vbuf != NULL) {
 		(void)video_buffer_release(st->rgb565_vbuf);
 		st->rgb565_vbuf = NULL;
@@ -719,13 +772,14 @@ static void isp_close(alp_camera_backend_state_t *state)
 }
 
 static const alp_camera_ops_t _ops = {
-	.open          = isp_open,
-	.start         = isp_start,
-	.stop          = isp_stop,
-	.capture       = isp_capture,
-	.release       = isp_release,
-	.configure_isp = isp_configure_isp,
-	.close         = isp_close,
+	.open             = isp_open,
+	.start            = isp_start,
+	.stop             = isp_stop,
+	.capture          = isp_capture,
+	.release          = isp_release,
+	.configure_isp    = isp_configure_isp,
+	.set_trigger_mode = isp_set_trigger_mode,
+	.close            = isp_close,
 };
 
 ALP_BACKEND_REGISTER(camera,

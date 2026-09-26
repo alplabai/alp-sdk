@@ -41,7 +41,9 @@
 #include <string.h>
 
 #include <zephyr/device.h>
+#include <zephyr/drivers/video-controls.h>
 #include <zephyr/drivers/video.h>
+#include <zephyr/drivers/video/alp_video_ctrls.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
 
@@ -411,27 +413,89 @@ static alp_status_t z_configure_isp(alp_camera_backend_state_t    *state,
 	return ALP_ERR_NOSUPPORT;
 }
 
+/*
+ * VIDEO_CID_ALP_TRIGGER_MODE (issue #2287) is set on `st->dev`. `st->dev` is
+ * whatever the board's alp-camera0..3 DT alias names -- the bare sensor node
+ * on some boards, but on AEN it's `&csi_capture_port` (a CSI/CPI
+ * intermediary, not the sensor itself). Either way this reaches the sensor:
+ * Zephyr v4.4's `video_find_ctrl()` (`video_ctrls.c`) walks a device's
+ * `src_dev` chain (CSI -> sensor, or ISP -> CAM -> CSI -> sensor on the
+ * alif_isp_pico.c backend) looking for the first device whose OWN registry
+ * has the requested CID, so this call reaches the sensor several links away
+ * without this backend needing to name it. A sensor that never registers
+ * this CID (everything except IMX296 today) answers -ENOTSUP, mapped to
+ * ALP_ERR_NOSUPPORT by _errno_to_alp() same as any other unsupported
+ * control; a sensor that rejects the switch while streaming (IMX296's
+ * imx296_set_ctrl(), "via sensor standby" only) answers -EBUSY, mapped to
+ * ALP_ERR_BUSY -- caught locally too (st->streaming) so this backend refuses
+ * the switch even against a sensor with no standby guard of its own.
+ */
+static alp_status_t z_set_trigger_mode(alp_camera_backend_state_t *state, alp_camera_trigger_t mode)
+{
+	alp_z_video_state_t *st = (alp_z_video_state_t *)state->be_data;
+	if (st == NULL) return ALP_ERR_NOT_READY;
+	if (st->streaming) return ALP_ERR_BUSY;
+
+	struct video_control ctrl = { .id = VIDEO_CID_ALP_TRIGGER_MODE, .val = (int32_t)mode };
+	int                  err  = video_set_ctrl(st->dev, &ctrl);
+	if (err == -ENOTSUP && mode == ALP_CAMERA_TRIGGER_FREE_RUN) {
+		/* No sensor in this chain has a trigger control at all -- it is
+		 * already free-running (the only mode it can ever be in), so
+		 * asking for FREE_RUN explicitly is a no-op success, not a
+		 * failure (issue #2287 dev review). EXTERNAL against the same
+		 * sensor still falls through to ALP_ERR_NOSUPPORT below -- that
+		 * mode genuinely cannot be entered. */
+		return ALP_OK;
+	}
+	return _errno_to_alp(err);
+}
+
 static void z_close(alp_camera_backend_state_t *state)
 {
 	alp_z_video_state_t *st = (alp_z_video_state_t *)state->be_data;
 	if (st == NULL) return;
 	st->streaming = false;
+
 	/* Stop + drain + release every buffer this handle allocated --
 	 * _release_vbufs stops the stream itself (harmless when already
-	 * stopped), so the pool is whole again for the next open (#246). */
+	 * stopped), so the pool is whole again for the next open (#246). MUST
+	 * run before the trigger-mode reset just below: a caller that closes
+	 * without a prior alp_camera_stop() still has the real Zephyr stream
+	 * running at this point (the `st->streaming = false` line above only
+	 * updates this backend's OWN bookkeeping flag -- it does not itself
+	 * stop anything), and IMX296's imx296_set_ctrl() rejects a trigger-mode
+	 * write with -EBUSY while its stream is running ("via sensor standby"
+	 * only). Resetting before this call used to silently no-op on exactly
+	 * that close-without-stop path, leaving the sensor stuck in
+	 * ALP_CAMERA_TRIGGER_EXTERNAL forever (issue #2287 dev review). */
 	_release_vbufs(st);
+
+	/* Reset trigger mode to FREE_RUN before the handle goes away: a prior
+	 * session leaving the sensor latched in ALP_CAMERA_TRIGGER_EXTERNAL
+	 * would otherwise persist across a fresh alp_camera_open() on the same
+	 * (static, never-reallocated) Zephyr device -- <alp/camera.h>'s own
+	 * doc comment on ALP_CAMERA_TRIGGER_FREE_RUN promises free-run is
+	 * every backend's default. Ignore the result: -ENOTSUP (sensor never
+	 * had a trigger control to begin with) is expected and harmless; any
+	 * other failure has nothing useful to do with it either, this is a
+	 * best-effort cleanup on a path with no return value of its own. */
+	struct video_control ctrl = { .id  = VIDEO_CID_ALP_TRIGGER_MODE,
+		                          .val = VIDEO_ALP_TRIGGER_MODE_FREE_RUN };
+	(void)video_set_ctrl(st->dev, &ctrl);
+
 	_free_state(st);
 	state->be_data = NULL;
 }
 
 static const alp_camera_ops_t _ops = {
-	.open          = z_open,
-	.start         = z_start,
-	.stop          = z_stop,
-	.capture       = z_capture,
-	.release       = z_release,
-	.configure_isp = z_configure_isp,
-	.close         = z_close,
+	.open             = z_open,
+	.start            = z_start,
+	.stop             = z_stop,
+	.capture          = z_capture,
+	.release          = z_release,
+	.configure_isp    = z_configure_isp,
+	.set_trigger_mode = z_set_trigger_mode,
+	.close            = z_close,
 };
 
 ALP_BACKEND_REGISTER(camera,
