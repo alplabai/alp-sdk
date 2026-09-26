@@ -39,7 +39,10 @@ def test_secure_element_examples_do_not_claim_current_signing():
         "examples/aen/aen-secure-element-sign/testcase.yaml",
         "examples/v2n/v2n-secure-element-sign/src/main.c",
         "examples/v2n/v2n-secure-element-sign/README.md",
-        "examples/v2n/v2n-secure-element-sign/testcase.yaml",
+        # v2n-secure-element-sign was retargeted to A55/Linux userspace
+        # (feat/v2m-deepx-rail-uboot): it has no Zephyr twister config any
+        # more, so there is no testcase.yaml to check here. aen's stays
+        # Zephyr and keeps its entry above.
     ]
 
     combined = "\n".join(_text(path) for path in paths)

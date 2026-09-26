@@ -18,8 +18,9 @@ The SDK targets two distinct product lines:
   `<alp/e1m_pinout.h>` (`ALP_E1M_PWM0`, `ALP_E1M_I2C0`,
   `ALP_E1M_GPIO_IO0..IO25`, …).
 - **E1M-X** (45×65 mm) — heterogeneous Cortex-A55 + Cortex-M33 on
-  every SKU, higher-TDP silicon.  Today: Renesas RZ/V2N (V2N101/102)
-  and the same with DEEPX DX-M1 (V2M101/102).  Symbol namespace:
+  every SKU, higher-TDP silicon.  Today: Renesas RZ/V2N
+  (V2N101/102/103) and the same with DEEPX DX-M1 (V2M101/102/103).
+  Symbol namespace:
   `<alp/e1m_x_pinout.h>` (`ALP_E1M_X_PWM0`, `ALP_E1M_X_I2C0`,
   `ALP_E1M_X_GPIO_IO0..IO35`, …).
 

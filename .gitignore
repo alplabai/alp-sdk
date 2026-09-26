@@ -161,11 +161,13 @@ notes/
 dist/
 *.dist-info/
 
-# meta-alp-sdk: the private LPDDR4X DDR param is OVERLAID into this public layer
+# meta-alp-sdk: the private LPDDR4X DDR params are OVERLAID into this public layer
 # tree at build time from alp-sdk-internal (see that repo's conf/bblayers-overlay.md).
-# It is Renesas-gen_tool-derived, SoM-hardware-specific config and MUST NOT be
-# committed to the public repo.
-meta-alp-sdk/recipes-bsp/trusted-firmware-a/trusted-firmware-a/ddr_param_def_lpddr4-alp.c
+# They are Renesas-gen_tool-derived, SoM-hardware-specific config and MUST NOT be
+# committed to the public repo. Glob, not a fixed list, so a future config variant
+# (any ddr_param_def_lpddr4-alp*.c) is covered without another edit here.
+# -alp.c is the D16S32 default; -alp-d8s32.c is the E1M-V2N103/V2M103 memory tier.
+meta-alp-sdk/recipes-bsp/trusted-firmware-a/trusted-firmware-a/ddr_param_def_lpddr4-alp*.c
 
 # Local ARM Vela / NPU toolchain virtualenv (not redistributed)
 .venv-vela/

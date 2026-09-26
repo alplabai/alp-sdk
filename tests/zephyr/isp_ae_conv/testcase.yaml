@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# twister coverage for zephyr/drivers/video/isp_sns_gain_conv.h's AE gain/exposure sensor-
+# register conversion helpers (issue #2287 Stage B unit 3) -- pure logic, no ISP driver, no
+# emulator, no device tree: the header has no Zephyr/hal_alif dependency by design (see its own
+# comment) so this suite runs the SAME conversion code isp_pico.c/hal_alif patch 0013's
+# isp_api_wrapper.c call, standalone.
+
+common:
+  tags:
+    - alp-sdk
+    - video
+    - camera
+
+tests:
+  alp_sdk.video.isp_ae_conv:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    min_ram: 16

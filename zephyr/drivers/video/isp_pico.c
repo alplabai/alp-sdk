@@ -20,10 +20,10 @@
  * this TU needed, <zephyr/drivers/video/isp-vsi.h> and its
  * isp_ctrl_params.h, are vendored VERBATIM (Apache-2.0) into
  * zephyr/include/zephyr/drivers/video/ -- see the HAL_ALIF note below.
- * Build-only proof: examples/aen/aen-isp-regcheck (AEN801/E8).  RUNTIME stays
- * BENCH-BLOCKED -- no camera sensor is wired on this hardware batch, and the
- * ISP only does useful work inside a camera->csi->isp->memory
- * media-controller graph.
+ * Build-only proof: examples/aen/aen-isp-regcheck (AEN801/E8).  RUNTIME:
+ * PROVEN on real silicon through a full camera->csi->isp->memory
+ * media-controller graph, a real OV5647 sensor over CSI-2, with AE/AWB
+ * running -- see examples/aen/aen-isp-capture.
  * ==========================================================================
  *
  * Vendored from the fork, then PORTED to the upstream Zephyr v4.4 video API by
@@ -48,11 +48,11 @@
  *     forwarding to the controller (a capture device) the fmt/caps `.type` is
  *     forced to VIDEO_BUF_TYPE_OUTPUT so the controller fills/accepts its
  *     OUTPUT side;
- *   - the value-pointer .set_ctrl/.get_ctrl callbacks are dropped (see the
- *     note above the DEVICE_API table); this also removes the only callers of
- *     isp_vsi_set_param/isp_vsi_get_param -- which is intentional (see the
- *     HAL_ALIF note below: those symbols are declared by the vendored
- *     isp-vsi.h but unused by this port).
+ *   - the value-pointer .set_ctrl/.get_ctrl callbacks (fork's `unsigned int
+ *     cid, void *value` form) are gone -- v4.4's registry-based .set_ctrl
+ *     (this device, uint32_t cid) is what's wired up now (isp_set_ctrl(),
+ *     below), reaching isp_vsi_set_param/isp_vsi_get_param through
+ *     video_init_ctrl() + this device's VIDEO_DEVICE_DEFINE chain.
  *
  * !!! HAL_ALIF VERSION MISMATCH -- RESOLVED (was FLAGGED) !!!
  * This 2026 isp_pico.c was authored against a NEWER hal_alif libisp wrapper than
@@ -66,14 +66,13 @@
  * isp_ctrl_params.h dependency) VERBATIM (Apache-2.0) from
  * alifsemi/zephyr_alif @ v2.3.0 into zephyr/include/zephyr/drivers/video/.  The
  * v2.3.0 wrapper exports isp_vsi_init/update_cfg/uninit/bottom_half/start/stop/
- * enqueue/dequeue -- everything this port calls.  It does not export
- * isp_vsi_set_param/isp_vsi_get_param, but the v4.4 port's ctrl-callback drop
- * (above) already removed their only callers, so that gap is moot.  Do NOT
- * fabricate any hal_alif API.
- * COMPILE + LINK: PROVEN (examples/aen/aen-isp-regcheck, CONFIG_VIDEO_ISP_VSI=y).
- * RUNTIME: BENCH-BLOCKED -- no camera sensor wired on this batch, so the m2m
- * capture graph (camera->csi->isp->memory) never runs.
- * vendor-ext, BENCH-BLOCKED (runtime only), ISP=Vivante blob (opt-in).
+ * enqueue/dequeue -- everything this port calls -- PLUS isp_vsi_set_param/
+ * isp_vsi_get_param (isp_api_wrapper.c:880, :1242), now reachable through
+ * isp_set_ctrl()'s VIDEO_CID_AUTO_WHITE_BALANCE/VIDEO_CID_EXPOSURE_AUTO
+ * cases, below.  Do NOT fabricate any hal_alif API.
+ * COMPILE + LINK + RUNTIME: PROVEN on real silicon (examples/aen/
+ * aen-isp-capture, CONFIG_VIDEO_ISP_VSI=y).
+ * vendor-ext, ISP=Vivante blob (opt-in).
  */
 #define DT_DRV_COMPAT vsi_isp_pico
 
@@ -82,14 +81,23 @@
 LOG_MODULE_REGISTER(ISP, CONFIG_VIDEO_LOG_LEVEL);
 
 #include <zephyr/drivers/video.h>
+#include <zephyr/drivers/video-controls.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/device_mmio.h>
 #include <zephyr/drivers/pinctrl.h>
 
 #include "isp_pico.h"
+#include <zephyr/drivers/video/isp_frame_size.h>
 #include <zephyr/drivers/video/video_alif.h>
 #include <soc_memory_map.h>
 #include <zephyr/cache.h>
+/* Upstream's private drivers/video/video_device.h (put on the include path by
+ * zephyr/CMakeLists.txt's ${ZEPHYR_BASE}/drivers/video dir) -- needed for
+ * VIDEO_DEVICE_DEFINE, below, so v4.4's control-registry walk
+ * (video_find_ctrl(), drivers/video/video_ctrls.c) can chain from this
+ * device to its upstream controller. */
+#include "video_device.h"
+#include "isp_sns_gain_conv.h"
 
 /*
  * alp-sdk ABI enforcement (Alp Lab AB): the hal_alif prebuilt ISP middleware
@@ -160,6 +168,32 @@ static const struct video_format_cap supported_input_fmts[] = {
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_GBRG10, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_GRBG10, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_RGGB10, 1920, 1080),
+	/*
+	 * VIDEO_PIX_FMT_SBGGR10P (packed) -- run 72: examples/aen/
+	 * aen-isp-capture's stage 3d/4 diagnostic requests this
+	 * exactly (mirroring what the OV5647 driver advertises and the CPI
+	 * negotiates on the CSI wire), matching the hal_alif
+	 * 0003-isp-add-sbggr10p-bggr10-input-mapping.patch wrapper mapping
+	 * added for it -- but this table, the ISP driver's OWN INPUT format
+	 * gate, had no case for it, so find_format() rejected it with
+	 * -ENOTSUP before isp_vsi_update_cfg() (and the wrapper's new
+	 * mapping) was ever reached.  See bayer_sample_depth(), below,
+	 * which already keys the correct PIN_MAPPING=1 (10-bit) off this
+	 * same fourcc.
+	 */
+	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_SBGGR10P, 1920, 1080),
+	/*
+	 * VIDEO_PIX_FMT_SRGGB10P (packed) -- issue #2287 Stage B: the fourcc IMX296
+	 * (zephyr/drivers/video/imx296.c) advertises for BOTH its modes, the fixed full-frame
+	 * mode and its ROI crop (same pixel format, different size -- imx296_fmts[] lists both
+	 * as SRGGB10P). Same shape as the VIDEO_PIX_FMT_SBGGR10P entry just above (this table is
+	 * the ISP driver's own INPUT format gate, separate from the hal_alif wrapper's own
+	 * fourcc->PIXEL_FORMAT_RGGB10 mapping -- see
+	 * zephyr/patches/hal_alif/0012-isp-srggb10p-input.patch); bayer_sample_depth() below
+	 * already keys the correct PIN_MAPPING=1 (10-bit) off this fourcc (its SRGGB10P case
+	 * predates this cap entry -- only the input-format gate was missing it).
+	 */
+	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_SRGGB10P, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_BGGR12, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_GBRG12, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_GRBG12, 1920, 1080),
@@ -215,27 +249,52 @@ static const struct video_format_cap supported_tpg_fmts[] = {
 	{ 0 },
 };
 
+/*
+ * OUTPUT (MI/channel) formats -- what isp_pixelfmt_from_fourcc()
+ * (isp_api_wrapper.c) can actually map to a libisp PIXEL_FORMAT_E the MI
+ * hardware will accept for a CHANNEL (VSI_MPI_ISP_SetChnAttr).
+ *
+ * Bench evidence (run 66, aen-isp-regcheck stage 1): setting OUTPUT format
+ * VIDEO_PIX_FMT_SBGGR10 (1280x720) made isp_vsi_update_cfg() fail with -22,
+ * logged as "E: Setting the Channel config failed!" from
+ * VSI_MPI_ISP_SetChnAttr.  Root cause (read from vsi_comm_video.h, isp_wrapper
+ * /inc/lib/): the library has TWO SEPARATE pixel-format namespaces -- Bayer
+ * PIXEL_FORMAT_{BGGR,GBRG,GRBG,RGGB}{8,10,12,14,16} (input-port-only, what
+ * the SENSOR/TPG transmits) vs. PIXEL_FORMAT_{RAW8,RAW10,RAW12}/YUV.../RGB888
+ * (output-channel-capable, what the MI can write to memory).
+ * isp_pixelfmt_from_fourcc() uses ONE switch for BOTH port->port_fmt
+ * (isp_vsi_update_cfg's port attrs) and channel->output_fmt (its channel
+ * attrs), and maps every VIDEO_PIX_FMT_{B,G}*{8,10,12,...} straight to the
+ * matching Bayer PIXEL_FORMAT_* -- valid for the port, REJECTED by
+ * SetChnAttr for the channel.  So the fourccs below are dropped from this
+ * list because they map to an input-only Bayer enum:
+ *   BGGR/GBRG/GRBG/RGGB {8,10,12} (isp_pixelfmt_from_fourcc:201-224)
+ * ...and these are dropped because they map to -1 (unhandled -> "Unsupported
+ * Channel pixel format!", isp_api_wrapper.c:577-580) or to a Bayer enum via a
+ * TODO hack instead of the RAW* family:
+ *   VIDEO_PIX_FMT_Y10, VIDEO_PIX_FMT_Y12 (no case in isp_pixelfmt_from_fourcc
+ *     -> -1), VIDEO_PIX_FMT_Y10P (maps to PIXEL_FORMAT_GRBG10, a documented
+ *     TODO placeholder pending a real RAW10 mapping -- see the wrapper fix
+ *     note above isp_stream_start(), below).
+ * What remains is exactly what isp_pixelfmt_from_fourcc() maps to a
+ * genuinely output-capable PIXEL_FORMAT_E: YUYV/VYUY/UYVY (packed YUV422,
+ * Alif's own DFP default MI output -- RTE_Device.h RTE_ISP_OUTPUT_FORMAT=32
+ * == PIXEL_FORMAT_YUYV), NV12/NV21/NV16/NV61 (semi-planar YUV),
+ * YUV422P/YUV420 (planar YUV), GREY (-> PIXEL_FORMAT_RAW8), Y12P
+ * (-> PIXEL_FORMAT_RAW12), RGB888_PLANAR_PRIVATE.
+ */
 static const struct video_format_cap supported_output_fmts[] = {
-	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_BGGR8, 1920, 1080),
-	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_GBRG8, 1920, 1080),
-	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_GRBG8, 1920, 1080),
-	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_RGGB8, 1920, 1080),
-	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_BGGR10, 1920, 1080),
-	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_GBRG10, 1920, 1080),
-	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_GRBG10, 1920, 1080),
-	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_RGGB10, 1920, 1080),
-	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_BGGR12, 1920, 1080),
-	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_GBRG12, 1920, 1080),
-	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_GRBG12, 1920, 1080),
-	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_RGGB12, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_NV12, 1920, 1080),
+	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_NV21, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_NV16, 1920, 1080),
-	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_YUV422P, 19200, 1080),
+	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_NV61, 1920, 1080),
+	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_YUV422P, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_YUV420, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_YUYV, 1920, 1080),
+	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_VYUY, 1920, 1080),
+	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_UYVY, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_GREY, 1920, 1080),
-	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_Y10, 1920, 1080),
-	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_Y12, 1920, 1080),
+	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_Y12P, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_RGB888_PLANAR_PRIVATE, 1920, 1080),
 	{ 0 },
 };
@@ -322,12 +381,33 @@ static void isp_bottom_half(const struct device *dev)
 	const struct isp_config *config = dev->config;
 	struct isp_data *data = dev->data;
 	struct video_buffer *vbuf = NULL;
+	/*
+	 * #2287 Stage B unit 3, reviewer fix (bench run 301): the CPI-only-pause-vs-full-stop
+	 * decision below used to key off `signal_status == VIDEO_BUF_DONE`, which the
+	 * isp_attach_buffer_to_hw() failure branch (below) ALSO set -- a real hardware-attach
+	 * failure would then get the gentle pause instead of a full stop. This local is set true
+	 * ONLY by the genuine "no more empty buffers" starvation branch; isp_bottom_done uses it,
+	 * not signal_status, to choose.
+	 */
+	bool starved = false;
 
 	int ret;
 
-	/* Do bottom half processing of all the modules at the end of frame. */
-	isp_vsi_bottom_half(dev, &data->init_cfg, data->mi_mis);
+	/* A frame-end with no stream running (latched before this boot, or
+	 * landing after a stop) has no buffer to complete and must not reach
+	 * the VSI lib, which may not even be configured yet.
+	 */
+	if (!data->is_streaming) {
+		return;
+	}
 
+	/* Do bottom half processing of all the modules at the end of frame.
+	 * Same lib_lock isp_apply_wb()/isp_apply_ae() take -- this runs on
+	 * isp_cb_workq, those run from isp_stream_start() on the caller's
+	 * thread; see struct isp_data's lib_lock comment (isp_pico.h). */
+	k_mutex_lock(&data->lib_lock, K_FOREVER);
+	isp_vsi_bottom_half(dev, &data->init_cfg, data->mi_mis);
+	k_mutex_unlock(&data->lib_lock);
 
 	vbuf = k_fifo_peek_head(&data->fifo_in);
 	if (vbuf == NULL) {
@@ -363,6 +443,7 @@ static void isp_bottom_half(const struct device *dev)
 			"Stopping video capture. If re-queued, restart stream.");
 		data->is_streaming = false;
 		signal_status = VIDEO_BUF_DONE;
+		starved = true;
 		goto isp_bottom_done;
 	}
 	data->curr_vid_buf = (uint32_t) vbuf->buffer;
@@ -371,17 +452,79 @@ static void isp_bottom_half(const struct device *dev)
 	if (ret) {
 		LOG_ERR("Failed to attach buffer to hardware!");
 		data->is_streaming = false;
-		signal_status = VIDEO_BUF_DONE;
+		signal_status = VIDEO_BUF_ERROR;
 		goto isp_bottom_done;
+	}
+
+	/*
+	 * #2287 Stage B unit 3 (bench runs 307/308): re-arm the CPI HERE,
+	 * now that isp_attach_buffer_to_hw() (above) has told the ISP's own MI where the NEXT
+	 * frame goes -- alif_cam_cpi_resume() (video_alif.c) is a pure SNAPSHOT-mode re-arm (one
+	 * frame per call); calling it before the ISP has a destination buffer ready is exactly
+	 * what used to happen (alif_cam_work_helper()'s own STOP-work re-arming unconditionally,
+	 * racing this decision) and corrupted the buffer just handed to the app. A failure here is
+	 * logged, not fatal to the frame already retired above (fifo_out) -- it does mean the NEXT
+	 * frame will not arrive; nothing in this driver currently detects and recovers from that
+	 * beyond the app's own bench-observable frame-rate stall.
+	 */
+	if (config->controller) {
+		ret = alif_cam_cpi_resume(config->controller);
+		if (ret) {
+			LOG_ERR("Failed to re-arm CPI capture for the next frame! ret=%d", ret);
+		}
 	}
 
 isp_bottom_done:
 	if (!data->is_streaming) {
-		/* v4.4 video-API shim (Alp Lab AB): video_stream_stop gained an
+		/*
+		 * In TPG mode config->controller is a legitimate NULL (see
+		 * video_isp_init()'s init-time check) -- there is no endpoint
+		 * device to forward stream-stop to; skip it rather than call
+		 * video_stream_stop(NULL, ...) (harmless -- its own dev==NULL
+		 * guard returns -EINVAL without touching *dev -- but dead code
+		 * whose ignored return obscures that this path does nothing
+		 * useful in TPG mode).
+		 * v4.4 video-API shim (Alp Lab AB): video_stream_stop gained an
 		 * `enum video_buf_type`; the controller is the capture source ->
 		 * VIDEO_BUF_TYPE_OUTPUT.
+		 *
+		 * #2287 Stage B unit 3 (bench runs 298-301): `starved` (set ONLY by the genuine "no
+		 * more empty buffers" branch above -- NOT by signal_status, which
+		 * isp_attach_buffer_to_hw() failure also used to set to VIDEO_BUF_DONE, wrongly
+		 * routing a real hardware failure down this same gentle path; reviewer fix, bench
+		 * run 301) means genuine buffer starvation, not a real error. A full
+		 * video_stream_stop() drives the CSI-2 endpoint + sensor into STANDBY every time the
+		 * app doesn't re-enqueue an ISP output buffer before the next frame, which for
+		 * IMX296 also restarts its ~9-frame init period (datasheet p54) on every resume --
+		 * bench run 301 confirms the STANDBY-cycling removal itself: "masked after 16"
+		 * appears once instead of every restart, and frame rate rose ~4x (0.8 -> 3.4 fps
+		 * app-side). On genuine starvation, this driver simply does NOT re-arm the CPI (see
+		 * isp_attach_buffer_to_hw()'s own success-path comment, above -- there is no active
+		 * register action for a pause any more (bench runs 307/308):
+		 * alif_cam_cpi_pause()/hw_cam_cpi_only_stop() used to actively interrupt a
+		 * capture that alif_cam_work_helper()'s own STOP-work had ALREADY wrongly re-armed
+		 * behind this decision's back -- that race is gone now that only THIS function ever
+		 * re-arms the CPI in ISP-consumer mode), leaving the endpoint + sensor (and the ISP's
+		 * own AE/AWB library state -- nothing here touches isp_vsi_stop()) running, simply
+		 * idle, across the pause. A genuine error (VIDEO_BUF_ERROR, the other branches above)
+		 * still gets the full stop: something is actually wrong, not just backpressure, and
+		 * this driver has no evidence a CPI-only pause is safe to resume from after one.
+		 *
+		 * Whether AE itself now converges is a SEPARATE, still-open question run 301 did NOT
+		 * answer: SHS stayed at its exposure-lines floor (2 lines) and GAIN at 0 for all 60
+		 * frames even with the STANDBY-cycling gone -- isp_stream_start()'s restart still
+		 * re-runs isp_vsi_update_cfg()/isp_vsi_start() on every app re-queue (unchanged by
+		 * this fix), and whether THAT resets the AE library's own convergence state each
+		 * time is not established either way yet.
 		 */
-		video_stream_stop(config->controller, VIDEO_BUF_TYPE_OUTPUT);
+		if (config->controller) {
+			if (starved) {
+				data->controller_cpi_paused = true;
+			} else {
+				video_stream_stop(config->controller, VIDEO_BUF_TYPE_OUTPUT);
+				data->controller_cpi_paused = false;
+			}
+		}
 		data->curr_vid_buf = 0;
 	}
 
@@ -400,6 +543,61 @@ static void isp_cb_work(struct k_work *work)
 	/* Call a helper to process the things further. */
 	isp_bottom_half(data->dev);
 }
+
+/*
+ * #2287 Stage B unit 3 (bench runs 307/308): re-arms the CPI ONLY, for isp_isr_handler()'s
+ * corrupted-frame path -- see struct isp_data's own cpi_rearm_work comment (isp_pico.h) for why
+ * this needs to be a separate, minimal work item rather than calling alif_cam_cpi_resume()
+ * directly from ISR context (it takes a k_mutex) or reusing cb_work (which retires a real,
+ * successfully-captured frame -- there isn't one here).
+ */
+static void isp_cpi_rearm_work(struct k_work *work)
+{
+	struct isp_data *data = CONTAINER_OF(work, struct isp_data, cpi_rearm_work);
+	const struct device *dev = data->dev;
+	const struct isp_config *config = dev->config;
+	int ret;
+
+	if (!data->is_streaming || !config->controller) {
+		return;
+	}
+
+	ret = alif_cam_cpi_resume(config->controller);
+	if (ret) {
+		LOG_ERR("Failed to re-arm CPI after a corrupted frame! ret=%d", ret);
+	}
+}
+
+/*
+ * #2287 Stage B unit 3 (bench runs 307-310, stall-recovery gap): registered with the controller
+ * via alif_cam_register_error_cb() (video_isp_init(), below) -- called from
+ * alif_video_cam_isr()'s (video_alif.c) OWN ISR context whenever it sees a CPI/CSI-level error
+ * (INTR_OUTFIFO_OVERRUN/INTR_INFIFO_OVERRUN/INTR_BRESP_ERR) that never reaches the ISP's own
+ * frame-end interrupt at all (the frame failed before it got that far). MUST be ISR-safe:
+ * k_work_submit_to_queue() is (unlike alif_cam_cpi_resume() itself, which takes a k_mutex --
+ * exactly why this reuses cpi_rearm_work, isp_cpi_rearm_work() above, instead of calling resume
+ * directly here).
+ */
+static void isp_cpi_rearm_error_cb(void *user_data)
+{
+	const struct device *dev = user_data;
+	struct isp_data *data = dev->data;
+
+	k_work_submit_to_queue(&data->cb_workq, &data->cpi_rearm_work);
+}
+
+/*
+ * Bench instrumentation (Alp Lab AB), CONFIG_VIDEO_ISP_VSI_FRAME_STATS
+ * (default n -- review round, post-3511cd180): counts MI_INTR_MP_FRAME_END
+ * events -- i.e. IRQ 368 ("mi-isp") actually firing a completed-frame
+ * interrupt, not just the shared isp_isr_handler() being entered for one of
+ * its other status bits.  Global (not static) + volatile so a RAM-run bench
+ * app can read it with an `extern` declaration, or a debugger can read the
+ * symbol directly over SWD post-mortem.
+ */
+#ifdef CONFIG_VIDEO_ISP_VSI_FRAME_STATS
+volatile uint32_t isp_mi_frame_end_count;
+#endif
 
 static void isp_isr_handler(const struct device *dev)
 {
@@ -479,9 +677,22 @@ static void isp_isr_handler(const struct device *dev)
 
 	if (mi_int_st & MI_INTR_MP_FRAME_END) {
 		LOG_DBG("End of Frame at MI interface of Main picture.");
+#ifdef CONFIG_VIDEO_ISP_VSI_FRAME_STATS
+		isp_mi_frame_end_count++;
+#endif
 		if (is_not_corrupted_frame) {
 			k_work_submit_to_queue(&data->cb_workq, &data->cb_work);
 		} else {
+			/*
+			 * #2287 Stage B unit 3 (bench runs 307/308): a corrupted frame skips
+			 * cb_work (no valid data for isp_bottom_half() to retire) -- but with
+			 * the ISP now the ONLY thing that ever re-arms the CPI, skipping
+			 * cb_work also skips the re-arm the next frame needs, stalling the
+			 * stream. cpi_rearm_work does ONLY that (isp_pico.h's own comment) --
+			 * submitted here instead of calling alif_cam_cpi_resume() directly
+			 * (it takes a k_mutex, unsafe from this ISR context).
+			 */
+			k_work_submit_to_queue(&data->cb_workq, &data->cpi_rearm_work);
 			is_not_corrupted_frame = true;
 		}
 	}
@@ -507,6 +718,27 @@ int isp_set_fmt(const struct device *dev,
 	if (!fmt) {
 		LOG_ERR("Illegal format to set!");
 		return -EINVAL;
+	}
+
+	/*
+	 * #2287 Stage B unit 3, reviewer fix (bench run 303, major): a format change while
+	 * data->controller_cpi_paused has no dirty-flag equivalent to wb_dirty/ae_dirty (a real
+	 * format change here writes port->port_fmt/channel->output_fmt AND config->controller's own
+	 * format IMMEDIATELY, synchronously -- there is nothing to defer or re-check at the next
+	 * isp_stream_start()) -- Fix D's light resume path (isp_stream_start()) has no way to know
+	 * a format changed since the pause and would resume with the OLD isp_vsi_update_cfg() state
+	 * still in the VSI library. Rejecting outright (-EBUSY) is the safer of the two options the
+	 * review round raised (vs. silently clearing controller_cpi_paused here, which would let a
+	 * LATER isp_stream_start() reach video_stream_start(config->controller, ...) against a
+	 * controller alif_cam_stream_start() still sees as is_streaming=true -- since only a REAL
+	 * stop, not a forgotten flag, actually unwinds that -- -EBUSY there too, just deferred and
+	 * harder to diagnose): a caller changing the format while paused gets an explicit, correct
+	 * error immediately, and can stop()/start() first if a fresh format really is needed.
+	 */
+	if (data->controller_cpi_paused) {
+		LOG_ERR("Cannot set format while resuming from a CPI-only starvation pause -- "
+			"stop the stream first!");
+		return -EBUSY;
 	}
 
 	switch (fmt->type) {
@@ -543,10 +775,59 @@ int isp_set_fmt(const struct device *dev,
 			return 0;
 		}
 
+		/*
+		 * find_format() rejects with -ENOTSUP right here for any fourcc
+		 * not in supported_output_fmts[] -- in particular every Bayer
+		 * format (BGGR/GBRG/GRBG/RGGB), which the libisp wrapper CAN set
+		 * on the port (input) but NOT on the channel (output; run 66 --
+		 * see the comment above supported_output_fmts[]).  This is the
+		 * fail-fast point for that class of error: catching it here means
+		 * an app misconfiguring the output format finds out from
+		 * video_set_format() immediately, not from a cryptic -EINVAL out
+		 * of isp_stream_start() -> isp_vsi_update_cfg() three calls later.
+		 */
 		ret = find_format(fmt, supported_output_fmts);
 		if (ret) {
 			LOG_ERR("Desired format is not supported by the ISP Output EP!");
 			return ret;
+		}
+
+		/*
+		 * isp_apply_mrsz() divides by (height - 1) to scale 4:2:0
+		 * chroma; find_format() above ignores height_step (ISP_VIDEO_
+		 * FORMAT_CAP sets .height_step = 4), so it lets a height < 4
+		 * or odd height through: height 1 traps DIV_0_TRP, height 2
+		 * gives a degenerate SCALE_VC=0, and an odd height gives a
+		 * non-integer 2:1 chroma downscale. Reject here, at the
+		 * fail-fast point this switch already uses for output-format
+		 * errors.
+		 */
+		if ((fmt->pixelformat == VIDEO_PIX_FMT_YUV420 || fmt->pixelformat == VIDEO_PIX_FMT_NV12 ||
+		     fmt->pixelformat == VIDEO_PIX_FMT_NV21) &&
+		    (fmt->height < 4 || (fmt->height % 2) != 0)) {
+			LOG_ERR("4:2:0 output height %u must be even and >= 4!", fmt->height);
+			return -EINVAL;
+		}
+
+		/*
+		 * A caller that doesn't already know its own stride (every
+		 * backend negotiating a fresh format) passes pitch == 0 and
+		 * expects this driver to fill it in -- video_set_format()'s
+		 * fmt is in/out for exactly this reason (see
+		 * video_stm32_venc.c's stm32_venc_set_fmt() for the same
+		 * convention upstream). alp_isp_default_pitch()
+		 * (isp_frame_size.h) is the single place this driver AND
+		 * src/backends/camera/alif_isp_pico.c's buffer-pool sizing
+		 * derive a format's byte geometry from -- see that header for
+		 * why planar/semi-planar YUV gets the LUMA-only line stride,
+		 * not an average-bpp-derived one.
+		 */
+		if (fmt->pitch == 0u) {
+			fmt->pitch = alp_isp_default_pitch(fmt->pixelformat, fmt->width);
+			if (fmt->pitch == 0u) {
+				LOG_ERR("Cannot derive a pitch for this output fourcc!");
+				return -EINVAL;
+			}
 		}
 
 		channel->output_fmt = *fmt;
@@ -555,6 +836,730 @@ int isp_set_fmt(const struct device *dev,
 		LOG_ERR("Unsupported buffer type!");
 		return -EINVAL;
 
+	}
+
+	return 0;
+}
+
+/*
+ * Review round (post-3511cd180), item "sensor-specific constants in the
+ * generic ISP driver": isp_apply_wb()/isp_apply_ae(), below, are written to
+ * stay usable for whatever sensor is bound, not just the OV5647 this branch
+ * bring-up happens to target.
+ *
+ * AWB: instead of this driver carrying its own calibration table (a prior
+ * revision borrowed Alif's ARX3A0 reference table -- wrong sensor, and a
+ * generic driver has no business embedding ANY sensor's calibration data),
+ * isp_apply_wb() now round-trips isp_vsi_get_param()/isp_vsi_set_param():
+ * read back whatever calibration isp_vsi_update_cfg()'s SetCalib() already
+ * loaded (isp_param_conf.h, selected at BUILD time by which
+ * CONFIG_ISP_LIB_*_MODULE Kconfigs + calibration table the integrator
+ * compiles in -- not this driver's concern), flip only .enable/.op_mode,
+ * write it back unchanged otherwise. AWB now defaults ON
+ * (isp_init_controls()'s .def=1, matching the calibration's own
+ * OP_TYPE_AUTO AWB) -- the calling example can still turn it off, this
+ * driver doesn't presume a sensor needs it disabled.
+ *
+ * AE: int_time_min/max are derived from video_get_frmival() (the sensor's
+ * OWN reported frame period, via the isp -> cam -> csi -> sensor chain) --
+ * sensor-agnostic, no register facts needed. again_min/max are derived from
+ * video_query_ctrl(VIDEO_CID_ANALOGUE_GAIN) (the sensor's OWN registered
+ * gain-control range) converted to this library's fixed-point scale via
+ * isp_sns_gain_lib_from_ctrl(), below -- that ONE conversion (a sensor's
+ * analogue-gain register isn't standardized to any particular "1x" value or
+ * scale -- linear or logarithmic -- by Zephyr's video API) is the one piece
+ * of this file that stays sensor-specific by construction, same status as
+ * hal_alif patch 0005/0013's matching write-back scaling (isp_api_wrapper.c).
+ *
+ * #2287 Stage B unit 3: this used to be a single hardcoded
+ * ISP_AE_GAIN_REG_PER_1X = 16 constant (OV5647_AGC_GAIN reg 0x10 = 1.0x,
+ * linear). IMX296's GAIN register (0x3204-0x3205) is 0.1 dB/count instead
+ * (logarithmic) -- isp_sns_gain_conv.h now holds BOTH conversions, and
+ * CONFIG_VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS (zephyr/kconfigs/vendor-alif-
+ * peripherals.kconfig) picks which one isp_sns_gain_ctrl_from_lib()/
+ * isp_sns_gain_lib_from_ctrl() below use -- upstreamable: false in
+ * patches.yml for the matching isp_api_wrapper.c hunk, same reason as
+ * before: this is board/sensor-specific, not a hal_alif-generic fix.
+ */
+
+/*
+ * Kconfig-dispatched wrappers around isp_sns_gain_conv.h's pure conversion
+ * functions -- non-static: hal_alif patch 0013's isp_api_wrapper.c
+ * (a DIFFERENT translation unit, in the hal_alif module) extern-declares
+ * and calls these directly instead of re-deriving the OV5647-linear-only
+ * scaling patch 0005 used to hardcode there.
+ */
+uint32_t isp_sns_gain_ctrl_from_lib(uint32_t total_1024)
+{
+	if (IS_ENABLED(CONFIG_VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS)) {
+		return isp_sns_gain_lib_to_db_tenths(total_1024);
+	}
+	return isp_sns_gain_lib_to_linear_reg(total_1024, CONFIG_VIDEO_ISP_VSI_SNS_GAIN_REG_PER_1X);
+}
+
+uint32_t isp_sns_gain_lib_from_ctrl(uint32_t ctrl_reg)
+{
+	if (IS_ENABLED(CONFIG_VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS)) {
+		return isp_sns_gain_db_tenths_to_lib(ctrl_reg);
+	}
+	return isp_sns_gain_linear_reg_to_lib(ctrl_reg, CONFIG_VIDEO_ISP_VSI_SNS_GAIN_REG_PER_1X);
+}
+
+uint32_t isp_sns_exposure_ctrl_from_lines(uint32_t lines)
+{
+	return isp_sns_exposure_lines_to_ctrl(lines, CONFIG_VIDEO_ISP_VSI_SNS_EXPOSURE_CTRL_PER_LINE);
+}
+
+/*
+ * Run 74 established the proven-working order: apply AFTER isp_vsi_start()'s
+ * Enable*, not before -- at the time, isp_vsi_update_cfg()'s SetCalib()
+ * (isp_api_wrapper.c) reloaded WB/AE from isp_param_conf.h on EVERY restart,
+ * so anything applied before Enable* was simply overwritten by it. Patch
+ * 0007 (zephyr/patches/hal_alif/0007-isp-setcalib-load-once.patch) changed
+ * that: SetCalib in isp_vsi_update_cfg() is now guarded by a once-flag (see
+ * the run-85 comment above isp_apply_aem_wbm()), so it only fires on the
+ * FIRST isp_vsi_update_cfg() call, never again on a later restart. A
+ * runtime isp_vsi_set_param() therefore now persists across restarts on its
+ * own; run 74's apply-after-Enable* ordering remains correct (still needed
+ * for the FIRST apply to stick), it just no longer needs re-applying every
+ * time.
+ *
+ * Patch 0009 (zephyr/patches/hal_alif/0009-isp-setcalib-before-3a-callbacks.
+ * patch) fixed the real bug behind "AWB/AE never move": the pinned hal_alif
+ * registered the AWB/AE callbacks BEFORE SetCalib. With it, the
+ * calibration's own OP_TYPE_AUTO AE+AWB converge from the FIRST stream with
+ * no runtime isp_vsi_set_param() and no restart at all (bench runs 153,
+ * 156) -- so isp_stream_start() (the call site, below) only calls
+ * isp_apply_wb()/isp_apply_ae() when wb_dirty/ae_dirty is set
+ * (isp_set_ctrl()'s dirty flags, isp_pico.h): any ctrl change sets the
+ * flag, and ae_dirty additionally starts true (isp_init_controls()) so
+ * the first stream start pushes the live, sensor-queried frame-period/
+ * gain ceilings too. Patch 0009 also adds its OWN unconditional
+ * SetCalib call at isp_vsi_init() (init time), so SetCalib now runs at most
+ * TWICE per boot -- once from patch 0009 at init, once from patch 0007's
+ * once-guard at the first isp_vsi_update_cfg() -- never on a later restart.
+ */
+static int isp_apply_wb(const struct device *dev, bool enable)
+{
+	struct isp_data *data = dev->data;
+	struct isp_params params = {0};
+	int ret;
+
+	if (!IS_ENABLED(CONFIG_ISP_LIB_WB_MODULE)) {
+		return 0;
+	}
+
+	k_mutex_lock(&data->lib_lock, K_FOREVER);
+
+	/*
+	 * Run 90-106 bisect: isp_vsi_get_param()'s wrapper implementation
+	 * (isp_api_wrapper.c) gates EACH block on `params->valid_mask &
+	 * ISP_PARAM_MASK_*` -- the SAME mask the caller is expected to set
+	 * BEFORE the call, not just before the matching set_param(). This
+	 * used to be left at 0 here (params = {0}, valid_mask set only AFTER
+	 * the get, for the SET below), so the get silently populated
+	 * NOTHING -- params.wb stayed all-zero from the local initializer.
+	 * The round-trip's whole POINT (preserve run_interval/speed/
+	 * tolerance/init_color_temp/calib from whatever SetCalib loaded) was
+	 * therefore a no-op: this function pushed enable=1/AUTO with a
+	 * ZEROED calib table and zeroed convergence tuning -- poisoned AWB,
+	 * not a working one. Fix: set valid_mask BEFORE the get, so the
+	 * round-trip is real.
+	 */
+	params.valid_mask = ISP_PARAM_MASK_WB;
+
+	ret = isp_vsi_get_param(&data->init_cfg, &params);
+	if (ret) {
+		k_mutex_unlock(&data->lib_lock);
+		LOG_ERR("Failed to read back WB/calib state: %d", ret);
+		return ret;
+	}
+
+	/* Run 107 observability: what did the round-trip ACTUALLY read back?
+	 * illum[ISP_ILLUMINANT_D50] (index 3) -- run 106/74's hand-built
+	 * struct used init_color_temp=5000 (D50), the same illuminant this
+	 * logs. */
+	LOG_DBG("WB GET rc=%d enable=%u op_mode=%u run_interval=%u speed=%u "
+		"tolerance=%u init_color_temp=%u calib.rg_min=%d rg_max=%d "
+		"illum[D50] temp=%u r=0x%x gr=0x%x gb=0x%x b=0x%x",
+		ret,
+		params.wb.enable,
+		params.wb.op_mode,
+		params.wb.run_interval,
+		params.wb.speed,
+		params.wb.tolerance,
+		params.wb.init_color_temp,
+		params.wb.calib.rg_min,
+		params.wb.calib.rg_max,
+		params.wb.calib.illuminant[ISP_ILLUMINANT_D50].color_temp,
+		params.wb.calib.illuminant[ISP_ILLUMINANT_D50].r_gain,
+		params.wb.calib.illuminant[ISP_ILLUMINANT_D50].gr_gain,
+		params.wb.calib.illuminant[ISP_ILLUMINANT_D50].gb_gain,
+		params.wb.calib.illuminant[ISP_ILLUMINANT_D50].b_gain);
+
+	params.wb.enable   = enable ? 1 : 0;
+	params.wb.op_mode  = ISP_OP_AUTO;
+
+	/* Run 84: VIDEO_ISP_VSI_WB_MANUAL_GAIN diagnostic escape hatch (see the
+	 * Kconfig help) -- forces specific gains instead of round-tripping
+	 * whatever SetCalib()'s .wb default loaded, to isolate "is the colour
+	 * pipeline downstream of WB correct" from "has AWB itself converged".
+	 */
+#if defined(CONFIG_VIDEO_ISP_VSI_WB_MANUAL_GAIN)
+	/* #if, not IS_ENABLED(): the four VIDEO_ISP_VSI_WB_GAIN_* symbols
+	 * below only exist in Kconfig's output (autoconf.h) when this parent
+	 * bool is set (each `depends on VIDEO_ISP_VSI_WB_MANUAL_GAIN`) -- an
+	 * IS_ENABLED() runtime guard still requires the identifiers to be
+	 * DECLARED for the compiler even in the dead branch; only a
+	 * preprocessor #if drops the reference entirely when they don't
+	 * exist.
+	 */
+	params.wb.op_mode  = ISP_OP_MANUAL;
+	params.wb.r_gain   = CONFIG_VIDEO_ISP_VSI_WB_GAIN_R;
+	params.wb.gr_gain  = CONFIG_VIDEO_ISP_VSI_WB_GAIN_GR;
+	params.wb.gb_gain  = CONFIG_VIDEO_ISP_VSI_WB_GAIN_GB;
+	params.wb.b_gain   = CONFIG_VIDEO_ISP_VSI_WB_GAIN_B;
+#endif /* defined(CONFIG_VIDEO_ISP_VSI_WB_MANUAL_GAIN) */
+
+	ret = isp_vsi_set_param(&data->init_cfg, &params);
+
+	k_mutex_unlock(&data->lib_lock);
+
+	LOG_DBG("WB SET enable=%u op_mode=%u run_interval=%u speed=%u tolerance=%u "
+		"init_color_temp=%u rc=%d",
+		params.wb.enable,
+		params.wb.op_mode,
+		params.wb.run_interval,
+		params.wb.speed,
+		params.wb.tolerance,
+		params.wb.init_color_temp,
+		ret);
+
+	if (ret) {
+		LOG_ERR("Failed to %s AWB: %d", enable ? "enable" : "disable", ret);
+	}
+
+	return ret;
+}
+
+/*
+ * Run 90-107 bisect (bench run 107's "Control id 0x9e0903 is inactive" /
+ * "Failed to write Total Gain to the sensor!" regression): split out of
+ * isp_apply_ae() -- the SENSOR-side gating below (force the sensor's OWN
+ * AEC/AUTOGAIN out of the way) must happen BEFORE the ISP starts capturing
+ * frames at all, not deferred with the library-side isp_vsi_set_param(AE)
+ * push (isp_apply_ae(), below). The deferred apply only runs AFTER at
+ * least one frame-end + the settle delay; isp_vsi_bottom_half()'s own
+ * write-back (hal_alif patch 0005) can attempt a VIDEO_CID_ANALOGUE_GAIN
+ * write on the VERY FIRST frame-end, before that deferred work has had a
+ * chance to turn the sensor's own AUTOGAIN off -- ov5647.c's
+ * video_auto_cluster_ctrl() clusters gain under autogain, so a write while
+ * autogain is still on is rejected as "inactive" (the same failure mode
+ * bench run 76 first found, just from a different cause this time: missing
+ * synchronisation, not a missing call). Called synchronously from
+ * isp_stream_start(), BEFORE isp_vsi_start()'s Enable* -- so the sensor is
+ * already gated before the first frame, hence the first frame-end, can
+ * happen at all. Unconditional every restart, including the FIRST one
+ * (video_set_ctrl()'s own registry, video_ctrls.c, already no-ops a write
+ * whose value hasn't changed): patch 0009 registers the calibration's
+ * OP_TYPE_AUTO AE before SetCalib, so library AE is already running from
+ * the first stream regardless of this driver's ctrl default.
+ *
+ * Always gates the sensor to MANUAL (EXPOSURE_AUTO=MANUAL, AUTOGAIN=0),
+ * regardless of which mode the library's own AE module is running in: the
+ * ISP -- never the sensor's own AEC/AUTOGAIN -- owns exposure/gain either
+ * way. With the lib in AUTO it computes exposure/gain and writes them to
+ * the sensor; with the lib in MANUAL (isp_apply_ae(false), below) it writes
+ * its OWN manual values to the sensor instead. A gate that handed the
+ * sensor back to its own AUTO for library-MANUAL left the sensor's gain
+ * control INACTIVE for patch 0005's per-frame write-back ("Control id
+ * 0x9e0903 is inactive" logged every frame).
+ */
+static void isp_apply_ae_sensor_gate(const struct device *dev)
+{
+	const struct isp_config *config = dev->config;
+
+	if (!IS_ENABLED(CONFIG_ISP_LIB_AE_MODULE) || !config->controller) {
+		return;
+	}
+
+	struct video_control sensor_exp_auto = {
+		.id  = VIDEO_CID_EXPOSURE_AUTO,
+		.val = VIDEO_EXPOSURE_MANUAL,
+	};
+	struct video_control sensor_autogain = {
+		.id  = VIDEO_CID_AUTOGAIN,
+		.val = 0,
+	};
+	int rc;
+
+	/*
+	 * #2287 Stage B unit 3 (bench runs 299/300, wording fixed bench run 303): -ENOTSUP here
+	 * (IMX296 on E1M-AEN803) is expected noise, not a real failure -- IMX296 has no separate
+	 * sensor-side auto-exposure/auto-gain MODE to gate; its exposure/gain are set through
+	 * VIDEO_CID_EXPOSURE/VIDEO_CID_ANALOGUE_GAIN, which this driver's writeback
+	 * (isp_api_wrapper.c) already writes -- and which imx296_set_ctrl() (imx296.c) in turn
+	 * writes as SHS/GAIN, its own inversely-related hardware registers, not the same units --
+	 * so imx296.c registers neither VIDEO_CID_EXPOSURE_AUTO nor VIDEO_CID_AUTOGAIN at all and
+	 * video_find_ctrl() (drivers/video/video_ctrls.c) returns -ENOTSUP
+	 * for a control ID no device in the chain registers. Any OTHER
+	 * error (a sensor that DOES claim the control but rejects this
+	 * specific value) still warns -- that would be a real problem this
+	 * gate is supposed to prevent (see the file comment above).
+	 */
+	rc = video_set_ctrl(config->controller, &sensor_exp_auto);
+	if (rc == -ENOTSUP) {
+		LOG_DBG("Sensor has no EXPOSURE_AUTO control (rc=%d) -- nothing to gate", rc);
+	} else if (rc) {
+		LOG_WRN("Failed to set sensor EXPOSURE_AUTO: %d", rc);
+	}
+	rc = video_set_ctrl(config->controller, &sensor_autogain);
+	if (rc == -ENOTSUP) {
+		LOG_DBG("Sensor has no AUTOGAIN control (rc=%d) -- nothing to gate", rc);
+	} else if (rc) {
+		LOG_WRN("Failed to set sensor AUTOGAIN: %d", rc);
+	}
+}
+
+/*
+ * #2271: latched like isp_apply_wb()'s own LOG_ERR-worthy conditions --
+ * log the AE-attr readback mismatch once per episode (not every apply),
+ * re-arm once a later readback agrees again. See isp_apply_ae()'s own
+ * readback block, below, for what this actually catches.
+ */
+static bool ae_readback_mismatch_logged;
+
+static int isp_apply_ae(const struct device *dev, bool enable)
+{
+	const struct isp_config *config = dev->config;
+	struct isp_data *data = dev->data;
+	struct isp_params params = {0};
+	/* 15 fps / OV5647_AGC_GAIN-range fallback -- see the block comment
+	 * above for why this is the one sensor-tuned constant left, and only
+	 * as a fallback for when the live queries below fail. 2095 lines
+	 * (VTS - 4, 15 fps) * 31749 ns/line (OV5647_HTS_640X480_BINNED /
+	 * pixel_rate, bench run 61) = 66514155 ns.
+	 */
+	uint32_t int_time_max_us = 66514;
+	uint32_t again_min       = 1024;  /* library units, 1x = 1024 */
+	uint32_t again_max       = 65472; /* (1023 OV5647 AGC_GAIN max) * 1024 / 16 */
+
+	if (!IS_ENABLED(CONFIG_ISP_LIB_AE_MODULE)) {
+		return 0;
+	}
+
+	if (config->controller) {
+		/*
+		 * Run for BOTH modes, not just enable=true: manual mode
+		 * (below) derives its fixed int_time/again from these same
+		 * ceilings, not from the 15 fps/OV5647_AGC_GAIN-range
+		 * fallback above -- gating this block on `enable` left
+		 * manual mode always using that fallback ceiling regardless
+		 * of the sensor's actual configured frame rate.
+		 *
+		 * Sensor-agnostic exposure ceiling: the sensor's
+		 * OWN reported frame period (video_get_frmival(),
+		 * forwarded down the isp -> cam -> csi -> sensor
+		 * chain by alif_cam_get_frmival()/csi2_dw_get_frmival())
+		 * minus a generic 2% blanking margin -- no per-sensor
+		 * line-time constant needed. Falls back to the 15 fps
+		 * OV5647 constant above if the query fails (no sensor
+		 * bound, TPG mode, driver doesn't implement it).
+		 */
+		struct video_frmival frmival;
+
+		if (video_get_frmival(config->controller, &frmival) == 0 &&
+		    frmival.denominator > 0) {
+			uint64_t frame_period_us =
+				(uint64_t)frmival.numerator * 1000000ULL /
+				frmival.denominator;
+			uint64_t margin_us = frame_period_us / 50; /* 2% */
+
+			int_time_max_us = (uint32_t)(frame_period_us > margin_us
+							      ? frame_period_us - margin_us
+							      : frame_period_us);
+		}
+
+		/*
+		 * Sensor-agnostic gain CEILING only: query the
+		 * sensor's OWN registered VIDEO_CID_ANALOGUE_GAIN
+		 * range instead of assuming OV5647_AGC_GAIN_MAX -- the
+		 * register-to-library-units conversion is still
+		 * sensor-specific (isp_sns_gain_lib_from_ctrl(), block
+		 * comment above); the range ENDPOINT (max) is not.
+		 * again_min is NOT derived from cq.range.min (run 81:
+		 * that range's own minimum is the register's absolute
+		 * floor, e.g. 0, not a meaningful "1x" reference) --
+		 * always the literal 1024 = 1x floor (isp_sns_gain_
+		 * lib_from_ctrl() of the linear/dB "1x" register value,
+		 * declared above, unconditionally: AE should never be
+		 * told to command sub-1x gain.
+		 */
+		struct video_ctrl_query cq = {
+			.dev = config->controller,
+			.id  = VIDEO_CID_ANALOGUE_GAIN,
+		};
+
+		if (video_query_ctrl(&cq) == 0 && cq.range.max > 0) {
+			again_max = isp_sns_gain_lib_from_ctrl((uint32_t)cq.range.max);
+		}
+
+		/*
+		 * #2287 bench run 313: the sensor's own manual control range
+		 * (queried just above) is deliberately WIDER than the AE
+		 * library's calibrated ceiling on IMX296 -- a caller setting
+		 * gain manually can still reach the full register range
+		 * (VIDEO_CID_ANALOGUE_GAIN's driver-side max stays 0-480,
+		 * zephyr/drivers/video/imx296.c), but hal_alif patch 0013's
+		 * calibration caps the library's OWN autonomous ceiling lower
+		 * (IMX296_AE_MAX_AGAIN, 24.0 dB, the analog-only half of the
+		 * register -- imx296_ae_envelope.h's own comment). Pushing
+		 * the wider sensor range here OVERWROTE that lower calibrated
+		 * ceiling every isp_stream_start() -- the library's own
+		 * compiled-in clamp still held (bench-confirmed: run 313's
+		 * `again` converged to 0x3f65 = 16229, not higher), but the
+		 * push itself disagreed with what SetCalib() had already
+		 * loaded, logged as "AE attr mismatch after set" on every
+		 * readback below. CONFIG_VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS
+		 * (0 = no cap, every non-IMX296 sensor) clamps the PUSHED
+		 * value to agree with the calibration instead.
+		 */
+		if (CONFIG_VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS > 0) {
+			uint32_t calib_again_max = isp_sns_gain_db_tenths_to_lib(
+				CONFIG_VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS);
+
+			if (again_max > calib_again_max) {
+				again_max = calib_again_max;
+			}
+		}
+	}
+
+	params.valid_mask   = ISP_PARAM_MASK_AE;
+	params.ae.op_mode        = enable ? ISP_OP_AUTO : ISP_OP_MANUAL;
+	params.ae.ae_target      = CONFIG_VIDEO_ISP_VSI_AE_TARGET;
+	params.ae.damp_over      = 0x40;
+	params.ae.damp_under     = 0x40;
+	params.ae.tolerance      = 1;
+	params.ae.run_interval   = 1;
+	params.ae.ae_mode        = ISP_AE_MODE_FIX_FRAME_RATE;
+	params.ae.int_time_min   = 32;
+	params.ae.int_time_max   = int_time_max_us;
+	params.ae.again_min      = again_min;
+	params.ae.again_max      = again_max;
+	/*
+	 * dgain is documented "1x = 256" (isp_ctrl_params.h), but the
+	 * write-back's totalGain = aGain * dGain / ISP_SNS_GAIN_ACCU
+	 * (ISP_SNS_GAIN_ACCU = 1024, isp_api_wrapper.c) and Alif's own
+	 * isp_param_conf.h reference AE block both treat dgain as 1x = 1024
+	 * -- confirmed on the bench (run 78): with dgain pinned to 256 (the
+	 * documented-but-wrong value) the sensor received exactly 1/4 of the
+	 * library's intended gain (register 0x04 instead of 0x10 for a
+	 * nominal 1x). Pinned to 1024 (unity in the SAME scale as again) so
+	 * all headroom flows through again, matching OV5647's single
+	 * combined AGC_GAIN register; the header's "1x = 256" comment
+	 * appears to be copied from ISP_WB_GAIN_S's (correct, different)
+	 * scale, not verified against this path.
+	 */
+	params.ae.dgain_min      = 1024;
+	params.ae.dgain_max      = 1024;
+
+	/*
+	 * #2287 Stage B unit 3, Fix B (bench runs 299/300): unconditional now -- this used to be
+	 * gated on `!enable` (manual mode only), leaving int_time/again/dgain at struct isp_params
+	 * params = {0}'s zero-init for AUTO mode. INFERENCE, not confirmed against the closed
+	 * VSI_MPI_ISP library's source: the library reads THESE fields as an initial AE seed even
+	 * in auto mode, not just the manual-mode fixed values. Observed with the gate in place
+	 * (runs 299/300): AE ON parked at SHS register 0x45C (1116 decimal -- exposure =
+	 * lines_per_frame - SHS = 1118 - 1116 = 2 LINES, not SHS itself) and GAIN 0 for all 60
+	 * frames, ae_stable never set, meanLum printed only 3 times across 60 frames (its own
+	 * frame counter resetting -- AE restarting from scratch on every ISP stream restart, see
+	 * isp_bottom_half()'s starvation-pause fix above). Bench run 301 (this Fix B + Fix C
+	 * together) still shows the SAME SHS 0x45C/GAIN 0 parking despite Fix C removing the
+	 * sensor STANDBY-cycling (confirmed separately: "masked after 16" now logs once instead
+	 * of every restart, ~4x fps) -- so whether THIS seed hoist is actually the fix, versus
+	 * isp_stream_start() still re-running isp_vsi_update_cfg()/isp_vsi_start() on every app
+	 * re-queue and resetting AE's convergence state some other way, remains open; see the AE
+	 * diagnostic run in progress on the bench. For MANUAL mode (enable=false) this is still
+	 * exactly the fixed value that gets applied and held; for AUTO mode it is only the
+	 * STARTING point the library's own convergence loop is asserted (not proven) to move away
+	 * from -- int_time_max/2 (half of the same sensor-derived ceiling) at the 1x gain floor,
+	 * not zero.
+	 */
+	params.ae.int_time = params.ae.int_time_max / 2;
+	params.ae.again    = again_min;
+	params.ae.dgain    = 1024;
+
+	k_mutex_lock(&data->lib_lock, K_FOREVER);
+	int ret = isp_vsi_set_param(&data->init_cfg, &params);
+
+	k_mutex_unlock(&data->lib_lock);
+
+	if (ret) {
+		LOG_ERR("Failed to %s AE: %d", enable ? "enable" : "disable", ret);
+	}
+
+	/*
+	 * #2271 proof-of-effect: read back what the library is ACTUALLY
+	 * holding, not just what this call pushed -- bench evidence (runs
+	 * 211/212) was isp_apply_ae() computing a correct ceiling while a
+	 * per-frame writeback (hal_alif patch 0010's clamp) still saturated
+	 * against a DIFFERENT, mismatched ceiling (isp_calib_param.ae,
+	 * isp_param_conf.h, loaded by SetCalib() before this function ever
+	 * ran). Those two runs' values decode exactly against the
+	 * calibration's AE block; with hal_alif patch 0011 (OV5647 calib
+	 * envelope) applied, bench run 213 held within the sensor's real
+	 * envelope (int_time_max=98000 again_max=65472, intLine settling at
+	 * 3145/again 0xffc0 in a dark room) with 0 clamp-triggered
+	 * `E: Control value is invalid` lines -- but which ceiling the
+	 * library actually applies (this push, the calibration block, or
+	 * something else) is NOT established by this readback: the library
+	 * likely just echoes back the struct it was handed, so a "matches"
+	 * result here proves this driver's push round-trips, not that the
+	 * library is ENFORCING it. Same valid_mask-before-get pattern
+	 * isp_apply_wb() uses above: ISP_PARAM_MASK_AE must be set BEFORE
+	 * the get, or isp_vsi_get_param()'s wrapper (isp_api_wrapper.c)
+	 * silently leaves every field zeroed. Only attempted when the push
+	 * itself succeeded -- a failed set already logged above, and a
+	 * readback under a not-yet-applied push would just report the
+	 * library's PRIOR state, not a new mismatch.
+	 */
+	if (ret == 0) {
+		struct isp_params rb = { .valid_mask = ISP_PARAM_MASK_AE };
+		int               rb_ret;
+
+		k_mutex_lock(&data->lib_lock, K_FOREVER);
+		rb_ret = isp_vsi_get_param(&data->init_cfg, &rb);
+		k_mutex_unlock(&data->lib_lock);
+
+		if (rb_ret) {
+			LOG_WRN("AE attr readback failed: %d", rb_ret);
+		} else {
+			bool matches = (rb.ae.int_time_max == params.ae.int_time_max) &&
+			               (rb.ae.again_max == params.ae.again_max) &&
+			               (rb.ae.dgain_min == params.ae.dgain_min) &&
+			               (rb.ae.dgain_max == params.ae.dgain_max) &&
+			               (rb.ae.ae_target == params.ae.ae_target);
+
+			LOG_INF("AE readback: int_time_max=%u again_max=%u dgain_min=%u "
+			        "dgain_max=%u ae_target=%u",
+			        rb.ae.int_time_max,
+			        rb.ae.again_max,
+			        rb.ae.dgain_min,
+			        rb.ae.dgain_max,
+			        rb.ae.ae_target);
+
+			if (!matches && !ae_readback_mismatch_logged) {
+				LOG_ERR("AE attr mismatch after set: pushed int_time_max=%u "
+				        "again_max=%u dgain_min=%u dgain_max=%u ae_target=%u, "
+				        "library holds int_time_max=%u again_max=%u "
+				        "dgain_min=%u dgain_max=%u ae_target=%u",
+				        params.ae.int_time_max,
+				        params.ae.again_max,
+				        params.ae.dgain_min,
+				        params.ae.dgain_max,
+				        params.ae.ae_target,
+				        rb.ae.int_time_max,
+				        rb.ae.again_max,
+				        rb.ae.dgain_min,
+				        rb.ae.dgain_max,
+				        rb.ae.ae_target);
+				ae_readback_mismatch_logged = true;
+			} else if (matches) {
+				ae_readback_mismatch_logged = false;
+			}
+		}
+	}
+
+	return ret;
+}
+
+/*
+ * Run 84: root cause for AE/AWB never stabilising even after every fix so
+ * far (idempotent-skip removed, apply-after-Enable* ordering, again_min/max
+ * derivation, maxDgain unity fix -- all real, all necessary, none
+ * sufficient). isp_vsi_update_cfg()'s SetCalib() (isp_api_wrapper.c:578)
+ * was reloaded -- before patch 0007's once-flag guard -- the ENTIRE
+ * isp_param_conf.h calib blob on every restart, including
+ * .aem.blockWin (default {0,0,1920,1080}, isp_param_conf.h:54-63) and
+ * .wbm.measRect -- both sized for a 1080p sensor, not this camera's 640x480
+ * frame.
+ *
+ * Run 85 correction: h_size/v_size are the WHOLE window, not a per-block
+ * size -- the vendor header's "Size of One Block" wording (mpi_isp_expm.h/
+ * mpi_isp_wbm.h) is misleading; the library divides the window by its own
+ * fixed 5x5 grid internally. Run 84's width/5,height/5 (128/96 in) landed in
+ * the ISP_EXP_H_SIZE/V_SIZE hardware registers as 24/18 -- 128/96 divided by
+ * 5 AGAIN, i.e. a 5x5-block-of-blocks, not the intended 128x96 window. Bench
+ * evidence (run 85, meanLum now 16000 not 0): the grid completed a real
+ * measurement even at the wrong window size, just the wrong one -- passing
+ * the FULL frame (h_size=width, v_size=height, offsets 0) is what the
+ * hardware register readback needs to land on 128/96 (640/5, 480/5).
+ *
+ * Unlike isp_apply_wb()/isp_apply_ae() (3A convergence STATE -- must NOT be
+ * re-applied every restart, run 81's regression), the AEM/WBM windows carry
+ * no convergence state of their own -- re-issuing identical values every
+ * restart is a no-op once SetCalib itself only runs once (see the run-85
+ * hal_alif patch guarding VSI_MPI_ISP_SetCalib with a once-flag,
+ * isp_api_wrapper.c). Left unconditional here anyway: cheap, and it also
+ * covers a future format change mid-run this driver doesn't currently
+ * support switching without a full re-init.
+ *
+ * wbm.wpRange: max_y/max_c_sum/min_c are YCbCr-mode-only fields, unused in
+ * RGB mode (mpi_isp_wbm.h's ISP_WBM_WP_RANGE_S doc) -- left as read back.
+ * ref_cr_max_r/min_y_max_g/ref_cb_max_b ARE the RGB-mode upper bounds
+ * (mpi_isp_wbm.h:84-96: "RGB Mode: only pixels values R/G/B < MaxR/G/B
+ * contribute") -- run 85 bench evidence (WBM count 0, means 0xFF) showed the
+ * compiled-in calib's bounds exclude every real (non-clipped-white) pixel in
+ * this scene; 0xF0 admits anything short of sensor clipping.
+ */
+static int isp_apply_aem_wbm(const struct device *dev, uint16_t width, uint16_t height)
+{
+	struct isp_data *data = dev->data;
+	struct isp_params params = {0};
+	int ret;
+
+	if (!IS_ENABLED(CONFIG_ISP_LIB_EXPOSUREM_MODULE) &&
+	    !IS_ENABLED(CONFIG_ISP_LIB_WBM_MODULE)) {
+		return 0;
+	}
+
+	k_mutex_lock(&data->lib_lock, K_FOREVER);
+
+	/* Same valid_mask-before-get bug as isp_apply_wb() (see its comment)
+	 * -- must be set BEFORE isp_vsi_get_param(), not just before the
+	 * matching set_param(), or the wrapper's GET gate
+	 * (`params->valid_mask & ISP_PARAM_MASK_*`) drops the read silently.
+	 * AEM's own fields are all explicitly overwritten below regardless,
+	 * so this didn't poison AEM; WBM's wpRange fields NOT explicitly
+	 * overwritten (max_y/max_c_sum/min_c, unused in RGB mode but still
+	 * meant to be real read-back values, not zero) WERE silently zeroed.
+	 */
+	if (IS_ENABLED(CONFIG_ISP_LIB_EXPOSUREM_MODULE)) {
+		params.valid_mask |= ISP_PARAM_MASK_AEM;
+	}
+	if (IS_ENABLED(CONFIG_ISP_LIB_WBM_MODULE)) {
+		params.valid_mask |= ISP_PARAM_MASK_WBM;
+	}
+
+	ret = isp_vsi_get_param(&data->init_cfg, &params);
+	if (ret) {
+		k_mutex_unlock(&data->lib_lock);
+		LOG_ERR("Failed to read back AEM/WBM calib state: %d", ret);
+		return ret;
+	}
+
+	if (IS_ENABLED(CONFIG_ISP_LIB_EXPOSUREM_MODULE)) {
+		params.aem.enable   = 1;
+		params.aem.alt_mode = 0;
+		params.aem.h_offs   = 0;
+		params.aem.v_offs   = 0;
+		params.aem.h_size   = width;
+		params.aem.v_size   = height;
+	}
+
+	if (IS_ENABLED(CONFIG_ISP_LIB_WBM_MODULE)) {
+		/* valid_mask already has ISP_PARAM_MASK_WBM, set before the
+		 * get above. */
+		params.wbm.enable      = 1;
+		params.wbm.meas_mode   = ISP_WBM_MODE_RGB;
+		params.wbm.h_offs      = 0;
+		params.wbm.v_offs      = 0;
+		params.wbm.h_size      = width;
+		params.wbm.v_size      = height;
+		/* RGB-mode upper bounds -- see the function comment. maxY/
+		 * maxCSum/minC untouched (YCbCr-mode-only, left as read back).
+		 */
+		params.wbm.ref_cr_max_r = 0xF0;
+		params.wbm.min_y_max_g  = 0xF0;
+		params.wbm.ref_cb_max_b = 0xF0;
+	}
+
+	ret = isp_vsi_set_param(&data->init_cfg, &params);
+
+	k_mutex_unlock(&data->lib_lock);
+
+	if (ret) {
+		LOG_ERR("Failed to set AEM/WBM measurement windows: %d", ret);
+	}
+
+	return ret;
+}
+
+/*
+ * Runs 153, 156 (patch 0009: zephyr/patches/hal_alif/
+ * 0009-isp-setcalib-before-3a-callbacks.patch): the calibration's own
+ * OP_TYPE_AUTO AE+AWB converge from the FIRST stream with no help from this
+ * driver, so a ctrl left at its calibration-matching default (range.def,
+ * isp_init_controls()) needs no isp_vsi_set_param() call, ever -- just
+ * record whether the app pushed the value away from that default.
+ * isp_stream_start() (the only place still stopped when a change could
+ * safely take effect) is what actually calls isp_apply_wb()/isp_apply_ae(),
+ * once, the next time it runs; see the ponytail comment below.
+ */
+static int isp_set_ctrl(const struct device *dev, uint32_t cid)
+{
+	struct isp_data *data = dev->data;
+
+	switch (cid) {
+	/* Any change is re-applied, including a return to the default: once
+	 * a SET has moved the lib off its calibration state, only another SET
+	 * moves it back.
+	 */
+	case VIDEO_CID_AUTO_WHITE_BALANCE:
+		data->ctrls.wb_dirty = true;
+		break;
+	case VIDEO_CID_EXPOSURE_AUTO:
+		data->ctrls.ae_dirty = true;
+		break;
+	default:
+		return -ENOTSUP;
+	}
+
+	/*
+	 * ponytail: a ctrl change made while the ISP is already streaming is
+	 * only stored here -- it takes effect at the NEXT isp_stream_start()
+	 * (bench-observed, runs 131-138: a SET issued mid-stream is stored by
+	 * the library but not ACTIVATED until a full stop+restart). Upgrade
+	 * path, if a same-stream live toggle turns out to matter: drive a
+	 * stop+restart from here instead.
+	 */
+	return 0;
+}
+
+static int isp_init_controls(const struct device *dev)
+{
+	struct isp_data *data = dev->data;
+	int ret;
+
+	if (IS_ENABLED(CONFIG_ISP_LIB_WB_MODULE)) {
+		/* Default ON, matching the calibration's own OP_TYPE_AUTO AWB
+		 * (patch 0009, runs 153/156) -- not a driver-invented default.
+		 */
+		ret = video_init_ctrl(&data->ctrls.awb, dev, VIDEO_CID_AUTO_WHITE_BALANCE,
+				      (struct video_ctrl_range){.min = 0, .max = 1, .step = 1,
+								 .def = 1});
+		if (ret) {
+			return ret;
+		}
+	}
+
+	if (IS_ENABLED(CONFIG_ISP_LIB_AE_MODULE)) {
+		/* Default AUTO, matching the calibration's own OP_TYPE_AUTO AE
+		 * (patch 0009, runs 153/156) -- not a driver-invented default.
+		 */
+		ret = video_init_menu_ctrl(&data->ctrls.exposure_auto, dev,
+					   VIDEO_CID_EXPOSURE_AUTO, VIDEO_EXPOSURE_AUTO, NULL);
+		if (ret) {
+			return ret;
+		}
+		/* ae_dirty starts true so the first stream start pushes the
+		 * live, sensor-queried frame-period/gain ceilings isp_apply_ae()
+		 * derives from CONFIG_VIDEO_ISP_VSI_AE_TARGET and the sensor's
+		 * own ctrls, even at the default. Without it AE drives the
+		 * OV5647 past its exposure limit and saturates the frame
+		 * (bench run 157).
+		 */
+		data->ctrls.ae_dirty = true;
 	}
 
 	return 0;
@@ -624,9 +1629,10 @@ int isp_get_fmt(const struct device *dev,
 				supported_output_fmts[i].height_max;
 			channel->output_fmt.width =
 				supported_output_fmts[i].width_max;
-			channel->output_fmt.pitch =
-				(video_bits_per_pixel(tmp_fmt) *
-				 channel->output_fmt.width) >> 3;
+			/* video_bits_per_pixel() returns 0 for this private
+			 * fourcc -- alp_isp_default_pitch() (isp_frame_size.h)
+			 * knows it (24 bpp, 3 equal 8-bit planes). */
+			channel->output_fmt.pitch = alp_isp_default_pitch(tmp_fmt, channel->output_fmt.width);
 		}
 
 		*fmt = channel->output_fmt;
@@ -638,6 +1644,147 @@ int isp_get_fmt(const struct device *dev,
 	return 0;
 }
 
+/*
+ * ISP_ACQ_PROP's pin mapping selects the ACQ hardware's 8/10/12-bit Bayer
+ * decode path.  pix_fmt_bpp() (video_alif.c) reports the fourcc's STORAGE
+ * width, not the sensor SAMPLE depth -- for the *unpacked* Bayer formats
+ * (e.g. VIDEO_PIX_FMT_SBGGR10, one 10-bit sample stored per 16-bit word)
+ * video_bits_per_pixel() returns 16, which fell through isp_stream_start()'s
+ * switch below to the 12-bit default and mis-mapped every unpacked 10-bit
+ * format.  Key on the true sample depth instead, derived directly from the
+ * fourcc's Bayer variant (packed or not).
+ *
+ * VIDEO_PIX_FMT_Y10P / VIDEO_PIX_FMT_GREY (run 70, bench-confirmed): these
+ * generic mono/packed fourccs are ALSO valid ISP INPUT formats
+ * (supported_input_fmts[], below) -- isp_pico.c's own isp_set_fmt(INPUT)
+ * stores whatever fourcc the caller requests verbatim into
+ * port->port_fmt.pixelformat, and the OV5647 real-sensor path (stage 3,
+ * examples/aen/aen-isp-capture) requests exactly VIDEO_PIX_FMT_Y10P
+ * (mirroring Alif's own sdk-alif viewfinder recipe).  Neither fourcc
+ * matched any case here, so bayer_sample_depth() silently fell through to
+ * the 12-bit default for every real-sensor capture -- confirmed on silicon
+ * by reading ISP_ACQ_PROP back after a live capture: PIN_MAPPING (bits
+ * [19:17]) read 0 (12-bit) instead of the correct 1 (10-bit) for Y10P/
+ * RAW10 data.  The CPI side is independently confirmed correct for the
+ * same capture (CAM_CFG's DATA_MASK field read back CPI_DATA_MASK_10_BIT,
+ * dynamically set from the negotiated CSI2_DT_RAW10 by
+ * alif_cam_set_csi()'s data_mode_settings[] lookup, video_alif.c:530-548)
+ * -- so this was an ISP-side-only mis-mapping, not a CPI misconfiguration.
+ */
+static unsigned int bayer_sample_depth(uint32_t fourcc)
+{
+	switch (fourcc) {
+	case VIDEO_PIX_FMT_SBGGR8:
+	case VIDEO_PIX_FMT_SGBRG8:
+	case VIDEO_PIX_FMT_SGRBG8:
+	case VIDEO_PIX_FMT_SRGGB8:
+	case VIDEO_PIX_FMT_GREY:
+		return 8;
+	case VIDEO_PIX_FMT_SBGGR10:
+	case VIDEO_PIX_FMT_SGBRG10:
+	case VIDEO_PIX_FMT_SGRBG10:
+	case VIDEO_PIX_FMT_SRGGB10:
+	case VIDEO_PIX_FMT_SBGGR10P:
+	case VIDEO_PIX_FMT_SGBRG10P:
+	case VIDEO_PIX_FMT_SGRBG10P:
+	case VIDEO_PIX_FMT_SRGGB10P:
+	case VIDEO_PIX_FMT_Y10P:
+		return 10;
+	case VIDEO_PIX_FMT_SBGGR12:
+	case VIDEO_PIX_FMT_SGBRG12:
+	case VIDEO_PIX_FMT_SGRBG12:
+	case VIDEO_PIX_FMT_SRGGB12:
+	case VIDEO_PIX_FMT_SBGGR12P:
+	case VIDEO_PIX_FMT_SGBRG12P:
+	case VIDEO_PIX_FMT_SGRBG12P:
+	case VIDEO_PIX_FMT_SRGGB12P:
+	default:
+		return 12;
+	}
+}
+
+/*
+ * PLANNED FIX (not done here, run 66): 10-bit RAW MI output.
+ *
+ * supported_output_fmts[] (above) currently has no 10-bit raw entry because
+ * isp_pixelfmt_from_fourcc() (isp_api_wrapper.c) has no fourcc mapping to
+ * PIXEL_FORMAT_RAW10 (vsi_comm_video.h: PIXEL_FORMAT_RAW10 = 21, distinct
+ * from the Bayer PIXEL_FORMAT_BGGR10 = 4 family SetChnAttr rejects for
+ * output) -- the closest existing case, VIDEO_PIX_FMT_Y10P, maps to
+ * PIXEL_FORMAT_GRBG10 instead, a TODO placeholder the wrapper's own comment
+ * flags ("This should have been PIXEL_FORMAT_RAW10, but lib does not
+ * support it").  Stage 2 of this bring-up (a byte-identical CPI-vs-ISP A/B)
+ * needs raw passthrough, so this gap has to close before then.
+ *
+ * The fix is a hal_alif patch, NOT an alp-sdk change: add a
+ * `case VIDEO_PIX_FMT_Y10P: return PIXEL_FORMAT_RAW10;` (replacing the
+ * GRBG10 placeholder) to isp_pixelfmt_from_fourcc() in
+ * isp_wrapper/src/isp_api_wrapper.c, then add VIDEO_PIX_FMT_Y10P (or a raw
+ * 10-bit fourcc of our own choosing) to supported_output_fmts[] above.
+ * alp-sdk already has a carry-patch mechanism for exactly this kind of
+ * single-file hal_alif fix: zephyr/patches/hal_alif/NNNN-name.patch, tracked in
+ * zephyr/patches.yml (path/sha256sum/module/author/email/date/upstreamable/
+ * comments per entry, applied via `west patch apply`, checked by
+ * scripts/verify_west_patches.py) -- see
+ * zephyr/patches/hal_alif/0001-se-service-add-boot-cpu.patch for the shape
+ * of an existing hal_alif entry.  Do NOT hand-edit the vendored
+ * isp_api_wrapper.c in the west workspace; carry the fix as a new
+ * zephyr/patches/hal_alif/000N-*.patch + patches.yml entry instead, so it
+ * survives a `west update` and stays submittable upstream.
+ */
+
+/*
+ * The ISP core always produces 4:2:2 chroma internally; for a 4:2:0 MI
+ * output (YUV420/NV12/NV21) the main resizer must downscale chroma
+ * vertically 2:1, or the MI writes a full-height chroma plane into a
+ * half-height buffer and wraps ("Main picture Cb/Cr address wrap"),
+ * losing/misplacing colour on real scenes. Neither the closed VSI lib nor
+ * this wrapper ever programs MRSZ (bench runs 186/187) -- do it directly.
+ */
+static void isp_apply_mrsz(const struct device *dev, uint32_t pixelformat, uint16_t out_height)
+{
+	uintptr_t regs = DEVICE_MMIO_GET(dev);
+	bool      is_420 = pixelformat == VIDEO_PIX_FMT_YUV420 || pixelformat == VIDEO_PIX_FMT_NV12 ||
+	                   pixelformat == VIDEO_PIX_FMT_NV21;
+
+	/*
+	 * Defensive: (in_h - 1) divides SCALE_VC below, so a height < 4 must
+	 * bypass here instead of a DIV_0_TRP UsageFault. Only heights below 4
+	 * are bypassed; odd 4:2:0 heights are rejected earlier by
+	 * isp_set_fmt(), which is the real gate -- this is belt-and-braces.
+	 */
+	if (!is_420 || out_height < 4) {
+		/*
+		 * Bypass, and clear any 4:2:0 config a previous stream left
+		 * armed -- FORMAT_CONV_CTRL takes effect immediately (it is
+		 * not shadowed by CFG_UPD), so a stale 0x4 (4:2:0) from a
+		 * prior stream must be cleared here too, not just SCALE_VC/
+		 * PHASE_VC.
+		 */
+		sys_write32(0, regs + ISP_MRSZ_FORMAT_CONV_CTRL);
+		sys_write32(0, regs + ISP_MRSZ_SCALE_VC);
+		sys_write32(0, regs + ISP_MRSZ_PHASE_VC);
+		sys_write32(MRSZ_CTRL_CFG_UPD, regs + ISP_MRSZ_CTRL);
+		return;
+	}
+
+	/*
+	 * alp_isp_mrsz_scale_vc() (isp_frame_size.h) rounds this ratio UP by
+	 * one (rkisp1-lineage formula) so the resizer emits exactly
+	 * out_height/2 chroma lines, not one short -- a plain
+	 * floor(((out_height/2 - 1) << 16) / (out_height - 1)) truncates the
+	 * last line (E1M-AEN803 bench runs 205/201: silent green last chroma
+	 * row / stale last U row).
+	 */
+	uint32_t scale_vc = alp_isp_mrsz_scale_vc(out_height, out_height / 2);
+
+	sys_write32(scale_vc, regs + ISP_MRSZ_SCALE_VC);
+	sys_write32(0, regs + ISP_MRSZ_PHASE_VC);
+	sys_write32(MRSZ_FORMAT_CONV_CTRL_FORMAT_420, regs + ISP_MRSZ_FORMAT_CONV_CTRL);
+	sys_write32(MRSZ_CTRL_SCALE_VC_ENABLE | MRSZ_CTRL_CFG_UPD | MRSZ_CTRL_AUTO_UPD,
+		    regs + ISP_MRSZ_CTRL);
+}
+
 static int isp_stream_start(const struct device *dev)
 {
 	const struct isp_config *config = dev->config;
@@ -646,19 +1793,36 @@ static int isp_stream_start(const struct device *dev)
 	struct video_buffer *vbuf;
 	struct video_buffer vbuf2;
 
+	struct channel_parameters *channel = &data->init_cfg.channel;
 	struct port_parameters *port = &data->init_cfg.port;
 	uint32_t tmp;
 	int ret;
-
-	/* Cancel any stale work from previous session before starting */
+	int err = 0; /* the ORIGINAL failure, preserved across cleanup below */
 	struct k_work_sync sync;
-
-	k_work_cancel_sync(&data->cb_work, &sync);
 
 	if (data->is_streaming) {
 		LOG_DBG("Already streaming");
 		return -EBUSY;
 	}
+
+	/*
+	 * Cancel any stale work from a previous session before starting --
+	 * this either cancelled a pending bottom half (dropping a
+	 * frame-end) or blocked on a running one, so no isp_bottom_half()
+	 * invocation from before this start can still be in flight once it
+	 * returns. Bench T4 fix: moved AFTER the is_streaming check above --
+	 * a no-op restart call (already streaming, about to -EBUSY out) used
+	 * to cancel-sync cb_work anyway, tearing down the running bottom
+	 * half of a stream this call isn't actually going to (re)start.
+	 */
+	k_work_cancel_sync(&data->cb_work, &sync);
+	/*
+	 * #2287 Stage B unit 3: cpi_rearm_work (isp_pico.h) can also still be pending/running here
+	 * (a corrupted-frame ISR submitted it, isp_isr_handler()) -- cancel it too, same reasoning
+	 * as cb_work just above: a stale re-arm firing after this function has already decided
+	 * whether to take the light or full start path would re-arm the CPI unexpectedly.
+	 */
+	k_work_cancel_sync(&data->cpi_rearm_work, &sync);
 
 	vbuf = k_fifo_peek_head(&data->fifo_in);
 	if (vbuf == NULL) {
@@ -668,6 +1832,106 @@ static int isp_stream_start(const struct device *dev)
 	}
 
 	data->curr_vid_buf = POINTER_TO_UINT(vbuf->buffer);
+
+	/*
+	 * #2287 Stage B unit 3, Fix D (bench run 302): resuming from a CPI-only starvation pause
+	 * (data->controller_cpi_paused, set by isp_bottom_half()'s starvation handler, above) must
+	 * NOT go through the full restart sequence below -- isp_vsi_update_cfg()/isp_vsi_start()
+	 * (VSI_MPI_ISP_EnableDev/EnablePort/EnableChn, isp_api_wrapper.c) run UNCONDITIONALLY on
+	 * every call to this function, even though the starvation pause never called isp_vsi_stop()
+	 * (see isp_bottom_half()'s own comment: "nothing here touches isp_vsi_stop()") -- so the
+	 * ISP DEV/PORT/CHN are STILL enabled from the PREVIOUS isp_vsi_start(), and this call would
+	 * enable them AGAIN. Bench run 302 (AE INF logs): the library's own meanLum frame counter
+	 * resets to "Frame 1" on (almost) every app re-queue -- consistent with, though not proven
+	 * against the closed VSI_MPI_ISP library's source, VSI_MPI_ISP_EnableChn/EnablePort/EnableDev
+	 * (the only calls in this function's normal path that run unconditionally on every restart
+	 * AND plausibly (re)initialize per-channel state -- isp_vsi_update_cfg()'s own SetCalib is
+	 * separately once-guarded, patch 0007, so it is not this call's candidate) re-initializing
+	 * the AE 3A module's accumulated statistics on every redundant re-enable.
+	 *
+	 * The FIX: skip isp_vsi_update_cfg()/isp_apply_aem_wbm()/the ACQ_PROP pin-mapping write/
+	 * isp_vsi_enqueue()/isp_apply_ae_sensor_gate()/isp_vsi_start()/isp_apply_mrsz()/the wb_dirty
+	 * and ae_dirty applies entirely on this path -- none of them are needed (the ISP's own
+	 * config, calibration and AE/AWB enable state are unchanged since the pause) -- and instead
+	 * do only what isp_bottom_half() ITSELF already does for every ordinary continuing frame
+	 * (the steady-state case that never resets AE): isp_attach_buffer_to_hw() (a pure MI
+	 * register write -- MI_MP_*_BASE_AD_INIT + MI_INIT_CFG_UPD, no VSI library call at all) to
+	 * hand the ISP its next destination buffer, then alif_cam_cpi_resume() to re-arm the CPI.
+	 * A first start (data->controller_cpi_paused == false, e.g. the very first
+	 * video_stream_start() or any restart after a REAL video_stream_stop()) is untouched --
+	 * falls through to the existing full sequence below.
+	 */
+	/*
+	 * #2287 Stage B unit 3, reviewer fix (bench run 303, major): the light path above is only
+	 * safe if there is nothing else this restart would otherwise have applied. isp_set_ctrl()
+	 * (its own comment) stores an AWB/AE ctrl change in wb_dirty/ae_dirty and documents that
+	 * ONLY the next isp_stream_start() actually pushes it (isp_apply_wb()/isp_apply_ae(),
+	 * below, in the full path) -- the light path skips both calls entirely, so a ctrl change
+	 * made while paused would be silently dropped forever (the dirty flag never gets cleared,
+	 * but it also never gets APPLIED, since no later isp_stream_start() would go through the
+	 * full path either once controller_cpi_paused was already cleared by a light resume).
+	 */
+	if (data->controller_cpi_paused && !data->ctrls.wb_dirty && !data->ctrls.ae_dirty) {
+		ret = isp_attach_buffer_to_hw(dev, vbuf);
+		if (ret) {
+			LOG_ERR("Fix D resume: failed to attach buffer to hardware! ret=%d", ret);
+			data->curr_vid_buf = 0;
+			return ret;
+		}
+
+		data->is_streaming = true;
+
+		if (config->controller) {
+			ret = alif_cam_cpi_resume(config->controller);
+			data->controller_cpi_paused = false;
+			if (ret) {
+				LOG_ERR("Fix D resume: alif_cam_cpi_resume failed! ret=%d", ret);
+				data->is_streaming = false;
+				data->curr_vid_buf = 0;
+				return ret;
+			}
+		} else {
+			data->controller_cpi_paused = false;
+		}
+
+		return 0;
+	}
+
+	if (data->controller_cpi_paused) {
+		/*
+		 * A ctrl change is pending (wb_dirty/ae_dirty) -- the light path above was skipped
+		 * on purpose. The controller is still only CPI-paused (alif_cam_stream_stop() was
+		 * never called, so its OWN is_streaming stays true) -- falling straight through to
+		 * the full sequence below would call video_stream_start(config->controller, ...) on
+		 * a controller alif_cam_stream_start() sees as ALREADY streaming, -EBUSY. Unwind the
+		 * pause into a real, clean stop first (mirrors isp_stream_stop()'s own was-paused
+		 * handling), then fall through to the full start sequence, which will then correctly
+		 * call video_stream_start() and isp_vsi_start() against a genuinely stopped stack.
+		 */
+		if (config->controller) {
+			/*
+			 * #2287 Stage B unit 3, reviewer fix (bench run 303 round): this return
+			 * used to be discarded -- log it, and bail out early rather than
+			 * proceeding to isp_vsi_stop() and the full start sequence below against a
+			 * controller that may still be only partially unwound.
+			 */
+			ret = video_stream_stop(config->controller, VIDEO_BUF_TYPE_OUTPUT);
+			if (ret) {
+				LOG_ERR("Failed to stop controller unwinding CPI-only pause "
+					"before a dirty-ctrl restart! video_stream_stop=%d",
+					ret);
+				data->curr_vid_buf = 0;
+				return ret;
+			}
+		}
+		ret = isp_vsi_stop(&data->init_cfg);
+		if (ret) {
+			LOG_ERR("Failed to unwind CPI-only pause before a dirty-ctrl restart! "
+				"isp_vsi_stop=%d",
+				ret);
+		}
+		data->controller_cpi_paused = false;
+	}
 
 	/* Update ISP configuration to the middleware */
 	switch (port->port_fmt.pixelformat) {
@@ -701,15 +1965,28 @@ static int isp_stream_start(const struct device *dev)
 
 	ret = isp_vsi_update_cfg(&data->init_cfg);
 	if (ret) {
-		LOG_ERR("Failed to update ISP config to input/output formats and ROI!");
+		LOG_ERR("Failed to update ISP config to input/output formats and ROI! "
+			"isp_vsi_update_cfg=%d",
+			ret);
 		data->curr_vid_buf = 0;
 		return ret;
+	}
+
+	/* Run 84: unconditional, every restart -- see isp_apply_aem_wbm()'s
+	 * own comment for why this does NOT wait for isp_vsi_start() or gate
+	 * on wb_dirty/ae_dirty the way isp_apply_wb()/isp_apply_ae() do.
+	 * Logged, not fatal: a stale (but non-zero) measurement window is
+	 * still better than aborting the whole stream start over it.
+	 */
+	ret = isp_apply_aem_wbm(dev, port->port_fmt.width, port->port_fmt.height);
+	if (ret) {
+		LOG_WRN("AEM/WBM measurement window apply failed: %d (continuing)", ret);
 	}
 
 	tmp = sys_read32(regs + ISP_ACQ_PROP);
 	tmp &= ~(ACQ_PROP_PIN_MAPPING_MASK << ACQ_PROP_PIN_MAPPING_SHIFT);
 
-	switch (pix_fmt_bpp(port->port_fmt.pixelformat)) {
+	switch (bayer_sample_depth(port->port_fmt.pixelformat)) {
 	case 10:
 		tmp |= (1 << ACQ_PROP_PIN_MAPPING_SHIFT);
 		break;
@@ -725,10 +2002,18 @@ static int isp_stream_start(const struct device *dev)
 
 	ret = isp_vsi_enqueue(&data->init_cfg, vbuf);
 	if (ret) {
-		LOG_ERR("Failed to assign buffer to hardware!");
+		LOG_ERR("Failed to assign buffer to hardware! isp_vsi_enqueue=%d", ret);
 		data->curr_vid_buf = 0;
 		return ret;
 	}
+
+	/* Run 90-107 bisect fix: gate the SENSOR (EXPOSURE_AUTO/AUTOGAIN) to
+	 * MANUAL before the ISP starts capturing -- see
+	 * isp_apply_ae_sensor_gate()'s own comment for why this can no
+	 * longer be deferred alongside the library-side AE param push, and
+	 * why it is unconditional regardless of which AE mode the library
+	 * itself is in. */
+	isp_apply_ae_sensor_gate(dev);
 
 	/* Set is_streaming BEFORE starting hardware to prevent
 	 * bottom_half from stopping CPI mid-start
@@ -737,21 +2022,96 @@ static int isp_stream_start(const struct device *dev)
 
 	ret = isp_vsi_start(&data->init_cfg);
 	if (ret) {
-		LOG_ERR("Failed to start stream!");
+		LOG_ERR("Failed to start stream! isp_vsi_start=%d", ret);
 		data->is_streaming = false;
+		err = ret;
 		goto dequeue_buf;
 	}
 
-	/* v4.4 video-API shim (Alp Lab AB): video_stream_start gained an
+	/*
+	 * Placement: after isp_vsi_start() (above), before the camera path's
+	 * video_stream_start(config->controller) (below). FORMAT_CONV_CTRL is
+	 * not CFG_UPD-shadowed, so this write takes effect the instant it
+	 * lands -- safe here on the camera path because no pixel data flows
+	 * until video_stream_start(config->controller), which runs after
+	 * this call. Do not move this below video_stream_start().
+	 *
+	 * In TPG mode (config->controller == NULL) the TPG is the ISP's own
+	 * internal pattern source, so it may already be producing frames
+	 * right after isp_vsi_start() returns -- this write can then land
+	 * mid-frame. TPG colour output is tracked separately (#2256); no fix
+	 * here.
+	 */
+	isp_apply_mrsz(dev, channel->output_fmt.pixelformat, channel->output_fmt.height);
+
+	/*
+	 * WB: runs only for a ctrl the app actually changed (isp_set_ctrl()'s
+	 * wb_dirty) -- default AWB needs no call at all, the calibration
+	 * already runs it (patch 0009, runs 153/156). Right here,
+	 * synchronously, after isp_vsi_start()'s Enable* above, is the one
+	 * proven-working order (run 74): the AWB/AE callbacks aren't live
+	 * until Enable* runs, so an apply issued before it would just be
+	 * dropped. SetCalib (isp_vsi_update_cfg(), above) itself now runs at
+	 * most twice per boot -- once at init (patch 0009), once at the
+	 * first isp_vsi_update_cfg() (patch 0007's once-guard) -- never on a
+	 * later restart, so this apply doesn't need to fight a reload; it
+	 * just needs Enable* to have already happened. isp_stream_start()
+	 * only ever runs while stopped (guarded at the top of this
+	 * function), so this is also exactly "the next stream start while
+	 * the ISP is stopped" a mid-stream ctrl change waits for (see
+	 * isp_set_ctrl()'s ponytail comment). AE below applies the same way,
+	 * gated on ae_dirty, which starts true (isp_init_controls()).
+	 */
+	if (data->ctrls.wb_dirty) {
+		bool wb_enable = (data->ctrls.awb.val != 0);
+		int ret_wb = isp_apply_wb(dev, wb_enable);
+
+		if (ret_wb == 0) {
+			data->ctrls.wb_dirty = false;
+		}
+	}
+	if (data->ctrls.ae_dirty) {
+		bool ae_enable = (data->ctrls.exposure_auto.val == VIDEO_EXPOSURE_AUTO);
+		int ret_ae = isp_apply_ae(dev, ae_enable);
+
+		if (ret_ae == 0) {
+			data->ctrls.ae_dirty = false;
+		}
+	}
+
+	/*
+	 * In TPG mode (no camera controller wired -- config->controller is a
+	 * legitimate NULL here, see video_isp_init()'s init-time check) there is
+	 * no endpoint device to forward stream-start to: the TPG is the ISP's
+	 * OWN internal pattern source.  video_stream_start(NULL, ...) returns
+	 * -EINVAL via its own dev==NULL guard (zephyr/include/zephyr/drivers/
+	 * video.h) WITHOUT touching *dev -- so calling it unconditionally does
+	 * not crash, but it always "fails" and previously masked a real
+	 * config->controller->name NULL dereference in the LOG_ERR below it.
+	 * v4.4 video-API shim (Alp Lab AB): video_stream_start gained an
 	 * `enum video_buf_type`; the controller is the capture source ->
 	 * VIDEO_BUF_TYPE_OUTPUT.
+	 *
+	 * #2287 Stage B unit 3: by the time this line runs, data->controller_cpi_paused is always
+	 * false -- either it was never true, the light-resume path above already returned early
+	 * (true && !dirty), or the dirty-ctrl unwind block above already cleared it (true && dirty
+	 * -> a real video_stream_stop() first). A plain video_stream_start() is therefore always
+	 * correct here; an earlier revision had a now-dead `if (data->controller_cpi_paused) {
+	 * alif_cam_cpi_resume(...) }` branch at this exact point that could never execute -- see
+	 * the light-resume path (above, `if (data->controller_cpi_paused && ...)`) for where that
+	 * re-arm actually happens now.
 	 */
-	ret = video_stream_start(config->controller, VIDEO_BUF_TYPE_OUTPUT);
-	if (ret) {
-		LOG_ERR("Failed to start stream for Endpoint device: %s!",
-				config->controller->name);
-		data->is_streaming = false;
-		goto stop_isp_stream;
+	if (config->controller) {
+		ret = video_stream_start(config->controller, VIDEO_BUF_TYPE_OUTPUT);
+		if (ret) {
+			LOG_ERR("Failed to start stream for Endpoint device: %s! "
+				"ret=%d",
+				config->controller->name,
+				ret);
+			data->is_streaming = false;
+			err = ret;
+			goto stop_isp_stream;
+		}
 	}
 
 	return 0;
@@ -759,64 +2119,144 @@ static int isp_stream_start(const struct device *dev)
 stop_isp_stream:
 	ret = isp_vsi_stop(&data->init_cfg);
 	if (ret) {
-		LOG_ERR("Failed to stop ISP device streaming");
-		return ret;
+		/* Cleanup failure: log it, but do NOT let it overwrite `err` --
+		 * the caller needs the ORIGINAL failure (set above), not
+		 * whichever of these two cleanup calls happened to also fail.
+		 */
+		LOG_ERR("Failed to stop ISP device streaming (cleanup): isp_vsi_stop=%d", ret);
 	}
 dequeue_buf:
 	ret = isp_vsi_dequeue(&data->init_cfg, &vbuf2);
 	if (ret) {
-		LOG_ERR("Failed to dequeue buffer back!");
-		return ret;
+		LOG_ERR("Failed to dequeue buffer back (cleanup): isp_vsi_dequeue=%d", ret);
 	}
 
-	return 0;
+	return err;
 }
 
 static int isp_stream_stop(const struct device *dev)
 {
 	const struct isp_config *config = dev->config;
 	struct isp_data *data = dev->data;
+	struct k_work_sync sync;
 	int ret;
+	bool was_streaming = data->is_streaming; /* see the video_stream_stop() failure path below */
 
-	if (!data->is_streaming) {
+	/*
+	 * #2287 Stage B unit 3, reviewer fix (bench run 301, blocker): a starvation pause
+	 * (isp_bottom_half()) already sets is_streaming=false WITHOUT touching the controller --
+	 * it only sets controller_cpi_paused (this driver simply stops calling
+	 * alif_cam_cpi_resume(), video_alif.c -- CSI-2 endpoint + sensor still physically
+	 * streaming), not truly stopped, and the ISP library itself is still in its
+	 * isp_vsi_start()'d state (isp_bottom_half() never calls isp_vsi_stop()). The OLD early
+	 * `if (!data->is_streaming) return 0;` here treated that as "already fully stopped" and
+	 * returned WITHOUT ever reaching video_stream_stop(controller) below -- a user stop()/
+	 * close() landing right after a starvation pause left the sensor + CSI-2 endpoint running
+	 * indefinitely, invisibly. Tear down for real whenever EITHER is true.
+	 */
+	if (!data->is_streaming && !data->controller_cpi_paused) {
 		LOG_DBG("Already stopped streaming!");
 		return 0;
 	}
 
-	/* v4.4 video-API shim (Alp Lab AB): video_stream_stop gained an
-	 * `enum video_buf_type`; the controller is the capture source ->
-	 * VIDEO_BUF_TYPE_OUTPUT.
+	/*
+	 * #2287 Stage B unit 3, reviewer fix: is_streaming=false FIRST -- both isp_bottom_half()
+	 * (cb_work) and isp_cpi_rearm_work() already check it and return early, so clearing it
+	 * before cancel-syncing either work item (next) means a concurrent bottom-half/re-arm that
+	 * is ALREADY running when the cancel calls block on it sees a stop in progress and doesn't
+	 * do anything that would race the teardown below (e.g. re-arm the CPI, or retire a frame,
+	 * moments before this function stops the controller out from under it). Cancel-sync both
+	 * work items next, mirroring isp_stream_start()'s/isp_flush()'s own placement of this same
+	 * pair BEFORE any of the state-changing calls that follow -- not nested inside lib_lock
+	 * (neither work item's own processing needs it held by ITS caller; isp_bottom_half() and
+	 * isp_cpi_rearm_work() each take lib_lock/the controller's own lock internally, as needed).
 	 */
-	ret = video_stream_stop(config->controller, VIDEO_BUF_TYPE_OUTPUT);
-	if (ret) {
-		LOG_ERR("Failed to stop streaming in pipeline!");
-		return ret;
-	}
+	data->is_streaming = false;
+	k_work_cancel_sync(&data->cb_work, &sync);
+	k_work_cancel_sync(&data->cpi_rearm_work, &sync);
 
+	/*
+	 * In TPG mode config->controller is a legitimate NULL (see
+	 * video_isp_init()'s init-time check) -- there is no endpoint device to
+	 * forward stream-stop to.  Calling video_stream_stop(NULL, ...)
+	 * unconditionally previously made this function ALWAYS return -EINVAL
+	 * in TPG mode (its own dev==NULL guard) before ever reaching
+	 * isp_vsi_stop() below, so the ISP hardware never actually stopped.
+	 * v4.4 video-API shim (Alp Lab AB): video_stream_stop gained an
+	 * `enum video_buf_type`; the controller is the capture source ->
+	 * VIDEO_BUF_TYPE_OUTPUT. Called unconditionally here (not gated on
+	 * controller_cpi_paused) -- a CPI-only pause never stopped the endpoint,
+	 * so the endpoint is ALWAYS still live to tear down, whether this is a
+	 * normal is_streaming=true stop or the was-paused case above.
+	 */
+	if (config->controller) {
+		ret = video_stream_stop(config->controller, VIDEO_BUF_TYPE_OUTPUT);
+		if (ret) {
+			LOG_ERR("Failed to stop streaming in pipeline! video_stream_stop=%d",
+				ret);
+			/*
+			 * #2287 Stage B unit 3, reviewer fix (bench run 311 round, corrected
+			 * bench run 312 round): restore is_streaming to its ENTRY value
+			 * (was_streaming), not an unconditional true -- this function set it
+			 * false, above, before even attempting the controller stop (matching
+			 * isp_stream_start()'s own set-before-hardware-call pattern), but that
+			 * was premature: the controller stop FAILED, so streaming never
+			 * actually stopped/changed state. Unconditional true was itself wrong
+			 * for the starvation-pause entry path (guard above): that path enters
+			 * with is_streaming ALREADY false (only controller_cpi_paused was
+			 * true) -- forcing it back to true here would claim a stream that was
+			 * never actually running is now streaming again. was_streaming carries
+			 * whichever of the two entry shapes this call actually had. Leaving
+			 * is_streaming at its post-clear value (false) here, for either entry
+			 * shape, would let a caller's retry (another isp_stream_stop() call)
+			 * hit the "Already stopped streaming!" early return above (since
+			 * controller_cpi_paused is also still true at this point) and silently
+			 * skip retrying the controller stop that actually needs to happen.
+			 */
+			data->is_streaming = was_streaming;
+			return ret;
+		}
+	}
+	/*
+	 * A real user stop tears the controller all the way down above regardless of any
+	 * in-flight CPI-only starvation pause -- clear the flag so a LATER isp_stream_start()
+	 * calls a real video_stream_start() instead of mistakenly resuming a pause this stop
+	 * already cleared.
+	 */
+	data->controller_cpi_paused = false;
+
+	/*
+	 * isp_vsi_stop() unconditionally: even in the was-paused (!is_streaming) case, the ISP
+	 * library itself was never isp_vsi_stop()'d by the starvation pause (see above) -- its
+	 * internal state is still "started" from isp_vsi_start()'s perspective regardless of this
+	 * driver's own is_streaming bookkeeping, so a real stop must still close it out.
+	 */
 	ret = isp_vsi_stop(&data->init_cfg);
 	if (ret) {
-		LOG_ERR("Failed to stop ISP from streaming!");
+		LOG_ERR("Failed to stop ISP from streaming! isp_vsi_stop=%d", ret);
 		return ret;
 	}
 
 	data->curr_vid_buf = 0;
-	data->is_streaming = false;
 
 	return 0;
 }
 
 /* v4.4 video-API shim (Alp Lab AB): set_stream gained an `enum video_buf_type
  * type` param (unused here -- this m2m device streams a single pipeline).
+ *
+ * Alif's own model (kept): the driver auto-stops on its own once the IN-FIFO
+ * runs dry (isp_bottom_half()'s "No more empty buffers" branch) and only
+ * restarts the next time a caller calls video_stream_start() again --
+ * src/backends/camera/alif_isp_pico.c's isp_capture() re-issues it before
+ * every dequeue, examples/aen/aen-isp-capture's per-frame loop does
+ * the same. No driver-driven restart of its own.
  */
 static int isp_set_stream(const struct device *dev, bool enable, enum video_buf_type type)
 {
 	ARG_UNUSED(type);
 
-	if (enable) {
-		return isp_stream_start(dev);
-	} else {
-		return isp_stream_stop(dev);
-	}
+	return enable ? isp_stream_start(dev) : isp_stream_stop(dev);
 }
 
 /* v4.4 video-API shim (Alp Lab AB): dropped the `enum video_endpoint_id ep`
@@ -866,6 +2306,11 @@ static int isp_get_caps(const struct device *dev,
 
 /* v4.4 video-API shim (Alp Lab AB): dropped the `enum video_endpoint_id ep`
  * param; the forwarded video_flush() also loses its `ep` arg.
+ *
+ * Zephyr v4.4's video_stream_stop() helper (drivers/video.h) is
+ * set_stream(dev, false) THEN video_flush(dev, true), two SEPARATE
+ * top-level calls from the same caller thread -- so a user stop reaches
+ * this function moments after isp_set_stream() already returned.
  */
 static int isp_flush(const struct device *dev, bool cancel)
 {
@@ -874,12 +2319,31 @@ static int isp_flush(const struct device *dev, bool cancel)
 
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
 	struct video_buffer *vbuf = NULL;
+	struct k_work_sync sync;
 
 	int ret;
 
 	if (cancel) {
 		/* Case when video stream processing needs to be stopped. */
 		hw_disable_mi_interrupts(regs, MI_INTR_MP_FRAME_END);
+
+		/*
+		 * Cancel-sync the bottom half BEFORE the drain below hands
+		 * every queued buffer back to fifo_out. isp_bottom_half()
+		 * (data->cb_workq) can already be queued -- or mid-run -- at
+		 * this point despite the interrupt disable just above (it
+		 * only stops NEW frame-end interrupts, not a bottom half
+		 * already submitted from one that fired earlier); left
+		 * uncancelled it can still attach a buffer via
+		 * isp_vsi_enqueue() after this function has handed the
+		 * buffers back to the caller. Runs on the caller thread, no
+		 * lock held -- matches isp_stream_start()'s own
+		 * k_work_cancel_sync() of the same work item.
+		 */
+		k_work_cancel_sync(&data->cb_work, &sync);
+		/* #2287 Stage B unit 3: same reasoning as isp_stream_start()'s own cancel of this
+		 * work item -- a corrupted-frame re-arm must not fire after this flush. */
+		k_work_cancel_sync(&data->cpi_rearm_work, &sync);
 
 		for (int i = 0; (i < 20) &&
 				(sys_read32(regs + ISP_MI_RIS) & MI_INTR_MP_FRAME_END); i++) {
@@ -906,17 +2370,86 @@ static int isp_flush(const struct device *dev, bool cancel)
 			}
 #endif /* defined(CONFIG_POLL) */
 		}
-	} else {
-		/* Case when video stream processing need not be stopped. */
-		if (!data->curr_vid_buf) {
-			while ((vbuf = k_fifo_get(&data->fifo_in, K_NO_WAIT))) {
-				k_fifo_put(&data->fifo_out, vbuf);
-			}
+	} else if (!data->is_streaming) {
+		/*
+		 * Not actually running (a starvation stop, or a stream that
+		 * was never started) -- nothing will ever drain fifo_in on
+		 * its own (no active DMA, no more frame-ends coming), so the
+		 * wait below would spin forever. Move every queued buffer
+		 * straight to fifo_out instead, the same as the cancel=true
+		 * path does above. Keyed on is_streaming, not curr_vid_buf:
+		 * is_streaming is the authoritative "is a DMA in flight"
+		 * state this driver already uses everywhere else
+		 * (isp_bottom_half(), isp_stream_start()/_stop());
+		 * curr_vid_buf can lag it by a beat in some paths and isn't
+		 * the thing actually being tested here.
+		 */
+		while ((vbuf = k_fifo_get(&data->fifo_in, K_NO_WAIT))) {
+			k_fifo_put(&data->fifo_out, vbuf);
 		}
-
-		while (!k_fifo_is_empty(&data->fifo_in)) {
+	} else {
+		/*
+		 * A DMA is in flight: wait for isp_bottom_half() (on
+		 * data->cb_workq) to drain fifo_in the normal way, one
+		 * frame-end at a time -- it flips is_streaming false once the
+		 * IN-FIFO runs dry (this driver's own auto-stop, kept from
+		 * Alif's original model). Bounded, not indefinite: a wedged
+		 * DMA (a lost frame-end interrupt, a hung bottom half) must
+		 * not hang the caller thread forever. Bounded at 500ms total,
+		 * not per frame-end -- a deep queue or a low frame rate can
+		 * legitimately need more than that to drain and will
+		 * correctly hit -ETIMEDOUT below rather than being given an
+		 * unbounded wait.
+		 */
+		for (int i = 0; i < 500 && !k_fifo_is_empty(&data->fifo_in) &&
+				data->is_streaming;
+		     i++) {
 			k_msleep(1);
 		}
+
+		if (data->is_streaming && !k_fifo_is_empty(&data->fifo_in)) {
+			/*
+			 * Timed out with the MI still DMA-ing into
+			 * curr_vid_buf: draining fifo_in here would hand the
+			 * caller a buffer hardware is actively writing, and
+			 * this branch never stops the ISP, so clearing
+			 * is_streaming would be a lie about what is actually
+			 * running. Leave every queue and all state untouched
+			 * and report the timeout -- the caller can retry with
+			 * cancel=true, which stops the ISP before it drains.
+			 */
+			return -ETIMEDOUT;
+		}
+
+		/* The wait above ended without timing out -- fifo_in drained
+		 * naturally, or is_streaming flipped false (the bottom
+		 * half's own auto-stop) with a few buffers still queued.
+		 * Hand those back the same way the not-streaming branch
+		 * above does.
+		 */
+		while ((vbuf = k_fifo_get(&data->fifo_in, K_NO_WAIT))) {
+			k_fifo_put(&data->fifo_out, vbuf);
+		}
+	}
+
+	if (!cancel) {
+		/*
+		 * The cancel=true path above already cancel-synced
+		 * data->cb_work; this path never does (it only waits for
+		 * fifo_in to empty, either because the bottom half is
+		 * legitimately still draining it or because is_streaming was
+		 * already false). A bottom half can still be RUNNING here --
+		 * it has taken the last buffer off fifo_in (so the wait loop
+		 * above saw an empty fifo and exited) but not yet finished
+		 * and cleared is_streaming -- so flush it out before this
+		 * function overwrites curr_vid_buf/is_streaming itself.
+		 * Runs on the caller thread with no lock held, same as the
+		 * cancel path's cancel_sync just above.
+		 */
+		k_work_flush(&data->cb_work, &sync);
+		/* #2287 Stage B unit 3: same reasoning -- see the cancel=true path's own comment
+		 * on cpi_rearm_work above. */
+		k_work_flush(&data->cpi_rearm_work, &sync);
 	}
 
 	data->curr_vid_buf = 0;
@@ -945,12 +2478,22 @@ static int isp_enqueue(const struct device *dev, struct video_buffer *buf)
 
 	buf->bytesused = 0;
 
+	/*
+	 * Flush BEFORE the buffer is visible on fifo_in, not after: once
+	 * k_fifo_put() runs, a concurrent caller-driven video_stream_start()
+	 * on another thread, or (if this is the buffer isp_bottom_half() is
+	 * about to pick up next) the ISR-driven bottom half itself, can
+	 * immediately attach this buffer to hardware and start a DMA into
+	 * it. A flush that runs AFTER the buffer is queued can land after
+	 * that DMA has already started, writing this core's dirty cache
+	 * lines back over frame data the hardware already wrote.
+	 */
+	(void)sys_cache_data_flush_and_invd_range(buf->buffer, buf->size);
+
 	k_fifo_put(&data->fifo_in, buf);
 
 	LOG_DBG("Enqueued buffer: Addr - 0x%x, size - %d, bytesused - %d",
 		(uint32_t)buf->buffer, buf->size, buf->bytesused);
-
-	(void)sys_cache_data_flush_and_invd_range(buf->buffer, buf->size);
 
 	return 0;
 }
@@ -970,7 +2513,50 @@ static int isp_dequeue(const struct device *dev,
 		return -EAGAIN;
 	}
 
-	(*buf)->bytesused = channel->output_fmt.pitch * channel->output_fmt.height;
+	/*
+	 * Full frame size, not pitch*height: pitch (isp_set_fmt(), above) is
+	 * the LUMA-only line stride for planar/semi-planar YUV, so
+	 * pitch*height covers only the Y plane and drops the U/V planes --
+	 * bench-proven on E1M-AEN803 (run 200): every dequeued YUV420/NV12
+	 * buffer reported bytesused 0 (pitch was 0 before the isp_set_fmt()
+	 * fix, above) and callers copied nothing.  alp_isp_frame_size()
+	 * (isp_frame_size.h) -- the same helper
+	 * src/backends/camera/alif_isp_pico.c sizes its buffer pool with --
+	 * reports the format's true average bits/pixel INCLUDING chroma, so
+	 * this is correct for every output fourcc this driver's
+	 * supported_output_fmts[] advertises.
+	 *
+	 * Capped at buf->size: alp_isp_frame_size() sizes the FORMAT, not
+	 * this particular buffer, so a caller that enqueued something
+	 * smaller than the negotiated frame (a pool-sizing bug, or a format
+	 * this helper doesn't yet know) would otherwise hand
+	 * sys_cache_data_invd_range(), below, a length that invalidates past
+	 * the buffer's end. video_buffer_aligned_alloc() rounds every real
+	 * allocation UP to CONFIG_VIDEO_BUFFER_POOL_ALIGN, so this cap is a
+	 * last-line-of-defense, not the expected path.
+	 */
+	uint32_t frame_size = alp_isp_frame_size(
+	    channel->output_fmt.pixelformat, channel->output_fmt.width, channel->output_fmt.height);
+
+	if (frame_size > (*buf)->size) {
+		LOG_WRN("Dequeued buffer (%u B) is smaller than the negotiated frame (%u B); "
+		        "bytesused capped, dequeued frame will be truncated",
+		        (*buf)->size,
+		        frame_size);
+	}
+	(*buf)->bytesused = MIN(frame_size, (*buf)->size);
+
+	/*
+	 * Invalidate what the ISP's MI (memory interface) DMA just wrote.  The
+	 * enqueue path already cleans+invalidates the buffer before the transfer
+	 * (isp_enqueue(), above), but nothing invalidates it afterwards, so with
+	 * CONFIG_DCACHE=y and no nocache placement the application could read
+	 * cache lines that speculative prefetch pulled in during the ISP's
+	 * capture window -- stale pixels, no error.  Same stale-cache class the
+	 * CPI driver fixes at video_alif.c's alif_cam_dequeue() (#1825).
+	 */
+	(void)sys_cache_data_invd_range((*buf)->buffer, (*buf)->bytesused);
+
 	LOG_DBG("Dequeued buffer: Addr - 0x%08x, size - %d, bytesused - %d",
 		(uint32_t)(*buf)->buffer, (*buf)->size, (*buf)->bytesused);
 	return 0;
@@ -1009,10 +2595,11 @@ static int isp_set_signal(const struct device *dev,
  * value-pointer ISP-param path has no v4.4 equivalent.  Until those controls
  * are registered on the control registry, the ctrl callbacks are dropped from
  * the API table below (deferred to the control-registry wiring).  This also
- * removes the only callers of isp_vsi_set_param / isp_vsi_get_param, which is
- * intentional: those symbols are NOT exported by the locally vendored hal_alif
- * libisp wrapper (see the HAL_ALIF VERSION MISMATCH note at the top of this
- * file).  Do NOT fabricate the missing API.
+ * removes the only callers of isp_vsi_set_param / isp_vsi_get_param -- both
+ * ARE exported by the locally vendored hal_alif libisp wrapper
+ * (isp_api_wrapper.c:880, :1242; see the HAL_ALIF note at the top of this
+ * file); they simply have no caller left in this port until the
+ * control-registry wiring lands.  Do NOT fabricate an API that already exists.
  */
 static DEVICE_API(video, isp_driver_api) = {
 	.set_format = isp_set_fmt,
@@ -1022,6 +2609,7 @@ static DEVICE_API(video, isp_driver_api) = {
 	.flush = isp_flush,
 	.enqueue = isp_enqueue,
 	.dequeue = isp_dequeue,
+	.set_ctrl = isp_set_ctrl,
 #ifdef CONFIG_POLL
 	.set_signal = isp_set_signal,
 #endif /* CONFIG_POLL */
@@ -1128,15 +2716,11 @@ int video_isp_init(const struct device *dev)
 	 * Setup the ISR callback work.
 	 */
 	k_work_init(&data->cb_work, isp_cb_work);
+	k_work_init(&data->cpi_rearm_work, isp_cpi_rearm_work);
 	k_work_queue_init(&data->cb_workq);
 	k_work_queue_start(&data->cb_workq, isp_cb_workq, K_KERNEL_STACK_SIZEOF(isp_cb_workq),
 			   K_PRIO_COOP(WORKQ_PRIORITY), NULL);
 	k_thread_name_set(&data->cb_workq.thread, "isp_work_helper");
-
-	/*
-	 * Setup interrupts.
-	 */
-	config->irq_config_func(dev);
 
 	/*
 	 * Setup FIFO for ISP driver.
@@ -1144,6 +2728,35 @@ int video_isp_init(const struct device *dev)
 	k_fifo_init(&data->fifo_in);
 	k_fifo_init(&data->fifo_out);
 	data->dev = dev;
+
+	/*
+	 * #2287 Stage B unit 3 (bench runs 307-310, stall-recovery gap): register this driver's
+	 * own CPI-rearm callback with the controller so alif_video_cam_isr()'s error path
+	 * (video_alif.c -- an error the ISP's own frame-end interrupt never sees, because the
+	 * CPI/CSI side failed before a frame got that far) can still re-arm the CPI. TPG mode
+	 * (config->controller == NULL) has no controller to register with -- the TPG is this
+	 * device's own internal pattern source, this whole class of CPI/CSI error doesn't apply.
+	 */
+	if (config->controller) {
+		alif_cam_register_error_cb(config->controller, isp_cpi_rearm_error_cb, (void *)dev);
+	}
+
+	k_mutex_init(&data->lib_lock);
+
+	/*
+	 * Setup interrupts -- only now that everything the ISR's bottom half
+	 * touches exists. A core reset does not reset the ISP: an MI
+	 * frame-end latched by the previous image fires the moment the IRQ
+	 * is enabled, and with the IRQs enabled first it ran the bottom half
+	 * on an uninitialised lib_lock (HardFault, bench run 165).
+	 */
+	config->irq_config_func(dev);
+
+	ret = isp_init_controls(dev);
+	if (ret) {
+		LOG_ERR("Failed to register ISP video controls!");
+		return ret;
+	}
 
 	/*
 	 * Do ISP configuration.
@@ -1232,9 +2845,19 @@ int video_isp_init(const struct device *dev)
 		&isp_data_##i,                                                                \
 		&isp_config_##i,                                                              \
 		POST_KERNEL,                                                                  \
-		CONFIG_KERNEL_INIT_PRIORITY_DEVICE,                                           \
+		CONFIG_VIDEO_ISP_VSI_INIT_PRIORITY,                                           \
 		&isp_driver_api);                                                             \
 		                                                                              \
+	/* Chains this device onto v4.4's control-registry walk (video_find_ctrl(),         \
+	 * drivers/video/video_ctrls.c): an app calling video_get_ctrl()/                    \
+	 * video_set_ctrl() on the ISP device for a control the ISP itself doesn't          \
+	 * register (e.g. exposure/AWB, owned by the sensor) falls through to               \
+	 * .src_dev and keeps walking upstream.  src_dev mirrors .controller above --       \
+	 * NULL in TPG-only configs (no camera port@0 wired), which the framework           \
+	 * handles by stopping the walk there. */                                          \
+	VIDEO_DEVICE_DEFINE(isp_vdev_##i, DEVICE_DT_INST_GET(i),                            \
+			     DEVICE_DT_GET_OR_NULL(REMOTE_DEVICE(i, 0)));                    \
+                                                                                              \
 	static void isp_config_func_##i(const struct device *dev)                             \
 	{                                                                                     \
 		IRQ_CONNECT(DT_INST_IRQ_BY_NAME(i, isp, irq),                                 \

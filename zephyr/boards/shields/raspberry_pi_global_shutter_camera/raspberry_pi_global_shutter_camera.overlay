@@ -1,0 +1,163 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Raspberry Pi Global Shutter Camera / InnoMaker GS camera module
+ * (IMX296LQR-C colour), 54 MHz module oscillator, CCI address 0x1A, 1 MIPI
+ * data lane (unlike the sibling raspberry_pi_camera_module_1 /
+ * innomaker_cam_ov9281 shields, which are both 2-lane parts -- the IMX296
+ * silicon has a single CSI-2 data lane, see zephyr/drivers/video/imx296.c).
+ * Board-agnostic: follows the upstream raspberry_pi_camera_module_2
+ * shield's label contract EXACTLY (`chosen zephyr,camera`,
+ * `&csi_interface`, `&csi_ep_in`, `&csi_i2c`) -- see zephyrproject-rtos/
+ * zephyr boards/shields/raspberry_pi_camera_module_2/
+ * raspberry_pi_camera_module_2.overlay -- so it plugs into ANY carrier
+ * connector shield that defines those labels. On alp-sdk that carrier
+ * shield is the E1M-EVK's e1m_evk_rpi_csi connector shield (owned +
+ * provided separately); build with
+ * SHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera".
+ *
+ * The module's own oscillator is 54 MHz: if a different InnoMaker/RPi GS
+ * module variant ships a different crystal, this fixed-clock value must be
+ * changed to match it -- see doc/index.rst.
+ */
+
+#include <zephyr/dt-bindings/gpio/raspberrypi-csi-connector.h>
+#include <zephyr/dt-bindings/video/video-interfaces.h>
+
+/ {
+	chosen {
+		zephyr,camera = &csi_capture_port;
+	};
+
+	imx296_input_clock: imx296-input-clock {
+		compatible = "fixed-clock";
+		clock-frequency = <54000000>;
+		#clock-cells = <0>;
+	};
+};
+
+&csi_interface {
+	status = "okay";
+};
+
+/*
+ * issue #2287: IPI controller-timing mode, bench-proven on E1M-AEN803
+ * 2026W36-0001. The DW CSI-2 host's default "Camera" IPI mode (see
+ * zephyr/dts/bindings/video/snps,designware-csi.yaml's ipi-mode enum, and
+ * csi2_dw_validate_data()'s CSI2_IPI_MODE_TIMINGS_CAM branch in
+ * zephyr/drivers/video/video_csi_dw.c) derives HSA/HBP/HSD from the D-PHY
+ * clock -- and emitted NO lines at all for this 1-lane sensor on silicon.
+ * "Controller" mode instead uses these fixed csi-h* / csi-v* timings
+ * (CSI2_IPI_MODE_TIMINGS_CTRL, same file, skips the derivation and
+ * programs the values below verbatim into CSI_IPI_H*_TIME /
+ * CSI_IPI_V*_LINES -- csi2_dw_ipi_set_timings()).
+ *
+ * The IPI pixel clock itself is 400 MHz / 3 = 133.33 MHz, NOT the
+ * bandwidth-margined rate video_csi_dw.c normally requests: in Controller
+ * mode, csi2_dw_validate_data() (zephyr/drivers/video/video_csi_dw.c)
+ * requests the BARE pixel rate -- pll_fin 594000000 * 2 * 1 lane / 10 bpp =
+ * 118800000 Hz -- because here the DT timings below set the IPI drain rate,
+ * not a margin over the sensor. Confirmed on the bench (E1M-AEN803
+ * 2026W36-0001): CSI_PIXCLK_CTRL (0x4903f008) read back 0x00030001, i.e.
+ * divisor 3 off the 400 MHz source = 133.33 MHz. See the comment on that
+ * request in csi2_dw_validate_data() for why the normal 1.2x margin would
+ * pick divisor 2 (200 MHz) instead and starve the IPI relative to the
+ * sensor.
+ *
+ * Derivation (must be recomputed if IMX296_HMAX/VMAX or the CSI IPI pixel
+ * clock change -- see the matching comment next to those constants in
+ * zephyr/drivers/video/imx296.c):
+ *   sensor line time = HMAX 1100 / INCK 74.25 MHz         = 14.815 us
+ *   IPI line time     = (hsa+hbp+hsd+hact) / IPI pixclk
+ *                      = (3+10+503+1456) / 133.33 MHz      = 14.79  us
+ * The IPI line is slightly FASTER than the sensor line, so the 8 KiB IPI
+ * FIFO drains a line before the next one lands and never overflows.
+ *   VTOTAL = vsa+vbp+vfp+vact = 1+4+25+1088 = 1118 = IMX296_VMAX (exact).
+ *
+ * HSD was swept on the bench to find this margin: HSD 531 (line time
+ * 15.000 us, slower than the sensor) overflowed the FIFO and banded the
+ * frame every ~80 rows (14.815 us / 0.185 us-per-row-drift predicts 80);
+ * HSD 520 gave ~139-row bands; HSD 503 gave zero IPI-FIFO overflow events
+ * over a full capture run -- this is the bench-verified full-frame result
+ * csi-hline/csi-vtotal below must still reproduce (they do, see below).
+ *
+ * issue #2287 Stage B: csi-hline / csi-vtotal REPLACE the fixed csi-hsd /
+ * csi-vfp this overlay used to carry (zephyr/dts/bindings/video/
+ * snps,designware-csi.yaml's own doc comment on the two). A single fixed
+ * csi-hsd is only ever correct for the ONE hact (active width) it was
+ * bench-swept against -- imx296.c now also offers a 1280x960 ROI mode
+ * alongside the 1456x1088 full frame, and a narrower hact under the SAME
+ * fixed hsd shortens the derived HLINE below the sensor's own unchanged
+ * line time, starving the IPI. csi-hline/csi-vtotal instead give
+ * csi2_dw_validate_data() (video_csi_dw.c) the sensor's TOTAL line/frame
+ * length, INCK-independent (both are just IMX296_HMAX/VMAX re-expressed in
+ * IPI pixclk cycles, and HMAX/VMAX are the SAME across the sensor's three
+ * INCK options, imx296.c's own comment on IMX296_VMAX/HMAX), so it can
+ * re-derive hsd/vfp from whatever hact/vact the CURRENTLY selected format
+ * sets -- timing now follows any format the sensor advertises, including
+ * this ROI mode, instead of being pinned to whichever one was bench-swept.
+ *
+ *   csi-hline  = hsa+hbp+hsd+hact  = 3+10+503+1456   = 1972
+ *   csi-vtotal = vsa+vbp+vfp+vact  = 1+4+25+1088      = 1118 (= IMX296_VMAX)
+ *
+ * Full-frame arithmetic check (hact 1456, vact 1088 -- csi2_dw_validate_data()
+ * derives these at configure time, not hardcoded here):
+ *   hsd = csi-hline - hsa - hbp - hact   = 1972 - 3 - 10 - 1456  = 503
+ *   vfp = csi-vtotal - vsa - vbp - vact  = 1118 - 1 - 4 - 1088   = 25
+ * Both match the bench-swept fixed values above EXACTLY -- csi-hline/
+ * csi-vtotal reproduce the bench-verified full-frame timing bit-for-bit, not
+ * just approximately. ROI mode (hact 1280, vact 960, imx296.c's
+ * IMX296_ROI_WIDTH/HEIGHT) is UNBENCHED: hsd = 1972-3-10-1280 = 679,
+ * vfp = 1118-1-4-960 = 153, both non-negative (csi2_dw_validate_data()
+ * rejects a negative derivation with -EINVAL), but whether 679/153 keep the
+ * IPI line/frame time ahead of the sensor's the same way 503/25 do has not
+ * been measured on silicon.
+ *
+ * SCOPE: these properties (ipi-mode, csi-h* / csi-v* / csi-hline / csi-vtotal)
+ * live on the shared &csi CONTROLLER node, not on the imx296 sensor node --
+ * they are IMX296-specific derivations applied to a controller-wide register
+ * set. A second sensor wired to the same &csi controller (this Alif CSI-2
+ * host has two PHY/sensor slots, CSI2_NUM_SENSORS in video_csi_dw.h) would
+ * INHERIT these Controller-mode timings too, which is almost certainly wrong
+ * for a different sensor's HMAX/VMAX/pixel-clock. Revisit if/when a second
+ * sensor is ever wired here.
+ */
+&csi {
+	ipi-mode = "Controller";
+	csi-hsa = <3>;
+	csi-hbp = <10>;
+	csi-hline = <1972>;
+	csi-vsa = <1>;
+	csi-vbp = <4>;
+	csi-vtotal = <1118>;
+};
+
+&csi_ep_in {
+	remote-endpoint-label = "imx296_ep_out";
+	bus-type = <VIDEO_BUS_TYPE_CSI2_DPHY>;
+	data-lanes = <1>;
+};
+
+&csi_i2c {
+	imx296: imx296@1a {
+		compatible = "sony,imx296";
+		clocks = <&imx296_input_clock>;
+		reg = <0x1a>;
+
+		port {
+			imx296_ep_out: endpoint {
+				remote-endpoint-label = "csi_ep_in";
+				bus-type = <VIDEO_BUS_TYPE_CSI2_DPHY>;
+				data-lanes = <1>;
+				/* issue #2287: this sensor has no known register that
+				 * parks its CLOCK lane at LP-11 short of full
+				 * streaming -- see the property's own doc comment in
+				 * zephyr/dts/bindings/video/sony,imx296.yaml.
+				 */
+				no-lp11-clock-lane-park;
+			};
+		};
+	};
+};

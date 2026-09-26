@@ -26,13 +26,27 @@ extern "C" {
 #define VIDEO_CID_ALIF_ISP_SET               (VIDEO_CID_PRIVATE_BASE + 2)
 #define VIDEO_CID_ALIF_ISP_GET               (VIDEO_CID_PRIVATE_BASE + 3)
 
+/* Read-only, volatile (VIDEO_CTRL_FLAG_VOLATILE): 1 while the encoder still
+ * has SW_ENC_E (JPEG_SWREG5 bit 0, per AE822FA0E5597BS0_CM55_HE_View.svd)
+ * asserted, 0 once hardware has cleared it. This is a driver-private status
+ * bit, not a JPEG-class control (V4L2's JPEG class defines no such CID), so
+ * it belongs in the VIDEO_CID_PRIVATE_BASE range alongside the CSI/ISP
+ * controls above, not VIDEO_CID_JPEG_CLASS_BASE. Added for the bounded
+ * pre-stop quiesce poll in src/backends/jpeg/alif_hantro.c's
+ * hantro_encode() -- see jpeg_hantro_vc9000e_get_volatile_ctrl() in
+ * jpeg_hantro_vc9000e.c.
+ */
+#define VIDEO_CID_JPEG_ENC_BUSY              (VIDEO_CID_PRIVATE_BASE + 4)
+
 /*
  * v4.4 video-API shim (Alp Lab AB): legacy Bayer + greyscale pixel-format
  * aliases the fork driver bodies reference by their PRE-v4.4 names.  Upstream
  * Zephyr v4.4 renamed the 8/10/12/14/16-bit Bayer FOURCCs to the `S`-prefixed
  * `VIDEO_PIX_FMT_SBGGR8` etc.; the FOURCC byte values are UNCHANGED, so we alias
- * the fork's `BGGR8`/`GBRG8`/`GRBG8`/`RGGB8` names to the v4.4 `S`-prefixed
- * macros to keep the vendored driver bodies verbatim.  `Y6P`/`Y7P` (RAW6/RAW7
+ * the fork's `BGGR8`/`GBRG8`/`GRBG8`/`RGGB8` (and 10-bit unpacked `BGGR10`..)
+ * names to the v4.4 `S`-prefixed macros to keep the vendored driver bodies
+ * verbatim.  The 10-bit MIPI-packed Bayer formats have no alias: callers use
+ * upstream's `VIDEO_PIX_FMT_SBGGR10P`.. directly.  `Y6P`/`Y7P` (RAW6/RAW7
  * MIPI-packed greyscale) were DROPPED entirely by v4.4 with no replacement, so
  * we re-declare them here with the fork's original FOURCC values (the only
  * consumers are the fork CPI/CSI data-type tables, gated under the
@@ -42,15 +56,15 @@ extern "C" {
 #define VIDEO_PIX_FMT_GBRG8                  VIDEO_PIX_FMT_SGBRG8
 #define VIDEO_PIX_FMT_GRBG8                  VIDEO_PIX_FMT_SGRBG8
 #define VIDEO_PIX_FMT_RGGB8                  VIDEO_PIX_FMT_SRGGB8
+#define VIDEO_PIX_FMT_BGGR10                 VIDEO_PIX_FMT_SBGGR10
+#define VIDEO_PIX_FMT_GBRG10                 VIDEO_PIX_FMT_SGBRG10
+#define VIDEO_PIX_FMT_GRBG10                 VIDEO_PIX_FMT_SGRBG10
+#define VIDEO_PIX_FMT_RGGB10                 VIDEO_PIX_FMT_SRGGB10
 #define VIDEO_PIX_FMT_Y6P                    (VIDEO_FOURCC('Y', '0', '6', 'P'))
 #define VIDEO_PIX_FMT_Y7P                    (VIDEO_FOURCC('Y', '0', '7', 'P'))
 
 /* Additional supported formats */
 #define VIDEO_PIX_FMT_RGB888_PLANAR_PRIVATE  (VIDEO_FOURCC('P', 'R', 'G', 'B'))
-#define VIDEO_PIX_FMT_BGGR10P                (VIDEO_FOURCC('p', 'B', 'A', 'A'))
-#define VIDEO_PIX_FMT_GBRG10P                (VIDEO_FOURCC('p', 'G', 'A', 'A'))
-#define VIDEO_PIX_FMT_GRBG10P                (VIDEO_FOURCC('p', 'g', 'A', 'A'))
-#define VIDEO_PIX_FMT_RGGB10P                (VIDEO_FOURCC('p', 'R', 'A', 'A'))
 #define VIDEO_PIX_FMT_BGGR12P                (VIDEO_FOURCC('p', 'B', 'C', 'C'))
 #define VIDEO_PIX_FMT_GBRG12P                (VIDEO_FOURCC('p', 'G', 'C', 'C'))
 #define VIDEO_PIX_FMT_GRBG12P                (VIDEO_FOURCC('p', 'g', 'C', 'C'))
@@ -59,10 +73,6 @@ extern "C" {
 #define VIDEO_PIX_FMT_GBRG14P                (VIDEO_FOURCC('p', 'G', 'E', 'E'))
 #define VIDEO_PIX_FMT_GRBG14P                (VIDEO_FOURCC('p', 'g', 'E', 'E'))
 #define VIDEO_PIX_FMT_RGGB14P                (VIDEO_FOURCC('p', 'R', 'E', 'E'))
-#define VIDEO_PIX_FMT_BGGR10                 (VIDEO_FOURCC('B', 'G', '1', '0'))
-#define VIDEO_PIX_FMT_GBRG10                 (VIDEO_FOURCC('G', 'B', '1', '0'))
-#define VIDEO_PIX_FMT_GRBG10                 (VIDEO_FOURCC('B', 'A', '1', '0'))
-#define VIDEO_PIX_FMT_RGGB10                 (VIDEO_FOURCC('R', 'G', '1', '0'))
 #define VIDEO_PIX_FMT_BGGR12                 (VIDEO_FOURCC('B', 'G', '1', '2'))
 #define VIDEO_PIX_FMT_GBRG12                 (VIDEO_FOURCC('G', 'B', '1', '2'))
 #define VIDEO_PIX_FMT_GRBG12                 (VIDEO_FOURCC('B', 'A', '1', '2'))
@@ -224,6 +234,42 @@ static const struct cpi_csi2_mode_settings data_mode_settings[] = {
 size_t fourcc_to_plane_size(uint32_t fourcc, uint8_t plane_id, size_t buffer_size);
 int fourcc_to_numplanes(uint32_t fourcc);
 unsigned int pix_fmt_bpp(uint32_t fourcc);
+
+/*
+ * #2287 Stage B unit 3 (bench runs 307/308): re-arms ONLY the CPI
+ * capture engine (SNAPSHOT mode -- one frame per call) for an ISP consumer's next frame
+ * (isp_pico.c), as distinct from a full video_stream_stop()/_start() (which always tears the
+ * CSI-2 endpoint + sensor down, by design, for a real stop()/close()). The CALLER (isp_pico.c's
+ * isp_bottom_half()) MUST have already attached its own next destination buffer
+ * (isp_attach_buffer_to_hw()) before calling this -- re-arming the CPI before the ISP has a
+ * destination ready is exactly the bug runs 307/308 found (see video_alif.c's own comment on
+ * this function for the full mechanism). There is no longer a matching "pause" function: with
+ * nothing else ever re-arming the CPI behind isp_pico.c's back, a pause is simply isp_pico.c
+ * choosing not to call this. `dev` is this CPI controller device (the ISP's `config->controller`).
+ */
+int alif_cam_cpi_resume(const struct device *dev);
+
+/*
+ * #2287 Stage B unit 3 (bench runs 307-310, stall-recovery gap): registers a callback
+ * alif_video_cam_isr() (video_alif.c) invokes from ISR context whenever it detects a CPI/CSI
+ * error (INTR_OUTFIFO_OVERRUN/INTR_INFIFO_OVERRUN/INTR_BRESP_ERR) in ISP-consumer mode -- the
+ * ISP's own frame-end interrupt never fires for a frame that failed before reaching the ISP at
+ * all, so without this, nothing would ever re-arm the CPI after this class of error. `cb` MUST
+ * be ISR-safe (no k_mutex, no blocking calls -- isp_pico.c's own implementation only calls
+ * k_work_submit_to_queue(), which is ISR-safe); `user_data` is passed back to `cb` verbatim
+ * (isp_pico.c passes its own `const struct device *` ISP device). `dev` is this CPI controller
+ * device (the ISP's `config->controller`), same as alif_cam_cpi_resume()'s own `dev` param.
+ *
+ * ONE callback per controller device: a later call REPLACES whatever was registered before, it
+ * does not chain or append. `cb == NULL` unregisters (the error path then simply does nothing,
+ * same as if this had never been called). MUST be called before streaming starts -- there is no
+ * lock around the two fields this sets (`error_cb`/`error_cb_user_data`, video_alif.h): the ISR
+ * reads them directly, so registering (or re-registering) while a stream is already running
+ * races that read with no ordering guarantee. isp_pico.c's own video_isp_init() is the only
+ * caller today, and it runs well before any stream starts.
+ */
+void alif_cam_register_error_cb(const struct device *dev, void (*cb)(void *user_data),
+				 void *user_data);
 
 #ifdef __cplusplus
 }

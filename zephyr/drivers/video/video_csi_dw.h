@@ -318,6 +318,18 @@
 #define CSI2_IPI_FIFO_DEPTH   1024
 #define CSI2_BANDWIDTH_SCALER (1.2)
 
+/*
+ * Alp Lab AB: a sensor stuck emitting bad IPI framing can fire
+ * CSI_INT_ST_MAIN_IPI_FATAL once per line -- csi2_dw_irq() LOG_ERRs
+ * uncapped on every one of those, which floods the log. Cap the LOG_ERR to
+ * the first this many occurrences, then mask CSI_INT_MSK_IPI_FATAL so the
+ * source goes quiet (see csi2_dw_data.ipi_fatal_count / ipi_fatal_total).
+ * This is log-only bookkeeping -- csi2_dw_irq() no longer soft-resets IPI
+ * on this or any other fatal event (issue #2287; see the comment at the
+ * end of csi2_dw_irq() in video_csi_dw.c for why that reset was removed).
+ */
+#define CSI2_DW_IPI_FATAL_LOG_LIMIT 16
+
 #define CSI2_NUM_SENSORS 2
 
 enum csi2_ipi_mode_timings {
@@ -330,6 +342,13 @@ struct csi2_dw_config {
 
 	const struct device *rx_dphy;
 	uint32_t ipi_mode: 1;
+	/*
+	 * Alp Lab AB (issue #2287 Stage B, bench runs 304-306): optional DT property
+	 * ipi-fs-sync (snps,designware-csi.yaml) -- when true, csi2_dw_ipi_advanced_features()
+	 * SETS CSI_IPI_ADV_FEATURES_SYNC_EVENT instead of clearing it. Default false: byte-
+	 * identical to before this field existed (SYNC_EVENT stays cleared).
+	 */
+	uint32_t ipi_fs_sync: 1;
 
 	uint32_t irq;
 	void (*irq_config_func)(const struct device *dev);
@@ -341,6 +360,21 @@ struct csi2_dw_config {
 	const struct device *sensor[CSI2_NUM_SENSORS];
 
 	uint32_t num_dphys;
+
+	/*
+	 * Alp Lab AB (issue #2287 Stage B): optional Controller-mode DT properties csi-hline /
+	 * csi-vtotal (snps,designware-csi.yaml) -- when non-zero, csi2_dw_validate_data()
+	 * derives timing->hsd / timing->vfp from these at configure time instead of reading
+	 * them as fixed csi-hsd / csi-vfp DT values, so the IPI controller timing tracks
+	 * whatever hact/vact the CURRENTLY selected format sets, not just whichever format a
+	 * single fixed csi-hsd happened to be bench-swept against. 0 means "not set" (neither
+	 * property is a meaningful 0 in practice -- a zero-length line/frame is nonsensical),
+	 * so board DTS that doesn't set them gets byte-identical behaviour to before this
+	 * field existed: the fixed csi-hsd/csi-vfp path.
+	 */
+	uint32_t hline;
+	uint32_t vtotal;
+
 	uint8_t rx_dphy_ids[];
 };
 
@@ -366,6 +400,29 @@ struct csi2_dw_data {
 
 	const struct cpi_csi2_mode_settings *csi_cpi_settings[CSI2_NUM_SENSORS];
 	struct dphy_csi2_settings phy[CSI2_NUM_SENSORS];
+
+	/*
+	 * Alp Lab AB: count of CSI_INT_ST_MAIN_IPI_FATAL events seen by csi2_dw_irq() in the
+	 * CURRENT unmask window -- reset to 0 by csi2_dw_irq_on(), which now runs both from
+	 * csi2_dw_configure() (set_format time) AND from csi2_dw_stream_start() (every stream
+	 * (re)start), so a stream restart always gets a fresh cap window instead of inheriting
+	 * a mask a previous, unrelated stream left set. A misprogrammed/misbehaving sensor can
+	 * fire this once per line (a per-fatal LOG_ERR storm, log-only -- csi2_dw_irq() does NOT
+	 * soft-reset IPI, issue #2287) -- csi2_dw_irq() stops logging and masks
+	 * CSI_INT_MSK_IPI_FATAL once this reaches CSI2_DW_IPI_FATAL_LOG_LIMIT.
+	 */
+	uint32_t ipi_fatal_count;
+
+	/*
+	 * Alp Lab AB: lifetime count of CSI_INT_ST_MAIN_IPI_FATAL events, NEVER reset (unlike
+	 * ipi_fatal_count above), incremented alongside it in csi2_dw_irq(). Reporting is
+	 * LOG-ONLY: this field is read back once, into the "masked after N (total M since driver
+	 * init)" LOG_ERR line csi2_dw_irq() prints when ipi_fatal_count hits
+	 * CSI2_DW_IPI_FATAL_LOG_LIMIT -- there is no separate diagnostic dump API that surfaces
+	 * it; a caller wanting the running total has to read csi2_dw_data directly (internal to
+	 * this driver) or grep the log.
+	 */
+	uint32_t ipi_fatal_total;
 };
 
 #endif /* _CSI_DW_H_ */

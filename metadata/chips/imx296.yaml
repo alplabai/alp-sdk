@@ -1,0 +1,100 @@
+# Alp SDK chip manifest: Sony IMX296LQR-C 1.58 MP global-shutter colour MIPI CSI-2.
+schema_version:   1
+chip_id:          imx296
+driver_status:    none              # no chips/imx296/ portable chip-ID stub exists (unlike
+                                     # OV9281's chips/ov9281/ov9281.c) -- streaming lives entirely
+                                     # in the Zephyr driver, zephyr/drivers/video/imx296.c. OV5647
+                                     # takes the shape one step further: it has no metadata/chips/
+                                     # manifest at all, catalogue-only or otherwise. This manifest
+                                     # IS one (driver_status: none, no chips/ entry) -- catalogue-
+                                     # only, allowlisted in scripts/check_chip_manifest_parity.py's
+                                     # KNOWN_MANIFEST_NO_DRIVER.
+display_name:     "Sony IMX296LQR-C 1.58 MP global-shutter colour MIPI CSI-2 sensor"
+vendor:           sony
+mpn_population:
+  - "IMX296LQR-C"
+
+datasheet:
+  primary:        "Sony IMX296LQR-C public preliminary datasheet"
+
+notes: |
+  Streaming driver: zephyr/drivers/video/imx296.c (ADR-0017-ADJACENT, authored
+  from the datasheet -- see that file's header). Shield:
+  zephyr/boards/shields/raspberry_pi_global_shutter_camera/. See
+  docs/camera-shields.md for the full driver/shield/control reference.
+
+  Issue #2287, Stage A (E1M-AEN803 2026W36-0001, E1M-EVK, csi_i2c = I2C1 @
+  0x49011000), bench-verified: I2C identity (bench run 229 -- the module
+  answers at CCI 0x1A; STANDBY (0x3000) and XMSTA (0x300A) match datasheet
+  POR defaults; the undocumented SENSOR_INFO register, 0x3148/0x3149,
+  16-bit little-endian, reads 0x4A00, the signature the driver checks for
+  this colour LQR variant), CSI-2 streaming, and a full 1456x1088 RAW10
+  frame captured through <alp/camera.h> and correlated against a diag
+  control capture: bench run 292 (a SINGLE capture, evening light, gain 0)
+  reads mean pixel value 61.19, max 108, a clean close and no mod-4-column
+  byte-slip pattern in the captured image; 0.98 8x8-block correlation
+  against diag control run 293 (SHS=14 written directly, same light). Both
+  runs are still dim (~1 code above black); exposure/lighting tuning is a
+  follow-up. Run 292's build had CONFIG_LOG unset (no log output at all),
+  so its clean console says nothing about INT_IPI_PIXEL_IF_HLINE_ERR or
+  INT_IPI_PIXEL_IF_FIFO_OVERFLOW -- their status on the product build is
+  UNKNOWN, not "not seen". The 37-80-per-capture and ~10.8k HLINE_ERR
+  counts elsewhere were measured in earlier diag runs (logging enabled),
+  before the init-period/SHS/CPI-pause fixes. This is a single-capture
+  proof only: frame rate was not measured, and CONTINUOUS streaming has
+  not been bench-run on the product (logging-enabled) build, so whether
+  HLINE_ERR/FIFO_OVERFLOW (or anything else) shows up there is open.
+
+  Issue #2287, Stage B, bench-verified: a 1280x960 ROI crop mode (runs
+  294/295), the ISP-Pico data path (SRGGB10P -> ISP-Pico -> YUV420, run
+  297), auto-exposure through the ISP-Pico AE library (runs 309/310, after
+  fixing a CPI snapshot-mode re-arm race that corrupted frames -- see
+  changelog.d/2287.md), and continuous MJPEG streaming through
+  examples/connectivity/camera-mjpeg-stream (runs 312-314: 61 fps encode,
+  0 encode failures, up to 28.3 fps / 885 KB/s delivered to one client).
+
+  NOT yet bench-verified: colour (AWB/CCM) -- no IMX296-fitted calibration
+  table exists yet, every IMX296 build falls through to the stock ARX3A0
+  defaults; the driver's fast-trigger exposure mode
+  (IMX296_CID_TRIGGER_MODE) -- compiles clean but has not run with a
+  trigger pulse, and its GPIO wiring's electrical polarity is also
+  unconfirmed against the module's own documentation, so do not wire its
+  trigger header yet; SHS < 14 in ROI mode (the datasheet's own tabulated
+  frame-rate floor vs. this driver's fixed VMAX is an open discrepancy);
+  and OV5647/OV9281 re-bench of the CPI/ISP changes Stage B made to the
+  code those sensors also share.
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x1A, scope: "fixed CCI address (SLAMODE-independent; the datasheet also
+        documents 0x36/0x37 depending on the SLAMODE strap, not used by this driver)" }
+  max_clock_hz:   400000
+
+mipi:
+  lanes_supported: [1]
+
+resolutions:
+  max:            [1456, 1088]
+  features:       [global_shutter]
+
+kconfig:
+  zephyr:         VIDEO_IMX296      # streaming driver's own Kconfig symbol (no portable
+                                     # ALP_SDK_CHIP_IMX296 -- see driver_status above)
+  baremetal:      n/a               # no bare-metal (CMSIS, no-RTOS) camera capture path exists
+                                     # in this tree for any sensor on this bus
+
+families:
+  - aen
+
+verification:
+  hil_silicon:    partial           # Stage A+B bench-verified: I2C identity, CSI-2 streaming, a
+                                     # captured raw frame (full-frame + 1280x960 ROI), the
+                                     # ISP-Pico data path, auto-exposure, and continuous MJPEG
+                                     # streaming -- see notes above. STILL partial, not full:
+                                     # colour (AWB/CCM) is uncalibrated and fast-trigger mode is
+                                     # unbenched -- both remain open, so this stays "partial"
+                                     # rather than moving to a full-verification status.
+  smoke_tests:    none               # no chips/ portable driver surface exists to unit-test;
+                                     # the streaming driver's coverage is
+                                     # tests/zephyr/video_sensors/src/imx296_test.c.

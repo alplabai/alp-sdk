@@ -48,7 +48,7 @@ both `paths:` filter blocks, adds `zephyr/boards/shields/**`, `zephyr/drivers/di
 drivers it compiles into this app, none previously covered by this gate), and
 adds the
 example as a sixth bounded `--testsuite-root`
-(`.github/workflows/pr-twister-aen.yml:433`
+(`.github/workflows/pr-twister-aen.yml:451`
 ("alp-sdk/examples/connectivity/iot-dashboard")) — the one root among the six
 that contributes a scenario to *both* SKU matrix legs, since mqtt-telemetry
 and iot-fleet-ota remain AEN801-only.

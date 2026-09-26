@@ -11,7 +11,8 @@
  * adds the on-module GD32G553 supervisor links:
  *   - SCI7 Simple-SPI (alias alp-spi1): P76 MOSI7 / P77 MISO7 / P96 SCK7 +
  *     P97 GPIO chip-select (master SCI-SPI has no hardware slave-select)
- *   - RIIC8 / BRD_I2C (alias alp-i2c0): P06 SDA / P07 SCL  (GD32 slave @ 0x70)
+ *   - RIIC8 / BRD_I2C: P06 SDA / P07 SCL (GD32 slave @ 0x70) -- Cortex-A55/Linux-exclusive,
+ *     NOT wired on this board: no alias, &i2c8 stays disabled below.
  *
  * The on-module silicon is the n44 variant; Zephyr only models the n48gbg
  * SoC, which is devicetree-identical for the M33 + SPI/I2C peripherals
@@ -45,7 +46,6 @@
 
 	aliases {
 		alp-spi1 = &gd32_spi;
-		alp-i2c0 = &i2c8;
 	};
 
 	sram: memory@8003000 {
@@ -113,11 +113,16 @@
 	status = "okay";
 };
 
+/*
+ * RIIC8 / BRD_I2C is Cortex-A55/Linux-exclusive
+ * (metadata/e1m_modules/v2n/core-ownership.yaml) -- the CM33 must never
+ * master it, so this node stays disabled and carries no alias (no
+ * alp_i2c_open() bus_id resolves to it on this board).  The pinctrl group
+ * (i2c8_pins in alp_e1m_v2m101_m33_sm-pinctrl.dtsi) is kept for
+ * reference only -- an unreferenced group claims no pin.
+ */
 &i2c8 {
-	pinctrl-0 = <&i2c8_pins>;
-	pinctrl-names = "default";
-	clock-frequency = <I2C_BITRATE_FAST>;
-	status = "okay";
+	status = "disabled";
 };
 
 /*

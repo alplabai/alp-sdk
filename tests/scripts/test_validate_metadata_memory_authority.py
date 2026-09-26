@@ -122,13 +122,13 @@ def test_real_aen_presets_all_carry_write_authority():
 
 
 def test_real_non_aen_presets_are_skipped_not_flagged():
-    """E1M-V2N101/102, E1M-V2M101/102, E1M-NX9101 author no `memory_map:`
-    at all -- this check must not fire on them."""
+    """E1M-V2N101/102/103, E1M-V2M101/102/103, E1M-NX9101 author no
+    `memory_map:` at all -- this check must not fire on them."""
     vm = _load_vm()
     non_aen = [
         REPO / "metadata" / "e1m_modules" / f"{sku}.yaml"
-        for sku in ("E1M-V2N101", "E1M-V2N102", "E1M-V2M101",
-                    "E1M-V2M102", "E1M-NX9101")
+        for sku in ("E1M-V2N101", "E1M-V2N102", "E1M-V2N103",
+                    "E1M-V2M101", "E1M-V2M102", "E1M-V2M103", "E1M-NX9101")
     ]
     for p in non_aen:
         assert p.is_file()

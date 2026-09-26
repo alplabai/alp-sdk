@@ -70,9 +70,13 @@ into the topic-specific docs.
   silicon-gated; GPU2D and SecAES are also HAL-pack gated, ISP Pico's
   pack has already landed and is blocked by other reasons (see that
   doc's *Silicon scope — which E-part has what* section).
+- [camera-shields.md](camera-shields.md) — the three board-agnostic
+  Raspberry-Pi-style MIPI CSI-2 camera-module sensor drivers (OV5647,
+  OV9281, IMX296) and their Zephyr shields; build command form + supported
+  modes.
 - [glossary.md](glossary.md) — terms.
 - [adr/README.md](adr/README.md) — Architecture Decision Records
-  index (33 ADRs; recount with `ls docs/adr/[0-9]*.md | wc -l`).
+  index (34 ADRs; recount with `ls docs/adr/[0-9]*.md | wc -l`).
 
 ## Per-SoM bring-up
 
@@ -142,6 +146,15 @@ into the topic-specific docs.
   for a tier-2 bench-measured model-perf point
   (`metadata/model_perf/<SKU>/<hash>.yaml`); the contract ships in
   #1520, `metadata/model_perf/` stays empty until a real capture runs.
+
+## Models / edge-AI
+
+- [measuring-inference-energy.md](measuring-inference-energy.md) — the
+  measured millijoules per inference on E1M-AEN801 silicon: the
+  method (rail scan, conversion-ready sampling, idle-subtracted
+  window integration), the whole-board PSU cross-check, a measured
+  error budget, and the explicit list of what the figure is NOT
+  (not NPU energy, not silicon energy, not vendor-comparable).
 
 ## Security & release
 

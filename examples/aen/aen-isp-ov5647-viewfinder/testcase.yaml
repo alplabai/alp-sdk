@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression (in CI) for the portable <alp/camera.h> ISP-Pico
+# path (sensor -> csi -> cam -> isp -> memory -> CPU RGB565 conversion) on
+# the E1M-AEN801/AEN803 (Ensemble E8, M55-HE).  CI only compile-checks the
+# driver + DT graph -- there is no silicon in the runner -- but this image
+# is meant for a real bench capture with a real OV5647 sensor.  See
+# examples/aen/aen-isp-capture/testcase.yaml for the raw-API
+# sibling this mirrors.
+#
+# Needs both shields, same as aen-isp-capture / aen-camera-
+# firstlight's OV5647 scenario.
+
+sample:
+  name: aen-isp-ov5647-viewfinder
+  description: |
+    Bench RAM-run: a real OV5647 sensor frame through the Alif ISP-Pico,
+    AE + AWB on, captured through the portable <alp/camera.h> API (not the
+    raw Zephyr video_* calls aen-isp-capture uses) -- proves the
+    alif_isp_pico backend itself, not just the driver underneath it.
+
+tests:
+  alp_sdk.examples.aen.isp_ov5647_viewfinder.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_args:
+      - SHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1"
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - isp
+      - video
+      - camera
+    build_only: true   # the ISP-Pico+sensor build check is a bench flash, not a CI run.

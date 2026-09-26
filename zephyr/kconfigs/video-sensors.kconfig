@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Raspberry-Pi-style MIPI CSI-2 camera-module sensor drivers. Board-agnostic
+# (no Alif/EVK specifics) -- unlike zephyr/kconfigs/vendor-alif-peripherals.kconfig,
+# which holds the Alif CSI-2 HOST + Alif-fork sensors (ARX3A0), this file
+# holds sensors reached via a generic 15-pin camera shield on top of
+# whichever CSI-2 host the board provides.
+
+# Kconfig.ov5647 and Kconfig.ov9281 only add DT_HAS_..._ENABLED-gated leaf
+# options -- neither declares its own `depends on VIDEO` (Kconfig.ov5647
+# doesn't because upstream's own drivers/video/Kconfig wraps the whole
+# sensor list in `if VIDEO`, which our rsource is outside of). Wrap here
+# instead of hand-editing the vendored file.
+if VIDEO
+
+# ADR 0017 Tier-1 (upstream-PENDING backport of zephyrproject-rtos/zephyr#119301
+# "drivers: video: add a driver for the OmniVision OV5647" @
+# d81b1f630ee0f5078de6e3a47e7bc1b3613424c2), INTERIM. Vendored VERBATIM
+# (Apache-2.0) because it is not yet in the pinned Zephyr v4.4.1 base. Delete
+# this rsource line + zephyr/drivers/video/{ov5647.c,Kconfig.ov5647} + the
+# ovti,ov5647.yaml binding the moment the Zephyr pin advances past a revision
+# containing that PR -- see zephyr/drivers/video/ov5647.c and
+# docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
+rsource "../drivers/video/Kconfig.ov5647"
+
+# ADR 0017 Tier-1.5 (port of the Apache-2.0 Espressif esp-video-components
+# esp_cam_sensor/sensors/ov9281 driver onto the upstream v4.4 video API),
+# BENCH-VERIFIED 2026-09-21 on an E1M-AEN803 on the E1M-EVK. See
+# zephyr/drivers/video/ov9281.c for the source commit and retirement note.
+rsource "../drivers/video/Kconfig.ov9281"
+
+# ADR-0017-ADJACENT (authored from the Sony IMX296 datasheet -- no
+# permissive-licence IMX296 driver exists to consume), PARTIALLY
+# BENCH-VERIFIED (I2C identity only -- issue #2287, bench run 229). See
+# zephyr/drivers/video/imx296.c for the datasheet-section citations and
+# retirement note.
+rsource "../drivers/video/Kconfig.imx296"
+
+endif # VIDEO

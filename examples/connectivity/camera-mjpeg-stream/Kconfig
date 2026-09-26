@@ -1,0 +1,54 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Resolution select for this example.  Off (default) keeps the
+# bench-proven 640x480@30fps path; on switches src/main.c and
+# mjpeg_http.h over to the 1280x960 path (issue #2286, later reused by
+# #2287 Stage B unit 5 for IMX296) -- see boards/overlay-1280x960.conf
+# for the matching ISP-buffer-count and video-pool-size deltas that
+# resolution needs on the E1M-AEN801/AEN803's 4 MiB SRAM0 bank -- the
+# accounting there is sensor-neutral, it depends only on the 1280x960
+# NV12 frame size, not which sensor produced it.  Bench run 243
+# (E1M-AEN803 2026W36-0001, OV5647, Stage A's crop mode -- NOT yet
+# re-run against Stage B's binned mode below): board encodes 15 fps
+# capture/encode (encode ~2 ms), but the HTTP send path is the
+# bottleneck -- host receives ~7.5 fps / ~997,544 B/s delivered.  See
+# README.md.
+
+config CAMERA_MJPEG_STREAM_1280X960
+	bool "Stream at 1280x960 (15 fps capture/encode, ~7.5 fps delivered, send-bound) instead of 640x480@30fps"
+	default n
+	help
+	  Selects the sensor's own 1280x960 mode: OV5647's full-FOV 2x2-binned
+	  mode (issue #2286 Stage B, ov5647.c's ov5647_set_mode_regs() --
+	  Stage A's narrower centre crop at this same output size/rate is
+	  retired, see ov5647_hts_for()'s mode-selection comment) or IMX296's
+	  1280x960 ROI crop (issue #2287 Stage B unit 5,
+	  zephyr/drivers/video/imx296.c's IMX296_ROI_WIDTH/HEIGHT) --
+	  whichever sensor the build's SHIELD selects; this symbol and the
+	  SRAM0/buffer-pool accounting it drives (below,
+	  boards/overlay-1280x960.conf) are the same 1280x960 NV12 frame size
+	  either way, so neither depends on which sensor is actually wired.
+	  Still requests 15 fps by default even though OV5647's sensor mode
+	  also reaches 30 fps -- unbenched at 30 fps so far (IMX296 runs at
+	  its own fixed 60.3 frame/s regardless of this request; its actual
+	  delivered rate is expected to be send- or encode-bound, the same
+	  shape OV5647's own bench run 243 below found, but this has not yet
+	  been measured for IMX296 -- see changelog.d/2287.md). Bench run 243
+	  (E1M-AEN803 2026W36-0001,
+	  OV5647, Stage A's crop mode) measured 15 fps capture/encode
+	  (encode ~2 ms) but only ~7.5 fps delivered to the HTTP client -- the
+	  send path, not capture/encode, is the bottleneck (~997,544 B/s,
+	  ~1 MB/s). Two 1,843,200 B NV12 frames plus two ~160 KiB JPEG output
+	  buffers no longer fit alongside a third raw ISP buffer and the
+	  synthetic-frame fallback in the AEN's 4 MiB SRAM0 bank, so this
+	  build variant also drops the synthetic-frame fallback path entirely
+	  (src/main.c) and pairs with boards/overlay-1280x960.conf, which
+	  lowers CONFIG_ALP_SDK_CAMERA_ALIF_ISP_VBUF_COUNT to 2 and resizes
+	  the video buffer pool.  1920x1080 and 2592x1944 are out of scope
+	  for OV5647 (infeasible per the issue's feasibility note -- two NV12
+	  frames at either size don't fit SRAM0 at all); IMX296 has no mode
+	  at either size to begin with (its ROI crop and full-pixel-scan
+	  modes are 1280x960 and 1456x1088).
+
+source "Kconfig.zephyr"

@@ -123,6 +123,10 @@ struct video_cam_config {
 
 	const struct device *clk_dev;
 	clock_control_subsys_t cid;
+	/* Alp Lab AB: CPI pixel clock (CAMERA_PIXCLK_CTRL) and the CSI pixel clock
+	 * it is matched to in CSI mode; NULL when the DT does not carry them. */
+	clock_control_subsys_t pix_cid;
+	clock_control_subsys_t csi_pix_cid;
 
 	const struct device *endpoint_dev;
 };
@@ -143,6 +147,36 @@ struct video_cam_data {
 	struct k_poll_signal *signal;
 	struct video_format current_format;
 	bool is_streaming;
+	/* Alp Lab AB: buffer-starvation/resume contract -- `starved` marks a
+	 * STOP-interrupt-triggered pause (IN-FIFO ran dry) as distinct from a
+	 * user stream_stop(), so the next enqueue() knows to restart the
+	 * endpoint instead of the pause becoming a permanent stop
+	 * (bench-proven 2026-09-21). `lock` serializes the work-queue helper's
+	 * empty-check+starve decision against enqueue()'s put+restart decision
+	 * (both run in thread context; see video_alif.c for why this is a
+	 * k_mutex, not a spinlock). */
+	bool starved;
+	struct k_mutex lock;
+
+	/*
+	 * #2287 Stage B (stall-recovery gap found in bench runs 307-310): in ISP-consumer mode, isp_pico.c is the ONLY thing that re-arms the CPI
+	 * (isp_bottom_half()'s successful-attach path, alif_cam_cpi_resume()) -- but
+	 * alif_video_cam_isr()'s own corrupted-frame path (INTR_OUTFIFO_OVERRUN/
+	 * INTR_INFIFO_OVERRUN/INTR_BRESP_ERR) never reaches the ISP's frame-end interrupt at all
+	 * (the CPI/CSI side failed before a frame -- corrupted or otherwise -- ever reached the
+	 * ISP), so nothing would ever re-arm the CPI after this class of error, stalling the
+	 * stream permanently. `error_cb`/`error_cb_user_data`, set by
+	 * alif_cam_register_error_cb() (isp_pico.c calls this once at init, passing its own
+	 * device as `user_data`), let alif_video_cam_isr() notify the ISP to re-arm without this
+	 * file needing to know anything about isp_pico.c's internals -- the callback itself must
+	 * be ISR-safe (isp_pico.c's implementation only calls k_work_submit_to_queue(), which is).
+	 * NULL (unregistered) is the default -- byte-identical to before this existed for any
+	 * consumer that never calls the registration function (the AXI/memory-capture path, which
+	 * has its own, different, buffer-recovery semantics -- "wait for user to handle" -- and
+	 * does not register a callback).
+	 */
+	void (*error_cb)(void *user_data);
+	void *error_cb_user_data;
 };
 
 #endif /* _VIDEO_ALIF_H_ */

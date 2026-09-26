@@ -245,7 +245,7 @@ patches:
       `... --test core -- scramble_region_backwards_boundary`. Upstream
       to mcu-tools/mcuboot then drop alongside 0004.
   - path: zephyr/0001-clock_control_alif-master-source-expmst-i2s-setrate.patch
-    sha256sum: dd363a007acddc263e9168f4c75ac2b4bafd5a8ee438ce655b5f63a0398f2a76
+    sha256sum: d4655df3492d8226aea403ee36bcf5b827d2288e7cd562100a89c7068076ec93
     module: zephyr
     author: Alp Lab AB
     email: contact@alplab.ai
@@ -268,8 +268,17 @@ patches:
             reference header but is NOT confirmed against the DFP/TRM for the
             DesignWare i2s_dw path -- it is a separable hunk so the bench step can
             land the (a) enable and hold (b) if the divider regresses.
-      Drop both once an Alif upstream clockctrl carries the master-source enable
-      and a real I2S .set_rate.
+        (c) BENCH-UNVERIFIED: .set_rate/.get_rate for the CPI and CSI pixel-clock
+            dividers (CLKCTL_PER_MST CAMERA_PIXCLK_CTRL 0x00 / CSI_PIXCLK_CTRL
+            0x08, divisor [24:16], 2..0x1FF) so video_csi_dw.c's
+            clock_control_set_rate(pix_clk) is programmed instead of failing
+            -ENOTSUP.  Picks the slowest rate >= the request; -ERANGE above
+            source / 2.  set_rate also programs the CLK_SEL the clock ID
+            encodes, so consumers can set the divisor before .on (the DFP
+            order) whatever CLK_SEL boot firmware left (CLK_SEL=1 refused: its
+            rate is not settled).
+      Drop all three once an Alif upstream clockctrl carries the master-source
+      enable and real I2S / pixel-clock .set_rate.
   - path: zephyr/0002-ipm-add-poll-out-poll-in.patch
     sha256sum: 2412e7f6bcdbed10433cb7421be4166d75adadc31315f1423dde543fa99ecf9c
     module: zephyr
@@ -336,6 +345,515 @@ patches:
       own service policy. Unblocked ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM,
       which now defaults ON and is bench-validated on real E8 silicon (see
       zephyr/Kconfig). Upstream to hal_alif then drop.
+  - path: hal_alif/0003-isp-add-sbggr10p-bggr10-input-mapping.patch
+    sha256sum: 58d8fa4cb7a14c5427c370e73ca9b4d788bcd78b3283cfcf92520badb6552029
+    # See the module-name note on the 0001 patch above.
+    module: alif
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-09-22
+    upstreamable: true
+    comments: |
+      The ISP-Pico libisp wrapper's isp_pixelfmt_from_fourcc()/
+      isp_mode_from_fourcc() (isp_wrapper/src/isp_api_wrapper.c) map
+      VIDEO_PIX_FMT_Y10P to PIXEL_FORMAT_GRBG10 -- their own documented TODO
+      ("This should have been PIXEL_FORMAT_RAW10, but lib does not support
+      it") -- which is the WRONG Bayer phase for a BGGR sensor (bench-run
+      70/71 on a real OV5647: chroma exists but with a purple/green cast
+      when amplified, consistent with the wrong Bayer phase). The wrapper
+      ALREADY maps VIDEO_PIX_FMT_BGGR10 (== VIDEO_PIX_FMT_SBGGR10, unpacked)
+      correctly to PIXEL_FORMAT_BGGR10 -- it just never had a case for the
+      PACKED VIDEO_PIX_FMT_SBGGR10P, which is what alp-sdk's ISP-Pico driver
+      port (isp_pico.c's isp_set_fmt(INPUT)) and CPI (video_alif.c) actually
+      negotiate end to end for a real BGGR sensor. Add that one case,
+      mapping to the SAME PIXEL_FORMAT_BGGR10 the existing unpacked case
+      uses, in both isp_pixelfmt_from_fourcc() and isp_mode_from_fourcc()
+      (ISP_MODE_RAW). VIDEO_PIX_FMT_Y10P is left mapped to
+      PIXEL_FORMAT_GRBG10 unchanged, for compatibility with Alif's own
+      sdk-alif viewfinder recipe (targets an OV5675, a GRBG sensor). Pure
+      additive; upstream to hal_alif (a genuine RAW10 mapping, not just a
+      BGGR-specific one, is still the deeper fix -- see
+      zephyr/drivers/video/isp_pico.c's "PLANNED FIX" note) then drop.
+  - path: hal_alif/0004-isp-fix-wbm-v10-config-prefix.patch
+    sha256sum: ad97d6fbe61f990c03b852ef91c1502547bb5187895ac7b916c79b5d93dee764
+    # See the module-name note on the 0001 patch above.
+    module: alif
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-09-22
+    upstreamable: true
+    comments: |
+      isp_wrapper/inc/isp_conf.h guards ISP_WBM_V10 on `#if
+      defined(ISP_LIB_WBM_MODULE)` -- missing the CONFIG_ prefix every
+      sibling guard in the same file uses (CONFIG_ISP_LIB_CSM_MODULE,
+      CONFIG_ISP_LIB_EXPOSUREM_MODULE, ...), so ISP_WBM_V10 is NEVER defined
+      even with CONFIG_ISP_LIB_WBM_MODULE=y: the raw (unprefixed) macro is
+      never set by Kconfig. mpi_isp_calib.h's isp_calib_set/get helpers gate
+      their WBM read/write calls on `#if (ISP_WBM_V10)`, which silently
+      evaluates as 0 (an undefined identifier in a preprocessor #if) instead
+      of erroring, so the bug produces no build failure -- only dead code.
+      Not on the path isp_api_wrapper.c's own WBM enable calls use today
+      (those correctly check CONFIG_ISP_LIB_WBM_MODULE directly,
+      isp_api_wrapper.c:1197/1559), but fixing the guard is a one-line,
+      same-style-as-every-neighbour correction that stops the next caller of
+      mpi_isp_calib.h's calib helpers from hitting the same silent gap.
+      Pure additive/corrective; upstream to hal_alif then drop.
+  - path: hal_alif/0005-isp-port-ae-writeback-to-v4.4-video-ctrl.patch
+    sha256sum: ba5b57d3a2fd3e443b44d20dc11429b3c69b20671fdf9397f97dc9fef26134b3
+    # See the module-name note on the 0001 patch above.
+    module: alif
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-09-22
+    upstreamable: false
+    comments: |
+      Bench run 74 (stage 5, task C): isp_vsi_bottom_half()'s AE write-back
+      to the sensor (isp_api_wrapper.c, gated on CONFIG_ISP_LIB_AE_MODULE)
+      called the pre-v4.4 video_set_ctrl(dev, cid, void *value) 3-arg form,
+      which does not exist in the pinned Zephyr v4.4.1 video API (int
+      video_set_ctrl(const struct device *dev, struct video_control
+      *control)) -- dead code today only because no alp-sdk example enables
+      CONFIG_ISP_LIB_AE_MODULE yet, so the block was never actually
+      compiled. Ports both call sites to struct video_control, and fixes
+      two further mismatches the port exposed: (1) the gain write targeted
+      the generic VIDEO_CID_GAIN, which no alp-sdk sensor driver registers
+      (ov5647.c registers VIDEO_CID_ANALOGUE_GAIN) -- retargeted; (2) both
+      writes need unit scaling this library's fixed-point values don't
+      share with the sensor's own registers: totalGain is in this
+      library's ISP_SNS_GAIN_ACCU = 1024 = 1x scale, OV5647's AGC_GAIN
+      register (0x350a) uses register value 0x10 = 1x (scale by 16/1024);
+      sns_config.intLine is in raw sensor lines, OV5647's VIDEO_CID_EXPOSURE
+      is 1/16-line units (scale by 16). `dev` here is the ISP device
+      itself; video_set_ctrl(dev, ...) reaches the sensor via the v4.4
+      control-registry chain (video_find_ctrl(), drivers/video/video_ctrls.c)
+      walking isp -> cam -> csi -> sensor's VIDEO_DEVICE_DEFINE chain
+      (isp_pico.c/video_alif.c/video_csi_dw.c/ov5647.c each declare one),
+      landing on ov5647_set_ctrl() since neither CID is registered by any
+      device upstream of it. Upstream to hal_alif once the AE module has a
+      wider CI footprint there than one downstream board's bring-up; then
+      drop.
+
+      UPDATED (bench run 76): latches each write-back failure (LOG_ERR
+      "Failed to write Total Gain/Exposure to the sensor!") to log once
+      instead of every frame end -- run 76 hit exactly this with the gain
+      write (VIDEO_CID_ANALOGUE_GAIN INACTIVE every frame until alp-sdk's
+      isp_pico.c also disabled the sensor's AUTOGAIN cluster,
+      isp_apply_ae()), and a persistent failure of any kind would otherwise
+      spam the console for as long as it lasts.
+
+      REGENERATED (review round, blocker #1): the previous revision of this
+      patch was cut as a `git diff` against a checkout that already had
+      0003's hunks applied, so it silently CARRIED 0003's own diff inside
+      it -- applying 0001..0006 in order on a fresh v2.3.0 clone re-applied
+      0003's hunks a second time and failed at isp_api_wrapper.c:186.
+      Regenerated as a real stack: pristine v2.3.0 -> 0001 -> 0002 -> 0003
+      -> 0004 (each applied + committed) -> THIS patch's actual delta on
+      top, `git format-patch`-equivalent. Verified applying 0001..0006 in
+      order on an independent fresh clone reproduces the shared workspace's
+      <west topdir>/modules/hal/alif checkout byte-for-byte (diff -q, every
+      touched file).
+
+      UPDATED (review round, item 10): marked upstreamable: false -- the
+      16/ISP_SNS_GAIN_ACCU gain-scaling factor this patch hardcodes is
+      OV5647's own AGC_GAIN register-to-1x ratio, not a value any other
+      sensor is guaranteed to share (alp-sdk's isp_pico.c documents the
+      matching ISP_AE_GAIN_REG_PER_1X constant, isp_apply_ae(), for the
+      same reason). Not something to propose upstream as a general fix.
+  - path: hal_alif/0006-isp-ov5647-ae-sensor-defaults.patch
+    sha256sum: 73c8ee6dc4e08176484dc39280b05a9e124e1b0607249d0b17c79b6b4662c03f
+    # See the module-name note on the 0001 patch above.
+    module: alif
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-09-22
+    upstreamable: false
+    comments: |
+      Bench run 74 (stage 5, task C/D): sensor_attributes.h's static
+      AE_SNS_DEFAULT_S sensor_attributes table is a generic placeholder
+      (fullLinesStd 0xA47B = 42107 lines, fps 5, gain range up to 512x --
+      no real alp-sdk sensor matches these). Replaces the sensor-timing
+      facts (fullLinesStd/fullLines/fps/maxIntLine/minAgain/maxAgain) with
+      values derived from ov5647.c's own constants: pixel_rate 58333333 Hz,
+      HTS(640x480 binned) OV5647_HTS_640X480_BINNED = 1852, default 15 fps
+      (ov5647.c's own `.frmrate = 15` -- this branch does not force a
+      frmival) -> VTS = pixel_rate / (hts * frmrate) = 2099
+      (ov5647_frmrate_to_vts()'s own formula); exposure max = VTS - 4 =
+      2095 lines; OV5647_AGC_GAIN (0x350a) is 10-bit (OV5647_AGC_GAIN_MAX =
+      GENMASK(9,0) = 1023) where register value 0x10 = 1x, and struct
+      isp_ae_param's again is documented 1x = 1024 (isp_ctrl_params.h) ->
+      minAgain = 1024, maxAgain = 1023 * 1024 / 16 = 65472. Left unchanged
+      (algorithm-tuning constants, not sensor facts, need a bench pass, not
+      a citation): maxDgain/minDgain/dgainStep/aeRunInterval/aeTarget/
+      dampOver/dampUnder/tolerance/initExposure/aeMode/gainThreshold.
+      SENSOR-SPECIFIC by construction (upstreamable: false) -- retire this
+      patch, not upstream it, once/if the AE module gains a real per-sensor
+      config mechanism instead of one compiled-in global table.
+
+      UPDATED (bench run 81): fps, fullLinesStd/fullLines and maxIntLine
+      retargeted from 15 fps to 10 fps (fullLinesStd/fullLines 2099 ->
+      3149, fps 15*ISP_SNS_FPS_ACCU -> 10*ISP_SNS_FPS_ACCU, maxIntLine
+      2095 -> 3145). Run 81 measured the AE loop's exposure ceiling frozen
+      at exactly 2095 lines (this table's OLD 15 fps maxIntLine) even
+      after isp_apply_ae() (isp_pico.c) derived a 10-fps-based
+      int_time_max from video_get_frmival() at runtime -- the library's
+      own microseconds-to-lines conversion evidently reads THIS static
+      table, not the microsecond value isp_ae_param.int_time_max carries.
+      alp-sdk's examples/aen/aen-isp-capture now runs the sensor at
+      10 fps (OV5647's floor rate) by design, so this table tracks that. A
+      library-level way to vary this at runtime with an arbitrary
+      app-chosen frame rate, if one exists, was not found and is not what
+      this patch provides -- documented as a known gap in the patch file's
+      own comment, not solved here.
+
+      UPDATED (bench run 83): maxDgain 0x1FF (511, ~0.5x on dgain's
+      1024=1x scale) raised to 1024 (unity) -- advisor root cause,
+      arithmetic-confirmed: isp_apply_ae()'s own dgain_min/dgain_max=1024
+      (isp_pico.c) were being silently clamped down to this table's lower
+      maxDgain by the library's own attribute validation, capping
+      achievable total gain (aGain*dGain/1024) at roughly half of aGain's
+      own ceiling -- run 83's gain register 0x1fd (509, ~31.8x) matches
+      1023 (aGain's full register range) * 511 / 1024 almost exactly.
+      minDgain (64) was already below both the old and new maxDgain, so it
+      was never the binding constraint -- left unchanged. aeTarget also
+      switched from a bare `= 50` literal to `CONFIG_VIDEO_ISP_VSI_AE_
+      TARGET` (zephyr/kconfigs/vendor-alif-peripherals.kconfig), the SAME
+      Kconfig isp_apply_ae() reads for its own ae_target, so the two can
+      no longer drift independently -- run 81/83's dark-lab bench showed
+      the Kconfig's sane default (50, mid-grey) is unreachable there even
+      at the AE loop's own gain/exposure ceiling; diagnosed via a
+      build-time overlay lowering the Kconfig value, not by editing this
+      file's own literal.
+
+      UPDATED (bench run 85): minDgain (64, ~0.0625x) raised to 1024
+      (unity, == maxDgain) -- at the AE floor (dark bench scene, gain
+      driven all the way down) the library was free to pick anywhere in
+      [minDgain, maxDgain] and picked near the floor (sensor gain register
+      read back 0x01, ~1/16x) even with isp_apply_ae()'s own
+      dgain_min/dgain_max = 1024 (isp_pico.c) -- the same "app asked for
+      unity, the library's own attribute table let it go lower" pattern as
+      run 83's maxDgain bug, at the other end of the range this time.
+  - path: hal_alif/0007-isp-setcalib-load-once.patch
+    sha256sum: 2340b949abcf413894ac2b8b2ffeae7e31d9e7e209991cf27c7720d79e201b40
+    # See the module-name note on the 0001 patch above.
+    module: alif
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-09-23
+    upstreamable: true
+    comments: |
+      Bench run 85: isp_vsi_update_cfg() runs on EVERY isp_stream_start()
+      (the driver's restart-per-frame pattern, isp_pico.c's
+      MI_INTR_MP_FRAME_END-driven auto-stop-on-empty-fifo behaviour), which
+      meant VSI_MPI_ISP_SetCalib() also ran every restart -- reloading the
+      WHOLE compiled-in isp_calib_param blob (AEM/WBM measurement windows,
+      AE/WB attrs, ...) on top of whatever runtime state isp_pico.c's own
+      isp_apply_aem_wbm()/isp_apply_wb()/isp_apply_ae() had just
+      programmed. With a restart every frame, this alternated "calib's
+      compiled-in values" and "the driver's runtime values" frame to frame
+      -- the AEM/WBM measurement grid never held a stable configuration
+      long enough to complete a real measurement. Guards SetCalib() with a
+      static once-flag inside isp_vsi_update_cfg() (isp_api_wrapper.c:577-
+      582): the calibration is a build-time-compiled, per-port constant --
+      loading it once is correct, loading it every restart was the bug.
+      Marked upstreamable: true -- this is a general correctness fix (avoid
+      redundant re-programming of static calibration data on every stream
+      restart), not an Alp-Lab/OV5647-specific one; nothing in it depends
+      on our sensor or board.
+  - path: hal_alif/0008-isp-ov5647-awb-ccm-calibration.patch
+    sha256sum: 2875160b0657a87d28b7bda9b20ee18c3b2597dd5f2861dd098cb11f909b99e6
+    # See the module-name note on the 0001 patch above.
+    module: alif
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-09-23
+    upstreamable: false
+    comments: |
+      Bench run 140 (E1M-AEN803, OV5647, AE+AWB running after 1c3d8ccc9):
+      strong magenta cast on a ceiling-white target (RGB mean
+      [195, 109, 247]), AWB converging to rGain 0x19e bGain 0x26a.
+      isp_param_conf.h's static isp_calib_param blob (this hal_alif
+      module's ONE compiled-in per-port calibration, loaded once by patch
+      0007's SetCalib guard) carries Alif's own ARX3A0 sensor calibration
+      (.wb.autoAttr.calibParam's centLine/rgMin/rgMax/wpRange0/wpRange1/
+      illuminant[] gains, and .ccm.autoAttr.illuminantCCM[]'s colour
+      matrices) -- a different sensor's silicon than the OV5647 this
+      branch actually runs. Adds a CONFIG_VIDEO_ISP_VSI_CALIB_OV5647
+      #if/#else branch selecting an OV5647-derived calibration for those
+      two blocks only; the ARX3A0 tables stay byte-identical in the #else
+      arm. Left untouched: the .bls block (64 black-level, already
+      sensor-agnostic) and every other module's calibration.
+
+      Source data (manufacturer-side tuning, BSD-2-Clause): Raspberry Pi
+      libcamera's src/ipa/rpi/vc4/data/ov5647.json
+      (github.com/raspberrypi/libcamera). This library works in
+      white-balance GAIN space (gain = 1/(R/G), 1/(B/G)), so every
+      wbGain/centLine/wpRange value here is the RPi ct_curve's (R/G, B/G)
+      ratios inverted, not a direct transcription -- cross-checked against
+      the untouched ARX3A0 table's own internal relation
+      (rgParam*gR + bgParam*gB = distParam*1e6, verified holding for
+      ARX3A0's A/D50/D65 illuminant gains) before applying the same
+      derivation to OV5647's. The illuminantCCM matrices are the RPi CCMs
+      interpolated by colour temperature onto this struct's fixed-point
+      scale (128 = 1.0, rows sum to 128). wpRange0/wpRange1's dist widths
+      (+-100000 / +-200000, both curves sharing one rg array) are a
+      starting heuristic carried over from the RPi tuning's own
+      transverse_pos/transverse_neg shape (ov5647.json has no direct
+      equivalent of this library's two-curve wpRange encoding) -- flagged
+      in the patch's own comment as the one part of this table that may
+      want a bench-driven retune, not a straight derivation like the rest.
+
+      Module fit (bench runs 159/162): on the INNO-MAKER CAM-OV5647 the
+      RPi-derived curve left a neutral ceiling magenta -- AWB settled on
+      the curve's 4540 K point while the post-gain WBM means (R 100, G 77,
+      B 99) showed this module's raw R/G and B/G ~1.3x the RPi reference.
+      The AWB table is the RPi-derived one scaled by kR = 0.770 and
+      kB = 0.778 (centLine re-derived for the scaled axes). Run 162: WBM
+      post-gain R 88 G 86 B 85, ceiling centre RGB [121 126 140].
+      PROVISIONAL: one scene, one illuminant -- replace with a grey-card
+      calibration under at least two illuminants.
+
+      SENSOR-SPECIFIC by construction (upstreamable: false), same as 0006
+      -- retire this patch, not upstream it, once/if isp_param_conf.h
+      gains a real per-sensor calibration mechanism instead of one
+      compiled-in global table.
+  - path: hal_alif/0009-isp-setcalib-before-3a-callbacks.patch
+    sha256sum: 3f6b3a513a26e73e61f6816865275b7a195e1fc31f76906802818ef06d942e72
+    # See the module-name note on the 0001 patch above.
+    module: alif
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-09-23
+    upstreamable: false
+    comments: |
+      The pinned hal_alif isp_vsi_init() registers the AWB and AE
+      algorithm callbacks (VSI_MPI_ISP_AwbRegCallBack / AeRegCallBack)
+      without loading the calibration first; SetCalib only ran later, from
+      isp_vsi_update_cfg(). Upstream alifsemi/hal_alif calls
+      VSI_MPI_ISP_SetCalib() in isp_vsi_init() BEFORE the callback
+      registration. Registering the callbacks before SetCalib left both
+      algorithms idle (DGAIN_RB stuck at 0x01000100, exposure never
+      moved); with this patch they converge on the FIRST stream instead
+      (E1M-AEN803 + OV5647, bench run 153), no restart needed. Brings the
+      pinned module to upstream's order; drop when the pin moves to a
+      hal_alif revision that has it (upstreamable: false only because
+      upstream already carries the fix).
+
+      Side effect worth noting: this SetCalib() call in isp_vsi_init()
+      runs once at driver init, before patch 0007's own once-guarded
+      SetCalib() call in isp_vsi_update_cfg() ever fires -- so 0007's
+      call (on the first isp_stream_start() after init) is now redundant.
+      Left in place here rather than pulled into this patch, to keep this
+      change to the one fix bench run 153 needed; a candidate to drop in
+      a follow-up.
+  - path: hal_alif/0010-isp-clamp-ae-writeback-to-ctrl-range.patch
+    sha256sum: f4a56ad7fee200055ce3a7b8053e436a4121892285f08e6e59addf2222e1b24c
+    # See the module-name note on the 0001 patch above.
+    module: alif
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-09-24
+    upstreamable: true
+    comments: |
+      isp_vsi_bottom_half() (patch 0005's v4.4 video-ctrl port of the
+      per-frame AE writeback) computes ctrl.val for VIDEO_CID_ANALOGUE_GAIN
+      and VIDEO_CID_EXPOSURE from the ISP library's own AE algorithm output
+      and calls video_set_ctrl() with no clamp to the sensor's registered
+      control range. E1M-AEN803 + OV5647 bench (runs 211/212): AE drove the
+      EXPOSURE writeback to intLine 94470 (ctrl.val = intLine * 16 =
+      1511520), outside OV5647's registered VIDEO_CID_EXPOSURE range of
+      [0, 0xFFFFF] (zephyr/drivers/video/ov5647.c) -- video_set_ctrl()
+      rejected every write with -EINVAL (Zephyr drivers/video/video_ctrls.c
+      video_set_ctrl()'s IN_RANGE check), logging "Control value is
+      invalid" once per frame. cached_sns_config only updates on a
+      successful write, so the rejected value was retried every frame
+      forever, never just once. (The GAIN writeback that same run, aGain
+      0x2000 / dGain 0x9cd, computed ctrl.val = 313 -- inside OV5647's
+      registered VIDEO_CID_ANALOGUE_GAIN range [0, 1023] the whole time.)
+      Add isp_clamp_ctrl_val() and call video_query_ctrl() for the same id
+      before each write, saturating ctrl.val into [range.min, range.max]; a
+      failed query leaves the value unclamped (video_set_ctrl() then
+      rejects it exactly as before this patch -- no new failure mode). This
+      clamp is a DEFENSIVE layer, not a fix for why AE drove outside its
+      configured ceiling in the first place: isp_pico.c's isp_apply_ae()
+      DOES push a correct, sensor-queried int_time_max, but SetCalib()
+      (isp_vsi_init()) loads isp_param_conf.h's compiled-in AE calibration
+      block into the library FIRST, and that block's values (expTimeRange.max
+      3000000 us -> 94470 lines) decode exactly against runs 211/212's
+      writeback. Patch 0011 brings isp_param_conf.h's OV5647 calibration arm
+      to match the sensor's real envelope; bench run 213 with 0011 applied
+      held within that envelope (int_time_max=98000, again_max=65472) with 0
+      rejected writes -- the exact mechanism by which the calibration block
+      wins over isp_apply_ae()'s own push is not established against the
+      closed VSI_MPI_ISP library, so this clamp stays as defense in depth
+      either way. Latched LOG_WRN (once per episode, like the existing
+      gain/exposure write-error latches) prints the raw library terms
+      (sns_config.aGain/dGain or intLine), the computed ctrl value and the
+      clamped value plus range.max whenever a clamp actually changes the
+      write, so the bench can see which library term breached its ceiling.
+      Pure additive; upstream to hal_alif then drop.
+  - path: hal_alif/0011-isp-ov5647-ae-calib-envelope.patch
+    sha256sum: eb51ee34836346f2c314cf0204d35ecf06fdae52e3fbbcee55c2aab19b7b41ad
+    # See the module-name note on the 0001 patch above.
+    module: alif
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-09-24
+    upstreamable: false
+    comments: |
+      Companion fix to #2271 (patch 0010's clamp is only the defensive
+      layer): isp_param_conf.h's compiled-in ISP_CALIB_DATA_S.modules.ae
+      block is loaded into the library by SetCalib() (isp_vsi_init(),
+      isp_api_wrapper.c) BEFORE isp_apply_ae() (isp_pico.c) ever runs its
+      own sensor-queried exposure/gain ceilings; the .ae block had never
+      been updated off Alif's stock ARX3A0 reference envelope
+      (expTimeRange.max 3000000 us, converting to 94470 lines via
+      vsi_get_ae_default()'s own linesPer500ms formula), and that stale
+      envelope decodes exactly against runs 211/212's out-of-range
+      writeback that patch 0010's clamp was catching. Add an OV5647 arm to
+      the .ae block, gated the same way patch 0008 already gates the
+      WB/CCM calibration (CONFIG_VIDEO_ISP_VSI_CALIB_OV5647, #else keeps
+      the ARX3A0 literals unchanged), with expTimeRange/againRange/
+      dgainRange/aeTarget/manualAttr set from a new shared header,
+      ov5647_ae_envelope.h's OV5647_AE_* macros -- the SAME facts
+      sensor_attributes.h's own AE_SNS_DEFAULT_S table already carried
+      (patch 0006), now named instead of duplicated as independent
+      literals, with _Static_assert guards pinning the macros' own values
+      and the library's own microseconds<->lines round-trip (both an upper
+      AND a lower bound -- an upper-only check can never fail given the
+      truncation direction) and the 20-bit VIDEO_CID_EXPOSURE field width.
+      The macros live in their OWN header (included by both
+      isp_param_conf.h and sensor_attributes.h) rather than in
+      sensor_attributes.h directly: including the whole of
+      sensor_attributes.h from isp_param_conf.h would pull its
+      AE_SNS_DEFAULT_S static table into isp_api_wrapper.c's
+      translation unit even when CONFIG_ISP_LIB_AE_MODULE is off (the
+      config that guards the table's only use site) -- defined but never
+      referenced, tripping -Werror=unused-variable in the
+      aen-isp-regcheck/AEN803/AEN801 twister build. Bench run 213 (0010+
+      0011 applied) held within the sensor's real envelope
+      (int_time_max=98000, again_max=65472) with 0 rejected writes; the
+      exact mechanism by which the calibration block wins over
+      isp_apply_ae()'s own push is not established against the closed
+      VSI_MPI_ISP library. Pure additive (isp_param_conf.h's ARX3A0 arm is
+      untouched). SENSOR-SPECIFIC by construction (upstreamable: false),
+      same as 0006/0008 -- retire this patch, not upstream it, once/if
+      isp_param_conf.h gains a real per-sensor calibration mechanism
+      instead of one compiled-in global table.
+  - path: hal_alif/0012-isp-srggb10p-input.patch
+    sha256sum: 7b2ecf646be430d4b0b81ffcf00f9116fcc7130688474c66f98d7e3b7a283a3e
+    # See the module-name note on the 0001 patch above.
+    module: alif
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-09-25
+    upstreamable: true
+    comments: |
+      Issue #2287 Stage B: isp_api_wrapper.c's isp_mode_from_fourcc()/
+      isp_pixelfmt_from_fourcc() had no case for VIDEO_PIX_FMT_SRGGB10P --
+      the fourcc alp-sdk's IMX296 driver (zephyr/drivers/video/imx296.c)
+      advertises for BOTH of its modes (its fixed full-frame mode and its
+      ROI crop) -- so any attempt to run IMX296 through the ISP fell
+      through isp_mode_from_fourcc() to ISP_MODE_BT656 (wrong: this is RAW
+      Bayer, not BT.656 YUV) and isp_pixelfmt_from_fourcc() to the 12-bit
+      PIXEL_FORMAT_RGGB12 default (wrong: IMX296 samples at 10 bits),
+      mis-mapping every frame. Same shape as patch 0003's
+      VIDEO_PIX_FMT_SBGGR10P addition (maps to the SAME
+      PIXEL_FORMAT_RGGB10 the pre-existing unpacked VIDEO_PIX_FMT_RGGB10
+      case already uses -- the packed/unpacked split only changes memory
+      layout, not Bayer phase -- and adds ISP_MODE_RAW alongside
+      VIDEO_PIX_FMT_SBGGR10P in the mode switch); patch 0003 itself is
+      sensor-neutral (any BGGR sensor advertising the packed fourcc), this
+      one is the RGGB counterpart, not specific to IMX296 either. Pure
+      additive, touches only the two switches' SRGGB10P case; every other
+      fourcc's mapping is unchanged. Upstream to hal_alif then drop.
+  - path: hal_alif/0013-isp-imx296-ae-envelope.patch
+    sha256sum: d9fdb37170ebe23c2725a82fea78d3294ba173f4196a1a49409c03c781de83a2
+    # See the module-name note on the 0001 patch above.
+    module: alif
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-09-25
+    upstreamable: false
+    comments: |
+      Issue #2287 Stage B unit 3: gives IMX296 its own AE envelope instead
+      of inheriting OV5647's (patches 0006/0011) or ARX3A0's stock one.
+      New drivers/isp/isp_wrapper/inc/imx296_ae_envelope.h (mirrors patch
+      0011's ov5647_ae_envelope.h -- same macro names, same _Static_assert
+      round-trip band) sources IMX296_AE_FULL_LINES/FPS_X10/MAX_INT_LINE/
+      MIN_AGAIN/MAX_AGAIN/MIN_DGAIN/MAX_DGAIN from the Sony IMX296LQR-C
+      datasheet alone (pp.44, 49, 56, 60, 61) -- clean-room, no other
+      IMX296 driver or calibration table consulted. sensor_attributes.h's
+      AE_SNS_DEFAULT_S table (patch 0006) and isp_param_conf.h's .ae
+      calibration block (patch 0011) both gain a
+      CONFIG_VIDEO_ISP_VSI_CALIB_IMX296 #elif arm alongside their existing
+      CONFIG_VIDEO_ISP_VSI_CALIB_OV5647 one; neither existing arm (OV5647
+      or ARX3A0) is touched, so an OV5647 or ARX3A0 build stays bit-
+      identical. AWB/CCM are NOT covered -- both files' AWB/CCM blocks stay
+      gated on CONFIG_VIDEO_ISP_VSI_CALIB_OV5647 only, so an IMX296 build
+      falls through to the ARX3A0 AWB/CCM defaults (compiles and runs,
+      does not colour-calibrate IMX296) until #2287 unit 4 gives IMX296 its
+      own AWB/CCM table.
+
+      isp_api_wrapper.c's AE gain/exposure writeback (patch 0005) also
+      hardcoded OV5647's LINEAR gain scaling ("* 16 / ISP_SNS_GAIN_ACCU")
+      and exposure scaling ("* 16") directly -- wrong for IMX296's
+      LOGARITHMIC GAIN register (0.1 dB/count, datasheet p.61). Both call
+      sites now call isp_sns_gain_ctrl_from_lib()/
+      isp_sns_exposure_ctrl_from_lines() (alp-sdk's
+      zephyr/drivers/video/isp_pico.c, a different translation unit in the
+      same final link -- extern-declared here) instead, which dispatch on
+      CONFIG_VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS/_GAIN_REG_PER_1X/
+      _EXPOSURE_CTRL_PER_LINE (zephyr/kconfigs/vendor-alif-
+      peripherals.kconfig); an OV5647 build's Kconfig defaults reproduce
+      the exact same "* 16 / ISP_SNS_GAIN_ACCU" / "* 16" arithmetic these
+      two lines used to hardcode -- bit-identical writeback for that path,
+      confirmed by preprocessing and diffing both files' generated
+      sensor_attributes/isp_param_conf content before/after this patch on
+      an OV5647 (CONFIG_VIDEO_ISP_VSI_CALIB_OV5647=y) config. This
+      conversion runs BEFORE patch 0010's clamp-to-ctrl-range (the clamp
+      reads cq.range, which is in ctrl units; converting first is required
+      for the clamp to compare like units) -- unchanged call ordering,
+      only the value being clamped now comes from the new conversion
+      instead of the old hardcoded scale.
+
+      Board/sensor-specific by construction (same status as patch 0005),
+      not upstreamable as-is.
+
+      Bench run 312 (camera-mjpeg-stream, E1M-AEN803 2026W36-0001, night
+      room) update: IMX296_AE_MAX_AGAIN (imx296_ae_envelope.h) and
+      sensor_attributes.h's matching .maxAgain literal are now 16229
+      (24.0 dB), not 257217 (48.0 dB) -- the AE library ran gain to the
+      register's full ceiling in a dim scene, and the resulting frame
+      noise blew the JPEG encoder's output-buffer budget on every
+      subsequent encode. The datasheet's GAIN-vs-code PLOT on p.56 (read
+      off the graph, not a labelled table) bends at code 240/24.0 dB:
+      analog gain below that code, digital layered on top above it;
+      digital gain multiplies sensor read noise along with signal, so
+      the AE library's own ceiling is now pinned to the analog side of
+      that bend. VIDEO_CID_ANALOGUE_GAIN's driver-side control range
+      (zephyr/drivers/video/imx296.c) is unchanged at the full 0-480 --
+      only the 3A library's autonomous ceiling moved; a caller setting
+      gain manually can still reach the full register range.
+
+      Bench run 313 (camera-mjpeg-stream, same board, same scene class)
+      update: no overflow at the new 24.0 dB cap -- consistent with, but
+      not proof of, the digital-gain-is-noisier explanation above (run
+      313's scene was also not a controlled brightness match against
+      runs 305/310/312, so a brighter scene remains an equally plausible
+      explanation on the evidence gathered so far). Also confirmed
+      isp_pico.c's isp_apply_ae() was PUSHING the sensor's full 0-480
+      manual control range as the library's again_max ceiling every
+      isp_stream_start(), overwriting this calibration's lower 16229
+      ceiling and logging "AE attr mismatch after set" (the library's
+      own compiled-in clamp still held the real ceiling at 16229
+      throughout -- bench-confirmed, run 313's `again` converged to
+      0x3f65 = 16229, not higher -- so this was a spurious error log,
+      not a functional regression). Fixed on the alp-sdk side only
+      (isp_pico.c's isp_apply_ae(), new Kconfig
+      VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS, default 240 when
+      CONFIG_VIDEO_ISP_VSI_CALIB_IMX296) -- no further hal_alif change
+      needed for that fix; it clamps the push to agree with this
+      patch's own 16229, kept in sync by hand.
   - path: zephyr/0003-kconfig-serialize-missing-deps.patch
     sha256sum: 873ed5171298271804ba89cba22fd2c286fdb749cec2856a7ea7c2e1d7c3c7c5
     module: zephyr

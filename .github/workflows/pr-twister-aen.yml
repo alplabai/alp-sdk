@@ -98,6 +98,7 @@ on:
     branches: [main, dev]
     paths:
       - 'examples/aen/**'
+      - 'examples/connectivity/camera-mjpeg-stream/**'
       - 'examples/connectivity/firmware-update-log/**'
       - 'examples/connectivity/iot-dashboard/**'
       - 'examples/connectivity/iot-fleet-ota/**'
@@ -127,6 +128,7 @@ on:
     branches: [main, dev]
     paths:
       - 'examples/aen/**'
+      - 'examples/connectivity/camera-mjpeg-stream/**'
       - 'examples/connectivity/firmware-update-log/**'
       - 'examples/connectivity/iot-dashboard/**'
       - 'examples/connectivity/iot-fleet-ota/**'
@@ -405,7 +407,23 @@ jobs:
       # names BOTH alp_e1m_aen801_m55_hp and alp_e1m_aen803_m55_hp -- unlike
       # mqtt-telemetry/iot-fleet-ota above, this one contributes a scenario
       # to BOTH matrix legs.
-      - name: twister · ${{ matrix.label }} on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota + iot-dashboard
+      # examples/connectivity/camera-mjpeg-stream is the sixth bounded root
+      # (issue #2265): before this, its AEN801/AEN803 build-only scenario
+      # (real camera + Hantro JPEG + interim Ethernet, needing both the
+      # e1m_evk_rpi_csi carrier shield and raspberry_pi_camera_module_1)
+      # never ran in CI at all -- nothing in this repo's CI selected an AEN
+      # board target for it, so a regression in that pipeline would only
+      # surface on the next real bench flash. Same shape as the roots
+      # above: one example, bounded, build_only, not widened to any other
+      # directory. `--dry-run` against this job's full root list, before
+      # vs. after adding this root: +1 AEN801 configuration (83 -> 84),
+      # +1 AEN803 configuration (78 -> 79) -- one testcase.yaml scenario
+      # with a two-entry platform_allow. NOT reconciled against the two
+      # older total counts above/below this step (153/144) -- both
+      # already predate this addition by an amount this change did not
+      # introduce (neither matches this measurement's own 83+78=161
+      # baseline either, so the drift is pre-existing, not new here).
+      - name: twister · ${{ matrix.label }} on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota + camera-mjpeg-stream + iot-dashboard
         working-directory: ${{ github.workspace }}
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
@@ -434,6 +452,7 @@ jobs:
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/drone-autopilot" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/mqtt-telemetry" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/iot-fleet-ota" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/camera-mjpeg-stream" \
             --inline-logs \
             --no-detailed-test-id
 
