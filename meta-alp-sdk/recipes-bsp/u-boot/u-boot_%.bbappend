@@ -274,6 +274,23 @@ SRC_URI:append:rzv2n-family = " file://0007-rzv2n-dev-ALP-E1M-clkgen-otp-fixup.p
 # SRC_URI line ahead of this one when both land.
 SRC_URI:append:rzv2n-family = " file://0009-rzv2n-dev-ALP-E1M-publish-sku-to-chosen.patch"
 
+# Derive ethaddr/eth1addr from the same validated manifest's serial --
+# fleet-unique by construction, not globally unique (no purchased IEEE
+# OUI block). Neither the RZ/V2N SoC nor this SoM has any other MAC
+# source. Must land after 0009: it edits the same alp_som_is_v2n_m1()
+# function body 0009's own hunk already touched (adding an alp_serial
+# capture alongside 0009's alp_sku one).
+#
+# meta-rz-features/meta-rz-drpai's OWN, separate u-boot bbappend
+# (recipes-bsp/u-boot/files/0001-add-ether-setting.patch) sets
+# ethaddr/eth1addr to 02:11:22:33:44:55/66 in CFG_EXTRA_ENV_SETTINGS;
+# this patch derives the real per-unit MAC at boot instead, both in
+# board_late_init() and via a bootcmd hook this same patch adds to
+# CONFIG_BOOTCOMMAND (include/configs/rzv2n-dev.h), right after "env
+# default -a" -- see docs/soms/v2n.md#ethernet-mac-address-policy and
+# scripts/alp_eth_mac.py.
+SRC_URI:append:rzv2n-family = " file://0010-rzv2n-dev-ALP-E1M-serial-derived-eth-mac.patch"
+
 # Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot
 # binary serves both families, so the dtb basename is a Kconfig string
 # (CONFIG_ALP_E1M_FDTFILE, patch 0002) whose default suits the V2N SKUs;

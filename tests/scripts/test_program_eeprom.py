@@ -113,6 +113,26 @@ class TestManifestLayout(unittest.TestCase):
             self.assertEqual(struct.unpack_from("<I", data, 0)[0], 0x414C5048)
             self.assertEqual(struct.unpack_from("<I", data, 4)[0], 1)
 
+    def test_cli_rejects_malformed_serial(self) -> None:
+        """A serial that scripts/alp_eth_mac.py's parser would reject (its
+        Ethernet MAC could never be derived) must fail closed here too --
+        not get silently packed into a manifest nothing can compute a MAC
+        from later."""
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "eeprom.bin"
+            rv = subprocess.run(
+                [sys.executable, str(TOOL),
+                 "--board-yaml", str(REPO / "examples" / "peripheral-io" / "gpio-button-led" / "board.yaml"),
+                 "--serial", "not-a-serial",
+                 "--mfg-date", "2026-05-11",
+                 "--output", str(out)],
+                capture_output=True, text=True, encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
+            )
+            self.assertNotEqual(rv.returncode, 0)
+            self.assertIn("YYYYWww-IIII", rv.stderr)
+            self.assertFalse(out.exists())
+
 
 class TestBoardDatecode(unittest.TestCase):
     """The manifest's hw_rev carries the FULL board designator.

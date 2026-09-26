@@ -142,6 +142,78 @@ and keeps the distro default hostname `alp-e1m`.
 Full procedure: [`docs/board-id.md`](../board-id.md).
 Example: [`examples/v2n/v2n-board-id-readout/`](../../examples/v2n/v2n-board-id-readout/).
 
+### Ethernet MAC address policy {#ethernet-mac-address-policy}
+
+Neither the RZ/V2N SoC nor this SoM has a MAC-address source: the SoC has no
+MAC OTP, and there is no MAC EEPROM on the module. Left alone, both `end0`
+and `end1` would boot with whatever compiled-in default the enabled BSP
+feature layers happen to bake into U-Boot's environment -- identical on
+every unit, and (depending on which layers are enabled) not even a real
+IEEE-registered address.
+
+U-Boot instead derives `ethaddr`/`eth1addr` at boot from the unit serial
+already in the validated identity-EEPROM manifest (`docs/board-id.md`) --
+an **injective encoding, not a hash**, into IEEE 802c SLAP
+locally-administered space. This makes both MACs **fleet-unique by
+construction** (unique across every unit this allocator has issued a serial
+to) -- **not globally unique** the way a purchased IEEE OUI block would
+make them; that block is not something the project has bought.
+
+The MAC carries no SKU field, so the serial's index is allocated
+**fleet-wide per ISO week, across every SKU** -- not per SKU -- which is
+what makes the encoding actually unique: two different SKUs sharing a
+week and an index would otherwise collide on the same MAC.
+
+* Layout: octet 0 fixed `0xA2` (individual, locally administered), then a
+  40-bit payload: 4-bit Alp Lab prefix `0xC` | 6-bit `year - 2024` | 6-bit
+  ISO week | 20-bit Crockford base32 index (the serial's `NNNN`/`IIII`
+  field, alphabet `0123456789ABCDEFGHJKMNPQRSTVWXYZ` -- no `I`/`L`/`O`/`U`,
+  never aliased) | 2-bit interface (`0` = `end0`, `1` = `end1`) | 2 reserved
+  bits.
+* Canonical implementation: `scripts/alp_eth_mac.py` (host/tooling side) and
+  U-Boot patch `meta-alp-sdk/recipes-bsp/u-boot/u-boot/0010-rzv2n-dev-ALP-E1M-serial-derived-eth-mac.patch`
+  (device side) -- the two must stay bit-for-bit identical; both carry the
+  same golden vector for serial `2026W38-0001`: `end0 = A2:C0:A6:00:00:10`,
+  `end1 = A2:C0:A6:00:00:14`.
+* **Runs twice, on purpose:** once from `board_late_init()` (so U-Boot's
+  own networking has a MAC before `bootcmd` runs), and again from a new
+  `alp_eth_mac` command that `CONFIG_BOOTCOMMAND` invokes immediately
+  after `env default -a`. The second call is the one that actually
+  reaches Linux: U-Boot's `image_setup_libfdt()` runs
+  `fdt_fixup_ethernet()` (which copies `ethaddr`/`eth1addr` into the
+  `ethernet0`/`ethernet1` DT nodes' `mac-address`/`local-mac-address`
+  properties) *before* `ft_system_setup()` ever runs. Deriving only in
+  `board_late_init()` would leave nothing for Linux to see: its value is
+  *wiped* by that same `env default -a` a few bootcmd tokens later.
+  Deriving only in `ft_system_setup()` would already be too late for
+  that same boot instead, since `fdt_fixup_ethernet()` has already run
+  by the time it executes.
+* **No env override, by construction, not by choice:** `CONFIG_BOOTCOMMAND`
+  opens with `env default -a`, which wipes the whole environment back to
+  its compiled-in defaults on every boot before Linux is reached -- so a
+  `setenv ethaddr <mac>; saveenv` would not survive to the next autoboot
+  regardless of what U-Boot's derivation code did. The honest rule this
+  SoM ships is: **the derived MAC always applies whenever the serial
+  parses**, unconditionally, every boot. There is no override slot --
+  **conditional on autoboot actually running the compiled-in
+  `CONFIG_BOOTCOMMAND`.** A unit carrying a *saved* `bootcmd` from an
+  older FIP (predating this `alp_eth_mac` command) or from a manual
+  `setenv bootcmd; saveenv` runs THAT saved command instead -- one with
+  no `alp_eth_mac` call. Its `env default -a` (still present in every
+  version of this bootcmd) then wipes whatever `board_late_init()` set,
+  and Linux sees the DRP-AI vendor default `02:11:22:33:44:55`/`66`
+  instead of the derived MAC. See `docs/provisioning.md`'s FIP-flash
+  step for the saved-env reset a FIP upgrade on a previously-provisioned
+  unit must carry.
+* Recompute a unit's MAC any time from its serial with
+  `scripts/alp_eth_mac.py 2026W38-0001` (no ledger field carries it --
+  it is cheap to recompute and would otherwise just be a value that can
+  drift from the encoding that produces it).
+
+Octet 0 `0xA2` has U/L=1, I/G=0 and IEEE 802c-2017 SLAP quadrant bits
+Z:Y=`00`, i.e. the *Administratively Assigned Identifier* (AAI) quadrant --
+the range a local administrator may assign without buying an IEEE block.
+
 ## Bring-up
 
 Step-by-step bench bring-up: [`docs/bring-up-v2n.md`](../bring-up-v2n.md).

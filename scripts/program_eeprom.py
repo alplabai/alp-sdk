@@ -37,6 +37,15 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+# Explicit path bootstrap (not a bare `import alp_eth_mac`): this file is
+# loaded two ways -- as a script (`python3 scripts/program_eeprom.py`,
+# where Python already puts scripts/ on sys.path[0]) and dynamically via
+# importlib.util.spec_from_file_location (tests/scripts/test_program_eeprom.py),
+# which does NOT add its directory to sys.path. Insert it explicitly so
+# the sibling import below resolves either way.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from alp_eth_mac import AlpEthMacError, parse_serial  # noqa: E402
+
 try:
     import yaml  # type: ignore[import-untyped]
 except ImportError:
@@ -205,7 +214,10 @@ def main() -> int:
     parser.add_argument("--board-yaml", type=Path, default=Path("board.yaml"),
                         help="Path to the project's board.yaml (default: ./board.yaml).")
     parser.add_argument("--serial", required=True,
-                        help="Factory-assigned serial number (max 23 ASCII chars).")
+                        help="Factory-assigned serial number, YYYYWww-IIII "
+                             "(e.g. 2026W38-0001; IIII is a 4-char Crockford "
+                             "base32 index) -- validated against "
+                             "scripts/alp_eth_mac.py's parser.")
     parser.add_argument("--mfg-date", required=True,
                         help="Manufacturing date in ISO format (YYYY-MM-DD).")
     parser.add_argument("--output", type=Path, default=Path("eeprom-manifest.bin"),
@@ -214,6 +226,13 @@ def main() -> int:
                         default=Path(__file__).resolve().parent.parent / "metadata",
                         help="Override the metadata search root.")
     args = parser.parse_args()
+
+    try:
+        parse_serial(args.serial)
+    except AlpEthMacError as e:
+        sys.exit(f"program_eeprom: --serial {args.serial!r} is not a valid "
+                 f"YYYYWww-IIII serial ({e}) -- refusing to program a "
+                 f"manifest whose Ethernet MAC could never be derived from it")
 
     project = _load_board_yaml(args.board_yaml)
     sku = (project.get("som") or {}).get("sku")
