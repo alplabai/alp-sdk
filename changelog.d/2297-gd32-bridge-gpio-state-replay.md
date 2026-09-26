@@ -1,7 +1,11 @@
 ### Fixed — the Linux `gpio-gd32-bridge` driver now replays requested GPIO output state after the GD32 comes up late or resets (#2297)
 
-Bug observed on E1M-V2M103, 2026-09-26; fix not yet bench-verified. Two
-related bugs in
+Bug observed and fix bench-verified on E1M-V2M103 (GD32 fw 0.2.13), 2026-09-26.
+Two cases were checked. At cold boot, probe finds the bridge down and the
+panel-reset write fails. The replay then logs `bridge reachable, 1 line(s)
+re-applied` at ~5 s, with no driver rebind. With GD32_NRST held for 2 s
+mid-run, the log shows `output state replay failed (-6)` and then
+`re-applied`, and `GPIO_READ` confirms the pad level. Two related bugs in
 `meta-alp-sdk/recipes-kernel/linux/linux-renesas/0005-gpio-add-gd32-bridge-expander-driver.patch`
 (`drivers/gpio/gpio-gd32-bridge.c`): (1) `gd32_bridge_gpio_set()` only
 latched `output_mask`/`output_vals` **after** a successful I2C
