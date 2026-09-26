@@ -1,0 +1,92 @@
+From d1db9b08fbf399ace18cb99adfd609d7e5582b73 Mon Sep 17 00:00:00 2001
+From: Martino Facchin <m.facchin@arduino.cc>
+Date: Thu, 11 Jun 2026 16:05:25 +0200
+Subject: [PATCH] hwmon: (ina2xx) Add support for INA232
+
+The INA232 is a current/power monitor. It shares the same register
+layout as the other chips in the series and uses the INA226 default
+configuration, but differs in its electrical characteristics:
+bus-voltage LSB 1.6 mV vs INA226's 1.25 mV, power LSB factor 32 vs 25.
+
+TI's INA236 is register- and electrically-compatible with INA232 (same
+1.6 mV bus LSB, same 2.5 uV shunt LSB, same INA226-derived config
+default) -- it adds only an SMBus alert-response-address option INA232
+lacks, which this driver does not use. Binding the E1M-X-EVK's five
+on-board INA236 current monitors as "ti,ina232" gives them the correct
+scaling; upstream's ina2xx driver has no explicit INA236 entry to bind
+to instead, and no compatible string named "ti,ina236" exists in any
+released kernel.
+
+Signed-off-by: Martino Facchin <m.facchin@arduino.cc>
+Signed-off-by: Loic Poulain <loic.poulain@oss.qualcomm.com>
+Reviewed-by: Dmitry Baryshkov <dmitry.baryshkov@oss.qualcomm.com>
+Link: https://lore.kernel.org/r/20260611-monza-ina232-v2-2-e4375ce652d0@oss.qualcomm.com
+[groeck: Rephrased commit message]
+Signed-off-by: Guenter Roeck <linux@roeck-us.net>
+[alp-sdk: backported for 6.1.141-cip43. Upstream's struct ina2xx_config
+ has since grown shunt_voltage_shift/current_shift/has_alerts/
+ has_ishunt/has_power_average/has_update_interval fields, added by
+ later INA234/INA260/SY24655-series commits this tree predates; the
+ verbatim upstream hunk does not apply as-is. The ina232 config row
+ below carries forward only the 7 fields struct ina2xx_config still
+ has at 6.1.141 (config_default, calibration_value, registers,
+ shunt_div, bus_voltage_shift, bus_voltage_lsb, power_lsb_factor) --
+ the electrical constants and this driver's Signed-off-by trailers are
+ unchanged from upstream. Regenerated with `git apply --check` against
+ a scratch copy of this tree's drivers/hwmon/ina2xx.c (2026-09-26).]
+Signed-off-by: Alp Lab AB <opensource@alplab.ai>
+---
+ drivers/hwmon/ina2xx.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+--- a/drivers/hwmon/ina2xx.c
++++ b/drivers/hwmon/ina2xx.c
+@@ -99,7 +99,7 @@
+ 	.val_bits = 16,
+ };
+
+-enum ina2xx_ids { ina219, ina226 };
++enum ina2xx_ids { ina219, ina226, ina232 };
+
+ struct ina2xx_config {
+ 	u16 config_default;
+@@ -142,6 +142,18 @@
+ 		.bus_voltage_lsb = 1250,
+ 		.power_lsb_factor = 25,
+ 	},
++	[ina232] = {
++		/* TI INA232 -- register-identical to TI INA236, which this
++		 * driver has no dedicated entry for; see commit message.
++		 */
++		.config_default = INA226_CONFIG_DEFAULT,
++		.calibration_value = 2048,
++		.registers = INA226_REGISTERS,
++		.shunt_div = 400,
++		.bus_voltage_shift = 0,
++		.bus_voltage_lsb = 1600,
++		.power_lsb_factor = 32,
++	},
+ };
+
+ /*
+@@ -683,6 +695,7 @@
+ 	{ "ina226", ina226 },
+ 	{ "ina230", ina226 },
+ 	{ "ina231", ina226 },
++	{ "ina232", ina232 },
+ 	{ }
+ };
+ MODULE_DEVICE_TABLE(i2c, ina2xx_id);
+@@ -708,6 +721,10 @@
+ 		.compatible = "ti,ina231",
+ 		.data = (void *)ina226
+ 	},
++	{
++		.compatible = "ti,ina232",
++		.data = (void *)ina232
++	},
+ 	{ },
+ };
+ MODULE_DEVICE_TABLE(of, ina2xx_of_match);
+--
+2.43.0

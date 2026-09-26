@@ -28,6 +28,12 @@ sensor:
 kconfig:
   zephyr:         ALP_SDK_CHIP_BMI323
   baremetal:      ALP_SDK_CHIP_BMI323
+  # Linux (V2N-family A-cluster, meta-alp-sdk linux-renesas): bound via
+  # upstream's in-tree "bosch,bmi323" IIO driver, backported for
+  # 6.1.141-cip43 (no in-tree BMI323 support at that kernel version).
+  # See meta-alp-sdk/recipes-kernel/linux/linux-renesas/
+  # 0007-iio-imu-bmi323-add-driver.patch + e1m-x-evk-sensors.cfg
+  # (CONFIG_BMI323 / CONFIG_BMI323_I2C). E1M-X-EVK &i2c0 node: bmi323@68.
 
 families:
   - aen

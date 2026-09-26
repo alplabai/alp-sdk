@@ -23,6 +23,12 @@ monitoring:
 kconfig:
   zephyr:         ALP_SDK_CHIP_INA236
   baremetal:      ALP_SDK_CHIP_INA236
+  # Linux (V2N-family A-cluster, meta-alp-sdk linux-renesas): the in-tree
+  # ina2xx hwmon driver has no INA236 entry; bound instead via "ti,ina232"
+  # (TI INA232 is register-/electrically-identical: same 1.6 mV bus LSB,
+  # 2.5 uV shunt LSB). See meta-alp-sdk/recipes-kernel/linux/linux-renesas/
+  # 0008-hwmon-ina2xx-add-ina232-ina236-compat.patch + e1m-x-evk-sensors.cfg
+  # (CONFIG_SENSORS_INA2XX). E1M-X-EVK &i2c0 nodes: ina236@40/41/48/49/4a.
 
 signals:
   - { name: SCL,   type: input,  scope: "I2C" }

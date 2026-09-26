@@ -282,8 +282,17 @@ i2c_devices:
       doc: "Canonical primary IMU (ICM-42670)." }
   - { macro: XEVK_I2C_ADDR_BMP581, part: bmp581, address: "0x47",
       doc: "BMP581 barometer (SDO->VIO; 0x46 if SDO->GND)." }
-  - { macro: XEVK_I2C_ADDR_TCAL9538, part: tcal9538, address: "0x72",
-      doc: "TCAL9538 I/O expander." }
+  - { macro: XEVK_I2C_ADDR_TCAL9538_MAIN, part: tcal9538, designator: U35, address: "0x73",
+      alias: XEVK_I2C_ADDR_TCAL9538,
+      doc: "U35 main I/O expander. CORRECTED 2026-09 from 0x72 (a maintainer-schedule
+            value never bench-measured on this carrier, per docs/portability-matrix.md's
+            #1980 note): a live i2c-0 sweep ACKs at 0x71 and 0x73, not 0x72, matching the
+            E1M-EVK's confirmed U35=0x73/U37=0x71 strap pattern exactly (alp-sdk#1974) --
+            both parts are populated here (unlike the E1M-EVK, where U37 is DNP)." }
+  - { macro: XEVK_I2C_ADDR_TCAL9538_PCIE, part: tcal9538, designator: U37, address: "0x71",
+      doc: "U37 PCIe I/O expander. See the U35 entry above for how this address was
+            confirmed; no netlist/pin-map data exists in this tree recording what
+            either expander's P0-P7 outputs drive on this carrier." }
   - { macro: XEVK_I2C_ADDR_EEPROM, part: eeprom_24c128, address: "0x50",
       doc: "Board ID EEPROM (24-series)." }
   - { macro: XEVK_I2C_ADDR_INA236_3V3, part: ina236, designator: U21, address: "0x40",
