@@ -71,33 +71,34 @@
  *     disambiguate a second `codec@N` sibling from a `cpu@N` one in this
  *     driver: every documented "multi" example is N-cpu-into-1-codec
  *     (TDM split done in ONE physical chip), never 1-cpu-into-N-codec.
- *     Same shape, same driver, in audio-graph-card.c (also hardcodes
- *     `codecs = 1` per link) -- there is no in-tree binding that lets
- *     two independent codec DEVICES share one dai_link's single stream.
  *
- *     The correct in-tree mechanism for a second amp riding the same
- *     physical I2S wires is `simple-audio-card,aux-devs`
- *     (Documentation/devicetree/bindings/sound/simple-card.yaml's
- *     `aux-devs` property; parsed by simple-card.c's
- *     `snd_soc_of_parse_aux_devs()`): the card adds the aux component's
- *     DAI/DAPM/controls without giving it a dai_link of its own, so
- *     there's no cpu/codec pair for the ambiguous-sibling bug to
- *     misclassify. tas2563_left remains the ONE real codec of the ONE
- *     real dai_link (cpu=rcar_sound); tas2563_right is listed in
- *     `aux-devs` instead of as a second `codec@N` sibling. Each TAS2563
- *     is still configured (ti,imon-slot-no) to consume its own TDM slot
- *     over I2C; shutdown-gpios/interrupts are wired on the LEFT (U27)
- *     node only -- board.yaml documents SD_N/IRQ_N as ONE shared net
- *     across both chips, not per-amp, so only one Linux consumer may
- *     claim the GPIO line.
+ *     `simple-audio-card,aux-devs` avoids the oops, but an aux device
+ *     has no dai_link, so the kernel never runs hw_params/set_tdm_slot or
+ *     the DAC DAPM path for it: on the bench (E1M-V2M103, 2026-09-27) the
+ *     right amp stayed at its register defaults while the left one
+ *     powered up with the stream. What works is audio-graph-card2's
+ *     `multi` link (sound/soc/generic/audio-graph-card2.c, built in on
+ *     this kernel): ONE cpu port (rcar_sound SSI1) fanned out to TWO
+ *     codec ports in a single dai_link, so both amps get the same
+ *     hw_params, format and DAPM power sequencing. Bench-verified: both
+ *     amps' PWR_CTL go software-shutdown -> active with the stream and
+ *     back afterwards.
  *
- *     STILL OPEN for the bench: tas2563_right's own "ASI1"/DAC DAPM path
- *     is not wired into any `simple-audio-card,routing` entry here, since
- *     it isn't part of a dai_link and so gets no automatic CPU<->codec
- *     DAPM connection -- the component driver's `idle_bias_on` may be
- *     enough to keep it biased and passing audio off the shared physical
- *     wire regardless, but that wants confirming on real hardware, not
- *     asserted here.
+ *     Each codec endpoint also carries `dai-tdm-slot-*`: rsnd fixes the
+ *     SSI system word length at 32 bits, but the TAS2563 only learns its
+ *     slot length (TDM_CFG2.RX_SLEN) from set_tdm_slot, so without it the
+ *     amp decodes 16-bit slots and the right channel reads the empty low
+ *     half of the left slot. The tas2562 driver rejects a zero tx mask,
+ *     hence the explicit masks. Which slot an amp actually plays is the
+ *     "Left/Right ASI1 Sel" mixer control (Left / Right respectively),
+ *     not DT.
+ *
+ *     shutdown-gpios/interrupts are wired on the LEFT (U27) node only --
+ *     board.yaml documents SD_N/IRQ_N as ONE shared net across both
+ *     chips, not per-amp, so only one Linux consumer may claim the GPIO
+ *     line. Because SD_N therefore does not reset the amps across a warm
+ *     reboot, meta-alp-sdk patch 0009 makes the tas2562 driver
+ *     software-reset each amp at probe.
  *
  *     STILL OPEN, not resolved by this landing: I2C-address ownership.
  *     Landing the kernel `ti,tas2563` codec nodes below means the kernel
@@ -234,26 +235,56 @@
 		};
 	};
 
-	/* TAS2563 stereo pair (U27 left / U28 right), one shared I2S0 bus.
-	 * simple-audio-card, not audio-graph-card -- see this file's header
-	 * comment for why. tas2563_left is the ONE real codec of the ONE
-	 * real dai_link; tas2563_right rides the same physical wires as an
-	 * aux-dev, not a second `codec@N` sibling -- see the header comment
-	 * for the oops that shape caused. */
+	/* TAS2563 stereo pair (U27 left / U28 right), one shared I2S0 bus:
+	 * one audio-graph-card2 `multi` link, SSI1 -> both amps. See this
+	 * file's header comment for why not simple-audio-card. */
 	sound_card: sound {
-		compatible = "simple-audio-card";
-		simple-audio-card,name = "e1m-x-evk-tas2563";
-		simple-audio-card,format = "i2s";
-		simple-audio-card,bitclock-master = <&sound_cpu_dai>;
-		simple-audio-card,frame-master = <&sound_cpu_dai>;
-		simple-audio-card,aux-devs = <&tas2563_right>;
+		compatible = "audio-graph-card2";
+		label = "e1m-x-evk-tas2563";
+		links = <&sound_multi_cpu>;
 
-		sound_cpu_dai: simple-audio-card,cpu {
-			sound-dai = <&rcar_sound 0>;
-		};
+		multi {
+			#address-cells = <1>;
+			#size-cells = <0>;
 
-		simple-audio-card,codec {
-			sound-dai = <&tas2563_left>;
+			/* CPU side: port@0 is the link itself, port@1 the SSI. */
+			ports@0 {
+				reg = <0>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				sound_multi_cpu: port@0 {
+					reg = <0>;
+					mcpu0_ep: endpoint { remote-endpoint = <&mcodec0_ep>; };
+				};
+
+				port@1 {
+					reg = <1>;
+					mcpu1_ep: endpoint { remote-endpoint = <&rsnd_ep>; };
+				};
+			};
+
+			/* Codec side: port@0 is the link itself, then one per amp. */
+			ports@1 {
+				reg = <1>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+					mcodec0_ep: endpoint { remote-endpoint = <&mcpu0_ep>; };
+				};
+
+				port@1 {
+					reg = <1>;
+					mcodec1_ep: endpoint { remote-endpoint = <&tas2563_left_ep>; };
+				};
+
+				port@2 {
+					reg = <2>;
+					mcodec2_ep: endpoint { remote-endpoint = <&tas2563_right_ep>; };
+				};
+			};
 		};
 	};
 };
@@ -280,9 +311,21 @@
 
 	#sound-dai-cells = <1>;
 
-	rcar_sound,dai {
-		dai0 {
-			playback = <&ssi1>;
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+
+			/* SoC is bit- and frame-clock provider (ADG from Audio_CLKB). */
+			rsnd_ep: endpoint {
+				remote-endpoint = <&mcpu1_ep>;
+				dai-format = "i2s";
+				bitclock-master;
+				frame-master;
+				playback = <&ssi1>;
+			};
 		};
 	};
 };
@@ -313,6 +356,18 @@
 		interrupt-parent = <&pinctrl>;
 		interrupts = <RZV2N_GPIO(1, 5) IRQ_TYPE_EDGE_FALLING>;
 		ti,imon-slot-no = <0>;
+
+		port {
+			/* 2 x 32-bit slots to match rsnd's fixed 32-bit SSI word;
+			 * see this file's header comment. */
+			tas2563_left_ep: endpoint {
+				remote-endpoint = <&mcodec1_ep>;
+				dai-tdm-slot-num = <2>;
+				dai-tdm-slot-width = <32>;
+				dai-tdm-slot-tx-mask = <1 1>;
+				dai-tdm-slot-rx-mask = <1 1>;
+			};
+		};
 	};
 
 	tas2563_right: codec@4e {
@@ -321,6 +376,16 @@
 		sound-name-prefix = "Right";
 		#sound-dai-cells = <0>;
 		ti,imon-slot-no = <1>;
+
+		port {
+			tas2563_right_ep: endpoint {
+				remote-endpoint = <&mcodec2_ep>;
+				dai-tdm-slot-num = <2>;
+				dai-tdm-slot-width = <32>;
+				dai-tdm-slot-tx-mask = <1 1>;
+				dai-tdm-slot-rx-mask = <1 1>;
+			};
+		};
 	};
 };
 

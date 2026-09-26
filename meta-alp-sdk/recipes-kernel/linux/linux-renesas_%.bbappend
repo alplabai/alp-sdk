@@ -235,5 +235,5 @@ SRC_URI:append:e1m-v2m101 = " file://display.cfg"
 # header comment + &i2c0's tas2563_left/tas2563_right nodes). Per-carrier like
 # display.cfg above, not unconditional: it is the E1M-X-EVK's TAS2563 pair,
 # not a SoM-level fact.
-SRC_URI:append:e1m-v2n101 = " file://tas2563-audio.cfg"
-SRC_URI:append:e1m-v2m101 = " file://tas2563-audio.cfg"
+SRC_URI:append:e1m-v2n101 = " file://tas2563-audio.cfg file://0009-ASoC-tas2562-reset-the-amplifier-at-probe.patch"
+SRC_URI:append:e1m-v2m101 = " file://tas2563-audio.cfg file://0009-ASoC-tas2562-reset-the-amplifier-at-probe.patch"
