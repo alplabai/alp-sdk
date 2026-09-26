@@ -33,15 +33,64 @@ Lines 18/19 (bt-reg-on/wl-reg-on): the bridge pad map grows two more
 lines at firmware 0.2.12 (PROTOCOL_VERSION_MINOR 11) for the on-module
 Murata LBEE5HY2FY-922 Wi-Fi+BT REG_ON pair. The chip always registers
 all 20 lines; lines 18/19 are gated per-consumer in a .request()
-callback that runs GET_VERSION on demand (bounded ~3 s poll, since a
-plain one-shot -EPROBE_DEFER only gets retried when some unrelated
-driver event walks the deferred-probe list) and caches the result --
-0 once a confirmed minor >= 11 (major 0), -ENODEV once confirmed
-below that or on an unexpected major, -EPROBE_DEFER while the bridge
-stays silent past the bounded wait. direction_output() propagates the
-underlying transfer error (mapping a transient -EIO on lines 18/19 to
--EPROBE_DEFER only while that resolution is still pending) instead of
-always returning success.
+callback that runs one non-blocking GET_VERSION attempt on demand and
+caches the result -- 0 once a confirmed minor >= 11 (major 0), -ENODEV
+once confirmed below that or on an unexpected major, -EPROBE_DEFER
+while the bridge is still silent.
+
+Late-bridge deferral (Refs #2297; bug bench-observed 2026-09-26,
+E1M-V2M103; fix bench-verified 2026-09-26 on E1M-V2M103 with GD32_NRST held ~40 s past probe: bridge reachable ~46 s, SDIO card enumerated 48.4 s, brcmfmac firmware 49.7 s, hci0 UP+RUNNING 54.8 s, devices_deferred empty, no rebind; a normal boot is unchanged): a bare -EPROBE_DEFER from .request() only gets retried by
+the kernel when some OTHER driver's (un)registration happens to walk
+the deferred-probe list -- nothing guarantees that happens once the
+bridge later comes up. Observed on the bench: NRST release failed, and
+/sys/kernel/debug/devices_deferred listed 15c20000.mmc, wlan-pwrseq and
+serial0-0 for the whole boot even though the bridge came up seconds
+later. .request() must still return -EPROBE_DEFER rather than grant
+the request while unresolved, though: mmc-pwrseq-simple and hci_bcm
+each run a one-shot power-up sequence (mmc_rescan() / loading the .hcd
+patch) immediately once .request() succeeds, and SDHI2 being
+non-removable means that sequence never reruns on its own if it runs
+before REG_ON can actually move.
+
+What resolves the deferral instead: a new, independent delayed_work,
+gd32_bridge_resolve_work(), polls GET_VERSION regardless of whether any
+consumer has requested the lines yet. On resolving either way (0
+confirmed supported, or -ENODEV confirmed unsupported) it briefly
+registers a throwaway platform_device (see
+gd32_bridge_kick_deferred_probe()) purely so that device's bind runs
+driver_bound() -> the kernel's own driver_deferred_probe_trigger()
+(drivers/base/dd.c, confirmed present at that call site in this kernel
+tree) -- the only in-tree hook that lets module code queue a
+deferred-probe retry (asynchronous, on system_unbound_wq) on demand.
+That gets mmc-pwrseq-simple / hci_bcm to retry .request() with the real
+answer -- granted, or failing outright with -ENODEV -- instead of
+lingering deferred indefinitely.
+
+Output-state replay (Refs #2297): a write attempted while the bridge is
+unreachable (bench-proven: "GPIO write line 5 failed" against the
+Display-1 panel reset-gpios consumer at probe, before the GD32 has come
+up) used to be forgotten forever, and a GD32 reset (WDT, OTA A/B swap)
+silently drops every pad back to its boot default -- notably the Wi-Fi
+REG_ON lines (18/19), which then need re-asserting. Fixed by (1)
+latching output_mask/output_vals under a new state_lock before
+attempting the write and holding that lock for the transfer's entire
+duration (not just the latch), so a concurrent replay can never read a
+stale snapshot and land its write after a newer one, and (2) a
+delayed_work that re-issues one idempotent CMD_GPIO_WRITE(output_mask,
+output_vals) about once a second whenever output_mask != 0 -- glitch-free
+on pads already at that level, so no reset detection is needed; costs
+one small I2C frame/s on BRD_I2C (i2c8). Because the requested state is
+always latched and eventually replayed, direction_output() always
+reports success instead of propagating the transfer error: its
+consumers here (the Display-1 panel reset-gpios, mmc-pwrseq-simple, a
+Bluetooth shutdown-gpios) are ordinary gpiod_direction_output() callers,
+not OF gpio-hogs, and have no -EPROBE_DEFER equivalent once past
+.request() -- a nonzero return would fail the *consumer's* own probe
+permanently over what is usually only a transient bridge-down window,
+instead of the consumer picking up the correct state on the next replay.
+
+Note: only the Linux gpio-gd32-bridge driver re-asserts. The CM33/Zephyr
+side of this bridge does not yet, so #2297 stays open for that half.
 
 Upstream-Status: Inappropriate [Alp Lab SoM-specific supervisor MCU protocol]
 
@@ -49,8 +98,8 @@ Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  drivers/gpio/Kconfig            |   9 +
  drivers/gpio/Makefile           |   1 +
- drivers/gpio/gpio-gd32-bridge.c | 412 ++++++++++++++++++++++++++++++++
- 3 files changed, 422 insertions(+)
+ drivers/gpio/gpio-gd32-bridge.c | 845 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 855 insertions(+)
  create mode 100644 drivers/gpio/gpio-gd32-bridge.c
 
 diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
@@ -87,10 +136,10 @@ index e331e951e..3ba5cc2f2 100644
  obj-$(CONFIG_GPIO_GRGPIO)		+= gpio-grgpio.o
 diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
 new file mode 100644
-index 000000000..712d5c3d8
+index 000000000..b202babc2
 --- /dev/null
 +++ b/drivers/gpio/gpio-gd32-bridge.c
-@@ -0,0 +1,412 @@
+@@ -0,0 +1,845 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * GPIO driver for the Alp Lab GD32 IO-MCU bridge (I2C transport).
@@ -121,32 +170,82 @@ index 000000000..712d5c3d8
 + * the GD32 is not up yet -- pinning the chip at 18 lines forever, even
 + * once the bridge comes up seconds later). Instead, lines 18/19 are
 + * gated at .request() time: the first consumer to request either line
-+ * (re)runs GET_VERSION on demand and caches the result, polling for a
-+ * bounded ~3 s (GD32_WIFI_BT_POLL_RETRIES) before giving up -- a plain
-+ * one-shot -EPROBE_DEFER would only get retried when some OTHER
-+ * driver's (un)registration happens to walk the deferred-probe list,
-+ * which nothing guarantees will happen soon after the bridge itself
-+ * comes up. Once the bounded wait lands a reply, a confirmed minor <
-+ * GD32_PROTO_MINOR_WIFI_BT (or an unexpected protocol major -- see
-+ * gd32_bridge_resolve_wifi_bt()) is cached as -ENODEV: that firmware
-+ * never learned these two pads, and letting a consumer issue
-+ * GPIO_WRITE against pad bits it silently ignores would power nothing
-+ * while reporting success. Still fully silent after the bounded wait,
-+ * -EPROBE_DEFER is returned uncached so the *consumer* (mmc-pwrseq-
-+ * simple, a bluetooth shutdown-gpios) retries through the normal
-+ * deferred-probe path.
++ * runs one non-blocking GET_VERSION attempt (gd32_bridge_resolve_wifi_bt())
++ * and caches the result. A confirmed minor < GD32_PROTO_MINOR_WIFI_BT (or
++ * an unexpected protocol major) is cached as -ENODEV: that firmware never
++ * learned these two pads, and letting a consumer issue GPIO_WRITE against
++ * pad bits it silently ignores would power nothing while reporting
++ * success. .request() fails with -ENODEV in that definitive case, and
++ * with -EPROBE_DEFER while the bridge is still silent.
++ *
++ * Bug (Refs #2297, bench-observed 2026-09-26, E1M-V2M103): a bare
++ * -EPROBE_DEFER from .request() only gets retried by the kernel when some
++ * OTHER driver's (un)registration happens to walk the deferred-probe
++ * list, which nothing guarantees will happen once the bridge later comes
++ * up: mmc-pwrseq-simple's wlan-pwrseq reset-gpios and hci_bcm's shutdown-
++ * gpios (lines 19/18) sat in /sys/kernel/debug/devices_deferred for the
++ * whole boot, alongside the mmc host itself, even though the bridge came
++ * up seconds later. .request() must still return -EPROBE_DEFER rather
++ * than grant the request while unresolved, though: mmc-pwrseq-simple and
++ * hci_bcm each run a one-shot power-up sequence (mmc_rescan() / loading
++ * the .hcd patch) immediately once .request() succeeds, and SDHI2 being
++ * non-removable means that sequence never reruns on its own if it runs
++ * before REG_ON can actually move.
++ *
++ * What resolves the deferral instead: a dedicated
++ * gd32_bridge_resolve_work(), independent of any consumer request or the
++ * output-state replay below, polls GET_VERSION regardless of whether
++ * anyone has requested the lines yet. On resolving either way (0
++ * confirmed supported, or -ENODEV confirmed unsupported) it briefly
++ * registers a throwaway platform_device (see
++ * gd32_bridge_kick_deferred_probe()) purely so that device's bind runs
++ * driver_bound() -> the kernel's own driver_deferred_probe_trigger()
++ * (drivers/base/dd.c) -- the only in-tree hook that lets module code
++ * queue a deferred-probe retry (asynchronous, on system_unbound_wq) on
++ * demand. That is what gets mmc-pwrseq-simple / hci_bcm to retry
++ * .request() with the real answer -- granted, or failing outright with
++ * -ENODEV -- instead of lingering deferred indefinitely.
++ *
++ * Output-state replay: a write attempted while the bridge is unreachable
++ * (at probe, or after any GD32 reset -- WDT, OTA A/B swap) is never lost,
++ * and a GD32 reset also drops every pad back to its boot default -- see
++ * issue #2297: the Wi-Fi REG_ON lines need re-asserting after a GD32
++ * reset. Handled two ways: (1) output_mask/output_vals are latched under
++ * state_lock BEFORE the write is attempted and for its entire duration
++ * (see the struct comment on the lock order), so the requested state
++ * always survives a failed transfer and a concurrent replay cannot land a
++ * stale write after a newer one; (2) a delayed_work re-issues one
++ * idempotent CMD_GPIO_WRITE(output_mask, output_vals) roughly once a
++ * second whenever output_mask != 0 -- glitch-free on pads already at that
++ * level, so it needs no reset detection, just a period short enough that
++ * a freshly-up bridge is re-promoted quickly. Costs one small I2C
++ * frame/s on BRD_I2C (i2c8) while any line is held as output.
++ *
++ * Consequently direction_output() always reports success rather than
++ * propagating the transfer error: its consumers (the Display-1 panel
++ * reset-gpios, mmc-pwrseq-simple, a Bluetooth shutdown-gpios) are
++ * ordinary gpiod_direction_output() callers with no equivalent of
++ * -EPROBE_DEFER once past .request() -- a nonzero return here fails the
++ * *consumer's* probe permanently over what is usually only a transient
++ * bridge-down window, with no automatic retry. Swallowing it instead lets
++ * the consumer's own probe proceed; the requested state is latched
++ * regardless and gd32_bridge_replay_work() applies it once the bridge
++ * answers, so the consumer just cannot tell the line is actually driven
++ * until the next successful replay.
 + *
 + * Copyright (c) 2026 Alp Lab AB
 + */
 +
 +#include <asm/unaligned.h>
++#include <linux/bitops.h>
 +#include <linux/crc-itu-t.h>
-+#include <linux/delay.h>
 +#include <linux/gpio/driver.h>
 +#include <linux/i2c.h>
 +#include <linux/module.h>
 +#include <linux/mutex.h>
 +#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/workqueue.h>
 +
 +#define GD32_REG_CMD		0x00
 +#define GD32_CMD_PING		0x00
@@ -162,14 +261,39 @@ index 000000000..712d5c3d8
 + * exist. A bridge below this minor has no notion of them. */
 +#define GD32_PROTO_MINOR_WIFI_BT	11
 +
-+/* Bounded poll window before gd32_bridge_resolve_wifi_bt() gives up and
-+ * returns -EPROBE_DEFER: -EPROBE_DEFER only gets retried by the driver
-+ * core when some OTHER driver's (un)registration walks the deferred-probe
-+ * list, so a bridge that is merely slow to boot -- not absent -- would
-+ * otherwise sit deferred indefinitely with nothing to kick it. 30 x
-+ * 100 ms = ~3 s, comfortably past the bridge's own observed boot time. */
-+#define GD32_WIFI_BT_POLL_RETRIES	30
-+#define GD32_WIFI_BT_POLL_DELAY_MS	100
++/*
++ * gd32_bridge_resolve_work() poll period (Refs #2297): independent of, and
++ * much less urgent than, the output-state replay below -- this just needs
++ * to notice a slow bridge coming up sometime during boot, not glitch-free
++ * pad re-promotion.
++ *
++ * Flat at GD32_RESOLVE_POLL_PERIOD_MS (1 Hz) for the first
++ * GD32_RESOLVE_POLL_FLAT_ATTEMPTS ticks (~30 s, comfortably past every
++ * bridge boot time observed so far), then backs off exponentially up to
++ * the GD32_RESOLVE_POLL_PERIOD_CAP_MS cap. Never gives up outright: the
++ * bridge firmware can be reset or OTA'd at any point during a long-running
++ * boot, and the whole point of this poller is to notice that eventually
++ * rather than depend on some unrelated event to re-probe.
++ */
++#define GD32_RESOLVE_POLL_PERIOD_MS		1000
++#define GD32_RESOLVE_POLL_FLAT_ATTEMPTS		30
++#define GD32_RESOLVE_POLL_PERIOD_CAP_MS		30000
++
++/* Name (and platform_driver.driver.name) of the throwaway platform_device
++ * gd32_bridge_kick_deferred_probe() registers purely to retrigger deferred
++ * probing once lines 18/19 resolve, either way -- see the file-header
++ * comment and gd32_bridge_kick_probe(). */
++#define GD32_DEFERRED_KICK_DEVNAME	"gd32-bridge-deferred-kick"
++
++/* Bit mask covering lines 18/19 only, for masking them out of a replay
++ * when the bridge has not (or not yet) confirmed it understands them. */
++#define GD32_WIFI_BT_LINE_MASK	GENMASK(GD32_NGPIO_WIFI_BT - 1, GD32_NGPIO_BASE)
++
++/* Output-state replay period: frequent enough that a bridge which just
++ * came up (post-reset or first power-on) is re-promoted within about a
++ * second, cheap enough (one small I2C frame) to run indefinitely on
++ * BRD_I2C (i2c8) whenever any line is held as output. */
++#define GD32_REPLAY_PERIOD_MS	1000
 +
 +static const char * const gd32_bridge_gpio_names[GD32_NGPIO_WIFI_BT] = {
 +	"IO8",  "IO9",  "IO10", "IO11", "IO12", "IO13",
@@ -184,19 +308,41 @@ index 000000000..712d5c3d8
 +	struct mutex lock;		/* serialize cmd/reply pairs */
 +	/*
 +	 * output_mask: lines promoted to output (sticky; once written a pad
-+	 * stays push-pull until GD32 reset).
-+	 * output_vals: last driven levels.
-+	 * Single-writer assumption: gpiolib serializes per-line ops so no
-+	 * atomic RMW is needed here.
++	 * stays push-pull until GD32 reset). Bits are only ever added, never
++	 * cleared.
++	 * output_vals: last requested levels. Latched even when the bridge
++	 * rejects or fails the write -- gd32_bridge_replay_work() keeps
++	 * retrying until it lands.
++	 *
++	 * Guarded by state_lock, held across the *entire* transfer (not just
++	 * the read-modify-write of these two fields) in both
++	 * gd32_bridge_gpio_do_set() and gd32_bridge_replay_work(): gpiolib
++	 * only serializes per-line callback invocations against each other,
++	 * not against this driver's own workqueue, so without state_lock
++	 * spanning the transfer a replay reading a stale snapshot could land
++	 * its write after a newer .set()/direction_output() call and drive a
++	 * line back to an earlier level.
++	 *
++	 * Lock order (always this direction, never reversed):
++	 * state_lock -> status_lock -> gd32_bridge_xfer()'s own `lock`.
++	 * gd32_bridge_wifi_bt_status() (status_lock only) and
++	 * gd32_bridge_xfer() (`lock` only) are both called while state_lock
++	 * is held; can_sleep is true, so blocking I2C under a mutex is fine.
 +	 */
 +	u32 output_mask;
 +	u32 output_vals;
++	struct mutex state_lock;	/* protects output_mask/output_vals; see lock order above */
++	struct delayed_work replay_work;
++	bool replay_failing;		/* guarded by state_lock; logs transitions once */
 +	/*
 +	 * Lines 18/19 (bt-reg-on/wl-reg-on) gating, resolved lazily at
 +	 * .request() time rather than once at probe() -- see the
 +	 * file-header comment. wifi_bt_reg_on_status caches the resolved
 +	 * errno: 0 (supported), -ENODEV (confirmed unsupported), or
-+	 * -EPROBE_DEFER (not yet resolved -- retry on next request()).
++	 * -EPROBE_DEFER (not yet resolved -- retried by .request() itself
++	 * with one non-blocking attempt each time, and independently by
++	 * gd32_bridge_resolve_work() regardless of whether anyone has
++	 * requested the lines).
 +	 * Guarded by status_lock, a lock separate from the cmd/reply lock
 +	 * above: gd32_bridge_resolve_wifi_bt() reads/writes this field
 +	 * around calls into gd32_bridge_xfer(), which takes `lock` itself
@@ -204,6 +350,16 @@ index 000000000..712d5c3d8
 +	 */
 +	int wifi_bt_reg_on_status;
 +	struct mutex status_lock;
++	/*
++	 * Independent lines-18/19 resolver, NOT under state_lock (it has
++	 * nothing to do with output_mask/output_vals or the replay above) --
++	 * see gd32_bridge_resolve_work() and the file-header comment.
++	 * resolve_attempts is touched only from gd32_bridge_resolve_work()
++	 * itself (a single delayed_work instance never runs concurrently
++	 * with itself), so it needs no lock of its own.
++	 */
++	struct delayed_work resolve_work;
++	unsigned int resolve_attempts;
 +};
 +
 +/* Peek the cached lines-18/19 status without triggering a new bridge
@@ -278,6 +434,16 @@ index 000000000..712d5c3d8
 +	u32 mask = BIT(offset), levels;
 +	int ret;
 +
++	/*
++	 * Defensive: .request() already refuses lines 18/19 until
++	 * gd32_bridge_resolve_wifi_bt() confirms support, so an in-kernel
++	 * consumer reaching .get() here without a granted request should not
++	 * happen. Gate anyway rather than reading bits the firmware may not
++	 * implement.
++	 */
++	if ((mask & GD32_WIFI_BT_LINE_MASK) && gd32_bridge_wifi_bt_status(gd32) != 0)
++		return -EAGAIN;
++
 +	put_unaligned_le32(mask, req);
 +	ret = gd32_bridge_xfer(gd32, GD32_CMD_GPIO_READ, req, 4, rsp, 4);
 +	if (ret)
@@ -291,20 +457,51 @@ index 000000000..712d5c3d8
 +{
 +	u8 req[8];
 +	u32 mask = BIT(offset);
-+	int ret;
++	bool is_wifi_bt = mask & GD32_WIFI_BT_LINE_MASK;
++	int ret = 0;
 +
-+	put_unaligned_le32(mask, &req[0]);
-+	put_unaligned_le32(value ? mask : 0, &req[4]);
-+	ret = gd32_bridge_xfer(gd32, GD32_CMD_GPIO_WRITE, req, 8, NULL, 0);
-+	if (ret)
-+		return ret;
-+
++	/*
++	 * Latch the requested state and hold state_lock across the transfer
++	 * itself -- see the struct comment's lock-order note. This
++	 * serializes against gd32_bridge_replay_work(): without it, a
++	 * replay could read a stale snapshot and land its write after this
++	 * one, driving the line back to an earlier level.
++	 */
++	mutex_lock(&gd32->state_lock);
 +	gd32->output_mask |= mask;
 +	if (value)
 +		gd32->output_vals |= mask;
 +	else
 +		gd32->output_vals &= ~mask;
-+	return 0;
++
++	/*
++	 * Defensive only: .request() refuses lines 18/19 until support is
++	 * confirmed (gd32_bridge_gpio_request()), so do_set() should never
++	 * actually reach this with is_wifi_bt true and status != 0. Skip the
++	 * wire transfer for those bits anyway rather than assume that can
++	 * never change -- the level is still latched above regardless, and
++	 * gd32_bridge_replay_work() would re-issue the write if support were
++	 * ever (re)confirmed, so nothing would be lost even if this were hit.
++	 */
++	if (!is_wifi_bt || gd32_bridge_wifi_bt_status(gd32) == 0) {
++		put_unaligned_le32(mask, &req[0]);
++		put_unaligned_le32(value ? mask : 0, &req[4]);
++		ret = gd32_bridge_xfer(gd32, GD32_CMD_GPIO_WRITE, req, 8, NULL, 0);
++		if (ret)
++			gd32->replay_failing = true;
++	}
++
++	/*
++	 * Make sure the periodic replay is running: it is not scheduled
++	 * while output_mask is 0 (nothing to replay), so the first write of
++	 * any line needs to (re)kick it. Idempotent if already queued.
++	 */
++	queue_delayed_work(system_freezable_power_efficient_wq,
++			   &gd32->replay_work,
++			   msecs_to_jiffies(GD32_REPLAY_PERIOD_MS));
++	mutex_unlock(&gd32->state_lock);
++
++	return ret;
 +}
 +
 +static void gd32_bridge_gpio_set(struct gpio_chip *chip, unsigned int offset,
@@ -323,25 +520,44 @@ index 000000000..712d5c3d8
 +				    unsigned int offset, int value)
 +{
 +	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(chip);
-+	int ret;
++	int ret = gd32_bridge_gpio_do_set(gd32, offset, value);
 +
-+	/* The bridge promotes a pad to output on first write. Unlike the
-+	 * plain .set() callback (void return -- gpiolib has nowhere to
-+	 * propagate a failure), .direction_output() has a real return path:
-+	 * surface the transfer error instead of always reporting success. */
-+	ret = gd32_bridge_gpio_do_set(gd32, offset, value);
++	/*
++	 * Swallow the transfer error rather than propagate it. This chip's
++	 * consumers (the Display-1 panel reset-gpios, mmc-pwrseq-simple, a
++	 * Bluetooth shutdown-gpios) are ordinary gpiod_direction_output()
++	 * callers, not OF gpio-hogs -- a nonzero return here fails the
++	 * *consumer's* own probe permanently (there is no -EPROBE_DEFER
++	 * equivalent once past .request()), over what is usually only a
++	 * transient bridge-down window with no automatic retry. The
++	 * requested state is already latched (see
++	 * gd32_bridge_gpio_do_set()) and gd32_bridge_replay_work() applies
++	 * it once the bridge answers, so returning 0 unconditionally lets
++	 * the consumer's probe proceed; it just cannot yet tell the line is
++	 * actually driven until the next successful replay.
++	 */
++	if (ret)
++		dev_warn_ratelimited(chip->parent,
++				     "GPIO write line %u failed (%d)\n",
++				     offset, ret);
 +
-+	return ret;
++	return 0;
 +}
 +
 +static int gd32_bridge_gpio_dir_in(struct gpio_chip *chip, unsigned int offset)
 +{
 +	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(chip);
 +
-+	/* Sticky promotion: once written, a pad cannot return to input. */
-+	if (gd32->output_mask & BIT(offset))
++	/*
++	 * Sticky promotion: once written, a pad cannot return to input.
++	 * READ_ONCE, not state_lock: output_mask bits are only ever added
++	 * (see the struct comment), so an unlocked peek can only be stale
++	 * in the safe direction (a just-promoted pad briefly still reading
++	 * as input), never the other way.
++	 */
++	if (READ_ONCE(gd32->output_mask) & BIT(offset))
 +		return -EPERM;
-+	return 0;	/* boot default is already input + pull-up */
++	return 0;	/* input; pull behaviour depends on bridge firmware version */
 +}
 +
 +static int gd32_bridge_gpio_get_dir(struct gpio_chip *chip,
@@ -349,42 +565,29 @@ index 000000000..712d5c3d8
 +{
 +	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(chip);
 +
-+	return (gd32->output_mask & BIT(offset)) ? GPIO_LINE_DIRECTION_OUT
-+						 : GPIO_LINE_DIRECTION_IN;
++	return (READ_ONCE(gd32->output_mask) & BIT(offset)) ? GPIO_LINE_DIRECTION_OUT
++							     : GPIO_LINE_DIRECTION_IN;
 +}
 +
 +/*
-+ * Resolve (and cache) whether this bridge exposes lines 18/19. Called
-+ * lazily from .request() rather than once at probe() -- see the
-+ * file-header comment.
++ * One non-blocking GET_VERSION attempt against the bridge, updating the
++ * cached lines-18/19 status on success. Never sleeps or retries -- a
++ * caller that needs a bounded wait loops this via
++ * gd32_bridge_resolve_wifi_bt() instead; gd32_bridge_resolve_work() calls
++ * this directly, once per tick, independently of any consumer request.
 + *
-+ * Returns 0 if confirmed supported, -ENODEV if confirmed unsupported,
-+ * or -EPROBE_DEFER if the bridge is still silent (retry later).
++ * Returns 0 and updates the cache on a successful GET_VERSION, or the
++ * xfer error (typically -ETIMEDOUT/-EIO) with the cache left untouched
++ * (still -EPROBE_DEFER) when the bridge stays silent.
 + */
-+static int gd32_bridge_resolve_wifi_bt(struct gd32_bridge_gpio *gd32)
++static int gd32_bridge_wifi_bt_poll_once(struct gd32_bridge_gpio *gd32)
 +{
 +	u8 ver[3];
-+	int ret = -ETIMEDOUT;
-+	unsigned int retry;
-+	int cached;
++	int ret;
 +
-+	cached = gd32_bridge_wifi_bt_status(gd32);
-+	if (cached != -EPROBE_DEFER)
-+		return cached;
-+
-+	/* Bounded poll -- see GD32_WIFI_BT_POLL_RETRIES's comment. Runs
-+	 * outside status_lock: gd32_bridge_xfer() takes its own `lock`
-+	 * (i2c cmd/reply serialization), a different mutex, so there is
-+	 * nothing to nest here. */
-+	for (retry = 0; retry < GD32_WIFI_BT_POLL_RETRIES; retry++) {
-+		ret = gd32_bridge_xfer(gd32, GD32_CMD_GET_VERSION, NULL, 0,
-+					ver, 3);
-+		if (!ret)
-+			break;
-+		msleep(GD32_WIFI_BT_POLL_DELAY_MS);
-+	}
++	ret = gd32_bridge_xfer(gd32, GD32_CMD_GET_VERSION, NULL, 0, ver, 3);
 +	if (ret)
-+		return -EPROBE_DEFER;	/* still silent after the bounded wait */
++		return ret;
 +
 +	mutex_lock(&gd32->status_lock);
 +	/*
@@ -394,17 +597,43 @@ index 000000000..712d5c3d8
 +	 * rather than trusting the minor field under different semantics.
 +	 */
 +	if (ver[0] != 0 || ver[1] < GD32_PROTO_MINOR_WIFI_BT) {
-+		dev_warn(gd32->chip.parent,
-+			 "bridge protocol %u.%u.%u has no bt-reg-on/wl-reg-on lines (need major 0, minor >= %u)\n",
-+			 ver[0], ver[1], ver[2], GD32_PROTO_MINOR_WIFI_BT);
++		if (gd32->wifi_bt_reg_on_status != -ENODEV)
++			dev_warn(gd32->chip.parent,
++				 "bridge protocol %u.%u.%u has no bt-reg-on/wl-reg-on lines (need major 0, minor >= %u); lines 18/19 (bt-reg-on/wl-reg-on) will never be driven on this firmware\n",
++				 ver[0], ver[1], ver[2], GD32_PROTO_MINOR_WIFI_BT);
 +		gd32->wifi_bt_reg_on_status = -ENODEV;
 +	} else {
 +		gd32->wifi_bt_reg_on_status = 0;
 +	}
-+	cached = gd32->wifi_bt_reg_on_status;
 +	mutex_unlock(&gd32->status_lock);
 +
-+	return cached;
++	return 0;
++}
++
++/*
++ * Resolve (and cache) whether this bridge exposes lines 18/19. Called
++ * from .request() -- see the file-header comment.
++ *
++ * One non-blocking GET_VERSION attempt only: a bridge that is already up
++ * resolves immediately, and a bridge that is merely slow to boot is
++ * gd32_bridge_resolve_work()'s job, not this function's -- blocking
++ * .request() itself to wait it out would only delay that consumer's own
++ * probe for no benefit now that the independent poller exists.
++ *
++ * Returns 0 if confirmed supported, -ENODEV if confirmed unsupported, or
++ * -EPROBE_DEFER if the bridge is still silent.
++ */
++static int gd32_bridge_resolve_wifi_bt(struct gd32_bridge_gpio *gd32)
++{
++	int cached = gd32_bridge_wifi_bt_status(gd32);
++
++	if (cached != -EPROBE_DEFER)
++		return cached;
++
++	if (gd32_bridge_wifi_bt_poll_once(gd32))
++		return -EPROBE_DEFER;	/* still silent */
++
++	return gd32_bridge_wifi_bt_status(gd32);
 +}
 +
 +static int gd32_bridge_gpio_request(struct gpio_chip *chip,
@@ -415,9 +644,206 @@ index 000000000..712d5c3d8
 +	if (offset < GD32_NGPIO_BASE)
 +		return 0;
 +
-+	/* -EPROBE_DEFER has no request()-time retry path like probe() gets;
-+	 * it surfaces straight to the gpio chardev caller as plain errno 517. */
++	/*
++	 * -EPROBE_DEFER here defers the *consumer's* own probe
++	 * (mmc-pwrseq-simple's wlan-pwrseq reset-gpios, hci_bcm's
++	 * shutdown-gpios) -- deliberate: each runs a one-shot power-up
++	 * sequence right after .request() succeeds, and SDHI2 being
++	 * non-removable means that sequence never reruns on its own if it
++	 * runs before REG_ON can actually move, so granting the request
++	 * while still unresolved is not safe (Refs #2297). See the
++	 * file-header comment: gd32_bridge_resolve_work() discovers a slow
++	 * bridge independently and retriggers deferred probing once
++	 * resolved either way, so this consumer gets called again with the
++	 * real answer.
++	 */
 +	return gd32_bridge_resolve_wifi_bt(gd32);
++}
++
++/*
++ * Periodically re-assert output_mask/output_vals against the bridge. A
++ * GD32 reset (WDT, OTA A/B swap) silently drops every pad back to its
++ * boot default, and a write attempted while the bridge was unreachable
++ * (e.g. at probe, before the GD32 has come up) is latched but not yet
++ * applied -- see gd32_bridge_gpio_do_set(). Re-issuing CMD_GPIO_WRITE for
++ * the whole mask is glitch-free on pads already at that level, so this
++ * needs no reset detection: it just needs to run often enough that a
++ * freshly-up bridge is re-promoted within about one period. Reschedules
++ * itself only while output_mask != 0; gd32_bridge_gpio_do_set() (re)kicks
++ * it whenever a line is written.
++ */
++static void gd32_bridge_replay_work(struct work_struct *work)
++{
++	struct gd32_bridge_gpio *gd32 = container_of(to_delayed_work(work),
++						     struct gd32_bridge_gpio,
++						     replay_work);
++	u8 req[8];
++	u32 mask, vals, xfer_mask;
++	int ret;
++	bool active;
++
++	/*
++	 * Hold state_lock across the transfer itself, not just the
++	 * snapshot -- see the struct comment's lock-order note. Without
++	 * this, a concurrent gd32_bridge_gpio_do_set() could land a newer
++	 * write in between this function's read and its own transfer,
++	 * and this stale replay would then drive the line back down.
++	 */
++	mutex_lock(&gd32->state_lock);
++	mask = gd32->output_mask;
++	vals = gd32->output_vals;
++
++	/*
++	 * Lines 18/19 only ever enter output_mask once .request() has
++	 * resolved them supported (gd32_bridge_gpio_request() now refuses
++	 * the request otherwise, see the file-header comment), so this is
++	 * defensive rather than a live path: mask them out unless confirmed
++	 * supported, so a replay never sends bits the firmware may not
++	 * understand. Resolving a still-unresolved bridge is
++	 * gd32_bridge_resolve_work()'s job, independent of this replay and
++	 * NOT run under state_lock.
++	 */
++	xfer_mask = mask;
++	if (gd32_bridge_wifi_bt_status(gd32) != 0)
++		xfer_mask &= ~GD32_WIFI_BT_LINE_MASK;
++
++	if (xfer_mask) {
++		put_unaligned_le32(xfer_mask, &req[0]);
++		put_unaligned_le32(vals & xfer_mask, &req[4]);
++		ret = gd32_bridge_xfer(gd32, GD32_CMD_GPIO_WRITE, req, 8,
++				       NULL, 0);
++		if (ret) {
++			if (!gd32->replay_failing) {
++				dev_warn(gd32->chip.parent,
++					 "output state replay failed (%d)\n",
++					 ret);
++				gd32->replay_failing = true;
++			}
++		} else if (gd32->replay_failing) {
++			dev_info(gd32->chip.parent,
++				 "bridge reachable, %u line(s) re-applied\n",
++				 hweight32(xfer_mask));
++			gd32->replay_failing = false;
++		}
++	}
++	active = mask != 0;
++	mutex_unlock(&gd32->state_lock);
++
++	if (active)
++		queue_delayed_work(system_freezable_power_efficient_wq,
++				   &gd32->replay_work,
++				   msecs_to_jiffies(GD32_REPLAY_PERIOD_MS));
++}
++
++static void gd32_bridge_cancel_replay(void *data)
++{
++	struct gd32_bridge_gpio *gd32 = data;
++
++	cancel_delayed_work_sync(&gd32->replay_work);
++}
++
++/*
++ * No-op probe: this device exists purely so registering it BINDS. Binding
++ * runs driver_bound(), which (drivers/base/dd.c in this tree, verified on
++ * the actual E1M-V2M103 kernel source) unconditionally calls
++ * driver_deferred_probe_trigger() -- see gd32_bridge_kick_deferred_probe().
++ */
++static int gd32_bridge_kick_probe(struct platform_device *pdev)
++{
++	return 0;
++}
++
++static struct platform_driver gd32_bridge_kick_driver = {
++	.driver = {
++		.name = GD32_DEFERRED_KICK_DEVNAME,
++	},
++	.probe = gd32_bridge_kick_probe,
++};
++
++/*
++ * Fire on lines 18/19 resolving either way (0 confirmed supported, -ENODEV
++ * confirmed unsupported -- see gd32_bridge_resolve_work()). Registers a
++ * throwaway platform_device that matches gd32_bridge_kick_driver by name;
++ * its probe() always succeeds, so platform_device_register_simple() drives
++ * it synchronously through bus_probe_device() -> ... -> driver_bound(),
++ * which (see the comment on gd32_bridge_kick_probe()) unconditionally
++ * calls driver_deferred_probe_trigger() -- that queues a deferred-probe
++ * retry (asynchronous, on system_unbound_wq) for every currently-deferred
++ * device, including mmc-pwrseq-simple's wlan-pwrseq and hci_bcm's
++ * shutdown-gpios, which get called again with the real answer: granted, or
++ * failing outright with -ENODEV instead of lingering. The device has done
++ * its job the moment it binds, so it is unregistered again immediately;
++ * PLATFORM_DEVID_AUTO avoids any name collision if more than one bridge
++ * instance is ever present on one system.
++ */
++static void gd32_bridge_kick_deferred_probe(struct gd32_bridge_gpio *gd32)
++{
++	struct platform_device *pdev;
++
++	pdev = platform_device_register_simple(GD32_DEFERRED_KICK_DEVNAME,
++						PLATFORM_DEVID_AUTO, NULL, 0);
++	if (IS_ERR(pdev)) {
++		dev_warn(gd32->chip.parent,
++			 "failed to register %s (%ld); deferred consumers of lines 18/19 will only pick this up on their own next retry\n",
++			 GD32_DEFERRED_KICK_DEVNAME, PTR_ERR(pdev));
++		return;
++	}
++
++	platform_device_unregister(pdev);
++}
++
++/*
++ * Independent lazy resolver for lines 18/19 (Refs #2297; see the
++ * file-header comment for why this exists separately from both
++ * .request() and gd32_bridge_replay_work()). Polls GET_VERSION, NOT under
++ * state_lock -- this has nothing to do with output_mask/output_vals --
++ * regardless of whether any consumer has requested the lines yet, so a
++ * bridge that is merely slow to boot still gets discovered even after the
++ * first .request() has already given up and returned -EPROBE_DEFER to its
++ * caller.
++ */
++static void gd32_bridge_resolve_work(struct work_struct *work)
++{
++	struct gd32_bridge_gpio *gd32 = container_of(to_delayed_work(work),
++						     struct gd32_bridge_gpio,
++						     resolve_work);
++	unsigned int shift, period_ms;
++
++	if (!gd32_bridge_wifi_bt_poll_once(gd32)) {
++		/*
++		 * Resolved either way -- kick deferred probing once so
++		 * mmc-pwrseq-simple / hci_bcm get a deterministic answer now
++		 * instead of lingering (see gd32_bridge_kick_deferred_probe()).
++		 * Terminal: do not reschedule.
++		 */
++		gd32_bridge_kick_deferred_probe(gd32);
++		return;
++	}
++
++	/* Still silent -- see GD32_RESOLVE_POLL_PERIOD_MS's comment for the
++	 * flat-then-backoff schedule. Clamp the shift itself (not just the
++	 * result) to avoid an oversized shift count as resolve_attempts
++	 * grows unbounded over a very long uptime. */
++	gd32->resolve_attempts++;
++	if (gd32->resolve_attempts <= GD32_RESOLVE_POLL_FLAT_ATTEMPTS) {
++		period_ms = GD32_RESOLVE_POLL_PERIOD_MS;
++	} else {
++		shift = gd32->resolve_attempts - GD32_RESOLVE_POLL_FLAT_ATTEMPTS;
++		if (shift > 5)
++			shift = 5;	/* 1000 << 5 = 32000 already past the cap */
++		period_ms = min_t(unsigned int, GD32_RESOLVE_POLL_PERIOD_MS << shift,
++				   GD32_RESOLVE_POLL_PERIOD_CAP_MS);
++	}
++
++	queue_delayed_work(system_freezable_power_efficient_wq,
++			   &gd32->resolve_work, msecs_to_jiffies(period_ms));
++}
++
++static void gd32_bridge_cancel_resolve(void *data)
++{
++	struct gd32_bridge_gpio *gd32 = data;
++
++	cancel_delayed_work_sync(&gd32->resolve_work);
 +}
 +
 +static int gd32_bridge_gpio_probe(struct i2c_client *client)
@@ -433,6 +859,9 @@ index 000000000..712d5c3d8
 +	gd32->client = client;
 +	mutex_init(&gd32->lock);
 +	mutex_init(&gd32->status_lock);
++	mutex_init(&gd32->state_lock);
++	INIT_DELAYED_WORK(&gd32->replay_work, gd32_bridge_replay_work);
++	INIT_DELAYED_WORK(&gd32->resolve_work, gd32_bridge_resolve_work);
 +	gd32->wifi_bt_reg_on_status = -EPROBE_DEFER;	/* not yet resolved */
 +
 +	gd32->chip.label	  = "gd32-bridge-gpio";
@@ -481,6 +910,32 @@ index 000000000..712d5c3d8
 +	gd32->chip.get_direction    = gd32_bridge_gpio_get_dir;
 +	gd32->chip.can_sleep	  = true;
 +
++	ret = devm_add_action_or_reset(&client->dev, gd32_bridge_cancel_replay,
++					gd32);
++	if (ret)
++		return ret;
++	/*
++	 * Nothing to replay yet: output_mask starts at 0, so the periodic
++	 * work is not queued here. gd32_bridge_gpio_do_set() (re)kicks it
++	 * the first time any line is written.
++	 */
++
++	ret = devm_add_action_or_reset(&client->dev, gd32_bridge_cancel_resolve,
++					gd32);
++	if (ret)
++		return ret;
++	/*
++	 * Kick off the independent lines-18/19 resolver now if the
++	 * best-effort handshake above didn't already land -- see
++	 * gd32_bridge_resolve_work() and the file-header comment. Not
++	 * needed (and not started) if the handshake already resolved
++	 * wifi_bt_reg_on_status to 0 or -ENODEV.
++	 */
++	if (gd32->wifi_bt_reg_on_status == -EPROBE_DEFER)
++		queue_delayed_work(system_freezable_power_efficient_wq,
++				   &gd32->resolve_work,
++				   msecs_to_jiffies(GD32_RESOLVE_POLL_PERIOD_MS));
++
 +	i2c_set_clientdata(client, gd32);
 +	return devm_gpiochip_add_data(&client->dev, &gd32->chip, gd32);
 +}
@@ -498,11 +953,37 @@ index 000000000..712d5c3d8
 +	},
 +	.probe_new = gd32_bridge_gpio_probe,
 +};
-+module_i2c_driver(gd32_bridge_gpio_driver);
++
++/*
++ * Not module_i2c_driver(): gd32_bridge_kick_driver (see the file-header
++ * comment and gd32_bridge_kick_deferred_probe()) needs registering
++ * alongside the i2c driver, so both are done explicitly here.
++ */
++static int __init gd32_bridge_gpio_module_init(void)
++{
++	int ret;
++
++	ret = platform_driver_register(&gd32_bridge_kick_driver);
++	if (ret)
++		return ret;
++
++	ret = i2c_add_driver(&gd32_bridge_gpio_driver);
++	if (ret)
++		platform_driver_unregister(&gd32_bridge_kick_driver);
++
++	return ret;
++}
++module_init(gd32_bridge_gpio_module_init);
++
++static void __exit gd32_bridge_gpio_module_exit(void)
++{
++	i2c_del_driver(&gd32_bridge_gpio_driver);
++	platform_driver_unregister(&gd32_bridge_kick_driver);
++}
++module_exit(gd32_bridge_gpio_module_exit);
 +
 +MODULE_AUTHOR("Alp Lab AB");
 +MODULE_DESCRIPTION("GPIO driver for the Alp Lab GD32 IO-MCU bridge");
 +MODULE_LICENSE("GPL");
 -- 
 2.55.0
-
