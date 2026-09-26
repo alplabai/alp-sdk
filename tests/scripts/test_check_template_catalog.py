@@ -150,6 +150,17 @@ def test_core_dir_testcase_yaml_is_exempt():
     assert ctc._check_core_files_declared(rec) == []
 
 
+def test_core_files_check_reports_git_failure(monkeypatch):
+    """Outside a git checkout the #2241 check must fail through the gate's
+    own `FAIL · problem` output, never escape as a raw traceback."""
+    def _boom(_rel_dir):
+        raise subprocess.CalledProcessError(128, ["git", "ls-files"])
+    monkeypatch.setattr(ctc, "_tracked_files_under", _boom)
+    rec = next(t for t in _catalog()["templates"] if t["id"] == "iot")
+    problems = ctc._check_core_files_declared(rec)
+    assert problems and "cannot list the files git tracks" in problems[0]
+
+
 def test_cores_missing_entry_rejected(tmp_path):
     """Dropping a declared core (multicore-mailbox's board.yaml
     declares BOTH m55_hp and m55_he) must fail, not pass with a

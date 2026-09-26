@@ -238,7 +238,9 @@ def _check_core_files_declared(rec: dict) -> list[str]:
     that list, so anything it omits is silently missing from the scaffold.
     Exempt: a path `test.testcase_yaml` lists (CI wiring, never scaffolded).
     A core whose `dir` is the example root is not walked: the root also
-    holds CI-only files (native_sim.conf, boards/ overlays) by design."""
+    holds CI-only files (native_sim.conf, boards/ overlays) by design. No
+    record uses a root app dir today; one that does gets no #2241 coverage
+    from this check, so extend it before adding such a record."""
     rid = rec.get("id", "<no id>")
     example = rec["example"].rstrip("/")
     declared = set(rec["files"]["user_owned"])
@@ -249,7 +251,14 @@ def _check_core_files_declared(rec: dict) -> list[str]:
         core_dir = (core.get("dir") or "").removeprefix("./").strip("/")
         if core_dir in ("", "."):
             continue
-        for path in _tracked_files_under(f"{example}/{core_dir}"):
+        try:
+            tracked = _tracked_files_under(f"{example}/{core_dir}")
+        except (OSError, subprocess.CalledProcessError) as e:
+            problems.append(
+                f"{rid}: cannot list the files git tracks under "
+                f"{example}/{core_dir} ({e}) -- run this gate in a git checkout")
+            continue
+        for path in tracked:
             rel = path.removeprefix(f"{example}/")
             if path in ci_only or rel in declared:
                 continue
