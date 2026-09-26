@@ -159,6 +159,11 @@ construction** (unique across every unit this allocator has issued a serial
 to) -- **not globally unique** the way a purchased IEEE OUI block would
 make them; that block is not something the project has bought.
 
+The MAC carries no SKU field, so the serial's index is allocated
+**fleet-wide per ISO week, across every SKU** -- not per SKU -- which is
+what makes the encoding actually unique: two different SKUs sharing a
+week and an index would otherwise collide on the same MAC.
+
 * Layout: octet 0 fixed `0xA2` (individual, locally administered), then a
   40-bit payload: 4-bit Alp Lab prefix `0xC` | 6-bit `year - 2024` | 6-bit
   ISO week | 20-bit Crockford base32 index (the serial's `NNNN`/`IIII`
@@ -177,16 +182,29 @@ make them; that block is not something the project has bought.
   reaches Linux: U-Boot's `image_setup_libfdt()` runs
   `fdt_fixup_ethernet()` (which copies `ethaddr`/`eth1addr` into the
   `ethernet0`/`ethernet1` DT nodes' `mac-address`/`local-mac-address`
-  properties) *before* `ft_system_setup()` ever runs -- so deriving only
-  in `board_late_init()`, or only in `ft_system_setup()`, would already
-  be too late for that same boot.
+  properties) *before* `ft_system_setup()` ever runs. Deriving only in
+  `board_late_init()` would leave nothing for Linux to see: its value is
+  *wiped* by that same `env default -a` a few bootcmd tokens later.
+  Deriving only in `ft_system_setup()` would already be too late for
+  that same boot instead, since `fdt_fixup_ethernet()` has already run
+  by the time it executes.
 * **No env override, by construction, not by choice:** `CONFIG_BOOTCOMMAND`
   opens with `env default -a`, which wipes the whole environment back to
   its compiled-in defaults on every boot before Linux is reached -- so a
   `setenv ethaddr <mac>; saveenv` would not survive to the next autoboot
   regardless of what U-Boot's derivation code did. The honest rule this
   SoM ships is: **the derived MAC always applies whenever the serial
-  parses**, unconditionally, every boot. There is no override slot.
+  parses**, unconditionally, every boot. There is no override slot --
+  **conditional on autoboot actually running the compiled-in
+  `CONFIG_BOOTCOMMAND`.** A unit carrying a *saved* `bootcmd` from an
+  older FIP (predating this `alp_eth_mac` command) or from a manual
+  `setenv bootcmd; saveenv` runs THAT saved command instead -- one with
+  no `alp_eth_mac` call. Its `env default -a` (still present in every
+  version of this bootcmd) then wipes whatever `board_late_init()` set,
+  and Linux sees the DRP-AI vendor default `02:11:22:33:44:55`/`66`
+  instead of the derived MAC. See `docs/provisioning.md`'s FIP-flash
+  step for the saved-env reset a FIP upgrade on a previously-provisioned
+  unit must carry.
 * Recompute a unit's MAC any time from its serial with
   `scripts/alp_eth_mac.py 2026W38-0001` (no ledger field carries it --
   it is cheap to recompute and would otherwise just be a value that can

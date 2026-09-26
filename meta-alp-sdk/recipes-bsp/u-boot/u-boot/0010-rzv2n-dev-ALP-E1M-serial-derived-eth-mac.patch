@@ -1,12 +1,12 @@
-From 4e0ddb30512fe4472e2a0117ac37abeccac42204 Mon Sep 17 00:00:00 2001
+From 311ed1c414da9745205fbaf4b7a9f1c61bacbade Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
-Date: Sat, 26 Sep 2026 16:44:18 +0000
+Date: Sat, 26 Sep 2026 17:10:08 +0000
 Subject: [PATCH] rzv2n-dev: ALP E1M derive ethaddr/eth1addr from the SoM
  serial
 
 E1M-V2N/E1M-V2M SoMs have two RAVB Ethernet interfaces and no per-unit
 MAC source: the RZ/V2N has no MAC OTP and this SoM has no MAC EEPROM.
-meta-rz-features/meta-rz-drpai own u-boot bbappend sets ethaddr/eth1addr
+meta-rz-features/meta-rz-drpai's own u-boot bbappend sets ethaddr/eth1addr
 to 02:11:22:33:44:55/66 in CFG_EXTRA_ENV_SETTINGS -- identical on every
 board either way.
 
@@ -18,21 +18,25 @@ layout and carries the same golden vector for serial "2026W38-0001":
 end0 A2:C0:A6:00:00:10, end1 A2:C0:A6:00:00:14.
 
 Always overwrites unconditionally via env_set() -- eth_env_set_enetaddr()
-refuses whenever the variable already holds any value, so it can never
-replace the vendor default. Called from board_late_init() (so U-Boot
-itself has a MAC before bootcmd) and from a new alp_eth_mac command
-that CONFIG_BOOTCOMMAND (patch 0002) invokes right after "env default
--a" -- image_setup_libfdt() runs fdt_fixup_ethernet() before
-ft_system_setup(), so setting env only in ft_system_setup() would
-already be too late for the same boot.
+refuses whenever the variable already holds a valid MAC, so it can
+never replace the vendor default. Called from board_late_init() (so
+U-Boot itself has a MAC before bootcmd) and from a new alp_eth_mac
+command that CONFIG_BOOTCOMMAND (include/configs/rzv2n-dev.h) invokes
+right after "env default -a". Deriving only in board_late_init() would
+leave nothing for Linux to see: its value is wiped by that same "env
+default -a" a few bootcmd tokens later. Deriving only in
+ft_system_setup() would already be too late for that same boot instead,
+since image_setup_libfdt() runs fdt_fixup_ethernet() before
+ft_system_setup() ever runs.
 
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
- board/renesas/rzv2n-dev/rzv2n-dev.c | 198 ++++++++++++++++++++++++++++
- 1 file changed, 198 insertions(+)
+ board/renesas/rzv2n-dev/rzv2n-dev.c | 201 ++++++++++++++++++++++++++++
+ include/configs/rzv2n-dev.h         |  12 +-
+ 2 files changed, 212 insertions(+), 1 deletion(-)
 
 diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
-index 1152ade7..d8c366f9 100644
+index 1152ade7..c32e3844 100644
 --- a/board/renesas/rzv2n-dev/rzv2n-dev.c
 +++ b/board/renesas/rzv2n-dev/rzv2n-dev.c
 @@ -27,6 +27,9 @@
@@ -69,7 +73,7 @@ index 1152ade7..d8c366f9 100644
  	memcpy(alp_sku, &buf[0x18], 24);
  	alp_sku[24] = '\0';
  	printf("ALP: SoM family \"%s\" sku \"%.24s\"\n", family, &buf[0x18]);
-@@ -916,6 +929,190 @@ int ft_system_setup(void *blob, struct bd_info *bd)
+@@ -916,6 +929,193 @@ int ft_system_setup(void *blob, struct bd_info *bd)
  	return 0;
  }
 
@@ -194,23 +198,26 @@ index 1152ade7..d8c366f9 100644
 + * autoboot regardless of what this function did.  This is called both
 + * from board_late_init() (so U-Boot's own networking has a MAC before
 + * bootcmd runs) and from the "alp_eth_mac" command CONFIG_BOOTCOMMAND
-+ * (patch 0002) runs immediately after "env default -a" -- the second
-+ * call is the one that matters for Linux: boot/image-fdt.c's
-+ * image_setup_libfdt() calls fdt_fixup_ethernet() (which reads
-+ * ethaddr/eth1addr straight out of env into the ethernet0/ethernet1
-+ * DT nodes' mac-address/local-mac-address properties) BEFORE
-+ * ft_system_setup() ever runs, so setting env only in ft_system_setup()
-+ * would already be too late for that same boot.
++ * (include/configs/rzv2n-dev.h) runs immediately after "env default
++ * -a" -- the second call is the one that matters for Linux: boot/
++ * image-fdt.c's image_setup_libfdt() calls fdt_fixup_ethernet() (which
++ * reads ethaddr/eth1addr straight out of env into the ethernet0/
++ * ethernet1 DT nodes' mac-address/local-mac-address properties)
++ * BEFORE ft_system_setup() ever runs, so setting env only in
++ * ft_system_setup() would already be too late for that same boot.
 + *
 + * env_set(), not eth_env_set_enetaddr_by_index(): the latter
 + * (net/eth_common.c -> env/common.c's eth_env_set_enetaddr()) refuses
-+ * with -EEXIST whenever the variable already holds ANY value --
++ * with -EEXIST whenever the variable already holds a valid MAC --
 + * including the DRP-AI vendor default this exists to replace -- so it
 + * can never do the one thing this function needs.  env_set() always
-+ * overwrites: this board's rzv2n-dev_defconfig defines no
-+ * CFG_ENV_FLAGS_LIST_STATIC entry for ethaddr/eth1addr, so
-+ * env_flags_validate() has nothing to enforce here and env_set()
-+ * succeeds unconditionally.
++ * overwrites here: this board's VENDOR rzv2n-dev_defconfig sets
++ * CONFIG_ENV_OVERWRITE=y, so include/env_flags.h's ETHADDR_FLAGS gives
++ * ethaddr/eth1addr the unrestricted "ma" (env_flags_varaccess_any)
++ * access flag instead of the write-once "mo" it would get without that
++ * option -- env_flags_validate() therefore permits the overwrite
++ * unconditionally (confirmed by reading env/flags.c, include/
++ * env_flags.h and the board's actual built .config, not assumed).
 + */
 +static void alp_eth_mac_bringup(void)
 +{
@@ -260,7 +267,7 @@ index 1152ade7..d8c366f9 100644
  int board_late_init(void)
  {
  	bool v2n_m1;
-@@ -924,6 +1121,7 @@ int board_late_init(void)
+@@ -924,6 +1124,7 @@ int board_late_init(void)
  	alp_clk5l_fixup();
 
  	v2n_m1 = alp_som_is_v2n_m1();
@@ -268,6 +275,29 @@ index 1152ade7..d8c366f9 100644
 
  	if (IS_ENABLED(CONFIG_ALP_E1M_DEEPX_RAIL) || v2n_m1)
  		rail_ok = alp_deepx_rail_bringup();
+diff --git a/include/configs/rzv2n-dev.h b/include/configs/rzv2n-dev.h
+index 85c0e7af..1ad4b02f 100644
+--- a/include/configs/rzv2n-dev.h
++++ b/include/configs/rzv2n-dev.h
+@@ -149,7 +149,17 @@
+  * feature layers (meta-rz-drpai, meta-rz-opencva) and cannot be relied
+  * on to fail loudly.  Same address and same mmc spec each already uses,
+  * so the re-load is idempotent when the vendor path worked. */
+-#define CONFIG_BOOTCOMMAND	"env default -a;run bootcmd_check;" \
++/* ALP: alp_eth_mac (patch 0010, board/renesas/rzv2n-dev/rzv2n-dev.c) runs
++ * here, immediately after "env default -a" and before anything else --
++ * that leading env reset is why the per-unit ethaddr/eth1addr derivation
++ * cannot live in board_late_init() alone: board_late_init() runs once,
++ * long before bootcmd, so whatever it sets into env is wiped by this
++ * same "env default -a" a few tokens later.  Running the derivation
++ * again here, post-wipe, is what makes it visible to the booti path's
++ * fdt_fixup_ethernet() (boot/image-fdt.c's image_setup_libfdt(), which
++ * runs it BEFORE ft_system_setup() -- confirmed by reading this BSP's
++ * actual 2024.07 source, not assumed). */
++#define CONFIG_BOOTCOMMAND	"env default -a;alp_eth_mac;run bootcmd_check;" \
+ 	"if mmc dev 1; then " \
+ 	"setenv alp_mmc 1:2;setenv alp_root /dev/mmcblk1p2; else " \
+ 	"setenv alp_mmc 0:2;setenv alp_root /dev/mmcblk0p2; fi;" \
 --
 2.43.0
 

@@ -285,9 +285,10 @@ SRC_URI:append:rzv2n-family = " file://0009-rzv2n-dev-ALP-E1M-publish-sku-to-cho
 # (recipes-bsp/u-boot/files/0001-add-ether-setting.patch) sets
 # ethaddr/eth1addr to 02:11:22:33:44:55/66 in CFG_EXTRA_ENV_SETTINGS;
 # this patch derives the real per-unit MAC at boot instead, both in
-# board_late_init() and via a bootcmd hook (CONFIG_BOOTCOMMAND, patch
-# 0002) that runs right after "env default -a" -- see
-# docs/soms/v2n.md#ethernet-mac-address-policy and scripts/alp_eth_mac.py.
+# board_late_init() and via a bootcmd hook this same patch adds to
+# CONFIG_BOOTCOMMAND (include/configs/rzv2n-dev.h), right after "env
+# default -a" -- see docs/soms/v2n.md#ethernet-mac-address-policy and
+# scripts/alp_eth_mac.py.
 SRC_URI:append:rzv2n-family = " file://0010-rzv2n-dev-ALP-E1M-serial-derived-eth-mac.patch"
 
 # Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot
