@@ -151,11 +151,12 @@ fi
 # at the NVIC, the freshly loaded image runs straight into that app's ISR the
 # instant IRQs are unmasked -- seen on E1M-AEN803 2026W36-0009: IRQn 333
 # (CDC_SCANLINE0) with the core stuck at IPSR 0x15D. The MSPLIM/PSPLIM
-# clearing above already puts the STACK state back to a cold-reset shape;
-# this puts the INTERRUPT state back the same way. 16 words each covers IRQ
-# 0-511 (16*32), comfortably past the E8's highest defined IRQ (480) --
-# ICER/ICPR are both write-1-to-clear, so writing 0xFFFFFFFF to all 16 is
-# unconditionally safe (an already-disabled/non-pending bit is unaffected).
+# clearing in the CMDS array below already puts the STACK state back to a
+# cold-reset shape; this puts the INTERRUPT state back the same way. 16 words
+# each covers IRQ 0-511 (16*32), comfortably past the E8's highest defined
+# IRQ (480) -- ICER/ICPR are both write-1-to-clear, so writing 0xFFFFFFFF to
+# all 16 is unconditionally safe (an already-disabled/non-pending bit is
+# unaffected).
 # Shared by both cores (CORE=hp/he use the same $CMDS array below): a
 # resident app's ISR storm is not HE-specific, and clearing these on a core
 # that had nothing pending is a no-op, so there is no reason to special-case
