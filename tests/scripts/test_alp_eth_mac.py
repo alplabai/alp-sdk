@@ -15,6 +15,7 @@ Run:
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -120,11 +121,20 @@ class TestParseSerial(unittest.TestCase):
             mac.parse_serial("2026W38-0001\n")
 
     def test_unicode_digit_rejected(self):
-        # Without re.ASCII, \d matches any Unicode decimal digit (e.g.
-        # Arabic-Indic THREE, U+0663) -- must be rejected, not silently
-        # accepted as an ASCII digit look-alike.
+        # Week "38" with its second digit replaced by the Arabic-Indic
+        # THREE (U+0663) -- same 12-character shape as a valid serial
+        # (unlike a longer string, whose rejection could just be a length
+        # mismatch, proving nothing about re.ASCII specifically).
+        serial = "2026W3٣-0001"
+        self.assertEqual(len(serial), 12)
         with self.assertRaises(mac.AlpEthMacError):
-            mac.parse_serial("2026W3٣3-0001")
+            mac.parse_serial(serial)
+
+        # Confirm re.ASCII is actually load-bearing here, not decoration:
+        # the identical pattern minus that flag DOES match this string --
+        # i.e. dropping re.ASCII would silently let it through.
+        lenient = re.compile(mac.SERIAL_RE.pattern, re.IGNORECASE)
+        self.assertIsNotNone(lenient.fullmatch(serial))
 
     def test_u017f_long_s_rejected(self):
         # U+017F LATIN SMALL LETTER LONG S upper-cases to plain ASCII "S"
