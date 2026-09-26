@@ -7,6 +7,7 @@ all exercised against a monkeypatched `_run_vela_report`/`_vela_version`. The
 one place a real `vela` is used is a detect-and-skip smoke test against the
 already-committed files.
 """
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -29,7 +30,7 @@ def _report(u55_u65_ops: list[str], u85_ops: list[str]) -> str:
 
 
 #: A report shaped like the real one: U85 = a small base set + the exact
-#: pinned 17-op delta, so build_tables()'s assertions pass.
+#: pinned 19-op delta, so build_tables()'s assertions pass.
 _BASE_OPS = ["ADD", "CONV_2D", "MUL"]
 _VALID_REPORT = _report(_BASE_OPS, sorted(_BASE_OPS + list(gno._EXPECTED_U85_ONLY_DELTA)))
 
@@ -94,7 +95,7 @@ def test_build_tables_stops_when_u55_u65_is_not_a_subset_of_u85(monkeypatch):
 
 
 def test_build_tables_stops_when_the_u85_only_delta_disagrees(monkeypatch):
-    # Drop one op from the expected 17-op delta -- the assertion must catch
+    # Drop one op from the expected 19-op delta -- the assertion must catch
     # this rather than silently writing a table with a changed delta.
     wrong_delta = list(gno._EXPECTED_U85_ONLY_DELTA)[1:]
     bad_report = _report(_BASE_OPS, sorted(_BASE_OPS + wrong_delta))
@@ -218,3 +219,48 @@ def test_committed_ethos_u_pin_reads_the_version_from_the_filename(monkeypatch, 
 
     (tmp_path / "u85@vela-5.1.0.json").write_text("{}\n", encoding="utf-8")
     assert _committed_ethos_u_pin() == "5.1.0"
+
+
+def test_pyproject_vela_pin_matches_committed_tables():
+    """Hermetic (no vela needed): pyproject's `ethos-u-vela==X` pin and the
+    committed table filenames' `@vela-X` must name the SAME version -- bumping
+    one without the other (the exact bug #2310 found: pyproject at 5.2.0,
+    uv.lock resolving 5.1.0) must fail this test."""
+    pyproject_text = (REPO / "pyproject.toml").read_text(encoding="utf-8")
+    match = re.search(r'"ethos-u-vela==([0-9.]+)"', pyproject_text)
+    assert match, "pyproject.toml has no exact ethos-u-vela==X pin"
+    pinned = _committed_ethos_u_pin()
+    assert pinned is not None, "no committed metadata/npu_ops/ethos_u/u85@vela-*.json"
+    assert match.group(1) == pinned
+
+
+def _locked_ethos_u_vela_version() -> str | None:
+    """The `version` uv.lock actually RESOLVED for the `ethos-u-vela`
+    `[[package]]` table, or None if uv.lock has no such package.
+
+    Read by REGEX, not `tomllib`/a `uv` invocation -- this is the exact
+    #2310 drift class (pyproject pinned `==5.2.0`, `uv.lock` had resolved
+    5.1.0 from before the pin existed) and no CI step runs `uv lock
+    --check`, so nothing else in the tree notices a stale lock entry."""
+    lock_text = (REPO / "uv.lock").read_text(encoding="utf-8")
+    match = re.search(
+        r'^name = "ethos-u-vela"\nversion = "([0-9.]+)"', lock_text, re.MULTILINE)
+    return match.group(1) if match else None
+
+
+def test_uv_lock_ethos_u_vela_version_matches_pyprojects_pin():
+    """The drift `test_pyproject_vela_pin_matches_committed_tables`'s own
+    docstring PROMISES to catch (pyproject pinned `==5.2.0`, `uv.lock`
+    resolving a stale 5.1.0) but never actually reads `uv.lock` at all --
+    only the committed npu-ops table filename, which a `pyproject.toml`
+    edit alone does not touch. `uv lock --check` would catch it too, but no
+    CI step runs that (#2310); this is the one hermetic check in the tree
+    that reads uv.lock's OWN resolved version at all."""
+    pyproject_text = (REPO / "pyproject.toml").read_text(encoding="utf-8")
+    match = re.search(r'"ethos-u-vela==([0-9.]+)"', pyproject_text)
+    assert match, "pyproject.toml has no exact ethos-u-vela==X pin"
+    locked = _locked_ethos_u_vela_version()
+    assert locked is not None, "uv.lock has no ethos-u-vela [[package]] entry"
+    assert locked == match.group(1), (
+        f"uv.lock resolved ethos-u-vela {locked!r} but pyproject.toml pins "
+        f"{match.group(1)!r} -- run `uv lock` to re-resolve")
