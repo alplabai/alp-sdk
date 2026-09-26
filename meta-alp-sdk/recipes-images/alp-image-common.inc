@@ -86,27 +86,22 @@ IMAGE_INSTALL += " ${ALP_RZ_DRPAI_INSTALL}"
 
 # On-module Murata LBEE5HY2FY-922 (Infineon CYW55513) Wi-Fi + BT: the
 # out-of-tree cyw-fmac driver + firmware blobs (this layer, own
-# recipes -- no vendor-layer gate needed), the murata-2gy-nvram override
-# (per-board-compatible NVRAM/CLM for this exact module -- see
-# recipes-kernel/murata-2gy-nvram/; without it cyw-fmac-firmware's
-# generic Infineon eval-board blob is what actually loads) plus the
-# standard userspace stack (wireless-regdb-static installs regulatory.db
-# + regulatory.db.p7s under /lib/firmware for cfg80211 to load directly
-# at modprobe -- kernel >= 4.15 only, which this 6.1 kernel clears; the
-# bare wireless-regdb package is the legacy crda-daemon path
-# (regulatory.bin under /usr/lib/crda/) and RCONFLICTS with -static, so
-# picking the wrong one is not an additive mistake, iw for scan/connect
-# from the shell, wpa_supplicant + wpa-supplicant-cli/-passphrase for
-# WPA2/WPA3 association and passphrase-hashing from the shell, bluez5
-# for hci0/bluetoothctl). Gated the same way ALP_RZ_DRPAI_INSTALL is --
-# on MACHINE_FEATURES containing "v2n" -- because every V2N/V2M SKU
-# carries the same on-module part (see wifi_ble: in each
+# recipes -- no vendor-layer gate needed) plus the standard userspace
+# stack (wireless-regdb-static installs regulatory.db + regulatory.db.p7s
+# under /lib/firmware for cfg80211 to load directly at modprobe -- kernel
+# >= 4.15 only, which this 6.1 kernel clears; the bare wireless-regdb
+# package is the legacy crda-daemon path (regulatory.bin under
+# /usr/lib/crda/) and RCONFLICTS with -static, so picking the wrong one
+# is not an additive mistake, iw for scan/connect from the shell,
+# wpa_supplicant for WPA2/WPA3 association, bluez5 for hci0/
+# bluetoothctl). Gated the same way ALP_RZ_DRPAI_INSTALL is -- on
+# MACHINE_FEATURES containing "v2n" -- because every V2N/V2M SKU carries
+# the same on-module part (see wifi_ble: in each
 # metadata/e1m_modules/E1M-V2{N,M}10{1,2,3}.yaml), but a shared
 # bblayers.conf building a non-RZ MACHINE (AEN, NX91) must not pull a
 # dependency with no provider there.
 ALP_V2N_WIFI_BT_INSTALL = "${@bb.utils.contains('MACHINE_FEATURES', 'v2n', \
-    'cyw-fmac cyw-fmac-firmware murata-2gy-nvram wireless-regdb-static iw \
-     wpa-supplicant wpa-supplicant-cli wpa-supplicant-passphrase bluez5', '', d)}"
+    'cyw-fmac cyw-fmac-firmware wireless-regdb-static iw wpa-supplicant bluez5', '', d)}"
 ALP_V2N_WIFI_BT_INSTALL[vardepvalue] = "${ALP_V2N_WIFI_BT_INSTALL}"
 
 IMAGE_INSTALL += " ${ALP_V2N_WIFI_BT_INSTALL}"
