@@ -183,8 +183,7 @@ static void stage_ota_poll(void)
      *      has no OSPI flash fitted at all (`ospi0`/`ospi1` are both
      *      `assembled: false` in its SoM preset), so `ps_storage`
      *      backs to the same on-die MRAM (`mram_main`) that holds
-     *      slot0, and there is no supported path from an OSPI
-     *      staging write to an in-place slot0 update.
+     *      slot0.
      *
      * On native_sim every step returns NOSUPPORT; the example
      * prints the transitions but doesn't actually move bytes. */

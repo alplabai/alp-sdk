@@ -11,8 +11,9 @@ depth" shape (mirrors `test_orchestrate_storage_write_authority.py`):
 
   - `load_board_yaml()` end to end -- the loader's cross-field check
     (`_known_flash_devices()`) must no longer offer `ospi0` on AEN801,
-    so a board.yaml naming it fails with the loader's own "does not
-    resolve to any flash device" error before the resolver even runs.
+    so a board.yaml naming it fails with the loader's own "which is
+    not assembled on ... (assembled: false in ...)" error before the
+    resolver even runs.
   - `_resolve_flash_device()` called directly -- the defense-in-depth
     guard for a hand-built project that skips the loader's check must
     itself refuse, naming the SKU, the device, and the preset file.
