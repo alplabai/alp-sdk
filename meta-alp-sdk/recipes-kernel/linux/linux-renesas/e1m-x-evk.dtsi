@@ -173,8 +173,6 @@
 		ethernet1 = &eth1;
 		i2c0 = &i2c0;
 		i2c1 = &i2c1;
-		i2c6 = &i2c6;
-		i2c7 = &i2c7;
 		mmc0 = &sdhi0;
 		mmc1 = &sdhi1;
 		serial0 = &scif;
@@ -434,19 +432,10 @@
 	status = "okay";
 };
 
-&i2c6 {
-	pinctrl-0 = <&i2c6_pins>;
-	pinctrl-names = "default";
-	clock-frequency = <400000>;
-	status = "okay";
-};
-
-&i2c7 {
-	pinctrl-0 = <&i2c7_pins>;
-	pinctrl-names = "default";
-	clock-frequency = <400000>;
-	status = "okay";
-};
+/* No &i2c6/&i2c7: P44-P47 are the E1M_X_I2S0 pads (SSIU1_SSI1 SCK/WS/SDATA +
+ * SSIU2_SSI2_SDATA, function 7, renesas-peripheral-map.csv:112-115) wired to the
+ * TAS2563 pair through the carrier's TMUX1574. RZ/V2N has no RIIC6/RIIC7 on those
+ * pins in this SoM's pin map, and nothing on the carrier sits on them. */
 
 &i2c8 {
 	pinctrl-0 = <&i2c8_pins>;
@@ -561,18 +550,6 @@
 	i2c1_pins: i2c1 {
 		pinmux = <RZV2N_PORT_PINMUX(3, 2, 1)>, /* I2C1_SDA */
 			 <RZV2N_PORT_PINMUX(3, 3, 1)>; /* I2C1_SCL */
-		bias-pull-up;
-	};
-
-	i2c6_pins: i2c6 {
-		pinmux = <RZV2N_PORT_PINMUX(4, 4, 1)>, /* I2C6_SDA */
-			 <RZV2N_PORT_PINMUX(4, 5, 1)>; /* I2C6_SCL */
-		bias-pull-up;
-	};
-
-	i2c7_pins: i2c7 {
-		pinmux = <RZV2N_PORT_PINMUX(4, 6, 1)>, /* I2C7_SDA */
-			 <RZV2N_PORT_PINMUX(4, 7, 1)>; /* I2C7_SCL */
 		bias-pull-up;
 	};
 
