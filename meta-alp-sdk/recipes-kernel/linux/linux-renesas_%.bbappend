@@ -226,6 +226,9 @@ SRC_URI:append = " \
 # display.cfg: this is a SoM-level fact, not a carrier one.
 SRC_URI:append = " file://rv3028-rtc.cfg"
 
+# On-module TMP112 temperature sensor, same SoM-level scope as the RTC.
+SRC_URI:append = " file://tmp112-hwmon.cfg"
+
 # Display stack: RK055HDMIPI4MA0 panel on Display 1 (DSI + PWM backlight + GPT
 # + GD32-bridge GPIO for panel reset).
 SRC_URI:append:e1m-v2n101 = " file://display.cfg"

@@ -303,6 +303,15 @@
 		compatible = "microcrystal,rv3028";
 		reg = <0x52>;
 	};
+
+	/* On-module TMP112 (ADD0 strap reads back as 0x40 on the fitted
+	 * X2SON-5 package, not the datasheet table's 0x48 -- 0x48 on this
+	 * bus is a DEEPX TPS628640 rail on V2M SKUs). lm75 hwmon driver.
+	 */
+	tmp112: temperature-sensor@40 {
+		compatible = "ti,tmp112";
+		reg = <0x40>;
+	};
 };
 
 / {
