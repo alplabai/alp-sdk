@@ -331,14 +331,43 @@ indefinitely; host code SHOULD NOT call it.
 
 `mask` selects which GD32 pads the host wants to read or write.  The
 mask is a **logical** index space owned by the GD32 firmware — the
-bit-to-pad mapping is documented in `gd32-bridge-firmware:README.md` and
-mirrored in the host driver header.  The host MUST NOT assume that
+bit-to-pad mapping (bits 0..19) is documented in
+`gd32-bridge-firmware:README.md`; the host header names only bits 18/19
+(below).  The host MUST NOT assume that
 bit `n` corresponds to GD32 pad `Pxn`.
 
 `GPIO_WRITE` is atomic in the firmware: read-modify-write of the
 pad output register is done with interrupts disabled around the
 masked update so a concurrent `GPIO_WRITE` on the other transport
 cannot interleave a partial state.
+
+At protocol minor `>= 11` (firmware `0.2.12`), the pad map grows from
+18 to 20 lines, adding the on-module Murata LBEE5HY2FY-922 (Infineon
+CYW55513) Wi-Fi+BT module's two REG_ON enables:
+
+| Bit | Name       | GD32 pad | Boot state   | Host macro |
+|-----|------------|----------|--------------|------------|
+| 18  | `bt-reg-on` | `PE14`  | OUTPUT LOW   | `GD32G553_GPIO_LINE_BT_REG_ON` |
+| 19  | `wl-reg-on` | `PE15`  | OUTPUT LOW   | `GD32G553_GPIO_LINE_WL_REG_ON` |
+
+Both enables drive their module low-then-high: the host holds
+`GPIO_WRITE` low for >= 10 ms before the rising edge, matching the
+on-module Murata LBEE5HY2FY-922's REG_ON timing requirement.
+
+A bridge below minor 11 never learned these two bits; a host driving
+`GPIO_WRITE` against them on such a bridge silently powers nothing
+while the firmware reports success. The Linux `gpio-gd32-bridge`
+kernel driver resolves this at first *consumer* request rather than
+once at `probe()` (a single best-effort `GET_VERSION` at boot
+consistently races the bridge's own startup) -- see
+`GD32G553_REG_ON_MIN_PROTOCOL_MINOR` in
+[`include/alp/chips/gd32g553.h`](../include/alp/chips/gd32g553.h).
+
+**Any GD32 reset drops both lines low again** (WDT, fault, OTA A/B
+swap, SE reset -- the boot-time OUTPUT LOW default applies on every
+reset), which power-cycles the module. The host must re-assert them
+after a bridge reset, not only at first bring-up; `CMD_RESET_REASON`
+is how it detects one. No host code does that yet (#2297).
 
 ### 3.2 PWM channels
 
@@ -1041,8 +1070,10 @@ image data), the host driver **gates the OTA session on `minor`**: an
 OTA cannot start against a peer below `GD32G553_OTA_MIN_PROTOCOL_MINOR`
 (6). `gd32g553_ota_begin` / `gd32g553_ota_write_chunk` return
 `ALP_ERR_NOSUPPORT` **before any erase or program**, and
-`gd32g553_ota_supported()` lets a host check up front (#751). Other
-opcodes remain governed by the exact-lockstep rule above.
+`gd32g553_ota_supported()` lets a host check up front (#751). The
+REG_ON lines 18/19 of `GPIO_WRITE` are the second minor-gated surface
+(`GD32G553_REG_ON_MIN_PROTOCOL_MINOR`, §3.1). Other opcodes remain
+governed by the exact-lockstep rule above.
 
 Version history (pre-1.0): **v0.7** adds `LINK_FEATURES` (0x81) +
 the negotiated `STATUS_SEQ` reply stamp (§3.14, §4.1.1) and the
@@ -1056,7 +1087,26 @@ the ADC-stream DSP pipeline's already-existing `chain_open` /
 actually filters or spectralizes the stream instead of the chain
 sitting unbound — and adds the new opcode `CMD_ADC_SPECTRUM_READ`
 (`0x3A`, §3.x) to pull the FFT terminal's spectrum; a v0.8 host that
-never binds a chain sees no behaviour change.
+never binds a chain sees no behaviour change.  **v0.10**
+(`gd32-bridge-firmware` PR #121) makes the ADC-stream DSP chain bind
+refuse, up front, a chain the FAC/FFT runtime cannot realise and a
+second FFT bind against the single FFT block; before it, both were
+accepted and failed only at stream time (`STATUS_OK` with zero
+samples forever, or `STATUS_BUSY` forever on both streams).
+**v0.11** (firmware `0.2.12`, `gd32-bridge-firmware` PR #244) grows the GPIO
+expander pad map from 18 to 20 lines, adding `bt-reg-on` (bit 18,
+`PE14`) and `wl-reg-on` (bit 19, `PE15`) for the on-module Murata
+LBEE5HY2FY-922 (Infineon CYW55513) Wi-Fi+BT module's REG_ON enables —
+both boot OUTPUT LOW; the host drives REG_ON low for >= 10 ms then
+high (§3.1). No opcode changed shape; a host below
+`GD32G553_REG_ON_MIN_PROTOCOL_MINOR` (11) simply never learns bits
+18/19 exist. `GET_VERSION`'s SPI reply for `0.11.0` is `A5 00 00 0B 00 C5 C4`
+(`SOF STATUS major minor patch CRClo CRChi`, CRC-16/CCITT-FALSE over
+`SOF..PAYLOAD` per §4.2) -- recompute from the algorithm rather than
+hand-copying, and cross-check any other hand-copied `GET_VERSION`
+vector before relying on it (see `extending-the-gd32-bridge-protocol`'s
+note on inlined wire hex going stale across a `PROTOCOL_VERSION`
+bump).
 
 ## 9. Reference vectors
 

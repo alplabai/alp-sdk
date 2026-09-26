@@ -331,18 +331,29 @@
 };
 
 /* USB 2.0 host (OTG) + USB 3.0.  The carrier's OVC sense wiring is not
- * usable (errata E3).  PB.1 (usb30) is parked as a GPIO input by the hog
- * below, which keeps the xHCI OVC input inactive.  P9.6 (usb20) can no
- * longer be parked the same way: it is SCK7 of the CM33-owned GD32
- * supervisor SPI, and the CM33 is started by BL2 PRE-Linux -- so the old
- * hog actually clobbered the live SCK7 mux at every Linux boot (~1.9 s,
- * PMC9 byte-RMW; same clobber class as SD1_CD below) until the CM33's
- * own pin re-init took the pad back, which is also why usb20 OVC
- * suppression was lost.  The usb20 channel is instead suppressed at the
- * controller: spurious-oc on the EHCI (generic binding, in-tree) and on
- * the OHCI (kernel patch 0003 adds the same property).  OC processing
- * is fully off for usb20 -- correct here because VBUS is hardwired
- * always-on with no per-port switching to protect. */
+ * usable (errata E3).  P9.6 (usb20) can no longer be parked as a GPIO:
+ * it is SCK7 of the CM33-owned GD32 supervisor SPI, and the CM33 is
+ * started by BL2 PRE-Linux -- so the old hog actually clobbered the
+ * live SCK7 mux at every Linux boot (~1.9 s, PMC9 byte-RMW; same
+ * clobber class as SD1_CD below) until the CM33's own pin re-init took
+ * the pad back, which is also why usb20 OVC suppression was lost.  The
+ * usb20 channel is instead suppressed at the controller: spurious-oc on
+ * the EHCI (generic binding, in-tree) and on the OHCI (kernel patch
+ * 0003 adds the same property).  OC processing is fully off for usb20
+ * -- correct here because VBUS is hardwired always-on with no per-port
+ * switching to protect.
+ *
+ * usb30 has no VBUS pinmux and no OVC-disable GPIO hog: PB0 (VBUS,
+ * func14) and PB1 (usb30 OVC) are on-module WLAN_SDIO.CLK and
+ * WLAN_SDIO.D0 (e1m-v2n-som.dtsi's sd2_wlan_pins, &sdhi2) -- on-module
+ * nets that never reach the E1M connector, so this carrier cannot claim
+ * either pin. The old usb30_pins/hog pair was copied from the Renesas
+ * EVK reference dts without checking the ALP module's netlist. usb30 OC
+ * processing is left at its EHCI/xHCI default (not yet suppressed at
+ * the controller); BENCH TODO: verify xHCI reports no spurious
+ * over-current with PB1 now muxed as SD2DAT0 instead of a parked GPIO
+ * input -- if it does, suppress usb30 OC at the controller the same way
+ * usb20 is suppressed above. */
 &ehci0 {
 	memory-region = <&global_cma>;
 	dr_mode = "otg";
@@ -384,8 +395,6 @@
 };
 
 &xhci0 {
-	pinctrl-0 = <&usb30_pins>;
-	pinctrl-names = "default";
 	memory-region = <&global_cma>;
 	status = "okay";
 };
@@ -492,25 +501,11 @@
 	};
 
 	/* No usb20 (USB2.0 VBUS) pinmux: VBUS is always-on (hardwired) on this
-	 * carrier, and P95 is the DEEPX PCIe mux-sel on V2M (kept as GPIO). */
-
-	usb30_pins: usb30 {
-		vbus {
-			pinmux = <RZV2N_PORT_PINMUX(B, 0, 14)>; /* VBUS */
-		};
-	};
-
-	/* usb30 OVC (PB.1) parked as a plain GPIO input so the xHCI OVC
-	 * input reads inactive.  P9.6 (usb20 OVC) is DELIBERATELY absent:
-	 * it is the CM33's SCK7.  Linux must never claim or re-mux the
-	 * CM33's P9.6/P9.7, and every Linux port-9 access is a non-atomic
-	 * PMC9/PM9 byte-RMW that can race the CM33 (the SD1_CD/P94 lesson
-	 * above).  The one deliberate exception is the V2M deepx mux-sel
-	 * hog on P9.5 (e1m-v2m-deepx.dtsi) -- see the race note there. */
-	usb-ovc-disable-hog {
-		gpio-hog;
-		gpios = <RZV2N_GPIO(B, 1) GPIO_ACTIVE_HIGH>;
-		input;
-		line-name = "usb_ovc_disable";
-	};
+	 * carrier, and P95 is the DEEPX PCIe mux-sel on V2M (kept as GPIO).
+	 *
+	 * No usb30 pinmux or OVC-disable hog either: PB0 (VBUS, func14) and
+	 * PB1 (usb30 OVC) are the on-module WLAN_SDIO.CLK and WLAN_SDIO.D0
+	 * nets (see &xhci0's comment above) -- they never reach this
+	 * carrier's E1M connector, so no carrier-level pinctrl group may
+	 * claim them. */
 };

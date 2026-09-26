@@ -71,6 +71,7 @@ SRC_URI:append = " \
     file://0004-drm-panel-add-himax-hx8394-with-rocktech-rk055hdmipi.patch \
     file://0005-gpio-add-gd32-bridge-expander-driver.patch \
     file://0006-input-goodix-fall-back-to-polling-without-an-irq.patch \
+    file://0007-mmc-renesas_sdhi-pm_runtime-guard-the-vqmmc-regulato.patch \
 "
 
 # AMP clock ownership: RSCI7 belongs to the Cortex-M33 system manager
@@ -108,6 +109,16 @@ SRC_URI:append = " \
 # documents it in generic-ohci.yaml.  Both &ehci0 and &ohci0 carry
 # spurious-oc in e1m-x-evk.dtsi.  Cold-boot-verified 2026-06-12 on
 # E1M-V2M101: zero over-current lines.
+
+# 0007 (SDHI vqmmc regulator read while runtime-suspended): the vqmmc
+# regulator this recipe's &sdhi2 WLAN node registers (see e1m-v2n-som.dtsi's
+# sdhi2_vqmmc) reads CTL_SD_STATUS directly in is_enabled()/get_voltage(),
+# with no pm_runtime claim on the SDHI host.  regulator-always-on only
+# short-circuits regulator_late_cleanup()'s OWN call to is_enabled() (its
+# `if (c->always_on) return 0;` early-return); a later sysfs/debugfs
+# regulator read still hits the raw register access and can take a
+# synchronous external abort while the controller is clock-gated.  0007
+# wraps both ops in pm_runtime_resume_and_get()/pm_runtime_put().
 
 # DRP-AI3 NPU overlay -- CONDITIONAL on the OPTIONAL meta-rz-drpai layer.
 #
@@ -225,6 +236,15 @@ SRC_URI:append = " \
 # Unconditional like the two trims above, not per-machine like
 # display.cfg: this is a SoM-level fact, not a carrier one.
 SRC_URI:append = " file://rv3028-rtc.cfg"
+
+# On-module Murata LBEE5HY2FY-922 (Infineon CYW55513) Wi-Fi + BT -- all
+# six V2N-family SKUs carry the same module (see wifi_ble: in each
+# metadata/e1m_modules/E1M-V2{N,M}10{1,2,3}.yaml). Unconditional like
+# rv3028-rtc.cfg above: a SoM-level fact, not a per-machine one. See
+# e1m-v2n-som.dtsi for the &sdhi2 WLAN node + &sci4 BT node, and
+# meta-alp-sdk/recipes-kernel/cyw-fmac{,-firmware}/ for the out-of-tree
+# driver + blobs this fragment's CFG80211=m / BRCMFMAC=n pairs with.
+SRC_URI:append = " file://wifi-bt.cfg"
 
 # Display stack: RK055HDMIPI4MA0 panel on Display 1 (DSI + PWM backlight + GPT
 # + GD32-bridge GPIO for panel reset).

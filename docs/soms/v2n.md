@@ -136,6 +136,63 @@ ADC cross-check).
 Full procedure: [`docs/board-id.md`](../board-id.md).
 Example: [`examples/v2n/v2n-board-id-readout/`](../../examples/v2n/v2n-board-id-readout/).
 
+## Wi-Fi + Bluetooth (Linux)
+
+Every V2N/V2M SKU carries the same on-module Murata LBEE5HY2FY-922
+(Infineon CYW55513), Wi-Fi 6/6E 1x1 HE20 tri-band + BT 5.4, on SDHI2
+(4-bit SDIO) + RSCI4 (BT UART). Both REG_ON enables are GD32 bridge
+GPIO lines -- **not** SoC pins -- and only exist on bridge firmware
+>= 0.2.12 / protocol minor 11 (`GD32G553_REG_ON_MIN_PROTOCOL_MINOR`, see
+[`include/alp/chips/gd32g553.h`](../../include/alp/chips/gd32g553.h)):
+
+| Signal    | GD32 pad | Bridge GPIO line |
+|-----------|----------|-------------------|
+| WL_REG_ON | PE15     | 19                 |
+| BT_REG_ON | PE14     | 18                 |
+
+The **Linux** side lives entirely in `meta-alp-sdk` (the Zephyr/M33
+side has no Wi-Fi role):
+
+* `meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi` --
+  `&sdhi2` (WLAN, `mmc-pwrseq-simple` on line 19), `&sci4` (BT,
+  `brcm,bcm43438-bt` `shutdown-gpios` on line 18), the `sd2_wlan_pins` /
+  `sci4_bt_pins` pinctrl groups.
+* `meta-alp-sdk/recipes-kernel/linux/linux-renesas/wifi-bt.cfg` --
+  `CONFIG_CFG80211=m` + in-tree `CONFIG_BRCMFMAC` off (no CYW55513 ID
+  in the 6.1.x in-tree driver) + Bluetooth HCI UART/Broadcom config.
+* `meta-alp-sdk/recipes-kernel/cyw-fmac/` -- the out-of-tree Murata
+  `cyw-fmac` backports kmod (`compat`/`cfg80211`/`brcmutil`/`brcmfmac`,
+  installed under `updates/` so depmod prefers it over any in-tree
+  module).
+* `meta-alp-sdk/recipes-kernel/cyw-fmac-firmware/` -- the five
+  firmware blobs (WLAN `.trxse`, CLM, NVRAM, two regional BT `.hcd`
+  patches) from four upstream `murata-wireless` / `Infineon` repos,
+  pinned by `SRCREV`.
+* `wireless-regdb`, `iw`, `wpa-supplicant`, `bluez5` -- standard
+  OE-core/meta-networking recipes, pulled in by
+  `alp-image-common.inc` for any V2N/V2M `MACHINE_FEATURES`.
+
+**Bench TODO:** the E1M-X-EVK carrier dtsi (`e1m-x-evk.dtsi`) no longer
+parks PB0/PB1 as usb30 VBUS/OVC GPIOs -- those SoC pins are the
+on-module WLAN group's `SD2CLK`/`SD2DAT0`, never routed to the E1M
+connector (the old `usb30_pins`/`usb-ovc-disable-hog` pair was copied
+from the Renesas EVK reference dts without checking the ALP module's
+netlist). usb30 OC processing is left at its controller default;
+verify on the bench that xHCI reports no spurious over-current with
+PB1 now muxed as `SD2DAT0` -- if it does, suppress usb30 OC at the
+controller the same way usb20 is suppressed (see `&ehci0`'s comment in
+`e1m-x-evk.dtsi`).
+
+**Bench history**: the 2026-06 WLAN bring-up on this exact node shape
+chased pull-ups, JTAG_SEL, IOVS pad-voltage mode, and the SDIO/gSPI
+boot strap before converging on the on-module 32.768 kHz LPO (sourced
+from the on-module 5L35023B clock generator) as the real blocker --
+tracked separately in #2293, not part of this change. SDIO enumeration
+has not been re-run against this node shape.
+BT (raw HCI, manual REG_ON) was bench-confirmed working at 115200 baud
+on `/dev/ttySC4` in 2026-06; the serdev/`shutdown-gpios` path above
+replaces that manual toggle and has not itself been re-run on silicon.
+
 ## Bring-up
 
 Step-by-step bench bring-up: [`docs/bring-up-v2n.md`](../bring-up-v2n.md).

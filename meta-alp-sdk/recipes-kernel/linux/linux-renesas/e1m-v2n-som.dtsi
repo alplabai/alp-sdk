@@ -320,6 +320,38 @@
 		 * RTC_HCTOSYS and every alias above that assumes rv3028 = rtc0.
 		 * Pin &rtc to rtc1 explicitly so rv3028 keeps rtc0. */
 		rtc1 = &rtc;
+		/* RSCI4 carries the on-module Bluetooth UART (&sci4 below). The
+		 * rz-rsci driver takes its tty index from this alias; without it
+		 * the port registers as ttySC0 -- colliding with the SCIF debug
+		 * console (serial0, e1m-x-evk.dtsi) -- and matches
+		 * console=ttySC0, so the kernel console and the serial getty
+		 * move onto the BT UART (bench, E1M-V2M103, 2026-09-26). */
+		serial4 = &sci4;
+	};
+
+	/* On-module Wi-Fi power sequencing for the Murata LBEE5HY2FY-922
+	 * (Infineon CYW55513): WL_REG_ON is GD32 bridge line 19 (PE15,
+	 * boots OUTPUT LOW at bridge firmware >= 0.2.12 / protocol minor
+	 * 11 -- see gpio-gd32-bridge.c). mmc-pwrseq-simple's reset-gpios
+	 * is asserted (driven to its ACTIVE level) in .pre_power_on and
+	 * deasserted in .post_power_on, so ACTIVE_LOW here reproduces the
+	 * required sequence: REG_ON low through card power-up, then high.
+	 * mmc_power_up() holds REG_ON low for host->ios.power_delay_ms
+	 * between .pre_power_on and .post_power_on -- that MMC-core delay
+	 * is the >=10 ms REG_ON-low hold the bring-up notes call for, not
+	 * anything set here. post-power-on-delay-ms instead runs AFTER
+	 * .post_power_on drives REG_ON high (pwrseq_simple.c:
+	 * mmc_pwrseq_simple_post_power_on() deasserts, then sleeps this
+	 * many ms) -- a settle time for the module post-power-up, before
+	 * the first CMD5. Bench-tuned on E1M-V2M103 (2026-09-26): at 10 ms
+	 * a WL_REG_ON power cycle (SDHI2 unbind/bind) re-enumerated only
+	 * 11/15 times -- the failing rounds never answer CMD5 -- while cold
+	 * boot always worked; at 200 ms it re-enumerated 15/15 (brcmfmac
+	 * firmware reloaded each time). */
+	wlan_pwrseq: wlan-pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		reset-gpios = <&gd32_gpio 19 GPIO_ACTIVE_LOW>;
+		post-power-on-delay-ms = <200>;
 	};
 };
 
@@ -348,6 +380,120 @@
 
 &rtc {
 	status = "okay";
+};
+
+/* On-module Wi-Fi: Murata LBEE5HY2FY-922 (Infineon CYW55513) on SDHI2,
+ * 4-bit SDIO, non-removable (it is a soldered-down module, not a card
+ * slot). Ground truth (bench-derived 2026-06): PB0=CLK, PB1-PB4=DAT0-3,
+ * PB5=CMD (RZ/V2N datasheet Table 2.2-2, Func1 -- the ONLY SD2 routing).
+ *
+ * IOVS (SD_STATUS pad-voltage-mode bit) MUST be set for a 1.8 V-only
+ * part like this one: the SoC SDHI2 pads reset into 3.3 V receiver
+ * mode, which cannot read the module's 1.8 V SDIO responses at all
+ * (CMDTIMEOUT on every CMD5). IOVS is set ONLY when the SDHI's own
+ * internal vqmmc-regulator child (sdhi2_vqmmc, from the SoC dtsi) is
+ * enabled -- but enabling it NAIVELY re-triggers a real bench-observed
+ * boot oops: regulator_late_cleanup -> renesas_sdhi_regulator_
+ * is_enabled -> a raw SD_STATUS register read while the controller is
+ * runtime-suspended takes a synchronous external abort, which killed
+ * the console-input IRQ and put the eMMC rootfs at risk on the exact
+ * board this was found on. `regulator-always-on` is the proven-safe
+ * fix: it makes regulator_late_cleanup's own early-return trigger
+ * (`if (c->always_on) return 0;`) fire BEFORE the crashing read. Do
+ * NOT drop regulator-always-on from sdhi2_vqmmc below. A second,
+ * independent guard against the same class of read-while-suspended
+ * crash (a manual sysfs/debugfs regulator read, which always_on does
+ * NOT cover) lives in
+ * meta-alp-sdk/recipes-kernel/linux/linux-renesas/
+ * 0007-mmc-renesas_sdhi-pm_runtime-guard-the-vqmmc-regulato.patch.
+ *
+ * mmc-pwrseq drives WL_REG_ON (GD32 bridge line 19) through the
+ * required low-then-high sequence (wlan_pwrseq, above). The `wifi@1`
+ * child node is the standard brcmfmac SDIO binding; brcmfmac itself
+ * matches on the SDIO vendor/device ID the module reports, this node
+ * only gives it a DT anchor for future properties (e.g. a host-wake
+ * IRQ, not yet routed on this SoM).
+ *
+ * STATUS: UNVALIDATED on real silicon through this exact node shape --
+ * the WLAN blocker chased through 2026-06 bench sessions turned out to
+ * be the module's 32.768 kHz LPO (from the on-module 5L35023B clock
+ * generator), not anything IOVS/pinctrl/strap-side; see #2293 for that
+ * fix (owned there, NOT touched here). This node assumes that fix
+ * lands; SDIO enumeration itself has not been re-run against it.
+ */
+&sdhi2 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	pinctrl-0 = <&sd2_wlan_pins>;
+	pinctrl-1 = <&sd2_wlan_pins>;
+	pinctrl-names = "default", "state_uhs";
+	/* The module's VBAT is the SoM's always-on 3.3 V rail. vmmc-supply
+	 * is required even so: without it tmio_mmc_init_ocr() finds no OCR
+	 * mask (no regulator, and the RZ SDHI of_data carries no ocr_mask)
+	 * and returns -EPROBE_DEFER forever -- the host never probes and
+	 * dmesg only repeats "allocated mmc-pwrseq" (bench, E1M-V2M103,
+	 * 2026-09-26). */
+	vmmc-supply = <&reg_3p3v>;
+	vqmmc-supply = <&sdhi2_vqmmc>;
+	mmc-pwrseq = <&wlan_pwrseq>;
+	bus-width = <4>;
+	non-removable;
+	cap-power-off-card;
+	keep-power-in-suspend;
+	status = "okay";
+
+	sdhi2_vqmmc: vqmmc-regulator {
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-always-on;
+		status = "okay";
+	};
+
+	wifi@1 {
+		compatible = "brcm,bcm4329-fmac";
+		reg = <1>;
+	};
+};
+
+/* On-module Bluetooth: the same CYW55513's BT core, on RSCI4 (UART),
+ * P40-P43 -- BT_REG_ON is GD32 bridge line 18 (PE14), driven by hci_bcm
+ * through shutdown-gpios before the .hcd patch load. uart-has-rtscts
+ * matches the 4-wire P40-43 wiring (TXD/RXD/CTS/RTS); the module will not
+ * transmit unless the host's RTS is asserted.
+ *
+ * compatible = "infineon,cyw55572-bt" with brcm,requires-autobaud-mode is
+ * the CYW555xx path in hci_bcm/btbcm, and the only one that brings this
+ * module up. Bench, E1M-V2M103, 2026-09-26, each step reproduced on the
+ * raw ttySC4 as well as through serdev:
+ *  - With max-speed set, bcm_open() copies it into hu->oper_speed and
+ *    hci_serdev sends the vendor Update-Baud-Rate command (0xfc18) as the
+ *    first byte on the link. The pre-patch ROM wedges on that: 0xfc18
+ *    and every later command, HCI_Reset included, time out. It also
+ *    ignores 0xfc18 after a Reset, so there is no max-speed and no ramp:
+ *    the link stays at the 115200 init speed.
+ *  - The ROM also does not answer the vendor Read Controller Features
+ *    (0xfc6e), which btbcm_initialize() treats as fatal on the non-
+ *    autobaud path. Autobaud mode skips that and Read Local Name.
+ * Result: chip id 157, 'brcm/BCM.hcd' patch loaded, hci0 UP+RUNNING
+ * (the patch is the Murata 2FY .hcd, installed as BCM.hcd).
+ *
+ * PFC funcs per the e2 studio PinMux tool (authoritative over the
+ * EVK reference dts, which does not populate RSCI4 at all): P40=f2
+ * (TXD4), P41=f2 (RXD4), P42=f4 (CTS4), P43=f2 (RTS4) -- note CTS4 is
+ * NOT the same function number as the other three; do not "correct"
+ * it to f2, that was checked against pin_data.c directly.
+ */
+&sci4 {
+	pinctrl-0 = <&sci4_bt_pins>;
+	pinctrl-names = "default";
+	uart-has-rtscts;
+	status = "okay";
+
+	bluetooth {
+		compatible = "infineon,cyw55572-bt";
+		shutdown-gpios = <&gd32_gpio 18 GPIO_ACTIVE_HIGH>;
+		brcm,requires-autobaud-mode;
+	};
 };
 
 /* On-module xSPI NOR. */
@@ -515,5 +661,42 @@
 
 	backlight_pwm_pins: backlight-pwm {
 		pinmux = <RZV2N_PORT_PINMUX(A, 5, 9)>; /* PA5 func 9 = GTIOC10B -> on-SoM backlight boost CNTRL */
+	};
+
+	/* On-module Wi-Fi SDIO (SDHI2), func1 -- see &sdhi2 above for the
+	 * full ground-truth writeup. Split CLK vs CMD/DAT exactly like
+	 * sdhi0_emmc_pins above: PB0 (SD2CLK) has NO PIN_CFG_IEN capability
+	 * in the pinctrl-rzg2l RZV2H_PB table (a group-wide input-enable
+	 * spanning it fails pinctrl_ops.set_mux with -EINVAL, taking the
+	 * WHOLE group down, clk included) while PB1-PB5 (SD2DAT0-3, SD2CMD)
+	 * all have it and need it enabled for the host to sample the
+	 * module's responses at all. */
+	sd2_wlan_pins: sd2-wlan {
+		sd2-clk {
+			pinmux = <RZV2N_PORT_PINMUX(B, 0, 1)>; /* PB0 = SD2CLK */
+			renesas,output-impedance = <2>;
+			slew-rate = <0>;
+		};
+
+		sd2-cmd-dat {
+			pinmux = <RZV2N_PORT_PINMUX(B, 1, 1)>, /* PB1 = SD2DAT0 */
+				 <RZV2N_PORT_PINMUX(B, 2, 1)>, /* PB2 = SD2DAT1 */
+				 <RZV2N_PORT_PINMUX(B, 3, 1)>, /* PB3 = SD2DAT2 (SDIO/gSPI boot strap) */
+				 <RZV2N_PORT_PINMUX(B, 4, 1)>, /* PB4 = SD2DAT3 */
+				 <RZV2N_PORT_PINMUX(B, 5, 1)>; /* PB5 = SD2CMD */
+			input-enable;
+			renesas,output-impedance = <2>;
+			slew-rate = <0>;
+		};
+	};
+
+	/* On-module Bluetooth UART (RSCI4), P40-P43. Func numbers per the
+	 * e2 studio PinMux tool (pin_data.c) -- NOT uniform (CTS4 is f4,
+	 * the other three are f2); see the &sci4 comment above. */
+	sci4_bt_pins: sci4-bt {
+		pinmux = <RZV2N_PORT_PINMUX(4, 0, 2)>, /* P40 = TXD4 */
+			 <RZV2N_PORT_PINMUX(4, 1, 2)>, /* P41 = RXD4 */
+			 <RZV2N_PORT_PINMUX(4, 2, 4)>, /* P42 = CTS4 */
+			 <RZV2N_PORT_PINMUX(4, 3, 2)>; /* P43 = RTS4 */
 	};
 };

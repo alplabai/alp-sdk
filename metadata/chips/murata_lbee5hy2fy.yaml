@@ -23,9 +23,9 @@ bus:              gpio              # plus SDIO / UART / I2S not handled here
 
 side_channel_lines:
   - { name: BT_REG_ON,    direction: output, role: "BT subsystem regulator enable",
-      v2n_route: "GD32 PE14 -- host reaches via gd32g553_gpio_write" }
+      v2n_route: "GD32 PE14, bridge GPIO expander line 18 (GD32G553_GPIO_LINE_BT_REG_ON) -- host reaches via gd32g553_gpio_write; requires bridge protocol minor >= 11 (GD32G553_REG_ON_MIN_PROTOCOL_MINOR)" }
   - { name: WL_REG_ON,    direction: output, role: "Wi-Fi subsystem regulator enable",
-      v2n_route: "GD32 PE15 -- host reaches via gd32g553_gpio_write" }
+      v2n_route: "GD32 PE15, bridge GPIO expander line 19 (GD32G553_GPIO_LINE_WL_REG_ON) -- host reaches via gd32g553_gpio_write; requires bridge protocol minor >= 11 (GD32G553_REG_ON_MIN_PROTOCOL_MINOR)" }
   - { name: BT_HOST_WAKE, direction: input,  role: "module wakes host on BT activity",
       v2n_route: "Renesas P05" }
   - { name: WL_HOST_WAKE, direction: input,  role: "module wakes host on Wi-Fi activity",
