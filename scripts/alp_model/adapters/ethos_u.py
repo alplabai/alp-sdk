@@ -22,15 +22,20 @@ its own DRAM-backed built-in profile (`Ethos_U85_SYS_DRAM_Mid` /
 `sram_memory_used = 0.0` on a part that has no DRAM at all -- and that zero
 then satisfies alp-sdk's on-device fit gate
 (`src/backends/inference/alp_model_select.c`) against ANY arena. compile()
-therefore passes `--memory-mode` from @target's `vela_memory_mode` (the SoC
-spec's own `npu_toolchain.vela.memory_mode`, resolved once by
+therefore REFUSES to run without a memory mode at all (`@target` is None or
+carries no `vela_memory_mode`) -- guessing a profile compiles a command
+stream for memory the module may not have, and a customer's `.alpmodel`
+build must fail loudly rather than ship a defaulted footprint. `--memory-mode`
+comes from @target's `vela_memory_mode` (the SoC spec's own
+`npu_toolchain.vela.memory_mode`, resolved once by
 `alp_project_loader.resolve_targets` and threaded here -- never re-read from
-metadata/ inside this adapter). `--system-config` is passed only when @target
-names one AND a vendor vela `.ini` is actually available
-(`ALP_VELA_CONFIG`): naming a vendor-only System_Config section with no
-`--config` is a hard vela rc=1 ("Section System_Config.<name> not found in
-Vela config file"), so an unresolvable name is simply withheld rather than
-guessed at.
+metadata/ inside this adapter). `--system-config` is split by
+`vela_system_config` (an Arm built-in, safe to pass alone) vs
+`vela_vendor_system_config` (vendor-gated, passed only alongside `--config`
+when a vendor vela `.ini` is actually available via `ALP_VELA_CONFIG`):
+naming a vendor-only System_Config section with no `--config` is a hard vela
+rc=1 ("Section System_Config.<name> not found in Vela config file"), so an
+unresolvable vendor name is simply withheld rather than guessed at.
 
 A clean vela exit is never trusted to mean the reported footprint is honest:
 a compile that placed operators on the NPU but reports zero SRAM anywhere is
@@ -64,8 +69,15 @@ _VELA_CONFIG_ENV = "ALP_VELA_CONFIG"
 # stdout) emits exactly one "CPU operators =" and one "NPU operators =" line
 # per run, e.g. "NPU operators = 6 (40.0%)" -- present whether or not any
 # operator actually landed on the NPU (a full CPU fallback prints "NPU
-# operators = 0 (0.0%)" and still exits 0).
-_PLACEMENT_RE = re.compile(r"^NPU operators = (\d+)", re.MULTILINE)
+# operators = 0 (0.0%)" and still exits 0). Both kinds are read (not NPU
+# alone) so a caller can tell "this run reported 0 NPU ops" apart from "this
+# run's placement lines could not be found at all" using the same regex.
+_PLACEMENT_RE = re.compile(r"^(CPU|NPU) operators = (\d+)", re.MULTILINE)
+
+# A directory component built from an accel_config that comes out of SoM
+# metadata; anything outside this set is folded to "_" so a malformed
+# accel_config can never walk a compile's output directory out of @out_dir.
+_UNSAFE_DIR_CHARS = re.compile(r"[^A-Za-z0-9._-]")
 
 
 def _vela_version() -> str:
@@ -89,22 +101,36 @@ def _vendor_config_path() -> Path | None:
     return path if path.is_file() else None
 
 
-def _profile_flags(target: TargetSpec | None) -> list[str]:
+def _run_dir(out_dir: Path, accel_config: str) -> Path:
+    """A per-accel-config subdirectory of @out_dir for one vela run.
+
+    `build_model` (scripts/alp_model/build.py) reuses one `out_dir` across
+    every target a SoM declares, so a shared directory means one compile's
+    summary CSV can silently answer for another's -- a u55 target's summary
+    left in @out_dir got read back as a u85 target's footprint (issue #2312
+    review). One subdirectory per accel_config makes that impossible: each
+    run's `_parse_vela_summary` glob can only ever see its own output."""
+    return out_dir / f"vela-{_UNSAFE_DIR_CHARS.sub('_', accel_config)}"
+
+
+def _profile_flags(target: TargetSpec) -> list[str]:
     """The `--memory-mode`/`--config`/`--system-config` flags for @target's
-    silicon, or [] when @target carries no ethos_u vela profile (a target
-    hand-built without one -- e.g. an old-style test -- gets the flagless
-    invocation, byte for byte, same as before this profile existed)."""
-    if target is None or not target.vela_memory_mode:
-        return []
+    silicon. @target.vela_memory_mode is required by the caller before this
+    is reached -- see compile()."""
     flags = ["--memory-mode", target.vela_memory_mode]
     if target.vela_system_config:
+        # A built-in Arm System_Config: safe to pass alone, no vendor file
+        # needed (see TargetSpec's split-field docstring).
+        flags += ["--system-config", target.vela_system_config]
+    elif target.vela_vendor_system_config:
         vendor_config = _vendor_config_path()
         if vendor_config is not None:
-            flags += ["--config", str(vendor_config), "--system-config", target.vela_system_config]
-        # else: a named system_config with no vendor .ini on hand is withheld,
-        # never guessed at -- vela's own built-in system config is used
-        # instead, and the memory mode above still fixes the placement that
-        # matters (see the module docstring).
+            flags += ["--config", str(vendor_config),
+                     "--system-config", target.vela_vendor_system_config]
+        # else: a vendor-gated system_config with no vendor .ini on hand is
+        # withheld, never guessed at -- vela's own built-in system config is
+        # used instead, and the memory mode above still fixes the placement
+        # that matters (see the module docstring).
     return flags
 
 
@@ -119,10 +145,18 @@ def _parse_vela_summary(out_dir: Path, stem: str) -> tuple[int, int]:
     on_chip_flash_memory_used (the const/weights region) is deliberately never
     read here -- it is carried in the model blob, sized by blob_len.
 
-    Returns (0, 0) when the summary is missing or unparseable, or when vela
-    reported no SRAM at all (a full CPU fallback)."""
+    Returns (0, 0) when the summary is missing, unparseable, or AMBIGUOUS
+    (more than one `*_summary_*.csv` in @out_dir) -- picking
+    `sorted(matches)[0]` out of several is only ever right by accident of
+    sort order, and a footprint attributed to the wrong compile is worse than
+    no footprint at all. compile() calls this against a per-accel-config
+    subdirectory (`_run_dir`) precisely so ambiguity should never occur in
+    production; a caller that still hits it composes with
+    `_refuse_zero_sram_footprint` exactly as an unreadable placement line
+    does, and (0, 0) is also the correct, legitimate reading for a full CPU
+    fallback."""
     matches = sorted(out_dir.glob(f"{stem}_summary_*.csv"))
-    if not matches:
+    if len(matches) != 1:
         return 0, 0
     with open(matches[0], newline="", encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))
@@ -148,14 +182,16 @@ def _parse_vela_summary(out_dir: Path, stem: str) -> tuple[int, int]:
 def _parse_vela_placement(stdout: str) -> int | None:
     """The NPU operator count vela's own stdout reports for this run, or None
     when the line is absent (an unexpected vela output shape -- never
-    guessed at; the caller treats None as "can't judge, don't refuse")."""
-    m = _PLACEMENT_RE.search(stdout)
-    return int(m.group(1)) if m else None
+    guessed at; the caller treats None the same as a nonzero count: "can't
+    confirm this zero is a full CPU fallback, refuse it")."""
+    found = {kind: int(n) for kind, n in _PLACEMENT_RE.findall(stdout)}
+    return found.get("NPU")
 
 
-def _refuse_zero_sram_footprint(*, accel_config: str, npu_ops: int) -> None:
-    """A successful compile that placed operators on the NPU but reports no
-    SRAM working set is a refusal, not a zero.
+def _refuse_zero_sram_footprint(*, accel_config: str, npu_ops: int | None) -> None:
+    """A successful compile that reports no SRAM working set is a refusal,
+    not a zero -- UNLESS it is a confirmed full CPU fallback (vela's own
+    stdout named exactly 0 NPU operators placed).
 
     `req_sram_kib == 0` does not read as "this model needs no arena" on the
     device side: alp-sdk's selector reads it as *fits any envelope*
@@ -164,16 +200,24 @@ def _refuse_zero_sram_footprint(*, accel_config: str, npu_ops: int) -> None:
     zero. Measured, real `ethos-u-vela`: a model that places operators on the
     NPU under vela's DRAM-backed built-in default reports its working set in
     `dram_memory_used` instead of `sram_memory_used` -- the footprint is
-    real, just not expressed in a memory area this module has. Raised only
-    when vela actually placed operators on the NPU (@npu_ops > 0); a full CPU
-    fallback legitimately reports zero SRAM and is not refused."""
+    real, just not expressed in a memory area this module has.
+
+    Fails CLOSED on an unreadable placement line too (@npu_ops is None): an
+    unexpected vela output shape means this module cannot tell a full CPU
+    fallback apart from a defaulted DRAM profile, and shipping the zero on a
+    guess is exactly the bug this refusal exists to prevent."""
+    if npu_ops is None:
+        placed = ("vela's own NPU-operator-placement line could not be read "
+                  "from its stdout, so this zero cannot be confirmed as a "
+                  "full CPU fallback")
+    else:
+        placed = f"placed {npu_ops} operator(s) on the NPU"
     raise RuntimeError(
-        f"vela compiled cleanly for {accel_config} and placed {npu_ops} "
-        "operator(s) on the NPU, but reported zero SRAM working set in any "
-        "memory area. This is a defaulted/mismatched vela memory profile, "
-        "not a model with no arena requirement -- alp-sdk's on-device fit "
-        "gate reads req_sram_kib == 0 as fitting any envelope. Declare "
-        "npu_toolchain.vela.memory_mode for this SoC "
+        f"vela compiled cleanly for {accel_config} and {placed}, but "
+        "reported zero SRAM. This is a defaulted/mismatched vela memory "
+        "profile, not a model with no arena requirement -- alp-sdk's "
+        "on-device fit gate reads req_sram_kib == 0 as fitting any "
+        "envelope. Declare npu_toolchain.vela.memory_mode for this SoC "
         "(metadata/schemas/soc-spec-v1.schema.json) so vela is invoked "
         "with the memory model this part actually has.")
 
@@ -189,9 +233,19 @@ class VelaAdapter(CompilerAdapter):
 
     def compile(self, source: Path, *, accel_config: str, out_dir: Path,
                 opts: dict | None = None, target: TargetSpec | None = None) -> Blob:
-        out_dir.mkdir(parents=True, exist_ok=True)
+        if target is None or not target.vela_memory_mode:
+            # Never run vela flagless: it silently falls back to its own
+            # DRAM-backed built-in profile and reports a working set on
+            # memory this part may not have (see the module docstring).
+            raise RuntimeError(
+                f"no vela memory profile for {accel_config}: TargetSpec.vela_memory_mode "
+                "is unset. Declare npu_toolchain.vela.memory_mode for this SoC "
+                "(metadata/schemas/soc-spec-v1.schema.json) rather than compile "
+                "against vela's own DRAM-backed default.")
+        run_dir = _run_dir(out_dir, accel_config)
+        run_dir.mkdir(parents=True, exist_ok=True)
         cmd = (["vela", str(source), "--accelerator-config", accel_config,
-                "--output-dir", str(out_dir)] + _profile_flags(target))
+                "--output-dir", str(run_dir)] + _profile_flags(target))
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
                                   env={**os.environ, "PYTHONIOENCODING": "utf-8"}, timeout=_VELA_TIMEOUT_S)
@@ -199,13 +253,13 @@ class VelaAdapter(CompilerAdapter):
             raise RuntimeError(f"vela timed out after {exc.timeout}s for {accel_config}") from exc
         if proc.returncode != 0:
             raise RuntimeError(f"vela failed for {accel_config}: {proc.stderr.strip()}")
-        produced = out_dir / f"{source.stem}_vela.tflite"
+        produced = run_dir / f"{source.stem}_vela.tflite"
         if not produced.is_file():
             raise RuntimeError(f"vela produced no output at {produced}")
-        arena, sram_kib = _parse_vela_summary(out_dir, source.stem)
+        arena, sram_kib = _parse_vela_summary(run_dir, source.stem)
         if sram_kib == 0:
             npu_ops = _parse_vela_placement(proc.stdout)
-            if npu_ops:
+            if npu_ops != 0:
                 _refuse_zero_sram_footprint(accel_config=accel_config, npu_ops=npu_ops)
         return Blob(format="vela_tflite", payload=produced.read_bytes(),
                     arena_bytes=arena, compiler_version=_vela_version(),

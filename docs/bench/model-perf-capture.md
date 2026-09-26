@@ -40,6 +40,14 @@ const-region question, is now settled — see below, not a blocker.)
    capture whichever profile is in use once this is resolved, and
    record it verbatim in `vela.system_config` / `vela.memory_mode`.
 
+   A vendor-tuned `System_Config` (e.g. Alif's `ensemble_vela.ini`,
+   named per SoC by `npu_toolchain.vela.vendor_config_filename`) is
+   proprietary and alp-sdk does not redistribute it. A capture run
+   on one points `scripts/alp_model/build.py`'s `.alpmodel` pipeline
+   at it via the `ALP_VELA_CONFIG` environment variable -- never a
+   `board.yaml` field, since where the file lives on a bench host is
+   not a fact about the silicon.
+
 **The const-region question (settled, tan-cli#1011).**
 `perf.req_sram_kib` is **arena-only, by design** — vela's
 `sram_memory_used` column, the same accounting as the `.alpmodel`

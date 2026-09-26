@@ -39,9 +39,39 @@ def test_resolve_targets_threads_the_soc_specs_vela_profile_onto_ethos_u_targets
     eu = next(s for s in specs if s.backend == "ethos_u")
     assert eu.vela_memory_mode == "Sram_Only"
     assert eu.vela_vendor_config_filename == "ensemble_vela.ini"
+    # E7 (like every Alif Ensemble part) names NO system_config at all, so
+    # both split fields resolve to None -- correct today, and the fields
+    # exist for the SoC spec that eventually does name one.
+    assert eu.vela_system_config is None and eu.vela_vendor_system_config is None
     # A non-ethos_u target carries no vela profile at all.
     cpu = next(s for s in specs if s.backend == "cpu")
     assert cpu.vela_memory_mode == "" and cpu.vela_system_config is None
+
+
+def test_resolve_targets_splits_a_named_system_config_by_requires_vendor_config():
+    # #2312 item 4: `system_config_requires_vendor_config` decides which of
+    # the two split fields a NAMED `system_config` lands in -- a built-in one
+    # (false) is safe to pass alone; a vendor-gated one (anything else,
+    # fail-closed) is withheld into `vela_vendor_system_config` instead.
+    from alp_project_loader import _soc_targets
+
+    builtin_soc = {"npus": [{"type": "ethos-u55", "mac_per_cycle": 256}],
+                  "npu_toolchain": {"vela": {
+                      "memory_mode": "Sram_Only",
+                      "system_config": "Some_Builtin",
+                      "system_config_requires_vendor_config": False}}}
+    specs = _soc_targets(builtin_soc, "test:soc")
+    assert specs[0].vela_system_config == "Some_Builtin"
+    assert specs[0].vela_vendor_system_config is None
+
+    vendor_soc = {"npus": [{"type": "ethos-u55", "mac_per_cycle": 256}],
+                 "npu_toolchain": {"vela": {
+                     "memory_mode": "Sram_Only",
+                     "system_config": "Some_Vendor_Config",
+                     "system_config_requires_vendor_config": True}}}
+    specs = _soc_targets(vendor_soc, "test:soc")
+    assert specs[0].vela_vendor_system_config == "Some_Vendor_Config"
+    assert specs[0].vela_system_config is None
 
 
 def test_resolve_targets_for_v2n101_yields_drpai_plus_cpu():

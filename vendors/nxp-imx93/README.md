@@ -138,6 +138,17 @@ embedded in the Vela output is variant-specific.  Mismatch surfaces
 as a runtime ALP_ERR_IO from `alp_inference_invoke` once the v0.4
 i.MX 93 bring-up wires the NPU.
 
+**A vendor-tuned profile, if you have one (`ALP_VELA_CONFIG`).** The command
+above passes only Arm's own built-in `--memory-mode`; it never passes
+`--config`/`--system-config` because `imx93.json` names no vendor
+`System_Config` (see the DRAM-capacity note below). A licensed customer with
+their own vendor vela `.ini` -- which alp-sdk does not redistribute -- points
+`scripts/alp_model/build.py`'s `.alpmodel` pipeline at it via the
+`ALP_VELA_CONFIG` environment variable (a path, never a `board.yaml` field:
+where the file lives is a fact about this host, not this SoC). Unset, empty,
+or naming a file that does not exist all mean the same thing: no vendor
+config, and vela's own built-in system config is used.
+
 **E1M-NX9101 DRAM capacity -- TBD, deliberately (issue #2312 item 2).**
 `metadata/e1m_modules/E1M-NX9101.yaml`'s `memory.dram_mbit` stays `TBD`
 pending the authoritative hardware config (the maintainer's own
