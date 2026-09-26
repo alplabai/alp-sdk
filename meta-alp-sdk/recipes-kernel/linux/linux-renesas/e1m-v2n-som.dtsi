@@ -454,36 +454,32 @@
 };
 
 /* On-module Bluetooth: the same CYW55513's BT core, on RSCI4 (UART),
- * P40-P43 -- BT_REG_ON is GD32 bridge line 18 (PE14). shutdown-gpios
- * on the `bluetooth` child node is the standard brcm,bcm43438-bt
- * binding: hci_uart's Broadcom vendor extension drives it through the
- * same low-then-high sequence as WL_REG_ON before the .hcd firmware
- * patch load. No baud-rate ramp: max-speed below is fixed, not
- * autobaud (brcm,requires-autobaud-mode is not set), so hci_uart runs
- * the link at a constant 115200 throughout -- bench-confirmed 2026-06.
- * uart-has-rtscts matches the 4-wire P40-43 wiring (TXD/RXD/CTS/RTS).
+ * P40-P43 -- BT_REG_ON is GD32 bridge line 18 (PE14), driven by hci_bcm
+ * through shutdown-gpios before the .hcd patch load. uart-has-rtscts
+ * matches the 4-wire P40-43 wiring (TXD/RXD/CTS/RTS); the module will not
+ * transmit unless the host's RTS is asserted.
  *
- * compatible is deliberately "brcm,bcm43438-bt", not the CYW555xx-family
- * "infineon,cyw55572-bt" hci_bcm.c also carries: that entry's ONLY
- * effect (cyw55572_device_data.max_autobaud_speed) is gated behind
- * bcm_of_probe()'s "brcm,requires-autobaud-mode" DT property, which
- * this node does not set (fixed-baud 115200, bench-proven, not
- * autobaud) -- so switching would change nothing there while silently
- * dropping bcm43438_device_data's drive_rts_on_open (RTS driven on
- * ->open(), used by hci_bcm.c's `else if` branch precisely when
- * autobaud is off), which our 4-wire RTS/CTS wiring above can exercise.
- * Revisit only alongside actually enabling autobaud mode.
+ * compatible = "infineon,cyw55572-bt" with brcm,requires-autobaud-mode is
+ * the CYW555xx path in hci_bcm/btbcm, and the only one that brings this
+ * module up. Bench, E1M-V2M103, 2026-09-26, each step reproduced on the
+ * raw ttySC4 as well as through serdev:
+ *  - With max-speed set, bcm_open() copies it into hu->oper_speed and
+ *    hci_serdev sends the vendor Update-Baud-Rate command (0xfc18) as the
+ *    first byte on the link. The pre-patch ROM wedges on that: 0xfc18
+ *    and every later command, HCI_Reset included, time out. It also
+ *    ignores 0xfc18 after a Reset, so there is no max-speed and no ramp:
+ *    the link stays at the 115200 init speed.
+ *  - The ROM also does not answer the vendor Read Controller Features
+ *    (0xfc6e), which btbcm_initialize() treats as fatal on the non-
+ *    autobaud path. Autobaud mode skips that and Read Local Name.
+ * Result: chip id 157, 'brcm/BCM.hcd' patch loaded, hci0 UP+RUNNING
+ * (the patch is the Murata 2FY .hcd, installed as BCM.hcd).
  *
  * PFC funcs per the e2 studio PinMux tool (authoritative over the
  * EVK reference dts, which does not populate RSCI4 at all): P40=f2
  * (TXD4), P41=f2 (RXD4), P42=f4 (CTS4), P43=f2 (RTS4) -- note CTS4 is
  * NOT the same function number as the other three; do not "correct"
  * it to f2, that was checked against pin_data.c directly.
- *
- * STATUS: raw HCI (no shutdown-gpios, manual REG_ON) was bench-proven
- * on /dev/ttySC4 in 2026-06; this serdev-based node (in-kernel REG_ON
- * sequencing through the bridge, replacing the manual toggle) has not
- * itself been re-run on silicon.
  */
 &sci4 {
 	pinctrl-0 = <&sci4_bt_pins>;
@@ -492,9 +488,9 @@
 	status = "okay";
 
 	bluetooth {
-		compatible = "brcm,bcm43438-bt";
+		compatible = "infineon,cyw55572-bt";
 		shutdown-gpios = <&gd32_gpio 18 GPIO_ACTIVE_HIGH>;
-		max-speed = <115200>;
+		brcm,requires-autobaud-mode;
 	};
 };
 
