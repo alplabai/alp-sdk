@@ -29,22 +29,27 @@ module-isolated power.
    on-target integral as a cross-check, plus a `RESULT PASS/FAIL` line.
 
 It reports `RESULT FAIL` — deliberately — when the delta is not resolvable above
-the rail's noise. A tiny model does exactly that; see "Model choice" below.
+the rail's noise. A tiny model sits right at that noise floor; see "Model
+choice" below.
 
-## Model choice: a trivial model cannot be measured
+## Model choice: a trivial model is too small to measure reliably
 
-Bench-confirmed. With the hermetic `tiny_int8.tflite` fixture (8 MACs) the app
-reports:
+With the hermetic `tiny_int8.tflite` fixture, 8 MACs of NPU work sits right at
+the resolution floor of every shunt on the board, so the app's `RESULT` can
+come out either way depending on board load. A clean HE run on an
+E1M-AEN803 EVK on 2026-09-26 printed:
 
 ```
-RESULT FAIL: delta not resolvable -- mean=-0.000003 spread=0.000000 ...
-             (inference load below this rail's noise, or wrong rail)
+RESULT PASS: 0.000138 mJ/inference (+/-0.000010) ... pairs=3/3
 ```
 
-That is the correct outcome, not a bug: 8 MACs of NPU work is far below the
-resolution of every shunt on the board, and the idle baseline (CPU spinning, NPU
-quiet) correctly cancels the CPU work that dominates such a call. Measuring
-energy needs a model that does real work — `person_detect` is 7,077,252 MACs,
+— resolvable under the 3-standard-error bar. A warm run with HP contending for
+the same rail was not resolvable and reported `RESULT FAIL: delta not
+resolvable`. Neither is a bug: at this MAC count the idle baseline (CPU
+spinning, NPU quiet) correctly cancels the CPU work that dominates such a
+call, and whether the remaining NPU delta clears the noise floor depends on
+how quiet the rail happens to be during that run. `person_detect` is the
+meaningful measurement, at 7,077,252 MACs,
 100 % NPU, and produces a clean, several-hundred-microvolt step on the +5V
 rail (190 uV in an earlier bench pass; 172.5 uV in the primary run recorded in
 [`docs/measuring-inference-energy.md`](../../../docs/measuring-inference-energy.md)
@@ -96,15 +101,22 @@ sleep 45                                                  # default build runs ~
 scripts/bench/aen/reread.sh "$BENCH_ROOT/build/aen-inference-energy" 0x10000
 ```
 
-The `0x10000` read size matters: this app's `CONFIG_RAM_CONSOLE_BUFFER_SIZE` is
-sized to exactly the JLinkExe single-`mem8` cap (see
-`docs/aen-bench-bringup.md`) with headroom for the default knobs; the default
-`reread.sh` read size would truncate the capture mid-window. Raise
-`AEN_ENERGY_SAMPLES_PER_WINDOW` or `AEN_ENERGY_WINDOW_PAIRS` past the documented
-default and the capture can exceed both the buffer AND the single-read cap —
-read it back in two `mem8` calls at that point (halve the buffer address range
-across two `reread.sh`-style sessions), not by passing a size above `0x10000`
-(JLinkExe rejects `NumBytes > 0x10000` outright).
+The read size you pass to `reread.sh`/`ram-run.sh` and this app's
+`CONFIG_RAM_CONSOLE_BUFFER_SIZE` (`examples/aen/aen-inference-energy/prj.conf`)
+are two different things: the read size is how much the bench script asks
+JLinkExe to read back; the buffer size is how much the firmware's RAM console
+actually holds. This app's default buffer is 65536 bytes (`0x10000`), with
+headroom for the default knobs. The scripts' OWN defaults are much smaller
+(`ram-run.sh`'s `SIZE="${3:-0x600}"`, `reread.sh`'s `SIZE="${2:-0x500}"`) --
+pass `0x10000` (or your enlarged `CONFIG_RAM_CONSOLE_BUFFER_SIZE`) explicitly
+every time, as every recipe below does. Raise `AEN_ENERGY_SAMPLES_PER_WINDOW` or
+`AEN_ENERGY_WINDOW_PAIRS` past the documented default and the capture can
+exceed that buffer — raise `CONFIG_RAM_CONSOLE_BUFFER_SIZE` to match (there is
+no cap on the firmware side), then pass the same larger size as the read: both
+scripts chunk any read above `0x10000` automatically (alp-sdk#2313, via
+`bench_mem8_chunks()` in `bench-env.sh`), so JLinkExe's own
+`NumBytes > 0x10000` rejection no longer applies at this layer, and the
+read comes back complete.
 
 ## Fast iteration — tiny model, Flow C (no MRAM write)
 
@@ -113,7 +125,8 @@ scripts/bench/aen/build.sh "$A"
 scripts/bench/aen/ram-run.sh "$BENCH_ROOT/build/aen-inference-energy" 20000 0x10000
 ```
 
-Expect `RESULT FAIL: delta not resolvable` — see "Model choice". This build
+Expect `RESULT PASS` or `RESULT FAIL: delta not resolvable` depending on board
+load — see "Model choice". This build
 proves the I2C bus, the rail scan, the NPU dispatch and the sampling loop, which
 is what you want when iterating on the app rather than on a measurement.
 

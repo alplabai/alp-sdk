@@ -954,6 +954,119 @@ bench_jlink_assert_connected() {
 	return 0
 }
 
+# --------------------------------------------------------------------
+# mem8 chunking (alp-sdk#2313)
+# --------------------------------------------------------------------
+
+# bench_mem8_chunks <addr> <size> -- echo one JLinkExe 'mem8 <addr>, <len>'
+# line per chunk, each chunk capped at 0x10000 bytes. JLinkExe itself
+# refuses a single 'mem8' whose NumBytes exceeds 0x10000 ("NumBytes should
+# be <= 0x10000"), so a bare `mem8 <buf>, <size>` for any RAM console
+# bigger than 64 KiB returned NOTHING at all -- silently, which is why
+# aen-inference-energy shrank its buffer to exactly 0x10000 rather than
+# fix the read (alp-sdk#2313).
+#
+# <addr> may be anything bash arithmetic accepts (0x-prefixed hex or
+# decimal). <size> is always HEX, with or without a `0x`/`0X` prefix (see
+# the bare-value normalisation below) -- never decimal. Addresses advance by
+# each chunk's own length, so the chunks
+# concatenate with no gap/overlap and in strictly increasing address order.
+# A caller embeds this function's output where it used to write a single
+# 'mem8' line; the existing line-oriented decoders (ram-run.sh, reread.sh)
+# already handle N dump blocks unchanged -- they scan every matching
+# 'ADDR = HH HH ...' line in FILE order, and file order here IS address
+# order, so nothing downstream of the CommandFile needs to change.
+bench_mem8_chunks() {
+	local addr="$1" size="$2"
+	local addr_dec size_dec remain chunk off=0
+
+	if [ -z "$addr" ] || [ -z "$size" ]; then
+		echo "bench-env: bench_mem8_chunks: usage: bench_mem8_chunks <addr> <size>" >&2
+		return 1
+	fi
+	addr_dec=$((addr)) || {
+		echo "bench-env: bench_mem8_chunks: addr '$addr' is not a valid arithmetic value" >&2
+		return 1
+	}
+	# alp-sdk#2313 fix: JLinkExe's own `mem8` command -- and every
+	# ram-run.sh/reread.sh caller's `[bufsize_hex]` -- always treated a
+	# bare `size` as HEX (e.g. `1000` meaning 0x1000, 4096 bytes). Handing
+	# that same bare string to bash arithmetic instead silently reparses it
+	# as DECIMAL: a bare `1000` used to be read as decimal 1000 (0x3E8),
+	# not 4096, and outright ERRORS on a bare value with a hex-only digit
+	# (`1A00`, "A": not a valid base-10 constant). Normalise a bare value
+	# (no `0x`/`0X` prefix) to hex before the arithmetic, so `$((size))`
+	# sees the same base JLinkExe always assumed.
+	if ! printf '%s\n' "$size" | grep -qE '^(0[xX])?[0-9A-Fa-f]+$'; then
+		echo "bench-env: bench_mem8_chunks: size '$size' is not a valid hex value" >&2
+		return 1
+	fi
+	case $size in
+	0x*|0X*) ;;
+	*) size="0x$size" ;;
+	esac
+	size_dec=$((size)) || {
+		echo "bench-env: bench_mem8_chunks: size '$size' is not a valid arithmetic value" >&2
+		return 1
+	}
+	if [ "$size_dec" -le 0 ]; then
+		echo "bench-env: bench_mem8_chunks: size must be > 0, got '$size'" >&2
+		return 1
+	fi
+
+	remain=$size_dec
+	while [ "$remain" -gt 0 ]; do
+		chunk=$remain
+		[ "$chunk" -gt 65536 ] && chunk=65536
+		printf 'mem8 0x%X, 0x%X\n' $((addr_dec + off)) "$chunk"
+		off=$((off + chunk))
+		remain=$((remain - chunk))
+	done
+}
+
+# bench_mem8_verify_chunks <label> <transcript> <mem8-lines> -- shared
+# read-failure guard for a `bench_mem8_chunks()`-generated read, called AFTER
+# the transcript's own connect check already passed (alp-sdk#813/#1318). A
+# CONNECTED session can still fail the READ itself with no root cause
+# established for why: `mem8` can report "Could not read memory." while
+# every prior command in the same session succeeded, or produce no dump
+# line at all, or -- the narrowest and easiest to miss -- drop exactly ONE
+# chunk's dump line while every OTHER chunk still comes back (alp-sdk#2313:
+# a read above 0x10000 chunks into N `mem8` commands, and JLinkExe can drop
+# one chunk's dump silently; a whole-transcript "any dump line at all" check
+# would not notice this at all). `<mem8-lines>` is `bench_mem8_chunks()`'s
+# own output, newline-separated `mem8 <addr>, <len>` commands, one per chunk.
+#
+# Prints a `!! <label>: ...` message to stderr and returns 9 on any of the
+# three failures above; returns 0 (silent) once every chunk's own start
+# address has a matching 'ADDR = HH HH ...' dump line in the transcript.
+bench_mem8_verify_chunks() {
+	local label="$1" transcript="$2" mem8_lines="$3"
+	local _chunk_line _chunk_addr
+
+	if grep -qi "Could not read memory" "$transcript"; then
+		echo "!! $label: mem8 reported 'Could not read memory' -- refusing to decode this as a console." >&2
+		return 9
+	fi
+	if ! grep -qE '^[0-9A-Fa-f]+ = ' "$transcript"; then
+		echo "!! $label: no memory dump line in the read session's transcript -- refusing to decode an empty read as a console." >&2
+		return 9
+	fi
+	while IFS= read -r _chunk_line; do
+		[ -n "$_chunk_line" ] || continue
+		_chunk_addr="$(printf '%s\n' "$_chunk_line" | sed -E 's/^mem8 0[xX]([0-9A-Fa-f]+),.*/\1/')"
+		if ! printf '%s\n' "$_chunk_addr" | grep -qE '^[0-9A-Fa-f]+$'; then
+			echo "!! $label: could not parse a chunk address out of '$_chunk_line' -- refusing to decode." >&2
+			return 9
+		fi
+		if ! grep -qEi "^0*${_chunk_addr} = " "$transcript"; then
+			echo "!! $label: no dump line for chunk '$_chunk_line' -- refusing to decode a partially-empty read as a console." >&2
+			return 9
+		fi
+	done <<<"$mem8_lines"
+	return 0
+}
+
 # bench_require_setools — guard for Flow A/D. Errors (exit 2) if
 # SETOOLS_DIR is unset or doesn't look like a SETOOLS install. SETOOLS
 # is license-gated and NOT shipped with alp-sdk; this is the single
@@ -1939,7 +2052,7 @@ for e in manifest:
 		# and exhausting all 3 retries fell through to `return "$rc"` with
 		# rc=0: a proof whose every connect attempt FAILED still returned
 		# success. Verified: `if false; then :; fi; echo $?` prints 0.
-		# Capture the assertion's OWN status directly, on the same line, so
+		# Capture the assertion's OWN status directly, immediately after, so
 		# nothing can sit between the command and reading `$?`.
 		bench_jlink_assert_connected "$out" "$tag post-write proof read (attempt $attempt/3)"
 		rc=$?
