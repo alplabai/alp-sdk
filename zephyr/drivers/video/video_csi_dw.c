@@ -552,7 +552,17 @@ static int csi2_dw_validate_data(const struct device *dev)
 	LOG_DBG("pll_fin - %d, Check pixclock = %d (CSI_PIXCLK_CTRL)", phy->pll_fin,
 		(uint32_t)pixclock);
 
-	tmp = (uint32_t)pixclock;
+	/*
+	 * Alp Lab AB (issue #2327): pass an explicit csi-pixclk-hz through as the
+	 * integer the shield wrote, never via the float above -- a float carries
+	 * only 24 mantissa bits, so 133333333 rounds UP to 133333336, and
+	 * alif_pixclk_set_rate()'s floor(400 MHz / hz) then lands on divisor 2
+	 * (200 MHz) instead of 3 (133.33 MHz). Bench-observed on
+	 * E1M-AEN803 2026W36-0001: CSI_PIXCLK_CTRL read 0x00020001.
+	 */
+	tmp = (config->ipi_mode == CSI2_IPI_MODE_TIMINGS_CTRL && config->pixclk_hz != 0)
+		      ? config->pixclk_hz
+		      : (uint32_t)pixclock;
 	ret = clock_control_set_rate(config->clk_dev, config->pixclk,
 			(clock_control_subsys_rate_t)tmp);
 	if (ret == -ERANGE && config->ipi_mode == CSI2_IPI_MODE_TIMINGS_CTRL &&
