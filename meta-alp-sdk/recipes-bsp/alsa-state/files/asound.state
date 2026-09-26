@@ -5,14 +5,20 @@
 # U28 right), restored by alsa-restore.service. Both amps sit on one
 # stereo I2S link; each plays its own slot only when its "ASI1 Sel" is
 # Left/Right -- the driver default "I2C offset" does not map to the
-# stereo pair. Amp Gain starts at its lowest level (0 = 8.5 dBV) rather
-# than the silicon default (16 = 16 dBV, ~10 W peak into 4 ohm); raise
-# it deliberately for the enclosure/speaker in use.
+# stereo pair.
+#
+# "Amp Gain Volume" is the raw PB_CFG1.AMP_LEVEL code. It starts at 1
+# (01h = 8.5 dBV, the lowest level TI SLASET3D Table 7-105 lists) rather
+# than the silicon default 16 (10h = 16.0 dBV, ~10 W peak into 4 ohm);
+# raise it deliberately for the enclosure/speaker in use. Code 0 is not a
+# listed level. The 6.1 driver's dB scale for this control is one code
+# off the datasheet (it labels code 1 as 9.0 dB), so read levels from the
+# table above, not from amixer's dB column.
 state.e1mxevktas2563 {
 	control.1 {
 		iface MIXER
 		name 'Left Amp Gain Volume'
-		value 0
+		value 1
 		comment {
 			access 'read write'
 			type INTEGER
@@ -20,7 +26,7 @@ state.e1mxevktas2563 {
 			range '0 - 28'
 			dbmin 850
 			dbmax 2250
-			dbvalue.0 850
+			dbvalue.0 950
 		}
 	}
 	control.2 {
@@ -40,7 +46,7 @@ state.e1mxevktas2563 {
 	control.3 {
 		iface MIXER
 		name 'Right Amp Gain Volume'
-		value 0
+		value 1
 		comment {
 			access 'read write'
 			type INTEGER
@@ -48,7 +54,7 @@ state.e1mxevktas2563 {
 			range '0 - 28'
 			dbmin 850
 			dbmax 2250
-			dbvalue.0 850
+			dbvalue.0 950
 		}
 	}
 	control.4 {
