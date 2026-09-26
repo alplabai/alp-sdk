@@ -57,7 +57,7 @@ def test_aen801_ospi0_refused_by_loader(tmp_path: Path) -> None:
     """E1M-AEN801 declares `ospi0` `assembled: false` -- it must not be
     a known device the loader's cross-check accepts."""
     path = _write_board(tmp_path, _board("E1M-AEN801", "ospi0"))
-    with pytest.raises(OrchestratorError, match="ospi0"):
+    with pytest.raises(OrchestratorError, match="assembled: false"):
         load_board_yaml(path)
 
 

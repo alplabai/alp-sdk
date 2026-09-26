@@ -179,12 +179,12 @@ static void stage_ota_poll(void)
      *      chunks there, alp_iot_publish a deployment-accepted
      *      status, and reboot into the newly-staged image.  This
      *      SKU (E1M-AEN801) boots single-app (see [STATUS] in
-     *      board.yaml): OTA apply is DEFERRED (#1069) -- the
-     *      on-module OSPI0 NOR (`ps_storage: ospi0`, itself
-     *      `assembled: optional`) is a separate device from the
-     *      App MRAM that holds slot0, and there is no supported
-     *      path from an OSPI staging write to an in-place slot0
-     *      update.
+     *      board.yaml): OTA apply is DEFERRED (#1069) -- E1M-AEN801
+     *      has no OSPI flash fitted at all (`ospi0`/`ospi1` are both
+     *      `assembled: false` in its SoM preset), so `ps_storage`
+     *      backs to the same on-die MRAM (`mram_main`) that holds
+     *      slot0, and there is no supported path from an OSPI
+     *      staging write to an in-place slot0 update.
      *
      * On native_sim every step returns NOSUPPORT; the example
      * prints the transitions but doesn't actually move bytes. */

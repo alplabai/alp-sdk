@@ -246,6 +246,40 @@ def test_security_psa_its_storage_refused_on_unassembled_ospi(
     assert "metadata/e1m_modules/E1M-AEN801.yaml" in msg
 
 
+def _ps_ospi0_board(sku: str) -> str:
+    return f"""
+        name: test-{sku.lower()}-ps-ospi0
+        som:
+          sku: {sku}
+        cores:
+          m55_hp:
+            os: zephyr
+            app: ./m55_hp
+        security:
+          psa:
+            its_storage: mram_main
+            ps_storage: ospi0
+            tfm: true
+    """
+
+
+def test_security_psa_ps_storage_refused_on_unassembled_ospi(
+    tmp_path: Path,
+) -> None:
+    """#2311: same guard, `ps_storage` side -- E1M-AEN801 declares
+    `ospi0` `assembled: false`, so naming it as `security.psa.ps_storage:`
+    must be refused with the specific "not assembled" reason."""
+    path = _write_board(tmp_path, _ps_ospi0_board("E1M-AEN801"))
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "security.psa.ps_storage" in msg
+    assert "ospi0" in msg
+    assert "E1M-AEN801" in msg
+    assert "assembled: false" in msg
+    assert "metadata/e1m_modules/E1M-AEN801.yaml" in msg
+
+
 def test_security_psa_its_storage_accepted_on_assembled_ospi(
     tmp_path: Path,
 ) -> None:

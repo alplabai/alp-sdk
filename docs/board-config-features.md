@@ -434,10 +434,20 @@ security:
   psa:
     persistent_slots:  16
     its_storage:       mram_main          # SoM memory_map region OR storage[] name
-    ps_storage:        ospi0              # optional (PS)
+    ps_storage:        mram_main          # optional (PS)
     tfm:               true               # enable TF-M secure partition
     attestation_root:  optiga_trust_m     # optiga_trust_m | tfm_internal | none
 ```
+
+Any `storage[].flash_device`, `security.psa.its_storage`, or
+`security.psa.ps_storage` that names an `on_module.ospi_memories:` key
+must resolve to a part the chosen SKU actually carries: a key marked
+`assembled: false` in that SKU's `metadata/e1m_modules/<SKU>.yaml`
+(e.g. E1M-AEN801's `ospi0`/`ospi1`, which are a designed-in PCB
+footprint the module doesn't populate) is refused with the reason at
+load time, not silently accepted. Point these fields at a `storage[]`
+partition, a SoM `memory_map:` region (like `mram_main` above), or an
+OSPI key that SKU assembles.
 
 Project-wide. When `tfm: true` the planner emits a sysbuild
 child-image overlay at `build/sysbuild/tfm/tfm.conf` containing

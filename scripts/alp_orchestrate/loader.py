@@ -1058,6 +1058,23 @@ def _resolve_storage(
         for entry in storage_entries:
             if entry.flash_device is None:
                 continue   # resolver will block it with a clear reason
+            if _is_ospi_key_unassembled(som_preset, entry.flash_device):
+                # Same #2311 guard as the PSA ITS/PS backing-store check
+                # below: an `ospi_memories` key with `assembled: false`
+                # (e.g. E1M-AEN801's `ospi0`/`ospi1`) is a designed-in
+                # footprint, not a part this SKU actually carries -- refuse
+                # it as a `storage[].flash_device` with the specific reason
+                # rather than the generic "does not resolve" message.
+                where = f"SoM {sku}" if sku else "this SoM"
+                yaml_ref = (f"metadata/e1m_modules/{sku}.yaml" if sku
+                            else "its SoM preset YAML")
+                raise OrchestratorError(
+                    f"board.yaml `storage[{entry.name}].flash_device: "
+                    f"{entry.flash_device}` names on-module OSPI part "
+                    f"'{entry.flash_device}', which is not assembled on "
+                    f"{where} (assembled: false in {yaml_ref}); pick a "
+                    f"flash device backed by a part this SKU actually "
+                    f"carries")
             if entry.flash_device not in known_devices:
                 raise OrchestratorError(
                     f"board.yaml `storage[{entry.name}].flash_device: "
