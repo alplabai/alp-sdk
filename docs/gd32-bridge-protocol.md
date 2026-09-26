@@ -996,6 +996,15 @@ low nibble; `0x80 NO_PENDING` is I2C-only, where stamping never
 applies).  Masking is safe unconditionally on SPI: legacy firmware
 never sets the high nibble there.
 
+**OTA post-COMMIT/ROLLBACK trial window (v0.12):** after `OTA_COMMIT`
+or `OTA_ROLLBACK` the bridge reboots into an unconfirmed TRIAL image
+and answers `STATUS_BUSY` to **every** opcode — including `PING` and
+`GET_VERSION` — until it decodes its first CRC-valid frame of any
+kind, which itself confirms the trial (see §10).  `gd32g553_init()`
+rides this out with a bounded (~2 s) retry ladder on `ALP_ERR_BUSY`;
+other callers hitting `STATUS_BUSY` in this window should retry after
+a re-init rather than treat it as a hard failure.
+
 ## 7. Liveness handshake
 
 `gd32g553_init()` issues:
@@ -1056,7 +1065,12 @@ the ADC-stream DSP pipeline's already-existing `chain_open` /
 actually filters or spectralizes the stream instead of the chain
 sitting unbound — and adds the new opcode `CMD_ADC_SPECTRUM_READ`
 (`0x3A`, §3.x) to pull the FFT terminal's spectrum; a v0.8 host that
-never binds a chain sees no behaviour change.
+never binds a chain sees no behaviour change.  **v0.12** adds the
+post-COMMIT/ROLLBACK TRIAL-then-confirm boot sequence (§6, §10) — no
+new opcode and no framing change, so it is observable only as a
+bounded run of `STATUS_BUSY` right after an OTA reset; a host that
+already treats `STATUS_BUSY` as retryable (as `gd32g553_init()` now
+does) sees no behaviour change beyond that widened retry window.
 
 ## 9. Reference vectors
 
@@ -1144,6 +1158,40 @@ COMMIT/ROLLBACK's reset run inside the request transaction, their
 reply transaction can miss — hosts treat an I/O error there as
 "issued" and confirm via `OTA_GET_STATE` (or by re-initialising
 against the rebooted bridge after COMMIT/ROLLBACK).
+
+**TRIAL boot, confirm, and watchdog revert (v0.12).** `COMMIT` and
+`ROLLBACK` don't hand control straight to a trusted image: the bridge
+reboots into the newly-active slot in an unconfirmed **TRIAL** state,
+and until it decodes its first CRC-valid frame — of ANY opcode, not
+just an OTA one — it answers `STATUS_BUSY` (§6) to everything.  That
+first valid frame both confirms the trial AND triggers a **second**
+reset, this one booting the now-confirmed image; the link drops again
+for a few milliseconds around that second reset before settling into
+normal operation.  If no valid frame lands before the bootloader's
+watchdog (FWDGT) window expires — nominal ~32.8 s — the bootloader
+reverts to the previously-active slot instead, exactly as if the new
+image had hung.
+
+An `OTA_BEGIN` sent in the legacy 8-byte form (no `fw_version` triple,
+§3's table above) is treated as an unknown incoming version, which is
+itself sufficient reason for the bridge to boot the result into TRIAL
+— this is deliberate: a caller that hasn't wired up version tracking
+still gets the safety net.
+
+Host contract: send a frame within the watchdog window after COMMIT
+or ROLLBACK (any opcode works — a `PING`/`GET_VERSION` re-init is
+enough), and treat `STATUS_BUSY` seen right after COMMIT/ROLLBACK as
+retryable, not a failure — `gd32g553_init()` (`chips/gd32g553/gd32g553.c`)
+already does this with a bounded (~2 s) retry ladder on
+`ALP_ERR_BUSY`/`ALP_ERR_IO`, so a plain re-init call is the whole
+contract for most callers.  `gd32g553_ota_get_state()` does NOT retry
+on its own — call it after a successful re-init, not in the trial
+window itself.
+
+**Bench status:** the app-side confirm path (BUSY → first valid frame
+→ second reset → normal operation) is silicon-validated on
+E1M-V2M103, 2026-09-26.  The bootloader's watchdog-driven revert path
+is implemented but not yet bench-verified.
 
 **Path B — Host-driven SWD bit-bang (universal recovery).**
 

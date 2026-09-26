@@ -199,6 +199,29 @@ void fake_tas2563_fail_write_at(uint8_t book, uint8_t page, uint8_t reg);
  *  log, the counters, the book/page selection and any armed fault. */
 void fake_tas2563_reset(void);
 
+/* ------------------------------------------------------------------ */
+/* fake GD32G553 supervisor-MCU bridge (PING/GET_VERSION only)         */
+/* ------------------------------------------------------------------ */
+/* Models the OTA post-COMMIT/ROLLBACK TRIAL window's STATUS_BUSY reply
+ * (and the confirm-triggered second reset's raw link drop) -- see
+ * fake_gd32bridge.c. */
+
+void fake_gd32bridge_set_version(uint8_t major, uint8_t minor, uint8_t patch);
+
+/** Answer STATUS_BUSY (short error envelope) to the next @p count
+ *  requests regardless of opcode, then resume normal replies. */
+void fake_gd32bridge_arm_busy_replies(unsigned count);
+
+/** Fail the next @p count bus transactions at the transport level
+ *  (-EIO, no reply at all) -- models the second reset's link drop. */
+void fake_gd32bridge_arm_io_failures(unsigned count);
+
+/** Total decoded (non-io-failed) requests seen since the last reset. */
+uint32_t fake_gd32bridge_calls_seen(void);
+
+/** Reset version, armed faults and the call counter to defaults. */
+void fake_gd32bridge_reset(void);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

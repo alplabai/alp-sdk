@@ -422,6 +422,51 @@ static alp_status_t cmd_send(gd32g553_t          *ctx,
 /* Public API                                                          */
 /* ----------------------------------------------------------------- */
 
+/* OTA trial-boot window: after OTA_COMMIT/OTA_ROLLBACK the bridge
+ * reboots into an unconfirmed TRIAL image and answers STATUS_BUSY to
+ * EVERY opcode -- including PING/GET_VERSION -- until it decodes its
+ * first CRC-valid frame, which itself confirms the trial; the bridge
+ * then resets a SECOND time to boot the now-confirmed image, so the
+ * link also drops for a few ms right after that first BUSY reply
+ * lands.  That second drop surfaces to the host as a transient
+ * transport error (STATUS_IO, or a CRC miss the driver already maps
+ * to ALP_ERR_IO), not BUSY.  Ride out both here so a caller that
+ * re-inits right after COMMIT/ROLLBACK (docs/gd32-bridge-protocol.md
+ * §10) doesn't have to hand-roll its own retry loop.  Non-transient
+ * failures (NOSUPPORT, INVAL, a genuine version mismatch) return
+ * immediately -- retrying those only delays a real failure.
+ *
+ * Budget: 2 s total, geometric-then-flat backoff.  The bootloader's
+ * FWDGT window is ~32.8 s nominal (far longer than this budget), so
+ * 2 s is sized to the confirm+reboot path, not the watchdog-revert
+ * path -- a caller riding out an actual revert will simply see this
+ * budget expire and get back the transient status, same as any other
+ * failed init. */
+#define GD32G553_INIT_RETRY_BUDGET_MS 2000u
+static const uint16_t gd32g553_init_retry_ms[] = { 10u, 20u, 40u, 80u, 160u, 160u, 160u, 160u };
+
+static bool gd32g553_init_status_is_transient(alp_status_t s)
+{
+	return s == ALP_ERR_BUSY || s == ALP_ERR_IO;
+}
+
+/* Sleep the next rung of the ladder and account it against the budget.
+ * Returns false once the budget is spent (caller gives up with the
+ * last status it saw). */
+static bool gd32g553_init_retry_wait(unsigned *attempt, uint32_t *elapsed_ms)
+{
+	if (*elapsed_ms >= GD32G553_INIT_RETRY_BUDGET_MS) return false;
+	const unsigned rung =
+	    (*attempt < (sizeof(gd32g553_init_retry_ms) / sizeof(gd32g553_init_retry_ms[0])))
+	        ? *attempt
+	        : (unsigned)(sizeof(gd32g553_init_retry_ms) / sizeof(gd32g553_init_retry_ms[0])) - 1u;
+	const uint16_t wait_ms = gd32g553_init_retry_ms[rung];
+	alp_delay_ms(wait_ms);
+	*elapsed_ms += wait_ms;
+	(*attempt)++;
+	return true;
+}
+
 alp_status_t gd32g553_init(gd32g553_t *ctx, alp_spi_t *spi, alp_i2c_t *i2c, uint8_t i2c_addr_7bit)
 {
 	if (ctx == NULL) return ALP_ERR_INVAL;
@@ -435,14 +480,27 @@ alp_status_t gd32g553_init(gd32g553_t *ctx, alp_spi_t *spi, alp_i2c_t *i2c, uint
 	ctx->default_transport = (spi != NULL) ? GD32G553_TRANSPORT_SPI : GD32G553_TRANSPORT_I2C;
 	ctx->initialised       = true;
 
-	alp_status_t s = gd32g553_ping(ctx);
+	alp_status_t s;
+	unsigned     attempt    = 0u;
+	uint32_t     elapsed_ms = 0u;
+	for (;;) {
+		s = gd32g553_ping(ctx);
+		if (!gd32g553_init_status_is_transient(s)) break;
+		if (!gd32g553_init_retry_wait(&attempt, &elapsed_ms)) break;
+	}
 	if (s != ALP_OK) {
 		ctx->initialised = false;
 		return s;
 	}
 
 	gd32g553_version_t v;
-	s = gd32g553_get_version(ctx, &v);
+	attempt    = 0u;
+	elapsed_ms = 0u;
+	for (;;) {
+		s = gd32g553_get_version(ctx, &v);
+		if (!gd32g553_init_status_is_transient(s)) break;
+		if (!gd32g553_init_retry_wait(&attempt, &elapsed_ms)) break;
+	}
 	if (s != ALP_OK) {
 		ctx->initialised = false;
 		return s;

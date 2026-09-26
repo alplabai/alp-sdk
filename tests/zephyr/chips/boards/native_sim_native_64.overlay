@@ -93,6 +93,13 @@
                 compatible = "alp,fake-tas2563";
                 reg = <0x4d>;
             };
+            /* GD32G553 supervisor-MCU bridge fake -- PING/GET_VERSION
+             * only, driving gd32g553_init()'s OTA-trial retry ladder
+             * (chips/gd32g553/gd32g553.c). */
+            fake_gd32bridge: fake_gd32bridge@2c {
+                compatible = "alp,fake-gd32bridge";
+                reg = <0x2c>;
+            };
         };
     };
 

@@ -7,6 +7,7 @@
  * bit-bang SWD controller used to flash it).
  */
 
+#include <zephyr/kernel.h>
 #include <zephyr/ztest.h>
 
 #include "alp/chips/gd32_swd.h"
@@ -14,6 +15,7 @@
 #include "alp/e1m_pinout.h"
 #include "alp/peripheral.h"
 #include "alp/protocol/crc16.h"
+#include "fakes.h"
 
 /* ------------------------------------------------------------------ */
 /* #2035 -- gd32g553.c's frame CRC-16 migrated off its own local        */
@@ -60,6 +62,96 @@ ZTEST(alp_chips, test_gd32g553_init_invalid_i2c_addr)
 	              ALP_ERR_INVAL,
 	              "8-bit address through the 7-bit API must be rejected");
 	alp_i2c_close(bus);
+}
+
+/* ------------------------------------------------------------------ */
+/* gd32g553_init() -- OTA post-COMMIT/ROLLBACK TRIAL-window retry       */
+/* (docs/gd32-bridge-protocol.md §10; fake_gd32bridge.c).  Without      */
+/* the retry ladder in gd32g553_init(), the FIRST of these would fail   */
+/* immediately: gd32g553_ping() returning ALP_ERR_BUSY used to abort    */
+/* init on the spot (`if (s != ALP_OK) { ...; return s; }`) rather than  */
+/* riding the transient status out, so this test reddens against the    */
+/* pre-fix code exactly as intended.                                    */
+/* ------------------------------------------------------------------ */
+
+static alp_i2c_t *open_fake_gd32bridge_bus(void)
+{
+	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = ALP_E1M_I2C0,
+	    .bitrate_hz = 100000,
+	});
+	zassert_not_null(bus);
+	return bus;
+}
+
+ZTEST(alp_chips, test_gd32g553_init_retries_busy_then_succeeds)
+{
+	fake_gd32bridge_reset();
+	fake_gd32bridge_set_version(GD32G553_HOST_PROTOCOL_MAJOR, 12u, 0u);
+	/* PING sees BUSY 3 times (modelling the TRIAL window's short
+	 * error-envelope reply to every opcode), then OK; GET_VERSION
+	 * then goes through clean since the ladder is already exhausted. */
+	fake_gd32bridge_arm_busy_replies(3u);
+
+	alp_i2c_t *bus = open_fake_gd32bridge_bus();
+	gd32g553_t ctx;
+	zassert_equal(gd32g553_init(&ctx, NULL, bus, 0x2Cu),
+	              ALP_OK,
+	              "init must ride out a bounded run of STATUS_BUSY and succeed");
+	zassert_true(ctx.initialised);
+
+	alp_i2c_close(bus);
+	fake_gd32bridge_reset();
+}
+
+ZTEST(alp_chips, test_gd32g553_init_gives_up_after_retry_budget)
+{
+	fake_gd32bridge_reset();
+	/* Never stops being busy within any reasonable test budget --
+	 * models the bootloader's watchdog-revert path, where no valid
+	 * frame ever lands. */
+	fake_gd32bridge_arm_busy_replies(1000000u);
+
+	alp_i2c_t    *bus = open_fake_gd32bridge_bus();
+	gd32g553_t    ctx;
+	const int64_t start_ms   = k_uptime_get();
+	alp_status_t  s          = gd32g553_init(&ctx, NULL, bus, 0x2Cu);
+	const int64_t elapsed_ms = k_uptime_get() - start_ms;
+
+	zassert_equal(s,
+	              ALP_ERR_BUSY,
+	              "init must give up with the last transient status once its budget is spent");
+	zassert_false(ctx.initialised);
+	/* Budget is 2 s; allow slack below for scheduler jitter but prove
+	 * it actually rode out most of the ladder rather than giving up
+	 * on the first BUSY. */
+	zassert_true(elapsed_ms >= 1500,
+	             "init gave up too early (%lld ms) -- did the retry ladder regress?",
+	             (long long)elapsed_ms);
+
+	alp_i2c_close(bus);
+	fake_gd32bridge_reset();
+}
+
+ZTEST(alp_chips, test_gd32g553_init_non_transient_error_not_retried)
+{
+	fake_gd32bridge_reset();
+	/* A genuine major-version mismatch is not transient -- GET_VERSION
+	 * itself succeeds (STATUS_OK), it's the version check afterward
+	 * that fails, and that must return immediately. */
+	fake_gd32bridge_set_version((uint8_t)(GD32G553_HOST_PROTOCOL_MAJOR + 1u), 0u, 0u);
+
+	alp_i2c_t *bus = open_fake_gd32bridge_bus();
+	gd32g553_t ctx;
+	zassert_equal(gd32g553_init(&ctx, NULL, bus, 0x2Cu),
+	              ALP_ERR_NOSUPPORT,
+	              "a genuine version mismatch must return immediately, not retry");
+	zassert_equal(fake_gd32bridge_calls_seen(),
+	              2u,
+	              "exactly one PING + one GET_VERSION -- no retry ladder engaged");
+
+	alp_i2c_close(bus);
+	fake_gd32bridge_reset();
 }
 
 ZTEST(alp_chips, test_gd32g553_post_init_calls_reject_uninitialised)
