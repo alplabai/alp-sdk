@@ -363,6 +363,47 @@ consistently races the bridge's own startup) -- see
 `GD32G553_REG_ON_MIN_PROTOCOL_MINOR` in
 [`include/alp/chips/gd32g553.h`](../include/alp/chips/gd32g553.h).
 
+**Host-behaviour note (Refs #2297; bug bench-observed 2026-09-26,
+E1M-V2M103, fix compile-verified only so far -- not yet re-run on the
+bench):** `.request()`'s single non-blocking `GET_VERSION` attempt can
+end in one of three states -- confirmed supported, confirmed
+unsupported (a bridge that answered and reported a minor below 11 or
+an unexpected major), or *still unresolved* because the bridge hasn't
+answered at all yet. On the bench, that third case used to leave
+`mmc-pwrseq-simple`'s `wlan-pwrseq` (line 19) and `hci_bcm`'s
+`shutdown-gpios` (line 18) consumer sitting in
+`/sys/kernel/debug/devices_deferred` for the whole boot even though the
+bridge answered seconds later, because a bare `-EPROBE_DEFER` only
+gets retried by the kernel when some *other* driver's (un)registration
+happens to walk the deferred-probe list -- nothing guarantees that
+happens on its own. `.request()` must still return `-EPROBE_DEFER`
+rather than grant the request in that still-unresolved case, though:
+`mmc-pwrseq-simple` and `hci_bcm` each run a one-shot power-up sequence
+(`mmc_rescan()` / loading the `.hcd` patch) immediately once
+`.request()` succeeds, and SDHI2 being non-removable means that
+sequence never reruns on its own if it runs before REG_ON can actually
+move.
+
+What resolves a slow bridge instead: a second, independent poll -- a
+dedicated `delayed_work` polls `GET_VERSION` regardless of whether any
+consumer has requested the lines yet (flat at ~1 Hz for the first
+~30 s, then backing off exponentially to a 30 s cap; it never gives
+up, since the bridge firmware can be reset or reflashed at any point
+during a long-running boot). On resolving either way -- confirmed
+supported, or confirmed unsupported -- it briefly registers a
+throwaway `platform_device` purely so that device's bind runs
+`driver_bound()` -> the kernel's own `driver_deferred_probe_trigger()`
+(`drivers/base/dd.c`, called from `driver_bound()` on every successful
+bind) -- the only in-tree hook that lets module code queue a
+deferred-probe retry (asynchronous, on `system_unbound_wq`) on demand.
+That gets `mmc-pwrseq-simple` / `hci_bcm` to retry `.request()` with
+the real answer -- granted, or failing outright with `-ENODEV` --
+instead of lingering deferred indefinitely. A confirmed `-ENODEV`
+is cached for the life of the driver instance (until the next reboot);
+it is not re-checked even across a bridge OTA A/B swap, since a
+firmware update that adds REG_ON support mid-boot is not a scenario
+this driver defends against today.
+
 **Any GD32 reset drops both lines low again** (WDT, fault, OTA A/B
 swap, SE reset -- the boot-time OUTPUT LOW default applies on every
 reset), which power-cycles the module. The host must re-assert them

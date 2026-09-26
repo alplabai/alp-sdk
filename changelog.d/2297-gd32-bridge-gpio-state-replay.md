@@ -61,3 +61,43 @@ Murata module itself.
 See also: `docs/gd32-bridge-protocol.md` §3.1 (host-behaviour note,
 including the BRD_I2C shared-bus/arbitration caveat, updated in the same
 change).
+
+**Follow-up (same branch; bug bench-observed 2026-09-26, E1M-V2M103,
+this fix compile-verified only so far -- not yet re-run on the
+bench):** lines 18/19's `.request()` gate
+(`gd32_bridge_resolve_wifi_bt()`) used to return `-EPROBE_DEFER` itself
+when the bridge was still silent, which permanently deferred the
+*consumer* -- `mmc-pwrseq-simple`'s `wlan-pwrseq` `reset-gpios` and
+`hci_bcm`'s `shutdown-gpios` -- with nothing to ever retry it, since a
+bare `-EPROBE_DEFER` only gets retried when some other driver's
+(un)registration happens to walk the deferred-probe list. Observed on
+the bench: NRST release failed, and
+`/sys/kernel/debug/devices_deferred` listed `15c20000.mmc`,
+`wlan-pwrseq` and `serial0-0` for the whole boot, even though the
+bridge came up seconds later. `.request()` must still return
+`-EPROBE_DEFER` rather than grant the request while unresolved,
+though: `mmc-pwrseq-simple` and `hci_bcm` each run a one-shot power-up
+sequence (`mmc_rescan()` / loading the `.hcd` patch) immediately once
+`.request()` succeeds, and SDHI2 being non-removable means that
+sequence never reruns on its own if it runs before REG_ON can actually
+move.
+
+What resolves the deferral instead: a new, independent `delayed_work`
+(`gd32_bridge_resolve_work()`) that polls `GET_VERSION` regardless of
+whether any consumer has requested the lines yet (flat at ~1 Hz for
+the first ~30 s, then backing off exponentially to a 30 s cap; it
+never gives up, since the bridge firmware can be reset or reflashed at
+any point during a long-running boot). On resolving either way --
+confirmed supported, or confirmed unsupported -- it briefly registers
+a throwaway `platform_device` (`gd32_bridge_kick_deferred_probe()`)
+purely so that device's bind runs `driver_bound()` -> the kernel's own
+`driver_deferred_probe_trigger()` (`drivers/base/dd.c`, confirmed
+present at that call site in this kernel tree) -- the only in-tree
+hook that lets module code queue a deferred-probe retry (asynchronous,
+on `system_unbound_wq`) on demand. That gets `mmc-pwrseq-simple` /
+`hci_bcm` to retry `.request()` with the real answer -- granted, or
+failing outright with `-ENODEV` -- instead of lingering deferred
+indefinitely. `.request()` itself now makes only a single
+non-blocking `GET_VERSION` attempt instead of a bounded blocking wait,
+since the independent poller above is what actually catches a slow
+bridge.
