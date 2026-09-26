@@ -83,7 +83,7 @@ index 1152ade7..7c3d9f81 100644
  	memcpy(alp_sku, &buf[0x18], 24);
  	alp_sku[24] = '\0';
  	printf("ALP: SoM family \"%s\" sku \"%.24s\"\n", family, &buf[0x18]);
-@@ -916,6 +928,156 @@ int ft_system_setup(void *blob, struct bd_info *bd)
+@@ -916,6 +928,154 @@ int ft_system_setup(void *blob, struct bd_info *bd)
  	return 0;
  }
  
@@ -91,10 +91,8 @@ index 1152ade7..7c3d9f81 100644
 + * Fleet-unique (NOT globally unique -- that needs a purchased IEEE OUI
 + * block) locally-administered Ethernet MAC derivation from the SoM
 + * serial. Bit-for-bit identical to scripts/alp_eth_mac.py -- keep both
-+ * in lockstep; see that script's docstring for the SLAP-quadrant
-+ * caveat this repo is flagging for the maintainer (0xA2's low nibble
-+ * reads as SAI, not AAI, by this author's reading of IEEE 802c-2017;
-+ * shipped as 0xA2 anyway per explicit maintainer instruction).
++ * in lockstep. Octet 0 0xA2 = unicast, locally administered, IEEE
++ * 802c SLAP AAI quadrant (Z:Y = 00).
 + */
 +#define ALP_ETH_MAC_OCTET0		0xA2u
 +#define ALP_ETH_MAC_PREFIX		0xCu
@@ -240,7 +238,7 @@ index 1152ade7..7c3d9f81 100644
  int board_late_init(void)
  {
  	bool v2n_m1;
-@@ -924,6 +1086,7 @@ int board_late_init(void)
+@@ -924,6 +1084,7 @@ int board_late_init(void)
  	alp_clk5l_fixup();
  
  	v2n_m1 = alp_som_is_v2n_m1();

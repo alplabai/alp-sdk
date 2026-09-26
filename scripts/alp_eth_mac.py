@@ -23,9 +23,8 @@ anchor -- see `test_alp_eth_mac.py`.
 MAC layout (48 bits total, big-endian octets 0..5):
 
     octet0            = 0xA2 (fixed) -- individual/unicast (I/G=0),
-                        locally administered (U/L=1) -- see the
-                        SLAP-quadrant caveat in this module's docstring
-                        tail.
+                        locally administered (U/L=1), SLAP AAI
+                        quadrant (see the docstring tail).
     octets 1..5 (40b) = 4-bit fixed Alp Lab prefix 0xC
                         | (year - 2024)   6 bits  (0..63 -> 2024..2087)
                         | week             6 bits  (1..53)
@@ -35,16 +34,11 @@ MAC layout (48 bits total, big-endian octets 0..5):
                                             1 = end1/eth1addr, 2/3 reserved)
                         | reserved         2 bits  (0)
 
-SLAP-quadrant caveat (documented, not silently "fixed"): IEEE 802c-2017's
-Structured Local Address Plan defines the two bits above the U/L bit
-(bits 3:2 of octet0, i.e. the '2' in 0xA2's low nibble) as a quadrant
-selector -- by this author's reading of the amendment, `00` = Standards
-Assigned Identifier (SAI) and `01` = Administratively Assigned Identifier
-(AAI).  0xA2's low nibble is `0010`, i.e. quadrant bits `00` = SAI, not
-AAI.  A strict AAI byte would be `0xA6` (quadrant bits `01`).  This module
-ships 0xA2 per an explicit maintainer instruction re-affirming it after
-that discrepancy was raised; flagged here for the maintainer to
-confirm/correct, not silently overridden.
+SLAP quadrant: IEEE 802c-2017's Structured Local Address Plan uses the
+two bits above U/L (octet0 bits 3:2, Z:Y) as a quadrant selector:
+Z:Y = 00 AAI (Administratively Assigned, second hex digit 2), 01 reserved
+(6), 10 ELI (A), 11 SAI (E).  0xA2's low nibble 0010 = AAI, the quadrant
+meant for addresses a local administrator assigns without an IEEE block.
 """
 
 from __future__ import annotations

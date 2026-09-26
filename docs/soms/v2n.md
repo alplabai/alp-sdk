@@ -181,13 +181,9 @@ make them; that block is not something the project has bought.
   the same `scripts/alp_eth_mac.py` so a ledger row and the unit's actual
   boot-time MAC can be cross-checked without powering the board on.
 
-**Open, flagged for the maintainer:** by this author's reading of IEEE
-802c-2017's SLAP quadrant bits (the two bits above the U/L bit), octet 0's
-low nibble `0x2` (binary `0010`) selects the *Standards Assigned
-Identifier* quadrant, not *Administratively Assigned Identifier* (which
-reads as `0x6`, binary `0110`, by the same table). `0xA2` ships anyway per
-an explicit maintainer instruction re-affirming it after this was raised;
-it is not a silent decision.
+Octet 0 `0xA2` has U/L=1, I/G=0 and IEEE 802c-2017 SLAP quadrant bits
+Z:Y=`00`, i.e. the *Administratively Assigned Identifier* (AAI) quadrant --
+the range a local administrator may assign without buying an IEEE block.
 
 ## Bring-up
 
