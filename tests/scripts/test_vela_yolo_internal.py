@@ -24,8 +24,16 @@ from pathlib import Path
 import pytest
 
 from alp_model.adapters.ethos_u import VelaAdapter
+from alp_project_loader import TargetSpec
 
 _ROOT = Path(__file__).resolve().parents[2]
+
+#: The E1M-AEN801 (Alif Ensemble E8)'s real npu_toolchain.vela profile
+#: (metadata/socs/alif/ensemble/e8.json) -- without it vela falls back to its
+#: own DRAM-backed default and this real-model compile would refuse (#2312).
+_E8_TARGET = TargetSpec(backend="ethos_u", silicon_ref="alif:ensemble:e8", accel_config="",
+                        vela_memory_mode="Sram_Only",
+                        vela_vendor_config_filename="ensemble_vela.ini")
 
 
 def _internal_root() -> Path:
@@ -54,7 +62,8 @@ def test_vela_compiles_real_model_for_e8(tmp_path, accel_config):
     model = _real_int8_models()[0]
     src = tmp_path / model.name
     shutil.copy(model, src)
-    blob = VelaAdapter().compile(src, accel_config=accel_config, out_dir=tmp_path)
+    blob = VelaAdapter().compile(src, accel_config=accel_config, out_dir=tmp_path,
+                                 target=_E8_TARGET)
     assert blob.format == "vela_tflite"
     assert blob.payload[4:8] == b"TFL3"
     # A real (non-toy) model yields a real reported footprint.

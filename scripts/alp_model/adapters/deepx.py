@@ -28,7 +28,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from . import CompilerAdapter, Blob
+from . import CompilerAdapter, Blob, TargetSpec
 
 # dxcom does post-training quantization + compilation (torch/onnx under the
 # hood); minutes for a real model, but never unbounded in CI.
@@ -63,7 +63,7 @@ class DeepxAdapter(CompilerAdapter):
         return src_format == "onnx"          # dxcom is an ONNX frontend
 
     def compile(self, source: Path, *, accel_config: str, out_dir: Path,
-                opts: dict | None = None) -> Blob:
+                opts: dict | None = None, target: TargetSpec | None = None) -> Blob:
         config = (opts or {}).get("config")
         if not config:
             raise RuntimeError(

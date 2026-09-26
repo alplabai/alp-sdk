@@ -138,6 +138,37 @@ embedded in the Vela output is variant-specific.  Mismatch surfaces
 as a runtime ALP_ERR_IO from `alp_inference_invoke` once the v0.4
 i.MX 93 bring-up wires the NPU.
 
+**A vendor-tuned profile, if you have one (`ALP_VELA_CONFIG`).** The command
+above passes only Arm's own built-in `--memory-mode`; it never passes
+`--config`/`--system-config` because `imx93.json` names no vendor
+`System_Config` (see the DRAM-capacity note below). A licensed customer with
+their own vendor vela `.ini` -- which alp-sdk does not redistribute -- points
+`scripts/alp_model/build.py`'s `.alpmodel` pipeline at it via the
+`ALP_VELA_CONFIG` environment variable (a path, never a `board.yaml` field:
+where the file lives is a fact about this host, not this SoC). Unset, empty,
+or naming a file that does not exist all mean the same thing: no vendor
+config, and vela's own built-in system config is used.
+
+`ALP_VELA_CONFIG` is inert for this SoC specifically: it only ever reaches
+vela's command line alongside a `system_config` whose
+`system_config_requires_vendor_config` is `true`
+(`metadata/schemas/soc-spec-v1.schema.json`), and `imx93.json` sets that
+flag `false` and names no `system_config` at all -- so on i.MX 93 this
+variable never applies, set or not. AEN example builds configure the
+same kind of vendor `.ini` a different way entirely, via the CMake
+`AEN_NPU_VELA_CONFIG` variable
+(`examples/aen/aen-npu-inference/README.md`), not this env var.
+
+**E1M-NX9101 DRAM capacity -- TBD, deliberately (issue #2312 item 2).**
+`metadata/e1m_modules/E1M-NX9101.yaml`'s `memory.dram_mbit` stays `TBD`
+pending the authoritative hardware config (the maintainer's own
+decision to make, not one this pipeline should guess at). Until that
+lands, the `--memory-mode Shared_Sram` invocation above relies on
+vela's own DEFAULT `--system-config` (no `imx93.json`
+`npu_toolchain.vela.system_config` is set) -- `imx93.json` names no
+vendor `System_Config` today, so nothing is invented here; see the
+provenance note above for why `Shared_Sram` itself is already pinned.
+
 ### A55-side path (Linux / Yocto)
 
 In NXP's own shipped software stack, Linux on the Cortex-A55 does not

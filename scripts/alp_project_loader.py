@@ -669,10 +669,34 @@ def som_unpopulated_capabilities(sku_preset: dict[str, Any]) -> list[str]:
 
 @dataclass(frozen=True)
 class TargetSpec:
-    """One `.alpmodel` compile target: backend + owning silicon + vela accel-config."""
+    """One `.alpmodel` compile target: backend + owning silicon + vela accel-config.
+
+    The `vela_*` fields are the SoC spec's `npu_toolchain.vela` block
+    (metadata/schemas/soc-spec-v1.schema.json), resolved HERE from the open
+    SoC JSON and threaded to the ethos_u compiler adapter -- never re-read
+    from metadata/ inside the adapter, so a fact resolved once cannot
+    disagree with itself between the target and the artifact it produced
+    (mirrors tan-cli's `TargetSpec.vela_memory_mode`). All are "" / None
+    for a non-ethos_u target.
+
+    `vela_system_config` and `vela_vendor_system_config` are split by what is
+    SAFE TO PASS, per `system_config_requires_vendor_config`: the former is
+    an Arm built-in `System_Config` name that vela accepts on the command
+    line alone; the latter exists only inside a vendor `.ini` and is legal
+    only alongside a `--config` pointing at it (`ALP_VELA_CONFIG`). Exactly
+    one of the two is ever populated -- the adapter may put
+    `vela_system_config` on a command line unconditionally, and
+    `vela_vendor_system_config` only when a vendor config file is on hand,
+    because it is never handed a vendor-gated name in the field it passes
+    freely (mirrors tan-cli's `TargetSpec.vela_system_config` /
+    `vela_vendor_system_config` split, alp-sdk#2312)."""
     backend: str            # cpu | ethos_u | drpai | deepx_dxm1
     silicon_ref: str        # SoC ref e.g. "alif:ensemble:e7" | "deepx:dx:m1" | "*"
     accel_config: str       # vela accel-config e.g. "ethos-u55-256"; "" when N/A
+    vela_memory_mode: str = ""              # vela --memory-mode, e.g. "Sram_Only"; "" when unknown
+    vela_system_config: str | None = None          # built-in, safe to pass alone; None when unnamed
+    vela_vendor_system_config: str | None = None   # vendor-gated; needs --config alongside it
+    vela_vendor_config_filename: str | None = None  # basename only, e.g. "ensemble_vela.ini"
 
 
 def npu_backend(npu_type: str, subtype: str) -> str | None:
@@ -715,6 +739,7 @@ def accel_config(npu: dict, backend: str) -> str:
 
 def _soc_targets(soc: dict, silicon_ref: str) -> list[TargetSpec]:
     """One TargetSpec per mappable NPU in a SoC's npus[] (deduped by the caller)."""
+    vela = soc.get("npu_toolchain", {}).get("vela", {})
     out: list[TargetSpec] = []
     for npu in soc.get("npus", []):
         npu_type = npu.get("type", "")
@@ -722,7 +747,25 @@ def _soc_targets(soc: dict, silicon_ref: str) -> list[TargetSpec]:
         if backend is None:
             continue
         accel = accel_config(npu, backend)
-        out.append(TargetSpec(backend=backend, silicon_ref=silicon_ref, accel_config=accel))
+        kwargs = {}
+        if backend == "ethos_u":
+            named_system_config = vela.get("system_config")
+            # Fail CLOSED, not open: an ABSENT/non-False
+            # `system_config_requires_vendor_config` withholds the name from
+            # the safe-to-pass field, exactly as an explicit `true` does --
+            # the schema requires this key whenever a `vela` block exists, so
+            # a spec that omits it is malformed, and the safe reading of a
+            # malformed spec is "assume vendor-gated", not "assume built-in
+            # and put an unresolvable name on vela's command line" (a hard
+            # rc=1, mirrors tan-cli's `_vela_profile`).
+            requires_vendor_config = vela.get("system_config_requires_vendor_config") is not False
+            kwargs = dict(
+                vela_memory_mode=vela.get("memory_mode", ""),
+                vela_system_config=None if requires_vendor_config else named_system_config,
+                vela_vendor_system_config=named_system_config if requires_vendor_config else None,
+                vela_vendor_config_filename=vela.get("vendor_config_filename"),
+            )
+        out.append(TargetSpec(backend=backend, silicon_ref=silicon_ref, accel_config=accel, **kwargs))
     return out
 
 

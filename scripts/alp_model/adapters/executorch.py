@@ -27,7 +27,7 @@ ExecuTorch *runtime* backend (issue #1260 closes the write-side gap only --
 the SDK can now describe and produce an ExecuTorch blob, not yet run one)."""
 from __future__ import annotations
 from pathlib import Path
-from . import CompilerAdapter, Blob
+from . import CompilerAdapter, Blob, TargetSpec
 
 
 class ExecutorchAdapter(CompilerAdapter):
@@ -43,7 +43,8 @@ class ExecutorchAdapter(CompilerAdapter):
         # `models[].source` description names it explicitly (see there).
         return src_format == "pte"
 
-    def compile(self, source: Path, *, accel_config: str, out_dir: Path, opts: dict | None = None) -> Blob:
+    def compile(self, source: Path, *, accel_config: str, out_dir: Path,
+                opts: dict | None = None, target: TargetSpec | None = None) -> Blob:
         payload = source.read_bytes()
         return Blob(format="executorch", payload=payload, arena_bytes=0,
                     compiler_version="passthrough")
