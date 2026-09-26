@@ -46,12 +46,17 @@ EOF
 bench_jlink_assert_connected /tmp/reread-preflight.out "re-read preflight" || exit 7
 bench_jlink_assert_aen_dpidr /tmp/reread-preflight.out "re-read preflight" || exit 4
 
-cat > /tmp/rr.jlink <<EOF
-connect
-halt
-mem8 $BUF, $SIZE
-qc
-EOF
+# mem8 is chunked at 0x10000 bytes (JLinkExe rejects a single NumBytes above
+# that, alp-sdk#2313) via the shared bench_mem8_chunks() helper -- see its
+# header comment in bench-env.sh. The decoder below is unaffected: it scans
+# every matching 'ADDR = HH HH ...' line in file order, which is address order.
+MEM8_LINES="$(bench_mem8_chunks "$BUF" "$SIZE")" || exit $?
+{
+	echo connect
+	echo halt
+	printf '%s\n' "$MEM8_LINES"
+	echo qc
+} > /tmp/rr.jlink
 "${JLINK_ARGS[@]}" -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommanderScript /tmp/rr.jlink 2>/dev/null > /tmp/rr.out || true
 # JLinkExe exits 0 even when it never opened the probe, so `|| true` above
 # hides a total connect failure and the decode below would render it as

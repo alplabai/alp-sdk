@@ -954,6 +954,57 @@ bench_jlink_assert_connected() {
 	return 0
 }
 
+# --------------------------------------------------------------------
+# mem8 chunking (alp-sdk#2313)
+# --------------------------------------------------------------------
+
+# bench_mem8_chunks <addr> <size> -- echo one JLinkExe 'mem8 <addr>, <len>'
+# line per chunk, each chunk capped at 0x10000 bytes. JLinkExe itself
+# refuses a single 'mem8' whose NumBytes exceeds 0x10000 ("NumBytes should
+# be <= 0x10000"), so a bare `mem8 <buf>, <size>` for any RAM console
+# bigger than 64 KiB returned NOTHING at all -- silently, which is why
+# aen-inference-energy shrank its buffer to exactly 0x10000 rather than
+# fix the read (alp-sdk#2313).
+#
+# <addr>/<size> may be anything bash arithmetic accepts (0x-prefixed hex or
+# decimal). Addresses advance by each chunk's own length, so the chunks
+# concatenate with no gap/overlap and in strictly increasing address order.
+# A caller embeds this function's output where it used to write a single
+# 'mem8' line; the existing line-oriented decoders (ram-run.sh, reread.sh)
+# already handle N dump blocks unchanged -- they scan every matching
+# 'ADDR = HH HH ...' line in FILE order, and file order here IS address
+# order, so nothing downstream of the CommandFile needs to change.
+bench_mem8_chunks() {
+	local addr="$1" size="$2"
+	local addr_dec size_dec remain chunk off=0
+
+	if [ -z "$addr" ] || [ -z "$size" ]; then
+		echo "bench-env: bench_mem8_chunks: usage: bench_mem8_chunks <addr> <size>" >&2
+		return 1
+	fi
+	addr_dec=$((addr)) || {
+		echo "bench-env: bench_mem8_chunks: addr '$addr' is not a valid arithmetic value" >&2
+		return 1
+	}
+	size_dec=$((size)) || {
+		echo "bench-env: bench_mem8_chunks: size '$size' is not a valid arithmetic value" >&2
+		return 1
+	}
+	if [ "$size_dec" -le 0 ]; then
+		echo "bench-env: bench_mem8_chunks: size must be > 0, got '$size'" >&2
+		return 1
+	fi
+
+	remain=$size_dec
+	while [ "$remain" -gt 0 ]; do
+		chunk=$remain
+		[ "$chunk" -gt 65536 ] && chunk=65536
+		printf 'mem8 0x%X, 0x%X\n' $((addr_dec + off)) "$chunk"
+		off=$((off + chunk))
+		remain=$((remain - chunk))
+	done
+}
+
 # bench_require_setools — guard for Flow A/D. Errors (exit 2) if
 # SETOOLS_DIR is unset or doesn't look like a SETOOLS install. SETOOLS
 # is license-gated and NOT shipped with alp-sdk; this is the single

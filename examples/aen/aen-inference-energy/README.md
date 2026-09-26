@@ -101,10 +101,11 @@ sized to exactly the JLinkExe single-`mem8` cap (see
 `docs/aen-bench-bringup.md`) with headroom for the default knobs; the default
 `reread.sh` read size would truncate the capture mid-window. Raise
 `AEN_ENERGY_SAMPLES_PER_WINDOW` or `AEN_ENERGY_WINDOW_PAIRS` past the documented
-default and the capture can exceed both the buffer AND the single-read cap —
-read it back in two `mem8` calls at that point (halve the buffer address range
-across two `reread.sh`-style sessions), not by passing a size above `0x10000`
-(JLinkExe rejects `NumBytes > 0x10000` outright).
+default and the capture can exceed the buffer — `reread.sh` and `ram-run.sh`
+now chunk any read above `0x10000` automatically (alp-sdk#2313, via
+`bench_mem8_chunks()` in `bench-env.sh`), so passing a size above `0x10000` to
+either script is fine; JLinkExe's own `NumBytes > 0x10000` rejection no longer
+applies at this layer.
 
 ## Fast iteration — tiny model, Flow C (no MRAM write)
 

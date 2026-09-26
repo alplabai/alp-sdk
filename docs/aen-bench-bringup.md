@@ -279,17 +279,16 @@ J-Link, then ASCII-decode. Have each test print one `RESULT PASS: ...` /
 `RESULT FAIL: ...` line. SEGGER **RTT** is the live-terminal alternative over the
 same SWD link.
 
-> **A single `mem8` may not exceed `0x10000`.** Beyond that JLinkExe answers
-> `NumBytes should be <= 0x10000` and reads NOTHING, while the CommanderScript
-> keeps going — so an app with a large `CONFIG_RAM_CONSOLE_BUFFER_SIZE` reads
-> back empty on the first try and looks like it crashed. `ram-run.sh` and
-> `reread.sh` do **not** currently split a read across the `0x10000` boundary
-> (checked against this repo's scripts, not assumed), so `CONFIG_RAM_CONSOLE_BUFFER_SIZE`
-> is a real design constraint, not just a link-time number — an app that
-> needs more than one `mem8`'s worth of console (`examples/aen/aen-inference-energy`
-> sizes its buffer to exactly `0x10000` to stay inside a single read at its
-> documented default knobs) needs a manual multi-`mem8` session, or the
-> helpers extended to chunk, if a future config pushes it past the cap.
+> **A single `mem8` may not exceed `0x10000`.** JLinkExe itself refuses any
+> `NumBytes` above that with `NumBytes should be <= 0x10000` and reads
+> NOTHING for that one command, while the CommanderScript keeps going.
+> `ram-run.sh` and `reread.sh` (alp-sdk#2313) now split a read wider than
+> `0x10000` into multiple `mem8` calls automatically, via the shared
+> `bench_mem8_chunks()` helper in `bench-env.sh` — a `CONFIG_RAM_CONSOLE_BUFFER_SIZE`
+> above `0x10000` (e.g. beyond `examples/aen/aen-inference-energy`'s own
+> `0x10000` default) reads back correctly through either script with no
+> manual multi-`mem8` session required. A hand-rolled JLinkExe session
+> outside these two helpers still needs to chunk by hand.
 >
 > **Also note a J-Link `qc` leaves the core HALTED.** Every read here ends in
 > `qc`, so reading a still-running app freezes it part-way and truncates its

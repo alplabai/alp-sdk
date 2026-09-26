@@ -532,11 +532,17 @@ sleep "$SLEEP_S"
 # "memory reads work while the CPU runs; register reads error out
 # harmlessly"). Adding a halt here would reintroduce the in-session halt
 # this fix removes, just moved into the second session.
-cat > "$WORKDIR/read.jlink" <<EOF
-connect
-mem8 $BUF, $SIZE
-exit
-EOF
+# mem8 is chunked at 0x10000 bytes (JLinkExe rejects a single NumBytes above
+# that, alp-sdk#2313) via the shared bench_mem8_chunks() helper -- a $SIZE
+# above 0x10000 becomes N 'mem8' lines here instead of one that JLinkExe
+# would reject outright. The decoder below is unaffected: it scans every
+# matching 'ADDR = HH HH ...' line in file order, which is address order.
+MEM8_LINES="$(bench_mem8_chunks "$BUF" "$SIZE")" || exit $?
+{
+	echo connect
+	printf '%s\n' "$MEM8_LINES"
+	echo exit
+} > "$WORKDIR/read.jlink"
 # stderr merged, same reason as session 1 above.
 jlink_run -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommandFile "$WORKDIR/read.jlink" > "$WORKDIR/read.out" 2>&1 || true
 # JLinkExe exits 0 even when it never opened the probe, so the `|| true` above

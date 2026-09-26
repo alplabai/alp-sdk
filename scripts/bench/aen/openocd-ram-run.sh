@@ -144,6 +144,33 @@ if (( 0x$WORD1 >= 0x80000000 )); then
 	exit 1
 fi
 
+# NVIC_CLEAR_CMDS -- clear every NVIC ICER (Interrupt Clear-Enable) and ICPR
+# (Interrupt Clear-Pending) register before resuming the freshly loaded image
+# (alp-sdk#2313). A RAM-run lands on a core that may still carry a RESIDENT
+# app's interrupt state: if that app left an IRQ enabled (or merely pending)
+# at the NVIC, the freshly loaded image runs straight into that app's ISR the
+# instant IRQs are unmasked -- seen on E1M-AEN803 2026W36-0009: IRQn 333
+# (CDC_SCANLINE0) with the core stuck at IPSR 0x15D. The MSPLIM/PSPLIM
+# clearing above already puts the STACK state back to a cold-reset shape;
+# this puts the INTERRUPT state back the same way. 16 words each covers IRQ
+# 0-511 (16*32), comfortably past the E8's highest defined IRQ (480) --
+# ICER/ICPR are both write-1-to-clear, so writing 0xFFFFFFFF to all 16 is
+# unconditionally safe (an already-disabled/non-pending bit is unaffected).
+# Shared by both cores (CORE=hp/he use the same $CMDS array below): a
+# resident app's ISR storm is not HE-specific, and clearing these on a core
+# that had nothing pending is a no-op, so there is no reason to special-case
+# HP out of it.
+NVIC_CLEAR_CMDS=()
+for _n in $(seq 0 15); do
+	_icer_addr=$(printf '0x%X' $((0xE000E180 + 4 * _n)))
+	NVIC_CLEAR_CMDS+=(-c "mww $_icer_addr 0xFFFFFFFF")
+done
+for _n in $(seq 0 15); do
+	_icpr_addr=$(printf '0x%X' $((0xE000E280 + 4 * _n)))
+	NVIC_CLEAR_CMDS+=(-c "mww $_icpr_addr 0xFFFFFFFF")
+done
+unset _n _icer_addr _icpr_addr
+
 NAME=$(basename "$BD")
 if [ "$CORE" = "he" ]; then
 	AP="0x00300000"
@@ -232,6 +259,9 @@ CMDS=(
 	# rather than as the stale-register problem it is.
 	-c "reg psplim_s 0x00000000"
 	-c "reg psplim_ns 0x00000000"
+	# Clear all NVIC enables/pendings (alp-sdk#2313) -- see NVIC_CLEAR_CMDS'
+	# own header comment above for why this must happen before resume.
+	"${NVIC_CLEAR_CMDS[@]}"
 	# ...and the EXCEPTION state, for the same reason. A RAM-run lands on a
 	# core that is usually still running the previous app -- and if that app
 	# died in a fault, the core is sitting in Handler mode with the HardFault
