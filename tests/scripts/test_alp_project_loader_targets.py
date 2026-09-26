@@ -143,7 +143,7 @@ def test_resolve_targets_aen801_has_three_distinct_ethos_configs():
     assert ethos == {"ethos-u85-256", "ethos-u55-256", "ethos-u55-128"}
 
 
-# Vela's documented --accelerator-config choices (ethos-u-vela 5.1.0; the same
+# Vela's documented --accelerator-config choices (ethos-u-vela 5.2.0; the same
 # set Vela prints when handed a bogus config).  A resolved ethos_u accel_config
 # outside this set would be silently rejected by Vela at compile/bench time, so
 # this closes the metadata({npu_type}-{mac_per_cycle}) -> Vela contract.
