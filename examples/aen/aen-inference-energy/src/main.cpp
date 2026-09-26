@@ -875,8 +875,14 @@ int main(void)
 
 	const float power_lsb_w = ina236_power_lsb_w(&mon);
 
+	/* current_lsb_a / power_lsb_w are the host's multipliers -- see the
+	 * CONFIG_CBPRINTF_FP_SUPPORT comment in prj.conf -- so they print at full
+	 * float precision (%.9g: a float has ~7.2 decimal digits of precision,
+	 * 9 significant digits round-trips it exactly).  %f's 6-digit default
+	 * truncated 0.0000312500 (31.25 uA/count) to 0.000031, an 0.8% error the
+	 * host then baked into every current/power sample downstream. */
 	printk("ENERGY-CFG {\"rail\":\"%s\",\"addr\":%u,\"shunt_ohms\":%f,"
-	       "\"current_lsb_a\":%f,\"power_lsb_w\":%f,\"adcrange\":%d,\"avg\":%u,"
+	       "\"current_lsb_a\":%.9g,\"power_lsb_w\":%.9g,\"adcrange\":%d,\"avg\":%u,"
 	       "\"vbusct_us\":%u,\"vshct_us\":%u,\"sample_period_us\":%u,"
 	       "\"cycles_per_s\":%u,\"samples_per_window\":%u,\"windows\":%u,"
 	       "\"npu_dispatched\":%s,\"baseline\":\"cpu-spin-npu-idle\","
@@ -1054,7 +1060,19 @@ int main(void)
 		printk("null}\n");
 	}
 
-	if (mean > 0.0f) {
+	/* The pair-to-pair mean needs the same significance bar the per-rail scan
+	 * already applies (NOISE_SIGMA standard errors, see the `scan_result`
+	 * comment above): with >= 2 pairs the standard error of the MEAN is
+	 * `spread / sqrt(pairs_used)`, and a mean that does not clear
+	 * NOISE_SIGMA times that SE is indistinguishable from noise even when it
+	 * is positive -- the tiny_int8 fixture reliably lands here (mean and
+	 * spread both ~7e-5 mJ).  With exactly one pair there is no spread to
+	 * test against, so the best available check is `mean > 0`. */
+	bool resolvable = have_spread
+	                      ? (mean > NOISE_SIGMA * (spread / __builtin_sqrtf((float)pairs_used)))
+	                      : (mean > 0.0f);
+
+	if (resolvable) {
 		printk("RESULT PASS: %f mJ/inference (+/-%f) rail=%s n=%u pairs=%u/%u "
 		       "all_pairs_ok=%d\n",
 		       (double)mean,
@@ -1065,9 +1083,11 @@ int main(void)
 		       (unsigned)WINDOW_PAIRS,
 		       (int)all_ok);
 	} else {
-		/* A non-positive delta is a real outcome, not a crash: it means the
-		 * inference load did not rise above this rail's noise.  Reporting it
-		 * as FAIL keeps a meaningless number from being quoted as a result. */
+		/* An unresolvable delta is a real outcome, not a crash: it means the
+		 * inference load did not rise above this rail's noise (including the
+		 * case where the raw mean is positive but smaller than its own error
+		 * bar).  Reporting it as FAIL keeps a meaningless number from being
+		 * quoted as a result. */
 		printk("RESULT FAIL: delta not resolvable -- mean=%f spread=%f all_windows_ok=%d "
 		       "rail=%s (inference load below this rail's noise, or wrong rail)\n",
 		       (double)mean,

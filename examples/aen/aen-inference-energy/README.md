@@ -117,6 +117,37 @@ Expect `RESULT FAIL: delta not resolvable` — see "Model choice". This build
 proves the I2C bus, the rail scan, the NPU dispatch and the sampling loop, which
 is what you want when iterating on the app rather than on a measurement.
 
+**Caveat -- a resident ATOC can steer `ram-run.sh` onto the wrong core.**
+`ram-run.sh` attaches by AP index, and on a board whose flash already carries
+an ATOC that boots `HP_APP` (seen on AEN803 evk-01), that AP can resolve to the
+M55-HP rather than the M55-HE this app targets. Before trusting a RAM-run
+result:
+
+- Confirm the target core first: in the attached context, HE ITCM at
+  `0x58000000` must be readable and `0x50000000` must NOT be (that address is
+  HP's ITCM, not HE's). If it comes back the other way round, the wrong core
+  is attached.
+- A clean HE run under a resident ATOC needs a real core reset, not just a
+  RAM load: halt HE, set DEMCR (`0xE000EDFC`) = `0x01100001` (VC_CORERESET),
+  set AIRCR (`0xE000ED0C`) = `0x05FA0004`, reload the image, zero
+  MSPLIM/PSPLIM, set MSP/PC/xPSR from the vector table, then resume. Also
+  clear the NVIC enable/pending state first — the resident app can leave an
+  IRQ enabled (IRQ 333 / CDC_SCANLINE0 was seen left enabled), which fires
+  into the freshly loaded image before it has installed its own handlers.
+- Simplest fix: run from a board or ATOC slot with no resident image, which
+  sidesteps the whole class of trap.
+
+This is a caveat on the *procedure*, not a change to
+`scripts/bench/aen/ram-run.sh` itself — that script is unchanged.
+
+**Rail baseline is per-carrier, not universal.** On AEN803 + the LCD panel,
+the idle +5V rail read ~2.2 W (POWER register mean 2.2060 W), versus ~0.45 W
+implied by [`docs/measuring-inference-energy.md`](../../../docs/measuring-inference-energy.md)'s
+"The measured result" idle window (~495.6 mJ / ~1.10 s) on the bare AEN801
+bench. That is an observation about THIS carrier's load (SoM + LCD + carrier
+all on one +5V rail — see "Hardware fact" above), not a new headline number:
+the LCD, not the SoC, is most of the difference.
+
 ## Knobs
 
 All are CMake cache variables forwarded to the compiler by `CMakeLists.txt`
