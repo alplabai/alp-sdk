@@ -119,7 +119,7 @@ is what you want when iterating on the app rather than on a measurement.
 
 **Caveat -- a resident ATOC can steer `ram-run.sh` onto the wrong core.**
 `ram-run.sh` attaches by AP index, and on a board whose flash already carries
-an ATOC that boots `HP_APP` (seen on AEN803 evk-01), that AP can resolve to the
+an ATOC that boots `HP_APP` (seen on an E1M-AEN803 EVK), that AP can resolve to the
 M55-HP rather than the M55-HE this app targets. Before trusting a RAM-run
 result:
 
