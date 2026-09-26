@@ -489,8 +489,7 @@ int main(void)
 
 			if (rc == ALP_OK) {
 				capture_fail_consec = 0;
-				jpeg_req_from_packed(
-				    &req, pixfmt, frame.data, FRAME_W, FRAME_H, current_quality);
+				jpeg_req_from_packed(&req, pixfmt, frame.data, FRAME_W, FRAME_H, current_quality);
 				have_frame = true;
 			} else {
 				if (rate_limited(&capture_fail_last_log, &capture_fail_count)) {

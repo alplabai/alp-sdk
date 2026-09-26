@@ -159,8 +159,7 @@ struct video_cam_data {
 	struct k_mutex lock;
 
 	/*
-	 * #2287 Stage B unit 3 (bench runs 307-310, stall-recovery gap the same round's advisor
-	 * review flagged): in ISP-consumer mode, isp_pico.c is the ONLY thing that re-arms the CPI
+	 * #2287 Stage B (stall-recovery gap found in bench runs 307-310): in ISP-consumer mode, isp_pico.c is the ONLY thing that re-arms the CPI
 	 * (isp_bottom_half()'s successful-attach path, alif_cam_cpi_resume()) -- but
 	 * alif_video_cam_isr()'s own corrupted-frame path (INTR_OUTFIFO_OVERRUN/
 	 * INTR_INFIFO_OVERRUN/INTR_BRESP_ERR) never reaches the ISP's frame-end interrupt at all

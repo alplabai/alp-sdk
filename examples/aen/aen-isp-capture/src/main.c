@@ -259,8 +259,7 @@ static int ov5647_read_reg8(const struct i2c_dt_spec *i2c, uint16_t reg, uint8_t
  * datasheet's "Register List" tables) -- guarded on IMX296_NODE existing, matching
  * print_imx296_ae_regs()'s own #if below, its only caller. */
 #if DT_NODE_EXISTS(IMX296_NODE)
-static int imx296_read_reg_le(const struct i2c_dt_spec *i2c, uint16_t reg, uint8_t *vals,
-			       size_t n)
+static int imx296_read_reg_le(const struct i2c_dt_spec *i2c, uint16_t reg, uint8_t *vals, size_t n)
 {
 	uint8_t reg_be[2] = { (uint8_t)(reg >> 8), (uint8_t)(reg & 0xFF) };
 
@@ -364,13 +363,12 @@ static void print_ov5647_ae_regs(int f)
 #if DT_NODE_EXISTS(IMX296_NODE)
 static void print_imx296_ae_regs(int f)
 {
-	const struct i2c_dt_spec i2c = I2C_DT_SPEC_GET(IMX296_NODE);
-	uint8_t                  shs_le[3] = { 0 };
+	const struct i2c_dt_spec i2c        = I2C_DT_SPEC_GET(IMX296_NODE);
+	uint8_t                  shs_le[3]  = { 0 };
 	uint8_t                  gain_le[2] = { 0 };
-	int                      rc_shs  = imx296_read_reg_le(&i2c, 0x308D, shs_le, sizeof(shs_le));
+	int                      rc_shs     = imx296_read_reg_le(&i2c, 0x308D, shs_le, sizeof(shs_le));
 	int                      rc_gain = imx296_read_reg_le(&i2c, 0x3204, gain_le, sizeof(gain_le));
-	uint32_t shs  = (uint32_t)shs_le[0] | ((uint32_t)shs_le[1] << 8) |
-			((uint32_t)shs_le[2] << 16);
+	uint32_t shs  = (uint32_t)shs_le[0] | ((uint32_t)shs_le[1] << 8) | ((uint32_t)shs_le[2] << 16);
 	uint32_t gain = (uint32_t)gain_le[0] | ((uint32_t)gain_le[1] << 8);
 	/* lines_per_frame == IMX296_VMAX (1118, imx296.c) at this driver's one fixed frame rate --
 	 * see imx296_ae_envelope.h's IMX296_AE_FULL_LINES for the same figure. exposure(lines) =
@@ -519,8 +517,8 @@ int main(void)
 	}
 #endif
 
-#if defined(AEN_ISP_IMX296) && DT_NODE_EXISTS(IMX296_NODE) &&                                    \
-	(defined(AEN_ISP_IMX296_EXPOSURE_LINES) || defined(AEN_ISP_IMX296_GAIN))
+#if defined(AEN_ISP_IMX296) && DT_NODE_EXISTS(IMX296_NODE) && \
+    (defined(AEN_ISP_IMX296_EXPOSURE_LINES) || defined(AEN_ISP_IMX296_GAIN))
 	/*
 	 * Pin a SPECIFIC manual exposure/gain combination directly on the sensor -- independent
 	 * of whatever AE would have converged to -- since SHS and gain otherwise always move
@@ -559,10 +557,10 @@ int main(void)
 		const struct i2c_dt_spec i2c        = I2C_DT_SPEC_GET(IMX296_NODE);
 		uint8_t                  shs_le[3]  = { 0 };
 		uint8_t                  gain_le[2] = { 0 };
-		int rc_shs  = imx296_read_reg_le(&i2c, 0x308D, shs_le, sizeof(shs_le));
-		int rc_gain = imx296_read_reg_le(&i2c, 0x3204, gain_le, sizeof(gain_le));
+		int                      rc_shs = imx296_read_reg_le(&i2c, 0x308D, shs_le, sizeof(shs_le));
+		int      rc_gain = imx296_read_reg_le(&i2c, 0x3204, gain_le, sizeof(gain_le));
 		uint32_t shs =
-			(uint32_t)shs_le[0] | ((uint32_t)shs_le[1] << 8) | ((uint32_t)shs_le[2] << 16);
+		    (uint32_t)shs_le[0] | ((uint32_t)shs_le[1] << 8) | ((uint32_t)shs_le[2] << 16);
 		uint32_t gain = (uint32_t)gain_le[0] | ((uint32_t)gain_le[1] << 8);
 
 		printk("imx296 control-capture readback: SHS(0x308d-f)=0x%06x (rc=%d) "

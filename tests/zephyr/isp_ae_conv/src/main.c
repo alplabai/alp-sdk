@@ -57,8 +57,8 @@ ZTEST(isp_ae_conv, test_db_tenths_clamps)
 {
 	zassert_equal(isp_sns_gain_db_tenths_to_lib(9999), 257217, "reg > 480 clamps to table[480]");
 	zassert_equal(isp_sns_gain_lib_to_db_tenths(0), 0, "gain below table[0] clamps to reg 0");
-	zassert_equal(isp_sns_gain_lib_to_db_tenths(UINT32_MAX), 480,
-		      "gain above table[480] clamps to reg 480");
+	zassert_equal(
+	    isp_sns_gain_lib_to_db_tenths(UINT32_MAX), 480, "gain above table[480] clamps to reg 480");
 }
 
 /* OV5647's linear AGC_GAIN path (register value directly proportional to gain, reg_per_1x = 16):
@@ -98,10 +98,13 @@ ZTEST(isp_ae_conv, test_db_tenths_table_monotonic_and_round_trips)
 
 		if (reg > 0) {
 			zassert_true(lib > isp_sns_gain_db_tenths_to_lib(reg - 1),
-				     "table[%u] must be strictly greater than table[%u]", reg,
-				     reg - 1);
+			             "table[%u] must be strictly greater than table[%u]",
+			             reg,
+			             reg - 1);
 		}
-		zassert_equal(isp_sns_gain_lib_to_db_tenths(lib), reg,
-			      "table[%u] -> lib -> reg round-trip landed on a different reg", reg);
+		zassert_equal(isp_sns_gain_lib_to_db_tenths(lib),
+		              reg,
+		              "table[%u] -> lib -> reg round-trip landed on a different reg",
+		              reg);
 	}
 }
