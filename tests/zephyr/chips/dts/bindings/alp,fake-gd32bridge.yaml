@@ -1,0 +1,16 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Fake GD32G553 supervisor-MCU bridge i2c-emul target.  Lives in this
+# test only.
+
+description: |
+  Fake GD32 bridge i2c-emul target used by the alp-sdk chips ztest.
+  Models PING/GET_VERSION over the wire framing in
+  docs/gd32-bridge-protocol.md §5, including the short error-envelope
+  shape a real bridge answers with while it is BUSY -- used to drive
+  gd32g553_init()'s post-OTA-trial retry ladder (chips/gd32g553/gd32g553.c).
+
+compatible: "alp,fake-gd32bridge"
+
+include: i2c-device.yaml

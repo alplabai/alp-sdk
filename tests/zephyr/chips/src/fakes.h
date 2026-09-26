@@ -199,6 +199,43 @@ void fake_tas2563_fail_write_at(uint8_t book, uint8_t page, uint8_t reg);
  *  log, the counters, the book/page selection and any armed fault. */
 void fake_tas2563_reset(void);
 
+/* ------------------------------------------------------------------ */
+/* fake GD32G553 supervisor-MCU bridge (PING/GET_VERSION only)         */
+/* ------------------------------------------------------------------ */
+/* Models the OTA post-COMMIT/ROLLBACK TRIAL window's STATUS_BUSY reply
+ * (and the confirm-triggered second reset's raw link drop) -- see
+ * fake_gd32bridge.c. */
+
+void fake_gd32bridge_set_version(uint8_t major, uint8_t minor, uint8_t patch);
+
+/** Answer the given wire status byte (short error envelope) to the
+ *  next @p count requests regardless of opcode, then resume normal
+ *  replies.  Answered BEFORE any armed io failures (see
+ *  fake_gd32bridge.c's header comment for why that ordering matches
+ *  the real TRIAL-window sequence). */
+void fake_gd32bridge_arm_status_replies(uint8_t wire_status, unsigned count);
+
+/** Convenience wrapper: fake_gd32bridge_arm_status_replies(STATUS_BUSY, count). */
+void fake_gd32bridge_arm_busy_replies(unsigned count);
+
+/** Fail the next @p count bus transactions at the transport level
+ *  (-EIO, no reply at all) -- models the second reset's link drop.
+ *  Consumed only after any armed status replies are exhausted. */
+void fake_gd32bridge_arm_io_failures(unsigned count);
+
+/** Total decoded (non-io-failed) requests seen since the last reset. */
+uint32_t fake_gd32bridge_calls_seen(void);
+
+/** Total bus transactions attempted since the last reset, INCLUDING
+ *  ones that failed at the transport level (io failures) -- use this
+ *  to prove a call failed fast (e.g. exactly 1 attempt) when
+ *  fake_gd32bridge_calls_seen() alone can't distinguish "never tried"
+ *  from "tried once and transport-failed". */
+uint32_t fake_gd32bridge_attempts_seen(void);
+
+/** Reset version, armed faults and the counters to defaults. */
+void fake_gd32bridge_reset(void);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

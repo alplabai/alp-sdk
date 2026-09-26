@@ -1098,6 +1098,27 @@ typedef struct {
  *                         legacy 8-byte BEGIN (version unknown) --
  *                         wire-compatible with pre-v0.7 firmware in
  *                         both pairings (protocol v0.7 additive form).
+ *                         The bridge treats an unknown version as a
+ *                         reason to boot the committed image into the
+ *                         TRIAL state (see @ref gd32g553_ota_commit) --
+ *                         desirable for a manual/dev flash where the
+ *                         version isn't tracked; @ref gd32g553_init
+ *                         rides out the resulting STATUS_BUSY window
+ *                         on its own.  This is only right for an
+ *                         INCOMING image that is ITSELF trial-capable
+ *                         (firmware release >= 0.2.14): an older image
+ *                         committed this way still boots into TRIAL,
+ *                         never confirms itself (it has no confirm
+ *                         logic to run), and the bootloader reverts it
+ *                         ~33 s later on FWDGT expiry.  To install an
+ *                         older image that must actually survive,
+ *                         pass its real, known version instead --
+ *                         a KNOWN version below 0.2.14 is a deliberate
+ *                         downgrade guard: the bridge commits/rolls
+ *                         back to it WITHOUT the TRIAL dance at all
+ *                         (no STATUS_BUSY window), since an image that
+ *                         predates the confirm protocol could never
+ *                         satisfy it.
  * @param chunk_max_bytes  Out: chunk size the firmware accepts in
  *                         a single @ref gd32g553_ota_write_chunk.
  * @param target_slot      Out: slot the bridge will write into.
@@ -1185,10 +1206,28 @@ alp_status_t gd32g553_ota_image_crc32(const uint8_t *image, size_t len, uint32_t
  * @brief Stage a metadata-page flip and reset the bridge.
  *
  * On reboot the bootloader sees the pending flip, applies it
- * atomically, and starts the new slot.  The SPI / I2C link drops
- * during the reset; the host MUST re-issue @ref gd32g553_init after
- * a short delay (typically a few hundred milliseconds for the
- * bridge to come back online).
+ * atomically, and starts the new slot -- but not yet as CONFIRMED
+ * (only when the committed image is itself trial-capable, firmware
+ * release >= 0.2.14; see @ref gd32g553_ota_begin's @p fw_version
+ * doc for the downgrade-guard case that skips this entirely): the
+ * newly-booted image runs in a TRIAL state and answers STATUS_BUSY to
+ * every opcode (PING/GET_VERSION included) until it decodes its first
+ * CRC-valid frame, which confirms the trial and triggers a SECOND
+ * reset before the link comes back for good
+ * (docs/gd32-bridge-protocol.md §10).  If no valid frame lands within
+ * the bootloader's watchdog window the bootloader reverts to the
+ * previous slot instead -- but ONLY if the bootloader itself
+ * implements the watchdog-revert protection; an old bootloader paired
+ * with a new, trial-capable app still runs the TRIAL/BUSY dance (the
+ * app side alone drives that) but never reverts a hung image, so
+ * bootloader and app must ship together for the safety net to
+ * actually apply.  The SPI / I2C link drops during both resets; the
+ * host MUST re-issue @ref gd32g553_init after a short delay -- it
+ * already rides out the STATUS_BUSY / transient-transport window this
+ * produces (retrying ALP_ERR_IO/ALP_ERR_TIMEOUT only once it has
+ * itself observed at least one ALP_ERR_BUSY in the same init() call,
+ * so an absent bridge still fails fast), so a plain re-init is the
+ * whole contract.
  */
 alp_status_t gd32g553_ota_commit(gd32g553_t *ctx);
 
@@ -1196,8 +1235,8 @@ alp_status_t gd32g553_ota_commit(gd32g553_t *ctx);
  * @brief Roll back to the previously-active slot (used after a
  *        committed upgrade bricks the application).
  *
- * Like @ref gd32g553_ota_commit, this resets the bridge and the host
- * must re-init the driver.
+ * Like @ref gd32g553_ota_commit, this resets the bridge into the same
+ * TRIAL-then-confirm sequence and the host must re-init the driver.
  */
 alp_status_t gd32g553_ota_rollback(gd32g553_t *ctx);
 
@@ -1208,6 +1247,13 @@ alp_status_t gd32g553_ota_rollback(gd32g553_t *ctx);
  * Safe to call at any time -- doesn't perturb the chip state.
  * Answers concretely today even on scaffold firmware: the firmware
  * handler reads its own in-RAM session struct + the metadata page.
+ *
+ * Unlike @ref gd32g553_init, this call does NOT retry on
+ * STATUS_BUSY/transient transport errors -- calling it inside the
+ * post-COMMIT/ROLLBACK trial window (docs/gd32-bridge-protocol.md
+ * §10) surfaces `ALP_ERR_BUSY` or `ALP_ERR_IO` exactly once. Re-init
+ * with @ref gd32g553_init first (which rides out that window), then
+ * call this to inspect the confirmed state.
  *
  * @param ctx  GD32G553 bridge context (must be initialised first).
  * @param out  Populated on @ref ALP_OK.  May not be NULL.
