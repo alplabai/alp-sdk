@@ -175,8 +175,8 @@ def test_execute_skipped_power_on_test_records_pending_hw_not_pass(tmp_path, mon
     _record directly would bypass that wiring entirely.
 
     flash:bl2/flash:fip need real hardware under --execute
-    (xspi_flashwriter's real-write branch requires a real Flash Writer
-    .mot and pyserial), which #1276 has nothing to do with, so _flash is
+    (renesas_flashwriter_scif refuses a confirmed write), which #1276
+    has nothing to do with, so _flash is
     stubbed to an immediate pass; validate, eeprom, test, and record all
     run for real."""
     d = _make_bundle(tmp_path)   # bootloader-only, no --carrier/--hil-spec

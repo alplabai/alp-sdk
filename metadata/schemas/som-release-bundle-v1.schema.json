@@ -22,17 +22,31 @@
         "additionalProperties": false,
         "required": ["role", "file", "sha256", "size_bytes", "flash_target"],
         "properties": {
-          "role": { "type": "string", "enum": ["bl2", "fip", "system_image"] },
+          "role": { "type": "string", "enum": ["bl2", "bl2_mmc", "fip", "system_image"] },
           "file": { "type": "string", "minLength": 1 },
           "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
           "size_bytes": { "type": "integer", "minimum": 1 },
-          "flash_target": { "type": "string", "enum": ["xspi:mtd0", "xspi:mtd1", "emmc"] }
-        }
+          "flash_target": { "type": "string", "enum": ["xspi:mtd0", "xspi:mtd1", "emmc", "emmc:boot1"] }
+        },
+        "description": "bl2_mmc is the eMMC-boot BL2 (bl2_bp_mmc) and is the only role flashed to emmc:boot1.",
+        "if": { "properties": { "role": { "const": "bl2_mmc" } }, "required": ["role"] },
+        "then": { "properties": { "flash_target": { "const": "emmc:boot1" } } },
+        "else": { "properties": { "flash_target": { "not": { "const": "emmc:boot1" } } } }
       },
       "allOf": [
         { "contains": { "type": "object", "properties": { "role": { "const": "bl2" } }, "required": ["role"] } },
         { "contains": { "type": "object", "properties": { "role": { "const": "fip" } }, "required": ["role"] } }
       ]
+    },
+    "memory_tier": {
+      "description": "Optional. The DRAM tier the BL2 images in this bundle were built for; one leg of the provisioning DDR tier check. label names the tier (two tiers can share one dram_mbit, so only the label tells them apart).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dram_mbit"],
+      "properties": {
+        "dram_mbit": { "type": "integer", "minimum": 1 },
+        "label": { "type": "string", "pattern": "^[A-Za-z0-9]+$" }
+      }
     },
     "provenance": {
       "type": "object",

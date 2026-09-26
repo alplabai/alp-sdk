@@ -182,3 +182,62 @@ def test_malformed_pubkey_is_clean_fail(tmp_path):
     assert proc.returncode != 0
     assert "cannot load public key" in proc.stdout
     assert "Traceback" not in proc.stderr
+
+
+# --- V2N provisioning extensions: bl2_mmc -> emmc:boot1, optional memory_tier ---
+
+def _v2n_bundle():
+    b = _valid_bundle()
+    b["components"].insert(1, {"role": "bl2_mmc", "file": "artifacts/bl2_mmc.bin",
+                               "sha256": "0" * 64, "size_bytes": 1,
+                               "flash_target": "emmc:boot1"})
+    b["memory_tier"] = {"dram_mbit": 32768}
+    return b
+
+
+def _check(tmp_path, doc):
+    p = tmp_path / "bundle.json"
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    return _run("--bundle", str(p))
+
+
+def test_v2n_bundle_with_bl2_mmc_and_memory_tier_passes(tmp_path):
+    proc = _check(tmp_path, _v2n_bundle())
+    assert proc.returncode == 0, proc.stdout
+
+
+def test_old_bundle_without_new_fields_still_passes(tmp_path):
+    b = _valid_bundle()
+    assert "memory_tier" not in b and all(c["role"] != "bl2_mmc" for c in b["components"])
+    assert _check(tmp_path, b).returncode == 0
+
+
+def test_bl2_mmc_must_target_emmc_boot1(tmp_path):
+    b = _v2n_bundle()
+    b["components"][1]["flash_target"] = "emmc"
+    assert _check(tmp_path, b).returncode != 0
+
+
+def test_emmc_boot1_reserved_for_bl2_mmc(tmp_path):
+    b = _v2n_bundle()
+    b["components"][2]["flash_target"] = "emmc:boot1"  # the fip
+    assert _check(tmp_path, b).returncode != 0
+
+
+def test_memory_tier_shape(tmp_path):
+    ok = _v2n_bundle()
+    ok["memory_tier"] = {"dram_mbit": 32768, "label": "D8S32"}
+    assert _check(tmp_path, ok).returncode == 0
+    for bad in ({}, {"dram_mbit": 0}, {"dram_mbit": "32768"}, {"dram_mbit": 32768, "extra": 1},
+                {"dram_mbit": 32768, "label": "D8 S32"}):
+        b = _v2n_bundle()
+        b["memory_tier"] = bad
+        assert _check(tmp_path, b).returncode != 0, bad
+
+
+def test_duplicate_role_fails(tmp_path):
+    b = _v2n_bundle()
+    b["components"].append(dict(b["components"][1]))
+    proc = _check(tmp_path, b)
+    assert proc.returncode != 0
+    assert "duplicate role" in proc.stdout

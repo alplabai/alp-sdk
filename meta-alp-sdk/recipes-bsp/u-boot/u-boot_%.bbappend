@@ -264,6 +264,37 @@ SRC_URI:append:rzv2n-family = " file://0006-rzv2n-dev-i2c-rzg2l_riic-p06-p07-pul
 # after those two is not order-sensitive, only readable.
 SRC_URI:append:rzv2n-family = " file://0007-rzv2n-dev-ALP-E1M-clkgen-otp-fixup.patch"
 
+# 0008 (carrier microSD on SDHI1): the vendor bootcmd_check ("if mmc dev 1;
+# then run sd2load; else run emmcload; fi") and 0002's CONFIG_BOOTCOMMAND
+# both pick the boot medium with "mmc dev 1", but rzv2n-dev.dts aliased
+# mmc1 to SDHI2 (mmc@15c20000) and left SDHI1 (mmc@15c10000, the E1M-X EVK
+# microSD) disabled -- so U-Boot could never boot from the SD card. 0008
+# makes SDHI1 mmc1 (SDHI2 moves to mmc2; SDHI0 eMMC stays mmc0, so the env
+# device is unchanged) and, under CONFIG_ALP_E1M_SD1_MICROSD (default y in
+# the patched defconfig), sets up the slot in board_init() before
+# initr_mmc: PA2 (uSD1_V_SEL) low = 3.3 V, PA3 (SD1_SD1PWEN) power-cycled
+# then held high, and the SD1CLK/SD1CMD/SD1DAT0-3 dedicated pads at drive
+# strength 2 / slew 0 / input-enabled, the same pad setup as the Linux
+# sdhi1_pins group. 3.3 V only (no UHS in this U-Boot); no card detect
+# (sh_sdhi has no get_cd op, so an empty slot fails "mmc dev 1" by timeout
+# and bootcmd_check falls back to the eMMC, as before). 0008 also makes
+# 0002's CONFIG_BOOTCOMMAND take the SD branch only when "ext4size mmc 1:2
+# boot/Image" succeeds, so a card with no boot image (a data card) boots the
+# eMMC instead of stopping at the prompt. The SD boot path is
+# the provisioning flow's boot_sd_linux step (docs/provisioning-v2n.md).
+# Applies with and without 0003 (checked both ways). BENCH-PENDING:
+# unverified on silicon.
+#
+# Numbered 0008, not 0007: U-Boot patch 0007 (#2293, the 5L35023B OTP
+# fixup docs/provisioning-v2n.md's clkgen_verify step checks for) already
+# claims that slot. The real dependency is a text conflict in THIS
+# bbappend's own SRC_URI patch list -- two "file://0007-....patch" entries
+# for the same recipe would collide -- not a build-order or code
+# dependency; do_patch applies both patches successfully in either merge
+# order. This patch was regenerated (git format-patch) on top of #2293's
+# 0007 so its hunks carry the correct post-0007 line offsets.
+SRC_URI:append:rzv2n-family = " file://0008-rzv2n-dev-ALP-E1M-sdhi1-microsd.patch"
+
 # Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot
 # binary serves both families, so the dtb basename is a Kconfig string
 # (CONFIG_ALP_E1M_FDTFILE, patch 0002) whose default suits the V2N SKUs;

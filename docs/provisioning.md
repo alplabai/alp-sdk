@@ -3,7 +3,13 @@
 `scripts/provision_som.py` provisions one module from a versioned SoM-release
 bundle (see the bundle manifest schema `metadata/schemas/som-release-bundle-v1.schema.json`).
 
-It runs a linear, stop-on-first-failure sequence:
+V2N / V2N-M1 modules use the step machine instead
+(`provision_som.py plan|run|status`, see
+[provisioning-v2n.md](provisioning-v2n.md)). The flat form below is kept for
+the other families; on a bundle that carries a `bl2_mmc` (`emmc:boot1`)
+component it reports that component as skipped.
+
+The flat form runs a linear, stop-on-first-failure sequence:
 
 1. **validate** the bundle (`check_som_bundle.py`)
 2. **HiL spec check** — if `--hil-spec` (or a `--carrier`-derived path; a relative
@@ -12,7 +18,7 @@ It runs a linear, stop-on-first-failure sequence:
    flashing or serial allocation below, so a mis-derived `--carrier` **fails the run**
    (exit 1) before it can burn a manufacturing serial or write to the board. With
    neither flag, no test is wanted and this step is a no-op.
-3. **flash** `bl2`/`fip` to xSPI (`xspi_flashwriter`, Flash Writer SCIF) and the
+3. **flash** `bl2`/`fip` to xSPI (`renesas_flashwriter_scif`, planned only) and the
    system image to eMMC (`yocto_wic`) — the image is skipped for a
    `bootloader-only:image-pending-hw` bundle
 4. **EEPROM** — allocate a serial, build the 128-byte manifest (`program_eeprom.py`).

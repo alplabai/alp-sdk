@@ -37,8 +37,8 @@ import flash_backends as fb
 
 # bundle.json flash_target -> (backend method, xspi partition or None)
 _TARGET_BACKEND = {
-    "xspi:mtd0": ("xspi_flashwriter", "mtd0"),
-    "xspi:mtd1": ("xspi_flashwriter", "mtd1"),
+    "xspi:mtd0": ("renesas_flashwriter_scif", "mtd0"),
+    "xspi:mtd1": ("renesas_flashwriter_scif", "mtd1"),
     "emmc": ("yocto_wic_to_sd_or_emmc", None),
 }
 _FLASH_ORDER = {"bl2": 0, "fip": 1, "system_image": 2}
@@ -97,6 +97,9 @@ def _validate_bundle(cfg: Cfg):
 def _flash(cfg: Cfg, comp: dict) -> Step:
     target = comp["flash_target"]
     spec = _TARGET_BACKEND.get(target)
+    if target == "emmc:boot1":
+        return Step(f"flash:{comp['role']}", True,
+                    "skipped (emmc:boot1 is written by the V2N flow: provision_som.py plan|run)")
     if spec is None:
         return Step(f"flash:{comp['role']}", False, f"no backend for {target}")
     method, partition = spec
@@ -352,5 +355,222 @@ def main() -> int:
     return provision(cfg)
 
 
+# --------------------------------------------------------------------------
+# V2N / V2N-M1 flow: plan | run | status (docs/provisioning-v2n.md)
+# --------------------------------------------------------------------------
+
+V2N_SUBCOMMANDS = ("plan", "run", "status")
+
+
+def _v2n_parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(prog="provision_som.py",
+                                 description="V2N / V2N-M1 SoM provisioning (step machine).")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--sku", required=True)
+    common.add_argument("--ledger-root", type=Path, required=True,
+                        help="PRIVATE ledger/ dir (unit.yaml, state.json, schema/)")
+    common.add_argument("--serial")
+    work = argparse.ArgumentParser(add_help=False)
+    src = work.add_mutually_exclusive_group(required=True)
+    src.add_argument("--bundle", type=Path, help="release bundle dir (bundle.json + artifacts/)")
+    src.add_argument("--build-dir", type=Path,
+                     help="unsigned bundle from a deploy dir: bl2_bp_spi*.bin, bl2_bp_mmc*.bin, "
+                          "fip*.bin, *.wic.gz (bench use; no bundle.json, no signature)")
+    work.add_argument("--bench", type=Path, help="PRIVATE bench.yaml")
+    work.add_argument("--tier-markers", type=Path, help="PRIVATE DDR tier markers JSON")
+    work.add_argument("--pmic-expect", type=Path,
+                      help="PRIVATE expected PMIC registers (YAML or JSON)")
+    work.add_argument("--flash-writer", type=Path, help="Flash Writer .mot (overrides bench.yaml)")
+    work.add_argument("--gd32-fw", type=Path,
+                      help="dir with bootloader.bin, ota-meta.bin, slot-a.bin")
+    work.add_argument("--enable-dxm1-flash", action="store_true",
+                      help="BENCH-PENDING: program the DX-M1 NPU's SPI-NAND over the UART "
+                           "recovery path (v2n-m1 only); needs bench.yaml dxm1.* -- has never "
+                           "run on silicon and cannot succeed on the first V2M bench unit yet "
+                           "-- default skip until bench-verified")
+    work.add_argument("--mfg-date", type=date.fromisoformat,
+                      help="default: Monday of the serial's ISO week (a different date is "
+                           "recorded as an override)")
+    work.add_argument("--allow-tier-mismatch", metavar="REASON")
+    work.add_argument("--reprovision-from", type=Path, metavar="MANIFEST")
+    work.add_argument("--cold-cycles", type=int, default=3)
+    work.add_argument("--transfer", choices=("sd", "xmodem"), default="sd")
+    work.add_argument("--carrier", default="")
+    work.add_argument("--hil-spec", type=Path)
+    work.add_argument("--station")
+    work.add_argument("--by", default="provision_som")
+    work.add_argument("--ledger-xlsx", type=Path,
+                      help="PRIVATE ledger_xlsx.py (default: <ledger-root>/../scripts/ledger_xlsx.py)")
+    work.add_argument("--only", help="STEP[,STEP] (preflight always runs)")
+    work.add_argument("--from", dest="start", metavar="STEP")
+    work.add_argument("--skip", help="STEP[,STEP]")
+    work.add_argument("--force-step", help="STEP[,STEP]: run even if its probe is satisfied")
+    sub.add_parser("plan", parents=[common, work], help="dry run; read-only probes with --bench")
+    r = sub.add_parser("run", parents=[common, work], help="dry run unless --execute")
+    r.add_argument("--som-ledger", type=Path, help="PRIVATE som_ledger.py (serial alloc)")
+    r.add_argument("--execute", action="store_true")
+    r.add_argument("--lock", action="store_true",
+                   help="ONLY lock the secure page (separate invocation; preconditions + serial retype)")
+    st = sub.add_parser("status", parents=[common])
+    st.add_argument("--catalogue", type=Path)
+    return ap
+
+
+def _bundle_from_build_dir(d: Path) -> dict:
+    comps = []
+    for role, pat, target in (("bl2", "bl2_bp_spi*.bin", "xspi:mtd0"),
+                              ("bl2_mmc", "bl2_bp_mmc*.bin", "emmc:boot1"),
+                              ("fip", "fip*.bin", "xspi:mtd1"),
+                              ("system_image", "*.wic.gz", "emmc")):
+        hits = sorted(d.glob(pat))
+        if len(hits) != 1:
+            raise ValueError(f"--build-dir: want exactly one {pat}, found {[h.name for h in hits]}")
+        comps.append({"role": role, "file": hits[0].name, "sha256": _sha256(hits[0]),
+                      "size_bytes": hits[0].stat().st_size, "flash_target": target})
+    return {"status": "complete", "release_version": f"build-dir:{d.name}", "components": comps}
+
+
+def _csv(v: str | None) -> list[str] | None:
+    return [x.strip() for x in v.split(",") if x.strip()] if v else None
+
+
+def _print_results(results, execute: bool) -> None:
+    print(f"=== provision_som v2n [{'EXECUTE' if execute else 'DRY-RUN'}] ===")
+    for r in results:
+        print(f"[{r.status.upper():7}] {r.name}: {r.detail}")
+        for c in r.commands:
+            print(f"          {c}")
+    bad = [r.name for r in results if r.status == "failed"]
+    print(f"--- {'FAILED at: ' + ', '.join(bad) if bad else 'no failures'} ---")
+
+
+def _status(a) -> int:
+    from provision import ledger_out, steps
+    if not a.serial:
+        print("provision_som: status needs --serial", file=sys.stderr)
+        return 2
+    d = a.ledger_root / a.sku
+    state = steps.load_state(d / f"{a.serial}.state.json")
+    print(f"=== {a.sku} {a.serial} ===")
+    for name in steps.STEP_NAMES:
+        s = state.get("steps", {}).get(name)
+        print(f"  {name:22} {s['status'] + ' ' + s['at'] if s else '-'}")
+    for o in state.get("overrides", []):
+        print(f"  override {o['gate']}: {o['reason']} ({o['at']})")
+    cat = ledger_out.load_catalogue(a.catalogue or a.ledger_root / "schema" / "v2n.keys.yaml")
+    blockers = ledger_out.ship_check(ledger_out.read_unit_yaml(d / f"{a.serial}.unit.yaml"), cat)
+    print("ship check: " + ("SHIPPABLE" if not blockers else "blocked"))
+    for b in blockers:
+        print(f"  - {b}")
+    return 0 if not blockers else 1
+
+
+def v2n_main(argv: list[str]) -> int:
+    import yaml
+    from provision import bench as bench_mod
+    from provision import gates, steps
+
+    try:
+        a = _v2n_parser().parse_args(argv)
+    except SystemExit as e:
+        return 2 if e.code else 0
+    if a.cmd == "status":
+        return _status(a)
+    execute = a.cmd == "run" and a.execute
+    try:
+        preset_path = REPO / "metadata" / "e1m_modules" / f"{a.sku}.yaml"
+        if not preset_path.is_file():
+            raise ValueError(f"no preset {preset_path.name}")
+        preset = yaml.safe_load(preset_path.read_text(encoding="utf-8"))
+        if a.bundle:
+            bundle_dir = a.bundle
+            bj = bundle_dir / "bundle.json"
+            bundle = json.loads(bj.read_text(encoding="utf-8"))
+            bundle_sha = _sha256(bj)
+        else:
+            bundle_dir = a.build_dir
+            bundle = _bundle_from_build_dir(bundle_dir)
+            bundle.update(sku=a.sku, family=steps.expected_family(preset),
+                          hw_rev=preset.get("default_hw_rev", "r1"))
+            bundle_sha = hashlib.sha256(json.dumps(bundle, sort_keys=True).encode()).hexdigest()
+        markers = json.loads(a.tier_markers.read_text(encoding="utf-8")) if a.tier_markers else None
+        regs = yaml.safe_load(a.pmic_expect.read_text(encoding="utf-8")) if a.pmic_expect else None
+        if a.cmd == "run" and not a.bench:
+            raise ValueError("run needs --bench")
+        bench = bench_mod.load_bench(a.bench) if a.bench else None
+        names = (_csv(a.only) or []) + (_csv(a.skip) or []) + (_csv(a.force_step) or [])
+        for n in names + ([a.start] if a.start else []):
+            if n not in steps.STEP_NAMES:
+                raise ValueError(f"unknown step {n!r}; steps: {', '.join(steps.STEP_NAMES)}")
+    except (ValueError, OSError, json.JSONDecodeError, yaml.YAMLError) as e:
+        print(f"provision_som: {e}", file=sys.stderr)
+        return 2
+
+    serial = a.serial
+    if not serial:
+        som_ledger = getattr(a, "som_ledger", None)
+        if not som_ledger:
+            if a.cmd == "run":
+                print("provision_som: run needs --serial or --som-ledger", file=sys.stderr)
+                return 2
+            iso = date.today().isocalendar()
+            serial = f"{iso.year}W{iso.week:02d}-0001"
+            print(f"plan: no --serial; planning as {serial}")
+        else:
+            proc = subprocess.run([sys.executable, str(som_ledger), "--ledger-root", str(a.ledger_root),
+                                   "alloc", "--sku", a.sku], capture_output=True, text=True,
+                                  encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+            serial = proc.stdout.strip()
+            if proc.returncode != 0 or not serial:
+                print(f"provision_som: serial alloc failed: {proc.stderr.strip()}", file=sys.stderr)
+                return 1
+            print(f"{'allocated' if execute else 'would allocate'} serial {serial}")
+    try:
+        derived = gates.mfg_date_for_serial(serial)
+    except ValueError as e:
+        print(f"provision_som: {e}", file=sys.stderr)
+        return 2
+
+    hil = a.hil_spec
+    if hil is None and a.carrier:
+        hil = REPO / "tests" / "hil" / f"{a.sku.lower().removeprefix('e1m-')}-{a.carrier}"
+    ctx = steps.Ctx(sku=a.sku, serial=serial, bundle_dir=bundle_dir, bundle=bundle, preset=preset,
+                    ledger_root=a.ledger_root, execute=execute, lock=getattr(a, "lock", False),
+                    bench=bench, tier_markers=markers, expected_registers=regs,
+                    allow_tier_mismatch=a.allow_tier_mismatch, reprovision_from=a.reprovision_from,
+                    cold_cycles=a.cold_cycles, hil_spec=hil, flash_writer=a.flash_writer,
+                    gd32_fw=a.gd32_fw, dxm1_flash=a.enable_dxm1_flash,
+                    transfer=a.transfer, station=a.station, by=a.by,
+                    ledger_xlsx=a.ledger_xlsx,
+                    mfg_date_override=a.mfg_date if a.mfg_date and a.mfg_date != derived else None)
+    ctx.state = steps.load_state(ctx.state_path)
+    steps.init_state(ctx, bundle_sha)
+    if ctx.mfg_date_override:
+        steps._record_override(ctx, "mfg_date", f"{a.mfg_date} instead of {derived}")
+    if execute:
+        steps.save_state(ctx.state_path, ctx.state)   # reserves the serial immediately
+
+    if ctx.lock:
+        try:
+            if bench is not None:
+                steps.connect_linux(ctx)
+        except bench_mod.BenchError as e:
+            print(f"provision_som: {e}", file=sys.stderr)
+            return 1
+        results = steps.run_steps(ctx, steps=[steps.SecurePageLock])
+    else:
+        results = steps.run_steps(ctx, only=_csv(a.only), start=a.start, skip=_csv(a.skip),
+                                  force=_csv(a.force_step))
+    _print_results(results, execute)
+    return 1 if any(r.status == "failed" for r in results) else 0
+
+
+def _dispatch() -> int:
+    if len(sys.argv) > 1 and sys.argv[1] in V2N_SUBCOMMANDS:
+        return v2n_main(sys.argv[1:])
+    return main()
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_dispatch())
