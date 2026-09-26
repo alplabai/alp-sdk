@@ -34,12 +34,12 @@ WHAT COUNTS AS A FAILURE VS. A DELIBERATE EXEMPTION (decided explicitly,
 per the issue's own ask, not left implicit):
 
   * A recipe whose PN matches no `metadata/libraries/<pn>.yaml` (e.g.
-    this layer's OWN `alp-sdk`/`alp-chips`/`dx-rt` recipes) is OUT OF
+    this layer's OWN `alp-sdk`/`alp-chips` recipes) is OUT OF
     SCOPE -- it isn't a curated third-party library pin at all, so
     there is no ground truth on the other side to compare against.
     Not a failure, not reported.
   * A recipe with NO `SRCREV` at all (a license-gated recipe with no
-    fetchable source, e.g. `dx-rt_2.4.bb`), or one pinned to
+    fetchable source), or one pinned to
     `${AUTOREV}`/any unresolved `${...}` expansion (a floating,
     non-reproducible pin -- ADR 0017 territory, a DIFFERENT gate's
     concern), has no literal value to compare.  Not a failure, not

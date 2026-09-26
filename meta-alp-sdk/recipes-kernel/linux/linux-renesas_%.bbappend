@@ -158,10 +158,14 @@ ALP_DRPAI_LAYER[vardepvalue] = "${ALP_DRPAI_LAYER}"
 # an opt-in feature.
 #
 # So require an explicit ALP_ENABLE_DRPAI too, defaulting to 0.  It is
-# DECLARED in all six V2N/V2M machine confs (`ALP_ENABLE_DRPAI ?= "0"`)
-# next to ALP_ENABLE_DEEPX_DXM1, so a builder reading the conf for their
-# MACHINE finds it -- the `??=` here is only the fallback for a consumer
-# that uses this bbappend without one of those confs.  Turning the SDK backend on
+# DECLARED in all six V2N/V2M machine confs (`ALP_ENABLE_DRPAI ?= "0"`),
+# so a builder reading the conf for their MACHINE finds it -- the `??=`
+# here is only the fallback for a consumer that uses this bbappend
+# without one of those confs.  (The V2M-only DEEPX equivalent,
+# ALP_ENABLE_DEEPX_DXM1, now lives one level down in
+# conf/machine/include/e1m-v2m-deepx.inc, `require`d by the three V2M
+# confs, rather than declared in each conf directly -- a different
+# knob, not a place to look for this one.)  Turning the SDK backend on
 # (PACKAGECONFIG "drpai") and turning the kernel node on are deliberately
 # separate switches: the backend without the node fails at open() with a
 # clear error, whereas the node without the backend is simply an idle

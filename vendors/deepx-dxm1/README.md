@@ -64,10 +64,17 @@ Two additional repos are useful but not on the runtime path:
 ### Yocto integration (V2N-M1)
 
 `meta-alp-sdk`'s `conf/layer.conf` `LAYERRECOMMENDS` the Renesas V2N
-base BSP plus `meta-deepx-m1`, and `conf/machine/e1m-v2m101-a55.conf`
-(and `e1m-v2m102-a55.conf` / `e1m-v2m103-a55.conf`)
-appends `dx-driver dx-rt` to `IMAGE_INSTALL` so V2N-M1 images
-ship the DEEPX stack by default.
+base BSP plus `meta-deepx-m1` (the real `BBFILE_COLLECTIONS` name of
+DEEPX's official layer), and `conf/machine/include/e1m-v2m-deepx.inc`
+(`require`d from `e1m-v2m101-a55.conf` / `e1m-v2m102-a55.conf` /
+`e1m-v2m103-a55.conf`) appends `dx-driver dx-rt` to `IMAGE_INSTALL`
+when `ALP_ENABLE_DEEPX_DXM1 = "1"`, so opted-in V2N-M1 images ship the
+DEEPX stack (`dxrt-cli` ships inside the `dx-rt` package itself at
+this pin -- there is no separate `dx-rt-cli` recipe).  A
+`dynamic-layers/meta-deepx-m1/` bbappend also tightens dx-driver's
+udev device-node permissions (world-writable by default upstream) --
+see `meta-alp-sdk/README.md`.  Verified against commit
+`8d09b25f20f81104c16c7de90928ff8920eb482d` on branch `scarthgap`.
 
 Upstream `meta-deepx-m1` (per its README, scarthgap branch) ships
 two recipes:
@@ -85,6 +92,7 @@ Adding the layer to a Yocto workspace:
 ```bash
 git clone -b scarthgap https://github.com/DEEPX-AI/meta-deepx-m1.git \
     ../meta-deepx-m1
+git -C ../meta-deepx-m1 checkout 8d09b25f20f81104c16c7de90928ff8920eb482d
 bitbake-layers add-layer ../meta-deepx-m1
 ```
 
