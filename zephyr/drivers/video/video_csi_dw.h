@@ -375,6 +375,25 @@ struct csi2_dw_config {
 	uint32_t hline;
 	uint32_t vtotal;
 
+	/*
+	 * Alp Lab AB (issue #2327): optional Controller-mode DT property csi-pixclk-hz
+	 * (snps,designware-csi.yaml) -- when non-zero, csi2_dw_validate_data() requests this
+	 * rate for the IPI pixel clock instead of the derived bare sensor pixrate
+	 * (pll_fin * 2 * lanes / bpp). Controller mode's bare-rate request (see the comment on
+	 * that branch) assumes the clock-control divisor policy happens to land the requested
+	 * rate on a divisor the shield's csi-hsa/hbp/hline timings were derived against
+	 * (raspberry_pi_global_shutter_camera.overlay's own comment walks through this for
+	 * IMX296); a sensor whose bare pixrate does not fit under the pixel-clock divider's max
+	 * (e.g. a 2-lane sensor's bare rate exceeding alif_pixclk_set_rate()'s 200 MHz ceiling)
+	 * has no such landing rate to assume, so its shield instead states the intended IPI
+	 * pixel clock explicitly. 0 means "not set", byte-identical to before this field
+	 * existed: the derived bare pixrate is requested exactly as before, unconditionally
+	 * (this field is the ONLY thing that changes -- csi-hline/csi-vtotal's own hsd/vfp
+	 * derivation immediately below is untouched, and re-derives against whatever rate
+	 * clock_control_get_rate() reports was actually programmed, this field's or not).
+	 */
+	uint32_t pixclk_hz;
+
 	uint8_t rx_dphy_ids[];
 };
 

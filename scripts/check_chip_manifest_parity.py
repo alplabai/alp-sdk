@@ -54,6 +54,11 @@ KNOWN_MANIFEST_NO_DRIVER = {
     # catalogue-only so the part is discoverable in the chip metadata
     # system; `driver_status: none` is the honest state, not aspirational.
     "imx296",
+    # Sony IMX335 (issue #2327): streaming is upstream Zephyr's own
+    # drivers/video/imx335.c (CONFIG_VIDEO_IMX335), reused as-is -- same
+    # catalogue-only shape as imx296 above, one step further down ADR 0017's
+    # tier ladder (Tier 0, no alp-sdk-authored driver code at all).
+    "imx335",
 }
 
 

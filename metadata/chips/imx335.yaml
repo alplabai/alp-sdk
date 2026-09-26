@@ -1,0 +1,79 @@
+# Alp SDK chip manifest: Sony IMX335 5.0 MP colour MIPI CSI-2 (rolling shutter).
+schema_version:   1
+chip_id:          imx335
+driver_status:    none              # no chips/imx335/ portable chip-ID stub exists -- streaming
+                                     # lives entirely in upstream Zephyr's drivers/video/imx335.c
+                                     # (CONFIG_VIDEO_IMX335), reused as-is (ADR 0017 Tier 0,
+                                     # unlike IMX296's ADR-0017-ADJACENT authored driver). This
+                                     # manifest IS one (driver_status: none, no chips/ entry) --
+                                     # catalogue-only, allowlisted in
+                                     # scripts/check_chip_manifest_parity.py's
+                                     # KNOWN_MANIFEST_NO_DRIVER, same shape as imx296.yaml.
+display_name:     "Sony IMX335 5.0 MP colour MIPI CSI-2 sensor"
+vendor:           sony
+mpn_population:
+  - "IMX335"
+
+datasheet:
+  primary:        "Sony IMX335 public preliminary datasheet"
+
+notes: |
+  Streaming driver: upstream Zephyr v4.4.1 drivers/video/imx335.c
+  (CONFIG_VIDEO_IMX335), NOT vendored -- consumed as-is per ADR 0017. One
+  repo-carried patch on top, zephyr/patches/zephyr/0004-imx335-link-freq.patch
+  (zephyr/patches.yml): registers VIDEO_CID_LINK_FREQ and corrects
+  VIDEO_CID_PIXEL_RATE so video_get_csi_link_freq() (video_common.c) reads
+  the sensor's real 594 MHz D-PHY link frequency instead of mis-approximating
+  it from the upstream driver's uncorrected pixel rate -- the same
+  ERRSOTSYNCHS/PHY_FATAL failure signature OV5647 hit (issue #2248) before
+  its own fix. Shield: zephyr/boards/shields/innomaker_cam_imx335/. See
+  docs/camera-shields.md for the full driver/shield/control reference.
+
+  Issue #2327, Stage A (E1M-AEN803 2026W36-0001, E1M-EVK, csi_i2c = I2C1 @
+  0x49011000), bench-verified: I2C identity ONLY -- the module answers at
+  CCI 0x1A (the only device on the J5 camera bus), and STANDBY (0x3000),
+  VMAX (0x3030-0x3032), HMAX (0x3034) and LANEMODE (0x3a01) all read back at
+  their power-on-reset defaults (0x01, 0x001194 = 4500, 0x0226 = 550, 0x03
+  respectively). The module self-powers -- CAM_EN (J5 pin 11) is untouched.
+
+  NOT bench-verified -- do not claim any of the following happened on
+  silicon: CSI-2 D-PHY lock at 1188 Mbps/lane through the E1M SoM R2 pinout
+  adapter (max measured on any sensor on this bus to date is 875 Mbps, on a
+  different sensor); this sensor's 2x2-binned-mode line pacing (the shield
+  overlay's Controller-mode IPI timing derivation assumes 2H output-line
+  pacing, INFERRED from the sensor's own read-back HMAX/VMAX values, not a
+  datasheet MIPI-timing-table citation); LP-11 clock-lane-park behaviour;
+  and any frame capture, at any resolution.
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x1A, scope: "CCI address, bench-confirmed the only device on the J5
+        camera bus on E1M-AEN803 2026W36-0001" }
+  max_clock_hz:   400000
+
+mipi:
+  lanes_supported: [2]
+
+resolutions:
+  max:            [2592, 1944]
+  features:       [2x2_binning]
+
+kconfig:
+  zephyr:         VIDEO_IMX335      # upstream Kconfig symbol (drivers/video/Kconfig.imx335,
+                                     # DT_HAS_SONY_IMX335_ENABLED default y) -- no portable
+                                     # ALP_SDK_CHIP_IMX335 -- see driver_status above.
+  baremetal:      n/a               # no bare-metal (CMSIS, no-RTOS) camera capture path exists
+                                     # in this tree for any sensor on this bus.
+
+families:
+  - aen
+
+verification:
+  hil_silicon:    partial           # Stage A bench-verified: I2C identity ONLY -- see notes
+                                     # above for everything else that remains unverified.
+  smoke_tests:    none               # no chips/ portable driver surface exists to unit-test; see
+                                     # tests/zephyr/video_sensors/ for this sensor's Zephyr-level
+                                     # coverage decision (docs/camera-shields.md and
+                                     # changelog.d/2327.md explain why no emulator suite was
+                                     # added for this upstream driver).

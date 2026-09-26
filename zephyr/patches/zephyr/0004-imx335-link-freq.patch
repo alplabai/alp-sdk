@@ -1,0 +1,84 @@
+diff --git a/drivers/video/imx335.c b/drivers/video/imx335.c
+index cead6b7199e..9d0f84da905 100644
+--- a/drivers/video/imx335.c
++++ b/drivers/video/imx335.c
+@@ -27,7 +27,25 @@ LOG_MODULE_REGISTER(video_imx335, CONFIG_VIDEO_LOG_LEVEL);
+ #define IMX335_BIN_2X2_WIDTH	1296
+ #define IMX335_BIN_2X2_HEIGHT	972
+ 
+-#define IMX335_PIXEL_RATE	396000000
++/*
++ * Alp Lab AB (issue #2327): upstream registered VIDEO_CID_PIXEL_RATE only, at a
++ * value (396 MHz) that does not match any of the driver's own INCK/lane-mode
++ * register tables below (imx335_inck_24mhz + imx335_mode_2l_10b select 2
++ * lanes, 10-bit). video_get_csi_link_freq() (video_common.c) falls back to
++ * approximating LINK_FREQ from PIXEL_RATE when a sensor reports no
++ * VIDEO_CID_LINK_FREQ control -- with the upstream 396 MHz that approximation
++ * lands on 990 MHz (1980 Mbps/lane), not the sensor's real 594 MHz link clock
++ * (1188 Mbps/lane per lane, 2 lanes, 10 bpp: 1188e6 * 2 / 10 = 237.6e6 pixels/
++ * s), and the DW CSI-2 host then races the D-PHY at roughly double rate --
++ * the OV5647 ERRSOTSYNCHS/PHY_FATAL storm signature (issue #2248). Correct
++ * PIXEL_RATE to the value the driver's own register tables actually produce,
++ * and register LINK_FREQ directly (below) so video_get_csi_link_freq() never
++ * needs the fallback for this sensor. NOT bench-verified for this sensor --
++ * carried from the IMX335 datasheet's own MIPI output timing table, same
++ * derivation as sony,imx296.c's IMX296_LINK_FREQ_HZ.
++ */
++#define IMX335_PIXEL_RATE	237600000
++#define IMX335_LINK_FREQ_HZ	594000000
+ 
+ enum imx335_res {
+ 	IMX335_RES_2592x1944,
+@@ -53,6 +71,7 @@ struct imx335_ctrls {
+ 	struct video_ctrl gain;
+ 	struct video_ctrl exposure;
+ 	struct video_ctrl pixel_rate;
++	struct video_ctrl link_freq; /* Alp Lab AB (issue #2327) */
+ };
+ 
+ struct imx335_data {
+@@ -341,6 +360,11 @@ static const struct video_format_cap imx335_fmts[] = {
+ 	{0}
+ };
+ 
++/* Alp Lab AB (issue #2327): single fixed link frequency, see IMX335_LINK_FREQ_HZ above. */
++static const int64_t imx335_link_frequencies[] = {
++	IMX335_LINK_FREQ_HZ,
++};
++
+ static const uint32_t imx335_framerates[] = {
+ 	[IMX335_25_FPS] = 25,
+ 	[IMX335_30_FPS] = 30,
+@@ -667,13 +691,31 @@ static int imx335_init_controls(const struct device *dev)
+ 		return ret;
+ 	}
+ 
+-	return video_init_ctrl(
++	ret = video_init_ctrl(
+ 		&ctrls->pixel_rate, dev, VIDEO_CID_PIXEL_RATE,
+ 		(struct video_ctrl_range){
+ 			.min64 = IMX335_PIXEL_RATE,
+ 			.max64 = IMX335_PIXEL_RATE,
+ 			.step64 = 1,
+ 			.def64 = IMX335_PIXEL_RATE});
++	if (ret < 0) {
++		return ret;
++	}
++
++	/*
++	 * Alp Lab AB (issue #2327): READ_ONLY int-menu, same shape as
++	 * sony,imx296.c's own link_freq control -- lets video_get_csi_link_freq()
++	 * (video_common.c) read the real D-PHY clock straight from this control
++	 * instead of falling back to approximating it from PIXEL_RATE.
++	 */
++	ret = video_init_int_menu_ctrl(&ctrls->link_freq, dev, VIDEO_CID_LINK_FREQ, 0,
++					imx335_link_frequencies, ARRAY_SIZE(imx335_link_frequencies));
++	if (ret < 0) {
++		return ret;
++	}
++	ctrls->link_freq.flags |= VIDEO_CTRL_FLAG_READ_ONLY;
++
++	return 0;
+ }
+ 
+ static int imx335_init(const struct device *dev)

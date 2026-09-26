@@ -131,6 +131,31 @@ properties:
       for why deriving from a format-independent total (rather than a
       per-format fixed value) is what this property exists for.
 
+  csi-pixclk-hz:
+    type: int
+    required: false
+    description: |
+      Issue #2327. Optional, Controller-mode only ("ipi-mode" = "Controller"):
+      the IPI pixel clock rate to request, in Hz, REPLACING
+      csi2_dw_validate_data()'s (video_csi_dw.c) normal Controller-mode
+      request -- the sensor's bare derived pixel rate (pll_fin * 2 * lanes /
+      bpp, no bandwidth margin, see that branch's own comment). That bare-rate
+      request assumes the reachable clock-control divisor it lands on happens
+      to keep the IPI line time close to the sensor's own line time -- true
+      for IMX296's 118.8 MHz -> 133.33 MHz (raspberry_pi_global_shutter_camera
+      .overlay's own comment walks through the margin this leaves), but not
+      guaranteed for every sensor: a 2-lane sensor's bare rate can exceed the
+      pixel-clock divider's reachable range outright (alif_pixclk_set_rate()
+      rejects above 200 MHz with -ERANGE), in which case there is no
+      derivable rate this binding can fall back to, and the shield must state
+      its own intended IPI pixel clock explicitly instead. When absent (0),
+      behaviour is byte-identical to before this property existed: the bare
+      derived pixrate is requested exactly as before. Requires csi-hline /
+      csi-vtotal to also be set in practice (the IPI timing is only
+      meaningful once its drain rate is one this property, not the
+      derivation, controls) -- this binding does not itself enforce that
+      pairing.
+
   ipi-fs-sync:
     type: boolean
     description: |

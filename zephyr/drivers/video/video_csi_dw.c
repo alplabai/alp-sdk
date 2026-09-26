@@ -520,8 +520,20 @@ static int csi2_dw_validate_data(const struct device *dev)
 		 * sensor's 14.815 us line time, i.e. the IPI would starve waiting
 		 * on a sensor that cannot keep up -- not the FIFO-overflow failure
 		 * margin mode guards against, but just as unusable.
+		 *
+		 * Alp Lab AB (issue #2327): csi-pixclk-hz (config->pixclk_hz, struct
+		 * csi2_dw_config's own comment) overrides the bare pixrate above when
+		 * set. The bare-pixrate assumption only works when SOME reachable
+		 * divisor happens to land near the sensor's own line rate (IMX296's
+		 * 118.8 MHz -> 133.33 MHz, close enough for its bench-swept csi-hsd
+		 * to still drain the IPI ahead of the sensor); a 2-lane sensor's bare
+		 * pixrate can land on a divisor with NO such margin, or even exceed
+		 * alif_pixclk_set_rate()'s reachable range outright, in which case a
+		 * shield states its own intended IPI pixel clock explicitly instead
+		 * of leaving it to fall out of whichever divisor the bare request
+		 * happens to round to.
 		 */
-		pixclock = pixrate;
+		pixclock = config->pixclk_hz != 0 ? (float)config->pixclk_hz : pixrate;
 	} else {
 		pixclock = pixrate * (float)CSI2_BANDWIDTH_SCALER;
 	}
@@ -1113,6 +1125,8 @@ static int csi2_dw_init(const struct device *dev)
 		.hline = DT_INST_PROP_OR(i, csi_hline, 0),                                         \
 		.vtotal = DT_INST_PROP_OR(i, csi_vtotal, 0),                                       \
 		.ipi_fs_sync = DT_INST_PROP(i, ipi_fs_sync),                                       \
+		/* issue #2327: see struct csi2_dw_config's own comment on this one. */            \
+		.pixclk_hz = DT_INST_PROP_OR(i, csi_pixclk_hz, 0),                                 \
 	};                                                                                         \
                                                                                                    \
 	static struct csi2_dw_data data_##i = {                                                    \

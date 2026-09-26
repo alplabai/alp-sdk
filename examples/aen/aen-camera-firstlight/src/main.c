@@ -31,6 +31,13 @@
  *     -DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1" # OV5647, RAW10
  *   ... -DSHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"         # OV9281, GREY8
  *   ... -DSHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera" # IMX296, RAW10
+ *   ... -DSHIELD="e1m_evk_rpi_csi innomaker_cam_imx335"                # IMX335, RAW10 (issue
+ *                                                                      # #2327, Stage A -- I2C
+ *                                                                      # identity probe ONLY,
+ *                                                                      # see
+ *                                                                      # zephyr/boards/shields/
+ *                                                                      # innomaker_cam_imx335/
+ *                                                                      # doc/index.rst)
  *
  * IMX296 also has a second, opt-in mode (issue #2287 Stage B): its 1280x960
  * centred ROI crop, alongside the default full 1456x1088 frame above -- add
@@ -309,6 +316,19 @@ static bool trigger_capture_loop(alp_camera_t *cam)
 #define CAM_HEIGHT          1088
 #define CAM_BYTES_PER_PIXEL 2
 #define CAM_SHIELD_NAME     "raspberry_pi_global_shutter_camera (IMX296, RAW10 1456x1088)"
+#elif defined(CONFIG_VIDEO_IMX335)
+/* INNO-MAKER CAM-IMX335-5MP (Sony IMX335, issue #2327), Stage A: request the sensor's 2x2-binned
+ * mode EXPLICITLY -- the upstream driver (drivers/video/imx335.c) boots at its native
+ * 2592x1944, and alp_camera_open() below sets cfg.width/height from these constants, which
+ * zephyr_video.c forwards as a video_set_format() call the driver honours before streaming
+ * starts. RAW10 (SRGGB10P Bayer), 2 CSI-2 lanes. Only the I2C identity probe is bench-verified
+ * for this sensor (metadata/chips/imx335.yaml) -- CSI-2 streaming and frame capture on this path
+ * are UNVERIFIED, see zephyr/boards/shields/innomaker_cam_imx335/doc/index.rst. */
+#define CAM_FORMAT          ALP_PIXFMT_RAW10
+#define CAM_WIDTH           1296
+#define CAM_HEIGHT          972
+#define CAM_BYTES_PER_PIXEL 2
+#define CAM_SHIELD_NAME     "innomaker_cam_imx335 (IMX335, 2x2-binned RAW10 1296x972)"
 #else
 #error "aen-camera-firstlight needs a camera shield stacked on e1m_evk_rpi_csi -- see README.md"
 #endif
