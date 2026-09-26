@@ -65,7 +65,7 @@ prose and survives regeneration.
 | E1M-AEN501 | `alif:ensemble:e5` | ✅ | ✅ | ✅ | Ethos-U U55 · `partial_hw_config: true` |
 | E1M-AEN601 | `alif:ensemble:e6` | ✅ | ✅ | ✅ | Ethos-U U55+U85 · `partial_hw_config: true` |
 | E1M-AEN701 | `alif:ensemble:e7` | ✅ | ✅ | ✅ | Ethos-U U55 · `partial_hw_config: true` |
-| E1M-AEN801 | `alif:ensemble:e8` | ✅ | ✅ | ✅ | Ethos-U U55+U85 · `partial_hw_config: true` |
+| E1M-AEN801 | `alif:ensemble:e8` | ✅ | ✅ | ✅ | no external DRAM · no external flash · Ethos-U U55+U85 · `partial_hw_config: true` |
 | E1M-AEN803 | `alif:ensemble:e8` | ✅ | ✅ | ✅ | 512 Mbit DRAM · Ethos-U U55+U85 · `partial_hw_config: true` |
 | E1M-NX9101 | `nxp:imx9:imx93` | ❌ | ❌ | ❌ | Ethos-U U65 · `partial_hw_config: true` |
 

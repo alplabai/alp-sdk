@@ -107,6 +107,30 @@ vela --accelerator-config ethos-u65-256 \
      mobilenet_v2_quantised.tflite
 ```
 
+> **Provenance of `--memory-mode Shared_Sram` -- read before citing this.**
+> That flag is **alp-sdk-authored, not sourced from an NXP or eIQ
+> document**: `Shared_Sram` is simply one of the six `[Memory_Mode.*]`
+> sections Arm's own `vela.ini` ships (ethos-u-vela 5.1.0), and it suits a
+> part that pairs 256 KiB of on-die SRAM with LPDDR4/4X
+> (`metadata/socs/nxp/imx9/imx93.json` `external_memory_interfaces`).  It
+> is here because vela's flagless default is worse: measured on
+> ethos-u-vela 5.1.0 against `tests/fixtures/models/tiny_int8.tflite` at
+> `ethos-u65-256`, no flags picks `Ethos_U65_Client_Server` /
+> `Dedicated_Sram_384KB` and reports `sram_memory_used = 0.0` /
+> `dram_memory_used = 0.109375`, while `--memory-mode Shared_Sram` reports
+> `sram_memory_used = 0.03125` / `dram_memory_used = 0.078125`.
+> `metadata/socs/nxp/imx9/imx93.json`'s `npu_toolchain.vela.source` cites the
+> `--memory-mode Shared_Sram \` line of the command above and **not this
+> note**, on purpose: this note names `Shared_Sram` three times, so while the
+> citation was a 6-line range it could slide off the command onto the
+> disclaimer and stay green — the disclaimer would have satisfied the check it
+> exists to weaken. Either way that citation proves alp-sdk agrees with
+> **itself**; it is an internal-consistency check, not vendor grounding.
+> Naming an
+> NXP / eIQ primary document for the i.MX 93 Ethos-U65 memory model is open
+> work; until one is cited, treat this mode as alp-sdk's own default rather
+> than a vendor-stated fact.
+
 `ethos-u65-256` is the i.MX 93's bonded MAC count (vs `ethos-u55-256`
 on AEN-E7 and `ethos-u55-128` on AEN-E3).  A model compiled for one
 variant **does not** run on the other -- the Ethos-U custom op
@@ -116,11 +140,48 @@ i.MX 93 bring-up wires the NPU.
 
 ### A55-side path (Linux / Yocto)
 
-On the i.MX 93 Yocto build (v0.4 first-class target), the Cortex-A55
-Linux side reaches the Ethos-U65 through OpenAMP / remoteproc to a
-small M33 firmware that owns the NPU.  The A55-side `<alp/inference.h>`
-backend at `src/yocto/` proxies into the M33 service via shared
-memory + mailbox -- planned alongside the v0.4 multi-proc completion
-(see `<alp/mproc.h>` and ADR 0001).  Direct A55-only inference (without
-the M33 firmware) is not supported by NXP's stack; the NPU is gated
-through the M33's address space.
+In NXP's own shipped software stack, Linux on the Cortex-A55 does not
+drive the Ethos-U65 directly: it posts inference requests into a
+shared ring buffer and signals the Cortex-M33 over a mailbox IRQ, and
+the Cortex-M33 runs the Ethos-U driver.  Source: NXP's own
+`nxp-imx/ethos-u-driver-stack-imx` repository
+(<https://github.com/nxp-imx/ethos-u-driver-stack-imx>), described
+there as "the user space driver library for ethos-u NPU on iMX93
+platform".  Its documentation states: "The Linux driver stack for
+Arm(R) Ethos(TM)-U provides an example of how a rich operating system
+like Linux can dispatch inferences to an Arm Cortex(R)-M subsystem,
+consisting of an Arm Cortex-M of choice and an Arm Ethos-U NPU," and
+that "the communication with the Ethos-U subsystem is based on
+message passing in shared memory, and the Linux kernel mailbox APIs
+for triggering IRQs on the remote CPU."  That same README also settles
+where the node lives: "For each subsystem there is a device tree
+entry" -- so the absence of an Ethos-U node in the SoC-level
+`imx93.dtsi` proves nothing either way; the node belongs at board
+level, and that is exactly where NXP's own `linux-imx` (branch
+`lf-6.6.y`) puts it -- `arch/arm64/boot/dts/freescale/imx93-11x11-evk.dts`
+(lines 80-85) and `imx93-9x9-qsb.dts` (lines 79-84), neither of which
+lives in this repo, both carry
+
+    ethosu {
+        compatible = "arm,ethosu";
+        fsl,cm33-proc = <&cm33>;
+        memory-region = <&ethosu_mem>;
+        power-domains = <&mlmix>;
+    };
+
+`fsl,cm33-proc = <&cm33>` is NXP explicitly binding the Ethos-U devicetree
+node to the Cortex-M33 phandle, on both production boards that
+instantiate the NPU at all -- direct evidence the M33 is the node's
+driving core, not an inference from what the SoC dtsi omits.
+
+That is a statement about NXP's **software stack**, not about silicon.
+IMX93RM Rev. 7 documents no host-core binding for the NPU Controller at
+all (see `metadata/socs/nxp/imx9/imx93.json`'s `notes[]` and
+`paired_core`'s schema description) -- the two are different claims and
+both are true at once: no core is documented as the NPU's silicon host,
+while NXP's shipped driver stack happens to run on the M33.  The A55-side
+`<alp/inference.h>` backend at `src/yocto/` will need to proxy into that
+M33 service via shared memory + mailbox to match NXP's stack -- planned
+alongside the v0.4 multi-proc completion (see `<alp/mproc.h>` /
+`<alp/rpc.h>` and ADR 0010).  Direct A55-only inference, bypassing the
+M33, is not supported by NXP's stack as shipped.

@@ -68,13 +68,14 @@ def test_other_u55_only_alif_soms_split_by_core(sku, soc):
     assert _ethos_config(_emit(sku, soc, "m55_hp")) == "CONFIG_ETHOS_U55_256=y"
 
 
-# --- U85 silicon: most-capable variant, U85 is not core-paired (shared HG) --
+# --- U85 silicon: most-capable variant, U85 is not core-paired (shared NPU_HG) --
 
 @pytest.mark.parametrize("core", ["m55_he", "m55_hp"])
 def test_aen801_picks_u85_regardless_of_core(core):
-    # The E8 U85 lives on the shared HG subsystem (no paired_core), so both
-    # M55 slices resolve to the flagship U85 -- the per-core path falls back
-    # to the most-capable variant, unchanged from the pre-#909 behaviour.
+    # The E8 U85 is a shared, SoC-level NPU (Alif block name NPU_HG, no
+    # paired_core), so both M55 slices resolve to the flagship U85 -- the
+    # per-core path falls back to the most-capable variant, unchanged from
+    # the pre-#909 behaviour.
     assert _ethos_config(_emit("E1M-AEN801", "e8", core)) == "CONFIG_ETHOS_U85_256=y"
 
 
