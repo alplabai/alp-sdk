@@ -106,8 +106,10 @@ The read size you pass to `reread.sh`/`ram-run.sh` and this app's
 are two different things: the read size is how much the bench script asks
 JLinkExe to read back; the buffer size is how much the firmware's RAM console
 actually holds. This app's default buffer is 65536 bytes (`0x10000`), with
-headroom for the default knobs, and the default `reread.sh`/`ram-run.sh` read
-size matches it. Raise `AEN_ENERGY_SAMPLES_PER_WINDOW` or
+headroom for the default knobs. The scripts' OWN defaults are much smaller
+(`ram-run.sh`'s `SIZE="${3:-0x600}"`, `reread.sh`'s `SIZE="${2:-0x500}"`) --
+pass `0x10000` (or your enlarged `CONFIG_RAM_CONSOLE_BUFFER_SIZE`) explicitly
+every time, as every recipe below does. Raise `AEN_ENERGY_SAMPLES_PER_WINDOW` or
 `AEN_ENERGY_WINDOW_PAIRS` past the documented default and the capture can
 exceed that buffer — raise `CONFIG_RAM_CONSOLE_BUFFER_SIZE` to match (there is
 no cap on the firmware side), then pass the same larger size as the read: both

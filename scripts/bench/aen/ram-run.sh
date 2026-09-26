@@ -554,37 +554,11 @@ _connect_or_exit "$WORKDIR/read.out" "RAM-run $(basename "$BD") (read)"
 # established for why (the very defect this file fixes) -- `mem8` can
 # report "Could not read memory." while every prior command in the same
 # session succeeded, and bench_jlink_assert_connected above does not see
-# that as a connect failure. Check the read's OWN outcome before decoding:
-# an explicit read failure, or a transcript with no `ADDR = HH HH ...` dump
-# line at all, must not decode as a silent empty console.
-if grep -qi "Could not read memory" "$WORKDIR/read.out"; then
-	echo "!! ram-run: mem8 reported 'Could not read memory' -- refusing to decode this as a console." >&2
-	exit 9
-fi
-if ! grep -qE '^[0-9A-Fa-f]+ = ' "$WORKDIR/read.out"; then
-	echo "!! ram-run: no memory dump line in the read session's transcript -- refusing to decode an empty read as a console." >&2
-	exit 9
-fi
-# A read above 0x10000 is N chunked 'mem8' commands (bench_mem8_chunks()
-# above); JLinkExe can drop ONE chunk's dump silently while the others still
-# produce output, and the whole-transcript check just above would not
-# notice -- it only asks "any dump line at all", not "one per chunk". Require
-# a dump line at EVERY chunk's own start address, so a later chunk going
-# silently missing (the tail of the buffer, exactly where a truncated
-# capture would matter) is caught rather than decoded as if it were there.
-while IFS= read -r _chunk_line; do
-	[ -n "$_chunk_line" ] || continue
-	_chunk_addr="$(printf '%s\n' "$_chunk_line" | sed -E 's/^mem8 0[xX]([0-9A-Fa-f]+),.*/\1/')"
-	if ! printf '%s\n' "$_chunk_addr" | grep -qE '^[0-9A-Fa-f]+$'; then
-		echo "!! ram-run: could not parse a chunk address out of '$_chunk_line' -- refusing to decode." >&2
-		exit 9
-	fi
-	if ! grep -qEi "^0*${_chunk_addr} = " "$WORKDIR/read.out"; then
-		echo "!! ram-run: no dump line for chunk '$_chunk_line' -- refusing to decode a partially-empty read as a console." >&2
-		exit 9
-	fi
-done <<<"$MEM8_LINES"
-unset _chunk_line _chunk_addr
+# that as a connect failure. Check the read's OWN outcome before decoding
+# (an explicit read failure, a whole-transcript-empty read, or one chunk's
+# dump line missing while the others come back) via the shared helper --
+# see its header comment in bench-env.sh (alp-sdk#2313).
+bench_mem8_verify_chunks "ram-run" "$WORKDIR/read.out" "$MEM8_LINES" || exit $?
 RUN_OK=1
 echo "----- RAM console (decoded) -----"
 # Decode the 'ADDR = HH HH ...' mem8 lines into ASCII; stop at first NUL run.

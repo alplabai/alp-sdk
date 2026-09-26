@@ -62,5 +62,10 @@ MEM8_LINES="$(bench_mem8_chunks "$BUF" "$SIZE")" || exit $?
 # hides a total connect failure and the decode below would render it as
 # empty target output (alp-sdk#1318).
 bench_jlink_assert_connected /tmp/rr.out "re-read" || exit 7
+# A CONNECTED session can still fail the READ itself (an explicit "Could not
+# read memory.", a whole-transcript-empty read, or one chunk's dump line
+# missing while the others come back) -- see bench_mem8_verify_chunks()'s
+# header comment in bench-env.sh (alp-sdk#2313).
+bench_mem8_verify_chunks "reread" /tmp/rr.out "$MEM8_LINES" || exit $?
 awk '/^[0-9A-Fa-f]+ = / { for (i=3;i<=NF;i++){ if ($i !~ /^[0-9A-Fa-f][0-9A-Fa-f]$/) continue; b=strtonum("0x"$i); if(b==0){nul++; if(nul>6)exit; next} nul=0; if(b==10||b==13){printf "\n";continue} if(b>=32&&b<127)printf "%c",b } }' /tmp/rr.out
 echo; echo "(buf=$BUF)"

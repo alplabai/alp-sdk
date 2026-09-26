@@ -232,6 +232,7 @@ fi
 echo "Found SW-DP with ID 0x4C013477"
 total_loadbins=$(grep -c '^loadbin' "$script")
 idx=0
+mem8_idx=0
 while IFS= read -r line; do
 	echo "J-Link>$line"
 	case "$line" in
@@ -275,10 +276,17 @@ LOADBIN_OK_EOF
 		# (alp-sdk#2313) checks each chunk's OWN start address, not just
 		# "a dump line exists somewhere".
 		_req_addr="$(printf '%s\\n' "$line" | sed -E 's/^mem8 0[xX]([0-9A-Fa-f]+),.*/\\1/' | tr '[:lower:]' '[:upper:]')"
+		mem8_idx=$((mem8_idx + 1))
 		if [ -n "${{FAIL_READ_NOMEM:-}}" ]; then
 			echo "$_req_addr = 68 69 00 00"
 			echo "Could not read memory."
 		elif [ -n "${{FAIL_READ_NODUMP:-}}" ]; then
+			:
+		elif [ "$mem8_idx" = "${{FAIL_READ_NODUMP_CHUNK:-0}}" ]; then
+			# alp-sdk#2313: stay silent for ONE chunk's mem8 only (the Nth
+			# mem8 command overall, 1-indexed) while every other chunk still
+			# dumps normally -- proves the per-chunk guard catches a single
+			# dropped chunk, not just a whole-transcript-empty read.
 			:
 		else
 			echo "$_req_addr = 68 69 00 00"
@@ -489,6 +497,31 @@ def test_read_session_chunks_a_size_above_the_jlink_cap(tmp_path: Path) -> None:
     read_lines = [ln.strip() for ln in read_back.read_text(encoding="utf-8").splitlines()]
     mem8_lines = [ln for ln in read_lines if ln.startswith("mem8 ")]
     assert len(mem8_lines) == 2, f"expected 2 chunked mem8 lines, got: {mem8_lines}"
+
+
+@_needs_e2e
+def test_session_two_a_dropped_chunk_is_a_hard_error(tmp_path: Path) -> None:
+    """alp-sdk#2313: the per-chunk dump-line guard (ram-run.sh, the loop
+    right after the whole-transcript 'any dump line at all' check) must
+    catch ONE chunk's mem8 going silently missing while every OTHER chunk
+    still dumps normally -- the whole-transcript check above it would not
+    notice this at all (it only asks "any dump line anywhere"). size=0x14000
+    chunks into two mem8 lines (0x10000 + 0x4000, bench_mem8_chunks());
+    FAIL_READ_NODUMP_CHUNK=2 silences only the second."""
+    res, calls, _ = _run_ram_run(
+        tmp_path, size="0x14000", extra_env={"FAIL_READ_NODUMP_CHUNK": "2"},
+    )
+
+    assert res.returncode == 9, f"expected exit 9:\n{res.stdout}\n{res.stderr}"
+    assert "RAM console (decoded)" not in res.stdout
+
+    call_files = sorted(calls.glob("call-*.jlink"), key=lambda p: int(p.stem.split("-")[1]))
+    _preflight, _load_go, read_back = call_files
+    read_lines = [ln.strip() for ln in read_back.read_text(encoding="utf-8").splitlines()]
+    mem8_lines = [ln for ln in read_lines if ln.startswith("mem8 ")]
+    assert len(mem8_lines) == 2, f"expected 2 chunked mem8 lines, got: {mem8_lines}"
+    second_chunk = mem8_lines[1]
+    assert f"no dump line for chunk '{second_chunk}'" in res.stderr, res.stderr
 
 
 @_needs_e2e

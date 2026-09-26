@@ -144,6 +144,18 @@ def test_chunk_zero_size_is_a_hard_error(tmp_path: Path) -> None:
 
 
 @_NEEDS_BASH
+def test_chunk_non_hex_size_gets_the_custom_error_not_a_bash_arithmetic_one(
+    tmp_path: Path,
+) -> None:
+    """A size that is not even hex ('zz') must be caught by the explicit
+    `^(0[xX])?[0-9A-Fa-f]+$` check before `$(( ))` ever sees it, and get
+    THIS function's own named error, not bash arithmetic's generic one."""
+    res = _call_chunks(tmp_path, "0x20000d00", "zz")
+    assert res.returncode == 1
+    assert "size 'zz' is not a valid hex value" in res.stderr
+
+
+@_NEEDS_BASH
 def test_chunk_bad_addr_is_a_hard_error(tmp_path: Path) -> None:
     """A genuinely malformed arithmetic expression (two tokens, no operator)
     must be refused, not silently coerced to 0. A bare non-numeric WORD is
@@ -164,6 +176,79 @@ def test_ram_run_and_reread_route_their_mem8_through_the_chunker() -> None:
             line.strip().startswith("mem8 $BUF") or line.strip().startswith("mem8 \"$BUF\"")
             for line in body.splitlines()
         ), f"{path.name} still has a raw, unchunked 'mem8 $BUF' line"
+
+
+def test_ram_run_and_reread_both_call_the_shared_chunk_verify_guard() -> None:
+    """ram-run.sh and reread.sh must both route their read-failure check
+    through the ONE shared `bench_mem8_verify_chunks()` helper (bench-env.sh)
+    rather than each carrying its own copy -- reread.sh had NO such check at
+    all before this fix (alp-sdk#2313 item 3)."""
+    for path in (RAM_RUN, REREAD):
+        body = path.read_text(encoding="utf-8")
+        assert "bench_mem8_verify_chunks" in body, (
+            f"{path.name} does not call the shared bench_mem8_verify_chunks() guard")
+
+
+def _call_verify_chunks(
+    tmp_path: Path, label: str, transcript_body: str, mem8_lines: str,
+) -> subprocess.CompletedProcess[str]:
+    """Source bench-env.sh (no labgrid inputs, so it never reaches real
+    infrastructure) and call bench_mem8_verify_chunks() directly against a
+    hand-built transcript -- the same function ram-run.sh and reread.sh both
+    call after their own JLinkExe session completes."""
+    (tmp_path / "bench-env.sh").write_bytes(ENV.read_bytes())
+    transcript = tmp_path / "transcript.out"
+    transcript.write_text(transcript_body, encoding="utf-8")
+    script = (
+        "unset LG_PLACE LG_COORDINATOR LG_SWD_PATH ALP_JLINK_SEARCH_ROOT\n"
+        "source ./bench-env.sh\n"
+        f'bench_mem8_verify_chunks "{label}" "{transcript}" "{mem8_lines}"\n'
+        "exit $?\n"
+    )
+    gate = tmp_path / "gate.sh"
+    gate.write_text(script, encoding="utf-8")
+    return subprocess.run(
+        ["bash", "gate.sh"], cwd=tmp_path, capture_output=True,
+        text=True, encoding="utf-8", errors="replace", timeout=60,
+    )
+
+
+@_NEEDS_BASH
+def test_mem8_verify_chunks_passes_when_every_chunk_dumps(tmp_path: Path) -> None:
+    mem8_lines = "mem8 0x1000, 0x10000\nmem8 0x11000, 0x4000"
+    transcript = "1000 = 68 69 00 00\n11000 = 68 69 00 00\n"
+    res = _call_verify_chunks(tmp_path, "reread", transcript, mem8_lines)
+    assert res.returncode == 0, res.stderr
+
+
+@_NEEDS_BASH
+def test_mem8_verify_chunks_could_not_read_memory_is_a_hard_error(tmp_path: Path) -> None:
+    mem8_lines = "mem8 0x1000, 0x10000"
+    transcript = "1000 = 68 69 00 00\nCould not read memory.\n"
+    res = _call_verify_chunks(tmp_path, "reread", transcript, mem8_lines)
+    assert res.returncode == 9
+    assert "!! reread: mem8 reported 'Could not read memory'" in res.stderr
+
+
+@_NEEDS_BASH
+def test_mem8_verify_chunks_no_dump_at_all_is_a_hard_error(tmp_path: Path) -> None:
+    mem8_lines = "mem8 0x1000, 0x10000"
+    res = _call_verify_chunks(tmp_path, "reread", "", mem8_lines)
+    assert res.returncode == 9
+    assert "!! reread: no memory dump line in the read session's transcript" in res.stderr
+
+
+@_NEEDS_BASH
+def test_mem8_verify_chunks_a_dropped_chunk_is_a_hard_error(tmp_path: Path) -> None:
+    """reread.sh's guard, exercised the same way as ram-run.sh's own
+    end-to-end dropped-chunk test: the SECOND of two chunks has no dump
+    line while the first still comes back -- the whole-transcript
+    'any dump line at all' check would not catch this on its own."""
+    mem8_lines = "mem8 0x1000, 0x10000\nmem8 0x11000, 0x4000"
+    transcript = "1000 = 68 69 00 00\n"   # chunk 2 (0x11000) silently missing
+    res = _call_verify_chunks(tmp_path, "reread", transcript, mem8_lines)
+    assert res.returncode == 9
+    assert "!! reread: no dump line for chunk 'mem8 0x11000, 0x4000'" in res.stderr
 
 
 # --- openocd-ram-run.sh: NVIC ICER/ICPR clear before resume (HE path) ------
