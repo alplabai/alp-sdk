@@ -535,6 +535,332 @@ ZTEST(alp_chips, test_fake_ina236_conversion_ready_issues_a_fresh_read_each_call
 	alp_i2c_close(bus);
 }
 
+/* Regression: a NULL ready_out is a caller-error (ALP_ERR_INVAL), distinct
+ * from an uninitialised/NULL ctx (ALP_ERR_NOT_READY) -- these two return
+ * codes were briefly folded into one ALP_ERR_NOT_READY while merging in the
+ * energy-sampler additions; keep them apart. */
+ZTEST(alp_chips, test_ina236_conversion_ready_null_args)
+{
+	ina236_t ctx_uninit = { 0 };
+	bool     ready      = false;
+
+	zassert_equal(ina236_conversion_ready(NULL, &ready), ALP_ERR_NOT_READY);
+	zassert_equal(ina236_conversion_ready(&ctx_uninit, &ready), ALP_ERR_NOT_READY);
+
+	fake_ina236_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+	ina236_t ctx;
+	zassert_equal(ina236_init(&ctx, bus, 0x40u, 0.010f, 1.0f, INA236_ADCRANGE_81MV), ALP_OK);
+
+	zassert_equal(ina236_conversion_ready(&ctx, NULL), ALP_ERR_INVAL);
+
+	ina236_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_ina236_read_power_raw_and_uw_match_power_lsb)
+{
+	fake_ina236_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	/* E1M EVK +5V rail on the FINE range: 20 mOhm, 4.0 A request clamps
+	 * to the 1.024 A ceiling, giving the ADC-matched 31.25 uA CURRENT_LSB
+	 * and, per eq. 4, exactly 1.0 mW per POWER count (see
+	 * test_ina236_calibration_matches_datasheet_and_survives_clamp). */
+	ina236_t ctx;
+	zassert_equal(ina236_init(&ctx, bus, 0x40u, 0.020f, 4.0f, INA236_ADCRANGE_20MV), ALP_OK);
+	zassert_within(ina236_power_lsb_w(&ctx), 0.001f, 1e-9f, "1.0 mW per POWER count");
+
+	fake_ina236_set_reg(0x03u, 1000u);
+
+	uint16_t raw = 0;
+	zassert_equal(ina236_read_power_raw(&ctx, &raw), ALP_OK);
+	zassert_equal(raw, 1000u);
+
+	/* ina236_read_power_uw() is routed through ina236_power_lsb_w() (no
+	 * inline "32.0f * current_lsb_a" restatement) -- this pins that the
+	 * two agree: 1000 counts x 1.0 mW/count = 1000 mW = 1,000,000 uW. */
+	uint32_t uw = 0;
+	zassert_equal(ina236_read_power_uw(&ctx, &uw), ALP_OK);
+	zassert_equal(uw, 1000000u, "1000 x 1.0 mW/count = 1,000,000 uW, got %u", uw);
+
+	/* NULL / uninitialised guards on both. */
+	ina236_t ctx_uninit = { 0 };
+	zassert_equal(ina236_read_power_raw(&ctx_uninit, &raw), ALP_ERR_NOT_READY);
+	zassert_equal(ina236_read_power_raw(&ctx, NULL), ALP_ERR_NOT_READY);
+	zassert_equal(ina236_read_power_uw(&ctx_uninit, &uw), ALP_ERR_NOT_READY);
+	zassert_equal(ina236_read_power_uw(&ctx, NULL), ALP_ERR_NOT_READY);
+
+	ina236_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_ina236_configure_writes_avg_ct_mode_preserving_adcrange)
+{
+	fake_ina236_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	/* Init on the FINE range so ADCRANGE (CONFIG bit 12) is SET, and prove
+	 * ina236_configure() preserves it -- the field it must read-modify-write
+	 * around, per its Doxygen. */
+	ina236_t ctx;
+	zassert_equal(ina236_init(&ctx, bus, 0x40u, 0.010f, 1.0f, INA236_ADCRANGE_20MV), ALP_OK);
+	zassert_equal(fake_ina236_get_reg(0x00u) & 0x1000u, 0x1000u, "ADCRANGE bit must be set");
+
+	zassert_equal(
+	    ina236_configure(
+	        &ctx, INA236_AVG_16, INA236_CT_204US, INA236_CT_332US, INA236_MODE_SHUNT_BUS_CONT),
+	    ALP_OK);
+
+	/* AVG=16(code 2)<<9 | VBUSCT=204us(code 1)<<6 | VSHCT=332us(code 2)<<3 |
+	 * MODE=shunt+bus-cont(code 7), ADCRANGE (bit 12) preserved from init. */
+	uint16_t expect = 0x1000u | (2u << 9) | (1u << 6) | (2u << 3) | 7u;
+	zassert_equal(fake_ina236_get_reg(0x00u),
+	              expect,
+	              "CONFIG = 0x%04x, expected 0x%04x",
+	              fake_ina236_get_reg(0x00u),
+	              expect);
+
+	/* Out-of-range fields are rejected before any bus write. */
+	uint32_t writes_before = fake_ina236_read_count(0x00u); /* unrelated counter, just a marker */
+	(void)writes_before;
+	zassert_equal(
+	    ina236_configure(
+	        &ctx, (ina236_avg_t)8, INA236_CT_204US, INA236_CT_332US, INA236_MODE_SHUNT_BUS_CONT),
+	    ALP_ERR_INVAL);
+
+	ina236_t ctx_uninit = { 0 };
+	zassert_equal(ina236_configure(&ctx_uninit,
+	                               INA236_AVG_16,
+	                               INA236_CT_204US,
+	                               INA236_CT_332US,
+	                               INA236_MODE_SHUNT_BUS_CONT),
+	              ALP_ERR_NOT_READY);
+
+	ina236_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
+/* ------------------------------------------------------------------ */
+/* ina236 -- energy-sampler helpers (pure functions, no bus traffic)  */
+/* ------------------------------------------------------------------ */
+
+/* The POWER scaling had been wrong by a factor of 625 (it applied the
+ * bus-voltage LSB a second time on top of the 32 that already carries it),
+ * and nothing caught it because every ina236 test above only checks
+ * argument rejection.  Both new pure helpers are bus-free, so the scaling
+ * and the conversion-timing table CAN be pinned without the (dormant)
+ * chips fake layer -- which is exactly what these two tests do. */
+ZTEST(alp_chips, test_ina236_power_lsb_is_32x_current_lsb)
+{
+	/* SBOSA81D eq. 4: Power [W] = 32 x CURRENT_LSB x POWER.  The 32 is
+	 * NOT dimensionless -- the internal register math divides by 20000
+	 * and 20000 x 1.6 mV (the bus LSB) = 32 V -- so the bus LSB must NOT
+	 * be applied again.  Filling current_lsb_a directly keeps this a pure
+	 * scaling check with no bus traffic. */
+	ina236_t ctx = { 0 };
+
+	/* The +5V EVK rail: 20 mOhm shunt, 4.0 A full scale ->
+	 * CURRENT_LSB = 4.0 / 32768 = 122.070312 uA. */
+	ctx.current_lsb_a = 4.0f / 32768.0f;
+	zassert_within(ina236_power_lsb_w(&ctx),
+	               32.0f * (4.0f / 32768.0f),
+	               1e-9f,
+	               "power LSB must be exactly 32 x CURRENT_LSB (eq. 4)");
+	/* Anchor the absolute value too, so a future refactor that keeps the
+	 * relationship but rescales CURRENT_LSB still trips: 3.906250 mW. */
+	zassert_within(ina236_power_lsb_w(&ctx), 0.00390625f, 1e-9f, "expected 3.90625 mW per count");
+
+	/* A NULL context must yield 0, not read through the pointer. */
+	zassert_equal(ina236_power_lsb_w(NULL), 0.0f);
+}
+
+/* CURRENT_LSB is a REPORTING scale and must never be derived from a current
+ * the selected ADCRANGE cannot measure -- doing so reports every measurable
+ * current more coarsely than the ADC resolved it.  The +5V EVK rail is the
+ * live case: board data rates it 4.0 A, but on the +/-20.48 mV range a 20 mOhm
+ * shunt saturates at 1.024 A. */
+ZTEST(alp_chips, test_ina236_full_scale_is_range_over_shunt)
+{
+	/* SBOSA81D table 7-4 full scales over the shunt: this is the real
+	 * measurement ceiling, above which the ADC saturates regardless of the
+	 * requested reporting scale. */
+	zassert_within(ina236_full_scale_a(0.020f, INA236_ADCRANGE_81MV), 4.096f, 1e-4f);
+	zassert_within(ina236_full_scale_a(0.020f, INA236_ADCRANGE_20MV), 1.024f, 1e-4f);
+	zassert_within(ina236_full_scale_a(0.050f, INA236_ADCRANGE_20MV), 0.4096f, 1e-5f);
+	/* Non-positive / non-finite shunt must not divide by zero. */
+	zassert_equal(ina236_full_scale_a(0.0f, INA236_ADCRANGE_81MV), 0.0f);
+	zassert_equal(ina236_full_scale_a(NAN, INA236_ADCRANGE_81MV), 0.0f);
+}
+
+/* ina236_sample_period_us() (tested below) is derived from these two lookup
+ * tables -- pin them directly too, so a table typo shows up at the smallest
+ * possible unit rather than only as an already-multiplied period. */
+ZTEST(alp_chips, test_ina236_avg_count_and_conversion_time_us_match_datasheet_tables)
+{
+	/* SBOSA81D table 7-4 AVG field: 1, 4, 16, 64, 128, 256, 512, 1024. */
+	zassert_equal(ina236_avg_count(INA236_AVG_1), 1u);
+	zassert_equal(ina236_avg_count(INA236_AVG_4), 4u);
+	zassert_equal(ina236_avg_count(INA236_AVG_16), 16u);
+	zassert_equal(ina236_avg_count(INA236_AVG_64), 64u);
+	zassert_equal(ina236_avg_count(INA236_AVG_128), 128u);
+	zassert_equal(ina236_avg_count(INA236_AVG_256), 256u);
+	zassert_equal(ina236_avg_count(INA236_AVG_512), 512u);
+	zassert_equal(ina236_avg_count(INA236_AVG_1024), 1024u);
+	zassert_equal(ina236_avg_count((ina236_avg_t)8), 0u, "out-of-range code must report 0");
+
+	/* SBOSA81D table 7-4 VBUSCT/VSHCT field (shared encoding): 140, 204,
+	 * 332, 588, 1100, 2116, 4156, 8244 us. */
+	zassert_equal(ina236_conversion_time_us(INA236_CT_140US), 140u);
+	zassert_equal(ina236_conversion_time_us(INA236_CT_204US), 204u);
+	zassert_equal(ina236_conversion_time_us(INA236_CT_332US), 332u);
+	zassert_equal(ina236_conversion_time_us(INA236_CT_588US), 588u);
+	zassert_equal(ina236_conversion_time_us(INA236_CT_1100US), 1100u);
+	zassert_equal(ina236_conversion_time_us(INA236_CT_2116US), 2116u);
+	zassert_equal(ina236_conversion_time_us(INA236_CT_4156US), 4156u);
+	zassert_equal(ina236_conversion_time_us(INA236_CT_8244US), 8244u);
+	zassert_equal(ina236_conversion_time_us((ina236_ct_t)8), 0u, "out-of-range code must report 0");
+}
+
+/* The calibration arithmetic is where BOTH shipped scaling bugs lived (power
+ * 625x low, SHUNT_CAL not /4 on the fine range) and where a third hid (a
+ * saturating clamp that left CURRENT_LSB describing a register value that was
+ * never written).  ina236_calibration_for() is the exact function
+ * apply_calibration() calls, so these assertions exercise production code
+ * rather than restating it -- the earlier version of this test re-derived the
+ * expression locally and would still have passed with the clamp reverted. */
+ZTEST(alp_chips, test_ina236_calibration_matches_datasheet_and_survives_clamp)
+{
+	uint16_t cal = 0;
+	float    lsb = 0.0f;
+
+	/* E1M EVK +5V rail on the COARSE range: 20 mOhm, rated 4.0 A.  Requested
+	 * scale is just under the 4.096 A ceiling, so it is honoured.
+	 * SHUNT_CAL = 0.00512 / (CURRENT_LSB x R) rounds 2097.15 -> 2097, and
+	 * CURRENT_LSB is then back-derived from 2097. */
+	zassert_equal(ina236_calibration_for(0.020f, 4.0f, INA236_ADCRANGE_81MV, &cal, &lsb), ALP_OK);
+	zassert_equal(cal, 2097, "eq. 1 rounds to 2097, got %u", cal);
+	zassert_within(lsb, 0.00512f / (2097.0f * 0.020f), 1e-9f);
+
+	/* Same rail on the FINE range.  The 4.0 A request exceeds the 1.024 A
+	 * the range can measure, so it clamps -- giving the ADC-matched
+	 * 31.25 uA and, per eq. 4, exactly 1.0 mW per POWER count.  This is the
+	 * configuration the bench measurement ran at. */
+	zassert_equal(ina236_calibration_for(0.020f, 4.0f, INA236_ADCRANGE_20MV, &cal, &lsb), ALP_OK);
+	zassert_equal(cal, 2048, "0.00512/(31.25uA x 20mOhm)/4 = 2048, got %u", cal);
+	zassert_within(lsb, 31.25e-6f, 1e-10f, "ADC-matched CURRENT_LSB");
+	zassert_within(32.0f * lsb, 0.001f, 1e-9f, "1.0 mW per POWER count (eq. 4)");
+
+	/* A DELIBERATELY tighter scale than the range is honoured, not widened. */
+	zassert_equal(ina236_calibration_for(0.020f, 0.5f, INA236_ADCRANGE_81MV, &cal, &lsb), ALP_OK);
+	zassert_true(lsb < 31.25e-6f, "a narrow request must give a finer LSB");
+
+	/* SATURATION: 20 mOhm at 0.2 A wants SHUNT_CAL 41943, above the 15-bit
+	 * 0x7FFF ceiling.  The clamp must be reflected in CURRENT_LSB -- keeping
+	 * the requested 0.2/32768 = 6.1035 uA would make every current and power
+	 * reading 21.9 % low while still returning ALP_OK. */
+	zassert_equal(ina236_calibration_for(0.020f, 0.2f, INA236_ADCRANGE_81MV, &cal, &lsb), ALP_OK);
+	zassert_equal(cal, 32767, "must saturate at the 15-bit maximum, got %u", cal);
+	zassert_within(lsb,
+	               0.00512f / (32767.0f * 0.020f),
+	               1e-10f,
+	               "CURRENT_LSB must follow the CLAMPED SHUNT_CAL");
+	zassert_true(lsb > 6.2e-6f, "must NOT keep the unclamped 6.1035 uA");
+
+	/* INVARIANT: SHUNT_CAL always lands in [2048, 32767].  2048 is the
+	 * ADC-matched floor -- clamping the scale to the range's full scale FS/R
+	 * makes (scale/32768) x R = FS/32768, which is independent of R, so
+	 * cal = 0.00512 x 32768 / FS / range_div = 2048 on BOTH ranges.  Any
+	 * narrower request only pushes cal up, toward the 15-bit ceiling.  This
+	 * is what makes the SHUNT_CAL=0 case ("report zero current and power")
+	 * unreachable rather than merely unlikely.  Sweep a wide spread of
+	 * shunts and scales, including absurd ones, and prove the bound holds. */
+	const float             shunts[] = { 0.001f, 0.020f, 0.050f, 0.500f, 1000.0f };
+	const float             scales[] = { 0.001f, 0.2f, 1.0f, 4.0f, 1000.0f };
+	const ina236_adcrange_t ranges[] = { INA236_ADCRANGE_81MV, INA236_ADCRANGE_20MV };
+	for (size_t r = 0; r < ARRAY_SIZE(shunts); ++r) {
+		for (size_t s = 0; s < ARRAY_SIZE(scales); ++s) {
+			for (size_t g = 0; g < ARRAY_SIZE(ranges); ++g) {
+				zassert_equal(ina236_calibration_for(shunts[r], scales[s], ranges[g], &cal, &lsb),
+				              ALP_OK,
+				              "R=%f scale=%f range=%d",
+				              (double)shunts[r],
+				              (double)scales[s],
+				              (int)ranges[g]);
+				zassert_between_inclusive(cal,
+				                          2048,
+				                          32767,
+				                          "SHUNT_CAL %u out of [2048,32767] for "
+				                          "R=%f scale=%f range=%d",
+				                          cal,
+				                          (double)shunts[r],
+				                          (double)scales[s],
+				                          (int)ranges[g]);
+				zassert_true(lsb > 0.0f);
+			}
+		}
+	}
+
+	/* Argument guards. */
+	zassert_equal(ina236_calibration_for(0.020f, 1.0f, INA236_ADCRANGE_81MV, NULL, &lsb),
+	              ALP_ERR_INVAL);
+	zassert_equal(ina236_calibration_for(0.020f, 1.0f, INA236_ADCRANGE_81MV, &cal, NULL),
+	              ALP_ERR_INVAL);
+	zassert_equal(ina236_calibration_for(0.0f, 1.0f, INA236_ADCRANGE_81MV, &cal, &lsb),
+	              ALP_ERR_INVAL);
+	zassert_equal(ina236_calibration_for(0.020f, NAN, INA236_ADCRANGE_81MV, &cal, &lsb),
+	              ALP_ERR_INVAL);
+}
+
+ZTEST(alp_chips, test_ina236_sample_period_matches_datasheet_tables)
+{
+	/* SBOSA81D table 7-4 conversion times, section 7.4.4 averaging.  In
+	 * continuous shunt+bus the ADC is multiplexed across both, so the two
+	 * conversion times ADD; a single-quantity mode counts only its own. */
+	zassert_equal(ina236_sample_period_us(
+	                  INA236_AVG_1, INA236_CT_140US, INA236_CT_140US, INA236_MODE_SHUNT_BUS_CONT),
+	              280u,
+	              "1 x (140 + 140) us");
+	/* The configuration this repo's energy runner uses: 16 x 280 us. */
+	zassert_equal(ina236_sample_period_us(
+	                  INA236_AVG_16, INA236_CT_140US, INA236_CT_140US, INA236_MODE_SHUNT_BUS_CONT),
+	              4480u,
+	              "16 x (140 + 140) us");
+	/* Reset defaults: AVG=1, both CT = 1100 us. */
+	zassert_equal(ina236_sample_period_us(
+	                  INA236_AVG_1, INA236_CT_1100US, INA236_CT_1100US, INA236_MODE_SHUNT_BUS_CONT),
+	              2200u);
+	/* Shunt-only ignores VBUSCT; bus-only ignores VSHCT. */
+	zassert_equal(ina236_sample_period_us(
+	                  INA236_AVG_4, INA236_CT_8244US, INA236_CT_204US, INA236_MODE_SHUNT_CONT),
+	              816u,
+	              "4 x 204 us -- VBUSCT must not count in shunt-only mode");
+	zassert_equal(ina236_sample_period_us(
+	                  INA236_AVG_4, INA236_CT_204US, INA236_CT_8244US, INA236_MODE_BUS_CONT),
+	              816u,
+	              "4 x 204 us -- VSHCT must not count in bus-only mode");
+	/* BOTH datasheet shutdown encodings (000b and 100b) must report 0 --
+	 * no conversions happen, and 0 makes a "divide by the period" caller
+	 * fail loudly instead of reporting an impossible sample rate. */
+	zassert_equal(ina236_sample_period_us(
+	                  INA236_AVG_1, INA236_CT_140US, INA236_CT_140US, INA236_MODE_SHUTDOWN),
+	              0u);
+	zassert_equal(ina236_sample_period_us(
+	                  INA236_AVG_1, INA236_CT_140US, INA236_CT_140US, INA236_MODE_SHUTDOWN_ALT),
+	              0u);
+	/* Largest legal combination must not overflow: 1024 x (8244 + 8244). */
+	zassert_equal(
+	    ina236_sample_period_us(
+	        INA236_AVG_1024, INA236_CT_8244US, INA236_CT_8244US, INA236_MODE_SHUNT_BUS_CONT),
+	    16883712u);
+}
+
 /* ------------------------------------------------------------------ */
 /* eeprom_24c128 -- generic 24Cxx I2C EEPROM                          */
 /* ------------------------------------------------------------------ */
