@@ -364,8 +364,7 @@ consistently races the bridge's own startup) -- see
 [`include/alp/chips/gd32g553.h`](../include/alp/chips/gd32g553.h).
 
 **Host-behaviour note (Refs #2297; bug bench-observed 2026-09-26,
-E1M-V2M103, fix compile-verified only so far -- not yet re-run on the
-bench):** `.request()`'s single non-blocking `GET_VERSION` attempt can
+E1M-V2M103; fix bench-verified 2026-09-26 on E1M-V2M103 with GD32_NRST held ~40 s past probe: bridge reachable ~46 s, SDIO card enumerated 48.4 s, brcmfmac firmware 49.7 s, hci0 UP+RUNNING 54.8 s, devices_deferred empty, no rebind; a normal boot is unchanged):** `.request()`'s single non-blocking `GET_VERSION` attempt can
 end in one of three states -- confirmed supported, confirmed
 unsupported (a bridge that answered and reported a minor below 11 or
 an unexpected major), or *still unresolved* because the bridge hasn't

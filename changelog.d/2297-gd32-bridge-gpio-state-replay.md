@@ -63,8 +63,7 @@ including the BRD_I2C shared-bus/arbitration caveat, updated in the same
 change).
 
 **Follow-up (same branch; bug bench-observed 2026-09-26, E1M-V2M103,
-this fix compile-verified only so far -- not yet re-run on the
-bench):** lines 18/19's `.request()` gate
+this fix bench-verified 2026-09-26 on E1M-V2M103 with GD32_NRST held ~40 s past probe: bridge reachable ~46 s, SDIO card enumerated 48.4 s, brcmfmac firmware 49.7 s, hci0 UP+RUNNING 54.8 s, devices_deferred empty, no rebind; a normal boot is unchanged):** lines 18/19's `.request()` gate
 (`gd32_bridge_resolve_wifi_bt()`) used to return `-EPROBE_DEFER` itself
 when the bridge was still silent, which permanently deferred the
 *consumer* -- `mmc-pwrseq-simple`'s `wlan-pwrseq` `reset-gpios` and

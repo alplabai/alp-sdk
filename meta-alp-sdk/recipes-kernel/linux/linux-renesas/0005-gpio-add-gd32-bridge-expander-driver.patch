@@ -39,8 +39,7 @@ once confirmed below that or on an unexpected major, -EPROBE_DEFER
 while the bridge is still silent.
 
 Late-bridge deferral (Refs #2297; bug bench-observed 2026-09-26,
-E1M-V2M103, this fix compile-verified only so far -- not yet re-run on
-the bench): a bare -EPROBE_DEFER from .request() only gets retried by
+E1M-V2M103; fix bench-verified 2026-09-26 on E1M-V2M103 with GD32_NRST held ~40 s past probe: bridge reachable ~46 s, SDIO card enumerated 48.4 s, brcmfmac firmware 49.7 s, hci0 UP+RUNNING 54.8 s, devices_deferred empty, no rebind; a normal boot is unchanged): a bare -EPROBE_DEFER from .request() only gets retried by
 the kernel when some OTHER driver's (un)registration happens to walk
 the deferred-probe list -- nothing guarantees that happens once the
 bridge later comes up. Observed on the bench: NRST release failed, and
