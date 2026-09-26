@@ -85,7 +85,23 @@ this exact gap (tracked as
 `tan doctor` to confirm what's missing before re-running.
 
 To target a different SoM / board, edit `board.yaml` -- nothing else
-needs to change.
+needs to change. For example, this app already ships E1M-AEN803 twins
+of both its board-qualified overlays, with DT content identical to the
+AEN801 files beside them. After you set `som.sku: E1M-AEN803` in
+`board.yaml`, `tan build` applies
+[`boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay`](boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay)
+(this app declares only `cores: m55_hp`). The M55-HE twin,
+[`boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay`](boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay),
+serves the AEN bench farm's default target
+(`scripts/bench/aen/bench-env.sh`'s `AEN_BOARD`) through a raw
+`west build` that bypasses `board.yaml`'s `cores:` selection. After the
+same `som.sku` edit:
+
+```bash
+west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he examples/peripheral-io/blink \
+    -- -DEXTRA_ZEPHYR_MODULES=$(pwd) -DCONFIG_COMPILER_OPT='"-DALP_BOARD_E1M_EVK"'
+west flash
+```
 
 ### native_sim (host, no hardware)
 
