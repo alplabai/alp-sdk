@@ -168,28 +168,23 @@ side has no Wi-Fi role):
   firmware blobs (WLAN `.trxse`, CLM, NVRAM, two regional BT `.hcd`
   patches) from four upstream `murata-wireless` / `Infineon` repos,
   pinned by `SRCREV`.
-* `meta-alp-sdk/recipes-kernel/murata-2gy-nvram/` -- module-specific
-  NVRAM + CLM for the actual on-module Murata LBEE5HY2FY (Type 2GY),
-  installed under brcmfmac's per-board-compatible firmware names so it
-  is picked ahead of `cyw-fmac-firmware`'s generic Infineon eval-board
-  blob (boardtype `0x0899`, placeholder MAC `00:90:4c`).
-* `wireless-regdb-static`, `iw`, `wpa-supplicant` (+ `-cli` /
-  `-passphrase`), `bluez5` -- standard OE-core recipes, pulled in by
-  `alp-image-common.inc` for any V2N/V2M `MACHINE_FEATURES`.
+* `wireless-regdb-static`, `iw`, `wpa-supplicant`, `bluez5` -- standard
+  OE-core recipes, pulled in by `alp-image-common.inc` for any V2N/V2M
+  `MACHINE_FEATURES`.
 
-**Bench results (2026-09-26, E1M-V2M103 unit 2026W38-0001, Murata
-LBEE5HY2FY Type 2GY, cyw-fmac fw 28.10.387.10, kernel 6.1.141-cip43):**
+**Bench results (2026-09-26, E1M-V2M103, cyw-fmac fw 28.10.387.10,
+kernel 6.1.141-cip43):**
 
 * Wi-Fi scan, WPA2/SAE association on 5 GHz channel 60, and DHCP all
   worked end to end.
-* `sd-uhs-sdr50`/`sd-uhs-sdr104` on `&sdhi2` (above) negotiate SDR50 at
-  100 MHz (up from HS at 50 MHz); SDR104 was not reached in this run.
+* `sd-uhs-sdr50` on `&sdhi2` (above) negotiates SDR50 at 100 MHz (up
+  from HS at 50 MHz); `sd-uhs-sdr104` is deliberately not set --
+  untested 208 MHz tuning on this non-removable module is not worth
+  the risk yet.
 * `brcm,ccode-map-trivial` on the `wifi@1` node lets `iw reg set DE`
   reach the firmware; confirmed with `wireless-regdb-static` installed.
-* NVRAM/CLM come from the real Murata module part (`murata-2gy-nvram`
-  above), not the generic Infineon eval blob.
-* Open HW note: RSSI on this bench unit reads ~-70 dBm where a phone
-  reads ~-35 dBm at the same spot -- points at that unit's antenna/RF
+* Open HW note: bench RSSI on the E1M-V2M103 EVK reads roughly 35 dB
+  below a phone at the same spot -- points at that unit's antenna/RF
   path, under investigation, not a software issue.
 
 **Bench TODO:** the E1M-X-EVK carrier dtsi (`e1m-x-evk.dtsi`) no longer
