@@ -4,8 +4,10 @@
  *
  * native_sim board overlay -- chooses zephyr's dummy display
  * driver so the LVGL demo links without a real display chip.
- * Real-silicon builds (alif / v2n) bring up the actual panel
- * (ST7789 / ILI9488 / DSI etc.) via the SoM board overlay.
+ * Real-silicon builds (alif / v2n) bring up the actual panel: on AEN
+ * that's the RK055HDMIPI4MA0 DSI panel via the e1m_evk_rk055hdmipi4ma0
+ * shield (CMakeLists.txt, #2173); other SoMs bring up their own panel
+ * (e.g. ILI9488) via the SoM board overlay.
  *
  * Two references to the same dummy_dc node -- see
  * examples/display/lvgl-widgets-demo/boards/native_sim_native_64.overlay
