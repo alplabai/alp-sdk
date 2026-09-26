@@ -232,3 +232,35 @@ def test_pyproject_vela_pin_matches_committed_tables():
     pinned = _committed_ethos_u_pin()
     assert pinned is not None, "no committed metadata/npu_ops/ethos_u/u85@vela-*.json"
     assert match.group(1) == pinned
+
+
+def _locked_ethos_u_vela_version() -> str | None:
+    """The `version` uv.lock actually RESOLVED for the `ethos-u-vela`
+    `[[package]]` table, or None if uv.lock has no such package.
+
+    Read by REGEX, not `tomllib`/a `uv` invocation -- this is the exact
+    #2310 drift class (pyproject pinned `==5.2.0`, `uv.lock` had resolved
+    5.1.0 from before the pin existed) and no CI step runs `uv lock
+    --check`, so nothing else in the tree notices a stale lock entry."""
+    lock_text = (REPO / "uv.lock").read_text(encoding="utf-8")
+    match = re.search(
+        r'^name = "ethos-u-vela"\nversion = "([0-9.]+)"', lock_text, re.MULTILINE)
+    return match.group(1) if match else None
+
+
+def test_uv_lock_ethos_u_vela_version_matches_pyprojects_pin():
+    """The drift `test_pyproject_vela_pin_matches_committed_tables`'s own
+    docstring PROMISES to catch (pyproject pinned `==5.2.0`, `uv.lock`
+    resolving a stale 5.1.0) but never actually reads `uv.lock` at all --
+    only the committed npu-ops table filename, which a `pyproject.toml`
+    edit alone does not touch. `uv lock --check` would catch it too, but no
+    CI step runs that (#2310); this is the one hermetic check in the tree
+    that reads uv.lock's OWN resolved version at all."""
+    pyproject_text = (REPO / "pyproject.toml").read_text(encoding="utf-8")
+    match = re.search(r'"ethos-u-vela==([0-9.]+)"', pyproject_text)
+    assert match, "pyproject.toml has no exact ethos-u-vela==X pin"
+    locked = _locked_ethos_u_vela_version()
+    assert locked is not None, "uv.lock has no ethos-u-vela [[package]] entry"
+    assert locked == match.group(1), (
+        f"uv.lock resolved ethos-u-vela {locked!r} but pyproject.toml pins "
+        f"{match.group(1)!r} -- run `uv lock` to re-resolve")
