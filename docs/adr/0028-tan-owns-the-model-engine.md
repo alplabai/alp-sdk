@@ -23,17 +23,19 @@ counts.
 
 ```
 metadata/npu_ops/
-  ethos_u/u85@vela-5.1.0.json          70 ops · tflite · tool-generated
-  ethos_u/u55-u65@vela-5.1.0.json      53 ops · tflite · tool-generated
+  ethos_u/u85@vela-5.2.0.json          74 ops · tflite · tool-generated
+  ethos_u/u55-u65@vela-5.2.0.json      55 ops · tflite · tool-generated
   drpai/onnx-i8@translator-1.12.json   47 ops · onnx   · vendor-manual
   (no deepx/ — deliberately)
 ```
 
-Vela 5.1.0 publishes **two** TFLite tables: Ethos-U85 (70 operators) and
-Ethos-U55/U65 (53). U55/U65 is a strict subset; exactly 17 are U85-only —
-`CAST`, `DIV`, `EQUAL`, `GATHER`, `GREATER`, `GREATER_EQUAL`, `LESS`,
-`LESS_EQUAL`, `LOGICAL_AND`, `LOGICAL_NOT`, `LOGICAL_OR`, `NOT_EQUAL`,
-`REDUCE_ALL`, `REDUCE_ANY`, `SCATTER_ND`, `SELECT`, `SELECT_V2`. alp-sdk ships
+Vela 5.2.0 publishes **two** TFLite tables: Ethos-U85 (74 operators) and
+Ethos-U55/U65 (55). U55/U65 is a strict subset; exactly 19 are U85-only —
+`ASSIGN_VARIABLE`, `CAST`, `DIV`, `EQUAL`, `GATHER`, `GREATER`,
+`GREATER_EQUAL`, `LESS`, `LESS_EQUAL`, `LOGICAL_AND`, `LOGICAL_NOT`,
+`LOGICAL_OR`, `NOT_EQUAL`, `READ_VARIABLE`, `REDUCE_ALL`, `REDUCE_ANY`,
+`SCATTER_ND`, `SELECT`, `SELECT_V2` (re-pinned from vela 5.1.0's 17-op delta
+by #2310). alp-sdk ships
 all three variants (u85: E1M-AEN401/601/801/803; u55: E1M-AEN301/501/701;
 u65: E1M-NX9101), so one flat `ethos_u.json` carrying 70 would report 17
 false capabilities on four of the eight Ethos-U SKUs. The tables are invariant to
