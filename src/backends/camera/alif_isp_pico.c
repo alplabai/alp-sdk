@@ -106,6 +106,7 @@
 LOG_MODULE_REGISTER(alp_camera_alif_isp_pico, CONFIG_LOG_DEFAULT_LEVEL);
 
 #include "alp_errno.h"
+#include "camera_frmival.h"
 #include "camera_ops.h"
 #include "alif_isp_pico.h"
 #include "alp_slot_claim.h"
@@ -374,18 +375,22 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	(void)video_set_ctrl(dev, &ae_ctrl);
 
 #if DT_NODE_EXISTS(DT_NODELABEL(ov5647))
-	/* Request the caller's fps (issue #2276: this used to hard-code 10 fps
-	 * here, silently ignoring cfg->fps).  cfg->fps == 0 means "backend
-	 * default" (see <alp/camera.h>'s alp_camera_config_t::fps doc) -- NOT
-	 * the same convention width/height use just above (those are a
-	 * "you must choose" sentinel that alp_camera_open() rejects outright;
-	 * an unset fps is not an error, it just falls back to this backend's
-	 * own default of 10 fps, the OV5647's lowest supported rate
+	/* Request the caller's fps via the shared policy (issue #2276 first
+	 * wired this up, hand-rolled; #2278 moved the body into
+	 * camera_frmival.h's camera_apply_fps() so zephyr_video.c and
+	 * v2n_n44_isp.c share it instead of copying this block twice more).
+	 * cfg->fps == 0 means "backend default" (see <alp/camera.h>'s
+	 * alp_camera_config_t::fps doc) -- NOT the same convention
+	 * width/height use just above (those are a "you must choose"
+	 * sentinel that alp_camera_open() rejects outright; an unset fps is
+	 * not an error, it falls back to this backend's own default of 10
+	 * fps below, the OV5647's lowest supported rate
 	 * (ov5647_framerates[] in ov5647.c) -- a *choice* that buys AE the
 	 * most exposure headroom in a dim scene, not a hardware floor.
 	 * ov5647_set_frmival() then picks the closest of {10, 15, 30, 45, 60,
-	 * 90, 120} it can actually reach at this mode (VTS-clamped), so read
-	 * the result back rather than assume the request landed exactly.
+	 * 90, 120} it can actually reach at this mode (VTS-clamped);
+	 * camera_apply_fps() reads the result back rather than assume the
+	 * request landed exactly.
 	 *
 	 * isp_pico.c can't be asked generically here: it derives its own AE
 	 * envelope from video_get_frmival(config->controller, ...) (isp ->
@@ -398,45 +403,20 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	 *
 	 * The sensor driver owns the exposure ceiling: ov5647_set_ctrl_exposure()
 	 * (ov5647.c) clamps every VIDEO_CID_EXPOSURE write to the active mode's
-	 * VTS - 4 lines. */
+	 * VTS - 4 lines.
+	 *
+	 * The shared policy is stricter than this backend used to be: an
+	 * explicit nonzero cfg->fps the sensor can't honor now fails open()
+	 * with ALP_ERR_NOSUPPORT instead of only warning.  OV5647 implements
+	 * .set_frmival, so that branch is moot in practice -- applied anyway
+	 * for consistency with the other two camera backends. */
 	const struct device *sensor_dev = DEVICE_DT_GET(DT_NODELABEL(ov5647));
 	if (device_is_ready(sensor_dev)) {
-		uint8_t              requested_fps = (cfg->fps != 0u) ? cfg->fps : 10u;
-		struct video_frmival frmival       = { .numerator = 1, .denominator = requested_fps };
-		int                  rc            = video_set_frmival(sensor_dev, &frmival);
-
-		if (rc != 0) {
-			LOG_WRN("camera%u: video_set_frmival(%u fps) failed: rc=%d",
-			        cfg->camera_id,
-			        requested_fps,
-			        rc);
-		}
-
-		struct video_frmival actual = { 0 };
-		if (video_get_frmival(sensor_dev, &actual) == 0 && actual.denominator > 0) {
-			/* Print the settled interval as num/den rather than a
-			 * truncating denominator/numerator division -- a
-			 * non-integer or sub-1-fps settled rate would otherwise
-			 * print a misleading rounded (or zero) fps. The request
-			 * was always {.numerator = 1, .denominator =
-			 * requested_fps}, so compare against that rather than
-			 * requested_fps alone. */
-			bool settled_as_requested =
-			    (actual.numerator == 1u) && (actual.denominator == requested_fps);
-
-			if (settled_as_requested) {
-				LOG_DBG("camera%u: requested %u fps, sensor settled on %u/%u",
-				        cfg->camera_id,
-				        requested_fps,
-				        actual.denominator,
-				        actual.numerator);
-			} else {
-				LOG_INF("camera%u: requested %u fps, sensor settled on %u/%u",
-				        cfg->camera_id,
-				        requested_fps,
-				        actual.denominator,
-				        actual.numerator);
-			}
+		alp_status_t fps_status =
+		    camera_apply_fps(sensor_dev, cfg->camera_id, cfg->fps, 10u, &st->frmival);
+		if (fps_status != ALP_OK) {
+			_free_state(st);
+			return fps_status;
 		}
 	} else {
 		LOG_WRN("camera%u: OV5647 device not ready; fps request (%u) not applied",

@@ -64,6 +64,11 @@ typedef struct {
 	 *  back as the frame's data pointer.  Not enqueued to the ISP
 	 *  device -- it never leaves this handle. */
 	struct video_buffer *rgb565_vbuf;
+	/** Frame interval camera_apply_fps() actually settled on at open()
+	 *  (#2278), on the OV5647 sensor device -- {0, 0} if the DT node
+	 *  doesn't exist or fps was left at the device's own default. Not
+	 *  read back by any getter yet -- see issue #2279. */
+	struct video_frmival frmival;
 	bool                 in_use;
 } alp_alif_isp_pico_state_t;
 

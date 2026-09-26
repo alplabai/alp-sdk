@@ -1,0 +1,16 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Fake video device used only by the camera_zephyr_video ztest (#2278).
+# Implements just enough of the Zephyr drivers/video/ API for
+# src/backends/camera/zephyr_video.c's z_open() to reach the fps step and
+# succeed -- get_caps / set_format / get_format / enqueue / dequeue --
+# while deliberately NOT implementing set_frmival / get_frmival /
+# enum_frmival, so camera_apply_fps() (camera_frmival.h) sees the
+# "this device has no frame-rate control at all" (-ENOSYS) path.
+
+description: |
+  Minimal fake video controller with no frame-interval control, backing
+  the alp-sdk camera_zephyr_video unit test's alp-camera1 alias.
+
+compatible: "alp,test-video-no-frmival"

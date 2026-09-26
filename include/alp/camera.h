@@ -69,13 +69,18 @@ typedef struct {
 	uint16_t     width;
 	uint16_t     height;
 	uint8_t      fps; /**< Requested frame rate, in frames/second. 0 = let the
-	                   *   backend pick its own default; nonzero is a
+	                   *   backend pick its own default (some backends have
+	                   *   none either, in which case the device is left at
+	                   *   whatever rate it powered up with); nonzero is a
 	                   *   REQUEST, not a guarantee -- the backend settles on
 	                   *   the nearest rate its sensor/mode actually supports
 	                   *   (e.g. the OV5647 only reaches one of a fixed rate
 	                   *   table). The settled rate is not reported back to
-	                   *   the caller yet (issue #2279). Not every backend
-	                   *   honors this field at all yet -- see issue #2278. */
+	                   *   the caller yet (issue #2279). If this field is
+	                   *   nonzero and the backend's device has no frame-rate
+	                   *   control at all, @ref alp_camera_open fails loudly
+	                   *   with ALP_ERR_NOSUPPORT rather than silently
+	                   *   ignoring the request. */
 	alp_pixfmt_t format;
 } alp_camera_config_t;
 
@@ -87,11 +92,14 @@ typedef struct {
  * "you must choose" sentinel -- @ref alp_camera_open rejects an
  * out-of-range configuration, so a caller who forgets to set them
  * fails loudly rather than opening at an unintended size.  @c fps
- * defaults to 30 (the common video frame rate) and @c format defaults
- * to @ref ALP_PIXFMT_RGB565 (the widely-supported embedded-camera
- * default -- @ref ALP_PIXFMT_MONO_VLSB, the enum's zero value, is a
- * narrow SSD1306-specific format and would be a misleading default
- * here). Set @c width / @c height before calling open().
+ * defaults to 0 ("let the backend pick its own default" -- see @c fps's
+ * own doc above; most backends have no opinion either and just leave
+ * the sensor at whatever rate it powered up with) and @c format
+ * defaults to @ref ALP_PIXFMT_RGB565 (the widely-supported
+ * embedded-camera default -- @ref ALP_PIXFMT_MONO_VLSB, the enum's
+ * zero value, is a narrow SSD1306-specific format and would be a
+ * misleading default here). Set @c width / @c height before calling
+ * open().
  *
  * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
  *       SDK's toolchains; standard through C23).  Usable as an initializer
@@ -100,7 +108,7 @@ typedef struct {
  */
 #define ALP_CAMERA_CONFIG_DEFAULT(id) \
 	((alp_camera_config_t){ \
-	    .camera_id = (id), .width = 0u, .height = 0u, .fps = 30u, .format = ALP_PIXFMT_RGB565 })
+	    .camera_id = (id), .width = 0u, .height = 0u, .fps = 0u, .format = ALP_PIXFMT_RGB565 })
 
 typedef struct {
 	void    *data;
@@ -124,8 +132,11 @@ typedef struct {
  *         itself -- e.g. ALP_ERR_INVAL (zephyr_video / v2n_n44_isp /
  *         alif_isp_pico: out-of-range @c camera_id), ALP_ERR_NOT_READY
  *         (zephyr_video: no camera aliased in devicetree for the
- *         requested @c camera_id), or ALP_ERR_NOT_IMPLEMENTED
- *         (zephyr_stub, on silicon with no real backend).
+ *         requested @c camera_id), ALP_ERR_NOSUPPORT (zephyr_video /
+ *         v2n_n44_isp / alif_isp_pico: @c cfg->fps is nonzero and the
+ *         backend's device has no frame-rate control at all), or
+ *         ALP_ERR_NOT_IMPLEMENTED (zephyr_stub, on silicon with no
+ *         real backend).
  */
 alp_camera_t *alp_camera_open(const alp_camera_config_t *cfg);
 
