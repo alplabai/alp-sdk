@@ -875,7 +875,7 @@ patches:
       format is untouched, so traceconfig.py and tests/kconfig/tracing are
       unaffected. Upstream to Zephyr then drop.
   - path: zephyr/0004-imx335-2lane-link-freq-and-binning.patch
-    sha256sum: cfd5e5833131cce6f8962fbad8316016f1f53ea421cc0986e07c770e4f1aff67
+    sha256sum: 2459cd9511dac95fa682197302b1d33b201dbacd3d4df02c2097e53dbd5278c0
     module: zephyr
     author: Alp Lab AB
     email: contact@alplab.ai
@@ -902,19 +902,27 @@ patches:
       left UNTOUCHED -- 396 MHz is the correct v4l2 pixel-array-clock value
       per <video-controls.h>'s own convention, not a value needing
       correction; LINK_FREQ alone is what video_get_csi_link_freq() reads,
-      so PIXEL_RATE does not need to change for this fix.
+      so PIXEL_RATE does not need to change for this fix. Bench-confirmed at
+      1188 Mbps/lane (runs 319-330, paired with fix 2 below).
 
       2. The driver never writes SYSMODE (0x319e) or the 0x3a18-0x3a28 MIPI
       output-timing block for any lane/rate combination, leaving both at
       their power-on-reset value. At 1188 Mbps/lane this produces a
       payload-checksum/CRC error storm on the CSI-2 receiver (bench run 318).
-      Writing the RPi/OmniVision kernel driver's own register values for
-      this exact lane count and bit rate (SYSMODE=1 plus nine REG16 values)
-      eliminates it -- 0 CSI CRC errors bench-confirmed (runs 319 onward). An
-      891 Mbps/lane alternative timing set was ALSO bench-confirmed clean
-      (run 320) but is not carried here: this driver is hardcoded to its own
-      2-lane/10-bit mode, which this repo's shield feeds at 24 MHz INCK ->
-      the 1188 Mbps/lane path only.
+      Writing the values the mainline Linux imx335 driver (raspberrypi/linux,
+      branch rpi-6.12.y) programs for this exact lane count and bit rate
+      (SYSMODE=1 plus nine REG16 values -- register values carried as
+      hardware facts, no GPL code copied) eliminates it -- 0 CSI CRC errors
+      bench-confirmed (runs 319-330), including 6/6 consecutive clean
+      1296x972 captures through the E1M SoM R2 pinout adapter (run 330):
+      this VERIFIES 2-lane D-PHY lock at 1188 Mbps/lane on E1M-AEN803
+      2026W36-0001 + this E1M-EVK. An 891 Mbps/lane alternative timing set
+      also gave 0 CSI CRC errors on the link (run 320, a different
+      IMX335_INCKSEL/INCK selection -- that run still had the fix-3 buffer
+      overrun below, so no clean frame resulted at 891 Mbps, only a clean
+      link) but is not carried in the product: this driver is hardcoded to
+      its own 2-lane/10-bit mode, which this repo's shield feeds at 24 MHz
+      INCK -> the 1188 Mbps/lane path only.
 
       3. imx335_bin_2x2 (the 2x2-binned mode) leaves HNUM at the
       full-resolution 0x0a20 (2592) and sets Y_OUT_SIZE to 0x03d8 (984) --
@@ -924,14 +932,16 @@ patches:
       transmitted width matched exactly): binned width = HNUM/2 + 12, so
       HNUM must be 0x0a08 (2568) for a 1296-pixel row. Y_OUT_SIZE corrected
       to the exact 972 lines (0x03cc, bench run 321). OPB_SIZE_V (0x304c)
-      cleared to 0, the RPi/OmniVision kernel driver's own binned-mode value
-      (upstream never touches it). imx335_bin_none gets a matching HNUM
-      restore (0x0a20) now that bin_2x2 changes it away from that default --
-      NOT included: correcting bin_none's own Y_OUT_SIZE (0x07ac = 1964,
-      a 20-line discrepancy against IMX335_NATIVE_HEIGHT = 1944 of the same
-      shape as the binned-mode bug) -- full-resolution mode is UNBENCHED
-      (Stage A only exercises the 2x2-binned mode), so that value is left as
-      upstream shipped it rather than corrected on a guess.
+      cleared to 0, the mainline Linux imx335 driver's own binned-mode value
+      (upstream Zephyr never touches it). imx335_bin_none gets a matching
+      HNUM restore (0x0a20) now that bin_2x2 changes it away from that
+      default -- NOT included: correcting bin_none's own Y_OUT_SIZE (0x07ac
+      = 1964) -- both upstream Zephyr's own imx335_init_params (Y_OUT_SIZE
+      0x0798 = 1944) and the mainline Linux driver's full-resolution mode use
+      1944, so 0x07ac is the same overrun class as fix 3 above for any
+      full-resolution caller. Full-resolution mode is UNBENCHED (only the
+      2x2-binned mode has been exercised), so this is left as a follow-up
+      rather than changed on an unbenched guess.
 
       Bench-verified end to end (runs 329/330, Camera-mode IPI at an
       explicit 200 MHz pixclk -- see the innomaker_cam_imx335 shield and the
@@ -941,11 +951,13 @@ patches:
       release had darkened lower rows in one run (329) but not the next
       (330) -- see aen-camera-firstlight's own fix discarding the first
       frame for this sensor. Frame rate/fps was NOT measured. Controller-mode
-      IPI timing (this patch's earlier revision's csi-hsa/hbp/hline/vtotal
-      approach) could not be made to match this sensor's measured binned
-      line period (29.63 us, ~4H at HMAX 550, 972 HSYNC/frame, runs
-      329/330) and is no longer used by this shield -- Camera mode only.
-      D-PHY Stop-state check passed normally with these timing registers
-      written (STOPSTATE 0x00010003 before stream start) -- no
-      no-lp11-clock-lane-park-style skip property was needed.
+      IPI timing with a fixed csi-hsa/hbp/hline/vtotal could not be made to
+      match this sensor's measured binned line period (29.63 us, ~4H at
+      HMAX 550, 972 HSYNC/frame, runs 329/330) and is not used by this
+      shield -- Camera mode only. D-PHY Stop-state check passed normally
+      with these timing registers written (STOPSTATE 0x00010003 before
+      stream start) -- no no-lp11-clock-lane-park-style skip property was
+      needed. NOT bench-verified: D-PHY lock on any unit/carrier other than
+      E1M-AEN803 2026W36-0001 on this specific E1M-EVK (a stock,
+      non-reworked carrier is untested for this sensor).
       Upstream to zephyrproject-rtos/zephyr then drop.

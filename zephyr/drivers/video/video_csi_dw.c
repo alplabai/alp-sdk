@@ -736,13 +736,21 @@ static int csi2_dw_validate_data(const struct device *dev)
 		 * bench-proven against exactly this formula (issue #2248 / the
 		 * 2026-09-21 OV9281 bench) -- changing it for them needs its own
 		 * re-bench, not a silent fix bundled with the IMX335 work that found
-		 * it. Signed arithmetic + a floor at 0 (was implicit uint16_t
-		 * wraparound before this change; a negative computed value would have
-		 * silently become a huge unsigned HSD instead of failing or clamping).
+		 * it. Signed arithmetic + a floor at 0 below, added by this change:
+		 * the previous unsigned (pixclock * bpp * ...) / (pll_fin << 1) -
+		 * (hact + hsa) + 1 computed in `float`, then implicitly converted to
+		 * uint16_t -- a negative float-to-unsigned conversion is undefined
+		 * behaviour in C, and on this Cortex-M target's VCVT instruction
+		 * SATURATES to 0 rather than wrapping to a huge value, so the
+		 * pre-this-change behaviour on a negative result was (by observed
+		 * compiler codegen, not by the C standard) already landing near 0,
+		 * not silently becoming a huge HSD -- this change makes that outcome
+		 * explicit and portable instead of relying on unspecified conversion
+		 * behaviour.
 		 */
 		if (explicit_pixclk) {
 			/*
-			 * Alp Lab AB (issue #2327): the DFP-correct form of the same
+			 * Alp Lab AB (issue #2327): lanes-aware form of the same
 			 * reception-time-vs-D-PHY-bit-rate comparison -- divides by
 			 * (pll_fin<<1)*num_lanes (Driver_MIPI_CSI2.c's own HSD
 			 * derivation), not by (pll_fin<<1) alone. Used only when
@@ -750,9 +758,14 @@ static int csi2_dw_validate_data(const struct device *dev)
 			 * pixel clock has no bench history tied to the legacy,
 			 * lanes-omitting formula the way OV5647/OV9281 do, so there is
 			 * no compatibility reason to keep the historical omission for
-			 * it -- IMX335 bench runs 329/330 (0 IPI-fatal events, correct
-			 * stride, 6/6 clean captures) exercise this branch, not the
-			 * legacy one.
+			 * it. This formula still clamps at 0 below (the DFP's own
+			 * Driver_MIPI_CSI2.c floors HSD at CSI2_HSD_MIN = 1, one lower
+			 * bound this driver does not otherwise enforce) -- IMX335 bench
+			 * runs 329/330 (0 IPI-fatal events, correct stride, 6/6 clean
+			 * captures) exercise this branch and land exactly ON that
+			 * clamp: the raw computed value is -208 (200 MHz pixclk, 1296
+			 * hact, 594 MHz pll_fin, 2 lanes, 10 bpp), clamped to 0, and
+			 * the bench result is clean at 0 regardless.
 			 */
 			int64_t reception_time = (int64_t)pixclock * bpp * timing->hact;
 			int64_t divisor = (int64_t)(phy->pll_fin << 1) * phy->num_lanes;

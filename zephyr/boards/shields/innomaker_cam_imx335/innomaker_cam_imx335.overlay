@@ -62,23 +62,22 @@
 
 /*
  * Issue #2327, bench runs 316-330 (E1M-AEN803 2026W36-0001): Camera mode with
- * an explicit csi-pixclk-hz -- Controller mode (this overlay's own earlier
- * revision) could NOT be made to match this sensor's measured timing and is
- * no longer used here.
+ * an explicit csi-pixclk-hz. Controller mode cannot be made to match this
+ * sensor's measured timing and is not used here.
  *
  * Why not Controller mode: it requires stating this sensor's own line/frame
  * length as fixed IPI-pixclk-cycle counts (csi-hline/csi-vtotal), derived
- * from an assumed line pacing this driver's own registers never expose
- * directly. Bench measurement (runs 329/330, VSYNC/HSYNC counters read back
- * over the CSI-2 host) found the sensor's ACTUAL binned-mode line period is
- * 29.63 us (~4H at HMAX 550 -- not the earlier 2H-pacing guess this overlay
- * used to carry) with 972 HSYNC pulses per frame -- a measured fact, not an
- * inference, but one this driver's own imx335.c never surfaces as a control
- * or register read, so a shield can't derive a Controller-mode csi-hline/
- * csi-vtotal pair from it without hand-verifying against a bench capture on
- * every future change. Camera mode instead lets the DW CSI-2 host derive its
- * own H/V timing from the D-PHY bit rate + an explicit pixel clock, with no
- * fixed line/frame-length DT constants to re-derive.
+ * from the sensor's line pacing -- a fact this driver's own registers never
+ * expose directly. Bench measurement (runs 329/330, VSYNC/HSYNC counters
+ * read back over the CSI-2 host) found the sensor's ACTUAL binned-mode line
+ * period is 29.63 us (~4H at HMAX 550) with 972 HSYNC pulses per frame -- a
+ * measured fact, not an inference, but one this driver's own imx335.c never
+ * surfaces as a control or register read, so a shield can't derive a
+ * Controller-mode csi-hline/csi-vtotal pair from it without hand-verifying
+ * against a bench capture on every future change. Camera mode instead lets
+ * the DW CSI-2 host derive its own H/V timing from the D-PHY bit rate + an
+ * explicit pixel clock, with no fixed line/frame-length DT constants to
+ * re-derive.
  *
  * Why csi-pixclk-hz is still needed under Camera mode: the DW CSI-2 host's
  * default Camera-mode pixel-clock request (pll_fin * 2 * lanes / bpp * 1.2
@@ -103,11 +102,10 @@
  * fix discarding the first frame for this sensor (src/main.c) rather than
  * claiming this is understood.
  *
- * ipi-fs-sync: unset (default false, unchanged controller behaviour) --
- * issue #2287's own bench investigation of this bit on IMX296 found no
- * effect; not worth carrying speculatively onto an unbenched sensor, and
- * moot for Camera mode regardless (only read by the Controller-mode path
- * this shield no longer uses).
+ * ipi-fs-sync: unset (default false, unchanged controller behaviour) -- moot
+ * for Camera mode (only read by the Controller-mode path this shield does
+ * not use); issue #2287's own bench investigation of this bit found no
+ * effect on IMX296 either.
  * no-lp11-clock-lane-park: NOT set -- not needed; see the D-PHY Stop-state
  * result above.
  */

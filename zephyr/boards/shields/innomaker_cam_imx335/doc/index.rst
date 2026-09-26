@@ -37,8 +37,8 @@ evidence:
 2. writes the ``SYSMODE``/MIPI output-timing registers this lane count and
    bit rate need (the driver never wrote them for ANY configuration) --
    without this, the CSI-2 receiver logged a payload-checksum/CRC error
-   storm at 1188 Mbps/lane (bench run 318); with it, 0 CRC errors (runs 319
-   onward);
+   storm at 1188 Mbps/lane (bench run 318); with it, 0 CRC errors (runs
+   319-330);
 3. fixes the 2x2-binned mode's ``HNUM``/``Y_OUT_SIZE`` -- upstream left
    ``HNUM`` at its full-resolution value, so the sensor transmitted a
    1308x984 frame into this driver's own 1296x972 buffer (a 12-pixel/
@@ -78,6 +78,8 @@ mode explicitly, and discards the first captured frame after stream start
    configuration (see the overlay's own comment for why Camera mode, not
    Controller mode), 6/6 consecutive clean 1296x972 RAW10 raw captures (run
    330): 0 CSI CRC errors, 0 IPI-fatal events, correct stride, no overrun.
+   **This VERIFIES 2-lane CSI-2 D-PHY lock at 1188 Mbps/lane on this unit
+   and this E1M-EVK, through the SoM R2 pinout adapter** (runs 319-330).
    D-PHY Stop-state check (``STOPSTATE 0x00010003`` before stream start)
    passed normally once the patch's MIPI-timing registers were written --
    no ``no-lp11-clock-lane-park``-style skip property was needed. The
@@ -94,10 +96,9 @@ mode explicitly, and discards the first captured frame after stream start
    **NOT bench-verified -- never claim beyond the above:**
 
    - frame rate/fps (not measured on this path);
-   - CSI-2 D-PHY lock at 1188 Mbps/lane through the E1M SoM R2 pinout
-     adapter on a 2-lane sensor specifically -- 1188 Mbps/lane itself IS
-     bench-proven, but only on data lane D0 (IMX296, 1 lane, run 292); D1
-     through the adapter is untested;
+   - D-PHY lock on any unit/carrier other than E1M-AEN803 2026W36-0001 on
+     this specific E1M-EVK -- a stock, non-reworked carrier is untested for
+     this sensor;
    - ISP/AE/colour (no ISP path exists for this sensor);
    - the sensor's full-resolution (non-binned) mode.
 

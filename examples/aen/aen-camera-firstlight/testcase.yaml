@@ -9,9 +9,10 @@
 # E1M-EVK, issue #2248), IMX296 (issue #2287, Stage A -- I2C identity, CSI-2
 # streaming, and a captured+correlated frame, bench run 292; ISP-Pico/AE/
 # fast-trigger not yet bench-verified, see docs/camera-shields.md) and IMX335
-# (issue #2327, Stage A -- I2C identity probe ONLY; CSI-2 streaming and
-# frame capture are NOT bench-verified, see metadata/chips/imx335.yaml and
-# zephyr/boards/shields/innomaker_cam_imx335/doc/index.rst).
+# (issue #2327 -- raw 1296x972 capture bench-verified, runs 316-330: 6/6
+# clean frames, 0 CSI/IPI errors; frame rate/fps, ISP/AE/colour and
+# full-resolution mode are NOT bench-verified, see metadata/chips/imx335.yaml
+# and zephyr/boards/shields/innomaker_cam_imx335/doc/index.rst).
 #
 # Twister's extra_args SHIELD value carries BOTH shields as one
 # space-separated string (the carrier connector shield first, the camera
@@ -123,4 +124,4 @@ tests:
       - camera
       - video
       - csi
-    build_only: true # issue #2327 Stage A -- I2C identity probe ONLY bench-verified; CSI-2 streaming and frame capture UNTESTED ON SILICON, see docs/camera-shields.md.
+    build_only: true # issue #2327 -- raw 1296x972 capture bench-verified (runs 316-330); build-only here since twister has no bench access, see docs/camera-shields.md.

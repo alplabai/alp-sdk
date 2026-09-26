@@ -1,8 +1,8 @@
 diff --git a/drivers/video/imx335.c b/drivers/video/imx335.c
-index cead6b7199e..a09cca74dae 100644
+index cead6b7199e..d86c8184ac4 100644
 --- a/drivers/video/imx335.c
 +++ b/drivers/video/imx335.c
-@@ -29,6 +29,27 @@ LOG_MODULE_REGISTER(video_imx335, CONFIG_VIDEO_LOG_LEVEL);
+@@ -29,6 +29,28 @@ LOG_MODULE_REGISTER(video_imx335, CONFIG_VIDEO_LOG_LEVEL);
  
  #define IMX335_PIXEL_RATE	396000000
  
@@ -21,16 +21,17 @@ index cead6b7199e..a09cca74dae 100644
 + * (issue #2248). Register LINK_FREQ directly so video_get_csi_link_freq()
 + * never needs the PIXEL_RATE fallback for this sensor; PIXEL_RATE itself is
 + * untouched (out of scope -- LINK_FREQ alone is what the DW CSI-2 host
-+ * reads). NOT bench-verified for this sensor -- carried from the IMX335
-+ * datasheet's own MIPI output timing table, same derivation as
-+ * sony,imx296.c's IMX296_LINK_FREQ_HZ.
++ * reads). Bench-confirmed at 1188 Mbps/lane (E1M-AEN803 2026W36-0001,
++ * runs 319-330: 0 CSI CRC errors, 6/6 clean 1296x972 captures through the
++ * E1M SoM R2 pinout adapter, run 330) -- see imx335_mipi_timing_1188mbps
++ * below, which this link frequency must stay paired with.
 + */
 +#define IMX335_LINK_FREQ_HZ	594000000
 +
  enum imx335_res {
  	IMX335_RES_2592x1944,
  	IMX335_RES_1296x972,
-@@ -53,6 +74,7 @@ struct imx335_ctrls {
+@@ -53,6 +75,7 @@ struct imx335_ctrls {
  	struct video_ctrl gain;
  	struct video_ctrl exposure;
  	struct video_ctrl pixel_rate;
@@ -38,7 +39,7 @@ index cead6b7199e..a09cca74dae 100644
  };
  
  struct imx335_data {
-@@ -102,6 +124,37 @@ struct imx335_data {
+@@ -102,6 +125,43 @@ struct imx335_data {
  #define IMX335_TCYCLE			IMX335_REG8(0x3300)
  #define IMX335_ADBIT1			IMX335_REG16(0x341c)
  #define IMX335_LANEMODE			IMX335_REG8(0x3a01)
@@ -50,15 +51,21 @@ index cead6b7199e..a09cca74dae 100644
 + * their power-on-reset value (0x00 / all-zero). At this driver's 2-lane
 + * 10-bit configuration (1188 Mbps/lane, IMX335_LINK_FREQ_HZ above), that
 + * produces a payload-checksum/CRC error storm on the CSI-2 receiver (bench
-+ * run 318, DIAG variant B/diag). Writing the values the RPi/OmniVision
-+ * kernel driver programs for this exact lane count and bit rate (SYSMODE=1,
-+ * the nine REG16 values below) eliminates it: 0 CSI CRC errors bench-
-+ * confirmed at 1188 Mbps/lane (runs 319 onward). An 891 Mbps/lane
-+ * alternative set was ALSO bench-confirmed clean (run 320, IMX335_INCKSEL /
-+ * a different INCK selection) but is not carried here -- this driver is
-+ * hardcoded to imx335_mode_2l_10b's 2-lane/10-bit mode, which this repo's
-+ * shield feeds at 24 MHz INCK -> the 1188 Mbps/lane path only; keep a single
-+ * lane-rate's timing table rather than two unused branches.
++ * run 318). Writing the values the mainline Linux imx335 driver
++ * (raspberrypi/linux, branch rpi-6.12.y) programs for this exact lane count
++ * and bit rate (SYSMODE=1, the nine REG16 values below -- register values
++ * carried as hardware facts, no GPL code copied) eliminates it: 0 CSI CRC
++ * errors bench-confirmed at 1188 Mbps/lane (runs 319-330), including 6/6
++ * consecutive clean 1296x972 captures through the E1M SoM R2 pinout adapter
++ * (run 330) -- this VERIFIES 2-lane D-PHY lock at 1188 Mbps/lane on this
++ * unit/carrier. An 891 Mbps/lane alternative timing set also gave 0 CSI CRC
++ * errors on the link (run 320, a different IMX335_INCKSEL/INCK selection --
++ * that run still had the pre-binning-fix buffer overrun, so no clean frame
++ * resulted at 891 Mbps, only a clean link) but is not carried in the
++ * product -- this driver is hardcoded to imx335_mode_2l_10b's 2-lane/10-bit
++ * mode, which this repo's shield feeds at 24 MHz INCK -> the 1188 Mbps/lane
++ * path only; keep a single lane-rate's timing table rather than two unused
++ * branches.
 + */
 +#define IMX335_SYSMODE			IMX335_REG8(0x319e)
 +static const struct video_reg imx335_mipi_timing_1188mbps[] = {
@@ -76,7 +83,7 @@ index cead6b7199e..a09cca74dae 100644
  static const struct video_reg imx335_init_params[] = {
  	{IMX335_STANDBY, 0x01},
  	{IMX335_XMSTA, 0x00},
-@@ -184,9 +237,28 @@ static const struct video_reg16 imx335_fixed_regs[] = {
+@@ -184,9 +244,30 @@ static const struct video_reg16 imx335_fixed_regs[] = {
  	{0x3a00, 0x01},
  };
  
@@ -94,8 +101,10 @@ index cead6b7199e..a09cca74dae 100644
 + * ONE resolution, not a general formula. Y_OUT_SIZE corrected to the exact
 + * 972 lines (0x03cc, bench run 321) instead of upstream's 984 (0x03d8, a
 + * 12-line overrun matching the same pattern as the width). OPB_SIZE_V
-+ * (0x304c) cleared to 0, the RPi/OmniVision kernel driver's own binned-mode
-+ * value -- upstream never touches it (POR default, unconfirmed non-zero).
++ * (0x304c) cleared to 0, the mainline Linux imx335 driver's own binned-mode
++ * value (raspberrypi/linux, branch rpi-6.12.y -- register value carried as
++ * a hardware fact, no GPL code copied) -- upstream Zephyr never touches it
++ * (POR default, unconfirmed non-zero).
 + */
  static const struct video_reg imx335_bin_2x2[] = {
  	{IMX335_WINMODE, 0x01},
@@ -106,7 +115,7 @@ index cead6b7199e..a09cca74dae 100644
  	{IMX335_AREA2_WIDTH_1, 0x0030},
  	{IMX335_AREA3_ST_ADR_1, 0x00A8},
  	{IMX335_AREA3_WIDTH_1, 0x0F60},
-@@ -225,9 +297,22 @@ static const struct video_reg imx335_bin_2x2[] = {
+@@ -225,9 +306,23 @@ static const struct video_reg imx335_bin_2x2[] = {
  
  /* Note that this only contains registers that need to be reset when switching away from
   * 2x2 binning mode
@@ -116,12 +125,13 @@ index cead6b7199e..a09cca74dae 100644
 + * default -- upstream never needed this entry because upstream's bin_2x2 never
 + * touched HNUM either. Y_OUT_SIZE here (0x07ac = 1964) is unchanged from
 + * upstream and does NOT match IMX335_NATIVE_HEIGHT (1944, imx335_fmts' own caps
-+ * entry) -- a 20-line discrepancy of the SAME shape as the binned-mode bugs
-+ * this patch fixes above, but full-resolution mode is UNBENCHED (Stage A only
-+ * exercises the 2x2-binned mode this shield's example requests), so this value
-+ * is left AS UPSTREAM SHIPPED IT rather than "corrected" on a guess -- fixing
-+ * it needs the same kind of bench sweep imx335_bin_2x2's HNUM/Y_OUT_SIZE got,
-+ * not just pattern-matching the binned-mode fix onto an unverified mode.
++ * entry): both upstream Zephyr's own imx335_init_params (Y_OUT_SIZE 0x0798 =
++ * 1944) and the mainline Linux imx335 driver's full-resolution mode use 1944 --
++ * 0x07ac (1964) here is the same overrun class as the binned-mode bugs this
++ * patch fixes above, for any caller of the full-resolution mode. Left
++ * UNFIXED: full-resolution mode is UNBENCHED (only the 2x2-binned mode this
++ * shield's example requests has been exercised), so this is filed as a
++ * follow-up rather than changed on an unbenched guess.
   */
  static const struct video_reg imx335_bin_none[] = {
  	{IMX335_WINMODE, 0x00},
@@ -129,7 +139,7 @@ index cead6b7199e..a09cca74dae 100644
  	{IMX335_Y_OUT_SIZE, 0x07AC},
  	{IMX335_AREA2_WIDTH_1, 0x0028},
  	{IMX335_AREA3_ST_ADR_1, 0x00B0},
-@@ -341,6 +426,11 @@ static const struct video_format_cap imx335_fmts[] = {
+@@ -341,6 +436,11 @@ static const struct video_format_cap imx335_fmts[] = {
  	{0}
  };
  
@@ -141,7 +151,7 @@ index cead6b7199e..a09cca74dae 100644
  static const uint32_t imx335_framerates[] = {
  	[IMX335_25_FPS] = 25,
  	[IMX335_30_FPS] = 30,
-@@ -667,13 +757,31 @@ static int imx335_init_controls(const struct device *dev)
+@@ -667,13 +767,31 @@ static int imx335_init_controls(const struct device *dev)
  		return ret;
  	}
  
@@ -174,7 +184,7 @@ index cead6b7199e..a09cca74dae 100644
  }
  
  static int imx335_init(const struct device *dev)
-@@ -745,6 +853,20 @@ static int imx335_init(const struct device *dev)
+@@ -745,6 +863,20 @@ static int imx335_init(const struct device *dev)
  		return ret;
  	}
  

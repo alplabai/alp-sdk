@@ -712,13 +712,20 @@ bench-confirmed on E1M-AEN803 2026W36-0001 (bench runs 316-330):
    `SYSMODE` (`0x319e`) or the `0x3a18`-`0x3a28` MIPI output-timing block for
    any lane/rate combination, leaving both at their power-on-reset value. At
    1188 Mbps/lane this produced a payload-checksum/CRC error storm on the
-   CSI-2 receiver (bench run 318). Writing the RPi/OmniVision kernel
-   driver's own register values for this exact lane count and bit rate
-   (`SYSMODE=1` plus nine `REG16` values) eliminated it -- 0 CSI CRC errors
-   bench-confirmed (runs 319 onward). An 891 Mbps/lane alternative timing
-   set was ALSO bench-confirmed clean (run 320) but is not carried in the
-   product: this driver is hardcoded to its own 2-lane/10-bit mode, which
-   this shield feeds at 24 MHz INCK -> the 1188 Mbps/lane path only.
+   CSI-2 receiver (bench run 318). Writing the values the mainline Linux
+   imx335 driver (`raspberrypi/linux`, branch `rpi-6.12.y`) programs for this
+   exact lane count and bit rate (`SYSMODE=1` plus nine `REG16` values --
+   register values carried as hardware facts, no GPL code copied) eliminated
+   it -- 0 CSI CRC errors bench-confirmed (runs 319-330), including 6/6
+   consecutive clean 1296x972 captures through the E1M SoM R2 pinout adapter
+   (run 330): **this VERIFIES 2-lane CSI-2 D-PHY lock at 1188 Mbps/lane on
+   E1M-AEN803 2026W36-0001 + this E1M-EVK.** An 891 Mbps/lane alternative
+   timing set also gave 0 CSI CRC errors on the link (run 320, a different
+   `IMX335_INCKSEL`/INCK selection) -- that run still had bug 3's buffer
+   overrun below, so no clean frame resulted at 891 Mbps, only a clean link
+   -- and is not carried in the product: this driver is hardcoded to its own
+   2-lane/10-bit mode, which this shield feeds at 24 MHz INCK -> the 1188
+   Mbps/lane path only.
 
 3. **2x2-binned mode overruns its own buffer.** `imx335_bin_2x2` leaves
    `HNUM` at the full-resolution `0x0a20` (2592) and sets `Y_OUT_SIZE` to
@@ -728,13 +735,15 @@ bench-confirmed on E1M-AEN803 2026W36-0001 (bench runs 316-330):
    the transmitted width matched exactly): binned width = HNUM/2 + 12, so
    `HNUM` must be `0x0a08` (2568) for a 1296-pixel row. `Y_OUT_SIZE`
    corrected to the exact 972 lines (`0x03cc`, bench run 321). `OPB_SIZE_V`
-   (`0x304c`) cleared to 0, the RPi/OmniVision kernel driver's own
+   (`0x304c`) cleared to 0, the mainline Linux imx335 driver's own
    binned-mode value. `imx335_bin_none` gets a matching `HNUM` restore
    (`0x0a20`). NOT included: correcting `imx335_bin_none`'s own `Y_OUT_SIZE`
-   (`0x07ac` = 1964, a 20-line discrepancy against `IMX335_NATIVE_HEIGHT` =
-   1944, the same shape as bug 3 above) -- full-resolution mode is
-   UNBENCHED (only the 2x2-binned mode is exercised), so that value is left
-   as upstream shipped it rather than corrected on a guess.
+   (`0x07ac` = 1964) -- both upstream Zephyr's own `imx335_init_params`
+   (`Y_OUT_SIZE` `0x0798` = 1944) and the mainline Linux driver's
+   full-resolution mode use 1944, so `0x07ac` is the same overrun class as
+   bug 3 above for any full-resolution caller. Full-resolution mode is
+   UNBENCHED (only the 2x2-binned mode is exercised), so this is filed as a
+   follow-up rather than changed on an unbenched guess.
 
 If bootstrapping against a Zephyr checkout that already has alp-sdk's
 0001-0003 patches applied, re-running the whole patch list fails
@@ -742,18 +751,19 @@ re-applying 0001 (`west patch` is not idempotent against an already-patched
 tree) -- apply 0004 by hand (`git apply` from the Zephyr repo root) or
 start from a clean checkout.
 
-**Why this shield uses Camera mode, not Controller mode.** An earlier
-revision of this shield used Controller mode with a fixed `csi-hline`/
-`csi-vtotal` derived from an ASSUMED 2H sensor line pacing -- bench
-measurement (runs 329/330, VSYNC/HSYNC counters read back over the CSI-2
-host) found the sensor's ACTUAL binned-mode line period is 29.63 us (~4H at
-HMAX 550, not 2H) with 972 HSYNC pulses per frame, a measured fact this
-driver never surfaces as a register read or control, so a Controller-mode
-`csi-hline`/`csi-vtotal` pair could not be derived from it without
-hand-verifying against a bench capture on every future change. This shield
-now uses Camera mode instead, which lets the DW CSI-2 host derive its own
-H/V timing from the D-PHY bit rate + an explicit pixel clock -- no fixed
-line/frame-length DT constants to re-derive.
+**Why this shield uses Camera mode, not Controller mode.** Controller mode
+requires stating this sensor's own line/frame length as fixed IPI-pixclk-cycle
+counts (`csi-hline`/`csi-vtotal`), derived from the sensor's line pacing -- a
+fact this driver's own registers never expose directly. Bench measurement
+(runs 329/330, VSYNC/HSYNC counters read back over the CSI-2 host) found
+the sensor's ACTUAL binned-mode line period is 29.63 us (~4H at HMAX 550)
+with 972 HSYNC pulses per frame, a measured fact this driver never surfaces
+as a register read or control, so a Controller-mode `csi-hline`/`csi-vtotal`
+pair could not be derived from it without hand-verifying against a bench
+capture on every future change. This shield uses Camera mode instead,
+which lets the DW CSI-2 host derive its own H/V timing from the D-PHY bit
+rate + an explicit pixel clock -- no fixed line/frame-length DT constants
+to re-derive.
 
 **Why `csi-pixclk-hz` (issue #2327, `snps,designware-csi.yaml`) is still
 needed under Camera mode:** the DW CSI-2 host's default Camera-mode pixel
@@ -784,24 +794,26 @@ uses for its own larger-than-default frame above.
 the patch above applied and this shield's Camera-mode + explicit
 `csi-pixclk-hz` configuration, 0 CSI CRC errors, 0 IPI-fatal events,
 correct 1296x972 stride, no overrun, and 6/6 consecutive clean raw captures
-(run 330). D-PHY Stop-state check passed normally (`STOPSTATE 0x00010003`
-before stream start) once the patch's MIPI-timing registers were written --
-no `no-lp11-clock-lane-park`-style skip property was needed. The module
-answered at CCI `0x1A` (the only device on the J5 camera bus) with `CAM_EN`
-(J5 pin 11) untouched -- that bench unit's E1M-EVK carries the J5 pin-11
-pull-up rework ([`docs/boards/e1m-evk.md`](boards/e1m-evk.md), originally
-fitted for OV5647), so **whether this module self-enables on a stock
-carrier (no rework) is NOT established** by this result; IMX335 is not
-added to that doc's self-enables list on the strength of it. The first
-captured frame after STANDBY release had darkened lower rows in one run
-(329) but not the next (330) -- `aen-camera-firstlight` discards the first
-frame for this sensor rather than claiming this is understood.
+(run 330). **This VERIFIES 2-lane CSI-2 D-PHY lock at 1188 Mbps/lane on
+E1M-AEN803 2026W36-0001 + this E1M-EVK through the SoM R2 pinout adapter**
+(runs 319-330). D-PHY Stop-state check passed normally (`STOPSTATE
+0x00010003` before stream start) once the patch's MIPI-timing registers
+were written -- no `no-lp11-clock-lane-park`-style skip property was
+needed. The module answered at CCI `0x1A` (the only device on the J5
+camera bus) with `CAM_EN` (J5 pin 11) untouched -- that bench unit's
+E1M-EVK carries the J5 pin-11 pull-up rework
+([`docs/boards/e1m-evk.md`](boards/e1m-evk.md), originally fitted for
+OV5647), so **whether this module self-enables on a stock carrier (no
+rework) is NOT established** by this result; IMX335 is not added to that
+doc's self-enables list on the strength of it. The first captured frame
+after STANDBY release had darkened lower rows in one run (329) but not the
+next (330) -- `aen-camera-firstlight` discards the first frame for this
+sensor rather than claiming this is understood.
 
 **NOT bench-verified -- do not claim beyond the above:** frame rate/fps
-(not measured); CSI-2 D-PHY lock at 1188 Mbps/lane through the E1M SoM R2
-pinout adapter on a 2-lane sensor specifically -- 1188 Mbps/lane itself IS
-bench-proven, but only on data lane D0 (IMX296, 1 lane, run 292); D1
-through the adapter is untested; ISP/AE/colour (no ISP path exists for this
+(not measured); D-PHY lock on any unit/carrier other than E1M-AEN803
+2026W36-0001 on this specific E1M-EVK -- a stock, non-reworked carrier is
+untested for this sensor; ISP/AE/colour (no ISP path exists for this
 sensor); and the sensor's full-resolution (non-binned) mode.
 
 ## Build coverage

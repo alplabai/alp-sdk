@@ -43,7 +43,10 @@ notes: |
   0x49011000), bench-verified (bench runs 316-330): raw capture, 2x2-binned
   1296x972 RAW10, through <alp/camera.h> -- 6/6 consecutive clean captures
   (run 330), 0 CSI CRC errors, 0 IPI-fatal events, correct stride, no
-  overrun. The module answered at CCI 0x1A (the only device on the J5
+  overrun. This VERIFIES 2-lane CSI-2 D-PHY lock at 1188 Mbps/lane on
+  E1M-AEN803 2026W36-0001 + E1M-EVK through the SoM R2 pinout adapter (runs
+  319-330; run 318 without the MIPI-timing patch showed the CRC storm this
+  fixes). The module answered at CCI 0x1A (the only device on the J5
   camera bus) with CAM_EN (J5 pin 11) untouched, and STANDBY (0x3000), VMAX
   (0x3030-0x3032), HMAX (0x3034) and LANEMODE (0x3a01) all read back at
   their power-on-reset defaults (0x01, 0x001194 = 4500, 0x0226 = 550, 0x03
@@ -59,10 +62,9 @@ notes: |
   frame for this sensor rather than claiming this is understood.
 
   NOT bench-verified -- do not claim any of the following happened on
-  silicon: frame rate/fps (not measured); CSI-2 D-PHY lock at 1188 Mbps/lane
-  on a 2-lane sensor through the E1M SoM R2 pinout adapter specifically --
-  1188 Mbps/lane itself IS bench-proven, but only on data lane D0 (IMX296,
-  1 lane, run 292); D1 through the adapter is untested; ISP/AE/colour (no
+  silicon: frame rate/fps (not measured); D-PHY lock on any unit/carrier
+  other than E1M-AEN803 2026W36-0001 on this specific E1M-EVK (a stock,
+  non-reworked carrier is untested for this sensor); ISP/AE/colour (no
   ISP path exists for this sensor); and the sensor's full-resolution
   (non-binned) mode.
 
