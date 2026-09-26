@@ -308,14 +308,18 @@ i2c_devices:
                      max_macro: XEVK_INA236_MAX_5V_A, max_current_a: "4.0" } }
 
 # Audio -- 2x TAS2563 boosted class-D smart-amp (U27/U28) on E1M_X_I2C0 +
-# E1M_X_I2S0.  Scripts that emit the Linux DT (rcar_sound + audio-graph-card)
-# read this block; device-instance facts here are mined from the board
-# netlist (2026-05).  The E1M-IO -> SoC (RIIC / SSI / GPIO) mapping is
-# resolved SoM-side, not here.
+# E1M_X_I2S0.  Scripts that emit the Linux DT read this block; device-
+# instance facts here are mined from the board netlist (2026-05).  The
+# E1M-IO -> SoC (RIIC / SSI / GPIO) mapping is resolved SoM-side, not here.
 #
 # NB: the stock RZ/V2N EVK codec (DA7212) is NOT populated on this carrier.
-# The audio DT keeps &da7212 disabled and builds a fresh TAS2563 audio-
-# graph-card -- it does NOT re-enable the EVK's da7212-based sound_card.
+# The audio DT keeps &da7212 disabled and builds a fresh `simple-audio-card`
+# DAI link instead (two `simple-audio-card,codec@N` sub-nodes sharing one
+# CPU DAI -- the documented multi-codec pattern in
+# Documentation/devicetree/bindings/sound/simple-card.yaml; the in-tree
+# audio-graph-card.yaml at this kernel SHA (6717c06) does not document a
+# multi-codec-per-port pattern, so audio-graph-card was not used here) --
+# it does NOT re-enable the EVK's da7212-based audio-graph-card sound_card.
 audio:
   codecs:
     # Stereo pair: U27 = LEFT, U28 = RIGHT, sharing one I2C bus + one I2S.
@@ -324,7 +328,16 @@ audio:
   i2s_bus: E1M_X_I2S0              # SCLK / WS / SDI / SDO; codecs are bit-clock + frame slaves
   mclk:
     source:  e1m_audio_clk        # E1M AUDIO_CLK (SoM ADG); wired to the TAS MCLK on the current PCB rev
-    rate_hz: 12288000             # 256 x 48 kHz (default -- confirm against the ADG / clock-gen setup)
+    # CONFIRMED 2026-09-26: the Renesas RZ/V2N EVK reference dts
+    # (r9a09g056n48-rzv2n-evk.dts, kernel-source SHA 6717c06) sets
+    # `&audio_clkb { clock-frequency = <24576000>; };` for the identical
+    # 5L35023B SE3 24.576 MHz feed -- matches this chip's Audio_CLKB output
+    # (metadata/chips/clk_5l35023b.yaml). The TAS2563 has no discrete MCLK
+    # pin (bus/gpio/signals lists in metadata/chips/tas2563.yaml carry only
+    # SBCLK/FSYNC/SDIN); the ADG derives the SSI bit-clock from this
+    # reference, it is not routed to the codec directly. Supersedes the
+    # earlier unconfirmed 256x48kHz placeholder.
+    rate_hz: 24576000
   # I2S path-mux (TI TMUX1574, U46): SoC I2S0 -> TAS amps (A side) or the
   # M.2 E-key slot (B side).  Both control lines active-low; drive LOW for the amps.
   path_mux:

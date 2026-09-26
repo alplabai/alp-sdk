@@ -2,6 +2,14 @@
 schema_version:   1
 chip_id:          tas2563
 driver_status:    partial
+notes: >
+  2026-09-26: the E1M-X-EVK V2N-family Linux ALSA path now has a kernel
+  binding -- `ti,tas2563` codec nodes + `simple-audio-card` DAI link in
+  meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi (issue
+  #2331, untested on silicon). This is separate from -- and, on that
+  board/SoM combination, must not race -- the userspace driver
+  (`chips/tas2563/tas2563.c`) reachable over `alp_i2c_*` below, which
+  remains the sole ownership path on Zephyr/baremetal targets (e.g. AEN).
 display_name:     "TI TAS2563 mono digital-input Class-D smart amp (I2C ctrl + I2S data, I/V sense)"
 vendor:           ti
 mpn_population:
