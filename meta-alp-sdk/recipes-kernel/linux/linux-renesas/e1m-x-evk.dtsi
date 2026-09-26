@@ -314,17 +314,6 @@
 	#address-cells = <1>;
 	#size-cells = <0>;
 
-	/* U13 BMI323, alternate IMU (primary is ICM-42670 @0x69, no driver --
-	 * see above). No interrupt-parent wired: BMI323_INT1 lands on E1M-X
-	 * IO32 (metadata/boards/e1m-x-evk.yaml XEVK_PIN_BMI323_INT1), and no
-	 * carrier GPIO pad in this dtsi has a physical RZ/V2N pin assignment
-	 * yet (this file's own header: carrier GPIO pad routing is TODO) --
-	 * so the driver runs polled rather than guess a SoC pin. */
-	bmi323@68 {
-		compatible = "bosch,bmi323";
-		reg = <0x68>;
-	};
-
 	tcal9538@71 {
 		/* U37 PCIe I/O expander -- see docs/boards/e1m-x-evk.md /
 		 * changelog.d for what confirmed this address (bench sweep,

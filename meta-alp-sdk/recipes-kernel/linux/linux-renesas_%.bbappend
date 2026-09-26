@@ -71,7 +71,6 @@ SRC_URI:append = " \
     file://0004-drm-panel-add-himax-hx8394-with-rocktech-rk055hdmipi.patch \
     file://0005-gpio-add-gd32-bridge-expander-driver.patch \
     file://0006-input-goodix-fall-back-to-polling-without-an-irq.patch \
-    file://0007-iio-imu-bmi323-add-driver.patch \
     file://0008-hwmon-ina2xx-add-ina232-ina236-compat.patch \
 "
 
@@ -110,15 +109,6 @@ SRC_URI:append = " \
 # documents it in generic-ohci.yaml.  Both &ehci0 and &ohci0 carry
 # spurious-oc in e1m-x-evk.dtsi.  Cold-boot-verified 2026-06-12 on
 # E1M-V2M101: zero over-current lines.
-
-# 0007 (BMI323 IMU driver, U13 @0x68): upstream's IIO subsystem has no
-# BMI323 support at 6.1.141-cip43. Backported verbatim from upstream's
-# initial-add commit (8a636db3aa57, "iio: imu: Add driver for BMI323
-# IMU", v6.7-rc1 era) rather than the current (much larger, ~100-commit)
-# upstream state -- see the patch's own backport note. Self-contained
-# new files (drivers/iio/imu/bmi323/*), verified with `git apply
-# --check` against this tree; not bench-verified (E1M-X-EVK bring-up is
-# UNTESTED through bitbake per this bbappend's own file-header STATUS).
 
 # 0008 (INA236 register-compatible binding, U21/U30/U31/U32/U34): the
 # in-tree ina2xx hwmon driver has no INA236 entry, but TI's INA236 is
@@ -253,11 +243,11 @@ SRC_URI:append:e1m-v2n101 = " file://display.cfg"
 SRC_URI:append:e1m-v2m101 = " file://display.cfg"
 
 # E1M-X-EVK carrier sensor bus (XEVK_I2C_BUS_SENSORS / E1M_X_I2C0, &i2c0
-# in e1m-x-evk.dtsi -- ICM-42670, BMI323, BMP581, TCAL9538 x2, INA236
+# in e1m-x-evk.dtsi -- ICM-42670, BMP581, TCAL9538 x2, INA236
 # x5). Unconditional like e1m-x-evk.dtsi itself above (a carrier fact,
 # not a per-machine one): every MACHINE this bbappend serves builds the
 # same carrier. See e1m-x-evk-sensors.cfg for what each part needs and
-# why (TCAL9538/GPIO_PCA953X already =y, no patch; INA236 and BMI323
-# need the two backport patches above; BMP581/ICM-42670 have no
+# why (TCAL9538/GPIO_PCA953X already =y, no patch; INA236
+# needs the backport patch above; BMP581/ICM-42670 have no
 # upstream driver at this kernel version and are NOT enabled).
 SRC_URI:append = " file://e1m-x-evk-sensors.cfg"

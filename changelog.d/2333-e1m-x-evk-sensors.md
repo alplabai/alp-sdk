@@ -1,4 +1,4 @@
-### Added — Linux drivers for the E1M-X-EVK carrier sensor bus: BMI323, INA236 x5, TCAL9538 x2 (#2333)
+### Added — Linux drivers for the E1M-X-EVK carrier sensor bus: INA236 x5, TCAL9538 x2 (#2333)
 
 The E1M-X-EVK carrier's on-board sensor bus (`XEVK_I2C_BUS_SENSORS` /
 E1M_X_I2C0, Linux `i2c-0`) had no devicetree child nodes at all
@@ -6,29 +6,11 @@ E1M_X_I2C0, Linux `i2c-0`) had no devicetree child nodes at all
 was `status = "okay"` with nothing under it), so none of its five
 populated part families probed under Linux despite being fully described
 in `metadata/boards/e1m-x-evk.yaml` and `metadata/chips/*.yaml`. Following
-the ADR 0017 tier ladder (consume upstream first), three of the five now
-bind; two remain genuinely blocked on upstream and are reported, not
+the ADR 0017 tier ladder (consume upstream first), two of the five now
+bind; three remain genuinely blocked on upstream and are reported, not
 guessed at.
 
-**BMI323** (U13, alternate IMU, `0x68`) — no BMI323 support in
-6.1.141-cip43's IIO subsystem. Backported verbatim from upstream's own
-initial-add commit (`8a636db3aa57`, "iio: imu: Add driver for BMI323
-IMU", the v6.7-rc1 era) rather than the current, much larger upstream
-state (~100 further commits of refactors and fixes) — that commit adds
-only new files (`drivers/iio/imu/bmi323/{Kconfig,Makefile,bmi323.h,
-bmi323_core.c,bmi323_i2c.c,bmi323_spi.c}` + one line each in
-`drivers/iio/imu/{Kconfig,Makefile}`), so it is both the smallest correct
-starting point and the one least likely to depend on newer kernel APIs.
-It does not: the newest helper it calls,
-`devm_regulator_bulk_get_enable()`, already exists in this tree
-(`drivers/regulator/devres.c`). Two hunks from the original commit
-(`Documentation/ABI/testing/sysfs-bus-iio`, `MAINTAINERS`) are dropped —
-both fail `git apply` here because unrelated entries around them have
-since been reworded/reordered upstream, and neither affects the build.
-`meta-alp-sdk/recipes-kernel/linux/linux-renesas/
-0007-iio-imu-bmi323-add-driver.patch`, `git apply --check`-verified
-against a scratch copy of this tree's kernel source (2026-09-26, deleted
-after).
+**BMI323** (U13, alternate IMU, `0x68`) is not bound: the part does not answer at `0x68` on the bench unit (not fitted), and the upstream driver (`8a636db3aa57`, v6.7) depends on newer kernel APIs (`in_range()`, `iio_trigger_poll_nested()`, the single-argument i2c `probe()`) than 6.1.141-cip43 provides.
 
 **INA236** x5 (U21 `0x40` +3V3, U31 `0x41` +1V8, U32 `0x48` +VCAM2, U34
 `0x49` +VCAM3, U30 `0x4A` +5V) — the in-tree `ina2xx` hwmon driver has no
