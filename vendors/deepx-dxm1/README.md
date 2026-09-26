@@ -22,6 +22,18 @@ namespace `dxrt` (`dxrt::InferenceEngine`, `dxrt::Tensor`,
 headers; it has NOT been run on silicon (needs a V2N-M1 module with the
 DX-M1 on PCIe + the dx_rt runtime/driver on the sysroot).
 
+**Runtime path bench-verified separately (2026-09-26, E1M-V2M103).**
+The DEEPX kernel driver + userspace runtime this vendor wrapper
+targets -- `dx-driver` 1.8.0 + `dx-rt` 3.2.0 from `meta-deepx-m1` --
+is confirmed working on real V2N-M1 silicon: the DX-M1 flash-boots
+firmware 2.4.0, enumerates as PCIe `1ff4:0000` Gen3 x2, `/dev/dxrt0`
+comes up `0660 root:video`, and `dxrt-cli -s` reports rc `0` against
+the pinned stack. See [`docs/soms/v2n-m1.md`](../../docs/soms/v2n-m1.md)'s
+"DEEPX DX-M1 bring-up" section for the full writeup, including why no
+`dxrtd` service unit is enabled at this pin. This is the Yocto
+driver/runtime path, distinct from the SDK's own inference backend
+below, which remains BENCH-UNVERIFIED for an actual model run.
+
 dx_rt is **proprietary** (DEEPX EULA -- see "Licensing" below), so the
 SDK does **not** vendor its headers or libs.  This directory is now a
 **doc + detect-and-skip shim only** -- there is no clean-room `dxnn_*`
