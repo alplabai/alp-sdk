@@ -623,19 +623,11 @@ alp_status_t tas2563_configure_iv_sense(tas2563_t *ctx, bool enable, uint8_t v_s
 /* Fault pin (IRQ_N) + latched fault readback                          */
 /* ------------------------------------------------------------------ */
 
-alp_status_t
-tas2563_configure_fault_pin(tas2563_t *ctx, alp_gpio_t *irq_n, bool chip_internal_pullup)
+alp_status_t tas2563_arm_fault_irq(tas2563_t *ctx, bool chip_internal_pullup)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-	if (irq_n == NULL) return ALP_ERR_INVAL;
 
-	/* IRQ_N is open drain and only ever pulls low (§7.3.12
-	 * Figure 7-10, p.36), so the host side needs a pull-up to see a
-	 * released pin as high. */
-	alp_status_t s = alp_gpio_configure(irq_n, ALP_GPIO_INPUT, ALP_GPIO_PULL_UP);
-	if (s != ALP_OK) return s;
-
-	s = select_page(ctx, 0);
+	alp_status_t s = select_page(ctx, 0);
 	if (s != ALP_OK) return s;
 
 	s = reg_update(ctx,
@@ -650,9 +642,24 @@ tas2563_configure_fault_pin(tas2563_t *ctx, alp_gpio_t *irq_n, bool chip_interna
 
 	/* TDM clock error is masked at reset (INT_MASK0 = FCh, bit 2) and
 	 * nothing else in this driver unmasks it (#2140) -- a caller
-	 * binding a fault pin wants that fault reaching both the pin and
+	 * arming the fault IRQ wants that fault reaching both the pin and
 	 * tas2563_read_faults(), not silently discarded. */
-	s = reg_update(ctx, TAS2563_REG_INT_MASK0, TAS2563_INT_MASK0_TDM_CLOCK, 0u);
+	return reg_update(ctx, TAS2563_REG_INT_MASK0, TAS2563_INT_MASK0_TDM_CLOCK, 0u);
+}
+
+alp_status_t
+tas2563_configure_fault_pin(tas2563_t *ctx, alp_gpio_t *irq_n, bool chip_internal_pullup)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (irq_n == NULL) return ALP_ERR_INVAL;
+
+	/* IRQ_N is open drain and only ever pulls low (§7.3.12
+	 * Figure 7-10, p.36), so the host side needs a pull-up to see a
+	 * released pin as high. */
+	alp_status_t s = alp_gpio_configure(irq_n, ALP_GPIO_INPUT, ALP_GPIO_PULL_UP);
+	if (s != ALP_OK) return s;
+
+	s = tas2563_arm_fault_irq(ctx, chip_internal_pullup);
 	if (s != ALP_OK) return s;
 
 	ctx->irq_n = irq_n;

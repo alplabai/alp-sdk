@@ -195,10 +195,10 @@
  *     the host's I2S TX feeds the amp's SDIN, the amp's SDOUT feeds
  *     IV-sense data back on the host's I2S RX.
  *   - fault-pin handling (@ref tas2563_configure_fault_pin,
- *     @ref tas2563_fault_asserted, @ref tas2563_read_faults,
- *     @ref tas2563_clear_faults) for the open-drain IRQ_N on the EVK's
- *     `EVK_PIN_AMP_FAULT`, routed through host SoC GPIO with an
- *     internal pull-up.
+ *     @ref tas2563_arm_fault_irq, @ref tas2563_fault_asserted,
+ *     @ref tas2563_read_faults, @ref tas2563_clear_faults) for the
+ *     open-drain IRQ_N on the EVK's `EVK_PIN_AMP_FAULT`, routed through
+ *     host SoC GPIO with an internal pull-up.
  *
  * I2C addresses (TAS2563 Table 7-3):
  *   AD0/SPICLK = GND       -> 0x4C
@@ -725,16 +725,24 @@ alp_status_t
 tas2563_configure_iv_sense(tas2563_t *ctx, bool enable, uint8_t v_slot, uint8_t i_slot);
 
 /**
- * @brief Bind the amp's open-drain IRQ_N to a host GPIO and point the
- *        chip's IRQZ output at the latched interrupt registers.
+ * @brief Point the chip's IRQZ output at the latched interrupt
+ *        registers and unmask the TDM clock fault, without touching
+ *        any host GPIO.
+ *
+ * This is the chip-side half of @ref tas2563_configure_fault_pin,
+ * split out for boards where the host pin is not reachable via
+ * alp_gpio -- routed to a bridge MCU, shared with a peripheral this
+ * driver doesn't model, or otherwise outside `board.yaml`'s
+ * `e1m_routes:` -- so the caller owns the pin itself and only needs
+ * the amp's side armed. `ctx->irq_n` is left untouched by this call,
+ * so @ref tas2563_fault_asserted keeps returning ALP_ERR_NOSUPPORT
+ * until something else binds it.
  *
  * IRQ_N is an open-drain output that pulls low on an unmasked fault
  * and therefore needs a pull-up to IOVDD; the part has a 20 kOhm
  * internal one behind `MISC_CFG1.IRQZ_PU` (bit 3, reset `0h` =
  * disabled -- SLASET3D §7.3.12 Figure 7-10 p.36, §7.5.6 Table 7-106
- * p.68, §7.3.12 Table 7-12 p.37).  The host pin is configured as an
- * input with its own internal pull-up as well, matching the EVK
- * routing of `EVK_PIN_AMP_FAULT`.
+ * p.68, §7.3.12 Table 7-12 p.37).
  *
  * `INT & CLK CFG.IRQZ_PIN_CFG[1:0]` is set to `01b`, "assert on any
  * unmasked latched interrupts" -- also the reset value -- so a fault
@@ -755,6 +763,37 @@ tas2563_configure_iv_sense(tas2563_t *ctx, bool enable, uint8_t v_slot, uint8_t 
  * tas2563_read_faults directly) never sees one.
  *
  * @param[in] ctx                  Initialised context.
+ * @param[in] chip_internal_pullup Enable the amp's own 20 kOhm
+ *                                 pull-up.  Pass false when the board
+ *                                 already fits an external pull-up on
+ *                                 IRQ_N -- e.g. the E1M-EVK's 0x4D/0x4E
+ *                                 pair, which share IRQZ on P5_0 behind
+ *                                 R124 (`metadata/boards/e1m-evk.yaml`).
+ *
+ * @note The `INT_MASK0` unmask this function performs is per CHIP, not
+ *   per net: on a shared IRQZ net (see "Shared SD_N / IRQZ nets"
+ *   above), call this on EVERY amp sharing the net -- arming only one
+ *   still leaves the others' TDM clock faults masked from the shared
+ *   pin.
+ *
+ * @return ALP_OK, or the underlying bus status.
+ * @retval ALP_ERR_NOT_READY ctx is NULL or not initialised.
+ */
+alp_status_t tas2563_arm_fault_irq(tas2563_t *ctx, bool chip_internal_pullup);
+
+/**
+ * @brief Bind the amp's open-drain IRQ_N to a host GPIO and arm the
+ *        chip side via @ref tas2563_arm_fault_irq.
+ *
+ * Configures the host pin as an input with its own internal pull-up,
+ * matching the EVK routing of `EVK_PIN_AMP_FAULT`, then delegates the
+ * chip-register programming (IRQZ pull-up, latch pin-cfg, TDM-clock
+ * unmask) to @ref tas2563_arm_fault_irq -- see that function's doc for
+ * what gets written and why. Only after both succeed is @p irq_n
+ * recorded in @p ctx, so @ref tas2563_fault_asserted has something to
+ * read.
+ *
+ * @param[in] ctx                  Initialised context.
  * @param[in] irq_n                Open GPIO handle bound to
  *                                 AMP.FAULT.  Stored in @p ctx.
  * @param[in] chip_internal_pullup Enable the amp's own 20 kOhm
@@ -765,7 +804,8 @@ tas2563_configure_iv_sense(tas2563_t *ctx, bool enable, uint8_t v_slot, uint8_t 
  * @note If @p irq_n's net is shared with another amp (see "Shared
  *   SD_N / IRQZ nets" above), a pin assertion means only that ONE of
  *   the amps on it faulted -- read each instance's own @ref
- *   tas2563_read_faults over I2C to find out which.
+ *   tas2563_read_faults over I2C to find out which. Also see @ref
+ *   tas2563_arm_fault_irq's note on arming every amp on a shared net.
  *
  * @return ALP_OK, or the underlying bus/GPIO status.
  * @retval ALP_ERR_NOT_READY ctx is NULL or not initialised.

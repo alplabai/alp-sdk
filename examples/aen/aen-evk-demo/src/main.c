@@ -3718,7 +3718,23 @@ static phase_verdict_t phase_encoder(demo_ctx_t *ctx)
  *      2-channel so both slots carry real, non-zero samples -- a mono
  *      stream would leave the RIGHT slot always zero regardless of which
  *      amp is told to listen to it.
- *   6. Fault baseline: tas2563_read_faults() on every amp (I2C, richer than
+ *   6. Arm each amp's fault IRQ -- tas2563_arm_fault_irq() on every
+ *      initialised amp, chip-side only (#2182): points IRQZ at the
+ *      latched interrupts and unmasks the TDM clock fault (see that
+ *      function's own doc for the register-level detail), the same
+ *      writes tas2563_configure_fault_pin() makes on top of its GPIO
+ *      bind. This phase already owns AMP_FAULT as a raw gpio5 pin (step 3
+ *      above), not an alp_gpio_t handle, so it calls the chip-only half
+ *      directly instead of going through configure_fault_pin(). This is
+ *      the ONLY production caller of either function in the tree --
+ *      before #2182, nothing linked the unmask into a buildable image, so
+ *      it had never run on silicon. Bench builds
+ *      (ALP_AEN_EVK_DEMO_PROBE_FAULT_PIN, see CMakeLists.txt) replace this
+ *      plain call with a seeded read-modify-write discriminator against
+ *      raw I2C, immediately followed by a deliberate TDM-clock-fault
+ *      stimulus through the pin -- see probe_fault_pin_seeded_rmw() and
+ *      probe_fault_pin_stimulus() below for what each one does and why.
+ *   7. Fault baseline: tas2563_read_faults() on every amp (I2C, richer than
  *      the pin -- see AMP_FAULT below) plus one read of the raw AMP_FAULT pin
  *      (P5_0), both printed. Neither gates anything by itself here; they are
  *      the "before" half of the "did ACTIVE cause a fault" comparison after
@@ -3727,9 +3743,9 @@ static phase_verdict_t phase_encoder(demo_ctx_t *ctx)
  *      TAS2563_FAULT_TDM_CLOCK bit read alongside it: at this point in the
  *      sequence no I2S clock has ever run, so this is expected to read
  *      "no valid clock" regardless of playback. Runs regardless of playback.
- *   7. PLAYBACK ONLY: alp_audio_in_open() (PDM, peripheral 0) + start --
+ *   8. PLAYBACK ONLY: alp_audio_in_open() (PDM, peripheral 0) + start --
  *      capture SOUND_BASELINE_BLOCKS of room noise BEFORE the tone starts.
- *   8. PLAYBACK ONLY: alp_audio_out_open() (I2S3, peripheral 0) +
+ *   9. PLAYBACK ONLY: alp_audio_out_open() (I2S3, peripheral 0) +
  *      set_volume(SOUND_VOL_START) + start, THEN one silent block written
  *      before either amp is touched -- lever 2 above. Since #2132,
  *      alp_audio_out_start() with nothing queued only arms a pending
@@ -3737,31 +3753,33 @@ static phase_verdict_t phase_encoder(demo_ctx_t *ctx)
  *      fire until this first write. tas2563_resume() (next step) requires
  *      that clock already running, so this silent write is what makes it
  *      true rather than assumed (#2146).
- *   9. PLAYBACK ONLY: tas2563_resume() on every initialised amp -- ONLY
+ *  10. PLAYBACK ONLY: tas2563_resume() on every initialised amp -- ONLY
  *      now, with both levers already at their quiet settings, the bit
- *      clock genuinely running (step 8), and any latch a previous stop
+ *      clock genuinely running (step 9), and any latch a previous stop
  *      left behind cleared as part of the same call before MODE switches
  *      to ACTIVE. Never reached with playback off -- the amp stays in
- *      software shutdown for this phase's whole run in that mode.
- *  10. PLAYBACK ONLY: the tone -- SOUND_TONE_BLOCKS blocks of a square
+ *      software shutdown for this phase's whole run in that mode. Also
+ *      never reached for an amp whose bench-only probe (step 6) could not
+ *      verify its own INT_MASK0 restore -- see that step's comment.
+ *  11. PLAYBACK ONLY: the tone -- SOUND_TONE_BLOCKS blocks of a square
  *      wave, interleaved one alp_audio_out_write() with one
  *      alp_audio_in_read() per iteration (no threads needed -- both calls
  *      block for real wall-clock time, so alternating them samples the
  *      mic DURING playback), volume ramped linearly from SOUND_VOL_START
  *      to SOUND_VOL_CEILING across the blocks.
- *  11. Teardown, amp-mute FIRST: tas2563_set_mode(SHUTDOWN) on every
+ *  12. Teardown, amp-mute FIRST: tas2563_set_mode(SHUTDOWN) on every
  *      initialised amp -- UNCONDITIONAL, playback on or off, so the
  *      set_mode() write path is I2C-exercised either way -- THEN (playback
  *      only) audio_out stop+close, THEN audio_in stop+close.
- *  12. Fault re-read (I2C + pin) on every amp -- the "after" half. Any
+ *  13. Fault re-read (I2C + pin) on every amp -- the "after" half. Any
  *      TAS2563_FAULT_SHUTDOWN_CAUSES bit set here except TAS2563_FAULT_TDM_CLOCK
  *      (see #2146) is a FAIL, not swallowed. Also re-prints
  *      tas2563_read_tdm_detect() (#2140), same non-gating role as at the
- *      baseline in step 6 -- the latch answers "did a clock fault ever
+ *      baseline in step 7 -- the latch answers "did a clock fault ever
  *      happen", the live read answers "what is the clock doing right now",
  *      and this phase reports both rather than keying its verdict on
  *      either alone. Runs regardless of playback.
- *  13. Idle restore, on EVERY exit path including every failure above,
+ *  14. Idle restore, on EVERY exit path including every failure above,
  *      mirroring phase 6 (RGB LED) and NOT phase 9 (SD mux, which leaves its
  *      mux asserted on purpose -- see that phase's header for why): AMP_ENABLE
  *      RELEASED to an input so R138's pull-up defines it, exactly as at
@@ -3857,6 +3875,250 @@ static const tas2563_rx_channel_t amp_rx_channel[AMP_COUNT] = {
 	TAS2563_RX_RIGHT, /* U28 -> J21, RIGHT */
 };
 
+#if defined(ALP_AEN_EVK_DEMO_PROBE_FAULT_PIN)
+/*
+ * #2182 BENCH DISCRIMINATOR -- NOT app code, and not a template for one.
+ *
+ * INT_MASK0's POR (FCh) and the value tas2563_arm_fault_irq() leaves it at
+ * (F8h) differ in exactly bit 2 (TDM clock, TAS2563_INT_MASK0_TDM_CLOCK),
+ * so a correct read-modify-write is byte-for-byte indistinguishable from a
+ * bug that blindly writes F8h -- UNLESS the register is seeded away from
+ * both values first. Seeding to FFh makes a correct RMW land on FBh and a
+ * blind write still land on F8h; see chips/tas2563/tas2563.c's
+ * tas2563_arm_fault_irq() and issue #2182 for the argument this
+ * discriminates.
+ *
+ * PAGE and INT_MASK0 are re-declared here, at their raw register addresses
+ * (SLASET3D §7.5.2 "Page", p.65 / §7.5.28 "Interrupt Mask 0", p.77), rather
+ * than exposed as a public accessor on the driver: this is a one-shot
+ * bench probe for a single internal, not a second, app-reachable way to
+ * poke the chip's registers (#2182's own design note).
+ */
+#define PROBE_TAS2563_REG_PAGE      0x00u
+#define PROBE_TAS2563_REG_INT_MASK0 0x1Au
+
+/* One amp's worth of probe + stimulus evidence, printed as the single
+ * greppable summary line both helpers below build up together. stim_pin
+ * and ltch stay their initialised sentinels (-1 / 0) when the stimulus
+ * never ran -- e.g. because the RMW probe's restore could not be
+ * verified. abort_remaining is set by the stimulus half when it could
+ * not leave the amp in a known-safe state (a DC_DETECT latch, or a
+ * SHUTDOWN that itself failed) -- the caller must not run the stimulus
+ * on any amp after one that set it. */
+typedef struct {
+	uint8_t  seed;
+	uint8_t  rmw;
+	uint8_t  restore;
+	bool     restore_ok;
+	int      stim_pin;
+	uint32_t ltch;
+	bool     pass;
+	bool     abort_remaining;
+} probe_fault_pin_result_t;
+
+/*
+ * Seeding INT_MASK0 directly over raw I2C is safe here because
+ * tas2563_init() (step 4, above) leaves both amps in SOFTWARE shutdown
+ * (PWR_CTL.MODE = 10b, SLASET3D §7.5.4 Table 7-104, p.66) and nothing
+ * before this call ever switches either amp ACTIVE -- there is no Class-D
+ * stage running that a spuriously unmasked interrupt could disturb.
+ *
+ * Restoring INT_MASK0 to its POR value afterward is mandatory, not
+ * best-effort, and runs regardless of whether the seed step below
+ * verified itself: the bench notes on this bus (issue #2182) record it
+ * failing open -- ACKing every address and echoing the register address
+ * back as read data -- so a write can land on the wire even when the
+ * return code, or a later readback, says otherwise. Bailing out on the
+ * first seed error would then skip the restore and leave INT_MASK0 at
+ * whatever the seed write left it. This function re-arms with
+ * tas2563_arm_fault_irq() after writing FCh back and reads the register
+ * a THIRD time, and only sets r->restore_ok once that readback actually
+ * shows F8h (the post-arm value, not the FCh it wrote -- the write alone
+ * does not prove the re-arm's RMW itself still works). The caller must
+ * not resume playback on this amp when r->restore_ok is false: a stuck
+ * FBh silently leaves over-temp and over-current masked from the pin as
+ * well, which is worse than the bug this probe exists to catch.
+ */
+static void probe_fault_pin_seeded_rmw(tas2563_t                *amp,
+                                       alp_i2c_t                *bus,
+                                       uint8_t                   addr,
+                                       probe_fault_pin_result_t *r)
+{
+	r->seed            = 0;
+	r->rmw             = 0;
+	r->restore         = 0;
+	r->restore_ok      = false;
+	r->stim_pin        = -1;
+	r->ltch            = 0;
+	r->pass            = false;
+	r->abort_remaining = false;
+
+	uint8_t reg_addr = PROBE_TAS2563_REG_INT_MASK0;
+
+	/* Seed step: every sub-step is attempted regardless of the previous
+	 * one's rc -- see the function comment above for why this cannot
+	 * bail out early on the first error. */
+	uint8_t      page0[2]   = { PROBE_TAS2563_REG_PAGE, 0x00u };
+	alp_status_t page_rc    = alp_i2c_write(bus, addr, page0, sizeof(page0));
+	uint8_t      seed_ff[2] = { PROBE_TAS2563_REG_INT_MASK0, 0xFFu };
+	alp_status_t seed_wr_rc = alp_i2c_write(bus, addr, seed_ff, sizeof(seed_ff));
+	alp_status_t seed_rd_rc = alp_i2c_write_read(bus, addr, &reg_addr, 1, &r->seed, 1);
+	bool seed_ok = (page_rc == ALP_OK) && (seed_wr_rc == ALP_OK) && (seed_rd_rc == ALP_OK) &&
+	               (r->seed == 0xFFu);
+	if (!seed_ok) {
+		printf("[evkdemo] FAULTPIN amp=0x%02x: seed did not land (page_rc=%d write_rc=%d "
+		       "read_rc=%d seed=0x%02x) -- skipping the RMW-under-test, restore still runs\n",
+		       addr,
+		       (int)page_rc,
+		       (int)seed_wr_rc,
+		       (int)seed_rd_rc,
+		       r->seed);
+	} else {
+		alp_status_t arm_rc = tas2563_arm_fault_irq(amp, false);
+		if (arm_rc == ALP_OK) arm_rc = alp_i2c_write_read(bus, addr, &reg_addr, 1, &r->rmw, 1);
+		if (arm_rc != ALP_OK) {
+			printf("[evkdemo] FAULTPIN amp=0x%02x: arm_fault_irq/readback failed -> %d\n",
+			       addr,
+			       (int)arm_rc);
+		}
+	}
+
+	/* Mandatory restore -- runs unconditionally; see the function comment
+	 * above. */
+	uint8_t      restore_por[2] = { PROBE_TAS2563_REG_INT_MASK0, 0xFCu };
+	alp_status_t restore_rc     = alp_i2c_write(bus, addr, restore_por, sizeof(restore_por));
+	if (restore_rc == ALP_OK) restore_rc = tas2563_arm_fault_irq(amp, false);
+	if (restore_rc == ALP_OK)
+		restore_rc = alp_i2c_write_read(bus, addr, &reg_addr, 1, &r->restore, 1);
+	r->restore_ok = (restore_rc == ALP_OK) && (r->restore == 0xF8u);
+	if (!r->restore_ok) {
+		printf("[evkdemo] FAULTPIN amp=0x%02x: restore NOT verified (restore=0x%02x) -- "
+		       "TDM clock fault stays masked from the pin on this amp; skipping the "
+		       "stimulus and refusing to resume playback on it\n",
+		       addr,
+		       r->restore);
+	}
+}
+
+static const char *probe_pin_verdict_str(bool valid, bool asserted)
+{
+	if (!valid) return "INVALID READ";
+	return asserted ? "asserted" : "not-asserted";
+}
+
+/* set_mode(SHUTDOWN) retried once before being trusted -- see the caller
+ * comment on why r->pass and r->abort_remaining both depend on this
+ * actually landing. */
+static alp_status_t probe_shutdown_retry(tas2563_t *amp, uint8_t addr, const char *why)
+{
+	alp_status_t rc = tas2563_set_mode(amp, TAS2563_MODE_SHUTDOWN);
+	if (rc != ALP_OK) rc = tas2563_set_mode(amp, TAS2563_MODE_SHUTDOWN);
+	printf("[evkdemo] FAULTPIN amp=0x%02x: set_mode(SHUTDOWN)%s -> %d\n", addr, why, (int)rc);
+	return rc;
+}
+
+/*
+ * Deliberate inverse of #2146's rule (never switch an amp ACTIVE before its
+ * I2S clock is confirmed running -- see this phase's step 10 and
+ * changelog.d/2146.md): here we switch ACTIVE with NO clock started at all,
+ * on purpose, to prove the unmasked TDM clock fault actually reaches both
+ * tas2563_read_faults() and (via tas2563_arm_fault_irq(), just armed above)
+ * the AMP_FAULT pin. Bench-only -- never runs with AEN_EVKDEMO_SOUND_PLAYBACK
+ * on. The caller gates the call itself on every precondition this function
+ * assumes: the RMW probe's restore verified, this amp's own
+ * TAS2563_AMP_LEVEL_MIN write (step 5) and I2S configure (step 6) both
+ * returned ALP_OK, the AMP_FAULT pin's own pinctrl/gpio configure (step 3)
+ * returned 0, and no earlier amp in this run set r->abort_remaining --
+ * this function has no way to re-check any of those itself. No I2S write
+ * is ever queued, so the Class-D stage has nothing to switch even while
+ * nominally ACTIVE. r->abort_remaining is set when this function cannot
+ * prove the amp landed back in a safe, known state (DC_DETECT latched, or
+ * a SHUTDOWN that itself failed even after one retry); the caller must
+ * not run this function again for a later amp once that happens.
+ */
+static void probe_fault_pin_stimulus(tas2563_t                *amp,
+                                     const struct device      *gpio5,
+                                     uint8_t                   addr,
+                                     probe_fault_pin_result_t *r)
+{
+	(void)tas2563_clear_faults(amp);
+
+	bool idle_asserted = false;
+	bool idle_valid    = amp_fault_pin_verdict(gpio_pin_get(gpio5, AMP_FAULT_PIN), &idle_asserted);
+	printf("[evkdemo] FAULTPIN amp=0x%02x: pin idle before stimulus -> %s (want not-asserted)\n",
+	       addr,
+	       probe_pin_verdict_str(idle_valid, idle_asserted));
+
+	alp_status_t act_rc = tas2563_set_mode(amp, TAS2563_MODE_ACTIVE);
+	if (act_rc != ALP_OK) {
+		printf("[evkdemo] FAULTPIN amp=0x%02x: set_mode(ACTIVE) failed -> %d -- aborting "
+		       "stimulus\n",
+		       addr,
+		       (int)act_rc);
+		if (probe_shutdown_retry(amp, addr, " after ACTIVE failure") != ALP_OK)
+			r->abort_remaining = true;
+		return;
+	}
+
+	/* Poll until the pin asserts (want 0/asserted -- the fault this
+	 * stimulus provokes) or the last delay elapses; break on the FIRST
+	 * asserted reading rather than always running all three delays. */
+	static const uint32_t poll_delays_ms[] = { 10u, 50u, 200u };
+	bool                  poll_asserted    = false;
+	bool                  poll_valid       = false;
+	for (size_t p = 0; p < ARRAY_SIZE(poll_delays_ms); p++) {
+		k_msleep(poll_delays_ms[p]);
+		bool asserted = false;
+		bool valid    = amp_fault_pin_verdict(gpio_pin_get(gpio5, AMP_FAULT_PIN), &asserted);
+		printf("[evkdemo] FAULTPIN amp=0x%02x: pin at +%ums -> %s (want asserted)\n",
+		       addr,
+		       poll_delays_ms[p],
+		       probe_pin_verdict_str(valid, asserted));
+		poll_valid    = valid;
+		poll_asserted = valid && asserted;
+		if (poll_asserted) break;
+	}
+	r->stim_pin = !poll_valid ? -1 : (poll_asserted ? 0 : 1);
+
+	(void)tas2563_read_faults(amp, &r->ltch);
+	if ((r->ltch & TAS2563_FAULT_DC_DETECT) != 0u) {
+		/* Not the fault this stimulus is trying to provoke, and DC on the
+		 * output with no clock running is not a state to sit in -- abort
+		 * to SHUTDOWN immediately. Faults are deliberately left latched
+		 * (no tas2563_clear_faults() here) so the evidence survives for
+		 * whoever reads the bench log; this is not the safety recovery
+		 * path, which never re-arms anything on its own. */
+		printf("[evkdemo] FAULTPIN amp=0x%02x: *** DC_DETECT latched (ltch=0x%08x) -- "
+		       "aborting stimulus to SHUTDOWN immediately, faults left latched as evidence "
+		       "***\n",
+		       addr,
+		       r->ltch);
+		/* Ignore this SHUTDOWN's own rc here -- whether or not it
+		 * succeeds, DC_DETECT alone already forces abort_remaining;
+		 * a SHUTDOWN failure on top of it is a second, independent
+		 * problem the printed rc above still surfaces. */
+		(void)probe_shutdown_retry(amp, addr, " after DC_DETECT");
+		r->abort_remaining = true;
+		return;
+	}
+
+	alp_status_t shutdown_rc = probe_shutdown_retry(amp, addr, "");
+	(void)tas2563_clear_faults(amp);
+
+	bool after_asserted = false;
+	bool after_valid = amp_fault_pin_verdict(gpio_pin_get(gpio5, AMP_FAULT_PIN), &after_asserted);
+	printf("[evkdemo] FAULTPIN amp=0x%02x: pin after clear -> %s (want not-asserted)\n",
+	       addr,
+	       probe_pin_verdict_str(after_valid, after_asserted));
+
+	if (shutdown_rc != ALP_OK) r->abort_remaining = true;
+
+	r->pass = idle_valid && !idle_asserted && poll_valid && poll_asserted &&
+	          ((r->ltch & TAS2563_FAULT_TDM_CLOCK) != 0u) && (shutdown_rc == ALP_OK) &&
+	          after_valid && !after_asserted;
+}
+#endif /* ALP_AEN_EVK_DEMO_PROBE_FAULT_PIN */
+
 /* Sum of |sample| across every channel of one captured block -- the whole of
  * this phase's "did the mic hear something" evidence. See sound_verdict.h
  * for why this is an energy check and not a frequency one. Both call sites
@@ -3882,7 +4144,41 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 
 	tas2563_t amps[AMP_COUNT];
 	bool      amp_up[AMP_COUNT] = { false, false };
-	int       ok_amps           = 0;
+	/* Set at step 6 below. True unless a bench probe build (#2182,
+	 * ALP_AEN_EVK_DEMO_PROBE_FAULT_PIN) could not verify its own INT_MASK0
+	 * restore on that amp -- the default (non-probe) build never touches
+	 * this array past its initialiser, since tas2563_arm_fault_irq() alone
+	 * has nothing to fail this way. Read by the (currently unreachable
+	 * with playback off) tas2563_resume() gate at step 10. */
+	bool amp_fault_pin_restore_ok[AMP_COUNT] = { true, true };
+	ARG_UNUSED(amp_fault_pin_restore_ok);
+	/* Set at step 5 below (tas2563_set_amp_level(MIN)'s own rc). Read at
+	 * step 6 to decide whether the bench probe's stimulus is safe to run
+	 * on that amp -- see probe_fault_pin_stimulus()'s doc: it assumes
+	 * AMP_LEVEL is already at its floor and has no way to re-check that
+	 * itself. Unused past its initialiser in the default (non-probe)
+	 * build. */
+	bool amp_level_min_ok[AMP_COUNT] = { false, false };
+	ARG_UNUSED(amp_level_min_ok);
+	/* Set at step 3 below (the shared AMP_FAULT pin's own pinctrl/gpio
+	 * configure rc) -- one value, not per amp, since P5_0 is a single
+	 * physical pin both amps share. Same read-at-step-6, precondition-only
+	 * role as amp_level_min_ok above. */
+	int amp_fault_pin_cfg_rc = -1;
+	ARG_UNUSED(amp_fault_pin_cfg_rc);
+	/* Set at step 6 (either build) or by the stimulus's abort_remaining;
+	 * checked once at the very end, after teardown/idle-restore have
+	 * still run unconditionally -- same reasoning as new_shutdown_fault
+	 * below: a fault-IRQ problem must fail the phase, but must not skip
+	 * putting the hardware back in a safe idle state on the way out. */
+	bool        fault_irq_gate_failed = false;
+	static char fault_irq_gate_note[128];
+	/* Reset every call (the buffer itself is static only so ctx->note can
+	 * still point at it after this function returns) -- every write site
+	 * below is guarded on this still being empty, so the FIRST failure
+	 * reason wins rather than a later, more generic one overwriting it. */
+	fault_irq_gate_note[0] = '\0';
+	int ok_amps            = 0;
 
 	const struct device *gpio5 = DEVICE_DT_GET(DT_NODELABEL(gpio5));
 	if (!device_is_ready(gpio5)) {
@@ -4020,6 +4316,7 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	rc = pinctrl_configure_pins(amp_fault_mux, ARRAY_SIZE(amp_fault_mux), 0U);
 	if (rc == 0) rc = gpio_pin_configure(gpio5, AMP_FAULT_PIN, GPIO_INPUT);
 	printf("[evkdemo] SOUND: AMP_FAULT (IRQ_N, P5_0) configured as input -> %d\n", rc);
+	amp_fault_pin_cfg_rc = rc;
 
 	/* SDZ (AMP_ENABLE) just went high above -- the hardware reset the
 	 * comment at step 2 calls out -- and tas2563_init() is called below
@@ -4057,6 +4354,7 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	for (size_t i = 0; i < AMP_COUNT; i++) {
 		if (!amp_up[i]) continue;
 		alp_status_t lvl_rc = tas2563_set_amp_level(&amps[i], TAS2563_AMP_LEVEL_MIN);
+		amp_level_min_ok[i] = (lvl_rc == ALP_OK);
 		printf("[evkdemo] SOUND: tas2563_set_amp_level(0x%02x, MIN) -> %d\n",
 		       amp_addrs[i],
 		       (int)lvl_rc);
@@ -4076,10 +4374,102 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 		.format         = ALP_I2S_FMT_I2S,
 		.block_frames   = SOUND_FRAMES_PER_BLOCK,
 	};
+#if defined(ALP_AEN_EVK_DEMO_PROBE_FAULT_PIN)
+	/* Set by probe_fault_pin_stimulus() (via r->abort_remaining) the first
+	 * time it cannot prove an amp landed back in a known-safe state --
+	 * from that point on, no later amp in this loop gets the stimulus,
+	 * even though its own seeded-RMW probe still runs (that half never
+	 * switches the amp ACTIVE, so it stays safe regardless). */
+	bool probe_abort = false;
+#endif
 	for (size_t i = 0; i < AMP_COUNT; i++) {
 		if (!amp_up[i]) continue;
 		alp_status_t cfg_rc = tas2563_configure_i2s(&amps[i], &amp_i2s_cfg, amp_rx_channel[i]);
 		printf("[evkdemo] SOUND: tas2563_configure_i2s(0x%02x) -> %d\n", amp_addrs[i], (int)cfg_rc);
+
+#if defined(ALP_AEN_EVK_DEMO_PROBE_FAULT_PIN)
+		/* Bench probe build (#2182): seeded-RMW discriminator in place of
+		 * the plain arm below, immediately followed -- same amp, before
+		 * moving to the next one -- by a deliberate TDM-clock-fault
+		 * stimulus through the pin, gated on every precondition the
+		 * stimulus itself assumes. See probe_fault_pin_seeded_rmw() and
+		 * probe_fault_pin_stimulus()'s own comments for the full argument;
+		 * this call site only sequences them and prints the one
+		 * greppable summary line both contribute to. */
+		probe_fault_pin_result_t probe_r;
+		probe_fault_pin_seeded_rmw(&amps[i], ctx->carrier_bus, amp_addrs[i], &probe_r);
+		amp_fault_pin_restore_ok[i] = probe_r.restore_ok;
+
+		bool stim_preconditions_ok = amp_level_min_ok[i] && (cfg_rc == ALP_OK) &&
+		                             (amp_fault_pin_cfg_rc == 0) && probe_r.restore_ok;
+		if (!AEN_EVKDEMO_SOUND_PLAYBACK && !probe_abort && stim_preconditions_ok) {
+			probe_fault_pin_stimulus(&amps[i], gpio5, amp_addrs[i], &probe_r);
+			if (probe_r.abort_remaining) {
+				probe_abort           = true;
+				fault_irq_gate_failed = true;
+				/* First failure reason wins -- the generic probe_pass
+				 * check below must not overwrite this specific one. */
+				if (fault_irq_gate_note[0] == '\0') {
+					snprintf(fault_irq_gate_note,
+					         sizeof(fault_irq_gate_note),
+					         "FAULTPIN stimulus could not return amp 0x%02x to a "
+					         "known-safe state",
+					         amp_addrs[i]);
+				}
+			}
+		} else if (!AEN_EVKDEMO_SOUND_PLAYBACK && probe_abort) {
+			printf("[evkdemo] FAULTPIN amp=0x%02x: stimulus skipped (phase-wide abort from "
+			       "an earlier amp)\n",
+			       amp_addrs[i]);
+		} else if (!AEN_EVKDEMO_SOUND_PLAYBACK) {
+			printf("[evkdemo] FAULTPIN amp=0x%02x: stimulus skipped (level_min_ok=%d "
+			       "cfg_rc=%d fault_pin_cfg_rc=%d restore_ok=%d)\n",
+			       amp_addrs[i],
+			       amp_level_min_ok[i],
+			       (int)cfg_rc,
+			       amp_fault_pin_cfg_rc,
+			       probe_r.restore_ok);
+		}
+
+		bool probe_pass = (probe_r.seed == 0xFFu) && (probe_r.rmw == 0xFBu) && probe_r.restore_ok &&
+		                  (AEN_EVKDEMO_SOUND_PLAYBACK ||
+		                   (stim_preconditions_ok && !probe_r.abort_remaining && probe_r.pass));
+		if (!probe_pass) {
+			fault_irq_gate_failed = true;
+			/* First failure reason wins -- do not clobber a more specific
+			 * note (e.g. the abort_remaining one above) with this
+			 * generic one. */
+			if (fault_irq_gate_note[0] == '\0') {
+				snprintf(fault_irq_gate_note,
+				         sizeof(fault_irq_gate_note),
+				         "FAULTPIN probe FAILED on amp 0x%02x",
+				         amp_addrs[i]);
+			}
+		}
+		printf("[evkdemo] FAULTPIN amp=0x%02x seed=0x%02x rmw=0x%02x restore=0x%02x "
+		       "stim_pin=%d ltch=0x%08x verdict=%s\n",
+		       amp_addrs[i],
+		       probe_r.seed,
+		       probe_r.rmw,
+		       probe_r.restore,
+		       probe_r.stim_pin,
+		       probe_r.ltch,
+		       probe_pass ? "PASS" : "FAIL");
+#else
+		alp_status_t arm_rc = tas2563_arm_fault_irq(&amps[i], false);
+		printf("[evkdemo] SOUND: tas2563_arm_fault_irq(0x%02x) -> %d\n", amp_addrs[i], (int)arm_rc);
+		if (arm_rc != ALP_OK) {
+			fault_irq_gate_failed = true;
+			/* First failure reason wins, same as the probe build below. */
+			if (fault_irq_gate_note[0] == '\0') {
+				snprintf(fault_irq_gate_note,
+				         sizeof(fault_irq_gate_note),
+				         "tas2563_arm_fault_irq(0x%02x) failed -> %d",
+				         amp_addrs[i],
+				         (int)arm_rc);
+			}
+		}
+#endif
 	}
 
 	/* --- 7. Fault baseline: I2C word + the raw pin --------------------- */
@@ -4092,7 +4482,7 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 		       faults_before[i]);
 
 		/* Live readback (#2140), a different question from the latched
-		 * fault word above -- see the phase header's step 6. Not gated
+		 * fault word above -- see the phase header's step 7. Not gated
 		 * on anything: no I2S clock has run yet at this point, so
 		 * "no valid clock" here is expected, not a failure. */
 		tas2563_tdm_detect_t tdm_before = { 0 };
@@ -4248,6 +4638,16 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 		if (silence_rc == ALP_OK) {
 			for (size_t i = 0; i < AMP_COUNT; i++) {
 				if (!amp_up[i]) continue;
+				/* #2182: a bench probe build that could not verify its own
+				 * INT_MASK0 restore must not resume this amp -- a stuck FBh
+				 * leaves over-temp/over-current masked from the pin too. */
+				if (!amp_fault_pin_restore_ok[i]) {
+					if (failed_resume_addr < 0) failed_resume_addr = amp_addrs[i];
+					printf("[evkdemo] SOUND: tas2563_resume(0x%02x) skipped -- fault-pin "
+					       "probe could not verify its INT_MASK0 restore (#2182)\n",
+					       amp_addrs[i]);
+					continue;
+				}
 				alp_status_t act_rc = tas2563_resume(&amps[i]);
 				if (act_rc == ALP_OK) {
 					resumed_amps++;
@@ -4348,7 +4748,7 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 		if ((faults_after & shutdown_fault_mask) != 0u) new_shutdown_fault = true;
 
 		/* Live readback (#2140), same non-gating role as the baseline
-		 * print above -- see the phase header's step 12. Printed for
+		 * print above -- see the phase header's step 13. Printed for
 		 * diagnosis alongside the latch, not used in the verdict: by
 		 * this point in teardown the amps are already muted/shut down,
 		 * so a "no valid clock" reading here is also expected on the
@@ -4413,6 +4813,15 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 
 	if (new_shutdown_fault) {
 		ctx->note = "amp reported a shutdown-cause fault";
+		return PHASE_FAIL;
+	}
+	/* #2182: an unarmed fault IRQ (default build) or a failed FAULTPIN
+	 * probe/stimulus (bench probe build) -- checked here, after teardown
+	 * and idle-restore have already run unconditionally above, so a
+	 * fault-IRQ problem fails the phase without skipping the hardware's
+	 * return to a safe idle state. */
+	if (fault_irq_gate_failed) {
+		ctx->note = fault_irq_gate_note;
 		return PHASE_FAIL;
 	}
 	/* Gate on BOTH amps, not just "at least one": with playback off, the

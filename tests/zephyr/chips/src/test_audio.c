@@ -751,6 +751,58 @@ ZTEST(alp_chips, test_tas2563_configure_fault_pin_unmasks_tdm_clock_error)
 	alp_i2c_close(bus);
 }
 
+/* #2182: arm_fault_irq is configure_fault_pin's chip-only half -- it
+ * must reject an uninitialised context exactly like configure_fault_pin
+ * does, before any bus access. */
+ZTEST(alp_chips, test_tas2563_arm_fault_irq_rejects_uninitialised)
+{
+	tas2563_t ctx = { 0 };
+	zassert_equal(tas2563_arm_fault_irq(&ctx, true), ALP_ERR_NOT_READY);
+}
+
+/* Mirrors test_tas2563_configure_fault_pin_unmasks_tdm_clock_error
+ * above, but through tas2563_arm_fault_irq() directly and with no GPIO
+ * involved at all -- the chip-side RMW must land the same way whether
+ * or not a caller ever binds a host pin. */
+ZTEST(alp_chips, test_tas2563_arm_fault_irq_unmasks_tdm_clock_error)
+{
+	tas2563_t  ctx;
+	alp_i2c_t *bus = tas_init(&ctx, 0x0Eu, NULL);
+	zassert_equal(fake_tas2563_get_reg(TAS_REG_INT_MASK0), 0xFCu, "POR default");
+
+	/* Same discriminator as the configure_fault_pin test: from 0xFF an
+	 * RMW must land on 0xFB, while a blind write would land on 0xF8. */
+	fake_tas2563_set_reg(TAS_REG_INT_MASK0, 0xFFu);
+
+	zassert_equal(tas2563_arm_fault_irq(&ctx, true), ALP_OK);
+	zassert_equal(fake_tas2563_get_reg(TAS_REG_INT_MASK0),
+	              0xFBu,
+	              "bit 2 (TDM clock) cleared by a read-modify-write; every "
+	              "other bit preserved, which 0xF8 would not prove");
+
+	alp_i2c_close(bus);
+}
+
+/* #2182: arm_fault_irq never sees a GPIO handle, so it must not bind
+ * ctx->irq_n -- tas2563_fault_asserted has to keep reporting
+ * ALP_ERR_NOSUPPORT until a caller separately binds the pin (e.g. via
+ * configure_fault_pin, or by setting ctx->irq_n itself on a board where
+ * this driver doesn't own the pin). */
+ZTEST(alp_chips, test_tas2563_arm_fault_irq_leaves_irq_n_unbound)
+{
+	tas2563_t  ctx;
+	alp_i2c_t *bus = tas_init(&ctx, 0x0Eu, NULL);
+
+	zassert_equal(tas2563_arm_fault_irq(&ctx, true), ALP_OK);
+
+	bool asserted = false;
+	zassert_equal(tas2563_fault_asserted(&ctx, &asserted),
+	              ALP_ERR_NOSUPPORT,
+	              "arm_fault_irq must not bind ctx->irq_n on its own");
+
+	alp_i2c_close(bus);
+}
+
 /* IRQ_N is open drain, active low (7.3.12 Figure 7-10 p.36,
  * Table 7-13 p.37): a LOW pin is a fault. */
 ZTEST(alp_chips, test_tas2563_fault_asserted_reads_active_low)
