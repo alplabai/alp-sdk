@@ -416,24 +416,22 @@ int main(void)
 
 #if defined(CONFIG_VIDEO_IMX335)
 	/*
-	 * Alp Lab AB (issue #2327, bench runs 329-331): the first frame captured
-	 * right after STANDBY release has been bad every time it was checked --
-	 * darkened lower rows in run 329, and in run 331 (the product-code
-	 * confirmation run, patch 0004 only, no diag code), BOTH of its two
-	 * loads discarded a bad first frame too: near-black rows 466-583 in one
-	 * load, all-zero rows 759-778 in the other -- while the SECOND capture
-	 * was clean in every run (run 331: 0 IPI/CRC error lines, correct
-	 * 1296x972 stride, 0 near-black rows, clean close). This bench-justifies
-	 * discarding the first frame; the root cause (a plausible guess is
+	 * Alp Lab AB (issue #2327, bench runs 329-331): the first post-start
+	 * frame was bad in 3 of the 4 first frames checked -- run 329 (darkened
+	 * lower rows) and both of run 331's loads (near-black rows 466-583;
+	 * all-zero rows 759-778); run 330's own first frame was CLEAN. The kept
+	 * SECOND frame was clean every time (run 331: 0 IPI/CRC error lines,
+	 * correct 1296x972 stride, 0 near-black rows, clean close). Discard the
+	 * first frame anyway rather than risk reporting a bad one as this
+	 * sensor's "first-light" result -- the root cause (a plausible guess is
 	 * exposure/AGC settling before the sensor's first full frame) is still
-	 * NOT confirmed. Discard it rather than risk reporting a bad frame as
-	 * this sensor's "first-light" result; the SECOND capture is what this
-	 * example reports below.
+	 * NOT confirmed, and a clean run 330 does not mean the first frame is
+	 * reliably good. The SECOND capture is what this example reports below.
 	 */
 	alp_camera_frame_t discard_frame;
 
 	printk("[camfl] IMX335: discarding the first post-start frame (bench runs 329-331 -- "
-	       "consistently bad) ...\n");
+	       "bad in 3 of 4 first frames checked) ...\n");
 	s = alp_camera_capture(cam, &discard_frame, CAM_CAPTURE_TIMEOUT_MS);
 	if (s == ALP_OK) {
 		alp_camera_release(cam, &discard_frame);

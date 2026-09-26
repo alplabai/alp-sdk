@@ -88,18 +88,22 @@ mode explicitly, and discards the first captured frame after stream start
    pin-11 pull-up rework (``docs/boards/e1m-evk.md``, originally fitted for
    OV5647), so whether this module self-enables on a STOCK carrier (no
    rework) is NOT established by this result; do not add IMX335 to any
-   "self-enables" list on the strength of it. The first captured frame
-   after STANDBY release has been bad every time it was checked: darkened
-   lower rows (run 329), and in run 331 (the product-code confirmation run
-   below) BOTH of its two loads discarded a bad first frame too --
-   near-black rows 466-583 in one load, all-zero rows 759-778 in the other
-   -- this example discards the first frame for this sensor; this is
-   bench-justified, though the root cause is still not confirmed.
+   "self-enables" list on the strength of it. The first post-start frame
+   was bad in 3 of the 4 first frames checked (run 329 -- darkened lower
+   rows -- and both of run 331's loads -- near-black rows 466-583;
+   all-zero rows 759-778; run 330's own first frame was clean); the kept
+   second frame was clean every time. This example discards the first
+   frame for this sensor rather than rely on a clean run happening again.
 
-   **Run 331 -- PRODUCT-CODE confirmation:** the committed tree
-   (``fbf9c8de3``) with ONLY patch 0004 applied on a pristine Zephyr v4.4.1
-   checkout (sha256 matches the committed patch file), no diag-only code.
-   The kept (second) frame was clean: 0 IPI/CRC error lines, only one
+   **Run 331 -- PRODUCT-CODE confirmation:** the ``fbf9c8de3`` tree with
+   ONLY patch 0004 applied on a pristine Zephyr v4.4.1 checkout, no
+   diag-only code. Run 331 applied patch 0004 at sha256
+   ``2459cd9511dac95fa682197302b1d33b201dbacd3d4df02c2097e53dbd5278c0``
+   (the ``fbf9c8de3`` file); the committed patch file was regenerated
+   afterward (sha256
+   ``47d7d5ac6dd2293b3ffb46562f031a543867a618b0da7dbe596c83ca609a400d``)
+   and differs from what run 331 tested ONLY in comments -- no register
+   writes, ordering, or logic changed. The kept (second) frame was clean: 0 IPI/CRC error lines, only one
    ``FRAME_SEQ`` event at start, correct stride, 0 near-black rows, nothing
    written past the buffer, a clean close, and ``CSI_PIXCLK_CTRL`` read
    back ``0x00020001`` (divisor 2 = 200 MHz, matching this shield's
