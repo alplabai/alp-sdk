@@ -49,16 +49,55 @@
  *
  *     ONE design point this landing had no in-tree precedent for: two
  *     TAS2563 MONO amps share a single physical I2S bus (one SCLK/WS/
- *     SDATA set). The in-tree audio-graph-card.yaml binding at this SHA
- *     does not document a multi-codec-per-port pattern, so this uses
- *     `simple-audio-card` instead, whose binding DOES document repeated
- *     `simple-audio-card,codec@N` sub-nodes under one dai-link (see
- *     Documentation/devicetree/bindings/sound/simple-card.yaml). Each
- *     TAS2563 is configured (ti,imon-slot-no) to consume its own TDM
- *     slot; shutdown-gpios/interrupts are wired on the LEFT (U27) node
- *     only -- board.yaml documents SD_N/IRQ_N as ONE shared net across
- *     both chips, not per-amp, so only one Linux consumer may claim the
- *     GPIO line.
+ *     SDATA set). A PREVIOUS revision of this file put both amps in as
+ *     sibling `simple-audio-card,codec@0`/`codec@1` nodes under the one
+ *     implicit dai-link and oopsed at card-bind time (snd_soc_dapm_new_dai,
+ *     NULL rtd->pcm) -- read out of the actual 6.1.141-cip43 sources at
+ *     this SHA: simple-card.c's `__simple_for_each_link()` identifies
+ *     "the codec" of a link by pointer-equality against the SINGLE node
+ *     `of_get_child_by_name(node, "codec")` finds (always the first
+ *     "codec"-named sibling, i.e. codec@0) -- every OTHER sibling that
+ *     isn't that exact node, including codec@1, is then walked as if it
+ *     were an extra CPU-side node (`simple_count_noml()` hardcodes
+ *     `cpus = 1; codecs = 1;` per link, and `simple_dai_link_of()` takes
+ *     whatever `np` it's given as "the cpu"). That misclassifies
+ *     tas2563_right as a bogus second "cpu" paired back onto
+ *     tas2563_left, producing a spurious dai_link whose "cpu" DAI belongs
+ *     to a codec component -- soc_new_pcm() never runs for it as a normal
+ *     stream on this misrouted pairing, so `rtd->pcm` stays NULL, and
+ *     `dapm_connect_dai_pair()`'s unconditional `rtd->pcm->streams` derefs
+ *     it. Documentation/devicetree/bindings/sound/simple-card.yaml's own
+ *     `patternProperties` confirm there is no schema-level way to
+ *     disambiguate a second `codec@N` sibling from a `cpu@N` one in this
+ *     driver: every documented "multi" example is N-cpu-into-1-codec
+ *     (TDM split done in ONE physical chip), never 1-cpu-into-N-codec.
+ *     Same shape, same driver, in audio-graph-card.c (also hardcodes
+ *     `codecs = 1` per link) -- there is no in-tree binding that lets
+ *     two independent codec DEVICES share one dai_link's single stream.
+ *
+ *     The correct in-tree mechanism for a second amp riding the same
+ *     physical I2S wires is `simple-audio-card,aux-devs`
+ *     (Documentation/devicetree/bindings/sound/simple-card.yaml's
+ *     `aux-devs` property; parsed by simple-card.c's
+ *     `snd_soc_of_parse_aux_devs()`): the card adds the aux component's
+ *     DAI/DAPM/controls without giving it a dai_link of its own, so
+ *     there's no cpu/codec pair for the ambiguous-sibling bug to
+ *     misclassify. tas2563_left remains the ONE real codec of the ONE
+ *     real dai_link (cpu=rcar_sound); tas2563_right is listed in
+ *     `aux-devs` instead of as a second `codec@N` sibling. Each TAS2563
+ *     is still configured (ti,imon-slot-no) to consume its own TDM slot
+ *     over I2C; shutdown-gpios/interrupts are wired on the LEFT (U27)
+ *     node only -- board.yaml documents SD_N/IRQ_N as ONE shared net
+ *     across both chips, not per-amp, so only one Linux consumer may
+ *     claim the GPIO line.
+ *
+ *     STILL OPEN for the bench: tas2563_right's own "ASI1"/DAC DAPM path
+ *     is not wired into any `simple-audio-card,routing` entry here, since
+ *     it isn't part of a dai_link and so gets no automatic CPU<->codec
+ *     DAPM connection -- the component driver's `idle_bias_on` may be
+ *     enough to keep it biased and passing audio off the shared physical
+ *     wire regardless, but that wants confirming on real hardware, not
+ *     asserted here.
  *
  *     STILL OPEN, not resolved by this landing: I2C-address ownership.
  *     Landing the kernel `ti,tas2563` codec nodes below means the kernel
@@ -197,29 +236,24 @@
 
 	/* TAS2563 stereo pair (U27 left / U28 right), one shared I2S0 bus.
 	 * simple-audio-card, not audio-graph-card -- see this file's header
-	 * comment for why. */
+	 * comment for why. tas2563_left is the ONE real codec of the ONE
+	 * real dai_link; tas2563_right rides the same physical wires as an
+	 * aux-dev, not a second `codec@N` sibling -- see the header comment
+	 * for the oops that shape caused. */
 	sound_card: sound {
 		compatible = "simple-audio-card";
 		simple-audio-card,name = "e1m-x-evk-tas2563";
 		simple-audio-card,format = "i2s";
 		simple-audio-card,bitclock-master = <&sound_cpu_dai>;
 		simple-audio-card,frame-master = <&sound_cpu_dai>;
-
-		#address-cells = <1>;
-		#size-cells = <0>;
+		simple-audio-card,aux-devs = <&tas2563_right>;
 
 		sound_cpu_dai: simple-audio-card,cpu {
 			sound-dai = <&rcar_sound 0>;
 		};
 
-		simple-audio-card,codec@0 {
-			reg = <0>;
+		simple-audio-card,codec {
 			sound-dai = <&tas2563_left>;
-		};
-
-		simple-audio-card,codec@1 {
-			reg = <1>;
-			sound-dai = <&tas2563_right>;
 		};
 	};
 };
