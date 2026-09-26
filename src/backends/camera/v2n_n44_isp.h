@@ -70,6 +70,10 @@ typedef struct {
 typedef struct {
 	const struct device *dev;
 	struct video_format  fmt;
+	/** Frame interval camera_apply_fps() actually settled on at open()
+	 *  (#2278); {0, 0} if fps was left at the device's own default.
+	 *  Not read back by any getter yet -- see issue #2279. */
+	struct video_frmival frmival;
 	struct video_buffer *vbufs[CONFIG_ALP_SDK_CAMERA_V2N_N44_ISP_VBUF_COUNT];
 	uint8_t              vbuf_count;
 	bool                 streaming;

@@ -935,6 +935,44 @@ static int csi2_dw_get_frmival(const struct device *dev, struct video_frmival *f
 	return video_get_frmival(config->sensor[data->current_sensor], frmival);
 }
 
+/*
+ * #2278: same forwarding shape as csi2_dw_get_frmival() above -- set/enum
+ * mirror get exactly, including the "no sensor selected" guard. Alp Lab AB.
+ */
+static int csi2_dw_set_frmival(const struct device *dev, struct video_frmival *frmival)
+{
+	const struct csi2_dw_config *config = dev->config;
+	struct csi2_dw_data *data = dev->data;
+
+	if (!frmival) {
+		return -EINVAL;
+	}
+
+	if (!config->sensor[data->current_sensor]) {
+		LOG_ERR("Invalid sensor selected!");
+		return -ENODEV;
+	}
+
+	return video_set_frmival(config->sensor[data->current_sensor], frmival);
+}
+
+static int csi2_dw_enum_frmival(const struct device *dev, struct video_frmival_enum *fie)
+{
+	const struct csi2_dw_config *config = dev->config;
+	struct csi2_dw_data *data = dev->data;
+
+	if (!fie) {
+		return -EINVAL;
+	}
+
+	if (!config->sensor[data->current_sensor]) {
+		LOG_ERR("Invalid sensor selected!");
+		return -ENODEV;
+	}
+
+	return video_enum_frmival(config->sensor[data->current_sensor], fie);
+}
+
 /* v4.4 video-API shim (Alp Lab AB): dropped the `enum video_endpoint_id ep`
  * param + its validation; the caps forwarder loses its `ep` arg.
  */
@@ -974,6 +1012,8 @@ static DEVICE_API(video, csi2_dw_driver_api) = {
 	.set_format = csi2_dw_set_format,
 	.get_format = csi2_dw_get_format,
 	.get_frmival = csi2_dw_get_frmival,
+	.set_frmival = csi2_dw_set_frmival,
+	.enum_frmival = csi2_dw_enum_frmival,
 	.set_stream = csi2_dw_set_stream,
 	.get_caps = csi2_dw_get_caps,
 };

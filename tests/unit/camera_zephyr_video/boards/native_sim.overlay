@@ -1,0 +1,40 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * native_sim ships no built-in camera device, so this overlay
+ * instantiates three: the upstream zephyr,video-sw-generator (a real
+ * frame-interval-capable video device, upstream's own test pattern
+ * generator -- see zephyr/drivers/video/video_sw_generator.c) aliased
+ * alp-camera0, this test's own alp,test-video-no-frmival fake
+ * (../dts/bindings/alp,test-video-no-frmival.yaml,
+ * ../src/test_video_no_frmival.c) aliased alp-camera1, and this test's
+ * alp,test-video-frmival-err fake (../dts/bindings/
+ * alp,test-video-frmival-err.yaml, ../src/test_video_frmival_err.c),
+ * NOT aliased -- the test source reaches it directly via
+ * DT_NODELABEL(test_camera_err) for a direct camera_apply_fps() call,
+ * never through alp_camera_open().
+ * src/backends/camera/zephyr_video.c resolves camera_id 0/1 via
+ * DT_ALIAS(alp_camera0)/DT_ALIAS(alp_camera1) (#2278).
+ */
+/ {
+	aliases {
+		alp-camera0 = &video_sw_generator;
+		alp-camera1 = &test_camera1;
+	};
+
+	video_sw_generator: video-sw-generator {
+		compatible = "zephyr,video-sw-generator";
+		status = "okay";
+	};
+
+	test_camera1: test-camera1 {
+		compatible = "alp,test-video-no-frmival";
+		status = "okay";
+	};
+
+	test_camera_err: test-camera-err {
+		compatible = "alp,test-video-frmival-err";
+		status = "okay";
+	};
+};

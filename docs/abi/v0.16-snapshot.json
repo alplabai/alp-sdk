@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-25",
+  "generated": "2026-09-26",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -1619,8 +1619,8 @@
       },
       "macros": {
         "ALP_CAMERA_CONFIG_DEFAULT": {
-          "hash": "f28ff4150c031b0a",
-          "value": "(id) ((alp_camera_config_t){ .camera_id = (id), .width = 0u, .height = 0u, .fps = 30u, .format = ALP_PIXFMT_RGB565 })"
+          "hash": "076a556a65bada82",
+          "value": "(id) ((alp_camera_config_t){ .camera_id = (id), .width = 0u, .height = 0u, .fps = 0u, .format = ALP_PIXFMT_RGB565 })"
         }
       },
       "typedefs": {

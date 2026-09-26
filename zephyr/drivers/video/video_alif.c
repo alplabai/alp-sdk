@@ -949,6 +949,32 @@ static int alif_cam_get_frmival(const struct device *dev, struct video_frmival *
 	return video_get_frmival(config->endpoint_dev, frmival);
 }
 
+/*
+ * #2278: same forwarding shape as alif_cam_get_frmival() above -- set/enum
+ * mirror get exactly. Alp Lab AB.
+ */
+static int alif_cam_set_frmival(const struct device *dev, struct video_frmival *frmival)
+{
+	const struct video_cam_config *config = dev->config;
+
+	if (!frmival) {
+		return -EINVAL;
+	}
+
+	return video_set_frmival(config->endpoint_dev, frmival);
+}
+
+static int alif_cam_enum_frmival(const struct device *dev, struct video_frmival_enum *fie)
+{
+	const struct video_cam_config *config = dev->config;
+
+	if (!fie) {
+		return -EINVAL;
+	}
+
+	return video_enum_frmival(config->endpoint_dev, fie);
+}
+
 static int alif_cam_stream_start(const struct device *dev)
 {
 	const struct video_cam_config *config = dev->config;
@@ -1383,6 +1409,8 @@ static DEVICE_API(video, cam_driver_api) = {
 	.set_format = alif_cam_set_fmt,
 	.get_format = alif_cam_get_fmt,
 	.get_frmival = alif_cam_get_frmival,
+	.set_frmival = alif_cam_set_frmival,
+	.enum_frmival = alif_cam_enum_frmival,
 	.set_stream = alif_cam_set_stream,
 	.flush = alif_cam_flush,
 	.enqueue = alif_cam_enqueue,

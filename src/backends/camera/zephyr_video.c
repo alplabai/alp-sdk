@@ -43,6 +43,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/video.h>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
 
 #include <alp/backend.h>
@@ -50,7 +51,10 @@
 #include <alp/cap_instance.h>
 #include <alp/peripheral.h>
 
+LOG_MODULE_REGISTER(alp_camera_zephyr_video, CONFIG_LOG_DEFAULT_LEVEL);
+
 #include "alp_errno.h"
+#include "camera_frmival.h"
 #include "camera_ops.h"
 #include "alp_slot_claim.h"
 
@@ -77,6 +81,10 @@ static const struct device *const _devs[] = {
 typedef struct {
 	const struct device *dev;
 	struct video_format  fmt;
+	/** Frame interval camera_apply_fps() actually settled on at open()
+	 *  (#2278); {0, 0} if fps was left at the device's own default.
+	 *  Not read back by any getter yet -- see issue #2279. */
+	struct video_frmival frmival;
 	struct video_buffer *vbufs[CONFIG_ALP_SDK_CAMERA_ZEPHYR_VIDEO_VBUF_COUNT];
 	uint8_t              vbuf_count;
 	bool                 streaming;
@@ -265,6 +273,21 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
 		 * reads the endpoint named by fmt.type, so set it first. */
 		st->fmt.type = VIDEO_BUF_TYPE_OUTPUT;
 		(void)video_get_format(dev, &st->fmt);
+	}
+
+	/* fps AFTER format, never before: ov5647_set_fmt() re-derives its
+	 * stored frame-interval request from the just-negotiated mode
+	 * (zephyr/drivers/video/ov5647.c), so a frmival set ahead of
+	 * set_format would be silently overwritten (#2278).  No backend
+	 * default here -- cfg->fps == 0 leaves this device at whatever
+	 * rate the sensor's default mode already runs. */
+	alp_status_t fps_status = camera_apply_fps(dev, cfg->camera_id, cfg->fps, 0u, &st->frmival);
+	if (fps_status != ALP_OK) {
+		/* Nothing allocated yet (vbufs come after this) -- releasing
+		 * the state slot is the only cleanup an open failure this
+		 * early needs (#246). */
+		_free_state(st);
+		return fps_status;
 	}
 
 	/* Decide buffer count: clamp the configured pool to the
