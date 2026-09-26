@@ -1,6 +1,6 @@
 # Raspberry-Pi-style CSI-2 camera shields
 
-Three sensors ship here: OV5647 and OV9281 are fully bench-verified; IMX296
+Four sensors ship here: OV5647 and OV9281 are fully bench-verified; IMX296
 is Stage A + Stage B bench-verified -- I2C identity, CSI-2 streaming, a
 full 1456x1088 RAW10 frame (Stage A) and a 1280x960 ROI crop (Stage B,
 runs 294/295), the ISP-Pico data path (Stage B, run 297), auto-exposure
@@ -14,7 +14,11 @@ driver's buffer-starvation-pause behaviour (now an ISP-driven re-arm
 instead of a CPI-only pause that used to cycle the CSI-2 endpoint/sensor,
 fixed after a mid-frame-corruption bug found in runs 304-310); this
 applies to OV5647 and OV9281 too, but is bench-verified on IMX296 only --
-re-bench on OV5647/OV9281 is pending.
+re-bench on OV5647/OV9281 is pending. IMX335 (issue #2327) is
+bench-verified for raw capture ONLY -- 6/6 consecutive clean 1296x972 RAW10
+frames (bench runs 316-331), 0 CSI/IPI errors; frame rate, ISP/AE/colour,
+and the sensor's full-resolution mode are all UNVERIFIED; see the driver
+section below.
 
 ## Supported camera modules
 
@@ -23,6 +27,7 @@ re-bench on OV5647/OV9281 is pending.
 | InnoMaker CAM-OV9281 | OV9281 (1 Mpx global-shutter mono) | `innomaker_cam_ov9281` | MIPI CSI-2 D-PHY, 2 lanes | 640x400 GREY8 @100 fps; 1280x720 GREY8 @50 fps; 1280x800 GREY8 @~100 fps | **Bench-verified** on an E1M-AEN803 on the E1M-EVK (J5), 2026-09-21: all three modes stream live frames, each at its configured rate (measured 60-frame bursts: 640x400 ~100 fps, 1280x720 ~50 fps, 1280x800 ~100 fps); the sensor test pattern is verified in all three modes. CPI starvation-pause behaviour changed AGAIN by issue #2287 Stage B after this bench (re-arm responsibility moved to the ISP's own bottom half, after a mid-frame-corruption bug found in runs 304-310 -- see the IMX296 row above and the driver section below) -- re-bench on this sensor pending. |
 | RPi Camera Module 1 | OV5647 (5 Mpx raw Bayer) | `raspberry_pi_camera_module_1` | MIPI CSI-2 D-PHY, 2 lanes | up to 2592x1944 SBGGR8/SBGGR10P; 640x480 is a full-array subsampled+binned mode at 15 fps by default, not a crop (default format before any `set_format()` is now 640x480 SBGGR10P, not 2592x1944) | **Bench-verified (run 52, RAW10 640x480)** on an E1M-AEN803 on the E1M-EVK (J5), 2026-09-22: `PHY_FATAL` 7712 -> 0, `capture ALP_OK`, 60 frames at 15.96 fps (see the driver section below). Needed the J5 pin-11 pull-up rework -- [`docs/boards/e1m-evk.md`](boards/e1m-evk.md) -- to answer on I2C at all, and a PLL + MIPI-TX pad-drive divergence in the driver the earlier BLOCKED finding misdiagnosed as a module hardware fault. **Run 61 (2026-09-22, current)** replaced runs 56/58/60's Alif-derived 640x480/common-init mix with register values taken as hardware facts from the RPi/OmniVision reference driver (raspberrypi/linux branch rpi-6.6.y, `drivers/media/i2c/ov5647.c`): column fixed-pattern noise fell from 6-8 LSB (3.7-5.9% of signal) with the runs 56/58/60 mix to 1.0-1.5 LSB (~1.1% of signal) with the reference set, in the same dark lab at the same 0.51 s x15.5 gain exposure -- the visible vertical stripes runs 56/58/60 left in are gone; which specific register difference caused that is NOT ESTABLISHED (see the driver section). **Run 62 bench-verified the COMMITTED driver itself** (77/77 registers matched, zero CSI errors) and the maintainer confirmed a host-demosaiced render of the captured frame is the correct image (BGGR, unmirrored). **Run 62 also caught a pre-merge regression**, introduced earlier in this same unreleased PR chain by the run-61 PLL retarget and fixed before merge (never shipped): booting into the full-resolution crop had made the driver's own default 15 fps unreachable at boot, silently settling on 10 fps for every later 640x480 open too; `ov5647_init()` now boots straight into 640x480, where 15 fps is reachable. **Run 63 re-verified the committed fix** (VTS `0x0833`, `fps_x100=1501`, 77/0 register mismatches, column FPN unchanged) and its review, by mutation-testing the fix-up, found three further real behaviour bugs in this same PR (all fixed, all pre-merge, none shipped): the frame rate could still stick at a prior mode's clamped value after a LATER format change (distinct from the boot-time issue above); `ov5647_set_mode_regs()`'s whole-byte writes to `0x3820`/`0x3821` silently undid `VIDEO_CID_HFLIP`/`VIDEO_CID_VFLIP` on every format change; and the crop path's AEC band step reused the binned mode's line counts, capping banding-mode AEC at roughly 502 lines on a 1944-line crop (a calculation, not a bench measurement of actual under-exposure). **A round-4 review then found the fix for the first of those three had its own regression** (fixed, pre-merge, never shipped): the fix stored only the requested frame rate's denominator, silently turning a numerator-!=-1 request (e.g. the shape Zephyr's own `video frmival` shell command sends) into a different rate on the next format change; fixed by storing the whole requested `struct video_frmival`, written only after the rate is actually applied. The SAME round also replaced the crop path's byte-for-byte-copied mainline band-step values with values scaled to this driver's own (different) line time -- still BENCH-UNVERIFIED, not run on hardware -- and made `get_format()` report that `VIDEO_CID_HFLIP`/`VIDEO_CID_VFLIP` shift the Bayer colour order (no NEW register writes, but an API contract change: only the default (unflipped) SBGGR order is bench/maintainer-verified; the three flipped orders `get_format()` now reports are derived from the RPi/OmniVision reference's own flip-to-code mapping, not bench-checked on this module). **A round-5 review of that fix then found `set_format()` could not accept back what `get_format()` had just reported** (a `get_format()` -> `set_format()` round trip failed with `-ENOTSUP`, since `set_format()` still only matched the two base fourccs): fixed by mapping a flip-shifted request back to its base fourcc before validating, and reporting the flip-shifted fourcc back on success; also fixed the same round: `set_frmival()` could echo a request it never applied when no candidate rate was within reach, and the crop path's max-bands registers (`0x3a0d`/`0x3a0e`) were pinned to the 2592x1944 crop's own VTS for every crop size (see the driver section below for both). RAW10 only; RAW8 (SBGGR8) is unverified. CPI starvation-pause behaviour changed AGAIN by issue #2287 Stage B after this bench (re-arm responsibility moved to the ISP's own bottom half, after a mid-frame-corruption bug found in runs 304-310 -- see the IMX296 row above and the driver section below) -- re-bench on this sensor pending. |
 | INNO-MAKER CAM-IMX296RAW-TRIGGER | IMX296LQR-C (1.58 Mpx global-shutter colour) | `raspberry_pi_global_shutter_camera` | MIPI CSI-2 D-PHY, **1 lane** | 1456x1088 SRGGB10P full-frame (one fixed mode, 60.3 fps datasheet rate); 1280x960 SRGGB10P ROI crop (Stage B, same 60.3 fps, `VMAX` unchanged) | **Stage A + Stage B bench-verified** (issue #2287, E1M-AEN803 2026W36-0001, E1M-EVK, `csi_i2c` = I2C1 @ 0x49011000). Stage A: I2C identity (run 229 -- CCI 0x1A, undocumented `SENSOR_INFO` `0x3148`/`0x3149` reads `0x4A00`), CSI-2 streaming, a full 1456x1088 RAW10 frame through `<alp/camera.h>` (run 292, mean 61.19, 0.98 correlation against diag control run 293) -- both dim, ~1 code above black; a follow-up exposure/lighting pass is open. Stage B: the 1280x960 ROI crop (runs 294/295, 0.91 correlation against an offset crop of the full-frame capture), the ISP-Pico data path (run 297, `SRGGB10P` -> ISP-Pico -> YUV420, 0.83 correlation against the pre-ISP raw frame -- image quality/colour NOT verified, no IMX296 AWB/CCM table exists), auto-exposure through the ISP-Pico AE library (runs 309/310, converging correctly after the CPI-rearm fix below), and continuous MJPEG streaming via `examples/connectivity/camera-mjpeg-stream` (runs 312-314: 61 fps encode, 0 fail, up to 28.3 fps / 885 KB/s delivered to one client). See `changelog.d/2287.md` for the full bench history. Fast-trigger mode (below) is added but UNBENCHED. `SHS` < 14 in ROI mode (the datasheet's own tabulated frame-rate floor vs. this driver's fixed `VMAX`) is an open discrepancy -- see the driver section below. |
+| INNO-MAKER CAM-IMX335-5MP | IMX335 (5.0 Mpx colour, rolling shutter) | `innomaker_cam_imx335` | MIPI CSI-2 D-PHY, 2 lanes | 1296x972 SRGGB10P 2x2-binned (example default, requested explicitly -- driver boots at native 2592x1944) | **Bench-verified for raw capture ONLY** (issue #2327, bench runs 316-331, E1M-AEN803 2026W36-0001, E1M-EVK). 6/6 consecutive clean 1296x972 RAW10 raw captures (run 330): 0 CSI CRC errors, 0 IPI-fatal events, correct stride, no overrun. Driver: upstream Zephyr v4.4.1 `drivers/video/imx335.c` (`CONFIG_VIDEO_IMX335`), reused as-is, with one repo patch (`zephyr/patches/zephyr/0004-imx335-2lane-link-freq-and-binning.patch`) fixing three real driver defects -- see the driver section below. Frame rate/fps, ISP/AE/colour, and the sensor's full-resolution mode are all UNVERIFIED; do not claim otherwise. |
 E1M-AEN hw_rev r2 (2626-R2)'s camera-connector revision needs a P/N-crossing
 adapter regardless of which module is used: each differential pair's N and P
 pins are swapped -- 2↔3 (D0), 5↔6 (D1), 8↔9 (CLK); everything else —
@@ -31,8 +36,8 @@ RPi connector only. See the OV9281 driver section below and
 [`docs/boards/e1m-evk.md`](boards/e1m-evk.md)'s Camera section for the full
 adapter note.
 
-Three board-agnostic Zephyr shields under `zephyr/boards/shields/` carry
-Raspberry-Pi-style 15-pin MIPI CSI-2 camera modules. None of the three
+Four board-agnostic Zephyr shields under `zephyr/boards/shields/` carry
+Raspberry-Pi-style 15-pin MIPI CSI-2 camera modules. None of the four
 know about any specific carrier or SoM — each just wires its sensor's
 `fixed-clock` + endpoint onto the upstream RPi camera shield label contract
 (`chosen zephyr,camera`, `&csi_interface`, `&csi_ep_in`, `&csi_i2c`; see
@@ -45,6 +50,7 @@ connector shield (owned outside this set, e.g. the E1M-EVK's
 | `raspberry_pi_camera_module_1` | OV5647 (5 Mpx raw Bayer) | 25 MHz | 0x36 | 2 |
 | `innomaker_cam_ov9281` | OV9281 (1 Mpx global-shutter mono) | 24 MHz | 0x60 | 2 |
 | `raspberry_pi_global_shutter_camera` | IMX296LQR-C (1.58 Mpx global-shutter colour) | 54 MHz | 0x1A | 1 |
+| `innomaker_cam_imx335` | IMX335 (5.0 Mpx colour, rolling shutter) | 24 MHz | 0x1A | 2 |
 
 ## Build command form
 
@@ -668,6 +674,166 @@ system; both are allowlisted in
 `scripts/check_chip_manifest_parity.py`'s `KNOWN_MANIFEST_NO_DRIVER` for
 the same reason.
 
+## Driver: IMX335 (upstream `drivers/video/imx335.c`)
+
+Issue #2327: raw capture only (no ISP/AE/streaming). Unlike OV5647/OV9281/
+IMX296 above, this sensor is NOT vendored into alp-sdk -- it reuses
+upstream Zephyr v4.4.1's own `drivers/video/imx335.c` (`CONFIG_VIDEO_IMX335`,
+`compatible = "sony,imx335"`) directly, ADR 0017 Tier 1 (upstream-native),
+plus one repo patch on top. No `chips/imx335/` stub, no OS-glue split --
+`metadata/chips/imx335.yaml` is catalogue-only (`driver_status: none`),
+allowlisted in `scripts/check_chip_manifest_parity.py`'s
+`KNOWN_MANIFEST_NO_DRIVER`, the same shape as IMX296 above.
+
+**`zephyr/patches/zephyr/0004-imx335-2lane-link-freq-and-binning.patch`**
+(registered in `zephyr/patches.yml`, applied per-module by
+`scripts/bootstrap.sh` via `west patch apply`, and checked by
+`scripts/verify_west_patches.py`) fixes three real bugs in the upstream
+driver at this driver's 2-lane/10-bit/1188 Mbps-per-lane configuration, all
+bench-confirmed on E1M-AEN803 2026W36-0001 (bench runs 316-331):
+
+1. **No `VIDEO_CID_LINK_FREQ`.** The driver registers `VIDEO_CID_PIXEL_RATE`
+   only. `video_get_csi_link_freq()` (`video_common.c`) falls back to
+   approximating the D-PHY link frequency from `PIXEL_RATE` whenever a
+   sensor reports no `VIDEO_CID_LINK_FREQ` control; for this sensor's 396
+   MHz `PIXEL_RATE` (a v4l2 pixel-array-clock convention value, unrelated to
+   the per-lane D-PHY bit rate) that approximation lands the DW CSI-2 host
+   on 990 MHz (1980 Mbps/lane) instead of the sensor's real 594 MHz link
+   clock (link_freq = per-lane bit rate / 2) -- the same
+   `ERRSOTSYNCHS`/`PHY_FATAL` storm signature OV5647 hit before its own fix
+   (issue #2248). The patch registers `VIDEO_CID_LINK_FREQ` directly as a
+   READ_ONLY int-menu `{594000000}`, the same shape as `imx296.c`'s own
+   `link_freq` control. `PIXEL_RATE` itself is left UNTOUCHED -- 396 MHz is
+   the correct v4l2 pixel-array-clock value per `<video-controls.h>`'s own
+   convention; only `VIDEO_CID_LINK_FREQ` is what `video_get_csi_link_freq()`
+   reads once it's registered, so `PIXEL_RATE` needs no change.
+
+2. **No SYSMODE / MIPI output-timing registers.** The driver never writes
+   `SYSMODE` (`0x319e`) or the `0x3a18`-`0x3a28` MIPI output-timing block for
+   any lane/rate combination, leaving both at their power-on-reset value. At
+   1188 Mbps/lane this produced a payload-checksum/CRC error storm on the
+   CSI-2 receiver (bench run 318). Writing the values the mainline Linux
+   imx335 driver (`raspberrypi/linux`, branch `rpi-6.12.y`) programs for this
+   exact lane count and bit rate (`SYSMODE=1` plus nine `REG16` values --
+   register values carried as hardware facts, no GPL code copied) eliminated
+   it -- 0 CSI CRC errors bench-confirmed (runs 319-330), including 6/6
+   consecutive clean 1296x972 captures through the E1M SoM R2 pinout adapter
+   (run 330): **this VERIFIES 2-lane CSI-2 D-PHY lock at 1188 Mbps/lane on
+   E1M-AEN803 2026W36-0001 + this E1M-EVK.** An 891 Mbps/lane alternative
+   timing set also gave 0 CSI CRC errors on the link (run 320, a different
+   `IMX335_INCKSEL`/INCK selection) -- that run still had bug 3's buffer
+   overrun below, so no clean frame resulted at 891 Mbps, only a clean link
+   -- and is not carried in the product: this driver is hardcoded to its own
+   2-lane/10-bit mode, which this shield feeds at 24 MHz INCK -> the 1188
+   Mbps/lane path only.
+
+3. **2x2-binned mode overruns its own buffer.** `imx335_bin_2x2` leaves
+   `HNUM` at the full-resolution `0x0a20` (2592) and sets `Y_OUT_SIZE` to
+   `0x03d8` (984) -- the sensor then transmitted a 1308x984 frame into this
+   driver's own 1296x972 buffer, a 12-pixel/12-line overrun that corrupted
+   memory past the buffer. Bench-derived model (run 322, `HNUM` swept until
+   the transmitted width matched exactly): binned width = HNUM/2 + 12, so
+   `HNUM` must be `0x0a08` (2568) for a 1296-pixel row. `Y_OUT_SIZE`
+   corrected to the exact 972 lines (`0x03cc`, bench run 321). `OPB_SIZE_V`
+   (`0x304c`) cleared to 0, the mainline Linux imx335 driver's own
+   binned-mode value. `imx335_bin_none` gets a matching `HNUM` restore
+   (`0x0a20`). NOT included: correcting `imx335_bin_none`'s own `Y_OUT_SIZE`
+   (`0x07ac` = 1964) -- both upstream Zephyr's own `imx335_init_params`
+   (`Y_OUT_SIZE` `0x0798` = 1944) and the mainline Linux driver's
+   full-resolution mode use 1944, so `0x07ac` is the same overrun class as
+   bug 3 above for any full-resolution caller. Full-resolution mode is
+   UNBENCHED (only the 2x2-binned mode is exercised) -- tracked as issue
+   #2334.
+
+If bootstrapping against a Zephyr checkout that already has alp-sdk's
+0001-0003 patches applied, re-running the whole patch list fails
+re-applying 0001 (`west patch` is not idempotent against an already-patched
+tree) -- apply 0004 by hand (`git apply` from the Zephyr repo root) or
+start from a clean checkout.
+
+**Why this shield uses Camera mode, not Controller mode.** Controller mode
+requires stating this sensor's own line/frame length as fixed IPI-pixclk-cycle
+counts (`csi-hline`/`csi-vtotal`), derived from the sensor's line pacing -- a
+fact this driver's own registers never expose directly. Bench measurement
+(runs 329/330, VSYNC/HSYNC counters read back over the CSI-2 host) found
+the sensor's ACTUAL binned-mode line period is 29.63 us (~4H at HMAX 550)
+with 972 HSYNC pulses per frame, a measured fact this driver never surfaces
+as a register read or control, so a Controller-mode `csi-hline`/`csi-vtotal`
+pair could not be derived from it without hand-verifying against a bench
+capture on every future change. This shield uses Camera mode instead,
+which lets the DW CSI-2 host derive its own H/V timing from the D-PHY bit
+rate + an explicit pixel clock -- no fixed line/frame-length DT constants
+to re-derive.
+
+**Why `csi-pixclk-hz` (issue #2327, `snps,designware-csi.yaml`) is still
+needed under Camera mode:** the DW CSI-2 host's default Camera-mode pixel
+clock request (bandwidth-margined bare pixel rate) is 285.12 MHz for this
+2-lane sensor, and even the bare rate without the margin (237.6 MHz)
+already exceeds `alif_pixclk_set_rate()`'s ~200 MHz practical ceiling --
+unlike IMX296's single-lane case, where the margined rate still fits.
+`csi-pixclk-hz` (now effective in EITHER `ipi-mode`, originally
+Controller-only) lets this shield state 200 MHz -- the highest rate this
+clock actually reaches -- explicitly, bypassing both derived requests.
+Camera mode with an explicit `csi-pixclk-hz` also switches the driver's HSD
+derivation (`csi2_dw_validate_data()`'s CAM branch, `video_csi_dw.c`) to a
+lanes-aware formula (divides by `(pll_fin<<1)*num_lanes` instead of the
+legacy `(pll_fin<<1)` alone) -- the legacy, lanes-omitting formula is
+UNCHANGED for OV5647/OV9281 (both run Camera mode with no explicit pixclk
+and are bench-proven against it); changing it for them would need its own
+re-bench.
+
+**Buffer sizing (`examples/aen/aen-camera-firstlight/Kconfig`):** the
+2x2-binned frame this shield's example requests is 1296 x 972 x 2 =
+2,519,424 bytes unpacked -- larger than the default 2 MiB video-buffer
+pool, so the Kconfig overlay drops `ALP_SDK_CAMERA_ZEPHYR_VIDEO_VBUF_COUNT`/
+`VIDEO_BUFFER_POOL_NUM_MAX` to 1 and grows `VIDEO_BUFFER_POOL_HEAP_SIZE` to
+2.75 MiB for `VIDEO_IMX335`, the same one-buffer-plus-margin shape IMX296
+uses for its own larger-than-default frame above.
+
+**Bench-verified on E1M-AEN803 2026W36-0001 (bench runs 316-331):** with
+the patch above applied and this shield's Camera-mode + explicit
+`csi-pixclk-hz` configuration, 0 CSI CRC errors, 0 IPI-fatal events,
+correct 1296x972 stride, no overrun, and 6/6 consecutive clean raw captures
+(run 330). **This VERIFIES 2-lane CSI-2 D-PHY lock at 1188 Mbps/lane on
+E1M-AEN803 2026W36-0001 + this E1M-EVK through the SoM R2 pinout adapter**
+(runs 319-330). D-PHY Stop-state check passed normally (`STOPSTATE
+0x00010003` before stream start) once the patch's MIPI-timing registers
+were written -- no `no-lp11-clock-lane-park`-style skip property was
+needed. The module answered at CCI `0x1A` (the only device on the J5
+camera bus) with `CAM_EN` (J5 pin 11) untouched -- that bench unit's
+E1M-EVK carries the J5 pin-11 pull-up rework
+([`docs/boards/e1m-evk.md`](boards/e1m-evk.md), originally fitted for
+OV5647), so **whether this module self-enables on a stock carrier (no
+rework) is NOT established** by this result; IMX335 is not added to that
+doc's self-enables list on the strength of it. The first post-start frame
+was bad in 3 of the 4 first frames checked (run 329 -- darkened lower
+rows -- and both of run 331's loads -- near-black rows 466-583; all-zero
+rows 759-778; run 330's own first frame was clean); the kept second frame
+was clean every time. `aen-camera-firstlight` discards the first frame for
+this sensor rather than rely on a clean run happening again.
+
+**Run 331 -- PRODUCT-CODE confirmation:** the `fbf9c8de3` tree with ONLY
+patch 0004 applied on a pristine Zephyr v4.4.1 checkout, no diag-only code.
+Run 331 applied patch 0004 at sha256
+`2459cd9511dac95fa682197302b1d33b201dbacd3d4df02c2097e53dbd5278c0` (the
+`fbf9c8de3` file); the committed patch file was regenerated afterward
+(sha256 `47d7d5ac6dd2293b3ffb46562f031a543867a618b0da7dbe596c83ca609a400d`)
+and differs from what run 331 tested ONLY in comments -- no register
+writes, ordering, or logic changed. The kept (second)
+frame was clean: 0 IPI/CRC error lines, only one `FRAME_SEQ` event at
+start, correct stride, 0 near-black rows, nothing written past the buffer,
+a clean close, and `CSI_PIXCLK_CTRL` read back `0x00020001` (divisor 2 =
+200 MHz, matching this shield's `csi-pixclk-hz`). `csi-halt-en` was left at
+its default -- no IPI-halt/"nohalt" DT override was needed.
+
+**NOT bench-verified -- do not claim beyond the above:** frame rate/fps
+(not measured); the module self-enabling on a stock, non-reworked carrier
+(the J5 pin-11 rework is a module-enable concern, unrelated to D-PHY lock
+-- see the self-enable note above); D-PHY lock on any unit/carrier other
+than E1M-AEN803 2026W36-0001 on this specific E1M-EVK; ISP/AE/colour (no
+ISP path exists for this sensor); and the sensor's full-resolution
+(non-binned) mode.
+
 ## Build coverage
 
 `tests/zephyr/video_sensors` runs a real ztest for OV9281 (`ov9281_test.c`)
@@ -722,17 +888,47 @@ section above); fast-trigger mode itself is not -- this test suite is the
 only executable proof its register-level logic behaves as written; it does
 not substitute for a real trigger-mode capture.
 
+**No emulator+ztest was added for IMX335 (issue #2327).** OV5647/OV9281/
+IMX296 above each get one because alp-sdk carries their WHOLE driver
+(Tier 1 / Tier 1.5 / ADR-0017-ADJACENT) with no upstream test coverage to
+lean on. IMX335's driver itself is ALSO ADR 0017 Tier 1 (upstream-native --
+upstream Zephyr's own driver, patched rather than authored), and the
+patch's register writes are all bench-verified directly against real
+silicon (bench runs 316-331: 0 CSI CRC errors, 0 IPI-fatal events, 6/6
+clean captures) -- a stronger form of proof for THIS specific silicon than
+an emulator ztest would add, since an emulator cannot reproduce the
+CRC/timing failure modes the bench found in the first place. Writing a
+from-scratch emulator to re-prove upstream's own identity/init/
+register-write logic (the part this patch does NOT touch) would still
+duplicate Zephyr's own test coverage of a driver alp-sdk does not own; none
+of the other pure-upstream-driver patches in `zephyr/patches.yml` (the
+mcuboot/`zephyr` clock-control, IPM or Kconfig patches) carry an alp-sdk
+ztest of their own either, for the same reason. **A `csi-pixclk-hz` /
+Camera-mode-HSD unit test was considered and NOT added for the same reason
+as `csi-hline`/`csi-vtotal` (issue #2287 Stage B) before it:
+`video_csi_dw.c` has zero test coverage in this tree today** (it drives
+Alif-specific hardware registers with no `native_sim` emulation target)
+**-- there is no existing harness to extend, and this logic's real proof is
+the bench result above, not a unit test of the arithmetic in isolation.**
+The build-time proof this change gets on every CI run: the AEN803
+`aen-camera-firstlight` IMX335 scenario (`testcase.yaml`) compiles with the
+patch applied and the shield's Camera-mode `csi-pixclk-hz` DT property
+present in the generated devicetree.
+
 ## First-light example
 
 `examples/aen/aen-camera-firstlight` opens each shield through the portable
 `<alp/camera.h>` API and captures one frame with a timeout, on the
 E1M-EVK's `e1m_evk_rpi_csi` carrier connector shield. See that example's
 README for what each printed line means and the expected result per module
--- the OV9281, OV5647 and IMX296 (free-run) paths are all bench-verified
-(see their driver sections above); the IMX296 `#elif`
-(`raspberry_pi_global_shutter_camera` shield) captures a real frame off
-real silicon in this build mode -- see the IMX296 driver section above for
-the bench numbers and what remains unverified (ISP-Pico, AE, fast-trigger).
+-- the OV9281, OV5647, IMX296 (free-run) and IMX335 paths are all
+bench-verified for raw capture (see their driver sections above); the
+IMX296 `#elif` (`raspberry_pi_global_shutter_camera` shield) and the IMX335
+`#elif` (`innomaker_cam_imx335` shield, first frame discarded -- see that
+driver section above) both capture a real frame off real silicon in this
+build mode -- see each driver section above for the bench numbers and what
+remains unverified (IMX296: ISP-Pico, AE, fast-trigger; IMX335: frame
+rate/fps, ISP/AE/colour, full-resolution mode).
 
 The example also has an opt-in `-DAEN_CAMERA_TRIGGER=ON` CMake build mode
 (issue #2287): arms `IMX296_CID_TRIGGER_MODE`, then pulses a GPIO

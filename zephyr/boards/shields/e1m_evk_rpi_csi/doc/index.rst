@@ -40,13 +40,15 @@ three MIPI CSI-2 differential pairs (clock lane and both data lanes)
 relative to the EVK. A camera plugged straight into J5 answers its I2C
 chip-ID probe but never synchronizes (D-PHY leaves Stop-state, no frame
 arrives). Build a short adapter that crosses camera-connector pins 2<->3,
-5<->6 and 8<->9 (every other pin stays straight); match lane lengths given
-the 800 Mbit/s/lane rate. See ``docs/camera-shields.md``.
+5<->6 and 8<->9 (every other pin stays straight); match lane lengths --
+bench-confirmed on E1M-AEN803 2026W36-0001: IMX296 (1 data lane) and IMX335
+(2 data lanes) both lock and stream at 1188 Mbit/s/lane through this
+adapter. See ``docs/camera-shields.md``.
 
 Compatible sensor shields
 *************************
 
-Three in-tree sensor shields carry this connector's label contract (see
+Four in-tree sensor shields carry this connector's label contract (see
 ``docs/camera-shields.md`` for their modes, controls and bench status):
 
 - ``innomaker_cam_ov9281`` -- InnoMaker CAM-OV9281 (OV9281, 2 data lanes)
@@ -54,6 +56,7 @@ Three in-tree sensor shields carry this connector's label contract (see
   CAM-OV5647 (OV5647, 2 data lanes)
 - ``raspberry_pi_global_shutter_camera`` -- INNO-MAKER CAM-IMX296RAW-TRIGGER
   (IMX296, 1 data lane)
+- ``innomaker_cam_imx335`` -- InnoMaker CAM-IMX335-5MP (IMX335, 2 data lanes)
 
 Programming
 ***********

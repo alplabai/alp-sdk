@@ -701,11 +701,15 @@ zephyr_library_sources_ifdef(CONFIG_VIDEO_ISP_VSI
 # (no Alif/EVK specifics), consumed via a camera shield
 # (zephyr/boards/shields/raspberry_pi_camera_module_1,
 # zephyr/boards/shields/innomaker_cam_ov9281,
-# zephyr/boards/shields/raspberry_pi_global_shutter_camera) on top of
-# whatever CSI-2 host is on the board (e.g. the Alif video_csi_dw.c bridge
-# above).  All three use the upstream video_common.c CCI helpers
-# (video_read_cci_reg / video_write_cci_multiregs*), so the private
-# drivers/video include dir is needed here too.
+# zephyr/boards/shields/raspberry_pi_global_shutter_camera,
+# zephyr/boards/shields/innomaker_cam_imx335) on top of whatever CSI-2 host
+# is on the board (e.g. the Alif video_csi_dw.c bridge above).  The first
+# three drivers below are alp-sdk-carried (NOT upstream) and use the
+# upstream video_common.c CCI helpers (video_read_cci_reg /
+# video_write_cci_multiregs*), so the private drivers/video include dir is
+# needed here too. innomaker_cam_imx335's driver (CONFIG_VIDEO_IMX335) is
+# upstream Zephyr's own drivers/video/imx335.c -- no source/include wiring
+# needed here at all, see docs/camera-shields.md's IMX335 driver section.
 #
 # OV5647 (compatible "ovti,ov5647"): ADR 0017 Tier-1 (upstream-PENDING
 # backport of zephyrproject-rtos/zephyr#119301, INTERIM) -- see

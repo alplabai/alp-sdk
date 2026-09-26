@@ -36,6 +36,12 @@
  *     -DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1" # OV5647, RAW10
  *   ... -DSHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"         # OV9281, GREY8
  *   ... -DSHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera" # IMX296, RAW10
+ *   ... -DSHIELD="e1m_evk_rpi_csi innomaker_cam_imx335"                # IMX335, RAW10 (issue
+ *                                                                      # #2327, bench-verified
+ *                                                                      # raw capture only, see
+ *                                                                      # zephyr/boards/shields/
+ *                                                                      # innomaker_cam_imx335/
+ *                                                                      # doc/index.rst)
  *
  * IMX296 also has a second, opt-in mode (issue #2287 Stage B): its 1280x960
  * centred ROI crop, alongside the default full 1456x1088 frame above -- add
@@ -314,6 +320,21 @@ static bool trigger_capture_loop(alp_camera_t *cam)
 #define CAM_HEIGHT          1088
 #define CAM_BYTES_PER_PIXEL 2
 #define CAM_SHIELD_NAME     "raspberry_pi_global_shutter_camera (IMX296, RAW10 1456x1088)"
+#elif defined(CONFIG_VIDEO_IMX335)
+/* INNO-MAKER CAM-IMX335-5MP (Sony IMX335, issue #2327), Stage A: request the sensor's 2x2-binned
+ * mode EXPLICITLY -- the upstream driver (drivers/video/imx335.c) boots at its native
+ * 2592x1944, and alp_camera_open() below sets cfg.width/height from these constants, which
+ * zephyr_video.c forwards as a video_set_format() call the driver honours before streaming
+ * starts. RAW10 (SRGGB10P Bayer), 2 CSI-2 lanes. Bench-verified (runs 316-330, E1M-AEN803
+ * 2026W36-0001): 6/6 consecutive clean 1296x972 RAW10 raw captures, 0 CSI/IPI errors -- see
+ * metadata/chips/imx335.yaml and zephyr/boards/shields/innomaker_cam_imx335/doc/index.rst for
+ * the full bench history and what remains UNVERIFIED (frame rate/fps, ISP/AE/colour,
+ * full-resolution mode). */
+#define CAM_FORMAT          ALP_PIXFMT_RAW10
+#define CAM_WIDTH           1296
+#define CAM_HEIGHT          972
+#define CAM_BYTES_PER_PIXEL 2
+#define CAM_SHIELD_NAME     "innomaker_cam_imx335 (IMX335, 2x2-binned RAW10 1296x972)"
 #else
 #error "aen-camera-firstlight needs a camera shield stacked on e1m_evk_rpi_csi -- see README.md"
 #endif
@@ -392,6 +413,33 @@ int main(void)
 #else
 	/* --- 3. wait for one frame, with a timeout ----------------------- */
 	alp_camera_frame_t frame;
+
+#if defined(CONFIG_VIDEO_IMX335)
+	/*
+	 * Alp Lab AB (issue #2327, bench runs 329-331): the first post-start
+	 * frame was bad in 3 of the 4 first frames checked -- run 329 (darkened
+	 * lower rows) and both of run 331's loads (near-black rows 466-583;
+	 * all-zero rows 759-778); run 330's own first frame was CLEAN. The kept
+	 * SECOND frame was clean every time (run 331: 0 IPI/CRC error lines,
+	 * correct 1296x972 stride, 0 near-black rows, clean close). Discard the
+	 * first frame anyway rather than risk reporting a bad one as this
+	 * sensor's "first-light" result -- the root cause (a plausible guess is
+	 * exposure/AGC settling before the sensor's first full frame) is still
+	 * NOT confirmed, and a clean run 330 does not mean the first frame is
+	 * reliably good. The SECOND capture is what this example reports below.
+	 */
+	alp_camera_frame_t discard_frame;
+
+	printk("[camfl] IMX335: discarding the first post-start frame (bench runs 329-331 -- "
+	       "bad in 3 of 4 first frames checked) ...\n");
+	s = alp_camera_capture(cam, &discard_frame, CAM_CAPTURE_TIMEOUT_MS);
+	if (s == ALP_OK) {
+		alp_camera_release(cam, &discard_frame);
+	} else {
+		printk("[camfl] IMX335: discard capture -> %s\n", alp_status_name(s));
+	}
+#endif
+
 	printk("[camfl] alp_camera_capture: waiting up to %u ms for one frame ...\n",
 	       CAM_CAPTURE_TIMEOUT_MS);
 	s = alp_camera_capture(cam, &frame, CAM_CAPTURE_TIMEOUT_MS);
