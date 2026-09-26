@@ -543,6 +543,8 @@
           "prj.conf",
           "CMakeLists.txt",
           "src/main.c",
+          "src/cc3501e_bridge.c",
+          "src/cc3501e_bridge.h",
           "README.md"
         ],
         "generated": [

@@ -35,6 +35,13 @@ nothing here may silently drift from it. This gate fails when:
     dirs, same EFFECTIVE `os:` (resolved via alp_orchestrate.load_board_
     yaml, not re-derived here). `cores` duplicates what board.yaml
     already says; this is what keeps that duplication from drifting.
+  - a file git tracks in one of a record's `cores[].dir` app dirs is
+    missing from `files.user_owned` (issue #2241). `--emit scaffold`
+    copies exactly that list, so an omitted file silently vanishes from
+    every scaffold -- iot shipped without src/cc3501e_bridge.{c,h} while
+    its CMakeLists.txt still compiled the .c. A core dir's testcase.yaml
+    is exempt when `test.testcase_yaml` lists it (SDK CI wiring the
+    scaffold drops on purpose).
 
 Run locally:
 
@@ -46,6 +53,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -214,6 +222,52 @@ def _check_cores_match_board_yaml(rec: dict) -> list[str]:
     return problems
 
 
+def _tracked_files_under(rel_dir: str) -> list[str]:
+    """Repo-relative POSIX paths git tracks under `rel_dir`. Tracked, not
+    walked: a stray local file (.DS_Store, an editor swap file) must never
+    read as an undeclared template source."""
+    out = subprocess.run(
+        ["git", "-C", str(REPO), "ls-files", "--", rel_dir],
+        capture_output=True, text=True, encoding="utf-8", check=True)
+    return out.stdout.splitlines()
+
+
+def _check_core_files_declared(rec: dict) -> list[str]:
+    """Every tracked file in a record's core app dirs must be in
+    `files.user_owned` (issue #2241) -- `--emit scaffold` copies exactly
+    that list, so anything it omits is silently missing from the scaffold.
+    Exempt: a path `test.testcase_yaml` lists (CI wiring, never scaffolded).
+    A core whose `dir` is the example root is not walked: the root also
+    holds CI-only files (native_sim.conf, boards/ overlays) by design. No
+    record uses a root app dir today; one that does gets no #2241 coverage
+    from this check, so extend it before adding such a record."""
+    rid = rec.get("id", "<no id>")
+    example = rec["example"].rstrip("/")
+    declared = set(rec["files"]["user_owned"])
+    ci_only = set(rec["test"]["testcase_yaml"])
+
+    problems: list[str] = []
+    for core in rec.get("cores", []):
+        core_dir = (core.get("dir") or "").removeprefix("./").strip("/")
+        if core_dir in ("", "."):
+            continue
+        try:
+            tracked = _tracked_files_under(f"{example}/{core_dir}")
+        except (OSError, subprocess.CalledProcessError) as e:
+            problems.append(
+                f"{rid}: cannot list the files git tracks under "
+                f"{example}/{core_dir} ({e}) -- run this gate in a git checkout")
+            continue
+        for path in tracked:
+            rel = path.removeprefix(f"{example}/")
+            if path in ci_only or rel in declared:
+                continue
+            problems.append(
+                f"{rid}: {path} is in the {core['id']} core's app dir but "
+                f"not in files.user_owned -- `--emit scaffold` would drop it")
+    return problems
+
+
 def _check_ids_unique(doc: dict) -> list[str]:
     ids = [t["id"] for t in doc.get("templates", [])]
     dupes = sorted({i for i in ids if ids.count(i) > 1})
@@ -262,6 +316,7 @@ def main() -> int:
         for rec in doc.get("templates", []):
             problems += _check_record_drift(rec, real_libraries)
             problems += _check_cores_match_board_yaml(rec)
+            problems += _check_core_files_declared(rec)
         problems += _check_ids_unique(doc)
         problems += _check_archetypes_covered(doc)
 
