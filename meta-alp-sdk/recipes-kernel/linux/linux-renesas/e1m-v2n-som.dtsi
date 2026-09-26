@@ -458,16 +458,23 @@
  * on the `bluetooth` child node is the standard brcm,bcm43438-bt
  * binding: hci_uart's Broadcom vendor extension drives it through the
  * same low-then-high sequence as WL_REG_ON before the .hcd firmware
- * patch load. No baud-rate ramp: max-speed below is fixed, not
- * autobaud (brcm,requires-autobaud-mode is not set), so hci_uart runs
- * the link at a constant 115200 throughout -- bench-confirmed 2026-06.
+ * patch load. No baud-rate ramp and deliberately NO max-speed: with
+ * max-speed set, hci_bcm's bcm_open() copies it into hu->oper_speed and
+ * hci_serdev sends the vendor Update-Baud-Rate command (0xfc18) as the
+ * very first byte on the link. This module's ROM wedges on an 0xfc18
+ * received before any HCI_Reset -- that command and every later one,
+ * Reset included, time out (bench, E1M-V2M103, 2026-09-26, reproduced on
+ * the raw tty) -- and it ignores 0xfc18 even after a Reset, so no ramp is
+ * possible anyway. Without max-speed no 0xfc18 is ever sent and the link
+ * stays at the protocol's 115200 init speed, which answers HCI_Reset and
+ * Read_Local_Version. Autobaud (brcm,requires-autobaud-mode) is not set.
  * uart-has-rtscts matches the 4-wire P40-43 wiring (TXD/RXD/CTS/RTS).
  *
  * compatible is deliberately "brcm,bcm43438-bt", not the CYW555xx-family
  * "infineon,cyw55572-bt" hci_bcm.c also carries: that entry's ONLY
  * effect (cyw55572_device_data.max_autobaud_speed) is gated behind
  * bcm_of_probe()'s "brcm,requires-autobaud-mode" DT property, which
- * this node does not set (fixed-baud 115200, bench-proven, not
+ * this node does not set (fixed 115200 init speed, no max-speed, not
  * autobaud) -- so switching would change nothing there while silently
  * dropping bcm43438_device_data's drive_rts_on_open (RTS driven on
  * ->open(), used by hci_bcm.c's `else if` branch precisely when
@@ -494,7 +501,6 @@
 	bluetooth {
 		compatible = "brcm,bcm43438-bt";
 		shutdown-gpios = <&gd32_gpio 18 GPIO_ACTIVE_HIGH>;
-		max-speed = <115200>;
 	};
 };
 
