@@ -73,7 +73,7 @@ back to `locale.getpreferredencoding(False)`:
 tests assert that each call both decodes UTF-8 and asks the child for it:
 `tests/scripts/test_alp_model_adapters.py:163` ("assert seen["). The DEEPX test
 checks both `dxcom` calls, the `-v` probe and the compile:
-`tests/scripts/test_alp_model_adapters.py:538` ("probe_io").
+`tests/scripts/test_alp_model_adapters.py:592` ("probe_io").
 
 **`check_tan_docs_surface.py` asks `tan` for UTF-8 too.** That gate was not on
 the baseline, because it already decoded `tan`'s output with

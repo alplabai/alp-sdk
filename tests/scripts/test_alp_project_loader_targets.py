@@ -74,6 +74,25 @@ def test_resolve_targets_splits_a_named_system_config_by_requires_vendor_config(
     assert specs[0].vela_system_config is None
 
 
+def test_soc_targets_fails_closed_when_requires_vendor_config_key_is_omitted():
+    # #2312 item 4: a `system_config` named with NO
+    # `system_config_requires_vendor_config` key at all (a malformed spec --
+    # the schema requires this key whenever a `vela` block exists) must be
+    # treated exactly as `true`, landing in the vendor-gated field, never the
+    # built-in-safe one. The real check is `is not False`; a mutant that
+    # flips it to `is True` would instead route this omitted-key case into
+    # `vela_system_config` (wrong) and this assertion catches that.
+    from alp_project_loader import _soc_targets
+
+    soc = {"npus": [{"type": "ethos-u55", "mac_per_cycle": 256}],
+           "npu_toolchain": {"vela": {
+               "memory_mode": "Sram_Only",
+               "system_config": "Some_Unmarked_Config"}}}
+    specs = _soc_targets(soc, "test:soc")
+    assert specs[0].vela_vendor_system_config == "Some_Unmarked_Config"
+    assert specs[0].vela_system_config is None
+
+
 def test_resolve_targets_for_v2n101_yields_drpai_plus_cpu():
     # E1M-V2N101 -> renesas:rzv2n:n44 -> DRP-AI NPU + cpu
     specs = resolve_targets("E1M-V2N101", metadata_root=_META)

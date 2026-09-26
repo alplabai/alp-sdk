@@ -8,7 +8,7 @@ from alp_model.adapters import CompilerAdapter, Blob
 from alp_model.adapters.cpu import CpuAdapter
 from alp_model.adapters.drpai import DrpaiAdapter
 from alp_model.adapters.deepx import DeepxAdapter
-from alp_model.adapters.ethos_u import VelaAdapter, _parse_vela_summary
+from alp_model.adapters.ethos_u import VelaAdapter, _parse_vela_summary, _parse_vela_placement
 from alp_model.adapters.executorch import ExecutorchAdapter
 from alp_project_loader import TargetSpec
 
@@ -122,7 +122,7 @@ def test_vela_adapter_is_available_follows_path(monkeypatch):
 
 
 def _fake_run_writing_into_output_dir(payload: bytes = b"VELA-OUT",
-                                      stdout: str = "NPU operators = 0 (0.0%)\n",
+                                      stdout: str = "CPU operators = 0 (0.0%)\nNPU operators = 0 (0.0%)\n",
                                       seen: dict | None = None):
     """A fake `subprocess.run` that writes vela's `_vela.tflite` into whatever
     `--output-dir` the real command line names -- required since #2312's
@@ -317,7 +317,7 @@ def test_vela_real_compile_with_alif_profile_reports_a_real_sram_footprint(tmp_p
 
 
 def _fake_run_with_summary(summary_csv: str | None = None,
-                           stdout: str = "NPU operators = 0 (0.0%)\n",
+                           stdout: str = "CPU operators = 0 (0.0%)\nNPU operators = 0 (0.0%)\n",
                            seen: dict | None = None):
     """A fake `subprocess.run` writing vela's `_vela.tflite` AND (optionally)
     a `<stem>_summary_*.csv` into whatever `--output-dir` the real command
@@ -414,6 +414,29 @@ def test_vela_compile_refuses_a_zero_sram_footprint_when_npu_placed_ops(tmp_path
         VelaAdapter().compile(src, accel_config="ethos-u85-256", out_dir=tmp_path, target=_E8_TARGET)
 
 
+def test_parse_vela_placement_refuses_an_npu_line_with_no_matching_cpu_line():
+    # #2312 item 3: an "NPU operators = 0" line with no matching "CPU
+    # operators =" line is just as unreadable a shape as no placement lines
+    # at all -- reading the NPU line alone would ship that zero as a
+    # confirmed full CPU fallback on a guess.
+    assert _parse_vela_placement("NPU operators = 0 (0.0%)\n") is None
+
+
+def test_vela_compile_refuses_a_zero_sram_footprint_when_cpu_line_is_missing(tmp_path, monkeypatch):
+    # Same #2312 item 3 case, exercised through compile(): a summary with
+    # zero SRAM plus an NPU-only placement line must refuse, not ship 0 as
+    # a confirmed full CPU fallback.
+    src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
+
+    monkeypatch.setattr(
+        "alp_model.adapters.ethos_u.subprocess.run",
+        _fake_run_with_summary(
+            summary_csv="network,sram_memory_used,dram_memory_used\nm,0.0,5.359375\n",
+            stdout="NPU operators = 0 (0.0%)\n"))
+    with pytest.raises(RuntimeError, match="could not be read"):
+        VelaAdapter().compile(src, accel_config="ethos-u85-256", out_dir=tmp_path, target=_E8_TARGET)
+
+
 def test_vela_compile_refuses_a_zero_sram_footprint_when_placement_line_is_unreadable(tmp_path, monkeypatch):
     # #2312 item 1 (BLOCKING): no "NPU operators =" line at all must refuse,
     # not be read as `if npu_ops:` (None/0 both falsy) skipping the refusal
@@ -456,9 +479,40 @@ def test_vela_compile_does_not_read_a_stale_summary_from_another_accel_config(tm
 
     monkeypatch.setattr(
         "alp_model.adapters.ethos_u.subprocess.run",
-        _fake_run_with_summary(stdout="NPU operators = 0 (0.0%)\n"))  # this run wrote no summary
+        _fake_run_with_summary(stdout="NPU operators = 0 (0.0%)\nCPU operators = 15 (100.0%)\n"))
     blob = VelaAdapter().compile(src, accel_config="ethos-u85-256", out_dir=tmp_path, target=_E8_TARGET)
     assert blob.req_sram_kib == 0        # NOT 500 -- the stale sibling must not be read
+
+
+def test_vela_compile_does_not_read_a_stale_summary_left_by_a_prior_run_of_the_same_target(tmp_path, monkeypatch):
+    # #2312 item 6: `_run_dir` is per-accel-config, not per-invocation -- a
+    # REBUILD reuses the same run directory. Plant a stale summary CSV
+    # (as an earlier compile of this exact accel_config would have left
+    # behind) directly in the run dir this compile will use, before
+    # invoking vela; the fresh run must read only its own output, never
+    # the leftover.
+    run_dir = tmp_path / "vela-ethos-u85-256"
+    run_dir.mkdir(parents=True)
+    # A DIFFERENT filename than the fresh run's own `m_summary_internal.csv`
+    # (vela timestamps/suffixes these in practice) so that, absent the
+    # cleanup, two `m_summary_*.csv` files would coexist and trip
+    # `_parse_vela_summary`'s own ambiguity refusal ((0, 0)) rather than
+    # merely being overwritten -- proving the stale file was actually
+    # deleted, not just coincidentally clobbered by an identical filename.
+    (run_dir / "m_summary_stale.csv").write_text(
+        "network,sram_memory_used\nm,500.0\n", encoding="utf-8")
+    # A stale .tflite from a prior run too, per item 6.
+    (run_dir / "m_vela.tflite").write_bytes(b"STALE-VELA-OUT")
+    src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
+
+    monkeypatch.setattr(
+        "alp_model.adapters.ethos_u.subprocess.run",
+        _fake_run_with_summary(
+            summary_csv="network,sram_memory_used,dram_memory_used\nm,12.0,0.0\n",
+            stdout="NPU operators = 6 (40.0%)\nCPU operators = 9 (60.0%)\n"))
+    blob = VelaAdapter().compile(src, accel_config="ethos-u85-256", out_dir=tmp_path, target=_E8_TARGET)
+    assert blob.req_sram_kib == 12       # this run's own figure, NOT ambiguous/stale
+    assert blob.payload == b"VELA-OUT"   # this run's own .tflite, not the stale one
 
 
 def test_cpu_and_vela_do_not_require_compile_opts():

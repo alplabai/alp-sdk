@@ -149,6 +149,16 @@ where the file lives is a fact about this host, not this SoC). Unset, empty,
 or naming a file that does not exist all mean the same thing: no vendor
 config, and vela's own built-in system config is used.
 
+`ALP_VELA_CONFIG` is inert for this SoC specifically: it only ever reaches
+vela's command line alongside a `system_config` whose
+`system_config_requires_vendor_config` is `true`
+(`metadata/schemas/soc-spec-v1.schema.json`), and `imx93.json` sets that
+flag `false` and names no `system_config` at all -- so on i.MX 93 this
+variable never applies, set or not. AEN example builds configure the
+same kind of vendor `.ini` a different way entirely, via the CMake
+`AEN_NPU_VELA_CONFIG` variable
+(`examples/aen/aen-npu-inference/README.md`), not this env var.
+
 **E1M-NX9101 DRAM capacity -- TBD, deliberately (issue #2312 item 2).**
 `metadata/e1m_modules/E1M-NX9101.yaml`'s `memory.dram_mbit` stays `TBD`
 pending the authoritative hardware config (the maintainer's own

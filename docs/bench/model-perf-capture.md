@@ -48,6 +48,18 @@ const-region question, is now settled — see below, not a blocker.)
    `board.yaml` field, since where the file lives on a bench host is
    not a fact about the silicon.
 
+   **`ALP_VELA_CONFIG` is inert today.** It only takes effect once a
+   SoC spec's `npu_toolchain.vela` names a `system_config` with
+   `system_config_requires_vendor_config: true`
+   (`metadata/schemas/soc-spec-v1.schema.json`) -- `scripts/alp_project_loader.py`'s
+   `_soc_targets()` is what routes a named `system_config` into the
+   vendor-gated field this env var feeds. No shipped `metadata/socs/**`
+   spec names a `system_config` at all yet, so setting this variable
+   changes nothing for any part in metadata/ today. AEN example builds
+   configure the same vendor `.ini` a different way, via the CMake
+   `AEN_NPU_VELA_CONFIG` variable
+   (`examples/aen/aen-npu-inference/README.md`), not this env var.
+
 **The const-region question (settled, tan-cli#1011).**
 `perf.req_sram_kib` is **arena-only, by design** — vela's
 `sram_memory_used` column, the same accounting as the `.alpmodel`
@@ -57,9 +69,9 @@ const/weight region (vela's `on_chip_flash_memory_used`) is **never**
 summed into it: it is carried in the model blob itself, and its size
 is the blob's own byte length (`blob_len`), provisioned by the
 integrator per `vela_memory_mode` placement — not a figure this
-pipeline re-derives. This mirrors tan-cli's `_footprint()`
-(`python/tan/model/adapters/ethos_u.py`) and the SRAM-port pinning in
-`src/backends/inference/ethos_u_aen.cpp`.
+pipeline re-derives. This is the same contract as tan-cli's `_footprint()`
+(tan-cli#1011, `python/tan/model/adapters/ethos_u.py`), not a line-for-line
+port, and the SRAM-port pinning in `src/backends/inference/ethos_u_aen.cpp`.
 
 ## What a point is keyed on
 

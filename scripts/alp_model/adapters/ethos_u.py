@@ -11,9 +11,10 @@ req_sram_kib is the tensor ARENA only (vela's `sram_memory_used` column),
 never the const/weights region (`on_chip_flash_memory_used`) -- see
 _parse_vela_summary. The const region is carried in the model blob itself and
 sized by the integrator from the blob's own byte length (`blob_len`); it is
-never summed into req_sram_kib. This mirrors tan-cli's `_footprint()`
-(tan-cli#1011, `python/tan/model/adapters/ethos_u.py`) and the SRAM-port
-pinning in `src/backends/inference/ethos_u_aen.cpp`.
+never summed into req_sram_kib. This is the same contract as tan-cli's
+`_footprint()` (tan-cli#1011, `python/tan/model/adapters/ethos_u.py`), not a
+line-for-line port, and the SRAM-port pinning in
+`src/backends/inference/ethos_u_aen.cpp`.
 
 THE MEMORY PROFILE (issue #2312, mirroring alp-sdk #1470 / tan-cli#789):
 invoked with NEITHER `--memory-mode` nor `--system-config`, vela falls back to
@@ -69,9 +70,10 @@ _VELA_CONFIG_ENV = "ALP_VELA_CONFIG"
 # stdout) emits exactly one "CPU operators =" and one "NPU operators =" line
 # per run, e.g. "NPU operators = 6 (40.0%)" -- present whether or not any
 # operator actually landed on the NPU (a full CPU fallback prints "NPU
-# operators = 0 (0.0%)" and still exits 0). Both kinds are read (not NPU
+# operators = 0 (0.0%)" and still exits 0). Both kinds are REQUIRED (not NPU
 # alone) so a caller can tell "this run reported 0 NPU ops" apart from "this
-# run's placement lines could not be found at all" using the same regex.
+# run's placement lines could not be found at all" -- an NPU line with no
+# matching CPU line is treated as the latter, not the former.
 _PLACEMENT_RE = re.compile(r"^(CPU|NPU) operators = (\d+)", re.MULTILINE)
 
 # A directory component built from an accel_config that comes out of SoM
@@ -111,6 +113,26 @@ def _run_dir(out_dir: Path, accel_config: str) -> Path:
     review). One subdirectory per accel_config makes that impossible: each
     run's `_parse_vela_summary` glob can only ever see its own output."""
     return out_dir / f"vela-{_UNSAFE_DIR_CHARS.sub('_', accel_config)}"
+
+
+def _clear_stale_run_output(run_dir: Path, stem: str) -> None:
+    """Delete a prior run's `<stem>_summary_*.csv` and `<stem>_vela.tflite`
+    from @run_dir before invoking vela again.
+
+    `_run_dir` is per-accel-config, not per-invocation -- a rebuild (or a
+    caller retrying after a failure) reuses the same directory, and a vela
+    run that itself produces no summary CSV (e.g. it errors before writing
+    one, or a caller's fake in a test) would otherwise leave a PRIOR run's
+    CSV sitting there for `_parse_vela_summary` to glob-match as if it were
+    this run's own output. Clearing first makes that impossible; it never
+    trips `_parse_vela_summary`'s own ambiguity refusal either, since a
+    stale file next to a fresh one is exactly the "more than one match"
+    shape that refusal exists to catch."""
+    for stale in run_dir.glob(f"{stem}_summary_*.csv"):
+        stale.unlink()
+    tflite = run_dir / f"{stem}_vela.tflite"
+    if tflite.is_file():
+        tflite.unlink()
 
 
 def _profile_flags(target: TargetSpec) -> list[str]:
@@ -181,11 +203,17 @@ def _parse_vela_summary(out_dir: Path, stem: str) -> tuple[int, int]:
 
 def _parse_vela_placement(stdout: str) -> int | None:
     """The NPU operator count vela's own stdout reports for this run, or None
-    when the line is absent (an unexpected vela output shape -- never
+    when EITHER line is absent (an unexpected vela output shape -- never
     guessed at; the caller treats None the same as a nonzero count: "can't
-    confirm this zero is a full CPU fallback, refuse it")."""
+    confirm this zero is a full CPU fallback, refuse it"). Both the CPU and
+    NPU lines must be present: a stdout carrying an "NPU operators = 0" line
+    with no matching "CPU operators =" line is just as unreadable a shape as
+    no placement lines at all, and reading the NPU line alone would ship
+    that zero as a confirmed full CPU fallback on a guess."""
     found = {kind: int(n) for kind, n in _PLACEMENT_RE.findall(stdout)}
-    return found.get("NPU")
+    if "CPU" not in found or "NPU" not in found:
+        return None
+    return found["NPU"]
 
 
 def _refuse_zero_sram_footprint(*, accel_config: str, npu_ops: int | None) -> None:
@@ -244,6 +272,7 @@ class VelaAdapter(CompilerAdapter):
                 "against vela's own DRAM-backed default.")
         run_dir = _run_dir(out_dir, accel_config)
         run_dir.mkdir(parents=True, exist_ok=True)
+        _clear_stale_run_output(run_dir, source.stem)
         cmd = (["vela", str(source), "--accelerator-config", accel_config,
                 "--output-dir", str(run_dir)] + _profile_flags(target))
         try:
