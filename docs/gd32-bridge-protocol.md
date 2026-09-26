@@ -382,6 +382,23 @@ bring-up, or after any reset) is re-promoted within about one period.
 This costs one small I2C frame/s on BRD_I2C (`i2c8`) while any line is
 held as output; see `gd32_bridge_replay_work()` (Refs #2297).
 
+Only the Linux `gpio-gd32-bridge` driver does this. The CM33/Zephyr side
+of the bridge does not yet re-assert anything after a reset, so #2297
+stays open for that half. Also note what re-asserting REG_ON does and
+does not fix: it restores the *pin level* only. The Linux Wi-Fi/BT
+drivers (`cyw-fmac` etc.) are not re-initialised by this replay -- a
+GD32 reset that also wedges or resets the Murata module itself still
+needs the normal Linux driver-level recovery, on top of the pin being
+re-asserted.
+
+**Shared-bus caveat:** BRD_I2C (`i2c8`) may be multi-mastered -- the
+CM33 also owns a device on it (DA9292 @ `0x1E`). Arbitration loss on a
+contended bus surfaces to the replay as an ordinary transfer failure
+(the "output state replay failed" warning below), indistinguishable
+from the bridge simply being down. A wedged bus is retried at the same
+~1 Hz rate with no backoff, so a stuck bus gets one failing frame per
+second indefinitely rather than escalating or giving up.
+
 ### 3.2 PWM channels
 
 PWM channel ids are an **opaque enum** assigned by the GD32 firmware.
