@@ -38,10 +38,25 @@ plain one-shot -EPROBE_DEFER only gets retried when some unrelated
 driver event walks the deferred-probe list) and caches the result --
 0 once a confirmed minor >= 11 (major 0), -ENODEV once confirmed
 below that or on an unexpected major, -EPROBE_DEFER while the bridge
-stays silent past the bounded wait. direction_output() propagates the
-underlying transfer error (mapping a transient -EIO on lines 18/19 to
--EPROBE_DEFER only while that resolution is still pending) instead of
-always returning success.
+stays silent past the bounded wait.
+
+Output-state replay (Refs #2297): a write attempted while the bridge is
+unreachable (bench-proven: "GPIO write line 5 failed" against the
+Display-1 panel reset-gpios hog at probe, before the GD32 has come up)
+used to be forgotten forever, and a GD32 reset (WDT, OTA A/B swap)
+silently drops every pad back to its boot default -- notably the Wi-Fi
+REG_ON lines (18/19), which then need re-asserting. Fixed by (1)
+latching output_mask/output_vals before attempting the write instead of
+after a successful one, and (2) a delayed_work started at probe() that
+re-issues one idempotent CMD_GPIO_WRITE(output_mask, output_vals) about
+once a second whenever output_mask != 0 -- glitch-free on pads already
+at that level, so no reset detection is needed; costs one small I2C
+frame/s on BRD_I2C (i2c8). Because the requested state is now always
+latched and eventually replayed, direction_output() always reports
+success instead of propagating the transfer error: this callback also
+runs for OF gpio-hog lines during the chip's own registration, and a
+nonzero return there would fail the whole 20-line gpiochip instead of
+just the one hog.
 
 Upstream-Status: Inappropriate [Alp Lab SoM-specific supervisor MCU protocol]
 
@@ -49,8 +64,8 @@ Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  drivers/gpio/Kconfig            |   9 +
  drivers/gpio/Makefile           |   1 +
- drivers/gpio/gpio-gd32-bridge.c | 412 ++++++++++++++++++++++++++++++++
- 3 files changed, 422 insertions(+)
+ drivers/gpio/gpio-gd32-bridge.c | 535 ++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 545 insertions(+)
  create mode 100644 drivers/gpio/gpio-gd32-bridge.c
 
 diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
@@ -90,7 +105,7 @@ new file mode 100644
 index 000000000..712d5c3d8
 --- /dev/null
 +++ b/drivers/gpio/gpio-gd32-bridge.c
-@@ -0,0 +1,412 @@
+@@ -0,0 +1,535 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * GPIO driver for the Alp Lab GD32 IO-MCU bridge (I2C transport).
@@ -136,10 +151,30 @@ index 000000000..712d5c3d8
 + * simple, a bluetooth shutdown-gpios) retries through the normal
 + * deferred-probe path.
 + *
++ * Output-state replay: CMD_GPIO_WRITE only ever reached output_mask/
++ * output_vals AFTER a successful transfer, so a write attempted while the
++ * bridge was unreachable (at probe, or after any GD32 reset -- WDT, OTA
++ * A/B swap) used to be forgotten forever, and a reset also drops every pad
++ * back to its boot default (see issue #2297: the Wi-Fi REG_ON lines need
++ * re-asserting after a GD32 reset). Fixed two ways: (1) output_mask/
++ * output_vals are latched under state_lock BEFORE the write is attempted,
++ * so the requested state always survives a failed transfer; (2) a
++ * delayed_work started at probe() re-issues one idempotent
++ * CMD_GPIO_WRITE(output_mask, output_vals) roughly once a second whenever
++ * output_mask != 0 -- glitch-free on pads already at that level, so it
++ * needs no reset detection, just a period short enough that a freshly-up
++ * bridge is re-promoted quickly. Costs one small I2C frame/s on BRD_I2C
++ * (i2c8) while any line is held as output. Consequently
++ * direction_output() now always reports success: the requested state is
++ * never lost, and a nonzero return here would fail gpiochip registration
++ * itself for an OF gpio-hog consumer (for example the Display-1 panel
++ * reset-gpios), losing the entire 20-line chip instead of just that line.
++ *
 + * Copyright (c) 2026 Alp Lab AB
 + */
 +
 +#include <asm/unaligned.h>
++#include <linux/bitops.h>
 +#include <linux/crc-itu-t.h>
 +#include <linux/delay.h>
 +#include <linux/gpio/driver.h>
@@ -147,6 +182,7 @@ index 000000000..712d5c3d8
 +#include <linux/module.h>
 +#include <linux/mutex.h>
 +#include <linux/of.h>
++#include <linux/workqueue.h>
 +
 +#define GD32_REG_CMD		0x00
 +#define GD32_CMD_PING		0x00
@@ -171,6 +207,16 @@ index 000000000..712d5c3d8
 +#define GD32_WIFI_BT_POLL_RETRIES	30
 +#define GD32_WIFI_BT_POLL_DELAY_MS	100
 +
++/* Bit mask covering lines 18/19 only, for masking them out of a replay
++ * when the bridge has not (or not yet) confirmed it understands them. */
++#define GD32_WIFI_BT_LINE_MASK	GENMASK(GD32_NGPIO_WIFI_BT - 1, GD32_NGPIO_BASE)
++
++/* Output-state replay period: frequent enough that a bridge which just
++ * came up (post-reset or first power-on) is re-promoted within about a
++ * second, cheap enough (one small I2C frame) to run indefinitely on
++ * BRD_I2C (i2c8) whenever any line is held as output. */
++#define GD32_REPLAY_PERIOD_MS	1000
++
 +static const char * const gd32_bridge_gpio_names[GD32_NGPIO_WIFI_BT] = {
 +	"IO8",  "IO9",  "IO10", "IO11", "IO12", "IO13",
 +	"IO14", "IO16", "IO24", "IO25", "IO27", "IO28",
@@ -186,11 +232,18 @@ index 000000000..712d5c3d8
 +	 * output_mask: lines promoted to output (sticky; once written a pad
 +	 * stays push-pull until GD32 reset).
 +	 * output_vals: last driven levels.
-+	 * Single-writer assumption: gpiolib serializes per-line ops so no
-+	 * atomic RMW is needed here.
++	 * Guarded by state_lock: gd32_bridge_gpio_do_set() latches both
++	 * BEFORE attempting the write (so a failed transfer never loses the
++	 * requested state), and gd32_bridge_replay_work() reads them from
++	 * workqueue context to periodically re-assert them. That crosses
++	 * the old single-writer assumption (gpiolib merely serializes
++	 * per-line ops against each other, not against a workqueue).
 +	 */
 +	u32 output_mask;
 +	u32 output_vals;
++	struct mutex state_lock;	/* protects output_mask/output_vals */
++	struct delayed_work replay_work;
++	bool replay_failing;		/* work-context only; logs transitions once */
 +	/*
 +	 * Lines 18/19 (bt-reg-on/wl-reg-on) gating, resolved lazily at
 +	 * .request() time rather than once at probe() -- see the
@@ -293,18 +346,26 @@ index 000000000..712d5c3d8
 +	u32 mask = BIT(offset);
 +	int ret;
 +
-+	put_unaligned_le32(mask, &req[0]);
-+	put_unaligned_le32(value ? mask : 0, &req[4]);
-+	ret = gd32_bridge_xfer(gd32, GD32_CMD_GPIO_WRITE, req, 8, NULL, 0);
-+	if (ret)
-+		return ret;
-+
++	/*
++	 * Latch the requested state BEFORE attempting the write. A failed
++	 * transfer (bridge not up yet, bus wedged) must not lose the
++	 * intent -- gd32_bridge_replay_work() re-issues CMD_GPIO_WRITE for
++	 * everything in output_mask/output_vals roughly once a second until
++	 * a write actually lands, so the requested level is never forgotten.
++	 */
++	mutex_lock(&gd32->state_lock);
 +	gd32->output_mask |= mask;
 +	if (value)
 +		gd32->output_vals |= mask;
 +	else
 +		gd32->output_vals &= ~mask;
-+	return 0;
++	mutex_unlock(&gd32->state_lock);
++
++	put_unaligned_le32(mask, &req[0]);
++	put_unaligned_le32(value ? mask : 0, &req[4]);
++	ret = gd32_bridge_xfer(gd32, GD32_CMD_GPIO_WRITE, req, 8, NULL, 0);
++
++	return ret;
 +}
 +
 +static void gd32_bridge_gpio_set(struct gpio_chip *chip, unsigned int offset,
@@ -323,15 +384,21 @@ index 000000000..712d5c3d8
 +				    unsigned int offset, int value)
 +{
 +	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(chip);
-+	int ret;
 +
-+	/* The bridge promotes a pad to output on first write. Unlike the
-+	 * plain .set() callback (void return -- gpiolib has nowhere to
-+	 * propagate a failure), .direction_output() has a real return path:
-+	 * surface the transfer error instead of always reporting success. */
-+	ret = gd32_bridge_gpio_do_set(gd32, offset, value);
++	/*
++	 * The bridge promotes a pad to output on first write. The requested
++	 * state is latched in output_mask/output_vals before the transfer is
++	 * attempted (see gd32_bridge_gpio_do_set()) and gd32_bridge_replay_
++	 * work() re-applies it once the bridge answers, so a transfer
++	 * failure here is recoverable, not lost. Do NOT propagate it: this
++	 * callback also runs for OF gpio-hog lines (for example the
++	 * Display-1 panel reset-gpios) during gpiochip registration itself,
++	 * and a nonzero return here fails devm_gpiochip_add_data() outright
++	 * -- losing the entire 20-line chip instead of just the one hog.
++	 */
++	gd32_bridge_gpio_do_set(gd32, offset, value);
 +
-+	return ret;
++	return 0;
 +}
 +
 +static int gd32_bridge_gpio_dir_in(struct gpio_chip *chip, unsigned int offset)
@@ -341,7 +408,7 @@ index 000000000..712d5c3d8
 +	/* Sticky promotion: once written, a pad cannot return to input. */
 +	if (gd32->output_mask & BIT(offset))
 +		return -EPERM;
-+	return 0;	/* boot default is already input + pull-up */
++	return 0;	/* input; pull behaviour depends on bridge firmware version */
 +}
 +
 +static int gd32_bridge_gpio_get_dir(struct gpio_chip *chip,
@@ -420,6 +487,68 @@ index 000000000..712d5c3d8
 +	return gd32_bridge_resolve_wifi_bt(gd32);
 +}
 +
++/*
++ * Periodically re-assert output_mask/output_vals against the bridge. A
++ * GD32 reset (WDT, OTA A/B swap) silently drops every pad back to its
++ * boot default, and a write attempted while the bridge was unreachable
++ * (e.g. at probe, before the GD32 has come up) is latched but not yet
++ * applied -- see gd32_bridge_gpio_do_set(). Re-issuing CMD_GPIO_WRITE for
++ * the whole mask is glitch-free on pads already at that level, so this
++ * needs no reset detection: it just needs to run often enough that a
++ * freshly-up bridge is re-promoted within about one period.
++ */
++static void gd32_bridge_replay_work(struct work_struct *work)
++{
++	struct gd32_bridge_gpio *gd32 = container_of(to_delayed_work(work),
++						     struct gd32_bridge_gpio,
++						     replay_work);
++	u8 req[8];
++	u32 mask, vals;
++	int ret;
++
++	mutex_lock(&gd32->state_lock);
++	mask = gd32->output_mask;
++	vals = gd32->output_vals;
++	mutex_unlock(&gd32->state_lock);
++
++	/* Lines 18/19 only ever enter output_mask once .request() has
++	 * resolved them supported; mask them out defensively so a replay
++	 * never writes them against a bridge that has not confirmed it
++	 * understands them. */
++	if (gd32_bridge_wifi_bt_status(gd32) != 0)
++		mask &= ~GD32_WIFI_BT_LINE_MASK;
++
++	if (mask) {
++		put_unaligned_le32(mask, &req[0]);
++		put_unaligned_le32(vals, &req[4]);
++		ret = gd32_bridge_xfer(gd32, GD32_CMD_GPIO_WRITE, req, 8,
++				       NULL, 0);
++		if (ret) {
++			if (!gd32->replay_failing) {
++				dev_warn(gd32->chip.parent,
++					 "bridge unreachable, output state replay failed (%d)\n",
++					 ret);
++				gd32->replay_failing = true;
++			}
++		} else if (gd32->replay_failing) {
++			dev_info(gd32->chip.parent,
++				 "bridge reachable, %u line(s) re-applied\n",
++				 hweight32(mask));
++			gd32->replay_failing = false;
++		}
++	}
++
++	schedule_delayed_work(&gd32->replay_work,
++			      msecs_to_jiffies(GD32_REPLAY_PERIOD_MS));
++}
++
++static void gd32_bridge_cancel_replay(void *data)
++{
++	struct gd32_bridge_gpio *gd32 = data;
++
++	cancel_delayed_work_sync(&gd32->replay_work);
++}
++
 +static int gd32_bridge_gpio_probe(struct i2c_client *client)
 +{
 +	struct gd32_bridge_gpio *gd32;
@@ -433,6 +562,8 @@ index 000000000..712d5c3d8
 +	gd32->client = client;
 +	mutex_init(&gd32->lock);
 +	mutex_init(&gd32->status_lock);
++	mutex_init(&gd32->state_lock);
++	INIT_DELAYED_WORK(&gd32->replay_work, gd32_bridge_replay_work);
 +	gd32->wifi_bt_reg_on_status = -EPROBE_DEFER;	/* not yet resolved */
 +
 +	gd32->chip.label	  = "gd32-bridge-gpio";
@@ -480,6 +611,13 @@ index 000000000..712d5c3d8
 +	gd32->chip.direction_input  = gd32_bridge_gpio_dir_in;
 +	gd32->chip.get_direction    = gd32_bridge_gpio_get_dir;
 +	gd32->chip.can_sleep	  = true;
++
++	ret = devm_add_action_or_reset(&client->dev, gd32_bridge_cancel_replay,
++					gd32);
++	if (ret)
++		return ret;
++	schedule_delayed_work(&gd32->replay_work,
++			      msecs_to_jiffies(GD32_REPLAY_PERIOD_MS));
 +
 +	i2c_set_clientdata(client, gd32);
 +	return devm_gpiochip_add_data(&client->dev, &gd32->chip, gd32);

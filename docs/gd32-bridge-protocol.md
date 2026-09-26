@@ -366,8 +366,21 @@ consistently races the bridge's own startup) -- see
 **Any GD32 reset drops both lines low again** (WDT, fault, OTA A/B
 swap, SE reset -- the boot-time OUTPUT LOW default applies on every
 reset), which power-cycles the module. The host must re-assert them
-after a bridge reset, not only at first bring-up; `CMD_RESET_REASON`
-is how it detects one. No host code does that yet (#2297).
+after a bridge reset, not only at first bring-up.
+
+The Linux `gpio-gd32-bridge` driver does this without reset detection
+(`CMD_RESET_REASON` is clear-on-read on the firmware side, so polling
+it would itself lose the very information a *second* poller needs):
+every line ever written is latched host-side in `output_mask`/
+`output_vals` **before** the write is attempted, so a failed transfer
+never loses the requested state, and a `delayed_work` re-issues one
+idempotent `GPIO_WRITE(output_mask, output_vals)` roughly once a
+second whenever `output_mask != 0`. Re-asserting an already-correct
+level is glitch-free, so this needs no reset detection at all -- it
+just needs to run often enough that a bridge coming back up (first
+bring-up, or after any reset) is re-promoted within about one period.
+This costs one small I2C frame/s on BRD_I2C (`i2c8`) while any line is
+held as output; see `gd32_bridge_replay_work()` (Refs #2297).
 
 ### 3.2 PWM channels
 
