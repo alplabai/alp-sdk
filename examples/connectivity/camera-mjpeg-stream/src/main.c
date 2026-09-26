@@ -202,9 +202,32 @@ static void build_synthetic_frame(alp_pixfmt_t fmt, alp_jpeg_encode_req_t *req)
 }
 #endif
 
-/* Print the DHCP lease + the stream/snapshot URLs once bound -- runs on
+/*
+ * Print the DHCP lease + the stream/snapshot URLs once bound -- runs on
  * the net-mgmt callback's own context, never inside the capture loop, so
- * this never adds network latency to a capture iteration. */
+ * this never adds network latency to a capture iteration.
+ *
+ * Bench run 312 (#2287) never saw these lines: NOT a bug in this print
+ * path, the event registration order (net_mgmt_add_event_callback() runs
+ * BEFORE net_dhcpv4_start() below, so the callback can't miss the event),
+ * or CONFIG_LOG_DEFAULT_LEVEL (this is a plain printf(), not a log call).
+ * Prime suspect at the time: this line prints ONCE, near boot, into a
+ * 16 KiB CONFIG_RAM_CONSOLE_BUFFER_SIZE circular buffer -- and that
+ * run's JPEG-buffer-full failure (alif_hantro.c's driver-side LOG_ERR,
+ * once per failed encode, unthrottled) fired ~14x/second for 40 seconds,
+ * wrapping that ring buffer many times over before anyone read it back.
+ *
+ * Bench run 313 (same fixes applied, 0 encode failures this run) STILL
+ * never saw these lines -- ruling that theory out as the WHOLE story:
+ * something else is also capable of wrapping this same 16 KiB buffer.
+ * The VSI AE/AWB library's own diagnostic prints (hal_alif's
+ * isp_api_wrapper.c, routed through LOG_INF at CONFIG_VIDEO_LOG_LEVEL)
+ * run continuously, every frame, for the life of the stream -- up to
+ * ~13 KB/s -- which alone is enough to wrap this buffer inside two
+ * seconds, with no JPEG failure needed at all. prj.conf now lowers
+ * CONFIG_VIDEO_LOG_LEVEL to WRN for this app (see its own comment) to
+ * stop that chatter. Re-bench needed to confirm the DHCP lines survive
+ * with THIS fix in place -- not yet done. */
 static struct net_mgmt_event_callback dhcp_cb;
 
 static void
@@ -407,6 +430,24 @@ int main(void)
 	int64_t  encode_fail_last_log  = 0;
 	uint32_t encode_retry_count    = 0;
 
+	/*
+	 * Persists the quality ladder's current rung ACROSS frames, so a noisy
+	 * scene that keeps overflowing JPEG_OUT_CAP stays down at a lower
+	 * quality instead of re-trying JPEG_QUALITY_DEFAULT (and failing the
+	 * same way) every single frame -- bench run 312 (#2287): once the
+	 * out_len bug below was fixed, a per-frame-only ladder would have
+	 * retried at the SAME two rungs forever without ever remembering the
+	 * scene needed the lower one. Recovers back toward
+	 * JPEG_QUALITY_DEFAULT one rung at a time after
+	 * QUALITY_RECOVERY_STREAK consecutive clean encodes at the current
+	 * rung, so a scene that brightens (or AE's new 24 dB gain ceiling,
+	 * hal_alif patch 0013, keeps the noise down) climbs back up instead of
+	 * staying parked at the floor forever.
+	 */
+	uint8_t  current_quality      = JPEG_QUALITY_DEFAULT;
+	uint32_t quality_clean_streak = 0;
+#define QUALITY_RECOVERY_STREAK 30u /* ~2s at 15fps, ~1s at 30fps -- a real recovery, not a blip */
+
 	/* Once-a-second stats line (issue #2286 bench run 242): win_* reset
 	 * every print, so fps/size/encode_ms report THIS window, not a
 	 * lifetime average that would hide a regression under a long-running
@@ -448,8 +489,7 @@ int main(void)
 
 			if (rc == ALP_OK) {
 				capture_fail_consec = 0;
-				jpeg_req_from_packed(
-				    &req, pixfmt, frame.data, FRAME_W, FRAME_H, JPEG_QUALITY_DEFAULT);
+				jpeg_req_from_packed(&req, pixfmt, frame.data, FRAME_W, FRAME_H, current_quality);
 				have_frame = true;
 			} else {
 				if (rate_limited(&capture_fail_last_log, &capture_fail_count)) {
@@ -493,24 +533,29 @@ int main(void)
 			alp_status_t erc       = alp_jpeg_encode(
 			    jpeg, &req, mjpeg_http_claim_write_buffer(), JPEG_OUT_CAP, &out_len);
 
-			/* Bounded ladder, ONE retry -- gated on out_len, not just the
-			 * error code: alp_jpeg_encode() returns ALP_ERR_NOMEM for
-			 * more than one backend-internal reason (src/backends/jpeg/
-			 * alif_hantro.c) -- the Hantro backend's output-buffer overrun
-			 * (done->bytesused > out_cap) sets *out_len to the REQUIRED
-			 * size on that specific path, but a pool-exhaustion NOMEM
-			 * (video_import_buffer() -ENOBUFS, no free pool slot) leaves
-			 * out_len at its prior value (0 on the first attempt) --
-			 * re-encoding at a lower quality only helps the former, so
-			 * out_len > JPEG_OUT_CAP is the signal this checks, not the
-			 * error code alone (issue #2286 bench run 242). req.quality >
-			 * JPEG_QUALITY_FLOOR guards against retrying with the exact
-			 * quality that just failed, which jpeg_quality_step_down()'s
-			 * floor would otherwise do. Bench run 243 never exercised this
-			 * ladder on real silicon: 0 retries, every frame encoded
-			 * under cap at quality 60 on the first attempt. */
-			if (erc == ALP_ERR_NOMEM && out_len > JPEG_OUT_CAP &&
-			    req.quality > JPEG_QUALITY_FLOOR) {
+			/*
+			 * Bounded ladder, ONE retry per frame -- gated on the error
+			 * code alone, NOT on out_len (bench run 312, #2287): out_len
+			 * is the REQUIRED size only on the done->bytesused > out_cap
+			 * path (src/backends/jpeg/alif_hantro.c) -- the actual
+			 * failure this ladder exists for, JPEG_BUFFER_FULL
+			 * (video_dequeue() returning -ENOSPC), used to leave out_len
+			 * at its prior value (0 on a first attempt), so
+			 * `out_len > JPEG_OUT_CAP` was always false and the ladder
+			 * never engaged (retry=0 every run). alif_hantro.c's -ENOSPC
+			 * path now also sets *out_len (to out_cap + 1, "too big,
+			 * amount unknown") so that signal is reliable again -- but
+			 * gating on the error code directly is simpler and covers
+			 * BOTH NOMEM sub-causes: a pool-exhaustion NOMEM
+			 * (video_import_buffer() -ENOBUFS) can't be fixed by a lower
+			 * quality either, but retrying it anyway is harmless (bounded
+			 * to this one extra attempt, same as the buffer-overrun case)
+			 * and simpler than trying to keep telling the two apart from
+			 * the caller's side. req.quality > JPEG_QUALITY_FLOOR guards
+			 * against retrying with the exact quality that just failed,
+			 * which jpeg_quality_step_down()'s floor would otherwise do.
+			 */
+			if (jpeg_quality_should_retry(erc == ALP_ERR_NOMEM, req.quality)) {
 				encode_retry_count++;
 				req.quality = jpeg_quality_step_down(req.quality);
 				out_len     = 0;
@@ -528,12 +573,52 @@ int main(void)
 				win_size_max = (uint32_t)out_len > win_size_max ? (uint32_t)out_len : win_size_max;
 				win_size_sum += out_len;
 				win_encode_ms_sum += encode_ms;
-			} else if (rate_limited(&encode_fail_last_log, &encode_fail_count)) {
-				printf("[camera-mjpeg-stream] alp_jpeg_encode failed (rc=%d, "
-				       "total=%u, retries=%u)\n",
-				       (int)erc,
-				       encode_fail_count,
-				       encode_retry_count);
+
+				/*
+				 * Quality-ladder state, persisted across frames (see
+				 * current_quality's own comment above). req.quality is
+				 * whichever rung actually succeeded THIS frame (the
+				 * original one, or the stepped-down retry) -- remember
+				 * it so the NEXT frame starts there instead of re-
+				 * failing at JPEG_QUALITY_DEFAULT again. Climb back up
+				 * one rung after a real streak of clean encodes at the
+				 * current rung, never on a single lucky frame.
+				 */
+				if (req.quality < current_quality) {
+					current_quality      = req.quality;
+					quality_clean_streak = 0;
+				} else if (current_quality < JPEG_QUALITY_DEFAULT) {
+					if (++quality_clean_streak >= QUALITY_RECOVERY_STREAK) {
+						current_quality =
+						    jpeg_quality_step_up(current_quality, JPEG_QUALITY_DEFAULT);
+						quality_clean_streak = 0;
+					}
+				}
+			} else {
+				/*
+				 * Both attempts failed -- reset the recovery streak (a
+				 * failure breaks any run of clean encodes), but do NOT
+				 * force current_quality down here (bench run 313, #2287
+				 * reviewer fix): a pool-exhaustion NOMEM
+				 * (video_import_buffer() -ENOBUFS, no free pool slot --
+				 * see jpeg_quality_should_retry()'s own comment) is not
+				 * fixed by a lower quality at all, and unconditionally
+				 * dropping to the floor here would permanently lower
+				 * quality for every LATER frame too, for a cause a lower
+				 * quality can never address. current_quality is only
+				 * ever lowered in the ALP_OK branch above, i.e. only
+				 * when a lower-quality retry (or the current rung
+				 * itself) actually SUCCEEDED -- never wedges either
+				 * way, the next frame just tries again at whatever rung
+				 * last succeeded. */
+				quality_clean_streak = 0;
+				if (rate_limited(&encode_fail_last_log, &encode_fail_count)) {
+					printf("[camera-mjpeg-stream] alp_jpeg_encode failed (rc=%d, "
+					       "total=%u, retries=%u)\n",
+					       (int)erc,
+					       encode_fail_count,
+					       encode_retry_count);
+				}
 			}
 			if (camera != NULL) {
 				alp_camera_release(camera, &frame);

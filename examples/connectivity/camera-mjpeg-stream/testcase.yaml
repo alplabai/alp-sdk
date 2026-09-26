@@ -82,3 +82,26 @@ tests:
       - ethernet
       - connectivity
     build_only: true   # camera + Ethernet HW proof is a bench flash, not a CI run.
+
+  # IMX296 variant (#2287 Stage B unit 5): SAME CONFIG_CAMERA_MJPEG_STREAM_1280X960 +
+  # overlay-1280x960.conf as the OV5647 scenario above -- IMX296's own 1280x960 ROI crop is the
+  # identical frame size that overlay's SRAM0/buffer-pool accounting already covers, only the
+  # shield (hence which sensor node DT wires in) differs. AE on, AWB at the ISP's stock default
+  # (no IMX296 AWB/CCM calibration yet) -- see README.md's "IMX296 build variant" section.
+  # UNBENCHED -- see that section.
+  alp_sdk.examples.camera_mjpeg_stream.aen_imx296:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_args:
+      - SHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera"
+      - EXTRA_CONF_FILE="boards/overlay-1280x960.conf"
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - camera
+      - jpeg
+      - ethernet
+      - connectivity
+    build_only: true   # camera + Ethernet HW proof is a bench flash, not a CI run.

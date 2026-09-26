@@ -33,8 +33,8 @@
  *     &isp -- not the raw &csi_capture_port -- for the OV5647 ISP path), they
  *     drive the real ISP m2m path the moment the hal_alif libisp wrapper is
  *     bumped to the version isp_pico.c targets.
- *   - open() now drives the exact sequence examples/aen/aen-isp-ov5647-
- *     capture proves on real silicon (runs 69-145): ISP INPUT format
+ *   - open() now drives the exact sequence examples/aen/aen-isp-capture proves
+ *     on real silicon (runs 69-145): ISP INPUT format
  *     SBGGR10P at the requested size, AWB (VIDEO_CID_AUTO_WHITE_BALANCE) and
  *     AE (VIDEO_CID_EXPOSURE_AUTO) turned on via the standard Zephyr video
  *     ctrl registry before the first video_stream_start(), the caller's
@@ -46,7 +46,7 @@
  *     negotiated YUV output (YUV420 planar preferred, YUYV fallback -- see
  *     _rgb565_yuv_candidates[] below: YUYV frames never completed on
  *     silicon in run 154, and YUV420 matches both Alif's own viewfinder
- *     sample and the bench-proven aen-isp-ov5647-capture example)
+ *     sample and the bench-proven aen-isp-capture example)
  *     converted to RGB565 on the CPU by isp_capture(); a caller requesting
  *     a YUV format the ISP produces natively (ALP_PIXFMT_YUV420_PLANAR /
  *     ALP_PIXFMT_NV12) gets it passed through unmodified.
@@ -59,7 +59,7 @@
  *
  * ADR 0017 Tier-2, OPT-IN (CONFIG_ALP_SDK_CAMERA_ALIF_ISP, default n).
  * vendor-ext. Runtime capture proven on isp_pico.c's own bench app
- * (examples/aen/aen-isp-ov5647-capture); this PORTABLE backend itself is
+ * (examples/aen/aen-isp-capture); this PORTABLE backend itself is
  * still bench-unverified end to end.
  *
  * AE-convergence fix (bench run 147, examples/aen/aen-isp-ov5647-viewfinder):
@@ -90,6 +90,7 @@
 #include <string.h>
 
 #include <zephyr/device.h>
+#include <zephyr/devicetree.h>
 #include <zephyr/drivers/video.h>
 #include <zephyr/drivers/video-controls.h>
 #include <zephyr/drivers/video/isp_frame_size.h>
@@ -181,15 +182,33 @@ static uint32_t _to_video_fourcc(alp_pixfmt_t fmt)
 	}
 }
 
-/* ISP INPUT is always our sensor's native Bayer layout -- SBGGR10P, the
- * OV5647's, matching examples/aen/aen-isp-ov5647-capture (see that file's
- * header for why SBGGR10P and not the GRBG10 the wrapper otherwise falls
- * back to for an unmapped fourcc). */
+/*
+ * ISP INPUT is always our sensor's native Bayer layout. OV5647 (the shield examples/aen/
+ * aen-isp-capture bench-proved this backend against) is SBGGR10P -- see that file's header
+ * for why SBGGR10P and not the GRBG10 the wrapper otherwise falls back to for an unmapped fourcc.
+ * IMX296 (issue #2287 Stage B) is SRGGB10P instead -- a different Bayer PHASE, not just a
+ * different sensor, see zephyr/drivers/video/imx296.c's own Bayer-order comment on
+ * imx296_fmts[] -- so this can't be one fixed fourcc for every board any more.
+ *
+ * DT_HAS_COMPAT_STATUS_OKAY(sony_imx296), not video_get_format() on the ISP input device: this
+ * has to be a COMPILE-TIME choice. Querying the input device's format at runtime instead would
+ * call into alif_cam_set_fmt() (video_alif.c) as a SIDE EFFECT of just reading it back -- and
+ * that call fails outright at IMX296's 1088-tall full-frame height (unrelated to this fourcc
+ * choice), so probing the input device before this backend has even picked a fourcc for it would
+ * break this backend on IMX296 before ALIF_ISP_INPUT_FOURCC even mattered. Every board this SDK
+ * ships today has exactly one Bayer sensor wired to the ISP, so "the one sony,imx296 node exists"
+ * is an unambiguous stand-in for "IMX296 is this board's sensor" -- a board wiring both OV5647 and
+ * IMX296 to the same ISP input at once is not a configuration this SDK supports.
+ */
+#if DT_HAS_COMPAT_STATUS_OKAY(sony_imx296)
+#define ALIF_ISP_INPUT_FOURCC VIDEO_PIX_FMT_SRGGB10P
+#else
 #define ALIF_ISP_INPUT_FOURCC VIDEO_PIX_FMT_SBGGR10P
+#endif
 
 /* Output fourccs this backend converts to RGB565 on the CPU when the
  * caller requests ALP_PIXFMT_RGB565, tried in this order: YUV420 planar
- * first -- bench-proven end to end by examples/aen/aen-isp-ov5647-capture
+ * first -- bench-proven end to end by examples/aen/aen-isp-capture
  * (runs 69-145) and matching Alif's own viewfinder sample -- then YUYV as
  * the fallback if a driver build doesn't offer YUV420. YUYV was tried
  * first in an earlier revision (packed 4:2:2, no chroma-plane subsampling
@@ -347,7 +366,7 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	 * explicitly anyway, before the first video_stream_start(), as
 	 * documented intent and so a future driver default change can't
 	 * silently leave this backend's 3A off. Best-effort, same as
-	 * examples/aen/aen-isp-ov5647-capture: a driver build without the
+	 * examples/aen/aen-isp-capture: a driver build without the
 	 * WB/AE library modules just leaves the ctrl unset. */
 	struct video_control awb_ctrl = { .id = VIDEO_CID_AUTO_WHITE_BALANCE, .val = 1 };
 	(void)video_set_ctrl(dev, &awb_ctrl);
@@ -502,8 +521,8 @@ static alp_status_t isp_start(alp_camera_backend_state_t *state)
 		return ALP_OK;
 	}
 	/* Alif's own settle delay between the last buffer enqueue (isp_open())
-	 * and the first video_stream_start() -- examples/aen/aen-isp-ov5647-
-	 * capture mirrors this exactly; no smaller value is bench-proven. */
+	 * and the first video_stream_start() -- examples/aen/aen-isp-capture
+	 * mirrors this exactly; no smaller value is bench-proven. */
 	k_msleep(1000);
 	int err = video_stream_start(st->dev, VIDEO_BUF_TYPE_OUTPUT);
 	if (err == 0) {
@@ -544,7 +563,7 @@ isp_capture(alp_camera_backend_state_t *state, alp_camera_frame_t *out, uint32_t
 	 * checked out between this call and release()) and only restarts when
 	 * this app calls video_stream_start() again (isp_pico.c's own model,
 	 * no driver-driven restart of its own) -- re-arm before every dequeue,
-	 * mirroring examples/aen/aen-isp-ov5647-capture's per-frame loop.
+	 * mirroring examples/aen/aen-isp-capture's per-frame loop.
 	 * -EBUSY just means the driver hadn't auto-stopped yet since the last
 	 * call; either way there's nothing to do but keep going. */
 	/* Hand every already-completed (stale) buffer straight back to the

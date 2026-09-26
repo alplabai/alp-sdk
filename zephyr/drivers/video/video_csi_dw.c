@@ -322,10 +322,13 @@ static void csi2_dw_irq(const struct device *dev)
 
 static int csi2_dw_ipi_advanced_features(const struct device *dev)
 {
+	const struct csi2_dw_config *config = dev->config;
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
 
 	/*
-	 * 1. Disable Frame start to trigger any sync event.
+	 * 1. Frame start triggers a sync event only if ipi_fs_sync is set (#2287 Stage B, bench
+	 *    runs 304-306 -- see struct csi2_dw_config's and the ipi-fs-sync DT property's own
+	 *    comments); default (unset) behaviour is UNCHANGED from before this option existed.
 	 * 2. Enable Manual selection of packets for Line Delimiters.
 	 * 3. Disable use of embedded packets for IPI sync events.
 	 * 4. Disable use of blanking packets for IPI sync events.
@@ -341,7 +344,8 @@ static int csi2_dw_ipi_advanced_features(const struct device *dev)
 			       CSI_IPI_ADV_FEATURES_DT_OVERWRITE);
 
 	sys_set_bits(regs + CSI_IPI_ADV_FEATURES,
-		     CSI_IPI_ADV_FEATURES_SEL_LINE_EVENT | CSI_IPI_ADV_FEATURES_EN_VIDEO);
+		     CSI_IPI_ADV_FEATURES_SEL_LINE_EVENT | CSI_IPI_ADV_FEATURES_EN_VIDEO |
+			     (config->ipi_fs_sync ? CSI_IPI_ADV_FEATURES_SYNC_EVENT : 0));
 
 	return 0;
 }
@@ -566,6 +570,61 @@ static int csi2_dw_validate_data(const struct device *dev)
 	ret = clock_control_get_rate(config->clk_dev, config->pixclk, &tmp);
 	if (ret == 0) {
 		pixclock = tmp;
+	}
+
+	if (config->ipi_mode == CSI2_IPI_MODE_TIMINGS_CTRL && config->hline != 0 &&
+	    config->vtotal != 0) {
+		/*
+		 * Alp Lab AB (issue #2287 Stage B): csi-hline/csi-vtotal present (0 means "DT
+		 * doesn't set them", see struct csi2_dw_config's own comment) -- derive hsd/vfp
+		 * from them and the CURRENT format's hact/vact instead of using a fixed csi-hsd/
+		 * csi-vfp DT value. A single fixed csi-hsd (the pre-Stage-B behaviour, still used
+		 * when these two properties are absent) is only ever correct for the ONE hact it
+		 * was bench-swept against -- a sensor with more than one selectable resolution
+		 * (e.g. imx296.c's issue #2287 Stage B ROI mode, 1280 wide vs. the sensor's
+		 * 1456-wide full frame) would otherwise silently mistime the IPI line for every
+		 * format but that one: a narrower hact under the SAME fixed hsd shortens the
+		 * derived HLINE (hsa+hbp+hsd+hact) below the sensor's own unchanged line time,
+		 * starving the IPI rather than over- or under-running it by a margin any FIFO
+		 * headroom could absorb.
+		 */
+		int32_t hsd = (int32_t)config->hline - timing->hsa - timing->hbp - timing->hact;
+		int32_t vfp = (int32_t)config->vtotal - timing->vsa - timing->vbp - timing->vact;
+
+		if (hsd < 0 || vfp < 0) {
+			LOG_ERR("csi-hline %u / csi-vtotal %u too small for this format "
+				"(hact %u, vact %u, hsa %u, hbp %u, vsa %u, vbp %u): "
+				"derived hsd %d, vfp %d",
+				config->hline, config->vtotal, timing->hact, timing->vact,
+				timing->hsa, timing->hbp, timing->vsa, timing->vbp, hsd, vfp);
+			return -EINVAL;
+		}
+
+		/*
+		 * Alp Lab AB (issue #2287 Stage B, reviewer minor): CSI_IPI_HSD_TIME /
+		 * CSI_IPI_VFP_LINES are hardware fields narrower than the 32-bit arithmetic
+		 * above -- CSI_IPI_HSD_TIME_MASK is 12 bits (0-4095), CSI_IPI_VFP_LINES_MASK is
+		 * 10 bits (0-1023). csi2_dw_ipi_set_timings() below masks silently
+		 * (`timing->hsd & CSI_IPI_HSD_TIME_MASK`), which would truncate an
+		 * out-of-range derived value into the WRONG in-range one instead of failing --
+		 * reject here instead, at the one place that knows this was a Stage-B DERIVED
+		 * value (a plain fixed csi-hsd/csi-vfp DT value is never checked against these
+		 * masks either, same as before this change).
+		 */
+		if (hsd > CSI_IPI_HSD_TIME_MASK || vfp > CSI_IPI_VFP_LINES_MASK) {
+			/* GENMASK() (CSI_IPI_HSD_TIME_MASK/CSI_IPI_VFP_LINES_MASK's own
+			 * definition) is `unsigned long`, not `unsigned int` -- cast down for
+			 * %u rather than widen every other field in this LOG_ERR to %lu. */
+			LOG_ERR("csi-hline %u / csi-vtotal %u derived hsd %d / vfp %d out of "
+				"range for this format (hact %u, vact %u): hsd max %u, vfp max %u",
+				config->hline, config->vtotal, hsd, vfp, timing->hact,
+				timing->vact, (unsigned int)CSI_IPI_HSD_TIME_MASK,
+				(unsigned int)CSI_IPI_VFP_LINES_MASK);
+			return -EINVAL;
+		}
+
+		timing->hsd = (uint16_t)hsd;
+		timing->vfp = (uint16_t)vfp;
 	}
 
 	if (config->ipi_mode == CSI2_IPI_MODE_TIMINGS_CTRL && ret == 0) {
@@ -1019,6 +1078,21 @@ static int csi2_dw_init(const struct device *dev)
 	DT_PHA_BY_IDX(node_id, prop, idx, id)
 
 #define ALIF_MIPI_CSI_DEVICE(i)                                                                    \
+	/* issue #2287 Stage B, reviewer minor: catch a DT authoring mistake at build time \
+	 * rather than silently keeping the pre-Stage-B fixed-csi-hsd/csi-vfp behaviour for \
+	 * half of a csi-hline/csi-vtotal pair -- see snps,designware-csi.yaml's own doc \
+	 * comment. NOT also asserting "csi-hsd/csi-vfp absent when csi-hline/csi-vtotal \
+	 * are set" (the reviewer's original ask): zephyr/dts/alif/ensemble_e8_peripherals.dtsi's \
+	 * shared &csi node sets BOTH unconditionally (csi-hsd = <280>, csi-vfp = <4>) for \
+	 * every board -- DT_INST_NODE_HAS_PROP(i, csi_hsd) is unconditionally true \
+	 * whether or not a shield overlay itself sets it, so that check would fail-build \
+	 * every board that ever sets csi-hline/csi-vtotal, including this one's own \
+	 * shield overlay. Harmless either way: csi2_dw_validate_data() (video_csi_dw.c) \
+	 * only ever READS the base dtsi's csi-hsd/csi-vfp when csi-hline/csi-vtotal are \
+	 * ABSENT; when present, it overwrites timing->hsd/vfp before either is used. */ \
+	BUILD_ASSERT(DT_INST_NODE_HAS_PROP(i, csi_hline) == DT_INST_NODE_HAS_PROP(i, csi_vtotal), \
+		     "csi-hline and csi-vtotal must both be set, or both left unset"); \
+	                                                                                                   \
 	static void csi2_dw_config_func_##i(const struct device *dev);                             \
 	static const struct csi2_dw_config config_##i = {                                          \
 		DEVICE_MMIO_ROM_INIT(DT_DRV_INST(i)),                                              \
@@ -1034,6 +1108,11 @@ static int csi2_dw_init(const struct device *dev)
 		.irq_config_func = csi2_dw_config_func_##i,                                        \
                                                                                                    \
 		.ipi_mode = DT_INST_ENUM_IDX(i, ipi_mode),                                         \
+                                                                                                   \
+		/* issue #2287 Stage B: see struct csi2_dw_config's own comment on these two. */    \
+		.hline = DT_INST_PROP_OR(i, csi_hline, 0),                                         \
+		.vtotal = DT_INST_PROP_OR(i, csi_vtotal, 0),                                       \
+		.ipi_fs_sync = DT_INST_PROP(i, ipi_fs_sync),                                       \
 	};                                                                                         \
                                                                                                    \
 	static struct csi2_dw_data data_##i = {                                                    \

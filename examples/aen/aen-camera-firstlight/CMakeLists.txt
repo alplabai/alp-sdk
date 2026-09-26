@@ -43,6 +43,16 @@ if(AEN_CAMERA_TRIGGER)
     list(APPEND DTC_OVERLAY_FILE "${CMAKE_CURRENT_SOURCE_DIR}/trigger_gpio.overlay")
 endif()
 
+# Opt-in IMX296 ROI-mode demo (issue #2287 Stage B): selects the sensor's second, centred
+# 1280x960 crop (zephyr/drivers/video/imx296.c's IMX296_ROI_WIDTH/HEIGHT) instead of the default
+# full 1456x1088 frame -- see src/main.c's CAM_WIDTH/CAM_HEIGHT #elif ladder, which is the only
+# other place this define is read. OFF by default: a normal IMX296 build stays the more
+# bench-tested full-frame capture it always was. No DT overlay needed (unlike
+# AEN_CAMERA_TRIGGER above) -- the ROI registers are driven entirely by imx296_set_stream()
+# reading back the format video_set_format() selected, not by anything in devicetree.
+#   -DAEN_CAMERA_IMX296_ROI=ON
+option(AEN_CAMERA_IMX296_ROI "Capture IMX296's 1280x960 ROI crop instead of the full frame" OFF)
+
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(aen_camera_firstlight LANGUAGES C)
 
@@ -50,4 +60,8 @@ target_sources(app PRIVATE src/main.c)
 
 if(AEN_CAMERA_TRIGGER)
     target_compile_definitions(app PRIVATE AEN_CAMERA_TRIGGER=1)
+endif()
+
+if(AEN_CAMERA_IMX296_ROI)
+    target_compile_definitions(app PRIVATE AEN_CAMERA_IMX296_ROI=1)
 endif()

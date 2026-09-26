@@ -89,6 +89,75 @@ properties:
     description: |
       The Horizontal active time in PIXCLK.
 
+  csi-hline:
+    type: int
+    required: false
+    description: |
+      Issue #2287 Stage B. Optional, Controller-mode only ("csi-ipi-mode" =
+      "Controller"): total IPI line length in PIXCLK, i.e. what the sensor's
+      own line time (its HMAX-derived 1H period) works out to once
+      re-expressed in this controller's pixel clock -- csi-hsa + csi-hbp +
+      csi-hsd + csi-hact. When present, csi-hsd is DERIVED from it at
+      configure time (hsd = csi-hline - csi-hsa - csi-hbp - hact, where hact
+      is the format's own active width, not a fixed DT value) instead of
+      read as a fixed csi-hsd property -- csi-hsd is IGNORED (overridden by
+      the derivation) whenever csi-hline is set, whether or not csi-hsd
+      itself is also present in DT (a shared base dtsi may set csi-hsd
+      unconditionally for every board on this controller, in which case
+      there is no "unset" state to omit it into -- the override still
+      applies). This is what keeps the derived Controller-mode timing
+      correct across every format a sensor can select (e.g. a sensor with a
+      cropped ROI mode alongside its full-frame mode -- see
+      raspberry_pi_global_shutter_camera.overlay's own comment) where a
+      single fixed csi-hsd, swept for only one of those formats, would
+      otherwise silently mistime every other one. Requires csi-vtotal to
+      also be set (the two are configured as a pair); leaving one but not
+      the other set is a devicetree authoring mistake this binding does not
+      itself reject.
+
+  csi-vtotal:
+    type: int
+    required: false
+    description: |
+      Issue #2287 Stage B. Optional, Controller-mode only, pairs with
+      csi-hline above: total number of lines per frame in the sensor's own
+      timing (its VMAX in master mode) -- csi-vsa + csi-vbp + csi-vfp +
+      csi-vact. When present, csi-vfp is DERIVED from it at configure time
+      (vfp = csi-vtotal - csi-vsa - csi-vbp - vact, where vact is the
+      format's own active height) instead of read as a fixed csi-vfp
+      property -- csi-vfp is IGNORED (overridden) the same way csi-hsd is,
+      see csi-hline's description above (including for a shared base dtsi
+      that sets csi-vfp unconditionally). See csi-hline's description above
+      for why deriving from a format-independent total (rather than a
+      per-format fixed value) is what this property exists for.
+
+  ipi-fs-sync:
+    type: boolean
+    description: |
+      Issue #2287 Stage B (bench runs 304-306, E1M-AEN803 2026W36-0001): sets
+      CSI_IPI_ADV_FEATURES_SYNC_EVENT (bit 24, csi2_dw_ipi_advanced_features()
+      in video_csi_dw.c) instead of clearing it -- re-locks the IPI's frame
+      boundary to the CSI-2 protocol's own Frame Start short packet on every
+      frame, instead of the controller inferring frame boundaries purely from
+      the video-packet stream (this bit's default, cleared, state). Runs
+      304-306's multi-frame ROI capture through the ISP (the first workload to
+      stream continuously in DW CSI-2 Controller-timing mode, derived hsd 679/
+      vfp 153) showed a captured frame straddling what looks like two sensor
+      frames -- a real scene visible only in one horizontal band, the rest
+      horizontally-streaky texture not matching the scene, the band's row
+      range differing per run (run 307: rows 0-255 plus a thin strip at the
+      bottom; run 308: rows 832-895 -- the band MOVED between runs, not a
+      fixed offset). Bench run C5 isolated this property against the
+      symptom (build with it enabled, run 308) and found NO effect --
+      GAINDLY (build C4) was isolated the same way, also no effect. The
+      ACTUAL cause (bench runs 309/310, see changelog.d/2287.md) was a race
+      in alif_cam_work_helper()'s own CPI re-arm timing (video_alif.c),
+      fixed by moving CPI re-arm responsibility to the ISP -- this property
+      is NOT implicated. Kept as a real, working, still-untested-against-any-
+      symptom capability (isolating one variable at a time was the right
+      call even though this one came back negative) -- NOT enabled on any
+      shield. Optional, default false (unchanged controller behaviour).
+
   rx-ddr-clk1:
     type: int
     required: false

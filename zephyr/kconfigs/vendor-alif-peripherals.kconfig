@@ -995,7 +995,7 @@ config VIDEO_ARX3A0
 # (isp_api_wrapper.c:880, :1242); the v4.4 port just dropped their only
 # callers porting the ctrl API, so there is no compile blocker either way.
 # COMPILE + LINK + RUNTIME now PROVEN on real silicon
-# (examples/aen/aen-isp-ov5647-capture, CONFIG_VIDEO_ISP_VSI=y, a real
+# (examples/aen/aen-isp-capture, CONFIG_VIDEO_ISP_VSI=y, a real
 # OV5647 sensor through the full camera->csi->isp->memory graph with
 # AE/AWB running). Stays default n / OPT-IN here regardless -- links the
 # proprietary Vivante blob.
@@ -1016,7 +1016,7 @@ config VIDEO_ISP_VSI
 	  OPT-IN, default n.  Compiles + links against hal_alif v2.3.0 (isp-vsi.h +
 	  isp_ctrl_params.h vendored VERBATIM from zephyr_alif v2.3.0 into
 	  zephyr/include/zephyr/drivers/video/) and runs end to end on real
-	  silicon (examples/aen/aen-isp-ov5647-capture: a real OV5647 sensor
+	  silicon (examples/aen/aen-isp-capture: a real OV5647 sensor
 	  through the full camera->csi->isp->memory graph, AE/AWB via the
 	  standard Zephyr video ctrl registry).
 	  Driver: zephyr/drivers/video/isp_pico.c.
@@ -1078,6 +1078,141 @@ config VIDEO_ISP_VSI_CALIB_OV5647
 	  default y whenever CONFIG_VIDEO_OV5647 (the sensor driver this
 	  calibration matches) is enabled -- ARX3A0's table is never the right
 	  default on a board running this sensor.
+
+config VIDEO_ISP_VSI_CALIB_IMX296
+	bool "ISP-Pico AE calibration: use IMX296's own AE envelope, not ARX3A0's"
+	default y if VIDEO_IMX296
+	depends on VIDEO_ISP_VSI && !VIDEO_ISP_VSI_CALIB_OV5647
+	help
+	  Same mechanism as VIDEO_ISP_VSI_CALIB_OV5647 above (isp_param_conf.h
+	  compiles in one static calibration blob, patch 0007's SetCalib guard
+	  loads it once), but for hal_alif patch 0013's IMX296 AE envelope
+	  (sensor_attributes.h's AE_SNS_DEFAULT_S table and isp_param_conf.h's
+	  .ae block, both sourced from imx296_ae_envelope.h) instead of patch
+	  0011's OV5647 one. AWB/CCM stay on the ARX3A0 #else arm for IMX296 --
+	  there is no IMX296-fitted colour calibration yet (#2287 unit 4);
+	  this symbol only swaps the AE envelope.
+
+	  `depends on !VIDEO_ISP_VSI_CALIB_OV5647` (rather than the reverse)
+	  keeps the two mutually exclusive without touching the OV5647 symbol
+	  above: hal_alif patch 0013's isp_param_conf.h #if chain only has one
+	  slot for a non-ARX3A0 AE block, so both can never legitimately be y
+	  in the same build regardless of which sensor drivers happen to be
+	  enabled.
+
+	  default y whenever CONFIG_VIDEO_IMX296 is enabled, same reasoning as
+	  the OV5647 symbol's own default.
+
+config VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS
+	bool "ISP-Pico AE gain writeback: sensor register is 0.1 dB/count, not linear"
+	default y if VIDEO_ISP_VSI_CALIB_IMX296
+	depends on VIDEO_ISP_VSI
+	help
+	  isp_pico.c's isp_sns_gain_ctrl_from_lib()/isp_sns_gain_lib_from_ctrl()
+	  (zephyr/drivers/video/isp_sns_gain_conv.h) and hal_alif patch 0013's
+	  isp_api_wrapper.c writeback both need to know whether the bound
+	  sensor's analogue-gain register is LINEAR (OV5647's AGC_GAIN,
+	  register value directly proportional to gain --
+	  VIDEO_ISP_VSI_SNS_GAIN_REG_PER_1X below) or LOGARITHMIC (IMX296's
+	  GAIN, 0.1 dB per register count -- see isp_sns_gain_conv.h's own
+	  comment for the conversion). Selecting this symbol switches both
+	  sites to the dB-tenths lookup table instead of the linear
+	  multiply/divide; VIDEO_ISP_VSI_SNS_GAIN_REG_PER_1X is ignored while
+	  this is y.
+
+	  default y whenever CONFIG_VIDEO_ISP_VSI_CALIB_IMX296 is enabled (not
+	  the raw CONFIG_VIDEO_IMX296 sensor-driver symbol -- tying this to the
+	  SAME "which AE envelope is active" symbol the calibration block
+	  itself uses keeps every IMX296-AE-specific Kconfig default anchored
+	  to one selector) -- n (linear) is the correct default for every
+	  other sensor this driver currently supports (OV5647, OV9281).
+
+config VIDEO_ISP_VSI_SNS_GAIN_REG_PER_1X
+	int "ISP-Pico AE gain writeback: sensor register units per 1.0x (linear sensors only)"
+	default 16
+	depends on VIDEO_ISP_VSI
+	help
+	  Only READ on a LINEAR-gain sensor (VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS
+	  off) -- deliberately NOT `depends on !VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS`:
+	  isp_sns_gain_ctrl_from_lib()/isp_sns_gain_lib_from_ctrl()
+	  (isp_sns_gain_conv.h) reference this symbol from BOTH branches of
+	  their IS_ENABLED(...DB_TENTHS) dispatch at compile time (only one
+	  branch executes at runtime, but C compiles both), so making this
+	  symbol disappear from autoconf.h whenever DB_TENTHS is y (as an
+	  actual `depends on !...DB_TENTHS` would) breaks the build for every
+	  DB-tenths sensor (IMX296) with an "undeclared identifier" error.
+	  Always visible, harmlessly unused on a DB-tenths build. Default 16
+	  matches OV5647's AGC_GAIN (0x350a): register value 0x10 (16) = 1.0x
+	  -- see isp_pico.c's own ISP_AE_GAIN_REG_PER_1X history for why this
+	  is a Kconfig now instead of a hardcoded #define: a second linear-gain
+	  sensor with a different register
+	  scale can override this per board without touching isp_pico.c.
+
+config VIDEO_ISP_VSI_SNS_EXPOSURE_CTRL_PER_LINE
+	int "ISP-Pico AE exposure writeback: sensor control units per LINE"
+	default 1 if VIDEO_ISP_VSI_CALIB_IMX296
+	default 16
+	depends on VIDEO_ISP_VSI
+	help
+	  isp_sns_exposure_ctrl_from_lines() (isp_sns_gain_conv.h) and hal_alif
+	  patch 0013's isp_api_wrapper.c writeback both scale a LINE count
+	  (the library's own exposure unit) by this factor before writing the
+	  sensor's VIDEO_CID_EXPOSURE control -- NOT its hardware register
+	  directly. OV5647's VIDEO_CID_EXPOSURE is in 1/16-line units (default
+	  16, matching the OV5647 write-back this file's own isp_api_wrapper.c
+	  hunk originally hardcoded); IMX296's VIDEO_CID_EXPOSURE
+	  (zephyr/drivers/video/imx296.c's imx296_set_ctrl()) is already in
+	  whole LINES (1) -- imx296_set_ctrl() itself then converts that line
+	  count to the inversely-related SHS register (SHS = lines_per_frame -
+	  lines, datasheet p.60) before writing 0x308D-0x308F; this Kconfig
+	  and isp_sns_exposure_ctrl_from_lines() never see or compute an SHS
+	  value. default 1 whenever CONFIG_VIDEO_ISP_VSI_CALIB_IMX296 is
+	  enabled (not the raw CONFIG_VIDEO_IMX296 sensor-driver symbol -- see
+	  VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS's own help for why).
+
+config VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS
+	int "ISP-Pico AE gain ceiling PUSH cap, in 0.1 dB units (0 = no cap)"
+	range 0 480
+	default 240 if VIDEO_ISP_VSI_CALIB_IMX296
+	default 0
+	depends on VIDEO_ISP_VSI
+	help
+	  Bench run 313 (#2287): isp_apply_ae() queries the SENSOR's own
+	  registered VIDEO_CID_ANALOGUE_GAIN control range (video_query_ctrl(),
+	  above) and pushes THAT as the library's again_max ceiling every
+	  isp_stream_start() -- correct in general (a sensor-agnostic ceiling,
+	  not a hardcoded ARX3A0/OV5647 constant), but IMX296's manual control
+	  range is deliberately left at the full register range (0-480, 0-48.0
+	  dB -- VIDEO_CID_ANALOGUE_GAIN's driver-side max, zephyr/drivers/
+	  video/imx296.c) so a caller SETTING gain manually can still reach
+	  it, while hal_alif patch 0013's calibration caps the AE LIBRARY's
+	  OWN ceiling lower, at 24.0 dB (IMX296_AE_MAX_AGAIN, the register's
+	  analog-only half -- see that header's own comment). Without this
+	  cap, isp_apply_ae()'s push OVERWRITES the calibration's lower
+	  ceiling with the sensor's wider manual one every time -- the
+	  library's own clamp still holds the ceiling at its compiled-in
+	  16229 (confirmed bench-side: run 313's `again` converged to
+	  0x3f65 = 16229, not higher), but the push itself is wrong and logs
+	  "AE attr mismatch after set" every isp_stream_start() (readback
+	  disagreeing with what was just pushed). This symbol, when nonzero,
+	  clamps the PUSHED again_max to
+	  isp_sns_gain_db_tenths_to_lib(this value) -- so the push and the
+	  library's own compiled-in ceiling agree and the mismatch log stops.
+	  0 (every sensor except IMX296) means "trust the sensor's control
+	  range as-is", unchanged behaviour.
+
+	  default 240 (24.0 dB) whenever CONFIG_VIDEO_ISP_VSI_CALIB_IMX296 is
+	  enabled -- matches hal_alif patch 0013's IMX296_AE_MAX_AGAIN by
+	  hand (same by-hand-invariant status that header's own comment
+	  documents for its OTHER hand-synced figures); a future change to
+	  one without the other reintroduces the same mismatch this symbol
+	  exists to silence.
+
+	  `range 0 480`: 480 is IMX296's own GAIN register's full legal
+	  range (0.0-48.0 dB, 0.1 dB/count) -- a value above that has no
+	  register encoding for isp_sns_gain_db_tenths_to_lib() to clamp
+	  toward, so it can never be a meaningful cap on any sensor this
+	  symbol could apply to.
 
 config VIDEO_ISP_VSI_AE_TARGET
 	int "ISP-Pico AE target luminance [0, 255]"

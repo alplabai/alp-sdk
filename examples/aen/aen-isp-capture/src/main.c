@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * aen-isp-ov5647-capture -- the Alif ISP-Pico (VeriSilicon ISP Nano,
+ * aen-isp-capture -- the Alif ISP-Pico (VeriSilicon ISP Nano,
  * compatible "vsi,isp-pico") bring-up on the E1M-AEN801/AEN803 (Ensemble
  * E8, M55-HE): a REAL OV5647 sensor frame through the ISP
  * (sensor -> csi -> cam -> isp -> memory), with AE (auto exposure/gain) and
@@ -73,6 +73,30 @@
  * from the ISP: CCM amplifies an existing low-saturation cast rather than
  * causing it, and will be retuned by that grey-card calibration rather
  * than by turning CCM off.
+ *
+ * IMX296 VARIANT (issue #2287 Stage B, -DAEN_ISP_IMX296=ON, off by default): the same
+ * sensor -> csi -> cam -> isp graph with IMX296's 1280x960 ROI crop (SRGGB10P) in place of
+ * OV5647's 640x480 (SBGGR10P) -- see the FRAME_WIDTH/HEIGHT/N_FRAMES/ISP_INPUT_FOURCC #if
+ * ladder below. AWB stays manual/off for this variant regardless of AE mode (no IMX296-fitted
+ * AWB/CCM calibration exists yet, unlike OV5647's patches 0008/0011, #2287 unit 4).
+ *
+ *   - AE off (default -- layer overlay-no-ae.conf, CONFIG_ISP_LIB_AE_MODULE=n): ONE frame
+ *     captured, this driver's original first-light proof that hal_alif patch 0012
+ *     (zephyr/patches/hal_alif/0012-isp-srggb10p-input.patch)'s
+ *     SRGGB10P->PIXEL_FORMAT_RGGB10 mapping and isp_pico.c's matching input-format cap entry
+ *     actually let a real IMX296 frame reach the ISP, not a bench-tuned capture like OV5647's
+ *     30-frame AE+AWB runs above. Bench-verified (bench run 297, changelog.d/2287.md): data
+ *     path through the ISP confirmed, image quality not (no AWB/CCM calibration for this
+ *     sensor yet).
+ *   - AE on (this example's default, prj.conf's own CONFIG_ISP_LIB_AE_MODULE=y -- AE-off above
+ *     is the opt-in variant, via layering overlay-no-ae.conf; this branch needs nothing extra,
+ *     #2287 Stage B unit 3): 60 frames, letting isp_pico.c's isp_apply_ae() writeback settle
+ *     against IMX296's real AE envelope (hal_alif patch 0013,
+ *     drivers/isp/isp_wrapper/inc/imx296_ae_envelope.h, sourced from the datasheet) before the
+ *     last frame is kept. print_imx296_ae_regs() (below) reads the sensor's own SHS
+ *     (0x308D-0x308F) and GAIN (0x3204-0x3205) registers directly over I2C every printed
+ *     frame -- proof of what the writeback actually landed in the sensor, not just what the
+ *     library computed as a target.
  */
 
 #include <stdbool.h>
@@ -91,6 +115,17 @@
 
 #define ISP_NODE    DT_NODELABEL(isp)
 #define OV5647_NODE DT_NODELABEL(ov5647)
+#define IMX296_NODE DT_NODELABEL(imx296)
+/* issue #2287 Stage B: IMX296 variant (-DAEN_ISP_IMX296=ON, see CMakeLists.txt) -- a second
+ * real sensor through the SAME sensor -> csi -> cam -> isp graph, in place of OV5647. The
+ * boards/ overlay files are sensor-agnostic (they only reference &cam/&isp, not &ov5647), so
+ * building with SHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera" instead of
+ * raspberry_pi_camera_module_1 is the only DT-side change needed; see the
+ * FRAME_WIDTH/HEIGHT/N_FRAMES/ISP_INPUT_FOURCC block below for what this file itself
+ * parametrizes. No IMX296_NODE macro here (unlike OV5647_NODE) -- this app has no
+ * IMX296-specific sensor register dump or manual-ctrl block to gate on one; IMX296's own
+ * exposure/gain already default to sane fixed values at imx296_init() (imx296.c), nothing this
+ * app needs to touch. */
 
 /*
  * isp_vsi_register_ae_status_callback() (isp_pico.c, exported via the
@@ -115,14 +150,57 @@ static void ae_status_cb(const struct device *dev, uint8_t ae_stable, void *user
  * isp_pico.c. */
 extern volatile uint32_t isp_mi_frame_end_count;
 
-#define FRAME_WIDTH    640
-#define FRAME_HEIGHT   480
+#if defined(AEN_ISP_IMX296)
+/*
+ * issue #2287 Stage B: IMX296's 1280x960 ROI crop (zephyr/drivers/video/imx296.c's
+ * IMX296_ROI_WIDTH/HEIGHT), not its 1456x1088 full frame -- the ISP INPUT format table
+ * (zephyr/drivers/video/isp_pico.c's supported_input_fmts[], ISP_VIDEO_FORMAT_CAP entries) caps
+ * every format at height 1080, which 1088 exceeds; the ROI crop's 960 fits.
+ *
+ * #2287 Stage B unit 3: N_FRAMES depends on whether AE is compiled in. With
+ * CONFIG_ISP_LIB_AE_MODULE=n (overlay-no-ae.conf layered in, the original first-light plumbing
+ * proof for hal_alif patch 0012 + isp_pico.c's SRGGB10P input cap): ONE frame, AE/AWB manual/off,
+ * unchanged from before this unit. With CONFIG_ISP_LIB_AE_MODULE=y (this example's own default,
+ * no overlay-no-ae.conf -- unit 3's AE-on scenario, hal_alif patch 0013's IMX296 AE envelope):
+ * 60 frames, letting the AE loop settle against real IMX296 SHS/GAIN register writeback before
+ * the last frame is kept -- AWB stays manual (no IMX296 AWB/CCM calibration yet, #2287 unit 4).
+ *
+ * AEN_ISP_N_FRAMES (CMakeLists.txt's -DAEN_ISP_N_FRAMES=<n> option) overrides the AE-on/off
+ * default above when set (nonzero) -- lets an AE-off run capture more than one frame, to check
+ * whether a symptom is specific to the AE loop or also shows up under a fixed manual exposure
+ * held over more frames. See README.md.
+ */
+#define FRAME_WIDTH  1280
+#define FRAME_HEIGHT 960
+#if defined(AEN_ISP_N_FRAMES)
+#define N_FRAMES AEN_ISP_N_FRAMES
+#else
+#define N_FRAMES (IS_ENABLED(CONFIG_ISP_LIB_AE_MODULE) ? 60 : 1)
+#endif
+#define ISP_INPUT_FOURCC VIDEO_PIX_FMT_SRGGB10P
+#else
+#define FRAME_WIDTH      640
+#define FRAME_HEIGHT     480
+#define N_FRAMES         30
+#define ISP_INPUT_FOURCC VIDEO_PIX_FMT_SBGGR10P
+#endif
 #define FRAME_SIZE     (FRAME_WIDTH * FRAME_HEIGHT * 3 / 2) /* YUV420 planar */
 #define N_BUFFERS      2
-#define N_FRAMES       30
 #define REG_DUMP_EVERY 5
 
+#if !defined(AEN_ISP_IMX296)
+/*
+ * OV5647 only: a separate SRAM0 copy of the last frame, taken so the bench hold below can
+ * savebin a fixed, known address regardless of which of the N_BUFFERS video_enqueue() cycles
+ * back through the driver next. The IMX296 variant (no further frames ever dequeued once the
+ * loop reaches f == N_FRAMES, whether that's 1 or the AE-on scenario's 60) instead holds the
+ * DEQUEUED buffer itself before re-enqueueing it -- see the f == N_FRAMES block below -- so it
+ * needs no second copy, and no extra ~1.8 MB of SRAM0 on top of the pool already sized to hold 2
+ * buffers that size (see the AEN_ISP_IMX296 CONFIG_VIDEO_BUFFER_POOL_HEAP_SIZE note in
+ * prj.conf/overlay-imx296.conf).
+ */
 static uint8_t frame_copy[FRAME_SIZE] __attribute__((section("SRAM0"), aligned(64)));
+#endif
 
 #define ISP_BASE          (0x49046000UL)
 #define ISP_DGAIN_RB      (ISP_BASE + 0x800) /* isp_pico.h:95 */
@@ -162,14 +240,39 @@ static inline uint32_t reg32(uintptr_t addr)
 
 /* Hand-rolled CCI read: OV5647's own exposure/gain registers, independent
  * of the driver's private video_common.h CCI helper (not on this app's
- * include path) -- same wire protocol, the public zephyr/drivers/i2c.h API. */
+ * include path) -- same wire protocol, the public zephyr/drivers/i2c.h API.
+ * issue #2287 Stage B: guarded on OV5647_NODE existing, matching
+ * print_ov5647_ae_regs()'s own #if below -- its only caller -- so an
+ * IMX296 build (OV5647_NODE absent from DT) doesn't trip
+ * -Wunused-function. */
+#if DT_NODE_EXISTS(OV5647_NODE)
 static int ov5647_read_reg8(const struct i2c_dt_spec *i2c, uint16_t reg, uint8_t *val)
 {
 	uint8_t reg_be[2] = { (uint8_t)(reg >> 8), (uint8_t)(reg & 0xFF) };
 
 	return i2c_write_read_dt(i2c, reg_be, sizeof(reg_be), val, 1);
 }
+#endif
 
+/* #2287 Stage B unit 3: same hand-rolled CCI read as ov5647_read_reg8() above, generalised to a
+ * multi-byte little-endian read (imx296.c's IMX296_REG24/REG16 registers are LSB-first, per the
+ * datasheet's "Register List" tables) -- guarded on IMX296_NODE existing, matching
+ * print_imx296_ae_regs()'s own #if below, its only caller. */
+#if DT_NODE_EXISTS(IMX296_NODE)
+static int imx296_read_reg_le(const struct i2c_dt_spec *i2c, uint16_t reg, uint8_t *vals, size_t n)
+{
+	uint8_t reg_be[2] = { (uint8_t)(reg >> 8), (uint8_t)(reg & 0xFF) };
+
+	return i2c_write_read_dt(i2c, reg_be, sizeof(reg_be), vals, n);
+}
+#endif
+
+/*
+ * #2287 Stage B unit 3: guarded so an IMX296 build (which calls print_imx296_ae_regs() instead,
+ * below) doesn't trip -Wunused-function -- this function is otherwise called unconditionally in
+ * the per-frame print block.
+ */
+#if !(defined(AEN_ISP_IMX296) && DT_NODE_EXISTS(IMX296_NODE))
 static void print_ov5647_ae_regs(int f)
 {
 #if DT_NODE_EXISTS(OV5647_NODE)
@@ -243,6 +346,66 @@ static void print_ov5647_ae_regs(int f)
 	       reg32(ISP_AWB_V_SIZE),
 	       reg32(ISP_AWB_FRAMES));
 }
+#endif /* !(defined(AEN_ISP_IMX296) && DT_NODE_EXISTS(IMX296_NODE)) */
+
+/*
+ * #2287 Stage B unit 3, AE-on IMX296 scenario: reads back the SENSOR's own AE registers directly
+ * over I2C every printed frame, same purpose as print_ov5647_ae_regs()'s 0x3500-02/0x350a-0b dump
+ * above -- proof of what hal_alif patch 0013's writeback (isp_api_wrapper.c's
+ * isp_sns_gain_ctrl_from_lib()/isp_sns_exposure_ctrl_from_lines() calls, dB-tenths gain scale for
+ * this sensor) actually landed in the sensor, not just what isp_pico.c's isp_apply_ae() computed
+ * as a target. SHS (0x308D-0x308F, 24-bit LSB-first, imx296.c's IMX296_REG_SHS) is in LINES
+ * counted DOWN from lines_per_frame (exposure = lines_per_frame - SHS, imx296.c's own comment);
+ * GAIN (0x3204-0x3205, 16-bit LSB-first, imx296.c's IMX296_REG_GAIN) is in 0.1 dB/count, 0-480
+ * (IMX296_GAIN_MAX) -- the SAME register range zephyr/drivers/video/isp_sns_gain_conv.h's
+ * isp_gain_db_tenths_table[] and imx296_ae_envelope.h's IMX296_AE_MAX_AGAIN were derived to cover.
+ */
+#if DT_NODE_EXISTS(IMX296_NODE)
+static void print_imx296_ae_regs(int f)
+{
+	const struct i2c_dt_spec i2c        = I2C_DT_SPEC_GET(IMX296_NODE);
+	uint8_t                  shs_le[3]  = { 0 };
+	uint8_t                  gain_le[2] = { 0 };
+	int                      rc_shs     = imx296_read_reg_le(&i2c, 0x308D, shs_le, sizeof(shs_le));
+	int                      rc_gain = imx296_read_reg_le(&i2c, 0x3204, gain_le, sizeof(gain_le));
+	uint32_t shs  = (uint32_t)shs_le[0] | ((uint32_t)shs_le[1] << 8) | ((uint32_t)shs_le[2] << 16);
+	uint32_t gain = (uint32_t)gain_le[0] | ((uint32_t)gain_le[1] << 8);
+	/* lines_per_frame == IMX296_VMAX (1118, imx296.c) at this driver's one fixed frame rate --
+	 * see imx296_ae_envelope.h's IMX296_AE_FULL_LINES for the same figure. exposure(lines) =
+	 * lines_per_frame - SHS, imx296.c's own IMX296_REG_SHS comment. */
+	uint32_t exposure_lines = (shs < 1118) ? (1118 - shs) : 0;
+
+	printk("f%d imx296 SHS(0x308d-f)=0x%06x (rc=%d, exposure=%u lines) "
+	       "GAIN(0x3204-5)=0x%04x (rc=%d, =%u.%01u dB)\n",
+	       f,
+	       shs,
+	       rc_shs,
+	       exposure_lines,
+	       gain,
+	       rc_gain,
+	       gain / 10,
+	       gain % 10);
+
+	/*
+	 * Same EXPM/g_ae_stable dump print_ov5647_ae_regs() prints above, for the IMX296 path:
+	 * an unmoving SHS/GAIN readback can mean either the AE loop never runs (EXPM measurement
+	 * window overflow -- IMX296's 1280-wide ROI / 5 = 256 exceeds an 8-bit ISP_EXP_H_SIZE) or
+	 * it runs and parks on a genuinely black measurement -- h_size/v_size == 0 or an obviously
+	 * wrong value points at the former; a nonzero, plausible h_size/v_size with mean_22 == 0
+	 * points at the latter.
+	 */
+	printk("f%d DGAIN_RB=0x%08x DGAIN_G=0x%08x ae_stable=%u\n",
+	       f,
+	       reg32(ISP_DGAIN_RB),
+	       reg32(ISP_DGAIN_G),
+	       g_ae_stable);
+	printk("f%d ISP_EXP_H_SIZE=%u ISP_EXP_V_SIZE=%u ISP_EXP_MEAN_22=%u\n",
+	       f,
+	       reg32(ISP_EXP_H_SIZE),
+	       reg32(ISP_EXP_V_SIZE),
+	       reg32(ISP_EXP_MEAN_22));
+}
+#endif
 
 struct plane_stats {
 	uint32_t mean;
@@ -270,7 +433,13 @@ static void plane_stats_compute(const uint8_t *plane, size_t n, struct plane_sta
 
 int main(void)
 {
-	printk("\n=== aen-isp-ov5647-capture (real OV5647 through the ISP, AE+AWB on) ===\n");
+#if defined(AEN_ISP_IMX296)
+	printk("\n=== aen-isp-capture (issue #2287 Stage B: real IMX296 ROI through the ISP, "
+	       "AE=%s AWB=manual/off) ===\n",
+	       IS_ENABLED(CONFIG_ISP_LIB_AE_MODULE) ? "auto (unit 3)" : "manual/off");
+#else
+	printk("\n=== aen-isp-capture (real OV5647 through the ISP, AE+AWB on) ===\n");
+#endif
 
 	const struct device *isp_dev = DEVICE_DT_GET_OR_NULL(ISP_NODE);
 
@@ -348,6 +517,76 @@ int main(void)
 	}
 #endif
 
+#if defined(AEN_ISP_IMX296) && DT_NODE_EXISTS(IMX296_NODE) && \
+    (defined(AEN_ISP_IMX296_EXPOSURE_LINES) || defined(AEN_ISP_IMX296_GAIN))
+	/*
+	 * Pin a SPECIFIC manual exposure/gain combination directly on the sensor -- independent
+	 * of whatever AE would have converged to -- since SHS and gain otherwise always move
+	 * together via AE, making the two impossible to separate on a failing capture. AE-off
+	 * only (CMakeLists.txt's own comment): with the AE library compiled in, isp_apply_ae()'s
+	 * own per-frame writeback (isp_api_wrapper.c) would immediately overwrite whatever this
+	 * sets on the very next frame.
+	 */
+	const struct device *imx296_dev = DEVICE_DT_GET(IMX296_NODE);
+
+	if (device_is_ready(imx296_dev)) {
+#if defined(AEN_ISP_IMX296_EXPOSURE_LINES)
+		struct video_control imx296_exp_ctrl = {
+			.id  = VIDEO_CID_EXPOSURE,
+			.val = AEN_ISP_IMX296_EXPOSURE_LINES,
+		};
+		int rc_imx296_exp = video_set_ctrl(imx296_dev, &imx296_exp_ctrl);
+
+		printk("imx296 EXPOSURE=%d lines rc=%d\n", imx296_exp_ctrl.val, rc_imx296_exp);
+#endif
+#if defined(AEN_ISP_IMX296_GAIN)
+		struct video_control imx296_gain_ctrl = {
+			.id  = VIDEO_CID_ANALOGUE_GAIN,
+			.val = AEN_ISP_IMX296_GAIN,
+		};
+		int rc_imx296_gain = video_set_ctrl(imx296_dev, &imx296_gain_ctrl);
+
+		printk("imx296 ANALOGUE_GAIN=%d (0.1 dB tenths) rc=%d\n",
+		       imx296_gain_ctrl.val,
+		       rc_imx296_gain);
+#endif
+		/* Readback: the SAME registers print_imx296_ae_regs() (below) reads every printed
+		 * frame -- printed once here, right after the writes above and before
+		 * video_stream_start(), so the bench log has a clean before-first-frame snapshot
+		 * of what the sensor actually latched. */
+		const struct i2c_dt_spec i2c        = I2C_DT_SPEC_GET(IMX296_NODE);
+		uint8_t                  shs_le[3]  = { 0 };
+		uint8_t                  gain_le[2] = { 0 };
+		int                      rc_shs = imx296_read_reg_le(&i2c, 0x308D, shs_le, sizeof(shs_le));
+		int      rc_gain = imx296_read_reg_le(&i2c, 0x3204, gain_le, sizeof(gain_le));
+		uint32_t shs =
+		    (uint32_t)shs_le[0] | ((uint32_t)shs_le[1] << 8) | ((uint32_t)shs_le[2] << 16);
+		uint32_t gain = (uint32_t)gain_le[0] | ((uint32_t)gain_le[1] << 8);
+
+		printk("imx296 control-capture readback: SHS(0x308d-f)=0x%06x (rc=%d) "
+		       "GAIN(0x3204-5)=0x%04x (rc=%d)\n",
+		       shs,
+		       rc_shs,
+		       gain,
+		       rc_gain);
+	} else {
+		printk("imx296 device not ready; skipping control-capture manual exposure/gain\n");
+	}
+#endif /* defined(AEN_ISP_IMX296) && DT_NODE_EXISTS(IMX296_NODE) &&
+	  (defined(AEN_ISP_IMX296_EXPOSURE_LINES) || defined(AEN_ISP_IMX296_GAIN)) */
+
+#if defined(AEN_ISP_IMX296)
+	/*
+	 * issue #2287 Stage B: AWB OFF (manual) for this first IMX296-through-ISP pass -- there is
+	 * no IMX296-fitted AWB/CCM calibration (hal_alif patch 0008/0011's tables are OV5647-only,
+	 * gated on CONFIG_VIDEO_ISP_VSI_CALIB_OV5647), so running the auto loop against the stock
+	 * ARX3A0 calibration would tune against facts that don't describe this sensor, the same
+	 * mismatch #2271's OV5647 AE fix addressed for exposure/gain. The WB module itself stays
+	 * compiled in (prj.conf's CONFIG_ISP_LIB_WB_MODULE=y, unchanged) -- this ctrl only selects
+	 * auto-vs-manual, same as the comment on the OV5647 branch below explains.
+	 */
+	struct video_control awb_ctrl = { .id = VIDEO_CID_AUTO_WHITE_BALANCE, .val = 0 };
+#else
 	/* AWB is already ON by default at the driver level (matches the
 	 * calibration's own OP_TYPE_AUTO AWB, hal_alif patch 0009) -- this SET
 	 * is explicit intent, not a required enable. It still enables the WB
@@ -358,9 +597,11 @@ int main(void)
 	 * either way, only auto-vs-manual and the gain source change.
 	 */
 	struct video_control awb_ctrl = { .id = VIDEO_CID_AUTO_WHITE_BALANCE, .val = 1 };
-	int                  rc_awb   = video_set_ctrl(isp_dev, &awb_ctrl);
+#endif
+	int rc_awb = video_set_ctrl(isp_dev, &awb_ctrl);
 
-	printk("video_set_ctrl(ISP, AUTO_WHITE_BALANCE=1) rc=%d (manual_gain_override=%d)\n",
+	printk("video_set_ctrl(ISP, AUTO_WHITE_BALANCE=%d) rc=%d (manual_gain_override=%d)\n",
+	       awb_ctrl.val,
 	       rc_awb,
 	       IS_ENABLED(CONFIG_VIDEO_ISP_VSI_WB_MANUAL_GAIN));
 
@@ -393,13 +634,14 @@ int main(void)
 
 	struct video_format in_fmt = {
 		.type        = VIDEO_BUF_TYPE_INPUT,
-		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
+		.pixelformat = ISP_INPUT_FOURCC,
 		.width       = FRAME_WIDTH,
 		.height      = FRAME_HEIGHT,
 	};
 	int rc_in = video_set_format(isp_dev, &in_fmt);
 
-	printk("video_set_format(INPUT, SBGGR10P, %ux%u) rc=%d\n",
+	printk("video_set_format(INPUT, fourcc=0x%08x, %ux%u) rc=%d\n",
+	       (unsigned int)ISP_INPUT_FOURCC,
 	       (unsigned int)FRAME_WIDTH,
 	       (unsigned int)FRAME_HEIGHT,
 	       rc_in);
@@ -450,7 +692,9 @@ int main(void)
 
 	printk("video_stream_start rc=%d\n", rc_start);
 
+#if !defined(AEN_ISP_IMX296)
 	bool have_last_frame = false;
+#endif
 
 	for (int f = 1; f <= N_FRAMES; f++) {
 		/* isp_pico.c auto-stops once its IN-FIFO empties and only
@@ -509,13 +753,46 @@ int main(void)
 			printk("f%d Y mean=%u min=%u max=%u\n", f, sy.mean, sy.min, sy.max);
 			printk("f%d U mean=%u min=%u max=%u\n", f, su.mean, su.min, su.max);
 			printk("f%d V mean=%u min=%u max=%u\n", f, sv.mean, sv.min, sv.max);
+#if defined(AEN_ISP_IMX296) && DT_NODE_EXISTS(IMX296_NODE)
+			print_imx296_ae_regs(f);
+#else
 			print_ov5647_ae_regs(f);
+#endif
 		}
 
+#if defined(AEN_ISP_IMX296)
+		if (f == N_FRAMES) {
+			/*
+			 * IMX296 variant: hold and savebin the DEQUEUED buffer itself -- N_FRAMES
+			 * == 1, so nothing else in this run will ever touch it again -- instead of
+			 * copying it into a second static buffer first (see the frame_copy
+			 * #if !defined(AEN_ISP_IMX296) comment above for why: the pool is already
+			 * sized for 2 buffers this size, and a second copy that size would not
+			 * fit alongside it in SRAM0). Held BEFORE video_enqueue() below, not
+			 * after: enqueue hands the buffer straight back to the driver, which is
+			 * free to overwrite it the moment the next stream_start() runs -- a hold
+			 * placed after enqueue (matching the OV5647 branch's own post-loop hold,
+			 * which is safe there only because frame_copy is a separate copy) would
+			 * risk the bench's savebin racing that overwrite.
+			 */
+			uint32_t crc = crc32_ieee(deq->buffer, deq->bytesused);
+
+			printk("snapshot(frame %d): addr=%p size=%u crc32=0x%08x\n",
+			       f,
+			       (void *)deq->buffer,
+			       deq->bytesused,
+			       crc);
+			printk("RESULT PASS: %d frame(s) captured (see per-frame stats above)\n", N_FRAMES);
+			printk("Holding 20 s for a bench `savebin` of the snapshot buffer "
+			       "BEFORE re-queueing it...\n");
+			k_sleep(K_SECONDS(20));
+		}
+#else
 		if (f == N_FRAMES) {
 			memcpy(frame_copy, deq->buffer, deq->bytesused);
 			have_last_frame = true;
 		}
+#endif
 
 		int rc_enq = video_enqueue(isp_dev, deq);
 
@@ -524,6 +801,7 @@ int main(void)
 
 	video_stream_stop(isp_dev, VIDEO_BUF_TYPE_OUTPUT);
 
+#if !defined(AEN_ISP_IMX296)
 	if (have_last_frame) {
 		uint32_t crc = crc32_ieee(frame_copy, FRAME_SIZE);
 
@@ -539,6 +817,13 @@ int main(void)
 
 	printk("Holding 20 s for a bench `savebin` of the snapshot buffer...\n");
 	k_sleep(K_SECONDS(20));
+#endif
+	/*
+	 * IMX296 variant: no separate post-loop RESULT/hold block -- the f == N_FRAMES block
+	 * inside the loop above already printed RESULT PASS and held 20 s on success; a dequeue
+	 * failure is already reported inline by the loop's own "RESULT FAIL (no buffer)" break,
+	 * so there is nothing left to report here either way.
+	 */
 
 	return 0;
 }
