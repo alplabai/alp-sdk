@@ -14,3 +14,5 @@ description: |
   the alp-sdk camera_zephyr_video unit test's alp-camera1 alias.
 
 compatible: "alp,test-video-no-frmival"
+
+include: base.yaml

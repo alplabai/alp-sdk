@@ -15,17 +15,29 @@
  * Policy:
  *   - effective fps = requested_fps if nonzero, else default_fps.  If BOTH
  *     are 0, the device is left untouched -- *settled comes back {0, 0}.
- *   - video_set_frmival() -ENOSYS / -ENOTSUP ("this device has no frame-
- *     rate control at all"): a caller-requested nonzero fps is a loud
- *     decline (ALP_ERR_NOSUPPORT + LOG_ERR); a backend-only default is a
- *     quiet LOG_WRN + ALP_OK -- a caller who left fps at 0 didn't ask for
- *     anything to fail their open() over.
- *   - any other negative rc maps through the shared errno baseline
- *     (alp_errno.h) and is returned as-is -- the caller's open() fails.
+ *   - video_set_frmival() failing is graded by WHO asked, not by the errno,
+ *     because a backend-only default must never brick an open() the caller
+ *     never asked to fail (this restores alif_isp_pico.c's pre-#2278
+ *     tolerance -- a transient SCCB NAK on the OV5647's default 10 fps
+ *     request used to only LOG_WRN, never fail open()):
+ *       - requested_fps == 0 (only a backend default asked): ANY negative
+ *         rc -- ENOSYS, a transient I2C/SCCB NAK, anything -- is a quiet
+ *         LOG_WRN + ALP_OK.
+ *       - requested_fps != 0 (the CALLER explicitly asked): -ENOSYS /
+ *         -ENOTSUP ("this device has no frame-rate control at all") is a
+ *         loud decline (ALP_ERR_NOSUPPORT + LOG_ERR); any other negative rc
+ *         maps through the shared errno baseline (alp_errno.h) and the
+ *         caller's open() fails.
  *   - on success, read back with video_get_frmival() rather than trust the
  *     write-back (a driver may clamp to its own supported-rate table, e.g.
- *     the OV5647's {10,15,30,45,60,90,120}); a failed read-back falls back
- *     to reporting the request as settled and only warns.
+ *     the OV5647's {10,15,30,45,60,90,120}) -- and compare that readback
+ *     against the ORIGINAL request, not a struct video_frmival that was
+ *     passed BY POINTER into video_set_frmival() and may have been
+ *     overwritten in place with the clamped value (video_sw_generator.c's
+ *     set_frmival does exactly this).  A failed read-back, or one that
+ *     reports a zero interval (some drivers write back {0,0} on a path
+ *     that isn't really an error), falls back to reporting the original
+ *     request as settled and only warns.
  *
  * Header-only (mirrors src/backends/camera/yuv_to_rgb565.h's shape) so the
  * three call sites (zephyr_video.c, v2n_n44_isp.c, alif_isp_pico.c) share
@@ -71,7 +83,9 @@
  *
  * @return ALP_OK, or ALP_ERR_NOSUPPORT when @p requested_fps is nonzero and
  *         @p dev has no frame-rate control at all, or the mapped status of
- *         any other video_set_frmival() failure.
+ *         any other video_set_frmival() failure the CALLER asked to incur
+ *         (a backend-only default never fails open() -- see the policy
+ *         above).
  */
 static inline alp_status_t camera_apply_fps(const struct device  *dev,
                                             uint32_t              camera_id,
@@ -90,36 +104,47 @@ static inline alp_status_t camera_apply_fps(const struct device  *dev,
 		return ALP_OK;
 	}
 
-	struct video_frmival request = { .numerator = 1, .denominator = effective };
-	int                  rc      = video_set_frmival(dev, &request);
+	/* video_set_frmival() takes its argument BY POINTER and some drivers
+	 * (video_sw_generator.c's set_frmival, for one) overwrite it in place
+	 * with the clamped/settled value -- pass a COPY so `request` still
+	 * holds what was actually asked for when comparing against the later
+	 * read-back. */
+	const struct video_frmival request = { .numerator = 1, .denominator = effective };
+	struct video_frmival       set_arg = request;
+	int                        rc      = video_set_frmival(dev, &set_arg);
 
-	if (rc == -ENOSYS || rc == -ENOTSUP) {
-		if (requested_fps != 0u) {
+	if (rc != 0) {
+		if (requested_fps == 0u) {
+			/* Only the backend's own default asked for this rate --
+			 * don't fail an open() the caller never asked to fail,
+			 * no matter what video_set_frmival() returned (ENOSYS,
+			 * a transient I2C/SCCB NAK, ...) -- restores the
+			 * tolerance alif_isp_pico.c had before #2278. */
+			LOG_WRN("camera%u: backend default of %u fps failed: rc=%d", camera_id, effective, rc);
+			return ALP_OK;
+		}
+		if (rc == -ENOSYS || rc == -ENOTSUP) {
 			LOG_ERR("camera%u: %u fps requested but this device does not "
 			        "support frame-rate control",
 			        camera_id,
 			        requested_fps);
 			return ALP_ERR_NOSUPPORT;
 		}
-		/* Only the backend's own default asked for this rate --
-		 * don't fail an open() the caller never asked to fail. */
-		LOG_WRN("camera%u: backend default of %u fps requested but this "
-		        "device does not support frame-rate control",
-		        camera_id,
-		        effective);
-		return ALP_OK;
-	}
-	if (rc != 0) {
 		return alp_status_from_zephyr_errno(rc);
 	}
 
 	/* Don't trust the write-back -- a driver may clamp to its own
-	 * supported-rate table, so read back what actually landed. */
+	 * supported-rate table, so read back what actually landed.  A failed
+	 * read-back, or one reporting a zero interval, falls back to the
+	 * ORIGINAL request (not set_arg, which set_frmival may have already
+	 * overwritten). */
 	struct video_frmival actual = { 0 };
-	if (video_get_frmival(dev, &actual) != 0) {
-		LOG_WRN("camera%u: video_get_frmival() failed after a successful "
+	int                  get_rc = video_get_frmival(dev, &actual);
+	if (get_rc != 0 || actual.numerator == 0u || actual.denominator == 0u) {
+		LOG_WRN("camera%u: video_get_frmival() %s after a successful "
 		        "video_set_frmival(); reporting the %u fps request as settled",
 		        camera_id,
+		        (get_rc != 0) ? "failed" : "returned a zero interval",
 		        effective);
 		actual = request;
 	}

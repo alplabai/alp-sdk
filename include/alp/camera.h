@@ -75,12 +75,19 @@ typedef struct {
 	                   *   REQUEST, not a guarantee -- the backend settles on
 	                   *   the nearest rate its sensor/mode actually supports
 	                   *   (e.g. the OV5647 only reaches one of a fixed rate
-	                   *   table). The settled rate is not reported back to
-	                   *   the caller yet (issue #2279). If this field is
-	                   *   nonzero and the backend's device has no frame-rate
+	                   *   table, and the IMX296 always settles to its one
+	                   *   fixed 60.3 fps rate no matter what was asked). The
+	                   *   settled rate is not reported back to the caller
+	                   *   yet (issue #2279). If this field is NONZERO and
+	                   *   the terminal sensor device has no frame-rate
 	                   *   control at all, @ref alp_camera_open fails loudly
 	                   *   with ALP_ERR_NOSUPPORT rather than silently
-	                   *   ignoring the request. */
+	                   *   ignoring the request -- but if it is left at 0
+	                   *   and only a BACKEND's own internal default rate
+	                   *   fails to apply (e.g. a transient sensor I/O
+	                   *   error), that failure is not surfaced at all: it
+	                   *   is logged and open() still succeeds, since the
+	                   *   caller never asked for that rate specifically. */
 	alp_pixfmt_t format;
 } alp_camera_config_t;
 
@@ -134,9 +141,10 @@ typedef struct {
  *         (zephyr_video: no camera aliased in devicetree for the
  *         requested @c camera_id), ALP_ERR_NOSUPPORT (zephyr_video /
  *         v2n_n44_isp / alif_isp_pico: @c cfg->fps is nonzero and the
- *         backend's device has no frame-rate control at all), or
- *         ALP_ERR_NOT_IMPLEMENTED (zephyr_stub, on silicon with no
- *         real backend).
+ *         terminal sensor device has no frame-rate control at all -- a
+ *         backend's own internal default rate failing to apply never
+ *         surfaces as an error), or ALP_ERR_NOT_IMPLEMENTED
+ *         (zephyr_stub, on silicon with no real backend).
  */
 alp_camera_t *alp_camera_open(const alp_camera_config_t *cfg);
 

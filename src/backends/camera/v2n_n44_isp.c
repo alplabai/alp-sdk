@@ -284,8 +284,12 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	/* fps AFTER format, same ordering rationale as zephyr_video.c (#2278).
 	 * No backend default -- cfg->fps == 0 leaves the device at its own
 	 * rate.  Unexercised on real silicon until the N44 CSI-2 receiver
-	 * driver lands (#1149) -- see the DATA-GATED block above; this call
-	 * fails _devs[]'s NULL check today, same as the rest of isp_open(). */
+	 * driver lands (#1149) -- see the DATA-GATED block above: `dev` is
+	 * already known non-NULL by this point (the _devs[]/device_is_ready
+	 * check above returns ALP_ERR_NOT_READY before this line), but no
+	 * V2N board or overlay in this repo populates alp-camera0..3 with a
+	 * real drivers/video/ device today, so this call has never had a
+	 * real device to reach in practice, same as the rest of isp_open(). */
 	alp_status_t fps_status = camera_apply_fps(dev, cfg->camera_id, cfg->fps, 0u, &st->frmival);
 	if (fps_status != ALP_OK) {
 		_free_state(st);

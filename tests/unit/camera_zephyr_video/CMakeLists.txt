@@ -4,4 +4,5 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(test_camera_zephyr_video)
 target_sources(app PRIVATE
     src/test_video_no_frmival.c
+    src/test_video_frmival_err.c
     src/test_camera_zephyr_video.c)
