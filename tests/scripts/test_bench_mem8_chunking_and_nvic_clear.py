@@ -116,6 +116,27 @@ def test_chunk_count_matches_ceil_division(tmp_path: Path) -> None:
 
 
 @_NEEDS_BASH
+def test_chunk_bare_size_is_treated_as_hex(tmp_path: Path) -> None:
+    """alp-sdk#2313 regression: JLinkExe's own `mem8` command -- and
+    ram-run.sh's `[bufsize_hex]` usage -- always treated a bare (no `0x`)
+    size as HEX. `$((size))` on a bare `1000` silently reparses it as
+    DECIMAL instead; a bare size must still resolve to the hex value."""
+    res = _call_chunks(tmp_path, "0x20000d00", "1000")
+    assert res.returncode == 0, res.stderr
+    assert res.stdout.strip() == "mem8 0x20000D00, 0x1000"
+
+
+@_NEEDS_BASH
+def test_chunk_bare_size_with_hex_only_digit_does_not_error(tmp_path: Path) -> None:
+    """A bare size containing a hex-only digit (`1A00`) used to hit bash
+    arithmetic's base-10 default and error outright ("value too great for
+    base"); it must resolve to 0x1A00, not fail."""
+    res = _call_chunks(tmp_path, "0x0", "1A00")
+    assert res.returncode == 0, res.stderr
+    assert res.stdout.strip() == "mem8 0x0, 0x1A00"
+
+
+@_NEEDS_BASH
 def test_chunk_zero_size_is_a_hard_error(tmp_path: Path) -> None:
     res = _call_chunks(tmp_path, "0x20000d00", "0")
     assert res.returncode == 1
@@ -161,11 +182,16 @@ def test_openocd_ram_run_clears_nvic_icer_and_icpr() -> None:
     assert "seq 0 15" in body, "loop bound must cover n=0..15 (IRQ 0-511)"
     assert "0xFFFFFFFF" in body, "must write-1-to-clear (0xFFFFFFFF), not merely read"
 
-    # The clear must happen strictly before 'resume', not after (an NVIC
+    # The clear must be built strictly between 'halt' and 'resume' in the
+    # CMDS construction -- built after the halt (so the core is stopped
+    # while NVIC state is cleared) and strictly before 'resume' (an NVIC
     # clear issued after IRQs are already unmasked is too late).
+    halt_idx = body.index('-c "halt"')
+    icer_idx = body.index('"${NVIC_CLEAR_CMDS[@]}"')
     resume_idx = body.index('-c "resume"')
-    icer_idx = body.index("NVIC_CLEAR_CMDS=()")
-    assert icer_idx < resume_idx, "NVIC ICER/ICPR clear must precede 'resume'"
+    assert halt_idx < icer_idx < resume_idx, (
+        "NVIC ICER/ICPR clear must be embedded strictly between 'halt' "
+        "and 'resume' in the CMDS construction")
 
 
 @_NEEDS_BASH

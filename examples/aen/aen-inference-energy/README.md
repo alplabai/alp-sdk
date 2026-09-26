@@ -101,16 +101,20 @@ sleep 45                                                  # default build runs ~
 scripts/bench/aen/reread.sh "$BENCH_ROOT/build/aen-inference-energy" 0x10000
 ```
 
-The `0x10000` read size matters: this app's `CONFIG_RAM_CONSOLE_BUFFER_SIZE` is
-sized to exactly the JLinkExe single-`mem8` cap (see
-`docs/aen-bench-bringup.md`) with headroom for the default knobs; the default
-`reread.sh` read size would truncate the capture mid-window. Raise
-`AEN_ENERGY_SAMPLES_PER_WINDOW` or `AEN_ENERGY_WINDOW_PAIRS` past the documented
-default and the capture can exceed the buffer — `reread.sh` and `ram-run.sh`
-now chunk any read above `0x10000` automatically (alp-sdk#2313, via
-`bench_mem8_chunks()` in `bench-env.sh`), so passing a size above `0x10000` to
-either script is fine; JLinkExe's own `NumBytes > 0x10000` rejection no longer
-applies at this layer.
+The read size you pass to `reread.sh`/`ram-run.sh` and this app's
+`CONFIG_RAM_CONSOLE_BUFFER_SIZE` (`examples/aen/aen-inference-energy/prj.conf`)
+are two different things: the read size is how much the bench script asks
+JLinkExe to read back; the buffer size is how much the firmware's RAM console
+actually holds. This app's default buffer is 65536 bytes (`0x10000`), with
+headroom for the default knobs, and the default `reread.sh`/`ram-run.sh` read
+size matches it. Raise `AEN_ENERGY_SAMPLES_PER_WINDOW` or
+`AEN_ENERGY_WINDOW_PAIRS` past the documented default and the capture can
+exceed that buffer — raise `CONFIG_RAM_CONSOLE_BUFFER_SIZE` to match (there is
+no cap on the firmware side), then pass the same larger size as the read: both
+scripts chunk any read above `0x10000` automatically (alp-sdk#2313, via
+`bench_mem8_chunks()` in `bench-env.sh`), so JLinkExe's own
+`NumBytes > 0x10000` rejection no longer applies at this layer, and the
+read comes back complete.
 
 ## Fast iteration — tiny model, Flow C (no MRAM write)
 

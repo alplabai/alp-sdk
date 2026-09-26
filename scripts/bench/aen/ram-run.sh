@@ -565,6 +565,26 @@ if ! grep -qE '^[0-9A-Fa-f]+ = ' "$WORKDIR/read.out"; then
 	echo "!! ram-run: no memory dump line in the read session's transcript -- refusing to decode an empty read as a console." >&2
 	exit 9
 fi
+# A read above 0x10000 is N chunked 'mem8' commands (bench_mem8_chunks()
+# above); JLinkExe can drop ONE chunk's dump silently while the others still
+# produce output, and the whole-transcript check just above would not
+# notice -- it only asks "any dump line at all", not "one per chunk". Require
+# a dump line at EVERY chunk's own start address, so a later chunk going
+# silently missing (the tail of the buffer, exactly where a truncated
+# capture would matter) is caught rather than decoded as if it were there.
+while IFS= read -r _chunk_line; do
+	[ -n "$_chunk_line" ] || continue
+	_chunk_addr="$(printf '%s\n' "$_chunk_line" | sed -E 's/^mem8 0[xX]([0-9A-Fa-f]+),.*/\1/')"
+	if ! printf '%s\n' "$_chunk_addr" | grep -qE '^[0-9A-Fa-f]+$'; then
+		echo "!! ram-run: could not parse a chunk address out of '$_chunk_line' -- refusing to decode." >&2
+		exit 9
+	fi
+	if ! grep -qEi "^0*${_chunk_addr} = " "$WORKDIR/read.out"; then
+		echo "!! ram-run: no dump line for chunk '$_chunk_line' -- refusing to decode a partially-empty read as a console." >&2
+		exit 9
+	fi
+done <<<"$MEM8_LINES"
+unset _chunk_line _chunk_addr
 RUN_OK=1
 echo "----- RAM console (decoded) -----"
 # Decode the 'ADDR = HH HH ...' mem8 lines into ASCII; stop at first NUL run.

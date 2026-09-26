@@ -115,10 +115,6 @@ def _needs_e2e(func):
     return _NEEDS_BASH(_NEEDS_LINUX(_NEEDS_STRTONUM_AWK(func)))
 
 
-# A fake mem8 dump line whose bytes ASCII-decode to "hi" -- proves the
-# existing decoder still runs unchanged against session 2's transcript.
-_FAKE_MEM8_LINE = "20000D00 = 68 69 00 00"
-
 _FAKE_READELF = """\
 #!/usr/bin/env bash
 if [ "$1" = "-h" ]; then
@@ -273,13 +269,19 @@ LOADBIN_OK_EOF
 		fi
 		;;
 	mem8*)
+		# Echo a dump line ADDRESSED AT THE REQUESTED CHUNK, not always the
+		# same fixed address -- a real JLinkExe dump starts at the address
+		# it was asked to read, and ram-run.sh's per-chunk dump-line guard
+		# (alp-sdk#2313) checks each chunk's OWN start address, not just
+		# "a dump line exists somewhere".
+		_req_addr="$(printf '%s\\n' "$line" | sed -E 's/^mem8 0[xX]([0-9A-Fa-f]+),.*/\\1/' | tr '[:lower:]' '[:upper:]')"
 		if [ -n "${{FAIL_READ_NOMEM:-}}" ]; then
-			echo "{_FAKE_MEM8_LINE}"
+			echo "$_req_addr = 68 69 00 00"
 			echo "Could not read memory."
 		elif [ -n "${{FAIL_READ_NODUMP:-}}" ]; then
 			:
 		else
-			echo "{_FAKE_MEM8_LINE}"
+			echo "$_req_addr = 68 69 00 00"
 		fi
 		;;
 	esac
@@ -306,6 +308,7 @@ def _run_ram_run(
     preload: str | None = None,
     extra_env: dict[str, str] | None = None,
     create_elf: bool = True,
+    size: str = "0x10",
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     """Run the real ram-run.sh against a fake AEN_JLINK_RUN wrapper + fake
     toolchain.
@@ -382,7 +385,7 @@ def _run_ram_run(
     if extra_env:
         env.update(extra_env)
 
-    args = ["bash", str(RAM_RUN), str(bd), sleep_ms, "0x10"]
+    args = ["bash", str(RAM_RUN), str(bd), sleep_ms, size]
     if preload is not None:
         args.append(preload)
 
@@ -468,6 +471,24 @@ def test_loadbin_go_and_mem8_are_in_separate_sessions(tmp_path: Path) -> None:
     assert _workdirs(sandbox_tmpdir) == [], (
         f"WORKDIR left behind after a successful run: {_workdirs(sandbox_tmpdir)}"
     )
+
+
+@_needs_e2e
+def test_read_session_chunks_a_size_above_the_jlink_cap(tmp_path: Path) -> None:
+    """alp-sdk#2313: JLinkExe's own `mem8` caps NumBytes at 0x10000. A
+    buffer size above that must produce TWO `mem8` lines in the read
+    session's CommandFile (0x10000 + the remainder), routed through the
+    shared `bench_mem8_chunks()`, not a single oversized line JLinkExe
+    would silently reject."""
+    res, calls, _ = _run_ram_run(tmp_path, size="0x14000")
+    assert res.returncode == 0, f"expected success:\n{res.stdout}\n{res.stderr}"
+
+    call_files = sorted(calls.glob("call-*.jlink"), key=lambda p: int(p.stem.split("-")[1]))
+    assert len(call_files) == 3, [p.name for p in call_files]
+    _preflight, _load_go, read_back = call_files
+    read_lines = [ln.strip() for ln in read_back.read_text(encoding="utf-8").splitlines()]
+    mem8_lines = [ln for ln in read_lines if ln.startswith("mem8 ")]
+    assert len(mem8_lines) == 2, f"expected 2 chunked mem8 lines, got: {mem8_lines}"
 
 
 @_needs_e2e

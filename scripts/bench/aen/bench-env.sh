@@ -986,6 +986,19 @@ bench_mem8_chunks() {
 		echo "bench-env: bench_mem8_chunks: addr '$addr' is not a valid arithmetic value" >&2
 		return 1
 	}
+	# alp-sdk#2313 fix: JLinkExe's own `mem8` command -- and every
+	# ram-run.sh/reread.sh caller's `[bufsize_hex]` -- always treated a
+	# bare `size` as HEX (e.g. `1000` meaning 0x1000). Handing that same
+	# bare string to bash arithmetic instead silently reparses it as
+	# DECIMAL (`1000` becomes 4096, not 4096 KiB... er, 0x1000 bytes) and
+	# outright ERRORS on a bare value with a hex-only digit (`1A00`, "A":
+	# not a valid base-10 constant). Normalise a bare value (no `0x`/`0X`
+	# prefix) to hex before the arithmetic, so `$((size))` sees the same
+	# base JLinkExe always assumed.
+	case $size in
+	0x*|0X*) ;;
+	*) size="0x$size" ;;
+	esac
 	size_dec=$((size)) || {
 		echo "bench-env: bench_mem8_chunks: size '$size' is not a valid arithmetic value" >&2
 		return 1
