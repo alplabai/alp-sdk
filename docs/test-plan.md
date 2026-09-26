@@ -425,7 +425,7 @@ been green on `main` for at least two consecutive PRs.
 | `pr-doxygen.yml` zero-warnings | `pr-doxygen.yml` | ✅ verified |
 | VS Code extension build (split repo) | [`alplabai/alp-sdk-vscode` &mdash; ci workflow](https://github.com/alplabai/alp-sdk-vscode/actions/workflows/ci.yml) | ✅ verified |
 | `coverity.yml` weekly scan | `coverity.yml` | ✅ verified |
-| Portable-API conformance suite (14 classes × 8 cases, `alp_sdk.conformance.portable_api`) | `pr-twister.yml` (`tests/zephyr/conformance/`) | ✅ verified |
+| Portable-API conformance suite (16 classes × 8 cases, `alp_sdk.conformance.portable_api`) | `pr-twister.yml` (`tests/zephyr/conformance/`) | ✅ verified |
 
 ---
 

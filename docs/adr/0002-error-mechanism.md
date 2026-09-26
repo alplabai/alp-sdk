@@ -124,8 +124,9 @@ amendment: `alp_gpio_write(closed_pin, ...)` still returns
 the same public symbol answering differently depending which backend it
 was built against. `tests/yocto/peripheral_{i2c,spi,uart}.c` cover the
 NULL-handle half of #1834's fix; `tests/yocto/peripheral_{i2c,spi,uart}_
-closed_status.c` add the sharper non-NULL, closed-handle case per class,
-mirroring `tests/yocto/peripheral_gpio_closed_pin_status.c`'s technique.
+closed_status.c` add the sharper non-NULL, closed-handle case per class
+(the mirrored gpio-side test, `peripheral_gpio_closed_pin_status.c`, lives
+on the `origin/integration/1494-1734-back` branch, not on `dev`).
 No test pins the gpio side yet.
 
 **Gap: signex unverified.** No signex checkout exists on the host this
