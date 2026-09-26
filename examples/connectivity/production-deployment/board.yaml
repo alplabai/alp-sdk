@@ -167,16 +167,19 @@ ota:
 # ----------------------------------------------------------------
 # TF-M-on-HE-core is the AEN production stance.  Persistent keys
 # live in Internal Trusted Storage backed by the secure half of
-# MRAM; Protected Storage (encrypted-at-rest) lives in the on-
-# module OSPI for app-managed credentials that don't need the
-# tamper-resistant tier.  Attestation root is the OPTIGA Trust M
-# (single trust root with boot + OTA -- see iot-fleet-ota for the
-# shared signing key story).
+# MRAM.  E1M-AEN801 populates NEITHER on-module OSPI part
+# (`ospi0`/`ospi1` are both `assembled: false`,
+# metadata/e1m_modules/E1M-AEN801.yaml) -- an app-tier Protected
+# Storage backing store would need a SKU that actually carries one
+# (e.g. E1M-AEN803), so this example keeps PS in the same on-die
+# MRAM as ITS rather than naming a part this SKU doesn't have (#2311).
+# Attestation root is the OPTIGA Trust M (single trust root with
+# boot + OTA -- see iot-fleet-ota for the shared signing key story).
 security:
   psa:
     persistent_slots: 32
     its_storage:      mram_main     # AEN E8: 5.5 MiB MRAM (secure half)
-    ps_storage:       ospi0         # on-module OSPI for app-tier creds
+    ps_storage:       mram_main     # same on-die MRAM (no OSPI on this SKU)
     tfm:              true
     attestation_root: optiga_trust_m
 

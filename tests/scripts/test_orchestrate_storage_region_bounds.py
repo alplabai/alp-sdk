@@ -417,9 +417,14 @@ class TestTargetingARegionDirectly:
         lines 193-206). Exercised directly since nothing else in this file
         reaches that branch -- the loader check above always fires first
         for a board.yaml-driven call.
+
+        `mram_main`, not `ospi0`, is the settings partition's device here:
+        E1M-AEN801 declares `ospi0` `assembled: false` (#2311), so it is no
+        longer a `_known_flash_devices()` member this board.yaml could name
+        at all -- unrelated to the sub-region refusal this test exercises.
         """
         path = _write_board(tmp_path, _aen801("""
-      - { name: settings, size_kib: 32, fs: littlefs, flash_device: ospi0, mount: /lfs/settings }
+      - { name: settings, size_kib: 32, fs: littlefs, flash_device: mram_main, mount: /lfs/settings }
     """))
         project = load_board_yaml(path)
         descriptor, reason = _resolve_flash_device(
