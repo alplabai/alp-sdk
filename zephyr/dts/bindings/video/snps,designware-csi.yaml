@@ -156,6 +156,16 @@ properties:
       derivation, controls) -- this binding does not itself enforce that
       pairing.
 
+      Practical ceiling: ~200 MHz. This is alif_pixclk_set_rate()'s own
+      reachable-divisor limit off its 400 MHz source (divisor 2), not a limit
+      this property enforces itself -- a value above that is a shield
+      authoring mistake and fails the build's clock_control_set_rate() call
+      at runtime with an explicit LOG_ERR naming this property, not a
+      silent fallback to the derived bare pixrate (see
+      csi2_dw_validate_data()'s own comment on that -ERANGE path). Only
+      effective when "ipi-mode" is "Controller" -- set under "Camera" mode
+      it is ignored, with a LOG_WRN.
+
   ipi-fs-sync:
     type: boolean
     description: |

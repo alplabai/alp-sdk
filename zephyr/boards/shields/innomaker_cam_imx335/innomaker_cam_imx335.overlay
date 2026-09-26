@@ -16,20 +16,24 @@
  * SHIELD="e1m_evk_rpi_csi innomaker_cam_imx335".
  *
  * Driver: upstream Zephyr v4.4.1 drivers/video/imx335.c (CONFIG_VIDEO_IMX335,
- * compatible "sony,imx335") -- reused as-is, NOT vendored into alp-sdk, per
- * ADR 0017. It carries one repo patch (zephyr/patches/zephyr/
- * 0004-imx335-link-freq.patch, zephyr/patches.yml) that registers
+ * compatible "sony,imx335") -- reused as-is, NOT vendored into alp-sdk (ADR
+ * 0017 Tier 1, upstream-native). It carries one repo patch
+ * (zephyr/patches/zephyr/0004-imx335-link-freq.patch, zephyr/patches.yml,
+ * applied per-module by scripts/bootstrap.sh at `west update` time and
+ * checked by scripts/verify_west_patches.py) that registers
  * VIDEO_CID_LINK_FREQ so video_get_csi_link_freq() (video_common.c) does not
- * fall back to mis-approximating the D-PHY link rate from PIXEL_RATE -- see
- * that patch's own comment.
+ * fall back to mis-approximating the D-PHY link rate from the driver's own
+ * (untouched) VIDEO_CID_PIXEL_RATE -- see that patch's own comment.
  *
  * Silicon facts established on unit E1M-AEN803 2026W36-0001 (I2C identity
- * probe only, see metadata/chips/imx335.yaml): the module answers at CCI
- * 0x1A (the only device on the J5 camera bus), and its registers read back
- * at their power-on-reset defaults (STANDBY 0x3000=0x01, VMAX
- * 0x3030-0x3032=0x001194=4500, HMAX 0x3034=0x0226=550, LANEMODE
- * 0x3a01=0x03), and the module self-powers (CAM_EN untouched, matching
- * raspberry_pi_global_shutter_camera.overlay's own note on the same J5 pin).
+ * probe only, see metadata/chips/imx335.yaml): the module answered at CCI
+ * 0x1A (the only device on the J5 camera bus) with CAM_EN untouched, and its
+ * registers read back at their power-on-reset defaults (STANDBY
+ * 0x3000=0x01, VMAX 0x3030-0x3032=0x001194=4500, HMAX 0x3034=0x0226=550,
+ * LANEMODE 0x3a01=0x03). That bench unit's E1M-EVK carries the J5 pin-11
+ * pull-up rework (docs/boards/e1m-evk.md, originally fitted for OV5647) --
+ * whether this module self-enables on a STOCK carrier (no rework) is NOT
+ * established by this result.
  * CSI-2 streaming, D-PHY lock, and frame capture are NOT bench-verified --
  * see this shield's doc/index.rst for the full not-verified list.
  */
@@ -113,6 +117,22 @@
  *     margin left in this derivation; if bench testing shows FIFO/line
  *     errors, csi-vbp is the knob to revisit first).
  *
+ * REVIEWER CAUTION (issue #2327, not yet bench-checked): the DW CSI-2 IPI's
+ * Controller-mode vertical timing is anchored at Frame Start, so a large
+ * csi-vbp (254 here, vs. IMX296's bench-proven 4) delays the first active
+ * line by (csi-vsa+csi-vbp) IPI lines after FS -- 255 * 14.79 us (this
+ * overlay's own derived IPI line time) ~= 3.77 ms. Whether the DW CSI-2 IPI
+ * actually tolerates that delay, or instead overflows waiting for it, is
+ * NOT established from the code alone (video_csi_dw.c has no runtime
+ * comment or bench note on Controller-mode vertical-delay tolerance).
+ * innomaker_cam_imx335-vbp4.overlay (this shield's own directory) carries an
+ * alternative csi-vbp=4/csi-vtotal=2000 candidate -- see that file's own
+ * comment. The FIRST bench step for this shield must compare BOTH
+ * candidates (this file's default, and that file's alternative, selected
+ * via -DEXTRA_DTC_OVERLAY_FILE, see that file's usage comment) and record
+ * which one, if either, achieves D-PHY lock and a captured frame without
+ * IPI-FIFO overflow or HLINE errors -- neither is claimed correct here.
+ *
  * ipi-fs-sync: unset (default false, unchanged controller behaviour) --
  * issue #2287's own bench investigation of this bit on IMX296 found no
  * effect; not worth carrying speculatively onto an unbenched sensor.
@@ -122,9 +142,8 @@
  *
  * FALLBACK (documented for the bench, NOT implemented here): if 2H output-
  * line pacing turns out wrong on silicon, the alternative is 1H pacing --
- * csi-pixclk-hz 200000000, csi-hline 1478 -- which the advisor's plan notes
- * needs either Camera mode or a VMAX change to reach; out of scope for this
- * Stage A overlay.
+ * csi-pixclk-hz 200000000, csi-hline 1478 -- which needs either Camera mode
+ * or a VMAX change to reach; out of scope for this Stage A overlay.
  */
 &csi {
 	ipi-mode = "Controller";

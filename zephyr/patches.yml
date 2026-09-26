@@ -875,7 +875,7 @@ patches:
       format is untouched, so traceconfig.py and tests/kconfig/tracing are
       unaffected. Upstream to Zephyr then drop.
   - path: zephyr/0004-imx335-link-freq.patch
-    sha256sum: f0b335d302f235a7f39ba4949c3b85123f1799cc4857f1c03a51769fe70dc225
+    sha256sum: 12b44c14d2076aceccd58bb12374ab07b400b356f5f5ed4b06030e88cc842e3f
     module: zephyr
     author: Alp Lab AB
     email: contact@alplab.ai
@@ -883,26 +883,32 @@ patches:
     upstreamable: true
     comments: |
       Issue #2327 Stage A. Upstream drivers/video/imx335.c (Sony IMX335)
-      registers VIDEO_CID_PIXEL_RATE only, at 396 MHz -- a value that matches
-      none of the driver's own INCK/lane-mode register tables (24 MHz INCK,
-      2-lane 10-bit mode). video_get_csi_link_freq() (video_common.c) falls
-      back to approximating the CSI-2 D-PHY link frequency from PIXEL_RATE
-      whenever a sensor reports no VIDEO_CID_LINK_FREQ control; with the
-      upstream 396 MHz that approximation lands the DW CSI-2 host on 990 MHz
-      (1980 Mbps/lane) instead of the sensor's real 594 MHz link clock (1188
-      Mbps/lane, 2 lanes, 10 bpp) -- the same ERRSOTSYNCHS/PHY_FATAL storm
+      registers VIDEO_CID_PIXEL_RATE only, and no VIDEO_CID_LINK_FREQ.
+      video_get_csi_link_freq() (video_common.c) falls back to approximating
+      the CSI-2 D-PHY link frequency from PIXEL_RATE whenever a sensor
+      reports no VIDEO_CID_LINK_FREQ control; for this sensor's 396 MHz
+      PIXEL_RATE (a v4l2 pixel-array-clock convention value, unrelated to the
+      per-lane D-PHY bit rate) that approximation lands the DW CSI-2 host on
+      990 MHz (1980 Mbps/lane) instead of the sensor's real 594 MHz link
+      clock (24 MHz INCK, 2-lane 10-bit mode: 1188 Mbps/lane, link_freq =
+      per-lane bit rate / 2) -- the same ERRSOTSYNCHS/PHY_FATAL storm
       signature seen on OV5647 (issue #2248) before that sensor's own fix.
-      Corrects PIXEL_RATE to 237600000 (the value the driver's own register
-      tables actually produce: 1188e6 * 2 lanes / 10 bpp) and registers
-      VIDEO_CID_LINK_FREQ directly as a READ_ONLY int-menu {594000000}, same
-      shape as this repo's own zephyr/drivers/video/imx296.c link_freq
-      control, so video_get_csi_link_freq() never needs the PIXEL_RATE
-      fallback for this sensor.
-      NOT bench-verified: this patch's link frequency and corrected pixel
-      rate are carried from the IMX335 datasheet's MIPI output timing table,
-      not measured on silicon -- the only IMX335 bench result to date
-      (E1M-AEN803 2026W36-0001) is an I2C identity probe (see
-      metadata/chips/imx335.yaml), taken before this patch existed. Whether
-      the E8 CSI-2 RX D-PHY actually locks at 1188 Mbps/lane through the SoM
-      R2 pinout adapter is untested. Upstream to zephyrproject-rtos/zephyr
-      then drop.
+      Registers VIDEO_CID_LINK_FREQ directly as a READ_ONLY int-menu
+      {594000000}, same shape as this repo's own zephyr/drivers/video/
+      imx296.c link_freq control, so video_get_csi_link_freq() never needs
+      the PIXEL_RATE fallback for this sensor. PIXEL_RATE itself is left
+      UNTOUCHED (a review round found 396 MHz is the correct v4l2
+      pixel-array-clock value per <video-controls.h>'s own convention, not a
+      derived-from-D-PHY value needing correction -- an earlier version of
+      this patch also "corrected" PIXEL_RATE to 237600000, which does not
+      survive upstream review and is unnecessary now that LINK_FREQ bypasses
+      the PIXEL_RATE fallback entirely).
+      NOT bench-verified: this patch's link frequency is carried from the
+      IMX335 datasheet's MIPI output timing table, not measured on silicon
+      -- the only IMX335 bench result to date (E1M-AEN803 2026W36-0001) is
+      an I2C identity probe (see metadata/chips/imx335.yaml), taken before
+      this patch existed. Whether the E8 CSI-2 RX D-PHY actually locks at
+      1188 Mbps/lane on a 2-lane sensor through the SoM R2 pinout adapter is
+      untested -- 1188 Mbps/lane itself IS bench-proven, but only on data
+      lane D0 (IMX296, 1 lane, run 292); D1 through the adapter is untested.
+      Upstream to zephyrproject-rtos/zephyr then drop.

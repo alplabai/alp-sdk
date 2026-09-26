@@ -495,6 +495,18 @@ static int csi2_dw_validate_data(const struct device *dev)
 	 */
 	pixrate = ((float)(phy->pll_fin << 1) * phy->num_lanes) / bpp;
 
+	/*
+	 * Alp Lab AB (issue #2327, reviewer): csi-pixclk-hz only has an effect in
+	 * Controller mode (the branch below) -- a board/shield that sets it under
+	 * Camera mode (e.g. a copy-paste from a Controller-mode shield) would
+	 * otherwise silently get the ordinary margined-pixrate request with no
+	 * indication the property was ignored.
+	 */
+	if (config->pixclk_hz != 0 && config->ipi_mode != CSI2_IPI_MODE_TIMINGS_CTRL) {
+		LOG_WRN("csi-pixclk-hz (%u Hz) is set but ipi-mode is not \"Controller\" -- "
+			"ignored", config->pixclk_hz);
+	}
+
 	if (config->ipi_mode == CSI2_IPI_MODE_TIMINGS_CTRL) {
 		/*
 		 * Alp Lab AB (issue #2287): the 20% margin above exists to keep
@@ -543,6 +555,23 @@ static int csi2_dw_validate_data(const struct device *dev)
 	tmp = (uint32_t)pixclock;
 	ret = clock_control_set_rate(config->clk_dev, config->pixclk,
 			(clock_control_subsys_rate_t)tmp);
+	if (ret == -ERANGE && config->ipi_mode == CSI2_IPI_MODE_TIMINGS_CTRL &&
+	    config->pixclk_hz != 0) {
+		/*
+		 * Alp Lab AB (issue #2327, reviewer): an EXPLICIT csi-pixclk-hz that
+		 * does not fit under the pixel-clock divider's maximum is a shield
+		 * authoring mistake (the whole point of stating this rate explicitly
+		 * is that the shield's own IPI timing -- csi-hsa/hbp/hline/vtotal --
+		 * was derived AGAINST this exact rate; silently falling back to the
+		 * bare derived pixrate below would run different, undocumented
+		 * timing than what the shield's own comment claims). Fail loudly
+		 * instead of retrying at a rate the shield was never derived for.
+		 */
+		LOG_ERR("csi-pixclk-hz %u Hz exceeds the CSI pixel-clock max (practical "
+			"ceiling ~200 MHz, see snps,designware-csi.yaml) -- fix the shield's "
+			"csi-pixclk-hz, not this driver", config->pixclk_hz);
+		return ret;
+	}
 	if (ret == -ERANGE) {
 		/*
 		 * Alp Lab AB: the 20 % margin does not fit under the pixel-clock

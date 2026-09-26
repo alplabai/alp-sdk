@@ -389,8 +389,11 @@ struct csi2_dw_config {
 	 * pixel clock explicitly. 0 means "not set", byte-identical to before this field
 	 * existed: the derived bare pixrate is requested exactly as before, unconditionally
 	 * (this field is the ONLY thing that changes -- csi-hline/csi-vtotal's own hsd/vfp
-	 * derivation immediately below is untouched, and re-derives against whatever rate
-	 * clock_control_get_rate() reports was actually programmed, this field's or not).
+	 * derivation immediately below is unaffected by this field either way: hsd/vfp are
+	 * computed purely from csi-hline/csi-vtotal and the format's own hact/vact, never
+	 * from the programmed pixel-clock rate. Only the diagnostic LOG_INF this field's own
+	 * branch emits reads back the actually-programmed rate via clock_control_get_rate(),
+	 * to log the real resulting IPI line time against csi-hline for comparison).
 	 */
 	uint32_t pixclk_hz;
 

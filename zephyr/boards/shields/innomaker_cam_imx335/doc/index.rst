@@ -18,14 +18,31 @@ On alp-sdk that carrier connector shield is the E1M-EVK's
 ``e1m_evk_rpi_csi`` shield.
 
 Driver: this shield reuses upstream Zephyr v4.4.1's
-``drivers/video/imx335.c`` (``CONFIG_VIDEO_IMX335``) as-is -- there is no
-alp-sdk-vendored IMX335 driver. One repo patch applies on top of it,
-``zephyr/patches/zephyr/0004-imx335-link-freq.patch`` (registered in
-``zephyr/patches.yml``): it registers ``VIDEO_CID_LINK_FREQ`` and corrects
-``VIDEO_CID_PIXEL_RATE`` so the DW CSI-2 host (``video_csi_dw.c``) programs
+``drivers/video/imx335.c`` (``CONFIG_VIDEO_IMX335``) as-is (ADR 0017 Tier 1,
+upstream-native) -- there is no alp-sdk-vendored IMX335 driver. One repo
+patch applies on top of it, ``zephyr/patches/zephyr/0004-imx335-link-freq.patch``
+(registered in ``zephyr/patches.yml``, applied per-module by
+``scripts/bootstrap.sh`` at ``west update`` time via ``west patch apply``,
+and checked by ``scripts/verify_west_patches.py``): it registers
+``VIDEO_CID_LINK_FREQ`` so the DW CSI-2 host (``video_csi_dw.c``) programs
 the sensor's real 594 MHz link frequency instead of mis-approximating it
-from the upstream driver's uncorrected pixel rate -- see the patch's own
-comment in ``zephyr/patches.yml`` for the full derivation.
+from the upstream driver's own ``VIDEO_CID_PIXEL_RATE`` -- see the patch's
+own comment in ``zephyr/patches.yml`` for the full derivation.
+``VIDEO_CID_PIXEL_RATE`` itself is left untouched (396 MHz is the correct
+v4l2 pixel-array-clock value; only the D-PHY link frequency needed fixing).
+
+**If you already have a Zephyr checkout with alp-sdk's 0001-0003 zephyr
+patches applied**, re-running the whole bootstrap will fail applying 0001
+again (``west patch`` is not idempotent against an already-patched tree) --
+apply 0004 by hand instead: ``west patch apply --patch-yml
+zephyr/patches.yml`` targets the whole list, so either start from a clean
+Zephyr checkout, or apply just the new patch with ``git apply
+zephyr/patches/zephyr/0004-imx335-link-freq.patch`` from the Zephyr repo
+root. **Without 0004 applied, this shield's D-PHY runs at the wrong rate
+(990 MHz instead of 594 MHz) and the CSI-2 receiver logs an
+ERRSOTSYNCHS/PHY_FATAL error storm** (issue #2248's own OV5647 signature) --
+if you build this shield against an unpatched Zephyr tree and see that
+storm on the bench, this is why.
 
 Issue #2327, Stage A only: raw first-light capture through
 ``<alp/camera.h>``, no ISP/AE/streaming. The driver boots at its native
@@ -42,25 +59,32 @@ requests the 2x2-binned 1296x972 mode explicitly.
 .. note::
    **Silicon facts established on unit E1M-AEN803 2026W36-0001 (I2C
    identity probe ONLY -- see** ``metadata/chips/imx335.yaml``\
-   **):** the module answers at CCI 0x1A (the only device on the J5 camera
-   bus), and its registers read back at power-on-reset defaults (STANDBY
-   0x3000=0x01, VMAX 0x3030-0x3032=0x001194=4500, HMAX 0x3034=0x0226=550,
-   LANEMODE 0x3a01=0x03). The module self-powers -- CAM_EN (J5 pin 11) is
-   untouched, same as the IMX296 shield's own note on that pin.
+   **):** the module answered at CCI 0x1A (the only device on the J5 camera
+   bus) with CAM_EN (J5 pin 11) untouched, and its registers read back at
+   power-on-reset defaults (STANDBY 0x3000=0x01, VMAX
+   0x3030-0x3032=0x001194=4500, HMAX 0x3034=0x0226=550, LANEMODE
+   0x3a01=0x03). That bench unit's E1M-EVK carries the J5 pin-11 pull-up
+   rework (``docs/boards/e1m-evk.md``, originally fitted for OV5647) --
+   whether this module self-enables on a STOCK carrier (no rework) is NOT
+   established by this result; do not add IMX335 to any "self-enables"
+   list on the strength of it.
 
    **NOT bench-verified -- never claim beyond the I2C probe above:**
 
-   - the sensor achieving CSI-2 D-PHY lock at 1188 Mbps/lane through the
-     E1M SoM R2 pinout adapter (the highest measured link rate on any
-     sensor on this bus to date is 875 Mbps, on a different sensor);
+   - CSI-2 D-PHY lock at 1188 Mbps/lane on a 2-lane sensor through the E1M
+     SoM R2 pinout adapter -- 1188 Mbps/lane itself IS bench-proven, but
+     only on data lane D0 (IMX296, 1 lane, run 292); D1 through the adapter
+     is untested;
    - this shield's Controller-mode IPI timing (``csi-pixclk-hz``,
      ``csi-hsa``/``csi-hbp``/``csi-hline``/``csi-vsa``/``csi-vbp``/
      ``csi-vtotal`` on the ``&csi`` node) -- its derivation is INFERRED
      from the sensor's own read-back HMAX/VMAX register values and an
      ASSUMED 2x2-binned-mode line pacing, not a datasheet MIPI-timing-table
      citation (unlike the IMX296 shield's own derivation, which does cite
-     one) -- see this shield's overlay for the full derivation and its own
-     fallback note;
+     one) -- see this shield's overlay for the full derivation, and
+     ``innomaker_cam_imx335-vbp4.overlay`` (same directory) for an
+     alternative vertical-timing candidate the first bench pass must
+     compare against;
    - LP-11 clock-lane-park behaviour (``no-lp11-clock-lane-park`` is left
      unset pending a bench result, not because the sensor is known not to
      need it);

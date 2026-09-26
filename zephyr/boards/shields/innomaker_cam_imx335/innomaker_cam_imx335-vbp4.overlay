@@ -1,0 +1,48 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Issue #2327, reviewer follow-up: an ALTERNATIVE Controller-mode IPI
+ * vertical-timing candidate for the innomaker_cam_imx335 shield, NOT applied
+ * by default -- opt in explicitly (see below).
+ *
+ * innomaker_cam_imx335.overlay's default csi-vbp=254 / csi-vtotal=2250 keeps
+ * vfp pinned at the CSI_IPI_VFP_LINES_MASK 10-bit maximum (1023) with zero
+ * margin (see that overlay's own derivation comment). A large csi-vbp also
+ * means the IPI's Frame-Start-anchored vertical timing delays the first
+ * active line by csi-vbp+csi-vsa IPI lines after FS -- 255 lines * 14.79 us
+ * (the derived IPI line time) ~= 3.77 ms -- which is UNVERIFIED against the
+ * DW CSI-2 IPI's actual Controller-mode vertical behaviour (no bench data
+ * exists yet for this shield at all) and could starve or overflow the IPI
+ * FIFO if that delay does not line up with when the sensor's own vertical
+ * blanking ends.
+ *
+ * This file instead uses IMX296's OWN bench-proven csi-vbp value (4, from
+ * raspberry_pi_global_shutter_camera.overlay) and a matching csi-vtotal of
+ * 2000 (a round value inside range, NOT independently re-derived from the
+ * IMX335 HMAX/VMAX arithmetic the way the default overlay's 2250 was --
+ * treat this file as a coarser, less-derived alternative to bench against,
+ * not a competing derivation).
+ *
+ * FIRST BENCH STEP for this shield (issue #2327): compare the default
+ * vbp=254/vtotal=2250 against this file's vbp=4/vtotal=2000 and record which
+ * one (if either) achieves CSI-2 D-PHY lock and a captured frame without
+ * IPI-FIFO overflow or HLINE errors. Neither combination is claimed correct
+ * here -- this file exists only to make the alternative a one-flag switch
+ * instead of a hand-edit of the shield's own overlay.
+ *
+ * Usage: stack this file on top of the shield build via
+ * EXTRA_DTC_OVERLAY_FILE (applied after -DSHIELD, so it overrides the
+ * shield's own &csi properties):
+ *
+ *   west build -b <board> examples/aen/aen-camera-firstlight -- \
+ *     -DSHIELD="e1m_evk_rpi_csi innomaker_cam_imx335" \
+ *     -DEXTRA_DTC_OVERLAY_FILE="<path-to-alp-sdk>/zephyr/boards/shields/\
+innomaker_cam_imx335/innomaker_cam_imx335-vbp4.overlay"
+ */
+
+&csi {
+	csi-vbp = <4>;
+	csi-vtotal = <2000>;
+};

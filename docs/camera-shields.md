@@ -677,34 +677,51 @@ the same reason.
 Issue #2327, Stage A: raw first-light capture only (no ISP/AE/streaming).
 Unlike OV5647/OV9281/IMX296 above, this sensor is NOT vendored into
 alp-sdk -- it reuses upstream Zephyr v4.4.1's own `drivers/video/imx335.c`
-(`CONFIG_VIDEO_IMX335`, `compatible = "sony,imx335"`) directly, per ADR
-0017's tier ladder (Tier 0: nothing to author or maintain, the driver
-already exists upstream). No `chips/imx335/` stub, no OS-glue split --
-`metadata/chips/imx335.yaml` is catalogue-only (`driver_status: none`),
-allowlisted in `scripts/check_chip_manifest_parity.py`'s
-`KNOWN_MANIFEST_NO_DRIVER`, the same shape as IMX296/OV5647 above.
+(`CONFIG_VIDEO_IMX335`, `compatible = "sony,imx335"`) directly, ADR 0017
+Tier 1 (upstream-native), plus one small repo patch on top. No
+`chips/imx335/` stub, no OS-glue split -- `metadata/chips/imx335.yaml` is
+catalogue-only (`driver_status: none`), allowlisted in
+`scripts/check_chip_manifest_parity.py`'s `KNOWN_MANIFEST_NO_DRIVER`, the
+same shape as IMX296 above.
 
 **The one code change carried on top of upstream**
 (`zephyr/patches/zephyr/0004-imx335-link-freq.patch`, registered in
-`zephyr/patches.yml`, applied via `west patch apply` at `west update` time
--- see `zephyr/patches.yml`'s own header comment and `scripts/bootstrap.sh`
-for the mechanism): the upstream driver registers `VIDEO_CID_PIXEL_RATE`
-only, at 396 MHz -- a value matching none of the driver's own INCK/lane-mode
-register tables (24 MHz INCK, 2-lane 10-bit mode actually select a 594 MHz
-link clock, 1188 Mbps/lane). `video_get_csi_link_freq()` (`video_common.c`)
-falls back to approximating the D-PHY link frequency from `PIXEL_RATE`
-whenever a sensor reports no `VIDEO_CID_LINK_FREQ` control; with the
-uncorrected 396 MHz that approximation lands the DW CSI-2 host on 990 MHz
-(1980 Mbps/lane) instead of 594 MHz -- the same `ERRSOTSYNCHS`/`PHY_FATAL`
-storm signature OV5647 hit before its own fix (issue #2248). The patch
-corrects `PIXEL_RATE` to 237600000 (the value the driver's own tables
-actually produce) and registers `VIDEO_CID_LINK_FREQ` directly as a
-READ_ONLY int-menu `{594000000}`, the same shape as `imx296.c`'s own
+`zephyr/patches.yml`, applied per-module by `scripts/bootstrap.sh` at `west
+update` time via `west patch apply`, and checked by
+`scripts/verify_west_patches.py`): the upstream driver registers
+`VIDEO_CID_PIXEL_RATE` only, and no `VIDEO_CID_LINK_FREQ`.
+`video_get_csi_link_freq()` (`video_common.c`) falls back to approximating
+the D-PHY link frequency from `PIXEL_RATE` whenever a sensor reports no
+`VIDEO_CID_LINK_FREQ` control; for this sensor's 396 MHz `PIXEL_RATE` (a
+v4l2 pixel-array-clock convention value, unrelated to the per-lane D-PHY bit
+rate) that approximation lands the DW CSI-2 host on 990 MHz (1980
+Mbps/lane) instead of the sensor's real 594 MHz link clock (24 MHz INCK,
+2-lane 10-bit mode: 1188 Mbps/lane, link_freq = per-lane bit rate / 2) --
+the same `ERRSOTSYNCHS`/`PHY_FATAL` storm signature OV5647 hit before its
+own fix (issue #2248). The patch registers `VIDEO_CID_LINK_FREQ` directly
+as a READ_ONLY int-menu `{594000000}`, the same shape as `imx296.c`'s own
 `link_freq` control, so `video_get_csi_link_freq()` never needs the
-`PIXEL_RATE` fallback for this sensor. This correction is carried from the
-datasheet's own MIPI output timing table, NOT bench-measured -- the only
-bench result for this sensor to date is the I2C identity probe below,
-which predates this patch.
+`PIXEL_RATE` fallback for this sensor. `PIXEL_RATE` itself is left
+UNTOUCHED -- 396 MHz is the correct v4l2 pixel-array-clock value per
+`<video-controls.h>`'s own convention, not a value derived from the D-PHY
+bit rate that needed correcting, and an earlier draft of this patch that
+also "corrected" it was dropped on review (unnecessary once LINK_FREQ
+bypasses the PIXEL_RATE fallback entirely, and would not survive upstream
+review as a change to a value that was already correct). This correction
+is carried from the datasheet's own MIPI output timing table, NOT
+bench-measured -- the only bench result for this sensor to date is the I2C
+identity probe below, which predates this patch.
+
+**If bootstrapping against a Zephyr checkout that already has alp-sdk's
+0001-0003 patches applied**, re-running the full patch list fails re-applying
+0001 (`west patch` is not idempotent against an already-patched tree) --
+apply 0004 by hand instead (`git apply
+zephyr/patches/zephyr/0004-imx335-link-freq.patch` from the Zephyr repo
+root), or start from a clean checkout. **Without 0004 applied, this
+shield's D-PHY runs at 990 MHz instead of 594 MHz and the CSI-2 receiver
+logs an `ERRSOTSYNCHS`/`PHY_FATAL` error storm** (the OV5647 #2248
+signature) -- if that storm shows up on the bench, check the patch is
+applied before suspecting hardware.
 
 **Why the shield needs `csi-pixclk-hz` (issue #2327,
 `snps,designware-csi.yaml`):** the DW CSI-2 host's default Camera-mode IPI
@@ -720,19 +737,38 @@ to fall out of a request no reachable divisor can satisfy; see
 shield uses (133.333 MHz, INFERRED from the sensor's read-back HMAX/VMAX
 register values, not a datasheet timing-table citation).
 
+**Buffer sizing (`examples/aen/aen-camera-firstlight/Kconfig`):** the
+2x2-binned frame this shield's example requests is 1296 x 972 x 2 =
+2,519,424 bytes unpacked -- larger than the default 2 MiB video-buffer
+pool, so the Kconfig overlay drops `ALP_SDK_CAMERA_ZEPHYR_VIDEO_VBUF_COUNT`/
+`VIDEO_BUFFER_POOL_NUM_MAX` to 1 and grows `VIDEO_BUFFER_POOL_HEAP_SIZE` to
+2.75 MiB for `VIDEO_IMX335`, the same one-buffer-plus-margin shape IMX296
+uses for its own larger-than-default frame above.
+
 **Silicon facts established on unit E1M-AEN803 2026W36-0001, I2C identity
-probe ONLY:** the module answers at CCI 0x1A, the only device on the J5
-camera bus, and `STANDBY` (`0x3000`), `VMAX` (`0x3030`-`0x3032`), `HMAX`
-(`0x3034`) and `LANEMODE` (`0x3a01`) all read back at their power-on-reset
-defaults (`0x01`, `0x001194` = 4500, `0x0226` = 550, `0x03` respectively).
-The module self-powers -- CAM_EN (J5 pin 11) is untouched, same as the
-IMX296 module's own behaviour on that pin.
+probe ONLY:** the module answered at CCI 0x1A, the only device on the J5
+camera bus, with CAM_EN (J5 pin 11) untouched, and `STANDBY` (`0x3000`),
+`VMAX` (`0x3030`-`0x3032`), `HMAX` (`0x3034`) and `LANEMODE` (`0x3a01`) all
+read back at their power-on-reset defaults (`0x01`, `0x001194` = 4500,
+`0x0226` = 550, `0x03` respectively). That bench unit's E1M-EVK carries the
+J5 pin-11 pull-up rework ([`docs/boards/e1m-evk.md`](boards/e1m-evk.md),
+originally fitted for OV5647) -- **whether this module self-enables on a
+stock carrier (no rework) is NOT established** by this result; IMX335 is
+not added to that doc's self-enables list on the strength of it.
 
 **NOT bench-verified -- do not claim beyond the I2C probe above:** CSI-2
-D-PHY lock at 1188 Mbps/lane through the E1M SoM R2 pinout adapter (the
-highest measured link rate on any sensor on this bus to date is 875 Mbps,
-on a different sensor); this shield's assumed 2x2-binned-mode 2H
-output-line pacing; LP-11 clock-lane-park behaviour
+D-PHY lock at 1188 Mbps/lane on a 2-lane sensor through the E1M SoM R2
+pinout adapter -- 1188 Mbps/lane itself IS bench-proven, but only on data
+lane D0 (IMX296, 1 lane, run 292); D1 through the adapter is untested; this
+shield's assumed 2x2-binned-mode 2H output-line pacing and the
+Controller-mode vertical timing it produces (the overlay's default
+`csi-vbp=254`/`csi-vtotal=2250` anchors the first active line ~3.77 ms
+after Frame Start with zero FIFO margin left in the derivation -- see the
+overlay's own reviewer-caution comment; `innomaker_cam_imx335-vbp4.overlay`
+in the same shield directory carries an alternative `csi-vbp=4`/
+`csi-vtotal=2000` candidate, selectable via `-DEXTRA_DTC_OVERLAY_FILE`, and
+the first bench pass for this shield must compare both -- neither is
+claimed correct here); LP-11 clock-lane-park behaviour
 (`no-lp11-clock-lane-park` is left unset pending a bench result); and any
 frame ever captured through this shield, at any resolution.
 
@@ -793,9 +829,10 @@ not substitute for a real trigger-mode capture.
 **No emulator+ztest was added for IMX335 (issue #2327).** OV5647/OV9281/
 IMX296 above each get one because alp-sdk carries their WHOLE driver
 (Tier 1 / Tier 1.5 / ADR-0017-ADJACENT) with no upstream test coverage to
-lean on. IMX335 is Tier 0 -- upstream Zephyr's own, unmodified driver
-logic -- and the only alp-sdk-owned code is the ~15-line
-`0004-imx335-link-freq.patch` (a corrected constant plus one
+lean on. IMX335's driver itself is ALSO ADR 0017 Tier 1 (upstream-native --
+unmodified, upstream Zephyr's own driver logic), but it additionally
+carries one small repo patch on top, and the only alp-sdk-owned code is
+that ~10-line `0004-imx335-link-freq.patch` (one
 `video_init_int_menu_ctrl()` call, the same shape `imx296_test.c` already
 exercises for `imx296.c`'s own `link_freq` control). Writing a from-scratch
 emulator to re-prove upstream's own identity/init/register-write logic

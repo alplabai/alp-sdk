@@ -1,35 +1,36 @@
 diff --git a/drivers/video/imx335.c b/drivers/video/imx335.c
-index cead6b7199e..9d0f84da905 100644
+index cead6b7199e..b003d6bca5d 100644
 --- a/drivers/video/imx335.c
 +++ b/drivers/video/imx335.c
-@@ -27,7 +27,25 @@ LOG_MODULE_REGISTER(video_imx335, CONFIG_VIDEO_LOG_LEVEL);
- #define IMX335_BIN_2X2_WIDTH	1296
- #define IMX335_BIN_2X2_HEIGHT	972
+@@ -29,6 +29,27 @@ LOG_MODULE_REGISTER(video_imx335, CONFIG_VIDEO_LOG_LEVEL);
  
--#define IMX335_PIXEL_RATE	396000000
+ #define IMX335_PIXEL_RATE	396000000
+ 
 +/*
-+ * Alp Lab AB (issue #2327): upstream registered VIDEO_CID_PIXEL_RATE only, at a
-+ * value (396 MHz) that does not match any of the driver's own INCK/lane-mode
-+ * register tables below (imx335_inck_24mhz + imx335_mode_2l_10b select 2
-+ * lanes, 10-bit). video_get_csi_link_freq() (video_common.c) falls back to
-+ * approximating LINK_FREQ from PIXEL_RATE when a sensor reports no
-+ * VIDEO_CID_LINK_FREQ control -- with the upstream 396 MHz that approximation
-+ * lands on 990 MHz (1980 Mbps/lane), not the sensor's real 594 MHz link clock
-+ * (1188 Mbps/lane per lane, 2 lanes, 10 bpp: 1188e6 * 2 / 10 = 237.6e6 pixels/
-+ * s), and the DW CSI-2 host then races the D-PHY at roughly double rate --
-+ * the OV5647 ERRSOTSYNCHS/PHY_FATAL storm signature (issue #2248). Correct
-+ * PIXEL_RATE to the value the driver's own register tables actually produce,
-+ * and register LINK_FREQ directly (below) so video_get_csi_link_freq() never
-+ * needs the fallback for this sensor. NOT bench-verified for this sensor --
-+ * carried from the IMX335 datasheet's own MIPI output timing table, same
-+ * derivation as sony,imx296.c's IMX296_LINK_FREQ_HZ.
++ * Alp Lab AB (issue #2327): upstream registers VIDEO_CID_PIXEL_RATE only, and
++ * no VIDEO_CID_LINK_FREQ. video_get_csi_link_freq() (video_common.c) falls
++ * back to approximating the CSI-2 D-PHY link frequency from PIXEL_RATE
++ * whenever a sensor reports no VIDEO_CID_LINK_FREQ control -- for this
++ * sensor's 396 MHz PIXEL_RATE (a v4l2 pixel-array-clock convention value,
++ * unrelated to the per-lane D-PHY bit rate -- see <video-controls.h>'s own
++ * VIDEO_CID_PIXEL_RATE doc comment) that approximation lands the DW CSI-2
++ * host on 990 MHz (1980 Mbps/lane), not the sensor's real 594 MHz link clock
++ * (24 MHz INCK + imx335_mode_2l_10b's 2-lane 10-bit mode: 1188 Mbps/lane,
++ * link_freq = per-lane bit rate / 2 = 594 MHz) -- the same
++ * ERRSOTSYNCHS/PHY_FATAL storm signature OV5647 hit before its own fix
++ * (issue #2248). Register LINK_FREQ directly so video_get_csi_link_freq()
++ * never needs the PIXEL_RATE fallback for this sensor; PIXEL_RATE itself is
++ * untouched (out of scope -- LINK_FREQ alone is what the DW CSI-2 host
++ * reads). NOT bench-verified for this sensor -- carried from the IMX335
++ * datasheet's own MIPI output timing table, same derivation as
++ * sony,imx296.c's IMX296_LINK_FREQ_HZ.
 + */
-+#define IMX335_PIXEL_RATE	237600000
 +#define IMX335_LINK_FREQ_HZ	594000000
- 
++
  enum imx335_res {
  	IMX335_RES_2592x1944,
-@@ -53,6 +71,7 @@ struct imx335_ctrls {
+ 	IMX335_RES_1296x972,
+@@ -53,6 +74,7 @@ struct imx335_ctrls {
  	struct video_ctrl gain;
  	struct video_ctrl exposure;
  	struct video_ctrl pixel_rate;
@@ -37,7 +38,7 @@ index cead6b7199e..9d0f84da905 100644
  };
  
  struct imx335_data {
-@@ -341,6 +360,11 @@ static const struct video_format_cap imx335_fmts[] = {
+@@ -341,6 +363,11 @@ static const struct video_format_cap imx335_fmts[] = {
  	{0}
  };
  
@@ -49,7 +50,7 @@ index cead6b7199e..9d0f84da905 100644
  static const uint32_t imx335_framerates[] = {
  	[IMX335_25_FPS] = 25,
  	[IMX335_30_FPS] = 30,
-@@ -667,13 +691,31 @@ static int imx335_init_controls(const struct device *dev)
+@@ -667,13 +694,31 @@ static int imx335_init_controls(const struct device *dev)
  		return ret;
  	}
  
