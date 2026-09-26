@@ -54,6 +54,12 @@ KNOWN_MANIFEST_NO_DRIVER = {
     # catalogue-only so the part is discoverable in the chip metadata
     # system; `driver_status: none` is the honest state, not aspirational.
     "imx296",
+    # OmniVision OV5647 (issue #2287 camera sweep): same shape as IMX296 --
+    # streaming lives entirely in zephyr/drivers/video/ov5647.c, no chips/
+    # portable stub. This manifest is catalogue-only so the part is
+    # discoverable in the chip metadata system; `driver_status: none` is
+    # the honest state, not aspirational.
+    "ov5647",
 }
 
 

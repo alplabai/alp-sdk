@@ -242,14 +242,18 @@ responder to 0 and back with `CAM_EN`.
 
   On an E1M-AEN SoM, build a camera app with the board-side shield
   `e1m_evk_rpi_csi` paired with a sensor shield that follows
-  Zephyr's Raspberry Pi camera contract, e.g. the InnoMaker CAM-OV9281
-  or the RPi Camera Module 1 (OV5647) -- both bench-verified, see below:
+  Zephyr's Raspberry Pi camera contract, e.g. the InnoMaker CAM-OV9281,
+  the RPi Camera Module 1 (OV5647), or the INNO-MAKER CAM-IMX296RAW-TRIGGER
+  (IMX296) -- all three bench-verified, see below:
 
       west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <app> -- \
         -DSHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"
       # ... or:
       west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <app> -- \
         -DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1"
+      # ... or:
+      west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <app> -- \
+        -DSHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera"
 
   `e1m_evk_rpi_csi` wires J5 to the E8's dedicated CSI-2 receive
   D-PHY, hogs `IO2` low (input A), enables SoC I2C1 as the sensor
@@ -287,18 +291,24 @@ responder to 0 and back with `CAM_EN`.
   patched (`scripts/bootstrap.sh` does it).
 
   [`examples/aen/aen-camera-firstlight`](../../examples/aen/aen-camera-firstlight/)
-  is the bench first-light app for this connector: it opens the OV9281 or
-  the OV5647 shield through `<alp/camera.h>`, starts the
+  is the bench first-light app for this connector: it opens the OV9281,
+  OV5647, or IMX296 shield through `<alp/camera.h>`, starts the
   stream, and waits for one frame with a 2 s timeout, printing a CRC32
   + histogram + sample row bytes on success or a diagnosed failure
-  otherwise. See its README for what each printed line means. Both shields
-  are bench-verified: OV9281 (2026-09-21, an E1M-AEN803 on the E1M-EVK):
-  live GREY8 frames land in memory in all three modes (640x400, 1280x720,
-  1280x800), each at its configured frame rate, with the sensor test
-  pattern also verified in all three; OV5647 (2026-09-22, needing the
+  otherwise. See its README for what each printed line means. All three
+  shields are bench-verified: OV9281 (2026-09-21, an E1M-AEN803 on the
+  E1M-EVK): live GREY8 frames land in memory in all three modes (640x400,
+  1280x720, 1280x800), each at its configured frame rate, with the sensor
+  test pattern also verified in all three; OV5647 (2026-09-22, needing the
   [J5 pin 11 pull-up rework](#j5-pin-11-pull-up-rework) above), RAW10
   640x480 -- see [`docs/camera-shields.md`](../camera-shields.md)'s
-  OV5647 driver section.
+  OV5647 driver section; IMX296 (issue #2287, Stage A + Stage B
+  bench-verified) -- see [`docs/camera-shields.md`](../camera-shields.md)'s
+  IMX296 driver section for the full bench history. Issue #2287's bench
+  history documents no J5 pin-11 pull-up rework for the IMX296 module;
+  whether it self-enables like the OV9281 or was benched with the rework
+  already fitted from the OV5647 work is not recorded either way in that
+  history.
 
   > **Important.**  E1M `IO2` was previously documented as the RGB
   > LED-blue channel.  That was a placeholder guess; the EVK
