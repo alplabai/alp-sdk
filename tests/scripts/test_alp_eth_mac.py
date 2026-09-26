@@ -3,7 +3,7 @@
 Unit tests for scripts/alp_eth_mac.py.
 
 Pins the golden vector for serial "2026W38-0001" that the U-Boot C side
-(meta-alp-sdk/recipes-bsp/u-boot/u-boot/0010-rzv2n-dev-ALP-E1M-eth-mac.patch)
+(meta-alp-sdk/recipes-bsp/u-boot/u-boot/0010-rzv2n-dev-ALP-E1M-serial-derived-eth-mac.patch)
 carries verbatim too -- if either side's encoding drifts, this is the one
 test that notices.
 
@@ -110,6 +110,28 @@ class TestParseSerial(unittest.TestCase):
         for bad in ("2026-W38-0001", "2026W380001", "26W38-0001", "2026W38-001", ""):
             with self.assertRaises(mac.AlpEthMacError):
                 mac.parse_serial(bad)
+
+    def test_trailing_newline_rejected(self):
+        # Python's `$` anchor matches just before a trailing newline, not
+        # only at the true end of string -- fullmatch() (no ^/$) closes
+        # that hole. A serial read from a file/env with a stray \n must
+        # not silently parse.
+        with self.assertRaises(mac.AlpEthMacError):
+            mac.parse_serial("2026W38-0001\n")
+
+    def test_unicode_digit_rejected(self):
+        # Without re.ASCII, \d matches any Unicode decimal digit (e.g.
+        # Arabic-Indic THREE, U+0663) -- must be rejected, not silently
+        # accepted as an ASCII digit look-alike.
+        with self.assertRaises(mac.AlpEthMacError):
+            mac.parse_serial("2026W3٣3-0001")
+
+    def test_u017f_long_s_rejected(self):
+        # U+017F LATIN SMALL LETTER LONG S upper-cases to plain ASCII "S"
+        # in Unicode, so re.IGNORECASE without re.ASCII would fold it
+        # onto a valid Crockford character -- must be rejected instead.
+        with self.assertRaises(mac.AlpEthMacError):
+            mac.parse_serial("2026W38-000ſ")
 
 
 class TestDeriveMac(unittest.TestCase):

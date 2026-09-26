@@ -58,7 +58,15 @@ from dataclasses import dataclass
 #: loudly, not silently decode to a different unit's MAC.
 CROCKFORD_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
-SERIAL_RE = re.compile(r"^(\d{4})W(\d{2})-([0-9A-Za-z]{4})$", re.IGNORECASE)
+#: `re.ASCII` is load-bearing, not decoration: without it, `\d` matches any
+#: Unicode decimal digit (e.g. Arabic-Indic `٣`, fullwidth `４`), and
+#: `re.IGNORECASE` case-folds some non-ASCII letters onto an ASCII one in
+#: the `[0-9A-Za-z]` class -- notably U+017F LATIN SMALL LETTER LONG S
+#: ("ſ"), whose Unicode uppercasing is plain "S", so it would otherwise
+#: pass as a look-alike for the index field. `fullmatch()` (no `^`/`$`)
+#: additionally closes Python's `$`-matches-before-a-trailing-newline
+#: exception -- `^...$` alone would accept "2026W38-0001\n".
+SERIAL_RE = re.compile(r"(\d{4})W(\d{2})-([0-9A-Za-z]{4})", re.IGNORECASE | re.ASCII)
 
 MAC_OCTET0 = 0xA2          #: fixed individual/local-admin byte -- see docstring.
 MAC_PREFIX_NIBBLE = 0xC    #: fixed Alp Lab prefix inside the 40-bit payload.
@@ -113,7 +121,7 @@ def crockford_decode(chars: str) -> int:
 def parse_serial(serial: str) -> ParsedSerial:
     """Parse `YYYYWww-IIII` into (year, week, index), or raise
     :class:`AlpEthMacError` with a reason -- never guesses."""
-    m = SERIAL_RE.match(serial)
+    m = SERIAL_RE.fullmatch(serial)
     if not m:
         raise AlpEthMacError(f"serial {serial!r} does not match YYYYWww-IIII")
     year = int(m.group(1))
@@ -126,8 +134,10 @@ def parse_serial(serial: str) -> ParsedSerial:
         )
     if not (1 <= week <= 53):
         raise AlpEthMacError(f"week {week} out of range [1, 53]")
-    if index > (1 << INDEX_BITS) - 1:
-        raise AlpEthMacError(f"index {index} exceeds {(1 << INDEX_BITS) - 1}")
+    # No index range check here: crockford_decode() already bounds `index`
+    # to exactly 4 base-32 digits (0 .. 32**4 - 1 == (1 << INDEX_BITS) - 1),
+    # so an out-of-range value here is unreachable -- a redundant check
+    # would just be dead code no test could ever exercise honestly.
 
     return ParsedSerial(year=year, week=week, index=index)
 
