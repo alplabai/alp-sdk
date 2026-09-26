@@ -114,7 +114,7 @@ class TestSecurePageMirrorLayout(unittest.TestCase):
             rv = subprocess.run(
                 [sys.executable, str(TOOL),
                  "--board-yaml", str(REPO / "examples" / "aen" / "aen-eeprom-provision" / "board.yaml"),
-                 "--serial", "TEST-0001",
+                 "--serial", "2026W36-0001",
                  "--mfg-date", "2026-05-11",
                  "--output", str(out)],
                 capture_output=True, text=True, encoding="utf-8",
@@ -129,6 +129,25 @@ class TestSecurePageMirrorLayout(unittest.TestCase):
             # 128-byte manifest tool does for this same board.yaml.
             hw_rev = data[0x15:0x15 + 12].split(b"\0", 1)[0].decode("ascii")
             self.assertEqual(hw_rev, "2626-r2")
+
+    def test_cli_rejects_malformed_serial(self) -> None:
+        """Same fail-closed guard as program_eeprom.py: a serial
+        scripts/alp_eth_mac.py's parser would reject must not be
+        silently packed into a Secure Data Page mirror either."""
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "secure-page.bin"
+            rv = subprocess.run(
+                [sys.executable, str(TOOL),
+                 "--board-yaml", str(REPO / "examples" / "aen" / "aen-eeprom-provision" / "board.yaml"),
+                 "--serial", "not-a-serial",
+                 "--mfg-date", "2026-05-11",
+                 "--output", str(out)],
+                capture_output=True, text=True, encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
+            )
+            self.assertNotEqual(rv.returncode, 0)
+            self.assertIn("YYYYWww-IIII", rv.stderr)
+            self.assertFalse(out.exists())
 
     def test_different_magic_from_array_manifest(self) -> None:
         """The mirror's magic must never collide with the array

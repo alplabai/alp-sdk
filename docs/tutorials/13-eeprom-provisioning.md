@@ -98,8 +98,10 @@ project's `board.yaml`, not from individual CLI flags:
   resolves **family** automatically from the SKU's
   `metadata/e1m_modules/<SKU>.yaml` preset, and **hw_rev** from
   `som.hw_rev` if present, else the preset's `default_hw_rev`.
-- **`--serial`** (`A20260514-0001`) -- production-assigned, max 23
-  ASCII characters; recommend a date prefix + sequence number.
+- **`--serial`** (`YYYYWww-IIII`, e.g. `2026W20-0001`) -- production-assigned;
+  `YYYY` the manufacturing year, `ww` the ISO week, `IIII` a 4-character
+  Crockford base32 index. Validated against `scripts/alp_eth_mac.py`'s
+  parser -- a malformed serial fails the run before anything is written.
 - **`--mfg-date`** (`2026-05-14`) -- ISO `YYYY-MM-DD`, the calendar
   date the unit was tested.
 
