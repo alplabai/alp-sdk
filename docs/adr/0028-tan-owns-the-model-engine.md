@@ -37,7 +37,7 @@ Ethos-U55/U65 (55). U55/U65 is a strict subset; exactly 19 are U85-only —
 `SCATTER_ND`, `SELECT`, `SELECT_V2` (re-pinned from vela 5.1.0's 17-op delta
 by #2310). alp-sdk ships
 all three variants (u85: E1M-AEN401/601/801/803; u55: E1M-AEN301/501/701;
-u65: E1M-NX9101), so one flat `ethos_u.json` carrying 70 would report 17
+u65: E1M-NX9101), so one flat `ethos_u.json` carrying 74 would report 19
 false capabilities on four of the eight Ethos-U SKUs. The tables are invariant to
 `--accelerator-config` — five regenerations across `ethos-u55-32`,
 `ethos-u55-256`, `ethos-u65-512`, `ethos-u85-128` and `ethos-u85-2048` produced

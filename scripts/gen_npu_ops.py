@@ -235,7 +235,7 @@ def build_tables(vela: str) -> dict[str, dict]:
             "content_hash": content_hash,
             "note": (common_provenance_note + " A strict subset of the U85 "
                     "table -- see u85@vela-*.json's supported_ops for the "
-                    "17-op delta this SKU lacks."),
+                    f"{len(_EXPECTED_U85_ONLY_DELTA)}-op delta this SKU lacks."),
         },
         "supported_ops": u55_u65,
     }
