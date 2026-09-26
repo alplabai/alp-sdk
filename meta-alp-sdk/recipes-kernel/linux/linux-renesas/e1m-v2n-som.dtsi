@@ -342,14 +342,16 @@
 	 * anything set here. post-power-on-delay-ms instead runs AFTER
 	 * .post_power_on drives REG_ON high (pwrseq_simple.c:
 	 * mmc_pwrseq_simple_post_power_on() deasserts, then sleeps this
-	 * many ms) -- a settle time for the module post-power-up. Neither
-	 * value is bench-tuned against real silicon yet (module has never
-	 * enumerated on this board -- see docs/soms/v2n.md's Wi-Fi/BT
-	 * section). */
+	 * many ms) -- a settle time for the module post-power-up, before
+	 * the first CMD5. Bench-tuned on E1M-V2M103 (2026-09-26): at 10 ms
+	 * a WL_REG_ON power cycle (SDHI2 unbind/bind) re-enumerated only
+	 * 11/15 times -- the failing rounds never answer CMD5 -- while cold
+	 * boot always worked; at 200 ms it re-enumerated 15/15 (brcmfmac
+	 * firmware reloaded each time). */
 	wlan_pwrseq: wlan-pwrseq {
 		compatible = "mmc-pwrseq-simple";
 		reset-gpios = <&gd32_gpio 19 GPIO_ACTIVE_LOW>;
-		post-power-on-delay-ms = <10>;
+		post-power-on-delay-ms = <200>;
 	};
 };
 
