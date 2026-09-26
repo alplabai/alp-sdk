@@ -806,9 +806,12 @@ clocks back out on the *next* CS transaction within
 
 The CRC is transmitted **LSB first** (low byte on the wire first, then the
 high byte) — e.g. CRC-16/CCITT-FALSE over the PING request body `A5 00` is
-`0xFF84`, which goes on the wire as `84 FF`. This is the one field in the
-envelope that is little-endian; every other multi-byte field in this protocol
-is big-endian, and that asymmetry is exactly what makes it easy to get wrong.
+`0xFF84`, which goes on the wire as `84 FF`. That is the same little-endian
+rule §2 sets for every multi-byte field in this protocol: payload integers
+(`OTA_BEGIN`'s `size`/`expected_crc32`, `GPIO_WRITE`'s `mask`/`levels`, …) go
+low byte first too. A host that packs them big-endian gets `STATUS 0x08`
+(OUT_OF_RANGE) on `OTA_BEGIN`, because the byte-swapped `size` exceeds the
+slot.
 
 Length is **not** carried on the wire because a single opcode has a
 fixed request-payload width and a status-code-determined reply-payload
