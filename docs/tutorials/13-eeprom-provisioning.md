@@ -119,7 +119,7 @@ YAML
 
 python3 scripts/program_eeprom.py \
     --board-yaml board.yaml \
-    --serial     A20260514-0001 \
+    --serial     2026W20-0001 \
     --mfg-date   2026-05-14 \
     --output     build/eeprom-manifest.bin
 ```
@@ -131,7 +131,7 @@ program_eeprom: wrote 128 bytes to build/eeprom-manifest.bin
   family   aen
   sku      E1M-AEN801
   hw_rev   r2
-  serial   A20260514-0001
+  serial   2026W20-0001
   mfg_date 2026-05-14
 ```
 
