@@ -164,6 +164,51 @@ no-op on hardware seen so far, not as validated for that case.
 
 ## 4. Image
 
+**The two-switch contract, authoritative here — every other mention in this
+repo is a pointer to this paragraph, not a restatement of it.** Two
+independent switches, both default OFF, deliberately not merged into one
+(the released v0.15.0 contract, `CHANGELOG.md`: "Two independent switches,
+both default OFF, deliberately not merged into one"):
+
+- **`PACKAGECONFIG[drpai]`** on the `alp-sdk` recipe (set by the builder in
+  `local.conf` as `PACKAGECONFIG:append:pn-alp-sdk = " drpai"`) compiles the
+  DRP-AI3 backend into `libalp_sdk`. Nothing else sets it.
+- **`ALP_ENABLE_DRPAI = "1"`** (a MACHINE-conf variable) does two things:
+  enables the `&drpai0` devicetree node (§3), and — `alp-image-edge`
+  only, and only on an `rzv2n-family` MACHINE (`'rzv2n-family' in
+  (d.getVar('MACHINEOVERRIDES') or '').split(':')`) — gates installing
+  `alp-drpai-inference`
+  (`meta-alp-sdk/recipes-images/alp-image-edge.bb:50-51`); never
+  `alp-image-prod`, and never on a non-RZ/V2N machine such as
+  `e1m-nx9101-a55` or `e1m-aen801-a32` even with `ALP_ENABLE_DRPAI = "1"`
+  set. It installs no userspace runtime package itself.
+  `alp-image-common.inc`'s `ALP_RZ_DRPAI_INSTALL` (lines 81-85) is the
+  single packaging authority for the `lib-tvm` + `kernel-module-mmngr`
+  pair, on every `alp-image-*` image (the three recipes that `require
+  alp-image-common.inc` — `alp-image-base`/`-edge`/`-prod`), gated only
+  on `rz-drpai` being in `BBFILE_COLLECTIONS` and `v2n` being in
+  `MACHINE_FEATURES` (issue #1176), independent of `ALP_ENABLE_DRPAI`. A
+  non-`alp-image-*` build (a bare `core-image-*`) with
+  `ALP_ENABLE_DRPAI = "1"` does NOT get that pair from alp-sdk's tree at
+  all — it would need its own install, or the vendor layer's own
+  `core-image` bbappend (no such bbappend exists in this tree).
+
+**Both are required and neither implies the other.** Omitting the
+`PACKAGECONFIG` half leaves `ALP_SDK_USE_DRPAI_V2N=OFF`, and
+`alp_inference_open()` returns `NULL` with `ALP_ERR_NOSUPPORT` even though
+the node and userspace payload are present. Omitting `ALP_ENABLE_DRPAI`
+also fails, not idles: with a compiled backend but no `&drpai0` node,
+`/dev/drpai0` does not exist, so `open()`'s `ENOENT` collapses to
+`ALP_ERR_IO` (`src/yocto/inference_drpai.cpp`'s `_drpai_mem_start()`,
+called first from `alp_inference_drpai_open()`, via
+`_drpai_errno_to_status()`'s default case). A driver that IS present
+but contended returns a different code from that same mapping instead
+— `ALP_ERR_TIMEOUT` for `ETIMEDOUT`, `ALP_ERR_BUSY` for `EINPROGRESS`/
+`EADDRNOTAVAIL` — so absent (`ALP_ERR_IO`) and busy
+(`ALP_ERR_TIMEOUT`/`ALP_ERR_BUSY`) are distinguishable, not the same
+code path. Neither switch silently half-works, and neither missing
+switch is silent either.
+
 Enable the backend through the SDK recipe's PACKAGECONFIG:
 
 ```
