@@ -63,3 +63,16 @@ alp_status_t alp_camera_configure_isp(alp_camera_t *c, const alp_camera_isp_conf
 	return ALP_ERR_NOSUPPORT;
 }
 #endif /* !ALP_VENDOR_OVERRIDES_CAMERA */
+
+/* ------------------------------------------------------------------ */
+/* Camera trigger mode (alp/camera.h, issue #2287)                    */
+/* ------------------------------------------------------------------ */
+
+#if !defined(ALP_VENDOR_OVERRIDES_CAMERA)
+alp_status_t alp_camera_set_trigger_mode(alp_camera_t *c, alp_camera_trigger_t mode)
+{
+	(void)c;
+	(void)mode;
+	return ALP_ERR_NOSUPPORT;
+}
+#endif /* !ALP_VENDOR_OVERRIDES_CAMERA */

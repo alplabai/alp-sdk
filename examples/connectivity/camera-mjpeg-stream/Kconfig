@@ -51,4 +51,36 @@ config CAMERA_MJPEG_STREAM_1280X960
 	  at either size to begin with (its ROI crop and full-pixel-scan
 	  modes are 1280x960 and 1456x1088).
 
+# Opt-in external-trigger demo (issue #2287 unit 4): drives the camera in
+# ALP_CAMERA_TRIGGER_EXTERNAL mode (<alp/camera.h>) instead of free-run, and
+# pulses a GPIO at APP_CAMERA_TRIGGER_HZ to supply the frame timing IMX296's
+# fast-trigger mode expects on its external trigger input -- see README.md's
+# "Trigger mode" section and src/main.c's trigger_timer_handler(). OFF by
+# default: every other build variant in testcase.yaml stays exactly the
+# free-run capture this example always shipped. Only meaningful on IMX296
+# (SHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera") -- on any
+# other sensor alp_camera_set_trigger_mode() returns ALP_ERR_NOSUPPORT and
+# main.c falls back to free-run with a printed warning, so turning this on
+# for OV5647/OV9281 is harmless, just pointless.
+config APP_CAMERA_TRIGGER
+	bool "Drive the camera in external-trigger mode via a GPIO pulse"
+	default n
+	help
+	  See this symbol's own comment in Kconfig and README.md's "Trigger
+	  mode" section. NOTHING in this build variant has been benched on
+	  real silicon with an actual trigger pulse -- see README.md.
+
+config APP_CAMERA_TRIGGER_HZ
+	int "Trigger pulse rate, Hz"
+	default 15
+	depends on APP_CAMERA_TRIGGER
+	help
+	  How often main.c's k_timer fires a trigger pulse. 15 Hz matches
+	  this example's own CONFIG_CAMERA_MJPEG_STREAM_1280X960 capture
+	  rate request (see that symbol's Kconfig help) -- there is no
+	  requirement the two match, a mismatched rate just means captures
+	  either wait longer between pulses or (if faster than the sensor's
+	  own trigger-to-readout time) queue up, neither of which this
+	  example handles specially.
+
 source "Kconfig.zephyr"

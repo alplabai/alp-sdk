@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-24",
+  "generated": "2026-09-26",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -1608,6 +1608,10 @@
           "hash": "9c155c4bf49789d5",
           "signature": "alp_status_t alp_camera_release(alp_camera_t *c, alp_camera_frame_t *frame);"
         },
+        "alp_camera_set_trigger_mode": {
+          "hash": "b6ffdd8b7a9da9b7",
+          "signature": "alp_status_t alp_camera_set_trigger_mode(alp_camera_t *c, alp_camera_trigger_t mode);"
+        },
         "alp_camera_start": {
           "hash": "253f9607e6c4b0e0",
           "signature": "alp_status_t alp_camera_start(alp_camera_t *c);"
@@ -1667,6 +1671,15 @@
           "definition": "typedef struct alp_camera alp_camera_t;",
           "hash": "fe9acbb85337fbe2",
           "kind": "opaque"
+        },
+        "alp_camera_trigger_t": {
+          "definition": "typedef enum { ALP_CAMERA_TRIGGER_FREE_RUN = 0, ALP_CAMERA_TRIGGER_EXTERNAL = 1, } alp_camera_trigger_t;",
+          "enumerators": [
+            "ALP_CAMERA_TRIGGER_FREE_RUN = 0",
+            "ALP_CAMERA_TRIGGER_EXTERNAL = 1"
+          ],
+          "hash": "7f928b237fbb7cb7",
+          "kind": "enum"
         }
       },
       "variables": {}

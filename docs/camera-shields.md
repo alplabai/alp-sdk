@@ -630,25 +630,36 @@ at `0x308D`, range cited to the datasheet's "Register List of Shutter
 setting", page 60), analogue+digital gain (`VIDEO_CID_ANALOGUE_GAIN`, `GAIN`
 at `0x3204`, 0.1 dB step, 0-48.0 dB, range cited to "Gain Adjustment
 Function"/"Register List of Gain setting", page 56), H/V flip, pixel rate
-(118.8 Mpix/s), link frequency (594 MHz), and a driver-private control,
-`IMX296_CID_TRIGGER_MODE` (`VIDEO_CID_PRIVATE_BASE + 0x01`, default free-run,
-unchanged behaviour) that switches the sensor into the datasheet's Global
-Shutter **Fast Trigger Mode** (`TRIGEN` at `0x300B` + `LOWLAGTRG` at `0x30AE`,
-"Global Shutter (Fast Trigger Mode) Operation", page 64) -- the only one of
-the datasheet's two trigger sub-modes this hardware can reach, since
-Sequential Trigger Mode is "slave mode only" (page 62) and this sensor, like
-every part on the RPi-style 15-pin CSI connector, has no XVS/XHS lines wired.
-The mode switch only takes effect on the next `video_stream_start()`, per
-"Mode Transitions of Global Shutter Operation" (page 66): "In case of Fast
-Trigger mode, the mode transition must be done via sensor standby." Setting
-the control while already streaming is rejected `-EBUSY` rather than
-silently deferred. UNTESTED ON SILICON -- issue #2287 benches it later with
-a GPIO pulse on the sensor module's own opto-isolated J3 Trig+ header (on
-the INNO-MAKER camera module itself, separate from both the E1M-EVK carrier
-and the 15-pin CSI FFC that connects them), routed to Arduino D4 /
-`EVK_PIN_CK_DIO4` (E1M pad M2, Alif P5_1); see
-`examples/aen/aen-camera-firstlight`'s `AEN_CAMERA_TRIGGER` CMake option and
-`trigger_gpio.overlay` for the (also unbenched) bench-app wiring.
+(118.8 Mpix/s), link frequency (594 MHz), and a shared SDK control,
+`VIDEO_CID_ALP_TRIGGER_MODE` (`zephyr/include/zephyr/drivers/video/
+alp_video_ctrls.h`, `VIDEO_CID_PRIVATE_BASE + 0x01`, default free-run,
+unchanged behaviour -- formerly a driver-private `IMX296_CID_TRIGGER_MODE`
+before this shared header existed) that switches the sensor into the
+datasheet's Global Shutter **Fast Trigger Mode** (`TRIGEN` at `0x300B` +
+`LOWLAGTRG` at `0x30AE`, "Global Shutter (Fast Trigger Mode) Operation", page
+64) -- the only one of the datasheet's two trigger sub-modes this hardware
+can reach, since Sequential Trigger Mode is "slave mode only" (page 62) and
+this sensor, like every part on the RPi-style 15-pin CSI connector, has no
+XVS/XHS lines wired. The mode switch only takes effect on the next
+`video_stream_start()`, per "Mode Transitions of Global Shutter Operation"
+(page 66): "In case of Fast Trigger mode, the mode transition must be done
+via sensor standby." Setting the control while already streaming is rejected
+`-EBUSY` rather than silently deferred.
+
+This control now also reaches every `<alp/camera.h>` Zephyr-video backend
+through the portable `alp_camera_set_trigger_mode(camera,
+ALP_CAMERA_TRIGGER_EXTERNAL)` API (issue #2287) -- a caller no longer has to
+reach the sensor's Zephyr device directly to arm trigger mode; each backend
+maps `-EBUSY` to `ALP_ERR_BUSY` and an unsupported/unknown control (any
+sensor other than IMX296) to `ALP_ERR_NOSUPPORT`. UNTESTED ON SILICON, at
+every layer -- issue #2287 benches it later with a GPIO pulse on the sensor
+module's own opto-isolated J3 Trig+ header (on the INNO-MAKER camera module
+itself, separate from both the E1M-EVK carrier and the 15-pin CSI FFC that
+connects them), routed to Arduino D4 / `EVK_PIN_CK_DIO4` (E1M pad M2, Alif
+P5_1); see `examples/aen/aen-camera-firstlight`'s `AEN_CAMERA_TRIGGER` CMake
+option and `trigger_gpio.overlay` for that lower-level (non-portable) bench
+wiring, and `examples/connectivity/camera-mjpeg-stream`'s `CONFIG_APP_CAMERA_
+TRIGGER` Kconfig option for the portable-API version, both still unbenched.
 
 **HARDWARE CAUTION, do not wire J3 yet:** the electrical polarity of this
 trigger path is unverified -- the INNO-MAKER module's J3 input circuit
@@ -765,3 +776,11 @@ IMX296 calibration). Bench-verified end to end, runs 312-314: DHCP lease +
 `/stream`/`/snapshot.jpg` served, 61 fps encode, 0 encode failures, up to
 28.3 fps / 885 KB/s delivered to one client. See that example's own
 README.md for the build command and full bench history.
+
+Also has an opt-in `CONFIG_APP_CAMERA_TRIGGER` Kconfig (issue #2287 unit 4):
+calls `alp_camera_set_trigger_mode(camera, ALP_CAMERA_TRIGGER_EXTERNAL)`
+before `alp_camera_start()` and pulses the same trigger GPIO
+`aen-camera-firstlight` uses (P5_1 / Arduino D4) at `CONFIG_APP_CAMERA_
+TRIGGER_HZ` (default 15 Hz) via a `k_timer`. UNBENCHED -- `testcase.yaml`'s
+`aen_imx296_trigger` scenario is `build_only: true`; see that example's
+README "Trigger mode" section for the still-unverified J3 polarity caveat.

@@ -93,6 +93,7 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/video.h>
 #include <zephyr/drivers/video-controls.h>
+#include <zephyr/drivers/video/alp_video_ctrls.h>
 #include <zephyr/drivers/video/isp_frame_size.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -699,6 +700,47 @@ static alp_status_t isp_configure_isp(alp_camera_backend_state_t    *state,
 	return ALP_OK;
 }
 
+/*
+ * Unlike zephyr_video.c / v2n_n44_isp.c, `st->dev` here is the ISP m2m
+ * device, not the sensor -- the sensor sits UPSTREAM of the ISP in this
+ * backend's pipeline (isp_open()'s own header comment). VIDEO_CID_ALP_TRIGGER_MODE
+ * is a sensor-level control (only the sensor's exposure hardware knows about
+ * an external trigger input), so it has to be set on the sensor node
+ * directly, the same way the fps request just above does for OV5647's
+ * VIDEO_CID_EXPOSURE_AUTO -- one #if DT_NODE_EXISTS branch per sensor this
+ * ISP path supports. Returns NULL when neither compiles into this board's
+ * devicetree, which set_trigger_mode() below turns into ALP_ERR_NOSUPPORT
+ * (no sensor-scoped trigger control CAN exist without a sensor node at all).
+ */
+static const struct device *_isp_trigger_sensor_dev(void)
+{
+#if DT_NODE_EXISTS(DT_NODELABEL(imx296))
+	return DEVICE_DT_GET(DT_NODELABEL(imx296));
+#elif DT_NODE_EXISTS(DT_NODELABEL(ov5647))
+	return DEVICE_DT_GET(DT_NODELABEL(ov5647));
+#else
+	return NULL;
+#endif
+}
+
+static alp_status_t isp_set_trigger_mode(alp_camera_backend_state_t *state,
+                                         alp_camera_trigger_t        mode)
+{
+	alp_alif_isp_pico_state_t *st = (alp_alif_isp_pico_state_t *)state->be_data;
+	if (st == NULL) {
+		return ALP_ERR_NOT_READY;
+	}
+
+	const struct device *sensor_dev = _isp_trigger_sensor_dev();
+	if (sensor_dev == NULL || !device_is_ready(sensor_dev)) {
+		return ALP_ERR_NOSUPPORT;
+	}
+
+	struct video_control ctrl = { .id = VIDEO_CID_ALP_TRIGGER_MODE, .val = (int32_t)mode };
+	int                  err  = video_set_ctrl(sensor_dev, &ctrl);
+	return _errno_to_alp(err);
+}
+
 static void isp_close(alp_camera_backend_state_t *state)
 {
 	alp_alif_isp_pico_state_t *st = (alp_alif_isp_pico_state_t *)state->be_data;
@@ -719,13 +761,14 @@ static void isp_close(alp_camera_backend_state_t *state)
 }
 
 static const alp_camera_ops_t _ops = {
-	.open          = isp_open,
-	.start         = isp_start,
-	.stop          = isp_stop,
-	.capture       = isp_capture,
-	.release       = isp_release,
-	.configure_isp = isp_configure_isp,
-	.close         = isp_close,
+	.open             = isp_open,
+	.start            = isp_start,
+	.stop             = isp_stop,
+	.capture          = isp_capture,
+	.release          = isp_release,
+	.configure_isp    = isp_configure_isp,
+	.set_trigger_mode = isp_set_trigger_mode,
+	.close            = isp_close,
 };
 
 ALP_BACKEND_REGISTER(camera,

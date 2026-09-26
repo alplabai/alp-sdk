@@ -44,6 +44,10 @@ struct alp_camera_ops {
 	alp_status_t (*release)(alp_camera_backend_state_t *state, alp_camera_frame_t *frame);
 	alp_status_t (*configure_isp)(alp_camera_backend_state_t    *state,
 	                              const alp_camera_isp_config_t *isp);
+	/** May be NULL -- the dispatcher then reports ALP_ERR_NOSUPPORT, same
+	 *  as a backend that implements it but has no sensor-level trigger
+	 *  control (issue #2287). */
+	alp_status_t (*set_trigger_mode)(alp_camera_backend_state_t *state, alp_camera_trigger_t mode);
 	void (*close)(alp_camera_backend_state_t *state);
 };
 

@@ -3615,6 +3615,7 @@
         "alp_camera_configure_isp",
         "alp_camera_open",
         "alp_camera_release",
+        "alp_camera_set_trigger_mode",
         "alp_camera_start",
         "alp_camera_stop"
       ],

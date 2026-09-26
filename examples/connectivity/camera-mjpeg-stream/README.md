@@ -187,6 +187,56 @@ region` summary (`west build` prints it after linking) before adding to
 byte count still applies, it moves with every change to this file or its
 dependencies.
 
+### Trigger mode (issue #2287 unit 4, UNBENCHED)
+
+`CONFIG_APP_CAMERA_TRIGGER` (this directory's `Kconfig`, default `n`) puts
+the camera in `ALP_CAMERA_TRIGGER_EXTERNAL` mode
+(`alp_camera_set_trigger_mode()`, `<alp/camera.h>`) instead of free-run, and
+starts a `k_timer` in `src/main.c` that pulses a GPIO at
+`CONFIG_APP_CAMERA_TRIGGER_HZ` (default 15) to actually supply that frame
+timing. Only IMX296 answers this control today
+(`zephyr/drivers/video/imx296.c`'s `VIDEO_CID_ALP_TRIGGER_MODE`) — on any
+other shield `alp_camera_set_trigger_mode()` returns `ALP_ERR_NOSUPPORT`,
+which this example logs and falls back to plain free-run streaming rather
+than treating as fatal.
+
+```bash
+west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
+    examples/connectivity/camera-mjpeg-stream -- \
+    "-DEXTRA_ZEPHYR_MODULES=<path-to-alp-sdk>;<path-to-hal_alif>" \
+    "-DSHIELD=e1m_evk_rpi_csi raspberry_pi_global_shutter_camera" \
+    "-DEXTRA_CONF_FILE=boards/overlay-1280x960.conf" \
+    "-DCONFIG_APP_CAMERA_TRIGGER=y"
+# flash + run per docs/aen-bench-bringup.md.
+```
+
+The GPIO pin reused for the pulse is the same one
+`examples/aen/aen-camera-firstlight/trigger_gpio.overlay` documents in
+full: P5_1 / Arduino D4 (`EVK_PIN_CK_DIO4`), wired to the INNO-MAKER
+CAM-IMX296RAW-TRIGGER module's own J3 Trig+ header — **not** the E1M-EVK
+carrier and **not** the 15-pin CSI FFC between them. Both AEN board
+overlays in this directory (`boards/alp_e1m_aen80{1,3}_..._rtss_he.overlay`)
+reserve that pin unconditionally under a `/zephyr,user` node (there is no
+Kconfig-conditional devicetree in this build system — the overlay set is
+fixed before Kconfig evaluates), but it stays inert unless
+`CONFIG_APP_CAMERA_TRIGGER=y` actually configures and drives it.
+
+**Electrical polarity is UNVERIFIED, same as `trigger_gpio.overlay`'s own
+caveat — do not wire J3 until the INNO-MAKER module's own documentation (or
+a bench measurement) confirms whether its input circuit inverts.** The
+`GPIO_ACTIVE_HIGH` flag in both board overlays' trigger blocks is a
+placeholder, not a confirmed fact; see `trigger_gpio.overlay`'s header
+comment for the two possible cases it chooses between and the reasoning
+either way.
+
+**Nothing about this Kconfig option, this GPIO wiring, or this README
+section has been benched on real silicon.** `testcase.yaml`'s
+`aen_imx296_trigger` scenario is a compile-time check only (`build_only:
+true`) — no camera, Ethernet, or trigger-source hardware exists in the CI
+runner that builds it, and no bench run against a physical trigger pulse
+has been recorded for this variant, unlike the IMX296 free-run variant
+above (runs 312-314).
+
 ### Ethernet MAC address changes every boot (investigated, not fixed)
 
 Bench runs 312-314 each logged a DIFFERENT MAC address
@@ -369,10 +419,10 @@ the body):
 | `src/jpeg_quality_ladder.h` | `jpeg_quality_step_down()` — the pure, native_sim-testable retry-ladder step `src/main.c` uses on an `ALP_ERR_NOMEM` encode failure (`tests/unit/mjpeg_quality_ladder`). |
 | `src/aen_eth_phy.c` | AEN-only, interim: PHY power/reset + refclk-mode bring-up; not linked on other targets. |
 | `src/selftest.c` | native_sim-only CI selftest (`GET /snapshot.jpg` JPEG marker check, `GET /stream` multipart-framing check). |
-| `boards/alp_e1m_aen80{1,3}_..._rtss_he.overlay` | ISP graph rewiring (mirrors `aen-isp-ov5647-viewfinder`) + interim Ethernet RMII/PHY DT wiring (mirrors `aen-ethernet-link`). Content-identical across the two SKUs. |
+| `boards/alp_e1m_aen80{1,3}_..._rtss_he.overlay` | ISP graph rewiring (mirrors `aen-isp-ov5647-viewfinder`) + interim Ethernet RMII/PHY DT wiring (mirrors `aen-ethernet-link`) + the `CONFIG_APP_CAMERA_TRIGGER` GPIO reservation (`/zephyr,user`, inert unless that Kconfig is on). Content-identical across the two SKUs. |
 | `boards/alp_e1m_aen80{1,3}_..._rtss_he.conf` | AEN hardware-path Kconfig (ISP pipeline sized for 640×480 NV12, Hantro JPEG encoder, Ethernet DMA-region glue, `CONFIG_DCACHE=n`) — board-scoped so native_sim stays clean of undefined-symbol Kconfig warnings. Content-identical across the two SKUs. |
 | `boards/overlay-1280x960.conf` | 1280x960 variant (AEN801 or AEN803, same PCB/SoC): sets `CONFIG_CAMERA_MJPEG_STREAM_1280X960`, drops the ISP raw-buffer count to 2, resizes the video buffer pool for the larger NV12 frame, and resets `CONFIG_NET_TCP_MAX_SEND_WINDOW_SIZE` to 0 (auto) — the board confs' 64 KiB window starves this overlay's 16/8 TX pools — layered on top of either board conf via `EXTRA_CONF_FILE`. |
-| `Kconfig` | `CONFIG_CAMERA_MJPEG_STREAM_1280X960` — the resolution select `src/main.c` and `src/mjpeg_http.h` both key off. |
+| `Kconfig` | `CONFIG_CAMERA_MJPEG_STREAM_1280X960` — the resolution select `src/main.c` and `src/mjpeg_http.h` both key off — plus `CONFIG_APP_CAMERA_TRIGGER`/`_HZ` (see "Trigger mode" above). |
 | `boards/native_sim.conf` + `boards/native_sim_native_64.conf` | Content-identical pair (Zephyr resolves a different filename per qualifier string, so one file alone doesn't cover both `native_sim` and `native_sim/native/64`): `CONFIG_NET_LOOPBACK` + a zeroed `CONFIG_NET_TCP_TIME_WAIT_DELAY` so `src/selftest.c`'s two back-to-back loopback connections don't collide on a lingering TIME_WAIT port. |
 
 ## Portability

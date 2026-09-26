@@ -82,6 +82,7 @@
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/video-controls.h>
 #include <zephyr/drivers/video.h>
+#include <zephyr/drivers/video/alp_video_ctrls.h>
 #include <zephyr/dt-bindings/video/video-interfaces.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -93,23 +94,30 @@
 LOG_MODULE_REGISTER(imx296, CONFIG_VIDEO_LOG_LEVEL);
 
 /*
- * Driver-private control, V4L2/Zephyr vendor-CID convention (VIDEO_CID_PRIVATE_BASE, see
- * video-controls.h) -- precedent: zephyr/drivers/video/video_emul_imager.c's
- * EMUL_IMAGER_CID_CUSTOM. No standard Zephyr video CID exists for "external trigger vs free-run
- * exposure", so this rides the vendor-private range rather than inventing a cross-sensor standard
- * one driver's worth of evidence cannot justify. Selects between this sensor's two Global Shutter
- * sub-modes -- see IMX296_REG_TRIGEN's comment below for why only fast trigger mode is reachable
- * on this hardware. 0 (default) = free-run (current, unchanged behaviour); 1 = fast trigger mode
- * (issue #2287): exposure is then controlled by the width of an external low pulse on the XTRIG
- * pin rather than by VIDEO_CID_EXPOSURE/SHS. The mode only takes effect on the next
- * video_stream_start() -- "Mode Transitions of Global Shutter Operation" (page 66) requires the
- * TRIGEN/LOWLAGTRG switch to happen "via sensor standby", so imx296_set_ctrl() rejects a write to
- * this control with -EBUSY while already streaming, rather than silently queuing it for whatever
+ * Shared SDK control, not a driver-private one: VIDEO_CID_ALP_TRIGGER_MODE
+ * (<zephyr/drivers/video/alp_video_ctrls.h>, issue #2287) is the Alp SDK's
+ * cross-sensor "external trigger vs free-run exposure" CID, backing the
+ * portable <alp/camera.h> alp_camera_set_trigger_mode() API. This driver was
+ * the first to register it (formerly a driver-private IMX296_CID_TRIGGER_MODE,
+ * V4L2/Zephyr vendor-CID convention -- precedent: video_emul_imager.c's
+ * EMUL_IMAGER_CID_CUSTOM); it now rides the shared header instead so
+ * src/backends/camera/ and callers outside this driver have one name for it.
+ * Selects between this sensor's two Global Shutter sub-modes -- see
+ * IMX296_REG_TRIGEN's comment below for why only fast trigger mode is
+ * reachable on this hardware. VIDEO_ALP_TRIGGER_MODE_FREE_RUN (default) =
+ * free-run (current, unchanged behaviour); VIDEO_ALP_TRIGGER_MODE_EXTERNAL =
+ * fast trigger mode (issue #2287): exposure is then controlled by the width
+ * of an external low pulse on the XTRIG pin rather than by
+ * VIDEO_CID_EXPOSURE/SHS. The mode only takes effect on the next
+ * video_stream_start() -- "Mode Transitions of Global Shutter Operation"
+ * (page 66) requires the TRIGEN/LOWLAGTRG switch to happen "via sensor
+ * standby", so imx296_set_ctrl() rejects a write to this control with -EBUSY
+ * while already streaming, rather than silently queuing it for whatever
  * stop/start cycle comes next.
  */
-#define IMX296_CID_TRIGGER_MODE      (VIDEO_CID_PRIVATE_BASE + 0x01)
-#define IMX296_TRIGGER_MODE_FREE_RUN 0
-#define IMX296_TRIGGER_MODE_EXTERNAL 1
+#define IMX296_CID_TRIGGER_MODE      VIDEO_CID_ALP_TRIGGER_MODE
+#define IMX296_TRIGGER_MODE_FREE_RUN VIDEO_ALP_TRIGGER_MODE_FREE_RUN
+#define IMX296_TRIGGER_MODE_EXTERNAL VIDEO_ALP_TRIGGER_MODE_EXTERNAL
 
 /*
  * Datasheet "Setting Registers Using Serial Communication" -> "Description

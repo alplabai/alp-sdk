@@ -273,6 +273,62 @@ typedef struct {
  */
 alp_status_t alp_camera_configure_isp(alp_camera_t *camera, const alp_camera_isp_config_t *isp);
 
+/* ================================================================== */
+/* Trigger mode (issue #2287)                                          */
+/*                                                                     */
+/* Some global-shutter sensors (e.g. Sony IMX296) can take frame       */
+/* timing from an external pulse instead of running free-run --       */
+/* useful for synchronising capture to another event (a rotary        */
+/* encoder tick, another camera, a lab strobe).  Previously this was  */
+/* reachable only through a driver-private Zephyr video CID; the      */
+/* surface below makes it part of the portable <alp/camera.h> API so  */
+/* an app (e.g. examples/connectivity/camera-mjpeg-stream) can drive  */
+/* it without touching Zephyr's drivers/video/ class directly.        */
+/* ================================================================== */
+
+/** Camera frame-timing source. */
+typedef enum {
+	/** Sensor runs its own internal timing; frames arrive at the
+	 *  negotiated frame rate with no external input required. This
+	 *  is every backend's default at @ref alp_camera_open. */
+	ALP_CAMERA_TRIGGER_FREE_RUN = 0,
+	/** Frame timing comes from pulses on the sensor module's
+	 *  external trigger input -- the app/carrier board must drive
+	 *  that line itself (see @ref alp_camera_set_trigger_mode).
+	 *  Not every sensor/backend supports this mode. */
+	ALP_CAMERA_TRIGGER_EXTERNAL = 1,
+} alp_camera_trigger_t;
+
+/**
+ * @brief Select the camera's frame-timing source.
+ *
+ * Valid only while the stream is stopped: call after @ref alp_camera_open
+ * and before @ref alp_camera_start (or after a matching @ref
+ * alp_camera_stop). While the stream is running the mode switch is
+ * rejected with @ref ALP_ERR_BUSY -- most sensors that support this
+ * control can only switch between free-run and external-trigger timing
+ * through their own standby state, so there is no safe way to apply the
+ * change mid-stream.
+ *
+ * In @ref ALP_CAMERA_TRIGGER_EXTERNAL mode, frame timing comes entirely
+ * from pulses the application (or the carrier board it runs on) drives on
+ * the sensor module's own trigger input -- this API does not generate
+ * those pulses itself, only arms the sensor to expect them. Once
+ * streaming, @ref alp_camera_capture blocks until a triggered frame
+ * actually arrives; with no trigger pulses it behaves exactly like an
+ * unusually slow free-run stream and eventually returns @ref
+ * ALP_ERR_TIMEOUT at the caller's requested timeout.
+ *
+ * @param[in] c     Handle from @ref alp_camera_open.
+ * @param[in] mode  Requested trigger mode.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL (NULL @p c, or @p mode outside @ref
+ *         alp_camera_trigger_t) / ALP_ERR_NOT_READY (handle not open) /
+ *         ALP_ERR_BUSY (stream already running) / ALP_ERR_NOSUPPORT
+ *         (backend or sensor has no trigger-mode control) / ALP_ERR_IO.
+ */
+alp_status_t alp_camera_set_trigger_mode(alp_camera_t *c, alp_camera_trigger_t mode);
+
 #ifdef __cplusplus
 }
 #endif

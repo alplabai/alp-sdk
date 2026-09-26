@@ -105,3 +105,28 @@ tests:
       - ethernet
       - connectivity
     build_only: true   # camera + Ethernet HW proof is a bench flash, not a CI run.
+
+  # External-trigger variant (issue #2287 unit 4): same IMX296 shield +
+  # 1280x960 overlay as the scenario above, plus CONFIG_APP_CAMERA_TRIGGER=y
+  # so alp_camera_set_trigger_mode(ALP_CAMERA_TRIGGER_EXTERNAL) lands before
+  # alp_camera_start() and the GPIO pulse timer in src/main.c starts.
+  # Compile-check only -- no camera/Ethernet/trigger-source HW in the CI
+  # runner, and nothing about this variant has been benched on real silicon
+  # (see README.md's "Trigger mode" section).
+  alp_sdk.examples.camera_mjpeg_stream.aen_imx296_trigger:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_args:
+      - SHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera"
+      - EXTRA_CONF_FILE="boards/overlay-1280x960.conf"
+      - CONFIG_APP_CAMERA_TRIGGER=y
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - camera
+      - jpeg
+      - ethernet
+      - connectivity
+    build_only: true   # camera + Ethernet HW proof is a bench flash, not a CI run.

@@ -41,7 +41,9 @@
 #include <string.h>
 
 #include <zephyr/device.h>
+#include <zephyr/drivers/video-controls.h>
 #include <zephyr/drivers/video.h>
+#include <zephyr/drivers/video/alp_video_ctrls.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
 
@@ -411,6 +413,27 @@ static alp_status_t z_configure_isp(alp_camera_backend_state_t    *state,
 	return ALP_ERR_NOSUPPORT;
 }
 
+/*
+ * VIDEO_CID_ALP_TRIGGER_MODE (issue #2287) is set directly on `st->dev` --
+ * for this backend that IS the sensor node (the alp-camera0..3 DT aliases
+ * point straight at the sensor, no CSI/ISP intermediary -- see z_open()
+ * above), so there is no separate "find the sensor" step the ISP backends
+ * below need. A sensor that never registers this CID (everything except
+ * IMX296 today) answers -ENOTSUP, mapped to ALP_ERR_NOSUPPORT by
+ * _errno_to_alp() same as any other unsupported control; a sensor that
+ * rejects the switch while streaming (IMX296's imx296_set_ctrl(), "via
+ * sensor standby" only) answers -EBUSY, mapped to ALP_ERR_BUSY.
+ */
+static alp_status_t z_set_trigger_mode(alp_camera_backend_state_t *state, alp_camera_trigger_t mode)
+{
+	alp_z_video_state_t *st = (alp_z_video_state_t *)state->be_data;
+	if (st == NULL) return ALP_ERR_NOT_READY;
+
+	struct video_control ctrl = { .id = VIDEO_CID_ALP_TRIGGER_MODE, .val = (int32_t)mode };
+	int                  err  = video_set_ctrl(st->dev, &ctrl);
+	return _errno_to_alp(err);
+}
+
 static void z_close(alp_camera_backend_state_t *state)
 {
 	alp_z_video_state_t *st = (alp_z_video_state_t *)state->be_data;
@@ -425,13 +448,14 @@ static void z_close(alp_camera_backend_state_t *state)
 }
 
 static const alp_camera_ops_t _ops = {
-	.open          = z_open,
-	.start         = z_start,
-	.stop          = z_stop,
-	.capture       = z_capture,
-	.release       = z_release,
-	.configure_isp = z_configure_isp,
-	.close         = z_close,
+	.open             = z_open,
+	.start            = z_start,
+	.stop             = z_stop,
+	.capture          = z_capture,
+	.release          = z_release,
+	.configure_isp    = z_configure_isp,
+	.set_trigger_mode = z_set_trigger_mode,
+	.close            = z_close,
 };
 
 ALP_BACKEND_REGISTER(camera,

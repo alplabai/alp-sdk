@@ -218,6 +218,24 @@ alp_status_t alp_camera_configure_isp(alp_camera_t *h, const alp_camera_isp_conf
 	return rc;
 }
 
+alp_status_t alp_camera_set_trigger_mode(alp_camera_t *h, alp_camera_trigger_t mode)
+{
+	if (mode != ALP_CAMERA_TRIGGER_FREE_RUN && mode != ALP_CAMERA_TRIGGER_EXTERNAL) {
+		return ALP_ERR_INVAL;
+	}
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	alp_status_t rc;
+	if (h->state.ops->set_trigger_mode == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->set_trigger_mode(&h->state, mode);
+	}
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
+}
+
 void alp_camera_close(alp_camera_t *h)
 {
 	if (h == NULL) {

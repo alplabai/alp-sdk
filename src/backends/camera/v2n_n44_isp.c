@@ -101,7 +101,9 @@
 #include <string.h>
 
 #include <zephyr/device.h>
+#include <zephyr/drivers/video-controls.h>
 #include <zephyr/drivers/video.h>
+#include <zephyr/drivers/video/alp_video_ctrls.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
 
@@ -429,6 +431,25 @@ static alp_status_t isp_configure_isp(alp_camera_backend_state_t    *state,
 	return ALP_OK;
 }
 
+/*
+ * VIDEO_CID_ALP_TRIGGER_MODE (issue #2287) set directly on `st->dev` -- for
+ * this backend, as for zephyr_video.c, `st->dev` IS the sensor node
+ * (isp_open() above resolves the same alp-camera0..3 alias straight to the
+ * sensor; the N44 on-die ISP has no wired CSI path of its own yet). Same
+ * errno mapping as zephyr_video.c: -ENOTSUP -> ALP_ERR_NOSUPPORT, -EBUSY ->
+ * ALP_ERR_BUSY.
+ */
+static alp_status_t isp_set_trigger_mode(alp_camera_backend_state_t *state,
+                                         alp_camera_trigger_t        mode)
+{
+	alp_v2n_n44_isp_state_t *st = (alp_v2n_n44_isp_state_t *)state->be_data;
+	if (st == NULL) return ALP_ERR_NOT_READY;
+
+	struct video_control ctrl = { .id = VIDEO_CID_ALP_TRIGGER_MODE, .val = (int32_t)mode };
+	int                  err  = video_set_ctrl(st->dev, &ctrl);
+	return _errno_to_alp(err);
+}
+
 static void isp_close(alp_camera_backend_state_t *state)
 {
 	alp_v2n_n44_isp_state_t *st = (alp_v2n_n44_isp_state_t *)state->be_data;
@@ -443,13 +464,14 @@ static void isp_close(alp_camera_backend_state_t *state)
 }
 
 static const alp_camera_ops_t _ops = {
-	.open          = isp_open,
-	.start         = isp_start,
-	.stop          = isp_stop,
-	.capture       = isp_capture,
-	.release       = isp_release,
-	.configure_isp = isp_configure_isp,
-	.close         = isp_close,
+	.open             = isp_open,
+	.start            = isp_start,
+	.stop             = isp_stop,
+	.capture          = isp_capture,
+	.release          = isp_release,
+	.configure_isp    = isp_configure_isp,
+	.set_trigger_mode = isp_set_trigger_mode,
+	.close            = isp_close,
 };
 
 ALP_BACKEND_REGISTER(camera,

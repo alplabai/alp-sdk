@@ -38,6 +38,15 @@
  * the portable software encoder wins and only accepts fully-planar
  * YUV420.  The camera is then opened in whichever format the encoder
  * asked for.
+ *
+ * Trigger mode (issue #2287, opt-in CONFIG_APP_CAMERA_TRIGGER, default n):
+ * drives the camera through the portable alp_camera_set_trigger_mode() API
+ * instead of leaving it free-run, and pulses a GPIO at CONFIG_APP_CAMERA_
+ * TRIGGER_HZ to actually supply that timing -- see trigger_arm() /
+ * trigger_timer_handler() below and README.md's "Trigger mode" section.
+ * NOTHING in this build variant has been benched on real silicon with an
+ * actual trigger pulse; see that README section for exactly what has and
+ * hasn't been checked.
  */
 
 #include <stdbool.h>
@@ -57,6 +66,86 @@
 #include "alp/jpeg.h"
 #include "jpeg_quality_ladder.h"
 #include "mjpeg_http.h"
+
+#if defined(CONFIG_APP_CAMERA_TRIGGER)
+#include <errno.h>
+
+#include <zephyr/devicetree.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/pinctrl.h>
+
+/*
+ * The GPIO + pinctrl state this drives are declared on `/zephyr,user` in
+ * both boards/alp_e1m_aen80{1,3}_..._rtss_he.overlay -- see either
+ * overlay's "Opt-in trigger-mode demo wiring" block for the pin chain
+ * (P5_1 / Arduino D4) and the still-unconfirmed J3 polarity caveat this
+ * inherits from examples/aen/aen-camera-firstlight/trigger_gpio.overlay.
+ */
+#define TRIGGER_GPIO_NODE DT_PATH(zephyr_user)
+#define TRIGGER_PULSE_MS  5u
+
+static const struct gpio_dt_spec trigger_gpio =
+    GPIO_DT_SPEC_GET(TRIGGER_GPIO_NODE, app_camera_trigger_gpios);
+
+/* `/zephyr,user` has no init hook of its own -- trigger_arm() below applies
+ * this pinctrl state explicitly, same reasoning as aen-camera-firstlight's
+ * trigger_arm(). */
+PINCTRL_DT_DEFINE(TRIGGER_GPIO_NODE);
+
+static struct k_work  trigger_pulse_work;
+static struct k_timer trigger_timer;
+
+/* Runs on the system workqueue, NOT in the k_timer's own ISR context --
+ * k_msleep() below would be illegal there.  One pulse: assert
+ * TRIGGER_PULSE_MS, then release. */
+static void trigger_pulse_work_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	gpio_pin_set_dt(&trigger_gpio, 1);
+	k_msleep(TRIGGER_PULSE_MS);
+	gpio_pin_set_dt(&trigger_gpio, 0);
+}
+
+/* k_timer expiry callback: ISR context, so this only ever submits work,
+ * never touches the GPIO itself.  If a pulse is still in flight when the
+ * next period elapses, k_work_submit() on an already-queued/running item
+ * is a documented no-op -- a pulse can be dropped at a trigger rate faster
+ * than TRIGGER_PULSE_MS can complete, never doubled up. */
+static void trigger_timer_handler(struct k_timer *timer)
+{
+	ARG_UNUSED(timer);
+	k_work_submit(&trigger_pulse_work);
+}
+
+/* Configures the GPIO + pinctrl and starts the periodic pulse timer at
+ * CONFIG_APP_CAMERA_TRIGGER_HZ. Caller must have already put the camera in
+ * ALP_CAMERA_TRIGGER_EXTERNAL mode (alp_camera_set_trigger_mode(), before
+ * alp_camera_start()) -- this function only ever drives the GPIO side. */
+static int trigger_arm(void)
+{
+	int ret =
+	    pinctrl_apply_state(PINCTRL_DT_DEV_CONFIG_GET(TRIGGER_GPIO_NODE), PINCTRL_STATE_DEFAULT);
+	if (ret < 0) {
+		return ret;
+	}
+
+	if (!gpio_is_ready_dt(&trigger_gpio)) {
+		return -ENODEV;
+	}
+
+	ret = gpio_pin_configure_dt(&trigger_gpio, GPIO_OUTPUT_INACTIVE);
+	if (ret < 0) {
+		return ret;
+	}
+
+	k_work_init(&trigger_pulse_work, trigger_pulse_work_handler);
+	k_timer_init(&trigger_timer, trigger_timer_handler, NULL);
+
+	k_timeout_t period = K_MSEC(1000u / CONFIG_APP_CAMERA_TRIGGER_HZ);
+	k_timer_start(&trigger_timer, period, period);
+	return 0;
+}
+#endif /* CONFIG_APP_CAMERA_TRIGGER */
 
 #define HTTP_PORT 8080
 
@@ -377,6 +466,33 @@ int main(void)
 		ccfg.fps    = FRAME_FPS;
 		ccfg.format = pixfmt;
 		camera      = alp_camera_open(&ccfg);
+
+#if defined(CONFIG_APP_CAMERA_TRIGGER)
+		/* Must land before alp_camera_start() -- alp_camera_set_trigger_mode()
+		 * is only valid while the stream is stopped (<alp/camera.h>'s own
+		 * doc comment). A sensor with no trigger control (anything but
+		 * IMX296 today) answers ALP_ERR_NOSUPPORT here; this example just
+		 * logs it and falls through to a plain free-run alp_camera_start()
+		 * rather than treating it as fatal, so turning this Kconfig on for
+		 * the wrong shield degrades to normal streaming instead of an
+		 * outright failure to open. */
+		if (camera != NULL) {
+			alp_status_t trig_rc = alp_camera_set_trigger_mode(camera, ALP_CAMERA_TRIGGER_EXTERNAL);
+			if (trig_rc != ALP_OK) {
+				printf("[camera-mjpeg-stream] alp_camera_set_trigger_mode failed: %s "
+				       "-- falling back to free-run\n",
+				       alp_status_name(trig_rc));
+			} else if (trigger_arm() != 0) {
+				printf("[camera-mjpeg-stream] trigger GPIO arm failed -- sensor is in "
+				       "external-trigger mode with nothing driving it, capture will "
+				       "time out\n");
+			} else {
+				printf("[camera-mjpeg-stream] external trigger armed at %u Hz\n",
+				       CONFIG_APP_CAMERA_TRIGGER_HZ);
+			}
+		}
+#endif
+
 		if (camera == NULL || alp_camera_start(camera) != ALP_OK) {
 #if defined(CONFIG_CAMERA_MJPEG_STREAM_1280X960)
 			printf("[camera-mjpeg-stream] alp_camera_open/start failed (err=%d); no "
