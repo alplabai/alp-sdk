@@ -444,9 +444,15 @@ static alp_status_t isp_set_trigger_mode(alp_camera_backend_state_t *state,
 {
 	alp_v2n_n44_isp_state_t *st = (alp_v2n_n44_isp_state_t *)state->be_data;
 	if (st == NULL) return ALP_ERR_NOT_READY;
+	if (st->streaming) return ALP_ERR_BUSY;
 
 	struct video_control ctrl = { .id = VIDEO_CID_ALP_TRIGGER_MODE, .val = (int32_t)mode };
 	int                  err  = video_set_ctrl(st->dev, &ctrl);
+	if (err == -ENOTSUP && mode == ALP_CAMERA_TRIGGER_FREE_RUN) {
+		/* Already free-running with no trigger control to switch off --
+		 * see zephyr_video.c's z_set_trigger_mode() for the rationale. */
+		return ALP_OK;
+	}
 	return _errno_to_alp(err);
 }
 
@@ -455,6 +461,15 @@ static void isp_close(alp_camera_backend_state_t *state)
 	alp_v2n_n44_isp_state_t *st = (alp_v2n_n44_isp_state_t *)state->be_data;
 	if (st == NULL) return;
 	st->streaming = false;
+
+	/* Reset trigger mode to FREE_RUN before the handle goes away -- see
+	 * zephyr_video.c's z_close() for the full rationale (issue #2287 dev
+	 * review). Ignore the result: -ENOTSUP is expected on any sensor with
+	 * no trigger control. */
+	struct video_control ctrl = { .id  = VIDEO_CID_ALP_TRIGGER_MODE,
+		                          .val = VIDEO_ALP_TRIGGER_MODE_FREE_RUN };
+	(void)video_set_ctrl(st->dev, &ctrl);
+
 	/* Stop + drain + release every buffer this handle allocated --
 	 * _release_vbufs stops the stream itself (harmless when already
 	 * stopped), so the pool is whole again for the next open (#246). */

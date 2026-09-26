@@ -57,14 +57,24 @@ config CAMERA_MJPEG_STREAM_1280X960
 # fast-trigger mode expects on its external trigger input -- see README.md's
 # "Trigger mode" section and src/main.c's trigger_timer_handler(). OFF by
 # default: every other build variant in testcase.yaml stays exactly the
-# free-run capture this example always shipped. Only meaningful on IMX296
+# free-run capture this example always shipped.
+#
+# `depends on` gates this on the GPIO this symbol's own src/main.c code
+# actually needs existing in devicetree (`app-camera-trigger-gpios` on the
+# `zephyr_user` nodelabel, both AEN board overlays' "Opt-in trigger-mode demo
+# wiring" block) -- turning this on for a board/shield combination that never
+# wired that property (anything other than the two AEN boards in this
+# directory) now fails at Kconfig time with a clear unmet-dependency message,
+# instead of failing later at DT_ALIAS/GPIO_DT_SPEC_GET compile time in
+# src/main.c. Still only USEFUL on IMX296
 # (SHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera") -- on any
-# other sensor alp_camera_set_trigger_mode() returns ALP_ERR_NOSUPPORT and
-# main.c falls back to free-run with a printed warning, so turning this on
-# for OV5647/OV9281 is harmless, just pointless.
+# other sensor stacked on the same two AEN boards the GPIO exists (so this
+# still builds) but alp_camera_set_trigger_mode() returns ALP_ERR_NOSUPPORT
+# and main.c falls back to free-run with a printed warning.
 config APP_CAMERA_TRIGGER
 	bool "Drive the camera in external-trigger mode via a GPIO pulse"
 	default n
+	depends on $(dt_nodelabel_has_prop,zephyr_user,app-camera-trigger-gpios)
 	help
 	  See this symbol's own comment in Kconfig and README.md's "Trigger
 	  mode" section. NOTHING in this build variant has been benched on
@@ -73,6 +83,7 @@ config APP_CAMERA_TRIGGER
 config APP_CAMERA_TRIGGER_HZ
 	int "Trigger pulse rate, Hz"
 	default 15
+	range 5 60
 	depends on APP_CAMERA_TRIGGER
 	help
 	  How often main.c's k_timer fires a trigger pulse. 15 Hz matches
@@ -81,6 +92,31 @@ config APP_CAMERA_TRIGGER_HZ
 	  requirement the two match, a mismatched rate just means captures
 	  either wait longer between pulses or (if faster than the sensor's
 	  own trigger-to-readout time) queue up, neither of which this
-	  example handles specially.
+	  example handles specially. Range 5..60 Hz: below 5 Hz the MJPEG
+	  stream this example serves is arguably not "streaming" any more
+	  (a bare capture demo would do), and above 60 Hz risks outrunning
+	  CONFIG_APP_CAMERA_TRIGGER_PULSE_US -- the pulse must fully
+	  complete (assert + release) well within one period, and IMX296's
+	  own fixed 60.3 frame/s free-run rate is already an upper bound on
+	  how fast this sensor is meant to be read out at all.
+
+config APP_CAMERA_TRIGGER_PULSE_US
+	int "Trigger pulse width, microseconds"
+	default 5000
+	range 10 1000000
+	depends on APP_CAMERA_TRIGGER
+	help
+	  How long src/main.c holds the trigger GPIO asserted per pulse.
+	  NOT just a timing nicety on a sensor whose trigger input sets
+	  exposure by pulse WIDTH (IMX296 fast-trigger mode -- see
+	  ALP_CAMERA_TRIGGER_EXTERNAL's own doc comment in <alp/camera.h>):
+	  on that class of sensor, THIS VALUE IS THE EXPOSURE TIME. The
+	  5000 us (5 ms) default is an arbitrary starting point carried
+	  over from this example's first cut, not a calibrated exposure --
+	  tune it for the scene's actual lighting once bench-testing this
+	  path. Actual pulse-width resolution is limited by
+	  CONFIG_SYS_CLOCK_TICKS_PER_SEC (the k_work_delayable this value
+	  schedules rounds to the nearest tick), not by this Kconfig's own
+	  microsecond unit.
 
 source "Kconfig.zephyr"

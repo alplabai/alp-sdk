@@ -632,7 +632,13 @@ at `0x3204`, 0.1 dB step, 0-48.0 dB, range cited to "Gain Adjustment
 Function"/"Register List of Gain setting", page 56), H/V flip, pixel rate
 (118.8 Mpix/s), link frequency (594 MHz), and a shared SDK control,
 `VIDEO_CID_ALP_TRIGGER_MODE` (`zephyr/include/zephyr/drivers/video/
-alp_video_ctrls.h`, `VIDEO_CID_PRIVATE_BASE + 0x01`, default free-run,
+alp_video_ctrls.h`, `VIDEO_CID_PRIVATE_BASE + 0x1000` -- its own dedicated
+sub-range, not `+ 0x01`: Zephyr v4.4's `video_find_ctrl()` walks a device's
+whole `src_dev` chain, e.g. ISP -> CAM -> CSI -> sensor, so this control's
+value has to be unique across every device on a chain it might traverse,
+not just within one device's own registry -- `+ 0x01` collided with
+`video_alif.h`'s `VIDEO_CID_ALIF_CSI_CURR_CAM`, a different control on a
+device the same AEN camera/ISP chain also walks. Default free-run,
 unchanged behaviour -- formerly a driver-private `IMX296_CID_TRIGGER_MODE`
 before this shared header existed) that switches the sensor into the
 datasheet's Global Shutter **Fast Trigger Mode** (`TRIGEN` at `0x300B` +
@@ -650,8 +656,15 @@ This control now also reaches every `<alp/camera.h>` Zephyr-video backend
 through the portable `alp_camera_set_trigger_mode(camera,
 ALP_CAMERA_TRIGGER_EXTERNAL)` API (issue #2287) -- a caller no longer has to
 reach the sensor's Zephyr device directly to arm trigger mode; each backend
-maps `-EBUSY` to `ALP_ERR_BUSY` and an unsupported/unknown control (any
-sensor other than IMX296) to `ALP_ERR_NOSUPPORT`. UNTESTED ON SILICON, at
+also checks its own `streaming` flag and refuses with `ALP_ERR_BUSY` before
+ever calling the sensor, maps a sensor-level `-EBUSY` through the same way,
+and maps an unsupported/unknown control on `ALP_CAMERA_TRIGGER_EXTERNAL`
+(any sensor other than IMX296) to `ALP_ERR_NOSUPPORT` --
+`ALP_CAMERA_TRIGGER_FREE_RUN` against that same unsupported sensor instead
+returns `ALP_OK` (it's already free-running). Every backend's `close()`
+also resets the sensor back to free-run before the handle goes away, so a
+later `alp_camera_open()` never inherits a prior session's trigger setting.
+UNTESTED ON SILICON, at
 every layer -- issue #2287 benches it later with a GPIO pulse on the sensor
 module's own opto-isolated J3 Trig+ header (on the INNO-MAKER camera module
 itself, separate from both the E1M-EVK carrier and the 15-pin CSI FFC that
@@ -777,10 +790,16 @@ IMX296 calibration). Bench-verified end to end, runs 312-314: DHCP lease +
 28.3 fps / 885 KB/s delivered to one client. See that example's own
 README.md for the build command and full bench history.
 
-Also has an opt-in `CONFIG_APP_CAMERA_TRIGGER` Kconfig (issue #2287 unit 4):
-calls `alp_camera_set_trigger_mode(camera, ALP_CAMERA_TRIGGER_EXTERNAL)`
-before `alp_camera_start()` and pulses the same trigger GPIO
+Also has an opt-in `CONFIG_APP_CAMERA_TRIGGER` Kconfig (issue #2287 unit 4,
+gated on the trigger GPIO's DT property actually existing): calls
+`alp_camera_set_trigger_mode(camera, ALP_CAMERA_TRIGGER_EXTERNAL)` before
+`alp_camera_start()` and pulses the same trigger GPIO
 `aen-camera-firstlight` uses (P5_1 / Arduino D4) at `CONFIG_APP_CAMERA_
-TRIGGER_HZ` (default 15 Hz) via a `k_timer`. UNBENCHED -- `testcase.yaml`'s
-`aen_imx296_trigger` scenario is `build_only: true`; see that example's
-README "Trigger mode" section for the still-unverified J3 polarity caveat.
+TRIGGER_HZ` (default 15 Hz, range 5-60) for `CONFIG_APP_CAMERA_
+TRIGGER_PULSE_US` (default 5000 us) via a `k_timer` + a `k_work`/
+`k_work_delayable` pair (no blocking sleep on the system workqueue). On
+IMX296 this pulse width IS the exposure time while trigger mode is active.
+Every camera stop/close path disarms the timer/GPIO first. UNBENCHED --
+`testcase.yaml`'s `aen_imx296_trigger` scenario is `build_only: true`; see
+that example's README "Trigger mode" section for the still-unverified J3
+polarity caveat.

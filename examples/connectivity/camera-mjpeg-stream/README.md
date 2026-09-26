@@ -193,12 +193,26 @@ dependencies.
 the camera in `ALP_CAMERA_TRIGGER_EXTERNAL` mode
 (`alp_camera_set_trigger_mode()`, `<alp/camera.h>`) instead of free-run, and
 starts a `k_timer` in `src/main.c` that pulses a GPIO at
-`CONFIG_APP_CAMERA_TRIGGER_HZ` (default 15) to actually supply that frame
-timing. Only IMX296 answers this control today
-(`zephyr/drivers/video/imx296.c`'s `VIDEO_CID_ALP_TRIGGER_MODE`) — on any
-other shield `alp_camera_set_trigger_mode()` returns `ALP_ERR_NOSUPPORT`,
-which this example logs and falls back to plain free-run streaming rather
-than treating as fatal.
+`CONFIG_APP_CAMERA_TRIGGER_HZ` (default 15, range 5-60) for
+`CONFIG_APP_CAMERA_TRIGGER_PULSE_US` (default 5000 us / 5 ms, range
+10-1,000,000) to actually supply that frame timing. Only IMX296 answers
+this control today (`zephyr/drivers/video/imx296.c`'s
+`VIDEO_CID_ALP_TRIGGER_MODE`) — on any other shield
+`alp_camera_set_trigger_mode(ALP_CAMERA_TRIGGER_EXTERNAL)` returns
+`ALP_ERR_NOSUPPORT`, which this example logs and falls back to plain
+free-run streaming rather than treating as fatal. `CONFIG_APP_CAMERA_
+TRIGGER` itself only builds against a board/shield that actually wired the
+trigger GPIO in devicetree (a Kconfig `depends on`, not just a runtime
+check) — the two AEN board overlays in this directory are the only ones
+that do.
+
+**The pulse width IS the exposure time on IMX296's fast-trigger mode** (the
+sensor's exposure is set by how long XTRIG is held low, not by
+`VIDEO_CID_EXPOSURE`) — `CONFIG_APP_CAMERA_TRIGGER_PULSE_US`'s 5000 us
+default is an arbitrary starting point, not a calibrated exposure; tune it
+for the scene once this path is actually bench-tested. Auto-exposure/gain
+controls do not apply while this mode is active on that class of sensor —
+see `ALP_CAMERA_TRIGGER_EXTERNAL`'s own doc comment in `<alp/camera.h>`.
 
 ```bash
 west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \

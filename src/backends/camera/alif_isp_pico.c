@@ -701,28 +701,18 @@ static alp_status_t isp_configure_isp(alp_camera_backend_state_t    *state,
 }
 
 /*
- * Unlike zephyr_video.c / v2n_n44_isp.c, `st->dev` here is the ISP m2m
- * device, not the sensor -- the sensor sits UPSTREAM of the ISP in this
- * backend's pipeline (isp_open()'s own header comment). VIDEO_CID_ALP_TRIGGER_MODE
- * is a sensor-level control (only the sensor's exposure hardware knows about
- * an external trigger input), so it has to be set on the sensor node
- * directly, the same way the fps request just above does for OV5647's
- * VIDEO_CID_EXPOSURE_AUTO -- one #if DT_NODE_EXISTS branch per sensor this
- * ISP path supports. Returns NULL when neither compiles into this board's
- * devicetree, which set_trigger_mode() below turns into ALP_ERR_NOSUPPORT
- * (no sensor-scoped trigger control CAN exist without a sensor node at all).
+ * `st->dev` here is the ISP m2m device, not the sensor -- the sensor sits
+ * UPSTREAM of the ISP in this backend's pipeline (isp_open()'s own header
+ * comment). This still reaches the sensor: Zephyr v4.4's
+ * `video_find_ctrl()` (`video_ctrls.c`) walks a device's `src_dev` chain --
+ * ISP -> CAM -> CSI -> sensor, `isp_pico.c`'s own `REMOTE_DEVICE` chase --
+ * looking for the first device whose OWN registry has the requested CID, so
+ * `video_set_ctrl(st->dev, ...)` on the ISP handle lands on the sensor
+ * several links away without this backend needing to name it. No sensor
+ * anywhere in the chain that registers VIDEO_CID_ALP_TRIGGER_MODE ->
+ * `video_find_ctrl()` returns NULL -> `-ENOTSUP`, mapped to
+ * ALP_ERR_NOSUPPORT below same as every other backend.
  */
-static const struct device *_isp_trigger_sensor_dev(void)
-{
-#if DT_NODE_EXISTS(DT_NODELABEL(imx296))
-	return DEVICE_DT_GET(DT_NODELABEL(imx296));
-#elif DT_NODE_EXISTS(DT_NODELABEL(ov5647))
-	return DEVICE_DT_GET(DT_NODELABEL(ov5647));
-#else
-	return NULL;
-#endif
-}
-
 static alp_status_t isp_set_trigger_mode(alp_camera_backend_state_t *state,
                                          alp_camera_trigger_t        mode)
 {
@@ -730,14 +720,21 @@ static alp_status_t isp_set_trigger_mode(alp_camera_backend_state_t *state,
 	if (st == NULL) {
 		return ALP_ERR_NOT_READY;
 	}
-
-	const struct device *sensor_dev = _isp_trigger_sensor_dev();
-	if (sensor_dev == NULL || !device_is_ready(sensor_dev)) {
-		return ALP_ERR_NOSUPPORT;
+	if (st->streaming) {
+		/* Same standby-only restriction the sensor's own set_ctrl()
+		 * enforces (imx296_set_ctrl() -EBUSY) -- caught here too so a
+		 * chain with no sensor-level guard of its own still refuses
+		 * the switch while this backend's own stream is running. */
+		return ALP_ERR_BUSY;
 	}
 
 	struct video_control ctrl = { .id = VIDEO_CID_ALP_TRIGGER_MODE, .val = (int32_t)mode };
-	int                  err  = video_set_ctrl(sensor_dev, &ctrl);
+	int                  err  = video_set_ctrl(st->dev, &ctrl);
+	if (err == -ENOTSUP && mode == ALP_CAMERA_TRIGGER_FREE_RUN) {
+		/* Already free-running with no trigger control to switch off --
+		 * see zephyr_video.c's z_set_trigger_mode() for the rationale. */
+		return ALP_OK;
+	}
 	return _errno_to_alp(err);
 }
 
@@ -748,6 +745,15 @@ static void isp_close(alp_camera_backend_state_t *state)
 		return;
 	}
 	st->streaming = false;
+
+	/* Reset trigger mode to FREE_RUN before the handle goes away -- see
+	 * zephyr_video.c's z_close() for the full rationale (issue #2287 dev
+	 * review). Ignore the result: -ENOTSUP is expected whenever no sensor
+	 * in this chain (isp -> cam -> csi -> sensor) has a trigger control. */
+	struct video_control trig_ctrl = { .id  = VIDEO_CID_ALP_TRIGGER_MODE,
+		                               .val = VIDEO_ALP_TRIGGER_MODE_FREE_RUN };
+	(void)video_set_ctrl(st->dev, &trig_ctrl);
+
 	/* Stop + drain + release every buffer this handle allocated --
 	 * _release_vbufs stops the stream itself (harmless when already
 	 * stopped), so the pool is whole again for the next open (#246). */

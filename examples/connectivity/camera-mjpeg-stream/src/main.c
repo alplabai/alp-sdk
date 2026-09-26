@@ -80,9 +80,14 @@
  * overlay's "Opt-in trigger-mode demo wiring" block for the pin chain
  * (P5_1 / Arduino D4) and the still-unconfirmed J3 polarity caveat this
  * inherits from examples/aen/aen-camera-firstlight/trigger_gpio.overlay.
+ *
+ * CONFIG_APP_CAMERA_TRIGGER_PULSE_US matters beyond just "how long the pin
+ * is high": on a sensor whose trigger input sets exposure by pulse WIDTH
+ * (IMX296 fast-trigger mode -- see ALP_CAMERA_TRIGGER_EXTERNAL's own doc
+ * comment in <alp/camera.h>), this Kconfig value IS the exposure time, not
+ * a cosmetic timing detail.
  */
 #define TRIGGER_GPIO_NODE DT_PATH(zephyr_user)
-#define TRIGGER_PULSE_MS  5u
 
 static const struct gpio_dt_spec trigger_gpio =
     GPIO_DT_SPEC_GET(TRIGGER_GPIO_NODE, app_camera_trigger_gpios);
@@ -92,29 +97,44 @@ static const struct gpio_dt_spec trigger_gpio =
  * trigger_arm(). */
 PINCTRL_DT_DEFINE(TRIGGER_GPIO_NODE);
 
-static struct k_work  trigger_pulse_work;
-static struct k_timer trigger_timer;
+static struct k_work           trigger_pulse_start_work;
+static struct k_work_delayable trigger_pulse_stop_work;
+static struct k_timer          trigger_timer;
+static bool                    trigger_armed;
 
-/* Runs on the system workqueue, NOT in the k_timer's own ISR context --
- * k_msleep() below would be illegal there.  One pulse: assert
- * TRIGGER_PULSE_MS, then release. */
-static void trigger_pulse_work_handler(struct k_work *work)
+/* Second half of one pulse: runs CONFIG_APP_CAMERA_TRIGGER_PULSE_US after
+ * trigger_pulse_start_work_handler() asserts the line. A k_work_delayable
+ * callback, same non-ISR context as any other system-workqueue handler, but
+ * scheduled instead of slept -- see this pair's header comment on why a
+ * blocking k_msleep() used to sit here instead (issue #2287 dev review: it
+ * blocked the shared system workqueue for the whole pulse width, delaying
+ * every other work item queued behind it, including this trigger's own next
+ * start at a high enough CONFIG_APP_CAMERA_TRIGGER_HZ). */
+static void trigger_pulse_stop_work_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	gpio_pin_set_dt(&trigger_gpio, 0);
+}
+
+/* First half of one pulse: runs on the system workqueue, NOT in the
+ * k_timer's own ISR context. Asserts the line, then schedules the release
+ * above instead of sleeping here. */
+static void trigger_pulse_start_work_handler(struct k_work *work)
 {
 	ARG_UNUSED(work);
 	gpio_pin_set_dt(&trigger_gpio, 1);
-	k_msleep(TRIGGER_PULSE_MS);
-	gpio_pin_set_dt(&trigger_gpio, 0);
+	k_work_schedule(&trigger_pulse_stop_work, K_USEC(CONFIG_APP_CAMERA_TRIGGER_PULSE_US));
 }
 
 /* k_timer expiry callback: ISR context, so this only ever submits work,
  * never touches the GPIO itself.  If a pulse is still in flight when the
  * next period elapses, k_work_submit() on an already-queued/running item
  * is a documented no-op -- a pulse can be dropped at a trigger rate faster
- * than TRIGGER_PULSE_MS can complete, never doubled up. */
+ * than CONFIG_APP_CAMERA_TRIGGER_PULSE_US can complete, never doubled up. */
 static void trigger_timer_handler(struct k_timer *timer)
 {
 	ARG_UNUSED(timer);
-	k_work_submit(&trigger_pulse_work);
+	k_work_submit(&trigger_pulse_start_work);
 }
 
 /* Configures the GPIO + pinctrl and starts the periodic pulse timer at
@@ -138,12 +158,41 @@ static int trigger_arm(void)
 		return ret;
 	}
 
-	k_work_init(&trigger_pulse_work, trigger_pulse_work_handler);
+	k_work_init(&trigger_pulse_start_work, trigger_pulse_start_work_handler);
+	k_work_init_delayable(&trigger_pulse_stop_work, trigger_pulse_stop_work_handler);
 	k_timer_init(&trigger_timer, trigger_timer_handler, NULL);
 
 	k_timeout_t period = K_MSEC(1000u / CONFIG_APP_CAMERA_TRIGGER_HZ);
 	k_timer_start(&trigger_timer, period, period);
+	trigger_armed = true;
 	return 0;
+}
+
+/* Reverse of trigger_arm(): stops the periodic timer, cancels/drains
+ * whichever half of a pulse may still be in flight, and leaves the GPIO
+ * inactive.  No-op if trigger_arm() was never called or already failed
+ * (issue #2287 dev review: every camera stop/close path in main() below
+ * calls this unconditionally, so it must be safe to call from a state where
+ * nothing was ever armed). */
+static void trigger_disarm(void)
+{
+	if (!trigger_armed) {
+		return;
+	}
+	k_timer_stop(&trigger_timer);
+	/* Waits out an in-flight start-work callback (which only ever runs
+	 * briefly, no blocking calls of its own) before cancelling the
+	 * delayable stop-work it may have just scheduled -- doing it in this
+	 * order means a pulse that was mid-flight when this ran either
+	 * completes fully (GPIO left inactive by trigger_pulse_stop_work_handler
+	 * itself) or never started asserting the line, never leaves it
+	 * stuck high. */
+	struct k_work_sync sync;
+
+	k_work_flush(&trigger_pulse_start_work, &sync);
+	k_work_cancel_delayable(&trigger_pulse_stop_work);
+	gpio_pin_set_dt(&trigger_gpio, 0);
+	trigger_armed = false;
 }
 #endif /* CONFIG_APP_CAMERA_TRIGGER */
 
@@ -483,9 +532,14 @@ int main(void)
 				       "-- falling back to free-run\n",
 				       alp_status_name(trig_rc));
 			} else if (trigger_arm() != 0) {
-				printf("[camera-mjpeg-stream] trigger GPIO arm failed -- sensor is in "
-				       "external-trigger mode with nothing driving it, capture will "
-				       "time out\n");
+				/* Sensor is latched into external-trigger mode with nothing
+				 * now going to drive it -- every capture would time out
+				 * forever, so undo the mode switch rather than leave the
+				 * camera in a state this app can't service. Best-effort:
+				 * nothing else to do if this also fails. */
+				printf("[camera-mjpeg-stream] trigger GPIO arm failed -- reverting "
+				       "camera to free-run\n");
+				(void)alp_camera_set_trigger_mode(camera, ALP_CAMERA_TRIGGER_FREE_RUN);
 			} else {
 				printf("[camera-mjpeg-stream] external trigger armed at %u Hz\n",
 				       CONFIG_APP_CAMERA_TRIGGER_HZ);
@@ -502,6 +556,9 @@ int main(void)
 			printf("[camera-mjpeg-stream] alp_camera_open/start failed (err=%d); "
 			       "serving a synthetic frame instead\n",
 			       (int)alp_last_error());
+#endif
+#if defined(CONFIG_APP_CAMERA_TRIGGER)
+			trigger_disarm();
 #endif
 			alp_camera_close(camera);
 			camera = NULL;
@@ -627,6 +684,9 @@ int main(void)
 					       "consecutive failures); falling back to the "
 					       "synthetic frame\n",
 					       capture_fail_consec);
+#endif
+#if defined(CONFIG_APP_CAMERA_TRIGGER)
+					trigger_disarm();
 #endif
 					alp_camera_stop(camera);
 					alp_camera_close(camera);

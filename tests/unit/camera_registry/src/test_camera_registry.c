@@ -379,11 +379,18 @@ ZTEST(alp_camera_registry, test_set_trigger_mode_passes_through_backend_status)
 {
 	/* Proves the dispatcher forwards whatever its backend's
      * set_trigger_mode returns unmodified -- BUSY (stream running,
-     * IMX296-style "only via standby") and NOSUPPORT (sensor with no
-     * trigger control at all) are the two statuses every backend's real
-     * body (zephyr_video.c / v2n_n44_isp.c / alif_isp_pico.c) can produce
-     * from a mapped errno; this fake stands in for all three without
-     * requiring CONFIG_VIDEO on this native_sim build. */
+     * IMX296-style "only via standby") and NOSUPPORT (no sensor in the
+     * chain has a trigger control at all, requested EXTERNAL) are two of
+     * the statuses every backend's real body (zephyr_video.c /
+     * v2n_n44_isp.c / alif_isp_pico.c) can produce from a mapped errno;
+     * this fake stands in for all three without requiring CONFIG_VIDEO on
+     * this native_sim build. NOTE: a real backend given FREE_RUN against a
+     * sensor with no trigger control returns ALP_OK instead of NOSUPPORT
+     * (already free-running, issue #2287 dev review) -- that translation
+     * lives inside each backend's own -ENOTSUP handling, not here, so this
+     * fake (which returns whatever be_data says regardless of mode) does
+     * not exercise it; EXTERNAL is used below specifically so this test
+     * doesn't assert the one combination real backends now special-case. */
 	struct alp_camera fake = {
 		.lifecycle = ALP_HANDLE_LC_OPEN,
 		.state     = { .ops = &_fake_trigger_ops, .be_data = (void *)(intptr_t)ALP_ERR_BUSY },
@@ -391,7 +398,7 @@ ZTEST(alp_camera_registry, test_set_trigger_mode_passes_through_backend_status)
 	zassert_equal(alp_camera_set_trigger_mode(&fake, ALP_CAMERA_TRIGGER_EXTERNAL), ALP_ERR_BUSY);
 
 	fake.state.be_data = (void *)(intptr_t)ALP_ERR_NOSUPPORT;
-	zassert_equal(alp_camera_set_trigger_mode(&fake, ALP_CAMERA_TRIGGER_FREE_RUN),
+	zassert_equal(alp_camera_set_trigger_mode(&fake, ALP_CAMERA_TRIGGER_EXTERNAL),
 	              ALP_ERR_NOSUPPORT);
 }
 
