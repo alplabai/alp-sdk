@@ -875,7 +875,7 @@ patches:
       format is untouched, so traceconfig.py and tests/kconfig/tracing are
       unaffected. Upstream to Zephyr then drop.
   - path: zephyr/0004-imx335-2lane-link-freq-and-binning.patch
-    sha256sum: 2459cd9511dac95fa682197302b1d33b201dbacd3d4df02c2097e53dbd5278c0
+    sha256sum: 47d7d5ac6dd2293b3ffb46562f031a543867a618b0da7dbe596c83ca609a400d
     module: zephyr
     author: Alp Lab AB
     email: contact@alplab.ai
@@ -940,8 +940,7 @@ patches:
       0x0798 = 1944) and the mainline Linux driver's full-resolution mode use
       1944, so 0x07ac is the same overrun class as fix 3 above for any
       full-resolution caller. Full-resolution mode is UNBENCHED (only the
-      2x2-binned mode has been exercised), so this is left as a follow-up
-      rather than changed on an unbenched guess.
+      2x2-binned mode has been exercised) -- tracked as issue #2334.
 
       Bench-verified end to end (runs 329/330, Camera-mode IPI at an
       explicit 200 MHz pixclk -- see the innomaker_cam_imx335 shield and the
@@ -957,7 +956,8 @@ patches:
       shield -- Camera mode only. D-PHY Stop-state check passed normally
       with these timing registers written (STOPSTATE 0x00010003 before
       stream start) -- no no-lp11-clock-lane-park-style skip property was
-      needed. NOT bench-verified: D-PHY lock on any unit/carrier other than
-      E1M-AEN803 2026W36-0001 on this specific E1M-EVK (a stock,
-      non-reworked carrier is untested for this sensor).
+      needed. NOT bench-verified: the module self-enabling on a stock,
+      non-reworked carrier (the J5 pin-11 rework is a module-enable
+      concern, unrelated to D-PHY lock); D-PHY lock on any unit/carrier
+      other than E1M-AEN803 2026W36-0001 on this specific E1M-EVK.
       Upstream to zephyrproject-rtos/zephyr then drop.

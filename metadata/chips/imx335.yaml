@@ -40,7 +40,7 @@ notes: |
   history.
 
   Issue #2327 (E1M-AEN803 2026W36-0001, E1M-EVK, csi_i2c = I2C1 @
-  0x49011000), bench-verified (bench runs 316-330): raw capture, 2x2-binned
+  0x49011000), bench-verified (bench runs 316-331): raw capture, 2x2-binned
   1296x972 RAW10, through <alp/camera.h> -- 6/6 consecutive clean captures
   (run 330), 0 CSI CRC errors, 0 IPI-fatal events, correct stride, no
   overrun. This VERIFIES 2-lane CSI-2 D-PHY lock at 1188 Mbps/lane on
@@ -57,16 +57,30 @@ notes: |
   D-PHY Stop-state check (STOPSTATE 0x00010003 before stream start) passed
   normally once the patch's MIPI-timing registers were written -- no
   no-lp11-clock-lane-park-style skip property was needed. The first
-  captured frame after STANDBY release had darkened lower rows in one run
-  (329) but not the next (330) -- aen-camera-firstlight discards the first
-  frame for this sensor rather than claiming this is understood.
+  captured frame after STANDBY release has been bad every time it was
+  checked: darkened lower rows (run 329), and in run 331 (the product-code
+  confirmation run below) BOTH of its two loads discarded a bad first
+  frame too -- near-black rows 466-583 in one load, all-zero rows 759-778
+  in the other -- aen-camera-firstlight discards the first frame for this
+  sensor; this is bench-justified, though the root cause is still not
+  confirmed.
+
+  Run 331 (bench-verified): PRODUCT-CODE confirmation -- the committed
+  fbf9c8de3 tree with ONLY patch 0004 applied on a pristine Zephyr v4.4.1
+  checkout (sha256 47d7d5ac... matches the committed patch file), no other
+  diag-only code. The kept (second) frame was clean: 1296x972, 0 IPI/CRC
+  error lines, only one FRAME_SEQ event at start, correct stride, 0
+  near-black rows, nothing written past the buffer, a clean close, and
+  CSI_PIXCLK_CTRL read back 0x00020001. csi-halt-en was left at its
+  default (kept) -- no IPI-halt/"nohalt" DT override was needed.
 
   NOT bench-verified -- do not claim any of the following happened on
-  silicon: frame rate/fps (not measured); D-PHY lock on any unit/carrier
-  other than E1M-AEN803 2026W36-0001 on this specific E1M-EVK (a stock,
-  non-reworked carrier is untested for this sensor); ISP/AE/colour (no
-  ISP path exists for this sensor); and the sensor's full-resolution
-  (non-binned) mode.
+  silicon: frame rate/fps (not measured); the module self-enabling on a
+  stock, non-reworked carrier (the J5 pin-11 rework is a module-enable
+  concern, unrelated to D-PHY lock -- see the CAM_EN note above); D-PHY
+  lock on any unit/carrier other than E1M-AEN803 2026W36-0001 on this
+  specific E1M-EVK; ISP/AE/colour (no ISP path exists for this sensor);
+  and the sensor's full-resolution (non-binned) mode.
 
 bus:              i2c
 i2c:
@@ -95,7 +109,7 @@ families:
 verification:
   hil_silicon:    partial           # Bench-verified: 2x2-binned 1296x972 RAW10 raw capture
                                      # through <alp/camera.h>, 6/6 consecutive clean frames, 0
-                                     # CSI/IPI errors (bench runs 316-330) -- STILL partial, not
+                                     # CSI/IPI errors (bench runs 316-331) -- STILL partial, not
                                      # full: frame rate/fps, ISP/AE/colour, and full-resolution
                                      # mode all remain unverified, see notes above.
   smoke_tests:    none               # no chips/ portable driver surface exists to unit-test; see

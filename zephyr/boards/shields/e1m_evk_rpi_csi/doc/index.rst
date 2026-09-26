@@ -40,8 +40,10 @@ three MIPI CSI-2 differential pairs (clock lane and both data lanes)
 relative to the EVK. A camera plugged straight into J5 answers its I2C
 chip-ID probe but never synchronizes (D-PHY leaves Stop-state, no frame
 arrives). Build a short adapter that crosses camera-connector pins 2<->3,
-5<->6 and 8<->9 (every other pin stays straight); match lane lengths given
-the 800 Mbit/s/lane rate. See ``docs/camera-shields.md``.
+5<->6 and 8<->9 (every other pin stays straight); match lane lengths --
+bench-confirmed on E1M-AEN803 2026W36-0001: IMX296 (1 data lane) and IMX335
+(2 data lanes) both lock and stream at 1188 Mbit/s/lane through this
+adapter. See ``docs/camera-shields.md``.
 
 Compatible sensor shields
 *************************

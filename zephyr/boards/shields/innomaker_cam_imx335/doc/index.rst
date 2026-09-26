@@ -24,7 +24,7 @@ patch applies on top of it,
 ``zephyr/patches/zephyr/0004-imx335-2lane-link-freq-and-binning.patch``
 (registered in ``zephyr/patches.yml``, applied per-module by
 ``scripts/bootstrap.sh`` via ``west patch apply``, and checked by
-``scripts/verify_west_patches.py``). Bench runs 316-330 (E1M-AEN803
+``scripts/verify_west_patches.py``). Bench runs 316-331 (E1M-AEN803
 2026W36-0001) found and fixed three real upstream-driver bugs at this
 sensor's 2-lane/10-bit/1188 Mbps-per-lane configuration -- see the patch's
 own comment in ``zephyr/patches.yml`` for the full derivation and bench
@@ -71,7 +71,7 @@ mode explicitly, and discards the first captured frame after stream start
    CAM-IMX335-5MP module ships.
 
 .. note::
-   **Bench-verified on unit E1M-AEN803 2026W36-0001 (bench runs 316-330 --
+   **Bench-verified on unit E1M-AEN803 2026W36-0001 (bench runs 316-331 --
    see** ``metadata/chips/imx335.yaml`` **and** ``changelog.d/2327.md``
    **for the full history):** with the patch above applied, and this
    shield's Camera-mode + explicit ``csi-pixclk-hz`` = 200 MHz
@@ -89,16 +89,30 @@ mode explicitly, and discards the first captured frame after stream start
    OV5647), so whether this module self-enables on a STOCK carrier (no
    rework) is NOT established by this result; do not add IMX335 to any
    "self-enables" list on the strength of it. The first captured frame
-   after STANDBY release had darkened lower rows in one run (329) but not
-   the next (330) -- this example discards the first frame for this
-   sensor rather than claiming the cause is understood.
+   after STANDBY release has been bad every time it was checked: darkened
+   lower rows (run 329), and in run 331 (the product-code confirmation run
+   below) BOTH of its two loads discarded a bad first frame too --
+   near-black rows 466-583 in one load, all-zero rows 759-778 in the other
+   -- this example discards the first frame for this sensor; this is
+   bench-justified, though the root cause is still not confirmed.
+
+   **Run 331 -- PRODUCT-CODE confirmation:** the committed tree
+   (``fbf9c8de3``) with ONLY patch 0004 applied on a pristine Zephyr v4.4.1
+   checkout (sha256 matches the committed patch file), no diag-only code.
+   The kept (second) frame was clean: 0 IPI/CRC error lines, only one
+   ``FRAME_SEQ`` event at start, correct stride, 0 near-black rows, nothing
+   written past the buffer, a clean close, and ``CSI_PIXCLK_CTRL`` read
+   back ``0x00020001`` (divisor 2 = 200 MHz, matching this shield's
+   ``csi-pixclk-hz``). ``csi-halt-en`` was left at its default -- no
+   IPI-halt/"nohalt" DT override was needed.
 
    **NOT bench-verified -- never claim beyond the above:**
 
    - frame rate/fps (not measured on this path);
+   - the module self-enabling on a stock, non-reworked carrier (the J5
+     pin-11 rework is a module-enable concern, unrelated to D-PHY lock);
    - D-PHY lock on any unit/carrier other than E1M-AEN803 2026W36-0001 on
-     this specific E1M-EVK -- a stock, non-reworked carrier is untested for
-     this sensor;
+     this specific E1M-EVK;
    - ISP/AE/colour (no ISP path exists for this sensor);
    - the sensor's full-resolution (non-binned) mode.
 

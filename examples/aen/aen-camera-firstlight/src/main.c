@@ -416,19 +416,24 @@ int main(void)
 
 #if defined(CONFIG_VIDEO_IMX335)
 	/*
-	 * Alp Lab AB (issue #2327, bench runs 329/330): the first frame captured
-	 * right after STANDBY release had darkened lower rows in one bench run
-	 * (329) but not the next (330) under otherwise identical settings -- not
-	 * understood well enough to claim a cause (a plausible guess is exposure/
-	 * AGC settling before the sensor's first full frame, but that is NOT
-	 * confirmed). Discard it rather than risk reporting a dark frame as this
-	 * sensor's "first-light" result; the SECOND capture is what this example
-	 * reports below.
+	 * Alp Lab AB (issue #2327, bench runs 329-331): the first frame captured
+	 * right after STANDBY release has been bad every time it was checked --
+	 * darkened lower rows in run 329, and in run 331 (the product-code
+	 * confirmation run, patch 0004 only, no diag code), BOTH of its two
+	 * loads discarded a bad first frame too: near-black rows 466-583 in one
+	 * load, all-zero rows 759-778 in the other -- while the SECOND capture
+	 * was clean in every run (run 331: 0 IPI/CRC error lines, correct
+	 * 1296x972 stride, 0 near-black rows, clean close). This bench-justifies
+	 * discarding the first frame; the root cause (a plausible guess is
+	 * exposure/AGC settling before the sensor's first full frame) is still
+	 * NOT confirmed. Discard it rather than risk reporting a bad frame as
+	 * this sensor's "first-light" result; the SECOND capture is what this
+	 * example reports below.
 	 */
 	alp_camera_frame_t discard_frame;
 
-	printk("[camfl] IMX335: discarding the first post-start frame (bench runs 329/330 -- "
-	       "may have darkened lower rows) ...\n");
+	printk("[camfl] IMX335: discarding the first post-start frame (bench runs 329-331 -- "
+	       "consistently bad) ...\n");
 	s = alp_camera_capture(cam, &discard_frame, CAM_CAPTURE_TIMEOUT_MS);
 	if (s == ALP_OK) {
 		alp_camera_release(cam, &discard_frame);
