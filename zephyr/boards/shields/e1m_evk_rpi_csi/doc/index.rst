@@ -46,7 +46,7 @@ the 800 Mbit/s/lane rate. See ``docs/camera-shields.md``.
 Compatible sensor shields
 *************************
 
-Three in-tree sensor shields carry this connector's label contract (see
+Four in-tree sensor shields carry this connector's label contract (see
 ``docs/camera-shields.md`` for their modes, controls and bench status):
 
 - ``innomaker_cam_ov9281`` -- InnoMaker CAM-OV9281 (OV9281, 2 data lanes)
@@ -54,6 +54,7 @@ Three in-tree sensor shields carry this connector's label contract (see
   CAM-OV5647 (OV5647, 2 data lanes)
 - ``raspberry_pi_global_shutter_camera`` -- INNO-MAKER CAM-IMX296RAW-TRIGGER
   (IMX296, 1 data lane)
+- ``innomaker_cam_imx335`` -- InnoMaker CAM-IMX335-5MP (IMX335, 2 data lanes)
 
 Programming
 ***********
