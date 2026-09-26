@@ -277,24 +277,17 @@ SRC_URI:append:rzv2n-family = " file://0009-rzv2n-dev-ALP-E1M-publish-sku-to-cho
 # Derive ethaddr/eth1addr from the same validated manifest's serial --
 # fleet-unique by construction, not globally unique (no purchased IEEE
 # OUI block). Neither the RZ/V2N SoC nor this SoM has any other MAC
-# source. Context: 0009's alp_som_is_v2n_m1() capture of alp_sku, whose
-# alp_serial sibling this patch adds alongside it -- must land after
-# 0009, not merely after it for readability, since it edits the same
-# function body 0009's own hunk already touched.
+# source. Must land after 0009: it edits the same alp_som_is_v2n_m1()
+# function body 0009's own hunk already touched (adding an alp_serial
+# capture alongside 0009's alp_sku one).
 #
-# The widely-assumed hardcoded default ("00:11:22:33:44:55") is NOT a
-# meta-alp-sdk fact: no patch in this series ever set ethaddr/eth1addr.
-# The real compiled-in default ("02:11:22:33:44:55" /
-# "02:11:22:33:44:66" -- already locally-administered, not a real IEEE
-# OUI) comes from meta-rz-features/meta-rz-drpai's OWN, separate u-boot
-# bbappend (recipes-bsp/u-boot/files/0001-add-ether-setting.patch),
-# which -- per the patch-fuzz demotion comment below -- lands AFTER
-# this whole series. This patch does not edit that foreign layer's
-# file; instead its board_late_init() code treats that exact compiled-
-# in string as "unset" alongside a real NULL, so it derives correctly
-# whether or not the DRP-AI feature layer is enabled. See
-# docs/soms/v2n.md#ethernet-mac-address-policy for the policy writeup
-# and scripts/alp_eth_mac.py for the shared golden vector.
+# meta-rz-features/meta-rz-drpai's OWN, separate u-boot bbappend
+# (recipes-bsp/u-boot/files/0001-add-ether-setting.patch) sets
+# ethaddr/eth1addr to 02:11:22:33:44:55/66 in CFG_EXTRA_ENV_SETTINGS;
+# this patch derives the real per-unit MAC at boot instead, both in
+# board_late_init() and via a bootcmd hook (CONFIG_BOOTCOMMAND, patch
+# 0002) that runs right after "env default -a" -- see
+# docs/soms/v2n.md#ethernet-mac-address-policy and scripts/alp_eth_mac.py.
 SRC_URI:append:rzv2n-family = " file://0010-rzv2n-dev-ALP-E1M-serial-derived-eth-mac.patch"
 
 # Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot

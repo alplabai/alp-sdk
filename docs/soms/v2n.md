@@ -170,16 +170,27 @@ make them; that block is not something the project has bought.
   (device side) -- the two must stay bit-for-bit identical; both carry the
   same golden vector for serial `2026W38-0001`: `end0 = A2:C0:A6:00:00:10`,
   `end1 = A2:C0:A6:00:00:14`.
-* Override: `setenv ethaddr <mac>; setenv eth1addr <mac>; saveenv` in U-Boot
-  before Linux boots. U-Boot only derives a MAC when the current value is
-  either unset or is one of the known compiled-in defaults a BSP feature
-  layer bakes in (see the patch's commit message) -- any other value,
-  including one you set yourself, is left untouched on every subsequent
-  boot.
-* Ledger: the production ledger (`alp-sdk-internal/ledger/`) records the
-  derived pair per serial under keys `eth0_mac` / `eth1_mac`, computed with
-  the same `scripts/alp_eth_mac.py` so a ledger row and the unit's actual
-  boot-time MAC can be cross-checked without powering the board on.
+* **Runs twice, on purpose:** once from `board_late_init()` (so U-Boot's
+  own networking has a MAC before `bootcmd` runs), and again from a new
+  `alp_eth_mac` command that `CONFIG_BOOTCOMMAND` invokes immediately
+  after `env default -a`. The second call is the one that actually
+  reaches Linux: U-Boot's `image_setup_libfdt()` runs
+  `fdt_fixup_ethernet()` (which copies `ethaddr`/`eth1addr` into the
+  `ethernet0`/`ethernet1` DT nodes' `mac-address`/`local-mac-address`
+  properties) *before* `ft_system_setup()` ever runs -- so deriving only
+  in `board_late_init()`, or only in `ft_system_setup()`, would already
+  be too late for that same boot.
+* **No env override, by construction, not by choice:** `CONFIG_BOOTCOMMAND`
+  opens with `env default -a`, which wipes the whole environment back to
+  its compiled-in defaults on every boot before Linux is reached -- so a
+  `setenv ethaddr <mac>; saveenv` would not survive to the next autoboot
+  regardless of what U-Boot's derivation code did. The honest rule this
+  SoM ships is: **the derived MAC always applies whenever the serial
+  parses**, unconditionally, every boot. There is no override slot.
+* Recompute a unit's MAC any time from its serial with
+  `scripts/alp_eth_mac.py 2026W38-0001` (no ledger field carries it --
+  it is cheap to recompute and would otherwise just be a value that can
+  drift from the encoding that produces it).
 
 Octet 0 `0xA2` has U/L=1, I/G=0 and IEEE 802c-2017 SLAP quadrant bits
 Z:Y=`00`, i.e. the *Administratively Assigned Identifier* (AAI) quadrant --

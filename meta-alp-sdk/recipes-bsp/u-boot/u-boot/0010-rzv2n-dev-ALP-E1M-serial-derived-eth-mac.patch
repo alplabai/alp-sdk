@@ -1,68 +1,54 @@
-From 3a9c1a1e2b6d4f708c9a1e5d2f6a7b8c9d0e1f2a Mon Sep 17 00:00:00 2001
+From 4e0ddb30512fe4472e2a0117ac37abeccac42204 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
-Date: Sat, 26 Sep 2026 09:15:00 +0200
+Date: Sat, 26 Sep 2026 16:44:18 +0000
 Subject: [PATCH] rzv2n-dev: ALP E1M derive ethaddr/eth1addr from the SoM
  serial
 
-The E1M-V2N/E1M-V2M SoM has two RAVB Ethernet interfaces (Linux
-end0/end1) and no per-unit MAC source at all: the RZ/V2N has no MAC
-OTP and this SoM carries no MAC EEPROM. Left alone, every unit boots
-with whatever CFG_EXTRA_ENV_SETTINGS the enabled feature layers bake
-in -- on a DRP-AI build that is meta-rz-features/meta-rz-drpai's
-recipes-bsp/u-boot/files/0001-add-ether-setting.patch (NOT a
-meta-alp-sdk patch; it lands on include/configs/rzv2n-dev.h AFTER
-this whole series, per this board's own u-boot_%.bbappend comment on
-patch ordering), which hardcodes
-"ethaddr=02:11:22:33:44:55\0" / "eth1addr=02:11:22:33:44:66\0" --
-already locally-administered (U/L set), not a purchased IEEE OUI, and
-identical on every board either way. Buying an IEEE OUI block is off
-the table (maintainer decision), so the only per-unit fact available
-at boot is the allocator-guaranteed-unique factory serial
-(alp_serial, captured alongside alp_sku above) already sitting in the
-validated manifest this board reads on every boot.
+E1M-V2N/E1M-V2M SoMs have two RAVB Ethernet interfaces and no per-unit
+MAC source: the RZ/V2N has no MAC OTP and this SoM has no MAC EEPROM.
+meta-rz-features/meta-rz-drpai own u-boot bbappend sets ethaddr/eth1addr
+to 02:11:22:33:44:55/66 in CFG_EXTRA_ENV_SETTINGS -- identical on every
+board either way.
 
-Derive both MACs from that serial -- an injective encoding, not a
-hash -- into IEEE 802c SLAP locally-administered space: octet0 =
-0xA2 (individual, locally administered), then a 40-bit payload (4-bit
-Alp Lab prefix 0xC | 6-bit year-2024 | 6-bit week | 20-bit Crockford
-base32 index | 2-bit iface | 2 reserved bits). The Python side
-(scripts/alp_eth_mac.py) implements the identical bit layout and
-carries the same golden vector for serial "2026W38-0001":
-end0 A2:C0:A6:00:00:10, end1 A2:C0:A6:00:00:14 -- the two must never
-drift apart; see that script's own test suite.
+Derive both MACs instead from the unit serial already captured
+alongside alp_sku -- an injective encoding, not a hash, into IEEE 802c
+SLAP locally-administered space (octet0 0xA2, AAI quadrant). The
+Python side (scripts/alp_eth_mac.py) implements the identical bit
+layout and carries the same golden vector for serial "2026W38-0001":
+end0 A2:C0:A6:00:00:10, end1 A2:C0:A6:00:00:14.
 
-"Already configured" is checked against BOTH a real env value and the
-DRP-AI layer's known compiled-in default string -- deliberately, so
-this derives correctly whether or not that vendor layer is enabled,
-without this repo forking a patch file in a layer it does not own. A
-genuine user/production override (anything else, including a value
-this same code derived on an earlier boot) is left untouched.
+Always overwrites unconditionally via env_set() -- eth_env_set_enetaddr()
+refuses whenever the variable already holds any value, so it can never
+replace the vendor default. Called from board_late_init() (so U-Boot
+itself has a MAC before bootcmd) and from a new alp_eth_mac command
+that CONFIG_BOOTCOMMAND (patch 0002) invokes right after "env default
+-a" -- image_setup_libfdt() runs fdt_fixup_ethernet() before
+ft_system_setup(), so setting env only in ft_system_setup() would
+already be too late for the same boot.
 
-Runs unconditionally in board_late_init(), right after the manifest
-read that already captures alp_sku -- a missing/invalid manifest or
-an unparseable serial only logs and leaves ethaddr/eth1addr exactly
-as every other feature layer left them.
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
- board/renesas/rzv2n-dev/rzv2n-dev.c | 163 +++++++++++++++++++++++++++++++++++
- 1 file changed, 163 insertions(+)
+ board/renesas/rzv2n-dev/rzv2n-dev.c | 198 ++++++++++++++++++++++++++++
+ 1 file changed, 198 insertions(+)
 
 diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
-index 1152ade7..7c3d9f81 100644
+index 1152ade7..d8c366f9 100644
 --- a/board/renesas/rzv2n-dev/rzv2n-dev.c
 +++ b/board/renesas/rzv2n-dev/rzv2n-dev.c
-@@ -27,6 +27,8 @@
+@@ -27,6 +27,9 @@
  #include <linux/delay.h>
  #include <u-boot/crc.h>
  #include <asm/unaligned.h>
++#include <command.h>
 +#include <env.h>
 +#include <net.h>
  #include <fdt_support.h>
- 
+
  DECLARE_GLOBAL_DATA_PTR;
-@@ -346,6 +348,14 @@
+@@ -346,6 +349,14 @@ static void alp_gpio_output(unsigned int bank, unsigned int pin, int value)
   */
  static char alp_sku[25];
- 
+
 +/*
 + * Factory serial from the same validated manifest, format
 + * "YYYYWww-IIII" (e.g. "2026W38-0001") -- the sole per-unit uniqueness
@@ -74,8 +60,8 @@ index 1152ade7..7c3d9f81 100644
  static bool alp_som_is_v2n_m1(void)
  {
  	struct udevice *dev;
-@@ -379,6 +389,8 @@ static bool alp_som_is_v2n_m1(void)
- 
+@@ -379,6 +390,8 @@ static bool alp_som_is_v2n_m1(void)
+
  	memcpy(family, &buf[0x08], 16);
  	family[16] = '\0';
 +	memcpy(alp_serial, &buf[0x38], 24);
@@ -83,10 +69,10 @@ index 1152ade7..7c3d9f81 100644
  	memcpy(alp_sku, &buf[0x18], 24);
  	alp_sku[24] = '\0';
  	printf("ALP: SoM family \"%s\" sku \"%.24s\"\n", family, &buf[0x18]);
-@@ -916,6 +928,154 @@ int ft_system_setup(void *blob, struct bd_info *bd)
+@@ -916,6 +929,190 @@ int ft_system_setup(void *blob, struct bd_info *bd)
  	return 0;
  }
- 
+
 +/*
 + * Fleet-unique (NOT globally unique -- that needs a purchased IEEE OUI
 + * block) locally-administered Ethernet MAC derivation from the SoM
@@ -102,13 +88,6 @@ index 1152ade7..7c3d9f81 100644
 +#define ALP_ETH_INDEX_BITS		20
 +#define ALP_ETH_IFACE_BITS		2
 +#define ALP_ETH_RESERVED_BITS		2
-+
-+/* Compiled-in defaults meta-rz-features/meta-rz-drpai's add-ether patch
-+ * bakes into CFG_EXTRA_ENV_SETTINGS -- see this patch's commit message.
-+ * Treated as "unset", same as a real NULL, so this derives correctly
-+ * whether or not that vendor layer is in the build. */
-+#define ALP_ETH_VENDOR_DEFAULT_ETHADDR	"02:11:22:33:44:55"
-+#define ALP_ETH_VENDOR_DEFAULT_ETH1ADDR	"02:11:22:33:44:66"
 +
 +static bool alp_eth_crockford_decode(const char *chars, u32 *out)
 +{
@@ -195,12 +174,50 @@ index 1152ade7..7c3d9f81 100644
 +	mac[5] = (u8)(value >> 0);
 +}
 +
++static void alp_eth_format_mac(const u8 mac[6], char out[18])
++{
++	sprintf(out, "%02X:%02X:%02X:%02X:%02X:%02X",
++		mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
++}
++
++/*
++ * Derive and unconditionally publish ethaddr/eth1addr from the validated
++ * SoM serial captured above.  Fleet-unique by construction (the
++ * allocator guarantees the serial is), NOT globally unique (that needs
++ * a purchased IEEE OUI block).  See scripts/alp_eth_mac.py for the
++ * shared golden vector and docs/soms/v2n.md for the policy writeup.
++ *
++ * Always overwrites -- there is no env override slot on this board:
++ * CONFIG_BOOTCOMMAND opens with "env default -a", which wipes the
++ * whole environment back to its compiled-in defaults before Linux is
++ * ever reached, so a saved override could not survive to the next
++ * autoboot regardless of what this function did.  This is called both
++ * from board_late_init() (so U-Boot's own networking has a MAC before
++ * bootcmd runs) and from the "alp_eth_mac" command CONFIG_BOOTCOMMAND
++ * (patch 0002) runs immediately after "env default -a" -- the second
++ * call is the one that matters for Linux: boot/image-fdt.c's
++ * image_setup_libfdt() calls fdt_fixup_ethernet() (which reads
++ * ethaddr/eth1addr straight out of env into the ethernet0/ethernet1
++ * DT nodes' mac-address/local-mac-address properties) BEFORE
++ * ft_system_setup() ever runs, so setting env only in ft_system_setup()
++ * would already be too late for that same boot.
++ *
++ * env_set(), not eth_env_set_enetaddr_by_index(): the latter
++ * (net/eth_common.c -> env/common.c's eth_env_set_enetaddr()) refuses
++ * with -EEXIST whenever the variable already holds ANY value --
++ * including the DRP-AI vendor default this exists to replace -- so it
++ * can never do the one thing this function needs.  env_set() always
++ * overwrites: this board's rzv2n-dev_defconfig defines no
++ * CFG_ENV_FLAGS_LIST_STATIC entry for ethaddr/eth1addr, so
++ * env_flags_validate() has nothing to enforce here and env_set()
++ * succeeds unconditionally.
++ */
 +static void alp_eth_mac_bringup(void)
 +{
 +	u32 year, week, index;
 +	u8 mac0[6], mac1[6];
-+	const char *cur0, *cur1;
-+	bool set0, set1;
++	char buf0[18], buf1[18];
++	int ret0, ret1;
 +
 +	if (!alp_serial[0]) {
 +		printf("ALP: no validated SoM serial -- ethaddr/eth1addr left as-is\n");
@@ -215,37 +232,42 @@ index 1152ade7..7c3d9f81 100644
 +
 +	alp_eth_derive_mac(year, week, index, 0, mac0);
 +	alp_eth_derive_mac(year, week, index, 1, mac1);
++	alp_eth_format_mac(mac0, buf0);
++	alp_eth_format_mac(mac1, buf1);
 +
-+	cur0 = env_get("ethaddr");
-+	cur1 = env_get("eth1addr");
-+	set0 = !cur0 || !strcmp(cur0, ALP_ETH_VENDOR_DEFAULT_ETHADDR);
-+	set1 = !cur1 || !strcmp(cur1, ALP_ETH_VENDOR_DEFAULT_ETH1ADDR);
++	ret0 = env_set("ethaddr", buf0);
++	if (ret0)
++		printf("ALP: MAC set failed (%d)\n", ret0);
++	ret1 = env_set("eth1addr", buf1);
++	if (ret1)
++		printf("ALP: MAC set failed (%d)\n", ret1);
 +
-+	if (set0)
-+		eth_env_set_enetaddr_by_index("eth", 0, mac0);
-+	if (set1)
-+		eth_env_set_enetaddr_by_index("eth", 1, mac1);
-+
-+	if (!set0 && !set1) {
-+		printf("ALP: ethaddr/eth1addr already configured -- leaving as-is\n");
-+		return;
-+	}
-+
-+	printf("ALP: MAC end0 %s end1 %s (serial %s)\n",
-+	       env_get("ethaddr"), env_get("eth1addr"), alp_serial);
++	if (!ret0 && !ret1)
++		printf("ALP: MAC end0 %s end1 %s (serial %s)\n", buf0, buf1, alp_serial);
 +}
++
++static int do_alp_eth_mac(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
++{
++	alp_eth_mac_bringup();
++	return 0;
++}
++
++U_BOOT_CMD(alp_eth_mac, 1, 0, do_alp_eth_mac,
++	   "derive ethaddr/eth1addr from the SoM serial",
++	   ""
++);
 +
  int board_late_init(void)
  {
  	bool v2n_m1;
-@@ -924,6 +1084,7 @@ int board_late_init(void)
+@@ -924,6 +1121,7 @@ int board_late_init(void)
  	alp_clk5l_fixup();
- 
+
  	v2n_m1 = alp_som_is_v2n_m1();
 +	alp_eth_mac_bringup();
- 
+
  	if (IS_ENABLED(CONFIG_ALP_E1M_DEEPX_RAIL) || v2n_m1)
  		rail_ok = alp_deepx_rail_bringup();
 --
-2.34.1
- 
+2.43.0
+
