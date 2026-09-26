@@ -320,6 +320,13 @@
 		 * RTC_HCTOSYS and every alias above that assumes rv3028 = rtc0.
 		 * Pin &rtc to rtc1 explicitly so rv3028 keeps rtc0. */
 		rtc1 = &rtc;
+		/* RSCI4 carries the on-module Bluetooth UART (&sci4 below). The
+		 * rz-rsci driver takes its tty index from this alias; without it
+		 * the port registers as ttySC0 -- colliding with the SCIF debug
+		 * console (serial0, e1m-x-evk.dtsi) -- and matches
+		 * console=ttySC0, so the kernel console and the serial getty
+		 * move onto the BT UART (bench, E1M-V2M103, 2026-09-26). */
+		serial4 = &sci4;
 	};
 
 	/* On-module Wi-Fi power sequencing for the Murata LBEE5HY2FY-922
