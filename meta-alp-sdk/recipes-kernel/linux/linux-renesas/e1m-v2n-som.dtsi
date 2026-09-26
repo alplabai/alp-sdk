@@ -425,6 +425,13 @@
 	pinctrl-0 = <&sd2_wlan_pins>;
 	pinctrl-1 = <&sd2_wlan_pins>;
 	pinctrl-names = "default", "state_uhs";
+	/* The module's VBAT is the SoM's always-on 3.3 V rail. vmmc-supply
+	 * is required even so: without it tmio_mmc_init_ocr() finds no OCR
+	 * mask (no regulator, and the RZ SDHI of_data carries no ocr_mask)
+	 * and returns -EPROBE_DEFER forever -- the host never probes and
+	 * dmesg only repeats "allocated mmc-pwrseq" (bench, E1M-V2M103,
+	 * 2026-09-26). */
+	vmmc-supply = <&reg_3p3v>;
 	vqmmc-supply = <&sdhi2_vqmmc>;
 	mmc-pwrseq = <&wlan_pwrseq>;
 	bus-width = <4>;
