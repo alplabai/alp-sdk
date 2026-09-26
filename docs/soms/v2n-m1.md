@@ -126,6 +126,31 @@ Board `M.2 Rev 0.2`, NPU0-2 at `1000` MHz. Any mismatch here (wrong
 firmware version, a device stuck in reset, an unprogrammed NAND)
 surfaces before an inference is ever attempted.
 
+### Inference smoke test
+
+DEEPX's public model zoo publishes `.dxnn` models compiled per firmware
+release (`https://sdk.deepx.ai/modelzoo/dxnn/2_4_0/<model>.dxnn` for FW
+2.4.0). They are licensed for evaluation and development only. Run them with
+`run_model`:
+
+```
+run_model -m mobilenetv2_224x224.dxnn -s -l 50 -v   # single request, per-inference timing
+run_model -m mobilenetv2_224x224.dxnn -b -l 300     # throughput, all three NPUs
+```
+
+Measured on E1M-V2M103 (FW 2.4.0, DX-RT 3.2.0, PCIe Gen3 x2):
+
+| Model | NPU time | End-to-end latency (`-s`) | Throughput (`-b`, 3 NPUs) |
+|---|---|---|---|
+| `mobilenetv2_224x224` | 0.68 ms | 1.16 ms | 2781 FPS |
+| `resnet18_224x224` | 0.86 ms | 1.34 ms | -- |
+| `yolov5-s_640x640` | 4.09 ms | 62.1 ms | 33.8 FPS |
+
+YOLOv5s end-to-end latency is dominated by host-side output handling, not by
+the NPU. Use a loop count (`-l`): the time-bounded mode (`-t <s>`) stalled
+after its warm-up runs on this setup. `dxrt-cli -s` reports NPU voltage as
+`0 mV` with the no-PMIC firmware, because there is no PMIC read-out.
+
 ### DX-RT service mode (`dxrtd`) -- not enabled
 
 DX-RT 3.x has an optional, CMake-time "service mode"
