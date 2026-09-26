@@ -72,7 +72,21 @@ ZTEST(alp_chips, test_gd32g553_init_invalid_i2c_addr)
 /* init on the spot (`if (s != ALP_OK) { ...; return s; }`) rather than  */
 /* riding the transient status out, so this test reddens against the    */
 /* pre-fix code exactly as intended.                                    */
+/*                                                                      */
+/* #2314 review: ALP_ERR_BUSY is always transient, but ALP_ERR_IO /     */
+/* ALP_ERR_TIMEOUT are transient ONLY once this same init() call has    */
+/* already seen at least one ALP_ERR_BUSY (proof a trial is actually    */
+/* in progress) -- an absent/unflashed bridge never answers BUSY at     */
+/* all, so it must still fail FAST on the very first IO/TIMEOUT.        */
+/* Several cases below exist specifically to pin that rule down.        */
+/*                                                                      */
+/* Wire status bytes used directly below (docs/gd32-bridge-protocol.md  */
+/* §6): 0x03 = STATUS_BUSY, 0x06 = STATUS_NOSUPPORT (a non-transient    */
+/* code some real opcode could plausibly answer with -- any code other  */
+/* than BUSY exercises the same "not transient" path).                 */
 /* ------------------------------------------------------------------ */
+
+#define FAKE_GD32BRIDGE_WIRE_STATUS_NOSUPPORT 0x06u
 
 static alp_i2c_t *open_fake_gd32bridge_bus(void)
 {
@@ -89,8 +103,9 @@ ZTEST(alp_chips, test_gd32g553_init_retries_busy_then_succeeds)
 	fake_gd32bridge_reset();
 	fake_gd32bridge_set_version(GD32G553_HOST_PROTOCOL_MAJOR, 12u, 0u);
 	/* PING sees BUSY 3 times (modelling the TRIAL window's short
-	 * error-envelope reply to every opcode), then OK; GET_VERSION
-	 * then goes through clean since the ladder is already exhausted. */
+	 * error-envelope reply to every opcode), then OK; the busy count
+	 * is exhausted by the time GET_VERSION runs, so that phase goes
+	 * through on its first try. */
 	fake_gd32bridge_arm_busy_replies(3u);
 
 	alp_i2c_t *bus = open_fake_gd32bridge_bus();
@@ -99,6 +114,61 @@ ZTEST(alp_chips, test_gd32g553_init_retries_busy_then_succeeds)
 	              ALP_OK,
 	              "init must ride out a bounded run of STATUS_BUSY and succeed");
 	zassert_true(ctx.initialised);
+
+	alp_i2c_close(bus);
+	fake_gd32bridge_reset();
+}
+
+ZTEST(alp_chips, test_gd32g553_init_busy_then_io_then_succeeds)
+{
+	fake_gd32bridge_reset();
+	fake_gd32bridge_set_version(GD32G553_HOST_PROTOCOL_MAJOR, 12u, 0u);
+	/* Models the real sequence: one BUSY reply (still in TRIAL) proves
+	 * a live bridge, THEN the confirm-triggered second reset drops the
+	 * link for the next couple of attempts (raw transport IO
+	 * failures), THEN the link is back and PING succeeds normally.
+	 * This must succeed because the IO failures follow an observed
+	 * BUSY in the SAME init() call. */
+	fake_gd32bridge_arm_busy_replies(1u);
+	fake_gd32bridge_arm_io_failures(2u);
+
+	alp_i2c_t *bus = open_fake_gd32bridge_bus();
+	gd32g553_t ctx;
+	zassert_equal(gd32g553_init(&ctx, NULL, bus, 0x2Cu),
+	              ALP_OK,
+	              "IO failures right after an observed BUSY must be treated as transient");
+	zassert_true(ctx.initialised);
+
+	alp_i2c_close(bus);
+	fake_gd32bridge_reset();
+}
+
+ZTEST(alp_chips, test_gd32g553_init_io_without_busy_fails_fast)
+{
+	fake_gd32bridge_reset();
+	/* No BUSY ever seen -- models an absent/unflashed bridge, or a
+	 * re-init that happens to land INSIDE the COMMIT/ROLLBACK reset
+	 * itself, before any BUSY was ever observed.  Must fail on the
+	 * very first attempt, not spend the 2 s retry budget: this is the
+	 * latency src/zephyr/v2n_supervisor.c depends on for its
+	 * per-acquire() re-init of an absent bridge. */
+	fake_gd32bridge_arm_io_failures(1000000u);
+
+	alp_i2c_t    *bus = open_fake_gd32bridge_bus();
+	gd32g553_t    ctx;
+	const int64_t start_ms   = k_uptime_get();
+	alp_status_t  s          = gd32g553_init(&ctx, NULL, bus, 0x2Cu);
+	const int64_t elapsed_ms = k_uptime_get() - start_ms;
+
+	zassert_equal(
+	    s, ALP_ERR_IO, "an IO error with no prior BUSY must surface immediately, unretried");
+	zassert_false(ctx.initialised);
+	zassert_equal(fake_gd32bridge_attempts_seen(),
+	              1u,
+	              "must fail on the FIRST bus attempt -- no retry ladder engaged");
+	zassert_true(elapsed_ms < 200,
+	             "init must fail fast (got %lld ms) -- did it start retrying IO unconditionally?",
+	             (long long)elapsed_ms);
 
 	alp_i2c_close(bus);
 	fake_gd32bridge_reset();
@@ -122,12 +192,38 @@ ZTEST(alp_chips, test_gd32g553_init_gives_up_after_retry_budget)
 	              ALP_ERR_BUSY,
 	              "init must give up with the last transient status once its budget is spent");
 	zassert_false(ctx.initialised);
-	/* Budget is 2 s; allow slack below for scheduler jitter but prove
-	 * it actually rode out most of the ladder rather than giving up
-	 * on the first BUSY. */
+	/* Budget is 2 s, read ONCE via alp_uptime_ms() and shared across
+	 * both the PING and GET_VERSION phases (#2314 review) -- allow
+	 * slack below for scheduler jitter but prove it actually rode out
+	 * most of the shared deadline rather than giving up early or
+	 * doubling the budget by re-reading it per phase. */
 	zassert_true(elapsed_ms >= 1500,
 	             "init gave up too early (%lld ms) -- did the retry ladder regress?",
 	             (long long)elapsed_ms);
+	zassert_true(elapsed_ms < 2800,
+	             "init overran the shared 2 s deadline (%lld ms) -- is the budget being "
+	             "re-read per phase instead of shared?",
+	             (long long)elapsed_ms);
+
+	alp_i2c_close(bus);
+	fake_gd32bridge_reset();
+}
+
+ZTEST(alp_chips, test_gd32g553_init_non_transient_wire_status_not_retried)
+{
+	fake_gd32bridge_reset();
+	/* A non-transient wire status on the very first PING (no BUSY ever
+	 * seen) must break out of the retry loop immediately -- exercises
+	 * the loop's OWN transience check, distinct from the post-loop
+	 * major-version check the next test covers. */
+	fake_gd32bridge_arm_status_replies(FAKE_GD32BRIDGE_WIRE_STATUS_NOSUPPORT, 1u);
+
+	alp_i2c_t *bus = open_fake_gd32bridge_bus();
+	gd32g553_t ctx;
+	zassert_equal(gd32g553_init(&ctx, NULL, bus, 0x2Cu),
+	              ALP_ERR_NOSUPPORT,
+	              "a non-transient wire status must return immediately, not retry");
+	zassert_equal(fake_gd32bridge_calls_seen(), 1u, "exactly one PING -- no retry engaged");
 
 	alp_i2c_close(bus);
 	fake_gd32bridge_reset();

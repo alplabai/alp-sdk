@@ -13,13 +13,17 @@
  * decodes exactly that shape as its "error-envelope fallback", the
  * same trap documented on the SPI side.
  *
- * Test control lets a case arm N STATUS_BUSY replies (modelling the
+ * Test control lets a case arm N replies of an arbitrary wire status
+ * (short error envelope; STATUS_BUSY is the common case, modelling the
  * post-OTA-COMMIT/ROLLBACK TRIAL window, docs/gd32-bridge-protocol.md
  * §10, where the bridge answers BUSY to every opcode until it decodes
  * a CRC-valid frame) and/or M raw bus failures (modelling the SECOND,
  * confirm-triggered reset's link drop) before it answers normally --
  * driving gd32g553_init()'s retry ladder in chips/gd32g553/gd32g553.c.
- */
+ * Armed status replies are always answered BEFORE armed io failures,
+ * matching the real sequence a trial window produces: BUSY while
+ * unconfirmed, then a transient IO/timeout around the confirm-
+ * triggered second reset, then normal replies. */
 
 #define DT_DRV_COMPAT alp_fake_gd32bridge
 
@@ -37,9 +41,11 @@
 
 struct fake_gd32bridge_data {
 	uint8_t  major, minor, patch;
-	unsigned busy_replies_remaining; /* answers STATUS_BUSY to ANY opcode */
+	uint8_t  armed_status;           /* wire status answered while armed below */
+	unsigned armed_status_remaining; /* answers `armed_status` to ANY opcode */
 	unsigned io_fail_remaining;      /* raw bus failure -- models a link drop */
-	uint32_t calls_seen;
+	uint32_t calls_seen;             /* decoded (non-io-failed) requests */
+	uint32_t attempts_seen;          /* every transfer(), incl. io-failed ones */
 };
 
 static struct fake_gd32bridge_data *g_fake_gd32bridge;
@@ -72,13 +78,15 @@ static void write_ok_reply(uint8_t *buf, size_t len, const uint8_t *payload, siz
 }
 
 /* Short error-envelope: STATUS + CRC(STATUS) only -- the shape real
- * firmware answers with for ANY opcode while STATUS_BUSY (no payload,
- * regardless of the opcode's normal reply width).  Bytes past the
- * 3-byte envelope are unread by the host's fallback decode but zeroed
- * here so nothing looks like stale FIFO content by accident. */
-static void write_busy_reply(uint8_t *buf, size_t len)
+ * firmware answers with for ANY opcode while it can't run the normal
+ * handler (STATUS_BUSY during the trial window, but any other wire
+ * status works the same way -- no payload, regardless of the
+ * opcode's normal reply width).  Bytes past the 3-byte envelope are
+ * unread by the host's fallback decode but zeroed here so nothing
+ * looks like stale FIFO content by accident. */
+static void write_status_reply(uint8_t status, uint8_t *buf, size_t len)
 {
-	buf[0]             = FAKE_GD32BRIDGE_STATUS_BUSY;
+	buf[0]             = status;
 	const uint16_t crc = alp_crc16_ccitt_false(buf, 1u);
 	buf[1]             = (uint8_t)(crc & 0xFFu);
 	buf[2]             = (uint8_t)((crc >> 8) & 0xFFu);
@@ -91,9 +99,25 @@ fake_gd32bridge_transfer(const struct emul *target, struct i2c_msg *msgs, int nu
 	(void)addr;
 	struct fake_gd32bridge_data *d = target->data;
 
+	d->attempts_seen++;
+
+	/* Armed status replies are answered BEFORE armed io failures --
+	 * see this file's header comment for why that ordering matches
+	 * the real TRIAL-window sequence. */
+	if (d->armed_status_remaining > 0u) {
+		d->armed_status_remaining--;
+		if (num_msgs != 2 || (msgs[0].flags & I2C_MSG_READ) != 0 ||
+		    (msgs[1].flags & I2C_MSG_READ) == 0) {
+			return -EIO;
+		}
+		d->calls_seen++;
+		write_status_reply(d->armed_status, msgs[1].buf, msgs[1].len);
+		return 0;
+	}
+
 	/* Models the link physically dropping (the bridge's second,
 	 * confirm-triggered reset) -- a raw bus failure, not a decoded
-	 * STATUS_BUSY reply. */
+	 * status reply. */
 	if (d->io_fail_remaining > 0u) {
 		d->io_fail_remaining--;
 		return -EIO;
@@ -108,12 +132,6 @@ fake_gd32bridge_transfer(const struct emul *target, struct i2c_msg *msgs, int nu
 	const uint8_t cmd = msgs[0].buf[1];
 	d->calls_seen++;
 
-	if (d->busy_replies_remaining > 0u) {
-		d->busy_replies_remaining--;
-		write_busy_reply(msgs[1].buf, msgs[1].len);
-		return 0;
-	}
-
 	switch (cmd) {
 	case FAKE_GD32BRIDGE_CMD_PING:
 		write_ok_reply(msgs[1].buf, msgs[1].len, NULL, 0u);
@@ -126,7 +144,7 @@ fake_gd32bridge_transfer(const struct emul *target, struct i2c_msg *msgs, int nu
 	default:
 		/* Unexercised by this fake's test cases -- answer BUSY rather
 		 * than silently misbehaving on an opcode nobody armed. */
-		write_busy_reply(msgs[1].buf, msgs[1].len);
+		write_status_reply(FAKE_GD32BRIDGE_STATUS_BUSY, msgs[1].buf, msgs[1].len);
 		return 0;
 	}
 }
@@ -166,10 +184,16 @@ void fake_gd32bridge_set_version(uint8_t major, uint8_t minor, uint8_t patch)
 	g_fake_gd32bridge->patch = patch;
 }
 
-void fake_gd32bridge_arm_busy_replies(unsigned count)
+void fake_gd32bridge_arm_status_replies(uint8_t wire_status, unsigned count)
 {
 	if (g_fake_gd32bridge == NULL) return;
-	g_fake_gd32bridge->busy_replies_remaining = count;
+	g_fake_gd32bridge->armed_status           = wire_status;
+	g_fake_gd32bridge->armed_status_remaining = count;
+}
+
+void fake_gd32bridge_arm_busy_replies(unsigned count)
+{
+	fake_gd32bridge_arm_status_replies(FAKE_GD32BRIDGE_STATUS_BUSY, count);
 }
 
 void fake_gd32bridge_arm_io_failures(unsigned count)
@@ -181,6 +205,11 @@ void fake_gd32bridge_arm_io_failures(unsigned count)
 uint32_t fake_gd32bridge_calls_seen(void)
 {
 	return g_fake_gd32bridge ? g_fake_gd32bridge->calls_seen : 0u;
+}
+
+uint32_t fake_gd32bridge_attempts_seen(void)
+{
+	return g_fake_gd32bridge ? g_fake_gd32bridge->attempts_seen : 0u;
 }
 
 void fake_gd32bridge_reset(void)

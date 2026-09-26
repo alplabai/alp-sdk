@@ -996,14 +996,23 @@ low nibble; `0x80 NO_PENDING` is I2C-only, where stamping never
 applies).  Masking is safe unconditionally on SPI: legacy firmware
 never sets the high nibble there.
 
-**OTA post-COMMIT/ROLLBACK trial window (v0.12):** after `OTA_COMMIT`
-or `OTA_ROLLBACK` the bridge reboots into an unconfirmed TRIAL image
-and answers `STATUS_BUSY` to **every** opcode — including `PING` and
+**OTA post-COMMIT/ROLLBACK trial window (v0.12, firmware >= 0.2.14):**
+after `OTA_COMMIT` or `OTA_ROLLBACK` commits a trial-capable image the
+bridge reboots into an unconfirmed TRIAL image and answers
+`STATUS_BUSY` to **every** opcode — including `PING` and
 `GET_VERSION` — until it decodes its first CRC-valid frame of any
 kind, which itself confirms the trial (see §10).  `gd32g553_init()`
-rides this out with a bounded (~2 s) retry ladder on `ALP_ERR_BUSY`;
-other callers hitting `STATUS_BUSY` in this window should retry after
-a re-init rather than treat it as a hard failure.
+rides this out with a bounded (~2 s) retry ladder gated on the
+following rule: `ALP_ERR_BUSY` is always retried; `ALP_ERR_IO` /
+`ALP_ERR_TIMEOUT` are retried **only** once this same `init()` call
+has already seen at least one `ALP_ERR_BUSY` (proof a trial is
+actually in progress and a confirm-triggered second reset is the
+explanation) — an absent or unflashed bridge never answers `BUSY` at
+all, so it still fails fast on the very first `IO`/`TIMEOUT`, exactly
+as before this retry existed.  Other callers hitting `STATUS_BUSY` in
+this window should retry after a re-init rather than treat it as a
+hard failure, using the same BUSY-gates-IO/TIMEOUT rule if they build
+their own retry.
 
 ## 7. Liveness handshake
 
@@ -1068,9 +1077,11 @@ sitting unbound — and adds the new opcode `CMD_ADC_SPECTRUM_READ`
 never binds a chain sees no behaviour change.  **v0.12** adds the
 post-COMMIT/ROLLBACK TRIAL-then-confirm boot sequence (§6, §10) — no
 new opcode and no framing change, so it is observable only as a
-bounded run of `STATUS_BUSY` right after an OTA reset; a host that
-already treats `STATUS_BUSY` as retryable (as `gd32g553_init()` now
-does) sees no behaviour change beyond that widened retry window.
+bounded run of `STATUS_BUSY` right after an OTA reset committing a
+trial-capable image (firmware release >= 0.2.14, a separate axis from
+this wire-protocol version — see §10); a host that already treats
+`STATUS_BUSY` as retryable (as `gd32g553_init()` now does) sees no
+behaviour change beyond that widened retry window.
 
 ## 9. Reference vectors
 
@@ -1159,39 +1170,70 @@ reply transaction can miss — hosts treat an I/O error there as
 "issued" and confirm via `OTA_GET_STATE` (or by re-initialising
 against the rebooted bridge after COMMIT/ROLLBACK).
 
-**TRIAL boot, confirm, and watchdog revert (v0.12).** `COMMIT` and
-`ROLLBACK` don't hand control straight to a trusted image: the bridge
-reboots into the newly-active slot in an unconfirmed **TRIAL** state,
-and until it decodes its first CRC-valid frame — of ANY opcode, not
-just an OTA one — it answers `STATUS_BUSY` (§6) to everything.  That
-first valid frame both confirms the trial AND triggers a **second**
-reset, this one booting the now-confirmed image; the link drops again
-for a few milliseconds around that second reset before settling into
-normal operation.  If no valid frame lands before the bootloader's
-watchdog (FWDGT) window expires — nominal ~32.8 s — the bootloader
-reverts to the previously-active slot instead, exactly as if the new
-image had hung.
+**TRIAL boot, confirm, and watchdog revert (v0.12, firmware >= 0.2.14).**
+`COMMIT` and `ROLLBACK` don't hand control straight to a trusted
+image: when the committed image is itself trial-capable (firmware
+release >= 0.2.14 -- the release that introduced this whole mechanism;
+see §8's version history), the bridge reboots into the newly-active
+slot in an unconfirmed **TRIAL** state, and until it decodes its first
+CRC-valid frame — of ANY opcode, not just an OTA one — it answers
+`STATUS_BUSY` (§6) to everything.  That first valid frame both
+confirms the trial AND triggers a **second** reset, this one booting
+the now-confirmed image; the link drops again for a few milliseconds
+around that second reset before settling into normal operation.  If no
+valid frame lands before the bootloader's watchdog (FWDGT) window
+expires — nominal ~32.8 s — the bootloader reverts to the
+previously-active slot instead, exactly as if the new image had hung.
 
 An `OTA_BEGIN` sent in the legacy 8-byte form (no `fw_version` triple,
 §3's table above) is treated as an unknown incoming version, which is
 itself sufficient reason for the bridge to boot the result into TRIAL
 — this is deliberate: a caller that hasn't wired up version tracking
-still gets the safety net.
+still gets the safety net.  **This is only the right call for an image
+that is itself >= 0.2.14** — an OLDER image committed via the legacy
+form (or via an explicit version that happens to be unknown) still
+boots into TRIAL, has no confirm logic of its own to run, and is
+reverted by the watchdog ~33 s later exactly as if it had hung.  To
+install an older image that must actually survive, pass its real,
+known version to `OTA_BEGIN` instead: an explicitly known version
+**below 0.2.14** is a deliberate **downgrade guard** — the bridge
+commits or rolls back to it WITHOUT the TRIAL dance at all (no
+`STATUS_BUSY` window, no second reset), since an image that predates
+the confirm protocol could never satisfy it.
+
+**Bootloader/app version coupling.** The watchdog-revert protection is
+the BOOTLOADER's doing, not the app's. An old bootloader paired with a
+new, trial-capable app still runs the TRIAL/`STATUS_BUSY`/confirm
+dance (the app side alone drives that), but an old bootloader has no
+watchdog-revert logic to fall back on, so a hung new app is never
+reverted. Bootloader and app must be built and shipped together for
+the watchdog-revert protection to actually apply.
 
 Host contract: send a frame within the watchdog window after COMMIT
 or ROLLBACK (any opcode works — a `PING`/`GET_VERSION` re-init is
 enough), and treat `STATUS_BUSY` seen right after COMMIT/ROLLBACK as
-retryable, not a failure — `gd32g553_init()` (`chips/gd32g553/gd32g553.c`)
-already does this with a bounded (~2 s) retry ladder on
-`ALP_ERR_BUSY`/`ALP_ERR_IO`, so a plain re-init call is the whole
-contract for most callers.  `gd32g553_ota_get_state()` does NOT retry
-on its own — call it after a successful re-init, not in the trial
-window itself.
+retryable, not a failure.  `gd32g553_init()`
+(`chips/gd32g553/gd32g553.c`) already does this with a bounded (~2 s)
+retry ladder gated on: `ALP_ERR_BUSY` is always retried;
+`ALP_ERR_IO`/`ALP_ERR_TIMEOUT` are retried only once THIS SAME
+`init()` call has already seen at least one `ALP_ERR_BUSY` — so a
+plain re-init call is the whole contract for most callers, and an
+absent/unflashed bridge (which never answers BUSY at all) still fails
+fast rather than paying the full retry budget on every acquire.  A
+re-init whose very first frame happens to land inside the
+COMMIT/ROLLBACK reset itself (before any BUSY was ever observed) still
+fails fast with `IO`/`TIMEOUT` — the caller's own outer retry (already
+required for any transient init failure) picks it up on the next
+attempt.  `gd32g553_ota_get_state()` does NOT retry on its own — call
+it after a successful re-init, not in the trial window itself.
 
-**Bench status:** the app-side confirm path (BUSY → first valid frame
-→ second reset → normal operation) is silicon-validated on
-E1M-V2M103, 2026-09-26.  The bootloader's watchdog-driven revert path
-is implemented but not yet bench-verified.
+**Bench status:** both the app-side confirm path (BUSY → first valid
+frame → second reset → normal operation) AND the bootloader's
+watchdog-driven revert path are silicon-validated on E1M-V2M103,
+2026-09-26: a deliberately hung image (HXTAL misconfigured) committed
+via the legacy `OTA_BEGIN` form was reverted to the previous slot
+after ~33 s, `RESET_REASON` read back `WDT`, and the bridge's own
+health check cleared the reverted slot's `slot_valid` flag.
 
 **Path B — Host-driven SWD bit-bang (universal recovery).**
 
