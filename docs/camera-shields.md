@@ -667,10 +667,10 @@ single point to flip if the real polarity turns out to be inverted.
 
 No portable `chips/imx296/` chip-ID stub exists (unlike OV9281's
 `chips/ov9281/ov9281.c`) -- streaming lives entirely in this Zephyr driver,
-matching OV5647's approach (which also has no `chips/` stub or
-`metadata/chips/` manifest). `metadata/chips/imx296.yaml` still exists as a
-catalogue-only manifest (`driver_status: none`) so the part is discoverable
-in the chip metadata system; it is allowlisted in
+matching OV5647's approach (neither has a `chips/` stub). OV5647 and IMX296
+both carry a catalogue-only `metadata/chips/*.yaml` manifest
+(`driver_status: none`) so each part is discoverable in the chip metadata
+system; both are allowlisted in
 `scripts/check_chip_manifest_parity.py`'s `KNOWN_MANIFEST_NO_DRIVER` for
 the same reason.
 

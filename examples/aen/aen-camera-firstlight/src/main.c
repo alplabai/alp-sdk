@@ -12,12 +12,17 @@
  *
  * OV9281 is bench-verified (an E1M-AEN803 on the E1M-EVK, 2026-09-21): real
  * GREY8 frames land in memory in all three of the driver's modes.  The
- * OV5647 path is bench-verified too (runs 52/61/62, issue #2248).  The
- * IMX296 path (issue #2287) is Stage A bench-verified: I2C identity (bench
+ * OV5647 path is bench-verified too (runs 52/61/62, issue #2248).  Both
+ * OV9281 and OV5647 are due for a re-bench after issue #2287 Stage B changed
+ * the shared CPI driver's buffer-starvation-pause behaviour -- re-bench on
+ * these two sensors is pending.  The IMX296 path (issue #2287) is Stage A +
+ * Stage B bench-verified: Stage A through this app -- I2C identity (bench
  * run 229), CSI-2 streaming, and a real 1456x1088 RAW10 frame captured
  * through this app (bench run 292, 0.98 correlation against a diag control
- * capture) -- see docs/camera-shields.md for the full write-up on all
- * three, and for what remains unverified on IMX296 (ISP-Pico, AE,
+ * capture); Stage B via examples/aen/aen-isp-capture (ISP-Pico data path,
+ * AE) and examples/connectivity/camera-mjpeg-stream (continuous MJPEG
+ * streaming) -- see docs/camera-shields.md for the full write-up on all
+ * three, and for what remains unverified on IMX296 (colour AWB/CCM,
  * fast-trigger mode).
  * This app still prints enough detail on every path (including a failed
  * open() or a capture TIMEOUT) that a bench engineer can tell which stage

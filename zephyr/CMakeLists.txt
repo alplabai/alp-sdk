@@ -722,8 +722,8 @@ zephyr_library_sources_ifdef(CONFIG_VIDEO_ISP_VSI
 #
 # IMX296 (compatible "sony,imx296"): ADR-0017-ADJACENT (authored from the
 # Sony IMX296 datasheet -- no permissive-licence IMX296 driver exists to
-# consume), PARTIALLY BENCH-VERIFIED (I2C identity only -- issue #2287,
-# bench run 229) -- see zephyr/drivers/video/imx296.c.
+# consume), Stage A + Stage B bench-verified (issue #2287) -- see
+# docs/camera-shields.md and zephyr/drivers/video/imx296.c.
 if(CONFIG_VIDEO_OV5647 OR CONFIG_VIDEO_OV9281 OR CONFIG_VIDEO_IMX296)
     zephyr_include_directories(${ZEPHYR_BASE}/drivers/video)
 endif()
