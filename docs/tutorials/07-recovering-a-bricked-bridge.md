@@ -154,7 +154,8 @@ that can reach the wrong board.  This tutorial's table reproduces
 formerly carried its own "BENCH-VERIFIED" banner covering `GD32_DPIDR`
 too; that banner cited `docs/aen-bench-bringup.md`, a document that
 does not mention the GD32 at all, and is now hedged
-(`scripts/bench/aen/bench-env.sh:148-151`).
+(`scripts/bench/aen/bench-env.sh:391-396` -- "GD32_DPIDR is NOT
+bench-verified ... treat it as unattested").
 Whether `0x0BE12477` was ever read off a GD32 with a probe attached
 remains open at #1369 and needs silicon to close, not doc surgery.
 

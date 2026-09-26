@@ -17,9 +17,9 @@ enforced by the same code in the same voice.
 
 `board.yaml` may set `cores.<id>.os`. Setting the *other* class's runtime --
 `zephyr` on a Cortex-A, `yocto` on a Cortex-M -- is refused at
-`scripts/alp_orchestrate/validate.py:270-282`
+`scripts/alp_orchestrate/validate.py:296`
 (`_enforce_os_matches_core_class`), reached from
-`scripts/alp_orchestrate/loader.py:910`, with this message:
+`scripts/alp_orchestrate/loader.py:927`, with this message:
 
 ```text
 core '<id>' (<type>): its runtime is determined by the core class
@@ -34,7 +34,7 @@ the pinned v4.4.1 ships `arch/arm/core/cortex_a_r/` and
 *chosen* to carry exactly two OSes and pair one to each core class, so that a
 SoM swap within a family keeps the same runtime per core -- ADR
 [0011](0011-intra-family-portability.md)'s promise. That is a good decision. It
-is a decision. `scripts/alp_orchestrate/topology.py:92` states it as
+is a decision. `scripts/alp_orchestrate/topology.py:112` states it as
 impossibility -- "A Cortex-A can't run Zephyr" -- and the customer-facing error
 inherits that voice.
 

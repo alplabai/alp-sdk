@@ -66,8 +66,8 @@ Hardware:
   `examples/aen/aen-eeprom-manifest/README.md`); on V2N / V2N-M1
   the EEPROM sits on its own `e1m_i2c0` bus, separate from
   BRD_I²C (which carries the PMICs/RTC/OPTIGA/GD32 instead) --
-  see `metadata/e1m_modules/E1M-V2N101.yaml:56-59` /
-  `metadata/e1m_modules/E1M-V2M101.yaml:61-64`.
+   see `metadata/e1m_modules/E1M-V2N101.yaml:56-59` /
+   `metadata/e1m_modules/E1M-V2M101.yaml:67-69`.
 - Board in factory-test mode (no application running --
   either powered through the USB-I²C alone, or running a
   factory-test firmware that gives I²C bus access to the

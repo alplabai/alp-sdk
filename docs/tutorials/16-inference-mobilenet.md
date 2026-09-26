@@ -377,8 +377,9 @@ Per-backend latency baselines (native_sim CPU + AEN Ethos-U55):
 | MobileNet v2 96x96 quant | ~120 ms | ~1 ms |
 
 Real numbers per silicon land in
-`tests/bench/baselines/E1M-AEN801-zephyr.yaml` once HiL is
-provisioned.
+`tests/bench/baselines/` (only the `native-sim-cpu.yaml` row
+exists today; the E1M-AEN801-zephyr row arrives once HiL is
+provisioned).
 
 ## 8. Troubleshooting
 

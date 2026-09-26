@@ -5,7 +5,10 @@
 Everything below was confirmed on **real E1M-AEN801 silicon** during the
 2026-06-15 bench session (J-Link PLUS over SWD + the Alif SETOOLS over the
 SE-UART). It is the authoritative companion to [`bring-up-aen.md`](bring-up-aen.md)
-and [`aen-provisioning.md`](aen-provisioning.md).
+and [`aen-provisioning.md`](aen-provisioning.md). Since #2226 the bench farm
+holds E1M-AEN803 boards and every bench helper
+(`scripts/bench/aen/bench-env.sh`) defaults to `alp_e1m_aen803_m55_*`;
+the flows here apply to both SKUs unchanged.
 
 ## 1. What is validated on silicon
 
