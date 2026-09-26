@@ -168,9 +168,29 @@ side has no Wi-Fi role):
   firmware blobs (WLAN `.trxse`, CLM, NVRAM, two regional BT `.hcd`
   patches) from four upstream `murata-wireless` / `Infineon` repos,
   pinned by `SRCREV`.
-* `wireless-regdb`, `iw`, `wpa-supplicant`, `bluez5` -- standard
-  OE-core/meta-networking recipes, pulled in by
+* `meta-alp-sdk/recipes-kernel/murata-2gy-nvram/` -- module-specific
+  NVRAM + CLM for the actual on-module Murata LBEE5HY2FY (Type 2GY),
+  installed under brcmfmac's per-board-compatible firmware names so it
+  is picked ahead of `cyw-fmac-firmware`'s generic Infineon eval-board
+  blob (boardtype `0x0899`, placeholder MAC `00:90:4c`).
+* `wireless-regdb-static`, `iw`, `wpa-supplicant` (+ `-cli` /
+  `-passphrase`), `bluez5` -- standard OE-core recipes, pulled in by
   `alp-image-common.inc` for any V2N/V2M `MACHINE_FEATURES`.
+
+**Bench results (2026-09-26, E1M-V2M103 unit 2026W38-0001, Murata
+LBEE5HY2FY Type 2GY, cyw-fmac fw 28.10.387.10, kernel 6.1.141-cip43):**
+
+* Wi-Fi scan, WPA2/SAE association on 5 GHz channel 60, and DHCP all
+  worked end to end.
+* `sd-uhs-sdr50`/`sd-uhs-sdr104` on `&sdhi2` (above) negotiate SDR50 at
+  100 MHz (up from HS at 50 MHz); SDR104 was not reached in this run.
+* `brcm,ccode-map-trivial` on the `wifi@1` node lets `iw reg set DE`
+  reach the firmware; confirmed with `wireless-regdb-static` installed.
+* NVRAM/CLM come from the real Murata module part (`murata-2gy-nvram`
+  above), not the generic Infineon eval blob.
+* Open HW note: RSSI on this bench unit reads ~-70 dBm where a phone
+  reads ~-35 dBm at the same spot -- points at that unit's antenna/RF
+  path, under investigation, not a software issue.
 
 **Bench TODO:** the E1M-X-EVK carrier dtsi (`e1m-x-evk.dtsi`) no longer
 parks PB0/PB1 as usb30 VBUS/OVC GPIOs -- those SoC pins are the
@@ -187,8 +207,8 @@ controller the same way usb20 is suppressed (see `&ehci0`'s comment in
 chased pull-ups, JTAG_SEL, IOVS pad-voltage mode, and the SDIO/gSPI
 boot strap before converging on the on-module 32.768 kHz LPO (sourced
 from the on-module 5L35023B clock generator) as the real blocker --
-tracked separately in #2293, not part of this change. SDIO enumeration
-has not been re-run against this node shape.
+tracked separately in #2293, not part of this change. The 2026-09-26
+bench results above are the re-run against this node shape.
 BT (raw HCI, manual REG_ON) was bench-confirmed working at 115200 baud
 on `/dev/ttySC4` in 2026-06; the serdev/`shutdown-gpios` path above
 replaces that manual toggle and has not itself been re-run on silicon.
