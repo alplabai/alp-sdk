@@ -746,18 +746,23 @@ static void isp_close(alp_camera_backend_state_t *state)
 	}
 	st->streaming = false;
 
+	/* Stop + drain + release every buffer this handle allocated --
+	 * _release_vbufs stops the stream itself (harmless when already
+	 * stopped), so the pool is whole again for the next open (#246). MUST
+	 * run before the trigger-mode reset just below -- see zephyr_video.c's
+	 * z_close() for why (issue #2287 dev review): a close() without a
+	 * prior stop() still has the real Zephyr stream running at this point,
+	 * and a streaming sensor can reject the reset with -EBUSY. */
+	_release_vbufs(st);
+
 	/* Reset trigger mode to FREE_RUN before the handle goes away -- see
-	 * zephyr_video.c's z_close() for the full rationale (issue #2287 dev
-	 * review). Ignore the result: -ENOTSUP is expected whenever no sensor
-	 * in this chain (isp -> cam -> csi -> sensor) has a trigger control. */
+	 * zephyr_video.c's z_close() for the full rationale. Ignore the
+	 * result: -ENOTSUP is expected whenever no sensor in this chain
+	 * (isp -> cam -> csi -> sensor) has a trigger control. */
 	struct video_control trig_ctrl = { .id  = VIDEO_CID_ALP_TRIGGER_MODE,
 		                               .val = VIDEO_ALP_TRIGGER_MODE_FREE_RUN };
 	(void)video_set_ctrl(st->dev, &trig_ctrl);
 
-	/* Stop + drain + release every buffer this handle allocated --
-	 * _release_vbufs stops the stream itself (harmless when already
-	 * stopped), so the pool is whole again for the next open (#246). */
-	_release_vbufs(st);
 	if (st->rgb565_vbuf != NULL) {
 		(void)video_buffer_release(st->rgb565_vbuf);
 		st->rgb565_vbuf = NULL;

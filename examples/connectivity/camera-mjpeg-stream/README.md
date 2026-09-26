@@ -195,12 +195,15 @@ the camera in `ALP_CAMERA_TRIGGER_EXTERNAL` mode
 starts a `k_timer` in `src/main.c` that pulses a GPIO at
 `CONFIG_APP_CAMERA_TRIGGER_HZ` (default 15, range 5-60) for
 `CONFIG_APP_CAMERA_TRIGGER_PULSE_US` (default 5000 us / 5 ms, range
-10-1,000,000) to actually supply that frame timing. Only IMX296 answers
-this control today (`zephyr/drivers/video/imx296.c`'s
-`VIDEO_CID_ALP_TRIGGER_MODE`) — on any other shield
-`alp_camera_set_trigger_mode(ALP_CAMERA_TRIGGER_EXTERNAL)` returns
-`ALP_ERR_NOSUPPORT`, which this example logs and falls back to plain
-free-run streaming rather than treating as fatal. `CONFIG_APP_CAMERA_
+10-100,000) to actually supply that frame timing. A `BUILD_ASSERT` in
+`src/main.c` additionally enforces that the pulse width is at most half the
+`_HZ` period — the two Kconfigs' individual `range`s can't express that
+cross-symbol pairing, so an incompatible combination fails the build
+instead of overlapping pulses at runtime. Only IMX296 answers this control
+today (`zephyr/drivers/video/imx296.c`'s `VIDEO_CID_ALP_TRIGGER_MODE`) — on
+any other shield `alp_camera_set_trigger_mode(ALP_CAMERA_TRIGGER_EXTERNAL)`
+returns `ALP_ERR_NOSUPPORT`, which this example logs and falls back to
+plain free-run streaming rather than treating as fatal. `CONFIG_APP_CAMERA_
 TRIGGER` itself only builds against a board/shield that actually wired the
 trigger GPIO in devicetree (a Kconfig `depends on`, not just a runtime
 check) — the two AEN board overlays in this directory are the only ones

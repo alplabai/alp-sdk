@@ -293,9 +293,16 @@ typedef enum {
 	 *  is every backend's default at @ref alp_camera_open -- a
 	 *  backend that ever switches a sensor to @ref
 	 *  ALP_CAMERA_TRIGGER_EXTERNAL restores this mode again in its
-	 *  own @ref alp_camera_close, so a later @ref alp_camera_open
-	 *  never inherits a prior session's trigger setting even on the
-	 *  same underlying hardware device. */
+	 *  own @ref alp_camera_close, AFTER it has fully stopped the
+	 *  stream (not merely after a caller's own @ref alp_camera_stop,
+	 *  which is not required before @ref alp_camera_close): a sensor
+	 *  that still believes it is streaming when the reset is
+	 *  attempted can reject a trigger-mode write outright (IMX296's
+	 *  "via sensor standby" restriction being one such case), so the
+	 *  restore is only reliable once streaming has actually torn
+	 *  down first. A later @ref alp_camera_open never inherits a
+	 *  prior session's trigger setting even on the same underlying
+	 *  hardware device. */
 	ALP_CAMERA_TRIGGER_FREE_RUN = 0,
 	/** Frame timing comes from pulses on the sensor module's
 	 *  external trigger input -- the app/carrier board must drive

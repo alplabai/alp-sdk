@@ -456,24 +456,33 @@ static void z_close(alp_camera_backend_state_t *state)
 	if (st == NULL) return;
 	st->streaming = false;
 
-	/* Reset trigger mode to FREE_RUN before the handle goes away (issue
-	 * #2287 dev review): a prior session leaving the sensor latched in
-	 * ALP_CAMERA_TRIGGER_EXTERNAL would otherwise persist across a fresh
-	 * alp_camera_open() on the same (static, never-reallocated) Zephyr
-	 * device -- <alp/camera.h>'s own doc comment on alp_camera_open()
-	 * promises free-run is every backend's default. Ignore the result:
-	 * -ENOTSUP (sensor never had a trigger control to begin with) is
-	 * expected and harmless; any other failure has nothing useful to do
-	 * with it either, this is a best-effort cleanup on a path with no
-	 * return value of its own. */
+	/* Stop + drain + release every buffer this handle allocated --
+	 * _release_vbufs stops the stream itself (harmless when already
+	 * stopped), so the pool is whole again for the next open (#246). MUST
+	 * run before the trigger-mode reset just below: a caller that closes
+	 * without a prior alp_camera_stop() still has the real Zephyr stream
+	 * running at this point (the `st->streaming = false` line above only
+	 * updates this backend's OWN bookkeeping flag -- it does not itself
+	 * stop anything), and IMX296's imx296_set_ctrl() rejects a trigger-mode
+	 * write with -EBUSY while its stream is running ("via sensor standby"
+	 * only). Resetting before this call used to silently no-op on exactly
+	 * that close-without-stop path, leaving the sensor stuck in
+	 * ALP_CAMERA_TRIGGER_EXTERNAL forever (issue #2287 dev review). */
+	_release_vbufs(st);
+
+	/* Reset trigger mode to FREE_RUN before the handle goes away: a prior
+	 * session leaving the sensor latched in ALP_CAMERA_TRIGGER_EXTERNAL
+	 * would otherwise persist across a fresh alp_camera_open() on the same
+	 * (static, never-reallocated) Zephyr device -- <alp/camera.h>'s own
+	 * doc comment on ALP_CAMERA_TRIGGER_FREE_RUN promises free-run is
+	 * every backend's default. Ignore the result: -ENOTSUP (sensor never
+	 * had a trigger control to begin with) is expected and harmless; any
+	 * other failure has nothing useful to do with it either, this is a
+	 * best-effort cleanup on a path with no return value of its own. */
 	struct video_control ctrl = { .id  = VIDEO_CID_ALP_TRIGGER_MODE,
 		                          .val = VIDEO_ALP_TRIGGER_MODE_FREE_RUN };
 	(void)video_set_ctrl(st->dev, &ctrl);
 
-	/* Stop + drain + release every buffer this handle allocated --
-	 * _release_vbufs stops the stream itself (harmless when already
-	 * stopped), so the pool is whole again for the next open (#246). */
-	_release_vbufs(st);
 	_free_state(st);
 	state->be_data = NULL;
 }

@@ -22,9 +22,16 @@ sensor) to reach whichever device actually registers the control, the same
 mechanism `isp_pico.c` itself uses to reach a sensor's other controls) and
 stubbed `ALP_ERR_NOSUPPORT` / `ALP_ERR_NOT_IMPLEMENTED` on the stub/host
 backends. Every backend's `close()` also resets the sensor back to
-`ALP_CAMERA_TRIGGER_FREE_RUN` (best-effort, ignoring `-ENOTSUP`) before
-tearing the handle down, so a later `alp_camera_open()` against the same
-underlying device never inherits a prior session's trigger setting.
+`ALP_CAMERA_TRIGGER_FREE_RUN` (best-effort, ignoring `-ENOTSUP`) AFTER it
+has stopped and drained the stream (not before) — a caller that closes
+without a prior `alp_camera_stop()` still has the real Zephyr stream
+running at the point `close()` is entered, and a streaming sensor can
+reject the reset outright (IMX296's `imx296_set_ctrl()`, "via sensor
+standby" only); resetting before the stream teardown used to silently
+no-op on exactly that path, leaving the sensor stuck in
+`ALP_CAMERA_TRIGGER_EXTERNAL`. With the ordering fixed, a later
+`alp_camera_open()` against the same underlying device never inherits a
+prior session's trigger setting.
 
 The CID itself moves out of `imx296.c`'s driver-private range into a new
 shared header, `zephyr/include/zephyr/drivers/video/alp_video_ctrls.h`:
@@ -49,13 +56,18 @@ GPIO's devicetree property actually existing via `$(dt_nodelabel_has_prop,
 ...)` so enabling it on a board/shield that never wired the pin fails at
 Kconfig time, not deep in a GPIO macro) + `CONFIG_APP_CAMERA_TRIGGER_HZ`
 (default 15, `range 5 60`) + `CONFIG_APP_CAMERA_TRIGGER_PULSE_US` (default
-5000, `range 10 1000000`): calls the new portable API before
+5000, `range 10 100000`): calls the new portable API before
 `alp_camera_start()` and drives the same trigger GPIO
 `aen-camera-firstlight` uses (P5_1 / Arduino D4) from a `k_timer` at the
 configured rate. The pulse itself is two `k_work` handoffs (assert, then a
 `k_work_delayable` scheduled `CONFIG_APP_CAMERA_TRIGGER_PULSE_US` later to
 release) rather than a `k_msleep()` in the workqueue handler, so a long
-pulse width never blocks the shared system workqueue. On a sensor whose
+pulse width never blocks the shared system workqueue. A `BUILD_ASSERT` in
+`main.c` enforces `PULSE_US <= (1000000 / HZ) / 2` — each Kconfig's own
+`range` bounds its individual value, but the pairing across both symbols
+can't be expressed as a single-symbol `range`, so an integrator who raises
+`HZ` without lowering `PULSE_US` (or vice versa) gets a compile-time
+failure instead of overlapping pulses at runtime. On a sensor whose
 trigger pulse WIDTH sets its exposure time (IMX296 fast-trigger mode) this
 Kconfig **is** the exposure control while trigger mode is active — see
 `ALP_CAMERA_TRIGGER_EXTERNAL`'s own `<alp/camera.h>` doc comment. Every

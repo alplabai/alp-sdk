@@ -73,6 +73,7 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/pinctrl.h>
+#include <zephyr/toolchain.h>
 
 /*
  * The GPIO + pinctrl state this drives are declared on `/zephyr,user` in
@@ -194,6 +195,18 @@ static void trigger_disarm(void)
 	gpio_pin_set_dt(&trigger_gpio, 0);
 	trigger_armed = false;
 }
+
+/* Pulse must fully complete (assert + release) well inside one trigger
+ * period -- at most half of it, so there is always slack for the
+ * start-work/stop-work handoff itself to run, not just the nominal
+ * schedule. CONFIG_APP_CAMERA_TRIGGER_HZ/_PULSE_US are two independent
+ * Kconfig symbols an integrator can set to any combination inside their
+ * own ranges, so this is checked at compile time rather than only
+ * documented -- an invalid combination fails the build loudly instead of
+ * silently overlapping pulses or drifting frame timing at runtime. */
+BUILD_ASSERT(CONFIG_APP_CAMERA_TRIGGER_PULSE_US <= (1000000 / CONFIG_APP_CAMERA_TRIGGER_HZ) / 2,
+             "CONFIG_APP_CAMERA_TRIGGER_PULSE_US must be at most half the "
+             "CONFIG_APP_CAMERA_TRIGGER_HZ period");
 #endif /* CONFIG_APP_CAMERA_TRIGGER */
 
 #define HTTP_PORT 8080
