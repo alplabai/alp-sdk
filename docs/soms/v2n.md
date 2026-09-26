@@ -142,6 +142,53 @@ and keeps the distro default hostname `alp-e1m`.
 Full procedure: [`docs/board-id.md`](../board-id.md).
 Example: [`examples/v2n/v2n-board-id-readout/`](../../examples/v2n/v2n-board-id-readout/).
 
+### Ethernet MAC address policy {#ethernet-mac-address-policy}
+
+Neither the RZ/V2N SoC nor this SoM has a MAC-address source: the SoC has no
+MAC OTP, and there is no MAC EEPROM on the module. Left alone, both `end0`
+and `end1` would boot with whatever compiled-in default the enabled BSP
+feature layers happen to bake into U-Boot's environment -- identical on
+every unit, and (depending on which layers are enabled) not even a real
+IEEE-registered address.
+
+U-Boot instead derives `ethaddr`/`eth1addr` at boot from the unit serial
+already in the validated identity-EEPROM manifest (`docs/board-id.md`) --
+an **injective encoding, not a hash**, into IEEE 802c SLAP
+locally-administered space. This makes both MACs **fleet-unique by
+construction** (unique across every unit this allocator has issued a serial
+to) -- **not globally unique** the way a purchased IEEE OUI block would
+make them; that block is not something the project has bought.
+
+* Layout: octet 0 fixed `0xA2` (individual, locally administered), then a
+  40-bit payload: 4-bit Alp Lab prefix `0xC` | 6-bit `year - 2024` | 6-bit
+  ISO week | 20-bit Crockford base32 index (the serial's `NNNN`/`IIII`
+  field, alphabet `0123456789ABCDEFGHJKMNPQRSTVWXYZ` -- no `I`/`L`/`O`/`U`,
+  never aliased) | 2-bit interface (`0` = `end0`, `1` = `end1`) | 2 reserved
+  bits.
+* Canonical implementation: `scripts/alp_eth_mac.py` (host/tooling side) and
+  U-Boot patch `meta-alp-sdk/recipes-bsp/u-boot/u-boot/0010-rzv2n-dev-ALP-E1M-serial-derived-eth-mac.patch`
+  (device side) -- the two must stay bit-for-bit identical; both carry the
+  same golden vector for serial `2026W38-0001`: `end0 = A2:C0:A6:00:00:10`,
+  `end1 = A2:C0:A6:00:00:14`.
+* Override: `setenv ethaddr <mac>; setenv eth1addr <mac>; saveenv` in U-Boot
+  before Linux boots. U-Boot only derives a MAC when the current value is
+  either unset or is one of the known compiled-in defaults a BSP feature
+  layer bakes in (see the patch's commit message) -- any other value,
+  including one you set yourself, is left untouched on every subsequent
+  boot.
+* Ledger: the production ledger (`alp-sdk-internal/ledger/`) records the
+  derived pair per serial under keys `eth0_mac` / `eth1_mac`, computed with
+  the same `scripts/alp_eth_mac.py` so a ledger row and the unit's actual
+  boot-time MAC can be cross-checked without powering the board on.
+
+**Open, flagged for the maintainer:** by this author's reading of IEEE
+802c-2017's SLAP quadrant bits (the two bits above the U/L bit), octet 0's
+low nibble `0x2` (binary `0010`) selects the *Standards Assigned
+Identifier* quadrant, not *Administratively Assigned Identifier* (which
+reads as `0x6`, binary `0110`, by the same table). `0xA2` ships anyway per
+an explicit maintainer instruction re-affirming it after this was raised;
+it is not a silent decision.
+
 ## Bring-up
 
 Step-by-step bench bring-up: [`docs/bring-up-v2n.md`](../bring-up-v2n.md).
