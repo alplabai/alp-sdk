@@ -812,8 +812,9 @@ here):
   slice of the full-resolution (2592x1944) stream: `ROW` field `2` (3
   lines) and then `7` (8 lines), i.e. the same `ROW = lines - 1` encoding
   as run 336's control. Both captured exactly the requested line count
-  (extent 15552 bytes = 3 x 5184 bytes for the 3-line request; ~41472
-  bytes ~= 8 x 5184 bytes for the 8-line request) at 2592 samples/line
+  (extent 15552 bytes = 3 x 5184 bytes for the 3-line request; last
+  non-zero byte at offset 41471 for the 8-line request, i.e. 8 x 5184 =
+  41472 bytes with a zero final byte) at 2592 samples/line
   (5184 bytes/line -- 2 bytes/sample, this CPI's 16-bit-unpacked storage,
   not RAW10-packed), with a stride autocorrelation peak at exactly 5184
   (= 2x2592, i.e. no row-to-row shear), the canary region past the bounded
