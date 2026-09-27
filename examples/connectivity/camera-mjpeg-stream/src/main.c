@@ -87,6 +87,18 @@
 #define FRAME_H   960
 #define FRAME_FPS 15
 /*
+ * IMX335 note: src/backends/camera/alif_isp_pico.c's cfg->fps request only ever reaches the
+ * OV5647 node (`DEVICE_DT_GET(DT_NODELABEL(ov5647))`, hardcoded, not generic to whatever sensor
+ * is active) -- so this FRAME_FPS is NOT forwarded to IMX335 at all; that sensor free-runs at its
+ * driver's own default, 30 fps (upstream imx335.c's DEVICE_DT_INST_DEFINE `.frame_rate = 30`,
+ * HMAX 0x0226 at init) -- which happens to already match hal_alif patch 0014's AE envelope
+ * (calibrated at exactly 30 fps). Bench run 334 (E1M-AEN803 2026W36-0001) confirmed this by
+ * reading HMAX/VMAX back over I2C after stream start: 0x0226/0x001194, the same values the
+ * driver's own 30 fps default programs. Backend fps requests reaching only OV5647 (not IMX296 or
+ * IMX335) is a real gap, tracked as issue #2338 -- FRAME_FPS above is simply unused for those two
+ * sensors today, not a bug this example needs to work around.
+ */
+/*
  * Starting quality for this resolution -- bench run 242 (issue #2286):
  * quality 80 (the 640x480 default below) blew MJPEG_HTTP_MAX_JPEG
  * (mjpeg_http.h, 160 KiB) on every frame once AE converged past the
