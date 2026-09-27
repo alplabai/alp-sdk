@@ -1,5 +1,5 @@
 diff --git a/drivers/video/imx335.c b/drivers/video/imx335.c
-index cead6b7199e..b1c4faff06d 100644
+index cead6b7..340a07c 100644
 --- a/drivers/video/imx335.c
 +++ b/drivers/video/imx335.c
 @@ -29,6 +29,28 @@ LOG_MODULE_REGISTER(video_imx335, CONFIG_VIDEO_LOG_LEVEL);
@@ -115,7 +115,7 @@ index cead6b7199e..b1c4faff06d 100644
  	{IMX335_AREA2_WIDTH_1, 0x0030},
  	{IMX335_AREA3_ST_ADR_1, 0x00A8},
  	{IMX335_AREA3_WIDTH_1, 0x0F60},
-@@ -225,9 +306,23 @@ static const struct video_reg imx335_bin_2x2[] = {
+@@ -225,10 +306,59 @@ static const struct video_reg imx335_bin_2x2[] = {
  
  /* Note that this only contains registers that need to be reset when switching away from
   * 2x2 binning mode
@@ -123,23 +123,60 @@ index cead6b7199e..b1c4faff06d 100644
 + * Alp Lab AB (issue #2327): restores HNUM to imx335_init_params' full-resolution
 + * value (0x0a20 = 2592) now that imx335_bin_2x2 above changes it away from that
 + * default -- upstream never needed this entry because upstream's bin_2x2 never
-+ * touched HNUM either. Y_OUT_SIZE here (0x07ac = 1964) is unchanged from
-+ * upstream and does NOT match IMX335_NATIVE_HEIGHT (1944, imx335_fmts' own caps
-+ * entry): both upstream Zephyr's own imx335_init_params (Y_OUT_SIZE 0x0798 =
-+ * 1944) and the mainline Linux imx335 driver's full-resolution mode use 1944 --
-+ * 0x07ac (1964) here is the same overrun class as the binned-mode bugs this
-+ * patch fixes above, for any caller of the full-resolution mode. Left
-+ * UNFIXED here: full-resolution mode is UNBENCHED (only the 2x2-binned mode
-+ * this shield's example requests has been exercised) -- tracked as issue
-+ * #2334.
++ * touched HNUM either.
++ *
++ * Alp Lab AB (issue #2334): Y_OUT_SIZE corrected from upstream's 0x07ac (1964)
++ * to 0x0798 (1944), matching IMX335_NATIVE_HEIGHT (imx335_fmts' own caps
++ * entry) -- a Y_OUT_SIZE/format-height MISMATCH (0x07ac feeds more lines
++ * than the 1944-line format advertises), the same class of defect as the
++ * binned-mode bug fixed above, for any caller of the full-resolution mode.
++ * Two independent references agree on 1944 for this exact register at full
++ * resolution: this driver's own imx335_init_params (Y_OUT_SIZE 0x0798, a
++ * power-on default this table never previously matched despite both
++ * targeting the same native size) and the mainline Linux imx335 driver's
++ * full-resolution mode table (raspberrypi/linux, branch rpi-6.12.y -- register
++ * value carried as a hardware fact, no GPL code copied). HNUM is left
++ * untouched at 0x0a20 (2592, restored above): unlike bin_2x2 -- which set an
++ * explicit HNUM value that this driver had no formula to derive and got
++ * bench-wrong by 24 columns (issue #2327's HNUM/2+12 model) -- this table's
++ * HNUM was already the exact value imx335_init_params and the Linux
++ * full-resolution table both use for the native width, so there is no
++ * corresponding width defect to fix here. WINMODE (0x00, "all-pixel" scan)
++ * also stays as upstream Zephyr wrote it, rather than adopting the Linux
++ * driver's WINMODE 0x04 ("window-crop") full-resolution path: the two
++ * drivers select the full sensor array through different window-mode
++ * encodings, but this driver's AREA2_WIDTH_1/AREA3_WIDTH_1 pair below (40 /
++ * 3928) already matches the Linux full-resolution table's values for the
++ * same geometry, so there is no register drift to reconcile by switching
++ * window-mode encodings.
++ *
++ * Bench runs 335-337 (E1M-AEN803 2026W36-0001): run 335 read WINMODE/
++ * HTRIMMING_START/HNUM/Y_OUT_SIZE back over I2C in all-pixel mode and
++ * confirmed this patch's writes landed as intended. Run 337 (the CPI's own
++ * CAM_VIDEO_FCFG ROW field bounding the capture to a few lines in hardware,
++ * so a full ~10 MB frame was never written) confirmed the WIDTH is exactly
++ * 2592 samples/line at full resolution, matching HNUM. The disputed LINE
++ * COUNT (1944 vs. upstream's 1964) was NOT measured: run 335 found the
++ * CPI's HSYNC/VSYNC "Detected" interrupts require the write-DMA armed, so
++ * counting them without writing frame data is not possible on this
++ * hardware, and a full-size frame does not fit the 4 MiB SRAM0 capture
++ * buffer. This does not undermine the fix -- CAM_VIDEO_FCFG's ROW field
++ * bounds the CPI's write to a fixed row count in hardware regardless of the
++ * sensor's own Y_OUT_SIZE (run 336), so this fix is a correction against
++ * the driver's own init table and the mainline Linux driver's
++ * full-resolution table, not a bench measurement of the disputed line
++ * count. See docs/camera-shields.md and changelog.d/2334.md for the full
++ * writeup.
   */
  static const struct video_reg imx335_bin_none[] = {
  	{IMX335_WINMODE, 0x00},
+-	{IMX335_Y_OUT_SIZE, 0x07AC},
 +	{IMX335_HNUM, 0x0A20},
- 	{IMX335_Y_OUT_SIZE, 0x07AC},
++	{IMX335_Y_OUT_SIZE, 0x0798},
  	{IMX335_AREA2_WIDTH_1, 0x0028},
  	{IMX335_AREA3_ST_ADR_1, 0x00B0},
-@@ -341,6 +436,11 @@ static const struct video_format_cap imx335_fmts[] = {
+ 	{IMX335_AREA3_WIDTH_1, 0x0F58},
+@@ -341,6 +471,11 @@ static const struct video_format_cap imx335_fmts[] = {
  	{0}
  };
  
@@ -151,7 +188,7 @@ index cead6b7199e..b1c4faff06d 100644
  static const uint32_t imx335_framerates[] = {
  	[IMX335_25_FPS] = 25,
  	[IMX335_30_FPS] = 30,
-@@ -667,13 +767,31 @@ static int imx335_init_controls(const struct device *dev)
+@@ -667,13 +802,31 @@ static int imx335_init_controls(const struct device *dev)
  		return ret;
  	}
  
@@ -184,7 +221,7 @@ index cead6b7199e..b1c4faff06d 100644
  }
  
  static int imx335_init(const struct device *dev)
-@@ -745,6 +863,20 @@ static int imx335_init(const struct device *dev)
+@@ -745,6 +898,20 @@ static int imx335_init(const struct device *dev)
  		return ret;
  	}
  

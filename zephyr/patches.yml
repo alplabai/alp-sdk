@@ -943,7 +943,7 @@ patches:
       format is untouched, so traceconfig.py and tests/kconfig/tracing are
       unaffected. Upstream to Zephyr then drop.
   - path: zephyr/0004-imx335-2lane-link-freq-and-binning.patch
-    sha256sum: 47d7d5ac6dd2293b3ffb46562f031a543867a618b0da7dbe596c83ca609a400d
+    sha256sum: ce3725b86521ddcd7f442f79e28cc36f294c65b0df642d54cfcf6a68198e09e9
     module: zephyr
     author: Alp Lab AB
     email: contact@alplab.ai
@@ -1003,12 +1003,39 @@ patches:
       cleared to 0, the mainline Linux imx335 driver's own binned-mode value
       (upstream Zephyr never touches it). imx335_bin_none gets a matching
       HNUM restore (0x0a20) now that bin_2x2 changes it away from that
-      default -- NOT included: correcting bin_none's own Y_OUT_SIZE (0x07ac
-      = 1964) -- both upstream Zephyr's own imx335_init_params (Y_OUT_SIZE
-      0x0798 = 1944) and the mainline Linux driver's full-resolution mode use
-      1944, so 0x07ac is the same overrun class as fix 3 above for any
-      full-resolution caller. Full-resolution mode is UNBENCHED (only the
-      2x2-binned mode has been exercised) -- tracked as issue #2334.
+      default.
+
+      4. (Issue #2334) imx335_bin_none's own Y_OUT_SIZE (0x07ac = 1964)
+      MISMATCHED the 2592x1944 format's advertised 1944-line height -- the
+      same class of defect as fix 3 above but for the full-resolution
+      (all-pixel) path: both this driver's own imx335_init_params
+      (Y_OUT_SIZE 0x0798 = 1944) and the mainline Linux imx335 driver's
+      full-resolution mode table agree on 1944. Corrected to 0x0798. No
+      corresponding HNUM/WINMODE change was needed: unlike bin_2x2 (which
+      set an explicit, bench-derived HNUM the driver had no formula for),
+      bin_none's restored HNUM (0x0a20 = 2592) already matches both
+      imx335_init_params and the Linux full-resolution table's HNUM, and its
+      AREA2_WIDTH_1/AREA3_WIDTH_1 pair (40 / 3928) already matches the Linux
+      full-resolution table too -- there is no known width defect to fix at
+      full resolution, only the line-count/format-height mismatch.
+
+      Bench runs 335-337 (E1M-AEN803 2026W36-0001): run 335 read WINMODE/
+      HTRIMMING_START/HNUM/Y_OUT_SIZE back over I2C in all-pixel mode and
+      confirmed this patch's writes landed as intended. Run 337 (the CPI's
+      own CAM_VIDEO_FCFG ROW field bounding the capture to a few lines in
+      hardware, so a full ~10 MB frame was never written) confirmed the
+      WIDTH is exactly 2592 samples/line at full resolution, matching HNUM.
+      The disputed LINE COUNT (1944 vs. upstream's 1964) was NOT measured:
+      run 335 found the CPI's HSYNC/VSYNC "Detected" interrupts require the
+      write-DMA armed, so counting them without writing frame data is not
+      possible on this hardware, and a full-size frame does not fit the
+      4 MiB SRAM0 capture buffer. This does not undermine the fix --
+      CAM_VIDEO_FCFG's ROW field bounds the CPI's write to a fixed row
+      count in hardware regardless of the sensor's own Y_OUT_SIZE (run
+      336), so this fix is a correction against the driver's own init
+      table and the mainline Linux driver's full-resolution table, not a
+      bench measurement of the disputed line count. See
+      docs/camera-shields.md and changelog.d/2334.md for the full writeup.
 
       Bench-verified end to end (runs 329/330, Camera-mode IPI at an
       explicit 200 MHz pixclk -- see the innomaker_cam_imx335 shield and the

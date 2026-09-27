@@ -737,19 +737,105 @@ bench-confirmed on E1M-AEN803 2026W36-0001 (bench runs 316-331):
    corrected to the exact 972 lines (`0x03cc`, bench run 321). `OPB_SIZE_V`
    (`0x304c`) cleared to 0, the mainline Linux imx335 driver's own
    binned-mode value. `imx335_bin_none` gets a matching `HNUM` restore
-   (`0x0a20`). NOT included: correcting `imx335_bin_none`'s own `Y_OUT_SIZE`
-   (`0x07ac` = 1964) -- both upstream Zephyr's own `imx335_init_params`
-   (`Y_OUT_SIZE` `0x0798` = 1944) and the mainline Linux driver's
-   full-resolution mode use 1944, so `0x07ac` is the same overrun class as
-   bug 3 above for any full-resolution caller. Full-resolution mode is
-   UNBENCHED (only the 2x2-binned mode is exercised) -- tracked as issue
-   #2334.
+   (`0x0a20`).
+
+4. **Full-resolution mode's own `Y_OUT_SIZE`/format-height mismatch (issue
+   #2334).** `imx335_bin_none`'s `Y_OUT_SIZE` was upstream's `0x07ac`
+   (1964) -- mismatched against the 2592x1944 format's advertised 1944-line
+   height, the same class of defect as bug 3, but for the all-pixel path.
+   Both upstream Zephyr's own `imx335_init_params` (`Y_OUT_SIZE` `0x0798` =
+   1944) and the mainline Linux imx335 driver's full-resolution mode table
+   (`raspberrypi/linux`, branch `rpi-6.12.y` -- register value carried as a
+   hardware fact, no GPL code copied) agree on 1944; corrected to `0x0798`.
+   No matching `HNUM`/`WINMODE` change was needed: unlike bug 3's
+   `imx335_bin_2x2` (an explicit, bench-derived `HNUM` this driver had no
+   formula for), `imx335_bin_none`'s restored `HNUM` (`0x0a20` = 2592)
+   already matches both `imx335_init_params` and the Linux full-resolution
+   table's `HNUM`, and its `AREA2_WIDTH_1`/`AREA3_WIDTH_1` pair (40 / 3928)
+   already matches the Linux full-resolution table too. **Bench run 335**
+   (E1M-AEN803 2026W36-0001) read the sensor's own registers back in
+   all-pixel mode and confirmed the patch's writes landed exactly as
+   intended: `WINMODE 0x00`, `HTRIMMING_START 0x003c`, `HNUM 0x0a20`,
+   `Y_OUT_SIZE 0x0798`. **Bench run 337** (full-resolution 2592x1944,
+   capture bounded in hardware by `CAM_VIDEO_FCFG`'s `ROW` field -- see
+   below -- to 3 and then 8 lines) measured 2592 samples/line (5184 bytes
+   -- 2 bytes/sample, this CPI's 16-bit-unpacked storage format, not
+   RAW10-packed) with a stride autocorrelation peak at exactly 5184 (=
+   2x2592, i.e. no row-to-row shear), 4/4 identical across repeated runs,
+   canary bytes past the bounded region intact both times: **width is
+   confirmed exactly 2592 at full resolution**, matching `HNUM`. Caveat:
+   the DW CSI-2 host's Camera-mode `hact` is itself set to 2592 for this
+   capture, so a sensor line longer than 2592 samples truncated to `hact`
+   is not excluded by this measurement alone. The disputed LINE COUNT
+   (1944 vs. 1964) was **not measured** -- see "Full-resolution mode: bench
+   results (issue #2334)" below for why and for the argument that still
+   justifies this fix without that direct measurement.
 
 If bootstrapping against a Zephyr checkout that already has alp-sdk's
 0001-0003 patches applied, re-running the whole patch list fails
 re-applying 0001 (`west patch` is not idempotent against an already-patched
 tree) -- apply 0004 by hand (`git apply` from the Zephyr repo root) or
 start from a clean checkout.
+
+### Full-resolution mode: bench results (issue #2334)
+
+A 2592x1944 frame at this CPI's 16-bit-unpacked storage format is
+2592 x 1944 x 2 = 10,077,696 bytes (~9.6 MiB / ~10.1 MB) -- it does not fit
+the 4 MiB SRAM0 budget `aen-camera-firstlight` and every other
+IMX335-using example capture into, so a full, unbounded capture was never
+attempted. Three diagnostic runs (335-337, E1M-AEN803 2026W36-0001) were
+made instead, scratch-only (not product code, not built by any CI job
+here):
+
+- **Run 335**: the CPI's `CAM_INTR_VSYNC`/`CAM_INTR_HSYNC` ("VSYNC/HSYNC
+  Detected") interrupts do **not** fire while `CAM_CTRL_START` (the
+  write-DMA arm bit) is left clear -- sync detection requires the
+  write-DMA armed on this hardware, so counting HSYNC/VSYNC edges without
+  ever engaging the DMA is not possible here. The same run read the
+  sensor's registers back in all-pixel mode and confirmed the patch's
+  writes (see item 4 above): `WINMODE 0x00`, `HTRIMMING_START 0x003c`,
+  `HNUM 0x0a20`, `Y_OUT_SIZE 0x0798`.
+- **Run 336** (2x2-binned mode) found a real, hardware-enforced write
+  bound: the CPI's `CAM_VIDEO_FCFG` register's `ROW` field bounds the
+  capture to exactly `ROW + 1` lines in hardware -- `zephyr/drivers/video/
+  video_alif.c` itself writes `ROW = height - 1` when setting a format, and
+  the control capture in this run wrote `FCFG = 0x03cb0510` (`ROW` field
+  `0x3cb` = 971, i.e. 972 lines) and captured exactly 972 lines. A
+  diagnostic build that separately calls `CAM_CTRL_START` (the write-DMA
+  arm) with `CAM_INTR_HSYNC` enabled, planning to cut the capture in an ISR
+  after a couple of HSYNC edges via `hw_cam_cpi_only_stop()` (`CAM_CTRL =
+  0` plus a soft reset), found that software stop does **not** actually
+  stop the DMA -- filed as issue #2342. `CAM_VIDEO_FCFG`'s `ROW` field, not
+  an interrupt-timed software stop, is the bounding mechanism a bounded
+  capture on this CPI must use.
+- **Run 337** used `CAM_VIDEO_FCFG`'s `ROW` bound to capture a small, safe
+  slice of the full-resolution (2592x1944) stream: `ROW` field `2` (3
+  lines) and then `7` (8 lines), i.e. the same `ROW = lines - 1` encoding
+  as run 336's control. Both captured exactly the requested line count
+  (extent 15552 bytes = 3 x 5184 bytes for the 3-line request; last
+  non-zero byte at offset 41471 for the 8-line request, i.e. 8 x 5184 =
+  41472 bytes with a zero final byte) at 2592 samples/line
+  (5184 bytes/line -- 2 bytes/sample, this CPI's 16-bit-unpacked storage,
+  not RAW10-packed), with a stride autocorrelation peak at exactly 5184
+  (= 2x2592, i.e. no row-to-row shear), the canary region past the bounded
+  capture intact both times, and identical results 4/4. This confirms the
+  WIDTH is exactly 2592 at full resolution, matching `HNUM`. Caveat: the
+  DW CSI-2 host's Camera-mode `hact` was itself set to 2592 for this
+  capture, so a sensor line longer than 2592 samples truncated to `hact`
+  is a possibility this measurement alone does not exclude.
+- **Lines/frame (1944 vs. 1964) was NOT measured.** HSYNC/VSYNC counting
+  needs the DMA armed (run 335), and a full ~10.1 MB frame can't be
+  written to prove the exact line count directly. This fix is still
+  justified without that direct measurement: `CAM_VIDEO_FCFG`'s `ROW`
+  field bounds the CPI's write to a fixed row count in hardware regardless
+  of what the sensor's own `Y_OUT_SIZE` register says (run 336's finding),
+  so upstream's buggy 1964 value could never have overrun a properly
+  `FCFG`-bounded capture buffer either way -- the memory-safety concern
+  that motivated this diagnostic is independently addressed by `FCFG`
+  bounding. The `Y_OUT_SIZE` register fix itself remains justified by the
+  driver's own init table (`imx335_init_params`) and the mainline Linux
+  imx335 driver's full-resolution mode table, not by a bench measurement
+  of the disputed quantity.
 
 **Why this shield uses Camera mode, not Controller mode.** Controller mode
 requires stating this sensor's own line/frame length as fixed IPI-pixclk-cycle
