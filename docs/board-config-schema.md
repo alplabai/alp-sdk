@@ -84,7 +84,7 @@ A `board.yaml` may **disable** a core (`os: off`) or drop it to **no-OS**
 (`os: baremetal`).  Selecting the *other* class's OS — `zephyr` on a
 Cortex-A, `yocto` on a Cortex-M — is **refused**, at
 `scripts/alp_orchestrate/validate.py:296`
-(`_enforce_os_matches_core_class`), with this exact message:
+(`_enforce_os_matches_core_class`, raising at `:303-307`), with this exact message:
 
 ```text
 core '<id>' (<type>): its runtime is determined by the core class

@@ -67,10 +67,11 @@ int main(void) {
 ## Expected output on E1M-AEN801 + E1M-EVK
 
 `BOARD_I2C_SENSORS` is one shared bus, so the scan ACKs more than just
-the on-module chip -- the E1M-EVK carrier populates thirteen more
+the on-module chip -- the E1M-EVK carrier populates twelve more
 devices on the same `ALP_E1M_I2C0` (`metadata/boards/e1m-evk.yaml`
-`i2c_devices:`; the thirteenth ACK, `0x48`, is the TAS2563 pair's
-GLOBAL/broadcast address, not an extra physical part).  Expect the full set below, not just the on-module
+`i2c_devices:`), giving thirteen ACKs: the extra one, `0x48`, is the
+TAS2563 pair's GLOBAL/broadcast address, not an extra physical part.
+Expect the full set below, not just the on-module
 one, or the troubleshooting step at the bottom of this page will send
 you chasing a part that was never on this bus to begin with.
 
@@ -84,7 +85,7 @@ On-module (E1M-AEN801 `i2c_devices:` `e1m_i2c0:` block):
 ```
 
 The SoM's three other I²C parts -- OPTIGA Trust M (`0x30`), TMP112
-(`0x48`) and RV-3028-C7 (`0x52`) -- do NOT ACK here.  They sit on a
+(`0x40`) and RV-3028-C7 (`0x52`) -- do NOT ACK here.  They sit on a
 separate bus, `brd_i2c` (SoC I2C0, not this bus), not exercised by this
 tutorial's scan (`metadata/e1m_modules/E1M-AEN801.yaml` `i2c_devices:`
 `brd_i2c:`; `docs/bring-up-aen.md` §5.1, which also carries the OPTIGA
@@ -104,15 +105,15 @@ E1M-EVK board-populated (`metadata/boards/e1m-evk.yaml` `i2c_devices:`):
 0x42 ACK   -- INA236 U33, +VIO rail current monitor
 0x47 ACK   -- BMP581 U14 barometer
 0x48 ACK   -- TAS2563 U27/U28 GLOBAL/broadcast address (both amps
-               answer it by design; MFG_ID=0x1000, not an INA236 --
-               alp-sdk#1976).  On PRE-RESPIN carriers this address was
-               ALSO held by U32 INA236B (+V_CAM0), re-strapped to 0x4B
-               from the next batch.
+              answer it by design; MFG_ID=0x1000, not an INA236 --
+              alp-sdk#1976).  On PRE-RESPIN carriers this address was
+              ALSO held by U32 INA236B (+V_CAM0), re-strapped to 0x4B
+              from the next batch.
 0x49 ACK   -- INA236 U34, +V_CAM1 rail current monitor
 0x4A ACK   -- INA236 U30, +5V rail current monitor
 0x4B ACK   -- INA236 U32, +V_CAM0 rail current monitor (post-respin
-               strap; PRE-RESPIN boards had U32 at 0x48, colliding
-               with the TAS2563 broadcast address -- unreadable there)
+              strap; PRE-RESPIN boards had U32 at 0x48, colliding
+              with the TAS2563 broadcast address -- unreadable there)
 0x4D ACK   -- TAS2563 U27 smart amp (low-address unit)
 0x4E ACK   -- TAS2563 U28 smart amp (high-address unit)
 0x68 ACK   -- BMI323 U13 IMU (post-respin boards)
@@ -164,40 +165,43 @@ Expected:
 
 ```
 0x40 ACK   -- INA236A U21, +3V3 rail current monitor
-               (include/alp/boards/alp_e1m_x_evk_routes.h:128)
+              (include/alp/boards/alp_e1m_x_evk_routes.h:128)
 0x41 ACK   -- INA236A U31, +1V8 rail current monitor
-               (include/alp/boards/alp_e1m_x_evk_routes.h:129)
+              (include/alp/boards/alp_e1m_x_evk_routes.h:129)
 0x47 ACK   -- BMP581 U14 barometer
-               (include/alp/boards/alp_e1m_x_evk_routes.h:125)
-0x48 ACK   -- INA236B U32, +VCAM2 rail current monitor
-               (include/alp/boards/alp_e1m_x_evk_routes.h:130)
+              (include/alp/boards/alp_e1m_x_evk_routes.h:125)
+0x48 ACK   -- INA236B U32, +VCAM2 rail current monitor.  Caveat: the
+              TAS2563 pair's GLOBAL/broadcast address is ALSO 0x48, and
+              both amps answer it by design on this same bus as U32 --
+              an unfixed collision here (see docs/boards/e1m-x-evk.md).
+              (include/alp/boards/alp_e1m_x_evk_routes.h:130)
 0x49 ACK   -- INA236B U34, +VCAM3 rail current monitor
-               (include/alp/boards/alp_e1m_x_evk_routes.h:131)
+              (include/alp/boards/alp_e1m_x_evk_routes.h:131)
 0x4A ACK   -- INA236B U30, +5V rail current monitor
-               (include/alp/boards/alp_e1m_x_evk_routes.h:132)
+              (include/alp/boards/alp_e1m_x_evk_routes.h:132)
 0x4D ACK   -- TAS2563 U27 smart amp, left channel
-               (metadata/boards/e1m-x-evk.yaml:322)
+              (metadata/boards/e1m-x-evk.yaml:322)
 0x4E ACK   -- TAS2563 U28 smart amp, right channel
-               (metadata/boards/e1m-x-evk.yaml:323)
+              (metadata/boards/e1m-x-evk.yaml:323)
 0x50 ACK   -- 24C128 EEPROM, the SoM's `e1m_i2c0:` block
-               (metadata/e1m_modules/E1M-V2N101.yaml:58-61)
+              (metadata/e1m_modules/E1M-V2N101.yaml:58-61)
 0x58 ACK   -- SAME 24C128 EEPROM, its second device-select header
-               (`1010` -> 0x50, `1011` -> 0x58, same A2/A1/A0 straps) --
-               not a second chip, nothing to source (alp-sdk#1976)
-               (metadata/e1m_modules/E1M-V2N101.yaml:71)
+              (`1010` -> 0x50, `1011` -> 0x58, same A2/A1/A0 straps) --
+              not a second chip, nothing to source (alp-sdk#1976)
+              (metadata/e1m_modules/E1M-V2N101.yaml:71)
 0x68 ACK   -- BMI323 U13 IMU (alternate)
-               (include/alp/boards/alp_e1m_x_evk_routes.h:123)
+              (include/alp/boards/alp_e1m_x_evk_routes.h:123)
 0x69 ACK   -- ICM-42670 U12 IMU (canonical primary)
-               (include/alp/boards/alp_e1m_x_evk_routes.h:124)
+              (include/alp/boards/alp_e1m_x_evk_routes.h:124)
 0x72 ACK   -- TCAL9538 I/O expander (one of U35/U37 -- the header
-               doesn't say which; the OTHER one has no committed
-               address, see below)
-               (include/alp/boards/alp_e1m_x_evk_routes.h:126)
+              doesn't say which; the OTHER one has no committed
+              address, see below)
+              (include/alp/boards/alp_e1m_x_evk_routes.h:126)
 ```
 
 Ten of the thirteen addresses above come from the `XEVK_I2C_ADDR_*`
 macros (`include/alp/boards/alp_e1m_x_evk_routes.h:123-132`), BENCH-
-CONFIRMED on E1M-X-V2N silicon (`include/alp/boards/alp_e1m_x_evk.h:25-27`);
+CONFIRMED on E1M-X-V2N silicon (`include/alp/boards/alp_e1m_x_evk.h:27-29`);
 the TAS2563 pair (0x4D/0x4E) instead comes from the board's `audio:`
 metadata (`metadata/boards/e1m-x-evk.yaml:322-323`).  The X-EVK's
 second TCAL9538 (`metadata/boards/e1m-x-evk.yaml:54`, designators
