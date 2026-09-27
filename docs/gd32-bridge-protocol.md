@@ -1097,7 +1097,8 @@ version) are generated at firmware build time and stored in
 `gd32-bridge-firmware:tests/protocol_vectors.txt` by
 `gd32-bridge-firmware:tests/gen_protocol_vectors.py`.  No test
 currently consumes this file: `tests/zephyr/chips/src/test_gd32_bridge.c`
-is a NULL-arg / NOT_READY smoke test with zero references to
+covers argument checks and the `gd32g553_init()` BUSY/IO retry ladder
+against an `i2c-emul` fake bridge, but has zero references to
 `protocol_vectors`, and `gd32-bridge-firmware:tests/` holds only the
 generator script and the generated `.txt`.  A host<->firmware
 divergence test built on these vectors remains an open gap, not

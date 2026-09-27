@@ -1227,7 +1227,10 @@ alp_status_t gd32g553_ota_image_crc32(const uint8_t *image, size_t len, uint32_t
  * produces (retrying ALP_ERR_IO/ALP_ERR_TIMEOUT only once it has
  * itself observed at least one ALP_ERR_BUSY in the same init() call,
  * so an absent bridge still fails fast), so a plain re-init is the
- * whole contract.
+ * whole contract.  Precondition: the delay must outlast the COMMIT
+ * reset itself.  A re-init whose very first PING lands inside that
+ * reset, before any ALP_ERR_BUSY is seen, returns ALP_ERR_IO /
+ * ALP_ERR_TIMEOUT at once; retry it after a further delay.
  */
 alp_status_t gd32g553_ota_commit(gd32g553_t *ctx);
 
