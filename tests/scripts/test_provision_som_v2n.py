@@ -120,9 +120,25 @@ def test_status_reports_steps_and_ship_blockers(tmp_path):
     (d / f"{SERIAL}.unit.yaml").write_text("act88760_gpio4_defect: yes\ndisposition: bench-only\n",
                                             encoding="utf-8")
     p = _run("status", "--sku", SKU, "--serial", SERIAL, "--ledger-root", ledger)
-    assert p.returncode == 1
+    assert p.returncode == 0          # a blocked ship check is normal after provisioning
     assert "preflight" in p.stdout and "done" in p.stdout and "override tier_triangle" in p.stdout
     assert "gpio4_defect" in p.stdout and "missing eeprom_unique_id" in p.stdout
+    p = _run("status", "--sku", SKU, "--serial", SERIAL, "--ledger-root", ledger,
+             "--require-shippable")
+    assert p.returncode == 1
+
+
+def test_status_flags_a_state_run_would_supersede(tmp_path):
+    ledger, _ = _inputs(tmp_path)
+    b = _bundle(tmp_path)
+    d = ledger / SKU
+    d.mkdir()
+    (d / f"{SERIAL}.state.json").write_text(json.dumps(
+        {"schema": 1, "bundle_sha256": "0" * 64, "tool_rev": "not-this-rev",
+         "steps": {"write_xspi": {"status": "done", "at": "2026-09-24T00:00:00Z"}}}),
+        encoding="utf-8")
+    p = _run("status", "--sku", SKU, "--serial", SERIAL, "--ledger-root", ledger, "--bundle", b)
+    assert "STALE" in p.stdout and "tool_rev" in p.stdout and "bundle_sha256" in p.stdout, p.stdout
 
 
 def test_legacy_flat_flow_skips_bl2_mmc(tmp_path):

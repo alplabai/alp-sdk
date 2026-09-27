@@ -414,6 +414,10 @@ def _v2n_parser() -> argparse.ArgumentParser:
                    help="ONLY lock the secure page (separate invocation; preconditions + serial retype)")
     st = sub.add_parser("status", parents=[common])
     st.add_argument("--catalogue", type=Path)
+    st.add_argument("--bundle", dest="status_bundle", type=Path,
+                    help="bundle dir to compare the recorded state against")
+    st.add_argument("--require-shippable", action="store_true",
+                    help="exit 1 unless the unit is shippable and its state is current")
     return ap
 
 
@@ -453,6 +457,18 @@ def _status(a) -> int:
     d = a.ledger_root / a.sku
     state = steps.load_state(d / f"{a.serial}.state.json")
     print(f"=== {a.sku} {a.serial} ===")
+    # `run` supersedes a state recorded against another bundle or tool
+    # revision and redoes every step (steps.init_state); say so here rather
+    # than reporting those steps as done.
+    stale = []
+    if state.get("steps") and state.get("tool_rev") != steps.tool_rev():
+        stale.append(f"tool_rev {state.get('tool_rev')} != current {steps.tool_rev()}")
+    if a.status_bundle is not None and state.get("steps"):
+        want = _sha256(a.status_bundle / "bundle.json")
+        if state.get("bundle_sha256") != want:
+            stale.append(f"bundle_sha256 {str(state.get('bundle_sha256'))[:12]} != {want[:12]}")
+    if stale:
+        print("  STALE (run would redo every step): " + "; ".join(stale))
     for name in steps.STEP_NAMES:
         s = state.get("steps", {}).get(name)
         print(f"  {name:22} {s['status'] + ' ' + s['at'] if s else '-'}")
@@ -463,7 +479,11 @@ def _status(a) -> int:
     print("ship check: " + ("SHIPPABLE" if not blockers else "blocked"))
     for b in blockers:
         print(f"  - {b}")
-    return 0 if not blockers else 1
+    # A blocked ship check is the normal state right after provisioning (the
+    # disposition is set later), so it is not an error unless asked for.
+    if a.require_shippable and (blockers or stale):
+        return 1
+    return 0
 
 
 def v2n_main(argv: list[str]) -> int:
