@@ -29,8 +29,9 @@ properties:
     type: string
     required: false
     default: "snapshot"
-    description: Continuous or single frame (snapshot) capture.
-    enum: ["continuous", "snapshot"]
+    description: Single frame (snapshot) capture. Continuous capture has no
+      bench-proven safe mid-frame stop on this CPI and is not supported.
+    enum: ["snapshot"]
 
   fifo-rd-wmark:
     type: int
