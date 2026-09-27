@@ -76,9 +76,11 @@
 /* CPI constants. */
 #define CPI_MIN_VBUF 1
 
+/* Continuous capture is rejected at DT build time (alif,cam.yaml's
+ * capture-mode enum has only "snapshot") -- see hw_cam_start_video_capture().
+ */
 enum cpi_capture_mode {
-	CPI_CAPTURE_MODE_CONTINUOUS = 0,
-	CPI_CAPTURE_MODE_SNAPSHOT,
+	CPI_CAPTURE_MODE_SNAPSHOT = 0,
 };
 
 enum cpi_input_fifo_clk_sel {
