@@ -43,6 +43,10 @@ the private repository.
 | `run` | yes | only with `--execute`; the lock only with `--lock` |
 | `status` | no | nothing |
 
+`status` exits 0 after printing; `--require-shippable` makes a blocked ship
+check, or a state `run` would supersede (another tool revision or, with
+`--bundle`, another bundle), exit 1. It prints `STALE` for the latter.
+
 `run` without `--execute` runs every read-only probe and prints, per step,
 the exact commands it would issue. `--lock` is never implied by `--execute`.
 
@@ -100,7 +104,7 @@ state recorded against a **different bundle or tool revision** is moved to
 | `dsw1_scif` | operator: boot switch to SCIF download |
 | `bootstrap` | Flash Writer: `EM_W` boot1 sector `0x1` ← `bl2_mmc`, sector `0x300` ← `fip`; `EM_SECSD` EXT_CSD `[177]=0x02` (BOOT_BUS_CONDITIONS), `[179]=0x08` (PARTITION_CONFIG); `EM_DCID` |
 | `dsw1_emmc_insert_sd` | operator: boot switch to eMMC, insert the release microSD; U-Boot must autoboot |
-| `boot_sd_linux` | U-Boot boots the wic from microSD; log in, find the host, confirm the root is on the SD. Fallback `--transfer xmodem`: `loadx` + `gzwrite` the wic from the U-Boot prompt |
+| `boot_sd_linux` | U-Boot boots the wic from microSD; log in, find the host, confirm the root is on the SD, then the live SoM check: every non-optional on-module I2C device the SoM preset declares must ACK (the GD32 excepted) before any destructive step runs. Fallback `--transfer xmodem`: `loadx` + `gzwrite` the wic from the U-Boot prompt |
 | `write_xspi` | from Linux: `bl2` → `mtd0`, `fip` → `mtd1`; md5 readback. A FIP whose erase would reach the CM33 image at `mtd1` + `0x1A0000` is refused |
 | `write_emmc_boot` | release `bl2_mmc` + `fip` into `mmcblk<N>boot1`, md5 readback, EXT_CSD via mmc-utils |
 | `write_rootfs` | stream the wic into the eMMC user area (refused while Linux runs from the eMMC), `fsck -n`, `/boot/<dtb>` present |

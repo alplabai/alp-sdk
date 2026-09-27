@@ -31,3 +31,12 @@ Page. The flow and its hazards are in `docs/provisioning-v2n.md`.
   confirmed write. The flat flow reports a `bl2_mmc` component as skipped.
 
 None of the hardware paths have run on a board yet.
+
+Review follow-ups: `boot_sd_linux` checks the live SoM (every
+non-optional on-module I2C device the preset declares must ACK) before the
+first xSPI write, and a resume refuses a Linux booted from the eMMC;
+`--pmic-expect` is checked in preflight under `--execute`; the boot1 write is
+bounded by the partition size; `status` flags a state `run` would supersede
+and returns 1 only with `--require-shippable`; the FIP's dtb is read from its
+`bootcmd`; a `.py` bench probe wrapper runs under the current interpreter;
+and `ScpiPower.is_on()` reads the Siglent SPD3303X `SYST:STAT?` bits.

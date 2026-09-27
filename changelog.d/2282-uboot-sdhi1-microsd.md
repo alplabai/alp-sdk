@@ -14,8 +14,9 @@ has five parts:
 
 - **Device numbering.** SDHI1 becomes `mmc1` and SDHI2 moves to `mmc2`. The
   SDHI0 eMMC stays `mmc0`, so the environment device does not change.
-- **Card power and IO voltage.** Under `CONFIG_ALP_E1M_SD1_MICROSD` (on by
-  default in the patched `rzv2n-dev_defconfig`), `board_init()` drives PA2
+- **Card power and IO voltage.** Under `CONFIG_ALP_E1M_SD1_MICROSD` (off by
+  default; `sd1-microsd.cfg` enables it for the E1M-V2N/V2M MACHINEs only,
+  where PA2/PA3 are the SoM's own `uSD1_V_SEL`/`SD1_SD1PWEN` nets), `board_init()` drives PA2
   (`uSD1_V_SEL`) low for 3.3 V. It turns PA3 (`SD1_SD1PWEN`) off for 20 ms and
   then on, so a card that Linux left in 1.8 V UHS signalling starts again at
   3.3 V after a warm reboot.
