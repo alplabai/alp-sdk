@@ -205,6 +205,16 @@ week and an index would otherwise collide on the same MAC.
   instead of the derived MAC. See `docs/provisioning.md`'s FIP-flash
   step for the saved-env reset a FIP upgrade on a previously-provisioned
   unit must carry.
+* **Unprovisioned EEPROM (no serial, or one that does not parse):**
+  U-Boot prints `ALP: WARNING: ... SoM EEPROM not provisioned` and
+  derives the MACs from the on-module eMMC's CID instead: CRC-32 of the
+  128-bit CID in the same layout under prefix nibble `0xD` (serial-derived
+  MACs use `0xC`, so the two families never overlap). That keeps
+  unprovisioned units off the shared vendor default, but it is a hash, not
+  an identity -- two such units collide with odds of about n^2 / 2^33, and
+  the MAC changes if the eMMC is replaced. Provision the EEPROM before a
+  unit ships. Only a unit with no readable eMMC either keeps the vendor
+  default, with a second WARNING line.
 * Recompute a unit's MAC any time from its serial with
   `scripts/alp_eth_mac.py 2026W38-0001` (no ledger field carries it --
   it is cheap to recompute and would otherwise just be a value that can

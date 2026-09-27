@@ -23,7 +23,11 @@ before `ft_system_setup()`.
 no env override slot on this board: the derived MAC always applies whenever
 the serial parses, on any unit whose autoboot runs this compiled-in
 `CONFIG_BOOTCOMMAND` — a unit with a saved `bootcmd` from an older FIP (no
-`alp_eth_mac` call) still gets the DRP-AI vendor default instead. See
+`alp_eth_mac` call) still gets the DRP-AI vendor default instead. A unit
+whose EEPROM has no parseable serial yet falls back, with a console
+WARNING, to a MAC derived from the on-module eMMC's CID (prefix nibble
+`0xD`, disjoint from the serial-derived `0xC` range) rather than the vendor
+default every such unit would share. See
 `docs/soms/v2n.md#ethernet-mac-address-policy` for the full policy, and
 `scripts/alp_eth_mac.py` for the host-side implementation the device side
 stays bit-for-bit identical to.
