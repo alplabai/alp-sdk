@@ -21,8 +21,10 @@ arch/arm/dts/rzv2n-dev.dts (SEL_SD0_SD1 = 0 branch):
   empty slot fails "mmc dev 1" by command timeout, which is the
   fallback bootcmd_check already expects.
 
-board/renesas/rzv2n-dev (CONFIG_ALP_E1M_SD1_MICROSD, default y in
-rzv2n-dev_defconfig), in board_init() before initr_mmc:
+board/renesas/rzv2n-dev (CONFIG_ALP_E1M_SD1_MICROSD, off by default;
+meta-alp-sdk enables it for the E1M-V2N/V2M MACHINEs only, where PA2/PA3
+are the SoM's own uSD1_V_SEL / SD1_SD1PWEN nets), in board_init()
+before initr_mmc:
 - PA2 (uSD1_V_SEL) low: 3.3 V SD1 IO rail.
 - PA3 (SD1_SD1PWEN): low for 20 ms, then high.  The power cycle
   returns a card that Linux left in 1.8 V UHS signalling to 3.3 V
@@ -48,9 +50,8 @@ Signed-off-by: Alp Lab AB <contact@alplab.ai>
  arch/arm/dts/rzv2n-dev.dts          | 22 ++++++++++-
  board/renesas/rzv2n-dev/Kconfig     | 18 +++++++++
  board/renesas/rzv2n-dev/rzv2n-dev.c | 58 +++++++++++++++++++++++++++++
- configs/rzv2n-dev_defconfig         |  1 +
  include/configs/rzv2n-dev.h         |  7 +++-
- 5 files changed, 104 insertions(+), 2 deletions(-)
+ 4 files changed, 103 insertions(+), 2 deletions(-)
 
 diff --git a/arch/arm/dts/rzv2n-dev.dts b/arch/arm/dts/rzv2n-dev.dts
 index 83b68a3f1..db2f837b5 100644
@@ -194,15 +195,6 @@ index fd4e8e1f7..56a2f6802 100644
  	board_usb_init();
  
  	return 0;
-diff --git a/configs/rzv2n-dev_defconfig b/configs/rzv2n-dev_defconfig
-index e04099d12..67423d43c 100644
---- a/configs/rzv2n-dev_defconfig
-+++ b/configs/rzv2n-dev_defconfig
-@@ -98,3 +98,4 @@ CONFIG_USB_FUNCTION_MASS_STORAGE=y
- CONFIG_CMD_USB_MASS_STORAGE=y
- 
- CONFIG_ALP_E1M_EMMC_1V8=y
-+CONFIG_ALP_E1M_SD1_MICROSD=y
 diff --git a/include/configs/rzv2n-dev.h b/include/configs/rzv2n-dev.h
 index 85c0e7afa..447f80e9a 100644
 --- a/include/configs/rzv2n-dev.h

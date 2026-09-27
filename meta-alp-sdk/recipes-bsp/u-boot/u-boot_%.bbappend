@@ -270,8 +270,8 @@ SRC_URI:append:rzv2n-family = " file://0007-rzv2n-dev-ALP-E1M-clkgen-otp-fixup.p
 # mmc1 to SDHI2 (mmc@15c20000) and left SDHI1 (mmc@15c10000, the E1M-X EVK
 # microSD) disabled -- so U-Boot could never boot from the SD card. 0008
 # makes SDHI1 mmc1 (SDHI2 moves to mmc2; SDHI0 eMMC stays mmc0, so the env
-# device is unchanged) and, under CONFIG_ALP_E1M_SD1_MICROSD (default y in
-# the patched defconfig), sets up the slot in board_init() before
+# device is unchanged) and, under CONFIG_ALP_E1M_SD1_MICROSD, sets up the
+# slot in board_init() before
 # initr_mmc: PA2 (uSD1_V_SEL) low = 3.3 V, PA3 (SD1_SD1PWEN) power-cycled
 # then held high, and the SD1CLK/SD1CMD/SD1DAT0-3 dedicated pads at drive
 # strength 2 / slew 0 / input-enabled, the same pad setup as the Linux
@@ -285,6 +285,13 @@ SRC_URI:append:rzv2n-family = " file://0007-rzv2n-dev-ALP-E1M-clkgen-otp-fixup.p
 # Applies with and without 0003 (checked both ways). BENCH-PENDING:
 # unverified on silicon.
 #
+# PA3 power-cycle vs Linux's always-on PA3 hog (e1m-x-evk.dtsi): not a
+# contradiction. U-Boot cycles the card rail once, before Linux exists, so a
+# card a previous Linux session left in 1.8 V UHS signalling comes back at
+# 3.3 V after a warm reboot. The DT hog only stops the Linux MMC core from
+# switching the rail at runtime (the card-detect pull-up shares it). Nothing
+# reads card detect during the 20 ms U-Boot window.
+#
 # Numbered 0008, not 0007: U-Boot patch 0007 (#2293, the 5L35023B OTP
 # fixup docs/provisioning-v2n.md's clkgen_verify step checks for) already
 # claims that slot. The real dependency is a text conflict in THIS
@@ -294,6 +301,14 @@ SRC_URI:append:rzv2n-family = " file://0007-rzv2n-dev-ALP-E1M-clkgen-otp-fixup.p
 # order. This patch was regenerated (git format-patch) on top of #2293's
 # 0007 so its hunks carry the correct post-0007 line offsets.
 SRC_URI:append:rzv2n-family = " file://0008-rzv2n-dev-ALP-E1M-sdhi1-microsd.patch"
+
+# sd1-microsd.cfg: CONFIG_ALP_E1M_SD1_MICROSD=y. Off by default in 0008's
+# Kconfig and enabled only for the E1M-V2N/V2M MACHINEs (all carry the
+# e1m-v2n101 override), because it drives PA2/PA3: on these SoMs they are
+# the SoM's own uSD1_V_SEL (U28 SEL) and SD1_SD1PWEN (U6 CNTRL) nets per
+# the E1M-V2N 2625-R2 netlist, so the fact is SoM-level, not carrier-level.
+# A plain rzv2n-family MACHINE (Renesas EVK) never drives them.
+SRC_URI:append:e1m-v2n101 = " file://sd1-microsd.cfg"
 
 # Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot
 # binary serves both families, so the dtb basename is a Kconfig string
