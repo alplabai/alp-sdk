@@ -6,10 +6,9 @@ from __future__ import annotations
 import re
 import socket
 import subprocess
+import sys
 import threading
 from pathlib import Path
-
-import sys
 
 import pytest
 from provision import bench
