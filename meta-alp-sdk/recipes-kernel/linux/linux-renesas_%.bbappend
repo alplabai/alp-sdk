@@ -230,3 +230,12 @@ SRC_URI:append = " file://rv3028-rtc.cfg"
 # + GD32-bridge GPIO for panel reset).
 SRC_URI:append:e1m-v2n101 = " file://display.cfg"
 SRC_URI:append:e1m-v2m101 = " file://display.cfg"
+
+# Audio: TAS2563 smart-amp pair on the E1M-X-EVK carrier (see e1m-x-evk.dtsi's
+# header comment + &i2c0's tas2563_left/tas2563_right nodes). Per-carrier like
+# display.cfg above, not unconditional: it is the E1M-X-EVK's TAS2563 pair,
+# not a SoM-level fact.
+# Keyed on e1m-v2n101 ONLY: every V2N-family machine, the V2M ones
+# included, carries that override (conf/machine/e1m-v2m10*-a55.conf), so a
+# second :e1m-v2m101 append would add the patch twice and do_patch fails.
+SRC_URI:append:e1m-v2n101 = " file://tas2563-audio.cfg file://0009-ASoC-tas2562-reset-the-amplifier-at-probe.patch"
