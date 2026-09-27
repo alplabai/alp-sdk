@@ -234,6 +234,12 @@ def emmc_boot1_write_verify(t: LinuxTarget, emmc: str, local: Path, sector: int)
     name = emmc.rsplit("/", 1)[-1]
     force_ro = f"/sys/block/{name}boot1/force_ro"
     dev = f"{emmc}boot1"
+    # boot1 is a few MiB: refuse before writing anything rather than leave a
+    # new BL2 next to a half-written FIP when the image runs off the end.
+    part = int(t.run(f"cat /sys/block/{name}boot1/size").stdout.strip()) * 512
+    if sector * 512 + data_len > part:
+        raise BenchError(f"{local.name} ({data_len} B) at sector {sector:#x} does not fit "
+                         f"{dev} ({part} B)")
     remote = f"/tmp/{local.name}"
     t.put(local, remote)
     try:

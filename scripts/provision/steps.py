@@ -380,6 +380,11 @@ class Preflight(Step):
             results.append(gates.GateResult("identity_table", True, "N24S128 frame table self-check ok"))
         except (ValueError, AssertionError) as e:
             results.append(gates.GateResult("identity_table", False, str(e)))
+        if ctx.execute:
+            # pmic_verify needs it; refuse here, not after every destructive step.
+            results.append(gates.GateResult("pmic_expect", bool(ctx.expected_registers),
+                                            "expected-registers file given" if ctx.expected_registers
+                                            else "run --execute needs --pmic-expect"))
         bad = [r for r in results if not r.ok]
         lines = [f"{'ok ' if r.ok else 'FAIL'} {r.name}: {r.detail}" for r in results]
         ctx.step_logs[self.name] = "\n".join(lines)

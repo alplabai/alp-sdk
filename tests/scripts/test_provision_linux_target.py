@@ -195,7 +195,7 @@ Extended CSD rev 1.8 [EXT_CSD_REV: 0x08]
 def test_emmc_boot1_force_ro_restored_on_failure(tmp_path):
     img = tmp_path / "bl2_mmc.bin"
     img.write_bytes(b"\x02" * 512)
-    t, fake = target([("md5sum", f"{md5(img.read_bytes())}  -\n"), ("force_ro|rm -f", ""),
+    t, fake = target([("boot1/size", "8192\n"), ("md5sum", f"{md5(img.read_bytes())}  -\n"), ("force_ro|rm -f", ""),
                       (r"^dd ", (1, ""))])
     with pytest.raises(BenchError):
         lt.emmc_boot1_write_verify(t, "/dev/mmcblk1", img, 1)
@@ -206,7 +206,7 @@ def test_emmc_boot1_write_verify(tmp_path):
     img = tmp_path / "fip.bin"
     img.write_bytes(b"\x03" * 1000)
     good = md5(img.read_bytes())
-    t, fake = target([("md5sum", f"{good}  -\n"), ("force_ro|rm -f|^dd ", "")])
+    t, fake = target([("boot1/size", "8192\n"), ("md5sum", f"{good}  -\n"), ("force_ro|rm -f|^dd ", "")])
     assert lt.emmc_boot1_write_verify(t, "/dev/mmcblk1", img, 0x300) == good
     assert "dd if=/tmp/fip.bin of=/dev/mmcblk1boot1 bs=512 seek=768 conv=fsync status=none" in fake.commands
     assert "tail -c +393217 /dev/mmcblk1boot1 | head -c 1000 | md5sum" in fake.commands
@@ -724,3 +724,13 @@ def test_census_manifest_crc():
 def test_parse_emmc_cid_rejects_garbage():
     with pytest.raises(ValueError):
         lt.parse_emmc_cid("xyz")
+
+
+def test_emmc_boot1_write_refuses_an_image_past_the_partition_end(tmp_path):
+    img = tmp_path / "fip.bin"
+    img.write_bytes(b"\x03" * 1000)
+    t, fake = target([("boot1/size", "768\n")])     # 768 sectors: ends exactly at 0x300
+    with pytest.raises(BenchError, match="does not fit"):
+        lt.emmc_boot1_write_verify(t, "/dev/mmcblk1", img, 0x300)
+    assert not any(c.startswith("dd ") for c in fake.commands)
+

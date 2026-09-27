@@ -107,6 +107,7 @@ def _ctx(tmp_path, bundle=None, **kw):
     preset = yaml.safe_load((REPO / "metadata" / "e1m_modules" / f"{kw.pop('preset_sku', SKU)}.yaml")
                             .read_text(encoding="utf-8"))
     kw.setdefault("tier_markers", MARKERS)
+    kw.setdefault("expected_registers", {"devices": {}})
     return steps.Ctx(sku=kw.pop("sku", SKU), serial=SERIAL, bundle_dir=bdir, bundle=b, preset=preset,
                      ledger_root=kw.pop("ledger_root", _ledger(tmp_path)), **kw)
 
@@ -862,3 +863,11 @@ def test_boot_sd_linux_probe_refuses_an_emmc_root_on_resume(tmp_path, monkeypatc
     monkeypatch.setattr(lt, "root_device", lambda t: "mmcblk0p2")
     monkeypatch.setattr(lt, "resolve_emmc", lambda t: "mmcblk0")
     assert isinstance(steps.BootSdLinux().probe(ctx), steps.Unsatisfied)
+
+
+def test_preflight_refuses_execute_without_pmic_expect(tmp_path):
+    ctx = _ctx(tmp_path, execute=True, expected_registers=None)
+    res = steps.Preflight().run(ctx)
+    assert res.status == "failed" and "pmic_expect" in res.detail
+    ctx = _ctx(tmp_path / "b", execute=False, expected_registers=None)
+    assert "pmic_expect" not in steps.Preflight().run(ctx).detail
