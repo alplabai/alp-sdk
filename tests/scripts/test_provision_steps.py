@@ -871,3 +871,18 @@ def test_preflight_refuses_execute_without_pmic_expect(tmp_path):
     assert res.status == "failed" and "pmic_expect" in res.detail
     ctx = _ctx(tmp_path / "b", execute=False, expected_registers=None)
     assert "pmic_expect" not in steps.Preflight().run(ctx).detail
+
+
+def test_detect_drops_a_stale_bootstrap_record_when_the_unit_is_silent(tmp_path):
+    ctx = _ctx(tmp_path, bench=_bench(console=FakeConsole([])))
+    ctx.state = {"steps": {"bootstrap": {"status": "done"}}}
+    res = steps.Detect().run(ctx)
+    assert "silent" in res.detail and "bootstrap dropped" in res.detail
+    assert not ctx.state_done("bootstrap")
+
+
+def test_detect_keeps_the_bootstrap_record_when_bl2_prints(tmp_path):
+    ctx = _ctx(tmp_path, bench=_bench(console=FakeConsole([(None, "NOTICE:  BL2: v2.10.5(release):alp\n")])))
+    ctx.state = {"steps": {"bootstrap": {"status": "done"}}}
+    steps.Detect().run(ctx)
+    assert ctx.state_done("bootstrap")

@@ -429,7 +429,15 @@ class Detect(Step):
         elif ctx.linux is None and ctx.bench.linux_host:
             ctx.linux = lt.LinuxTarget(ctx.bench.linux_host, ctx.bench.linux_user)
         up = ctx.linux_up()
-        return self.result(ctx, f"unit state: {key}; Linux target {'reachable' if up else 'not reachable'}",
+        note = ""
+        if key == "silent" and ctx.state_done("bootstrap"):
+            # A unit whose eMMC boot1 holds a good bootstrap prints BL2 after a
+            # power cycle. Silence means that record is stale (corrupt write,
+            # erased part, wrong DSW1): drop it so bootstrap runs again instead
+            # of the flow timing out later waiting for a Linux login.
+            ctx.state["steps"].pop("bootstrap", None)
+            note = "; recorded bootstrap dropped (unit silent after power cycle)"
+        return self.result(ctx, f"unit state: {key}; Linux target {'reachable' if up else 'not reachable'}{note}",
                            ev, status="done")
 
 
