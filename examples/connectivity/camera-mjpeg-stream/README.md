@@ -187,6 +187,37 @@ region` summary (`west build` prints it after linking) before adding to
 byte count still applies, it moves with every change to this file or its
 dependencies.
 
+### IMX335 build variant (E1M-AEN801/AEN803, 1280x960 ISP crop, issue #2327 Stage B) — BUILD-ONLY, UNBENCHED
+
+Streams the Sony IMX335 (upstream `zephyr/drivers/video/imx335.c`) through
+the SAME `CONFIG_CAMERA_MJPEG_STREAM_1280X960` path the OV5647/IMX296
+variants above use, but IMX335 has no in-sensor crop this driver uses --
+its native 2x2-binned output is a fixed 1296x972, not 1280x960 -- so this
+variant ALSO needs `boards/overlay-imx335-isp-crop.overlay`, which sets
+`crop-x0 = 8`/`crop-y0 = 6` on `&isp` to crop it down to the same
+1280x960 `boards/overlay-1280x960.conf`'s SRAM0/buffer-pool accounting
+already covers (see `docs/camera-shields.md`'s Stage B section for the
+8/6 derivation). AE is on (hal_alif patch 0014's IMX335 envelope, capped
+at 30.0 dB analog gain -- a public Sony datasheet-flyer figure, not
+bench-derived); AWB stays at the ISP's stock ARX3A0 default, same
+colour-uncalibrated caveat as the IMX296 variant above.
+
+```bash
+west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
+    examples/connectivity/camera-mjpeg-stream -- \
+    "-DEXTRA_ZEPHYR_MODULES=<path-to-alp-sdk>;<path-to-hal_alif>" \
+    "-DSHIELD=e1m_evk_rpi_csi innomaker_cam_imx335" \
+    "-DEXTRA_CONF_FILE=boards/overlay-1280x960.conf" \
+    "-DEXTRA_DTC_OVERLAY_FILE=boards/overlay-imx335-isp-crop.overlay"
+```
+
+**No bench run backs this variant.** It builds clean (`-Werror`) at the
+SAME SRAM0 usage (98.50%) as the IMX296 variant above -- confirming this
+addition did not regress that existing, bench-verified scenario -- but no
+IMX335 unit has ever streamed a frame through this pipeline. Do not claim
+fps, image quality, or even that the crop offset is correct until a bench
+run confirms it.
+
 ### Ethernet MAC address changes every boot (investigated, not fixed)
 
 Bench runs 312-314 each logged a DIFFERENT MAC address

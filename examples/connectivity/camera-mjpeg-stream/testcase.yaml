@@ -105,3 +105,27 @@ tests:
       - ethernet
       - connectivity
     build_only: true   # camera + Ethernet HW proof is a bench flash, not a CI run.
+
+  # IMX335 variant (issue #2327 Stage B, BUILD-ONLY -- no bench run backs this scenario the way
+  # the IMX296 one above is bench-verified): SAME overlay-1280x960.conf as the OV5647/IMX296
+  # scenarios above, PLUS boards/overlay-imx335-isp-crop.overlay -- IMX335's native 1296x972
+  # 2x2-binned output has no in-sensor crop, so the ISP itself crops it down to the SAME 1280x960
+  # frame size that overlay already budgets SRAM0 for (see that overlay's own comment). AE on,
+  # AWB at the ISP's stock default (no IMX335 AWB/CCM calibration yet).
+  alp_sdk.examples.camera_mjpeg_stream.aen_imx335:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_args:
+      - SHIELD="e1m_evk_rpi_csi innomaker_cam_imx335"
+      - EXTRA_CONF_FILE="boards/overlay-1280x960.conf"
+      - EXTRA_DTC_OVERLAY_FILE="boards/overlay-imx335-isp-crop.overlay"
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - camera
+      - jpeg
+      - ethernet
+      - connectivity
+    build_only: true   # camera + Ethernet HW proof is a bench flash, not a CI run; UNBENCHED for IMX335 -- see changelog.d/2327.md.

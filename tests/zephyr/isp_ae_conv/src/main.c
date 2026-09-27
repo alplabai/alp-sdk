@@ -108,3 +108,47 @@ ZTEST(isp_ae_conv, test_db_tenths_table_monotonic_and_round_trips)
 		              reg);
 	}
 }
+
+/*
+ * #2327 Stage B: IMX335's VIDEO_CID_ANALOGUE_GAIN control is dB-log like IMX296's, but the
+ * upstream driver pre-scales it to MILLI-dB (ctrl_per_db_tenth = 100 -- 100 mdB = 1 tenth of a
+ * dB) instead of exposing the raw 0.1 dB/count register value directly the way IMX296 does.
+ * ctrl_per_db_tenth = 1 must reduce these two functions to the plain db_tenths ones exactly (the
+ * identity case IMX296 already relies on); ctrl_per_db_tenth = 100 is IMX335's own case.
+ */
+ZTEST(isp_ae_conv, test_db_tenths_ctrl_identity_matches_imx296)
+{
+	for (uint32_t reg = 0; reg <= 480; reg += 30) {
+		zassert_equal(isp_sns_gain_db_tenths_ctrl_to_lib(reg, 1),
+		              isp_sns_gain_db_tenths_to_lib(reg),
+		              "ctrl_per_db_tenth=1 must match the plain db_tenths conversion");
+	}
+	uint32_t lib = isp_sns_gain_db_tenths_to_lib(240);
+
+	zassert_equal(isp_sns_gain_lib_to_db_tenths_ctrl(lib, 1),
+	              isp_sns_gain_lib_to_db_tenths(lib),
+	              "ctrl_per_db_tenth=1 must match the plain db_tenths reverse conversion");
+}
+
+/* IMX335's 30.0 dB analog-gain cap (imx335_ae_envelope.h's IMX335_AE_MAX_AGAIN = 32382, hal_alif
+ * patch 0014) is register code 100 in the upstream driver's own 0.3 dB/count GAIN register, i.e.
+ * control value 30000 mdB (IMX335_GAIN_UNIT_MDB = 300, so 100 * 300 = 30000) -- ctrl_per_db_tenth
+ * = 100 (100 mdB = 1 tenth of a dB) must convert that control value to isp_gain_db_tenths_table[300]
+ * exactly (300 tenths = 30.0 dB), matching the literal hal_alif patch 0014 hand-duplicates.
+ */
+ZTEST(isp_ae_conv, test_db_tenths_ctrl_imx335_30db_cap)
+{
+	zassert_equal(isp_sns_gain_db_tenths_ctrl_to_lib(30000, 100),
+	              32382,
+	              "IMX335 30.0 dB cap (30000 mdB) must land on isp_gain_db_tenths_table[300]");
+	zassert_equal(isp_sns_gain_lib_to_db_tenths_ctrl(32382, 100),
+	              30000,
+	              "reverse: library units for 30.0 dB must land on 30000 mdB");
+}
+
+/* 0 dB (0 mdB) is still unity at any ctrl_per_db_tenth scale. */
+ZTEST(isp_ae_conv, test_db_tenths_ctrl_0db_is_unity)
+{
+	zassert_equal(isp_sns_gain_db_tenths_ctrl_to_lib(0, 100), ISP_SNS_GAIN_LIB_UNITY, NULL);
+	zassert_equal(isp_sns_gain_lib_to_db_tenths_ctrl(ISP_SNS_GAIN_LIB_UNITY, 100), 0, NULL);
+}

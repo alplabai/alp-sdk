@@ -70,3 +70,36 @@ tests:
       - video
       - camera
     build_only: true   # issue #2287 Stage B unit 3: IMX296 with AE on (hal_alif patch 0013's envelope), UNBENCHED -- see changelog.d/2287.md.
+
+  alp_sdk.examples.aen.isp_capture.imx335:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_args:
+      - SHIELD="e1m_evk_rpi_csi innomaker_cam_imx335"
+      - AEN_ISP_IMX335=ON
+      - EXTRA_CONF_FILE=overlay-no-ae.conf
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - isp
+      - video
+      - camera
+    build_only: true   # issue #2327 Stage B: IMX335 2x2-binned frame, ISP-cropped to 1280x960 -- BUILD-ONLY, no bench run -- see changelog.d/2327.md.
+
+  alp_sdk.examples.aen.isp_capture.imx335_ae:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_args:
+      - SHIELD="e1m_evk_rpi_csi innomaker_cam_imx335"
+      - AEN_ISP_IMX335=ON
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - isp
+      - video
+      - camera
+    build_only: true   # issue #2327 Stage B: IMX335 with AE on (hal_alif patch 0014's envelope), BUILD-ONLY, UNBENCHED -- see changelog.d/2327.md.

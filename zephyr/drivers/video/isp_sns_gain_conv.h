@@ -175,6 +175,53 @@ static inline uint32_t isp_sns_gain_lib_to_db_tenths(uint32_t total_1024)
 }
 
 /*
+ * dB-per-count sensor gain CONTROL (not necessarily the raw hardware
+ * register) at ANY scale that is an integer multiple of 0.1 dB per control
+ * unit -> library gain units. Reuses isp_gain_db_tenths_table above by
+ * dividing the control value down to the table's own 0.1 dB index
+ * (ctrl / ctrl_per_db_tenth) instead of building a second 481-entry table
+ * per sensor -- #2327 Stage B: IMX296's VIDEO_CID_ANALOGUE_GAIN IS the raw
+ * GAIN register value directly (0.1 dB/count, ctrl_per_db_tenth = 1); IMX335's
+ * VIDEO_CID_ANALOGUE_GAIN is pre-scaled by the driver itself to MILLI-dB
+ * (0.3 dB/count register, but the control's own step is 300 mdB = 0.1 dB *
+ * 100, so ctrl_per_db_tenth = 100 for IMX335 -- see imx335.c's own
+ * IMX335_GAIN_UNIT_MDB). ctrl_per_db_tenth = 1 reduces this to
+ * isp_sns_gain_db_tenths_to_lib() exactly, so IMX296's existing behaviour is
+ * unchanged.
+ */
+static inline uint32_t isp_sns_gain_db_tenths_ctrl_to_lib(uint32_t ctrl, uint32_t ctrl_per_db_tenth)
+{
+	uint32_t tenths;
+
+	if (ctrl_per_db_tenth == 0U) {
+		ctrl_per_db_tenth = 1U;
+	}
+	tenths = ctrl / ctrl_per_db_tenth;
+	return isp_sns_gain_db_tenths_to_lib(tenths > 480U ? 480U : tenths);
+}
+
+/*
+ * Library gain units (1024 = 1x) -> the sensor's own dB-per-count CONTROL
+ * value at the given scale (reverse of isp_sns_gain_db_tenths_ctrl_to_lib()
+ * above): looks up the nearest tenths-of-dB table entry, then scales that up
+ * to the control's own unit (tenths * ctrl_per_db_tenth) -- exact for IMX335
+ * (every table tenths value times 100 is itself an exact multiple of the
+ * driver's own 300 mdB register step only when tenths is itself a multiple
+ * of 3; a non-multiple-of-3 tenths value still yields a legal mdB control
+ * value, just one imx335_set_ctrl()'s own ctrl.val/300 register write then
+ * truncates by up to 2 mdB/100 of a register count -- the same order of
+ * quantization the 0.3 dB hardware step itself imposes, not a new loss this
+ * conversion introduces).
+ */
+static inline uint32_t isp_sns_gain_lib_to_db_tenths_ctrl(uint32_t total_1024,
+							   uint32_t ctrl_per_db_tenth)
+{
+	uint32_t tenths = isp_sns_gain_lib_to_db_tenths(total_1024);
+
+	return tenths * ctrl_per_db_tenth;
+}
+
+/*
  * Linear sensor gain register (e.g. OV5647's AGC_GAIN, reg_per_1x units per
  * 1.0x) -> library gain units (1024 = 1x).
  */

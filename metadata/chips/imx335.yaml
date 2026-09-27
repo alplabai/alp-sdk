@@ -82,8 +82,21 @@ notes: |
   stock, non-reworked carrier (the J5 pin-11 rework is a module-enable
   concern, unrelated to D-PHY lock -- see the CAM_EN note above); D-PHY
   lock on any unit/carrier other than E1M-AEN803 2026W36-0001 on this
-  specific E1M-EVK; ISP/AE/colour (no ISP path exists for this sensor);
+  specific E1M-EVK; ISP/AE/colour (see Stage B below, itself unbenched);
   and the sensor's full-resolution (non-binned) mode.
+
+  Issue #2327 Stage B (BUILD-ONLY, no bench run backs this section): the
+  2x2-binned frame now also reaches the ISP-Pico with AE, through
+  hal_alif patch 0014 (drivers/isp/isp_wrapper/inc/imx335_ae_envelope.h,
+  CONFIG_VIDEO_ISP_VSI_CALIB_IMX335) -- sourced from upstream imx335.c's
+  own VMAX/SHR0-min constants plus one public Sony datasheet-flyer figure
+  (30 dB analog-gain ceiling; above that this sensor's single GAIN
+  register, 0x30e8, is digital). The ISP's own crop (crop-x0/crop-y0 = 8/6)
+  reduces the 1296x972 native frame to 1280x960 for
+  examples/connectivity/camera-mjpeg-stream, reusing that example's
+  existing 1280x960 buffer budget. AWB/CCM are NOT calibrated for this
+  sensor -- falls through to the stock ARX3A0 defaults. See
+  changelog.d/2327.md's Stage B section.
 
 bus:              i2c
 i2c:

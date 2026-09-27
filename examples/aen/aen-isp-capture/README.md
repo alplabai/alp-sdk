@@ -43,7 +43,33 @@ west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
     "-DSHIELD=e1m_evk_rpi_csi raspberry_pi_global_shutter_camera" \
     "-DAEN_ISP_IMX296=ON"
 # flash + run per docs/aen-bench-bringup.md.
+
+# IMX335, AE off (issue #2327 Stage B, BUILD-ONLY -- never run on silicon):
+west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
+    examples/aen/aen-isp-capture -- \
+    "-DEXTRA_ZEPHYR_MODULES=<path-to-alp-sdk>;<path-to-hal_alif>" \
+    "-DSHIELD=e1m_evk_rpi_csi innomaker_cam_imx335" \
+    "-DAEN_ISP_IMX335=ON" "-DEXTRA_CONF_FILE=overlay-no-ae.conf"
+
+# IMX335, AE on (hal_alif patch 0014's envelope, BUILD-ONLY):
+west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
+    examples/aen/aen-isp-capture -- \
+    "-DEXTRA_ZEPHYR_MODULES=<path-to-alp-sdk>;<path-to-hal_alif>" \
+    "-DSHIELD=e1m_evk_rpi_csi innomaker_cam_imx335" \
+    "-DAEN_ISP_IMX335=ON"
 ```
+
+## IMX335 (`-DAEN_ISP_IMX335=ON`, issue #2327 Stage B) — BUILD-ONLY, UNBENCHED
+
+Same shape as the IMX296 column above, with two real differences: IMX335's
+native 2x2-binned output is a fixed 1296x972 (ISP input), ISP-CROPPED to
+1280x960 (ISP output, `overlay-imx335.conf` + `boards/imx335-isp-crop.overlay`
+— see `docs/camera-shields.md`'s Stage B section for the crop derivation);
+and its AE envelope is hal_alif patch 0014 (`imx335_ae_envelope.h`), capped
+at 30.0 dB analog gain (a public Sony datasheet-flyer figure, not
+bench-derived the way IMX296's 24.0 dB cap is). **No bench run backs any of
+this — every build above compiles clean (`-Werror`) and nothing more.**
+AWB/CCM stay on the stock ARX3A0 defaults, same as IMX296.
 
 ## Diagnostic knobs (IMX296 only)
 

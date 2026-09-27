@@ -200,10 +200,29 @@ static uint32_t _to_video_fourcc(alp_pixfmt_t fmt)
  * is an unambiguous stand-in for "IMX296 is this board's sensor" -- a board wiring both OV5647 and
  * IMX296 to the same ISP input at once is not a configuration this SDK supports.
  */
-#if DT_HAS_COMPAT_STATUS_OKAY(sony_imx296)
+#if DT_HAS_COMPAT_STATUS_OKAY(sony_imx296) || DT_HAS_COMPAT_STATUS_OKAY(sony_imx335)
 #define ALIF_ISP_INPUT_FOURCC VIDEO_PIX_FMT_SRGGB10P
 #else
 #define ALIF_ISP_INPUT_FOURCC VIDEO_PIX_FMT_SBGGR10P
+#endif
+
+/*
+ * ISP INPUT size, issue #2327 Stage B (BUILD-ONLY): every other sensor's ISP INPUT size equals
+ * the caller's REQUESTED size (cfg->width/height below) -- OV5647's 640x480 native output and
+ * IMX296's 1280x960 ROI crop both already match what a caller asks for. IMX335 has no in-sensor
+ * crop this driver uses: its native 2x2-binned output is a FIXED 1296x972, and the requested
+ * 1280x960 is produced by the ISP's OWN crop instead (crop-x0/crop-y0 on &isp, set by a
+ * board-level overlay -- e.g. examples/aen/aen-isp-capture/boards/imx335-isp-crop.overlay) -- so
+ * this backend's ISP INPUT request must stay pinned to the sensor's real native size regardless
+ * of what the caller asked the OUTPUT to be. 0/0 (every other sensor) means "use cfg->width/
+ * height unchanged", the existing behaviour.
+ */
+#if DT_HAS_COMPAT_STATUS_OKAY(sony_imx335)
+#define ALIF_ISP_INPUT_WIDTH  1296
+#define ALIF_ISP_INPUT_HEIGHT 972
+#else
+#define ALIF_ISP_INPUT_WIDTH  0
+#define ALIF_ISP_INPUT_HEIGHT 0
 #endif
 
 /* Output fourccs this backend converts to RGB565 on the CPU when the
@@ -316,8 +335,8 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	struct video_format in_fmt = {
 		.type        = VIDEO_BUF_TYPE_INPUT,
 		.pixelformat = ALIF_ISP_INPUT_FOURCC,
-		.width       = cfg->width,
-		.height      = cfg->height,
+		.width       = ALIF_ISP_INPUT_WIDTH ? ALIF_ISP_INPUT_WIDTH : cfg->width,
+		.height      = ALIF_ISP_INPUT_HEIGHT ? ALIF_ISP_INPUT_HEIGHT : cfg->height,
 	};
 	int err = video_set_format(dev, &in_fmt);
 	if (err != 0) {

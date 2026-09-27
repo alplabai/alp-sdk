@@ -854,6 +854,51 @@ patches:
       CONFIG_VIDEO_ISP_VSI_CALIB_IMX296) -- no further hal_alif change
       needed for that fix; it clamps the push to agree with this
       patch's own 16229, kept in sync by hand.
+  - path: hal_alif/0014-isp-imx335-ae-envelope.patch
+    sha256sum: c9ec4ff6c2df61bf0bb706b569de5737a600696e917e0c5e7918a54cb00b1c59
+    module: alif
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-09-27
+    upstreamable: false
+    comments: |
+      Issue #2327 Stage B: gives IMX335 its own AE envelope, same mechanism
+      as patch 0013's IMX296 one. New drivers/isp/isp_wrapper/inc/
+      imx335_ae_envelope.h (same macro names, same _Static_assert round-trip
+      band as imx296_ae_envelope.h/ov5647_ae_envelope.h) sources
+      IMX335_AE_FULL_LINES/FPS_X10/MAX_INT_LINE/MIN_AGAIN/MAX_AGAIN/
+      MIN_DGAIN/MAX_DGAIN from upstream Zephyr's own imx335.c driver
+      constants (IMX335_VMAX_DEFAULT 4500, IMX335_SHR0_MIN_BINNING 17) plus
+      one public Sony IMX335 datasheet-flyer figure (30 dB analog-gain
+      ceiling -- above that this sensor's single GAIN register (0x30e8, 0.3
+      dB/count) is documented as digital, same analog/digital-bend
+      reasoning patch 0013's own comment applies to IMX296's GAIN register).
+      sensor_attributes.h's AE_SNS_DEFAULT_S table (patch 0006) and
+      isp_param_conf.h's .ae calibration block (patch 0011) each gain a
+      third CONFIG_VIDEO_ISP_VSI_CALIB_IMX335 #elif arm alongside their
+      existing OV5647/IMX296 ones; neither existing arm is touched, so an
+      OV5647, IMX296, or ARX3A0 build stays bit-identical. AWB/CCM are NOT
+      covered -- an IMX335 build falls through to the ARX3A0 AWB/CCM
+      defaults (compiles, does not colour-calibrate IMX335), same
+      known-limitation shape as IMX296's own unit-4 gap.
+
+      isp_api_wrapper.c needs NO further change: its AE gain/exposure
+      writeback already dispatches through isp_sns_gain_ctrl_from_lib()/
+      isp_sns_exposure_ctrl_from_lines() (alp-sdk's zephyr/drivers/video/
+      isp_pico.c, patch 0013's mechanism) on
+      CONFIG_VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS. IMX335's GAIN register is
+      0.3 dB/count, not IMX296's 0.1 dB/count, so the alp-sdk side (this
+      patch does not touch alp-sdk files) extends isp_sns_gain_conv.h with
+      a dB-STEP variant that reuses the SAME 0.1-dB-tenths lookup table by
+      scaling the register value by its own tenths-per-count instead of
+      building a second 481-entry table -- see that header's own comment.
+
+      UNBENCHED (issue #2327 Stage B is build-only): every figure above is
+      either an upstream driver constant or a public datasheet-flyer
+      number, not a bench-derived one the way patch 0013's IMX296 figures
+      are (that patch's own bench runs 304/306/312/313 do not exist for
+      IMX335). Board/sensor-specific by construction (same status as patch
+      0005/0013), not upstreamable as-is.
   - path: zephyr/0003-kconfig-serialize-missing-deps.patch
     sha256sum: 873ed5171298271804ba89cba22fd2c286fdb749cec2856a7ea7c2e1d7c3c7c5
     module: zephyr

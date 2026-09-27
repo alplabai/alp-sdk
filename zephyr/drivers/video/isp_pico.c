@@ -880,6 +880,16 @@ int isp_set_fmt(const struct device *dev,
  * isp_sns_gain_lib_from_ctrl() below use -- upstreamable: false in
  * patches.yml for the matching isp_api_wrapper.c hunk, same reason as
  * before: this is board/sensor-specific, not a hal_alif-generic fix.
+ *
+ * #2327 Stage B: IMX335's VIDEO_CID_ANALOGUE_GAIN is ALSO logarithmic but the
+ * upstream driver pre-scales it to MILLI-dB (0..72000, 300 mdB/count) rather
+ * than exposing IMX296's raw 0.1 dB/count register value (0..480) directly
+ * -- a single boolean can't tell the two apart, so the dB-tenths path is now
+ * scaled by CONFIG_VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS_PER_CTRL (default 1,
+ * i.e. unchanged, for IMX296 -- its ctrl IS tenths-of-dB directly; 100 for
+ * IMX335, whose ctrl is in mdB, 100 mdB = 1 tenth of a dB) via
+ * isp_sns_gain_conv.h's isp_sns_gain_db_tenths_ctrl_to_lib()/
+ * isp_sns_gain_lib_to_db_tenths_ctrl() -- see that header's own comment.
  */
 
 /*
@@ -892,7 +902,8 @@ int isp_set_fmt(const struct device *dev,
 uint32_t isp_sns_gain_ctrl_from_lib(uint32_t total_1024)
 {
 	if (IS_ENABLED(CONFIG_VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS)) {
-		return isp_sns_gain_lib_to_db_tenths(total_1024);
+		return isp_sns_gain_lib_to_db_tenths_ctrl(
+			total_1024, CONFIG_VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS_PER_CTRL);
 	}
 	return isp_sns_gain_lib_to_linear_reg(total_1024, CONFIG_VIDEO_ISP_VSI_SNS_GAIN_REG_PER_1X);
 }
@@ -900,7 +911,8 @@ uint32_t isp_sns_gain_ctrl_from_lib(uint32_t total_1024)
 uint32_t isp_sns_gain_lib_from_ctrl(uint32_t ctrl_reg)
 {
 	if (IS_ENABLED(CONFIG_VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS)) {
-		return isp_sns_gain_db_tenths_to_lib(ctrl_reg);
+		return isp_sns_gain_db_tenths_ctrl_to_lib(
+			ctrl_reg, CONFIG_VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS_PER_CTRL);
 	}
 	return isp_sns_gain_linear_reg_to_lib(ctrl_reg, CONFIG_VIDEO_ISP_VSI_SNS_GAIN_REG_PER_1X);
 }

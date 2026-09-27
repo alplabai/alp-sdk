@@ -97,6 +97,19 @@
  *     (0x308D-0x308F) and GAIN (0x3204-0x3205) registers directly over I2C every printed
  *     frame -- proof of what the writeback actually landed in the sensor, not just what the
  *     library computed as a target.
+ *
+ * IMX335 VARIANT (issue #2327 Stage B, -DAEN_ISP_IMX335=ON, off by default, BUILD-ONLY -- no
+ * bench run backs this variant the way the IMX296 one above is bench-verified): the sensor's
+ * native 1296x972 2x2-binned SRGGB10P output, ISP-CROPPED down to 1280x960 -- unlike IMX296's ROI
+ * crop (which happens IN the sensor, so its ISP input already matches its 1280x960 output),
+ * IMX335 has no in-sensor crop this driver uses, so the ISP itself crops 8 px off each side and 6
+ * off top/bottom (boards/imx335-isp-crop.overlay's &isp crop-x0/crop-y0) -- see
+ * ISP_INPUT_WIDTH/HEIGHT vs. FRAME_WIDTH/HEIGHT below, the only place this variant's input/output
+ * size split matters. AWB stays manual/off regardless of AE mode, same reasoning as IMX296 (no
+ * IMX335-fitted AWB/CCM calibration exists). AE-on (this example's default) uses hal_alif patch
+ * 0014's IMX335 AE envelope (drivers/isp/isp_wrapper/inc/imx335_ae_envelope.h) -- sourced from
+ * upstream imx335.c driver constants plus one public Sony datasheet-flyer figure (30 dB analog
+ * gain ceiling), NOT bench-derived the way IMX296's envelope is.
  */
 
 #include <stdbool.h>
@@ -170,8 +183,28 @@ extern volatile uint32_t isp_mi_frame_end_count;
  * whether a symptom is specific to the AE loop or also shows up under a fixed manual exposure
  * held over more frames. See README.md.
  */
-#define FRAME_WIDTH  1280
-#define FRAME_HEIGHT 960
+#define FRAME_WIDTH     1280
+#define FRAME_HEIGHT    960
+#define ISP_INPUT_WIDTH FRAME_WIDTH /* IMX296's ROI crop happens in the sensor -- input == output */
+#define ISP_INPUT_HEIGHT FRAME_HEIGHT
+#if defined(AEN_ISP_N_FRAMES)
+#define N_FRAMES AEN_ISP_N_FRAMES
+#else
+#define N_FRAMES (IS_ENABLED(CONFIG_ISP_LIB_AE_MODULE) ? 60 : 1)
+#endif
+#define ISP_INPUT_FOURCC VIDEO_PIX_FMT_SRGGB10P
+#elif defined(AEN_ISP_IMX335)
+/*
+ * issue #2327 Stage B (BUILD-ONLY): IMX335's native 2x2-binned output is 1296x972 -- the ISP
+ * INPUT size -- but the OUTPUT (this app's queued YUV420 buffer, FRAME_WIDTH/HEIGHT) is cropped
+ * to 1280x960 by boards/imx335-isp-crop.overlay's &isp crop-x0/crop-y0 (see that file's own
+ * comment for the 8/6 derivation) -- the SAME output size IMX296's own ROI already uses, so this
+ * variant reuses IMX296's buffer-pool sizing (overlay-imx335.conf) unchanged.
+ */
+#define FRAME_WIDTH      1280
+#define FRAME_HEIGHT     960
+#define ISP_INPUT_WIDTH  1296
+#define ISP_INPUT_HEIGHT 972
 #if defined(AEN_ISP_N_FRAMES)
 #define N_FRAMES AEN_ISP_N_FRAMES
 #else
@@ -181,6 +214,8 @@ extern volatile uint32_t isp_mi_frame_end_count;
 #else
 #define FRAME_WIDTH      640
 #define FRAME_HEIGHT     480
+#define ISP_INPUT_WIDTH  FRAME_WIDTH
+#define ISP_INPUT_HEIGHT FRAME_HEIGHT
 #define N_FRAMES         30
 #define ISP_INPUT_FOURCC VIDEO_PIX_FMT_SBGGR10P
 #endif
@@ -188,7 +223,17 @@ extern volatile uint32_t isp_mi_frame_end_count;
 #define N_BUFFERS      2
 #define REG_DUMP_EVERY 5
 
-#if !defined(AEN_ISP_IMX296)
+/*
+ * Both non-OV5647 variants (IMX296's in-sensor ROI, IMX335's ISP crop) share the SAME "hold the
+ * dequeued buffer directly, no second frame_copy" and "AWB off" behaviour below -- this umbrella
+ * covers exactly the sites that are true of EITHER variant; sites specific to one (e.g. IMX296's
+ * own register-dump helper, gated on DT_NODE_EXISTS(IMX296_NODE) instead) are untouched.
+ */
+#if defined(AEN_ISP_IMX296) || defined(AEN_ISP_IMX335)
+#define AEN_ISP_CROP_SENSOR 1
+#endif
+
+#if !defined(AEN_ISP_CROP_SENSOR)
 /*
  * OV5647 only: a separate SRAM0 copy of the last frame, taken so the bench hold below can
  * savebin a fixed, known address regardless of which of the N_BUFFERS video_enqueue() cycles
@@ -437,6 +482,10 @@ int main(void)
 	printk("\n=== aen-isp-capture (issue #2287 Stage B: real IMX296 ROI through the ISP, "
 	       "AE=%s AWB=manual/off) ===\n",
 	       IS_ENABLED(CONFIG_ISP_LIB_AE_MODULE) ? "auto (unit 3)" : "manual/off");
+#elif defined(AEN_ISP_IMX335)
+	printk("\n=== aen-isp-capture (issue #2327 Stage B, BUILD-ONLY: real IMX335 2x2-binned "
+	       "frame ISP-cropped to 1280x960, AE=%s AWB=manual/off) ===\n",
+	       IS_ENABLED(CONFIG_ISP_LIB_AE_MODULE) ? "auto" : "manual/off");
 #else
 	printk("\n=== aen-isp-capture (real OV5647 through the ISP, AE+AWB on) ===\n");
 #endif
@@ -575,9 +624,9 @@ int main(void)
 #endif /* defined(AEN_ISP_IMX296) && DT_NODE_EXISTS(IMX296_NODE) &&
 	  (defined(AEN_ISP_IMX296_EXPOSURE_LINES) || defined(AEN_ISP_IMX296_GAIN)) */
 
-#if defined(AEN_ISP_IMX296)
+#if defined(AEN_ISP_CROP_SENSOR)
 	/*
-	 * issue #2287 Stage B: AWB OFF (manual) for this first IMX296-through-ISP pass -- there is
+	 * issue #2287/#2327 Stage B: AWB OFF (manual) for this first IMX296/IMX335-through-ISP pass -- there is
 	 * no IMX296-fitted AWB/CCM calibration (hal_alif patch 0008/0011's tables are OV5647-only,
 	 * gated on CONFIG_VIDEO_ISP_VSI_CALIB_OV5647), so running the auto loop against the stock
 	 * ARX3A0 calibration would tune against facts that don't describe this sensor, the same
@@ -635,15 +684,15 @@ int main(void)
 	struct video_format in_fmt = {
 		.type        = VIDEO_BUF_TYPE_INPUT,
 		.pixelformat = ISP_INPUT_FOURCC,
-		.width       = FRAME_WIDTH,
-		.height      = FRAME_HEIGHT,
+		.width       = ISP_INPUT_WIDTH,
+		.height      = ISP_INPUT_HEIGHT,
 	};
 	int rc_in = video_set_format(isp_dev, &in_fmt);
 
 	printk("video_set_format(INPUT, fourcc=0x%08x, %ux%u) rc=%d\n",
 	       (unsigned int)ISP_INPUT_FOURCC,
-	       (unsigned int)FRAME_WIDTH,
-	       (unsigned int)FRAME_HEIGHT,
+	       (unsigned int)ISP_INPUT_WIDTH,
+	       (unsigned int)ISP_INPUT_HEIGHT,
 	       rc_in);
 
 	struct video_format out_fmt = {
@@ -692,7 +741,7 @@ int main(void)
 
 	printk("video_stream_start rc=%d\n", rc_start);
 
-#if !defined(AEN_ISP_IMX296)
+#if !defined(AEN_ISP_CROP_SENSOR)
 	bool have_last_frame = false;
 #endif
 
@@ -760,10 +809,10 @@ int main(void)
 #endif
 		}
 
-#if defined(AEN_ISP_IMX296)
+#if defined(AEN_ISP_CROP_SENSOR)
 		if (f == N_FRAMES) {
 			/*
-			 * IMX296 variant: hold and savebin the DEQUEUED buffer itself -- N_FRAMES
+			 * IMX296/IMX335 variant: hold and savebin the DEQUEUED buffer itself -- N_FRAMES
 			 * == 1, so nothing else in this run will ever touch it again -- instead of
 			 * copying it into a second static buffer first (see the frame_copy
 			 * #if !defined(AEN_ISP_IMX296) comment above for why: the pool is already
@@ -801,7 +850,7 @@ int main(void)
 
 	video_stream_stop(isp_dev, VIDEO_BUF_TYPE_OUTPUT);
 
-#if !defined(AEN_ISP_IMX296)
+#if !defined(AEN_ISP_CROP_SENSOR)
 	if (have_last_frame) {
 		uint32_t crc = crc32_ieee(frame_copy, FRAME_SIZE);
 
