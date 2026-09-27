@@ -31,3 +31,8 @@ default every such unit would share. See
 `docs/soms/v2n.md#ethernet-mac-address-policy` for the full policy, and
 `scripts/alp_eth_mac.py` for the host-side implementation the device side
 stays bit-for-bit identical to.
+
+U-Boot now also publishes the validated unit serial as `/chosen/alp,serial`,
+and `alp-hostname` appends it to the SKU hostname, so units of one SKU on a
+LAN get distinct names (`e1m-v2m103-2026w38-0001`). Without the property the
+hostname stays the SKU name (#2298).

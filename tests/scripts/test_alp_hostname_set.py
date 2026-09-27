@@ -22,13 +22,16 @@ pytestmark = pytest.mark.skipif(SH is None, reason="needs a POSIX sh")
 LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
 
-def _run(tmp_path: Path, raw: bytes):
+def _run(tmp_path: Path, raw: bytes, serial: bytes | None = None):
     prop = tmp_path / "alp,sku"
     prop.write_bytes(raw)
+    sprop = tmp_path / "alp,serial"
+    if serial is not None:
+        sprop.write_bytes(serial)
     etc = tmp_path / "hostname"
     kern = tmp_path / "kernel_hostname"
-    env = {**os.environ, "ALP_SKU_PROP": str(prop), "ALP_HOSTNAME_FILE": str(etc),
-           "ALP_KERNEL_HOSTNAME": str(kern)}
+    env = {**os.environ, "ALP_SKU_PROP": str(prop), "ALP_SERIAL_PROP": str(sprop),
+           "ALP_HOSTNAME_FILE": str(etc), "ALP_KERNEL_HOSTNAME": str(kern)}
     proc = subprocess.run([SH, str(SCRIPT)], env=env, capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
     return (kern.read_text().strip() if kern.exists() else None,
@@ -56,3 +59,21 @@ def test_hostile_inputs_sanitise_to_a_dns_label(tmp_path, raw, expected):
 def test_inputs_with_nothing_usable_leave_hostname_alone(tmp_path, raw):
     kern, etc = _run(tmp_path, raw)
     assert kern is None and etc is None
+
+
+@pytest.mark.parametrize("serial, expected", [
+    (b"2026W38-0001\0", "e1m-v2m103-2026w38-0001"),
+    (b"2026W39-0001", "e1m-v2m103-2026w39-0001"),   # same index, other week
+    (b"$(x);\n", "e1m-v2m103-x"),
+    (b"---", "e1m-v2m103"),                          # nothing usable: SKU only
+    (b"", "e1m-v2m103"),
+])
+def test_serial_suffix(tmp_path, serial, expected):
+    kern, etc = _run(tmp_path, b"E1M-V2M103\0", serial)
+    assert kern == expected and etc == expected
+    assert LABEL.match(kern) and len(kern) <= 63 and "--" not in kern
+
+
+def test_no_serial_property_keeps_sku_name(tmp_path):
+    kern, _ = _run(tmp_path, b"E1M-V2M103\0", None)
+    assert kern == "e1m-v2m103"

@@ -37,14 +37,17 @@ MAC -- and say so loudly on the console, instead of leaving the vendor
 default that every such board shares. Only when there is no eMMC
 either does the vendor default remain, again with a WARNING line.
 
+Also publish the validated serial as /chosen/alp,serial next to
+/chosen/alp,sku, for the Linux alp-hostname unit.
+
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
- board/renesas/rzv2n-dev/rzv2n-dev.c | 253 ++++++++++++++++++++++++++++
+ board/renesas/rzv2n-dev/rzv2n-dev.c | 261 ++++++++++++++++++++++++++++
  include/configs/rzv2n-dev.h         |  12 +-
- 2 files changed, 264 insertions(+), 1 deletion(-)
+ 2 files changed, 272 insertions(+), 1 deletion(-)
 
 diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
-index 1152ade7..413eb0f7 100644
+index 1152ade7..7de74924 100644
 --- a/board/renesas/rzv2n-dev/rzv2n-dev.c
 +++ b/board/renesas/rzv2n-dev/rzv2n-dev.c
 @@ -27,6 +27,9 @@
@@ -81,10 +84,21 @@ index 1152ade7..413eb0f7 100644
  	memcpy(alp_sku, &buf[0x18], 24);
  	alp_sku[24] = '\0';
  	printf("ALP: SoM family \"%s\" sku \"%.24s\"\n", family, &buf[0x18]);
-@@ -916,6 +929,245 @@ int ft_system_setup(void *blob, struct bd_info *bd)
- 	return 0;
- }
+@@ -913,9 +926,256 @@ int ft_system_setup(void *blob, struct bd_info *bd)
+ 	if (ret)
+ 		printf("ALP: failed to publish /chosen/alp,sku (%d)\n", ret);
  
++	/* The unit serial from the same validated manifest; Linux's
++	 * alp-hostname unit appends its index to the SKU hostname. */
++	if (alp_serial[0]) {
++		ret = fdt_setprop_string(blob, node, "alp,serial", alp_serial);
++		if (ret)
++			printf("ALP: failed to publish /chosen/alp,serial (%d)\n", ret);
++	}
++
++	return 0;
++}
++
 +/*
 + * Fleet-unique (NOT globally unique -- that needs a purchased IEEE OUI
 + * block) locally-administered Ethernet MAC derivation from the SoM
@@ -316,9 +330,9 @@ index 1152ade7..413eb0f7 100644
 +static int do_alp_eth_mac(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
 +{
 +	alp_eth_mac_bringup();
-+	return 0;
-+}
-+
+ 	return 0;
+ }
+ 
 +U_BOOT_CMD(alp_eth_mac, 1, 0, do_alp_eth_mac,
 +	   "derive ethaddr/eth1addr from the SoM serial",
 +	   ""
@@ -327,7 +341,7 @@ index 1152ade7..413eb0f7 100644
  int board_late_init(void)
  {
  	bool v2n_m1;
-@@ -924,6 +1176,7 @@ int board_late_init(void)
+@@ -924,6 +1184,7 @@ int board_late_init(void)
  	alp_clk5l_fixup();
  
  	v2n_m1 = alp_som_is_v2n_m1();
