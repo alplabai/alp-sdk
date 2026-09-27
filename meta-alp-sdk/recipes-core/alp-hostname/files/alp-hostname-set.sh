@@ -8,12 +8,18 @@
 # property (no validated manifest, older bootloader) the distro default from
 # alp.conf stays. Always exits 0: a missing SKU is not a boot failure.
 #
-# ALP_SKU_PROP / ALP_HOSTNAME_FILE / ALP_KERNEL_HOSTNAME override the three
-# paths for tests/scripts/test_alp_hostname_set.py only.
+# When U-Boot also publishes the unit serial (/chosen/alp,serial, patch
+# 0010), it is appended so units of one SKU get distinct names:
+# "e1m-v2m103-2026w38-0001". The whole serial, not just its index: the
+# index restarts every ISO week.
+#
+# ALP_SKU_PROP / ALP_SERIAL_PROP / ALP_HOSTNAME_FILE / ALP_KERNEL_HOSTNAME
+# override the paths for tests/scripts/test_alp_hostname_set.py only.
 
 set -u
 
 prop=${ALP_SKU_PROP:-/proc/device-tree/chosen/alp,sku}
+sprop=${ALP_SERIAL_PROP:-/proc/device-tree/chosen/alp,serial}
 etc=${ALP_HOSTNAME_FILE:-/etc/hostname}
 kern=${ALP_KERNEL_HOSTNAME:-/proc/sys/kernel/hostname}
 [ -r "$prop" ] || exit 0
@@ -21,14 +27,22 @@ kern=${ALP_KERNEL_HOSTNAME:-/proc/sys/kernel/hostname}
 # "E1M-V2M103" -> "e1m-v2m103": lowercase, [a-z0-9-] only, no stray dashes.
 # This is the whole trust boundary for a raw EEPROM field: tr -c maps every
 # other byte to '-' before the value is used anywhere.
-name=$(tr -d '\0' <"$prop" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-' |
-	sed -e 's/--*/-/g' -e 's/^-//' -e 's/-$//')
+sanitise() {
+	tr -d '\0' <"$1" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-' |
+		sed -e 's/--*/-/g' -e 's/^-//' -e 's/-$//'
+}
+
+name=$(sanitise "$prop")
 [ -n "$name" ] || exit 0
+if [ -r "$sprop" ]; then
+	serial=$(sanitise "$sprop")
+	[ -n "$serial" ] && name="$name-$serial"
+fi
 
 # Write the kernel hostname directly (no dependency on a hostname binary)
 # and log either outcome.
 if echo "$name" >"$kern" 2>/dev/null; then
-	echo "alp-hostname: $name (from /chosen/alp,sku)"
+	echo "alp-hostname: $name (from /chosen)"
 else
 	echo "alp-hostname: WARNING: could not set kernel hostname to $name" >&2
 fi
