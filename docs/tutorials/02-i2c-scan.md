@@ -180,11 +180,11 @@ Expected:
 0x4E ACK   -- TAS2563 U28 smart amp, right channel
                (metadata/boards/e1m-x-evk.yaml:323)
 0x50 ACK   -- 24C128 EEPROM, the SoM's `e1m_i2c0:` block
-               (metadata/e1m_modules/E1M-V2N101.yaml:56-59)
+               (metadata/e1m_modules/E1M-V2N101.yaml:58-61)
 0x58 ACK   -- SAME 24C128 EEPROM, its second device-select header
                (`1010` -> 0x50, `1011` -> 0x58, same A2/A1/A0 straps) --
                not a second chip, nothing to source (alp-sdk#1976)
-               (metadata/e1m_modules/E1M-V2N101.yaml:69)
+               (metadata/e1m_modules/E1M-V2N101.yaml:71)
 0x68 ACK   -- BMI323 U13 IMU (alternate)
                (include/alp/boards/alp_e1m_x_evk_routes.h:123)
 0x69 ACK   -- ICM-42670 U12 IMU (canonical primary)
@@ -212,7 +212,7 @@ anomaly pending the next respin, not a sixth/seventh rail monitor.
 
 BRD_I2C is the SoM's RIIC8 housekeeping bus -- DA9292, ACT88760, OPTIGA,
 TMP112, the clock generator, and the GD32 supervisor all sit here
-(`metadata/e1m_modules/E1M-V2N101.yaml:41-55`), but `BOARD_I2C_SENSORS`
+(`metadata/e1m_modules/E1M-V2N101.yaml:41-57`), but `BOARD_I2C_SENSORS`
 does not reach it (see above).  RIIC8/BRD_I2C is Cortex-A55/Linux-
 exclusive (`metadata/e1m_modules/v2n/core-ownership.yaml`) -- there is
 no CM33/Zephyr path to it at all.  On Linux it is numeric bus 8
