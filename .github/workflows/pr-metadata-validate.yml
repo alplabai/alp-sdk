@@ -681,7 +681,16 @@ jobs:
         # comment above for the sum-of-caps it has to clear).
         timeout-minutes: 20
         run: |
-          python3 -m pytest tests/scripts/ -n auto -v --tb=short
+          python3 -m pytest tests/scripts/ -n auto -m "not repo_writes" -v --tb=short
+
+      # The few modules that write into the real checkout and clean up after
+      # themselves (tests/scripts/conftest.py `_REPO_WRITER_MODULES`) run on
+      # their own after the parallel sweep, so no xdist worker can glob a
+      # file they have only temporarily put there (#2328).
+      - name: Pytest -- repo-writing tests (serial)
+        timeout-minutes: 10
+        run: |
+          python3 -m pytest tests/scripts/ -m repo_writes -v --tb=short
 
       # The gd32-bridge protocol vectors must stay in lockstep with
       # the generator.  The script's --check mode exits non-zero if

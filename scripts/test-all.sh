@@ -693,13 +693,15 @@ stage_pytest_scripts() {
         return 99
     fi
     # pytest-xdist (a [dev] dependency since #2328) spreads the ~4,400 tests
-    # over every core, as CI does; without it the stage still runs, serially.
-    xdist_args=""
+    # over every core, as CI does: a parallel sweep, then the modules that
+    # write into the real checkout on their own (tests/scripts/conftest.py
+    # _REPO_WRITER_MODULES). Without xdist the stage still runs, serially.
     if python3 -c 'import xdist' >/dev/null 2>&1; then
-        xdist_args="-n auto"
+        python3 -m pytest tests/scripts/ -q -n auto -m "not repo_writes" || return 1
+        python3 -m pytest tests/scripts/ -q -m repo_writes || return 1
+    else
+        python3 -m pytest tests/scripts/ -q || return 1
     fi
-    # shellcheck disable=SC2086  # split on purpose: empty or "-n auto"
-    python3 -m pytest tests/scripts/ -q $xdist_args || return 1
 
     # tests/parity/ is NOT under tests/scripts/, so the seam-1 comparator's own
     # 15 unit tests were excluded from this stage AND from parity-seam1.yml,

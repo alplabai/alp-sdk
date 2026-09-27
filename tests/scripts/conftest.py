@@ -22,6 +22,41 @@ _CLANG_FORMAT_STYLE = _REPO / ".clang-format"
 # mismatch into a false "generator drifted" failure.
 _CLANG_FORMAT_PIN = "22.1.5"
 
+# Modules whose tests temporarily write into the real checkout, then clean up
+# (#2328). Serially that is harmless; under pytest-xdist another worker that
+# globs the same directory can see the transient file mid-test. It was
+# observed: test_abi_snapshot's real-tree check picked up the freeze-gate
+# test's fake docs/abi/v99.99-snapshot.json as the last released snapshot.
+# Each module listed here gets the `repo_writes` marker. CI and test-all.sh
+# run `-n auto -m "not repo_writes"` first and then `-m repo_writes`
+# serially, so no parallel test ever overlaps one of these. A new test that
+# writes into the checkout (instead of tmp_path) must be added here.
+_REPO_WRITER_MODULES = frozenset({
+    "test_abi_snapshot_freeze_gate",  # docs/abi/v99.9x-snapshot.json
+    "test_validate_metadata_slot0_address",  # metadata/e1m_modules/.test-*.yaml
+    "test_validate_metadata_memory_authority",  # metadata/e1m_modules/.test-*.yaml
+    "test_validate_metadata_som_memory_population",  # metadata/e1m_modules/.test-*.yaml
+    "test_validate_metadata_soc_peripheral_instance_uniqueness",  # metadata/e1m_modules/.test-*.yaml
+    "test_validate_metadata_duplicate_keys",  # metadata/chips/.test-dup-*.{yaml,json}
+    "test_check_atoc_class_disagreement",  # metadata/e1m_modules/.test-*.yaml
+    "test_check_atoc_aperture_tiling",  # metadata/e1m_modules/.test-*.yaml
+    "test_test_all_worktree",  # `git worktree add` against the shared .git
+})
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "repo_writes: writes into the real checkout; run serially, never "
+        "alongside pytest-xdist workers (see _REPO_WRITER_MODULES)",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    for item in items:
+        if Path(str(item.fspath)).stem in _REPO_WRITER_MODULES:
+            item.add_marker(pytest.mark.repo_writes)
+
 
 def clang_format_text(tmp_path: Path, name: str, text: str) -> str:
     """Write `text` under tmp_path and run it through the repo's clang-format,
