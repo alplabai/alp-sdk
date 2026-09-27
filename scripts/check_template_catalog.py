@@ -43,6 +43,13 @@ nothing here may silently drift from it. This gate fails when:
     is exempt when `test.testcase_yaml` lists it (SDK CI wiring the
     scaffold drops on purpose).
 
+Wiring: scripts/test-all.sh runs this gate through the quality registry
+(metadata/quality-tasks-v1.json, the required-gate-scripts stage). CI has no
+workflow step for it; it reaches CI only through
+tests/scripts/test_check_template_catalog.py::test_committed_catalog_conforms,
+which runs it against the real catalog inside `pytest tests/scripts/`. Keep
+that test (or add a direct step) -- without it the gate goes silent in CI.
+
 Run locally:
 
     python3 scripts/check_template_catalog.py

@@ -150,6 +150,24 @@ def test_core_dir_testcase_yaml_is_exempt():
     assert ctc._check_core_files_declared(rec) == []
 
 
+def test_root_app_dir_core_is_not_walked():
+    """Characterises the documented blind spot: a core whose `dir` is the
+    example root is skipped, so even an undeclared source there passes this
+    check. Pinned so extending coverage is a deliberate change, not drift."""
+    rec = copy.deepcopy(next(t for t in _catalog()["templates"] if t["id"] == "iot"))
+    rec["cores"][0]["dir"] = "."
+    rec["files"]["user_owned"] = ["board.yaml"]
+    assert ctc._check_core_files_declared(rec) == []
+
+
+def test_core_dir_with_no_tracked_files_is_vacuous():
+    """A `dir` git tracks nothing under yields no #2241 problem -- the stale
+    path is `_check_cores_match_board_yaml`'s to report, not this check's."""
+    rec = copy.deepcopy(next(t for t in _catalog()["templates"] if t["id"] == "iot"))
+    rec["cores"][0]["dir"] = "./no-such-app-dir"
+    assert ctc._check_core_files_declared(rec) == []
+
+
 def test_core_files_check_reports_git_failure(monkeypatch):
     """Outside a git checkout the #2241 check must fail through the gate's
     own `FAIL · problem` output, never escape as a raw traceback."""
