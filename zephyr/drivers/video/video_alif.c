@@ -102,6 +102,16 @@ BUILD_ASSERT(!IS_ENABLED(CONFIG_VIDEO_ALIF_CAM) || !IS_ENABLED(CONFIG_SOC_SERIES
 #define WORKQ_PRIORITY   7
 K_KERNEL_STACK_DEFINE(alif_isr_cb_workq, WORKQ_STACK_SIZE);
 
+/*
+ * Bug #2342 revision (bench run 341): bounded wait, in alif_cam_flush(cancel),
+ * for an armed capture to reach its frame-end STOP before soft-resetting the
+ * CPI -- see the wait's own comment. Not derived from a Kconfig frame-rate
+ * figure; plain constant chosen as generous margin over one frame period at
+ * the slowest frame rate any supported sensor runs at. If it elapses with no
+ * STOP seen, the DMA is idle (no pixels arriving) and resetting is safe.
+ */
+#define CPI_FLUSH_FRAME_END_TIMEOUT_MS 500
+
 extern size_t fourcc_to_plane_size(uint32_t fourcc, uint8_t plane_id, size_t buffer_size);
 extern int fourcc_to_numplanes(uint32_t fourcc);
 extern unsigned int pix_fmt_bpp(uint32_t fmt);
@@ -369,6 +379,15 @@ static inline void hw_cam_start_video_capture(const struct device *dev)
  * CAM_CTRL write) and no wait on the raw CAM_INTR STOP bit either: the
  * soft reset is unconditional and bench-proved to freeze the DMA
  * regardless of BUSY or STOP state, so there is nothing left to wait for.
+ *
+ * Bug #2342 revision (bench run 341): this is only safe with no AXI write
+ * burst in flight. Calling this while a capture is still actively writing
+ * mid-frame wedged the SRAM0 write path in 12 of 212 bench events (core
+ * stalls in/just after this call; AXI-AP reads still work but a write never
+ * completes). Every caller must first either stop the source (stream_stop's
+ * stop-source-first order: endpoint/sensor stopped before this call) or wait
+ * for the frame to end (alif_cam_flush(cancel)'s bounded poll on raw CAM_INTR
+ * STOP) before reaching here.
  *
  * @param regs CPI register base address
  * @param irq_mask Interrupts to mask for the duration (0 to leave
@@ -1222,11 +1241,66 @@ static int alif_cam_flush(const struct device *dev, bool cancel)
 
 		k_mutex_lock(&data->lock, K_FOREVER);
 
+		/*
+		 * Bug #2342 revision (bench run 341): a soft reset landing
+		 * mid-frame, while the CPI is still actively writing an AXI
+		 * burst, wedges the SRAM0 write path -- core stalls in/just
+		 * after hw_cam_quiesce() below, 12/212 runs, AXI-AP reads
+		 * still working but a write never completing. Frame-boundary
+		 * resets (0/120) and stream_stop's stop-source-first order
+		 * (0/50) never hung. If a capture is armed (CAM_CTRL START
+		 * set) and the frame hasn't ended yet (raw CAM_INTR STOP not
+		 * yet latched -- FCFG ROW bounds the frame in hardware, so an
+		 * armed capture always reaches STOP within one frame), wait
+		 * for that STOP instead of resetting into the burst.
+		 */
+		if ((sys_read32(regs + CAM_CTRL) & CAM_CTRL_START) &&
+		    !(sys_read32(regs + CAM_INTR) & INTR_STOP)) {
+			bool frame_ended = false;
+			int waited_ms = 0;
+
+			/*
+			 * data->lock dropped for this poll: INTR_STOP is
+			 * already masked and cb_work already cancelled above,
+			 * so nothing re-arms the CPI (hw_cam_start_video_capture())
+			 * behind this wait's back. The only other CAM_CTRL
+			 * writer is alif_cam_enqueue()'s starved-resume path,
+			 * and that only fires once `data->starved` is set,
+			 * which only happens after a capture has already been
+			 * fully stopped (hw_cam_cpi_only_stop()/hw_cam_quiesce())
+			 * -- never while CAM_CTRL START is still set, the very
+			 * condition guarding this branch. Holding the lock
+			 * across the poll would also block every other
+			 * data->lock caller for up to the full timeout.
+			 */
+			k_mutex_unlock(&data->lock);
+
+			while (waited_ms < CPI_FLUSH_FRAME_END_TIMEOUT_MS) {
+				if (sys_read32(regs + CAM_INTR) & INTR_STOP) {
+					frame_ended = true;
+					break;
+				}
+				k_msleep(1);
+				waited_ms++;
+			}
+
+			if (!frame_ended) {
+				LOG_WRN("Timed out waiting for frame end before "
+					"flush(cancel) reset (CAM_CTRL=0x%08x, "
+					"CAM_INTR=0x%08x)",
+					sys_read32(regs + CAM_CTRL),
+					sys_read32(regs + CAM_INTR));
+			}
+
+			k_mutex_lock(&data->lock, K_FOREVER);
+		}
+
 		/* See hw_cam_quiesce() for why this is the only safe way to
 		 * stop: soft reset via hw_cam_quiesce(). INTR_STOP is already
 		 * masked above; passing it again here is a harmless re-mask,
 		 * kept so this call matches every other hw_cam_quiesce() call
-		 * site.
+		 * site. The wait above (if it ran) guarantees no AXI write
+		 * burst is in flight when this reset lands (#2342).
 		 */
 		hw_cam_quiesce(regs, INTR_STOP);
 
