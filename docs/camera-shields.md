@@ -737,19 +737,66 @@ bench-confirmed on E1M-AEN803 2026W36-0001 (bench runs 316-331):
    corrected to the exact 972 lines (`0x03cc`, bench run 321). `OPB_SIZE_V`
    (`0x304c`) cleared to 0, the mainline Linux imx335 driver's own
    binned-mode value. `imx335_bin_none` gets a matching `HNUM` restore
-   (`0x0a20`). NOT included: correcting `imx335_bin_none`'s own `Y_OUT_SIZE`
-   (`0x07ac` = 1964) -- both upstream Zephyr's own `imx335_init_params`
-   (`Y_OUT_SIZE` `0x0798` = 1944) and the mainline Linux driver's
-   full-resolution mode use 1944, so `0x07ac` is the same overrun class as
-   bug 3 above for any full-resolution caller. Full-resolution mode is
-   UNBENCHED (only the 2x2-binned mode is exercised) -- tracked as issue
-   #2334.
+   (`0x0a20`).
+
+4. **Full-resolution mode's own `Y_OUT_SIZE` overrun (issue #2334).**
+   `imx335_bin_none`'s `Y_OUT_SIZE` was upstream's `0x07ac` (1964) -- the
+   same overrun class as bug 3, but for the all-pixel (2592x1944) path.
+   Both upstream Zephyr's own `imx335_init_params` (`Y_OUT_SIZE` `0x0798` =
+   1944) and the mainline Linux imx335 driver's full-resolution mode table
+   (`raspberrypi/linux`, branch `rpi-6.12.y` -- register value carried as a
+   hardware fact, no GPL code copied) agree on 1944; corrected to `0x0798`.
+   No matching `HNUM`/`WINMODE` change was needed: unlike bug 3's
+   `imx335_bin_2x2` (an explicit, bench-derived `HNUM` this driver had no
+   formula for), `imx335_bin_none`'s restored `HNUM` (`0x0a20` = 2592)
+   already matches both `imx335_init_params` and the Linux full-resolution
+   table's `HNUM`, and its `AREA2_WIDTH_1`/`AREA3_WIDTH_1` pair (40 / 3928)
+   already matches the Linux full-resolution table too -- there is no known
+   width defect at full resolution, only the line-count one. **Full-
+   resolution mode remains UNBENCHED**: a 2592x1944 raw frame does not fit
+   the 4 MiB SRAM0 capture buffer this shield's example budgets, so this
+   fix is a register-table correction verified against the two reference
+   tables above, not a captured frame. See "Full-resolution mode: why it
+   can't be captured, and how to verify it without capturing it" below for
+   the diagnostic that would confirm it on real silicon.
 
 If bootstrapping against a Zephyr checkout that already has alp-sdk's
 0001-0003 patches applied, re-running the whole patch list fails
 re-applying 0001 (`west patch` is not idempotent against an already-patched
 tree) -- apply 0004 by hand (`git apply` from the Zephyr repo root) or
 start from a clean checkout.
+
+### Full-resolution mode: why it can't be captured, and how to verify it without capturing it (issue #2334)
+
+A 2592x1944 RAW10 frame is roughly 6.3 MB (10 bits/pixel, packed) -- it does
+not fit the 4 MiB SRAM0 budget `aen-camera-firstlight` and every other
+IMX335-using example capture into, so item 4's `Y_OUT_SIZE` fix above has
+**not been bench-verified against a captured full-resolution frame**, and
+cannot be with this shield's current memory budget.
+
+The CPI (Alif E8 camera parallel interface) exposes two interrupt bits
+distinct from its own write-DMA arm bit (`CAM_CTRL_START`):
+`CAM_INTR_VSYNC`/`CAM_INTR_HSYNC` ("VSYNC/HSYNC Detected", per the Alif
+CMSIS DFP's `cpi.h` -- vendor reference, not part of this repo), already
+wired (currently `LOG_DBG`-only) in `zephyr/drivers/video/video_alif.c`'s
+`alif_video_cam_isr()`. Counting
+HSYNC edges between two VSYNC edges gives the exact transmitted line count
+for a frame without the CPI ever writing a single pixel byte to memory, IF
+sync detection is independent of the write-DMA arm (register naming
+suggests it is; not bench-confirmed in this repo). A scratch-only
+diagnostic recipe implementing this (plus a bounded-write fallback for a
+handful of KB if that assumption turns out false, and the pre-flight check
+that decides between them) lives outside this repo, is NOT product code,
+and is not built by any CI job here -- see the diagnostic's own README for
+the full plan, including why the fallback provably cannot overrun memory.
+Width (2592 columns) was not included in this diagnostic's scope: register
+analysis (item 4 above) found no analogous width defect in
+`imx335_bin_none` to confirm.
+
+Until that diagnostic runs on real silicon, this fix is a register-table
+correction verified against two independent reference sources (this
+driver's own `imx335_init_params` and the mainline Linux imx335 driver's
+full-resolution mode table), not a bench result -- treat it accordingly.
 
 **Why this shield uses Camera mode, not Controller mode.** Controller mode
 requires stating this sensor's own line/frame length as fixed IPI-pixclk-cycle

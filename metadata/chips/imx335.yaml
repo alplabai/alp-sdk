@@ -134,6 +134,18 @@ notes: |
   Stage B section and docs/camera-shields.md's own Stage B section for
   the full mechanism.
 
+  Issue #2334: imx335_bin_none's (full-resolution/all-pixel mode)
+  Y_OUT_SIZE was upstream's 0x07ac (1964 lines) for a 2592x1944 format --
+  the same overrun class as the 2x2-binned bug above. Corrected to 0x0798
+  (1944), matching both this driver's own imx335_init_params and the
+  mainline Linux imx335 driver's full-resolution mode table. NOT
+  bench-verified: a 2592x1944 raw frame does not fit the 4 MiB SRAM0
+  capture budget, so this is a register-table correction against the two
+  reference tables above, not a bench result -- see changelog.d/2334.md
+  and docs/camera-shields.md's "Full-resolution mode: why it can't be
+  captured, and how to verify it without capturing it" section for the
+  planned diagnostic.
+
 bus:              i2c
 i2c:
   addresses:
@@ -166,7 +178,9 @@ verification:
                                      # STILL partial, not full: colour/AWB/CCM, frame rate AT
                                      # THE SENSOR, AE in varied lighting, and the sensor's
                                      # full-resolution mode all remain unverified, see notes
-                                     # above.
+                                     # above. Issue #2334's Y_OUT_SIZE fix for full-resolution
+                                     # mode is a register-table correction, NOT bench-verified
+                                     # (a full-res frame does not fit the SRAM0 capture budget).
   smoke_tests:    none               # no chips/ portable driver surface exists to unit-test; see
                                      # docs/camera-shields.md's "Build coverage" section for this
                                      # sensor's Zephyr-level coverage decision (why no
