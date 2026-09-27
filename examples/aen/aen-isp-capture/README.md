@@ -43,7 +43,45 @@ west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
     "-DSHIELD=e1m_evk_rpi_csi raspberry_pi_global_shutter_camera" \
     "-DAEN_ISP_IMX296=ON"
 # flash + run per docs/aen-bench-bringup.md.
+
+# IMX335, AE off (issue #2327 Stage B, BUILD-ONLY -- never run on silicon):
+west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
+    examples/aen/aen-isp-capture -- \
+    "-DEXTRA_ZEPHYR_MODULES=<path-to-alp-sdk>;<path-to-hal_alif>" \
+    "-DSHIELD=e1m_evk_rpi_csi innomaker_cam_imx335" \
+    "-DAEN_ISP_IMX335=ON" "-DEXTRA_CONF_FILE=overlay-no-ae.conf"
+
+# IMX335, AE on (hal_alif patch 0014's envelope, BUILD-ONLY):
+west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
+    examples/aen/aen-isp-capture -- \
+    "-DEXTRA_ZEPHYR_MODULES=<path-to-alp-sdk>;<path-to-hal_alif>" \
+    "-DSHIELD=e1m_evk_rpi_csi innomaker_cam_imx335" \
+    "-DAEN_ISP_IMX335=ON"
 ```
+
+## IMX335 (`-DAEN_ISP_IMX335=ON`, issue #2327 Stage B) — bench-verified, run 332 (AE-on scenario)
+
+Same shape as the IMX296 column above, with two real differences: IMX335's
+native 2x2-binned output is a fixed 1296x972 (ISP input), ISP-CROPPED to
+1280x960 (ISP output — the crop, `&isp`'s `crop-x0`/`crop-y0` = 8/6, lives in
+the `innomaker_cam_imx335` SHIELD's own overlay, not a per-example one, since
+it is a property of this sensor module — see `docs/camera-shields.md`'s Stage
+B section for the derivation and `src/backends/camera/alif_isp_pico.c`'s
+`BUILD_ASSERT` that proves it still produces 1280x960); and its AE envelope
+is hal_alif patch 0014 (`imx335_ae_envelope.h`), capped at 30.0 dB analog
+gain (a public Sony datasheet-flyer figure, not bench-derived the way
+IMX296's 24.0 dB cap is). AWB/CCM stay on the stock ARX3A0 defaults, same as
+IMX296 — colour is NOT calibrated (bench run 332 reports a green cast with
+AWB off).
+
+**Bench run 332** (E1M-AEN803 2026W36-0001, AE-on scenario): 60 frames, AE
+converged (`ae_stable=1` at frame 50, Y mean 152), ISP output YUV420
+1280x960 via the crop above, scene complete/straight/centred — the first
+silicon confirmation of `out_form_rect`'s `left`/`top` crop offsets working
+correctly on real hardware. Only error-class log line across the whole run:
+one `FRAME_SEQ` event at stream start (the same single benign event every
+other sensor's Stage B run also logs once). The AE-off scenario
+(`-DEXTRA_CONF_FILE=overlay-no-ae.conf`) was NOT bench-run — still build-only.
 
 ## Diagnostic knobs (IMX296 only)
 

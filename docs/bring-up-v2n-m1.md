@@ -158,6 +158,15 @@ If the kernel comes up but `dxrt_init()` returns an error, see the
 upstream DEEPX troubleshooting docs at
 [`github.com/DEEPX-AI/dx_rt`](https://github.com/DEEPX-AI/dx_rt).
 
+> **Firmware must already be present on the DX-M1.** The SoM-specific
+> DEEPX-built firmware image is provisioned onto the DX-M1 separately
+> (not distributed with the SDK) before this hand-off. Verify the
+> on-module firmware matches the pinned runtime stack with
+> `dxrt-cli -s` and check the reported firmware version against
+> `PREFERRED_VERSION_dx-rt` / `PREFERRED_VERSION_dx-driver` in
+> [`conf/machine/include/e1m-v2m-deepx.inc`](../meta-alp-sdk/conf/machine/include/e1m-v2m-deepx.inc)
+> before trusting an inference result.
+
 ## Bring-up regression checks
 
 After every change in the bring-up flow, re-run these in order:
