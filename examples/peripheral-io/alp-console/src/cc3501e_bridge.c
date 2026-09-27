@@ -21,16 +21,14 @@
  * drive strength).  TODO: drop this raw poke once the Alif GPIO backend
  * muxes the LP island via pinctrl.
  *
- * ALIF_LPGPIO_PADCTRL_BASE (0x42007000) is a GLOBAL LP-domain address, not
- * an M55-HE-local one -- both cores' AHB fabric reach the same LP-GPIO
- * island at this address, so the poke is exactly as applicable on M55-HP.
- * The #if was CONFIG_SOC_..._RTSS_HE-only until #2173 review (alpCaner)
- * caught that the HP boards select CONFIG_SOC_..._RTSS_HP: on HP this
- * function compiled to an empty stub and WIFI_EN never powered the
- * CC3501E on any HP target, silently. The M55-HP path through this
- * function is NOT bench-proven -- only the M55-HE poke above is confirmed
- * on silicon; widening the guard is a compile-time fix for a structural
- * bug, not a claim that HP has been measured.
+ * ALIF_LPGPIO_PADCTRL_BASE (0x42007000) is not an M55-HE-local address: the
+ * shared upstream `pin-controller@1a603000` node (ensemble_common.dtsi,
+ * included by both cores' SoC dtsi) declares this exact window as its
+ * second `reg` range, and `alp_e1m_aen801_m55_hp-pinctrl.dtsi` already
+ * muxes a different LP-GPIO pad (P15_0, RTC_ALARM) from the M55-HP pinctrl
+ * driver through it, so the poke below is equally applicable on M55-HP.
+ * Running it on M55-HP is NOT bench-proven -- only running it on M55-HE has
+ * been confirmed on silicon.
  */
 #define ALIF_LPGPIO_PADCTRL_BASE 0x42007000u
 #define ALIF_PAD_GPIO_OUTPUT     0x23u

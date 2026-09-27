@@ -88,16 +88,17 @@
 		 * spi_dw_alif.c writes RX_SAMPLE_DLY (reg 0xF0, ssi_clk cycles at
 		 * 200 MHz = 5 ns/cycle) from this property at BOTH init and PM resume
 		 * (write_rxdly(dev, info->rx_delay)); spi_dw_configure() never touches
-		 * the register outside those two paths. Because the property is unset
-		 * (0), a PM resume after init overwrites whatever runtime value
-		 * src/cc3501e_bridge.c poked with 0 -- that poke re-applies
-		 * CC3501E_BRIDGE_RX_SAMPLE_DLY (cc3501e_bridge.h) after every
-		 * alp_spi_open(), which covers the ordinary open path but NOT a PM
-		 * resume that happens between opens; this is a live risk, not a
-		 * hypothetical. CC3501E_BRIDGE_RX_SAMPLE_DLY is 4, silicon-tuned for
-		 * ~25 MHz on E1M-AEN803 serial 2026W36-0002 -- NOT 6 / ~14.3 MHz, an
-		 * earlier measurement the header itself documents as stale and not
-		 * comparable (see cc3501e_bridge.h's own correction). */
+		 * the register outside those two paths. src/cc3501e_bridge.c pokes
+		 * RX_SAMPLE_DLY itself once inside cc3501e_bridge_bringup(), after
+		 * this node's init already ran, so the unset (0) property here does
+		 * not matter today. The overwrite is LATENT, not live: only the
+		 * `#if defined CONFIG_PM_DEVICE` resume path (spi_dw_alif.c) would
+		 * re-write RX_SAMPLE_DLY from this property, and nothing in this app
+		 * enables CONFIG_PM_DEVICE. CC3501E_BRIDGE_RX_SAMPLE_DLY is 4,
+		 * silicon-tuned for ~25 MHz on E1M-AEN803 serial 2026W36-0002 --
+		 * NOT 6 / ~14.3 MHz, an earlier measurement the header itself
+		 * documents as stale and not comparable (see cc3501e_bridge.h's own
+		 * correction). */
 		pinctrl-0 = <&pinctrl_spi1>;
 		pinctrl-names = "default";
 		status = "okay";

@@ -427,12 +427,11 @@ jobs:
       # the exact roots + `-p` flags this step uses, at HEAD after the dev
       # merge and this change's own iot-dashboard AEN board overlay
       # backfill: 96 AEN801 configurations (both HE + HP), 91 AEN803 (187
-      # total). This supersedes every earlier count in this file -- the
-      # 153/144 totals in the job-level and #1477 comments, and this same
-      # block's own earlier 83+78=161 delta baseline -- all of which
-      # predate multiple scenario additions since (#2242, #2265, and this
-      # change). The timeout-minutes comment below points here rather than
-      # carrying its own duplicate count.
+      # total). This is the only current count in this file; every other
+      # comment above and below that mentions a scenario count is either a
+      # historical snapshot explicitly marked as such, or points back here.
+      # The timeout-minutes comment below does the latter -- it does not
+      # carry its own count.
       - name: twister · ${{ matrix.label }} on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota + camera-mjpeg-stream + iot-dashboard
         working-directory: ${{ github.workspace }}
         env:
@@ -442,10 +441,10 @@ jobs:
         # sampled runs of the PRE-#2209 combined job (both SKUs, ~92
         # builds). 30min was already ~1.54x that, kept under the job's own
         # 41min ceiling (see that job-level comment). Scenario count is not
-        # re-derived here -- see the AUTHORITATIVE `--dry-run` count (96
-        # AEN801 / 91 AEN803, both HE + HP) in the camera-mjpeg-stream
-        # comment above this step. Scaled linearly off the 1461s/92-build
-        # #2198 measurement (15.9 s/build): AEN801 projects to about
+        # re-derived here -- see the AUTHORITATIVE `--dry-run` count in the
+        # camera-mjpeg-stream comment above this step, not restated here.
+        # Scaled linearly off the 1461s/92-build #2198 measurement
+        # (15.9 s/build) at that count: AEN801 projects to about
         # 1525s/25.4min (~15% headroom under this 30min cap), AEN803 to
         # about 1445s/24.1min (~20% headroom) -- inside the cap, but not
         # the wide margin an earlier draft of this comment claimed.

@@ -47,11 +47,13 @@ both `paths:` filter blocks, adds `zephyr/boards/shields/**`, `zephyr/drivers/di
 `zephyr/drivers/mipi_dsi/**` (the shield and the CDC200 / DesignWare DSI
 drivers it compiles into this app, none previously covered by this gate), and
 adds the
-example as a sixth bounded `--testsuite-root`
-(`.github/workflows/pr-twister-aen.yml:461`
-("alp-sdk/examples/connectivity/iot-dashboard")) — the one root among the six
-that contributes a scenario to *both* SKU matrix legs, since mqtt-telemetry
-and iot-fleet-ota remain AEN801-only.
+example as the third `--testsuite-root` line in this job's (now
+seven-root) list
+(`.github/workflows/pr-twister-aen.yml:460`
+("alp-sdk/examples/connectivity/iot-dashboard")) — one of only two roots
+(alongside `camera-mjpeg-stream`, added separately by #2265) that
+contributes a scenario to *both* SKU matrix legs, since mqtt-telemetry and
+iot-fleet-ota remain AEN801-only.
 
 Verified locally (Zephyr v4.4.1 with `zephyr/patches.yml` applied, Zephyr SDK
 1.0.1 `arm-zephyr-eabi-gcc` 14.3.0, picolibc; plain twister for both SKU legs
@@ -77,7 +79,7 @@ wiring, no I2C2/RGB-LED (this app has no sensor-manifest bus of its own
 here):
 `examples/connectivity/iot-dashboard/boards/alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay:69`
 ("cc3501e_spi: spi@48104000 {") and
-`examples/connectivity/iot-dashboard/boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay:118`
+`examples/connectivity/iot-dashboard/boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay:119`
 ("alp_pins: alp-pins {"). This also turns on real coverage from
 `check_example_board_overlay_parity.py` (#2101, and its `#1009` class
 check -- a `board.yaml`-declared core with no matching overlay) and
@@ -85,9 +87,10 @@ check -- a `board.yaml`-declared core with no matching overlay) and
 example's AEN801/AEN803 pair, neither of which had anything to check
 before these files existed.
 
-**Second blocker, also review (#2242): the C-side pad-mux poke was M55-HE
-only.** `aen_lp_pads_enable_output()` -- the raw LP-GPIO pad-config store
-that actually powers WIFI_EN/nRESET -- was guarded
+**Second blocker, found by the orchestrator's own review of this change's
+first commit (73a6f2752), not the PR review: the C-side pad-mux poke was
+M55-HE only.** `aen_lp_pads_enable_output()` -- the raw LP-GPIO pad-config
+store that actually powers WIFI_EN/nRESET -- was guarded
 `#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HE)` only
 (`examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.c:10`
 ("#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HE) || defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP)")
@@ -95,9 +98,13 @@ shows the fixed guard). The HP boards select
 `CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP`, so even with the DT wiring above
 present, the function compiled to an empty stub on every HP target and
 WIFI_EN never powered the CC3501E -- a second, independent way the same
-bridge was unreachable on HP. `ALIF_LPGPIO_PADCTRL_BASE` (0x42007000) is a
-global LP-domain address reachable from either core's AHB fabric, so
-widening the guard to both cores is a straight compile-time fix, not a new
+bridge was unreachable on HP. `ALIF_LPGPIO_PADCTRL_BASE` (0x42007000) is
+not an M55-HE-local address: the shared upstream `pin-controller@1a603000`
+node (`ensemble_common.dtsi`, included by both cores' SoC dtsi) declares
+this exact window as its second `reg` range, and
+`alp_e1m_aen801_m55_hp-pinctrl.dtsi` already muxes a different LP-GPIO pad
+(P15_0, RTC_ALARM) from the M55-HP pinctrl driver through it, so widening
+the guard to both cores is a straight compile-time fix, not a new
 behaviour. This is the canonical copy; the fix propagates byte-identically
 to every non-divergent copy `scripts/check_cc3501e_bridge_copies.py`
 locks (15 copies including `iot-dashboard`'s own), and the equivalent
@@ -105,7 +112,11 @@ guard was applied by hand to the divergent `alp-console` copy, keeping its
 other divergence. **This guard widening changes every HP build of every
 AEN example that uses the bridge, not just iot-dashboard** -- it was
 undetectable before because no example had an HP board overlay to build
-against until this change added one.
+against until this change added one. `mqtt-telemetry` and
+`iot-fleet-ota` target `alp_e1m_aen801_m55_hp` too but still ship no
+`boards/` overlay at all, so their `cc3501e_bridge_bringup()` still
+returns `ALP_ERR_NOT_PRESENT_ON_THIS_SOC` on HP regardless of this guard
+fix -- a follow-up issue pending, not fixed by this change.
 
 Verified: both HP targets link with `west build`; `zephyr.dts` in each
 build tree shows `spi@48104000` `status = "okay"` with
