@@ -96,7 +96,8 @@ def build_model(*, sku: str, name: str, source: Path, out_dir: Path,
             coverage.append(Coverage(spec.backend, spec.accel_config, "incompatible",
                                      f"{spec.backend} does not accept .{src_fmt}"))
             continue
-        blob = adapter.compile(source, accel_config=spec.accel_config, out_dir=out_dir, opts=backend_opts)
+        blob = adapter.compile(source, accel_config=spec.accel_config, out_dir=out_dir,
+                               opts=backend_opts, target=spec)
         targets.append(Target(
             backend=spec.backend, silicon_ref=spec.silicon_ref,
             blob_format=blob.format, accel_config=spec.accel_config,
