@@ -92,7 +92,7 @@
  *     Kernel config: the mainline ASoC `tas2562` driver covers the
  *     TAS2563; CONFIG_SND_SOC_RCAR is already `=y` in this BSP's
  *     defconfig. tas2563-audio.cfg enables CONFIG_SND_SOC_TAS2562 and pins
- *     CONFIG_SND_AUDIO_GRAPH_CARD2 (see tas2563-audio.cfg (re-added; the earlier copy was removed
+ *     CONFIG_SND_AUDIO_GRAPH_CARD2; see tas2563-audio.cfg (re-added; the earlier copy was removed
  *     under #1171 because a codec driver with no DT consumer cannot
  *     bind -- the DT consumer now exists, below).
  *
@@ -313,7 +313,9 @@
  * (fault) are ONE shared net each across both chips (board.yaml's
  * `audio.shutdown`/`audio.fault_irq`) -- wired on the LEFT node only so
  * a single Linux GPIO consumer owns each line. imon/vmon-slot-no give
- * each amp distinct SDOUT slots (I: 0/1, V: 2/3) for I-V sense telemetry;
+ * each amp distinct SDOUT slots (I: 0/1, V: 2/3) for I-V sense telemetry
+ * (ti,vmon-slot-no is read by the 6.1 driver but is not in the upstream
+ * ti,tas2562 binding, so dtbs_check flags it);
  * the driver's default vmon slot is 2 for every instance, which would
  * collide. Playback slots are set on the codec endpoints (header
  * comment). */

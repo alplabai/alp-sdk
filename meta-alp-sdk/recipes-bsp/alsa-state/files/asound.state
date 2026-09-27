@@ -12,7 +12,7 @@
 # than the silicon default 16 (10h = 16.0 dBV, ~10 W peak into 4 ohm);
 # raise it deliberately for the enclosure/speaker in use. Code 0 is not a
 # listed level. The 6.1 driver's dB scale for this control is one code
-# off the datasheet (it labels code 1 as 9.0 dB), so read levels from the
+# off the datasheet (its TLV labels code 1 as 9.0 dB, dbvalue 900 below), so read levels from the
 # table above, not from amixer's dB column.
 state.e1mxevktas2563 {
 	control.1 {
@@ -26,7 +26,7 @@ state.e1mxevktas2563 {
 			range '0 - 28'
 			dbmin 850
 			dbmax 2250
-			dbvalue.0 950
+			dbvalue.0 900
 		}
 	}
 	control.2 {
@@ -54,7 +54,7 @@ state.e1mxevktas2563 {
 			range '0 - 28'
 			dbmin 850
 			dbmax 2250
-			dbvalue.0 950
+			dbvalue.0 900
 		}
 	}
 	control.4 {

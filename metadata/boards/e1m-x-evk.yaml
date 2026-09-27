@@ -321,11 +321,13 @@ i2c_devices:
 audio:
   codecs:
     # Stereo pair: U27 = LEFT, U28 = RIGHT, sharing one I2C bus + one I2S.
+    # E1M_X_I2C0 runs at 100 kHz (e1m-x-evk.dtsi &i2c0) with 4.7 kOhm carrier
+    # pull-ups to +VIO (R137 SCL / R144 SDA, E1M-X EVK V2 netlist).
     - { chip: tas2563, designator: U27, channel: left,  i2c_bus: E1M_X_I2C0, i2c_address: "0x4D" }   # AD0: 10k -> GND
     - { chip: tas2563, designator: U28, channel: right, i2c_bus: E1M_X_I2C0, i2c_address: "0x4E" }   # AD0: 10k -> VIO
   i2s_bus: E1M_X_I2S0              # SCLK / WS / SDI / SDO; codecs are bit-clock + frame slaves
   mclk:
-    source:  e1m_audio_clk        # E1M AUDIO_CLK: the SoM ADG reference (not routed to the TAS2563)
+    source:  e1m_audio_clk        # E1M AUDIO_CLK = Audio_CLKB: the SoC ADG/SSI reference clock. The TAS2563 has no MCLK pin.
     # CONFIRMED 2026-09-26: the Renesas RZ/V2N EVK reference dts
     # (r9a09g056n48-rzv2n-evk.dts, kernel-source SHA 6717c06) sets
     # `&audio_clkb { clock-frequency = <24576000>; };` for the identical
@@ -346,6 +348,10 @@ audio:
   # current PCB iteration -- exact E1M pads pending (maintainer assigning).
   # Amp control on the otherwise-unused E1M_X_I2S1 pads, driven as plain
   # GPIO (Linux DT pinmuxes them to GPIO, not SSI).  Wired on current PCB rev.
+  # active_low describes the nets' electrical sense (\SD_N, IRQ_N). The Linux
+  # DT encodes the same SD_N line as GPIO_ACTIVE_HIGH because the 6.1 tas2562
+  # driver drives logical 1 to power the amp up, and IRQ_N as
+  # IRQ_TYPE_EDGE_FALLING. Same wires, two vocabularies.
   shutdown:  { net: AMP.ENABLE, e1m: E1M_X_I2S1_SCLK, active_low: true }   # \SD_N -> codec shutdown-gpios (GPIO out)
   fault_irq: { net: AMP.FAULT,  e1m: E1M_X_I2S1_SDI,  active_low: true }   # IRQ_N -> fault interrupt (GPIO in); confirm SDI is I2S1 (NOT the live I2S0 audio data line)
 
