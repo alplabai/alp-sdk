@@ -1,0 +1,174 @@
+# Alp SDK chip manifest: Sony IMX335 5.0 MP colour MIPI CSI-2 (rolling shutter).
+schema_version:   1
+chip_id:          imx335
+driver_status:    none              # no chips/imx335/ portable chip-ID stub exists -- streaming
+                                     # lives entirely in upstream Zephyr's drivers/video/imx335.c
+                                     # (CONFIG_VIDEO_IMX335), reused as-is (ADR 0017 Tier 1,
+                                     # upstream-native, plus one repo patch -- unlike IMX296's
+                                     # ADR-0017-ADJACENT authored driver). This
+                                     # manifest IS one (driver_status: none, no chips/ entry) --
+                                     # catalogue-only, allowlisted in
+                                     # scripts/check_chip_manifest_parity.py's
+                                     # KNOWN_MANIFEST_NO_DRIVER, same shape as imx296.yaml.
+display_name:     "Sony IMX335 5.0 MP colour MIPI CSI-2 sensor"
+vendor:           sony
+mpn_population:
+  - "IMX335"
+
+datasheet:
+  primary:        "Sony IMX335 public preliminary datasheet"
+
+notes: |
+  Streaming driver: upstream Zephyr v4.4.1 drivers/video/imx335.c
+  (CONFIG_VIDEO_IMX335), NOT vendored -- consumed as-is per ADR 0017 Tier 1
+  (upstream-native). One repo-carried patch on top, zephyr/patches/zephyr/
+  0004-imx335-2lane-link-freq-and-binning.patch (zephyr/patches.yml), fixing
+  three real bugs bench-found at this sensor's 2-lane/10-bit/1188
+  Mbps-per-lane configuration: (1) registers VIDEO_CID_LINK_FREQ so
+  video_get_csi_link_freq() (video_common.c) reads the sensor's real 594 MHz
+  D-PHY link frequency instead of mis-approximating it from the upstream
+  driver's own (untouched) VIDEO_CID_PIXEL_RATE -- the same
+  ERRSOTSYNCHS/PHY_FATAL failure signature OV5647 hit (issue #2248) before
+  its own fix; (2) writes the SYSMODE/MIPI output-timing registers this lane
+  count/bit rate needs (upstream writes neither, for any configuration) --
+  without them, a payload-checksum/CRC error storm; (3) fixes the
+  2x2-binned mode's HNUM/Y_OUT_SIZE, which upstream leaves at values that
+  transmit a 1308x984 frame into this driver's own 1296x972 buffer (a
+  12-pixel/12-line overrun). Shield: zephyr/boards/shields/
+  innomaker_cam_imx335/. See docs/camera-shields.md for the full
+  driver/shield/control reference and changelog.d/2327.md for the bench
+  history.
+
+  Issue #2327 (E1M-AEN803 2026W36-0001, E1M-EVK, csi_i2c = I2C1 @
+  0x49011000), bench-verified (bench runs 316-331): raw capture, 2x2-binned
+  1296x972 RAW10, through <alp/camera.h> -- 6/6 consecutive clean captures
+  (run 330), 0 CSI CRC errors, 0 IPI-fatal events, correct stride, no
+  overrun. This VERIFIES 2-lane CSI-2 D-PHY lock at 1188 Mbps/lane on
+  E1M-AEN803 2026W36-0001 + E1M-EVK through the SoM R2 pinout adapter (runs
+  319-330; run 318 without the MIPI-timing patch showed the CRC storm this
+  fixes). The module answered at CCI 0x1A (the only device on the J5
+  camera bus) with CAM_EN (J5 pin 11) untouched, and STANDBY (0x3000), VMAX
+  (0x3030-0x3032), HMAX (0x3034) and LANEMODE (0x3a01) all read back at
+  their power-on-reset defaults (0x01, 0x001194 = 4500, 0x0226 = 550, 0x03
+  respectively) before the patch's config writes. That bench unit's E1M-EVK
+  carries the J5 pin-11 pull-up rework (docs/boards/e1m-evk.md, originally
+  fitted for OV5647) -- whether the IMX335 module self-enables on a STOCK
+  carrier (no pull-up rework) is NOT established by this bench result. The
+  D-PHY Stop-state check (STOPSTATE 0x00010003 before stream start) passed
+  normally once the patch's MIPI-timing registers were written -- no
+  no-lp11-clock-lane-park-style skip property was needed. The first
+  post-start frame was bad in 3 of the 4 first frames checked (run 329 --
+  darkened lower rows -- and both of run 331's loads -- near-black rows
+  466-583; all-zero rows 759-778; run 330's own first frame was clean);
+  the kept second frame was clean every time. aen-camera-firstlight
+  discards the first frame for this sensor rather than rely on a clean
+  run happening again.
+
+  Run 331 (bench-verified): PRODUCT-CODE confirmation -- the fbf9c8de3
+  tree with ONLY patch 0004 applied on a pristine Zephyr v4.4.1 checkout,
+  no other diag-only code. Run 331 applied patch 0004 at sha256
+  2459cd9511dac95fa682197302b1d33b201dbacd3d4df02c2097e53dbd5278c0 (the
+  fbf9c8de3 file); the committed patch file was regenerated afterward
+  (sha256 47d7d5ac6dd2293b3ffb46562f031a543867a618b0da7dbe596c83ca609a400d)
+  and differs from what run 331 tested ONLY in comments -- no register
+  writes, ordering, or logic changed. The kept (second) frame was clean: 1296x972, 0 IPI/CRC
+  error lines, only one FRAME_SEQ event at start, correct stride, 0
+  near-black rows, nothing written past the buffer, a clean close, and
+  CSI_PIXCLK_CTRL read back 0x00020001. csi-halt-en was left at its
+  default (kept) -- no IPI-halt/"nohalt" DT override was needed.
+
+  NOT bench-verified -- do not claim any of the following happened on
+  silicon: frame rate/fps (not measured); the module self-enabling on a
+  stock, non-reworked carrier (the J5 pin-11 rework is a module-enable
+  concern, unrelated to D-PHY lock -- see the CAM_EN note above); D-PHY
+  lock on any unit/carrier other than E1M-AEN803 2026W36-0001 on this
+  specific E1M-EVK; ISP/AE/colour AT THE TIME OF STAGE A (see Stage B
+  below, now bench-verified for ISP/AE); and the sensor's full-resolution
+  (non-binned) mode, still unverified.
+
+  Issue #2327 Stage B, bench-verified runs 332-334 (E1M-AEN803
+  2026W36-0001): the 2x2-binned frame now also reaches the ISP-Pico with
+  AE, through hal_alif patch 0014
+  (drivers/isp/isp_wrapper/inc/imx335_ae_envelope.h,
+  CONFIG_VIDEO_ISP_VSI_CALIB_IMX335) -- sourced from upstream imx335.c's
+  own VMAX/SHR0-min constants plus one public Sony datasheet-flyer figure
+  (30 dB analog-gain ceiling; above that this sensor's single GAIN
+  register, 0x30e8, is digital). The ISP's own crop (&isp's crop-x0/
+  crop-y0 = 8/6, in the innomaker_cam_imx335 shield's own overlay) reduces
+  the 1296x972 native frame to 1280x960 for
+  examples/connectivity/camera-mjpeg-stream, reusing that example's
+  existing 1280x960 buffer budget. AWB/CCM are NOT calibrated for this
+  sensor -- falls through to the stock ARX3A0 defaults.
+
+  Run 332 (aen-isp-capture, AE-on scenario): 60 frames, AE converged
+  (ae_stable=1 at frame 50, Y mean 152), ISP output YUV420 1280x960 via
+  the crop above, scene complete/straight/centred -- the first silicon
+  confirmation of the ISP crop's left/top offsets working correctly.
+  Green cast with AWB off (expected, no colour calibration exists). Run
+  333 (camera-mjpeg-stream, aen_imx335 scenario): 1280x960, app stats
+  fps=30 fail=0 retry=0, one HTTP client 29.99 fps / 772.7 KB/s over
+  30 s, ~26.3 KB JPEGs, mild lavender/cyan cast (stock AWB). Run 334
+  (same scenario, after crop-ownership/gain-rounding/exposure-cap
+  follow-up changes): crop 8/6 confirmed from the shield's own DT,
+  driver frame_rate 30, HMAX 0x0226 / VMAX 0x001194 read back over I2C,
+  fps=30 fail=0 retry=0, one client 29.98 fps / 773.5 KB/s over 30 s,
+  ~26.4 KB JPEGs -- ran without regression, though the follow-up
+  changes' specific effects are not separately bench-proven by this
+  run. Only error-class log line across all three runs: one FRAME_SEQ
+  event at stream start.
+
+  The IMX335 ISP INPUT is fixed at 1296x972 regardless of what fps a
+  caller requests: src/backends/camera/alif_isp_pico.c only ever
+  forwards an fps request to the OV5647 sensor node (hardcoded), so
+  IMX335 (and IMX296) free-run at their own driver default -- 30 fps for
+  IMX335 (upstream imx335.c's own default), which already matches
+  hal_alif patch 0014's AE envelope with no explicit request needed.
+  This app-level backend gap is tracked as issue #2338.
+
+  NOT bench-verified by runs 332-334: colour/AWB/CCM accuracy (no
+  calibration exists); the frame rate AT THE SENSOR by an independent
+  method (runs 333/334's HMAX/VMAX I2C readback confirms the driver's
+  own programmed state, not an external timing measurement); AE
+  behaviour in lighting other than these runs' own scene; and the AE-off
+  aen-isp-capture scenario, never bench-run. See changelog.d/2327.md's
+  Stage B section and docs/camera-shields.md's own Stage B section for
+  the full mechanism.
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x1A, scope: "CCI address, bench-confirmed the only device on the J5
+        camera bus on E1M-AEN803 2026W36-0001" }
+  max_clock_hz:   400000
+
+mipi:
+  lanes_supported: [2]
+
+resolutions:
+  max:            [2592, 1944]
+  features:       [2x2_binning]
+
+kconfig:
+  zephyr:         VIDEO_IMX335      # upstream Kconfig symbol (drivers/video/Kconfig.imx335,
+                                     # DT_HAS_SONY_IMX335_ENABLED default y) -- no portable
+                                     # ALP_SDK_CHIP_IMX335 -- see driver_status above.
+  baremetal:      n/a               # no bare-metal (CMSIS, no-RTOS) camera capture path exists
+                                     # in this tree for any sensor on this bus.
+
+families:
+  - aen
+
+verification:
+  hil_silicon:    partial           # Bench-verified: 2x2-binned 1296x972 RAW10 raw capture
+                                     # through <alp/camera.h>, 6/6 consecutive clean frames, 0
+                                     # CSI/IPI errors (bench runs 316-331); ISP-Pico + AE +
+                                     # camera-mjpeg-stream ALSO bench-verified (runs 332-334) --
+                                     # STILL partial, not full: colour/AWB/CCM, frame rate AT
+                                     # THE SENSOR, AE in varied lighting, and the sensor's
+                                     # full-resolution mode all remain unverified, see notes
+                                     # above.
+  smoke_tests:    none               # no chips/ portable driver surface exists to unit-test; see
+                                     # docs/camera-shields.md's "Build coverage" section for this
+                                     # sensor's Zephyr-level coverage decision (why no
+                                     # tests/zephyr/video_sensors/ emulator suite was added for
+                                     # this upstream driver).

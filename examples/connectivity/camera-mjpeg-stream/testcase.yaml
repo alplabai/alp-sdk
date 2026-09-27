@@ -82,3 +82,52 @@ tests:
       - ethernet
       - connectivity
     build_only: true   # camera + Ethernet HW proof is a bench flash, not a CI run.
+
+  # IMX296 variant (#2287 Stage B unit 5): SAME CONFIG_CAMERA_MJPEG_STREAM_1280X960 +
+  # overlay-1280x960.conf as the OV5647 scenario above -- IMX296's own 1280x960 ROI crop is the
+  # identical frame size that overlay's SRAM0/buffer-pool accounting already covers, only the
+  # shield (hence which sensor node DT wires in) differs. AE on, AWB at the ISP's stock default
+  # (no IMX296 AWB/CCM calibration yet) -- see README.md's "IMX296 build variant" section.
+  # UNBENCHED -- see that section.
+  alp_sdk.examples.camera_mjpeg_stream.aen_imx296:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_args:
+      - SHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera"
+      - EXTRA_CONF_FILE="boards/overlay-1280x960.conf"
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - camera
+      - jpeg
+      - ethernet
+      - connectivity
+    build_only: true   # camera + Ethernet HW proof is a bench flash, not a CI run.
+
+  # IMX335 variant (issue #2327 Stage B; bench-verified runs 333/334, E1M-AEN803 2026W36-0001):
+  # SAME overlay-1280x960.conf as the OV5647/IMX296 scenarios above -- IMX335's native 1296x972
+  # 2x2-binned output has no in-sensor crop, so the ISP itself crops it down to the SAME 1280x960
+  # frame size that overlay already budgets SRAM0 for. The crop (&isp crop-x0/crop-y0 = 8/6) is
+  # in the innomaker_cam_imx335 SHIELD's own overlay (a sensor-module property, not an example
+  # one), so no EXTRA_DTC_OVERLAY_FILE is needed here. AE on, AWB at the ISP's stock default (no
+  # IMX335 AWB/CCM calibration yet). Bench run 334: driver frame_rate 30 (HMAX 0x0226 / VMAX
+  # 0x001194 read back over I2C), fps=30 fail=0 retry=0, one client 29.98 fps / 773.5 KB/s over
+  # 30 s, ~26.4 KB JPEGs, only error one FRAME_SEQ at start; see changelog.d/2327.md.
+  alp_sdk.examples.camera_mjpeg_stream.aen_imx335:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_args:
+      - SHIELD="e1m_evk_rpi_csi innomaker_cam_imx335"
+      - EXTRA_CONF_FILE="boards/overlay-1280x960.conf"
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - camera
+      - jpeg
+      - ethernet
+      - connectivity
+    build_only: true   # CI only compile-checks; bench-verified separately -- run 333, see changelog.d/2327.md.

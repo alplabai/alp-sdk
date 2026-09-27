@@ -54,13 +54,14 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 | [`aen-npu-inference`](aen-npu-inference/)          | **bench** -- first on-silicon NPU inference: a fused subgraph dispatched to the Ethos-U85 (256-MAC) via the Arm core driver. |
 | [`aen-npu-inference-alif`](aen-npu-inference-alif/)| **bench** -- matched-runtime Vela int8 inference end-to-end via the Arm `InferenceProcess` wrapper -> TFLM; hermetic fixture. |
 | [`aen-npu-inference-person-mram`](aen-npu-inference-person-mram/) | **bench** -- the real `person_detect` MobileNet (int8) end-to-end with the model resident in MRAM slot0 (production-scale). |
+| [`aen-inference-energy`](aen-inference-energy/)    | **bench** -- millijoules per inference, measured: picks the compute rail from the six EVK INA236 monitors, then integrates matched active/idle windows. A trivial model reports FAIL by design. |
 | [`aen-gpu2d-bench`](aen-gpu2d-bench/)              | **bench** -- GPU2D software-fallback validation on the M55-HE. |
 
 ### Camera / display / media
 
 | Directory                                          | What it shows                                                                |
 |----------------------------------------------------|------------------------------------------------------------------------------|
-| [`aen-camera-firstlight`](aen-camera-firstlight/)  | **bench** -- Raspberry-Pi-style CSI-2 camera first light (OV5647 / OV9281 on the E1M-EVK's J5) through the portable `<alp/camera.h>` API; OV9281 bench-verified on an E1M-AEN803 on the E1M-EVK (2026-09-21, all three modes); OV5647 bench-verified (2026-09-22, RAW10 640x480, issue #2248). |
+| [`aen-camera-firstlight`](aen-camera-firstlight/)  | **bench** -- Raspberry-Pi-style CSI-2 camera first light (OV5647 / OV9281 / IMX296 / IMX335 on the E1M-EVK's J5) through the portable `<alp/camera.h>` API; OV9281 bench-verified on an E1M-AEN803 on the E1M-EVK (2026-09-21, all three modes); OV5647 bench-verified (2026-09-22, RAW10 640x480, issue #2248) -- both due for a re-bench after issue #2287 Stage B's shared CPI driver change, pending; IMX296 Stage A + Stage B (Stage B via `aen-isp-capture` / `camera-mjpeg-stream`) bench-verified (issue #2287); IMX335 raw-capture bench-verified (issue #2327, runs 316-330: 6/6 clean 1296x972 frames) -- see [`docs/camera-shields.md`](../../docs/camera-shields.md). |
 | [`aen-isp-regcheck`](aen-isp-regcheck/)            | **staging** -- VeriSilicon ISP Pico (`vsi,isp-pico`) bind-only staging check. |
 | [`aen-dsi-regcheck`](aen-dsi-regcheck/)            | **staging** -- Alif C2-MIPI-DSI display stack bind-only check (the TX twin of the CSI camera path). |
 | [`aen-dsi-display`](aen-dsi-display/)              | **bench** -- live RK055HDMIPI4MA0 pixels-on-glass path through CDC200 + DesignWare MIPI-DSI + D-PHY, via the `e1m_evk_rk055hdmipi4ma0` shield. |

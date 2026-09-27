@@ -212,6 +212,95 @@ def test_security_psa_ps_storage_unknown_reference_rejected(
     assert "security.psa.ps_storage" in str(excinfo.value)
 
 
+def _its_ospi0_board(sku: str) -> str:
+    return f"""
+        name: test-{sku.lower()}-its-ospi0
+        som:
+          sku: {sku}
+        cores:
+          m55_hp:
+            os: zephyr
+            app: ./m55_hp
+        security:
+          psa:
+            its_storage: ospi0
+            tfm: true
+    """
+
+
+def test_security_psa_its_storage_refused_on_unassembled_ospi(
+    tmp_path: Path,
+) -> None:
+    """#2311: E1M-AEN801 declares `ospi0` `assembled: false` -- naming it
+    as `security.psa.its_storage:` must be refused with the specific
+    "not assembled" reason, not the generic "does not resolve" message,
+    and not silently accepted into `CONFIG_PSA_CRYPTO_ITS_BACKING_STORE`."""
+    path = _write_board(tmp_path, _its_ospi0_board("E1M-AEN801"))
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "security.psa.its_storage" in msg
+    assert "ospi0" in msg
+    assert "E1M-AEN801" in msg
+    assert "assembled: false" in msg
+    assert "metadata/e1m_modules/E1M-AEN801.yaml" in msg
+
+
+def _ps_ospi0_board(sku: str) -> str:
+    return f"""
+        name: test-{sku.lower()}-ps-ospi0
+        som:
+          sku: {sku}
+        cores:
+          m55_hp:
+            os: zephyr
+            app: ./m55_hp
+        security:
+          psa:
+            its_storage: mram_main
+            ps_storage: ospi0
+            tfm: true
+    """
+
+
+def test_security_psa_ps_storage_refused_on_unassembled_ospi(
+    tmp_path: Path,
+) -> None:
+    """#2311: same guard, `ps_storage` side -- E1M-AEN801 declares
+    `ospi0` `assembled: false`, so naming it as `security.psa.ps_storage:`
+    must be refused with the specific "not assembled" reason."""
+    path = _write_board(tmp_path, _ps_ospi0_board("E1M-AEN801"))
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "security.psa.ps_storage" in msg
+    assert "ospi0" in msg
+    assert "E1M-AEN801" in msg
+    assert "assembled: false" in msg
+    assert "metadata/e1m_modules/E1M-AEN801.yaml" in msg
+
+
+def test_security_psa_its_storage_accepted_on_assembled_ospi(
+    tmp_path: Path,
+) -> None:
+    """E1M-AEN803 fits `ospi0` (`assembled: true`) -- unaffected."""
+    path = _write_board(tmp_path, _its_ospi0_board("E1M-AEN803"))
+    project = load_board_yaml(path)
+    out = emit_tfm_sysbuild_conf(project)
+    assert 'CONFIG_PSA_CRYPTO_ITS_BACKING_STORE="ospi0"' in out
+
+
+def test_security_psa_its_storage_accepted_on_optional_ospi(
+    tmp_path: Path,
+) -> None:
+    """E1M-AEN301 declares `ospi0` `assembled: optional` -- `optional`
+    is not the literal `False` the guard keys on, so it stays legal."""
+    path = _write_board(tmp_path, _its_ospi0_board("E1M-AEN301"))
+    project = load_board_yaml(path)
+    out = emit_tfm_sysbuild_conf(project)
+    assert 'CONFIG_PSA_CRYPTO_ITS_BACKING_STORE="ospi0"' in out
+
+
 def test_security_psa_attestation_optiga_rejected_when_som_lacks_it(
     tmp_path: Path,
 ) -> None:

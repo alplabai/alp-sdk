@@ -1,8 +1,7 @@
-# ADR-0017-ADJACENT (authored from the Sony IMX296 datasheet), PARTIALLY
-# BENCH-VERIFIED (I2C identity only -- issue #2287, bench run 229; the CSI-2
-# streaming path has not run on silicon yet). No permissive-licence IMX296
-# driver exists to consume (upstream Zephyr / hal_alif / Espressif
-# esp_cam_sensor have none; Linux's is GPL-2.0). See
+# ADR-0017-ADJACENT (authored from the Sony IMX296 datasheet), Stage A +
+# Stage B bench-verified (issue #2287) -- see docs/camera-shields.md. No
+# permissive-licence IMX296 driver exists to consume (upstream Zephyr /
+# hal_alif / Espressif esp_cam_sensor have none; Linux's is GPL-2.0). See
 # zephyr/drivers/video/imx296.c for the datasheet-section citations and
 # retirement note, and docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
 #

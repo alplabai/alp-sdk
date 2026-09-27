@@ -157,6 +157,26 @@ struct video_cam_data {
 	 * k_mutex, not a spinlock). */
 	bool starved;
 	struct k_mutex lock;
+
+	/*
+	 * #2287 Stage B (stall-recovery gap found in bench runs 307-310): in ISP-consumer mode, isp_pico.c is the ONLY thing that re-arms the CPI
+	 * (isp_bottom_half()'s successful-attach path, alif_cam_cpi_resume()) -- but
+	 * alif_video_cam_isr()'s own corrupted-frame path (INTR_OUTFIFO_OVERRUN/
+	 * INTR_INFIFO_OVERRUN/INTR_BRESP_ERR) never reaches the ISP's frame-end interrupt at all
+	 * (the CPI/CSI side failed before a frame -- corrupted or otherwise -- ever reached the
+	 * ISP), so nothing would ever re-arm the CPI after this class of error, stalling the
+	 * stream permanently. `error_cb`/`error_cb_user_data`, set by
+	 * alif_cam_register_error_cb() (isp_pico.c calls this once at init, passing its own
+	 * device as `user_data`), let alif_video_cam_isr() notify the ISP to re-arm without this
+	 * file needing to know anything about isp_pico.c's internals -- the callback itself must
+	 * be ISR-safe (isp_pico.c's implementation only calls k_work_submit_to_queue(), which is).
+	 * NULL (unregistered) is the default -- byte-identical to before this existed for any
+	 * consumer that never calls the registration function (the AXI/memory-capture path, which
+	 * has its own, different, buffer-recovery semantics -- "wait for user to handle" -- and
+	 * does not register a callback).
+	 */
+	void (*error_cb)(void *user_data);
+	void *error_cb_user_data;
 };
 
 #endif /* _VIDEO_ALIF_H_ */

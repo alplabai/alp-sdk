@@ -35,7 +35,7 @@
  *     ctrl registry, and keeps the driver's incoming-buffer fifo fed
  *     -- see that backend's file header for the full sequence.
  *     Runtime capture is proven end to end on isp_pico.c's own bench
- *     app (examples/aen/aen-isp-ov5647-capture, runs 69-145) and, through
+ *     app (examples/aen/aen-isp-capture, runs 69-145) and, through
  *     this PORTABLE header, on examples/aen/aen-isp-ov5647-viewfinder --
  *     30/30 colour frames captured with AE+AWB on E1M-AEN803 + OV5647
  *     (runs 156-166).

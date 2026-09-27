@@ -498,7 +498,7 @@ patches:
       int_time_max from video_get_frmival() at runtime -- the library's
       own microseconds-to-lines conversion evidently reads THIS static
       table, not the microsecond value isp_ae_param.int_time_max carries.
-      alp-sdk's examples/aen/aen-isp-ov5647-capture now runs the sensor at
+      alp-sdk's examples/aen/aen-isp-capture now runs the sensor at
       10 fps (OV5647's floor rate) by design, so this table tracks that. A
       library-level way to vary this at runtime with an arbitrary
       app-chosen frame rate, if one exists, was not found and is not what
@@ -739,6 +739,189 @@ patches:
       same as 0006/0008 -- retire this patch, not upstream it, once/if
       isp_param_conf.h gains a real per-sensor calibration mechanism
       instead of one compiled-in global table.
+  - path: hal_alif/0012-isp-srggb10p-input.patch
+    sha256sum: 7b2ecf646be430d4b0b81ffcf00f9116fcc7130688474c66f98d7e3b7a283a3e
+    # See the module-name note on the 0001 patch above.
+    module: alif
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-09-25
+    upstreamable: true
+    comments: |
+      Issue #2287 Stage B: isp_api_wrapper.c's isp_mode_from_fourcc()/
+      isp_pixelfmt_from_fourcc() had no case for VIDEO_PIX_FMT_SRGGB10P --
+      the fourcc alp-sdk's IMX296 driver (zephyr/drivers/video/imx296.c)
+      advertises for BOTH of its modes (its fixed full-frame mode and its
+      ROI crop) -- so any attempt to run IMX296 through the ISP fell
+      through isp_mode_from_fourcc() to ISP_MODE_BT656 (wrong: this is RAW
+      Bayer, not BT.656 YUV) and isp_pixelfmt_from_fourcc() to the 12-bit
+      PIXEL_FORMAT_RGGB12 default (wrong: IMX296 samples at 10 bits),
+      mis-mapping every frame. Same shape as patch 0003's
+      VIDEO_PIX_FMT_SBGGR10P addition (maps to the SAME
+      PIXEL_FORMAT_RGGB10 the pre-existing unpacked VIDEO_PIX_FMT_RGGB10
+      case already uses -- the packed/unpacked split only changes memory
+      layout, not Bayer phase -- and adds ISP_MODE_RAW alongside
+      VIDEO_PIX_FMT_SBGGR10P in the mode switch); patch 0003 itself is
+      sensor-neutral (any BGGR sensor advertising the packed fourcc), this
+      one is the RGGB counterpart, not specific to IMX296 either. Pure
+      additive, touches only the two switches' SRGGB10P case; every other
+      fourcc's mapping is unchanged. Upstream to hal_alif then drop.
+  - path: hal_alif/0013-isp-imx296-ae-envelope.patch
+    sha256sum: d9fdb37170ebe23c2725a82fea78d3294ba173f4196a1a49409c03c781de83a2
+    # See the module-name note on the 0001 patch above.
+    module: alif
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-09-25
+    upstreamable: false
+    comments: |
+      Issue #2287 Stage B unit 3: gives IMX296 its own AE envelope instead
+      of inheriting OV5647's (patches 0006/0011) or ARX3A0's stock one.
+      New drivers/isp/isp_wrapper/inc/imx296_ae_envelope.h (mirrors patch
+      0011's ov5647_ae_envelope.h -- same macro names, same _Static_assert
+      round-trip band) sources IMX296_AE_FULL_LINES/FPS_X10/MAX_INT_LINE/
+      MIN_AGAIN/MAX_AGAIN/MIN_DGAIN/MAX_DGAIN from the Sony IMX296LQR-C
+      datasheet alone (pp.44, 49, 56, 60, 61) -- clean-room, no other
+      IMX296 driver or calibration table consulted. sensor_attributes.h's
+      AE_SNS_DEFAULT_S table (patch 0006) and isp_param_conf.h's .ae
+      calibration block (patch 0011) both gain a
+      CONFIG_VIDEO_ISP_VSI_CALIB_IMX296 #elif arm alongside their existing
+      CONFIG_VIDEO_ISP_VSI_CALIB_OV5647 one; neither existing arm (OV5647
+      or ARX3A0) is touched, so an OV5647 or ARX3A0 build stays bit-
+      identical. AWB/CCM are NOT covered -- both files' AWB/CCM blocks stay
+      gated on CONFIG_VIDEO_ISP_VSI_CALIB_OV5647 only, so an IMX296 build
+      falls through to the ARX3A0 AWB/CCM defaults (compiles and runs,
+      does not colour-calibrate IMX296) until #2287 unit 4 gives IMX296 its
+      own AWB/CCM table.
+
+      isp_api_wrapper.c's AE gain/exposure writeback (patch 0005) also
+      hardcoded OV5647's LINEAR gain scaling ("* 16 / ISP_SNS_GAIN_ACCU")
+      and exposure scaling ("* 16") directly -- wrong for IMX296's
+      LOGARITHMIC GAIN register (0.1 dB/count, datasheet p.61). Both call
+      sites now call isp_sns_gain_ctrl_from_lib()/
+      isp_sns_exposure_ctrl_from_lines() (alp-sdk's
+      zephyr/drivers/video/isp_pico.c, a different translation unit in the
+      same final link -- extern-declared here) instead, which dispatch on
+      CONFIG_VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS/_GAIN_REG_PER_1X/
+      _EXPOSURE_CTRL_PER_LINE (zephyr/kconfigs/vendor-alif-
+      peripherals.kconfig); an OV5647 build's Kconfig defaults reproduce
+      the exact same "* 16 / ISP_SNS_GAIN_ACCU" / "* 16" arithmetic these
+      two lines used to hardcode -- bit-identical writeback for that path,
+      confirmed by preprocessing and diffing both files' generated
+      sensor_attributes/isp_param_conf content before/after this patch on
+      an OV5647 (CONFIG_VIDEO_ISP_VSI_CALIB_OV5647=y) config. This
+      conversion runs BEFORE patch 0010's clamp-to-ctrl-range (the clamp
+      reads cq.range, which is in ctrl units; converting first is required
+      for the clamp to compare like units) -- unchanged call ordering,
+      only the value being clamped now comes from the new conversion
+      instead of the old hardcoded scale.
+
+      Board/sensor-specific by construction (same status as patch 0005),
+      not upstreamable as-is.
+
+      Bench run 312 (camera-mjpeg-stream, E1M-AEN803 2026W36-0001, night
+      room) update: IMX296_AE_MAX_AGAIN (imx296_ae_envelope.h) and
+      sensor_attributes.h's matching .maxAgain literal are now 16229
+      (24.0 dB), not 257217 (48.0 dB) -- the AE library ran gain to the
+      register's full ceiling in a dim scene, and the resulting frame
+      noise blew the JPEG encoder's output-buffer budget on every
+      subsequent encode. The datasheet's GAIN-vs-code PLOT on p.56 (read
+      off the graph, not a labelled table) bends at code 240/24.0 dB:
+      analog gain below that code, digital layered on top above it;
+      digital gain multiplies sensor read noise along with signal, so
+      the AE library's own ceiling is now pinned to the analog side of
+      that bend. VIDEO_CID_ANALOGUE_GAIN's driver-side control range
+      (zephyr/drivers/video/imx296.c) is unchanged at the full 0-480 --
+      only the 3A library's autonomous ceiling moved; a caller setting
+      gain manually can still reach the full register range.
+
+      Bench run 313 (camera-mjpeg-stream, same board, same scene class)
+      update: no overflow at the new 24.0 dB cap -- consistent with, but
+      not proof of, the digital-gain-is-noisier explanation above (run
+      313's scene was also not a controlled brightness match against
+      runs 305/310/312, so a brighter scene remains an equally plausible
+      explanation on the evidence gathered so far). Also confirmed
+      isp_pico.c's isp_apply_ae() was PUSHING the sensor's full 0-480
+      manual control range as the library's again_max ceiling every
+      isp_stream_start(), overwriting this calibration's lower 16229
+      ceiling and logging "AE attr mismatch after set" (the library's
+      own compiled-in clamp still held the real ceiling at 16229
+      throughout -- bench-confirmed, run 313's `again` converged to
+      0x3f65 = 16229, not higher -- so this was a spurious error log,
+      not a functional regression). Fixed on the alp-sdk side only
+      (isp_pico.c's isp_apply_ae(), new Kconfig
+      VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS, default 240 when
+      CONFIG_VIDEO_ISP_VSI_CALIB_IMX296) -- no further hal_alif change
+      needed for that fix; it clamps the push to agree with this
+      patch's own 16229, kept in sync by hand.
+  - path: hal_alif/0014-isp-imx335-ae-envelope.patch
+    sha256sum: c9ec4ff6c2df61bf0bb706b569de5737a600696e917e0c5e7918a54cb00b1c59
+    module: alif
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-09-27
+    upstreamable: false
+    comments: |
+      Issue #2327 Stage B: gives IMX335 its own AE envelope, same mechanism
+      as patch 0013's IMX296 one. New drivers/isp/isp_wrapper/inc/
+      imx335_ae_envelope.h (same macro names, same _Static_assert round-trip
+      band as imx296_ae_envelope.h/ov5647_ae_envelope.h) sources
+      IMX335_AE_FULL_LINES/FPS_X10/MAX_INT_LINE/MIN_AGAIN/MAX_AGAIN/
+      MIN_DGAIN/MAX_DGAIN from upstream Zephyr's own imx335.c driver
+      constants (IMX335_VMAX_DEFAULT 4500, IMX335_SHR0_MIN_BINNING 17) plus
+      one public Sony IMX335 datasheet-flyer figure (30 dB analog-gain
+      ceiling -- above that this sensor's single GAIN register (0x30e8, 0.3
+      dB/count) is documented as digital, same analog/digital-bend
+      reasoning patch 0013's own comment applies to IMX296's GAIN register).
+      sensor_attributes.h's AE_SNS_DEFAULT_S table (patch 0006) and
+      isp_param_conf.h's .ae calibration block (patch 0011) each gain a
+      third CONFIG_VIDEO_ISP_VSI_CALIB_IMX335 #elif arm alongside their
+      existing OV5647/IMX296 ones; neither existing arm is touched, so an
+      OV5647, IMX296, or ARX3A0 build stays bit-identical. AWB/CCM are NOT
+      covered -- an IMX335 build falls through to the ARX3A0 AWB/CCM
+      defaults (compiles, does not colour-calibrate IMX335), same
+      known-limitation shape as IMX296's own unit-4 gap.
+
+      isp_api_wrapper.c needs NO further change: its AE gain/exposure
+      writeback already dispatches through isp_sns_gain_ctrl_from_lib()/
+      isp_sns_exposure_ctrl_from_lines() (alp-sdk's zephyr/drivers/video/
+      isp_pico.c, patch 0013's mechanism) on
+      CONFIG_VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS. Unlike IMX296 (whose
+      VIDEO_CID_ANALOGUE_GAIN control IS its raw 0.1 dB/count GAIN
+      register value directly), IMX335's upstream driver pre-scales its
+      own 0.3 dB/count register to MILLI-dB before exposing it as the
+      control (0..72000 mdB, IMX335_GAIN_UNIT_MDB = 300) -- so the alp-sdk
+      side (this patch does not touch alp-sdk files) extends
+      isp_sns_gain_conv.h with a control-SCALE parameter
+      (VIDEO_ISP_VSI_SNS_GAIN_CTRL_PER_DB_TENTH: 100 for IMX335, 100 mdB =
+      1 tenth of a dB) that reuses the SAME 0.1-dB-tenths lookup table by
+      dividing/multiplying the control value, plus a SEPARATE
+      control-STEP parameter (VIDEO_ISP_VSI_SNS_GAIN_CTRL_STEP: 300,
+      matching IMX335_GAIN_UNIT_MDB) that rounds the pushed value to the
+      nearest exact multiple of the sensor's own hardware-register write
+      granularity -- without that second rounding step, a tenths-of-dB
+      value that is not itself a multiple of 3 would reach
+      imx335_set_ctrl()'s own truncating divide and silently under-drive
+      gain by up to just under one register count. See
+      isp_sns_gain_conv.h's own comment for the full derivation; both
+      Kconfig defaults are 1 (no-ops) for every non-IMX335 sensor,
+      including IMX296.
+
+      Bench-verified, runs 332-334 (E1M-AEN803 2026W36-0001): AE converges
+      (aen-isp-capture, ae_stable=1 at frame 50), the ISP crop lands
+      correctly on 1280x960 (the first silicon confirmation of
+      out_form_rect's left/top offsets), and camera-mjpeg-stream streams
+      at an app-reported 30 fps / ~773 KB/s, including HMAX/VMAX read back
+      over I2C confirming the sensor's own 30 fps default (run 334). Every
+      FIGURE this envelope
+      uses (fullLines, maxIntLine, the 30 dB gain cap) remains an upstream
+      driver constant or a public datasheet-flyer number, not independently
+      bench-derived the way patch 0013's IMX296 figures are (that patch's
+      own bench runs 304/306/312/313 do not exist for IMX335) -- the bench
+      runs above confirm the MECHANISM works, not that these specific
+      figures are the sensor's true envelope. Board/sensor-specific by
+      construction (same status as patch 0005/0013), not upstreamable
+      as-is.
   - path: zephyr/0003-kconfig-serialize-missing-deps.patch
     sha256sum: 873ed5171298271804ba89cba22fd2c286fdb749cec2856a7ea7c2e1d7c3c7c5
     module: zephyr
@@ -759,3 +942,90 @@ patches:
       the sibling always matches the .config just written). The 6-tuple trace
       format is untouched, so traceconfig.py and tests/kconfig/tracing are
       unaffected. Upstream to Zephyr then drop.
+  - path: zephyr/0004-imx335-2lane-link-freq-and-binning.patch
+    sha256sum: 47d7d5ac6dd2293b3ffb46562f031a543867a618b0da7dbe596c83ca609a400d
+    module: zephyr
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-09-26
+    upstreamable: true
+    comments: |
+      Issue #2327, bench runs 316-330 on E1M-AEN803 2026W36-0001. Upstream
+      drivers/video/imx335.c (Sony IMX335) has three real defects at this
+      driver's 2-lane/10-bit/1188 Mbps-per-lane configuration, all
+      bench-confirmed and fixed by this patch:
+
+      1. Registers VIDEO_CID_PIXEL_RATE only, and no VIDEO_CID_LINK_FREQ.
+      video_get_csi_link_freq() (video_common.c) falls back to approximating
+      the CSI-2 D-PHY link frequency from PIXEL_RATE whenever a sensor
+      reports no VIDEO_CID_LINK_FREQ control; for this sensor's 396 MHz
+      PIXEL_RATE (a v4l2 pixel-array-clock convention value, unrelated to the
+      per-lane D-PHY bit rate) that approximation lands the DW CSI-2 host on
+      990 MHz (1980 Mbps/lane) instead of the sensor's real 594 MHz link
+      clock (link_freq = per-lane bit rate / 2) -- the same
+      ERRSOTSYNCHS/PHY_FATAL storm signature seen on OV5647 (issue #2248)
+      before that sensor's own fix. Registers VIDEO_CID_LINK_FREQ directly as
+      a READ_ONLY int-menu {594000000}, same shape as this repo's own
+      zephyr/drivers/video/imx296.c link_freq control. PIXEL_RATE itself is
+      left UNTOUCHED -- 396 MHz is the correct v4l2 pixel-array-clock value
+      per <video-controls.h>'s own convention, not a value needing
+      correction; LINK_FREQ alone is what video_get_csi_link_freq() reads,
+      so PIXEL_RATE does not need to change for this fix. Bench-confirmed at
+      1188 Mbps/lane (runs 319-330, paired with fix 2 below).
+
+      2. The driver never writes SYSMODE (0x319e) or the 0x3a18-0x3a28 MIPI
+      output-timing block for any lane/rate combination, leaving both at
+      their power-on-reset value. At 1188 Mbps/lane this produces a
+      payload-checksum/CRC error storm on the CSI-2 receiver (bench run 318).
+      Writing the values the mainline Linux imx335 driver (raspberrypi/linux,
+      branch rpi-6.12.y) programs for this exact lane count and bit rate
+      (SYSMODE=1 plus nine REG16 values -- register values carried as
+      hardware facts, no GPL code copied) eliminates it -- 0 CSI CRC errors
+      bench-confirmed (runs 319-330), including 6/6 consecutive clean
+      1296x972 captures through the E1M SoM R2 pinout adapter (run 330):
+      this VERIFIES 2-lane D-PHY lock at 1188 Mbps/lane on E1M-AEN803
+      2026W36-0001 + this E1M-EVK. An 891 Mbps/lane alternative timing set
+      also gave 0 CSI CRC errors on the link (run 320, a different
+      IMX335_INCKSEL/INCK selection -- that run still had the fix-3 buffer
+      overrun below, so no clean frame resulted at 891 Mbps, only a clean
+      link) but is not carried in the product: this driver is hardcoded to
+      its own 2-lane/10-bit mode, which this repo's shield feeds at 24 MHz
+      INCK -> the 1188 Mbps/lane path only.
+
+      3. imx335_bin_2x2 (the 2x2-binned mode) leaves HNUM at the
+      full-resolution 0x0a20 (2592) and sets Y_OUT_SIZE to 0x03d8 (984) --
+      the sensor then transmits a 1308x984 frame into this driver's own
+      1296x972 buffer, a 12-pixel/12-line overrun that corrupts memory past
+      the buffer. Bench-derived model (run 322, HNUM swept until the
+      transmitted width matched exactly): binned width = HNUM/2 + 12, so
+      HNUM must be 0x0a08 (2568) for a 1296-pixel row. Y_OUT_SIZE corrected
+      to the exact 972 lines (0x03cc, bench run 321). OPB_SIZE_V (0x304c)
+      cleared to 0, the mainline Linux imx335 driver's own binned-mode value
+      (upstream Zephyr never touches it). imx335_bin_none gets a matching
+      HNUM restore (0x0a20) now that bin_2x2 changes it away from that
+      default -- NOT included: correcting bin_none's own Y_OUT_SIZE (0x07ac
+      = 1964) -- both upstream Zephyr's own imx335_init_params (Y_OUT_SIZE
+      0x0798 = 1944) and the mainline Linux driver's full-resolution mode use
+      1944, so 0x07ac is the same overrun class as fix 3 above for any
+      full-resolution caller. Full-resolution mode is UNBENCHED (only the
+      2x2-binned mode has been exercised) -- tracked as issue #2334.
+
+      Bench-verified end to end (runs 329/330, Camera-mode IPI at an
+      explicit 200 MHz pixclk -- see the innomaker_cam_imx335 shield and the
+      video_csi_dw.c csi-pixclk-hz Camera-mode fix in the same change): 0
+      IPI-fatal events, correct 1296x972 stride, no overrun, 6/6 consecutive
+      clean raw captures (run 330). The first captured frame after STANDBY
+      release had darkened lower rows in one run (329) but not the next
+      (330) -- see aen-camera-firstlight's own fix discarding the first
+      frame for this sensor. Frame rate/fps was NOT measured. Controller-mode
+      IPI timing with a fixed csi-hsa/hbp/hline/vtotal could not be made to
+      match this sensor's measured binned line period (29.63 us, ~4H at
+      HMAX 550, 972 HSYNC/frame, runs 329/330) and is not used by this
+      shield -- Camera mode only. D-PHY Stop-state check passed normally
+      with these timing registers written (STOPSTATE 0x00010003 before
+      stream start) -- no no-lp11-clock-lane-park-style skip property was
+      needed. NOT bench-verified: the module self-enabling on a stock,
+      non-reworked carrier (the J5 pin-11 rework is a module-enable
+      concern, unrelated to D-PHY lock); D-PHY lock on any unit/carrier
+      other than E1M-AEN803 2026W36-0001 on this specific E1M-EVK.
+      Upstream to zephyrproject-rtos/zephyr then drop.

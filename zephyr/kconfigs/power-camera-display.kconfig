@@ -142,7 +142,7 @@ config ALP_SDK_CAMERA_ALIF_ISP
 	  OPT-IN, default n -- it depends on CONFIG_VIDEO_ISP_VSI, which
 	  links the hal_alif libisp Vivante blob.  COMPILES + LINKS + RUNS
 	  clean against the pinned hal_alif v2.3.0 wrapper on real silicon
-	  (examples/aen/aen-isp-ov5647-capture) -- the former hal_alif
+	  (examples/aen/aen-isp-capture) -- the former hal_alif
 	  version mismatch is resolved.
 
 config ALP_SDK_CAMERA_ALIF_ISP_VBUF_COUNT

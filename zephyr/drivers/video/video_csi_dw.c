@@ -322,10 +322,13 @@ static void csi2_dw_irq(const struct device *dev)
 
 static int csi2_dw_ipi_advanced_features(const struct device *dev)
 {
+	const struct csi2_dw_config *config = dev->config;
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
 
 	/*
-	 * 1. Disable Frame start to trigger any sync event.
+	 * 1. Frame start triggers a sync event only if ipi_fs_sync is set (#2287 Stage B, bench
+	 *    runs 304-306 -- see struct csi2_dw_config's and the ipi-fs-sync DT property's own
+	 *    comments); default (unset) behaviour is UNCHANGED from before this option existed.
 	 * 2. Enable Manual selection of packets for Line Delimiters.
 	 * 3. Disable use of embedded packets for IPI sync events.
 	 * 4. Disable use of blanking packets for IPI sync events.
@@ -341,7 +344,8 @@ static int csi2_dw_ipi_advanced_features(const struct device *dev)
 			       CSI_IPI_ADV_FEATURES_DT_OVERWRITE);
 
 	sys_set_bits(regs + CSI_IPI_ADV_FEATURES,
-		     CSI_IPI_ADV_FEATURES_SEL_LINE_EVENT | CSI_IPI_ADV_FEATURES_EN_VIDEO);
+		     CSI_IPI_ADV_FEATURES_SEL_LINE_EVENT | CSI_IPI_ADV_FEATURES_EN_VIDEO |
+			     (config->ipi_fs_sync ? CSI_IPI_ADV_FEATURES_SYNC_EVENT : 0));
 
 	return 0;
 }
@@ -467,6 +471,7 @@ static int csi2_dw_validate_data(const struct device *dev)
 	float pixrate;
 	uint32_t bpp;
 	uint32_t tmp;
+	bool explicit_pixclk;
 	int ret;
 
 	bpp = data->csi_cpi_settings[data->current_sensor]->bits_per_pixel;
@@ -490,6 +495,17 @@ static int csi2_dw_validate_data(const struct device *dev)
 	 * balanced pixel clock = pix_clk * 1.2
 	 */
 	pixrate = ((float)(phy->pll_fin << 1) * phy->num_lanes) / bpp;
+
+	/*
+	 * Alp Lab AB (issue #2327, bench runs 316-330): csi-pixclk-hz is honoured
+	 * in EITHER ipi-mode now (originally Controller-only) -- a 2-lane sensor's
+	 * bare Camera-mode margined request can ALSO exceed alif_pixclk_set_rate()'s
+	 * reachable range (IMX335's own case: 594e6*2*2/10*1.2 = 285.12 MHz, no
+	 * lower Camera-mode request is available the way Controller mode's bare
+	 * rate was tried first), so a shield needs the same explicit override
+	 * either way. `explicit_pixclk` below picks the branch that applies it.
+	 */
+	explicit_pixclk = config->pixclk_hz != 0;
 
 	if (config->ipi_mode == CSI2_IPI_MODE_TIMINGS_CTRL) {
 		/*
@@ -516,17 +532,67 @@ static int csi2_dw_validate_data(const struct device *dev)
 		 * sensor's 14.815 us line time, i.e. the IPI would starve waiting
 		 * on a sensor that cannot keep up -- not the FIFO-overflow failure
 		 * margin mode guards against, but just as unusable.
+		 *
+		 * Alp Lab AB (issue #2327): csi-pixclk-hz (config->pixclk_hz, struct
+		 * csi2_dw_config's own comment) overrides the bare pixrate above when
+		 * set. The bare-pixrate assumption only works when SOME reachable
+		 * divisor happens to land near the sensor's own line rate (IMX296's
+		 * 118.8 MHz -> 133.33 MHz, close enough for its bench-swept csi-hsd
+		 * to still drain the IPI ahead of the sensor); a 2-lane sensor's bare
+		 * pixrate can land on a divisor with NO such margin, or even exceed
+		 * alif_pixclk_set_rate()'s reachable range outright, in which case a
+		 * shield states its own intended IPI pixel clock explicitly instead
+		 * of leaving it to fall out of whichever divisor the bare request
+		 * happens to round to.
 		 */
-		pixclock = pixrate;
+		pixclock = explicit_pixclk ? (float)config->pixclk_hz : pixrate;
+	} else if (explicit_pixclk) {
+		/*
+		 * Alp Lab AB (issue #2327, bench runs 316-330): Camera mode's own
+		 * margined request (below, the un-taken branch) can ALSO exceed the
+		 * pixel-clock divider's reachable range for a 2-lane sensor -- IMX335's
+		 * bare Camera-mode rate is 594e6*2*2/10 = 237.6 MHz, and even that (no
+		 * margin) already exceeds it, so the margined 285.12 MHz has nowhere to
+		 * round down to the way IMX296's Controller-mode bare rate did. Same
+		 * override shape as Controller mode above: an explicit csi-pixclk-hz
+		 * bypasses the margin entirely (integer pass-through below, -ERANGE
+		 * fatal) instead of trying a rate the shield never asked for.
+		 */
+		pixclock = (float)config->pixclk_hz;
 	} else {
 		pixclock = pixrate * (float)CSI2_BANDWIDTH_SCALER;
 	}
 	LOG_DBG("pll_fin - %d, Check pixclock = %d (CSI_PIXCLK_CTRL)", phy->pll_fin,
 		(uint32_t)pixclock);
 
-	tmp = (uint32_t)pixclock;
+	/*
+	 * Alp Lab AB (issue #2327): pass an explicit csi-pixclk-hz through as the
+	 * integer the shield wrote, never via the float above -- a float carries
+	 * only 24 mantissa bits, so 133333333 rounds UP to 133333336, and
+	 * alif_pixclk_set_rate()'s floor(400 MHz / hz) then lands on divisor 2
+	 * (200 MHz) instead of 3 (133.33 MHz). Bench-observed on
+	 * E1M-AEN803 2026W36-0001: CSI_PIXCLK_CTRL read 0x00020001.
+	 */
+	tmp = explicit_pixclk ? config->pixclk_hz : (uint32_t)pixclock;
 	ret = clock_control_set_rate(config->clk_dev, config->pixclk,
 			(clock_control_subsys_rate_t)tmp);
+	if (ret == -ERANGE && explicit_pixclk) {
+		/*
+		 * Alp Lab AB (issue #2327): an EXPLICIT csi-pixclk-hz that
+		 * does not fit under the pixel-clock divider's maximum is a shield
+		 * authoring mistake (the whole point of stating this rate explicitly
+		 * is that the shield's own IPI timing was derived AGAINST this exact
+		 * rate; silently falling back to the bare/margined derived pixrate
+		 * below would run different, undocumented timing than what the
+		 * shield's own comment claims). Fatal in EITHER ipi-mode -- fail
+		 * loudly instead of retrying at a rate the shield was never derived
+		 * for.
+		 */
+		LOG_ERR("csi-pixclk-hz %u Hz exceeds the CSI pixel-clock max (practical "
+			"ceiling ~200 MHz, see snps,designware-csi.yaml) -- fix the shield's "
+			"csi-pixclk-hz, not this driver", config->pixclk_hz);
+		return ret;
+	}
 	if (ret == -ERANGE) {
 		/*
 		 * Alp Lab AB: the 20 % margin does not fit under the pixel-clock
@@ -568,6 +634,61 @@ static int csi2_dw_validate_data(const struct device *dev)
 		pixclock = tmp;
 	}
 
+	if (config->ipi_mode == CSI2_IPI_MODE_TIMINGS_CTRL && config->hline != 0 &&
+	    config->vtotal != 0) {
+		/*
+		 * Alp Lab AB (issue #2287 Stage B): csi-hline/csi-vtotal present (0 means "DT
+		 * doesn't set them", see struct csi2_dw_config's own comment) -- derive hsd/vfp
+		 * from them and the CURRENT format's hact/vact instead of using a fixed csi-hsd/
+		 * csi-vfp DT value. A single fixed csi-hsd (the pre-Stage-B behaviour, still used
+		 * when these two properties are absent) is only ever correct for the ONE hact it
+		 * was bench-swept against -- a sensor with more than one selectable resolution
+		 * (e.g. imx296.c's issue #2287 Stage B ROI mode, 1280 wide vs. the sensor's
+		 * 1456-wide full frame) would otherwise silently mistime the IPI line for every
+		 * format but that one: a narrower hact under the SAME fixed hsd shortens the
+		 * derived HLINE (hsa+hbp+hsd+hact) below the sensor's own unchanged line time,
+		 * starving the IPI rather than over- or under-running it by a margin any FIFO
+		 * headroom could absorb.
+		 */
+		int32_t hsd = (int32_t)config->hline - timing->hsa - timing->hbp - timing->hact;
+		int32_t vfp = (int32_t)config->vtotal - timing->vsa - timing->vbp - timing->vact;
+
+		if (hsd < 0 || vfp < 0) {
+			LOG_ERR("csi-hline %u / csi-vtotal %u too small for this format "
+				"(hact %u, vact %u, hsa %u, hbp %u, vsa %u, vbp %u): "
+				"derived hsd %d, vfp %d",
+				config->hline, config->vtotal, timing->hact, timing->vact,
+				timing->hsa, timing->hbp, timing->vsa, timing->vbp, hsd, vfp);
+			return -EINVAL;
+		}
+
+		/*
+		 * Alp Lab AB (issue #2287 Stage B, reviewer minor): CSI_IPI_HSD_TIME /
+		 * CSI_IPI_VFP_LINES are hardware fields narrower than the 32-bit arithmetic
+		 * above -- CSI_IPI_HSD_TIME_MASK is 12 bits (0-4095), CSI_IPI_VFP_LINES_MASK is
+		 * 10 bits (0-1023). csi2_dw_ipi_set_timings() below masks silently
+		 * (`timing->hsd & CSI_IPI_HSD_TIME_MASK`), which would truncate an
+		 * out-of-range derived value into the WRONG in-range one instead of failing --
+		 * reject here instead, at the one place that knows this was a Stage-B DERIVED
+		 * value (a plain fixed csi-hsd/csi-vfp DT value is never checked against these
+		 * masks either, same as before this change).
+		 */
+		if (hsd > CSI_IPI_HSD_TIME_MASK || vfp > CSI_IPI_VFP_LINES_MASK) {
+			/* GENMASK() (CSI_IPI_HSD_TIME_MASK/CSI_IPI_VFP_LINES_MASK's own
+			 * definition) is `unsigned long`, not `unsigned int` -- cast down for
+			 * %u rather than widen every other field in this LOG_ERR to %lu. */
+			LOG_ERR("csi-hline %u / csi-vtotal %u derived hsd %d / vfp %d out of "
+				"range for this format (hact %u, vact %u): hsd max %u, vfp max %u",
+				config->hline, config->vtotal, hsd, vfp, timing->hact,
+				timing->vact, (unsigned int)CSI_IPI_HSD_TIME_MASK,
+				(unsigned int)CSI_IPI_VFP_LINES_MASK);
+			return -EINVAL;
+		}
+
+		timing->hsd = (uint16_t)hsd;
+		timing->vfp = (uint16_t)vfp;
+	}
+
 	if (config->ipi_mode == CSI2_IPI_MODE_TIMINGS_CTRL && ret == 0) {
 		/*
 		 * Alp Lab AB (issue #2287): log the IPI line time this ACTUAL
@@ -593,6 +714,8 @@ static int csi2_dw_validate_data(const struct device *dev)
 	}
 
 	if (config->ipi_mode == CSI2_IPI_MODE_TIMINGS_CAM) {
+		int32_t hsd;
+
 		/*
 		 * FV(VSYNC) comes at least 3 pixel clocks before
 		 * LV(HSYNC/DATA_EN). Hence, setting HSA as 3.
@@ -604,13 +727,74 @@ static int csi2_dw_validate_data(const struct device *dev)
 		 * HSD should be such that when the PPI interface should
 		 * collect last pixel and send to memory before IPI interface
 		 * is collecting the last pixel of Horizontal Active Area.
+		 *
+		 * Alp Lab AB (issue #2327, bench runs 316-330): this legacy formula
+		 * divides the reception time by (pll_fin<<1) ALONE -- it omits
+		 * num_lanes, unlike pixrate's own derivation a few lines up. Left
+		 * UNCHANGED when csi-pixclk-hz is absent: OV5647 and OV9281 both run
+		 * Camera mode by default with no explicit pixclk, and both are
+		 * bench-proven against exactly this formula (issue #2248 / the
+		 * 2026-09-21 OV9281 bench) -- changing it for them needs its own
+		 * re-bench, not a silent fix bundled with the IMX335 work that found
+		 * it. Signed arithmetic + a floor at 0 below, added by this change:
+		 * the previous unsigned (pixclock * bpp * ...) / (pll_fin << 1) -
+		 * (hact + hsa) + 1 computed in `float`, then implicitly converted to
+		 * uint16_t -- a negative float-to-unsigned conversion is undefined
+		 * behaviour in C, and on this Cortex-M target's VCVT instruction
+		 * SATURATES to 0 rather than wrapping to a huge value, so the
+		 * pre-this-change behaviour on a negative result was (by observed
+		 * compiler codegen, not by the C standard) already landing near 0,
+		 * not silently becoming a huge HSD -- this change makes that outcome
+		 * explicit and portable instead of relying on unspecified conversion
+		 * behaviour.
 		 */
-		timing->hsd = ((pixclock * bpp * timing->hact) / (phy->pll_fin << 1)) -
-			    (timing->hact + timing->hsa) + 1;
+		if (explicit_pixclk) {
+			/*
+			 * Alp Lab AB (issue #2327): lanes-aware form of the same
+			 * reception-time-vs-D-PHY-bit-rate comparison -- divides by
+			 * (pll_fin<<1)*num_lanes (Driver_MIPI_CSI2.c's own HSD
+			 * derivation), not by (pll_fin<<1) alone. Used only when
+			 * csi-pixclk-hz is explicit: a shield stating its own IPI
+			 * pixel clock has no bench history tied to the legacy,
+			 * lanes-omitting formula the way OV5647/OV9281 do, so there is
+			 * no compatibility reason to keep the historical omission for
+			 * it. This formula still clamps at 0 below (the DFP's own
+			 * Driver_MIPI_CSI2.c floors HSD at CSI2_HSD_MIN = 1, one lower
+			 * bound this driver does not otherwise enforce) -- IMX335 bench
+			 * runs 329/330 (0 IPI-fatal events, correct stride, 6/6 clean
+			 * captures) exercise this branch and land exactly ON that
+			 * clamp: the raw computed value is -208 (200 MHz pixclk, 1296
+			 * hact, 594 MHz pll_fin, 2 lanes, 10 bpp), clamped to 0, and
+			 * the bench result is clean at 0 regardless.
+			 */
+			int64_t reception_time = (int64_t)pixclock * bpp * timing->hact;
+			int64_t divisor = (int64_t)(phy->pll_fin << 1) * phy->num_lanes;
+
+			hsd = (int32_t)(reception_time / divisor) -
+			      (int32_t)(timing->hact + timing->hsa) + 1;
+		} else {
+			hsd = (int32_t)((pixclock * bpp * timing->hact) / (phy->pll_fin << 1)) -
+			      (int32_t)(timing->hact + timing->hsa) + 1;
+		}
+		timing->hsd = (uint16_t)(hsd < 0 ? 0 : hsd);
 		timing->vsa = 0;
 		timing->vbp = 0;
 		timing->vfp = 0;
 		timing->vact = 0;
+
+		if (explicit_pixclk && ret == 0) {
+			/*
+			 * Alp Lab AB (issue #2327): same diagnostic shape as the
+			 * Controller-mode LOG_INF above, for Camera mode's own explicit
+			 * csi-pixclk-hz path (innomaker_cam_imx335's shield) -- logs the
+			 * ACTUAL programmed clock and the HLINE/line-time it produces.
+			 */
+			uint32_t hline = timing->hsa + timing->hbp + timing->hsd + timing->hact;
+
+			LOG_INF("CSI IPI Camera-mode (explicit csi-pixclk-hz): pixclk %u Hz, "
+				"HLINE %u px -> line time %u ns",
+				tmp, hline, (uint32_t)(((uint64_t)hline * 1000000000ULL) / tmp));
+		}
 	}
 	return 0;
 }
@@ -1019,6 +1203,21 @@ static int csi2_dw_init(const struct device *dev)
 	DT_PHA_BY_IDX(node_id, prop, idx, id)
 
 #define ALIF_MIPI_CSI_DEVICE(i)                                                                    \
+	/* issue #2287 Stage B, reviewer minor: catch a DT authoring mistake at build time \
+	 * rather than silently keeping the pre-Stage-B fixed-csi-hsd/csi-vfp behaviour for \
+	 * half of a csi-hline/csi-vtotal pair -- see snps,designware-csi.yaml's own doc \
+	 * comment. NOT also asserting "csi-hsd/csi-vfp absent when csi-hline/csi-vtotal \
+	 * are set" (the reviewer's original ask): zephyr/dts/alif/ensemble_e8_peripherals.dtsi's \
+	 * shared &csi node sets BOTH unconditionally (csi-hsd = <280>, csi-vfp = <4>) for \
+	 * every board -- DT_INST_NODE_HAS_PROP(i, csi_hsd) is unconditionally true \
+	 * whether or not a shield overlay itself sets it, so that check would fail-build \
+	 * every board that ever sets csi-hline/csi-vtotal, including this one's own \
+	 * shield overlay. Harmless either way: csi2_dw_validate_data() (video_csi_dw.c) \
+	 * only ever READS the base dtsi's csi-hsd/csi-vfp when csi-hline/csi-vtotal are \
+	 * ABSENT; when present, it overwrites timing->hsd/vfp before either is used. */ \
+	BUILD_ASSERT(DT_INST_NODE_HAS_PROP(i, csi_hline) == DT_INST_NODE_HAS_PROP(i, csi_vtotal), \
+		     "csi-hline and csi-vtotal must both be set, or both left unset"); \
+	                                                                                                   \
 	static void csi2_dw_config_func_##i(const struct device *dev);                             \
 	static const struct csi2_dw_config config_##i = {                                          \
 		DEVICE_MMIO_ROM_INIT(DT_DRV_INST(i)),                                              \
@@ -1034,6 +1233,13 @@ static int csi2_dw_init(const struct device *dev)
 		.irq_config_func = csi2_dw_config_func_##i,                                        \
                                                                                                    \
 		.ipi_mode = DT_INST_ENUM_IDX(i, ipi_mode),                                         \
+                                                                                                   \
+		/* issue #2287 Stage B: see struct csi2_dw_config's own comment on these two. */    \
+		.hline = DT_INST_PROP_OR(i, csi_hline, 0),                                         \
+		.vtotal = DT_INST_PROP_OR(i, csi_vtotal, 0),                                       \
+		.ipi_fs_sync = DT_INST_PROP(i, ipi_fs_sync),                                       \
+		/* issue #2327: see struct csi2_dw_config's own comment on this one. */            \
+		.pixclk_hz = DT_INST_PROP_OR(i, csi_pixclk_hz, 0),                                 \
 	};                                                                                         \
                                                                                                    \
 	static struct csi2_dw_data data_##i = {                                                    \
