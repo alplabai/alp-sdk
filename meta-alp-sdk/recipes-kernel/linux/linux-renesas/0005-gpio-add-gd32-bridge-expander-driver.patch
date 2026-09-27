@@ -39,7 +39,7 @@ once confirmed below that or on an unexpected major, -EPROBE_DEFER
 while the bridge is still silent.
 
 Late-bridge deferral (Refs #2297; bug bench-observed 2026-09-26,
-E1M-V2M103; fix bench-verified 2026-09-26 on E1M-V2M103 with GD32_NRST held ~40 s past probe: bridge reachable ~46 s, SDIO card enumerated 48.4 s, brcmfmac firmware 49.7 s, hci0 UP+RUNNING 54.8 s, devices_deferred empty, no rebind; a normal boot is unchanged): a bare -EPROBE_DEFER from .request() only gets retried by
+E1M-V2M103; fix bench-verified 2026-09-26 on E1M-V2M103 with GD32_NRST held ~40 s past probe: the resolve poller's fixed 1 Hz ticks (1..30 s, then 31, 33, 37, 45, 61 s ...) mean the bridge was first observed by the 45 s poll -- SDIO card enumerated 48.4 s, brcmfmac firmware 49.7 s, hci0 UP+RUNNING 54.8 s, devices_deferred empty, no rebind; a normal boot is unchanged): a bare -EPROBE_DEFER from .request() only gets retried by
 the kernel when some OTHER driver's (un)registration happens to walk
 the deferred-probe list -- nothing guarantees that happens once the
 bridge later comes up. Observed on the bench: NRST release failed, and
@@ -60,11 +60,14 @@ registers a throwaway platform_device (see
 gd32_bridge_kick_deferred_probe()) purely so that device's bind runs
 driver_bound() -> the kernel's own driver_deferred_probe_trigger()
 (drivers/base/dd.c, confirmed present at that call site in this kernel
-tree) -- the only in-tree hook that lets module code queue a
-deferred-probe retry (asynchronous, on system_unbound_wq) on demand.
-That gets mmc-pwrseq-simple / hci_bcm to retry .request() with the real
-answer -- granted, or failing outright with -ENODEV -- instead of
-lingering deferred indefinitely.
+tree) -- a convenient in-tree hook module code can use to queue a
+deferred-probe retry (asynchronous, on system_unbound_wq) on demand,
+not the only such mechanism (device_reprobe()/bus_rescan_devices()/
+wait_for_device_probe() also exist -- this one just needs no bus/device
+reference this driver already holds). That gets mmc-pwrseq-simple /
+hci_bcm to retry .request() with the real answer -- granted, or
+failing outright with -ENODEV -- instead of lingering deferred
+indefinitely.
 
 Output-state replay (Refs #2297): a write attempted while the bridge is
 unreachable (bench-proven: "GPIO write line 5 failed" against the
@@ -139,7 +142,7 @@ new file mode 100644
 index 000000000..b202babc2
 --- /dev/null
 +++ b/drivers/gpio/gpio-gd32-bridge.c
-@@ -0,0 +1,845 @@
+@@ -0,0 +1,865 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * GPIO driver for the Alp Lab GD32 IO-MCU bridge (I2C transport).
@@ -200,10 +203,11 @@ index 000000000..b202babc2
 + * registers a throwaway platform_device (see
 + * gd32_bridge_kick_deferred_probe()) purely so that device's bind runs
 + * driver_bound() -> the kernel's own driver_deferred_probe_trigger()
-+ * (drivers/base/dd.c) -- the only in-tree hook that lets module code
-+ * queue a deferred-probe retry (asynchronous, on system_unbound_wq) on
-+ * demand. That is what gets mmc-pwrseq-simple / hci_bcm to retry
-+ * .request() with the real answer -- granted, or failing outright with
++ * (drivers/base/dd.c) -- a convenient in-tree hook module code can use
++ * to queue a deferred-probe retry (asynchronous, on system_unbound_wq)
++ * on demand, not the only such mechanism. That is what gets
++ * mmc-pwrseq-simple / hci_bcm to retry .request() with the real
++ * answer -- granted, or failing outright with
 + * -ENODEV -- instead of lingering deferred indefinitely.
 + *
 + * Output-state replay: a write attempted while the bridge is unreachable
@@ -270,10 +274,15 @@ index 000000000..b202babc2
 + * Flat at GD32_RESOLVE_POLL_PERIOD_MS (1 Hz) for the first
 + * GD32_RESOLVE_POLL_FLAT_ATTEMPTS ticks (~30 s, comfortably past every
 + * bridge boot time observed so far), then backs off exponentially up to
-+ * the GD32_RESOLVE_POLL_PERIOD_CAP_MS cap. Never gives up outright: the
-+ * bridge firmware can be reset or OTA'd at any point during a long-running
-+ * boot, and the whole point of this poller is to notice that eventually
-+ * rather than depend on some unrelated event to re-probe.
++ * the GD32_RESOLVE_POLL_PERIOD_CAP_MS cap -- long enough to cover a slow
++ * boot without depending on some unrelated event to re-probe. This poller
++ * is terminal, not perpetual: gd32_bridge_resolve_work() stops rescheduling
++ * itself the moment it gets a definitive answer (0 confirmed supported, or
++ * -ENODEV confirmed unsupported) and kicks deferred probing once. It does
++ * NOT keep running afterwards to notice a later bridge reset or OTA A/B
++ * swap -- that is the separate output-state replay's job for pad LEVELS
++ * (see below); nothing re-resolves the lines-18/19 CAPABILITY answer after
++ * this poller's first definitive tick.
 + */
 +#define GD32_RESOLVE_POLL_PERIOD_MS		1000
 +#define GD32_RESOLVE_POLL_FLAT_ATTEMPTS		30
@@ -535,6 +544,14 @@ index 000000000..b202babc2
 +	 * it once the bridge answers, so returning 0 unconditionally lets
 +	 * the consumer's probe proceed; it just cannot yet tell the line is
 +	 * actually driven until the next successful replay.
++	 *
++	 * Trade-off, stated plainly: a one-shot sequencer that acts the
++	 * instant .request()/.direction_output() returns -- mmc-pwrseq-simple
++	 * (SDHI2 WLAN power-up) and a panel's reset-gpios (Display-1) -- can
++	 * silently mis-drive its line for as long as the bridge stays
++	 * unreachable, since it never sees the failed transfer. The replay
++	 * work re-applies the latched level within ~1 s (GD32_REPLAY_PERIOD_MS)
++	 * of the bridge answering, so the window is bounded, not unbounded.
 +	 */
 +	if (ret)
 +		dev_warn_ratelimited(chip->parent,
@@ -656,6 +673,12 @@ index 000000000..b202babc2
 +	 * bridge independently and retriggers deferred probing once
 +	 * resolved either way, so this consumer gets called again with the
 +	 * real answer.
++	 *
++	 * Not a poisoned retry: gpiod_request_commit() (drivers/gpio/gpiolib.c,
++	 * 6.1.141-cip43) clears FLAG_REQUESTED and the desc label when
++	 * gc->request() fails, so a consumer re-entering gpiod_request() on
++	 * its deferred-probe retry re-requests cleanly rather than getting
++	 * stuck on stale request state.
 +	 */
 +	return gd32_bridge_resolve_wifi_bt(gd32);
 +}
@@ -721,7 +744,7 @@ index 000000000..b202babc2
 +			}
 +		} else if (gd32->replay_failing) {
 +			dev_info(gd32->chip.parent,
-+				 "bridge reachable, %u line(s) re-applied\n",
++				 "bridge reachable, %u line(s) in the replay mask\n",
 +				 hweight32(xfer_mask));
 +			gd32->replay_failing = false;
 +		}

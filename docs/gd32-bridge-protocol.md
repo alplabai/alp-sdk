@@ -356,7 +356,10 @@ on-module Murata LBEE5HY2FY-922's REG_ON timing requirement.
 
 A bridge below minor 11 never learned these two bits; a host driving
 `GPIO_WRITE` against them on such a bridge silently powers nothing
-while the firmware reports success. The Linux `gpio-gd32-bridge`
+while the firmware reports success. This is true only through protocol
+0.12: firmware 0.2.16 / protocol 0.13 rejects a write to an unknown pad
+bit outright (Refs #2341) rather than reporting success. The Linux
+`gpio-gd32-bridge`
 kernel driver resolves this at first *consumer* request rather than
 once at `probe()` (a single best-effort `GET_VERSION` at boot
 consistently races the bridge's own startup) -- see
@@ -364,7 +367,12 @@ consistently races the bridge's own startup) -- see
 [`include/alp/chips/gd32g553.h`](../include/alp/chips/gd32g553.h).
 
 **Host-behaviour note (Refs #2297; bug bench-observed 2026-09-26,
-E1M-V2M103; fix bench-verified 2026-09-26 on E1M-V2M103 with GD32_NRST held ~40 s past probe: bridge reachable ~46 s, SDIO card enumerated 48.4 s, brcmfmac firmware 49.7 s, hci0 UP+RUNNING 54.8 s, devices_deferred empty, no rebind; a normal boot is unchanged):** `.request()`'s single non-blocking `GET_VERSION` attempt can
+E1M-V2M103; fix bench-verified 2026-09-26 on E1M-V2M103 with GD32_NRST
+held ~40 s past probe: the resolve poller's fixed 1 Hz ticks (1..30 s,
+then 31, 33, 37, 45, 61 s ...) mean the bridge was first observed by
+the 45 s poll — SDIO card enumerated 48.4 s, brcmfmac firmware 49.7 s,
+hci0 UP+RUNNING 54.8 s, devices_deferred empty, no rebind; a normal
+boot is unchanged):** `.request()`'s single non-blocking `GET_VERSION` attempt can
 end in one of three states -- confirmed supported, confirmed
 unsupported (a bridge that answered and reported a minor below 11 or
 an unexpected major), or *still unresolved* because the bridge hasn't
@@ -386,16 +394,23 @@ move.
 What resolves a slow bridge instead: a second, independent poll -- a
 dedicated `delayed_work` polls `GET_VERSION` regardless of whether any
 consumer has requested the lines yet (flat at ~1 Hz for the first
-~30 s, then backing off exponentially to a 30 s cap; it never gives
-up, since the bridge firmware can be reset or reflashed at any point
-during a long-running boot). On resolving either way -- confirmed
-supported, or confirmed unsupported -- it briefly registers a
-throwaway `platform_device` purely so that device's bind runs
-`driver_bound()` -> the kernel's own `driver_deferred_probe_trigger()`
-(`drivers/base/dd.c`, called from `driver_bound()` on every successful
-bind) -- the only in-tree hook that lets module code queue a
-deferred-probe retry (asynchronous, on `system_unbound_wq`) on demand.
-That gets `mmc-pwrseq-simple` / `hci_bcm` to retry `.request()` with
+~30 s, then backing off exponentially to a 30 s cap). This poller is
+terminal, not perpetual: it stops rescheduling itself the moment it
+gets a definitive answer (confirmed supported, or confirmed
+unsupported) and kicks deferred probing once. It does not keep running
+afterwards to notice a later bridge reset or OTA A/B swap -- nothing
+re-resolves the lines-18/19 *capability* answer once this poller has
+settled it; only the separate output-state replay below keeps
+re-applying pad *levels* after a reset. On its first definitive answer
+it briefly registers a throwaway `platform_device` purely so that
+device's bind runs `driver_bound()` -> the kernel's own
+`driver_deferred_probe_trigger()` (`drivers/base/dd.c`, called from
+`driver_bound()` on every successful bind) -- a convenient in-tree
+hook module code can use to queue a deferred-probe retry
+(asynchronous, on `system_unbound_wq`) on demand, not the only such
+mechanism (`device_reprobe()` / `bus_rescan_devices()` /
+`wait_for_device_probe()` also exist). That gets `mmc-pwrseq-simple` /
+`hci_bcm` to retry `.request()` with
 the real answer -- granted, or failing outright with `-ENODEV` --
 instead of lingering deferred indefinitely. A confirmed `-ENODEV`
 is cached for the life of the driver instance (until the next reboot);
@@ -1121,8 +1136,10 @@ caller wants liveness confirmation.
   `GET_VERSION`.
 * `major` is bumped on **wire-breaking** changes (frame layout,
   CRC algorithm, command renumbering).
-* `minor` is bumped when **opcodes are added** that older hosts
-  don't have to know about.
+* `minor` is bumped on any **additive, backward-compatible** change
+  older hosts don't have to know about -- not only a new opcode: v0.10
+  (chain-bind refusal) and v0.11 (the REG_ON pad-map growth, §3.1) both
+  bumped `minor` with no new opcode at all.
 * `patch` is bumped on documentation or non-observable firmware
   changes.
 

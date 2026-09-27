@@ -3,9 +3,10 @@
 Bug observed and fix bench-verified on E1M-V2M103 (GD32 fw 0.2.13), 2026-09-26.
 Two cases were checked. At cold boot, probe finds the bridge down and the
 panel-reset write fails. The replay then logs `bridge reachable, 1 line(s)
-re-applied` at ~5 s, with no driver rebind. With GD32_NRST held for 2 s
-mid-run, the log shows `output state replay failed (-6)` and then
-`re-applied`, and `GPIO_READ` confirms the pad level. Two related bugs in
+in the replay mask` at ~5 s, with no driver rebind. With GD32_NRST held for
+2 s mid-run, the log shows `output state replay failed (-6)` and then the
+same "in the replay mask" line, and `GPIO_READ` confirms the pad level. Two
+related bugs in
 `meta-alp-sdk/recipes-kernel/linux/linux-renesas/0005-gpio-add-gd32-bridge-expander-driver.patch`
 (`drivers/gpio/gpio-gd32-bridge.c`): (1) `gd32_bridge_gpio_set()` only
 latched `output_mask`/`output_vals` **after** a successful I2C
@@ -52,6 +53,14 @@ so the consumer just cannot tell the line is actually driven until the
 next successful replay (now logged with a `dev_warn_ratelimited()` at
 the call site too).
 
+Stated plainly: this means a one-shot sequencer that acts the instant
+`.request()`/`.direction_output()` return — `mmc-pwrseq-simple` (SDHI2
+WLAN power-up) and a panel's `reset-gpios` (Display-1) — can silently
+mis-drive its line for as long as the bridge stays unreachable, since it
+never sees the failed transfer. The replay re-applies the latched level
+within ~1 s (`GD32_REPLAY_PERIOD_MS`) of the bridge next answering, so
+the window is bounded rather than unbounded.
+
 Only the Linux side re-asserts. **#2297 stays open** for the CM33/Zephyr
 side of the bridge, which does not yet re-apply anything after a reset,
 and re-asserting REG_ON only restores the pin level — it does not
@@ -63,7 +72,12 @@ including the BRD_I2C shared-bus/arbitration caveat, updated in the same
 change).
 
 **Follow-up (same branch; bug bench-observed 2026-09-26, E1M-V2M103,
-this fix bench-verified 2026-09-26 on E1M-V2M103 with GD32_NRST held ~40 s past probe: bridge reachable ~46 s, SDIO card enumerated 48.4 s, brcmfmac firmware 49.7 s, hci0 UP+RUNNING 54.8 s, devices_deferred empty, no rebind; a normal boot is unchanged):** lines 18/19's `.request()` gate
+this fix bench-verified 2026-09-26 on E1M-V2M103 with GD32_NRST held ~40 s
+past probe: the resolve poller's fixed 1 Hz ticks (1..30 s, then 31, 33,
+37, 45, 61 s ...) mean the bridge was first observed by the 45 s poll —
+SDIO card enumerated 48.4 s, brcmfmac firmware 49.7 s, hci0 UP+RUNNING
+54.8 s, devices_deferred empty, no rebind; a normal boot is unchanged):**
+lines 18/19's `.request()` gate
 (`gd32_bridge_resolve_wifi_bt()`) used to return `-EPROBE_DEFER` itself
 when the bridge was still silent, which permanently deferred the
 *consumer* -- `mmc-pwrseq-simple`'s `wlan-pwrseq` `reset-gpios` and
@@ -84,19 +98,25 @@ move.
 What resolves the deferral instead: a new, independent `delayed_work`
 (`gd32_bridge_resolve_work()`) that polls `GET_VERSION` regardless of
 whether any consumer has requested the lines yet (flat at ~1 Hz for
-the first ~30 s, then backing off exponentially to a 30 s cap; it
-never gives up, since the bridge firmware can be reset or reflashed at
-any point during a long-running boot). On resolving either way --
-confirmed supported, or confirmed unsupported -- it briefly registers
-a throwaway `platform_device` (`gd32_bridge_kick_deferred_probe()`)
-purely so that device's bind runs `driver_bound()` -> the kernel's own
-`driver_deferred_probe_trigger()` (`drivers/base/dd.c`, confirmed
-present at that call site in this kernel tree) -- the only in-tree
-hook that lets module code queue a deferred-probe retry (asynchronous,
-on `system_unbound_wq`) on demand. That gets `mmc-pwrseq-simple` /
-`hci_bcm` to retry `.request()` with the real answer -- granted, or
-failing outright with `-ENODEV` -- instead of lingering deferred
-indefinitely. `.request()` itself now makes only a single
-non-blocking `GET_VERSION` attempt instead of a bounded blocking wait,
-since the independent poller above is what actually catches a slow
-bridge.
+the first ~30 s, then backing off exponentially to a 30 s cap). This
+poller is terminal, not perpetual: it stops rescheduling itself the
+moment it gets a definitive answer (confirmed supported, or confirmed
+unsupported) and kicks deferred probing once. It does not keep running
+afterwards to notice a later bridge reset or OTA A/B swap — nothing
+re-resolves the lines-18/19 *capability* answer once this poller has
+settled it; only the separate output-state replay above keeps
+re-applying pad *levels* after a reset. On its first definitive answer
+it briefly registers a throwaway `platform_device`
+(`gd32_bridge_kick_deferred_probe()`) purely so that device's bind runs
+`driver_bound()` -> the kernel's own `driver_deferred_probe_trigger()`
+(`drivers/base/dd.c`, confirmed present at that call site in this
+kernel tree) -- a convenient in-tree hook module code can use to queue
+a deferred-probe retry (asynchronous, on `system_unbound_wq`) on
+demand, not the only such mechanism (`device_reprobe()` /
+`bus_rescan_devices()` / `wait_for_device_probe()` also exist). That
+gets `mmc-pwrseq-simple` / `hci_bcm` to retry `.request()` with the
+real answer -- granted, or failing outright with `-ENODEV` -- instead
+of lingering deferred indefinitely. `.request()` itself now makes only
+a single non-blocking `GET_VERSION` attempt instead of a bounded
+blocking wait, since the independent poller above is what actually
+catches a slow bridge.
