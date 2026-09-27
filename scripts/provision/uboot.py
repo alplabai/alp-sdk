@@ -267,6 +267,9 @@ def loadx_gzwrite(
                 )
             gz = gzip.compress(piece, mtime=0)
             loadx(console, gz, load_addr)
+            # gzwrite <iface> <dev> <addr> <len> [<bufsize> [<offs>]]: U-Boot parses
+            # every number as hex, so "100000" is a 1 MiB write buffer and {off} the
+            # byte offset of this chunk in the eMMC user area.
             out = run(
                 console,
                 f"gzwrite mmc {emmc_dev} {load_addr:#x} {len(gz):#x} 100000 {off:#x}",
