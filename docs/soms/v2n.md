@@ -159,7 +159,10 @@ side has no Wi-Fi role):
   `sci4_bt_pins` pinctrl groups.
 * `meta-alp-sdk/recipes-kernel/linux/linux-renesas/wifi-bt.cfg` --
   `CONFIG_CFG80211=m` + in-tree `CONFIG_BRCMFMAC` off (no CYW55513 ID
-  in the 6.1.x in-tree driver) + Bluetooth HCI UART/Broadcom config.
+  in the 6.1.x in-tree driver) + the Bluetooth HCI UART/Broadcom stack
+  as modules + `CONFIG_GPIO_GD32_BRIDGE=y`. The BT stack must stay `=m`:
+  built in, `hci_uart_bcm` probes before the root filesystem is mounted,
+  cannot load `brcm/BCM.hcd`, and hci0 setup times out on opcode 0x1003.
 * `meta-alp-sdk/recipes-kernel/cyw-fmac/` -- the out-of-tree Murata
   `cyw-fmac` backports kmod (`compat`/`cfg80211`/`brcmutil`/`brcmfmac`,
   installed under `updates/` so depmod prefers it over any in-tree
@@ -208,6 +211,9 @@ BT (raw HCI, manual REG_ON) was bench-confirmed working at 115200 baud
 on `/dev/ttySC4` in 2026-06; the serdev/`shutdown-gpios` path above
 replaces that manual toggle and was re-run on silicon 2026-09-26
 (E1M-V2M103): `hci0` UP+RUNNING, BD_ADDR read via HCIGETDEVINFO.
+Re-run 2026-09-27 with the BT stack as modules: `bluetooth`/`hci_uart`/`btbcm`
+autoload after rootfs, the `brcm/BCM.hcd` patch loads (chip id 157), and
+`hci0` comes UP+RUNNING.
 
 ## Bring-up
 
