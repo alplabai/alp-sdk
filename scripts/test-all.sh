@@ -700,6 +700,7 @@ stage_pytest_scripts() {
         python3 -m pytest tests/scripts/ -q -n auto -m "not repo_writes" || return 1
         python3 -m pytest tests/scripts/ -q -m repo_writes || return 1
     else
+        echo "stage_pytest_scripts: pytest-xdist not importable; running serially (pip install -e \".[dev]\" to parallelise)."
         python3 -m pytest tests/scripts/ -q || return 1
     fi
 

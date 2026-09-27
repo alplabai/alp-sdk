@@ -50,12 +50,29 @@ def pytest_configure(config):
         "repo_writes: writes into the real checkout; run serially, never "
         "alongside pytest-xdist workers (see _REPO_WRITER_MODULES)",
     )
+    here = Path(__file__).resolve().parent
+    stale = sorted(m for m in _REPO_WRITER_MODULES if not (here / f"{m}.py").is_file())
+    if stale:
+        # A renamed or split writer module would otherwise drop silently back
+        # into the parallel phase.
+        raise pytest.UsageError(
+            f"_REPO_WRITER_MODULES names module(s) that no longer exist: {stale}")
 
 
 def pytest_collection_modifyitems(config, items):
+    # On an xdist worker a repo_writes test would race the other workers --
+    # someone ran `-n` without `-m "not repo_writes"`. Skip it there with the
+    # right command in the reason, rather than let the race back in or crash
+    # the worker. (-m deselection runs after this hook, so on the proper
+    # parallel phase these items are deselected anyway.)
+    on_xdist_worker = hasattr(config, "workerinput")
     for item in items:
-        if Path(str(item.fspath)).stem in _REPO_WRITER_MODULES:
+        if item.path.stem in _REPO_WRITER_MODULES:
             item.add_marker(pytest.mark.repo_writes)
+            if on_xdist_worker:
+                item.add_marker(pytest.mark.skip(
+                    reason="writes into the checkout: not safe under pytest-xdist; "
+                           "run `pytest tests/scripts/ -m repo_writes` without -n"))
 
 
 def clang_format_text(tmp_path: Path, name: str, text: str) -> str:

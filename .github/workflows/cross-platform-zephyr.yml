@@ -461,6 +461,9 @@ jobs:
       # on Windows `run:` is pwsh, which only checks the LAST command's exit
       # code, so a first-line failure would be masked.
       - name: pytest tests/scripts/ (repo-writing, serial)
+        # Still run when the parallel sweep failed, so one CI round reports
+        # both sets.
+        if: ${{ !cancelled() }}
         timeout-minutes: 10
         run: python -m pytest tests/scripts/ -q -m repo_writes
 

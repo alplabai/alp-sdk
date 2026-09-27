@@ -26,8 +26,12 @@ subprocess spawns, so it parallelises cleanly.
   `_REPO_WRITER_MODULES`, and gives their tests a `repo_writes` marker. Every
   runner runs `-n auto -m "not repo_writes"` first, then `-m repo_writes`
   serially (123 of 4,465 tests, about 4 s). In both workflows the two phases
-  are separate steps: on Windows, `run:` is pwsh, which only checks the last
-  command's exit code.
+  are separate steps. In `cross-platform-zephyr` that is required, because on
+  Windows `run:` is pwsh, which only checks the last command's exit code.
+  The serial step still runs when the parallel one fails
+  (`if: ${{ !cancelled() }}`). Run under `-n` without the `-m` filter, the
+  writer tests skip with a reason that names the serial command, so they
+  never race.
 - `scripts/test-all.sh`'s `pytest-scripts` stage runs the same two phases
   when `pytest-xdist` is importable, and otherwise still runs the suite
   serially, so a venv without the new extra keeps working.
