@@ -9,6 +9,8 @@ import subprocess
 import threading
 from pathlib import Path
 
+import sys
+
 import pytest
 from provision import bench
 from provision.bench import BenchError, ExpectTimeout
@@ -280,6 +282,13 @@ def test_script_probe(tmp_path):
     assert calls[2] == [str(w), "reset-run"]
     with pytest.raises(BenchError):
         bench.ScriptProbe(w, runner=lambda a, **k: _cp(2, err="no probe")).reset_run()
+
+
+def test_script_probe_runs_a_py_wrapper_with_this_interpreter(tmp_path):
+    calls = []
+    w = tmp_path / "probe.py"
+    bench.ScriptProbe(w, runner=lambda a, **k: calls.append(a) or _cp()).reset_run()
+    assert calls == [[sys.executable, str(w), "reset-run"]]
 
 
 def test_fake_probe_overlays_memory(tmp_path):

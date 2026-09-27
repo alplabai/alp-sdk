@@ -19,6 +19,7 @@ import codecs
 import re
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 from dataclasses import dataclass
@@ -451,7 +452,8 @@ class ScriptProbe(Probe):
         self._runner = runner
 
     def _call(self, *args: str) -> str:
-        argv = (["bash"] if self.wrapper.suffix == ".sh" else []) + [
+        interp = {".sh": ["bash"], ".py": [sys.executable]}.get(self.wrapper.suffix, [])
+        argv = interp + [
             str(self.wrapper),
             *args,
         ]
