@@ -50,8 +50,8 @@ adds the
 example as the third `--testsuite-root` line in this job's (now
 seven-root) list
 (`.github/workflows/pr-twister-aen.yml:460`
-("alp-sdk/examples/connectivity/iot-dashboard")) — one of only two roots
-(alongside `camera-mjpeg-stream`, added separately by #2265) that
+("alp-sdk/examples/connectivity/iot-dashboard")) — besides `examples/aen`,
+one of only two roots (with `camera-mjpeg-stream`, added by #2265) that
 contributes a scenario to *both* SKU matrix legs, since mqtt-telemetry and
 iot-fleet-ota remain AEN801-only.
 

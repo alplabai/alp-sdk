@@ -428,8 +428,8 @@ jobs:
       # merge and this change's own iot-dashboard AEN board overlay
       # backfill: 96 AEN801 configurations (both HE + HP), 91 AEN803 (187
       # total). This is the only current count in this file; every other
-      # comment above and below that mentions a scenario count is either a
-      # historical snapshot explicitly marked as such, or points back here.
+      # scenario count in it (header, ADVISORY note, job comments) describes
+      # the tree when its cited issue landed, not HEAD -- trust this one.
       # The timeout-minutes comment below does the latter -- it does not
       # carry its own count.
       - name: twister · ${{ matrix.label }} on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota + camera-mjpeg-stream + iot-dashboard
