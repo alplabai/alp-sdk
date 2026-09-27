@@ -48,7 +48,7 @@ both `paths:` filter blocks, adds `zephyr/boards/shields/**`, `zephyr/drivers/di
 drivers it compiles into this app, none previously covered by this gate), and
 adds the
 example as a sixth bounded `--testsuite-root`
-(`.github/workflows/pr-twister-aen.yml:450`
+(`.github/workflows/pr-twister-aen.yml:461`
 ("alp-sdk/examples/connectivity/iot-dashboard")) — the one root among the six
 that contributes a scenario to *both* SKU matrix legs, since mqtt-telemetry
 and iot-fleet-ota remain AEN801-only.
@@ -75,17 +75,48 @@ overlay only where one is declared, and none was). Two new overlays fix
 this — the CC3501E bridge subset of `alp-console`'s bench-validated
 wiring, no I2C2/RGB-LED (this app has no sensor-manifest bus of its own
 here):
-`examples/connectivity/iot-dashboard/boards/alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay:68`
+`examples/connectivity/iot-dashboard/boards/alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay:69`
 ("cc3501e_spi: spi@48104000 {") and
-`examples/connectivity/iot-dashboard/boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay:108`
+`examples/connectivity/iot-dashboard/boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay:118`
 ("alp_pins: alp-pins {"). This also turns on real coverage from
-`check_example_board_overlay_parity.py` (#2101) and
-`check_example_board_overlay_content_parity.py` (#1009/#2198) for this
+`check_example_board_overlay_parity.py` (#2101, and its `#1009` class
+check -- a `board.yaml`-declared core with no matching overlay) and
+`check_example_board_overlay_content_parity.py` (#2198) for this
 example's AEN801/AEN803 pair, neither of which had anything to check
-before these files existed. Verified: both HP targets link with
-`west build`, and `zephyr.dts` in each build tree shows `spi@48104000`
-`status = "okay"` with `pinctrl-0 = <&pinctrl_spi1>` and the `alp-spi1`
-alias resolved, sourced from the new overlay rather than left undeclared.
+before these files existed.
+
+**Second blocker, also review (#2242): the C-side pad-mux poke was M55-HE
+only.** `aen_lp_pads_enable_output()` -- the raw LP-GPIO pad-config store
+that actually powers WIFI_EN/nRESET -- was guarded
+`#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HE)` only
+(`examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.c:10`
+("#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HE) || defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP)")
+shows the fixed guard). The HP boards select
+`CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP`, so even with the DT wiring above
+present, the function compiled to an empty stub on every HP target and
+WIFI_EN never powered the CC3501E -- a second, independent way the same
+bridge was unreachable on HP. `ALIF_LPGPIO_PADCTRL_BASE` (0x42007000) is a
+global LP-domain address reachable from either core's AHB fabric, so
+widening the guard to both cores is a straight compile-time fix, not a new
+behaviour. This is the canonical copy; the fix propagates byte-identically
+to every non-divergent copy `scripts/check_cc3501e_bridge_copies.py`
+locks (15 copies including `iot-dashboard`'s own), and the equivalent
+guard was applied by hand to the divergent `alp-console` copy, keeping its
+other divergence. **This guard widening changes every HP build of every
+AEN example that uses the bridge, not just iot-dashboard** -- it was
+undetectable before because no example had an HP board overlay to build
+against until this change added one.
+
+Verified: both HP targets link with `west build`; `zephyr.dts` in each
+build tree shows `spi@48104000` `status = "okay"` with
+`pinctrl-0 = <&pinctrl_spi1>` and the `alp-spi1` alias resolved, sourced
+from the new overlay rather than left undeclared; and disassembly of the
+built `cc3501e_bridge.c.obj` for the AEN801 HP target shows
+`aen_lp_pads_enable_output()` inlined into `cc3501e_bridge_bringup()` with
+the real pad-config stores present (`movs r2, #35 @ 0x23` /
+`str r2, [r3, #20]`), not an empty stub. None of this is bench-proven on
+HP -- it proves the DT node and the pad-config store are both compiled
+in and reachable, not that the CC3501E answers on real M55-HP silicon.
 
 **Not proven, and not silently left implicit.** This is a `build_only`
 compile check, nothing more:
@@ -97,7 +128,9 @@ compile check, nothing more:
 - The new CC3501E bridge overlays are HP twins of the bench-proven M55-HE
   wiring (`alp-console`, `aen-cc3501e-bringup`) — the SPI1 IRQ and the
   whole HP bridge path are unbenched, same BENCH-TBD caveat the M55-HE
-  overlays already carry.
+  overlays already carry. Same for the widened pad-mux guard above: it
+  makes the M55-HE poke run on M55-HP too, but only the M55-HE poke is
+  confirmed on silicon.
 - The build still only compiles because of the #2192 weak-RNG acknowledgement.
   That flag is bench-only; a production build on real hardware needs a real
   entropy source, which does not exist for AEN yet.

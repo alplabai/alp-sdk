@@ -78,8 +78,9 @@
 &soc {
 	/* DWC_ssi SPI1 -- the on-SoM CC3501E inter-chip link (NOT the edge SPI0).
 	 * 4-wire: SCLK/MOSI/MISO + the hardware SS0 chip-select (P14_7 = SPI1_SS0_C,
-	 * declared in pinctrl_spi1 above); clock-frequency = SYST_HCLK (400 MHz) so
-	 * spi_dw_alif skips the failing clock-control path. */
+	 * declared in pinctrl_spi1 above); clock-frequency = 200 MHz, the real SSI
+	 * functional clock (E8 HWRM), so spi_dw_alif skips the failing
+	 * clock-control path. */
 	cc3501e_spi: spi@48104000 {
 		compatible = "alif,dwc-ssi-spi";
 		#address-cells = <1>;
@@ -96,13 +97,22 @@
 		clock-frequency = <200000000>;
 		dwc-ssi;
 		fifo-depth = <16>;
-		/* NOTE: there is NO `rx-delay` devicetree property -- the spi_dw binding
-		 * does not define one, so writing it here would silently do nothing.  The
-		 * DWC_ssi RX sample delay (RX_SAMPLE_DLY, reg 0xF0, in ssi_clk cycles at
-		 * 200 MHz = 5 ns/cycle) recenters the master's MISO capture at higher SCLK
-		 * and is written from C -- see CC3501E_BRIDGE_RX_SAMPLE_DLY in
-		 * examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.c, where 6 is
-		 * silicon-tuned for ~14.3 MHz. */
+		/* `rx-delay` IS a real devicetree property
+		 * (zephyr/dts/bindings/spi/alif,dwc-ssi-spi.yaml, int, default 0) --
+		 * deliberately left UNSET here, not omitted because it doesn't exist.
+		 * spi_dw_alif.c writes RX_SAMPLE_DLY (reg 0xF0, ssi_clk cycles at
+		 * 200 MHz = 5 ns/cycle) from this property at BOTH init and PM resume
+		 * (write_rxdly(dev, info->rx_delay)); spi_dw_configure() never touches
+		 * the register outside those two paths. Because the property is unset
+		 * (0), a PM resume after init overwrites whatever runtime value
+		 * src/cc3501e_bridge.c poked with 0 -- that poke re-applies
+		 * CC3501E_BRIDGE_RX_SAMPLE_DLY (cc3501e_bridge.h) after every
+		 * alp_spi_open(), which covers the ordinary open path but NOT a PM
+		 * resume that happens between opens; this is a live risk, not a
+		 * hypothetical. CC3501E_BRIDGE_RX_SAMPLE_DLY is 4, silicon-tuned for
+		 * ~25 MHz on E1M-AEN803 serial 2026W36-0002 -- NOT 6 / ~14.3 MHz, an
+		 * earlier measurement the header itself documents as stale and not
+		 * comparable (see cc3501e_bridge.h's own correction). */
 		pinctrl-0 = <&pinctrl_spi1>;
 		pinctrl-names = "default";
 		status = "okay";

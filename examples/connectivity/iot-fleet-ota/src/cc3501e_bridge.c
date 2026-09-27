@@ -7,17 +7,29 @@
 
 #include "cc3501e_bridge.h"
 
-#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HE)
+#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HE) || defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP)
 #include <zephyr/arch/cpu.h>
 #include <zephyr/sys/sys_io.h>
 /*
- * AEN LP-pad mux (Alif Ensemble E8, M55-HE).  WIFI_EN (P15_5) and nRESET (P15_1)
- * are on the Alif LP-GPIO island, bound by the generic snps,designware-gpio driver
- * which does NOT apply Alif pinctrl -- so the LP pads stay un-muxed and their output
- * drivers OFF (confirmed on silicon: WIFI_EN never powers the CC3501E until these
- * regs are set).  0x23 = the Alif GPIO-output pad config (driver + read-enable +
- * drive strength).  TODO: drop this raw poke once the Alif GPIO backend muxes the LP
- * island via pinctrl.
+ * AEN LP-pad mux (Alif Ensemble E8, both M55-HE and M55-HP cores).  WIFI_EN
+ * (P15_5) and nRESET (P15_1) are on the Alif LP-GPIO island, bound by the
+ * generic snps,designware-gpio driver which does NOT apply Alif pinctrl --
+ * so the LP pads stay un-muxed and their output drivers OFF (confirmed on
+ * silicon on M55-HE: WIFI_EN never powers the CC3501E until these regs are
+ * set).  0x23 = the Alif GPIO-output pad config (driver + read-enable +
+ * drive strength).  TODO: drop this raw poke once the Alif GPIO backend
+ * muxes the LP island via pinctrl.
+ *
+ * ALIF_LPGPIO_PADCTRL_BASE (0x42007000) is a GLOBAL LP-domain address, not
+ * an M55-HE-local one -- both cores' AHB fabric reach the same LP-GPIO
+ * island at this address, so the poke is exactly as applicable on M55-HP.
+ * The #if was CONFIG_SOC_..._RTSS_HE-only until #2173 review (alpCaner)
+ * caught that the HP boards select CONFIG_SOC_..._RTSS_HP: on HP this
+ * function compiled to an empty stub and WIFI_EN never powered the
+ * CC3501E on any HP target, silently. The M55-HP path through this
+ * function is NOT bench-proven -- only the M55-HE poke above is confirmed
+ * on silicon; widening the guard is a compile-time fix for a structural
+ * bug, not a claim that HP has been measured.
  */
 #define ALIF_LPGPIO_PADCTRL_BASE 0x42007000u
 #define ALIF_PAD_GPIO_OUTPUT     0x23u
