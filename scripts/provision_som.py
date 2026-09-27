@@ -34,6 +34,7 @@ REPO = SCRIPTS.parent
 # scripts/ on sys.path and import flash_backends as a top-level package.
 sys.path.insert(0, str(SCRIPTS))
 import flash_backends as fb
+from alp_eth_mac import AlpEthMacError, parse_serial  # noqa: E402
 
 # bundle.json flash_target -> (backend method, xspi partition or None)
 _TARGET_BACKEND = {
@@ -276,6 +277,16 @@ def provision(cfg: Cfg) -> int:
         if not cfg.hil_spec.is_dir():
             steps.append(Step("test", False,
                               f"HiL spec dir is not a directory: {cfg.hil_spec}"))
+            return done()
+
+    # An explicit --serial must be MAC-derivable (program_eeprom.py refuses
+    # anything else) -- check it here, before the xSPI/eMMC flash steps,
+    # not at the eeprom step after they have already run.
+    if cfg.serial:
+        try:
+            parse_serial(cfg.serial)
+        except AlpEthMacError as e:
+            steps.append(Step("serial", False, f"--serial {cfg.serial!r}: {e}"))
             return done()
 
     bootloader_only = bundle["status"].startswith("bootloader-only")
