@@ -221,10 +221,10 @@ static uint32_t _to_video_fourcc(alp_pixfmt_t fmt)
  * driver uses: its native 2x2-binned output is a FIXED 1296x972, and the requested 1280x960 is
  * produced by the ISP's OWN crop instead -- crop-x0/crop-y0 on &isp, set by the SHIELD
  * (zephyr/boards/shields/innomaker_cam_imx335/innomaker_cam_imx335.overlay, not a per-example
- * overlay -- issue #2327 Stage B reviewer follow-up: the crop is a property of THIS SENSOR
- * MODULE, tying it to the example instead left the pinned 1296/972 input size here silently
- * disconnected from whatever crop-x0/crop-y0 a given board happened to set). Reads the shield's
- * own DT values (DT_PROP below) rather than hardcoding 8/6 a second time, and BUILD_ASSERTs they
+ * overlay: the crop is a property of THIS SENSOR MODULE, so tying it to one example instead
+ * would leave the pinned 1296/972 input size here disconnected from whatever crop-x0/crop-y0 a
+ * given board happened to set). Reads the shield's own DT values (DT_PROP below) rather than
+ * hardcoding 8/6 a second time, and BUILD_ASSERTs they
  * still produce the 1280x960 every IMX335 example/scenario budgets its buffers for -- a future
  * shield edit that changes the crop without updating this backend fails the BUILD, not silently
  * mismatches at isp_stream_start() (zephyr/drivers/video/isp_pico.c's own out_form_rect check).
@@ -238,10 +238,10 @@ static uint32_t _to_video_fourcc(alp_pixfmt_t fmt)
 #define ALIF_ISP_IMX335_OUT_WIDTH  (ALIF_ISP_INPUT_WIDTH - 2 * ALIF_ISP_IMX335_CROP_X0)
 #define ALIF_ISP_IMX335_OUT_HEIGHT (ALIF_ISP_INPUT_HEIGHT - 2 * ALIF_ISP_IMX335_CROP_Y0)
 BUILD_ASSERT(ALIF_ISP_IMX335_OUT_WIDTH == 1280,
-             "innomaker_cam_imx335.overlay's &isp crop-x0 no longer crops 1296 down to 1280 -- "
+             "innomaker_cam_imx335.overlay's &isp crop-x0 must crop 1296 down to 1280 -- "
              "update this backend's/every IMX335 example's assumed output size to match");
 BUILD_ASSERT(ALIF_ISP_IMX335_OUT_HEIGHT == 960,
-             "innomaker_cam_imx335.overlay's &isp crop-y0 no longer crops 972 down to 960 -- "
+             "innomaker_cam_imx335.overlay's &isp crop-y0 must crop 972 down to 960 -- "
              "update this backend's/every IMX335 example's assumed output size to match");
 #else
 #define ALIF_ISP_INPUT_WIDTH  0
@@ -344,7 +344,7 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	}
 #if DT_HAS_COMPAT_STATUS_OKAY(sony_imx335)
 	/*
-	 * Issue #2327 Stage B reviewer follow-up: IMX335's ISP INPUT is pinned to its fixed native
+	 * IMX335's ISP INPUT is pinned to its fixed native
 	 * 1296x972 (ALIF_ISP_INPUT_WIDTH/HEIGHT above), regardless of cfg->width/height -- so a
 	 * caller requesting anything OTHER than the shield's own crop result
 	 * (ALIF_ISP_IMX335_OUT_WIDTH/HEIGHT, BUILD_ASSERTed above to be 1280x960) would silently

@@ -149,23 +149,38 @@ ZTEST(isp_ae_conv, test_db_tenths_ctrl_imx335_30db_cap)
 }
 
 /*
- * #2327 Stage B reviewer follow-up: isp_sns_gain_lib_to_db_tenths_ctrl()'s ctrl_step rounding
- * must land on an EXACT multiple of 300 (IMX335_GAIN_UNIT_MDB) for EVERY table entry, not just
- * the ones that already happen to be -- a naive tenths*ctrl_per_db_tenth scale-up (no rounding)
- * would produce a non-multiple-of-300 value whenever tenths is not itself a multiple of 3, which
- * imx335_set_ctrl()'s own truncating `ctrl.val / 300` divide would then silently under-drive.
+ * isp_sns_gain_lib_to_db_tenths_ctrl()'s ctrl_step rounding must land on an EXACT multiple of 300
+ * (IMX335_GAIN_UNIT_MDB) for EVERY table entry, not just the ones that already happen to be -- a
+ * naive tenths*ctrl_per_db_tenth scale-up (no rounding) would produce a non-multiple-of-300 value
+ * whenever tenths is not itself a multiple of 3, which imx335_set_ctrl()'s own truncating
+ * `ctrl.val / 300` divide would then silently under-drive. The second assertion additionally
+ * proves the rounding is to the NEAREST multiple, not merely floored to one: a flooring mutant
+ * (round down instead of round-to-nearest) still produces an exact multiple of 300 -- the first
+ * assertion alone would not catch it -- but can land up to a FULL step (300) below the
+ * un-rounded scale-up (tenths * 100), not just half a step; bounding that gap at 150 (half of
+ * 300) fails on such a mutant while passing the correct round-half-up implementation.
  */
 ZTEST(isp_ae_conv, test_db_tenths_ctrl_imx335_step_always_multiple_of_300)
 {
 	for (uint32_t reg = 0; reg <= 480; reg++) {
-		uint32_t lib = isp_sns_gain_db_tenths_to_lib(reg);
-		uint32_t ctrl = isp_sns_gain_lib_to_db_tenths_ctrl(lib, 100, 300);
+		uint32_t lib    = isp_sns_gain_db_tenths_to_lib(reg);
+		uint32_t tenths = isp_sns_gain_lib_to_db_tenths(lib);
+		uint32_t ctrl   = isp_sns_gain_lib_to_db_tenths_ctrl(lib, 100, 300);
+		uint32_t raw    = tenths * 100U;
+		uint32_t diff   = (ctrl > raw) ? (ctrl - raw) : (raw - ctrl);
 
 		zassert_true((ctrl % 300U) == 0U,
 		             "table[%u] -> ctrl=%u is not an exact multiple of the 300 mdB "
 		             "register step",
 		             reg,
 		             ctrl);
+		zassert_true(diff <= 150U,
+		             "table[%u] -> ctrl=%u strayed more than half a register step (150) "
+		             "from the un-rounded scale-up %u -- rounding is not to the NEAREST "
+		             "multiple of 300",
+		             reg,
+		             ctrl,
+		             raw);
 	}
 }
 

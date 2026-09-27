@@ -27,7 +27,7 @@ section below.
 | InnoMaker CAM-OV9281 | OV9281 (1 Mpx global-shutter mono) | `innomaker_cam_ov9281` | MIPI CSI-2 D-PHY, 2 lanes | 640x400 GREY8 @100 fps; 1280x720 GREY8 @50 fps; 1280x800 GREY8 @~100 fps | **Bench-verified** on an E1M-AEN803 on the E1M-EVK (J5), 2026-09-21: all three modes stream live frames, each at its configured rate (measured 60-frame bursts: 640x400 ~100 fps, 1280x720 ~50 fps, 1280x800 ~100 fps); the sensor test pattern is verified in all three modes. CPI starvation-pause behaviour changed AGAIN by issue #2287 Stage B after this bench (re-arm responsibility moved to the ISP's own bottom half, after a mid-frame-corruption bug found in runs 304-310 -- see the IMX296 row above and the driver section below) -- re-bench on this sensor pending. |
 | RPi Camera Module 1 | OV5647 (5 Mpx raw Bayer) | `raspberry_pi_camera_module_1` | MIPI CSI-2 D-PHY, 2 lanes | up to 2592x1944 SBGGR8/SBGGR10P; 640x480 is a full-array subsampled+binned mode at 15 fps by default, not a crop (default format before any `set_format()` is now 640x480 SBGGR10P, not 2592x1944) | **Bench-verified (run 52, RAW10 640x480)** on an E1M-AEN803 on the E1M-EVK (J5), 2026-09-22: `PHY_FATAL` 7712 -> 0, `capture ALP_OK`, 60 frames at 15.96 fps (see the driver section below). Needed the J5 pin-11 pull-up rework -- [`docs/boards/e1m-evk.md`](boards/e1m-evk.md) -- to answer on I2C at all, and a PLL + MIPI-TX pad-drive divergence in the driver the earlier BLOCKED finding misdiagnosed as a module hardware fault. **Run 61 (2026-09-22, current)** replaced runs 56/58/60's Alif-derived 640x480/common-init mix with register values taken as hardware facts from the RPi/OmniVision reference driver (raspberrypi/linux branch rpi-6.6.y, `drivers/media/i2c/ov5647.c`): column fixed-pattern noise fell from 6-8 LSB (3.7-5.9% of signal) with the runs 56/58/60 mix to 1.0-1.5 LSB (~1.1% of signal) with the reference set, in the same dark lab at the same 0.51 s x15.5 gain exposure -- the visible vertical stripes runs 56/58/60 left in are gone; which specific register difference caused that is NOT ESTABLISHED (see the driver section). **Run 62 bench-verified the COMMITTED driver itself** (77/77 registers matched, zero CSI errors) and the maintainer confirmed a host-demosaiced render of the captured frame is the correct image (BGGR, unmirrored). **Run 62 also caught a pre-merge regression**, introduced earlier in this same unreleased PR chain by the run-61 PLL retarget and fixed before merge (never shipped): booting into the full-resolution crop had made the driver's own default 15 fps unreachable at boot, silently settling on 10 fps for every later 640x480 open too; `ov5647_init()` now boots straight into 640x480, where 15 fps is reachable. **Run 63 re-verified the committed fix** (VTS `0x0833`, `fps_x100=1501`, 77/0 register mismatches, column FPN unchanged) and its review, by mutation-testing the fix-up, found three further real behaviour bugs in this same PR (all fixed, all pre-merge, none shipped): the frame rate could still stick at a prior mode's clamped value after a LATER format change (distinct from the boot-time issue above); `ov5647_set_mode_regs()`'s whole-byte writes to `0x3820`/`0x3821` silently undid `VIDEO_CID_HFLIP`/`VIDEO_CID_VFLIP` on every format change; and the crop path's AEC band step reused the binned mode's line counts, capping banding-mode AEC at roughly 502 lines on a 1944-line crop (a calculation, not a bench measurement of actual under-exposure). **A round-4 review then found the fix for the first of those three had its own regression** (fixed, pre-merge, never shipped): the fix stored only the requested frame rate's denominator, silently turning a numerator-!=-1 request (e.g. the shape Zephyr's own `video frmival` shell command sends) into a different rate on the next format change; fixed by storing the whole requested `struct video_frmival`, written only after the rate is actually applied. The SAME round also replaced the crop path's byte-for-byte-copied mainline band-step values with values scaled to this driver's own (different) line time -- still BENCH-UNVERIFIED, not run on hardware -- and made `get_format()` report that `VIDEO_CID_HFLIP`/`VIDEO_CID_VFLIP` shift the Bayer colour order (no NEW register writes, but an API contract change: only the default (unflipped) SBGGR order is bench/maintainer-verified; the three flipped orders `get_format()` now reports are derived from the RPi/OmniVision reference's own flip-to-code mapping, not bench-checked on this module). **A round-5 review of that fix then found `set_format()` could not accept back what `get_format()` had just reported** (a `get_format()` -> `set_format()` round trip failed with `-ENOTSUP`, since `set_format()` still only matched the two base fourccs): fixed by mapping a flip-shifted request back to its base fourcc before validating, and reporting the flip-shifted fourcc back on success; also fixed the same round: `set_frmival()` could echo a request it never applied when no candidate rate was within reach, and the crop path's max-bands registers (`0x3a0d`/`0x3a0e`) were pinned to the 2592x1944 crop's own VTS for every crop size (see the driver section below for both). RAW10 only; RAW8 (SBGGR8) is unverified. CPI starvation-pause behaviour changed AGAIN by issue #2287 Stage B after this bench (re-arm responsibility moved to the ISP's own bottom half, after a mid-frame-corruption bug found in runs 304-310 -- see the IMX296 row above and the driver section below) -- re-bench on this sensor pending. |
 | INNO-MAKER CAM-IMX296RAW-TRIGGER | IMX296LQR-C (1.58 Mpx global-shutter colour) | `raspberry_pi_global_shutter_camera` | MIPI CSI-2 D-PHY, **1 lane** | 1456x1088 SRGGB10P full-frame (one fixed mode, 60.3 fps datasheet rate); 1280x960 SRGGB10P ROI crop (Stage B, same 60.3 fps, `VMAX` unchanged) | **Stage A + Stage B bench-verified** (issue #2287, E1M-AEN803 2026W36-0001, E1M-EVK, `csi_i2c` = I2C1 @ 0x49011000). Stage A: I2C identity (run 229 -- CCI 0x1A, undocumented `SENSOR_INFO` `0x3148`/`0x3149` reads `0x4A00`), CSI-2 streaming, a full 1456x1088 RAW10 frame through `<alp/camera.h>` (run 292, mean 61.19, 0.98 correlation against diag control run 293) -- both dim, ~1 code above black; a follow-up exposure/lighting pass is open. Stage B: the 1280x960 ROI crop (runs 294/295, 0.91 correlation against an offset crop of the full-frame capture), the ISP-Pico data path (run 297, `SRGGB10P` -> ISP-Pico -> YUV420, 0.83 correlation against the pre-ISP raw frame -- image quality/colour NOT verified, no IMX296 AWB/CCM table exists), auto-exposure through the ISP-Pico AE library (runs 309/310, converging correctly after the CPI-rearm fix below), and continuous MJPEG streaming via `examples/connectivity/camera-mjpeg-stream` (runs 312-314: 61 fps encode, 0 fail, up to 28.3 fps / 885 KB/s delivered to one client). See `changelog.d/2287.md` for the full bench history. Fast-trigger mode (below) is added but UNBENCHED. `SHS` < 14 in ROI mode (the datasheet's own tabulated frame-rate floor vs. this driver's fixed `VMAX`) is an open discrepancy -- see the driver section below. |
-| INNO-MAKER CAM-IMX335-5MP | IMX335 (5.0 Mpx colour, rolling shutter) | `innomaker_cam_imx335` | MIPI CSI-2 D-PHY, 2 lanes | 1296x972 SRGGB10P 2x2-binned (example default, requested explicitly -- driver boots at native 2592x1944) | **Bench-verified for raw capture ONLY** (issue #2327, bench runs 316-331, E1M-AEN803 2026W36-0001, E1M-EVK). 6/6 consecutive clean 1296x972 RAW10 raw captures (run 330): 0 CSI CRC errors, 0 IPI-fatal events, correct stride, no overrun. Driver: upstream Zephyr v4.4.1 `drivers/video/imx335.c` (`CONFIG_VIDEO_IMX335`), reused as-is, with one repo patch (`zephyr/patches/zephyr/0004-imx335-2lane-link-freq-and-binning.patch`) fixing three real driver defects -- see the driver section below. Frame rate/fps AT THE SENSOR, colour/AWB/CCM, and the sensor's full-resolution mode remain UNVERIFIED; do not claim otherwise. Stage B (issue #2327) adds ISP-Pico + AE + `camera-mjpeg-stream` support, bench-verified runs 332/333 (AE converges, 1280x960 ISP crop correct, MJPEG streaming at an app-reported 30 fps / 772.7 KB/s) -- see this doc's own Stage B section for exactly what remains unverified. |
+| INNO-MAKER CAM-IMX335-5MP | IMX335 (5.0 Mpx colour, rolling shutter) | `innomaker_cam_imx335` | MIPI CSI-2 D-PHY, 2 lanes | 1296x972 SRGGB10P 2x2-binned (example default, requested explicitly -- driver boots at native 2592x1944) | **Bench-verified for raw capture ONLY** (issue #2327, bench runs 316-331, E1M-AEN803 2026W36-0001, E1M-EVK). 6/6 consecutive clean 1296x972 RAW10 raw captures (run 330): 0 CSI CRC errors, 0 IPI-fatal events, correct stride, no overrun. Driver: upstream Zephyr v4.4.1 `drivers/video/imx335.c` (`CONFIG_VIDEO_IMX335`), reused as-is, with one repo patch (`zephyr/patches/zephyr/0004-imx335-2lane-link-freq-and-binning.patch`) fixing three real driver defects -- see the driver section below. Frame rate/fps AT THE SENSOR, colour/AWB/CCM, and the sensor's full-resolution mode remain UNVERIFIED; do not claim otherwise. Stage B (issue #2327) adds ISP-Pico + AE + `camera-mjpeg-stream` support, bench-verified runs 332-334 (AE converges, 1280x960 ISP crop correct, MJPEG streaming at an app-reported 30 fps / ~773 KB/s) -- see this doc's own Stage B section for exactly what remains unverified. |
 E1M-AEN hw_rev r2 (2626-R2)'s camera-connector revision needs a P/N-crossing
 adapter regardless of which module is used: each differential pair's N and P
 pins are swapped -- 2↔3 (D0), 5↔6 (D1), 8↔9 (CLK); everything else —
@@ -834,7 +834,7 @@ than E1M-AEN803 2026W36-0001 on this specific E1M-EVK; ISP/AE/colour (see
 Stage B below, itself unbenched); and the sensor's full-resolution
 (non-binned) mode.
 
-### IMX335 Stage B: ISP-Pico, AE, and MJPEG streaming (issue #2327) -- bench-verified, runs 332/333
+### IMX335 Stage B: ISP-Pico, AE, and MJPEG streaming (issue #2327) -- bench-verified, runs 332-334
 
 Follows IMX296's own Stage B shape (issue #2287, `hal_alif` patch 0013) as
 closely as the two sensors' real differences allow -- see that section's
@@ -885,10 +885,9 @@ the SAME 1280x960 frame size `examples/connectivity/camera-mjpeg-stream`'s
 existing buffer pool already budgets SRAM0 for. This crop lives in the
 `innomaker_cam_imx335` shield's own overlay
 (`zephyr/boards/shields/innomaker_cam_imx335/innomaker_cam_imx335.overlay`),
-not a per-example board overlay -- a review round moved it there: the crop
-is a property of THIS SENSOR MODULE (its fixed native/output size
-mismatch), not of any one example, and a per-example overlay left it
-silently untied to the backend's own assumption below. `src/backends/camera/
+not a per-example board overlay: the crop is a property of THIS SENSOR
+MODULE (its fixed native/output size mismatch), not of any one example.
+`src/backends/camera/
 alif_isp_pico.c` (the portable `<alp/camera.h>` ISP backend) pins its ISP
 INPUT request to this fixed 1296x972 native size for an IMX335 board
 (`DT_HAS_COMPAT_STATUS_OKAY(sony_imx335)`) rather than the caller's
@@ -905,21 +904,29 @@ board that ever sets `crop-x0`/`crop-y0` without a matching
 IMX335 caller requesting any size other than the shield's own cropped
 1280x960, rather than silently ignoring the mismatch.
 
-**Frame rate**: IMX335 only supports {25, 30, 50, 60} fps
-(upstream `imx335.c`'s `imx335_framerates[]`), and hal_alif patch 0014's AE
-envelope is calibrated against the sensor's EXACT 30 fps mode (`HMAX`
-`0x0226`). `examples/connectivity/camera-mjpeg-stream`'s shared 1280x960
-path requests 15 fps for OV5647/IMX296; a review round found this would NOT
-give IMX335 15 fps -- `video_closest_frmival()` rounds an unsupported
-request to the nearest AVAILABLE rate, and 15 rounds to 25 (`|25-15|=10` <
-`|30-15|=15`), landing on a different `HMAX` the envelope was never derived
-against. `src/main.c` now requests 30 fps explicitly for IMX335
-(`DT_HAS_COMPAT_STATUS_OKAY(sony_imx335)`), an exact match. `isp_pico.c`'s
-`isp_apply_ae()` also gained `CONFIG_VIDEO_ISP_VSI_AE_EXP_TIME_MAX_US_CAP`
+**Frame rate**: `src/backends/camera/alif_isp_pico.c`'s `cfg->fps` request
+(the portable `<alp/camera.h>` `fps` field) only ever reaches the OV5647
+sensor node (`DEVICE_DT_GET(DT_NODELABEL(ov5647))`, hardcoded, not generic
+to whatever sensor is actually active) -- so `examples/connectivity/
+camera-mjpeg-stream`'s 15 fps request for its shared 1280x960 path is
+simply NEVER forwarded to IMX335 or IMX296; both free-run at whatever rate
+their own driver defaults to. IMX335's driver default is 30 fps (upstream
+`imx335.c`'s `DEVICE_DT_INST_DEFINE` `.frame_rate = 30`, `HMAX` `0x0226`
+programmed at init), which already matches hal_alif patch 0014's AE
+envelope (calibrated at exactly 30 fps) with no explicit request needed --
+bench run 334 confirmed this directly, reading `HMAX`/`VMAX` back over I2C
+as `0x0226`/`0x001194`, the exact values the driver's own 30 fps default
+programs. This app-level backend forwarding fps only to OV5647 is a real
+gap, tracked as issue #2338 -- it is not something this Stage B work needed
+to fix to keep IMX335 on its envelope's assumed rate. `isp_pico.c`'s
+`isp_apply_ae()` separately gained `CONFIG_VIDEO_ISP_VSI_AE_EXP_TIME_MAX_US_CAP`
 (33207 for IMX335, matching `IMX335_AE_EXP_TIME_MAX_US`), clamping the
 pushed exposure-time ceiling to the calibration's own assumption the same
-way the existing gain-ceiling clamp already does, in case a future caller
-still requests an off-envelope frame rate for this sensor.
+way the existing gain-ceiling clamp already does -- a backstop for a
+DIRECT video API caller that sets a different rate on this sensor
+(`video_set_frmival()` against the sensor device itself, bypassing the
+app-level backend entirely), not something this example's own build
+exercises.
 
 `examples/aen/aen-isp-capture` gains an `-DAEN_ISP_IMX335=ON` variant
 (`overlay-imx335.conf`), same AE-on/off shape as the IMX296 variant,
@@ -939,24 +946,34 @@ with AWB off (expected -- no IMX335 colour calibration exists).
 **Bench run 333** (`camera-mjpeg-stream`, `aen_imx335` scenario, same
 board): 1280x960, app stats `fps=30 fail=0 retry=0`, one HTTP client
 measured 29.99 fps / 772.7 KB/s delivered over 30 s, ~26.3 KB JPEGs, a mild
-lavender/cyan colour cast (stock AWB, expected). This run measured `fps=30`
-under the code as it existed BEFORE the explicit 30 fps request above (it
-still requested 15, which happened to round-trip to a rate the app's own
-stats line reported as 30 -- the exact ambiguity the explicit request now
-removes rather than relies on); not yet re-run with the explicit request in
-place. Only error-class log line across both bench runs: one `FRAME_SEQ`
-event at stream start (the same single benign event every other sensor's
-Stage B run also logs once).
+lavender/cyan colour cast (stock AWB, expected). Only error-class log line
+across both bench runs: one `FRAME_SEQ` event at stream start (the same
+single benign event every other sensor's Stage B run also logs once).
+
+**Bench run 334** (same scenario, after the crop-ownership/gain-rounding/
+exposure-cap changes above): crop 8/6 confirmed coming from the shield's
+own DT (no example overlay), driver `frame_rate` 30, `HMAX 0x0226`/`VMAX
+0x001194` read back over I2C, `fps=30 fail=0 retry=0`, one client 29.98
+fps / 773.5 KB/s over 30 s, ~26.4 KB JPEGs, only error one `FRAME_SEQ` at
+start -- ran without regression. The gain-rounding, exposure-time cap,
+`isp_open()` rejection, and `isp_stream_start()` crop guard were all
+present in that image, but their specific effects are NOT separately
+bench-proven by this run (a passing capture does not distinguish "rounded
+correctly" from "the rounding never mattered this session"); the gain
+rounding's own proof is `tests/zephyr/isp_ae_conv` on `native_sim`.
 
 **AEN803 build verification** (`-Werror`,
 `CONFIG_COMPILER_WARNINGS_AS_ERRORS=y`, beyond the bench runs above):
 `aen-isp-capture`'s IMX335 AE-off variant (not itself bench-run) builds
 clean; `camera-mjpeg-stream`'s `aen_imx335` scenario rebuilds clean at
-SRAM0 98.50% usage. The existing IMX296 scenario also rebuilds clean, bit
-identical BY CONSTRUCTION rather than merely "the same usage number" --
-it never touches the `sony_imx335` DT compat, so every
-`DT_HAS_COMPAT_STATUS_OKAY(sony_imx335)` branch this Stage B work added
-compiles out of its build entirely, and its own gain-conversion Kconfig
+SRAM0 98.50% usage. The existing IMX296 scenario also rebuilds clean,
+BEHAVIOURALLY UNCHANGED rather than merely "the same usage number" --
+`isp_pico.c`'s new `isp_stream_start()` crop-vs-output-format guard IS
+compiled for every sensor, IMX296 included, but is a no-op for it
+(`crop-x0`/`crop-y0` default to 0, so the check always passes); the
+IMX296 build separately never touches the `sony_imx335` DT compat, so
+every `DT_HAS_COMPAT_STATUS_OKAY(sony_imx335)` branch this Stage B work
+added compiles out of it entirely, and its own gain-conversion Kconfig
 values stay at `VIDEO_ISP_VSI_SNS_GAIN_CTRL_PER_DB_TENTH` = 1 /
 `VIDEO_ISP_VSI_SNS_GAIN_CTRL_STEP` = 1 (both no-ops) -- confirmed by
 rebuilding it, not inferred from unchanged SRAM0 arithmetic alone.
@@ -966,7 +983,7 @@ rebuilding it, not inferred from unchanged SRAM0 arithmetic alone.
 silicon:** IMX335 colour/AWB/CCM accuracy (no calibration exists); the
 frame rate AT THE SENSOR itself (only the app-level `fps=30`/29.99 fps
 stats are bench-confirmed, not a sensor-side register or scope
-measurement); AE behaviour in lighting other than run 332/333's own scene;
+measurement); AE behaviour in lighting other than runs 332-334's own scene;
 the `aen-isp-capture` AE-off scenario (`-DEXTRA_CONF_FILE=overlay-no-ae.conf`,
 never bench-run); and the sensor's full-resolution (non-binned) mode
 through the ISP (Stage A's own non-binned-mode caveat is unchanged by
@@ -1059,9 +1076,11 @@ test** -- unlike the raw-capture patch above, `tests/zephyr/isp_ae_conv`
 pure logic) gained cases for the `ctrl_per_db_tenth`-scaled conversion this
 sensor's milli-dB `VIDEO_CID_ANALOGUE_GAIN` control needed: the identity
 case (`ctrl_per_db_tenth = 1`, proving IMX296's existing behaviour is
-unchanged), IMX335's own 30.0 dB cap, and (a review round's own finding) an
-exhaustive per-table-entry check that the pushed control value is an EXACT
-multiple of the sensor's 300 mdB register step. That last case exists
+unchanged), IMX335's own 30.0 dB cap, and an exhaustive per-table-entry
+check that the pushed control value is an EXACT multiple of the sensor's
+300 mdB register step, AND that the rounding is to the nearest such
+multiple (bounding its distance from the un-rounded scale-up at half a
+register step) rather than merely floored to one. That last case exists
 BECAUSE bench run 332 alone would NOT have caught the bug it guards
 against -- a systematic under-drive of at most one register count
 (~0.3 dB) is well within the AE loop's own convergence noise and would not

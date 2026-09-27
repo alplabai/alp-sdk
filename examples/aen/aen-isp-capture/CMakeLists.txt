@@ -43,17 +43,17 @@ if(AEN_ISP_IMX296)
     list(APPEND EXTRA_CONF_FILE "${CMAKE_CURRENT_SOURCE_DIR}/overlay-imx296.conf")
 endif()
 
-# Opt-in IMX335 variant (issue #2327 Stage B; bench-verified run 332, E1M-AEN803 2026W36-0001,
-# AE-on scenario): -DAEN_ISP_IMX335=ON requests the sensor's native 1296x972 2x2-binned SRGGB10P
-# input, then relies on the ISP's own crop (crop-x0/crop-y0 on &isp -- set by the
-# innomaker_cam_imx335 SHIELD's own overlay now, a property of the sensor module rather than this
-# example, issue #2327 Stage B reviewer follow-up) to output the SAME 1280x960 YUV420 buffer size
-# IMX296's ROI already uses -- see src/main.c's ISP_INPUT_WIDTH/HEIGHT vs. FRAME_WIDTH/HEIGHT
-# split and src/backends/camera/alif_isp_pico.c's BUILD_ASSERT proving the shield's crop still
-# produces 1280x960. Needs the innomaker_cam_imx335 shield (see testcase.yaml's imx335 scenario)
-# and hal_alif patch 0014 (zephyr/patches/hal_alif/0014-isp-imx335-ae-envelope.patch) for the
-# AE-on scenario; hal_alif patch 0012's SRGGB10P mapping (already shipped for IMX296) is reused
-# as-is -- IMX335 requests the SAME fourcc, no new mapping needed.
+# Opt-in IMX335 variant (issue #2327 Stage B; bench-verified runs 332/334, E1M-AEN803
+# 2026W36-0001, AE-on scenario): -DAEN_ISP_IMX335=ON requests the sensor's native 1296x972
+# 2x2-binned SRGGB10P input, then relies on the ISP's own crop (crop-x0/crop-y0 on &isp -- a
+# property of the sensor module, set by the innomaker_cam_imx335 SHIELD's own overlay, not this
+# example) to output the SAME 1280x960 YUV420 buffer size IMX296's ROI already uses -- see
+# src/main.c's ISP_INPUT_WIDTH/HEIGHT vs. FRAME_WIDTH/HEIGHT split and
+# src/backends/camera/alif_isp_pico.c's BUILD_ASSERT proving the shield's crop still produces
+# 1280x960. Needs the innomaker_cam_imx335 shield (see testcase.yaml's imx335 scenario) and
+# hal_alif patch 0014 (zephyr/patches/hal_alif/0014-isp-imx335-ae-envelope.patch) for the AE-on
+# scenario; hal_alif patch 0012's SRGGB10P mapping (already shipped for IMX296) is reused as-is
+# -- IMX335 requests the SAME fourcc, no new mapping needed.
 #   -DAEN_ISP_IMX335=ON
 option(AEN_ISP_IMX335 "Run IMX335's 2x2-binned frame, ISP-cropped to 1280x960, through the ISP" OFF)
 if(AEN_ISP_IMX335)
@@ -61,12 +61,9 @@ if(AEN_ISP_IMX335)
     # app's video_buffer pool actually holds is 1280x960 YUV420 for both variants (IMX335's larger
     # 1296x972 INPUT never occupies a queued video_buffer; it is consumed by the CPI/ISP hardware
     # path directly, cropped down before it ever reaches this pool). The ISP crop itself (&isp's
-    # crop-x0/crop-y0 = 8/6) lives in the innomaker_cam_imx335 SHIELD's own overlay now (issue
-    # #2327 Stage B reviewer follow-up: the crop is a property of THIS SENSOR MODULE's fixed
-    # native/output size mismatch, not of this example -- a per-example crop overlay left it
-    # silently untied to src/backends/camera/alif_isp_pico.c's own pinned 1296x972 input-size
-    # assumption; see that file's BUILD_ASSERT), not a per-example overlay -- nothing more to
-    # append here for the crop itself.
+    # crop-x0/crop-y0 = 8/6) is a property of THIS SENSOR MODULE and lives in the
+    # innomaker_cam_imx335 SHIELD's own overlay, not a per-example one -- nothing more to append
+    # here for the crop itself.
     list(APPEND EXTRA_CONF_FILE "${CMAKE_CURRENT_SOURCE_DIR}/overlay-imx335.conf")
 endif()
 

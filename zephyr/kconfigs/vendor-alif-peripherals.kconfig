@@ -1180,10 +1180,9 @@ config VIDEO_ISP_VSI_SNS_GAIN_CTRL_PER_DB_TENTH
 	  isp_sns_gain_conv.h's isp_sns_gain_db_tenths_ctrl_to_lib()/
 	  isp_sns_gain_lib_to_db_tenths_ctrl() for the conversion this symbol
 	  feeds. `range 1 1000`: 0 would divide-by-zero in
-	  isp_sns_gain_db_tenths_ctrl_to_lib() (issue #2327 Stage B reviewer
-	  follow-up -- that function no longer silently substitutes 1 for a 0
-	  input; Kconfig itself is the only guard now), and no real sensor
-	  control needs more than 1000 units per 0.1 dB.
+	  isp_sns_gain_db_tenths_ctrl_to_lib() (that function does not
+	  substitute 1 for a 0 input; Kconfig itself is the only guard), and
+	  no real sensor control needs more than 1000 units per 0.1 dB.
 
 config VIDEO_ISP_VSI_SNS_GAIN_CTRL_STEP
 	int "ISP-Pico AE gain writeback: sensor control WRITE granularity (dB-scaled sensors only)"
@@ -1191,9 +1190,8 @@ config VIDEO_ISP_VSI_SNS_GAIN_CTRL_STEP
 	default 1
 	depends on VIDEO_ISP_VSI
 	help
-	  Issue #2327 Stage B reviewer follow-up. Only READ while
-	  VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS is y, same always-visible reasoning
-	  as the two symbols above. This is DIFFERENT from
+	  Only READ while VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS is y, same
+	  always-visible reasoning as the two symbols above. This is DIFFERENT from
 	  VIDEO_ISP_VSI_SNS_GAIN_CTRL_PER_DB_TENTH above, which is a pure
 	  unit-conversion SCALE (how many control units equal 0.1 dB) --
 	  this is the sensor's own hardware-register WRITE granularity, in
@@ -1324,8 +1322,10 @@ config VIDEO_ISP_VSI_AE_EXP_TIME_MAX_US_CAP
 	  (imx335_ae_envelope.h's IMX335_AE_EXP_TIME_MAX_US) is calibrated against this
 	  sensor's EXACT 30 fps mode (upstream imx335.c's IMX335_30_FPS, HMAX 0x0226) --
 	  this symbol, when nonzero, clamps the PUSHED int_time_max_us to that SAME
-	  calibrated ceiling so a caller requesting a different (rounded) frame rate for
-	  this sensor can't push the AE library past what the envelope was derived against.
+	  calibrated ceiling so a direct video API caller that sets another rate on this
+	  sensor (video_set_frmival() against the sensor device directly, bypassing
+	  whatever fps convention an app-level backend applies) can't push the AE library
+	  past what the envelope was derived against.
 	  Already in the SAME microsecond unit as int_time_max_us -- unlike
 	  VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS (a dB-tenths value that needs a register/dB
 	  conversion), this symbol needs none.

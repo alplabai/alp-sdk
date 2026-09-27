@@ -907,11 +907,13 @@ patches:
       Kconfig defaults are 1 (no-ops) for every non-IMX335 sensor,
       including IMX296.
 
-      Bench-verified, runs 332/333 (E1M-AEN803 2026W36-0001): AE converges
+      Bench-verified, runs 332-334 (E1M-AEN803 2026W36-0001): AE converges
       (aen-isp-capture, ae_stable=1 at frame 50), the ISP crop lands
       correctly on 1280x960 (the first silicon confirmation of
       out_form_rect's left/top offsets), and camera-mjpeg-stream streams
-      at an app-reported 30 fps / 772.7 KB/s. Every FIGURE this envelope
+      at an app-reported 30 fps / ~773 KB/s, including HMAX/VMAX read back
+      over I2C confirming the sensor's own 30 fps default (run 334). Every
+      FIGURE this envelope
       uses (fullLines, maxIntLine, the 30 dB gain cap) remains an upstream
       driver constant or a public datasheet-flyer number, not independently
       bench-derived the way patch 0013's IMX296 figures are (that patch's

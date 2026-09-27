@@ -137,13 +137,10 @@
 };
 
 /*
- * Issue #2327 Stage B (bench-verified, run 332/333, E1M-AEN803 2026W36-0001): this sensor's
+ * Issue #2327 Stage B (bench-verified, runs 332-334, E1M-AEN803 2026W36-0001): this sensor's
  * native 2x2-binned output is a fixed 1296x972 with no in-sensor crop this driver uses --
  * whatever crops that down to a usable ISP OUTPUT size is a property of THIS SENSOR MODULE, not
- * of any one example, so it lives here rather than in a per-example board overlay (reviewer
- * follow-up to the original Stage B PR, which had put it in
- * examples/aen/aen-isp-capture/boards/imx335-isp-crop.overlay and examples/connectivity/
- * camera-mjpeg-stream/boards/overlay-imx335-isp-crop.overlay -- both deleted).
+ * of any one example, so it lives here rather than in a per-example board overlay.
  *
  * crop-x0/crop-y0 (zephyr/dts/bindings/video/vsi,isp-pico.yaml) feed isp_pico.c's out_form_rect:
  * width = port_fmt.width - (left << 1), height = port_fmt.height - (top << 1) -- i.e. both

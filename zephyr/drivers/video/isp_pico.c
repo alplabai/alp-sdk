@@ -1201,13 +1201,14 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 		}
 
 		/*
-		 * Issue #2327 Stage B reviewer follow-up: same reasoning as the gain-ceiling clamp
-		 * below (CONFIG_VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS) -- the frame-period-derived
-		 * ceiling above is sensor-agnostic and normally correct, but IMX335's calibration
-		 * (hal_alif patch 0014's IMX335_AE_EXP_TIME_MAX_US, already in the SAME microsecond
-		 * unit as int_time_max_us here -- no register/dB conversion needed, unlike gain)
-		 * assumes an EXACT 30 fps frame period; a caller that requests a different (rounded)
-		 * frame rate (see camera-mjpeg-stream's own FRAME_FPS comment) would otherwise push a
+		 * Same reasoning as the gain-ceiling clamp below (CONFIG_VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS)
+		 * -- the frame-period-derived ceiling above is sensor-agnostic and normally correct,
+		 * but IMX335's calibration (hal_alif patch 0014's IMX335_AE_EXP_TIME_MAX_US, already
+		 * in the SAME microsecond unit as int_time_max_us here -- no register/dB conversion
+		 * needed, unlike gain) assumes an EXACT 30 fps frame period, this sensor driver's own
+		 * default. A direct video API caller that sets a different rate on this sensor
+		 * (video_set_frmival() against the sensor device directly -- no app-level backend
+		 * forwards an fps request to IMX335 today, issue #2338) would otherwise push a
 		 * ceiling the calibration was never derived against. 0 (every non-IMX335 sensor)
 		 * means "trust the frame-period derivation above", unchanged behaviour.
 		 */
@@ -2000,7 +2001,7 @@ static int isp_stream_start(const struct device *dev)
 	port->out_form_rect.height = port->port_fmt.height - (port->out_form_rect.top << 1);
 
 	/*
-	 * Issue #2327 Stage B reviewer follow-up: out_form_rect (the ISP's own crop, above --
+	 * out_form_rect (the ISP's own crop, above --
 	 * left/top come from the &isp crop-x0/crop-y0 DT properties) must land EXACTLY on the
 	 * OUTPUT format's own width/height -- there is no scalar module in this driver's ISP
 	 * pipeline that would resize a crop mismatch for you, so a crop that lands on the wrong
@@ -2029,6 +2030,7 @@ static int isp_stream_start(const struct device *dev)
 			port->out_form_rect.height,
 			channel->output_fmt.width,
 			channel->output_fmt.height);
+		data->curr_vid_buf = 0;
 		return -EINVAL;
 	}
 

@@ -86,7 +86,7 @@ notes: |
   below, now bench-verified for ISP/AE); and the sensor's full-resolution
   (non-binned) mode, still unverified.
 
-  Issue #2327 Stage B, bench-verified runs 332/333 (E1M-AEN803
+  Issue #2327 Stage B, bench-verified runs 332-334 (E1M-AEN803
   2026W36-0001): the 2x2-binned frame now also reaches the ISP-Pico with
   AE, through hal_alif patch 0014
   (drivers/isp/isp_wrapper/inc/imx335_ae_envelope.h,
@@ -107,19 +107,32 @@ notes: |
   Green cast with AWB off (expected, no colour calibration exists). Run
   333 (camera-mjpeg-stream, aen_imx335 scenario): 1280x960, app stats
   fps=30 fail=0 retry=0, one HTTP client 29.99 fps / 772.7 KB/s over
-  30 s, ~26.3 KB JPEGs, mild lavender/cyan cast (stock AWB). Only
-  error-class log line across both runs: one FRAME_SEQ event at stream
-  start.
+  30 s, ~26.3 KB JPEGs, mild lavender/cyan cast (stock AWB). Run 334
+  (same scenario, after crop-ownership/gain-rounding/exposure-cap
+  follow-up changes): crop 8/6 confirmed from the shield's own DT,
+  driver frame_rate 30, HMAX 0x0226 / VMAX 0x001194 read back over I2C,
+  fps=30 fail=0 retry=0, one client 29.98 fps / 773.5 KB/s over 30 s,
+  ~26.4 KB JPEGs -- ran without regression, though the follow-up
+  changes' specific effects are not separately bench-proven by this
+  run. Only error-class log line across all three runs: one FRAME_SEQ
+  event at stream start.
 
-  NOT bench-verified by runs 332/333: colour/AWB/CCM accuracy (no
-  calibration exists); the frame rate AT THE SENSOR itself (only the
-  app-level fps stats are confirmed, not a sensor-side register or scope
-  measurement -- run 333 also measured its fps=30 stat under a since-fixed
-  15 fps request that happened to round-trip to a reported 30, not the
-  now-explicit 30 fps request); AE behaviour in lighting other than these
-  runs' own scene; and the AE-off aen-isp-capture scenario, never
-  bench-run. See changelog.d/2327.md's Stage B section and
-  docs/camera-shields.md's own Stage B section for the full mechanism.
+  The IMX335 ISP INPUT is fixed at 1296x972 regardless of what fps a
+  caller requests: src/backends/camera/alif_isp_pico.c only ever
+  forwards an fps request to the OV5647 sensor node (hardcoded), so
+  IMX335 (and IMX296) free-run at their own driver default -- 30 fps for
+  IMX335 (upstream imx335.c's own default), which already matches
+  hal_alif patch 0014's AE envelope with no explicit request needed.
+  This app-level backend gap is tracked as issue #2338.
+
+  NOT bench-verified by runs 332-334: colour/AWB/CCM accuracy (no
+  calibration exists); the frame rate AT THE SENSOR by an independent
+  method (runs 333/334's HMAX/VMAX I2C readback confirms the driver's
+  own programmed state, not an external timing measurement); AE
+  behaviour in lighting other than these runs' own scene; and the AE-off
+  aen-isp-capture scenario, never bench-run. See changelog.d/2327.md's
+  Stage B section and docs/camera-shields.md's own Stage B section for
+  the full mechanism.
 
 bus:              i2c
 i2c:
@@ -149,7 +162,7 @@ verification:
   hil_silicon:    partial           # Bench-verified: 2x2-binned 1296x972 RAW10 raw capture
                                      # through <alp/camera.h>, 6/6 consecutive clean frames, 0
                                      # CSI/IPI errors (bench runs 316-331); ISP-Pico + AE +
-                                     # camera-mjpeg-stream ALSO bench-verified (runs 332/333) --
+                                     # camera-mjpeg-stream ALSO bench-verified (runs 332-334) --
                                      # STILL partial, not full: colour/AWB/CCM, frame rate AT
                                      # THE SENSOR, AE in varied lighting, and the sensor's
                                      # full-resolution mode all remain unverified, see notes
