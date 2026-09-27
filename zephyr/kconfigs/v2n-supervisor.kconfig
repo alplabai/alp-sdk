@@ -75,4 +75,16 @@ config ALP_SDK_V2N_SUPERVISOR_ACQUIRE_TIMEOUT_MS
 	  it -- they get ALP_ERR_BUSY back at the portable surface and
 	  can retry.  Default 100 ms is well above any steady-state op.
 
+config ALP_SDK_V2N_SUPERVISOR_BUSY_HOLDOFF_MS
+	int "Hold-off after a GD32 init that ended BUSY (ms)"
+	default 1000
+	range 0 60000
+	help
+	  A bridge running an unconfirmed OTA trial image answers
+	  STATUS_BUSY until it settles, and gd32g553_init() spends its
+	  whole ~2 s retry budget against it while holding the
+	  supervisor mutex.  After such an init, acquirers get
+	  ALP_ERR_BUSY immediately for this long instead of re-running
+	  the 2 s init each time.  0 disables the hold-off.
+
 endif # ALP_SDK_V2N_SUPERVISOR
