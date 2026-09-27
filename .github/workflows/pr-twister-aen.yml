@@ -427,8 +427,9 @@ jobs:
       # boards/ twin (DT/Kconfig content held equal to the AEN801 file by
       # check_example_board_overlay_content_parity.py) plus one build_only
       # AEN scenario naming both SKUs for every core it ships an overlay
-      # for (alp-console: M55-HE; blink and pwm-led-fade: M55-HE +
-      # M55-HP). Bounded to these
+      # for (alp-console: M55-HE; blink and pwm-led-fade: M55-HP only --
+      # both declare only cores.m55_hp in board.yaml, so no M55-HE twin).
+      # Bounded to these
       # four examples (this trio plus drone-autopilot above), not widened to
       # all of examples/peripheral-io/ -- every OTHER example there stays
       # native_sim-only (see #2106).
@@ -447,19 +448,20 @@ jobs:
         # added the alp-console/blink/pwm-led-fade trio, and #2265
         # (already on dev) separately added camera-mjpeg-stream, bringing
         # the testsuite-root list to the nine above. A fresh `twister
-        # --dry-run` over this MERGED nine-root list (Zephyr v4.4.1, this
-        # repo's pin) measures 90 AEN801 + 86 AEN803 (176 total)
-        # configurations -- higher than a naive 85+81 (#2235 alone) or
-        # 86+82 (#2235 plus #2265's own +1/+1 dry-run delta) arithmetic
-        # would suggest, because further scenarios landed on dev between
-        # those two PRs and this merge. 90/86 is a real measurement of the
-        # merged tree, not a sum of the two PRs' individually-claimed
-        # deltas -- do not re-derive it by addition again without rerunning
-        # `--dry-run`. Scaling the AEN801 leg's last CI-measured rate
-        # (1179.76s/80 builds, CI run 35436368459) linearly projects to
-        # about 1330s/22.2min for 90 builds, still comfortably under this
+        # --dry-run` over this MERGED nine-root list at this PR's head
+        # (Zephyr v4.4.1, this repo's pin -- includes #2235's own fix
+        # dropping blink/pwm-led-fade's undeclared-core M55-HE twin, and
+        # the further scenarios #2323 and other dev commits landed since
+        # the earlier 90/86 measurement) measures 98 AEN801 + 94
+        # AEN803 (192 total) configurations. Re-derive with a fresh
+        # `--dry-run` rather than by arithmetic on any prior count in this
+        # comment -- the 90/86/176 figure that used to stand here was
+        # itself already stale by the time this comment was re-measured.
+        # Scaling the AEN801 leg's last CI-measured rate (1179.76s/80
+        # builds, CI run 35436368459) linearly projects to about
+        # 1445.2s/24.09min for 98 builds, still comfortably under this
         # 30min cap; the AEN803 leg's own last-measured rate (693.43s/75
-        # builds, same CI run) projects to about 795s/13.3min for 86
+        # builds, same CI run) projects to about 869s/14.48min for 94
         # builds, also comfortably under this cap -- both projections are
         # arithmetic off an OLDER CI timing sample, not a fresh timed run,
         # so revisit with a real in-CI run if a future scenario count

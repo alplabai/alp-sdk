@@ -155,6 +155,14 @@ GLOB_SCOPED_SHAPES = (HE, HP)  # shapes whose stems end in "_rtss_h[ep]"
 SHAPE_IDS = [s.id for s in ALL_SHAPES]
 GLOB_SCOPED_IDS = [s.id for s in GLOB_SCOPED_SHAPES]
 
+# The two extensions build.sh's guard checks identically
+# (bench_build_require_board_qualified is called once per extension with
+# its own error-message label); a near-miss name is a hazard for either
+# one, so both are exercised, not just whichever half a given test
+# happened to pick first.
+EXT_LABELS = {"overlay": "overlay", "conf": ".conf"}
+EXTS = tuple(EXT_LABELS)
+
 
 def _sanitized_env() -> dict[str, str]:
     """A unit test must never reach real bench infra (see
@@ -411,8 +419,9 @@ class TestBuildShBoardQualifiedGuard:
         assert "BUILD FAILED" not in result.stderr
 
     @pytest.mark.parametrize("shape", GLOB_SCOPED_SHAPES, ids=GLOB_SCOPED_IDS)
+    @pytest.mark.parametrize("ext", EXTS)
     def test_bare_board_name_near_miss_is_refused(
-        self, tmp_path: Path, shape: BoardShape
+        self, tmp_path: Path, shape: BoardShape, ext: str
     ) -> None:
         # Arrange: the app ships ONLY the bare board name (no qualifiers
         # at all) -- Zephyr auto-applies neither accepted stem for this
@@ -420,35 +429,39 @@ class TestBuildShBoardQualifiedGuard:
         # mismatched-board file, just invisible to the generic
         # "_rtss_h[ep]" glob (HE/HP only: the one-qualifier shape's bare
         # name IS its accepted short stem, covered by the accept tests
-        # above instead).
+        # above instead). Exercised for both .overlay and .conf: the
+        # guard runs bench_build_require_board_qualified once per
+        # extension, and a near-miss name is a hazard for either.
         app = _make_app(tmp_path, "app-bare-near-miss", {
-            f"{shape.bare}.overlay": "/* bare board name -- Zephyr never applies this */\n",
+            f"{shape.bare}.{ext}": f"/* bare board name -- Zephyr never applies this ({ext}) */\n",
         })
         # Act
         result = _run(tmp_path, app, shape.fq_board)
         # Assert: refused, and the near-miss file is named as present.
         assert result.returncode == 2, result.stderr
-        assert "ships AEN board overlay files, but none for" in result.stderr
-        assert f"{shape.bare}.overlay" in result.stderr
+        assert f"ships AEN board {EXT_LABELS[ext]} files, but none for" in result.stderr
+        assert f"{shape.bare}.{ext}" in result.stderr
         assert "BUILD FAILED" not in result.stderr
 
     @pytest.mark.parametrize("shape", GLOB_SCOPED_SHAPES, ids=GLOB_SCOPED_IDS)
+    @pytest.mark.parametrize("ext", EXTS)
     def test_board_plus_soc_near_miss_is_refused(
-        self, tmp_path: Path, shape: BoardShape
+        self, tmp_path: Path, shape: BoardShape, ext: str
     ) -> None:
         # Arrange: the app ships ONLY board+SoC with the trailing RTSS
         # qualifier dropped -- also never auto-applied by Zephyr, and also
-        # invisible to the generic "_rtss_h[ep]" glob.
+        # invisible to the generic "_rtss_h[ep]" glob. Exercised for both
+        # .overlay and .conf, same reasoning as the bare-name case above.
         assert shape.board_soc is not None  # sanity: only HE/HP carry one
         app = _make_app(tmp_path, "app-board-soc-near-miss", {
-            f"{shape.board_soc}.conf": "# board+SoC, no RTSS qualifier -- never auto-applied\n",
+            f"{shape.board_soc}.{ext}": f"# board+SoC, no RTSS qualifier -- never auto-applied ({ext})\n",
         })
         # Act
         result = _run(tmp_path, app, shape.fq_board)
         # Assert
         assert result.returncode == 2, result.stderr
-        assert "ships AEN board .conf files, but none for" in result.stderr
-        assert f"{shape.board_soc}.conf" in result.stderr
+        assert f"ships AEN board {EXT_LABELS[ext]} files, but none for" in result.stderr
+        assert f"{shape.board_soc}.{ext}" in result.stderr
         assert "BUILD FAILED" not in result.stderr
 
     def test_board_with_empty_qualifier_segment_is_refused_early(

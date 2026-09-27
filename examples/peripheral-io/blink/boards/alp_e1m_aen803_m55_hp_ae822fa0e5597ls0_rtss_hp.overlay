@@ -16,9 +16,9 @@
  * P15_3, P15_6, P15_7): the LED lives on P12_7/gpio12, its RGB siblings
  * on P12_6/gpio12 and P2_4/gpio2, and every unmapped array slot on the
  * gpio2-pin-31 sentinel below -- so the E1M-AEN801 body (below) carries
- * over unchanged.  The M55-HE overlay beside this one is identical --
- * the LED pad is a SoM-level route, not a core-level one, so either
- * core can drive it.
+ * over unchanged.  There is no E1M-AEN803 M55-HE twin of this file:
+ * board.yaml declares only cores.m55_hp, so an HE overlay would target
+ * an undeclared core.
  *
  * WHY THIS FILE EXISTS AT ALL.  <alp/peripheral.h>'s portable
  * alp_gpio_open() resolves a pin id through the `alp,pin-array` DT node

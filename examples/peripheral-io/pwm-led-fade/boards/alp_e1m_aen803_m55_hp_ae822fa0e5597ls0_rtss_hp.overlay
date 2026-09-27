@@ -14,8 +14,8 @@
  * pad, P2_4 (E1M_PWM3, the RGB LED's green channel), is not part of the
  * OSPI0 set (P2_0, P2_1, P6_2..P6_6, P0_7, P12_0..P12_4, P15_2, P15_3,
  * P15_6, P15_7), so the E1M-AEN801 body (below) carries over unchanged.
- * The M55-HE overlay beside this one is identical -- the LED pad is a
- * SoM-level route, not a core-level one, so either core can drive it.
+ * There is no E1M-AEN803 M55-HE twin of this file: board.yaml declares
+ * only cores.m55_hp, so an HE overlay would target an undeclared core.
  *
  * WHY THIS FILE EXISTS: board.yaml's declarative `pins: [{ e1m: E1M_PWM3,
  * macro: EVK_PWM_LED_GREEN }]` + `peripherals: [pwm]` route does NOT emit a
