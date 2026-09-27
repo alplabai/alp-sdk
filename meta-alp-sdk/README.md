@@ -317,9 +317,9 @@ backend the SoM preset's `capabilities:` block declares
 dependencies of the `alp-sdk` library** — the Yocto build links only
 the dispatcher + portable stubs.  Where a runtime userspace package
 exists, the **image** recipe installs it (e.g.
-`conf/machine/include/e1m-v2m-deepx.inc` appending `dx-driver dx-rt`
-when `ALP_ENABLE_DEEPX_DXM1 = "1"` -- `dxrt-cli` ships inside the
-`dx-rt` package itself at this pin, not as a separate recipe);
+`conf/machine/include/e1m-v2m-deepx.inc` appending `dx-driver dx-rt
+dx-rt-cli` when `ALP_ENABLE_DEEPX_DXM1 = "1"` -- `dxrt-cli`, `run_model`
+and the other tools ship in the `dx-rt-cli` sub-package);
 DRP-AI3 is driven through the in-kernel driver + UAPI headers from
 `meta-rz-drpai` (see below).
 

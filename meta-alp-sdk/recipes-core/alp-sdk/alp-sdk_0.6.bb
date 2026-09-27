@@ -102,6 +102,17 @@ PACKAGECONFIG[drpai]    = "-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=O
 PACKAGECONFIG[deepx-dxm1] = "-DALP_SDK_USE_DEEPX_DXM1=ON -DALP_SDK_DEEPX_REQUIRED=ON,-DALP_SDK_USE_DEEPX_DXM1=OFF,dx-rt,"
 PACKAGECONFIG:append = "${@bb.utils.contains('MACHINE_FEATURES', 'deepx-dxm1', ' deepx-dxm1' if d.getVar('ALP_ENABLE_DEEPX_DXM1') == '1' else '', '', d)}"
 
+# Fail loudly when the DEEPX opt-in is set but DEEPX's layer is not in
+# bblayers.conf. Without this the same misconfiguration surfaces as a
+# cryptic "Nothing PROVIDES dx-rt" here and "Nothing RPROVIDES dx-driver"
+# at do_rootfs.
+python () {
+    if d.getVar('ALP_ENABLE_DEEPX_DXM1') == '1' and 'meta-deepx-m1' not in (d.getVar('BBFILE_COLLECTIONS') or '').split():
+        bb.fatal("ALP_ENABLE_DEEPX_DXM1 = \"1\" but the meta-deepx-m1 layer is "
+                 "not in bblayers.conf. Add DEEPX's meta-deepx-m1 layer "
+                 "(see conf/machine/include/e1m-v2m-deepx.inc) or unset the opt-in.")
+}
+
 # Inference backends are NOT build-time dependencies of the SDK
 # library.  The Yocto build (src/yocto/) links only the
 # <alp/inference.h> dispatcher + the portable stubs; the vendor NPU
