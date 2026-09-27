@@ -38,9 +38,12 @@ if ALP_SDK_V2N_SUPERVISOR
 
 config ALP_SDK_V2N_SUPERVISOR_SPI_BUS_ID
 	int "alp_spi bus_id carrying the GD32 SPI fast path (-1 = disabled)"
+	default 1 if $(dt_alias_enabled,alp-spi1)
 	default -1
 	help
-	  alp_spi_open()'s bus_id field.  When set to 1 (DT alias
+	  alp_spi_open()'s bus_id field.  Defaults to 1 when the board
+	  enables DT alias alp-spi1 (both in-tree V2N/V2M CM33 boards do),
+	  else -1.  When set to 1 (DT alias
 	  alp-spi1 = &gd32_spi on the in-tree boards), resolves to the
 	  SCI7 Simple-SPI on V2N pads P76/P77/P96 with P97 as GPIO
 	  chip-select.  This is the CM33's ONLY transport to the GD32 --
