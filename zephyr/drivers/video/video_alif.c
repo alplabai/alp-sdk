@@ -325,7 +325,8 @@ static inline void hw_cam_start_video_capture(const struct device *dev)
 	hw_cam_soft_reset(regs);
 
 	/* Start video capture. Snapshot is the only supported capture mode --
-	 * continuous is rejected at DT build time, see enum cpi_capture_mode.
+	 * continuous is rejected at DT build time (alif,cam.yaml's
+	 * capture-mode enum has only "snapshot").
 	 */
 	sys_write32(CAM_CTRL_FIFO_CLK_SEL | CAM_CTRL_SNAPSHOT | CAM_CTRL_START, regs + CAM_CTRL);
 }
@@ -426,7 +427,7 @@ static inline void hw_cam_quiesce(uintptr_t regs, uint32_t irq_mask)
  */
 static inline void hw_cam_cpi_only_stop(uintptr_t regs)
 {
-	/* See hw_cam_quiesce() for why this is the only safe way to stop. */
+	/* Soft reset via hw_cam_quiesce(); see it for why this is the only safe stop. */
 	hw_cam_quiesce(
 	    regs, INTR_VSYNC | INTR_BRESP_ERR | INTR_OUTFIFO_OVERRUN | INTR_INFIFO_OVERRUN | INTR_STOP);
 }
@@ -733,6 +734,18 @@ static void alif_cam_work_helper(const struct device *dev)
 	if (config->axi_bus_ep) {
 		k_mutex_lock(&data->lock, K_FOREVER);
 
+		/*
+		 * alif_cam_stream_stop() may have run (and quiesced the CPI)
+		 * between this STOP interrupt firing and this work item
+		 * running -- data->lock serializes against it, so this read
+		 * is race-free. Nothing left to do for a stream the user
+		 * already asked to stop; re-arming here would restart it.
+		 */
+		if (!data->is_streaming) {
+			k_mutex_unlock(&data->lock);
+			return;
+		}
+
 		vbuf = k_fifo_peek_head(&data->fifo_in);
 		if (vbuf == NULL) {
 			LOG_ERR("Unexpected condition! The IN-FIFO should have "
@@ -794,18 +807,6 @@ static void alif_cam_work_helper(const struct device *dev)
 			 * streaming across the stall -- see hw_cam_cpi_only_stop(). */
 			hw_cam_cpi_only_stop(regs);
 			signal_status = VIDEO_BUF_DONE;
-			k_mutex_unlock(&data->lock);
-			goto done;
-		}
-
-		/*
-		 * alif_cam_stream_stop() may have run (and quiesced the CPI)
-		 * between this STOP interrupt firing and this work item
-		 * running -- data->lock serializes against it, so this read
-		 * is race-free. Re-arming here after a stop would restart a
-		 * capture the user already asked to stop.
-		 */
-		if (!data->is_streaming) {
 			k_mutex_unlock(&data->lock);
 			goto done;
 		}
@@ -1193,7 +1194,22 @@ static int alif_cam_flush(const struct device *dev, bool cancel)
 		struct k_work_sync sync;
 
 		/*
-		 * Cancel any in-flight work_helper first, and OUTSIDE the
+		 * Mask STOP before cancelling the in-flight work_helper --
+		 * same ordering as isp_flush() (zephyr/drivers/video/isp_pico.c).
+		 * Masking first closes the window where a STOP fires between
+		 * k_work_cancel_sync() returning and this function re-taking
+		 * the lock below: without the mask, that STOP can resubmit
+		 * cb_work, which then runs after hw_cam_quiesce() has already
+		 * reset the CPI, finds an empty IN-FIFO, hits the "Unexpected
+		 * condition" branch in alif_cam_work_helper(), clears
+		 * is_streaming and stalls the stream.
+		 */
+		k_mutex_lock(&data->lock, K_FOREVER);
+		hw_disable_interrupts(regs, INTR_STOP);
+		k_mutex_unlock(&data->lock);
+
+		/*
+		 * Cancel any in-flight work_helper next, and OUTSIDE the
 		 * lock -- k_work_cancel_sync() blocks on alif_cam_work_helper()
 		 * (which itself takes data->lock) finishing, so taking the
 		 * lock first would deadlock against it (same reasoning as
@@ -1207,9 +1223,10 @@ static int alif_cam_flush(const struct device *dev, bool cancel)
 		k_mutex_lock(&data->lock, K_FOREVER);
 
 		/* See hw_cam_quiesce() for why this is the only safe way to
-		 * stop. Disabling only INTR_STOP (not the full interrupt set)
-		 * ensures the current buffer isn't moved IN-FIFO -> OUT-FIFO
-		 * by a STOP that fires during the quiesce below.
+		 * stop: soft reset via hw_cam_quiesce(). INTR_STOP is already
+		 * masked above; passing it again here is a harmless re-mask,
+		 * kept so this call matches every other hw_cam_quiesce() call
+		 * site.
 		 */
 		hw_cam_quiesce(regs, INTR_STOP);
 
@@ -1533,10 +1550,14 @@ static void __maybe_unused alif_video_cam_isr(const struct device *dev)
 		 * bench: ~2x frame overrun, the same failure hw_cam_quiesce()
 		 * exists to avoid. Writing FIFO_CLK_SEL | SNAPSHOT is, relative
 		 * to that already-armed state, equivalent to clearing only
-		 * START -- bench-proven a no-op mid-capture (hw_cam_quiesce()'s
-		 * header comment, arm B). Either way this write clears START,
-		 * so alif_cam_cpi_resume()'s idempotency guard (BUSY | START)
-		 * still lets a genuinely finished capture re-arm normally.
+		 * START -- bench-proven a no-op for a capture already in
+		 * progress (hw_cam_quiesce()'s header comment, arm B); for a
+		 * CPI armed but not yet started this is unproven, but the
+		 * write this replaced (a bare 0) also cleared START, so this
+		 * is not a regression either way. This write clears START
+		 * regardless, so alif_cam_cpi_resume()'s idempotency guard
+		 * (BUSY | START) still lets a genuinely finished capture
+		 * re-arm normally.
 		 */
 		sys_write32(CAM_CTRL_FIFO_CLK_SEL | CAM_CTRL_SNAPSHOT, regs + CAM_CTRL);
 		/* Guard: don't process stale STOP after stream was turned off */
@@ -1828,7 +1849,6 @@ static int __maybe_unused alif_video_cam_init(const struct device *dev)
 		.msb = DT_INST_PROP(i, msb),                                                       \
 		.vsync_en = DT_INST_PROP(i, vsync_en),                                             \
 		.wait_vsync = DT_INST_PROP(i, wait_vsync),                                         \
-		.capture_mode = DT_INST_ENUM_IDX(i, capture_mode),                                 \
 		.data_mode = DT_INST_ENUM_IDX(i, data_mode),                                       \
 		.data_mask = DT_INST_ENUM_IDX(i, data_mask),                                       \
 		.code10on8 = DT_INST_PROP(i, code_10_on_8),                                        \

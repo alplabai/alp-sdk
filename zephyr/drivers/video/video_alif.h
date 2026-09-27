@@ -76,13 +76,6 @@
 /* CPI constants. */
 #define CPI_MIN_VBUF 1
 
-/* Continuous capture is rejected at DT build time (alif,cam.yaml's
- * capture-mode enum has only "snapshot") -- see hw_cam_start_video_capture().
- */
-enum cpi_capture_mode {
-	CPI_CAPTURE_MODE_SNAPSHOT = 0,
-};
-
 enum cpi_input_fifo_clk_sel {
 	CPI_INPUT_FIFO_CLK_INTERNAL = 0,
 	CPI_INPUT_FIFO_CLK_EXTERNAL,
@@ -117,11 +110,10 @@ struct video_cam_config {
 	uint32_t wait_vsync: 1;
 	uint32_t csi_halt_en: 1;
 	uint32_t write_wmark: 5;
-	uint32_t capture_mode: 1;
 	uint32_t axi_bus_ep: 1;
 	uint32_t isp_ep: 1;
 	uint32_t interface: 1;
-	uint32_t reserved: 7;
+	uint32_t reserved: 8;
 
 	const struct device *clk_dev;
 	clock_control_subsys_t cid;
