@@ -26,6 +26,7 @@ IMAGE_INSTALL = " \
     mender-client                  \
     openssh                        \
     alp-watchdog-policy            \
+    alp-hostname                   \
 "
 
 # meta-rz-drpai vendor payload (DRP-AI3 NPU userspace runtime + kernel
