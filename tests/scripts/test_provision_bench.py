@@ -137,8 +137,8 @@ def test_scpi_power_commands_and_query():
     def handler(conn):
         data = conn.recv(100)
         seen.append(data)
-        if data.startswith(b"OUTP?"):
-            conn.sendall(b"ON\n")
+        if data.startswith(b"SYST:STAT?"):
+            conn.sendall(b"0x24\n")   # SPD3303X: bit 5 = CH2 output on
 
     srv, port = _serve_once(handler)
     try:
@@ -147,7 +147,26 @@ def test_scpi_power_commands_and_query():
         assert p.is_on() is True
     finally:
         srv.close()
-    assert seen == [b"OUTP CH2,OFF\n", b"OUTP CH2,ON\n", b"OUTP? CH2\n"]
+    assert seen == [b"OUTP CH2,OFF\n", b"OUTP CH2,ON\n", b"SYST:STAT?\n"]
+
+
+def test_scpi_power_is_on_reads_the_channel_bit():
+    def serve(reply):
+        def handler(conn):
+            conn.recv(100)
+            conn.sendall(reply)
+        return _serve_once(handler)
+
+    srv, port = serve(b"0x14\n")                 # bench read: CH1 on, CH2 off
+    try:
+        assert bench.ScpiPower("127.0.0.1", port, 2).is_on() is False
+    finally:
+        srv.close()
+    srv, port = serve(b"garbage\n")
+    try:
+        assert bench.ScpiPower("127.0.0.1", port, 1).is_on() is None
+    finally:
+        srv.close()
 
 
 def test_scpi_power_unreachable_is_bench_error():

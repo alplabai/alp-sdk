@@ -248,8 +248,8 @@ class Power:
 class ScpiPower(Power):
     """SCPI over raw TCP, one connection per command.
 
-    Command syntax is the bench-proven ``OUTP CH<n>,ON|OFF`` /
-    ``OUTP? CH<n>`` form, not the IEEE ``(@n)`` channel-list form.
+    Command syntax is the bench-proven ``OUTP CH<n>,ON|OFF`` form, not the
+    IEEE ``(@n)`` channel-list form; output state is read from ``SYST:STAT?``.
     """
 
     def __init__(
@@ -282,8 +282,17 @@ class ScpiPower(Power):
         self._send(f"OUTP CH{self.channel},OFF")
 
     def is_on(self) -> bool | None:
-        r = self._send(f"OUTP? CH{self.channel}", reply=True).upper()
-        return {"ON": True, "1": True, "OFF": False, "0": False}.get(r)
+        """Siglent SPD3303X has no ``OUTP?`` query (it times out); its output
+        state is ``SYST:STAT?`` (hex) bit 4 for CH1, bit 5 for CH2 --
+        bench-read ``0x14`` with CH1 on. None when the reply does not parse
+        or the channel has no status bit."""
+        if self.channel not in (1, 2):
+            return None
+        try:
+            stat = int(self._send("SYST:STAT?", reply=True), 16)
+        except (BenchError, ValueError):
+            return None
+        return bool(stat >> (3 + self.channel) & 1)
 
 
 class LabgridPower(Power):
