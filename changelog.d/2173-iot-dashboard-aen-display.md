@@ -116,7 +116,7 @@ against until this change added one. `mqtt-telemetry` and
 `iot-fleet-ota` target `alp_e1m_aen801_m55_hp` too but still ship no
 `boards/` overlay at all, so their `cc3501e_bridge_bringup()` still
 returns `ALP_ERR_NOT_PRESENT_ON_THIS_SOC` on HP regardless of this guard
-fix -- a follow-up issue pending, not fixed by this change.
+fix -- tracked in #2363, not fixed by this change.
 
 Verified: both HP targets link with `west build`; `zephyr.dts` in each
 build tree shows `spi@48104000` `status = "okay"` with
