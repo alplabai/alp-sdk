@@ -71,7 +71,14 @@ SRC_URI:append = " \
     file://0004-drm-panel-add-himax-hx8394-with-rocktech-rk055hdmipi.patch \
     file://0005-gpio-add-gd32-bridge-expander-driver.patch \
     file://0006-input-goodix-fall-back-to-polling-without-an-irq.patch \
+    file://0011-irqchip-renesas-rzv2h-mask-the-ICU-error-sources-the-handler-cannot-ack.patch \
 "
+
+# 0011 (ICU error mask, #2355): the shared CA55 ICU error line is serviced
+# only for GPT overflow bits, but group 0 resets fully unmasked; once the
+# Cortex-M33 runs, group 0 bit 0 asserts, nobody acknowledges it, and the
+# line storms ("irq 14: nobody cared") until genirq disables it. The patch
+# unmasks only the GPT overflow bits the handler services.
 
 # AMP clock ownership: RSCI7 belongs to the Cortex-M33 system manager
 # (GD32 supervisor SPI link).  Without this patch, Linux's
