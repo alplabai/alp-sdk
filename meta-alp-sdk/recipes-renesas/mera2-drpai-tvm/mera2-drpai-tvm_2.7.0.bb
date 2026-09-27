@@ -480,9 +480,12 @@ INSANE_SKIP:${PN} += "ldflags"
 RDEPENDS:${PN} += "mmngr-user-module mmngrbuf-user-module kernel-module-mmngr"
 
 # Excluded from `bitbake world`: this recipe only builds successfully
-# once a builder has pointed RUHMI_DRPAI_TVM_DIR at a real checkout,
-# same posture as recipes-deepx/dx-rt for the other license-gated NPU
-# runtime in this layer.
+# once a builder has pointed RUHMI_DRPAI_TVM_DIR at a real checkout --
+# this is now the only license-gated NPU runtime meta-alp-sdk itself
+# builds in-tree; the other one (DEEPX DX-M1) is consumed from DEEPX's
+# own external meta-deepx-m1 layer instead (see
+# conf/machine/include/e1m-v2m-deepx.inc and
+# docs/vendor-partnerships.md).
 EXCLUDE_FROM_WORLD = "1"
 
 # EXCLUDE_FROM_WORLD only keeps this out of `bitbake world`.  It does NOT

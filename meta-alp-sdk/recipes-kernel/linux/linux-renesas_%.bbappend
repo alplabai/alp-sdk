@@ -71,9 +71,16 @@ SRC_URI:append = " \
     file://0004-drm-panel-add-himax-hx8394-with-rocktech-rk055hdmipi.patch \
     file://0005-gpio-add-gd32-bridge-expander-driver.patch \
     file://0006-input-goodix-fall-back-to-polling-without-an-irq.patch \
+    file://0010-mmc-renesas_sdhi-bounce-multi-segment-requests-in-internal-dmac.patch \
     file://0011-irqchip-renesas-rzv2h-mask-the-ICU-error-sources-the-handler-cannot-ack.patch \
 "
 
+# 0010 (SDHI internal-DMAC bounce buffer, #2357): the DMAC takes one
+# contiguous buffer per request and the RZ/V2N SDHI has no IOMMU, so every
+# page-cache write reached the card as a separate 4 KiB command (microSD
+# ~2.7 MB/s, and SDR104 writes hung on "Card stuck being busy!"). The patch
+# copies multi-segment requests through a 256 KiB coherent buffer per host.
+#
 # 0011 (ICU error mask, #2355): the shared CA55 ICU error line is serviced
 # only for GPT overflow bits, but group 0 resets fully unmasked; once the
 # Cortex-M33 runs, group 0 bit 0 asserts, nobody acknowledges it, and the
@@ -165,10 +172,14 @@ ALP_DRPAI_LAYER[vardepvalue] = "${ALP_DRPAI_LAYER}"
 # an opt-in feature.
 #
 # So require an explicit ALP_ENABLE_DRPAI too, defaulting to 0.  It is
-# DECLARED in all six V2N/V2M machine confs (`ALP_ENABLE_DRPAI ?= "0"`)
-# next to ALP_ENABLE_DEEPX_DXM1, so a builder reading the conf for their
-# MACHINE finds it -- the `??=` here is only the fallback for a consumer
-# that uses this bbappend without one of those confs.  Turning the SDK backend on
+# DECLARED in all six V2N/V2M machine confs (`ALP_ENABLE_DRPAI ?= "0"`),
+# so a builder reading the conf for their MACHINE finds it -- the `??=`
+# here is only the fallback for a consumer that uses this bbappend
+# without one of those confs.  (The V2M-only DEEPX equivalent,
+# ALP_ENABLE_DEEPX_DXM1, now lives one level down in
+# conf/machine/include/e1m-v2m-deepx.inc, `require`d by the three V2M
+# confs, rather than declared in each conf directly -- a different
+# knob, not a place to look for this one.)  Turning the SDK backend on
 # (PACKAGECONFIG "drpai") and turning the kernel node on are deliberately
 # separate switches: the backend without the node fails at open() with a
 # clear error, whereas the node without the backend is simply an idle
