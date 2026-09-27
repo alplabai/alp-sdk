@@ -14,8 +14,8 @@ mpn_population:
 datasheet:
   primary:        "Renesas 5L35023 datasheet (public, Dec 2025 rev)"
   url:            "https://www.renesas.com/en/document/dst/5l35023-datasheet"
-  # 8-bit default write-address is 0xD0 (per the V2N strap I2C_addr[1:0] = 00),
-  # which is 7-bit 0x68 + R/W bit.
+  # 8-bit default write-address is 0xD2 (per the V2N strap I2C_addr[1:0] = 01,
+  # maintainer-confirmed 2026-09-24), which is 7-bit 0x69 + R/W bit.
 
 notes: |
   Same part is used on the Renesas RZ/V2N EVK.  The chip carries
@@ -28,7 +28,8 @@ notes: |
 
   I2C slave-address options: 0xD0 / 0xD2 / 0xD4 / 0xD6 (8-bit) =
   7-bit 0x68 / 0x69 / 0x6A / 0x6B per the `I2C_addr[1:0]` strap
-  in Byte 0x00 bits[6:5].  V2N straps `00` -> 7-bit 0x68.
+  in Byte 0x00 bits[6:5].  V2N straps `01` -> 7-bit 0x69
+  (maintainer-confirmed 2026-09-24).
 
   Typed helpers cover:
     * Byte 0x00 (General Control) -- cached at init; readback via
@@ -73,7 +74,7 @@ register_table:
 bus:              i2c
 i2c:
   addresses:
-    - { addr_7bit: 0x68, scope: "BRD_I2C; V2N strap (8-bit 0xD0); other strap options 0x69/0x6A/0x6B." }
+    - { addr_7bit: 0x69, scope: "BRD_I2C; V2N strap I2C_addr[1:0]=01 (8-bit 0xD2), maintainer-confirmed 2026-09-24; other strap options 0x68/0x6A/0x6B." }
   max_clock_hz:   400000           # Fast-mode -- datasheet I2C bus AC chars table 13
 
 signals:

@@ -42,8 +42,9 @@
  * verdict -- see its own header for the amp-safety sequencing this phase
  * exists to get right) and phase 13 (JPEG encode on the Hantro VC9000E).
  * Phase 12 (screen/DSI) is not a blind stub either: it calls
- * alp_display_open() for real and reports the grounded reason no
- * alp-display* alias can resolve on this SoC (see its own header). Only
+ * alp_display_open() for real and reports why it fails -- this build declares
+ * no alp-display* alias unless the e1m_evk_rk055hdmipi4ma0 shield is added
+ * (see its own header). Only
  * phase 14 (NPU) is still a blind stub -- see phase_npu_stub()'s header for
  * why it is a different kind of gap (an image that would have to change
  * BOOT FLOW to hold the model, not hardware absence or a deferred slice).
@@ -1209,6 +1210,13 @@ static phase_verdict_t phase_power_rails(demo_ctx_t *ctx)
  * identically on every attempt and still FAILs the phase once the
  * bound is spent.
  *
+ * WITH THE DISPLAY SHIELD: e1m_evk_rk055hdmipi4ma0 declares this same
+ * expander as `lcd_exp` (nxp,pca9538), so Zephyr's gpio_pca_series driver
+ * owns it (P0/P1 become the panel enable and reset, and the driver caches
+ * the output/direction registers). Raw register traffic from here would
+ * race that owner, so when the node exists this phase prints why and
+ * reports SKIPPED without touching the chip.
+ *
  * The interrupt-status register (0x46) is still read but NOT acted on,
  * same as before: nothing here unmasks a pin in 0x45 (power-up default
  * masks every pin, SCPS280B p.26), so 0x46 reads 0 regardless of pin
@@ -1242,6 +1250,13 @@ static phase_verdict_t phase_power_rails(demo_ctx_t *ctx)
 static phase_verdict_t phase_io_expander(demo_ctx_t *ctx)
 {
 	printf("[evkdemo] -- Phase: I/O expander (TCAL9538 @0x%02x) --\n", EVK_I2C_ADDR_TCAL9538_MAIN);
+	if (DT_NODE_EXISTS(DT_NODELABEL(lcd_exp))) {
+		printf("[evkdemo] IOEXP @0x%02x: not touched -- the e1m_evk_rk055hdmipi4ma0 shield's "
+		       "lcd_exp node hands it to the gpio_pca_series driver, which owns its registers\n",
+		       EVK_I2C_ADDR_TCAL9538_MAIN);
+		ctx->note = "expander owned by the display shield's GPIO driver";
+		return PHASE_SKIPPED;
+	}
 	if (ctx->carrier_bus == NULL) {
 		printf("[evkdemo] IOEXP: carrier bus not open\n");
 		return PHASE_FAIL;
@@ -4448,38 +4463,32 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
  * Phase 12 -- screen (DSI)
  * ======================================================================
  *
- * NO PANEL ON THIS BENCH, and a clean controller init would not prove one is
- * attached -- so this phase does not fake a PASS. What it DOES do, instead
+ * NO PANEL IS DRIVEN HERE, and a clean controller init would not prove one
+ * is attached -- so this phase does not fake a PASS. What it DOES do, instead
  * of the blind stub this used to be: it actually calls alp_display_open()
- * and reports the concrete, grounded reason it cannot succeed.
+ * and reports what it got.
  *
- * CHECKED, NOT ASSUMED. <alp/display.h>'s Zephyr backend
- * (src/backends/display/zephyr_drv.c) wraps Zephyr's PANEL-level
- * <zephyr/drivers/display.h> API via an alp-display0..3 DT alias -- it needs
- * a bound panel driver (SSD1306, ILI9341, ST7789V, ...), not a raw
- * controller register set. This SoC's peripherals dtsi
- * (zephyr/dts/alif/ensemble_e8_peripherals.dtsi) declares only the shared
- * CSI/DSI D-PHY node (d-phy@49033000, "snps,designware-dphy") -- the
- * physical layer the camera path uses -- and that block's own comment marks
- * it a "FLAGGED PLACEHOLDER... BENCH-UNVERIFIED" with a dummy clock, status
- * "disabled". There is no separate DSI protocol-layer host-controller node
- * or driver anywhere in this tree (checked: no "snps,designware-dsi"
- * compatible, no alif-named file under drivers/mipi_dsi/) -- only a
- * camera-side D-PHY that is itself not bench-ready. So no alp-display*
- * alias can ever resolve on this SoC as this tree stands, panel or no
- * panel, and this app declares none.
+ * <alp/display.h>'s Zephyr backend (src/backends/display/zephyr_drv.c) wraps
+ * Zephyr's <zephyr/drivers/display.h> API via an alp-display0..3 DT alias,
+ * and this app's own build declares none. The AEN display chain itself is in
+ * the tree: the E8 peripherals dtsi
+ * (zephyr/dts/alif/ensemble_e8_peripherals.dtsi) declares the CDC200 and the
+ * DesignWare MIPI-DSI host (disabled), and the e1m_evk_rk055hdmipi4ma0 shield
+ * (zephyr/boards/shields/) turns them on with the RK055HDMIPI4MA0 panel and
+ * maps alp-display0 to the CDC200 -- examples/aen/aen-dsi-display is the app
+ * that drives it.
  *
- * This app also does NOT enable CONFIG_DISPLAY -- there is nothing for it to
- * link against -- so alp_display_open() resolves to the wildcard
- * NOT_IMPLEMENTED stub (src/backends/display/zephyr_stub.c, priority 0,
- * always linked), a deliberately honest degrade rather than a silent one.
+ * Without the shield this app does not enable CONFIG_DISPLAY, so
+ * alp_display_open() resolves to the wildcard NOT_IMPLEMENTED stub
+ * (src/backends/display/zephyr_stub.c, priority 0, always linked), a
+ * deliberately honest degrade rather than a silent one. Built WITH the
+ * shield the open succeeds and is reported, but this phase still drives no
+ * pixels (that proof is aen-dsi-display's), so it stays SKIPPED either way.
  *
- * LCD_PWR_EN / LCD_RST (TCAL9538 P0/P1): NOT driven, on purpose. Phase 4
- * already decided never to touch them because they gate real carrier
- * hardware; this phase has an even weaker reason to reach for them than
- * phase 4 would -- there is no controller downstream that could do anything
- * with a powered panel, so toggling the rail would prove nothing and only
- * add carrier-hardware risk for no evidence gained.
+ * LCD_PWR_EN / LCD_RST (TCAL9538 P0/P1): never driven by this phase. Without
+ * the shield nothing downstream could use a powered panel (and phase 4 never
+ * touches them either); with it they belong to the shield's GPIO driver and
+ * the panel driver.
  */
 static phase_verdict_t phase_screen(demo_ctx_t *ctx)
 {
@@ -4490,18 +4499,19 @@ static phase_verdict_t phase_screen(demo_ctx_t *ctx)
 	printf("[evkdemo] SCREEN: alp_display_open(0) -> %p, err=%d (%s)\n",
 	       (void *)disp,
 	       (int)rc,
-	       IS_ENABLED(CONFIG_DISPLAY) ? "CONFIG_DISPLAY=y but no alp-display0 alias resolved"
-	                                  : "CONFIG_DISPLAY not linked -- no panel, no DSI host "
-	                                    "driver in this tree");
-	printf("[evkdemo] SCREEN: DSI host-controller register evidence -- none available: the "
-	       "SoC dtsi's only DSI-adjacent node is the shared CSI/DSI D-PHY "
-	       "(d-phy@49033000), status=\"disabled\", BENCH-UNVERIFIED placeholder clock "
-	       "(zephyr/dts/alif/ensemble_e8_peripherals.dtsi); there is no separate DSI "
-	       "protocol-layer host controller node or driver in this tree to read a real "
-	       "register from\n");
+	       (disp != NULL)               ? "alp-display0 resolved -- not driven by this phase"
+	       : IS_ENABLED(CONFIG_DISPLAY) ? "CONFIG_DISPLAY=y but no alp-display0 alias resolved"
+	                                    : "CONFIG_DISPLAY not linked -- this build declares no "
+	                                      "display");
+	printf("[evkdemo] SCREEN: the AEN display chain (cdc200 -> mipi_dsi -> d-phy, "
+	       "zephyr/dts/alif/ensemble_e8_peripherals.dtsi) is enabled, with the "
+	       "RK055HDMIPI4MA0 panel and alp-display0, by the e1m_evk_rk055hdmipi4ma0 shield; "
+	       "examples/aen/aen-dsi-display drives it\n");
 	if (disp != NULL) alp_display_close(disp);
 
-	ctx->note = "no DSI host-controller driver in this tree (checked, not assumed)";
+	ctx->note = (disp != NULL) ? "display opened; this phase does not drive the panel"
+	                           : "no alp-display0 in this build (the e1m_evk_rk055hdmipi4ma0 "
+	                             "shield provides one)";
 	return PHASE_SKIPPED;
 }
 

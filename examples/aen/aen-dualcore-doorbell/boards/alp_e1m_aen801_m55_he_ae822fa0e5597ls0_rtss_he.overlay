@@ -22,7 +22,7 @@
 
 /*
  * RAM-run: retarget ROM to ITCM (path-reference form &itcm; the phandle-array
- * form makes FLASH_SIZE=0 and overflows the link) -- the camera-regcheck
+ * form makes FLASH_SIZE=0 and overflows the link) -- the aen-adc-regcheck
  * precedent.
  */
 / {

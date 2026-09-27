@@ -4,7 +4,7 @@
  *
  * aen-se-service-info -- scopeless on-silicon staging check of the Secure
  * Enclave (SE) SERVICE transport on the E1M-AEN801 (Ensemble E8, M55-HE), via
- * the bench RAM-run + RAM-console flow.  Mirrors aen-camera-regcheck.
+ * the bench RAM-run + RAM-console flow.  Mirrors aen-adc-regcheck.
  *
  * DELIBERATELY VENDOR-SPECIFIC (the sanctioned bring-up escape hatch, per the
  * vendor-extension doctrine -- see examples/peripheral-io/vendor-ext-

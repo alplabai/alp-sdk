@@ -66,7 +66,7 @@ IMAGE_INSTALL = " \
 # Gated on the meta-rz-drpai LAYER being present (soft
 # LAYERRECOMMENDS_alp-sdk dep -- its BBFILE_COLLECTIONS name, "rz-drpai",
 # not its directory name; see conf/layer.conf) AND MACHINE_FEATURES
-# containing "v2n" (set on all four V2N/V2M machine confs): a build can
+# containing "v2n" (set on all six V2N/V2M machine confs): a build can
 # legitimately carry this layer in bblayers.conf while building a
 # different MACHINE in the same tree (AEN, NX91 -- neither ever builds
 # linux-renesas), and kernel-module-mmngr has no COMPATIBLE_MACHINE guard

@@ -15,11 +15,11 @@ This cookbook ties three other docs together:
   guarantee.  Every cell is a SKU × example compile test;
   18 / 21 cells green for E1M (NX9101's only hw_rev is `status: tbd` --
   refused outright by the hw_rev-buildable gate, #1025 --
-  so all 3 of its cells currently fail), 8 / 12 for E1M-X (the
-  `adc-voltmeter` example fails on all four E1M-X presets --
-  V2N101, V2N102, V2M101, V2M102; the other two pinned examples,
-  `pwm-led-fade` and `v2n-pwm-fan-control`, are green on all four --
-  see the matrix for the per-cell diagnostics).
+  so all 3 of its cells currently fail), 12 / 18 for E1M-X (the
+  `adc-voltmeter` example fails on all six E1M-X presets --
+  V2N101, V2N102, V2N103, V2M101, V2M102, V2M103; the other two pinned
+  examples, `pwm-led-fade` and `v2n-pwm-fan-control`, are green on all
+  six -- see the matrix for the per-cell diagnostics).
 - [`docs/adr/0011-intra-family-portability.md`](adr/0011-intra-family-portability.md)
   — the architectural decision record that ratifies the intra-family
   boundary, with the alternatives we considered and rejected.
@@ -52,8 +52,8 @@ The promise has a **scope**.  It is not "any SoM, any time".  It is:
   Same 35 × 35 mm form factor, same `<alp/e1m_pinout.h>` symbol
   namespace, same E1M-spec instance reservations
   (`ALP_E1M_I2C_COUNT == 2`, `ALP_E1M_PWM_COUNT == 8`, etc.).
-- **E1M-X family.**  `E1M-V2N101` ↔ `E1M-V2N102` ↔ `E1M-V2M101` ↔
-  `E1M-V2M102`.  Same 45 × 65 mm form factor, same
+- **E1M-X family.**  `E1M-V2N101` ↔ `E1M-V2N102` ↔ `E1M-V2N103` ↔
+  `E1M-V2M101` ↔ `E1M-V2M102` ↔ `E1M-V2M103`.  Same 45 × 65 mm form factor, same
   `<alp/e1m_x_pinout.h>` namespace, same E1M-X-spec reservations
   (`ALP_E1M_X_PCIE_COUNT == 1`, `ALP_E1M_X_ETH_COUNT == 2`, …).
 
@@ -846,13 +846,13 @@ scripts/gen_portability_matrix.py` to reproduce):
   3 cells all belong to E1M-NX9101 — a placeholder MPN whose only
   hw_rev (imx93 r1) is `status: tbd`, which the hw_rev-buildable
   gate refuses outright, so none of its cells currently pass.
-- **E1M-X family.**  8 / 12 cells generate cleanly.  V2M SKUs
+- **E1M-X family.**  12 / 18 cells generate cleanly.  V2M SKUs
   add three on-module chip-driver enables (DEEPX DX-M1, PCIe
   mux, DEEPX rail buck) but otherwise produce the same
-  generated config as V2N within each example.  The 4 failing
-  cells are `adc-voltmeter` on all four E1M-X presets (V2N101,
-  V2N102, V2M101, V2M102) — see the matrix for the per-cell
-  diagnostics.
+  generated config as V2N within each example.  The 6 failing
+  cells are `adc-voltmeter` on all six E1M-X presets (V2N101,
+  V2N102, V2N103, V2M101, V2M102, V2M103) — see the matrix for
+  the per-cell diagnostics.
 
 The A2-1 (V2M102 pad-route namespace) and A2-2 (V2M missing
 extension-GPIO routes) metadata gaps that used to show up as

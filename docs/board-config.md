@@ -67,8 +67,8 @@ SDK-shipped SoM presets (look under
 | Family            | MPNs (paste any into `som.sku`)                                              |
 |-------------------|------------------------------------------------------------------------------|
 | Alif Ensemble     | `E1M-AEN301`, `AEN401`, `AEN501`, `AEN601`, `AEN701`, `AEN801`               |
-| Renesas RZ/V2N    | `E1M-V2N101`, `V2N102`                                                       |
-| RZ/V2N + DEEPX    | `E1M-V2M101`, `V2M102`                                                       |
+| Renesas RZ/V2N    | `E1M-V2N101`, `V2N102`, `V2N103`                                             |
+| RZ/V2N + DEEPX    | `E1M-V2M101`, `V2M102`, `V2M103`                                             |
 | NXP i.MX 93       | `E1M-NX9101` (placeholder MPN; production `E1M-NX9xxx` TBD pending HW config) |
 
 Stock board presets (paste into `preset:`):

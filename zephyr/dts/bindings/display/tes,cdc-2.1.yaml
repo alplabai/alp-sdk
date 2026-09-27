@@ -93,6 +93,18 @@ properties:
     type: int
     description: 24-bit display background color (CDC_BACKGND_COLOR).
 
+  # Not `required:` so a bind-only node (aen-dsi-regcheck) stays valid; the
+  # driver BUILD_ASSERTs it instead, since it cannot scan out without it.
+  memory-region:
+    type: phandle
+    description: |
+      Memory node (e.g. an "mmio-sram" carve-out) that holds the layer
+      framebuffers, at an address the CDC's AXI master can reach.  Layer 1's
+      framebuffer starts at the node's reg base; layer 2's, when enable-l2 is
+      set, follows it.  The node's reg size must cover both.  The driver uses
+      the address directly -- no linker section -- so the framebuffer adds
+      nothing to the image.  Required by the display_cdc200 driver.
+
   enable-l1:
     type: int
     required: false

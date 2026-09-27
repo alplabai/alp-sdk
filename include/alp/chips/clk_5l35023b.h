@@ -37,8 +37,8 @@
  * |----------------|-------------|---------------------------------------------|
  * | `Audio_CLKB`   | `P10`       | clock output to E1M AR9 AUDIO_CLK           |
  * | `Audio_CLKB_OE`| `P67`       | output-enable strap (active-high)           |
- * | I2C            | `BRD_I2C`   | management bus; default 7-bit address 0x68  |
- * |                |             | (= 8-bit write 0xD0 per the Renesas datasheet) |
+ * | I2C            | `BRD_I2C`   | management bus; default 7-bit address 0x69  |
+ * |                |             | (= 8-bit write 0xD2 per the Renesas datasheet) |
  *
  * @par I2C slave addressing
  *
@@ -54,7 +54,8 @@
  * | `10`            | 0x6A  | 0xD4        | 0xD5       |
  * | `11`            | 0x6B  | 0xD6        | 0xD7       |
  *
- * V2N straps `I2C_addr[1:0] = 00` -> 7-bit `0x68`.
+ * V2N straps `I2C_addr[1:0] = 01` -> 7-bit `0x69` (maintainer-confirmed
+ * 2026-09-24).
  *
  * @par Register-table cross-reference (Renesas 5L35023 datasheet)
  *
@@ -96,9 +97,10 @@
 extern "C" {
 #endif
 
-/** Default 7-bit I2C slave address (8-bit write `0xD0`).  Matches
- *  the V2N strap `I2C_addr[1:0] = 00`. */
-#define CLK_5L35023B_I2C_ADDR_DEFAULT 0x68u
+/** Default 7-bit I2C slave address (8-bit write `0xD2`).  Matches
+ *  the V2N strap `I2C_addr[1:0] = 01` (maintainer-confirmed
+ *  2026-09-24). */
+#define CLK_5L35023B_I2C_ADDR_DEFAULT 0x69u
 
 /** Documented register offsets the typed helpers operate on.
  *  Customers can reach any other register via the raw R/W helpers. */
