@@ -29,10 +29,10 @@ def _run(tmp_path: Path, raw: bytes):
     kern = tmp_path / "kernel_hostname"
     env = {**os.environ, "ALP_SKU_PROP": str(prop), "ALP_HOSTNAME_FILE": str(etc),
            "ALP_KERNEL_HOSTNAME": str(kern)}
-    proc = subprocess.run([SH, str(SCRIPT)], env=env, capture_output=True, text=True)
+    proc = subprocess.run([SH, str(SCRIPT)], env=env, capture_output=True, text=True, encoding="utf-8")
     assert proc.returncode == 0, proc.stderr
-    return (kern.read_text().strip() if kern.exists() else None,
-            etc.read_text().strip() if etc.exists() else None)
+    return (kern.read_text(encoding="utf-8").strip() if kern.exists() else None,
+            etc.read_text(encoding="utf-8").strip() if etc.exists() else None)
 
 
 @pytest.mark.parametrize("raw, expected", [
