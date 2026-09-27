@@ -48,7 +48,7 @@ both `paths:` filter blocks, adds `zephyr/boards/shields/**`, `zephyr/drivers/di
 drivers it compiles into this app, none previously covered by this gate), and
 adds the
 example as a sixth bounded `--testsuite-root`
-(`.github/workflows/pr-twister-aen.yml:451`
+(`.github/workflows/pr-twister-aen.yml:450`
 ("alp-sdk/examples/connectivity/iot-dashboard")) — the one root among the six
 that contributes a scenario to *both* SKU matrix legs, since mqtt-telemetry
 and iot-fleet-ota remain AEN801-only.
@@ -61,6 +61,32 @@ plus one `--sysbuild` configure-and-link): `iot-dashboard` links for both
 `CONFIG_ALP_SDK_CHIP_ST7789` gone from the generated config; `mqtt-telemetry`
 and `iot-fleet-ota` still link for AEN801 unchanged.
 
+**Review found this shipped no AEN board overlay at all (#2242).**
+`board.yaml` declares `spi` + `gpio` for the CC3501E bridge
+(`cc3501e_bridge_bringup()`, `src/cc3501e_bridge.c`, bus_id
+`CC3501E_BRIDGE_SPI_BUS_ID` = 1, `alp_pins` WIFI_EN/NRST), but the shield
+added above wires only the display chain — it does nothing for SPI1 pinmux
+or the LP-GPIO control nets. Without a board overlay, `alp_spi_open(1)` and
+the `alp_pins` array had no DT node to resolve on either AEN target: the
+app compiled, but could never reach the CC3501E, on real hardware or in
+CI's `build_only` scenario (the DTS just lacked the node — nothing caught
+it because `check_example_board_overlay_parity.py` checks for a `boards/`
+overlay only where one is declared, and none was). Two new overlays fix
+this — the CC3501E bridge subset of `alp-console`'s bench-validated
+wiring, no I2C2/RGB-LED (this app has no sensor-manifest bus of its own
+here):
+`examples/connectivity/iot-dashboard/boards/alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay:68`
+("cc3501e_spi: spi@48104000 {") and
+`examples/connectivity/iot-dashboard/boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay:108`
+("alp_pins: alp-pins {"). This also turns on real coverage from
+`check_example_board_overlay_parity.py` (#2101) and
+`check_example_board_overlay_content_parity.py` (#1009/#2198) for this
+example's AEN801/AEN803 pair, neither of which had anything to check
+before these files existed. Verified: both HP targets link with
+`west build`, and `zephyr.dts` in each build tree shows `spi@48104000`
+`status = "okay"` with `pinctrl-0 = <&pinctrl_spi1>` and the `alp-spi1`
+alias resolved, sourced from the new overlay rather than left undeclared.
+
 **Not proven, and not silently left implicit.** This is a `build_only`
 compile check, nothing more:
 
@@ -68,6 +94,10 @@ compile check, nothing more:
   this app's use of the RK055HDMIPI4MA0/HX8394 chain, and the display chain
   itself depends on #2204 (the shield), which as of this change is a draft PR
   whose own bench evidence is an M55-HE run, not M55-HP.
+- The new CC3501E bridge overlays are HP twins of the bench-proven M55-HE
+  wiring (`alp-console`, `aen-cc3501e-bringup`) — the SPI1 IRQ and the
+  whole HP bridge path are unbenched, same BENCH-TBD caveat the M55-HE
+  overlays already carry.
 - The build still only compiles because of the #2192 weak-RNG acknowledgement.
   That flag is bench-only; a production build on real hardware needs a real
   entropy source, which does not exist for AEN yet.

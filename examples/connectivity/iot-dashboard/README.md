@@ -72,7 +72,11 @@ either build form, so no `-DSHIELD=...` flag is needed.
 > The display chain above is compile-proven, not bench-proven: no
 > pixels have been confirmed on glass yet. It depends on #2204 (the
 > `e1m_evk_rk055hdmipi4ma0` shield), and the twister coverage this
-> example gets is `build_only`.
+> example gets is `build_only`. This app's M55-HP display chain is
+> compile-checked only -- the shield's own glass evidence (#2204,
+> E1M-AEN803 2026W36-0009) was an M55-HE run -- and the
+> `boards/*.overlay` CC3501E bridge wiring these AEN targets need is an
+> HP twin of the bench-proven M55-HE wiring, itself unbenched.
 
 On `native_sim/native/64` the WiFi + MQTT paths stub via the
 `<alp/iot.h>` NOSUPPORT contract; the UI still renders against the

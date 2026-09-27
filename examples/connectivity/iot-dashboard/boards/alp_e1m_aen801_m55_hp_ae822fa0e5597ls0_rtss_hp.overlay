@@ -1,0 +1,113 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * E1M-AEN801 M55-HP overlay for iot-dashboard.  Review on #2242 (#2173)
+ * found this example shipped no AEN board overlay at all: on the AEN
+ * targets the SPI1/CC3501E-bridge pads have no DT node or pinmux, so
+ * cc3501e_bridge_bringup() (src/cc3501e_bridge.c, bus_id
+ * CC3501E_BRIDGE_SPI_BUS_ID = 1, alp_pins WIFI_EN/NRST) could not reach
+ * the CC3501E on either AEN target -- the DSI shield alone is not enough.
+ *
+ * This is the CC3501E bridge subset of
+ * examples/peripheral-io/alp-console's bench-validated overlay -- the
+ * SoM-internal Alif<->CC3501E SPI1 link + the two host-driven control
+ * nets, from metadata/e1m_modules/aen/inter-chip.tsv:
+ *   SPI1.SCK P14_6  MOSI P14_5  MISO P14_4   WIFI_EN P15_5  NRST P15_1_FLEX
+ * iot-dashboard has no I2C sensor-manifest bus of its own here (BME280
+ * comes from the board's EVK_I2C_BUS_SENSORS via board.yaml), so unlike
+ * alp-console this overlay carries ONLY the bridge wiring -- no I2C2 /
+ * alp-i2c0, no RGB-LED PWM.
+ *
+ * These are M55-HP twins of the M55-HE bridge wiring in alp-console and
+ * aen-cc3501e-bringup -- no other example ships an HP bridge overlay yet.
+ * SPI1 @0x48104000 and lpgpio @0x42002000 come from the shared
+ * zephyr/dts/alif/ensemble_e8_peripherals.dtsi the HP board dts also
+ * includes, so the addresses are the same silicon the M55-HE overlays
+ * already use. Pads verified disjoint from the e1m_evk_rk055hdmipi4ma0
+ * shield this app auto-applies (../CMakeLists.txt): the shield muxes only
+ * P3_7 / P7_2 (I2C1, touch) plus its own I2C2 GPIO expander nets, not
+ * P14_4..7 / P15_1 / P15_5.
+ *
+ * IRQ 138 and the whole HP bridge path are NOT bench-proven -- carried
+ * over unverified from the M55-HE overlays; see their BENCH-TBD comment.
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+&pinctrl {
+	/* SPI1 master (CC3501E bridge): SCK P14_6 / MOSI P14_5 / MISO P14_4 (alt-2, _C). */
+	pinctrl_spi1: pinctrl_spi1 {
+		group0 {
+			/* SS0 (P14_7) is now peripheral-driven -- the dwc-ssi hardware chip-select,
+			 * NOT the old GPIO bodge.  Push-pull output pad like SCLK/MOSI (no input-enable);
+			 * the master asserts/deasserts SS0 per transfer (write_ser). */
+			pinmux = <PIN_P14_6__SPI1_SCLK_C>, <PIN_P14_5__SPI1_MOSI_C>,
+				 <PIN_P14_7__SPI1_SS0_C>;
+		};
+		group1 {
+			pinmux = <PIN_P14_4__SPI1_MISO_C>;
+			input-enable;
+		};
+	};
+};
+
+/* P14_7 (CS) is now muxed as SPI1_SS0_C in pinctrl_spi1 -- the dwc-ssi peripheral drives
+ * it in hardware per transfer.  The old gpio14 GPIO-bodge controller node is removed: a
+ * GPIO claim of P14_7 would fight the SS0 pinctrl mux. */
+
+&clockctrl {
+	status = "okay";
+};
+
+&soc {
+	/* DWC_ssi SPI1 -- the on-SoM CC3501E inter-chip link (NOT the edge SPI0).
+	 * 4-wire: SCLK/MOSI/MISO + the hardware SS0 chip-select (P14_7 = SPI1_SS0_C,
+	 * declared in pinctrl_spi1 above); clock-frequency = SYST_HCLK (400 MHz) so
+	 * spi_dw_alif skips the failing clock-control path. */
+	cc3501e_spi: spi@48104000 {
+		compatible = "alif,dwc-ssi-spi";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x48104000 0x1000>;
+		interrupts = <138 3>;          /* BENCH-TBD: SPI1 IRQ */
+		clocks = <&clockctrl ALIF_SPI_CLK>;
+		/* Real SSI functional clock (E8 HWRM).  Was mis-set to 400000000 here,
+		 * which is not a cosmetic error: spi_dw derives BAUDR =
+		 * clock-frequency / freq_hz, so a doubled input clock doubles the
+		 * divider and HALVES the real SCLK -- this node was running at
+		 * 500 kHz while asking for 1 MHz.  Proven via BAUDR scaling and
+		 * already corrected in the aen-cc3501e-* overlays. */
+		clock-frequency = <200000000>;
+		dwc-ssi;
+		fifo-depth = <16>;
+		/* NOTE: there is NO `rx-delay` devicetree property -- the spi_dw binding
+		 * does not define one, so writing it here would silently do nothing.  The
+		 * DWC_ssi RX sample delay (RX_SAMPLE_DLY, reg 0xF0, in ssi_clk cycles at
+		 * 200 MHz = 5 ns/cycle) recenters the master's MISO capture at higher SCLK
+		 * and is written from C -- see CC3501E_BRIDGE_RX_SAMPLE_DLY in
+		 * examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.c, where 6 is
+		 * silicon-tuned for ~14.3 MHz. */
+		pinctrl-0 = <&pinctrl_spi1>;
+		pinctrl-names = "default";
+		status = "okay";
+	};
+};
+
+/* LP GPIO island: WIFI_EN (P15_5) + E_WIFI.NRST (P15_1_FLEX) as outputs. */
+&lpgpio {
+	status = "okay";
+};
+
+/ {
+	aliases {
+		alp-spi1 = &cc3501e_spi;   /* bus_id 1 in cc3501e_bridge_bringup() */
+	};
+
+	/* SoM-internal CC3501E control nets, in CC3501E_PIN_* index order. */
+	alp_pins: alp-pins {
+		compatible = "alp,pin-array";
+		gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>,   /* [0] WIFI_EN     (P15_5)      */
+			<&lpgpio 1 GPIO_ACTIVE_HIGH>;   /* [1] E_WIFI.NRST (P15_1_FLEX) */
+	};
+};

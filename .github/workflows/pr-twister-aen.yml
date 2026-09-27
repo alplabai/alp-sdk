@@ -415,14 +415,17 @@ jobs:
       # board target for it, so a regression in that pipeline would only
       # surface on the next real bench flash. Same shape as the roots
       # above: one example, bounded, build_only, not widened to any other
-      # directory. `--dry-run` against this job's full root list, before
-      # vs. after adding this root: +1 AEN801 configuration (83 -> 84),
-      # +1 AEN803 configuration (78 -> 79) -- one testcase.yaml scenario
-      # with a two-entry platform_allow. NOT reconciled against the two
-      # older total counts above/below this step (153/144) -- both
-      # already predate this addition by an amount this change did not
-      # introduce (neither matches this measurement's own 83+78=161
-      # baseline either, so the drift is pre-existing, not new here).
+      # directory. AUTHORITATIVE scenario count for this job's root list --
+      # re-derived 2026-09-27 (#2173) with a single `--dry-run` per leg over
+      # the exact roots + `-p` flags this step uses, at HEAD after the dev
+      # merge and this change's own iot-dashboard AEN board overlay
+      # backfill: 96 AEN801 configurations (both HE + HP), 91 AEN803 (187
+      # total). This supersedes every earlier count in this file -- the
+      # 153/144 totals in the job-level and #1477 comments, and this same
+      # block's own earlier 83+78=161 delta baseline -- all of which
+      # predate multiple scenario additions since (#2242, #2265, and this
+      # change). The timeout-minutes comment below points here rather than
+      # carrying its own duplicate count.
       - name: twister · ${{ matrix.label }} on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota + camera-mjpeg-stream + iot-dashboard
         working-directory: ${{ github.workspace }}
         env:
@@ -431,17 +434,13 @@ jobs:
         # #1477: worst observed successful run 1167s/19.45min across 10
         # sampled runs of the PRE-#2209 combined job (both SKUs, ~92
         # builds). 30min was already ~1.54x that, kept under the job's own
-        # 41min ceiling (see that job-level comment). Not re-derived per
-        # SKU post-split: a local `--dry-run` count on this tree gives 78
-        # AEN801 configurations and 66 AEN803 (144 total, up from 92) --
-        # scaled linearly off the 1461s/92-build #2198 measurement, AEN801
-        # projects to about 1240s/20.7min and AEN803 to about 1050s/17.5min,
-        # both still comfortably under this 30min cap. #2173 item (3) adds
-        # one build-only scenario per leg (iot-dashboard) on top of that
-        # count; not independently re-measured here (see the changelog
-        # fragment), but a single extra build_only scenario is far inside
-        # the existing margin on both legs. Revisit if a future scenario
-        # count pushes either leg close to it.
+        # 41min ceiling (see that job-level comment). Scenario count is not
+        # re-derived here -- see the AUTHORITATIVE `--dry-run` count (96
+        # AEN801 / 91 AEN803, both HE + HP) in the camera-mjpeg-stream
+        # comment above this step; scaled linearly off the 1461s/92-build
+        # #2198 measurement, both legs stay far inside this 30min cap on
+        # that count. Revisit if a future scenario count pushes either leg
+        # close to it.
         timeout-minutes: 30
         run: |
           python3 zephyr/scripts/twister \
