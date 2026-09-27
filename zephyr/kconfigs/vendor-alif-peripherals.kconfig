@@ -813,7 +813,11 @@ endif # I2S_DW
 # The J5 innomaker_cam_ov9281 shield is bench-verified (live GREY8 capture,
 # an E1M-AEN803 on the E1M-EVK, 2026-09-21).  The J5
 # raspberry_pi_camera_module_1 (OV5647) shield is bench-verified too (live
-# RAW10 capture, 2026-09-22, issue #2248).  vendor-ext.
+# RAW10 capture, 2026-09-22, issue #2248).  Both benches predate issue
+# #2287 Stage B's shared CPI driver change (buffer-starvation-pause
+# behaviour) -- re-bench on these two sensors is pending.  The J5
+# raspberry_pi_global_shutter_camera (IMX296) shield is Stage A + Stage B
+# bench-verified too (issue #2287) -- see docs/camera-shields.md.  vendor-ext.
 # ---------------------------------------------------------------------------
 config VIDEO_ALIF_CAM
 	bool "Alif Ensemble CPI camera-capture controller (ADR 0017 Tier-2 INTERIM)"
@@ -1103,9 +1107,34 @@ config VIDEO_ISP_VSI_CALIB_IMX296
 	  default y whenever CONFIG_VIDEO_IMX296 is enabled, same reasoning as
 	  the OV5647 symbol's own default.
 
+config VIDEO_ISP_VSI_CALIB_IMX335
+	bool "ISP-Pico AE calibration: use IMX335's own AE envelope, not ARX3A0's"
+	default y if VIDEO_IMX335
+	depends on VIDEO_ISP_VSI && !VIDEO_ISP_VSI_CALIB_OV5647 && !VIDEO_ISP_VSI_CALIB_IMX296
+	help
+	  Same mechanism as VIDEO_ISP_VSI_CALIB_IMX296 above, but for hal_alif
+	  patch 0014's IMX335 AE envelope (sensor_attributes.h's
+	  AE_SNS_DEFAULT_S table and isp_param_conf.h's .ae block, both sourced
+	  from imx335_ae_envelope.h). AWB/CCM stay on the ARX3A0 #else arm for
+	  IMX335 -- there is no IMX335-fitted colour calibration; this symbol
+	  only swaps the AE envelope. Issue #2327 Stage B: BUILD-ONLY, no bench
+	  run backs this envelope's figures the way IMX296's bench-derived ones
+	  are -- see imx335_ae_envelope.h's own comment for exactly which
+	  figures are upstream-driver constants vs. a public datasheet-flyer
+	  number.
+
+	  `depends on !VIDEO_ISP_VSI_CALIB_OV5647 && !VIDEO_ISP_VSI_CALIB_IMX296`
+	  keeps all three mutually exclusive without touching either existing
+	  symbol -- hal_alif patch 0014's isp_param_conf.h #if/#elif chain only
+	  has one slot for a non-ARX3A0 AE block per build.
+
+	  default y whenever CONFIG_VIDEO_IMX335 is enabled, same reasoning as
+	  the IMX296 symbol's own default.
+
 config VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS
-	bool "ISP-Pico AE gain writeback: sensor register is 0.1 dB/count, not linear"
+	bool "ISP-Pico AE gain writeback: sensor control is dB-scaled, not linear"
 	default y if VIDEO_ISP_VSI_CALIB_IMX296
+	default y if VIDEO_ISP_VSI_CALIB_IMX335
 	depends on VIDEO_ISP_VSI
 	help
 	  isp_pico.c's isp_sns_gain_ctrl_from_lib()/isp_sns_gain_lib_from_ctrl()
@@ -1120,12 +1149,65 @@ config VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS
 	  multiply/divide; VIDEO_ISP_VSI_SNS_GAIN_REG_PER_1X is ignored while
 	  this is y.
 
-	  default y whenever CONFIG_VIDEO_ISP_VSI_CALIB_IMX296 is enabled (not
-	  the raw CONFIG_VIDEO_IMX296 sensor-driver symbol -- tying this to the
+	  default y whenever CONFIG_VIDEO_ISP_VSI_CALIB_IMX296 or
+	  CONFIG_VIDEO_ISP_VSI_CALIB_IMX335 is enabled (not the raw
+	  CONFIG_VIDEO_IMX296/IMX335 sensor-driver symbols -- tying this to the
 	  SAME "which AE envelope is active" symbol the calibration block
-	  itself uses keeps every IMX296-AE-specific Kconfig default anchored
-	  to one selector) -- n (linear) is the correct default for every
-	  other sensor this driver currently supports (OV5647, OV9281).
+	  itself uses keeps every dB-scaled-sensor Kconfig default anchored to
+	  one selector) -- n (linear) is the correct default for every other
+	  sensor this driver currently supports (OV5647, OV9281).
+
+config VIDEO_ISP_VSI_SNS_GAIN_CTRL_PER_DB_TENTH
+	int "ISP-Pico AE gain writeback: sensor control units per 0.1 dB (dB-scaled sensors only)"
+	range 1 1000
+	default 100 if VIDEO_ISP_VSI_CALIB_IMX335
+	default 1
+	depends on VIDEO_ISP_VSI
+	help
+	  Only READ while VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS is y (same
+	  always-visible reasoning as VIDEO_ISP_VSI_SNS_GAIN_REG_PER_1X below
+	  -- both branches of isp_sns_gain_ctrl_from_lib()'s dispatch compile
+	  regardless of which runs). Two sensors register
+	  VIDEO_CID_ANALOGUE_GAIN at a dB-log scale so far, at DIFFERENT
+	  control-unit granularities: IMX296's control IS its raw GAIN
+	  register value (0.1 dB/count, so 1 control unit = 1 tenth of a dB --
+	  default 1, unchanged); IMX335's upstream driver (zephyr/drivers/
+	  video/imx335.c) instead pre-scales its own 0.3 dB/count register into
+	  MILLI-dB before exposing it as the control (IMX335_GAIN_UNIT_MDB =
+	  300 mdB/count) -- 100 mdB = 1 tenth of a dB, so 100 control units = 1
+	  tenth of a dB (default 100 whenever
+	  CONFIG_VIDEO_ISP_VSI_CALIB_IMX335 is enabled). See
+	  isp_sns_gain_conv.h's isp_sns_gain_db_tenths_ctrl_to_lib()/
+	  isp_sns_gain_lib_to_db_tenths_ctrl() for the conversion this symbol
+	  feeds. `range 1 1000`: 0 would divide-by-zero in
+	  isp_sns_gain_db_tenths_ctrl_to_lib() (that function does not
+	  substitute 1 for a 0 input; Kconfig itself is the only guard), and
+	  no real sensor control needs more than 1000 units per 0.1 dB.
+
+config VIDEO_ISP_VSI_SNS_GAIN_CTRL_STEP
+	int "ISP-Pico AE gain writeback: sensor control WRITE granularity (dB-scaled sensors only)"
+	default 300 if VIDEO_ISP_VSI_CALIB_IMX335
+	default 1
+	depends on VIDEO_ISP_VSI
+	help
+	  Only READ while VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS is y, same
+	  always-visible reasoning as the two symbols above. This is DIFFERENT from
+	  VIDEO_ISP_VSI_SNS_GAIN_CTRL_PER_DB_TENTH above, which is a pure
+	  unit-conversion SCALE (how many control units equal 0.1 dB) --
+	  this is the sensor's own hardware-register WRITE granularity, in
+	  the SAME control units, i.e. the coarsest step the control can
+	  actually MOVE by. For IMX296 every control unit IS a legal register
+	  value (no coarser step exists) -- default 1, a no-op. For IMX335
+	  the control is in milli-dB (CTRL_PER_DB_TENTH = 100) but the
+	  driver's own GAIN register only accepts whole
+	  IMX335_GAIN_UNIT_MDB = 300 mdB increments (zephyr/drivers/video/
+	  imx335.c) -- pushing an arbitrary tenths-of-dB-derived control value
+	  without rounding it to a multiple of 300 first would reach
+	  imx335_set_ctrl()'s own `ctrl.val / IMX335_GAIN_UNIT_MDB` TRUNCATING
+	  divide and silently under-drive gain by up to just under one
+	  register count on every write. isp_sns_gain_lib_to_db_tenths_ctrl()
+	  (isp_sns_gain_conv.h) rounds to the nearest exact multiple of this
+	  value instead -- see that function's own comment.
 
 config VIDEO_ISP_VSI_SNS_GAIN_REG_PER_1X
 	int "ISP-Pico AE gain writeback: sensor register units per 1.0x (linear sensors only)"
@@ -1151,6 +1233,7 @@ config VIDEO_ISP_VSI_SNS_GAIN_REG_PER_1X
 config VIDEO_ISP_VSI_SNS_EXPOSURE_CTRL_PER_LINE
 	int "ISP-Pico AE exposure writeback: sensor control units per LINE"
 	default 1 if VIDEO_ISP_VSI_CALIB_IMX296
+	default 1 if VIDEO_ISP_VSI_CALIB_IMX335
 	default 16
 	depends on VIDEO_ISP_VSI
 	help
@@ -1168,12 +1251,16 @@ config VIDEO_ISP_VSI_SNS_EXPOSURE_CTRL_PER_LINE
 	  and isp_sns_exposure_ctrl_from_lines() never see or compute an SHS
 	  value. default 1 whenever CONFIG_VIDEO_ISP_VSI_CALIB_IMX296 is
 	  enabled (not the raw CONFIG_VIDEO_IMX296 sensor-driver symbol -- see
-	  VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS's own help for why).
+	  VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS's own help for why). IMX335's own
+	  VIDEO_CID_EXPOSURE (zephyr/drivers/video/imx335.c) is ALSO already in
+	  whole LINES -- the driver writes SHR0 = VMAX - val itself -- so
+	  default 1 whenever CONFIG_VIDEO_ISP_VSI_CALIB_IMX335 is enabled too.
 
 config VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS
 	int "ISP-Pico AE gain ceiling PUSH cap, in 0.1 dB units (0 = no cap)"
 	range 0 480
 	default 240 if VIDEO_ISP_VSI_CALIB_IMX296
+	default 300 if VIDEO_ISP_VSI_CALIB_IMX335
 	default 0
 	depends on VIDEO_ISP_VSI
 	help
@@ -1208,11 +1295,48 @@ config VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS
 	  one without the other reintroduces the same mismatch this symbol
 	  exists to silence.
 
+	  default 300 (30.0 dB) whenever CONFIG_VIDEO_ISP_VSI_CALIB_IMX335 is
+	  enabled -- matches hal_alif patch 0014's IMX335_AE_MAX_AGAIN by hand
+	  (a public Sony IMX335 flyer figure, NOT bench-derived -- see that
+	  header's own comment); same by-hand-invariant status as the IMX296
+	  figure above.
+
 	  `range 0 480`: 480 is IMX296's own GAIN register's full legal
 	  range (0.0-48.0 dB, 0.1 dB/count) -- a value above that has no
 	  register encoding for isp_sns_gain_db_tenths_to_lib() to clamp
 	  toward, so it can never be a meaningful cap on any sensor this
 	  symbol could apply to.
+
+config VIDEO_ISP_VSI_AE_EXP_TIME_MAX_US_CAP
+	int "ISP-Pico AE exposure-time ceiling PUSH cap, in microseconds (0 = no cap)"
+	default 33207 if VIDEO_ISP_VSI_CALIB_IMX335
+	default 0
+	depends on VIDEO_ISP_VSI
+	help
+	  Same reasoning as VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS above, for the AE library's
+	  EXPOSURE-TIME ceiling instead of gain: isp_apply_ae() (isp_pico.c) normally derives
+	  int_time_max_us from the sensor's OWN reported frame period
+	  (video_get_frmival()) minus a generic 2% blanking margin -- sensor-agnostic and
+	  correct in general, since it reacts to whatever frame rate the sensor is ACTUALLY
+	  running at. hal_alif patch 0014's IMX335 AE envelope
+	  (imx335_ae_envelope.h's IMX335_AE_EXP_TIME_MAX_US) is calibrated against this
+	  sensor's EXACT 30 fps mode (upstream imx335.c's IMX335_30_FPS, HMAX 0x0226) --
+	  this symbol, when nonzero, clamps the PUSHED int_time_max_us to that SAME
+	  calibrated ceiling so a direct video API caller that sets another rate on this
+	  sensor (video_set_frmival() against the sensor device directly, bypassing
+	  whatever fps convention an app-level backend applies) can't push the AE library
+	  past what the envelope was derived against.
+	  Already in the SAME microsecond unit as int_time_max_us -- unlike
+	  VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS (a dB-tenths value that needs a register/dB
+	  conversion), this symbol needs none.
+
+	  default 33207 whenever CONFIG_VIDEO_ISP_VSI_CALIB_IMX335 is enabled -- matches
+	  hal_alif patch 0014's IMX335_AE_EXP_TIME_MAX_US by hand (4483 lines * 1e7 /
+	  (4500 * 300), integer division -- same by-hand-invariant status
+	  VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS's own help documents for its figure); a
+	  future change to one without the other reintroduces the same class of mismatch.
+	  0 (every other sensor) means "trust the frame-period derivation as-is", unchanged
+	  behaviour.
 
 config VIDEO_ISP_VSI_AE_TARGET
 	int "ISP-Pico AE target luminance [0, 255]"

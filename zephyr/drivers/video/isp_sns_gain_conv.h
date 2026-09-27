@@ -175,6 +175,70 @@ static inline uint32_t isp_sns_gain_lib_to_db_tenths(uint32_t total_1024)
 }
 
 /*
+ * dB-per-count sensor gain CONTROL (not necessarily the raw hardware
+ * register) at ANY scale that is an integer multiple of 0.1 dB per control
+ * unit -> library gain units. Reuses isp_gain_db_tenths_table above by
+ * dividing the control value down to the table's own 0.1 dB index
+ * (ctrl / ctrl_per_db_tenth) instead of building a second 481-entry table
+ * per sensor -- #2327 Stage B: IMX296's VIDEO_CID_ANALOGUE_GAIN IS the raw
+ * GAIN register value directly (0.1 dB/count, so 100 mdB = 1 tenth of a dB
+ * = 1 control unit, ctrl_per_db_tenth = 1); IMX335's VIDEO_CID_ANALOGUE_GAIN
+ * is pre-scaled by the driver itself to MILLI-dB (100 mdB = 1 tenth of a dB
+ * = 1 control unit here too, so ctrl_per_db_tenth = 100 -- see imx335.c's
+ * own IMX335_GAIN_UNIT_MDB). ctrl_per_db_tenth = 1 reduces this to
+ * isp_sns_gain_db_tenths_to_lib() exactly, so IMX296's existing behaviour is
+ * unchanged. NOTE: ctrl_per_db_tenth is the CONTROL's unit-conversion scale
+ * (mdB per control unit here) -- it has NOTHING to do with the sensor's own
+ * hardware-register WRITE granularity; see isp_sns_gain_lib_to_db_tenths_ctrl()
+ * below, which needs a SEPARATE ctrl_step for that. No 0-guard here: the
+ * Kconfig this is fed from (VIDEO_ISP_VSI_SNS_GAIN_CTRL_PER_DB_TENTH) is
+ * `range 1 1000`, so 0 can never reach this function from a real build --
+ * a caller passing 0 directly (native_sim unit test only) gets a
+ * divide-by-zero, deliberately, rather than a silently-wrong answer.
+ */
+static inline uint32_t isp_sns_gain_db_tenths_ctrl_to_lib(uint32_t ctrl, uint32_t ctrl_per_db_tenth)
+{
+	uint32_t tenths = ctrl / ctrl_per_db_tenth;
+
+	return isp_sns_gain_db_tenths_to_lib(tenths > 480U ? 480U : tenths);
+}
+
+/*
+ * Library gain units (1024 = 1x) -> the sensor's own dB-per-count CONTROL
+ * value at the given scale (reverse of isp_sns_gain_db_tenths_ctrl_to_lib()
+ * above): looks up the nearest tenths-of-dB table entry, scales it up to the
+ * control's own unit (tenths * ctrl_per_db_tenth), THEN rounds that to the
+ * nearest multiple of ctrl_step -- the sensor's own hardware-register WRITE
+ * granularity in the SAME control units, e.g. IMX335's IMX335_GAIN_UNIT_MDB
+ * = 300 (the driver's GAIN register is 0.3 dB/count -- ctrl_per_db_tenth = 100
+ * alone only says "100 mdB = 1 tenth of a dB", it says nothing about the
+ * register only accepting every 3rd tenth). Without this rounding step, a
+ * tenths value that is not itself a multiple of 3 (e.g. 301 -> 30100 mdB)
+ * would reach imx335_set_ctrl()'s own `ctrl.val / IMX335_GAIN_UNIT_MDB`
+ * write, which TRUNCATES (30100 / 300 = 100, not round(100.33) = 100 here,
+ * but 30199 / 300 = 100 too, i.e. ALWAYS rounds down, silently under-driving
+ * gain by up to just under one register count on every write, not just an
+ * occasional worst-case one). Rounding HERE, to the nearest exact multiple
+ * of ctrl_step (round-half-up: (raw + ctrl_step/2) / ctrl_step), means the
+ * value handed to the sensor's own truncating divide is already exact, so
+ * that divide can never lose precision. ctrl_step <= 1 (IMX296: every
+ * control unit IS a legal register value, no coarser step exists) is a
+ * no-op -- IMX296's existing behaviour is unchanged.
+ */
+static inline uint32_t isp_sns_gain_lib_to_db_tenths_ctrl(uint32_t total_1024,
+							   uint32_t ctrl_per_db_tenth,
+							   uint32_t ctrl_step)
+{
+	uint32_t tenths = isp_sns_gain_lib_to_db_tenths(total_1024);
+	uint32_t raw    = tenths * ctrl_per_db_tenth;
+
+	if (ctrl_step <= 1U) {
+		return raw;
+	}
+	return ((raw + ctrl_step / 2U) / ctrl_step) * ctrl_step;
+}
+
+/*
  * Linear sensor gain register (e.g. OV5647's AGC_GAIN, reg_per_1x units per
  * 1.0x) -> library gain units (1024 = 1x).
  */

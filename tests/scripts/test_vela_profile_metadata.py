@@ -30,7 +30,7 @@ _ROOT = Path(__file__).resolve().parents[2]
 _META = _ROOT / "metadata"
 
 #: `[Memory_Mode.*]` section names shipped in Arm's own vela.ini, verbatim
-#: (ethos-u-vela 5.1.0, `<venv>/lib/python3.12/site-packages/ethosu/
+#: (ethos-u-vela 5.2.0, `<venv>/lib/python3.12/site-packages/ethosu/
 #: config_files/Arm/vela.ini`).  A memory_mode outside this set exists only in
 #: a proprietary vendor config -- and memory_mode is the flag that fixes the
 #: footprint, so it has to work for a customer who has no vendor config at all.

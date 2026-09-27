@@ -1,0 +1,5 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+
+config SHIELD_INNOMAKER_CAM_IMX335
+	def_bool $(shields_list_contains,innomaker_cam_imx335)

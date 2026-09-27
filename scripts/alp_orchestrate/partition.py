@@ -63,6 +63,26 @@ _RUNTIME_WRITABLE_AUTHORITY = "customer_runtime"
 _DEFERRING_ALIAS_AUTHORITY = "composite"
 
 
+def _is_ospi_key_unassembled(som_preset: dict[str, Any], key: str) -> bool:
+    """Does `som_preset.on_module.ospi_memories[key]` carry `assembled:
+    false` -- the schema's tag for an on-module OSPI part this SKU's PCB
+    doesn't actually populate (e.g. E1M-AEN801's `ospi0`/`ospi1`, #2311)?
+
+    Shared by every caller that must refuse an unfitted OSPI part rather
+    than treat its `capacity_mbit` (a property of the shared PCB footprint,
+    not evidence of assembly) as usable: `_known_flash_devices()` and
+    `_resolve_flash_device()` below, and `loader.py`'s
+    `storage[].flash_device` cross-field check and its
+    `security.psa.{its,ps}_storage` cross-check.
+    """
+    om = som_preset.get("on_module") or {}
+    ospi = om.get("ospi_memories") or {}
+    if not isinstance(ospi, dict) or key not in ospi:
+        return False
+    entry = ospi[key] or {}
+    return isinstance(entry, dict) and entry.get("assembled") is False
+
+
 def _resolve_aperture_arg(
     som_preset: dict[str, Any],
     metadata_root: Path,
@@ -157,9 +177,15 @@ def _known_flash_devices(
     om = som_preset.get("on_module") or {}
     ospi = om.get("ospi_memories") or {}
     if isinstance(ospi, dict):
-        for k in ospi.keys():
-            if isinstance(k, str):
-                names.add(k)
+        for k in ospi:
+            if not isinstance(k, str):
+                continue
+            if _is_ospi_key_unassembled(som_preset, k):
+                # Not fitted on this SKU (e.g. E1M-AEN801's ospi0/ospi1) --
+                # don't advertise a device `_resolve_flash_device()` below
+                # will refuse anyway (#2311).
+                continue
+            names.add(k)
     return sorted(names)
 
 
@@ -618,31 +644,34 @@ def _resolve_flash_device(
 
     # on_module.ospi_memories: key match.
     #
-    # KNOWN HAZARD, deliberately not fixed here (#915 follow-up).  This branch
-    # keys off `capacity_mbit` alone and ignores `assembled:`, so on
-    # `E1M-AEN801` -- the SKU whose preset declares `ospi0`/`ospi1`/`hyperram`
-    # `assembled: false` -- `_resolve_flash_device("ospi0", ...)` happily
-    # returns size_bytes=33554432 (32 MiB, from `capacity_mbit: 256`) for a
-    # part that preset says is not fitted -- and `_known_flash_devices()`
-    # above still offers `ospi0`/`ospi1` to a customer's
-    # `storage[].flash_device:`.  `assembled` is the declared fact a fix keys
-    # on; `capacity_mbit` is the DESIGNED-IN part's capacity, not one the
-    # module carries.
+    # #2311: refuse a device this SKU's preset declares `assembled: false`
+    # (e.g. `E1M-AEN801`'s `ospi0`/`ospi1`) BEFORE looking at `capacity_mbit`
+    # -- `capacity_mbit` is the DESIGNED-IN part's capacity (present on the
+    # shared PCB footprint per the R2 netlist), not evidence the module
+    # actually carries the part. `_known_flash_devices()` above already
+    # keeps an unassembled device out of the advertised set; this is the
+    # same guard applied where a hand-built project (or a stale caller) skips
+    # that check and calls this resolver directly (defense in depth, same
+    # shape as the `_is_flash_sub_partition()` guard just above). `optional`
+    # and an absent key (schema default: true) both still resolve --
+    # `assembled` must be the literal `False` the schema uses for "not
+    # fitted".
     #
-    # Latent, not live: no in-tree board.yaml names either device (the only
-    # `flash_device:` user is examples/connectivity/production-deployment/
-    # board.yaml, five entries, all `mram_main`).
-    #
-    # It is not fixed here because the fix crosses repos.  tan-cli's
-    # `python/tan/planner/partition.py::_resolve_flash_device` is a
-    # line-for-line port of this function, and tan is the executor: a refusal
-    # added on one side only would make alp-sdk and tan disagree about the same
-    # board.yaml, which is the drift ADR-0020 exists to prevent.  Both sides
-    # move in one change, or neither does.
+    # tan-cli's `python/tan/planner/partition.py::_resolve_flash_device` is a
+    # line-for-line port of this function; both sides move together (#2311).
     om = som_preset.get("on_module") or {}
     ospi = om.get("ospi_memories") or {}
     if isinstance(ospi, dict) and flash_device in ospi:
         entry = ospi[flash_device] or {}
+        if _is_ospi_key_unassembled(som_preset, flash_device):
+            sku = som_preset.get("sku")
+            where = f"SoM {sku}" if sku else "this SoM"
+            yaml_ref = (f"metadata/e1m_modules/{sku}.yaml" if sku
+                        else "its SoM preset YAML")
+            return None, (
+                f"flash device '{flash_device}' is not assembled on "
+                f"{where} (assembled: false in {yaml_ref}); it cannot "
+                f"take a runtime storage mount")
         cap = entry.get("capacity_mbit")
         if is_tbd(cap):
             return None, (

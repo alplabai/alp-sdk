@@ -1,0 +1,237 @@
+diff --git a/drivers/isp/isp_wrapper/inc/isp_param_conf.h b/drivers/isp/isp_wrapper/inc/isp_param_conf.h
+index e8f2e8b..cd9b4d8 100644
+--- a/drivers/isp/isp_wrapper/inc/isp_param_conf.h
++++ b/drivers/isp/isp_wrapper/inc/isp_param_conf.h
+@@ -33,6 +33,14 @@
+ #include "imx296_ae_envelope.h"
+ #endif /* defined(CONFIG_VIDEO_ISP_VSI_CALIB_IMX296) */
+ 
++/*
++ * alp-sdk fix (Alp Lab AB, #2327 Stage B): same reasoning as the two
++ * includes above, for IMX335's IMX335_AE_* macros (imx335_ae_envelope.h).
++ */
++#if defined(CONFIG_VIDEO_ISP_VSI_CALIB_IMX335)
++#include "imx335_ae_envelope.h"
++#endif /* defined(CONFIG_VIDEO_ISP_VSI_CALIB_IMX335) */
++
+ #ifdef __cplusplus
+ extern "C"{
+ #endif
+@@ -170,6 +178,37 @@ static ISP_CALIB_DATA_S isp_calib_param = {
+ 				.aeRunInterval = 1,
+ 				.aeTarget = CONFIG_VIDEO_ISP_VSI_AE_TARGET,
+ 				.dampOver = 0x40,
++#elif defined(CONFIG_VIDEO_ISP_VSI_CALIB_IMX335)
++			/*
++			 * alp-sdk fix (Alp Lab AB, #2327 Stage B): same mechanism as the
++			 * IMX296 arm above, IMX335's own envelope instead
++			 * (imx335_ae_envelope.h's IMX335_AE_* macros -- see that header's
++			 * comment). AWB/CCM stay on the ARX3A0 #else arm for IMX335 below
++			 * (this #elif only replaces the .ae block) -- there is no
++			 * IMX335-fitted colour calibration; BUILD-ONLY, no bench run
++			 * backs any figure this arm uses.
++			 */
++			.manualAttr = {
++				.intTime = IMX335_AE_EXP_TIME_MAX_US / 2,
++				.again = IMX335_AE_MIN_AGAIN,
++				.dgain = IMX335_AE_MIN_DGAIN,
++			},
++			.autoAttr = {
++				.expTimeRange = {
++					.min =  32,
++					.max =  IMX335_AE_EXP_TIME_MAX_US,
++				},
++				.againRange = {
++					.min = IMX335_AE_MIN_AGAIN,
++					.max = IMX335_AE_MAX_AGAIN,
++				},
++				.dgainRange = {
++					.min = IMX335_AE_MIN_DGAIN,
++					.max = IMX335_AE_MAX_DGAIN,
++				},
++				.aeRunInterval = 1,
++				.aeTarget = CONFIG_VIDEO_ISP_VSI_AE_TARGET,
++				.dampOver = 0x40,
+ #else /* ARX3A0 (Alif's stock calibration, unchanged) */
+ 			.manualAttr = {
+ 				.intTime = 100000,
+diff --git a/drivers/isp/isp_wrapper/inc/sensor_attributes.h b/drivers/isp/isp_wrapper/inc/sensor_attributes.h
+index e7343f6..4c19c4c 100644
+--- a/drivers/isp/isp_wrapper/inc/sensor_attributes.h
++++ b/drivers/isp/isp_wrapper/inc/sensor_attributes.h
+@@ -89,7 +89,33 @@ extern "C"{
+  * comments -- so an OV5647 (or any non-IMX296) build's sensor_attributes
+  * stays bit-identical to before this patch.
+  */
+-#if defined(CONFIG_VIDEO_ISP_VSI_CALIB_IMX296)
++#if defined(CONFIG_VIDEO_ISP_VSI_CALIB_IMX335)
++static AE_SNS_DEFAULT_S sensor_attributes = {
++	.fullLinesMax = 0xFFFF,
++	.fullLinesStd = 4500,
++	.fullLines = 4500,
++	.fps = 30 * ISP_SNS_FPS_ACCU, /* upstream driver default, not bench-measured -- see imx335_ae_envelope.h */
++	.maxIntLine = 4483,
++	.minIntLine = 0x1,
++	.intLineStep = 1,
++	.maxAgain = 32382, /* 30.0 dB analog-only ceiling (Sony flyer) -- see imx335_ae_envelope.h */
++	.minAgain = 1024,
++	.againStep = 1,
++	.maxDgain = 1024,
++	.minDgain = 1024,
++	.dgainStep = 1,
++	.aeRunInterval = 1,
++	.aeTarget = CONFIG_VIDEO_ISP_VSI_AE_TARGET,
++
++	.dampOver = 0x40,
++	.dampUnder = 0x40,
++	.tolerance = 1,
++
++	.initExposure = 80,
++	.aeMode = AE_MODE_FIX_FRAME_RATE,
++	.gainThreshold = 1024,
++};
++#elif defined(CONFIG_VIDEO_ISP_VSI_CALIB_IMX296)
+ static AE_SNS_DEFAULT_S sensor_attributes = {
+ 	.fullLinesMax = 0xFFFF,
+ 	.fullLinesStd = 1118,
+@@ -141,7 +167,7 @@ static AE_SNS_DEFAULT_S sensor_attributes = {
+ 	.aeMode = AE_MODE_FIX_FRAME_RATE,
+ 	.gainThreshold = 1024,
+ };
+-#endif /* defined(CONFIG_VIDEO_ISP_VSI_CALIB_IMX296) */
++#endif /* defined(CONFIG_VIDEO_ISP_VSI_CALIB_IMX335) / defined(CONFIG_VIDEO_ISP_VSI_CALIB_IMX296) */
+ 
+ /*
+  * alp-sdk fix (Alp Lab AB, #2271): isp_param_conf.h's OV5647 .ae calibration
+@@ -168,6 +194,14 @@ static AE_SNS_DEFAULT_S sensor_attributes = {
+  */
+ #include "imx296_ae_envelope.h"
+ #endif /* defined(CONFIG_VIDEO_ISP_VSI_CALIB_IMX296) */
++#if defined(CONFIG_VIDEO_ISP_VSI_CALIB_IMX335)
++/*
++ * alp-sdk fix (Alp Lab AB, #2327 Stage B): same by-hand-invariant status as
++ * the includes above -- isp_param_conf.h's IMX335 .ae calibration block
++ * needs these SAME facts as the AE_SNS_DEFAULT_S #if arm above.
++ */
++#include "imx335_ae_envelope.h"
++#endif /* defined(CONFIG_VIDEO_ISP_VSI_CALIB_IMX335) */
+ 
+ #ifdef __cplusplus
+ }
+diff --git a/drivers/isp/isp_wrapper/inc/imx335_ae_envelope.h b/drivers/isp/isp_wrapper/inc/imx335_ae_envelope.h
+new file mode 100644
+index 0000000..bfb7bce
+--- /dev/null
++++ b/drivers/isp/isp_wrapper/inc/imx335_ae_envelope.h
+@@ -0,0 +1,111 @@
++/*
++ * Copyright (C) 2026 Alif Semiconductor.
++ * Copyright (c) 2026 Alp Lab AB
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++#ifndef DRIVERS_ISP_ISP_WRAPPER_INC_IMX335_AE_ENVELOPE_H
++#define DRIVERS_ISP_ISP_WRAPPER_INC_IMX335_AE_ENVELOPE_H
++
++#include "vsios_type.h"
++
++/*
++ * alp-sdk fix (Alp Lab AB, #2327 Stage B): IMX335's AE envelope, same
++ * sharing mechanism as imx296_ae_envelope.h (patch 0013) and
++ * ov5647_ae_envelope.h (patch 0011) -- see either header's own comment for
++ * why SetCalib() loading isp_param_conf.h's compiled-in calibration before
++ * isp_apply_ae() ever runs forces this duplication between this header's
++ * macros and sensor_attributes.h's AE_SNS_DEFAULT_S table. This header
++ * follows the same shape deliberately (same macro names, same round-trip
++ * assert band); it is NOT bench-derived like IMX296's -- IMX335 Stage B is
++ * BUILD-ONLY, no bench run backs any figure below. Every figure is either
++ * an upstream Zephyr driver constant (zephyr/drivers/video/imx335.c,
++ * v4.4.1) or a public Sony IMX335 datasheet-flyer figure; do not read any
++ * of these as bench-verified.
++ *
++ * Sourcing (2x2-binned mode, 24 MHz INCK, this shield's configuration):
++ *   - fullLines (VMAX, imx335.c's IMX335_VMAX_DEFAULT): 4500 lines/frame --
++ *     the driver never reprograms VMAX for either mode, so this is the
++ *     SAME value in binned and full-resolution mode.
++ *   - fps: 30 fps, upstream Zephyr's own default for this VMAX/HMAX pair
++ *     (IMX335_HMAX 0x0226 = 550) -- NOT independently measured; bench
++ *     runs 316-331 (#2327 Stage A) explicitly did not measure frame rate.
++ *   - minIntLine/maxIntLine: exposure LINES (VIDEO_CID_EXPOSURE, this
++ *     driver's own control unit -- the driver writes SHR0 = VMAX - val
++ *     itself, imx335.c's imx335_set_ctrl(), so nothing here ever computes
++ *     or writes an SHR0 value directly), 1 and VMAX - IMX335_SHR0_MIN_BINNING
++ *     = 4500 - 17 = 4483 -- imx335.c's own binned-mode control-range ceiling
++ *     (imx335_set_fmt()'s ctrls->exposure.range.max for the 2x2-binned
++ *     format), reused here rather than re-derived, since it is the exact
++ *     ceiling video_set_ctrl() itself already enforces.
++ *   - minAgain/maxAgain: GAIN register (0x30e8, imx335.c's IMX335_GAIN,
++ *     0.3 dB/count, 0..240 = 0.0..72.0 dB, VIDEO_CID_ANALOGUE_GAIN in
++ *     milli-dB with a 300 mdB step -- IMX335_GAIN_UNIT_MDB) is NOT capped
++ *     at its full range here: the public Sony IMX335 product-flyer figure
++ *     is analog gain 0-30 dB, with anything above 30 dB layered as DIGITAL
++ *     gain on the same register (same analog/digital-bend reasoning
++ *     imx296_ae_envelope.h's own MAX_AGAIN comment documents for that
++ *     sensor's GAIN register, and the same caution applies: digital gain
++ *     multiplies read noise along with signal, so it is plausibly noisier
++ *     per dB for a dim scene, but this has NOT been bench-confirmed for
++ *     IMX335 the way IMX296's run 312/313 pair confirmed it for that
++ *     sensor). 30.0 dB = register code 100 (100 * IMX335_GAIN_UNIT_MDB/
++ *     100 = 100 * 3 tenths-of-dB = 300 tenths); library units 32382 =
++ *     isp_gain_db_tenths_table[300] (zephyr/drivers/video/
++ *     isp_sns_gain_conv.h, alp-sdk-side, not reachable from this hal_alif
++ *     header, hence the separate literal here -- same by-hand-invariant
++ *     status ov5647_ae_envelope.h/imx296_ae_envelope.h's own comments
++ *     document for their own duplicated figures). isp_pico.c's
++ *     isp_apply_ae() clamps its PUSHED ceiling to this same figure via
++ *     Kconfig VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS=300, same mechanism
++ *     IMX296 uses at =240 -- see that Kconfig's own help text.
++ *   - dgain: pinned to 1024 (unity), same convention as OV5647/IMX296's
++ *     envelopes -- IMX335 has no register this library treats as a
++ *     SEPARATE digital-gain control; the digital half of GAIN's own range
++ *     is excluded entirely by the AE-library ceiling above instead.
++ */
++#define IMX335_AE_FULL_LINES 4500 /* VMAX, imx335.c IMX335_VMAX_DEFAULT (unreprogrammed by either mode) */
++#define IMX335_AE_FPS_X10    300  /* 30.0 fps * 10 -- upstream driver default, not bench-measured */
++#define IMX335_AE_MAX_INT_LINE                                                                   \
++	4483 /* VMAX - IMX335_SHR0_MIN_BINNING (4500 - 17), imx335.c's own binned-mode ctrl ceiling */
++#define IMX335_AE_MIN_AGAIN 1024  /* 1x floor, library units (1x = 1024) */
++#define IMX335_AE_MAX_AGAIN 32382 /* 30.0 dB analog-only ceiling (Sony flyer) -- see header comment */
++#define IMX335_AE_MIN_DGAIN 1024  /* unity -- no separate digital-gain register this library owns */
++#define IMX335_AE_MAX_DGAIN 1024  /* unity, matching MIN */
++
++_Static_assert(IMX335_AE_FULL_LINES == 4500, "drifted from sensor_attributes.fullLines");
++_Static_assert(IMX335_AE_MAX_INT_LINE == 4483, "drifted from sensor_attributes.maxIntLine");
++_Static_assert(IMX335_AE_MAX_AGAIN == 32382, "drifted from sensor_attributes.maxAgain");
++_Static_assert(IMX335_AE_MIN_AGAIN == 1024, "drifted from sensor_attributes.minAgain");
++_Static_assert(IMX335_AE_MAX_DGAIN == 1024, "drifted from sensor_attributes.minDgain");
++_Static_assert(IMX335_AE_MIN_DGAIN == 1024, "drifted from sensor_attributes.minDgain");
++
++/*
++ * Exposure ceiling in MICROSECONDS -- same derivation imx296_ae_envelope.h's
++ * IMX296_AE_EXP_TIME_MAX_US uses (see that header's own comment): line-time_us
++ * = 1e7 / (fullLines * fps_x10), exp_time_max_us = maxIntLine * that.
++ */
++#define IMX335_AE_EXP_TIME_MAX_US                                                                \
++	((vsi_u32_t)((vsi_u64_t)IMX335_AE_MAX_INT_LINE * 10000000 /                              \
++		      ((vsi_u64_t)IMX335_AE_FULL_LINES * IMX335_AE_FPS_X10)))
++
++/*
++ * Round-trip guard, same [ceiling-1, ceiling] band rationale as
++ * imx296_ae_envelope.h/ov5647_ae_envelope.h's own (integer truncation only
++ * ever rounds the forward conversion DOWN, so an upper-only check can never
++ * fail -- the lower bound is what actually catches a unit/order slip).
++ */
++_Static_assert(((vsi_u64_t)IMX335_AE_EXP_TIME_MAX_US *
++		 ((vsi_u64_t)IMX335_AE_FULL_LINES * IMX335_AE_FPS_X10) / 10000000) <=
++		       IMX335_AE_MAX_INT_LINE,
++	       "IMX335_AE_EXP_TIME_MAX_US round-trips to more lines than IMX335_AE_MAX_INT_LINE");
++_Static_assert(((vsi_u64_t)IMX335_AE_EXP_TIME_MAX_US *
++		 ((vsi_u64_t)IMX335_AE_FULL_LINES * IMX335_AE_FPS_X10) / 10000000) >=
++		       IMX335_AE_MAX_INT_LINE - 1,
++	       "IMX335_AE_EXP_TIME_MAX_US round-trips to far fewer lines than "
++	       "IMX335_AE_MAX_INT_LINE -- check for a unit or operand-order slip");
++_Static_assert((vsi_u64_t)IMX335_AE_MAX_INT_LINE <= 0xFFFFF,
++	       "IMX335_AE_MAX_INT_LINE (isp_api_wrapper.c's VIDEO_CID_EXPOSURE writeback scale, "
++	       "1 ctrl unit per line for IMX335) overflows the 20-bit video-ctrl exposure field");
++
++#endif /* DRIVERS_ISP_ISP_WRAPPER_INC_IMX335_AE_ENVELOPE_H */

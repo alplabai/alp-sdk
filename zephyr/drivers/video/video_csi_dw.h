@@ -375,6 +375,30 @@ struct csi2_dw_config {
 	uint32_t hline;
 	uint32_t vtotal;
 
+	/*
+	 * Alp Lab AB (issue #2327, bench runs 316-330): optional DT property csi-pixclk-hz
+	 * (snps,designware-csi.yaml), effective in EITHER ipi-mode -- when non-zero,
+	 * csi2_dw_validate_data() requests this rate for the IPI pixel clock instead of the
+	 * derived bare (Controller mode) or 20%-margined (Camera mode) sensor pixrate. Both
+	 * normal requests assume the clock-control divisor policy happens to land on a rate
+	 * that keeps the IPI ahead of the sensor -- a 2-lane sensor's bare OR margined rate can
+	 * exceed alif_pixclk_set_rate()'s ~200 MHz ceiling in EITHER mode (IMX335's case: its
+	 * Camera-mode margined AND bare rates both exceed it, and its measured line timing
+	 * could not be matched in Controller mode at all), so its shield states the intended IPI
+	 * pixel clock explicitly under Camera mode. 0 means "not set", byte-identical to before
+	 * this field existed in EITHER mode. In Controller mode this field is the ONLY thing
+	 * that changes -- csi-hline/csi-vtotal's own hsd/vfp derivation is unaffected (computed
+	 * purely from csi-hline/csi-vtotal and the format's own hact/vact, never from the
+	 * programmed pixel-clock rate). In Camera mode, a non-zero value ALSO switches HSD to a
+	 * lanes-aware derivation (csi2_dw_validate_data()'s CAM branch, divides by
+	 * (pll_fin<<1)*num_lanes instead of the legacy (pll_fin<<1) alone) -- the legacy formula
+	 * stays unchanged when this field is 0, since OV5647/OV9281 are bench-proven against it.
+	 * Both modes' explicit-pixclk branches emit a diagnostic LOG_INF that reads back the
+	 * actually-programmed rate via clock_control_get_rate(), to log the real resulting IPI
+	 * line time for comparison.
+	 */
+	uint32_t pixclk_hz;
+
 	uint8_t rx_dphy_ids[];
 };
 

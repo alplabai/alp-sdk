@@ -207,17 +207,19 @@ def _resolve_ethos_u_table(pattern: str) -> Path | None:
 _U85 = _resolve_ethos_u_table("u85@vela-*.json")
 _U55_U65 = _resolve_ethos_u_table("u55-u65@vela-*.json")
 
-#: The exact Ethos-U85-only delta over Ethos-U55/U65 (17 ops), taken from the
-#: same regenerated report cited in this change -- not re-derived from a
+#: The exact Ethos-U85-only delta over Ethos-U55/U65 (19 ops, vela 5.2.0;
+#: was 17 at vela 5.1.0, +ASSIGN_VARIABLE/READ_VARIABLE -- #2310), taken from
+#: the same regenerated report cited in this change -- not re-derived from a
 #: second, independent read of the vendor data, so this does not by itself
 #: rule out a shared transcription error with scripts/gen_npu_ops.py's own
 #: pinned constant of the same name; `test_u85_and_u55_u65_share_the_same_
 #: vela_report_content_hash` below is what actually pins both tables to one
 #: real `vela` run.
 _EXPECTED_U85_ONLY_DELTA = {
-    "CAST", "DIV", "EQUAL", "GATHER", "GREATER", "GREATER_EQUAL", "LESS",
-    "LESS_EQUAL", "LOGICAL_AND", "LOGICAL_NOT", "LOGICAL_OR", "NOT_EQUAL",
-    "REDUCE_ALL", "REDUCE_ANY", "SCATTER_ND", "SELECT", "SELECT_V2",
+    "ASSIGN_VARIABLE", "CAST", "DIV", "EQUAL", "GATHER", "GREATER",
+    "GREATER_EQUAL", "LESS", "LESS_EQUAL", "LOGICAL_AND", "LOGICAL_NOT",
+    "LOGICAL_OR", "NOT_EQUAL", "READ_VARIABLE", "REDUCE_ALL", "REDUCE_ANY",
+    "SCATTER_ND", "SELECT", "SELECT_V2",
 }
 
 
@@ -226,7 +228,7 @@ def test_u85_and_u55_u65_tables_exist():
     assert _U55_U65 is not None, "expected exactly one metadata/npu_ops/ethos_u/u55-u65@vela-*.json"
 
 
-def test_u55_u65_is_a_strict_subset_of_u85_with_the_known_17_op_delta():
+def test_u55_u65_is_a_strict_subset_of_u85_with_the_known_19_op_delta():
     u85 = set(_load(_U85)["supported_ops"])
     u55_u65 = set(_load(_U55_U65)["supported_ops"])
     assert u55_u65 <= u85, (
@@ -236,7 +238,7 @@ def test_u55_u65_is_a_strict_subset_of_u85_with_the_known_17_op_delta():
     assert delta == _EXPECTED_U85_ONLY_DELTA, (
         f"Ethos-U85-only delta changed -- expected "
         f"{sorted(_EXPECTED_U85_ONLY_DELTA)}, got {sorted(delta)}")
-    assert len(delta) == 17
+    assert len(delta) == 19
 
 
 def test_u85_and_u55_u65_share_the_same_vela_report_content_hash():

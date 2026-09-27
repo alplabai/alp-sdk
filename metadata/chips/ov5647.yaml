@@ -1,0 +1,81 @@
+# Alp SDK chip manifest: OmniVision OV5647 5 MP raw-Bayer MIPI CSI-2.
+schema_version:   1
+chip_id:          ov5647
+driver_status:    none              # no chips/ov5647/ portable chip-ID stub exists (unlike
+                                     # OV9281's chips/ov9281/ov9281.c) -- streaming lives entirely
+                                     # in the Zephyr driver, zephyr/drivers/video/ov5647.c. This
+                                     # manifest is catalogue-only (same shape as imx296.yaml),
+                                     # allowlisted in scripts/check_chip_manifest_parity.py's
+                                     # KNOWN_MANIFEST_NO_DRIVER.
+display_name:     "OmniVision OV5647 5 MP raw-Bayer MIPI CSI-2 sensor"
+vendor:           omnivision
+mpn_population:
+  - "OV5647"
+
+datasheet:
+  primary:        "OV5647 datasheet (OmniVision, PRELIMINARY)"
+
+notes: |
+  Streaming driver: zephyr/drivers/video/ov5647.c (ADR 0017 Tier-1, an
+  upstream-PENDING backport of open upstream PR
+  zephyrproject-rtos/zephyr#119301). Shield:
+  zephyr/boards/shields/raspberry_pi_camera_module_1/. See
+  docs/camera-shields.md for the full driver/shield/control reference,
+  including the two AUTHORIZED in-tree divergences from the verbatim-backport
+  rule (the PLL/MIPI-TX pad-drive fix and the lane-park fix) that must both
+  be confirmed present upstream before the vendored copy is ever deleted.
+
+  Modes: SBGGR8 / SBGGR10P raw Bayer, any 4-pixel-aligned resolution up to
+  2592x1944, MIPI CSI-2 D-PHY, 2 data lanes, 6-27 MHz XVCLK. RAW10 only is
+  bench-verified; RAW8 (SBGGR8) is unverified (see docs/camera-shields.md).
+
+  Bench-verified (run 52, then re-verified runs 61/62/63, an E1M-AEN803 on
+  an E1M-EVK, RAW10 640x480): `alp_camera_open` returns ALP_OK, 60 frames
+  captured at 15.96 fps, frame CRC-matched against a real scene and the
+  maintainer confirmed a host-demosaiced render is the correct image (BGGR,
+  unmirrored). The module needs the J5 pin-11 pull-up rework described in
+  docs/boards/e1m-evk.md to answer on I2C at all -- CAM_EN# on this
+  connector is open-drain with no on-board pull-up. Colour (AWB/CCM) is not
+  claimed here -- see docs/camera-shields.md for what run 62 established.
+
+  Re-bench pending after issue #2287 Stage B: the shared CPI driver's
+  buffer-starvation-pause behaviour changed (an ISP-driven re-arm instead of
+  a CPI-only pause), bench-verified on IMX296 only -- this applies to
+  OV5647 too but has not been re-run on this sensor yet.
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x36, scope: "fixed CCI address" }
+  max_clock_hz:   400000
+
+mipi:
+  lanes_supported: [1, 2]
+
+resolutions:
+  max:            [2592, 1944]
+  features:       [raw_bayer]
+
+kconfig:
+  zephyr:         VIDEO_OV5647      # streaming driver's own Kconfig symbol (no portable
+                                     # ALP_SDK_CHIP_OV5647 -- see driver_status above)
+  baremetal:      n/a               # no bare-metal (CMSIS, no-RTOS) camera capture path exists
+                                     # in this tree for any sensor on this bus
+
+families:
+  - aen
+
+verification:
+  hil_silicon:    partial           # Bench-verified (runs 52/61/62/63): CSI-2 streaming, a
+                                     # captured RAW10 frame at 640x480, run 62's captured frame
+                                     # confirmed the correct image (BGGR, unmirrored) -- see
+                                     # notes above. STILL partial, not full: RAW8 is unverified
+                                     # -- that is the primary reason this stays "partial" rather
+                                     # than "verified" (contrast metadata/chips/ov9281.yaml,
+                                     # kept "verified" since all of ITS modes are fully
+                                     # bench-verified). Re-bench after issue #2287 Stage B's
+                                     # shared CPI-driver change is also pending, noted here as
+                                     # an open item, not an additional reason for "partial".
+  smoke_tests:    none               # no chips/ portable driver surface exists to unit-test;
+                                     # the streaming driver's coverage is
+                                     # tests/zephyr/video_sensors/src/ov5647_test.c.

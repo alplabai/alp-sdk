@@ -880,6 +880,23 @@ int isp_set_fmt(const struct device *dev,
  * isp_sns_gain_lib_from_ctrl() below use -- upstreamable: false in
  * patches.yml for the matching isp_api_wrapper.c hunk, same reason as
  * before: this is board/sensor-specific, not a hal_alif-generic fix.
+ *
+ * #2327 Stage B: IMX335's VIDEO_CID_ANALOGUE_GAIN is ALSO logarithmic but the
+ * upstream driver pre-scales it to MILLI-dB (0..72000, 300 mdB/count) rather
+ * than exposing IMX296's raw 0.1 dB/count register value (0..480) directly
+ * -- a single boolean can't tell the two apart, so the dB-tenths path is now
+ * scaled by CONFIG_VIDEO_ISP_VSI_SNS_GAIN_CTRL_PER_DB_TENTH (default 1,
+ * i.e. unchanged, for IMX296 -- its ctrl IS tenths-of-dB directly; 100 for
+ * IMX335, whose ctrl is in mdB, 100 mdB = 1 tenth of a dB) via
+ * isp_sns_gain_conv.h's isp_sns_gain_db_tenths_ctrl_to_lib()/
+ * isp_sns_gain_lib_to_db_tenths_ctrl() -- see that header's own comment. The
+ * reverse direction ALSO needs CONFIG_VIDEO_ISP_VSI_SNS_GAIN_CTRL_STEP (the
+ * sensor's own hardware-register WRITE granularity, in the SAME control
+ * units -- 300 for IMX335, matching IMX335_GAIN_UNIT_MDB; 1, a no-op, for
+ * every sensor whose control unit already IS its register's own step) so
+ * the pushed value is always an EXACT multiple of what the sensor's own
+ * ctrl-to-register divide can represent -- see that header's own comment
+ * for why a naive scale-up alone silently under-drives gain.
  */
 
 /*
@@ -892,7 +909,9 @@ int isp_set_fmt(const struct device *dev,
 uint32_t isp_sns_gain_ctrl_from_lib(uint32_t total_1024)
 {
 	if (IS_ENABLED(CONFIG_VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS)) {
-		return isp_sns_gain_lib_to_db_tenths(total_1024);
+		return isp_sns_gain_lib_to_db_tenths_ctrl(total_1024,
+							   CONFIG_VIDEO_ISP_VSI_SNS_GAIN_CTRL_PER_DB_TENTH,
+							   CONFIG_VIDEO_ISP_VSI_SNS_GAIN_CTRL_STEP);
 	}
 	return isp_sns_gain_lib_to_linear_reg(total_1024, CONFIG_VIDEO_ISP_VSI_SNS_GAIN_REG_PER_1X);
 }
@@ -900,7 +919,8 @@ uint32_t isp_sns_gain_ctrl_from_lib(uint32_t total_1024)
 uint32_t isp_sns_gain_lib_from_ctrl(uint32_t ctrl_reg)
 {
 	if (IS_ENABLED(CONFIG_VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS)) {
-		return isp_sns_gain_db_tenths_to_lib(ctrl_reg);
+		return isp_sns_gain_db_tenths_ctrl_to_lib(ctrl_reg,
+							   CONFIG_VIDEO_ISP_VSI_SNS_GAIN_CTRL_PER_DB_TENTH);
 	}
 	return isp_sns_gain_linear_reg_to_lib(ctrl_reg, CONFIG_VIDEO_ISP_VSI_SNS_GAIN_REG_PER_1X);
 }
@@ -1178,6 +1198,26 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 			int_time_max_us = (uint32_t)(frame_period_us > margin_us
 							      ? frame_period_us - margin_us
 							      : frame_period_us);
+		}
+
+		/*
+		 * Same reasoning as the gain-ceiling clamp below
+		 * (CONFIG_VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS) -- the frame-period-derived
+		 * ceiling above is sensor-agnostic and normally correct,
+		 * but IMX335's calibration (hal_alif patch 0014's IMX335_AE_EXP_TIME_MAX_US, already
+		 * in the SAME microsecond unit as int_time_max_us here -- no register/dB conversion
+		 * needed, unlike gain) assumes an EXACT 30 fps frame period, this sensor driver's own
+		 * default. A caller that sets a different rate on this sensor -- directly via
+		 * video_set_frmival() against the sensor device, or via the app-level
+		 * src/backends/camera/alif_isp_pico.c backend's cfg->fps request (issue #2338:
+		 * that backend now forwards cfg->fps generically to whichever sensor is wired,
+		 * not just OV5647) -- would otherwise push a ceiling the calibration was never
+		 * derived against. 0 (every non-IMX335 sensor) means "trust the frame-period
+		 * derivation above", unchanged behaviour.
+		 */
+		if (CONFIG_VIDEO_ISP_VSI_AE_EXP_TIME_MAX_US_CAP > 0 &&
+		    int_time_max_us > (uint32_t)CONFIG_VIDEO_ISP_VSI_AE_EXP_TIME_MAX_US_CAP) {
+			int_time_max_us = (uint32_t)CONFIG_VIDEO_ISP_VSI_AE_EXP_TIME_MAX_US_CAP;
 		}
 
 		/*
@@ -1963,6 +2003,40 @@ static int isp_stream_start(const struct device *dev)
 	port->out_form_rect.width = port->port_fmt.width - (port->out_form_rect.left << 1);
 	port->out_form_rect.height = port->port_fmt.height - (port->out_form_rect.top << 1);
 
+	/*
+	 * out_form_rect (the ISP's own crop, above --
+	 * left/top come from the &isp crop-x0/crop-y0 DT properties) must land EXACTLY on the
+	 * OUTPUT format's own width/height -- there is no scalar module in this driver's ISP
+	 * pipeline that would resize a crop mismatch for you, so a crop that lands on the wrong
+	 * size would silently feed isp_vsi_update_cfg() a channel geometry the caller's own
+	 * video_set_format(OUTPUT, ...) never agreed to (a DT crop-x0/crop-y0 edit with no
+	 * matching output-format update, or a caller requesting a size the crop was never sized
+	 * for). Every board shipping today either sets crop-x0/crop-y0 to 0 (OV5647/OV9281/IMX296
+	 * -- in-sensor crop only, out_form_rect always equals the uncropped port_fmt) or to
+	 * IMX335's 8/6 (innomaker_cam_imx335.overlay), matched by that shield's own
+	 * BUILD_ASSERT in src/backends/camera/alif_isp_pico.c -- so this can only fire on a
+	 * genuine DT/format mismatch, never on an existing bench-verified board.
+	 *
+	 * `config->controller` guard: TPG-only builds (examples/aen/aen-isp-regcheck --
+	 * config->controller == NULL, no camera port@0 wired) never call video_set_format(INPUT,
+	 * ...) at all, so port->port_fmt stays zero-initialized and this comparison would always
+	 * fail for them -- a real regression this guard avoids. The crop this check protects only
+	 * ever applies to a real sensor -> csi -> cam -> isp pipeline, which is exactly when
+	 * config->controller is non-NULL.
+	 */
+	if (config->controller &&
+	    (port->out_form_rect.width != channel->output_fmt.width ||
+	     port->out_form_rect.height != channel->output_fmt.height)) {
+		LOG_ERR("ISP crop (out_form_rect) %ux%u does not match the OUTPUT format %ux%u -- "
+			"check &isp's crop-x0/crop-y0 against the requested output size",
+			port->out_form_rect.width,
+			port->out_form_rect.height,
+			channel->output_fmt.width,
+			channel->output_fmt.height);
+		data->curr_vid_buf = 0;
+		return -EINVAL;
+	}
+
 	ret = isp_vsi_update_cfg(&data->init_cfg);
 	if (ret) {
 		LOG_ERR("Failed to update ISP config to input/output formats and ROI! "
@@ -2581,6 +2655,51 @@ static int isp_set_signal(const struct device *dev,
 #endif /* CONFIG_POLL */
 
 /*
+ * Issue #2338: forward frmival get/set to `controller` -- the same device
+ * isp_apply_ae() (above) already reads video_get_frmival() from directly,
+ * bypassing this vtable. Registering these here lets an app-level caller
+ * (src/backends/camera/alif_isp_pico.c) reach the real sensor's frame rate
+ * with one video_set_frmival(isp_dev, ...) call instead of reimplementing
+ * the isp -> cam -> csi -> sensor forwarding chain itself: each of those
+ * drivers' own .get_frmival/.set_frmival (video_alif.c's
+ * alif_cam_get/set_frmival, video_csi_dw.c's csi2_dw_get/set_frmival) already
+ * forwards one hop further upstream, so calling this on the ISP walks the
+ * whole chain automatically. TPG-only builds have no controller wired
+ * (config->controller == NULL, no camera port@0) -- nothing to forward to,
+ * so both return -ENOSYS, matching what video_set_frmival()/video_get_frmival()
+ * document for "API not implemented" rather than -EINVAL from a NULL dev.
+ */
+static int isp_get_frmival(const struct device *dev, struct video_frmival *frmival)
+{
+	const struct isp_config *config = dev->config;
+
+	if (!frmival) {
+		return -EINVAL;
+	}
+
+	if (!config->controller) {
+		return -ENOSYS;
+	}
+
+	return video_get_frmival(config->controller, frmival);
+}
+
+static int isp_set_frmival(const struct device *dev, struct video_frmival *frmival)
+{
+	const struct isp_config *config = dev->config;
+
+	if (!frmival) {
+		return -EINVAL;
+	}
+
+	if (!config->controller) {
+		return -ENOSYS;
+	}
+
+	return video_set_frmival(config->controller, frmival);
+}
+
+/*
  * v4.4 video-API shim (Alp Lab AB): the fork's value-pointer ctrl API
  * (set_ctrl/get_ctrl taking `unsigned int cid, void *value`) is gone.  The ISP
  * exposed two PRIVATE CIDs by reading/writing the caller's `void *value`:
@@ -2604,6 +2723,8 @@ static int isp_set_signal(const struct device *dev,
 static DEVICE_API(video, isp_driver_api) = {
 	.set_format = isp_set_fmt,
 	.get_format = isp_get_fmt,
+	.get_frmival = isp_get_frmival,
+	.set_frmival = isp_set_frmival,
 	.set_stream = isp_set_stream,
 	.get_caps = isp_get_caps,
 	.flush = isp_flush,
