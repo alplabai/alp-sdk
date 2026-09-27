@@ -398,10 +398,16 @@
  * switched card rail. Active-low: 0 = card present.
  *
  * vqmmc: vqmmc_sdhi1 (e1m-v2n-som.dtsi) switches the SD1 IO rail to
- * 1.8 V for UHS, up to SDR104 (200 MHz). The SD1 pads run at
- * output-impedance 2, one step weaker than the eMMC: at 3 (strongest)
- * SDR104 through the carrier SDIO mux fails the data phase with CRC
- * errors (-84); at 2 it is clean.
+ * 1.8 V for UHS. The SD1 pads run at output-impedance 2, one step weaker
+ * than the eMMC: at 3 (strongest) SDR104 through the carrier SDIO mux
+ * fails the data phase with CRC errors (-84); at 2 it is clean.
+ *
+ * Capped at SDR50 (100 MHz, 1.8 V), no sd-uhs-sdr104: SDR104 reads are
+ * fine (~85 MB/s), but host-to-card writes at 208 MHz never complete --
+ * "mmc1: Card stuck being busy!" with 4 KiB requests, a hung request with
+ * 256 KiB ones (#2357). Tuning only calibrates the host's read sampling,
+ * not its outgoing data. SDR50 writes 512 MiB in 20 s (E1M-V2M103, bench
+ * 2026-09-27, with kernel patch 0010).
  *
  * vmmc: card power (PA3/SD1_SD1PWEN) is an always-on hog, not a
  * regulator the MMC core may switch off. The card-detect pull-up sits on
@@ -412,10 +418,11 @@
  * SDIO reset carried through the carrier SDIO mux, so it is left
  * undriven here.
  *
- * The carrier SDIO mux (MUX_SEL.SDIO / SD_MUX_EN, driven by the GD32
- * IO-MCU on E1M IO27/IO29) selects microSD vs M.2 Wi-Fi SDIO; its
- * undriven default selects the microSD socket. See
- * docs/boards/e1m-x-evk.md. */
+ * The carrier SDIO mux (TMUX1574 U38/U39) selects microSD vs M.2 Wi-Fi
+ * SDIO. On the E1M-X EVK V2 its SEL (MUX_SEL.SDIO) is not a GPIO: R239
+ * (100k) pulls it low (= microSD) and header P6 ties it to +3V3 (= M.2);
+ * E1M IO27 is unconnected. Its active-low EN (SD_MUX_EN) is E1M IO29,
+ * with no external pull-down. See docs/boards/e1m-x-evk.md. */
 &sdhi1 {
 	pinctrl-0 = <&sdhi1_pins>;
 	pinctrl-1 = <&sdhi1_pins>;
@@ -424,7 +431,6 @@
 	vqmmc-supply = <&vqmmc_sdhi1>;
 	bus-width = <4>;
 	sd-uhs-sdr50;
-	sd-uhs-sdr104;
 	cd-gpios = <&pinctrl RZV2N_GPIO(A, 1) GPIO_ACTIVE_LOW>;
 	status = "okay";
 };
