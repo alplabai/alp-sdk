@@ -519,13 +519,13 @@ class BootSdLinux(Step):
     def probe(self, ctx):
         if not ctx.linux_up():
             return Unknown("no Linux target reachable")
-        ev = {}
         try:
-            ev["root_device"] = lt.root_device(ctx.linux)
+            root = lt.root_device(ctx.linux)
         except BenchError:
-            pass
-        return Satisfied({k: v for k, v in ev.items() if k != "root_device"},
-                         f"Linux target reachable (root {ev.get('root_device', '?')})")
+            return Unknown("Linux reachable but its root device is unknown")
+        if ctx.transfer == "sd" and root.startswith(lt.resolve_emmc(ctx.linux)):
+            return Unsatisfied(f"Linux root {root} is on the eMMC, not the microSD")
+        return Satisfied({}, f"Linux target reachable (root {root})")
 
     def run(self, ctx):
         b = ctx.need_bench()
@@ -573,7 +573,26 @@ class BootSdLinux(Step):
             if root.startswith(emmc):
                 raise Refused(f"Linux root {root} is on the eMMC, not the microSD "
                               "(SDHI1 not up? SD mux? check U-Boot patch 0008)")
+        probs = som_presence_problems(ctx)
+        if probs:
+            raise Refused("the SoM on the bench does not match the preset "
+                          f"({ctx.sku}): " + "; ".join(probs))
         return self.result(ctx, f"Linux up on {getattr(t, 'host', '?')}", ev)
+
+
+def som_presence_problems(ctx) -> list[str]:
+    """The live board check: every non-optional on-module I2C device the
+    SoM preset declares must ACK, checked once Linux runs and BEFORE the
+    first destructive write. Declared data (bundle, preset, bench.yaml) can
+    all agree while the module on the bench is a different SKU; the devices
+    answering on the bus cannot. Same set ColdBootTest requires at the end,
+    minus the GD32 bridge, which may legitimately be held in reset here."""
+    if ctx.bench is None or ctx.linux is None:
+        return []
+    expected = {bus: a - {GD32_BRIDGE_ADDR}
+                for bus, a in lt.expected_i2c(ctx.preset, ctx.bench.i2c_bus).items()
+                if bus is not None}
+    return lt.i2c_check(ctx.linux, expected)
 
 
 class WriteXspi(Step):

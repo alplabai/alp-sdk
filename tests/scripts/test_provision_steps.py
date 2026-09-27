@@ -804,3 +804,61 @@ def test_dxm1_npu_flash_execute_fails_when_pcie_endpoint_absent(tmp_path):
         assert "DEEPX endpoint" in str(e)
     finally:
         lt.DXM1_FW_UART_BOOT_MD5, lt.DXM1_FW_MD5, lt.DXM1_UART_BOOT_TOOL_MD5 = orig
+
+
+class _AckBoard(Board):
+    """A Board whose I2C buses ACK exactly `acks` (bus -> set of addresses)."""
+
+    def __init__(self, acks, **kw):
+        super().__init__(**kw)
+        self.acks = acks
+
+    def _answer(self, cmd):
+        if m := re.match(r"i2cdetect -y -r (\d+)", cmd):
+            got = self.acks.get(int(m[1]), set())
+            rows = []
+            for base in range(0, 0x80, 0x10):
+                cells = [f"{a:02x}" if a in got else "--" for a in range(base, base + 16)]
+                rows.append(f"{base:02x}: " + " ".join(cells))
+            return 0, "\n".join(rows) + "\n"
+        return super()._answer(cmd)
+
+
+def _preset_acks(ctx):
+    return {bus: set(a) for bus, a in lt.expected_i2c(ctx.preset, ctx.bench.i2c_bus).items()}
+
+
+def test_som_presence_passes_when_every_preset_device_acks(tmp_path):
+    ctx = _ctx(tmp_path, bench=_bench())
+    ctx.linux = _AckBoard(_preset_acks(ctx))
+    assert steps.som_presence_problems(ctx) == []
+
+
+def test_som_presence_ignores_a_gd32_held_in_reset(tmp_path):
+    ctx = _ctx(tmp_path, bench=_bench())
+    acks = _preset_acks(ctx)
+    for a in acks.values():
+        a.discard(steps.GD32_BRIDGE_ADDR)
+    ctx.linux = _AckBoard(acks)
+    assert steps.som_presence_problems(ctx) == []
+
+
+def test_som_presence_flags_a_different_som(tmp_path):
+    """A V2M preset on a bench whose module has no DA9292 (0x1E): refuse
+    before any destructive write."""
+    ctx = _ctx(tmp_path, bench=_bench())
+    acks = _preset_acks(ctx)
+    for a in acks.values():
+        a.discard(0x1E)
+    ctx.linux = _AckBoard(acks)
+    probs = steps.som_presence_problems(ctx)
+    assert probs and "0x1e" in probs[0]
+
+
+def test_boot_sd_linux_probe_refuses_an_emmc_root_on_resume(tmp_path, monkeypatch):
+    ctx = _ctx(tmp_path, bench=_bench(), transfer="sd")
+    ctx.linux = Board()
+    monkeypatch.setattr(ctx, "linux_up", lambda: True)
+    monkeypatch.setattr(lt, "root_device", lambda t: "mmcblk0p2")
+    monkeypatch.setattr(lt, "resolve_emmc", lambda t: "mmcblk0")
+    assert isinstance(steps.BootSdLinux().probe(ctx), steps.Unsatisfied)
