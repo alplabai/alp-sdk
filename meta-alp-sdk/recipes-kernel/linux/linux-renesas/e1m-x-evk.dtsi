@@ -12,32 +12,93 @@
  * STATUS: UNVALIDATED through dtc/bitbake.
  *
  * TODO (carrier features to port once exercised on the bench):
- *   - Audio: TAS2563 smart-amp pair on I2C0 @0x4D/0x4E, fed from I2S0
- *     through the TMUX1574 path-mux.  Carrier-side facts (addresses,
- *     channel, mux + shutdown/fault GPIOs, MCLK) are in
- *     metadata/boards/e1m-x-evk.yaml's `audio:` block.
+ *   - Audio: LANDED below (2026-09-26) -- TAS2563 smart-amp pair on I2C0
+ *     @0x4D/0x4E, fed from I2S0 (SSIU1/SSI1 + SSIU2/SSI2) through the
+ *     TMUX1574 path-mux.  Carrier-side facts (addresses, channel, mux +
+ *     shutdown/fault GPIOs, MCLK) are in metadata/boards/e1m-x-evk.yaml's
+ *     `audio:` block.
  *
- *     DATA-GATED, not just unwritten.  The SoC side needs four values
- *     this repo does not carry: which SSI/SSIU node the linux-renesas
- *     6.1.141-cip43 r9a09g056 dtsi exposes and under which label, its
- *     binding (an earlier note here said `rcar_sound` -- that is an
- *     R-Car binding and is UNVERIFIED for this SoC), the PFC function
- *     for the SSIU pads (metadata/pinmux/v2n.yaml still carries
- *     e1m_pad/e1m_function "TBD" on every SSIU row), and the real MCLK
- *     source + rate.  Do not guess any of them.
+ *     The four SoC-side values the previous note called DATA-GATED are
+ *     now confirmed by reading the actual linux-renesas 6.1.141-cip43
+ *     kernel-source tree at the SHA this carrier was ported from
+ *     (6717c06):
+ *       - binding: `rcar_sound` IS correct for r9a09g056 -- SoC dtsi
+ *         `compatible = "renesas,rcar_sound-r9a09g056"`, reg-names
+ *         "scu"/"adg"/"ssiu"/"ssi"/"audmapp"/"spdif", node label
+ *         `rcar_sound`, SSI channels `ssi0`..`ssi9` (arch/arm64/boot/dts/
+ *         renesas/r9a09g056.dtsi).
+ *       - PFC function: the stock Renesas RZ/V2N EVK reference dts
+ *         (r9a09g056n48-rzv2n-evk.dts, same SHA) pinmuxes its own SSI3/4
+ *         + AUDIO_CLKB/C pads as `RZV2N_PORT_PINMUX(port, pin, 7)`, where
+ *         (port, pin) is exactly this repo's "P<port><pin>" notation
+ *         (e.g. SSIU3_SSI3_SCK/P12 -> RZV2N_PORT_PINMUX(1, 2, 7); AUDIO_
+ *         CLKB/P10 -> RZV2N_PORT_PINMUX(1, 0, 7) -- both confirmed
+ *         against that dts verbatim). metadata/pinmux/v2n.yaml's e1m_pad
+ *         "TBD" column is a separate, still-open gap (the E1M-X module
+ *         edge-pad silkscreen crosswalk) -- it does not block writing
+ *         kernel pinctrl, which only needs the SoC-side P<port><pin>.
+ *       - MCLK source + rate: the same reference dts sets
+ *         `&audio_clkb { clock-frequency = <24576000>; };` for the
+ *         identical 5L35023B 24.576 MHz feed -- see
+ *         metadata/boards/e1m-x-evk.yaml's `audio.mclk` note.
+ *       - the SoM-preset crosswalk (metadata/e1m_modules/E1M-V2N103.yaml)
+ *         already ties E1M-X logical I2S0/I2S1 to SSIU1+SSIU2 /
+ *         SSIU3+SSIU4 respectively; that mapping is unchanged by this
+ *         landing (its `driver_status: none` there describes the #655
+ *         auto-generation pipeline, not this hand-authored node).
+ *
+ *     Two TAS2563 MONO amps share one physical I2S bus (one SCLK/WS/SDATA
+ *     set), so the card is one audio-graph-card2 `multi` link
+ *     (sound/soc/generic/audio-graph-card2.c, built in on this kernel):
+ *     ONE cpu port (rcar_sound SSI1) fanned out to TWO codec ports in a
+ *     single dai_link, so both amps get the same hw_params, format and
+ *     DAPM power sequencing. Bench-verified on E1M-V2M103 (2026-09-27):
+ *     both amps' PWR_CTL go software-shutdown -> active with the stream
+ *     and back afterwards. Why not simple-audio-card: simple-card.c counts
+ *     exactly one codec per link and parses a second `codec@N` sibling as
+ *     an extra CPU node (a bogus dai_link with a NULL rtd->pcm, which
+ *     oopses in dapm_connect_dai_pair()); and `aux-devs` gives the second
+ *     amp no dai_link at all, so it never receives hw_params,
+ *     set_tdm_slot or the DAC DAPM path.
+
+ *     Each codec endpoint also carries `dai-tdm-slot-*`: rsnd fixes the
+ *     SSI system word length at 32 bits, but the TAS2563 only learns its
+ *     slot length (TDM_CFG2.RX_SLEN) from set_tdm_slot, so without it the
+ *     amp decodes 16-bit slots and the right channel reads the empty low
+ *     half of the left slot. The tas2562 driver rejects a zero tx mask,
+ *     hence the explicit masks. Which slot an amp actually plays is the
+ *     "Left/Right ASI1 Sel" mixer control (Left / Right respectively),
+ *     not DT.
+ *
+ *     shutdown-gpios/interrupts are wired on the LEFT (U27) node only --
+ *     board.yaml documents SD_N/IRQ_N as ONE shared net across both
+ *     chips, not per-amp, so only one Linux consumer may claim the GPIO
+ *     line. Because SD_N therefore does not reset the amps across a warm
+ *     reboot, meta-alp-sdk patch 0009 makes the tas2562 driver
+ *     software-reset each amp at component probe. The IRQ_N `interrupts`
+ *     property documents the wiring only: the 6.1 tas2562 driver never
+ *     requests an IRQ, so amp faults are not signalled to Linux.
+ *
+ *     STILL OPEN, not resolved by this landing: I2C-address ownership.
+ *     Landing the kernel `ti,tas2563` codec nodes below means the kernel
+ *     binds i2c0@0x4d/0x4e for ALSA -- the SDK's own userspace
+ *     chips/tas2563 driver (reachable over alp_i2c_* on this same bus)
+ *     must not ALSO be wired up against this board/SoM combination, or
+ *     the two would race the same registers. No alp-chips PACKAGECONFIG
+ *     currently enables it for e1m-v2n101/e1m-v2m101, so there is no
+ *     live conflict today -- flagging so a future userspace-driver
+ *     enablement on these MACHINEs does not silently reintroduce one.
  *
  *     Kernel config: the mainline ASoC `tas2562` driver covers the
- *     TAS2563 and the BSP defconfig leaves it off, so the codec nodes
- *     land together with a one-line `CONFIG_SND_SOC_TAS2562=y` .cfg
- *     fragment -- not before.  A `tas2563-audio.cfg` used to ship ahead
- *     of the nodes; it was removed (#1171) because a codec driver with
- *     no DT consumer cannot bind.  Landing that node is also the point
- *     where I2C-address ownership has to be decided: the kernel codec
- *     would claim 0x4D/0x4E away from the SDK's own userspace
- *     chips/tas2563 driver, which reaches them over alp_i2c_*.
+ *     TAS2563; CONFIG_SND_SOC_RCAR is already `=y` in this BSP's
+ *     defconfig. tas2563-audio.cfg enables CONFIG_SND_SOC_TAS2562 and pins
+ *     CONFIG_SND_AUDIO_GRAPH_CARD2; see tas2563-audio.cfg (re-added; the earlier copy was removed
+ *     under #1171 because a codec driver with no DT consumer cannot
+ *     bind -- the DT consumer now exists, below).
  *
  *     See chips/tas2563 + issues #25 (codec), #655 (DT/pinctrl
- *     generation from the SoM layer), #1171.
+ *     generation from the SoM layer), #1171, #2331 (this landing --
+ *     I2C-ownership + E1M-pad-crosswalk follow-ups).
  *   - Display 1 (J6): ported -- rk055hdmipi4ma0 panel on dsi0 (see below).
  *     Display 2 (J28) is permanently unavailable: it requires DSI1 lane
  *     set, which the V2N/V2M family does not populate.
@@ -131,8 +192,6 @@
 		ethernet1 = &eth1;
 		i2c0 = &i2c0;
 		i2c1 = &i2c1;
-		i2c6 = &i2c6;
-		i2c7 = &i2c7;
 		mmc0 = &sdhi0;
 		mmc1 = &sdhi1;
 		serial0 = &scif;
@@ -152,6 +211,163 @@
 			linux,code = <0>;
 			label = "NMI";
 			wakeup-source;
+		};
+	};
+
+	/* TAS2563 stereo pair (U27 left / U28 right), one shared I2S0 bus:
+	 * one audio-graph-card2 `multi` link, SSI1 -> both amps. See this
+	 * file's header comment for why not simple-audio-card. */
+	sound_card: sound {
+		compatible = "audio-graph-card2";
+		label = "e1m-x-evk-tas2563";
+		links = <&sound_multi_cpu>;
+
+		multi {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			/* CPU side: port@0 is the link itself, port@1 the SSI. */
+			ports@0 {
+				reg = <0>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				sound_multi_cpu: port@0 {
+					reg = <0>;
+					mcpu0_ep: endpoint { remote-endpoint = <&mcodec0_ep>; };
+				};
+
+				port@1 {
+					reg = <1>;
+					mcpu1_ep: endpoint { remote-endpoint = <&rsnd_ep>; };
+				};
+			};
+
+			/* Codec side: port@0 is the link itself, then one per amp. */
+			ports@1 {
+				reg = <1>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+					mcodec0_ep: endpoint { remote-endpoint = <&mcpu0_ep>; };
+				};
+
+				port@1 {
+					reg = <1>;
+					mcodec1_ep: endpoint { remote-endpoint = <&tas2563_left_ep>; };
+				};
+
+				port@2 {
+					reg = <2>;
+					mcodec2_ep: endpoint { remote-endpoint = <&tas2563_right_ep>; };
+				};
+			};
+		};
+	};
+};
+
+/* MCLK reference for the ADG (Audio Digital clock Generator): the
+ * on-module 5L35023B SE3 output feeds Audio_CLKB at a fixed 24.576 MHz
+ * (metadata/chips/clk_5l35023b.yaml `Audio_CLKB` signal; confirmed
+ * against the stock RZ/V2N EVK reference dts -- see this file's header).
+ * The TAS2563 has no discrete MCLK pin; the ADG derives the SSI1/SSI2
+ * bit-clock from this reference. */
+&audio_clkb {
+	clock-frequency = <24576000>;
+};
+
+/* SoC audio block (SCU/ADG/SSIU/SSI/AUDMAPP). Only SSI1 (playback,
+ * SSIU1 SCK/WS + its own SDATA) is wired to the carrier -- SSIU2's extra
+ * SDATA line is unused for this playback-only stereo pair (both TAS2563
+ * mono amps tap the one shared SDATA line; each is configured over I2C
+ * to consume its own TDM slot, not a second physical data line). */
+&rcar_sound {
+	pinctrl-0 = <&sound_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	#sound-dai-cells = <1>;
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+
+			/* SoC is bit- and frame-clock provider (ADG from Audio_CLKB). */
+			rsnd_ep: endpoint {
+				remote-endpoint = <&mcpu1_ep>;
+				dai-format = "i2s";
+				bitclock-master;
+				frame-master;
+				playback = <&ssi1>;
+			};
+		};
+	};
+};
+
+/* TAS2563 smart-amp pair (I2C0 @0x4D/0x4E). SD_N (shutdown) and IRQ_N
+ * (fault) are ONE shared net each across both chips (board.yaml's
+ * `audio.shutdown`/`audio.fault_irq`) -- wired on the LEFT node only so
+ * a single Linux GPIO consumer owns each line. imon/vmon-slot-no give
+ * each amp distinct SDOUT slots (I: 0/1, V: 2/3) for I-V sense telemetry
+ * (ti,vmon-slot-no is read by the 6.1 driver but is not in the upstream
+ * ti,tas2562 binding, so dtbs_check flags it);
+ * the driver's default vmon slot is 2 for every instance, which would
+ * collide. Playback slots are set on the codec endpoints (header
+ * comment). */
+&i2c0 {
+	tas2563_left: codec@4d {
+		compatible = "ti,tas2563";
+		reg = <0x4d>;
+		sound-name-prefix = "Left";
+		#sound-dai-cells = <0>;
+		/* AMP.ENABLE (\SD_N), shared -- see header comment. SSIU3_SSI3_SCK
+		 * / P12 (E1M-X I2S1_SCLK repurposed as plain GPIO, not an SSI
+		 * function here). */
+		/* The 6.1 tas2562 driver drives shutdown-gpios to logical 1 to power the
+		 * amp up (SDZ is active-low shutdown), so the line is ACTIVE_HIGH:
+		 * ACTIVE_LOW held both amps in shutdown (they NACK I2C while SDZ is low). */
+		shutdown-gpios = <&pinctrl RZV2N_GPIO(1, 2) GPIO_ACTIVE_HIGH>;
+		/* AMP.FAULT (IRQ_N), shared -- see header comment. SSIU4_SSI4_
+		 * SDATA / P15 (E1M-X I2S1_SDI repurposed as plain GPIO). */
+		interrupt-parent = <&pinctrl>;
+		interrupts = <RZV2N_GPIO(1, 5) IRQ_TYPE_EDGE_FALLING>;
+		ti,imon-slot-no = <0>;
+		ti,vmon-slot-no = <2>;
+
+		port {
+			/* 2 x 32-bit slots to match rsnd's fixed 32-bit SSI word;
+			 * see this file's header comment. */
+			tas2563_left_ep: endpoint {
+				remote-endpoint = <&mcodec1_ep>;
+				dai-tdm-slot-num = <2>;
+				dai-tdm-slot-width = <32>;
+				dai-tdm-slot-tx-mask = <1 1>;
+				dai-tdm-slot-rx-mask = <1 1>;
+			};
+		};
+	};
+
+	tas2563_right: codec@4e {
+		compatible = "ti,tas2563";
+		reg = <0x4e>;
+		sound-name-prefix = "Right";
+		#sound-dai-cells = <0>;
+		ti,imon-slot-no = <1>;
+		ti,vmon-slot-no = <3>;
+
+		port {
+			tas2563_right_ep: endpoint {
+				remote-endpoint = <&mcodec2_ep>;
+				dai-tdm-slot-num = <2>;
+				dai-tdm-slot-width = <32>;
+				dai-tdm-slot-tx-mask = <1 1>;
+				dai-tdm-slot-rx-mask = <1 1>;
+			};
 		};
 	};
 };
@@ -303,19 +519,10 @@
 	status = "okay";
 };
 
-&i2c6 {
-	pinctrl-0 = <&i2c6_pins>;
-	pinctrl-names = "default";
-	clock-frequency = <400000>;
-	status = "okay";
-};
-
-&i2c7 {
-	pinctrl-0 = <&i2c7_pins>;
-	pinctrl-names = "default";
-	clock-frequency = <400000>;
-	status = "okay";
-};
+/* No &i2c6/&i2c7: P44-P47 are the E1M_X_I2S0 pads (SSIU1_SSI1 SCK/WS/SDATA +
+ * SSIU2_SSI2_SDATA, function 7, renesas-peripheral-map.csv:112-115) wired to the
+ * TAS2563 pair through the carrier's TMUX1574. RZ/V2N has no RIIC6/RIIC7 on those
+ * pins in this SoM's pin map, and nothing on the carrier sits on them. */
 
 &i2c8 {
 	pinctrl-0 = <&i2c8_pins>;
@@ -442,18 +649,6 @@
 		bias-pull-up;
 	};
 
-	i2c6_pins: i2c6 {
-		pinmux = <RZV2N_PORT_PINMUX(4, 4, 1)>, /* I2C6_SDA */
-			 <RZV2N_PORT_PINMUX(4, 5, 1)>; /* I2C6_SCL */
-		bias-pull-up;
-	};
-
-	i2c7_pins: i2c7 {
-		pinmux = <RZV2N_PORT_PINMUX(4, 6, 1)>, /* I2C7_SDA */
-			 <RZV2N_PORT_PINMUX(4, 7, 1)>; /* I2C7_SCL */
-		bias-pull-up;
-	};
-
 	i2c8_pins: i2c8 {
 		pinmux = <RZV2N_PORT_PINMUX(0, 6, 1)>, /* I2C8_SDA */
 			 <RZV2N_PORT_PINMUX(0, 7, 1)>; /* I2C8_SCL */
@@ -463,6 +658,28 @@
 	scif_pins: scif {
 		pins = "SCIF_TXD", "SCIF_RXD";
 		renesas,output-impedance = <1>;
+	};
+
+	/* Audio: I2S0 (SSIU1 SCK/WS/SDATA) -> TAS2563 pair via the TMUX1574
+	 * path-mux, + Audio_CLKB (the 5L35023B SE3 24.576 MHz reference into
+	 * the ADG). One wrapper node with labeled leaf sub-nodes, referenced
+	 * as a single phandle from &rcar_sound's pinctrl-0 -- same shape as
+	 * this SoC's own stock RZ/V2N EVK reference dts `sound_pins` node.
+	 * Function 7 + P<port><pin> confirmed against that reference dts's
+	 * SSI3/4 + AUDIO_CLK pinctrl entries (RZV2N_PORT_PINMUX(port, pin,
+	 * 7)) -- see this file's header comment. SSIU2's extra SDATA (P47)
+	 * is left unclaimed: unused for this playback-only pair (see
+	 * &rcar_sound's comment). */
+	sound_pins: sound {
+		ssi1_pins: ssi1 {
+			pinmux = <RZV2N_PORT_PINMUX(4, 4, 7)>, /* SSIU1_SSI1_SCK */
+				 <RZV2N_PORT_PINMUX(4, 5, 7)>, /* SSIU1_SSI1_WS */
+				 <RZV2N_PORT_PINMUX(4, 6, 7)>; /* SSIU1_SSI1_SDATA */
+		};
+
+		audio_clkb_pins: audio_clkb {
+			pinmux = <RZV2N_PORT_PINMUX(1, 0, 7)>; /* AUDIO_CLKB */
+		};
 	};
 
 	/* SD1 CLK/CMD/DAT need explicit dedicated-pin config, same as SDHI0
@@ -508,4 +725,17 @@
 	 * nets (see &xhci0's comment above) -- they never reach this
 	 * carrier's E1M connector, so no carrier-level pinctrl group may
 	 * claim them. */
+
+	/* Audio_CLKB_OE (P67): host-driven output-enable for the on-module
+	 * 5L35023B's Audio_CLKB. metadata/chips/clk_5l35023b.yaml: "OTP
+	 * defaults + the Audio_CLKB_OE GPIO... cover normal operation -- no
+	 * [I2C control] master access [needed]" -- an always-on hog is
+	 * sufficient; there is no runtime gating requirement to build a
+	 * driver for. */
+	audio-clkb-oe-hog {
+		gpio-hog;
+		gpios = <RZV2N_GPIO(6, 7) GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "audio_clkb_oe";
+	};
 };
