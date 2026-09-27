@@ -34,15 +34,12 @@ ALP_ENABLE_DEEPX_DXM1 ?= "0"
 # of it -- but an explicit KERNEL_MODULE_AUTOLOAD is the documented,
 # layer-owned way to guarantee both load at boot regardless of udev/
 # initramfs timing on a given image.  `dx-rt` is the userspace DXRT
-# runtime; there is no separate `dx-rt-cli` package at this pin --
-# bench-verified against a real bake of meta-deepx-m1@8d09b25f's
-# dx-rt_3.2.0: its RPM deploy set is only `dx-rt` /
-# `dx-rt-dbg`/`dx-rt-dev`/`dx-rt-src`, and `dxrt-cli` (plus `dxrtd`,
-# `dxtop`, `dxbenchmark`) all ship IN the main `dx-rt` package.
-# Installing a `dx-rt-cli` item here fails the image with "Nothing
-# RPROVIDES dx-rt-cli" -- don't add it back without re-verifying
-# against whatever PREFERRED_VERSION_dx-rt is pinned to below.
-IMAGE_INSTALL:append = "${@' dx-driver dx-rt' if d.getVar('ALP_ENABLE_DEEPX_DXM1') == '1' else ''}"
+# runtime library; at meta-deepx-m1@8d09b25f its recipe splits the tools
+# into a `dx-rt-cli` sub-package (`FILES:${PN}-cli` = dxrt-cli, dxrtd,
+# parse_model, run_model, dxtop, dxbenchmark), so it must be installed
+# explicitly. dx-rt_3.2.0 also builds with -DUSE_ORT=ON and
+# DEPENDS += "libonnxruntime", so the opt-in pulls ONNX Runtime in too.
+IMAGE_INSTALL:append = "${@' dx-driver dx-rt dx-rt-cli' if d.getVar('ALP_ENABLE_DEEPX_DXM1') == '1' else ''}"
 KERNEL_MODULE_AUTOLOAD:append = "${@' dx_dma dxrt_driver' if d.getVar('ALP_ENABLE_DEEPX_DXM1') == '1' else ''}"
 
 # SECURITY: upstream dx-driver ships /etc/udev/rules.d/99-dx-dma.rules

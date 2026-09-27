@@ -79,10 +79,13 @@ Two additional repos are useful but not on the runtime path:
 base BSP plus `meta-deepx-m1` (the real `BBFILE_COLLECTIONS` name of
 DEEPX's official layer), and `conf/machine/include/e1m-v2m-deepx.inc`
 (`require`d from `e1m-v2m101-a55.conf` / `e1m-v2m102-a55.conf` /
-`e1m-v2m103-a55.conf`) appends `dx-driver dx-rt` to `IMAGE_INSTALL`
-when `ALP_ENABLE_DEEPX_DXM1 = "1"`, so opted-in V2N-M1 images ship the
-DEEPX stack (`dxrt-cli` ships inside the `dx-rt` package itself at
-this pin -- there is no separate `dx-rt-cli` recipe).  A
+`e1m-v2m103-a55.conf`) appends `dx-driver dx-rt dx-rt-cli` to
+`IMAGE_INSTALL` when `ALP_ENABLE_DEEPX_DXM1 = "1"`, so opted-in V2N-M1
+images ship the DEEPX stack (the tools, `dxrt-cli` included, are in the
+`dx-rt-cli` sub-package).  At this pin `meta-deepx-m1` also carries
+`dx-stream`, `dx-stream-sample`, `dx-yolo26` and `dx-yolo26-sample`;
+`dx-yolo26` fetches a private DEEPX repository, so keep those recipes
+out of `IMAGE_INSTALL` and `bitbake world` unless you have that access.  A
 `dynamic-layers/meta-deepx-m1/` bbappend also tightens dx-driver's
 udev device-node permissions (world-writable by default upstream) --
 see `meta-alp-sdk/README.md`.  Verified against commit

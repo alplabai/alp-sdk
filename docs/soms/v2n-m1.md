@@ -112,7 +112,7 @@ DX-M1 firmware update, with a V2M103 image carrying `dx-driver` 1.8.0
   rule this layer's `dx-driver_%.bbappend` tightens (see "What's
   different from V2N base" above).
 * `/usr/bin/{dxrt-cli,dxrtd,dxtop,run_model,parse_model,dxbenchmark}`
-  all ship inside the main `dx-rt` package at this pin.
+  come from the `dx-rt-cli` sub-package, which the image installs.
 
 ### Verifying the bring-up
 
@@ -158,8 +158,8 @@ DX-RT 3.x has an optional, CMake-time "service mode"
 than one process can share the DX-M1 concurrently. The `dx-rt_3.2.0`
 recipe this layer pins (`PREFERRED_VERSION_dx-rt = "3.2.0"`, which
 selects `dx-rt_3.2.0.bb`, not the `-1` suffix) builds with
-`USE_SERVICE=OFF` -- upstream's own default, alongside disabling
-`USE_ORT` to avoid an unrelated ONNX Runtime configure failure -- and
+`USE_SERVICE=OFF` -- upstream's own default; the same recipe builds
+with `USE_ORT=ON` and depends on `libonnxruntime` -- and
 does not install a `dxrtd` unit at all. `meta-deepx-m1` also ships a
 `dx-rt_3.2.0-1.bb` variant with `USE_SERVICE=ON`, but its
 systemd/SysVinit wiring (`SYSTEMD_SERVICE`, the `do_install:append`
