@@ -504,6 +504,14 @@
  * (TXD4), P41=f2 (RXD4), P42=f4 (CTS4), P43=f2 (RTS4) -- note CTS4 is
  * NOT the same function number as the other three; do not "correct"
  * it to f2, that was checked against pin_data.c directly.
+ *
+ * Naming frame: renesas-peripheral-map.tsv / pinmux/v2n.yaml name the
+ * same pads BT_UART.RXD=P40, BT_UART.TXD=P41 -- that is the *module's*
+ * (Murata BT core's) own RXD/TXD, i.e. what it receives on / transmits
+ * from. The SoC-side name above (P40=TXD4, P41=RXD4) is the RZ/V2N's
+ * own transmit/receive role on that same pad -- a host TXD wires to a
+ * peripheral's RXD. Same pads, correct crossover, just two different
+ * "whose TXD is this" frames; not a discrepancy.
  */
 &sci4 {
 	pinctrl-0 = <&sci4_bt_pins>;

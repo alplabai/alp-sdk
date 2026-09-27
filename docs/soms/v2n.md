@@ -206,7 +206,8 @@ tracked separately in #2293, not part of this change. The 2026-09-26
 bench results above are the re-run against this node shape.
 BT (raw HCI, manual REG_ON) was bench-confirmed working at 115200 baud
 on `/dev/ttySC4` in 2026-06; the serdev/`shutdown-gpios` path above
-replaces that manual toggle and has not itself been re-run on silicon.
+replaces that manual toggle and was re-run on silicon 2026-09-26
+(E1M-V2M103): `hci0` UP+RUNNING, BD_ADDR read via HCIGETDEVINFO.
 
 ## Bring-up
 
