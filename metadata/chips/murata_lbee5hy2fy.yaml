@@ -41,14 +41,20 @@ bulk_traffic_lines:
 kconfig:
   zephyr:         ALP_SDK_CHIP_MURATA_LBEE5HY2FY
   baremetal:      ALP_SDK_CHIP_MURATA_LBEE5HY2FY
-  yocto:          n/a              # Linux uses the upstream brcmfmac + BlueZ
+  yocto:          "meta-alp-sdk/recipes-kernel/cyw-fmac (out-of-tree brcmfmac backports, the in-tree driver has no CYW55513 ID) + wifi-bt.cfg's CONFIG_BT_HCIUART/CONFIG_BT_BCM (in-tree hci_uart/btbcm, BlueZ userspace)"
 
 families:
   - v2n
   - v2n-m1
 
 verification:
-  hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
+  hil_silicon:    partial          # Bench, E1M-V2M103, 2026-09-26: Wi-Fi scan/
+                                   # WPA2-SAE association + DHCP + TCP throughput,
+                                   # hci0 UP+RUNNING via serdev shutdown-gpios,
+                                   # BT_REG_ON/WL_REG_ON driven via GD32 bridge
+                                   # lines 18/19. RF range/antenna performance on
+                                   # this specific unit is still under investigation
+                                   # (hardware, not this manifest's scope).
   smoke_tests:    null_arg_guard
 
 physical:
