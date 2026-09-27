@@ -1201,8 +1201,9 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 		}
 
 		/*
-		 * Same reasoning as the gain-ceiling clamp below (CONFIG_VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS)
-		 * -- the frame-period-derived ceiling above is sensor-agnostic and normally correct,
+		 * Same reasoning as the gain-ceiling clamp below
+		 * (CONFIG_VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS) -- the frame-period-derived
+		 * ceiling above is sensor-agnostic and normally correct,
 		 * but IMX335's calibration (hal_alif patch 0014's IMX335_AE_EXP_TIME_MAX_US, already
 		 * in the SAME microsecond unit as int_time_max_us here -- no register/dB conversion
 		 * needed, unlike gain) assumes an EXACT 30 fps frame period, this sensor driver's own

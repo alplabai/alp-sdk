@@ -863,13 +863,12 @@ reuse the SAME table. A SEPARATE Kconfig, `VIDEO_ISP_VSI_SNS_GAIN_CTRL_STEP`
 (1 for IMX296, a no-op; 300 for IMX335, matching `IMX335_GAIN_UNIT_MDB`),
 then rounds the pushed control value to the nearest EXACT multiple of the
 sensor's own hardware-register write granularity -- these are two distinct
-facts (a unit-conversion scale vs. the register's real write step) a review
-round caught being conflated in an earlier draft of this comment; without
+facts (a unit-conversion scale vs. the register's real write step); without
 the rounding step, a tenths-of-dB value that is not itself a multiple of 3
 would reach `imx335_set_ctrl()`'s own truncating `ctrl.val / 300` divide and
 silently under-drive gain by up to just under one register count on every
 write. `tests/zephyr/isp_ae_conv` covers the identity case, IMX335's 30.0 dB
-cap, and (a review-round addition) that the rounded control value is an
+cap, and that the rounded control value is an
 exact multiple of 300 for EVERY one of the table's 481 entries, not just
 the ones that already happened to be.
 
