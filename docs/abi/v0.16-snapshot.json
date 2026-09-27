@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-25",
+  "generated": "2026-09-27",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -1391,8 +1391,16 @@
           "value": "0x49u"
         },
         "XEVK_I2C_ADDR_TCAL9538": {
-          "hash": "bd0e087dfca18e44",
-          "value": "0x72u"
+          "hash": "6870b1cc43d6c734",
+          "value": "XEVK_I2C_ADDR_TCAL9538_MAIN"
+        },
+        "XEVK_I2C_ADDR_TCAL9538_MAIN": {
+          "hash": "3895d68b962ad68c",
+          "value": "0x73u"
+        },
+        "XEVK_I2C_ADDR_TCAL9538_PCIE": {
+          "hash": "14537b3d40f72ff4",
+          "value": "0x71u"
         },
         "XEVK_I2C_BUS_DSI_CSI0": {
           "hash": "73f48edc7f8a3a88",

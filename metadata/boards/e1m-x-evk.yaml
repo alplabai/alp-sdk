@@ -282,8 +282,15 @@ i2c_devices:
       doc: "Canonical primary IMU (ICM-42670)." }
   - { macro: XEVK_I2C_ADDR_BMP581, part: bmp581, address: "0x47",
       doc: "BMP581 barometer (SDO->VIO; 0x46 if SDO->GND)." }
-  - { macro: XEVK_I2C_ADDR_TCAL9538, part: tcal9538, address: "0x72",
-      doc: "TCAL9538 I/O expander." }
+  - { macro: XEVK_I2C_ADDR_TCAL9538_MAIN, part: tcal9538, designator: U35, address: "0x73",
+      alias: XEVK_I2C_ADDR_TCAL9538,
+      doc: "U35 main I/O expander, A0 and A1 strapped high. CORRECTED 2026-09 from 0x72,
+            a value never measured on this carrier: the E1M-X EVK V2 straps and a live
+            i2c-0 sweep on an E1M-V2M103 both give 0x73." }
+  - { macro: XEVK_I2C_ADDR_TCAL9538_PCIE, part: tcal9538, designator: U37, address: "0x71",
+      doc: "U37 PCIe I/O expander, A0 high and A1 low. It sits on PCIE0_I2C, which an
+            LSF0102 level shifter joins to E1M_X_I2C0; confirmed by the same i2c-0 sweep.
+            Its P0 drives the PCIe I2C mux select." }
   - { macro: XEVK_I2C_ADDR_EEPROM, part: eeprom_24c128, address: "0x50",
       doc: "Board ID EEPROM (24-series)." }
   - { macro: XEVK_I2C_ADDR_INA236_3V3, part: ina236, designator: U21, address: "0x40",
@@ -295,7 +302,11 @@ i2c_devices:
       calibration: { shunt_macro: XEVK_INA236_SHUNT_1V8_OHMS, shunt_ohms: "0.020",
                      max_macro: XEVK_INA236_MAX_1V8_A, max_current_a: "4.0" } }
   - { macro: XEVK_I2C_ADDR_INA236_VCAM2, part: ina236, designator: U32, address: "0x48",
-      doc: "U32 INA236B, +VCAM2 rail (50 mOhm shunt, 1.6 A max). A0 = GND.",
+      doc: "U32 INA236B, +VCAM2 rail (50 mOhm shunt, 1.6 A max). A0 = GND.
+            DESIGN CONFLICT on E1M-X EVK V2: 0x48 is also the TAS2563 broadcast
+            address on this bus, and TAS2563 page-select writes to reg 0x00 land
+            in this part's CONFIG register. U32 is removed on the current build
+            batch; a re-strap to 0x4A/0x4B is planned for the next carrier rev.",
       calibration: { shunt_macro: XEVK_INA236_SHUNT_VCAM2_OHMS, shunt_ohms: "0.050",
                      max_macro: XEVK_INA236_MAX_VCAM2_A, max_current_a: "1.6" } }
   - { macro: XEVK_I2C_ADDR_INA236_VCAM3, part: ina236, designator: U34, address: "0x49",
