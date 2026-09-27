@@ -419,7 +419,20 @@
  * be the module's 32.768 kHz LPO (from the on-module 5L35023B clock
  * generator), not anything IOVS/pinctrl/strap-side; see #2293 for that
  * fix (owned there, NOT touched here). This node assumes that fix
- * lands; SDIO enumeration itself has not been re-run against it.
+ * lands.
+ *
+ * sd-uhs-sdr50: sdhi2_vqmmc below is a FIXED 1.8 V regulator (min ==
+ * max == 1800000), so no voltage switching is involved in reaching UHS
+ * here -- the pads are 1.8 V-only from power-up, unlike a card slot
+ * that starts at 3.3 V and CMD11-switches. Without this property
+ * mmc_sdio_init_uhs_card() (drivers/mmc/core/sdio.c) never tries
+ * anything past the legacy "sd high-speed" mode; bench-verified
+ * (E1M-V2M103, 2026-09-26): without it mmc2 negotiated "sd
+ * high-speed" at 50 MHz, 4-bit. With it, "sd uhs SDR50" at 100 MHz,
+ * 4-bit, no errors. sd-uhs-sdr104 is deliberately NOT set: this node
+ * is non-removable (soldered-down, not a card slot to fall back to on
+ * a bad tuning) and only SDR50 has been bench-verified -- untested
+ * 208 MHz tuning risks taking SDIO down on some unit.
  */
 &sdhi2 {
 	#address-cells = <1>;
@@ -440,6 +453,7 @@
 	non-removable;
 	cap-power-off-card;
 	keep-power-in-suspend;
+	sd-uhs-sdr50;
 	status = "okay";
 
 	sdhi2_vqmmc: vqmmc-regulator {
@@ -449,9 +463,17 @@
 		status = "okay";
 	};
 
+	/* brcm,ccode-map-trivial: without it brcmfmac has no cfg80211
+	 * country->firmware country-code map for this module and silently
+	 * drops the reg_notifier() country (e.g. "DE" from the
+	 * wireless-regdb-static-backed `iw reg set`) -- the firmware never
+	 * sees it. The trivial map (ISO code -> the same two ASCII bytes,
+	 * revision 0) is enough for this module; bench-verified working on
+	 * kernel 6.1.141-cip43 (E1M-V2M103, 2026-09-26). */
 	wifi@1 {
 		compatible = "brcm,bcm4329-fmac";
 		reg = <1>;
+		brcm,ccode-map-trivial;
 	};
 };
 

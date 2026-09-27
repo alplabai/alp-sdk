@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * aen-isp-ov5647-capture overlay for the E1M-AEN801 (Ensemble E8, M55-HE)
+ * aen-isp-capture overlay for the E1M-AEN803 (Ensemble E8, M55-HE)
  * RAM-run: stage 3 of the ISP-Pico bring-up, a REAL sensor frame through
  * the ISP.
  *

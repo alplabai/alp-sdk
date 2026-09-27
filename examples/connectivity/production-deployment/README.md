@@ -81,15 +81,17 @@ security:
   psa:
     persistent_slots: 32
     its_storage:      mram_main
-    ps_storage:       ospi0
+    ps_storage:       mram_main
     tfm:              true
     attestation_root: optiga_trust_m
 ```
 
 `tfm: true` lands TF-M's secure-partition image as a sysbuild
-child build. Internal Trusted Storage (PSA persistent keys) backs
-to the secure half of MRAM; Protected Storage (encrypted-at-rest
-app credentials) backs to the on-module OSPI. The attestation
+child build. Internal Trusted Storage (PSA persistent keys) and
+Protected Storage (encrypted-at-rest app credentials) both back
+to on-die MRAM: E1M-AEN801 has no OSPI flash fitted (`ospi0`/
+`ospi1` are both `assembled: false` in its SoM preset), so
+`ps_storage` cannot point at `ospi0` on this SKU. The attestation
 root is the OPTIGA Trust M -- single trust root with boot + OTA,
 fewer surfaces for an attacker to chip away at.
 

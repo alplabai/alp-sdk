@@ -21,12 +21,13 @@ under the published tree (`scripts/validate_metadata.py` refuses any
 
 ## Blockers — read this before you spend bench time
 
-Two open questions gate the *data*, not the contract landed here.
-None is solved by this doc; each is called out so a capture session
-doesn't discover it mid-bench. (A third blocker, the lack of a
+One open question gates the *data*, not the contract landed here.
+It is not solved by this doc; it's called out so a capture session
+doesn't discover it mid-bench. (A second former blocker, the lack of a
 latency accessor, used to be listed here; it closed when
 `alp_inference_last_invoke_latency_us()` landed in #1541 — see the
-Recipe's step 4 below for how a capture uses it.)
+Recipe's step 4 below for how a capture uses it. A third, the
+const-region question, is now settled — see below, not a blocker.)
 
 1. **The vela profile question.** `vela` picks its OWN built-in
    default system/memory profile (`Ethos_U85_SYS_DRAM_Mid` /
@@ -38,13 +39,39 @@ Recipe's step 4 below for how a capture uses it.)
    actually compile under is not decided yet. Do not invent one;
    capture whichever profile is in use once this is resolved, and
    record it verbatim in `vela.system_config` / `vela.memory_mode`.
-2. **The const-region question.** `perf.req_sram_kib` today counts
-   the compiled activation arena alone (the same accounting as the
-   `.alpmodel` manifest's `Target.requires.sram_kib`) — it does not
-   yet account for the model's const/weight region on backends where
-   that region is SRAM- rather than MRAM/flash-resident. A bench point
-   captured before this is resolved is recording a real number, just
-   not the whole SRAM picture; note that in `capture.notes`.
+
+   A vendor-tuned `System_Config` (e.g. Alif's `ensemble_vela.ini`,
+   named per SoC by `npu_toolchain.vela.vendor_config_filename`) is
+   proprietary and alp-sdk does not redistribute it. A capture run
+   on one points `scripts/alp_model/build.py`'s `.alpmodel` pipeline
+   at it via the `ALP_VELA_CONFIG` environment variable -- never a
+   `board.yaml` field, since where the file lives on a bench host is
+   not a fact about the silicon.
+
+   **`ALP_VELA_CONFIG` is inert today.** It only takes effect once a
+   SoC spec's `npu_toolchain.vela` names a `system_config` with
+   `system_config_requires_vendor_config: true`
+   (`metadata/schemas/soc-spec-v1.schema.json`) -- `scripts/alp_project_loader.py`'s
+   `_soc_targets()` is what routes a named `system_config` into the
+   vendor-gated field this env var feeds. No shipped `metadata/socs/**`
+   spec names a `system_config` at all yet, so setting this variable
+   changes nothing for any part in metadata/ today. AEN example builds
+   configure the same vendor `.ini` a different way, via the CMake
+   `AEN_NPU_VELA_CONFIG` variable
+   (`examples/aen/aen-npu-inference/README.md`), not this env var.
+
+**The const-region question (settled, tan-cli#1011).**
+`perf.req_sram_kib` is **arena-only, by design** — vela's
+`sram_memory_used` column, the same accounting as the `.alpmodel`
+manifest's `Target.requires.sram_kib` and the on-device selector's
+comparison in `src/backends/inference/alp_model_select.c`. The
+const/weight region (vela's `on_chip_flash_memory_used`) is **never**
+summed into it: it is carried in the model blob itself, and its size
+is the blob's own byte length (`blob_len`), provisioned by the
+integrator per `vela_memory_mode` placement — not a figure this
+pipeline re-derives. This is the same contract as tan-cli's `_footprint()`
+(tan-cli#1011, `python/tan/model/adapters/ethos_u.py`), not a line-for-line
+port, and the SRAM-port pinning in `src/backends/inference/ethos_u_aen.cpp`.
 
 ## What a point is keyed on
 
@@ -177,8 +204,7 @@ different measurements and get two different files; see
    `operator`, `bench_id` (the physical rig, identified by module SKU +
    serial, e.g. `E1M-AEN801/2026W36-0003`),
    and `notes` for anything a reader trusting the number should know
-   (thermal state, firmware build, the const-region caveat from
-   blocker 2).
+   (thermal state, firmware build).
 6. **Compute the filename** by content-hashing the identity fields —
    `scripts/validate_metadata.py`'s `_model_perf_identity_hash()` is
    the single source of that recipe; do not hand-invent a filename.
