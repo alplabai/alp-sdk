@@ -905,15 +905,22 @@ IMX335 caller requesting any size other than the shield's own cropped
 
 **Frame rate**: `src/backends/camera/alif_isp_pico.c`'s `cfg->fps` request
 (the portable `<alp/camera.h>` `fps` field) now reaches whichever real sensor
-is wired behind the ISP -- OV5647, IMX296, or IMX335 -- generically, by
-walking the same upstream `video_device` chain (`isp` -> `cam` -> `csi` ->
-sensor, each hop's `.src_dev` registered by that driver's own
-`VIDEO_DEVICE_DEFINE()`) that `isp_pico.c`'s own AE code already relies on,
-instead of a hardcoded `DEVICE_DT_GET(DT_NODELABEL(ov5647))` (issue #2338,
-fixed). A sensor whose own `set_frmival()` can't actually change the rate
-(IMX296's all-pixel-scan mode has exactly one fixed 60.3 frame/s -- see
-`imx296_set_frmival()`, which always reports that fixed rate back rather
-than erroring) or that returns `-ENOSYS`/`-ENOTSUP` outright just keeps
+is wired behind the ISP -- OV5647, IMX296, or IMX335 -- generically, with one
+`video_set_frmival(dev, ...)` call on the ISP device itself, instead of a
+hardcoded `DEVICE_DT_GET(DT_NODELABEL(ov5647))` (issue #2338, fixed).
+`isp_pico.c` gained `.get_frmival`/`.set_frmival` forwarding to
+`config->controller`, `video_alif.c`'s `alif_cam_set_frmival()` forwards to
+its endpoint (matching its existing `alif_cam_get_frmival()`), and
+`video_csi_dw.c`'s `csi2_dw_set_frmival()` forwards to the same
+`config->sensor[data->current_sensor]` its own `.get_frmival` already reads
+-- so calling `video_set_frmival()` on the ISP walks the whole
+isp -> cam -> csi -> sensor chain through those forwarders and lands on
+whichever real sensor is wired, and a 2-sensor CSI node's AE (which reads the
+rate back through `.get_frmival`) sees the rate this sets. A sensor whose own
+`set_frmival()` can't actually change the rate (IMX296's all-pixel-scan mode
+has exactly one fixed 60.3 frame/s -- see `imx296_set_frmival()`, which
+always reports that fixed rate back rather than erroring) or that returns
+`-ENOSYS`/`-ENOTSUP` outright (e.g. TPG mode, no controller wired) just keeps
 running at its existing rate; that is logged, not treated as a failure.
 
 This closed a real gap for IMX335 specifically: `examples/connectivity/

@@ -2655,6 +2655,51 @@ static int isp_set_signal(const struct device *dev,
 #endif /* CONFIG_POLL */
 
 /*
+ * Issue #2338: forward frmival get/set to `controller` -- the same device
+ * isp_apply_ae() (above) already reads video_get_frmival() from directly,
+ * bypassing this vtable. Registering these here lets an app-level caller
+ * (src/backends/camera/alif_isp_pico.c) reach the real sensor's frame rate
+ * with one video_set_frmival(isp_dev, ...) call instead of reimplementing
+ * the isp -> cam -> csi -> sensor forwarding chain itself: each of those
+ * drivers' own .get_frmival/.set_frmival (video_alif.c's
+ * alif_cam_get/set_frmival, video_csi_dw.c's csi2_dw_get/set_frmival) already
+ * forwards one hop further upstream, so calling this on the ISP walks the
+ * whole chain automatically. TPG-only builds have no controller wired
+ * (config->controller == NULL, no camera port@0) -- nothing to forward to,
+ * so both return -ENOSYS, matching what video_set_frmival()/video_get_frmival()
+ * document for "API not implemented" rather than -EINVAL from a NULL dev.
+ */
+static int isp_get_frmival(const struct device *dev, struct video_frmival *frmival)
+{
+	const struct isp_config *config = dev->config;
+
+	if (!frmival) {
+		return -EINVAL;
+	}
+
+	if (!config->controller) {
+		return -ENOSYS;
+	}
+
+	return video_get_frmival(config->controller, frmival);
+}
+
+static int isp_set_frmival(const struct device *dev, struct video_frmival *frmival)
+{
+	const struct isp_config *config = dev->config;
+
+	if (!frmival) {
+		return -EINVAL;
+	}
+
+	if (!config->controller) {
+		return -ENOSYS;
+	}
+
+	return video_set_frmival(config->controller, frmival);
+}
+
+/*
  * v4.4 video-API shim (Alp Lab AB): the fork's value-pointer ctrl API
  * (set_ctrl/get_ctrl taking `unsigned int cid, void *value`) is gone.  The ISP
  * exposed two PRIVATE CIDs by reading/writing the caller's `void *value`:
@@ -2678,6 +2723,8 @@ static int isp_set_signal(const struct device *dev,
 static DEVICE_API(video, isp_driver_api) = {
 	.set_format = isp_set_fmt,
 	.get_format = isp_get_fmt,
+	.get_frmival = isp_get_frmival,
+	.set_frmival = isp_set_frmival,
 	.set_stream = isp_set_stream,
 	.get_caps = isp_get_caps,
 	.flush = isp_flush,
