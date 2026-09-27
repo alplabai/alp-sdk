@@ -71,7 +71,14 @@ SRC_URI:append = " \
     file://0004-drm-panel-add-himax-hx8394-with-rocktech-rk055hdmipi.patch \
     file://0005-gpio-add-gd32-bridge-expander-driver.patch \
     file://0006-input-goodix-fall-back-to-polling-without-an-irq.patch \
+    file://0010-mmc-renesas_sdhi-bounce-multi-segment-requests-in-internal-dmac.patch \
 "
+
+# 0010 (SDHI internal-DMAC bounce buffer, #2357): the DMAC takes one
+# contiguous buffer per request and the RZ/V2N SDHI has no IOMMU, so every
+# page-cache write reached the card as a separate 4 KiB command (microSD
+# ~2.7 MB/s, and SDR104 writes hung on "Card stuck being busy!"). The patch
+# copies multi-segment requests through a 256 KiB coherent buffer per host.
 
 # AMP clock ownership: RSCI7 belongs to the Cortex-M33 system manager
 # (GD32 supervisor SPI link).  Without this patch, Linux's

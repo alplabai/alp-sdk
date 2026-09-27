@@ -1,0 +1,142 @@
+From: Alp Lab AB
+Subject: [PATCH] mmc: renesas_sdhi: bounce multi-segment requests on the internal DMAC
+
+The SDHI internal DMAC takes one contiguous buffer per request, so the
+driver advertises max_segs = 1. Without an IOMMU (the RZ/V2N SDHI has
+none) page-cache pages are not physically contiguous, and every request
+reaches the card as a single 4 KiB command: on an E1M-V2M103 /
+E1M-X EVK the microSD wrote at ~2.7 MB/s in HS/SDR50 and hung in
+SDR104 ('Card stuck being busy!') while reads ran at ~85 MB/s.
+
+Allocate one 256 KiB coherent buffer per host, advertise 64 segments,
+and copy multi-segment requests through it (to it before a write, back
+from it after a read). Single-segment requests keep the zero-copy
+dma_map_sg() path. When the buffer cannot be allocated the host keeps
+max_segs = 1, as before.
+
+Upstream-Status: Pending
+Signed-off-by: Alp Lab AB
+---
+diff -ru a/drivers/mmc/host/renesas_sdhi.h b/drivers/mmc/host/renesas_sdhi.h
+--- a/drivers/mmc/host/renesas_sdhi.h
++++ b/drivers/mmc/host/renesas_sdhi.h
+@@ -63,6 +63,9 @@
+ 
+ struct renesas_sdhi_dma {
+ 	unsigned long end_flags;
++	void *bounce_buf;		/* contiguous copy for multi-segment requests */
++	dma_addr_t bounce_dma;
++	bool bounce_active;		/* the current request goes through bounce_buf */
+ 	enum dma_slave_buswidth dma_buswidth;
+ 	dma_filter_fn filter;
+ 	void (*enable)(struct tmio_mmc_host *host, bool enable);
+diff -ru a/drivers/mmc/host/renesas_sdhi_internal_dmac.c b/drivers/mmc/host/renesas_sdhi_internal_dmac.c
+--- a/drivers/mmc/host/renesas_sdhi_internal_dmac.c
++++ b/drivers/mmc/host/renesas_sdhi_internal_dmac.c
+@@ -18,6 +18,7 @@
+ #include <linux/of_device.h>
+ #include <linux/pagemap.h>
+ #include <linux/scatterlist.h>
++#include <linux/sizes.h>
+ #include <linux/sys_soc.h>
+ 
+ #include "renesas_sdhi.h"
+@@ -71,6 +72,15 @@
+  */
+ 
+ static unsigned long global_flags;
++
++/*
++ * This DMAC takes a single contiguous buffer per request (max_segs = 1), so
++ * without an IOMMU every page-cache request reaches the card as one 4 KiB
++ * command -- the slowest way to write an SD card. Requests that span several
++ * segments are copied through one coherent buffer instead, so the block layer
++ * may build requests of up to SDHI_BOUNCE_SIZE.
++ */
++#define SDHI_BOUNCE_SIZE		SZ_256K
+ /*
+  * Workaround for avoiding to use RX DMAC by multiple channels.
+  * On R-Car H3 ES1.* and M3-W ES1.0, when multiple SDHI channels use
+@@ -373,8 +383,18 @@
+ 						 (data->host_cookie == cookie);
+ 
+ 	if (unmap) {
+-		dma_unmap_sg(&host->pdev->dev, data->sg, data->sg_len,
+-			     mmc_get_dma_dir(data));
++		struct renesas_sdhi_dma *dma_priv = &host_to_priv(host)->dma_priv;
++
++		if (dma_priv->bounce_active) {
++			if (data->flags & MMC_DATA_READ)
++				sg_copy_from_buffer(data->sg, data->sg_len,
++						    dma_priv->bounce_buf,
++						    data->blksz * data->blocks);
++			dma_priv->bounce_active = false;
++		} else {
++			dma_unmap_sg(&host->pdev->dev, data->sg, data->sg_len,
++				     mmc_get_dma_dir(data));
++		}
+ 		data->host_cookie = COOKIE_UNMAPPED;
+ 	}
+ }
+@@ -384,9 +404,26 @@
+ 			       struct mmc_data *data,
+ 			       enum renesas_sdhi_dma_cookie cookie)
+ {
++	struct renesas_sdhi_dma *dma_priv = &host_to_priv(host)->dma_priv;
++
+ 	if (data->host_cookie == COOKIE_PRE_MAPPED)
+ 		return true;
+ 
++	if (data->sg_len > 1) {
++		size_t len = data->blksz * data->blocks;
++
++		/* bounced at start_dma time only: one buffer per host */
++		if (cookie == COOKIE_PRE_MAPPED || !dma_priv->bounce_buf ||
++		    len > SDHI_BOUNCE_SIZE)
++			return false;
++		if (!(data->flags & MMC_DATA_READ))
++			sg_copy_to_buffer(data->sg, data->sg_len,
++					  dma_priv->bounce_buf, len);
++		dma_priv->bounce_active = true;
++		data->host_cookie = cookie;
++		return true;
++	}
++
+ 	if (!dma_map_sg(&host->pdev->dev, data->sg, data->sg_len,
+ 			    mmc_get_dma_dir(data)))
+ 		return false;
+@@ -430,7 +467,8 @@
+ 
+ 	/* set dma parameters */
+ 	writel(dtran_mode, host->ctl + DM_CM_DTRAN_MODE);
+-	writel(sg_dma_address(sg), host->ctl + DM_DTRAN_ADDR);
++	writel(priv->dma_priv.bounce_active ? priv->dma_priv.bounce_dma :
++	       sg_dma_address(sg), host->ctl + DM_DTRAN_ADDR);
+ 
+ 	host->dma_on = true;
+ 
+@@ -557,6 +595,24 @@
+ 	/* Add pre_req and post_req */
+ 	host->ops.pre_req = renesas_sdhi_internal_dmac_pre_req;
+ 	host->ops.post_req = renesas_sdhi_internal_dmac_post_req;
++
++	/* Runs before mmc_add_host(), so the block queue sees these limits. */
++	if (host->mmc->max_segs == 1) {
++		priv->dma_priv.bounce_buf =
++			dmam_alloc_coherent(&host->pdev->dev, SDHI_BOUNCE_SIZE,
++					    &priv->dma_priv.bounce_dma, GFP_KERNEL);
++		if (priv->dma_priv.bounce_buf) {
++			host->mmc->max_segs = SDHI_BOUNCE_SIZE / PAGE_SIZE;
++			host->mmc->max_req_size = min_t(unsigned int,
++							host->mmc->max_req_size,
++							SDHI_BOUNCE_SIZE);
++			host->mmc->max_blk_count = min_t(unsigned int,
++							 host->mmc->max_blk_count,
++							 SDHI_BOUNCE_SIZE /
++							 host->mmc->max_blk_size);
++			host->mmc->max_seg_size = host->mmc->max_req_size;
++		}
++	}
+ }
+ 
+ static void
