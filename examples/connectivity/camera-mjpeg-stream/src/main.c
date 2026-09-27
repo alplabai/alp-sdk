@@ -45,6 +45,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <zephyr/devicetree.h>
 #include <zephyr/kernel.h>
 #include <zephyr/net/net_if.h>
 #include <zephyr/net/net_mgmt.h>
@@ -83,9 +84,28 @@
  * to 30 fps would also need a fresh bench pass (encode time, send-path
  * bandwidth) not done yet. */
 #if defined(CONFIG_CAMERA_MJPEG_STREAM_1280X960)
-#define FRAME_W   1280
-#define FRAME_H   960
+#define FRAME_W 1280
+#define FRAME_H 960
+/*
+ * Issue #2327 Stage B reviewer follow-up: IMX335's hal_alif AE envelope (imx335_ae_envelope.h,
+ * patch 0014) is calibrated against this sensor's EXACT 30 fps mode (upstream imx335.c's
+ * IMX335_30_FPS case, HMAX 0x0226) -- IMX335_AE_EXP_TIME_MAX_US is derived from fullLines *
+ * fps_x10 assuming that exact HMAX/line-time. Requesting 15 fps here the way OV5647/IMX296 do
+ * would NOT give 15 fps: imx335.c only supports {25, 30, 50, 60} fps
+ * (imx335_framerates[]/IMX335_{25,30,50,60}_FPS) and video_closest_frmival() picks the nearest
+ * available rate to whatever is requested -- 15 rounds to 25 (|25-15|=10 < |30-15|=15), landing
+ * on a DIFFERENT HMAX (0x0280 in binned mode) the 30 fps envelope was never calibrated against.
+ * Requesting 30 explicitly gets an EXACT match instead (HMAX 0x0226), keeping the running sensor
+ * state consistent with the AE envelope's own assumptions. Bench run 333 (E1M-AEN803
+ * 2026W36-0001) measured fps=30 in the app's own once-a-second stats line under the code as it
+ * existed before this fix (which still requested 15) -- this explicit request removes the
+ * ambiguity of relying on that rounding behaviour rather than stating the intended rate.
+ */
+#if DT_HAS_COMPAT_STATUS_OKAY(sony_imx335)
+#define FRAME_FPS 30
+#else
 #define FRAME_FPS 15
+#endif
 /*
  * Starting quality for this resolution -- bench run 242 (issue #2286):
  * quality 80 (the 640x480 default below) blew MJPEG_HTTP_MAX_JPEG

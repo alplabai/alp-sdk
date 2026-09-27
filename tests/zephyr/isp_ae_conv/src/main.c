@@ -125,9 +125,10 @@ ZTEST(isp_ae_conv, test_db_tenths_ctrl_identity_matches_imx296)
 	}
 	uint32_t lib = isp_sns_gain_db_tenths_to_lib(240);
 
-	zassert_equal(isp_sns_gain_lib_to_db_tenths_ctrl(lib, 1),
+	zassert_equal(isp_sns_gain_lib_to_db_tenths_ctrl(lib, 1, 1),
 	              isp_sns_gain_lib_to_db_tenths(lib),
-	              "ctrl_per_db_tenth=1 must match the plain db_tenths reverse conversion");
+	              "ctrl_per_db_tenth=1, ctrl_step=1 must match the plain db_tenths reverse "
+	              "conversion (both no-ops)");
 }
 
 /* IMX335's 30.0 dB analog-gain cap (imx335_ae_envelope.h's IMX335_AE_MAX_AGAIN = 32382, hal_alif
@@ -141,14 +142,36 @@ ZTEST(isp_ae_conv, test_db_tenths_ctrl_imx335_30db_cap)
 	zassert_equal(isp_sns_gain_db_tenths_ctrl_to_lib(30000, 100),
 	              32382,
 	              "IMX335 30.0 dB cap (30000 mdB) must land on isp_gain_db_tenths_table[300]");
-	zassert_equal(isp_sns_gain_lib_to_db_tenths_ctrl(32382, 100),
+	zassert_equal(isp_sns_gain_lib_to_db_tenths_ctrl(32382, 100, 300),
 	              30000,
-	              "reverse: library units for 30.0 dB must land on 30000 mdB");
+	              "reverse: library units for 30.0 dB must land on 30000 mdB, already an exact "
+	              "multiple of the IMX335_GAIN_UNIT_MDB=300 register step");
+}
+
+/*
+ * #2327 Stage B reviewer follow-up: isp_sns_gain_lib_to_db_tenths_ctrl()'s ctrl_step rounding
+ * must land on an EXACT multiple of 300 (IMX335_GAIN_UNIT_MDB) for EVERY table entry, not just
+ * the ones that already happen to be -- a naive tenths*ctrl_per_db_tenth scale-up (no rounding)
+ * would produce a non-multiple-of-300 value whenever tenths is not itself a multiple of 3, which
+ * imx335_set_ctrl()'s own truncating `ctrl.val / 300` divide would then silently under-drive.
+ */
+ZTEST(isp_ae_conv, test_db_tenths_ctrl_imx335_step_always_multiple_of_300)
+{
+	for (uint32_t reg = 0; reg <= 480; reg++) {
+		uint32_t lib = isp_sns_gain_db_tenths_to_lib(reg);
+		uint32_t ctrl = isp_sns_gain_lib_to_db_tenths_ctrl(lib, 100, 300);
+
+		zassert_true((ctrl % 300U) == 0U,
+		             "table[%u] -> ctrl=%u is not an exact multiple of the 300 mdB "
+		             "register step",
+		             reg,
+		             ctrl);
+	}
 }
 
 /* 0 dB (0 mdB) is still unity at any ctrl_per_db_tenth scale. */
 ZTEST(isp_ae_conv, test_db_tenths_ctrl_0db_is_unity)
 {
 	zassert_equal(isp_sns_gain_db_tenths_ctrl_to_lib(0, 100), ISP_SNS_GAIN_LIB_UNITY, NULL);
-	zassert_equal(isp_sns_gain_lib_to_db_tenths_ctrl(ISP_SNS_GAIN_LIB_UNITY, 100), 0, NULL);
+	zassert_equal(isp_sns_gain_lib_to_db_tenths_ctrl(ISP_SNS_GAIN_LIB_UNITY, 100, 300), 0, NULL);
 }

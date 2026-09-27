@@ -82,21 +82,44 @@ notes: |
   stock, non-reworked carrier (the J5 pin-11 rework is a module-enable
   concern, unrelated to D-PHY lock -- see the CAM_EN note above); D-PHY
   lock on any unit/carrier other than E1M-AEN803 2026W36-0001 on this
-  specific E1M-EVK; ISP/AE/colour (see Stage B below, itself unbenched);
-  and the sensor's full-resolution (non-binned) mode.
+  specific E1M-EVK; ISP/AE/colour AT THE TIME OF STAGE A (see Stage B
+  below, now bench-verified for ISP/AE); and the sensor's full-resolution
+  (non-binned) mode, still unverified.
 
-  Issue #2327 Stage B (BUILD-ONLY, no bench run backs this section): the
-  2x2-binned frame now also reaches the ISP-Pico with AE, through
-  hal_alif patch 0014 (drivers/isp/isp_wrapper/inc/imx335_ae_envelope.h,
+  Issue #2327 Stage B, bench-verified runs 332/333 (E1M-AEN803
+  2026W36-0001): the 2x2-binned frame now also reaches the ISP-Pico with
+  AE, through hal_alif patch 0014
+  (drivers/isp/isp_wrapper/inc/imx335_ae_envelope.h,
   CONFIG_VIDEO_ISP_VSI_CALIB_IMX335) -- sourced from upstream imx335.c's
   own VMAX/SHR0-min constants plus one public Sony datasheet-flyer figure
   (30 dB analog-gain ceiling; above that this sensor's single GAIN
-  register, 0x30e8, is digital). The ISP's own crop (crop-x0/crop-y0 = 8/6)
-  reduces the 1296x972 native frame to 1280x960 for
+  register, 0x30e8, is digital). The ISP's own crop (&isp's crop-x0/
+  crop-y0 = 8/6, in the innomaker_cam_imx335 shield's own overlay) reduces
+  the 1296x972 native frame to 1280x960 for
   examples/connectivity/camera-mjpeg-stream, reusing that example's
   existing 1280x960 buffer budget. AWB/CCM are NOT calibrated for this
-  sensor -- falls through to the stock ARX3A0 defaults. See
-  changelog.d/2327.md's Stage B section.
+  sensor -- falls through to the stock ARX3A0 defaults.
+
+  Run 332 (aen-isp-capture, AE-on scenario): 60 frames, AE converged
+  (ae_stable=1 at frame 50, Y mean 152), ISP output YUV420 1280x960 via
+  the crop above, scene complete/straight/centred -- the first silicon
+  confirmation of the ISP crop's left/top offsets working correctly.
+  Green cast with AWB off (expected, no colour calibration exists). Run
+  333 (camera-mjpeg-stream, aen_imx335 scenario): 1280x960, app stats
+  fps=30 fail=0 retry=0, one HTTP client 29.99 fps / 772.7 KB/s over
+  30 s, ~26.3 KB JPEGs, mild lavender/cyan cast (stock AWB). Only
+  error-class log line across both runs: one FRAME_SEQ event at stream
+  start.
+
+  NOT bench-verified by runs 332/333: colour/AWB/CCM accuracy (no
+  calibration exists); the frame rate AT THE SENSOR itself (only the
+  app-level fps stats are confirmed, not a sensor-side register or scope
+  measurement -- run 333 also measured its fps=30 stat under a since-fixed
+  15 fps request that happened to round-trip to a reported 30, not the
+  now-explicit 30 fps request); AE behaviour in lighting other than these
+  runs' own scene; and the AE-off aen-isp-capture scenario, never
+  bench-run. See changelog.d/2327.md's Stage B section and
+  docs/camera-shields.md's own Stage B section for the full mechanism.
 
 bus:              i2c
 i2c:
@@ -125,9 +148,12 @@ families:
 verification:
   hil_silicon:    partial           # Bench-verified: 2x2-binned 1296x972 RAW10 raw capture
                                      # through <alp/camera.h>, 6/6 consecutive clean frames, 0
-                                     # CSI/IPI errors (bench runs 316-331) -- STILL partial, not
-                                     # full: frame rate/fps, ISP/AE/colour, and full-resolution
-                                     # mode all remain unverified, see notes above.
+                                     # CSI/IPI errors (bench runs 316-331); ISP-Pico + AE +
+                                     # camera-mjpeg-stream ALSO bench-verified (runs 332/333) --
+                                     # STILL partial, not full: colour/AWB/CCM, frame rate AT
+                                     # THE SENSOR, AE in varied lighting, and the sensor's
+                                     # full-resolution mode all remain unverified, see notes
+                                     # above.
   smoke_tests:    none               # no chips/ portable driver surface exists to unit-test; see
                                      # docs/camera-shields.md's "Build coverage" section for this
                                      # sensor's Zephyr-level coverage decision (why no

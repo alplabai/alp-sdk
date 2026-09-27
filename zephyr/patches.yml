@@ -886,19 +886,40 @@ patches:
       writeback already dispatches through isp_sns_gain_ctrl_from_lib()/
       isp_sns_exposure_ctrl_from_lines() (alp-sdk's zephyr/drivers/video/
       isp_pico.c, patch 0013's mechanism) on
-      CONFIG_VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS. IMX335's GAIN register is
-      0.3 dB/count, not IMX296's 0.1 dB/count, so the alp-sdk side (this
-      patch does not touch alp-sdk files) extends isp_sns_gain_conv.h with
-      a dB-STEP variant that reuses the SAME 0.1-dB-tenths lookup table by
-      scaling the register value by its own tenths-per-count instead of
-      building a second 481-entry table -- see that header's own comment.
+      CONFIG_VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS. Unlike IMX296 (whose
+      VIDEO_CID_ANALOGUE_GAIN control IS its raw 0.1 dB/count GAIN
+      register value directly), IMX335's upstream driver pre-scales its
+      own 0.3 dB/count register to MILLI-dB before exposing it as the
+      control (0..72000 mdB, IMX335_GAIN_UNIT_MDB = 300) -- so the alp-sdk
+      side (this patch does not touch alp-sdk files) extends
+      isp_sns_gain_conv.h with a control-SCALE parameter
+      (VIDEO_ISP_VSI_SNS_GAIN_CTRL_PER_DB_TENTH: 100 for IMX335, 100 mdB =
+      1 tenth of a dB) that reuses the SAME 0.1-dB-tenths lookup table by
+      dividing/multiplying the control value, plus a SEPARATE
+      control-STEP parameter (VIDEO_ISP_VSI_SNS_GAIN_CTRL_STEP: 300,
+      matching IMX335_GAIN_UNIT_MDB) that rounds the pushed value to the
+      nearest exact multiple of the sensor's own hardware-register write
+      granularity -- without that second rounding step, a tenths-of-dB
+      value that is not itself a multiple of 3 would reach
+      imx335_set_ctrl()'s own truncating divide and silently under-drive
+      gain by up to just under one register count. See
+      isp_sns_gain_conv.h's own comment for the full derivation; both
+      Kconfig defaults are 1 (no-ops) for every non-IMX335 sensor,
+      including IMX296.
 
-      UNBENCHED (issue #2327 Stage B is build-only): every figure above is
-      either an upstream driver constant or a public datasheet-flyer
-      number, not a bench-derived one the way patch 0013's IMX296 figures
-      are (that patch's own bench runs 304/306/312/313 do not exist for
-      IMX335). Board/sensor-specific by construction (same status as patch
-      0005/0013), not upstreamable as-is.
+      Bench-verified, runs 332/333 (E1M-AEN803 2026W36-0001): AE converges
+      (aen-isp-capture, ae_stable=1 at frame 50), the ISP crop lands
+      correctly on 1280x960 (the first silicon confirmation of
+      out_form_rect's left/top offsets), and camera-mjpeg-stream streams
+      at an app-reported 30 fps / 772.7 KB/s. Every FIGURE this envelope
+      uses (fullLines, maxIntLine, the 30 dB gain cap) remains an upstream
+      driver constant or a public datasheet-flyer number, not independently
+      bench-derived the way patch 0013's IMX296 figures are (that patch's
+      own bench runs 304/306/312/313 do not exist for IMX335) -- the bench
+      runs above confirm the MECHANISM works, not that these specific
+      figures are the sensor's true envelope. Board/sensor-specific by
+      construction (same status as patch 0005/0013), not upstreamable
+      as-is.
   - path: zephyr/0003-kconfig-serialize-missing-deps.patch
     sha256sum: 873ed5171298271804ba89cba22fd2c286fdb749cec2856a7ea7c2e1d7c3c7c5
     module: zephyr

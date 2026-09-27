@@ -103,7 +103,8 @@
  * native 1296x972 2x2-binned SRGGB10P output, ISP-CROPPED down to 1280x960 -- unlike IMX296's ROI
  * crop (which happens IN the sensor, so its ISP input already matches its 1280x960 output),
  * IMX335 has no in-sensor crop this driver uses, so the ISP itself crops 8 px off each side and 6
- * off top/bottom (boards/imx335-isp-crop.overlay's &isp crop-x0/crop-y0) -- see
+ * off top/bottom (innomaker_cam_imx335.overlay's &isp crop-x0/crop-y0 -- a sensor-module
+ * property, not a per-example overlay) -- see
  * ISP_INPUT_WIDTH/HEIGHT vs. FRAME_WIDTH/HEIGHT below, the only place this variant's input/output
  * size split matters. AWB stays manual/off regardless of AE mode, same reasoning as IMX296 (no
  * IMX335-fitted AWB/CCM calibration exists). AE-on (this example's default) uses hal_alif patch
@@ -197,7 +198,7 @@ extern volatile uint32_t isp_mi_frame_end_count;
 /*
  * issue #2327 Stage B (BUILD-ONLY): IMX335's native 2x2-binned output is 1296x972 -- the ISP
  * INPUT size -- but the OUTPUT (this app's queued YUV420 buffer, FRAME_WIDTH/HEIGHT) is cropped
- * to 1280x960 by boards/imx335-isp-crop.overlay's &isp crop-x0/crop-y0 (see that file's own
+ * to 1280x960 by the innomaker_cam_imx335 shield's own &isp crop-x0/crop-y0 (see that overlay's own
  * comment for the 8/6 derivation) -- the SAME output size IMX296's own ROI already uses, so this
  * variant reuses IMX296's buffer-pool sizing (overlay-imx335.conf) unchanged.
  */

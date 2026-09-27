@@ -187,36 +187,58 @@ region` summary (`west build` prints it after linking) before adding to
 byte count still applies, it moves with every change to this file or its
 dependencies.
 
-### IMX335 build variant (E1M-AEN801/AEN803, 1280x960 ISP crop, issue #2327 Stage B) — BUILD-ONLY, UNBENCHED
+### IMX335 build variant (E1M-AEN801/AEN803, 1280x960 ISP crop, issue #2327 Stage B) — bench-verified, run 333
 
 Streams the Sony IMX335 (upstream `zephyr/drivers/video/imx335.c`) through
 the SAME `CONFIG_CAMERA_MJPEG_STREAM_1280X960` path the OV5647/IMX296
 variants above use, but IMX335 has no in-sensor crop this driver uses --
 its native 2x2-binned output is a fixed 1296x972, not 1280x960 -- so this
-variant ALSO needs `boards/overlay-imx335-isp-crop.overlay`, which sets
-`crop-x0 = 8`/`crop-y0 = 6` on `&isp` to crop it down to the same
-1280x960 `boards/overlay-1280x960.conf`'s SRAM0/buffer-pool accounting
-already covers (see `docs/camera-shields.md`'s Stage B section for the
-8/6 derivation). AE is on (hal_alif patch 0014's IMX335 envelope, capped
-at 30.0 dB analog gain -- a public Sony datasheet-flyer figure, not
-bench-derived); AWB stays at the ISP's stock ARX3A0 default, same
-colour-uncalibrated caveat as the IMX296 variant above.
+sensor's ISP itself crops it down to the same 1280x960
+`boards/overlay-1280x960.conf`'s SRAM0/buffer-pool accounting already
+covers. That crop (`&isp`'s `crop-x0 = 8`/`crop-y0 = 6`) lives in the
+`innomaker_cam_imx335` shield's own overlay
+(`zephyr/boards/shields/innomaker_cam_imx335/innomaker_cam_imx335.overlay`)
+rather than a per-example one — it is a property of this sensor module, not
+of this example (issue #2327 Stage B reviewer follow-up) — see
+`docs/camera-shields.md`'s Stage B section for the 8/6 derivation and
+`src/backends/camera/alif_isp_pico.c`'s `BUILD_ASSERT` that proves the
+shield's crop still produces 1280x960. `src/main.c` also requests this
+sensor's frame rate EXPLICITLY at 30 fps (not the 15 fps the OV5647/IMX296
+variants request) — IMX335 only supports {25, 30, 50, 60} fps, and hal_alif
+patch 0014's AE envelope is calibrated against the sensor's EXACT 30 fps
+mode (HMAX 0x0226); a 15 fps request would round to 25 fps instead (the
+nearest of the four), running a different line time the envelope was never
+derived against. AE is on (capped at 30.0 dB analog gain -- a public Sony
+datasheet-flyer figure, not bench-derived); AWB stays at the ISP's stock
+ARX3A0 default, same colour-uncalibrated caveat as the IMX296 variant above.
 
 ```bash
 west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
     examples/connectivity/camera-mjpeg-stream -- \
     "-DEXTRA_ZEPHYR_MODULES=<path-to-alp-sdk>;<path-to-hal_alif>" \
     "-DSHIELD=e1m_evk_rpi_csi innomaker_cam_imx335" \
-    "-DEXTRA_CONF_FILE=boards/overlay-1280x960.conf" \
-    "-DEXTRA_DTC_OVERLAY_FILE=boards/overlay-imx335-isp-crop.overlay"
+    "-DEXTRA_CONF_FILE=boards/overlay-1280x960.conf"
 ```
 
-**No bench run backs this variant.** It builds clean (`-Werror`) at the
-SAME SRAM0 usage (98.50%) as the IMX296 variant above -- confirming this
-addition did not regress that existing, bench-verified scenario -- but no
-IMX335 unit has ever streamed a frame through this pipeline. Do not claim
-fps, image quality, or even that the crop offset is correct until a bench
-run confirms it.
+**Bench run 333** (E1M-AEN803 2026W36-0001): 1280x960, app stats `fps=30
+fail=0 retry=0`, one HTTP client measured 29.99 fps / 772.7 KB/s delivered
+over a 30 s window, ~26.3 KB JPEGs, a mild lavender/cyan colour cast (stock
+AWB, expected — no IMX335 colour calibration exists). Only error-class log
+line across the whole run: one `FRAME_SEQ` event at stream start. This run
+predates the explicit 30 fps request above (it measured `fps=30` while the
+code still requested 15, which is the mismatch the request above now
+resolves rather than relies on by accident) — not yet re-run with the
+explicit request in place. Rebuilds clean (`-Werror`) at the SAME SRAM0
+usage (98.50%) as the IMX296 variant above; that variant itself also
+rebuilds unchanged (bit-identical by construction: it never touches
+`sony_imx335`'s DT compat, so every `#if DT_HAS_COMPAT_STATUS_OKAY(sony_imx335)`
+branch this Stage B work added compiles out entirely for it, and its own
+gain-conversion Kconfig defaults stay at `VIDEO_ISP_VSI_SNS_GAIN_CTRL_PER_DB_TENTH`=1/
+`VIDEO_ISP_VSI_SNS_GAIN_CTRL_STEP`=1, both no-ops) — confirmed by rebuilding
+it, not merely by unchanged SRAM0 arithmetic. Colour/AWB/CCM accuracy, the
+frame rate as measured AT THE SENSOR (only the app-level `fps=30` stat is
+bench-confirmed, not a sensor-side register readback), and AE behaviour in
+varied lighting all remain unverified.
 
 ### Ethernet MAC address changes every boot (investigated, not fixed)
 

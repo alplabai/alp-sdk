@@ -102,4 +102,4 @@ tests:
       - isp
       - video
       - camera
-    build_only: true   # issue #2327 Stage B: IMX335 with AE on (hal_alif patch 0014's envelope), BUILD-ONLY, UNBENCHED -- see changelog.d/2327.md.
+    build_only: true   # issue #2327 Stage B: IMX335 with AE on (hal_alif patch 0014's envelope) -- CI only compile-checks; bench-verified run 332 (AE converged, ae_stable=1 at f50) -- see changelog.d/2327.md.

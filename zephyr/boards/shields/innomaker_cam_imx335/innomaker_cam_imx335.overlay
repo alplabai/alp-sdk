@@ -135,3 +135,33 @@
 		};
 	};
 };
+
+/*
+ * Issue #2327 Stage B (bench-verified, run 332/333, E1M-AEN803 2026W36-0001): this sensor's
+ * native 2x2-binned output is a fixed 1296x972 with no in-sensor crop this driver uses --
+ * whatever crops that down to a usable ISP OUTPUT size is a property of THIS SENSOR MODULE, not
+ * of any one example, so it lives here rather than in a per-example board overlay (reviewer
+ * follow-up to the original Stage B PR, which had put it in
+ * examples/aen/aen-isp-capture/boards/imx335-isp-crop.overlay and examples/connectivity/
+ * camera-mjpeg-stream/boards/overlay-imx335-isp-crop.overlay -- both deleted).
+ *
+ * crop-x0/crop-y0 (zephyr/dts/bindings/video/vsi,isp-pico.yaml) feed isp_pico.c's out_form_rect:
+ * width = port_fmt.width - (left << 1), height = port_fmt.height - (top << 1) -- i.e. both
+ * properties crop SYMMETRICALLY (left AND right by crop-x0, top AND bottom by crop-y0), not from
+ * one corner. 1296 - 1280 = 16, so crop-x0 = 8 (8 px off each side); 972 - 960 = 12, so crop-y0 =
+ * 6 (6 px off top and bottom) -- landing on 1280x960, the frame size every IMX335 example/
+ * scenario budgets its buffers for. src/backends/camera/alif_isp_pico.c reads these SAME two
+ * properties back (DT_PROP(DT_NODELABEL(isp), crop_x0/crop_y0)) and BUILD_ASSERTs they still
+ * produce 1280x960 -- a future edit here that changes the crop without updating every IMX335
+ * example's assumed output size fails the BUILD, not a silent isp_stream_start() -EINVAL three
+ * calls later (zephyr/drivers/video/isp_pico.c's own out_form_rect-vs-output_fmt check).
+ *
+ * Harmless on a build that stacks this shield but never enables the ISP (e.g.
+ * aen-camera-firstlight's raw-capture-only path) -- these are plain DT properties on a node that
+ * stays `status = "disabled"` unless an example's own board overlay sets `&isp { status = "okay";
+ * ... };`.
+ */
+&isp {
+	crop-x0 = <8>;
+	crop-y0 = <6>;
+};
