@@ -129,7 +129,7 @@ extern "C" {
 #define XEVK_I2C_ADDR_EEPROM        0x50u  /**< Board ID EEPROM (24-series). */
 #define XEVK_I2C_ADDR_INA236_3V3    0x40u  /**< U21 INA236A, +3V3 rail   (20 mOhm shunt, 4.0 A max). A0 = GND. */
 #define XEVK_I2C_ADDR_INA236_1V8    0x41u  /**< U31 INA236A, +1V8 rail   (20 mOhm shunt, 4.0 A max). A0 = V+. */
-#define XEVK_I2C_ADDR_INA236_VCAM2  0x48u  /**< U32 INA236B, +VCAM2 rail (50 mOhm shunt, 1.6 A max). A0 = GND. */
+#define XEVK_I2C_ADDR_INA236_VCAM2  0x48u  /**< U32 INA236B, +VCAM2 rail (50 mOhm shunt, 1.6 A max). A0 = GND. DESIGN CONFLICT on E1M-X EVK V2: 0x48 is also the TAS2563 broadcast address on this bus, and TAS2563 page-select writes to reg 0x00 land in this part's CONFIG register. U32 is removed on the current build batch; a re-strap to 0x4A/0x4B is planned for the next carrier rev. */
 #define XEVK_I2C_ADDR_INA236_VCAM3  0x49u  /**< U34 INA236B, +VCAM3 rail (50 mOhm shunt, 1.6 A max). A0 = V+. */
 #define XEVK_I2C_ADDR_INA236_5V     0x4Au  /**< U30 INA236B, +5V rail    (20 mOhm shunt, 4.0 A max). A0 = SDA. */
 

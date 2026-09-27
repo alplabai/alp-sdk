@@ -302,7 +302,11 @@ i2c_devices:
       calibration: { shunt_macro: XEVK_INA236_SHUNT_1V8_OHMS, shunt_ohms: "0.020",
                      max_macro: XEVK_INA236_MAX_1V8_A, max_current_a: "4.0" } }
   - { macro: XEVK_I2C_ADDR_INA236_VCAM2, part: ina236, designator: U32, address: "0x48",
-      doc: "U32 INA236B, +VCAM2 rail (50 mOhm shunt, 1.6 A max). A0 = GND.",
+      doc: "U32 INA236B, +VCAM2 rail (50 mOhm shunt, 1.6 A max). A0 = GND.
+            DESIGN CONFLICT on E1M-X EVK V2: 0x48 is also the TAS2563 broadcast
+            address on this bus, and TAS2563 page-select writes to reg 0x00 land
+            in this part's CONFIG register. U32 is removed on the current build
+            batch; a re-strap to 0x4A/0x4B is planned for the next carrier rev.",
       calibration: { shunt_macro: XEVK_INA236_SHUNT_VCAM2_OHMS, shunt_ohms: "0.050",
                      max_macro: XEVK_INA236_MAX_VCAM2_A, max_current_a: "1.6" } }
   - { macro: XEVK_I2C_ADDR_INA236_VCAM3, part: ina236, designator: U34, address: "0x49",
