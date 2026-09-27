@@ -169,10 +169,13 @@ IMAGE_INSTALL += " \
 # networkd-only.
 IMAGE_FEATURES:remove = "tools-testapps"
 
-# DEEPX runtime on V2M variants: the machine confs own this, gated on
-# ALP_ENABLE_DEEPX_DXM1 (dx-rt is license-gated -- its do_fetch is a
-# hard stop without a licensed source). No unconditional append here:
-# it would make every un-opted V2M image build fail at fetch.
+# DEEPX runtime on V2M variants: the machine confs own this (see
+# conf/machine/include/e1m-v2m-deepx.inc), gated on
+# ALP_ENABLE_DEEPX_DXM1 (dx-driver/dx-rt come from DEEPX's own
+# meta-deepx-m1 layer and are license-gated to DEEPX NPU customers). No
+# unconditional append here: it would make every un-opted V2M image
+# require meta-deepx-m1 in bblayers.conf even when the customer never
+# wants the DEEPX path.
 
 IMAGE_LINGUAS = "en-us"
 
