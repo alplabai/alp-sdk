@@ -5,6 +5,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 
+from alp_project_loader import TargetSpec  # scripts/ is always on sys.path (see build.py)
+
 
 @dataclass
 class Blob:
@@ -34,10 +36,17 @@ class CompilerAdapter(ABC):
 
     @abstractmethod
     def compile(self, source: Path, *, accel_config: str, out_dir: Path,
-                opts: dict | None = None) -> Blob:
+                opts: dict | None = None, target: TargetSpec | None = None) -> Blob:
         """Compile @source for @accel_config; return the Blob.
 
         @opts is the per-model compile config for this backend
         (board.yaml `models[].compile.<backend>`), with any path values already
         resolved to absolute paths by the caller; None when the backend needs
-        no per-model config (cpu, ethos_u)."""
+        no per-model config (cpu, ethos_u).
+
+        @target is the resolved `alp_project_loader.TargetSpec` this compile
+        call came from -- the silicon-determined facts (e.g. ethos_u's
+        `vela_memory_mode`) the caller already resolved from metadata/, never
+        re-read from disk by the adapter itself. None only in a caller that
+        hasn't threaded it (e.g. a hand-built test); every real backend but
+        ethos_u ignores it."""

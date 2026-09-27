@@ -30,8 +30,10 @@ meta-alp-sdk/
 │   └── machine/
 │       ├── e1m-v2n101-a55.conf          # V2N base SoM, A55 Linux cluster.
 │       ├── e1m-v2n102-a55.conf          # V2N variant.
+│       ├── e1m-v2n103-a55.conf          # V2N variant (4 GB / 16 GB).
 │       ├── e1m-v2m101-a55.conf          # V2N + DEEPX DX-M1.
 │       ├── e1m-v2m102-a55.conf          # V2N + DEEPX variant.
+│       ├── e1m-v2m103-a55.conf          # V2N + DEEPX variant (4 GB / 16 GB).
 │       └── e1m-nx9101-a55.conf          # NXP i.MX 93.
 ├── recipes-core/
 │   ├── alp-sdk/
@@ -314,8 +316,10 @@ the in-kernel driver + UAPI headers from `meta-rz-drpai` (see below).
 |----------------------|------------------------|---------------------------------------------|
 | `e1m-v2n101-a55`     | DRP-AI3                | in-kernel driver + `meta-rz-drpai` headers  |
 | `e1m-v2n102-a55`     | DRP-AI3                | Same as V2N101 (memory variant)             |
+| `e1m-v2n103-a55`     | DRP-AI3                | Same as V2N101 (memory variant)             |
 | `e1m-v2m101-a55`     | DRP-AI3 + DEEPX DX-M1  | DRP-AI3 as above; `dx-rt` via the image     |
 | `e1m-v2m102-a55`     | Same as V2M101         | Same as V2M101 (memory variant)             |
+| `e1m-v2m103-a55`     | Same as V2M101         | Same as V2M101 (memory variant)             |
 | `e1m-nx9101-a55`     | Ethos-U65              | NXP i.MX 93 Ethos-U userspace via the image |
 | `e1m-aen801-a32`     | Ethos-U85 + 2x U55     | Ethos-U path inside the alp-sdk library     |
 | `e1m-aen701-a32`     | 2x Ethos-U55           | Ethos-U path inside the alp-sdk library     |
@@ -474,6 +478,6 @@ i.MX 93 path remains unbaked.
 - [RZ/V2N product page (AI SDK + BSP downloads)](https://www.renesas.com/en/products/rz-v2n)
   — Software overview + getting-started + how-to-build.
 - [`vendors/deepx-dxm1/README.md`](../vendors/deepx-dxm1/README.md)
-  — DEEPX DX-M1 integration notes (covers V2M101 / V2M102).
+  — DEEPX DX-M1 integration notes (covers V2M101 / V2M102 / V2M103).
 - `docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md`
   — the orchestrator spec this layer is wired to.

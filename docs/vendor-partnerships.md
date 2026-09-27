@@ -21,8 +21,9 @@ doesn't lose state between weekly partnership-review cycles.
 ## Renesas (RZ/V2N family)
 
 **Surface impact**: `chips/gd32g553/` host driver +
-`src/zephyr/v2n_supervisor.c` + `src/zephyr/v2n_power_mgmt.c`
-all assume an upstream Renesas FSP for the RZ/V2N N44 SoC.
+`src/zephyr/v2n_supervisor.c` both assume an upstream Renesas FSP for
+the RZ/V2N N44 SoC.  (`src/zephyr/v2n_power_mgmt.c` does not exist;
+DEEPX rail bring-up is U-Boot's job, off this list entirely.)
 
 **Status update 2026-05-14 (verified against upstream)**:
 

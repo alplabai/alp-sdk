@@ -40,12 +40,18 @@
 # bench. Verified by adding one.
 #
 # WHAT IT IS NOT WORTH, so nobody reads more into a green run than is there:
-# it does NOT prove the GMAC's DMA memory is cache-coherent. The obvious
-# candidate for that, eth_dwmac_alif's BUILD_ASSERT, is satisfied
-# unconditionally on this config -- CONFIG_NOCACHE_MEMORY is select'ed on by
-# zephyr/kconfigs/vendor-alif-peripherals.kconfig, and the assert is an OR --
-# so a build with CONFIG_DCACHE=y passes this scenario clean. The
-# CONFIG_DCACHE=n line in prj.conf is protected by its comment, not by CI.
+# it does NOT itself prove the GMAC's DMA memory is cache-coherent on real
+# silicon -- that needs a bench run (aen-ethernet-link's bench run 202 proved
+# the mechanism end-to-end: DHCP lease + ping, rings/pools in SRAM0, main RAM
+# on DTCM -- but not this app's own SRAM0-window-sharing layout, which is
+# build-verified only). What compiling here DOES now catch: eth_dwmac_alif's
+# BUILD_ASSERT is UNCONDITIONAL (`!IS_ENABLED(CONFIG_DCACHE)`) --
+# zephyr/kconfigs/vendor-alif-peripherals.kconfig no longer selects
+# CONFIG_NOCACHE_MEMORY from ETH_DWMAC_ALIF, so there is no more OR-escape
+# hatch. A CONFIG_DCACHE=y build of this scenario now FAILS at compile time
+# with that assert's message, rather than passing clean. The CONFIG_DCACHE=n
+# line in prj.conf is a rule backed by a real build-time check now, not just
+# a comment.
 
 sample:
   name: aen-evk-demo

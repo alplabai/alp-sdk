@@ -1,0 +1,363 @@
+# Metadata Drift — Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Issue: #1636** (`bug`, `area:metadata`, `area:build`, `area:npu`, milestone `Backlog`)
+
+**Goal:** Return hardware facts that drifted back into hand-written headers to `metadata/`, and fix the one case where a zeroed metadata field silently disabled a check the public API promises.
+
+**Architecture:** The repo's core principle is that every hardware fact has **one** source under `metadata/`, with headers emitted from it by `scripts/*.py`. Four places have drifted back out. Task 1 is the worst and the largest — the entire E1M-X EVK I2C block, hand-`#define`d beside a sibling carrier whose identical data *is* generated. Task 2 is the pad-index block in the same family. Task 3 is a different failure mode: the metadata field exists, is zero, and a `== 0` fallback in the consumer turns that into "accept anything". Task 4 is the smallest.
+
+**Every fix here is a generator or a YAML change. Hand-editing a generated header is the one thing this plan must never do.**
+
+**Tech Stack:** Python 3.10+ (`scripts/gen_*.py`), YAML under `metadata/`, pytest under `tests/scripts/`, C headers as generated output.
+
+**Spec:** `docs/superpowers/plans/2026-08-23-post-audit-hardening-campaign.md` — read its **Global Constraints** and **Verification infrastructure** sections first.
+
+## Global Constraints
+
+- Base branch is `dev`. Verify with `git merge-base HEAD origin/dev`. Never `--base main`.
+- Branch from an up-to-date `origin/dev`. **Campaign Step 0 (the 280 staged files) must be resolved first.**
+- `bash scripts/test-all.sh --target dev` green before `gh pr create`.
+- **Never hand-edit a generated file.** Fix the generator under `scripts/` and regenerate.
+- Any `metadata/**` or `scripts/**.py` change means `python-smoke` (`pytest tests/scripts/ -q`) runs on **macOS and Windows too**. A macOS/Windows-only red is almost always a real platform bug, not a base-baseline flake.
+- After `git merge origin/dev`, run `python3 scripts/gen_catalog.py` and commit the result.
+- Regenerating `soc_caps.h` changes public macros — that is an ABI change; regenerate the ABI snapshot too.
+- **Do not run `gen_soc_caps.py` concurrently with twister or pytest** — it flakes `ALP_SOC_REF_STR undeclared`. Serialise.
+- No AI attribution anywhere.
+- **`alp_e1m_evk.h:520`/`:550`** (`EVK_MB_ANA`/`EVK_ARD_A0` → `ALP_E1M_ADC0` contradicting the generated `ALP_E1M_ADC6`) is the same class but is **filed separately as #1622** and is Plan-1-adjacent work. Reference it; do not fix it here.
+
+---
+
+## The measured drift
+
+### Task 1's site, shown against its own sibling
+
+This is the whole issue in two excerpts. The E1M carrier's I2C addresses are **generated from metadata**, and carry bench provenance:
+
+```c
+/* include/alp/boards/alp_e1m_evk_routes.h:135-140 — GENERATED */
+#define EVK_I2C_ADDR_INA236_3V3    0x40u  /**< U21 INA236A, +3V3 rail (20 mOhm shunt, 4.0 A max). A0 = GND. */
+#define EVK_I2C_ADDR_INA236_1V8    0x41u  /**< U31 INA236A, +1V8 rail (20 mOhm shunt, 4.0 A max). A0 = V+. */
+#define EVK_I2C_ADDR_INA236_VIO    0x42u  /**< U33 INA236A, +VIO rail (50 mOhm shunt, 1.6 A max). A0 = SDA. */
+#define EVK_I2C_ADDR_INA236_VCAM0  0x4Bu  /**< U32 INA236B, +V_CAM0 rail (50 mOhm shunt, 1.6 A max). Re-strapped A0=SCL -> 0x4B from the next batch; PRE-RESPIN boards had it at 0x48, which collides with the TAS2563 broadcast address (unreadable there). */
+```
+
+The E1M-X carrier's are **hand-written**, same chip, same shape, same manufacturer:
+
+```c
+/* include/alp/boards/alp_e1m_x_evk.h:80-86 — HAND-WRITTEN */
+#define XEVK_I2C_ADDR_INA236_3V3 0x40u /**< U21 INA236A, +3V3 rail   (20 mOhm shunt, 4.0 A max). */
+#define XEVK_I2C_ADDR_INA236_1V8 0x41u /**< U31 INA236A, +1V8 rail   (20 mOhm shunt, 4.0 A max). */
+#define XEVK_I2C_ADDR_INA236_VCAM2 \
+	0x48u /**< U32 INA236B, +VCAM2 rail (50 mOhm shunt, 1.6 A max). */
+#define XEVK_I2C_ADDR_INA236_VCAM3 \
+	0x49u                             /**< U34 INA236B, +VCAM3 rail (50 mOhm shunt, 1.6 A max). */
+#define XEVK_I2C_ADDR_INA236_5V 0x4Au /**< U30 INA236B, +5V rail    (20 mOhm shunt, 4.0 A max). */
+```
+
+with the electrical constants beside them:
+
+```c
+/* include/alp/boards/alp_e1m_x_evk.h:98-100 */
+#define XEVK_INA236_SHUNT_3V3_OHMS   0.020f
+#define XEVK_INA236_MAX_3V3_A        4.0f
+#define XEVK_INA236_SHUNT_1V8_OHMS   0.020f
+```
+
+Verified: `grep -n "i2c_devices" metadata/boards/e1m-x-evk.yaml` returns **nothing**. There is no `i2c_devices:` block in that file at all.
+
+**Why this one matters more than an address typo.** `XEVK_INA236_SHUNT_3V3_OHMS 0.020f` is not an identifier — it is a scaling factor. Every current reading on the +3V3 rail is computed through it. A schematic respin that changes a shunt resistor silently desyncs it, and the failure is not a build break or a NAK — it is *plausible numbers that are wrong*. The sibling carrier had exactly this data lifted into metadata under **#515** and generated into `alp_e1m_evk_routes.h`. The E1M-X carrier never got the same treatment.
+
+### Task 3's site — a zeroed field that disables a promised check
+
+`include/alp/inference.h:232-238` promises the selector fits the blob to the device:
+
+```
+ * Parses the package, selects the blob whose backend is available on the
+ * active SoC, whose `silicon_ref` is compatible, and that fits the device
+ * NPU envelope (arena SRAM); ties break by the SoM's preferred backend.
+```
+
+The selector implements that with a zero-means-anything fallback:
+
+```c
+/* src/backends/inference/alp_model_select.c:85 */
+	return e->arena_sram_kib == 0u || t->req_sram_kib <= e->arena_sram_kib;
+```
+
+and every real SoC reports zero:
+
+```
+$ grep -n "ALP_SOC_NPU_ARENA_SRAM_KIB" include/alp/soc_caps.h
+66:#define ALP_SOC_NPU_ARENA_SRAM_KIB      0
+107:#define ALP_SOC_NPU_ARENA_SRAM_KIB      0
+148:  … 189, 230, 271, 311, 351, 391 — all 0
+430:#define ALP_SOC_NPU_ARENA_SRAM_KIB      UINT16_MAX
+```
+
+**Correction to the audit, which said "all ten SoCs":** it is **nine** real SoCs at `0`. Line 430 is `UINT16_MAX`, and that is the `else_defs` permissive fallback for `CONFIG_ALP_SOC_NONE` (`scripts/gen_soc_caps.py:559`) — correct as it stands, not a tenth instance.
+
+So on every shipped SoM the `ALP_ERR_NO_FIT` envelope check is dead, and an oversize Ethos-U blob faults at invoke instead of failing cleanly at load with a status that says why.
+
+The value is generated from metadata:
+
+```python
+# scripts/gen_soc_caps.py:551
+        soc_defs.append(("ALP_SOC_NPU_ARENA_SRAM_KIB", str(arena_kib)))
+```
+
+so the fix is upstream in `metadata/socs/`, never in the header.
+
+---
+
+## File Structure
+
+| File | Responsibility | Task |
+|---|---|---|
+| `metadata/boards/e1m-x-evk.yaml` | Modify: add the `i2c_devices:` block with addresses, shunts, max currents | 1 |
+| `metadata/schemas/` (board schema) | Modify: allow the per-device electrical fields if not already permitted | 1 |
+| `scripts/gen_board_header.py` | Modify: emit `XEVK_*` from the new block | 1 |
+| `include/alp/boards/alp_e1m_x_evk_routes.h` | Generated output — do not hand-edit | 1 |
+| `include/alp/boards/alp_e1m_x_evk.h:80-100` | Modify: delete the hand-written block | 1 |
+| `tests/scripts/test_gen_board_header.py` | Modify/create: assert the generated block matches the YAML | 1 |
+| `include/alp/boards/alp_e1m_evk.h:296-359` | Modify: delete 11 hand-maintained pad indices once generated | 2 |
+| `metadata/socs/*.json` | Modify: real `arena_kib` per SoC | 3 |
+| `src/backends/inference/alp_model_select.c:85` | Modify: decide what zero means | 3 |
+| `include/alp/cap.h:58` | Modify: the fourth site | 4 |
+
+---
+
+## Task 1: Lift the E1M-X EVK I2C block into metadata
+
+**Files:** `metadata/boards/e1m-x-evk.yaml`, the board schema, `scripts/gen_board_header.py`, `include/alp/boards/alp_e1m_x_evk.h`, `tests/scripts/test_gen_board_header.py`.
+
+**Interfaces:**
+- Produces: `XEVK_I2C_ADDR_*`, `XEVK_INA236_SHUNT_*_OHMS`, `XEVK_INA236_MAX_*_A` as **generated** macros. The spellings must be byte-identical to today's hand-written ones — Task 1 is a source-of-truth change, not a rename.
+
+- [ ] **Step 1: Create the branch**
+
+```bash
+git fetch origin
+git checkout -b fix/1636-metadata-drift origin/dev
+```
+
+- [ ] **Step 2: Read how the sibling does it — do not invent a shape**
+
+```bash
+grep -n "i2c_devices" -A 30 metadata/boards/e1m-evk.yaml | head -60
+grep -n "i2c_devices\|EVK_I2C_ADDR" scripts/gen_board_header.py | head -20
+```
+
+The E1M carrier already has the working end-to-end path (#515). Copy its YAML key names, its generator branch, and its macro-emission shape. **A second, differently-shaped `i2c_devices:` schema for the X carrier would be a new drift, not a fix.**
+
+Note what the existing generated output carries that the hand-written block does not: per-device provenance in the doc comment (`A0 = GND`, `BENCH-CONFIRMED 2026-06-16`, the re-strap history). The YAML must be able to carry that, or the lift loses information that is currently in the tree.
+
+- [ ] **Step 3: Write the failing test**
+
+Extend `tests/scripts/test_gen_board_header.py` (create it following `tests/scripts/test_check_bootstrap_manifest.py`'s shape if it does not exist). Assert that generating from the X carrier's YAML produces the exact macros the hand-written header defines today:
+
+```python
+def test_x_evk_i2c_block_is_generated(tmp_path: Path) -> None:
+    """The X carrier's INA236 addresses and shunts must come from metadata,
+    not from a hand-written header (#1636)."""
+    out = generate_board_header(Path("metadata/boards/e1m-x-evk.yaml"))
+
+    # Addresses, verbatim as the hand-written header spells them today.
+    assert "#define XEVK_I2C_ADDR_INA236_3V3 0x40u" in out
+    assert "#define XEVK_I2C_ADDR_INA236_1V8 0x41u" in out
+    assert "#define XEVK_I2C_ADDR_INA236_VCAM2" in out and "0x48u" in out
+    assert "#define XEVK_I2C_ADDR_INA236_VCAM3" in out and "0x49u" in out
+    assert "#define XEVK_I2C_ADDR_INA236_5V 0x4Au" in out
+
+    # The electrical constants -- these scale every current reading.
+    assert "XEVK_INA236_SHUNT_3V3_OHMS" in out and "0.020f" in out
+    assert "XEVK_INA236_MAX_3V3_A" in out and "4.0f" in out
+```
+
+**`generate_board_header`'s real name and signature must come from `scripts/gen_board_header.py`** — the name above is a placeholder for whatever the module actually exposes. If the generator has no importable entry point (older gates do their work inside `main()`), add one following `scripts/check_quality_registry.py`'s `find_problems(root)` + thin `main()` shape, which is what makes it testable without a subprocess.
+
+- [ ] **Step 4: Run it and confirm it FAILS**
+
+```bash
+py -3 -m pytest tests/scripts/test_gen_board_header.py -q
+```
+
+Expected: no `XEVK_I2C_ADDR_*` in the output — the YAML has no `i2c_devices:` block yet.
+
+- [ ] **Step 5: Add the block to the YAML**
+
+Transcribe every address, shunt, max current, reference designator, and provenance note from `include/alp/boards/alp_e1m_x_evk.h:80-100` into `metadata/boards/e1m-x-evk.yaml`.
+
+**Transcribe, do not retype from memory or from the E1M sibling.** The two carriers differ — the X carrier has `VCAM2`/`VCAM3` where the E1M has `VIO`/`VCAM0`/`VCAM1`, and `0x48u`/`0x49u` where the E1M has `0x4Bu`/`0x49u`. Copying the sibling's addresses would be a hardware-wrong change that builds and passes every gate.
+
+**Note the collision hazard while transcribing:** the E1M sibling's `EVK_I2C_ADDR_INA236_VCAM0` comment records that `0x48` collides with the TAS2563 broadcast address on pre-respin boards. The X carrier currently places `XEVK_I2C_ADDR_INA236_VCAM2` at `0x48u`. Whether that is a live collision on the X carrier depends on whether it populates a TAS2563 — check `metadata/boards/e1m-x-evk.yaml` and the schematic before assuming either way, and if it is a real collision, that is a **separate hardware finding** to report, not something to silently fix in a YAML transcription.
+
+- [ ] **Step 6: Extend the schema if needed**
+
+If `metadata/schemas/`'s board schema does not already permit the per-device electrical fields, add them. Keep them additive; the campaign index notes the schema tightening work is elsewhere.
+
+- [ ] **Step 7: Teach the generator, run the test, regenerate**
+
+```bash
+py -3 -m pytest tests/scripts/test_gen_board_header.py -q      # must pass
+python3 scripts/gen_board_header.py                            # regenerate
+git diff --stat include/alp/boards/
+```
+
+- [ ] **Step 8: Delete the hand-written block**
+
+Remove `include/alp/boards/alp_e1m_x_evk.h:80-100` and have that header include the generated routes header, exactly as the E1M carrier's does. **Verify the generated macros are byte-identical to the deleted ones first**:
+
+```bash
+git stash && grep -E "XEVK_(I2C_ADDR_INA236|INA236_(SHUNT|MAX))" include/alp/boards/alp_e1m_x_evk.h | sort > /tmp/before.txt
+git stash pop && grep -rE "XEVK_(I2C_ADDR_INA236|INA236_(SHUNT|MAX))" include/alp/boards/ | sed 's/^[^:]*://' | sort > /tmp/after.txt
+diff /tmp/before.txt /tmp/after.txt
+```
+
+An empty diff is the evidence that this was a source-of-truth change and not a silent hardware change. **Paste that empty diff into the PR.**
+
+- [ ] **Step 9: Gate and commit**
+
+```bash
+python3 scripts/gen_catalog.py
+bash scripts/test-all.sh --target dev
+git add metadata/boards/e1m-x-evk.yaml metadata/schemas/ scripts/gen_board_header.py \
+        include/alp/boards/ tests/scripts/test_gen_board_header.py metadata/catalog.json
+git commit -m "fix(metadata): generate the E1M-X EVK I2C block instead of hand-defining it
+
+metadata/boards/e1m-x-evk.yaml had no i2c_devices: block at all, so the X
+carrier's five INA236 addresses, their shunt resistances and their max currents
+lived only in include/alp/boards/alp_e1m_x_evk.h -- while the sibling E1M
+carrier's identical data is generated from metadata (#515).
+
+XEVK_INA236_SHUNT_3V3_OHMS is not an identifier, it is a scaling factor: every
++3V3 current reading is computed through it, so a schematic respin desyncs it
+into plausible-but-wrong numbers rather than a build break.
+
+Generated output is byte-identical to the deleted macros."
+```
+
+- [ ] **Step 10: Bench — E1M-X EVK, opportunistic**
+
+Read all five rails through `ina236_init()` with the generated constants and confirm the currents match a reference measurement. Not a merge blocker — the byte-identical diff in Step 8 is the real evidence — but the first time the X carrier is on a bench, this is a five-minute confirmation that the transcription was right.
+
+---
+
+## Task 2: The pad-index block
+
+**Files:** `include/alp/boards/alp_e1m_evk.h:296-359`, `metadata/boards/e1m-evk.yaml`, `scripts/gen_board_header.py`.
+
+Eleven hand-maintained `EVK_PIN_OVERLAY_BASE + N` pad indices, absent from the YAML that generates the rest of that header's content.
+
+- [ ] **Step 1: Read them and decide whether they are facts or derivations**
+
+```bash
+sed -n '296,359p' include/alp/boards/alp_e1m_evk.h
+```
+
+This matters before writing any YAML. If each is an independent hardware fact, it belongs in metadata like the I2C block. If they are `BASE + N` *derivations* from an ordering already in the YAML, the generator should compute them and the YAML should not repeat the arithmetic — putting derived values in metadata creates two sources of truth for one fact, which is the same defect wearing different clothes.
+
+**Report which it is in the PR.** The right fix differs, and the audit did not distinguish them.
+
+- [ ] **Step 2: Apply whichever fix Step 1 established**
+
+Follow Task 1's shape: failing test first, then YAML and/or generator, regenerate, delete the hand-written block, prove byte-identity with a diff.
+
+- [ ] **Step 3: Gate and commit**
+
+```bash
+bash scripts/test-all.sh --target dev
+git commit -am "fix(metadata): generate the E1M EVK pad-index block"
+```
+
+---
+
+## Task 3: The NPU arena envelope is zero everywhere
+
+**Files:** `metadata/socs/*.json`, `scripts/gen_soc_caps.py`, `src/backends/inference/alp_model_select.c`.
+
+**A different failure mode from Tasks 1 and 2.** Here the metadata field exists and is wired through the generator correctly — it is simply **zero**, and a `== 0` fallback in the consumer turns that into "accept anything".
+
+- [ ] **Step 1: Decide what zero should mean — this is the real work**
+
+Two changes are needed and they are independent:
+
+1. **Populate the real values** in `metadata/socs/*.json` for the nine SoCs that report `0`, most importantly `ALIF_ENSEMBLE_E8` (Ethos-U) and `DEEPX_DX_M1`.
+2. **Decide whether `arena_sram_kib == 0` should keep meaning "unbounded".**
+
+On (2): today's fallback makes an unpopulated field silently disable a documented check, which is exactly how this got missed. But flipping `0` to mean "reject everything" would break any SoC still unpopulated after step (1).
+
+**Recommended:** keep `0 == unbounded` in `alp_model_select.c:85` — it is the safe default for an SoC genuinely without an arena limit — and instead make the *absence* of the field a **generator error** rather than a silent zero. `scripts/gen_soc_caps.py:551` currently emits whatever `arena_kib` holds; make it fail loudly when the SoC declares an NPU but no arena. That way an unpopulated field can never again reach the header as a silent zero.
+
+Confirm this against the actual SoC set before implementing: if some SoC legitimately has an NPU with no SRAM arena bound, the generator error needs an explicit opt-out in that SoC's JSON rather than a code exception.
+
+- [ ] **Step 2: Write the failing test**
+
+In `tests/scripts/`, assert the generator refuses a SoC JSON that declares an NPU with no `arena_kib`, and that a populated one emits the real value rather than `0`.
+
+- [ ] **Step 3: Populate the metadata**
+
+Per-SoC arena sizes come from the vendor datasheets — Ethos-U on the Alif Ensemble parts, DRP-AI on RZ/V2N, the DX-M1's own budget. **Do not guess these.** If a value cannot be sourced confidently, leave that SoC out of this PR and say which ones and why; a wrong arena bound rejects valid models at load, which is a worse failure than the current one.
+
+- [ ] **Step 4: Regenerate and check the ABI**
+
+```bash
+# Serialise -- do NOT run concurrently with twister or pytest.
+python3 scripts/gen_soc_caps.py
+git diff --stat include/alp/soc_caps.h
+# Changed public macros = ABI change; see regenerating-generated-files.
+```
+
+- [ ] **Step 5: Verify the check is actually live now**
+
+Add a test that a blob whose `req_sram_kib` exceeds the SoC's arena is rejected with `ALP_ERR_NO_FIT` — the status `include/alp/inference.h:232-238` promises. That assertion is the point of the whole task; without it this is a metadata edit with no proof it changed behaviour.
+
+- [ ] **Step 6: Gate and commit**
+
+```bash
+bash scripts/test-all.sh --target dev
+git commit -am "fix(metadata): populate the NPU arena envelope so ALP_ERR_NO_FIT works
+
+ALP_SOC_NPU_ARENA_SRAM_KIB was 0 on all nine real SoCs, and
+alp_model_select.c:85 reads 0 as 'accept any blob' -- so the NPU-envelope check
+inference.h promises was dead on every shipped SoM and an oversize Ethos-U blob
+faulted at invoke instead of failing cleanly at load.
+
+gen_soc_caps.py now refuses to emit a zero arena for an SoC that declares an
+NPU, so an unpopulated field cannot silently disable the check again.
+(soc_caps.h:430's UINT16_MAX is the CONFIG_ALP_SOC_NONE permissive fallback and
+is correct as it stands.)"
+```
+
+---
+
+## Task 4: `include/alp/cap.h:58`
+
+- [ ] **Step 1: Read it and characterise it before planning a fix**
+
+```bash
+sed -n '50,70p' include/alp/cap.h
+grep -rn "cap.h" scripts/*.py | head
+```
+
+The audit listed this as a fifth drift site without detail, and it was not verified while writing this plan. Establish first whether `cap.h` is generated, partly generated, or hand-written, and what specifically drifted. **If it turns out not to be a drift site, say so and close the item** — a fabricated fix for an unverified finding is worse than an honest "the audit was wrong here".
+
+- [ ] **Step 2: Fix or close, then commit**
+
+---
+
+## Opening the PRs
+
+Four PRs, all `--base dev`.
+
+- Task 1: `Refs #1636.` Labels `bug`, `area:metadata`, `area:build`, `v2n`.
+- Task 2: `Refs #1636.` Labels `bug`, `area:metadata`, `area:build`.
+- Task 3: `Refs #1636.` Labels `bug`, `area:metadata`, `area:npu`. **ABI regen.**
+- Task 4: `Closes #1636.` Labels depend on what Step 1 finds.
+
+**Every one of these touches `metadata/**` or `scripts/**.py`**, so `python-smoke` runs on macOS and Windows as well as Linux. A macOS/Windows-only red is almost always a real platform bug — a case-insensitive path collision or a bash-3.2 empty-array expansion — not a base-baseline flake. Read the CI log, which names the script and line.
+
+**Bench:** none blocking. Task 1's rail check is opportunistic on an E1M-X EVK; Task 3 wants a real oversize-model load on E1M-AEN801 once the arena values are populated, but the unit test in Step 5 is the merge gate.
+
+**Related, filed separately:** #1622 (`EVK_MB_ANA`/`EVK_ARD_A0` mapping to `ALP_E1M_ADC0` against the generated `ALP_E1M_ADC6`) is the same class and is already tracked on its own.

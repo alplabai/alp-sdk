@@ -8,8 +8,8 @@ Camera variant).
 
 | Family             | SKUs                          | Renesas part            | LPDDR4X         | eMMC                       | Companion accelerator   |
 |--------------------|-------------------------------|-------------------------|-----------------|----------------------------|--------------------------|
-| **E1M-X V2N**      | `E1M-V2N101`, `E1M-V2N102`    | `R9A09G056N44GBG#AC0`   | 32 / 64 Gbit    | eMMC 5.1, 32 / 128 Gbit    | —                        |
-| **E1M-X V2N-M1**   | `E1M-V2M101`, `E1M-V2M102`    | `R9A09G056N44GBG#AC0`   | 32 / 64 Gbit    | eMMC 5.1, 32 / 128 Gbit    | DEEPX DX-M1 (25 TOPS)    |
+| **E1M-X V2N**      | `E1M-V2N101`, `E1M-V2N102`, `E1M-V2N103` | `R9A09G056N44GBG#AC0` | 32 / 64 Gbit | eMMC 5.1, 32 / 128 Gbit | —                        |
+| **E1M-X V2N-M1**   | `E1M-V2M101`, `E1M-V2M102`, `E1M-V2M103` | `R9A09G056N44GBG#AC0` | 32 / 64 Gbit | eMMC 5.1, 32 / 128 Gbit | DEEPX DX-M1 (25 TOPS)    |
 
 Authoritative per-SKU detail and the silicon stack live in
 [`e1m-spec` Annex A.2 / A.3](https://github.com/alplabai/e1m-spec/blob/main/STANDARD.md#a2-e1m-x-v2n-family-renesas-rzv2n).

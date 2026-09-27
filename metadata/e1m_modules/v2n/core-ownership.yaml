@@ -8,7 +8,12 @@
 # that matches zero rows, or more than one, is a hard generator error --
 # see scripts/gen_pinmux_capability.py.
 #
-# Only silicon-verified pads belong here.  Every row below has a citation.
+# Only silicon-verified pads belong here, with one explicit exception:
+# a row whose evidence is marked BENCH-PENDING is source-verified (the
+# driving code exists and applies/builds against its stated context) but
+# not yet compiled and/or run on real hardware -- callers must not treat
+# it as silicon-confirmed until the marker is removed.  Every row below
+# has a citation.
 # Absence means "not attributed" -- never "shared" and never "a55 by
 # elimination" (an earlier attempt derived unlisted pads as a55-by-default
 # from the CM33 devicetree and got 5 pads wrong: pads a chip driver or
@@ -34,9 +39,17 @@ core_ownership:
     evidence: "metadata/chips/gd32g553.yaml spi.renesas_pads.cs = P97 / gd32_pads.cs = PA8; master Simple-SPI has no hardware slave-select, so P97 stays GPIO for per-transaction framing of the GD32's PA8 CS-EXTI (gpio9 pin 7, GPIO_ACTIVE_LOW -- alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33.dts:62, :93-94 names it the GD32 chip-select via cs-gpios)"
   - peripheral: "RIIC8_SCL8"
     pad: "P07"
-    core: "m33"
-    evidence: "metadata/chips/gd32g553.yaml i2c.renesas_pads scl P07 / sda P06, plus meta-alp-sdk/recipes-kernel/linux/linux-renesas/0001-clk-renesas-r9a09g056-keep-CM33-owned-RSCI7-RIIC8-on.patch (silicon-validated 2026-06-03 on E1M-V2M101: Linux clk_disable_unused gating RIIC8 bus-faults the CM33 until power-cycle)"
+    core: "a55"
+    evidence: "Maintainer decision 2026-09-24 (rv3028 RTC bring-up, alp-sdk fix/v2n-rtc-rv3028-linux): CA55/Linux is the sole master of the WHOLE RIIC8/BRD_I2C bus -- every device on it (rv3028c7 RTC @0x52, da9292 @0x1E, gd32g553 GD32 I2C slave @0x70, tmp112, clk_5l35023b, act8760), not just the one this SoM fix touches; the CM33 must not master RIIC8 at all. RESOLVED (feat/v2m-deepx-rail-uboot, same day): meta-alp-sdk/recipes-kernel/linux/linux-renesas/0001-clk-renesas-r9a09g056-keep-CM33-owned-RSCI7-on.patch dropped its riic_8_ckm hunk + retitled (RSCI7 only now); metadata/e1m_modules/v2n/supervisor-links.yaml's brd_i2c link is status: disabled and the CM33 Zephyr board no longer claims i2c8 or the alp-i2c0 alias (scripts/gen_zephyr_board.py _v2n_dts()); src/zephyr/v2n_power_mgmt.c (DA9292 bring-up) and examples/v2n/v2n-rtc-multi-alarm (both drove m33_sm i2c on this bus) are both retired."
   - peripheral: "RIIC8_SDA8"
     pad: "P06"
-    core: "m33"
-    evidence: "metadata/chips/gd32g553.yaml i2c.renesas_pads scl P07 / sda P06, same patch as RIIC8_SCL8 (silicon-validated 2026-06-03 on E1M-V2M101: Linux clk_disable_unused gating RIIC8 bus-faults the CM33 until power-cycle)"
+    core: "a55"
+    evidence: "Maintainer decision 2026-09-24 (rv3028 RTC bring-up, alp-sdk fix/v2n-rtc-rv3028-linux): CA55/Linux is the sole master of the WHOLE RIIC8/BRD_I2C bus -- every device on it, not just the one this SoM fix touches; the CM33 must not master RIIC8 at all. RESOLVED (feat/v2m-deepx-rail-uboot, same day): same follow-up scope as RIIC8_SCL8 above, all closed there."
+  - peripheral: "DEEPX_CORE_0P75_EN"
+    pad: "P64"
+    core: "a55"
+    evidence: "Bench-verified (2026-09-24, feat/v2m-deepx-rail-uboot, E1M-V2M103): U-Boot's board_late_init() (meta-alp-sdk/recipes-bsp/u-boot/u-boot/0004-rzv2n-dev-ALP-E1M-DEEPX-rail-bringup.patch) is the sole driver of P64: drives it high only after the DA9292 CH2 = 0.75V rail is confirmed power-good over RIIC8/BRD_I2C, and low on any failure path. U-Boot runs on the A55 before Linux or the CM33 image starts. No CM33 board file may claim this pad. Flashed and booted end to end on real silicon (v4 u-boot.bin, WSL Ubuntu-22.04: rzv2n-dev_defconfig + deepx-rail.cfg + fdtfile-v2m.cfg + no-dirty-version.cfg + gigadevice-xspi.cfg, aarch64-linux-gnu gcc 11.4.0, rc=0, 0 warnings): console showed `ALP: DA9292 programmed CTRL_01=0x01 VOUT_CH2=0x96/0x96` then `ALP: DEEPX rail 0.75V up (PG)`; post-boot readback CTRL_01=0x03, VOUT_CH2=0x96/0x96, STATUS_00=0x03 (CH2_PG set, no UV/OV/OC), STATUS_01=0x00, and the DEEPX bucks surfaced on BRD_I2C once P64 went high (0x44=0x82, 0x48=0x5a, 0x4F=0x14). See changelog.d/2045."
+  - peripheral: "DEEPX_PWR_EN_REQ"
+    pad: "P65"
+    core: "a55"
+    evidence: "Bench-verified (2026-09-24, feat/v2m-deepx-rail-uboot, E1M-V2M103): U-Boot's board_late_init() (same patch as DEEPX_CORE_0P75_EN above) is the sole reader of P65 (input, polled up to 500ms) before enabling the DA9292's CH2_EN. No CM33 board file may claim this pad. Flashed and booted end to end on real silicon (v4 u-boot.bin, WSL Ubuntu-22.04: rzv2n-dev_defconfig + deepx-rail.cfg + fdtfile-v2m.cfg + no-dirty-version.cfg + gigadevice-xspi.cfg, aarch64-linux-gnu gcc 11.4.0, rc=0, 0 warnings): P65 read live and confirmed DEEPX_PWR_EN_REQ before console showed `ALP: DA9292 programmed CTRL_01=0x01 VOUT_CH2=0x96/0x96` then `ALP: DEEPX rail 0.75V up (PG)`; post-boot readback CTRL_01=0x03, VOUT_CH2=0x96/0x96, STATUS_00=0x03 (CH2_PG set, no UV/OV/OC), STATUS_01=0x00. See changelog.d/2045."

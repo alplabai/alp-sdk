@@ -416,8 +416,10 @@ code written against this byte works unchanged when a future HW rev
 lets the bridge serve it.  This byte is **not** `PMC_STATUS_00` and
 does not mirror its bit layout.  For register-level PMIC status
 (`PMC_STATUS_00` etc.) the host reads the DA9292 directly over
-`BRD_I2C` from the CM33 via `da9292_get_status()` in the
-`chips/da9292` driver — see `<alp/chips/da9292.h>`.
+`BRD_I2C` from the Cortex-A55 (Linux, or U-Boot for the DEEPX-rail
+bring-up sequence) via `da9292_get_status()` in the `chips/da9292`
+driver — RIIC8/BRD_I2C is Cortex-A55-exclusive, and the CM33 must
+never master it — see `<alp/chips/da9292.h>`.
 
 ### 3.5 DAC outputs (`v0.2+`)
 
@@ -1179,7 +1181,8 @@ header.
 * DA9292 fault pins / PMIC alarms — on the current SoM revision the
   `DA9292_INT`/`DA9292_TW` nets reach only the Renesas (P37/P36), so
   the host reads the pin state directly (`da9292_get_fault_pins()`)
-  and full PMIC register status over `BRD_I2C` from the CM33 via the
+  and full PMIC register status over `BRD_I2C` from the Cortex-A55
+  (Linux, or U-Boot for DEEPX-rail bring-up), not the CM33, via the
   `chips/da9292` driver; `DA9292_STATUS_FORWARD` answers `0xFF` until
   a HW rev wires the nets to the GD32 (see §3.4).
 * Streaming workloads (audio, video) — not in scope; use the

@@ -13,8 +13,9 @@ only in the `alp_e1m_<sku>_` token -- e.g.
 content, provided both SKUs are the same PCB. "Same PCB" is read from the
 SoM presets, not hard-coded: two SKUs are paired when their
 `metadata/e1m_modules/<SKU>.yaml` declare the same `family` AND the same
-`silicon_variant` (today: E1M-AEN801/E1M-AEN803, E1M-V2N101/E1M-V2N102,
-E1M-V2M101/E1M-V2M102). Such SKUs differ only by BOM population, so an
+`silicon_variant` (today: E1M-AEN801/E1M-AEN803,
+E1M-V2N101/E1M-V2N102/E1M-V2N103, E1M-V2M101/E1M-V2M102/E1M-V2M103).
+Such SKUs differ only by BOM population, so an
 overlay delta between them is drift unless it is a population fact listed
 in `ALLOWED_DELTAS` below.
 

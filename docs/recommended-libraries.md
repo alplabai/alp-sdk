@@ -184,8 +184,12 @@ deferred / considered tiers below or open an issue.  Adding a
 library is a matter of writing a manifest at
 `metadata/libraries/<name>.yaml` (shape per ADR 0018 and
 `metadata/schemas/library-v1.schema.json`; `board.yaml`'s
-`libraries:` references manifests by name) -- low friction
-once the case is made.
+`libraries:` references manifests by name), plus, where the library
+needs one, a compile-time profile header under
+[`metadata/library-profiles/<lib>/`](../metadata/library-profiles/)
+(`etl_profile.h`, `fmt_config.h`, `lv_conf.h`, `mbedtls_config.h`,
+`json_config.h`, `doctest_config.h`) -- low friction once the case is
+made.
 
 ## HW-backend profiles (per-library accelerator binding)
 

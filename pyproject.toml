@@ -31,8 +31,14 @@ model-io = [
     "flatbuffers>=23.1.21",
 ]
 # Full host model-compile toolchain (adds the Vela Ethos-U compiler).
+# Pinned exactly (not >=) -- metadata/npu_ops/ethos_u/*.json is keyed to a
+# specific vela release (see gen_npu_ops.py); an unpinned ">=" here is what
+# let CI silently install a newer vela than the committed tables and made
+# the real-vela freshness test in test_gen_npu_ops.py skip instead of run
+# (#2310, follow-up from #1470). Bump this deliberately, in lockstep with a
+# `python3 scripts/gen_npu_ops.py` regeneration, never on its own.
 model-compile = [
-    "ethos-u-vela>=3.9",
+    "ethos-u-vela==5.2.0",
     "tflite>=2.10",
     "flatbuffers>=23.1.21",
 ]

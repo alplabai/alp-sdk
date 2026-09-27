@@ -1,0 +1,16 @@
+diff --git a/drivers/isp/isp_wrapper/inc/isp_conf.h b/drivers/isp/isp_wrapper/inc/isp_conf.h
+index a3b1225..584174a 100644
+--- a/drivers/isp/isp_wrapper/inc/isp_conf.h
++++ b/drivers/isp/isp_wrapper/inc/isp_conf.h
+@@ -74,9 +74,9 @@ extern "C" {
+ #define ISP_CSM_V10 1
+ #endif /* defined(CONFIG_ISP_LIB_CSM_MODULE) */
+ 
+-#if defined(ISP_LIB_WBM_MODULE)
++#if defined(CONFIG_ISP_LIB_WBM_MODULE)
+ #define ISP_WBM_V10 1
+-#endif /* defined(ISP_LIB_WBM_MODULE) */
++#endif /* defined(CONFIG_ISP_LIB_WBM_MODULE) */
+ 
+ #ifdef __cplusplus
+ #if __cplusplus
