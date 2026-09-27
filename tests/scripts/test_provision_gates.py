@@ -169,6 +169,18 @@ def test_fip_fdtfile():
         gates.fip_fdtfile(FIP + b"boot/other.dtb")
 
 
+def test_fip_fdtfile_prefers_bootcmd_over_vendor_env_scripts():
+    # A real E1M FIP: the vendor emmcload/sd2load env scripts still name the
+    # stock EVK dtb, but only bootcmd runs at autoboot.
+    fip = (b"\0bootcmd=env default -a;run bootcmd_check;if ext4load mmc ${alp_mmc} "
+           b"0x48000000 boot/e1m-v2m101-x-evk.dtb; then run bootimage; fi\0"
+           b"emmcload=ext4load mmc 0:2 0x48000000 boot/r9a09g056n44-dev.dtb\0"
+           b"sd2load=ext4load mmc 1:2 0x48000000 boot/r9a09g056n44-dev.dtb\0")
+    assert gates.fip_fdtfile(fip) == "e1m-v2m101-x-evk.dtb"
+    with pytest.raises(ValueError, match="bootcmd"):
+        gates.fip_fdtfile(fip.replace(b"boot/Image\0", b"") + b"bootcmd=boot/other.dtb\0")
+
+
 # --- rail ------------------------------------------------------------------------
 
 def test_fip_rail():

@@ -187,11 +187,22 @@ def fip_rail(fip: bytes, family: str) -> GateResult:
 _FDT_RE = re.compile(rb"boot/([A-Za-z0-9_.,+-]+\.dtb)")
 
 
+_BOOTCMD_RE = re.compile(rb"bootcmd=[^\x00]*")
+
+
 def fip_fdtfile(fip: bytes) -> str:
-    """The dtb basename U-Boot loads (compiled in by patch 0002 as boot/<name>)."""
-    names = {m.decode("ascii") for m in _FDT_RE.findall(fip)}
+    """The dtb basename U-Boot loads (compiled in by patch 0002 as boot/<name>).
+
+    Read from the default ``bootcmd`` when the FIP carries one: the vendor
+    env scripts (``emmcload``/``sd2load``) also name the stock EVK dtb, but
+    only ``bootcmd`` runs at autoboot. Without a ``bootcmd`` every
+    ``boot/*.dtb`` in the FIP must agree."""
+    in_bootcmd = {m.decode("ascii") for cmd in _BOOTCMD_RE.findall(fip)
+                  for m in _FDT_RE.findall(cmd)}
+    names = in_bootcmd or {m.decode("ascii") for m in _FDT_RE.findall(fip)}
     if len(names) != 1:
-        raise ValueError(f"expected one boot/*.dtb in the FIP, found {sorted(names)}")
+        where = "the FIP's bootcmd" if in_bootcmd else "the FIP"
+        raise ValueError(f"expected one boot/*.dtb in {where}, found {sorted(names)}")
     return names.pop()
 
 
