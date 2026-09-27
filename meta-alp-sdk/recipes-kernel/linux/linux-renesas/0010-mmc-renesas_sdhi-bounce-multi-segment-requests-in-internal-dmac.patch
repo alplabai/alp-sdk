@@ -14,6 +14,10 @@ from it after a read). Single-segment requests keep the zero-copy
 dma_map_sg() path. When the buffer cannot be allocated the host keeps
 max_segs = 1, as before.
 
+Requests are pipelined (post_req() of one request can run while the
+next is in flight), so the buffer is owned by exactly one mmc_data at
+a time and only that request copies from or releases it.
+
 Upstream-Status: Pending
 Signed-off-by: Alp Lab AB
 ---
@@ -26,7 +30,7 @@ diff -ru a/drivers/mmc/host/renesas_sdhi.h b/drivers/mmc/host/renesas_sdhi.h
  	unsigned long end_flags;
 +	void *bounce_buf;		/* contiguous copy for multi-segment requests */
 +	dma_addr_t bounce_dma;
-+	bool bounce_active;		/* the current request goes through bounce_buf */
++	struct mmc_data *bounce_data;	/* the request that owns bounce_buf */
  	enum dma_slave_buswidth dma_buswidth;
  	dma_filter_fn filter;
  	void (*enable)(struct tmio_mmc_host *host, bool enable);
@@ -57,7 +61,7 @@ diff -ru a/drivers/mmc/host/renesas_sdhi_internal_dmac.c b/drivers/mmc/host/rene
  /*
   * Workaround for avoiding to use RX DMAC by multiple channels.
   * On R-Car H3 ES1.* and M3-W ES1.0, when multiple SDHI channels use
-@@ -373,8 +383,18 @@
+@@ -373,8 +383,23 @@
  						 (data->host_cookie == cookie);
  
  	if (unmap) {
@@ -65,12 +69,17 @@ diff -ru a/drivers/mmc/host/renesas_sdhi_internal_dmac.c b/drivers/mmc/host/rene
 -			     mmc_get_dma_dir(data));
 +		struct renesas_sdhi_dma *dma_priv = &host_to_priv(host)->dma_priv;
 +
-+		if (dma_priv->bounce_active) {
++		/*
++		 * Requests are pipelined: post_req() of the previous request can
++		 * run while the next one is in flight, so only the request that
++		 * owns the buffer may copy from or release it.
++		 */
++		if (dma_priv->bounce_data == data) {
 +			if (data->flags & MMC_DATA_READ)
 +				sg_copy_from_buffer(data->sg, data->sg_len,
 +						    dma_priv->bounce_buf,
 +						    data->blksz * data->blocks);
-+			dma_priv->bounce_active = false;
++			dma_priv->bounce_data = NULL;
 +		} else {
 +			dma_unmap_sg(&host->pdev->dev, data->sg, data->sg_len,
 +				     mmc_get_dma_dir(data));
@@ -78,7 +87,7 @@ diff -ru a/drivers/mmc/host/renesas_sdhi_internal_dmac.c b/drivers/mmc/host/rene
  		data->host_cookie = COOKIE_UNMAPPED;
  	}
  }
-@@ -384,9 +404,26 @@
+@@ -384,9 +409,26 @@
  			       struct mmc_data *data,
  			       enum renesas_sdhi_dma_cookie cookie)
  {
@@ -90,14 +99,14 @@ diff -ru a/drivers/mmc/host/renesas_sdhi_internal_dmac.c b/drivers/mmc/host/rene
 +	if (data->sg_len > 1) {
 +		size_t len = data->blksz * data->blocks;
 +
-+		/* bounced at start_dma time only: one buffer per host */
++		/* bounced at start_dma time only, one owner at a time */
 +		if (cookie == COOKIE_PRE_MAPPED || !dma_priv->bounce_buf ||
-+		    len > SDHI_BOUNCE_SIZE)
++		    dma_priv->bounce_data || len > SDHI_BOUNCE_SIZE)
 +			return false;
 +		if (!(data->flags & MMC_DATA_READ))
 +			sg_copy_to_buffer(data->sg, data->sg_len,
 +					  dma_priv->bounce_buf, len);
-+		dma_priv->bounce_active = true;
++		dma_priv->bounce_data = data;
 +		data->host_cookie = cookie;
 +		return true;
 +	}
@@ -105,17 +114,17 @@ diff -ru a/drivers/mmc/host/renesas_sdhi_internal_dmac.c b/drivers/mmc/host/rene
  	if (!dma_map_sg(&host->pdev->dev, data->sg, data->sg_len,
  			    mmc_get_dma_dir(data)))
  		return false;
-@@ -430,7 +467,8 @@
+@@ -430,7 +472,8 @@
  
  	/* set dma parameters */
  	writel(dtran_mode, host->ctl + DM_CM_DTRAN_MODE);
 -	writel(sg_dma_address(sg), host->ctl + DM_DTRAN_ADDR);
-+	writel(priv->dma_priv.bounce_active ? priv->dma_priv.bounce_dma :
++	writel(priv->dma_priv.bounce_data == data ? priv->dma_priv.bounce_dma :
 +	       sg_dma_address(sg), host->ctl + DM_DTRAN_ADDR);
  
  	host->dma_on = true;
  
-@@ -557,6 +595,24 @@
+@@ -557,6 +600,24 @@
  	/* Add pre_req and post_req */
  	host->ops.pre_req = renesas_sdhi_internal_dmac_pre_req;
  	host->ops.post_req = renesas_sdhi_internal_dmac_post_req;
