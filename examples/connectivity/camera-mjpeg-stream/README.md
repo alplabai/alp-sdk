@@ -203,23 +203,26 @@ of this example — see `docs/camera-shields.md`'s Stage B section for the
 8/6 derivation and `src/backends/camera/alif_isp_pico.c`'s `BUILD_ASSERT`
 that proves the shield's crop still produces 1280x960.
 
-`FRAME_FPS` above (15, the OV5647/IMX296 request) is NOT forwarded to
-IMX335 at all: `src/backends/camera/alif_isp_pico.c`'s fps request only
-ever reaches the OV5647 sensor node (hardcoded, not generic to whatever
-sensor is active — issue #2338 tracks this backend gap). IMX335 instead
-free-runs at its own driver default, 30 fps (upstream `imx335.c`'s
-`DEVICE_DT_INST_DEFINE` `.frame_rate = 30`), which already matches hal_alif
-patch 0014's AE envelope (calibrated at exactly 30 fps) with no request
-needed. AE is on (capped at 30.0 dB analog gain -- a public Sony
-datasheet-flyer figure, not bench-derived); AWB stays at the ISP's stock
-ARX3A0 default, same colour-uncalibrated caveat as the IMX296 variant above.
+`FRAME_FPS` above (15, the OV5647/IMX296 request) is now forwarded to
+whichever real sensor is behind the ISP (issue #2338, fixed — see
+`src/backends/camera/alif_isp_pico.c`), so IMX335 would otherwise also see
+that 15 fps request. IMX335's `imx335_framerates[]` (`{25, 30, 50, 60}`) has
+no 15 fps entry — the driver would round it up to 25 fps, a rate hal_alif
+patch 0014's AE envelope (calibrated at exactly 30 fps) was never derived
+against. This scenario (`aen_imx335` in `testcase.yaml`) overrides
+`CONFIG_CAMERA_MJPEG_STREAM_FPS` to 30 (`extra_configs`) so IMX335 keeps
+landing on its calibrated rate instead. AE is on (capped at 30.0 dB analog
+gain -- a public Sony datasheet-flyer figure, not bench-derived); AWB stays
+at the ISP's stock ARX3A0 default, same colour-uncalibrated caveat as the
+IMX296 variant above.
 
 ```bash
 west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
     examples/connectivity/camera-mjpeg-stream -- \
     "-DEXTRA_ZEPHYR_MODULES=<path-to-alp-sdk>;<path-to-hal_alif>" \
     "-DSHIELD=e1m_evk_rpi_csi innomaker_cam_imx335" \
-    "-DEXTRA_CONF_FILE=boards/overlay-1280x960.conf"
+    "-DEXTRA_CONF_FILE=boards/overlay-1280x960.conf" \
+    "-DCONFIG_CAMERA_MJPEG_STREAM_FPS=30"
 ```
 
 **Bench run 333** (E1M-AEN803 2026W36-0001): 1280x960, app stats `fps=30

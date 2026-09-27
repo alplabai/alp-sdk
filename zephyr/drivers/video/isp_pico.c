@@ -1207,11 +1207,13 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 		 * but IMX335's calibration (hal_alif patch 0014's IMX335_AE_EXP_TIME_MAX_US, already
 		 * in the SAME microsecond unit as int_time_max_us here -- no register/dB conversion
 		 * needed, unlike gain) assumes an EXACT 30 fps frame period, this sensor driver's own
-		 * default. A direct video API caller that sets a different rate on this sensor
-		 * (video_set_frmival() against the sensor device directly -- no app-level backend
-		 * forwards an fps request to IMX335 today, issue #2338) would otherwise push a
-		 * ceiling the calibration was never derived against. 0 (every non-IMX335 sensor)
-		 * means "trust the frame-period derivation above", unchanged behaviour.
+		 * default. A caller that sets a different rate on this sensor -- directly via
+		 * video_set_frmival() against the sensor device, or via the app-level
+		 * src/backends/camera/alif_isp_pico.c backend's cfg->fps request (issue #2338:
+		 * that backend now forwards cfg->fps generically to whichever sensor is wired,
+		 * not just OV5647) -- would otherwise push a ceiling the calibration was never
+		 * derived against. 0 (every non-IMX335 sensor) means "trust the frame-period
+		 * derivation above", unchanged behaviour.
 		 */
 		if (CONFIG_VIDEO_ISP_VSI_AE_EXP_TIME_MAX_US_CAP > 0 &&
 		    int_time_max_us > (uint32_t)CONFIG_VIDEO_ISP_VSI_AE_EXP_TIME_MAX_US_CAP) {

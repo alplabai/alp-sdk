@@ -39,8 +39,9 @@
  *     AE (VIDEO_CID_EXPOSURE_AUTO) turned on via the standard Zephyr video
  *     ctrl registry before the first video_stream_start(), the caller's
  *     requested frame interval (cfg->fps, falling back to a 10 fps default
- *     -- a choice, not a hardware limit -- when unset; see the DT_NODE_EXISTS
- *     block below), then the ISP OUTPUT format.  The ISP MI
+ *     -- a choice, not a hardware limit -- when unset; applied to whichever
+ *     real sensor is wired behind the ISP, see the video_find_vdev() chain
+ *     walk below), then the ISP OUTPUT format.  The ISP MI
  *     never produces RGB565 (isp_pico.c's supported_output_fmts is
  *     YUV/mono/Bayer only) -- a caller requesting ALP_PIXFMT_RGB565 gets a
  *     negotiated YUV output (YUV420 planar preferred, YUYV fallback -- see
@@ -110,6 +111,14 @@ LOG_MODULE_REGISTER(alp_camera_alif_isp_pico, CONFIG_LOG_DEFAULT_LEVEL);
 #include "alif_isp_pico.h"
 #include "alp_slot_claim.h"
 #include "yuv_to_rgb565.h"
+
+/* Upstream's private drivers/video/video_device.h (put on this backend's
+ * include path too by zephyr/CMakeLists.txt's CONFIG_VIDEO_ISP_VSI guard --
+ * this backend already depends on that Kconfig symbol, see
+ * ALP_SDK_CAMERA_ALIF_ISP in zephyr/kconfigs/power-camera-display.kconfig).
+ * Needed for video_find_vdev()/struct video_device -- see the fps-forwarding
+ * chain-walk in open(), below (issue #2338). */
+#include "video_device.h"
 
 #ifndef CONFIG_ALP_SDK_MAX_CAMERA_HANDLES
 #define CONFIG_ALP_SDK_MAX_CAMERA_HANDLES 2
@@ -429,77 +438,115 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	struct video_control ae_ctrl = { .id = VIDEO_CID_EXPOSURE_AUTO, .val = VIDEO_EXPOSURE_AUTO };
 	(void)video_set_ctrl(dev, &ae_ctrl);
 
-#if DT_NODE_EXISTS(DT_NODELABEL(ov5647))
-	/* Request the caller's fps (issue #2276: this used to hard-code 10 fps
-	 * here, silently ignoring cfg->fps).  cfg->fps == 0 means "backend
-	 * default" (see <alp/camera.h>'s alp_camera_config_t::fps doc) -- NOT
-	 * the same convention width/height use just above (those are a
-	 * "you must choose" sentinel that alp_camera_open() rejects outright;
-	 * an unset fps is not an error, it just falls back to this backend's
-	 * own default of 10 fps, the OV5647's lowest supported rate
-	 * (ov5647_framerates[] in ov5647.c) -- a *choice* that buys AE the
-	 * most exposure headroom in a dim scene, not a hardware floor.
-	 * ov5647_set_frmival() then picks the closest of {10, 15, 30, 45, 60,
-	 * 90, 120} it can actually reach at this mode (VTS-clamped), so read
-	 * the result back rather than assume the request landed exactly.
+	/* Request the caller's fps on whichever real sensor is wired behind this
+	 * ISP -- OV5647, IMX296, IMX335, or a future sensor -- with no per-sensor
+	 * DT nodelabel list (issue #2338: this used to reach only
+	 * DEVICE_DT_GET(DT_NODELABEL(ov5647)), silently dropping the request for
+	 * every other sensor).  cfg->fps == 0 means "backend default" (see
+	 * <alp/camera.h>'s alp_camera_config_t::fps doc) -- NOT the same
+	 * convention width/height use just above (those are a "you must choose"
+	 * sentinel that alp_camera_open() rejects outright; an unset fps is not
+	 * an error, it just falls back to this backend's own default of 10 fps --
+	 * a *choice* that buys AE the most exposure headroom in a dim scene on a
+	 * sensor with a wide rate table like the OV5647 (ov5647_framerates[] in
+	 * ov5647.c: {10, 15, 30, 45, 60, 90, 120}), not a hardware floor any
+	 * sensor needs.  Each sensor's own set_frmival() picks the closest rate
+	 * it can actually reach (VTS-clamped for OV5647; IMX296's all-pixel-scan
+	 * mode has exactly one fixed 60.3 frame/s rate, imx296.c's
+	 * imx296_set_frmival() -- see below), so read the result back rather
+	 * than assume the request landed exactly.
 	 *
-	 * isp_pico.c can't be asked generically here: it derives its own AE
-	 * envelope from video_get_frmival(config->controller, ...) (isp ->
-	 * cam -> csi -> sensor chain, sensor-agnostic -- see that file's AE
-	 * comment), but `controller` is private to its driver config, not
-	 * reachable from this backend, and isp_pico's video_driver_api
-	 * doesn't implement .set_frmival/.get_frmival itself. So this stays
-	 * scoped to the OV5647 shield's own DT node; a future sensor on this
-	 * ISP path needs its own branch here.
+	 * isp_pico.c's own video_driver_api implements neither .set_frmival nor
+	 * .get_frmival (its AE envelope instead reads
+	 * video_get_frmival(config->controller, ...), and `controller` is
+	 * private to that driver's own config, unreachable from here) -- so this
+	 * backend can't just call video_set_frmival(dev, ...) on the ISP device
+	 * itself. Reach the real sensor by walking the SAME upstream
+	 * video_device chain isp_pico.c's own AE code relies on: isp -> cam ->
+	 * csi -> sensor, each hop registered by a driver's own
+	 * VIDEO_DEVICE_DEFINE() `.src_dev` (isp_pico.c / video_alif.c /
+	 * video_csi_dw.c) and looked up with video_find_vdev(). The chain
+	 * terminates at the sensor's own VIDEO_DEVICE_DEFINE(..., NULL)
+	 * (ov5647.c / imx296.c / imx335.c all register src_dev = NULL, having no
+	 * further upstream) -- so following `.src_dev` until it goes NULL lands
+	 * on the sensor regardless of which one is wired. In TPG mode
+	 * (config->controller == NULL, no real sensor) the chain terminates at
+	 * the ISP device itself; video_set_frmival() on it then just returns
+	 * -ENOSYS below, which this treats as "nothing to do", not an error.
 	 *
-	 * The sensor driver owns the exposure ceiling: ov5647_set_ctrl_exposure()
-	 * (ov5647.c) clamps every VIDEO_CID_EXPOSURE write to the active mode's
-	 * VTS - 4 lines. */
-	const struct device *sensor_dev = DEVICE_DT_GET(DT_NODELABEL(ov5647));
-	if (device_is_ready(sensor_dev)) {
+	 * The sensor driver owns the exposure ceiling: e.g. OV5647's
+	 * ov5647_set_ctrl_exposure() (ov5647.c) clamps every VIDEO_CID_EXPOSURE
+	 * write to the active mode's VTS - 4 lines. */
+	const struct device *fps_dev = dev;
+
+	for (int hop = 0; hop < 4; hop++) {
+		struct video_device *vdev = video_find_vdev(fps_dev);
+
+		if (vdev == NULL || vdev->src_dev == NULL) {
+			break;
+		}
+		fps_dev = vdev->src_dev;
+	}
+
+	if (!device_is_ready(fps_dev)) {
+		LOG_WRN("camera%u: %s not ready; fps request (%u) not applied",
+		        cfg->camera_id,
+		        fps_dev->name,
+		        cfg->fps);
+	} else {
 		uint8_t              requested_fps = (cfg->fps != 0u) ? cfg->fps : 10u;
 		struct video_frmival frmival       = { .numerator = 1, .denominator = requested_fps };
-		int                  rc            = video_set_frmival(sensor_dev, &frmival);
+		int                  rc            = video_set_frmival(fps_dev, &frmival);
 
-		if (rc != 0) {
-			LOG_WRN("camera%u: video_set_frmival(%u fps) failed: rc=%d",
+		if (rc == -ENOSYS || rc == -ENOTSUP) {
+			/* Not a hard error: a device with no settable rate (TPG mode
+			 * above, or a future sensor that rejects set_frmival outright)
+			 * just keeps running at whatever rate it already has. */
+			LOG_INF("camera%u: %s has no settable frame rate; fps request "
+			        "(%u) not applied",
+			        cfg->camera_id,
+			        fps_dev->name,
+			        requested_fps);
+		} else if (rc != 0) {
+			LOG_WRN("camera%u: video_set_frmival(%u fps) on %s failed: rc=%d",
 			        cfg->camera_id,
 			        requested_fps,
+			        fps_dev->name,
 			        rc);
-		}
+		} else {
+			struct video_frmival actual = { 0 };
 
-		struct video_frmival actual = { 0 };
-		if (video_get_frmival(sensor_dev, &actual) == 0 && actual.denominator > 0) {
-			/* Print the settled interval as num/den rather than a
-			 * truncating denominator/numerator division -- a
-			 * non-integer or sub-1-fps settled rate would otherwise
-			 * print a misleading rounded (or zero) fps. The request
-			 * was always {.numerator = 1, .denominator =
-			 * requested_fps}, so compare against that rather than
-			 * requested_fps alone. */
-			bool settled_as_requested =
-			    (actual.numerator == 1u) && (actual.denominator == requested_fps);
+			if (video_get_frmival(fps_dev, &actual) == 0 && actual.denominator > 0) {
+				/* Print the settled interval as num/den rather than a
+				 * truncating denominator/numerator division -- a
+				 * non-integer or sub-1-fps settled rate would otherwise
+				 * print a misleading rounded (or zero) fps. The request
+				 * was always {.numerator = 1, .denominator =
+				 * requested_fps}, so compare against that rather than
+				 * requested_fps alone. Only logged, not reported back to
+				 * the caller -- <alp/camera.h> has no settled-fps field
+				 * yet (issue #2279). */
+				bool settled_as_requested =
+				    (actual.numerator == 1u) && (actual.denominator == requested_fps);
 
-			if (settled_as_requested) {
-				LOG_DBG("camera%u: requested %u fps, sensor settled on %u/%u",
-				        cfg->camera_id,
-				        requested_fps,
-				        actual.denominator,
-				        actual.numerator);
-			} else {
-				LOG_INF("camera%u: requested %u fps, sensor settled on %u/%u",
-				        cfg->camera_id,
-				        requested_fps,
-				        actual.denominator,
-				        actual.numerator);
+				if (settled_as_requested) {
+					LOG_DBG("camera%u: %s requested %u fps, settled on %u/%u",
+					        cfg->camera_id,
+					        fps_dev->name,
+					        requested_fps,
+					        actual.denominator,
+					        actual.numerator);
+				} else {
+					LOG_INF("camera%u: %s requested %u fps, settled on %u/%u",
+					        cfg->camera_id,
+					        fps_dev->name,
+					        requested_fps,
+					        actual.denominator,
+					        actual.numerator);
+				}
 			}
 		}
-	} else {
-		LOG_WRN("camera%u: OV5647 device not ready; fps request (%u) not applied",
-		        cfg->camera_id,
-		        cfg->fps);
 	}
-#endif
 
 	uint8_t want = ARRAY_SIZE(st->vbufs);
 	if (vcaps.min_vbuf_count > want) {
