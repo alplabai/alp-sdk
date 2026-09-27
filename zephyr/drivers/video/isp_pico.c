@@ -1207,11 +1207,13 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 		 * but IMX335's calibration (hal_alif patch 0014's IMX335_AE_EXP_TIME_MAX_US, already
 		 * in the SAME microsecond unit as int_time_max_us here -- no register/dB conversion
 		 * needed, unlike gain) assumes an EXACT 30 fps frame period, this sensor driver's own
-		 * default. A direct video API caller that sets a different rate on this sensor
-		 * (video_set_frmival() against the sensor device directly -- no app-level backend
-		 * forwards an fps request to IMX335 today, issue #2338) would otherwise push a
-		 * ceiling the calibration was never derived against. 0 (every non-IMX335 sensor)
-		 * means "trust the frame-period derivation above", unchanged behaviour.
+		 * default. A caller that sets a different rate on this sensor -- directly via
+		 * video_set_frmival() against the sensor device, or via the app-level
+		 * src/backends/camera/alif_isp_pico.c backend's cfg->fps request (issue #2338:
+		 * that backend now forwards cfg->fps generically to whichever sensor is wired,
+		 * not just OV5647) -- would otherwise push a ceiling the calibration was never
+		 * derived against. 0 (every non-IMX335 sensor) means "trust the frame-period
+		 * derivation above", unchanged behaviour.
 		 */
 		if (CONFIG_VIDEO_ISP_VSI_AE_EXP_TIME_MAX_US_CAP > 0 &&
 		    int_time_max_us > (uint32_t)CONFIG_VIDEO_ISP_VSI_AE_EXP_TIME_MAX_US_CAP) {
@@ -2653,6 +2655,51 @@ static int isp_set_signal(const struct device *dev,
 #endif /* CONFIG_POLL */
 
 /*
+ * Issue #2338: forward frmival get/set to `controller` -- the same device
+ * isp_apply_ae() (above) already reads video_get_frmival() from directly,
+ * bypassing this vtable. Registering these here lets an app-level caller
+ * (src/backends/camera/alif_isp_pico.c) reach the real sensor's frame rate
+ * with one video_set_frmival(isp_dev, ...) call instead of reimplementing
+ * the isp -> cam -> csi -> sensor forwarding chain itself: each of those
+ * drivers' own .get_frmival/.set_frmival (video_alif.c's
+ * alif_cam_get/set_frmival, video_csi_dw.c's csi2_dw_get/set_frmival) already
+ * forwards one hop further upstream, so calling this on the ISP walks the
+ * whole chain automatically. TPG-only builds have no controller wired
+ * (config->controller == NULL, no camera port@0) -- nothing to forward to,
+ * so both return -ENOSYS, matching what video_set_frmival()/video_get_frmival()
+ * document for "API not implemented" rather than -EINVAL from a NULL dev.
+ */
+static int isp_get_frmival(const struct device *dev, struct video_frmival *frmival)
+{
+	const struct isp_config *config = dev->config;
+
+	if (!frmival) {
+		return -EINVAL;
+	}
+
+	if (!config->controller) {
+		return -ENOSYS;
+	}
+
+	return video_get_frmival(config->controller, frmival);
+}
+
+static int isp_set_frmival(const struct device *dev, struct video_frmival *frmival)
+{
+	const struct isp_config *config = dev->config;
+
+	if (!frmival) {
+		return -EINVAL;
+	}
+
+	if (!config->controller) {
+		return -ENOSYS;
+	}
+
+	return video_set_frmival(config->controller, frmival);
+}
+
+/*
  * v4.4 video-API shim (Alp Lab AB): the fork's value-pointer ctrl API
  * (set_ctrl/get_ctrl taking `unsigned int cid, void *value`) is gone.  The ISP
  * exposed two PRIVATE CIDs by reading/writing the caller's `void *value`:
@@ -2676,6 +2723,8 @@ static int isp_set_signal(const struct device *dev,
 static DEVICE_API(video, isp_driver_api) = {
 	.set_format = isp_set_fmt,
 	.get_format = isp_get_fmt,
+	.get_frmival = isp_get_frmival,
+	.set_frmival = isp_set_frmival,
 	.set_stream = isp_set_stream,
 	.get_caps = isp_get_caps,
 	.flush = isp_flush,

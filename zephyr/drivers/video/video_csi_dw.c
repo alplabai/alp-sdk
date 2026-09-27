@@ -1060,6 +1060,30 @@ static int csi2_dw_get_frmival(const struct device *dev, struct video_frmival *f
 	return video_get_frmival(config->sensor[data->current_sensor], frmival);
 }
 
+/*
+ * Issue #2338: same forwarding shape as csi2_dw_get_frmival() above, for the
+ * SET side -- forwards to the SAME config->sensor[data->current_sensor] the
+ * GET side reads, so a 2-sensor CSI node's AE (which reads back through
+ * .get_frmival) sees the rate this sets on the currently-selected sensor,
+ * not a stale/different one. Alp Lab AB.
+ */
+static int csi2_dw_set_frmival(const struct device *dev, struct video_frmival *frmival)
+{
+	const struct csi2_dw_config *config = dev->config;
+	struct csi2_dw_data *data = dev->data;
+
+	if (!frmival) {
+		return -EINVAL;
+	}
+
+	if (!config->sensor[data->current_sensor]) {
+		LOG_ERR("Invalid sensor selected!");
+		return -ENODEV;
+	}
+
+	return video_set_frmival(config->sensor[data->current_sensor], frmival);
+}
+
 /* v4.4 video-API shim (Alp Lab AB): dropped the `enum video_endpoint_id ep`
  * param + its validation; the caps forwarder loses its `ep` arg.
  */
@@ -1099,6 +1123,7 @@ static DEVICE_API(video, csi2_dw_driver_api) = {
 	.set_format = csi2_dw_set_format,
 	.get_format = csi2_dw_get_format,
 	.get_frmival = csi2_dw_get_frmival,
+	.set_frmival = csi2_dw_set_frmival,
 	.set_stream = csi2_dw_set_stream,
 	.get_caps = csi2_dw_get_caps,
 };

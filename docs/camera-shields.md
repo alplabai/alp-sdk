@@ -990,28 +990,45 @@ IMX335 caller requesting any size other than the shield's own cropped
 1280x960, rather than silently ignoring the mismatch.
 
 **Frame rate**: `src/backends/camera/alif_isp_pico.c`'s `cfg->fps` request
-(the portable `<alp/camera.h>` `fps` field) only ever reaches the OV5647
-sensor node (`DEVICE_DT_GET(DT_NODELABEL(ov5647))`, hardcoded, not generic
-to whatever sensor is actually active) -- so `examples/connectivity/
-camera-mjpeg-stream`'s 15 fps request for its shared 1280x960 path is
-simply NEVER forwarded to IMX335 or IMX296; both free-run at whatever rate
-their own driver defaults to. IMX335's driver default is 30 fps (upstream
-`imx335.c`'s `DEVICE_DT_INST_DEFINE` `.frame_rate = 30`, `HMAX` `0x0226`
-programmed at init), which already matches hal_alif patch 0014's AE
-envelope (calibrated at exactly 30 fps) with no explicit request needed --
-bench run 334 confirmed this directly, reading `HMAX`/`VMAX` back over I2C
-as `0x0226`/`0x001194`, the exact values the driver's own 30 fps default
-programs. This app-level backend forwarding fps only to OV5647 is a real
-gap, tracked as issue #2338 -- it is not something this Stage B work needed
-to fix to keep IMX335 on its envelope's assumed rate. `isp_pico.c`'s
-`isp_apply_ae()` separately gained `CONFIG_VIDEO_ISP_VSI_AE_EXP_TIME_MAX_US_CAP`
-(33207 for IMX335, matching `IMX335_AE_EXP_TIME_MAX_US`), clamping the
-pushed exposure-time ceiling to the calibration's own assumption the same
-way the existing gain-ceiling clamp already does -- a backstop for a
-DIRECT video API caller that sets a different rate on this sensor
-(`video_set_frmival()` against the sensor device itself, bypassing the
-app-level backend entirely), not something this example's own build
-exercises.
+(the portable `<alp/camera.h>` `fps` field) now reaches whichever real sensor
+is wired behind the ISP -- OV5647, IMX296, or IMX335 -- generically, with one
+`video_set_frmival(dev, ...)` call on the ISP device itself, instead of a
+hardcoded `DEVICE_DT_GET(DT_NODELABEL(ov5647))` (issue #2338, fixed).
+`isp_pico.c` gained `.get_frmival`/`.set_frmival` forwarding to
+`config->controller`, `video_alif.c`'s `alif_cam_set_frmival()` forwards to
+its endpoint (matching its existing `alif_cam_get_frmival()`), and
+`video_csi_dw.c`'s `csi2_dw_set_frmival()` forwards to the same
+`config->sensor[data->current_sensor]` its own `.get_frmival` already reads
+-- so calling `video_set_frmival()` on the ISP walks the whole
+isp -> cam -> csi -> sensor chain through those forwarders and lands on
+whichever real sensor is wired, and a 2-sensor CSI node's AE (which reads the
+rate back through `.get_frmival`) sees the rate this sets. A sensor whose own
+`set_frmival()` can't actually change the rate (IMX296's all-pixel-scan mode
+has exactly one fixed 60.3 frame/s -- see `imx296_set_frmival()`, which
+always reports that fixed rate back rather than erroring) or that returns
+`-ENOSYS`/`-ENOTSUP` outright (e.g. TPG mode, no controller wired) just keeps
+running at its existing rate; that is logged, not treated as a failure.
+
+This closed a real gap for IMX335 specifically: `examples/connectivity/
+camera-mjpeg-stream`'s shared 1280x960 path requests 15 fps, and IMX335's
+`imx335_framerates[]` (`{25, 30, 50, 60}`, upstream `imx335.c`) has no 15 fps
+entry -- the driver would now round that request up to 25 fps, a rate
+hal_alif patch 0014's AE envelope (calibrated at exactly 30 fps) was never
+derived against. Fixed by splitting the requested fps out of the
+resolution-select Kconfig into its own `CONFIG_CAMERA_MJPEG_STREAM_FPS`
+symbol (`examples/connectivity/camera-mjpeg-stream/Kconfig`), which the
+`aen_imx335` scenario in that example's `testcase.yaml` overrides to 30 via
+`extra_configs` -- IMX335 keeps landing on its calibrated rate, and
+OV5647/IMX296 keep the unaffected 15 fps default (OV5647 reaches it exactly;
+IMX296 stays at its fixed 60.3 frame/s regardless of the request, as before).
+`isp_pico.c`'s `isp_apply_ae()` separately carries
+`CONFIG_VIDEO_ISP_VSI_AE_EXP_TIME_MAX_US_CAP` (33207 for IMX335, matching
+`IMX335_AE_EXP_TIME_MAX_US`), clamping the pushed exposure-time ceiling to
+the calibration's own assumption the same way the existing gain-ceiling
+clamp already does -- this backstop now also covers this app-level path (an
+app requesting a rate other than 30 on IMX335), not just a direct
+`video_set_frmival()` caller bypassing the backend entirely. Bench-verified
+on real silicon -- see bench run 338 below.
 
 `examples/aen/aen-isp-capture` gains an `-DAEN_ISP_IMX335=ON` variant
 (`overlay-imx335.conf`), same AE-on/off shape as the IMX296 variant,
@@ -1046,6 +1063,19 @@ present in that image, but their specific effects are NOT separately
 bench-proven by this run (a passing capture does not distinguish "rounded
 correctly" from "the rounding never mattered this session"); the gain
 rounding's own proof is `tests/zephyr/isp_ae_conv` on `native_sim`.
+
+**Bench run 338** (`camera-mjpeg-stream`, `aen_imx335` scenario, same board,
+after issue #2338's fix -- see that changelog entry): proves the fps request
+now actually reaches IMX335 instead of being silently dropped. With
+`CONFIG_CAMERA_MJPEG_STREAM_FPS=30` (this scenario's override): driver
+`frame_rate` 30, `HMAX 0x0226`/`VMAX 0x001194` read back over I2C,
+`fps=30 fail=0 retry=0`, one client 29.98 fps / 779.4 KB/s delivered over
+30 s. With the symbol forced back to 15 (this fix's default, run for
+comparison against the pre-fix behaviour): the backend logged `camera0:
+requested 15 fps, settled on 25/1`, driver `frame_rate` 25, `HMAX 0x0280` --
+IMX335 rounds the request to its nearest supported rate (`imx335_framerates[]`
+`{25, 30, 50, 60}`), exactly as designed. OV5647 was not bench-verified this
+run (not fitted on this board); IMX296 was not bench-verified.
 
 **AEN803 build verification** (`-Werror`,
 `CONFIG_COMPILER_WARNINGS_AS_ERRORS=y`, beyond the bench runs above):
