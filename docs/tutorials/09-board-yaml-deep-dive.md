@@ -452,7 +452,7 @@ against either the SoM's `memory_map:` regions (auto-derived from
 the SoC variant when not overridden) or `on_module.ospi_memories:`
 keys (when the SoM ships with external OSPI flash).  A `memory_map:`
 region marked `carveout: false` is a partition *inside* a flash-class
-node rather than a flash device of its own (on E1M-AEN301..801 that's
+node rather than a flash device of its own (on E1M-AEN301..803 that's
 `mcuboot`, `he_slot0`, `hp_slot0`, `reserved`, `storage`, and `atoc`,
 all living inside the `mram_storage` flash node) and is refused as a
 `flash_device:` target with a reason (#1484).

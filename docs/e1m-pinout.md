@@ -152,9 +152,10 @@ It does **not** specify:
 
 ## Version pinning
 
-The SDK's v0.1 release is built against **e1m-spec v1.1** (the
-first public release).  The pin is referenced explicitly in
-`west.yml` so a `west update` on this SDK pulls a known-compatible
+The SDK's v0.1 release is built against **e1m-spec v1.0** (the
+first public release).  The pin is recorded in
+`metadata/e1m/e1m-spec.lock` (`ref`/`sha`/`version`) so a
+`west update` on this SDK pulls a known-compatible
 spec revision.
 
 If you're adding support for a new SoM or board:

@@ -42,8 +42,8 @@ slice (this project is M33-only -- `a55_cluster: os: "off"` in its
 |-------------------------------------|----------|
 | Mic -> I2S RX DMA                   | ~2.0 ms  |
 | `<alp/dsp.h>` FFT pipe (GD32 bridge)| ~1.5 ms  |
-| `<alp/inference.h>` invoke (TFLM)   | ~3.0 ms  |
-| Mask apply + IFFT                   | ~1.5 ms  |
+| `<alp/inference.h>` invoke (TFLM)   | ~3.0 ms (unmeasured estimate) |
+| Mask apply + IFFT (still stubbed)   | ~1.5 ms  |
 | I2S TX DMA push                     | ~2.0 ms  |
 | **total**                           | ~10.0 ms |
 

@@ -241,8 +241,9 @@ header-only utility libraries (`etl`, `fmt`, `nlohmann-json`,
 `doctest`) plus `catch2` (test framework, host-side), `jsmn`
 (parser, pure-SW only), and `nanopb` (serialisation, pure-SW only)
 -- their value lives in the pure-SW path with no accelerator class
-to bind.  The other 15 libraries each carry at least one
-`requires_cap:`-gated backend entry.
+to bind.  The other 15 declare at least one accelerator binding; 11 of
+them gate it on `requires_cap:` (the remaining four — `coap`,
+`libwebsockets`, `modbus`, `pid` — carry an ungated `priority:` entry).
 
 Regression-tested by
 [`tests/scripts/test_project_backends.py`](../tests/scripts/test_project_backends.py)'s
