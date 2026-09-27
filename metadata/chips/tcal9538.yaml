@@ -31,11 +31,6 @@ gpios:
 kconfig:
   zephyr:         ALP_SDK_CHIP_TCAL9538
   baremetal:      ALP_SDK_CHIP_TCAL9538
-  # Linux (V2N-family A-cluster, meta-alp-sdk linux-renesas): ADR 0017
-  # Tier-1, no patch needed -- GPIO_PCA953X is already =y at
-  # 6.1.141-cip43 and its in-tree "nxp,pca9538" compatible binds this
-  # register-compatible part as-is. E1M-X-EVK &i2c0 nodes:
-  # tcal9538@71 (U37 PCIe) / tcal9538@73 (U35 main).
 
 families:
   - aen
