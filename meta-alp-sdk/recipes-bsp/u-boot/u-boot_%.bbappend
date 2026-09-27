@@ -279,7 +279,8 @@ SRC_URI:append:rzv2n-family = " file://0009-rzv2n-dev-ALP-E1M-publish-sku-to-cho
 # OUI block). Neither the RZ/V2N SoC nor this SoM has any other MAC
 # source. Must land after 0009: it edits the same alp_som_is_v2n_m1()
 # function body 0009's own hunk already touched (adding an alp_serial
-# capture alongside 0009's alp_sku one).
+# capture alongside 0009's alp_sku one), and after 0002: it rewrites the
+# #define CONFIG_BOOTCOMMAND line 0002 introduced.
 #
 # meta-rz-features/meta-rz-drpai's OWN, separate u-boot bbappend
 # (recipes-bsp/u-boot/files/0001-add-ether-setting.patch) sets

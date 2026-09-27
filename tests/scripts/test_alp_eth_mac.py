@@ -166,7 +166,12 @@ class TestDeriveMac(unittest.TestCase):
 
     def test_first_octet_is_fixed_locally_administered_byte(self):
         end0, _ = mac.derive_both_macs("2026W38-0001")
-        self.assertEqual(end0.split(":")[0], f"{mac.MAC_OCTET0:02X}")
+        o0 = int(end0.split(":")[0], 16)
+        # Assert the properties, not the constant: unicast, locally
+        # administered, IEEE 802c SLAP AAI quadrant.
+        self.assertEqual(o0 & 0b01, 0b00)
+        self.assertEqual(o0 & 0b10, 0b10)
+        self.assertEqual((o0 >> 2) & 0b11, 0b00)
 
     def test_two_different_serials_never_collide(self):
         # Injectivity spot-check across a range of index values with the
@@ -178,6 +183,16 @@ class TestDeriveMac(unittest.TestCase):
             m = mac.derive_mac(serial, 0)
             self.assertNotIn(m, seen)
             seen.add(m)
+        # Letter index characters too: step every Crockford position.
+        seen = set()
+        alpha = mac.CROCKFORD_ALPHABET
+        for i in range(len(alpha)):
+            for j in (0, 7, 31):
+                serial = f"2026W38-{alpha[i]}{alpha[j]}{alpha[(i + j) % 32]}{alpha[31 - i]}"
+                for iface in (0, 1):
+                    m = mac.derive_mac(serial, iface)
+                    self.assertNotIn(m, seen)
+                    seen.add(m)
 
     def test_iface_out_of_range_rejected(self):
         with self.assertRaises(mac.AlpEthMacError):
@@ -186,3 +201,45 @@ class TestDeriveMac(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCSideParity(unittest.TestCase):
+    """Textual parity between scripts/alp_eth_mac.py and the U-Boot C in
+    patch 0010 -- the two implementations of one encoding."""
+
+    PATCH = (Path(__file__).resolve().parents[2] / "meta-alp-sdk" / "recipes-bsp" / "u-boot"
+             / "u-boot" / "0010-rzv2n-dev-ALP-E1M-serial-derived-eth-mac.patch")
+
+    def setUp(self):
+        self.src = self.PATCH.read_text(encoding="utf-8")
+
+    def _c_define(self, name):
+        m = re.search(r"^\+#define\s+" + name + r"\s+(0x[0-9A-Fa-f]+|\d+)u?", self.src, re.M)
+        self.assertIsNotNone(m, name)
+        return int(m.group(1), 0)
+
+    def test_constants_match(self):
+        for c_name, py in (("ALP_ETH_MAC_OCTET0", mac.MAC_OCTET0),
+                           ("ALP_ETH_MAC_PREFIX", mac.MAC_PREFIX_NIBBLE),
+                           ("ALP_ETH_YEAR_BASE", mac.YEAR_BASE),
+                           ("ALP_ETH_YEAR_BITS", mac.YEAR_BITS),
+                           ("ALP_ETH_WEEK_BITS", mac.WEEK_BITS),
+                           ("ALP_ETH_INDEX_BITS", mac.INDEX_BITS),
+                           ("ALP_ETH_IFACE_BITS", mac.IFACE_BITS),
+                           ("ALP_ETH_RESERVED_BITS", mac.RESERVED_BITS)):
+            self.assertEqual(self._c_define(c_name), py, c_name)
+
+    def test_cid_fallback_prefix_is_disjoint(self):
+        self.assertNotEqual(self._c_define("ALP_ETH_MAC_PREFIX_CID"), mac.MAC_PREFIX_NIBBLE)
+
+    def test_shift_chain_order(self):
+        body = self.src[self.src.index("static void alp_eth_derive_mac("):]
+        chain = re.findall(r"<< ALP_ETH_(\w+)_BITS", body[:body.index("\n+}")])
+        self.assertEqual(chain, ["YEAR", "WEEK", "INDEX", "IFACE", "RESERVED"])
+        for k in range(1, 6):
+            self.assertIn(f"mac[{k}] = (u8)(value >> {8 * (5 - k)})", body)
+
+    def test_golden_vectors_quoted(self):
+        end0, end1 = mac.derive_both_macs("2026W38-0001")
+        self.assertIn(end0, self.src)
+        self.assertIn(end1, self.src)
