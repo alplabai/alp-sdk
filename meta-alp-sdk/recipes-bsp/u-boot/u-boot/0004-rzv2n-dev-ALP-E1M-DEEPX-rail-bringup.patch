@@ -1,0 +1,492 @@
+From 380265c6cc89402010e28823ab075bca6f8e9549 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Thu, 24 Sep 2026 09:00:00 +0200
+Subject: [PATCH] rzv2n-dev: ALP E1M DEEPX 0.75V rail bring-up before PCIe
+
+The V2N-M1 SoM's DEEPX DX-M1 core rail (DA9292 CH2, 0.75V) is currently
+not sequenced by any code path -- patch 0001 releases M1_RESET and
+enables the PCIe mux purely on the on-module EEPROM manifest match, with
+no rail step in front of it.  The DA9292-AROVx OTP variant this SoM uses
+boots with CH2_VSTEP=1 (doubled voltage range, PMC_CTRL_01 reset 0x80):
+releasing M1_RESET before CH2 is confirmed at 0.75V and power-good risks
+an over-voltage event on the DEEPX core rail the instant the chip starts
+drawing current, not merely a brownout.
+
+board_late_init() now runs alp_deepx_rail_bringup() BEFORE
+alp_deepx_pcie_bringup(), gated on the new CONFIG_ALP_E1M_DEEPX_RAIL (set
+via meta-alp-sdk's deepx-rail.cfg for the V2M MACHINEs only, default n
+otherwise) OR the same alp_som_is_v2n_m1() EEPROM check patch 0001 already
+uses -- either is enough to attempt the rail, so a V2M-family image still
+sequences it even before its manifest is burned, and any V2N-family image
+still sequences it on physical V2N-M1 hardware without needing the
+Kconfig.  alp_deepx_pcie_bringup() keeps its own alp_som_is_v2n_m1() gate
+unchanged and additionally requires the rail step to have succeeded --
+M1_RESET is never released with the rail down.
+
+Sequence, over DM I2C bus 8 (RIIC8 / BRD_I2C) at 7-bit address 0x1E:
+
+  Program phase (unconditional; every write read back; any mismatch
+  aborts without ever touching CH2_EN):
+    1. PMC_DEV_ID (0x19) must read the exact OTP variant (0xEA).
+    2. PMC_STATUS_01 (0x01) must read 0x00 (no thermal/UVLO latched).
+    3. If PMC_CTRL_01 (0x07) has CH2_VSTEP (bit7) or CH2_EN (bit1) set,
+       clear both together with a read-modify-write (never a constant
+       write -- preserves CH1_EN and everything else), then read back.
+    4. Program both CH2 VSEL registers (0x0C, 0x0D) to 0x96 (0.75V at
+       VSTEP=0) -- VSEL2 pin routing is undocumented on this SoM
+       (da9292.yaml EN2/VSEL2 v2n_route: TBD), so both setpoints get
+       written defensively.
+    5. Read back 0x0C/0x0D; confirm CH1's VOUT (0x0A) and CTRL_01 bit0
+       (CH1_EN) are untouched.
+    6. Read + write-1-to-clear PMC_EVENT_00/01 so a stale fault can't
+       false-trip the enable-phase poll below.
+    Idempotent on a warm reboot: if CTRL_01 already has VSTEP=0 and
+    both VOUT_CH2 registers already read 0x96, steps 3-5's writes are
+    skipped entirely -- CH2_EN may legitimately already be 1 with the
+    DEEPX drawing power off it, and clearing it would drop a rail that
+    is already correctly up.
+
+  Enable phase (only after the program phase passes):
+    P65 (DEEPX_PWR_EN_REQ) is polled as an input for up to 500ms; if it
+    never goes high, P64 stays low, M1_RESET (PA6) is driven low, and
+    the function returns false without ever writing CH2_EN.  Otherwise:
+    7. Set CH2_EN in PMC_CTRL_01.
+    8. Poll PMC_STATUS_00 up to 20ms for CH2_PG=1 with CH2_UV/OV/OC all
+       clear, and PMC_EVENT_00 free of a latched CH2_OV/OC.
+    9. On failure, immediately clear CH2_EN, drive P64 and PA6 low, and
+       return false.
+    10. On success, drive P64 (DEEPX_CORE_0P75_EN) high, wait 5ms, and
+        re-read STATUS_00 to confirm PG held with no UV before handing
+        off to alp_deepx_pcie_bringup().
+
+Adds two small GPIO helpers (alp_gpio_input_configure /
+alp_gpio_input_get) alongside patch 0001's alp_gpio_output -- same
+P/PM/PMC register block, PM=0x1 selects input mode instead of 0x2; the
+live pin level is read from the separate PFC terminal-input register
+(PFC_BASE+0x0820+n), not from P -- see below for why that distinction
+matters.
+
+RIIC8 pinmux (P06/P07) and the i2c8 devicetree node + alias are already
+enabled in this tree (both predate patch 0001, confirmed unchanged in
+its diff context) -- no further devicetree wiring is needed here.
+
+This is the ONLY code, on any core, that writes the DA9292 or drives
+P64: the CM33/Zephyr side has no equivalent -- src/zephyr/v2n_power_mgmt.c
+does not exist, and metadata/pinmux/v2n.yaml attributes P64/P65 to core
+"a55" so a CM33 board file cannot claim them.
+
+alp_gpio_input_get() reads the P output-latch register (PFC_BASE+0x0020+n,
+last value written), not the live pin level. Adds ALP_PFC_PIN(n) =
+PFC_BASE+0x0820+n (the dedicated terminal input register; TF-A
+pfc_regs.h PFC_PIN2A=+0x082A confirms the offset, bench-read
+PIN6=0x10410826 confirmed a real input bit) and switches the read to
+it; removes the comment that wrongly claimed no separate PIN register
+exists on this family.
+
+Every program-phase abort (DA9292 reachable onward) now forces P64 low
+/ PA6 (M1_RESET) low via a new alp_deepx_rail_safe_off() helper before
+returning, not only the enable-phase failures that already did this
+inline; the three existing inline pairs converge onto the same helper.
+
+Hardening: immediately before the CH2_EN write, the CTRL_01 value just
+re-read for that write is re-checked for CH2_VSTEP==0 and the rail is
+aborted via the same helper if it is not -- the exact over-voltage
+condition this whole sequence exists to prevent.
+
+The PG-timeout failure message now also hints that CH2 may require
+EN2/P64 high before power-good asserts (see docs/bring-up-v2n-m1.md
+Sec 2), alongside the existing STATUS_00/EVENT_00 dump. The enable
+sequence itself (CH2_EN over I2C, poll PG, then P64) is unchanged.
+
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
+---
+ board/renesas/rzv2n-dev/Kconfig     |  25 +++
+ board/renesas/rzv2n-dev/rzv2n-dev.c | 330 +++++++++++++++++++++++++++-
+ 2 files changed, 354 insertions(+), 1 deletion(-)
+
+diff --git a/board/renesas/rzv2n-dev/Kconfig b/board/renesas/rzv2n-dev/Kconfig
+index 7a9885f7..f1807399 100644
+--- a/board/renesas/rzv2n-dev/Kconfig
++++ b/board/renesas/rzv2n-dev/Kconfig
+@@ -74,3 +74,28 @@ config ALP_E1M_FDTFILE
+ 	  Set the basename only.  KERNEL_DEVICETREE carries a "renesas/"
+ 	  prefix that the deploy step strips, so the file lands at
+ 	  boot/<basename> on the target.
++
++config ALP_E1M_DEEPX_RAIL
++	bool "ALP E1M: sequence the on-module DA9292 DEEPX 0.75V rail before PCIe bring-up"
++	depends on TARGET_RZV2N_DEV || TARGET_RZV2N_EVK
++	default n
++	help
++	  Force board_late_init() to run alp_deepx_rail_bringup() even
++	  before the on-module EEPROM manifest is checked --
++	  alp_som_is_v2n_m1() alone already triggers it on any board whose
++	  manifest reports family "v2n-m1", so this matters only for a
++	  V2M-family image built before its EEPROM is burned.
++
++	  Sequences the DA9292 PMIC's CH2 to 0.75V and polls it to
++	  power-good before alp_deepx_pcie_bringup() is allowed to release
++	  M1_RESET (PA6) -- releasing the DX-M1 reset with the rail down,
++	  or worse still at its OTP-default doubled voltage range, risks
++	  an over-voltage event on the DEEPX core rail.  U-Boot is the
++	  sole writer of the DA9292 and the sole driver of P64
++	  (DEEPX_CORE_0P75_EN) / P65 (DEEPX_PWR_EN_REQ) -- the CM33 must
++	  never master BRD_I2C or claim these pads (see
++	  metadata/pinmux/v2n.yaml and
++	  metadata/e1m_modules/v2n/core-ownership.yaml in alp-sdk).
++
++	  Set via meta-alp-sdk's deepx-rail.cfg for the V2M MACHINEs only;
++	  leave off (default) for the V2N base build.
+diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
+index a20ccae8..689c3062 100644
+--- a/board/renesas/rzv2n-dev/rzv2n-dev.c
++++ b/board/renesas/rzv2n-dev/rzv2n-dev.c
+@@ -284,6 +284,7 @@ static void board_usb_init(void)
+ #define ALP_PFC_P(n)		((void *)(uintptr_t)(PFC_BASE + 0x0020 + (n)))		/* data, 8-bit */
+ #define ALP_PFC_PM(n)		((void *)(uintptr_t)(PFC_BASE + 0x0140 + (n) * 2))	/* mode, 16-bit */
+ #define ALP_PFC_PMC(n)		((void *)(uintptr_t)(PFC_BASE + 0x0220 + (n)))		/* mode ctrl, 8-bit */
++#define ALP_PFC_PIN(n)		((void *)(uintptr_t)(PFC_BASE + 0x0820 + (n)))		/* terminal input, 8-bit */
+ #define ALP_PM_OUTPUT		0x2
+ 
+ static void alp_gpio_output(unsigned int bank, unsigned int pin, int value)
+@@ -360,9 +361,336 @@ static void alp_deepx_pcie_bringup(void)
+ 	printf("ALP: DEEPX DX-M1 PCIe path enabled (mux on, reset released)\n");
+ }
+ 
++/*
++ * ALP V2M (E1M-V2M1xx): sequence the on-module DA9292 PMIC's CH2 rail to
++ * 0.75V and enable it BEFORE alp_deepx_pcie_bringup() ever releases
++ * M1_RESET.  This matters because the DA9292-AROVx OTP variant on this
++ * SoM boots with CH2_VSTEP=1 (doubled voltage range): releasing the DX-M1
++ * reset with CH2 still at its OTP default risks an over-voltage event on
++ * the DEEPX core rail the instant the chip starts drawing current, not
++ * just an under-voltage brownout.  U-Boot is the SOLE writer of this PMIC
++ * and the sole driver of P64 (DEEPX_CORE_0P75_EN); the CM33 must never
++ * master BRD_I2C or claim P64/P65 -- see
++ * metadata/pinmux/v2n.yaml (core: "a55" on both pads) and
++ * metadata/e1m_modules/v2n/core-ownership.yaml.
++ *
++ * Gated on CONFIG_ALP_E1M_DEEPX_RAIL (set via deepx-rail.cfg on V2M
++ * MACHINEs only) OR alp_som_is_v2n_m1() -- either is sufficient to run
++ * THIS function, so a V2M image still sequences the rail even before its
++ * EEPROM manifest is burned, and a V2N-family image still sequences the
++ * rail on physical V2N-M1 hardware even without the Kconfig.
++ * alp_deepx_pcie_bringup() keeps its OWN alp_som_is_v2n_m1() gate
++ * unchanged -- M1_RESET is only ever released on confirmed V2N-M1
++ * hardware, never merely because the Kconfig forced a rail attempt.
++ *
++ * Returns true only when CH2 is confirmed power-good (STATUS_00 CH2_PG=1,
++ * no UV/OV/OC) and P64 has been driven high.  Any other return means the
++ * caller must NOT run alp_deepx_pcie_bringup() -- the mux/reset stay down
++ * with the rail.
++ */
++
++#define ALP_DA9292_I2C_BUS  8		/* DM I2C bus number for RIIC8 / BRD_I2C */
++#define ALP_DA9292_I2C_ADDR 0x1E	/* 7-bit; DA9292-AROVx OTP variant, see da9292.h */
++
++/* PMC_* register offsets + bit positions -- Renesas DA9292 Datasheet
++ * Rev 2.2 (R16DS0518EJ0220) Tables 12-27; mirrors the register map already
++ * verified in alp-sdk's chips/da9292/da9292.c (this file cannot include
++ * that header -- U-Boot builds standalone against upstream sources only). */
++#define DA9292_REG_STATUS_00   0x00
++#define DA9292_REG_STATUS_01   0x01
++#define DA9292_REG_EVENT_00    0x02
++#define DA9292_REG_EVENT_01    0x03
++#define DA9292_REG_CTRL_01     0x07
++#define DA9292_REG_VOUT_CH1_00 0x0A
++#define DA9292_REG_VOUT_CH2_00 0x0C
++#define DA9292_REG_VOUT_CH2_01 0x0D
++#define DA9292_REG_DEV_ID      0x19
++#define DA9292_REG_REV_ID      0x1A
++#define DA9292_REG_CFG_REV     0x1B
++
++#define DA9292_CTRL01_CH2_VSTEP BIT(7)
++#define DA9292_CTRL01_CH2_EN    BIT(1)
++#define DA9292_CTRL01_CH1_EN    BIT(0)
++
++#define DA9292_STATUS00_CH2_OC BIT(7)
++#define DA9292_STATUS00_CH2_OV BIT(5)
++#define DA9292_STATUS00_CH2_UV BIT(3)
++#define DA9292_STATUS00_CH2_PG BIT(1)
++
++#define DA9292_EVENT00_CH2_OC BIT(7)
++#define DA9292_EVENT00_CH2_OV BIT(5)
++
++#define DA9292_DEV_ID_EXPECTED 0xEA	/* DA9292-AROVx OTP variant on this SoM */
++#define DA9292_VOUT_750MV_BYTE 0x96	/* VSTEP=0 (5 mV/step) encoding of 0.75 V */
++
++static int alp_da9292_reg_read(struct udevice *dev, u8 reg, u8 *val)
++{
++	return dm_i2c_read(dev, reg, val, 1);
++}
++
++static int alp_da9292_reg_write(struct udevice *dev, u8 reg, u8 val)
++{
++	return dm_i2c_write(dev, reg, &val, 1);
++}
++
++/* Renesas RZ/V2N PFC input read-back: reads the dedicated PFC_PINxx terminal
++ * input register (PFC_BASE+0x0820+n), NOT the P output-latch register --
++ * P only reflects what was last WRITTEN, not the live pin level
++ * (bench-confirmed: PIN6=0x10410826 read bit5=1 with PM6=0x0400/input). */
++#define ALP_PM_INPUT 0x1
++
++static void alp_gpio_input_configure(unsigned int bank, unsigned int pin)
++{
++	u16 pm;
++
++	clrbits_8(ALP_PFC_PMC(bank), BIT(pin));		/* GPIO mode */
++
++	pm = readw(ALP_PFC_PM(bank));
++	pm &= ~(0x3 << (pin * 2));
++	pm |= (ALP_PM_INPUT << (pin * 2));
++	writew(pm, ALP_PFC_PM(bank));
++}
++
++static int alp_gpio_input_get(unsigned int bank, unsigned int pin)
++{
++	return !!(readb(ALP_PFC_PIN(bank)) & BIT(pin));
++}
++
++/* Force the DEEPX rail path to a known-safe state (P64 low,
++ * M1_RESET asserted) on ANY abort from the point the DA9292 is confirmed
++ * reachable onward -- not just the enable-phase failures that already did
++ * this inline. Cheap and idempotent even when neither pin has been driven
++ * yet this boot; the point is no abort path can ever leave P64 high with
++ * an unconfirmed or dropped rail. */
++static void alp_deepx_rail_safe_off(void)
++{
++	alp_gpio_output(6, 4, 0);	/* P64 low */
++	alp_gpio_output(10, 6, 0);	/* PA6 M1_RESET asserted */
++}
++
++static bool alp_deepx_rail_bringup(void)
++{
++	struct udevice *dev;
++	u8 dev_id = 0, rev_id = 0, cfg_rev = 0;
++	u8 status00 = 0, status01 = 0;
++	u8 ctrl01 = 0, ctrl01_en;
++	u8 vout_ch2_00 = 0, vout_ch2_01 = 0;
++	u8 vout_ch1_before = 0, vout_ch1_after = 0;
++	u8 event00 = 0, event01 = 0;
++	bool already_programmed;
++	int ret, level, waited_ms;
++	unsigned int t;
++
++	ret = i2c_get_chip_for_busnum(ALP_DA9292_I2C_BUS, ALP_DA9292_I2C_ADDR, 1, &dev);
++	if (ret) {
++		printf("ALP: DA9292 not reachable on RIIC8/BRD_I2C (%d)\n", ret);
++		alp_deepx_rail_safe_off();
++		return false;
++	}
++
++	/* 1. Identity -- abort on anything but the exact OTP variant. */
++	ret = alp_da9292_reg_read(dev, DA9292_REG_DEV_ID, &dev_id);
++	if (ret || dev_id != DA9292_DEV_ID_EXPECTED) {
++		alp_da9292_reg_read(dev, DA9292_REG_REV_ID, &rev_id);
++		alp_da9292_reg_read(dev, DA9292_REG_CFG_REV, &cfg_rev);
++		printf("ALP: DA9292 DEV_ID=0x%02x (want 0x%02x) REV_ID=0x%02x CFG_REV=0x%02x ret=%d -- abort\n",
++		       dev_id, DA9292_DEV_ID_EXPECTED, rev_id, cfg_rev, ret);
++		alp_deepx_rail_safe_off();
++		return false;
++	}
++
++	/* 2. No thermal/UVLO status latched on entry. */
++	ret = alp_da9292_reg_read(dev, DA9292_REG_STATUS_01, &status01);
++	if (ret || status01 != 0x00) {
++		printf("ALP: DA9292 STATUS_01=0x%02x ret=%d (want 0x00) -- abort\n", status01, ret);
++		alp_deepx_rail_safe_off();
++		return false;
++	}
++
++	ret = alp_da9292_reg_read(dev, DA9292_REG_CTRL_01, &ctrl01);
++	ret |= alp_da9292_reg_read(dev, DA9292_REG_VOUT_CH2_00, &vout_ch2_00);
++	ret |= alp_da9292_reg_read(dev, DA9292_REG_VOUT_CH2_01, &vout_ch2_01);
++	ret |= alp_da9292_reg_read(dev, DA9292_REG_VOUT_CH1_00, &vout_ch1_before);
++	if (ret) {
++		printf("ALP: DA9292 pre-program register read failed\n");
++		alp_deepx_rail_safe_off();
++		return false;
++	}
++
++	/* Idempotent warm-reboot path: CH2 already at 0.75V/VSTEP=0 means
++	 * CH2_EN may already be 1 with the DEEPX actively drawing power off
++	 * it -- clearing CH2_EN here (step 3 below) would drop a rail that
++	 * is already correctly up. */
++	already_programmed = !(ctrl01 & DA9292_CTRL01_CH2_VSTEP) &&
++			      vout_ch2_00 == DA9292_VOUT_750MV_BYTE &&
++			      vout_ch2_01 == DA9292_VOUT_750MV_BYTE;
++
++	if (already_programmed) {
++		printf("ALP: DA9292 CH2 already 0.75V/VSTEP=0 (warm reboot) -- skipping program phase\n");
++	} else {
++		/* 3. Clear VSTEP + EN together, NEVER a constant write. */
++		if (ctrl01 & (DA9292_CTRL01_CH2_VSTEP | DA9292_CTRL01_CH2_EN)) {
++			u8 want = ctrl01 & (u8)~(DA9292_CTRL01_CH2_VSTEP | DA9292_CTRL01_CH2_EN);
++			u8 got = 0;
++
++			ret = alp_da9292_reg_write(dev, DA9292_REG_CTRL_01, want);
++			ret |= alp_da9292_reg_read(dev, DA9292_REG_CTRL_01, &got);
++			if (ret || got != want) {
++				printf("ALP: DA9292 CTRL_01 clear wrote 0x%02x read 0x%02x ret=%d -- abort\n",
++				       want, got, ret);
++				alp_deepx_rail_safe_off();
++				return false;
++			}
++			ctrl01 = got;
++		}
++
++		/* 4. Program both VSEL setpoints -- VSEL2 pin routing is
++		 * unknown (da9292.yaml EN2/VSEL2 v2n_route: TBD), so both
++		 * CH2 registers get the same 0.75V byte defensively. */
++		ret = alp_da9292_reg_write(dev, DA9292_REG_VOUT_CH2_00, DA9292_VOUT_750MV_BYTE);
++		ret |= alp_da9292_reg_write(dev, DA9292_REG_VOUT_CH2_01, DA9292_VOUT_750MV_BYTE);
++		if (ret) {
++			printf("ALP: DA9292 VOUT_CH2 write failed (%d) -- abort\n", ret);
++			alp_deepx_rail_safe_off();
++			return false;
++		}
++
++		/* 5. Read back. */
++		ret = alp_da9292_reg_read(dev, DA9292_REG_VOUT_CH2_00, &vout_ch2_00);
++		ret |= alp_da9292_reg_read(dev, DA9292_REG_VOUT_CH2_01, &vout_ch2_01);
++		if (ret || vout_ch2_00 != DA9292_VOUT_750MV_BYTE || vout_ch2_01 != DA9292_VOUT_750MV_BYTE) {
++			printf("ALP: DA9292 VOUT_CH2 readback 0x%02x/0x%02x ret=%d (want 0x%02x/0x%02x) -- abort\n",
++			       vout_ch2_00, vout_ch2_01, ret, DA9292_VOUT_750MV_BYTE, DA9292_VOUT_750MV_BYTE);
++			alp_deepx_rail_safe_off();
++			return false;
++		}
++	}
++
++	/* 5 (both paths): CH1 must be untouched and still enabled. */
++	ret = alp_da9292_reg_read(dev, DA9292_REG_VOUT_CH1_00, &vout_ch1_after);
++	ret |= alp_da9292_reg_read(dev, DA9292_REG_CTRL_01, &ctrl01);
++	if (ret || vout_ch1_after != vout_ch1_before || !(ctrl01 & DA9292_CTRL01_CH1_EN)) {
++		printf("ALP: DA9292 CH1 disturbed VOUT_CH1_00 0x%02x->0x%02x CTRL_01=0x%02x ret=%d -- abort\n",
++		       vout_ch1_before, vout_ch1_after, ctrl01, ret);
++		alp_deepx_rail_safe_off();
++		return false;
++	}
++
++	/* 6. Clear any latched events so a stale fault can't false-trip the
++	 * enable-phase poll below. */
++	ret = alp_da9292_reg_read(dev, DA9292_REG_EVENT_00, &event00);
++	ret |= alp_da9292_reg_read(dev, DA9292_REG_EVENT_01, &event01);
++	if (ret) {
++		printf("ALP: DA9292 EVENT read failed (%d) -- abort\n", ret);
++		alp_deepx_rail_safe_off();
++		return false;
++	}
++	if (event00)
++		alp_da9292_reg_write(dev, DA9292_REG_EVENT_00, event00);
++	if (event01)
++		alp_da9292_reg_write(dev, DA9292_REG_EVENT_01, event01);
++
++	printf("ALP: DA9292 programmed CTRL_01=0x%02x VOUT_CH2=0x%02x/0x%02x\n",
++	       ctrl01, vout_ch2_00, vout_ch2_01);
++
++	/* Enable phase: only if the A55 asked for it via P65
++	 * (DEEPX_PWR_EN_REQ), polled up to 500 ms. */
++	alp_gpio_input_configure(6, 5);
++	level = 0;
++	for (waited_ms = 0; waited_ms <= 500; waited_ms++) {
++		level = alp_gpio_input_get(6, 5);
++		if (level)
++			break;
++		mdelay(1);
++	}
++	if (!level) {
++		alp_deepx_rail_safe_off();
++		printf("ALP: DEEPX_PWR_EN_REQ (P65) low -- DEEPX rail not enabled\n");
++		return false;
++	}
++
++	/* 7. CH2_EN = 1. */
++	ret = alp_da9292_reg_read(dev, DA9292_REG_CTRL_01, &ctrl01);
++	if (ret) {
++		printf("ALP: DA9292 CTRL_01 pre-enable read failed (%d) -- abort\n", ret);
++		alp_deepx_rail_safe_off();
++		return false;
++	}
++
++	/* Re-assert on the FRESH CTRL_01 read above that
++	 * CH2_VSTEP is still 0 immediately before setting CH2_EN -- a
++	 * VSTEP=1 CH2_EN would run CH2 at double range, the exact
++	 * over-voltage this whole rail sequence exists to prevent. */
++	if (ctrl01 & DA9292_CTRL01_CH2_VSTEP) {
++		printf("ALP: DA9292 CTRL_01=0x%02x has CH2_VSTEP set at enable time -- abort\n", ctrl01);
++		alp_deepx_rail_safe_off();
++		if (ctrl01 & DA9292_CTRL01_CH2_EN)
++			alp_da9292_reg_write(dev, DA9292_REG_CTRL_01, (u8)(ctrl01 & ~DA9292_CTRL01_CH2_EN));
++		return false;
++	}
++	ctrl01_en = ctrl01 | DA9292_CTRL01_CH2_EN;
++	ret = alp_da9292_reg_write(dev, DA9292_REG_CTRL_01, ctrl01_en);
++	if (ret) {
++		printf("ALP: DA9292 CH2_EN write failed (%d) -- abort\n", ret);
++		alp_deepx_rail_safe_off();
++		return false;
++	}
++
++	/* 8. Poll up to 20 ms for CH2 PG with no UV/OV/OC, plus no latched
++	 * CH2 OV/OC event. */
++	for (t = 0; t <= 20; t++) {
++		ret = alp_da9292_reg_read(dev, DA9292_REG_STATUS_00, &status00);
++		if (!ret && (status00 & DA9292_STATUS00_CH2_PG) &&
++		    !(status00 & (DA9292_STATUS00_CH2_UV | DA9292_STATUS00_CH2_OV | DA9292_STATUS00_CH2_OC)))
++			break;
++		mdelay(1);
++	}
++	event00 = 0;
++	alp_da9292_reg_read(dev, DA9292_REG_EVENT_00, &event00);
++	if (!(status00 & DA9292_STATUS00_CH2_PG) ||
++	    (status00 & (DA9292_STATUS00_CH2_UV | DA9292_STATUS00_CH2_OV | DA9292_STATUS00_CH2_OC)) ||
++	    (event00 & (DA9292_EVENT00_CH2_OV | DA9292_EVENT00_CH2_OC))) {
++		/* 9. Disable immediately -- never leave CH2_EN set on a
++		 * failed enable. */
++		alp_da9292_reg_write(dev, DA9292_REG_CTRL_01, (u8)(ctrl01_en & ~DA9292_CTRL01_CH2_EN));
++		alp_deepx_rail_safe_off();
++		printf("ALP: DA9292 CH2 enable failed STATUS_00=0x%02x EVENT_00=0x%02x -- DEEPX rail not enabled"
++		       " (CH2 may require EN2/P64 high before PG -- see bring-up doc)\n",
++		       status00, event00);
++		return false;
++	}
++
++	/* 10. Success: drive P64 high, settle, re-verify before handing off. */
++	alp_gpio_output(6, 4, 1);
++	mdelay(5);
++	ret = alp_da9292_reg_read(dev, DA9292_REG_STATUS_00, &status00);
++	if (ret || !(status00 & DA9292_STATUS00_CH2_PG) || (status00 & DA9292_STATUS00_CH2_UV)) {
++		/* P64/PA6 go low FIRST, unconditionally, before
++		 * touching CTRL_01 -- so the pin state is safe regardless of EN2
++		 * pin semantics. The CTRL_01 clear is still issued and a second
++		 * safe_off() follows it (idempotent) so it is the last word. */
++		alp_deepx_rail_safe_off();
++		alp_da9292_reg_read(dev, DA9292_REG_CTRL_01, &ctrl01);
++		alp_da9292_reg_write(dev, DA9292_REG_CTRL_01, (u8)(ctrl01 & ~DA9292_CTRL01_CH2_EN));
++		alp_deepx_rail_safe_off();
++		printf("ALP: DA9292 CH2 dropped after P64 high STATUS_00=0x%02x ret=%d -- DEEPX rail disabled\n",
++		       status00, ret);
++		return false;
++	}
++
++	printf("ALP: DEEPX rail 0.75V up (PG)\n");
++	return true;
++}
++
+ int board_late_init(void)
+ {
+-	if (alp_som_is_v2n_m1())
++	bool v2n_m1 = alp_som_is_v2n_m1();
++	bool rail_ok = true;
++
++	if (IS_ENABLED(CONFIG_ALP_E1M_DEEPX_RAIL) || v2n_m1)
++		rail_ok = alp_deepx_rail_bringup();
++
++	if (v2n_m1 && rail_ok)
+ 		alp_deepx_pcie_bringup();
+ 
+ 	return 0;
+-- 
+2.43.0
+

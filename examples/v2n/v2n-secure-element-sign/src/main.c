@@ -10,78 +10,93 @@
  * library integration, but return ALP_ERR_NOSUPPORT today after
  * argument validation.  This example keeps the historical name while
  * making that probe-only contract explicit.
+ *
+ * RIIC8/BRD_I2C is Cortex-A55/Linux-exclusive
+ * (metadata/e1m_modules/v2n/core-ownership.yaml) -- the CM33 must
+ * never master it.  This is a Linux/Yocto user-space app on the
+ * V2N Cortex-A55, following the same `alp_i2c_*` + chip-driver
+ * pattern as examples/v2n/v2n-power-monitor.
  */
 
-#include <zephyr/kernel.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
 
 #include "alp/peripheral.h"
 #include "alp/chips/optiga_trust_m.h"
 
+/* BRD_I2C = Linux /dev/i2c-8: meta-alp-sdk's e1m-v2n-som.dtsi
+ * aliases `i2c8 = &i2c8;`, so `alp_i2c_open(.bus_id = 8)` here opens
+ * /dev/i2c-8.  A literal (not a board-header macro) because BRD_I2C
+ * is a SoM-level bus, not one of the E1M-X-EVK carrier's own routed
+ * pins. */
+#define V2N_BRD_I2C_BUS_ID 8u
+
 int main(void)
 {
-	printk("[se] v2n-secure-element-sign (probe-only)\n");
+	printf("[se] v2n-secure-element-sign (probe-only)\n");
 
 	/* BRD_I2C carries the Trust M alongside the PMICs + RTC.
-     * 400 kHz is the standard Trust M bus rate; the chip supports
-     * up to 1 MHz Fast-mode+ if the rest of the bus does too. */
+	 * 400 kHz is the standard Trust M bus rate; the chip supports
+	 * up to 1 MHz Fast-mode+ if the rest of the bus does too. */
 	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-	    .bus_id     = 0u,
+	    .bus_id     = V2N_BRD_I2C_BUS_ID,
 	    .bitrate_hz = 400000u,
 	});
 	if (bus == NULL) {
-		printk("[se] RESULT FAIL: alp_i2c_open failed: %d\n", (int)alp_last_error());
-		printk("[se] done\n");
-		return 0;
+		printf("[se] RESULT FAIL: alp_i2c_open failed: %d\n", (int)alp_last_error());
+		printf("[se] done\n");
+		return 1;
 	}
 
 	/* Init probes I2C_STATE.  It does not issue OPEN_APPLICATION. */
 	optiga_trust_m_t se;
 	alp_status_t     s = optiga_trust_m_init(&se, bus, OPTIGA_TRUST_M_I2C_ADDR);
 	if (s != ALP_OK) {
-		printk("[se] RESULT FAIL: optiga_trust_m_init -> %d (Trust M not ACKing)\n", (int)s);
+		printf("[se] RESULT FAIL: optiga_trust_m_init -> %d (Trust M not ACKing)\n", (int)s);
 		alp_i2c_close(bus);
-		printk("[se] done\n");
-		return 0;
+		printf("[se] done\n");
+		return 1;
 	}
 
-	printk("[se] I2C_STATE probe -> ALP_OK\n");
+	printf("[se] I2C_STATE probe -> ALP_OK\n");
 
 	optiga_trust_m_product_info_t info;
 	s = optiga_trust_m_read_product_info(&se, &info);
-	printk("[se] read_product_info -> %d (expected NOSUPPORT)\n", (int)s);
+	printf("[se] read_product_info -> %d (expected NOSUPPORT)\n", (int)s);
 	if (s != ALP_ERR_NOSUPPORT) {
-		printk("[se] RESULT FAIL: product-info path no longer matches the probe-only contract\n");
+		printf("[se] RESULT FAIL: product-info path no longer matches the probe-only contract\n");
 		optiga_trust_m_deinit(&se);
 		alp_i2c_close(bus);
-		printk("[se] done\n");
-		return 0;
+		printf("[se] done\n");
+		return 1;
 	}
 
 	/* apdu[] content is irrelevant here: send_apdu validates only
-     * pointers/lengths before returning NOSUPPORT, so any non-empty
-     * frame exercises the same path.  resp_len is pre-loaded with the
-     * poison value 123 (impossible for an 8-byte resp buffer) so the
-     * check below proves the driver actually zeroes *resp_len on the
-     * NOSUPPORT path rather than leaving the caller's stale value. */
+	 * pointers/lengths before returning NOSUPPORT, so any non-empty
+	 * frame exercises the same path.  resp_len is pre-loaded with the
+	 * poison value 123 (impossible for an 8-byte resp buffer) so the
+	 * check below proves the driver actually zeroes *resp_len on the
+	 * NOSUPPORT path rather than leaving the caller's stale value. */
 	uint8_t apdu[4]  = { 0x31u, 0x11u, 0x00u, 0x00u };
 	uint8_t resp[8]  = { 0 };
 	size_t  resp_len = 123u;
 	s = optiga_trust_m_send_apdu(&se, apdu, sizeof apdu, resp, sizeof resp, &resp_len, 1000u);
-	printk("[se] send_apdu -> %d resp_len=%u (expected NOSUPPORT, zero bytes)\n",
+	printf("[se] send_apdu -> %d resp_len=%u (expected NOSUPPORT, zero bytes)\n",
 	       (int)s,
 	       (unsigned)resp_len);
 	if (s != ALP_ERR_NOSUPPORT || resp_len != 0u) {
-		printk("[se] RESULT FAIL: raw-APDU path no longer matches the probe-only contract\n");
+		printf("[se] RESULT FAIL: raw-APDU path no longer matches the probe-only contract\n");
 		optiga_trust_m_deinit(&se);
 		alp_i2c_close(bus);
-		printk("[se] done\n");
-		return 0;
+		printf("[se] done\n");
+		return 1;
 	}
 
 	optiga_trust_m_deinit(&se);
 	alp_i2c_close(bus);
-	printk("[se] RESULT PASS: Trust M I2C_STATE probe works; product-info/raw-APDU are "
+	printf("[se] RESULT PASS: Trust M I2C_STATE probe works; product-info/raw-APDU are "
 	       "cleanly blocked with ALP_ERR_NOSUPPORT\n");
-	printk("[se] done\n");
+	printf("[se] done\n");
 	return 0;
 }

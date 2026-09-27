@@ -4,7 +4,7 @@
  *
  * aen-dsi-regcheck -- scopeless on-silicon staging check of the Alif C2-MIPI-DSI
  * DISPLAY stack on the E1M-AEN801 (Ensemble E8, M55-HE), via the bench RAM-run +
- * RAM-console flow.  Mirrors aen-camera-regcheck (the CSI/RX twin of this path).
+ * RAM-console flow.  Mirrors aen-camera-firstlight (the CSI/RX twin of this path).
  *
  * THE DISPLAY CHAIN (C2-MIPI-DSI):
  *

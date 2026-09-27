@@ -6,12 +6,14 @@
 # RAM-run + RAM-console flow.
 #
 # Plain prj.conf app (no alp_project.py board.yaml emit).  This regcheck enables
-# CONFIG_VIDEO_ISP_VSI=y -- the isp_pico.c driver TU now COMPILES + LINKS
-# against hal_alif v2.3.0 (isp-vsi.h + isp_ctrl_params.h vendored VERBATIM into
-# zephyr/include/zephyr/drivers/video/, see the driver file header). This is a
-# BUILD-ONLY proof: RUNTIME stays BENCH-BLOCKED because no camera sensor is
-# wired on this hardware batch, so the m2m capture graph never runs. See
-# src/main.c + the board overlay.
+# CONFIG_VIDEO_ISP_VSI=y -- the isp_pico.c driver TU COMPILES + LINKS against
+# hal_alif v2.3.0 (isp-vsi.h + isp_ctrl_params.h vendored VERBATIM into
+# zephyr/include/zephyr/drivers/video/, see the driver file header) -- and
+# (stage 1, on real hardware) streams one frame off the ISP's self-contained
+# Test-Pattern Generator through the MI DMA: no camera sensor is wired on
+# this hardware batch, but the TPG needs none.  Live SENSOR capture
+# (camera->csi->isp->memory) stays BENCH-BLOCKED.  See src/main.c + the
+# board overlays.
 
 cmake_minimum_required(VERSION 3.20)
 

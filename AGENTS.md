@@ -62,17 +62,23 @@ Two loaders fan `board.yaml` into per-core slices:
 - `python -m alp_orchestrate --emit {system-manifest,build-plan,ipc-contract-h,dts-reservations,dts-partitions,storage-mounts-c,tfm-sysbuild-conf,kconfig}`
   — the cross-core / system artefacts. The package lives under `scripts/`, so
   run it as `PYTHONPATH=scripts python -m alp_orchestrate …` (or with `scripts/`
-  on your path); note per ADR 0026 this producer is slated for deletion — tan
-  owns the planner — so treat its output as provisional.
+  on your path). Per ADR 0026, `build-plan` is the one mode that moves to tan;
+  treat *that* mode's output as provisional. Every other mode here —
+  `system-manifest`, `kconfig`, `headers`, `secure`, `topology` and the rest —
+  is renderer-owned and stays canonical in alp-sdk (ADR 0026 §C/§D).
 
 `tan build --project <app-dir>` is the customer wrapper. The current Python
 implementation carries a relocated in-process planner, reads the selected
 alp-sdk checkout's metadata/schemas, materialises the per-slice config, then
-runs each slice's native build command. Per ADR 0026 tan owns the planner
-outright: alp-sdk's `alp_orchestrate` is **not** the reference producer
-anymore, and `scripts/alp_orchestrate/` is scheduled for deletion once the
-port completes. Until then it remains a runnable way to inspect what a
-`board.yaml` resolves to; prefer `tan`'s planner for authoritative planning.
+runs each slice's native build command. Per ADR 0026 tan owns the *planner*
+(`build-plan`); the `alp_orchestrate` emitter/loader core in alp-sdk is **not**
+repointed and is **not** scheduled for deletion — ADR 0026 §B warns that
+`rm -rf scripts/alp_orchestrate/` would delete the `SdkRevisionUnknown` /
+`SdkRevisionNotBuildable` / `SdkRevisionUnsupported` enforcement that
+`scripts/validate_board_yaml.py` imports (and that `tan validate` spawns).
+Prefer `tan`'s planner for authoritative planning; the SDK's `--emit` modes
+remain the inspectable parity/reference producer for what a `board.yaml`
+resolves to.
 
 The `--emit` surface is the **machine-readable contract** other tools consume
 (ADR 0014, `docs/adr/0014-build-plan-emit-cli-contract.md`). When you need to

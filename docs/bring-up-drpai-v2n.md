@@ -107,7 +107,7 @@ only when **both** `meta-rz-drpai` is in `bblayers.conf` **and**
 `ALP_ENABLE_DRPAI = "1"` is set (default `"0"`).  The layer alone is
 deliberately not enough: it ships bundled in the AI SDK BSP, so keying off its
 presence would turn the NPU on for every V2N/V2M image.  It is declared
-`ALP_ENABLE_DRPAI ?= "0"` in all four V2N/V2M machine confs; set it to
+`ALP_ENABLE_DRPAI ?= "0"` in all six V2N/V2M machine confs; set it to
 `"1"` in `local.conf` to opt in. Without it the build installs a comment-only stub and the node
 stays `disabled`.
 

@@ -1,0 +1,26 @@
+--- a/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
++++ b/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
+@@ -394,6 +394,23 @@
+ 		return isp_err_2_errno(ret);
+ 	}
+ 
++	/*
++	 * Upstream alifsemi/hal_alif order: load the calibration BEFORE the
++	 * AWB/AE algorithm callbacks are registered. Registering the
++	 * callbacks before SetCalib left both algorithms idle; with this
++	 * patch they converge on the FIRST stream instead (E1M-AEN803 +
++	 * OV5647, bench run 153). Note this makes patch 0007's own
++	 * once-guarded SetCalib call (isp_vsi_update_cfg(), the first
++	 * restart after this isp_vsi_init() call already ran it) redundant
++	 * -- a candidate to drop, not touched here to keep this patch to the
++	 * one fix bench run 153 actually needed.
++	 */
++	ret = VSI_MPI_ISP_SetCalib(isp_port_id, &isp_calib_param);
++	if (ret) {
++		LOG_ERR("Programming ISP calibration data in library failed!");
++		return isp_err_2_errno(ret);
++	}
++
+ 	/* Program the function pointers for AWB Algorithm in library */
+ #if defined(CONFIG_ISP_LIB_WB_MODULE)
+ 	ret = VSI_MPI_ISP_AwbRegCallBack(isp_port_id, &vsiAwbAlgo);

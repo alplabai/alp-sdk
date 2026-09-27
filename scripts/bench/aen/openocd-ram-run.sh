@@ -144,6 +144,34 @@ if (( 0x$WORD1 >= 0x80000000 )); then
 	exit 1
 fi
 
+# NVIC_CLEAR_CMDS -- clear every NVIC ICER (Interrupt Clear-Enable) and ICPR
+# (Interrupt Clear-Pending) register before resuming the freshly loaded image
+# (alp-sdk#2313). A RAM-run lands on a core that may still carry a RESIDENT
+# app's interrupt state: if that app left an IRQ enabled (or merely pending)
+# at the NVIC, the freshly loaded image runs straight into that app's ISR the
+# instant IRQs are unmasked -- seen on E1M-AEN803 2026W36-0009: IRQn 333
+# (CDC_SCANLINE0) with the core stuck at IPSR 0x15D. The MSPLIM/PSPLIM
+# clearing in the CMDS array below already puts the STACK state back to a
+# cold-reset shape; this puts the INTERRUPT state back the same way. 16 words
+# each covers IRQ 0-511 (16*32), comfortably past the E8's highest defined
+# IRQ (480) -- ICER/ICPR are both write-1-to-clear, so writing 0xFFFFFFFF to
+# all 16 is unconditionally safe (an already-disabled/non-pending bit is
+# unaffected).
+# Shared by both cores (CORE=hp/he use the same $CMDS array below): a
+# resident app's ISR storm is not HE-specific, and clearing these on a core
+# that had nothing pending is a no-op, so there is no reason to special-case
+# HP out of it.
+NVIC_CLEAR_CMDS=()
+for _n in $(seq 0 15); do
+	_icer_addr=$(printf '0x%X' $((0xE000E180 + 4 * _n)))
+	NVIC_CLEAR_CMDS+=(-c "mww $_icer_addr 0xFFFFFFFF")
+done
+for _n in $(seq 0 15); do
+	_icpr_addr=$(printf '0x%X' $((0xE000E280 + 4 * _n)))
+	NVIC_CLEAR_CMDS+=(-c "mww $_icpr_addr 0xFFFFFFFF")
+done
+unset _n _icer_addr _icpr_addr
+
 NAME=$(basename "$BD")
 if [ "$CORE" = "he" ]; then
 	AP="0x00300000"
@@ -219,6 +247,50 @@ CMDS=(
 	-c "load_image $BIN 0x0 bin"
 	-c "reg msplim_s 0x00000000"
 	-c "reg msplim_ns 0x00000000"
+	# The PROCESS stack limits must be cleared too, and for a long time they
+	# were not. A RAM-run over an already-running app inherits that app's
+	# psplim_s, and Zephyr switches to the main thread on psp -- so if the new
+	# image's thread stack sits below the stale limit, the core takes a
+	# HardFault before it reaches main(), at a depth that varies with how the
+	# two images' stacks happen to line up. Measured on E1M-AEN803 2026W36-0009
+	# 2026-09-20: two byte-identical warm loads faulted at DIFFERENT depths
+	# (one before PRE_KERNEL_1 console init, one deep in POST_KERNEL), with
+	# psplim_s = 0x20005300 left over and psp = 0x2000527c -- below its own
+	# limit. The RAM console stayed all-zero, so it reads as a dead board
+	# rather than as the stale-register problem it is.
+	-c "reg psplim_s 0x00000000"
+	-c "reg psplim_ns 0x00000000"
+	# Clear all NVIC enables/pendings (alp-sdk#2313) -- see NVIC_CLEAR_CMDS'
+	# own header comment above for why this must happen before resume.
+	"${NVIC_CLEAR_CMDS[@]}"
+	# ...and the EXCEPTION state, for the same reason. A RAM-run lands on a
+	# core that is usually still running the previous app -- and if that app
+	# died in a fault, the core is sitting in Handler mode with the HardFault
+	# still ACTIVE. load_image + `reg pc` + `resume` do not clear that: the
+	# fresh image resumes with IPSR = 3 and goes straight back into the fatal
+	# spin, printing nothing, so the RAM console reads as an all-zero buffer
+	# and the board looks dead. Measured on E1M-AEN803 2026W36-0009 2026-09-20: the
+	# PRE-load halt already showed "current mode: Handler HardFault" with
+	# SHCSR (0xE000ED24) = 0x00070004 (bit 2 HARDFAULTACT), while CFSR, HFSR,
+	# DFSR, MMFAR and BFAR all read 0x00000000 -- i.e. no new fault, purely
+	# inherited state.
+	#
+	# Put the core back where a cold reset would leave it: Thread mode with
+	# the Thumb bit set and IPSR = 0, and MSP selected.
+	#
+	# These two cover the ordinary case. They do NOT rescue a core whose
+	# previous app died in a fault: an ACTIVE exception is architecturally
+	# sticky, and the only exits are an exception return or a real reset.
+	# Measured on E1M-AEN803 2026W36-0009 2026-09-20, on a halted core with the fault
+	# active: `mww 0xE000ED24 0x00000000` cleared SHCSR bits 16-18
+	# (MEM/BUS/USGFAULTENA) but bit 2 HARDFAULTACT read back SET, and after
+	# `resume` the core reported IPSR = 3 again. `reg xPSR` only updates
+	# OpenOCD's register cache in that state. So a debugger write cannot
+	# clear it -- if the pre-load halt reports "current mode: Handler
+	# HardFault", POWER CYCLE the board before running; nothing this script
+	# does will unwedge it.
+	-c "reg xPSR 0x01000000"
+	-c "reg control 0x00000000"
 	-c "reg msp $MSP"
 	-c "reg pc $PC"
 	-c "resume"

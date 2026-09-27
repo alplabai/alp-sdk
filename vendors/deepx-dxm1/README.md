@@ -65,7 +65,7 @@ Two additional repos are useful but not on the runtime path:
 
 `meta-alp-sdk`'s `conf/layer.conf` `LAYERRECOMMENDS` the Renesas V2N
 base BSP plus `meta-deepx-m1`, and `conf/machine/e1m-v2m101-a55.conf`
-(and `e1m-v2m102-a55.conf`)
+(and `e1m-v2m102-a55.conf` / `e1m-v2m103-a55.conf`)
 appends `dx-driver dx-rt` to `IMAGE_INSTALL` so V2N-M1 images
 ship the DEEPX stack by default.
 

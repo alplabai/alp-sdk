@@ -81,7 +81,8 @@ signatures), if you have one in mind.
    pick it up automatically); `tan doctor`'s `python` check is a
    presence probe only (no pin comparison).
 6. Open a PR; CI runs the AEN-Zephyr (`pr-twister-aen`) and
-   V2N-Yocto (`pr-bitbake`) matrices, plus the cross-platform
+   V2N-Yocto (`pr-bitbake`) matrices, the AEN-baremetal build
+   (`pr-plain-cmake`), plus the cross-platform
    Zephyr build gate.  CI green is necessary but not sufficient for tagging
    a release -- the test-plan row also has to flip to `✅`.
 

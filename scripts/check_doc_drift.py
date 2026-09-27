@@ -212,6 +212,25 @@ _ALLOWLIST: set[str] = {
     # regardless of what alp-sdk's own Python tooling does -- doesn't regress
     # to "dead" the moment scripts/alp_model/ is gone (#1943).
     "ALP_DRPAI_TVM_HOME",
+    # U-Boot board_late_init() helper in meta-alp-sdk's
+    # 0001-rzv2n-dev-EEPROM-gated-DEEPX-DX-M1-PCIe-bring-up.patch, named by
+    # docs/bring-up-v2n-m1.md's DEEPX walkthrough.  Real identifier, but
+    # *.patch is deliberately outside the harvested surfaces (same shape as
+    # ALP_E1M_FDTFILE above -- also patch-defined, also allowlisted).
+    "alp_deepx_pcie_bringup",
+    # docs/v1.0-readiness.md is an explicit "Historical snapshot, not
+    # current" tracker (its own banner) that narrates what v0.14-era code
+    # DID and, via an inline correction, what got RETIRED since
+    # (feat/v2m-deepx-rail-uboot, 2026-09-24): src/zephyr/v2n_power_mgmt.c
+    # and the V2N supervisor's BRD_I2C transport are deleted outright
+    # (RIIC8/BRD_I2C is now Cortex-A55/Linux-exclusive).  These four were
+    # real, harvested identifiers before that deletion; naming them
+    # precisely is the whole point of an accurate retirement note, so
+    # allowlisting beats vaguening the prose to dodge the gate.
+    "alp_z_v2n_power_mgmt_init",
+    "ALP_SDK_V2N_POWER_MGMT",
+    "alp_z_v2n_supervisor_brd_i2c_acquire",
+    "ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID",
 }
 
 # Identifier shapes we treat as SDK symbols.  The optional `CONFIG_`

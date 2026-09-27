@@ -45,14 +45,16 @@ EXTRA_OECMAKE = " \
 # alp-sdk repo root.  v0.6 additions vs the v0.1 carryover:
 #   bmi323, bmp581, icm42670, ssd1331, optiga_trust_m,
 #   eeprom_24c128, ov5640, cam_mux_pi3wvr626 — present in v0.6.
-# v0.1 entries that have since moved into vendor-specific
-# subtrees (deepx_dxm1, gd32g553, alif HALs, etc.) are NOT
-# listed here; they ship via vendor recipes, not alp-chips.
+# act8760, da9292, clk_5l35023b, tps628640, gd32g553 are the
+# same OS-agnostic chips/<id>/<id>.c drivers as every other row
+# here (they build against alp_sdk_headers alone, per
+# CMakeLists.txt's CHIP_LIST_EXCLUDED_WITH_REASON note); the V2N
+# BRD_I2C bring-up example links all five.
 PACKAGECONFIG ??= " \
     tcal9538 ina236 tas2563 lsm6dso bmi323 bmp581 \
     icm42670 ssd1306 ssd1331 tmp112 rv3028c7 \
     optiga_trust_m eeprom_24c128 ov5640 cam_mux_pi3wvr626 \
-    ublox_neo_m9n \
+    ublox_neo_m9n act8760 da9292 clk_5l35023b tps628640 gd32g553 \
 "
 
 PACKAGECONFIG[tcal9538]            = "-DALP_SDK_CHIP_TCAL9538=ON,-DALP_SDK_CHIP_TCAL9538=OFF"
@@ -71,6 +73,11 @@ PACKAGECONFIG[eeprom_24c128]       = "-DALP_SDK_CHIP_EEPROM_24C128=ON,-DALP_SDK_
 PACKAGECONFIG[ov5640]              = "-DALP_SDK_CHIP_OV5640=ON,-DALP_SDK_CHIP_OV5640=OFF"
 PACKAGECONFIG[cam_mux_pi3wvr626]   = "-DALP_SDK_CHIP_CAM_MUX_PI3WVR626=ON,-DALP_SDK_CHIP_CAM_MUX_PI3WVR626=OFF"
 PACKAGECONFIG[ublox_neo_m9n]       = "-DALP_SDK_CHIP_UBLOX_NEO_M9N=ON,-DALP_SDK_CHIP_UBLOX_NEO_M9N=OFF"
+PACKAGECONFIG[act8760]             = "-DALP_SDK_CHIP_ACT8760=ON,-DALP_SDK_CHIP_ACT8760=OFF"
+PACKAGECONFIG[da9292]              = "-DALP_SDK_CHIP_DA9292=ON,-DALP_SDK_CHIP_DA9292=OFF"
+PACKAGECONFIG[clk_5l35023b]        = "-DALP_SDK_CHIP_CLK_5L35023B=ON,-DALP_SDK_CHIP_CLK_5L35023B=OFF"
+PACKAGECONFIG[tps628640]           = "-DALP_SDK_CHIP_TPS628640=ON,-DALP_SDK_CHIP_TPS628640=OFF"
+PACKAGECONFIG[gd32g553]            = "-DALP_SDK_CHIP_GD32G553=ON,-DALP_SDK_CHIP_GD32G553=OFF"
 
 FILES:${PN}-staticdev = "${libdir}/libalp_chips.a"
 FILES:${PN}-dev       = "${includedir}/alp/chips/"

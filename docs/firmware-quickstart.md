@@ -32,8 +32,8 @@ own quickstart.
 | If your hardware is...                      | `som.sku` to declare | Board default     | One-pager                                         | Bring-up doc | Reference examples |
 |---------------------------------------------|----------------------|---------------------|---------------------------------------------------|--------------|---------------------|
 | E1M-AEN3..801 SoM on E1M EVK                | `E1M-AEN801` (etc.)  | `E1M-EVK`           | [`docs/soms/aen.md`](soms/aen.md)                 | [`docs/bring-up-aen.md`](bring-up-aen.md) | `examples/peripheral-io/gpio-button-led`, `i2c-scanner`, `rtc-clock`, `hello-world` |
-| E1M-X V2N101 / V2N102 SoM on E1M-X-EVK      | `E1M-V2N101`         | `E1M-X-EVK`         | [`docs/soms/v2n.md`](soms/v2n.md)                 | [`docs/bring-up-v2n.md`](bring-up-v2n.md) | `examples/v2n/v2n-gd32-bridge-ping`, `v2n-board-id-readout`, `v2n-ethernet-dual`, `dac-waveform` |
-| E1M-X V2N-M1 (V2M101 / V2M102) SoM          | `E1M-V2M101`         | `E1M-X-EVK`         | [`docs/soms/v2n-m1.md`](soms/v2n-m1.md)           | [`docs/bring-up-v2n-m1.md`](bring-up-v2n-m1.md) | DEEPX bring-up delta on top of V2N |
+| E1M-X V2N101 / V2N102 / V2N103 SoM on E1M-X-EVK | `E1M-V2N101`     | `E1M-X-EVK`         | [`docs/soms/v2n.md`](soms/v2n.md)                 | [`docs/bring-up-v2n.md`](bring-up-v2n.md) | `examples/v2n/v2n-gd32-bridge-ping`, `v2n-board-id-readout`, `v2n-ethernet-dual`, `dac-waveform` |
+| E1M-X V2N-M1 (V2M101 / V2M102 / V2M103) SoM | `E1M-V2M101`         | `E1M-X-EVK`         | [`docs/soms/v2n-m1.md`](soms/v2n-m1.md)           | [`docs/bring-up-v2n-m1.md`](bring-up-v2n-m1.md) | DEEPX bring-up delta on top of V2N |
 | E1M-NX9101 (NXP i.MX 93)                    | `E1M-NX9101`         | `E1M-EVK`           | [`docs/soms/imx93.md`](soms/imx93.md)             | [`docs/getting-started.md`](getting-started.md) §4-5 | same cross-family examples as AEN |
 
 The per-SoM one-pager covers what's populated, which examples
@@ -256,11 +256,11 @@ Three steps in the V2N-M1 bring-up that V2N base skips:
 
 1. `da9292_v2n_m1_enable_deepx_rail(&pmic, 50000)` -- the 0.75 V
    DEEPX rail on the secondary PMIC's CH2.
-2. ACK-probe the DEEPX TPS628640 instances at `0x44 / 0x4F`
-   to confirm population (do NOT probe `0x48` for the LPDDR
-   buck -- that address is the on-module TMP112, and the
-   buck's address is still TBD; see
-   [`docs/bring-up-v2n-m1.md`](bring-up-v2n-m1.md) §1).
+2. ACK-probe the DEEPX TPS628640 instances at `0x44 / 0x48 / 0x4F`
+   to confirm population. `0x48` (`deepx_lpddr_0v85`) only ACKs once
+   P64 (`DEEPX_CORE_0P75_EN`) is high, and reads back `0x5A` = 0.85 V
+   there; the on-module TMP112 is at `0x40`, not `0x48`. See
+   [`docs/bring-up-v2n-m1.md`](bring-up-v2n-m1.md) §1.
 3. `deepx_dxm1_bring_up(&dxm1, DEEPX_DXM1_DEFAULT_BOOT_US)` -- the
    PCIe muxes + M1_RESET sequencer.
 

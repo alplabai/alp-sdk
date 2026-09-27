@@ -29,9 +29,10 @@ bridge health. Two diagnostic ways in:
 
 > The same `alp companion` group binds the **GD32** supervisor on V2N SoMs
 > (`CONFIG_ALP_SDK_V2N_SUPERVISOR`, plus a non-negative
-> `CONFIG_ALP_SDK_V2N_SUPERVISOR_SPI_BUS_ID` or
-> `CONFIG_ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID` — both default `-1`, which no
-> in-tree board overrides yet (tracked in #2044)) instead of the CC3501E;
+> `CONFIG_ALP_SDK_V2N_SUPERVISOR_SPI_BUS_ID` — the CM33's only transport
+> to the GD32, since RIIC8/BRD_I2C is Cortex-A55/Linux-exclusive; the SPI
+> bus ID defaults `-1`, which no in-tree board overrides yet (tracked in
+> #2044)) instead of the CC3501E;
 > there it exposes `companion gpio read/write` rather than the Wi-Fi/BLE
 > tree below. This page documents the **CC3501E (Alif)** binding.
 

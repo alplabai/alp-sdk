@@ -24,6 +24,32 @@
 #include "alp_slot_claim.h"
 #include "backends/camera/camera_ops.h"
 
+/* Every Zephyr camera backend allocates its frames from the video buffer
+ * pool, a sys_heap, unless CONFIG_VIDEO_BUFFER_USE_SHARED_MULTI_HEAP routes
+ * allocation through the shared-multi-heap allocator instead (that path
+ * doesn't use CONFIG_VIDEO_BUFFER_POOL_HEAP_SIZE, so this check doesn't
+ * apply).  Zephyr picks SYS_HEAP_SMALL_ONLY by default when the kernel's
+ * SRAM is <= 256 KB (the Alif M55 DTCM), and a small heap cannot span more
+ * than 262136 bytes -- a bigger pool (2 MiB in SRAM0 is the norm for a
+ * camera) then misbehaves at run time instead of failing: allocations come
+ * back 4-byte aligned and the second frame buffer fails, so open() reports
+ * ALP_ERR_NOMEM.  Fail the build instead; the fix is CONFIG_SYS_HEAP_AUTO=y
+ * (or _BIG_ONLY) in the application's prj.conf.
+ * Only builds with a pool-allocating backend are checked.  ALP_SDK_CAMERA_
+ * ZEPHYR_VIDEO defaults to y whenever VIDEO=y, so an app that turns VIDEO on
+ * for another driver and wants to keep the camera stub must set
+ * CONFIG_ALP_SDK_CAMERA_ZEPHYR_VIDEO=n explicitly (as aen-evk-demo,
+ * aen-isp-regcheck and aen-jpeg-regcheck do) or size the heap instead. */
+#if defined(CONFIG_SYS_HEAP_SMALL_ONLY) && defined(CONFIG_VIDEO_BUFFER_POOL_HEAP_SIZE) && \
+    !defined(CONFIG_VIDEO_BUFFER_USE_SHARED_MULTI_HEAP) && \
+    (defined(CONFIG_ALP_SDK_CAMERA_ZEPHYR_VIDEO) || defined(CONFIG_ALP_SDK_CAMERA_ALIF_ISP) || \
+     defined(CONFIG_ALP_SDK_CAMERA_V2N_N44_ISP))
+#include <zephyr/toolchain.h>
+BUILD_ASSERT(CONFIG_VIDEO_BUFFER_POOL_HEAP_SIZE <= 262136,
+             "video buffer pool is bigger than a small sys_heap can hold: "
+             "set CONFIG_SYS_HEAP_AUTO=y");
+#endif
+
 ALP_BACKEND_DEFINE_CLASS(camera);
 ALP_BACKEND_ANCHOR(camera);
 

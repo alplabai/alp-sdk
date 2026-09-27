@@ -33,8 +33,8 @@ pads:
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "CANFD3_CTX3", silicon_pad: "P86" }
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "DA9292_INT", silicon_pad: "P37" }
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "DA9292_TW", silicon_pad: "P36" }
-  - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "DEEPX_CORE_0P75_EN", silicon_pad: "P64" }
-  - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "DEEPX_PWR_EN_REQ", silicon_pad: "P65" }
+  - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", core: "a55", silicon_peripheral: "DEEPX_CORE_0P75_EN", silicon_pad: "P64" }
+  - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", core: "a55", silicon_peripheral: "DEEPX_PWR_EN_REQ", silicon_pad: "P65" }
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "eMMC_V_SEL", silicon_pad: "PA0" }
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "ET0_MDC", silicon_pad: "K27" }
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "ET0_MDIO", silicon_pad: "J29" }
@@ -85,8 +85,8 @@ pads:
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "RIIC1_SDA1", silicon_pad: "P32" }
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "RIIC2_SCL2", silicon_pad: "P35" }
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "RIIC2_SDA2", silicon_pad: "P34" }
-  - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", core: "m33", silicon_peripheral: "RIIC8_SCL8", silicon_pad: "P07" }
-  - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", core: "m33", silicon_peripheral: "RIIC8_SDA8", silicon_pad: "P06" }
+  - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", core: "a55", silicon_peripheral: "RIIC8_SCL8", silicon_pad: "P07" }
+  - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", core: "a55", silicon_peripheral: "RIIC8_SDA8", silicon_pad: "P06" }
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "RSPI0_MISOA", silicon_pad: "P91" }
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "RSPI0_MOSIA", silicon_pad: "P90" }
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "RSPI0_RSPCKA", silicon_pad: "P92" }

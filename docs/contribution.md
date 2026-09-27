@@ -45,7 +45,8 @@ signatures), if you have one.
    inner loops.  See [`docs/testing.md`](testing.md) for the
    per-stage breakdown.
 5. Open a PR.  CI runs the AEN-Zephyr (`pr-twister-aen`) and
-   V2N-Yocto (`pr-bitbake`) matrices, plus the cross-platform
+   V2N-Yocto (`pr-bitbake`) matrices, the AEN-baremetal build
+   (`pr-plain-cmake`), plus the cross-platform
    Zephyr build gate (whichever exist for the version you're
    branching from — see [`VERSIONS.md`](../VERSIONS.md)).  Append a row to
    [`docs/test-plan.md`](test-plan.md) for any new feature, default

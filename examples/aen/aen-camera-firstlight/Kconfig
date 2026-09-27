@@ -1,0 +1,33 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+
+# Per-shield buffer sizing.  The IMX296 shield's only mode is a full
+# 1456x1088 RAW10 frame (1456 x 1088 x 2 = 3,168,256 bytes unpacked): two of
+# those would not fit the 4 MiB SRAM0 bank, so queue a single buffer and size
+# the pool for it -- 3.5 MiB, the frame plus room for the
+# VIDEO_BUFFER_POOL_ALIGN padding and the heap's own bookkeeping.
+#
+# Issue #2327: the IMX335 shield's requested 2x2-binned
+# frame is 1296 x 972 x 2 = 2,519,424 bytes unpacked -- with the plain
+# defaults (two buffers, 2 MiB pool, same as every other shield below) the
+# pool cannot even fit ONE frame, let alone VBUF_COUNT's default two, so the
+# backend's own buffer allocation would fail before any CSI-2 traffic is
+# ever exchanged. Same one-buffer-plus-margin shape as IMX296 above: 2.75 MiB
+# (2,883,584 bytes, ~14.5% over the raw frame size -- a similar margin to
+# what IMX296's 3.5 MiB leaves over its own 3,168,256-byte frame, ~15.8%)
+# for VIDEO_BUFFER_POOL_ALIGN padding and heap bookkeeping.
+#
+# Every other shield keeps the defaults (two buffers, 2 MiB pool).
+configdefault ALP_SDK_CAMERA_ZEPHYR_VIDEO_VBUF_COUNT
+	default 1 if VIDEO_IMX296
+	default 1 if VIDEO_IMX335
+
+configdefault VIDEO_BUFFER_POOL_NUM_MAX
+	default 1 if VIDEO_IMX296
+	default 1 if VIDEO_IMX335
+
+configdefault VIDEO_BUFFER_POOL_HEAP_SIZE
+	default 3670016 if VIDEO_IMX296
+	default 2883584 if VIDEO_IMX335
+
+source "Kconfig.zephyr"
