@@ -240,6 +240,18 @@ frame rate as measured AT THE SENSOR (only the app-level `fps=30` stat is
 bench-confirmed, not a sensor-side register readback), and AE behaviour in
 varied lighting all remain unverified.
 
+**Bench-only note (run 333's J-Link RAM-run, not a product change):** the
+IMX335 build above overflowed ITCM by 4136 B under
+`docs/aen-bench-bringup.md`'s § Flow C RAM-run retarget (`zephyr,flash =
+&itcm`, needed to J-Link-load without touching MRAM) and needed a
+bench-only shell-trim conf layered on top to fit (the same class of
+headroom problem that section's `aen-flowc-itcm.conf` already documents
+for other examples, not something specific to this app's own `prj.conf`).
+This is purely an artifact of the RAM-run bench flow's smaller ITCM
+budget — the product build (Flow D/MRAM-XIP, or any customer build that
+doesn't retarget to ITCM) is unaffected, and `prj.conf` was NOT changed to
+work around it.
+
 ### Ethernet MAC address changes every boot (investigated, not fixed)
 
 Bench runs 312-314 each logged a DIFFERENT MAC address
