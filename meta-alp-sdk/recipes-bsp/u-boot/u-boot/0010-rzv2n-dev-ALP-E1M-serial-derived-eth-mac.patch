@@ -42,12 +42,12 @@ Also publish the validated serial as /chosen/alp,serial next to
 
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
- board/renesas/rzv2n-dev/rzv2n-dev.c | 261 ++++++++++++++++++++++++++++
+ board/renesas/rzv2n-dev/rzv2n-dev.c | 257 ++++++++++++++++++++++++++++
  include/configs/rzv2n-dev.h         |  12 +-
- 2 files changed, 272 insertions(+), 1 deletion(-)
+ 2 files changed, 268 insertions(+), 1 deletion(-)
 
 diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
-index 1152ade7..7de74924 100644
+index 1152ade7..219eb219 100644
 --- a/board/renesas/rzv2n-dev/rzv2n-dev.c
 +++ b/board/renesas/rzv2n-dev/rzv2n-dev.c
 @@ -27,6 +27,9 @@
@@ -84,7 +84,7 @@ index 1152ade7..7de74924 100644
  	memcpy(alp_sku, &buf[0x18], 24);
  	alp_sku[24] = '\0';
  	printf("ALP: SoM family \"%s\" sku \"%.24s\"\n", family, &buf[0x18]);
-@@ -913,9 +926,256 @@ int ft_system_setup(void *blob, struct bd_info *bd)
+@@ -913,9 +926,252 @@ int ft_system_setup(void *blob, struct bd_info *bd)
  	if (ret)
  		printf("ALP: failed to publish /chosen/alp,sku (%d)\n", ret);
  
@@ -296,16 +296,14 @@ index 1152ade7..7de74924 100644
 +		src = "serial";
 +	} else {
 +		printf("ALP: WARNING: %s%s%s -- SoM EEPROM not provisioned; "
-+		       "falling back to an eMMC-CID-derived MAC
-+",
++		       "falling back to an eMMC-CID-derived MAC\n",
 +		       alp_serial[0] ? "SoM serial \"" : "no validated SoM serial",
 +		       alp_serial[0] ? alp_serial : "",
 +		       alp_serial[0] ? "\" does not parse as YYYYWww-IIII" : "");
 +		if (!alp_eth_derive_mac_from_cid(0, mac0) ||
 +		    !alp_eth_derive_mac_from_cid(1, mac1)) {
 +			printf("ALP: WARNING: no eMMC CID either -- ethaddr/eth1addr "
-+			       "left at the vendor default shared by every such board
-+");
++			       "left at the vendor default shared by every such board\n");
 +			return;
 +		}
 +		src = "eMMC CID";
@@ -318,12 +316,10 @@ index 1152ade7..7de74924 100644
 +	ret1 = env_set("eth1addr", buf1);
 +	if (ret0 || ret1) {
 +		printf("ALP: WARNING: MAC env_set failed (%d/%d) -- Linux gets "
-+		       "the vendor default MAC
-+", ret0, ret1);
++		       "the vendor default MAC\n", ret0, ret1);
 +		return;
 +	}
-+	printf("ALP: MAC end0 %s end1 %s (%s%s%s)
-+", buf0, buf1, src,
++	printf("ALP: MAC end0 %s end1 %s (%s%s%s)\n", buf0, buf1, src,
 +	       alp_serial[0] ? " " : "", alp_serial[0] ? alp_serial : "");
 +}
 +
@@ -341,7 +337,7 @@ index 1152ade7..7de74924 100644
  int board_late_init(void)
  {
  	bool v2n_m1;
-@@ -924,6 +1184,7 @@ int board_late_init(void)
+@@ -924,6 +1180,7 @@ int board_late_init(void)
  	alp_clk5l_fixup();
  
  	v2n_m1 = alp_som_is_v2n_m1();
