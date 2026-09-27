@@ -116,7 +116,12 @@ Per-chip status lives in
 
 Headers below the top level are contract surfaces too, but they are
 classified in their file-level marker rather than the top-level table
-above (which covers `include/alp/*.h` only).  Current classification:
+above (which covers `include/alp/*.h` only).  The **file-level** class is
+the marker in the file's top doxygen block and is what the table records; an
+individual function inside one of these files may additionally carry
+`[ABI-STABLE]` at function granularity, and that co-exists with -- rather
+than contradicts -- an `[ABI-EXPERIMENTAL]` file-level class (the mixed-tier
+mechanism in "What the markers mean" above).  Current classification:
 
 | Header                                  | Marker               | Notes                                                              |
 |-----------------------------------------|----------------------|--------------------------------------------------------------------|
