@@ -72,7 +72,7 @@ production tool                          on-module EEPROM
 ─────────────────                        ────────────────
 $ python scripts/program_eeprom.py \
       --board-yaml board.yaml \
-      --serial ALP-V2N101-26W19-00042 \
+      --serial 2026W19-0042 \
       --mfg-date 2026-05-09 \
       --output build/eeprom-manifest.bin
         │

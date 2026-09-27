@@ -54,6 +54,21 @@ def test_scaffold_emits_json_envelope_for_the_examples_own_sku():
     assert "ALP_SDK_ROOT is not set" in by_path["CMakeLists.txt"]
 
 
+def test_iot_scaffold_emits_the_cc3501e_bridge_it_compiles():
+    """issue #2241: the iot template's CMakeLists.txt compiles
+    src/cc3501e_bridge.c, so the scaffold must carry it and its header --
+    before the fix the envelope had neither and the emitted project could
+    not link."""
+    proc = _run("--emit", "scaffold", "--template", "iot",
+                "--sku", "E1M-AEN801")
+    assert proc.returncode == 0, proc.stderr
+    by_path = {item["path"]: item["contents"] for item in json.loads(proc.stdout)}
+    assert "src/cc3501e_bridge.c" in by_path["CMakeLists.txt"]
+    example = REPO / "examples" / "connectivity" / "mqtt-telemetry"
+    for rel in ("src/cc3501e_bridge.c", "src/cc3501e_bridge.h"):
+        assert by_path.get(rel) == (example / rel).read_text(encoding="utf-8"), rel
+
+
 def test_scaffold_substitutes_sku_and_preset_for_a_different_sku():
     proc = _run("--emit", "scaffold", "--template", "minimal",
                 "--sku", "E1M-V2N101")

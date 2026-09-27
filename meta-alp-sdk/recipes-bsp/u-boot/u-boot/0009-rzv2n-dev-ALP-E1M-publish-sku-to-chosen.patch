@@ -1,0 +1,108 @@
+From 0f333096736444b7981bb96844cbc881e045c1e4 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Fri, 25 Sep 2026 22:40:00 +0200
+Subject: [PATCH] rzv2n-dev: ALP E1M publish the SoM SKU to /chosen/alp,sku
+
+board_late_init() already reads and validates the on-module identity
+EEPROM manifest (magic, schema, CRC32) and prints the SKU, but the value
+never left U-Boot, so Linux could only name itself after the MACHINE the
+image was built for. On the bench, an E1M-V2M103 booting an older image
+built for e1m-v2n101-a55 reported itself as "e1m-v2n101-a55".
+
+Keep the SKU from a validated manifest in board-static storage and
+publish it to the kernel device tree as /chosen/alp,sku from
+ft_system_setup(), enabled with CONFIG_OF_SYSTEM_SETUP. The two other
+hooks don't work here: ft_board_setup() is already defined by
+rcar-common's v2-common.c, which this board links, and an EVT_FT_FIXUP
+spy never sees the kernel blob because this configuration has no
+OFNODE_MULTI_TREE.
+
+Nothing is published when the manifest is missing or fails validation,
+and a failed write only warns, so a module without a burned EEPROM boots
+exactly as before.
+---
+ board/renesas/rzv2n-dev/rzv2n-dev.c | 37 +++++++++++++++++++++++++++++
+ configs/rzv2n-dev_defconfig         |  1 +
+ 2 files changed, 38 insertions(+)
+
+diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
+index fd4e8e1f..1152ade7 100644
+--- a/board/renesas/rzv2n-dev/rzv2n-dev.c
++++ b/board/renesas/rzv2n-dev/rzv2n-dev.c
+@@ -27,6 +27,7 @@
+ #include <linux/delay.h>
+ #include <u-boot/crc.h>
+ #include <asm/unaligned.h>
++#include <fdt_support.h>
+ 
+ DECLARE_GLOBAL_DATA_PTR;
+ 
+@@ -337,6 +338,14 @@ static void alp_gpio_output(unsigned int bank, unsigned int pin, int value)
+ #define ALP_HW_INFO_MAGIC	0x414C5048	/* "ALPH" little-endian */
+ #define ALP_HW_INFO_SCHEMA	1
+ 
++/*
++ * SKU string from a validated SoM manifest, published to the kernel as
++ * /chosen/alp,sku by ft_system_setup() so Linux can name itself after the
++ * module actually fitted. Empty unless the manifest passed the magic,
++ * schema and CRC checks -- never guessed.
++ */
++static char alp_sku[25];
++
+ static bool alp_som_is_v2n_m1(void)
+ {
+ 	struct udevice *dev;
+@@ -370,6 +379,8 @@ static bool alp_som_is_v2n_m1(void)
+ 
+ 	memcpy(family, &buf[0x08], 16);
+ 	family[16] = '\0';
++	memcpy(alp_sku, &buf[0x18], 24);
++	alp_sku[24] = '\0';
+ 	printf("ALP: SoM family \"%s\" sku \"%.24s\"\n", family, &buf[0x18]);
+ 
+ 	return strcmp(family, "v2n-m1") == 0;
+@@ -879,6 +890,32 @@ done:
+ 	       CLK5L_SE1_DIV4_CTRL_WANT, CLK5L_SE3_CTRL_WANT);
+ }
+ 
++/*
++ * ft_board_setup() is already defined by rcar-common's v2-common.c, and
++ * EVT_FT_FIXUP never reaches the kernel blob without OFNODE_MULTI_TREE, so
++ * the SKU goes in through the OF_SYSTEM_SETUP hook. Failures only warn: a
++ * naming property must never stop the board from booting.
++ */
++int ft_system_setup(void *blob, struct bd_info *bd)
++{
++	int node, ret;
++
++	if (!alp_sku[0])
++		return 0;
++
++	node = fdt_find_or_add_subnode(blob, 0, "chosen");
++	if (node < 0) {
++		printf("ALP: /chosen not available (%d), SKU not published\n", node);
++		return 0;
++	}
++
++	ret = fdt_setprop_string(blob, node, "alp,sku", alp_sku);
++	if (ret)
++		printf("ALP: failed to publish /chosen/alp,sku (%d)\n", ret);
++
++	return 0;
++}
++
+ int board_late_init(void)
+ {
+ 	bool v2n_m1;
+diff --git a/configs/rzv2n-dev_defconfig b/configs/rzv2n-dev_defconfig
+index e04099d1..2f690723 100644
+--- a/configs/rzv2n-dev_defconfig
++++ b/configs/rzv2n-dev_defconfig
+@@ -1,6 +1,7 @@
+ CONFIG_ARM=y
+ CONFIG_ARCH_CPU_INIT=y
+ CONFIG_BOARD_LATE_INIT=y
++CONFIG_OF_SYSTEM_SETUP=y
+ CONFIG_ARCH_RENESAS=y
+ CONFIG_OF_UPSTREAM=n
+ CONFIG_MTD=y

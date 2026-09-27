@@ -15,10 +15,19 @@
  * dphy node is repointed AND bench-verified.
  * ==================================================================
  *
- * Vendored from the fork with two local changes: the PLL is programmed through
- * the SoC shadow registers (dphy_dw_config_pll()), and dphy_dw_init() powers
- * the D-PHY and enables its upstream clocks (dphy_dw_power_on()) -- the fork
- * leaves both of those to the application.  This driver does NOT touch the
+ * Vendored from the fork with three local changes: the PLL is programmed
+ * through the SoC shadow registers (dphy_dw_config_pll()), dphy_dw_init()
+ * powers the D-PHY and enables its upstream clocks (dphy_dw_power_on()) --
+ * the fork leaves both of those to the application -- and
+ * dphy_dw_slave_setup()'s Stop-state wait honours a per-sensor
+ * `phy->skip_clk_lane_stopstate` flag (struct dphy_csi2_settings,
+ * <zephyr/drivers/mipi_dphy/dphy_dw.h>) that skips ONLY the clock-lane
+ * Stop-state bit for a continuous-clock sensor with no known way to park
+ * LP-11 (issue #2287; see that struct field's comment and the IMX296
+ * driver). Data-lane Stop-state and the wait's timeout stay fatal
+ * unconditionally -- this is NOT a blanket leniency: it caught a real
+ * silicon defect on OV5647 (#2248) and must keep doing so for every sensor
+ * that has not opted out on its own DT endpoint. This driver does NOT touch the
  * video API, so it was never blocked by the v4.4 video-API rework.  Consumers:
  * video_csi_dw.c (dphy_dw_slave_setup, camera RX) and dsi_dw.c
  * (dphy_dw_master_setup, DSI TX).  vendor-ext.  Equivalent power/clock writes,
@@ -793,6 +802,16 @@ int dphy_dw_slave_setup(const struct device *dev, struct dphy_csi2_settings *phy
 
 	tmp = CSI_PHY_STOPSTATE_PHY_STOPSTATECLK | CSI_PHY_STOPSTATE_PHY_STOPSTATEDATA_0;
 	tmp = (phy->num_lanes == 2) ? (tmp | CSI_PHY_STOPSTATE_PHY_STOPSTATEDATA_1) : tmp;
+	/*
+	 * issue #2287: a sensor that never parks its clock lane in LP-11
+	 * (data lanes unaffected) opts out of just that bit here -- see
+	 * `skip_clk_lane_stopstate`'s comment in <zephyr/drivers/mipi_dphy/
+	 * dphy_dw.h>. Every other sensor, and every data-lane bit, keeps the
+	 * fatal wait below unchanged.
+	 */
+	if (phy->skip_clk_lane_stopstate) {
+		tmp &= ~CSI_PHY_STOPSTATE_PHY_STOPSTATECLK;
+	}
 
 	for (int i = 0; (i < 1000000) && ((sys_read32(csi_regs + CSI_PHY_STOPSTATE) & tmp) != tmp);
 	     i++) {

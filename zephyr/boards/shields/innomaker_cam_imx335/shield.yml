@@ -1,0 +1,6 @@
+shield:
+  name: innomaker_cam_imx335
+  full_name: INNO-MAKER CAM-IMX335-5MP (Sony IMX335)
+  vendor: InnoMaker
+  supported_features:
+    - video

@@ -1,0 +1,142 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Alp Lab AB
+#
+# Boot-time mixer defaults for the E1M-X-EVK TAS2563 pair (U27 left /
+# U28 right), restored by alsa-restore.service. Both amps sit on one
+# stereo I2S link; each plays its own slot only when its "ASI1 Sel" is
+# Left/Right -- the driver default "I2C offset" does not map to the
+# stereo pair.
+#
+# "Amp Gain Volume" is the raw PB_CFG1.AMP_LEVEL code. It starts at 1
+# (01h = 8.5 dBV, the lowest level TI SLASET3D Table 7-105 lists) rather
+# than the silicon default 16 (10h = 16.0 dBV, ~10 W peak into 4 ohm);
+# raise it deliberately for the enclosure/speaker in use. Code 0 is not a
+# listed level. The 6.1 driver's dB scale for this control is one code
+# off the datasheet (its TLV labels code 1 as 9.0 dB, dbvalue 900 below), so read levels from the
+# table above, not from amixer's dB column.
+state.e1mxevktas2563 {
+	control.1 {
+		iface MIXER
+		name 'Left Amp Gain Volume'
+		value 1
+		comment {
+			access 'read write'
+			type INTEGER
+			count 1
+			range '0 - 28'
+			dbmin 850
+			dbmax 2250
+			dbvalue.0 900
+		}
+	}
+	control.2 {
+		iface MIXER
+		name 'Left Digital Volume Control'
+		value 110
+		comment {
+			access 'read write'
+			type INTEGER
+			count 1
+			range '0 - 110'
+			dbmin -11000
+			dbmax 0
+			dbvalue.0 0
+		}
+	}
+	control.3 {
+		iface MIXER
+		name 'Right Amp Gain Volume'
+		value 1
+		comment {
+			access 'read write'
+			type INTEGER
+			count 1
+			range '0 - 28'
+			dbmin 850
+			dbmax 2250
+			dbvalue.0 900
+		}
+	}
+	control.4 {
+		iface MIXER
+		name 'Right Digital Volume Control'
+		value 110
+		comment {
+			access 'read write'
+			type INTEGER
+			count 1
+			range '0 - 110'
+			dbmin -11000
+			dbmax 0
+			dbvalue.0 0
+		}
+	}
+	control.5 {
+		iface MIXER
+		name 'Left ASI1 Sel'
+		value Left
+		comment {
+			access 'read write'
+			type ENUMERATED
+			count 1
+			item.0 'I2C offset'
+			item.1 Left
+			item.2 Right
+			item.3 LeftRightDiv2
+		}
+	}
+	control.6 {
+		iface MIXER
+		name 'Left ISENSE Switch'
+		value false
+		comment {
+			access 'read write'
+			type BOOLEAN
+			count 1
+		}
+	}
+	control.7 {
+		iface MIXER
+		name 'Left VSENSE Switch'
+		value false
+		comment {
+			access 'read write'
+			type BOOLEAN
+			count 1
+		}
+	}
+	control.8 {
+		iface MIXER
+		name 'Right ASI1 Sel'
+		value Right
+		comment {
+			access 'read write'
+			type ENUMERATED
+			count 1
+			item.0 'I2C offset'
+			item.1 Left
+			item.2 Right
+			item.3 LeftRightDiv2
+		}
+	}
+	control.9 {
+		iface MIXER
+		name 'Right ISENSE Switch'
+		value false
+		comment {
+			access 'read write'
+			type BOOLEAN
+			count 1
+		}
+	}
+	control.10 {
+		iface MIXER
+		name 'Right VSENSE Switch'
+		value false
+		comment {
+			access 'read write'
+			type BOOLEAN
+			count 1
+		}
+	}
+}

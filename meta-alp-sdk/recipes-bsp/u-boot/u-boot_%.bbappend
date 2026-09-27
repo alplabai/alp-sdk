@@ -236,6 +236,62 @@ SRC_URI:append:rzv2n-family = " file://0005-i2c-rzg2l_riic-combined-register-rea
 # the full matrix.
 SRC_URI:append:rzv2n-family = " file://0006-rzv2n-dev-i2c-rzg2l_riic-p06-p07-pullup-clock-fix.patch"
 
+# 0007 (on-module 5L35023B clock-generator OTP fixup): the on-module
+# Renesas 5L35023B programmable clock generator (RIIC8/BRD_I2C, 7-bit
+# 0x69) ships an OTP image whose single-ended routing is wrong for this
+# SoM -- SE1 (feeds the SoC RTXIN and the Wi-Fi module's 32k LPO) comes
+# up at 24.576 MHz instead of 32.768 kHz, and SE3 (audio clock) comes up
+# at 22.5792 MHz instead of 24.576 MHz. Bench-confirmed (E1M-V2M103
+# board #1, 2026-09-24): with the OTP defaults the SoC RTC (RTCA-3)
+# fails to start ("Failed to setup the RTC!", -ETIMEDOUT); two volatile
+# register writes (reg 0x24: 0x9c->0x8e, reg 0x21: 0x80->0xc0) fix it,
+# after which the RTC counts at 32.768 kHz. Both are OTP-shadow
+# registers and REVERT ON POWER-CYCLE (the OTP itself cannot be
+# re-burned in-system), so alp_clk5l_fixup() runs unconditionally,
+# on every boot, first in board_late_init() -- ahead of and independent
+# of the 0004 DEEPX rail step -- for the whole rzv2n-family (this clock
+# generator is present on every V2N/V2M SoM, not just DEEPX-populated
+# V2M units). Guarded to single-byte reads only (see 0005/0006 above)
+# and to writing only these two registers, and only when reg 0x00 reads
+# the expected OTP-burned/addr-0x69 value (0xa0) and 0x24/0x21 read the
+# exact as-shipped OTP pair -- any other readback is left untouched and
+# only reported. NOT disjoint from 0004: this patch's board_late_init()
+# hunk rewrites the `bool v2n_m1 = alp_som_is_v2n_m1();` declaration
+# 0004 adds (splitting it into a bare declaration plus a later
+# assignment, so alp_clk5l_fixup() can run first) -- it must apply on
+# top of 0004's context, not merely after it for readability. It is
+# disjoint from 0005/0006 (drivers/i2c/rzg2l_riic.c), so its position
+# after those two is not order-sensitive, only readable.
+SRC_URI:append:rzv2n-family = " file://0007-rzv2n-dev-ALP-E1M-clkgen-otp-fixup.patch"
+
+# Publish the SKU from the validated identity-EEPROM manifest to the kernel
+# as /chosen/alp,sku from ft_system_setup() (the patch enables
+# CONFIG_OF_SYSTEM_SETUP; ft_board_setup() is already taken by rcar-common's
+# v2-common.c). recipes-core/alp-hostname turns it into the hostname.
+# Context: 0001's alp_som_is_v2n_m1() and the tail of 0007's
+# alp_clk5l_fixup(). 0008 is reserved for the SDHI1 microSD patch on the
+# provisioning branch; its hunks are disjoint from this one's, so keep its
+# SRC_URI line ahead of this one when both land.
+SRC_URI:append:rzv2n-family = " file://0009-rzv2n-dev-ALP-E1M-publish-sku-to-chosen.patch"
+
+# Derive ethaddr/eth1addr from the same validated manifest's serial --
+# fleet-unique by construction, not globally unique (no purchased IEEE
+# OUI block). Neither the RZ/V2N SoC nor this SoM has any other MAC
+# source. Must land after 0009: it edits the same alp_som_is_v2n_m1()
+# function body 0009's own hunk already touched (adding an alp_serial
+# capture alongside 0009's alp_sku one), and after 0002: it rewrites the
+# #define CONFIG_BOOTCOMMAND line 0002 introduced.
+#
+# meta-rz-features/meta-rz-drpai's OWN, separate u-boot bbappend
+# (recipes-bsp/u-boot/files/0001-add-ether-setting.patch) sets
+# ethaddr/eth1addr to 02:11:22:33:44:55/66 in CFG_EXTRA_ENV_SETTINGS;
+# this patch derives the real per-unit MAC at boot instead, both in
+# board_late_init() and via a bootcmd hook this same patch adds to
+# CONFIG_BOOTCOMMAND (include/configs/rzv2n-dev.h), right after "env
+# default -a" -- see docs/soms/v2n.md#ethernet-mac-address-policy and
+# scripts/alp_eth_mac.py.
+SRC_URI:append:rzv2n-family = " file://0010-rzv2n-dev-ALP-E1M-serial-derived-eth-mac.patch"
+
 # Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot
 # binary serves both families, so the dtb basename is a Kconfig string
 # (CONFIG_ALP_E1M_FDTFILE, patch 0002) whose default suits the V2N SKUs;
