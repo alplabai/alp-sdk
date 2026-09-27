@@ -28,8 +28,8 @@ within-product-line option flip:
   `topology.m33:` in `metadata/e1m_modules/E1M-NX9101.yaml`).
 - **E1M-X** (45×65 mm) -- heterogeneous Cortex-A55 +
   Cortex-M33, higher-TDP silicon.  Today: Renesas RZ/V2N
-  (`E1M-V2N101/102`) and the same with DEEPX DX-M1
-  (`E1M-V2M101/102`).
+  (`E1M-V2N101/102/103`) and the same with DEEPX DX-M1
+  (`E1M-V2M101/102/103`).
 
 **Within either family, the SDK promises source-level
 portability.**  Pad assignments, peripheral fan-out, on-module
@@ -66,9 +66,9 @@ silicon-determined deltas), see
 [`docs/portability-matrix.md`](../portability-matrix.md) -- 18
 of 21 E1M cells (all 6 AEN SKUs; NX9101's 3 cells fail -- its only
 hw_rev, imx93 r1, is `status: tbd`, refused outright by the
-hw_rev-buildable gate, #1025) and 8 of 12 E1M-X cells generate
-cleanly today (the `adc-voltmeter` example fails on all four
-E1M-X presets -- V2N101, V2N102, V2M101, V2M102).
+hw_rev-buildable gate, #1025) and 12 of 18 E1M-X cells generate
+cleanly today (the `adc-voltmeter` example fails on all six
+E1M-X presets -- V2N101, V2N102, V2N103, V2M101, V2M102, V2M103).
 
 ## What's *not* a `som.sku:` swap
 

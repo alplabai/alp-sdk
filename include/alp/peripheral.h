@@ -43,6 +43,26 @@ extern "C" {
  * @c alp_jpeg_encode_req_t::format -- existing values are unchanged, so
  * this stays ABI-safe for every display/camera caller already switching
  * on this enum.
+ *
+ * @ref ALP_PIXFMT_GREY8, @ref ALP_PIXFMT_RAW8, and @ref ALP_PIXFMT_RAW10
+ * were appended (new numeric values after @ref ALP_PIXFMT_NV12) for
+ * <alp/camera.h> sensors that hand raw, undemosaiced pixels to the
+ * application instead of an already-converted RGB/YUV frame -- again
+ * additive only, existing values unchanged.  @ref ALP_PIXFMT_RAW8 and
+ * @ref ALP_PIXFMT_RAW10 don't fix a Bayer order in the enum itself: which
+ * of the four CFA arrangements (BGGR/GBRG/GRBG/RGGB) a frame actually
+ * uses is a property of the SENSOR, not the request -- open()ing camera
+ * @c N with @ref ALP_PIXFMT_RAW10 always yields that camera's native
+ * order.  This API version has no runtime query for it (no
+ * `alp_camera_get_format()`); an application learns the order the same
+ * place it learns which sensor is wired at all -- the board/shield
+ * documentation (e.g. docs/camera-shields.md's per-shield table) -- and
+ * hardcodes it, the same way it already hardcodes the requested
+ * width/height.  @ref ALP_PIXFMT_RAW10 is always delivered UNPACKED: one
+ * 16-bit little-endian sample per pixel (the low 10 bits carry data, the
+ * high 6 are zero), never the MIPI CSI-2 wire's 5-bytes-per-4-pixels
+ * packed form -- so a frame's row stride is a caller-computable constant,
+ * `width * 2`, with no pitch query needed either.
  */
 typedef enum {
 	ALP_PIXFMT_MONO_VLSB = 0, /**< 1 bpp, vertical bytes (SSD1306 native). */
@@ -53,6 +73,11 @@ typedef enum {
 	    4, /**< I420: separate Y, U, V planes, each its own base pointer + stride (4:2:0). */
 	ALP_PIXFMT_NV12 =
 	    5, /**< Semi-planar 4:2:0: one Y plane immediately followed by one interleaved U/V plane. */
+	ALP_PIXFMT_GREY8 = 6, /**< 8 bpp mono, one byte per pixel, no colour info (e.g. OV9281). */
+	ALP_PIXFMT_RAW8 =
+	    7, /**< Sensor-native 8-bit raw: one byte per pixel, Bayer CFA (order is the sensor's) or mono. */
+	ALP_PIXFMT_RAW10 =
+	    8, /**< Sensor-native 10-bit raw, unpacked to one 16-bit little-endian sample per pixel (high 6 bits zero); Bayer CFA (order is the sensor's) or mono. */
 } alp_pixfmt_t;
 
 /** Status codes returned by ALP peripheral functions. */

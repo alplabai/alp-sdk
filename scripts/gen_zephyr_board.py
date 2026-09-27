@@ -2660,8 +2660,9 @@ def _v2n_dts(
         f" *   - SCI{ch} Simple-SPI (alias {gd32_spi['alias']}): {mosi['silicon_pad']} MOSI{ch} / "
         f"{miso['silicon_pad']} MISO{ch} / {sclk['silicon_pad']} SCK{ch} +",
         f" *     {cs0['silicon_pad']} GPIO chip-select (master SCI-SPI has no hardware slave-select)",
-        f" *   - RIIC8 / BRD_I2C (alias {brd_i2c['alias']}): {sda['silicon_pad']} SDA / "
-        f"{scl['silicon_pad']} SCL  (GD32 slave @ 0x{peer_addr:02x})",
+        f" *   - RIIC8 / BRD_I2C: {sda['silicon_pad']} SDA / {scl['silicon_pad']} SCL "
+        f"(GD32 slave @ 0x{peer_addr:02x}) -- Cortex-A55/Linux-exclusive,",
+        " *     NOT wired on this board: no alias, &i2c8 stays disabled below.",
         " *",
         " * The on-module silicon is the n44 variant; Zephyr only models the n48gbg",
         " * SoC, which is devicetree-identical for the M33 + SPI/I2C peripherals",
@@ -2699,7 +2700,6 @@ def _v2n_dts(
         "",
         "\taliases {",
         f"\t\t{gd32_spi['alias']} = &gd32_spi;",
-        f"\t\t{brd_i2c['alias']} = &{brd_i2c['dt_label']};",
         "\t};",
         "",
         "\tsram: memory@8003000 {",
@@ -2768,11 +2768,16 @@ def _v2n_dts(
         '\tstatus = "okay";',
         "};",
         "",
+        "/*",
+        f" * {brd_i2c['peripheral']} / BRD_I2C is Cortex-A55/Linux-exclusive",
+        " * (metadata/e1m_modules/v2n/core-ownership.yaml) -- the CM33 must never",
+        " * master it, so this node stays disabled and carries no alias (no",
+        " * alp_i2c_open() bus_id resolves to it on this board).  The pinctrl group",
+        f" * ({brd_i2c['pinctrl_group_label']} in {dir_name}-pinctrl.dtsi) is kept for",
+        " * reference only -- an unreferenced group claims no pin.",
+        " */",
         f"&{brd_i2c['dt_label']} {{",
-        f"\tpinctrl-0 = <&{brd_i2c['pinctrl_group_label']}>;",
-        '\tpinctrl-names = "default";',
-        "\tclock-frequency = <I2C_BITRATE_FAST>;",
-        '\tstatus = "okay";',
+        '\tstatus = "disabled";',
         "};",
         "",
         "/*",
@@ -2813,11 +2818,17 @@ def _v2n_defconfig(links: dict[str, Any]) -> str:
             "the console pins' evidence: strings) is why the CM33 serial "
             "console is off; re-enabling it needs a matching _defconfig "
             "rewrite, not just a metadata flip")
-    if gd32_spi.get("status") != "enabled" or brd_i2c.get("status") != "enabled":
+    if gd32_spi.get("status") != "enabled":
         raise ZephyrBoardEmitError(
-            "supervisor-links.yaml gd32_spi and brd_i2c links must both "
-            "stay status: enabled for this _defconfig template to turn on "
-            "CONFIG_SPI/CONFIG_I2C")
+            "supervisor-links.yaml gd32_spi link must stay status: enabled "
+            "for this _defconfig template to turn on CONFIG_SPI")
+    if brd_i2c.get("status") != "disabled":
+        raise ZephyrBoardEmitError(
+            "supervisor-links.yaml brd_i2c link must stay status: disabled "
+            "-- RIIC8/BRD_I2C is Cortex-A55/Linux-exclusive, so this "
+            "_defconfig template does NOT turn on CONFIG_I2C for it; "
+            "re-enabling it needs a matching _defconfig rewrite, not just "
+            "a metadata flip")
     return (
         _COPYRIGHT_HASH +
         "\n"
@@ -2831,9 +2842,9 @@ def _v2n_defconfig(links: dict[str, Any]) -> str:
         "CONFIG_CONSOLE=n\n"
         "CONFIG_UART_CONSOLE=n\n"
         "\n"
-        "# On-module GD32G553 supervisor bridge transports\n"
+        "# On-module GD32G553 supervisor bridge transport.  SPI only: RIIC8/\n"
+        "# BRD_I2C is Cortex-A55/Linux-exclusive, so no CONFIG_I2C here.\n"
         "CONFIG_SPI=y\n"
-        "CONFIG_I2C=y\n"
     )
 
 

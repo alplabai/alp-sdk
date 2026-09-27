@@ -194,6 +194,16 @@ alp_jpeg_t *alp_jpeg_open(const alp_jpeg_config_t *cfg);
  *       software backend (@c hw_accelerated false), which has no such
  *       placement restriction.
  *
+ * @note On @ref ALP_ERR_TIMEOUT from a hardware-accelerated backend, the
+ *       contents of @p out_buf are UNDEFINED. The engine may not have
+ *       stopped writing to it by the time this call returns -- a bounded
+ *       best-effort stop is attempted internally, but no hardware-confirmed
+ *       proof of a drained in-flight write is available (issue #2268). The
+ *       caller must not read @p out_buf, and must not assume the hardware
+ *       has stopped touching it, until a SUBSEQUENT @ref alp_jpeg_encode on
+ *       the same handle returns @ref ALP_OK, or @ref alp_jpeg_close is
+ *       called.
+ *
  * @return @ref ALP_OK on success, or one of:
  *         - @ref ALP_ERR_INVAL -- NULL @p h / @p req / @p out_buf /
  *           @p out_len, a zero @c width / @c height, or a nonzero
@@ -210,6 +220,9 @@ alp_jpeg_t *alp_jpeg_open(const alp_jpeg_config_t *cfg);
  *           backend can't do, or (hardware backends only) a buffer that
  *           is not DMA-reachable -- see the @note above.
  *         - @ref ALP_ERR_NOMEM -- @p out_cap too small for the result.
+ *         - @ref ALP_ERR_TIMEOUT -- (hardware backends only) the engine did
+ *           not signal completion in time -- see the @note above on
+ *           @p out_buf's contents.
  *         - @ref ALP_ERR_IO -- hardware-engine fault.
  *         - @ref ALP_ERR_NOT_IMPLEMENTED -- backend has no encode path.
  *         - @ref ALP_ERR_NOT_READY -- handle not open / mid-close.

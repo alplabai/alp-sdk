@@ -24,8 +24,8 @@ for E1M-X).  `scripts/check_e1m_pinout.py` cross-checks every non-`TBD`
 |--------|-------------------------------|-----------------------------------|
 | AEN    | `E1M-AEN301..801`             | Alif Ensemble E3..E8              |
 | imx93  | `E1M-NX9101` [^imx93-tbd]     | NXP i.MX 93 (i.MX 9352 variant)   |
-| v2n    | `E1M-V2N101`, `E1M-V2N102`    | Renesas RZ/V2N                    |
-| v2n-m1 | `E1M-V2M101`, `E1M-V2M102`    | Renesas RZ/V2N + DEEPX DX-M1      |
+| v2n    | `E1M-V2N101`, `E1M-V2N102`, `E1M-V2N103` | Renesas RZ/V2N          |
+| v2n-m1 | `E1M-V2M101`, `E1M-V2M102`, `E1M-V2M103` | Renesas RZ/V2N + DEEPX DX-M1 |
 
 [^imx93-tbd]: `E1M-NX9101` is a **placeholder MPN** — the production SKU is
 TBD pending the hand-written HW config (see the header of
@@ -132,9 +132,9 @@ The six SKUs must stay in lockstep (same `update_channel`, same
 
 ### V2N / V2M / `gd32_bridge`
 
-All four E1M-X presets (`E1M-V2N101`, `E1M-V2N102`, `E1M-V2M101`,
-`E1M-V2M102` — one PCB, variant-populated) carry a byte-identical
-`gd32_bridge` entry declaring **two** axes:
+All six E1M-X presets (`E1M-V2N101`, `E1M-V2N102`, `E1M-V2N103`,
+`E1M-V2M101`, `E1M-V2M102`, `E1M-V2M103` — one PCB, variant-populated)
+carry a byte-identical `gd32_bridge` entry declaring **two** axes:
 `flash_policy: recovery_only` + `update_channel: alp_ota_spi_bridge`.
 Field updates stream over the bridge link into the slot-A/B application
 bootloader (protocol v0.6 Path A).

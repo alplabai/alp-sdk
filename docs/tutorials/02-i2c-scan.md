@@ -201,13 +201,15 @@ anomaly pending the next respin, not a sixth/seventh rail monitor.
 BRD_I2C is the SoM's RIIC8 housekeeping bus -- DA9292, ACT88760, OPTIGA,
 TMP112, the clock generator, and the GD32 supervisor all sit here
 (`metadata/e1m_modules/E1M-V2N101.yaml:41-55`), but `BOARD_I2C_SENSORS`
-does not reach it (see above).  On the V2N M33 Zephyr target it's
-numeric bus 0, opened directly rather than through a `<alp/board.h>`
-alias (`examples/v2n/v2n-brd-i2c-bringup/src/main.c:350-353`) -- this
+does not reach it (see above).  RIIC8/BRD_I2C is Cortex-A55/Linux-
+exclusive (`metadata/e1m_modules/v2n/core-ownership.yaml`) -- there is
+no CM33/Zephyr path to it at all.  On Linux it is numeric bus 8
+(`/dev/i2c-8`), opened directly rather than through a `<alp/board.h>`
+alias (`examples/v2n/v2n-brd-i2c-bringup/src/main.c:79`) -- this
 tutorial's code does not scan it.  Use
 [`examples/v2n/v2n-brd-i2c-bringup`](../../examples/v2n/v2n-brd-i2c-bringup/)
-instead: it opens bus 0 directly and probes each device with its real
-chip driver.
+instead: a Linux/Yocto user-space app that opens `/dev/i2c-8` directly
+and probes each device with its real chip driver.
 
 If a documented address doesn't show up, the chip is missing or
 mis-strapped -- compare against `metadata/e1m_modules/<SKU>.yaml`'s

@@ -1,8 +1,8 @@
 # E1M-X V2N module pinout
 
 Pin-to-function mapping for the E1M-X V2N family of SoMs
-(`E1M-V2N101`, `E1M-V2N102` -- Renesas RZ/V2N-based modules
-without the DEEPX DX-M1 NPU).
+(`E1M-V2N101`, `E1M-V2N102`, `E1M-V2N103` -- Renesas RZ/V2N-based
+modules without the DEEPX DX-M1 NPU).
 
 ## Files
 
@@ -43,7 +43,7 @@ actually drives them; see
 
 ## V2N-M1 vs V2N base
 
-`E1M-V2M101` / `E1M-V2M102` (the V2N-M1 family) reuses this base
+`E1M-V2M101` / `E1M-V2M102` / `E1M-V2M103` (the V2N-M1 family) reuses this base
 map plus a small Renesas-side overlay for the DEEPX-specific
 signals (`M1_RESET`, `PCIe.MUX_PD`, `PCIe.MUX_SEL`).  See
 [`../v2n-m1/`](../v2n-m1/) for the overlay.

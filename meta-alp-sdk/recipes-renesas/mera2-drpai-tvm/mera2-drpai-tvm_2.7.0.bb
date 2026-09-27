@@ -490,7 +490,7 @@ EXCLUDE_FROM_WORLD = "1"
 # has no DRP-AI at all -- so scope it explicitly.  The payload staged here
 # is the RZ/V2N `obj/build_runtime/v2h` prebuilt set; on an AEN or NX9101
 # build it is not merely useless, it is wrong.
-COMPATIBLE_MACHINE = "^(e1m-v2n101-a55|e1m-v2n102-a55|e1m-v2m101-a55|e1m-v2m102-a55)$"
+COMPATIBLE_MACHINE = "^(e1m-v2n101-a55|e1m-v2n102-a55|e1m-v2n103-a55|e1m-v2m101-a55|e1m-v2m102-a55|e1m-v2m103-a55)$"
 
 # Pin to MACHINE_ARCH.  With the default TUNE_PKGARCH this recipe's output
 # would share an sstate/feed slot with every other aarch64 machine, so a
