@@ -10,10 +10,10 @@ the ADR 0017 tier ladder (consume upstream first), two of the five now
 bind; three remain genuinely blocked on upstream and are reported, not
 guessed at.
 
-**BMI323** (U13, alternate IMU, `0x68`) is not bound: the part does not answer at `0x68` on the bench unit (not fitted), and the upstream driver (`8a636db3aa57`, v6.7) depends on newer kernel APIs (`in_range()`, `iio_trigger_poll_nested()`, the single-argument i2c `probe()`) than 6.1.141-cip43 provides.
+**BMI323** (U13) is not bound. It is fitted, but the E1M-X EVK V2 netlist straps it to the same address as the ICM-42670 (U12): both `SDO` pins go to +VIO through fitted 0 Ω resistors (R45 for U12, R47 for U13; the GND-side R46/R48 are DNP), so both sit at `0x69`. That collision is why nothing answers at `0x68` and why `0x69` reads WHO_AM_I = 0 on the bench. The rework is to fit R48 and remove R47, which moves the BMI323 to `0x68`. Independently, the upstream driver (`8a636db3aa57`, v6.7) depends on newer kernel APIs (`in_range()`, `iio_trigger_poll_nested()`, the single-argument i2c `probe()`) than 6.1.141-cip43 provides.
 
-**INA236** x5 (U21 `0x40` +3V3, U31 `0x41` +1V8, U32 `0x48` +VCAM2, U34
-`0x49` +VCAM3, U30 `0x4A` +5V) — the in-tree `ina2xx` hwmon driver has no
+**INA236** x4 (U21 `0x40` +3V3, U31 `0x41` +1V8, U32 `0x48` +VCAM2, U34
+`0x49` +VCAM3) — the in-tree `ina2xx` hwmon driver has no
 dedicated INA236 chip type, and no released kernel's DT binding names a
 `ti,ina236` compatible at all. TI's INA236 is register- and
 electrically-compatible with TI's INA232, which upstream did add
@@ -31,11 +31,13 @@ forward unchanged. `shunt-resistor` values in the new `&i2c0` DT nodes
 come from `metadata/boards/e1m-x-evk.yaml`'s existing
 `i2c_devices[].calibration` block (already the single source of truth
 for the generated `XEVK_INA236_SHUNT_*` macros, bench-confirmed 2026-06):
-20 mOhm for the 3V3/1V8/5V rails, 50 mOhm for VCAM2/VCAM3. U30 (`0x4A`,
-+5V) is silent on the current bench unit, consistent with the same
-board.yaml's own "NEXT-REVISION board notes" recording an INA236 absence
-as a per-unit trait elsewhere on this carrier family rather than a
-permanent unfitted part — its DT node stays enabled on that evidence.
+20 mOhm for the 3V3/1V8 rails, 50 mOhm for VCAM2/VCAM3. The +5V input
+monitor U30 is not bound: the E1M-X EVK V2 netlist shows it is an
+INA228AIDGS (not an INA236) strapped to `0x42` (A1 = GND, A0 = SDA), and
+its SDA/SCL pins are netted swapped onto I2C0, so it cannot answer on this
+carrier revision. `metadata/boards/e1m-x-evk.yaml` still describes it as an
+INA236 at `0x4A`; correcting that metadata (and the generated
+`XEVK_I2C_ADDR_INA236_5V` macro) is tracked separately.
 
 **TCAL9538** x2 (U35 main, U37 PCIe) — ADR 0017 Tier-1, no kernel patch:
 `GPIO_PCA953X=y` already, and its in-tree `nxp,pca9538` compatible binds

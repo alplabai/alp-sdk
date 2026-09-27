@@ -374,17 +374,10 @@
 		shunt-resistor = <50000>;
 	};
 
-	ina236@4a {
-		/* U30, +5V rail, A0=SDA. Silent on the current bench unit
-		 * (task live facts, 2026-09) -- e1m-x-evk.yaml's own
-		 * "NEXT-REVISION board notes" record the same absence as a
-		 * per-unit trait elsewhere on this carrier family, not a
-		 * permanent unfitted part; kept enabled rather than marked
-		 * assembled:false on that evidence alone. */
-		compatible = "ti,ina232";
-		reg = <0x4a>;
-		shunt-resistor = <20000>;
-	};
+	/* U30 (+5V input monitor) is deliberately NOT bound: the E1M-X EVK V2
+	 * netlist shows an INA228AIDGS (not an INA236) at 0x42 (A1=GND,
+	 * A0=SDA) with its SDA/SCL pins netted swapped onto I2C0, so it
+	 * cannot answer on this carrier revision. */
 };
 
 &i2c1 {
