@@ -668,19 +668,20 @@ jobs:
               fi
           done
 
-      # Pytest sweep -- covers the doc-yaml linter, silicon-determined-
-      # field rejection (regression-lock for commit a3cd4fd), and
-      # per-(SoM x core) topology default resolution (regression-lock
-      # for commit e3a4c6b's bulk-strip).  These all share fixtures
-      # with the orchestrator tests and run in <2 s.
+      # Pytest sweep -- the whole tests/scripts/ suite (~4,400 tests), not
+      # only the doc-yaml linter, silicon-determined-field rejection
+      # (regression-lock for commit a3cd4fd) and per-(SoM x core) topology
+      # default resolution (regression-lock for commit e3a4c6b) it started
+      # as. Run in parallel over every runner core with pytest-xdist.
       - name: Pytest -- linter + schema regression + topology defaults
-        # #1477: worst observed successful run 812s/13.5min -- explicit
-        # cap instead of the (untrue for this step) 1min uncapped-step
-        # budget; see the job-level comment above for the sum-of-caps
-        # this ceiling has to clear.
+        # #2328: serially this step had reached 19-20 min of this 20 min
+        # cap on dev (the #1477 figure, 812s/13.5min, was long stale) and
+        # timed out unrelated PRs. `-n auto` spreads it over the runner's
+        # cores; the cap stays as the explicit ceiling (see the job-level
+        # comment above for the sum-of-caps it has to clear).
         timeout-minutes: 20
         run: |
-          python3 -m pytest tests/scripts/ -v --tb=short
+          python3 -m pytest tests/scripts/ -n auto -v --tb=short
 
       # The gd32-bridge protocol vectors must stay in lockstep with
       # the generator.  The script's --check mode exits non-zero if

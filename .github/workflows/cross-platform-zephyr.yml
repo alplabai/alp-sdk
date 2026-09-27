@@ -442,9 +442,9 @@ jobs:
 
       # ---------------------------------------------------------
       # 4. Test sweep -- the same pytest battery the Linux PR
-      #    gate runs.  ~370 tests; <30 s on every OS on Linux/macOS, but
-      #    Windows is far slower (worst observed successful run 1009s/
-      #    16.8min across the sampled history) -- #1477 gave this step an
+      #    gate runs: ~4,400 tests, spread over every runner core with
+      #    pytest-xdist (`-n auto`, #2328). Serially it had grown to
+      #    9-15 min per OS (Windows slowest) -- #1477 gave this step an
       #    explicit timeout-minutes rather than leaving it to the
       #    uncapped-step 1min/step budget
       #    test_job_ceiling_exceeds_the_sum_of_its_step_timeouts assumes,
@@ -453,7 +453,7 @@ jobs:
       # ---------------------------------------------------------
       - name: pytest tests/scripts/
         timeout-minutes: 25
-        run: python -m pytest tests/scripts/ -q
+        run: python -m pytest tests/scripts/ -q -n auto
 
   # ---------------------------------------------------------------
   # Loader smoke: every emit mode of alp_project.py produces
