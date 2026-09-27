@@ -125,7 +125,9 @@ def main() -> int:
     parser.add_argument("--board-yaml", type=Path, default=Path("board.yaml"),
                         help="Path to the project's board.yaml (default: ./board.yaml).")
     parser.add_argument("--serial", required=True,
-                        help="Factory-assigned serial number (max 22 ASCII chars).")
+                        help="Factory-assigned serial number, YYYYWww-IIII "
+                             "(e.g. 2026W38-0001) -- validated against "
+                             "scripts/alp_eth_mac.py's parser.")
     parser.add_argument("--mfg-date", required=True,
                         help="Manufacturing date in ISO format (YYYY-MM-DD).")
     parser.add_argument("--output", type=Path, default=Path("secure-page.bin"),
@@ -134,6 +136,14 @@ def main() -> int:
                         default=Path(__file__).resolve().parent.parent / "metadata",
                         help="Override the metadata search root.")
     args = parser.parse_args()
+
+    try:
+        _manifest.parse_serial(args.serial)
+    except _manifest.AlpEthMacError as e:
+        sys.exit(f"program_eeprom_secure_page: --serial {args.serial!r} is not "
+                 f"a valid YYYYWww-IIII serial ({e}) -- refusing to write a "
+                 f"Secure Data Page mirror whose Ethernet MAC could never be "
+                 f"derived from it")
 
     project = _manifest._load_board_yaml(args.board_yaml)
     sku = (project.get("som") or {}).get("sku")
