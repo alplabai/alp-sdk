@@ -177,7 +177,10 @@ blob published at
 [`cc3501e-bridge-firmware:prebuilt/`](https://github.com/alplabai/cc3501e-bridge-firmware) per
 [ADR 0031](adr/0031-bridge-firmware-lives-in-its-own-repositories.md),
 which supersedes ADR 0015's in-tree embedding; AEN modules ship
-factory-flashed with the latest CC3501E firmware).
+factory-flashed with a CC3501E bridge build -- see
+[`docs/cc3501e-bridge.md`](cc3501e-bridge.md) for which build each
+`prebuilt/` artefact is, and for the v0.9.0 caveat: it is cut but not
+yet bench-verified, so `prebuilt/` still publishes v0.8.0).
 Decoupling the two firmwares means a failed CC3501E update can't
 brick the Alif side and vice versa.
 

@@ -2,8 +2,8 @@
 
 Status: Accepted — superseded by ADR-0020 (build execution moved to
 `tan`; the `west alp-*` extensions are retired) and further amended by
-ADR-0022 (the Python executor retirement: `pr-renode-dual-os.yml` and the
-whole Renode dual-OS CI surface below were deleted with it)
+ADR-0022 (whose Renode-retirement amendment deleted
+`pr-renode-dual-os.yml` and the whole Renode dual-OS CI surface below)
 Date: 2026-05-15
 Deciders: alpCaner
 
@@ -83,9 +83,7 @@ Full design at `docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration
 - **CI verifies the integration.**  `pr-renode-dual-os.yml` boots the V2N
   system manifest end-to-end and asserts the RPMsg handshake completes.
   The promise that "both halves work together" gates every PR rather
-  than being a doc claim.  *(Historical: this workflow was deleted by
-  ADR-0022's Python-executor retirement; the dual-OS boot gate no longer
-  exists — see the Status note.)*
+  than being a doc claim.
 - **alp-studio gains a unified target.**  Studio codegen consumes the
   same per-core mapping the hand-written-firmware path uses.  Adding a
   visual block for a cross-core RPC call is a schema extension, not a

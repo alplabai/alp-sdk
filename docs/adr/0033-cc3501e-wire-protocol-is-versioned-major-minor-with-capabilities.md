@@ -9,11 +9,9 @@ Deciders: alpCaner
 The CC3501E wire protocol went from **v5 to v9 in a single week** (2026-08-27 →
 2026-09-03). Every one of those bumps forced customers to reflash *both* halves
 in lockstep, because the host refuses the link outright on any mismatch
-(`chips/cc3501e/cc3501e_core.c` as of 2026-09, exact-equality
-`if (fw_version != ALP_CC3501E_PROTOCOL_VERSION)`; the gate has since moved to
-a MAJOR-only comparison around `:336`/`:576` — see the amendment under
-Decision 1) → `ALP_ERR_VERSION`, clearing
-`initialised` so every later call fails.
+(`chips/cc3501e/cc3501e_core.c:234`, `if (fw_version !=
+ALP_CC3501E_PROTOCOL_VERSION)` → `ALP_ERR_VERSION`, and it clears
+`initialised` so every later call fails).
 
 That refusal is correct for *some* of those bumps and wrong for others. Sorting
 the actual history by the only question that matters — **would an old host be
@@ -79,18 +77,25 @@ The host gate becomes:
   firmware with a *higher* minor has features this host does not use.
 
 Retroactive mapping, so the history above stays legible: v5 = `1.0`, v6 = `1.1`,
-v7 = `2.0`, v8 = `3.0`, v9 = `3.1`. The ledger below is the source of truth for
-the current version (4.0, the #2035 CRC-trailer bump).
+v7 = `2.0`, v8 = `3.0`, v9 = `3.1`. The current wire is therefore **3.1**, and
+it is byte-identical to what shipped as "v9" — the scheme renames the contract,
+it does not change a single frame.
 
 > **Amendment (implementation delta, 2026-09):** the host gate as implemented
 > is deliberately **bilingual during the 3.x → 4.0 migration window**: it
 > accepts MAJOR 4 *or* MAJOR 3 via `ALP_CC3501E_PROTOCOL_MAJOR_LEGACY`
-> (`include/alp/protocol/cc3501e.h`; gate in `chips/cc3501e/cc3501e_core.c`)
+> (`include/alp/protocol/cc3501e.h`; the gate is `cc3501e_reset()` /
+> `cc3501e_fw_major_is_acceptable()` in `chips/cc3501e/cc3501e_core.c`)
 > instead of refusing every non-matching MAJOR, so the OTA path from a 3.x
 > firmware to 4.0 always has a host that can still talk to the peer it is
 > upgrading. `docs/cc3501e-bridge.md` documents the same window. The MAJOR-3
 > acceptance is a migration mechanism, not a weakening of the rule: new
 > features gated on 4.0 still check the negotiated version.
+>
+> The current version has since moved to **4.0** (#2035: `RESP_OK` moved
+> `0x00` → `0x5A` and every frame gained a CRC-16/CCITT-FALSE trailer). The
+> ledger below is the source of truth for that; the Decision-1 sentence above
+> is left as written, since it was true when the scheme was adopted.
 
 ### 2. Features are discovered by capability, not inferred from a version
 

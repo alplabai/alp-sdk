@@ -127,7 +127,11 @@ mechanism in "What the markers mean" above).  Current classification:
 |-----------------------------------------|----------------------|--------------------------------------------------------------------|
 | `boards/alp_e1m_evk_routes.h`           | `[ABI-STABLE]`       | Generated E1M-EVK board routes (`EVK_*` macros).                    |
 | `boards/alp_e1m_x_evk_routes.h`         | `[ABI-STABLE]`       | Generated E1M-X-EVK board routes (`XEVK_*` macros).                 |
-| `boards/alp_e1m_x_evk.h`                | `[ABI-EXPERIMENTAL]` | E1M-X-EVK convenience include; the macros live in the routes header. |
+| `boards/alp_e1m_x_evk.h`                | `[ABI-EXPERIMENTAL]` | E1M-X-EVK convenience include; declares no symbols of its own (the `XEVK_*` macros live in the routes header). |
+| `boards/alp_e1m_evk.h`                  | `[ABI-EXPERIMENTAL]` | Defines the E1M EVK's own `EVK_ARD_*` / `EVK_MB_*` macros and `evk_cam_select_t` -- not a facade (the `EVK_*` routes macros come from the generated header). |
+| `blocks/button_led.h`                   | `[ABI-EXPERIMENTAL]` | Caller-owned button+LED helper (`alp_button_led_*`).                |
+| `blocks/pdm_mic.h`                      | `[ABI-EXPERIMENTAL]` | PDM-mic capture block (`alp_pdm_mic_*`).                            |
+| `protocol/crc16.h`                      | `[ABI-EXPERIMENTAL]` | `static inline` CRC-16/CCITT-FALSE helpers (`alp_crc16_ccitt_false[_update]`) -- API, though not linker ABI. |
 | `ext/alif/{adc,camera}.h`               | `[ABI-EXPERIMENTAL]` | Vendor escape hatch (`<alp/ext/...>`); promote per the rules below. |
 | `ext/alif/storage.h`                    | `[ABI-EXPERIMENTAL]` | See the table above for its rationale row.                          |
 | `ext/cc3501e/console.h`                 | `[ABI-EXPERIMENTAL]` | See the table above for its rationale row.                          |
@@ -137,13 +141,11 @@ mechanism in "What the markers mean" above).  Current classification:
 
 Headers that declare **no ABI symbols of their own** carry no
 `@par ABI status:` tag, matching the `board.h`/`console.h` facade
-convention above: `boards/alp_e1m_evk.h` (facade include of the
-generated routes), `protocol/crc16.h` (constants/helpers), and
-`blocks/button_led.h` + `blocks/pdm_mic.h` + `protocol/cc3501e.h`
-(the latter is the canonical wire-contract type header cited by
-`chips/cc3501e/`; it declares shared frame types, not dispatch
+convention above.  `protocol/cc3501e.h` is the one such header here:
+it is the canonical wire-contract type header cited by
+`chips/cc3501e/`, declaring shared frame types rather than dispatch
 symbols, and its stability statement lives in the file's top
-doxygen block like the chip drivers).
+doxygen block like the chip drivers' does.
 
 ### Internal headers (`include/alp/internal/*.h`, `src/**/*.h`)
 

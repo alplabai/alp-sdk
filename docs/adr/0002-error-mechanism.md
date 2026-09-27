@@ -125,8 +125,8 @@ the same public symbol answering differently depending which backend it
 was built against. `tests/yocto/peripheral_{i2c,spi,uart}.c` cover the
 NULL-handle half of #1834's fix; `tests/yocto/peripheral_{i2c,spi,uart}_
 closed_status.c` add the sharper non-NULL, closed-handle case per class
-(the mirrored gpio-side test, `peripheral_gpio_closed_pin_status.c`, lives
-on the `origin/integration/1494-1734-back` branch, not on `dev`).
+(the mirrored gpio-side test, `peripheral_gpio_closed_pin_status.c`, is
+tracked under #1734 and is not on `dev` yet).
 No test pins the gpio side yet.
 
 **Gap: signex unverified.** No signex checkout exists on the host this
