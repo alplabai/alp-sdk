@@ -51,7 +51,8 @@ config CAMERA_MJPEG_STREAM_1280X960
 	  at either size to begin with (its ROI crop and full-pixel-scan
 	  modes are 1280x960 and 1456x1088).
 
-# Requested capture fps, split out from CAMERA_MJPEG_STREAM_1280X960 so the aen_imx335 testcase.yaml scenario can override just this (issue #2338).
+# Requested capture fps, split out from CAMERA_MJPEG_STREAM_1280X960 so the
+# aen_imx335 testcase.yaml scenario can override just this (issue #2338).
 config CAMERA_MJPEG_STREAM_FPS
 	int "Requested camera capture frame rate for this example"
 	default 15 if CAMERA_MJPEG_STREAM_1280X960

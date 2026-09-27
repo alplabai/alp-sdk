@@ -450,13 +450,16 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	 * than assume the request landed exactly.
 	 *
 	 * A single video_set_frmival(dev, ...) on the ISP device itself now
-	 * reaches the real sensor generically: isp_pico.c's own .set_frmival
-	 * forwards to `controller`, video_alif.c's alif_cam_set_frmival()
-	 * forwards to its endpoint, and video_csi_dw.c's csi2_dw_set_frmival()
-	 * forwards to config->sensor[data->current_sensor] -- the same three-hop
-	 * isp -> cam -> csi -> sensor path each of those drivers' own
-	 * .get_frmival forwarder already used (isp_pico.c's isp_apply_ae() AE
-	 * envelope derivation). csi2_dw_set_frmival() targets the SAME
+	 * reaches the real sensor generically: isp_pico.c gains its own
+	 * .get_frmival/.set_frmival (new, forwarding to `controller`) to match
+	 * video_alif.c's alif_cam_set_frmival() (forwards to its endpoint) and
+	 * video_csi_dw.c's csi2_dw_set_frmival() (forwards to
+	 * config->sensor[data->current_sensor]) -- those two already had a
+	 * .get_frmival forwarder each (isp_pico.c's isp_apply_ae() AE envelope
+	 * derivation used them directly, bypassing this backend's own vtable,
+	 * which is why isp_pico.c itself had none until now). Together the
+	 * three-hop isp -> cam -> csi -> sensor forward chain now exists on both
+	 * the get and set side. csi2_dw_set_frmival() targets the SAME
 	 * current_sensor its own .get_frmival reads, so a 2-sensor CSI node's AE
 	 * (which reads back through .get_frmival) sees the rate this sets. In
 	 * TPG mode (config->controller == NULL, no real sensor) isp_pico.c's

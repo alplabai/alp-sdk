@@ -941,7 +941,8 @@ IMX296 stays at its fixed 60.3 frame/s regardless of the request, as before).
 the calibration's own assumption the same way the existing gain-ceiling
 clamp already does -- this backstop now also covers this app-level path (an
 app requesting a rate other than 30 on IMX335), not just a direct
-`video_set_frmival()` caller bypassing the backend entirely.
+`video_set_frmival()` caller bypassing the backend entirely. Bench-verified
+on real silicon -- see bench run 338 below.
 
 `examples/aen/aen-isp-capture` gains an `-DAEN_ISP_IMX335=ON` variant
 (`overlay-imx335.conf`), same AE-on/off shape as the IMX296 variant,
@@ -976,6 +977,19 @@ present in that image, but their specific effects are NOT separately
 bench-proven by this run (a passing capture does not distinguish "rounded
 correctly" from "the rounding never mattered this session"); the gain
 rounding's own proof is `tests/zephyr/isp_ae_conv` on `native_sim`.
+
+**Bench run 338** (`camera-mjpeg-stream`, `aen_imx335` scenario, same board,
+after issue #2338's fix -- see that changelog entry): proves the fps request
+now actually reaches IMX335 instead of being silently dropped. With
+`CONFIG_CAMERA_MJPEG_STREAM_FPS=30` (this scenario's override): driver
+`frame_rate` 30, `HMAX 0x0226`/`VMAX 0x001194` read back over I2C,
+`fps=30 fail=0 retry=0`, one client 29.98 fps / 779.4 KB/s delivered over
+30 s. With the symbol forced back to 15 (this fix's default, run for
+comparison against the pre-fix behaviour): the backend logged `camera0:
+requested 15 fps, settled on 25/1`, driver `frame_rate` 25, `HMAX 0x0280` --
+IMX335 rounds the request to its nearest supported rate (`imx335_framerates[]`
+`{25, 30, 50, 60}`), exactly as designed. OV5647 was not bench-verified this
+run (not fitted on this board); IMX296 was not bench-verified.
 
 **AEN803 build verification** (`-Werror`,
 `CONFIG_COMPILER_WARNINGS_AS_ERRORS=y`, beyond the bench runs above):
