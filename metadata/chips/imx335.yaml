@@ -135,23 +135,29 @@ notes: |
   the full mechanism.
 
   Issue #2334: imx335_bin_none's (full-resolution/all-pixel mode)
-  Y_OUT_SIZE was upstream's 0x07ac (1964 lines) for a 2592x1944 format --
-  the same overrun class as the 2x2-binned bug above. Corrected to 0x0798
-  (1944), matching both this driver's own imx335_init_params and the
-  mainline Linux imx335 driver's full-resolution mode table. Bench runs
-  335-337 (E1M-AEN803 2026W36-0001): run 335 read WINMODE/HTRIMMING_START/
-  HNUM/Y_OUT_SIZE back in all-pixel mode and confirmed the patch's writes;
-  run 337 (CAM_VIDEO_FCFG ROW-bounded to 3 and 8 rows) confirmed the WIDTH
-  is exactly 2592 samples/line at full resolution, 4/4, canary intact. The
-  disputed LINE COUNT (1944 vs. 1964) was NOT directly measured -- a full
-  2592x1944 raw frame does not fit the 4 MiB SRAM0 capture budget, and run
-  335 found the CPI's HSYNC/VSYNC interrupts require the write-DMA armed,
-  so DMA-free counting is not possible on this hardware. Run 336 found
-  CAM_VIDEO_FCFG's ROW field bounds a capture to a fixed row count in
-  hardware regardless of the sensor's own Y_OUT_SIZE, so upstream's buggy
-  1964 could never have overrun an FCFG-bounded buffer either way; the
-  ISR-based software stop originally proposed as a fallback does NOT halt
-  the DMA in time (filed as issue #2342). See changelog.d/2334.md and
+  Y_OUT_SIZE (0x07ac = 1964) was mismatched against the 2592x1944 format's
+  advertised 1944-line height -- the same class of defect as the
+  2x2-binned bug above. Corrected to 0x0798 (1944), matching both this
+  driver's own imx335_init_params and the mainline Linux imx335 driver's
+  full-resolution mode table. Bench runs 335-337 (E1M-AEN803 2026W36-0001):
+  run 335 read WINMODE/HTRIMMING_START/HNUM/Y_OUT_SIZE back in all-pixel
+  mode and confirmed the patch's writes; run 337 (CAM_VIDEO_FCFG's ROW
+  field set to 2 and then 7 -- the driver's own ROW = lines - 1 encoding,
+  requesting 3 and 8 lines) confirmed the WIDTH is exactly 2592
+  samples/line at full resolution (5184 bytes/line, 2 bytes/sample --
+  16-bit-unpacked CPI storage, not RAW10-packed), 4/4, canary intact. The
+  disputed LINE COUNT (1944 vs. 1964) was NOT measured -- a full
+  2592x1944x2 = 10,077,696-byte (~10.1 MB) frame does not fit the 4 MiB
+  SRAM0 capture budget, and run 335 found the CPI's HSYNC/VSYNC interrupts
+  require the write-DMA armed, so counting them without writing frame data
+  is not possible on this hardware. Run 336 found CAM_VIDEO_FCFG's ROW
+  field bounds a capture to a fixed row count in hardware regardless of
+  the sensor's own Y_OUT_SIZE (its 1296x972 control wrote FCFG=0x03cb0510,
+  ROW=971=972-1, and captured exactly 972 lines), so upstream's buggy 1964
+  could never have overrun an FCFG-bounded buffer either way; a separate
+  diagnostic build's ISR-based software stop (arming CAM_CTRL_START,
+  cutting the capture from an INTR_HSYNC handler) does NOT stop the DMA
+  (filed as issue #2342). See changelog.d/2334.md and
   docs/camera-shields.md's "Full-resolution mode: bench results (issue
   #2334)" section for the full writeup.
 
