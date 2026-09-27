@@ -123,9 +123,9 @@ extern "C" {
 #define XEVK_I2C_ADDR_BMI323        0x68u  /**< U-IMU BMI323 6-axis IMU (alternate IMU). */
 #define XEVK_I2C_ADDR_ICM42670      0x69u  /**< Canonical primary IMU (ICM-42670). */
 #define XEVK_I2C_ADDR_BMP581        0x47u  /**< BMP581 barometer (SDO->VIO; 0x46 if SDO->GND). */
-#define XEVK_I2C_ADDR_TCAL9538_MAIN 0x73u  /**< U35 main I/O expander. CORRECTED 2026-09 from 0x72 (a maintainer-schedule value never bench-measured on this carrier, per docs/portability-matrix.md's #1980 note): a live i2c-0 sweep ACKs at 0x71 and 0x73, not 0x72, matching the E1M-EVK's confirmed U35=0x73/U37=0x71 strap pattern exactly (alp-sdk#1974) -- both parts are populated here (unlike the E1M-EVK, where U37 is DNP). */
+#define XEVK_I2C_ADDR_TCAL9538_MAIN 0x73u  /**< U35 main I/O expander, A0 and A1 strapped high. CORRECTED 2026-09 from 0x72, a value never measured on this carrier: the E1M-X EVK V2 straps and a live i2c-0 sweep on an E1M-V2M103 both give 0x73. */
 #define XEVK_I2C_ADDR_TCAL9538      XEVK_I2C_ADDR_TCAL9538_MAIN  /**< Alias for XEVK_I2C_ADDR_TCAL9538_MAIN. */
-#define XEVK_I2C_ADDR_TCAL9538_PCIE 0x71u  /**< U37 PCIe I/O expander. See the U35 entry above for how this address was confirmed; no netlist/pin-map data exists in this tree recording what either expander's P0-P7 outputs drive on this carrier. */
+#define XEVK_I2C_ADDR_TCAL9538_PCIE 0x71u  /**< U37 PCIe I/O expander, A0 high and A1 low. It sits on PCIE0_I2C, which an LSF0102 level shifter joins to E1M_X_I2C0; confirmed by the same i2c-0 sweep. Its P0 drives the PCIe I2C mux select. */
 #define XEVK_I2C_ADDR_EEPROM        0x50u  /**< Board ID EEPROM (24-series). */
 #define XEVK_I2C_ADDR_INA236_3V3    0x40u  /**< U21 INA236A, +3V3 rail   (20 mOhm shunt, 4.0 A max). A0 = GND. */
 #define XEVK_I2C_ADDR_INA236_1V8    0x41u  /**< U31 INA236A, +1V8 rail   (20 mOhm shunt, 4.0 A max). A0 = V+. */
