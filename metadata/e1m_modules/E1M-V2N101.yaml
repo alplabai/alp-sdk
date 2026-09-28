@@ -109,9 +109,7 @@ topology:
     # This board's .dts carries the OpenAMP/MHU-B reserved-memory block +
     # the CAN-FD-unavailable analysis (alp-sdk #683/#1146) -- see
     # `openamp_ipc` in metadata/schemas/som-preset-v1.schema.json.
-    # E1M-V2M101 does not set this (#655 slice 2): the committed V2M101
-    # board tree carries neither block today, not because the hardware
-    # differs.
+    # E1M-V2M101 sets it too (#1948): same die, same MHU-B.
     openamp_ipc: true
 
 # Memory layout (SRAM banks + MRAM) is derived from the SoC variant

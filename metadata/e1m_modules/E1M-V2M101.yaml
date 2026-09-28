@@ -114,6 +114,11 @@ topology:
     hw_console: false
     zephyr_full_name: "E1M-V2M101 (RZ/V2N + DEEPX DX-M1) Cortex-M33 system manager"
     zephyr_twister_name: "E1M-V2M101 Cortex-M33 system manager"
+    # Same RZ/V2N die, same MHU-B and same CM33-NS DDR alias as E1M-V2N101,
+    # so the CM33 side of the OpenAMP/MHU-B carve-out is the same hardware
+    # fact here (#1948).  Like V2N101, the A55 half (the 4f70xxxx UIO /
+    # reserved-memory nodes) is not in any shipped Linux DT yet.
+    openamp_ipc: true
 
 # Memory layout (SRAM banks + MRAM) is derived from the SoC variant
 # resolved via `silicon_variant:` -- see metadata/socs/<vendor>/<family>/<part>.json
