@@ -111,7 +111,7 @@ def test_firmware_path_pointing_at_a_directory_fails(tmp_path):
 
 
 def test_real_repo_passes():
-    """Baseline: the real repo's six AEN presets (all currently pointing at
+    """Baseline: the real repo's seven AEN presets (all currently pointing at
     firmware/cc3501e/prebuilt/cc3501e-v0.2.0.bin) resolve today -- exit 0."""
     proc = _run("--root", str(REPO))
     assert proc.returncode == 0, proc.stdout + proc.stderr

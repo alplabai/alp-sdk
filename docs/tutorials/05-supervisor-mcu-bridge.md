@@ -36,13 +36,18 @@ Both carry the same command set; the host picks per-call:
 | SPI       | P76/77/96/97      | PA8/9/10/PB15       | up to 25 MHz  | low-latency telemetry, frequent PWM updates |
 | I²C       | P07/P06 (BRD_I2C) | PA15/PB9 @ 0x70    | up to 1 MHz   | when already on BRD_I2C for PMICs  |
 
-## The command set
+## The command set (common subset)
 
 Protocol version (`PROTOCOL_VERSION_MAJOR.MINOR.PATCH`) at the time
 of writing: `0.9.0` -- minor revisions are additive (new opcodes,
 older firmware replies `STATUS_NOSUPPORT` for what it doesn't
 implement); the host driver refuses to operate on a mismatched
-major.
+major. The table below is the common subset this tutorial touches;
+the full opcode set (including `0x3A ADC_SPECTRUM_READ`,
+`0x41 SE_RESET`, `0x81 LINK_FEATURES`, and the system-power-mode /
+advanced-timer blocks) lives in
+[`docs/gd32-bridge-protocol.md`](../gd32-bridge-protocol.md) §3 and
+`<alp/chips/gd32g553.h>`.
 
 | Opcode  | Helper                            | What it does                                  |
 |---------|-----------------------------------|-----------------------------------------------|
