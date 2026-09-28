@@ -692,7 +692,17 @@ stage_pytest_scripts() {
         echo "stage_pytest_scripts: python3 ($(command -v python3)) cannot import pytest. Activate the zephyrproject venv or: pip install pytest."
         return 99
     fi
-    python3 -m pytest tests/scripts/ -q || return 1
+    # pytest-xdist (a [dev] dependency since #2328) spreads the ~4,400 tests
+    # over every core, as CI does: a parallel sweep, then the modules that
+    # write into the real checkout on their own (tests/scripts/conftest.py
+    # _REPO_WRITER_MODULES). Without xdist the stage still runs, serially.
+    if python3 -c 'import xdist' >/dev/null 2>&1; then
+        python3 -m pytest tests/scripts/ -q -n auto -m "not repo_writes" || return 1
+        python3 -m pytest tests/scripts/ -q -m repo_writes || return 1
+    else
+        echo "stage_pytest_scripts: pytest-xdist not importable; running serially (pip install -e \".[dev]\" to parallelise)."
+        python3 -m pytest tests/scripts/ -q || return 1
+    fi
 
     # tests/parity/ is NOT under tests/scripts/, so the seam-1 comparator's own
     # 15 unit tests were excluded from this stage AND from parity-seam1.yml,
