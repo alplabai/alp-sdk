@@ -84,6 +84,7 @@
 #include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 
 #include <cmsis_core.h>
 #include <zephyr/device.h>
@@ -285,6 +286,8 @@ int main(void)
 	uint8_t jedec_id[3] = { 0 };
 	int     jedec_rc    = -ENOTSUP;
 	bool    jedec_ok    = true;
+	bool    sfdp_ok     = true;
+	bool    read_ok     = true;
 
 #if defined(CONFIG_BOARD_ALP_E1M_AEN803_M55_HE)
 	jedec_rc = device_is_ready(ospi_dev) ? flash_read_jedec_id(ospi_dev, jedec_id) : -ENODEV;
@@ -297,6 +300,80 @@ int main(void)
 	       jedec_id[0],
 	       jedec_id[1],
 	       jedec_id[2]);
+
+	/* JESD216 SFDP: the header's fixed "SFDP" signature is a deterministic
+	 * proof that an addressed command (0x5A + 24-bit address + dummy byte)
+	 * works end to end, independent of whatever the array holds. The dump
+	 * (header + first parameter headers) also records which parameter
+	 * tables the part advertises. */
+	uint8_t sfdp[48] = { 0 };
+	int     sfdp_rc  = flash_sfdp_read(ospi_dev, 0, sfdp, sizeof(sfdp));
+
+	sfdp_ok = (sfdp_rc == 0) && (sfdp[0] == 'S') && (sfdp[1] == 'F') && (sfdp[2] == 'D') &&
+	          (sfdp[3] == 'P');
+	printk("flash : flash_sfdp_read(0, %u) rc=%d signature %s rev %u.%u nph=%u\n",
+	       (unsigned)sizeof(sfdp),
+	       sfdp_rc,
+	       sfdp_ok ? "SFDP" : "MISSING",
+	       sfdp[5],
+	       sfdp[4],
+	       sfdp[6] + 1U);
+	/* Parameter header 1 is the 4-byte address instruction table (ID
+	 * 0xFF84); its DWORD1 bit 0 advertises the 1-1-1 READ with a 4-byte
+	 * address (opcode 13h) the driver's flash_read() uses. */
+	uint8_t bait[8]  = { 0 };
+	int     bait_rc  = -ENOENT;
+	bool    read4_ok = false;
+
+	if (sfdp_ok && sfdp[16] == 0x84U && sfdp[23] == 0xFFU) {
+		uint32_t ptr = sfdp[20] | ((uint32_t)sfdp[21] << 8) | ((uint32_t)sfdp[22] << 16);
+
+		bait_rc  = flash_sfdp_read(ospi_dev, ptr, bait, sizeof(bait));
+		read4_ok = (bait_rc == 0) && ((bait[0] & 0x01U) != 0U);
+	}
+	printk("flash : 4BAIT rc=%d dword1=%02x %02x %02x %02x -> 1-1-1 READ 13h %s\n",
+	       bait_rc,
+	       bait[0],
+	       bait[1],
+	       bait[2],
+	       bait[3],
+	       read4_ok ? "SUPPORTED" : "not advertised");
+	/* flash_read() over 13h: two reads of the same 4 KiB must agree, both
+	 * below and above 16 MiB (the second needs the 4th address byte). On an
+	 * erased part this reads all-0xFF, which an idle-high MISO would also
+	 * give -- so this proves the command runs and completes, not the data.
+	 * The SFDP read above is the data proof for the same TX-then-RX path;
+	 * a known-pattern check has to wait for program support. */
+	static uint8_t rd_a[4096];
+	static uint8_t rd_b[4096];
+	const off_t    rd_off[] = { 0, 0x01000000 };
+
+	read_ok = read4_ok;
+	for (size_t k = 0; k < ARRAY_SIZE(rd_off) && read_ok; k++) {
+		int  ra   = flash_read(ospi_dev, rd_off[k], rd_a, sizeof(rd_a));
+		int  rb   = flash_read(ospi_dev, rd_off[k], rd_b, sizeof(rd_b));
+		bool same = (ra == 0) && (rb == 0) && (memcmp(rd_a, rd_b, sizeof(rd_a)) == 0);
+
+		printk("flash : flash_read(0x%08x, %u) rc=%d/%d repeat %s, first bytes "
+		       "%02x %02x %02x %02x\n",
+		       (unsigned)rd_off[k],
+		       (unsigned)sizeof(rd_a),
+		       ra,
+		       rb,
+		       same ? "MATCH" : "DIFFER",
+		       rd_a[0],
+		       rd_a[1],
+		       rd_a[2],
+		       rd_a[3]);
+		read_ok = same;
+	}
+	for (size_t i = 0; i < sizeof(sfdp); i += 16) {
+		printk("sfdp  : %02x:", (unsigned)i);
+		for (size_t j = 0; j < 16; j++) {
+			printk(" %02x", sfdp[i + j]);
+		}
+		printk("\n");
+	}
 #else
 	printk("flash : JEDEC ID SKIPPED -- E1M-AEN801 fits no OSPI0 memory\n");
 #endif
@@ -323,11 +400,12 @@ int main(void)
 	 * OSPI_XIP_SER does not exist on AE822, independent of what any chip
 	 * select carries).
 	 */
-	if (node_ok && hal_init_ok && ctrlr0_ok && jedec_ok) {
+	if (node_ok && hal_init_ok && ctrlr0_ok && jedec_ok && sfdp_ok && read_ok) {
 #if defined(CONFIG_BOARD_ALP_E1M_AEN803_M55_HE)
 		printk("RESULT PASS: OSPI/HexSPI node BINDS; controller init and CTRLR0 "
-		       "readback pass; JEDEC ID = %02x %02x %02x (ISSI IS25WX256); "
-		       "XiP SKIPPED (no XIP_SER on this die)\n",
+		       "readback pass; JEDEC ID = %02x %02x %02x (ISSI IS25WX256); SFDP "
+		       "signature read; 4-byte-address flash_read() (13h) completes and repeats; XiP "
+		       "SKIPPED (no XIP_SER on this die)\n",
 		       jedec_id[0],
 		       jedec_id[1],
 		       jedec_id[2]);
@@ -335,17 +413,17 @@ int main(void)
 		printk("RESULT PASS: OSPI/HexSPI node BINDS -- ospi0@83000000 binds to "
 		       "snps,designware-ospi at the fork reg/aes-reg base with IRQ 96; "
 		       "alif_hal_ospi_initialize() is reachable and links; CTRLR0 reads "
-		       "its documented reset value; XiP SKIPPED (no XIP_SER on this die); "
+		       "live; XiP SKIPPED (no XIP_SER on this die); "
 		       "no device-level transfer attempted (controller-register proof only)\n");
 #endif
 	} else {
 		printk("RESULT FAIL: OSPI/HexSPI node NOT staged "
 		       "(bound=%d base_ok=%d irq_ok=%d hal_init_ok=%d ctrlr0_ok=%d "
-		       "jedec_ok=%d jedec_rc=%d id=%02x %02x %02x -- node "
+		       "jedec_ok=%d jedec_rc=%d id=%02x %02x %02x sfdp_ok=%d read_ok=%d -- node "
 		       "missing, disabled, bound to the wrong compatible/reg/irq, the "
 		       "hal_alif init call did not return OSPI_ERR_NONE, or the register "
-		       "file did not read back its reset value, or the AEN803 CS1 NOR did "
-		       "not return 9d 5b 19)\n",
+		       "file did not read back live, or the AEN803 CS1 NOR did "
+		       "not return 9d 5b 19 or its SFDP signature)\n",
 		       (int)OSPI_BOUND,
 		       (int)(ospi_base == OSPI_BASE_EXPECTED && ospi_aes_base == OSPI_AES_BASE_EXPECTED),
 		       (int)(ospi_irq == OSPI_IRQ_EXPECTED),
@@ -355,7 +433,9 @@ int main(void)
 		       jedec_rc,
 		       jedec_id[0],
 		       jedec_id[1],
-		       jedec_id[2]);
+		       jedec_id[2],
+		       (int)sfdp_ok,
+		       (int)read_ok);
 	}
 
 	return 0;

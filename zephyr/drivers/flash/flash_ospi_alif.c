@@ -543,18 +543,11 @@ static int ospi_alif_init(const struct device *dev)
 	return 0;
 }
 
-/* #915: mandatory flash operations remain deliberately unsupported until an
- * addressed read, page program, and erase sequence have each been captured on
- * the fitted IS25WX256. Supplying explicit stubs keeps the registered flash
- * device fail-closed; NULL mandatory callbacks would fault the caller. */
-static int ospi_alif_read(const struct device *dev, off_t offset, void *buffer, size_t len)
-{
-	ARG_UNUSED(dev);
-	ARG_UNUSED(offset);
-	ARG_UNUSED(buffer);
-
-	return len == 0U ? 0 : -ENOTSUP;
-}
+/* #915: program and erase remain deliberately unsupported until their
+ * sequences are captured on the fitted IS25WX256. Supplying explicit stubs
+ * keeps the registered flash device fail-closed; NULL mandatory callbacks
+ * would fault the caller. (read is implemented below, over the command-read
+ * helper.) */
 
 static int ospi_alif_write(const struct device *dev, off_t offset, const void *buffer, size_t len)
 {
@@ -585,40 +578,45 @@ static const struct flash_parameters *ospi_alif_get_parameters(const struct devi
 	return &ospi_alif_parameters;
 }
 
-#if defined(CONFIG_FLASH_JESD216_API)
 /*
- * JEDEC ID over standard single-lane SPI, in the DW-SSI EEPROM-read transfer
- * mode (TMOD = 0b11): the controller shifts out what is in the TX FIFO (the
- * 0x9F opcode) and then clocks in CTRLR1 + 1 frames.
+ * Command-then-read over standard single-lane SPI, in the DW-SSI EEPROM-read
+ * transfer mode (TMOD = 0b11): the controller shifts out what is in the TX
+ * FIFO (opcode, address, dummy bytes) and then clocks in CTRLR1 + 1 frames.
  *
  * Not alif_hal_ospi_transfer(): that entry programs TMOD = RECEIVE_ONLY and
  * relies on the SPI_CTRLR0 instruction phase, which only exists in the
  * enhanced (dual/quad/octal) frame formats. In standard format a
  * receive-only transfer never shifts the opcode out, so the part never
  * answers and the HAL's completion callback never fires -- on silicon that
- * was a -ETIMEDOUT with an all-zero ID, 3 of 3 (#915). The part sits in
+ * was a -ETIMEDOUT with an all-zero JEDEC ID, 3 of 3 (#915). The part sits in
  * 1-1-1 SPI after reset, so standard format is the right one; hal_alif just
  * has no command-then-read entry for it. Fields come from hal_alif's ospi.h.
+ *
+ * The TX FIFO is filled while no slave is selected, then SER starts the
+ * transfer, so a multi-byte command cannot underflow the FIFO mid-command.
+ * RX is drained as it arrives; one transfer is at most 65536 frames (the
+ * CTRLR1 NDF field), so longer reads are split, each with its own command.
  */
-static int ospi_alif_read_jedec_id(const struct device *dev, uint8_t *id)
+#define OSPI_ALIF_MAX_FRAMES 65536U
+
+static int ospi_alif_cmd_read_locked(const struct device *dev,
+                                     const uint8_t       *cmd,
+                                     size_t               cmd_len,
+                                     uint8_t             *out,
+                                     size_t               len)
 {
 	const struct ospi_alif_config *config = dev->config;
-	struct ospi_alif_data         *data   = dev->data;
 	struct ospi_regs              *regs   = (struct ospi_regs *)config->base_regs;
 	uint32_t                       ctrlr0;
-	int                            rc = 0;
+	size_t                         got = 0U;
 	int                            spin;
-	int                            n;
+	int                            rc = 0;
 
-	if (id == NULL) {
+	if (len == 0U || len > OSPI_ALIF_MAX_FRAMES || cmd_len == 0U || cmd_len > OSPI_TX_FIFO_DEPTH) {
 		return -EINVAL;
 	}
-
-	k_mutex_lock(&data->lock, K_FOREVER);
-
 	if (ospi_busy(regs)) {
-		rc = -EBUSY;
-		goto out_unlock;
+		return -EBUSY;
 	}
 
 	ospi_disable(regs);
@@ -628,37 +626,128 @@ static int ospi_alif_read_jedec_id(const struct device *dev, uint8_t *id)
 	ctrlr0 |= SPI_CTRLR0_DFS_8bit | SPI_CTRLR0_FRF_MOTOROLA | SPI_CTRLR0_TMOD_EEPROM_READ_ONLY |
 	          SPI_CTRLR0_SPI_FRF_STANDRAD;
 	regs->OSPI_CTRLR0 = ctrlr0;
-	regs->OSPI_CTRLR1 = OSPI_ALIF_JEDEC_ID_LEN - 1;
+	regs->OSPI_CTRLR1 = (uint32_t)(len - 1U);
 	regs->OSPI_IMR    = 0U;
-	regs->OSPI_SER |= BIT(config->cs_pin);
+	regs->OSPI_SER    = 0U;
 	ospi_enable(regs);
 
-	/* Writing the opcode starts the transfer. */
-	regs->OSPI_DR0 = OSPI_ALIF_JEDEC_RDID;
-
-	for (spin = 0;
-	     spin < OSPI_ALIF_XFER_POLL_ITERATIONS && regs->OSPI_RXFLR < OSPI_ALIF_JEDEC_ID_LEN;
-	     spin++) {
+	for (size_t i = 0U; i < cmd_len; i++) {
+		regs->OSPI_DR0 = cmd[i];
 	}
-	if (regs->OSPI_RXFLR < OSPI_ALIF_JEDEC_ID_LEN) {
-		LOG_ERR("JEDEC ID read timed out after %d polls (RXFLR=%u)",
-		        spin,
-		        (unsigned int)regs->OSPI_RXFLR);
-		rc = -ETIMEDOUT;
-	} else {
-		for (n = 0; n < OSPI_ALIF_JEDEC_ID_LEN; n++) {
-			id[n] = (uint8_t)regs->OSPI_DR0;
+	regs->OSPI_SER = BIT(config->cs_pin); /* starts the transfer */
+
+	for (spin = 0; got < len && spin < OSPI_ALIF_XFER_POLL_ITERATIONS; spin++) {
+		while (got < len && regs->OSPI_RXFLR != 0U) {
+			out[got++] = (uint8_t)regs->OSPI_DR0;
+			spin       = 0;
 		}
+	}
+	if (got < len) {
+		LOG_ERR("command 0x%02x read stalled at %u/%u bytes",
+		        cmd[0],
+		        (unsigned int)got,
+		        (unsigned int)len);
+		rc = -ETIMEDOUT;
 	}
 
 	/* Deassert CS, leave the controller idle and enabled; the same forced
-	 * recovery covers a timed-out read. */
+	 * recovery covers a stalled read. */
 	ospi_alif_recover_transfer(dev);
-
-out_unlock:
-	k_mutex_unlock(&data->lock);
-
 	return rc;
+}
+
+static int ospi_alif_cmd_read(const struct device *dev,
+                              const uint8_t       *cmd,
+                              size_t               cmd_len,
+                              uint8_t             *out,
+                              size_t               len)
+{
+	struct ospi_alif_data *data = dev->data;
+	int                    rc;
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	rc = ospi_alif_cmd_read_locked(dev, cmd, cmd_len, out, len);
+	k_mutex_unlock(&data->lock);
+	return rc;
+}
+
+/* 1-1-1 READ with a 4-byte address (13h). The fitted IS25WX256 advertises it
+ * in its SFDP 4-byte address instruction table (DWORD1 bit 0, read on silicon
+ * as 43 0e ff ff), and a 4-byte opcode works whatever address mode the part
+ * was left in. No dummy cycles at this bus rate.
+ * ponytail: no array-size bound -- the node carries no size and the part wraps
+ * past its end; add one from SFDP BFPT DWORD2 when a consumer needs it. */
+#define OSPI_ALIF_READ4 0x13U
+
+static int ospi_alif_read(const struct device *dev, off_t offset, void *buffer, size_t len)
+{
+	uint8_t *out = buffer;
+
+	if (offset < 0 || (buffer == NULL && len != 0U)) {
+		return -EINVAL;
+	}
+	while (len > 0U) {
+		size_t  chunk = MIN(len, (size_t)OSPI_ALIF_MAX_FRAMES);
+		uint8_t cmd[] = {
+			OSPI_ALIF_READ4,
+			(uint8_t)((uint32_t)offset >> 24),
+			(uint8_t)((uint32_t)offset >> 16),
+			(uint8_t)((uint32_t)offset >> 8),
+			(uint8_t)offset,
+		};
+		int rc = ospi_alif_cmd_read(dev, cmd, sizeof(cmd), out, chunk);
+
+		if (rc != 0) {
+			return rc;
+		}
+		out += chunk;
+		offset += (off_t)chunk;
+		len -= chunk;
+	}
+	return 0;
+}
+
+#if defined(CONFIG_FLASH_JESD216_API)
+static int ospi_alif_read_jedec_id(const struct device *dev, uint8_t *id)
+{
+	static const uint8_t cmd[] = { OSPI_ALIF_JEDEC_RDID };
+
+	if (id == NULL) {
+		return -EINVAL;
+	}
+	return ospi_alif_cmd_read(dev, cmd, sizeof(cmd), id, OSPI_ALIF_JEDEC_ID_LEN);
+}
+
+/* JESD216 Read SFDP: 0x5A, 24-bit address, 8 dummy clocks (one dummy byte in
+ * 1-1-1), then data. */
+#define OSPI_ALIF_SFDP_READ 0x5AU
+
+static int ospi_alif_sfdp_read(const struct device *dev, off_t offset, void *data, size_t len)
+{
+	uint8_t *out = data;
+
+	if (offset < 0 || (data == NULL && len != 0U)) {
+		return -EINVAL;
+	}
+	while (len > 0U) {
+		size_t  chunk = MIN(len, (size_t)OSPI_ALIF_MAX_FRAMES);
+		uint8_t cmd[] = {
+			OSPI_ALIF_SFDP_READ,
+			(uint8_t)(offset >> 16),
+			(uint8_t)(offset >> 8),
+			(uint8_t)offset,
+			0x00U, /* 8 dummy clocks */
+		};
+		int rc = ospi_alif_cmd_read(dev, cmd, sizeof(cmd), out, chunk);
+
+		if (rc != 0) {
+			return rc;
+		}
+		out += chunk;
+		offset += (off_t)chunk;
+		len -= chunk;
+	}
+	return 0;
 }
 #endif /* CONFIG_FLASH_JESD216_API */
 
@@ -668,6 +757,7 @@ static const struct flash_driver_api ospi_alif_api = {
 	.erase          = ospi_alif_erase,
 	.get_parameters = ospi_alif_get_parameters,
 #if defined(CONFIG_FLASH_JESD216_API)
+	.sfdp_read     = ospi_alif_sfdp_read,
 	.read_jedec_id = ospi_alif_read_jedec_id,
 #endif
 };
