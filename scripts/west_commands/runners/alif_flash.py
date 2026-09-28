@@ -169,15 +169,27 @@ _DEFAULT_CPU_SUFFIX = 'HE'  # boards that omit --device were always HE-only
 # extra flag here either (#2262).
 _DEFAULT_SE_UART_BAUD = '57600'
 
-# The exact ATOC entry name Alp Lab's factory provisioning stages for the
-# MCUboot bootloader on a pre-provisioned module (HIGH-2 review, #2262):
+# TBD (unverified, no gettoc capture of a pre-provisioned module):  the
+# ATOC entry name this code ASSUMES Alp Lab's factory provisioning stages
+# for the MCUboot bootloader on a pre-provisioned module (HIGH-2 review,
+# #2262). It traces to exactly one sentence in
 # `zephyr/sysbuild/aen/README.md`'s "SoM-maker provisioning model" --
 # `cpu_id M55_HE`, `loadAddress 0x58000000`, and the SES banner then shows
-# `| MCUBOOT- | M55-HE | ... | uLVB |`. A resident entry with this exact
-# name is never a plain "some other app was here" foreign entry: it is
-# THE bootloader every pre-provisioned module needs to boot at all, so the
-# refusal message below steers away from `--replace-atoc` instead of
-# toward it (see docs/aen-provisioning.md section 0.5's Option A warning).
+# `| MCUBOOT- | M55-HE | ... | uLVB |` -- which itself documents a
+# SETOOLS-shipped config (`build/config/app-mcuboot-only.json`) that
+# alp-sdk does not ship. There is NO capture of a real pre-provisioned
+# module's `gettoc` output anywhere in this repo to confirm the literal
+# against; every "real" fixture in tests/scripts/test_atoc_guard_parity.py
+# is an AEN EVK *dev* board, never a factory-provisioned one. The name is
+# plausible (`docs/aen-provisioning.md`'s Option B example uses the same
+# `BLINK-HE`-style convention), but if it is wrong this constant does NOT
+# make the guard unsafe: an unrecognised factory name still resolves as an
+# ordinary foreign entry and the guard still REFUSES -- it only loses the
+# distinct, more specific message below and falls through to the generic
+# one (see that message's own note on why it no longer defaults to
+# steering the operator at `--replace-atoc`). Capture the real name during
+# a Stage 2 bench session (see this PR's bench plan) and correct this
+# literal then; until that capture exists, treat it as TBD, not confirmed.
 _FACTORY_MCUBOOT_ATOC_NAME = 'MCUBOOT-'
 
 
@@ -380,6 +392,14 @@ def _run_maintenance(maintenance_path, se_uart, baud, opt):
         return f'{partial}\nTIMEOUT after {_MAINTENANCE_TIMEOUT_S}s: {exc}\n', 1
     except OSError as exc:
         return f'{exc}\n', 1
+    except ValueError as exc:
+        # Review finding (#2262, second round): `subprocess.run` raises
+        # `ValueError`, not `OSError`, for some argument-shape problems it
+        # catches before ever exec'ing anything -- e.g. a NUL byte
+        # embedded in an argument (a garbled/truncated `se_uart` string).
+        # Treat it the same as any other failed-to-even-run case: rc=1,
+        # never an uncaught exception out of the guard.
+        return f'{exc}\n', 1
     return proc.stdout.decode('utf-8', errors='replace'), proc.returncode
 
 
@@ -402,6 +422,31 @@ def _format_atoc_transcript(se_uart, baud, maintenance_available,
         f'$ maintenance -b {baud} -c {se_uart} -opt gettoc  '
         f'(exit {gettoc_rc})\n'
         f'{gettoc_text or ""}\n')
+
+
+def _write_text_or_raise(path, content):
+    '''`Path.write_text`, but a failure (an unwritable build_dir -- a
+    read-only mount, a permissions mistake) is wrapped and re-raised as a
+    RuntimeError NAMING THE PATH instead of propagating a bare OSError.
+
+    Review finding (#2262, second round): this was the ONE abort path in
+    `_run_atoc_guard` that did not produce a RuntimeError -- still
+    fail-closed (the burn is never reached; whatever raises here happens
+    strictly before `app-write-mram` runs), but silent about which of the
+    guard's own writes (the transcript or the verdict) failed and why, and
+    it necessarily writes NO atoc-guard.json when it is the verdict write
+    itself that fails -- the one honest exception to this guard's own "a
+    refused run always leaves a verdict" contract (documented in
+    docs/aen-provisioning.md's "The ATOC-replace guard verdict contract"
+    section): if the build directory cannot be written to at all, there is
+    nowhere to put that verdict.'''
+    try:
+        path.write_text(content, encoding='utf-8')
+    except OSError as exc:
+        raise RuntimeError(
+            f'could not write {path} ({exc}) -- refusing to burn without '
+            'a place to record the pre-burn ATOC guard\'s own result.'
+        ) from exc
 
 
 class AlifFlashBinaryRunner(ZephyrBinaryRunner):
@@ -623,9 +668,22 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
 
         shape_desc = ('MRAM slot0-XIP' if 'mramAddress' in app_shape
                       else 'ITCM-load')
+        # Review finding (#2262, second round): "the SES has booted the
+        # image" claimed more than this method actually knows -- the only
+        # write here is `app-write-mram -p` (never an erase), and the AEN
+        # bench notes document the SE preferring a STALE resident slot0
+        # image over a freshly written ITCM-load ATOC (the remedy is an
+        # explicit erase over the SE-UART, which this runner never
+        # performs). State only what is verified: the ATOC write itself
+        # completed (`app-write-mram` exited zero); whether the board then
+        # actually booted THIS image is not checked by `west flash` at
+        # all -- confirm it over the console or PC/IPSR-over-SWD the same
+        # way any other flow's boot is confirmed.
         self.logger.info(
             f"flashed '{name}' to MRAM via SETOOLS ({shape_desc} ATOC); "
-            'the SES has booted the image.')
+            'the write completed -- boot not verified by this command '
+            '(see docs/aen-bench-bringup.md\'s ATOC-replace guard section '
+            'for the stale-slot0-shadowing gotcha).')
 
     def _run_atoc_guard(self, setools, allowed):
         '''Pre-burn ATOC-replace guard (#2262) -- read what SETOOLS
@@ -645,13 +703,26 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
         the SE-UART IO + build-dir bookkeeping,
         mirroring the "pure parser vs. IO-doing caller" split that module
         docstring's #2262 note describes.'''
-        atoc_dir = Path(self.cfg.build_dir) / 'alif_flash'
+        # Review finding (#2262, second round): the frozen v1 verdict
+        # contract documents `transcript` as an "absolute path", but
+        # `Path(cfg.build_dir) / ...` is only absolute when west's OWN
+        # build_dir happens to be. `.resolve()` here guarantees it
+        # regardless of how `do_run` was invoked (relative build_dir, a
+        # caller that chdir'd, ...) rather than relying on that assumption.
+        atoc_dir = (Path(self.cfg.build_dir) / 'alif_flash').resolve()
         atoc_dir.mkdir(parents=True, exist_ok=True)
         transcript_path = atoc_dir / 'atoc-before.txt'
         verdict_path = atoc_dir / 'atoc-guard.json'
 
+        # Review finding (#2262, second round): bash's own guard checks
+        # `[ -x "$SETOOLS_DIR/maintenance" ]`, not merely that the path
+        # exists -- match it with `os.access(..., os.X_OK)` rather than
+        # `.is_file()` alone, so a present-but-not-executable file (bad
+        # permissions, a bad extract) is treated the same as "no
+        # maintenance binary at all" rather than attempting to run it.
         maintenance = setools / 'maintenance'
-        maintenance_available = maintenance.is_file()
+        maintenance_available = maintenance.is_file() and os.access(
+            maintenance, os.X_OK)
         banner_text = banner_rc = gettoc_text = gettoc_rc = None
         if maintenance_available:
             banner_text, banner_rc = _run_maintenance(
@@ -668,11 +739,11 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
         # share one -- there is no analogous cross-run collision to guard
         # against here.
         # write-text-newline-exempt: scratch per-run transcript in the build dir
-        transcript_path.write_text(
+        _write_text_or_raise(
+            transcript_path,
             _format_atoc_transcript(
                 self.se_uart, self.se_uart_baud, maintenance_available,
-                banner_text, banner_rc, gettoc_text, gettoc_rc),
-            encoding='utf-8')
+                banner_text, banner_rc, gettoc_text, gettoc_rc))
 
         query_status = _aen_atoc.compute_query_status(
             maintenance_available, banner_text, banner_rc, gettoc_text,
@@ -687,7 +758,8 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
         # zephyr_west_flash backend) can tell apart from any other `west
         # flash` failure without parsing stderr.
         # write-text-newline-exempt: scratch per-run verdict in the build dir
-        verdict_path.write_text(
+        _write_text_or_raise(
+            verdict_path,
             json.dumps({
                 'schema': 'alp-sdk.alif-flash-atoc-guard.v1',
                 'status': verdict.status,
@@ -695,9 +767,20 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
                 'transcript': str(transcript_path),
                 'allowed': sorted(allowed),
                 'query_status': query_status,
-            }, indent=2) + '\n',
-            encoding='utf-8')
+            }, indent=2) + '\n')
 
+        # Review finding (#2262, second round): branch on the BOOLEAN
+        # `verdict.refused` `decide_atoc_guard` already computes, not on an
+        # enumerated set of status strings -- every test in this suite and
+        # `test_atoc_guard_parity.py` asserts on `.refused`, but this was
+        # the one consumer that instead fell through to a silent burn (`->
+        # proceed`) for any status that was not EXACTLY 'refused-unverified'
+        # or 'refused-foreign'. `.status` is used only below to pick which
+        # message to raise, never to decide whether to abort.
+        if not verdict.refused:
+            self.logger.info(
+                f'ATOC guard: {verdict.status} (transcript: {transcript_path})')
+            return
         if verdict.status == 'refused-unverified':
             # Minor review fix (#2262): this message's own "re-run with
             # --replace-atoc" advice is exactly the wrong instinct on a
@@ -751,16 +834,35 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
                     f'overrides this refusal if you are certain -- but it '
                     f'deletes {_FACTORY_MCUBOOT_ATOC_NAME!r} and the '
                     'module will not boot until MCUboot is reprovisioned.')
+            # LOW review (#2262, second round): lead with "restore first",
+            # not with the destroy flag -- an earlier version of this
+            # message opened its remedy sentence with "Re-run with
+            # --replace-atoc", which is exactly the steer-onto-the-
+            # destroy-flag failure the factory-MCUBOOT- branch above was
+            # written to avoid. This branch is reached for ANY unrecognised
+            # foreign name -- including a factory bootloader whose real
+            # name doesn't happen to match `_FACTORY_MCUBOOT_ATOC_NAME`
+            # (see that constant's own TBD note) -- so it must not
+            # default to inviting deletion either.
             raise RuntimeError(
                 'this write REPLACES every app ATOC entry not in it -- it '
                 f'does NOT merge. This board also carries: {names}. '
                 f'Writing now would SILENTLY DELIST {names} -- no error, '
                 'no SES warning (this destroyed the A32 Linux boot chain '
-                'on an AEN EVK bench unit, 2026-09-07). Re-run with '
-                f'--replace-atoc only once you can restore {names}, or if '
+                'on an AEN EVK bench unit, 2026-09-07). Capture/restore '
+                f'{names} first (see docs/aen-provisioning.md) -- only '
+                f'pass --replace-atoc once you can restore {names}, or if '
                 'losing them is genuinely intended.')
-        self.logger.info(
-            f'ATOC guard: {verdict.status} (transcript: {transcript_path})')
+        # Defensive fail-closed default: `verdict.refused` is True but
+        # `.status` matches neither shape above -- a future
+        # `decide_atoc_guard` status this method has no dedicated message
+        # for yet. Abort rather than silently falling through to a burn,
+        # which is exactly the bug the `verdict.refused` branch above
+        # replaces.
+        raise RuntimeError(
+            f'ATOC guard refused this burn (status: {verdict.status!r}; '
+            f'see {transcript_path}) -- no dedicated message is defined '
+            'for this status yet; refusing rather than proceeding.')
 
 
 def _has_fdt():

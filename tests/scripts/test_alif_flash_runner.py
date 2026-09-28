@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import re
 import sys
 import types
 from pathlib import Path
@@ -325,7 +327,9 @@ def _make_runner(tmp_path, device="AE822FA0E5597LS0_HE", reset_vector=0x58000401
     (setools / "app-gen-toc").write_bytes(b"")
     (setools / "app-write-mram").write_bytes(b"")
     if maintenance_available:
-        (setools / "maintenance").write_bytes(b"")
+        maintenance = setools / "maintenance"
+        maintenance.write_bytes(b"")
+        maintenance.chmod(0o755)  # the guard now checks os.X_OK, not just is_file()
 
     build_dir = tmp_path / "build"
     (build_dir / "zephyr").mkdir(parents=True)
@@ -418,12 +422,47 @@ def test_do_run_replace_atoc_still_overrides_the_factory_mcuboot_refusal(
     assert "MCUBOOT-" in verdict["foreign"]
 
 
+def test_do_run_success_log_does_not_claim_boot_was_verified(
+        tmp_path, monkeypatch, caplog) -> None:
+    # Review finding (#2262, second round): "the SES has booted the image"
+    # was an unverified success claim -- this runner's only write is
+    # `app-write-mram -p` (never an erase), and the AEN bench notes
+    # document the SE preferring a STALE resident slot0 image over a
+    # freshly written ITCM-load ATOC. The post-burn log line must claim
+    # only what do_run actually knows: the ATOC write itself completed.
+    runner = _make_runner(tmp_path)
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    with caplog.at_level(logging.INFO):
+        runner.do_run("flash")
+    messages = " ".join(r.message for r in caplog.records)
+    assert "has booted" not in messages
+    assert "boot not verified" in messages
+
+
 def test_do_run_clean_board_proceeds_and_burns(tmp_path, monkeypatch) -> None:
     runner = _make_runner(tmp_path)
     _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
     runner.do_run("flash")
     assert _write_mram_was_called(runner)
     assert _verdict(runner)["status"] == "clear"
+
+
+def test_do_run_verdict_transcript_path_is_absolute_even_with_a_relative_build_dir(
+        tmp_path, monkeypatch) -> None:
+    # Review finding (#2262, second round): the frozen v1 verdict contract
+    # says `transcript` is an "absolute path", but the code only ever built
+    # `Path(cfg.build_dir) / 'alif_flash' / 'atoc-before.txt'` -- absolute
+    # only when west's OWN build_dir happens to be. Drive `do_run` with a
+    # RELATIVE build_dir (chdir into tmp_path first) to prove the verdict's
+    # `transcript` field is resolved to an absolute path regardless.
+    monkeypatch.chdir(tmp_path)
+    runner = _make_runner(tmp_path)
+    runner.cfg.build_dir = os.path.relpath(runner.cfg.build_dir, tmp_path)
+    assert not os.path.isabs(runner.cfg.build_dir)
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    runner.do_run("flash")
+    verdict = _verdict(runner)
+    assert os.path.isabs(verdict["transcript"]), verdict["transcript"]
 
 
 def test_do_run_no_atoc_found_proceeds_and_burns(tmp_path, monkeypatch) -> None:
@@ -440,6 +479,52 @@ def test_do_run_refuses_when_maintenance_binary_missing(tmp_path, monkeypatch) -
         runner.do_run("flash")
     assert not _write_mram_was_called(runner)
     assert _verdict(runner)["status"] == "refused-unverified"
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="POSIX file mode bits only")
+def test_do_run_refuses_when_maintenance_present_but_not_executable(
+        tmp_path, monkeypatch) -> None:
+    # Review finding (#2262, second round): the guard checked
+    # `maintenance.is_file()` where bash's own guard checks
+    # `[ -x "$SETOOLS_DIR/maintenance" ]` -- a present-but-not-executable
+    # file (bad permissions, a bad extract, ...) must be treated the same
+    # as "no maintenance binary at all", not as "available". Stub
+    # `_run_maintenance` with a CLEAN result: if `maintenance_available`
+    # were wrongly computed True (the `.is_file()`-only bug), this would
+    # burn on a "clear" verdict instead of refusing -- isolates the
+    # availability check itself from the fail-closed-by-coincidence
+    # OSError path a real subprocess exec of a non-executable file would
+    # otherwise take.
+    runner = _make_runner(tmp_path)
+    maintenance = Path(runner.setools_dir) / "maintenance"
+    maintenance.chmod(0o644)  # present, but not executable
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    with pytest.raises(RuntimeError, match="Confirm by hand what is resident"):
+        runner.do_run("flash")
+    assert not _write_mram_was_called(runner)
+    assert _verdict(runner)["status"] == "refused-unverified"
+
+
+def test_do_run_aborts_on_any_refused_status_not_just_known_strings(
+        tmp_path, monkeypatch) -> None:
+    # Review finding (#2262): `_run_atoc_guard` branched on
+    # `verdict.status == 'refused-unverified'`/`'refused-foreign'`
+    # (stringly-typed), falling through to burn for ANY OTHER status even
+    # though `decide_atoc_guard` had already computed `refused=True` --
+    # every test in this suite and the parity suite asserts on `.refused`,
+    # but the runner was the one consumer that ignored it. A renamed or
+    # newly-added refused status must still abort; simulate one by
+    # monkeypatching `decide_atoc_guard`'s return.
+    runner = _make_runner(tmp_path)
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    fake_verdict = alif_flash._aen_atoc.AtocGuardVerdict(
+        status="refused-something-new", foreign=[], refused=True)
+    monkeypatch.setattr(
+        alif_flash._aen_atoc, "decide_atoc_guard", lambda *a, **k: fake_verdict)
+    with pytest.raises(RuntimeError):
+        runner.do_run("flash")
+    assert not _write_mram_was_called(runner)
+    assert _verdict(runner)["status"] == "refused-something-new"
 
 
 def test_do_run_unverified_refusal_warns_about_factory_mcuboot(tmp_path, monkeypatch) -> None:
@@ -528,6 +613,31 @@ def test_do_run_writes_transcript_before_the_burn_step(tmp_path, monkeypatch) ->
     assert "ALP-HE" in transcript.read_text(encoding="utf-8")
 
 
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="POSIX file mode bits only")
+def test_do_run_wraps_transcript_write_failure_in_a_named_runtime_error(
+        tmp_path, monkeypatch) -> None:
+    # Review finding (#2262, second round): an unwritable build_dir (a
+    # read-only mount, a permissions mistake) previously surfaced as a
+    # bare, unhandled OSError from `Path.write_text` -- fail-closed (the
+    # burn is never reached) but the ONE abort path that raises something
+    # other than a RuntimeError naming the path, and the one abort path
+    # that writes no verdict.json at all, contradicting the "a refused run
+    # always leaves a verdict" contract (documented as the one honest
+    # exception to that contract in docs/aen-provisioning.md).
+    runner = _make_runner(tmp_path)
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    atoc_dir = (Path(runner.cfg.build_dir) / "alif_flash").resolve()
+    atoc_dir.mkdir(parents=True, exist_ok=True)
+    atoc_dir.chmod(0o500)  # read + execute only -- no write
+    try:
+        with pytest.raises(RuntimeError, match=re.escape(str(atoc_dir / "atoc-before.txt"))):
+            runner.do_run("flash")
+    finally:
+        atoc_dir.chmod(0o700)  # restore so tmp_path cleanup can remove it
+    assert not _write_mram_was_called(runner)
+    assert not (atoc_dir / "atoc-guard.json").exists()
+
+
 def test_do_run_removes_a_stale_verdict_file_when_it_fails_before_the_guard(
         tmp_path, monkeypatch) -> None:
     # MEDIUM-3 review (#2262): a run that fails BEFORE reaching the guard
@@ -608,6 +718,25 @@ def test_run_maintenance_nonzero_exit_is_reported_verbatim(tmp_path) -> None:
     text, rc = alif_flash._run_maintenance(maint, "fake-uart", "57600", "getbanner")
     assert rc == 3
     assert "partial" in text
+
+
+def test_run_maintenance_value_error_from_subprocess_is_treated_as_failed_read(
+        tmp_path) -> None:
+    # Review finding (#2262, second round): `_run_maintenance` caught only
+    # `TimeoutExpired`/`OSError` -- a `ValueError` from `subprocess.run`
+    # (e.g. a NUL byte embedded in `se_uart`) would otherwise propagate
+    # uncaught out of `_run_atoc_guard` instead of being treated as a
+    # failed read (rc=1), which is what every other IO failure here
+    # becomes on its way to `compute_query_status`'s fail-closed
+    # "unverified".
+    setools = tmp_path / "setools"
+    setools.mkdir()
+    maint = setools / "maintenance"
+    maint.write_bytes(b"")
+    maint.chmod(0o755)
+    text, rc = alif_flash._run_maintenance(maint, "fake\x00uart", "57600", "gettoc")
+    assert rc == 1
+    assert text  # some diagnostic text, not a bare empty string
 
 
 def test_run_maintenance_missing_binary_returns_rc1_via_oserror(tmp_path) -> None:
