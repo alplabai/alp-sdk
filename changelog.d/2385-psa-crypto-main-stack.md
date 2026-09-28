@@ -10,7 +10,7 @@ printing anything. `zephyr/Kconfig.alp-libraries` now defaults
 `MAIN_STACK_SIZE` to 4096 whenever the PSA core is on. An app or board
 that sets its own size still wins.
 
-Bench-verified on E1M-AEN803 2026W36-0009 (`e1m-aen-evk-01`, M55-HP,
+Bench-verified on E1M-AEN803 2026W36-0009 (M55-HP,
 `mqtt-telemetry` with the #2363 bridge overlay). The unfixed build faulted
 at PC `0x00012410`. The fixed build (`CONFIG_MAIN_STACK_SIZE=4096` from the
 new default) ran to `[mqtt] done`, and a `CONFIG_INIT_STACKS` run
