@@ -76,8 +76,9 @@ typedef struct {
 	                   *   own fixed rate table; some sensors have exactly one
 	                   *   fixed rate and ignore the request entirely). The
 	                   *   settled rate is not reported back to the caller yet
-	                   *   (issue #2279). Not every backend honors this field
-	                   *   at all yet -- see issue #2278. */
+	                   *   (issue #2279). A driver with no settable rate
+	                   *   keeps its own rate and logs that the request was
+	                   *   not applied (#2278). */
 	alp_pixfmt_t format;
 } alp_camera_config_t;
 

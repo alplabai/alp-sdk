@@ -277,7 +277,7 @@ def test_transcript_with_no_commander_prompt_is_a_hard_error(tmp_path: Path) -> 
 # or a QUOTED `"${TMPDIR:-/tmp}/foo.out"` (the six Flow D writers, converted
 # so concurrent pytest runs against the same host /tmp no longer collide).
 _READBACK_RE = re.compile(
-    r'^[ \t]*\S.*-CommanderScript\s.*?>\s*(?P<out>"\$\{TMPDIR:-/tmp\}/[^"]+"|/tmp/\S+)\s*\|\|\s*true[ \t]*$',
+    r'^[ \t]*\S.*-CommanderScript\s.*?>\s*(?P<out>"\$(?:\{TMPDIR:-/tmp\}|WORKDIR)/[^"]+"|/tmp/\S+)\s*\|\|\s*true[ \t]*$',
     re.M,
 )
 

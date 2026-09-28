@@ -4,11 +4,11 @@
  *
  * [vendor-ext] DEEPX DX-M1 backend hook for <alp/inference.h>.
  *
- * BENCH-UNVERIFIED: compiles + header-checks against the real DEEPX
- * dx_rt headers, but has NOT been run on silicon.  Validation needs an
- * E1M-X V2N-M1 module with the DX-M1 enumerated on PCIe plus the
- * proprietary dx_rt runtime + kernel driver on the Yocto sysroot.
- * Same posture as the recent mbox_alif_mhuv2 / alif_dave2d work.
+ * Runs on silicon (#1262, 2026-09-28): an E1M-V2M103 with dx-rt 3.2.0
+ * and DX-M1 FW 2.4.0 opens and invokes a yolo11n `.dxnn` through this
+ * file under both DEEPX_DXM1 and AUTO, and close() against an in-flight
+ * invoke() drains cleanly.  Outputs match ONNX Runtime CPU on the same
+ * model (box correlation 0.9997, class-score correlation 0.9946).
  *
  * ----------------------------------------------------------------------
  * Real vendor API
@@ -28,16 +28,11 @@
  *   returns and yields the output `TensorPtrs`.
  *
  * Vendor-artifact handling (classifying-public-vs-internal)
- *   dx_rt is PROPRIETARY (DEEPX EULA, customer-only).  Its headers + the
- *   libdxrt.so live OUTSIDE this repo (the maintainer clone at
- *   ~/npu-sdks/dx_rt; the license-gated copy belongs in alp-sdk-internal
- *   under Git LFS).  The public repo carries only THIS body, which links
- *   against the SDK located via the Yocto sysroot at build time when
- *   ALP_SDK_USE_DEEPX_DXM1=ON (default OFF).  No DEEPX source is vendored.
- *
- *   Follow-up: drop the real dx_rt headers/libs into alp-sdk-internal
- *   (Git LFS) + wire the meta-deepx-m1 dx-rt recipe into the V2N-M1
- *   MACHINE so the cross-build finds libdxrt on the sysroot.
+ *   dx_rt is DEEPX's own runtime, published by DEEPX on GitHub for the
+ *   users of its NPU (every V2M SoM carries one).  It is not vendored
+ *   here: DEEPX's meta-deepx-m1 layer builds it into the Yocto sysroot,
+ *   and the V2M MACHINEs turn ALP_SDK_USE_DEEPX_DXM1=ON automatically
+ *   whenever that layer is present (#482; default OFF elsewhere).
  *
  * Blob format
  *   cfg.model_data is a `.dxnn` compiled model (magic "DXNN", 8 KiB

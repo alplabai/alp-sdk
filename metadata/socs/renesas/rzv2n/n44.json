@@ -70,6 +70,7 @@
     "pcie_gen3": 1,
     "adc_12bit": 24,
     "temp_sensor": 2,
+    "otp": 1,
     "timer_32bit_gpt": 16,
     "timer_32bit_cmtw": 8,
     "timer_32bit_gtm": 8,

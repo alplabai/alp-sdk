@@ -3,23 +3,27 @@
 How to get the RZ/V2N's on-die DRP-AI3 NPU running a real model through
 `<alp/inference.h>` on an E1M-X V2N SoM.
 
-> **Status: KERNEL DRIVER PROVEN ON SILICON, PACKAGING WRITTEN BUT NEVER BAKED,
-> INFERENCE NOT YET RUN.** A full `alp-image-edge` bake now completes on this
-> host (12118 tasks,
-> all succeeded, a 716 MB `.wic.gz`) — the first ever; previously nothing had
-> baked. That run had `drpai` OFF (the base image); see §4 for what is and
-> isn't proven about the `drpai`-enabled path. `PACKAGECONFIG[drpai]` now
-> resolves the whole MERA2 runtime closure, and the `MeraDrpRuntimeWrapper::*`
-> symbols alp-sdk needs all match what the wrapper exports (26 exported, 9
-> referenced, 0 unresolved) — confirmed at the compile/symbol level, not yet
-> through a `drpai`-enabled bake on the real aarch64 Yocto cross-toolchain. On
-> real E1M-X V2N-M1 silicon the DRP-AI **kernel** driver stack is proven
-> working: `/dev/drpai0` probes clean and the memory-base ioctl returns the
-> correct arena (§3, §7) — but that silicon runs its own current image, not
-> one built from this branch. No model has been compiled and no inference has
-> run. Treat this as the procedure to execute and verify to completion, not a
-> report of a working system. `docs/test-plan.md` carries the verification
-> rows this gates.
+> **Status: INFERENCE RUNS ON SILICON; THE BAKED IMAGE IS NOT YET CONFIRMED.**
+> On 2026-09-28 an E1M-V2M103 (board #1, Alp SDK 0.7.0 image) ran YOLOX-S/VOC
+> through `<alp/inference.h>` on the DRP-AI3 (#1268):
+> - The `&drpai0` override was applied by hand to the board DTB, and
+>   `drpai-rz 17000000.drpai` probed with the `0xD0000000` arena.
+> - `src/yocto/inference_drpai.cpp` was cross-built against the real MERA2
+>   runtime (RUHMI 2.7.0-hotfix2; `libmera_drpai_wrapper.so` compiled from
+>   `apps/MeraDrpRuntimeWrapper.cpp`).
+> - `alp_inference_open()` works under both `DRPAI` and `AUTO`, and `invoke()`
+>   takes ~40 ms per 640x640 frame.
+> - The outputs match the compiler's interpreter reference (correlation
+>   0.996-0.998).
+> - With a bundle calibrated on 100 VOC images, a real aeroplane photo is
+>   detected as aeroplane (0.519, against 0.525 from ONNX Runtime CPU on the
+>   same input).
+>
+> Not yet confirmed: an `alp-image-edge` baked from this tree producing the
+> same result on its own. That needs the defaults in §4 (node on with
+> meta-rz-drpai, backend on with `RUHMI_DRPAI_TVM_DIR`) and a real
+> `mera2-drpai-tvm` BitBake run, which has not happened. `docs/test-plan.md`
+> carries the verification rows this gates.
 
 For the base V2N board bring-up see [bring-up-v2n.md](bring-up-v2n.md); for the
 DEEPX DX-M1 delta on V2N-M1 see [bring-up-v2n-m1.md](bring-up-v2n-m1.md).
@@ -103,13 +107,14 @@ shared_drp_reserved: shareddrp@afcff000 reg = <0x0 0xafcff000 0x0 0x00001000>   
 
 Declaring them is **not sufficient** — something has to claim them.
 `e1m-v2n-drpai.dtsi` carries the override, and the kernel bbappend installs it
-only when **both** `meta-rz-drpai` is in `bblayers.conf` **and**
-`ALP_ENABLE_DRPAI = "1"` is set (default `"0"`).  The layer alone is
-deliberately not enough: it ships bundled in the AI SDK BSP, so keying off its
-presence would turn the NPU on for every V2N/V2M image.  It is declared
-`ALP_ENABLE_DRPAI ?= "0"` in all six V2N/V2M machine confs; set it to
-`"1"` in `local.conf` to opt in. Without it the build installs a comment-only stub and the node
-stays `disabled`.
+when `meta-rz-drpai` is in `bblayers.conf` and `ALP_ENABLE_DRPAI` is `"1"`.
+`ALP_ENABLE_DRPAI` **defaults to `"1"` whenever that layer is present**: it is
+declared in all six V2N/V2M machine confs as on-with-the-layer, because every
+V2N/V2M SKU carries the same on-die DRP-AI3.  An earlier revision defaulted it
+to `"0"`, and shipped images then carried the driver, the arena and the
+vendor runtime but no `/dev/drpai0`.  Set `ALP_ENABLE_DRPAI = "0"` in
+`local.conf` to opt out; without the layer, or with the opt-out, the build
+installs a comment-only stub and the node stays `disabled`.
 
 The layer half of the gate exists because that layer creates the `drpai0`
 label: referencing it without the layer fails in dtc, and the same SoM dtsi
@@ -119,9 +124,13 @@ is included by the V2M board dts, so it would take that dtb down too.
 dtb, `/boot/r9a09g056n44-dev.dtb`, carries **zero** `drpai` nodes — the
 enablement on that board comes from a different, already-loaded
 `/boot/uio-683.dtb`, not from anything this repo builds. Our own dtb,
-`e1m-v2n101-x-evk.dtb`, carries the node enabled **only when
-`ALP_ENABLE_DRPAI = "1"` was set for that build**; by default it carries the
-stub and the node stays `disabled`.  The overlay is what makes it present,
+`e1m-v2n101-x-evk.dtb`, carries the node enabled whenever `ALP_ENABLE_DRPAI`
+resolves to `"1"` for that build, which is now the default with
+`meta-rz-drpai` present.  Images built before that default change carry
+the stub, and the node stays `disabled` (E1M-V2M103 board #1 on the Alp SDK
+0.7.0 image, 2026-09-28: `/soc/drpai@16800000` `status = "disabled"`, no
+`/dev/drpai0`, although `CONFIG_DRPAI=y` and the `drp-ai@d0000000` arena are
+present).  The overlay is what makes it present,
 never the SoC by default. Separately: the **kernel** half of the stack is
 already proven working on this silicon — `/dev/drpai0` exists on that board's
 current image and the driver probes clean (`drpai-rz 17000000.drpai: DRP-AI
@@ -163,6 +172,59 @@ load-bearing on a two-region config remains unresolved; treat it as a safe
 no-op on hardware seen so far, not as validated for that case.
 
 ## 4. Image
+
+**The two-switch contract, authoritative here — every other mention in this
+repo is a pointer to this paragraph, not a restatement of it.** Two
+independent switches, both default OFF, deliberately not merged into one
+(the released v0.15.0 contract, `CHANGELOG.md`: "Two independent switches,
+both default OFF, deliberately not merged into one"):
+
+- **`PACKAGECONFIG[drpai]`** on the `alp-sdk` recipe compiles the DRP-AI3
+  backend into `libalp_sdk`.  It turns on by itself on an `rzv2n-family`
+  MACHINE when `ALP_ENABLE_DRPAI` is `"1"` **and** `RUHMI_DRPAI_TVM_DIR`
+  points at a RUHMI checkout (the MERA2 runtime cannot be built without
+  one, so without it the backend stays off rather than failing the bake).
+  `PACKAGECONFIG:append:pn-alp-sdk = " drpai"` in `local.conf` forces it.
+- **`ALP_ENABLE_DRPAI`** (a MACHINE-conf variable, default `"1"` whenever
+  `meta-rz-drpai` is present) does two things:
+  enables the `&drpai0` devicetree node (§3), and — `alp-image-edge`
+  only, and only on an `rzv2n-family` MACHINE (`'rzv2n-family' in
+  (d.getVar('MACHINEOVERRIDES') or '').split(':')`) — gates installing
+  `alp-drpai-inference` (only when `RUHMI_DRPAI_TVM_DIR` is set too, so
+  the demo never lands without its backend); never
+  `alp-image-prod`, and never on a non-RZ/V2N machine such as
+  `e1m-nx9101-a55` or `e1m-aen801-a32` even with `ALP_ENABLE_DRPAI = "1"`
+  set. It installs no userspace runtime package itself. The
+  "opted in without `meta-rz-drpai`" `bb.fatal` guard lives only in
+  `alp-image-edge.bb`; `alp-image-prod` has none, so a prod build with
+  `ALP_ENABLE_DRPAI = "1"` and no `meta-rz-drpai` silently gets the
+  comment-only `&drpai0` stub.
+  `alp-image-common.inc`'s `ALP_RZ_DRPAI_INSTALL` (lines 81-85) is the
+  single packaging authority for the `lib-tvm` + `kernel-module-mmngr`
+  pair, on every `alp-image-*` image (the three recipes that `require
+  alp-image-common.inc` — `alp-image-base`/`-edge`/`-prod`), gated only
+  on `rz-drpai` being in `BBFILE_COLLECTIONS` and `v2n` being in
+  `MACHINE_FEATURES` (issue #1176), independent of `ALP_ENABLE_DRPAI`. A
+  non-`alp-image-*` build (a bare `core-image-*`) with
+  `ALP_ENABLE_DRPAI = "1"` does NOT get that pair from alp-sdk's tree at
+  all — it would need its own install, or the vendor layer's own
+  `core-image` bbappend (no such bbappend exists in this tree).
+
+**Both are required and neither implies the other.** Omitting the
+`PACKAGECONFIG` half leaves `ALP_SDK_USE_DRPAI_V2N=OFF`, and
+`alp_inference_open()` returns `NULL` with `ALP_ERR_NOSUPPORT` even though
+the node and userspace payload are present. Omitting `ALP_ENABLE_DRPAI`
+also fails, not idles: with a compiled backend but no `&drpai0` node,
+`/dev/drpai0` does not exist, so `open()`'s `ENOENT` collapses to
+`ALP_ERR_IO` (`src/yocto/inference_drpai.cpp`'s `_drpai_mem_start()`,
+called first from `alp_inference_drpai_open()`, via
+`_drpai_errno_to_status()`'s default case). A driver that IS present
+but contended returns a different code from that same mapping instead
+— `ALP_ERR_TIMEOUT` for `ETIMEDOUT`, `ALP_ERR_BUSY` for `EINPROGRESS`/
+`EADDRNOTAVAIL` — so absent (`ALP_ERR_IO`) and busy
+(`ALP_ERR_TIMEOUT`/`ALP_ERR_BUSY`) are distinguishable, not the same
+code path. Neither switch silently half-works, and neither missing
+switch is silent either.
 
 Enable the backend through the SDK recipe's PACKAGECONFIG:
 
@@ -281,11 +343,44 @@ matches what the on-device DRP preprocessing chain does — needs a real
 calibration image set and a board to validate the result's accuracy; that is
 tracked in alp-sdk#1271 and not done here.
 
-**No compiled model exists yet — an ONNX source does.** RUHMI ships a real
-model, `how-to/sample_app_v2h/app_yolox_cam/yolox-S_VOC.onnx` (35 MB,
-YOLOX-S on VOC), but there is no pre-compiled `drpai_dir` output anywhere in a
-fresh checkout — searching for `drp_desc.bin`, `weight.bin`, `addr_map.txt`
-and `deploy.json` finds none. `tutorials/README.md` documents the alternative
+### Detector bundle: the route that works today (YOLOX-S/VOC, #2236)
+
+Until #1271 lands, compile a detector by hand with RUHMI's own tutorial,
+patched exactly as `how-to/sample_app_v2h/app_yolox_cam/README.md` says.
+The result below is the one proven on silicon: E1M-V2M103 board #1,
+2026-09-28 (#1268). A VOC aeroplane photo came back as aeroplane at 0.519,
+against 0.525 from ONNX Runtime CPU on the same input.
+
+```sh
+cd <rzv_drp-ai_tvm>/tutorials            # work on a copy if you keep the checkout clean
+sed -i -e 's/256/640/g' -e 's/ 224/ 640/g' -e 's/to_tensor/pil_to_tensor/g'        -e '/std = stdev/d' -e '/F.normalize/d' -e 's/FORMAT.BGR/FORMAT.YUYV_422/g'        -e '/cof_add/d' -e '/cof_mul/d' -e 's/480, 640, 3/1920, 1920, 2/g'        compile_onnx_model_quant.py
+export PATH=<drp-ai venv>/bin:$PATH      # the quantizer shells out to a bare `python3`
+export LD_LIBRARY_PATH=<dir holding libLLVM-14.so.1>
+export PRODUCT=V2N TVM_ROOT=<rzv_drp-ai_tvm> SDK=<RZ/V SDK>
+export TRANSLATOR=<DRP-AI_Translator_i8>/translator/ QUANTIZER=<DRP-AI_Translator_i8>/drpAI_Quantizer/
+python3 compile_onnx_model_quant.py <DRP-AI_Translator_i8>/onnx_models/YoloX-S_VOC_sparse70.onnx     -o yolox-s-voc -t $SDK -d $TRANSLATOR -c $QUANTIZER -s 1,3,640,640     --images <dir of ~100 real VOC JPEGs>
+tar cf yolox-s-voc.tar -C yolox-s-voc --exclude=interpreter_out --exclude=input_0.bin .
+```
+
+Three things each broke a real run:
+- **Calibration data.** Without `--images` the tutorial calibrates on random
+  frames. That bundle runs fine but detects nothing: a flat ~0.32 on every
+  anchor.
+- **The quantizer's Python.** It spawns a bare `python3`. If that resolves to
+  anything but the venv's (3.10 here), it fails with
+  `onnx_optimizer.so: undefined symbol: _PyUnicode_Ready`.
+- **Environment.** `PRODUCT` and LLVM 14 must be set, or the script exits
+  before compiling.
+
+The input the bundle expects is the `app_yolox_cam` preprocessing
+`examples/v2n/v2n-drpai-inference/README.md` documents: an RGB-114 letterbox
+with the image at the top, bilinear to 640, raw 0-255, NCHW float32.
+
+**RUHMI ships the ONNX source, not a compiled bundle.** A fresh checkout has
+`how-to/sample_app_v2h/app_yolox_cam/yolox-S_VOC.onnx` (35 MB, YOLOX-S on
+VOC), but no pre-compiled `drpai_dir` output. A search for `drp_desc.bin`,
+`weight.bin`, `addr_map.txt` and `deploy.json` finds none. Every bundle comes
+from running the compile above yourself, as the #2236 detector bundle did. `tutorials/README.md` documents the alternative
 public source instead: `wget` a public ONNX
 (`resnet18-v1-7.onnx` from the `onnx/models` repo) and run
 `compile_onnx_model.py` against it. Either way, compiling still requires the
@@ -362,9 +457,9 @@ already, via the `CONFIG_BOOTCOMMAND` override in
 In order:
 
 1. `ls /dev/drpai0` — absent means one of three things, in the order worth
-   checking: `ALP_ENABLE_DRPAI` was not set to `"1"` (the default, and now the
-   most likely cause); `meta-rz-drpai` was not in `bblayers.conf`; or the DT
-   override otherwise did not land. Nothing else will work. (This
+   checking: `meta-rz-drpai` was not in `bblayers.conf`; the build set
+   `ALP_ENABLE_DRPAI = "0"`; the image predates the default-on change; or the
+   DT override otherwise did not land. Nothing else will work. (This
    node already exists on the V2N bench unit's current, non-ALP-built image, so
    its presence alone doesn't prove *this* image's DT override worked — check
    the dtb in use, per §3.)
