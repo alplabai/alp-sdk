@@ -23,8 +23,13 @@ Bench-verified on E1M-AEN803 2026W36-0009 (M55-HE, Flow C RAM-run), 2 of
 - the CSPRNG output differed across boots (`dfcf56a3…` vs `36884390…`),
   which a test generator would repeat.
 
+The same build for the M55-HP
+(`alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp`), using the same
+`seservice0r/s` pair, also passed:
+`zephyr,entropy (se_trng): get=0/0 differ=1 csrand=0 OK`. The
+`0x40040000`/`0x40050000` mailboxes are core-local, so each core reaches
+the SE through its own copy.
+
 **Not done, so #2192 stays open.** The AEN boards do not choose it by
-default yet. The M55-HP path is unproven: which SE mailbox pair the HP
-uses is not verified. The connectivity examples (`mqtt-telemetry`,
-`iot-fleet-ota`, `iot-dashboard`, all M55-HP) keep their weak-RNG
-opt-ins.
+default yet. The connectivity examples (`mqtt-telemetry`,
+`iot-fleet-ota`, `iot-dashboard`) keep their weak-RNG opt-ins.
