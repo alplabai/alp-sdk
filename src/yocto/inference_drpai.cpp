@@ -246,7 +246,10 @@ void _rm_rf(const std::string &dir)
 		return;
 	}
 	std::string cmd = "rm -rf '" + dir + "'";
-	(void)std::system(cmd.c_str());
+	/* Best-effort; bound, not cast: glibc marks system() warn_unused_result,
+	 * which a (void) cast does not silence under GCC. */
+	const int rc = std::system(cmd.c_str());
+	(void)rc;
 }
 
 /** Extract the `drpai_dir` tar @p data (@p len bytes) into a fresh private
