@@ -179,11 +179,31 @@ alp_status_t cc3501e_ota_write(cc3501e_t     *ctx,
 	    ctx, ALP_CC3501E_CMD_OTA_WRITE, buf, 4u + len, NULL, 0, NULL, timeout_ms);
 }
 
+/* #2126 review: the device leaves update mode BY ITSELF after a successful
+ * FINISH (arms the deferred swap-reboot) -- the swap must land in the
+ * normal DMA bridge, never the polled boot cc3501e_ota_update_mode() models,
+ * per that function's own doc comment. Nothing previously told the HOST
+ * side that happened: cc3501e_peer_is_polled() (cc3501e_internal.h) would
+ * keep reporting a polled peer that no longer exists (edge-gating READY
+ * against a peer that is back to driving it at a level), and nothing
+ * cleared ota_session_active either, so cc3501e_recover() would go on
+ * refusing recovery through a session that is, in fact, long over. Shared
+ * by both success exits below -- a confirmed FINISH is a confirmed FINISH
+ * whether or not the ack itself made it back. */
+static void cc3501e_ota_finish_confirmed(void)
+{
+	cc3501e_set_peer_polled(false);
+}
+
 alp_status_t cc3501e_ota_finish(cc3501e_t *ctx, uint32_t timeout_ms)
 {
 	const alp_status_t s =
 	    poll_by_repeat(ctx, ALP_CC3501E_CMD_OTA_FINISH, NULL, 0, NULL, 0, NULL, timeout_ms);
-	if (s == ALP_OK) return ALP_OK;
+	if (s == ALP_OK) {
+		cc3501e_ota_finish_confirmed();
+		if (ctx != NULL) ctx->ota_session_active = false;
+		return ALP_OK;
+	}
 	/* Same discarded verdict that was fixed in cc3501e_ota_begin, left in its
 	 * sibling.  A device that latched OTA ERROR (a flush wrote nothing) answers
 	 * the next FINISH with RESP_ERR_INVALID, because its state is no longer
@@ -192,6 +212,8 @@ alp_status_t cc3501e_ota_finish(cc3501e_t *ctx, uint32_t timeout_ms)
 	 * ota_settled_as already computes the right answer; keep it. */
 	const alp_status_t settled = ota_settled_as(ctx, ALP_CC3501E_OTA_STATE_STAGED, timeout_ms);
 	if (settled == ALP_OK) {
+		cc3501e_ota_finish_confirmed();
+		if (ctx != NULL) ctx->ota_session_active = false;
 		return ALP_OK;
 	}
 	if (settled == ALP_ERR_IO) {
@@ -229,7 +251,16 @@ alp_status_t cc3501e_ota_promote(cc3501e_t *ctx, uint32_t timeout_ms)
 
 	if (ss != ALP_OK) return ss;
 	if (st.pending == (uint8_t)ALP_CC3501E_OTA_PENDING_STAGED) {
-		return poll_by_repeat(ctx, ALP_CC3501E_CMD_OTA_PROMOTE, NULL, 0, NULL, 0, NULL, timeout_ms);
+		const alp_status_t ps =
+		    poll_by_repeat(ctx, ALP_CC3501E_CMD_OTA_PROMOTE, NULL, 0, NULL, 0, NULL, timeout_ms);
+		/* #2126 review: defensive, belt-and-braces clear. PROMOTE normally
+		 * runs OUTSIDE an update-mode session entirely (it never calls
+		 * cc3501e_ota_update_mode() itself, and the common case is a LATER
+		 * boot after a successful FINISH already cleared the flag) -- this
+		 * only matters for the unusual case of a caller PROMOTE-ing while
+		 * STILL inside an active session. */
+		if (ps == ALP_OK && ctx != NULL) ctx->ota_session_active = false;
+		return ps;
 	}
 	if (st.pending == (uint8_t)ALP_CC3501E_OTA_PENDING_TRIAL) {
 		/* Already swapped in and running on trial -- the promote the caller is
@@ -272,10 +303,14 @@ alp_status_t cc3501e_ota_promote(cc3501e_t *ctx, uint32_t timeout_ms)
  * sleep.  Note what does NOT make a readback expensive: cc3501e_request()
  * IGNORES its timeout_ms outright ("(void)timeout_ms; -- reserved for a future
  * IRQ-driven wait", cc3501e_core.c), unlike poll_by_repeat() which really does
- * re-issue for the whole budget.  What costs time is the READY gate: once
- * g_ready_line_proven latches, EACH reply phase may wait
- * CC3501E_READY_WAIT_US = 250000 us, so one 4-phase 0x47 readback can burn ~1 s
- * of wall time on a bodged unit.  Charging only the sleep is exactly what turned
+ * re-issue for the whole budget.  What costs time is the READY gate: whenever
+ * ctx->ready_pin is populated, EACH reply phase may wait
+ * CC3501E_READY_WAIT_US = 250000 us before its fixed settle even runs, so one
+ * 4-phase 0x47 readback can burn ~1 s of wall time on a bodged unit -- bounded
+ * to CC3501E_READY_STUCK_LOW_STREAK such GATES (the streak counts gates, not
+ * whole readbacks) before cc3501e_reply_gate() stops waiting while ready_pin
+ * reads LOW; it resumes the bounded wait the moment a read comes back HIGH
+ * (cc3501e_core.c).  Charging only the sleep is exactly what turned
  * a nominal 20 s BEGIN wait into ~8000 s (silicon 2026-08-21), so this cap is
  * charged whether or not the frame really blocked -- an UPPER bound, as
  * CC3501E_OTA_BLACKOUT_POLL_TIMEOUT_MS above is.
@@ -313,16 +348,28 @@ static bool update_mode_reads_as(cc3501e_t *ctx, uint8_t want, uint32_t timeout_
 	if (want != 0u) {
 		return true; /* 0x00 cannot forge a 1 -- the readback IS the proof. */
 	}
-	/* want == 0 is the direction the mode byte CANNOT defend (see the comment
-	 * above): a dead payload phase clocks literal 0x00, which is byte-identical
-	 * to a genuine "normal bridge, OTA idle" reply, so reply[0] == 0 alone is
-	 * the absence of evidence, not evidence.  This function is what the public
-	 * ALP_OK of cc3501e_ota_update_mode(ctx, false, ...) rests on, and both
-	 * include/alp/protocol/cc3501e.h and docs/cc3501e-bridge.md instruct hosts
-	 * to corroborate here -- so corroborate: require a diag reply carrying a
-	 * NON-ZERO uptime_ms.  A dead phase reads uptime_ms as 0; a live device
-	 * that has run far enough to service this frame never does.  reset_cause is
-	 * deliberately NOT used: the HAL hardcodes it to 0. */
+	/* want == 0 is the direction the mode byte alone could never defend (see
+	 * the comment above): a dead payload phase clocks literal 0x00, which used
+	 * to be byte-identical to a genuine "normal bridge, OTA idle" reply.
+	 *
+	 * v4.0 (#2035) closes that for a fw_proto_major-4 peer: cc3501e_request()
+	 * (via cc3501e_reply_verdict(), cc3501e_core.c) now requires a valid
+	 * CRC-16/CCITT-FALSE trailer on every reply from such a peer, and the CRC
+	 * of a genuinely dead (all-zero) frame is never the wire's all-zero "CRC"
+	 * -- so a dead phase is rejected ALP_ERR_IO before this function's `s !=
+	 * ALP_OK` check above even sees it, and reply[0] == 0 reaching here at all
+	 * already IS positive evidence, on that wire.  Uptime corroboration is
+	 * therefore redundant for fw_proto_major 4 and is skipped.
+	 *
+	 * A fw_proto_major-3 peer carries no CRC (byte-identical-to-3.1 wire, see
+	 * the migration-order note in <alp/protocol/cc3501e.h>), so the alias is
+	 * still live there and the original corroboration stays: require a diag
+	 * reply carrying a NON-ZERO uptime_ms.  A dead phase reads uptime_ms as 0;
+	 * a live device that has run far enough to service this frame never does.
+	 * reset_cause is deliberately NOT used: the HAL hardcodes it to 0. */
+	if (ctx->fw_proto_major >= 4u) {
+		return true;
+	}
 	alp_cc3501e_diag_info_t info = { 0 };
 	return cc3501e_diag_info(ctx, &info) == ALP_OK && info.uptime_ms != 0u;
 }
@@ -342,6 +389,19 @@ alp_status_t cc3501e_ota_update_mode(cc3501e_t *ctx, bool enable, uint32_t timeo
 
 	const uint8_t want = enable ? 1u : 0u;
 
+	/* #2126 review: entering (enable=true) sets ota_session_active BEFORE
+	 * the wire send below, not after a confirmed transition -- worst-case
+	 * assumption, since a request that never gets a reply (the expected
+	 * outcome once the device reboots into the polled boot) must not leave
+	 * the flag looking like normal mode. Every exit below either confirms
+	 * this (stays true) or proves the device is genuinely back in normal
+	 * mode (cleared): the readback paths below, or the final hard_reset
+	 * fallback, which ALWAYS lands in normal mode regardless of `enable`.
+	 * See ctx->ota_session_active's own comment in <alp/chips/cc3501e/
+	 * core.h> for why this, not cc3501e_peer_is_polled() below, is what
+	 * cc3501e_recover()'s OTA guard reads. */
+	if (enable) ctx->ota_session_active = true;
+
 	/* SEND ONCE, then go silent -- the same rule (and the same reason) as
 	 * cc3501e_ota_begin: re-clocking a payload-bearing frame at a device that is
 	 * rebooting cannot work, because the thing that would answer is the thing
@@ -354,7 +414,8 @@ alp_status_t cc3501e_ota_update_mode(cc3501e_t *ctx, bool enable, uint32_t timeo
 	 * return at once instead of burning the settle on a device that never left.
 	 * (It is also why the confirm loop below may re-issue the same opcode.) */
 	if (update_mode_reads_as(ctx, want, timeout_ms)) {
-		cc3501e_set_peer_polled(enable); /* polled slave -> edge-gate READY */
+		cc3501e_set_peer_polled(enable); /* gates cc3501e_ota_begin()'s precondition */
+		if (!enable) ctx->ota_session_active = false;
 		return ALP_OK;
 	}
 
@@ -374,6 +435,7 @@ alp_status_t cc3501e_ota_update_mode(cc3501e_t *ctx, bool enable, uint32_t timeo
 	for (;;) {
 		if (update_mode_reads_as(ctx, want, poll_ms)) {
 			cc3501e_set_peer_polled(enable);
+			if (!enable) ctx->ota_session_active = false;
 			return ALP_OK;
 		}
 		if (waited >= timeout_ms) break;
@@ -388,11 +450,18 @@ alp_status_t cc3501e_ota_update_mode(cc3501e_t *ctx, bool enable, uint32_t timeo
 	 * here is the timeout either way.
 	 *
 	 * Clear the polled flag FIRST: the reset always lands the device in NORMAL
-	 * mode, so leaving it set would keep the host edge-gating READY against a
-	 * level-driving peer -- up to CC3501E_READY_EDGE_US of extra wait on every
-	 * phase, for the rest of the session. */
+	 * mode, so leaving it set would leave cc3501e_ota_begin()'s precondition
+	 * check believing update mode is still entered when it is not, wrongly
+	 * letting a later BEGIN proceed straight into the wedge this function
+	 * exists to prevent. */
 	cc3501e_set_peer_polled(false);
 	(void)cc3501e_hard_reset(ctx);
+	/* #2126 review: hard_reset ALWAYS lands in normal (non-polled) mode
+	 * regardless of `enable`, so the session is over either way -- a
+	 * caller that wanted IN never got confirmation the device entered
+	 * (and it did not -- it is back in normal mode), and a caller that
+	 * wanted OUT gets it via the reset instead of the readback. */
+	ctx->ota_session_active = false;
 	return ALP_ERR_TIMEOUT;
 }
 
@@ -601,7 +670,28 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
 				/* The STATUS read itself can fail here -- while the slave re-arms
 				 * its SPI the link is DOWN, so header-only polls return IO too.
 				 * That is the expected shape of a flush window, not an error:
-				 * keep polling until the device answers again. */
+				 * keep polling until the device answers again.
+				 *
+				 * v4.0 (#2035): this ALP_OK is what the #1378 dead-phase alias used
+				 * to be able to forge -- a dead payload phase reads back status OK
+				 * with an all-zero alp_cc3501e_ota_status_t, so reserved[1] == 0
+				 * (flush not pending) passes and state == IDLE (0) != WRITING fires
+				 * cc3501e_ota_abort() on a session that was actually healthy.
+				 * OTA_STATUS stays on cc3501e_reply_may_be_all_zero()'s exemption
+				 * list (a genuine "no session ever run" reply IS legitimately
+				 * all-zero), so that alone still cannot tell the two apart.
+				 *
+				 * Against a fw_proto_major-4 peer this is now closed at the
+				 * transport: cc3501e_reply_verdict() (cc3501e_core.c) requires a
+				 * valid CRC-16/CCITT-FALSE trailer on every reply from such a
+				 * peer, and the CRC of an all-zero frame is never the wire's
+				 * all-zero "CRC" -- a dead phase is rejected ALP_ERR_IO before
+				 * `cc3501e_ota_status() == ALP_OK` here can ever be true.  Against
+				 * a fw_proto_major-3 peer (no CRC, byte-identical-to-3.1 wire) the
+				 * alias is unchanged and still live -- this loop has no extra
+				 * corroboration for that case, matching the "keep today's
+				 * exemption-list behaviour for the legacy branch" rule the rest of
+				 * this change follows. */
 				if (cc3501e_ota_status(ctx, &fs, fpoll_ms) == ALP_OK && fs.reserved[1] == 0u) {
 					/* A device that has latched ERROR (or dropped out of the
 					 * session entirely) will never take another chunk, so

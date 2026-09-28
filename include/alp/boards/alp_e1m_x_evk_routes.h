@@ -120,16 +120,18 @@ extern "C" {
 /* On-board I2C device addresses (from `i2c_devices:`) */
 /* ------------------------------------------------------------------ */
 
-#define XEVK_I2C_ADDR_BMI323       0x68u  /**< U-IMU BMI323 6-axis IMU (alternate IMU). */
-#define XEVK_I2C_ADDR_ICM42670     0x69u  /**< Canonical primary IMU (ICM-42670). */
-#define XEVK_I2C_ADDR_BMP581       0x47u  /**< BMP581 barometer (SDO->VIO; 0x46 if SDO->GND). */
-#define XEVK_I2C_ADDR_TCAL9538     0x72u  /**< TCAL9538 I/O expander. */
-#define XEVK_I2C_ADDR_EEPROM       0x50u  /**< Board ID EEPROM (24-series). */
-#define XEVK_I2C_ADDR_INA236_3V3   0x40u  /**< U21 INA236A, +3V3 rail   (20 mOhm shunt, 4.0 A max). A0 = GND. */
-#define XEVK_I2C_ADDR_INA236_1V8   0x41u  /**< U31 INA236A, +1V8 rail   (20 mOhm shunt, 4.0 A max). A0 = V+. */
-#define XEVK_I2C_ADDR_INA236_VCAM2 0x48u  /**< U32 INA236B, +VCAM2 rail (50 mOhm shunt, 1.6 A max). A0 = GND. */
-#define XEVK_I2C_ADDR_INA236_VCAM3 0x49u  /**< U34 INA236B, +VCAM3 rail (50 mOhm shunt, 1.6 A max). A0 = V+. */
-#define XEVK_I2C_ADDR_INA236_5V    0x4Au  /**< U30 INA236B, +5V rail    (20 mOhm shunt, 4.0 A max). A0 = SDA. */
+#define XEVK_I2C_ADDR_BMI323        0x68u  /**< U13 BMI323 6-axis IMU (alternate IMU), SDO_MISO_ADR to GND via R48. E1M-X EVK V2 as built fits R47 (SDO to +VIO) with R48 DNP, which puts the BMI323 at 0x69 on top of the ICM-42670 -- neither IMU reads back until the board is reworked: fit R48, remove R47 (#2343). */
+#define XEVK_I2C_ADDR_ICM42670      0x69u  /**< U12 ICM-42670 canonical primary IMU (AD0_SDO to +VIO via R45). Collides with an unreworked E1M-X EVK V2's BMI323; see XEVK_I2C_ADDR_BMI323. */
+#define XEVK_I2C_ADDR_BMP581        0x47u  /**< BMP581 barometer (SDO->VIO; 0x46 if SDO->GND). */
+#define XEVK_I2C_ADDR_TCAL9538_MAIN 0x73u  /**< U35 main I/O expander, A0 and A1 strapped high. CORRECTED 2026-09 from 0x72, a value never measured on this carrier: the E1M-X EVK V2 straps and a live i2c-0 sweep on an E1M-V2M103 both give 0x73. */
+#define XEVK_I2C_ADDR_TCAL9538      XEVK_I2C_ADDR_TCAL9538_MAIN  /**< Alias for XEVK_I2C_ADDR_TCAL9538_MAIN. */
+#define XEVK_I2C_ADDR_TCAL9538_PCIE 0x71u  /**< U37 PCIe I/O expander, A0 high and A1 low. It sits on PCIE0_I2C, which an LSF0102 level shifter joins to E1M_X_I2C0; confirmed by the same i2c-0 sweep. Its P0 drives the PCIe I2C mux select. */
+#define XEVK_I2C_ADDR_EEPROM        0x50u  /**< Board ID EEPROM (24-series). */
+#define XEVK_I2C_ADDR_INA236_3V3    0x40u  /**< U21 INA236A, +3V3 rail   (20 mOhm shunt, 4.0 A max). A0 = GND. */
+#define XEVK_I2C_ADDR_INA236_1V8    0x41u  /**< U31 INA236A, +1V8 rail   (20 mOhm shunt, 4.0 A max). A0 = V+. */
+#define XEVK_I2C_ADDR_INA236_VCAM2  0x48u  /**< U32 INA236B, +VCAM2 rail (50 mOhm shunt, 1.6 A max). A0 = GND. DESIGN CONFLICT on E1M-X EVK V2: 0x48 is also the TAS2563 broadcast address on this bus, and TAS2563 page-select writes to reg 0x00 land in this part's CONFIG register. U32 is removed on the current build batch; a re-strap to 0x4A/0x4B is planned for the next carrier rev. */
+#define XEVK_I2C_ADDR_INA236_VCAM3  0x49u  /**< U34 INA236B, +VCAM3 rail (50 mOhm shunt, 1.6 A max). A0 = V+. */
+#define XEVK_I2C_ADDR_INA228_5V     0x42u  /**< U30 INA228 (20-bit, not INA236-compatible), +5V input rail. A1 = GND, A0 = SDA. E1M-X EVK V2 as built nets U30's SDA to I2C0.SCL and its SCL to I2C0.SDA, so it cannot answer until the board is reworked (#2343). */
 
 /* ------------------------------------------------------------------ */
 /* INA236 calibration constants (from `i2c_devices[].calibration`) */
@@ -143,8 +145,6 @@ extern "C" {
 #define XEVK_INA236_MAX_VCAM2_A      1.6f  /**< Max current for XEVK_I2C_ADDR_INA236_VCAM2. */
 #define XEVK_INA236_SHUNT_VCAM3_OHMS 0.050f  /**< Shunt for XEVK_I2C_ADDR_INA236_VCAM3. */
 #define XEVK_INA236_MAX_VCAM3_A      1.6f  /**< Max current for XEVK_I2C_ADDR_INA236_VCAM3. */
-#define XEVK_INA236_SHUNT_5V_OHMS    0.020f  /**< Shunt for XEVK_I2C_ADDR_INA236_5V. */
-#define XEVK_INA236_MAX_5V_A         4.0f  /**< Max current for XEVK_I2C_ADDR_INA236_5V. */
 
 /* ------------------------------------------------------------------ */
 /* Portable cross-EVK aliases (e1m-spec STANDARD.md §7.2 common set). */

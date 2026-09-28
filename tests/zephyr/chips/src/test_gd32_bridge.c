@@ -7,12 +7,33 @@
  * bit-bang SWD controller used to flash it).
  */
 
+#include <zephyr/kernel.h>
 #include <zephyr/ztest.h>
 
 #include "alp/chips/gd32_swd.h"
 #include "alp/chips/gd32g553.h"
 #include "alp/e1m_pinout.h"
 #include "alp/peripheral.h"
+#include "alp/protocol/crc16.h"
+#include "fakes.h"
+
+/* ------------------------------------------------------------------ */
+/* #2035 -- gd32g553.c's frame CRC-16 migrated off its own local        */
+/* crc16_ccitt_false() onto the shared alp_crc16_ccitt_false()          */
+/* (<alp/protocol/crc16.h>), the same helper already used on the        */
+/* CC3501E wire protocol.  This exercises the exact call gd32g553.c     */
+/* now makes, against the check vector its own removed comment quoted   */
+/* ("123456789" -> 0x29B1) -- so a future edit to the shared header     */
+/* that silently changes the algorithm reddens here, not just on the    */
+/* CC3501E side.                                                        */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_gd32g553_frame_crc16_check_vector)
+{
+	uint16_t crc = alp_crc16_ccitt_false((const uint8_t *)"123456789", 9u);
+
+	zassert_equal(crc, 0x29B1u, "CRC-16/CCITT-FALSE check-vector mismatch: got 0x%04x", crc);
+}
 
 /* ------------------------------------------------------------------ */
 /* gd32g553 -- V2N supervisor MCU host driver, NULL-arg validation     */
@@ -41,6 +62,192 @@ ZTEST(alp_chips, test_gd32g553_init_invalid_i2c_addr)
 	              ALP_ERR_INVAL,
 	              "8-bit address through the 7-bit API must be rejected");
 	alp_i2c_close(bus);
+}
+
+/* ------------------------------------------------------------------ */
+/* gd32g553_init() -- OTA post-COMMIT/ROLLBACK TRIAL-window retry       */
+/* (docs/gd32-bridge-protocol.md §10; fake_gd32bridge.c).  Without      */
+/* the retry ladder in gd32g553_init(), the FIRST of these would fail   */
+/* immediately: gd32g553_ping() returning ALP_ERR_BUSY used to abort    */
+/* init on the spot (`if (s != ALP_OK) { ...; return s; }`) rather than  */
+/* riding the transient status out, so this test reddens against the    */
+/* pre-fix code exactly as intended.                                    */
+/*                                                                      */
+/* #2314 review: ALP_ERR_BUSY is always transient, but ALP_ERR_IO /     */
+/* ALP_ERR_TIMEOUT are transient ONLY once this same init() call has    */
+/* already seen at least one ALP_ERR_BUSY (proof a trial is actually    */
+/* in progress) -- an absent/unflashed bridge never answers BUSY at     */
+/* all, so it must still fail FAST on the very first IO/TIMEOUT.        */
+/* Several cases below exist specifically to pin that rule down.        */
+/*                                                                      */
+/* Wire status bytes used directly below (docs/gd32-bridge-protocol.md  */
+/* §6): 0x03 = STATUS_BUSY, 0x06 = STATUS_NOSUPPORT (a non-transient    */
+/* code some real opcode could plausibly answer with -- any code other  */
+/* than BUSY exercises the same "not transient" path).                 */
+/* ------------------------------------------------------------------ */
+
+#define FAKE_GD32BRIDGE_WIRE_STATUS_NOSUPPORT 0x06u
+
+static alp_i2c_t *open_fake_gd32bridge_bus(void)
+{
+	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = ALP_E1M_I2C0,
+	    .bitrate_hz = 100000,
+	});
+	zassert_not_null(bus);
+	return bus;
+}
+
+ZTEST(alp_chips, test_gd32g553_init_retries_busy_then_succeeds)
+{
+	fake_gd32bridge_reset();
+	fake_gd32bridge_set_version(GD32G553_HOST_PROTOCOL_MAJOR, 12u, 0u);
+	/* PING sees BUSY 3 times (modelling the TRIAL window's short
+	 * error-envelope reply to every opcode), then OK; the busy count
+	 * is exhausted by the time GET_VERSION runs, so that phase goes
+	 * through on its first try. */
+	fake_gd32bridge_arm_busy_replies(3u);
+
+	alp_i2c_t *bus = open_fake_gd32bridge_bus();
+	gd32g553_t ctx;
+	zassert_equal(gd32g553_init(&ctx, NULL, bus, 0x2Cu),
+	              ALP_OK,
+	              "init must ride out a bounded run of STATUS_BUSY and succeed");
+	zassert_true(ctx.initialised);
+
+	alp_i2c_close(bus);
+	fake_gd32bridge_reset();
+}
+
+ZTEST(alp_chips, test_gd32g553_init_busy_then_io_then_succeeds)
+{
+	fake_gd32bridge_reset();
+	fake_gd32bridge_set_version(GD32G553_HOST_PROTOCOL_MAJOR, 12u, 0u);
+	/* Models the real sequence: one BUSY reply (still in TRIAL) proves
+	 * a live bridge, THEN the confirm-triggered second reset drops the
+	 * link for the next couple of attempts (raw transport IO
+	 * failures), THEN the link is back and PING succeeds normally.
+	 * This must succeed because the IO failures follow an observed
+	 * BUSY in the SAME init() call. */
+	fake_gd32bridge_arm_busy_replies(1u);
+	fake_gd32bridge_arm_io_failures(2u);
+
+	alp_i2c_t *bus = open_fake_gd32bridge_bus();
+	gd32g553_t ctx;
+	zassert_equal(gd32g553_init(&ctx, NULL, bus, 0x2Cu),
+	              ALP_OK,
+	              "IO failures right after an observed BUSY must be treated as transient");
+	zassert_true(ctx.initialised);
+
+	alp_i2c_close(bus);
+	fake_gd32bridge_reset();
+}
+
+ZTEST(alp_chips, test_gd32g553_init_io_without_busy_fails_fast)
+{
+	fake_gd32bridge_reset();
+	/* No BUSY ever seen -- models an absent/unflashed bridge, or a
+	 * re-init that happens to land INSIDE the COMMIT/ROLLBACK reset
+	 * itself, before any BUSY was ever observed.  Must fail on the
+	 * very first attempt, not spend the 2 s retry budget: this is the
+	 * latency src/zephyr/v2n_supervisor.c depends on for its
+	 * per-acquire() re-init of an absent bridge. */
+	fake_gd32bridge_arm_io_failures(1000000u);
+
+	alp_i2c_t    *bus = open_fake_gd32bridge_bus();
+	gd32g553_t    ctx;
+	const int64_t start_ms   = k_uptime_get();
+	alp_status_t  s          = gd32g553_init(&ctx, NULL, bus, 0x2Cu);
+	const int64_t elapsed_ms = k_uptime_get() - start_ms;
+
+	zassert_equal(
+	    s, ALP_ERR_IO, "an IO error with no prior BUSY must surface immediately, unretried");
+	zassert_false(ctx.initialised);
+	zassert_equal(fake_gd32bridge_attempts_seen(),
+	              1u,
+	              "must fail on the FIRST bus attempt -- no retry ladder engaged");
+	zassert_true(elapsed_ms < 200,
+	             "init must fail fast (got %lld ms) -- did it start retrying IO unconditionally?",
+	             (long long)elapsed_ms);
+
+	alp_i2c_close(bus);
+	fake_gd32bridge_reset();
+}
+
+ZTEST(alp_chips, test_gd32g553_init_gives_up_after_retry_budget)
+{
+	fake_gd32bridge_reset();
+	/* Never stops being busy within any reasonable test budget --
+	 * models the bootloader's watchdog-revert path, where no valid
+	 * frame ever lands. */
+	fake_gd32bridge_arm_busy_replies(1000000u);
+
+	alp_i2c_t    *bus = open_fake_gd32bridge_bus();
+	gd32g553_t    ctx;
+	const int64_t start_ms   = k_uptime_get();
+	alp_status_t  s          = gd32g553_init(&ctx, NULL, bus, 0x2Cu);
+	const int64_t elapsed_ms = k_uptime_get() - start_ms;
+
+	zassert_equal(s,
+	              ALP_ERR_BUSY,
+	              "init must give up with the last transient status once its budget is spent");
+	zassert_false(ctx.initialised);
+	/* Budget is 2 s, read ONCE via alp_uptime_ms() and shared across
+	 * both the PING and GET_VERSION phases (#2314 review) -- allow
+	 * slack below for scheduler jitter but prove it actually rode out
+	 * most of the shared deadline rather than giving up early or
+	 * doubling the budget by re-reading it per phase. */
+	zassert_true(elapsed_ms >= 1500,
+	             "init gave up too early (%lld ms) -- did the retry ladder regress?",
+	             (long long)elapsed_ms);
+	zassert_true(elapsed_ms < 2800,
+	             "init overran the shared 2 s deadline (%lld ms) -- is the budget being "
+	             "re-read per phase instead of shared?",
+	             (long long)elapsed_ms);
+
+	alp_i2c_close(bus);
+	fake_gd32bridge_reset();
+}
+
+ZTEST(alp_chips, test_gd32g553_init_non_transient_wire_status_not_retried)
+{
+	fake_gd32bridge_reset();
+	/* A non-transient wire status on the very first PING (no BUSY ever
+	 * seen) must break out of the retry loop immediately -- exercises
+	 * the loop's OWN transience check, distinct from the post-loop
+	 * major-version check the next test covers. */
+	fake_gd32bridge_arm_status_replies(FAKE_GD32BRIDGE_WIRE_STATUS_NOSUPPORT, 1u);
+
+	alp_i2c_t *bus = open_fake_gd32bridge_bus();
+	gd32g553_t ctx;
+	zassert_equal(gd32g553_init(&ctx, NULL, bus, 0x2Cu),
+	              ALP_ERR_NOSUPPORT,
+	              "a non-transient wire status must return immediately, not retry");
+	zassert_equal(fake_gd32bridge_calls_seen(), 1u, "exactly one PING -- no retry engaged");
+
+	alp_i2c_close(bus);
+	fake_gd32bridge_reset();
+}
+
+ZTEST(alp_chips, test_gd32g553_init_non_transient_error_not_retried)
+{
+	fake_gd32bridge_reset();
+	/* A genuine major-version mismatch is not transient -- GET_VERSION
+	 * itself succeeds (STATUS_OK), it's the version check afterward
+	 * that fails, and that must return immediately. */
+	fake_gd32bridge_set_version((uint8_t)(GD32G553_HOST_PROTOCOL_MAJOR + 1u), 0u, 0u);
+
+	alp_i2c_t *bus = open_fake_gd32bridge_bus();
+	gd32g553_t ctx;
+	zassert_equal(gd32g553_init(&ctx, NULL, bus, 0x2Cu),
+	              ALP_ERR_NOSUPPORT,
+	              "a genuine version mismatch must return immediately, not retry");
+	zassert_equal(fake_gd32bridge_calls_seen(),
+	              2u,
+	              "exactly one PING + one GET_VERSION -- no retry ladder engaged");
+
+	alp_i2c_close(bus);
+	fake_gd32bridge_reset();
 }
 
 ZTEST(alp_chips, test_gd32g553_post_init_calls_reject_uninitialised)
@@ -395,4 +602,60 @@ ZTEST(alp_chips, test_gd32g553_ota_ops_reject_pre_v06_peer)
 	zassert_equal(gd32g553_ota_write_chunk(&v05, 0u, data, sizeof(data), &rx),
 	              ALP_ERR_NOSUPPORT,
 	              "ota_write_chunk must refuse a v0.5 peer");
+}
+
+/* ------------------------------------------------------------------ */
+/* #2035 -- gd32g553_ota_image_crc32() (src/zephyr/gd32g553_ota_crc_    */
+/* zephyr.c).  native_sim never selects CONFIG_CRC_ALIF (no Alif        */
+/* devicetree node exists there), so every case below exercises the     */
+/* portable software fallback -- exactly the path every real board      */
+/* takes today too, since no shipping board enables crc0 by default     */
+/* (opt-in per board/example overlay, matching crc_alif's own DT        */
+/* binding convention).  Reference values cross-checked against         */
+/* Python's zlib.crc32 (the wire protocol's own "zlib-compatible"       */
+/* contract, docs/gd32-bridge-protocol.md).                             */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_gd32g553_ota_image_crc32_null_args)
+{
+	uint32_t      crc     = 0u;
+	const uint8_t data[1] = { 0u };
+
+	zassert_equal(gd32g553_ota_image_crc32(data, sizeof(data), NULL), ALP_ERR_INVAL);
+	zassert_equal(gd32g553_ota_image_crc32(NULL, 1u, &crc), ALP_ERR_INVAL);
+
+	/* NULL image with a zero length is not an error -- the empty buffer. */
+	zassert_equal(gd32g553_ota_image_crc32(NULL, 0u, &crc), ALP_OK);
+	zassert_equal(crc, 0x00000000u, "CRC32 of the empty buffer is 0");
+}
+
+ZTEST(alp_chips, test_gd32g553_ota_image_crc32_check_vector)
+{
+	/* The standard CRC-32/ISO-HDLC check value: 9 ASCII bytes, deliberately
+	 * NOT a multiple of 4 -- the hardware's 32-bit word path (HWRM
+	 * 15.2.5.3.6) cannot consume this length whole, so this also proves
+	 * the length-based HW/SW split falls back correctly rather than
+	 * mis-computing or rejecting the call. */
+	uint32_t crc = 0u;
+
+	zassert_equal(gd32g553_ota_image_crc32((const uint8_t *)"123456789", 9u, &crc), ALP_OK);
+	zassert_equal(crc, 0xCBF43926u, "check-vector CRC32 mismatch: got 0x%08x", crc);
+}
+
+ZTEST(alp_chips, test_gd32g553_ota_image_crc32_longer_buffer)
+{
+	/* 256 bytes, a 4-byte-aligned length (the shape a real OTA image chunk
+	 * takes and the shape the hardware word path would consume), cross-
+	 * checked against zlib.crc32(bytes(range(256))) computed independently
+	 * on the host. */
+	uint8_t buf[256];
+
+	for (size_t i = 0; i < sizeof(buf); i++) {
+		buf[i] = (uint8_t)i;
+	}
+
+	uint32_t crc = 0u;
+
+	zassert_equal(gd32g553_ota_image_crc32(buf, sizeof(buf), &crc), ALP_OK);
+	zassert_equal(crc, 0x29058C73u, "256-byte buffer CRC32 mismatch: got 0x%08x", crc);
 }

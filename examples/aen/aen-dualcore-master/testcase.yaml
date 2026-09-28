@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Filtered OUT of the native_sim pr-twister.yml gate (platform_allow = the
-# AEN801 HP board only), but pr-twister-aen.yml (issue #1076) DOES build this
-# scenario -- it runs twister against both real AEN801 board targets. Manual
+# Filtered OUT of the native_sim pr-twister.yml gate (platform_allow = real
+# AEN M55-HP board targets, no native_sim overlay), but pr-twister-aen.yml
+# (issue #1076) DOES build this scenario -- it runs twister against both
+# real AEN801 AND AEN803 M55-HP board targets (issue #2209). Manual
 # invocation, for reference:
 #   west twister -p alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp \
 #     -s alp_sdk.examples.aen.dualcore_master.hp_role
@@ -28,6 +29,7 @@ tests:
   alp_sdk.examples.aen.dualcore_master.hp_role:
     platform_allow:
       - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+      - alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp
     tags:
       - alp-sdk
       - example

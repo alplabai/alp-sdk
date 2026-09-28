@@ -110,9 +110,12 @@ Once a working bridge firmware is on the GD32, subsequent upgrades
 flow through the application-bootloader OTA opcodes
 (`CMD_OTA_*` in the reserved `0xF0..0xFF` range; see
 [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10).
-The host driver helpers for these opcodes are not yet on
-`<alp/chips/gd32g553.h>` -- the firmware-side handlers reply
-`STATUS_NOSUPPORT` until the bodies land.
+The full host-driver helper set ships on
+`<alp/chips/gd32g553.h>`: `gd32g553_ota_begin()` /
+`_write_chunk()` / `_verify()` / `_commit()` / `_get_state()` /
+`_abort()`, gated at build time by `-DBRIDGE_OTA_PARTITIONED`
+on the firmware side. The firmware path is silicon-validated
+end-to-end (see [`docs/gd32-bridge.md`](gd32-bridge.md)).
 
 ## 3. Confirm the host ↔ GD32 bridge link
 
@@ -133,7 +136,15 @@ exercising the I2C bus):
   pair per [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md)
   §4.
 
-* Read `GET_VERSION` -- expect `0.1.0` (the v0.3 candidate firmware).
+* Read `GET_VERSION` -- the reply is the negotiated wire-protocol
+  triple. Expect the MAJOR/MINOR your host gates on; the highest
+  version on record as bench-validated end-to-end is **0.6** (see
+  [`docs/gd32-bridge.md`](gd32-bridge.md)), and the wire history
+  reaches 0.9. The host
+  refuses a MAJOR mismatch, so a healthy link answers with the
+  MAJOR/MINOR that `<alp/chips/gd32g553.h>`'s
+  `GD32G553_HOST_PROTOCOL_MAJOR` expects (version history:
+  [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md)).
 
 ## 4. Read the SoM hardware-info manifest
 
@@ -185,7 +196,10 @@ Expected: PHYID1 reads `0x001C` (Realtek OUI).  After ~3-5 s with a
 
 ## 6. Sanity-check the rest of the on-module fleet
 
-* **RV-3028-C7** (RTC): set wall-clock, read back, confirm tick.
+* **RV-3028-C7** (RTC): `/dev/rtc0` on Linux (`hwclock -r`), not the CM33
+  -- CA55/Linux is now the sole master of RIIC8/BRD_I2C end to end; see
+  [`docs/soms/v2n.md`](soms/v2n.md#real-time-clock). Set wall-clock, read
+  back, confirm tick.
 * **OPTIGA Trust M**: issue an I2C connectivity-probe (full APDU
   command set is v0.3.x follow-up).
 * **TMP112**: read the temperature; should be within

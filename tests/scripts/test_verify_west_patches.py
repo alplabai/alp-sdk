@@ -137,8 +137,8 @@ def test_rmtree_helper_tolerates_a_file_vanishing_mid_walk(tmp_path, monkeypatch
     """
     victim = tmp_path / "gitdir"
     (victim / "objects").mkdir(parents=True)
-    (victim / "objects" / "maintenance.lock").write_text("")
-    (victim / "objects" / "keep").write_text("x")
+    (victim / "objects" / "maintenance.lock").write_text("", encoding="utf-8")
+    (victim / "objects" / "keep").write_text("x", encoding="utf-8")
 
     real_chmod = os.chmod
     calls = {"n": 0}
@@ -170,19 +170,20 @@ def _workspace(tmp_path: Path, module_content: str, *, module_name: str = "alif"
     topdir = tmp_path / "ws"
     repo = topdir / "alp-sdk"
     (repo / "zephyr" / "patches" / "hal_alif").mkdir(parents=True)
-    (repo / "zephyr" / "patches" / "hal_alif" / "0001.patch").write_text(PATCH)
+    (repo / "zephyr" / "patches" / "hal_alif" / "0001.patch").write_text(PATCH, encoding="utf-8")
     (repo / "zephyr" / "patches.yml").write_text(
         "patches:\n"
         "  - path: hal_alif/0001.patch\n"
-        f"    module: {module_name}\n"
+        f"    module: {module_name}\n",
+        encoding="utf-8",
     )
 
     mod = topdir / "modules" / "hal" / module_dirname
     mod.mkdir(parents=True)
-    (mod / "payload.txt").write_text(module_content)
+    (mod / "payload.txt").write_text(module_content, encoding="utf-8")
     if declare_module_yml:
         (mod / "zephyr").mkdir()
-        (mod / "zephyr" / "module.yml").write_text("name: alif\n")
+        (mod / "zephyr" / "module.yml").write_text("name: alif\n", encoding="utf-8")
     _git("init", "-q", cwd=mod)
     _git("add", "-A", cwd=mod)
     _git("commit", "-q", "-m", "fixture", cwd=mod)
@@ -378,7 +379,7 @@ def test_an_uncheckedout_module_is_separated_from_a_missing_patch(tmp_path, west
 def test_an_empty_patches_list_refuses_instead_of_passing_vacuously(tmp_path):
     """A verifier with nothing to verify must not report success."""
     repo, topdir = _workspace(tmp_path, PATCHED)
-    (repo / "zephyr" / "patches.yml").write_text("patches: []\n")
+    (repo / "zephyr" / "patches.yml").write_text("patches: []\n", encoding="utf-8")
     with pytest.raises(RuntimeError, match="declares no patches"):
         vwp.verify(repo, topdir)
 
@@ -408,7 +409,7 @@ def test_main_refuses_when_no_workspace_resolves(tmp_path, capsys):
         west.write_text("@echo off\r\nexit /b 1\r\n", encoding="utf-8")
     else:
         west = bindir / "west"
-        west.write_text("#!/usr/bin/env bash\nexit 1\n")
+        west.write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
         west.chmod(0o755)
     rc = vwp.main(["--repo", str(repo), "--west", str(west)])
     assert rc == 2
@@ -492,18 +493,19 @@ def _overlap_workspace(tmp_path: Path, module_content: str) -> tuple[Path, Path]
     topdir = tmp_path / "ws"
     repo = topdir / "alp-sdk"
     (repo / "zephyr" / "patches" / "hal_alif").mkdir(parents=True)
-    (repo / "zephyr" / "patches" / "hal_alif" / "0001.patch").write_text(OVERLAP_FIRST)
-    (repo / "zephyr" / "patches" / "hal_alif" / "0002.patch").write_text(OVERLAP_SECOND)
+    (repo / "zephyr" / "patches" / "hal_alif" / "0001.patch").write_text(OVERLAP_FIRST, encoding="utf-8")
+    (repo / "zephyr" / "patches" / "hal_alif" / "0002.patch").write_text(OVERLAP_SECOND, encoding="utf-8")
     (repo / "zephyr" / "patches.yml").write_text(
         "patches:\n"
         "  - path: hal_alif/0001.patch\n    module: alif\n"
-        "  - path: hal_alif/0002.patch\n    module: alif\n"
+        "  - path: hal_alif/0002.patch\n    module: alif\n",
+        encoding="utf-8",
     )
     mod = topdir / "modules" / "hal" / "alif"
     mod.mkdir(parents=True)
-    (mod / "payload.txt").write_text(module_content)
+    (mod / "payload.txt").write_text(module_content, encoding="utf-8")
     (mod / "zephyr").mkdir()
-    (mod / "zephyr" / "module.yml").write_text("name: alif\n")
+    (mod / "zephyr" / "module.yml").write_text("name: alif\n", encoding="utf-8")
     _git("init", "-q", cwd=mod)
     _git("add", "-A", cwd=mod)
     _git("commit", "-q", "-m", "fixture", cwd=mod)

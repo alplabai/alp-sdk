@@ -16,7 +16,7 @@ def _sample_source() -> str:
 def test_render_error_includes_code_path_caret_hint_and_doclink(tmp_path: Path):
     src = _sample_source()
     fixture = tmp_path / "board.yaml"
-    fixture.write_text(src)
+    fixture.write_text(src, encoding="utf-8")
     diag = Diagnostic(
         severity="error",
         path=fixture,
@@ -41,7 +41,7 @@ def test_render_error_includes_code_path_caret_hint_and_doclink(tmp_path: Path):
 def test_render_omits_color_codes_when_color_false(tmp_path: Path):
     src = "som:\n  sku: bogus\n"
     fixture = tmp_path / "board.yaml"
-    fixture.write_text(src)
+    fixture.write_text(src, encoding="utf-8")
     diag = Diagnostic(
         severity="error",
         path=fixture,
@@ -60,7 +60,7 @@ def test_render_omits_color_codes_when_color_false(tmp_path: Path):
 def test_render_respects_no_color_env(tmp_path: Path, monkeypatch):
     src = "som:\n  sku: x\n"
     fixture = tmp_path / "board.yaml"
-    fixture.write_text(src)
+    fixture.write_text(src, encoding="utf-8")
     diag = Diagnostic(
         severity="error",
         path=fixture,

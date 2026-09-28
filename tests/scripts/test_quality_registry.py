@@ -87,11 +87,11 @@ def test_gate_flags_orphan(tmp_path, monkeypatch):
     # a check_*.py on disk missing from the registry -> problem
     (tmp_path / "scripts").mkdir()
     (tmp_path / "metadata" / "schemas").mkdir(parents=True)
-    (tmp_path / "scripts" / "check_foo.py").write_text("# x")
+    (tmp_path / "scripts" / "check_foo.py").write_text("# x", encoding="utf-8")
     (tmp_path / "metadata" / "quality-tasks-v1.json").write_text(
-        '{"schemaVersion":1,"description":"x","tasks":[]}')
+        '{"schemaVersion":1,"description":"x","tasks":[]}', encoding="utf-8")
     (tmp_path / "metadata" / "schemas" / "quality-tasks-v1.schema.json").write_text(
-        (REPO / "metadata/schemas/quality-tasks-v1.schema.json").read_text())
+        (REPO / "metadata/schemas/quality-tasks-v1.schema.json").read_text(encoding="utf-8"), encoding="utf-8")
     probs = qgate.find_problems(tmp_path)
     assert any("check_foo.py" in p for p in probs)
 
@@ -100,12 +100,12 @@ def test_gate_flags_phantom(tmp_path):
     (tmp_path / "scripts").mkdir()
     (tmp_path / "metadata" / "schemas").mkdir(parents=True)
     (tmp_path / "metadata" / "schemas" / "quality-tasks-v1.schema.json").write_text(
-        (REPO / "metadata/schemas/quality-tasks-v1.schema.json").read_text())
+        (REPO / "metadata/schemas/quality-tasks-v1.schema.json").read_text(encoding="utf-8"), encoding="utf-8")
     (tmp_path / "metadata" / "quality-tasks-v1.json").write_text(
         '{"schemaVersion":1,"description":"x","tasks":['
         '{"id":"phantom","description":"x","runner":"check-script",'
         '"script":"scripts/check_nonexistent.py","gate":true,'
-        '"profiles":["pr"],"output":"none","ci":null}]}')
+        '"profiles":["pr"],"output":"none","ci":null}]}', encoding="utf-8")
     probs = qgate.find_problems(tmp_path)
     assert any("check_nonexistent.py" in p for p in probs)
 
@@ -118,11 +118,11 @@ def _seed_registry_tree(tmp_path, tasks: str, script_text: str = "# no subproces
     """
     (tmp_path / "scripts").mkdir()
     (tmp_path / "metadata" / "schemas").mkdir(parents=True)
-    (tmp_path / "scripts" / "check_a.py").write_text(script_text)
+    (tmp_path / "scripts" / "check_a.py").write_text(script_text, encoding="utf-8")
     (tmp_path / "metadata" / "schemas" / "quality-tasks-v1.schema.json").write_text(
-        (REPO / "metadata/schemas/quality-tasks-v1.schema.json").read_text())
+        (REPO / "metadata/schemas/quality-tasks-v1.schema.json").read_text(encoding="utf-8"), encoding="utf-8")
     (tmp_path / "metadata" / "quality-tasks-v1.json").write_text(
-        '{"schemaVersion":1,"description":"x","tasks":[' + tasks + ']}')
+        '{"schemaVersion":1,"description":"x","tasks":[' + tasks + ']}', encoding="utf-8")
 
 
 def test_gate_flags_empty_quick_profile(tmp_path):

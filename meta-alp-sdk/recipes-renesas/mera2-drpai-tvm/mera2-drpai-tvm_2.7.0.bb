@@ -480,9 +480,12 @@ INSANE_SKIP:${PN} += "ldflags"
 RDEPENDS:${PN} += "mmngr-user-module mmngrbuf-user-module kernel-module-mmngr"
 
 # Excluded from `bitbake world`: this recipe only builds successfully
-# once a builder has pointed RUHMI_DRPAI_TVM_DIR at a real checkout,
-# same posture as recipes-deepx/dx-rt for the other license-gated NPU
-# runtime in this layer.
+# once a builder has pointed RUHMI_DRPAI_TVM_DIR at a real checkout --
+# this is now the only license-gated NPU runtime meta-alp-sdk itself
+# builds in-tree; the other one (DEEPX DX-M1) is consumed from DEEPX's
+# own external meta-deepx-m1 layer instead (see
+# conf/machine/include/e1m-v2m-deepx.inc and
+# docs/vendor-partnerships.md).
 EXCLUDE_FROM_WORLD = "1"
 
 # EXCLUDE_FROM_WORLD only keeps this out of `bitbake world`.  It does NOT
@@ -490,7 +493,7 @@ EXCLUDE_FROM_WORLD = "1"
 # has no DRP-AI at all -- so scope it explicitly.  The payload staged here
 # is the RZ/V2N `obj/build_runtime/v2h` prebuilt set; on an AEN or NX9101
 # build it is not merely useless, it is wrong.
-COMPATIBLE_MACHINE = "^(e1m-v2n101-a55|e1m-v2n102-a55|e1m-v2m101-a55|e1m-v2m102-a55)$"
+COMPATIBLE_MACHINE = "^(e1m-v2n101-a55|e1m-v2n102-a55|e1m-v2n103-a55|e1m-v2m101-a55|e1m-v2m102-a55|e1m-v2m103-a55)$"
 
 # Pin to MACHINE_ARCH.  With the default TUNE_PKGARCH this recipe's output
 # would share an sstate/feed slot with every other aarch64 machine, so a
@@ -531,13 +534,16 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 #      PACKAGECONFIG[drpai] existed in alp-sdk_0.6.bb.  OE errors out on an
 #      append naming an undefined flag.
 #
-# So what is actually established, and nothing beyond it: do_compile
-# cross-compiles apps/MeraDrpRuntimeWrapper.cpp on an x86_64 host up to the
-# final link, where it stops with "skipping incompatible ... when searching
-# for -lmera2_runtime" -- an architecture mismatch against the aarch64
-# obj/build_runtime/v2h libraries, not a symbol error.  Whether packaging
-# passes do_package_qa, and whether the symbols resolve against the real
-# aarch64 payload, are both UNTESTED.
+# So what is actually established, and nothing beyond it: a hand-run host
+# g++ command modelled on do_compile compiled apps/MeraDrpRuntimeWrapper.cpp
+# against the real RUHMI headers.  A separate hand-run host link probe then
+# stopped with "skipping incompatible ... when searching for
+# -lmera2_runtime" -- an architecture mismatch against the aarch64
+# obj/build_runtime/v2h libraries, not a symbol error.  No BitBake task ran.
+# Whether do_compile reaches a real aarch64 link, whether packaging passes
+# do_package_qa, and whether the symbols resolve against the real aarch64
+# payload are all UNTESTED.  docs/bring-up-drpai-v2n.md's status banner is
+# the authority for the current bake state.
 #
 # The kernel side is proven independently of this recipe: /dev/drpai0 probes
 # clean on a real board and DRPAI_GET_DRPAI_AREA returns the 0xD0000000 /

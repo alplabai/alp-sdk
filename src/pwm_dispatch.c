@@ -156,6 +156,12 @@ alp_status_t alp_pwm_configure(alp_pwm_t      *pwm,
 	alp_status_t rc;
 	if ((unsigned)align_mode > (unsigned)ALP_PWM_ALIGN_CENTER_BOTH) {
 		rc = ALP_ERR_INVAL;
+	} else if ((break_cfg & (uint8_t)~ALP_PWM_BREAK_EXTERNAL) != 0u) {
+		/* #1648: an undefined break bit would reach the GD32 BKDT field
+		 * unchecked and be dropped or misread there -- refuse it here,
+		 * like an out-of-range align_mode, instead of returning ALP_OK
+		 * for a request no backend honours. */
+		rc = ALP_ERR_INVAL;
 	} else if (pwm->state.ops->configure == NULL) {
 		rc = ALP_ERR_NOSUPPORT;
 	} else {

@@ -158,6 +158,16 @@ alp_status_t alp_can_send(alp_can_t *can, const alp_can_frame_t *frame, uint32_t
 		rc = ALP_ERR_NOT_READY;
 	} else if (frame == NULL) {
 		rc = ALP_ERR_INVAL;
+	} else if (frame->fd && can->cfg.mode != ALP_CAN_MODE_FD) {
+		/* issue #1631: fd = true, payload_len = 64 passed both bound
+		 * checks below (64 is not > FD's own max, and the classic
+		 * arm is skipped because frame->fd is true) even though the
+		 * handle was never opened in ALP_CAN_MODE_FD -- on a Zephyr
+		 * build without CONFIG_CAN_FD_MODE the backend's
+		 * struct can_frame.data[] is only 8 bytes, so that frame went
+		 * on to overflow it.  Gate on the handle's own opened mode
+		 * here, once, for every backend -- not per backend. */
+		rc = ALP_ERR_NOSUPPORT;
 	} else if (frame->payload_len > ALP_CAN_MAX_PAYLOAD_BYTES_FD) {
 		rc = ALP_ERR_INVAL;
 	} else if (!frame->fd && frame->payload_len > ALP_CAN_MAX_PAYLOAD_BYTES_CLASSIC) {

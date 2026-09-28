@@ -39,11 +39,31 @@ cores:
     app: ./src
     # IoT toggles.  wifi:true wires the CC3501E bridge as the
     # <alp/iot.h> Wi-Fi backend on this AEN board; tls:true selects
-    # the mqtts:// (TLS) MQTT path.  See prj.conf for why
-    # CONFIG_MBEDTLS is held off in the build today.
+    # the mqtts:// (TLS) MQTT path.  CONFIG_MBEDTLS is no longer held
+    # off: the ssl_misc.h break that forced that is fixed at its root
+    # (ALP_SDK_MBEDTLS_PSA_CRYPTO, #2173), so every target builds the
+    # TLS-enabled configuration.  The remaining limit is the RNG, not
+    # the library -- see the README's TLS status section and #2192.
     iot:
       wifi: true
       tls:  true
+    # Portable peripheral subsystems this app opens to bring the CC3501E
+    # bridge up (cc3501e_bridge_bringup(), #2112): SPI1 (inter-chip link)
+    # + the WIFI_EN/nRESET LP-GPIO control pins. Same as the
+    # examples/aen/aen-cc3501e-* board.yaml. The loader translates these
+    # to CONFIG_SPI=y / CONFIG_GPIO=y in alp.conf.
+    peripherals:
+      - spi
+      - gpio
+
+# The bridge helper this app now carries (src/cc3501e_bridge.h, #2112)
+# includes <alp/chips/cc3501e.h> directly, so the chip has to be declared
+# here for check_example_portability.py's family-compatibility check and
+# the portability ring to account for it -- same as
+# examples/aen/aen-cc3501e-bringup/board.yaml.  Wi-Fi itself still reaches
+# the app through the portable <alp/iot.h> surface, not this entry.
+chips:
+  - cc3501e
 
 diagnostics:
   log_level: info

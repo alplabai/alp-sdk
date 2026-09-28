@@ -67,11 +67,6 @@
 	};
 };
 
-/* P2_6 (READY) is on gpio2 (defined in the SoC dtsi) -- just enable it. */
-&gpio2 {
-	status = "okay";
-};
-
 /* P14_7 (CS) is now muxed as SPI1_SS0_C in pinctrl_spi1 -- the dwc-ssi peripheral drives
  * it in hardware per transfer.  The old gpio14 GPIO-bodge controller node is removed: a
  * GPIO claim of P14_7 would fight the SS0 pinctrl mux. */

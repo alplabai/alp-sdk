@@ -6,12 +6,22 @@
  * <alp/inference.h>, A55 / Linux / Yocto side of the RZ/V2N.
  *
  * BENCH-UNVERIFIED: header-checks against the real
- * MeraDrpRuntimeWrapper.h surface, but has NOT run on silicon and does
- * NOT cross-link here -- the EdgeCortix MERA2 runtime + DRP-AI TVM
- * runtime libs only exist on the RZ/V Yocto SDK sysroot (mera2_runtime /
- * drp_tvm_rt / tvm_runtime), not on this dev host.  Compiled only when
- * ALP_SDK_USE_DRPAI_V2N=ON (default OFF).  Same posture as the DEEPX
- * DX-M1 hook (inference_deepx.cpp).
+ * MeraDrpRuntimeWrapper.h surface and cross-compiles to a valid .o with
+ * every previously-missing symbol defined -- confirmed with `nm` by hand
+ * on an x86_64 dev host, NOT by a bake (see
+ * meta-alp-sdk/recipes-renesas/mera2-drpai-tvm/mera2-drpai-tvm_2.7.0.bb).
+ * The FINAL LINK against the real aarch64 obj/build_runtime/v2h
+ * libraries has never been exercised: that same x86_64 host stops with
+ * "skipping incompatible ... when searching for -lmera2_runtime", an
+ * architecture mismatch, not proof of symbol resolution.  NO
+ * `drpai`-enabled alp-image-edge bake has ever completed, on any host.
+ * No compiled drpai_dir bundle exists in this checkout -- only an ONNX
+ * source does (RUHMI's yolox-S_VOC.onnx); see docs/bring-up-drpai-v2n.md
+ * Sec 5 for the current compile status and alp-sdk#2236 for the tracked
+ * work (derive real preprocessing from app_yolox_cam, compile a bundle,
+ * verify it byte-for-byte against its own input_0.bin).  Compiled only
+ * when ALP_SDK_USE_DRPAI_V2N=ON (default OFF).  Same posture as the
+ * DEEPX DX-M1 hook (inference_deepx.cpp).
  *
  * ----------------------------------------------------------------------
  * Real vendor API
@@ -57,7 +67,9 @@
  *   them relative to the object dir), calls LoadModel() on that dir, and
  *   close() removes the directory.  Extraction shells out to `tar -xf - -C
  *   <dir>` (busybox/GNU, A55/Yocto-side); the dir path is mkdtemp-private so
- *   there is no untrusted input in the command.
+ *   there is no untrusted input in the command, and mkdtemp creates it 0700
+ *   so another local user cannot race the extraction.  The blob size is
+ *   capped at open() (kDrpAiMaxModelBytes) so it cannot fill /tmp.
  *
  * Vendor-artifact handling (classifying-public-vs-internal)
  *   rzv_drp-ai_tvm is Apache-2.0 (referenceable) BUT the prebuilt MERA2
@@ -141,6 +153,8 @@ using namespace alp_drpai;
 
 /* DRP-AI driver device node.  Uniform across every vendor sample. */
 constexpr const char *kDrpAiDevice = "/dev/drpai0";
+/** Upper bound on a `drpai_dir` tar blob accepted by open(). */
+constexpr std::size_t kDrpAiMaxModelBytes = 64u * 1024u * 1024u;
 
 /** Map a DRP-AI driver errno onto the portable status enum.
  *
@@ -219,9 +233,10 @@ alp_status_t _drpai_mem_start(uint64_t &out)
 	if (rc != 0) {
 		return _drpai_errno_to_status(err);
 	}
-	/* A zero-sized area means the driver probed without a usable
-	 * memory-region; treat it as hard failure rather than DMA at 0. */
-	if (area.size == 0) {
+	/* A zero-sized or zero-based area means the driver probed without a
+	 * usable memory-region; treat either as hard failure rather than point
+	 * the NPU's DMA at physical 0 (the same hazard as a stale constant). */
+	if (area.size == 0 || area.address == 0) {
 		return ALP_ERR_IO;
 	}
 
@@ -238,7 +253,10 @@ void _rm_rf(const std::string &dir)
 		return;
 	}
 	std::string cmd = "rm -rf '" + dir + "'";
-	(void)std::system(cmd.c_str());
+	/* Best-effort; bound, not cast: glibc marks system() warn_unused_result,
+	 * which a (void) cast does not silence under GCC. */
+	const int rc = std::system(cmd.c_str());
+	(void)rc;
 }
 
 /** Extract the `drpai_dir` tar @p data (@p len bytes) into a fresh private
@@ -360,6 +378,12 @@ extern "C" alp_status_t alp_inference_drpai_open(struct alp_inference         *h
 	/* For ALP_INFERENCE_MODEL_DRPAI the blob is the `drpai_dir` tar bytes
      * (see the header comment).  Reject an empty blob early. */
 	if (cfg->model_data == nullptr || cfg->model_size == 0) {
+		return ALP_ERR_INVAL;
+	}
+	/* The tar is extracted into /tmp before LoadModel() reads it; bound it
+	 * so an oversized blob is a portable INVAL, not a tar ENOSPC on a
+	 * small rootfs.  64 MiB is generous for a DRP-AI YOLOX-S bundle. */
+	if (cfg->model_size > kDrpAiMaxModelBytes) {
 		return ALP_ERR_INVAL;
 	}
 
@@ -506,9 +530,12 @@ extern "C" alp_status_t alp_inference_drpai_get_output(struct alp_inference   *h
 
 	/* GetOutput(idx) -> (dtype, data ptr, elem_count).  Before the first
      * Run() the wrapper returns its zero-initialised output area; after
-     * Run() it points at the live result buffer.  elem_count * dtype-size
-     * gives the byte size; prefer the GetOutputInfo() byte size when the
-     * dtype is known. */
+     * Run() it points at the live result buffer.  The size reported is the
+     * one describing THAT buffer (elem_count * dtype size); the
+     * GetOutputInfo() size is only the fallback for OTHER, whose element
+     * size is unknown.  A live buffer smaller than GetOutputInfo() claims
+     * is a runtime/model mismatch -- fail rather than let a caller walk
+     * size_bytes past the end of it. */
 	InOutDataType dtype;
 	void         *data               = nullptr;
 	int64_t       num_elems          = 0;
@@ -517,9 +544,36 @@ extern "C" alp_status_t alp_inference_drpai_get_output(struct alp_inference   *h
 	/* rank/shape: same deploy.json-derived, open()-time-resolved source
      * and same fail-safe (empty == rank 0) as get_input() above. */
 	const std::vector<uint16_t> &shape = st->out_shapes[index];
+	const std::size_t info_bytes = std::get<1>(st->out_info[index]);
+	std::size_t       elem_bytes = 0;
+	switch (dtype) {
+	case InOutDataType::FLOAT32:
+	case InOutDataType::INT32:
+		elem_bytes = 4u;
+		break;
+	case InOutDataType::FLOAT16:
+		elem_bytes = 2u;
+		break;
+	case InOutDataType::INT64:
+		elem_bytes = 8u;
+		break;
+	case InOutDataType::OTHER:
+	default:
+		break;
+	}
+	std::size_t live_bytes = info_bytes;
+	if (elem_bytes != 0u) {
+		if (num_elems < 0) {
+			return ALP_ERR_IO;
+		}
+		live_bytes = static_cast<std::size_t>(num_elems) * elem_bytes;
+		if (live_bytes < info_bytes) {
+			return ALP_ERR_IO;
+		}
+	}
 
 	out->data       = data;
-	out->size_bytes = std::get<1>(st->out_info[index]);
+	out->size_bytes = live_bytes;
 	out->dtype      = mera_dtype_to_alp(dtype);
 	out->rank       = static_cast<uint8_t>(shape.size());
 	for (size_t i = 0; i < shape.size(); ++i) {

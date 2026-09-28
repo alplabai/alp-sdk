@@ -1,0 +1,65 @@
+From: Alp Lab AB
+Subject: [PATCH] irqchip/renesas-rzv2h: mask the ICU error sources the handler cannot acknowledge
+
+gpt_irq_handler() services only the GPT overflow bits of error groups
+1 and 2 on the shared CA55 error line, but probe left group 0 (which
+resets fully unmasked) and every other bit of group 1 unmasked. Once a
+non-GPT error source asserts -- on an E1M-V2M103 group 0 bit 0 is set
+as soon as the Cortex-M33 runs -- nothing acknowledges it, the line
+storms ('irq 14: nobody cared') and genirq disables it, taking the GPT
+overflow interrupts with it. Also, the GPT unit-0 dead-time mask was
+written to group 2 instead of group 1.
+
+Unmask only the GPT overflow bits the handler services and mask
+everything else in groups 0-3, warning once about any error status
+already pending at probe.
+
+Upstream-Status: Pending
+Signed-off-by: Alp Lab AB
+---
+--- a/drivers/irqchip/irq-renesas-rzv2h.c
++++ b/drivers/irqchip/irq-renesas-rzv2h.c
+@@ -750,26 +750,24 @@
+ 		return -ENOENT;
+ 	}
+ 
+-	/* mask gpt overflow interrupt. */
+-	for (u8 ch = 0; ch <= 1; ch++) {
+-		int err_flag = readl(rzv2h_icu_data->base +
+-			((!ch) ? ERROR_ERINTMSK_OFFSET(1) : ERROR_ERINTMSK_OFFSET(2)));
+-
+-		/* Unmask gpt overflow interrupt. */
+-		writel(~GPT_CLR_ERINT_MASK(ch) & err_flag,
+-			rzv2h_icu_data->base +
+-			((!ch) ? ERROR_ERINTMSK_OFFSET(1) : ERROR_ERINTMSK_OFFSET(2)));
++	/*
++	 * The CA55 error line is shared by every ICU error source, but
++	 * gpt_irq_handler() only services the GPT overflow bits (groups 1
++	 * and 2). Any other source left unmasked -- group 0 resets fully
++	 * unmasked -- can never be acknowledged, so it storms the line until
++	 * genirq disables it, and the GPT overflow interrupts go with it.
++	 * Unmask the GPT overflow bits only; report anything already pending.
++	 */
++	for (u8 grp = 0; grp <= 3; grp++) {
++		u32 stat = readl(rzv2h_icu_data->base + ERROR_INTSTAT_OFFSET(grp));
++		u32 keep = grp == 1 ? GPT_OVF_MASK(0) :
++			   grp == 2 ? GPT_OVF_MASK(1) : 0;
+ 
+-		/* Mask gpt deadtime interrupt. */
+-		err_flag = readl(rzv2h_icu_data->base + ERROR_ERINTMSK_OFFSET(2));
+-		if (ch) {
+-			writel(GPT1_2_ERINTMSK_DEI_MASK | err_flag,
+-				 rzv2h_icu_data->base + ERROR_ERINTMSK_OFFSET(2));
+-			writel(GPT1_3_ERINTMSK_DEI_MASK,
+-				 rzv2h_icu_data->base + ERROR_ERINTMSK_OFFSET(3));
+-		} else
+-			writel(GPT0_ERINTMSK_DEI_MASK | err_flag,
+-				 rzv2h_icu_data->base + ERROR_ERINTMSK_OFFSET(2));
++		if (stat & ~keep)
++			dev_warn(&pdev->dev,
++				 "error group %u status 0x%08x pending at probe, masked\n",
++				 grp, stat & ~keep);
++		writel(~keep, rzv2h_icu_data->base + ERROR_ERINTMSK_OFFSET(grp));
+ 	}
+ 
+ 	/*

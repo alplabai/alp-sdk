@@ -84,6 +84,15 @@
 #                     (No --target = the historical "full" run: every stage
 #                     except the main-only ABI strict diff.)
 #   --quick           skip twister + Doxygen (the slow stages)
+#
+# Environment:
+#   ALP_TWISTER_JOBS  cap twister's concurrent TEST INSTANCES (passed through
+#                     as `-j`).  Unset = twister's own default, one per core.
+#                     NOTE this alone is NOT enough -- each instance runs its
+#                     own ninja at full core parallelism underneath, so the
+#                     real compiler count is this value TIMES the core count.
+#                     The stage caps that inner build too; see the OOM note on
+#                     stage_twister below.
 #   --yocto-only      run only stage 1 + format + metadata
 #   --zephyr-only     run only stage 3 (requires ZEPHYR_BASE)
 #   --no-clean        keep build directories between runs (faster)
@@ -329,7 +338,40 @@ stage_twister() {
     # a warning like -Werror=comment ('/*' inside a comment) fails there;
     # forcing CONFIG_COMPILER_WARNINGS_AS_ERRORS=y here catches that class
     # locally instead of on the PR (bit examples/.../u8g2 main.c, #650).
+    # Concurrency cap.  Twister defaults to ONE BUILD JOB PER CORE and each build
+    # runs its own parallel ninja underneath, so the real compiler count is well
+    # above the core count.  Measured on the 20-core / 31 GB bench gateway: a
+    # default-parallelism run OOM-killed the machine, the kernel reaping cc1plus
+    # repeatedly ("Out of memory: Killed process ... (cc1plus) ...
+    # anon-rss:425060kB") until the box had to be rebooted -- which on THAT
+    # machine also takes the attached board farm down with it.
+    #
+    # Unset keeps twister's default, so CI is unchanged.  Set ALP_TWISTER_JOBS
+    # on a shared or memory-tight host; roughly one job per 2 GB of RAM is a
+    # safe starting point, and lower still if anything else heavy is running.
+    twister_jobs=()
+    if [ -n "${ALP_TWISTER_JOBS:-}" ]; then
+        twister_jobs=(-j "${ALP_TWISTER_JOBS}")
+
+        # Capping twister ALONE IS NOT ENOUGH, and believing it was cost a
+        # second near-OOM.  `-j` bounds concurrent TEST INSTANCES; each instance
+        # then runs its own ninja, which defaults to the full core count.  So
+        # the real concurrent-compiler count is ALP_TWISTER_JOBS x nproc.
+        # Measured on this 20-core host with ALP_TWISTER_JOBS=4: 78 live cc1plus
+        # processes, 27 of 31 GB consumed, load average 152 -- the run had to be
+        # killed to avoid repeating the OOM reboot the cap was added to prevent.
+        #
+        # CMAKE_BUILD_PARALLEL_LEVEL is what bounds the inner build (it is also
+        # what the bench runner uses for the same reason).  Default it to 2 so
+        # the product stays modest, and let a caller override it deliberately.
+        export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
+        echo "stage_twister: capping twister at ${ALP_TWISTER_JOBS} concurrent test instance(s) (ALP_TWISTER_JOBS)," \
+             "each building with CMAKE_BUILD_PARALLEL_LEVEL=${CMAKE_BUILD_PARALLEL_LEVEL}" \
+             "-- up to $((ALP_TWISTER_JOBS * CMAKE_BUILD_PARALLEL_LEVEL)) concurrent compilers"
+    fi
+
     python3 "${ZEPHYR_BASE}/scripts/twister" \
+        "${twister_jobs[@]+"${twister_jobs[@]}"}" \
         --testsuite-root "${REPO_ROOT}/tests/unit" \
         --testsuite-root "${REPO_ROOT}/tests/zephyr" \
         --testsuite-root "${REPO_ROOT}/tests/console" \
@@ -650,7 +692,17 @@ stage_pytest_scripts() {
         echo "stage_pytest_scripts: python3 ($(command -v python3)) cannot import pytest. Activate the zephyrproject venv or: pip install pytest."
         return 99
     fi
-    python3 -m pytest tests/scripts/ -q || return 1
+    # pytest-xdist (a [dev] dependency since #2328) spreads the ~4,400 tests
+    # over every core, as CI does: a parallel sweep, then the modules that
+    # write into the real checkout on their own (tests/scripts/conftest.py
+    # _REPO_WRITER_MODULES). Without xdist the stage still runs, serially.
+    if python3 -c 'import xdist' >/dev/null 2>&1; then
+        python3 -m pytest tests/scripts/ -q -n auto -m "not repo_writes" || return 1
+        python3 -m pytest tests/scripts/ -q -m repo_writes || return 1
+    else
+        echo "stage_pytest_scripts: pytest-xdist not importable; running serially (pip install -e \".[dev]\" to parallelise)."
+        python3 -m pytest tests/scripts/ -q || return 1
+    fi
 
     # tests/parity/ is NOT under tests/scripts/, so the seam-1 comparator's own
     # 15 unit tests were excluded from this stage AND from parity-seam1.yml,
@@ -765,6 +817,20 @@ stage_required_gate_scripts() {
         return 99
     fi
     return "${failed}"
+}
+
+# required-gate-scripts graded changelog citations against the WORKING
+# TREE. CI grades the PR merge commit instead (actions/checkout on a
+# pull_request event checks out refs/pull/N/merge), where a citation into
+# a file dev has since moved is already wrong. This grades that merge,
+# built in the object store from origin/dev and HEAD -- committed work
+# only (alp-sdk#2186). origin/dev is passed explicitly rather than
+# inherited: DIFF_BASE is shared with the clang-format stage, and a base
+# that is already an ancestor of HEAD would grade HEAD, not a merge. The
+# orchestration below probes for git >= 2.38 (merge-tree --write-tree)
+# and for origin/dev first, and reports either as a [GAP] SKIP.
+stage_changelog_citations_merge() {
+    DIFF_BASE=origin/dev python3 scripts/check_changelog_citations.py --against-merge
 }
 
 stage_hil_spec_validate() {
@@ -920,6 +986,71 @@ stage_generated_files() {
         python3 scripts/gen_soc_peripheral_instances.py \
             || { echo "scripts/gen_soc_peripheral_instances.py failed"; return 1; }
     fi
+    # gen_npu_ops.py is deliberately NOT in the `gens` array above (see its
+    # own module docstring): that array always REGENERATES, and doing that
+    # here unconditionally would make the heavy, optional `vela` toolchain a
+    # gate dependency for every contributor. `--check` sidesteps that: it
+    # exits 2 -- not 1 -- the instant `vela` isn't found on PATH, before
+    # anything toolchain-heavy runs, so this call is safe and cheap to make
+    # unconditionally. rc 1 is a real defect (stale tables, or a report-format
+    # /delta mismatch) and DOES fail the stage, same as any other generator.
+    #
+    # rc 2 is a SKIP -- but ONLY when the change under test cannot have
+    # invalidated the tables. Unconditionally, it was the proxy-check shape
+    # this repo keeps digging out: `vela` is on almost no contributor's PATH,
+    # so the default local invocation printed "SKIPPED" and never checked the
+    # NPU op tables AT ALL -- including on a diff that edited nothing but
+    # metadata/npu_ops/ and scripts/gen_npu_ops.py, i.e. exactly the tooling
+    # whose freshness this call is the only local proof of. A gate that
+    # cannot run on the one change it exists for is decoration. So: if the
+    # diff touches those paths and vela is missing, the stage FAILS and says
+    # what to install; otherwise it still skips, loudly.
+    if [ -f scripts/gen_npu_ops.py ]; then
+        local gen_npu_ops_out npu_ops_touched npu_ops_base
+        # DIFF_BASE overrides, same as the clang-format stage above, but the
+        # default here is merge-base(origin/dev, HEAD), not HEAD~1: a
+        # multi-commit branch (the normal case for a metadata change like
+        # this) has npu_ops-touching commits older than HEAD~1, and HEAD~1
+        # would miss them entirely.  If `origin/dev` is unreachable (no such
+        # remote-tracking ref locally), `git merge-base` fails and this falls
+        # back to HEAD~1.  Two sources, because either alone has a blind
+        # spot: `git diff <base>` cannot see uncommitted work (which is what
+        # a local run usually IS), and the working tree cannot see what an
+        # earlier commit on the branch already changed.
+        npu_ops_base="${DIFF_BASE:-$(git merge-base origin/dev HEAD 2>/dev/null || echo HEAD~1)}"
+        npu_ops_touched=""
+        if git rev-parse "${npu_ops_base}" >/dev/null 2>&1; then
+            npu_ops_touched=$(git diff --name-only "${npu_ops_base}" -- \
+                metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null)
+        fi
+        # `--porcelain` v1 is "XY <path>"; strip the status columns so both
+        # probes yield bare paths and `sort -u` can merge them.
+        npu_ops_touched="${npu_ops_touched}
+$(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null | cut -c4-)"
+        # Collapse to nothing when both probes came back empty.
+        npu_ops_touched=$(printf '%s\n' "${npu_ops_touched}" \
+            | sed '/^[[:space:]]*$/d' | sort -u)
+
+        gen_npu_ops_out=$(python3 scripts/gen_npu_ops.py --check 2>&1)
+        rc=$?
+        if [ "${rc}" -eq 2 ] && [ -n "${npu_ops_touched}" ]; then
+            echo "${gen_npu_ops_out}"
+            echo "generated-files: gen_npu_ops.py --check could NOT run (vela not"
+            echo "on PATH) -- but this change touches the very files it checks:"
+            printf '%s\n' "${npu_ops_touched}" | sed 's/^/    /'
+            echo "Skipping here would leave the NPU op tables unverified by the"
+            echo "one gate that verifies them.  Install ethos-u-vela into a venv"
+            echo "and re-run with it on PATH, e.g."
+            echo "    PATH=<venv>/bin:\$PATH bash scripts/test-all.sh --target dev"
+            return 1
+        elif [ "${rc}" -eq 2 ]; then
+            echo "generated-files: gen_npu_ops.py --check SKIPPED (vela not on PATH; this change touches no metadata/npu_ops/ or scripts/gen_npu_ops.py file)"
+        elif [ "${rc}" -ne 0 ]; then
+            echo "${gen_npu_ops_out}"
+            echo "scripts/gen_npu_ops.py --check failed"
+            return 1
+        fi
+    fi
     # ABI snapshot -- current working snapshot is derived from
     # metadata/sdk_version.yaml (older snapshots are frozen).
     if [ -f scripts/abi_snapshot.py ]; then
@@ -967,6 +1098,7 @@ stage_generated_files() {
         docs/portability-matrix.md docs/peripheral-support-matrix.md \
         docs/verification-status.md \
         examples/aen \
+        src/backends/gpio/cc3501e_rev_dependent_pins.c \
         docs/diagnostics 2>/dev/null; then
         echo "git add -N failed -- an expected generated path is missing from the tree"
         return 1
@@ -991,6 +1123,7 @@ stage_generated_files() {
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/verification-status.md \
             examples/aen \
+            src/backends/gpio/cc3501e_rev_dependent_pins.c \
             docs/diagnostics 2>/dev/null; then
         echo "generated files are OUT OF SYNC -- regenerated in place; git add + commit:"
         git --no-pager diff --stat -- \
@@ -1000,6 +1133,7 @@ stage_generated_files() {
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/verification-status.md \
             examples/aen \
+            src/backends/gpio/cc3501e_rev_dependent_pins.c \
             docs/diagnostics 2>/dev/null | tail -20
         return 1
     fi
@@ -1099,6 +1233,19 @@ else
     # above.  Keeps this wrapper's coverage aligned with the hard
     # gates pr-metadata-validate.yml / pr-doc-drift.yml run in CI.
     run_stage "required-gate-scripts" stage_required_gate_scripts
+
+    # The same citation gate, graded against the merge CI will check out.
+    # Both probes mirror what stage_changelog_citations_merge needs, so a
+    # host that cannot build the merge gets a named [GAP], not a FAIL.
+    if ! command -v python3 >/dev/null 2>&1 || [ ! -f scripts/check_changelog_citations.py ]; then
+        skip_stage "changelog-citations-merge" "python3 or scripts/check_changelog_citations.py missing" gap
+    elif ! git merge-tree --write-tree HEAD HEAD >/dev/null 2>&1; then
+        skip_stage "changelog-citations-merge" "$(git --version) has no merge-tree --write-tree (needs git >= 2.38)" gap
+    elif ! git rev-parse -q --verify "origin/dev^{commit}" >/dev/null; then
+        skip_stage "changelog-citations-merge" "origin/dev not present here (git fetch origin dev)" gap
+    else
+        run_stage "changelog-citations-merge" stage_changelog_citations_merge
+    fi
 
     # `check · generated files in sync` -- regenerate every single-sourced
     # artifact + fail on drift.  Catches the class of red that bit #623 /

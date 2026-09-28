@@ -5,7 +5,7 @@
 Two consumers read `npus[].mac_per_cycle` for an ethos-u* NPU without a
 schema backstop:
 
-  * `scripts/alp_model/targets.py::_soc_targets` does `npu['mac_per_cycle']`
+  * `scripts/alp_project_loader.py::_soc_targets` does `npu['mac_per_cycle']`
     -- a bare dict subscript that raises `KeyError` if the field is absent.
   * `scripts/alp_orchestrate/kconfig.py` filters `npus[]` to entries with a
     truthy `mac_per_cycle` before sizing the Ethos-U accelerator Kconfig; if

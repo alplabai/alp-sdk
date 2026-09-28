@@ -104,6 +104,23 @@ Then power-cycle.  `device AE822FA0E5597LS0_M55_HE` is **required** --
 the bare `AE822FA0E5597LS0` hangs on the GUI device picker even with
 `-nogui 1`.
 
+> **alp-sdk#2233 — two hazards in the raw session above, if you type it by
+> hand.** SEGGER's built-in loader rewrites the WHOLE 16 KiB sector either
+> `loadbin` touches and never reads its prior contents first, so a blob that
+> does not start and end on a sector (`0x4000`) boundary silently turns the
+> REST of that sector to `0xFF` (harmless here only because this particular
+> image happened to fill its sector, which is NOT true in general — check
+> the size before assuming that). Separately, `verifybin` here only ever
+> compares against J-Link's own in-process flash cache, never a fresh chip
+> read — `Verify successful.` is not proof of what MRAM holds. The scripted
+> path (`scripts/bench/aen/flash-jlink-mramxip.sh` for this two-blob shape)
+> handles both: it reads the touched sectors first, overlays the blob on
+> them (`scripts/bench/aen/flowd_sector_pad.py`), `loadbin`s the padded
+> image instead, and proves the write with a FRESH read-only session rather
+> than `verifybin`. Prefer the script; if you must type this by hand, at
+> minimum confirm with a fresh-session `savebin` (a NEW JLinkExe process) or
+> a cold-cycle read, never `verifybin` alone.
+
 > **Proven safe at `0x80010000` (slot0) only.**  Writing the ATOC
 > region, or erasing MCUboot itself, was **not** tested by this bench
 > session -- treat that as a different, unproven risk.  Rejection is
@@ -368,21 +385,31 @@ band was carved out of it.
 
 **How.** Use the helper, which derives the window from the preset, refuses to
 run unless it ends exactly where `atoc` begins, checks the SW-DP IDR is the
-AEN E8's `0x4C013477` before writing anything, and byte-verifies the result:
+AEN E8's `0x4C013477` before writing anything, resolves where the RESIDENT
+ATOC package actually starts (not just where its allocated region begins —
+alp-sdk#2233 measured a real board whose package started well inside the
+customer storage window; see `scripts/bench/aen/atoc_trailer.py`) and refuses
+outright if the erase would overlap it, and byte-verifies the result with a
+fresh-session read-back (not `verifybin`, which only reads J-Link's own
+cache — the other alp-sdk#2233 defect):
 
 ```sh
-scripts/bench/aen/erase-storage.sh --dry-run   # prints the window + script, touches nothing
-scripts/bench/aen/erase-storage.sh             # the real thing (destructive)
+scripts/bench/aen/erase-storage.sh --dry-run              # prints the window + script, touches nothing
+scripts/bench/aen/erase-storage.sh                         # the real thing (destructive), default E1M-AEN801
+scripts/bench/aen/erase-storage.sh --sku E1M-AEN803         # another AEN SKU with the same storage/atoc layout
 ```
 
 Note that a J-Link **`erase` does not clear MRAM** on this part, so the erase
-is a `loadbin` of a zero-filled file through the part-number device profile
-(`AE822FA0E5597LS0_M55_HE`) — the same mechanism Flow D uses to write MRAM.
-The zero file is also the `verifybin` reference, so "erased" is a byte-compare
-rather than a claim. The script does **not** reset or boot the board; when it
-exits 0, cold power-cycle by hand and re-run the §2 listener. The ATOC band
-was not touched, so the banner must still show your image booting — **not**
-`No ATOC`.
+is a sector-padded `loadbin` of a zero-filled file through the part-number
+device profile (`AE822FA0E5597LS0_M55_HE`) — the same mechanism Flow D uses
+to write MRAM. The zero file is also what the fresh-session read-back proof
+compares against, so "erased" is a byte-compare rather than a claim. The
+script does **not** reset or boot the board; when it exits 0, cold
+power-cycle by hand and re-run the §2 listener. The ATOC band was not
+touched, so the banner must still show your image booting — **not**
+`No ATOC`. Every pre-write sector read is also kept under
+`$BENCH_ROOT/flowd-backup/<timestamp>-erase-storage/`, printed at run time —
+the only restore source on a board with no SE-UART.
 
 If you would rather stay on the SETOOLS/SE-UART path (Flow A) instead of SWD,
 the equivalent is `app-write-mram -c <your-serial-device> -e "<base> <size>"`;
@@ -391,7 +418,10 @@ with `tools-config` (§3) first.
 
 **`[BENCH-VERIFIED 2026-08-30]`** — first real run of `erase-storage.sh` on a
 module (off-labgrid E1M-AEN801, `AE822FA0E5597LS0`, J-Link `000821005680`).
-Both things a first run owed are below.
+Both things a first run owed are below. **This transcript predates the
+alp-sdk#2233 fix** (2026-09-19) and still shows the old `verifybin` line the
+script no longer gates on, and no ATOC-trailer check — kept verbatim as the
+historical record of that run, not as a description of the current gate.
 
 The erase itself, with the byte-compare that makes "erased" a measurement
 rather than a claim:

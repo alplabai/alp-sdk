@@ -35,8 +35,8 @@ from alp_orchestrate.paths import METADATA_ROOT as _MR  # noqa: E402
 
 def _emit(sku: str, soc: str, core: str) -> list[str]:
     """Emit the inference Kconfig lines for one SKU/core using real metadata."""
-    soc_spec = json.loads((_MR / "socs" / "alif" / "ensemble" / f"{soc}.json").read_text())
-    som = yaml.safe_load((_MR / "e1m_modules" / f"{sku}.yaml").read_text())
+    soc_spec = json.loads((_MR / "socs" / "alif" / "ensemble" / f"{soc}.json").read_text(encoding="utf-8"))
+    som = yaml.safe_load((_MR / "e1m_modules" / f"{sku}.yaml").read_text(encoding="utf-8"))
     proj = types.SimpleNamespace(soc_spec=soc_spec, som_preset=som, sku=sku,
                                  effective_metadata_root=lambda: _MR)
     slice_ = Slice(core_id=core, os="zephyr", inference={"default_arena_kib": 256})
@@ -68,13 +68,14 @@ def test_other_u55_only_alif_soms_split_by_core(sku, soc):
     assert _ethos_config(_emit(sku, soc, "m55_hp")) == "CONFIG_ETHOS_U55_256=y"
 
 
-# --- U85 silicon: most-capable variant, U85 is not core-paired (shared HG) --
+# --- U85 silicon: most-capable variant, U85 is not core-paired (shared NPU_HG) --
 
 @pytest.mark.parametrize("core", ["m55_he", "m55_hp"])
 def test_aen801_picks_u85_regardless_of_core(core):
-    # The E8 U85 lives on the shared HG subsystem (no paired_core), so both
-    # M55 slices resolve to the flagship U85 -- the per-core path falls back
-    # to the most-capable variant, unchanged from the pre-#909 behaviour.
+    # The E8 U85 is a shared, SoC-level NPU (Alif block name NPU_HG, no
+    # paired_core), so both M55 slices resolve to the flagship U85 -- the
+    # per-core path falls back to the most-capable variant, unchanged from
+    # the pre-#909 behaviour.
     assert _ethos_config(_emit("E1M-AEN801", "e8", core)) == "CONFIG_ETHOS_U85_256=y"
 
 
@@ -84,7 +85,7 @@ def test_multi_mac_variant_without_paired_core_raises():
     # Synthetic SoC: two U55s of different MAC arrays, NEITHER declaring
     # paired_core -- the emit must refuse to guess (silent max() was the #909
     # bug), not fall back to 256.
-    som = yaml.safe_load((_MR / "e1m_modules" / "E1M-AEN301.yaml").read_text())
+    som = yaml.safe_load((_MR / "e1m_modules" / "E1M-AEN301.yaml").read_text(encoding="utf-8"))
     soc_spec = {
         "cores": [{"id": "m55_he", "type": "cortex-m55"}, {"id": "m55_hp", "type": "cortex-m55"}],
         "npus": [

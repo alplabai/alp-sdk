@@ -447,8 +447,8 @@ _SHIPPED_HIL_DIR = REPO / "tests" / "hil"
 _SHIPPED_BOARDS = (
     "aen301-evk", "aen401-evk", "aen501-evk", "aen601-evk",
     "aen701-evk", "aen801-evk",
-    "v2n101-x-evk", "v2n102-x-evk",
-    "v2m101-x-evk", "v2m102-x-evk",
+    "v2n101-x-evk", "v2n102-x-evk", "v2n103-x-evk",
+    "v2m101-x-evk", "v2m102-x-evk", "v2m103-x-evk",
     "nx9101-evk",
 )
 

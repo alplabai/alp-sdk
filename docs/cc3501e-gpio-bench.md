@@ -32,7 +32,7 @@ The current E1M-AEN board rev wires **no HOST_IRQ line**, so the asynchronous GP
 interrupt path (`CMD_GPIO_SET_INTERRUPT` → `EVT_GPIO_INTERRUPT`, an async push from
 the coprocessor to the host) **cannot be delivered to the host**. Async GPIO-IRQ is
 therefore future HOST_IRQ work. Command/reply traffic still uses the current
-hardware-SS0 + READY bridge.
+hardware-SS0 bridge (READY optional, unwired by default).
 
 The example still *arms* an IRQ (the `gpio_irq_arm` step) to prove the configure
 command round-trips and is accepted, but it does **not** assert an edge or wait for

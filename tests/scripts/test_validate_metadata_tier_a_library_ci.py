@@ -47,11 +47,11 @@ def test_non_object_topology_does_not_crash_the_gate(tmp_path, monkeypatch):
         "hostBuild": {"libraries": [], "excludedLibraries": {}},
         "familyMatrix": [{"family": "aen", "som": "E1M-TST001", "core": "m33_sm"}],
         "excludedFamilies": {},
-    }))
+    }), encoding="utf-8")
     monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
 
     som = tmp_path / "E1M-TST001.yaml"
-    som.write_text("sku: E1M-TST001\nfamily: aen\ntopology: m33_sm\n")
+    som.write_text("sku: E1M-TST001\nfamily: aen\ntopology: m33_sm\n", encoding="utf-8")
 
     failures = vm._check_tier_a_library_ci([], [som])  # must not raise
     assert failures
@@ -69,13 +69,14 @@ def test_object_topology_with_matching_core_passes(tmp_path, monkeypatch):
         "hostBuild": {"libraries": [], "excludedLibraries": {}},
         "familyMatrix": [{"family": "aen", "som": "E1M-TST001", "core": "m33_sm"}],
         "excludedFamilies": {},
-    }))
+    }), encoding="utf-8")
     monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
 
     som = tmp_path / "E1M-TST001.yaml"
     som.write_text(
         "sku: E1M-TST001\nfamily: aen\n"
-        "topology:\n  m33_sm:\n    board: alp_e1m_tst001_m33_sm\n"
+        "topology:\n  m33_sm:\n    board: alp_e1m_tst001_m33_sm\n",
+        encoding="utf-8",
     )
 
     failures = vm._check_tier_a_library_ci([], [som])
@@ -91,7 +92,7 @@ def test_excluded_libraries_as_a_list_does_not_crash_the_gate(tmp_path, monkeypa
     explain the real problem."""
     vm = _load_vm(tmp_path, monkeypatch, "vm_tier_a_excluded_libs_list")
     registry = tmp_path / "tier-a-library-ci.json"
-    registry.write_text(json.dumps({"hostBuild": {"excludedLibraries": ["foo"]}}))
+    registry.write_text(json.dumps({"hostBuild": {"excludedLibraries": ["foo"]}}), encoding="utf-8")
     monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
     # `_as_dict()` normalises the malformed (list, not object) container to
     # `{}` -- same as a non-dict `capabilities:`/`hostBuild:` elsewhere in
@@ -110,7 +111,7 @@ def test_excluded_families_as_a_list_does_not_crash_the_gate(tmp_path, monkeypat
     real problem."""
     vm = _load_vm(tmp_path, monkeypatch, "vm_tier_a_excluded_families_list")
     registry = tmp_path / "tier-a-library-ci.json"
-    registry.write_text(json.dumps({"excludedFamilies": ["foo"]}))
+    registry.write_text(json.dumps({"excludedFamilies": ["foo"]}), encoding="utf-8")
     monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
     failures = vm._check_tier_a_library_ci([], [])  # must not raise
     assert failures == []  # a list `excludedFamilies` iterates to nothing meaningful to check
@@ -125,7 +126,7 @@ def test_non_object_top_level_does_not_crash_the_gate(tmp_path, monkeypatch):
     real problem."""
     vm = _load_vm(tmp_path, monkeypatch, "vm_tier_a_non_object_top")
     registry = tmp_path / "tier-a-library-ci.json"
-    registry.write_text(json.dumps([]))
+    registry.write_text(json.dumps([]), encoding="utf-8")
     monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
     failures = vm._check_tier_a_library_ci([], [])  # must not raise
     assert failures
@@ -148,7 +149,7 @@ def test_non_list_family_matrix_and_non_list_host_libraries_do_not_crash_the_gat
         "hostBuild": {"libraries": 5, "excludedLibraries": {}},
         "familyMatrix": 5,
         "excludedFamilies": {},
-    }))
+    }), encoding="utf-8")
     monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
     vm._check_tier_a_library_ci([], [])  # must not raise
 
@@ -164,7 +165,7 @@ def test_non_string_host_library_entry_does_not_crash_the_gate(tmp_path, monkeyp
         "hostBuild": {"libraries": [{"nested": "dict"}], "excludedLibraries": {}},
         "familyMatrix": [],
         "excludedFamilies": {},
-    }))
+    }), encoding="utf-8")
     monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
     failures = vm._check_tier_a_library_ci([], [])  # must not raise
     assert isinstance(failures, list)
@@ -180,7 +181,7 @@ def test_non_string_family_matrix_som_does_not_crash_the_gate(tmp_path, monkeypa
         "hostBuild": {"libraries": [], "excludedLibraries": {}},
         "familyMatrix": [{"family": "aen", "som": {"nested": "dict"}, "core": "m33_sm"}],
         "excludedFamilies": {},
-    }))
+    }), encoding="utf-8")
     monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
     failures = vm._check_tier_a_library_ci([], [])  # must not raise
     assert isinstance(failures, list)
@@ -197,12 +198,13 @@ def test_non_string_family_matrix_core_does_not_crash_the_gate(tmp_path, monkeyp
         "hostBuild": {"libraries": [], "excludedLibraries": {}},
         "familyMatrix": [{"family": "aen", "som": "E1M-TST001", "core": {"nested": "dict"}}],
         "excludedFamilies": {},
-    }))
+    }), encoding="utf-8")
     monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
     som = tmp_path / "E1M-TST001.yaml"
     som.write_text(
         "sku: E1M-TST001\nfamily: aen\n"
-        "topology:\n  m33_sm:\n    board: alp_e1m_tst001_m33_sm\n"
+        "topology:\n  m33_sm:\n    board: alp_e1m_tst001_m33_sm\n",
+        encoding="utf-8",
     )
     failures = vm._check_tier_a_library_ci([], [som])  # must not raise
     assert isinstance(failures, list)
@@ -221,7 +223,7 @@ def test_non_string_topology_keys_do_not_crash_the_gate(tmp_path, monkeypatch):
         "hostBuild": {"libraries": [], "excludedLibraries": {}},
         "familyMatrix": [{"family": "aen", "som": "E1M-TST001", "core": "m33_sm"}],
         "excludedFamilies": {},
-    }))
+    }), encoding="utf-8")
     monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
     som = tmp_path / "E1M-TST001.yaml"
     # `99:` is a YAML integer key, sitting alongside the string key
@@ -230,7 +232,8 @@ def test_non_string_topology_keys_do_not_crash_the_gate(tmp_path, monkeypatch):
     # set is exercised.
     som.write_text(
         "sku: E1M-TST001\nfamily: aen\n"
-        "topology:\n  a55_cluster:\n    board: x\n  99:\n    board: y\n"
+        "topology:\n  a55_cluster:\n    board: x\n  99:\n    board: y\n",
+        encoding="utf-8",
     )
     failures = vm._check_tier_a_library_ci([], [som])  # must not raise
     assert failures
@@ -249,12 +252,13 @@ def test_all_non_string_topology_keys_do_not_crash_the_gate(tmp_path, monkeypatc
         "hostBuild": {"libraries": [], "excludedLibraries": {}},
         "familyMatrix": [{"family": "aen", "som": "E1M-TST001", "core": "m33_sm"}],
         "excludedFamilies": {},
-    }))
+    }), encoding="utf-8")
     monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
     som = tmp_path / "E1M-TST001.yaml"
     som.write_text(
         "sku: E1M-TST001\nfamily: aen\n"
-        "topology:\n  99:\n    board: y\n"
+        "topology:\n  99:\n    board: y\n",
+        encoding="utf-8",
     )
     failures = vm._check_tier_a_library_ci([], [som])  # must not raise
     assert failures
@@ -273,7 +277,7 @@ def test_null_som_reports_diagnostic_not_silently_dropped(tmp_path, monkeypatch)
         "hostBuild": {"libraries": [], "excludedLibraries": {}},
         "familyMatrix": [{"family": "aen", "som": None, "core": "m33_sm"}],
         "excludedFamilies": {},
-    }))
+    }), encoding="utf-8")
     monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
     failures = vm._check_tier_a_library_ci([], [])  # must not raise
     assert failures
@@ -290,12 +294,13 @@ def test_null_core_reports_diagnostic_not_silently_dropped(tmp_path, monkeypatch
         "hostBuild": {"libraries": [], "excludedLibraries": {}},
         "familyMatrix": [{"family": "aen", "som": "E1M-TST001", "core": None}],
         "excludedFamilies": {},
-    }))
+    }), encoding="utf-8")
     monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
     som = tmp_path / "E1M-TST001.yaml"
     som.write_text(
         "sku: E1M-TST001\nfamily: aen\n"
-        "topology:\n  m33_sm:\n    board: x\n"
+        "topology:\n  m33_sm:\n    board: x\n",
+        encoding="utf-8",
     )
     failures = vm._check_tier_a_library_ci([], [som])  # must not raise
     assert failures

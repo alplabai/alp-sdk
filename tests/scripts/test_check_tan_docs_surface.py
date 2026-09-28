@@ -245,11 +245,11 @@ def test_install_tan_stub_takes_the_windows_branch_when_forced(tmp_path, monkeyp
 
 
 def _run(repo_root: Path, tan_bin_dir: Path, **kw):
-    env = dict(os.environ)
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     env["PATH"] = f"{tan_bin_dir}{os.pathsep}{env.get('PATH', '')}"
     return subprocess.run(
         [sys.executable, str(SCRIPT), "--repo-root", str(repo_root)],
-        capture_output=True, text=True, env=env, **kw,
+        capture_output=True, text=True, encoding="utf-8", env=env, **kw,
     )
 
 
@@ -361,6 +361,41 @@ def test_rich_table_help_is_decoded_as_utf8_under_a_non_utf8_locale(tmp_path):
     assert proc.returncode == 0, combined
 
 
+def test_tan_child_is_told_to_write_utf8(tmp_path):
+    """Decoding `tan`'s output as UTF-8 is only half the fix: a Python `tan`
+    writes its locale unless PYTHONIOENCODING says otherwise (#2197).
+
+    This stub prints the Rich box-drawing table through its default stdout,
+    with no `reconfigure()`. The gate inherits PYTHONIOENCODING=cp1252, which
+    cannot encode those characters, so the stub crashes -- unless the gate
+    overrides the child's PYTHONIOENCODING with utf-8."""
+    reconfigure = ('sys.stdout.reconfigure(encoding="utf-8")\n'
+                   'sys.stderr.reconfigure(encoding="utf-8")\n')
+    assert reconfigure in _RICH_HELP_STUB
+    doc_root = tmp_path / "repo"
+    _write_docroot(doc_root)
+    bin_dir = tmp_path / "bin"
+    _install_tan_stub(
+        bin_dir,
+        _RICH_HELP_STUB.replace(reconfigure, "").replace(
+            "__TABLE__", repr({v: sorted(f) for v, f in _ALL_RECOGNIZED.items()})
+        ),
+    )
+
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+    env["PYTHONIOENCODING"] = "cp1252"
+    proc = subprocess.run(
+        [sys.executable, str(SCRIPT), "--repo-root", str(doc_root)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", env=env,
+    )
+
+    combined = proc.stdout + proc.stderr
+    assert "is not listed in" not in combined, combined
+    assert "is not a recognised flag" not in combined, combined
+    assert proc.returncode == 0, combined
+
+
 def test_removed_subcommand_fails(tmp_path):
     """The real-world case: a subcommand documented in prose/tables no
     longer exists in `tan` (e.g. `emit` renamed to `generate`)."""
@@ -398,11 +433,11 @@ def test_tan_not_on_path_fails_loudly_never_skips(tmp_path):
     empty_bin = tmp_path / "empty-bin"
     empty_bin.mkdir()
 
-    env = dict(os.environ)
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     env["PATH"] = str(empty_bin)  # deliberately excludes any real `tan` already on this host
     proc = subprocess.run(
         [sys.executable, str(SCRIPT), "--repo-root", str(doc_root)],
-        capture_output=True, text=True, env=env,
+        capture_output=True, text=True, encoding="utf-8", env=env,
     )
     assert proc.returncode != 0
     assert "not on PATH" in proc.stderr

@@ -1,14 +1,24 @@
 # v2n-secure-element-sign
 
 Probe the OPTIGA Trust M on V2N's BRD_I2C and confirm the current
-probe-only driver contract.  The driver reads I2C_STATE to prove the
+probe-only driver contract, from a Linux/Yocto user-space app on the
+V2N Cortex-A55 cluster.  The driver reads I2C_STATE to prove the
 part is reachable; product-info and raw-APDU helpers return
 `ALP_ERR_NOSUPPORT` until the Infineon host-library transport is
 integrated.
 
+> RIIC8/BRD_I2C is Cortex-A55/Linux-exclusive
+> (`metadata/e1m_modules/v2n/core-ownership.yaml`) -- the CM33 must
+> never master it. This app runs on the A55, following the same
+> pattern as [`v2n-power-monitor`](../v2n-power-monitor/) (portable
+> `<alp/i2c.h>` + a natural-name chip driver, Linux `/dev/i2c-N`
+> backend).
+
 ## What it shows
 
-1. Opening BRD_I2C at 400 kHz and initialising
+1. Opening BRD_I2C (`bus_id = 8`, Linux `/dev/i2c-8`; meta-alp-sdk's
+   `e1m-v2n-som.dtsi` aliases `i2c8 = &i2c8;`) at 400 kHz and
+   initialising
    [`optiga_trust_m_t`](../../../include/alp/chips/optiga_trust_m.h).
    `optiga_trust_m_init` performs an I2C_STATE register read only;
    failing this means the chip is not on the bus or is not strapped to

@@ -31,8 +31,9 @@
  *   - **DEEPX DX-M1**: real A55/Yocto-side backend
  *     (`src/yocto/inference_deepx.cpp`) against the real
  *     `dxrt::InferenceEngine` runtime.  Gated
- *     `ALP_SDK_USE_DEEPX_DXM1` (default OFF); BENCH-UNVERIFIED
- *     (issue #59).
+ *     `ALP_SDK_USE_DEEPX_DXM1` (default OFF).  Verified on DX-M1
+ *     silicon, outputs matching an ONNX Runtime CPU reference
+ *     (issue #1262).
  *   - **sw_fallback** (priority 0): every call returns
  *     ALP_ERR_NOSUPPORT; wins only when no other backend links for
  *     the active silicon.

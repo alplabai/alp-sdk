@@ -50,10 +50,12 @@ cores:
 
 # Cross-core RPMsg carve-out.  The orchestrator allocates from
 # E1M-AEN801's `memory_map:` (added by #1069) -- the only region
-# accessible from all three cores is `mram_main`, and it deliberately
-# keeps `base: TBD` (see the field's own comment in
-# metadata/e1m_modules/E1M-AEN801.yaml) so this carve-out still lands
-# `status: blocked` rather than resolving into a coarse whole-MRAM
+# accessible from all three cores is `mram_main`, and it resolves
+# `status: blocked` because its extent equals the SoC's declared App
+# MRAM aperture exactly (the whole-device alias; `base` resolved to
+# 0x80000000 in #2053) and it is therefore flash-class -- not safe as
+# an IPC carve-out target -- rather than because its `base` is
+# unresolved.  This keeps the carve-out out of a coarse whole-MRAM
 # address that could overlap the real mcuboot/slot0/reserved/storage
 # regions.  spec §6.8 flips to cacheable: true on AEN by default because
 # the M55 cache is on -- but <alp/rpc.h> has no cache-maintenance layer

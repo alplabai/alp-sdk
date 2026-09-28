@@ -198,6 +198,41 @@ def test_minimal_has_no_declared_parameters_so_it_is_a_pure_copy():
     assert _minimal_record()["parameters"] == []
 
 
+def test_minimum_on_a_string_parameter_raises_curated_error_not_typeerror():
+    # #1916: this record validates clean against
+    # metadata/schemas/template-catalog-v1.schema.json, but used to crash
+    # with a bare `TypeError: '<' not supported between instances of
+    # 'str' and 'int'`. It must now raise the curated ParameterError.
+    spec = {"name": "knob", "type": "string", "description": "x",
+            "default": "a", "constraints": {"minimum": 5}}
+    with pytest.raises(alp_template.ParameterError, match=r"only applies to type 'integer'"):
+        alp_template._check_constraints("minimal", spec, "a")
+
+
+def test_maximum_on_an_enum_parameter_raises_curated_error():
+    spec = {"name": "knob", "type": "enum", "description": "x",
+            "default": "a", "constraints": {"maximum": 5}}
+    with pytest.raises(alp_template.ParameterError, match=r"only applies to type 'integer'"):
+        alp_template._check_constraints("minimal", spec, "a")
+
+
+def test_minimum_on_a_boolean_parameter_raises_curated_error():
+    # bool < int never raises (no crash), but the bound is still
+    # meaningless for a boolean -- refuse it too.
+    spec = {"name": "knob", "type": "boolean", "description": "x",
+            "default": False, "constraints": {"minimum": 5}}
+    with pytest.raises(alp_template.ParameterError, match=r"only applies to type 'integer'"):
+        alp_template._check_constraints("minimal", spec, False)
+
+
+def test_minimum_on_an_integer_parameter_still_enforces_the_bound():
+    spec = {"name": "knob", "type": "integer", "description": "x",
+            "default": 10, "constraints": {"minimum": 5}}
+    alp_template._check_constraints("minimal", spec, 10)  # no raise
+    with pytest.raises(alp_template.ParameterError, match=r"< minimum"):
+        alp_template._check_constraints("minimal", spec, 1)
+
+
 # --------------------------------------------------------------------------
 # find_template_by_cores() -- the --cores scaffold selector (issue #1652)
 # --------------------------------------------------------------------------
@@ -827,28 +862,33 @@ def test_scaffold_readme_cold_chain_models_link_survives_scaffolding():
         readme, "No model is shipped", "[`models/README.md`](")
 
 
-def test_scaffold_readme_mqtt_native_sim_conf_link_survives_scaffolding():
-    """Issue #1794: mqtt-telemetry's README deliberately links
-    `../mqtt-telemetry/native_sim.conf` -- climbing out of the example
-    dir and back in -- because `_RELATIVE_LINK_RE` only matches
-    `../`-prefixed links and `native_sim.conf` is a CHILD of the example
-    dir, not a sibling. A future edit that "tidies" the link to the more
-    natural `](native_sim.conf)` would stop matching the rewriter
-    entirely and ship a dangling relative link in every scaffold; assert
-    on the EMITTED output, not the source text, so this catches that.
+def test_scaffold_readme_mqtt_own_dir_link_survives_scaffolding():
+    """Issue #1794: mqtt-telemetry's README deliberately links a file in
+    its OWN directory as `../mqtt-telemetry/<file>` -- climbing out of the
+    example dir and back in -- because `_RELATIVE_LINK_RE` only matches
+    `../`-prefixed links and a child of the example dir is not a sibling.
+    A future edit that "tidies" the link to the more natural
+    `](<file>)` would stop matching the rewriter entirely and ship a
+    dangling relative link in every scaffold; assert on the EMITTED
+    output, not the source text, so this catches that.
 
     Also pins issue #1798's rendering regression: a URL substring alone
     survives even when an explanatory HTML comment sitting at column 0
-    silently splits the "turns mbedtls off (see [link])" sentence into
-    two paragraphs, so also assert the lead-in and the link render in
-    the SAME CommonMark block."""
+    silently splits the "... (see [link])" sentence into two paragraphs,
+    so also assert the lead-in and the link render in the SAME CommonMark
+    block.
+
+    The fixture used to be `native_sim.conf`, which existed only to force
+    `CONFIG_MBEDTLS=n`; that break is fixed at its root and the file is
+    deleted (#2173), so this pins the same two behaviours on `prj.conf` --
+    a child of the example dir that is not going anywhere."""
     envelope = dict(alp_template.render_to_envelope("iot", "E1M-AEN801"))
     readme = envelope["README.md"]
     ref = alp_template._docs_ref(alp_template.REPO)
     assert (f"https://github.com/alplabai/alp-sdk/blob/{ref}"
-            "/examples/connectivity/mqtt-telemetry/native_sim.conf") in readme
+            "/examples/connectivity/mqtt-telemetry/prj.conf") in readme
     assert _no_paragraph_break_between(
-        readme, "turns mbedtls off (see", "[`native_sim.conf`](")
+        readme, "carries no mbedTLS", "[`prj.conf`](")
 
 
 def test_scaffold_readme_extra_zephyr_modules_uses_alp_sdk_root_not_pwd():
@@ -1336,13 +1376,13 @@ def test_derive_pin_doc_renames_copies_the_target_boards_own_doc():
     actively wrong once the physical pad has changed."""
     pins = [{
         "e1m": "E1M_GPIO_IO4", "macro": "EVK_PIN_ENCODER_SW",
-        "doc": "Rotary encoder push switch (PEC12R-4222F-S0024), "
+        "doc": "Rotary encoder push switch (PEC11R-4215K-S0024), "
                "10k pull-up + 0.1uF debounce",
     }]
     renames = alp_template._derive_pin_doc_renames(
         pins, "E1M-V2N101", "e1m-evk", alp_template.METADATA_ROOT)
     assert renames == {
-        "Rotary encoder push switch (PEC12R-4222F-S0024), 10k pull-up + "
+        "Rotary encoder push switch (PEC11R-4215K-S0024), 10k pull-up + "
         "0.1uF debounce":
             "Rotary encoder (PEC12R-4222F) push switch; pull-up + "
             "RC debounce.",
@@ -1559,7 +1599,7 @@ def test_render_to_envelope_peripheral_v2n101_has_no_stale_e1m_evk_pad_mentions(
     for old_macro in ("EVK_PIN_ENCODER_SW", "EVK_PIN_LED_RED"):
         assert not re.search(rf"\b{old_macro}\b", envelope["board.yaml"]), \
             (old_macro, envelope["board.yaml"])
-    assert "PEC12R-4222F-S0024" not in envelope["board.yaml"]  # stale e1m-evk doc
+    assert "PEC11R-4215K-S0024" not in envelope["board.yaml"]  # stale e1m-evk doc
 
 
 # --------------------------------------------------------------------------
@@ -1689,7 +1729,8 @@ def test_render_to_envelope_every_template_sku_combo(template_id, sku, tmp_path)
             [sys.executable, str(REPO / "scripts" / "alp_project.py"),
              "--input", str(board_yaml_path),
              "--emit", "zephyr-conf", "--core", core_id],
-            capture_output=True, text=True, cwd=REPO, check=False)
+            capture_output=True, text=True, encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=REPO, check=False)
         assert proc.returncode == 0, (template_id, sku, core_id, proc.stderr)
         assert "unknown core id" not in proc.stderr
 

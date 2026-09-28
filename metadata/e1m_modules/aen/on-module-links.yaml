@@ -1,0 +1,295 @@
+# On-module (non-edge) SoC pad wiring for the E1M-AEN family (Alp Lab
+# hand-authored source -- not vendor pinout data and not generated).
+#
+# WHY THIS FILE EXISTS.  metadata/pinmux/aen.yaml is a generated
+# projection of from-alif.tsv + from-cc3501e.tsv, and both of those are
+# E1M EDGE pad tables: they answer "which SoC pad backs E1M pin X".  The
+# pads below back nothing on the edge connector -- they run between the
+# Alif SoC and chips soldered on the module itself -- so they have no row
+# there and never will.  This file is their authority, in the same role
+# metadata/e1m_modules/v2n/supervisor-links.yaml plays for the RZ/V2N
+# family's on-module GD32G553 supervisor links.
+#
+# It carries the pad <-> signal facts AND the DT-node-shape facts the
+# pad tables do not model: dt_label, pinctrl group label, portable
+# alp-i2cN alias, the on-bus device nodes (compatible + 7-bit address +
+# binding properties), and the RTC alarm's GPIO controller/pin/IRQ.
+#
+# EXCEPTION: `e1m_i2c0` (SoC I2C2, below).  Unlike brd_i2c/rtc_alarm its
+# pads (P5_6/P5_7) DO have a row in metadata/pinmux/aen.yaml -- I2C2
+# also rides the E1M edge connector as ALP_E1M_I2C0/EVK_I2C_BUS_SENSORS,
+# carrying the EVK carrier's sensor/IO-expander/INA236 parts.  It still
+# belongs here because the SoM's own 24C128 manifest EEPROM (see
+# metadata/e1m_modules/E1M-AEN801.yaml on_module.i2c_devices.e1m_i2c0)
+# is bridge/DNP-selected onto this SAME physical bus, and the board
+# layer -- not a per-app overlay -- is the right place to enable the
+# controller + pinctrl for an on-module chip present on every board
+# built from this SoM (docs/bring-up-aen.md §5.1: "Two separate buses").
+#
+# SECOND EXCEPTION: `backlight` (below).  A31/B31 DO have E1M edge-
+# connector identity (metadata/e1m/pinout-v1.json silkscreen names
+# BL_LED_A / BL_LED_K) but, unlike e1m_i2c0, deliberately carry NO row in
+# metadata/pinmux/aen.yaml: neither pad is backed by any SoC silicon pad.
+# Both are the on-module backlight driver's own LED output/feedback pins
+# -- a boost-converter output well above logic level -- reaching the edge
+# connector straight from the driver, bypassing the SoC entirely.  Only
+# the driver's ENABLE input is a real SoC pad (P5_5), and it is
+# SoM-internal like brd_i2c/rtc_alarm above: no edge route of its own.
+# Previously A31 was wrongly listed as an Alif-owned pad at P5_5 in
+# from-alif.tsv / pinmux/aen.yaml; corrected in alp-sdk#2203.
+#
+# scripts/gen_zephyr_board.py's `_aen_pinctrl_dtsi()` / `_aen_dts()`
+# emitters read this file to produce the AEN `<board>-pinctrl.dtsi` and
+# `<board>.dts`; every pad, macro, address and alias in those generated
+# files comes from here.  Edit here, then regenerate (see
+# docs/porting-new-som.md, "Regenerating a board").
+#
+# Every entry carries an `evidence:` string citing a NON-DERIVATIVE
+# source -- the E1M-AEN-2626-R2 netlist, the AE822 DFP pin table, or a
+# dated bench measurement -- never a generated file.
+schemaVersion: on-module-links-v1
+families:
+  - aen
+
+on_module_links:
+  # BRD_I2C -- the on-module housekeeping bus.  SoC I2C0 in its function-C
+  # muxing, NOT the slave-only LPI2C0 it was believed to be before #1848.
+  brd_i2c:
+    peripheral: "I2C0"
+    dt_label: i2c0
+    pinctrl_group_label: pinctrl_i2c0
+    status: enabled
+    # Portable bus index 2: 0 and 1 are the E1M EDGE buses (ALP_E1M_I2C0 /
+    # ALP_E1M_I2C1).  BRD_I2C has no E1M route of its own, so it takes the
+    # next free portable index rather than one an edge bus already claims
+    # (#1848; docs/bring-up-aen.md).
+    alias: alp-i2c2
+    # 100 kHz standard mode.  This net has no external pull-up anywhere
+    # (see the pins' evidence), so it relies on the pad's own internal
+    # pull-up + push-pull drive; no fast-mode rise-time margin exists.
+    clock_frequency_macro: I2C_BITRATE_STANDARD
+    pins:
+      - silicon_peripheral: "I2C0_SDA_C"
+        silicon_pad: "P7_0"
+        net: "BRD_I2C_SDA"
+        evidence: >-
+          E1M-AEN-2626-R2 netlist pinmap CSV row
+          "BRD_I2C_SDA",U6,B8,"P7_0/SCP0_A"; AE822 DFP pin table
+          (AE822FA0E5597LS0_M55_HE/RTE/BSP pins.h) gives P7_0 alt-fn [4] =
+          I2C0_SDA_C.  Bench-proven 2026-09-05 on E1M-AEN801 2626-R2
+          (Flow A, cold-cycle proven): every non-response is a clean
+          rc=-5 (-EIO) NACK, zero -ETIMEDOUT, zero "User Abort".
+      - silicon_peripheral: "I2C0_SCL_C"
+        silicon_pad: "P7_1"
+        net: "BRD_I2C_SCL"
+        evidence: >-
+          E1M-AEN-2626-R2 netlist pinmap CSV row
+          "BRD_I2C_SCL",U6,B3,"P7_1/SCP1_A"; AE822 DFP pin table gives
+          P7_1 alt-fn [4] = I2C0_SCL_C.  Alif's own DFP sets
+          PADCTRL_READ_ENABLE on BOTH P7_0 and P7_1 -- with input-enable
+          on SDA only the controller NACKs every address for a reason
+          that looks electrical (cost one bench run, 2026-09-05).
+    devices:
+      # U21 -- Micro Crystal RV-3028-C7 32.768KHZ 1PPM-TA-QA.
+      - chip: rv3028c7
+        node_label: rv3028
+        node_name: "rtc@52"
+        compatible: "microcrystal,rv3028"
+        address_7bit: 0x52
+        alias: rtc
+        int_gpio_link: rtc_alarm
+        properties:
+          # REQUIRED by dts/bindings/rtc/microcrystal,rv3028.yaml, and
+          # "disabled" is the only correct value on this module: VBACKUP
+          # (U21 pin 6) has NO supply fitted -- its only other net members
+          # are R4 and R68, both 0-ohm DNP=1.  No backup cell means no
+          # switchover to select and (see below) no trickle source.
+          backup-switch-mode: "disabled"
+        # trickle-resistor-ohms is deliberately ABSENT: charging into an
+        # unpopulated VBACKUP would be wrong.
+        # clkout-frequency is deliberately ABSENT: RTC_CLKOUT (U21 pin 1)
+        # goes ONLY to the E1M edge connector (E1 pin AH16) and never
+        # reaches the SoC, so firmware cannot consume it.  Omitting it
+        # leaves the pin LOW; it is a CARRIER-facing choice.
+        evidence: >-
+          E1M-AEN-2626-R2 components CSV: U21 = RV-3028-C7, DNP=0 fitted.
+          Bench 2026-09-05: ACKs at 0x52, ID register 0x28 reads 0x44, and
+          the seconds register advanced 0x01 -> 0x02, so the oscillator is
+          RUNNING.  CAVEAT for docs and examples: with no VBACKUP cell the
+          RTC does NOT retain time or a pending alarm across a power cycle
+          on this batch.
+      # U20 -- TI TMP112DIDPWR, ADD0 tied to 0V.
+      - chip: tmp112
+        node_label: tmp112
+        node_name: "tmp112@40"
+        compatible: "ti,tmp112"
+        address_7bit: 0x40
+        # alp-prefixed to join the existing portable-alias namespace
+        # (alp-i2c2 above, alp-lprtc-counter) -- <alp/temperature.h>'s
+        # Zephyr backend resolves DT_ALIAS(alp_temp0) (alp-sdk#2066).
+        alias: alp-temp0
+        evidence: >-
+          E1M-AEN-2626-R2 components CSV: U20 = TMP112DIDPWR, DNP=0 fitted,
+          ADD0 tied to 0V.  Per TI SBOS473L p.44 (package option addendum),
+          the exact orderable MPN TMP112DIDPWR is X2SON (DPW), 5 pins -- no
+          SOT563-6 orderable carries that MPN (the SOT563-6 parts are
+          TMP112AIDRLR / TMP112BIDRLR / TMP112NAIDRLR).  Per TI SBOS473L Table
+          7-4, the X2SON-5 "Address Variant Only" TMP112D row straps ADD0->GND
+          = 0x40 (->V+ = 0x41, ->SDA = 0x42, ->SCL = 0x43); the SOT563-6
+          "Address + Alert Variant" row (ADD0->GND = 0x48) does not apply to
+          this MPN.  So 0x40 is the DESIGN address for the part this board
+          specifies, and the bench observation matches that design rather than
+          being an anomaly to explain away: two bench units answered at 0x40
+          instead of 0x48 (28.062 degC, 2026-09-05; 27.687 degC, 2026-09-07,
+          serial 2026W36-0002), each confirming a three-of-three TMP112
+          register fingerprint (CONFIG=0x60a0, T_LOW=0x4b00, T_HIGH=0x5000,
+          the datasheet power-on defaults).  Design and silicon agree, so this
+          entry and the devicetree node it emits now both carry 0x40; the
+          earlier 0x48 was simply wrong, which is also why the stock
+          CONFIG_TMP112 driver never bound -- the node put it at an address
+          nothing answers.  Recorded under alp-sdk#1978.
+      # IC1 (OPTIGA Trust M, SLS32AIA010MLUSON10XTMA2, @0x30) is DNP=1 --
+      # NOT fitted on this batch, so it gets no node.  It must not ACK; its
+      # silence is a negative control, not a fault.
+
+  # e1m_i2c0 -- SoC I2C2 (function C), portable alp-i2c0 (E1M edge bus 0:
+  # ALP_E1M_I2C0 / EVK_I2C_BUS_SENSORS / BOARD_I2C_SENSORS).  Carries the
+  # SoM's own 24C128 manifest EEPROM (metadata/e1m_modules/E1M-AEN801.yaml
+  # on_module.i2c_devices.e1m_i2c0) plus, on the same physical bus once it
+  # leaves the module, the EVK carrier's sensor/IO-expander/INA236 parts --
+  # see docs/bring-up-aen.md Sec 5.1.  No device child nodes here: every
+  # part this board layer would otherwise declare is EVK-carrier silicon,
+  # not SoM-resident, except the EEPROM, which the SDK addresses by 7-bit
+  # address over the bus (no DT device node) the same way
+  # examples/aen/aen-i2c2-eeprom-regcheck and examples/aen/aen-eeprom-manifest
+  # already do.
+  #
+  # BEFORE this entry existed, `zephyr/dts/alif/ensemble_e8_peripherals.dtsi`
+  # left i2c2 `status = "disabled"` with no board-layer pinctrl_i2c2, so
+  # DT_ALIAS(alp_i2c0) resolved to nothing, src/backends/i2c/zephyr_drv.c's
+  # `_devs[0]` stayed NULL, and alp_i2c_open(.bus_id = ALP_E1M_I2C0)
+  # returned ALP_ERR_NOT_READY (-2) before touching any device --
+  # bench-observed on `examples/peripheral-io/i2c-device-hub` (alp-sdk,
+  # 2026-09-07): "[devhub] bus open failed: alp_last_error=-2".
+  e1m_i2c0:
+    peripheral: "I2C2"
+    dt_label: i2c2
+    pinctrl_group_label: pinctrl_i2c2
+    status: enabled
+    # Portable bus index 0: this is one of the two E1M EDGE buses
+    # (ALP_E1M_I2C0), unlike BRD_I2C which has no edge route and takes
+    # index 2 (see the brd_i2c entry's alias comment above).
+    alias: alp-i2c0
+    # 100 kHz standard mode, matching the bench-validated
+    # aen-i2c2-eeprom-regcheck / aen-eeprom-manifest overlays.
+    clock_frequency_macro: I2C_BITRATE_STANDARD
+    # Pad config (input-enable + bias-pull-down) is bench-validated ONLY on
+    # the part(s) keyed below -- same per-part-map pattern rtc_alarm.risk
+    # uses (#1988).  Keyed by the SoC's own `part` designator ("E8", "E3",
+    # ...), NOT by family: this file's `families: [aen]` scope covers every
+    # AEN SKU, but a bench run against one part's silicon is not evidence
+    # for another's.  Unlike rtc_alarm.risk, a part with no key here does
+    # NOT get silence in the generated comment -- gen_zephyr_board.py's
+    # `_aen_e1m_i2c0_pinctrl_group()` still cites the E8 run and states
+    # explicitly that it was not repeated on that part, because the
+    # emitted pad VALUE is unchanged and still correct for every part
+    # (#2046).  Do not add an entry without an actual bench run against
+    # that part's own silicon.
+    bench_validation:
+      E8: >-
+        bench-validated 2026-06-15 on the E8, matching Alif's own
+        reference I2C pinctrl -- see the identical, verbatim-copied group
+        in examples/aen/aen-i2c2-eeprom-regcheck's board overlay and
+        examples/aen/aen-eeprom-manifest's overlay, both of which cite
+        the same date.
+    pins:
+      - silicon_peripheral: "I2C2_SDA_C"
+        silicon_pad: "P5_7"
+        evidence: >-
+          metadata/e1m_modules/aen/from-alif.tsv row AD2 I2C0_SDA
+          I2C2_SDA_C P5_7 (projected, byte-for-byte, into
+          metadata/pinmux/aen.yaml's e1m_pad "AD2" row) gives the AE822
+          DFP alt-function assignment P5_7 = I2C2_SDA_C.  NO
+          E1M-AEN-2626-R2 netlist net name has been read for this ball
+          yet (unlike BRD_I2C_SDA/SCL above) -- do not infer one; add it
+          only from an actual netlist row.  Pad-config bench evidence is
+          this entry's own `bench_validation:` map above, not here
+          (#2046).
+      - silicon_peripheral: "I2C2_SCL_C"
+        silicon_pad: "P5_6"
+        evidence: >-
+          metadata/e1m_modules/aen/from-alif.tsv row AE2 I2C0_SCL
+          I2C2_SCL_C P5_6 (projected, byte-for-byte, into
+          metadata/pinmux/aen.yaml's e1m_pad "AE2" row) gives the AE822
+          DFP alt-function assignment P5_6 = I2C2_SCL_C.  Same
+          netlist-net-name caveat as I2C2_SDA_C above; same
+          `bench_validation:` map for the pad-config bench evidence
+          (#2046).
+
+  # RV-3028 /INT (U21 pin 2) -> net RTC_ALARM -> SoC pad P15_0_FLEX.
+  rtc_alarm:
+    net: "RTC_ALARM"
+    silicon_peripheral: "LPGPIO"
+    silicon_pad: "P15_0"
+    gpio_node: lpgpio
+    gpio_pin: 0
+    gpio_irq: 171
+    active_low: true
+    status: enabled
+    evidence: >-
+      E1M-AEN-2626-R2 netlist: U21 pin 2 (/INT) -> RTC_ALARM -> SoC pad U6
+      V2 = P15_0_FLEX, with R98 = 100k to +1V8 FITTED as the open-drain
+      pull-up; active LOW.  P15_0 is LPGPIO bit 0, so its interrupt is the
+      first of the lpgpio controller's eight, IRQ 171 (gpio@42002000,
+      interrupts = <171 3>, <172 3> ... in
+      zephyr/dts/alif/ensemble_e8_peripherals.dtsi).  Pinctrl macro
+      PIN_P15_0__LPGPIO = ALIF_PINMUX(15, 0, 0).
+    # Keyed by the SoC's own `part` designator ("E8", "E3", ...), NOT by
+    # family: this file's `families: [aen]` scope covers every AEN SKU, but
+    # each part's DFP is a SEPARATE document, so a warning evidenced against
+    # one part's DFP is not evidence for another's silicon.  A part with no
+    # key here gets no risk paragraph emitted at all (#1988) -- an absent
+    # DFP citation is not a hedge-worded restatement, it is silence.
+    risk:
+      E8: >-
+        The AE822 DFP warns for port 15: "Note that LPGPIO_CTRL_n register
+        has a different layout!".  That is the most likely bench failure on
+        this alarm path and must NOT be mistaken for an RTC fault -- if the
+        alarm never fires, suspect the port-15 control-register layout
+        before suspecting U21.
+    # MODULE_STBY (U21 pin 8, EVI) is a CARRIER-driven external event
+    # input (E1M edge pin O2, R43 100k to +1V8) -- no SoC pad, so no link
+    # here.
+
+  # On-module backlight LED driver.  Not consumed by any board emitter
+  # today -- bring-up is alp-sdk#2199 -- this entry exists purely to
+  # record the fact so nothing re-derives A31/B31 as Alif-owned again
+  # (alp-sdk#2203).
+  backlight:
+    # The driver's enable input: a real SoC pad, SoM-internal like
+    # brd_i2c/rtc_alarm above (no E1M edge route of its own).
+    enable:
+      silicon_peripheral: "UT2_T1_B"
+      silicon_pad: "P5_5"
+      status: enabled
+      evidence: >-
+        Per the E1M-AEN-2626-R2 SoM netlist (internal): P5_5 is the
+        on-module backlight driver's enable input.  It is SoM-internal --
+        not routed to any E1M edge pad.  The only path from P5_5 toward
+        the edge connector is an unpopulated (DNP) option, not a live
+        connection, so it must never be projected into from-alif.tsv /
+        metadata/pinmux/aen.yaml.
+    # The driver's LED string: reaches the E1M edge connector on its OWN
+    # two pins, direct from the driver, never through the SoC.  Carries a
+    # boost-converter output far above logic level -- a carrier must
+    # never wire a logic-level signal here.
+    led_pins:
+      - { e1m_pad: "A31", e1m_function: "BL_LED_A" }
+      - { e1m_pad: "B31", e1m_function: "BL_LED_K" }
+    evidence: >-
+      Per the E1M-AEN-2626-R2 SoM netlist (internal): A31 (`BL_LED_A`)
+      and B31 (`BL_LED_K`) are the on-module backlight driver's LED
+      output/feedback pair, reaching the panel through the carrier's
+      display connector.  Neither pad is backed by Alif (or any other)
+      silicon, so neither belongs in from-alif.tsv / pinmux/aen.yaml, and
+      neither is assignable as a general-purpose GPIO/PWM pad by any app.

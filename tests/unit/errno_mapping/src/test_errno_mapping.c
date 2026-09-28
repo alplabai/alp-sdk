@@ -77,6 +77,20 @@ ZTEST(alp_errno_mapping, test_zephyr_rejects_positive_errno)
 	zassert_equal(alp_status_from_zephyr_errno(ENOSPC), ALP_ERR_IO);
 }
 
+/* -ENOMSG has no baseline arm (falls to ALP_ERR_IO), which is why
+ * src/backends/audio/zephyr_drv.c's errno_to_alp() overrides it locally
+ * (issue #2133 round 4d) rather than delegating -- k_msgq_get(K_NO_WAIT)
+ * returns -ENOMSG for a non-blocking read that simply found nothing
+ * queued yet, which is a timeout, not dropped data. Pinned here so that
+ * override's motivation doesn't silently stop being true. */
+ZTEST(alp_errno_mapping, test_zephyr_enomsg_baseline_is_io_not_timeout)
+{
+	zassert_equal(alp_status_from_zephyr_errno(-ENOMSG),
+	              ALP_ERR_IO,
+	              "if this ever becomes ALP_ERR_TIMEOUT, the audio backend's "
+	              "local override is redundant and can be dropped");
+}
+
 ZTEST(alp_errno_mapping, test_zephyr_override_form)
 {
 	/* Overrides are matched on the NEGATIVE value, unlike the POSIX

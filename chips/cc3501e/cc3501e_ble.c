@@ -23,22 +23,30 @@
 
 #include "cc3501e_internal.h"
 
-/* BLE enable stands the bridge down for the NWP BLE-controller cold-init (a HIF
- * control-cmd round-trip, ~10-15 s) + the NimBLE host sync; floor the host poll well
- * above that so a slow-but-working enable is not misread as a timeout. */
-#define CC3501E_BLE_ENABLE_WINDOW_MS 90000u
-
 alp_status_t cc3501e_ble_enable(cc3501e_t *ctx, uint32_t timeout_ms)
 {
-	/* Worker-routed: the firmware SUSPENDS the bridge SPI, runs BleIf_EnableBLE (the
-	 * NWP BLE-controller cold-init -- a control-cmd round-trip that can take ~10-15 s)
-	 * + nimble_host_start sync, then RE-OPENS the bridge.  The link is DOWN for that
-	 * whole window, so the host must poll-by-repeat (retry on IO) longer than the
-	 * 10 s Wi-Fi floor -- floor to 30 s so a working-but-slow enable is not misread as
-	 * a failure before the worker publishes the result + the bridge re-syncs. */
-	uint32_t budget = timeout_ms;
-	if (budget < CC3501E_BLE_ENABLE_WINDOW_MS) budget = CC3501E_BLE_ENABLE_WINDOW_MS;
-	return poll_by_repeat(ctx, ALP_CC3501E_CMD_BLE_ENABLE, NULL, 0, NULL, 0, NULL, budget);
+	/* Worker-routed: the firmware stands the bridge SPI down, runs BleIf_EnableBLE
+	 * (the NWP BLE-controller cold-init) + the nimble_host_start sync, then re-opens
+	 * the bridge.  The link is DOWN for that window, so this polls by repeat and
+	 * retries on IO rather than failing on the first unanswered frame.
+	 *
+	 * THE CALLER'S TIMEOUT IS THE TIMEOUT (#82).  This used to floor the budget at a
+	 * CC3501E_BLE_ENABLE_WINDOW_MS of 90000 ms -- silently tripling every caller's
+	 * request, since all three in-tree callers pass 30000 -- on the stated grounds
+	 * that the cold-init "can take ~10-15 s".  That is where #82's headline reading
+	 * comes from: `ble enable failed (-4)` after 90.5 s against a 30 s timeout, which
+	 * is the floor plus one attempt, not a device that was still working.  (The
+	 * comment above the define claimed it floored to 30 s; the value had been 90000
+	 * since it was introduced.)
+	 *
+	 * The premise was already false and is now doubly so.  Bench-measured on an
+	 * E1M-AEN801 at fw 0.6.0: a cold BLE enable on a fresh boot completes in 0.67 s
+	 * end to end, and a repeat completes at the measurement floor -- 10-15 s is not
+	 * what this silicon does.  cc3501e-bridge-firmware#112 also removed the two
+	 * pointless SPI teardowns an already-enabled enable was doing, which is what made
+	 * the operation take minutes.  30 s of caller budget is ample; a caller that
+	 * wants longer passes longer, which is what the parameter is for. */
+	return poll_by_repeat(ctx, ALP_CC3501E_CMD_BLE_ENABLE, NULL, 0, NULL, 0, NULL, timeout_ms);
 }
 
 /* Wire BLE scan record: addr[6] | addr_type | rssi(int8) | name_len | name[name_len]
@@ -192,7 +200,15 @@ alp_status_t cc3501e_ble_gatt_register(cc3501e_t     *ctx,
                                        uint32_t       timeout_ms)
 {
 	if (num_handles_out != NULL) *num_handles_out = 0u;
-	if (descriptor == NULL || len == 0u || len > ALP_CC3501E_MAX_PAYLOAD) return ALP_ERR_INVAL;
+	/* #2035: ALP_CC3501E_MAX_PAYLOAD alone overstates what actually fits --
+	 * cc3501e_request()'s own tx_len ceiling (cc3501e_core.c) already
+	 * subtracts ALP_CC3501E_CRC_BYTES once this ctx has negotiated a MAJOR-4
+	 * peer (the trailer it then appends), so a descriptor sized to the bare
+	 * MAX_PAYLOAD bound gets rejected two frames deeper with no explanation.
+	 * Subtract it here too so this check is the one a caller actually hits. */
+	if (descriptor == NULL || len == 0u ||
+	    len > (size_t)(ALP_CC3501E_MAX_PAYLOAD - ALP_CC3501E_CRC_BYTES))
+		return ALP_ERR_INVAL;
 	if (handles_out == NULL && handles_cap > 0u) return ALP_ERR_INVAL;
 
 	/* BLE_GATT_REGISTER (0x38): the firmware handle_ble_gatt_register takes the
@@ -247,7 +263,9 @@ alp_status_t cc3501e_ble_gatt_notify(cc3501e_t     *ctx,
                                      uint32_t       timeout_ms)
 {
 	if (data == NULL && len > 0u) return ALP_ERR_INVAL;
-	if (len > (size_t)(ALP_CC3501E_MAX_PAYLOAD - 2u)) return ALP_ERR_INVAL;
+	/* #2035: leave room for the MAJOR-4 CRC trailer cc3501e_request() appends --
+	 * see cc3501e_ble_gatt_register()'s comment above. */
+	if (len > (size_t)(ALP_CC3501E_MAX_PAYLOAD - 2u - ALP_CC3501E_CRC_BYTES)) return ALP_ERR_INVAL;
 	/* BLE_GATT_NOTIFY (0x39) wire (firmware handle_ble_gatt_notify): handle(LE16)
 	 * | value bytes.  No header struct -- layout from the firmware handler. */
 	uint8_t buf[2u + (ALP_CC3501E_MAX_PAYLOAD - 2u)];
@@ -285,7 +303,9 @@ alp_status_t cc3501e_ble_gatt_write(cc3501e_t     *ctx,
                                     uint32_t       timeout_ms)
 {
 	if (data == NULL && len > 0u) return ALP_ERR_INVAL;
-	if (len > (size_t)(ALP_CC3501E_MAX_PAYLOAD - 2u)) return ALP_ERR_INVAL;
+	/* #2035: leave room for the MAJOR-4 CRC trailer cc3501e_request() appends --
+	 * see cc3501e_ble_gatt_register()'s comment above. */
+	if (len > (size_t)(ALP_CC3501E_MAX_PAYLOAD - 2u - ALP_CC3501E_CRC_BYTES)) return ALP_ERR_INVAL;
 	/* BLE_GATT_WRITE (0x3B) wire (firmware handle_ble_gatt_write): handle(LE16) |
 	 * value bytes -- identical framing to NOTIFY. */
 	uint8_t buf[2u + (ALP_CC3501E_MAX_PAYLOAD - 2u)];
