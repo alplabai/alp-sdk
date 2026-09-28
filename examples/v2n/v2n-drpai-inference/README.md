@@ -184,19 +184,18 @@ confirms the raw tensor's actual layout.
 
 The `alp-drpai-inference` recipe
 (`meta-alp-sdk/recipes-examples/alp-drpai-inference/`) packages this
-binary into `alp-image-edge` whenever the image is built with the
-existing DRP-AI opt-in:
+binary into `alp-image-edge` whenever the DRP-AI3 backend is built: with
+`meta-rz-drpai` in `bblayers.conf` the `&drpai0` node is on by default, and
+pointing the build at a RUHMI checkout turns the backend on too:
 
 ```
-ALP_ENABLE_DRPAI = "1"
-PACKAGECONFIG:append:pn-alp-sdk = " drpai"
+RUHMI_DRPAI_TVM_DIR = "/path/to/built/rzv_drp-ai_tvm"
 ```
 
-in `local.conf`. **Both switches are required and neither implies the
-other** -- see
+in `local.conf`. See
 [`docs/bring-up-drpai-v2n.md`](../../../docs/bring-up-drpai-v2n.md)
-Sec 4 for the full contract, including what each half installs and
-what omitting either one does.
+Sec 4 for the full contract, including what each switch installs and
+how to opt out.
 
 > The recipe's `SRC_URI` currently tracks alp-sdk's `dev` branch (this
 > example is not on `main` yet) -- flip it to `branch=main` at the next
@@ -239,10 +238,9 @@ gcc -I include -o v2n-drpai-inference \
   E1M-V2N102/103 and E1M-V2M101/102/103 should run it too, but this
   example is neither built nor checked against them.
 - E1M-X-EVK carrier.
-- An `alp-image-edge` bake with `ALP_ENABLE_DRPAI = "1"` AND
-  `PACKAGECONFIG:append:pn-alp-sdk = " drpai"` both set in `local.conf`
-  (see "Yocto (recommended)" above), and `meta-rz-drpai` in
-  `bblayers.conf`.
+- An `alp-image-edge` bake with `meta-rz-drpai` in `bblayers.conf` and
+  `RUHMI_DRPAI_TVM_DIR` set in `local.conf` (see "Yocto (recommended)"
+  above).
 
 ## What actually ran
 

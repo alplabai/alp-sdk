@@ -47,8 +47,11 @@ IMAGE_INSTALL += " alp-lvgl-dashboard"
 # shared local.conf cannot pull this RZ-only recipe into an
 # e1m-nx9101-a55 / e1m-aen801-a32 build (see that guard's comment for
 # why 'rzv2n-family' is confirmed present at this parse point).
+# ...and only when alp-sdk's drpai backend is actually built (RUHMI
+# configured, see alp-sdk_0.6.bb): the demo is pointless without it.
 IMAGE_INSTALL += "${@' alp-drpai-inference' if d.getVar('ALP_ENABLE_DRPAI') == '1' and \
-    'rzv2n-family' in (d.getVar('MACHINEOVERRIDES') or '').split(':') else ''}"
+    'rzv2n-family' in (d.getVar('MACHINEOVERRIDES') or '').split(':') and \
+    d.getVar('RUHMI_DRPAI_TVM_DIR') else ''}"
 
 # NOTE: the DRP-AI userspace RUNTIME PACKAGES (lib-tvm +
 # kernel-module-mmngr) and the SDK BACKEND compiled into libalp_sdk.so

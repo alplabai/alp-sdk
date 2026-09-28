@@ -104,13 +104,14 @@ shared_drp_reserved: shareddrp@afcff000 reg = <0x0 0xafcff000 0x0 0x00001000>   
 
 Declaring them is **not sufficient** — something has to claim them.
 `e1m-v2n-drpai.dtsi` carries the override, and the kernel bbappend installs it
-only when **both** `meta-rz-drpai` is in `bblayers.conf` **and**
-`ALP_ENABLE_DRPAI = "1"` is set (default `"0"`).  The layer alone is
-deliberately not enough: it ships bundled in the AI SDK BSP, so keying off its
-presence would turn the NPU on for every V2N/V2M image.  It is declared
-`ALP_ENABLE_DRPAI ?= "0"` in all six V2N/V2M machine confs; set it to
-`"1"` in `local.conf` to opt in. Without it the build installs a comment-only stub and the node
-stays `disabled`.
+when `meta-rz-drpai` is in `bblayers.conf` and `ALP_ENABLE_DRPAI` is `"1"`.
+`ALP_ENABLE_DRPAI` **defaults to `"1"` whenever that layer is present**: it is
+declared in all six V2N/V2M machine confs as on-with-the-layer, because every
+V2N/V2M SKU carries the same on-die DRP-AI3.  An earlier revision defaulted it
+to `"0"`, and shipped images then carried the driver, the arena and the
+vendor runtime but no `/dev/drpai0`.  Set `ALP_ENABLE_DRPAI = "0"` in
+`local.conf` to opt out; without the layer, or with the opt-out, the build
+installs a comment-only stub and the node stays `disabled`.
 
 The layer half of the gate exists because that layer creates the `drpai0`
 label: referencing it without the layer fails in dtc, and the same SoM dtsi
@@ -120,9 +121,13 @@ is included by the V2M board dts, so it would take that dtb down too.
 dtb, `/boot/r9a09g056n44-dev.dtb`, carries **zero** `drpai` nodes — the
 enablement on that board comes from a different, already-loaded
 `/boot/uio-683.dtb`, not from anything this repo builds. Our own dtb,
-`e1m-v2n101-x-evk.dtb`, carries the node enabled **only when
-`ALP_ENABLE_DRPAI = "1"` was set for that build**; by default it carries the
-stub and the node stays `disabled`.  The overlay is what makes it present,
+`e1m-v2n101-x-evk.dtb`, carries the node enabled whenever `ALP_ENABLE_DRPAI`
+resolves to `"1"` for that build, which is now the default with
+`meta-rz-drpai` present.  Images built before that default change carry
+the stub, and the node stays `disabled` (E1M-V2M103 board #1 on the Alp SDK
+0.7.0 image, 2026-09-28: `/soc/drpai@16800000` `status = "disabled"`, no
+`/dev/drpai0`, although `CONFIG_DRPAI=y` and the `drp-ai@d0000000` arena are
+present).  The overlay is what makes it present,
 never the SoC by default. Separately: the **kernel** half of the stack is
 already proven working on this silicon — `/dev/drpai0` exists on that board's
 current image and the driver probes clean (`drpai-rz 17000000.drpai: DRP-AI
@@ -171,15 +176,19 @@ independent switches, both default OFF, deliberately not merged into one
 (the released v0.15.0 contract, `CHANGELOG.md`: "Two independent switches,
 both default OFF, deliberately not merged into one"):
 
-- **`PACKAGECONFIG[drpai]`** on the `alp-sdk` recipe (set by the builder in
-  `local.conf` as `PACKAGECONFIG:append:pn-alp-sdk = " drpai"`) compiles the
-  DRP-AI3 backend into `libalp_sdk`. Nothing else sets it.
-- **`ALP_ENABLE_DRPAI = "1"`** (a MACHINE-conf variable) does two things:
+- **`PACKAGECONFIG[drpai]`** on the `alp-sdk` recipe compiles the DRP-AI3
+  backend into `libalp_sdk`.  It turns on by itself on an `rzv2n-family`
+  MACHINE when `ALP_ENABLE_DRPAI` is `"1"` **and** `RUHMI_DRPAI_TVM_DIR`
+  points at a RUHMI checkout (the MERA2 runtime cannot be built without
+  one, so without it the backend stays off rather than failing the bake).
+  `PACKAGECONFIG:append:pn-alp-sdk = " drpai"` in `local.conf` forces it.
+- **`ALP_ENABLE_DRPAI`** (a MACHINE-conf variable, default `"1"` whenever
+  `meta-rz-drpai` is present) does two things:
   enables the `&drpai0` devicetree node (§3), and — `alp-image-edge`
   only, and only on an `rzv2n-family` MACHINE (`'rzv2n-family' in
   (d.getVar('MACHINEOVERRIDES') or '').split(':')`) — gates installing
-  `alp-drpai-inference`
-  (`meta-alp-sdk/recipes-images/alp-image-edge.bb:50-51`); never
+  `alp-drpai-inference` (only when `RUHMI_DRPAI_TVM_DIR` is set too, so
+  the demo never lands without its backend); never
   `alp-image-prod`, and never on a non-RZ/V2N machine such as
   `e1m-nx9101-a55` or `e1m-aen801-a32` even with `ALP_ENABLE_DRPAI = "1"`
   set. It installs no userspace runtime package itself. The
@@ -412,9 +421,9 @@ already, via the `CONFIG_BOOTCOMMAND` override in
 In order:
 
 1. `ls /dev/drpai0` — absent means one of three things, in the order worth
-   checking: `ALP_ENABLE_DRPAI` was not set to `"1"` (the default, and now the
-   most likely cause); `meta-rz-drpai` was not in `bblayers.conf`; or the DT
-   override otherwise did not land. Nothing else will work. (This
+   checking: `meta-rz-drpai` was not in `bblayers.conf`; the build set
+   `ALP_ENABLE_DRPAI = "0"`; the image predates the default-on change; or the
+   DT override otherwise did not land. Nothing else will work. (This
    node already exists on the V2N bench unit's current, non-ALP-built image, so
    its presence alone doesn't prove *this* image's DT override worked — check
    the dtb in use, per §3.)

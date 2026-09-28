@@ -222,6 +222,14 @@ PACKAGECONFIG[drpai]    = "-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=O
 #               build that leaves ALP_ENABLE_DEEPX_DXM1 unset still
 #               builds -- it links only the dispatcher + portable stub,
 #               same as today.
+# DRP-AI3 backend: auto-enabled on an RZ/V2N-family MACHINE that has the
+# DRP-AI node on (ALP_ENABLE_DRPAI, default-on with meta-rz-drpai) AND a
+# RUHMI checkout configured (RUHMI_DRPAI_TVM_DIR, which mera2-drpai-tvm
+# needs to build the MERA2 runtime).  Without RUHMI it stays off rather
+# than failing the bake; set PACKAGECONFIG:append:pn-alp-sdk = " drpai"
+# to force it, or ALP_ENABLE_DRPAI = "0" to keep it out.
+PACKAGECONFIG:append = "${@' drpai' if ('rzv2n-family' in (d.getVar('MACHINEOVERRIDES') or '').split(':') and d.getVar('ALP_ENABLE_DRPAI') == '1' and d.getVar('RUHMI_DRPAI_TVM_DIR')) else ''}"
+
 PACKAGECONFIG[deepx-dxm1] = "-DALP_SDK_USE_DEEPX_DXM1=ON -DALP_SDK_DEEPX_REQUIRED=ON,-DALP_SDK_USE_DEEPX_DXM1=OFF,dx-rt,"
 PACKAGECONFIG:append = "${@bb.utils.contains('MACHINE_FEATURES', 'deepx-dxm1', ' deepx-dxm1' if d.getVar('ALP_ENABLE_DEEPX_DXM1') == '1' else '', '', d)}"
 

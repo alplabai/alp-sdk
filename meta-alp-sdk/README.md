@@ -257,18 +257,14 @@ MACHINE = "e1m-v2n101-a55"     # plain V2N
 # or
 MACHINE = "e1m-v2m101-a55"     # V2N + DEEPX
 
-# 7b. OPTIONAL: compile the DRP-AI3 NPU backend into libalp_sdk.so.
-#     Default OFF.  Only do this once a built RUHMI checkout's headers +
-#     libs are STAGED INTO THE RECIPE SYSROOT (ALP_DRPAI_TVM_APPS +
-#     CMAKE_LIBRARY_PATH are a plain-CMake-only hint; they do nothing
-#     under BitBake -- see "Model compilation toolchain (RUHMI / DRP-AI
-#     TVM)" below).  BENCH-UNVERIFIED: never run on DRP-AI silicon.
-#
-#     PACKAGECONFIG[drpai] + ALP_ENABLE_DRPAI = "1": two independent
-#     switches, both required, neither implies the other -- see
-#     docs/bring-up-drpai-v2n.md section 4 for the full contract.
-PACKAGECONFIG:append:pn-alp-sdk = " drpai"
-ALP_ENABLE_DRPAI = "1"
+# 7b. DRP-AI3 NPU.  With meta-rz-drpai in bblayers.conf the &drpai0
+#     node (/dev/drpai0) is ON by default on every V2N/V2M MACHINE
+#     (ALP_ENABLE_DRPAI = "0" opts out).  The SDK backend in
+#     libalp_sdk.so additionally needs the MERA2 runtime, built from a
+#     RUHMI checkout; point at one and PACKAGECONFIG[drpai] turns on by
+#     itself (see "Model compilation toolchain (RUHMI / DRP-AI TVM)"
+#     below and docs/bring-up-drpai-v2n.md section 4).  BENCH-UNVERIFIED.
+RUHMI_DRPAI_TVM_DIR = "/path/to/built/rzv_drp-ai_tvm"
 
 # 8. Enable the DEEPX runtime (opt-in; requires step 6's layer):
 ALP_ENABLE_DEEPX_DXM1 = "1"
@@ -398,10 +394,10 @@ dependency of the recipe.
 
 | MACHINE              | NPU backend                          | Runtime source                                                        |
 |----------------------|--------------------------------------|-----------------------------------------------------------------------|
-| `e1m-v2n101-a55`     | DRP-AI3 — opt-in (`ALP_ENABLE_DRPAI` node + `PACKAGECONFIG[drpai]` backend, both required), BENCH-UNVERIFIED | kernel driver + `<linux/drpai.h>` + `libtvm_runtime.so` from `meta-rz-drpai`; `mera2_runtime` / `mera2_plan_io` / `drp_tvm_rt` (staged) + `mera_drpai_wrapper` (compiled from `apps/MeraDrpRuntimeWrapper.cpp`) from a built RUHMI checkout |
-| `e1m-v2n102-a55`     | DRP-AI3 — opt-in (`ALP_ENABLE_DRPAI` node + `PACKAGECONFIG[drpai]` backend, both required), BENCH-UNVERIFIED | Same as V2N101 (memory variant)                                       |
-| `e1m-v2n103-a55`     | DRP-AI3 — opt-in (`ALP_ENABLE_DRPAI` node + `PACKAGECONFIG[drpai]` backend, both required), BENCH-UNVERIFIED | Same as V2N101 (memory variant)                                       |
-| `e1m-v2m101-a55`     | DRP-AI3 — opt-in (`ALP_ENABLE_DRPAI` node + `PACKAGECONFIG[drpai]` backend, both required), BENCH-UNVERIFIED + DEEPX DX-M1 — opt-in (`ALP_ENABLE_DEEPX_DXM1`) | DRP-AI3 as above; `dx-driver`/`dx-rt` via `meta-deepx-m1` (`ALP_ENABLE_DEEPX_DXM1`) |
+| `e1m-v2n101-a55`     | DRP-AI3 — node on by default with `meta-rz-drpai`; backend (`PACKAGECONFIG[drpai]`) on when `RUHMI_DRPAI_TVM_DIR` is set; BENCH-UNVERIFIED | kernel driver + `<linux/drpai.h>` + `libtvm_runtime.so` from `meta-rz-drpai`; `mera2_runtime` / `mera2_plan_io` / `drp_tvm_rt` (staged) + `mera_drpai_wrapper` (compiled from `apps/MeraDrpRuntimeWrapper.cpp`) from a built RUHMI checkout |
+| `e1m-v2n102-a55`     | DRP-AI3 — node on by default with `meta-rz-drpai`; backend (`PACKAGECONFIG[drpai]`) on when `RUHMI_DRPAI_TVM_DIR` is set; BENCH-UNVERIFIED | Same as V2N101 (memory variant)                                       |
+| `e1m-v2n103-a55`     | DRP-AI3 — node on by default with `meta-rz-drpai`; backend (`PACKAGECONFIG[drpai]`) on when `RUHMI_DRPAI_TVM_DIR` is set; BENCH-UNVERIFIED | Same as V2N101 (memory variant)                                       |
+| `e1m-v2m101-a55`     | DRP-AI3 — node on by default with `meta-rz-drpai`; backend (`PACKAGECONFIG[drpai]`) on when `RUHMI_DRPAI_TVM_DIR` is set; BENCH-UNVERIFIED + DEEPX DX-M1 — opt-in (`ALP_ENABLE_DEEPX_DXM1`) | DRP-AI3 as above; `dx-driver`/`dx-rt` via `meta-deepx-m1` (`ALP_ENABLE_DEEPX_DXM1`) |
 | `e1m-v2m102-a55`     | Same as V2M101                       | Same as V2M101 (memory variant)                                       |
 | `e1m-v2m103-a55`     | Same as V2M101                       | Same as V2M101 (memory variant)                                       |
 | `e1m-nx9101-a55`     | Ethos-U65                            | NXP i.MX 93 Ethos-U userspace via the image                           |
