@@ -259,10 +259,22 @@ int main(void)
 	 * regresses, this read faults and k_sys_fatal_error_handler() reports it
 	 * instead of a silent hang.
 	 */
+	/*
+	 * Not "equals the reset value": CTRLR0 keeps whatever the image that ran
+	 * before this one programmed -- alif_hal_ospi_initialize() does not
+	 * rewrite it. Measured on E1M-AEN803 silicon: 0x00C00407 (the POR value)
+	 * after a cold boot, but 0x01c0080f after a resident image had used OSPI
+	 * and 0x00000c07 after a previous run of this app (#915). A floating or
+	 * ungated bus reads all-zeros or all-ones; anything else is a live
+	 * register file.
+	 */
 	uint32_t ctrlr0    = *(volatile uint32_t *)ospi_base;
-	bool     ctrlr0_ok = (ctrlr0 == OSPI_CTRLR0_RESET_VALUE);
+	bool     ctrlr0_ok = (ctrlr0 != 0U) && (ctrlr0 != 0xFFFFFFFFU);
 
-	printk("hal   : CTRLR0=0x%08x (exp reset value 0x%08x)\n", ctrlr0, OSPI_CTRLR0_RESET_VALUE);
+	printk("hal   : CTRLR0=0x%08x (live: %s; POR value 0x%08x; keeps the previous image's state)\n",
+	       ctrlr0,
+	       ctrlr0_ok ? "yes" : "NO",
+	       OSPI_CTRLR0_RESET_VALUE);
 
 	/*
 	 * Step 6: exercise the one flash operation proven on the fitted part.

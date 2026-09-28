@@ -447,22 +447,6 @@ static int alif_ospi_clk_enable(uint32_t base_regs)
 	return 0;
 }
 
-static int ospi_alif_hal_errno(int32_t rc)
-{
-	switch (rc) {
-	case OSPI_ERR_NONE:
-		return 0;
-	case OSPI_ERR_INVALID_PARAM:
-		return -EINVAL;
-	case OSPI_ERR_CTRL_BUSY:
-		return -EBUSY;
-	case OSPI_ERR_INVALID_HANDLE:
-		return -ENODEV;
-	default:
-		return -EIO;
-	}
-}
-
 static void ospi_alif_xfer_done_cb(uint32_t event, void *user_data)
 {
 	struct ospi_alif_data *data = user_data;
@@ -602,22 +586,29 @@ static const struct flash_parameters *ospi_alif_get_parameters(const struct devi
 }
 
 #if defined(CONFIG_FLASH_JESD216_API)
+/*
+ * JEDEC ID over standard single-lane SPI, in the DW-SSI EEPROM-read transfer
+ * mode (TMOD = 0b11): the controller shifts out what is in the TX FIFO (the
+ * 0x9F opcode) and then clocks in CTRLR1 + 1 frames.
+ *
+ * Not alif_hal_ospi_transfer(): that entry programs TMOD = RECEIVE_ONLY and
+ * relies on the SPI_CTRLR0 instruction phase, which only exists in the
+ * enhanced (dual/quad/octal) frame formats. In standard format a
+ * receive-only transfer never shifts the opcode out, so the part never
+ * answers and the HAL's completion callback never fires -- on silicon that
+ * was a -ETIMEDOUT with an all-zero ID, 3 of 3 (#915). The part sits in
+ * 1-1-1 SPI after reset, so standard format is the right one; hal_alif just
+ * has no command-then-read entry for it. Fields come from hal_alif's ospi.h.
+ */
 static int ospi_alif_read_jedec_id(const struct device *dev, uint8_t *id)
 {
-	struct ospi_alif_data   *data      = dev->data;
-	struct ospi_trans_config trans_cfg = {
-		.frame_size   = OSPI_DFS_BITS_8,
-		.frame_format = OSPI_FRF_STANDRAD,
-		.addr_len     = OSPI_ADDR_LENGTH_0_BITS,
-		.inst_len     = OSPI_INST_LENGTH_8_BITS,
-		.wait_cycles  = 0,
-		.ddr_enable   = OSPI_DDR_DISABLE,
-	};
-	uint8_t opcode = OSPI_ALIF_JEDEC_RDID;
-	int32_t hal_rc;
-	int     rc = 0;
-	int     spin;
-	int     cs_rc;
+	const struct ospi_alif_config *config = dev->config;
+	struct ospi_alif_data         *data   = dev->data;
+	struct ospi_regs              *regs   = (struct ospi_regs *)config->base_regs;
+	uint32_t                       ctrlr0;
+	int                            rc = 0;
+	int                            spin;
+	int                            n;
 
 	if (id == NULL) {
 		return -EINVAL;
@@ -625,57 +616,45 @@ static int ospi_alif_read_jedec_id(const struct device *dev, uint8_t *id)
 
 	k_mutex_lock(&data->lock, K_FOREVER);
 
-	hal_rc = alif_hal_ospi_prepare_transfer(data->handle, &trans_cfg);
-	if (hal_rc != OSPI_ERR_NONE) {
-		rc = ospi_alif_hal_errno(hal_rc);
+	if (ospi_busy(regs)) {
+		rc = -EBUSY;
 		goto out_unlock;
 	}
 
-	hal_rc = alif_hal_ospi_cs_enable(data->handle, 1);
-	if (hal_rc != OSPI_ERR_NONE) {
-		rc = ospi_alif_hal_errno(hal_rc);
-		goto out_unlock;
-	}
+	ospi_disable(regs);
+	ctrlr0 = regs->OSPI_CTRLR0;
+	ctrlr0 &= ~(SPI_CTRLR0_DFS_MASK | SPI_CTRLR0_FRF_MASK | SPI_CTRLR0_TMOD_MASK |
+	            SPI_CTRLR0_SPI_FRF_MASK | SPI_CTRLR0_SPI_HYPERBUS_EN_SSTE_MASK);
+	ctrlr0 |= SPI_CTRLR0_DFS_8bit | SPI_CTRLR0_FRF_MOTOROLA | SPI_CTRLR0_TMOD_EEPROM_READ_ONLY |
+	          SPI_CTRLR0_SPI_FRF_STANDRAD;
+	regs->OSPI_CTRLR0 = ctrlr0;
+	regs->OSPI_CTRLR1 = OSPI_ALIF_JEDEC_ID_LEN - 1;
+	regs->OSPI_IMR    = 0U;
+	regs->OSPI_SER |= BIT(config->cs_pin);
+	ospi_enable(regs);
 
-	data->xfer_result = -EINPROGRESS;
-	hal_rc            = alif_hal_ospi_transfer(data->handle, &opcode, id, OSPI_ALIF_JEDEC_ID_LEN);
-	if (hal_rc != OSPI_ERR_NONE) {
-		rc = ospi_alif_hal_errno(hal_rc);
-		goto out_disable_cs;
-	}
+	/* Writing the opcode starts the transfer. */
+	regs->OSPI_DR0 = OSPI_ALIF_JEDEC_RDID;
 
-	for (spin = 0; spin < OSPI_ALIF_XFER_POLL_ITERATIONS && data->xfer_result == -EINPROGRESS;
+	for (spin = 0;
+	     spin < OSPI_ALIF_XFER_POLL_ITERATIONS && regs->OSPI_RXFLR < OSPI_ALIF_JEDEC_ID_LEN;
 	     spin++) {
-		hal_rc = alif_hal_ospi_irq_handler(data->handle);
-		if (hal_rc != OSPI_ERR_NONE) {
-			rc = ospi_alif_hal_errno(hal_rc);
-			break;
-		}
 	}
-
-	if (rc == 0) {
-		if (data->xfer_result == -EINPROGRESS) {
-			LOG_ERR("JEDEC ID transfer timed out after %d polls", spin);
-			rc = -ETIMEDOUT;
-		} else {
-			rc = data->xfer_result;
-		}
-	}
-
-out_disable_cs:
-	if (rc != 0) {
-		/* A failed or incomplete transfer can leave interrupt masks and FIFO
-		 * state live even when BUSY has already cleared. Always reset that
-		 * state rather than relying only on a normal CS deassert. */
-		ospi_alif_recover_transfer(dev);
+	if (regs->OSPI_RXFLR < OSPI_ALIF_JEDEC_ID_LEN) {
+		LOG_ERR("JEDEC ID read timed out after %d polls (RXFLR=%u)",
+		        spin,
+		        (unsigned int)regs->OSPI_RXFLR);
+		rc = -ETIMEDOUT;
 	} else {
-		cs_rc = ospi_alif_hal_errno(alif_hal_ospi_cs_enable(data->handle, 0));
-		if (cs_rc != 0) {
-			LOG_WRN("normal CS deassert failed (%d); forcing controller recovery", cs_rc);
-			ospi_alif_recover_transfer(dev);
-			rc = cs_rc;
+		for (n = 0; n < OSPI_ALIF_JEDEC_ID_LEN; n++) {
+			id[n] = (uint8_t)regs->OSPI_DR0;
 		}
 	}
+
+	/* Deassert CS, leave the controller idle and enabled; the same forced
+	 * recovery covers a timed-out read. */
+	ospi_alif_recover_transfer(dev);
+
 out_unlock:
 	k_mutex_unlock(&data->lock);
 
