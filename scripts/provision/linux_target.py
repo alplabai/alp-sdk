@@ -445,6 +445,33 @@ def i2c_set(t: LinuxTarget, bus: int, addr: int, reg: int, value: int) -> None:
     t.run(f"i2cset -y {bus} {addr:#04x} {reg:#04x} {value:#04x}")
 
 
+def _crc16_ccitt_false(data: bytes) -> int:
+    c = 0xFFFF
+    for byte in data:
+        c ^= byte << 8
+        for _ in range(8):
+            c = ((c << 1) ^ 0x1021) & 0xFFFF if c & 0x8000 else (c << 1) & 0xFFFF
+    return c
+
+
+def gd32_bridge_version(t: LinuxTarget, bus: int, addr: int = 0x70) -> tuple[int, int, int]:
+    """GET_VERSION over the bridge's I2C transport, read-only.
+
+    Frame (kernel gpio-gd32-bridge 0005): write [0x00 reg][0x01 cmd][crc lo][crc hi],
+    repeated-start read [status][major][minor][patch][crc lo][crc hi], CRC-16/CCITT-FALSE
+    over cmd (+payload) / status+payload.  `-f` because the kernel driver binds 0x70.
+    Asking the bridge beats grepping dmesg: the driver logs the protocol only if the
+    GD32 answers AT PROBE, which a late-released GD32 (ACT88760 GPIO4 defect) never does."""
+    crc = _crc16_ccitt_false(b"")
+    r = t.run(f"i2ctransfer -f -y {bus} w4@{addr:#04x} 0x00 0x01 {crc & 0xFF:#04x} {crc >> 8:#04x} r6")
+    rsp = _parse_bytes(r.stdout, 6)
+    if _crc16_ccitt_false(rsp[:4]) != rsp[4] | rsp[5] << 8:
+        raise BenchError(f"GD32 GET_VERSION reply CRC mismatch: {rsp.hex(' ')}")
+    if rsp[0] != 0:
+        raise BenchError(f"GD32 GET_VERSION status {rsp[0]:#04x}")
+    return rsp[1], rsp[2], rsp[3]
+
+
 def i2c_scan(t: LinuxTarget, bus: int) -> set[int]:
     """i2cdetect -r (read-byte probe, no quick-write); UU counts as present."""
     out = t.run(f"i2cdetect -y -r {bus}").stdout

@@ -744,3 +744,13 @@ def test_emmc_boot1_write_refuses_an_image_past_the_partition_end(tmp_path):
         lt.emmc_boot1_write_verify(t, "/dev/mmcblk1", img, 0x300)
     assert not any(c.startswith("dd ") and " of=" in c for c in fake.commands)
 
+
+
+def test_gd32_bridge_version_frames_and_checks_crc():
+    # bench bytes, E1M-V2M103 2026W38-0001 fw 0.2.16 (protocol 0.13.0)
+    t, fake = target([("i2ctransfer -f", "0x00 0x00 0x0d 0x00 0x9c 0xf2\n")])
+    assert lt.gd32_bridge_version(t, 8) == (0, 13, 0)
+    assert fake.commands[-1] == "i2ctransfer -f -y 8 w4@0x70 0x00 0x01 0xd1 0xf1 r6"
+    t, _ = target([("i2ctransfer -f", "0x00 0x00 0x0d 0x00 0x9c 0xf3\n")])
+    with pytest.raises(BenchError, match="CRC mismatch"):
+        lt.gd32_bridge_version(t, 8)

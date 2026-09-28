@@ -165,8 +165,10 @@ class Board(FakeLinux):
             return 0, ""
         if cmd.startswith("i2cdetect -y -r"):
             return 0, "70: 70 -- -- -- -- -- -- --\n"
-        if cmd.startswith("dmesg"):
-            return 0, "gd32: GD32 bridge protocol v1\n"
+        if cmd.startswith("i2ctransfer -f -y 8 w4@0x70 0x00 0x01 "):
+            return 0, "0x00 0x00 0x0d 0x00 0x9c 0xf2\n"   # GET_VERSION: OK, protocol 0.13.0 (bench bytes)
+        if cmd.startswith("sleep"):
+            return 0, ""
         if m := re.match(r"i2ctransfer -y 0 (.*)$", cmd):
             return self._i2c(m[1])
         return 1, ""   # census and anything else unscripted: a failed read, never a write

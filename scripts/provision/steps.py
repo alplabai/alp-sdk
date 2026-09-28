@@ -894,13 +894,11 @@ class Gd32Flash(Step):
         ctx.mutate("reset/run the GD32", b.probe.reset_run)
 
         def bridge():
-            r = t.run("dmesg | grep 'GD32 bridge protocol' | tail -n1", check=False).stdout.strip()
-            if not r:
-                raise BenchError("dmesg shows no 'GD32 bridge protocol' line")
-            if GD32_BRIDGE_ADDR not in lt.i2c_scan(t, ctx.i2c("brd")):
-                raise BenchError(f"GD32 bridge does not ACK at {GD32_BRIDGE_ADDR:#04x}")
-            return r
-        line = ctx.mutate("check dmesg 'GD32 bridge protocol' and the 0x70 ACK", bridge)
+            # ponytail: fixed 5 s settle for the post-reset boot + clock-up; poll if it proves short
+            t.run("sleep 5", check=False)
+            v = lt.gd32_bridge_version(t, ctx.i2c("brd"), GD32_BRIDGE_ADDR)
+            return "GD32 bridge protocol %d.%d.%d" % v
+        line = ctx.mutate(f"GET_VERSION from the bridge at {GD32_BRIDGE_ADDR:#04x}", bridge)
         if line:
             ev["gd32_protocol"] = line
         return self.result(ctx, "GD32 flashed and verified" if ctx.execute else "would flash the GD32", ev)
