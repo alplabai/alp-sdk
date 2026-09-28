@@ -55,7 +55,7 @@ RDEPENDS:${PN} = "${ROS_EXEC_DEPENDS} alp-sdk"
 # node.  It is a SoM/machine-level install: the three V2M machine confs
 # add dx-driver/dx-rt only on the V2M variants (which carry DEEPX
 # silicon), via conf/machine/include/e1m-v2m-deepx.inc when
-# ALP_ENABLE_DEEPX_DXM1 = "1" -- the same opt-in gate any other
-# license-gated NPU runtime goes through.  On V2N101/V2N102 (no DEEPX)
+# ALP_ENABLE_DEEPX_DXM1 = "1" (on by default whenever DEEPX's
+# meta-deepx-m1 layer is in bblayers.conf).  On V2N101/V2N102 (no DEEPX)
 # the node's alp_inference_open AUTO-falls through to DRP-AI.  Same
 # source builds for both; only the machine's install set differs.

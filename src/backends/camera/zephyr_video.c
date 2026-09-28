@@ -54,6 +54,11 @@
 #include "camera_ops.h"
 #include "alp_slot_claim.h"
 
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(alp_camera_zephyr_video, CONFIG_LOG_DEFAULT_LEVEL);
+
+#include "camera_frmival.h"
+
 #ifndef CONFIG_ALP_SDK_CAMERA_ZEPHYR_VIDEO_VBUF_COUNT
 #define CONFIG_ALP_SDK_CAMERA_ZEPHYR_VIDEO_VBUF_COUNT 2
 #endif
@@ -332,6 +337,8 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
 		}
 	}
 	st->vbuf_count = want;
+
+	alp_camera_apply_fps(dev, cfg->camera_id, cfg->fps);
 
 	state->be_data = st;
 	/* No special caps from the portable Zephyr video class -- ISP

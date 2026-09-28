@@ -173,6 +173,8 @@ week and an index would otherwise collide on the same MAC.
   field, alphabet `0123456789ABCDEFGHJKMNPQRSTVWXYZ` -- no `I`/`L`/`O`/`U`,
   never aliased) | 2-bit interface (`0` = `end0`, `1` = `end1`) | 2 reserved
   bits.
+* Single source of the values above: `metadata/identity/serial-mac.json`
+  (#2361); the Python side loads it and the tests pin the C side to it.
 * Canonical implementation: `scripts/alp_eth_mac.py` (host/tooling side) and
   U-Boot patch `meta-alp-sdk/recipes-bsp/u-boot/u-boot/0010-rzv2n-dev-ALP-E1M-serial-derived-eth-mac.patch`
   (device side) -- the two must stay bit-for-bit identical; both carry the

@@ -411,3 +411,39 @@ def test_security_psa_build_type_inherits_from_boot(tmp_path: Path) -> None:
     out = emit_tfm_sysbuild_conf(project)
     assert "SB_CONFIG_TFM_BUILD_TYPE=Debug" in out
 
+
+
+@pytest.mark.parametrize("sku, fitted", [("E1M-AEN801", False), ("E1M-AEN401", True)])
+def test_security_psa_attestation_optiga_follows_population(
+    tmp_path: Path, sku: str, fitted: bool
+) -> None:
+    """#2316: E1M-AEN801 names OPTIGA under `on_module:` and sets
+    `capabilities.optiga_trust_m: true`, but its i2c_devices entry is
+    `assembled: false` -- the loader must refuse an optiga_trust_m
+    attestation root there (same class as #2311's OSPI guard), while a
+    SKU with the part fitted (E1M-AEN401) still accepts it."""
+    import alp_orchestrate
+
+    board_path = tmp_path / "board.yaml"
+    board_path.write_text(textwrap.dedent(f"""
+        name: test-optiga-population
+        som:
+          sku: {sku}
+        cores:
+          m55_hp:
+            os: zephyr
+            app: ./m55_hp
+        security:
+          psa:
+            attestation_root: optiga_trust_m
+            tfm: true
+    """).lstrip("\n"), encoding="utf-8")
+
+    if fitted:
+        alp_orchestrate.load_board_yaml(board_path, metadata_root=REPO / "metadata")
+        return
+    with pytest.raises(OrchestratorError) as excinfo:
+        alp_orchestrate.load_board_yaml(board_path, metadata_root=REPO / "metadata")
+    msg = str(excinfo.value)
+    assert "not assembled" in msg
+    assert f"assembled: false in metadata/e1m_modules/{sku}.yaml" in msg
