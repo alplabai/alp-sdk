@@ -24,6 +24,7 @@ cores:
       - gpio
 
 chips:
+  - act8760
   - da9292
 
 diagnostics:

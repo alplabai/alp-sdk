@@ -445,6 +445,55 @@ alp_status_t act8760_rail_set_enable(act8760_t *ctx, act8760_rail_t rail, bool e
 	    ctx, loc->page, loc->en_reg, ACT8760_TILE_ON, enable ? ACT8760_TILE_ON : 0u);
 }
 
+#define ACT8760_POK_POLL_US 100u
+
+static alp_status_t read_pok(act8760_t *ctx, act8760_rail_t rail, bool *pok)
+{
+	uint8_t      st = 0;
+	alp_status_t s  = reg_read(ctx, rail_table[rail].page, rail_table[rail].status_reg, &st);
+	*pok            = (st & ACT8760_TILE_POK) != 0u;
+	return s;
+}
+
+alp_status_t act8760_sequence_up(act8760_t                *ctx,
+                                 const act8760_seq_step_t *steps,
+                                 size_t                    n,
+                                 act8760_delay_fn          delay,
+                                 void                     *user,
+                                 uint32_t                  pok_timeout_us,
+                                 size_t                   *failed_step)
+{
+	if (failed_step != NULL) *failed_step = 0;
+	if (!ready(ctx)) return ALP_ERR_NOT_READY;
+	if (steps == NULL || delay == NULL) return ALP_ERR_INVAL;
+
+	for (size_t i = 0; i < n; i++) {
+		if (failed_step != NULL) *failed_step = i;
+		act8760_rail_t rail = steps[i].rail;
+		if ((unsigned)rail >= ACT8760_RAIL_COUNT) return ALP_ERR_INVAL;
+
+		/* Already regulating (A55 boot: the CMI ran) -> zero writes. */
+		bool         pok = false;
+		alp_status_t s   = read_pok(ctx, rail, &pok);
+		if (s != ALP_OK) return s;
+		if (pok) continue;
+
+		delay(user, (uint32_t)steps[i].delay_ms * 1000u);
+		s = act8760_rail_set_enable(ctx, rail, true);
+		if (s != ALP_OK) return s;
+
+		for (uint32_t waited = 0;; waited += ACT8760_POK_POLL_US) {
+			s = read_pok(ctx, rail, &pok);
+			if (s != ALP_OK) return s;
+			if (pok) break;
+			if (waited >= pok_timeout_us) return ALP_ERR_TIMEOUT;
+			delay(user, ACT8760_POK_POLL_US);
+		}
+	}
+	if (failed_step != NULL) *failed_step = n;
+	return ALP_OK;
+}
+
 alp_status_t act8760_gpio_get(act8760_t *ctx, uint8_t gpio, act8760_gpio_state_t *out)
 {
 	if (!ready(ctx)) return ALP_ERR_NOT_READY;

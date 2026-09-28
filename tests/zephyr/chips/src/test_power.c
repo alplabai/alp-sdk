@@ -618,12 +618,97 @@ ZTEST(alp_chips, test_act8760_noncritical_disable_hits_add2)
 	alp_i2c_close(bus);
 }
 
+/* CM33 cold boot: the eight GPIO5-chain rails, VSET0 at the CMI targets,
+ * ON clear, not POK.  {page, status, vset reg, vset, range reg, range}. */
+static const struct {
+	uint8_t page, st, vset_reg, vset, rng_reg, rng;
+} cm33_cold[] = {
+	{ 0u, 0x40u, 0x42u, 0x70u, 0x46u, 0x02u }, /* Buck1 3.3 V   */
+	{ 1u, 0x00u, 0x02u, 0x50u, 0x06u, 0x00u }, /* Buck7 0.9 V   */
+	{ 1u, 0x66u, 0x67u, 0x90u, 0x67u, 0x90u }, /* LDO4  1.8 V   */
+	{ 0u, 0xC0u, 0xC2u, 0x0Cu, 0xC2u, 0x0Cu }, /* Buck5 0.8 V   */
+	{ 0u, 0xA0u, 0xA2u, 0x34u, 0xA1u, 0x08u }, /* Buck4 1.8 V   */
+	{ 0u, 0x80u, 0x82u, 0x18u, 0x81u, 0x08u }, /* Buck3 1.1 V   */
+	{ 1u, 0x46u, 0x47u, 0xAEu, 0x47u, 0xAEu }, /* LDO3  3.3 V   */
+	{ 1u, 0x26u, 0x27u, 0x38u, 0x27u, 0x38u }, /* LDO2  1.2 V   */
+};
+
+static uint32_t seq_waited_us;
+
+static void seq_delay(void *user, uint32_t us)
+{
+	(void)user;
+	seq_waited_us += us;
+}
+
+ZTEST(alp_chips, test_act8760_cm33_boot_sequence)
+{
+	static const act8760_seq_step_t seq[] = V2N_POWER_ACT8760_CM33_BOOT_SEQ_INIT;
+	zassert_equal(ARRAY_SIZE(seq), V2N_POWER_ACT8760_CM33_BOOT_SEQ_LEN);
+	zassert_equal(ARRAY_SIZE(seq), ARRAY_SIZE(cm33_cold));
+
+	act8760_t  ctx;
+	alp_i2c_t *bus = act_setup(&ctx);
+	for (size_t i = 0; i < ARRAY_SIZE(cm33_cold); i++) {
+		fake_act8760_set_reg(cm33_cold[i].page, cm33_cold[i].st, 0x00u);
+		fake_act8760_set_reg(cm33_cold[i].page, cm33_cold[i].rng_reg, cm33_cold[i].rng);
+		fake_act8760_set_reg(cm33_cold[i].page, cm33_cold[i].vset_reg, cm33_cold[i].vset);
+	}
+	fake_act8760_set_reg(0u, 0x44u, 0x00u); /* act_setup left Buck1 ON */
+	size_t failed = 99u;
+
+	/* Fail-closed before a table is installed, nothing on the bus. */
+	zassert_equal(act8760_sequence_up(&ctx, seq, ARRAY_SIZE(seq), seq_delay, NULL, 1000u, &failed),
+	              ALP_ERR_NOSUPPORT);
+	zassert_equal(failed, 0u);
+	zassert_equal(fake_act8760_log_len(), 0u);
+
+	zassert_ok(
+	    act8760_set_limits(&ctx, act_v2n_limits, V2N_POWER_ACT8760_GPIO_POLARITY_WRITABLE_MASK));
+
+	/* A rail that never regulates: timeout, stop at that step. */
+	seq_waited_us = 0;
+	zassert_equal(act8760_sequence_up(&ctx, seq, ARRAY_SIZE(seq), seq_delay, NULL, 1000u, &failed),
+	              ALP_ERR_TIMEOUT);
+	zassert_equal(failed, 0u);
+	zassert_equal(fake_act8760_log_len(), 1u, "only Buck1 ON was written");
+
+	/* Cold: every rail switched on, in CMI order, after its delay. */
+	fake_act8760_reset();
+	fake_act8760_set_auto_pok(true);
+	for (size_t i = 0; i < ARRAY_SIZE(cm33_cold); i++) {
+		fake_act8760_set_reg(cm33_cold[i].page, cm33_cold[i].rng_reg, cm33_cold[i].rng);
+		fake_act8760_set_reg(cm33_cold[i].page, cm33_cold[i].vset_reg, cm33_cold[i].vset);
+	}
+	seq_waited_us = 0;
+	zassert_ok(act8760_sequence_up(&ctx, seq, ARRAY_SIZE(seq), seq_delay, NULL, 1000u, &failed));
+	zassert_equal(failed, ARRAY_SIZE(seq));
+	zassert_equal(fake_act8760_log_len(), ARRAY_SIZE(seq), "one ON write per rail");
+	for (size_t i = 0; i < ARRAY_SIZE(cm33_cold); i++) {
+		const struct fake_act8760_write *w = fake_act8760_log(i);
+		zassert_equal(w->page, cm33_cold[i].page, "step %u", (unsigned)i);
+		zassert_equal(w->val & 0x80u, 0x80u, "step %u", (unsigned)i);
+		zassert_true(fake_act8760_get_reg(cm33_cold[i].page, cm33_cold[i].st) & 0x80u);
+	}
+	zassert_equal(fake_act8760_log(0)->reg, 0x44u, "Buck1 first");
+	zassert_equal(fake_act8760_log(1)->reg, 0x04u, "Buck7 (ADD2) second");
+	zassert_equal(fake_act8760_log(7)->reg, 0x28u, "LDO2 (ADD2) last");
+	zassert_equal(seq_waited_us, (8u + 8u + 0u + 1u + 1u + 2u + 16u + 0u) * 1000u);
+
+	/* Warm (A55 boot, or a second run): all POK -> zero writes, zero waits. */
+	seq_waited_us = 0;
+	zassert_ok(act8760_sequence_up(&ctx, seq, ARRAY_SIZE(seq), seq_delay, NULL, 1000u, NULL));
+	zassert_equal(fake_act8760_log_len(), ARRAY_SIZE(seq));
+	zassert_equal(seq_waited_us, 0u);
+
+	act8760_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
 /* act8760_rail_set_enable(true) must refuse a live VSET the guard window no
  * longer covers, the same rule da9292_set_enable() / software_enable()
  * already apply -- exercised through a synthetic voltage+enable-writable
- * entry, since no real V2N rail combines both (every ACT88760 "voltage"
- * rail in the power tree is CMI-hardware-sequenced and enable_writable is
- * false there by design; see power-tree.yaml's control-class comment). */
+ * Buck1 entry so the test does not depend on the power-tree table. */
 ZTEST(alp_chips, test_act8760_rail_set_enable_refuses_vout_outside_window)
 {
 	act8760_t  ctx;

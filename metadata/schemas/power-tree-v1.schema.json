@@ -252,6 +252,29 @@
         }
       }
     },
+    "cm33_boot_sequence": {
+      "description": "CM33 cold boot: ordered ACT88760 rails the CM33 switches on itself (act8760_sequence_up()) because the PMIC skips its V2N_BOOT_CPU_SEL-triggered chain. delay_ms = wait after the previous step's POK.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rail",
+          "delay_ms"
+        ],
+        "properties": {
+          "rail": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "delay_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000
+          }
+        }
+      }
+    },
     "gpios": {
       "type": "array",
       "minItems": 1,

@@ -163,3 +163,27 @@ def test_committed_header_in_sync(real, tmp_path):
     tree, _, _ = real
     fresh = clang_format_text(tmp_path, "v2n_power_tree.h", g.render(tree, "v2n"))
     assert HEADER.read_text(encoding="utf-8") == fresh, "run: python3 scripts/gen_power_tree.py"
+
+
+def test_cm33_boot_sequence_matches_the_cm33_owned_rails(real):
+    tree, *_ = real
+    seq = [s["rail"] for s in tree["cm33_boot_sequence"]]
+    assert seq[0] == "vdd_3v3" and seq[1] == "vdd09_ca55"      # CMI: Buck1 GPIO5+8, Buck7 GPIO5+16
+    assert seq.index("lpd4x_1v1") < seq.index("vdd_emmc_3v3") < seq.index("ldo_1v2")  # Buck3 -> LDO3 -> LDO2
+    owned = {r["id"] for r in tree["rails"] if r["owner"]["cm33_boot"] == "cm33" and r["chip"] == "act8760"}
+    assert set(seq) == owned
+    assert "#define V2N_POWER_ACT8760_CM33_BOOT_SEQ_LEN 8u" in g.render(tree, "v2n")
+
+
+@pytest.mark.parametrize("mutate,err", [
+    (lambda t: t["cm33_boot_sequence"].append({"rail": "vdd_3v3", "delay_ms": 0}), "listed twice"),
+    (lambda t: t["cm33_boot_sequence"].append({"rail": "vdd1g_1p8", "delay_ms": 0}), "needs control"),
+    (lambda t: t["cm33_boot_sequence"].append({"rail": "vdd_0p75", "delay_ms": 0}), "not an ACT88760"),
+    (lambda t: t["cm33_boot_sequence"].pop(), "not in cm33_boot_sequence"),
+    (lambda t: _rail(t, "vdd_3v3").update(control="voltage"), "needs control"),
+])
+def test_cm33_boot_sequence_defects_are_caught(real, mutate, err):
+    tree, *_ = real
+    bad = copy.deepcopy(tree)
+    mutate(bad)
+    assert any(err in e for e in g._check_cm33_sequence(bad))

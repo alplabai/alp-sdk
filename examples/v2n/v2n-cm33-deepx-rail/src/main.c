@@ -39,6 +39,7 @@
 #include <stdio.h>
 
 #include "alp/peripheral.h"
+#include "alp/chips/act8760.h"
 #include "alp/chips/da9292.h"
 #include "alp/chips/v2n_power_tree.h"
 
@@ -122,6 +123,43 @@ int main(void)
 		return 0;
 	}
 
+	/* ACT88760 rails.  In CM33 boot the PMIC samples V2N_BOOT_CPU_SEL
+	 * (its GPIO5) low and never starts the rails its CMI triggers from it
+	 * -- VDD_3V3, VDD09_CA55, VDD_1V8 -- nor the DDR / eMMC rails chained
+	 * behind them.  Replay that chain in CMI order before anything else
+	 * (the DEEPX rail below and the CA55 both need it).  The step table
+	 * is generated from metadata/e1m_modules/v2n/power-tree.yaml's
+	 * `cm33_boot_sequence`; a rail already POK is skipped with zero
+	 * writes, so a warm run only verifies. */
+	act8760_t                      act;
+	alp_status_t                   s = act8760_init(&act, i2c);
+	static const pmic_rail_limit_t act_limits[ACT8760_RAIL_COUNT] =
+	    V2N_M1_POWER_ACT8760_RAIL_LIMITS_INIT;
+	if (s == ALP_OK) s = act8760_set_limits(&act, act_limits, 0u);
+	static const act8760_seq_step_t act_seq[] = V2N_POWER_ACT8760_CM33_BOOT_SEQ_INIT;
+	size_t                          act_step  = 0;
+	if (s == ALP_OK) {
+		s = act8760_sequence_up(&act,
+		                        act_seq,
+		                        V2N_POWER_ACT8760_CM33_BOOT_SEQ_LEN,
+		                        zephyr_delay_us,
+		                        NULL,
+		                        20000u, /* per-rail POK timeout, us */
+		                        &act_step);
+	}
+	if (s != ALP_OK) {
+		printf("[cm33-deepx-rail] ACT88760 rail replay FAILED at step %u: %d -- "
+		       "not touching the DEEPX rail
+		       ",
+		       (unsigned)act_step,
+		       (int)s);
+		alp_i2c_close(i2c);
+		return 0;
+	}
+	printf("[cm33-deepx-rail] ACT88760 rails up (%u-step CM33-boot chain)
+	       ",
+	       (unsigned)V2N_POWER_ACT8760_CM33_BOOT_SEQ_LEN);
+
 	/* P64 DEEPX_CORE_0P75_EN: output, start low (rail stays down until
 	 * the sequence below confirms CH2 power-good).  Write false BEFORE
 	 * configure, then again after -- the same write-before-configure-
@@ -134,8 +172,8 @@ int main(void)
 	 * flight before that switch closes the window; the second write
 	 * covers a backend (gpio_emul among them) that drops a write issued
 	 * before the pin is configured as output. */
-	alp_gpio_t  *core_en = alp_gpio_open(PIN_ID_DEEPX_CORE_0P75_EN);
-	alp_status_t s       = ALP_ERR_NOT_READY;
+	alp_gpio_t *core_en = alp_gpio_open(PIN_ID_DEEPX_CORE_0P75_EN);
+	s                   = ALP_ERR_NOT_READY;
 	if (core_en != NULL) {
 		s = alp_gpio_write(core_en, false);
 		if (s == ALP_OK) s = alp_gpio_configure(core_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);

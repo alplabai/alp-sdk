@@ -192,11 +192,35 @@ def _check_boot_modes(tree: dict, ownership: dict | None) -> list[str]:
     return errs
 
 
+def _check_cm33_sequence(tree: dict) -> list[str]:
+    """`cm33_boot_sequence` names exactly the ACT88760 rails whose
+    cm33_boot owner is cm33, each once, each enable-writable and critical
+    (so the sequence can switch it on but nothing can switch it off)."""
+    errs: list[str] = []
+    by_id = {r["id"]: r for r in tree["rails"]}
+    seq = [s["rail"] for s in tree.get("cm33_boot_sequence") or []]
+    for rid in seq:
+        r = by_id.get(rid)
+        if r is None:
+            errs.append(f"cm33_boot_sequence: unknown rail {rid}")
+        elif r["chip"] != "act8760":
+            errs.append(f"cm33_boot_sequence: {rid} is not an ACT88760 rail")
+        elif r["control"] != "voltage_enable" or not r["critical"] or r["owner"]["cm33_boot"] != "cm33":
+            errs.append(f"cm33_boot_sequence: {rid} needs control voltage_enable, critical true "
+                        f"and owner.cm33_boot cm33")
+    if len(set(seq)) != len(seq):
+        errs.append("cm33_boot_sequence: a rail is listed twice")
+    for r in tree["rails"]:
+        if r["chip"] == "act8760" and r["owner"]["cm33_boot"] == "cm33" and r["id"] not in seq:
+            errs.append(f"rail {r['id']}: owner.cm33_boot is cm33 but it is not in cm33_boot_sequence")
+    return errs
+
+
 def cross_check(tree: dict, chips: dict, som_presets: dict[str, dict],
                 ownership: dict | None = None) -> list[str]:
     """Semantic checks beyond the schema.  som_presets: {sku: preset doc};
     ownership: the family's core-ownership.yaml (see load_ownership())."""
-    errs: list[str] = _check_boot_modes(tree, ownership)
+    errs: list[str] = _check_boot_modes(tree, ownership) + _check_cm33_sequence(tree)
     pct = tree["window_policy"]["default_tolerance_pct"]
     families = set(tree["families"])
     seen_ids: set[str] = set()
@@ -368,6 +392,15 @@ def render(tree: dict, family_dir: str) -> str:
     L += [f"/** ACT88760 GPIO net names, index = GPIO number - 1. */"]
     L += _macro(f"{fam0}_ACT8760_GPIO_NETS_INIT",
                 [f'"{g["net"]}"' for g in sorted(tree["gpios"], key=lambda g: g["gpio"])])
+    seq = tree.get("cm33_boot_sequence") or []
+    if seq:
+        by_id = {r["id"]: r for r in rails}
+        L += ["/** CM33 cold boot: ACT88760 rails act8760_sequence_up() switches on, in",
+              " *  order (act8760_seq_step_t: rail, delay_ms after the previous POK). */",
+              f"#define {fam0}_ACT8760_CM33_BOOT_SEQ_LEN {len(seq)}u"]
+        L += _macro(f"{fam0}_ACT8760_CM33_BOOT_SEQ_INIT",
+                    [f"{{ ACT8760_RAIL_{by_id[s['rail']]['channel'].upper()}, {s['delay_ms']}u }}"
+                     for s in seq])
 
     for fam in tree["families"]:
         pre = _prefix(fam)

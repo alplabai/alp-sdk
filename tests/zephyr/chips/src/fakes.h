@@ -221,8 +221,10 @@ void                             fake_act8760_set_reg(uint8_t page, uint8_t reg,
 uint32_t                         fake_act8760_write_count(uint8_t page, uint8_t reg);
 size_t                           fake_act8760_log_len(void);
 const struct fake_act8760_write *fake_act8760_log(size_t i);
-/** Zero both pages, the counters and the log. */
+/** Zero both pages, the counters and the log; auto-POK off. */
 void fake_act8760_reset(void);
+/** When on, writing a tile's ON bit (bit7) also sets its status POK bit. */
+void fake_act8760_set_auto_pok(bool on);
 
 /* ------------------------------------------------------------------ */
 /* fake DA9292                                                         */

@@ -15,6 +15,7 @@
 #define DT_DRV_COMPAT alp_fake_act8760
 
 #include <errno.h>
+#include <stdbool.h>
 #include <string.h>
 
 #include <zephyr/device.h>
@@ -37,9 +38,32 @@ static uint32_t                  g_write_count[2][256];
 static struct fake_act8760_write g_log[FAKE_ACT8760_LOG_MAX];
 static size_t                    g_log_len;
 
+static bool g_auto_pok;
+
+/* Tile status register for an ON register, or -1: bucks sit at ON - 4
+ * (page 0 tiles 0x40..0xE0, Buck7 at page 1 0x00); LDOs at ON - 2. */
+static int status_for_on(uint8_t page, uint8_t reg)
+{
+	if (page == 0u) return (reg >= 0x44u && (reg & 0x1Fu) == 0x04u) ? reg - 4 : -1;
+	if (reg == 0x04u) return 0x00;
+	switch (reg) {
+	case 0x22u:
+	case 0x28u:
+	case 0x42u:
+	case 0x48u:
+	case 0x62u:
+	case 0x68u:
+		return reg - 2;
+	default:
+		return -1;
+	}
+}
+
 static void record_write(uint8_t page, uint8_t reg, uint8_t val)
 {
 	g_regs[page][reg] = val;
+	int st            = status_for_on(page, reg);
+	if (g_auto_pok && st >= 0 && (val & 0x80u) != 0u) g_regs[page][st] |= 0x80u;
 	g_write_count[page][reg]++;
 	if (g_log_len < FAKE_ACT8760_LOG_MAX) {
 		g_log[g_log_len++] = (struct fake_act8760_write){ page, reg, val };
@@ -135,5 +159,11 @@ void fake_act8760_reset(void)
 {
 	memset(g_regs, 0, sizeof g_regs);
 	memset(g_write_count, 0, sizeof g_write_count);
-	g_log_len = 0;
+	g_log_len  = 0;
+	g_auto_pok = false;
+}
+
+void fake_act8760_set_auto_pok(bool on)
+{
+	g_auto_pok = on;
 }

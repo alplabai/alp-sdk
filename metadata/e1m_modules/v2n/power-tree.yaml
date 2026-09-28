@@ -22,11 +22,13 @@
 #   * a rail whose target is not confirmed has `target_mv: null`,
 #     `window_mv: null`, `control: none` -- never an invented value;
 #   * `control: voltage` grants ONLY a voltage write, never enable/disable --
-#     every ACT88760 rail below is the PMIC's own CMI hardware sequence, not
-#     a software on/off switch.  `control: voltage_enable` is the explicit
-#     opt-in for a rail whose enable IS a documented guarded API (the four
-#     TPS628640 bucks, whose SOFTWARE_ENABLE bit tps628640_software_enable()
-#     exposes) -- reviewed per rail, never the default.
+#     in A55 boot every ACT88760 rail is the PMIC's own CMI hardware
+#     sequence.  `control: voltage_enable` is the explicit opt-in for a
+#     rail whose enable IS a documented guarded API: the four TPS628640
+#     bucks (SOFTWARE_ENABLE, tps628640_software_enable()) and the ACT88760
+#     rails the CM33 must switch on itself in CM33 boot
+#     (`cm33_boot_sequence:` below; enable only -- `critical` still forbids
+#     switching them off) -- reviewed per rail, never the default.
 #
 # Net names are PUBLIC (maintainer decision 2026-09-24).
 #
@@ -112,8 +114,8 @@ rails:
     range: 1
     window_mv: [3150, 3450]
     critical: true
-    control: voltage
-    owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
+    control: voltage_enable       # CM33 boot: switched on by act8760_sequence_up()
+    owner: { a55_boot: pmic_cmi, cm33_boot: cm33 }
     populated_on: [v2n, v2n-m1]
     evidence: "CMI Buck1 3.3 V range 1, trigger GPIO5 +8 ms == report VDD_3V3 (+8 ms after V2N_BOOT_CPU_SEL)"
   - id: vdd1g_1p8
@@ -140,8 +142,8 @@ rails:
     range: 1
     window_mv: [1050, 1150]
     critical: true
-    control: voltage
-    owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
+    control: voltage_enable       # CM33 boot: switched on by act8760_sequence_up()
+    owner: { a55_boot: pmic_cmi, cm33_boot: cm33 }
     populated_on: [v2n, v2n-m1]
     evidence: "CMI Buck3 1.1 V range 1, trigger Buck7 +4 ms == report LPD4x_1V1 (+4 ms after VDD09_CA55)"
   - id: lpddr_1v8
@@ -154,8 +156,8 @@ rails:
     range: 1
     window_mv: [1725, 1875]
     critical: true
-    control: voltage
-    owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
+    control: voltage_enable       # CM33 boot: switched on by act8760_sequence_up()
+    owner: { a55_boot: pmic_cmi, cm33_boot: cm33 }
     populated_on: [v2n, v2n-m1]
     evidence: "CMI Buck4 1.8 V range 1, trigger Buck7 +2 ms == report LPDDR_1V8 (+2 ms after VDD09_CA55)"
   - id: vdd_core_0p75
@@ -189,8 +191,8 @@ rails:
     range: 1
     window_mv: [775, 825]
     critical: true
-    control: voltage
-    owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
+    control: voltage_enable       # CM33 boot: switched on by act8760_sequence_up()
+    owner: { a55_boot: pmic_cmi, cm33_boot: cm33 }
     populated_on: [v2n, v2n-m1]
     evidence: >-
       Settled 2026-09-25: confirmed against the module design data, and a live read of tile 0xC2 = 0x0C (800 mV, 25 mV range)
@@ -206,8 +208,8 @@ rails:
     range: 0
     window_mv: [855, 945]
     critical: true
-    control: voltage
-    owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
+    control: voltage_enable       # CM33 boot: switched on by act8760_sequence_up()
+    owner: { a55_boot: pmic_cmi, cm33_boot: cm33 }
     populated_on: [v2n, v2n-m1]
     evidence: "CMI Buck7 0.9 V range 0, trigger GPIO5 +16 ms == report VDD09_CA55"
   - id: vdd1g_0p8
@@ -234,8 +236,8 @@ rails:
     range: 0
     window_mv: [1150, 1250]
     critical: true
-    control: voltage
-    owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
+    control: voltage_enable       # CM33 boot: switched on by act8760_sequence_up()
+    owner: { a55_boot: pmic_cmi, cm33_boot: cm33 }
     populated_on: [v2n, v2n-m1]
     evidence: "CMI LDO2 1.2 V range 0 == report LDO_1V2 (only 1.2 V LDO net)"
   - id: vdd_emmc_3v3
@@ -248,8 +250,8 @@ rails:
     range: 1
     window_mv: [3150, 3450]
     critical: true
-    control: voltage
-    owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
+    control: voltage_enable       # CM33 boot: switched on by act8760_sequence_up()
+    owner: { a55_boot: pmic_cmi, cm33_boot: cm33 }
     populated_on: [v2n, v2n-m1]
     evidence: "CMI LDO3 3.3 V range 1 (trigger Buck3 +16 ms); report VDD_eMMC_3V3 is the only 3.3 V net left after Buck1=VDD_3V3 -- mapping by elimination, confirm against the schematic"
   - id: vdd_1v8
@@ -262,8 +264,8 @@ rails:
     range: 1
     window_mv: [1750, 1850]
     critical: true
-    control: voltage
-    owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
+    control: voltage_enable       # CM33 boot: switched on by act8760_sequence_up()
+    owner: { a55_boot: pmic_cmi, cm33_boot: cm33 }
     populated_on: [v2n, v2n-m1]
     evidence: "CMI LDO4 1.8 V range 1, trigger GPIO5 +16 ms == report VDD_1V8"
   - id: vdd5g_1p8
@@ -388,6 +390,31 @@ rails:
     populated_on: [v2n, v2n-m1]
     assembled: optional
     evidence: "SoM presets list 0x4D as assembled: optional; not seen on the E1M-V2M103 bench scan"
+
+# CM33 cold boot: the ACT88760 also samples V2N_BOOT_CPU_SEL (GPIO5, an
+# EXT PG input in CMI 120.E1) and, with it LOW, never starts the rails the
+# CMI triggers from it -- nor the rails chained behind them (maintainer,
+# 2026-09-28: "nothing comes up automatically").  Only MODULE_EN-triggered
+# Buck2 (VDD1G_1P8) and LDO1 (VDD1G_0P8), plus the PWEN1/PWEN2-gated
+# load switches and Buck6, are driven without software.  The CM33 replays
+# the missing chain over RIIC8 with act8760_sequence_up() BEFORE it
+# releases the CA55, in CMI order.  `delay_ms` is the CMI on-delay
+# measured from the previous step's POK (from the start for the first
+# step), so every gap is at least the CMI one.  Rails are named by
+# register tile; the CMI input matrix numbers Buck5/Buck6 the other way
+# round (see vdd_core_0p75).  Source: ACT88760 CMI 120 Rev E1 input
+# matrix (Alp Lab): Buck1 GPIO5 +8, Buck7 GPIO5 +16, LDO4 GPIO5 +16,
+# Buck5 (CMI "Buck 6") Buck7 +1, Buck4 Buck7 +2, Buck3 Buck7 +4,
+# LDO3 Buck3 +16, LDO2 LDO3 +0.
+cm33_boot_sequence:
+  - { rail: vdd_3v3,      delay_ms: 8 }    # Buck1: GPIO5 +8 ms
+  - { rail: vdd09_ca55,   delay_ms: 8 }    # Buck7: GPIO5 +16 ms
+  - { rail: vdd_1v8,      delay_ms: 0 }    # LDO4:  GPIO5 +16 ms
+  - { rail: vdd08_ddr,    delay_ms: 1 }    # Buck5: Buck7 +1 ms
+  - { rail: lpddr_1v8,    delay_ms: 1 }    # Buck4: Buck7 +2 ms
+  - { rail: lpd4x_1v1,    delay_ms: 2 }    # Buck3: Buck7 +4 ms
+  - { rail: vdd_emmc_3v3, delay_ms: 16 }   # LDO3:  Buck3 +16 ms
+  - { rail: ldo_1v2,      delay_ms: 0 }    # LDO2:  LDO3 +0 ms
 
 # ACT88760 GPIOs (MSTR MODE1..7 = 0x0D..0x13, MODE8..11 = 0x27..0x2A;
 # bit7 = polarity, bits3:0 = MUX, bits6:4 factory).  Only the polarity bit

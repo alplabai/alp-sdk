@@ -126,6 +126,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 #include "alp/peripheral.h"
 #include "alp/chips/pmic_rail_limit.h"
@@ -387,6 +388,54 @@ alp_status_t act8760_rail_set_voltage_mv(act8760_t *ctx, act8760_rail_t rail, ui
  *         status on I2C failure.
  */
 alp_status_t act8760_rail_set_enable(act8760_t *ctx, act8760_rail_t rail, bool enable);
+
+/**
+ * @brief Wait callback for act8760_sequence_up().
+ *
+ * @param user  The caller's cookie, passed through unchanged.
+ * @param us    Microseconds to wait (at least).
+ */
+typedef void (*act8760_delay_fn)(void *user, uint32_t us);
+
+/** One step of a software power-up sequence (generated
+ *  `<FAMILY>_ACT8760_CM33_BOOT_SEQ_INIT`). */
+typedef struct {
+	act8760_rail_t rail;     /**< Rail to switch on. */
+	uint16_t       delay_ms; /**< Wait before this step, after the previous step's POK. */
+} act8760_seq_step_t;
+
+/**
+ * @brief Switch rails on in order, each after its delay, waiting for POK.
+ *
+ * Replays in software the part of the CMI power-up sequence the PMIC
+ * skips on its own: in CM33 cold boot (RZ/V2N `BOOTSELCPU` low) the
+ * ACT88760 sees `V2N_BOOT_CPU_SEL` (GPIO5) low and never starts the
+ * rails triggered from it.  Per step: a rail whose tile already reports
+ * POK is left untouched (zero writes -- an A55 boot, where the CMI ran,
+ * is a pure verify); otherwise wait @p steps[i].delay_ms, set the ON bit
+ * through act8760_rail_set_enable() (window- and table-guarded), then
+ * poll the tile's POK bit.  Stops at the first failure; rails already
+ * switched on stay on (every sequenced rail is `critical`).
+ *
+ * @param ctx             ACT8760 context handle with a limits table installed.
+ * @param steps           Ordered steps.
+ * @param n               Number of steps.
+ * @param delay           Wait callback (must not be NULL).
+ * @param user            Cookie passed to @p delay.
+ * @param pok_timeout_us  Per-rail POK timeout.
+ * @param failed_step     Optional; receives the failing step index, or
+ *                        @p n on success.
+ * @return ALP_OK; ALP_ERR_NOT_READY if not initialised; ALP_ERR_INVAL on
+ *         NULL @p steps / @p delay or an invalid rail; ALP_ERR_TIMEOUT if
+ *         a rail never reports POK; any act8760_rail_set_enable() error.
+ */
+alp_status_t act8760_sequence_up(act8760_t                *ctx,
+                                 const act8760_seq_step_t *steps,
+                                 size_t                    n,
+                                 act8760_delay_fn          delay,
+                                 void                     *user,
+                                 uint32_t                  pok_timeout_us,
+                                 size_t                   *failed_step);
 
 /**
  * @brief Read one GPIO's level, polarity, MUX, drive type and IRQ mask.
