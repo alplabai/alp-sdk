@@ -121,7 +121,7 @@ without rewriting the layer above.
   │               │    │                                                                        │
   │               │    │  ── 80+ Tier-1 chip drivers + Tier-2 community repo:                   │
   │               │    │        lsm6dso, bmi323, bmp581, icm42670, ina236, tmp112,              │
-  │               │    │        tcal9538, rv3028c7, 24c128, cc3501e, ssd13xx, …                 │
+  │               │    │        tcal9538, rv3028c7, 24c128, cc3501e, ssd1306,                   │
   │               │    │  ── User libraries (board.yaml libraries:):                            │
   │               │    │        ETL · fmt · nlohmann_json · doctest · LVGL · MbedTLS ·          │
   │               │    │        CMSIS-DSP · LittleFS                                            │

@@ -92,7 +92,8 @@ carries two source trees -- only the pinout `#include` and
 `som.sku:` differ, but the two app entry points are distinct
 artefacts.  The cross-cutting `<alp/...>` surface
 (`<alp/inference.h>`, `<alp/peripheral.h>`, `<alp/iot.h>`,
-`<alp/log.h>`, ...) IS shared and works the same on both lines.
+`<alp/console.h>`, ...) IS shared and works the same on both
+lines.
 
 The architectural reasoning lives at
 [`docs/adr/0011-intra-family-portability.md`](../adr/0011-intra-family-portability.md).
