@@ -376,11 +376,11 @@ The input the bundle expects is the `app_yolox_cam` preprocessing
 `examples/v2n/v2n-drpai-inference/README.md` documents: an RGB-114 letterbox
 with the image at the top, bilinear to 640, raw 0-255, NCHW float32.
 
-**No compiled model exists yet — an ONNX source does.** RUHMI ships a real
-model, `how-to/sample_app_v2h/app_yolox_cam/yolox-S_VOC.onnx` (35 MB,
-YOLOX-S on VOC), but there is no pre-compiled `drpai_dir` output anywhere in a
-fresh checkout — searching for `drp_desc.bin`, `weight.bin`, `addr_map.txt`
-and `deploy.json` finds none. `tutorials/README.md` documents the alternative
+**RUHMI ships the ONNX source, not a compiled bundle.** A fresh checkout has
+`how-to/sample_app_v2h/app_yolox_cam/yolox-S_VOC.onnx` (35 MB, YOLOX-S on
+VOC), but no pre-compiled `drpai_dir` output. A search for `drp_desc.bin`,
+`weight.bin`, `addr_map.txt` and `deploy.json` finds none. Every bundle comes
+from running the compile above yourself, as the #2236 detector bundle did. `tutorials/README.md` documents the alternative
 public source instead: `wget` a public ONNX
 (`resnet18-v1-7.onnx` from the `onnx/models` repo) and run
 `compile_onnx_model.py` against it. Either way, compiling still requires the
