@@ -356,18 +356,103 @@ on-module Murata LBEE5HY2FY-922's REG_ON timing requirement.
 
 A bridge below minor 11 never learned these two bits; a host driving
 `GPIO_WRITE` against them on such a bridge silently powers nothing
-while the firmware reports success. The Linux `gpio-gd32-bridge`
+while the firmware reports success. This is true only through protocol
+0.12: firmware 0.2.16 / protocol 0.13 rejects a write to an unknown pad
+bit outright (Refs #2341) rather than reporting success. The Linux
+`gpio-gd32-bridge`
 kernel driver resolves this at first *consumer* request rather than
 once at `probe()` (a single best-effort `GET_VERSION` at boot
 consistently races the bridge's own startup) -- see
 `GD32G553_REG_ON_MIN_PROTOCOL_MINOR` in
 [`include/alp/chips/gd32g553.h`](../include/alp/chips/gd32g553.h).
 
+**Host-behaviour note (Refs #2297; bug bench-observed 2026-09-26,
+E1M-V2M103; fix bench-verified 2026-09-26 on E1M-V2M103 with GD32_NRST
+held ~40 s past probe: the resolve poller's fixed 1 Hz ticks (1..30 s,
+then 31, 33, 37, 45, 61 s ...) mean the bridge was first observed by
+the 45 s poll — SDIO card enumerated 48.4 s, brcmfmac firmware 49.7 s,
+hci0 UP+RUNNING 54.8 s, devices_deferred empty, no rebind; a normal
+boot is unchanged):** `.request()`'s single non-blocking `GET_VERSION` attempt can
+end in one of three states -- confirmed supported, confirmed
+unsupported (a bridge that answered and reported a minor below 11 or
+an unexpected major), or *still unresolved* because the bridge hasn't
+answered at all yet. On the bench, that third case used to leave
+`mmc-pwrseq-simple`'s `wlan-pwrseq` (line 19) and `hci_bcm`'s
+`shutdown-gpios` (line 18) consumer sitting in
+`/sys/kernel/debug/devices_deferred` for the whole boot even though the
+bridge answered seconds later, because a bare `-EPROBE_DEFER` only
+gets retried by the kernel when some *other* driver's (un)registration
+happens to walk the deferred-probe list -- nothing guarantees that
+happens on its own. `.request()` must still return `-EPROBE_DEFER`
+rather than grant the request in that still-unresolved case, though:
+`mmc-pwrseq-simple` and `hci_bcm` each run a one-shot power-up sequence
+(`mmc_rescan()` / loading the `.hcd` patch) immediately once
+`.request()` succeeds, and SDHI2 being non-removable means that
+sequence never reruns on its own if it runs before REG_ON can actually
+move.
+
+What resolves a slow bridge instead: a second, independent poll -- a
+dedicated `delayed_work` polls `GET_VERSION` regardless of whether any
+consumer has requested the lines yet (flat at ~1 Hz for the first
+~30 s, then backing off exponentially to a 30 s cap). This poller is
+terminal, not perpetual: it stops rescheduling itself the moment it
+gets a definitive answer (confirmed supported, or confirmed
+unsupported) and kicks deferred probing once. It does not keep running
+afterwards to notice a later bridge reset or OTA A/B swap -- nothing
+re-resolves the lines-18/19 *capability* answer once this poller has
+settled it; only the separate output-state replay below keeps
+re-applying pad *levels* after a reset. On its first definitive answer
+it briefly registers a throwaway `platform_device` purely so that
+device's bind runs `driver_bound()` -> the kernel's own
+`driver_deferred_probe_trigger()` (`drivers/base/dd.c`, called from
+`driver_bound()` on every successful bind) -- a convenient in-tree
+hook module code can use to queue a deferred-probe retry
+(asynchronous, on `system_unbound_wq`) on demand, not the only such
+mechanism (`device_reprobe()` / `bus_rescan_devices()` /
+`wait_for_device_probe()` also exist). That gets `mmc-pwrseq-simple` /
+`hci_bcm` to retry `.request()` with
+the real answer -- granted, or failing outright with `-ENODEV` --
+instead of lingering deferred indefinitely. A confirmed `-ENODEV`
+is cached for the life of the driver instance (until the next reboot);
+it is not re-checked even across a bridge OTA A/B swap, since a
+firmware update that adds REG_ON support mid-boot is not a scenario
+this driver defends against today.
+
 **Any GD32 reset drops both lines low again** (WDT, fault, OTA A/B
 swap, SE reset -- the boot-time OUTPUT LOW default applies on every
 reset), which power-cycles the module. The host must re-assert them
-after a bridge reset, not only at first bring-up; `CMD_RESET_REASON`
-is how it detects one. No host code does that yet (#2297).
+after a bridge reset, not only at first bring-up.
+
+The Linux `gpio-gd32-bridge` driver does this without reset detection
+(`CMD_RESET_REASON` is clear-on-read on the firmware side, so polling
+it would itself lose the very information a *second* poller needs):
+every line ever written is latched host-side in `output_mask`/
+`output_vals` **before** the write is attempted, so a failed transfer
+never loses the requested state, and a `delayed_work` re-issues one
+idempotent `GPIO_WRITE(output_mask, output_vals)` roughly once a
+second whenever `output_mask != 0`. Re-asserting an already-correct
+level is glitch-free, so this needs no reset detection at all -- it
+just needs to run often enough that a bridge coming back up (first
+bring-up, or after any reset) is re-promoted within about one period.
+This costs one small I2C frame/s on BRD_I2C (`i2c8`) while any line is
+held as output; see `gd32_bridge_replay_work()` (Refs #2297).
+
+Only the Linux `gpio-gd32-bridge` driver does this. The CM33/Zephyr side
+of the bridge does not yet re-assert anything after a reset, so #2297
+stays open for that half. Also note what re-asserting REG_ON does and
+does not fix: it restores the *pin level* only. The Linux Wi-Fi/BT
+drivers (`cyw-fmac` etc.) are not re-initialised by this replay -- a
+GD32 reset that also wedges or resets the Murata module itself still
+needs the normal Linux driver-level recovery, on top of the pin being
+re-asserted.
+
+**Shared-bus caveat:** BRD_I2C (`i2c8`) may be multi-mastered -- the
+CM33 also owns a device on it (DA9292 @ `0x1E`). Arbitration loss on a
+contended bus surfaces to the replay as an ordinary transfer failure
+(the "output state replay failed" warning below), indistinguishable
+from the bridge simply being down. A wedged bus is retried at the same
+~1 Hz rate with no backoff, so a stuck bus gets one failing frame per
+second indefinitely rather than escalating or giving up.
 
 ### 3.2 PWM channels
 
@@ -1074,8 +1159,10 @@ caller wants liveness confirmation.
   `GET_VERSION`.
 * `major` is bumped on **wire-breaking** changes (frame layout,
   CRC algorithm, command renumbering).
-* `minor` is bumped when **opcodes are added** that older hosts
-  don't have to know about.
+* `minor` is bumped on any **additive, backward-compatible** change
+  older hosts don't have to know about -- not only a new opcode: v0.10
+  (chain-bind refusal) and v0.11 (the REG_ON pad-map growth, §3.1) both
+  bumped `minor` with no new opcode at all.
 * `patch` is bumped on documentation or non-observable firmware
   changes.
 
