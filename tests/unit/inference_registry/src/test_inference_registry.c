@@ -463,6 +463,7 @@ ZTEST(alp_inference_registry, test_deepx_ext_bad_args_and_no_libdxrt_on_zephyr)
 	zassert_equal(alp_deepx_inference_get_status(&fake, NULL), ALP_ERR_INVAL);
 	/* A DEEPX-vendor handle on an M-class core has no libdxrt behind it. */
 	alp_deepx_device_status_t status;
-	zassert_equal(alp_deepx_inference_bind_cores(&fake, ALP_DEEPX_NPU_CORES_ALL), ALP_ERR_NOSUPPORT);
+	zassert_equal(alp_deepx_inference_bind_cores(&fake, ALP_DEEPX_NPU_CORES_ALL),
+	              ALP_ERR_NOSUPPORT);
 	zassert_equal(alp_deepx_inference_get_status(&fake, &status), ALP_ERR_NOSUPPORT);
 }

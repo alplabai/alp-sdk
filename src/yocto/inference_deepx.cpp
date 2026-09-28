@@ -403,7 +403,7 @@ extern "C" alp_status_t alp_inference_deepx_bind_cores(struct alp_inference *h_,
 
 	std::unique_lock<std::shared_mutex> lk(st->engine_mtx); /* waits out in-flight invokes */
 	delete st->engine;
-	st->engine = fresh;
+	st->engine  = fresh;
 	st->outputs = fresh->GetOutputs();
 	st->last_outputs.clear(); /* pointed into the old engine */
 	return ALP_OK;

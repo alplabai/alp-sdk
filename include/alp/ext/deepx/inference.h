@@ -122,7 +122,8 @@ alp_status_t alp_deepx_inference_bind_cores(alp_inference_t *inf, alp_deepx_npu_
  *          @ref ALP_ERR_NOT_READY if @p inf is not open.
  *          @ref ALP_ERR_IO if libdxrt cannot read the device.
  */
-alp_status_t alp_deepx_inference_get_status(alp_inference_t *inf, alp_deepx_device_status_t *status_out);
+alp_status_t alp_deepx_inference_get_status(alp_inference_t           *inf,
+                                            alp_deepx_device_status_t *status_out);
 
 #ifdef __cplusplus
 }

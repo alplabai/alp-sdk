@@ -113,7 +113,8 @@ alp_inference_deepx_get_output(struct alp_inference *h, size_t index, alp_infere
 alp_status_t alp_inference_deepx_invoke(struct alp_inference *h);
 void         alp_inference_deepx_close(struct alp_inference *h);
 alp_status_t alp_inference_deepx_bind_cores(struct alp_inference *h, unsigned bound);
-alp_status_t alp_inference_deepx_get_status(struct alp_inference *h, alp_deepx_device_status_t *out);
+alp_status_t alp_inference_deepx_get_status(struct alp_inference      *h,
+                                            alp_deepx_device_status_t *out);
 #endif
 
 #if defined(ALP_SDK_USE_DRPAI_V2N)
@@ -550,7 +551,8 @@ alp_status_t alp_deepx_inference_bind_cores(alp_inference_t *inf, alp_deepx_npu_
 	return rc;
 }
 
-alp_status_t alp_deepx_inference_get_status(alp_inference_t *inf, alp_deepx_device_status_t *status_out)
+alp_status_t alp_deepx_inference_get_status(alp_inference_t           *inf,
+                                            alp_deepx_device_status_t *status_out)
 {
 	if (inf == NULL || status_out == NULL) return ALP_ERR_INVAL;
 	if (!alp_handle_op_enter(&inf->lifecycle, &inf->active_ops)) return ALP_ERR_NOT_READY;

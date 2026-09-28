@@ -39,7 +39,8 @@ alp_status_t alp_deepx_inference_bind_cores(alp_inference_t *inf, alp_deepx_npu_
 	return ALP_ERR_NOSUPPORT; /* no libdxrt on an M-class core */
 }
 
-alp_status_t alp_deepx_inference_get_status(alp_inference_t *inf, alp_deepx_device_status_t *status_out)
+alp_status_t alp_deepx_inference_get_status(alp_inference_t           *inf,
+                                            alp_deepx_device_status_t *status_out)
 {
 	if (inf == NULL || status_out == NULL) return ALP_ERR_INVAL;
 	if (!_is_deepx_backend(inf)) return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
