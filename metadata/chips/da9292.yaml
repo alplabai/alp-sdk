@@ -81,6 +81,7 @@ register_table:
   - { addr: 0x0B, name: "PMC_VOUT_CH1_01", type: rw, write: guarded, summary: "CH1 VSEL_HI setpoint" }
   - { addr: 0x0C, name: "PMC_VOUT_CH2_00", type: rw, write: guarded, summary: "CH2 VSEL_LO setpoint" }
   - { addr: 0x0D, name: "PMC_VOUT_CH2_01", type: rw, write: guarded, summary: "CH2 VSEL_HI setpoint" }
+  - { addr: 0x0E, name: "PMC_CFG_00",    type: rw, write: deny,    summary: "OTP 0xFF: EN2 / VSEL2 pin functions -- read by da9292_ch2_sequence(), never written" }
   - { addr: 0x19, name: "PMC_DEV_ID",    type: r,  write: deny,    summary: "OTP variant id (0xEA on V2N)" }
   - { addr: 0x1A, name: "PMC_REV_ID",    type: r,  write: deny,    summary: "silicon revision (0x42 on V2N)" }
   - { addr: 0x1B, name: "PMC_CFG_REV",   type: r,  write: deny,    summary: "OTP config revision (0x11 on V2N)" }

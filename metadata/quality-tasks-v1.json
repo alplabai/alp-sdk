@@ -236,6 +236,21 @@
       "ci": "pr-metadata-validate.yml:validate"
     },
     {
+      "id": "chip-reg-parity",
+      "description": "ACT88760 / DA9292 / TPS628640 driver register tables match metadata/chips/<part>.yaml field by field (#2347).",
+      "runner": "check-script",
+      "script": "scripts/check_chip_reg_parity.py",
+      "gate": true,
+      "profiles": [
+        "quick",
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "chip-subsystems-parity",
       "description": "_CHIP_SUBSYSTEMS <-> Kconfig depends-on parity gate -- fails when a chip's Zephyr subsystem dependency isn't mirrored from zephyr/kconfigs/chips.kconfig.",
       "runner": "check-script",

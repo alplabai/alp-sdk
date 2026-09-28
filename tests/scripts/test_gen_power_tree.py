@@ -187,3 +187,12 @@ def test_cm33_boot_sequence_defects_are_caught(real, mutate, err):
     bad = copy.deepcopy(tree)
     mutate(bad)
     assert any(err in e for e in g._check_cm33_sequence(bad))
+
+
+def test_act8760_addresses_must_match_the_chip_manifest(real):
+    # #2347: the ADD1/ADD2 slave addresses live in the power tree AND the chip manifest
+    tree, chips, presets = real
+    bad = copy.deepcopy(tree)
+    bad["chips"]["act8760"]["addr_add2"] = 0x27
+    errs = g.cross_check(bad, chips, presets, g.load_ownership(TREE))
+    assert "chips.act8760.addr_add2 39 != metadata/chips/act8760.yaml add2 addr_7bit 38" in errs

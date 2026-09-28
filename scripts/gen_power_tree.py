@@ -221,6 +221,15 @@ def cross_check(tree: dict, chips: dict, som_presets: dict[str, dict],
     """Semantic checks beyond the schema.  som_presets: {sku: preset doc};
     ownership: the family's core-ownership.yaml (see load_ownership())."""
     errs: list[str] = _check_boot_modes(tree, ownership) + _check_cm33_sequence(tree)
+    # The ACT88760 slave addresses live in three places (this tree, the chip
+    # manifest, the driver defaults) -- pin the first two together (#2347).
+    act_addrs = {a.get("slave"): a.get("addr_7bit")
+                 for a in ((chips.get("act8760") or {}).get("i2c") or {}).get("addresses") or []}
+    for key, slave in (("addr_add1", "add1"), ("addr_add2", "add2")):
+        want = act_addrs.get(slave)
+        got = (tree.get("chips") or {}).get("act8760", {}).get(key)
+        if want is not None and got != want:
+            errs.append(f"chips.act8760.{key} {got!r} != metadata/chips/act8760.yaml {slave} addr_7bit {want!r}")
     pct = tree["window_policy"]["default_tolerance_pct"]
     families = set(tree["families"])
     seen_ids: set[str] = set()
