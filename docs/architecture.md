@@ -798,7 +798,7 @@ for the full rationale and edge-case guidance.
 ## Sources of truth (do not duplicate)
 
 - HW pinout — [`alplabai/e1m-spec`](https://github.com/alplabai/e1m-spec)
-  (v1.1).  See [`docs/e1m-pinout.md`](e1m-pinout.md) for how the
+  (v1.0).  See [`docs/e1m-pinout.md`](e1m-pinout.md) for how the
   spec, the per-SoM pad-routing YAMLs, and the SDK's opaque `bus_id` /
   `pin_id` integers all relate.
 - **Per-SoM E1M pad → silicon-pin routing** —
