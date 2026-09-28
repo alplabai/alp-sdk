@@ -867,6 +867,21 @@ def test_boot_sd_linux_probe_refuses_an_emmc_root_on_resume(tmp_path, monkeypatc
     assert isinstance(steps.BootSdLinux().probe(ctx), steps.Unsatisfied)
 
 
+def test_linux_up_attaches_the_configured_host_when_detect_was_skipped(tmp_path, monkeypatch):
+    # --only boot_sd_linux,write_rootfs on a board already up: ctx.linux is
+    # still None (detect never ran), so the probe used to report Unknown and
+    # cold-cycle the board. A configured linux.host must be attached instead.
+    b = _bench()
+    b.linux_host = "192.0.2.7"
+    ctx = _ctx(tmp_path, bench=b)
+    seen = []
+    monkeypatch.setattr(lt.LinuxTarget, "run",
+                        lambda self, cmd, **kw: seen.append(self.host) or lt.CmdResult(0, "", ""))
+    assert ctx.linux is None and ctx.linux_up()
+    assert seen == ["192.0.2.7"]
+    assert not steps.Ctx.linux_up(_ctx(tmp_path / "b", bench=_bench()))
+
+
 def test_preflight_refuses_execute_without_pmic_expect(tmp_path):
     ctx = _ctx(tmp_path, execute=True, expected_registers=None)
     res = steps.Preflight().run(ctx)

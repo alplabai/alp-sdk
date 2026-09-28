@@ -177,6 +177,11 @@ class Ctx:
         return self.linux
 
     def linux_up(self) -> bool:
+        # --only/--from can start past detect, which is what normally attaches
+        # ctx.linux; attach a configured host here so a probe does not report
+        # Unknown and trigger a needless cold cycle on a board already up.
+        if self.linux is None and self.bench is not None and self.bench.linux_host:
+            self.linux = lt.LinuxTarget(self.bench.linux_host, self.bench.linux_user)
         if self.linux is None:
             return False
         try:
