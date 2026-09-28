@@ -229,6 +229,30 @@ Octet 0 `0xA2` has U/L=1, I/G=0 and IEEE 802c-2017 SLAP quadrant bits
 Z:Y=`00`, i.e. the *Administratively Assigned Identifier* (AAI) quadrant --
 the range a local administrator may assign without buying an IEEE block.
 
+### SoC OTP (not used by the SDK) {#soc-otp}
+
+The RZ/V2N carries one 32-Kbit OTP unit (`"otp": 1` in
+`metadata/socs/renesas/rzv2n/n44.json`; datasheet R01DS0466EJ0120 and
+hardware manual R01UH1071EJ0120 Rev.1.20, section 4.10), supplied from
+`OTPVDD18`. Base address `0x10450000` (CM33 view: `0x50450000`
+non-secure, `0x40450000` secure). Writes go in 16-bit units, reads in
+32-bit units, and each bit can be written once. The unit is addressed
+by the manual's Table 4.10-3 area map:
+
+| Area | OTP address |
+|---|---|
+| Chip product ID (individual identification) | `0F3h` to `0F6h` |
+| One-time read area enable setting | `12Ah` |
+| Boot device drive strength setting | `12Ch` |
+| User area 1 (one-time read area) | `160h` to `1DFh` |
+| User area 2 | `1E0h` to `3DFh` |
+
+The SDK does not read or write it: identity lives in the EEPROM manifest
+above, and there is no MAC area (see the MAC policy). **Writing it is
+permanent** -- a wrong boot-device drive-strength value can stop the SoC
+booting -- so treat it as out of scope for provisioning unless a later
+decision puts something there.
+
 ## Wi-Fi + Bluetooth (Linux)
 
 Every V2N/V2M SKU carries the same on-module Murata LBEE5HY2FY-922
