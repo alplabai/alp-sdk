@@ -98,7 +98,7 @@ conclusion:
 - **Other `alp_<vendor>_*` ext entry points** doing the same NULL-primary-
   handle → `ALP_ERR_INVAL` check, untested: `src/backends/ext/alif/camera.c`
   (`:70,100,126`), `ext/alif/storage.c` (`:33,46`),
-  `ext/deepx/inference.c` (`:46,60,71`), `ext/nxp/storage.c` (`:38,52`),
+  `ext/deepx/inference.c` (`:37,44`), `ext/nxp/storage.c` (`:38,52`),
   `ext/renesas/camera.c` (`:64,103,137`), `ext/renesas/inference.c`
   (`:51,66,79`), `ext/renesas/power.c` (`:45`).
 

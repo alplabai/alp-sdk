@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-27",
+  "generated": "2026-09-28",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -10609,23 +10609,19 @@
     },
     "alp/ext/deepx/inference.h": {
       "functions": {
-        "alp_deepx_inference_dram_tile_reserve": {
-          "hash": "5a70bdc2c7523a54",
-          "signature": "alp_status_t alp_deepx_inference_dram_tile_reserve(alp_inference_t *inf, uint32_t tile_bytes);"
+        "alp_deepx_inference_bind_cores": {
+          "hash": "b08ac660deb57b62",
+          "signature": "alp_status_t alp_deepx_inference_bind_cores(alp_inference_t *inf, alp_deepx_npu_cores_t cores);"
         },
         "alp_deepx_inference_get_status": {
-          "hash": "b461f6c819b47450",
-          "signature": "alp_status_t alp_deepx_inference_get_status(alp_inference_t *inf, uint32_t *status_out);"
-        },
-        "alp_deepx_inference_slot_pin": {
-          "hash": "88c845fb54e20f21",
-          "signature": "alp_status_t alp_deepx_inference_slot_pin(alp_inference_t *inf, alp_deepx_inference_slot_t slot);"
+          "hash": "da530b42aff7691c",
+          "signature": "alp_status_t alp_deepx_inference_get_status(alp_inference_t *inf, alp_deepx_device_status_t *status_out);"
         }
       },
       "macros": {
-        "ALP_DEEPX_INFERENCE_SLOT_COUNT": {
-          "hash": "9ab5d9f7dd966afd",
-          "value": "4u"
+        "ALP_DEEPX_NPU_CORE_COUNT": {
+          "hash": "1721f16ca30a9272",
+          "value": "3u"
         },
         "ALP_EXT_DEEPX_INFERENCE_AVAILABLE": {
           "hash": "2e12530fe6ec1333",
@@ -10633,28 +10629,29 @@
         }
       },
       "typedefs": {
-        "alp_deepx_inference_slot_t": {
-          "definition": "typedef enum { ALP_DEEPX_INFERENCE_SLOT_0 = 0u, ALP_DEEPX_INFERENCE_SLOT_1 = 1u, ALP_DEEPX_INFERENCE_SLOT_2 = 2u, ALP_DEEPX_INFERENCE_SLOT_3 = 3u, } alp_deepx_inference_slot_t;",
-          "enumerators": [
-            "ALP_DEEPX_INFERENCE_SLOT_0 = 0u",
-            "ALP_DEEPX_INFERENCE_SLOT_1 = 1u",
-            "ALP_DEEPX_INFERENCE_SLOT_2 = 2u",
-            "ALP_DEEPX_INFERENCE_SLOT_3 = 3u"
+        "alp_deepx_device_status_t": {
+          "definition": "typedef struct { int32_t temperature_c[ALP_DEEPX_NPU_CORE_COUNT]; uint32_t npu_clock_mhz[ALP_DEEPX_NPU_CORE_COUNT]; uint32_t npu_voltage_mv[ALP_DEEPX_NPU_CORE_COUNT]; uint64_t memory_bytes; } alp_deepx_device_status_t;",
+          "fields": [
+            "int32_t temperature_c[ALP_DEEPX_NPU_CORE_COUNT]",
+            "uint32_t npu_clock_mhz[ALP_DEEPX_NPU_CORE_COUNT]",
+            "uint32_t npu_voltage_mv[ALP_DEEPX_NPU_CORE_COUNT]",
+            "uint64_t memory_bytes"
           ],
-          "hash": "7ab2bf9f10d84737",
-          "kind": "enum"
+          "hash": "a7fb24a6fb286785",
+          "kind": "struct"
         },
-        "alp_deepx_inference_status_t": {
-          "definition": "typedef enum { ALP_DEEPX_INFERENCE_STATUS_IDLE = 0u, ALP_DEEPX_INFERENCE_STATUS_ARMED = 1u << 0, ALP_DEEPX_INFERENCE_STATUS_RUNNING = 1u << 1, ALP_DEEPX_INFERENCE_STATUS_DONE = 1u << 2, ALP_DEEPX_INFERENCE_STATUS_TIMEOUT = 1u << 3, ALP_DEEPX_INFERENCE_STATUS_TRANSPORT_ERR = 1u << 4, } alp_deepx_inference_status_t;",
+        "alp_deepx_npu_cores_t": {
+          "definition": "typedef enum { ALP_DEEPX_NPU_CORES_ALL = 0u, ALP_DEEPX_NPU_CORE_0 = 1u, ALP_DEEPX_NPU_CORE_1 = 2u, ALP_DEEPX_NPU_CORE_2 = 3u, ALP_DEEPX_NPU_CORES_01 = 4u, ALP_DEEPX_NPU_CORES_12 = 5u, ALP_DEEPX_NPU_CORES_02 = 6u, } alp_deepx_npu_cores_t;",
           "enumerators": [
-            "ALP_DEEPX_INFERENCE_STATUS_IDLE = 0u",
-            "ALP_DEEPX_INFERENCE_STATUS_ARMED = 1u << 0",
-            "ALP_DEEPX_INFERENCE_STATUS_RUNNING = 1u << 1",
-            "ALP_DEEPX_INFERENCE_STATUS_DONE = 1u << 2",
-            "ALP_DEEPX_INFERENCE_STATUS_TIMEOUT = 1u << 3",
-            "ALP_DEEPX_INFERENCE_STATUS_TRANSPORT_ERR = 1u << 4"
+            "ALP_DEEPX_NPU_CORES_ALL = 0u",
+            "ALP_DEEPX_NPU_CORE_0 = 1u",
+            "ALP_DEEPX_NPU_CORE_1 = 2u",
+            "ALP_DEEPX_NPU_CORE_2 = 3u",
+            "ALP_DEEPX_NPU_CORES_01 = 4u",
+            "ALP_DEEPX_NPU_CORES_12 = 5u",
+            "ALP_DEEPX_NPU_CORES_02 = 6u"
           ],
-          "hash": "9eb7eaeaca03723c",
+          "hash": "0dd48c5241689c31",
           "kind": "enum"
         }
       },

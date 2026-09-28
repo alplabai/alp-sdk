@@ -51,7 +51,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <mutex>
 #include <new>
+#include <shared_mutex>
 #include <vector>
 
 /* Pull the specific dx_rt headers this backend uses rather than the
@@ -63,8 +65,10 @@
 #include "dxrt/tensor.h"
 #include "dxrt/inference_option.h"
 #include "dxrt/inference_engine.h"
+#include "dxrt/device_info_status.h"
 
 extern "C" {
+#include "alp/ext/deepx/inference.h"
 #include "alp/inference.h"
 
 #include "inference_handle_internal.h"
@@ -85,6 +89,17 @@ namespace
  *  by the InferenceEngine and refreshed each Run(). */
 struct DeepxState {
 	dxrt::InferenceEngine *engine = nullptr;
+
+	/* Model bytes from open(): alp_deepx_inference_bind_cores() rebuilds
+	 * the engine from them (libdxrt fixes the core binding at engine
+	 * construction).  Borrowed, not copied -- the ext header documents
+	 * that model_data must still be valid for a rebind. */
+	const uint8_t *model      = nullptr;
+	size_t         model_size = 0u;
+
+	/* Guards `engine`, `outputs` and `last_outputs` against a rebind:
+	 * invoke/get_output take it shared, bind_cores exclusive. */
+	std::shared_mutex engine_mtx;
 
 	/* SDK-owned input staging buffers (one contiguous blob per input
      * tensor).  dx_rt's Run(inputPtr) takes a single pointer to the
@@ -211,8 +226,10 @@ extern "C" alp_status_t alp_inference_deepx_open(struct alp_inference         *h
 			return ALP_ERR_NOMEM;
 		}
 
-		st->inputs  = st->engine->GetInputs();
-		st->outputs = st->engine->GetOutputs();
+		st->model      = static_cast<const uint8_t *>(cfg->model_data);
+		st->model_size = cfg->model_size;
+		st->inputs     = st->engine->GetInputs();
+		st->outputs    = st->engine->GetOutputs();
 
 		if (!all_tensor_ranks_fit(st->inputs) || !all_tensor_ranks_fit(st->outputs)) {
 			/* alp_inference_tensor_t's shape[] has exactly 4 slots; refuse
@@ -305,6 +322,7 @@ extern "C" alp_status_t alp_inference_deepx_get_output(struct alp_inference   *h
 	if (st == nullptr) {
 		return ALP_ERR_NOT_READY;
 	}
+	std::shared_lock<std::shared_mutex> lk(st->engine_mtx);
 	if (index >= st->outputs.size()) {
 		return ALP_ERR_OUT_OF_RANGE;
 	}
@@ -337,7 +355,11 @@ extern "C" alp_status_t alp_inference_deepx_invoke(struct alp_inference *h_)
 {
 	auto *h  = h_;
 	auto *st = static_cast<DeepxState *>(h->be_state);
-	if (st == nullptr || st->engine == nullptr) {
+	if (st == nullptr) {
+		return ALP_ERR_NOT_READY;
+	}
+	std::shared_lock<std::shared_mutex> lk(st->engine_mtx);
+	if (st->engine == nullptr) {
 		return ALP_ERR_NOT_READY;
 	}
 
@@ -353,6 +375,61 @@ extern "C" alp_status_t alp_inference_deepx_invoke(struct alp_inference *h_)
 	}
 
 	return st->last_outputs.empty() ? ALP_ERR_IO : ALP_OK;
+}
+
+/* <alp/ext/deepx/inference.h> hooks, called by inference_yocto.c's
+ * alp_deepx_inference_* with the handle op-counted and the backend
+ * already checked. */
+
+extern "C" alp_status_t alp_inference_deepx_bind_cores(struct alp_inference *h_, unsigned bound)
+{
+	auto *st = static_cast<DeepxState *>(h_->be_state);
+	if (st == nullptr || st->model == nullptr) {
+		return ALP_ERR_NOT_READY;
+	}
+	dxrt::InferenceOption opt = dxrt::DefaultInferenceOption;
+	opt.boundOption           = bound; /* alp_deepx_npu_cores_t == BOUND_OPTION order */
+
+	/* Build the new engine first: on failure the old one keeps serving. */
+	dxrt::InferenceEngine *fresh = nullptr;
+	try {
+		fresh = new (std::nothrow) dxrt::InferenceEngine(st->model, st->model_size, opt);
+	} catch (...) {
+		return ALP_ERR_IO;
+	}
+	if (fresh == nullptr) {
+		return ALP_ERR_NOMEM;
+	}
+
+	std::unique_lock<std::shared_mutex> lk(st->engine_mtx); /* waits out in-flight invokes */
+	delete st->engine;
+	st->engine  = fresh;
+	st->outputs = fresh->GetOutputs();
+	st->last_outputs.clear(); /* pointed into the old engine */
+	return ALP_OK;
+}
+
+extern "C" alp_status_t alp_inference_deepx_get_status(struct alp_inference      *h_,
+                                                       alp_deepx_device_status_t *out)
+{
+	if (h_->be_state == nullptr) {
+		return ALP_ERR_NOT_READY;
+	}
+	try {
+		/* ponytail: device 0 -- a V2N-M1 carries exactly one DX-M1 and
+		 * InferenceEngine exposes no device id; map per handle if a
+		 * multi-DX-M1 carrier ever ships. */
+		dxrt::DeviceStatus ds = dxrt::DeviceStatus::GetCurrentStatus(0);
+		for (unsigned ch = 0; ch < ALP_DEEPX_NPU_CORE_COUNT; ++ch) {
+			out->temperature_c[ch]  = static_cast<int32_t>(ds.Temperature(static_cast<int>(ch)));
+			out->npu_clock_mhz[ch]  = ds.NpuClock(static_cast<int>(ch));
+			out->npu_voltage_mv[ch] = ds.Voltage(static_cast<int>(ch));
+		}
+		out->memory_bytes = static_cast<uint64_t>(ds.MemorySize());
+	} catch (...) {
+		return ALP_ERR_IO;
+	}
+	return ALP_OK;
 }
 
 extern "C" void alp_inference_deepx_close(struct alp_inference *h_)
