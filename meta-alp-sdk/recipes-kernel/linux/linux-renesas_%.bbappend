@@ -73,6 +73,7 @@ SRC_URI:append = " \
     file://0006-input-goodix-fall-back-to-polling-without-an-irq.patch \
     file://0007-mmc-renesas_sdhi-pm_runtime-guard-the-vqmmc-regulato.patch \
     file://0010-mmc-renesas_sdhi-bounce-multi-segment-requests-in-internal-dmac.patch \
+    file://0011-irqchip-renesas-rzv2h-mask-the-ICU-error-sources-the-handler-cannot-ack.patch \
 "
 
 # 0010 (SDHI internal-DMAC bounce buffer, #2357): the DMAC takes one
@@ -80,6 +81,12 @@ SRC_URI:append = " \
 # page-cache write reached the card as a separate 4 KiB command (microSD
 # ~2.7 MB/s, and SDR104 writes hung on "Card stuck being busy!"). The patch
 # copies multi-segment requests through a 256 KiB coherent buffer per host.
+#
+# 0011 (ICU error mask, #2355): the shared CA55 ICU error line is serviced
+# only for GPT overflow bits, but group 0 resets fully unmasked; once the
+# Cortex-M33 runs, group 0 bit 0 asserts, nobody acknowledges it, and the
+# line storms ("irq 14: nobody cared") until genirq disables it. The patch
+# unmasks only the GPT overflow bits the handler services.
 
 # AMP clock ownership: RSCI7 belongs to the Cortex-M33 system manager
 # (GD32 supervisor SPI link).  Without this patch, Linux's
