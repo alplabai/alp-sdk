@@ -56,3 +56,7 @@ CMakeLists.txt text eol=lf
 *.alpmodel binary
 *.bin     binary
 *.elf     binary
+
+# Vendor data under its own terms (ADR 0032): stored byte-identical to
+# upstream, CRLF and all, so the SHA-256s in metadata/svd/alif/README.md hold.
+metadata/svd/** -text
