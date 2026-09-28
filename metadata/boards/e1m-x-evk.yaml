@@ -275,6 +275,7 @@ e1m_routes:
 # On-board sensors + I/O expander + ID EEPROM, all on the same
 # XEVK_I2C_BUS_SENSORS bus (#1636 -- previously hand-defined in
 # include/alp/boards/alp_e1m_x_evk.h alongside the INA236 block above).
+i2c_devices_bus: E1M_X_I2C0    # = *_I2C_BUS_SENSORS; see check_i2c_address_uniqueness.py
 i2c_devices:
   - { macro: XEVK_I2C_ADDR_BMI323, part: bmi323, address: "0x68",
       doc: "U-IMU BMI323 6-axis IMU (alternate IMU)." }
