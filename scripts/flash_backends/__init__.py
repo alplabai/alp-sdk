@@ -142,7 +142,7 @@ from . import yocto_wic                  # noqa: E402,F401
 from . import zephyr_west_flash          # noqa: E402,F401
 from . import baremetal_cmake_flash      # noqa: E402,F401
 from . import swd_probe                  # noqa: E402,F401
-from . import xspi_flashwriter            # noqa: E402,F401
+from . import renesas_flashwriter_scif    # noqa: E402,F401
 
 
 __all__ = [
