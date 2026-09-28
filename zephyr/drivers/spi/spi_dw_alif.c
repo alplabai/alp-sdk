@@ -978,7 +978,31 @@ static bool spi_dw_should_dma(const struct spi_dw_config *info,
 		return false;
 	}
 	len = MAX(spi_dw_bufset_len(tx_bufs), spi_dw_bufset_len(rx_bufs));
-	return len >= (size_t)CONFIG_SPI_DW_ALIF_DMA_MIN_LEN;
+	if (len < (size_t)CONFIG_SPI_DW_ALIF_DMA_MIN_LEN) {
+		return false;
+	}
+	/* #2397: the RX path invalidates its destination by cache line, before
+	 * and after the transfer (#1830).  A buffer that shares its first or last
+	 * line with other data loses any CPU write to that neighbour which is
+	 * still dirty in the cache -- on the CC3501E bridge, whose rx_scratch
+	 * sits inline in its context struct, that corrupted pointers and ended
+	 * in an MPU fault.  Take DMA only for line-aligned RX buffers; anything
+	 * else goes polled, which is always correct. */
+	if (IS_ENABLED(CONFIG_DCACHE) && rx_bufs != NULL) {
+		size_t line = sys_cache_data_line_size_get();
+
+		if (line == 0u) {
+			line = 32u; /* Cortex-M55 D-cache line when Kconfig does not say */
+		}
+		for (size_t i = 0; i < rx_bufs->count; i++) {
+			const struct spi_buf *b = &rx_bufs->buffers[i];
+
+			if (b->buf != NULL && ((((uintptr_t)b->buf) | b->len) & (line - 1u)) != 0u) {
+				return false;
+			}
+		}
+	}
+	return true;
 }
 #endif /* CONFIG_SPI_DW_ALIF_USE_DMA */
 
