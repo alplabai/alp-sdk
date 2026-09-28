@@ -256,8 +256,11 @@ Three steps in the V2N-M1 bring-up that V2N base skips:
 
 1. `da9292_v2n_m1_enable_deepx_rail(&pmic, 50000)` -- the 0.75 V
    DEEPX rail on the secondary PMIC's CH2.
-2. ACK-probe the three DEEPX TPS628640 instances at `0x44 / 0x48 /
-   0x4F` to confirm population.
+2. ACK-probe the DEEPX TPS628640 instances at `0x44 / 0x48 / 0x4F`
+   to confirm population. `0x48` (`deepx_lpddr_0v85`) only ACKs once
+   P64 (`DEEPX_CORE_0P75_EN`) is high, and reads back `0x5A` = 0.85 V
+   there; the on-module TMP112 is at `0x40`, not `0x48`. See
+   [`docs/bring-up-v2n-m1.md`](bring-up-v2n-m1.md) §1.
 3. `deepx_dxm1_bring_up(&dxm1, DEEPX_DXM1_DEFAULT_BOOT_US)` -- the
    PCIe muxes + M1_RESET sequencer.
 

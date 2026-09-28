@@ -115,11 +115,16 @@ Match additions to the matrix in [`VERSIONS.md`](../../VERSIONS.md):
 - A new metadata schema bump → the `pr-metadata-validate` job
   starts validating against the new schema in addition to v1.
 
-Workflow filenames follow `{stage}-{target}.yml`:
+Workflow filenames follow `{stage}-{target}.yml` for the per-PR,
+nightly, and release gates; other stages carry their own prefix:
 
-- `stage` is one of `pr` (per-PR), `nightly`, `release`.
-- `target` is the SoM family (`aen`, `v2n`, `v2n-m1`) or a global
-  scope (`twister`, `doxygen`, `metadata-validate`).
+- `pr-`, `nightly-`, `release` — the gates above (e.g. `pr-twister`,
+  `nightly-v2n`, `release.yml`).
+- `merge-queue-` — checks that can only be graded against the merge
+  group itself (e.g. `merge-queue-changelog-citations.yml`).
+- Other standing workflows use their own stage prefix
+  (`cross-platform-zephyr.yml`, `dispatch-tan-parity.yml`,
+  `parity-seam1.yml`, `coverity.yml`, `onramp-clean-container.yml`).
 
 Every job needs a `timeout-minutes:` (#1477 -- GitHub's implicit
 360-minute runner default otherwise applies silently). Every job's ceiling

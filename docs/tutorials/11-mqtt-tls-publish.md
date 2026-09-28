@@ -98,13 +98,13 @@ static void on_control(const char *topic, const uint8_t *payload,
 
 int main(void) {
     alp_mqtt_config_t cfg = {
-        .uri           = "mqtts://broker.local:8883",
+        .broker_uri    = "mqtts://broker.local:8883",
         .client_id     = "alp-dev-001",
         .tls           = &(alp_mqtt_tls_config_t){
-            .ca_path   = "/etc/alp/broker.crt",
+            .ca_file   = "/etc/alp/broker.crt",
             .insecure  = false,
         },
-        .keepalive_sec = 30,
+        .keepalive_s   = 30,
     };
 
     alp_mqtt_t *m = alp_mqtt_open(&cfg);
