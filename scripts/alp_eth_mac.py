@@ -43,8 +43,10 @@ meant for addresses a local administrator assigns without an IEEE block.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Constants -- the ONE place these live; the U-Boot C side mirrors them
@@ -56,7 +58,15 @@ from dataclasses import dataclass
 #: STRICT: I/L/O/U are rejected outright, never aliased to 1/1/0/0 the
 #: way "lenient" Crockford decoders do -- a mis-typed serial must fail
 #: loudly, not silently decode to a different unit's MAC.
-CROCKFORD_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+#: Every value below comes from metadata/identity/serial-mac.json, the one
+#: home for this fleet-wide identity layout (#2361); nothing here restates
+#: a number.  tests/scripts/test_alp_eth_mac.py pins U-Boot patch 0010's C
+#: copies and the JSON's golden vectors against these.
+_SPEC_PATH = Path(__file__).resolve().parent.parent / "metadata" / "identity" / "serial-mac.json"
+_SPEC = json.loads(_SPEC_PATH.read_text(encoding="utf-8"))
+_FIELD_BITS = {f["name"]: int(f["bits"]) for f in _SPEC["mac"]["fields_msb_first"]}
+
+CROCKFORD_ALPHABET = _SPEC["serial"]["index_alphabet"]
 
 #: `re.ASCII` is load-bearing, not decoration: without it, `\d` matches any
 #: Unicode decimal digit (e.g. Arabic-Indic `٣`, fullwidth `４`), and
@@ -66,17 +76,24 @@ CROCKFORD_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 #: pass as a look-alike for the index field. `fullmatch()` (no `^`/`$`)
 #: additionally closes Python's `$`-matches-before-a-trailing-newline
 #: exception -- `^...$` alone would accept "2026W38-0001\n".
-SERIAL_RE = re.compile(r"(\d{4})W(\d{2})-([0-9A-Za-z]{4})", re.IGNORECASE | re.ASCII)
+SERIAL_RE = re.compile(_SPEC["serial"]["pattern"], re.IGNORECASE | re.ASCII)
 
-MAC_OCTET0 = 0xA2          #: fixed individual/local-admin byte -- see docstring.
-MAC_PREFIX_NIBBLE = 0xC    #: fixed Alp Lab prefix inside the 40-bit payload.
+MAC_OCTET0 = int(_SPEC["mac"]["octet0"], 16)  #: individual/local-admin byte -- see docstring.
+MAC_PREFIX_NIBBLE = int(_SPEC["mac"]["prefix_serial_nibble"], 16)  #: Alp Lab prefix, serial-derived MACs.
+#: Prefix U-Boot's eMMC-CID fallback uses when the serial is missing (C side only).
+MAC_PREFIX_CID_NIBBLE = int(_SPEC["mac"]["prefix_emmc_cid_nibble"], 16)
 
-YEAR_BASE = 2024
-YEAR_BITS = 6              # 0..63 -> years 2024..2087
-WEEK_BITS = 6              # 1..53 (0 and 54..63 unused, still rejected)
-INDEX_BITS = 20            # 4 Crockford chars, 32**4 == 2**20
-IFACE_BITS = 2             # 0 = end0, 1 = end1, 2/3 reserved
-RESERVED_BITS = 2          # always 0 today
+YEAR_BASE = int(_SPEC["serial"]["year_base"])
+WEEK_MIN = int(_SPEC["serial"]["week_min"])
+WEEK_MAX = int(_SPEC["serial"]["week_max"])
+YEAR_BITS = _FIELD_BITS["year"]            # 0..63 -> years 2024..2087
+WEEK_BITS = _FIELD_BITS["week"]            # 1..53 (0 and 54..63 unused, still rejected)
+INDEX_BITS = _FIELD_BITS["index"]          # 4 Crockford chars, 32**4 == 2**20
+IFACE_BITS = _FIELD_BITS["iface"]          # 0 = end0, 1 = end1, 2/3 reserved
+RESERVED_BITS = _FIELD_BITS["reserved"]    # always 0 today
+
+#: Published regression vectors, shared with the C side's quoted vectors.
+GOLDEN_VECTORS = tuple(_SPEC["golden_vectors"])
 
 IFACE_END0 = 0
 IFACE_END1 = 1
@@ -132,8 +149,8 @@ def parse_serial(serial: str) -> ParsedSerial:
         raise AlpEthMacError(
             f"year {year} out of range [{YEAR_BASE}, {YEAR_BASE + (1 << YEAR_BITS) - 1}]"
         )
-    if not (1 <= week <= 53):
-        raise AlpEthMacError(f"week {week} out of range [1, 53]")
+    if not (WEEK_MIN <= week <= WEEK_MAX):
+        raise AlpEthMacError(f"week {week} out of range [{WEEK_MIN}, {WEEK_MAX}]")
     # No index range check here: crockford_decode() already bounds `index`
     # to exactly 4 base-32 digits (0 .. 32**4 - 1 == (1 << INDEX_BITS) - 1),
     # so an out-of-range value here is unreachable -- a redundant check
