@@ -173,15 +173,19 @@ ota:
 # Storage backing store would need a SKU that actually carries one
 # (e.g. E1M-AEN803), so this example keeps PS in the same on-die
 # MRAM as ITS rather than naming a part this SKU doesn't have (#2311).
-# Attestation root is the OPTIGA Trust M (single trust root with
-# boot + OTA -- see iot-fleet-ota for the shared signing key story).
+# Attestation root is TF-M's own secure storage: E1M-AEN801 names the
+# OPTIGA Trust M under `on_module:` but the part is DNP (`assembled:
+# false` on its i2c_devices entry), and the loader refuses an
+# `optiga_trust_m` root on a SKU that does not carry the part (#2316).
+# On a SKU with OPTIGA fitted (E1M-AEN501/601/701) switch this to
+# `optiga_trust_m` for a hardware trust root.
 security:
   psa:
     persistent_slots: 32
     its_storage:      mram_main     # AEN E8: 5.5 MiB MRAM (secure half)
     ps_storage:       mram_main     # same on-die MRAM (no OSPI on this SKU)
     tfm:              true
-    attestation_root: optiga_trust_m
+    attestation_root: tfm_internal
 
 # ----------------------------------------------------------------
 # Storage partitions.

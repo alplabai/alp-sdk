@@ -1,7 +1,7 @@
 # `metadata/e1m_modules/`
 
 Per-SoM-family metadata for the E1M module catalogue -- both form
-factors.  AEN (`E1M-AEN301..801`) and imx93 (`E1M-NX9101` [^imx93-tbd])
+factors.  AEN (`E1M-AEN301..803`) and imx93 (`E1M-NX9101` [^imx93-tbd])
 are **E1M** (35×35, `default_board: E1M-EVK` in each SKU's preset);
 v2n and v2n-m1 are **E1M-X** (45×65, `default_board: E1M-X-EVK`).
 
@@ -22,7 +22,7 @@ for E1M-X).  `scripts/check_e1m_pinout.py` cross-checks every non-`TBD`
 
 | Family | SKUs                          | Silicon                           |
 |--------|-------------------------------|-----------------------------------|
-| AEN    | `E1M-AEN301..801`             | Alif Ensemble E3..E8              |
+| AEN    | `E1M-AEN301..803`             | Alif Ensemble E3..E8              |
 | imx93  | `E1M-NX9101` [^imx93-tbd]     | NXP i.MX 93 (i.MX 9352 variant)   |
 | v2n    | `E1M-V2N101`, `E1M-V2N102`, `E1M-V2N103` | Renesas RZ/V2N          |
 | v2n-m1 | `E1M-V2M101`, `E1M-V2M102`, `E1M-V2M103` | Renesas RZ/V2N + DEEPX DX-M1 |
@@ -120,7 +120,7 @@ only when an entry declares both a `flash_method` and an
 
 ### AEN / `cc3501e_otp`
 
-All six AEN presets (`E1M-AEN301..801`) carry a `cc3501e_otp` helper
+All seven AEN presets (`E1M-AEN301..803`) carry a `cc3501e_otp` helper
 entry with `update_channel: alp_ota_spi_otp` and `flash_policy:
 recovery_only`, and no `flash_method`.  The CC3501E (TI Wi-Fi 6 + BLE
 5.4 coprocessor) is Alp-released firmware applied over the bridge SPI
@@ -149,7 +149,7 @@ separate mechanism and is unaffected.
 
 `flash_policy` stays because it is required on every helper entry with
 or without a `flash_method` — it answers who may reach a local flash
-path if one is ever added.  The six AEN `cc3501e_otp` entries are the
+path if one is ever added.  The seven AEN `cc3501e_otp` entries are the
 same shape (`recovery_only`, no `flash_method`).
 
 The GD32's SW-DP ID remains unsettled and `metadata/chips/gd32_swd.yaml`

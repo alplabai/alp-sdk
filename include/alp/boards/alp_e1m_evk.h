@@ -49,6 +49,10 @@
  * `<alp/e1m_pinout.h>`.  For the underlying integers -- bus /
  * port instance IDs and pad-level GPIO indices --
  * `#include <alp/e1m_pinout.h>` directly.
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      Defines the board's own `EVK_ARD_*` / `EVK_MB_*` macros and
+ *      `evk_cam_select_t`; not a facade.  See docs/abi-markers.md.
  */
 
 #ifndef ALP_BOARDS_E1M_EVK_H

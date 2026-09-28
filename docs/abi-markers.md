@@ -112,6 +112,41 @@ stability statement in the file's top doxygen block.  Defaults:
 Per-chip status lives in
 [`docs/test-plan.md`](test-plan.md)'s per-row "Status" column.
 
+### Subdirectory + extension headers (`include/alp/{blocks,boards,protocol,ext}/*.h`)
+
+Headers below the top level are contract surfaces too, but they are
+classified in their file-level marker rather than the top-level table
+above (which covers `include/alp/*.h` only).  The **file-level** class is
+the marker in the file's top doxygen block and is what the table records; an
+individual function inside one of these files may additionally carry
+`[ABI-STABLE]` at function granularity, and that co-exists with -- rather
+than contradicts -- an `[ABI-EXPERIMENTAL]` file-level class (the mixed-tier
+mechanism in "What the markers mean" above).  Current classification:
+
+| Header                                  | Marker               | Notes                                                              |
+|-----------------------------------------|----------------------|--------------------------------------------------------------------|
+| `boards/alp_e1m_evk_routes.h`           | `[ABI-STABLE]`       | Generated E1M-EVK board routes (`EVK_*` macros).                    |
+| `boards/alp_e1m_x_evk_routes.h`         | `[ABI-STABLE]`       | Generated E1M-X-EVK board routes (`XEVK_*` macros).                 |
+| `boards/alp_e1m_x_evk.h`                | `[ABI-EXPERIMENTAL]` | E1M-X-EVK convenience include; declares no symbols of its own (the `XEVK_*` macros live in the routes header). |
+| `boards/alp_e1m_evk.h`                  | `[ABI-EXPERIMENTAL]` | Defines the E1M EVK's own `EVK_ARD_*` / `EVK_MB_*` macros and `evk_cam_select_t` -- not a facade (the `EVK_*` routes macros come from the generated header). |
+| `blocks/button_led.h`                   | `[ABI-EXPERIMENTAL]` | Caller-owned button+LED helper (`alp_button_led_*`).                |
+| `blocks/pdm_mic.h`                      | `[ABI-EXPERIMENTAL]` | PDM-mic capture block (`alp_pdm_mic_*`).                            |
+| `protocol/crc16.h`                      | `[ABI-EXPERIMENTAL]` | `static inline` CRC-16/CCITT-FALSE helpers (`alp_crc16_ccitt_false[_update]`) -- API, though not linker ABI. |
+| `ext/alif/{adc,camera}.h`               | `[ABI-EXPERIMENTAL]` | Vendor escape hatch (`<alp/ext/...>`); promote per the rules below. |
+| `ext/alif/storage.h`                    | `[ABI-EXPERIMENTAL]` | See the table above for its rationale row.                          |
+| `ext/cc3501e/console.h`                 | `[ABI-EXPERIMENTAL]` | See the table above for its rationale row.                          |
+| `ext/deepx/inference.h`                 | `[ABI-EXPERIMENTAL]` | Vendor escape hatch.                                                |
+| `ext/nxp/storage.h`                     | `[ABI-EXPERIMENTAL]` | Vendor escape hatch.                                                |
+| `ext/renesas/{camera,inference,power}.h`| `[ABI-EXPERIMENTAL]` | Vendor escape hatches.                                              |
+
+Headers that declare **no ABI symbols of their own** carry no
+`@par ABI status:` tag, matching the `board.h`/`console.h` facade
+convention above.  `protocol/cc3501e.h` is the one such header here:
+it is the canonical wire-contract type header cited by
+`chips/cc3501e/`, declaring shared frame types rather than dispatch
+symbols, and its stability statement lives in the file's top
+doxygen block like the chip drivers' does.
+
 ### Internal headers (`include/alp/internal/*.h`, `src/**/*.h`)
 
 Not part of the public ABI.  No marker required.  Renames /

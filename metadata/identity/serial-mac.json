@@ -1,0 +1,27 @@
+{
+  "$comment": "Single source for the SoM serial grammar and the serial-derived Ethernet MAC layout (#2361, #2326). scripts/alp_eth_mac.py loads these values instead of restating them; tests/scripts/test_alp_eth_mac.py (TestCSideParity) checks meta-alp-sdk U-Boot patch 0010's C constants against them, and every golden vector below against both. The MAC prefix nibbles are fleet-wide identity allocations: change them only with a deliberate re-provisioning plan.",
+  "serial": {
+    "pattern": "(\\d{4})W(\\d{2})-([0-9A-Za-z]{4})",
+    "year_base": 2024,
+    "week_min": 1,
+    "week_max": 53,
+    "index_alphabet": "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+  },
+  "mac": {
+    "octet0": "0xA2",
+    "prefix_serial_nibble": "0xC",
+    "prefix_emmc_cid_nibble": "0xD",
+    "fields_msb_first": [
+      { "name": "prefix",   "bits": 4 },
+      { "name": "year",     "bits": 6 },
+      { "name": "week",     "bits": 6 },
+      { "name": "index",    "bits": 20 },
+      { "name": "iface",    "bits": 2 },
+      { "name": "reserved", "bits": 2 }
+    ]
+  },
+  "golden_vectors": [
+    { "serial": "2026W38-0001", "end0": "A2:C0:A6:00:00:10", "end1": "A2:C0:A6:00:00:14" },
+    { "serial": "2026W38-ZZZZ", "end0": "A2:C0:A6:FF:FF:F0" }
+  ]
+}

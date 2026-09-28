@@ -179,14 +179,14 @@ base-level pump.  What a bound chain does to the reads:
 * **FFT terminal:** `CMD_ADC_STREAM_READ` returns `STATUS_NOSUPPORT`;
   the spectrum is pulled with `CMD_ADC_SPECTRUM_READ` (`0x3A`).
 
-One FAC and one FFT block exist.  A second `chain_bind` of a FIR/IIR
-(FAC-terminal) chain while the FAC is already serving another bound
-stream returns `STATUS_NOSUPPORT` -- but the firmware does not
-currently apply the same guard to FFT-terminal chains
-(`terminal_kind != 3u` in the busy check at
-`gd32-bridge-firmware:hal/gd32/adc_stream.c:675`), so two streams can
-both bind FFT chains against the single FFT block; tracked as
-[#1717](https://github.com/alplabai/alp-sdk/issues/1717).  The host-side
+One FAC and one FFT block exist.  A second `chain_bind` while the
+matching block is already serving another bound stream returns
+`STATUS_NOSUPPORT`: a FIR/IIR (FAC-terminal) chain against a busy FAC,
+and, since protocol v0.10 (`gd32-bridge-firmware` PR #121), an
+FFT-terminal chain against a busy FFT block
+(`adc_dsp_fft_stream_busy()` in `gd32-bridge-firmware:hal/gd32/adc_dsp_chain.c`).
+The refused chain stays open, so a host can wait for the other stream's
+`stream_end` and retry the same `chain_id`.  The host-side
 standalone API in `<alp/dsp.h>` ships working in v0.5.0 (runs the
 chain locally with CMSIS-DSP or the portable C fallback over
 in-RAM buffers), so application code can test against the same
@@ -297,9 +297,10 @@ the chain's terminal stage:
   must be terminal; WINDOW must immediately precede FFT).
 
 It returns `STATUS_NOSUPPORT` when the single FAC (FIR/IIR) hardware
-block is already serving another bound stream.  The equivalent guard
-for the single FFT block is not yet implemented -- see
-[#1717](https://github.com/alplabai/alp-sdk/issues/1717).
+block, or (since v0.10) the single FFT block, is already serving
+another bound stream of the same terminal class. The chain is not
+released on that refusal; retrying the same `chain_id` after the other
+stream ends is the supported recovery.
 
 #### `CMD_ADC_SPECTRUM_READ` (`0x3A`)
 
