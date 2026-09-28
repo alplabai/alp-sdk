@@ -924,39 +924,40 @@ ZTEST(alp_rpc_zephyr_backend, test_1632_dispatch_vs_unsubscribe_snapshot_is_cohe
 	zassert_equal(g_1632_unsub_status, ALP_OK);
 	zassert_equal(g_1632_be.subs[0].cb, NULL);
 	zassert_equal(g_1632_be.subs[0].user, NULL);
+}
 
-	/* ---------------------------------------------------------------------
+/* ---------------------------------------------------------------------
  * 5. Link liveness (issue #1643): rpc_ept_bound() / rpc_ept_unbound() /
  *    rpc_ept_error() drive the dispatcher's alp_rpc_notify_link() hook,
  *    and the unbound/error paths respect the SAME `closing` gate
  *    rpc_ept_recv() already does (rpc_recv_enter()/rpc_worker_leave()).
  * ------------------------------------------------------------------- */
 
-	ZTEST(alp_rpc_zephyr_backend, test_bound_notifies_link_up)
-	{
-		struct rpc_be be;
-		init_test_channel(&be, "bound");
-		be.owner = &be;
-		atomic_clear(&g_notify_calls);
-		g_notify_owner = NULL;
+ZTEST(alp_rpc_zephyr_backend, test_bound_notifies_link_up)
+{
+	struct rpc_be be;
+	init_test_channel(&be, "bound");
+	be.owner = &be;
+	atomic_clear(&g_notify_calls);
+	g_notify_owner = NULL;
 
-		rpc_ept_bound(&be);
+	rpc_ept_bound(&be);
 
-		zassert_true(be.ept_bound);
-		zassert_equal(atomic_get(&g_notify_calls), 1, "bound must notify link state exactly once");
-		zassert_equal(g_notify_owner, &be);
-		zassert_equal(g_notify_last_state, ALP_RPC_LINK_UP);
-	}
+	zassert_true(be.ept_bound);
+	zassert_equal(atomic_get(&g_notify_calls), 1, "bound must notify link state exactly once");
+	zassert_equal(g_notify_owner, &be);
+	zassert_equal(g_notify_last_state, ALP_RPC_LINK_UP);
+}
 
-	ZTEST(alp_rpc_zephyr_backend, test_unbound_notifies_link_lost_and_clears_ept_bound)
-	{
-		struct rpc_be be;
-		init_test_channel(&be, "unbound");
-		be.owner     = &be;
-		be.ept_bound = true;
-		atomic_clear(&g_notify_calls);
-		g_notify_owner = NULL;
-		/* ztest does not run suites in declaration order (and does not
+ZTEST(alp_rpc_zephyr_backend, test_unbound_notifies_link_lost_and_clears_ept_bound)
+{
+	struct rpc_be be;
+	init_test_channel(&be, "unbound");
+	be.owner     = &be;
+	be.ept_bound = true;
+	atomic_clear(&g_notify_calls);
+	g_notify_owner = NULL;
+	/* ztest does not run suites in declaration order (and does not
      * reset file-scope test doubles between cases) -- reset this one
      * too, not just g_notify_calls above, so this test's assertion on
      * it doesn't depend on run order.  Regression: adding a case
@@ -965,81 +966,80 @@ ZTEST(alp_rpc_zephyr_backend, test_1632_dispatch_vs_unsubscribe_snapshot_is_cohe
      * atomic_inc() (which deliberately leaves g_finalize_calls == 1 on
      * exit -- see that test) started running BEFORE this one and made
      * the un-reset zassert below fail spuriously. */
-		atomic_clear(&g_finalize_calls);
-		g_finalize_owner = NULL;
+	atomic_clear(&g_finalize_calls);
+	g_finalize_owner = NULL;
 
-		rpc_ept_unbound(&be);
+	rpc_ept_unbound(&be);
 
-		zassert_false(be.ept_bound);
-		zassert_equal(
-		    atomic_get(&g_notify_calls), 1, "unbound must notify link state exactly once");
-		zassert_equal(g_notify_owner, &be);
-		zassert_equal(g_notify_last_state, ALP_RPC_LINK_LOST);
-		/* Not a self-close: close_from_worker was never set, so the
+	zassert_false(be.ept_bound);
+	zassert_equal(atomic_get(&g_notify_calls), 1, "unbound must notify link state exactly once");
+	zassert_equal(g_notify_owner, &be);
+	zassert_equal(g_notify_last_state, ALP_RPC_LINK_LOST);
+	/* Not a self-close: close_from_worker was never set, so the
      * dispatcher's close_finalize() double must not have fired. */
-		zassert_equal(atomic_get(&g_finalize_calls), 0);
-	}
+	zassert_equal(atomic_get(&g_finalize_calls), 0);
+}
 
-	ZTEST(alp_rpc_zephyr_backend, test_unbound_after_closing_does_not_notify)
-	{
-		/* Mirrors z_shutdown() having already run on this channel (its
+ZTEST(alp_rpc_zephyr_backend, test_unbound_after_closing_does_not_notify)
+{
+	/* Mirrors z_shutdown() having already run on this channel (its
      * external-close path sets `closing` under `lock` before this
      * callback could observe it) -- rpc_recv_enter() must bail before
      * ever touching `owner`, exactly like it already does for
      * rpc_ept_recv(). */
-		struct rpc_be be;
-		init_test_channel(&be, "unbound_closing");
-		be.owner   = &be;
-		be.closing = true;
-		atomic_clear(&g_notify_calls);
+	struct rpc_be be;
+	init_test_channel(&be, "unbound_closing");
+	be.owner   = &be;
+	be.closing = true;
+	atomic_clear(&g_notify_calls);
 
-		rpc_ept_unbound(&be);
+	rpc_ept_unbound(&be);
 
-		zassert_equal(atomic_get(&g_notify_calls), 0, "unbound after closing must not notify");
-	}
+	zassert_equal(atomic_get(&g_notify_calls), 0, "unbound after closing must not notify");
+}
 
-	ZTEST(alp_rpc_zephyr_backend, test_error_notifies_link_lost)
-	{
-		struct rpc_be be;
-		init_test_channel(&be, "error");
-		be.owner = &be;
-		atomic_clear(&g_notify_calls);
-		g_notify_owner = NULL;
+ZTEST(alp_rpc_zephyr_backend, test_error_notifies_link_lost)
+{
+	struct rpc_be be;
+	init_test_channel(&be, "error");
+	be.owner = &be;
+	atomic_clear(&g_notify_calls);
+	g_notify_owner = NULL;
 
-		rpc_ept_error("simulated transport fault", &be);
+	rpc_ept_error("simulated transport fault", &be);
 
-		zassert_equal(atomic_get(&g_notify_calls), 1, "error must notify link state exactly once");
-		zassert_equal(g_notify_owner, &be);
-		zassert_equal(g_notify_last_state, ALP_RPC_LINK_LOST);
-	}
+	zassert_equal(atomic_get(&g_notify_calls), 1, "error must notify link state exactly once");
+	zassert_equal(g_notify_owner, &be);
+	zassert_equal(g_notify_last_state, ALP_RPC_LINK_LOST);
+}
 
-	ZTEST(alp_rpc_zephyr_backend, test_bound_after_closing_does_not_notify)
-	{
-		/* Regression: rpc_ept_bound() used to run unbracketed (no
+ZTEST(alp_rpc_zephyr_backend, test_bound_after_closing_does_not_notify)
+{
+	/* Regression: rpc_ept_bound() used to run unbracketed (no
      * rpc_recv_enter()/rpc_worker_leave() gate), unlike unbound()/
      * error() above -- see this file's own header comment for the
      * self-close-misclassification + recycle-race it caused.  bound()
      * must now respect the SAME `closing` gate. */
-		struct rpc_be be;
-		init_test_channel(&be, "bound_closing");
-		be.owner   = &be;
-		be.closing = true;
-		atomic_clear(&g_notify_calls);
+	struct rpc_be be;
+	init_test_channel(&be, "bound_closing");
+	be.owner   = &be;
+	be.closing = true;
+	atomic_clear(&g_notify_calls);
 
-		rpc_ept_bound(&be);
+	rpc_ept_bound(&be);
 
-		zassert_equal(atomic_get(&g_notify_calls), 0, "bound after closing must not notify");
-	}
+	zassert_equal(atomic_get(&g_notify_calls), 0, "bound after closing must not notify");
+}
 
-	ZTEST(alp_rpc_zephyr_backend, test_error_after_closing_does_not_notify)
-	{
-		struct rpc_be be;
-		init_test_channel(&be, "error_closing");
-		be.owner   = &be;
-		be.closing = true;
-		atomic_clear(&g_notify_calls);
+ZTEST(alp_rpc_zephyr_backend, test_error_after_closing_does_not_notify)
+{
+	struct rpc_be be;
+	init_test_channel(&be, "error_closing");
+	be.owner   = &be;
+	be.closing = true;
+	atomic_clear(&g_notify_calls);
 
-		rpc_ept_error("simulated transport fault", &be);
+	rpc_ept_error("simulated transport fault", &be);
 
-		zassert_equal(atomic_get(&g_notify_calls), 0, "error after closing must not notify");
-	}
+	zassert_equal(atomic_get(&g_notify_calls), 0, "error after closing must not notify");
+}
