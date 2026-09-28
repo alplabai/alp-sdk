@@ -4,11 +4,11 @@
  *
  * [vendor-ext] DEEPX DX-M1 backend hook for <alp/inference.h>.
  *
- * BENCH-UNVERIFIED: compiles + header-checks against the real DEEPX
- * dx_rt headers, but has NOT been run on silicon.  Validation needs an
- * E1M-X V2N-M1 module with the DX-M1 enumerated on PCIe plus the
- * proprietary dx_rt runtime + kernel driver on the Yocto sysroot.
- * Same posture as the recent mbox_alif_mhuv2 / alif_dave2d work.
+ * Runs on silicon (#1262, 2026-09-28): an E1M-V2M103 with dx-rt 3.2.0
+ * and DX-M1 FW 2.4.0 opens and invokes a yolo11n `.dxnn` through this
+ * file under both DEEPX_DXM1 and AUTO, and close() against an in-flight
+ * invoke() drains cleanly.  Not yet checked: output parity against a
+ * host-CPU reference.
  *
  * ----------------------------------------------------------------------
  * Real vendor API

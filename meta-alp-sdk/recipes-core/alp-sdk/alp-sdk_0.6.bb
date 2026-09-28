@@ -122,7 +122,7 @@ python () {
 # (src/yocto/inference_deepx.cpp) is real dx_rt-API code and compiles in
 # only under the `deepx-dxm1` PACKAGECONFIG below -- #482 wired that
 # PACKAGECONFIG + its auto-enable, not the backend body itself -- and
-# it too has never run on DX-M1 silicon, auto-enabled only on a MACHINE
+# it has run on DX-M1 silicon (#1262), auto-enabled only on a MACHINE
 # that carries `deepx-dxm1` in MACHINE_FEATURES with
 # ALP_ENABLE_DEEPX_DXM1 = "1").
 # Where a per-machine NPU userspace runtime package exists it is
