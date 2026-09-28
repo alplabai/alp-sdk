@@ -66,3 +66,15 @@
 &se_service {
 	status = "okay";
 };
+
+/* Seed Zephyr's CSPRNG (and the mbedTLS PSA core) from the Secure-Enclave
+ * TRNG over the same SE channel, instead of TEST_RANDOM_GENERATOR (#2192). */
+&se_trng {
+	status = "okay";
+};
+
+/ {
+	chosen {
+		zephyr,entropy = &se_trng;
+	};
+};

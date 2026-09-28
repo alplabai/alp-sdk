@@ -2090,6 +2090,17 @@
 		mhuv2-recv-node = <&seservice0r>;
 		status = "disabled";
 	};
+
+	/*
+	 * Secure-Enclave TRNG as a Zephyr entropy source (#2192), reached over
+	 * the se_service channel above -- no registers of its own. Enable it
+	 * together with se_service + seservice0r/s and point zephyr,entropy at
+	 * it.
+	 */
+	se_trng: se_trng {
+		compatible = "alif,se-trng";
+		status = "disabled";
+	};
 };
 
 /*
