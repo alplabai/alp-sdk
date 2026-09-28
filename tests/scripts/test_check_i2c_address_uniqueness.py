@@ -183,15 +183,17 @@ def test_board_audio_codecs_collision_is_reported(tmp_path: Path) -> None:
 
 
 def test_allowlisted_collision_is_not_reported(tmp_path: Path) -> None:
-    """The two #1163 collisions on the real tree must be silent -- proven
-    against a scaffolded copy so this test does not depend on the real
-    metadata staying exactly as it is today."""
+    """The #2343 E1M-X EVK U32-vs-TAS2563-broadcast collision on the real
+    tree must be silent -- proven against a scaffolded copy (board preset +
+    the TAS2563 chip manifest) so this test does not depend on the rest of
+    the real metadata staying exactly as it is today."""
     import shutil
 
-    real = REPO / "metadata" / "e1m_modules" / "E1M-V2M101.yaml"
-    dst = tmp_path / "metadata" / "e1m_modules" / "E1M-V2M101.yaml"
-    dst.parent.mkdir(parents=True)
-    shutil.copy2(real, dst)
+    for rel in ("metadata/boards/e1m-x-evk.yaml",
+                "metadata/chips/tas2563.yaml"):
+        dst = tmp_path / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(REPO / rel, dst)
     assert find_problems(tmp_path) == []
 
 
@@ -302,3 +304,108 @@ def test_partial_audio_codec_entry_is_reported_not_skipped(tmp_path):
     assert len(problems) == 1, problems
     assert "no i2c_bus" in problems[0]
     assert "NOT compared" in problems[0]
+
+
+# --- #2348: flat i2c_devices + audio.codecs on one declared bus, and ---
+# --- chip-manifest broadcast addresses.                               ---
+
+_TAS2563_CHIP = """\
+chip_id: tas2563
+i2c:
+  addresses:
+    - { addr_7bit: 0x4D, scope: "AD0 = 10k to GND" }
+    - { addr_7bit: 0x48, scope: "global broadcast (write-only)" }
+"""
+
+
+def test_flat_block_and_codec_collide_on_declared_bus(tmp_path: Path) -> None:
+    """A codec strapped onto a monitor's address on the bus the flat block
+    declares via i2c_devices_bus is one collision."""
+    _seed(
+        tmp_path,
+        "metadata/boards/fake-evk.yaml",
+        """\
+        i2c_devices_bus: E1M_X_I2C0
+        i2c_devices:
+          - { macro: FAKE_I2C_ADDR_MON, part: ina236, address: "0x4D" }
+        audio:
+          codecs:
+            - { chip: codec, designator: U27, i2c_bus: E1M_X_I2C0, i2c_address: "0x4D" }
+        """,
+    )
+    problems = find_problems(tmp_path)
+    assert len(problems) == 1, problems
+    assert "E1M_X_I2C0" in problems[0] and "0x4D" in problems[0]
+    assert "FAKE_I2C_ADDR_MON" in problems[0] and "U27" in problems[0]
+
+
+def test_flat_block_without_declared_bus_stays_separate(tmp_path: Path) -> None:
+    """No i2c_devices_bus: the gate does not guess the flat block's bus."""
+    _seed(
+        tmp_path,
+        "metadata/boards/fake-evk.yaml",
+        """\
+        i2c_devices:
+          - { macro: FAKE_I2C_ADDR_MON, part: ina236, address: "0x4D" }
+        audio:
+          codecs:
+            - { chip: codec, designator: U27, i2c_bus: E1M_X_I2C0, i2c_address: "0x4D" }
+        """,
+    )
+    assert find_problems(tmp_path) == []
+
+
+def test_broadcast_address_collides_with_strapped_device(tmp_path: Path) -> None:
+    """A device strapped to a fitted chip's broadcast address is written by
+    every broadcast -- the TAS2563 0x48 vs INA236 CONFIG hazard."""
+    _seed(tmp_path, "metadata/chips/tas2563.yaml", _TAS2563_CHIP)
+    _seed(
+        tmp_path,
+        "metadata/boards/fake-evk.yaml",
+        """\
+        i2c_devices_bus: E1M_X_I2C0
+        i2c_devices:
+          - { macro: FAKE_I2C_ADDR_MON, part: ina236, address: "0x48" }
+        audio:
+          codecs:
+            - { chip: tas2563, designator: U27, i2c_bus: E1M_X_I2C0, i2c_address: "0x4D" }
+        """,
+    )
+    problems = find_problems(tmp_path)
+    assert len(problems) == 1, problems
+    assert "0x48" in problems[0]
+    assert "chip=tas2563 broadcast" in problems[0]
+    assert "FAKE_I2C_ADDR_MON" in problems[0]
+
+
+def test_shared_broadcast_address_alone_is_not_a_collision(tmp_path: Path) -> None:
+    """Two TAS2563s both answering the global-call address is the design."""
+    _seed(tmp_path, "metadata/chips/tas2563.yaml", _TAS2563_CHIP)
+    _seed(
+        tmp_path,
+        "metadata/boards/fake-evk.yaml",
+        """\
+        audio:
+          codecs:
+            - { chip: tas2563, designator: U27, i2c_bus: E1M_X_I2C0, i2c_address: "0x4D" }
+            - { chip: tas2563, designator: U28, i2c_bus: E1M_X_I2C0, i2c_address: "0x4E" }
+        """,
+    )
+    assert find_problems(tmp_path) == []
+
+
+def test_unassembled_codec_contributes_no_broadcast(tmp_path: Path) -> None:
+    _seed(tmp_path, "metadata/chips/tas2563.yaml", _TAS2563_CHIP)
+    _seed(
+        tmp_path,
+        "metadata/boards/fake-evk.yaml",
+        """\
+        i2c_devices_bus: E1M_X_I2C0
+        i2c_devices:
+          - { macro: FAKE_I2C_ADDR_MON, part: ina236, address: "0x48" }
+        audio:
+          codecs:
+            - { chip: tas2563, designator: U27, i2c_bus: E1M_X_I2C0, i2c_address: "0x4D", assembled: false }
+        """,
+    )
+    assert find_problems(tmp_path) == []

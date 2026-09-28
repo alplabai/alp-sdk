@@ -38,9 +38,12 @@ if ALP_SDK_V2N_SUPERVISOR
 
 config ALP_SDK_V2N_SUPERVISOR_SPI_BUS_ID
 	int "alp_spi bus_id carrying the GD32 SPI fast path (-1 = disabled)"
+	default 1 if $(dt_alias_enabled,alp-spi1)
 	default -1
 	help
-	  alp_spi_open()'s bus_id field.  When set to 1 (DT alias
+	  alp_spi_open()'s bus_id field.  Defaults to 1 when the board
+	  enables DT alias alp-spi1 (both in-tree V2N/V2M CM33 boards do),
+	  else -1.  When set to 1 (DT alias
 	  alp-spi1 = &gd32_spi on the in-tree boards), resolves to the
 	  SCI7 Simple-SPI on V2N pads P76/P77/P96 with P97 as GPIO
 	  chip-select.  This is the CM33's ONLY transport to the GD32 --
@@ -71,5 +74,17 @@ config ALP_SDK_V2N_SUPERVISOR_ACQUIRE_TIMEOUT_MS
 	  timeout prevents subsequent acquirers from piling up behind
 	  it -- they get ALP_ERR_BUSY back at the portable surface and
 	  can retry.  Default 100 ms is well above any steady-state op.
+
+config ALP_SDK_V2N_SUPERVISOR_BUSY_HOLDOFF_MS
+	int "Hold-off after a GD32 init that ended BUSY (ms)"
+	default 1000
+	range 0 60000
+	help
+	  A bridge running an unconfirmed OTA trial image answers
+	  STATUS_BUSY until it settles, and gd32g553_init() spends its
+	  whole ~2 s retry budget against it while holding the
+	  supervisor mutex.  After such an init, acquirers get
+	  ALP_ERR_BUSY immediately for this long instead of re-running
+	  the 2 s init each time.  0 disables the hold-off.
 
 endif # ALP_SDK_V2N_SUPERVISOR

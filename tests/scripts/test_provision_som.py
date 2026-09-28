@@ -117,6 +117,16 @@ def test_missing_serial_without_ledger_fails(tmp_path):
     assert proc.returncode != 0
 
 
+def test_unparseable_serial_fails_before_any_flash_step(tmp_path):
+    """A --serial the MAC derivation cannot parse must stop provisioning
+    before the xSPI flash steps, not at the eeprom step after them."""
+    d = _make_bundle(tmp_path)
+    proc = _run("--bundle", str(d), "--serial", "ALP-V2N101-26W19-00042")
+    assert proc.returncode != 0
+    assert "xSPI mtd0" not in proc.stdout, proc.stdout
+    assert "ALP-V2N101-26W19-00042" in proc.stdout
+
+
 def test_carrier_auto_derive_resolves_real_hil_spec(tmp_path):
     """--carrier auto-derives tests/hil/<sku-without-'e1m-'>-<carrier>. The
     real dir is tests/hil/v2n101-x-evk (no e1m- prefix); regression for
