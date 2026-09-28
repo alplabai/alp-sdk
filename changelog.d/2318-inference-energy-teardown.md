@@ -10,7 +10,7 @@ model), and the teardown faulted in
 resolver and interpreter now live in never-destroyed static storage, so
 no exit path walks the model again.
 
-Bench-verified on E1M-AEN803 2026W36-0009 (`e1m-aen-evk-01`, Flow C
+Bench-verified on E1M-AEN803 2026W36-0009 (Flow C
 RAM-run landing on the M55-HP): unfixed 3 of 4 runs faulted after
 `RESULT FAIL: no INA236 answered on EVK_I2C_BUS_SENSORS` (two USAGE
 FAULTs, one BUS FAULT at BFAR `0xd795bcba`); fixed 0 of 6, each ending
