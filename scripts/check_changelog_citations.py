@@ -83,6 +83,26 @@ gets the same treatment as broken anchor text rather than the SKIP given to
 a citation this gate genuinely cannot resolve (a foreign-repo path, or a
 folded `changelog.d/` fragment).
 
+ANCHOR TEXT IS AUTHORITATIVE, THE LINE NUMBER IS ADVISORY
+---------------------------------------------------------
+A verified citation is resolved by its quoted text, never by its line number.
+If the anchor is found inside the cited range, the citation passes exactly as
+before. If it is not, the whole cited file is searched:
+  * found EXACTLY ONCE elsewhere -- PASS, with an informational note naming
+    the citation and the line the text now lives on ("note: <fragment>:
+    <path>:<old> anchor now at line <new>"). The line number is stale, not
+    wrong, so an unrelated edit that inserted lines above the cited code no
+    longer fails the gate. `--fix` rewrites the citation to that line (for a
+    START-END range both ends shift by the same delta).
+  * found MORE THAN ONCE -- ERROR, ambiguous. The message lists every
+    candidate line; a human picks the occurrence the note meant, because
+    guessing between them is how a citation silently retargets.
+  * NOT FOUND -- ERROR, as before, now also stating the text is absent from
+    the file rather than merely outside the cited range.
+
+The line number still bounds the range check and is still where `--fix`
+starts; only the anchor decides whether the citation is correct.
+
 NEW CITATIONS -- anchors are mandatory, old ones are grandfathered
 ------------------------------------------------------------------
 A citation on a line ADDED relative to a base must be anchored, or the gate
@@ -463,8 +483,25 @@ def _read_worktree(rel: str) -> str | None:
     return target.read_text(encoding="utf-8", errors="replace")
 
 
+def _anchor_line_hits(body: str, needle: str) -> list[int]:
+    """1-based line numbers where `needle` occurs in the joined `body`.
+
+    Searched in the joined text, not line by line, so an anchor a fragment
+    wrapped across two source lines is found the same way `_check_one` and
+    `_fix_one` both look for it -- by containment. Overlapping occurrences
+    are not re-counted (`find(..., at + 1)`).
+    """
+    hits: list[int] = []
+    at = body.find(needle)
+    while at != -1:
+        hits.append(body.count("\n", 0, at) + 1)
+        at = body.find(needle, at + 1)
+    return hits
+
+
 def _check_one(frag: Path, text: str, added: set[int] | None = None,
                read: Callable[[str], str | None] | None = None,
+               notes: list[str] | None = None,
                ) -> tuple[list[str], list[str], int, int]:
     """Return (errors, skips, checked, anchored) for one fragment.
 
@@ -473,6 +510,13 @@ def _check_one(frag: Path, text: str, added: set[int] | None = None,
     of them must be anchored. None means the rule is off for this document.
     `read` returns a cited file's text or None, defaulting to the working
     tree; `--against-merge` passes one that reads the merged tree instead.
+
+    An anchored citation is resolved by its QUOTED TEXT, never by the line
+    number: the number is advisory and only the anchor is authoritative. When
+    the text is not inside the cited range but occurs exactly once in the
+    file, the citation PASSES and an informational note naming the new line
+    is appended to `notes` (see the module docstring). `notes` may be None,
+    which simply suppresses the note.
     """
     errors: list[str] = []
     skips: list[str] = []
@@ -549,17 +593,34 @@ def _check_one(frag: Path, text: str, added: set[int] | None = None,
         anchored += 1
         needle = anchor.group("text").strip()
         region = "\n".join(lines[start - 1:end])
-        if needle not in region:
-            hint = ("The quoted text is broken across a markdown line, and a "
-                    "line break inside the quotes can never match a "
-                    "single-line citation -- rewrap before the '(' instead."
-                    if "\n" in needle and start == end else
-                    "The code moved; re-resolve the citation instead of "
-                    "widening the range.")
+        if needle in region:
+            continue
+
+        # The quoted text is the anchor and the line number is advisory, so
+        # the whole file is searched before the citation is called broken -- an
+        # unrelated line shift ABOVE the cited line no longer fails the gate.
+        hits = _anchor_line_hits("\n".join(lines), needle)
+        if len(hits) == 1:
+            if notes is not None:
+                notes.append(f"note: {where} anchor now at line {hits[0]}")
+            continue
+        if len(hits) > 1:
             errors.append(
-                f"{where} -- anchored on {needle!r}, but that text is not in "
-                f"the cited range. {hint}"
-            )
+                f"{where} -- anchored on {needle!r}, which occurs at lines "
+                f"{hits}, so the anchor is ambiguous: the line number must "
+                f"point at one of those occurrences.")
+            continue
+
+        hint = ("The quoted text is broken across a markdown line, and a "
+                "line break inside the quotes can never match a "
+                "single-line citation -- rewrap before the '(' instead."
+                if "\n" in needle and start == end else
+                "The anchor text is absent from the file, so the quoted code "
+                "is gone rather than moved; re-resolve the citation by hand.")
+        errors.append(
+            f"{where} -- anchored on {needle!r}, but that text is not in "
+            f"the cited range and is absent from {rel}. {hint}"
+        )
 
     return errors, skips, checked, anchored
 
@@ -679,12 +740,7 @@ def _fix_one(frag: Path, text: str) -> tuple[str, list[str], list[str], int]:
         # Located in the joined body rather than line by line, so an anchor a
         # fragment wrapped across two lines is found the same way `_check_one`
         # finds it -- by containment in the joined region.
-        body = "\n".join(lines)
-        hits: list[int] = []
-        at = body.find(needle)
-        while at != -1:
-            hits.append(body.count("\n", 0, at) + 1)
-            at = body.find(needle, at + 1)
+        hits = _anchor_line_hits("\n".join(lines), needle)
 
         if not hits:
             problems.append(
@@ -983,6 +1039,7 @@ def _grade(fragments: list[tuple[Path, str]], changelog: str | None,
     """
     all_errors: list[str] = []
     all_skips: list[str] = []
+    all_notes: list[str] = []
     total_checked = total_anchored = new = 0
 
     for frag, text in fragments:
@@ -992,7 +1049,8 @@ def _grade(fragments: list[tuple[Path, str]], changelog: str | None,
             new += sum(1 for m in _CITATION.finditer(_strip_fenced_blocks(text))
                        if text.count("\n", 0, m.start()) + 1 in lines
                        and not m.group("path").startswith(_FOREIGN_PREFIXES))
-        errs, skips, checked, anchored = _check_one(frag, text, lines, read)
+        errs, skips, checked, anchored = _check_one(
+            frag, text, lines, read, all_notes)
         all_errors += errs
         all_skips += skips
         total_checked += checked
@@ -1006,14 +1064,15 @@ def _grade(fragments: list[tuple[Path, str]], changelog: str | None,
     all_warnings: list[str] = []
     if changelog is not None:
         head, tail = _split_changelog(changelog)
-        errs, skips, checked, anchored = _check_one(CHANGELOG, head, None, read)
+        errs, skips, checked, anchored = _check_one(
+            CHANGELOG, head, None, read, all_notes)
         all_errors += errs
         all_skips += skips
         total_checked += checked
         total_anchored += anchored
         if tail:
             werrs, wskips, wchecked, wanchored = _check_one(
-                CHANGELOG, tail, None, read)
+                CHANGELOG, tail, None, read, all_notes)
             all_warnings += werrs
             all_skips += wskips
             total_checked += wchecked
@@ -1024,6 +1083,9 @@ def _grade(fragments: list[tuple[Path, str]], changelog: str | None,
 
     for s in all_skips:
         print(f"  SKIP {s}")
+
+    for n in all_notes:
+        print(f"  {n}")
 
     if all_errors:
         print(f"\ncheck-changelog-citations: {len(all_errors)} broken "
