@@ -23,7 +23,9 @@ def _bash_works() -> bool:
     # for reasons unrelated to the code under test.
     if shutil.which("bash") is None:
         return False
-    probe = subprocess.run(["bash", "-c", "echo ok"], capture_output=True, text=True, check=False)
+    probe = subprocess.run(
+        ["bash", "-c", "echo ok"], capture_output=True, text=True, encoding="utf-8", check=False
+    )
     return probe.returncode == 0 and probe.stdout.strip() == "ok"
 
 
@@ -32,7 +34,7 @@ pytestmark = pytest.mark.skipif(not _bash_works(), reason="needs a working bash"
 
 def _run(tmp_path: Path, map_text: str, allow: bool = False) -> subprocess.CompletedProcess:
     pkg_map = tmp_path / "app-package-map.txt"
-    pkg_map.write_text(map_text)
+    pkg_map.write_text(map_text, encoding="utf-8")
     env = dict(os.environ)
     # Never let sourcing bench-env.sh reach real labgrid / probes.
     for var in ("LG_PLACE", "LG_COORDINATOR", "LG_SWD_PATH", "ALP_JLINK_SEARCH_ROOT"):
@@ -45,6 +47,7 @@ def _run(tmp_path: Path, map_text: str, allow: bool = False) -> subprocess.Compl
         ["bash", "-c", f'source "{ENV.as_posix()}" >/dev/null 2>&1; bench_atoc_package_fits "$0" t', pkg_map.as_posix()],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=env,
         check=False,
     )
