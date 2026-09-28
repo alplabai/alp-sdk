@@ -10,6 +10,12 @@ diff and silently drops hardware configuration. `strict_yaml_load()`
 and `strict_json_loads()` are the one place every metadata ingestion
 boundary should route through instead of the raw stdlib loaders.
 
+`fast_safe_load()` is the lenient sibling: exactly `yaml.safe_load`
+semantics (duplicate keys keep the last value) for hot readers that do not
+opt into rejection. Both YAML paths parse with libyaml's C parser whenever
+PyYAML was built with it, and fall back to the pure-Python one otherwise
+(#2328).
+
 Zero dependencies beyond PyYAML on purpose: this is imported from both
 the top-level `scripts/` modules and `alp_orchestrate/`/`alp_cli/`, so
 it must not create an import cycle with either (mirrors `sentinels.py`).
@@ -29,7 +35,7 @@ class DuplicateKeyError(ValueError):
 
 
 def _no_duplicates_mapping_constructor(
-    loader: yaml.SafeLoader, node: yaml.MappingNode
+    loader: yaml.constructor.SafeConstructor, node: yaml.MappingNode
 ) -> dict[str, Any]:
     # Duplicate-key detection must run on the node's OWN explicit pairs
     # BEFORE `flatten_mapping()` splices in `<<: *anchor` merge-key
@@ -62,7 +68,15 @@ def _no_duplicates_mapping_constructor(
     return mapping
 
 
-class _StrictLoader(yaml.SafeLoader):
+# libyaml's C parser when PyYAML was built with it (its wheels are), the
+# pure-Python one otherwise. Same SafeConstructor either way, so the same
+# values and the same duplicate-key rejection -- only ~10x faster to parse.
+# YAML parsing was ~45% of tests/scripts' CPU time, most of it through the
+# loaders in this module (#2328).
+_SAFE_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+
+class _StrictLoader(_SAFE_LOADER):
     pass
 
 
@@ -77,6 +91,15 @@ def strict_yaml_load(text: str, source: str | Path = "<string>") -> Any:
         return yaml.load(text, Loader=_StrictLoader)
     except DuplicateKeyError as e:
         raise DuplicateKeyError(f"{source}: {e}") from e
+
+
+def fast_safe_load(text: str) -> Any:
+    """Exactly `yaml.safe_load(text)`, parsed by libyaml when available.
+
+    For the hot metadata readers that want stdlib semantics (duplicate keys
+    keep the last value) rather than `strict_yaml_load`'s rejection.
+    """
+    return yaml.load(text, Loader=_SAFE_LOADER)
 
 
 def _no_duplicates_object_pairs_hook(
