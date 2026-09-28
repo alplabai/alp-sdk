@@ -52,28 +52,53 @@ interleaved HWC file of the identical byte count passes the size check
 and would silently be fed to the NPU with the wrong channel ordering.
 Getting NCHW right is entirely the caller's job.
 
-Channel order (RGB vs BGR), pixel normalisation (raw 0-255 vs /255 vs
-mean/std), and letterbox padding are **unverified** -- no vendor
-sample has been run against this example. The vendor's own
-`how-to/sample_app_v2h/app_yolox_cam` sample is the authority for all
-three; match it exactly, do not guess. A camera/video capture path is
-explicitly **out of scope** here (that is issue #1149); a customer
-with a live pipeline produces frames in this NCHW layout with whatever
-resize/normalise/HWC->CHW transpose their capture path already needs.
-A host-side sketch with Pillow + NumPy -- RGB, raw 0-255 float32,
-plain resize with no letterbox -- is a **placeholder only**, to be
-checked against `app_yolox_cam` before trusting it for real
-detections:
+What goes in each plane is fixed by the vendor sample that ships
+this model, RUHMI's `how-to/sample_app_v2h/app_yolox_cam` (DRP-AI TVM
+v2.7.0), which the bundle's own `preprocess/` step implements on the
+device:
+
+- **Letterbox to a square, image at the top, pad 114.** The app copies
+  each 1920x1080 camera frame into the top rows of a 1920x1920 buffer
+  whose remaining rows are pre-filled with Y=114, U=V=128, i.e. RGB
+  (114, 114, 114) (`main_yolox.cpp`, `DRPAI_INPUT_PADDING (1)` in
+  `define.h`). The image is not centred.
+- **Bilinear resize of that square to 640x640** (`op.Resize(...,
+  BILINEAR)` in the patched `compile_onnx_model_quant.py`).
+- **RGB channel order, CHW, float32** (`format_out = FORMAT.RGB`,
+  `order_out = ORDER.CHW`, `type_out = TYPE.FP32`).
+- **No normalisation: raw 0-255.** The sample's README deletes the
+  tutorial's `cof_add`/`cof_mul` and `F.normalize` lines before
+  compiling.
+
+A camera/video capture path is explicitly **out of scope** here (that is
+issue #1149). A host-side generator that follows the same steps, using
+Pillow + NumPy:
 
 ```python
 import numpy as np
 from PIL import Image
-img = Image.open("photo.jpg").convert("RGB").resize((640, 640))
+img = Image.open("photo.jpg").convert("RGB")
+side = max(img.size)
+# Letterbox: square canvas of RGB 114, image pasted at the top-left.
+canvas = Image.new("RGB", (side, side), (114, 114, 114))
+canvas.paste(img, (0, 0))
+canvas = canvas.resize((640, 640), Image.BILINEAR)
 # HWC (640, 640, 3) -> CHW (3, 640, 640): move the channel axis from
 # last to first -- the transpose the model's NCHW input needs and a
-# same-size HWC file would silently skip.
-np.asarray(img, dtype=np.float32).transpose(2, 0, 1)[None].tofile("frame0.bin")
+# same-size HWC file would silently skip.  No /255, no mean/std.
+np.asarray(canvas, dtype=np.float32).transpose(2, 0, 1)[None].tofile("frame0.bin")
 ```
+
+This matches the device path step for step but not byte for byte:
+Pillow's bilinear filter and a direct RGB decode differ slightly from
+the DRP-AI resize and its YUYV->RGB conversion, so expect small
+per-pixel differences, not a layout or scaling mismatch. Two caveats
+remain open:
+- The sample calibrates the quantiser differently (shorter side
+  resized to 640, then a centre crop).
+- Upstream YOLOX's own preprocessing feeds BGR, while the Renesas
+  bundle is compiled for RGB. Follow the bundle, since it is what
+  runs.
 
 ## Model bundle
 
@@ -97,13 +122,15 @@ random-frame fallback. **No compiled `drpai_dir` bundle exists in this
 checkout** -- only the ONNX source does; Sec 5 of
 [`docs/bring-up-drpai-v2n.md`](../../../docs/bring-up-drpai-v2n.md)
 confirms no `drp_desc.bin`/`weight.bin`/`addr_map.txt`/`deploy.json`
-set exists anywhere in a fresh checkout. Deriving real preprocessing
-from the vendor's `app_yolox_cam` sample, compiling a bundle with it,
-and checking this example's frame generator byte-for-byte against that
-bundle's own sample `input_0.bin` are all tracked in
-[alplabai/alp-sdk#2236](https://github.com/alplabai/alp-sdk/issues/2236),
-not done here. Until that lands, produce a bundle for the first
-argument by compiling one **outside this SDK**, directly with the
+set exists anywhere in a fresh checkout. The input preprocessing is
+derived from the vendor's `app_yolox_cam` sample (see "Input" above);
+compiling a bundle with a real calibration set and checking it on
+silicon are tracked in
+[alplabai/alp-sdk#2236](https://github.com/alplabai/alp-sdk/issues/2236)
+and #1268. A bundle's `input_0.bin` is the compiler's own sample input
+(random frames unless a calibration set was given), so it is not a byte
+reference for the generator. Until that lands, produce a bundle for the
+first argument by compiling one **outside this SDK**, directly with the
 Renesas DRP-AI TVM (RUHMI) toolchain (see
 [`docs/bring-up-drpai-v2n.md`](../../../docs/bring-up-drpai-v2n.md)
 Sec 2 and Sec 5), then tar the compiler's object directory yourself,

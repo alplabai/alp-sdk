@@ -48,26 +48,33 @@
  *   size check below and would be fed to the NPU with a silently wrong
  *   channel ordering. Getting NCHW right is entirely the caller's job.
  *
- *   Channel order (RGB vs BGR), pixel normalisation (raw 0-255 vs /255
- *   vs mean/std), and letterbox padding are UNVERIFIED -- no vendor
- *   sample has been run against this example. The vendor's own
- *   `how-to/sample_app_v2h/app_yolox_cam` sample is the authority for
- *   all three; match it exactly, do not guess. A customer with a real
- *   camera/video pipeline (out of scope here -- see issue #1149)
- *   produces frames in this NCHW layout with whatever resize +
- *   normalise + HWC->CHW transpose their capture path already needs. A
- *   host-side sketch with Pillow + NumPy -- RGB, raw 0-255 float32,
- *   plain resize with no letterbox -- is a PLACEHOLDER only, to be
- *   checked against `app_yolox_cam` before trusting it for real
- *   detections:
+ *   The plane contents follow the vendor sample that ships this model,
+ *   RUHMI's `how-to/sample_app_v2h/app_yolox_cam` (DRP-AI TVM v2.7.0),
+ *   whose compiled `preprocess/` step does, on the device:
+ *     1. letterbox to a square with the image at the TOP and the rest
+ *        filled with RGB (114, 114, 114) (the app pre-fills a
+ *        1920x1920 buffer with Y=114, U=V=128 and copies the 1920x1080
+ *        frame into its top rows);
+ *     2. bilinear resize to 640x640;
+ *     3. RGB channel order, CHW, float32;
+ *     4. NO normalisation -- raw 0-255 (the sample deletes the
+ *        tutorial's mean/std and cof_add/cof_mul before compiling).
+ *   A camera/video pipeline is out of scope here (issue #1149). The
+ *   host-side equivalent with Pillow + NumPy (same steps, not
+ *   byte-identical: Pillow's bilinear and a direct RGB decode differ
+ *   slightly from the DRP-AI resize and its YUYV->RGB conversion):
  *
  *       import numpy as np
  *       from PIL import Image
- *       img = Image.open("photo.jpg").convert("RGB").resize((640, 640))
+ *       img = Image.open("photo.jpg").convert("RGB")
+ *       side = max(img.size)
+ *       canvas = Image.new("RGB", (side, side), (114, 114, 114))
+ *       canvas.paste(img, (0, 0))    # image at the top, pad below
+ *       canvas = canvas.resize((640, 640), Image.BILINEAR)
  *       # HWC (640, 640, 3) -> CHW (3, 640, 640): move the channel axis
  *       # from last to first; this is the transpose the model's NCHW
  *       # input needs and a same-size HWC file would silently skip.
- *       np.asarray(img, dtype=np.float32).transpose(2, 0, 1)[None].tofile("frame0.bin")
+ *       np.asarray(canvas, dtype=np.float32).transpose(2, 0, 1)[None].tofile("frame0.bin")
  *
  * Model bundle
  * ============
@@ -90,11 +97,11 @@
  *   this checkout -- only an ONNX source does (RUHMI's
  *   `yolox-S_VOC.onnx`; docs/bring-up-drpai-v2n.md Sec 5 confirms no
  *   `drp_desc.bin`/`weight.bin`/`addr_map.txt`/`deploy.json` set
- *   anywhere in a fresh checkout). Deriving real preprocessing from the
- *   vendor's `app_yolox_cam` sample, compiling a bundle with it, and
- *   checking this program's frame generator byte-for-byte against that
- *   bundle's own sample `input_0.bin` are all tracked in alp-sdk#2236,
- *   not done here. Until that lands, produce a bundle for argv[1] by
+ *   anywhere in a fresh checkout). The input preprocessing is derived
+ *   from the vendor's `app_yolox_cam` sample (above); compiling a
+ *   bundle with a real calibration set and checking it on silicon are
+ *   tracked in alp-sdk#2236 and #1268, not done here. Until that lands,
+ *   produce a bundle for argv[1] by
  *   compiling one outside this SDK, directly with the Renesas DRP-AI
  *   TVM (RUHMI) toolchain (docs/bring-up-drpai-v2n.md Sec 2 and Sec 5),
  *   then tar the compiler's object directory yourself, e.g.:
