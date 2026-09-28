@@ -297,7 +297,7 @@ measured 13,552 bytes.
 
 ## Verification
 
-**Bench-gated** — serial, `e1m-aen-evk-01` under a held labgrid reservation,
+**Bench-gated** — serial, an AEN EVK bench unit under a held labgrid reservation,
 AEN Vin **16.0 V**:
 
 1. HE-host / HP-peer end to end from a scaffolded project.

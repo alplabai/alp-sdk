@@ -72,7 +72,7 @@ def _extract_summary_block(text: str) -> str:
 
 @pytest.fixture(scope="module")
 def harness_pieces():
-    text = TEST_ALL.read_text()
+    text = TEST_ALL.read_text(encoding="utf-8")
     return {
         "run_stage": _extract_function(text, "run_stage"),
         "skip_stage": _extract_function(text, "skip_stage"),
@@ -99,12 +99,14 @@ def _run_harness(harness_pieces, body: str, tmp_path: Path) -> subprocess.Comple
         "fake_gap()  { return 99; }\n"
         f"{body}\n"
         "END=0\n"
-        f"{harness_pieces['summary']}\n"
+        f"{harness_pieces['summary']}\n",
+        encoding="utf-8",
     )
     return subprocess.run(
         ["bash", str(script)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=30,
     )
 
@@ -201,7 +203,7 @@ def test_every_call_site_in_the_real_script_passes_a_kind():
     call site being added without deciding scope-vs-gap (which would
     otherwise only be caught at runtime, and only if that code path is
     actually exercised)."""
-    text = TEST_ALL.read_text()
+    text = TEST_ALL.read_text(encoding="utf-8")
     calls = re.findall(r'skip_stage\s+"[^"]+"\s+"[^"]*"(\s+\S+)?', text)
     assert calls, "no skip_stage call sites found -- marker/regex drifted"
     for trailing in calls:

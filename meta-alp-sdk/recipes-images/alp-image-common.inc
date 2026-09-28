@@ -26,6 +26,7 @@ IMAGE_INSTALL = " \
     mender-client                  \
     openssh                        \
     alp-watchdog-policy            \
+    alp-hostname                   \
 "
 
 # meta-rz-drpai vendor payload (DRP-AI3 NPU userspace runtime + kernel
@@ -66,7 +67,7 @@ IMAGE_INSTALL = " \
 # Gated on the meta-rz-drpai LAYER being present (soft
 # LAYERRECOMMENDS_alp-sdk dep -- its BBFILE_COLLECTIONS name, "rz-drpai",
 # not its directory name; see conf/layer.conf) AND MACHINE_FEATURES
-# containing "v2n" (set on all four V2N/V2M machine confs): a build can
+# containing "v2n" (set on all six V2N/V2M machine confs): a build can
 # legitimately carry this layer in bblayers.conf while building a
 # different MACHINE in the same tree (AEN, NX91 -- neither ever builds
 # linux-renesas), and kernel-module-mmngr has no COMPATIBLE_MACHINE guard
@@ -79,10 +80,34 @@ IMAGE_INSTALL = " \
 # citation that is the concrete failure this closes. Settled by
 # inspection only; unverified by an actual `bitbake` run.
 ALP_RZ_DRPAI_INSTALL = "${@bb.utils.contains('BBFILE_COLLECTIONS', 'rz-drpai', \
-    bb.utils.contains('MACHINE_FEATURES', 'v2n', 'lib-tvm kernel-module-mmngr', '', d), '', d)}"
+    bb.utils.contains('MACHINE_FEATURES', 'v2n', 'lib-tvm kernel-module-mmngr alp-drpai-udev', '', d), '', d)}"
 ALP_RZ_DRPAI_INSTALL[vardepvalue] = "${ALP_RZ_DRPAI_INSTALL}"
 
 IMAGE_INSTALL += " ${ALP_RZ_DRPAI_INSTALL}"
+
+# On-module Murata LBEE5HY2FY-922 (Infineon CYW55513) Wi-Fi + BT: the
+# out-of-tree cyw-fmac driver + firmware blobs (this layer, own
+# recipes -- no vendor-layer gate needed) plus the standard userspace
+# stack (wireless-regdb-static installs regulatory.db + regulatory.db.p7s
+# under /lib/firmware for cfg80211 to load directly at modprobe -- kernel
+# >= 4.15 only, which this 6.1 kernel clears; the bare wireless-regdb
+# package is the legacy crda-daemon path (regulatory.bin under
+# /usr/lib/crda/) and RCONFLICTS with -static, so picking the wrong one
+# is not an additive mistake, iw for scan/connect from the shell,
+# wpa_supplicant for WPA2/WPA3 association, bluez5 for hci0/
+# bluetoothctl, and the BT kernel modules -- wifi-bt.cfg builds the BT stack
+# as =m because a built-in hci_uart_bcm probes before rootfs and cannot
+# load its firmware patch). Gated the same way ALP_RZ_DRPAI_INSTALL is -- on
+# MACHINE_FEATURES containing "v2n" -- because every V2N/V2M SKU carries
+# the same on-module part (see wifi_ble: in each
+# metadata/e1m_modules/E1M-V2{N,M}10{1,2,3}.yaml), but a shared
+# bblayers.conf building a non-RZ MACHINE (AEN, NX91) must not pull a
+# dependency with no provider there.
+ALP_V2N_WIFI_BT_INSTALL = "${@bb.utils.contains('MACHINE_FEATURES', 'v2n', \
+    'cyw-fmac cyw-fmac-firmware wireless-regdb-static iw wpa-supplicant bluez5 kernel-module-bluetooth kernel-module-hci-uart kernel-module-btbcm', '', d)}"
+ALP_V2N_WIFI_BT_INSTALL[vardepvalue] = "${ALP_V2N_WIFI_BT_INSTALL}"
+
+IMAGE_INSTALL += " ${ALP_V2N_WIFI_BT_INSTALL}"
 
 # SDK sysroot headers (populate_sdk) -- ports the vendor bbappends'
 # TOOLCHAIN_TARGET_TASK:append mechanism, without which `bitbake
@@ -169,10 +194,12 @@ IMAGE_INSTALL += " \
 # networkd-only.
 IMAGE_FEATURES:remove = "tools-testapps"
 
-# DEEPX runtime on V2M variants: the machine confs own this, gated on
-# ALP_ENABLE_DEEPX_DXM1 (dx-rt is license-gated -- its do_fetch is a
-# hard stop without a licensed source). No unconditional append here:
-# it would make every un-opted V2M image build fail at fetch.
+# DEEPX runtime on V2M variants: the machine confs own this (see
+# conf/machine/include/e1m-v2m-deepx.inc), gated on
+# ALP_ENABLE_DEEPX_DXM1, which defaults on whenever DEEPX's own
+# meta-deepx-m1 layer (dx-driver/dx-rt) is in bblayers.conf. No
+# unconditional append here: it would make every V2M image require
+# meta-deepx-m1 in bblayers.conf.
 
 IMAGE_LINGUAS = "en-us"
 

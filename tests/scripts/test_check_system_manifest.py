@@ -6,6 +6,7 @@ alp-sdk-vscode extension, CI, flashers) consume. These lock the emitter <->
 contract lockstep and the gate behaviour.
 """
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -17,7 +18,8 @@ SCHEMA = REPO / "metadata" / "schemas" / "system-manifest-v1.schema.json"
 
 def _run(*args):
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True)
+        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"})
 
 
 def test_schema_is_valid_draft202012():
@@ -66,7 +68,7 @@ def test_broken_slice_rejected(tmp_path):
         "ipc": [], "helper_mcus": [], "boot_order": [],
     }
     p = tmp_path / "system-manifest.yaml"
-    p.write_text(json.dumps(bad))
+    p.write_text(json.dumps(bad), encoding="utf-8")
     proc = _run("--manifest", str(p))
     assert proc.returncode != 0
     assert "FAIL" in proc.stdout
@@ -81,7 +83,7 @@ def test_unknown_top_level_key_rejected(tmp_path):
         "bogus_key": 1,   # additionalProperties:false must catch drift/typos
     }
     p = tmp_path / "m.yaml"
-    p.write_text(json.dumps(doc))
+    p.write_text(json.dumps(doc), encoding="utf-8")
     proc = _run("--manifest", str(p))
     assert proc.returncode != 0
 
@@ -101,6 +103,77 @@ def test_hw_info_eeprom_projection_allowed(tmp_path):
         "slices": [], "ipc": [], "helper_mcus": [], "boot_order": [],
     }
     p = tmp_path / "m.yaml"
-    p.write_text(json.dumps(doc))
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    proc = _run("--manifest", str(p))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+# ---------------------------------------------------------------------
+# The memory[] name join (#1365 item 3) -- JSON Schema cannot express it,
+# so the gate carries it in Python.  Both directions are pinned: dropping
+# the check must turn one of these red.
+# ---------------------------------------------------------------------
+
+
+def _manifest(**panes):
+    doc = {
+        "schema_version": 1, "generated_by": "test",
+        "hw_info": {
+            "sku": "E1M-AEN801", "som_hw_rev": "r1",
+            "board_name": "E1M-EVK", "board_hw_rev": None,
+            "silicon": "alif:ensemble:e8",
+        },
+        "slices": [], "ipc": [], "helper_mcus": [], "boot_order": [],
+    }
+    doc.update(panes)
+    return doc
+
+
+# `base` is not decoration here: the schema's row invariant requires it
+# whenever `status: ok`, so a row without one is refused before the join
+# check is ever reached.
+_MRAM_ROW = {
+    "name": "mram_main", "source": "som_preset",
+    "kind": "flash", "status": "ok", "base": 0x80000000,
+}
+
+
+def test_a_carve_out_region_naming_a_declared_region_passes(tmp_path):
+    doc = _manifest(
+        memory=[_MRAM_ROW],
+        ipc=[{"name": "link", "kind": "rpmsg", "endpoints": ["a", "b"],
+              "carve_out_region": "mram_main"}],
+    )
+    p = tmp_path / "m.yaml"
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    proc = _run("--manifest", str(p))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_a_carve_out_region_naming_no_region_is_refused(tmp_path):
+    """The refusing direction, pinned: a typo'd or stale
+    `carve_out_region` must fail the gate rather than ship a link that
+    points at nothing."""
+    doc = _manifest(
+        memory=[_MRAM_ROW],
+        ipc=[{"name": "link", "kind": "rpmsg", "endpoints": ["a", "b"],
+              "carve_out_region": "mram_mian"}],
+    )
+    p = tmp_path / "m.yaml"
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    proc = _run("--manifest", str(p))
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "carve_out_region 'mram_mian' names no memory[] region" in proc.stdout
+
+
+def test_the_join_is_skipped_when_the_memory_pane_is_absent(tmp_path):
+    """An absent `memory:` means a producer older than #1365 item 3, or a
+    SoM whose layout is still pending -- neither is a join failure."""
+    doc = _manifest(
+        ipc=[{"name": "link", "kind": "rpmsg", "endpoints": ["a", "b"],
+              "carve_out_region": "anything_at_all"}],
+    )
+    p = tmp_path / "m.yaml"
+    p.write_text(json.dumps(doc), encoding="utf-8")
     proc = _run("--manifest", str(p))
     assert proc.returncode == 0, proc.stdout + proc.stderr

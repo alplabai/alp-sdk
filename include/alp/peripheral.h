@@ -43,6 +43,26 @@ extern "C" {
  * @c alp_jpeg_encode_req_t::format -- existing values are unchanged, so
  * this stays ABI-safe for every display/camera caller already switching
  * on this enum.
+ *
+ * @ref ALP_PIXFMT_GREY8, @ref ALP_PIXFMT_RAW8, and @ref ALP_PIXFMT_RAW10
+ * were appended (new numeric values after @ref ALP_PIXFMT_NV12) for
+ * <alp/camera.h> sensors that hand raw, undemosaiced pixels to the
+ * application instead of an already-converted RGB/YUV frame -- again
+ * additive only, existing values unchanged.  @ref ALP_PIXFMT_RAW8 and
+ * @ref ALP_PIXFMT_RAW10 don't fix a Bayer order in the enum itself: which
+ * of the four CFA arrangements (BGGR/GBRG/GRBG/RGGB) a frame actually
+ * uses is a property of the SENSOR, not the request -- open()ing camera
+ * @c N with @ref ALP_PIXFMT_RAW10 always yields that camera's native
+ * order.  This API version has no runtime query for it (no
+ * `alp_camera_get_format()`); an application learns the order the same
+ * place it learns which sensor is wired at all -- the board/shield
+ * documentation (e.g. docs/camera-shields.md's per-shield table) -- and
+ * hardcodes it, the same way it already hardcodes the requested
+ * width/height.  @ref ALP_PIXFMT_RAW10 is always delivered UNPACKED: one
+ * 16-bit little-endian sample per pixel (the low 10 bits carry data, the
+ * high 6 are zero), never the MIPI CSI-2 wire's 5-bytes-per-4-pixels
+ * packed form -- so a frame's row stride is a caller-computable constant,
+ * `width * 2`, with no pitch query needed either.
  */
 typedef enum {
 	ALP_PIXFMT_MONO_VLSB = 0, /**< 1 bpp, vertical bytes (SSD1306 native). */
@@ -53,6 +73,11 @@ typedef enum {
 	    4, /**< I420: separate Y, U, V planes, each its own base pointer + stride (4:2:0). */
 	ALP_PIXFMT_NV12 =
 	    5, /**< Semi-planar 4:2:0: one Y plane immediately followed by one interleaved U/V plane. */
+	ALP_PIXFMT_GREY8 = 6, /**< 8 bpp mono, one byte per pixel, no colour info (e.g. OV9281). */
+	ALP_PIXFMT_RAW8 =
+	    7, /**< Sensor-native 8-bit raw: one byte per pixel, Bayer CFA (order is the sensor's) or mono. */
+	ALP_PIXFMT_RAW10 =
+	    8, /**< Sensor-native 10-bit raw, unpacked to one 16-bit little-endian sample per pixel (high 6 bits zero); Bayer CFA (order is the sensor's) or mono. */
 } alp_pixfmt_t;
 
 /** Status codes returned by ALP peripheral functions. */
@@ -227,6 +252,39 @@ void alp_delay_us(uint32_t us);
  * @param[in] ms  Milliseconds to sleep.  0 = no-op.
  */
 void alp_delay_ms(uint32_t ms);
+
+/**
+ * @brief Milliseconds since an arbitrary fixed epoch (usually boot).
+ *
+ * Monotonic and unaffected by wall-clock / RTC adjustments -- backends
+ * source it from the platform's own monotonic clock (Zephyr's
+ * @c k_uptime_get(), Yocto's @c clock_gettime(CLOCK_MONOTONIC), a
+ * calibrated running total on the clockless baremetal fallback).  Two
+ * epochs need not agree across backends, or even across two runs of the
+ * same backend -- only subtraction between two readings taken by the
+ * SAME process is meaningful, e.g. bounding a retry loop to a deadline:
+ *
+ * @code
+ * uint64_t deadline_ms = alp_uptime_ms() + timeout_ms;
+ * while (alp_uptime_ms() < deadline_ms) { ... }
+ * @endcode
+ *
+ * Exists so OS-agnostic code (e.g. the `chips/cc3501e/` core, which
+ * deliberately includes no Zephyr/vendor header) can measure real
+ * elapsed time -- @ref alp_delay_ms alone lets a retry loop charge its
+ * own back-off sleeps against a budget, but not the time spent in
+ * between them (issue #1953).
+ *
+ * @par Wraparound: a @c uint64_t millisecond count wraps after roughly
+ *      584 million years -- never, in practice.  Callers may compare two
+ *      readings directly instead of needing wraparound-safe unsigned
+ *      subtraction.
+ *
+ * @return Milliseconds since the epoch.
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL] -- v0.17 new.
+ */
+uint64_t alp_uptime_ms(void);
 
 /* ------------------------------------------------------------------ */
 /* GPIO                                                                */
@@ -870,20 +928,52 @@ typedef enum {
 	ALP_UART_PARITY_ODD  = 2
 } alp_uart_parity_t;
 
+/**
+ * @brief Hardware/software line flow control for @ref alp_uart_config_t.
+ *
+ * On a real UART port, a backend that cannot honour a non-@ref
+ * ALP_UART_FLOW_NONE value returns @ref ALP_ERR_NOSUPPORT from @ref
+ * alp_uart_open instead of silently accepting the request and dropping
+ * it (issue #1639).  This is a guarantee about the backend's own
+ * configuration layer: where the driver exposes a way to read its
+ * applied setting back (Zephyr's @c uart_config_get, Linux @c
+ * tcgetattr), a request that was accepted but not actually applied is
+ * caught and turned into @ref ALP_ERR_NOSUPPORT; where it does not (no
+ * @c config_get, or the CMSIS-Driver @c Control call itself refusing
+ * the mode), @ref ALP_OK trusts the driver's own success return with
+ * nothing further to check locally.  It does NOT cover the physical
+ * wiring: on a board whose devicetree overlay/pinmux does not route
+ * RTS/CTS to this UART node, @ref alp_uart_open can still return @ref
+ * ALP_OK for @ref ALP_UART_FLOW_RTS_CTS with no flow control on the
+ * line, because per-SoM RTS/CTS pad routing is not yet emitted (see
+ * issue #1639's changelog).  This governs backends that drive an
+ * actual line (Zephyr driver, Yocto tty, vendor CMSIS); it does not
+ * extend to the test doubles under @c CONFIG_ALP_SDK_TESTING_UART or
+ * @c CONFIG_ALP_SDK_UART_SW_FALLBACK, which are not real ports and
+ * document their own always-succeeds contract.
+ */
+typedef enum {
+	ALP_UART_FLOW_NONE     = 0, /**< No flow control (default). */
+	ALP_UART_FLOW_RTS_CTS  = 1, /**< 4-wire hardware flow control. */
+	ALP_UART_FLOW_XON_XOFF = 2  /**< In-band software framing; many drivers reject. */
+} alp_uart_flow_t;
+
 typedef struct {
 	uint32_t          port_id;
 	uint32_t          baudrate;
 	uint8_t           data_bits; /**< Usually 8. */
 	uint8_t           stop_bits; /**< 1 or 2. */
 	alp_uart_parity_t parity;
+	alp_uart_flow_t   flow_control; /**< Default @ref ALP_UART_FLOW_NONE. */
 } alp_uart_config_t;
 
 /**
  * @brief Default-initialize an @ref alp_uart_config_t for port @p id.
  *
- * Identity from @p id; canonical defaults = 115200 8N1:
+ * Identity from @p id; canonical defaults = 115200 8N1, no flow control:
  * @c baudrate = 115200, @c data_bits = 8, @c stop_bits = 1,
- * @c parity = @ref ALP_UART_PARITY_NONE.
+ * @c parity = @ref ALP_UART_PARITY_NONE,
+ * @c flow_control = @ref ALP_UART_FLOW_NONE.
  *
  * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
  *       SDK's toolchains; standard through C23).  Usable as an initializer
@@ -891,16 +981,21 @@ typedef struct {
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
 #define ALP_UART_CONFIG_DEFAULT(id) \
-	((alp_uart_config_t){ .port_id   = (id), \
-	                      .baudrate  = 115200u, \
-	                      .data_bits = 8u, \
-	                      .stop_bits = 1u, \
-	                      .parity    = ALP_UART_PARITY_NONE })
+	((alp_uart_config_t){ .port_id      = (id), \
+	                      .baudrate     = 115200u, \
+	                      .data_bits    = 8u, \
+	                      .stop_bits    = 1u, \
+	                      .parity       = ALP_UART_PARITY_NONE, \
+	                      .flow_control = ALP_UART_FLOW_NONE })
 
 /**
  * @brief Acquire a UART port handle.
  *
- * @param[in] cfg  Port configuration.  Must be non-NULL.
+ * @param[in] cfg  Port configuration.  Must be non-NULL.  A non-@ref
+ *                 ALP_UART_FLOW_NONE @c flow_control the backend
+ *                 cannot honour fails the whole open with @ref
+ *                 ALP_ERR_NOSUPPORT rather than silently dropping it
+ *                 and configuring the line with no flow control.
  *
  * @return Open handle on success; NULL with @ref alp_last_error
  *         set to @ref ALP_ERR_INVAL / @ref ALP_ERR_NOT_READY /

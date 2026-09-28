@@ -4,7 +4,7 @@
 # DISPLAY chain (cdc200 "tes,cdc-2.1" -> mipi_dsi "snps,designware-dsi" -> the
 # shared D-PHY "snps,designware-dphy") on the E1M-AEN801 (Ensemble E8, M55-HE),
 # via the bench RAM-run + RAM-console flow.  The CSI/RX twin of this app is
-# aen-camera-regcheck.
+# aen-camera-firstlight.
 #
 # Plain prj.conf app (no alp_project.py board.yaml emit).  This is a BIND check:
 # it instantiates nothing new -- the dphy already has an in-tree driver (its TX

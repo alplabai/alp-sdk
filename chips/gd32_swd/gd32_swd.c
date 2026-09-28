@@ -457,10 +457,14 @@ alp_status_t gd32_swd_connect(gd32_swd_t *ctx)
 
 	ctx->idcode = idcode;
 
-	/* The GD32G553 carries the Cortex-M33 r0p1 IDCODE.  We don't
-     * hard-reject mismatches at this layer -- callers that want a
-     * strict match check against GD32_SWD_EXPECTED_IDCODE themselves.
-     * The driver's job is to confirm a DP responds. */
+	/* GD32_SWD_GENERIC_CM33_R0P1_IDCODE is the GENERIC Cortex-M33 r0p1
+     * SW-DPv2 architectural default, never measured on a GD32G553 with
+     * a probe attached (alp-sdk#1440, #1369) -- whether this part's
+     * IDCODE matches it is unknown, so we don't hard-reject a mismatch
+     * at this layer.  Callers that want a strict match check against
+     * GD32_SWD_GENERIC_CM33_R0P1_IDCODE themselves, understanding it
+     * proves nothing either way.  The driver's job is to confirm a DP
+     * responds. */
 
 	/* 5. Power up the SW-DP. */
 	s = swd_power_up_debug(ctx);

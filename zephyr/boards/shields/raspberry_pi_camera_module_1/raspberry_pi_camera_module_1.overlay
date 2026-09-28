@@ -1,0 +1,63 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Raspberry Pi Camera Module 1 (OV5647), 25 MHz module oscillator, CCI
+ * address 0x36, 2 MIPI data lanes. Board-agnostic: follows the upstream
+ * raspberry_pi_camera_module_2 shield's label contract EXACTLY (`chosen
+ * zephyr,camera`, `&csi_interface`, `&csi_ep_in`, `&csi_i2c`) -- see
+ * zephyrproject-rtos/zephyr
+ * boards/shields/raspberry_pi_camera_module_2/raspberry_pi_camera_module_2.overlay
+ * -- so it plugs into ANY carrier connector shield that defines those
+ * labels. On alp-sdk that carrier shield is the E1M-EVK's
+ * e1m_evk_rpi_csi connector shield (owned + provided separately); build
+ * with SHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1".
+ *
+ * No pwdn-gpios: the OV5647 binding treats it as optional (see
+ * zephyr/dts/bindings/video/ovti,ov5647.yaml and
+ * zephyr/drivers/video/ov5647.c) and the 15-pin RPi CSI connector on the
+ * E1M-EVK carries no PWDN GPIO line to wire it to -- omitted here rather
+ * than faked.
+ */
+
+#include <zephyr/dt-bindings/gpio/raspberrypi-csi-connector.h>
+#include <zephyr/dt-bindings/video/video-interfaces.h>
+
+/ {
+	chosen {
+		zephyr,camera = &csi_capture_port;
+	};
+
+	ov5647_input_clock: ov5647-input-clock {
+		compatible = "fixed-clock";
+		clock-frequency = <25000000>;
+		#clock-cells = <0>;
+	};
+};
+
+&csi_interface {
+	status = "okay";
+};
+
+&csi_ep_in {
+	remote-endpoint-label = "ov5647_ep_out";
+	bus-type = <VIDEO_BUS_TYPE_CSI2_DPHY>;
+	data-lanes = <1 2>;
+};
+
+&csi_i2c {
+	ov5647: ov5647@36 {
+		compatible = "ovti,ov5647";
+		clocks = <&ov5647_input_clock>;
+		reg = <0x36>;
+
+		port {
+			ov5647_ep_out: endpoint {
+				remote-endpoint-label = "csi_ep_in";
+				bus-type = <VIDEO_BUS_TYPE_CSI2_DPHY>;
+				data-lanes = <1 2>;
+			};
+		};
+	};
+};

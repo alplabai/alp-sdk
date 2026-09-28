@@ -23,29 +23,18 @@
 #include <string.h>
 
 #include "alp/chips/gd32g553.h"
+#include "alp/protocol/crc16.h"
 
 /* ----------------------------------------------------------------- */
 /* CRC-16 / CCITT-FALSE  (poly 0x1021, init 0xFFFF, non-reflected,    */
 /* xor-out 0x0000).  Reference vector: "123456789" -> 0x29B1.         */
 /* Matches Zephyr's `crc16_itu_t(0xFFFF, ...)` and the matching       */
-/* gd32-bridge-firmware:src/protocol.c implementation byte-for-byte.           */
+/* gd32-bridge-firmware:src/protocol.c implementation byte-for-byte.  */
+/* alp_crc16_ccitt_false() (<alp/protocol/crc16.h>) is this exact     */
+/* bitwise algorithm, header-only and stddef/stdint-only, so pulling  */
+/* it in here does not add a Zephyr dependency to this deliberately   */
+/* Zephyr-agnostic file.                                              */
 /* ----------------------------------------------------------------- */
-
-static uint16_t crc16_ccitt_false(const uint8_t *buf, size_t len)
-{
-	uint16_t crc = 0xFFFFu;
-	for (size_t i = 0; i < len; ++i) {
-		crc ^= (uint16_t)buf[i] << 8;
-		for (unsigned b = 0; b < 8; ++b) {
-			if (crc & 0x8000u) {
-				crc = (uint16_t)((crc << 1) ^ 0x1021u);
-			} else {
-				crc <<= 1;
-			}
-		}
-	}
-	return crc;
-}
 
 /* ----------------------------------------------------------------- */
 /* Status-byte translation: wire encoding (unsigned) -> alp_status_t  */
@@ -209,7 +198,7 @@ static alp_status_t spi_xfer(gd32g553_t    *ctx,
 		memcpy(&req[2], req_payload, req_payload_len);
 	}
 	const size_t   crc_covered = 2u + req_payload_len;
-	const uint16_t crc         = crc16_ccitt_false(req, crc_covered);
+	const uint16_t crc         = alp_crc16_ccitt_false(req, crc_covered);
 	req[crc_covered]           = (uint8_t)(crc & 0xFFu);
 	req[crc_covered + 1u]      = (uint8_t)((crc >> 8) & 0xFFu);
 
@@ -251,7 +240,7 @@ static alp_status_t spi_xfer(gd32g553_t    *ctx,
 			if (s != ALP_OK) return s; /* transport-level error: fail loud */
 
 			if (reply[0] == GD32G553_BRIDGE_SOF) {
-				const uint16_t expect_crc = crc16_ccitt_false(reply, 2u + reply_payload_len);
+				const uint16_t expect_crc = alp_crc16_ccitt_false(reply, 2u + reply_payload_len);
 				const uint16_t got_crc    = (uint16_t)reply[2u + reply_payload_len] |
 				                            (uint16_t)reply[2u + reply_payload_len + 1u] << 8;
 				if (got_crc == expect_crc) {
@@ -272,7 +261,7 @@ static alp_status_t spi_xfer(gd32g553_t    *ctx,
                  * replies the host could not decode). */
 				if (reply_payload_len > 0u &&
 				    (reply[1] & GD32G553_STATUS_CODE_MASK) != 0x00u /* STATUS_OK */) {
-					const uint16_t err_crc = crc16_ccitt_false(reply, 2u);
+					const uint16_t err_crc = alp_crc16_ccitt_false(reply, 2u);
 					const uint16_t err_got = (uint16_t)reply[2] | ((uint16_t)reply[3] << 8);
 					if (err_got == err_crc) {
 						if (ctx->seq_enabled) {
@@ -362,7 +351,7 @@ static alp_status_t i2c_xfer(gd32g553_t    *ctx,
 	}
 	/* CRC covers CMD | PAYLOAD (NOT the reg byte, NOT the I2C address). */
 	const size_t   crc_covered      = 1u + req_payload_len;
-	const uint16_t crc              = crc16_ccitt_false(&wbuf[1], crc_covered);
+	const uint16_t crc              = alp_crc16_ccitt_false(&wbuf[1], crc_covered);
 	wbuf[2u + req_payload_len]      = (uint8_t)(crc & 0xFFu);
 	wbuf[2u + req_payload_len + 1u] = (uint8_t)((crc >> 8) & 0xFFu);
 
@@ -379,7 +368,7 @@ static alp_status_t i2c_xfer(gd32g553_t    *ctx,
 	alp_status_t s = alp_i2c_write_read(ctx->i2c, ctx->i2c_addr, wbuf, wlen, rbuf, rlen);
 	if (s != ALP_OK) return s;
 
-	const uint16_t expect_crc = crc16_ccitt_false(rbuf, 1u + reply_payload_len);
+	const uint16_t expect_crc = alp_crc16_ccitt_false(rbuf, 1u + reply_payload_len);
 	const uint16_t got_crc =
 	    (uint16_t)rbuf[1u + reply_payload_len] | (uint16_t)rbuf[1u + reply_payload_len + 1u] << 8;
 	if (got_crc != expect_crc) {
@@ -388,7 +377,7 @@ static alp_status_t i2c_xfer(gd32g553_t    *ctx,
          * I2C), so the full-width CRC fails on a legitimate error.
          * Decode the short shape before declaring transport failure. */
 		if (reply_payload_len > 0u && rbuf[0] != 0x00u /* STATUS_OK */) {
-			const uint16_t err_crc = crc16_ccitt_false(rbuf, 1u);
+			const uint16_t err_crc = alp_crc16_ccitt_false(rbuf, 1u);
 			const uint16_t err_got = (uint16_t)rbuf[1] | ((uint16_t)rbuf[2] << 8);
 			if (err_got == err_crc) {
 				return status_from_wire(rbuf[0]);
@@ -433,6 +422,74 @@ static alp_status_t cmd_send(gd32g553_t          *ctx,
 /* Public API                                                          */
 /* ----------------------------------------------------------------- */
 
+/* OTA trial-boot window: after OTA_COMMIT/OTA_ROLLBACK a trial-capable
+ * bridge (>= 0.2.14, see gd32g553_ota_begin()'s @p fw_version doc)
+ * reboots into an unconfirmed TRIAL image and answers STATUS_BUSY to
+ * EVERY opcode -- including PING/GET_VERSION -- until it decodes its
+ * first CRC-valid frame, which itself confirms the trial; the bridge
+ * then resets a SECOND time to boot the now-confirmed image, so the
+ * link also drops for a few ms right after that first BUSY reply
+ * lands.  That second drop surfaces to the host as a transient
+ * transport error (STATUS_IO / STATUS_TIMEOUT, or a CRC miss the
+ * driver already maps to ALP_ERR_IO), not BUSY.
+ *
+ * Retry rule (#2314 review): ALP_ERR_BUSY is unconditionally
+ * transient -- only a live, trial-confirming bridge answers it at
+ * all.  ALP_ERR_IO / ALP_ERR_TIMEOUT are transient ONLY once this
+ * same init() call has already seen at least one ALP_ERR_BUSY --
+ * i.e. only once we KNOW a trial is in progress and the second reset
+ * is the explanation.  An absent or unflashed bridge answers neither
+ * opcode at all and fails with IO/TIMEOUT WITHOUT ever having shown a
+ * BUSY, so it still fails fast, exactly as before this change --
+ * load-bearing for callers like src/zephyr/v2n_supervisor.c, which
+ * re-runs this init on every acquire() while the bridge stays absent
+ * and budgets that on a ~1 ms bridge op, not a 2 s retry ladder.
+ *
+ * Residual: a re-init that happens to start WHILE the bridge is
+ * already mid-COMMIT-reset (i.e. this call's very first PING lands
+ * inside that first reset, before any BUSY was ever observed) still
+ * fails fast with IO/TIMEOUT -- the caller's own retry (already
+ * required today for any transient init failure) picks it up on the
+ * next attempt, same as before this change.
+ *
+ * Budget: ~2 s, ONE shared deadline read via alp_uptime_ms() (#1953)
+ * at entry and reused across BOTH the PING and GET_VERSION phases --
+ * never re-read per phase -- so the wall-clock retry window is
+ * actually bounded to the budget even though it charges real elapsed
+ * time (bus calls, not just the backoff sleeps) against it.  The
+ * bootloader's FWDGT window is ~32.8 s nominal (far longer than this
+ * budget), so 2 s is sized to the confirm+reboot path, not the
+ * watchdog-revert path -- a caller riding out an actual revert simply
+ * sees this budget expire and gets back the transient status, same as
+ * any other failed init. */
+#define GD32G553_INIT_RETRY_BUDGET_MS 2000u
+static const uint16_t gd32g553_init_retry_ms[] = { 10u, 20u, 40u, 80u, 160u, 160u, 160u, 160u };
+#define GD32G553_INIT_RETRY_RUNGS \
+	(unsigned)(sizeof(gd32g553_init_retry_ms) / sizeof(gd32g553_init_retry_ms[0]))
+
+static bool gd32g553_init_status_is_transient(alp_status_t s, bool saw_busy_this_init)
+{
+	if (s == ALP_ERR_BUSY) return true;
+	return saw_busy_this_init && (s == ALP_ERR_IO || s == ALP_ERR_TIMEOUT);
+}
+
+/* Sleep the next rung of the ladder, clamped to what's left of the
+ * shared deadline.  Returns false once the deadline has passed
+ * (caller gives up with the last status it saw). */
+static bool gd32g553_init_retry_wait(unsigned *attempt, uint64_t deadline_ms)
+{
+	const uint64_t now_ms = alp_uptime_ms();
+	if (now_ms >= deadline_ms) return false;
+	const unsigned rung =
+	    (*attempt < GD32G553_INIT_RETRY_RUNGS) ? *attempt : GD32G553_INIT_RETRY_RUNGS - 1u;
+	uint16_t       wait_ms      = gd32g553_init_retry_ms[rung];
+	const uint64_t remaining_ms = deadline_ms - now_ms;
+	if ((uint64_t)wait_ms > remaining_ms) wait_ms = (uint16_t)remaining_ms;
+	alp_delay_ms(wait_ms);
+	(*attempt)++;
+	return true;
+}
+
 alp_status_t gd32g553_init(gd32g553_t *ctx, alp_spi_t *spi, alp_i2c_t *i2c, uint8_t i2c_addr_7bit)
 {
 	if (ctx == NULL) return ALP_ERR_INVAL;
@@ -446,14 +503,29 @@ alp_status_t gd32g553_init(gd32g553_t *ctx, alp_spi_t *spi, alp_i2c_t *i2c, uint
 	ctx->default_transport = (spi != NULL) ? GD32G553_TRANSPORT_SPI : GD32G553_TRANSPORT_I2C;
 	ctx->initialised       = true;
 
-	alp_status_t s = gd32g553_ping(ctx);
+	const uint64_t deadline_ms = alp_uptime_ms() + GD32G553_INIT_RETRY_BUDGET_MS;
+	bool           saw_busy    = false;
+	unsigned       attempt     = 0u;
+
+	alp_status_t s;
+	for (;;) {
+		s = gd32g553_ping(ctx);
+		if (s == ALP_ERR_BUSY) saw_busy = true;
+		if (!gd32g553_init_status_is_transient(s, saw_busy)) break;
+		if (!gd32g553_init_retry_wait(&attempt, deadline_ms)) break;
+	}
 	if (s != ALP_OK) {
 		ctx->initialised = false;
 		return s;
 	}
 
 	gd32g553_version_t v;
-	s = gd32g553_get_version(ctx, &v);
+	for (;;) {
+		s = gd32g553_get_version(ctx, &v);
+		if (s == ALP_ERR_BUSY) saw_busy = true;
+		if (!gd32g553_init_status_is_transient(s, saw_busy)) break;
+		if (!gd32g553_init_retry_wait(&attempt, deadline_ms)) break;
+	}
 	if (s != ALP_OK) {
 		ctx->initialised = false;
 		return s;

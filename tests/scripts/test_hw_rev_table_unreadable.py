@@ -47,6 +47,7 @@ Run locally:
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -334,7 +335,8 @@ def test_reader_2_emit_refuses_at_exit_1_not_exit_0(tmp_path):
         [sys.executable, str(REPO / "scripts" / "alp_project.py"),
          "--input", str(board), "--emit", "composed-route-table",
          "--metadata-root", str(meta)],
-        capture_output=True, text=True)
+        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"})
 
     assert proc.returncode == 1, proc.stdout + proc.stderr
     assert "hw-revisions.yaml" in proc.stderr

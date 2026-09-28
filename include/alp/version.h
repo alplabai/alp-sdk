@@ -136,6 +136,7 @@ extern "C" {
 #define ALP_ABI_STATUS_UPDATE_LOG ALP_ABI_EXPERIMENTAL /**< <alp/update_log.h>. */
 #define ALP_ABI_STATUS_BACKEND    ALP_ABI_EXPERIMENTAL /**< <alp/backend.h>. */
 #define ALP_ABI_STATUS_CAP        ALP_ABI_EXPERIMENTAL /**< <alp/cap.h> + <alp/cap_instance.h>. */
+#define ALP_ABI_STATUS_TEMPERATURE ALP_ABI_EXPERIMENTAL /**< <alp/temperature.h>. */
 
 /**
  * @brief Return the SDK release version as a string.

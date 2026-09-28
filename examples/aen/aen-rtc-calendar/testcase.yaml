@@ -4,7 +4,7 @@
 # (src/backends/rtc/lprtc_calendar_shim.c): compile-checks the alp_rtc_*
 # calendar surface layered over the always-on snps,dw-apb-rtc COUNTER on the real
 # E8 board target.  Filtered OUT of the native_sim PR gate (platform_allow = the
-# AEN801 HE board only); the on-silicon advance proof is a bench flash, not a CI
+# AEN801/AEN803 M55-HE board targets); the on-silicon advance proof is a bench flash, not a CI
 # run.  Pairs with aen-rtc-regcheck (the raw counter proof underneath).
 
 sample:
@@ -20,6 +20,7 @@ tests:
   alp_sdk.examples.aen.rtc_calendar.aen:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
     tags:
       - alp-sdk
       - example

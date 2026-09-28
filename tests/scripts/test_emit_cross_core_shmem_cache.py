@@ -136,8 +136,8 @@ def test_dedup_against_real_emit_inference_output():
     import json
     import yaml
 
-    soc_spec = json.loads((_MR / "socs" / "alif" / "ensemble" / "e8.json").read_text())
-    som = yaml.safe_load((_MR / "e1m_modules" / "E1M-AEN801.yaml").read_text())
+    soc_spec = json.loads((_MR / "socs" / "alif" / "ensemble" / "e8.json").read_text(encoding="utf-8"))
+    som = yaml.safe_load((_MR / "e1m_modules" / "E1M-AEN801.yaml").read_text(encoding="utf-8"))
     ipc = [IpcEntry(name="alp_shmem0", kind="raw_shmem",
                      endpoints=["m55_hp", "m55_he"], carve_out_kb=4)]
     project = types.SimpleNamespace(

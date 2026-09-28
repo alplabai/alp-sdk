@@ -60,8 +60,8 @@ cross-core `ipc:`, `boot:` (MCUboot), `ota:` (Mender), `storage:`,
 **BRD_I2C** -- Board-management I²C bus.  On V2N + V2N-M1 it hosts
 the PMICs, RTC, OPTIGA, supervisor MCU slave interface (Renesas RIIC8
 master).  On the E1M-AEN801 it hosts the RTC/OPTIGA/TMP112 trio over
-SoC I2C0 (function C, `P7_0`/`P7_1` -- #1848; R2-sourced, not yet
-on-unit-verified -- see `docs/bring-up-aen.md` §5.1).
+SoC I2C0 (function C, `P7_0`/`P7_1` -- #1848; bench-verified on 2626-R2
+2026-09-05 -- see `docs/soms/aen.md`).
 
 **Bridge (GD32)** -- The V2N module's on-module supervisor MCU
 (GD32G553) reachable over a hybrid SPI + I2C transport.  See
@@ -134,7 +134,8 @@ families ship in this size.
 **EVK** -- Evaluation Kit.  The reference board Alp Lab ships for
 bring-up.  Two flavours: E1M-EVK (35 × 35) and E1M-X-EVK (45 × 65).
 
-**Ethos-U** -- Arm's micro-NPU IP.  AEN modules carry Ethos-U55;
+**Ethos-U** -- Arm's micro-NPU IP.  AEN modules carry Ethos-U55 on
+every SKU plus Ethos-U85 on the E4/E6/E8 silicon (AEN401/601/801/803);
 N93 modules carry Ethos-U65.
 
 **GPU2D** -- 2D compositing accelerator (alpha blending, rotation,
@@ -160,9 +161,22 @@ heterogeneous-compute peer.
 
 **IDCODE** -- The 32-bit Arm Coresight SW-DP identification value
 returned by the target on the first SWD read after a line reset.
-Documented as `0x6BA02477` for the GD32G553 (Cortex-M33 r0p1
-SW-DPv2); used by `gd32_swd_connect` to confirm the link reaches
-the right silicon.
+`GD32_SWD_GENERIC_CM33_R0P1_IDCODE` is `0x6BA02477`, but that is the
+**generic** Cortex-M33 r0p1 SW-DPv2 value, **not a GD32G553
+measurement** -- `include/alp/chips/gd32_swd.h` carries a
+`@warning UNVERIFIED on a GD32G553` on it. `0x6BA02477` is separately
+the bench-measured SW-DP ID of the V2N CM33 DAP on a V2N bench
+unit -- a *different* target on the same board. The only
+other GD32 candidate on record, `0x0BE12477`, has no attribution at
+all: no bench transcript, no datasheet reference, no commit message.
+Whether a real GD32G553 answers either value is **unknown** -- neither
+has been measured on a GD32 with a probe attached (#1440, #1369) -- so
+a comparison against the macro proves nothing about the target either
+way, which is why `gd32_swd_connect()` deliberately does **not** treat
+a mismatch as fatal: it reports the value, it does not confirm the
+link reached the right silicon. Settling this needs a measurement on a
+GD32 (#1369). A production test that wants to refuse on a mismatch
+must match a value measured on its own board.
 
 **HiL** -- Hardware-in-the-Loop testing.  See
 the HiL rig plan in the internal `alp-sdk-internal` repo.
@@ -383,7 +397,7 @@ defaults in their project's `board.yaml cores:` block.
 E1M-X form factor.  See [`docs/soms/v2n.md`](soms/v2n.md).
 
 **V2N-M1** -- V2N variant with the DEEPX DX-M1 NPU on-module.
-SKUs `E1M-V2M101` / `E1M-V2M102`.  See
+SKUs `E1M-V2M101` / `E1M-V2M102` / `E1M-V2M103`.  See
 [`docs/soms/v2n-m1.md`](soms/v2n-m1.md).
 
 **west** -- Zephyr's meta-tool for workspace management + sub-commands. Python

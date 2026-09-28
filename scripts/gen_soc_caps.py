@@ -629,18 +629,18 @@ def main() -> int:
     out_text = emit()
     OUT.write_text(out_text, encoding="utf-8", newline="")
     _clang_format(OUT, exe)
-    print(f"wrote {OUT.relative_to(REPO)} ({len(OUT.read_text().splitlines())} lines)")
+    print(f"wrote {OUT.relative_to(REPO)} ({len(OUT.read_text(encoding='utf-8').splitlines())} lines)")
 
     cap_h_text = _emit_cap_h()
     CAP_H_OUT.write_text(cap_h_text, encoding="utf-8", newline="")
     _clang_format(CAP_H_OUT, exe)
-    print(f"wrote {CAP_H_OUT.relative_to(REPO)} ({len(CAP_H_OUT.read_text().splitlines())} lines)")
+    print(f"wrote {CAP_H_OUT.relative_to(REPO)} ({len(CAP_H_OUT.read_text(encoding='utf-8').splitlines())} lines)")
 
     CAP_C_OUT.parent.mkdir(parents=True, exist_ok=True)
     cap_c_text = _emit_cap_c()
     CAP_C_OUT.write_text(cap_c_text, encoding="utf-8", newline="")
     _clang_format(CAP_C_OUT, exe)
-    print(f"wrote {CAP_C_OUT.relative_to(REPO)} ({len(CAP_C_OUT.read_text().splitlines())} lines)")
+    print(f"wrote {CAP_C_OUT.relative_to(REPO)} ({len(CAP_C_OUT.read_text(encoding='utf-8').splitlines())} lines)")
 
     return 0
 

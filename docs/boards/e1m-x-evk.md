@@ -1,8 +1,8 @@
 # E1M-X Development Board — SDK reference
 
 Board for the **E1M-X** form factor (45 × 65 mm) — hosts
-the Renesas RZ/V2N family (`E1M-V2N101`, `E1M-V2N102`,
-`E1M-V2M101`, `E1M-V2M102`) and any future E1M-X conformant SoM.
+the Renesas RZ/V2N family (`E1M-V2N101`, `E1M-V2N102`, `E1M-V2N103`,
+`E1M-V2M101`, `E1M-V2M102`, `E1M-V2M103`) and any future E1M-X conformant SoM.
 
 > Source: vendor datasheet
 > — Altium project (multi-sheet schematic).  No standalone user
@@ -63,8 +63,10 @@ deltas (verify when the HW config writeup lands):
 |---------------|----------------------------------------------------------|---------------------------|
 | `E1M-V2N101`  | Renesas `R9A09G056N44GBG#AC0`                            | `renesas:rzv2n:n44`       |
 | `E1M-V2N102`  | Renesas `R9A09G056N44GBG#AC0` (different memory tier)    | `renesas:rzv2n:n44`       |
+| `E1M-V2N103`  | Same, alt memory tier (4 GB / 16 GB)                     | `renesas:rzv2n:n44`       |
 | `E1M-V2M101`  | Renesas `R9A09G056N44GBG#AC0` + DEEPX `DX-M1`            | `renesas:rzv2n:n44` (+ `npu: deepx_dxm1`) |
 | `E1M-V2M102`  | Same, alt memory tier                                    | same                      |
+| `E1M-V2M103`  | Same, alt memory tier (4 GB / 16 GB)                     | same                      |
 
 ## What this means for the SDK
 
@@ -120,6 +122,42 @@ all — that closes the write-into-INA236's-CONFIG-register hazard (the
 `INA236_REG_CONFIG`, `chips/ina236/ina236.c`), but it does not restore
 broadcast addressing to the TAS2563 amps.  Only a respin re-strapping
 U32's A0 off `0x48` does that.
+
+## MicroSD (SDHI1)
+
+Carrier microSD slot, `mmc@15c10000` in the kernel DT (`&sdhi1`,
+`meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi`). The
+bench dev image roots from this card (`root=/dev/mmcblk1p2`);
+on-module eMMC (SDHI0) is the production boot.
+
+| Signal | Pin | Behaviour |
+|---|---|---|
+| Card detect `SD1_SD1CD` | `PA1` | Socket switch to GND, pulled up to the switched card rail; active-low (`cd-gpios`) |
+| IO voltage `µSD1_V_SEL` | `PA2` | SoM selector: low = 3.3 V, high = 1.8 V (`vqmmc_sdhi1`, `e1m-v2n-som.dtsi`) |
+| Card power `SD1_SD1PWEN` | `PA3` | Always-on hog; the card-detect pull-up lives on this rail |
+| `SDCARD_RST` | `PA4` | M.2 Wi-Fi SDIO reset through the carrier mux, not a microSD signal; undriven |
+
+The carrier SDIO mux (TMUX1574 `U38`/`U39`) switches SD1 between the
+microSD socket and the M.2 E-key Wi-Fi SDIO. On the E1M-X EVK V2 its select
+line `MUX_SEL.SDIO` is not a GPIO: `R239` (100 kOhm) pulls it low (microSD)
+and header `P6` ties it to +3V3 (M.2). E1M `IO27` is unconnected. The
+active-low enable `SD_MUX_EN` is E1M `IO29` (a GD32 pad) with no external
+pull-down, so it rests on the TMUX1574's internal pull-downs; the slot works
+with a blank GD32.
+
+Fastest mode is **SDR50** (1.8 V, 100 MHz). The SD1 pads use
+`renesas,output-impedance = <2>`, one step weaker than the eMMC's `<3>`:
+at `<3>` the data phase fails with `error -84` (CRC). SDR104 is not
+enabled: reads work there (about 78-85 MB/s, bench 2026-09-24/27), but
+host-to-card writes at 208 MHz never complete (`mmc1: Card stuck being
+busy!`, #2357). With kernel patch `0010` (bounce buffer for multi-segment
+requests) SDR50 writes 512 MiB in 20 s and HS in 29 s (E1M-V2M103, bench
+2026-09-27); before it every write was a single 4 KiB request (~2.7 MB/s).
+
+**U-Boot numbering differs from Linux.** In U-Boot, `mmc 1` is
+`mmc@15c20000` (SDHI2, the Wi-Fi SDIO controller), not this slot;
+U-Boot's device tree needs the same SD1 node before it can reach the
+microSD.
 
 ## Pending from the user
 

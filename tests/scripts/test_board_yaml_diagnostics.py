@@ -1,3 +1,4 @@
+import os
 import shutil
 import subprocess
 import sys
@@ -28,6 +29,8 @@ def _script_schema_only(path: Path) -> subprocess.CompletedProcess[str]:
         [sys.executable, str(SCRIPT), "--input", str(path), "--no-presets"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         check=False,
     )
 
@@ -97,6 +100,8 @@ def test_som_wrong_type_standalone_validator_reports_clean_diagnostic():
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         check=False,
     )
     assert proc.returncode == 1
@@ -129,6 +134,8 @@ def test_standalone_validator_rejects_board_preset_family_mismatch():
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
     # validate_board_yaml.py is now a thin wrapper over the shared validator +
     # orchestrator loader (entrypoint parity): it collapses the legacy 0/1/2/3
@@ -268,7 +275,8 @@ def test_standalone_validator_rejects_unknown_chip():
             "--input", str(FIX_BAD / "ALP-B008-bad-chip.yaml"),
             "--no-color",
         ],
-        capture_output=True, text=True, check=False,
+        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
     )
     assert proc.returncode == 1
     assert "ALP-B008" in proc.stderr
@@ -368,7 +376,8 @@ def test_metadata_root_honoured_by_validate_board_yaml_script(tmp_path: Path):
             "--metadata-root", str(metadata_root),
             "--no-color",
         ],
-        capture_output=True, text=True, check=False,
+        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "ALP-B006" not in (proc.stdout + proc.stderr)

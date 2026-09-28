@@ -1,7 +1,7 @@
 # Building & deploying the V2N Linux image (Yocto)
 
 How a customer builds and deploys the **kernel + root filesystem** for
-the E1M-V2N101 / E1M-V2N102 SoM on the E1M-X-EVK (or a pin-compatible
+the E1M-V2N101 / E1M-V2N102 / E1M-V2N103 SoM on the E1M-X-EVK (or a pin-compatible
 custom carrier).  The build itself is the `bitbake-layers` flow in
 [`../meta-alp-sdk/README.md`](../meta-alp-sdk/README.md); this page adds
 the V2N-specific BSP, deploy, and on-board verification detail.
@@ -12,6 +12,25 @@ the V2N-specific BSP, deploy, and on-board verification detail.
 > the bootloader** — you build only kernel+rootfs below. Bootloader
 > rebuild/recovery lives in `alp-sdk-internal` (see
 > [`e1m-x-v2n-sdk-integration.md`](e1m-x-v2n-sdk-integration.md)).
+>
+> **The firmware pack is per memory tier, not shared across a family.**
+> `E1M-V2N103` / `E1M-V2M103` populate a different (4 GB) DRAM tier of the
+> same V2N-family PCB as `E1M-V2N101` / `E1M-V2M101`, and their BL2 needs a
+> different DDR param (`L4X.R2W32X16D8S32.ADEE` vs the family's
+> `L4X.R2W32X16D16S32.ADEE`) plus a different U-Boot `CONFIG_SYS_SDRAM_SIZE`
+> / control-DT memory node — selected automatically by `MACHINE` in
+> `meta-alp-sdk/recipes-bsp/{trusted-firmware-a,u-boot}/*_%.bbappend`. This
+> only matters if you rebuild the bootloader yourself (`alp-sdk-internal`
+> flow above); the on-module xSPI you receive already carries the right one
+> for your SoM.
+>
+> **OPEN: production `E1M-V2N101`/`E1M-V2M101` DRAM part/tier undecided.**
+> Their catalogue entry (`metadata/e1m_modules/E1M-V2N101.yaml`,
+> `E1M-V2M101.yaml`: `dram_mbit: 32768` = 4 GB) states the same 4 GB the
+> x103 tier above targets, yet their firmware still ships the family-default
+> 8 GB D16S32 config — a production blocker, not resolved by this doc or by
+> the x103 firmware-pack work. Firmware stays D16S32 for V2N101/V2M101 until
+> this resolves.
 
 ## 1. Prerequisites
 
@@ -37,7 +56,8 @@ from the extracted BSP, not a public clone.
 
 ```bash
 MACHINE=e1m-v2n101-a55 bitbake alp-image-edge
-# (V2N102: MACHINE=e1m-v2n102-a55;  V2N-M1: e1m-v2m101-a55 / e1m-v2m102-a55)
+# (V2N102: MACHINE=e1m-v2n102-a55;  V2N103: e1m-v2n103-a55;
+#  V2N-M1: e1m-v2m101-a55 / e1m-v2m102-a55 / e1m-v2m103-a55)
 ```
 
 Output (under `build/tmp/deploy/images/e1m-v2n101-a55/`):
@@ -107,17 +127,26 @@ not the distro.
 ## 4. Deploy the rootfs
 
 The bootloader's `bootcmd` (rzv2n-dev config + the Alp 0002 patch)
-loads `Image` from the ext4 rootfs `/boot`, auto-detecting the boot
-medium **per boot**. Both the vendor `emmcload` (eMMC) and `sd2load`
-(microSD) envs load `boot/r9a09g056n44-dev.dtb` — a build that
-KERNEL_DEVICETREE never produces — so the Alp override re-loads the
-correct board dtb, `boot/e1m-v2n101-x-evk.dtb`, on both branches (see
-the 0002 patch comment): on eMMC with root = `/dev/mmcblk0p2` (SDHI0,
-alias `mmc0`); on microSD with root = `/dev/mmcblk1p2` (SDHI1, alias
-`mmc1` in `e1m-x-evk.dtsi`). `ALP_BOOT_DEVICE ?= "emmc"` names the
-provisioning default, not a build split. The kernel cmdline is
-rebuilt by the Alp override with `console=ttySC0,115200` pinned; dev
-builds keep `earlycon`.
+loads `Image` from the ext4 rootfs `/boot` and then **reloads the
+per-MACHINE board dtb** — `boot/e1m-v2n101-x-evk.dtb` on V2N101/V2N102/
+V2N103, `boot/e1m-v2m101-x-evk.dtb` on V2M101/V2M102/V2M103 (each x103
+MACHINE's `KERNEL_DEVICETREE` reuses its x101 sibling's dtb by design --
+see the memory-tier rationale in `e1m-v2n103-a55.conf` /
+`e1m-v2m103-a55.conf`) (issue #1175, closed as
+#1252). The vendor env's hardcoded `boot/r9a09g056n44-dev.dtb` is a
+filename **no Alp image builds**, on the eMMC branch as well as the SD
+one, which is why the reload exists. If the dtb is missing from
+`/boot`, the bootloader prints an error and **stops** — it does not
+fall through and boot whatever devicetree is left in RAM.
+
+The boot medium is auto-detected **per boot**: if an SD card is
+present, root = `/dev/mmcblk1p2` (the carrier microSD, `&sdhi1` — see
+`e1m-x-evk.dtsi`; **not bench-confirmed**, the microSD boot path has
+never been exercised on real hardware), otherwise eMMC
+`/dev/mmcblk0p2` (`ALP_BOOT_DEVICE ?= "emmc"` names the provisioning
+default, not a build split). The kernel cmdline is rebuilt by the Alp
+override with `console=ttySC0,115200` pinned; dev builds keep
+`earlycon`.
 
 **Production boot variant:** set `ALP_PROD_BOOT = "1"` for
 release-bundle builds only — quiet cmdline (`quiet loglevel=4`, no
@@ -192,7 +221,7 @@ To raise the cap to 1.8 GHz, flip one line in the SoM dtsi
 ```
 
 …or pass it to the kernel dtb build without editing the file
-(`-DALP_CA55_1P8GHZ=1`). The change is SoM-level, so it applies to all four
+(`-DALP_CA55_1P8GHZ=1`). The change is SoM-level, so it applies to all six
 V2N-family SKUs. Validate your own silicon + thermals before enabling it
 fleet-wide.
 
@@ -230,10 +259,23 @@ When off (the default) the build is unchanged. When on, the kernel deploys
 
 ## Notes
 
+- **GigaDevice xSPI NOR (some SKUs).** Some production E1M V2N-family
+  modules carry a GigaDevice LX-family octal xSPI NOR in the "NOR flash
+  (variant per SKU)" slot — see [`soms/v2n.md`](soms/v2n.md).
+  The production bootloader build enables it via
+  `meta-alp-sdk/recipes-bsp/u-boot/u-boot/gigadevice-xspi.cfg`
+  (`CONFIG_SPI_FLASH_GIGADEVICE`); U-Boot's `sf probe` then detects it
+  and reports the correct capacity (bench-proven). **Known
+  limit:** this U-Boot's Renesas xSPI driver fails reads that cross the
+  16 MiB boundary (bench-observed `Read: ERROR 1` at `0xFFFF00+0x200`)
+  — boot content must stay below 16 MiB. Writes above 16 MiB are
+  untested.
 - Audio is currently **disabled** in the DT (no DA7212 on the carrier);
   it returns once the TAS2563 routing lands (see the integration doc,
   gap 3).
 - **Validation:** `core-image-minimal` baked clean on WSL (BSP v6.30,
   bitbake-layers) 2026-05-26 — DT patches apply, carrier dtb + `.wic.gz`
-  produced.  A full `alp-image-edge` bake + on-bench boot are the
-  remaining gates.
+  produced.  A `drpai`-OFF `alp-image-edge` bake has since completed too
+  — see [`docs/bring-up-drpai-v2n.md`](bring-up-drpai-v2n.md)'s status
+  banner for the task count and artefact.  On-bench boot and a
+  `drpai`-enabled bake are the remaining gates.

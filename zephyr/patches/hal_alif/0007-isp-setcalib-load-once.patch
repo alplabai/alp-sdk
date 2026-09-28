@@ -1,0 +1,45 @@
+diff --git a/drivers/isp/isp_wrapper/src/isp_api_wrapper.c b/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
+index cffd1b1..cea902f 100644
+--- a/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
++++ b/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
+@@ -574,11 +574,35 @@ int isp_vsi_update_cfg(struct isp_config_params *init_cfg)
+ 		return isp_err_2_errno(ret);
+ 	}
+ 
+-	/* Configure the ISP as per the calibration parameters */
+-	ret = VSI_MPI_ISP_SetCalib(isp_port_id, &isp_calib_param);
+-	if (ret) {
+-		LOG_ERR("Programming ISP calibration data in library failed!");
+-		return isp_err_2_errno(ret);
++	/*
++	 * alp-sdk (Alp Lab AB), bench run 85: isp_vsi_update_cfg() runs on
++	 * EVERY isp_stream_start() (the driver's restart-per-frame pattern,
++	 * isp_pico.c), which used to mean VSI_MPI_ISP_SetCalib() below also
++	 * ran every restart -- reloading the WHOLE compiled-in isp_calib_param
++	 * blob (AEM/WBM windows, AE/WB attrs, ...) on top of whatever runtime
++	 * state isp_pico.c's own isp_apply_aem_wbm()/isp_apply_wb()/
++	 * isp_apply_ae() had just set. With a restart every frame (the
++	 * MI_INTR_MP_FRAME_END-driven auto-stop-on-empty-fifo pattern), this
++	 * alternated "calib's compiled-in values" and "the driver's runtime
++	 * values" from one frame to the next -- the AEM/WBM measurement grid
++	 * never got a stable configuration long enough to complete a
++	 * measurement. SetCalib() only needs to load the calibration ONCE
++	 * (it is not itself a per-frame operation, and the SDK builds exactly
++	 * one calib table per compiled port); guard it with a static once-flag
++	 * so later isp_vsi_update_cfg() calls (i.e. every restart after the
++	 * first) skip it and leave whatever runtime state is already
++	 * programmed alone.
++	 */
++	static bool isp_calib_loaded;
++
++	if (!isp_calib_loaded) {
++		/* Configure the ISP as per the calibration parameters */
++		ret = VSI_MPI_ISP_SetCalib(isp_port_id, &isp_calib_param);
++		if (ret) {
++			LOG_ERR("Programming ISP calibration data in library failed!");
++			return isp_err_2_errno(ret);
++		}
++		isp_calib_loaded = true;
+ 	}
+ 
+ 	switch (channel->trans_bus) {

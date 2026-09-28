@@ -18,7 +18,10 @@ power once a second.
 | 1V8   | U31    | 0x41 | 20 mΩ |
 | VCAM2 | U32    | 0x48 | 50 mΩ |
 | VCAM3 | U34    | 0x49 | 50 mΩ |
-| 5V    | U30    | 0x4A | 20 mΩ |
+
+The +5V input monitor (U30) is an INA228 at `0x42`, a different
+register map that the `ina236` driver does not handle, so it is not
+in this table (#2343).
 
 > **EVK-only / demo.** The INA236 monitors exist only on the EVK
 > carriers; production E1M-X SoMs do not carry them. This is a
@@ -42,7 +45,6 @@ rail     bus_V     I_mA       P_mW
   1V8      0.002       0.00        0.0
   VCAM2    0.000       0.00        0.0
   VCAM3    0.000       0.00        0.0
-  5V       4.884     740.00     3614.0
 ```
 
 ## Known board notes (current EVK revision)
@@ -54,5 +56,6 @@ rails just read low):
   wiring); their shunt/current path is unaffected.
 - **VCAM2 / VCAM3** read ~0 — camera rails are off unless a camera
   is powered.
-- Two extra addresses (`0x42` / `0x43`) also respond as INA236 but
-  are not in the schematic BOM; not used by this app.
+- **VCAM2 (U32)** is removed on the E1M-X EVK V2 build batch (its
+  `0x48` collides with the TAS2563 broadcast address); the app prints
+  `--` for it.

@@ -1,5 +1,6 @@
 """Unit tests for scripts/check_stub_issues.py."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -10,7 +11,8 @@ SCRIPT = REPO / "scripts" / "check_stub_issues.py"
 
 def _run(*args, **kw):
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, **kw,
+        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, encoding="utf-8",
+        env={**(kw.pop("env", None) or os.environ), "PYTHONIOENCODING": "utf-8"}, **kw,
     )
 
 
@@ -27,7 +29,8 @@ def test_stub_with_issue_passes(tmp_path):
     d.mkdir(parents=True)
     (d / "nxp_stub.c").write_text(
         "/*\n * @par Implementation status: NOT_IMPLEMENTED\n"
-        " * @par Tracking: github.com/alplabai/alp-sdk/issues/42\n */\n"
+        " * @par Tracking: github.com/alplabai/alp-sdk/issues/42\n */\n",
+        encoding="utf-8"
     )
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -37,7 +40,7 @@ def test_stub_without_issue_fails(tmp_path):
     """*_stub.c without an issue ref -> exit 1."""
     d = tmp_path / "src" / "backends" / "adc"
     d.mkdir(parents=True)
-    (d / "broken_stub.c").write_text("/* @par Implementation status: NOT_IMPLEMENTED */\n")
+    (d / "broken_stub.c").write_text("/* @par Implementation status: NOT_IMPLEMENTED */\n", encoding="utf-8")
     proc = _run("--root", str(tmp_path))
     assert proc.returncode != 0
     assert "broken_stub.c" in proc.stdout + proc.stderr

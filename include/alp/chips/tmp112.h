@@ -17,12 +17,35 @@
  * the sensor sits on Alif's LPI2C bus alongside the RV-3028-C7
  * RTC and the OPTIGA Trust M secure element.
  *
- * Per TMP112 datasheet (SBOS473K):
- *   - 7-bit I2C address depends on ADD0 strap
- *       0x48  ADD0 = GND     (default on E1M-AEN)
+ * Per TI SBOS473L (TMP112 family datasheet, rev. Jul 2024), Table 7-4,
+ * p.16, the 7-bit I2C address depends on BOTH the ADD0 strap AND the
+ * orderable variant -- the table lists three rows, not two, and package
+ * alone does not tell them apart (X2SON-5 covers two of the three):
+ *   - Address Variant Only, X2SON-5 package (TMP112D):
+ *       ADD0 strapped; one physical part, address set by the strap.
+ *       0x40  ADD0 = GND
+ *       0x41  ADD0 = V+
+ *       0x42  ADD0 = SDA
+ *       0x43  ADD0 = SCL
+ *   - Alert Variant Only, X2SON-5 package (TMP112D0/D1/D2/D3):
+ *       ADD0 = N/A -- no strap pin; the address is fixed per orderable
+ *       part number, not selected in-circuit.
+ *       0x48  TMP112D0
+ *       0x49  TMP112D1
+ *       0x4A  TMP112D2
+ *       0x4B  TMP112D3
+ *   - Address + Alert Variant, SOT563-6 package (TMP112A/B/D/N):
+ *       ADD0 strapped; one physical part, address set by the strap.
+ *       0x48  ADD0 = GND
  *       0x49  ADD0 = V+
  *       0x4A  ADD0 = SDA
  *       0x4B  ADD0 = SCL
+ *   Row 2 and row 3 share the 0x48..0x4B address range by design -- an
+ *   Alert-Variant-Only part and a strapped Address+Alert part can read
+ *   the same 7-bit address; they are not interchangeable in-circuit,
+ *   only numerically identical.  All three rows are accepted by this
+ *   driver; which part is fitted on a given board is a per-SoM metadata
+ *   question, not a driver one.
  *   - Registers
  *       0x00  Temperature   (RO, 12/13-bit signed, 0.0625 C/LSB)
  *       0x01  Configuration (RW, see datasheet table 9)
@@ -42,10 +65,26 @@
 extern "C" {
 #endif
 
+/**
+ * Address + Alert variant, SOT563-6 package, ADD0-strapped
+ * (SBOS473L Table 7-4, p.16).  Numerically identical to the
+ * Alert-Variant-Only X2SON-5 parts' fixed addresses below --
+ * 0x48..0x4B is shared by both rows of the table, not unique to
+ * this package.
+ */
 #define TMP112_I2C_ADDR_GND   0x48u
 #define TMP112_I2C_ADDR_VPLUS 0x49u
 #define TMP112_I2C_ADDR_SDA   0x4Au
 #define TMP112_I2C_ADDR_SCL   0x4Bu
+
+/**
+ * Address Variant Only, X2SON-5 package, TMP112D, ADD0-strapped
+ * (SBOS473L Table 7-4, p.16).
+ */
+#define TMP112_I2C_ADDR_ADDRVAR_GND   0x40u
+#define TMP112_I2C_ADDR_ADDRVAR_VPLUS 0x41u
+#define TMP112_I2C_ADDR_ADDRVAR_SDA   0x42u
+#define TMP112_I2C_ADDR_ADDRVAR_SCL   0x43u
 
 /** Conversion-rate enum (CR1:CR0 in CONF). */
 typedef enum {

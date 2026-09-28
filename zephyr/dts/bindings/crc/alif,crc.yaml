@@ -25,6 +25,11 @@ description: |
 
   On the E8 SoM this models crc0@48107000 / crc1@48108000.
 
+  Both instances live in power domain PD-6 (HWRM Table 15-26), unavailable
+  in STANDBY/STOP; the driver does not read PD-6 status, so a caller must
+  not hard-depend on this device and should keep a software fallback (see
+  gd32g553_ota_image_crc32() for the pattern this repo uses).
+
 compatible: "alif,crc"
 
 include: base.yaml

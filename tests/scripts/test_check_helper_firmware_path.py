@@ -1,5 +1,6 @@
 """Unit tests for scripts/check_helper_firmware_path.py (issue #1372)."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -10,14 +11,15 @@ SCRIPT = REPO / "scripts" / "check_helper_firmware_path.py"
 
 def _run(*args, **kw):
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, **kw,
+        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, encoding="utf-8",
+        env={**(kw.pop("env", None) or os.environ), "PYTHONIOENCODING": "utf-8"}, **kw,
     )
 
 
 def _write_preset(tmp_path: Path, sku: str, body: str) -> None:
     d = tmp_path / "metadata" / "e1m_modules"
     d.mkdir(parents=True, exist_ok=True)
-    (d / f"{sku}.yaml").write_text(f"sku: {sku}\n{body}")
+    (d / f"{sku}.yaml").write_text(f"sku: {sku}\n{body}", encoding="utf-8")
 
 
 def test_empty_tree_passes(tmp_path):
@@ -109,7 +111,7 @@ def test_firmware_path_pointing_at_a_directory_fails(tmp_path):
 
 
 def test_real_repo_passes():
-    """Baseline: the real repo's six AEN presets (all currently pointing at
+    """Baseline: the real repo's seven AEN presets (all currently pointing at
     firmware/cc3501e/prebuilt/cc3501e-v0.2.0.bin) resolve today -- exit 0."""
     proc = _run("--root", str(REPO))
     assert proc.returncode == 0, proc.stdout + proc.stderr

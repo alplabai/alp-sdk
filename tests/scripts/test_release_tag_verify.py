@@ -70,9 +70,11 @@ def _run_tag_step(tmp_path: Path, tag: str, declared: str) -> subprocess.Complet
             "PATH": __import__("os").environ["PATH"],
             "GITHUB_REF_NAME": tag,
             "GITHUB_OUTPUT": str(github_output),
+            "PYTHONIOENCODING": "utf-8",
         },
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=30,
     )
 

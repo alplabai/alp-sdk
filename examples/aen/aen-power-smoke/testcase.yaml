@@ -10,9 +10,9 @@
 #   - k_timer/k_sem/k_cpu_idle()/k_uptime_get() link against the arch idle path;
 #   - the RAM-console retarget + ITCM RAM-run overlay link with NO PM subsystem
 #     (Stage-A is intentionally CONFIG_PM-free; HAS_PM is unselected upstream).
-# It is intentionally filtered to the AEN801 M55-HE board only, which the
-# native_sim PR gate never selects, so it adds a board-target build check
-# without slowing the gate.
+# It is intentionally filtered to the AEN801/AEN803 M55-HE board targets,
+# which the native_sim PR gate never selects, so it adds a board-target
+# build check without slowing the gate.
 #
 # NOTE: the platform id below MUST match the board .yaml `identifier` exactly
 # (zephyr/boards/alp/e1m_aen801_m55_he/..._rtss_he.yaml) or twister silently
@@ -36,6 +36,7 @@ tests:
   alp_sdk.examples.aen.power_smoke.aen:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
     tags:
       - alp-sdk
       - example

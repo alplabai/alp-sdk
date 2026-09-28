@@ -14,6 +14,7 @@
  */
 
 #include <errno.h>
+#include <stdbool.h>
 
 #include <zephyr/device.h>
 #include <zephyr/drivers/uart.h>
@@ -73,6 +74,25 @@ static enum uart_config_stop_bits _to_zephyr_stop_bits(uint8_t bits)
 	return (bits == 2) ? UART_CFG_STOP_BITS_2 : UART_CFG_STOP_BITS_1;
 }
 
+/* Maps alp_uart_flow_t -> Zephyr's uart_config.flow_ctrl.  Returns false for
+ * ALP_UART_FLOW_XON_XOFF: Zephyr's enum uart_config_flow_control carries only
+ * NONE / RTS_CTS / DTR_DSR / RS485, no in-band-software equivalent -- the
+ * caller (z_open) turns a false return into ALP_ERR_NOSUPPORT rather than
+ * silently opening with flow control off (issue #1639). */
+static bool _to_zephyr_flow_ctrl(alp_uart_flow_t flow, enum uart_config_flow_control *out)
+{
+	switch (flow) {
+	case ALP_UART_FLOW_NONE:
+		*out = UART_CFG_FLOW_CTRL_NONE;
+		return true;
+	case ALP_UART_FLOW_RTS_CTS:
+		*out = UART_CFG_FLOW_CTRL_RTS_CTS;
+		return true;
+	default:
+		return false;
+	}
+}
+
 static alp_status_t _errno_to_alp(int err)
 {
 	/* Delegates to the shared negative-errno baseline (issue #1638).
@@ -92,18 +112,56 @@ z_open(const alp_uart_config_t *cfg, alp_uart_backend_state_t *st, alp_capabilit
 	const struct device *dev = _devs[cfg->port_id];
 	if (dev == NULL || !device_is_ready(dev)) return ALP_ERR_NOT_READY;
 
+	enum uart_config_flow_control flow_ctrl;
+	if (!_to_zephyr_flow_ctrl(cfg->flow_control, &flow_ctrl)) {
+		/* ALP_UART_FLOW_XON_XOFF has no Zephyr equivalent -- refuse
+		 * up front instead of configuring NONE and returning ALP_OK
+		 * for a request the driver never even saw (issue #1639). */
+		return ALP_ERR_NOSUPPORT;
+	}
+
 	struct uart_config zcfg = {
 		.baudrate  = cfg->baudrate,
 		.parity    = _to_zephyr_parity(cfg->parity),
 		.stop_bits = _to_zephyr_stop_bits(cfg->stop_bits),
 		.data_bits = _to_zephyr_data_bits(cfg->data_bits),
-		.flow_ctrl = UART_CFG_FLOW_CTRL_NONE,
+		.flow_ctrl = flow_ctrl,
 	};
 	int err = uart_configure(dev, &zcfg);
-	/* Some controllers / shims don't expose runtime configuration --
-     * accept ENOSYS / ENOTSUP and trust the devicetree-provided params. */
-	if (err != 0 && err != -ENOSYS && err != -ENOTSUP) {
+	if (err == -ENOSYS || err == -ENOTSUP) {
+		/* Some controllers / shims don't expose runtime configuration --
+         * accept ENOSYS / ENOTSUP and trust the devicetree-provided params,
+         * UNLESS the caller asked for flow control: trusting the
+         * devicetree there would let a controller that can't honour
+         * RTS/CTS accept the field and drop it, reporting ALP_OK for a
+         * link that silently has no flow control (issue #1639). */
+		if (cfg->flow_control != ALP_UART_FLOW_NONE) {
+			return ALP_ERR_NOSUPPORT;
+		}
+	} else if (err != 0) {
 		return _errno_to_alp(err);
+	} else if (cfg->flow_control != ALP_UART_FLOW_NONE) {
+		/* uart_configure() reporting success does not mean the
+		 * driver acted on flow_ctrl -- nothing in the Zephyr UART
+		 * API requires a driver to reject a value it merely stores
+		 * without applying it to real hardware.  uart_emul is NOT
+		 * such a driver: its own .config_get mirrors back whatever
+		 * .configure stored (drivers/serial/uart_emul.c), so this
+		 * readback can never catch it -- see this suite's
+		 * test_uart_open_rts_cts_reaches_the_driver_on_uart1, which
+		 * asserts the opposite (an honoured request must NOT be
+		 * false-rejected here).  The guard exists for a controller
+		 * whose .config_get reports real hardware state independent
+		 * of what was merely requested (issue #1639). */
+		struct uart_config back;
+		int                gerr = uart_config_get(dev, &back);
+		if (gerr == 0 && back.flow_ctrl != flow_ctrl) {
+			return ALP_ERR_NOSUPPORT;
+		}
+		/* gerr != 0: the driver can't report its current config --
+		 * nothing left to check locally, so trust uart_configure()'s
+		 * ALP_OK the same way the ENOSYS/ENOTSUP branch above trusts
+		 * the devicetree-provided params. */
 	}
 
 	st->dev         = (void *)dev;

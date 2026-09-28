@@ -21,3 +21,16 @@ tests:
       - wifi
       - ble
       - sockets
+
+  # issue #2126 review: this used to grow a second `.auto_recover_off`
+  # scenario here, forcing CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER off via a
+  # plain CMake -D define instead of real Kconfig -- correctly rejected: a
+  # bare -D proves nothing about the actual Kconfig path (Zephyr Kconfig
+  # omits a disabled bool from autoconf.h entirely; that IS the bug this
+  # whole change fixes). See CMakeLists.txt's own comment for why a REAL
+  # Kconfig override can't work in THIS hermetic, glob-sourced target
+  # without duplicating the whole alp-sdk Zephyr library. The real
+  # Kconfig-off proof lives in tests/console instead (see the PR/task
+  # notes: build it once at default and once with
+  # CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER=n and diff the compiled
+  # cc3501e_core.c.obj's disassembly).

@@ -3,13 +3,13 @@
  * ALP E1M-V2N-M1 (V2M) DEEPX DXM1 NPU enablement — V2M boards only.
  *
  * The on-module DEEPX DXM1 NPU sits on a PCIe lane behind an on-module
- * lane mux. Route the mux to the DEEPX path and release the NPU reset so
- * the PCIe root complex enumerates the NPU at boot. The gpio-hogs below
- * apply at pinctrl probe (before the PCIe controller), which is the order
- * the link needs. Power sequencing for the NPU rails is handled on-module
- * (in U-Boot / PMIC DT), not here.
+ * lane mux. Route the mux to the DEEPX path; M1_RESET itself is released
+ * by U-Boot, not a gpio-hog here (see the Rails note below) -- only the
+ * mux gpio-hogs live in this file. They apply at pinctrl probe (before
+ * the PCIe controller), which is the order the link needs. Power
+ * sequencing for the NPU rail is handled entirely in U-Boot.
  *
- *   M1_RESET     = PA6  (active-low: drive HIGH to release)
+ *   M1_RESET     = PA6  (active-low; released by U-Boot, no Linux hog)
  *   PCIe.MUX_PD  = P80  (LOW = muxes enabled; PD is active-low)
  *   PCIe.MUX_SEL = P95  (LOW  = path_0 = DEEPX; HIGH = E1M edge)
  *
@@ -18,10 +18,14 @@
  * pinctrl probe (before the PCIe controller), which is the order the
  * link needs.
  *
- * Rails: the current SoM rev powers the DEEPX rails from the old
- * standalone buck (always-on) — no sequencing needed. The target rev
- * moves them to DA9292 ch3+ch4 + three BRD_I2C TPS628640 bucks (enable
- * in U-Boot / PMIC DT then).
+ * Rails: the DEEPX 0.75V core rail (DA9292 CH2, over RIIC8/BRD_I2C) is
+ * sequenced and confirmed power-good in U-Boot's board_late_init()
+ * BEFORE M1_RESET is ever released -- see meta-alp-sdk's
+ * 0004-rzv2n-dev-ALP-E1M-DEEPX-rail-bringup.patch. That is also why
+ * M1_RESET has NO gpio-hog here, unlike the two mux pads below: U-Boot
+ * is the sole owner of P64/P65/M1_RESET (PA6), and a Linux-side hog
+ * driving PA6 at pinctrl probe would race U-Boot's own sequencing and
+ * could release the reset before the rail is confirmed up.
  *
  * STATUS: UNVALIDATED — first DEEPX PCIe bring-up; verify on the bench
  * (lspci shows the NPU, dxrt_init succeeds).
@@ -61,11 +65,9 @@
 		line-name = "deepx_pcie_mux_sel";
 	};
 
-	/* DEEPX NPU reset (active-low): drive HIGH to release the NPU. */
-	deepx-m1-reset-release-hog {
-		gpio-hog;
-		gpios = <RZV2N_GPIO(A, 6) GPIO_ACTIVE_HIGH>;
-		output-high;
-		line-name = "deepx_m1_reset";
-	};
+	/* No deepx-m1-reset-release-hog here: M1_RESET (PA6) is released by
+	 * U-Boot's board_late_init() ONLY after the DA9292 CH2 rail is
+	 * confirmed power-good (0004-rzv2n-dev-ALP-E1M-DEEPX-rail-bringup.
+	 * patch). A Linux-side hog driving PA6 at pinctrl probe would be a
+	 * second, uncoordinated writer of the same reset line. */
 };
