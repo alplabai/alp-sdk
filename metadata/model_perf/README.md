@@ -1,15 +1,22 @@
 # `metadata/model_perf/` — tier-2 bench-measured model performance points
 
-This directory is **intentionally empty**. It's the contract for a
-manufacturer-owned data asset (docs/superpowers/specs/2026-07-24-edge-ai-lifecycle-roadmap.md
-sub-project 1, tier 2), not the data itself: a perf point comes off
-real Alp Lab bench silicon or it does not exist, and none has been
-captured yet (issue #1520 lands the schema + validator + capture
-recipe; the first bench campaign is separate, still-blocked work — see
-[docs/bench/model-perf-capture.md](../../docs/bench/model-perf-capture.md)
-for what's blocking it).
+This directory holds a manufacturer-owned data asset
+(docs/superpowers/specs/2026-07-24-edge-ai-lifecycle-roadmap.md
+sub-project 1, tier 2): a perf point comes off real Alp Lab bench
+silicon or it does not exist. Issue #1520 landed the schema, validator
+and capture recipe
+([docs/bench/model-perf-capture.md](../../docs/bench/model-perf-capture.md)).
 
-## Layout, once populated
+The first points are in `E1M-V2M103/` (#1894, 2026-09-28). They are the
+three A55 Linux backends on one bench unit:
+- DEEPX DX-M1: yolo11n.
+- DRP-AI3: YOLOX-S/VOC sparse70.
+- ONNX Runtime CPU: YOLOX-S/VOC.
+
+No Ethos-U point exists yet. The vela-profile blocker in the capture doc
+still gates those.
+
+## Layout
 
 ```
 metadata/model_perf/<SKU>/<hash>.yaml

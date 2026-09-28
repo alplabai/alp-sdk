@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+schema_version: 1
+sku: E1M-V2M103
+hw_rev: r1
+model:
+  name: yolo11n
+  src_sha: fb513a5afb17f4066901b680991ee3790a39cac9a404b540c6b7401d5c55e340
+  format: onnx
+target:
+  backend: deepx_dxm1
+  accel_config: ''
+  core: a55_cluster
+  compiler_version: dx-com 2.3.0
+perf:
+  req_sram_kib: 0
+  arena_bytes: 0
+  latency_ms:
+    mean: 45.465
+    p50: 45.396
+    p95: 46.157
+    stdev: 0.243
+    runs: 50
+capture:
+  date: '2026-09-28'
+  operator: Alp Lab
+  bench_id: E1M-V2M103/2026W38-0001
+  notes: 'yolo11n.dxnn (dx-com 2.3.0, minmax calibration) on dx-rt 3.2.0 / FW 2.4.0, uint8 HWC 640x640x3
+    input. A55 Linux backend: the model and its tensors are DDR-resident, so there is no on-chip SRAM
+    arena (req_sram_kib / arena_bytes = 0). 5 warm-up invokes discarded, then back-to-back good invokes
+    timed with alp_inference_last_invoke_latency_us() (CLOCK_MONOTONIC). SoC thermal zones 53-54 C. Bench-only
+    unit (ACT88760 GPIO4 OTP defect, DX-M1 IO19 strap bodge). alp-sdk dev f958b6083 + #2389.'
