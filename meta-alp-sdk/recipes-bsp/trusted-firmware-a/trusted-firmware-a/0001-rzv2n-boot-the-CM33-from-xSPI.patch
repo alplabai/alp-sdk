@@ -1,3 +1,15 @@
+From: Alp Lab AB
+Subject: [PATCH] rzv2n: boot the CM33 from the xSPI M33 slot in BL2
+
+Enable PLAT_M33_BOOT_SUPPORT (BOOT_TFA_USING_CM33 stays 0, so the CA55-boot
+flash layout is unchanged: BL2 @0x0, FIP @0x60000, M33 FW @0x200000) and make
+the BL22 path build without PLAT_SYSTEM_SUSPEND: include plat_tbbr_img_def.h
+for BL22_IMAGE_ID, and read the M33 image through the memory-mapped xSPI
+window (memdrv/open_memmap) like the FIP instead of the suspend-only xspidrv.
+
+Upstream-Status: Inappropriate [ALP E1M-V2N/V2M SoM configuration]
+Signed-off-by: Alp Lab AB
+---
 diff --git a/plat/renesas/rz/common/v2n_common.mk b/plat/renesas/rz/common/v2n_common.mk
 index d9d90f5..82e55b8 100644
 --- a/plat/renesas/rz/common/v2n_common.mk

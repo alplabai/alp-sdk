@@ -228,10 +228,17 @@ def test_the_give_up_line_agrees_with_the_attempt_lines(tmp_path: Path) -> None:
     a reader saw `attempt 3/3` followed by a give-up naming a different attempt
     number and no total. Observed on #1570, run 32275153453.
 
-    Budget 30s with a 12s slice spends 24s on two attempts and leaves 6s, which
-    is under the 10s floor -- the exact shape that used to contradict itself.
+    Budget 18s with a 4s slice spends 8s on two attempts and leaves at most
+    10s, which trips the wrapper's floor -- the exact shape that used to
+    contradict itself. That floor is a literal `-le 10` in `apt-bounded.sh`,
+    not an env var, so only budget and slice can be scaled (#2328). The rule:
+    attempt 3 always gives up when budget <= 2 * slice + 10, and a slow
+    runner only lowers `remaining` further. Attempt 2 must still start, which
+    tolerates up to budget - slice - 11 = 3s of process-start slowness in the
+    worst case (whole-second `date +%s` rounding costs up to 1s of that).
+    The wall time stays ~2 slices, whatever the budget.
     """
-    proc = _run_hanging(tmp_path, budget="30", slice_s="12", step="short-budget")
+    proc = _run_hanging(tmp_path, budget="18", slice_s="4", step="short-budget")
     err = proc.stderr
 
     assert proc.returncode != 0, f"a hung apt must not report success:\n{err}"
@@ -248,8 +255,15 @@ def test_the_give_up_line_agrees_with_the_attempt_lines(tmp_path: Path) -> None:
 
 
 def test_exhausting_every_attempt_says_so(tmp_path: Path) -> None:
-    """The other exit path must produce the same shape of sentence."""
-    proc = _run_hanging(tmp_path, budget="40", slice_s="12", step="full-budget")
+    """The other exit path must produce the same shape of sentence.
+
+    Unlike the floor-guard test above, this path never needs the remaining
+    budget to approach the wrapper's 10s floor -- it only needs all 3 attempts
+    to start, so a large budget with a small slice keeps every `remaining`
+    check comfortably clear of the floor while still exercising the same
+    retry loop, in ~3s instead of waiting out three 12s timeouts.
+    """
+    proc = _run_hanging(tmp_path, budget="60", slice_s="1", step="full-budget")
     err = proc.stderr
     assert "attempt 3/3" in err, err
     assert "giving up after 3/3 attempt(s)" in err, (
