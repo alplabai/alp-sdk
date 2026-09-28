@@ -62,10 +62,19 @@ bool alp_sigpipe_safe_write(int fd, const void *data, size_t len)
 		sigset_t pending_after;
 		sigpending(&pending_after);
 		if (sigismember(&pending_after, SIGPIPE) == 1) {
+			/* sigwait() returns an error NUMBER directly on failure -- it
+			 * does NOT return -1 and set errno like write() above, so the
+			 * retry condition must test its return value, not errno (a
+			 * stale errno==EINTR from a prior call would otherwise pass
+			 * this check forever without sigwait() itself ever having
+			 * failed with EINTR). r != 0 for any other reason is left
+			 * alone: nothing safe to do beyond that, and the signal (if
+			 * still pending) is not this function's to spin on further. */
 			int consumed = 0;
-			while (sigwait(&sigpipe_set, &consumed) != 0 && errno == EINTR) {
-				/* retry on spurious EINTR from sigwait() itself */
-			}
+			int r;
+			do {
+				r = sigwait(&sigpipe_set, &consumed);
+			} while (r == EINTR);
 		}
 	}
 

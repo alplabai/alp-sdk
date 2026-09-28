@@ -34,12 +34,11 @@
  * the tar-staging path (including the SIGPIPE-safe write helper it now
  * calls, alp_sigpipe_safe_write() -- issue #2389), all of which sit
  * behind that same device probe -- EXCEPT the format defense
- * (test_open_rejects_non_drpai_format below), which is the FIRST
- * cfg-shape guard in open(), ahead of the device probe, so it needs no
- * device at all. The tar-staging pipe's SIGPIPE-safety (a corrupt tar ->
- * ALP_ERR_IO, process survives, no exit 141) is covered independently,
- * against a real pipe with no real DRP-AI or tar dependency, by
- * tests/yocto/sigpipe_safe_write.c.
+ * (test_open_rejects_non_drpai_format below), which runs before the
+ * device probe, so it needs no device at all. The tar-staging pipe's
+ * SIGPIPE-safety (a corrupt tar -> ALP_ERR_IO, process survives, no
+ * exit 141) is covered independently, against a real pipe with no real
+ * DRP-AI or tar dependency, by tests/yocto/sigpipe_safe_write.c.
  *
  * Build with:
  *   cmake -B build -DALP_OS=yocto -DALP_BUILD_TESTS=ON
@@ -92,10 +91,10 @@ alp_inference_config_t base_cfg()
 /* Test 0 (issue #2389): open() rejects a non-DRPAI cfg->format before
  * touching the device -- this backend's own defensive check, IN ADDITION
  * to the dispatcher-level gate in src/yocto/inference_yocto.c.  Runs
- * ahead of _drpai_mem_start() (the format check is the first cfg-shape
- * guard in alp_inference_drpai_open(), before any /dev/drpai0 probe), so
- * this is host-independent like test_open_rejects_null_model_data below
- * -- no real DRP-AI device needed to prove it. */
+ * before the device probe (_drpai_mem_start(), the first thing in
+ * alp_inference_drpai_open() that touches /dev/drpai0), so this is
+ * host-independent like test_open_rejects_null_model_data below -- no
+ * real DRP-AI device needed to prove it. */
 void test_open_rejects_non_drpai_format()
 {
 	struct alp_inference   h   = {};

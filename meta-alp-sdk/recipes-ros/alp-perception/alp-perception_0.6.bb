@@ -56,6 +56,13 @@ RDEPENDS:${PN} = "${ROS_EXEC_DEPENDS} alp-sdk"
 # add dx-driver/dx-rt only on the V2M variants (which carry DEEPX
 # silicon), via conf/machine/include/e1m-v2m-deepx.inc when
 # ALP_ENABLE_DEEPX_DXM1 = "1" (on by default whenever DEEPX's
-# meta-deepx-m1 layer is in bblayers.conf).  On V2N101/V2N102 (no DEEPX)
-# the node's alp_inference_open AUTO-falls through to DRP-AI.  Same
-# source builds for both; only the machine's install set differs.
+# meta-deepx-m1 layer is in bblayers.conf).  Same source builds for both
+# V2M and V2N; only the machine's install set (and the deployed model
+# asset) differs.  On V2N101/V2N102 (no DEEPX) alp_inference_open's AUTO
+# still resolves to DRP-AI, but nothing transcodes the model container
+# for it (alp-sdk#2389): the node's hardcoded
+# ALP_INFERENCE_MODEL_DXNN blob (see deepx_dispatch.cpp) is a DEEPX-only
+# format and is REJECTED with ALP_ERR_INVAL against the DRP-AI backend
+# AUTO resolves to on V2N -- a V2N image must instead ship an
+# ALP_INFERENCE_MODEL_DRPAI `drpai_dir` bundle for this node to open a
+# model there at all.

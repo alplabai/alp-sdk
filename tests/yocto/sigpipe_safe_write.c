@@ -26,6 +26,8 @@
  *   ctest --test-dir build -R alp_test_sigpipe_safe_write
  */
 
+#include <errno.h>
+#include <pthread.h>
 #include <signal.h>
 #include <unistd.h>
 
@@ -87,6 +89,58 @@ static void test_no_pending_sigpipe_leaks_after_call(void)
 	ALP_ASSERT_TRUE(sigismember(&pending, SIGPIPE) == 0);
 }
 
+/* A SIGPIPE already pending BEFORE the call belongs to whoever raised
+ * it, not to this call's own write -- alp_sigpipe_safe_write() must
+ * leave it exactly as pending as it found it, not consume it as a side
+ * effect of servicing an unrelated successful write. */
+static void test_preexisting_pending_sigpipe_is_not_consumed(void)
+{
+	sigset_t sigpipe_set;
+	sigemptyset(&sigpipe_set);
+	sigaddset(&sigpipe_set, SIGPIPE);
+
+	sigset_t old_mask;
+	ALP_ASSERT_EQ_INT(pthread_sigmask(SIG_BLOCK, &sigpipe_set, &old_mask), 0);
+
+	/* Raise SIGPIPE against this (now SIGPIPE-blocked) thread ourselves --
+	 * it becomes pending rather than delivered.  Stands in for a SIGPIPE
+	 * some other part of the embedding app already raised before ever
+	 * calling into alp_sigpipe_safe_write(). */
+	ALP_ASSERT_EQ_INT(raise(SIGPIPE), 0);
+
+	sigset_t pending_before_call;
+	ALP_ASSERT_EQ_INT(sigpending(&pending_before_call), 0);
+	ALP_ASSERT_TRUE(sigismember(&pending_before_call, SIGPIPE) == 1);
+
+	/* An ordinary write through a live pipe -- only the "is the
+	 * pre-existing pending SIGPIPE left alone" behaviour is under test
+	 * here, so the write itself must succeed normally. */
+	int fds[2];
+	ALP_ASSERT_EQ_INT(pipe(fds), 0);
+	static const char msg[] = "y";
+	bool              ok    = alp_sigpipe_safe_write(fds[1], msg, sizeof(msg));
+	close(fds[1]);
+	char buf[8] = { 0 };
+	(void)read(fds[0], buf, sizeof(buf));
+	close(fds[0]);
+	ALP_ASSERT_TRUE(ok);
+
+	sigset_t pending_after_call;
+	ALP_ASSERT_EQ_INT(sigpending(&pending_after_call), 0);
+	ALP_ASSERT_TRUE(sigismember(&pending_after_call, SIGPIPE) == 1);
+
+	/* Clean up: consume the SIGPIPE this test raised itself (sigwait()
+	 * returns an error NUMBER directly, not -1 with errno -- see
+	 * alp_sigpipe_safe_write.c's own comment on this), then restore the
+	 * thread's original mask so later tests are unaffected. */
+	int consumed = 0;
+	int r;
+	do {
+		r = sigwait(&sigpipe_set, &consumed);
+	} while (r == EINTR);
+	pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
+}
+
 /* A zero-length write (the DRP-AI extractor's `len == 0` short-circuit
  * calls this helper only for len > 0, but the helper itself must still
  * behave for len == 0 -- no write() call, no false failure). */
@@ -107,6 +161,7 @@ int main(void)
 	test_write_succeeds_when_reader_is_present();
 	test_write_survives_closed_reader_no_sigpipe_death();
 	test_no_pending_sigpipe_leaks_after_call();
+	test_preexisting_pending_sigpipe_is_not_consumed();
 	test_zero_length_write_is_a_trivial_success();
 
 	ALP_TEST_SUMMARY();

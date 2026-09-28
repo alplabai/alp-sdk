@@ -99,9 +99,17 @@ typedef enum {
 	    4 /**< DEEPX DX-M1 (canonical id; matches the .alpmodel `deepx_dxm1` backend string). */
 } alp_inference_backend_t;
 
-/** Model format.  Each backend supports a subset; AUTO picks based
- *  on whichever loader matches the magic bytes at the head of the
- *  model buffer. */
+/** Model format.  Each backend supports exactly one container.  On
+ *  Yocto (V2N/V2M A55/Linux), @c backend = AUTO picks the
+ *  highest-priority backend compiled in for the active SoM (NPU-first
+ *  -- see @ref alp_inference_open's backend-pin semantics); if THAT
+ *  backend cannot load @c format, @ref alp_inference_open fails with
+ *  @ref ALP_ERR_INVAL rather than trying another backend -- pin @c
+ *  backend explicitly to route the blob to a different loader.  On
+ *  Zephyr, backend selection instead uses `silicon_ref`+priority and
+ *  does not consult @c format at all (see the @ref
+ *  ALP_INFERENCE_MODEL_EXECUTORCH entry below for what that means in
+ *  practice). */
 typedef enum {
 	ALP_INFERENCE_MODEL_TFLITE     = 0, /**< `.tflite` flatbuffer. */
 	ALP_INFERENCE_MODEL_VELA       = 1, /**< Vela-compiled `.tflite`. */
@@ -111,7 +119,7 @@ typedef enum {
 					     *   live: ExecutorchAdapter (issue #1260)
 					     *   produces this format from a .pte
 					     *   source.  No backend runtime consumes
-					     *   it yet.  Backend selection is
+					     *   it yet.  On ZEPHYR, backend selection is
 					     *   silicon_ref+priority and never reads
 					     *   cfg->format, so the outcome depends on
 					     *   which backend wins: on a TFLM-linked
@@ -122,7 +130,15 @@ typedef enum {
 					     *   (not a deliberate format check); with no
 					     *   TFLM linked, sw_fallback (priority 0)
 					     *   wins instead and fails with @ref
-					     *   ALP_ERR_NOSUPPORT.  See issue #1260. */
+					     *   ALP_ERR_NOSUPPORT.  See issue #1260.
+					     *   On YOCTO, none of the compiled-in
+					     *   backends (DRP-AI3 / DEEPX DX-M1 / ONNX
+					     *   Runtime) accepts this format (see the
+					     *   format-vs-backend note above), so
+					     *   whichever one AUTO resolves to (or the
+					     *   caller pins) rejects it with @ref
+					     *   ALP_ERR_INVAL before ever loading it
+					     *   (issue #2389). */
 	ALP_INFERENCE_MODEL_ONNX       = 5  /**< Raw `.onnx` graph (ONNX Runtime CPU backend). */
 } alp_inference_model_format_t;
 
@@ -225,7 +241,9 @@ typedef struct {
  *         a model that doesn't fit is refused rather than opened with
  *         a silently-truncated shape), ALP_ERR_NOMEM (handle-pool or
  *         arena allocation failure), or ALP_ERR_IO (backend's
- *         tensor-arena allocation failed).
+ *         tensor-arena allocation failed; on the Yocto DRP-AI backend,
+ *         also a corrupt/truncated @c drpai_dir tar bundle or a failed
+ *         extraction -- see @ref ALP_INFERENCE_MODEL_DRPAI).
  */
 alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg);
 

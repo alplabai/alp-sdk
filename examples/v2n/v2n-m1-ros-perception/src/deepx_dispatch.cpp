@@ -33,14 +33,24 @@ DeepxDispatcher::DeepxDispatcher(rclcpp::Node &parent) : parent_(parent)
 	// Field names + order match alp_inference_config_t in
 	// <alp/inference.h>: model_data, model_size, format, backend,
 	// arena_bytes, arena.
+	//
+	// `format` MUST match whichever backend AUTO actually resolves to on
+	// this SoM -- nothing transcodes between containers (alp-sdk#2389: a
+	// mismatched format is now rejected with ALP_ERR_INVAL before the
+	// backend ever sees the blob, not silently handled). DXNN below is
+	// correct on a V2M SoM (DEEPX DX-M1); a V2N SoM has no DEEPX NPU at
+	// all, so it needs an ALP_INFERENCE_MODEL_DRPAI `drpai_dir` bundle
+	// (see examples/v2n/v2n-drpai-inference) and a real per-SoM image
+	// bake would drop the matching one of the two, not this single
+	// hardcoded DXNN placeholder.
 	const alp_inference_config_t inf_cfg = {
 		.model_data = nullptr, // Customer drops their model into
 		                       // /etc/alp/models/perception.dxnn at
 		                       // image-bake time.
 		.model_size = 0,
-		.format     = ALP_INFERENCE_MODEL_DXNN, // DEEPX-native;
-		                                        // dispatcher transcodes for
-		                                        // DRP-AI if needed.
+		.format     = ALP_INFERENCE_MODEL_DXNN, // DEEPX DX-M1's native
+		                                        // container (V2M only --
+		                                        // see the note above).
 		.backend     = ALP_INFERENCE_BACKEND_AUTO,
 		.arena_bytes = 0,
 		.arena       = nullptr,

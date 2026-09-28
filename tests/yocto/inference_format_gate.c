@@ -217,12 +217,34 @@ static void test_explicit_drpai_pin_with_onnx_rejected(void)
 	ALP_ASSERT_EQ_INT(g_drpai_open_calls, 0);
 }
 
+/* The mismatch direction the issue's OWN repro did not hit but the gate
+ * must reject the same way: an explicit CPU pin with a DRPAI-formatted
+ * blob.  ORT's open() must never be called either. */
+static void test_explicit_cpu_pin_with_drpai_format_rejected(void)
+{
+	reset_call_counters();
+
+	alp_inference_config_t cfg = {
+		.model_data = k_model,
+		.model_size = sizeof(k_model),
+		.format     = ALP_INFERENCE_MODEL_DRPAI,
+		.backend    = ALP_INFERENCE_BACKEND_CPU,
+	};
+	alp_inference_t *h = alp_inference_open(&cfg);
+
+	ALP_ASSERT_NULL(h);
+	ALP_ASSERT_EQ_INT(alp_last_error(), ALP_ERR_INVAL);
+	ALP_ASSERT_EQ_INT(g_ort_open_calls, 0);
+	ALP_ASSERT_EQ_INT(g_drpai_open_calls, 0);
+}
+
 int main(void)
 {
 	test_auto_resolves_to_drpai_and_rejects_onnx_format();
 	test_auto_resolves_to_drpai_and_accepts_matching_format();
 	test_explicit_cpu_pin_with_onnx_still_opens();
 	test_explicit_drpai_pin_with_onnx_rejected();
+	test_explicit_cpu_pin_with_drpai_format_rejected();
 
 	ALP_TEST_SUMMARY();
 }
