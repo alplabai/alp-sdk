@@ -314,7 +314,7 @@ helper_firmware:
     #
     # `flash_policy` STAYS.  It answers who may reach a local flash path
     # if one is ever added, which the schema requires on every helper
-    # entry with or without a `flash_method` -- the six AEN
+    # entry with or without a `flash_method` -- the seven AEN
     # `cc3501e_otp` entries are that same shape (`recovery_only`, no
     # `flash_method`).  Alp Lab programs this part in production; a
     # customer flash is only ever bricked-board recovery with Alp

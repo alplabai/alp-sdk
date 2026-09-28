@@ -5,7 +5,7 @@ CI gate: every `helper_firmware[].firmware_path` in every
 `metadata/e1m_modules/*.yaml` SoM preset resolves to a real, repo-relative
 file on disk.
 
-Issue #1372: `firmware_path` is a repo-relative path shipped in six AEN
+Issue #1372: `firmware_path` is a repo-relative path shipped in seven AEN
 presets (pointing at a prebuilt companion image) and
 nothing anywhere validated that it resolves -- not the schema (`minLength: 1`
 only, no `format`/existence constraint), not `scripts/alp_cli/validator.py`
