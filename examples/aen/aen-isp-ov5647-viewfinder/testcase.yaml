@@ -5,10 +5,10 @@
 # the E1M-AEN801/AEN803 (Ensemble E8, M55-HE).  CI only compile-checks the
 # driver + DT graph -- there is no silicon in the runner -- but this image
 # is meant for a real bench capture with a real OV5647 sensor.  See
-# examples/aen/aen-isp-ov5647-capture/testcase.yaml for the raw-API
+# examples/aen/aen-isp-capture/testcase.yaml for the raw-API
 # sibling this mirrors.
 #
-# Needs both shields, same as aen-isp-ov5647-capture / aen-camera-
+# Needs both shields, same as aen-isp-capture / aen-camera-
 # firstlight's OV5647 scenario.
 
 sample:
@@ -16,7 +16,7 @@ sample:
   description: |
     Bench RAM-run: a real OV5647 sensor frame through the Alif ISP-Pico,
     AE + AWB on, captured through the portable <alp/camera.h> API (not the
-    raw Zephyr video_* calls aen-isp-ov5647-capture uses) -- proves the
+    raw Zephyr video_* calls aen-isp-capture uses) -- proves the
     alif_isp_pico backend itself, not just the driver underneath it.
 
 tests:

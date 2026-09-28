@@ -104,6 +104,110 @@ The Yocto layer that brings it into your image is wired in
 
 Integration cross-link: [`vendors/deepx-dxm1/README.md`](../../vendors/deepx-dxm1/README.md).
 
+## DEEPX DX-M1 bring-up (Yocto image, bench-verified)
+
+**Bench-verified 2026-09-26 on E1M-V2M103**, after a DEEPX-supplied
+DX-M1 firmware update, with a V2M103 image carrying `dx-driver` 1.8.0
++ `dx-rt` 3.2.0 installed from `meta-deepx-m1` (the pins in
+`conf/machine/include/e1m-v2m-deepx.inc`).
+
+### What the image provides
+
+* The DX-M1 flash-boots firmware 2.4.0 and enumerates as PCIe
+  `1ff4:0000` Gen3 x2.
+* `dx_dma` + `dxrt_driver` autoload at boot
+  (`dx_dma_pcie ... Probe Done!!`, `dxrt_driver_cdev_init: 1 devices`).
+* `/dev/dxrt0` is `0660 root:video`, via the `99-dx-dma.rules` udev
+  rule this layer's `dx-driver_%.bbappend` tightens (see "What's
+  different from V2N base" above).
+* `/usr/bin/{dxrt-cli,dxrtd,dxtop,run_model,parse_model,dxbenchmark}`
+  come from the `dx-rt-cli` sub-package, which the image installs.
+
+### Verifying the bring-up
+
+```
+dxrt-cli -s
+```
+
+should return rc `0` and report: `DXRT v3.2.0`, `RT driver v1.8.0`,
+`PCIe driver v1.6.0`, `FW v2.4.0`, LPDDR5x `6000` Mbps / `3.92` GiB,
+Board `M.2 Rev 0.2`, NPU0-2 at `1000` MHz. Any mismatch here (wrong
+firmware version, a device stuck in reset, an unprogrammed NAND)
+surfaces before an inference is ever attempted.
+
+### Inference smoke test
+
+DEEPX's public model zoo publishes `.dxnn` models compiled per firmware
+release (`https://sdk.deepx.ai/modelzoo/dxnn/2_4_0/<model>.dxnn` for FW
+2.4.0). They are licensed for evaluation and development only. Run them with
+`run_model`:
+
+```
+run_model -m mobilenetv2_224x224.dxnn -s -l 50 -v   # single request, per-inference timing
+run_model -m mobilenetv2_224x224.dxnn -b -l 300     # throughput, all three NPUs
+```
+
+Measured on E1M-V2M103 (FW 2.4.0, DX-RT 3.2.0, PCIe Gen3 x2):
+
+| Model | NPU time | End-to-end latency (`-s`) | Throughput (`-b`, 3 NPUs) |
+|---|---|---|---|
+| `mobilenetv2_224x224` | 0.68 ms | 1.16 ms | 2781 FPS |
+| `resnet18_224x224` | 0.86 ms | 1.34 ms | -- |
+| `yolov5-s_640x640` | 4.09 ms | 62.1 ms | 33.8 FPS |
+
+YOLOv5s end-to-end latency is dominated by host-side output handling, not by
+the NPU. Use a loop count (`-l`): the time-bounded mode (`-t <s>`) stalled
+after its warm-up runs on this setup. `dxrt-cli -s` reports NPU voltage as
+`0 mV` with the no-PMIC firmware, because there is no PMIC read-out.
+
+### DX-RT service mode (`dxrtd`) -- not enabled
+
+DX-RT 3.x has an optional, CMake-time "service mode"
+(`USE_SERVICE`) where `dxrtd` runs as a background daemon so more
+than one process can share the DX-M1 concurrently. The `dx-rt_3.2.0`
+recipe this layer pins (`PREFERRED_VERSION_dx-rt = "3.2.0"`, which
+selects `dx-rt_3.2.0.bb`, not the `-1` suffix) builds with
+`USE_SERVICE=OFF` -- upstream's own default; the same recipe builds
+with `USE_ORT=ON` and depends on `libonnxruntime` -- and
+does not install a `dxrtd` unit at all. `meta-deepx-m1` also ships a
+`dx-rt_3.2.0-1.bb` variant with `USE_SERVICE=ON`, but its
+systemd/SysVinit wiring (`SYSTEMD_SERVICE`, the `do_install:append`
+step that would stage `dxrt.service`) is commented out in
+`meta-deepx-m1` itself, so even that variant ships no *working*
+`dxrtd` service today.
+
+`run_model` and `dxrt-cli` do not need service mode -- both open the
+device directly as a single process, which is exactly what the bench
+run above exercised. `meta-alp-sdk` therefore does **not** bbappend a
+service unit in: there is nothing upstream to enable (the shipped
+recipe never fetches `dxrt.service`), and adding one against a
+runtime built with `USE_SERVICE=OFF` would ship a unit that cannot
+work. Multi-process device sharing is future work, gated on upstream
+re-enabling its own commented-out service wiring (or this layer
+re-pinning to the `-1` variant and rebuilding with `USE_SERVICE=ON`,
+a bigger change than a bbappend).
+
+### DX-M1 NAND firmware provisioning
+
+The DX-M1's application firmware lives on its own SPI NAND, separate
+from the Yocto image, and is provisioned once, out of band, over
+DEEPX's UART boot path (`fw_update_uart` from DEEPX's own tooling)
+using firmware images obtained **from DEEPX** -- alp-sdk does not
+redistribute them. If an update is interrupted or the DX-M1 wedges
+afterward, cold-power-cycle the module (a warm reset is not
+sufficient) before retrying.
+
+### Hardware prerequisites
+
+The bring-up above depends on these being true of the SoM:
+
+* the DX-M1's boot straps select mode 0 (flash boot);
+* the DX-M1's crystal oscillator has its bias resistor populated;
+* SoMs without the DEEPX reference PMIC run DEEPX's no-PMIC firmware
+  variant on the DX-M1;
+* the DX-M1's NAND has been programmed at least once over its UART
+  boot path (see above).
+
 ## Example apps targeting V2N-M1
 
 All V2N examples apply.  DEEPX-specific examples land separately

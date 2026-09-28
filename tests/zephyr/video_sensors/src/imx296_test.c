@@ -33,6 +33,7 @@
 #define REG_SHS_MSB  0x308f
 #define REG_GAIN_LSB 0x3204
 #define REG_GAIN_MSB 0x3205
+#define REG_GAINDLY  0x3212
 
 /* VMAX (24-bit LE), HMAX (16-bit LE), INCKSEL0..3 and CSI_TIMING -- see imx296.c's
  * IMX296_REG_VMAX / IMX296_REG_HMAX / IMX296_REG_INCKSEL0..3 / IMX296_REG_CSI_TIMING and
@@ -50,10 +51,22 @@
 
 /* IMX296_REG_CSI_LANE_HS / IMX296_REG_BLKLEVEL / IMX296_REG_ROI_ENABLE -- see imx296.c's own
  * comments above those macros. */
-#define REG_CSI_LANE_HS  0x3005
-#define REG_BLKLEVEL_LSB 0x3254
-#define REG_BLKLEVEL_MSB 0x3255
-#define REG_ROI_ENABLE   0x3300
+#define REG_CSI_LANE_HS   0x3005
+#define REG_BLKLEVEL_LSB  0x3254
+#define REG_BLKLEVEL_MSB  0x3255
+#define REG_ROI_ENABLE    0x3300
+#define ROI_ENABLE_ENABLE (BIT(0) | BIT(1)) /* FID0_ROIH1ON | FID0_ROIV1ON */
+
+/* IMX296_REG_ROI_POS_H/V, IMX296_REG_ROI_SIZE_H/V (issue #2287 Stage B) -- see their own
+ * comments above IMX296_REG_ROI_ENABLE in imx296.c. */
+#define REG_ROI_POS_H_LSB  0x3310
+#define REG_ROI_POS_H_MSB  0x3311
+#define REG_ROI_POS_V_LSB  0x3312
+#define REG_ROI_POS_V_MSB  0x3313
+#define REG_ROI_SIZE_H_LSB 0x3314
+#define REG_ROI_SIZE_H_MSB 0x3315
+#define REG_ROI_SIZE_V_LSB 0x3316
+#define REG_ROI_SIZE_V_MSB 0x3317
 
 /* IMX296_REG_TRIGEN / IMX296_REG_LOWLAGTRG / IMX296_REG_SYNCSEL -- see imx296.c's own comments
  * above those macros (issue #2287's external-trigger addition). */
@@ -76,10 +89,15 @@
 #define IMX296_TRIGGER_MODE_EXTERNAL 1
 
 /* Sony IMX296 datasheet "Register List of All-pixel scan mode" (page 49): VMAX = 1118 lines/frame
- * -- see IMX296_VMAX in imx296.c. Exposure is in lines of integration (VMAX - SHS); SHS_MIN = 4
- * ("Register List of Shutter setting", page 60) gives the exposure ceiling VMAX - 4 = 1114. */
+ * -- see IMX296_VMAX in imx296.c. Exposure is in lines of integration (VMAX - SHS); the
+ * datasheet's own legal SHS floor is 4 ("Register List of Shutter setting", page 60, exposure
+ * ceiling VMAX - 4 = 1114) -- but imx296.c's own VIDEO_CID_EXPOSURE range clamps to
+ * IMX296_SHS_DEFAULT (14) instead, bench-proven (#2287 runs 304-306, E1M-AEN803 2026W36-0001):
+ * SHS=4 produced a completely flat, black frame with no scene content on real silicon, SHS=14
+ * (same ROI/timing) a real scene -- see imx296.c's own comment on this clamp for why 4 stays the
+ * datasheet-legal SHS floor everywhere else even though this driver won't drive the sensor to it. */
 #define IMX296_VMAX  1118
-#define EXPOSURE_MAX (IMX296_VMAX - 4)
+#define EXPOSURE_MAX (IMX296_VMAX - 14)
 #define GAIN_MAX     480
 
 static const struct device *imx296_dev(void)
@@ -203,6 +221,17 @@ ZTEST(imx296, test_shs_gain_reverse_defaults_written_at_init)
 	zassert_true(imx296_test_first_write(emul, REG_GAIN_MSB, &val), "no write to GAIN MSB logged");
 	zassert_equal(val, 0x00, "GAIN MSB default (0 dB)");
 
+	/*
+	 * #2287 (bench runs 304-306, decode corrected bench round after 309/310): GAINDLY's own
+	 * POR default (00h) is datasheet-prohibited (page 41/56) -- imx296_init() must write the
+	 * one legal value this driver uses, unconditionally, same as SHS/GAIN/REVERSE above. Page
+	 * 41 verbatim: "08h: Gain reflect at the frame" / "09h: Gain reflect at the next frame
+	 * (Same timing as SHS reflecting output.)" -- 09h is used, NOT 08h, so GAIN and SHS land
+	 * together on the same frame.
+	 */
+	zassert_true(imx296_test_first_write(emul, REG_GAINDLY, &val), "no write to GAINDLY logged");
+	zassert_equal(val, 0x09, "GAINDLY default (Gain reflect at the next frame, page 41)");
+
 	zassert_true(imx296_test_first_write(emul, REG_REVERSE, &val), "no write to REVERSE logged");
 	zassert_equal(val, 0x00, "REVERSE default (no flip)");
 }
@@ -275,9 +304,17 @@ ZTEST(imx296, test_init_quiesce_order)
 	}
 }
 
-ZTEST(imx296, test_get_caps_lists_exactly_one_mode)
+/* Sony IMX296 datasheet "ROI mode" / "Register List of ROI mode" (pages 51-53), issue #2287
+ * Stage B: the second, centred crop mode -- see IMX296_ROI_WIDTH/HEIGHT's own comment in
+ * imx296.c for the derivation. */
+#define IMX296_ROI_WIDTH  1280
+#define IMX296_ROI_HEIGHT 960
+
+ZTEST(imx296, test_get_caps_lists_two_modes)
 {
-	struct video_caps caps = { .type = VIDEO_BUF_TYPE_OUTPUT };
+	struct video_caps caps           = { .type = VIDEO_BUF_TYPE_OUTPUT };
+	bool              saw_full_frame = false;
+	bool              saw_roi        = false;
 	int               count;
 
 	zassert_ok(video_get_caps(imx296_dev(), &caps));
@@ -288,16 +325,31 @@ ZTEST(imx296, test_get_caps_lists_exactly_one_mode)
 		              VIDEO_PIX_FMT_SRGGB10P,
 		              "mode %d is not SRGGB10P",
 		              count);
-		zassert_equal(caps.format_caps[count].width_min, 1456, "mode %d width", count);
-		zassert_equal(caps.format_caps[count].width_max, 1456, "mode %d width", count);
-		zassert_equal(caps.format_caps[count].height_min, 1088, "mode %d height", count);
-		zassert_equal(caps.format_caps[count].height_max, 1088, "mode %d height", count);
+		zassert_equal(caps.format_caps[count].width_min,
+		              caps.format_caps[count].width_max,
+		              "mode %d should be a single fixed size, not a range",
+		              count);
+		zassert_equal(caps.format_caps[count].height_min,
+		              caps.format_caps[count].height_max,
+		              "mode %d should be a single fixed size, not a range",
+		              count);
+
+		if (caps.format_caps[count].width_min == 1456 &&
+		    caps.format_caps[count].height_min == 1088) {
+			saw_full_frame = true;
+		} else if (caps.format_caps[count].width_min == IMX296_ROI_WIDTH &&
+		           caps.format_caps[count].height_min == IMX296_ROI_HEIGHT) {
+			saw_roi = true;
+		} else {
+			zassert_unreachable("mode %d is neither the full-frame nor the ROI size", count);
+		}
 	}
-	zassert_equal(
-	    count, 1, "the sensor's single fixed All-pixel scan mode should be the only entry");
+	zassert_equal(count, 2, "the driver should list exactly the full-frame and ROI modes");
+	zassert_true(saw_full_frame, "1456x1088 full-frame mode missing from format_caps");
+	zassert_true(saw_roi, "1280x960 ROI mode missing from format_caps");
 }
 
-ZTEST(imx296, test_set_format_succeeds_for_the_one_mode)
+ZTEST(imx296, test_set_format_succeeds_for_full_frame)
 {
 	struct video_format fmt = {
 		.type        = VIDEO_BUF_TYPE_OUTPUT,
@@ -306,6 +358,27 @@ ZTEST(imx296, test_set_format_succeeds_for_the_one_mode)
 		.height      = 1088,
 	};
 
+	zassert_ok(video_set_format(imx296_dev(), &fmt));
+}
+
+ZTEST(imx296, test_set_format_succeeds_for_roi)
+{
+	struct video_format fmt = {
+		.type        = VIDEO_BUF_TYPE_OUTPUT,
+		.pixelformat = VIDEO_PIX_FMT_SRGGB10P,
+		.width       = IMX296_ROI_WIDTH,
+		.height      = IMX296_ROI_HEIGHT,
+	};
+
+	zassert_ok(video_set_format(imx296_dev(), &fmt));
+
+	/* Restore the boot-time default: imx296_test_after() below also does this
+	 * unconditionally as a backstop, but doing it here too keeps this test from depending
+	 * on that backstop running first under ztest's name-sorted (not declaration order)
+	 * execution -- see test_stream_start_writes_roi_registers_for_roi_size below, which
+	 * needs a KNOWN starting format, not whatever the previous test left behind. */
+	fmt.width  = 1456;
+	fmt.height = 1088;
 	zassert_ok(video_set_format(imx296_dev(), &fmt));
 }
 
@@ -335,7 +408,24 @@ ZTEST(imx296, test_set_format_rejects_unsupported_size)
 	zassert_equal(video_set_format(imx296_dev(), &fmt),
 	              -ENOTSUP,
 	              "1440x1080 (the datasheet's RECORDING crop, not the TRANSMITTED frame) "
-	              "should be rejected -- the driver's one mode is 1456x1088");
+	              "should be rejected -- neither of the driver's two modes is this size");
+}
+
+ZTEST(imx296, test_set_format_rejects_size_between_the_two_modes)
+{
+	/* Neither the full-frame (1456x1088) nor the ROI (1280x960) entry in imx296_fmts[]
+	 * covers this size -- proves the two modes are each a fixed point, not endpoints of a
+	 * steppable range video_format_caps_index() would otherwise accept a size between. */
+	struct video_format fmt = {
+		.type        = VIDEO_BUF_TYPE_OUTPUT,
+		.pixelformat = VIDEO_PIX_FMT_SRGGB10P,
+		.width       = 1368,
+		.height      = 1024,
+	};
+
+	zassert_equal(video_set_format(imx296_dev(), &fmt),
+	              -ENOTSUP,
+	              "a size between the full-frame and ROI modes should be rejected");
 }
 
 ZTEST(imx296, test_stream_start_cancels_standby_then_starts_master_mode)
@@ -353,11 +443,16 @@ ZTEST(imx296, test_stream_start_cancels_standby_then_starts_master_mode)
 	 * the master-mode clock generator while the analog block is still in standby. The
 	 * TRIGEN/LOWLAGTRG/SYNCSEL writes (issue #2287, see imx296.c's imx296_set_stream())
 	 * land first, before STANDBY, since "Mode Transitions of Global Shutter Operation"
-	 * (page 66) requires them to be set "via sensor standby". video_stream_start() above also
-	 * blocks for IMX296_INIT_PERIOD_MS (issue #2287) after the XMSTA write -- likewise no
-	 * register write, so likewise invisible to this log, but native_sim's simulated clock
-	 * fast-forwards k_sleep() so it costs no real wall-clock time in this test. */
-	zassert_equal(imx296_emul_log_count(emul), 5, "expected exactly 5 writes to start streaming");
+	 * (page 66) requires them to be set "via sensor standby". The default format at boot is
+	 * full-frame (imx296_init()), so imx296_set_stream()'s ROI branch (issue #2287 Stage B)
+	 * takes the "not ROI" path here -- exactly one extra write, REG_ROI_ENABLE=disable,
+	 * landing right after SYNCSEL, before STANDBY -- see
+	 * test_stream_start_writes_roi_registers_for_roi_size below for the ROI-format case.
+	 * video_stream_start() above also blocks for IMX296_INIT_PERIOD_MS (issue #2287) after
+	 * the XMSTA write -- likewise no register write, so likewise invisible to this log, but
+	 * native_sim's simulated clock fast-forwards k_sleep() so it costs no real wall-clock
+	 * time in this test. */
+	zassert_equal(imx296_emul_log_count(emul), 6, "expected exactly 6 writes to start streaming");
 
 	zassert_ok(imx296_emul_log_get(emul, 0, &w));
 	zassert_equal(w.reg, REG_TRIGEN, "write 0 should be TRIGEN");
@@ -372,12 +467,69 @@ ZTEST(imx296, test_stream_start_cancels_standby_then_starts_master_mode)
 	zassert_equal(w.value, SYNCSEL_NORMAL, "SYNCSEL should be 0xC0 (Normal Output)");
 
 	zassert_ok(imx296_emul_log_get(emul, 3, &w));
-	zassert_equal(w.reg, REG_STANDBY, "write 3 should be STANDBY");
-	zassert_equal(w.value, 0, "STANDBY should be cancelled (0) to start streaming");
+	zassert_equal(w.reg, REG_ROI_ENABLE, "write 3 should be ROI_ENABLE");
+	zassert_equal(w.value, 0, "ROI_ENABLE should be disabled for the full-frame format");
 
 	zassert_ok(imx296_emul_log_get(emul, 4, &w));
-	zassert_equal(w.reg, REG_XMSTA, "write 4 should be XMSTA");
+	zassert_equal(w.reg, REG_STANDBY, "write 4 should be STANDBY");
+	zassert_equal(w.value, 0, "STANDBY should be cancelled (0) to start streaming");
+
+	zassert_ok(imx296_emul_log_get(emul, 5, &w));
+	zassert_equal(w.reg, REG_XMSTA, "write 5 should be XMSTA");
 	zassert_equal(w.value, 0, "XMSTA should be cleared (master-mode start) to start streaming");
+}
+
+ZTEST(imx296, test_stream_start_writes_roi_registers_for_roi_size)
+{
+	/* issue #2287 Stage B: switching to the 1280x960 ROI format before streaming must
+	 * program FID0_ROIPH1/ROIPV1/ROIWH1/ROIWV1 to the driver's one supported centred crop
+	 * and enable both FID0_ROIH1ON/ROIV1ON -- see IMX296_ROI_POS_H/V and
+	 * IMX296_ROI_WIDTH/HEIGHT's own comments in imx296.c for the 88/64/1280/960 values. */
+	const struct emul  *emul = imx296_emul();
+	struct video_format roi  = { .type        = VIDEO_BUF_TYPE_OUTPUT,
+		                         .pixelformat = VIDEO_PIX_FMT_SRGGB10P,
+		                         .width       = IMX296_ROI_WIDTH,
+		                         .height      = IMX296_ROI_HEIGHT };
+	struct video_format full = { .type        = VIDEO_BUF_TYPE_OUTPUT,
+		                         .pixelformat = VIDEO_PIX_FMT_SRGGB10P,
+		                         .width       = 1456,
+		                         .height      = 1088 };
+	uint8_t             val;
+
+	zassert_ok(video_set_format(imx296_dev(), &roi));
+
+	imx296_emul_clear_log(emul);
+	zassert_ok(video_stream_start(imx296_dev(), VIDEO_BUF_TYPE_OUTPUT));
+
+	/* ROIPH1 = 88 = 0x0058, ROIPV1 = 64 = 0x0040, ROIWH1 = 1280 = 0x0500,
+	 * ROIWV1 = 960 = 0x03C0 -- all 16-bit LE (see IMX296_REG_ROI_POS_H's comment in
+	 * imx296.c: unused high bits are fixed to 0, so LE-covering the whole 16 bits reads
+	 * back the same as the narrower documented field would). */
+	zassert_ok(imx296_emul_get_reg(emul, REG_ROI_POS_H_LSB, &val));
+	zassert_equal(val, 0x58, "ROIPH1 LSB (88)");
+	zassert_ok(imx296_emul_get_reg(emul, REG_ROI_POS_H_MSB, &val));
+	zassert_equal(val, 0x00, "ROIPH1 MSB");
+
+	zassert_ok(imx296_emul_get_reg(emul, REG_ROI_POS_V_LSB, &val));
+	zassert_equal(val, 0x40, "ROIPV1 LSB (64)");
+	zassert_ok(imx296_emul_get_reg(emul, REG_ROI_POS_V_MSB, &val));
+	zassert_equal(val, 0x00, "ROIPV1 MSB");
+
+	zassert_ok(imx296_emul_get_reg(emul, REG_ROI_SIZE_H_LSB, &val));
+	zassert_equal(val, 0x00, "ROIWH1 LSB (1280)");
+	zassert_ok(imx296_emul_get_reg(emul, REG_ROI_SIZE_H_MSB, &val));
+	zassert_equal(val, 0x05, "ROIWH1 MSB");
+
+	zassert_ok(imx296_emul_get_reg(emul, REG_ROI_SIZE_V_LSB, &val));
+	zassert_equal(val, 0xc0, "ROIWV1 LSB (960)");
+	zassert_ok(imx296_emul_get_reg(emul, REG_ROI_SIZE_V_MSB, &val));
+	zassert_equal(val, 0x03, "ROIWV1 MSB");
+
+	zassert_ok(imx296_emul_get_reg(emul, REG_ROI_ENABLE, &val));
+	zassert_equal(val, ROI_ENABLE_ENABLE, "FID0_ROIH1ON | FID0_ROIV1ON should both be enabled");
+
+	zassert_ok(video_stream_stop(imx296_dev(), VIDEO_BUF_TYPE_OUTPUT));
+	zassert_ok(video_set_format(imx296_dev(), &full));
 }
 
 ZTEST(imx296, test_trigger_mode_ctrl_default_is_free_run)
@@ -507,12 +659,12 @@ ZTEST(imx296, test_exposure_ctrl_programs_shs_inverted)
 	uint8_t              val;
 
 	/* "Calculation Formula of Exposure Time" (page 60): exposure ascends with more
-	 * integration time, which is the INVERSE of SHS -- shs = VMAX - exposure. At the
-	 * ceiling (VMAX - 4), shs should be exactly 4. */
+	 * integration time, which is the INVERSE of SHS -- shs = VMAX - exposure. At this
+	 * driver's clamped ceiling (VMAX - 14, #2287 runs 304-306), shs should be exactly 14. */
 	zassert_ok(video_set_ctrl(imx296_dev(), &ctrl));
 
 	zassert_ok(imx296_emul_get_reg(emul, REG_SHS_LSB, &val));
-	zassert_equal(val, 4, "SHS LSB");
+	zassert_equal(val, 14, "SHS LSB");
 	zassert_ok(imx296_emul_get_reg(emul, REG_SHS_MID, &val));
 	zassert_equal(val, 0, "SHS mid byte");
 	zassert_ok(imx296_emul_get_reg(emul, REG_SHS_MSB, &val));
@@ -526,9 +678,10 @@ ZTEST(imx296, test_exposure_above_ceiling_is_rejected)
 
 	zassert_equal(video_set_ctrl(imx296_dev(), &over),
 	              -EINVAL,
-	              "exposure 1 line past the SHS_MIN=4 ceiling should be rejected");
+	              "exposure 1 line past this driver's bench-clamped SHS=14 ceiling should be "
+	              "rejected");
 	zassert_ok(video_set_ctrl(imx296_dev(), &at_ceiling),
-	           "exposure at the ceiling should be accepted");
+	           "exposure at the (clamped) ceiling should be accepted");
 }
 
 ZTEST(imx296, test_gain_ctrl_programs_the_register_le)
@@ -597,9 +750,20 @@ ZTEST(imx296, test_hflip_vflip_set_the_reverse_bits_independently)
  */
 static void imx296_test_after(void *fixture)
 {
+	/* issue #2287 Stage B: also restore the full-frame format every test, the same
+	 * "known state for whoever runs next" reasoning as the stream-stop above -- a test
+	 * that leaves data->fmt on the ROI size (e.g. if a future test forgets its own
+	 * restore) would otherwise silently change the register-write count the full-frame
+	 * stream-start tests assert on, depending on ztest's name-sorted execution order. */
+	struct video_format full = { .type        = VIDEO_BUF_TYPE_OUTPUT,
+		                         .pixelformat = VIDEO_PIX_FMT_SRGGB10P,
+		                         .width       = 1456,
+		                         .height      = 1088 };
+
 	ARG_UNUSED(fixture);
 
 	(void)video_stream_stop(imx296_dev(), VIDEO_BUF_TYPE_OUTPUT);
+	(void)video_set_format(imx296_dev(), &full);
 }
 
 ZTEST_SUITE(imx296, NULL, NULL, NULL, imx296_test_after, NULL);

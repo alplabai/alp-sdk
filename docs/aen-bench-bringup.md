@@ -5,7 +5,10 @@
 Everything below was confirmed on **real E1M-AEN801 silicon** during the
 2026-06-15 bench session (J-Link PLUS over SWD + the Alif SETOOLS over the
 SE-UART). It is the authoritative companion to [`bring-up-aen.md`](bring-up-aen.md)
-and [`aen-provisioning.md`](aen-provisioning.md).
+and [`aen-provisioning.md`](aen-provisioning.md). Since #2226 the bench farm
+holds E1M-AEN803 boards and every bench helper
+(`scripts/bench/aen/bench-env.sh`) defaults to `alp_e1m_aen803_m55_*`;
+the flows here apply to both SKUs unchanged.
 
 ## 1. What is validated on silicon
 
@@ -28,7 +31,7 @@ and [`aen-provisioning.md`](aen-provisioning.md).
 | **WDT** (CMSDK, Tier-1) | ✅ PASS | CMSDK watchdog. |
 | **ADC** (`adc_alif`, Tier-2) | ✅ PASS | Single-shot read. |
 | **DAC** (`dac_alif`, Tier-2) | ✅ PASS | Write path holds (code-side; analog output bench-unverified). |
-| **Camera stack** (`cam`/`csi`/`dphy`/`arx3a0`) | ✅ PASS *(bind)* | All four nodes BIND + the v4.4-ported drivers load. **Update (2026-09-21, an E1M-AEN803 on the E1M-EVK): the `innomaker_cam_ov9281` shield's live capture is bench-verified in all three modes** -- real GREY8 frames (640x400, 1280x720, 1280x800), each at its configured frame rate, with the sensor test pattern also verified in all three, once a P/N-crossing camera-connector adapter is fitted (see `docs/boards/e1m-evk.md`'s Camera section) and `CONFIG_VIDEO_ALIF_CAM_EXTENDED=y` is set (now default on for the E8). The `raspberry_pi_camera_module_1` (OV5647) shield's live capture is also bench-verified (2026-09-22, an E1M-AEN803 on the E1M-EVK, RAW10 640x480, issue #2248) -- see `docs/camera-shields.md`'s OV5647 driver section. |
+| **Camera stack** (`cam`/`csi`/`dphy`/`arx3a0`) | ✅ PASS *(bind)* | All four nodes BIND + the v4.4-ported drivers load. **Update (2026-09-21, an E1M-AEN803 on the E1M-EVK): the `innomaker_cam_ov9281` shield's live capture is bench-verified in all three modes** -- real GREY8 frames (640x400, 1280x720, 1280x800), each at its configured frame rate, with the sensor test pattern also verified in all three, once a P/N-crossing camera-connector adapter is fitted (see `docs/boards/e1m-evk.md`'s Camera section) and `CONFIG_VIDEO_ALIF_CAM_EXTENDED=y` is set (now default on for the E8). The `raspberry_pi_camera_module_1` (OV5647) shield's live capture is also bench-verified (2026-09-22, an E1M-AEN803 on the E1M-EVK, RAW10 640x480, issue #2248) -- see `docs/camera-shields.md`'s OV5647 driver section. Both the OV9281 and OV5647 benches above predate issue #2287 Stage B's shared CPI driver change (buffer-starvation-pause behaviour) -- re-bench on these two sensors is pending. The `raspberry_pi_global_shutter_camera` (IMX296) shield is Stage A + Stage B bench-verified (issue #2287, E1M-AEN803 2026W36-0001 on the E1M-EVK) -- see `docs/camera-shields.md`'s IMX296 driver section. The `innomaker_cam_imx335` (IMX335) shield's raw capture is bench-verified (issue #2327, same unit/EVK, runs 316-330: 6/6 clean 1296x972 RAW10 frames, 0 CSI/IPI errors) -- see `docs/camera-shields.md`'s IMX335 driver section. |
 | **Ethos-U85** (NPU) | ✅ PASS | ID `0x20007001`. |
 | **Ethos-U55-HE** (NPU) | ✅ PASS | ID `0x10104201`. |
 | **NPU inference** (TFLM + Ethos-U85) | ✅ PASS | Tiny fixture runs to completion. Real models from MRAM slot0: **person_detect** (100% NPU) + **keyword_scrambled** (mixed 6-NPU/9-CPU, via the `<6>` op-resolver) both `runJob=OK` (2026-06-17). See `examples/aen/aen-npu-inference-person-mram`. |
@@ -278,6 +281,22 @@ address (`nm zephyr.elf | grep ram_console_buf`) and `mem8 <addr>, 0x800` in
 J-Link, then ASCII-decode. Have each test print one `RESULT PASS: ...` /
 `RESULT FAIL: ...` line. SEGGER **RTT** is the live-terminal alternative over the
 same SWD link.
+
+> **A single `mem8` may not exceed `0x10000`.** JLinkExe itself refuses any
+> `NumBytes` above that with `NumBytes should be <= 0x10000` and reads
+> NOTHING for that one command, while the CommanderScript keeps going.
+> `ram-run.sh` and `reread.sh` (alp-sdk#2313) now split a read wider than
+> `0x10000` into multiple `mem8` calls automatically, via the shared
+> `bench_mem8_chunks()` helper in `bench-env.sh` — a `CONFIG_RAM_CONSOLE_BUFFER_SIZE`
+> above `0x10000` (e.g. beyond `examples/aen/aen-inference-energy`'s own
+> `0x10000` default) reads back correctly through either script with no
+> manual multi-`mem8` session required. A hand-rolled JLinkExe session
+> outside these two helpers still needs to chunk by hand.
+>
+> **Also note a J-Link `qc` leaves the core HALTED.** Every read here ends in
+> `qc`, so reading a still-running app freezes it part-way and truncates its
+> console. For an app that runs for seconds, let it finish — or reset it
+> (`RSetType 2; r; g`) and wait out the full run — before reading.
 
 ### Flow C — J-Link RAM-run (no MRAM write)
 

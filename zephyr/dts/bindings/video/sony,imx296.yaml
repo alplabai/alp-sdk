@@ -2,8 +2,8 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# ADR-0017-ADJACENT (authored from the Sony IMX296 datasheet), PARTIALLY
-# BENCH-VERIFIED (I2C identity only -- issue #2287, bench run 229). Shaped
+# ADR-0017-ADJACENT (authored from the Sony IMX296 datasheet), Stage A +
+# Stage B bench-verified (issue #2287) -- see docs/camera-shields.md. Shaped
 # after upstream's dts/bindings/video/sony,imx219.yaml (i2c-device.yaml
 # + a video-interfaces.yaml endpoint child), mirroring
 # zephyr/dts/bindings/video/ovti,ov9281.yaml's `clocks: required: true`. See

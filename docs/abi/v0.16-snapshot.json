@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-25",
+  "generated": "2026-09-28",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -1370,6 +1370,10 @@
           "hash": "6dec10e01fc58f24",
           "value": "0x69u"
         },
+        "XEVK_I2C_ADDR_INA228_5V": {
+          "hash": "de4d67af37b38474",
+          "value": "0x42u"
+        },
         "XEVK_I2C_ADDR_INA236_1V8": {
           "hash": "c2c588a9640f949e",
           "value": "0x41u"
@@ -1377,10 +1381,6 @@
         "XEVK_I2C_ADDR_INA236_3V3": {
           "hash": "db2f615e7a9f47af",
           "value": "0x40u"
-        },
-        "XEVK_I2C_ADDR_INA236_5V": {
-          "hash": "eca71276506e3164",
-          "value": "0x4Au"
         },
         "XEVK_I2C_ADDR_INA236_VCAM2": {
           "hash": "54c31cdcf2773108",
@@ -1391,8 +1391,16 @@
           "value": "0x49u"
         },
         "XEVK_I2C_ADDR_TCAL9538": {
-          "hash": "bd0e087dfca18e44",
-          "value": "0x72u"
+          "hash": "6870b1cc43d6c734",
+          "value": "XEVK_I2C_ADDR_TCAL9538_MAIN"
+        },
+        "XEVK_I2C_ADDR_TCAL9538_MAIN": {
+          "hash": "3895d68b962ad68c",
+          "value": "0x73u"
+        },
+        "XEVK_I2C_ADDR_TCAL9538_PCIE": {
+          "hash": "14537b3d40f72ff4",
+          "value": "0x71u"
         },
         "XEVK_I2C_BUS_DSI_CSI0": {
           "hash": "73f48edc7f8a3a88",
@@ -1418,10 +1426,6 @@
           "hash": "230bcba87b062cad",
           "value": "4.0f"
         },
-        "XEVK_INA236_MAX_5V_A": {
-          "hash": "4388c012e9236a27",
-          "value": "4.0f"
-        },
         "XEVK_INA236_MAX_VCAM2_A": {
           "hash": "c59a2d78669ccdab",
           "value": "1.6f"
@@ -1436,10 +1440,6 @@
         },
         "XEVK_INA236_SHUNT_3V3_OHMS": {
           "hash": "88f3faeabe5c8b6e",
-          "value": "0.020f"
-        },
-        "XEVK_INA236_SHUNT_5V_OHMS": {
-          "hash": "1feb8cead916ad78",
           "value": "0.020f"
         },
         "XEVK_INA236_SHUNT_VCAM2_OHMS": {
@@ -2024,6 +2024,10 @@
           "hash": "c1419785a23efd71",
           "signature": "alp_status_t act8760_read_reg(act8760_t *ctx, act8760_page_t page, uint8_t reg, uint8_t *out);"
         },
+        "act8760_sequence_up": {
+          "hash": "1e76fa76bdd9346b",
+          "signature": "alp_status_t act8760_sequence_up(act8760_t *ctx, const act8760_seq_step_t *steps, size_t n, act8760_delay_fn delay, void *user, uint32_t pok_timeout_us, size_t *failed_step);"
+        },
         "act8760_set_limits": {
           "hash": "5fa50f73ce089271",
           "signature": "alp_status_t act8760_set_limits(act8760_t *ctx, const pmic_rail_limit_t *rails, uint16_t gpio_polarity_writable);"
@@ -2048,6 +2052,11 @@
         }
       },
       "typedefs": {
+        "act8760_delay_fn": {
+          "definition": "typedef void (*act8760_delay_fn)(void *user, uint32_t us);",
+          "hash": "4d3ad00b93455e41",
+          "kind": "fnptr"
+        },
         "act8760_gpio_state_t": {
           "definition": "typedef struct { bool level; bool inverted; uint8_t mux; uint8_t mode_raw; bool push_pull; bool irq_masked; } act8760_gpio_state_t;",
           "fields": [
@@ -2106,6 +2115,15 @@
           ],
           "hash": "47e6c12a7e873d40",
           "kind": "enum"
+        },
+        "act8760_seq_step_t": {
+          "definition": "typedef struct { act8760_rail_t rail; uint16_t delay_ms; } act8760_seq_step_t;",
+          "fields": [
+            "act8760_rail_t rail",
+            "uint16_t delay_ms"
+          ],
+          "hash": "68c95f103d302406",
+          "kind": "struct"
         },
         "act8760_status_t": {
           "definition": "typedef struct { bool rom_stat; bool wd_alert; bool thermal_warning; bool vsys_stat; bool vin_pok_ov; bool pb_assert; bool vsys_warning; bool pb_deassert; uint8_t raw; } act8760_status_t;",
@@ -4560,6 +4578,14 @@
           "hash": "07af629c5c4972e8",
           "value": "20u"
         },
+        "GD32G553_GPIO_LINE_BT_REG_ON": {
+          "hash": "a26a002ced48af2e",
+          "value": "18u"
+        },
+        "GD32G553_GPIO_LINE_WL_REG_ON": {
+          "hash": "02b7262b21b3b00f",
+          "value": "19u"
+        },
         "GD32G553_HOST_PROTOCOL_MAJOR": {
           "hash": "8cbf9804b6cc9204",
           "value": "0u"
@@ -4571,6 +4597,10 @@
         "GD32G553_OTA_MIN_PROTOCOL_MINOR": {
           "hash": "3081a6e71ff41243",
           "value": "6u"
+        },
+        "GD32G553_REG_ON_MIN_PROTOCOL_MINOR": {
+          "hash": "27d22c83de20f715",
+          "value": "11u"
         },
         "GD32G553_STATUS_CODE_MASK": {
           "hash": "5fac453e1d04fcbd",
@@ -5356,17 +5386,41 @@
     },
     "alp/chips/ina236.h": {
       "functions": {
+        "ina236_avg_count": {
+          "hash": "caea8159aaed6b23",
+          "signature": "uint16_t ina236_avg_count(ina236_avg_t avg);"
+        },
+        "ina236_calibration_for": {
+          "hash": "25f673a5c2aefb1b",
+          "signature": "alp_status_t ina236_calibration_for(float shunt_ohms, float max_current_a, ina236_adcrange_t adcrange, uint16_t *shunt_cal_out, float *current_lsb_a_out);"
+        },
+        "ina236_configure": {
+          "hash": "db04653c0ba893d8",
+          "signature": "alp_status_t ina236_configure(ina236_t *ctx, ina236_avg_t avg, ina236_ct_t vbusct, ina236_ct_t vshct, ina236_mode_t mode);"
+        },
         "ina236_conversion_ready": {
           "hash": "610691cc52d5ecfc",
           "signature": "alp_status_t ina236_conversion_ready(ina236_t *ctx, bool *ready_out);"
+        },
+        "ina236_conversion_time_us": {
+          "hash": "1a3f63b606e87cc7",
+          "signature": "uint16_t ina236_conversion_time_us(ina236_ct_t ct);"
         },
         "ina236_deinit": {
           "hash": "071e9b37aebdc9d8",
           "signature": "void ina236_deinit(ina236_t *ctx);"
         },
+        "ina236_full_scale_a": {
+          "hash": "00c692a09bed1ef4",
+          "signature": "float ina236_full_scale_a(float shunt_ohms, ina236_adcrange_t adcrange);"
+        },
         "ina236_init": {
           "hash": "39ab4f0b150f2cf0",
           "signature": "alp_status_t ina236_init(ina236_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, float shunt_ohms, float max_current_a, ina236_adcrange_t adcrange);"
+        },
+        "ina236_power_lsb_w": {
+          "hash": "f2b24d31d1a182e8",
+          "signature": "float ina236_power_lsb_w(const ina236_t *ctx);"
         },
         "ina236_read_all": {
           "hash": "26285b54d3f25d6b",
@@ -5380,6 +5434,10 @@
           "hash": "458aaf18b29943a0",
           "signature": "alp_status_t ina236_read_current_ua(ina236_t *ctx, int32_t *ua_out);"
         },
+        "ina236_read_power_raw": {
+          "hash": "85eb3c9d316664a0",
+          "signature": "alp_status_t ina236_read_power_raw(ina236_t *ctx, uint16_t *raw_out);"
+        },
         "ina236_read_power_uw": {
           "hash": "124e67f5694d7db5",
           "signature": "alp_status_t ina236_read_power_uw(ina236_t *ctx, uint32_t *uw_out);"
@@ -5391,6 +5449,10 @@
         "ina236_reset": {
           "hash": "14228d745f381138",
           "signature": "alp_status_t ina236_reset(ina236_t *ctx);"
+        },
+        "ina236_sample_period_us": {
+          "hash": "1c712b010551610b",
+          "signature": "uint32_t ina236_sample_period_us(ina236_avg_t avg, ina236_ct_t vbusct, ina236_ct_t vshct, ina236_mode_t mode);"
         }
       },
       "macros": {
@@ -5413,6 +5475,51 @@
           "hash": "6b51003a1bfdc80e",
           "kind": "enum"
         },
+        "ina236_avg_t": {
+          "definition": "typedef enum { INA236_AVG_1 = 0, INA236_AVG_4 = 1, INA236_AVG_16 = 2, INA236_AVG_64 = 3, INA236_AVG_128 = 4, INA236_AVG_256 = 5, INA236_AVG_512 = 6, INA236_AVG_1024 = 7, } ina236_avg_t;",
+          "enumerators": [
+            "INA236_AVG_1 = 0",
+            "INA236_AVG_4 = 1",
+            "INA236_AVG_16 = 2",
+            "INA236_AVG_64 = 3",
+            "INA236_AVG_128 = 4",
+            "INA236_AVG_256 = 5",
+            "INA236_AVG_512 = 6",
+            "INA236_AVG_1024 = 7"
+          ],
+          "hash": "33e07efcdee4920f",
+          "kind": "enum"
+        },
+        "ina236_ct_t": {
+          "definition": "typedef enum { INA236_CT_140US = 0, INA236_CT_204US = 1, INA236_CT_332US = 2, INA236_CT_588US = 3, INA236_CT_1100US = 4, INA236_CT_2116US = 5, INA236_CT_4156US = 6, INA236_CT_8244US = 7, } ina236_ct_t;",
+          "enumerators": [
+            "INA236_CT_140US = 0",
+            "INA236_CT_204US = 1",
+            "INA236_CT_332US = 2",
+            "INA236_CT_588US = 3",
+            "INA236_CT_1100US = 4",
+            "INA236_CT_2116US = 5",
+            "INA236_CT_4156US = 6",
+            "INA236_CT_8244US = 7"
+          ],
+          "hash": "3ec8aa765e049c5c",
+          "kind": "enum"
+        },
+        "ina236_mode_t": {
+          "definition": "typedef enum { INA236_MODE_SHUTDOWN = 0, INA236_MODE_SHUNT_TRIG = 1, INA236_MODE_BUS_TRIG = 2, INA236_MODE_SHUNT_BUS_TRIG = 3, INA236_MODE_SHUTDOWN_ALT = 4, INA236_MODE_SHUNT_CONT = 5, INA236_MODE_BUS_CONT = 6, INA236_MODE_SHUNT_BUS_CONT = 7, } ina236_mode_t;",
+          "enumerators": [
+            "INA236_MODE_SHUTDOWN = 0",
+            "INA236_MODE_SHUNT_TRIG = 1",
+            "INA236_MODE_BUS_TRIG = 2",
+            "INA236_MODE_SHUNT_BUS_TRIG = 3",
+            "INA236_MODE_SHUTDOWN_ALT = 4",
+            "INA236_MODE_SHUNT_CONT = 5",
+            "INA236_MODE_BUS_CONT = 6",
+            "INA236_MODE_SHUNT_BUS_CONT = 7"
+          ],
+          "hash": "9431b666b5c4f2cd",
+          "kind": "enum"
+        },
         "ina236_sample_t": {
           "definition": "typedef struct { int32_t bus_mv; int32_t shunt_uv; int32_t current_ua; uint32_t power_uw; } ina236_sample_t;",
           "fields": [
@@ -5425,7 +5532,7 @@
           "kind": "struct"
         },
         "ina236_t": {
-          "definition": "typedef struct { bool initialised; alp_i2c_t *bus; uint8_t addr; float shunt_ohms; float max_current_a; float current_lsb_a; uint16_t cfg_cache; ina236_adcrange_t adcrange; } ina236_t;",
+          "definition": "typedef struct { bool initialised; alp_i2c_t *bus; uint8_t addr; float shunt_ohms; float max_current_a; float current_lsb_a; float full_scale_a; uint16_t cfg_cache; ina236_adcrange_t adcrange; } ina236_t;",
           "fields": [
             "bool initialised",
             "alp_i2c_t *bus",
@@ -5433,10 +5540,11 @@
             "float shunt_ohms",
             "float max_current_a",
             "float current_lsb_a",
+            "float full_scale_a",
             "uint16_t cfg_cache",
             "ina236_adcrange_t adcrange"
           ],
-          "hash": "8003bcc36e214535",
+          "hash": "2cdd0d0d7ce3cad5",
           "kind": "struct"
         }
       },
@@ -8707,8 +8815,8 @@
       "functions": {},
       "macros": {
         "V2N_M1_POWER_ACT8760_RAIL_LIMITS_INIT": {
-          "hash": "e3a05794029ebbd4",
-          "value": "{ [ACT8760_RAIL_BUCK1] = { .min_mv = 3150u, .max_mv = 3450u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_BUCK2] = { .min_mv = 1725u, .max_mv = 1875u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_BUCK3] = { .min_mv = 1050u, .max_mv = 1150u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_BUCK4] = { .min_mv = 1725u, .max_mv = 1875u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_BUCK5] = { .min_mv = 775u, .max_mv = 825u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_BUCK6] = { .min_mv = 725u, .max_mv = 775u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_BUCK7] = { .min_mv = 855u, .max_mv = 945u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_LDO1] = { .min_mv = 763u, .max_mv = 837u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_LDO2] = { .min_mv = 1150u, .max_mv = 1250u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_LDO3] = { .min_mv = 3150u, .max_mv = 3450u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_LDO4] = { .min_mv = 1750u, .max_mv = 1850u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_LDO5] = { .min_mv = 0u, .max_mv = 0u, .critical = true, .voltage_writable = false, .enable_writable = false }, [ACT8760_RAIL_LDO6] = { .min_mv = 0u, .max_mv = 0u, .critical = true, .voltage_writable = false, .enable_writable = false }, }"
+          "hash": "b2bd95fbb3e5731d",
+          "value": "{ [ACT8760_RAIL_BUCK1] = { .min_mv = 3150u, .max_mv = 3450u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_BUCK2] = { .min_mv = 1725u, .max_mv = 1875u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_BUCK3] = { .min_mv = 1050u, .max_mv = 1150u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_BUCK4] = { .min_mv = 1725u, .max_mv = 1875u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_BUCK5] = { .min_mv = 775u, .max_mv = 825u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_BUCK6] = { .min_mv = 725u, .max_mv = 775u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_BUCK7] = { .min_mv = 855u, .max_mv = 945u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_LDO1] = { .min_mv = 763u, .max_mv = 837u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_LDO2] = { .min_mv = 1150u, .max_mv = 1250u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_LDO3] = { .min_mv = 3150u, .max_mv = 3450u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_LDO4] = { .min_mv = 1750u, .max_mv = 1850u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_LDO5] = { .min_mv = 0u, .max_mv = 0u, .critical = true, .voltage_writable = false, .enable_writable = false }, [ACT8760_RAIL_LDO6] = { .min_mv = 0u, .max_mv = 0u, .critical = true, .voltage_writable = false, .enable_writable = false }, }"
         },
         "V2N_M1_POWER_ACT8760_RAIL_NETS_INIT": {
           "hash": "bac427e9efb5ed32",
@@ -8770,6 +8878,14 @@
           "hash": "edcddbb8d0f20c5e",
           "value": "\"VDD0V85_LPDDR\""
         },
+        "V2N_POWER_ACT8760_CM33_BOOT_SEQ_INIT": {
+          "hash": "5555ddb1d594b2e9",
+          "value": "{ { ACT8760_RAIL_BUCK1, 8u }, { ACT8760_RAIL_BUCK7, 8u }, { ACT8760_RAIL_LDO4, 0u }, { ACT8760_RAIL_BUCK5, 1u }, { ACT8760_RAIL_BUCK4, 1u }, { ACT8760_RAIL_BUCK3, 2u }, { ACT8760_RAIL_LDO3, 16u }, { ACT8760_RAIL_LDO2, 0u }, }"
+        },
+        "V2N_POWER_ACT8760_CM33_BOOT_SEQ_LEN": {
+          "hash": "4173d4a1f0f9c46a",
+          "value": "8u"
+        },
         "V2N_POWER_ACT8760_GPIO4_EXPECTED_MODE": {
           "hash": "66eaaf773ef24483",
           "value": "0x08u"
@@ -8783,8 +8899,8 @@
           "value": "0x0008u"
         },
         "V2N_POWER_ACT8760_RAIL_LIMITS_INIT": {
-          "hash": "437a0332f9227e86",
-          "value": "{ [ACT8760_RAIL_BUCK1] = { .min_mv = 3150u, .max_mv = 3450u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_BUCK2] = { .min_mv = 1725u, .max_mv = 1875u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_BUCK3] = { .min_mv = 1050u, .max_mv = 1150u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_BUCK4] = { .min_mv = 1725u, .max_mv = 1875u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_BUCK5] = { .min_mv = 775u, .max_mv = 825u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_BUCK6] = { .min_mv = 725u, .max_mv = 775u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_BUCK7] = { .min_mv = 855u, .max_mv = 945u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_LDO1] = { .min_mv = 763u, .max_mv = 837u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_LDO2] = { .min_mv = 1150u, .max_mv = 1250u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_LDO3] = { .min_mv = 3150u, .max_mv = 3450u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_LDO4] = { .min_mv = 1750u, .max_mv = 1850u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_LDO5] = { .min_mv = 0u, .max_mv = 0u, .critical = true, .voltage_writable = false, .enable_writable = false }, [ACT8760_RAIL_LDO6] = { .min_mv = 0u, .max_mv = 0u, .critical = true, .voltage_writable = false, .enable_writable = false }, }"
+          "hash": "78cdc98464d31078",
+          "value": "{ [ACT8760_RAIL_BUCK1] = { .min_mv = 3150u, .max_mv = 3450u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_BUCK2] = { .min_mv = 1725u, .max_mv = 1875u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_BUCK3] = { .min_mv = 1050u, .max_mv = 1150u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_BUCK4] = { .min_mv = 1725u, .max_mv = 1875u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_BUCK5] = { .min_mv = 775u, .max_mv = 825u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_BUCK6] = { .min_mv = 725u, .max_mv = 775u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_BUCK7] = { .min_mv = 855u, .max_mv = 945u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_LDO1] = { .min_mv = 763u, .max_mv = 837u, .critical = true, .voltage_writable = true, .enable_writable = false }, [ACT8760_RAIL_LDO2] = { .min_mv = 1150u, .max_mv = 1250u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_LDO3] = { .min_mv = 3150u, .max_mv = 3450u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_LDO4] = { .min_mv = 1750u, .max_mv = 1850u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_LDO5] = { .min_mv = 0u, .max_mv = 0u, .critical = true, .voltage_writable = false, .enable_writable = false }, [ACT8760_RAIL_LDO6] = { .min_mv = 0u, .max_mv = 0u, .critical = true, .voltage_writable = false, .enable_writable = false }, }"
         },
         "V2N_POWER_ACT8760_RAIL_NETS_INIT": {
           "hash": "9639f5f5f8043da0",

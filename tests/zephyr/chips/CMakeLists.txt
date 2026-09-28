@@ -106,4 +106,5 @@ target_sources(app PRIVATE
     src/fake_da9292.c
     src/fake_tps628640.c
     src/fake_clk_5l35023b.c
+    src/fake_gd32bridge.c
 )

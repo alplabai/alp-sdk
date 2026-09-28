@@ -35,7 +35,7 @@
  *     ctrl registry, and keeps the driver's incoming-buffer fifo fed
  *     -- see that backend's file header for the full sequence.
  *     Runtime capture is proven end to end on isp_pico.c's own bench
- *     app (examples/aen/aen-isp-ov5647-capture, runs 69-145) and, through
+ *     app (examples/aen/aen-isp-capture, runs 69-145) and, through
  *     this PORTABLE header, on examples/aen/aen-isp-ov5647-viewfinder --
  *     30/30 colour frames captured with AE+AWB on E1M-AEN803 + OV5647
  *     (runs 156-166).
@@ -72,10 +72,13 @@ typedef struct {
 	                   *   backend pick its own default; nonzero is a
 	                   *   REQUEST, not a guarantee -- the backend settles on
 	                   *   the nearest rate its sensor/mode actually supports
-	                   *   (e.g. the OV5647 only reaches one of a fixed rate
-	                   *   table). The settled rate is not reported back to
-	                   *   the caller yet (issue #2279). Not every backend
-	                   *   honors this field at all yet -- see issue #2278. */
+	                   *   (e.g. each ISP-Pico sensor only reaches one of its
+	                   *   own fixed rate table; some sensors have exactly one
+	                   *   fixed rate and ignore the request entirely). The
+	                   *   settled rate is not reported back to the caller yet
+	                   *   (issue #2279). A driver with no settable rate
+	                   *   keeps its own rate and logs that the request was
+	                   *   not applied (#2278). */
 	alp_pixfmt_t format;
 } alp_camera_config_t;
 

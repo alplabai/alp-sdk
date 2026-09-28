@@ -103,6 +103,13 @@ ALP_TFA_DDR_SRC:e1m-v2m103-a55 = "ddr_param_def_lpddr4-alp-d8s32.c"
 
 SRC_URI:append:rzv2n-family = " file://${ALP_TFA_DDR_SRC}"
 
+# BL2 boots the on-module Cortex-M33 from the xSPI M33 slot (0x200000 =
+# mtd1 offset 0x1a0000; raw image = 0x3000 zero pad + zephyr.bin, entry
+# 0x08003000). Without this BL2 never releases the CM33, so no Zephyr
+# CM33 app runs on a production module (#2354). See
+# docs/rzv2n-m33-secure-boot.md.
+SRC_URI:append:rzv2n-family = " file://0001-rzv2n-boot-the-CM33-from-xSPI.patch"
+
 # Reproducible / traceable BL2+BL31 version string.  TF-A's Makefile
 # derives BUILD_STRING from `git describe --always --dirty --tags` when
 # it is unset, which on our build is ALWAYS "-dirty": do_compile:prepend

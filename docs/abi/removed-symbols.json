@@ -99,6 +99,33 @@
       "issue": 1165,
       "reason": "Unguarded raw write reaching VOUT/CONTROL; every documented register is now owned by a window/critical-guarded typed API.",
       "replacement": null
+    },
+    {
+      "header": "alp/boards/alp_e1m_x_evk.h",
+      "category": "macro",
+      "symbol": "XEVK_I2C_ADDR_INA236_5V",
+      "release": "v0.17.0",
+      "issue": 2343,
+      "reason": "The E1M-X EVK V2 netlist shows U30, the +5V input monitor, is a TI INA228 strapped A1=GND A0=SDA (0x42), not an INA236 at 0x4A. The INA228 has a 20-bit register map that ina236_init() cannot drive, so an INA236 address and INA236 shunt/max-current calibration for it described a part that is not on the board. On the V2 build U30's SDA/SCL are also netted swapped, so it cannot answer until reworked.",
+      "replacement": "XEVK_I2C_ADDR_INA228_5V"
+    },
+    {
+      "header": "alp/boards/alp_e1m_x_evk.h",
+      "category": "macro",
+      "symbol": "XEVK_INA236_SHUNT_5V_OHMS",
+      "release": "v0.17.0",
+      "issue": 2343,
+      "reason": "The E1M-X EVK V2 netlist shows U30, the +5V input monitor, is a TI INA228 strapped A1=GND A0=SDA (0x42), not an INA236 at 0x4A. The INA228 has a 20-bit register map that ina236_init() cannot drive, so an INA236 address and INA236 shunt/max-current calibration for it described a part that is not on the board. On the V2 build U30's SDA/SCL are also netted swapped, so it cannot answer until reworked.",
+      "replacement": null
+    },
+    {
+      "header": "alp/boards/alp_e1m_x_evk.h",
+      "category": "macro",
+      "symbol": "XEVK_INA236_MAX_5V_A",
+      "release": "v0.17.0",
+      "issue": 2343,
+      "reason": "The E1M-X EVK V2 netlist shows U30, the +5V input monitor, is a TI INA228 strapped A1=GND A0=SDA (0x42), not an INA236 at 0x4A. The INA228 has a 20-bit register map that ina236_init() cannot drive, so an INA236 address and INA236 shunt/max-current calibration for it described a part that is not on the board. On the V2 build U30's SDA/SCL are also netted swapped, so it cannot answer until reworked.",
+      "replacement": null
     }
   ]
 }
