@@ -46,11 +46,12 @@ jobs:
   peripheral-instances-check:
     name: metadata · RZ/V2N peripheral-instances DTSI projection
     runs-on: ubuntu-latest
-    # Raised from 5 -> 10 (#1477): 3 flagged network steps (Checkout,
-    # Set up Python, the sparse-checkout of the pinned RZ/V2N devicetree)
-    # each need their own timeout-minutes cap; their sum (6min) left no
-    # headroom under the old 5-minute ceiling, which would fail
-    # test_job_ceiling_exceeds_the_sum_of_its_step_timeouts.
+    # #1477 gave the three network steps (Checkout, Set up Python, the
+    # sparse-checkout of the pinned RZ/V2N devicetree) their own
+    # timeout-minutes caps, which forced this ceiling up from 5 under the
+    # sum-of-step-caps rule of the time. That rule is now max-based
+    # (test_job_ceiling_exceeds_its_longest_step_timeout, #1549): the
+    # ceiling must exceed the longest single step cap.
     timeout-minutes: 25
 
     steps:

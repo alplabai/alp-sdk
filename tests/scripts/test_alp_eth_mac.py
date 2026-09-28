@@ -232,6 +232,10 @@ class TestCSideParity(unittest.TestCase):
     def test_cid_fallback_prefix_is_disjoint(self):
         self.assertNotEqual(self._c_define("ALP_ETH_MAC_PREFIX_CID"), mac.MAC_PREFIX_NIBBLE)
 
+    def test_cid_fallback_prefix_matches_metadata(self):
+        # #2361: the C fallback prefix is pinned to metadata/identity/serial-mac.json.
+        self.assertEqual(self._c_define("ALP_ETH_MAC_PREFIX_CID"), mac.MAC_PREFIX_CID_NIBBLE)
+
     def test_shift_chain_order(self):
         body = self.src[self.src.index("static void alp_eth_derive_mac("):]
         chain = re.findall(r"<< ALP_ETH_(\w+)_BITS", body[:body.index("\n+}")])
@@ -243,3 +247,26 @@ class TestCSideParity(unittest.TestCase):
         end0, end1 = mac.derive_both_macs("2026W38-0001")
         self.assertIn(end0, self.src)
         self.assertIn(end1, self.src)
+
+
+class TestIdentityMetadata(unittest.TestCase):
+    """#2361: metadata/identity/serial-mac.json is the single home of the
+    layout; the module derives from it and its golden vectors must hold."""
+
+    def test_layout_fills_the_40_bit_payload(self):
+        self.assertEqual(sum(f["bits"] for f in mac._SPEC["mac"]["fields_msb_first"]), 40)
+        self.assertEqual([f["name"] for f in mac._SPEC["mac"]["fields_msb_first"]],
+                         ["prefix", "year", "week", "index", "iface", "reserved"])
+
+    def test_golden_vectors_hold(self):
+        self.assertTrue(mac.GOLDEN_VECTORS)
+        for vec in mac.GOLDEN_VECTORS:
+            self.assertEqual(mac.derive_mac(vec["serial"], mac.IFACE_END0), vec["end0"])
+            if "end1" in vec:
+                self.assertEqual(mac.derive_mac(vec["serial"], mac.IFACE_END1), vec["end1"])
+
+    def test_prefixes_are_distinct_nibbles(self):
+        self.assertNotEqual(mac.MAC_PREFIX_NIBBLE, mac.MAC_PREFIX_CID_NIBBLE)
+        for nib in (mac.MAC_PREFIX_NIBBLE, mac.MAC_PREFIX_CID_NIBBLE):
+            self.assertTrue(0 <= nib <= 0xF)
+
