@@ -8,18 +8,15 @@ the field?".
 Targets every E1M-X SoM family. native_sim build verified; HiL
 verification gates on a staged Mender server (separate repo).
 
-> **TLS randomness is not production-grade on AEN yet (#2192).**
+> **TLS randomness on AEN comes from the Secure Enclave TRNG (#2192).**
 > This app's HTTPS poll and its ECDSA-P256 verification run on
 > mbedTLS' PSA crypto core, which needs a cryptographically secure
-> RNG. The Secure Enclave TRNG entropy driver (`alif,se-trng`) exists
-> and is bench-proven on both M55 cores, but this example does not
-> choose it as `zephyr,entropy` yet, so its AEN build is *refused*
-> unless it sets `CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y` to acknowledge a
-> predictable generator. The CI scenario sets it because it only
-> compiles; a shipping image must not. Until this example opts in to
-> the SE TRNG (see `examples/aen/aen-se-crypto`'s board overlays),
-> treat the OTA trust chain demonstrated here as structurally complete
-> and cryptographically unproven.
+> RNG. Every AEN board chooses the SE TRNG entropy driver
+> (`alif,se-trng`, bench-proven on both M55 cores) as
+> `zephyr,entropy` by default, so the AEN build seeds from real
+> hardware entropy and needs no weak-RNG opt-in. The native_sim build
+> has no such source and still sets `CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y`
+> on its own scenario.
 
 ## What lands declaratively in v0.6
 

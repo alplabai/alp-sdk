@@ -12,17 +12,13 @@ v0.6 block (`boot:`, `ota:`, `security.psa:`, `storage:`,
 `diagnostics.modules:`) appears in this `board.yaml` at the
 production stance the SDK recommends for shipping product.
 
-> **One thing here is not production-ready, and it is a
-> cryptographic one (#2192).** The stance this app demonstrates is
-> about structure -- signed boot, provisioned identity, attested
-> updates -- and that structure is real. The randomness underneath
-> its TLS is not: mbedTLS' PSA crypto core needs a cryptographically
-> secure RNG, and this app does not yet choose the Secure Enclave TRNG
-> entropy driver (`alif,se-trng`, bench-proven on both M55 cores) as
-> `zephyr,entropy`, so an AEN build is *refused* unless it
-> acknowledges a predictable generator with
-> `CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y`. Do not read "production
-> stance" as covering key material until it opts in to the SE TRNG.
+> **Randomness on AEN comes from the Secure Enclave TRNG (#2192).**
+> mbedTLS' PSA crypto core needs a cryptographically secure RNG;
+> every AEN board chooses the SE TRNG entropy driver (`alif,se-trng`,
+> bench-proven on both M55 cores) as `zephyr,entropy` by default, so
+> the TLS key material in this production stance is seeded from real
+> hardware entropy. The native_sim build has no such source and
+> acknowledges that explicitly in its own `native_sim.conf`.
 
 ## The v0.6 block walkthrough
 

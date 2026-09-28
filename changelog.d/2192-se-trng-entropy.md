@@ -1,4 +1,4 @@
-### Added — Secure-Enclave TRNG entropy driver for Alif Ensemble (#2192)
+### Added — AEN boards seed their CSPRNG from the Secure-Enclave TRNG by default (#2192)
 
 AEN had no Zephyr entropy driver, so the mbedTLS PSA core fell back to
 `TEST_RANDOM_GENERATOR`, and #2193's refusal made every TLS build opt in
@@ -9,12 +9,22 @@ fixes this. It is thin glue over hal_alif's public
 limit, with no ISR variant. `ensemble_e8_peripherals.dtsi` carries a
 disabled `se_trng` node next to `se_service`.
 
-A build opts in by enabling `&se_service`, `&seservice0r`, `&seservice0s`
-and `&se_trng`, and choosing `zephyr,entropy = &se_trng`. That gives
-`CONFIG_CSPRNG_ENABLED=y` with no weak-RNG opt-in needed.
-`aen-se-crypto`'s M55-HE overlays now do this, and the example gained a
-`zephyr,entropy` step: two 300-byte draws, which cross the chunk limit,
-plus `sys_csrand_get()`.
+`ensemble_e8_peripherals.dtsi` enables the SE-service channel
+(`se_service`, `seservice0r/s`) and `se_trng`, and chooses
+`zephyr,entropy = &se_trng`. Every AEN board therefore gets
+`CONFIG_CSPRNG_ENABLED=y` on real hardware entropy. The weak-RNG opt-ins
+are gone from the `mqtt-telemetry`, `iot-fleet-ota` and `aen-se-crypto`
+AEN scenarios; the native_sim scenarios keep theirs. `aen-se-crypto`
+gained a `zephyr,entropy` step: two 300-byte draws, which cross the chunk
+limit, plus `sys_csrand_get()`.
+
+**Caveat (#1700):** the first CSPRNG draw is now an SE `GET_RND` request.
+On a module with a mismatched SERAM/services pair, that is the reported
+trigger for the M55-HP dropping to 76.8 MHz. ADR 0030 makes such a pairing
+unsupported, and a matched v110 pair was re-tested clean: the CGU
+oscillator and PLL registers were unchanged across the request. An app
+that must avoid SE traffic can disable `&se_trng` and choose its own
+`zephyr,entropy`.
 
 Bench-verified on E1M-AEN803 2026W36-0009 (M55-HE, Flow C RAM-run), 2 of
 2 `RESULT PASS`:
@@ -30,6 +40,6 @@ The same build for the M55-HP
 `0x40040000`/`0x40050000` mailboxes are core-local, so each core reaches
 the SE through its own copy.
 
-**Not done, so #2192 stays open.** The AEN boards do not choose it by
-default yet. The connectivity examples (`mqtt-telemetry`,
-`iot-fleet-ota`, `iot-dashboard`) keep their weak-RNG opt-ins.
+A board-default build of `aen-se-crypto` passed again, `aen-gpio-bench`
+(no entropy consumer) still passes with the SE channel linked, and
+`mqtt-telemetry` on the M55-HP boots without the test-entropy warning.
