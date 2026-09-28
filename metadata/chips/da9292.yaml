@@ -33,7 +33,7 @@ channels:
   - id: ch2
     phases:        [phase3, phase4]
     role_v2n:      "DISABLED on V2N base"
-    role_v2n_m1:   "0.75 V DEEPX rail; firmware sets + enables via da9292_v2n_m1_enable_deepx_rail"
+    role_v2n_m1:   "0.75 V DEEPX rail; sequenced entirely by U-Boot's board_late_init() (meta-alp-sdk 0004-rzv2n-dev-ALP-E1M-DEEPX-rail-bringup.patch), NOT by this driver -- RIIC8/BRD_I2C is Cortex-A55/Linux-exclusive, so no alp-sdk core may call da9292_v2n_m1_enable_deepx_rail() for this purpose; the function stays public for diagnostic/read-only use only (see include/alp/chips/da9292.h)"
 
 # Signals exiting the chip that the board must route.
 signals:

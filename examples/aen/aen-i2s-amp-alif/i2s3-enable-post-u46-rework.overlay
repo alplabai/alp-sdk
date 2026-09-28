@@ -10,7 +10,7 @@
  * Apply ONLY once U46 is a 3257-type bus switch -- removes the
  * contention hazard regardless of which rail powers it; this app
  * never drives EN or SEL and does not test the amps. Amp audibility
- * is separate: on e1m-aen-evk-03 (2026-09-15), VCC was moved to +3V3
+ * is separate: on E1M-AEN803 serial 2026W36-0002 (2026-09-15), VCC was moved to +3V3
  * between a silent run and an audible run, not established as the
  * only difference; a switch rated for 1.8 V VCC is the untested
  * alternative (see include/alp/boards/alp_e1m_evk.h's I2S mux block):

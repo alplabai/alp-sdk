@@ -175,8 +175,8 @@ not once for the family.
 **There is only one AEN board.** This table used to carry a second row for "the
 second AEN bench board (on the internal board farm)", marked `TBD` /
 **Unverified**, and #1797 existed largely because of it. That row described
-hardware that does not exist. The board-farm place `e1m-aen-evk-01` is a stale
-definition: every resource on it reports `avail: False` with `port: None` and
+hardware that does not exist. That board-farm place definition is stale:
+every resource on it reports `avail: False` with `port: None` and
 `path: None`, the exporter host has no `/dev/ttyUSB*` at all, and the exporter's
 own udev match rules name `ID_SERIAL_SHORT` `BG01028C` and `BG04503B` — the same
 two FTDI adapters this bench enumerates as its SE-UART and app-console ports. One

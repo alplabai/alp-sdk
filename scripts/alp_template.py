@@ -1794,7 +1794,7 @@ def validate(
             dst.write_bytes(src.read_bytes())
 
         outdir = tmp / "twister-out"
-        env = os.environ.copy()
+        env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
         env["ZEPHYR_BASE"] = zephyr_base
         # CMakeLists.txt resolves ALP_SDK_ROOT from this env var when set
         # (see examples/*/CMakeLists.txt) -- required here since the temp
@@ -1821,7 +1821,7 @@ def validate(
             "--outdir", str(outdir),
         ]
         proc = subprocess.run(
-            cmd, cwd=tmp, env=env, capture_output=True, text=True, check=False)
+            cmd, cwd=tmp, env=env, capture_output=True, text=True, encoding="utf-8", check=False)
         passed_count = _count_passed(outdir)
         return ValidateResult(
             template_id=template_id,

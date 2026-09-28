@@ -15,6 +15,7 @@ toolchains (cmake, doxygen, ...) installed.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -42,7 +43,8 @@ pytestmark = pytest.mark.skipif(
 def test_test_all_would_run_every_declared_gate_script():
     declared = subprocess.run(
         [sys.executable, str(REPO / "scripts" / "quality_tasks.py"), "--gate-scripts"],
-        cwd=str(REPO), capture_output=True, text=True, check=True,
+        cwd=str(REPO), capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=True,
     ).stdout.splitlines()
     declared = {line.strip() for line in declared if line.strip()}
     assert declared, "quality_tasks.py --gate-scripts declared zero scripts"
@@ -56,7 +58,8 @@ def test_test_all_would_run_every_declared_gate_script():
     bash_path = shutil.which("bash")
     listed = subprocess.run(
         [bash_path, TEST_ALL.as_posix(), "--list-required-gate-scripts"],
-        cwd=str(REPO), capture_output=True, text=True, timeout=30,
+        cwd=str(REPO), capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}, timeout=30,
     )
     assert listed.returncode == 0, listed.stdout + listed.stderr
     would_run = {line.strip() for line in listed.stdout.splitlines() if line.strip()}

@@ -61,7 +61,7 @@
  * cleared. The E8 SVD (peripheral LPI2S, which i2s0..i2s3 derive from) gives
  * I2S_RER0 a reset value of 0x00FFFF01 with RXCHENX [0:0] read-only, "always
  * enabled" when the block is built with TDM support; bits 8-23 are the
- * per-slot enables RXSLOT0..15_EN. Measured on e1m-aen-evk-03 i2s3
+ * per-slot enables RXSLOT0..15_EN. Measured on E1M-AEN803 serial 2026W36-0002 i2s3
  * (0x49017000) with the block idle (IER 0x00000F00, IRER/ITER/CER 0): RER
  * still read 0x00FFFF01 right after i2s_rx_channel_disable(). The E7 SVD
  * has RER0 reset 0x00000001 with the bit read-write and no slot fields.
@@ -74,7 +74,7 @@
  *
  * alp-sdk issue #2205: TXCHENX on the E8, the same as RER.RXCHEN above --
  * I2S_TER0 resets to 0x00FFFF01, bit 0 is read-only, bits 8-23 are the
- * per-slot enables TXSLOT0..15_EN. Measured on e1m-aen-evk-03 i2s3: TER
+ * per-slot enables TXSLOT0..15_EN. Measured on E1M-AEN803 serial 2026W36-0002 i2s3: TER
  * still read 0x00FFFF01 right after i2s_tx_channel_disable(). ITER.TXEN (or
  * IER.IEN) is what actually stops the TX direction.
  */

@@ -75,3 +75,28 @@ tests:
       - sdhc
       - sdmmc
     build_only: true   # driver/ADMA build coverage only -- see sdhc-build-coverage.overlay; never flashed.
+
+  # AEN803 twin of the scenario above (issue #2209): extra_dtc_overlay_files
+  # REPLACES CMake's board-default-overlay auto-discovery, so it always
+  # names one literal file regardless of platform_allow -- a platform_allow
+  # entry alone here would have built the AEN801 board overlay for AEN803.
+  # sdhc-build-coverage.overlay is SoC-DT-node-only (the module's real SD
+  # "B" route, shared silicon on both SKUs), so it is reused unchanged.
+  alp_sdk.examples.aen.sdhc_probe.aen803.sdhc_build_coverage:
+    platform_allow:
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_dtc_overlay_files:
+      - boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay
+      - sdhc-build-coverage.overlay
+    extra_configs:
+      - CONFIG_SDHC=y
+      - CONFIG_DISK_ACCESS=y
+      - CONFIG_DISK_DRIVER_SDMMC=y
+      - CONFIG_SDMMC_STACK=y
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - sdhc
+      - sdmmc
+    build_only: true   # driver/ADMA build coverage only -- see sdhc-build-coverage.overlay; never flashed.

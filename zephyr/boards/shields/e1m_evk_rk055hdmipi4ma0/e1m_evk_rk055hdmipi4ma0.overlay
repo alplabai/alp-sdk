@@ -1,0 +1,401 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * e1m_evk_rk055hdmipi4ma0 -- the RK055HDMIPI4MA0 MIPI-DSI panel (720x1280,
+ * Himax HX8394 controller, 2 data lanes, RGB888) on the E1M-EVK's display
+ * connector (J6), driven by an E1M-AEN SoM (Alif Ensemble E8) through the SoC
+ * display chain:
+ *
+ *   cdc200   (tes,cdc-2.1)          -- DPI pixel pump, framebuffer in SRAM0
+ *       |  DPI
+ *   mipi_dsi (snps,designware-dsi)  -- MIPI-DSI host
+ *       |  phy-if <&dphy 1>
+ *   dphy     (snps,designware-dphy) -- the shared D-PHY, TX role
+ *       |  2 data lanes
+ *   panel@0  (himax,hx8394)
+ *
+ * The SoC nodes (reg, IRQs, clocks, cdc-if / phy-if) are defined disabled in
+ * zephyr/dts/alif/ensemble_e8_peripherals.dtsi.  This shield turns them on and
+ * adds what the carrier and the panel decide.  Build any app with
+ * `-DSHIELD=e1m_evk_rk055hdmipi4ma0`; the shield's Kconfig.defconfig enables
+ * the drivers.  The app must set CONFIG_ALP_SDK=y, as every alp-sdk AEN app
+ * does: the CDC200 / DesignWare DSI / D-PHY driver symbols are alp-sdk's and
+ * live under `if ALP_SDK`, and the shield deliberately does not turn the SDK
+ * on for an app.  The SoC-level clock / power / pad setup the chain needs
+ * lives in zephyr/soc-bridge/alif/mipi_display_e8.c.
+ *
+ * Panel timings are the upstream NXP rk055hdmipi4ma0 shield's.  The pixel clock
+ * is not: it is the fastest the link can carry.
+ *
+ * The layer format (pixel-fmt-l1 below) sets ONLY the framebuffer in memory --
+ * the DSI link runs at the PANEL's pixel-format (RGB888, panel@0 below)
+ * either way, so switching pixel-fmt-l1 to "rgb-565" leaves the lane rate
+ * unchanged at pixel-clock * 24 / 2 plus packet overhead.  At 400 MHz / 10 =
+ * 40 MHz that is 483.6 Mbps/lane, inside the Alif DSI controller's 500 Mbps
+ * two-lane ceiling.  40 MHz is the fastest 400 MHz / N clock that fits.
+ * Measured refresh is 40.0 Hz (762 * 1312 total pixels, including blanking,
+ * at 40 MHz).  What RGB565 buys: half the framebuffer (720*1280*2 =
+ * 1,843,200 B instead of 2,764,800 B) and half the CPU cost to fill it --
+ * nothing on the wire changes.  Colour bars (R/G/B/W, no channel swap)
+ * verified correct on glass at 40 MHz on E1M-AEN803 2026W36-0009: RGB888 at
+ * its earlier framebuffer placement, 2026-09-21; RGB565 at the shipped
+ * placement (`lcd_fb` at 0x02200000) on 2026-09-22, where the CDC L1
+ * framebuffer register (0x49031134) read back 0x02200000 on every one of 15
+ * boots, display_write() reported 2 bytes/pixel, and on the two boots that
+ * reached READY the bands came up RED, GREEN, BLUE, WHITE in order with no
+ * swap, confirmed by eye on the glass.
+ *
+ * 60 Hz needs 400 MHz / 7 = 57.142857 MHz, which only fits the Alif DSI
+ * controller's 500 Mbps two-lane ceiling with a genuine 16-bit LINK -- not
+ * just a 16-bit framebuffer: panel pixel-format MIPI_DSI_PIXFMT_RGB565,
+ * clock-frequency 57142857, hline 771, DPI_COLOR_CODING 0x1.  That
+ * combination was tried (#2199):
+ * it produced correct colour bars, but at a much higher intermittent
+ * init-stall rate than the 40 MHz RGB888-link config (5/10 cold boots versus
+ * 1/10, 10 boots each) and added read stalls on the first DCS read after
+ * display_write (4/10 versus 0/10).  Not shipped as the default for that
+ * reason; see changelog.d/2199-aen-panel-init-intermittent.md.
+ *
+ * The SoC glue derives the CDC divider from clock-frequency and the DSI host
+ * times its lanes from it, so those two cannot drift.  The APP's fill format
+ * must track pixel-fmt-l1 too -- aen-dsi-display derives it from this node
+ * rather than hardcoding, after a mismatch made every display_write() return
+ * -EINVAL with no frame written at all.
+ *
+ * Conflicts: the I2C expander at 0x73 becomes a driver-owned GPIO controller
+ * (gpio_pca_series), so an app must not also write its registers directly.
+ * aen-evk-demo's phase 4, the one in-tree raw user, checks for this shield's
+ * lcd_exp node and skips its register writes when it is present.
+ */
+
+#include <mem.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/mipi_dsi/mipi_dsi.h>
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+
+/ {
+	chosen {
+		zephyr,display = &cdc200;
+	};
+
+	aliases {
+		/* <alp/display.h> resolves display 0 through this alias. */
+		alp-display0 = &cdc200;
+	};
+
+	/*
+	 * Expander P0 enables the panel supply.  Modelled as a boot-on fixed
+	 * regulator so the panel is powered before the hx8394 driver resets it and
+	 * sends its DCS init sequence.  The lcd_exp hog below has already driven
+	 * RESX low by the time this runs, so the panel never sees VCC rise against
+	 * an undefined reset level.
+	 *
+	 * ACTIVE_HIGH follows the upstream NXP rk055hdmipi4ma0 shield, which drives
+	 * this same connector pin (J6 pin 32) as the panel power enable.  It is not
+	 * bench-proven on this carrier.  Both polarities were tried on 2026-09-20,
+	 * but while the panel module's own DC/DC was not running (a jumper missing
+	 * on the module itself, #2199), so neither result says anything about this
+	 * pin.  The HX8394 logic answers DCS with P0 held low, so this pin does not
+	 * gate the controller's logic supply.
+	 *
+	 * The flip does take effect, if you ever need to make it: regulator_fixed_init()
+	 * drives enable-gpios itself via gpio_pin_configure_dt(..., GPIO_OUTPUT_ACTIVE)
+	 * BEFORE regulator_common_init() runs, so only startup-delay-us is lost to
+	 * the refcount-only arm described below, never the pin itself.
+	 *
+	 * Bring-up note worth more than the polarity: every register reachable over
+	 * DSI lives in the HX8394-F's logic domain, which runs from +L_VIO (J6 pin
+	 * 25), while the source and gate drive depend on the panel module's own
+	 * DC/DC.  With that DC/DC off, the panel still answers every DCS read and
+	 * reports Sleep Out / Display On / 24 bpp -- RDDST D31 "Booster On" and
+	 * RDDSDR (0Fh) D6 both read healthy -- and shows nothing.  That was #2199.
+	 * The GT911 touch controller shares the module's supply, so a touch
+	 * controller that does not answer at 0x5d or 0x14 is the DSI-independent
+	 * tell: check it before debugging the video link.
+	 *
+	 * No startup-delay-us here: Zephyr 4.4.1 applies that property only on the
+	 * regulator_enable() path (regulator_common.c, the `else if` arm), and a
+	 * regulator-fixed with regulator-boot-on/always-on passes is_enabled=true
+	 * into regulator_common_init() and takes the refcount-only arm instead, so
+	 * the property would never be read.  The settle before RESX is released is
+	 * the hx8394 driver's own 1 ms VCC->RESX-valid wait plus its 1 ms reset-low
+	 * hold (display_hx8394.c), on top of the whole 75..90 init range.
+	 */
+	lcd_pwr_en: regulator-lcd-pwr-en {
+		compatible = "regulator-fixed";
+		regulator-name = "lcd-pwr-en";
+		enable-gpios = <&lcd_exp 0 GPIO_ACTIVE_HIGH>;
+		regulator-boot-on;
+		regulator-always-on;
+		status = "okay";
+	};
+};
+
+/*
+ * The framebuffer: the top 2 MiB of the 4 MiB SRAM0 (0x02000000, the SoC
+ * dtsi's sram0).  A 720x1280 RGB565 layer is 1,843,200 B, which fits inside
+ * 2 MiB (2,097,152 B) with room to spare -- DT_SIZE_M(2) is the smallest
+ * MiB-aligned size that holds it.  Plain "mmio-sram", not
+ * "zephyr,memory-region": the CDC driver uses the address directly, so
+ * nothing is linked here and the framebuffer adds nothing to the image (an
+ * ITCM RAM-run .bin stays small).
+ *
+ * The SoC dtsi's sram0 is ALSO the "SRAM0" linker region (and system RAM for
+ * an app with `zephyr,sram = &sram0`), so it is grown back to the bottom
+ * 2 MiB now that the smaller RGB565 framebuffer leaves room: anything linked
+ * into SRAM0 past 0x02200000 is then a link error ("region SRAM0
+ * overflowed") instead of a silent overwrite of the framebuffer.  An app
+ * overlay that narrows sram0 further (aen-evk-demo's 64 KiB) is applied
+ * after this shield and still stays below the framebuffer.  0x02000000 +
+ * 2 MiB (sram0) + 2 MiB (lcd_fb) = 0x02400000, the top of the 4 MiB SRAM0 --
+ * the two regions exactly partition it, no gap and no overlap.
+ */
+&sram0 {
+	reg = <0x02000000 DT_SIZE_M(2)>;
+};
+
+&soc {
+	lcd_fb: sram@2200000 {
+		compatible = "mmio-sram";
+		reg = <0x02200000 DT_SIZE_M(2)>;
+	};
+};
+
+/*
+ * The panel-control I2C GPIO expander on the E1M bus 0 (SoC I2C2, whose pins,
+ * clock and alp-i2c0 alias the board devicetree already sets).  reg 0x73 is
+ * EVK_I2C_ADDR_TCAL9538_MAIN in metadata/boards/e1m-evk.yaml (the
+ * i2c_devices block).  P0 enables the panel path (lcd_pwr_en above), P1 is
+ * the HX8394 reset.  It answers at POR;
+ * its own reset line is pulled up on the carrier, so no firmware action is
+ * needed.
+ *
+ * nxp,pca9538 (not nxp,pcal9538) on purpose: both bind gpio_pca_series.c, but
+ * pcal9538 is TYPE_2 and its init also writes the Agile-IO block at
+ * 0x40..0x45.  The part at 0x73 is not identified on silicon
+ * (metadata/chips/tcal9538.yaml marks 0x40+ untested), so stay on the TYPE_0
+ * base register set {0x00,0x01,0x03} that #1974 verified at POR.
+ */
+&i2c2 {
+	lcd_exp: gpio@73 {
+		compatible = "nxp,pca9538";
+		reg = <0x73>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		ngpios = <8>;
+		status = "okay";
+
+		/*
+		 * RESX defined LOW before the panel supply comes up.
+		 *
+		 * The TCAL9538 leaves its own reset with every pin an INPUT, and
+		 * gpio_pca_series_init() only restores that POR state (OUTPUT=0xff,
+		 * CONFIG=0xff).  So without this hog P1 stays high-impedance until the
+		 * hx8394 driver configures it at CONFIG_APPLICATION_INIT_PRIORITY (90),
+		 * which is AFTER regulator_fixed turns the panel supply on at
+		 * CONFIG_REGULATOR_FIXED_INIT_PRIORITY (75): the panel is powered with
+		 * RESX high-impedance for ~15 init levels, at whatever level the
+		 * carrier's own termination happens to leave the net at.  A
+		 * floating RESX during the VCC ramp is the failure this prevents -- the
+		 * HX8394 samples an undefined reset level as it powers.
+		 *
+		 * GPIO_ACTIVE_HIGH + output-low => gpio_pin_configure(GPIO_OUTPUT_INACTIVE)
+		 * => the expander pin is driven physically low, i.e. RESX asserted.
+		 * gpio_hogs_init() (zephyr/drivers/gpio/gpio_hogs.c) runs at POST_KERNEL
+		 * CONFIG_GPIO_HOGS_INIT_PRIORITY, which Kconfig.defconfig puts strictly
+		 * between the expander and the regulator, and it only calls
+		 * gpio_pin_configure() -- Zephyr hogs do not claim or lock a pin, so the
+		 * hx8394 driver re-configuring the same pin at 90 and pulsing it is
+		 * legal and unchanged.
+		 */
+		lcd_reset_hog: lcd-reset-hog {
+			gpio-hog;
+			gpios = <1 GPIO_ACTIVE_HIGH>;
+			output-low;
+			line-name = "lcd-resx";
+		};
+	};
+};
+
+/* gpio5 carries the backlight enable (panel bl-gpios below, P5_5). */
+&gpio5 {
+	status = "okay";
+};
+
+/*
+ * The panel flex's touch-controller I2C.  It is a shield fact (the bus only
+ * exists when this panel is plugged into J6), so it is enabled here and not
+ * in the board.  No touch driver is bound here yet (#2199); this just gets
+ * the bus up so an app or the I2C shell can probe the GT911 touch
+ * controller at 0x5d or 0x14.
+ *
+ * Route: J6 pin 26/27 (DSI_I2C.SDA_L / DSI_I2C.SCL_L) -> level translator ->
+ * E1M pads AH17 / AG17 -> Alif silicon P7_2 (I2C1_SDA_C) and P3_7
+ * (I2C1_SCL_B), per metadata/pinmux/aen.yaml.  metadata/boards/e1m-evk.yaml
+ * names the bus E1M_I2C1 / EVK_I2C_BUS_DSI_CSI, "Display + camera control I2C
+ * (touch panel, camera-side I2C config)".  Touch reset is expander U35 P3
+ * (net CTP_RST -> J6 pin 28).  CTP_INT_L (J6 pin 29) is the flex-side net; it
+ * crosses level translator U4 to CTP_INT (U4 pin A1) on the SoC side, which
+ * terminates on E1M module connector pad AH8 -- owned by the CC3501E
+ * Wi-Fi/BLE coprocessor (silicon_pad: GPIO_15, metadata/pinmux/aen.yaml), so
+ * the Alif has no direct INT line.
+ *
+ * Hardware contention: CC3501E GPIO_15 (E1M pad AH8) must stay an INPUT.
+ * cc3501e_spi1_configure(..., ALP_CC3501E_SPI1_CS1, ...) or
+ * cc3501e_gpio_configure(ctx, 15, OUTPUT, ...) would turn it into an output
+ * that fights the GT911's INT driver through U4.
+ *
+ * P3_7 + P7_2 ONLY.  P3_6 is the I/O expander's own reset (E1M pad N1) and must
+ * not be muxed or driven from this group.
+ *
+ * input-enable + bias-pull-down is the bench-validated E8 I2C pad config, the
+ * same group shape as the board's pinctrl_i2c2 (2026-06-15); bias-pull-up is
+ * reported to give a dead bus on this silicon and is not used.  No
+ * clock-frequency: the SoC i2c1 node already declares I2C_BITRATE_STANDARD.
+ */
+&pinctrl {
+	pinctrl_i2c1_dsi: pinctrl_i2c1_dsi {
+		group0 {
+			pinmux = <PIN_P3_7__I2C1_SCL_B>, <PIN_P7_2__I2C1_SDA_C>;
+			input-enable;
+			bias-pull-down;
+		};
+	};
+};
+
+&i2c1 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_i2c1_dsi>;
+	pinctrl-names = "default";
+};
+
+&dphy {
+	status = "okay";
+};
+
+&cdc200 {
+	/* Panel timing -- from the upstream NXP rk055hdmipi4ma0 shield. */
+	width = <720>;
+	height = <1280>;
+	hsync-len = <6>;
+	hfront-porch = <12>;
+	hback-porch = <24>;
+	vsync-len = <2>;
+	vfront-porch = <16>;
+	vback-porch = <14>;
+	hsync-active = <0>;
+	vsync-active = <0>;
+	de-active = <1>;
+	pixelclk-active = <0>;
+	/* The real pixel rate, 400 MHz / 10 (see the header). */
+	clock-frequency = <40000000>;
+	bg-color = <0x000000>;
+	memory-region = <&lcd_fb>;
+
+	/* L1 only: a single full-screen RGB565 layer (see the header comment). */
+	enable-l1 = <1>;
+	pixel-fmt-l1 = "rgb-565";
+	win-x0-l1 = <0>;
+	win-y0-l1 = <0>;
+	win-x1-l1 = <720>;
+	win-y1-l1 = <1280>;
+	blend-factor1-l1 = <4>;
+	blend-factor2-l1 = <5>;
+	const-alpha-l1 = <0xff>;
+
+	status = "okay";
+};
+
+&mipi_dsi {
+	vid-pkt-size = <720>;
+
+	/*
+	 * What the PANEL needs, which its driver does not declare: Zephyr's
+	 * himax,hx8394 sets mdev.mode_flags = MIPI_DSI_MODE_VIDEO and nothing
+	 * else, so anything beyond plain non-burst sync-events can never reach
+	 * this host no matter what the panel wants.  The board knows which panel
+	 * is fitted, so the board says.
+	 *
+	 * Kept at non-burst deliberately.  The upstream NXP shield for this same
+	 * module uses "burst" with autoinsert-eotp, but their host is NXP's own
+	 * IP (fsl_mipi_dsi.c), not a DesignWare core, so those settings do not
+	 * transfer register-for-register.  On THIS host burst was tried at 500,
+	 * 750 and 900 Mbps clamps and killed every DCS read in all three, while
+	 * non-burst answers reliably -- and the panel's own init writes ride that
+	 * same LP path, so under burst the panel is very likely never configured
+	 * at all.  Do not switch to burst without re-testing DCS reads (#2199).
+	 */
+	dpi-video-mode = "non-burst-sync-events";
+
+	/*
+	 * EoTp auto-insert, ON -- and note this is SEPARATE from the burst
+	 * decision above, which is the whole point.
+	 *
+	 * NXP's generic driver turns this on for every panel on their host:
+	 * DSI_GetDefaultConfig() sets `config->autoInsertEoTp = true`
+	 * (mcux-sdk-ng/drivers/mipi_dsi/fsl_mipi_dsi.c:504-521), and DSI_Init()
+	 * writes it into CFG_AUTOINSERT_EOTP (:446-453).  Our binding
+	 * snps,designware-dsi.yaml declares `autoinsert-eotp` with NO `default:`
+	 * key, so it resolves FALSE when unset -- and this shield never set it.
+	 * So this panel has been running with DSI_PCKHDL_CFG_EOTP_TX_EN clear
+	 * while the vendor runs the same module with it set.
+	 *
+	 * The comment above names "burst with autoinsert-eotp" as one thing and
+	 * discards both because burst killed DCS reads.  They are not one thing.
+	 * Burst changes how video packets are timed on the link; EoTp appends an
+	 * end-of-transmission short packet so the peripheral can tell an HS burst
+	 * ended cleanly rather than inferring it from the line going quiet.  EoTp
+	 * is on to match the vendor's configuration for this module; it was not
+	 * the cause of #2199's dark panel (the module's own DC/DC was), and the
+	 * panel displays with it on.  Burst stays OFF.
+	 */
+	autoinsert-eotp;
+
+	/*
+	 * The Alif DSI controller's TWO-LANE ceiling, not a guess: the Ensemble
+	 * serial-display application note's MIPI DSI feature list states
+	 * "Supports one data lane (maximum speed 850 Mbps) or two data lanes
+	 * (maximum speed 500 Mbps)", and Alif's own e1c.dtsi / b1.dtsi set
+	 * panel-max-lane-bandwidth = <500000000> explicitly.  Stated here rather
+	 * than left to the binding default so the number is visible next to the
+	 * pixel clock it constrains.
+	 *
+	 * At 2 lanes the lane rate is pixel-clock * bpp / 2, so the RGB888 link
+	 * above runs 40 MHz * 24 / 2 = 480 Mbps (the D-PHY PLL lands at ~483.6)
+	 * -- inside the limit, at 40 Hz.  Raising this above 500000000 runs the
+	 * controller out of spec.  The clamp limits only the RATE: MODE_TYPE comes from the mode flags in
+	 * dsi_dw_burst_mode_setup(), so a low clamp never cancels a burst -- it
+	 * only makes the lane slower than the DPI feed, starving the link.
+	 */
+	panel-max-lane-bandwidth = <500000000>;
+
+	status = "okay";
+
+	/*
+	 * The upstream hx8394 driver pulses reset as logical 0 -> 1;
+	 * GPIO_ACTIVE_HIGH maps that onto the expander's reset output.
+	 */
+	lcd_panel: panel@0 {
+		compatible = "himax,hx8394";
+		reg = <0>;
+		reset-gpios = <&lcd_exp 1 GPIO_ACTIVE_HIGH>;
+		/*
+		 * bl-gpios: Alif P5_5, the SoM backlight driver's enable input (not an
+		 * E1M pad).  Source: metadata/e1m_modules/aen/on-module-links.yaml,
+		 * backlight.enable (#2203): on the SoM, P5_5 drives the backlight
+		 * driver's enable, and E1M pads A31/B31 carry that driver's LED
+		 * output (#2199).  Static high = full brightness; there is no Alif UTIMER
+		 * PWM driver for dimming, and short low pulses on this input are the
+		 * backlight driver's dimming protocol, so never pulse it.  The hx8394
+		 * driver sets it at the end of a successful init; the SoC glue muxes
+		 * the pad to GPIO first (gpio_dw applies no pad mux).
+		 */
+		bl-gpios = <&gpio5 5 GPIO_ACTIVE_HIGH>;
+		data-lanes = <2>;
+		width = <720>;
+		height = <1280>;
+		pixel-format = <MIPI_DSI_PIXFMT_RGB888>;
+		status = "okay";
+	};
+};

@@ -167,5 +167,5 @@ the Flow C ITCM budget with room to spare, and with the descriptor rings, the
 in disjoint, DMA-reachable windows. No byte count or percentage is written into
 the tree for this image — two such figures have already gone stale — so read
 the linker's own summary. The phase's own `PASS` needs a bench run on
-`e1m-aen-evk-03` with a cable in a live switch port; the eight previously
+an AEN EVK bench unit with a cable in a live switch port; the eight previously
 implemented phases are unchanged in source.

@@ -48,7 +48,7 @@ same-family part swap alone removes the contention hazard below,
 regardless of which rail powers it -- this app never drives EN or SEL
 itself, and tests only the SoC's own `i2s3` controller, not the amps).
 Amp audibility is a separate, stricter condition this app does not
-check: on `e1m-aen-evk-03` (2026-09-15), a fitted 3257-type part's VCC
+check: on E1M-AEN803 serial 2026W36-0002 (2026-09-15), a fitted 3257-type part's VCC
 was moved to `+3V3` between a silent run and an audible run -- not
 established as the only difference between the two (a switch rated
 for 1.8 V VCC is the untested alternative), and even then disabling
@@ -92,8 +92,8 @@ on SoCs whose clockctrl lacks `.set_rate` (e.g. `native_sim`).
 >    `74LVC157ABQ,115` is a one-way mux and can NEVER pass this direction
 >    at any VCC (undervoltage is not the problem for that part — its VCC
 >    range is 1.2-3.6 V). U46 must be REPLACED with a 3257-type bus switch
->    AND that switch's VCC must be on `+3V3` — on `e1m-aen-evk-03`
->    (2026-09-15), a fitted 3257-type part's VCC was moved from `+VIO`
+>    AND that switch's VCC must be on `+3V3` — on E1M-AEN803 serial
+>    2026W36-0002 (2026-09-15), a fitted 3257-type part's VCC was moved from `+VIO`
 >    (1.8 V, silent) to `+3V3` (audible) — not established as the only
 >    difference between the two runs. `S` = IO13 →
 >    **CC3501E GPIO_13**, both hw revisions; `/E` is REVISION-DEPENDENT —
@@ -105,7 +105,7 @@ on SoCs whose clockctrl lacks `.set_rate` (e.g. `native_sim`).
 >    drivable via GPIO" unconditionally; that was wrong for r2 boards,
 >    and it mattered — it implied the mux could be enabled without the
 >    bridge there.) The mux must route to the amps. The same
->    `e1m-aen-evk-03` run also showed an open TDM clock-error latch
+>    run also showed an open TDM clock-error latch
 >    during playback and open issue #2146 (amps auto-shut down ~1 s
 >    after I2S stops, stay off after restart) — a working mux does not
 >    mean the audio path is otherwise clean.

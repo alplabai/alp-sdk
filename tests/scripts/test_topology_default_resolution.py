@@ -77,9 +77,11 @@ SOM_TOPOLOGIES: dict[str, dict[str, str]] = {
     # Renesas RZ/V2N -- A55 cluster + M33 system-manager.
     "E1M-V2N101": {"a55_cluster": "yocto", "m33_sm": "zephyr"},
     "E1M-V2N102": {"a55_cluster": "yocto", "m33_sm": "zephyr"},
+    "E1M-V2N103": {"a55_cluster": "yocto", "m33_sm": "zephyr"},
     # V2N + DEEPX DX-M1 (same silicon as V2N, different module BOM).
     "E1M-V2M101": {"a55_cluster": "yocto", "m33_sm": "zephyr"},
     "E1M-V2M102": {"a55_cluster": "yocto", "m33_sm": "zephyr"},
+    "E1M-V2M103": {"a55_cluster": "yocto", "m33_sm": "zephyr"},
     # NXP i.MX 93 -- A55 cluster + M33 (no _sm suffix) -- EXCLUDED
     # (#1025): E1M-NX9101's only hw_rev (imx93 r1) is `status: tbd`,
     # refused outright by the hw_rev-buildable gate before
@@ -104,8 +106,10 @@ _M_CORE_PER_SOM: dict[str, str] = {
     "E1M-AEN801": "m55_hp",
     "E1M-V2N101": "m33_sm",
     "E1M-V2N102": "m33_sm",
+    "E1M-V2N103": "m33_sm",
     "E1M-V2M101": "m33_sm",
     "E1M-V2M102": "m33_sm",
+    "E1M-V2M103": "m33_sm",
     # E1M-NX9101 excluded from SOM_TOPOLOGIES above (#1025) -- no row
     # here for it to anchor.
 }

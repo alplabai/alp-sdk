@@ -190,7 +190,7 @@ topology:
 # M55 cores boot from the SAME physical App MRAM, and a stock symmetric
 # two-slot partition map puts HE and HP slot0 at the SAME address
 # (0x80010000) -- flashing both cores then silently overwrites one image
-# (#1069, bench-confirmed on e1m-aen-evk-01).  This is SDK build policy,
+# (#1069, bench-confirmed on an AEN EVK bench unit).  This is SDK build policy,
 # not a silicon fact (see scripts/gen_zephyr_board.py's memory_map: vs
 # metadata/socs/ split), so the fix lives here rather than in the SoC JSON.
 #
@@ -359,8 +359,9 @@ pad_routes:
       doc: "Physically open on board 2626-R2 (no CC3501E or Alif termination); r1 routed it to CC3501E GPIO_30 -- see aen/hw-revisions.yaml pad_route_overrides (#1854)." }
 
 # On-module helper MCUs.  CC3501E (TI Wi-Fi 6 + BLE 5.4) is wired
-# on the AEN module; firmware is embedded in alp-sdk at
-# `firmware/cc3501e/` (ADR 0015).
+# on the AEN module; its firmware lives in
+# alplabai/cc3501e-bridge-firmware (ADR 0031, which superseded ADR 0015's
+# in-tree `firmware/cc3501e/`).
 helper_firmware:
   - name:          cc3501e_otp
     chip:          cc3501e

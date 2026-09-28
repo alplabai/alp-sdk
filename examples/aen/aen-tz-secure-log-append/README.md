@@ -48,7 +48,7 @@ Read the SRAM0 beacon at `0x02001100`:
 | 4 | `SCB->SFSR` | `0x48` = `AUVIOL` + `SFARVALID` |
 | 5 | `SCB->SFAR` | address of the Secure log store |
 
-Silicon-proven on E8 (`e1m-aen-evk-01`, 2026-07-06), on both the Flow C RAM-run and
+Silicon-proven on E8 (an AEN EVK bench unit, 2026-07-06), on both the Flow C RAM-run and
 the Flow D SES-boot path: `count=1`, `value=0xC0DE1234`, `result=4`, `SFSR=0x48`.
 Because E4 is E8 with only the A32 cluster removed (identical M55/SAU/TGU/SE), this
 holds on E4 unchanged.
@@ -58,7 +58,7 @@ holds on E4 unchanged.
 ```
 # Non-destructive (ITCM-linked, RAM-run):
 scripts/bench/aen/build.sh   $PWD/examples/aen/aen-tz-secure-log-append
-export BENCH_PLACE=e1m-aen-evk-01                   # your held labgrid-client place
+export BENCH_PLACE=<your-bench-place>               # your held labgrid-client place
 export AEN_JLINK_RUN=<board-farm>/bin/jlink-run.sh
 scripts/bench/aen/ram-run.sh "$BENCH_ROOT/build/aen-tz-secure-log-append"
 # then read 0x02001100 over SWD (table above)

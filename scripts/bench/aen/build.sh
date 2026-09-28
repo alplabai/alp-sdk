@@ -8,8 +8,8 @@
 #
 # Pristine-build an AEN bench app for the E8 M55-HE target.
 # Overlays auto-apply: this builds the fully-qualified $AEN_BOARD target
-# (alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he), so Zephyr picks up
-# boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay and
+# (alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he), so Zephyr picks up
+# boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay and
 # app.overlay by name automatically -- no explicit -DEXTRA_DTC_OVERLAY_FILE
 # force needed (the examples ship fully-qualified overlay names, not the
 # bare board name that would silently drop). For a Flow C RAM-run, pass

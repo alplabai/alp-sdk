@@ -1,0 +1,52 @@
+From c0a5a76f5c718615995cc90c88a70d847650608d Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Thu, 24 Sep 2026 05:12:48 +0000
+Subject: [PATCH] rzv2n-dev: ALP E1M-V2N103/V2M103 4 GB memory-tier boot params
+
+The E1M-V2N103 and E1M-V2M103 SoMs populate a 4 GB RAM / 16 GB eMMC
+memory tier of the shared V2N101/V2M101 PCB, half the 8 GB the
+rzv2n-dev config assumes. U-Boot builds bi_dram from this control
+DT and fixes up the kernel DT memory node from it
+(ARCH_FIXUP_FDT_MEMORY), so both the SDRAM-size constant and the
+control-DT memory node must agree on 4 GB or the kernel boots with
+the wrong RAM size.
+
+Applies on top of 0001 (DEEPX DX-M1 PCIe bring-up) and 0002
+(production boot) -- this patch is included in SRC_URI only for
+e1m-v2n103-a55 and e1m-v2m103-a55, so every other rzv2n-family
+MACHINE builds its own separate u-boot source tree untouched by
+this patch.
+---
+ arch/arm/dts/rzv2n-dev.dts  | 2 +-
+ include/configs/rzv2n-dev.h | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/dts/rzv2n-dev.dts b/arch/arm/dts/rzv2n-dev.dts
+index dc1e64ca..83b68a3f 100644
+--- a/arch/arm/dts/rzv2n-dev.dts
++++ b/arch/arm/dts/rzv2n-dev.dts
+@@ -64,7 +64,7 @@
+ 	memory@48000000 {
+ 		device_type = "memory";
+ 		/* first 128MB is reserved for secure area. */
+-		reg = <0x0 0x48000000 0x1 0xF8000000>;
++		reg = <0x0 0x48000000 0x0 0xF8000000>;
+ 	};
+ 
+ 	reserved-memory {
+diff --git a/include/configs/rzv2n-dev.h b/include/configs/rzv2n-dev.h
+index 4d8e2090..85c0e7af 100644
+--- a/include/configs/rzv2n-dev.h
++++ b/include/configs/rzv2n-dev.h
+@@ -43,7 +43,7 @@
+ 
+ #define DRAM_RSV_SIZE			0x08000000
+ #define CONFIG_SYS_SDRAM_BASE		(0x40000000 + DRAM_RSV_SIZE)
+-#define CONFIG_SYS_SDRAM_SIZE		(0x200000000u - DRAM_RSV_SIZE) //total 8GB
++#define CONFIG_SYS_SDRAM_SIZE		(0x100000000u - DRAM_RSV_SIZE) //total 4GB
+ #define CONFIG_SYS_LOAD_ADDR		0x58000000
+ /* Default load address for tfpt,bootp */
+ #define CONFIG_LOADADDR			CONFIG_SYS_LOAD_ADDR
+-- 
+2.43.0
+

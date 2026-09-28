@@ -6,6 +6,7 @@ alp-sdk-vscode extension, CI, flashers) consume. These lock the emitter <->
 contract lockstep and the gate behaviour.
 """
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -17,7 +18,8 @@ SCHEMA = REPO / "metadata" / "schemas" / "system-manifest-v1.schema.json"
 
 def _run(*args):
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True)
+        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"})
 
 
 def test_schema_is_valid_draft202012():
@@ -66,7 +68,7 @@ def test_broken_slice_rejected(tmp_path):
         "ipc": [], "helper_mcus": [], "boot_order": [],
     }
     p = tmp_path / "system-manifest.yaml"
-    p.write_text(json.dumps(bad))
+    p.write_text(json.dumps(bad), encoding="utf-8")
     proc = _run("--manifest", str(p))
     assert proc.returncode != 0
     assert "FAIL" in proc.stdout
@@ -81,7 +83,7 @@ def test_unknown_top_level_key_rejected(tmp_path):
         "bogus_key": 1,   # additionalProperties:false must catch drift/typos
     }
     p = tmp_path / "m.yaml"
-    p.write_text(json.dumps(doc))
+    p.write_text(json.dumps(doc), encoding="utf-8")
     proc = _run("--manifest", str(p))
     assert proc.returncode != 0
 
@@ -101,7 +103,7 @@ def test_hw_info_eeprom_projection_allowed(tmp_path):
         "slices": [], "ipc": [], "helper_mcus": [], "boot_order": [],
     }
     p = tmp_path / "m.yaml"
-    p.write_text(json.dumps(doc))
+    p.write_text(json.dumps(doc), encoding="utf-8")
     proc = _run("--manifest", str(p))
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
@@ -143,7 +145,7 @@ def test_a_carve_out_region_naming_a_declared_region_passes(tmp_path):
               "carve_out_region": "mram_main"}],
     )
     p = tmp_path / "m.yaml"
-    p.write_text(json.dumps(doc))
+    p.write_text(json.dumps(doc), encoding="utf-8")
     proc = _run("--manifest", str(p))
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
@@ -158,7 +160,7 @@ def test_a_carve_out_region_naming_no_region_is_refused(tmp_path):
               "carve_out_region": "mram_mian"}],
     )
     p = tmp_path / "m.yaml"
-    p.write_text(json.dumps(doc))
+    p.write_text(json.dumps(doc), encoding="utf-8")
     proc = _run("--manifest", str(p))
     assert proc.returncode == 1, proc.stdout + proc.stderr
     assert "carve_out_region 'mram_mian' names no memory[] region" in proc.stdout
@@ -172,6 +174,6 @@ def test_the_join_is_skipped_when_the_memory_pane_is_absent(tmp_path):
               "carve_out_region": "anything_at_all"}],
     )
     p = tmp_path / "m.yaml"
-    p.write_text(json.dumps(doc))
+    p.write_text(json.dumps(doc), encoding="utf-8")
     proc = _run("--manifest", str(p))
     assert proc.returncode == 0, proc.stdout + proc.stderr

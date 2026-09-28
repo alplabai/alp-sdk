@@ -121,7 +121,7 @@ echo ">>> FLASH $NAME  (ram_console_buf=${BUF_SYM:-none (UART console)})" >&2
 
 # 2. GUARD (alp-sdk#2025) -- app-write-mram -p below REPLACES the whole
 # resident ATOC, it does not merge (step 1 comment). One Flow A run on
-# e1m-aen-evk-01 (2026-09-07) silently delisted a live A32 Linux boot chain
+# an AEN EVK bench unit (2026-09-07) silently delisted a live A32 Linux boot chain
 # (BOOTLOAD/A32_APP/HP_APP/HE_APP) down to just DEVICE + the freshly written
 # ALP-HE -- no error, no SES warning ("[SES] ATOC ok" prints either way).
 #

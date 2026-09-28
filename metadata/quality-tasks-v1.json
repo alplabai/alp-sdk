@@ -148,6 +148,21 @@
       "ci": null
     },
     {
+      "id": "cc3501e-bridge-copies",
+      "description": "Every cc3501e_bridge.{c,h} copied into an example is byte-identical to examples/aen/aen-cc3501e-bringup/src, except the copies the gate declares divergent by name, so a silicon fix cannot land in one copy of this hardware-sequencing code and silently miss the other fifteen (#2163).",
+      "runner": "check-script",
+      "script": "scripts/check_cc3501e_bridge_copies.py",
+      "gate": true,
+      "profiles": [
+        "quick",
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "changelog-fragment-issue",
       "description": "A changelog.d/*.md fragment's filename leading digits match the single issue its own heading cites (where decidable), so the leading digits stay the join key back to the issue instead of silently drifting (#1957).",
       "runner": "check-script",
@@ -266,7 +281,7 @@
     },
     {
       "id": "cross-platform",
-      "description": "Lint repo content for cross-platform hazards: Linux-only idioms in customer-facing surfaces, and implicit text encodings in the SDK's own Python under scripts/ and tests/.",
+      "description": "Lint repo content for cross-platform hazards: Linux-only idioms in customer-facing surfaces, and implicit text encodings in the SDK's own Python under scripts/, tests/, and examples/.",
       "runner": "check-script",
       "script": "scripts/check_cross_platform.py",
       "gate": false,

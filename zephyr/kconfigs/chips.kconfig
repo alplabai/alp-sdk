@@ -209,7 +209,7 @@ config ALP_SDK_CC3501E_AUTO_RECOVER
 	help
 	  Let the driver warm-reset the bridge on its own when a top-level op
 	  comes back ALP_ERR_IO/ALP_ERR_TIMEOUT with no reply ever decoded off
-	  the wire (issue #2126) -- e1m-aen-evk-01 has been observed to wedge
+	  the wire (issue #2126) -- an AEN EVK bench unit has been observed to wedge
 	  the link mid Wi-Fi-connect roughly 3 times in 50 connects, and
 	  nothing else on the device can tell (see cc3501e_recover()'s own
 	  doc comment in include/alp/chips/cc3501e/core.h).

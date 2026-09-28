@@ -2,7 +2,7 @@
 # scripts/bench/aen/ram-run.sh <build-dir> [sleep_ms] [bufsize_hex] [preload_jlink_file]
 #
 # Requires LG_PLACE (the labgrid-client place name whose probe to use, e.g.
-# "e1m-aen-evk-02" -- you must already hold that place's reservation; see
+# "<your-bench-place>" -- you must already hold that place's reservation; see
 # bench-env.sh). Every JLinkExe session below is routed through
 # bench_jlink_run() (bench-env.sh, alp-sdk#2064), which resolves the probe
 # from LG_PLACE and masks every other probe in a private namespace. Export
@@ -94,7 +94,7 @@ if [ -n "$AEN_JLINK_RUN" ]; then
 		echo "         export BENCH_PLACE=<labgrid place> (or LG_PLACE, which" >&2
 		echo "         bench-env.sh already resolves SE_UART/LG_SWD_PATH from)," >&2
 		echo "         e.g.:" >&2
-		echo "             export BENCH_PLACE=e1m-aen-evk-02" >&2
+		echo "             export BENCH_PLACE=<your-bench-place>" >&2
 		echo "         (you must already hold that place's labgrid reservation)." >&2
 		exit 2
 	fi
@@ -344,7 +344,7 @@ bench_jlink_assert_aen_dpidr "$WORKDIR/preflight.out" "RAM-run preflight" || exi
 # --- Session 1: LOAD + START the app, then disconnect leaving it RUNNING --
 #
 # Split from the read-back into a SEPARATE JLinkExe session (alp-sdk#2076).
-# Bench-measured on e1m-aen-evk-02/-03 (2026-09-13): an in-session second
+# Bench-measured on two E1M-AEN803 modules (serial 2026W36-0001, serial 2026W36-0002) (2026-09-13): an in-session second
 # `halt` issued after `go` + `Sleep` returned an INCOHERENT core
 # (SP=0x00000030, FAULTMASK=378E, the FPS registers mirroring R0-R14, no
 # MSPLIM block at all) and the `mem8` that followed it failed outright
@@ -357,7 +357,7 @@ bench_jlink_assert_aen_dpidr "$WORKDIR/preflight.out" "RAM-run preflight" || exi
 #
 # Ending on a plain `exit` after `go` -- not `qc`, and no `halt`/`r` first
 # -- leaves the target running: BENCH-VERIFIED 2026-09-13 on
-# e1m-aen-evk-02 and e1m-aen-evk-03 (examples/peripheral-io/blink, whose
+# two E1M-AEN803 modules, serial 2026W36-0001 and serial 2026W36-0002 (examples/peripheral-io/blink, whose
 # main() never returns; 6 of 6 clean runs, three per board). Every load
 # transcript ended `loadbin ... O.K.`, `setpc`, `go`, `exit`; a separate
 # attach immediately after found the core still running (`CPU is not
@@ -461,8 +461,8 @@ _session1_window() {
 # -- it needs its own check.
 #
 # POSITIVE check, scoped to an EXACT window, not a whole-transcript
-# substring scan -- both were bench-measured wrong on evk-02/evk-03
-# (2026-09-13, real JLinkExe V9.74 through jlink-run.sh):
+# substring scan -- both were bench-measured wrong on two E1M-AEN803 modules
+# (serial 2026W36-0001/2026W36-0002, 2026-09-13, real JLinkExe V9.74 through jlink-run.sh):
 #   - too narrow: a real successful loadbin puts SIX lines (the implicit-
 #     reset banner + "Downloading file [...]...") between the echoed
 #     command and "O.K.", not "immediately after" as an earlier draft of
@@ -532,11 +532,17 @@ sleep "$SLEEP_S"
 # "memory reads work while the CPU runs; register reads error out
 # harmlessly"). Adding a halt here would reintroduce the in-session halt
 # this fix removes, just moved into the second session.
-cat > "$WORKDIR/read.jlink" <<EOF
-connect
-mem8 $BUF, $SIZE
-exit
-EOF
+# mem8 is chunked at 0x10000 bytes (JLinkExe rejects a single NumBytes above
+# that, alp-sdk#2313) via the shared bench_mem8_chunks() helper -- a $SIZE
+# above 0x10000 becomes N 'mem8' lines here instead of one that JLinkExe
+# would reject outright. The decoder below is unaffected: it scans every
+# matching 'ADDR = HH HH ...' line in file order, which is address order.
+MEM8_LINES="$(bench_mem8_chunks "$BUF" "$SIZE")" || exit $?
+{
+	echo connect
+	printf '%s\n' "$MEM8_LINES"
+	echo exit
+} > "$WORKDIR/read.jlink"
 # stderr merged, same reason as session 1 above.
 jlink_run -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommandFile "$WORKDIR/read.jlink" > "$WORKDIR/read.out" 2>&1 || true
 # JLinkExe exits 0 even when it never opened the probe, so the `|| true` above
@@ -548,17 +554,11 @@ _connect_or_exit "$WORKDIR/read.out" "RAM-run $(basename "$BD") (read)"
 # established for why (the very defect this file fixes) -- `mem8` can
 # report "Could not read memory." while every prior command in the same
 # session succeeded, and bench_jlink_assert_connected above does not see
-# that as a connect failure. Check the read's OWN outcome before decoding:
-# an explicit read failure, or a transcript with no `ADDR = HH HH ...` dump
-# line at all, must not decode as a silent empty console.
-if grep -qi "Could not read memory" "$WORKDIR/read.out"; then
-	echo "!! ram-run: mem8 reported 'Could not read memory' -- refusing to decode this as a console." >&2
-	exit 9
-fi
-if ! grep -qE '^[0-9A-Fa-f]+ = ' "$WORKDIR/read.out"; then
-	echo "!! ram-run: no memory dump line in the read session's transcript -- refusing to decode an empty read as a console." >&2
-	exit 9
-fi
+# that as a connect failure. Check the read's OWN outcome before decoding
+# (an explicit read failure, a whole-transcript-empty read, or one chunk's
+# dump line missing while the others come back) via the shared helper --
+# see its header comment in bench-env.sh (alp-sdk#2313).
+bench_mem8_verify_chunks "ram-run" "$WORKDIR/read.out" "$MEM8_LINES" || exit $?
 RUN_OK=1
 echo "----- RAM console (decoded) -----"
 # Decode the 'ADDR = HH HH ...' mem8 lines into ASCII; stop at first NUL run.

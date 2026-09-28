@@ -22,7 +22,7 @@
  * r2 -- see include/alp/boards/alp_e1m_evk.h's I2S mux block.  AUDIBLE amp
  * output additionally needs U46 to be a 3257-type bus switch with VCC on
  * +3V3, OR a switch rated for 1.8 V VCC (untested)
- * (on e1m-aen-evk-03, VCC was moved to +3V3 between a silent run and
+ * (on E1M-AEN803 serial 2026W36-0002, VCC was moved to +3V3 between a silent run and
  * an audible run, not established as the only difference; the as-built
  * 74LVC157 can never pass this direction regardless, see the same header)
  * + the mux routed + the TAS2563 configured; this example validates only

@@ -50,7 +50,7 @@ still retry to budget exactly as before.
 
 ### Documented — `aen-evk-demo` phase 8 now diagnoses a failed `BLE_ENABLE` instead of just failing it (#2035)
 
-`BLE_ENABLE (0x30) -> -4` against `e1m-aen-evk-01` left two explanations
+`BLE_ENABLE (0x30) -> -4` against an AEN EVK bench unit left two explanations
 indistinguishable: the link wedged one transfer behind, or `BLE_ENABLE`
 genuinely failed on the device with the failure masked as a timeout. Phase 8
 now snapshots `rx_scratch[0..3]` left by `BLE_ENABLE`'s own last attempt

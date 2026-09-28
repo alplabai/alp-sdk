@@ -32,7 +32,7 @@ _ORACLE_DIR = Path(__file__).resolve().parent / "oracle"
 
 
 def _load(name: str) -> dict:
-    return json.loads((_ORACLE_DIR / f"{name}.build-plan.json").read_text())
+    return json.loads((_ORACLE_DIR / f"{name}.build-plan.json").read_text(encoding="utf-8"))
 
 
 def _fails(oracle: dict, mutated: dict) -> bool:

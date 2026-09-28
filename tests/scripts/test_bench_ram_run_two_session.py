@@ -4,7 +4,8 @@ sessions, routed through the board-farm's per-probe isolation wrapper, with
 no in-session halt/reset between `go` and `mem8`, and no silent decode of a
 failed load or a failed read.
 
-Bench-measured on e1m-aen-evk-02/-03 (2026-09-13): an in-session second
+Bench-measured on two E1M-AEN803 modules, serial 2026W36-0001 and serial
+2026W36-0002 (2026-09-13): an in-session second
 `halt` issued after `go` + `Sleep` returned an incoherent core and the `mem8`
 that followed it failed outright, on an app a separate, read-only attach
 proved was still running cleanly. A later bench run (examples/peripheral-io/
@@ -46,7 +47,7 @@ def _bash_can_run_a_script() -> bool:
     try:
         probe = subprocess.run(
             ["bash", "-c", "printf ok"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -81,7 +82,7 @@ def _awk_has_strtonum() -> bool:
     try:
         probe = subprocess.run(
             ["awk", 'BEGIN{strtonum("0")}'],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -114,10 +115,6 @@ def _needs_e2e(func):
     return _NEEDS_BASH(_NEEDS_LINUX(_NEEDS_STRTONUM_AWK(func)))
 
 
-# A fake mem8 dump line whose bytes ASCII-decode to "hi" -- proves the
-# existing decoder still runs unchanged against session 2's transcript.
-_FAKE_MEM8_LINE = "20000D00 = 68 69 00 00"
-
 _FAKE_READELF = """\
 #!/usr/bin/env bash
 if [ "$1" = "-h" ]; then
@@ -143,7 +140,7 @@ echo "20000d00 D ram_console_buf"
 """
 
 # Verbatim from a real JLinkExe V9.74 transcript through jlink-run.sh on
-# e1m-aen-evk-02 (2026-09-13) -- SIX lines between the echoed `loadbin`
+# E1M-AEN803 serial 2026W36-0001 (2026-09-13) -- SIX lines between the echoed `loadbin`
 # command and `O.K.`, not "immediately after" (the bug a `grep -A3` window
 # missed). Used as the fake wrapper's SUCCESSFUL loadbin reply so the
 # ordinary happy-path tests below exercise the real shape, not a
@@ -235,6 +232,7 @@ fi
 echo "Found SW-DP with ID 0x4C013477"
 total_loadbins=$(grep -c '^loadbin' "$script")
 idx=0
+mem8_idx=0
 while IFS= read -r line; do
 	echo "J-Link>$line"
 	case "$line" in
@@ -272,13 +270,26 @@ LOADBIN_OK_EOF
 		fi
 		;;
 	mem8*)
+		# Echo a dump line ADDRESSED AT THE REQUESTED CHUNK, not always the
+		# same fixed address -- a real JLinkExe dump starts at the address
+		# it was asked to read, and ram-run.sh's per-chunk dump-line guard
+		# (alp-sdk#2313) checks each chunk's OWN start address, not just
+		# "a dump line exists somewhere".
+		_req_addr="$(printf '%s\\n' "$line" | sed -E 's/^mem8 0[xX]([0-9A-Fa-f]+),.*/\\1/' | tr '[:lower:]' '[:upper:]')"
+		mem8_idx=$((mem8_idx + 1))
 		if [ -n "${{FAIL_READ_NOMEM:-}}" ]; then
-			echo "{_FAKE_MEM8_LINE}"
+			echo "$_req_addr = 68 69 00 00"
 			echo "Could not read memory."
 		elif [ -n "${{FAIL_READ_NODUMP:-}}" ]; then
 			:
+		elif [ "$mem8_idx" = "${{FAIL_READ_NODUMP_CHUNK:-0}}" ]; then
+			# alp-sdk#2313: stay silent for ONE chunk's mem8 only (the Nth
+			# mem8 command overall, 1-indexed) while every other chunk still
+			# dumps normally -- proves the per-chunk guard catches a single
+			# dropped chunk, not just a whole-transcript-empty read.
+			:
 		else
-			echo "{_FAKE_MEM8_LINE}"
+			echo "$_req_addr = 68 69 00 00"
 		fi
 		;;
 	esac
@@ -305,6 +316,7 @@ def _run_ram_run(
     preload: str | None = None,
     extra_env: dict[str, str] | None = None,
     create_elf: bool = True,
+    size: str = "0x10",
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     """Run the real ram-run.sh against a fake AEN_JLINK_RUN wrapper + fake
     toolchain.
@@ -381,12 +393,12 @@ def _run_ram_run(
     if extra_env:
         env.update(extra_env)
 
-    args = ["bash", str(RAM_RUN), str(bd), sleep_ms, "0x10"]
+    args = ["bash", str(RAM_RUN), str(bd), sleep_ms, size]
     if preload is not None:
         args.append(preload)
 
     res = subprocess.run(
-        args, capture_output=True, text=True, timeout=60, env=env,
+        args, capture_output=True, text=True, encoding="utf-8", timeout=60, env=env,
     )
     return res, calls, sandbox_tmpdir
 
@@ -407,7 +419,7 @@ def _assert_no_halt_or_reset(lines: list[str], where: str) -> None:
         token = ln.split()[0] if ln.split() else ""
         assert token not in _HALT_OR_RESET_TOKENS, (
             f"'{ln}' re-halts/resets the core in {where} -- this is the exact "
-            f"shape measured broken on evk-02/-03 (alp-sdk#2076): {lines}"
+            f"shape measured broken on two E1M-AEN803 bench modules (alp-sdk#2076): {lines}"
         )
         assert not ln.startswith("RSetType"), (
             f"'{ln}' issues a pin reset in {where}: {lines}"
@@ -429,9 +441,9 @@ def test_loadbin_go_and_mem8_are_in_separate_sessions(tmp_path: Path) -> None:
     # tmp_path (derived from this test's name) contains the literal
     # substring "mem8", so a bare `"mem8" in body` false-positives on the
     # `loadbin <path-containing-mem8> ...` line in the load+go session.
-    load_lines = [ln.strip() for ln in load_go.read_text().splitlines()]
-    read_lines = [ln.strip() for ln in read_back.read_text().splitlines()]
-    preflight_body = preflight.read_text()
+    load_lines = [ln.strip() for ln in load_go.read_text(encoding="utf-8").splitlines()]
+    read_lines = [ln.strip() for ln in read_back.read_text(encoding="utf-8").splitlines()]
+    preflight_body = preflight.read_text(encoding="utf-8")
 
     assert any(ln.startswith("loadbin ") for ln in load_lines), load_lines
     assert "go" in load_lines, load_lines
@@ -457,7 +469,7 @@ def test_loadbin_go_and_mem8_are_in_separate_sessions(tmp_path: Path) -> None:
     # BENCH_PLACE actually reached the wrapper -- the whole point of routing
     # through it (review finding 2).
     for i in (1, 2, 3):
-        assert (calls / f"place-{i}").read_text().strip() == "test-place"
+        assert (calls / f"place-{i}").read_text(encoding="utf-8").strip() == "test-place"
 
     # The decoder must still work unchanged against session 2's transcript.
     assert "hi" in res.stdout
@@ -470,14 +482,57 @@ def test_loadbin_go_and_mem8_are_in_separate_sessions(tmp_path: Path) -> None:
 
 
 @_needs_e2e
+def test_read_session_chunks_a_size_above_the_jlink_cap(tmp_path: Path) -> None:
+    """alp-sdk#2313: JLinkExe's own `mem8` caps NumBytes at 0x10000. A
+    buffer size above that must produce TWO `mem8` lines in the read
+    session's CommandFile (0x10000 + the remainder), routed through the
+    shared `bench_mem8_chunks()`, not a single oversized line JLinkExe
+    would silently reject."""
+    res, calls, _ = _run_ram_run(tmp_path, size="0x14000")
+    assert res.returncode == 0, f"expected success:\n{res.stdout}\n{res.stderr}"
+
+    call_files = sorted(calls.glob("call-*.jlink"), key=lambda p: int(p.stem.split("-")[1]))
+    assert len(call_files) == 3, [p.name for p in call_files]
+    _preflight, _load_go, read_back = call_files
+    read_lines = [ln.strip() for ln in read_back.read_text(encoding="utf-8").splitlines()]
+    mem8_lines = [ln for ln in read_lines if ln.startswith("mem8 ")]
+    assert len(mem8_lines) == 2, f"expected 2 chunked mem8 lines, got: {mem8_lines}"
+
+
+@_needs_e2e
+def test_session_two_a_dropped_chunk_is_a_hard_error(tmp_path: Path) -> None:
+    """alp-sdk#2313: the per-chunk dump-line guard (ram-run.sh, the loop
+    right after the whole-transcript 'any dump line at all' check) must
+    catch ONE chunk's mem8 going silently missing while every OTHER chunk
+    still dumps normally -- the whole-transcript check above it would not
+    notice this at all (it only asks "any dump line anywhere"). size=0x14000
+    chunks into two mem8 lines (0x10000 + 0x4000, bench_mem8_chunks());
+    FAIL_READ_NODUMP_CHUNK=2 silences only the second."""
+    res, calls, _ = _run_ram_run(
+        tmp_path, size="0x14000", extra_env={"FAIL_READ_NODUMP_CHUNK": "2"},
+    )
+
+    assert res.returncode == 9, f"expected exit 9:\n{res.stdout}\n{res.stderr}"
+    assert "RAM console (decoded)" not in res.stdout
+
+    call_files = sorted(calls.glob("call-*.jlink"), key=lambda p: int(p.stem.split("-")[1]))
+    _preflight, _load_go, read_back = call_files
+    read_lines = [ln.strip() for ln in read_back.read_text(encoding="utf-8").splitlines()]
+    mem8_lines = [ln for ln in read_lines if ln.startswith("mem8 ")]
+    assert len(mem8_lines) == 2, f"expected 2 chunked mem8 lines, got: {mem8_lines}"
+    second_chunk = mem8_lines[1]
+    assert f"no dump line for chunk '{second_chunk}'" in res.stderr, res.stderr
+
+
+@_needs_e2e
 def test_a_real_time_gap_separates_the_two_sessions(tmp_path: Path) -> None:
     """The host must actually sleep between sessions -- a deleted `sleep`
     call (review finding 7) would leave call 2 and call 3 back to back."""
     res, calls, _ = _run_ram_run(tmp_path, sleep_ms="500")
     assert res.returncode == 0, f"expected success:\n{res.stdout}\n{res.stderr}"
 
-    ts2 = float((calls / "ts-2").read_text().strip())
-    ts3 = float((calls / "ts-3").read_text().strip())
+    ts2 = float((calls / "ts-2").read_text(encoding="utf-8").strip())
+    ts3 = float((calls / "ts-3").read_text(encoding="utf-8").strip())
     gap = ts3 - ts2
     assert gap >= 0.4, (
         f"only {gap:.3f}s between the load+go session and the read session "
@@ -628,7 +683,7 @@ def test_a_preload_loadbin_success_does_not_mask_the_main_loadbin_failure(tmp_pa
     # bare substring count would double-count (the same class of
     # self-interference as the "mem8"-in-tmp_path trap elsewhere in this
     # file).
-    load_lines = (sorted(calls.glob("call-*.jlink"))[1]).read_text().splitlines()
+    load_lines = (sorted(calls.glob("call-*.jlink"))[1]).read_text(encoding="utf-8").splitlines()
     n_loadbins = sum(1 for ln in load_lines if ln.strip().startswith("loadbin "))
     assert n_loadbins == 2, f"expected exactly 2 loadbin lines (preload + main): {load_lines}"
 
@@ -657,7 +712,7 @@ def test_a_same_path_preload_loadbin_success_does_not_mask_the_main_loadbin_fail
         f"a same-path preload's own successful loadbin masked the main "
         f"image's failure:\n{res.stdout}\n{res.stderr}"
     )
-    load_lines = (sorted(calls.glob("call-*.jlink"))[1]).read_text().splitlines()
+    load_lines = (sorted(calls.glob("call-*.jlink"))[1]).read_text(encoding="utf-8").splitlines()
     n_loadbins = sum(1 for ln in load_lines if ln.strip().startswith("loadbin "))
     assert n_loadbins == 2, f"expected exactly 2 loadbin lines (preload + main): {load_lines}"
 
@@ -813,12 +868,12 @@ def _descendants_comm(pid: int) -> list[str]:
     (not just that session 1 finished) before signalling it."""
     out: list[str] = []
     try:
-        kids = Path(f"/proc/{pid}/task/{pid}/children").read_text().split()
+        kids = Path(f"/proc/{pid}/task/{pid}/children").read_text(encoding="utf-8").split()
     except OSError:
         return out
     for k in kids:
         try:
-            out.append(Path(f"/proc/{k}/comm").read_text().strip())
+            out.append(Path(f"/proc/{k}/comm").read_text(encoding="utf-8").strip())
         except OSError:
             pass
         out += _descendants_comm(int(k))
@@ -906,7 +961,7 @@ def test_a_sigterm_to_the_pid_during_the_inter_session_sleep_keeps_the_workdir(
     SLEEP_MS = 3000
     proc = subprocess.Popen(
         ["bash", str(RAM_RUN), str(bd), str(SLEEP_MS), "0x10"],
-        env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
     )
     deadline = _time.time() + 20
     while _time.time() < deadline and "sleep" not in _descendants_comm(proc.pid):

@@ -244,6 +244,8 @@ def _run_pipeline(decompress_cmd: list[str], dd_cmd: list[str]) -> _ProcOutcome:
                 check=False,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
         finally:
             stdout_pipe.close()
@@ -388,7 +390,8 @@ class YoctoWicFlash:
             proc = _run_pipeline(*pipeline)
         else:
             proc = subprocess.run(cmd, check=False,
-                                  capture_output=True, text=True)
+                                  capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                  env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         elapsed = time.monotonic() - start
         if proc.returncode == 0:
             return FlashResult(

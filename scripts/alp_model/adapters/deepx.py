@@ -28,7 +28,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from . import CompilerAdapter, Blob
+from . import CompilerAdapter, Blob, TargetSpec
 
 # dxcom does post-training quantization + compilation (torch/onnx under the
 # hood); minutes for a real model, but never unbounded in CI.
@@ -41,7 +41,8 @@ def _dxcom_version() -> str:
     lowercase console-script name 'dxcom') so a perf point written during a
     probe failure still carries the same token downstream consumers match on."""
     try:
-        proc = subprocess.run(["dxcom", "-v"], capture_output=True, text=True, timeout=60)
+        proc = subprocess.run(["dxcom", "-v"], capture_output=True, text=True, encoding="utf-8",
+                              env={**os.environ, "PYTHONIOENCODING": "utf-8"}, timeout=60)
     except (OSError, subprocess.SubprocessError):
         return "DX-COM <unknown>"
     m = re.search(r"DX-COM[^\d]*(\d+\.\d+\.\d+)", proc.stdout + proc.stderr)
@@ -62,7 +63,7 @@ class DeepxAdapter(CompilerAdapter):
         return src_format == "onnx"          # dxcom is an ONNX frontend
 
     def compile(self, source: Path, *, accel_config: str, out_dir: Path,
-                opts: dict | None = None) -> Blob:
+                opts: dict | None = None, target: TargetSpec | None = None) -> Blob:
         config = (opts or {}).get("config")
         if not config:
             raise RuntimeError(
@@ -72,7 +73,8 @@ class DeepxAdapter(CompilerAdapter):
         dst.mkdir(parents=True, exist_ok=True)
         cmd = ["dxcom", "-m", str(source), "-c", str(config), "-o", str(dst)]
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_DXCOM_TIMEOUT_S)
+            proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                                  env={**os.environ, "PYTHONIOENCODING": "utf-8"}, timeout=_DXCOM_TIMEOUT_S)
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(f"dxcom timed out after {exc.timeout}s") from exc
         if proc.returncode != 0:

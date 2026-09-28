@@ -20,7 +20,6 @@ captured in [`docs/bring-up-v2n-m1.md`](../../docs/bring-up-v2n-m1.md).
 | [`v2n-brd-i2c-bringup`](v2n-brd-i2c-bringup/)          | Patch-day diagnostic for the SoM's BRD_I2C management bus (Renesas RIIC8) -- scan, separate bus-level faults from per-device failures, then read-only probe every populated IC. |
 | [`v2n-eeprom-manifest-dump`](v2n-eeprom-manifest-dump/)| Hexdump + structured decode of the EEPROM manifest at offset 0x0000 (magic, schema_version, family, sku, hw_rev, serial, mfg_year/mfg_month/mfg_day, CRC32).            |
 | [`v2n-ethernet-dual`](v2n-ethernet-dual/)              | Bring up both RTL8211FDI PHYs (ET0 + ET1) -- probe, reset, autoneg, link, Wake-on-LAN config.                                                    |
-| [`v2n-rtc-multi-alarm`](v2n-rtc-multi-alarm/)          | Register per-source callbacks on the rv3028c7 multi-source alarm dispatcher (timer + periodic + clock-out + manual).                             |
 | [`v2n-temp-sensor`](v2n-temp-sensor/)                  | Read the on-module TMP112 once per second and print degrees Celsius.                                                                             |
 | [`v2n-pwm-fan-control`](v2n-pwm-fan-control/)          | Ramp a GD32-side PWM channel along a five-stop fan curve (25 kHz board, 0--100 % duty interpolation).                                          |
 | [`v2n-secure-element-sign`](v2n-secure-element-sign/)  | OPTIGA Trust M I2C_STATE probe; product-info/raw-APDU return `ALP_ERR_NOSUPPORT` until host-library integration.                                  |

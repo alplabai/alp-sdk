@@ -20,6 +20,7 @@ check used.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -48,6 +49,8 @@ def test_validate_metadata_survives_alp_model_deletion(tmp_path):
         cwd=tmp_path,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         timeout=120,
     )
     assert "alp_model" not in result.stderr, (

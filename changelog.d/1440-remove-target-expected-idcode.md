@@ -12,7 +12,7 @@ logged and continued on a mismatch — never fatal. So the field read as an
 armed wrong-board guard while functioning as inert documentation, and the
 value it carried, `0x6BA02477`, was not a GD32 measurement at all:
 `CHANGELOG.md` records it as a measurement of a *different* target on the
-same board — the V2N CM33 DAP on `e1mx-v2n-m1-01` (`Found SW-DP with ID
+same board — the V2N CM33 DAP on a V2N bench unit (`Found SW-DP with ID
 0x6BA02477`, `Found Cortex-M33 r0p4`). The only other GD32 candidate on
 record, `0x0BE12477`, has no attribution at all — no bench transcript, no
 datasheet reference, no commit message.

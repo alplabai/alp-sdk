@@ -2,7 +2,11 @@
 
 Status: Accepted — amended 2026-08-03 for the Python Tan port, 2026-08-12,
 2026-08-26; the original Rust/plans-only mechanism below remains the
-historical Phase 1/4 record.
+historical Phase 1/4 record. Note: [0022](0022-python-executor-renode-retirement.md)
+narrowly supersedes this ADR's Rust-executor clause and its `renode`
+command-surface entries, and [0026](0026-tan-owns-the-planner-outright.md)
+amends amendment clause 3 (alp-sdk's `alp_orchestrate` is no longer "the
+reference producer").
 Date: 2026-07-18 (Caner) · 2026-07-20 (Hakan co-sign, this commit)
 Deciders: alpCaner (alp-sdk), Hakan (alp-sdk-vscode)
 Supersedes: [0014](0014-build-plan-emit-cli-contract.md) — its
@@ -307,7 +311,12 @@ blocked until the remediation is met. Tracked in #855.
    the two-seam gate + the cross-repo trigger, then tag."* Re-verified against
    the code rather than assumed:
 
-   - **Oracle frozen — done.** Six fixtures under `tests/parity/oracle/`,
+   - **Oracle frozen — done.** Five fixtures under `tests/parity/oracle/`
+     (`audio_i2s-tone`, `connectivity_iot-fleet-ota`,
+     `multicore_heterogeneous-offload`, `multicore_rpmsg-aen`,
+     `multicore_rpmsg-v2n`; the sixth, `multicore_rpmsg-imx93`, was later
+     DELETED rather than edited — E1M-NX9101 imx93 r1 is `status: tbd` and
+     unbuildable, recorded in `ORACLE-PROVENANCE.txt`),
      provenance and every hand-reviewed field correction recorded in
      `ORACLE-PROVENANCE.txt` (the #862 `-DSB_CONF_FILE` anchor, and the #999
      `multicore_rpmsg-imx93` slices[1] `command`→`null` + `board-tree-missing`

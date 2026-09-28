@@ -39,8 +39,11 @@ cores:
     app: ./src
     # IoT toggles.  wifi:true wires the CC3501E bridge as the
     # <alp/iot.h> Wi-Fi backend on this AEN board; tls:true selects
-    # the mqtts:// (TLS) MQTT path.  See prj.conf for why
-    # CONFIG_MBEDTLS is held off in the build today.
+    # the mqtts:// (TLS) MQTT path.  CONFIG_MBEDTLS is no longer held
+    # off: the ssl_misc.h break that forced that is fixed at its root
+    # (ALP_SDK_MBEDTLS_PSA_CRYPTO, #2173), so every target builds the
+    # TLS-enabled configuration.  The remaining limit is the RNG, not
+    # the library -- see the README's TLS status section and #2192.
     iot:
       wifi: true
       tls:  true

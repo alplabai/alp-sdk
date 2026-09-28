@@ -38,7 +38,7 @@ ATOC over SWD in ~0.16 s, verifies it, then a reset of type `nRESET` (RSetType
 2) re-runs the SE boot ROM so the app boots from MRAM.
 
 Requires **J-Link V9.46+ DLL** (the bench has V9.50). Helper:
-`bench-builds/flash-jlink.sh`.
+`scripts/bench/aen/flash-jlink.sh`.
 
 > **Probe firmware gotcha.** A version-mismatched probe forces a J-Link
 > firmware update on first connect. That update **times out over a USB hub** —
@@ -185,11 +185,15 @@ ITCM so J-Link can `loadbin` + run. **Every** RAM-run app overlay must contain:
 ```dts
 / {
     chosen {
-        zephyr,flash = <&itcm>;
+        zephyr,flash = &itcm; /* path-ref form -- the pointer form
+                                 (<&itcm>) makes FLASH_SIZE=0 and
+                                 overflows the link */
         /delete-property/ zephyr,code-partition;
     };
 };
 ```
+
+(The shipped overlay is `scripts/bench/aen/aen-flowc-itcm.overlay`.)
 
 Combine it with the flow-B RAM console `prj.conf` above so you can read the
 result over SWD. Build with the carrier board target and the module paths:
@@ -225,7 +229,7 @@ normal, not a fault.
 start it:
 
 ```
-J-Link> loadbin build/zephyr/zephyr.bin, <ITCM-base>
+J-Link> loadbin build/zephyr/zephyr.bin <ITCM-base>
 J-Link> setpc <ITCM-base>
 J-Link> go
 ```
@@ -254,5 +258,5 @@ Then read the result with flow B (mem8 of `ram_console_buf`).
 | RAM console reads as all-zeros / garbage | Wrong `ram_console_buf` address (re-resolve from `zephyr.map`), or the app never ran (check flow C `go`), or `CONFIG_UART_CONSOLE` left enabled (must be `n`). |
 | J-Link: `Could not connect to the target device` | You used the **Alif part-number** device on an **older J-Link DLL** (pre-V9.46). Switch to the generic `-device Cortex-M55`, or update J-Link to V9.46+ — see [`aen-bench-bringup.md`](aen-bench-bringup.md) §1. |
 | J-Link: `Could not find core in CoreSight setup` | Fresh/un-provisioned SoM — the SES holds the M55. Provision an app first (flow A / [`aen-provisioning.md`](aen-provisioning.md)); then the debug-AP comes alive. |
-| Wrong SW-DP IDR (not `0x4C013477`) | Wrong target or reversed SWD wiring. The other two probes on this rack (both on place `e1mx-v2n-m1-01`; see `scripts/bench/aen/bench-env.sh`): `0x6BA02477` is the **bench-measured V2N CM33 DAP**; `0x0BE12477` is the only **GD32 bridge** candidate on record but is NOT bench-verified — no bench transcript, no datasheet reference, no commit message (#1369). Either seeing one of these means you're on the wrong chip. (`0x6BA02477` was previously labelled "the GD32/Cortex-M33" here — that was the generic Cortex-M33 expectation, not a GD32 measurement; #1512.) |
+| Wrong SW-DP IDR (not `0x4C013477`) | Wrong target or reversed SWD wiring. The other two probes on this rack (both on the V2N bench unit; see `scripts/bench/aen/bench-env.sh`): `0x6BA02477` is the **bench-measured V2N CM33 DAP**; `0x0BE12477` is the only **GD32 bridge** candidate on record but is NOT bench-verified — no bench transcript, no datasheet reference, no commit message (#1369). Either seeing one of these means you're on the wrong chip. (`0x6BA02477` was previously labelled "the GD32/Cortex-M33" here — that was the generic Cortex-M33 expectation, not a GD32 measurement; #1512.) |
 | After a J-Link reset the RAM-run image is gone | A reset is **SYSRESETREQ** → reboots the **SES**; ITCM contents and your `go` are lost. Re-`loadbin`/`setpc`/`go`; don't reset mid-loop. |

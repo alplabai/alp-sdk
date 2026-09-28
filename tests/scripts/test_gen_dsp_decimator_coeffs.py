@@ -6,6 +6,7 @@ that only ever exercises the "matches" path is exactly the proxy-check defect
 class (a check that looks right but never watched the negative case fail).
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -25,6 +26,8 @@ def test_check_passes_on_committed_dispatch_c():
         [sys.executable, str(SCRIPT), "--check"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
     assert proc.returncode == 0, proc.stderr
 

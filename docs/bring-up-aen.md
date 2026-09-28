@@ -71,7 +71,7 @@ Inventory check before powering anything:
 > [`alif-ospi.tsv`](../metadata/e1m_modules/aen/alif-ospi.tsv)) rather
 > than the Alif DevKit's -- and that example's PASS banner no longer
 > prints the stale "no part populated this batch" claim. The apply is
-> bench-verified on `e1m-aen-evk-02` and `e1m-aen-evk-03`: it is
+> bench-verified on two E1M-AEN803 modules (serial 2026W36-0001, serial 2026W36-0002): it is
 > fail-closed and runs before the clock-enable, so the device reaching
 > READY proves it returned 0. The pad-mux registers were **not** read
 > back, though, so "pinctrl applied without error" is measured and "the
@@ -378,8 +378,10 @@ of cable insert.
 
 These are optional and SKU-/carrier-dependent.  The E1M-EVK
 carries a `CAM_MUX_PI3WVR626` MIPI CSI 2:1 mux (selected via
-`EVK_PIN_CAM_MUX_SEL`), but no camera-mux truth table is published
-yet -- treat the wiring as TBD until the carrier camera doc lands.
+`EVK_PIN_CAM_MUX_SEL`); its truth table and the Raspberry Pi
+connector (J5, input A) wiring are in
+[`boards/e1m-evk.md`](boards/e1m-evk.md), which also shows the
+`e1m_evk_rpi_csi` shield build for a Raspberry Pi camera module.
 
 
 **Bench-settled 2026-09-05** on an **R2** module (`E1M-AEN801` 2626-R2, Flow A,
@@ -505,19 +507,23 @@ top of the per-subsystem checks.
    in §7 -- but a *non-ACKing* EEPROM is a wiring/pull-up fault.
 
 4. **CC3501E PING / GET_VERSION.**  Bring the on-module Wi-Fi/BLE
-   coprocessor to life over the inter-chip SPI1 bus.  Issue the
-   two META-group opcodes from the bridge host driver (see the
-   wire frame in `cc3501e-bridge-firmware:DESIGN.md`):
-   `PING` (opcode `0x00`) then `GET_VERSION` (opcode `0x01`).
-   A standalone host-side helper for the M55 side is **TBD**
-   (only the device firmware ships today), so drive it from app
-   code via the bridge dispatch for now.
+   coprocessor to life over the inter-chip SPI1 bus.  The full
+   host-side driver ships in-tree: `cc3501e_init()` from
+   `<alp/chips/cc3501e.h>` (`chips/cc3501e/`) issues
+   `PING` (opcode `0x00`) then `GET_VERSION` (opcode `0x01`)
+   over the bridge dispatch and refuses a protocol-major
+   mismatch; the runnable `cc3501e_bridge_bringup()` helper is
+   in `examples/aen/aen-cc3501e-bringup/`, and the
+   `alp companion` console verbs exercise the link
+   interactively.
 
    * `PING` must return `RESP_OK` with empty data -- the liveness
      signal.
    * `GET_VERSION` must return the firmware's wire-protocol
      version; cross-check it against
      `cc3501e-bridge-firmware:prebuilt/CHANGELOG.md`.
+     Modules ship factory-flashed with the latest CC3501E
+     firmware (v0.9.0 as of this writing).
 
    No `RESP_OK` usually means the CC3501E hasn't been flashed yet
    (`helper_firmware[].firmware_path` is still TBD in the SKU

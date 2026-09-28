@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import re
 import subprocess
 import sys
@@ -131,7 +132,8 @@ def _composed_cc3501e_gpio_routes(board_yaml: Path) -> dict[str, int]:
     proc = subprocess.run(
         [sys.executable, str(ALP_PROJECT), "--input", str(board_yaml),
          "--emit", "composed-route-table"],
-        capture_output=True, text=True, check=True,
+        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=True,
     )
     composed = json.loads(proc.stdout)
     reserved = _tsv_reserved_pads()

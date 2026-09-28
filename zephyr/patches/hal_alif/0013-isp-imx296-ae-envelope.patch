@@ -1,0 +1,365 @@
+diff --git a/drivers/isp/isp_wrapper/inc/imx296_ae_envelope.h b/drivers/isp/isp_wrapper/inc/imx296_ae_envelope.h
+new file mode 100644
+index 0000000..e1ad509
+--- /dev/null
++++ b/drivers/isp/isp_wrapper/inc/imx296_ae_envelope.h
+@@ -0,0 +1,147 @@
++/*
++ * Copyright (C) 2026 Alif Semiconductor.
++ * SPDX-License-Identifier: Apache-2.0
++ */
++#ifndef DRIVERS_ISP_ISP_WRAPPER_INC_IMX296_AE_ENVELOPE_H
++#define DRIVERS_ISP_ISP_WRAPPER_INC_IMX296_AE_ENVELOPE_H
++
++#include "vsios_type.h"
++
++/*
++ * alp-sdk fix (Alp Lab AB, #2287 Stage B unit 3): IMX296's real AE envelope,
++ * shared between sensor_attributes.h's AE_SNS_DEFAULT_S table and
++ * isp_param_conf.h's IMX296 .ae calibration block (patch 0013) -- same
++ * mechanism as ov5647_ae_envelope.h (patch 0011), see that header's own
++ * comment for why SetCalib() loading isp_param_conf.h's compiled-in
++ * calibration before isp_apply_ae() ever runs makes this sharing necessary.
++ * This header follows ov5647_ae_envelope.h's shape deliberately (same macro
++ * names, same _Static_assert round-trip band) so the two sensors' envelopes
++ * stay easy to compare; it is NOT a copy of OV5647's values -- every figure
++ * below is IMX296-specific, derived from the Sony IMX296LQR-C datasheet
++ * (pp.44, 49, 56, 60), the ONLY source used (clean-room -- no other
++ * IMX296 driver or calibration table was consulted for these numbers).
++ *
++ * Sourcing (all-pixel scan mode, master mode, page references to the
++ * datasheet PDF as paginated):
++ *   - fullLines (VMAX, p.49/p.56): 1118 lines/frame at the datasheet's
++ *     master-mode timing example.
++ *   - fps (p.44/p.56): 60.3 frame/s at that VMAX -- ISP_SNS_FPS_ACCU-scaled
++ *     below (*100) for the AE_SNS_DEFAULT_S struct field, same convention
++ *     sensor_attributes.h's other entries use; IMX296_AE_FPS_X10 (this
++ *     header) keeps ONE extra decimal digit (603 = 60.3*10) so the
++ *     microsecond conversion below stays integer-only without losing the
++ *     fractional frame rate OV5647's integer-fps envelope didn't need.
++ *   - minIntLine/maxIntLine: exposure LINES (this library's own unit, VIDEO_CID_EXPOSURE),
++ *     1 and VMAX - 14 = 1104, NOT the sensor's SHS register directly -- SHS is inversely
++ *     related (exposure_lines = VMAX - SHS, p.60) and has its OWN, DIFFERENT legal range;
++ *     the datasheet's own legal floor is SHS=4 (p.60's "Register List of Shutter setting",
++ *     4 <= SHS <= VMAX - 1), which would invert to a 1114-line ceiling -- but bench evidence
++ *     (E1M-AEN803 2026W36-0001, runs 304 vs 306) is SHS=4 produces a completely flat, black
++ *     frame with NO scene content at all (gain held at 0, ruling gain out as the cause),
++ *     while SHS=14 with the SAME ROI/timing produces a real (if still imperfect -- runs
++ *     304-306's own open finding, see isp_apply_ae()'s comment) scene. NOT unexplained: the
++ *     ROI mode's own frame-rate table (p.53/p.61) tabulates lines-per-frame as
++ *     VTR = ROIWV1 + 30 = 990 (this driver's ROIWV1 = 960) -- but zephyr/drivers/video/
++ *     imx296.c deliberately keeps VMAX at its all-pixel-scan-mode value, 1118, in ROI mode
++ *     too (see that file's own ROI-mode comment), so run 304's SHS=4 failure was observed in
++ *     a lines-per-frame configuration the datasheet never itself tabulates SHS=4 against.
++ *     1104 is a bench-proven WORKAROUND for THIS untabulated VMAX=1118 ROI configuration, not
++ *     an isolated root cause. Clamped to SHS=14 (IMX296_SHS_DEFAULT, imx296.c -- the sensor's
++ *     OWN power-on-reset default, independently bench-proven to produce an image) as a
++ *     conservative floor until ROI mode switches to the tabulated VTR: SHS=VMAX-1 (its
++ *     CEILING) gives exposure=1, SHS=14 (this clamp) gives exposure=VMAX-14=1104.
++ *   - minAgain/maxAgain (p.56, GAIN register 0x3204-0x3205, 0.1 dB/count):
++ *     1024 (0 dB = 1.0x, library units) and round(1024 * 10^(240/200)) =
++ *     16229 (24.0 dB), NOT the register's full 0-480/0.0-48.0 dB range --
++ *     bench run 312 (E1M-AEN803 2026W36-0001, night room, camera-mjpeg-
++ *     stream) ran AE to the register's full ceiling (48.0 dB, GAIN=0x1e0)
++ *     in a dim scene: the resulting frame was noisy enough to blow the
++ *     encoder's 160 KiB JPEG output-buffer budget on every subsequent
++ *     encode (see examples/connectivity/camera-mjpeg-stream/src/main.c's
++ *     jpeg_quality_ladder use). p.56's gain-vs-code plot (not a numeric
++ *     table -- read off the graph, not quoted from labelled rows) shows
++ *     the response bending at 240 (24.0 dB): ANALOG gain below that code,
++ *     DIGITAL gain layered on top above it -- digital gain multiplies the
++ *     sensor's OWN read noise along with the signal, it does not add
++ *     photon signal the way analog (pre-ADC) gain does, so the top half
++ *     of the register's range is PLAUSIBLY noisier per dB than the
++ *     bottom half for a dim scene, consistent with runs 305/310's own
++ *     noise observations at high gain -- but bench run 313 (same board,
++ *     same scene class, this cap now in effect) shows no overflow AT the
++ *     24.0 dB cap with no digital gain reached at all, which is not the
++ *     same evidence as a controlled comparison AT the higher gains (a
++ *     different, brighter scene in run 313 could equally explain it).
++ *     The digital-gain-is-noisier explanation is plausible, not proven.
++ *     Capping the AE library's own ceiling at the analog/digital bend
++ *     (240, 24.0 dB) keeps the 3A loop out of the digital-gain half
++ *     entirely regardless of which explanation is right; VIDEO_CID_
++ *     ANALOGUE_GAIN's driver-side control range (zephyr/drivers/video/
++ *     imx296.c) is UNCHANGED at the full 0-480 -- a caller setting gain
++ *     manually (as examples/aen/aen-isp-capture's AEN_ISP_IMX296_GAIN
++ *     option does) can still reach the full register range; only the AE
++ *     library's autonomous ceiling is lowered -- isp_pico.c's
++ *     isp_apply_ae() also now clamps the ceiling it PUSHES from that
++ *     wider sensor range to match this same 240 (Kconfig
++ *     VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS), so the two agree instead of
++ *     the push silently overwriting this calibration's lower ceiling
++ *     every isp_stream_start() (bench run 313's "AE attr mismatch after
++ *     set" log). Computed the SAME way zephyr/drivers/video/
++ *     isp_sns_gain_conv.h's isp_gain_db_tenths_table[240] is (that table
++ *     is alp-sdk-side, not reachable from this hal_alif header, hence the
++ *     separate literal here; the two must stay in sync by hand, same
++ *     by-hand-invariant status ov5647_ae_envelope.h's own comment
++ *     documents for ITS struct/macro duplication).
++ *   - dgain (p.56, no separate digital-gain register documented for
++ *     this sensor): pinned to 1024 (unity), same convention as OV5647's
++ *     envelope -- all headroom flows through the analogue GAIN register,
++ *     now capped below the digital half of its own range (see above).
++ */
++#define IMX296_AE_FULL_LINES 1118 /* VMAX, master-mode timing example */
++#define IMX296_AE_FPS_X10    603  /* 60.3 fps * 10 -- see header comment */
++#define IMX296_AE_MAX_INT_LINE 1104 /* VMAX - 14 (SHS=14 floor, bench-clamped -- SHS=4 is dark, see header comment) */
++#define IMX296_AE_MIN_AGAIN     1024  /* 1x floor, library units (1x = 1024) */
++#define IMX296_AE_MAX_AGAIN     16229 /* 24.0 dB, analog-only ceiling -- see header comment (bench run 312) */
++#define IMX296_AE_MIN_DGAIN     1024   /* unity -- no separate digital gain register */
++#define IMX296_AE_MAX_DGAIN     1024   /* unity, matching MIN (see OV5647 envelope's rationale) */
++
++_Static_assert(IMX296_AE_FULL_LINES == 1118, "drifted from sensor_attributes.fullLines");
++_Static_assert(IMX296_AE_MAX_INT_LINE == 1104, "drifted from sensor_attributes.maxIntLine");
++_Static_assert(IMX296_AE_MAX_AGAIN == 16229, "drifted from sensor_attributes.maxAgain");
++_Static_assert(IMX296_AE_MIN_AGAIN == 1024, "drifted from sensor_attributes.minAgain");
++_Static_assert(IMX296_AE_MAX_DGAIN == 1024, "drifted from sensor_attributes.maxDgain");
++_Static_assert(IMX296_AE_MIN_DGAIN == 1024, "drifted from sensor_attributes.minDgain");
++
++/*
++ * Exposure ceiling in MICROSECONDS, same derivation ov5647_ae_envelope.h's
++ * OV5647_AE_EXP_TIME_MAX_US uses (see that header's own comment for the
++ * full round-trip-guard rationale) -- generalised for a NON-integer frame
++ * rate via IMX296_AE_FPS_X10 (fps*10): line-time_us = 1e6 / (fullLines *
++ * fps) = 1e7 / (fullLines * fps_x10), so
++ * exp_time_max_us = maxIntLine * 1e7 / (fullLines * fps_x10).
++ */
++#define IMX296_AE_EXP_TIME_MAX_US                                                                \
++	((vsi_u32_t)((vsi_u64_t)IMX296_AE_MAX_INT_LINE * 10000000 /                              \
++		      ((vsi_u64_t)IMX296_AE_FULL_LINES * IMX296_AE_FPS_X10)))
++
++/*
++ * Round-trip guard, same [ceiling-1, ceiling] band rationale as
++ * ov5647_ae_envelope.h's own (integer truncation only ever rounds the
++ * forward conversion DOWN, so an upper-only check can never fail -- the
++ * lower bound is what actually catches a unit/order slip). Round-trip
++ * formula (inverse of the macro above, fps_x10 cancels its own *10):
++ * lines = exp_time_us * fullLines * fps_x10 / 10000000.
++ */
++_Static_assert(((vsi_u64_t)IMX296_AE_EXP_TIME_MAX_US *
++		 ((vsi_u64_t)IMX296_AE_FULL_LINES * IMX296_AE_FPS_X10) / 10000000) <=
++		       IMX296_AE_MAX_INT_LINE,
++	       "IMX296_AE_EXP_TIME_MAX_US round-trips to more lines than IMX296_AE_MAX_INT_LINE");
++_Static_assert(((vsi_u64_t)IMX296_AE_EXP_TIME_MAX_US *
++		 ((vsi_u64_t)IMX296_AE_FULL_LINES * IMX296_AE_FPS_X10) / 10000000) >=
++		       IMX296_AE_MAX_INT_LINE - 1,
++	       "IMX296_AE_EXP_TIME_MAX_US round-trips to far fewer lines than "
++	       "IMX296_AE_MAX_INT_LINE -- check for a unit or operand-order slip");
++_Static_assert((vsi_u64_t)IMX296_AE_MAX_INT_LINE <= 0xFFFFF,
++	       "IMX296_AE_MAX_INT_LINE (isp_api_wrapper.c's VIDEO_CID_EXPOSURE writeback scale, "
++	       "1 ctrl unit per line for IMX296) overflows the 20-bit video-ctrl exposure field");
++
++#endif /* DRIVERS_ISP_ISP_WRAPPER_INC_IMX296_AE_ENVELOPE_H */
+diff --git a/drivers/isp/isp_wrapper/inc/isp_param_conf.h b/drivers/isp/isp_wrapper/inc/isp_param_conf.h
+index 525217d..e8f2e8b 100644
+--- a/drivers/isp/isp_wrapper/inc/isp_param_conf.h
++++ b/drivers/isp/isp_wrapper/inc/isp_param_conf.h
+@@ -23,6 +23,16 @@
+  */
+ #include "ov5647_ae_envelope.h"
+ 
++/*
++ * alp-sdk fix (Alp Lab AB, #2287 Stage B unit 3): same reasoning as the
++ * ov5647_ae_envelope.h include above, for IMX296's IMX296_AE_* macros
++ * (imx296_ae_envelope.h) -- only pulled in when the IMX296 calibration is
++ * actually selected, same guard pattern as the .ae block's #elif below.
++ */
++#if defined(CONFIG_VIDEO_ISP_VSI_CALIB_IMX296)
++#include "imx296_ae_envelope.h"
++#endif /* defined(CONFIG_VIDEO_ISP_VSI_CALIB_IMX296) */
++
+ #ifdef __cplusplus
+ extern "C"{
+ #endif
+@@ -126,6 +136,40 @@ static ISP_CALIB_DATA_S isp_calib_param = {
+ 				.aeRunInterval = 1,
+ 				.aeTarget = CONFIG_VIDEO_ISP_VSI_AE_TARGET,
+ 				.dampOver = 0x40,
++#elif defined(CONFIG_VIDEO_ISP_VSI_CALIB_IMX296)
++			/*
++			 * alp-sdk fix (Alp Lab AB, #2287 Stage B unit 3): same
++			 * mechanism as the OV5647 arm above, IMX296's own
++			 * envelope instead (imx296_ae_envelope.h's IMX296_AE_*
++			 * macros -- see that header's comment for the datasheet
++			 * sourcing). AWB/CCM stay on the ARX3A0 #else arm for
++			 * IMX296 below (this #elif only replaces the .ae block)
++			 * -- there is no IMX296-fitted AWB/CCM calibration yet
++			 * (#2287 unit 4); reusing ARX3A0's existing AWB/CCM
++			 * defaults here compiles and runs, it does not colour-
++			 * calibrate IMX296.
++			 */
++			.manualAttr = {
++				.intTime = IMX296_AE_EXP_TIME_MAX_US / 2,
++				.again = IMX296_AE_MIN_AGAIN,
++				.dgain = IMX296_AE_MIN_DGAIN,
++			},
++			.autoAttr = {
++				.expTimeRange = {
++					.min =  32,
++					.max =  IMX296_AE_EXP_TIME_MAX_US,
++				},
++				.againRange = {
++					.min = IMX296_AE_MIN_AGAIN,
++					.max = IMX296_AE_MAX_AGAIN,
++				},
++				.dgainRange = {
++					.min = IMX296_AE_MIN_DGAIN,
++					.max = IMX296_AE_MAX_DGAIN,
++				},
++				.aeRunInterval = 1,
++				.aeTarget = CONFIG_VIDEO_ISP_VSI_AE_TARGET,
++				.dampOver = 0x40,
+ #else /* ARX3A0 (Alif's stock calibration, unchanged) */
+ 			.manualAttr = {
+ 				.intTime = 100000,
+diff --git a/drivers/isp/isp_wrapper/inc/sensor_attributes.h b/drivers/isp/isp_wrapper/inc/sensor_attributes.h
+index 369cc27..e7343f6 100644
+--- a/drivers/isp/isp_wrapper/inc/sensor_attributes.h
++++ b/drivers/isp/isp_wrapper/inc/sensor_attributes.h
+@@ -79,6 +79,43 @@ extern "C"{
+  * left at this file's own defaults -- algorithm tuning constants, not
+  * sensor register facts, expect a bench pass.
+  */
++/*
++ * alp-sdk fix (Alp Lab AB, #2287 Stage B unit 3): this table used to be
++ * ONE unconditional OV5647-derived literal block (patch 0006) regardless of
++ * which sensor a build actually selects. IMX296_AE_* (imx296_ae_envelope.h)
++ * gives IMX296 its OWN facts instead of inheriting OV5647's by accident --
++ * see that header's own comment for the datasheet sourcing. The OV5647 arm
++ * below (the #else) is UNCHANGED from patch 0006 -- same literals, same
++ * comments -- so an OV5647 (or any non-IMX296) build's sensor_attributes
++ * stays bit-identical to before this patch.
++ */
++#if defined(CONFIG_VIDEO_ISP_VSI_CALIB_IMX296)
++static AE_SNS_DEFAULT_S sensor_attributes = {
++	.fullLinesMax = 0xFFFF,
++	.fullLinesStd = 1118,
++	.fullLines = 1118,
++	.fps = 60 * ISP_SNS_FPS_ACCU + 30, /* 60.3 fps -- see imx296_ae_envelope.h */
++	.maxIntLine = 1104,
++	.minIntLine = 0x1,
++	.intLineStep = 1,
++	.maxAgain = 16229, /* 24.0 dB analog-only ceiling, bench run 312 -- see imx296_ae_envelope.h */
++	.minAgain = 1024,
++	.againStep = 1,
++	.maxDgain = 1024,
++	.minDgain = 1024,
++	.dgainStep = 1,
++	.aeRunInterval = 1,
++	.aeTarget = CONFIG_VIDEO_ISP_VSI_AE_TARGET,
++
++	.dampOver = 0x40,
++	.dampUnder = 0x40,
++	.tolerance = 1,
++
++	.initExposure = 80,
++	.aeMode = AE_MODE_FIX_FRAME_RATE,
++	.gainThreshold = 1024,
++};
++#else
+ static AE_SNS_DEFAULT_S sensor_attributes = {
+ 	.fullLinesMax = 0xFFFF,
+ 	.fullLinesStd = 3149,
+@@ -104,6 +141,7 @@ static AE_SNS_DEFAULT_S sensor_attributes = {
+ 	.aeMode = AE_MODE_FIX_FRAME_RATE,
+ 	.gainThreshold = 1024,
+ };
++#endif /* defined(CONFIG_VIDEO_ISP_VSI_CALIB_IMX296) */
+ 
+ /*
+  * alp-sdk fix (Alp Lab AB, #2271): isp_param_conf.h's OV5647 .ae calibration
+@@ -121,6 +159,15 @@ static AE_SNS_DEFAULT_S sensor_attributes = {
+  * literals, not this struct silently drifting from either).
+  */
+ #include "ov5647_ae_envelope.h"
++#if defined(CONFIG_VIDEO_ISP_VSI_CALIB_IMX296)
++/*
++ * alp-sdk fix (Alp Lab AB, #2287 Stage B unit 3): same by-hand-invariant
++ * status as ov5647_ae_envelope.h's own include above -- isp_param_conf.h's
++ * IMX296 .ae calibration block (patch 0013) needs these SAME facts as the
++ * AE_SNS_DEFAULT_S #if arm above.
++ */
++#include "imx296_ae_envelope.h"
++#endif /* defined(CONFIG_VIDEO_ISP_VSI_CALIB_IMX296) */
+ 
+ #ifdef __cplusplus
+ }
+diff --git a/drivers/isp/isp_wrapper/src/isp_api_wrapper.c b/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
+index 0442cea..d193d34 100644
+--- a/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
++++ b/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
+@@ -64,6 +64,23 @@
+ #include "vsios_log.h"
+ 
+ #include <zephyr/logging/log.h>
++
++/*
++ * alp-sdk fix (Alp Lab AB, #2287 Stage B unit 3): the AE gain/exposure
++ * writeback below used to hardcode OV5647's LINEAR "*16/ISP_SNS_GAIN_ACCU"
++ * and "*16" scaling directly -- wrong for IMX296's LOGARITHMIC GAIN
++ * register (0.1 dB/count). These two functions (implemented in alp-sdk's
++ * zephyr/drivers/video/isp_pico.c, a DIFFERENT translation unit in the
++ * SAME final link -- isp_pico.c is the portable, Kconfig-aware owner of
++ * this conversion, this file just calls it) pick the right conversion at
++ * runtime via CONFIG_VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS/_REG_PER_1X/
++ * _EXPOSURE_CTRL_PER_LINE (zephyr/kconfigs/vendor-alif-peripherals.kconfig).
++ * OV5647 (CONFIG_VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS=n, default REG_PER_1X=16,
++ * default EXPOSURE_CTRL_PER_LINE=16) computes the SAME values these two
++ * lines used to hardcode -- bit-identical output for that path.
++ */
++extern uint32_t isp_sns_gain_ctrl_from_lib(uint32_t total_1024);
++extern uint32_t isp_sns_exposure_ctrl_from_lines(uint32_t lines);
+ LOG_MODULE_REGISTER(isp_wrapper, CONFIG_VIDEO_LOG_LEVEL);
+ 
+ #if defined(CONFIG_ISP_LIB_WB_MODULE)
+@@ -793,8 +810,12 @@ void isp_vsi_bottom_half(const struct device *dev,
+ 		 * generic VIDEO_CID_GAIN (no alp-sdk sensor driver registers
+ 		 * it) to VIDEO_CID_ANALOGUE_GAIN, which ov5647.c does.
+ 		 * totalGain is in this library's own fixed-point scale
+-		 * (ISP_SNS_GAIN_ACCU = 1024 = 1x); OV5647's AGC_GAIN register
+-		 * (0x350a) uses register value 0x10 = 1x -- scale by 16/1024.
++		 * (ISP_SNS_GAIN_ACCU = 1024 = 1x); the sensor's own gain
++		 * register scale (linear, e.g. OV5647's AGC_GAIN 0x350a =
++		 * reg 0x10 = 1x, or logarithmic, e.g. IMX296's GAIN
++		 * 0x3204-0x3205 = 0.1 dB/count) is converted by
++		 * isp_sns_gain_ctrl_from_lib() (alp-sdk fix, #2287 Stage B
++		 * unit 3) -- see its own comment above.
+ 		 */
+ 		struct video_control ctrl;
+ 		struct video_ctrl_query cq = {
+@@ -807,7 +828,7 @@ void isp_vsi_bottom_half(const struct device *dev,
+ 				sns_config.dGain) / ISP_SNS_GAIN_ACCU;
+ 
+ 		ctrl.id  = VIDEO_CID_ANALOGUE_GAIN;
+-		ctrl.val = (int32_t)((vsi_u64_t)totalGain * 16 / ISP_SNS_GAIN_ACCU);
++		ctrl.val = (int32_t)isp_sns_gain_ctrl_from_lib((uint32_t)totalGain);
+ 		computed_val = ctrl.val;
+ 		/*
+ 		 * alp-sdk fix (Alp Lab AB): saturate to the sensor's registered
+@@ -846,9 +867,13 @@ void isp_vsi_bottom_half(const struct device *dev,
+ 		/*
+ 		 * alp-sdk v4.4 video-API port (Alp Lab AB): same 3-arg ->
+ 		 * struct video_control port as above. sns_config.intLine is
+-		 * in raw sensor LINES; ov5647.c's VIDEO_CID_EXPOSURE is in
+-		 * 1/16-line units (see its OV5647_EXPOSURE_DEFAULT / manual
+-		 * exposure convention) -- scale by 16.
++		 * in raw sensor LINES; the sensor's own VIDEO_CID_EXPOSURE
++		 * control scale (e.g. OV5647's, 1/16-line units, or IMX296's,
++		 * whole lines -- NOT its SHS hardware register directly,
++		 * which the sensor driver's own ctrl handler derives from
++		 * this line count) is converted by
++		 * isp_sns_exposure_ctrl_from_lines() (alp-sdk fix, #2287
++		 * Stage B unit 3) -- see its own comment above.
+ 		 */
+ 		struct video_control ctrl;
+ 		struct video_ctrl_query cq = {
+@@ -858,7 +883,7 @@ void isp_vsi_bottom_half(const struct device *dev,
+ 		int32_t computed_val;
+ 
+ 		ctrl.id  = VIDEO_CID_EXPOSURE;
+-		ctrl.val = (int32_t)(sns_config.intLine * 16);
++		ctrl.val = (int32_t)isp_sns_exposure_ctrl_from_lines(sns_config.intLine);
+ 		computed_val = ctrl.val;
+ 		/* alp-sdk fix (Alp Lab AB): same clamp as the gain writeback above. */
+ 		if (video_query_ctrl(&cq) == 0) {

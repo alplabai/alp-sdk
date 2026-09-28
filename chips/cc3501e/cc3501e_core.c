@@ -72,7 +72,7 @@ alp_status_t cc3501e_init(cc3501e_t *ctx, alp_spi_t *bus)
 	return ALP_OK;
 }
 
-/* Cause-agnostic auto-recovery (issue #2126): e1m-aen-evk-01 has been
+/* Cause-agnostic auto-recovery (issue #2126): an AEN EVK bench unit has been
  * observed to wedge the bridge link mid Wi-Fi-connect roughly 3 times in 50
  * connects, for a cause that isn't fully identified yet (firmware-side
  * self-heal is tracked separately, cc3501e-bridge-firmware#142). Every
@@ -272,7 +272,7 @@ alp_status_t cc3501e_recover(cc3501e_t *ctx)
 	}
 
 	/* A WARM reset -- nRESET only, rails up -- is what clears this state.
-	 * Bench-established on e1m-aen-evk-01 (#1691): every observed wedge recovered
+	 * Bench-established on an AEN EVK bench unit (#1691): every observed wedge recovered
 	 * with `warm-reset -> 0  PING -> 0`.
 	 *
 	 * CORRECTION (issue #2136, cc3501e-bridge-firmware#148): a EARLIER version
@@ -1480,7 +1480,7 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
  * READY, which has not been checked.  Read the module's own revision before
  * assuming either way.
  *
- * UPDATE (run8, e1m-aen-evk-01): an R2 module now HAS been checked.  Its
+ * UPDATE (run8, on an AEN EVK bench unit): an R2 module now HAS been checked.  Its
  * overlay selects P2_6's I2S1_SCLK pinmux for the EVK's Arduino CK_RST
  * instead of the SPI1_SCLK_A this paragraph's unit selects -- P2_6's set of
  * available pinmux options is fixed silicon, what differs is which one each
@@ -1571,9 +1571,9 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
  * settle now runs unconditionally after ANY HIGH, stale or not, the slave
  * gets its settle time regardless of which HIGH ended the wait.
  *
- * PIN-ROUTING FACT (bench evidence, run8, e1m-aen-evk-01, advisor root-cause)
- * -- REVISION-SCOPED, read before assuming it generally: on the R2 module
- * mounted in e1m-aen-evk-01, Alif P2_6 -- the pad several AEN example
+ * PIN-ROUTING FACT (bench evidence, run8, on an AEN EVK bench unit, advisor
+ * root-cause) -- REVISION-SCOPED, read before assuming it generally: on the
+ * R2 module that bench held, Alif P2_6 -- the pad several AEN example
  * bridges used to open as CC3501E_BRIDGE_PIN_READY -- is E1M pad AH7 /
  * I2S1_SCLK, which the E1M EVK carrier's board.yaml maps to the Arduino
  * header's CK_RST, NOT the CC3501E GPIO17 READY net -- that lands on E1M
@@ -1756,7 +1756,7 @@ void cc3501e_set_peer_polled(bool on)
  * opcode from (cmd, tx_payload, tx_len) instead.
  *
  * Data points -- ONLY these two sizes were bench-measured, both SOCK_RECV
- * (run8/run9, e1m-aen-evk-01, bridge GPE 0.254.8.0/0.254.9.0):
+ * (run8/run9, on an AEN EVK bench unit, bridge GPE 0.254.8.0/0.254.9.0):
  *   - want  512 (reply 536 B, sizeof(alp_cc3501e_sock_recv_resp_t) (24 B) +
  *     want): 200 us -> 3/3 end-to-end (the existing floor).
  *   - want 4071: 200 us -> wedged the link on the FIRST recv, 2/2, at both

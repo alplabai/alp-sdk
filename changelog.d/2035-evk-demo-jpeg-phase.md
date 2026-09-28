@@ -59,5 +59,5 @@ Shrinking the model to fit would trade a proven artefact for an unproven one.
 Builds clean for `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` at
 `FLASH: 106 KB / 256 KB (41.41%)`, `RAM: 13104 B (5.00%)`, plus
 `SRAM0: 14 KB` for the two JPEG DMA buffers — inside the ITCM budget. The
-JPEG phase's own `PASS`/`FAIL` still needs a bench run on `e1m-aen-evk-03`;
+JPEG phase's own `PASS`/`FAIL` still needs a bench run on an AEN EVK bench unit;
 the six previously implemented phases are unchanged.

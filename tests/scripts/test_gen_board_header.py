@@ -645,7 +645,7 @@ def test_real_xevk_header_covers_i2c_device_macros(real_headers):
         "XEVK_I2C_ADDR_INA236_1V8": "0x41u",
         "XEVK_I2C_ADDR_INA236_VCAM2": "0x48u",
         "XEVK_I2C_ADDR_INA236_VCAM3": "0x49u",
-        "XEVK_I2C_ADDR_INA236_5V": "0x4Au",
+        "XEVK_I2C_ADDR_INA228_5V": "0x42u",
         "XEVK_INA236_SHUNT_3V3_OHMS": "0.020f",
         "XEVK_INA236_MAX_3V3_A": "4.0f",
         "XEVK_INA236_SHUNT_1V8_OHMS": "0.020f",
@@ -654,8 +654,6 @@ def test_real_xevk_header_covers_i2c_device_macros(real_headers):
         "XEVK_INA236_MAX_VCAM2_A": "1.6f",
         "XEVK_INA236_SHUNT_VCAM3_OHMS": "0.050f",
         "XEVK_INA236_MAX_VCAM3_A": "1.6f",
-        "XEVK_INA236_SHUNT_5V_OHMS": "0.020f",
-        "XEVK_INA236_MAX_5V_A": "4.0f",
     }
     defined = dict(re.findall(r"#define\s+(\S+)\s+(\S+)", out))
     for macro, value in must_define.items():
@@ -678,14 +676,15 @@ def test_main_removes_orphaned_generated_header(gen_module, tmp_path, monkeypatc
         "name: SOLO\n"
         "e1m_routes:\n"
         "  gpio:\n"
-        "    - {e1m: E1M_GPIO_IO0, macro: SOLO_PIN, doc: t}\n"
+        "    - {e1m: E1M_GPIO_IO0, macro: SOLO_PIN, doc: t}\n",
+        encoding="utf-8",
     )
     monkeypatch.setattr(gen_module, "BOARDS_DIR", boards_dir)
     monkeypatch.setattr(gen_module, "OUT_DIR", out_dir)
     monkeypatch.setattr(gen_module, "REPO", tmp_path)
 
     stale = out_dir / "alp_deleted_board_routes.h"
-    stale.write_text("/* stale: source YAML was renamed/deleted */\n")
+    stale.write_text("/* stale: source YAML was renamed/deleted */\n", encoding="utf-8")
 
     rc = gen_module.main()
     assert rc == 0
@@ -705,13 +704,15 @@ def test_main_rejects_slug_collision(gen_module, tmp_path, monkeypatch):
         "name: FOO-BAR\n"
         "e1m_routes:\n"
         "  gpio:\n"
-        "    - {e1m: E1M_GPIO_IO0, macro: A_PIN, doc: t}\n"
+        "    - {e1m: E1M_GPIO_IO0, macro: A_PIN, doc: t}\n",
+        encoding="utf-8",
     )
     (boards_dir / "b.yaml").write_text(
         "name: foo_bar\n"
         "e1m_routes:\n"
         "  gpio:\n"
-        "    - {e1m: E1M_GPIO_IO1, macro: B_PIN, doc: t}\n"
+        "    - {e1m: E1M_GPIO_IO1, macro: B_PIN, doc: t}\n",
+        encoding="utf-8",
     )
     monkeypatch.setattr(gen_module, "BOARDS_DIR", boards_dir)
     monkeypatch.setattr(gen_module, "OUT_DIR", out_dir)
@@ -737,13 +738,15 @@ def test_main_rejects_identical_board_names(gen_module, tmp_path, monkeypatch):
         "name: SAME-NAME\n"
         "e1m_routes:\n"
         "  gpio:\n"
-        "    - {e1m: E1M_GPIO_IO0, macro: A_PIN, doc: t}\n"
+        "    - {e1m: E1M_GPIO_IO0, macro: A_PIN, doc: t}\n",
+        encoding="utf-8",
     )
     (boards_dir / "b.yaml").write_text(
         "name: SAME-NAME\n"
         "e1m_routes:\n"
         "  gpio:\n"
-        "    - {e1m: E1M_GPIO_IO1, macro: B_PIN, doc: t}\n"
+        "    - {e1m: E1M_GPIO_IO1, macro: B_PIN, doc: t}\n",
+        encoding="utf-8",
     )
     monkeypatch.setattr(gen_module, "BOARDS_DIR", boards_dir)
     monkeypatch.setattr(gen_module, "OUT_DIR", out_dir)
@@ -763,7 +766,7 @@ def test_schema_rejects_xevk_overlay_pin_macro():
     exist.  The schema must refuse `XEVK_PIN_*` until the generator
     grows a matching branch."""
     schema = json.loads(
-        (REPO / "metadata" / "schemas" / "board-preset.schema.json").read_text()
+        (REPO / "metadata" / "schemas" / "board-preset.schema.json").read_text(encoding="utf-8")
     )
     validator = jsonschema.Draft202012Validator(schema)
     doc = {

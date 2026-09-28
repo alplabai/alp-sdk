@@ -4,7 +4,7 @@
  *
  * aen-can-regcheck -- scopeless on-silicon staging check of the Alif CAN-FD
  * controller on the E1M-AEN801 (Ensemble E8, M55-HE), via the bench RAM-run +
- * RAM-console flow.  Mirrors aen-camera-regcheck / aen-adc-regcheck.
+ * RAM-console flow.  Mirrors aen-adc-regcheck.
  *
  * WHAT THIS APP VALIDATES (and what it deliberately does NOT):
  *

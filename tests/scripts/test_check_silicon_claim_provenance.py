@@ -129,7 +129,7 @@ def test_claim_with_no_anchor_is_out_of_scope(tmp_path: Path) -> None:
     _scaffold(tmp_path)
     (tmp_path / "changelog.d" / "400.md").write_text(
         "### Fixed (#400)\n\n"
-        "Bench-verified on e1m-aen-evk-01: all four presets report "
+        "Bench-verified on an AEN EVK bench unit: all four presets report "
         "radio_ok=1.\n",
         encoding="utf-8",
     )

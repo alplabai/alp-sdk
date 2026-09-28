@@ -1,7 +1,7 @@
 # E1M-X V2N-M1 module pinout
 
 Pin-to-function mapping for the E1M-X V2N-M1 family of SoMs
-(`E1M-V2M101`, `E1M-V2M102` -- Renesas RZ/V2N + DEEPX DX-M1 NPU).
+(`E1M-V2M101`, `E1M-V2M102`, `E1M-V2M103` -- Renesas RZ/V2N + DEEPX DX-M1 NPU).
 
 The V2N-M1 module reuses the [base V2N pinout](../v2n/) in full
 plus the small overlay listed in `m1-additions.tsv`.

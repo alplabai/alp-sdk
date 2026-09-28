@@ -1,6 +1,6 @@
 ### Added — `scripts/bench/aen/openocd-ram-run.sh`, an OpenOCD Flow-C RAM-run that can address the M55-HE core (#2037)
 
-Bench-verified 2026-09-09: on `e1m-aen-evk-01`, CoreSight access port
+Bench-verified 2026-09-09: on an AEN EVK bench unit, CoreSight access port
 `0x00200000` is the **M55-HP**, not the HE, and `0x00300000` is the HE — every
 `ram-run.sh`/`flash-jlink*.sh` JLinkExe flow on this bench attaches to
 whichever core the shared SW-DP exposes as "the live core", which turned out
@@ -27,7 +27,7 @@ table, `resume`) against either core.
   answer (it read `[alif.m55he]` for a whole campaign that was really
   driving the HP).
 - **`core=he` prints a hazard warning, every run, not just the first**:
-  `evk-01`'s HE ITCM carries a ~4.6 KB Secure-Enclave-resident stub
+  an AEN EVK bench place's HE ITCM carries a ~4.6 KB Secure-Enclave-resident stub
   (MSP `0x20040000`, reset vector `0x00000B58`) that `load_image` overwrites.
   It is RAM (power-cycle-recoverable, not a persistent MRAM write like Flow
   A/D), but this script does not restore or ask before clobbering it.

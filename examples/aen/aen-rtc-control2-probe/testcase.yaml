@@ -5,8 +5,9 @@
 # ID register reads + the rv3028c7_init() call against the real board target.
 #
 # Compile-checks the driver + raw-register path on the real E8 board target;
-# filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE
-# board only) -- the electrical settlement needs the real BRD_I2C bus.
+# filtered OUT of the native_sim PR gate (platform_allow = the AEN801/AEN803
+# M55-HE board targets) -- the electrical settlement needs the real BRD_I2C
+# bus.
 
 sample:
   name: aen-rtc-control2-probe
@@ -25,6 +26,7 @@ tests:
   alp_sdk.examples.aen.rtc_control2_probe.aen:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
     tags:
       - alp-sdk
       - example

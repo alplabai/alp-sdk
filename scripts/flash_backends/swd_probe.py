@@ -46,6 +46,7 @@ flash_args contract:
 
 from __future__ import annotations
 
+import locale
 import os
 import re
 import shutil
@@ -268,11 +269,21 @@ class SwdProbeFlash:
                 )
             fd, script_path = tempfile.mkstemp(suffix=".jlink")
             try:
-                with os.fdopen(fd, "w") as fh:
+                # J-Link Commander reads its command file in the platform
+                # ANSI codepage on Windows, so the file must match the
+                # locale, not UTF-8 -- a C:\Users\<name>\ path with an é has to
+                # reach it as the bytes it will decode.  locale.getencoding()
+                # (3.11+) is that codepage even in UTF-8 Mode, where
+                # getpreferredencoding() answers "utf-8"; 3.10 has only the
+                # latter.
+                enc = (locale.getencoding() if hasattr(locale, "getencoding")
+                       else locale.getpreferredencoding(False))
+                with os.fdopen(fd, "w", encoding=enc) as fh:
                     fh.write(script)
                 cmd = base_cmd + [script_path]
                 proc = subprocess.run(cmd, check=False,
-                                      capture_output=True, text=True)
+                                      capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                      env={**os.environ, "PYTHONIOENCODING": "utf-8"})
             finally:
                 try:
                     os.unlink(script_path)
@@ -356,7 +367,8 @@ class SwdProbeFlash:
                         f"{' '.join(cmd)} (dry-run)",
                 command=cmd)
 
-        proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
+        proc = subprocess.run(cmd, check=False, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         elapsed = time.monotonic() - start
         if proc.returncode == 0:
             return FlashResult(

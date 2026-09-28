@@ -455,12 +455,12 @@ def emit_live_plan(sdk_root: Path, board_yaml: str) -> dict:
     resolved relative to `cwd=sdk_root`, so `board_yaml` is passed as the
     same repo-relative path the oracle's own `boardYaml` field records.
     """
-    env = dict(os.environ)
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     env["PYTHONPATH"] = str(sdk_root / "scripts")
     proc = subprocess.run(
         [sys.executable, "-m", "alp_orchestrate",
          "--input", board_yaml, "--emit", "build-plan"],
-        cwd=sdk_root, env=env, capture_output=True, text=True,
+        cwd=sdk_root, env=env, capture_output=True, text=True, encoding="utf-8",
     )
     if proc.returncode != 0:
         raise ComparatorError(
@@ -488,7 +488,7 @@ def run(sdk: Path, oracle_dir: Path, boards: list[str]) -> bool:
             all_ok = False
             continue
 
-        oracle_plan = json.loads(oracle_path.read_text())
+        oracle_plan = json.loads(oracle_path.read_text(encoding="utf-8"))
         board_yaml = oracle_plan.get("boardYaml")
         if not board_yaml:
             print(f"FAIL {board}: oracle fixture has no boardYaml field")

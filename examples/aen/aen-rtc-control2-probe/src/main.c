@@ -64,7 +64,7 @@
  *
  * Console is the RAM buffer 'ram_console_buf' (see prj.conf's comment) when
  * the bench forces it; Flow C's app UART emits nothing on this bench
- * (e1m-aen-evk-03). BENCH-VALIDATION app -- not a customer teaching
+ * place. BENCH-VALIDATION app -- not a customer teaching
  * example.
  */
 

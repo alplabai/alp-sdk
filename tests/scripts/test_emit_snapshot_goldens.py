@@ -25,6 +25,7 @@ than a second fixture-diff implementation that can itself drift.
 from __future__ import annotations
 
 import importlib.util
+import os
 import shutil
 import subprocess
 import sys
@@ -53,7 +54,8 @@ def test_every_committed_golden_is_in_sync():
     nothing about the goldens.
     """
     proc = subprocess.run(
-        [sys.executable, str(SCRIPT)], capture_output=True, text=True)
+        [sys.executable, str(SCRIPT)], capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "byte-identical" in proc.stdout
 

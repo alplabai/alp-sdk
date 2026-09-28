@@ -98,6 +98,63 @@ config ALP_SDK_WERROR
 	  Adds -Werror on top of CONFIG_ALP_SDK_STRICT_WARNINGS's flag set,
 	  for this module's own zephyr_library only.
 
+config ALP_SDK_FAST_MEMCPY
+	bool "Override memcpy() with a word-copy loop (issue #2285)"
+	default n
+	depends on SOC_FAMILY_ENSEMBLE || SOC_FAMILY_ENSEMBLE_RTSS
+	depends on SIZE_OPTIMIZATIONS
+	depends on PICOLIBC_USE_TOOLCHAIN
+	depends on "$(TOOLCHAIN_VARIANT_COMPILER)" = "gnu"
+	help
+	  On an Alif Ensemble (AEN) image built at -Os,
+	  CONFIG_SIZE_OPTIMIZATIONS links picolibc's "space" multilib, whose
+	  memcpy() copies one byte at a time -- a throughput-sensitive copy
+	  path (bench run 223, camera-mjpeg-stream: 24-30 ms HTTP send time
+	  per 32-41 KB frame, 45-51% of frames dropped against a 60 fps
+	  camera). That run's drops were traced to Ethernet buffer
+	  starvation and taken to 0% by buffer sizing alone (see this
+	  example's board confs and README) -- the only bench-proven fix
+	  here. A same-scene A/B (E1M-AEN803, module 2026W36-0001, 640x480 @
+	  30 fps, camera-bound) against that buffer-sizing-only baseline
+	  found no measurable gain from this word-copy override: 30.03 fps /
+	  ~1.09 MB/s with it on and with it off alike, 0 drops either way;
+	  the send-bound case run 223 actually hit is still unmeasured. The
+	  full CONFIG_SPEED_OPTIMIZATIONS build copies faster but is not
+	  always an option: it overflowed that same app's ITCM budget by
+	  about 41 KB running from ITCM RAM.
+
+	  This overrides memcpy()/__aeabi_memcpy*() with a word-at-a-time
+	  loop (src/common/alp_fast_memcpy_core.c) that keeps -Os code
+	  size. It only takes the word path when the source and destination
+	  share the same 4-byte alignment phase (mod 4); a mismatched
+	  alignment pair falls back to picolibc's byte loop for the whole
+	  copy, same as with this option off.
+
+	  Default n: no measured gain yet justifies flipping memcpy() on
+	  every -Os Ensemble image -- enable it explicitly per app instead
+	  (examples/connectivity/camera-mjpeg-stream's AEN801/AEN803 board
+	  confs do, alongside the Ethernet buffer sizing above).
+
+	  GCC-only: the core loop's self-recursion guard (next paragraph) is
+	  a GCC attribute, and Clang's own -Os loop-idiom pass would still
+	  rewrite the loop into a memcpy() call regardless -- Clang builds
+	  fall back to picolibc's byte loop instead of failing to build;
+	  src/common/alp_fast_memcpy_core.c also #errors if compiled under
+	  Clang, as a belt-and-suspenders check on this depends.
+
+	  The core loop carries
+	  __attribute__((optimize("no-tree-loop-distribute-patterns"))):
+	  without it, GCC's loop-idiom pass could rewrite the byte-copy loop
+	  shape back into a call to memcpy() -- which, since this function
+	  IS memcpy(), would recurse forever and hang the board. Confirmed
+	  against GCC 14.3, that pass does not rewrite this exact loop shape
+	  at plain -Os; the guard is insurance against a future -O2 build of
+	  this TU and against a future loop edit or GCC version that does
+	  rewrite it -- this file originally paired the guard with a local
+	  optimize("O2"), and it was under that O2 pairing that the
+	  recursion hung the board for real (bench run 227, before the
+	  network came up).
+
 config ALP_STATUS_DESCRIPTIONS
 	bool "Compile alp_status_description() string table"
 	default y

@@ -533,7 +533,7 @@ ZTEST(alp_i2s_start_defer, test_start_write_stop_race_stale_flag_recovers)
  * (return ALP_OK) instead of the -EIO i2s_dw_trigger()'s DRAIN case
  * returns forever once the stream is stuck in I2S_STATE_ERROR --
  * silicon repro: alp_audio_out_stop() returning -5 after the queue ran
- * dry, e1m-aen-evk-03. */
+ * dry, E1M-AEN803 serial 2026W36-0002. */
 ZTEST(alp_i2s_start_defer, test_underrun_then_stop_recovers)
 {
 	fake_i2s_reset();
@@ -569,7 +569,7 @@ ZTEST(alp_i2s_start_defer, test_underrun_then_stop_recovers)
  * PREPARE drops the ring, so nothing is queued right after) plus a
  * follow-up write() (which fires the real trigger) must play again --
  * silicon repro: alp_audio_out_start() returning -5 after the underrun,
- * e1m-aen-evk-03. */
+ * E1M-AEN803 serial 2026W36-0002. */
 ZTEST(alp_i2s_start_defer, test_underrun_then_start_and_write_replays)
 {
 	fake_i2s_reset();

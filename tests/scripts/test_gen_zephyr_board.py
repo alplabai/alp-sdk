@@ -27,18 +27,22 @@ either board's claim set.
 
 from __future__ import annotations
 
+import copy
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts"))
 
+import gen_zephyr_board as gzb  # noqa: E402
 from gen_zephyr_board import ZephyrBoardEmitError, _load_soc_spec, emit_zephyr_board  # noqa: E402
 import validate_metadata as validate_metadata_module  # noqa: E402
 
@@ -251,23 +255,33 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
             },
         )
 
-    def test_v2m_dts_reproduces_the_missing_openamp_block(self) -> None:
-        """E1M-V2M101's `topology.m33_sm.openamp_ipc` is absent (defaults
-        false), so its generated `.dts` must NOT carry the OpenAMP/MHU-B
-        block or the CAN-FD analysis that E1M-V2N101's does -- the
-        committed V2M101 tree doesn't have either, and `_parity()` only
-        catches drift if this generator can actually produce the SHORTER
-        file, not just the longer one."""
+    def test_v2m_dts_carries_the_openamp_block(self) -> None:
+        """E1M-V2M101 is the same RZ/V2N die as E1M-V2N101, so it sets
+        `topology.m33_sm.openamp_ipc: true` too (#1948) and its `.dts`
+        carries the same OpenAMP/MHU-B carve-out."""
         files = emit_zephyr_board("E1M-V2M101", "m33_sm", METADATA_ROOT)
+        dts = files["alp_e1m_v2m101_m33_sm/alp_e1m_v2m101_m33_sm_r9a09g056n48gbg_cm33.dts"]
+        self.assertIn("openamp_shm: memory@9f700000", dts)
+        self.assertIn("mbox1: mhu@", dts)
+
+    def test_openamp_ipc_false_drops_the_block(self) -> None:
+        """No committed board sets `openamp_ipc: false` any more, so the
+        shorter path is exercised on a preset with the flag cleared: it must
+        not leak any of the OpenAMP/MHU-B or CAN-FD-analysis content."""
+        real = gzb._resolve_sku
+
+        def cleared(sku, root):
+            preset = copy.deepcopy(real(sku, root))
+            preset["topology"]["m33_sm"]["openamp_ipc"] = False
+            return preset
+
+        with mock.patch.object(gzb, "_resolve_sku", cleared):
+            files = emit_zephyr_board("E1M-V2M101", "m33_sm", METADATA_ROOT)
         dts = files["alp_e1m_v2m101_m33_sm/alp_e1m_v2m101_m33_sm_r9a09g056n48gbg_cm33.dts"]
         self.assertNotIn("OpenAMP", dts)
         self.assertNotIn("reserved-memory", dts)
         self.assertNotIn("mbox1: mhu@", dts)
         self.assertNotIn("No &canfd node", dts)
-        # The wdt0 comment DOES mention "mbox1" in prose (contrasting the
-        # V2N101 sibling, which has the real node) -- that's the exact
-        # committed V2M101 text, not a leak of the OpenAMP block.
-        self.assertIn("contrast the V2N101 sibling board's mbox1", dts)
 
     def test_families_list_is_load_bearing_for_v2m(self) -> None:
         """`supervisor-links.yaml`'s `families:` list gates
@@ -1209,7 +1223,8 @@ class TestZephyrBoardCli(unittest.TestCase):
                  "--core", "m55_he",
                  "--emit", "zephyr-board",
                  "--output", str(out_dir)],
-                cwd=REPO, capture_output=True, text=True,
+                cwd=REPO, capture_output=True, text=True, encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"},
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             committed_dir = BOARDS_ROOT / "e1m_aen801_m55_he"
@@ -1229,7 +1244,8 @@ class TestZephyrBoardCli(unittest.TestCase):
             [sys.executable, str(REPO / "scripts" / "alp_project.py"),
              "--input", str(board_yaml), "--emit", "zephyr-board",
              "--output", "/tmp/should-not-be-written"],
-            cwd=REPO, capture_output=True, text=True,
+            cwd=REPO, capture_output=True, text=True, encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("--core", result.stderr)
@@ -1240,7 +1256,8 @@ class TestZephyrBoardCli(unittest.TestCase):
             [sys.executable, str(REPO / "scripts" / "alp_project.py"),
              "--input", str(board_yaml), "--core", "m55_he",
              "--emit", "zephyr-board"],
-            cwd=REPO, capture_output=True, text=True,
+            cwd=REPO, capture_output=True, text=True, encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("--output", result.stderr)

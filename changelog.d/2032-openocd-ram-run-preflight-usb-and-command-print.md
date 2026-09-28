@@ -16,8 +16,8 @@ is exactly when the file needs to stay behind to be read.
 
 The script's own top-of-file safety-gate comment named `3-4.4.3` as "the AEN
 E8" USB path for `AEN_OPENOCD_USB_LOCATION`. Live labgrid shows `3-4.4.3` is
-`e1m-aen-evk-03`'s probe; `e1m-aen-evk-01`, the board this script is used
-with most, is at a different path. All three AEN E8 boards on this bench
+one specific bench board's probe; another board, the one this script is
+used with most, is at a different path. All three AEN E8 boards on this bench
 answer the identical SWD DPIDR (`0x4c013477`), so a mis-pinned USB path
 still "looks healthy" through the whole DPIDR safety gate — the USB path is
 the only thing that actually selects the board, and a copy-pasted example
@@ -37,11 +37,11 @@ path, for the same DPIDR-collision reason.
 `docs/gd32-bridge.md` went further and asserted outright that `3-4.4.3` *is*
 "the AEN E8" (lines 229 and 259-260, in the GD32 recovery-flash probe-swap
 procedure); both are corrected to resolve the AEN E8's path per-board from
-labgrid, with `3-4.4.3` now labelled explicitly as `e1m-aen-evk-03`'s path
+labgrid, with `3-4.4.3` now labelled explicitly as one specific bench board's path
 so it cannot be misread as a generic "AEN E8" constant or copied by an
 operator holding a different board. `scripts/bench/aen/README.md`'s
 `openocd-ram-run.sh` table row also no longer claims the script is
-"UNEXERCISED ON HARDWARE" — it ran today on `e1m-aen-evk-01` and produced
+"UNEXERCISED ON HARDWARE" — it ran today on an AEN EVK bench unit and produced
 the restored `command_print` evidence described below, including
 `113960 bytes written at address 0x00000000` and all four register echoes.
 

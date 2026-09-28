@@ -43,10 +43,12 @@
  *     boot by the board-driven `EN1` strap; firmware doesn't have
  *     to touch it.
  *   - **CH2** (phases 3 + 4) -> 0.75 V DEEPX DDR / NPU rail.
- *     **Disabled at boot on every variant**; only V2N-M1 firmware
- *     programs CH2's `CH2_VOUT_VSEL_LO` to 0.75 V and then writes
- *     `CH2_EN = 1` (in register `PMC_CTRL_01` bit 1) before
- *     deasserting `M1_RESET`.  On V2N base CH2 stays disabled
+ *     **Disabled at boot on every variant**; on V2N-M1, U-Boot's
+ *     `board_late_init()` programs CH2's `CH2_VOUT_VSEL_LO` to 0.75 V
+ *     and then writes `CH2_EN = 1` (in register `PMC_CTRL_01` bit 1)
+ *     before deasserting `M1_RESET` -- as raw register I/O, not a
+ *     call into this driver (see @ref da9292_v2n_m1_enable_deepx_rail's
+ *     diagnostic-only warning).  On V2N base CH2 stays disabled
  *     because DEEPX isn't populated.
  *
  * The phase pairs themselves don't surface as separate channels at
@@ -256,11 +258,28 @@ alp_status_t da9292_get_voltage_mv(da9292_t *ctx, da9292_channel_t ch, uint16_t 
  *  Safe to call on V2N-M1 -- it leaves CH2 untouched if `ctx->dev_id`
  *  was probed successfully and CH2 was already enabled by the
  *  M1-specific init path.
+ *
+ *  @warning DIAGNOSTIC-ONLY on V2N-M1 hardware.  U-Boot's
+ *           `board_late_init()`
+ *           (`meta-alp-sdk/recipes-bsp/u-boot/u-boot/0004-rzv2n-dev-ALP-E1M-DEEPX-rail-bringup.patch`)
+ *           is the sole owner of the DEEPX rail sequence: RIIC8/BRD_I2C
+ *           is Cortex-A55/Linux-exclusive (`metadata/e1m_modules/v2n/
+ *           core-ownership.yaml`), so no alp-sdk core (Zephyr or
+ *           Yocto) may call this function as part of its own boot
+ *           flow -- a bench diagnostic app reading the chip's state is
+ *           the only intended caller.
  */
 alp_status_t da9292_v2n_base_init(da9292_t *ctx);
 
 /**
  * @brief V2N-M1 DEEPX rail bring-up sequence (CH2 -> 0.75 V).
+ *
+ *  @warning DIAGNOSTIC-ONLY -- see the identical warning on
+ *           @ref da9292_v2n_base_init.  U-Boot's board_late_init()
+ *           already runs this exact sequence (as raw register I/O,
+ *           not this function) before Linux or any Zephyr image
+ *           starts; calling this from alp-sdk application code would
+ *           be a second, uncoordinated writer of the same PMIC.
  *
  *  Procedure:
  *

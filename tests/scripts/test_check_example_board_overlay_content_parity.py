@@ -254,6 +254,28 @@ def test_testcase_extra_args_pin_on_sibling_target_fails(tmp_path):
     assert len(_scenario(tmp_path, [_HE803], extra)) == 1
 
 
+_EXTRA_803 = ("    extra_dtc_overlay_files:\n"
+              "      - boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay\n")
+
+
+def test_testcase_extra_overlay_for_reverse_sku_on_sibling_target_fails(tmp_path):
+    """The mirror image of test_testcase_extra_overlay_for_one_sku_on_
+    sibling_target_fails: this time the file pinned is AEN803's own, while
+    platform_allow reaches AEN801 -- the aen-ethernet-link.aen803.mdio_managed
+    shape (issue #2209), pinned the OTHER direction from the aen-sdhc-probe
+    case above. Both directions must fail; only ever exercising one leaves
+    a reversed comparison (`==` flipped to the wrong operand, or a hardcoded
+    "aen801"/"aen803" string) undetected."""
+    problems = _scenario(tmp_path, [_HE801, _HE803], _EXTRA_803)
+    assert problems == [
+        "examples/aen/demo/testcase.yaml: scenario demo.cov names "
+        "alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay in its extra "
+        f"board files while its platform_allow reaches aen801 ({_HE801}), so "
+        "that build reads the aen803 file instead of "
+        "examples/aen/demo/boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay"
+        " -- give the aen801 target its own scenario naming its own file"]
+
+
 def test_testcase_extra_overlay_on_its_own_sku_target_passes(tmp_path):
     assert _scenario(tmp_path, [_HE801], _EXTRA_801) == []
 

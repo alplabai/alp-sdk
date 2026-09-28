@@ -880,7 +880,7 @@ ZTEST(alp_chips, test_tas2563_clear_faults_sets_the_self_clearing_bit)
 
 /* #2146: tas2563_resume() must clear the latches BEFORE going ACTIVE --
  * clearing after would leave a shutdown-causing latch (e.g. the TDM
- * clock error observed on e1m-aen-evk-03) standing, ready to re-trip
+ * clock error observed on E1M-AEN803 serial 2026W36-0002) standing, ready to re-trip
  * the part the instant it is re-evaluated.  Seed PWR_CTL = 0Eh (MODE
  * SHUTDOWN, matching the silicon observation post-clock-loss) with
  * both latch bytes non-zero, then check the write log puts the

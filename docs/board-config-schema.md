@@ -83,8 +83,8 @@ it is.
 A `board.yaml` may **disable** a core (`os: off`) or drop it to **no-OS**
 (`os: baremetal`).  Selecting the *other* class's OS — `zephyr` on a
 Cortex-A, `yocto` on a Cortex-M — is **refused**, at
-`scripts/alp_orchestrate/validate.py:270-282`
-(`_enforce_os_matches_core_class`), with this exact message:
+`scripts/alp_orchestrate/validate.py:296`
+(`_enforce_os_matches_core_class`, raising at `:303-307`), with this exact message:
 
 ```text
 core '<id>' (<type>): its runtime is determined by the core class
@@ -103,7 +103,7 @@ for the RTOS, and pair one to each core class so that a SoM swap within
 a family keeps the same runtime per core.  That pairing is a product
 decision about what this SDK carries, tests and ships, and it is a
 defensible one; it is simply not a fact about the silicon.
-(`scripts/alp_orchestrate/topology.py:92`'s "A Cortex-A can't run
+(`scripts/alp_orchestrate/topology.py:112`'s "A Cortex-A can't run
 Zephyr" overstates it the same way, and is inaccurate as written.)
 
 What that means in practice:
@@ -304,7 +304,7 @@ with one `#define <MACRO> ALP_E1M_<…>` line per entry.
 #### Preset mode (SDK-internal shortcut)
 
 Most example projects under `examples/` target the EVK or X-EVK
-(100 do today — 75 on `e1m-evk`, 25 on `e1m-x-evk`), so they share a
+(101 do today — 76 on `e1m-evk`, 25 on `e1m-x-evk`), so they share a
 single board definition each via the `preset:` field:
 
 ```yaml
@@ -436,8 +436,10 @@ metadata/
 │   ├── E1M-AEN803.yaml      # AEN E8, dual external memory BOM; preliminary
 │   ├── E1M-V2N101.yaml      # v0.3 fully-populated worked example
 │   ├── E1M-V2N102.yaml      # partial_hw_config: true
+│   ├── E1M-V2N103.yaml      # 4 GB / 16 GB memory tier
 │   ├── E1M-V2M101.yaml      # V2N-M1 SKU (DEEPX-DXM1 populated)
 │   ├── E1M-V2M102.yaml      # V2N-M1 SKU
+│   ├── E1M-V2M103.yaml      # V2N-M1 SKU, 4 GB / 16 GB memory tier
 │   └── E1M-NX9101.yaml      # i.MX 93 placeholder MPN (production E1M-NX9xxx TBD)
 └── boards/
     ├── e1m-evk.yaml            # 35x35 EVK (AEN / N93)

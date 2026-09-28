@@ -29,9 +29,10 @@ bridge health. Two diagnostic ways in:
 
 > The same `alp companion` group binds the **GD32** supervisor on V2N SoMs
 > (`CONFIG_ALP_SDK_V2N_SUPERVISOR`, plus a non-negative
-> `CONFIG_ALP_SDK_V2N_SUPERVISOR_SPI_BUS_ID` or
-> `CONFIG_ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID` — both default `-1`, which no
-> in-tree board overrides yet (tracked in #2044)) instead of the CC3501E;
+> `CONFIG_ALP_SDK_V2N_SUPERVISOR_SPI_BUS_ID` — the CM33's only transport
+> to the GD32, since RIIC8/BRD_I2C is Cortex-A55/Linux-exclusive; the SPI
+> bus ID defaults `-1`, which no in-tree board overrides yet (tracked in
+> #2044)) instead of the CC3501E;
 > there it exposes `companion gpio read/write` rather than the Wi-Fi/BLE
 > tree below. This page documents the **CC3501E (Alif)** binding.
 
@@ -66,7 +67,7 @@ commands report the bridge is not ready. See
 
 ## Link auto-recovery (issue #2126)
 
-e1m-aen-evk-01 has been observed to wedge the bridge link mid Wi-Fi-connect
+An AEN EVK bench unit has been observed to wedge the bridge link mid Wi-Fi-connect
 roughly 3 times in 50 connects, for a cause that isn't fully identified yet
 (firmware-side self-heal is tracked separately,
 cc3501e-bridge-firmware#142). Once wedged, every request fails (`ver` → `-4`
@@ -336,16 +337,18 @@ verbs is documented in
 
 ---
 
-## Host-driver-only surfaces (no console command)
+## Host-driver-level surfaces (console + `cc3501e_*` API)
 
-Two companion subsystems are driven from firmware through the `cc3501e_*` API
-rather than the console:
+Two companion subsystems are driven both interactively and programmatically:
 
-### OTA firmware update (`cc3501e_ota_*`)
+### OTA firmware update (`alp companion ota` / `cc3501e_ota_*`)
 
 Stream a signed CC3501E vendor image over the bridge into the coprocessor's
-non-primary slot, which it then swaps on reboot (PSA-FWU). Driven by the
-device-side Mender contract, not interactively.
+non-primary slot, which it then swaps on reboot (PSA-FWU). The
+`alp companion ota` shell group drives a session interactively:
+`ota status` reports the session state and progress cursor, `ota begin
+<total_len_bytes>` starts one (the image bytes are pushed by the firmware
+path below, not typed into the shell), and `ota abort` cancels it.
 
 | API | What it does |
 |---|---|

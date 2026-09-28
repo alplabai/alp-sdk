@@ -234,7 +234,8 @@ def _load_board_symbols(zephyr_base: Path, board_triple: str) -> list[dict[str, 
             f"-DEXTRA_KCONFIG_TARGET_COMMAND_FOR_{_KCONFIG_TARGET}={target_cmd}",
         ]
         proc = subprocess.run(configure_cmd, cwd=zephyr_base.parent,
-                              capture_output=True, text=True)
+                              capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         if proc.returncode != 0:
             raise OrchestratorError(
                 f"--emit kconfig: `west build --cmake-only -b "
@@ -244,7 +245,8 @@ def _load_board_symbols(zephyr_base: Path, board_triple: str) -> list[dict[str, 
         # it explicitly (a second, separate `west build`).
         build_cmd = ["west", "build", "-d", str(build_dir), "-t", _KCONFIG_TARGET]
         proc = subprocess.run(build_cmd, cwd=zephyr_base.parent,
-                              capture_output=True, text=True)
+                              capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         if proc.returncode != 0:
             raise OrchestratorError(
                 f"--emit kconfig: `west build -t {_KCONFIG_TARGET}` failed "

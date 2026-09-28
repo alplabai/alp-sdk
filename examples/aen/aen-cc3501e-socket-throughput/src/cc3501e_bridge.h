@@ -108,7 +108,7 @@
  * ALP_ERR_BUSY after CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS -- see
  * <alp/chips/cc3501e/core.h>'s ready_pin doc.
  *
- * NOT Alif P2_6 on e1m-aen-evk-01's R2 module: P2_6 there is E1M pad AH7 /
+ * NOT Alif P2_6 on an R2 AEN EVK bench module: P2_6 there is E1M pad AH7 /
  * I2S1_SCLK (the EVK's Arduino CK_RST, metadata/boards/e1m-evk.yaml), and
  * the CC3501E GPIO17 READY net lands on E1M pad G3 / IO16 instead
  * (metadata/e1m_modules/aen/from-cc3501e.tsv).  cc3501e_bridge_bringup()
@@ -142,7 +142,7 @@
  * everything above 7 as unqualified, not as graded margin.
  *
  * The "4..8 all clean cold+warm" window this comment used to claim was taken on
- * e1m-aen-evk-01 at ~14.3 MHz -- a different board at roughly half the clock,
+ * an earlier bench run at ~14.3 MHz -- a different board at roughly half the clock,
  * so it is not comparable and is not evidence for 25 MHz on this one.
  *
  * 0 does NOT mean "no delay": it compiles the poke out, leaving whatever the

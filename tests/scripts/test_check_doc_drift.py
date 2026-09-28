@@ -1,5 +1,6 @@
 """Unit tests for scripts/check_doc_drift.py."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -10,7 +11,10 @@ SCRIPT = REPO / "scripts" / "check_doc_drift.py"
 
 def _run(*args, **kw):
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, **kw,
+        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True,
+        encoding="utf-8",
+        env={**(kw.pop("env", None) or os.environ), "PYTHONIOENCODING": "utf-8"},
+        **kw,
     )
 
 
@@ -464,3 +468,124 @@ def test_config_ifdef_reference_in_c_source_does_not_confirm_symbol(tmp_path):
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 1
     assert "ALP_SDK_FOO" in proc.stdout + proc.stderr
+
+
+# --- #2346: removed-symbol ledger and unknown board-macro checks ---
+
+
+def _write_removed_symbols(root: Path, *symbols: str) -> None:
+    """Write a minimal docs/abi/removed-symbols.json ledger."""
+    ledger = root / "docs" / "abi" / "removed-symbols.json"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    entries = ",\n".join(
+        f'    {{"header": "alp/chips/x.h", "category": "function", '
+        f'"symbol": "{s}", "release": "v0.17.0"}}'
+        for s in symbols
+    )
+    ledger.write_text('{\n  "removed": [\n' + entries + "\n  ]\n}\n",
+                      encoding="utf-8")
+
+
+def _write_board_header(root: Path, rel: str, body: str) -> None:
+    p = root / "include" / "alp" / "boards" / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(body, encoding="utf-8")
+
+
+def test_removed_chip_symbol_flagged(tmp_path):
+    _scaffold(tmp_path, docs={"boards/e1m-evk.md":
+                              "Call `cc3501e_set_event_callback()`.\n"})
+    _write_removed_symbols(tmp_path, "cc3501e_set_event_callback")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    out = proc.stdout + proc.stderr
+    assert "references removed symbol cc3501e_set_event_callback" in out
+    assert "(docs/abi/removed-symbols.json)" in out
+
+
+def test_removed_then_readded_symbol_not_flagged(tmp_path):
+    # The ledger records the removal, but the name is declared again in a
+    # header -- it is current, not drift.
+    _scaffold(tmp_path, header_syms="cc3501e_set_event_callback",
+              docs={"boards/e1m-evk.md": "Call `cc3501e_set_event_callback()`.\n"})
+    _write_removed_symbols(tmp_path, "cc3501e_set_event_callback")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_unknown_board_macro_flagged(tmp_path):
+    _scaffold(tmp_path, docs={"boards/e1m-x-evk.md":
+                              "Set `XEVK_INA236_I2C` high.\n"})
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    out = proc.stdout + proc.stderr
+    assert "board macro XEVK_INA236_I2C is not defined in include/alp/boards/" in out
+
+
+def test_defined_board_macro_not_flagged(tmp_path):
+    _scaffold(tmp_path, docs={"boards/e1m-x-evk.md":
+                              "Set `XEVK_INA236_I2C` high.\n"})
+    _write_board_header(
+        tmp_path, "alp_e1m_x_evk_routes.h",
+        "#define XEVK_INA236_I2C 0x40\n")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_wildcard_board_macro_not_flagged(tmp_path):
+    # `XEVK_INA236_*` tokenises to `XEVK_INA236_` (trailing underscore),
+    # the documented wildcard/prefix form -- must pass.
+    _scaffold(tmp_path, docs={"boards/e1m-x-evk.md":
+                              "Any `XEVK_INA236_*` alias works.\n"})
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_removed_and_board_macro_outside_scope_not_scanned(tmp_path):
+    # CHANGELOG.md (repo root) and docs/abi/** are both outside the
+    # scope of the #2346 checks.
+    _scaffold(tmp_path, docs={"abi/x.md":
+                              "Removed `cc3501e_set_event_callback`; "
+                              "macro `XEVK_INA236_I2C`.\n"})
+    _write_removed_symbols(tmp_path, "cc3501e_set_event_callback")
+    (tmp_path / "CHANGELOG.md").write_text(
+        "Removed `cc3501e_set_event_callback`; macro `XEVK_INA236_I2C`.\n",
+        encoding="utf-8")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+
+def _write_removed_with_replacement(root: Path, symbol: str,
+                                    replacement: str) -> None:
+    ledger = root / "docs" / "abi" / "removed-symbols.json"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ledger.write_text(
+        '{"removed": [{"header": "alp/boards/alp_e1m_evk_routes.h", '
+        '"category": "macro", "symbol": "' + symbol + '", '
+        '"release": "v0.17.0", "replacement": "' + replacement + '"}]}\n',
+        encoding="utf-8")
+
+
+def test_removed_symbol_named_beside_its_replacement_passes(tmp_path):
+    # A doc line that explains the rename (old name next to the ledger's
+    # replacement) is not relying on the old name.
+    _scaffold(tmp_path, docs={"boards/e1m-evk.md":
+                              "`EVK_ADDR_NEW` -- the plain `EVK_ADDR_OLD` "
+                              "name is no longer defined.\n"})
+    _write_removed_with_replacement(tmp_path, "EVK_ADDR_OLD", "EVK_ADDR_NEW")
+    _write_board_header(tmp_path, "alp_e1m_evk_routes.h",
+                        "#define EVK_ADDR_NEW 0x71u\n")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_removed_board_macro_reported_once(tmp_path):
+    _scaffold(tmp_path, docs={"boards/e1m-evk.md":
+                              "Use `EVK_ADDR_OLD`.\n"})
+    _write_removed_with_replacement(tmp_path, "EVK_ADDR_OLD", "EVK_ADDR_NEW")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    out = proc.stdout + proc.stderr
+    assert "references removed symbol EVK_ADDR_OLD" in out
+    assert "board macro EVK_ADDR_OLD is not defined" not in out

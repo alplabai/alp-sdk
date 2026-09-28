@@ -88,7 +88,7 @@ static thing_t *_alloc(void)
 def _seed(root: Path, relpath: str, body: str) -> None:
     p = root / relpath
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(body, newline="")
+    p.write_text(body, newline="", encoding="utf-8")
 
 
 def test_atomic_claim_passes(tmp_path: Path) -> None:

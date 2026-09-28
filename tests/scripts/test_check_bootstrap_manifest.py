@@ -15,6 +15,7 @@ Run locally:
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -111,7 +112,8 @@ def _replace(path: Path, old: str, new: str) -> None:
 
 def test_default_corpus_passes():
     proc = subprocess.run(
-        [sys.executable, str(SCRIPT)], capture_output=True, text=True,
+        [sys.executable, str(SCRIPT)], capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "OK" in proc.stdout
@@ -590,8 +592,8 @@ def test_bootstrap_sh_darwin_excludes_xz_and_wget_from_refusal(tmp_path):
 
     proc = subprocess.run(
         [bash_path, str(scaffold_root / "scripts" / "bootstrap.sh")],
-        capture_output=True, text=True, cwd=str(scaffold_root),
-        env={"PATH": str(shim_dir)},
+        capture_output=True, text=True, encoding="utf-8", cwd=str(scaffold_root),
+        env={"PATH": str(shim_dir), "PYTHONIOENCODING": "utf-8"},
     )
     out = proc.stdout + proc.stderr
     assert proc.returncode != 0, out
@@ -639,7 +641,8 @@ def test_bootstrap_sh_refuses_unknown_schema_version(tmp_path):
     # (alp-sdk#1110).
     proc = subprocess.run(
         [bash_path, (scaffold_root / "scripts" / "bootstrap.sh").as_posix(), "--print-env"],
-        capture_output=True, text=True, cwd=str(scaffold_root),
+        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(scaffold_root),
     )
     assert proc.returncode != 0, proc.stdout + proc.stderr
     assert "schemaVersion" in (proc.stdout + proc.stderr)
@@ -788,7 +791,8 @@ def test_bootstrap_ps1_refuses_unknown_schema_version(tmp_path):
     # guard with nothing else on PATH required.
     proc = subprocess.run(
         ["pwsh", "-NoProfile", "-File", str(scaffold_root / "scripts" / "bootstrap.ps1"), "-PrintEnv"],
-        capture_output=True, text=True, cwd=str(scaffold_root),
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(scaffold_root),
     )
     assert proc.returncode != 0, proc.stdout + proc.stderr
     assert "schemaVersion" in (proc.stdout + proc.stderr)
@@ -1689,7 +1693,7 @@ def _make_fake_zephyr_repo(tmp_path: Path, python_min_at_tag: str, tag: str) -> 
     zephyr_dir = tmp_path / "fake-zephyr"
     zephyr_dir.mkdir()
     run = lambda *args: subprocess.run(  # noqa: E731
-        ["git", *args], cwd=zephyr_dir, check=True, capture_output=True, text=True,
+        ["git", *args], cwd=zephyr_dir, check=True, capture_output=True, text=True, encoding="utf-8",
     )
     run("init", "-q")
     run("config", "user.email", "test@example.invalid")

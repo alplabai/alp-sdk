@@ -224,6 +224,14 @@ Existing state on 2026-05-18:
     are *not* customer-facing surfaces — so the check is no longer
     only about customer-facing docs, as this ADR originally scoped
     it.
+  - *Amendment (2026-09-18, #2197):* the backlog above is fully
+    drained and the grandfather baseline that tracked it is
+    removed — `IMPLICIT-ENCODING` now fails `--fail-on-warning`
+    like every other category, with no carve-out left.  The scan
+    also widened from `scripts/` + `tests/` to include
+    `examples/` (`PY_SCAN_ROOTS`), since every tracked `*.py` file
+    outside `scripts/`/`tests/` lives under `examples/` and is
+    just as exposed to the Windows `cp1252` failure mode.
 - The `standalone-from-alp-studio` promise
   ([[alp-sdk-standalone-studio-is-consumer]]) extends here: a
   Win / Mac user with `python` + `west` +
