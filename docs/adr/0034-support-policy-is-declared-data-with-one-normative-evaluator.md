@@ -17,9 +17,9 @@ enforced by the same code in the same voice.
 
 `board.yaml` may set `cores.<id>.os`. Setting the *other* class's runtime --
 `zephyr` on a Cortex-A, `yocto` on a Cortex-M -- is refused at
-`scripts/alp_orchestrate/validate.py:270-282`
-(`_enforce_os_matches_core_class`), reached from
-`scripts/alp_orchestrate/loader.py:910`, with this message:
+`scripts/alp_orchestrate/validate.py:296`
+(`_enforce_os_matches_core_class`, raising at `:303-307`), reached from
+`scripts/alp_orchestrate/loader.py:927`, with this message:
 
 ```text
 core '<id>' (<type>): its runtime is determined by the core class
@@ -34,7 +34,7 @@ the pinned v4.4.1 ships `arch/arm/core/cortex_a_r/` and
 *chosen* to carry exactly two OSes and pair one to each core class, so that a
 SoM swap within a family keeps the same runtime per core -- ADR
 [0011](0011-intra-family-portability.md)'s promise. That is a good decision. It
-is a decision. `scripts/alp_orchestrate/topology.py:92` states it as
+is a decision. `scripts/alp_orchestrate/topology.py:112` states it as
 impossibility -- "A Cortex-A can't run Zephyr" -- and the customer-facing error
 inherits that voice.
 
@@ -44,7 +44,7 @@ inherits that voice.
    pairing is a support boundary, so a reader looking for "what does this SDK
    support" finds a loader guard phrased as a law of nature.
 2. **It is restated three times and has already diverged.**
-   `topology.py:28-43` (`_default_os_from_core_type`), `topology.py:80-87`
+   `topology.py:28-43` (`_default_os_from_core_type`), `topology.py:90-107`
    (`_runtime_class`, the same prefix test with a `linux`/`rtos` codomain), and
    `tan-cli/python/tan/core/os_class.py`. On an unresolved core type the two
    repos DID disagree, and the repair is what makes the point rather than
@@ -171,7 +171,7 @@ ADR-0026 measures does not reopen one layer down. The category confusion under
 
 **west compatibility is preserved, and that is why clause 2 is written the way
 it is.** Today the refusal fires on a plain `west build` with tan nowhere in the
-loop, via `loader.py:910`. Keeping the evaluator in alp-sdk `scripts/` means
+loop, via `loader.py:927`. Keeping the evaluator in alp-sdk `scripts/` means
 that path keeps its refusal unchanged, all 96 configure-time invocations keep
 working, and `west alp-emit` / `alp-lock` / `alp-migrate` / `alp-quality` are
 unaffected. The alternative where alp-sdk stops evaluating entirely was rejected
