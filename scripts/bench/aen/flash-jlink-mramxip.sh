@@ -273,6 +273,7 @@ cd "$SET"
 # 2. build the signed ATOC (app-gen-toc only) + read the ATOC MRAM placement.
 ./app-gen-toc -f "build/config/$NAME-slot0.json" >"${TMPDIR:-/tmp}/gentoc-mramxip.log" 2>&1 \
   || { echo "gen-toc FAILED"; tail -20 "${TMPDIR:-/tmp}/gentoc-mramxip.log"; exit 1; }
+bench_atoc_package_fits build/app-package-map.txt flash-jlink-mramxip || exit $?
 PKG="$SET/build/AppTocPackage.bin"
 ATOC_ADDR=$(awk '/APP Package Start Address:/{print $NF}' build/app-package-map.txt | tail -1)
 [ -z "$ATOC_ADDR" ] && { echo "could not parse APP Package Start Address"; exit 1; }

@@ -124,6 +124,7 @@ JSON
 cd "$SET"
 echo ">>> FLOW-D M55_HP flash $NAME  (SRAM0 beacon=$BEACON)" >&2
 ./app-gen-toc -f "build/config/$NAME.json" >"${TMPDIR:-/tmp}/hp-gentoc.log" 2>&1 || { echo "gen-toc FAILED"; tail "${TMPDIR:-/tmp}/hp-gentoc.log"; exit 1; }
+bench_atoc_package_fits build/app-package-map.txt flash-jlink-hp || exit $?
 PKG="$SET/build/AppTocPackage.bin"
 ADDR=$(awk '/APP Package Start Address:/{print $NF}' build/app-package-map.txt | tail -1)
 [ -z "$ADDR" ] && { echo "could not parse APP Package Start Address"; exit 1; }

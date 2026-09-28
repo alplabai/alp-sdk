@@ -126,6 +126,7 @@ cd "$SET"
 echo ">>> AEN firmware-update-log HE firewall-probe ATOC" >&2
 ./app-gen-toc -f build/config/firmware-update-log-firewall-probe.json >"${TMPDIR:-/tmp}/firmware-update-log-firewall-probe-gentoc.log" 2>&1 \
 	|| { echo "gen-toc FAILED"; tail -20 "${TMPDIR:-/tmp}/firmware-update-log-firewall-probe-gentoc.log"; exit 1; }
+bench_atoc_package_fits build/app-package-map.txt flash-update-log-firewall-probe || exit $?
 
 PKG="$SET/build/AppTocPackage.bin"
 ATOC_ADDR=$(awk '/APP Package Start Address:/{print $NF}' build/app-package-map.txt | tail -1)

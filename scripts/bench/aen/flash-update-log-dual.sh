@@ -125,6 +125,7 @@ cd "$SET"
 echo ">>> AEN firmware-update-log dual-entry ATOC" >&2
 ./app-gen-toc -f build/config/firmware-update-log-dual.json >"${TMPDIR:-/tmp}/firmware-update-log-dual-gentoc.log" 2>&1 \
 	|| { echo "gen-toc FAILED"; tail -20 "${TMPDIR:-/tmp}/firmware-update-log-dual-gentoc.log"; exit 1; }
+bench_atoc_package_fits build/app-package-map.txt flash-update-log-dual || exit $?
 
 PKG="$SET/build/AppTocPackage.bin"
 ATOC_ADDR=$(awk '/APP Package Start Address:/{print $NF}' build/app-package-map.txt | tail -1)

@@ -127,6 +127,7 @@ echo ">>> FLOW-D J-Link flash $NAME  (ram_console_buf=${BUF_SYM:-none (UART cons
 # 2. build the signed ATOC package (app-gen-toc only -- NO SE-UART) + read its
 #    MRAM placement from the generated map (shifts per build/config -- never hardcode).
 ./app-gen-toc -f "build/config/$NAME.json" >"${TMPDIR:-/tmp}/gentoc.log" 2>&1 || { echo "gen-toc FAILED"; tail "${TMPDIR:-/tmp}/gentoc.log"; exit 1; }
+bench_atoc_package_fits build/app-package-map.txt flash-jlink || exit $?
 PKG="$SET/build/AppTocPackage.bin"
 ADDR=$(awk '/APP Package Start Address:/{print $NF}' build/app-package-map.txt | tail -1)
 [ -z "$ADDR" ] && { echo "could not parse APP Package Start Address from build/app-package-map.txt"; exit 1; }

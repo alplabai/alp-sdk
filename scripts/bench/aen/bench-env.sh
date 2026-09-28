@@ -1413,6 +1413,66 @@ bench_atoc_replace_guard() {
 	return 0
 }
 
+# bench_atoc_package_fits <app-package-map.txt> <tag>
+#
+# alp-sdk#2234: refuse to burn a freshly generated ATOC package that grows
+# below the metadata `atoc` band into customer `storage`. The band is sized
+# for a TOC-only package, but SETOOLS stores an ITCM load image's bytes
+# (`loadAddress`, no `mramAddress`) INSIDE the top-anchored package, so the
+# package grows downward by the image size. Measured on an E1M-AEN803 on
+# 2026-09-19: an 89152 B package starting at 0x8056A3C0, 56384 B of it inside
+# `storage` (0x80560000 + 96 KiB). A customer NVS/littlefs on `storage`, or
+# erase-storage.sh, would then overwrite the boot image.
+#
+# The band base is read from metadata/e1m_modules/E1M-AEN80{1,3}.yaml (the
+# `memory_map` row named `atoc`), never hardcoded. Both SKUs must agree;
+# they share one PCB and one map today.
+#
+# Escape hatch: BENCH_ALLOW_ATOC_INTO_STORAGE=1 proceeds with a warning, for
+# a bench board whose `storage` holds nothing you care about.
+#
+# Returns 0 to proceed, 6 to abort.
+bench_atoc_package_fits() {
+	local map="$1" tag="$2" start base f b
+
+	start=$(awk '/APP Package Start Address:/{print $NF}' "$map" | tail -1)
+	if [ -z "$start" ]; then
+		echo "$tag: ABORT -- could not parse 'APP Package Start Address' from $map (alp-sdk#2234)" >&2
+		return 6
+	fi
+	base=""
+	for f in "$ALP_SDK_DIR"/metadata/e1m_modules/E1M-AEN801.yaml \
+		"$ALP_SDK_DIR"/metadata/e1m_modules/E1M-AEN803.yaml; do
+		b=$(awk '/name: *atoc,/ { for (i = 1; i <= NF; i++) if ($i == "base:") { v = $(i + 1); sub(/,$/, "", v); print v } }' "$f")
+		if [ -z "$b" ]; then
+			echo "$tag: ABORT -- no 'atoc' memory_map row in $f (alp-sdk#2234)" >&2
+			return 6
+		fi
+		if [ -n "$base" ] && [ $((base)) -ne $((b)) ]; then
+			echo "$tag: ABORT -- AEN801/AEN803 metadata disagree on the atoc base ($base vs $b) (alp-sdk#2234)" >&2
+			return 6
+		fi
+		base="$b"
+	done
+
+	if [ $((start)) -ge $((base)) ]; then
+		echo "    package start $start is inside the atoc band (base $base)" >&2
+		return 0
+	fi
+	echo "$tag: ATOC package starts at $start, $(($((base)) - $((start)))) B below the" >&2
+	echo "       metadata atoc band base $base -- into customer 'storage' (or below it)." >&2
+	echo "       An ITCM load image is stored inside the package; a customer" >&2
+	echo "       runtime or erase-storage.sh writing 'storage' would destroy it" >&2
+	echo "       (alp-sdk#2234)." >&2
+	if [ "${BENCH_ALLOW_ATOC_INTO_STORAGE:-0}" = 1 ]; then
+		echo "$tag: BENCH_ALLOW_ATOC_INTO_STORAGE=1 -- proceeding anyway." >&2
+		return 0
+	fi
+	echo "$tag: ABORT. Re-run with BENCH_ALLOW_ATOC_INTO_STORAGE=1 if this board's" >&2
+	echo "       'storage' holds nothing you need." >&2
+	return 6
+}
+
 # bench_flowd_atoc_guard <replace-atoc 0|1> <atoc-unqueryable 0|1> <tag> [allowed-entry ...]
 #
 # GUARD (alp-sdk#2027) -- the Flow D follow-up to bench_atoc_replace_guard
