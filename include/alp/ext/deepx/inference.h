@@ -106,7 +106,10 @@ alp_status_t alp_deepx_inference_bind_cores(alp_inference_t *inf, alp_deepx_npu_
  * @par Supported silicon: deepx:dx:m1
  *
  * Reads the device @p inf runs on through libdxrt's `DeviceStatus`.
- * Safe to call while another thread is invoking on @p inf.
+ * Safe to call while another thread is invoking on @p inf.  Values are
+ * libdxrt's own: on DX-M1 FW v2.4.0 NPU 0's voltage reads 2779096 mV,
+ * the same figure `dxrt-cli -s` prints, so treat a value far outside the
+ * 0.75 V rail as a firmware reading, not a fault.
  *
  * @param[in]  inf         Handle from @ref alp_inference_open
  *                         opened against DEEPX silicon.
