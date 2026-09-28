@@ -201,7 +201,7 @@ armed with it can pass on exactly the board it exists to exclude (see
 actually-measured instance of that stance).
 The manifest previously carried `0x6BA02477` there, but that value is
 not a GD32 reading -- it is the bench-measured SW-DP ID of the V2N CM33
-DAP, a third J-Link on this rack (`scripts/bench/aen/bench-env.sh:145-147`,
+DAP, a third J-Link on this rack (`scripts/bench/aen/bench-env.sh:391-393`,
 measured 2026-08-08, `Found Cortex-M33 r0p4`; the V2N bench unit's
 probe table, `CHANGELOG.md:3364` and `CHANGELOG.md:3367`), tracked as
 #1440.  An
@@ -229,7 +229,7 @@ table reproduces `scripts/bench/aen/bench-env.sh`'s `GD32_DPIDR`
 export, and that export formerly carried its own "BENCH-VERIFIED"
 banner covering `GD32_DPIDR` too; that banner cited
 `docs/aen-bench-bringup.md`, which does not mention the GD32 at all,
-and is now hedged (`scripts/bench/aen/bench-env.sh:148-151`).
+and is now hedged (`scripts/bench/aen/bench-env.sh:394-397`).
 
 **Required step on the alplab-gw bench: read the DPIDR by hand before
 flashing, and abort on a match to either of two known-wrong boards.**
@@ -244,7 +244,7 @@ enumerate the same J-Link serial `603000869`, and `JLinkExe` selects
 an adapter only by serial -- with no port selector and no armed
 DPIDR guard on this out-of-`tan` path, probe choice for the cloned
 pair is ambiguous by construction
-(`scripts/bench/aen/bench-env.sh:138-143`).  Setting the shell
+(`scripts/bench/aen/bench-env.sh:384-386`).  Setting the shell
 variable `JLINK_SN` has **no effect on a hand-run `JLinkExe`
 invocation**: `JLinkExe` takes a probe selector only from a
 `-SelectEmuBySN <sn>` command-line flag or a `SelectEmuBySN` line
@@ -310,12 +310,12 @@ cloned-serial ambiguity for every invocation that follows:
    setup` state, a rejected command line, or any other transcript
    with no SW-DP ID line at all is a STOP, not a silent permit to
    proceed, mirroring `bench_jlink_assert_aen_dpidr`'s own
-   abort-unless-seen shape (`scripts/bench/aen/bench-env.sh:181-185`)
+   abort-unless-seen shape (`scripts/bench/aen/bench-env.sh:454-468`)
    rather than aborting only on a positive match to a known-wrong ID.
    When the line is present, abort before any write if the ID matches
    `AEN_DPIDR` (`4C013477` -- bench-verified AEN E8) **or**
    `V2N_CM33_DPIDR` (`6BA02477` -- the V2N CM33 DAP,
-   `scripts/bench/aen/bench-env.sh:154`; see #1440) -- both are an
+   `scripts/bench/aen/bench-env.sh:442`; see #1440) -- both are an
    unconditional STOP, not merely "not the AEN E8".  Do not treat
    `GD32_DPIDR` (`0BE12477` -- a claimed-but-unattested GD32 value;
    see #1369) as a pass condition, and **do not proceed on any ID the
@@ -326,7 +326,7 @@ cloned-serial ambiguity for every invocation that follows:
    guess.  `bench-env.sh` formerly carried a "BENCH-VERIFIED" label on
    `GD32_DPIDR` citing `docs/aen-bench-bringup.md`, which does not
    mention the GD32 at all; that label is now hedged
-   (`scripts/bench/aen/bench-env.sh:148-151`), so rely on the manual
+   (`scripts/bench/aen/bench-env.sh:394-397`), so rely on the manual
    read, not the `GD32_DPIDR` value, to prove the probe is not on a
    known-wrong board.
 4. **Flash immediately** after a passing read, using the same

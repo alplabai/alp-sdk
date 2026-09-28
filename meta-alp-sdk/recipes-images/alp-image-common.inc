@@ -80,7 +80,7 @@ IMAGE_INSTALL = " \
 # citation that is the concrete failure this closes. Settled by
 # inspection only; unverified by an actual `bitbake` run.
 ALP_RZ_DRPAI_INSTALL = "${@bb.utils.contains('BBFILE_COLLECTIONS', 'rz-drpai', \
-    bb.utils.contains('MACHINE_FEATURES', 'v2n', 'lib-tvm kernel-module-mmngr', '', d), '', d)}"
+    bb.utils.contains('MACHINE_FEATURES', 'v2n', 'lib-tvm kernel-module-mmngr alp-drpai-udev', '', d), '', d)}"
 ALP_RZ_DRPAI_INSTALL[vardepvalue] = "${ALP_RZ_DRPAI_INSTALL}"
 
 IMAGE_INSTALL += " ${ALP_RZ_DRPAI_INSTALL}"
@@ -186,6 +186,12 @@ IMAGE_INSTALL += " \
     rng-tools-service              \
 "
 
+# scripts/provision_som.py runs on the unit's own Linux: write_emmc_boot
+# reads and sets the eMMC boot config (EXT_CSD[177]/[179]) with `mmc`.
+# busybox has no equivalent, and no image carried it before (2026-09-28,
+# E1M-V2M103 2026W38-0001: "mmc: command not found").
+IMAGE_INSTALL += " mmc-utils"
+
 # Assert the network story: the vendor build template's
 # EXTRA_IMAGE_FEATURES (local.conf) includes tools-testapps, whose
 # packagegroup drags in connman -- a second DHCP manager fighting
@@ -196,11 +202,10 @@ IMAGE_FEATURES:remove = "tools-testapps"
 
 # DEEPX runtime on V2M variants: the machine confs own this (see
 # conf/machine/include/e1m-v2m-deepx.inc), gated on
-# ALP_ENABLE_DEEPX_DXM1 (dx-driver/dx-rt come from DEEPX's own
-# meta-deepx-m1 layer and are license-gated to DEEPX NPU customers). No
-# unconditional append here: it would make every un-opted V2M image
-# require meta-deepx-m1 in bblayers.conf even when the customer never
-# wants the DEEPX path.
+# ALP_ENABLE_DEEPX_DXM1, which defaults on whenever DEEPX's own
+# meta-deepx-m1 layer (dx-driver/dx-rt) is in bblayers.conf. No
+# unconditional append here: it would make every V2M image require
+# meta-deepx-m1 in bblayers.conf.
 
 IMAGE_LINGUAS = "en-us"
 

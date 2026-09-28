@@ -1,0 +1,21 @@
+U-Boot 2024.07-alp+ (Sep 24 2026 - 18:15:14 +0200)
+
+CPU:   Renesas Electronics CPU rev 16.15
+Model: Renesas Development EVK based on r9a09g056
+DRAM:  3.9 GiB
+Core:  33 devices, 20 uclasses, devicetree: separate
+MMC:   mmc@15c00000: 0, mmc@15c20000: 1
+Loading Environment from MMC... Reading from MMC(0)... *** Warning - bad CRC, using default environment
+
+In:    serial@11c01400
+Out:   serial@11c01400
+Err:   serial@11c01400
+ALP: no valid SoM manifest in EEPROM
+ALP: DA9292 programmed CTRL_01=0x01 VOUT_CH2=0x96/0x96
+ALP: DEEPX rail 0.75V up (PG)
+Net:   
+Error: ethernet@15c30000 No valid MAC address found.
+No ethernet found.
+
+Hit any key to stop autoboot:  2  0
+=>  

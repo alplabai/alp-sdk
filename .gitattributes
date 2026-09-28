@@ -56,3 +56,6 @@ CMakeLists.txt text eol=lf
 *.alpmodel binary
 *.bin     binary
 *.elf     binary
+
+# Raw console captures (CR CR LF line endings, leading NULs) replayed byte-exact by tests.
+tests/scripts/fixtures/provision/*.log -text
