@@ -143,6 +143,32 @@ foreign entry is the factory `MCUBOOT-` bootloader itself, so
 `--replace-atoc` there deletes it rather than being a safe workaround; see
 `docs/aen-provisioning.md` §0.5's Option A warning.
 
+> **`west flash` is a Flow-A-class destructive MRAM/ATOC write, not a safe
+> incremental update.** It burns over the SE-UART exactly the way the manual
+> `app-write-mram -p` above does — REPLACE, not merge — so everything this
+> section says about Flow A applies to plain `west flash` too. The guard
+> narrows the blast radius; it does not make the write non-destructive. In
+> particular, the canonical `person_detect`-style slot0 restore recipe
+> (`scripts/bench/aen/flash-jlink-mramxip.sh`, §"Restore the canonical
+> person_detect slot0" below) stages its entry as `ALP-HE`
+> (`flash-jlink-mramxip.sh:258-264`) — the SAME section name an HE `west
+> flash` build's own `allowed` set contains (`_atoc_section_name`). So a
+> restored board's `ALP-HE` entry is *inside* this guard's allowed set, and
+> a subsequent `west flash` correctly, silently overwrites it — that is the
+> guard working as designed (an in-band section a build owns is never
+> "foreign"), not a bypass. Don't read the guard's `clear`/`ok` verdict on
+> such a run as "nothing was touched" — the whole point of a slot0 write is
+> that `ALP-HE` changes.
+
+Soften one more assumption while you're reading this: the runner's own log
+line after a successful burn only claims the ATOC write itself succeeded —
+it does NOT claim the board actually booted the new image (bench gotcha: the
+SE can boot a STALE resident slot0 image preferentially over a freshly
+written ITCM-load ATOC, with the remedy being an explicit erase over the
+SE-UART; `west flash`'s only write is `-p`, never an erase). Confirm the
+boot the same way you would after any other flow — read the console (§Flow
+B) or PC/IPSR over SWD — rather than trusting the log line alone.
+
 ### Flow A — Dual-core deferred-TOC boot
 
 Booting a **second, dependent** M55 image (a peer the master releases at
