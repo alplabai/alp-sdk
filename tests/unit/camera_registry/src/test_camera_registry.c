@@ -95,6 +95,16 @@ ZTEST(alp_camera_registry, test_camera_configure_isp_rejects_null_isp)
 	zassert_equal(alp_camera_configure_isp(NULL, NULL), ALP_ERR_INVAL);
 }
 
+ZTEST(alp_camera_registry, test_camera_get_fps_guards)
+{
+	/* #2279: NULL out-pointer is INVAL ahead of the handle check; a NULL
+     * handle is NOT_READY, same as every other op. */
+	uint32_t fps = 0xDEADu;
+	zassert_equal(alp_camera_get_fps(NULL, NULL), ALP_ERR_INVAL);
+	zassert_equal(alp_camera_get_fps(NULL, &fps), ALP_ERR_NOT_READY);
+	zassert_equal(fps, 0xDEADu, "a failed read must not touch the output");
+}
+
 ZTEST(alp_camera_registry, test_camera_capture_release_close_null_safe)
 {
 	alp_camera_frame_t frame = { .data = NULL };
