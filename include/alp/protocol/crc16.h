@@ -49,6 +49,10 @@
  * following the SDK's existing portable-hardware-offload-with-software-
  * fallback pattern (ADR 0017).  One place to change, and both repos (this
  * one and cc3501e-bridge-firmware, once it vendors this file) pick it up.
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      `static inline alp_crc16_ccitt_false[_update]()` -- API, though not
+ *      linker ABI.  See docs/abi-markers.md.
  */
 
 #ifndef ALP_PROTOCOL_CRC16_H
