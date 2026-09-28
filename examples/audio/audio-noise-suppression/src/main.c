@@ -30,10 +30,10 @@
  *   ┌──────────────────────────────────────────────────────────────┐
  *   │ <alp/inference.h>  RNNoise-style denoiser (gain mask per     │
  *   │ bin)                                                          │
- *   │   - AUTO routes to DX-M1 on V2N-M1, CPU TFLM kernels on V2N. │
+ *   │   - AUTO: CPU TFLM kernels on this M33 slice (V2N, V2N-M1). │
  *   │   - ~50k params, int8 quantised, fits in 96 KiB arena.       │
  *   │ Output: per-bin gain mask -> applied to FFT bins -> inverse  │
- *   │ FFT (TODO v0.6) -> clean PCM block.                          │
+ *   │ FFT (still stubbed) -> clean PCM block.                      │
  *   └────────────────────────────┬─────────────────────────────────┘
  *                                │
  *                                ▼ I2S0 TX
@@ -418,9 +418,10 @@ int main(void)
 	/* ── Open the inference backend ────────────────────────
      *
      * AUTO routes to whatever the §D.lib loader resolved from
-     * the SoM preset -- DX-M1 on V2N-M1, CPU TFLM on V2N
-     * (no NPU), DX-M2 on V2H once that SKU lands.  App source
-     * doesn't change. */
+     * the SoM preset for THIS slice.  This project is M33-only,
+     * so on V2N and V2N-M1 alike that is CPU TFLM: DRP-AI3 and
+     * DEEPX DX-M1 are A55/Yocto-side and unreachable from here.
+     * App source doesn't change. */
 	alp_inference_config_t inf_cfg = {
 		.backend     = ALP_INFERENCE_BACKEND_AUTO,
 		.format      = ALP_INFERENCE_MODEL_TFLITE,
