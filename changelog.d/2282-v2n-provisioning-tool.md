@@ -30,7 +30,14 @@ Page. The flow and its hazards are in `docs/provisioning-v2n.md`.
   `renesas_flashwriter_scif`. It plans xSPI and eMMC boot1 writes and refuses a
   confirmed write. The flat flow reports a `bl2_mmc` component as skipped.
 
-None of the hardware paths have run on a board yet.
+First bench run (E1M-V2M103 2026W38-0001, 2026-09-28) found the target's
+busybox has no `head -c`, no `dd conv=`/`status=`/`iflag=` and no
+`blockdev`. The md5 probes had hashed an empty stream, so every step looked
+unfinished. Reads and writes now use plain `dd` (whole blocks plus a `bs=1`
+tail, then `sync`), an empty read of a non-empty span is an error, the
+partition re-read falls back to the `BLKRRPART` ioctl, `mmc-utils` ships in
+every Alp image, and `detect` runs `sync` on a live Linux before it
+power-cycles the unit.
 
 Review follow-ups: `boot_sd_linux` checks the live SoM (every
 non-optional on-module I2C device the preset declares must ACK) before the

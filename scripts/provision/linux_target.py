@@ -123,14 +123,27 @@ class LinuxTarget:
             raise BenchError(f"scp {remote} -> {local} failed: {r.stderr.strip()[-500:]}")
 
     def md5(self, path: str, offset: int = 0, size: int | None = None) -> str:
-        # tail/head instead of dd skip_bytes: works with busybox and coreutils alike.
-        src = f"tail -c +{offset + 1} {shlex.quote(path)}"
-        if size is not None:
-            src += f" | head -c {size}"
+        # Plain dd only: busybox builds may lack `head -c` and dd's
+        # skip_bytes/count_bytes (the alp-image-edge busybox has neither; a
+        # missing `head -c` hashed an EMPTY stream and every probe read as a
+        # mismatch).  Whole blocks first, then the < bs remainder at bs=1.
+        q = shlex.quote(path)
+        bs = 4096 if offset % 4096 == 0 else 512 if offset % 512 == 0 else 1
+        if size is None:
+            src = f"dd if={q} bs={bs} skip={offset // bs} 2>/dev/null"
+        else:
+            whole, rem = divmod(size, bs)
+            parts = ([f"dd if={q} bs={bs} skip={offset // bs} count={whole} 2>/dev/null"] if whole else []) +                     ([f"dd if={q} bs=1 skip={offset + whole * bs} count={rem} 2>/dev/null"] if rem else [])
+            src = parts[0] if len(parts) == 1 else "{ " + "; ".join(parts or ["true"]) + "; }"
         out = self.run(f"{src} | md5sum", timeout=600.0).stdout.split()
         if not out or not re.fullmatch(r"[0-9a-f]{32}", out[0]):
             raise BenchError(f"unparsable md5sum output for {path}")
+        if size and out[0] == _EMPTY_MD5:
+            raise BenchError(f"read 0 of {size} bytes from {path} at {offset:#x}")
         return out[0]
+
+
+_EMPTY_MD5 = hashlib.md5(b"").hexdigest()
 
 
 def _host_md5(path: Path) -> str:
@@ -247,7 +260,8 @@ def emmc_boot1_write_verify(t: LinuxTarget, emmc: str, local: Path, sector: int)
             raise BenchError(f"{remote}: copy on the target does not match {local.name}")
         t.run(f"echo 0 > {force_ro}")
         try:
-            t.run(f"dd if={shlex.quote(remote)} of={dev} bs=512 seek={sector} conv=fsync status=none",
+            # no conv=/status= operands: a minimal busybox dd rejects them outright
+            t.run(f"dd if={shlex.quote(remote)} of={dev} bs=512 seek={sector} && sync",
                   timeout=600.0)
         finally:
             t.run(f"echo 1 > {force_ro}", check=False)
@@ -300,8 +314,10 @@ def rootfs_write_verify(t: LinuxTarget, emmc: str, wic_gz: Path, timeout: float 
             h.update(block)
             n += len(block)
     want = h.hexdigest()
-    t.run(f"gunzip -c | dd of={emmc} bs=4M conv=fsync status=none", timeout=timeout, stdin_path=wic_gz)
-    t.run(f"blockdev --rereadpt {emmc}")
+    t.run(f"gunzip -c | dd of={emmc} bs=4M && sync", timeout=timeout, stdin_path=wic_gz)
+    # busybox images may lack blockdev: fall back to the BLKRRPART ioctl
+    t.run(f"blockdev --rereadpt {emmc} 2>/dev/null || python3 -c "
+          f"\"import fcntl, os; fcntl.ioctl(os.open('{emmc}', os.O_RDONLY), 0x125f)\"")
     got = t.md5(emmc, 0, n)
     if got != want:
         raise BenchError(f"{emmc} readback md5 {got} != uncompressed {wic_gz.name} md5 {want}")

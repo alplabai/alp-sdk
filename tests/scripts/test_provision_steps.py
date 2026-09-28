@@ -152,8 +152,8 @@ class Board(FakeLinux):
             return 0, "65536\n"
         if re.match(r"cat /sys/class/mtd/mtd\d/size", cmd):
             return 0, f"{0x800000}\n"
-        if m := re.match(r"head -c (\d+) /dev/mtd1 \| grep", cmd):
-            has = gates.RAIL_PG.encode() in self.files["/dev/mtd1"][: int(m[1])]
+        if m := re.match(r"dd if=/dev/mtd1 bs=4096 count=(\d+) 2>/dev/null \| grep", cmd):
+            has = gates.RAIL_PG.encode() in self.files["/dev/mtd1"][: int(m[1]) * 4096]
             return (0 if (has if self.rail is None else self.rail) else 1), ""
         if cmd.startswith("mmc extcsd read"):
             return 0, f"[BOOT_BUS_CONDITIONS: 0x{self.ext[177]:02x}]\n[PARTITION_CONFIG: 0x{self.ext[179]:02x}]\n"
@@ -246,7 +246,7 @@ def test_board1_plan_refuses_eeprom_manifest(tmp_path):
     assert "lacks 'ALP: DEEPX rail 0.75V up (PG)'" in bad.detail
     assert res[-1].name == "record"                # Record still runs after the refusal
     # nothing was written: no erase, no dd, no 0x50 page write, no staging
-    assert not any(re.search(r"flash_erase|mtd_debug write|\bdd\b|w\d+@0x50 .* 0x\w+ 0x\w+ 0x", c)
+    assert not any(re.search(r"flash_erase|mtd_debug write|\bdd\b[^|]*\bof=|w\d+@0x50 .* 0x\w+ 0x\w+ 0x", c)
                    for c in board.commands)
     assert not (ctx.unit_dir / f"{SERIAL}.manifest.staged.bin").exists()
 

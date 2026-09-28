@@ -105,9 +105,19 @@ def test_run_timeout_is_bench_error():
 
 
 def test_md5_uses_offset_and_size():
-    t, fake = target([("md5sum", "d41d8cd98f00b204e9800998ecf8427e  -\n")])
+    t, fake = target([("md5sum", "11" * 16 + "  -\n")])
     t.md5("/dev/mtd1", 0x1A0000, 16)
-    assert fake.commands[-1] == "tail -c +1703937 /dev/mtd1 | head -c 16 | md5sum"
+    assert fake.commands[-1] == "dd if=/dev/mtd1 bs=1 skip=1703936 count=16 2>/dev/null | md5sum"
+    t.md5("/dev/mtd1", 0, 4097)
+    assert fake.commands[-1] == ("{ dd if=/dev/mtd1 bs=4096 skip=0 count=1 2>/dev/null; "
+                                 "dd if=/dev/mtd1 bs=1 skip=4096 count=1 2>/dev/null; } | md5sum")
+
+
+def test_md5_refuses_an_empty_read():
+    # a busybox without `head -c` / short device used to hash "" and look like a mismatch
+    t, _ = target([("md5sum", "d41d8cd98f00b204e9800998ecf8427e  -\n")])
+    with pytest.raises(BenchError, match="read 0 of 16 bytes"):
+        t.md5("/dev/mtd1", 0, 16)
 
 
 # --- console ---------------------------------------------------------------------
@@ -208,8 +218,8 @@ def test_emmc_boot1_write_verify(tmp_path):
     good = md5(img.read_bytes())
     t, fake = target([("boot1/size", "8192\n"), ("md5sum", f"{good}  -\n"), ("force_ro|rm -f|^dd ", "")])
     assert lt.emmc_boot1_write_verify(t, "/dev/mmcblk1", img, 0x300) == good
-    assert "dd if=/tmp/fip.bin of=/dev/mmcblk1boot1 bs=512 seek=768 conv=fsync status=none" in fake.commands
-    assert "tail -c +393217 /dev/mmcblk1boot1 | head -c 1000 | md5sum" in fake.commands
+    assert "dd if=/tmp/fip.bin of=/dev/mmcblk1boot1 bs=512 seek=768 && sync" in fake.commands
+    assert "dd if=/dev/mmcblk1boot1 bs=1 skip=393216 count=1000 2>/dev/null | md5sum" in fake.commands
 
 
 def test_set_boot_config_verifies():
@@ -228,8 +238,8 @@ def test_rootfs_write_verify_streams_and_compares(tmp_path):
     wic.write_bytes(gzip.compress(raw))
     t, fake = target([("gunzip", ""), ("rereadpt", ""), ("md5sum", f"{md5(raw)}  -\n")])
     assert lt.rootfs_write_verify(t, "/dev/mmcblk1", wic) == md5(raw)
-    assert fake.commands[0] == "gunzip -c | dd of=/dev/mmcblk1 bs=4M conv=fsync status=none"
-    assert fake.commands[-1] == f"tail -c +1 /dev/mmcblk1 | head -c {len(raw)} | md5sum"
+    assert fake.commands[0] == "gunzip -c | dd of=/dev/mmcblk1 bs=4M && sync"
+    assert fake.commands[-1] == f"dd if=/dev/mmcblk1 bs=4096 skip=0 count={len(raw) // 4096} 2>/dev/null | md5sum"
 
 
 # --- I2C + the N24S128 selector table ------------------------------------------------------
@@ -660,12 +670,12 @@ def _census_responses(array: bytes = b"\xff" * 128):
         (r"mmcblk1/device/cid", CID + "\n"), (r"mmcblk1/size", "30535680\n"),
         (r"extcsd read", EXTCSD.format(a=2, b=8)),
         (r"/ios", "actual clock:\t200000000 Hz\ntiming spec:\t9 (mmc HS200)\n"),
-        (r"mmcblk1boot1 \| head -c 100 ", "11" * 16 + "  -\n"),
-        (r"mmcblk1boot1 \| head -c 200 ", "22" * 16 + "  -\n"),
+        (r"mmcblk1boot1 bs=1 skip=512 count=100 ", "11" * 16 + "  -\n"),
+        (r"mmcblk1boot1 bs=1 skip=393216 count=200 ", "22" * 16 + "  -\n"),
         (r"spi-nor/jedec_id", "aabbcc\n"),
         (r"mtd\*; do", "393216\n66715648\n"),
-        (r"mtd0 \| head", "33" * 16 + "  -\n"), (r"tail -c \+1 /dev/mtd1 \|", "44" * 16 + "  -\n"),
-        (r"tail -c \+1703937 /dev/mtd1", "55" * 16 + "  -\n"),
+        (r"if=/dev/mtd0 ", "33" * 16 + "  -\n"), (r"if=/dev/mtd1 bs=\d+ skip=0 ", "44" * 16 + "  -\n"),
+        (r"if=/dev/mtd1 bs=\d+ skip=(416|1703936) ", "55" * 16 + "  -\n"),
         (r"w2@0x58 0x02 0x00 r16", _hx(bytes.fromhex(UNIQUE_ID))),
         (r"w2@0x58 0x04 0x00 r1", "0xfd\n"), (r"w2@0x58 0x06 0x00 r1", "0x1d\n"),
         (r"w2@0x58 0x00 0x00 r64", _hx(b"\xff" * 64)),
@@ -706,7 +716,7 @@ def test_census_collects_ledger_keys_read_only():
     assert facts["eth0_mac"] == "aa:bb:cc:00:00:01" and facts["eth0_link"] == "up"
     assert notes == ["eth1: not present"]
     # read-only: no writes of any kind reached the unit
-    assert not [c for c in fake.commands if re.search(r"i2cset|flash_erase|mtd_debug write|\bdd\b|mmc boot", c)]
+    assert not [c for c in fake.commands if re.search(r"i2cset|flash_erase|mtd_debug write|\bdd\b[^|]*\bof=|mmc boot", c)]
     assert not [c for c in fake.commands if re.search(r"w(?!2@)\d+@0x5[08]", c)]
 
 
@@ -732,5 +742,5 @@ def test_emmc_boot1_write_refuses_an_image_past_the_partition_end(tmp_path):
     t, fake = target([("boot1/size", "768\n")])     # 768 sectors: ends exactly at 0x300
     with pytest.raises(BenchError, match="does not fit"):
         lt.emmc_boot1_write_verify(t, "/dev/mmcblk1", img, 0x300)
-    assert not any(c.startswith("dd ") for c in fake.commands)
+    assert not any(c.startswith("dd ") and " of=" in c for c in fake.commands)
 

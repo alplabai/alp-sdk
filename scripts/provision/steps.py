@@ -406,6 +406,13 @@ class Detect(Step):
         classes = {"scif-rom": scif_writer.ROM_BANNER, "linux-login": LOGIN_RE, "uboot": uboot.PROMPT}
         n = len(c.transcript)
         if ctx.execute:
+            if ctx.linux is not None:
+                # best effort: flush a running Linux's page cache before cutting
+                # power (a microSD root can hold seconds of writeback, #2357)
+                try:
+                    ctx.linux.run("sync", check=False, timeout=120.0)
+                except BenchError:
+                    pass
             ctx.mutate("power cycle and classify the console",
                        lambda: ctx.bench.power.cycle(float(ctx.bench.raw.get("power", {}).get("off_s", 3.0))))
             try:
@@ -704,7 +711,7 @@ class WriteRootfs(Step):
         else:
             emmc = "/dev/<emmc>"
         dtb = gates.fip_fdtfile(ctx.artefact_bytes("fip"))
-        ctx.mutate(f"gunzip -c {wic.name} | dd of={emmc} bs=4M conv=fsync (over SSH), md5 readback",
+        ctx.mutate(f"gunzip -c {wic.name} | dd of={emmc} bs=4M && sync (over SSH), md5 readback",
                    lambda: lt.rootfs_write_verify(t, emmc, wic))
 
         def check():
@@ -780,7 +787,7 @@ class EepromManifest(Step):
             if not sku.ok:
                 bad.append(sku.detail)
         if ctx.family == "v2n-m1":
-            r = t.run(f"head -c {gates.CM33_REGION_OFFSET} /dev/mtd1 | grep -q -a -F "
+            r = t.run(f"dd if=/dev/mtd1 bs=4096 count={gates.CM33_REGION_OFFSET // 4096} 2>/dev/null | grep -q -a -F "
                       f"{shlex.quote(gates.RAIL_PG)}", check=False)
             if r.rc != 0:
                 bad.append(f"FIP on xSPI mtd1 lacks {gates.RAIL_PG!r} (U-Boot patch 0004): a v2n-m1 "
