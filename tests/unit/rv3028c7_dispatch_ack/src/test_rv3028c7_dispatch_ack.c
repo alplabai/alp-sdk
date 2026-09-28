@@ -32,12 +32,12 @@
 /* STATUS / CONTROL_2 register addresses + STATUS bit positions,
  * mirrored from chips/rv3028c7/rv3028c7.c (private to that TU) so
  * this test doesn't need to expose them from the public header. */
-#define REG_STATUS    0x0Eu
-#define REG_CONTROL_2 0x10u
-#define STATUS_PORF   0x01u
-#define STATUS_AF     0x04u
-#define STATUS_UF     0x10u
-#define CONTROL_2_24H 0x40u
+#define REG_STATUS      0x0Eu
+#define REG_CONTROL_2   0x10u
+#define STATUS_PORF     0x01u
+#define STATUS_AF       0x04u
+#define STATUS_UF       0x10u
+#define CONTROL_2_12_24 0x02u /* 0 = 24h, 1 = 12h (App. Manual Rev. 1.4 p.24) */
 
 /* ------------------------------------------------------------------
  * Fake I2C register file.  rv3028c7.c's only bus dependency.
@@ -128,13 +128,15 @@ ZTEST_SUITE(rv3028c7_dispatch_ack, NULL, NULL, NULL, NULL, NULL);
 ZTEST(rv3028c7_dispatch_ack, test_init_clears_porf_and_forces_24h)
 {
 	fake_reset();
-	fake_regs[REG_STATUS] = STATUS_PORF;
+	fake_regs[REG_STATUS]    = STATUS_PORF;
+	fake_regs[REG_CONTROL_2] = CONTROL_2_12_24; /* left in 12h mode */
 
 	rv3028c7_t ctx;
 	zassert_equal(rv3028c7_init(&ctx, (alp_i2c_t *)1), ALP_OK, "init failed");
 	zassert_equal(
 	    fake_regs[REG_STATUS], 0, "PORF not cleared, regs[STATUS]=0x%02x", fake_regs[REG_STATUS]);
-	zassert_true((fake_regs[REG_CONTROL_2] & CONTROL_2_24H) != 0, "24H bit not forced");
+	zassert_equal(
+	    fake_regs[REG_CONTROL_2] & CONTROL_2_12_24, 0, "12_24 bit not cleared (24h not forced)");
 }
 
 ZTEST(rv3028c7_dispatch_ack, test_dispatch_irq_dispatches_and_clears_observed_bit)
