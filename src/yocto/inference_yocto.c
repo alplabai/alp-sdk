@@ -214,21 +214,30 @@ alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg)
 	 * comment for why every OTHER access to this field is atomic). */
 	h->last_invoke_latency_us = UINT64_MAX;
 
+	/* Each compiled-in backend loads exactly one model format.  Refuse a
+	 * mismatch HERE, before its open hook sees the bytes: on E1M-V2M103 an
+	 * `.onnx` blob opened under AUTO (DRP-AI resolved) went straight into
+	 * the DRP-AI tar extractor, which is the wrong parser and, before its
+	 * SIGPIPE guard, killed the app.  The header already documents
+	 * "unsupported model format" as ALP_ERR_INVAL. */
 	alp_status_t rc = ALP_ERR_NOSUPPORT;
 	switch (backend) {
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
 	case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
-		rc = alp_inference_deepx_open(h, cfg);
+		rc = cfg->format == ALP_INFERENCE_MODEL_DXNN ? alp_inference_deepx_open(h, cfg)
+		                                             : ALP_ERR_INVAL;
 		break;
 #endif
 #if defined(ALP_SDK_USE_DRPAI_V2N)
 	case ALP_INFERENCE_BACKEND_DRPAI:
-		rc = alp_inference_drpai_open(h, cfg);
+		rc = cfg->format == ALP_INFERENCE_MODEL_DRPAI ? alp_inference_drpai_open(h, cfg)
+		                                              : ALP_ERR_INVAL;
 		break;
 #endif
 #if defined(ALP_SDK_USE_ORT_CPU)
 	case ALP_INFERENCE_BACKEND_CPU:
-		rc = alp_inference_ort_open(h, cfg);
+		rc = cfg->format == ALP_INFERENCE_MODEL_ONNX ? alp_inference_ort_open(h, cfg)
+		                                             : ALP_ERR_INVAL;
 		break;
 #endif
 	default:
