@@ -60,7 +60,7 @@ tan validate --board-yaml board.yaml
 
 The diagnostic points at the offending block and carries the raw
 `jsonschema` message for the keyword that fired. For example, a
-`supported_boards:` list (`board.schema.json:470`) with a duplicate
+`supported_boards:` list (`board.schema.json:466`) with a duplicate
 `e1m-evk` entry:
 
 ```
