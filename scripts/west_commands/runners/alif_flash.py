@@ -72,6 +72,53 @@ parity-tested against) ``bench_atoc_replace_guard`` in
 run leaves a transcript + a machine-readable verdict under
 ``<build_dir>/alif_flash/`` (see ``_run_atoc_guard`` below).
 
+Multi-domain sysbuild refusal (#2274)
+--------------------------------------
+Zephyr's own sysbuild flash plumbing runs this runner's ``do_run`` ONCE PER
+DOMAIN, not once per ``west flash`` invocation (facts below cited against
+Zephyr v4.4.1, this repo's pinned revision -- ``west.yml``'s ``zephyr:``
+entry): ``scripts/west_commands/flash.py`` hands ``do_run_common`` the
+sysbuild's top-level ``domains.yaml`` (``share/sysbuild/cmake/
+domains.cmake`` generates it at ``${CMAKE_BINARY_DIR}/domains.yaml``, the
+top build dir), and ``run_common.py``'s ``get_domains_to_process``/
+``do_run_common`` loop instantiates and calls the board's flash runner
+once per resolved domain, each time with THAT domain's own per-domain
+``build_dir`` -- exactly one level below the top build dir where
+``domains.yaml`` lives (``share/sysbuild/cmake/modules/
+sysbuild_extensions.cmake`` sets each domain's binary dir to
+``${CMAKE_BINARY_DIR}/${ZBUILD_APPLICATION}``).
+
+The #2262 ATOC-replace guard above identifies a resident entry by NAME
+ONLY. On an MCUboot sysbuild, both the ``mcuboot`` domain (ITCM
+``0x58000000``) and the app domain (HE slot0) map to the SAME ATOC section
+name ``ALP-HE`` via ``_atoc_section_name``. On a SECOND ``do_run``
+invocation, any ``ALP-HE`` entry a previous ``alif_flash`` run of the
+OTHER domain wrote is already this run's own ``allowed`` set, so the guard
+reports ``clear`` and burns a fresh single-entry ATOC -- silently
+replacing whatever that earlier run wrote. The guard only ever detects a
+FOREIGN name; it has no way to see a same-name overwrite between two
+sysbuild domains. (On a factory-provisioned module the resident MCUboot
+entry is instead named ``MCUBOOT-`` (entry name TBD/unverified, see
+``zephyr/sysbuild/aen/README.md``'s provisioning section), not
+``ALP-HE`` -- the #2262 guard already refuses that case as a foreign
+entry; this gap is specifically
+about two ``alif_flash`` runs of the SAME repo's own sysbuild both writing
+``ALP-HE``, e.g. a from-scratch bring-up or a re-keyed module.)
+
+``do_run`` therefore refuses, before ANY staging/gettoc/burn side effect,
+whenever this build's OWN ``domains.yaml`` (found via
+``_parse_sysbuild_domains_yaml``, independent of how many domains THIS
+west invocation happens to process) declares more than one FLASHABLE
+domain -- including a single ``--domain <x>`` invocation of such a build,
+since flashing only one domain would still replace any ``ALP-HE`` entry a
+previous run of the other domain wrote, the same way. It also refuses,
+with a distinct message, when `build_dir` is not even listed among the
+domains its own ``domains.yaml`` declares at all (a relocated or stale
+build tree). A single-domain sysbuild, and a plain (non-sysbuild) build
+with no ``domains.yaml`` at all, are unaffected. See
+``changelog.d/2274.md`` and ``docs/aen-provisioning.md`` §0.5 Option B for
+the supported J-Link path.
+
 Why this lives in alp-sdk and not upstream Zephyr
 -------------------------------------------------
 Upstream Zephyr's ``runners`` package has no ``alif_flash`` runner, and
@@ -99,6 +146,8 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+import yaml
 
 from runners.core import RunnerCaps, ZephyrBinaryRunner
 
@@ -142,7 +191,8 @@ _aen_atoc = _load_aen_atoc()
 # global alias; the SE copies it there before booting.
 #   loadAddress 0x58000000 (M55-HE) / 0x50000000 (M55-HP).
 #       cite: scripts/bench/aen/flash-run.sh:46  ("loadAddress": "0x58000000")
-#       cite: docs/aen-provisioning.md:317        ("loadAddress": "0x58000000")
+#       cite: docs/aen-provisioning.md section 4 ("Build the ATOC + write
+#             it") -- the example ATOC config's ("loadAddress": "0x58000000")
 #   flags ["load", "boot"], signed:true.
 #       cite: scripts/bench/aen/flash-run.sh:45-46
 #
@@ -334,6 +384,239 @@ def _build_atoc_config(name, app_shape):
         f'"binary": "{name}.bin", "version": "1.0.0", "signed": true,\n'
         f'{app_entry}\n'
         '}\n')
+
+
+# Multi-domain sysbuild refusal (#2274) -- see the module docstring section
+# of the same name for the upstream Zephyr facts this relies on. Every
+# `path:line` citation below is against Zephyr v4.4.1, this repo's pinned
+# revision (west.yml's `zephyr:` entry) -- a stable citation, not a moving
+# target, since alp-sdk pins one Zephyr base and bumps it deliberately.
+
+
+def _sysbuild_domains_path(build_dir):
+    '''The path this runner checks for a sysbuild ``domains.yaml``, given
+    the PER-DOMAIN ``build_dir`` `west flash` hands `do_run` (`self.cfg.
+    build_dir`).
+
+    ``domains.yaml`` itself lives at the sysbuild's TOP build_dir, one
+    level ABOVE the per-domain build_dir this runner receives:
+
+    - ``share/sysbuild/cmake/domains.cmake:8`` sets
+      ``build_dir: ${CMAKE_BINARY_DIR}`` (the top build dir) inside the
+      generated YAML, and line 19 writes the file itself to
+      ``${CMAKE_BINARY_DIR}/domains.yaml``.
+    - ``share/sysbuild/cmake/modules/sysbuild_extensions.cmake:356,360``
+      sets each domain's OWN binary dir to
+      ``${CMAKE_BINARY_DIR}/${ZBUILD_APPLICATION}`` -- i.e. exactly one
+      path component below the top build dir where ``domains.yaml`` sits.
+    - ``scripts/west_commands/flash.py:32`` builds
+      ``Path(build_dir) / 'domains.yaml'`` from that SAME top build_dir
+      (``get_build_dir(args)``, not any one domain's own build_dir) before
+      calling ``do_run_common``; ``scripts/west_commands/run_common.py:
+      351-353`` (``for d in domains: ... do_run_common_image(..., d.
+      build_dir, ...)``) is what then hands EACH domain's OWN
+      ``d.build_dir`` to the board's runner as ``cfg.build_dir`` -- the
+      value this function receives.
+
+      Uses ``.absolute()``, NOT ``.resolve()``: this only needs an
+      absolute path to compute ``.parent`` correctly (a relative
+      `build_dir` from a west invocation run outside the build tree's own
+      directory) -- it must NOT follow a symlink in `build_dir` itself,
+      since that would locate ``domains.yaml`` relative to the symlink's
+      TARGET rather than the tree the caller (and Zephyr's own
+      `flash.py`) actually navigated. Symlink resolution belongs only to
+      the listed-build-dir COMPARISON in
+      `_refuse_if_multi_domain_sysbuild`, where both sides must be
+      resolved the same way for equality to be meaningful -- not to
+      locating the file to read in the first place.'''
+    return Path(build_dir).absolute().parent / 'domains.yaml'
+
+
+def _parse_sysbuild_domains_yaml(build_dir):
+    '''Return ``{"all": [...], "flashable": [...]}`` -- both lists of
+    ``{"name": ..., "build_dir": ...}`` dicts -- for this build's own
+    ``domains.yaml``, or ``None`` if it is not a sysbuild build at all (no
+    ``domains.yaml`` next to the top build dir `build_dir` is nested
+    under). Pure and testable without a real west/Zephyr workspace.
+
+    ``"all"`` is every entry under ``domains:``, used to check whether
+    `build_dir` is even one of this sysbuild's own domains at all (see
+    `_refuse_if_multi_domain_sysbuild`'s stale-tree check) -- a build-only
+    image's build_dir is still a legitimate `cfg.build_dir` in principle
+    (a `--domain <build-only-image>` invocation, however unusual), so it
+    must not be misreported as "stale".
+
+    ``"flashable"`` is what would actually be FLASHED, preferring
+    ``flash_order:`` over the full ``domains:`` list when present and
+    non-empty: ``share/sysbuild/cmake/domains.cmake:14-16`` builds
+    ``flash_order:`` from ``IMAGES_FLASHING_ORDER`` filtered to exclude
+    each image's ``BUILD_ONLY`` property, i.e. it is already the
+    flashable-only subset -- the SAME list
+    ``scripts/west_commands/run_common.py:213``'s
+    ``domains.get_domains(args.domain, default_flash_order=True)`` reads
+    for a plain multi-domain ``west flash`` with no ``--domain``. Falls
+    back to ``"all"`` only when ``flash_order:`` is absent or empty, on
+    the fail-closed side (a domains.yaml shape this parser does not
+    recognise still counts every domain rather than none).
+
+    Reads only the documented ``domains.yaml`` shape
+    (``share/sysbuild/cmake/domains.cmake``): a mapping with ``default``,
+    ``build_dir``, a ``domains:`` sequence of ``{name, build_dir}`` maps,
+    and an optional ``flash_order:`` sequence of names. Deliberately does
+    not import Zephyr's own ``Domains`` class
+    (``scripts/pylib/build_helpers/domains.py``) -- that module is only
+    importable from an active west workspace, and this runner's own module
+    docstring explains why it avoids such a dependency (Zephyr module
+    runner, imported at flash time with no guarantee of anything beyond
+    ``runners.core`` on ``sys.path``).
+
+    Fails CLOSED on anything unreadable, malformed, or degenerate: an
+    unparseable ``domains.yaml``, a ``domains:``/``flash_order:`` entry of
+    the wrong shape or type, or an EMPTY ``domains:`` list, must never be
+    silently treated as "not a sysbuild" or "single domain, proceed" --
+    each of those would defeat the very refusal this function exists to
+    drive. Raises ``RuntimeError`` in every such case, matching this
+    runner's existing error-raising idiom (see e.g. ``_reset_vector``,
+    ``_select_app_shape``).'''
+    domains_yaml = _sysbuild_domains_path(build_dir)
+    if not domains_yaml.is_file():
+        return None
+    try:
+        text = domains_yaml.read_text(encoding='utf-8')
+    except OSError as exc:
+        raise RuntimeError(
+            f"could not read '{domains_yaml}' to check whether this is a "
+            f'multi-domain sysbuild ({exc}) -- refusing rather than '
+            'assuming a single-domain build (alp-sdk#2274).') from exc
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise RuntimeError(
+            f"'{domains_yaml}' is not valid YAML ({exc}) -- cannot verify "
+            'this is not a multi-domain sysbuild; refusing rather than '
+            'assuming a single-domain build (alp-sdk#2274).') from exc
+    if not isinstance(data, dict) or not isinstance(data.get('domains'), list):
+        raise RuntimeError(
+            f"'{domains_yaml}' does not match the expected domains.yaml "
+            "shape (a mapping with a 'domains:' list) -- cannot verify "
+            'this is not a multi-domain sysbuild; refusing rather than '
+            'assuming a single-domain build (alp-sdk#2274).')
+    if not data['domains']:
+        raise RuntimeError(
+            f"'{domains_yaml}' declares an empty domains: list -- cannot "
+            'verify this is not a multi-domain sysbuild; refusing rather '
+            'than assuming a single-domain build (alp-sdk#2274).')
+
+    by_name = {}
+    for entry in data['domains']:
+        if (not isinstance(entry, dict) or 'name' not in entry
+                or 'build_dir' not in entry):
+            raise RuntimeError(
+                f"'{domains_yaml}' has a domains: entry missing 'name' or "
+                "'build_dir' -- cannot verify this is not a multi-domain "
+                'sysbuild; refusing rather than assuming a single-domain '
+                'build (alp-sdk#2274).')
+        name, entry_build_dir = entry['name'], entry['build_dir']
+        if not isinstance(name, str) or not isinstance(entry_build_dir, str):
+            raise RuntimeError(
+                f"'{domains_yaml}' has a domains: entry whose 'name' or "
+                "'build_dir' is not a string -- cannot verify this is not "
+                'a multi-domain sysbuild; refusing rather than assuming a '
+                'single-domain build (alp-sdk#2274).')
+        if name in by_name:
+            raise RuntimeError(
+                f"'{domains_yaml}' has a duplicate domains: entry named "
+                f'{name!r} -- cannot verify this is not a multi-domain '
+                'sysbuild; refusing rather than assuming a single-domain '
+                'build (alp-sdk#2274).')
+        by_name[name] = {'name': name, 'build_dir': entry_build_dir}
+    all_domains = list(by_name.values())
+
+    flash_order = data.get('flash_order')
+    if isinstance(flash_order, list) and flash_order:
+        flashable = []
+        for name in flash_order:
+            if not isinstance(name, str):
+                raise RuntimeError(
+                    f"'{domains_yaml}' has a flash_order: entry that is "
+                    'not a string -- cannot verify this is not a '
+                    'multi-domain sysbuild; refusing rather than assuming '
+                    'a single-domain build (alp-sdk#2274).')
+            if name not in by_name:
+                raise RuntimeError(
+                    f"'{domains_yaml}' flash_order: names {name!r}, which "
+                    'is not declared under domains: -- cannot verify this '
+                    'is not a multi-domain sysbuild; refusing rather than '
+                    'assuming a single-domain build (alp-sdk#2274).')
+            flashable.append(by_name[name])
+    else:
+        flashable = all_domains
+
+    return {'all': all_domains, 'flashable': flashable}
+
+
+def _refuse_if_multi_domain_sysbuild(build_dir):
+    '''Refuse (RuntimeError) before ANY staging/gettoc/J-Link/burn side
+    effect when `build_dir`'s own sysbuild declares more than one
+    FLASHABLE domain (see `_parse_sysbuild_domains_yaml`'s ``"flashable"``)
+    -- keyed on the BUILD's domains.yaml, not on how many domains this
+    west invocation happens to process, so a single `--domain <x>`
+    invocation of a 2-domain sysbuild refuses too (see module docstring,
+    "Multi-domain sysbuild refusal (#2274)").
+
+    Also refuses (with a DISTINCT message) when `build_dir` is not even
+    LISTED among its own domains.yaml's domains at all -- a
+    relocated/stale build tree whose domains.yaml no longer describes
+    where this build actually lives. Comparing RESOLVED paths (`Path(
+    build_dir).resolve()` against each `Path(entry['build_dir']).resolve()`)
+    rather than raw strings means a relative vs. absolute spelling of the
+    same directory still matches; `.resolve()` does not require the path
+    to exist (`strict=False` is pathlib's default), so a not-yet-built
+    domain build_dir is handled the same way.'''
+    if not build_dir:
+        return
+    domains_yaml = _sysbuild_domains_path(build_dir)
+    parsed = _parse_sysbuild_domains_yaml(build_dir)
+    if parsed is None:
+        return
+
+    this_build_dir = Path(build_dir).resolve()
+    listed = any(Path(e['build_dir']).resolve() == this_build_dir
+                 for e in parsed['all'])
+    if not listed:
+        raise RuntimeError(
+            f"'{domains_yaml}' does not list this build dir "
+            f"'{this_build_dir}' -- stale sysbuild output? remove it or "
+            'build elsewhere (alp-sdk#2274).')
+
+    flashable = parsed['flashable']
+    if len(flashable) <= 1:
+        return
+
+    domains_desc = ', '.join(e['name'] for e in flashable)
+    raise RuntimeError(
+        f"'{domains_yaml}' declares a multi-domain sysbuild "
+        f'({domains_desc}) -- refusing to flash it through the '
+        "alif_flash runner (alp-sdk#2274). Zephyr's own sysbuild flash "
+        "plumbing runs this runner's do_run once PER DOMAIN, and the "
+        '#2262 ATOC-replace guard identifies a resident entry by NAME '
+        'ONLY: the mcuboot domain and the HE app domain both map to the '
+        "SAME ATOC section name 'ALP-HE', so a second invocation would "
+        'see any ALP-HE entry a previous alif_flash run of the other '
+        'domain wrote as already-allowed and burn a fresh single-entry '
+        'ATOC over it -- the guard reports clear, but that is silently '
+        'replacing whatever the earlier run wrote. This holds even when '
+        'flashing only ONE domain (e.g. --domain app): it would still '
+        'replace any ALP-HE entry a previous alif_flash run of the other '
+        'domain wrote, the same way. Use the supported path instead: a '
+        'plain J-Link loadbin of your imgtool-signed image straight to '
+        'slot0, no SETOOLS/ATOC/SE-UART at all (docs/aen-provisioning.md '
+        'section 0.5, Option B). That J-Link path writes the APP ONLY -- '
+        'it requires MCUboot already resident (a pre-provisioned module). '
+        'On a bare, wiped, or re-keyed module, provision MCUboot with '
+        "SETOOLS first (zephyr/sysbuild/aen/README.md's provisioning "
+        'section) or the module will not boot (recoverable via SETOOLS '
+        're-provisioning).')
 
 
 # MEDIUM-6 review (#2262): a wedged SE-UART (the maintenance session
@@ -551,18 +834,32 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
         # MEDIUM-3 review (#2262): clear any verdict a PREVIOUS run left
         # behind before this attempt reaches (or fails before reaching)
         # the guard step. Without this, a run that fails early -- no
-        # SETOOLS, no zephyr.bin, a rejected ATOC window, any of the
-        # RuntimeErrors below -- would leave the LAST run's
-        # atoc-guard.json in place, and a caller reading it (tan-cli's
-        # zephyr_west_flash backend, alplabai/tan-cli#1267) could mistake
-        # a stale "clear"/"replaced" verdict for THIS run's own outcome.
-        # `unlink(missing_ok=True)` rather than writing a "pending" status:
-        # the file's mere ABSENCE is then the unambiguous signal "the
-        # guard never reached a verdict for this attempt", with no schema
-        # change needed to distinguish it from a real one.
+        # SETOOLS, no zephyr.bin, a rejected ATOC window, the #2274
+        # multi-domain refusal just below, any of the RuntimeErrors below
+        # -- would leave the LAST run's atoc-guard.json in place, and a
+        # caller reading it (tan-cli's zephyr_west_flash backend,
+        # alplabai/tan-cli#1267) could mistake a stale "clear"/"replaced"
+        # verdict for THIS run's own outcome. `unlink(missing_ok=True)`
+        # rather than writing a "pending" status: the file's mere ABSENCE
+        # is then the unambiguous signal "the guard never reached a
+        # verdict for this attempt", with no schema change needed to
+        # distinguish it from a real one.
+        #
+        # Deliberately placed BEFORE the #2274 multi-domain refusal
+        # (moved here on review): unlinking this runner's OWN prior
+        # output is not an MRAM/ATOC side effect -- it never touches the
+        # device or stages anything -- so a #2274 refusal must still
+        # clear it, the same as every other early-abort path here. Left
+        # in place, a #2274 refusal would leave a PREVIOUS run's
+        # clear/replaced verdict looking like this attempt's own result.
         if self.cfg.build_dir:
             (Path(self.cfg.build_dir) / 'alif_flash' / 'atoc-guard.json').unlink(
                 missing_ok=True)
+
+        # Multi-domain sysbuild refusal (#2274) -- BEFORE any staging,
+        # gettoc, J-Link, or burn side effect. See the module docstring
+        # section of the same name and `_refuse_if_multi_domain_sysbuild`.
+        _refuse_if_multi_domain_sysbuild(self.cfg.build_dir)
         # `atoc-before.txt` is deliberately NOT removed here (nit review,
         # #2262 -- considered and decided against, not an oversight): its
         # whole audit-trail value is being the LAST successfully-read

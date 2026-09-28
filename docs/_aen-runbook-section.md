@@ -100,6 +100,16 @@ export SE_UART=<your-serial-device>               # the SE-UART (host-specific)
 west flash      # -> alif_flash runner -> SETOOLS over the SE-UART
 ```
 
+On the E1M-AEN boards, `west flash` on a sysbuild (MCUboot) build refuses
+(alp-sdk#2274): the `alif_flash` runner cannot stage both domains' ATOC
+entries in one burn. Use `docs/aen-provisioning.md` §0.5 (Option B for a
+module whose MCUboot is already provisioned; the SETOOLS MCUboot
+provisioning in `zephyr/sysbuild/aen/README.md`'s provisioning section
+(`app-mcuboot-only.json`) otherwise -- the manual path above is an
+app-only ATOC write, not MCUboot provisioning). Option B writes the app
+only; without a resident MCUboot the module will not boot (recoverable
+via SETOOLS re-provisioning).
+
 **One-off runner setup.** The `alif_flash` runner is **not** in upstream
 Zephyr's `runners` package; alp-sdk ships it
 ([`scripts/west_commands/runners/alif_flash.py`](../scripts/west_commands/runners/alif_flash.py))
@@ -151,15 +161,11 @@ verdict contract" section (published, and where a reader chasing `west
 flash`'s ATOC guard is already looking) — see it there for the field
 table; `changelog.d/2262.md` points at that same location.
 
-> **Sysbuild multi-domain caveat (alp-sdk#2274).** `alif_flash` runs once
-> PER DOMAIN, not once per `west flash` invocation, so a sysbuild build
-> (MCUboot domain + app domain) runs this guard twice. MCUboot and the HE
-> app both map to the same ATOC section name `ALP-HE`, so the guard cannot
-> tell the second invocation's own resident `ALP-HE` (written by the
-> first) from a legitimate re-write of its own entry — it reports `clear`
-> and silently replaces it. Not a regression (the pre-`#2262` runner did
-> the same unconditionally); see `zephyr/sysbuild/aen/README.md`'s own
-> warning next to its two-domain flash example.
+> **Sysbuild multi-domain refusal (alp-sdk#2274).** On the E1M-AEN boards,
+> `west flash` on a sysbuild (MCUboot) build refuses: the `alif_flash`
+> runner cannot stage both domains' ATOC entries in one burn. See the
+> README's #2274 warning in its Usage section
+> (`zephyr/sysbuild/aen/README.md`) and `changelog.d/2274.md`.
 
 > **Pre-provisioned modules from Alp Lab** already carry a dev-signed MCUboot +
 > self-test in slot0 (LCS=DM), so the core is already released and SWD/`west

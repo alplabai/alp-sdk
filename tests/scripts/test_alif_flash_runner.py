@@ -842,3 +842,402 @@ def test_do_create_se_uart_baud_flag_overrides_env(monkeypatch) -> None:
     runner = alif_flash.AlifFlashBinaryRunner.do_create(
         object(), _args_namespace(se_uart_baud="9600"))
     assert runner.se_uart_baud == "9600"
+
+
+# ---------------------------------------------------------------------
+# Multi-domain sysbuild refusal (alp-sdk#2274)
+# ---------------------------------------------------------------------
+
+def _write_domains_yaml(top_build_dir: Path, domain_names, flash_order=None,
+                         build_dirs=None, default=None) -> None:
+    '''Write a `domains.yaml` matching share/sysbuild/cmake/domains.cmake's
+    generated shape at `top_build_dir` -- the sysbuild's TOP build dir,
+    the PARENT of each domain's own build_dir (see
+    `alif_flash._sysbuild_domains_path`).
+
+    `flash_order` defaults to `domain_names` (every domain flashable);
+    pass a SUBSET to simulate a BUILD_ONLY image domains.cmake:14-16
+    excludes from flash_order. `build_dirs` defaults to `{name:
+    top_build_dir/name}`; pass an override dict to simulate a STALE
+    domains.yaml whose recorded build_dir no longer matches where a domain
+    actually lives.'''
+    top_build_dir.mkdir(parents=True, exist_ok=True)
+    build_dirs = build_dirs or {n: top_build_dir / n for n in domain_names}
+    flash_order = domain_names if flash_order is None else flash_order
+    domains = "\n".join(
+        f"  - name: {name}\n    build_dir: {build_dirs[name]}"
+        for name in domain_names
+    )
+    text = (
+        f"default: {default or (domain_names[0] if domain_names else '')}\n"
+        f"build_dir: {top_build_dir}\n"
+        f"domains:\n{domains}\n"
+        "flash_order:\n"
+        + "\n".join(f"  - {name}" for name in flash_order)
+        + "\n"
+    )
+    (top_build_dir / "domains.yaml").write_text(text, encoding="utf-8")
+
+
+def test_parse_sysbuild_domains_yaml_returns_none_without_domains_yaml(
+        tmp_path) -> None:
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    assert alif_flash._parse_sysbuild_domains_yaml(str(build_dir)) is None
+
+
+def test_parse_sysbuild_domains_yaml_returns_lists_for_single_domain(
+        tmp_path) -> None:
+    top = tmp_path / "build"
+    _write_domains_yaml(top, ["app"])
+    domain_build_dir = top / "app"
+    domain_build_dir.mkdir(parents=True, exist_ok=True)
+    parsed = alif_flash._parse_sysbuild_domains_yaml(str(domain_build_dir))
+    assert [e["name"] for e in parsed["all"]] == ["app"]
+    assert [e["name"] for e in parsed["flashable"]] == ["app"]
+
+
+def test_parse_sysbuild_domains_yaml_returns_lists_for_multiple_domains(
+        tmp_path) -> None:
+    top = tmp_path / "build"
+    _write_domains_yaml(top, ["mcuboot", "app"])
+    domain_build_dir = top / "app"
+    domain_build_dir.mkdir(parents=True, exist_ok=True)
+    parsed = alif_flash._parse_sysbuild_domains_yaml(str(domain_build_dir))
+    assert [e["name"] for e in parsed["all"]] == ["mcuboot", "app"]
+    assert [e["name"] for e in parsed["flashable"]] == ["mcuboot", "app"]
+
+
+def test_parse_sysbuild_domains_yaml_flashable_excludes_build_only_domain(
+        tmp_path) -> None:
+    # domains.cmake:14-16 builds flash_order: from IMAGES_FLASHING_ORDER
+    # filtered to exclude each image's BUILD_ONLY property -- a domain
+    # present under domains: but absent from flash_order: is a build-only
+    # image that `west flash` never processes, so it must not count
+    # towards "how many domains would actually be flashed".
+    top = tmp_path / "build"
+    _write_domains_yaml(top, ["mcuboot", "app", "bootstrap"],
+                         flash_order=["mcuboot", "app"])
+    domain_build_dir = top / "app"
+    domain_build_dir.mkdir(parents=True, exist_ok=True)
+    parsed = alif_flash._parse_sysbuild_domains_yaml(str(domain_build_dir))
+    assert [e["name"] for e in parsed["all"]] == ["mcuboot", "app", "bootstrap"]
+    assert [e["name"] for e in parsed["flashable"]] == ["mcuboot", "app"]
+
+
+def test_parse_sysbuild_domains_yaml_raises_on_malformed_yaml(tmp_path) -> None:
+    top = tmp_path / "build"
+    top.mkdir()
+    (top / "domains.yaml").write_text("not: [valid, yaml:", encoding="utf-8")
+    domain_build_dir = top / "app"
+    domain_build_dir.mkdir()
+    with pytest.raises(RuntimeError, match="not valid YAML"):
+        alif_flash._parse_sysbuild_domains_yaml(str(domain_build_dir))
+
+
+def test_parse_sysbuild_domains_yaml_raises_on_wrong_shape(tmp_path) -> None:
+    top = tmp_path / "build"
+    top.mkdir()
+    (top / "domains.yaml").write_text("just: a mapping\n", encoding="utf-8")
+    domain_build_dir = top / "app"
+    domain_build_dir.mkdir()
+    with pytest.raises(RuntimeError, match="expected domains.yaml shape"):
+        alif_flash._parse_sysbuild_domains_yaml(str(domain_build_dir))
+
+
+def test_parse_sysbuild_domains_yaml_raises_on_empty_domains_list(
+        tmp_path) -> None:
+    top = tmp_path / "build"
+    top.mkdir()
+    (top / "domains.yaml").write_text(
+        "default: app\nbuild_dir: " + str(top) + "\ndomains: []\n"
+        "flash_order: []\n",
+        encoding="utf-8")
+    domain_build_dir = top / "app"
+    domain_build_dir.mkdir()
+    with pytest.raises(RuntimeError, match="empty domains: list"):
+        alif_flash._parse_sysbuild_domains_yaml(str(domain_build_dir))
+
+
+def test_parse_sysbuild_domains_yaml_raises_on_domain_entry_without_name(
+        tmp_path) -> None:
+    top = tmp_path / "build"
+    top.mkdir()
+    (top / "domains.yaml").write_text(
+        "default: app\nbuild_dir: " + str(top) + "\ndomains:\n"
+        "  - build_dir: " + str(top / "app") + "\n",
+        encoding="utf-8")
+    domain_build_dir = top / "app"
+    domain_build_dir.mkdir()
+    with pytest.raises(RuntimeError, match="missing 'name' or 'build_dir'"):
+        alif_flash._parse_sysbuild_domains_yaml(str(domain_build_dir))
+
+
+def test_parse_sysbuild_domains_yaml_raises_on_non_string_name(tmp_path) -> None:
+    top = tmp_path / "build"
+    top.mkdir()
+    (top / "domains.yaml").write_text(
+        "default: app\nbuild_dir: " + str(top) + "\ndomains:\n"
+        "  - name: 42\n    build_dir: " + str(top / "app") + "\n",
+        encoding="utf-8")
+    domain_build_dir = top / "app"
+    domain_build_dir.mkdir()
+    with pytest.raises(RuntimeError, match="is not a string"):
+        alif_flash._parse_sysbuild_domains_yaml(str(domain_build_dir))
+
+
+def test_parse_sysbuild_domains_yaml_raises_on_non_string_build_dir(
+        tmp_path) -> None:
+    top = tmp_path / "build"
+    top.mkdir()
+    (top / "domains.yaml").write_text(
+        "default: app\nbuild_dir: " + str(top) + "\ndomains:\n"
+        "  - name: app\n    build_dir: 42\n",
+        encoding="utf-8")
+    domain_build_dir = top / "app"
+    domain_build_dir.mkdir()
+    with pytest.raises(RuntimeError, match="is not a string"):
+        alif_flash._parse_sysbuild_domains_yaml(str(domain_build_dir))
+
+
+def test_parse_sysbuild_domains_yaml_raises_on_duplicate_domain_name(
+        tmp_path) -> None:
+    top = tmp_path / "build"
+    top.mkdir()
+    (top / "domains.yaml").write_text(
+        "default: app\nbuild_dir: " + str(top) + "\ndomains:\n"
+        "  - name: app\n    build_dir: " + str(top / "app") + "\n"
+        "  - name: app\n    build_dir: " + str(top / "app2") + "\n",
+        encoding="utf-8")
+    domain_build_dir = top / "app"
+    domain_build_dir.mkdir()
+    with pytest.raises(RuntimeError, match="duplicate domains: entry"):
+        alif_flash._parse_sysbuild_domains_yaml(str(domain_build_dir))
+
+
+def test_sysbuild_domains_path_does_not_follow_a_symlinked_domain_dir(
+        tmp_path) -> None:
+    # .absolute() (not .resolve()) locates domains.yaml relative to the
+    # SYMLINK itself, not its resolved target -- a symlinked per-domain
+    # build dir must still find the real top-level domains.yaml sitting
+    # next to the symlink.
+    top = tmp_path / "build"
+    top.mkdir()
+    real_app_dir = tmp_path / "elsewhere" / "real-app"
+    real_app_dir.mkdir(parents=True)
+    symlinked_app_dir = top / "app"
+    symlinked_app_dir.symlink_to(real_app_dir, target_is_directory=True)
+    assert alif_flash._sysbuild_domains_path(str(symlinked_app_dir)) == (
+        top / "domains.yaml")
+
+
+def test_do_run_proceeds_for_a_single_domain_sysbuild_via_a_symlinked_build_dir(
+        tmp_path, monkeypatch) -> None:
+    top = tmp_path / "build"
+    _write_domains_yaml(top, ["app"])
+    real_app_dir = tmp_path / "elsewhere" / "real-app"
+    (real_app_dir / "zephyr").mkdir(parents=True, exist_ok=True)
+    symlinked_app_dir = top / "app"
+    symlinked_app_dir.symlink_to(real_app_dir, target_is_directory=True)
+
+    runner = _make_runner(tmp_path)
+    bin_file = Path(runner.cfg.bin_file)
+    new_bin_file = real_app_dir / "zephyr" / bin_file.name
+    new_bin_file.write_bytes(bin_file.read_bytes())
+    runner.cfg.build_dir = str(symlinked_app_dir)
+    runner.cfg.bin_file = str(new_bin_file)
+
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    runner.do_run("flash")
+    assert _write_mram_was_called(runner)
+
+
+def test_parse_sysbuild_domains_yaml_handles_a_not_yet_built_domain_dir(
+        tmp_path) -> None:
+    # `.resolve()` is non-strict by default (no existence requirement) --
+    # a domain listed in domains.yaml whose build_dir hasn't been created
+    # on disk yet must still parse and resolve cleanly, not raise.
+    top = tmp_path / "build"
+    _write_domains_yaml(top, ["app"])
+    domain_build_dir = top / "app"  # deliberately never mkdir'd
+    parsed = alif_flash._parse_sysbuild_domains_yaml(str(domain_build_dir))
+    assert [e["name"] for e in parsed["all"]] == ["app"]
+
+
+def _make_sysbuild_domain_runner(tmp_path, domain_names, this_domain="app",
+                                  flash_order=None, build_dirs=None,
+                                  **kwargs):
+    '''Like `_make_runner`, but nests `cfg.build_dir` one level under a
+    sysbuild top build dir carrying a `domains.yaml` for `domain_names` --
+    the exact shape `west flash` hands a runner for one domain of a
+    sysbuild (see `alif_flash._sysbuild_domains_path`).'''
+    top = tmp_path / "build"
+    _write_domains_yaml(top, domain_names, flash_order=flash_order,
+                         build_dirs=build_dirs)
+    runner = _make_runner(tmp_path, **kwargs)
+    domain_build_dir = top / this_domain
+    (domain_build_dir / "zephyr").mkdir(parents=True, exist_ok=True)
+    bin_file = Path(runner.cfg.bin_file)
+    new_bin_file = domain_build_dir / "zephyr" / bin_file.name
+    new_bin_file.write_bytes(bin_file.read_bytes())
+    runner.cfg.build_dir = str(domain_build_dir)
+    runner.cfg.bin_file = str(new_bin_file)
+    return runner
+
+
+def _staging_dir_exists(runner) -> bool:
+    '''True if do_run got far enough to stage a signed-ATOC image/config
+    (scripts/west_commands/runners/alif_flash.py's `images_dir`/
+    `config_dir`, both under `<setools_dir>/build/`) -- the refusal must
+    fire BEFORE this, not just before the burn.'''
+    return (Path(runner.setools_dir) / "build").exists()
+
+
+def _seed_stale_verdict(runner) -> Path:
+    '''Pre-create a (deliberately stale) atoc-guard.json from a PREVIOUS
+    run, so a test can assert a #2274 refusal still clears it -- the
+    MEDIUM-3 (#2262) stale-verdict unlink runs BEFORE the #2274
+    multi-domain check (unlinking this runner's own prior output is not
+    an MRAM/ATOC side effect), so a refused run must never leave a
+    PREVIOUS run's verdict looking like its own.'''
+    atoc_dir = Path(runner.cfg.build_dir) / "alif_flash"
+    atoc_dir.mkdir(parents=True, exist_ok=True)
+    verdict_path = atoc_dir / "atoc-guard.json"
+    verdict_path.write_text('{"schema": "stale-from-a-previous-run"}',
+                             encoding="utf-8")
+    return verdict_path
+
+
+def test_do_run_proceeds_when_build_has_no_domains_yaml(
+        tmp_path, monkeypatch) -> None:
+    runner = _make_runner(tmp_path)
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    runner.do_run("flash")
+    assert _write_mram_was_called(runner)
+
+
+def test_do_run_proceeds_for_a_single_domain_sysbuild(
+        tmp_path, monkeypatch) -> None:
+    runner = _make_sysbuild_domain_runner(tmp_path, ["app"])
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    runner.do_run("flash")
+    assert _write_mram_was_called(runner)
+
+
+def test_do_run_proceeds_when_the_other_domain_is_build_only(
+        tmp_path, monkeypatch) -> None:
+    # A domain present in domains: but excluded from flash_order: (a
+    # BUILD_ONLY image) must not trip the multi-domain refusal -- only
+    # flash_order:'s domains count.
+    runner = _make_sysbuild_domain_runner(
+        tmp_path, ["app", "bootstrap"], this_domain="app",
+        flash_order=["app"])
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    runner.do_run("flash")
+    assert _write_mram_was_called(runner)
+
+
+def test_do_run_refuses_a_two_domain_sysbuild_before_any_side_effect(
+        tmp_path, monkeypatch) -> None:
+    runner = _make_sysbuild_domain_runner(
+        tmp_path, ["mcuboot", "app"], this_domain="app")
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    stale_verdict = _seed_stale_verdict(runner)
+    with pytest.raises(RuntimeError, match="multi-domain sysbuild") as excinfo:
+        runner.do_run("flash")
+    assert runner.calls == []
+    assert not _staging_dir_exists(runner)
+    assert not _write_mram_was_called(runner)
+    # a #2274 refusal still runs the MEDIUM-3 (#2262) stale-verdict
+    # unlink first -- this run leaves NO verdict, not a previous run's.
+    assert not stale_verdict.exists()
+    assert not (Path(runner.cfg.build_dir) / "alif_flash" / "atoc-before.txt").exists()
+    # The Option B J-Link path this message points at writes the APP ONLY --
+    # MCUboot must already be resident, or provisioned via SETOOLS first.
+    message = str(excinfo.value)
+    assert "writes the APP ONLY" in message
+    assert "provision MCUboot with" in message
+
+
+def test_do_run_refuses_single_domain_flag_of_a_two_domain_sysbuild(
+        tmp_path, monkeypatch) -> None:
+    # Even a `--domain mcuboot`-style invocation that only ever PROCESSES
+    # one domain of this west command must refuse: the check is keyed on
+    # the build's own domains.yaml declaring >1 FLASHABLE domain, not on
+    # how many domains THIS invocation processes -- flashing only the
+    # mcuboot domain would still overwrite any ALP-HE entry a previous run
+    # of the app domain wrote, the same way (see module docstring).
+    runner = _make_sysbuild_domain_runner(
+        tmp_path, ["mcuboot", "app"], this_domain="mcuboot")
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    stale_verdict = _seed_stale_verdict(runner)
+    with pytest.raises(RuntimeError, match="multi-domain sysbuild"):
+        runner.do_run("flash")
+    assert runner.calls == []
+    assert not _staging_dir_exists(runner)
+    assert not _write_mram_was_called(runner)
+    # a #2274 refusal still runs the MEDIUM-3 (#2262) stale-verdict
+    # unlink first -- this run leaves NO verdict, not a previous run's.
+    assert not stale_verdict.exists()
+
+
+def test_do_run_refuses_on_malformed_domains_yaml_before_any_side_effect(
+        tmp_path, monkeypatch) -> None:
+    runner = _make_runner(tmp_path)
+    top = Path(runner.cfg.build_dir).parent
+    top.mkdir(parents=True, exist_ok=True)
+    (top / "domains.yaml").write_text("not: [valid, yaml:", encoding="utf-8")
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    stale_verdict = _seed_stale_verdict(runner)
+    with pytest.raises(RuntimeError, match="not valid YAML"):
+        runner.do_run("flash")
+    assert runner.calls == []
+    assert not _staging_dir_exists(runner)
+    assert not _write_mram_was_called(runner)
+    # a #2274 refusal still runs the MEDIUM-3 (#2262) stale-verdict
+    # unlink first -- this run leaves NO verdict, not a previous run's.
+    assert not stale_verdict.exists()
+
+
+def test_do_run_refuses_on_empty_domains_list_before_any_side_effect(
+        tmp_path, monkeypatch) -> None:
+    runner = _make_runner(tmp_path)
+    top = Path(runner.cfg.build_dir).parent
+    top.mkdir(parents=True, exist_ok=True)
+    (top / "domains.yaml").write_text(
+        "default: app\nbuild_dir: " + str(top) + "\ndomains: []\n"
+        "flash_order: []\n",
+        encoding="utf-8")
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    stale_verdict = _seed_stale_verdict(runner)
+    with pytest.raises(RuntimeError, match="empty domains: list"):
+        runner.do_run("flash")
+    assert runner.calls == []
+    assert not _staging_dir_exists(runner)
+    assert not _write_mram_was_called(runner)
+    # a #2274 refusal still runs the MEDIUM-3 (#2262) stale-verdict
+    # unlink first -- this run leaves NO verdict, not a previous run's.
+    assert not stale_verdict.exists()
+
+
+def test_do_run_refuses_when_domains_yaml_does_not_list_this_build_dir(
+        tmp_path, monkeypatch) -> None:
+    # A STALE domains.yaml -- e.g. a relocated/renamed build tree -- whose
+    # recorded build_dir for every domain points somewhere else must
+    # refuse with the distinct "does not list this build dir" message,
+    # fail-closed, even for what would otherwise look like a single-domain
+    # sysbuild.
+    elsewhere = tmp_path / "elsewhere" / "app"
+    runner = _make_sysbuild_domain_runner(
+        tmp_path, ["app"], this_domain="app",
+        build_dirs={"app": elsewhere})
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    stale_verdict = _seed_stale_verdict(runner)
+    with pytest.raises(RuntimeError, match="does not list this build dir"):
+        runner.do_run("flash")
+    assert runner.calls == []
+    assert not _staging_dir_exists(runner)
+    assert not _write_mram_was_called(runner)
+    # a #2274 refusal still runs the MEDIUM-3 (#2262) stale-verdict
+    # unlink first -- this run leaves NO verdict, not a previous run's.
+    assert not stale_verdict.exists()
