@@ -26,7 +26,9 @@ NEW_FW = "J-Link V13 compiled Aug 26 2026 13:07:02"
 def _bash_works() -> bool:
     if shutil.which("bash") is None:
         return False
-    probe = subprocess.run(["bash", "-c", "echo ok"], capture_output=True, text=True, check=False)
+    probe = subprocess.run(
+        ["bash", "-c", "echo ok"], capture_output=True, text=True, encoding="utf-8", check=False
+    )
     return probe.returncode == 0 and probe.stdout.strip() == "ok"
 
 
@@ -37,7 +39,7 @@ def _install(root: Path, name: str, fw: str) -> Path:
     d = root / name
     (d / "Firmwares").mkdir(parents=True)
     exe = d / "JLinkExe"
-    exe.write_text("#!/bin/sh\n")
+    exe.write_text("#!/bin/sh\n", encoding="utf-8")
     exe.chmod(0o755)
     (d / "Firmwares" / "JLink_V13.bin").write_bytes(b"\x00junk" + fw.encode() + b"\x00more")
     return exe
@@ -59,6 +61,7 @@ def _pick(tmp_path: Path, running: str | None) -> subprocess.CompletedProcess:
         ["bash", "-c", f'source "{ENV.as_posix()}" >/dev/null 2>&1; bench_jlink_exe'],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=env,
         check=False,
     )
