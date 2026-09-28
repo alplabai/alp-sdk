@@ -445,11 +445,8 @@ jobs:
       #    gate runs: ~4,400 tests, spread over every runner core with
       #    pytest-xdist (`-n auto`, #2328). Serially it had grown to
       #    9-15 min per OS (Windows slowest) -- #1477 gave this step an
-      #    explicit timeout-minutes rather than leaving it to the
-      #    uncapped-step 1min/step budget
-      #    test_job_ceiling_exceeds_the_sum_of_its_step_timeouts assumes,
-      #    which was never true for this step (see that constant's own
-      #    comment in the test file).
+      #    explicit timeout-minutes of its own, which the job ceiling must
+      #    exceed (test_job_ceiling_exceeds_its_longest_step_timeout).
       # ---------------------------------------------------------
       - name: pytest tests/scripts/
         timeout-minutes: 25
@@ -483,11 +480,11 @@ jobs:
     if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'merge_group' || needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
     runs-on: ${{ matrix.os }}
     # #1477: worst observed successful run 26s across 9 sampled runs.
-    # Raised from the formula's 15min to 20min so the job ceiling stays
-    # strictly above the sum of its own step timeouts plus the 1min/step
-    # budget test_job_ceiling_exceeds_the_sum_of_its_step_timeouts assigns
-    # every uncapped `emit *` step (6 of them; only the flagged setup
-    # steps above carry their own cap).
+    # The ceiling was first raised to clear #1274's sum-of-step-caps rule
+    # (the capped steps' own caps plus a 1min budget for each uncapped
+    # `emit *` step). #1549 made that rule max-based
+    # (test_job_ceiling_exceeds_its_longest_step_timeout): the ceiling now
+    # only has to exceed the longest single step cap.
     timeout-minutes: 30
 
     strategy:
