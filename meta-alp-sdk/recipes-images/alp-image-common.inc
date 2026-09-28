@@ -80,7 +80,7 @@ IMAGE_INSTALL = " \
 # citation that is the concrete failure this closes. Settled by
 # inspection only; unverified by an actual `bitbake` run.
 ALP_RZ_DRPAI_INSTALL = "${@bb.utils.contains('BBFILE_COLLECTIONS', 'rz-drpai', \
-    bb.utils.contains('MACHINE_FEATURES', 'v2n', 'lib-tvm kernel-module-mmngr', '', d), '', d)}"
+    bb.utils.contains('MACHINE_FEATURES', 'v2n', 'lib-tvm kernel-module-mmngr alp-drpai-udev', '', d), '', d)}"
 ALP_RZ_DRPAI_INSTALL[vardepvalue] = "${ALP_RZ_DRPAI_INSTALL}"
 
 IMAGE_INSTALL += " ${ALP_RZ_DRPAI_INSTALL}"
