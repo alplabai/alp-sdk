@@ -67,24 +67,21 @@ extern "C" {
 /* INA236 high-side current-shunt monitors (one per power rail)       */
 /* ================================================================== */
 
-/* Five INA236 monitors (U21/U31/U32/U34/U30) on XEVK_I2C_BUS_SENSORS.
+/* Four INA236 monitors (U21/U31/U32/U34) on XEVK_I2C_BUS_SENSORS.
  * INA236A occupies 0x40..0x43, INA236B occupies 0x48..0x4B (same A0
- * strap encoding), so all five share the one bus.  Ref-des, rail,
- * A0 strap and address per device are in the generated routes header
- * (from metadata/boards/e1m-x-evk.yaml's `i2c_devices:` block).
+ * strap encoding).  The +5V input monitor U30 is an INA228 at 0x42
+ * (XEVK_I2C_ADDR_INA228_5V), a different 20-bit register map that
+ * ina236_init() does not drive.  Ref-des, rail, A0 strap and address
+ * per device are in the generated routes header (from
+ * metadata/boards/e1m-x-evk.yaml's `i2c_devices:` block).
  *
- * NEXT-REVISION board notes (observed on current silicon, 2026-06;
- * NOT exposed as macros -- do not rely on them):
- *   - 0x42 / 0x43 also ACK as INA236 (mfg-ID "TI") although the
- *     schematic BOM lists only the five monitors above; treated as
- *     a board anomaly, to be resolved on the next respin.
- *   - The 3V3 (U21) and 1V8 (U31) monitors read ~0 V on the bus-
- *     voltage register on current silicon (VBUS-sense wiring under
- *     investigation); their shunt/current path is unaffected.  5V
- *     (U30) reads correctly (~4.88 V / whole-board input current).
+ * Board note (NOT exposed as macros -- do not rely on it): the 3V3
+ * (U21) and 1V8 (U31) monitors read ~0 V on the bus-voltage register
+ * (VBUS-sense wiring under investigation); their shunt/current path
+ * is unaffected.
  *
- * XEVK_I2C_ADDR_INA236_3V3, _1V8, _VCAM2, _VCAM3 and _5V are
- * defined in the generated routes header (#1636).
+ * XEVK_I2C_ADDR_INA236_3V3, _1V8, _VCAM2 and _VCAM3 are defined in the
+ * generated routes header (#1636).
  */
 
 /* Per-rail shunt + max-current values for ina236_init().  Each
@@ -93,13 +90,13 @@ extern "C" {
  *   shunt_ohms * max_current_a ~= 0.080 V.
  * Apps can pass these directly:
  *   ina236_init(&ctx, bus,
- *               XEVK_I2C_ADDR_INA236_5V,
- *               XEVK_INA236_SHUNT_5V_OHMS,
- *               XEVK_INA236_MAX_5V_A,
+ *               XEVK_I2C_ADDR_INA236_3V3,
+ *               XEVK_INA236_SHUNT_3V3_OHMS,
+ *               XEVK_INA236_MAX_3V3_A,
  *               INA236_ADCRANGE_81MV);
  *
  * XEVK_INA236_SHUNT_*_OHMS and XEVK_INA236_MAX_*_A (3V3, 1V8, VCAM2,
- * VCAM3, 5V) are defined in the generated routes header (#1636). */
+ * VCAM3) are defined in the generated routes header (#1636). */
 
 #ifdef __cplusplus
 }
