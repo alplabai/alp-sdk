@@ -5,6 +5,8 @@ committed metadata/catalog.json (11 SoMs each resolving to a SoC, non-empty
 examples, real portable-API headers, and a couple of known presence cells).
 """
 
+import copy
+import functools
 import io
 import json
 import os
@@ -21,12 +23,25 @@ SCRIPT = REPO / "scripts" / "gen_catalog.py"
 OUT = REPO / "metadata" / "catalog.json"
 
 
-def _catalog() -> dict:
+@functools.lru_cache(maxsize=1)
+def _build_once() -> dict:
+    # #2328: gc.build_catalog() rebuilds the whole catalog from scratch
+    # (~4-9s), and every test below only inspects the result, so build it
+    # once per module.
     return gc.build_catalog()
 
 
+def _catalog() -> dict:
+    # A private deep copy per call (<1 ms): a test that sorts, pops or
+    # assigns into its catalog can never leak that into a later test.
+    return copy.deepcopy(_build_once())
+
+
 def test_render_is_deterministic():
-    assert gc.render(_catalog()) == gc.render(_catalog())
+    # Two INDEPENDENT builds must render identically. `_catalog()` twice would
+    # be vacuous -- two copies of the same single build always match -- so
+    # the second side bypasses the cache and rebuilds from scratch. #2328
+    assert gc.render(_catalog()) == gc.render(gc.build_catalog())
 
 
 def test_committed_file_matches_generator():

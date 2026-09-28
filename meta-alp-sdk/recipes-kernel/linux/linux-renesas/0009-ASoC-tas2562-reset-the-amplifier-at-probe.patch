@@ -1,0 +1,88 @@
+From: Alp Lab AB <contact@alplab.ai>
+Date: Sun, 27 Sep 2026 01:40:00 +0200
+Subject: [PATCH] ASoC: tas2562: reset the amplifier at component probe
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Copyright (c) 2026 Alp Lab AB
+SPDX-License-Identifier: GPL-2.0
+
+The driver's register cache starts from the POR defaults, including
+PAGE_CTRL = 0, but nothing puts the silicon in that state.  When the part
+was not power-cycled -- a warm reboot with SD_N held high, which is what
+happens on the E1M-X-EVK where SD_N is one shared net for both TAS2563
+amps -- it keeps the previous kernel's book, page and configuration.
+regmap then skips the page-select write (the cached selector already
+reads 0), so page-0 writes land in whatever page was left selected (page
+2, after any Digital Volume change), and cached writes that match the
+stale defaults are dropped as no-ops.
+
+Seen on an E1M-V2M103 bench board after `reboot -f`: PB_CFG1 kept the
+previous boot's amplifier level while the cache said otherwise, so
+"Amp Gain Volume" writes silently did nothing, and the TDM slot width
+set by set_tdm_slot never reached TDM_CFG2.
+
+In the component probe -- at card bind, after every instance sharing
+SD_N has probed and released it -- wait for the part to leave shutdown,
+select book 0 / page 0 with the cache bypassed, issue SW_RESET, and wait
+for the reset to complete.
+
+Upstream-Status: Pending [generic driver fix; no SoM-specific code]
+
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
+---
+--- a/sound/soc/codecs/tas2562.c
++++ b/sound/soc/codecs/tas2562.c
+@@ -23,6 +23,8 @@
+ 
+ #include "tas2562.h"
+ 
++#define TAS2562_BOOK_CTRL	TAS2562_REG(0, 0x7f)
++
+ #define TAS2562_FORMATS (SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S24_LE |\
+ 			 SNDRV_PCM_FORMAT_S32_LE)
+ 
+@@ -384,12 +386,40 @@
+ static int tas2562_codec_probe(struct snd_soc_component *component)
+ {
+ 	struct tas2562_data *tas2562 = snd_soc_component_get_drvdata(component);
++	int ret;
+ 
+ 	tas2562->component = component;
+ 
+ 	if (tas2562->sdz_gpio)
+ 		gpiod_set_value_cansleep(tas2562->sdz_gpio, 1);
+ 
++	/*
++	 * SD_N may be shared between amplifiers and is not necessarily
++	 * cycled by a warm reboot, so the device can still hold the
++	 * previous kernel's book, page and configuration.  The register
++	 * cache starts from the POR defaults -- including PAGE_CTRL = 0,
++	 * which makes regmap skip the page-select write -- so accesses
++	 * would land in whatever page was left selected.  Select book 0 /
++	 * page 0 with the cache bypassed and issue a software reset so the
++	 * silicon matches the cache.  This runs at card bind rather than in
++	 * the I2C probe, so every instance sharing SD_N has released it;
++	 * give the device time to leave shutdown first.
++	 */
++	usleep_range(2000, 3000);
++	regcache_cache_bypass(tas2562->regmap, true);
++	ret = regmap_write(tas2562->regmap, TAS2562_PAGE_CTRL, 0x00);
++	if (!ret)
++		ret = regmap_write(tas2562->regmap, TAS2562_BOOK_CTRL, 0x00);
++	if (!ret)
++		ret = regmap_write(tas2562->regmap, TAS2562_SW_RESET, 0x01);
++	regcache_cache_bypass(tas2562->regmap, false);
++	if (ret) {
++		dev_err(tas2562->dev, "failed to reset device: %d\n", ret);
++		return ret;
++	}
++	/* Allow the reset to complete before the first cached access. */
++	usleep_range(1000, 2000);
++
+ 	return 0;
+ }
+ 
+-- 
+2.43.0
