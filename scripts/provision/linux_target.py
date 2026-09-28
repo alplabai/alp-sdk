@@ -472,16 +472,23 @@ def gd32_bridge_version(t: LinuxTarget, bus: int, addr: int = 0x70) -> tuple[int
     return rsp[1], rsp[2], rsp[3]
 
 
-def i2c_scan(t: LinuxTarget, bus: int) -> set[int]:
-    """i2cdetect -r (read-byte probe, no quick-write); UU counts as present."""
-    out = t.run(f"i2cdetect -y -r {bus}").stdout
+def i2c_scan(t: LinuxTarget, bus: int, span: tuple[int, int] | None = None,
+             wake: bool = False) -> set[int]:
+    """i2cdetect -r (read-byte probe, no quick-write), optionally limited to
+    span=(first, last); UU counts as present. wake=True runs a throwaway
+    probe first in the same command, for parts that NACK while asleep."""
+    cmd = f"i2cdetect -y -r {bus}" + (f" {span[0]:#04x} {span[1]:#04x}" if span else "")
+    out = t.run(f"{cmd} >/dev/null 2>&1; {cmd}" if wake else cmd).stdout
     found: set[int] = set()
     for ln in out.splitlines():
-        m = re.match(r"([0-7]0):\s(.*)", ln)
+        m = re.match(r"([0-7]0): ", ln)
         if not m:
             continue
         base = int(m[1], 16)
-        for i, cell in enumerate(m[2].split()):
+        # Fixed 3-char columns: blanks pad the addresses outside the probed
+        # range, so a whitespace split would shift every cell after them.
+        for i in range(16):
+            cell = ln[4 + 3 * i:6 + 3 * i]
             if cell == "UU" or re.fullmatch(r"[0-9a-f]{2}", cell):
                 found.add(base + i)
     return found
@@ -521,6 +528,12 @@ def i2c_check(t: LinuxTarget, expected: dict[int, set[int]]) -> list[str]:
     problems = []
     for bus, want in sorted(expected.items()):
         missing = want - i2c_scan(t, bus)
+        # Parts that sleep NACK the first access after idle and ACK one made
+        # right after it: the OPTIGA Trust M at 0x30 misses a plain scan and
+        # falls back asleep between separate SSH commands (bench, E1M-V2M103
+        # 2026W38-0001). Re-probe only the expected-but-silent addresses, each
+        # as wake-then-scan inside one command.
+        missing = {a for a in missing if a not in i2c_scan(t, bus, (a, a), wake=True)}
         if missing:
             problems.append(f"i2c-{bus}: missing " + " ".join(f"{a:#04x}" for a in sorted(missing)))
     return problems
