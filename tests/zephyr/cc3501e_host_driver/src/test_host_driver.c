@@ -1793,21 +1793,34 @@ ZTEST(cc3501e_host_driver, test_reply_gate_ping_max_payload_reply_cap_reaches_pr
 
 ZTEST(cc3501e_host_driver, test_reply_gate_interpolates_between_the_two_measured_points)
 {
-	/* 2314 B sits exactly halfway between the 536 B floor and the 4092 B
-	 * ceiling anchors -- expect the gate exactly halfway between 200 us and
-	 * 2000 us (1100 us).  This size was never bench-measured; the formula
-	 * interpolates it linearly (see cc3501e_expected_reply_bytes()'s and
-	 * cc3501e_reply_header_gate_us()'s comments in cc3501e_core.c). */
-	static uint8_t reply[2314];
+	/* 1292 B sits exactly halfway between the 536 B floor and the 2048 B
+	 * plateau anchors (#2052) -- expect the gate exactly halfway between
+	 * 200 us and 2000 us (1100 us).  This size was never bench-measured; the
+	 * formula interpolates it linearly (see cc3501e_expected_reply_bytes()'s
+	 * and cc3501e_reply_header_gate_us()'s comments in cc3501e_core.c). */
+	static uint8_t reply[1292];
 	size_t         got = 0u;
 	memset(reply, 0, sizeof(reply));
 	delay_log_reset();
 	alp_status_t s =
 	    cc3501e_request(&fw, ALP_CC3501E_CMD_PING, NULL, 0, reply, sizeof(reply), &got, 100u);
-	zassert_equal(s, ALP_OK, "PING with a 2314 B reply cap -> OK");
+	zassert_equal(s, ALP_OK, "PING with a 1292 B reply cap -> OK");
 	zassert_equal(g_delay_us_log[1],
 	              1100u,
 	              "the exact byte-count midpoint interpolates to the gate midpoint");
+}
+
+ZTEST(cc3501e_host_driver, test_reply_gate_2048_reaches_the_plateau)
+{
+	/* #2052: 2048 B frames failed at the interpolated ~970 us once the host
+	 * got faster; from 2048 B up the gate is the full 2000 us. */
+	static uint8_t reply[2048];
+	size_t         got = 0u;
+	delay_log_reset();
+	alp_status_t s =
+	    cc3501e_request(&fw, ALP_CC3501E_CMD_PING, NULL, 0, reply, sizeof(reply), &got, 100u);
+	zassert_equal(s, ALP_OK, "PING with a 2048 B reply cap -> OK");
+	zassert_equal(g_delay_us_log[1], 2000u, "2048 B is on the 2000 us plateau");
 }
 
 /* ---- the real key: SOCK_RECV's `want`, not its fixed rx_cap ---------------- *

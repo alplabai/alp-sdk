@@ -1788,11 +1788,21 @@ void cc3501e_set_peer_polled(bool on)
  * XFER) -- rather than at the measured 4093 B point itself, so the plateau
  * starts 1 B earlier than proven.  That is conservative, not risky: it only
  * ever hands out the full, already-proven 2000 us slightly sooner, never
- * less delay than the interpolation would otherwise give at 4092 B. */
+ * less delay than the interpolation would otherwise give at 4092 B.
+ *
+ * #2052 moved the plateau down to 2048 B.  With the host faster
+ * (CONFIG_SPI_DW_ALIF_PACK32, or the D-cache on) the interpolated ~970 us at
+ * 2048 B was too short: 2048-byte STREAM_WRITE failed rc=-5 in 4 of the 6
+ * failures seen on E1M-AEN803 2026W36-0009 on 2026-09-28, the link ring
+ * showing a reply-header read of all zeros (slave not re-armed) and every
+ * retry after it failing too.  With the full 2000 us from 2048 B up the same
+ * build ran 3/3 clean through 4092 B (a 1024 B plateau was also 3/3 clean but
+ * cost 1024 B frames 30%).  Below 2048 B the gate still interpolates from
+ * the 536 B floor. */
 #define CC3501E_REPLY_GATE_FLOOR_US 200u /* proven at bytes <= 536 (SOCK_RECV want 512) */
 #define CC3501E_REPLY_GATE_SMALL_BYTES \
 	536u /* sizeof(alp_cc3501e_sock_recv_resp_t) + 512 -- proven-floor boundary */
-#define CC3501E_REPLY_GATE_LARGE_BYTES (ALP_CC3501E_MAX_PAYLOAD - ALP_CC3501E_HEADER_BYTES)
+#define CC3501E_REPLY_GATE_LARGE_BYTES 2048u /* #2052: plateau from here up, see above */
 #define CC3501E_REPLY_GATE_LARGE_US    2000u /* proven at 4093 B (SOCK_RECV want 4071) */
 
 /* Reconstruct the reply size THIS request actually asks for, from (cmd,
