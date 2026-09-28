@@ -131,6 +131,8 @@ def test_abi_current_snapshot_tracks_sdk_version_yaml(sdk_repo_with_version, ver
         cwd=str(root),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         timeout=30,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -157,6 +159,8 @@ def test_abi_current_snapshot_matches_the_real_repos_declared_version():
         cwd=str(REPO),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         timeout=30,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -637,9 +641,10 @@ def test_ci_gate_and_test_all_sh_resolve_the_same_snapshot(tmp_path):
     proc = subprocess.run(
         ["bash", "-c", run_script],
         cwd=str(REPO),
-        env={**os.environ, "GITHUB_OUTPUT": str(github_output)},
+        env={**os.environ, "GITHUB_OUTPUT": str(github_output), "PYTHONIOENCODING": "utf-8"},
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=30,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -657,6 +662,8 @@ def test_ci_gate_and_test_all_sh_resolve_the_same_snapshot(tmp_path):
         cwd=str(REPO),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         timeout=30,
     )
     assert local.returncode == 0, local.stdout + local.stderr
@@ -682,9 +689,10 @@ def test_ci_gate_fails_cleanly_when_snapshot_not_committed(sdk_repo_with_version
     proc = subprocess.run(
         ["bash", "-c", run_script],
         cwd=str(root),
-        env={**os.environ, "GITHUB_OUTPUT": str(github_output)},
+        env={**os.environ, "GITHUB_OUTPUT": str(github_output), "PYTHONIOENCODING": "utf-8"},
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=30,
     )
     assert proc.returncode != 0, proc.stdout + proc.stderr
@@ -742,9 +750,10 @@ def test_freeze_gate_baseline_is_the_real_last_released_snapshot():
     proc = subprocess.run(
         ["bash", "-c", run_script],
         cwd=str(REPO),
-        env={**os.environ, "ABI_VERSION": current},
+        env={**os.environ, "ABI_VERSION": current, "PYTHONIOENCODING": "utf-8"},
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=60,
     )
     # REMOVED (rc=1) or clean (rc=0) both print the "Comparing..." line
@@ -789,9 +798,10 @@ def _run_freeze_gate(baseline_path: Path, payload: dict) -> subprocess.Completed
         return subprocess.run(
             ["bash", "-c", run_script],
             cwd=str(REPO),
-            env={**os.environ, "ABI_VERSION": current},
+            env={**os.environ, "ABI_VERSION": current, "PYTHONIOENCODING": "utf-8"},
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=60,
         )
     finally:
@@ -853,6 +863,8 @@ def test_freeze_gate_passes_on_a_moved_symbol():
             cwd=REPO,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
             check=True,
         ).stdout
     )
@@ -928,6 +940,8 @@ def test_freeze_gate_passes_on_an_allowlisted_removal():
             cwd=REPO,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
             check=True,
         ).stdout
     )

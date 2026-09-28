@@ -48,8 +48,9 @@ west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/ai/cold-ch
 west flash
 ```
 
-The DEEPX DX-M1 NPU is populated on `E1M-V2M101`/`E1M-V2M102` -- not on
-`E1M-V2N101`/`E1M-V2N102`, the same PCB without it. Pick either via
+The DEEPX DX-M1 NPU is populated on `E1M-V2M101`/`E1M-V2M102`/`E1M-V2M103`
+-- not on `E1M-V2N101`/`E1M-V2N102`/`E1M-V2N103`, the same PCB without
+it. Pick either via
 `som.sku` in `board.yaml`.
 
 ## Model

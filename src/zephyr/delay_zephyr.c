@@ -2,7 +2,8 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Zephyr backend for the alp_delay_* primitives in <alp/peripheral.h>.
+ * Zephyr backend for the alp_delay_* / alp_uptime_ms primitives in
+ * <alp/peripheral.h>.
  *
  * alp_delay_us routes to k_busy_wait so callers with sub-millisecond
  * hardware-timing requirements (chip power-on hold times, bus
@@ -11,6 +12,9 @@
  *
  * alp_delay_ms routes to k_msleep so longer waits release the CPU
  * to other threads.  Both honour the "0 = no-op" contract.
+ *
+ * alp_uptime_ms routes to k_uptime_get(), Zephyr's own monotonic
+ * millisecond-since-boot counter (issue #1953).
  */
 
 #include <zephyr/kernel.h>
@@ -27,4 +31,9 @@ void alp_delay_ms(uint32_t ms)
 {
 	if (ms == 0u) return;
 	k_msleep((int32_t)ms);
+}
+
+uint64_t alp_uptime_ms(void)
+{
+	return (uint64_t)k_uptime_get();
 }

@@ -32,9 +32,13 @@ chips:
   - da9292        # PMIC for the DEEPX 0.75 V rail
   - pi3dbs12212   # PCIe mux
 
-# v2n_power_mgmt (§C.28) auto-brings-up the 0.75 V DEEPX rail
-# on P65 IRQ via the V2N supervisor's SYS_INIT hook -- no
-# board.yaml-level wiring needed.
+# The 0.75 V DEEPX rail (DA9292 CH2) is brought up entirely in U-Boot's
+# board_late_init() -- see meta-alp-sdk/recipes-bsp/u-boot/u-boot/
+# 0004-rzv2n-dev-ALP-E1M-DEEPX-rail-bringup.patch -- BEFORE M1_RESET is
+# released and Linux/Zephyr ever start.  RIIC8/BRD_I2C is Cortex-A55/
+# Linux-exclusive, so nothing on the CM33 (this app included) can or
+# should sequence the rail: src/zephyr/v2n_power_mgmt.c does not
+# exist in this tree.
 
 diagnostics:
   log_level: info

@@ -33,7 +33,7 @@ regions to reference at all.
 The one example that uses the field, `examples/connectivity/production-deployment/board.yaml`,
 pins all five of its partitions to `mram_main` and declares `som.sku:
 E1M-AEN801`. When this ADR was written that was portable to nothing. Since
-#1447 all six AEN presets declare a `memory_map:` carrying `mram_main`, so an
+#1447 all seven AEN presets declare a `memory_map:` carrying `mram_main`, so an
 intra-family retarget at E1M-AEN601 now resolves; the gap remains on the five
 non-AEN presets (E1M-V2N101/102, E1M-V2M101/102, E1M-NX9101), which declare no
 `memory_map:` at all.
@@ -148,6 +148,17 @@ not just the fault.
    it once in tan and skip the port. **This ADR is a concrete instance of the
    duplication 0026 describes: without 0026, clause 3 is two implementations
    of the same refusal.**
+
+   **Accepted is not executed (noted 2026-08-30).** 0026 moved to `Accepted`
+   with an amendment on 2026-08-30, so the condition in this clause now reads
+   as met — but its migration has not run. Until 0026's replacement step 5
+   deletes the plan producer, alp-sdk still owns the emitters and still
+   allocates partitions, so **the port is still required**: skipping it now
+   would leave clause 3's reserved-band refusal implemented on one side only,
+   diverging a hardware refusal across two live producers. That is the exact
+   class 0026 exists to close, and 0026's own amendment §G orders the split and
+   the repoint *before* any deletion for the same reason. Re-read this clause
+   when 0026's step 5 lands; not before.
 
 ## Alternatives considered
 

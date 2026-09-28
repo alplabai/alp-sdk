@@ -14,12 +14,28 @@ the answer for one committed SoM.
 import sys
 from pathlib import Path
 
+import pytest
+
 import gen_portability_matrix as gpm  # noqa: E402  (scripts/ on sys.path via conftest)
 
 from alp_orchestrate.models import BoardProject, Slice
 
 REPO = Path(__file__).resolve().parents[2]
 DOC = REPO / "docs" / "portability-matrix.md"
+
+
+@pytest.fixture(scope="module")
+def generated() -> str:
+    """One full regenerated doc text, shared across the module's tests.
+
+    `gpm.generate()` re-runs the real swap-test sweep (subprocess `alp_project.py
+    --emit zephyr-conf` calls) each time it's invoked, so calling it once per
+    test made this module the slowest in the suite (#2328). Tests that only
+    read the generated text share this fixture; `test_generate_is_deterministic`
+    below still performs a second, independent `gpm.generate()` call so the
+    determinism check stays non-vacuous.
+    """
+    return gpm.generate()
 
 
 def _project(*, soc_cores, slices, som_preset=None) -> BoardProject:
@@ -46,12 +62,12 @@ def _project(*, soc_cores, slices, som_preset=None) -> BoardProject:
 # ---------------------------------------------------------------------
 
 
-def test_generate_is_deterministic():
-    assert gpm.generate() == gpm.generate()
+def test_generate_is_deterministic(generated):
+    assert generated == gpm.generate()
 
 
-def test_committed_doc_matches_generator():
-    assert DOC.read_text(encoding="utf-8") == gpm.generate()
+def test_committed_doc_matches_generator(generated):
+    assert DOC.read_text(encoding="utf-8") == generated
 
 
 def test_library_block_is_byte_stable_across_two_sweeps():
@@ -86,8 +102,8 @@ def test_library_block_preserves_surrounding_prose():
                              gpm.LIB_END_MARK) == out
 
 
-def test_generated_doc_keeps_library_section_prose_outside_markers():
-    text = gpm.generate()
+def test_generated_doc_keeps_library_section_prose_outside_markers(generated):
+    text = generated
     begin = text.index(gpm.LIB_BEGIN_MARK)
     end = text.index(gpm.LIB_END_MARK)
     prose = text[:begin] + text[end + len(gpm.LIB_END_MARK):]
@@ -102,15 +118,15 @@ def test_generated_doc_keeps_library_section_prose_outside_markers():
 # ---------------------------------------------------------------------
 
 
-def test_every_manifest_has_a_row():
+def test_every_manifest_has_a_row(generated):
     from alp_orchestrate.libraries import available_libraries
-    text = gpm.generate()
+    text = generated
     for name in available_libraries(gpm.METADATA):
         assert f"| `{name}` |" in text, f"no row for library {name}"
 
 
-def test_manifest_metadata_columns_render_from_the_manifest():
-    text = gpm.generate()
+def test_manifest_metadata_columns_render_from_the_manifest(generated):
+    text = generated
     # lvgl's pinned version + MIT licence are transcribed straight from
     # metadata/libraries/lvgl.yaml -- never hand-typed here.
     lvgl_row = next(ln for ln in text.splitlines()
@@ -138,8 +154,8 @@ def _lib_cell(text: str, library: str, sku: str) -> str:
     raise AssertionError(f"no cell for {library} x {sku}")
 
 
-def test_lvgl_compatible_on_ram_ample_m_som():
-    text = gpm.generate()
+def test_lvgl_compatible_on_ram_ample_m_som(generated):
+    text = generated
     # E1M-AEN801 (Alif E8, Cortex-M55, ample RAM) satisfies lvgl's 64 KiB
     # RAM floor and wires via its Zephyr integration.
     assert _lib_cell(text, "lvgl", "E1M-AEN801") == gpm.PASS

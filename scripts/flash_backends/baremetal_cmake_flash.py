@@ -23,6 +23,7 @@ flash_args contract:
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import time
@@ -79,8 +80,12 @@ class BaremetalCmakeFlash:
                 command=list(cmd),
             )
 
+        # The flash target belongs to the BSP / customer project and often runs a
+        # Python flasher (pyocd, esptool, spsdk, SETOOLS), so the child is told
+        # to write UTF-8 too -- encoding= alone only sets how WE decode (#2197).
         proc = subprocess.run(cmd, check=False,
-                              capture_output=True, text=True)
+                              capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         elapsed = time.monotonic() - start
         if proc.returncode == 0:
             return FlashResult(

@@ -25,6 +25,10 @@
  * (`alp_i2s_t`) ships in v0.2's audio library work — until then
  * @ref alp_pdm_mic_open returns NULL and read() returns
  * `ALP_ERR_NOSUPPORT`.  Same shape as `<alp/iot.h>` in v0.1.
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      PDM-mic capture block (`alp_pdm_mic_*`).  See
+ *      docs/abi-markers.md.
  */
 
 #ifndef ALP_BLOCKS_PDM_MIC_H

@@ -7,6 +7,7 @@ scripts/alp_cli/__init__.py derives its __version__ from sdk_version.yaml, so
 neither is synced here.
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -17,7 +18,10 @@ SCRIPT = REPO / "scripts" / "check_version_doc_sync.py"
 
 def _run(*args, **kw):
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, **kw,
+        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True,
+        encoding="utf-8",
+        env={**(kw.pop("env", None) or os.environ), "PYTHONIOENCODING": "utf-8"},
+        **kw,
     )
 
 

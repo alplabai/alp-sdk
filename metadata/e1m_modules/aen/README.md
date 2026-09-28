@@ -14,6 +14,7 @@ Alif-Ensemble-based E1M modules).
 | `alif-ospi.tsv`            | `ospi_signal \t alif_pad`                                           |
 | `alif-ethernet-phy.tsv`    | `phy_signal \t alif_pad`                                            |
 | `hw-revisions.yaml`        | Per-rev SDK-version compatibility window                            |
+| `on-module-links.yaml`     | On-module (non-edge) SoC pads + the devices on them                 |
 
 ## Two silicon sources
 
@@ -36,6 +37,14 @@ projected into a single schema'd, queryable table at
 E1M edge pad becomes one entry — `{ e1m_pad, e1m_function, owner,
 silicon_peripheral, silicon_pad }` — so a CLI/IDE queries one
 structured file instead of parsing the raw TSVs.
+
+`on-module-links.yaml` is deliberately OUTSIDE that projection: it covers
+pads that reach no E1M edge pin (BRD_I2C's `P7_0`/`P7_1`, the RTC alarm's
+`P15_0`), which by construction have no `e1m_pad` and so no row in either
+TSV.  It is the generation authority `scripts/gen_zephyr_board.py` reads
+for the AEN board `<board>-pinctrl.dtsi` / `<board>.dts` -- edit it and
+regenerate, the same loop `metadata/e1m_modules/v2n/supervisor-links.yaml`
+drives for the V2N family.
 
 The **TSVs remain the single source**; the table is generated and a CI
 regen-diff gate keeps it byte-in-sync (edit a TSV, run the generator,

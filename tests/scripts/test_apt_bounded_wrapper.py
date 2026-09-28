@@ -133,7 +133,7 @@ def test_a_step_whose_budget_is_spent_fails_loudly_rather_than_silently(
 
     proc = subprocess.run(
         ["bash", str(_WRAPPER), "install", "-y", "some-package"],
-        env=env, capture_output=True, text=True, timeout=120,
+        env=env, capture_output=True, text=True, encoding="utf-8", timeout=120,
     )
     assert proc.returncode != 0, (
         "budget exhausted but the wrapper exited 0 -- a step whose install never "
@@ -152,13 +152,13 @@ def test_the_deadline_is_shared_across_invocations_in_one_step(
     env["PATH"] = f"{_fake_apt(tmp_path, exit_code=0)}:{env['PATH']}"
 
     subprocess.run(["bash", str(_WRAPPER), "update"], env=env,
-                   capture_output=True, text=True, timeout=120, check=False)
+                   capture_output=True, text=True, encoding="utf-8", timeout=120, check=False)
     written = list(tmp_path.glob("apt-bounded.*.deadline"))
     assert len(written) == 1, f"expected exactly one deadline file, got {written}"
     first = written[0].read_text(encoding="utf-8")
 
     subprocess.run(["bash", str(_WRAPPER), "install", "-y", "pkg"], env=env,
-                   capture_output=True, text=True, timeout=120, check=False)
+                   capture_output=True, text=True, encoding="utf-8", timeout=120, check=False)
     assert written[0].read_text(encoding="utf-8") == first, (
         "the second invocation rewrote the deadline -- each call would get a "
         "full budget again, which is the #1592 overrun"
@@ -170,12 +170,12 @@ def test_a_different_step_gets_its_own_budget(tmp_path: Path) -> None:
     env_a = _env(tmp_path, step="step-a")
     env_a["PATH"] = f"{_fake_apt(tmp_path, exit_code=0)}:{env_a['PATH']}"
     subprocess.run(["bash", str(_WRAPPER), "update"], env=env_a,
-                   capture_output=True, text=True, timeout=120, check=False)
+                   capture_output=True, text=True, encoding="utf-8", timeout=120, check=False)
 
     env_b = _env(tmp_path, step="step-b")
     env_b["PATH"] = env_a["PATH"]
     proc = subprocess.run(["bash", str(_WRAPPER), "update"], env=env_b,
-                          capture_output=True, text=True, timeout=120)
+                          capture_output=True, text=True, encoding="utf-8", timeout=120)
     assert proc.returncode == 0, (
         f"a fresh step must get a fresh budget. stderr:\n{proc.stderr}"
     )
@@ -187,7 +187,7 @@ def test_a_real_apt_error_is_not_retried(tmp_path: Path) -> None:
     env = _env(tmp_path, step="step-err")
     env["PATH"] = f"{_fake_apt(tmp_path, exit_code=7)}:{env['PATH']}"
     proc = subprocess.run(["bash", str(_WRAPPER), "install", "-y", "pkg"],
-                          env=env, capture_output=True, text=True, timeout=120)
+                          env=env, capture_output=True, text=True, encoding="utf-8", timeout=120)
     assert proc.returncode == 7, (
         f"a non-transient exit must pass through unchanged, got {proc.returncode}"
     )
@@ -216,7 +216,7 @@ def _run_hanging(tmp_path: Path, *, budget: str, slice_s: str, step: str):
     env["APT_ATTEMPTS"] = "3"
     env["PATH"] = f"{_hanging_apt(tmp_path)}:{env['PATH']}"
     return subprocess.run(["bash", str(_WRAPPER), "update"], env=env,
-                          capture_output=True, text=True, timeout=180)
+                          capture_output=True, text=True, encoding="utf-8", timeout=180)
 
 
 def test_the_give_up_line_agrees_with_the_attempt_lines(tmp_path: Path) -> None:
@@ -228,10 +228,17 @@ def test_the_give_up_line_agrees_with_the_attempt_lines(tmp_path: Path) -> None:
     a reader saw `attempt 3/3` followed by a give-up naming a different attempt
     number and no total. Observed on #1570, run 32275153453.
 
-    Budget 30s with a 12s slice spends 24s on two attempts and leaves 6s, which
-    is under the 10s floor -- the exact shape that used to contradict itself.
+    Budget 18s with a 4s slice spends 8s on two attempts and leaves at most
+    10s, which trips the wrapper's floor -- the exact shape that used to
+    contradict itself. That floor is a literal `-le 10` in `apt-bounded.sh`,
+    not an env var, so only budget and slice can be scaled (#2328). The rule:
+    attempt 3 always gives up when budget <= 2 * slice + 10, and a slow
+    runner only lowers `remaining` further. Attempt 2 must still start, which
+    tolerates up to budget - slice - 11 = 3s of process-start slowness in the
+    worst case (whole-second `date +%s` rounding costs up to 1s of that).
+    The wall time stays ~2 slices, whatever the budget.
     """
-    proc = _run_hanging(tmp_path, budget="30", slice_s="12", step="short-budget")
+    proc = _run_hanging(tmp_path, budget="18", slice_s="4", step="short-budget")
     err = proc.stderr
 
     assert proc.returncode != 0, f"a hung apt must not report success:\n{err}"
@@ -248,8 +255,15 @@ def test_the_give_up_line_agrees_with_the_attempt_lines(tmp_path: Path) -> None:
 
 
 def test_exhausting_every_attempt_says_so(tmp_path: Path) -> None:
-    """The other exit path must produce the same shape of sentence."""
-    proc = _run_hanging(tmp_path, budget="40", slice_s="12", step="full-budget")
+    """The other exit path must produce the same shape of sentence.
+
+    Unlike the floor-guard test above, this path never needs the remaining
+    budget to approach the wrapper's 10s floor -- it only needs all 3 attempts
+    to start, so a large budget with a small slice keeps every `remaining`
+    check comfortably clear of the floor while still exercising the same
+    retry loop, in ~3s instead of waiting out three 12s timeouts.
+    """
+    proc = _run_hanging(tmp_path, budget="60", slice_s="1", step="full-budget")
     err = proc.stderr
     assert "attempt 3/3" in err, err
     assert "giving up after 3/3 attempt(s)" in err, (

@@ -57,7 +57,7 @@ RDEPENDS:${PN} = " \
 #      survives a build that drops the RZ/V feature layers entirely (e.g.
 #      AEN and NX91, which never build linux-renesas at all). This alone
 #      was the whole gate through the first two review passes.
-#   2. MACHINE_FEATURES containing "v2n" (set on all four V2N/V2M machine
+#   2. MACHINE_FEATURES containing "v2n" (set on all six V2N/V2M machine
 #      confs, e.g. e1m-v2n101-a55.conf's `MACHINE_FEATURES += "alp-sdk e1m
 #      v2n"`) -- because a single bblayers.conf commonly serves MULTIPLE
 #      MACHINE builds, gate (1) alone is not sufficient: with meta-rz-codecs

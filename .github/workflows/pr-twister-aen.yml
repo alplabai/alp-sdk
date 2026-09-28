@@ -9,8 +9,9 @@
 # (aen-analog-validate, the five aen-cc3501e-* companion examples,
 # aen-eeprom-manifest, aen-secure-element-sign, edgeai-vision-aen) and are
 # not this gate's business. Of the 61 files, 25 predate this gate, 35 were
-# added by the #1076 metadata sweep (#1095), and 1 (aen-sdcard-readout) by
-# #1097 once its driver linked; PR #1085 added the workflow itself, not the
+# added by the #1076 metadata sweep (#1095), and 1 (aen-sdcard-readout,
+# renamed aen-sdhc-probe by #2051) by #1097 once its driver linked; PR #1085
+# added the workflow itself, not the
 # metadata. (The counts were 62/53/60/70 and a 36-file #1095 bucket until
 # docs/adr/0022 Amendment 2 deleted the Renode-sim aen-sim-vision example,
 # which carried one HP-only scenario from that sweep.)
@@ -59,8 +60,9 @@
 # aen-npu-inference* (the tflite-micro/Ethos-U family) will need
 # `ethos-u-vela` on PATH once it gains a testcase.yaml -- tflite-micro and
 # hal_ethos_u are already unconditional west.yml groups, so no manifest
-# change, just a `pip install ethos-u-vela` step here. `aen-sdcard-readout` was the one
-# example #1095 left without a testcase.yaml, because its driver
+# change, just a `pip install ethos-u-vela` step here. `aen-sdcard-readout`
+# (renamed aen-sdhc-probe by #2051) was the one example #1095 left without a
+# testcase.yaml, because its driver
 # (zephyr/drivers/sdhc/sdhc_dwc.c) expanded
 # `Z_GENERIC_SECTION(CONFIG_SDHC_DESCRIPTOR_SECTION)` to an empty linker
 # section name (`default ""` in
@@ -70,6 +72,24 @@
 # the paths: filters above now include zephyr/drivers/sdhc/** and that
 # kconfig: without them a regression in the very files that caused #1097
 # would not trigger this job at all.
+#
+# Split per SKU (issue #2209): #2198 declared the AEN803 target for 12
+# scenarios (~92 builds total for both SKUs, 24m21s against the twister
+# step's 30min cap) and held back ~50 more because the combined job had no
+# headroom left. Those ~50, plus 9 more scenarios that ship no boards/
+# directory at all (an app.overlay-only or overlay-free shape, safe to
+# declare AEN803 for without a matching boards/ file), are declared now,
+# taking a `--dry-run` count over examples/aen + firmware-update-log +
+# drone-autopilot to 153 configurations total (78 AEN801, 75 AEN803) --
+# past the single-job cap on any linear projection. The `twister-aen` job
+# below is now a 2-way SKU matrix (AEN801, AEN803) instead of one job
+# building all four board targets, so the two SKUs build in parallel and
+# each job's own twister step only ever selects its own SKU's two
+# platforms (`-p` flags). Neither is a required branch-protection check on
+# `dev` (the required contexts are `twister-shard 1/4`..`4/4`,
+# `clang-format · diff-only` and `distro install · all`), so the split
+# blocks nothing. The `--testsuite-root` list stays a single block below,
+# shared by both matrix legs, rather than duplicated per SKU.
 
 name: pr-twister-aen
 
@@ -78,15 +98,25 @@ on:
     branches: [main, dev]
     paths:
       - 'examples/aen/**'
+      - 'examples/connectivity/camera-mjpeg-stream/**'
       - 'examples/connectivity/firmware-update-log/**'
+      - 'examples/connectivity/iot-fleet-ota/**'
+      - 'examples/connectivity/mqtt-telemetry/**'
+      - 'examples/peripheral-io/drone-autopilot/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
+      - 'zephyr/boards/alp/e1m_aen803_m55_he/**'
+      - 'zephyr/boards/alp/e1m_aen803_m55_hp/**'
       - 'zephyr/soc-bridge/**'
       - 'src/backends/mproc/**'
       - 'src/backends/soc_info/alif_se.c'
       - 'src/backends/update_log/**'
       - 'zephyr/drivers/sdhc/**'
+      - 'zephyr/dts/alif/**'
+      - 'zephyr/include/zephyr/dt-bindings/clock/**'
       - 'zephyr/kconfigs/vendor-alif-peripherals.kconfig'
+      - 'zephyr/CMakeLists.txt'
+      - 'zephyr/Kconfig.alp-libraries'
       - 'west.yml'
       - 'metadata/toolchains.json'
       - '.github/workflows/pr-twister-aen.yml'
@@ -94,15 +124,25 @@ on:
     branches: [main, dev]
     paths:
       - 'examples/aen/**'
+      - 'examples/connectivity/camera-mjpeg-stream/**'
       - 'examples/connectivity/firmware-update-log/**'
+      - 'examples/connectivity/iot-fleet-ota/**'
+      - 'examples/connectivity/mqtt-telemetry/**'
+      - 'examples/peripheral-io/drone-autopilot/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
+      - 'zephyr/boards/alp/e1m_aen803_m55_he/**'
+      - 'zephyr/boards/alp/e1m_aen803_m55_hp/**'
       - 'zephyr/soc-bridge/**'
       - 'src/backends/mproc/**'
       - 'src/backends/soc_info/alif_se.c'
       - 'src/backends/update_log/**'
       - 'zephyr/drivers/sdhc/**'
+      - 'zephyr/dts/alif/**'
+      - 'zephyr/include/zephyr/dt-bindings/clock/**'
       - 'zephyr/kconfigs/vendor-alif-peripherals.kconfig'
+      - 'zephyr/CMakeLists.txt'
+      - 'zephyr/Kconfig.alp-libraries'
       - 'west.yml'
       - 'metadata/toolchains.json'
   workflow_dispatch:
@@ -113,18 +153,50 @@ concurrency:
 
 jobs:
   twister-aen:
-    name: twister · AEN801 (M55-HE + M55-HP)
+    # #2209: one job per SKU, running in parallel, instead of one job
+    # building all four board targets. Each leg selects only its own SKU's
+    # two platforms (M55-HE + M55-HP) via matrix.platform_flags -- see the
+    # twister step below. A `--dry-run` over examples/aen +
+    # firmware-update-log + drone-autopilot on this tree counts 78 AEN801
+    # configurations and 75 AEN803 (153 total), against the pre-split
+    # single-job worst case of 92 that took 24m21s (#2198). Scaling that
+    # 1461s/92-build rate linearly, AEN801 (78 builds) projects to about
+    # 1240s/20.7min and AEN803 (75 builds) to about 1195s/19.9min -- both
+    # comfortably under the 30min twister-step cap and the 41min job
+    # ceiling below, so neither is tightened; a job-level timeout tighter
+    # than the shared 41min ceiling would need its own re-derivation per
+    # SKU for a margin this change does not need yet.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sku: aen801
+            label: AEN801 (M55-HE + M55-HP)
+            platform_flags: >-
+              -p alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+              -p alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+          - sku: aen803
+            label: AEN803 (M55-HE + M55-HP)
+            platform_flags: >-
+              -p alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+              -p alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp
+    name: twister · ${{ matrix.label }}
     runs-on: ubuntu-latest
     # #1477: raised from 30 -> 41 (corrected from a 3-run sample that
-    # overstated this to 60). True worst observed job wall is 1337s/
-    # 22.28min across 10 sampled runs -- 30min was genuinely unreachable
-    # because the twister step alone measures 1167s/19.45min (see that
-    # step's own comment below). 30 (twister step) + 7 (seven 1min
-    # setup/upload steps) + 3 (budget for the 3 remaining uncapped
-    # steps) sums to 40, so the ceiling must be at least 41 to stay
-    # strictly above that sum (test_job_ceiling_exceeds_the_sum_of_
-    # its_step_timeouts requires total < ceiling, not <=); 41 is also
-    # comfortably above the real 22.28min observed total.
+    # overstated this to 60). True worst observed job wall, pre-split, was
+    # 1337s/22.28min across 10 sampled runs of the single combined job --
+    # 30min was genuinely unreachable because the twister step alone
+    # measured 1167s/19.45min (see that step's own comment below). The
+    # test suite's actual invariant is max-based, not sum-based
+    # (test_job_ceiling_exceeds_its_longest_step_timeout requires only
+    # ceiling > the single LONGEST step cap, i.e. > 30 here -- 31 would
+    # already satisfy it); 41 is not derived from that test, it is kept
+    # because it comfortably exceeds the real 22.28min observed total for
+    # the old, larger combined job, leaving headroom this repo's own
+    # timeout-flakiness history (#1549) says is worth keeping. Unchanged
+    # for both SKU legs post-split rather than tightened per leg (see the
+    # per-SKU build/time estimate in the job comment above) -- each leg's
+    # own worst case, ~20min, is well inside it either way.
     timeout-minutes: 41
 
     env:
@@ -271,46 +343,107 @@ jobs:
           "$HOME/zephyr-sdk/setup.sh" -t arm-zephyr-eabi -c
           echo "ZEPHYR_SDK_INSTALL_DIR=$HOME/zephyr-sdk" >> "$GITHUB_ENV"
 
-      # Run twister against both AEN801 board targets, scoped to
-      # examples/aen -- the 52 testcase.yaml files whose platform_allow
-      # names an AEN target are the entire point; nothing outside that
-      # tree is in scope for this job. examples/connectivity/
-      # firmware-update-log is a second, bounded root (issue #1101): it
-      # is the one non-examples/aen example with AEN801 platform_allow
-      # entries, kept as its own --testsuite-root rather than widened to
-      # all of examples/ (this job's stated disk-budget concern, see the
-      # header comment) or moved under examples/aen (it is a portable
-      # <alp/update_log.h> demo, not AEN-only).
-      - name: twister · AEN801 (M55-HE + M55-HP) on examples/aen + firmware-update-log
+      # Run twister against this matrix leg's own SKU only -- both its
+      # M55-HE and M55-HP board targets (matrix.platform_flags, see the
+      # job-level `strategy:` above). alp-sdk#2084 -- a board's generated
+      # tree gets no real CI coverage without a -p flag AND a matching
+      # platform_allow entry; a testcase.yaml change alone selects nothing
+      # here. The --testsuite-root list below is scoped to examples/aen --
+      # the testcase.yaml files whose platform_allow names an AEN target
+      # are the entire point; nothing outside that tree is in scope for
+      # this job. examples/connectivity/firmware-update-log is a second,
+      # bounded root (issue #1101): it is the one non-examples/aen example
+      # with AEN801 platform_allow entries, kept as its own
+      # --testsuite-root rather than widened to all of examples/ (this
+      # job's stated disk-budget concern, see the header comment) or moved
+      # under examples/aen (it is a portable <alp/update_log.h> demo, not
+      # AEN-only). Every AEN803 scenario is build_only: true -- so they add
+      # compile scenarios, not bench runs. #2209 declared the AEN803
+      # target across the rest of examples/aen (the two SKUs' scenario
+      # counts diverge slightly: some scenarios remain SKU-specific, e.g.
+      # the aen-sdhc-probe / aen-ethernet-link twins whose
+      # extra_dtc_overlay_files names one SKU's board file explicitly) and
+      # split this job into the AEN801/AEN803 matrix above to keep the
+      # combined scenario count within budget.
+      # This list stays a SINGLE block shared by both matrix legs -- do not
+      # duplicate it per SKU.
+      # examples/peripheral-io/drone-autopilot is a third, bounded root
+      # (issue #2106, same #1101 precedent as firmware-update-log above):
+      # its AEN hardware scenario named a board target it shipped no
+      # overlay for, so the alp-i2c0/alp-uart1/alp-pwm0..3 aliases its
+      # overlay wires were silently dropped and nothing built to notice.
+      # Bounded to this one example, not widened to examples/peripheral-io/
+      # -- every other example there is native_sim-only (see #2106).
+      # examples/connectivity/mqtt-telemetry and .../iot-fleet-ota are the
+      # fourth and fifth bounded roots (issue #2173). Neither had ANY AEN
+      # coverage here: mqtt-telemetry shipped no AEN scenario at all, and
+      # iot-fleet-ota's named `ensemble_e8_dk/...` -- the stock Alif DevKit
+      # board, which no -p flag in this repo selects -- so the apps'
+      # real-silicon build was ungated and stayed broken (they did not
+      # compile at all until the mbedtls PSA floor landed). Both now name
+      # the alp_e1m_aen801_m55_hp target their own board.yaml describes
+      # (som.sku E1M-AEN801, preset e1m-evk), build_only, so a regression
+      # in the CC3501E/TLS build path fails a PR instead of a bench run.
+      # Both are AEN801-only, so they contribute scenarios to the AEN801
+      # matrix leg and select nothing on the AEN803 one -- these two apps
+      # have no AEN803 coverage, and #2209's per-SKU declaration sweep did
+      # not reach them (they sit outside examples/aen).
+      # examples/connectivity/camera-mjpeg-stream is the sixth bounded root
+      # (issue #2265): before this, its AEN801/AEN803 build-only scenario
+      # (real camera + Hantro JPEG + interim Ethernet, needing both the
+      # e1m_evk_rpi_csi carrier shield and raspberry_pi_camera_module_1)
+      # never ran in CI at all -- nothing in this repo's CI selected an AEN
+      # board target for it, so a regression in that pipeline would only
+      # surface on the next real bench flash. Same shape as the roots
+      # above: one example, bounded, build_only, not widened to any other
+      # directory. `--dry-run` against this job's full root list, before
+      # vs. after adding this root: +1 AEN801 configuration (83 -> 84),
+      # +1 AEN803 configuration (78 -> 79) -- one testcase.yaml scenario
+      # with a two-entry platform_allow. NOT reconciled against the two
+      # older total counts above/below this step (153/144) -- both
+      # already predate this addition by an amount this change did not
+      # introduce (neither matches this measurement's own 83+78=161
+      # baseline either, so the drift is pre-existing, not new here).
+      - name: twister · ${{ matrix.label }} on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota + camera-mjpeg-stream
         working-directory: ${{ github.workspace }}
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
           EXTRA_ZEPHYR_MODULES: ${{ github.workspace }}/alp-sdk
         # #1477: worst observed successful run 1167s/19.45min across 10
-        # sampled runs (corrected from a 3-run sample that understated
-        # this at 1055s/17.6min and a resulting 25min cap). 30min =
-        # ~1.54x that real worst case, kept under the job's own 41min
-        # ceiling (see that job-level comment).
+        # sampled runs of the PRE-#2209 combined job (both SKUs, ~92
+        # builds). 30min was already ~1.54x that, kept under the job's own
+        # 41min ceiling (see that job-level comment). Not re-derived per
+        # SKU post-split: a local `--dry-run` count on this tree gives 78
+        # AEN801 configurations and 66 AEN803 (144 total, up from 92) --
+        # scaled linearly off the 1461s/92-build #2198 measurement, AEN801
+        # projects to about 1240s/20.7min and AEN803 to about 1050s/17.5min,
+        # both still comfortably under this 30min cap. Revisit if a future
+        # scenario count pushes either leg close to it.
         timeout-minutes: 30
         run: |
           python3 zephyr/scripts/twister \
-            -p alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
-            -p alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp \
+            ${{ matrix.platform_flags }} \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/aen" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/firmware-update-log" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/drone-autopilot" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/mqtt-telemetry" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/iot-fleet-ota" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/camera-mjpeg-stream" \
             --inline-logs \
             --no-detailed-test-id
 
       # Persist the twister REPORTS regardless of pass/fail, same
       # rationale (and same NOT-the-whole-twister-out/-tree caveat) as
-      # pr-twister.yml.
+      # pr-twister.yml. Named per SKU (twister-out-${{ matrix.sku }}) --
+      # `upload-artifact` names must be unique within a workflow run, and
+      # the matrix now runs two legs in the same run.
       - name: Upload twister reports artefact
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         # #1477: worst observed successful run 2s across 10 sampled runs.
         timeout-minutes: 1
         with:
-          name: twister-out-aen
+          name: twister-out-${{ matrix.sku }}
           path: |
             twister-out/*.json
             twister-out/*.xml

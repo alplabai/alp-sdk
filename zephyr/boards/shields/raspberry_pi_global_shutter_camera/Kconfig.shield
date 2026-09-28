@@ -1,0 +1,5 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+
+config SHIELD_RASPBERRY_PI_GLOBAL_SHUTTER_CAMERA
+	def_bool $(shields_list_contains,raspberry_pi_global_shutter_camera)

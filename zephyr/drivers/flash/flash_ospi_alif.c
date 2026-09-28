@@ -356,6 +356,10 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
+#ifdef CONFIG_PINCTRL
+#include <zephyr/drivers/pinctrl.h>
+#endif
+
 #include <ospi_hal.h>
 
 LOG_MODULE_REGISTER(flash_ospi_alif, CONFIG_FLASH_LOG_LEVEL);
@@ -369,6 +373,9 @@ struct ospi_alif_config {
 	uint32_t  rx_ds_delay;
 	uint32_t  ddr_drive_edge;
 	uint16_t  xip_wait_cycles;
+#ifdef CONFIG_PINCTRL
+	const struct pinctrl_dev_config *pcfg;
+#endif
 };
 
 struct ospi_alif_data {
@@ -435,6 +442,24 @@ static int ospi_alif_init(const struct device *dev)
 	};
 	int32_t rc;
 	int     clk_rc;
+#ifdef CONFIG_PINCTRL
+	int pinctrl_rc;
+
+	/* Mux the OSPI pads (SCLK/SS/DQ) before any OSPI register touch or
+	 * clock-enable below -- this driver previously had no pinctrl support
+	 * at all (issue #2041), leaving every consumer to mux the pads itself
+	 * or silently not work. Pattern matched from spi_dw_alif.c's
+	 * spi_dw_init(), which applies PINCTRL_STATE_DEFAULT as the first thing
+	 * in its own init. The DT binding declares pinctrl-0/pinctrl-names
+	 * required (zephyr/dts/bindings/ospi/snps,designware-ospi.yaml), so
+	 * config->pcfg is never NULL here -- no NULL guard needed, unlike
+	 * adc_alif.c's fixed-function-pad case. */
+	pinctrl_rc = pinctrl_apply_state(config->pcfg, PINCTRL_STATE_DEFAULT);
+	if (pinctrl_rc != 0) {
+		LOG_ERR("pinctrl_apply_state failed: %d", pinctrl_rc);
+		return pinctrl_rc;
+	}
+#endif
 
 	/* Must happen before the first OSPI register touch inside
 	 * alif_hal_ospi_initialize() -- see the file-header provenance block. */
@@ -493,6 +518,7 @@ static int ospi_alif_init(const struct device *dev)
 		     "controller cap (HWRM S10.5)")
 
 #define OSPI_ALIF_INIT(inst)                                                                      \
+	IF_ENABLED(CONFIG_PINCTRL, (PINCTRL_DT_INST_DEFINE(inst);))                                   \
 	OSPI_ALIF_CHECK_SCLK(inst);                                                                   \
 	static struct ospi_alif_data         ospi_alif_data_##inst;                                  \
 	static const struct ospi_alif_config ospi_alif_config_##inst = {                             \
@@ -504,6 +530,7 @@ static int ospi_alif_init(const struct device *dev)
 		.rx_ds_delay     = DT_INST_PROP(inst, rx_ds_delay),                                       \
 		.ddr_drive_edge  = DT_INST_PROP(inst, ddr_drive_edge),                                    \
 		.xip_wait_cycles = DT_INST_PROP(inst, xip_wait_cycles),                                   \
+		IF_ENABLED(CONFIG_PINCTRL, (.pcfg = PINCTRL_DT_INST_DEV_CONFIG_GET(inst),))               \
 	};                                                                                             \
 	DEVICE_DT_INST_DEFINE(inst, ospi_alif_init, NULL, &ospi_alif_data_##inst,                    \
 			       &ospi_alif_config_##inst, POST_KERNEL, CONFIG_FLASH_INIT_PRIORITY, NULL);

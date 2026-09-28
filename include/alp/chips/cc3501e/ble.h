@@ -38,13 +38,18 @@ extern "C" {
  * @brief Enable the CC3501E BLE controller + NimBLE host (BLE_ENABLE, 0x30).
  *
  * The firmware worker-routes BLE_ENABLE off the SPI ISR: it brings the Wi-Fi
- * stack up first (shared HIF), then runs nimble_host_start (~2 s).  Like
- * cc3501e_wifi_get_mac, the host re-issues until the radio op completes; the
- * bridge is briefly down during the op, so @p timeout_ms is floored internally
- * to cover the bring-up window.  No reply payload -- success is the OK status.
+ * stack up first (shared HIF), then runs nimble_host_start.  Like
+ * cc3501e_wifi_get_mac, the host re-issues until the radio op completes, since
+ * the bridge is briefly down during the op.  No reply payload -- success is the
+ * OK status.
+ *
+ * @p timeout_ms IS the budget.  It used to be floored internally to 90 s, which
+ * silently overrode every caller and is where alp-sdk#82's "failed after 90.5 s
+ * against a 30 s timeout" came from; bench-measured, a cold enable completes in
+ * well under a second.
  *
  * @param ctx         Initialised bridge handle.
- * @param timeout_ms  Caller budget (floored to the radio-down window).
+ * @param timeout_ms  Caller budget, honoured as given.
  * @return ALP_OK once the BLE host is up; ALP_ERR_NOT_READY if BLE is not built
  *         in the firmware; otherwise the mapped error.
  */

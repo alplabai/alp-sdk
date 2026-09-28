@@ -12,9 +12,36 @@
 | `E1M-AEN601`   | Alif Ensemble E6 (preliminary)         | preliminary|
 | `E1M-AEN701`   | Alif Ensemble E7                       | production |
 | `E1M-AEN801`   | Alif Ensemble E8 (preliminary)         | preliminary|
+| `E1M-AEN803`   | Alif Ensemble E8, dual external memory (preliminary) | preliminary|
 
 All AEN SKUs share the same module PCB.  Pick by Alif silicon
 tier (cores + NPU count + memory).
+
+`E1M-AEN803` is the same E1M-AEN-2626 PCB and E8 silicon
+(`AE822FA0E5597LS0`) as `E1M-AEN801` -- it is the BOM variant that
+fits both external OSPI0 memories: a 512 Mbit HyperRAM
+(`S80KS5122GABHM02`, CS0) and a 256 Mbit xSPI NOR (`IS25WX256-JHLE`,
+CS1). `E1M-AEN801` leaves both DNI and runs boot + app storage from
+the SoC's on-die MRAM only; see
+[`metadata/e1m_modules/E1M-AEN803.yaml`](../../metadata/e1m_modules/E1M-AEN803.yaml)
+for the full preset. Its Zephyr board tree
+(`zephyr/boards/alp/e1m_aen803_m55_hp/`, `.../e1m_aen803_m55_he/`) was
+generated under #2084; like `E1M-AEN801`, it still boots and stores
+from on-die MRAM only -- the two external OSPI0 parts are physically
+fitted but not yet wired into a boot or storage partition. The OSPI0
+pinctrl gap that used to be the operative blocker is closed:
+`flash_ospi_alif.c` applies `PINCTRL_STATE_DEFAULT` in its init as of
+#2041 (closed 2026-09-12), bench-verified on two modules -- though
+that proof is bind-level, since the pad-mux registers were not read
+back and nothing in tree makes an OSPI device-level transfer. The
+operative blocker now is that the driver still ships no
+`flash_driver_api` (#915 -- recheck when it closes): it does config
+only, so there is no read/write/erase path a partition could use.
+Bench evidence for the physical fit is **NOR only**: [`docs/bring-up-aen.md`](../bring-up-aen.md)
+§0 reads the ISSI JEDEC ID off OSPI0 CS1 on the AEN803 bench module and
+says explicitly that result is silent on the HyperRAM's own behaviour
+-- the HyperRAM's fit is asserted in `E1M-AEN803.yaml`
+(`assembled: true`) but not itself bench-verified.
 
 ## What's on the module
 
@@ -23,22 +50,225 @@ tier (cores + NPU count + memory).
 | Application SoC         | Alif Ensemble E3..E8       | --               | (vendor HAL)                            |
 | Wi-Fi 6 + BLE 5.4       | TI CC3501E                 | inter-chip SPI1 + SDIO | App APIs: [`<alp/iot.h>`](../../include/alp/iot.h), [`<alp/ble.h>`](../../include/alp/ble.h); diagnostics: [`<alp/chips/cc3501e.h>`](../../include/alp/chips/cc3501e.h) |
 | Secure element          | Infineon OPTIGA Trust M    | BRD_I2C†          | [`<alp/chips/optiga_trust_m.h>`](../../include/alp/chips/optiga_trust_m.h) |
-| RTC                     | Micro Crystal RV-3028-C7   | BRD_I2C†          | [`<alp/chips/rv3028c7.h>`](../../include/alp/chips/rv3028c7.h) |
-| Temperature sensor      | TI TMP112                  | BRD_I2C†          | [`<alp/chips/tmp112.h>`](../../include/alp/chips/tmp112.h) |
+| RTC                     | Micro Crystal RV-3028-C7   | BRD_I2C†          | Upstream Zephyr `CONFIG_RTC_RV3028` (`rtc_*` API) -- see [BRD_I2C](#on-module-housekeeping-i2c-brd_i2c) |
+| Temperature sensor      | TI TMP112                  | BRD_I2C†          | Upstream Zephyr `CONFIG_TMP112` (sensor API) -- see [BRD_I2C](#on-module-housekeeping-i2c-brd_i2c) |
 | EEPROM (SoM manifest)   | Onsemi N24S128             | SoC I2C2 (bridge/DNP-selected, a separate bus from BRD_I2C) | [`<alp/chips/eeprom_24c128.h>`](../../include/alp/chips/eeprom_24c128.h) |
 | Ethernet PHY            | TI DP83825 (exact order code TBD) | RMII      | none -- see [`metadata/chips/dp83825.yaml`](../../metadata/chips/dp83825.yaml) |
 
-† On the **E1M-AEN801**, BRD_I2C is SoC I2C0 (function C, `P7_0`/`P7_1`),
-master-capable -- corrected from an earlier belief that it was the
-slave-only Alif LPI2C0 -- wired in `aen-secure-element-sign`'s own board
-overlay (#1848). That is necessary, not sufficient: the R2 netlist shows
-no pull-up path to any rail on the bus, and the datasheet/HWRM disagree on
-whether that is fatal -- see `docs/bring-up-aen.md` §5.1. The routing
-itself is R2-sourced (`E1M-AEN-2626-R2` netlist) and not yet confirmed on
-an actual unit. The other AEN SKUs still carry the pre-#1848 LPI2C0
-assumption in their own preset files pending the same netlist evidence.
+† On the **E1M-AEN801**, BRD_I2C is SoC I2C0 (function C, `P7_0` SDA /
+`P7_1` SCL), master-capable -- corrected from an earlier belief that it was
+the slave-only Alif LPI2C0 (#1848) -- and **bench-proven on 2626-R2
+silicon**. Full customer-facing writeup, including the limitations that
+will surprise you, in [On-module housekeeping I2C (BRD_I2C)](#on-module-housekeeping-i2c-brd_i2c)
+below. #1848 disproved the LPI2C0 reading for the whole AEN family, not just
+E1M-AEN801, and no shipped preset carries it; the other SKUs still await
+their own per-part datasheet confirmation of the corrected mapping.
 
 Memory + per-SKU specifics: [`metadata/e1m_modules/E1M-AEN<NNN>.yaml`](../../metadata/e1m_modules/).
+
+## On-module housekeeping I2C (BRD_I2C) {#on-module-housekeeping-i2c-brd_i2c}
+
+**E1M-AEN801 only.** BRD_I2C is the module's own housekeeping bus: a real
+time clock and a temperature sensor your application can use without a
+single carrier-side component. It is **SoC I2C0, function C** -- `P7_0`
+(SDA) / `P7_1` (SCL) -- driven by upstream Zephyr's `i2c_dw`
+(`snps,designware-i2c`), ADR 0017 Tier-1.
+
+| Part | 7-bit address | Fitted on this batch | Upstream driver |
+|------|---------------|----------------------|-----------------|
+| Micro Crystal **RV-3028-C7** RTC (U21) | `0x52` | yes | `CONFIG_RTC_RV3028`, compatible `microcrystal,rv3028` |
+| TI **TMP112** temperature sensor (U20) | `0x40` | yes | `CONFIG_TMP112`, compatible `ti,tmp112` |
+| Infineon **OPTIGA Trust M** (IC1) | `0x30` | **no -- DNP** | n/a |
+
+The bus is **isolated**: the two 0 Ω jumpers that would bridge it into the
+I2C2/EEPROM segment (`R93`/`R94`) are DNP, so the SoM manifest EEPROM is
+**not** on BRD_I2C -- it is on SoC I2C2 (`P5_6`/`P5_7`), a separate bus.
+BRD_I2C reaches no E1M edge pad either; it is module-internal.
+
+The OPTIGA's silence at `0x30` on this batch is a population fact, not a
+fault. It must not appear in a shipped devicetree.
+
+### Using it from an application
+
+Both parts are driven by **upstream Zephyr drivers** -- alp-sdk vendors no
+code for either.  The RTC has no `<alp/*>` entry point yet (repointing
+`alp_rtc_open()` at the on-module part is #1814); the temperature sensor
+does, as of alp-sdk#2066 -- `alp_temperature_read_milli_c()`
+(`<alp/temperature.h>`) binds the same DT alias below through the upstream
+sensor API and is the portable, SoM-swap-safe way to read it.  This
+section documents the direct/upstream route both parts still support.
+
+The bus, both device nodes and their aliases are **generated into the
+E1M-AEN801 board devicetree** from
+[`metadata/e1m_modules/aen/on-module-links.yaml`](../../metadata/e1m_modules/aen/on-module-links.yaml),
+so an application does not have to wire any of it: `i2c0` comes up enabled
+with its pinctrl group, the RV-3028 and the TMP112 appear as child nodes, and
+the aliases `alp-i2c2` (the portable bus index -- `0` and `1` are the E1M
+*edge* buses), `rtc` and `alp-temp0` point at them. Each example also
+carries the same wiring in its own `boards/` overlay, which is the readable
+reference for what those nodes contain and why.
+
+**If you do hand-roll the pad group, it has two traps in it**, both of which
+have already cost a bench run:
+
+* `input-enable` must be on **both** `P7_0` and `P7_1`. With it on SDA only,
+  the controller NACKs every address for a reason that looks electrical.
+* the bias must be `bias-pull-up` (DSC=1, a **real** pull-up). Do not copy the
+  I2C2/EEPROM overlay's `bias-pull-down` (DSC=2, a pull-**down**) -- that is
+  safe there only because that bus has external carrier pull-ups. This net has
+  none, and a pull-down would park both lines low.
+
+`drive-open-drain` is deliberately **not** set, leaving the pad push-pull.
+
+Reaching the devices:
+
+```c
+/* RTC -- DT_ALIAS(rtc) works too; the examples use the node label */
+const struct device *const rtc = DEVICE_DT_GET(DT_NODELABEL(rv3028));
+struct rtc_time now;
+
+rtc_get_time(rtc, &now);
+
+/* Thermometer -- by compatible, so the app needs no node name */
+const struct device *const temp =
+	DEVICE_DT_GET(DT_COMPAT_GET_ANY_STATUS_OKAY(ti_tmp112));
+struct sensor_value val;
+
+sensor_sample_fetch(temp);
+sensor_channel_get(temp, SENSOR_CHAN_AMBIENT_TEMP, &val);
+```
+
+Kconfig:
+
+```
+# RTC + alarm
+CONFIG_I2C=y
+CONFIG_GPIO=y          # the /INT line lands on lpgpio
+CONFIG_RTC=y
+CONFIG_RTC_ALARM=y     # WITHOUT this the alarm half of the driver is not built
+CONFIG_RTC_RV3028=y
+
+# Thermometer
+CONFIG_SENSOR=y
+CONFIG_TMP112=y
+```
+
+`CONFIG_RTC_RV3028` is `default y` off its devicetree node -- naming it by
+hand is a mistake, not a belt-and-braces: on any target without the
+`microcrystal,rv3028` node the assignment has an unmet dependency and the
+build warns, so let the devicetree drive it.
+
+`CONFIG_TMP112` is different, as of
+[alplabai/alp-sdk#2043](https://github.com/alplabai/alp-sdk/issues/2043):
+upstream still declares it `default y depends on DT_HAS_TI_TMP112_ENABLED`
+and it still `select`s I2C, but the E1M-AEN801 board's own
+`Kconfig.defconfig` now ALSO defaults TMP112 to `n` board-wide, because
+alp-sdk's own `chips/tmp112/tmp112.c` and upstream's
+`zephyr/drivers/sensor/ti/tmp112/tmp112.c` both define `tmp112_init` and an
+app linking both collides at LINK time. An app that wants the upstream
+driver now names `CONFIG_TMP112=y` explicitly -- the board default only
+supplies the value nothing else assigns, so the explicit `y` still wins over
+it. Confirmed on the real board target: `west build -p always -b
+alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-temp-sensor`
+links `zephyr/drivers/sensor/ti/tmp112/libdrivers__sensor__ti__tmp112.a`,
+and the resolved `.config` carries `CONFIG_TMP112=y` with the board's
+`default n` in force. The unmet-dependency warning above still applies on
+any board with no `ti,tmp112` node.
+
+Worked examples:
+
+* [`examples/aen/aen-rtc-alarm`](../../examples/aen/aen-rtc-alarm) -- set the
+  time, arm an alarm, take the interrupt.
+* [`examples/aen/aen-temp-sensor`](../../examples/aen/aen-temp-sensor) -- read
+  the temperature in a loop.
+
+[`examples/aen/aen-brd-i2c-scan`](../../examples/aen/aen-brd-i2c-scan) is the
+bench probe that proved the bus. Read it for evidence, not as an application
+template -- it deliberately retargets `zephyr,flash` to ITCM for a J-Link RAM
+run.
+
+### RTC alarm interrupt
+
+The RV-3028's `/INT` output (U21 pin 2, net `RTC_ALARM`) reaches the SoC:
+
+```
+RV-3028-C7 /INT  ->  RTC_ALARM  ->  P15_0_FLEX (ball V2)  ->  LPGPIO bit 0  ->  IRQ 171
+```
+
+It is **open-drain, active low**, and `R98` (100 kΩ to `+1V8`) is fitted as
+its pull-up, so no carrier-side resistor is needed. The pin is described to
+the driver as `int-gpios = <&lpgpio 0 GPIO_ACTIVE_LOW>`.
+
+> **If an alarm never fires, suspect the GPIO port before the RTC.** The
+> Alif DFP notes that port 15's `LPGPIO_CTRL_n` register uses a *different
+> layout* from the other GPIO ports. A misconfigured LPGPIO reads exactly
+> like a dead RTC. Confirm the alarm flag over I2C first: if the RTC's
+> status register shows the alarm fired, the RTC is fine and the fault is
+> in the interrupt path.
+
+### Limitations on this batch -- read these before you design around the bus
+
+**1. The RTC does not keep time across a power cycle.** `VDD_BAT` /
+`VBACKUP` (U21 pin 6) has **no supply fitted**: its only other net members
+are `R4` and `R68`, both 0 Ω and both DNP. There is no backup cell and no
+trickle-charge source, so the RTC loses the time *and* any pending alarm
+whenever module power drops. Set the time at every boot. Persistence is a
+**populate change** on the module, not a firmware setting -- ask before
+you design a product around it.
+
+Two devicetree properties follow directly from that, and are set this way
+deliberately:
+
+* `backup-switch-mode = "disabled"` -- required by the binding, and
+  "disabled" is the only honest value with no cell present.
+* `trickle-resistor-ohms` is **not set**. Enabling a trickle charger into
+  an unpopulated `VBACKUP` net would be wrong.
+
+**2. `RTC_CLKOUT` is carrier-only -- firmware cannot use it.** The RV-3028's
+`CLKOUT` (U21 pin 1) goes **only** to the E1M edge connector, pin **AH16**.
+It does not reach the SoC. It is therefore a *carrier designer's* clock
+source: pick a frequency with the `clkout-frequency` property if your
+carrier consumes it. Left omitted -- the shipped default -- the pin stays
+low.
+
+**3. `MODULE_STBY` / `EVI` is a carrier input.** The RV-3028's external
+event input (U21 pin 8) comes from E1M edge pin **O2**, with `R43` (100 kΩ
+to `+1V8`). Nothing on the module drives it; timestamping an event there is
+a carrier design decision.
+
+### Bench evidence
+
+Measured 2026-09-05 on an E1M-AEN801 **2626-R2** module (Flow A, cold-cycle
+proven), `i2c0` at 100 kHz:
+
+* **The bus works on the SoC's internal pull-up alone.** No external
+  pull-up resistor is fitted anywhere on the net, and none is needed:
+  `R93`/`R94` stay DNP.
+* **RV-3028-C7 @ `0x52`:** ACK. ID register `0x28` reads `0x44` -- per the
+  RV-3028-C7 Application Manual Rev. 1.4 §3.14 the high nibble (HID `0x4`)
+  is the hardware-identity field and matches; the low nibble (VID `0x4`) is
+  a production-line code, not an identity claim. The seconds register
+  advanced `0x01` → `0x02`, so the oscillator runs.
+* **TMP112 @ `0x40`:** ACK. `0x40` is the design address for U20's exact
+  orderable MPN (`TMP112DIDPWR`, X2SON-5 package per SBOS473L p.44 + Table
+  7-4, ADD0→GND). Reads back a plausible temperature (28.062 °C on
+  2026-09-05; 27.687 °C on 2026-09-07, serial `2026W36-0002`), and
+  fingerprints TMP112-shaped (`CONFIG` `0x60a0`, `T_LOW` `0x4b00`, `T_HIGH`
+  `0x5000` -- the datasheet power-on defaults).
+* **Every non-response was a clean `rc=-5` (`-EIO`) NACK** -- zero
+  `-ETIMEDOUT`, zero `User Abort on i2c@49010000` in the whole run. That
+  distinction matters when you debug this bus: a NACK means the controller
+  is driving a healthy wire and nobody answered that address, whereas a
+  timeout plus `User Abort` means the pads never reached the wire at all
+  (usually a pinctrl error, not a missing device).
+
+An earlier probe, dated 2026-08-31, concluded that BRD_I2C was "not usable
+as built" and needed `R93`/`R94` stuffed. **That conclusion does not
+carry.** It was run on an **r1** module, where the RTC and TMP112 sit on
+LPI2C0 (`P7_4`/`P7_5`) and are not connected to `P7_0`/`P7_1` at all --
+nothing could have ACKed on those pads whatever the biasing, so the run
+measured two floating pins rather than a populated bus. The measurement was
+real; the inference drawn from it was about the wrong revision.
 
 ## Carrier requirement: an external brownout supervisor on POR_N
 
@@ -99,6 +329,86 @@ ADC cross-check.  A carrier-board BOARD_ID resistor divider, where
 present, identifies the *carrier* revision and is independent of the
 SoM revision; it is not yet wired into `alp_hw_info_read()`.  See
 [`docs/board-id.md`](../board-id.md).
+
+## Rotary encoder (QEC0 / UTIMER channel 12) -- bench state {#rotary-encoder-qec0-bench-state}
+
+The E1M EVK's `PEC11R-4215K-S0024` (24 PPR) reaches the SoC as `ENC0_X` → E2
+`A10` → `P3_0` and `ENC0_Y` → E2 `B10` → `P3_1`
+(`metadata/e1m_modules/aen/from-alif.tsv`), decoded by **UTIMER channel 12** --
+QEC0 is channel 12, not channel 0.  Binding the qdec under `utimer0` reads a
+counter that never sees the encoder edges.
+
+**The decode path is not yet proven.**  Two defects were found on
+`E1M-AEN803` serial `2026W36-0002`; the first is fixed, the second is open.
+
+* **Withdrawn (#2037), and worth reading before you touch this driver.** The
+  driver leaves `CNTR_CTRL` (`0x4800D080`) = `0x00000021` — `CNTR_EN` and
+  `CNTR_TRIG` set, bit 1 `RUNNING` clear — and `GLB_CNTR_RUNNING`
+  (`0x4800000C`) = `0x00000000`. That was read as "the channel was never
+  started", and a `GLB_CNTR_START` write was added. **It is the correct resting
+  state for a trigger-counting channel, and starting the channel broke it.**
+
+  With the start call in place and the encoder untouched, `CNTR`
+  (`0x4800D0A0`) advanced 3,999,905,225 counts in 10.000 s = **400,010,738
+  counts/s** — with `UP_1_SRC` and `DOWN_1_SRC` both written `0x00000000`, so
+  no quadrature transition could contribute. Writing `GLB_CNTR_STOP`
+  (`0x48000004`) bit 12 froze it instantly: three `CNTR` reads 5 s apart,
+  bit-identical `0xF7E3EFEE`. At the shipped reload (`CNTR_PTR` =
+  `0x0000005F`) that free-run wraps a revolution every 240 ns, so the reported
+  angle was uncorrelated noise — worse than the stuck-at-zero symptom it was
+  meant to fix.
+
+  Alif's own QEC flow never starts the channel: `qec0_app()` in
+  `demo_qec.c` runs `ConfigCounter(TRIGGERING, TRIANGLE)` → `SetCount` → three
+  `ConfigTrigger` calls → `GetCount` → `Stop`, with no `Start()` anywhere.
+
+  **Register trap:** `CNTR_CTRL` bit 1 `RUNNING` is status, not control. It is
+  set by `GLB_CNTR_START` and cleared by `GLB_CNTR_STOP`; writing `0x00000023`
+  into `CNTR_CTRL` reads back `0x00000021`. Watching that bit change is not
+  proof that your write did anything.
+
+* **Resolved (#2038): the counter advanced on a stationary encoder.** Cause:
+  the withdrawn `GLB_CNTR_START` write above, nothing else. Five raw `CNTR`
+  reads over ~27 s while it was in place showed `0x0000002D`, `0x0000001B`,
+  `0x0000005F`, `0x00000039`, `0x0000003E`; removing the start call removes the
+  free-run. Before the cause was found, five candidates were eliminated on the
+  bench, each at the cost of a reservation, and they stay eliminated: the pads
+  (four configurations including `0x00290000` = AF 0, `P3_0`/`P3_1` deselected
+  from the QEC entirely — still counting); the asymmetric input filter
+  (`FILTER_CTRL_B` was `0x00000000` against `FILTER_CTRL_A` `0x00100101`;
+  fixed, still counting); the channel driving its own input (`GLB_DRIVER_OEN`
+  covers channels 0-11 only); Sawtooth-vs-Triangle (`CNTR_CTRL` written
+  `0x00000033`, still counting); and the trigger path itself (`CNTR_TRIG`
+  cleared, still counting). Every one of those was measured against a channel
+  that was free-running for a reason none of them addressed — which is why they
+  all came back negative.
+
+* **Still open: the original stuck-at-zero reading is unexplained.** That
+  symptom is what started this, and "the counter was never started" was the
+  wrong explanation for it. With the channel in its correct resting state,
+  whether it increments on real quadrature edges has never been observed,
+  because no run has had a hand on the shaft. `UP_0_SRC` (`0x18`) and
+  `DOWN_0_SRC` (`0x20`) read `0x00000000`; whether that is a defect is open.
+
+**Two traps when you measure this.**  The counter wraps at its programmed
+reload (`CNTR_PTR` = `counts-per-revolution - 1` = `0x0000005F`), so neither
+the app's printed degrees nor a raw `CNTR` read can distinguish "static" from
+"advanced by exactly 96·k" -- no counts-per-second figure is derivable from
+either.  Widen `CNTR_PTR` to `0xFFFFFFFF` first if you need a rate; that is how
+the 400 Mcount/s free-run was finally measured.  And **watching `CNTR_CTRL` bit
+1 `RUNNING` change is not proof your write landed** — it is status, set by
+`GLB_CNTR_START` and cleared by `GLB_CNTR_STOP`, and a write of `0x00000023`
+into `CNTR_CTRL` reads back `0x00000021`.
+
+**An attended run is now the right next step**, which it was not while #2038
+stood: with the free-run gone, a count that moves when someone turns the shaft
+means the decode works, and one that does not move is the original defect
+reproduced under a hand.  Turn one detent (expect ±4 raw counts at ×4 decode),
+then one full revolution each way.
+
+`counts-per-revolution` is **96** -- 24 PPR × 4 for the driver's x4 decode --
+and the qdec driver writes it into the hardware counter's reload register, so
+it sets the real wraparound rather than a display scale.
 
 ## Bring-up
 

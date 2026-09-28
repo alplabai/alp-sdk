@@ -53,3 +53,14 @@ properties:
     type: phandle
     description:
       Regulator supplying I/O signaling voltage to the SD card.
+  clocks:
+    type: phandle-array
+    description: |
+      Single phandle-array entry to a clock controller with the SD
+      peripheral clock gate id in its `clkid` cell, e.g. on the Alif
+      Ensemble family clocks = <&clockctrl ALIF_SDC_CLK> (the `alif,
+      clockctrl` compatible's single `#clock-cells = <1>` `clkid` cell --
+      DT_INST_CLOCKS_CELL(n, clkid) in the driver assumes that cell name,
+      not a controller with a different one). Optional: a board where this
+      gate is always-on, or that has no such controller at all, omits it,
+      and sdhc_dwc_init() skips the clock_control_on() call entirely.

@@ -19,6 +19,7 @@ scripts/test-all.sh), not by re-deriving the fix from memory.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -67,26 +68,35 @@ def fake_git_repo(tmp_path):
     subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=tmp_path, check=True)
     subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
     (tmp_path / "include" / "alp" / "boards").mkdir(parents=True)
-    (tmp_path / "include" / "alp" / "existing.h").write_text("/* existing */\n")
+    (tmp_path / "include" / "alp" / "existing.h").write_text("/* existing */\n", encoding="utf-8")
     (tmp_path / "scripts").mkdir()
     (tmp_path / "docs" / "abi").mkdir(parents=True)
-    (tmp_path / "docs" / "abi" / "existing.json").write_text("{}\n")
+    (tmp_path / "docs" / "abi" / "existing.json").write_text("{}\n", encoding="utf-8")
     (tmp_path / "docs" / "diagnostics").mkdir()
-    (tmp_path / "docs" / "diagnostics" / "existing.md").write_text("x\n")
-    (tmp_path / "docs" / "portability-matrix.md").write_text("x\n")
-    (tmp_path / "docs" / "peripheral-support-matrix.md").write_text("x\n")
-    (tmp_path / "docs" / "verification-status.md").write_text("x\n")
+    (tmp_path / "docs" / "diagnostics" / "existing.md").write_text("x\n", encoding="utf-8")
+    (tmp_path / "docs" / "portability-matrix.md").write_text("x\n", encoding="utf-8")
+    (tmp_path / "docs" / "peripheral-support-matrix.md").write_text("x\n", encoding="utf-8")
+    (tmp_path / "docs" / "verification-status.md").write_text("x\n", encoding="utf-8")
     (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "cap.c").write_text("/* stub */\n")
-    (tmp_path / "src" / "status_strings.c").write_text("/* stub */\n")
+    (tmp_path / "src" / "cap.c").write_text("/* stub */\n", encoding="utf-8")
+    (tmp_path / "src" / "status_strings.c").write_text("/* stub */\n", encoding="utf-8")
+    # #2144 added src/backends/gpio/cc3501e_rev_dependent_pins.c to
+    # stage_generated_files' pathspec; per this fixture's contract above,
+    # every path that list names needs a stub here or `git add -N` fails
+    # closed across the WHOLE pathspec and stages nothing.
+    (tmp_path / "src" / "backends" / "gpio").mkdir(parents=True)
+    (tmp_path / "src" / "backends" / "gpio" / "cc3501e_rev_dependent_pins.c").write_text(
+        "/* stub */\n",
+        encoding="utf-8"
+    )
     (tmp_path / "metadata" / "pinmux").mkdir(parents=True)
-    (tmp_path / "metadata" / "pinmux" / "existing.tsv").write_text("x\n")
-    (tmp_path / "metadata" / "catalog.json").write_text("{}\n")
-    (tmp_path / "metadata" / "error-catalog.json").write_text("{}\n")
+    (tmp_path / "metadata" / "pinmux" / "existing.tsv").write_text("x\n", encoding="utf-8")
+    (tmp_path / "metadata" / "catalog.json").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "metadata" / "error-catalog.json").write_text("{}\n", encoding="utf-8")
     (tmp_path / "metadata" / "socs" / "renesas" / "rzv2n").mkdir(parents=True)
-    (tmp_path / "metadata" / "socs" / "renesas" / "rzv2n" / "n44.json").write_text("{}\n")
+    (tmp_path / "metadata" / "socs" / "renesas" / "rzv2n" / "n44.json").write_text("{}\n", encoding="utf-8")
     (tmp_path / "examples" / "aen").mkdir(parents=True)
-    (tmp_path / "examples" / "aen" / "existing.c").write_text("/* stub */\n")
+    (tmp_path / "examples" / "aen" / "existing.c").write_text("/* stub */\n", encoding="utf-8")
     subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
     subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=tmp_path, check=True)
 
@@ -116,6 +126,8 @@ def _run_stage(repo: Path) -> subprocess.CompletedProcess:
         cwd=str(repo),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         timeout=30,
     )
 
@@ -130,7 +142,8 @@ def test_stage_generated_files_catches_a_new_untracked_generated_file(fake_git_r
     header lands in the working tree but was never `git add`ed. The
     stage must fail closed, not report green over a missing file."""
     (fake_git_repo / "include" / "alp" / "boards" / "alp_untracked_routes.h").write_text(
-        "x\n"
+        "x\n",
+        encoding="utf-8"
     )
     proc = _run_stage(fake_git_repo)
     assert proc.returncode != 0, (

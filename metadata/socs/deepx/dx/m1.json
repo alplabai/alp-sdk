@@ -61,7 +61,7 @@
       "order_code": "DX-M1",
       "package": "FCBGA625",
       "temperature_grade": "industrial",
-      "alp_module_skus": ["E1M-V2M101", "E1M-V2M102"]
+      "alp_module_skus": ["E1M-V2M101", "E1M-V2M102", "E1M-V2M103"]
     }
   ],
   "notes": [

@@ -75,6 +75,16 @@ extern "C" {
 					 JPEG_BUS_ERROR_STATUS | JPEG_BUFFER_FULL |\
 					 JPEG_TIMEOUT         | JPEG_IRQ_FUSE_ERROR)
 
+/* Alp Lab AB note: despite the name, these bits (16-24) are IRQ TYPE
+ * mask/select bits (0 = normal interruption, 1 = abnormal interruption per
+ * AE822FA0E5597BS0_CM55_HE_View.svd's JPEG_SWREG1.SW_ENC_IRQ_TYPE_* field
+ * descriptions), NOT a per-source interrupt enable. The actual encoder
+ * interrupt disable is JPEG_SWREG1 bit 1 (SW_ENC_IRQ_DIS, "When high there
+ * are no interrupts concerning encoder from HW"), which this driver never
+ * writes. Not renamed here to keep this vendored-verbatim register-name
+ * macro matching the fork; see jpeg_hantro_vc9000e_set_stream() for where
+ * it's used.
+ */
 #define JPEG_IRQ_EN_MASK                (JPEG_IRQ_TYPE_FRAME_RDY   | \
 					 JPEG_IRQ_TYPE_BUS_ERROR   | \
 					 JPEG_IRQ_TYPE_BUFFER_FULL | \

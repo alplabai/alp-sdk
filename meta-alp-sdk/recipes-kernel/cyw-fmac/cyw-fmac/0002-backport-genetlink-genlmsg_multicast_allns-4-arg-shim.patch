@@ -1,0 +1,61 @@
+From: Alp Lab AB <contact@alplab.ai>
+Date: Wed, 4 Jun 2026 12:01:00 +0200
+Subject: [PATCH 2/2] backport: genetlink: 4-arg genlmsg_multicast_allns() shim
+
+Copyright (c) 2026 Alp Lab AB
+SPDX-License-Identifier: GPL-2.0
+
+Backport-shim for building the Murata cyw-fmac backports tree (base
+v6.1.97, branch imx-mickledore-jaculus) against a 6.1.141 (cip43) target
+kernel.
+
+genlmsg_multicast_allns() lost its trailing gfp_t flags argument in
+mainline v6.8 (commit b8fd6008ad48); that change was backported into the
+6.1.x stable series at 6.1.79. This backports tree still carries call
+sites (bundled nl80211.c) that pass the old 5th argument, so it fails to
+compile against any kernel that already has the 4-argument prototype --
+which includes the 6.1.141 cip43 target here. Add a version-guarded
+wrapper that drops the flags argument on kernels with the 4-arg form, so
+the bundled call sites keep compiling unchanged.
+
+Upstream-Status: Inappropriate [kernel-version backport shim; belongs in
+the Murata backports tree's own backport-include, not the distro layer]
+
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
+---
+ backport-include/net/genetlink.h | 22 ++++++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+
+diff --git a/backport-include/net/genetlink.h b/backport-include/net/genetlink.h
+index 016e96c..bae9839 100644
+--- a/backport-include/net/genetlink.h
++++ b/backport-include/net/genetlink.h
+@@ -172,4 +172,26 @@ static inline int genlmsg_parse(const struct nlmsghdr *nlh,
+ }
+ #endif /* LINUX_VERSION_IS_LESS(5,2,0) */
+
++/*
++ * genlmsg_multicast_allns() lost its trailing gfp_t flags argument in
++ * mainline v6.8 (commit b8fd6008ad48) and the change was backported into the
++ * 6.1.x stable series at 6.1.79.  This backports tree (v6.1.97 base) still
++ * carries call sites that pass the old 5th argument.  When building against a
++ * kernel that already has the 4-argument prototype, provide a variadic-style
++ * shim that drops the flags argument so the bundled nl80211.c keeps compiling.
++ */
++#if (LINUX_VERSION_IS_GEQ(6,1,79) && LINUX_VERSION_IS_LESS(6,2,0)) || \
++    LINUX_VERSION_IS_GEQ(6,8,0)
++static inline int backport_genlmsg_multicast_allns_noflags(
++		const struct genl_family *family, struct sk_buff *skb,
++		u32 portid, unsigned int group, gfp_t flags)
++{
++	(void)flags;
++	return genlmsg_multicast_allns(family, skb, portid, group);
++}
++#undef genlmsg_multicast_allns
++#define genlmsg_multicast_allns(family, skb, portid, group, flags) \
++	backport_genlmsg_multicast_allns_noflags(family, skb, portid, group, flags)
++#endif /* 4-arg genlmsg_multicast_allns kernels */
++
+ #endif /* __BACKPORT_NET_GENETLINK_H */
+--
+2.43.0

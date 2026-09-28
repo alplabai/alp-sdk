@@ -63,6 +63,7 @@ are all ERRORS here, not skips.
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -103,6 +104,8 @@ def west_project_dirs(topdir: Path, west: str = "west") -> dict[str, Path]:
             cwd=topdir,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
     except OSError as err:
         raise RuntimeError(
@@ -182,7 +185,7 @@ def classify_module(patch_files: list[Path], module_dir: Path) -> dict[Path, str
         for i in range(len(ordered) - 1, -1, -1):
             res = subprocess.run(
                 ["git", "apply", "--reverse", str(ordered[i])],
-                cwd=scratch, capture_output=True, text=True,
+                cwd=scratch, capture_output=True, text=True, encoding="utf-8",
             )
             if res.returncode == 0:
                 verdicts[ordered[i]] = APPLIED
@@ -194,7 +197,7 @@ def classify_module(patch_files: list[Path], module_dir: Path) -> dict[Path, str
             # against a workspace whose other two zephyr patches were applied.
             forward = subprocess.run(
                 ["git", "apply", "--check", str(ordered[i])],
-                cwd=scratch, capture_output=True, text=True,
+                cwd=scratch, capture_output=True, text=True, encoding="utf-8",
             )
             verdicts[ordered[i]] = ABSENT if forward.returncode == 0 else DRIFTED
         return verdicts
@@ -329,7 +332,8 @@ def main(argv: list[str] | None = None) -> int:
     if topdir is None:
         try:
             probe = subprocess.run(
-                [args.west, "topdir"], cwd=args.repo, capture_output=True, text=True
+                [args.west, "topdir"], cwd=args.repo, capture_output=True, text=True, encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"}
             )
         except OSError as err:
             print(f"verify-west-patches: cannot execute {args.west!r}: {err}",

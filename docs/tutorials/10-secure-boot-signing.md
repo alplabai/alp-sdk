@@ -135,7 +135,7 @@ the disjoint-slot0 `memory_map:` (#1069, #1445) has no slot1/scratch
 partition, so the default resolves to single-app boot
 (`SB_CONFIG_MCUBOOT_MODE_SINGLE_APP=y`) -- setting `swap_algorithm:
 scratch` (or `move`/`overwrite`) explicitly here is a build-time error
-on all six (E1M-AEN301/401/501/601/701/801).  See
+on all seven (E1M-AEN301/401/501/601/701/801/803).  See
 [`docs/secure-boot.md`](../secure-boot.md) "Declarative wiring" for
 the full per-target rule.
 

@@ -1,0 +1,598 @@
+# SPDX-License-Identifier: Apache-2.0
+"""alp-sdk#2032 -- LG_PLACE resolves bench addresses from labgrid, never a
+raw device-path table.
+
+The maintainer's hard rule: every bench connection goes through labgrid,
+addressed by PLACE NAME. The 2026-09-07 incident happened because SE_UART
+and the app console were taken from a stale table instead of from a live
+`labgrid-client -p <place> show` -- the stale table had them SWAPPED
+(SES/SETOOLS pointed at the app console's device).
+
+These tests feed `bench_labgrid_resolve` (bench-env.sh) SANITISED captures
+of real `labgrid-client -p <place> show` output -- not hand-typed text.
+That matters: PR #2026's review found synthesised fixtures passing while
+the real SETOOLS-output format failed the anchors it wrote against, because
+real captures carry details (leading whitespace inside a pformat'd nested
+dict) a hand-typed fixture doesn't reproduce.
+
+SANITISED, not byte-for-byte: the place names below (`test-place-01..03`)
+replace the real board-farm place names, the coordinator address
+(`203.0.113.1:20408`, RFC 5737 TEST-NET-3) replaces the real one, and the
+`comment:` line real `show` output prints for each place (an operational
+narrative -- bench state, incident history, an internal-repo issue
+reference) is stripped entirely -- bench-env.sh's resolver never reads it,
+so keeping it would only bloat this file with unrelated free text. The
+device paths, USB bus/port and ports below are verbatim from the real
+capture, taken 2026-09-07.
+
+There is no real interactive-pty capture in this file: REAL_EVK01_ACQUIRED_PTY
+is REAL_EVK01_ACQUIRED with every "\\n" mechanically replaced by "\\r\\n" in
+Python, not a `script -qc "labgrid-client ... show" /dev/null` transcript.
+It still exercises the real hazard (a real pty run emits CRLF line endings;
+labgrid-client itself prints no ANSI/SGR codes) -- it is a synthesised stand-in
+for that shape, not a second real capture.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+from pathlib import Path
+
+import pytest
+
+REPO = Path(__file__).resolve().parents[2]
+BENCH = REPO / "scripts" / "bench" / "aen"
+ENV = BENCH / "bench-env.sh"
+
+
+def _bash_can_run_a_script() -> bool:
+    """See test_bench_jlink_connect_guard.py's identical helper: presence of
+    `bash` on PATH is not enough (Windows CI can resolve the WSL launcher
+    with no distribution installed); probe by actually running something."""
+    try:
+        probe = subprocess.run(
+            ["bash", "-c", "printf ok"],
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return probe.returncode == 0 and probe.stdout.strip() == "ok"
+
+
+_NEEDS_BASH = pytest.mark.skipif(
+    not _bash_can_run_a_script(),
+    reason="no working `bash` on this host; bench-env.sh is POSIX shell",
+)
+
+
+def _sanitized_env() -> dict[str, str]:
+    """See test_bench_jlink_connect_guard.py's identical helper -- a unit
+    test must never be able to reach real bench infrastructure. LG_PLACE and
+    LG_COORDINATOR are NOT stripped here: every script this file builds sets
+    both explicitly (or explicitly leaves LG_PLACE unset), so an inherited
+    value is always overridden -- this covers LG_SWD_PATH/
+    ALP_JLINK_SEARCH_ROOT, which are not."""
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    for var in ("LG_SWD_PATH", "ALP_JLINK_SEARCH_ROOT"):
+        env.pop(var, None)
+    return env
+
+
+def _who_i_am() -> str:
+    """Exactly what bench_labgrid_resolve()'s `me="$(hostname)/$(whoami)"`
+    (alp-sdk#2064) computes -- shelled out the same way, not
+    socket.gethostname()/getpass.getuser(), so this can never drift from
+    what the real bash builtins print on a host where they disagree with
+    Python's own idea of hostname/user."""
+    host = subprocess.run(["hostname"], capture_output=True, text=True, encoding="utf-8", timeout=30).stdout.strip()
+    user = subprocess.run(["whoami"], capture_output=True, text=True, encoding="utf-8", timeout=30).stdout.strip()
+    return f"{host}/{user}"
+
+
+# --- real captures, `comment:` line stripped (see module docstring) --------
+
+# test-place-01, ACQUIRED by test-farm/operator. Real values, measured
+# 2026-09-07: seuart /dev/ttyUSB0 @ ser2net 203.0.113.1:45235, console
+# /dev/ttyUSB1 @ ser2net 203.0.113.1:42637, swd USB path 3-4.1. This is the
+# exact table the incident's stale skill data got wrong in two ways: it
+# named /dev/ttyUSB2 for the console (really test-place-01's seuart... no, really
+# a DIFFERENT board's device) and /dev/ttyUSB1 for seuart (really the
+# console) -- pointing SETOOLS at ttyUSB1 here would have hit the app
+# console, not the SE-UART.
+REAL_EVK01_ACQUIRED = """\
+Place 'test-place-01':
+  matches:
+    test-farm/test-place-01/NetworkSerialPort/seuart
+    test-farm/test-place-01/NetworkSerialPort/console
+    test-farm/test-place-01/NetworkUSBDebugger/swd
+  acquired: test-farm/operator
+  acquired resources:
+    test-farm/test-place-01/NetworkSerialPort/console
+    test-farm/test-place-01/NetworkSerialPort/seuart
+    test-farm/test-place-01/NetworkUSBDebugger/swd
+  created: 2026-07-03 14:22:14.112250
+  changed: 2026-09-07 15:08:12.818328
+Acquired resource 'console' (test-farm/test-place-01/NetworkSerialPort/console):
+  {'acquired': 'test-place-01',
+   'avail': True,
+   'cls': 'NetworkSerialPort',
+   'params': {'extra': {'path': '/dev/ttyUSB1',
+                        'proxy': 'test-farm',
+                        'proxy_required': False},
+              'host': '203.0.113.1',
+              'port': 42637,
+              'speed': 115200}}
+Acquired resource 'seuart' (test-farm/test-place-01/NetworkSerialPort/seuart):
+  {'acquired': 'test-place-01',
+   'avail': True,
+   'cls': 'NetworkSerialPort',
+   'params': {'extra': {'path': '/dev/ttyUSB0',
+                        'proxy': 'test-farm',
+                        'proxy_required': False},
+              'host': '203.0.113.1',
+              'port': 45235,
+              'speed': 57600}}
+Acquired resource 'swd' (test-farm/test-place-01/NetworkUSBDebugger/swd):
+  {'acquired': 'test-place-01',
+   'avail': True,
+   'cls': 'NetworkUSBDebugger',
+   'params': {'busnum': 3,
+              'devnum': 17,
+              'extra': {'proxy': 'test-farm', 'proxy_required': False},
+              'host': '203.0.113.1',
+              'model_id': 257,
+              'path': '3-4.1',
+              'vendor_id': 4966}}
+"""
+
+# NOT a real pty capture -- see the module docstring. A real interactive run
+# (`script -qc "labgrid-client ... show" /dev/null`) DOES emit CRLF line
+# endings (measured 2026-09-07; labgrid-client itself prints no ANSI/SGR
+# codes), which is the actual "real output doesn't match a hand-typed
+# fixture" hazard for THIS command (distinct from, but same class as, the
+# SETOOLS ANSI-colour traps `test_bench_jlink_connect_guard.py` pins for
+# `maintenance` output). This is a synthesised stand-in for that CRLF shape,
+# built from REAL_EVK01_ACQUIRED by re-joining on "\\r\\n" in Python.
+REAL_EVK01_ACQUIRED_PTY = REAL_EVK01_ACQUIRED.replace("\n", "\r\n")
+
+# alp-sdk#2064: bench_labgrid_resolve() now checks WHO holds the place, not
+# just whether anyone does -- "test-farm/operator" above is a real capture of
+# a DIFFERENT operator's reservation, so tests that need a SUCCESSFUL resolve
+# use this variant instead, with the place-level `acquired:` line replaced by
+# THIS test process's own "$(hostname)/$(whoami)" (computed the same way
+# bench_labgrid_resolve() itself does). REAL_EVK01_ACQUIRED is kept
+# unmodified and reused for the "held by someone else -> refuse" test below.
+REAL_EVK01_ACQUIRED_BY_US = REAL_EVK01_ACQUIRED.replace(
+    "acquired: test-farm/operator", f"acquired: {_who_i_am()}"
+)
+REAL_EVK01_ACQUIRED_BY_US_PTY = REAL_EVK01_ACQUIRED_BY_US.replace("\n", "\r\n")
+
+# test-place-02: NOT acquired (`acquired: None`), and -- for real, not as a
+# test contrivance -- this place has no `seuart` resource registered in
+# labgrid at all yet (only `console` and `swd` appear in `matches:`).
+REAL_EVK02_UNACQUIRED = """\
+Place 'test-place-02':
+  matches:
+    test-farm/test-place-02/NetworkSerialPort/console
+    test-farm/test-place-02/NetworkUSBDebugger/swd
+  acquired: None
+  acquired resources:
+  created: 2026-09-05 11:17:45.939295
+  changed: 2026-09-07 15:07:54.232958
+Matching resource 'console' (test-farm/test-place-02/NetworkSerialPort/console):
+  {'acquired': None,
+   'avail': True,
+   'cls': 'NetworkSerialPort',
+   'params': {'extra': {'path': '/dev/ttyUSB2',
+                        'proxy': 'test-farm',
+                        'proxy_required': False},
+              'host': '203.0.113.1',
+              'port': None,
+              'speed': 115200}}
+Matching resource 'swd' (test-farm/test-place-02/NetworkUSBDebugger/swd):
+  {'acquired': None,
+   'avail': True,
+   'cls': 'NetworkUSBDebugger',
+   'params': {'busnum': 3,
+              'devnum': 4,
+              'extra': {'proxy': 'test-farm', 'proxy_required': False},
+              'host': '203.0.113.1',
+              'model_id': 257,
+              'path': '3-4.2',
+              'vendor_id': 4966}}
+"""
+
+# test-place-03: NOT acquired, swd USB path "3-4.4.3" -- a DIFFERENT board
+# from test-place-01's "3-4.1". This is the exact wrong-board hazard named in
+# alp-sdk#2032: a stale table pointed a J-Link probe selector at THIS path
+# while believing it was talking to test-place-01.
+REAL_EVK03_UNACQUIRED = """\
+Place 'test-place-03':
+  matches:
+    test-farm/test-place-03/NetworkSerialPort/console
+    test-farm/test-place-03/NetworkUSBDebugger/swd
+  acquired: None
+  acquired resources:
+  created: 2026-09-05 12:42:58.968326
+  changed: 2026-09-07 19:03:05.429360
+Matching resource 'console' (test-farm/test-place-03/NetworkSerialPort/console):
+  {'acquired': None,
+   'avail': True,
+   'cls': 'NetworkSerialPort',
+   'params': {'extra': {'path': '/dev/ttyUSB3',
+                        'proxy': 'test-farm',
+                        'proxy_required': False},
+              'host': '203.0.113.1',
+              'port': None,
+              'speed': 115200}}
+Matching resource 'swd' (test-farm/test-place-03/NetworkUSBDebugger/swd):
+  {'acquired': None,
+   'avail': True,
+   'cls': 'NetworkUSBDebugger',
+   'params': {'busnum': 3,
+              'devnum': 13,
+              'extra': {'proxy': 'test-farm', 'proxy_required': False},
+              'host': '203.0.113.1',
+              'model_id': 257,
+              'path': '3-4.4.3',
+              'vendor_id': 4966}}
+"""
+
+
+def _stub_labgrid_client(bin_dir: Path, place_to_output: dict[str, str]) -> None:
+    """Install a fake `labgrid-client` on PATH that answers `-p <place> show`
+    with canned REAL captures, so the resolver is exercised end-to-end
+    without a live coordinator or a real reservation."""
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    stub = bin_dir / "labgrid-client"
+    body = ['#!/usr/bin/env bash', 'place=""', 'while [ $# -gt 0 ]; do',
+            '\tcase "$1" in', '\t-p) place="$2"; shift 2 ;;',
+            '\t*) shift ;;', '\tesac', 'done']
+    for i, (place, text) in enumerate(place_to_output.items()):
+        cond = "if" if i == 0 else "elif"
+        body.append(f'{cond} [ "$place" = "{place}" ]; then')
+        body.append(f'\tprintf %s "$(cat "{bin_dir / (place + ".out")}")"')
+        (bin_dir / f"{place}.out").write_text(text, encoding="utf-8")
+    body.append("else")
+    body.append("\texit 1")
+    body.append("fi")
+    stub.write_text("\n".join(body) + "\n", encoding="utf-8")
+    stub.chmod(0o755)
+
+
+def _resolve(tmp_path: Path, place: str, captures: dict[str, str], extra_env: str = "") -> subprocess.CompletedProcess[str]:
+    workdir = tmp_path
+    (workdir / "bench-env.sh").write_bytes(ENV.read_bytes())
+    bin_dir = workdir / "fakebin"
+    _stub_labgrid_client(bin_dir, captures)
+
+    script = workdir / "run.sh"
+    script.write_bytes(
+        (
+            f'export PATH="{bin_dir}:$PATH"\n'
+            # LG_COORDINATOR has no in-script default (alp-sdk#2032) -- the
+            # stub labgrid-client below ignores its value entirely, so any
+            # non-empty placeholder satisfies bench_labgrid_resolve()'s
+            # unset check. Set explicitly rather than relying on whatever
+            # the CALLING environment happens to export: a CI runner has no
+            # LG_COORDINATOR at all, so every "resolve succeeds" test here
+            # failed on GitHub Actions while passing locally, where the
+            # bench operator's own shell profile happens to export one.
+            'export LG_COORDINATOR="fake-coordinator:20408"\n'
+            f'export LG_PLACE="{place}"\n'
+            f"{extra_env}"
+            # Every real caller (ram-run.sh, flash-run.sh, ...) runs `set -e`
+            # BEFORE sourcing bench-env.sh, which is what turns the
+            # resolver's `return 1` into the CALLER actually stopping. This
+            # tmp_path is not a git checkout though, and bench-env.sh's own
+            # (pre-existing, unrelated) `git rev-parse --show-toplevel` probe
+            # for BENCH_ROOT would itself trip `set -e` here for a reason
+            # that has nothing to do with the resolver -- so check the
+            # source command's OWN exit status explicitly instead, which
+            # pins the same real contract (a failed resolve must abort the
+            # sourcing caller) without that confound.
+            "source ./bench-env.sh; src_rc=$?\n"
+            'if [ "$src_rc" -ne 0 ]; then echo "SOURCE_FAILED=$src_rc" >&2; exit "$src_rc"; fi\n'
+            'echo "SE_UART=$SE_UART"\n'
+            'echo "LG_CONSOLE_DEV=$LG_CONSOLE_DEV"\n'
+            'echo "LG_CONSOLE_HOST=$LG_CONSOLE_HOST"\n'
+            'echo "LG_CONSOLE_PORT=$LG_CONSOLE_PORT"\n'
+            'echo "LG_SWD_PATH=$LG_SWD_PATH"\n'
+        ).encode("utf-8")
+    )
+    return subprocess.run(
+        ["bash", "run.sh"], cwd=workdir, env=_sanitized_env(), capture_output=True,
+        text=True, encoding="utf-8", errors="replace", timeout=60,
+    )
+
+
+@_NEEDS_BASH
+def test_resolves_all_four_values_from_a_real_acquired_capture(tmp_path: Path) -> None:
+    res = _resolve(tmp_path, "test-place-01", {"test-place-01": REAL_EVK01_ACQUIRED_BY_US})
+    assert res.returncode == 0, res.stderr
+    assert "SE_UART=/dev/ttyUSB0" in res.stdout
+    assert "LG_CONSOLE_DEV=/dev/ttyUSB1" in res.stdout
+    assert "LG_CONSOLE_HOST=203.0.113.1" in res.stdout
+    assert "LG_CONSOLE_PORT=42637" in res.stdout
+    assert "LG_SWD_PATH=3-4.1" in res.stdout
+
+
+@_NEEDS_BASH
+def test_resolves_correctly_under_real_pty_crlf_output(tmp_path: Path) -> None:
+    """CRLF line endings from a real interactive run must not break the
+    parser -- see module docstring."""
+    res = _resolve(tmp_path, "test-place-01", {"test-place-01": REAL_EVK01_ACQUIRED_BY_US_PTY})
+    assert res.returncode == 0, res.stderr
+    assert "SE_UART=/dev/ttyUSB0" in res.stdout
+    assert "LG_SWD_PATH=3-4.1" in res.stdout
+
+
+@_NEEDS_BASH
+def test_lapsed_reservation_fails_loudly_not_silently(tmp_path: Path) -> None:
+    """test-place-02/-03 are real, currently-unacquired places. A lapsed (or never
+    taken) reservation must abort, never resolve stale/guessed values."""
+    res = _resolve(tmp_path, "test-place-03", {"test-place-03": REAL_EVK03_UNACQUIRED})
+    assert res.returncode == 1
+    assert "NOT acquired" in res.stderr
+    assert "SE_UART=" not in res.stdout or "SE_UART=\n" not in res.stdout
+
+
+@_NEEDS_BASH
+def test_reservation_held_by_someone_else_refuses(tmp_path: Path) -> None:
+    """alp-sdk#2064: a non-empty, non-'None' `acquired:` is not enough -- it
+    must be held by US. REAL_EVK01_ACQUIRED's 'test-farm/operator' is a real
+    capture of a DIFFERENT operator's reservation; resolving it must refuse
+    exactly like a lapsed reservation, never drive that board anyway."""
+    res = _resolve(tmp_path, "test-place-01", {"test-place-01": REAL_EVK01_ACQUIRED})
+    assert res.returncode == 1
+    assert "test-farm/operator" in res.stderr
+    assert "not you" in res.stderr
+    assert "SE_UART=/dev/ttyUSB0" not in res.stdout
+
+
+@_NEEDS_BASH
+def test_place_with_swd_but_no_seuart_resolves_successfully(tmp_path: Path) -> None:
+    """alp-sdk#2064 bench verification on two AEN EVK bench places: real state, not
+    synthesised -- test-place-02 has no `seuart` resource registered in
+    labgrid at all (only `console` and `swd` appear in `matches:`), because
+    the physical board has none. Bench verification found the ORIGINAL
+    #2064 fix made `seuart` mandatory on every resolution, including this
+    one -- so a J-Link-only flow (ram-run.sh, reread.sh, flash-jlink*.sh,
+    ...) could never resolve LG_SWD_PATH on exactly the two AEN places
+    where the wrong-board isolation matters most (all three share DPIDR
+    0x4C013477 and OEM serial 000603000869). `seuart` is now resolved when
+    present but never required for the resolve itself to succeed: this must
+    return 0, with LG_SWD_PATH resolved and SE_UART left empty (not
+    guessed) -- the split half covered here. The OTHER half -- a flow that
+    DOES need SE_UART must still refuse loudly on an empty one, never fall
+    back to a raw/guessed path -- is unaffected by this change and already
+    covered by test_atoc_guard_aborts_when_se_uart_is_unset in
+    test_bench_jlink_connect_guard.py (bench_atoc_replace_guard's own
+    `[ -z "${SE_UART:-}" ]` check) and by flash-run.sh's/
+    flash-run-dualcore.sh's own identical guard ahead of `app-write-mram`."""
+    acquired_no_seuart = REAL_EVK02_UNACQUIRED.replace(
+        "  acquired: None", f"  acquired: {_who_i_am()}"
+    ).replace("Matching resource", "Acquired resource")
+    res = _resolve(tmp_path, "test-place-02", {"test-place-02": acquired_no_seuart})
+    assert res.returncode == 0, res.stderr
+    assert "no 'seuart' resource path" not in res.stderr
+    assert "LG_SWD_PATH=3-4.2" in res.stdout
+    assert "SE_UART=" in res.stdout and "SE_UART=/dev" not in res.stdout, (
+        "SE_UART must resolve EMPTY, not guessed, when the place has no seuart resource"
+    )
+
+
+@_NEEDS_BASH
+def test_place_with_seuart_but_no_swd_still_refuses(tmp_path: Path) -> None:
+    """The mirror image of test_place_with_swd_but_no_seuart_resolves_successfully
+    above: 'seuart' is optional, but 'swd' must never become optional the
+    same way. No real AEN place actually lacks 'swd' (that is exactly the
+    wrong-board hazard #2032/#2064 exist to prevent), so unlike
+    REAL_EVK02_UNACQUIRED this fixture is not a real capture -- it is
+    REAL_EVK01_ACQUIRED_BY_US with every 'swd' trace mechanically stripped:
+    the 'NetworkUSBDebugger/swd' lines in `matches:`/`acquired resources:`,
+    and the entire "Acquired resource 'swd' (...): {...}" block at the end
+    (removed by truncating before its header, since swd is the LAST resource
+    block in the real capture and the block's own body lines don't contain
+    the substring 'swd'). 'seuart' and 'console' are left resolvable, so a
+    place that HAS everything except 'swd' must still refuse -- with no
+    probe there must be no run. Confirmed red (this test fails) with the
+    'swd' check in bench-env.sh temporarily relaxed the same way 'seuart'
+    was relaxed, and green again with the check restored."""
+    acquired_no_swd = "".join(
+        line
+        for line in REAL_EVK01_ACQUIRED_BY_US.split("Acquired resource 'swd'")[0].splitlines(keepends=True)
+        if "NetworkUSBDebugger/swd" not in line
+    )
+    res = _resolve(tmp_path, "test-place-01", {"test-place-01": acquired_no_swd})
+    assert res.returncode == 1, res.stdout
+    assert "exports no 'swd' resource path" in res.stderr
+    assert "LG_SWD_PATH=" not in res.stdout
+
+
+@_NEEDS_BASH
+def test_swd_path_is_scoped_to_its_own_resource_block(tmp_path: Path) -> None:
+    """board-farm/bin/jlink-run.sh:34-50's own hazard: the top-level
+    `matches:` list repeats the same resource strings, so a naive whole-output
+    search can latch onto it. test-place-01's real capture exercises exactly this --
+    'NetworkUSBDebugger/swd' appears in `matches:` AND `acquired resources:`
+    before the real 'swd' resource block does -- and must still resolve the
+    swd block's own path (3-4.1), not something scraped from the list."""
+    res = _resolve(tmp_path, "test-place-01", {"test-place-01": REAL_EVK01_ACQUIRED_BY_US})
+    assert res.returncode == 0, res.stderr
+    assert "LG_SWD_PATH=3-4.1" in res.stdout
+
+
+@_NEEDS_BASH
+def test_seuart_and_console_paths_are_not_swapped(tmp_path: Path) -> None:
+    """The exact 2026-09-07 incident shape: two resources of the SAME class
+    (NetworkSerialPort) in one block each -- a resolver that grabbed the
+    FIRST 'path' key in the whole document regardless of resource name would
+    return the console's device (/dev/ttyUSB1) for seuart, or vice versa."""
+    res = _resolve(tmp_path, "test-place-01", {"test-place-01": REAL_EVK01_ACQUIRED_BY_US})
+    assert res.returncode == 0, res.stderr
+    assert "SE_UART=/dev/ttyUSB0" in res.stdout, "seuart resolved to the wrong device"
+    assert "LG_CONSOLE_DEV=/dev/ttyUSB1" in res.stdout, "console resolved to the wrong device"
+
+
+@_NEEDS_BASH
+def test_no_lg_place_and_no_se_uart_stays_empty_and_quiet(tmp_path: Path) -> None:
+    """Backward-compatible default: neither set -> SE_UART stays empty, no
+    warning noise (this is the ordinary "not doing bench work right now"
+    shape, not the off-labgrid escape hatch)."""
+    (tmp_path / "bench-env.sh").write_bytes(ENV.read_bytes())
+    # alp-sdk#2064 review, Major 1: this test's whole premise is "LG_PLACE is
+    # not set" -- an INHERITED one (an operator's shell profile) would make
+    # bench-env.sh resolve against the REAL labgrid coordinator the moment
+    # it is sourced, and the test would then be asserting nothing about the
+    # actual "neither set" case. `unset` in-script, not just `env=` below
+    # (see test_bench_jlink_connect_guard.py's _sanitized_env() for why).
+    res = subprocess.run(
+        ["bash", "-c", "unset LG_PLACE LG_COORDINATOR; source ./bench-env.sh; echo \"SE_UART=[$SE_UART]\""],
+        cwd=tmp_path, env=_sanitized_env(), capture_output=True, text=True, encoding="utf-8", timeout=60,
+    )
+    assert res.returncode == 0, res.stderr
+    assert "SE_UART=[]" in res.stdout
+    assert "WARNING" not in res.stderr
+
+
+@_NEEDS_BASH
+def test_raw_se_uart_without_lg_place_is_the_warned_escape_hatch(tmp_path: Path) -> None:
+    """A raw SE_UART with no LG_PLACE must still WORK (erase-storage.sh
+    documents a genuinely off-labgrid case) but must warn about the exact
+    hazard that caused the incident: stale/unstable ttyUSBn paths."""
+    (tmp_path / "bench-env.sh").write_bytes(ENV.read_bytes())
+    # Same "LG_PLACE must actually be absent" reasoning as the test above.
+    res = subprocess.run(
+        ["bash", "-c",
+         'unset LG_PLACE LG_COORDINATOR; export SE_UART=/dev/ttyUSB9; '
+         'source ./bench-env.sh; echo "SE_UART=[$SE_UART]"'],
+        cwd=tmp_path, env=_sanitized_env(), capture_output=True, text=True, encoding="utf-8", timeout=60,
+    )
+    assert res.returncode == 0, res.stderr
+    assert "SE_UART=[/dev/ttyUSB9]" in res.stdout
+    assert "WARNING" in res.stderr
+    assert "enumeration-ordered" in res.stderr
+
+
+@_NEEDS_BASH
+def test_lg_place_wins_over_a_simultaneously_exported_raw_se_uart(tmp_path: Path) -> None:
+    res = _resolve(
+        tmp_path, "test-place-01", {"test-place-01": REAL_EVK01_ACQUIRED_BY_US},
+        extra_env='export SE_UART=/dev/ttyUSB9\n',
+    )
+    assert res.returncode == 0, res.stderr
+    assert "SE_UART=/dev/ttyUSB0" in res.stdout, "LG_PLACE must win over the raw SE_UART"
+    assert "LG_PLACE=" in res.stderr and "ignoring the raw SE_UART" in res.stderr
+
+
+@_NEEDS_BASH
+def test_lg_place_set_with_no_coordinator_fails_loudly_not_a_guessed_default(tmp_path: Path) -> None:
+    """No hardcoded LG_COORDINATOR default (alp-sdk#2032 review): a bench
+    coordinator address is bench-specific infra, not a portable SDK value,
+    so baking any one real address into a PUBLIC script would always
+    resolve against that one bench regardless of who runs it. LG_PLACE set
+    with LG_COORDINATOR unset must abort with an actionable message, never
+    silently fall through to labgrid-client's own 127.0.0.1:20408 default."""
+    res = _resolve(
+        tmp_path, "test-place-01", {"test-place-01": REAL_EVK01_ACQUIRED},
+        extra_env="unset LG_COORDINATOR\n",
+    )
+    assert res.returncode == 1
+    assert "LG_COORDINATOR is unset" in res.stderr
+    assert "export LG_COORDINATOR=<host>:<port>" in res.stderr
+    assert "SE_UART=/dev/ttyUSB0" not in res.stdout
+
+
+@_NEEDS_BASH
+def test_unreachable_coordinator_or_unknown_place_fails_loudly(tmp_path: Path) -> None:
+    """`labgrid-client show` returning nothing (coordinator unreachable, or
+    the place does not exist) must abort, not resolve an empty/guessed set
+    of values."""
+    res = _resolve(tmp_path, "test-place-99", {"test-place-01": REAL_EVK01_ACQUIRED})
+    assert res.returncode == 1
+    assert "returned nothing" in res.stderr
+
+
+@_NEEDS_BASH
+def test_reread_sh_reaches_bench_jlink_run_on_a_swd_only_place(tmp_path: Path) -> None:
+    """End-to-end confirmation, not just bench_labgrid_resolve() in
+    isolation (alp-sdk#2064 bench verification): a REAL helper --
+    `reread.sh`, a pure J-Link flow with no SE_UART dependency at all --
+    must get PAST bench-env.sh's sourcing on a swd-only-shaped place
+    (swd + console, no seuart) and reach `bench_jlink_run()`, not die at
+    the old "exports no 'seuart' resource path" refusal before ever
+    touching the probe-isolation code.
+
+    Runs entirely against `BENCH_JLINK_RUN_DRY_RUN=1` and a fake sysfs/
+    dev-node tree with no sibling probes -- never `unshare`, never a real
+    probe, never real hardware. The DRY_RUN placeholder output is not a
+    real JLinkExe transcript, so `bench_jlink_assert_connected` correctly
+    refuses it (exit 7) -- that is the expected, ACCEPTABLE outcome here:
+    the point is that reread.sh got there at all, not that it fully
+    succeeded (nothing here has a real probe to succeed against)."""
+    workdir = tmp_path
+    reread = BENCH / "reread.sh"
+    (workdir / "bench-env.sh").write_bytes(ENV.read_bytes())
+
+    bin_dir = workdir / "fakebin"
+    acquired_no_seuart = REAL_EVK02_UNACQUIRED.replace(
+        "  acquired: None", f"  acquired: {_who_i_am()}"
+    ).replace("Matching resource", "Acquired resource")
+    _stub_labgrid_client(bin_dir, {"test-place-02": acquired_no_seuart})
+
+    toolsdir = workdir / "tools"
+    toolsdir.mkdir()
+    fake_nm = toolsdir / "arm-zephyr-eabi-nm"
+    fake_nm.write_text("#!/usr/bin/env bash\necho '20000d00 D ram_console_buf'\n", encoding="utf-8")
+    fake_nm.chmod(0o755)
+
+    # A stub, not a system path (macOS has no /bin/true) -- see
+    # test_bench_jlink_run.py's identical reasoning.
+    stub_jlink = workdir / "fake-jlinkexe"
+    stub_jlink.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    stub_jlink.chmod(0o755)
+
+    bd = workdir / "build"
+    (bd / "zephyr").mkdir(parents=True)
+    (bd / "zephyr" / "zephyr.elf").write_bytes(b"\x7fELF-fake")
+
+    # A fake probe tree at the REAL swd path (3-4.2) from
+    # REAL_EVK02_UNACQUIRED above, with no siblings to mask.
+    sysfs = workdir / "sysfs"
+    dev = workdir / "dev"
+    probe = sysfs / "3-4.2"
+    probe.mkdir(parents=True)
+    (probe / "idVendor").write_text("1366\n", encoding="utf-8")
+    (probe / "busnum").write_text("3\n", encoding="utf-8")
+    (probe / "devnum").write_text("9\n", encoding="utf-8")
+    (probe / "serial").write_text("000603000869\n", encoding="utf-8")
+    (dev / "003").mkdir(parents=True)
+    (dev / "003" / "009").write_text("", encoding="utf-8")
+
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    env["PATH"] = f"{bin_dir}{os.pathsep}{toolsdir}{os.pathsep}{env.get('PATH', '')}"
+    env["LG_COORDINATOR"] = "fake-coordinator:20408"
+    env["LG_PLACE"] = "test-place-02"
+    env["JLINK_EXE"] = str(stub_jlink)
+    env["BENCH_JLINK_SYSFS_ROOT"] = str(sysfs)
+    env["BENCH_JLINK_DEV_ROOT"] = str(dev)
+    env["BENCH_JLINK_RUN_DRY_RUN"] = "1"
+    env["ZEPHYR_SDK_INSTALL_DIR"] = ""
+    for var in ("LG_SWD_PATH", "ALP_JLINK_SEARCH_ROOT"):
+        env.pop(var, None)
+
+    res = subprocess.run(
+        ["bash", str(reread), str(bd)], cwd=workdir, env=env,
+        capture_output=True, text=True, encoding="utf-8", timeout=60,
+    )
+    # The old bug's exact symptom must be gone.
+    assert "exports no 'seuart' resource path" not in res.stderr, res.stderr
+    assert "labgrid resolution FAILED" not in res.stderr, res.stderr
+    # It got all the way through sourcing, bench_tool_prefix, the BUF_SYM
+    # extraction, and into bench_jlink_run() -- proven by reaching the
+    # J-Link connect-transcript gate, the next thing after bench_jlink_run()
+    # returns, rather than dying anywhere before it.
+    assert res.returncode == 7, f"expected exit 7 (no real probe here):\n{res.stdout}\n{res.stderr}"
+    assert "no 'J-Link>' command" in res.stderr, res.stderr

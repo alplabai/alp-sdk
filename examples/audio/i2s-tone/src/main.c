@@ -88,10 +88,13 @@ int main(void)
 		return 0;
 	}
 
-	/* start() begins the bit-clock + frame-clock generation.  TX
-     * starts fronting "underrun" silence until the first write()
-     * arrives -- on real hardware that's sub-millisecond, but be
-     * mindful when the codec is sensitive to DC. */
+	/* start() begins the bit-clock + frame-clock generation -- called
+     * here before the first write(), the natural order.  This does NOT
+     * front "underrun" silence on every backend: the Zephyr DesignWare
+     * I2S driver refuses to trigger the real hardware start with
+     * nothing queued yet (issue #2132), so alp_i2s_start() defers the
+     * actual trigger until the first write() below queues a block --
+     * this call itself still returns ALP_OK immediately either way. */
 	alp_status_t s = alp_i2s_start(i2s);
 	printf("[i2s] start -> %d\n", (int)s);
 

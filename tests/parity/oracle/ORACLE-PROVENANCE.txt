@@ -27,6 +27,26 @@ consumer a command frozen at 97ad481b that was never buildable. These two
 fields are the only ones touched by this correction; every other value in
 this fixture is untouched, still frozen at 97ad481b.
 
+Hand-reviewed field correction (alp-sdk#1982, "AEN A32 Yocto path
+honesty"): `multicore_rpmsg-aen.build-plan.json` and `audio_i2s-tone.
+build-plan.json`, both slices[0] (coreId `a32_cluster`), `command` was
+updated from `{"tool": "bitbake", "args": ["alp-image-edge"], "cwd":
+"build/a32_cluster-yocto"}` to `null`, and `warnings` was updated from
+`[]` to carry one `yocto-machine-unbuildable` warning for that slice.
+`e1m-aen801-a32`'s active `require conf/machine/devkit-e8.conf` names a
+file absent from every branch of the public meta-alif-ensemble upstream
+(#1968), and that upstream layer is Yocto-series-incompatible with this
+repo's Scarthgap baseline regardless (#1971) -- the planner now refuses
+to emit a `bitbake` command guaranteed to fail, blocking the command the
+same way `no-command`/`board-tree-missing` (alp-sdk#999, above) already
+do, rather than continuing to hand a consumer a command frozen at
+97ad481b that was never buildable. This is the same failure mode as
+#999 (a doomed command, re-frozen at the source), not a new comparator
+allowance -- see `alp_orchestrate.orchestrator.YOCTO_MACHINE_UNBUILDABLE`
+for the full reasoning. These two fields are the only ones touched by
+this correction in either fixture; every other value is untouched,
+still frozen at 97ad481b.
+
 Corpus removal, not a value correction (alp-sdk#1025, "hw_rev status gate"):
 `multicore_rpmsg-imx93.build-plan.json` is DELETED, not edited. `seam1_
 field_diff.py` auto-discovers its board corpus from every `*.build-plan.json`

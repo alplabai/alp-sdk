@@ -171,7 +171,7 @@ builds are not supported on Windows by upstream Zephyr.
 
 7. **Run a cross-compiled build** to confirm everything's wired:
    ```pwsh
-   west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples\peripheral-io\drone-autopilot
+   west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples\peripheral-io\drone-autopilot
    ```
 
 `native_sim` builds on Windows will fail at the DTS preprocess
@@ -190,7 +190,11 @@ breakers.  Before pushing:
 python -c "import yaml,glob; [yaml.safe_load(open(f)) for f in glob.glob('examples/**/testcase.yaml', recursive=True)]"
 python -c "import yaml,glob; [yaml.safe_load(open(f)) for f in glob.glob('metadata/**/*.yaml', recursive=True)]"
 
-# Loader smoke
+# Loader smoke (serial). CI runs it faster in two phases: a parallel sweep,
+# then the modules that write into the checkout on their own. Never run bare
+# `-n` over tests/scripts (see tests/scripts/conftest.py _REPO_WRITER_MODULES):
+#   pytest tests/scripts/ -q -n auto -m "not repo_writes"
+#   pytest tests/scripts/ -q -m repo_writes
 pytest tests/scripts/ -q
 
 # Doc drift: dead SDK-symbol refs in docs + docs-index integrity

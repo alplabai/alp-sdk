@@ -33,8 +33,11 @@ cores:
 # (mcuboot/he_slot0/hp_slot0/reserved/storage) are MRAM, not RAM, and are
 # marked `carveout: false` so the allocator can't silently place this
 # raw_shmem ring inside flash-class memory; `mram_main` (the only other
-# region accessible from both m55_hp and m55_he) deliberately keeps
-# `base: TBD`. The carve-out being blocked does not affect this example:
+# region accessible from both m55_hp and m55_he) is ALSO flash-class --
+# its extent equals the SoC's declared App MRAM aperture exactly (the
+# whole-device alias; `base` resolved to 0x80000000 in #2053), not safe
+# as an IPC carve-out target either. The carve-out being blocked does
+# not affect this example:
 # the generated `<alp/system_ipc.h>` / DTS reservation it would drive
 # aren't consumed here (main.c / peer/main.c open "alp_shmem0" by its DT
 # alias, wired by the board overlay directly, not by the orchestrator's
