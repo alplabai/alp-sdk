@@ -1,0 +1,42 @@
+From: Alp Lab AB <contact@alplab.ai>
+Date: Wed, 4 Jun 2026 12:00:00 +0200
+Subject: [PATCH 1/2] brcmfmac: sdio: include <uapi/linux/sched/types.h> for 6.1
+
+Copyright (c) 2026 Alp Lab AB
+SPDX-License-Identifier: GPL-2.0
+
+Backport-shim for building the Murata cyw-fmac backports tree (base
+v6.1.97, branch imx-mickledore-jaculus) against a 6.1.141 (cip43) target
+kernel.
+
+brcmfmac/sdio.c uses `struct sched_param` (via sched_set_fifo / the
+watchdog thread priority setup) but no longer gets the definition pulled
+in transitively on 6.1.x: the header reshuffle that moved struct
+sched_param into <uapi/linux/sched/types.h> means the bundled sdio.c
+fails to compile with an incomplete-type error unless the header is
+included explicitly. Add the include next to the other <linux/sched/*>
+includes.
+
+Upstream-Status: Inappropriate [kernel-version backport shim; the Murata
+backports tree must include this itself for 6.1.x targets, not the
+distro layer]
+
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
+---
+ drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c
+index aa26e9a..7948634 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c
+@@ -13,6 +13,7 @@
+ #include <linux/netdevice.h>
+ #include <linux/interrupt.h>
+ #include <linux/sched/signal.h>
++#include <uapi/linux/sched/types.h>	/* struct sched_param (6.1: no longer pulled in transitively) */
+ #include <linux/mmc/sdio.h>
+ #include <linux/mmc/sdio_ids.h>
+ #include <linux/mmc/sdio_func.h>
+--
+2.43.0

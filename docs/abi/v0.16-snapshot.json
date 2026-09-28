@@ -4385,6 +4385,14 @@
           "hash": "07af629c5c4972e8",
           "value": "20u"
         },
+        "GD32G553_GPIO_LINE_BT_REG_ON": {
+          "hash": "a26a002ced48af2e",
+          "value": "18u"
+        },
+        "GD32G553_GPIO_LINE_WL_REG_ON": {
+          "hash": "02b7262b21b3b00f",
+          "value": "19u"
+        },
         "GD32G553_HOST_PROTOCOL_MAJOR": {
           "hash": "8cbf9804b6cc9204",
           "value": "0u"
@@ -4396,6 +4404,10 @@
         "GD32G553_OTA_MIN_PROTOCOL_MINOR": {
           "hash": "3081a6e71ff41243",
           "value": "6u"
+        },
+        "GD32G553_REG_ON_MIN_PROTOCOL_MINOR": {
+          "hash": "27d22c83de20f715",
+          "value": "11u"
         },
         "GD32G553_STATUS_CODE_MASK": {
           "hash": "5fac453e1d04fcbd",
