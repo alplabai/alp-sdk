@@ -76,8 +76,11 @@ KNOWN_UNBACKED: dict[tuple[str, str], dict[str, str]] = {
 def _v2n_function_aliases(silicon_peripheral: str) -> list[str]:
     """Aliases for V2N pad-first rows whose E1M function is not in the TSV.
 
-    The V2N Renesas map is pad-first, so direct RIIC/UART/RSPI/SSIU/CAN rows
-    land in `silicon_peripheral` with `e1m_function: TBD`.  These aliases keep
+    The V2N Renesas map is pad-first; rows the SoM netlist routes straight
+    to an E1M edge ball carry that ball's function (RSPI/SSIU/RIIC/UART,
+    #2331), but E1M-X names I2C pads dotted (`I2C0.SCL`) where the netlist
+    uses `I2C0_SCL`, and the CAN pads sit behind on-module transceivers,
+    so those rows still need an alias.  These aliases keep
     the checker from treating present direct buses as unbacked while still
     failing carrier sidebands that have no V2N route at all.
     """
@@ -94,25 +97,6 @@ def _v2n_function_aliases(silicon_peripheral: str) -> list[str]:
     m = re.fullmatch(r"UART(\d+)_TXD\d+", silicon_peripheral)
     if m:
         return [f"UART{m.group(1)}_TX"]
-
-    rspi0_to_spi1 = {
-        "RSPI0_MISOA": "SPI1_MISO",
-        "RSPI0_MOSIA": "SPI1_MOSI",
-        "RSPI0_RSPCKA": "SPI1_SCLK",
-        "RSPI0_SSLA0": "SPI1_CS0",
-        "RSPI0_SSLA1": "SPI1_CS1",
-    }
-    if silicon_peripheral in rspi0_to_spi1:
-        return [rspi0_to_spi1[silicon_peripheral]]
-
-    ssiu_to_i2s0 = {
-        "SSIU1_SSI1_SCK": "I2S0_SCLK",
-        "SSIU1_SSI1_WS": "I2S0_WS",
-        "SSIU1_SSI1_SDATA": "I2S0_SDO",
-        "SSIU2_SSI2_SDATA": "I2S0_SDI",
-    }
-    if silicon_peripheral in ssiu_to_i2s0:
-        return [ssiu_to_i2s0[silicon_peripheral]]
 
     canfd_to_e1m = {
         "CANFD2_CRX2": "CAN0_RX",
