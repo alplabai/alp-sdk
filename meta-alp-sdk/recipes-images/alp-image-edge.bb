@@ -102,10 +102,14 @@ IMAGE_INSTALL += "${@' alp-drpai-inference' if d.getVar('ALP_ENABLE_DRPAI') == '
 # it. The guard below still belongs in a recipe (for the ConfHandler
 # reason above), and this recipe is as good a place as any recipe that
 # is guaranteed to parse whenever the machine confs do; it protects the
-# alp-drpai-inference install above (and the DT node's own
-# ALP_DRPAI_LAYER gate) from a misconfigured ALP_ENABLE_DRPAI = "1"
-# with no rz-drpai layer present -- not a packaging install site of its
-# own.
+# alp-drpai-inference install above from a misconfigured
+# ALP_ENABLE_DRPAI = "1" with no rz-drpai layer present -- not a
+# packaging install site of its own.  It fires only when THIS recipe is
+# parsed for the build: the &drpai0 node comes from
+# linux-renesas_%.bbappend, which any image pulls in, and
+# alp-image-prod.bb carries no equivalent guard -- so a prod build with
+# ALP_ENABLE_DRPAI = "1" and no meta-rz-drpai gets the comment-only DT
+# stub with no bb.fatal.
 #
 # Gated on the 'rzv2n-family' MACHINEOVERRIDES override rather than on
 # ALP_ENABLE_DRPAI's mere existence, because ALP_ENABLE_DRPAI is set with

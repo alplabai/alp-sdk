@@ -205,10 +205,12 @@ gcc -I include -o v2n-drpai-inference \
 
 ## Hardware needed
 
-- E1M-V2N101/102/103 or E1M-V2M101/102/103 SoM (DRP-AI3 is on-die in every
-  RZ/V2N-family SKU, per
+- E1M-V2N101 SoM (the SKU `board.yaml` declares). DRP-AI3 is on-die in
+  every RZ/V2N-family SKU, per
   [`docs/bring-up-drpai-v2n.md`](../../../docs/bring-up-drpai-v2n.md)'s
-  intro -- DEEPX on V2M is an addition, not a replacement).
+  intro (DEEPX on V2M is an addition, not a replacement), so
+  E1M-V2N102/103 and E1M-V2M101/102/103 should run it too, but this
+  example is neither built nor checked against them.
 - E1M-X-EVK carrier.
 - An `alp-image-edge` bake with `ALP_ENABLE_DRPAI = "1"` AND
   `PACKAGECONFIG:append:pn-alp-sdk = " drpai"` both set in `local.conf`

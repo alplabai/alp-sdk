@@ -8,11 +8,12 @@ How to get the RZ/V2N's on-die DRP-AI3 NPU running a real model through
 > host (12118 tasks,
 > all succeeded, a 716 MB `.wic.gz`) — the first ever; previously nothing had
 > baked. That run had `drpai` OFF (the base image); see §4 for what is and
-> isn't proven about the `drpai`-enabled path. `PACKAGECONFIG[drpai]` now
-> resolves the whole MERA2 runtime closure, and the `MeraDrpRuntimeWrapper::*`
-> symbols alp-sdk needs all match what the wrapper exports (26 exported, 9
-> referenced, 0 unresolved) — confirmed at the compile/symbol level, not yet
-> through a `drpai`-enabled bake on the real aarch64 Yocto cross-toolchain. On
+> isn't proven about the `drpai`-enabled path. `PACKAGECONFIG[drpai]` names
+> the whole MERA2 runtime closure on paper; what is established is only that a
+> hand-run host g++ compiled RUHMI's `apps/MeraDrpRuntimeWrapper.cpp` against
+> the real headers. No BitBake task of `mera2-drpai-tvm` has run, and the
+> aarch64 link, `do_package_qa` and symbol resolution are all untested (see
+> `mera2-drpai-tvm_2.7.0.bb`). On
 > real E1M-X V2N-M1 silicon the DRP-AI **kernel** driver stack is proven
 > working: `/dev/drpai0` probes clean and the memory-base ioctl returns the
 > correct arena (§3, §7) — but that silicon runs its own current image, not
@@ -181,7 +182,11 @@ both default OFF, deliberately not merged into one"):
   (`meta-alp-sdk/recipes-images/alp-image-edge.bb:50-51`); never
   `alp-image-prod`, and never on a non-RZ/V2N machine such as
   `e1m-nx9101-a55` or `e1m-aen801-a32` even with `ALP_ENABLE_DRPAI = "1"`
-  set. It installs no userspace runtime package itself.
+  set. It installs no userspace runtime package itself. The
+  "opted in without `meta-rz-drpai`" `bb.fatal` guard lives only in
+  `alp-image-edge.bb`; `alp-image-prod` has none, so a prod build with
+  `ALP_ENABLE_DRPAI = "1"` and no `meta-rz-drpai` silently gets the
+  comment-only `&drpai0` stub.
   `alp-image-common.inc`'s `ALP_RZ_DRPAI_INSTALL` (lines 81-85) is the
   single packaging authority for the `lib-tvm` + `kernel-module-mmngr`
   pair, on every `alp-image-*` image (the three recipes that `require

@@ -11,8 +11,13 @@
 # DRP-AI3 is on-die in every RZ/V2N-family SKU (V2N101/102/103 AND
 # V2M101/102/103 -- DEEPX is an addition on V2M, not a replacement, per
 # docs/bring-up-drpai-v2n.md's intro).  E1M-V2N101 is the plain base SKU,
-# so it is the narrowest board.yaml that still reaches the on-die NPU;
-# any V2x SKU runs the same binary unchanged.
+# so it is the narrowest board.yaml that still reaches the on-die NPU.
+# Only E1M-V2N101 is declared here; other V2x SKUs carry the same DRP-AI3
+# but are not built or checked against this example.
+#
+# No `inference:` block on purpose: the DRP-AI backend takes no
+# caller-supplied arena (the driver reports its own reserved region), so
+# a `default_arena_kib` here would size nothing.
 som:
   sku: E1M-V2N101
 

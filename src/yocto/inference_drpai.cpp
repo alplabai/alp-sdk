@@ -67,7 +67,9 @@
  *   them relative to the object dir), calls LoadModel() on that dir, and
  *   close() removes the directory.  Extraction shells out to `tar -xf - -C
  *   <dir>` (busybox/GNU, A55/Yocto-side); the dir path is mkdtemp-private so
- *   there is no untrusted input in the command.
+ *   there is no untrusted input in the command, and mkdtemp creates it 0700
+ *   so another local user cannot race the extraction.  The blob size is
+ *   capped at open() (kDrpAiMaxModelBytes) so it cannot fill /tmp.
  *
  * Vendor-artifact handling (classifying-public-vs-internal)
  *   rzv_drp-ai_tvm is Apache-2.0 (referenceable) BUT the prebuilt MERA2
@@ -144,6 +146,8 @@ namespace
 
 /* DRP-AI driver device node.  Uniform across every vendor sample. */
 constexpr const char *kDrpAiDevice = "/dev/drpai0";
+/** Upper bound on a `drpai_dir` tar blob accepted by open(). */
+constexpr std::size_t kDrpAiMaxModelBytes = 64u * 1024u * 1024u;
 
 /** Map a DRP-AI driver errno onto the portable status enum.
  *
@@ -222,9 +226,10 @@ alp_status_t _drpai_mem_start(uint64_t &out)
 	if (rc != 0) {
 		return _drpai_errno_to_status(err);
 	}
-	/* A zero-sized area means the driver probed without a usable
-	 * memory-region; treat it as hard failure rather than DMA at 0. */
-	if (area.size == 0) {
+	/* A zero-sized or zero-based area means the driver probed without a
+	 * usable memory-region; treat either as hard failure rather than point
+	 * the NPU's DMA at physical 0 (the same hazard as a stale constant). */
+	if (area.size == 0 || area.address == 0) {
 		return ALP_ERR_IO;
 	}
 
@@ -337,6 +342,12 @@ extern "C" alp_status_t alp_inference_drpai_open(struct alp_inference         *h
 	if (cfg->model_data == nullptr || cfg->model_size == 0) {
 		return ALP_ERR_INVAL;
 	}
+	/* The tar is extracted into /tmp before LoadModel() reads it; bound it
+	 * so an oversized blob is a portable INVAL, not a tar ENOSPC on a
+	 * small rootfs.  64 MiB is generous for a DRP-AI YOLOX-S bundle. */
+	if (cfg->model_size > kDrpAiMaxModelBytes) {
+		return ALP_ERR_INVAL;
+	}
 
 	/* Ask the driver for the working-memory arena base FIRST, before any
      * allocation or staging: a board with no DRP-AI (or a busy one) then
@@ -440,16 +451,47 @@ extern "C" alp_status_t alp_inference_drpai_get_output(struct alp_inference   *h
 
 	/* GetOutput(idx) -> (dtype, data ptr, elem_count).  Before the first
      * Run() the wrapper returns its zero-initialised output area; after
-     * Run() it points at the live result buffer.  elem_count * dtype-size
-     * gives the byte size; prefer the GetOutputInfo() byte size when the
-     * dtype is known. */
+     * Run() it points at the live result buffer.  The size reported is the
+     * one describing THAT buffer (elem_count * dtype size); the
+     * GetOutputInfo() size is only the fallback for OTHER, whose element
+     * size is unknown.  A live buffer smaller than GetOutputInfo() claims
+     * is a runtime/model mismatch -- fail rather than let a caller walk
+     * size_bytes past the end of it. */
 	InOutDataType dtype;
 	void         *data               = nullptr;
 	int64_t       num_elems          = 0;
 	std::tie(dtype, data, num_elems) = st->runtime.GetOutput(static_cast<int>(index));
 
+	const std::size_t info_bytes = std::get<1>(st->out_info[index]);
+	std::size_t       elem_bytes = 0;
+	switch (dtype) {
+	case InOutDataType::FLOAT32:
+	case InOutDataType::INT32:
+		elem_bytes = 4u;
+		break;
+	case InOutDataType::FLOAT16:
+		elem_bytes = 2u;
+		break;
+	case InOutDataType::INT64:
+		elem_bytes = 8u;
+		break;
+	case InOutDataType::OTHER:
+	default:
+		break;
+	}
+	std::size_t live_bytes = info_bytes;
+	if (elem_bytes != 0u) {
+		if (num_elems < 0) {
+			return ALP_ERR_IO;
+		}
+		live_bytes = static_cast<std::size_t>(num_elems) * elem_bytes;
+		if (live_bytes < info_bytes) {
+			return ALP_ERR_IO;
+		}
+	}
+
 	out->data       = data;
-	out->size_bytes = std::get<1>(st->out_info[index]);
+	out->size_bytes = live_bytes;
 	out->dtype      = mera_dtype_to_alp(dtype);
 	out->rank       = 0u;
 	out->scale      = 1.0f;
