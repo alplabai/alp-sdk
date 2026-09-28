@@ -343,6 +343,39 @@ matches what the on-device DRP preprocessing chain does — needs a real
 calibration image set and a board to validate the result's accuracy; that is
 tracked in alp-sdk#1271 and not done here.
 
+### Detector bundle: the route that works today (YOLOX-S/VOC, #2236)
+
+Until #1271 lands, compile a detector by hand with RUHMI's own tutorial,
+patched exactly as `how-to/sample_app_v2h/app_yolox_cam/README.md` says.
+The result below is the one proven on silicon: E1M-V2M103 board #1,
+2026-09-28 (#1268). A VOC aeroplane photo came back as aeroplane at 0.519,
+against 0.525 from ONNX Runtime CPU on the same input.
+
+```sh
+cd <rzv_drp-ai_tvm>/tutorials            # work on a copy if you keep the checkout clean
+sed -i -e 's/256/640/g' -e 's/ 224/ 640/g' -e 's/to_tensor/pil_to_tensor/g'        -e '/std = stdev/d' -e '/F.normalize/d' -e 's/FORMAT.BGR/FORMAT.YUYV_422/g'        -e '/cof_add/d' -e '/cof_mul/d' -e 's/480, 640, 3/1920, 1920, 2/g'        compile_onnx_model_quant.py
+export PATH=<drp-ai venv>/bin:$PATH      # the quantizer shells out to a bare `python3`
+export LD_LIBRARY_PATH=<dir holding libLLVM-14.so.1>
+export PRODUCT=V2N TVM_ROOT=<rzv_drp-ai_tvm> SDK=<RZ/V SDK>
+export TRANSLATOR=<DRP-AI_Translator_i8>/translator/ QUANTIZER=<DRP-AI_Translator_i8>/drpAI_Quantizer/
+python3 compile_onnx_model_quant.py <DRP-AI_Translator_i8>/onnx_models/YoloX-S_VOC_sparse70.onnx     -o yolox-s-voc -t $SDK -d $TRANSLATOR -c $QUANTIZER -s 1,3,640,640     --images <dir of ~100 real VOC JPEGs>
+tar cf yolox-s-voc.tar -C yolox-s-voc --exclude=interpreter_out --exclude=input_0.bin .
+```
+
+Three things each broke a real run:
+- **Calibration data.** Without `--images` the tutorial calibrates on random
+  frames. That bundle runs fine but detects nothing: a flat ~0.32 on every
+  anchor.
+- **The quantizer's Python.** It spawns a bare `python3`. If that resolves to
+  anything but the venv's (3.10 here), it fails with
+  `onnx_optimizer.so: undefined symbol: _PyUnicode_Ready`.
+- **Environment.** `PRODUCT` and LLVM 14 must be set, or the script exits
+  before compiling.
+
+The input the bundle expects is the `app_yolox_cam` preprocessing
+`examples/v2n/v2n-drpai-inference/README.md` documents: an RGB-114 letterbox
+with the image at the top, bilinear to 640, raw 0-255, NCHW float32.
+
 **No compiled model exists yet — an ONNX source does.** RUHMI ships a real
 model, `how-to/sample_app_v2h/app_yolox_cam/yolox-S_VOC.onnx` (35 MB,
 YOLOX-S on VOC), but there is no pre-compiled `drpai_dir` output anywhere in a
