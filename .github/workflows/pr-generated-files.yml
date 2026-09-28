@@ -109,8 +109,8 @@ jobs:
     runs-on: ubuntu-latest
     # #1477: worst observed successful run 32s across 3 sampled runs.
     # Raised to 25min to clear #1274's sum-of-step-caps rule (its capped
-    # steps plus a 1min budget for each of the 13 uncapped pure-Python
-    # regen/diff steps below). #1549 made the rule max-based
+    # steps plus a 1min budget for each uncapped pure-Python regen/diff
+    # step below). #1549 made the rule max-based
     # (test_job_ceiling_exceeds_its_longest_step_timeout): the ceiling must
     # only exceed the longest single step cap.
     timeout-minutes: 25

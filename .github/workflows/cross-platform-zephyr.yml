@@ -481,8 +481,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     # #1477: worst observed successful run 26s across 9 sampled runs.
     # The ceiling was first raised to clear #1274's sum-of-step-caps rule
-    # (the setup steps' own caps plus a 1min budget for each of the 6
-    # uncapped `emit *` steps). #1549 made that rule max-based
+    # (the capped steps' own caps plus a 1min budget for each uncapped
+    # `emit *` step). #1549 made that rule max-based
     # (test_job_ceiling_exceeds_its_longest_step_timeout): the ceiling now
     # only has to exceed the longest single step cap.
     timeout-minutes: 30
