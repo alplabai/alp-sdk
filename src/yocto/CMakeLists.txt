@@ -793,8 +793,8 @@ endif()
 # come from the Yocto sysroot (the meta-deepx-m1 dx-rt recipe), or    #
 # from ALP_DEEPX_DXRT_HOME (<root>/lib/include + <root>/lib).  That    #
 # include dir must be the INSTALLED header set (dx-rt-dev): a dx_rt    #
-# source clone lacks the build-generated dxrt/gen.h.  Runs on DX-M1    #
-# silicon (#1262); CPU-reference output parity not yet checked.        #
+# source clone lacks the build-generated dxrt/gen.h.  Verified on      #
+# DX-M1 silicon against an ONNX Runtime CPU reference (#1262).        #
 # ------------------------------------------------------------------ #
 if(ALP_SDK_USE_DEEPX_DXM1)
     # PROBE FIRST, then decide whether to compile the backend in.

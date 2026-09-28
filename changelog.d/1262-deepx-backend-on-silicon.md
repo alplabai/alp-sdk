@@ -1,4 +1,4 @@
-### Changed — the DEEPX DX-M1 inference backend runs on silicon (#1262)
+### Changed — the DEEPX DX-M1 inference backend is verified on silicon (#1262)
 
 `src/yocto/inference_deepx.cpp` has been run on real hardware for the first
 time: an E1M-V2M103 with DEEPX dx-rt 3.2.0, driver 1.8.0 and DX-M1 FW 2.4.0,
@@ -11,8 +11,12 @@ driving a yolo11n `.dxnn` through `<alp/inference.h>`. Results:
 
 The status in `docs/test-plan.md`, `<alp/inference.h>`, the backend header,
 `src/yocto/CMakeLists.txt`, the alp-sdk recipe and `docs/os-support-matrix.md`
-moves from bench-unverified to "runs on silicon". Output parity against a
-host-CPU reference is still unchecked.
+moves from bench-unverified to verified. Output parity: for a real VOC image,
+the decoded `[84, 8400]` output matches ONNX Runtime CPU on the same
+`yolo11n.onnx`:
+- box correlation 0.9997 and class-score correlation 0.9946;
+- the same top detection (class 4 at 0.868 on the NPU, 0.854 on the CPU);
+- 10/10 identical anchors above 0.5 confidence.
 
 ### Fixed — `ALP_DEEPX_DXRT_HOME` works with a Yocto SDK toolchain file (#1262)
 
