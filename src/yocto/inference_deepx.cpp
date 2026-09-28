@@ -28,16 +28,11 @@
  *   returns and yields the output `TensorPtrs`.
  *
  * Vendor-artifact handling (classifying-public-vs-internal)
- *   dx_rt is PROPRIETARY (DEEPX EULA, customer-only).  Its headers + the
- *   libdxrt.so live OUTSIDE this repo (the maintainer clone at
- *   ~/npu-sdks/dx_rt; the license-gated copy belongs in alp-sdk-internal
- *   under Git LFS).  The public repo carries only THIS body, which links
- *   against the SDK located via the Yocto sysroot at build time when
- *   ALP_SDK_USE_DEEPX_DXM1=ON (default OFF).  No DEEPX source is vendored.
- *
- *   Follow-up: drop the real dx_rt headers/libs into alp-sdk-internal
- *   (Git LFS) + wire the meta-deepx-m1 dx-rt recipe into the V2N-M1
- *   MACHINE so the cross-build finds libdxrt on the sysroot.
+ *   dx_rt is DEEPX's own runtime, published by DEEPX on GitHub for the
+ *   users of its NPU (every V2M SoM carries one).  It is not vendored
+ *   here: DEEPX's meta-deepx-m1 layer builds it into the Yocto sysroot,
+ *   and the V2M MACHINEs turn ALP_SDK_USE_DEEPX_DXM1=ON automatically
+ *   whenever that layer is present (#482; default OFF elsewhere).
  *
  * Blob format
  *   cfg.model_data is a `.dxnn` compiled model (magic "DXNN", 8 KiB

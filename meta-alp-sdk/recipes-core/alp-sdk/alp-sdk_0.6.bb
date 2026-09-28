@@ -93,12 +93,12 @@ PACKAGECONFIG[drpai]    = "-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=O
 #               portable stub.  NOT default-on unconditionally -- only
 #               when the MACHINE actually carries the DEEPX silicon
 #               (MACHINE_FEATURES `deepx-dxm1`, set by the V2M machine
-#               confs) AND the build has opted in to the license-gated
-#               runtime (ALP_ENABLE_DEEPX_DXM1 = "1", same opt-in the
-#               image recipe gates its dx-rt IMAGE_INSTALL on).  A V2M
-#               build that leaves ALP_ENABLE_DEEPX_DXM1 unset still
-#               builds -- it links only the dispatcher + portable stub,
-#               same as today.
+#               confs) AND ALP_ENABLE_DEEPX_DXM1 == "1" -- which the V2M
+#               machine include defaults on whenever DEEPX's
+#               meta-deepx-m1 layer is in bblayers.conf (#482).  A V2M
+#               build without that layer (or with the flag forced to
+#               "0") still builds -- it links only the dispatcher +
+#               portable stub.
 PACKAGECONFIG[deepx-dxm1] = "-DALP_SDK_USE_DEEPX_DXM1=ON -DALP_SDK_DEEPX_REQUIRED=ON,-DALP_SDK_USE_DEEPX_DXM1=OFF,dx-rt,"
 PACKAGECONFIG:append = "${@bb.utils.contains('MACHINE_FEATURES', 'deepx-dxm1', ' deepx-dxm1' if d.getVar('ALP_ENABLE_DEEPX_DXM1') == '1' else '', '', d)}"
 

@@ -80,7 +80,8 @@ base BSP plus `meta-deepx-m1` (the real `BBFILE_COLLECTIONS` name of
 DEEPX's official layer), and `conf/machine/include/e1m-v2m-deepx.inc`
 (`require`d from `e1m-v2m101-a55.conf` / `e1m-v2m102-a55.conf` /
 `e1m-v2m103-a55.conf`) appends `dx-driver dx-rt dx-rt-cli` to
-`IMAGE_INSTALL` when `ALP_ENABLE_DEEPX_DXM1 = "1"`, so opted-in V2N-M1
+`IMAGE_INSTALL` when `ALP_ENABLE_DEEPX_DXM1 = "1"` (the default once
+`meta-deepx-m1` is in `bblayers.conf`), so V2N-M1
 images ship the DEEPX stack (the tools, `dxrt-cli` included, are in the
 `dx-rt-cli` sub-package).  At this pin `meta-deepx-m1` also carries
 `dx-stream`, `dx-stream-sample`, `dx-yolo26` and `dx-yolo26-sample`;
