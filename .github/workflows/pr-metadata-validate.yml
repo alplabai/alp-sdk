@@ -215,12 +215,10 @@ jobs:
     # below rather than riding the 1min/step uncapped-step budget --
     # that budget was never true for this step, see the comment on
     # `_UNCAPPED_STEP_BUDGET_MINUTES` in the test file). With that step
-    # capped at 20min, the sum-of-step-caps model is: 12min (5
-    # already-capped steps) + 20min (the pytest step) + 45min (the
-    # remaining ~45 trivial local `Gate — ...`/schema-check steps,
-    # budgeted 1min each by the test) = 77min, so the ceiling needs
-    # real headroom above that, not just above the ~18min the job
-    # actually takes on a real run.
+    # capped at 35min (was 20 until the suite outgrew it), the job
+    # ceiling must exceed that longest single step (the rule
+    # test_job_ceiling_exceeds_its_longest_step_timeout enforces); 80
+    # leaves room for the rest of the job on a slow runner.
     timeout-minutes: 80
 
     steps:
@@ -676,9 +674,11 @@ jobs:
       - name: Pytest -- linter + schema regression + topology defaults
         # #1477: worst observed successful run 812s/13.5min -- explicit
         # cap instead of the (untrue for this step) 1min uncapped-step
-        # budget; see the job-level comment above for the sum-of-caps
-        # this ceiling has to clear.
-        timeout-minutes: 20
+        # budget. Raised 20 -> 35 (2026-09-28): the suite has grown to
+        # ~1200 s on the hosted runner, and dev's own runs started dying
+        # on this cap with every test passing (4422-4490 passed, killed
+        # at 20:00-20:11). 35 keeps well under the 80 min job ceiling.
+        timeout-minutes: 35
         run: |
           python3 -m pytest tests/scripts/ -v --tb=short
 
