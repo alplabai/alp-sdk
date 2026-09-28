@@ -111,7 +111,8 @@ typedef struct alp_audio_in alp_audio_in_t;
  *      @ref alp_dsp_decimator_t. @ref alp_audio_in_read still delivers
  *      frames at the requested rate, and @c frames_per_block still counts
  *      frames at that rate. Cost: the native block is @c ratio times larger
- *      (it must fit @c CONFIG_ALP_SDK_AUDIO_BLOCK_BYTES), the anti-alias
+ *      (it must fit @c CONFIG_ALP_SDK_AUDIO_BLOCK_BYTES, else the open
+ *      fails with @ref ALP_ERR_OUT_OF_RANGE), the anti-alias
  *      FIR adds 67 native-rate samples of group delay (about 2.1 ms at
  *      32 kHz, 1.4 ms at 48 kHz), and every read
  *      filters @c ratio input frames per output frame. S16 only; a rate no

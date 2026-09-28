@@ -106,8 +106,7 @@ struct hw_in_be {
 	/* Software resample (#2134): when the PDM cannot be clocked for the
 	 * requested rate, it runs at native = requested * ratio and every
 	 * block is decimated by `ratio` before it reaches the caller. ratio 1
-	 * means native, no decimator. `native` is a scratch block at the
-	 * native rate (dmic_read hands one slab block per call). */
+	 * means native, no decimator. */
 	uint32_t            ratio;
 	alp_dsp_decimator_t dec;
 	bool    in_use;
@@ -301,9 +300,13 @@ static alp_status_t z_in_open(const alp_audio_config_t     *cfg,
 
 		size_t native_block = block_bytes * ratio;
 		if (native_block > CONFIG_ALP_SDK_AUDIO_BLOCK_BYTES) {
-			err = -ENOMEM;
+			err = -ERANGE; /* -> ALP_ERR_OUT_OF_RANGE, like an oversized caller block */
 			continue;
 		}
+		/* Re-initialised per attempt because the block size depends on the
+		 * rate. Harmless unless CONFIG_OBJ_CORE_MEM_SLAB is on, where each
+		 * init re-links the slab's object-core node -- the same limit a
+		 * reopen of this handle already had. */
 		err = k_mem_slab_init(
 		    &be->slab, be->slab_buf, native_block, CONFIG_ALP_SDK_AUDIO_IN_SLAB_BLOCKS);
 		if (err != 0) {
@@ -370,6 +373,10 @@ static alp_status_t z_in_start(alp_audio_in_backend_state_t *state)
 #if defined(CONFIG_ALP_SDK_AUDIO_IN)
 	struct hw_in_be *be = (struct hw_in_be *)state->be_data;
 	if (be == NULL) return ALP_ERR_NOT_READY;
+	if (be->ratio > 1U) {
+		/* Fresh session: drop filter history from before a stop. */
+		(void)alp_dsp_decimator_reset(&be->dec);
+	}
 	int err = dmic_trigger(be->dev, DMIC_TRIGGER_START);
 	if (err == 0) be->started = true;
 	return errno_to_alp(err);
@@ -418,8 +425,13 @@ static alp_status_t z_in_read(alp_audio_in_backend_state_t *state,
 		 * frames_per_block output frames once the decimator phase is
 		 * settled; the process call refuses (and consumes nothing) if
 		 * the caller's buffer is too small. */
-		alp_status_t ds = alp_dsp_decimator_process(
-		    &be->dec, (const int16_t *)block, got_frms, (int16_t *)buf, frames, &want);
+		/* Feed at most frames * ratio native frames so a caller buffer
+		 * smaller than one block truncates exactly as the native path
+		 * does, instead of the decimator refusing and the block being
+		 * lost. */
+		size_t       in_frms = MIN(got_frms, frames * be->ratio);
+		alp_status_t ds      = alp_dsp_decimator_process(
+		    &be->dec, (const int16_t *)block, in_frms, (int16_t *)buf, frames, &want);
 		k_mem_slab_free(&be->slab, block);
 		if (ds != ALP_OK) {
 			return ds;
