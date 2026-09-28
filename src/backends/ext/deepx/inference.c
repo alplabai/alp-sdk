@@ -1,21 +1,17 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
- * Bodies for <alp/ext/deepx/inference.h>.  DX-M1 slot + DRAM
- * tile knobs.
+ * Zephyr bodies for <alp/ext/deepx/inference.h>.
  *
  * Vendor-handle gate (mirrors src/backends/ext/alif/storage.c +
  * src/backends/ext/renesas/inference.c):
- *   - NULL handle -> ALP_ERR_INVAL.
+ *   - NULL handle / bad argument -> ALP_ERR_INVAL.
  *   - non-DEEPX backend -> ALP_ERR_NOT_PRESENT_ON_THIS_SOC.
  *
- * After the gate the calls return NOSUPPORT today.  On Zephyr the
- * vendor gate is always the terminal answer: the registry ships NO
- * deepx-vendor inference backend because the DX-M1 hangs off the
- * A55's PCIe and is driven by libdxrt on Linux only
- * (src/yocto/inference_deepx.cpp; issue #59) -- an M-class handle
- * can never be DEEPX-backed.  Wiring these knobs through to the
- * Yocto handle is follow-up work gated on the DEEPX SDK adapter.
+ * On Zephyr the vendor gate is always the terminal answer: the registry
+ * ships NO deepx-vendor inference backend because the DX-M1 hangs off
+ * the A55's PCIe and is driven by libdxrt on Linux only.  The Yocto
+ * bodies live in src/yocto/inference_yocto.c (#482).
  */
 
 #include <stdbool.h>
@@ -30,46 +26,22 @@
 
 #include "../../inference/inference_ops.h"
 
-/* V2N-M1 SoM dedicates 256 MB of DDR to DX-M1.  Used to clamp
- * tile reservations; the real body checks against the live
- * SDK-reported carve-out when the vendor pack lands. */
-#define ALP_DEEPX_INFERENCE_DDR_CARVEOUT_BYTES (256u * 1024u * 1024u)
-
 static bool _is_deepx_backend(const alp_inference_t *inf)
 {
 	return inf != NULL && inf->backend != NULL && inf->backend->vendor != NULL &&
 	       strcmp(inf->backend->vendor, "deepx") == 0;
 }
 
-alp_status_t alp_deepx_inference_slot_pin(alp_inference_t *inf, alp_deepx_inference_slot_t slot)
+alp_status_t alp_deepx_inference_bind_cores(alp_inference_t *inf, alp_deepx_npu_cores_t cores)
 {
-	if (inf == NULL) return ALP_ERR_INVAL;
+	if (inf == NULL || (unsigned)cores > (unsigned)ALP_DEEPX_NPU_CORES_02) return ALP_ERR_INVAL;
 	if (!_is_deepx_backend(inf)) return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
-	if ((unsigned)slot >= ALP_DEEPX_INFERENCE_SLOT_COUNT) {
-		return ALP_ERR_INVAL;
-	}
-	/* Slot-pin enforcement lands when these knobs are wired to
-     * the A55-side dxrt body (issue #59).  The BUSY check
-     * against other in-flight handles requires adapter-side
-     * reservation state. */
-	return ALP_ERR_NOSUPPORT;
+	return ALP_ERR_NOSUPPORT; /* no libdxrt on an M-class core */
 }
 
-alp_status_t alp_deepx_inference_dram_tile_reserve(alp_inference_t *inf, uint32_t tile_bytes)
-{
-	if (inf == NULL) return ALP_ERR_INVAL;
-	if (!_is_deepx_backend(inf)) return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
-	if (tile_bytes == 0u) return ALP_ERR_OUT_OF_RANGE;
-	if (tile_bytes > ALP_DEEPX_INFERENCE_DDR_CARVEOUT_BYTES) {
-		return ALP_ERR_OUT_OF_RANGE;
-	}
-	return ALP_ERR_NOSUPPORT;
-}
-
-alp_status_t alp_deepx_inference_get_status(alp_inference_t *inf, uint32_t *status_out)
+alp_status_t alp_deepx_inference_get_status(alp_inference_t *inf, alp_deepx_device_status_t *status_out)
 {
 	if (inf == NULL || status_out == NULL) return ALP_ERR_INVAL;
 	if (!_is_deepx_backend(inf)) return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
-	*status_out = (uint32_t)ALP_DEEPX_INFERENCE_STATUS_IDLE;
-	return ALP_ERR_NOSUPPORT;
+	return ALP_ERR_NOSUPPORT; /* no libdxrt on an M-class core */
 }
