@@ -215,6 +215,10 @@
  * would need to resolve. */
 #define SOCKTP_VERDICT_WAIT_MS SOCKTP_CONNECT_TIMEOUT_MS
 
+/* Connect attempts before STEP 3 gives up; only a firmware FAIL_TIMEOUT
+ * verdict is retried (see STEP 3). */
+#define SOCKTP_CONNECT_ATTEMPTS 3u
+
 /*
  * Wi-Fi STA credentials for the CONNECT step. DELIBERATELY EMPTY by
  * default -- never hardcode bench credentials in a public example. Set
@@ -708,15 +712,29 @@ int main(void)
 		return 0;
 	}
 
-	printk("STEP 3: WIFI_CONNECT -> SSID \"%s\" (sec %u)...\n",
-	       SOCKTP_WIFI_SSID,
-	       (unsigned)SOCKTP_WIFI_SECURITY);
-	rc = cc3501e_wifi_connect(&fw,
-	                          SOCKTP_WIFI_SSID,
-	                          (uint8_t)SOCKTP_WIFI_SECURITY,
-	                          SOCKTP_WIFI_PASS,
-	                          SOCKTP_CONNECT_TIMEOUT_MS);
-	if (rc != ALP_OK) {
+	/* Up to SOCKTP_CONNECT_ATTEMPTS tries, retrying ONLY on the firmware's
+	 * own CONN_FAILED + FAIL_TIMEOUT verdict (alp-sdk#2394).  The on-module
+	 * antenna hears a same-room AP around -80 dBm (~40 dB below a laptop
+	 * next to it), so an association can simply run out of time on a
+	 * marginal link and succeed on the next try.  Any other verdict -- a
+	 * credential/security rejection, or an unreadable status -- is not
+	 * something a retry fixes, so it stops here. */
+	bool associated = false;
+	for (unsigned attempt = 1u; attempt <= SOCKTP_CONNECT_ATTEMPTS && !associated; attempt++) {
+		printk("STEP 3: WIFI_CONNECT -> SSID \"%s\" (sec %u), attempt %u/%u...\n",
+		       SOCKTP_WIFI_SSID,
+		       (unsigned)SOCKTP_WIFI_SECURITY,
+		       attempt,
+		       (unsigned)SOCKTP_CONNECT_ATTEMPTS);
+		rc = cc3501e_wifi_connect(&fw,
+		                          SOCKTP_WIFI_SSID,
+		                          (uint8_t)SOCKTP_WIFI_SECURITY,
+		                          SOCKTP_WIFI_PASS,
+		                          SOCKTP_CONNECT_TIMEOUT_MS);
+		if (rc == ALP_OK) {
+			associated = true;
+			break;
+		}
 		/* A non-OK return here does NOT mean the radio failed to associate --
 		 * it can equally mean the HOST gave up on its own timeout_ms budget
 		 * while the association was still genuinely running (this is exactly
@@ -737,22 +755,33 @@ int main(void)
 		k_msleep(SOCKTP_VERDICT_WAIT_MS);
 		alp_cc3501e_wifi_status_t verdict = { 0 };
 		alp_status_t              vr      = cc3501e_wifi_status(&fw, &verdict);
-		if (vr == ALP_OK) {
-			printk("STEP 3: WIFI_STATUS verdict -- state=%u fail_reason=%u "
-			       "(CONNECTED=%u: radio associated, host accounting was wrong; "
-			       "CONN_FAILED=%u + FAIL_TIMEOUT=%u: firmware's own budget expired; "
-			       "CONN_FAILED + any other fail_reason: real credential/security/role "
-			       "rejection). Stopping here.\n",
-			       (unsigned)verdict.state,
-			       (unsigned)verdict.fail_reason,
-			       (unsigned)ALP_CC3501E_WIFI_CONNECTED,
-			       (unsigned)ALP_CC3501E_WIFI_CONN_FAILED,
-			       (unsigned)ALP_CC3501E_WIFI_FAIL_TIMEOUT);
-		} else {
+		if (vr != ALP_OK) {
 			printk("STEP 3: WIFI_STATUS verdict read failed too (rc=%d) -- state/fail_reason "
 			       "UNREAD, the real radio outcome stays unknown. Stopping here.\n",
 			       (int)vr);
+			return 0;
 		}
+		printk("STEP 3: WIFI_STATUS verdict -- state=%u fail_reason=%u "
+		       "(CONNECTED=%u: radio associated, host accounting was wrong; "
+		       "CONN_FAILED=%u + FAIL_TIMEOUT=%u: firmware's own budget expired; "
+		       "CONN_FAILED + any other fail_reason: real credential/security/role "
+		       "rejection).\n",
+		       (unsigned)verdict.state,
+		       (unsigned)verdict.fail_reason,
+		       (unsigned)ALP_CC3501E_WIFI_CONNECTED,
+		       (unsigned)ALP_CC3501E_WIFI_CONN_FAILED,
+		       (unsigned)ALP_CC3501E_WIFI_FAIL_TIMEOUT);
+		if (verdict.state == ALP_CC3501E_WIFI_CONNECTED) {
+			associated = true;
+		} else if (verdict.state != ALP_CC3501E_WIFI_CONN_FAILED ||
+		           verdict.fail_reason != ALP_CC3501E_WIFI_FAIL_TIMEOUT) {
+			printk("STEP 3: not a timeout -- a retry will not fix this. Stopping here.\n");
+			return 0;
+		}
+	}
+	if (!associated) {
+		printk("STEP 3: no association after %u attempts. Stopping here.\n",
+		       (unsigned)SOCKTP_CONNECT_ATTEMPTS);
 		return 0;
 	}
 	uint8_t ip[4] = { 0 };
