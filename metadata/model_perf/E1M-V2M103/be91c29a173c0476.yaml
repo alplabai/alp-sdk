@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+schema_version: 1
+sku: E1M-V2M103
+hw_rev: r1
+model:
+  name: yolox-s-voc-sparse70
+  src_sha: f8fbf57f2c620b3459aaea7b9557444e1439cbccd7e5c34f38ebd68f78751def
+  format: onnx
+target:
+  backend: drpai
+  accel_config: ''
+  core: a55_cluster
+  compiler_version: DRP-AI Translator i8 v1.12 (RUHMI 2.7.0-hotfix2)
+perf:
+  req_sram_kib: 0
+  arena_bytes: 0
+  latency_ms:
+    mean: 40.046
+    p50: 40.04
+    p95: 40.092
+    stdev: 0.02
+    runs: 50
+capture:
+  date: '2026-09-28'
+  operator: Alp Lab
+  bench_id: E1M-V2M103/2026W38-0001
+  notes: 'drpai_dir bundle calibrated on ~100 VOC JPEGs (docs/bring-up-drpai-v2n.md section 5), NCHW float32
+    1x3x640x640 input, MERA2 runtime. A55 Linux backend: the model and its tensors are DDR-resident, so
+    there is no on-chip SRAM arena (req_sram_kib / arena_bytes = 0). 5 warm-up invokes discarded, then
+    back-to-back good invokes timed with alp_inference_last_invoke_latency_us() (CLOCK_MONOTONIC). SoC
+    thermal zones 63-64 C. Bench-only unit (ACT88760 GPIO4 OTP defect, DX-M1 IO19 strap bodge). alp-sdk
+    dev f958b6083 + #2389.'
