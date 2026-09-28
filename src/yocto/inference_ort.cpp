@@ -12,10 +12,10 @@
  * backend under AUTO -- this is the portable CPU floor, not a replacement
  * for the NPU paths.  Same posture as the DRP-AI (inference_drpai.cpp) and
  * DEEPX (inference_deepx.cpp) hooks: compiled only when its CMake option
- * (ALP_SDK_USE_ORT_CPU, default OFF) is on, and BENCH-UNVERIFIED -- ONNX
- * Runtime is not installed on this dev host, so this file has been
- * header-checked (see the CMake probe block's comment) but has not run on
- * silicon.
+ * (ALP_SDK_USE_ORT_CPU, default OFF) is on.  Ran on silicon 2026-09-28
+ * (#1255, E1M-V2M103, libonnxruntime 1.20.1 from the DEEPX layer):
+ * yolox-S_VOC.onnx matches Python ONNX Runtime on x86 to 3.6e-5 on every
+ * output head.  The own 1.28.0 recipe has not run on silicon yet.
  *
  * ----------------------------------------------------------------------
  * Real vendor API
