@@ -377,31 +377,11 @@ def parse_resident_atoc_table(gettoc_text: str) -> "list[tuple[str, str]]":
     return resident
 
 
-def _is_table_structurally_complete(gettoc_text: str) -> bool:
-    """True unless *gettoc_text* looks like a boxed `gettoc` table (has a
-    `| Name |` header row) that was cut short before its closing `+---+`
-    separator -- the BLOCKER finding of the second #2262 review round.
-
-    A `gettoc` read that stops mid-download (a serial timeout after the SE
-    has printed only its first few rows) can still exit rc=0 with a valid
-    banner and >=1 real resident row -- e.g. just the two `DEVICE` rows plus
-    `SERAM0`/`SERAM1` that precede any app entry in a real 9-row capture --
-    which `compute_query_status`'s prior rule ("ok" once >=1 row parsed)
-    accepted outright, silently burning over whatever app/A32-boot-chain
-    entries the cut-off tail would have shown (the exact 2026-09-07 hardware
-    loss this guard exists to close).
-
-    Requires BOTH the header row AND a closing separator strictly AFTER the
-    last parsed data row. A transcript with NEITHER marker at all -- a
-    plain, boxless "|name|cpu|..." dump with no header and no separator line
-    anywhere (see `_REAL_MULTI_ENTRY_ATOC` in
-    tests/scripts/test_atoc_guard_parity.py, a real capture in that shape)
-    -- has no structural bookends to check completeness against, so it is
-    exempt and keeps the pre-existing any-rows-parsed rule; a header WITH no
-    trailing separator, or a separator with no header, is exactly the
-    torn-in-half shape this closes and is never treated as complete.
-    Mirrors bench-env.sh's identical check in `bench_atoc_replace_guard`.
-    """
+def _scan_table_structure(gettoc_text: str):
+    """Shared scan behind `_is_table_structurally_complete` and
+    `table_has_structural_markers` -- one pass over *gettoc_text* that
+    finds the header row's line index, the last data row's line index, and
+    the last box-drawing separator's line index (each `None` if absent)."""
     stripped = strip_csi(gettoc_text).replace('\r', '')
     lines = stripped.split('\n')
     header_idx = None
@@ -421,11 +401,61 @@ def _is_table_structurally_complete(gettoc_text: str) -> bool:
             header_idx = idx
             continue
         last_row_idx = idx
-    if header_idx is None and last_separator_idx is None:
-        return True  # boxless/plain dump -- nothing to check
+    return header_idx, last_row_idx, last_separator_idx
+
+
+def _is_table_structurally_complete(gettoc_text: str) -> bool:
+    """True only if *gettoc_text* carries BOTH the `| Name |` header row
+    AND a closing `+---+` separator strictly AFTER the last parsed data
+    row -- the BLOCKER finding of the second #2262 review round.
+
+    A `gettoc` read that stops mid-download (a serial timeout after the SE
+    has printed only its first few rows) can still exit rc=0 with a valid
+    banner and >=1 real resident row -- e.g. just the two `DEVICE` rows plus
+    `SERAM0`/`SERAM1` that precede any app entry in a real 9-row capture --
+    which `compute_query_status`'s prior rule ("ok" once >=1 row parsed)
+    accepted outright, silently burning over whatever app/A32-boot-chain
+    entries the cut-off tail would have shown (the exact 2026-09-07 hardware
+    loss this guard exists to close).
+
+    THIRD review round: an earlier version of this function exempted a
+    transcript carrying NEITHER a header nor a separator line at all,
+    reasoning it was a "boxless/plain dump with nothing to check
+    completeness against" -- that exemption REOPENED the same fail-open
+    for any capture that happens to swallow both structural markers: noise
+    eating the top separator+header while a timeout still cuts the tail
+    (leaving only bare `DEVICE`/`SERAM0`/`SERAM1` rows, no markers at all),
+    a different SETOOLS build using different box-drawing glyphs this
+    parser has never seen, or SES boot-banner text interleaved into the
+    transcript by a mid-query reset -- all of which parse >=1 row and carry
+    no marker either, and all of which must refuse, not pass. A transcript
+    with no recognisable table structure at all is not a shape this guard
+    can vouch for; see `table_has_structural_markers` for the caller-facing
+    helper that tells "torn table" (had a header, lost its footer) apart
+    from "no recognised format at all" for refusal-message purposes only
+    -- neither shape is ever `ok` here. Mirrors bench-env.sh's identical
+    check in `bench_atoc_replace_guard`.
+    """
+    header_idx, last_row_idx, last_separator_idx = _scan_table_structure(gettoc_text)
     if header_idx is None or last_row_idx is None:
         return False
     return last_separator_idx is not None and last_separator_idx > last_row_idx
+
+
+def table_has_structural_markers(gettoc_text: str) -> bool:
+    """True if *gettoc_text* carries ANY boxed-table structural marker (the
+    `| Name |` header row, or any `+---+` box-drawing separator line)
+    anywhere in it -- used ONLY to choose which refusal message a caller
+    (e.g. `alif_flash.py`'s `_run_atoc_guard`) shows for an `unverified`
+    query that still parsed >=1 resident row: a table that has a header but
+    lost its closing separator is a recognisable, torn capture ("confirm by
+    hand, then --replace-atoc" is the right remedy); a table with NEITHER
+    marker at all is not a shape this parser recognises as a gettoc table
+    at all, and the right ask is "file the transcript", not "override the
+    guard". Never used to decide the verdict itself -- that stays
+    `_is_table_structurally_complete`, which requires BOTH markers."""
+    header_idx, _last_row_idx, last_separator_idx = _scan_table_structure(gettoc_text)
+    return header_idx is not None or last_separator_idx is not None
 
 
 def compute_query_status(

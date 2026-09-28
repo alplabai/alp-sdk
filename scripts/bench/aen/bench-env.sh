@@ -1324,17 +1324,24 @@ bench_atoc_replace_guard() {
 	# `${#resident[@]} -gt 0` rule alone accepted as "ok", silently burning
 	# over whatever app/A32-boot-chain entries the cut-off tail would have
 	# shown (the exact 2026-09-07 hardware loss this guard exists to
-	# close). Require structural completeness too: a boxed table (one that
-	# carries the `| Name |` header row) must ALSO carry a closing
-	# `+---+` separator strictly AFTER its last data row, or it reads as
-	# unverified rather than ok. A boxless/plain "|name|cpu|..." dump with
-	# NEITHER a header nor any separator line at all (see
-	# _REAL_MULTI_ENTRY_ATOC in tests/scripts/test_atoc_guard_parity.py, a
-	# real capture in that shape) has no structural bookends to check
-	# completeness against, so it is exempt and keeps the pre-existing
-	# any-rows-parsed rule. Mirrors scripts/aen_atoc.py's
+	# close). Require structural completeness: the `| Name |` header row
+	# AND a closing `+---+` separator strictly AFTER the last data row,
+	# both, or it reads as unverified rather than ok.
+	#
+	# THIRD review round: an earlier version of this check exempted a
+	# transcript with NEITHER marker at all ("nothing to check completeness
+	# against"), which reopened the exact same fail-open for any capture
+	# that swallows BOTH the header and the separator -- noise eating the
+	# top of the transcript while a timeout still cuts the tail leaves bare
+	# DEVICE/SERAM rows with no markers either, a different SETOOLS
+	# box-drawing style this parser has never seen carries none of its
+	# expected glyphs, and SES boot-banner text interleaved by a mid-query
+	# reset looks boxless too. There is no such exemption any more: a
+	# transcript with no recognisable table structure at all is UNVERIFIED,
+	# full stop -- it is never read as "ok" just because it also has no
+	# markers to be torn. Mirrors scripts/aen_atoc.py's
 	# `_is_table_structurally_complete` exactly -- same header/last-row/
-	# last-separator line-number bookkeeping, same exemption.
+	# last-separator line-number bookkeeping, no exemption on either side.
 	local complete
 	complete=$(printf '%s\n' "$stripped" | awk -F'|' '
 		/^[ \t]*\+[-+]*\+[ \t]*$/ { any_sep = 1; last_sep = NR; next }
@@ -1346,11 +1353,27 @@ bench_atoc_replace_guard() {
 			last_row = NR
 		}
 		END {
-			if (header == 0 && any_sep != 1) { print "1"; exit }
 			if (header == 0 || last_row == 0) { print "0"; exit }
 			if (any_sep == 1 && last_sep > last_row) { print "1"; exit }
 			print "0"
 		}')
+
+	# Caller-facing only (never affects `$complete`/`$query_status` above):
+	# does this transcript carry ANY structural marker at all (a header row
+	# or a box-drawing separator line)? Lets the unverified-refusal message
+	# below tell a recognisable-but-torn table (had a header, lost its
+	# footer -- "confirm by hand, then --replace-atoc" is the right remedy)
+	# apart from a transcript with no recognised gettoc format at all
+	# (mirrors scripts/aen_atoc.py's `table_has_structural_markers`).
+	local has_markers
+	has_markers=$(printf '%s\n' "$stripped" | awk -F'|' '
+		/^[ \t]*\+[-+]*\+[ \t]*$/ { found = 1 }
+		/^[ \t]*\|/ {
+			name = $2
+			gsub(/^[ \t]+|[ \t]+$/, "", name)
+			if (name == "Name") found = 1
+		}
+		END { print (found ? "1" : "0") }')
 
 	# Only trust the transcript's text when the query itself actually
 	# succeeded (rc=0) -- an error line containing "no atoc" (e.g. "no ATOC
@@ -1407,6 +1430,27 @@ bench_atoc_replace_guard() {
 
 	if [ "$replace_atoc" -ne 1 ]; then
 		if [ "$query_status" = unverified ]; then
+			# LOW/BLOCKER review (#2262, third round): a transcript that
+			# read rc=0 with a valid banner and parsed row(s), but matches
+			# NEITHER structural marker at all, is not "a check that
+			# failed" in the same sense as a missing maintenance binary or
+			# a non-zero exit -- it is a shape this parser has never seen
+			# and cannot vouch for (see the completeness-check comment
+			# above). Say so plainly and ask for the transcript rather than
+			# steering at --replace-atoc, which asserts a human already
+			# confirmed what's resident -- nobody has, on this shape.
+			if [ "$rc" -eq 0 ] && [ "${#resident[@]}" -gt 0 ] && [ "$has_markers" = 0 ]; then
+				echo "!! ABORT ($tag): the resident ATOC read exited 0 with a valid banner and" >&2
+				echo "   parsed row(s), but the transcript (see $before) matches no recognised" >&2
+				echo "   gettoc table format -- no '| Name |' header, no '+---+' separator" >&2
+				echo "   anywhere. This could be a genuine truncation that swallowed BOTH" >&2
+				echo "   structural markers, a different SETOOLS box-drawing style this guard" >&2
+				echo "   doesn't recognise yet, or SES boot-banner text interleaved by a" >&2
+				echo "   mid-query reset. Refusing to burn rather than guess -- please file this" >&2
+				echo "   transcript (see docs/aen-provisioning.md) so the parser can be taught" >&2
+				echo "   the real shape. This is NOT the same situation --replace-atoc is for." >&2
+				return 5
+			fi
 			echo "!! ABORT ($tag): could not read the resident ATOC via 'maintenance -c \$SE_UART -opt gettoc'" >&2
 			echo "   (see $before). A fresh ATOC write REPLACES every app entry not in it, so" >&2
 			echo "   writing blind risks silently delisting anything already on this board -- that is" >&2
@@ -1436,7 +1480,16 @@ bench_atoc_replace_guard() {
 				echo "   NOT --replace-atoc: that flag asserts you checked what is resident, and" >&2
 				echo "   on this path nothing was ever read." >&2
 			else
-				echo "   Confirm by hand what is resident, then re-run with --replace-atoc." >&2
+				# LOW review (#2262, third round): align with alif_flash.py's
+				# own unverified-refusal wording -- "then re-run with
+				# --replace-atoc." alone reads as a routine next step; on a
+				# pre-provisioned Alp Lab module an unverified read is
+				# disproportionately likely to mean a factory bootloader is
+				# still resident and unconfirmed, so name that risk instead
+				# of leaving --replace-atoc looking like the default fix.
+				echo "   Confirm by hand what is resident, then re-run with --replace-atoc only once you know it is safe to lose." >&2
+				echo "   On a pre-provisioned Alp Lab module this can include a factory bootloader" >&2
+				echo "   entry (see docs/aen-provisioning.md \"0.5 If your module came from Alp Lab\")." >&2
 			fi
 			return 5
 		fi

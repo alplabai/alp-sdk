@@ -276,14 +276,29 @@ def test_build_atoc_config_hp_uses_alp_hp_section() -> None:
 # app-write-mram, the verdict JSON, and --replace-atoc.
 # ---------------------------------------------------------------------
 
-_CLEAN_HE_GETTOC = (
+def _boxed(body: str) -> str:
+    """Wrap raw `| Name | CPU | ... |`-shaped data row(s) in the top
+    separator + `| Name | CPU |` header row + separator + ... + closing
+    separator every real gettoc capture carries -- see
+    `aen_atoc._is_table_structurally_complete`. THIRD #2262 review round:
+    the structural-completeness check's boxless exemption is gone, so
+    every fixture standing in for a genuine "this table is complete and
+    trustworthy" outcome must carry both bookends explicitly now."""
+    sep = "+----------+--------+\n"
+    header = "|   Name   |  CPU   |\n"
+    if not body.endswith("\n"):
+        body += "\n"
+    return sep + header + sep + body + sep
+
+
+_CLEAN_HE_GETTOC = _boxed(
     "|   DEVICE |  CM0+  | 0x8057C6F0 | 0x8057BCF0 | ---------- | ---------- |"
     "      312 |  0.5.0| u V  |\n"
     "|   ALP-HE | M55-HE | 0x8057EDB0 | 0x8057E3B0 | 0x58000000 | 0x58000000 |"
     "     4480 |  1.0.0| uLVB |\n"
 )
 
-_FOREIGN_GETTOC = (
+_FOREIGN_GETTOC = _boxed(
     "|   DEVICE |  CM0+  | 0x8057C6F0 | 0x8057BCF0 | ---------- | ---------- |"
     "      312 |  0.5.0| u V  |\n"
     "| BOOTLOAD | A32_0  | 0x80002000 | 0x8057A8F0 | ---------- | 0x80002000 |"
@@ -302,7 +317,7 @@ _COMPLIANT_BANNER = "SES A1 v1.110.0 Mar  4 2026 19:06:23\n"
 # A pre-provisioned module's factory ATOC (HIGH-2 review, #2262):
 # `zephyr/sysbuild/aen/README.md`'s "SoM-maker provisioning model" --
 # `| MCUBOOT- | M55-HE | ... | uLVB |`.
-_FACTORY_MCUBOOT_GETTOC = (
+_FACTORY_MCUBOOT_GETTOC = _boxed(
     "|   DEVICE |  CM0+  | 0x8057C6F0 | 0x8057BCF0 | ---------- | ---------- |"
     "      312 |  0.5.0| u V  |\n"
     "| MCUBOOT- | M55-HE | 0x8057D230 | 0x8057C830 | 0x58000000 | 0x58000000 |"
@@ -527,6 +542,30 @@ def test_do_run_aborts_on_any_refused_status_not_just_known_strings(
     assert _verdict(runner)["status"] == "refused-something-new"
 
 
+def test_do_run_unrecognized_format_refusal_does_not_steer_to_replace_atoc(
+        tmp_path, monkeypatch) -> None:
+    # BLOCKER review (#2262, third round): a query that exited 0 with a
+    # valid banner and parsed row(s), but whose transcript carries NEITHER
+    # the header nor any separator, must refuse with a message that says
+    # the format wasn't recognised and asks for the transcript -- NOT the
+    # generic "confirm by hand, then --replace-atoc" wording, which
+    # wrongly implies a human already confirmed what's resident.
+    runner = _make_runner(tmp_path)
+    boxless = "|   BOOTLOAD |  A32_0  | 0x0 | 0x0 |\n"
+    _stub_maintenance(monkeypatch, gettoc=(boxless, 0))
+    with pytest.raises(RuntimeError) as excinfo:
+        runner.do_run("flash")
+    message = str(excinfo.value)
+    assert "matches no recognised gettoc table format" in message
+    assert "file this transcript" in message
+    # The flag name may appear only to say it does NOT apply here -- never
+    # as an instruction to re-run with it.
+    assert "re-run with --replace-atoc" not in message
+    assert "NOT the same situation --replace-atoc is for" in message
+    assert not _write_mram_was_called(runner)
+    assert _verdict(runner)["status"] == "refused-unverified"
+
+
 def test_do_run_unverified_refusal_warns_about_factory_mcuboot(tmp_path, monkeypatch) -> None:
     # Minor review fix (#2262): the unverified-read refusal must not
     # blindly steer an operator at --replace-atoc without first warning
@@ -579,7 +618,7 @@ def test_do_run_allowed_entry_is_alp_he_for_an_he_build(tmp_path, monkeypatch) -
     # shape (_atoc_section_name), not a hardcoded/union set.
     runner = _make_runner(tmp_path, device="AE822FA0E5597LS0_HE",
                            reset_vector=0x58000401)
-    hp_only = (
+    hp_only = _boxed(
         "|   ALP-HP | M55-HP | 0x8057D230 | 0x8057C830 | 0x50000000 | 0x50000000 |"
         "     4480 |  1.0.0| uLVB |\n"
     )
@@ -593,7 +632,7 @@ def test_do_run_allowed_entry_is_alp_he_for_an_he_build(tmp_path, monkeypatch) -
 def test_do_run_allowed_entry_is_alp_hp_for_an_hp_build(tmp_path, monkeypatch) -> None:
     runner = _make_runner(tmp_path, device="AE822FA0E5597LS0_HP",
                            reset_vector=0x50000401)
-    he_only = (
+    he_only = _boxed(
         "|   ALP-HE | M55-HE | 0x8057EDB0 | 0x8057E3B0 | 0x58000000 | 0x58000000 |"
         "     4480 |  1.0.0| uLVB |\n"
     )

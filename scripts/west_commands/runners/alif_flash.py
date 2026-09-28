@@ -781,6 +781,39 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
                 f'ATOC guard: {verdict.status} (transcript: {transcript_path})')
             return
         if verdict.status == 'refused-unverified':
+            # BLOCKER review (#2262, third round): a query that exited 0
+            # with a valid banner and parsed row(s), but whose transcript
+            # carries NEITHER the '| Name |' header nor any '+---+'
+            # separator, is not "a check that failed" in the same sense as
+            # a missing maintenance binary or a non-zero exit -- it is a
+            # shape this parser has never seen and cannot vouch for (a
+            # truncation that swallowed BOTH structural markers, a
+            # different SETOOLS box-drawing style, or SES boot-banner text
+            # interleaved by a mid-query reset). Naming it "unverified" and
+            # steering at --replace-atoc the same way a routine failure
+            # would be is itself the wrong instinct here -- nobody has
+            # confirmed what's resident, and --replace-atoc asserts they
+            # have. Ask for the transcript instead.
+            format_unrecognized = (
+                banner_rc == 0
+                and gettoc_rc == 0
+                and resident
+                and not _aen_atoc.table_has_structural_markers(gettoc_text or ''))
+            if format_unrecognized:
+                raise RuntimeError(
+                    "the resident ATOC query via 'maintenance -c "
+                    f"{self.se_uart} -opt gettoc' exited 0 with a valid SES "
+                    'banner and parsed row(s), but the transcript (see '
+                    f'{transcript_path}) matches no recognised gettoc table '
+                    "format -- no '| Name |' header, no '+---+' separator "
+                    'anywhere. This could be a genuine truncation that '
+                    'swallowed BOTH structural markers, a different SETOOLS '
+                    "box-drawing style this guard doesn't recognise yet, or "
+                    'SES boot-banner text interleaved by a mid-query reset. '
+                    'Refusing to burn rather than guess -- please file this '
+                    'transcript (see docs/aen-provisioning.md) so the parser '
+                    'can be taught the real shape. This is NOT the same '
+                    'situation --replace-atoc is for.')
             # Minor review fix (#2262): this message's own "re-run with
             # --replace-atoc" advice is exactly the wrong instinct on a
             # pre-provisioned Alp Lab module with a stale/misconfigured

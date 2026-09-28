@@ -323,7 +323,7 @@ def test_parse_resident_atoc_table_nbsp_only_name_is_not_dropped(aen_atoc):
 
 def test_compute_query_status_ok_when_rows_present(aen_atoc):
     assert aen_atoc.compute_query_status(
-        True, "SES A1 v1.0\n", 0, "|   DEVICE |  CM0+  |\n", 0) == "ok"
+        True, "SES A1 v1.0\n", 0, _boxed("|   DEVICE |  CM0+  |"), 0) == "ok"
 
 
 def test_compute_query_status_empty_on_no_atoc_line(aen_atoc):
@@ -368,13 +368,35 @@ def test_compute_query_status_unverified_when_rc_zero_but_nothing_parses(aen_ato
 # PR exists to close). `compute_query_status` now additionally requires
 # structural completeness -- the `| Name |` header row AND a closing
 # `+---+` separator strictly after the last parsed data row -- before
-# trusting a boxed table's "ok" classification. A boxless/plain dump with
-# neither marker at all (no header, no separator line anywhere -- see
-# `test_compute_query_status_ok_on_boxless_table_without_header` below)
-# has nothing to check completeness against and keeps the pre-existing
-# any-rows-parsed rule, so `scripts/aen_atoc.py`'s own
-# `_REAL_MULTI_ENTRY_ATOC`-shaped real captures are unaffected.
+# trusting a boxed table's "ok" classification.
+#
+# THIRD review round: an earlier version of this fix EXEMPTED a transcript
+# carrying neither marker at all ("nothing to check completeness against"),
+# reasoning it must be a plain/boxless capture shape -- that reopened the
+# exact same fail-open for any capture that swallows BOTH the header and
+# the separator (noise eating the top of the transcript while a timeout
+# still cuts the tail leaves bare DEVICE/SERAM rows with no markers at
+# all), a different SETOOLS box-drawing style this parser has never seen,
+# or SES boot-banner text interleaved by a mid-query reset. There is no
+# such exemption any more: EVERY "ok" fixture below must be `_boxed(...)`
+# explicitly, and the one remaining boxless case
+# (`test_compute_query_status_unverified_on_boxless_table_without_markers`)
+# is a negative control proving the exemption stays closed.
 # ---------------------------------------------------------------------
+
+
+def _boxed(*rows: str) -> str:
+    """Wrap raw `| Name | CPU | ... |`-shaped data row line(s) in the top
+    separator + `| Name | CPU |` header row + separator + ... + closing
+    separator every real gettoc capture carries -- see
+    `aen_atoc._is_table_structurally_complete`. Every fixture standing in
+    for a genuine "this table is complete and trustworthy" outcome must
+    carry both bookends explicitly now that the boxless exemption is gone
+    (third #2262 review round)."""
+    sep = "+----------+--------+\n"
+    header = "|   Name   |  CPU   |\n"
+    body = "".join(row if row.endswith("\n") else row + "\n" for row in rows)
+    return sep + header + sep + body + sep
 
 
 def test_compute_query_status_unverified_on_table_truncated_after_baseline_rows(aen_atoc):
@@ -436,13 +458,34 @@ def test_compute_query_status_ok_on_structurally_complete_boxed_table(aen_atoc):
         True, "SES A1 v1.0\n", 0, table, 0) == "ok"
 
 
-def test_compute_query_status_ok_on_boxless_table_without_header(aen_atoc):
-    # A plain "|name|cpu|" dump with no header/separator lines at all (see
-    # `_REAL_MULTI_ENTRY_ATOC` in test_atoc_guard_parity.py) has no
-    # structural bookends to check completeness against, so it is exempt
-    # from the new rule and keeps the pre-existing any-rows-parsed "ok".
+def test_compute_query_status_unverified_on_boxless_table_without_markers(aen_atoc):
+    # NEGATIVE CONTROL (third #2262 review round): a plain "|name|cpu|"
+    # dump with NEITHER a header nor a separator line anywhere must refuse,
+    # not pass -- this is precisely the shape a capture that swallowed both
+    # structural markers (noise + a timeout, an unrecognised SETOOLS
+    # box-drawing style, interleaved SES boot-banner text) would take, and
+    # an earlier version of this fix wrongly exempted it as "nothing to
+    # check completeness against".
     assert aen_atoc.compute_query_status(
-        True, "SES A1 v1.0\n", 0, "|   DEVICE |  CM0+  |\n", 0) == "ok"
+        True, "SES A1 v1.0\n", 0, "|   DEVICE |  CM0+  |\n", 0) == "unverified"
+
+
+def test_table_has_structural_markers_true_for_torn_table_with_header(aen_atoc):
+    # A header present but no closing separator (a recognisable, torn
+    # capture) still HAS a marker -- the runner uses this to keep the
+    # existing "confirm by hand, then --replace-atoc" message for this
+    # shape, distinct from the boxless "unrecognised format" case below.
+    torn = (
+        "+----------+--------+\n"
+        "|   Name   |  CPU   |\n"
+        "+----------+--------+\n"
+        "|    DEVICE|   CM0+ |\n"
+    )
+    assert aen_atoc.table_has_structural_markers(torn)
+
+
+def test_table_has_structural_markers_false_for_boxless_dump(aen_atoc):
+    assert not aen_atoc.table_has_structural_markers("|   DEVICE |  CM0+  |\n")
 
 
 def test_is_no_atoc_found_tolerates_leading_and_trailing_whitespace(aen_atoc):

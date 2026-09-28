@@ -12,13 +12,30 @@ Fixture provenance (MEDIUM-5 review, alp-sdk#2262 -- be precise about
 which of these are real captures vs. hand-written test vectors):
   REAL, bench-verified 2026-09-07 AEN EVK captures (byte-identical to
   tests/scripts/test_bench_jlink_connect_guard.py's own pinned copies):
-    `_REAL_MULTI_ENTRY_ATOC`, `_REAL_GETBANNER`, `_REAL_GETTOC_9ROW`,
-    `_REAL_GETTOC_CLEAN`.
+    `_REAL_GETBANNER`, `_REAL_GETTOC_9ROW`, `_REAL_GETTOC_CLEAN`.
+  NOT a gettoc capture (THIRD review round correction -- was previously,
+  wrongly, listed above as one): `_REAL_MULTI_ENTRY_ATOC` is trimmed by
+  hand from the alp-sdk#2025 INCIDENT REPORT (PR #2026) prose, not from a
+  `maintenance -opt gettoc` transcript -- it carries no header row, no
+  `+---+` separators, no SERAM Time column, and its cell style matches an
+  SES boot-banner table, not a raw gettoc dump. Kept in its original
+  boxless shape as this suite's one deliberate negative control for the
+  "no recognised table structure at all" refusal (see
+  `test_parity_real_fixtures_classify_as_before`'s own MULTI_ENTRY case);
+  `_REAL_MULTI_ENTRY_ATOC_BOXED` below re-boxes the same row data for the
+  tests that need a genuinely complete table to exercise foreign-entry
+  detection.
   SYNTHETIC (hand-written to exercise one specific parser rule; never
   captured off real hardware): `_NO_ATOC`, `_ANSI_COMPLIANT_TABLE`,
   `_CRLF_ONLY_ALLOWED_ATOC`, the short-row/NBSP-only-name/empty-name/
   cross-CPU fixtures below, and the partial-row-then-error text in
-  `test_parity_gettoc_failure_after_partial_output_is_unverified`.
+  `test_parity_gettoc_failure_after_partial_output_is_unverified`. THIRD
+  review round: every one of these that stands in for a genuine "this is a
+  complete, trustworthy table" outcome is now wrapped in `_boxed()` (the
+  header row + `+---+` separators every real capture carries) -- the
+  second review round's structural-completeness fix originally exempted a
+  transcript with no markers at all, which these boxless fixtures relied
+  on and which reopened the very fail-open the fix existed to close.
 
 The bash side only ever returns 0 (proceed) or 5 (abort) -- the Python side
 is more granular (clear/empty/refused-foreign/refused-unverified/replaced).
@@ -190,6 +207,34 @@ def _run_bash_guard(
 # for full provenance notes. Duplicated here (not imported) so this parity
 # file has no import-time dependency on another test module's internals.
 
+
+def _boxed(body: str) -> str:
+    """Wrap raw `| Name | CPU | ... |`-shaped data row(s) in the top
+    separator + `| Name | CPU |` header row + separator + ... + closing
+    separator every real gettoc capture carries -- see
+    `aen_atoc._is_table_structurally_complete`. THIRD review round: the
+    structural-completeness check's boxless exemption is gone, so every
+    fixture standing in for a genuine "this table is complete and
+    trustworthy" outcome must carry both bookends explicitly now."""
+    sep = "+----------+--------+\n"
+    header = "|   Name   |  CPU   |\n"
+    if not body.endswith("\n"):
+        body += "\n"
+    return sep + header + sep + body + sep
+
+
+def _boxed_bytes(row: bytes) -> bytes:
+    """`_boxed`, for the raw-bytes `_run_maintenance` subprocess-boundary
+    fixtures below -- the header/separator bookends are plain ASCII, so
+    wrapping never disturbs a byte under test (e.g. an embedded bare
+    `\\r`) inside *row* itself."""
+    sep = b"+----------+--------+\n"
+    header = b"|   Name   |  CPU   |\n"
+    if not row.endswith(b"\n"):
+        row += b"\n"
+    return sep + header + sep + row + sep
+
+
 _REAL_MULTI_ENTRY_ATOC = """\
 |   DEVICE |  CM0+  | 0x8057C6F0 | 0x8057BCF0 | ---------- | ---------- |      312 |  0.5.0| u V  |
 |   DEVICE |  CM0+  | 0x805C1EC0 | 0x805C14C0 | ---------- | ---------- |      372 |  0.5.0| u V  |
@@ -198,6 +243,12 @@ _REAL_MULTI_ENTRY_ATOC = """\
 |   HP_APP | M55-HP | 0x8057D230 | 0x8057C830 | 0x50000000 | 0x50000000 |     4480 |  1.0.0| uLVB |
 |   HE_APP | M55-HE | 0x8057EDB0 | 0x8057E3B0 | 0x58000000 | 0x58000000 |     4480 |  1.0.0| uLVB |
 """
+
+# The same row data, re-boxed: `_REAL_MULTI_ENTRY_ATOC` itself stays
+# boxless (it is this suite's one deliberate negative control -- see the
+# module docstring), but a foreign-entry-detection test needs a table this
+# guard actually recognises as complete to exercise that logic at all.
+_REAL_MULTI_ENTRY_ATOC_BOXED = _boxed(_REAL_MULTI_ENTRY_ATOC)
 
 _NO_ATOC = "No ATOC found on target device.\n"
 
@@ -251,14 +302,14 @@ _REAL_GETTOC_CLEAN = (
     "\x1b[0m\n"
 )
 
-_ANSI_COMPLIANT_TABLE = (
+_ANSI_COMPLIANT_TABLE = _boxed(
     "|   \x1b[32mDEVICE\x1b[0m |  CM0+  | 0x8057C6F0 | 0x8057BCF0 | ---------- |"
     " ---------- |      312 |  0.5.0| u V  |\n"
     "|   \x1b[32mALP-HE\x1b[0m | M55-HE | 0x8057EDB0 | 0x8057E3B0 | 0x58000000 |"
     " 0x58000000 |     4480 |  1.0.0| uLVB |\n"
 )
 
-_CRLF_ONLY_ALLOWED_ATOC = (
+_CRLF_ONLY_ALLOWED_ATOC = _boxed(
     "|   DEVICE |  CM0+  | 0x8057C6F0 | 0x8057BCF0 | ---------- | ---------- |"
     "      312 |  0.5.0| u V  |\r\n"
     "|   ALP-HE | M55-HE | 0x8057EDB0 | 0x8057E3B0 | 0x58000000 | 0x58000000 |"
@@ -268,9 +319,13 @@ _CRLF_ONLY_ALLOWED_ATOC = (
 # HIGH-1 review shapes (alp-sdk#2262) -- SYNTHETIC, added specifically to
 # prove the fail-open fix in parse_resident_atoc_table on BOTH legs (a
 # real awk run confirmed these exact outputs: see the docstrings on
-# tests/scripts/test_aen_atoc.py's matching unit tests).
-_SHORT_ROW_FOREIGN = " |  A32_APP\n"
-_NBSP_ONLY_NAME_ROW = "|  \xa0\xa0\xa0 | CM0+ |\n"
+# tests/scripts/test_aen_atoc.py's matching unit tests). THIRD review
+# round: each is now `_boxed()` -- the row shape under test is unaffected
+# (the header/separator bookends are always skipped by the row parser),
+# but the table must still carry them to read as "ok" rather than
+# "unverified" now that the boxless exemption is gone.
+_SHORT_ROW_FOREIGN = _boxed(" |  A32_APP\n")
+_NBSP_ONLY_NAME_ROW = _boxed("|  \xa0\xa0\xa0 | CM0+ |\n")
 _EMPTY_NAME_ROW = "|    |  CM0+  |\n"
 # ALP-HE resident under a foreign-looking CPU column ("A32_0" instead of
 # "M55-HE") -- LOW-10 review: the allowed-set membership check is
@@ -278,12 +333,12 @@ _EMPTY_NAME_ROW = "|    |  CM0+  |\n"
 # `name not in allowed_set`), so this must NOT be foreign on either leg.
 # Documenting/parity-testing this deliberately-unchanged behaviour, not
 # altering it (LOW-10 is explicitly out of scope for this PR).
-_ALLOWED_NAME_WRONG_CPU_ROW = "|   ALP-HE | A32_0  | 0x0 | 0x0 |\n"
+_ALLOWED_NAME_WRONG_CPU_ROW = _boxed("|   ALP-HE | A32_0  | 0x0 | 0x0 |\n")
 # SERAM1 on a non-CM0+ CPU: the baseline exemption is cross-checked
 # against the CPU column, so a same-named row on a different core is a
 # genuine (if oddly-named) app entry, not SE firmware -- must be foreign
 # on both legs.
-_SERAM1_WRONG_CPU_ROW = "|   SERAM1 | M55-HE | 0x0 | 0x0 |\n"
+_SERAM1_WRONG_CPU_ROW = _boxed("|   SERAM1 | M55-HE | 0x0 | 0x0 |\n")
 
 _GARBLED_BANNER = "garbage, no SES banner here\n"
 
@@ -486,19 +541,24 @@ def test_parity_table_missing_closing_separator_is_unverified(tmp_path, aen_atoc
 
 @_NEEDS_BASH
 def test_parity_real_fixtures_classify_as_before(tmp_path, aen_atoc):
-    # Confirm the three real, bench-verified 2026-09-07 captures are
-    # unaffected by the new structural-completeness check (MEDIUM-5
-    # provenance note above): all three carry both the header row and a
-    # closing separator, or (MULTI_ENTRY) neither at all.
-    for allowed, fixture, expect_bash_rc in (
-        (["ALP-HE"], _REAL_GETTOC_9ROW, 5),           # foreign -> refuse
-        (["ALP-HE"], _REAL_GETTOC_CLEAN, 0),          # clean -> proceed
-        (["ALP-HP", "ALP-HE"], _REAL_MULTI_ENTRY_ATOC, 5),  # foreign -> refuse
+    # Confirm the two REAL, bench-verified 2026-09-07 captures are
+    # unaffected by the structural-completeness check: both carry the
+    # header row and a closing separator. THIRD review round:
+    # `_REAL_MULTI_ENTRY_ATOC` is NOT one of them (see the module
+    # docstring's corrected provenance note) -- it is boxless by
+    # construction, so it now correctly classifies `refused-unverified`
+    # rather than `refused-foreign`; bash still exits 5 either way (it
+    # only ever distinguishes proceed/abort), so only the Python-side
+    # status differs per row here.
+    for allowed, fixture, expect_bash_rc, expect_py_status in (
+        (["ALP-HE"], _REAL_GETTOC_9ROW, 5, "refused-foreign"),
+        (["ALP-HE"], _REAL_GETTOC_CLEAN, 0, "clear"),
+        (["ALP-HP", "ALP-HE"], _REAL_MULTI_ENTRY_ATOC, 5, "refused-unverified"),
     ):
         bash = _run_bash_guard(tmp_path, "0", allowed, fixture)
         py = _python_verdict(aen_atoc, _REAL_GETBANNER, 0, fixture, 0, allowed, "0")
         assert bash.returncode == expect_bash_rc, (fixture, bash.stderr)
-        assert py.status != "refused-unverified", (fixture, py)
+        assert py.status == expect_py_status, (fixture, py)
 
 
 @_NEEDS_BASH
@@ -522,10 +582,16 @@ def test_parity_crlf_table_proceeds(tmp_path, aen_atoc):
 @_NEEDS_BASH
 def test_parity_dualcore_own_write_allows_both_entries(tmp_path, aen_atoc):
     """flash-run-dualcore.sh's own legitimate two-entry write (ALP-HP +
-    ALP-HE) must not trip either guard on itself."""
-    bash = _run_bash_guard(tmp_path, "0", ["ALP-HP", "ALP-HE"], _REAL_MULTI_ENTRY_ATOC)
+    ALP-HE) must not trip either guard on itself. Uses the BOXED variant
+    (third review round): `_REAL_MULTI_ENTRY_ATOC` itself is boxless and,
+    since the structural-completeness check's boxless exemption closed,
+    now correctly reads `unverified` rather than exercising the
+    foreign-entry logic this test is actually for -- see
+    `_REAL_MULTI_ENTRY_ATOC_BOXED`'s own comment."""
+    bash = _run_bash_guard(tmp_path, "0", ["ALP-HP", "ALP-HE"], _REAL_MULTI_ENTRY_ATOC_BOXED)
     py = _python_verdict(
-        aen_atoc, _REAL_GETBANNER, 0, _REAL_MULTI_ENTRY_ATOC, 0, ["ALP-HP", "ALP-HE"], "0")
+        aen_atoc, _REAL_GETBANNER, 0, _REAL_MULTI_ENTRY_ATOC_BOXED, 0,
+        ["ALP-HP", "ALP-HE"], "0")
     # HP_APP/HE_APP are resident under different names than the ALP-HP/ALP-HE
     # this run would write -- still genuinely foreign on both sides. So are
     # BOOTLOAD/A32_APP (the A32 Linux boot chain): neither is in the
@@ -574,9 +640,9 @@ def test_parity_empty_name_row_is_not_a_resident_entry(tmp_path, aen_atoc):
     # A row whose Name column trims to "" is not a real entry on either
     # leg (`name != ""` in awk; `if name and ...` in Python) -- a clean
     # ALP-HE-only board plus one such row must still proceed.
-    table = _EMPTY_NAME_ROW + (
+    table = _boxed(_EMPTY_NAME_ROW + (
         "|   ALP-HE | M55-HE | 0x0 | 0x0 |\n"
-    )
+    ))
     bash = _run_bash_guard(tmp_path, "0", ["ALP-HE"], table)
     py = _python_verdict(aen_atoc, _REAL_GETBANNER, 0, table, 0, ["ALP-HE"], "0")
     assert bash.returncode == 0, bash.stderr
@@ -713,7 +779,11 @@ _NEEDS_REAL_SUBPROCESS = pytest.mark.skipif(
 def test_parity_bare_cr_inside_a_row_name_via_run_maintenance(tmp_path, aen_atoc):
     # bash: `tr -d '\r'` DELETES the bare CR, joining "ALP-HE" and "Z"
     # into one foreign name "ALP-HEZ" on a single row -> refused-foreign.
-    gettoc_bytes = b"| ALP-HE\rZ | M55-HE | x |\n"
+    # `_boxed_bytes` (third review round): the table must be structurally
+    # complete to read "foreign" at all now that the boxless exemption is
+    # gone; the embedded `\r` under test sits inside the wrapped row,
+    # untouched by the wrapper.
+    gettoc_bytes = _boxed_bytes(b"| ALP-HE\rZ | M55-HE | x |\n")
     maint = tmp_path / "maintenance"
     _write_byte_stub_maintenance(maint, _REAL_GETBANNER.encode("utf-8"), 0, gettoc_bytes, 0)
     (tmp_path / "bash").mkdir()
@@ -769,7 +839,9 @@ def test_parity_crlf_via_run_maintenance_is_a_negative_control(tmp_path, aen_ato
     # agree on both legs REGARDLESS of the `text=True` bug, so it does
     # not by itself prove the fix (see the three tests above for that);
     # it documents that CRLF specifically was never the broken case.
-    gettoc_bytes = b"| ALP-HE | M55-HE | x |\r\n"
+    # `_boxed_bytes` (third review round): needed to read "clear" now that
+    # the boxless exemption is gone.
+    gettoc_bytes = _boxed_bytes(b"| ALP-HE | M55-HE | x |\r\n")
     maint = tmp_path / "maintenance"
     _write_byte_stub_maintenance(maint, _REAL_GETBANNER.encode("utf-8"), 0, gettoc_bytes, 0)
     (tmp_path / "bash").mkdir()
