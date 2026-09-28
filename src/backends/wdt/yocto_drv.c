@@ -164,6 +164,12 @@ y_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilitie
 		 * rather than silently accept-and-ignore the mode (#1637). */
 		return ALP_ERR_NOSUPPORT;
 	}
+	if (cfg->window_min_ms != 0u || cfg->flags != 0u) {
+		/* WDIOC has neither a window nor a sleep/debug pause control:
+		 * refuse rather than arm a plain watchdog the caller did not
+		 * ask for (#1637). */
+		return ALP_ERR_NOSUPPORT;
+	}
 	char path[32];
 	int  n = snprintf(path, sizeof(path), "/dev/watchdog%u", (unsigned)cfg->wdt_id);
 	if (n < 0 || (size_t)n >= sizeof(path)) return ALP_ERR_INVAL;

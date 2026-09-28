@@ -14436,6 +14436,14 @@
         "ALP_WDT_CONFIG_DEFAULT": {
           "hash": "1d30b05cbc938689",
           "value": "(id) ((alp_wdt_config_t){ .wdt_id = (id), .timeout_ms = 1000u, .on_timeout = ALP_WDT_RESET_SOC })"
+        },
+        "ALP_WDT_PAUSE_HALTED_BY_DEBUG": {
+          "hash": "c15b217088e018e9",
+          "value": "(1u << 1)"
+        },
+        "ALP_WDT_PAUSE_IN_SLEEP": {
+          "hash": "14cf1c0e38245f32",
+          "value": "(1u << 0)"
         }
       },
       "typedefs": {
@@ -14450,15 +14458,17 @@
           "kind": "enum"
         },
         "alp_wdt_config_t": {
-          "definition": "typedef struct { uint32_t wdt_id; uint32_t timeout_ms; alp_wdt_action_t on_timeout; alp_wdt_expiry_cb_t on_expire; void *user; } alp_wdt_config_t;",
+          "definition": "typedef struct { uint32_t wdt_id; uint32_t timeout_ms; alp_wdt_action_t on_timeout; alp_wdt_expiry_cb_t on_expire; void *user; uint32_t window_min_ms; uint32_t flags; } alp_wdt_config_t;",
           "fields": [
             "uint32_t wdt_id",
             "uint32_t timeout_ms",
             "alp_wdt_action_t on_timeout",
             "alp_wdt_expiry_cb_t on_expire",
-            "void *user"
+            "void *user",
+            "uint32_t window_min_ms",
+            "uint32_t flags"
           ],
-          "hash": "4d8abadbb3481b00",
+          "hash": "df1a8264c2f64e0e",
           "kind": "struct"
         },
         "alp_wdt_expiry_cb_t": {
