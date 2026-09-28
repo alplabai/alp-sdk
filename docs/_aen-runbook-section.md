@@ -140,23 +140,16 @@ removes any verdict left by a previous run instead, so its mere absence
 means "the guard did not reach a verdict this attempt", never a stale
 success read as this run's own).
 
-**The verdict contract, frozen as `alp-sdk.alif-flash-atoc-guard.v1`** (this
-is the canonical description; `changelog.d/2262.md` points back here rather
-than duplicating it — any field change bumps the schema string):
-
-| Field | Type | Value |
-|---|---|---|
-| `schema` | string | the literal `alp-sdk.alif-flash-atoc-guard.v1` |
-| `status` | string | one of `clear`, `empty`, `refused-foreign`, `refused-unverified`, `replaced` |
-| `foreign` | array of strings | the resident entry names foreign to this run's own section; `[]` when none |
-| `transcript` | string | absolute path to the paired `atoc-before.txt`, always present |
-| `allowed` | array of strings, sorted | the section name(s) this run is itself about to (re)write (today always exactly one) |
-| `query_status` | string | one of `unverified`, `empty`, `ok` — the raw pre-decision read outcome, BEFORE `--replace-atoc` is applied |
-
-`status == "replaced"` alone doesn't say what `--replace-atoc` overrode:
-`query_status == "unverified"` (with `foreign == []`) means it overrode an
-unverified read; any other `query_status` with a non-empty `foreign` means
-it overrode a genuinely foreign entry.
+**The verdict contract, frozen as `alp-sdk.alif-flash-atoc-guard.v1`.**
+Documented review finding (#2262, second round): this fragment's own header
+says it is *"intended to be folded into `docs/bring-up-aen.md`"*, and that
+file never was folded — so the canonical field table lived only here, in an
+unpublished draft, not reachable from any published doc's index or from
+`docs/README.md`. The frozen table now lives in
+[`aen-provisioning.md`](aen-provisioning.md)'s "The ATOC-replace guard
+verdict contract" section (published, and where a reader chasing `west
+flash`'s ATOC guard is already looking) — see it there for the field
+table; `changelog.d/2262.md` points at that same location.
 
 > **Sysbuild multi-domain caveat (alp-sdk#2274).** `alif_flash` runs once
 > PER DOMAIN, not once per `west flash` invocation, so a sysbuild build
@@ -186,6 +179,11 @@ it overrode a genuinely foreign entry.
 > SETOOLS path above (or `alif_flash` with `--replace-atoc`) is for
 > re-keying to your own production key or recovering a wiped/bare module,
 > where losing/replacing the factory ATOC is the intended outcome.
+> **TBD, unverified:** the literal `MCUBOOT-` traces to
+> `zephyr/sysbuild/aen/README.md` alone, not a captured `gettoc` off a
+> real pre-provisioned module (none exists in this repo yet) — a wrong
+> literal still leaves the guard refusing, just with the generic message
+> instead of this entry's own.
 
 ---
 

@@ -107,7 +107,13 @@ cd "$SETOOLS_DIR"
 (MCUboot entry: `cpu_id M55_HE`, `loadAddress 0x58000000`,
 `flags ["load","boot"]`, `signed true`.  The SES banner then shows
 `| MCUBOOT- | M55-HE | ... | uLVB |` -- slot0 is no longer an SES boot
-entry; MCUboot owns it from here.)  Shipped modules then boot
+entry; MCUboot owns it from here.  **TBD, unverified:** this exact `Name`
+column literal has never been confirmed against a real `gettoc` capture
+off a pre-provisioned module -- every real capture in this repo's test
+suite is off an AEN EVK dev board instead. `scripts/west_commands/runners/
+alif_flash.py`'s `_FACTORY_MCUBOOT_ATOC_NAME` cites this sentence as its
+only source; capture the real string during a bench session and correct
+both if it differs.)  Shipped modules then boot
 out-of-box, and customers load apps into slot0 with a plain J-Link (no
 SETOOLS/SE-UART of their own -- see
 [`docs/aen-provisioning.md`](../../../docs/aen-provisioning.md) §0.5,

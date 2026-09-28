@@ -97,7 +97,13 @@ west flash    # alif_flash runner: signs + writes your MCUboot-signed image
 > module unable to boot MCUboot at all. `--replace-atoc` overrides the
 > refusal, but it does exactly that deletion — it is NOT the remedy for a
 > pre-provisioned module. **Use Option B below instead**, which never
-> touches the ATOC.
+> touches the ATOC. (**TBD, unverified**: the exact literal `MCUBOOT-` the
+> guard checks for traces to `zephyr/sysbuild/aen/README.md`'s own
+> provisioning section, not a captured `gettoc` off a real pre-provisioned
+> module — none exists in this repo yet. If the real name differs, the
+> guard still refuses the burn; it only loses this entry's dedicated
+> message and falls back to the generic foreign-entry one, which no longer
+> defaults to steering you at `--replace-atoc` either.)
 
 **Option B — plain J-Link, no SETOOLS, no ATOC, no SE-UART (the
 day-1 path for a pre-provisioned module).**  Proven
@@ -161,6 +167,45 @@ You only need to hand-run the SETOOLS steps below if you are:
    or bringing up a **bare module** sourced outside Alp Lab.
 
 The rest of this document is that path.
+
+## 0.6 The ATOC-replace guard verdict contract
+
+Every `west flash` attempt through the `alif_flash` runner (#2262) leaves
+`<build_dir>/alif_flash/atoc-before.txt` (the raw `getbanner`/`gettoc`
+transcript) and `<build_dir>/alif_flash/atoc-guard.json` (a machine-readable
+verdict), written *before* any refusal is raised, so a caller such as
+tan-cli's `zephyr_west_flash` backend (tan-cli#1267) can tell this refusal
+apart from any other `west flash` failure without parsing stderr. The exact
+field set is **frozen as `alp-sdk.alif-flash-atoc-guard.v1`** — any future
+change bumps the schema string (`...v1` -> `...v2`), the same convention
+`metadata/schemas/*-v1.schema.json` already uses elsewhere in this repo.
+(Moved here from `docs/_aen-runbook-section.md`, second #2262 review round:
+that fragment was never actually folded into a published doc, so the table
+had no reachable home — this file, the one a reader chasing `west flash`'s
+ATOC guard is already reading, is that home now.)
+
+| Field | Type | Value |
+|---|---|---|
+| `schema` | string | the literal `alp-sdk.alif-flash-atoc-guard.v1` |
+| `status` | string | one of `clear`, `empty`, `refused-foreign`, `refused-unverified`, `replaced` |
+| `foreign` | array of strings | the resident entry names foreign to this run's own section; `[]` when none |
+| `transcript` | string | absolute path to the paired `atoc-before.txt`, always present (`.resolve()`d, second #2262 review round — previously only absolute when west's own `build_dir` happened to be) |
+| `allowed` | array of strings, sorted | the section name(s) this run is itself about to (re)write (today always exactly one) |
+| `query_status` | string | one of `unverified`, `empty`, `ok` — the raw pre-decision read outcome, BEFORE `--replace-atoc` is applied |
+
+`status == "replaced"` alone doesn't say what `--replace-atoc` overrode:
+`query_status == "unverified"` (with `foreign == []`) means it overrode an
+unverified read; any other `query_status` with a non-empty `foreign` means
+it overrode a genuinely foreign entry.
+
+**A refused run always leaves a verdict — with one honest exception.** The
+guard writes `atoc-guard.json` before every `raise`, specifically so a
+refusal is never silent to a machine reader. That guarantee assumes the
+build directory itself is writable: if it is not, writing the verdict fails
+the same way writing the transcript does, and `_run_atoc_guard` raises a
+`RuntimeError` naming the path instead of leaving any file at all (a burn is
+still never reached — this is a fail-closed abort, just one with no verdict
+JSON to inspect afterward, since there is nowhere to put it).
 
 ## 1. What you need
 
