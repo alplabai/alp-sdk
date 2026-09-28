@@ -441,6 +441,7 @@ def _write_text_or_raise(path, content):
     section): if the build directory cannot be written to at all, there is
     nowhere to put that verdict.'''
     try:
+        # write-text-newline-exempt: scratch per-run alif_flash ATOC guard artifact
         path.write_text(content, encoding='utf-8')
     except OSError as exc:
         raise RuntimeError(
@@ -738,7 +739,6 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
         # directory, so two concurrent `west flash` invocations never
         # share one -- there is no analogous cross-run collision to guard
         # against here.
-        # write-text-newline-exempt: scratch per-run transcript in the build dir
         _write_text_or_raise(
             transcript_path,
             _format_atoc_transcript(
@@ -757,7 +757,6 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
         # a machine-readable verdict a caller (e.g. tan-cli's
         # zephyr_west_flash backend) can tell apart from any other `west
         # flash` failure without parsing stderr.
-        # write-text-newline-exempt: scratch per-run verdict in the build dir
         _write_text_or_raise(
             verdict_path,
             json.dumps({
