@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * aen-isp-ov5647-viewfinder -- the portable <alp/camera.h> counterpart to
- * examples/aen/aen-isp-ov5647-capture: a real OV5647 sensor frame through
+ * examples/aen/aen-isp-capture: a real OV5647 sensor frame through
  * the Alif ISP-Pico (VeriSilicon ISP Nano), AE + AWB on, but through
  * alp_camera_open/start/capture/release/stop/close instead of the raw
  * Zephyr video_* API -- proving the portable backend itself
@@ -34,7 +34,7 @@
  * video_stream_start() (tolerating -EBUSY) before every dequeue, and this
  * app releases each frame promptly after taking its stats so the backend
  * can keep buffers moving.  The last frame is kept in frame_copy (below)
- * for a bench `savebin`, the same convention aen-isp-ov5647-capture uses.
+ * for a bench `savebin`, the same convention aen-isp-capture uses.
  *
  * TIMING: every frame prints `capture=<N> us` -- alp_camera_capture()'s
  * wall time, k_cycle_get_32()-measured. This is the bench observable for

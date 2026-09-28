@@ -314,6 +314,10 @@ jobs:
         timeout-minutes: 20
         # model-io adds tflite + flatbuffers so the .alpmodel tensor-I/O
         # tests run here (they importorskip otherwise); cbor2 is a base dep.
+        # scripts/alp_model/ stays in alp-sdk for now -- docs/adr/0028-tan-
+        # owns-the-model-engine.md (Status: Proposed) is the relocation
+        # decision to python/tan/model/; it is not enacted, so the extra
+        # stays installed here too.
         run: pip install -e ".[dev,model-io]"
 
       # ---------------------------------------------------------
@@ -438,9 +442,9 @@ jobs:
 
       # ---------------------------------------------------------
       # 4. Test sweep -- the same pytest battery the Linux PR
-      #    gate runs.  ~370 tests; <30 s on every OS on Linux/macOS, but
-      #    Windows is far slower (worst observed successful run 1009s/
-      #    16.8min across the sampled history) -- #1477 gave this step an
+      #    gate runs: ~4,400 tests, spread over every runner core with
+      #    pytest-xdist (`-n auto`, #2328). Serially it had grown to
+      #    9-15 min per OS (Windows slowest) -- #1477 gave this step an
       #    explicit timeout-minutes rather than leaving it to the
       #    uncapped-step 1min/step budget
       #    test_job_ceiling_exceeds_the_sum_of_its_step_timeouts assumes,
@@ -449,7 +453,19 @@ jobs:
       # ---------------------------------------------------------
       - name: pytest tests/scripts/
         timeout-minutes: 25
-        run: python -m pytest tests/scripts/ -q
+        run: python -m pytest tests/scripts/ -q -n auto -m "not repo_writes"
+
+      # Modules that write into the real checkout run alone, serially, after
+      # the parallel sweep (#2328; tests/scripts/conftest.py
+      # `_REPO_WRITER_MODULES`). A separate step rather than a second line:
+      # on Windows `run:` is pwsh, which only checks the LAST command's exit
+      # code, so a first-line failure would be masked.
+      - name: pytest tests/scripts/ (repo-writing, serial)
+        # Still run when the parallel sweep failed, so one CI round reports
+        # both sets.
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        run: python -m pytest tests/scripts/ -q -m repo_writes
 
   # ---------------------------------------------------------------
   # Loader smoke: every emit mode of alp_project.py produces

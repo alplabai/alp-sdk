@@ -490,6 +490,8 @@ static alp_status_t hantro_encode(alp_jpeg_backend_state_t    *state,
 			st->streaming = false;
 		}
 		(void)video_buffer_release(&vbuf);
+		/* -ENOSPC (JPEG_BUFFER_FULL): required size unknown; *out_len left
+		 * untouched per <alp/jpeg.h>. */
 		return _errno_to_alp(err); /* -EAGAIN -> ALP_ERR_TIMEOUT, see alp_errno.h. */
 	}
 	if (done == NULL) {

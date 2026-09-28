@@ -14,7 +14,19 @@ It runs a linear, stop-on-first-failure sequence:
    neither flag, no test is wanted and this step is a no-op.
 3. **flash** `bl2`/`fip` to xSPI (`xspi_flashwriter`, Flash Writer SCIF) and the
    system image to eMMC (`yocto_wic`) — the image is skipped for a
-   `bootloader-only:image-pending-hw` bundle
+   `bootloader-only:image-pending-hw` bundle. **Re-flashing FIP on a unit
+   that has already been provisioned** (a field/repair FIP upgrade, not
+   first-time provisioning of a fresh module): if that unit ever had a
+   *saved* U-Boot env (an MMC-resident `bootcmd` from before the
+   `alp_eth_mac` V2N/V2M command existed, or a manual `setenv
+   bootcmd; saveenv`), the new FIP's compiled-in `CONFIG_BOOTCOMMAND`
+   is never reached -- the saved one runs instead, and `env default -a`
+   in it still wipes whatever `board_late_init()` derived, leaving Linux
+   with the DRP-AI vendor default MAC (see
+   `docs/soms/v2n.md#ethernet-mac-address-policy`). Reset the saved env
+   as part of the same upgrade: `env default -a; saveenv` from the
+   U-Boot prompt (or erase the env partition/offset the saved copy lives
+   at) before the unit next autoboots.
 4. **EEPROM** — allocate a serial, build the 128-byte manifest (`program_eeprom.py`).
    The RIIC0 @0x50 write + read-back-verify is HW-gated (see below) — this step only
    plans it, even under `--execute`.

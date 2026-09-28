@@ -26,7 +26,10 @@
  *     time (the failure mode that can't recover by retrying).
  *     Transient runtime failures (alp_spi_open hiccup, gd32g553_init
  *     handshake timeout) keep `tried_init = false`, so the next
- *     acquire retries the bus open + handshake.
+ *     acquire retries the bus open + handshake.  An init that ends
+ *     ALP_ERR_BUSY (bridge alive, mid-OTA-trial) arms a hold-off
+ *     (CONFIG_ALP_SDK_V2N_SUPERVISOR_BUSY_HOLDOFF_MS) during which
+ *     acquirers get ALP_ERR_BUSY without re-running the ~2 s init.
  */
 
 #include <zephyr/kernel.h>
@@ -39,6 +42,9 @@
 
 #ifndef CONFIG_ALP_SDK_V2N_SUPERVISOR_SPI_BUS_ID
 #define CONFIG_ALP_SDK_V2N_SUPERVISOR_SPI_BUS_ID (-1)
+#endif
+#ifndef CONFIG_ALP_SDK_V2N_SUPERVISOR_BUSY_HOLDOFF_MS
+#define CONFIG_ALP_SDK_V2N_SUPERVISOR_BUSY_HOLDOFF_MS 1000
 #endif
 #ifndef CONFIG_ALP_SDK_V2N_SUPERVISOR_SPI_FREQ_HZ
 #define CONFIG_ALP_SDK_V2N_SUPERVISOR_SPI_FREQ_HZ 10000000
@@ -55,6 +61,7 @@
 static struct {
 	bool           tried_init;
 	alp_status_t   init_status;
+	int64_t        busy_until_ms; /* hold-off after an init that saw BUSY */
 	alp_spi_t     *spi;
 	gd32g553_t     ctx;
 	struct k_mutex lock;
@@ -74,6 +81,11 @@ SYS_INIT(v2n_supervisor_sys_init, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAU
 static alp_status_t try_init_locked(void)
 {
 	if (g_v2n.tried_init) return g_v2n.init_status;
+	/* A bridge that answered BUSY is alive but mid-OTA-trial; each
+	 * gd32g553_init() against it spends its whole ~2 s retry budget
+	 * under g_v2n.lock.  Answer BUSY straight away until the hold-off
+	 * expires instead of making every acquirer pay that again. */
+	if (k_uptime_get() < g_v2n.busy_until_ms) return ALP_ERR_BUSY;
 	g_v2n.init_status = ALP_ERR_NOT_READY;
 
 #if (CONFIG_ALP_SDK_V2N_SUPERVISOR_SPI_BUS_ID >= 0)
@@ -119,6 +131,9 @@ static alp_status_t try_init_locked(void)
 			g_v2n.spi = NULL;
 		}
 		g_v2n.init_status = s;
+		if (s == ALP_ERR_BUSY) {
+			g_v2n.busy_until_ms = k_uptime_get() + CONFIG_ALP_SDK_V2N_SUPERVISOR_BUSY_HOLDOFF_MS;
+		}
 		return s;
 	}
 

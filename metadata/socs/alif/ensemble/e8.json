@@ -14,7 +14,8 @@
   },
   "hwrm": {
     "version": "0.3",
-    "source": "Confidential-Alif_E8_HWRM_v0.3.pdf",
+    "doc_id": "AHRM0012NDA",
+    "source": "Alif E8 Hardware Reference Manual",
     "confidential": true
   },
   "errata": [
@@ -134,6 +135,14 @@
       "supports": ["RNN", "CNN"]
     }
   ],
+  "npu_toolchain": {
+    "vela": {
+      "memory_mode": "Sram_Only",
+      "system_config_requires_vendor_config": true,
+      "vendor_config_filename": "ensemble_vela.ini",
+      "source": "examples/aen/aen-npu-inference-alp/CMakeLists.txt:43; examples/aen/aen-npu-inference-alp-u55/CMakeLists.txt:40"
+    }
+  },
   "soc_ram_kb": 9984,
   "inference_arena_sram_kib": 0,
   "soc_flash_mb": 5.5,
