@@ -190,7 +190,11 @@ breakers.  Before pushing:
 python -c "import yaml,glob; [yaml.safe_load(open(f)) for f in glob.glob('examples/**/testcase.yaml', recursive=True)]"
 python -c "import yaml,glob; [yaml.safe_load(open(f)) for f in glob.glob('metadata/**/*.yaml', recursive=True)]"
 
-# Loader smoke
+# Loader smoke (serial). CI runs it faster in two phases: a parallel sweep,
+# then the modules that write into the checkout on their own. Never run bare
+# `-n` over tests/scripts (see tests/scripts/conftest.py _REPO_WRITER_MODULES):
+#   pytest tests/scripts/ -q -n auto -m "not repo_writes"
+#   pytest tests/scripts/ -q -m repo_writes
 pytest tests/scripts/ -q
 
 # Doc drift: dead SDK-symbol refs in docs + docs-index integrity
