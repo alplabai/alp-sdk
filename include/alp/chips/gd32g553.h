@@ -180,6 +180,28 @@ extern "C" {
  *  BEFORE any erase/program (#751).  See docs/gd32-bridge-protocol.md §8. */
 #define GD32G553_OTA_MIN_PROTOCOL_MINOR 6u
 
+/** GPIO expander line carrying the on-module Murata LBEE5HY2FY-922
+ *  (Infineon CYW55513) Bluetooth core's BT_REG_ON enable (GD32 pad
+ *  `PE14`).  Valid only on bridges advertising protocol minor
+ *  @ref GD32G553_REG_ON_MIN_PROTOCOL_MINOR or newer -- see that macro. */
+#define GD32G553_GPIO_LINE_BT_REG_ON 18u
+
+/** GPIO expander line carrying the on-module Murata LBEE5HY2FY-922
+ *  (Infineon CYW55513) Wi-Fi core's WL_REG_ON enable (GD32 pad
+ *  `PE15`).  Valid only on bridges advertising protocol minor
+ *  @ref GD32G553_REG_ON_MIN_PROTOCOL_MINOR or newer -- see that macro. */
+#define GD32G553_GPIO_LINE_WL_REG_ON 19u
+
+/** Minimum protocol MINOR at which the bridge's GPIO expander grows
+ *  from 18 to 20 lines, adding @ref GD32G553_GPIO_LINE_BT_REG_ON and
+ *  @ref GD32G553_GPIO_LINE_WL_REG_ON (firmware 0.2.12).  A bridge
+ *  reporting a lower minor -- or a nonzero major, which is a
+ *  wire-format change this driver cannot assume is backward
+ *  compatible -- never learned these two pads; issuing GPIO_WRITE
+ *  against them would silently power nothing while reporting success.
+ *  See docs/gd32-bridge-protocol.md's version-history table. */
+#define GD32G553_REG_ON_MIN_PROTOCOL_MINOR 11u
+
 /** v0.7 link-feature bits (CMD_LINK_FEATURES payload).  STATUS_SEQ:
  *  once granted, every SPI reply's STATUS byte carries a 4-bit
  *  slave-side sequence stamp in bits [7:4] that advances per freshly
