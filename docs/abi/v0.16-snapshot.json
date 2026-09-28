@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-27",
+  "generated": "2026-09-28",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -1599,6 +1599,10 @@
         "alp_camera_configure_isp": {
           "hash": "d99ef9681316b5cd",
           "signature": "alp_status_t alp_camera_configure_isp(alp_camera_t *camera, const alp_camera_isp_config_t *isp);"
+        },
+        "alp_camera_get_fps": {
+          "hash": "832d10277138deb5",
+          "signature": "alp_status_t alp_camera_get_fps(alp_camera_t *camera, uint32_t *fps_x1000);"
         },
         "alp_camera_open": {
           "hash": "e14b545584b912d5",
