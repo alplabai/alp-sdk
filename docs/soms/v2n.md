@@ -227,6 +227,85 @@ Octet 0 `0xA2` has U/L=1, I/G=0 and IEEE 802c-2017 SLAP quadrant bits
 Z:Y=`00`, i.e. the *Administratively Assigned Identifier* (AAI) quadrant --
 the range a local administrator may assign without buying an IEEE block.
 
+## Wi-Fi + Bluetooth (Linux)
+
+Every V2N/V2M SKU carries the same on-module Murata LBEE5HY2FY-922
+(Infineon CYW55513), Wi-Fi 6/6E 1x1 HE20 tri-band + BT 5.4, on SDHI2
+(4-bit SDIO) + RSCI4 (BT UART). Both REG_ON enables are GD32 bridge
+GPIO lines -- **not** SoC pins -- and only exist on bridge firmware
+>= 0.2.12 / protocol minor 11 (`GD32G553_REG_ON_MIN_PROTOCOL_MINOR`, see
+[`include/alp/chips/gd32g553.h`](../../include/alp/chips/gd32g553.h)):
+
+| Signal    | GD32 pad | Bridge GPIO line |
+|-----------|----------|-------------------|
+| WL_REG_ON | PE15     | 19                 |
+| BT_REG_ON | PE14     | 18                 |
+
+The **Linux** side lives entirely in `meta-alp-sdk` (the Zephyr/M33
+side has no Wi-Fi role):
+
+* `meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi` --
+  `&sdhi2` (WLAN, `mmc-pwrseq-simple` on line 19), `&sci4` (BT,
+  `brcm,bcm43438-bt` `shutdown-gpios` on line 18), the `sd2_wlan_pins` /
+  `sci4_bt_pins` pinctrl groups.
+* `meta-alp-sdk/recipes-kernel/linux/linux-renesas/wifi-bt.cfg` --
+  `CONFIG_CFG80211=m` + in-tree `CONFIG_BRCMFMAC` off (no CYW55513 ID
+  in the 6.1.x in-tree driver) + the Bluetooth HCI UART/Broadcom stack
+  as modules + `CONFIG_GPIO_GD32_BRIDGE=y`. The BT stack must stay `=m`:
+  built in, `hci_uart_bcm` probes before the root filesystem is mounted,
+  cannot load `brcm/BCM.hcd`, and hci0 setup times out on opcode 0x1003.
+* `meta-alp-sdk/recipes-kernel/cyw-fmac/` -- the out-of-tree Murata
+  `cyw-fmac` backports kmod (`compat`/`cfg80211`/`brcmutil`/`brcmfmac`,
+  installed under `updates/` so depmod prefers it over any in-tree
+  module).
+* `meta-alp-sdk/recipes-kernel/cyw-fmac-firmware/` -- the five
+  firmware blobs (WLAN `.trxse`, CLM, NVRAM, two regional BT `.hcd`
+  patches) from four upstream `murata-wireless` / `Infineon` repos,
+  pinned by `SRCREV`.
+* `wireless-regdb-static`, `iw`, `wpa-supplicant`, `bluez5` -- standard
+  OE-core recipes, pulled in by `alp-image-common.inc` for any V2N/V2M
+  `MACHINE_FEATURES`.
+
+**Bench results (2026-09-26, E1M-V2M103, cyw-fmac fw 28.10.387.10,
+kernel 6.1.141-cip43):**
+
+* Wi-Fi scan, WPA2/SAE association on 5 GHz channel 60, and DHCP all
+  worked end to end.
+* `sd-uhs-sdr50` on `&sdhi2` (above) negotiates SDR50 at 100 MHz (up
+  from HS at 50 MHz); `sd-uhs-sdr104` is deliberately not set --
+  untested 208 MHz tuning on this non-removable module is not worth
+  the risk yet.
+* `brcm,ccode-map-trivial` on the `wifi@1` node lets `iw reg set DE`
+  reach the firmware; confirmed with `wireless-regdb-static` installed.
+* Open HW note: bench RSSI on the E1M-V2M103 EVK reads roughly 35 dB
+  below a phone at the same spot -- points at that unit's antenna/RF
+  path, under investigation, not a software issue.
+
+**Bench TODO:** the E1M-X-EVK carrier dtsi (`e1m-x-evk.dtsi`) no longer
+parks PB0/PB1 as usb30 VBUS/OVC GPIOs -- those SoC pins are the
+on-module WLAN group's `SD2CLK`/`SD2DAT0`, never routed to the E1M
+connector (the old `usb30_pins`/`usb-ovc-disable-hog` pair was copied
+from the Renesas EVK reference dts without checking the ALP module's
+netlist). usb30 OC processing is left at its controller default;
+verify on the bench that xHCI reports no spurious over-current with
+PB1 now muxed as `SD2DAT0` -- if it does, suppress usb30 OC at the
+controller the same way usb20 is suppressed (see `&ehci0`'s comment in
+`e1m-x-evk.dtsi`).
+
+**Bench history**: the 2026-06 WLAN bring-up on this exact node shape
+chased pull-ups, JTAG_SEL, IOVS pad-voltage mode, and the SDIO/gSPI
+boot strap before converging on the on-module 32.768 kHz LPO (sourced
+from the on-module 5L35023B clock generator) as the real blocker --
+tracked separately in #2293, not part of this change. The 2026-09-26
+bench results above are the re-run against this node shape.
+BT (raw HCI, manual REG_ON) was bench-confirmed working at 115200 baud
+on `/dev/ttySC4` in 2026-06; the serdev/`shutdown-gpios` path above
+replaces that manual toggle and was re-run on silicon 2026-09-26
+(E1M-V2M103): `hci0` UP+RUNNING, BD_ADDR read via HCIGETDEVINFO.
+Re-run 2026-09-27 with the BT stack as modules: `bluetooth`/`hci_uart`/`btbcm`
+autoload after rootfs, the `brcm/BCM.hcd` patch loads (chip id 157), and
+`hci0` comes UP+RUNNING.
+
 ## Bring-up
 
 Step-by-step bench bring-up: [`docs/bring-up-v2n.md`](../bring-up-v2n.md).

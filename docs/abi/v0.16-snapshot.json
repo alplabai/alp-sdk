@@ -1370,6 +1370,10 @@
           "hash": "6dec10e01fc58f24",
           "value": "0x69u"
         },
+        "XEVK_I2C_ADDR_INA228_5V": {
+          "hash": "de4d67af37b38474",
+          "value": "0x42u"
+        },
         "XEVK_I2C_ADDR_INA236_1V8": {
           "hash": "c2c588a9640f949e",
           "value": "0x41u"
@@ -1377,10 +1381,6 @@
         "XEVK_I2C_ADDR_INA236_3V3": {
           "hash": "db2f615e7a9f47af",
           "value": "0x40u"
-        },
-        "XEVK_I2C_ADDR_INA236_5V": {
-          "hash": "eca71276506e3164",
-          "value": "0x4Au"
         },
         "XEVK_I2C_ADDR_INA236_VCAM2": {
           "hash": "54c31cdcf2773108",
@@ -1426,10 +1426,6 @@
           "hash": "230bcba87b062cad",
           "value": "4.0f"
         },
-        "XEVK_INA236_MAX_5V_A": {
-          "hash": "4388c012e9236a27",
-          "value": "4.0f"
-        },
         "XEVK_INA236_MAX_VCAM2_A": {
           "hash": "c59a2d78669ccdab",
           "value": "1.6f"
@@ -1444,10 +1440,6 @@
         },
         "XEVK_INA236_SHUNT_3V3_OHMS": {
           "hash": "88f3faeabe5c8b6e",
-          "value": "0.020f"
-        },
-        "XEVK_INA236_SHUNT_5V_OHMS": {
-          "hash": "1feb8cead916ad78",
           "value": "0.020f"
         },
         "XEVK_INA236_SHUNT_VCAM2_OHMS": {
@@ -4393,6 +4385,14 @@
           "hash": "07af629c5c4972e8",
           "value": "20u"
         },
+        "GD32G553_GPIO_LINE_BT_REG_ON": {
+          "hash": "a26a002ced48af2e",
+          "value": "18u"
+        },
+        "GD32G553_GPIO_LINE_WL_REG_ON": {
+          "hash": "02b7262b21b3b00f",
+          "value": "19u"
+        },
         "GD32G553_HOST_PROTOCOL_MAJOR": {
           "hash": "8cbf9804b6cc9204",
           "value": "0u"
@@ -4404,6 +4404,10 @@
         "GD32G553_OTA_MIN_PROTOCOL_MINOR": {
           "hash": "3081a6e71ff41243",
           "value": "6u"
+        },
+        "GD32G553_REG_ON_MIN_PROTOCOL_MINOR": {
+          "hash": "27d22c83de20f715",
+          "value": "11u"
         },
         "GD32G553_STATUS_CODE_MASK": {
           "hash": "5fac453e1d04fcbd",

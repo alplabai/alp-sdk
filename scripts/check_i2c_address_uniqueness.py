@@ -25,35 +25,34 @@ the newest one is the only one:
     -- a dict keyed by bus name, each device a ``{chip, role, address_7bit,
     assembled?}`` mapping. This is where both #1163 collisions live.
   * ``metadata/boards/*.yaml``'s top-level ``i2c_devices:`` -- a FLAT list
-    (``{macro, part, address, assembled?}``), not bus-keyed: the block is
-    documented (in each file's leading comment) as one implicit board bus,
-    so uniqueness is checked within one synthetic bus per file. A future
-    per-entry bus key would need this gate updated to read it; today there
-    is none to read.
+    (``{macro, part, address, assembled?}``), not bus-keyed. The file's
+    top-level ``i2c_devices_bus:`` names the one E1M bus the whole block
+    sits on (``E1M_X_I2C0`` on the E1M-X EVK); without it the block is
+    checked within one synthetic bus per file.
   * ``metadata/boards/*.yaml``'s ``audio.codecs[]`` -- a list using
     ``i2c_bus`` / ``i2c_address`` instead of ``address_7bit``/``address``
     (the TAS2563 stereo pair). Grouped by its own ``i2c_bus`` value.
 
-These three shapes are NOT cross-checked against each other even when a
-board's flat ``i2c_devices:`` block and its ``audio.codecs:`` block share a
-physical bus (e.g. e1m-x-evk.yaml's ``XEVK_I2C_BUS_SENSORS`` IS
-``E1M_X_I2C0``, the same bus ``audio.codecs`` names directly) -- the flat
-list carries no per-entry bus key to resolve that identity from, and
-guessing it from a comment would be exactly the kind of assumption this
-gate exists to avoid making. Each shape's own declared grouping is checked
-exactly as declared.
+When a board declares ``i2c_devices_bus:`` and an ``audio.codecs`` entry
+names the same ``i2c_bus``, both blocks are checked as ONE bus (#2348): a
+codec strapped onto a monitor's address is the same collision as two
+monitors on one address. The bus identity comes only from that declared
+key, never from a comment.
+
+**Broadcast addresses.**  A chip whose manifest
+(``metadata/chips/<chip>.yaml`` ``i2c.addresses[]``) lists an address with
+a ``scope`` mentioning "broadcast" also claims that address on its bus.
+Every fitted TAS2563 answers the global-call ``0x48``, so a device
+strapped to ``0x48`` beside one is written by every broadcast -- the
+TAS2563 page-select write to reg ``0x00`` lands in an INA236's CONFIG
+register (#2348). Broadcast claims only collide with a strap-addressed
+device; several parts sharing one broadcast address is the design.
 
 **assembled handling.**  ``assembled: false`` devices are excluded --
 an unpopulated footprint cannot ACK.  ``assembled: optional`` is NOT
 excluded: a part fitted only on some board variants still occupies its
 address the moment it IS fitted, so an optional part sharing an address
 with an always-fitted part is a real collision, not a hypothetical one.
-
-**What it does NOT catch.**  A collision between a chip-header protocol
-constant (e.g. ``TAS2563_I2C_ADDR_BROADCAST`` in
-``include/alp/chips/tas2563.h``) and a strap address is issue #1659, a
-different defect: that is a C header literal, not a second metadata
-device entry, and reading C headers is out of scope here.
 
 Allowlisted collisions are real, open hardware questions -- not gate bugs
 worked around by adjusting the list. Widening ALLOWLIST to make the gate
@@ -99,33 +98,17 @@ import yaml
 # tracking issue -- see the module docstring.
 ALLOWLIST: dict[tuple[str, str, str], tuple[tuple[str, ...], str]] = {
     (
-        "metadata/e1m_modules/E1M-V2M101.yaml",
-        "brd_i2c",
+        "metadata/boards/e1m-x-evk.yaml",
+        "E1M_X_I2C0",
         "0x48",
     ): ((
-        "chip=tmp112 role=temp_sensor",
-        "chip=tps628640 role=deepx_lpddr_0v85",
+        "chip=tas2563 broadcast",
+        "part=ina236 macro=XEVK_I2C_ADDR_INA236_VCAM2",
     ), (
-        "#1163 open, unresolved. TMP112's own ADD0 strap range is "
-        "0x48..0x4B (metadata/e1m_modules/E1M-V2M101.yaml:51) and TPS628640 "
-        "also claims 0x48 for deepx_lpddr_0v85 "
-        "(metadata/e1m_modules/E1M-V2M101.yaml:57) -- which device actually "
-        "answers on brd_i2c 0x48 is a hardware fact pending a schematic "
-        "decision, not something to guess by editing either address."
-    )),
-    (
-        "metadata/e1m_modules/E1M-V2M102.yaml",
-        "brd_i2c",
-        "0x48",
-    ): ((
-        "chip=tmp112 role=temp_sensor",
-        "chip=tps628640 role=deepx_lpddr_0v85",
-    ), (
-        "#1163 open, unresolved -- V2M102 carries the identical DEEPX "
-        "LPDDR + TMP112 population as V2M101 (see that entry above) and "
-        "the identical open question: TMP112 at "
-        "metadata/e1m_modules/E1M-V2M102.yaml:47, TPS628640 "
-        "deepx_lpddr_0v85 at metadata/e1m_modules/E1M-V2M102.yaml:53."
+        "#2343: U32 (INA236B, VCAM2) is strapped to the TAS2563 global-call "
+        "address on the E1M-X EVK V2. The maintainer's call is to remove U32 "
+        "on the current build batch and re-strap it to 0x4A/0x4B on the next "
+        "carrier revision; the metadata keeps it at its V2 strap until then."
     )),
 }
 
@@ -161,16 +144,68 @@ def _addr_label(addr: int) -> str:
 
 
 class _Claim:
-    __slots__ = ("addr", "label")
+    __slots__ = ("addr", "label", "broadcast")
 
-    def __init__(self, addr: int, label: str) -> None:
+    def __init__(self, addr: int, label: str, broadcast: bool = False) -> None:
         self.addr = addr
         self.label = label
+        self.broadcast = broadcast
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
     with path.open(encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
+
+
+def _broadcast_addrs(root: Path, chip: str,
+                     cache: dict[str, list[int]]) -> list[int]:
+    """7-bit addresses metadata/chips/<chip>.yaml marks as broadcast."""
+    if chip not in cache:
+        addrs: list[int] = []
+        path = root / "metadata" / "chips" / f"{chip}.yaml"
+        if path.is_file():
+            data = _load_yaml(path)
+            for entry in ((data.get("i2c") or {}).get("addresses")) or []:
+                if "broadcast" in str(entry.get("scope", "")).lower():
+                    addr = _addr_int(entry.get("addr_7bit"))
+                    if addr is not None:
+                        addrs.append(addr)
+        cache[chip] = addrs
+    return cache[chip]
+
+
+def _chips_by_bus(data: dict[str, Any], kind: str) -> dict[str, set[str]]:
+    """Fitted chip keys per bus, for the broadcast-address lookup."""
+    out: dict[str, set[str]] = {}
+    if kind == "module":
+        buses = ((data.get("on_module") or {}).get("i2c_devices")) or {}
+        for bus_key, bus in (buses or {}).items():
+            for dev in (bus or {}).get("devices", []) or []:
+                if dev.get("assembled") is not False and dev.get("chip"):
+                    out.setdefault(bus_key, set()).add(str(dev["chip"]))
+        return out
+    flat_bus = data.get("i2c_devices_bus") or _BOARD_FLAT_BUS
+    for dev in data.get("i2c_devices") or []:
+        if dev.get("assembled") is not False and dev.get("part"):
+            out.setdefault(flat_bus, set()).add(str(dev["part"]))
+    for dev in ((data.get("audio") or {}).get("codecs")) or []:
+        if (dev.get("assembled") is not False and dev.get("chip")
+                and dev.get("i2c_bus")):
+            out.setdefault(dev["i2c_bus"], set()).add(str(dev["chip"]))
+    return out
+
+
+def _with_broadcasts(root: Path, claims: dict[str, list[_Claim]],
+                     chips: dict[str, set[str]],
+                     cache: dict[str, list[int]]) -> dict[str, list[_Claim]]:
+    """Add one broadcast claim per (bus, chip, address) for every chip on
+    each bus whose manifest declares a broadcast address."""
+    for bus, names in chips.items():
+        for chip in sorted(names):
+            for addr in _broadcast_addrs(root, chip, cache):
+                claims.setdefault(bus, []).append(
+                    _Claim(addr, f"chip={chip} broadcast", broadcast=True))
+    return claims
 
 
 def _module_claims(data: dict[str, Any]) -> dict[str, list[_Claim]]:
@@ -190,8 +225,10 @@ def _module_claims(data: dict[str, Any]) -> dict[str, list[_Claim]]:
 
 
 def _board_flat_claims(data: dict[str, Any]) -> dict[str, list[_Claim]]:
-    """Top-level i2c_devices: flat list -- metadata/boards/*.yaml."""
+    """Top-level i2c_devices: flat list -- metadata/boards/*.yaml, grouped
+    under the file's declared i2c_devices_bus when it has one."""
     claims: dict[str, list[_Claim]] = {}
+    bus = data.get("i2c_devices_bus") or _BOARD_FLAT_BUS
     for dev in data.get("i2c_devices") or []:
         if dev.get("assembled") is False:
             continue
@@ -199,7 +236,7 @@ def _board_flat_claims(data: dict[str, Any]) -> dict[str, list[_Claim]]:
         if addr is None:
             continue
         label = f"part={dev.get('part', '?')} macro={dev.get('macro', '?')}"
-        claims.setdefault(_BOARD_FLAT_BUS, []).append(_Claim(addr, label))
+        claims.setdefault(bus, []).append(_Claim(addr, label))
     return claims
 
 
@@ -252,20 +289,27 @@ def find_problems(root: Path) -> list[str]:
     malformed: list[str] = []
 
     files: list[tuple[Path, dict[str, list[_Claim]]]] = []
+    cache: dict[str, list[int]] = {}
     modules_dir = root / "metadata" / "e1m_modules"
     if modules_dir.is_dir():
         for path in sorted(modules_dir.glob("*.yaml")):
-            files.append((path, _module_claims(_load_yaml(path))))
+            data = _load_yaml(path)
+            files.append((path, _with_broadcasts(
+                root, _module_claims(data), _chips_by_bus(data, "module"),
+                cache)))
 
     boards_dir = root / "metadata" / "boards"
     if boards_dir.is_dir():
         for path in sorted(boards_dir.glob("*.yaml")):
             data = _load_yaml(path)
             files.append(
-                (path, _merge(_board_flat_claims(data),
-                              _board_audio_claims(
-                                  data, path.relative_to(root).as_posix(),
-                                  malformed)))
+                (path, _with_broadcasts(
+                    root,
+                    _merge(_board_flat_claims(data),
+                           _board_audio_claims(
+                               data, path.relative_to(root).as_posix(),
+                               malformed)),
+                    _chips_by_bus(data, "board"), cache))
             )
 
     problems.extend(malformed)
@@ -273,10 +317,15 @@ def find_problems(root: Path) -> list[str]:
     for path, by_bus in files:
         rel = path.relative_to(root).as_posix()
         for bus, claims in sorted(by_bus.items()):
-            by_addr: dict[int, list[str]] = {}
+            by_addr: dict[int, list[_Claim]] = {}
             for claim in claims:
-                by_addr.setdefault(claim.addr, []).append(claim.label)
-            for addr, labels in sorted(by_addr.items()):
+                by_addr.setdefault(claim.addr, []).append(claim)
+            for addr, group in sorted(by_addr.items()):
+                strapped = [c.label for c in group if not c.broadcast]
+                broadcast = [c.label for c in group if c.broadcast]
+                # A broadcast claim collides only with a strap-addressed
+                # device: parts sharing a global-call address is the design.
+                labels = strapped + (broadcast if strapped else [])
                 if len(labels) < 2:
                     continue
                 addr_label = _addr_label(addr)
