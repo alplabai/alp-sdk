@@ -31,7 +31,10 @@ REPO = Path(__file__).resolve().parents[2]
 SOM_SCHEMA = REPO / "metadata/schemas/som-preset-v1.schema.json"
 MODULES = REPO / "metadata/e1m_modules"
 
-V2N_V2M_SKUS = ["E1M-V2N101", "E1M-V2N102", "E1M-V2M101", "E1M-V2M102"]
+V2N_V2M_SKUS = [
+    "E1M-V2N101", "E1M-V2N102", "E1M-V2N103",
+    "E1M-V2M101", "E1M-V2M102", "E1M-V2M103",
+]
 AEN_SKUS = [
     "E1M-AEN301", "E1M-AEN401", "E1M-AEN501",
     "E1M-AEN601", "E1M-AEN701", "E1M-AEN801",
@@ -247,7 +250,7 @@ def test_flash_args_tbd_is_still_legal():
 def test_flash_policy_is_still_required_without_a_flash_method():
     """Non-vacuity for the two tests above: the schema has not simply
     stopped rejecting things.  #1439 removed one conditional, not the
-    `flash_policy` requirement the four GD32 entries still satisfy."""
+    `flash_policy` requirement the six GD32 entries still satisfy."""
     entry = {
         "name": "some_helper",
         "chip": "gd32g553",
@@ -267,9 +270,9 @@ def _helper_firmware(sku: str) -> list[dict]:
     return preset["helper_firmware"]
 
 
-def test_v2n_v2m_gd32_entries_are_identical_across_the_four_skus():
-    """V2N101/V2N102/V2M101/V2M102 are ONE PCB, variant-populated -- the
-    GD32 block must not drift between them."""
+def test_v2n_v2m_gd32_entries_are_identical_across_the_six_skus():
+    """V2N101/V2N102/V2N103/V2M101/V2M102/V2M103 are ONE PCB,
+    variant-populated -- the GD32 block must not drift between them."""
     blocks = {sku: _helper_firmware(sku) for sku in V2N_V2M_SKUS}
     reference = blocks[V2N_V2M_SKUS[0]]
     for sku in V2N_V2M_SKUS[1:]:
@@ -279,7 +282,7 @@ def test_v2n_v2m_gd32_entries_are_identical_across_the_four_skus():
 @pytest.mark.parametrize("sku", V2N_V2M_SKUS)
 def test_v2n_v2m_gd32_entry_declares_no_local_flash_path(sku):
     """#1439: GD32 programming is separated out of tan's scope entirely
-    (tan-cli#732), so the four E1M-X entries declare NO `flash_method`
+    (tan-cli#732), so the six E1M-X entries declare NO `flash_method`
     and NO `flash_args` -- tan does not flash this part, and no preset
     names a local flash path for it, so the absence is load-bearing,
     not tidiness."""

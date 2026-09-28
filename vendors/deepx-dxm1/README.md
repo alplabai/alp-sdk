@@ -22,6 +22,18 @@ namespace `dxrt` (`dxrt::InferenceEngine`, `dxrt::Tensor`,
 headers; it has NOT been run on silicon (needs a V2N-M1 module with the
 DX-M1 on PCIe + the dx_rt runtime/driver on the sysroot).
 
+**Runtime path bench-verified separately (2026-09-26, E1M-V2M103).**
+The DEEPX kernel driver + userspace runtime this vendor wrapper
+targets -- `dx-driver` 1.8.0 + `dx-rt` 3.2.0 from `meta-deepx-m1` --
+is confirmed working on real V2N-M1 silicon: the DX-M1 flash-boots
+firmware 2.4.0, enumerates as PCIe `1ff4:0000` Gen3 x2, `/dev/dxrt0`
+comes up `0660 root:video`, and `dxrt-cli -s` reports rc `0` against
+the pinned stack. See [`docs/soms/v2n-m1.md`](../../docs/soms/v2n-m1.md)'s
+"DEEPX DX-M1 bring-up" section for the full writeup, including why no
+`dxrtd` service unit is enabled at this pin. This is the Yocto
+driver/runtime path, distinct from the SDK's own inference backend
+below, which remains BENCH-UNVERIFIED for an actual model run.
+
 dx_rt is **proprietary** (DEEPX EULA -- see "Licensing" below), so the
 SDK does **not** vendor its headers or libs.  This directory is now a
 **doc + detect-and-skip shim only** -- there is no clean-room `dxnn_*`
@@ -64,10 +76,20 @@ Two additional repos are useful but not on the runtime path:
 ### Yocto integration (V2N-M1)
 
 `meta-alp-sdk`'s `conf/layer.conf` `LAYERRECOMMENDS` the Renesas V2N
-base BSP plus `meta-deepx-m1`, and `conf/machine/e1m-v2m101-a55.conf`
-(and `e1m-v2m102-a55.conf`)
-appends `dx-driver dx-rt` to `IMAGE_INSTALL` so V2N-M1 images
-ship the DEEPX stack by default.
+base BSP plus `meta-deepx-m1` (the real `BBFILE_COLLECTIONS` name of
+DEEPX's official layer), and `conf/machine/include/e1m-v2m-deepx.inc`
+(`require`d from `e1m-v2m101-a55.conf` / `e1m-v2m102-a55.conf` /
+`e1m-v2m103-a55.conf`) appends `dx-driver dx-rt dx-rt-cli` to
+`IMAGE_INSTALL` when `ALP_ENABLE_DEEPX_DXM1 = "1"`, so opted-in V2N-M1
+images ship the DEEPX stack (the tools, `dxrt-cli` included, are in the
+`dx-rt-cli` sub-package).  At this pin `meta-deepx-m1` also carries
+`dx-stream`, `dx-stream-sample`, `dx-yolo26` and `dx-yolo26-sample`;
+`dx-yolo26` fetches a private DEEPX repository, so keep those recipes
+out of `IMAGE_INSTALL` and `bitbake world` unless you have that access.  A
+`dynamic-layers/meta-deepx-m1/` bbappend also tightens dx-driver's
+udev device-node permissions (world-writable by default upstream) --
+see `meta-alp-sdk/README.md`.  Verified against commit
+`8d09b25f20f81104c16c7de90928ff8920eb482d` on branch `scarthgap`.
 
 Upstream `meta-deepx-m1` (per its README, scarthgap branch) ships
 two recipes:
@@ -85,6 +107,7 @@ Adding the layer to a Yocto workspace:
 ```bash
 git clone -b scarthgap https://github.com/DEEPX-AI/meta-deepx-m1.git \
     ../meta-deepx-m1
+git -C ../meta-deepx-m1 checkout 8d09b25f20f81104c16c7de90928ff8920eb482d
 bitbake-layers add-layer ../meta-deepx-m1
 ```
 

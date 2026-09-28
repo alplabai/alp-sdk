@@ -21,8 +21,9 @@ doesn't lose state between weekly partnership-review cycles.
 ## Renesas (RZ/V2N family)
 
 **Surface impact**: `chips/gd32g553/` host driver +
-`src/zephyr/v2n_supervisor.c` + `src/zephyr/v2n_power_mgmt.c`
-all assume an upstream Renesas FSP for the RZ/V2N N44 SoC.
+`src/zephyr/v2n_supervisor.c` both assume an upstream Renesas FSP for
+the RZ/V2N N44 SoC.  (`src/zephyr/v2n_power_mgmt.c` does not exist;
+DEEPX rail bring-up is U-Boot's job, off this list entirely.)
 
 **Status update 2026-05-14 (verified against upstream)**:
 
@@ -261,6 +262,20 @@ exception -- those are real Apache-2.0.
   question -- customers integrating V2N-M1 into a Yocto
   image want clarity on whether they can redistribute the
   layer.  Carry as an open item.
+
+**Decision 2026-09-25 (§C.43)**: meta-alp-sdk now consumes DEEPX's
+official `meta-deepx-m1` layer directly (verified commit
+`8d09b25f20f81104c16c7de90928ff8920eb482d`, branch `scarthgap`) as an
+OPTIONAL external layer for the V2M SKUs, replacing the unbuildable
+in-tree `recipes-deepx/dx-rt/dx-rt_2.4.bb` placeholder (now deleted).
+meta-alp-sdk ships no DEEPX code either way -- the placeholder never
+did, and the real layer is fetched by the licensed customer at build
+time -- so the redistribution question below is now moot for our own
+layer; it remains an open question only for a customer who wants to
+redistribute `meta-deepx-m1` itself, which is between them and DEEPX.
+Refs alp-sdk issue #482 -- partially addresses it (the layer swap +
+PACKAGECONFIG wiring); #482's build-check-lane, vendor-extension
+NOSUPPORT knobs, and V2M HIL acceptance items remain open.
 
 **Open items**:
 

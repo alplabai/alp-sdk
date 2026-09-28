@@ -48,6 +48,24 @@ KNOWN_MANIFEST_NO_DRIVER = {
     # driver. `driver_status: none` in the manifest is the honest state,
     # not aspirational.
     "dp83825",
+    # Sony IMX296 (issue #2287): streaming lives entirely in the Zephyr
+    # driver, zephyr/drivers/video/imx296.c, the same shape as OV5647
+    # (no chips/ entry of its own). This manifest is catalogue-only so the
+    # part is discoverable in the chip metadata system; `driver_status:
+    # none` is the honest state, not aspirational.
+    "imx296",
+    # Sony IMX335 (issue #2327): streaming is upstream Zephyr's own
+    # drivers/video/imx335.c (CONFIG_VIDEO_IMX335), reused as-is -- same
+    # catalogue-only shape as imx296 above, one step further down ADR 0017's
+    # tier ladder (Tier 1, upstream-native, plus one small repo patch --
+    # no alp-sdk-authored driver code of its own).
+    "imx335",
+    # OmniVision OV5647 (issue #2287 camera sweep): same shape as IMX296 --
+    # streaming lives entirely in zephyr/drivers/video/ov5647.c, no chips/
+    # portable stub. This manifest is catalogue-only so the part is
+    # discoverable in the chip metadata system; `driver_status: none` is
+    # the honest state, not aspirational.
+    "ov5647",
 }
 
 

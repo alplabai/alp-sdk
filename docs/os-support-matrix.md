@@ -29,10 +29,10 @@ for the SKU breakdown:
 - **E1M-AEN family** — `E1M-AEN301` … `E1M-AEN801` (Alif Ensemble
   E3–E8).  E3 / E4 are RTOS-only (no A-class); E5..E8 carry an
   A32 cluster alongside the M55 pair.
-- **E1M-X V2N family** — `E1M-V2N101`, `E1M-V2N102` (Renesas RZ/V2N):
-  A55 cluster + M33-SM.
-- **E1M-X V2N-M1 family** — `E1M-V2M101`, `E1M-V2M102` (RZ/V2N +
-  DEEPX DX-M1): same topology as V2N.
+- **E1M-X V2N family** — `E1M-V2N101`, `E1M-V2N102`, `E1M-V2N103`
+  (Renesas RZ/V2N): A55 cluster + M33-SM.
+- **E1M-X V2N-M1 family** — `E1M-V2M101`, `E1M-V2M102`, `E1M-V2M103`
+  (RZ/V2N + DEEPX DX-M1): same topology as V2N.
 - **E1M-N93 family** — iMX93: A55 cluster + M33.
 
 Because the per-core matrix is 11 columns wide, the per-version
@@ -180,7 +180,7 @@ need v0.4 fall back cleanly to the v0.3 state above.
 | **IoT — MQTT TLS** (`mqtts://`)      | code complete (untested) — mosquitto_tls_set + system / pinned CA | code complete (untested) — mosquitto_tls_set + system / pinned CA | code complete (untested) | planned |
 | **IoT — Wi-Fi station** (`<alp/iot.h>`) | sw_fallback by design (system-config via wpa_supplicant/NM) | sw_fallback by design (system-config via wpa_supplicant/NM) | sw_fallback by design | planned |
 | **Audio** (`<alp/audio.h>`)          | code complete (untested) — ALSA `snd_pcm_*` | code complete (untested) — ALSA `snd_pcm_*` | code complete (untested) | planned |
-| **Security** (`<alp/security.h>`)    | code complete (KATs green; meta-alp-sdk build mechanics verified 2026-05-26, full bake pending) — OpenSSL `EVP_*` | code complete (KATs green; meta-alp-sdk build mechanics verified 2026-05-26, full bake pending) — OpenSSL `EVP_*` | code complete (KATs green) | planned |
+| **Security** (`<alp/security.h>`)    | code complete (KATs green; image bake pending) — OpenSSL `EVP_*` | code complete (KATs green; `drpai`-OFF `alp-image-edge` bake complete, image boot pending; see [`bring-up-drpai-v2n.md`](bring-up-drpai-v2n.md)) — OpenSSL `EVP_*` | code complete (KATs green) | planned |
 | **Mender OTA (meta-alp-sdk opt-in)**     | code complete (untested) — `require conf/distro/include/mender.inc` | code complete (untested) — `require conf/distro/include/mender.inc` | code complete (untested) | planned |
 
 ### Cortex-M (Zephyr)

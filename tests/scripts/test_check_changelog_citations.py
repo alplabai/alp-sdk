@@ -111,16 +111,22 @@ def test_changelog_d_citation_from_changelog_md_is_graded_when_target_exists(
     hasn't run yet) whose anchor drifted was SKIPPED -- silently losing the
     exact grading a fragment doing the identical citation still gets. Now
     gated on `not (REPO / rel).is_file()`, so a citation whose target is
-    genuinely still present is graded normally, not skipped."""
+    genuinely still present is graded normally, not skipped. Since
+    alp-sdk#2350 that grading is the advisory-line-number rule: the anchor
+    is found once elsewhere, so it PASSES with a note rather than erroring."""
     mod = _load()
     mod.REPO = tmp_path
     (tmp_path / "changelog.d").mkdir()
     (tmp_path / "changelog.d" / "2175.md").write_text(
         "line 1\nline 2\nANCHOR TEXT\n", encoding="utf-8")
     text = 'cites `changelog.d/2175.md:1` ("ANCHOR TEXT")\n'
-    errors, skips, checked, anchored = mod._check_one(mod.CHANGELOG, text)
+    notes: list[str] = []
+    errors, skips, checked, anchored = mod._check_one(
+        mod.CHANGELOG, text, None, None, notes)
     assert skips == [], skips
-    assert len(errors) == 1 and "ANCHOR TEXT" in errors[0]
+    assert errors == [], errors
+    assert anchored == 1, "graded, not skipped"
+    assert len(notes) == 1 and "anchor now at line 3" in notes[0], notes
 
 
 def test_changelog_d_citation_from_changelog_md_is_fixed_when_target_exists(
@@ -387,8 +393,13 @@ def test_fix_skips_foreign_prefix_paths(tmp_path):
 def test_default_run_writes_nothing_and_keeps_its_verdict(
         tmp_path, monkeypatch, capsys):
     """The gate is a required CI context, so the no-flag path must be exactly
-    what it always was: it reports the drift as an error and writes NOTHING.
-    Only --fix rewrites, and it then re-checks its own output.
+    what it always was: it grades the tree and writes NOTHING. Only --fix
+    rewrites, and it then re-checks its own output.
+
+    Since alp-sdk#2350 a citation whose anchor moved -- here the text lives at
+    line 7, the citation says 3 -- passes with an advisory note rather than
+    erroring, so the default path is 0. What this still pins is that the
+    default path never writes: the stale `:3` survives until `--fix`.
 
     Also MUTATION-PROVES the widened alp-sdk#2178 condition did not disturb
     the path the gate actually runs on 364 days a year: with a fragment
@@ -400,9 +411,11 @@ def test_default_run_writes_nothing_and_keeps_its_verdict(
                              encoding="utf-8")
 
     monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py"])
-    assert mod.main() == 1, "a drifted anchor is still a hard error"
+    assert mod.main() == 0, "a moved anchor is advisory, not a hard error"
+    out = capsys.readouterr().out
+    assert "anchor now at line 7" in out, out
     assert frag.read_text(encoding="utf-8") == fragment, "no --fix means the gate never writes"
-    assert "nothing to check" not in capsys.readouterr().out
+    assert "nothing to check" not in out
 
     monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py", "--fix"])
     assert mod.main() == 0, "--fix re-checks the tree it just wrote"
@@ -520,7 +533,7 @@ def test_fix_rereads_a_cited_fragment_it_rewrote_earlier_in_the_same_run(
     assert "0 need a human" in out, out
 
 
-def test_fix_runs_even_when_changelog_d_is_empty(tmp_path, monkeypatch):
+def test_fix_runs_even_when_changelog_d_is_empty(tmp_path, monkeypatch, capsys):
     """`--fix` must still work on a tree with no fragments left.
 
     `assemble_changelog.py` empties `changelog.d/` at release time by folding
@@ -529,7 +542,9 @@ def test_fix_runs_even_when_changelog_d_is_empty(tmp_path, monkeypatch):
     check" early return fired BEFORE `--fix` did, making it a silent no-op
     exactly there. The first half of this test pins the default path on the
     same tree: since alp-sdk#2178 it GRADES the drifted `[Unreleased]`
-    citation instead of skipping it, and it still writes nothing.
+    citation instead of skipping it, and it still writes nothing. Since
+    alp-sdk#2350 that grading is a PASS with an advisory note -- the anchor is
+    found once, at line 7 -- rather than an error.
     """
     mod, frag = _tree(tmp_path, _source(7, "RELEASE-CANDIDATE ANCHOR"), "x\n")
     frag.unlink()
@@ -538,8 +553,10 @@ def test_fix_runs_even_when_changelog_d_is_empty(tmp_path, monkeypatch):
     mod.CHANGELOG.write_text(drifted, encoding="utf-8")
 
     monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py"])
-    assert mod.main() == 1, (
+    assert mod.main() == 0, (
         "alp-sdk#2178: an empty changelog.d/ no longer skips CHANGELOG.md")
+    assert "anchor now at line 7" in capsys.readouterr().out, (
+        "the citation was GRADED, not skipped")
     assert mod.CHANGELOG.read_text(encoding="utf-8") == drifted, "and still writes nothing"
 
     monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py", "--fix"])
@@ -584,19 +601,22 @@ def test_fix_runs_even_when_changelog_d_is_empty(tmp_path, monkeypatch):
 
 def test_empty_changelog_d_still_grades_a_broken_unreleased_citation(
         tmp_path, monkeypatch, capsys):
-    """THE defect: empty fragment dir + a drifted anchored `[Unreleased]`
-    citation exited 0 and never named the citation."""
-    mod, frag = _tree(tmp_path, _source(7, "RELEASE-CANDIDATE ANCHOR"), "x\n")
+    """THE defect: empty fragment dir + a broken anchored `[Unreleased]`
+    citation exited 0 and never named the citation. Since alp-sdk#2350 a
+    merely STALE line is advisory, so this uses an anchor that is absent from
+    the file -- the case that still has to fail."""
+    mod, frag = _tree(tmp_path, _source(7, "SOMETHING ELSE"), "x\n")
     frag.unlink()
     mod.CHANGELOG.write_text(
         "# Changelog\n\n## [Unreleased]\n\n"
-        'cites `src/a.c:3` ("RELEASE-CANDIDATE ANCHOR")\n', encoding="utf-8")
+        'cites `src/a.c:3` ("AN ANCHOR THAT IS NOWHERE IN THE FILE")\n',
+        encoding="utf-8")
 
     monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py"])
     assert mod.main() == 1, "an empty changelog.d/ is not a pass"
     err = capsys.readouterr().err
     assert "src/a.c:3" in err, "the broken citation must be NAMED, not counted"
-    assert "RELEASE-CANDIDATE ANCHOR" in err
+    assert "AN ANCHOR THAT IS NOWHERE IN THE FILE" in err
 
 
 def test_empty_changelog_d_passes_a_clean_unreleased_section(
@@ -1054,8 +1074,11 @@ def _drifted_merge_repo(tmp_path):
 @_needs_merge_tree
 def test_against_merge_grades_the_merge_not_the_tip(
         tmp_path, monkeypatch, capsys):
-    """The #2186 repro: green on the branch tip, red in the tree that lands.
-    And the merge is built without touching the working tree, index or HEAD."""
+    """The #2186 repro, as the alp-sdk#2350 rule leaves it: the branch tip's
+    citation is correct, and the merge shifts the loudly. Since the anchor is
+    authoritative the merge is not RED, but the advisory note can only be
+    produced by grading the MERGED tree, so its presence proves which tree was
+    read. The merge is built without touching the working tree, index or HEAD."""
     mod, git = _drifted_merge_repo(tmp_path)
     monkeypatch.setenv("DIFF_BASE", "main")
     head = git("rev-parse", "HEAD")
@@ -1063,11 +1086,14 @@ def test_against_merge_grades_the_merge_not_the_tip(
     assert _run(mod, monkeypatch) == 0, "the branch tip is correct"
     out = capsys.readouterr().out
     assert "graded: the working tree" in out
+    assert "anchor now at line 10" not in out, "the tip has not moved"
     assert "1 citation(s) on added lines, every one anchored" in out, (
         "a pass must say the new-citation rule saw the branch's citation")
-    assert _run(mod, monkeypatch, "--against-merge") == 1
-    err = capsys.readouterr().err
-    assert "1.md: `src/a.c:7`" in err and "the merge of main into HEAD" in err
+    assert _run(mod, monkeypatch, "--against-merge") == 0
+    out = capsys.readouterr().out
+    assert "anchor now at line 10" in out, (
+        "grading the merge must see the base's three inserted lines")
+    assert "graded: the merge of main into HEAD" in out
     assert git("rev-parse", "HEAD") == head
     assert git("status", "--porcelain") == "", "nothing written or staged"
 
@@ -1174,3 +1200,104 @@ def test_hunk_lines_refuses_a_header_it_cannot_read():
     with pytest.raises(SystemExit) as exc:
         mod._hunk_lines(diff)
     assert exc.value.code == 2
+
+
+# ---------------------------------------------------------------------------
+# alp-sdk#2350: the quoted anchor is authoritative and the line number is
+# advisory. An unrelated insertion above the cited code shifts the line but
+# leaves the anchor intact, so the citation PASSES with a note instead of
+# failing. Ambiguity and removal still fail.
+# ---------------------------------------------------------------------------
+
+
+def test_moved_anchor_passes_with_a_note(tmp_path):
+    """Lines inserted above the cited code move the text down; the anchor is
+    found once elsewhere, so the citation passes and an informational note
+    names the line it now lives on."""
+    mod, frag = _tree(tmp_path, _source(7, "MOVED ANCHOR"),
+                      'see `src/a.c:3` ("MOVED ANCHOR")\n')
+    notes: list[str] = []
+    errors, skips, checked, anchored = mod._check_one(
+        frag, frag.read_text(encoding="utf-8"), None, None, notes)
+    assert errors == [] and skips == []
+    assert checked == 1 and anchored == 1, "still anchored and text-verified"
+    assert len(notes) == 1, notes
+    assert "note: 9999.md: `src/a.c:3` anchor now at line 7" in notes[0]
+
+
+def test_moved_anchor_note_is_printed_and_does_not_fail_the_gate(
+        tmp_path, monkeypatch, capsys):
+    """End to end: the gate prints the note and exits 0 for a moved anchor."""
+    fragment = 'see `src/a.c:3` ("MOVED ANCHOR")\n'
+    mod, frag = _tree(tmp_path, _source(7, "MOVED ANCHOR"), fragment)
+    mod.CHANGELOG.write_text("# Changelog\n\n## [Unreleased]\n\nnone\n",
+                             encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py"])
+    assert mod.main() == 0
+    out = capsys.readouterr().out
+    assert "note: 9999.md: `src/a.c:3` anchor now at line 7" in out, out
+
+
+def test_fix_rewrites_a_moved_anchor_to_the_new_line(tmp_path):
+    """`--fix` rewrites the cited line number to where the anchor now lives."""
+    fragment = 'see `src/a.c:3` ("MOVED ANCHOR")\n'
+    mod, frag = _tree(tmp_path, _source(7, "MOVED ANCHOR"), fragment)
+    new, rewrites, problems, unanchored = mod._fix_one(frag, fragment)
+    assert "`src/a.c:7`" in new
+    assert problems == [] and unanchored == 0 and len(rewrites) == 1
+
+
+def test_fix_shifts_both_ends_of_a_range_by_the_same_delta(tmp_path):
+    """For a START-END range the anchor's move shifts BOTH ends: `:2-6`
+    anchored on the text now at line 8 becomes `:8-12`, never a collapsed
+    single line."""
+    mod, frag = _tree(tmp_path, _source(8, "RANGE ANCHOR"),
+                      'see `src/a.c:2-6` ("RANGE ANCHOR")\n')
+    new, rewrites, problems, unanchored = mod._fix_one(
+        frag, frag.read_text(encoding="utf-8"))
+    assert "`src/a.c:8-12`" in new, new
+    assert problems == [] and unanchored == 0 and len(rewrites) == 1
+
+
+def test_duplicated_moved_anchor_is_ambiguous_and_fails(tmp_path):
+    """Found more than once and not in range: the gate cannot know which
+    occurrence the note meant, so it fails and lists the candidates."""
+    lines = [f"line {i}" for i in range(1, 31)]
+    lines[1] = "REPEATED ANCHOR"    # line 2
+    lines[24] = "REPEATED ANCHOR"   # line 25
+    mod, frag = _tree(tmp_path, "\n".join(lines) + "\n",
+                      'see `src/a.c:10` ("REPEATED ANCHOR")\n')
+    notes: list[str] = []
+    errors, _, _, anchored = mod._check_one(
+        frag, frag.read_text(encoding="utf-8"), None, None, notes)
+    assert anchored == 1 and notes == [], "ambiguous is not a pass with a note"
+    assert len(errors) == 1, errors
+    assert "ambiguous" in errors[0] and "[2, 25]" in errors[0], errors[0]
+
+
+def test_anchor_removed_from_the_file_still_fails(tmp_path):
+    """The anchor is nowhere in the file: the code is gone rather than moved,
+    so the citation fails and says the text is absent from the file."""
+    mod, frag = _tree(tmp_path, _source(7, "SOMETHING ELSE"),
+                      'see `src/a.c:3` ("GONE ANCHOR")\n')
+    notes: list[str] = []
+    errors, _, _, anchored = mod._check_one(
+        frag, frag.read_text(encoding="utf-8"), None, None, notes)
+    assert anchored == 1 and notes == []
+    assert len(errors) == 1, errors
+    assert "absent from src/a.c" in errors[0], errors[0]
+
+
+def test_anchor_in_range_passes_unchanged_without_a_note(tmp_path):
+    """The original path is untouched: text in the cited range passes and
+    emits no note."""
+    mod, frag = _tree(tmp_path, _source(5, "GOOD ANCHOR"),
+                      'see `src/a.c:5` ("GOOD ANCHOR")\n')
+    notes: list[str] = []
+    errors, skips, checked, anchored = mod._check_one(
+        frag, frag.read_text(encoding="utf-8"), None, None, notes)
+    assert errors == [] and skips == []
+    assert checked == 1 and anchored == 1
+    assert notes == [], "an in-range anchor is not reported as moved"
+

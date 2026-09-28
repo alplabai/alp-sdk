@@ -107,7 +107,7 @@ only when **both** `meta-rz-drpai` is in `bblayers.conf` **and**
 `ALP_ENABLE_DRPAI = "1"` is set (default `"0"`).  The layer alone is
 deliberately not enough: it ships bundled in the AI SDK BSP, so keying off its
 presence would turn the NPU on for every V2N/V2M image.  It is declared
-`ALP_ENABLE_DRPAI ?= "0"` in all four V2N/V2M machine confs; set it to
+`ALP_ENABLE_DRPAI ?= "0"` in all six V2N/V2M machine confs; set it to
 `"1"` in `local.conf` to opt in. Without it the build installs a comment-only stub and the node
 stays `disabled`.
 
@@ -198,10 +198,11 @@ completed link:** with `RUHMI_DRPAI_TVM_DIR` pointed at a real
 checkout, the previously-undefined `MeraDrpRuntimeWrapper::*` symbols alp-sdk
 needs all match what the compiled wrapper exports — 26 symbols exported, 9
 referenced by alp-sdk, all 9 match, 0 unresolved. **Not yet verified:** the
-recipe's own `do_compile` has been proven only compiling the wrapper source
-cleanly against a real RUHMI checkout's headers on an x86_64 dev host (system
-spdlog/asio standing in for meta-oe's); the final link against the real
-aarch64 `obj/build_runtime/v2h` libraries has not been exercised, and no
+compile command later encoded in the recipe's `do_compile` was run only by
+hand on an x86_64 dev host against a real RUHMI checkout's headers (system
+spdlog/asio standing in for meta-oe's). That host-side probe compiled the
+wrapper source, but could not link against the real aarch64
+`obj/build_runtime/v2h` libraries; no
 `bitbake` run of this recipe — with or without `do_compile` — has happened at
 all. A full `alp-image-edge` bake has completed on this host (12118 tasks,
 producing a 716 MB `.wic.gz`, the first ever here) but with `drpai` OFF (the

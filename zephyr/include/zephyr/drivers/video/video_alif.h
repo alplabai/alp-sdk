@@ -26,6 +26,18 @@ extern "C" {
 #define VIDEO_CID_ALIF_ISP_SET               (VIDEO_CID_PRIVATE_BASE + 2)
 #define VIDEO_CID_ALIF_ISP_GET               (VIDEO_CID_PRIVATE_BASE + 3)
 
+/* Read-only, volatile (VIDEO_CTRL_FLAG_VOLATILE): 1 while the encoder still
+ * has SW_ENC_E (JPEG_SWREG5 bit 0, per AE822FA0E5597BS0_CM55_HE_View.svd)
+ * asserted, 0 once hardware has cleared it. This is a driver-private status
+ * bit, not a JPEG-class control (V4L2's JPEG class defines no such CID), so
+ * it belongs in the VIDEO_CID_PRIVATE_BASE range alongside the CSI/ISP
+ * controls above, not VIDEO_CID_JPEG_CLASS_BASE. Added for the bounded
+ * pre-stop quiesce poll in src/backends/jpeg/alif_hantro.c's
+ * hantro_encode() -- see jpeg_hantro_vc9000e_get_volatile_ctrl() in
+ * jpeg_hantro_vc9000e.c.
+ */
+#define VIDEO_CID_JPEG_ENC_BUSY              (VIDEO_CID_PRIVATE_BASE + 4)
+
 /*
  * v4.4 video-API shim (Alp Lab AB): legacy Bayer + greyscale pixel-format
  * aliases the fork driver bodies reference by their PRE-v4.4 names.  Upstream
@@ -222,6 +234,42 @@ static const struct cpi_csi2_mode_settings data_mode_settings[] = {
 size_t fourcc_to_plane_size(uint32_t fourcc, uint8_t plane_id, size_t buffer_size);
 int fourcc_to_numplanes(uint32_t fourcc);
 unsigned int pix_fmt_bpp(uint32_t fourcc);
+
+/*
+ * #2287 Stage B unit 3 (bench runs 307/308): re-arms ONLY the CPI
+ * capture engine (SNAPSHOT mode -- one frame per call) for an ISP consumer's next frame
+ * (isp_pico.c), as distinct from a full video_stream_stop()/_start() (which always tears the
+ * CSI-2 endpoint + sensor down, by design, for a real stop()/close()). The CALLER (isp_pico.c's
+ * isp_bottom_half()) MUST have already attached its own next destination buffer
+ * (isp_attach_buffer_to_hw()) before calling this -- re-arming the CPI before the ISP has a
+ * destination ready is exactly the bug runs 307/308 found (see video_alif.c's own comment on
+ * this function for the full mechanism). There is no longer a matching "pause" function: with
+ * nothing else ever re-arming the CPI behind isp_pico.c's back, a pause is simply isp_pico.c
+ * choosing not to call this. `dev` is this CPI controller device (the ISP's `config->controller`).
+ */
+int alif_cam_cpi_resume(const struct device *dev);
+
+/*
+ * #2287 Stage B unit 3 (bench runs 307-310, stall-recovery gap): registers a callback
+ * alif_video_cam_isr() (video_alif.c) invokes from ISR context whenever it detects a CPI/CSI
+ * error (INTR_OUTFIFO_OVERRUN/INTR_INFIFO_OVERRUN/INTR_BRESP_ERR) in ISP-consumer mode -- the
+ * ISP's own frame-end interrupt never fires for a frame that failed before reaching the ISP at
+ * all, so without this, nothing would ever re-arm the CPI after this class of error. `cb` MUST
+ * be ISR-safe (no k_mutex, no blocking calls -- isp_pico.c's own implementation only calls
+ * k_work_submit_to_queue(), which is ISR-safe); `user_data` is passed back to `cb` verbatim
+ * (isp_pico.c passes its own `const struct device *` ISP device). `dev` is this CPI controller
+ * device (the ISP's `config->controller`), same as alif_cam_cpi_resume()'s own `dev` param.
+ *
+ * ONE callback per controller device: a later call REPLACES whatever was registered before, it
+ * does not chain or append. `cb == NULL` unregisters (the error path then simply does nothing,
+ * same as if this had never been called). MUST be called before streaming starts -- there is no
+ * lock around the two fields this sets (`error_cb`/`error_cb_user_data`, video_alif.h): the ISR
+ * reads them directly, so registering (or re-registering) while a stream is already running
+ * races that read with no ordering guarantee. isp_pico.c's own video_isp_init() is the only
+ * caller today, and it runs well before any stream starts.
+ */
+void alif_cam_register_error_cb(const struct device *dev, void (*cb)(void *user_data),
+				 void *user_data);
 
 #ifdef __cplusplus
 }

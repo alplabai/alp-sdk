@@ -65,22 +65,43 @@ SRC_URI:append = " \
     file://e1m-v2m-deepx.dtsi \
     file://e1m-v2n101-x-evk.dts \
     file://e1m-v2m101-x-evk.dts \
-    file://0001-clk-renesas-r9a09g056-keep-CM33-owned-RSCI7-RIIC8-on.patch \
+    file://0001-clk-renesas-r9a09g056-keep-CM33-owned-RSCI7-on.patch \
     file://0002-drm-renesas-rzg2l-mipi-dsi-pm_runtime-guard-host-tra.patch \
     file://0003-usb-ohci-platform-add-spurious-oc-DT-property.patch \
     file://0004-drm-panel-add-himax-hx8394-with-rocktech-rk055hdmipi.patch \
     file://0005-gpio-add-gd32-bridge-expander-driver.patch \
     file://0006-input-goodix-fall-back-to-polling-without-an-irq.patch \
+    file://0007-mmc-renesas_sdhi-pm_runtime-guard-the-vqmmc-regulato.patch \
+    file://0010-mmc-renesas_sdhi-bounce-multi-segment-requests-in-internal-dmac.patch \
+    file://0011-irqchip-renesas-rzv2h-mask-the-ICU-error-sources-the-handler-cannot-ack.patch \
 "
 
-# AMP clock ownership: RSCI7 + RIIC8 belong to the Cortex-M33 system
-# manager (GD32 supervisor link).  Without this patch, Linux's
-# clk_disable_unused turns their module clocks off AND asserts the coupled
+# 0010 (SDHI internal-DMAC bounce buffer, #2357): the DMAC takes one
+# contiguous buffer per request and the RZ/V2N SDHI has no IOMMU, so every
+# page-cache write reached the card as a separate 4 KiB command (microSD
+# ~2.7 MB/s, and SDR104 writes hung on "Card stuck being busy!"). The patch
+# copies multi-segment requests through a 256 KiB coherent buffer per host.
+#
+# 0011 (ICU error mask, #2355): the shared CA55 ICU error line is serviced
+# only for GPT overflow bits, but group 0 resets fully unmasked; once the
+# Cortex-M33 runs, group 0 bit 0 asserts, nobody acknowledges it, and the
+# line storms ("irq 14: nobody cared") until genirq disables it. The patch
+# unmasks only the GPT overflow bits the handler services.
+
+# AMP clock ownership: RSCI7 belongs to the Cortex-M33 system manager
+# (GD32 supervisor SPI link).  Without this patch, Linux's
+# clk_disable_unused turns its module clocks off AND asserts the coupled
 # CPG BUS_MSTOP bits (the rzv2h-cpg driver ties the two together), which
 # bus-faults the CM33 mid-operation ~15 s into every boot.  The patch
-# marks the six clocks DEF_MOD_CRITICAL so both gates stay held for the
-# remote core.  Silicon-validated 2026-06-03 (two cold cycles + warm
-# reboot, link autonomous from ~2 s after power-on, no intervention).
+# marks the five rsci_7_* clocks DEF_MOD_CRITICAL so both gates stay held
+# for the remote core.  Silicon-validated 2026-06-03 (two cold cycles +
+# warm reboot, link autonomous from ~2 s after power-on, no intervention).
+#
+# RIIC8 (BRD_I2C) is NOT in this patch: the maintainer decision that
+# Cortex-A55/Linux is RIIC8's sole master (metadata/e1m_modules/v2n/
+# core-ownership.yaml) makes Linux the real consumer -- its own
+# clk_disable_unused correctly leaves riic_8_ckm alone.  See the
+# patch's own RETITLED note for the 2026-09-24 history.
 
 # 0002 (DSI shutdown SError): rzg2l_mipi_dsi's host transfer touched DSI
 # registers while the host was runtime-suspended (held in reset).  A panel
@@ -102,6 +123,16 @@ SRC_URI:append = " \
 # documents it in generic-ohci.yaml.  Both &ehci0 and &ohci0 carry
 # spurious-oc in e1m-x-evk.dtsi.  Cold-boot-verified 2026-06-12 on
 # E1M-V2M101: zero over-current lines.
+
+# 0007 (SDHI vqmmc regulator read while runtime-suspended): the vqmmc
+# regulator this recipe's &sdhi2 WLAN node registers (see e1m-v2n-som.dtsi's
+# sdhi2_vqmmc) reads CTL_SD_STATUS directly in is_enabled()/get_voltage(),
+# with no pm_runtime claim on the SDHI host.  regulator-always-on only
+# short-circuits regulator_late_cleanup()'s OWN call to is_enabled() (its
+# `if (c->always_on) return 0;` early-return); a later sysfs/debugfs
+# regulator read still hits the raw register access and can take a
+# synchronous external abort while the controller is clock-gated.  0007
+# wraps both ops in pm_runtime_resume_and_get()/pm_runtime_put().
 
 # DRP-AI3 NPU overlay -- CONDITIONAL on the OPTIONAL meta-rz-drpai layer.
 #
@@ -152,10 +183,14 @@ ALP_DRPAI_LAYER[vardepvalue] = "${ALP_DRPAI_LAYER}"
 # an opt-in feature.
 #
 # So require an explicit ALP_ENABLE_DRPAI too, defaulting to 0.  It is
-# DECLARED in all four V2N/V2M machine confs (`ALP_ENABLE_DRPAI ?= "0"`)
-# next to ALP_ENABLE_DEEPX_DXM1, so a builder reading the conf for their
-# MACHINE finds it -- the `??=` here is only the fallback for a consumer
-# that uses this bbappend without one of those confs.  Turning the SDK backend on
+# DECLARED in all six V2N/V2M machine confs (`ALP_ENABLE_DRPAI ?= "0"`),
+# so a builder reading the conf for their MACHINE finds it -- the `??=`
+# here is only the fallback for a consumer that uses this bbappend
+# without one of those confs.  (The V2M-only DEEPX equivalent,
+# ALP_ENABLE_DEEPX_DXM1, now lives one level down in
+# conf/machine/include/e1m-v2m-deepx.inc, `require`d by the three V2M
+# confs, rather than declared in each conf directly -- a different
+# knob, not a place to look for this one.)  Turning the SDK backend on
 # (PACKAGECONFIG "drpai") and turning the kernel node on are deliberately
 # separate switches: the backend without the node fails at open() with a
 # clear error, whereas the node without the backend is simply an idle
@@ -214,7 +249,31 @@ SRC_URI:append = " \
     file://no-kernel-audit.cfg \
 "
 
+# On-module RTC (all six V2N-family SKUs carry the same RV-3028-C7 --
+# see rtc_external: in each metadata/e1m_modules/E1M-V2{N,M}10{1,2,3}.yaml).
+# Unconditional like the two trims above, not per-machine like
+# display.cfg: this is a SoM-level fact, not a carrier one.
+SRC_URI:append = " file://rv3028-rtc.cfg"
+
+# On-module Murata LBEE5HY2FY-922 (Infineon CYW55513) Wi-Fi + BT -- all
+# six V2N-family SKUs carry the same module (see wifi_ble: in each
+# metadata/e1m_modules/E1M-V2{N,M}10{1,2,3}.yaml). Unconditional like
+# rv3028-rtc.cfg above: a SoM-level fact, not a per-machine one. See
+# e1m-v2n-som.dtsi for the &sdhi2 WLAN node + &sci4 BT node, and
+# meta-alp-sdk/recipes-kernel/cyw-fmac{,-firmware}/ for the out-of-tree
+# driver + blobs this fragment's CFG80211=m / BRCMFMAC=n pairs with.
+SRC_URI:append = " file://wifi-bt.cfg"
+
 # Display stack: RK055HDMIPI4MA0 panel on Display 1 (DSI + PWM backlight + GPT
 # + GD32-bridge GPIO for panel reset).
 SRC_URI:append:e1m-v2n101 = " file://display.cfg"
 SRC_URI:append:e1m-v2m101 = " file://display.cfg"
+
+# Audio: TAS2563 smart-amp pair on the E1M-X-EVK carrier (see e1m-x-evk.dtsi's
+# header comment + &i2c0's tas2563_left/tas2563_right nodes). Per-carrier like
+# display.cfg above, not unconditional: it is the E1M-X-EVK's TAS2563 pair,
+# not a SoM-level fact.
+# Keyed on e1m-v2n101 ONLY: every V2N-family machine, the V2M ones
+# included, carries that override (conf/machine/e1m-v2m10*-a55.conf), so a
+# second :e1m-v2m101 append would add the patch twice and do_patch fails.
+SRC_URI:append:e1m-v2n101 = " file://tas2563-audio.cfg file://0009-ASoC-tas2562-reset-the-amplifier-at-probe.patch"

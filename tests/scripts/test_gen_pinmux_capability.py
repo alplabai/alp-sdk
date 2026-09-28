@@ -44,8 +44,16 @@ def test_v2n_core_field_matches_verified_ownership_only():
     pinning today's pad list (issue #1157, 2026-08-12 comment: a hardcoded
     `m33_pads == {...}` would go red the moment a newly-verified pad is
     added and force the next person to argue with the test instead of the
-    data). Also asserts the two invariants the issue does want fixed: no
-    `a55` row yet, and every `core`-tagged row is `owner: "renesas"`."""
+    data). Also asserts every `core`-tagged row is `owner: "renesas"`.
+
+    `a55` rows are real now (feat/v2m-deepx-rail-uboot, 2026-09-24):
+    RIIC8_SCL8/SDA8 flipped from `m33` (CA55/Linux is RIIC8's sole
+    master), and DEEPX_CORE_0P75_EN/DEEPX_PWR_EN_REQ (P64/P65) are new
+    `a55` rows (U-Boot's board_late_init() is their sole driver) --
+    both covered by the `actual == expected` equality above, which is
+    exactly the "derive from the ownership file" contract the docstring
+    describes; no separate "no a55 yet" assertion is needed or correct
+    any more."""
     doc = yaml.safe_load((gpc.PINMUX_DIR / "v2n.yaml").read_text(encoding="utf-8"))
     ownership = yaml.safe_load(
         (REPO / "metadata" / "e1m_modules" / "v2n" / "core-ownership.yaml")
@@ -60,8 +68,6 @@ def test_v2n_core_field_matches_verified_ownership_only():
         if "core" in p
     }
     assert actual == expected
-    # No row anywhere claims "a55" -- nothing in this batch is verified a55.
-    assert not any(p.get("core") == "a55" for p in doc["pads"])
     # Every m33 row is renesas-owned (the AMP-core ambiguity is a renesas
     # fact; the GD32's own pads never carry `core`).
     for p in doc["pads"]:

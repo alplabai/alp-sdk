@@ -33,18 +33,22 @@
  *     &isp -- not the raw &csi_capture_port -- for the OV5647 ISP path), they
  *     drive the real ISP m2m path the moment the hal_alif libisp wrapper is
  *     bumped to the version isp_pico.c targets.
- *   - open() now drives the exact sequence examples/aen/aen-isp-ov5647-
- *     capture proves on real silicon (runs 69-145): ISP INPUT format
+ *   - open() now drives the exact sequence examples/aen/aen-isp-capture proves
+ *     on real silicon (runs 69-145): ISP INPUT format
  *     SBGGR10P at the requested size, AWB (VIDEO_CID_AUTO_WHITE_BALANCE) and
  *     AE (VIDEO_CID_EXPOSURE_AUTO) turned on via the standard Zephyr video
- *     ctrl registry before the first video_stream_start(), the OV5647's own
- *     10 fps floor frame interval, then the ISP OUTPUT format.  The ISP MI
+ *     ctrl registry before the first video_stream_start(), the caller's
+ *     requested frame interval (cfg->fps, falling back to a 10 fps default
+ *     -- a choice, not a hardware limit -- when unset; forwarded to whichever
+ *     real sensor is wired behind the ISP by video_set_frmival(dev, ...)
+ *     itself, see the fps-forwarding block below), then the ISP OUTPUT
+ *     format.  The ISP MI
  *     never produces RGB565 (isp_pico.c's supported_output_fmts is
  *     YUV/mono/Bayer only) -- a caller requesting ALP_PIXFMT_RGB565 gets a
  *     negotiated YUV output (YUV420 planar preferred, YUYV fallback -- see
  *     _rgb565_yuv_candidates[] below: YUYV frames never completed on
  *     silicon in run 154, and YUV420 matches both Alif's own viewfinder
- *     sample and the bench-proven aen-isp-ov5647-capture example)
+ *     sample and the bench-proven aen-isp-capture example)
  *     converted to RGB565 on the CPU by isp_capture(); a caller requesting
  *     a YUV format the ISP produces natively (ALP_PIXFMT_YUV420_PLANAR /
  *     ALP_PIXFMT_NV12) gets it passed through unmodified.
@@ -57,14 +61,16 @@
  *
  * ADR 0017 Tier-2, OPT-IN (CONFIG_ALP_SDK_CAMERA_ALIF_ISP, default n).
  * vendor-ext. Runtime capture proven on isp_pico.c's own bench app
- * (examples/aen/aen-isp-ov5647-capture); this PORTABLE backend itself is
+ * (examples/aen/aen-isp-capture); this PORTABLE backend itself is
  * still bench-unverified end to end.
  *
  * AE-convergence fix (bench run 147, examples/aen/aen-isp-ov5647-viewfinder):
  * the naive alp_yuv_to_rgb565() reference converter costs on the order of a
  * second per 640x480 frame at this bench's -Os + CONFIG_DCACHE=n config
  * (scripts/bench/aen/aen-bench-shared.conf) -- far longer than one frame
- * period at the OV5647's 10 fps floor. With only
+ * period at the 10 fps this backend requested by default at the time (a
+ * choice made for AE headroom in a dim scene, not a sensor limit -- see the
+ * open()-time frmival request below). With only
  * CONFIG_ALP_SDK_CAMERA_ALIF_ISP_VBUF_COUNT=2 raw buffers, holding one
  * buffer that long during conversion left just one buffer queued to the
  * ISP MI, which starved, auto-stopped, and forced a full stream restart
@@ -86,15 +92,20 @@
 #include <string.h>
 
 #include <zephyr/device.h>
+#include <zephyr/devicetree.h>
 #include <zephyr/drivers/video.h>
 #include <zephyr/drivers/video-controls.h>
+#include <zephyr/drivers/video/isp_frame_size.h>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
 
 #include <alp/backend.h>
 #include <alp/camera.h>
 #include <alp/cap_instance.h>
 #include <alp/peripheral.h>
+
+LOG_MODULE_REGISTER(alp_camera_alif_isp_pico, CONFIG_LOG_DEFAULT_LEVEL);
 
 #include "alp_errno.h"
 #include "camera_ops.h"
@@ -173,15 +184,75 @@ static uint32_t _to_video_fourcc(alp_pixfmt_t fmt)
 	}
 }
 
-/* ISP INPUT is always our sensor's native Bayer layout -- SBGGR10P, the
- * OV5647's, matching examples/aen/aen-isp-ov5647-capture (see that file's
- * header for why SBGGR10P and not the GRBG10 the wrapper otherwise falls
- * back to for an unmapped fourcc). */
+/*
+ * ISP INPUT is always our sensor's native Bayer layout. OV5647 (the shield examples/aen/
+ * aen-isp-capture bench-proved this backend against) is SBGGR10P -- see that file's header
+ * for why SBGGR10P and not the GRBG10 the wrapper otherwise falls back to for an unmapped fourcc.
+ * IMX296 (issue #2287 Stage B) is SRGGB10P instead -- a different Bayer PHASE, not just a
+ * different sensor, see zephyr/drivers/video/imx296.c's own Bayer-order comment on
+ * imx296_fmts[] -- so this can't be one fixed fourcc for every board any more.
+ *
+ * DT_HAS_COMPAT_STATUS_OKAY(sony_imx296), not video_get_format() on the ISP input device: this
+ * has to be a COMPILE-TIME choice. Querying the input device's format at runtime instead would
+ * call into alif_cam_set_fmt() (video_alif.c) as a SIDE EFFECT of just reading it back -- and
+ * that call fails outright at IMX296's 1088-tall full-frame height (unrelated to this fourcc
+ * choice), so probing the input device before this backend has even picked a fourcc for it would
+ * break this backend on IMX296 before ALIF_ISP_INPUT_FOURCC even mattered. Every board this SDK
+ * ships today has exactly one Bayer sensor wired to the ISP, so "the one sony,imx296 node exists"
+ * is an unambiguous stand-in for "IMX296 is this board's sensor" -- a board wiring both OV5647 and
+ * IMX296 to the same ISP input at once is not a configuration this SDK supports.
+ */
+#if DT_HAS_COMPAT_STATUS_OKAY(sony_imx296) && DT_HAS_COMPAT_STATUS_OKAY(sony_imx335)
+#error "IMX296 and IMX335 both DT_HAS_COMPAT_STATUS_OKAY at once -- ALIF_ISP_INPUT_FOURCC/WIDTH/" \
+	"HEIGHT below and isp_open()'s IMX335 output-size check assume exactly one Bayer sensor " \
+	"is wired to the ISP input (see the comment above), same assumption the fourcc choice " \
+	"already documented before IMX335 existed. A board wiring both at once needs this backend" \
+	" reworked, not silently picking one."
+#endif
+
+#if DT_HAS_COMPAT_STATUS_OKAY(sony_imx296) || DT_HAS_COMPAT_STATUS_OKAY(sony_imx335)
+#define ALIF_ISP_INPUT_FOURCC VIDEO_PIX_FMT_SRGGB10P
+#else
 #define ALIF_ISP_INPUT_FOURCC VIDEO_PIX_FMT_SBGGR10P
+#endif
+
+/*
+ * ISP INPUT size, issue #2327 Stage B: every other sensor's ISP INPUT size equals the caller's
+ * REQUESTED size (cfg->width/height below) -- OV5647's 640x480 native output and IMX296's
+ * 1280x960 ROI crop both already match what a caller asks for. IMX335 has no in-sensor crop this
+ * driver uses: its native 2x2-binned output is a FIXED 1296x972, and the requested 1280x960 is
+ * produced by the ISP's OWN crop instead -- crop-x0/crop-y0 on &isp, set by the SHIELD
+ * (zephyr/boards/shields/innomaker_cam_imx335/innomaker_cam_imx335.overlay, not a per-example
+ * overlay: the crop is a property of THIS SENSOR MODULE, so tying it to one example instead
+ * would leave the pinned 1296/972 input size here disconnected from whatever crop-x0/crop-y0 a
+ * given board happened to set). Reads the shield's own DT values (DT_PROP below) rather than
+ * hardcoding 8/6 a second time, and BUILD_ASSERTs they
+ * still produce the 1280x960 every IMX335 example/scenario budgets its buffers for -- a future
+ * shield edit that changes the crop without updating this backend fails the BUILD, not silently
+ * mismatches at isp_stream_start() (zephyr/drivers/video/isp_pico.c's own out_form_rect check).
+ * 0/0 (every other sensor) means "use cfg->width/height unchanged", the existing behaviour.
+ */
+#if DT_HAS_COMPAT_STATUS_OKAY(sony_imx335)
+#define ALIF_ISP_INPUT_WIDTH       1296
+#define ALIF_ISP_INPUT_HEIGHT      972
+#define ALIF_ISP_IMX335_CROP_X0    DT_PROP(DT_NODELABEL(isp), crop_x0)
+#define ALIF_ISP_IMX335_CROP_Y0    DT_PROP(DT_NODELABEL(isp), crop_y0)
+#define ALIF_ISP_IMX335_OUT_WIDTH  (ALIF_ISP_INPUT_WIDTH - 2 * ALIF_ISP_IMX335_CROP_X0)
+#define ALIF_ISP_IMX335_OUT_HEIGHT (ALIF_ISP_INPUT_HEIGHT - 2 * ALIF_ISP_IMX335_CROP_Y0)
+BUILD_ASSERT(ALIF_ISP_IMX335_OUT_WIDTH == 1280,
+             "innomaker_cam_imx335.overlay's &isp crop-x0 must crop 1296 down to 1280 -- "
+             "update this backend's/every IMX335 example's assumed output size to match");
+BUILD_ASSERT(ALIF_ISP_IMX335_OUT_HEIGHT == 960,
+             "innomaker_cam_imx335.overlay's &isp crop-y0 must crop 972 down to 960 -- "
+             "update this backend's/every IMX335 example's assumed output size to match");
+#else
+#define ALIF_ISP_INPUT_WIDTH  0
+#define ALIF_ISP_INPUT_HEIGHT 0
+#endif
 
 /* Output fourccs this backend converts to RGB565 on the CPU when the
  * caller requests ALP_PIXFMT_RGB565, tried in this order: YUV420 planar
- * first -- bench-proven end to end by examples/aen/aen-isp-ov5647-capture
+ * first -- bench-proven end to end by examples/aen/aen-isp-capture
  * (runs 69-145) and matching Alif's own viewfinder sample -- then YUYV as
  * the fallback if a driver build doesn't offer YUV420. YUYV was tried
  * first in an earlier revision (packed 4:2:2, no chroma-plane subsampling
@@ -273,6 +344,20 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	    cfg->format == ALP_PIXFMT_RAW10) {
 		return ALP_ERR_NOSUPPORT;
 	}
+#if DT_HAS_COMPAT_STATUS_OKAY(sony_imx335)
+	/*
+	 * IMX335's ISP INPUT is pinned to its fixed native
+	 * 1296x972 (ALIF_ISP_INPUT_WIDTH/HEIGHT above), regardless of cfg->width/height -- so a
+	 * caller requesting anything OTHER than the shield's own crop result
+	 * (ALIF_ISP_IMX335_OUT_WIDTH/HEIGHT, BUILD_ASSERTed above to be 1280x960) would silently
+	 * get a 1280x960 frame back no matter what it asked for. Fail loudly here instead of
+	 * letting isp_stream_start()'s own out_form_rect-vs-output_fmt check (isp_pico.c) catch
+	 * the SAME mismatch three calls later with a less specific error.
+	 */
+	if (cfg->width != ALIF_ISP_IMX335_OUT_WIDTH || cfg->height != ALIF_ISP_IMX335_OUT_HEIGHT) {
+		return ALP_ERR_OUT_OF_RANGE;
+	}
+#endif
 	const struct device *dev = _devs[cfg->camera_id];
 	if (dev == NULL || !device_is_ready(dev)) {
 		return ALP_ERR_NOT_READY;
@@ -289,8 +374,8 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	struct video_format in_fmt = {
 		.type        = VIDEO_BUF_TYPE_INPUT,
 		.pixelformat = ALIF_ISP_INPUT_FOURCC,
-		.width       = cfg->width,
-		.height      = cfg->height,
+		.width       = ALIF_ISP_INPUT_WIDTH ? ALIF_ISP_INPUT_WIDTH : cfg->width,
+		.height      = ALIF_ISP_INPUT_HEIGHT ? ALIF_ISP_INPUT_HEIGHT : cfg->height,
 	};
 	int err = video_set_format(dev, &in_fmt);
 	if (err != 0) {
@@ -339,24 +424,96 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	 * explicitly anyway, before the first video_stream_start(), as
 	 * documented intent and so a future driver default change can't
 	 * silently leave this backend's 3A off. Best-effort, same as
-	 * examples/aen/aen-isp-ov5647-capture: a driver build without the
+	 * examples/aen/aen-isp-capture: a driver build without the
 	 * WB/AE library modules just leaves the ctrl unset. */
 	struct video_control awb_ctrl = { .id = VIDEO_CID_AUTO_WHITE_BALANCE, .val = 1 };
 	(void)video_set_ctrl(dev, &awb_ctrl);
 	struct video_control ae_ctrl = { .id = VIDEO_CID_EXPOSURE_AUTO, .val = VIDEO_EXPOSURE_AUTO };
 	(void)video_set_ctrl(dev, &ae_ctrl);
 
-#if DT_NODE_EXISTS(DT_NODELABEL(ov5647))
-	/* OV5647's floor rate (ov5647_framerates[] in ov5647.c) gives AE the
-	 * most exposure headroom for a dim scene -- same reasoning as the
-	 * capture example's file header.  Scoped to the OV5647 shield only:
-	 * a future sensor on this ISP path needs its own branch here. */
-	const struct device *sensor_dev = DEVICE_DT_GET(DT_NODELABEL(ov5647));
-	if (device_is_ready(sensor_dev)) {
-		struct video_frmival frmival = { .numerator = 1, .denominator = 10 };
-		(void)video_set_frmival(sensor_dev, &frmival);
+	/* Request the caller's fps on whichever real sensor is wired behind this
+	 * ISP -- OV5647, IMX296, IMX335, or a future sensor -- with no per-sensor
+	 * DT nodelabel list (issue #2338: this used to reach only
+	 * DEVICE_DT_GET(DT_NODELABEL(ov5647)), silently dropping the request for
+	 * every other sensor).  cfg->fps == 0 means "backend default" (see
+	 * <alp/camera.h>'s alp_camera_config_t::fps doc) -- NOT the same
+	 * convention width/height use just above (those are a "you must choose"
+	 * sentinel that alp_camera_open() rejects outright; an unset fps is not
+	 * an error, it just falls back to this backend's own default of 10 fps --
+	 * a *choice* that buys AE the most exposure headroom in a dim scene on a
+	 * sensor with a wide rate table like the OV5647 (ov5647_framerates[] in
+	 * ov5647.c: {10, 15, 30, 45, 60, 90, 120}), not a hardware floor any
+	 * sensor needs.  Each sensor's own set_frmival() picks the closest rate
+	 * it can actually reach (VTS-clamped for OV5647; IMX296's all-pixel-scan
+	 * mode has exactly one fixed 60.3 frame/s rate, imx296.c's
+	 * imx296_set_frmival() -- see below), so read the result back rather
+	 * than assume the request landed exactly.
+	 *
+	 * A single video_set_frmival(dev, ...) on the ISP device itself now
+	 * reaches the real sensor generically: isp_pico.c gains its own
+	 * .get_frmival/.set_frmival (new, forwarding to `controller`) to match
+	 * video_alif.c's alif_cam_set_frmival() (forwards to its endpoint) and
+	 * video_csi_dw.c's csi2_dw_set_frmival() (forwards to
+	 * config->sensor[data->current_sensor]) -- those two already had a
+	 * .get_frmival forwarder each (isp_pico.c's isp_apply_ae() AE envelope
+	 * derivation used them directly, bypassing this backend's own vtable,
+	 * which is why isp_pico.c itself had none until now). Together the
+	 * three-hop isp -> cam -> csi -> sensor forward chain now exists on both
+	 * the get and set side. csi2_dw_set_frmival() targets the SAME
+	 * current_sensor its own .get_frmival reads, so a 2-sensor CSI node's AE
+	 * (which reads back through .get_frmival) sees the rate this sets. In
+	 * TPG mode (config->controller == NULL, no real sensor) isp_pico.c's
+	 * own .set_frmival returns -ENOSYS -- nothing to forward to -- which
+	 * this treats as "nothing to do", not an error.
+	 *
+	 * The sensor driver owns the exposure ceiling: e.g. OV5647's
+	 * ov5647_set_ctrl_exposure() (ov5647.c) clamps every VIDEO_CID_EXPOSURE
+	 * write to the active mode's VTS - 4 lines. */
+	uint8_t              requested_fps = (cfg->fps != 0u) ? cfg->fps : 10u;
+	struct video_frmival frmival       = { .numerator = 1, .denominator = requested_fps };
+	int                  rc            = video_set_frmival(dev, &frmival);
+
+	if (rc == -ENOSYS || rc == -ENOTSUP) {
+		/* Not a hard error: no sensor wired to set a rate on (TPG mode
+		 * above, or a future sensor that rejects set_frmival outright)
+		 * just keeps running at whatever rate it already has. */
+		LOG_INF("camera%u: no settable frame rate; fps request (%u) not applied",
+		        cfg->camera_id,
+		        requested_fps);
+	} else if (rc != 0) {
+		LOG_WRN(
+		    "camera%u: video_set_frmival(%u fps) failed: rc=%d", cfg->camera_id, requested_fps, rc);
+	} else {
+		struct video_frmival actual = { 0 };
+
+		if (video_get_frmival(dev, &actual) == 0 && actual.denominator > 0) {
+			/* Print the settled interval as num/den rather than a
+			 * truncating denominator/numerator division -- a
+			 * non-integer or sub-1-fps settled rate would otherwise
+			 * print a misleading rounded (or zero) fps. The request
+			 * was always {.numerator = 1, .denominator =
+			 * requested_fps}, so compare against that rather than
+			 * requested_fps alone. Only logged, not reported back to
+			 * the caller -- <alp/camera.h> has no settled-fps field
+			 * yet (issue #2279). */
+			bool settled_as_requested =
+			    (actual.numerator == 1u) && (actual.denominator == requested_fps);
+
+			if (settled_as_requested) {
+				LOG_DBG("camera%u: requested %u fps, settled on %u/%u",
+				        cfg->camera_id,
+				        requested_fps,
+				        actual.denominator,
+				        actual.numerator);
+			} else {
+				LOG_INF("camera%u: requested %u fps, settled on %u/%u",
+				        cfg->camera_id,
+				        requested_fps,
+				        actual.denominator,
+				        actual.numerator);
+			}
+		}
 	}
-#endif
 
 	uint8_t want = ARRAY_SIZE(st->vbufs);
 	if (vcaps.min_vbuf_count > want) {
@@ -364,13 +521,11 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 		return ALP_ERR_OUT_OF_RANGE;
 	}
 
-	/* Per-buffer size: prefer the driver-negotiated pitch; when the driver
-	 * reports none, derive bytes-per-pixel from the negotiated fourcc via
-	 * Zephyr's own format table (video_bits_per_pixel). */
-	uint32_t bytes_per_buf = (st->fmt.pitch != 0u) ? (st->fmt.pitch * st->fmt.height)
-	                                               : (((uint32_t)st->fmt.width * st->fmt.height *
-	                                                   video_bits_per_pixel(st->fmt.pixelformat)) /
-	                                                  BITS_PER_BYTE);
+	/* Per-buffer size: full frame size, not st->fmt.pitch * height -- see
+	 * <zephyr/drivers/video/isp_frame_size.h> for why (pitch is the
+	 * LUMA-only stride for planar/semi-planar YUV since isp_pico.c's
+	 * isp_set_fmt() fix; the same helper sizes bytesused there). */
+	uint32_t bytes_per_buf = alp_isp_frame_size(st->fmt.pixelformat, st->fmt.width, st->fmt.height);
 	if (bytes_per_buf == 0u) {
 		/* Real dimensions but a fourcc Zephyr's table can't size:
 		 * refuse rather than under-allocate and let the ISP DMA past
@@ -436,8 +591,8 @@ static alp_status_t isp_start(alp_camera_backend_state_t *state)
 		return ALP_OK;
 	}
 	/* Alif's own settle delay between the last buffer enqueue (isp_open())
-	 * and the first video_stream_start() -- examples/aen/aen-isp-ov5647-
-	 * capture mirrors this exactly; no smaller value is bench-proven. */
+	 * and the first video_stream_start() -- examples/aen/aen-isp-capture
+	 * mirrors this exactly; no smaller value is bench-proven. */
 	k_msleep(1000);
 	int err = video_stream_start(st->dev, VIDEO_BUF_TYPE_OUTPUT);
 	if (err == 0) {
@@ -478,7 +633,7 @@ isp_capture(alp_camera_backend_state_t *state, alp_camera_frame_t *out, uint32_t
 	 * checked out between this call and release()) and only restarts when
 	 * this app calls video_stream_start() again (isp_pico.c's own model,
 	 * no driver-driven restart of its own) -- re-arm before every dequeue,
-	 * mirroring examples/aen/aen-isp-ov5647-capture's per-frame loop.
+	 * mirroring examples/aen/aen-isp-capture's per-frame loop.
 	 * -EBUSY just means the driver hadn't auto-stopped yet since the last
 	 * call; either way there's nothing to do but keep going. */
 	/* Hand every already-completed (stale) buffer straight back to the
@@ -527,8 +682,10 @@ isp_capture(alp_camera_backend_state_t *state, alp_camera_frame_t *out, uint32_t
 		 * queued to the ISP MI (this one dequeued, held here through
 		 * the conversion), the fifo can absorb one held buffer for
 		 * roughly (VBUF_COUNT-1) frame periods before it starves and
-		 * the driver auto-stops -- at the OV5647's 10 fps floor that's
-		 * ~100 ms of headroom per spare buffer, nowhere near enough for
+		 * the driver auto-stops -- at this backend's 10 fps default
+		 * (see the frmival request in open()) that's ~100 ms of
+		 * headroom per spare buffer (less at a higher requested fps),
+		 * nowhere near enough for
 		 * the naive per-pixel path (~1 s/frame at -Os, see this file's
 		 * header) but comfortably inside this fast path's budget. */
 		if (st->isp_out_fourcc == VIDEO_PIX_FMT_YUYV) {

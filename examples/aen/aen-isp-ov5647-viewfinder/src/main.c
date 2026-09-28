@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * aen-isp-ov5647-viewfinder -- the portable <alp/camera.h> counterpart to
- * examples/aen/aen-isp-ov5647-capture: a real OV5647 sensor frame through
+ * examples/aen/aen-isp-capture: a real OV5647 sensor frame through
  * the Alif ISP-Pico (VeriSilicon ISP Nano), AE + AWB on, but through
  * alp_camera_open/start/capture/release/stop/close instead of the raw
  * Zephyr video_* API -- proving the portable backend itself
@@ -34,7 +34,7 @@
  * video_stream_start() (tolerating -EBUSY) before every dequeue, and this
  * app releases each frame promptly after taking its stats so the backend
  * can keep buffers moving.  The last frame is kept in frame_copy (below)
- * for a bench `savebin`, the same convention aen-isp-ov5647-capture uses.
+ * for a bench `savebin`, the same convention aen-isp-capture uses.
  *
  * TIMING: every frame prints `capture=<N> us` -- alp_camera_capture()'s
  * wall time, k_cycle_get_32()-measured. This is the bench observable for
@@ -42,8 +42,25 @@
  * reason a slow first cut of this backend couldn't keep AE converging
  * (isp_pico.c's fifo starved while a frame converted -- see
  * src/backends/camera/alif_isp_pico.c's "AE-convergence fix"): a duration
- * far past the ~100 ms 10 fps frame period says the conversion (or the
- * dequeue wait behind it) is still the bottleneck.
+ * far past the ~100 ms frame period this app's own cfg.fps = 10 request
+ * (below) targets says the conversion (or the dequeue wait behind it) is
+ * still the bottleneck.
+ *
+ * FPS: this app pins cfg.fps = 10 explicitly. The backend honors cfg.fps
+ * (issue #2276), so leaving it unset would pass ALP_CAMERA_CONFIG_DEFAULT's
+ * 30 fps through to the sensor instead of the 10 fps described above)
+ * -- it has never been re-benched at 30 fps, and 10 fps buys two things
+ * this app still needs at that rate: (1) CPU conversion headroom, since
+ * the ~100 ms 10 fps frame period is what let the fix above keep two
+ * buffers queued to the ISP MI while the third converts (a 30 fps ~33 ms
+ * period gives the same conversion far less slack to land in before the
+ * fifo starves again); and (2) AE exposure headroom in a dim scene -- a
+ * faster fps means a shorter frame period, so a shorter exposure ceiling
+ * no matter what (issue #2277 fixed a BUG where that ceiling used to stay
+ * pinned to the 10 fps VTS even when this app itself ran faster; it now
+ * tracks whichever fps is actually requested, so this app's choice of 10
+ * fps here is purely the CPU/AE headroom trade-off above, not a workaround
+ * for that bug).
  */
 
 #include <stdbool.h>
@@ -99,6 +116,12 @@ int main(void)
 	cfg.width               = CAM_WIDTH;
 	cfg.height              = CAM_HEIGHT;
 	cfg.format              = ALP_PIXFMT_RGB565;
+	/* Pin 10 fps explicitly -- see the file header's FPS note.  This app's
+	 * CPU YUV->RGB565 conversion and dim-scene AE headroom are only
+	 * bench-proven at 10 fps (runs 147/154); ALP_CAMERA_CONFIG_DEFAULT's
+	 * fps is 30, which the backend now honors (issue #2276), and this app
+	 * has not been benched at 30. */
+	cfg.fps = 10;
 
 	/* --- 1. open -------------------------------------------------- */
 	printk("[ispvf] alp_camera_open(id=0, %ux%u, RGB565) ...\n", cfg.width, cfg.height);

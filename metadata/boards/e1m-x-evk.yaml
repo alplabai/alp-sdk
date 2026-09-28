@@ -54,7 +54,7 @@ populated:
   tcal9538:                 true                # U35/U37 TCAL9538 (2x)
 
   # Power instrumentation
-  ina236:                   true                # U21/U30/U31/U32/U34 INA236 (5x current monitors)
+  ina236:                   true                # U21/U31/U32/U34 INA236 (4x current monitors; U30 is an INA228)
 
   # SDK-level block helpers (rotary encoder + RGB LED).
   button_led:               true                # E1 PEC12R-4222F encoder + RGB LED
@@ -246,13 +246,13 @@ e1m_routes:
         board_alias: BOARD_ENC_ROTARY,
         doc: "PEC12R-4222F rotary encoder: ENC0_X = A phase, ENC0_Y = B phase; push switch on XEVK_PIN_ENCODER_SW (E1M_X_GPIO_IO28).  ENC1-3 pads are broken out but unpopulated." }
 
-# Five INA236 high-side current-shunt monitors, all on
-# XEVK_I2C_BUS_SENSORS (E1M_X_I2C0).  Ref-des + rail + A0 strap per
-# the board schematic (Current Measurement.SchDoc); INA236A occupies
-# 0x40..0x43, INA236B occupies 0x48..0x4B (same A0 strap encoding),
-# so all five share the one bus.  Single source of truth for the
-# `XEVK_I2C_ADDR_INA236_*` / `XEVK_INA236_SHUNT_*` / `XEVK_INA236_MAX_*`
-# macros; `scripts/gen_board_header.py` reads this block and emits the
+# Four INA236 high-side current-shunt monitors (U21/U31/U32/U34) plus
+# one INA228 (U30, +5V input), all on XEVK_I2C_BUS_SENSORS
+# (E1M_X_I2C0).  Ref-des + rail + A0 strap per the board schematic
+# (Current Measurement.SchDoc); INA236A occupies 0x40..0x43, INA236B
+# occupies 0x48..0x4B (same A0 strap encoding).  Single source of truth
+# for the `XEVK_I2C_ADDR_INA2xx_*` / `XEVK_INA236_SHUNT_*` /
+# `XEVK_INA236_MAX_*` macros; `scripts/gen_board_header.py` reads this block and emits the
 # macros into `include/alp/boards/alp_e1m_x_evk_routes.h`. Do not
 # hand-edit the generated header (#1636).
 #
@@ -262,28 +262,40 @@ e1m_routes:
 #      shunt/max-current pairs come from the board schematic; current/
 #      power end-to-end accuracy is pending the HiL sweep.
 #
-# NEXT-REVISION board notes (observed on current silicon, 2026-06; not
-# modeled here -- do not rely on them for firmware behaviour):
-#   - 0x42 / 0x43 also ACK as INA236 (mfg-ID "TI") although the
-#     schematic BOM lists only the five monitors below; treated as a
-#     board anomaly, to be resolved on the next respin.
+# Board notes (not modeled here -- do not rely on them for firmware
+# behaviour):
+#   - 2026-06, earlier E1M-X EVK build: 0x42 / 0x43 also ACKed as INA236
+#     (mfg-ID "TI"), and a +5V monitor answered at 0x4A. Neither answers
+#     on the E1M-X EVK V2 (i2c-0 sweep on E1M-V2M103 2026W38-0001,
+#     2026-09-27); see U30 below (#2343).
 #   - The 3V3 (U21) and 1V8 (U31) monitors read ~0 V on the bus-
-#     voltage register on current silicon (VBUS-sense wiring under
-#     investigation); their shunt/current path is unaffected. 5V (U30)
-#     reads correctly (~4.88 V / whole-board input current).
+#     voltage register (VBUS-sense wiring under investigation); their
+#     shunt/current path is unaffected.
 #
 # On-board sensors + I/O expander + ID EEPROM, all on the same
 # XEVK_I2C_BUS_SENSORS bus (#1636 -- previously hand-defined in
 # include/alp/boards/alp_e1m_x_evk.h alongside the INA236 block above).
+i2c_devices_bus: E1M_X_I2C0    # = *_I2C_BUS_SENSORS; see check_i2c_address_uniqueness.py
 i2c_devices:
-  - { macro: XEVK_I2C_ADDR_BMI323, part: bmi323, address: "0x68",
-      doc: "U-IMU BMI323 6-axis IMU (alternate IMU)." }
-  - { macro: XEVK_I2C_ADDR_ICM42670, part: icm42670, address: "0x69",
-      doc: "Canonical primary IMU (ICM-42670)." }
+  - { macro: XEVK_I2C_ADDR_BMI323, part: bmi323, designator: U13, address: "0x68",
+      doc: "U13 BMI323 6-axis IMU (alternate IMU), SDO_MISO_ADR to GND via R48.
+            E1M-X EVK V2 as built fits R47 (SDO to +VIO) with R48 DNP, which puts
+            the BMI323 at 0x69 on top of the ICM-42670 -- neither IMU reads back
+            until the board is reworked: fit R48, remove R47 (#2343)." }
+  - { macro: XEVK_I2C_ADDR_ICM42670, part: icm42670, designator: U12, address: "0x69",
+      doc: "U12 ICM-42670 canonical primary IMU (AD0_SDO to +VIO via R45). Collides
+            with an unreworked E1M-X EVK V2's BMI323; see XEVK_I2C_ADDR_BMI323." }
   - { macro: XEVK_I2C_ADDR_BMP581, part: bmp581, address: "0x47",
       doc: "BMP581 barometer (SDO->VIO; 0x46 if SDO->GND)." }
-  - { macro: XEVK_I2C_ADDR_TCAL9538, part: tcal9538, address: "0x72",
-      doc: "TCAL9538 I/O expander." }
+  - { macro: XEVK_I2C_ADDR_TCAL9538_MAIN, part: tcal9538, designator: U35, address: "0x73",
+      alias: XEVK_I2C_ADDR_TCAL9538,
+      doc: "U35 main I/O expander, A0 and A1 strapped high. CORRECTED 2026-09 from 0x72,
+            a value never measured on this carrier: the E1M-X EVK V2 straps and a live
+            i2c-0 sweep on an E1M-V2M103 both give 0x73." }
+  - { macro: XEVK_I2C_ADDR_TCAL9538_PCIE, part: tcal9538, designator: U37, address: "0x71",
+      doc: "U37 PCIe I/O expander, A0 high and A1 low. It sits on PCIE0_I2C, which an
+            LSF0102 level shifter joins to E1M_X_I2C0; confirmed by the same i2c-0 sweep.
+            Its P0 drives the PCIe I2C mux select." }
   - { macro: XEVK_I2C_ADDR_EEPROM, part: eeprom_24c128, address: "0x50",
       doc: "Board ID EEPROM (24-series)." }
   - { macro: XEVK_I2C_ADDR_INA236_3V3, part: ina236, designator: U21, address: "0x40",
@@ -295,36 +307,53 @@ i2c_devices:
       calibration: { shunt_macro: XEVK_INA236_SHUNT_1V8_OHMS, shunt_ohms: "0.020",
                      max_macro: XEVK_INA236_MAX_1V8_A, max_current_a: "4.0" } }
   - { macro: XEVK_I2C_ADDR_INA236_VCAM2, part: ina236, designator: U32, address: "0x48",
-      doc: "U32 INA236B, +VCAM2 rail (50 mOhm shunt, 1.6 A max). A0 = GND.",
+      doc: "U32 INA236B, +VCAM2 rail (50 mOhm shunt, 1.6 A max). A0 = GND.
+            DESIGN CONFLICT on E1M-X EVK V2: 0x48 is also the TAS2563 broadcast
+            address on this bus, and TAS2563 page-select writes to reg 0x00 land
+            in this part's CONFIG register. U32 is removed on the current build
+            batch; a re-strap to 0x4A/0x4B is planned for the next carrier rev.",
       calibration: { shunt_macro: XEVK_INA236_SHUNT_VCAM2_OHMS, shunt_ohms: "0.050",
                      max_macro: XEVK_INA236_MAX_VCAM2_A, max_current_a: "1.6" } }
   - { macro: XEVK_I2C_ADDR_INA236_VCAM3, part: ina236, designator: U34, address: "0x49",
       doc: "U34 INA236B, +VCAM3 rail (50 mOhm shunt, 1.6 A max). A0 = V+.",
       calibration: { shunt_macro: XEVK_INA236_SHUNT_VCAM3_OHMS, shunt_ohms: "0.050",
                      max_macro: XEVK_INA236_MAX_VCAM3_A, max_current_a: "1.6" } }
-  - { macro: XEVK_I2C_ADDR_INA236_5V, part: ina236, designator: U30, address: "0x4A",
-      doc: "U30 INA236B, +5V rail    (20 mOhm shunt, 4.0 A max). A0 = SDA.",
-      calibration: { shunt_macro: XEVK_INA236_SHUNT_5V_OHMS, shunt_ohms: "0.020",
-                     max_macro: XEVK_INA236_MAX_5V_A, max_current_a: "4.0" } }
+  - { macro: XEVK_I2C_ADDR_INA228_5V, part: ina228, designator: U30, address: "0x42",
+      doc: "U30 INA228 (20-bit, not INA236-compatible), +5V input rail. A1 = GND,
+            A0 = SDA. E1M-X EVK V2 as built nets U30's SDA to I2C0.SCL and its SCL to
+            I2C0.SDA, so it cannot answer until the board is reworked (#2343)." }
 
 # Audio -- 2x TAS2563 boosted class-D smart-amp (U27/U28) on E1M_X_I2C0 +
-# E1M_X_I2S0.  Scripts that emit the Linux DT (rcar_sound + audio-graph-card)
-# read this block; device-instance facts here are mined from the board
-# netlist (2026-05).  The E1M-IO -> SoC (RIIC / SSI / GPIO) mapping is
-# resolved SoM-side, not here.
+# E1M_X_I2S0.  Scripts that emit the Linux DT read this block; device-
+# instance facts here are mined from the board netlist (2026-05).  The
+# E1M-IO -> SoC (RIIC / SSI / GPIO) mapping is resolved SoM-side, not here.
 #
 # NB: the stock RZ/V2N EVK codec (DA7212) is NOT populated on this carrier.
-# The audio DT keeps &da7212 disabled and builds a fresh TAS2563 audio-
-# graph-card -- it does NOT re-enable the EVK's da7212-based sound_card.
+# The audio DT keeps &da7212 disabled and builds a fresh audio-graph-card2
+# `multi` link instead: ONE CPU port (SSI1) fanned out to BOTH TAS2563
+# codec ports, so both amps follow the stream's hw_params and DAPM power
+# sequencing (see meta-alp-sdk/.../e1m-x-evk.dtsi) -- it does NOT re-enable
+# the EVK's da7212-based audio-graph-card sound_card.
 audio:
   codecs:
     # Stereo pair: U27 = LEFT, U28 = RIGHT, sharing one I2C bus + one I2S.
+    # E1M_X_I2C0 runs at 100 kHz (e1m-x-evk.dtsi &i2c0) with 4.7 kOhm carrier
+    # pull-ups to +VIO (R137 SCL / R144 SDA, E1M-X EVK V2 netlist).
     - { chip: tas2563, designator: U27, channel: left,  i2c_bus: E1M_X_I2C0, i2c_address: "0x4D" }   # AD0: 10k -> GND
     - { chip: tas2563, designator: U28, channel: right, i2c_bus: E1M_X_I2C0, i2c_address: "0x4E" }   # AD0: 10k -> VIO
   i2s_bus: E1M_X_I2S0              # SCLK / WS / SDI / SDO; codecs are bit-clock + frame slaves
   mclk:
-    source:  e1m_audio_clk        # E1M AUDIO_CLK (SoM ADG); wired to the TAS MCLK on the current PCB rev
-    rate_hz: 12288000             # 256 x 48 kHz (default -- confirm against the ADG / clock-gen setup)
+    source:  e1m_audio_clk        # E1M AUDIO_CLK = Audio_CLKB: the SoC ADG/SSI reference clock. The TAS2563 has no MCLK pin.
+    # CONFIRMED 2026-09-26: the Renesas RZ/V2N EVK reference dts
+    # (r9a09g056n48-rzv2n-evk.dts, kernel-source SHA 6717c06) sets
+    # `&audio_clkb { clock-frequency = <24576000>; };` for the identical
+    # 5L35023B SE3 24.576 MHz feed -- matches this chip's Audio_CLKB output
+    # (metadata/chips/clk_5l35023b.yaml). The TAS2563 has no discrete MCLK
+    # pin (bus/gpio/signals lists in metadata/chips/tas2563.yaml carry only
+    # SBCLK/FSYNC/SDIN); the ADG derives the SSI bit-clock from this
+    # reference, it is not routed to the codec directly. Supersedes the
+    # earlier unconfirmed 256x48kHz placeholder.
+    rate_hz: 24576000
   # I2S path-mux (TI TMUX1574, U46): SoC I2S0 -> TAS amps (A side) or the
   # M.2 E-key slot (B side).  Both control lines active-low; drive LOW for the amps.
   path_mux:
@@ -335,6 +364,10 @@ audio:
   # current PCB iteration -- exact E1M pads pending (maintainer assigning).
   # Amp control on the otherwise-unused E1M_X_I2S1 pads, driven as plain
   # GPIO (Linux DT pinmuxes them to GPIO, not SSI).  Wired on current PCB rev.
+  # active_low describes the nets' electrical sense (\SD_N, IRQ_N). The Linux
+  # DT encodes the same SD_N line as GPIO_ACTIVE_HIGH because the 6.1 tas2562
+  # driver drives logical 1 to power the amp up, and IRQ_N as
+  # IRQ_TYPE_EDGE_FALLING. Same wires, two vocabularies.
   shutdown:  { net: AMP.ENABLE, e1m: E1M_X_I2S1_SCLK, active_low: true }   # \SD_N -> codec shutdown-gpios (GPIO out)
   fault_irq: { net: AMP.FAULT,  e1m: E1M_X_I2S1_SDI,  active_low: true }   # IRQ_N -> fault interrupt (GPIO in); confirm SDI is I2S1 (NOT the live I2S0 audio data line)
 

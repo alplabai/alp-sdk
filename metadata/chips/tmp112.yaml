@@ -19,10 +19,11 @@ i2c:
     # metadata/e1m_modules/aen/on-module-links.yaml and alp-sdk#1978 for
     # the full derivation.  The stale 0x48 here is the same class of bug
     # that kept the stock CONFIG_TMP112 driver from ever binding.
-    - { addr_7bit: 0x40, scope: "ADD0 = GND (E1M-AEN, TMP112DIDPWR X2SON-5)" }
-    # E1M-V2N101.yaml still carries 0x48 pending bench verification on
-    # real silicon -- do not assume it matches AEN without measuring it.
-    - { addr_7bit: 0x48, scope: "ADD0 = GND (E1M-V2N, unverified on silicon)" }
+    # Same class of bug, same fix, confirmed on the V2N-family PCB too
+    # (maintainer-confirmed 2026-09-24, feat/v2m-deepx-rail-uboot): all six
+    # E1M-V2N/V2M SoM presets carried the stale 0x48 and now carry 0x40 --
+    # same ADD0=GND strap as AEN, on the one shared PCB the whole family uses.
+    - { addr_7bit: 0x40, scope: "ADD0 = GND (E1M-AEN + E1M-V2N + E1M-V2M, TMP112DIDPWR X2SON-5)" }
   address_strap_range: "0x48..0x4B (ADD0 strap)"
   max_clock_hz:   400000          # Fast-mode
 

@@ -22,6 +22,22 @@
  */
 int ov5647_emul_get_reg(const struct emul *target, uint16_t reg, uint8_t *value);
 
+/**
+ * @brief Directly poke one emulated OV5647 register, bypassing the driver.
+ *
+ * #2277: stands in for whatever OUTSIDE the ov5647.c driver's own I2C traffic last touched a
+ * register -- e.g. a vendor ISP library's own sensor-attach table, or (as bench-observed) the
+ * sensor's own on-chip AEC overwriting its exposure registers once AEC-manual goes inactive --
+ * so a test can reproduce "something clobbered this register" without needing that external
+ * write path present in a native_sim unit test.
+ *
+ * @param target The OV5647 emulator instance.
+ * @param reg 16-bit CCI register address.
+ * @param value Byte to store.
+ * @return 0 on success, -EINVAL if @p reg is out of the emulated map.
+ */
+int ov5647_emul_set_reg(const struct emul *target, uint16_t reg, uint8_t value);
+
 /* One recorded register write, in the order the driver issued it -- see ov5647_emul_log_get(). */
 struct ov5647_emul_write {
 	uint16_t reg;
