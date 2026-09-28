@@ -30,13 +30,14 @@
  * claim either part's SILICON lacks one, only that nothing in either tree
  * exposes one today.  Two reasons this stays software regardless:
  *
- *   1. Cost is noise at the sizes that matter.  A typical CC3501E reply is
- *      8..16 bytes, so a bitwise CRC here costs on the order of 640 cycles --
- *      nothing against the 250 us inter-phase settle the transport already
- *      pays per phase (CC3501E_PHASE_SETTLE_US, cc3501e_core.c).  The one
- *      size where hardware would actually matter is the 4096-byte
- *      ALP_CC3501E_MAX_PAYLOAD ceiling, and the path that approaches it (OTA)
- *      moves in 256-byte chunks, not one 4 KB burst.
+ *   1. Software is fast enough once it is byte-wise.  The first version ran
+ *      an 8-step bit loop per byte; STREAM_WRITE and SOCK_SEND frames reach
+ *      the 4096-byte ALP_CC3501E_MAX_PAYLOAD ceiling, and there that loop
+ *      cost ~1.3 ms of M55-HE time per frame -- measured 561 -> 687 KB/s on
+ *      4092-byte STREAM_WRITE frames when it was replaced by the shift form
+ *      below.  What is left is a few instructions per byte, small against
+ *      the transport's own inter-phase settles (CC3501E_PHASE_SETTLE_US,
+ *      cc3501e_core.c).
  *   2. The ISR hazard is the real argument against it.  The firmware builds
  *      replies inside the SPI callback.  A CRC peripheral shared with
  *      application code touched from that context needs a lock or a
@@ -85,15 +86,17 @@ extern "C" {
  */
 static inline uint16_t alp_crc16_ccitt_false_update(uint16_t crc, const uint8_t *buf, size_t len)
 {
+	/* Byte-at-a-time form of the 0x1021 polynomial: the same register as
+	 * the 8-step bit loop, in a handful of shifts per byte and no table.
+	 * The bit loop cost ~1 ms per 4 KiB frame on an M55 -- the CC3501E
+	 * bridge CRCs every request, so it showed up directly as link
+	 * throughput. */
 	for (size_t i = 0; i < len; ++i) {
-		crc ^= (uint16_t)buf[i] << 8;
-		for (unsigned b = 0; b < 8; ++b) {
-			if (crc & 0x8000u) {
-				crc = (uint16_t)((crc << 1) ^ 0x1021u);
-			} else {
-				crc <<= 1;
-			}
-		}
+		crc = (uint16_t)((crc >> 8) | (crc << 8));
+		crc ^= buf[i];
+		crc ^= (uint16_t)((crc & 0xFFu) >> 4);
+		crc ^= (uint16_t)(crc << 12);
+		crc ^= (uint16_t)((crc & 0xFFu) << 5);
 	}
 	return crc;
 }
