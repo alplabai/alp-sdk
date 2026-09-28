@@ -321,8 +321,9 @@ pad_routes:
       doc: "Physically open on board 2626-R2 (no CC3501E or Alif termination); r1 routed it to CC3501E GPIO_30 -- see aen/hw-revisions.yaml pad_route_overrides (#1854)." }
 
 # On-module helper MCUs.  CC3501E (TI Wi-Fi 6 + BLE 5.4) is wired
-# on the AEN module; firmware is embedded in alp-sdk at
-# `firmware/cc3501e/` (ADR 0015).
+# on the AEN module; its firmware lives in
+# alplabai/cc3501e-bridge-firmware (ADR 0031, which superseded ADR 0015's
+# in-tree `firmware/cc3501e/`).
 helper_firmware:
   - name:          cc3501e_otp
     chip:          cc3501e

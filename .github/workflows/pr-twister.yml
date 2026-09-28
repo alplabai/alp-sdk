@@ -60,13 +60,13 @@ jobs:
     # was 1544s (25m44s, job 93911719274) -- this ceiling is a backstop
     # to make a hang legible, not a performance target.
     #
-    # 145, not 130: capping `check · --emit kconfig contract (#893)` at 10
-    # moved it out of the uncapped-local-Python bucket (5 -> 4) and into the
-    # sum (116 -> 126), landing the total exactly ON the old ceiling.
-    # test_job_ceiling_exceeds_the_sum_of_its_step_timeouts requires the
-    # ceiling to be STRICTLY above the sum -- a ceiling equal to it leaves no
-    # room for a step to be killed by its own timeout first, which is the
-    # whole point.  The gate caught that, which is the gate working.
+    # 145 dates from #1274's sum-of-step-caps rule: the ceiling had to sit
+    # strictly above the SUM of every step cap, and capping `check · --emit
+    # kconfig contract (#893)` at 10 pushed that sum to 126. #1549 made the
+    # rule max-based (test_job_ceiling_exceeds_its_longest_step_timeout):
+    # the ceiling only has to exceed the LONGEST single step cap, so a hung
+    # step is still killed -- and named -- by its own timeout first. 145
+    # clears that with room to spare and stays as the backstop above.
     timeout-minutes: 145
 
     strategy:
