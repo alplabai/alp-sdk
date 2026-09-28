@@ -266,8 +266,9 @@ MACHINE = "e1m-v2m101-a55"     # V2N + DEEPX
 #     below and docs/bring-up-drpai-v2n.md section 4).  BENCH-UNVERIFIED.
 RUHMI_DRPAI_TVM_DIR = "/path/to/built/rzv_drp-ai_tvm"
 
-# 8. Enable the DEEPX runtime (opt-in; requires step 6's layer):
-ALP_ENABLE_DEEPX_DXM1 = "1"
+# 8. The DEEPX runtime (dx-driver + dx-rt + dx-rt-cli) is installed
+#    automatically on the V2M MACHINEs once step 6's layer is present;
+#    set ALP_ENABLE_DEEPX_DXM1 = "0" in local.conf to leave it out.
 
 # 9. Build the image:
 bitbake alp-image-edge                 # dev image (passwordless root, bench tooling)
@@ -381,7 +382,7 @@ dependencies of the `alp-sdk` library** — the Yocto build links only
 the dispatcher + portable stubs.  Where a runtime userspace package
 exists, the **image** recipe installs it (e.g.
 `conf/machine/include/e1m-v2m-deepx.inc` appending `dx-driver dx-rt
-dx-rt-cli` when `ALP_ENABLE_DEEPX_DXM1 = "1"` -- `dxrt-cli`, `run_model`
+dx-rt-cli` when `ALP_ENABLE_DEEPX_DXM1 = "1"` (the default once meta-deepx-m1 is in bblayers.conf) -- `dxrt-cli`, `run_model`
 and the other tools ship in the `dx-rt-cli` sub-package);
 DEEPX DX-M1's `deepx-dxm1` PACKAGECONFIG pulls only the `dx-rt`
 build dependency (headers + libdxrt), not the runtime install.

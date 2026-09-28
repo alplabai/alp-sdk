@@ -216,12 +216,12 @@ PACKAGECONFIG[drpai]    = "-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=O
 #               portable stub.  NOT default-on unconditionally -- only
 #               when the MACHINE actually carries the DEEPX silicon
 #               (MACHINE_FEATURES `deepx-dxm1`, set by the V2M machine
-#               confs) AND the build has opted in to the license-gated
-#               runtime (ALP_ENABLE_DEEPX_DXM1 = "1", same opt-in the
-#               image recipe gates its dx-rt IMAGE_INSTALL on).  A V2M
-#               build that leaves ALP_ENABLE_DEEPX_DXM1 unset still
-#               builds -- it links only the dispatcher + portable stub,
-#               same as today.
+#               confs) AND ALP_ENABLE_DEEPX_DXM1 == "1" -- which the V2M
+#               machine include defaults on whenever DEEPX's
+#               meta-deepx-m1 layer is in bblayers.conf (#482).  A V2M
+#               build without that layer (or with the flag forced to
+#               "0") still builds -- it links only the dispatcher +
+#               portable stub.
 # DRP-AI3 backend: auto-enabled on an RZ/V2N-family MACHINE that has the
 # DRP-AI node on (ALP_ENABLE_DRPAI, default-on with meta-rz-drpai) AND a
 # RUHMI checkout configured (RUHMI_DRPAI_TVM_DIR, which mera2-drpai-tvm
@@ -254,7 +254,7 @@ python () {
 # (src/yocto/inference_deepx.cpp) is real dx_rt-API code and compiles in
 # only under the `deepx-dxm1` PACKAGECONFIG below -- #482 wired that
 # PACKAGECONFIG + its auto-enable, not the backend body itself -- and
-# it too has never run on DX-M1 silicon, auto-enabled only on a MACHINE
+# it has run on DX-M1 silicon (#1262), auto-enabled only on a MACHINE
 # that carries `deepx-dxm1` in MACHINE_FEATURES with
 # ALP_ENABLE_DEEPX_DXM1 = "1").
 # No `drpai`-enabled alp-image-edge bake has completed yet, and no
