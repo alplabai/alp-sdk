@@ -98,6 +98,7 @@ static alp_inference_t *open_fake_handle(void)
 	alp_inference_config_t cfg       = {
 		.model_data = model,
 		.model_size = sizeof(model),
+		.format     = ALP_INFERENCE_MODEL_DXNN,
 		.backend    = ALP_INFERENCE_BACKEND_DEEPX_DXM1,
 	};
 	return alp_inference_open(&cfg);

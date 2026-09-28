@@ -1004,6 +1004,12 @@ if(ALP_SDK_USE_DRPAI_V2N)
     else()
         target_sources(alp_sdk PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/inference_drpai.cpp
+            # SIGPIPE-safe write() helper for the tar-staging pipe below
+            # (issue #2389) -- its own TU (not folded into
+            # inference_drpai.cpp) so tests/yocto/sigpipe_safe_write.c can
+            # compile it standalone on a non-Linux host too; see that
+            # file's own header comment.
+            ${CMAKE_CURRENT_SOURCE_DIR}/alp_sigpipe_safe_write.c
         )
         target_compile_definitions(alp_sdk PRIVATE
             ALP_SDK_USE_DRPAI_V2N=1

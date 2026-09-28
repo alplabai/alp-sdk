@@ -198,6 +198,7 @@ static void test_overlapping_invoke_is_last_store_wins(void)
 	alp_inference_config_t cfg       = {
 		.model_data = model,
 		.model_size = sizeof(model),
+		.format     = ALP_INFERENCE_MODEL_DXNN,
 		.backend    = ALP_INFERENCE_BACKEND_DEEPX_DXM1,
 	};
 	alp_inference_t *h = alp_inference_open(&cfg);

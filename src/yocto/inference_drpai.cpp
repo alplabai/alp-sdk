@@ -134,6 +134,7 @@
 extern "C" {
 #include "alp/inference.h"
 
+#include "alp_sigpipe_safe_write.h"
 #include "inference_handle_internal.h"
 }
 
@@ -276,9 +277,22 @@ alp_status_t _stage_drpai_blob(const void *data, size_t len, std::string &out_di
 		return ALP_ERR_IO;
 	}
 
-	size_t wrote = (len > 0) ? std::fwrite(data, 1, len, p) : 0;
-	int    rc    = ::pclose(p);
-	if (wrote != len || rc != 0) {
+	/* Write through the raw fd, SIGPIPE-safe (issue #2389): `tar` can die
+     * at any point while reading (a corrupt/wrong-format blob -- e.g. an
+     * ONNX buffer with no valid tar header -- makes it exit at the first
+     * bad header), and a plain fwrite() into that now-reader-less pipe
+     * raises SIGPIPE, whose default disposition KILLS this whole process
+     * before pclose()'s exit-status check below ever runs (observed as
+     * exit 141 in the issue's repro). alp_sigpipe_safe_write() blocks
+     * SIGPIPE for this thread around the write and reports the failure as
+     * a normal `false`/EPIPE instead. No stdio buffering is bypassed
+     * unsafely here: this is the ONLY write this TU ever issues against
+     * `p`, so there is no earlier fwrite() output sitting in the FILE*'s
+     * buffer for pclose() to reconcile against a raw write() on the same
+     * fd. */
+	bool wrote_ok = (len == 0) || alp_sigpipe_safe_write(::fileno(p), data, len);
+	int  rc       = ::pclose(p);
+	if (!wrote_ok || rc != 0) {
 		_rm_rf(dir);
 		return ALP_ERR_IO;
 	}
@@ -343,6 +357,17 @@ extern "C" alp_status_t alp_inference_drpai_open(struct alp_inference         *h
 	/* For ALP_INFERENCE_MODEL_DRPAI the blob is the `drpai_dir` tar bytes
      * (see the header comment).  Reject an empty blob early. */
 	if (cfg->model_data == nullptr || cfg->model_size == 0) {
+		return ALP_ERR_INVAL;
+	}
+	/* Defensive, in ADDITION to the dispatcher's own format gate
+     * (src/yocto/inference_yocto.c) -- this backend understands exactly
+     * one container (the drpai_dir tar) and nothing else looks like one.
+     * A non-DRPAI blob reaching this point (an ONNX/DXNN buffer piped
+     * straight at `tar -xf -`) is not a "maybe it extracts" case, it is
+     * always a bad tar header -- reject it as INVAL up front rather than
+     * relying solely on the caller to have gone through the dispatcher
+     * (issue #2389). */
+	if (cfg->format != ALP_INFERENCE_MODEL_DRPAI) {
 		return ALP_ERR_INVAL;
 	}
 	/* The tar is extracted into /tmp before LoadModel() reads it; bound it

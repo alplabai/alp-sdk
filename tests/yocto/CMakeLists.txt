@@ -236,10 +236,16 @@ add_test(NAME alp_test_inference_deepx_regression
 # host this one target is not defined and CI's ubuntu-latest yocto job
 # remains its only home, exactly as before.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(Threads REQUIRED)
+
     add_executable(alp_test_inference_drpai_regression
         ${CMAKE_CURRENT_SOURCE_DIR}/inference_drpai_regression.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/yocto/inference_drpai.cpp
+        # inference_drpai.cpp now calls alp_sigpipe_safe_write() (#2389) --
+        # link its TU in too, and pthread for pthread_sigmask/sigwait.
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/yocto/alp_sigpipe_safe_write.c
     )
+    target_link_libraries(alp_test_inference_drpai_regression PRIVATE Threads::Threads)
     target_include_directories(alp_test_inference_drpai_regression PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/fakes/drpai
@@ -281,6 +287,53 @@ target_compile_features(alp_test_inference_latency PRIVATE c_std_99)
 
 add_test(NAME alp_test_inference_latency
          COMMAND alp_test_inference_latency)
+
+# Format-vs-backend gate regression (issue #2389): alp_inference_open()
+# used to hand cfg->model_data to whatever backend AUTO/the caller
+# resolved to with no check that cfg->format matches what that backend
+# parses -- see this test's own header comment for the full repro shape
+# (AUTO resolving to DRP-AI, fed an ONNX blob). Same #include-the-.c-
+# directly technique as alp_test_inference_latency above, through TWO
+# fake backends (DRPAI + CPU) this time so the test can prove an explicit
+# CPU+ONNX pin still opens while AUTO+ONNX (which would resolve to
+# DRP-AI) is rejected before ever reaching a backend. Single-threaded, no
+# Threads dependency, portable to every host this suite builds on.
+add_executable(alp_test_inference_format_gate
+    ${CMAKE_CURRENT_SOURCE_DIR}/inference_format_gate.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
+)
+target_include_directories(alp_test_inference_format_gate PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+)
+target_compile_features(alp_test_inference_format_gate PRIVATE c_std_99)
+
+add_test(NAME alp_test_inference_format_gate
+         COMMAND alp_test_inference_format_gate)
+
+# alp_sigpipe_safe_write() regression (issue #2389): the DRP-AI tar-
+# staging extractor's SIGPIPE-safe write helper (src/yocto/
+# alp_sigpipe_safe_write.c) -- see that test's own header comment. Plain
+# POSIX (pthread_sigmask/sigpending/sigwait), no Linux-only header, so
+# this builds and runs on every POSIX host this suite targets, including
+# macOS, unlike inference_drpai.cpp itself (Linux-only, see the
+# alp_test_inference_drpai_regression gate above).
+find_package(Threads REQUIRED)
+add_executable(alp_test_sigpipe_safe_write
+    ${CMAKE_CURRENT_SOURCE_DIR}/sigpipe_safe_write.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/yocto/alp_sigpipe_safe_write.c
+)
+target_link_libraries(alp_test_sigpipe_safe_write PRIVATE Threads::Threads)
+target_include_directories(alp_test_sigpipe_safe_write PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_compile_features(alp_test_sigpipe_safe_write PRIVATE c_std_99)
+
+add_test(NAME alp_test_sigpipe_safe_write
+         COMMAND alp_test_sigpipe_safe_write)
 
 # Issue #1254 end-to-end regression: an "onnx" blob_format .alpmodel,
 # decoded by the REAL zcbor-backed alp_model_parse() (src/common/

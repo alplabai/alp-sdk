@@ -167,6 +167,51 @@ static alp_inference_backend_t resolve_auto(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* Format gate (issue #2389)                                           */
+/*                                                                      */
+/* Each real backend consumes exactly one on-disk model container:     */
+/* DRP-AI's multi-file `drpai_dir` tar, DEEPX's raw .dxnn buffer, or    */
+/* ORT's raw .onnx protobuf.  None of the three backend open() hooks    */
+/* checks cfg->format itself against what it actually parses -- handing */
+/* the wrong container to a backend is not a "maybe it works" case: on  */
+/* an NPU-bearing SoM, AUTO resolves to the NPU backend by design (an   */
+/* NPU-bearing SoM must never silently fall to CPU -- see resolve_auto()*/
+/* above), so an ONNX blob opened with backend=AUTO used to be piped    */
+/* straight into DRP-AI's `tar -xf -` extractor with nothing rejecting  */
+/* the mismatch first.  Reject it HERE, before the resolved backend's   */
+/* open() ever sees the blob, so AUTO's NPU-first policy stays intact -- */
+/* this gate never widens AUTO's choice to "try CPU instead"; it fails  */
+/* the open outright, exactly like a bad magic number would.            */
+/* ------------------------------------------------------------------ */
+
+static bool _format_matches_backend(alp_inference_backend_t      backend,
+                                    alp_inference_model_format_t format)
+{
+	switch (backend) {
+#if defined(ALP_SDK_USE_DEEPX_DXM1)
+	case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
+		return format == ALP_INFERENCE_MODEL_DXNN;
+#endif
+#if defined(ALP_SDK_USE_DRPAI_V2N)
+	case ALP_INFERENCE_BACKEND_DRPAI:
+		return format == ALP_INFERENCE_MODEL_DRPAI;
+#endif
+#if defined(ALP_SDK_USE_ORT_CPU)
+	case ALP_INFERENCE_BACKEND_CPU:
+		return format == ALP_INFERENCE_MODEL_ONNX;
+#endif
+	default:
+		/* Either this backend isn't compiled into this build (its case
+		 * above is preprocessed out), or it's a selector this Yocto
+		 * dispatcher doesn't wire at all (e.g. ETHOS_U).  Either way the
+		 * real dispatch switch below already answers NOSUPPORT for that
+		 * through its own default arm -- don't pre-empt that NOSUPPORT
+		 * with an INVAL here. */
+		return true;
+	}
+}
+
+/* ------------------------------------------------------------------ */
 /* Last-error stamping                                                 */
 /*                                                                     */
 /* The dispatcher calls alp_internal_set_last_error (declared in       */
@@ -199,6 +244,19 @@ alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg)
 			alp_internal_set_last_error(ALP_ERR_NOSUPPORT);
 			return NULL;
 		}
+	}
+
+	if (!_format_matches_backend(backend, cfg->format)) {
+		/* The resolved backend (AUTO's pick, or the caller's explicit
+		 * pin) cannot load this container -- reject before the blob
+		 * ever reaches a backend's open(), matching <alp/inference.h>'s
+		 * documented ALP_ERR_INVAL for "bad magic / unsupported model
+		 * format" (issue #2389).  A caller who wants the ONNX blob
+		 * served by CPU rather than rejected must pin
+		 * ALP_INFERENCE_BACKEND_CPU explicitly -- AUTO does not widen
+		 * itself to try that on this blob's behalf. */
+		alp_internal_set_last_error(ALP_ERR_INVAL);
+		return NULL;
 	}
 
 	struct alp_inference *h = pool_acquire();
