@@ -273,6 +273,22 @@ _SES_BANNER_RE = re.compile(r'^[ \t\r\v\f]*SES \S+ v\S+', re.MULTILINE)
 # rather than widened to match bash's wildcard.
 _NO_ATOC_LINE = 'no atoc found on target device.'
 
+# Second-round review (#2262): the changelog's own "not yet verified"
+# section named this as the top open risk -- SETOOLS demonstrably pads the
+# SES banner with a LEADING SPACE via its colour wrapping
+# (`is_valid_ses_banner` above tolerates it), and the identical "No ATOC"
+# reply is printed by the same tool through the same colour path, so it is
+# very likely padded the same way. `is_no_atoc_found` strips this exact set
+# of characters (ASCII space/tab/CR/VT/FF -- CR is already gone by the time
+# it runs, kept here only for symmetry with `_SES_BANNER_RE`'s class) off
+# each line before the exact-line compare, so a padded reply reads as the
+# genuinely empty board it is instead of falling through to the table
+# parse and landing on the wrong "unverified" (a false negative -- annoying
+# and fail-closed, but not the direction that risks a delisting; still
+# worth fixing so a truly blank board doesn't need --replace-atoc every
+# time). Mirrored in bench-env.sh's `grep` pattern below.
+_NO_ATOC_STRIP_CHARS = ' \t\r\v\f'
+
 # Table rows look like "|   DEVICE |  CM0+  | 0x... | ... |" -- SETOOLS
 # colours the WHOLE LINE, not just the cell text, so a real ANSI-stripped
 # row keeps a LEADING SPACE before the pipe (bench-env.sh: a bare `/^\|/`
@@ -290,6 +306,14 @@ _DASH_ONLY_RE = re.compile(r'^-+$')
 _BASELINE_NAMES = frozenset({'DEVICE', 'SERAM0', 'SERAM1'})
 _BASELINE_CPU = 'CM0+'
 
+# A `+---+`-style box-drawing separator line (top, mid-table, or closing) in
+# a real boxed `gettoc` capture, e.g. after ANSI/CR stripping:
+# " +----------+--------+------------+...+----------+". Never matches a
+# `_ROW_RE` pipe-row (it has no leading `|`), so it is invisible to
+# `parse_resident_atoc_table`'s own loop -- `_is_table_structurally_complete`
+# below scans for it separately.
+_SEPARATOR_RE = re.compile(r'^[ \t]*\+[-+]*\+[ \t]*$')
+
 
 def strip_csi(text: str) -> str:
     """Strip every ANSI CSI escape sequence from *text* (see `_CSI_RE`)."""
@@ -303,11 +327,15 @@ def is_valid_ses_banner(banner_text: str) -> bool:
 
 
 def is_no_atoc_found(gettoc_text: str) -> bool:
-    """True if *gettoc_text* (raw `maintenance -opt gettoc` stdout) is the
-    exact, case-insensitive "No ATOC found on target device." line SETOOLS
-    prints for a genuinely blank board."""
+    """True if *gettoc_text* (raw `maintenance -opt gettoc` stdout) contains
+    the exact, case-insensitive "No ATOC found on target device." line
+    SETOOLS prints for a genuinely blank board, tolerating the leading/
+    trailing whitespace SETOOLS' colour wrapping demonstrably adds to its
+    other lines (see `_NO_ATOC_STRIP_CHARS`)."""
     stripped = strip_csi(gettoc_text).replace('\r', '')
-    return any(line.casefold() == _NO_ATOC_LINE for line in stripped.split('\n'))
+    return any(
+        line.strip(_NO_ATOC_STRIP_CHARS).casefold() == _NO_ATOC_LINE
+        for line in stripped.split('\n'))
 
 
 def _awk_field(fields: "list[str]", index: int) -> str:
@@ -349,6 +377,57 @@ def parse_resident_atoc_table(gettoc_text: str) -> "list[tuple[str, str]]":
     return resident
 
 
+def _is_table_structurally_complete(gettoc_text: str) -> bool:
+    """True unless *gettoc_text* looks like a boxed `gettoc` table (has a
+    `| Name |` header row) that was cut short before its closing `+---+`
+    separator -- the BLOCKER finding of the second #2262 review round.
+
+    A `gettoc` read that stops mid-download (a serial timeout after the SE
+    has printed only its first few rows) can still exit rc=0 with a valid
+    banner and >=1 real resident row -- e.g. just the two `DEVICE` rows plus
+    `SERAM0`/`SERAM1` that precede any app entry in a real 9-row capture --
+    which `compute_query_status`'s prior rule ("ok" once >=1 row parsed)
+    accepted outright, silently burning over whatever app/A32-boot-chain
+    entries the cut-off tail would have shown (the exact 2026-09-07 hardware
+    loss this guard exists to close).
+
+    Requires BOTH the header row AND a closing separator strictly AFTER the
+    last parsed data row. A transcript with NEITHER marker at all -- a
+    plain, boxless "|name|cpu|..." dump with no header and no separator line
+    anywhere (see `_REAL_MULTI_ENTRY_ATOC` in
+    tests/scripts/test_atoc_guard_parity.py, a real capture in that shape)
+    -- has no structural bookends to check completeness against, so it is
+    exempt and keeps the pre-existing any-rows-parsed rule; a header WITH no
+    trailing separator, or a separator with no header, is exactly the
+    torn-in-half shape this closes and is never treated as complete.
+    Mirrors bench-env.sh's identical check in `bench_atoc_replace_guard`.
+    """
+    stripped = strip_csi(gettoc_text).replace('\r', '')
+    lines = stripped.split('\n')
+    header_idx = None
+    last_row_idx = None
+    last_separator_idx = None
+    for idx, line in enumerate(lines):
+        if _SEPARATOR_RE.match(line):
+            last_separator_idx = idx
+            continue
+        if not _ROW_RE.match(line):
+            continue
+        fields = line.split('|')
+        name = _awk_field(fields, 1).strip(' \t')
+        if not name or _DASH_ONLY_RE.match(name):
+            continue
+        if name == 'Name':
+            header_idx = idx
+            continue
+        last_row_idx = idx
+    if header_idx is None and last_separator_idx is None:
+        return True  # boxless/plain dump -- nothing to check
+    if header_idx is None or last_row_idx is None:
+        return False
+    return last_separator_idx is not None and last_separator_idx > last_row_idx
+
+
 def compute_query_status(
     maintenance_available: bool,
     banner_text: "str | None",
@@ -368,9 +447,11 @@ def compute_query_status(
     - a non-zero `gettoc` exit (e.g. a serial timeout mid-table) is never
       "ok" from the partial text alone;
     - the exact "No ATOC found" line means a genuinely empty board;
-    - otherwise "ok" only if at least one resident row parsed -- rc=0 with
-      neither the "No ATOC" line nor any parsed row stays unverified rather
-      than silently defaulting to a pass.
+    - otherwise "ok" only if at least one resident row parsed AND the table
+      is structurally complete (see `_is_table_structurally_complete`) --
+      rc=0 with neither the "No ATOC" line nor any parsed row, or a table
+      torn off before its closing separator, stays unverified rather than
+      silently defaulting to a pass.
     """
     if not maintenance_available:
         return 'unverified'
@@ -378,9 +459,10 @@ def compute_query_status(
     effective_rc = gettoc_rc if banner_ok else 1
     if effective_rc != 0:
         return 'unverified'
-    if is_no_atoc_found(gettoc_text or ''):
+    text = gettoc_text or ''
+    if is_no_atoc_found(text):
         return 'empty'
-    if parse_resident_atoc_table(gettoc_text or ''):
+    if parse_resident_atoc_table(text) and _is_table_structurally_complete(text):
         return 'ok'
     return 'unverified'
 

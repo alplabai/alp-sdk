@@ -357,6 +357,106 @@ def test_compute_query_status_unverified_when_rc_zero_but_nothing_parses(aen_ato
     assert aen_atoc.compute_query_status(True, "SES A1 v1.0\n", 0, "", 0) == "unverified"
 
 
+# ---------------------------------------------------------------------
+# BLOCKER review (alp-sdk#2262, second round): a `gettoc` transcript cut
+# short mid-download (a serial read that stops after the SE prints only
+# its first few rows) can still exit rc=0 with a valid banner and >=1 real
+# resident row -- the two DEVICE rows plus SERAM0/SERAM1 that precede any
+# app entry in the real 9-row capture -- and previously classified as
+# "ok", silently burning over whatever app/A32-boot-chain entries the
+# cut-off tail would have shown (the exact 2026-09-07 hardware loss this
+# PR exists to close). `compute_query_status` now additionally requires
+# structural completeness -- the `| Name |` header row AND a closing
+# `+---+` separator strictly after the last parsed data row -- before
+# trusting a boxed table's "ok" classification. A boxless/plain dump with
+# neither marker at all (no header, no separator line anywhere -- see
+# `test_compute_query_status_ok_on_boxless_table_without_header` below)
+# has nothing to check completeness against and keeps the pre-existing
+# any-rows-parsed rule, so `scripts/aen_atoc.py`'s own
+# `_REAL_MULTI_ENTRY_ATOC`-shaped real captures are unaffected.
+# ---------------------------------------------------------------------
+
+
+def test_compute_query_status_unverified_on_table_truncated_after_baseline_rows(aen_atoc):
+    # Real 9-row capture cut after its first four rows (DEVICE x2,
+    # * SERAM0, SERAM1) -- BOOTLOAD/A32_APP/HP_APP/HE_APP and the closing
+    # separator never arrive. The header row IS present, so this table
+    # looks boxed and is held to the completeness bar.
+    truncated = (
+        "+----------+--------+\n"
+        "|   Name   |  CPU   |\n"
+        "+----------+--------+\n"
+        "|    DEVICE|   CM0+ |\n"
+        "|    DEVICE|   CM0+ |\n"
+        "|  * SERAM0|   CM0+ |\n"
+        "|    SERAM1|   CM0+ |\n"
+    )
+    assert aen_atoc.compute_query_status(
+        True, "SES A1 v1.0\n", 0, truncated, 0) == "unverified"
+
+
+def test_compute_query_status_unverified_on_table_cut_mid_row(aen_atoc):
+    # The serial read stops mid-row (no closing `|`, no trailing newline
+    # even) -- also no closing separator anywhere after it.
+    truncated = (
+        "+----------+--------+\n"
+        "|   Name   |  CPU   |\n"
+        "+----------+--------+\n"
+        "|    DEVICE|   CM0+ |\n"
+        "|    ALP-HE| M55"
+    )
+    assert aen_atoc.compute_query_status(
+        True, "SES A1 v1.0\n", 0, truncated, 0) == "unverified"
+
+
+def test_compute_query_status_unverified_on_table_missing_closing_separator(aen_atoc):
+    # Every data row arrived intact, but the read was cut before the
+    # trailing `+---+` -- still incomplete, still unverified.
+    truncated = (
+        "+----------+--------+\n"
+        "|   Name   |  CPU   |\n"
+        "+----------+--------+\n"
+        "|    DEVICE|   CM0+ |\n"
+        "|    ALP-HE| M55-HE |\n"
+    )
+    assert aen_atoc.compute_query_status(
+        True, "SES A1 v1.0\n", 0, truncated, 0) == "unverified"
+
+
+def test_compute_query_status_ok_on_structurally_complete_boxed_table(aen_atoc):
+    table = (
+        "+----------+--------+\n"
+        "|   Name   |  CPU   |\n"
+        "+----------+--------+\n"
+        "|    DEVICE|   CM0+ |\n"
+        "|    ALP-HE| M55-HE |\n"
+        "+----------+--------+\n"
+    )
+    assert aen_atoc.compute_query_status(
+        True, "SES A1 v1.0\n", 0, table, 0) == "ok"
+
+
+def test_compute_query_status_ok_on_boxless_table_without_header(aen_atoc):
+    # A plain "|name|cpu|" dump with no header/separator lines at all (see
+    # `_REAL_MULTI_ENTRY_ATOC` in test_atoc_guard_parity.py) has no
+    # structural bookends to check completeness against, so it is exempt
+    # from the new rule and keeps the pre-existing any-rows-parsed "ok".
+    assert aen_atoc.compute_query_status(
+        True, "SES A1 v1.0\n", 0, "|   DEVICE |  CM0+  |\n", 0) == "ok"
+
+
+def test_is_no_atoc_found_tolerates_leading_and_trailing_whitespace(aen_atoc):
+    # #2262 review: SETOOLS pads its other lines (the SES banner) with a
+    # leading space via its colour wrapping; the changelog named it as the
+    # top open risk whether "No ATOC found on target device." gets the
+    # same treatment. Decided: strip whitespace before the exact-line
+    # compare, the same direction `is_valid_ses_banner` already takes for
+    # the banner, so a padded line reads as the genuinely empty board it
+    # is rather than falling through to "unverified".
+    assert aen_atoc.is_no_atoc_found(" No ATOC found on target device. \n")
+    assert aen_atoc.is_no_atoc_found("\tno atoc found on target device.\t\n")
+
+
 def test_foreign_resident_entries_exempts_device_and_seram_on_cm0(aen_atoc):
     resident = [("DEVICE", "CM0+"), ("* SERAM0", "CM0+"), ("SERAM1", "CM0+"),
                 ("ALP-HE", "M55-HE")]

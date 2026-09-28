@@ -1203,15 +1203,55 @@ bench_atoc_replace_guard() {
 			if (name != "" && name != "Name" && name !~ /^-+$/) print name "\t" cpu
 		}')
 
+	# BLOCKER review (alp-sdk#2262, second round): a `gettoc` read cut short
+	# mid-download (a serial timeout after the SE has printed only its
+	# first few rows) can still exit rc=0 with a valid banner and >=1 real
+	# resident row -- e.g. just the two DEVICE rows plus SERAM0/SERAM1 that
+	# precede any app entry in a real 9-row capture -- which the
+	# `${#resident[@]} -gt 0` rule alone accepted as "ok", silently burning
+	# over whatever app/A32-boot-chain entries the cut-off tail would have
+	# shown (the exact 2026-09-07 hardware loss this guard exists to
+	# close). Require structural completeness too: a boxed table (one that
+	# carries the `| Name |` header row) must ALSO carry a closing
+	# `+---+` separator strictly AFTER its last data row, or it reads as
+	# unverified rather than ok. A boxless/plain "|name|cpu|..." dump with
+	# NEITHER a header nor any separator line at all (see
+	# _REAL_MULTI_ENTRY_ATOC in tests/scripts/test_atoc_guard_parity.py, a
+	# real capture in that shape) has no structural bookends to check
+	# completeness against, so it is exempt and keeps the pre-existing
+	# any-rows-parsed rule. Mirrors scripts/aen_atoc.py's
+	# `_is_table_structurally_complete` exactly -- same header/last-row/
+	# last-separator line-number bookkeeping, same exemption.
+	local complete
+	complete=$(printf '%s\n' "$stripped" | awk -F'|' '
+		/^[ \t]*\+[-+]*\+[ \t]*$/ { any_sep = 1; last_sep = NR; next }
+		/^[ \t]*\|/ {
+			name = $2
+			gsub(/^[ \t]+|[ \t]+$/, "", name)
+			if (name == "" || name ~ /^-+$/) next
+			if (name == "Name") { header = NR; next }
+			last_row = NR
+		}
+		END {
+			if (header == 0 && any_sep != 1) { print "1"; exit }
+			if (header == 0 || last_row == 0) { print "0"; exit }
+			if (any_sep == 1 && last_sep > last_row) { print "1"; exit }
+			print "0"
+		}')
+
 	# Only trust the transcript's text when the query itself actually
 	# succeeded (rc=0) -- an error line containing "no atoc" (e.g. "no ATOC
 	# response from target") must not read as a genuinely empty board, and
 	# anchor to SETOOLS' exact message rather than a bare substring match.
+	# Tolerate leading/trailing whitespace around the "No ATOC" line the
+	# same way the banner match above does -- SETOOLS' colour wrapping
+	# demonstrably pads that line too (second #2262 review round's "top
+	# open risk"); mirrors scripts/aen_atoc.py's `_NO_ATOC_STRIP_CHARS`.
 	local query_status=unverified
 	if [ "$rc" -eq 0 ]; then
-		if printf '%s\n' "$stripped" | grep -qix "no atoc found on target device."; then
+		if printf '%s\n' "$stripped" | grep -qiE '^[[:space:]]*no atoc found on target device.[[:space:]]*$'; then
 			query_status=empty
-		elif [ "${#resident[@]}" -gt 0 ]; then
+		elif [ "${#resident[@]}" -gt 0 ] && [ "$complete" = "1" ]; then
 			query_status=ok
 		fi
 	fi
@@ -1292,8 +1332,12 @@ bench_atoc_replace_guard() {
 			echo "   This board also carries: ${extra[*]}" >&2
 			echo "   Writing now would SILENTLY DELIST ${extra[*]} -- no error, no SES warning" >&2
 			echo "   (this destroyed the A32 Linux boot chain on an AEN EVK bench unit, 2026-09-07)." >&2
-			echo "   Re-run with --replace-atoc only once you can restore ${extra[*]}, or if" >&2
-			echo "   losing them is genuinely intended." >&2
+			# LOW review (#2262, second round): lead with "restore first",
+			# not the destroy flag -- mirrors alif_flash.py's identical
+			# generic-refusal wording fix.
+			echo "   Capture/restore ${extra[*]} first (see docs/aen-provisioning.md) -- only pass" >&2
+			echo "   --replace-atoc once you can restore ${extra[*]}, or if losing them is" >&2
+			echo "   genuinely intended." >&2
 			return 5
 		fi
 	fi

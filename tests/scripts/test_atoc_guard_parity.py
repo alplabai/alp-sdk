@@ -287,6 +287,47 @@ _SERAM1_WRONG_CPU_ROW = "|   SERAM1 | M55-HE | 0x0 | 0x0 |\n"
 
 _GARBLED_BANNER = "garbage, no SES banner here\n"
 
+# BLOCKER review (alp-sdk#2262, second round) -- SYNTHETIC, but shaped
+# directly off the real `_REAL_GETTOC_9ROW` capture above: a `gettoc` read
+# cut short mid-download (a serial timeout) after the SE has printed only
+# its baseline rows (the two DEVICE rows, `* SERAM0`, SERAM1) -- BOOTLOAD/
+# A32_APP/HP_APP/HE_APP and the closing separator never arrive. rc=0 and a
+# valid banner (the timeout is on the gettoc byte stream, not the exit
+# status) -- exactly the "still reads ok" shape both guards must now refuse.
+_REAL_GETTOC_9ROW_TRUNCATED = (
+    "[INFO] port override /dev/ttyUSB0\n"
+    "[INFO] /dev/ttyUSB0 open Serial port success \n"
+    "[INFO] baud rate 57600\n"
+    "[INFO] Connecting to target...Device connected\n"
+    "\x1b[94m +----------+--------+------------+------------+------------+------------+----------+-----------+--------+----------+\n"
+    "\x1b[0m\x1b[94m |   Name   |  CPU   | Store Addr |  Obj Addr  | Dest Addr  | Boot Addr  |   Size   |  Version  |  Flags | Time (ms)|\n"
+    "\x1b[0m\x1b[94m +----------+--------+------------+------------+------------+------------+----------+-----------+--------+----------+\n"
+    "\x1b[0m\x1b[94m |    DEVICE|   CM0+ | 0x8057c6f0 | 0x8057BCF0 | ---------- | ---------- |      312 |      0.5.0|u V     |    14.92 |\n"
+    "\x1b[0m\x1b[94m |    DEVICE|   CM0+ | 0x805c1ec0 | 0x805C14C0 | ---------- | ---------- |      372 |      0.5.0|u V     |    15.04 |\n"
+    "\x1b[0m\x1b[94m |  * SERAM0|   CM0+ | ---------- | 0x000000C0 | ---------- | ---------- |    64508 |    1.110.0|u s     |     0.00 |\n"
+    "\x1b[0m\x1b[94m |    SERAM1|   CM0+ | ---------- | 0x00020AC0 | ---------- | ---------- |    64508 |    1.110.0|------- |     0.00 |\n"
+)
+
+# SYNTHETIC: the serial link drops mid-row (no closing pipe, no trailing
+# newline) -- also no closing separator anywhere after it.
+_TRUNCATED_MID_ROW = (
+    "\x1b[94m +----------+--------+\n"
+    "\x1b[0m\x1b[94m |   Name   |  CPU   |\n"
+    "\x1b[0m\x1b[94m +----------+--------+\n"
+    "\x1b[0m\x1b[94m |    DEVICE|   CM0+ |\n"
+    "\x1b[0m\x1b[94m |    ALP-HE| M55"
+)
+
+# SYNTHETIC: every data row arrived intact, but the transcript was cut
+# before the trailing `+---+` separator -- still incomplete.
+_TRUNCATED_MISSING_CLOSING_SEPARATOR = (
+    "\x1b[94m +----------+--------+\n"
+    "\x1b[0m\x1b[94m |   Name   |  CPU   |\n"
+    "\x1b[0m\x1b[94m +----------+--------+\n"
+    "\x1b[0m\x1b[94m |    DEVICE|   CM0+ |\n"
+    "\x1b[0m\x1b[94m |    ALP-HE| M55-HE |\n"
+)
+
 
 def _python_verdict(aen_atoc, banner_text, banner_rc, gettoc_text, gettoc_rc,
                      allowed, replace_atoc, maintenance_available=True):
@@ -366,6 +407,20 @@ def test_parity_no_atoc_proceeds(tmp_path, aen_atoc):
 
 
 @_NEEDS_BASH
+def test_parity_no_atoc_with_leading_and_trailing_whitespace_proceeds(tmp_path, aen_atoc):
+    # #2262 changelog's own "top open risk": SETOOLS' colour wrapping pads
+    # its other lines with a leading space (the SES banner, bench-verified
+    # 2026-09-07); this shape is the padded "No ATOC" reply the guard must
+    # ALSO recognise as a genuinely empty board, in parity, on both legs.
+    padded = " No ATOC found on target device. \n"
+    bash = _run_bash_guard(tmp_path, "0", ["ALP-HE"], padded)
+    py = _python_verdict(aen_atoc, _REAL_GETBANNER, 0, padded, 0, ["ALP-HE"], "0")
+    assert bash.returncode == 0, bash.stderr
+    assert not py.refused
+    assert py.status == "empty"
+
+
+@_NEEDS_BASH
 def test_parity_replace_atoc_overrides_foreign_entries(tmp_path, aen_atoc):
     bash = _run_bash_guard(tmp_path, "1", ["ALP-HE"], _REAL_GETTOC_9ROW)
     py = _python_verdict(aen_atoc, _REAL_GETBANNER, 0, _REAL_GETTOC_9ROW, 0, ["ALP-HE"], "1")
@@ -396,6 +451,54 @@ def test_parity_gettoc_failure_after_partial_output_is_unverified(tmp_path, aen_
     py = _python_verdict(aen_atoc, _REAL_GETBANNER, 0, partial, 1, ["ALP-HE"], "0")
     assert bash.returncode == 5, bash.stderr
     assert py.refused and py.status == "refused-unverified"
+
+
+@_NEEDS_BASH
+def test_parity_truncated_table_after_baseline_rows_is_unverified(tmp_path, aen_atoc):
+    # BLOCKER review (alp-sdk#2262, second round): a truncated-but-rc-0
+    # gettoc must refuse on BOTH legs, not silently classify "ok" and let
+    # the burn proceed.
+    bash = _run_bash_guard(tmp_path, "0", ["ALP-HE"], _REAL_GETTOC_9ROW_TRUNCATED)
+    py = _python_verdict(
+        aen_atoc, _REAL_GETBANNER, 0, _REAL_GETTOC_9ROW_TRUNCATED, 0, ["ALP-HE"], "0")
+    assert bash.returncode == 5, bash.stderr
+    assert py.refused and py.status == "refused-unverified"
+
+
+@_NEEDS_BASH
+def test_parity_table_cut_mid_row_is_unverified(tmp_path, aen_atoc):
+    bash = _run_bash_guard(tmp_path, "0", ["ALP-HE"], _TRUNCATED_MID_ROW)
+    py = _python_verdict(aen_atoc, _REAL_GETBANNER, 0, _TRUNCATED_MID_ROW, 0, ["ALP-HE"], "0")
+    assert bash.returncode == 5, bash.stderr
+    assert py.refused and py.status == "refused-unverified"
+
+
+@_NEEDS_BASH
+def test_parity_table_missing_closing_separator_is_unverified(tmp_path, aen_atoc):
+    bash = _run_bash_guard(
+        tmp_path, "0", ["ALP-HE"], _TRUNCATED_MISSING_CLOSING_SEPARATOR)
+    py = _python_verdict(
+        aen_atoc, _REAL_GETBANNER, 0, _TRUNCATED_MISSING_CLOSING_SEPARATOR, 0,
+        ["ALP-HE"], "0")
+    assert bash.returncode == 5, bash.stderr
+    assert py.refused and py.status == "refused-unverified"
+
+
+@_NEEDS_BASH
+def test_parity_real_fixtures_classify_as_before(tmp_path, aen_atoc):
+    # Confirm the three real, bench-verified 2026-09-07 captures are
+    # unaffected by the new structural-completeness check (MEDIUM-5
+    # provenance note above): all three carry both the header row and a
+    # closing separator, or (MULTI_ENTRY) neither at all.
+    for allowed, fixture, expect_bash_rc in (
+        (["ALP-HE"], _REAL_GETTOC_9ROW, 5),           # foreign -> refuse
+        (["ALP-HE"], _REAL_GETTOC_CLEAN, 0),          # clean -> proceed
+        (["ALP-HP", "ALP-HE"], _REAL_MULTI_ENTRY_ATOC, 5),  # foreign -> refuse
+    ):
+        bash = _run_bash_guard(tmp_path, "0", allowed, fixture)
+        py = _python_verdict(aen_atoc, _REAL_GETBANNER, 0, fixture, 0, allowed, "0")
+        assert bash.returncode == expect_bash_rc, (fixture, bash.stderr)
+        assert py.status != "refused-unverified", (fixture, py)
 
 
 @_NEEDS_BASH
