@@ -428,6 +428,7 @@ config HAS_ALIF_SE_SERVICES
 config ENTROPY_ALIF_SE
 	bool "Alif Ensemble Secure-Enclave TRNG entropy driver"
 	default y
+	depends on ENTROPY_GENERATOR
 	depends on DT_HAS_ALIF_SE_TRNG_ENABLED
 	depends on HAS_ALIF_SE_SERVICES
 	select ENTROPY_HAS_DRIVER

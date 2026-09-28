@@ -17,12 +17,12 @@ production stance the SDK recommends for shipping product.
 > about structure -- signed boot, provisioned identity, attested
 > updates -- and that structure is real. The randomness underneath
 > its TLS is not: mbedTLS' PSA crypto core needs a cryptographically
-> secure RNG, no Alif Ensemble entropy driver exists in this tree or
-> upstream, and an AEN build is therefore *refused* unless it
+> secure RNG, and this app does not yet choose the Secure Enclave TRNG
+> entropy driver (`alif,se-trng`, bench-proven on both M55 cores) as
+> `zephyr,entropy`, so an AEN build is *refused* unless it
 > acknowledges a predictable generator with
 > `CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y`. Do not read "production
-> stance" as covering key material until the Secure Enclave TRNG is
-> wired through a real entropy driver.
+> stance" as covering key material until it opts in to the SE TRNG.
 
 ## The v0.6 block walkthrough
 

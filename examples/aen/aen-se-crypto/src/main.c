@@ -190,7 +190,7 @@ static bool test_zephyr_entropy(void)
 
 	bool nonzero = false;
 	for (size_t i = 0u; i < sizeof(a); i++) {
-		if (a[i] != 0u) {
+		if ((a[i] != 0u) && (b[i] != 0u)) {
 			nonzero = true;
 			break;
 		}
@@ -198,13 +198,13 @@ static bool test_zephyr_entropy(void)
 	uint8_t cs[16] = { 0 };
 	int     rc     = sys_csrand_get(cs, sizeof(cs));
 
-	const bool ok =
-	    (ra == 0) && (rb == 0) && nonzero && (memcmp(a, b, sizeof(a)) != 0) && (rc == 0);
+	const bool differ = memcmp(a, b, sizeof(a)) != 0;
+	const bool ok     = (ra == 0) && (rb == 0) && nonzero && differ && (rc == 0);
 	printk("zephyr,entropy (%s): get=%d/%d differ=%d csrand=%d %s\n",
 	       dev->name,
 	       ra,
 	       rb,
-	       memcmp(a, b, sizeof(a)) != 0,
+	       (int)differ,
 	       rc,
 	       ok ? "OK" : "FAIL");
 	hexdump("entropy    ", a, 16);
@@ -228,8 +228,8 @@ int main(void)
 	if (sha_ok && gcm_ok && trng_ok && ent_ok) {
 		printk("RESULT PASS: SHA-256(\"abc\") known-answer MATCH + AES-128-GCM round-trip "
 		       "MATCH + TRNG OK + zephyr,entropy OK -- the portable <alp/security.h> surface "
-		       "answered through "
-		       "the selected crypto backend (SE CryptoCell on E8 when the send seam is "
+		       "answered through the selected crypto backend (SE CryptoCell on E8 when the send "
+		       "seam is "
 		       "wired; MbedTLS-PSA fallthrough otherwise)\n");
 	} else {
 		printk("RESULT FAIL: sha=%d gcm=%d trng=%d entropy=%d -- see the per-test lines above (a "

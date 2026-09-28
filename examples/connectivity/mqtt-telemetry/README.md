@@ -40,13 +40,15 @@ knobs at all any more (see [`prj.conf`](../mqtt-telemetry/prj.conf), which is
 empty by design) and the `native_sim.conf` that used to hold the workaround is
 deleted.
 
-The record stays `preview` for a different reason: no Alif Ensemble entropy
-driver exists yet, in this tree or upstream. An ordinary AEN hardware build is
-therefore refused instead of silently using Zephyr's non-cryptographic
-fallback. The AEN Twister scenario sets
+The record stays `preview` for a different reason: this example does not yet
+choose the Secure Enclave TRNG entropy driver (`alif,se-trng`, bench-proven on
+both M55 cores, issue #2192) as `zephyr,entropy`. An ordinary AEN hardware
+build is therefore refused instead of silently using Zephyr's
+non-cryptographic fallback. The AEN Twister scenario sets
 `CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y` only because it is `build_only`; that
-image must never be flashed or shipped. A production AEN TLS build remains
-blocked until the SE TRNG is wired to a real entropy driver (issue #2192).
+image must never be flashed or shipped. A production AEN TLS build needs this
+example to opt in to the SE TRNG (see `examples/aen/aen-se-crypto`'s board
+overlays).
 
 ## The "sensor reading"
 
