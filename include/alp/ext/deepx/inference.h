@@ -85,6 +85,11 @@ typedef struct {
  *          stay valid.  Blocks until any in-flight invoke on @p inf
  *          finishes.
  *
+ * @warning Processes sharing one DX-M1 must all use the same core set.
+ *          On dx-rt 3.2.0 two processes need the `dxrtd` service at all,
+ *          and with it, concurrent different bindings make the driver
+ *          refuse the second one (-EBUSY) and the daemon abort (#2398).
+ *
  * @param[in] inf    Handle from @ref alp_inference_open opened
  *                   against DEEPX silicon.
  * @param[in] cores  Core set from @ref alp_deepx_npu_cores_t.
