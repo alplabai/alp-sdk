@@ -149,15 +149,13 @@ int main(void)
 	}
 	if (s != ALP_OK) {
 		printf("[cm33-deepx-rail] ACT88760 rail replay FAILED at step %u: %d -- "
-		       "not touching the DEEPX rail
-		       ",
+		       "not touching the DEEPX rail\n",
 		       (unsigned)act_step,
 		       (int)s);
 		alp_i2c_close(i2c);
 		return 0;
 	}
-	printf("[cm33-deepx-rail] ACT88760 rails up (%u-step CM33-boot chain)
-	       ",
+	printf("[cm33-deepx-rail] ACT88760 rails up (%u-step CM33-boot chain)\n",
 	       (unsigned)V2N_POWER_ACT8760_CM33_BOOT_SEQ_LEN);
 
 	/* P64 DEEPX_CORE_0P75_EN: output, start low (rail stays down until
