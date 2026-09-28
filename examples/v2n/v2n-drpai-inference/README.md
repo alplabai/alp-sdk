@@ -9,8 +9,9 @@ exhibition booth runs (issue #1268).
 > unit against the real `<alp/inference.h>` header (see "What actually
 > ran" below). Linking against a real `libalp_sdk` (`ALP_OS=yocto`) and
 > running end-to-end through the documented NOSUPPORT path have **not**
-> been re-verified by this PR. No inference has run against real DRP-AI
-> hardware yet -- see
+> been re-verified by this PR. The DRP-AI backend itself has run on
+> silicon (E1M-V2M103, #1268: YOLOX-S/VOC through `<alp/inference.h>`,
+> ~40 ms per frame, correct detections); this app has not -- see
 > [`docs/bring-up-drpai-v2n.md`](../../../docs/bring-up-drpai-v2n.md)
 > for the full silicon status.
 

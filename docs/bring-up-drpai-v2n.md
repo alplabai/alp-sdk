@@ -3,24 +3,27 @@
 How to get the RZ/V2N's on-die DRP-AI3 NPU running a real model through
 `<alp/inference.h>` on an E1M-X V2N SoM.
 
-> **Status: KERNEL DRIVER PROVEN ON SILICON, PACKAGING WRITTEN BUT NEVER BAKED,
-> INFERENCE NOT YET RUN.** A full `alp-image-edge` bake now completes on this
-> host (12118 tasks,
-> all succeeded, a 716 MB `.wic.gz`) — the first ever; previously nothing had
-> baked. That run had `drpai` OFF (the base image); see §4 for what is and
-> isn't proven about the `drpai`-enabled path. `PACKAGECONFIG[drpai]` names
-> the whole MERA2 runtime closure on paper; what is established is only that a
-> hand-run host g++ compiled RUHMI's `apps/MeraDrpRuntimeWrapper.cpp` against
-> the real headers. No BitBake task of `mera2-drpai-tvm` has run, and the
-> aarch64 link, `do_package_qa` and symbol resolution are all untested (see
-> `mera2-drpai-tvm_2.7.0.bb`). On
-> real E1M-X V2N-M1 silicon the DRP-AI **kernel** driver stack is proven
-> working: `/dev/drpai0` probes clean and the memory-base ioctl returns the
-> correct arena (§3, §7) — but that silicon runs its own current image, not
-> one built from this branch. No model has been compiled and no inference has
-> run. Treat this as the procedure to execute and verify to completion, not a
-> report of a working system. `docs/test-plan.md` carries the verification
-> rows this gates.
+> **Status: INFERENCE RUNS ON SILICON; THE BAKED IMAGE IS NOT YET CONFIRMED.**
+> On 2026-09-28 an E1M-V2M103 (board #1, Alp SDK 0.7.0 image) ran YOLOX-S/VOC
+> through `<alp/inference.h>` on the DRP-AI3 (#1268):
+> - The `&drpai0` override was applied by hand to the board DTB, and
+>   `drpai-rz 17000000.drpai` probed with the `0xD0000000` arena.
+> - `src/yocto/inference_drpai.cpp` was cross-built against the real MERA2
+>   runtime (RUHMI 2.7.0-hotfix2; `libmera_drpai_wrapper.so` compiled from
+>   `apps/MeraDrpRuntimeWrapper.cpp`).
+> - `alp_inference_open()` works under both `DRPAI` and `AUTO`, and `invoke()`
+>   takes ~40 ms per 640x640 frame.
+> - The outputs match the compiler's interpreter reference (correlation
+>   0.996-0.998).
+> - With a bundle calibrated on 100 VOC images, a real aeroplane photo is
+>   detected as aeroplane (0.519, against 0.525 from ONNX Runtime CPU on the
+>   same input).
+>
+> Not yet confirmed: an `alp-image-edge` baked from this tree producing the
+> same result on its own. That needs the defaults in §4 (node on with
+> meta-rz-drpai, backend on with `RUHMI_DRPAI_TVM_DIR`) and a real
+> `mera2-drpai-tvm` BitBake run, which has not happened. `docs/test-plan.md`
+> carries the verification rows this gates.
 
 For the base V2N board bring-up see [bring-up-v2n.md](bring-up-v2n.md); for the
 DEEPX DX-M1 delta on V2N-M1 see [bring-up-v2n-m1.md](bring-up-v2n-m1.md).

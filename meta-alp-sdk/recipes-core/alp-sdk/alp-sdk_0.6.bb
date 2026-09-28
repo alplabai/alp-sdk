@@ -249,7 +249,8 @@ python () {
 # <alp/inference.h> dispatcher + the portable stubs; the vendor NPU
 # backends are gated (the DRP-AI3 backend is real MeraDrpRuntimeWrapper
 # code since #1145, but compiles in only under the `drpai` PACKAGECONFIG
-# above and has never run on DRP-AI silicon; the DEEPX DX-M1 backend
+# above and has run on DRP-AI3 silicon via a cross-built SDK (#1268), not
+# yet from a baked image; the DEEPX DX-M1 backend
 # (src/yocto/inference_deepx.cpp) is real dx_rt-API code and compiles in
 # only under the `deepx-dxm1` PACKAGECONFIG below -- #482 wired that
 # PACKAGECONFIG + its auto-enable, not the backend body itself -- and
