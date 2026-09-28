@@ -172,30 +172,18 @@ ALP_DRPAI_LAYER = "${@bb.utils.contains('BBFILE_COLLECTIONS', 'rz-drpai', '1', '
 # so adding ANY unrelated layer would re-run the kernel configure.
 ALP_DRPAI_LAYER[vardepvalue] = "${ALP_DRPAI_LAYER}"
 
-# ...but the layer alone is NOT enough to justify flipping the node on.
-#
-# meta-rz-drpai ships bundled in the RZ/V2N AI SDK BSP v6.30 package (see
-# conf/layer.conf), so it is in the normal bblayers set for anyone building
-# V2N at all.  Gating only on its presence would install this override --
-# and take &drpai0 from "disabled" to "okay" -- on EVERY existing V2N/V2M
-# image, so the driver would probe and /dev/drpai0 would appear on boards
-# whose owners never asked for it.  That is a behaviour change disguised as
-# an opt-in feature.
-#
-# So require an explicit ALP_ENABLE_DRPAI too, defaulting to 0.  It is
-# DECLARED in all six V2N/V2M machine confs (`ALP_ENABLE_DRPAI ?= "0"`),
-# so a builder reading the conf for their MACHINE finds it -- the `??=`
-# here is only the fallback for a consumer that uses this bbappend
-# without one of those confs.  (The V2M-only DEEPX equivalent,
-# ALP_ENABLE_DEEPX_DXM1, now lives one level down in
-# conf/machine/include/e1m-v2m-deepx.inc, `require`d by the three V2M
-# confs, rather than declared in each conf directly -- a different
-# knob, not a place to look for this one.)  Turning the SDK backend on
-# (PACKAGECONFIG "drpai") and turning the kernel node on are deliberately
-# separate switches: the backend without the node fails at open() with a
-# clear error, whereas the node without the backend is simply an idle
-# device -- neither silently half-works.
-ALP_ENABLE_DRPAI ??= "0"
+# ...and the node defaults ON with the layer.  An earlier revision kept it
+# off unless ALP_ENABLE_DRPAI = "1" was set by hand, so every shipped V2N/V2M
+# image carried the DRP-AI3 driver, its reserved arena and the vendor
+# runtime, yet no /dev/drpai0: the NPU was unreachable on the product.
+# DRP-AI3 is on-die on every V2N/V2M SKU, so a V2x image that has the
+# vendor layer now gets the node; ALP_ENABLE_DRPAI = "0" in local.conf
+# opts out.  The six V2N/V2M machine confs declare the same default, and
+# the `??=` here is only the fallback for a consumer that uses this
+# bbappend without one of them.  Turning the SDK backend on
+# (PACKAGECONFIG "drpai") stays a separate switch: it needs a RUHMI
+# checkout, and alp-sdk_0.6.bb auto-enables it only when one is configured.
+ALP_ENABLE_DRPAI ??= "${@'1' if 'rz-drpai' in (d.getVar('BBFILE_COLLECTIONS') or '').split() else '0'}"
 ALP_DRPAI_DT_ENABLE = "${@'1' if (d.getVar('ALP_DRPAI_LAYER') == '1' and d.getVar('ALP_ENABLE_DRPAI') == '1') else '0'}"
 ALP_DRPAI_DT_ENABLE[vardepvalue] = "${ALP_DRPAI_DT_ENABLE}"
 SRC_URI += "${@' file://e1m-v2n-drpai.dtsi' if d.getVar('ALP_DRPAI_DT_ENABLE') == '1' else ''}"

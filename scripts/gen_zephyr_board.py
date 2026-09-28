@@ -64,10 +64,9 @@ Scope (issue #523, first slice; extended by #655 slices 1 and 2):
     plus -- gated on the SoM preset's `topology.m33_sm.openamp_ipc`
     (`metadata/schemas/som-preset-v1.schema.json`) -- the OpenAMP/MHU-B
     reserved-memory block and the CAN-FD-unavailable analysis
-    (alp-sdk #683/#1146).  Only E1M-V2N101 sets that flag today:
-    E1M-V2M101's committed board tree does not carry either block, and
-    this generator reproduces that gap byte-for-byte rather than
-    "completing" a board nobody has written that content for yet.
+    (alp-sdk #683/#1146).  E1M-V2N101 and E1M-V2M101 both set it (the
+    same RZ/V2N die and MHU-B, #1948); a preset that leaves it false gets
+    neither block.
 
   NOT GENERATED (any family): `board.cmake` and a bare `Kconfig`.
   BOTH must be copied across by hand when a generated board tree is
