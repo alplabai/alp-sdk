@@ -12,20 +12,39 @@
  * is the only path to AEN OSPI.  See docs/adr/0017.
  *
  * The E1M-AEN801 (Ensemble E8) has no octal-NOR/HyperBus part populated this
- * hardware batch, so there is nothing on the bus to silicon-verify: this
- * driver's init reads its `struct ospi_init` straight out of the devicetree
- * node (reg/aes-reg/cs-pin/rx-ds-delay/ddr-drive-edge/bus-speed) and calls
- * alif_hal_ospi_initialize() ONCE at POST_KERNEL -- exercising the
+ * hardware batch, so there is nothing on the bus to silicon-verify there:
+ * this driver's init reads its `struct ospi_init` straight out of the
+ * devicetree node (reg/aes-reg/cs-pin/rx-ds-delay/ddr-drive-edge/bus-speed)
+ * and calls alif_hal_ospi_initialize() ONCE at POST_KERNEL -- exercising the
  * controller-side register program (expected to complete now that the OSPI0
  * clock-enable below has landed and its gating mechanism is bench-measured,
  * see that block) and proving that hal_alif entry point compiles + links.
  * It does NOT call alif_hal_ospi_xip_enable() -- see the FOURTH section
  * below, that call bus-faults on AE822 and init must not fault regardless of
- * whether an app wants XiP -- and does NOT implement flash_driver_api
- * (read/write/erase/SFDP) -- that is a larger silicon-gated follow-up once a
- * part is populated, not this batch.  See examples/aen/aen-ospi-regcheck,
- * which exercises alif_hal_ospi_initialize() directly from application code
- * as an independent compile+link+reachability proof.
+ * whether an app wants XiP.  See examples/aen/aen-ospi-regcheck, which
+ * exercises alif_hal_ospi_initialize() directly from application code as an
+ * independent compile+link+reachability proof.
+ *
+ * flash_driver_api (#915): E1M-AEN803 DOES fit an OSPI0 NOR (ISSI
+ * IS25WX256-JHLE on CS1) and the read side is now bench-proven on it --
+ * `read_jedec_id`, `sfdp_read` and 4-byte-address `read` all use the DW-SSI
+ * EEPROM-read transfer mode in 1-1-1 (standard single-lane) SPI, the frame
+ * format the part answers in coming out of reset. `write`/`erase` are
+ * DELIBERATE fail-closed stubs, not gaps left by oversight: bench attempts
+ * (issue #915 thread) show WREN (06h) never sets WEL in 1-1-1 SPI on this
+ * part -- RDSR read 0x00 before and after WREN, from both TX-only and
+ * EEPROM-read mode, and a follow-up ERASE (12h/21h) + PROGRAM sequence on a
+ * verified-blank sector left it unchanged (597/600 bytes still 0xFF, the
+ * other 3 pattern bytes happen to be 0xFF too). The Alif DFP's own IS25WX256
+ * driver (components/Source/IS25WX256.c) never programs in 1-1-1 either --
+ * it first switches the part to Octal DDR (81h write volatile config,
+ * IO mode 0xE7) and only then uses 84h program / 21h erase / 70h flag-status
+ * polling; its own comment says the status register only reads correctly
+ * after that switch. Implementing program/erase means driving that octal-DDR
+ * mode switch and the enhanced (octal) SPI frame format through hal_alif --
+ * a distinct, silicon-gated follow-up, not something this pass can fake by
+ * guessing at an untested command sequence. See `ospi_alif_write()` /
+ * `ospi_alif_erase()` below for the exact citation.
  *
  * core_clk: PREVIOUSLY a placeholder that fell back to the node's `bus-speed`
  * (100 MHz) when `clock-frequency` was unset. This value feeds
@@ -352,6 +371,7 @@
 
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
+#include <zephyr/drivers/flash.h>
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -380,7 +400,17 @@ struct ospi_alif_config {
 
 struct ospi_alif_data {
 	HAL_OSPI_Handle_T handle;
+	/* Serializes flash_driver_api calls onto the shared OSPI controller --
+	 * the cmd-then-read helper below owns the register file for the
+	 * duration of one transfer and must not race a second caller. */
+	struct k_mutex lock;
 };
+
+/* This driver polls hal_alif's IRQ pump because the current OSPI node does
+ * not connect IRQ 96 to an NVIC handler. Keep the loop bounded so a
+ * controller or bus regression reports an error instead of hanging the
+ * caller. */
+#define OSPI_ALIF_XFER_POLL_ITERATIONS 100000
 
 /* CLKCTL_PER_SLV->OSPI_CTRL; see the file-header provenance block for the
  * full DFP citation chain (soc.h:3763 base + soc.h:2584 offset). */
@@ -415,9 +445,11 @@ static int alif_ospi_clk_enable(uint32_t base_regs)
 		bit = 1;
 	} else {
 		LOG_WRN("ospi clk-enable: unrecognized OSPI base 0x%08x (only OSPI0 0x%08x / "
-			"OSPI1 0x%08x are DFP-cited for this fix); refusing to touch OSPI "
-			"registers -- they would bus-fault",
-			base_regs, ALIF_OSPI0_BASE, ALIF_OSPI1_BASE);
+		        "OSPI1 0x%08x are DFP-cited for this fix); refusing to touch OSPI "
+		        "registers -- they would bus-fault",
+		        base_regs,
+		        ALIF_OSPI0_BASE,
+		        ALIF_OSPI1_BASE);
 		return -ENOTSUP;
 	}
 
@@ -425,11 +457,28 @@ static int alif_ospi_clk_enable(uint32_t base_regs)
 	return 0;
 }
 
-static int ospi_alif_init(const struct device *dev)
+/* alif_hal_ospi_cs_enable() intentionally refuses to touch SER while the
+ * controller reports busy. That is correct during a healthy transfer, but
+ * it cannot recover a timed-out one: returning with CS asserted would
+ * poison the shared bus. Use the vendor register library's disable/mask/SS
+ * helpers to force the controller idle without open-coding register
+ * offsets or fields. Disabling the controller resets its FIFOs;
+ * ospi_control_ss() leaves it enabled again for a later retry. */
+static void ospi_alif_recover_transfer(const struct device *dev)
 {
 	const struct ospi_alif_config *config = dev->config;
-	struct ospi_alif_data         *data   = dev->data;
-	struct ospi_init init_cfg = {
+	struct ospi_regs              *regs   = (struct ospi_regs *)config->base_regs;
+
+	ospi_disable(regs);
+	ospi_mask_interrupts(regs);
+	ospi_control_ss(regs, config->cs_pin, SPI_SS_STATE_DISABLE);
+}
+
+static int ospi_alif_init(const struct device *dev)
+{
+	const struct ospi_alif_config *config   = dev->config;
+	struct ospi_alif_data         *data     = dev->data;
+	struct ospi_init               init_cfg = {
 		.bus_speed       = config->bus_speed,
 		.core_clk        = config->core_clk,
 		.cs_pin          = config->cs_pin,
@@ -461,6 +510,8 @@ static int ospi_alif_init(const struct device *dev)
 	}
 #endif
 
+	k_mutex_init(&data->lock);
+
 	/* Must happen before the first OSPI register touch inside
 	 * alif_hal_ospi_initialize() -- see the file-header provenance block. */
 	clk_rc = alif_ospi_clk_enable((uint32_t)config->base_regs);
@@ -488,8 +539,235 @@ static int ospi_alif_init(const struct device *dev)
 	return 0;
 }
 
+/* #915: program and erase remain deliberately unsupported -- see the
+ * file-header flash_driver_api note for the bench evidence (WREN never sets
+ * WEL in 1-1-1 SPI on the fitted IS25WX256; the vendor's own driver only
+ * programs/erases after switching the part to Octal DDR). Supplying explicit
+ * stubs keeps the registered flash device fail-closed; leaving these
+ * mandatory callbacks NULL would fault the caller instead. (read is
+ * implemented below, over the command-read helper.) */
+
+static int ospi_alif_write(const struct device *dev, off_t offset, const void *buffer, size_t len)
+{
+	ARG_UNUSED(dev);
+	ARG_UNUSED(offset);
+	ARG_UNUSED(buffer);
+
+	return len == 0U ? 0 : -ENOTSUP;
+}
+
+static int ospi_alif_erase(const struct device *dev, off_t offset, size_t size)
+{
+	ARG_UNUSED(dev);
+	ARG_UNUSED(offset);
+
+	return size == 0U ? 0 : -ENOTSUP;
+}
+
+static const struct flash_parameters ospi_alif_parameters = {
+	.write_block_size = 1,
+	.erase_value      = 0xFF,
+};
+
+static const struct flash_parameters *ospi_alif_get_parameters(const struct device *dev)
+{
+	ARG_UNUSED(dev);
+
+	return &ospi_alif_parameters;
+}
+
+/*
+ * Command-then-read over standard single-lane SPI, in the DW-SSI EEPROM-read
+ * transfer mode (TMOD = 0b11): the controller shifts out what is in the TX
+ * FIFO (opcode, address, dummy bytes) and then clocks in CTRLR1 + 1 frames.
+ *
+ * Not alif_hal_ospi_transfer(): that entry programs TMOD = RECEIVE_ONLY and
+ * relies on the SPI_CTRLR0 instruction phase, which only exists in the
+ * enhanced (dual/quad/octal) frame formats. In standard format a
+ * receive-only transfer never shifts the opcode out, so the part never
+ * answers and the HAL's completion callback never fires -- on silicon that
+ * was a -ETIMEDOUT with an all-zero JEDEC ID, 3 of 3 (#915). The part sits in
+ * 1-1-1 SPI after reset, so standard format is the right one; hal_alif just
+ * has no command-then-read entry for it. Fields come from hal_alif's ospi.h.
+ *
+ * The TX FIFO is filled while no slave is selected, then SER starts the
+ * transfer, so a multi-byte command cannot underflow the FIFO mid-command.
+ * RX is drained as it arrives; one transfer is at most 65536 frames (the
+ * CTRLR1 NDF field), so longer reads are split, each with its own command.
+ */
+#define OSPI_ALIF_MAX_FRAMES 65536U
+
+static int ospi_alif_cmd_read_locked(const struct device *dev,
+                                     const uint8_t       *cmd,
+                                     size_t               cmd_len,
+                                     uint8_t             *out,
+                                     size_t               len)
+{
+	const struct ospi_alif_config *config = dev->config;
+	struct ospi_regs              *regs   = (struct ospi_regs *)config->base_regs;
+	uint32_t                       ctrlr0;
+	size_t                         got = 0U;
+	int                            spin;
+	int                            rc = 0;
+
+	if (len == 0U || len > OSPI_ALIF_MAX_FRAMES || cmd_len == 0U || cmd_len > OSPI_TX_FIFO_DEPTH) {
+		return -EINVAL;
+	}
+	if (ospi_busy(regs)) {
+		return -EBUSY;
+	}
+
+	ospi_disable(regs);
+	ctrlr0 = regs->OSPI_CTRLR0;
+	ctrlr0 &= ~(SPI_CTRLR0_DFS_MASK | SPI_CTRLR0_FRF_MASK | SPI_CTRLR0_TMOD_MASK |
+	            SPI_CTRLR0_SPI_FRF_MASK | SPI_CTRLR0_SPI_HYPERBUS_EN_SSTE_MASK);
+	ctrlr0 |= SPI_CTRLR0_DFS_8bit | SPI_CTRLR0_FRF_MOTOROLA | SPI_CTRLR0_TMOD_EEPROM_READ_ONLY |
+	          SPI_CTRLR0_SPI_FRF_STANDRAD;
+	regs->OSPI_CTRLR0 = ctrlr0;
+	regs->OSPI_CTRLR1 = (uint32_t)(len - 1U);
+	regs->OSPI_IMR    = 0U;
+	regs->OSPI_SER    = 0U;
+	ospi_enable(regs);
+
+	for (size_t i = 0U; i < cmd_len; i++) {
+		regs->OSPI_DR0 = cmd[i];
+	}
+	regs->OSPI_SER = BIT(config->cs_pin); /* starts the transfer */
+
+	for (spin = 0; got < len && spin < OSPI_ALIF_XFER_POLL_ITERATIONS; spin++) {
+		while (got < len && regs->OSPI_RXFLR != 0U) {
+			out[got++] = (uint8_t)regs->OSPI_DR0;
+			spin       = 0;
+		}
+	}
+	if (got < len) {
+		LOG_ERR("command 0x%02x read stalled at %u/%u bytes",
+		        cmd[0],
+		        (unsigned int)got,
+		        (unsigned int)len);
+		rc = -ETIMEDOUT;
+	}
+
+	/* Deassert CS, leave the controller idle and enabled; the same forced
+	 * recovery covers a stalled read. */
+	ospi_alif_recover_transfer(dev);
+	return rc;
+}
+
+static int ospi_alif_cmd_read(const struct device *dev,
+                              const uint8_t       *cmd,
+                              size_t               cmd_len,
+                              uint8_t             *out,
+                              size_t               len)
+{
+	struct ospi_alif_data *data = dev->data;
+	int                    rc;
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	rc = ospi_alif_cmd_read_locked(dev, cmd, cmd_len, out, len);
+	k_mutex_unlock(&data->lock);
+	return rc;
+}
+
+/* 1-1-1 READ with a 4-byte address (13h). The fitted IS25WX256 advertises it
+ * in its SFDP 4-byte address instruction table (DWORD1 bit 0, read on
+ * silicon as 43 0e ff ff), and a 4-byte opcode works whatever address mode
+ * the part was left in. No dummy cycles at this bus rate.
+ * ponytail: no array-size bound -- the node carries no size and the part
+ * wraps past its end; add one from SFDP BFPT DWORD2 when a consumer needs
+ * it. */
+#define OSPI_ALIF_READ4 0x13U
+
+static int ospi_alif_read(const struct device *dev, off_t offset, void *buffer, size_t len)
+{
+	uint8_t *out = buffer;
+
+	if (offset < 0 || (buffer == NULL && len != 0U)) {
+		return -EINVAL;
+	}
+	while (len > 0U) {
+		size_t  chunk = MIN(len, (size_t)OSPI_ALIF_MAX_FRAMES);
+		uint8_t cmd[] = {
+			OSPI_ALIF_READ4,
+			(uint8_t)((uint32_t)offset >> 24),
+			(uint8_t)((uint32_t)offset >> 16),
+			(uint8_t)((uint32_t)offset >> 8),
+			(uint8_t)offset,
+		};
+		int rc = ospi_alif_cmd_read(dev, cmd, sizeof(cmd), out, chunk);
+
+		if (rc != 0) {
+			return rc;
+		}
+		out += chunk;
+		offset += (off_t)chunk;
+		len -= chunk;
+	}
+	return 0;
+}
+
+#if defined(CONFIG_FLASH_JESD216_API)
+/* Standard JEDEC-ID read opcode (9Fh); the fitted IS25WX256 answers 9d 5b 19
+ * (bench-captured, #915 / #2041). */
+#define OSPI_ALIF_JEDEC_RDID   0x9FU
+#define OSPI_ALIF_JEDEC_ID_LEN 3U
+
+static int ospi_alif_read_jedec_id(const struct device *dev, uint8_t *id)
+{
+	static const uint8_t cmd[] = { OSPI_ALIF_JEDEC_RDID };
+
+	if (id == NULL) {
+		return -EINVAL;
+	}
+	return ospi_alif_cmd_read(dev, cmd, sizeof(cmd), id, OSPI_ALIF_JEDEC_ID_LEN);
+}
+
+/* JESD216 Read SFDP: 0x5A, 24-bit address, 8 dummy clocks (one dummy byte in
+ * 1-1-1), then data. */
+#define OSPI_ALIF_SFDP_READ 0x5AU
+
+static int ospi_alif_sfdp_read(const struct device *dev, off_t offset, void *data, size_t len)
+{
+	uint8_t *out = data;
+
+	if (offset < 0 || (data == NULL && len != 0U)) {
+		return -EINVAL;
+	}
+	while (len > 0U) {
+		size_t  chunk = MIN(len, (size_t)OSPI_ALIF_MAX_FRAMES);
+		uint8_t cmd[] = {
+			OSPI_ALIF_SFDP_READ,
+			(uint8_t)(offset >> 16),
+			(uint8_t)(offset >> 8),
+			(uint8_t)offset,
+			0x00U, /* 8 dummy clocks */
+		};
+		int rc = ospi_alif_cmd_read(dev, cmd, sizeof(cmd), out, chunk);
+
+		if (rc != 0) {
+			return rc;
+		}
+		out += chunk;
+		offset += (off_t)chunk;
+		len -= chunk;
+	}
+	return 0;
+}
+#endif /* CONFIG_FLASH_JESD216_API */
+
+static const struct flash_driver_api ospi_alif_api = {
+	.read           = ospi_alif_read,
+	.write          = ospi_alif_write,
+	.erase          = ospi_alif_erase,
+	.get_parameters = ospi_alif_get_parameters,
+#if defined(CONFIG_FLASH_JESD216_API)
+	.sfdp_read     = ospi_alif_sfdp_read,
+	.read_jedec_id = ospi_alif_read_jedec_id,
+#endif
+};
+
 /* (clock-frequency / bus-speed): see the file-header DIVIDER INVARIANT note. */
-#define OSPI_ALIF_SCLK_DIV(inst)                                                                 \
+#define OSPI_ALIF_SCLK_DIV(inst) \
 	(DT_INST_PROP(inst, clock_frequency) / DT_INST_PROP(inst, bus_speed))
 
 /*
@@ -503,36 +781,44 @@ static int ospi_alif_init(const struct device *dev)
  * `clock-frequency`; these three catch it for a present but WRONG ratio
  * instead, at build time rather than on a populated part nobody scoped.
  */
-#define OSPI_ALIF_CHECK_SCLK(inst)                                                               \
-	BUILD_ASSERT(OSPI_ALIF_SCLK_DIV(inst) >= 2,                                              \
-		     "ospi" STRINGIFY(inst) ": clock-frequency / bus-speed < 2 leaves "          \
-		     "OSPI_BAUDR[SCKDV] all zero -- OSPI_SCLK disabled (HWRM S16.1.5.3.5)");     \
-	BUILD_ASSERT(OSPI_ALIF_SCLK_DIV(inst) % 2 == 0,                                          \
-		     "ospi" STRINGIFY(inst) ": clock-frequency / bus-speed is odd -- "           \
-		     "OSPI_BAUDR[SCKDV]'s reserved bit 0 rounds the divider DOWN, so SCLK "      \
-		     "silently OVERSHOOTS bus-speed");                                          \
-	BUILD_ASSERT(DT_INST_PROP(inst, clock_frequency) /                                       \
-				     (OSPI_ALIF_SCLK_DIV(inst) & ~1 ? OSPI_ALIF_SCLK_DIV(inst) & ~1 : 1) <= \
-			     200000000,                                                           \
-		     "ospi" STRINGIFY(inst) ": resulting OSPI_SCLK exceeds the 200 MHz HEXSPI "  \
-		     "controller cap (HWRM S10.5)")
+#define OSPI_ALIF_CHECK_SCLK(inst) \
+	BUILD_ASSERT(OSPI_ALIF_SCLK_DIV(inst) >= 2, \
+	             "ospi" STRINGIFY( \
+	                 inst) ": clock-frequency / bus-speed < 2 leaves " \
+	                       "OSPI_BAUDR[SCKDV] all zero -- OSPI_SCLK disabled (HWRM S16.1.5.3.5)"); \
+	BUILD_ASSERT(OSPI_ALIF_SCLK_DIV(inst) % 2 == 0, \
+	             "ospi" STRINGIFY( \
+	                 inst) ": clock-frequency / bus-speed is odd -- " \
+	                       "OSPI_BAUDR[SCKDV]'s reserved bit 0 rounds the divider DOWN, so SCLK " \
+	                       "silently OVERSHOOTS bus-speed"); \
+	BUILD_ASSERT(DT_INST_PROP(inst, clock_frequency) / \
+	                     (OSPI_ALIF_SCLK_DIV(inst) & ~1 ? OSPI_ALIF_SCLK_DIV(inst) & ~1 : 1) <= \
+	                 200000000, \
+	             "ospi" STRINGIFY(inst) ": resulting OSPI_SCLK exceeds the 200 MHz HEXSPI " \
+	                                    "controller cap (HWRM S10.5)")
 
-#define OSPI_ALIF_INIT(inst)                                                                      \
-	IF_ENABLED(CONFIG_PINCTRL, (PINCTRL_DT_INST_DEFINE(inst);))                                   \
-	OSPI_ALIF_CHECK_SCLK(inst);                                                                   \
-	static struct ospi_alif_data         ospi_alif_data_##inst;                                  \
-	static const struct ospi_alif_config ospi_alif_config_##inst = {                             \
-		.base_regs       = (uint32_t *)DT_INST_REG_ADDR(inst),                                   \
-		.aes_regs        = (uint32_t *)DT_INST_PROP_BY_IDX(inst, aes_reg, 0),                    \
-		.bus_speed       = DT_INST_PROP(inst, bus_speed),                                        \
-		.core_clk        = DT_INST_PROP(inst, clock_frequency),                                  \
-		.cs_pin          = DT_INST_PROP(inst, cs_pin),                                           \
-		.rx_ds_delay     = DT_INST_PROP(inst, rx_ds_delay),                                       \
-		.ddr_drive_edge  = DT_INST_PROP(inst, ddr_drive_edge),                                    \
-		.xip_wait_cycles = DT_INST_PROP(inst, xip_wait_cycles),                                   \
-		IF_ENABLED(CONFIG_PINCTRL, (.pcfg = PINCTRL_DT_INST_DEV_CONFIG_GET(inst),))               \
-	};                                                                                             \
-	DEVICE_DT_INST_DEFINE(inst, ospi_alif_init, NULL, &ospi_alif_data_##inst,                    \
-			       &ospi_alif_config_##inst, POST_KERNEL, CONFIG_FLASH_INIT_PRIORITY, NULL);
+#define OSPI_ALIF_INIT(inst) \
+	IF_ENABLED(CONFIG_PINCTRL, (PINCTRL_DT_INST_DEFINE(inst);)) \
+	OSPI_ALIF_CHECK_SCLK(inst); \
+	static struct ospi_alif_data         ospi_alif_data_##inst; \
+	static const struct ospi_alif_config ospi_alif_config_##inst = { \
+		.base_regs       = (uint32_t *)DT_INST_REG_ADDR(inst), \
+		.aes_regs        = (uint32_t *)DT_INST_PROP_BY_IDX(inst, aes_reg, 0), \
+		.bus_speed       = DT_INST_PROP(inst, bus_speed), \
+		.core_clk        = DT_INST_PROP(inst, clock_frequency), \
+		.cs_pin          = DT_INST_PROP(inst, cs_pin), \
+		.rx_ds_delay     = DT_INST_PROP(inst, rx_ds_delay), \
+		.ddr_drive_edge  = DT_INST_PROP(inst, ddr_drive_edge), \
+		.xip_wait_cycles = DT_INST_PROP(inst, xip_wait_cycles), \
+		IF_ENABLED(CONFIG_PINCTRL, (.pcfg = PINCTRL_DT_INST_DEV_CONFIG_GET(inst), )) \
+	}; \
+	DEVICE_DT_INST_DEFINE(inst, \
+	                      ospi_alif_init, \
+	                      NULL, \
+	                      &ospi_alif_data_##inst, \
+	                      &ospi_alif_config_##inst, \
+	                      POST_KERNEL, \
+	                      CONFIG_FLASH_INIT_PRIORITY, \
+	                      &ospi_alif_api);
 
 DT_INST_FOREACH_STATUS_OKAY(OSPI_ALIF_INIT)

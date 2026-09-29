@@ -1526,14 +1526,15 @@ config CAN_RBUF_AFWL
 # / USE_ALIF_HAL_ANALOG precedent) so OSPI_ALIF can select it and actually pull
 # the library in.
 #
-# vendor-ext, HW-BLOCKED, BUILD-ONLY this batch: the E1M-AEN801 (Ensemble E8)
-# has NO octal-NOR/HyperBus part populated on this hardware batch, so there is
-# nothing on the bus to silicon-verify against -- this only proves the ospi0
-# node BINDS + the hal_alif init/XiP-enable entry points COMPILE and LINK
-# (zephyr/drivers/flash/flash_ospi_alif.c calls both at driver init; see
-# examples/aen/aen-ospi-regcheck).  Not a full flash_driver_api (read/write/
-# erase/SFDP) -- that is a larger silicon-gated follow-up once a part is
-# populated, not this batch.
+# vendor-ext, MIXED verification this batch: the E1M-AEN801 (Ensemble E8) has
+# NO octal-NOR/HyperBus part populated, so there is nothing on ITS bus to
+# silicon-verify against -- for that SKU this only proves the ospi0 node
+# BINDS + the hal_alif init entry point COMPILES/LINKS. E1M-AEN803 DOES fit
+# an OSPI0 NOR (ISSI IS25WX256-JHLE) and its flash_driver_api read path
+# (JEDEC ID / SFDP / addressed read) is bench-verified there -- see
+# zephyr/drivers/flash/flash_ospi_alif.c and examples/aen/aen-ospi-regcheck.
+# write/erase remain fail-closed stubs (#915): the bench evidence is that
+# they need the fitted part's Octal-DDR mode switch, not 1-1-1 SPI.
 # ---------------------------------------------------------------------------
 config USE_ALIF_HAL_OSPI
 	bool
@@ -1542,23 +1543,28 @@ config USE_ALIF_HAL_OSPI
 	  OSPI_ALIF; not user-facing.
 
 config OSPI_ALIF
-	bool "Alif Ensemble OSPI/HexSPI controller (ADR 0017 Tier-1.5, HW-BLOCKED / BUILD-ONLY)"
+	bool "Alif Ensemble OSPI/HexSPI controller (ADR 0017 Tier-1.5)"
 	default y
 	depends on DT_HAS_SNPS_DESIGNWARE_OSPI_ENABLED
 	select USE_ALIF_HAL_OSPI
+	select FLASH_HAS_DRIVER_ENABLED
+	select FLASH_JESD216
 	help
 	  Alif Ensemble Synopsys DesignWare OSPI/HexSPI controller (compatible
 	  "snps,designware-ospi", base 0x8300_0000 on the E8 ospi0 instance),
 	  written over the Apache-2.0 hal_alif drivers/ospi register library
 	  (USE_ALIF_HAL_OSPI pulls in modules/hal/alif drivers/ospi).  Octal-SPI
 	  NOR flash + HyperBus/HyperRAM XIP modes are both driven through the same
-	  controller; this driver programs the controller (ospi_init) and the XiP
-	  window (xip_enable) only -- no read/write/erase flash_driver_api yet.
+	  controller; this driver programs the controller (ospi_init) and
+	  registers a flash_driver_api: read/read_jedec_id/sfdp_read (bench-proven
+	  on E1M-AEN803's fitted IS25WX256, over the DW-SSI EEPROM-read transfer
+	  mode in 1-1-1 SPI) and fail-closed write/erase stubs (#915: program/
+	  erase need the part's Octal-DDR mode switch, not implemented here). No
+	  XiP window (xip_enable) -- that call bus-faults on AE822, see the
+	  driver's file-header FOURTH section.
 
-	  HW-BLOCKED, BUILD-ONLY: no octal-NOR/HyperBus part is populated on the
-	  E1M-AEN801 this batch, so live XiP reads are unverifiable here -- this
-	  gate proves the DT node binds and the hal_alif entry points link.
-	  Driver: zephyr/drivers/flash/flash_ospi_alif.c.
+	  E1M-AEN801 fits no OSPI memory, so only the controller-register proof
+	  above runs there. Driver: zephyr/drivers/flash/flash_ospi_alif.c.
 
 	  ADR 0017 Tier-1.5 (in-tree thin driver over an Apache-2.0 hal_alif HW
 	  library, not a fork-driver copy -- the fork ships no OSPI Zephyr class
