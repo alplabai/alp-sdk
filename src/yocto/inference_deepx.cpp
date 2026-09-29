@@ -122,7 +122,7 @@ struct DeepxState {
 
 /** Map a dx_rt DataType onto the alp_inference dtype enum.  dx_rt's enum
  *  (datatype.h) carries device-only structured types (BBOX/FACE/POSE)
- *  the portable surface has no slot for; those fall back to UINT8 so the
+ *  and unsigned 16/32-bit ints the portable surface has no slot for; those fall back to UINT8 so the
  *  raw bytes are still reachable via the tensor's data()/size. */
 alp_inference_dtype_t dxrt_dtype_to_alp(dxrt::DataType t)
 {
@@ -133,14 +133,15 @@ alp_inference_dtype_t dxrt_dtype_to_alp(dxrt::DataType t)
 		return ALP_INFERENCE_DTYPE_UINT8;
 	case dxrt::INT8:
 		return ALP_INFERENCE_DTYPE_INT8;
-	case dxrt::UINT16:
 	case dxrt::INT16:
 		return ALP_INFERENCE_DTYPE_INT16;
 	case dxrt::INT32:
-	case dxrt::UINT32:
 		return ALP_INFERENCE_DTYPE_INT32;
 	default:
-		/* INT64/UINT64/BBOX/FACE/POSE/NONE have no portable slot; expose
+		/* UINT16/UINT32/INT64/UINT64/BBOX/FACE/POSE/NONE have no portable
+         * slot (the public enum has no unsigned 16/32-bit dtype; issue
+         * #2456) -- reporting UINT16/UINT32 as signed INT16/INT32 would
+         * make values above the signed range read as negative.  Expose
          * the raw bytes as uint8 so the caller can still reach them. */
 		return ALP_INFERENCE_DTYPE_UINT8;
 	}
