@@ -6,7 +6,7 @@
 # portable spec set from tests/hil/_common/.  SoM-specific specs
 # in this dir (A55, ssh-run): v2n-temp-sensor.yaml,
 # v2n-brd-i2c-bringup.yaml, v2n-secure-element-sign.yaml,
-# v2n-power-monitor.yaml.
+# v2n-power-monitor.yaml, v2n-drpai-inference.yaml.
 #
 # NOTE: E1M-V2M101's OWN catalogue entry declares the same 4 GB
 # dram_mbit as this SKU, yet V2M101 currently ships the family-default
