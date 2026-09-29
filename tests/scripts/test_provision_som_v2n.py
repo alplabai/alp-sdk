@@ -146,3 +146,35 @@ def test_status_flags_a_state_run_would_supersede(tmp_path):
 def test_legacy_flat_flow_skips_bl2_mmc(tmp_path):
     p = _run("--bundle", _bundle(tmp_path), "--serial", SERIAL)
     assert "flash:bl2_mmc: skipped (emmc:boot1" in p.stdout, p.stdout
+
+
+def test_cold_cycles_below_one_is_a_usage_error(tmp_path):
+    ledger, markers = _inputs(tmp_path)
+    b = _bundle(tmp_path)
+    for n in ("0", "-1"):
+        p = _run("plan", "--sku", SKU, "--bundle", b, "--ledger-root", ledger,
+                 "--cold-cycles", n)
+        assert p.returncode == 2, p.stdout + p.stderr
+
+
+def _shippable_unit(tmp_path, failed_step):
+    from provision import steps
+    ledger, _ = _inputs(tmp_path)
+    d = ledger / SKU
+    d.mkdir()
+    st = {"write_xspi": {"status": "failed" if failed_step else "done", "at": "2026-09-24T00:00:00Z"}}
+    (d / f"{SERIAL}.state.json").write_text(json.dumps(
+        {"schema": 1, "tool_rev": steps.tool_rev(), "steps": st}), encoding="utf-8")
+    (d / f"{SERIAL}.unit.yaml").write_text("eeprom_unique_id: 00 11\ndisposition: ship\n", encoding="utf-8")
+    return _run("status", "--sku", SKU, "--serial", SERIAL, "--ledger-root", ledger, "--require-shippable")
+
+
+def test_require_shippable_passes_when_no_step_failed(tmp_path):
+    p = _shippable_unit(tmp_path, failed_step=False)
+    assert p.returncode == 0 and "SHIPPABLE" in p.stdout, p.stdout + p.stderr
+
+
+def test_require_shippable_rejects_a_unit_whose_latest_run_failed(tmp_path):
+    p = _shippable_unit(tmp_path, failed_step=True)
+    assert p.returncode == 1 and "SHIPPABLE" not in p.stdout.replace("not SHIPPABLE", ""), p.stdout
+    assert "step write_xspi failed" in p.stdout
