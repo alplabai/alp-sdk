@@ -10,15 +10,20 @@
 #define TR_MEMMAP_H
 
 /* SRAM0 */
-#define TR_MEM_A32_DL     0x021C2000u /* the frame's DL (render.c DL): FB A's MiB-1 tail to 0x021FFFFF, WB 4 KiB pages */
-#define TR_MEM_A32_SETUP  0x02200000u /* triangle setup records (render.c SETUP) */
-#define TR_MEM_A32_BANDS  0x022A8000u /* per core a z + a colour band (render.c ZBAND) */
-#define TR_MEM_A32_ZTEX   0x022D8000u /* P15: the camera-side zone's ground textures, RGB565 (r3d_scene.c) */
+#define TR_MEM_A32_DL \
+	0x021C2000u /* the frame's DL (render.c DL): FB A's MiB-1 tail to 0x021FFFFF, WB 4 KiB pages */
+#define TR_MEM_A32_SETUP 0x02200000u /* triangle setup records (render.c SETUP) */
+#define TR_MEM_A32_BANDS 0x022A8000u /* per core a z + a colour band (render.c ZBAND) */
+#define TR_MEM_A32_ZTEX \
+	0x022D8000u /* P15: the camera-side zone's ground textures, RGB565 (r3d_scene.c) */
 #define TR_MEM_A32_ZTEX_SIZE 0x10000u /* 2 x 128 x 128 x 2 B */
-#define TR_MEM_A32_ZIDX   0x022E8000u /* the six ground slots' texel indices, unpacked from 4 bpp (r3d_scene.c) */
-#define TR_MEM_A32_ZIDX_SIZE 0x18000u /* 6 x 128 x 128 x 1 B: the four bound slots + the far road's two (r3d_scene.c) */
-#define TR_MEM_A32_DL1    0x02300000u /* scene part 2's DL (render.c DL1) */
-#define TR_MEM_NPU_ARENA  0x02339000u /* HP: MoveNet cut-model inference arena (docs/superpowers/specs/
+#define TR_MEM_A32_ZIDX \
+	0x022E8000u /* the six ground slots' texel indices, unpacked from 4 bpp (r3d_scene.c) */
+#define TR_MEM_A32_ZIDX_SIZE \
+	0x18000u /* 6 x 128 x 128 x 1 B: the four bound slots + the far road's two (r3d_scene.c) */
+#define TR_MEM_A32_DL1 0x02300000u /* scene part 2's DL (render.c DL1) */
+#define TR_MEM_NPU_ARENA \
+	0x02339000u /* HP: MoveNet cut-model inference arena (docs/superpowers/specs/
                                        * 2026-09-24-npu-body-control-design.md sec 2/9, candidate (a)).
                                        * Above DL1's current end (TR_DL_MAX_TRIS trimmed to make room,
                                        * r3d.h), 4 KiB aligned; a32/renderer/render.c asserts DL1 does
@@ -26,7 +31,8 @@
                                        * spare, ruled that way on real silicon (see TR_MEM_NPU_ARENA_SIZE)
                                        * after Vela's own 277.5 KiB figure proved short by 424 B once
                                        * TFLM's persistent allocations were counted too. */
-#define TR_MEM_NPU_ARENA_SIZE 286720u /* 0x46000, 280 KiB. Vela's --optimise Size figure (277.5 KiB,
+#define TR_MEM_NPU_ARENA_SIZE \
+	286720u                           /* 0x46000, 280 KiB. Vela's --optimise Size figure (277.5 KiB,
                                        * 284,160 B) undercounted TFLM's own persistent allocations on
                                        * top of it -- real silicon (HP ram console): "Failed to resize
                                        * buffer. Requested: 284288, available 283864, missing: 424."
@@ -37,11 +43,13 @@
                                        * add here. */
 #define TR_MEM_ARING      0x0237F000u /* P10 HE -> HP sound ring, layout in tr_aring.h */
 #define TR_MEM_ARING_SIZE 0x1C0u      /* == sizeof(tr_aring_t), asserted there */
-#define TR_MEM_PSLOT      0x0237F200u /* HP -> HE pose slot, layout + protocol in tr_pslot.h (design:
+#define TR_MEM_PSLOT \
+	0x0237F200u /* HP -> HE pose slot, layout + protocol in tr_pslot.h (design:
                                        * docs/superpowers/specs/2026-09-24-npu-body-control-design.md
                                        * sec 4). probe/npu's OWN (unrelated, 'RUPN'-magic) result block
                                        * also lives here -- the two never run resident at once. */
-#define TR_MEM_SRAM1_READY 0x0237FC90u /* HE -> HP: SRAM1 confirmed answering (src/platform/a32.c
+#define TR_MEM_SRAM1_READY \
+	0x0237FC90u /* HE -> HP: SRAM1 confirmed answering (src/platform/a32.c
                                         * sram1_answers(), the SAME check tr_a32_boot() already
                                         * gates its own mailbox use on) written here AFTER it,
                                         * so the HP can gate its camera pool (CAM_POOL, SRAM1
@@ -72,7 +80,8 @@
                                         * mode reads as "HP stuck: SRAM1_NOT_READY" directly in the
                                         * HE console next time, not just "camera unresponsive". */
 #define TR_MEM_SRAM1_READY_MAGIC 0x52315352u /* 'RSR1' (SRAM1 Ready) */
-#define TR_MEM_HP_DBG     0x0237FCA0u /* hp_vision's bench-readable per-stage DWT timing block
+#define TR_MEM_HP_DBG \
+	0x0237FCA0u /* hp_vision's bench-readable per-stage DWT timing block
                                        * (src/ipc/tr_hp_dbg.h hp_dbg_t, shared with the HE's HUD
                                        * since fix round 5): right after TR_MEM_SRAM1_READY's
                                        * reserved 16 B above (0x0237FC90 + 0x10), 16-B aligned.
@@ -91,7 +100,8 @@
                                        * has no room to grow without a relocation, the same class of
                                        * churn TR_MEM_SRAM1_READY's own comment already describes
                                        * fixing once). */
-#define TR_MEM_CAM_VIEW   0x0237FD20u /* HP -> A32: live camera view descriptor (src/ipc/
+#define TR_MEM_CAM_VIEW \
+	0x0237FD20u /* HP -> A32: live camera view descriptor (src/ipc/
                                        * tr_cam_view.h tr_cam_view_t, fix round 7 item 5), 32-B
                                        * aligned, TR_MEM_HP_DBG's own end (0x0237FD08) + headroom
                                        * up to this 32-B boundary (fix round 12). NOT the pixels
@@ -103,16 +113,20 @@
                                        * 0x0237FD3C, with 0x0237FD3C..0x0237FFFF (0x2C4 B) of headroom
                                        * still free in the sound ring's page after it. */
 /* SRAM1 */
-#define TR_MEM_CAM_POOL      0x02480000u /* HP: OV9281 camera frame pool (design sec 2), 2 x 256,000 B GREY8;
+#define TR_MEM_CAM_POOL \
+	0x02480000u /* HP: OV9281 camera frame pool (design sec 2), 2 x 256,000 B GREY8;
                                           * hp_vision/boards/<board>.overlay's sram1_cam_pool DT node is the
                                           * binding source, this is documentation only for cross-referencing */
-#define TR_MEM_CAM_POOL_SIZE 0x80000u    /* 512 KiB, CONFIG_VIDEO_BUFFER_POOL_HEAP_SIZE */
-#define TR_MEM_MBOX_PAGE_END   0x02403000u /* mailbox, prof + bench blocks, renderer L2 tables (0x023, 0x027, 0x021,
+#define TR_MEM_CAM_POOL_SIZE 0x80000u /* 512 KiB, CONFIG_VIDEO_BUFFER_POOL_HEAP_SIZE */
+#define TR_MEM_MBOX_PAGE_END \
+	0x02403000u /* mailbox, prof + bench blocks, renderer L2 tables (0x023, 0x027, 0x021,
                                              * 0x024 -- fix round 10, camera pool cacheable) */
-#define TR_MEM_RENDER_TTB      0x02408000u /* renderer L1 table, 16 KiB */
-#define TR_MEM_A32_IMG_END     0x025C0000u /* renderer image + .bss end (renderer.ld); the image alone <= 512 KiB (STUB_PAYLOAD_LIMIT) */
-#define TR_MEM_A32_BINS        0x025C0000u /* band bins (render.c BINS) */
-#define TR_MEM_A32_STACKS      0x025DE000u /* renderer stacks, 64 KiB per core (start.S), below FB B 0x02600000 */
+#define TR_MEM_RENDER_TTB 0x02408000u /* renderer L1 table, 16 KiB */
+#define TR_MEM_A32_IMG_END \
+	0x025C0000u /* renderer image + .bss end (renderer.ld); the image alone <= 512 KiB (STUB_PAYLOAD_LIMIT) */
+#define TR_MEM_A32_BINS 0x025C0000u /* band bins (render.c BINS) */
+#define TR_MEM_A32_STACKS \
+	0x025DE000u /* renderer stacks, 64 KiB per core (start.S), below FB B 0x02600000 */
 #define TR_MEM_A32_STACKS_SIZE 0x20000u
 #define TR_MEM_TFA_RW          0x027DE000u /* TF-A RW, never mapped by the A32 */
 #define TR_MEM_TFA_RW_END      0x027ED000u

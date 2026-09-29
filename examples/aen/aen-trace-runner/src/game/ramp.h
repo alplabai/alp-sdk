@@ -36,7 +36,8 @@
 #ifndef TR_RAMP_STEPS
 #define TR_RAMP_STEPS 2220u /* ~90 s of play to the cap */
 #endif
-_Static_assert(TR_RAMP_MAX_Q8 >= 256u && TR_RAMP_MAX_Q8 <= 384u, "1.0x .. 1.5x: never two steps a frame at 30 Hz");
+_Static_assert(TR_RAMP_MAX_Q8 >= 256u && TR_RAMP_MAX_Q8 <= 384u,
+               "1.0x .. 1.5x: never two steps a frame at 30 Hz");
 
 /* The speed factor after `steps` steps of the run, Q8. */
 static inline uint32_t tr_ramp_q8(uint32_t steps)

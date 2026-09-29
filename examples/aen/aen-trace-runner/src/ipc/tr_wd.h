@@ -57,10 +57,10 @@
  * renderer's LAUNCH -> first frame is ~0.1 s (CRC of the 452 KB image,
  * self-checks, render_init, one frame; estimate from host timings, measured
  * on silicon by the stamps a32.c prints), so 2 s is a 20x margin. */
-#define TR_WD_FIRST_FRAME_US 2000000u
-#define TR_WD_BACKOFF_MAX_SHIFT 4u    /* 2, 4, 8, 16, then every 32 s */
-#define TR_WD_SETTLE_US      500000u  /* a PARKED stub at boot may still self-LAUNCH */
-#define TR_WD_WINDOW_US      60000000u /* landed frames this long reset the backoff */
+#define TR_WD_FIRST_FRAME_US    2000000u
+#define TR_WD_BACKOFF_MAX_SHIFT 4u        /* 2, 4, 8, 16, then every 32 s */
+#define TR_WD_SETTLE_US         500000u   /* a PARKED stub at boot may still self-LAUNCH */
+#define TR_WD_WINDOW_US         60000000u /* landed frames this long reset the backoff */
 
 /* Why tr_wd_poll() did (or did not) command. */
 typedef enum {
@@ -85,17 +85,17 @@ typedef enum {
 const char *tr_wd_why_str(tr_wd_why_t why);
 
 typedef struct {
-	uint64_t wait_us;  /* start of the first-frame wait: stub first seen alive, or the last LAUNCH */
-	uint64_t since_us; /* start of the current run of landed frames */
+	uint64_t wait_us; /* start of the first-frame wait: stub first seen alive, or the last LAUNCH */
+	uint64_t since_us;   /* start of the current run of landed frames */
 	uint64_t pending_us; /* since when a command has waited (PENDING / PARKING), if `pending` */
-	uint32_t sent;     /* commands this boot */
-	uint32_t tries;    /* LAUNCHes since frames last ran TR_WD_WINDOW_US: the backoff exponent */
-	uint32_t last_cmd; /* last command written, TR_CTRL_* */
-	bool     first;    /* no frame since boot / the last LAUNCH */
-	bool     alive;    /* the stub has been seen alive */
-	bool     running;  /* a run of landed frames is in progress */
-	bool     pending;  /* the last poll found a command still in flight */
-	bool     halting;  /* a HALT was sent or seen pending, the stub not parked since */
+	uint32_t sent;       /* commands this boot */
+	uint32_t tries;      /* LAUNCHes since frames last ran TR_WD_WINDOW_US: the backoff exponent */
+	uint32_t last_cmd;   /* last command written, TR_CTRL_* */
+	bool     first;      /* no frame since boot / the last LAUNCH */
+	bool     alive;      /* the stub has been seen alive */
+	bool     running;    /* a run of landed frames is in progress */
+	bool     pending;    /* the last poll found a command still in flight */
+	bool     halting;    /* a HALT was sent or seen pending, the stub not parked since */
 } tr_wd_t;
 
 /* Boot: waiting for the first frame. */
@@ -119,7 +119,13 @@ uint64_t tr_wd_pending_us(const tr_wd_t *w, uint64_t now_us);
  * LAUNCHes (rule 6). A returned command counts as written: the caller must
  * write it.
  */
-uint32_t tr_wd_poll(tr_wd_t *w, bool alive, uint32_t stub_state, uint32_t ctrl_cmd, bool ours, bool missed,
-		    uint64_t now_us, tr_wd_why_t *why);
+uint32_t tr_wd_poll(tr_wd_t     *w,
+                    bool         alive,
+                    uint32_t     stub_state,
+                    uint32_t     ctrl_cmd,
+                    bool         ours,
+                    bool         missed,
+                    uint64_t     now_us,
+                    tr_wd_why_t *why);
 
 #endif /* TR_WD_H */

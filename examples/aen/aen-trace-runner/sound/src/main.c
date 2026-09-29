@@ -66,14 +66,15 @@
 #ifndef TR_SND_VOLUME
 #define TR_SND_VOLUME 128u
 #endif
-BUILD_ASSERT(TR_SND_VOLUME <= 128u, "above the bench-heard level: ask before raising (speaker rating unknown)");
+BUILD_ASSERT(TR_SND_VOLUME <= 128u,
+             "above the bench-heard level: ask before raising (speaker rating unknown)");
 
 #define RATE      TR_AUDIO_RATE
 #define BLOCK     (RATE * 16u / 1000u) /* frames per 16 ms block: 256 at 16 kHz, 768 at 48 kHz */
 #define WRITE_TMO 100u
 
-#define AMP_ENABLE_PIN           2   /* P5_2 = SD_N, active high (R138 pull-up to +VIO) */
-#define AMP_FAULT_PIN            0   /* P5_0 = IRQZ, open drain, active low */
+#define AMP_ENABLE_PIN           2 /* P5_2 = SD_N, active high (R138 pull-up to +VIO) */
+#define AMP_FAULT_PIN            0 /* P5_0 = IRQZ, open drain, active low */
 #define AMP_FAULT_PAD_REN        (1U << 16)
 #define AMP_ENABLE_RESET_HOLD_MS 24u /* >= 23.8 ms max SDZ_TIMEOUT (SLASET3D Table 7-7) */
 #define MUX_SETTLE_MS            10u
@@ -83,11 +84,12 @@ BUILD_ASSERT(TR_SND_VOLUME <= 128u, "above the bench-heard level: ask before rai
 #define CLOCK_CHECK_BLOCKS 8u
 #define CLOCK_CHECK_MIN_MS 60u
 #define CLOCK_CHECK_MAX_MS 250u
-#define AMP_COUNT                2u
+#define AMP_COUNT          2u
 
-static const pinctrl_soc_pin_t amp_enable_mux[] = { PIN_P5_2__GPIO };
-static const pinctrl_soc_pin_t amp_fault_mux[]  = { PIN_P5_0__GPIO | AMP_FAULT_PAD_REN };
-static const uint8_t amp_addrs[AMP_COUNT]      = { TAS2563_I2C_ADDR_GND_PULL, TAS2563_I2C_ADDR_VDD_PULL };
+static const pinctrl_soc_pin_t amp_enable_mux[]     = { PIN_P5_2__GPIO };
+static const pinctrl_soc_pin_t amp_fault_mux[]      = { PIN_P5_0__GPIO | AMP_FAULT_PAD_REN };
+static const uint8_t           amp_addrs[AMP_COUNT] = { TAS2563_I2C_ADDR_GND_PULL,
+	                                                    TAS2563_I2C_ADDR_VDD_PULL };
 /* explicit LEFT/RIGHT, not FROM_ADDR: the DW I2S3 frame is 2 x 32-bit slots */
 static const tas2563_rx_channel_t amp_rx[AMP_COUNT] = { TAS2563_RX_LEFT, TAS2563_RX_RIGHT };
 
@@ -131,7 +133,8 @@ static int bringup(bool with_mic)
 	s.mux_en  = alp_gpio_open(EVK_PIN_I2S_MUX_EN);
 	if (s.mux_sel == NULL || s.mux_en == NULL) {
 		printk("[snd] mux open failed (IO8 needs a CRC-valid manifest with hw_rev %s) err=%d\n",
-		       CONFIG_ALP_SDK_SOM_HW_REV, (int)alp_last_error());
+		       CONFIG_ALP_SDK_SOM_HW_REV,
+		       (int)alp_last_error());
 		return 2;
 	}
 	rc = alp_gpio_configure(s.mux_sel, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
@@ -156,7 +159,8 @@ static int bringup(bool with_mic)
 	if (grc != 0) return 4;
 	k_usleep(TAS2563_RESET_SETTLE_US);
 
-	s.bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = EVK_I2C_BUS_SENSORS, .bitrate_hz = 100000u });
+	s.bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = EVK_I2C_BUS_SENSORS, .bitrate_hz = 100000u });
 	printk("[snd] 5 alp_i2c_open(bus %d) -> %s\n", (int)EVK_I2C_BUS_SENSORS, s.bus ? "ok" : "NULL");
 	if (s.bus == NULL) return 5;
 
@@ -166,8 +170,13 @@ static int bringup(bool with_mic)
 		if (rc != ALP_OK) return 6;
 	}
 	const alp_i2s_config_t i2s = {
-		.bus_id = 0, .direction = ALP_I2S_DIR_TX, .sample_rate_hz = RATE, .channels = 2,
-		.word_bits = 16, .format = ALP_I2S_FMT_I2S, .block_frames = BLOCK,
+		.bus_id         = 0,
+		.direction      = ALP_I2S_DIR_TX,
+		.sample_rate_hz = RATE,
+		.channels       = 2,
+		.word_bits      = 16,
+		.format         = ALP_I2S_FMT_I2S,
+		.block_frames   = BLOCK,
 	};
 	for (unsigned i = 0; i < AMP_COUNT; i++) {
 		rc = tas2563_set_amp_level(&s.amps[i], TAS2563_AMP_LEVEL_MIN);
@@ -179,8 +188,11 @@ static int bringup(bool with_mic)
 		 * (sound/amp_regs_example.h), after the driver's own config. */
 		size_t bad = 0;
 		rc         = tas2563_load_tuning(&s.amps[i], k_amp_regs, ARRAY_SIZE(k_amp_regs), &bad);
-		printk("[snd] 7b amp 0x%02x %u override writes -> %d (record %u)\n", amp_addrs[i],
-		       (unsigned)ARRAY_SIZE(k_amp_regs), (int)rc, (unsigned)bad);
+		printk("[snd] 7b amp 0x%02x %u override writes -> %d (record %u)\n",
+		       amp_addrs[i],
+		       (unsigned)ARRAY_SIZE(k_amp_regs),
+		       (int)rc,
+		       (unsigned)bad);
 		if (rc != ALP_OK) return 7;
 		s_amp_overrides = ARRAY_SIZE(k_amp_regs);
 #endif
@@ -189,17 +201,22 @@ static int bringup(bool with_mic)
 	if (with_mic) {
 		/* Opened here, STARTED only right before the first read: the
 		 * backend's slab holds 4 blocks (64 ms) and an overrun is sticky. */
-		s.mic = alp_audio_in_open(&(alp_audio_config_t){ .peripheral_id = 0, .sample_rate_hz = 48000u,
-		                                                 .channels = 2, .format = ALP_AUDIO_FMT_S16_LE,
+		s.mic = alp_audio_in_open(&(alp_audio_config_t){ .peripheral_id    = 0,
+		                                                 .sample_rate_hz   = 48000u,
+		                                                 .channels         = 2,
+		                                                 .format           = ALP_AUDIO_FMT_S16_LE,
 		                                                 .frames_per_block = 768u });
-		rc = s.mic ? ALP_OK : alp_last_error();
+		rc    = s.mic ? ALP_OK : alp_last_error();
 		printk("[snd] 8 PDM open (48 kHz stereo) -> %d\n", (int)rc);
 		if (rc != ALP_OK) return 8;
 	}
 
-	s.spk = alp_audio_out_open(&(alp_audio_config_t){ .peripheral_id = 0, .sample_rate_hz = RATE, .channels = 2,
-	                                                  .format = ALP_AUDIO_FMT_S16_LE, .frames_per_block = BLOCK });
-	rc = s.spk ? alp_audio_out_set_volume(s.spk, TR_SND_VOLUME) : alp_last_error();
+	s.spk = alp_audio_out_open(&(alp_audio_config_t){ .peripheral_id    = 0,
+	                                                  .sample_rate_hz   = RATE,
+	                                                  .channels         = 2,
+	                                                  .format           = ALP_AUDIO_FMT_S16_LE,
+	                                                  .frames_per_block = BLOCK });
+	rc    = s.spk ? alp_audio_out_set_volume(s.spk, TR_SND_VOLUME) : alp_last_error();
 	if (rc == ALP_OK) rc = alp_audio_out_start(s.spk);
 	printk("[snd] 9 I2S3 open + volume %u + start -> %d\n", TR_SND_VOLUME, (int)rc);
 	if (rc != ALP_OK) return 9;
@@ -211,13 +228,17 @@ static int bringup(bool with_mic)
 	 * time before any amp wakes. */
 	memset(s_mono, 0, sizeof(s_mono));
 	uint32_t t_clk = k_uptime_get_32();
-	rc = ALP_OK;
+	rc             = ALP_OK;
 	for (unsigned b = 0; b < CLOCK_CHECK_BLOCKS && rc == ALP_OK; b++) {
 		rc = out_block(s_mono);
 	}
 	uint32_t clk_ms = k_uptime_get_32() - t_clk;
-	printk("[snd] 10 %u silent blocks -> %d in %u ms (expect %u..%u)\n", CLOCK_CHECK_BLOCKS, (int)rc,
-	       (unsigned)clk_ms, CLOCK_CHECK_MIN_MS, CLOCK_CHECK_MAX_MS);
+	printk("[snd] 10 %u silent blocks -> %d in %u ms (expect %u..%u)\n",
+	       CLOCK_CHECK_BLOCKS,
+	       (int)rc,
+	       (unsigned)clk_ms,
+	       CLOCK_CHECK_MIN_MS,
+	       CLOCK_CHECK_MAX_MS);
 	if (rc != ALP_OK || clk_ms < CLOCK_CHECK_MIN_MS || clk_ms > CLOCK_CHECK_MAX_MS) {
 		printk("[snd] I2S3 is not consuming blocks at %u Hz: no bit clock. Is ZEPHYR_BASE's "
 		       "clock_control_alif.c patched (alp-sdk zephyr/patches/zephyr/0001)?\n",
@@ -314,7 +335,8 @@ static void mic_block(bool keep)
 		}
 		memset(buf, 0, sizeof(buf));
 	}
-	if (keep && TR_SND_CAPTURE_ADDR + CAP_HDR_BYTES + (s_cap_frames + MIC_BLOCK) * 2u <= CAP_LIMIT) {
+	if (keep &&
+	    TR_SND_CAPTURE_ADDR + CAP_HDR_BYTES + (s_cap_frames + MIC_BLOCK) * 2u <= CAP_LIMIT) {
 		for (unsigned i = 0; i < MIC_BLOCK; i++) {
 			s_cap[s_cap_frames + i] = buf[2u * i];
 		}
@@ -365,7 +387,9 @@ static int run_test(void)
 	s_cap_hdr[2]  = 1u;
 	s_cap_hdr[4]  = SND_WINDOWS;
 	s_cap_hdr[10] = TR_AUDIO_RATE;
-	s_cap_hdr[11] = 0x100u | (TR_AUDIO_V3 ? 3u : TR_AUDIO_V2 ? 2u : 1u); /* 0x100: round-3 encoding */
+	s_cap_hdr[11] = 0x100u | (TR_AUDIO_V3   ? 3u
+	                          : TR_AUDIO_V2 ? 2u
+	                                        : 1u); /* 0x100: round-3 encoding */
 	s_cap_hdr[12] = TR_SND_VOLUME;
 	s_cap_hdr[13] = s_amp_overrides;
 
@@ -403,11 +427,12 @@ static int run_test(void)
 			mic_block(true);
 		}
 		volatile uint32_t *rec = &s_cap_hdr[16u + 5u * w];
-		rec[0] = sw->type | (uint32_t)sw->kind << 8 | (uint32_t)sw->param << 16 | (uint32_t)(sw->hz / 10u) << 24;
-		rec[1] = s_cap_frames - win_base[w];
-		rec[2] = amp_faults(0);
-		rec[3] = amp_faults(1);
-		rec[4] = max;
+		rec[0]                 = sw->type | (uint32_t)sw->kind << 8 | (uint32_t)sw->param << 16 |
+		                         (uint32_t)(sw->hz / 10u) << 24;
+		rec[1]                 = s_cap_frames - win_base[w];
+		rec[2]                 = amp_faults(0);
+		rec[3]                 = amp_faults(1);
+		rec[4]                 = max;
 	}
 	uint32_t ms = k_uptime_get_32() - t0;
 	teardown();
@@ -420,40 +445,67 @@ static int run_test(void)
 		s_cap_hdr[0] = CAP_MAGIC;
 	}
 
-	printk("[snd] played %u ms of %u, %u write failures, %u mic read failures (%u restarts), clipped %u, "
+	printk("[snd] played %u ms of %u, %u write failures, %u mic read failures (%u restarts), "
+	       "clipped %u, "
 	       "limited %u\n",
-	       (unsigned)ms, (unsigned)want_ms, (unsigned)writes_failed, (unsigned)s_mic_errors,
-	       (unsigned)s_mic_restarts, (unsigned)tr_audio_clipped(), (unsigned)tr_audio_limited());
-	printk("[snd] synth %u Hz V%u, budget %u cycles per 16 ms block\n", TR_AUDIO_RATE,
-	       TR_AUDIO_V3 ? 3u : TR_AUDIO_V2 ? 2u : 1u,
+	       (unsigned)ms,
+	       (unsigned)want_ms,
+	       (unsigned)writes_failed,
+	       (unsigned)s_mic_errors,
+	       (unsigned)s_mic_restarts,
+	       (unsigned)tr_audio_clipped(),
+	       (unsigned)tr_audio_limited());
+	printk("[snd] synth %u Hz V%u, budget %u cycles per 16 ms block\n",
+	       TR_AUDIO_RATE,
+	       TR_AUDIO_V3   ? 3u
+	       : TR_AUDIO_V2 ? 2u
+	                     : 1u,
 	       (unsigned)((uint64_t)sys_clock_hw_cycles_per_sec() * SND_BLOCK_MS / 1000u));
 	for (unsigned w = 0; w < SND_WINDOWS; w++) {
 		float rms = 0, bin = 0;
 		if (TR_SND_MIC) {
-			win_stats(win_base[w], s_cap_hdr[16u + 5u * w + 1u],
-			          snd_windows[w].type == SND_W_TONE ? snd_windows[w].hz : 1000u, &rms, &bin);
+			win_stats(win_base[w],
+			          s_cap_hdr[16u + 5u * w + 1u],
+			          snd_windows[w].type == SND_W_TONE ? snd_windows[w].hz : 1000u,
+			          &rms,
+			          &bin);
 		}
 		printk("[snd] %-15s mic rms %8.1f bin %.3e  faults 0x4d %08x 0x4e %08x  synth max %u cyc\n",
-		       snd_windows[w].name, (double)rms, (double)bin, (unsigned)s_cap_hdr[16u + 5u * w + 2u],
-		       (unsigned)s_cap_hdr[16u + 5u * w + 3u], (unsigned)s_cap_hdr[16u + 5u * w + 4u]);
+		       snd_windows[w].name,
+		       (double)rms,
+		       (double)bin,
+		       (unsigned)s_cap_hdr[16u + 5u * w + 2u],
+		       (unsigned)s_cap_hdr[16u + 5u * w + 3u],
+		       (unsigned)s_cap_hdr[16u + 5u * w + 4u]);
 	}
 
 	if (!TR_SND_MIC) {
 		bool ok = writes_failed <= SND_MAX_FAILS && ms <= want_ms + want_ms / 10u;
-		printk("[snd] RESULT %s (play-only): %s\n", ok ? "PASS" : "FAIL",
-		       ok ? "I2S3 streamed in real time; listen for each effect" : "I2S3 did not stream in real time");
+		printk("[snd] RESULT %s (play-only): %s\n",
+		       ok ? "PASS" : "FAIL",
+		       ok ? "I2S3 streamed in real time; listen for each effect"
+		          : "I2S3 did not stream in real time");
 		return 0;
 	}
 	/* snd_verdict.h's three windows: silence, the -12 dBFS 1 kHz tone, music
 	 * (one mic, so channel 1 stays dead and is skipped). */
 	snd_stats_t st = {
-		.frames = s_cap_frames, .want_frames = (want_blocks - PREROLL_BLOCKS) * MIC_BLOCK,
-		.write_fail = writes_failed, .mic_fail = s_mic_errors, .played_ms = ms, .want_ms = want_ms,
+		.frames      = s_cap_frames,
+		.want_frames = (want_blocks - PREROLL_BLOCKS) * MIC_BLOCK,
+		.write_fail  = writes_failed,
+		.mic_fail    = s_mic_errors,
+		.played_ms   = ms,
+		.want_ms     = want_ms,
 	};
-	const unsigned k_vw[3] = { snd_window_of(SND_W_SILENCE), snd_window_of(SND_W_TONE),
-	                           snd_window_of(SND_W_MUSIC) }; /* silence, tone1k_-12dBFS, music */
+	const unsigned k_vw[3] = { snd_window_of(SND_W_SILENCE),
+		                       snd_window_of(SND_W_TONE),
+		                       snd_window_of(SND_W_MUSIC) }; /* silence, tone1k_-12dBFS, music */
 	for (unsigned k = 0; k < 3u; k++) {
-		win_stats(win_base[k_vw[k]], s_cap_hdr[16u + 5u * k_vw[k] + 1u], 1000u, &st.rms[k][0], &st.bin[k][0]);
+		win_stats(win_base[k_vw[k]],
+		          s_cap_hdr[16u + 5u * k_vw[k] + 1u],
+		          1000u,
+		          &st.rms[k][0],
+		          &st.bin[k][0]);
 	}
 	const char *why = snd_verdict(&st);
 	if (why == NULL) {
@@ -523,7 +575,9 @@ static int run_game(void)
 int main(void)
 {
 	(void)alp_init();
-	printk("[snd] Trace Runner sound (%s), %u Hz, volume %u\n", TR_SND_TEST ? "TEST" : "GAME", RATE,
+	printk("[snd] Trace Runner sound (%s), %u Hz, volume %u\n",
+	       TR_SND_TEST ? "TEST" : "GAME",
+	       RATE,
 	       TR_SND_VOLUME);
 #if TR_SND_TEST
 	return run_test();

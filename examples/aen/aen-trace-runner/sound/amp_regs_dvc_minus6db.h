@@ -11,7 +11,10 @@
  * Why: moves 6 dB of headroom INSIDE the amp (after its RX path), where
  * TR_SND_VOLUME moves it before I2S. If the harshness goes away with this
  * and not with a synth change, the amp's DSP/output stage was overdriven. */
-#define TR_SND_AMP_REGS                                                                                      \
-	{                                                                                                        \
-		{ 0, 2, 0x0C, 0x20 }, { 0, 2, 0x0D, 0x00 }, { 0, 2, 0x0E, 0x00 }, { 0, 2, 0x0F, 0x00 },              \
+#define TR_SND_AMP_REGS \
+	{ \
+		{ 0, 2, 0x0C, 0x20 }, \
+		{ 0, 2, 0x0D, 0x00 }, \
+		{ 0, 2, 0x0E, 0x00 }, \
+		{ 0, 2, 0x0F, 0x00 }, \
 	}

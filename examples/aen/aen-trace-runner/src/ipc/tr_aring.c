@@ -30,8 +30,8 @@ bool tr_aring_push(volatile tr_aring_t *r, uint8_t kind, uint8_t param, void (*b
 		return false;
 	}
 	volatile tr_aev_t *e = &r->ev[h & (TR_ARING_CAP - 1u)];
-	e->kind  = kind;
-	e->param = param;
+	e->kind              = kind;
+	e->param             = param;
 	barrier(); /* slot visible before the head bump advertises it */
 	r->head = h + 1u;
 	barrier();
@@ -55,10 +55,10 @@ bool tr_aring_pop(volatile tr_aring_t *r, tr_aev_t *out, void (*barrier)(void))
 	}
 	barrier(); /* head read before the slot read */
 	volatile tr_aev_t *e = &r->ev[t & (TR_ARING_CAP - 1u)];
-	out->kind  = e->kind;
-	out->param = e->param;
-	out->pad0  = 0u;
-	out->pad1  = 0u;
+	out->kind            = e->kind;
+	out->param           = e->param;
+	out->pad0            = 0u;
+	out->pad1            = 0u;
 	barrier(); /* slot read before the tail bump frees it */
 	r->tail = t + 1u;
 	return true;

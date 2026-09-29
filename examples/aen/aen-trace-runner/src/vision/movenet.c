@@ -47,7 +47,9 @@ void tr_movenet_input_rot(const uint8_t *grey, int16_t src_w, int16_t src_h, int
 	int32_t cx0[TR_MN_IN], cx1[TR_MN_IN];
 
 	for (int c = 0; c < TR_MN_IN; c++) {
-		int ux = c < padx ? 0 : (c - padx) * m / TR_MN_IN; /* padding columns: never read, kept in range */
+		int ux = c < padx
+		             ? 0
+		             : (c - padx) * m / TR_MN_IN; /* padding columns: never read, kept in range */
 		int u1 = ux + 1 < uw ? ux + 1 : ux;
 
 		tr_cam_rot_src(rot, src_w, src_h, ux, 0, &sx, &sy);
@@ -116,23 +118,30 @@ void tr_movenet_decode(const tr_movenet_out_t *o, int16_t frame_w, int16_t frame
 
 	/* The letterbox tr_movenet_input_rot() applied: the long side fills the
 	 * square, the short one is padded both sides (1/16 input px). */
-	int32_t m     = frame_w > frame_h ? frame_w : frame_h;
+	int32_t m      = frame_w > frame_h ? frame_w : frame_h;
 	int32_t padx16 = (TR_MN_IN - (int32_t)frame_w * TR_MN_IN / m) * 16 / 2;
 	int32_t pady16 = (TR_MN_IN - (int32_t)frame_h * TR_MN_IN / m) * 16 / 2;
 
 	for (int k = 0; k < TR_POSE_KP; k++) {
 		/* 2. First guess from the centre's regression, 1/16 cell. */
-		int32_t ry = (ci / TR_MN_GRID) * 16 + q16th(o->regress[ci * 34 + 2 * k], TR_MN_REG_ZP, TR_MN_REG_SCALE);
-		int32_t rx = (ci % TR_MN_GRID) * 16 + q16th(o->regress[ci * 34 + 2 * k + 1], TR_MN_REG_ZP, TR_MN_REG_SCALE);
+		int32_t ry = (ci / TR_MN_GRID) * 16 +
+		             q16th(o->regress[ci * 34 + 2 * k], TR_MN_REG_ZP, TR_MN_REG_SCALE);
+		int32_t rx = (ci % TR_MN_GRID) * 16 +
+		             q16th(o->regress[ci * 34 + 2 * k + 1], TR_MN_REG_ZP, TR_MN_REG_SCALE);
 
 		/* 3. argmax of heat / (distance + 1.8), distance in 1/16 cell
 		 * (1.8 cells = 29/16), first maximum on ties. Seeded with the cell
 		 * under the guess -- nearly always a strong candidate -- so the
 		 * skip below (a heat that could not win even at distance 0) spares
 		 * almost every cell its square root and divide. */
-		int32_t  gy   = (ry + 8) / 16, gx = (rx + 8) / 16;
-		int      bj   = (gy < 0 ? 0 : gy > TR_MN_GRID - 1 ? TR_MN_GRID - 1 : gy) * TR_MN_GRID +
-			    (gx < 0 ? 0 : gx > TR_MN_GRID - 1 ? TR_MN_GRID - 1 : gx);
+		int32_t  gy = (ry + 8) / 16, gx = (rx + 8) / 16;
+		int      bj   = (gy < 0                ? 0
+		                 : gy > TR_MN_GRID - 1 ? TR_MN_GRID - 1
+		                                       : gy) *
+		                    TR_MN_GRID +
+		                (gx < 0                ? 0
+		                 : gx > TR_MN_GRID - 1 ? TR_MN_GRID - 1
+		                                       : gx);
 		uint32_t best = score_at(o, k, bj, ry, rx);
 		/* (h << 16) / 29u < best, algebraically, for non-negative integer
 		 * division: a/29 < b  <=>  a < 29*b (a/29 floors, so a/29 <= b-1
@@ -166,8 +175,10 @@ void tr_movenet_decode(const tr_movenet_out_t *o, int16_t frame_w, int16_t frame
 		}
 
 		/* 4. Cell + sub-cell offset -> 192-square px (4 per cell) -> frame px. */
-		int32_t y16 = (bj / TR_MN_GRID) * 16 + q16th(o->offset[bj * 34 + 2 * k], TR_MN_OFF_ZP, TR_MN_OFF_SCALE);
-		int32_t x16 = (bj % TR_MN_GRID) * 16 + q16th(o->offset[bj * 34 + 2 * k + 1], TR_MN_OFF_ZP, TR_MN_OFF_SCALE);
+		int32_t y16 = (bj / TR_MN_GRID) * 16 +
+		              q16th(o->offset[bj * 34 + 2 * k], TR_MN_OFF_ZP, TR_MN_OFF_SCALE);
+		int32_t x16 = (bj % TR_MN_GRID) * 16 +
+		              q16th(o->offset[bj * 34 + 2 * k + 1], TR_MN_OFF_ZP, TR_MN_OFF_SCALE);
 		int32_t h   = o->heat[bj * TR_POSE_KP + k] + 128;
 
 		/* x16 * 4 = 1/16 input px; (input px - pad) * m / 192 = frame px. */

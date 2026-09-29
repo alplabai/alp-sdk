@@ -12,7 +12,7 @@
 #include <stdint.h>
 
 #include "../game/panel_hz.h" /* TR_PANEL_PERIOD_US: one refresh */
-#include "tr_mbox.h"           /* TR_FB_A, TR_FB_B */
+#include "tr_mbox.h"          /* TR_FB_A, TR_FB_B */
 
 /* A landed flip later than 1.5 refreshes after the previous one missed a vblank. */
 #define TR_OVERRUN_GAP_US (TR_PANEL_PERIOD_US + TR_PANEL_PERIOD_US / 2u)
@@ -46,7 +46,9 @@ uint32_t tr_flip_hist_bucket(uint64_t gap_us);
 /* Call just BEFORE tr_flip_pace_landed(p, now_us): counts the interval since
  * the previous landed flip into hist[] and *total, unless there is none
  * (first flip, or a tr_flip_pace_reset() -- a ui_hold -- in between). */
-void tr_flip_hist_note(const tr_flip_pace_t *p, uint64_t now_us, volatile uint32_t hist[TR_FLIP_HIST_N],
-		       volatile uint32_t *total);
+void tr_flip_hist_note(const tr_flip_pace_t *p,
+                       uint64_t              now_us,
+                       volatile uint32_t     hist[TR_FLIP_HIST_N],
+                       volatile uint32_t    *total);
 
 #endif /* TR_FLIP_H */

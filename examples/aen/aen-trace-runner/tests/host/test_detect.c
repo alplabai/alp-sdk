@@ -17,8 +17,8 @@
  * no-op (fix round 1, finding 1), since a no-op bleed never heals at all. */
 #define GHOST_HEAL_MAX 600
 
-static uint8_t       g_frame[FW * FH];
-static tr_detect_t   s_detect; /* file-scope static: see detect.h's comment on
+static uint8_t     g_frame[FW * FH];
+static tr_detect_t s_detect; /* file-scope static: see detect.h's comment on
                                  * sizeof(tr_detect_t) -- this is the pattern
                                  * Task 9 must copy into src/main.c, never a
                                  * plain local. */
@@ -223,7 +223,8 @@ int main(void)
 	b = tr_detect_frame(&s_detect, g_frame, sizeof(g_frame));
 	assert(!b.valid);
 
-	assert(tr_detect_init(&s_detect, FW, FH, 1) != 0); /* 640*400 grid, way over TR_DETECT_GRID_MAX */
+	assert(tr_detect_init(&s_detect, FW, FH, 1) !=
+	       0); /* 640*400 grid, way over TR_DETECT_GRID_MAX */
 	b = tr_detect_frame(&s_detect, g_frame, sizeof(g_frame));
 	assert(!b.valid);
 
@@ -257,7 +258,7 @@ int main(void)
 	draw_block(450, 150, 60, 100); /* other: peak 10 cols, grid cols 45-50 */
 	b = feed(&s_detect, 1);
 	assert(b.valid);
-	assert(b.x >= 180 && b.x <= 210);            /* on the dominant block, not the gap */
+	assert(b.x >= 180 && b.x <= 210);             /* on the dominant block, not the gap */
 	assert(b.x + b.w >= 270 && b.x + b.w <= 300); /* right edge stays inside it too */
 	int centre_x = b.x + b.w / 2;
 	assert(centre_x < 280 || centre_x > 450); /* never in the 280..450 gap between the two */
@@ -292,7 +293,7 @@ int main(void)
 	fill_bg();
 	assert(tr_detect_init(&s_detect, FW, FH, 10) == 0);
 	feed(&s_detect, 3);
-	draw_block(100, 0, 100, 350); /* dominant, off-centre: grid cols 10-19, peak 35 */
+	draw_block(100, 0, 100, 350);  /* dominant, off-centre: grid cols 10-19, peak 35 */
 	draw_block(300, 150, 40, 100); /* small, near centre: grid cols 30-33, peak 10 */
 	b = feed(&s_detect, 1);
 	assert(b.valid);
@@ -341,8 +342,8 @@ int main(void)
 	draw_block(400, 0, 200, 20);   /* short & wide, elsewhere: grid cols 40-59, rows 0-1 */
 	b = feed(&s_detect, 1);
 	assert(b.valid);
-	assert(b.y >= 90 && b.y <= 110);   /* not dragged up to the wide blob's rows */
-	assert(b.h >= 230 && b.h <= 270);  /* not stretched to include them */
+	assert(b.y >= 90 && b.y <= 110);  /* not dragged up to the wide blob's rows */
+	assert(b.h >= 230 && b.h <= 270); /* not stretched to include them */
 
 	/*
 	 * ---- Subject review round 1 ----
@@ -374,9 +375,9 @@ int main(void)
 	fill_bg();
 	assert(tr_detect_init(&s_detect, FW, FH, 10) == 0);
 	feed(&s_detect, 3);
-	draw_block(80, 80, 80, 320);    /* A: peak 32, grid cols 8-15 */
-	draw_block(160, 330, 80, 70);   /* valley: peak 7, grid cols 16-23 */
-	draw_block(240, 200, 80, 200);  /* B: peak 20, grid cols 24-31 (62% of A) */
+	draw_block(80, 80, 80, 320);   /* A: peak 32, grid cols 8-15 */
+	draw_block(160, 330, 80, 70);  /* valley: peak 7, grid cols 16-23 */
+	draw_block(240, 200, 80, 200); /* B: peak 20, grid cols 24-31 (62% of A) */
 	b = feed(&s_detect, 1);
 	assert(b.valid);
 	assert(b.x >= 230 && b.x <= 250); /* B, not the phantom span 80..319 */

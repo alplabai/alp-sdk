@@ -54,7 +54,8 @@ enum {
 #define TR_STILL_TOL_PCT 15
 
 typedef struct {
-	int16_t x, y;  /* UPRIGHT camera frame px (cam_rot.h: 400x640 with the sensor on its side, 640x400 at 0) */
+	int16_t x,
+	    y; /* UPRIGHT camera frame px (cam_rot.h: 400x640 with the sensor on its side, 640x400 at 0) */
 	uint8_t score; /* 0..255 */
 } tr_kp_t;
 

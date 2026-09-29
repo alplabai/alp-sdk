@@ -33,14 +33,16 @@ static tr_pose_t figure(int cx, int top, int feet)
 		int8_t  dx;
 		uint8_t fy;
 	} body[TR_POSE_KP] = {
-		{ 0, 7 },    { 4, 5 },    { -4, 5 },   { 8, 6 },    { -8, 6 },   { 25, 20 },
-		{ -25, 20 }, { 30, 35 },  { -30, 35 }, { 30, 48 },  { -30, 48 }, { 15, 52 },
-		{ -15, 52 }, { 15, 75 },  { -15, 75 }, { 15, 100 }, { -15, 100 },
+		{ 0, 7 },    { 4, 5 },   { -4, 5 },   { 8, 6 },    { -8, 6 },    { 25, 20 },
+		{ -25, 20 }, { 30, 35 }, { -30, 35 }, { 30, 48 },  { -30, 48 },  { 15, 52 },
+		{ -15, 52 }, { 15, 75 }, { -15, 75 }, { 15, 100 }, { -15, 100 },
 	};
 	tr_pose_t p;
 
 	for (int k = 0; k < TR_POSE_KP; k++) {
-		p.kp[k] = (tr_kp_t){ (int16_t)(cx + body[k].dx), (int16_t)(top + (feet - top) * body[k].fy / 100), 200 };
+		p.kp[k] = (tr_kp_t){ (int16_t)(cx + body[k].dx),
+			                 (int16_t)(top + (feet - top) * body[k].fy / 100),
+			                 200 };
 	}
 	return p;
 }
@@ -76,7 +78,7 @@ static void settle(tr_kp_smooth_t *s, tr_track_t *t, tr_pose_t stand, int frames
 static int frames_to(tr_kp_smooth_t *s, tr_track_t *t, tr_pose_t target, int want)
 {
 	for (int i = 0; i < 10; i++) {
-		tr_pose_t   p  = jitter(target, 5);
+		tr_pose_t   p = jitter(target, 5);
 		tr_intent_t in;
 
 		tr_kp_smooth_step(s, &p, DT_MS);
@@ -118,8 +120,12 @@ int main(void)
 		}
 		double raw = sqrt(raw2 / n), sm = sqrt(sm2 / n);
 
-		printf("kp_smooth: standing jitter RMS %.2f px raw -> %.2f px smoothed (%.0f %%), %d stray intents\n", raw, sm,
-		       100.0 * sm / raw, intents);
+		printf("kp_smooth: standing jitter RMS %.2f px raw -> %.2f px smoothed (%.0f %%), %d stray "
+		       "intents\n",
+		       raw,
+		       sm,
+		       100.0 * sm / raw,
+		       intents);
 		assert(sm <= 0.6 * raw && intents == 0);
 	}
 
@@ -128,12 +134,14 @@ int main(void)
 		int f;
 
 		settle(&s, &t, stand, 40);
-		f = frames_to(&s, &t, figure(UW / 2, 100 - 100, 600 - 100), 0); /* jump: body up 20 % of stance */
+		f = frames_to(
+		    &s, &t, figure(UW / 2, 100 - 100, 600 - 100), 0); /* jump: body up 20 % of stance */
 		printf("kp_smooth: jump registers %d frame(s) after the step\n", f);
 		assert(f <= 1);
 
 		settle(&s, &t, stand, 40);
-		f = frames_to(&s, &t, figure(UW / 2, 100 + 100, 600 + 100), 1); /* duck: torso 100 px down */
+		f = frames_to(
+		    &s, &t, figure(UW / 2, 100 + 100, 600 + 100), 1); /* duck: torso 100 px down */
 		printf("kp_smooth: duck registers %d frame(s) after the step\n", f);
 		assert(f <= 1);
 
@@ -153,7 +161,10 @@ int main(void)
 		for (int i = 0; i < 3; i++) {
 			p = up;
 			tr_kp_smooth_step(&s, &p, DT_MS);
-			printf("kp_smooth: step frame %d nose y %d (target %d)\n", i, p.kp[TR_KP_NOSE].y, up.kp[TR_KP_NOSE].y);
+			printf("kp_smooth: step frame %d nose y %d (target %d)\n",
+			       i,
+			       p.kp[TR_KP_NOSE].y,
+			       up.kp[TR_KP_NOSE].y);
 		}
 		assert(abs(p.kp[TR_KP_NOSE].y - up.kp[TR_KP_NOSE].y) <= 3);
 	}
@@ -168,18 +179,22 @@ int main(void)
 			tr_kp_smooth_step(&s, &p, DT_MS);
 		}
 		for (int i = 0; i < 3; i++) {
-			p                  = stand;
-			p.kp[TR_KP_LSHO] = (tr_kp_t){ 0, 0, TR_POSE_KP_MIN - 1 }; /* an unsure decode, far off */
+			p = stand;
+			p.kp[TR_KP_LSHO] =
+			    (tr_kp_t){ 0, 0, TR_POSE_KP_MIN - 1 }; /* an unsure decode, far off */
 			tr_kp_smooth_step(&s, &p, DT_MS);
-			assert(p.kp[TR_KP_LSHO].x == stand.kp[TR_KP_LSHO].x && p.kp[TR_KP_LSHO].y == stand.kp[TR_KP_LSHO].y);
-			assert(p.kp[TR_KP_LSHO].score == TR_POSE_KP_MIN - 1); /* still unsure to every consumer */
+			assert(p.kp[TR_KP_LSHO].x == stand.kp[TR_KP_LSHO].x &&
+			       p.kp[TR_KP_LSHO].y == stand.kp[TR_KP_LSHO].y);
+			assert(p.kp[TR_KP_LSHO].score ==
+			       TR_POSE_KP_MIN - 1); /* still unsure to every consumer */
 		}
 		p = stand;
 		tr_kp_smooth_step(&s, &p, DT_MS); /* back: no jump */
-		assert(p.kp[TR_KP_LSHO].x == stand.kp[TR_KP_LSHO].x && p.kp[TR_KP_LSHO].y == stand.kp[TR_KP_LSHO].y);
+		assert(p.kp[TR_KP_LSHO].x == stand.kp[TR_KP_LSHO].x &&
+		       p.kp[TR_KP_LSHO].y == stand.kp[TR_KP_LSHO].y);
 
 		for (int i = 0; i <= TR_KS_HOLD_MAX; i++) {
-			p                  = stand;
+			p                = stand;
 			p.kp[TR_KP_LSHO] = (tr_kp_t){ 0, 0, 10 };
 			tr_kp_smooth_step(&s, &p, DT_MS);
 		}
@@ -187,10 +202,11 @@ int main(void)
 		p                  = stand;
 		p.kp[TR_KP_LSHO].x = 300;
 		tr_kp_smooth_step(&s, &p, DT_MS);
-		assert(p.kp[TR_KP_LSHO].x == 300); /* re-seeded from raw, not dragged from the old position */
+		assert(p.kp[TR_KP_LSHO].x ==
+		       300); /* re-seeded from raw, not dragged from the old position */
 
-		p          = stand;
-		p.kp[0].y  = 400;
+		p         = stand;
+		p.kp[0].y = 400;
 		tr_kp_smooth_step(&s, &p, TR_KS_DT_MAX + 1u); /* stalled stream */
 		assert(p.kp[0].y == 400);
 		printf("kp_smooth: unsure held, gone re-seeded, stall re-seeded\n");

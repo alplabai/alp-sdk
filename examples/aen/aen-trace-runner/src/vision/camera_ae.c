@@ -38,8 +38,12 @@ uint8_t tr_ae_meter(const uint8_t *grey, int w, int h)
 
 /* The (exposure, gain) pair for a total (lines x gain register): exposure
  * alone up to its ceiling at 1x, then the largest gain not above the rest. */
-static void split_total(uint32_t total, uint16_t exp_min, uint16_t exp_max, uint8_t gain_idx_max, uint16_t *exp,
-			uint8_t *gain_idx)
+static void split_total(uint32_t  total,
+                        uint16_t  exp_min,
+                        uint16_t  exp_max,
+                        uint8_t   gain_idx_max,
+                        uint16_t *exp,
+                        uint8_t  *gain_idx)
 {
 	*gain_idx = 0;
 	if (total <= (uint32_t)exp_max * TR_AE_GAIN_UNITY) {
@@ -54,7 +58,11 @@ static void split_total(uint32_t total, uint16_t exp_min, uint16_t exp_max, uint
 	}
 }
 
-bool tr_ae_step(tr_ae_t *ae, uint8_t mean, uint16_t exposure_min, uint16_t exposure_max, uint8_t gain_idx_max)
+bool tr_ae_step(tr_ae_t *ae,
+                uint8_t  mean,
+                uint16_t exposure_min,
+                uint16_t exposure_max,
+                uint8_t  gain_idx_max)
 {
 	if (ae->settle != 0u) {
 		ae->settle--; /* this frame was exposed (partly) before the last write */

@@ -16,8 +16,12 @@ static unsigned emit(tr_aev_t *out, unsigned n, uint8_t kind, uint8_t param)
 	return n + 1u;
 }
 
-unsigned tr_sfx_watch(tr_sfx_watch_t *w, const tr_game_t *g, uint8_t combo, bool attract_on, int16_t track_h,
-		      tr_aev_t *out)
+unsigned tr_sfx_watch(tr_sfx_watch_t  *w,
+                      const tr_game_t *g,
+                      uint8_t          combo,
+                      bool             attract_on,
+                      int16_t          track_h,
+                      tr_aev_t        *out)
 {
 	unsigned n = 0;
 

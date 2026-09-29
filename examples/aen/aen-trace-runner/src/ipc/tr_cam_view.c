@@ -1,8 +1,14 @@
 /* src/ipc/tr_cam_view.c -- see tr_cam_view.h. Same shape as tr_pslot.c. */
 #include "tr_cam_view.h"
 
-void tr_cam_view_write(volatile tr_cam_view_t *s, uint32_t buf_addr, uint32_t frame_no, uint16_t width,
-			uint16_t height, uint16_t rotate, uint16_t mirror, void (*barrier)(void))
+void tr_cam_view_write(volatile tr_cam_view_t *s,
+                       uint32_t                buf_addr,
+                       uint32_t                frame_no,
+                       uint16_t                width,
+                       uint16_t                height,
+                       uint16_t                rotate,
+                       uint16_t                mirror,
+                       void (*barrier)(void))
 {
 	s->seq = s->seq + 1u; /* even -> odd */
 	barrier();

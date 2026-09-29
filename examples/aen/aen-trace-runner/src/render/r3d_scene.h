@@ -22,7 +22,8 @@
 #define TR_PARTICLES 32
 #define TR_SCARF_PTS 7 /* >= meshes.h TR_SCARF_MAX + 1 */
 #define TR_TILE_LEN  384
-#define TR_TILES     66 /* from z = -2 tiles (under the camera) out past r3d_scene.c GROUND_END 23,800 */
+#define TR_TILES \
+	66 /* from z = -2 tiles (under the camera) out past r3d_scene.c GROUND_END 23,800 */
 
 /* ponytail: calibration knobs, tune on glass. World units (lane 240,
  * runner depth TR_PROJ_Z_RUNNER 256), degrees, px. */
@@ -30,8 +31,8 @@
  * 360 back, pitch 19 -> 18, f 560 -> 600 -- the horizon stays (445 px, was
  * 447: the HUD band untouched), the runner's feet drop 821 -> 987 px (13 %
  * of the screen lower), its height stays 243 px, and more road shows ahead. */
-#define TR_CAM_EYE_H     400.0f
-#define TR_CAM_BACK      360.0f
+#define TR_CAM_EYE_H 400.0f
+#define TR_CAM_BACK  360.0f
 #ifndef TR_CAM_PITCH_DEG
 /* fix round 9: 18.0 -> 23.0 -- the collision ground_y (tr_runner_ground_y,
  * unmoved, r3d_scene.h/src/game/state.h) is the AVERAGE foot position, not
@@ -65,8 +66,8 @@
  * proportions every knob above was tuned at (600 px over the 853-row view
  * of fix round 9): at TR_VIEW_H 640 that is 450 px -- the same picture 3/4
  * the size, with a wider horizontal view. */
-#define TR_CAM_F_PX      (600.0f * (float)TR_VIEW_H / (float)TR_VIEW_TUNED_H)
-#define TR_CAM_BANK_DEG  5.0f
+#define TR_CAM_F_PX     (600.0f * (float)TR_VIEW_H / (float)TR_VIEW_TUNED_H)
+#define TR_CAM_BANK_DEG 5.0f
 /* The skyline (far layer) stands this far ahead of the eye, riding with it;
  * the board runs out to its foot (r3d_scene.c GROUND_END). */
 #define TR_SCENE_SKY_DZ 24000.0f
@@ -93,8 +94,8 @@
 
 typedef struct {
 	tr_v3_t pos, vel;
-	float   life; /* 40 Hz frames left at the game pace (fractional); <= 0 = free */
-	uint8_t col;  /* tr_r3d_palette index */
+	float   life;  /* 40 Hz frames left at the game pace (fractional); <= 0 = free */
+	uint8_t col;   /* tr_r3d_palette index */
 	uint8_t spark; /* crash spark: small, culled nearer than the runner */
 } tr_particle_t;
 
@@ -113,29 +114,29 @@ typedef struct {
 	/* The runner's pose this frame (r3d_rig.h channels) and the blend
 	 * weights of the jump / duck / crash poses over the run cycle and of the
 	 * landing squash, each easing 0 <-> 1 over a few frames. */
-	float         ch[TR_ANIM_CH];
-	float         w_jump, w_duck, w_crash, w_land;
-	float         jump_ch[TR_ANIM_CH]; /* the jump's pose where the air time left it */
-	float         squash;              /* runner scale_y: squash at contact, stretch in flight */
-	float         roll;                /* duck: forward-roll angle, radians (0 upright) */
-	float         crash_roll;          /* the roll angle a crash caught, -pi..pi (0: none) */
+	float ch[TR_ANIM_CH];
+	float w_jump, w_duck, w_crash, w_land;
+	float jump_ch[TR_ANIM_CH]; /* the jump's pose where the air time left it */
+	float squash;              /* runner scale_y: squash at contact, stretch in flight */
+	float roll;                /* duck: forward-roll angle, radians (0 upright) */
+	float crash_roll;          /* the roll angle a crash caught, -pi..pi (0: none) */
 	/* P16 character. chr: the character drawn (the packet's, validated);
 	 * t40: 40 Hz frames since init, wrapped every 256 s (the blink and
  * flutter clock); face: this frame's
 	 * eyes; yaw: extra instance yaw (a spin, facing the camera when idle);
 	 * w_idle: the idle stance's blend; w_react: the reaction layer's
 	 * weight this frame (0: none). */
-	uint8_t       chr;
-	float         t40;
-	tr_face_t     face;
-	float         yaw, w_idle, w_react;
+	uint8_t   chr;
+	float     t40;
+	tr_face_t face;
+	float     yaw, w_idle, w_react;
 	/* The scarf (P16): a verlet chain of scarf_n + 1 world points from the
 	 * back of the neck (sc[0] = the anchor), stepped at 120 Hz over each
 	 * frame's time; sc_prev the previous positions, sc_anchor last
 	 * frame's anchor (the sub-steps interpolate it). scarf_n 0: not laid
 	 * out yet (the first frame, a character change). */
-	uint8_t       scarf_n;
-	float         sc[TR_SCARF_PTS][3], sc_prev[TR_SCARF_PTS][3], sc_anchor[3];
+	uint8_t scarf_n;
+	float   sc[TR_SCARF_PTS][3], sc_prev[TR_SCARF_PTS][3], sc_anchor[3];
 } tr_scene_t;
 
 /* tr_scene_t.quality: cheaper frames on demand (bench A/B, the A32 renderer
@@ -176,7 +177,11 @@ void tr_scene_build(const tr_scene_t *s, const tr_frame_in_t *in, tr_cam_t *cam,
 #ifndef TR_SCENE_SPLIT_TILE
 #define TR_SCENE_SPLIT_TILE 20
 #endif
-void tr_scene_build_part(const tr_scene_t *s, const tr_frame_in_t *in, tr_cam_t *cam, tr_dl_t *dl, int part);
+void tr_scene_build_part(const tr_scene_t    *s,
+                         const tr_frame_in_t *in,
+                         tr_cam_t            *cam,
+                         tr_dl_t             *dl,
+                         int                  part);
 
 /* Band background for `cam`: the dithered sky of the frame's zone (on the
  * board: indigo -> magenta -> the horizon glow at the camera's horizon row),
@@ -247,7 +252,8 @@ typedef struct {
 	float   x0, y0, x1, y1;
 	uint8_t col;
 } tr_far_quad_t;
-extern const tr_far_quad_t tr_far_arch[3], tr_far_resistor[3], tr_far_post_low[2], tr_far_post_high[2];
+extern const tr_far_quad_t tr_far_arch[3], tr_far_resistor[3], tr_far_post_low[2],
+    tr_far_post_high[2];
 
 /* Height of the side hop on a lane change, world units (ponytail: tune on
  * glass). */
@@ -285,7 +291,8 @@ typedef struct {
  * 8,144 B) ~33 KB -- inside
  * the 64 KiB per-core stack (a32/renderer/start.S). Grow this and
  * re-measure; past ~40 KB deepest, make it a static per-core buffer. */
-_Static_assert(sizeof(tr_runner_draw_t) <= 24u * 1024u, "tr_runner_draw_t: the A32 build_part stack budget (see above)");
+_Static_assert(sizeof(tr_runner_draw_t) <= 24u * 1024u,
+               "tr_runner_draw_t: the A32 build_part stack budget (see above)");
 
 void tr_scene_runner(const tr_scene_t *s, const tr_frame_in_t *in, tr_runner_draw_t *r);
 
@@ -348,13 +355,18 @@ void tr_scene_arc(uint32_t seed, tr_v3_t a, tr_v3_t b, float bow, float amp, int
  * 1 (blinking) or 3 (chasing), led_on bit k = LED k lit now, led_lo: past the
  * LOD threshold (body top only). Animated from tick + sub-tick phase. */
 typedef struct {
-	uint32_t h;        /* the tile hash walls() picks the parts from: h & 7 = 3 QFP, 4 BGA */
-	tr_v3_t fan;       /* rotor + frame centre on the package top */
-	float   fan_yaw;   /* rotor angle now, radians */
-	float   frame_yaw; /* the package's twist */
-	tr_v3_t led;       /* first LED, on the board; a row goes on outward (away from the lanes) */
-	uint8_t n_led, led_col, led_on, led_lo;
+	uint32_t h;         /* the tile hash walls() picks the parts from: h & 7 = 3 QFP, 4 BGA */
+	tr_v3_t  fan;       /* rotor + frame centre on the package top */
+	float    fan_yaw;   /* rotor angle now, radians */
+	float    frame_yaw; /* the package's twist */
+	tr_v3_t  led;       /* first LED, on the board; a row goes on outward (away from the lanes) */
+	uint8_t  n_led, led_col, led_on, led_lo;
 } tr_deco_t;
-void tr_scene_deco(uint32_t tile, int side, float z0, uint8_t q, const tr_frame_in_t *in, tr_deco_t *d);
+void tr_scene_deco(uint32_t             tile,
+                   int                  side,
+                   float                z0,
+                   uint8_t              q,
+                   const tr_frame_in_t *in,
+                   tr_deco_t           *d);
 
 #endif /* TR_R3D_SCENE_H */

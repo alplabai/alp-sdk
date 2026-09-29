@@ -23,15 +23,15 @@
 
 /* The shield's timing (alp-sdk-lcd zephyr/boards/shields/e1m_evk_rk055hdmipi4ma0/
  * e1m_evk_rk055hdmipi4ma0.overlay, &cdc200). */
-#define W 720
-#define HSYNC 6
-#define HFP 12
-#define HBP 24
-#define H 1280
-#define VSYNC 2
-#define VFP 16
-#define VBP 14
-#define PCLK 40000000.0
+#define W         720
+#define HSYNC     6
+#define HFP       12
+#define HBP       24
+#define H         1280
+#define VSYNC     2
+#define VFP       16
+#define VBP       14
+#define PCLK      40000000.0
 #define SYST_ACLK 400000000.0
 
 /* `prop = <N>;` from the overlay, -1 if absent. */
@@ -57,18 +57,24 @@ static long overlay_prop(const char *path, const char *prop)
 static double timing(double pclk, int vfp)
 {
 	int    htotal = W + HSYNC + HFP + HBP, vtotal = H + VSYNC + vfp + VBP;
-	double hz     = pclk / ((double)htotal * vtotal);
+	double hz = pclk / ((double)htotal * vtotal);
 	/* dsi_dw.c non-burst lane rate: ((pkt*24/8 + 12)/pkt) * pclk * 8/lanes
 	 * + (32/lanes) * pclk / hactive, pkt = 720, 2 lanes, RGB888 link. */
 	double lane = ((W * 24.0 / 8.0 + 12.0) / W) * pclk * (8.0 / 2.0) + (32.0 / 2.0) * pclk / W;
 	double div  = SYST_ACLK / pclk;
 
-	assert(fabs(div - round(div)) < 1e-9 && div >= 2.0 && div <= 511.0); /* mipi_display_e8.c BUILD_ASSERTs */
-	assert(lane <= 500e6);                     /* panel-max-lane-bandwidth: the 2-lane ceiling */
-	assert(vfp <= 1023);                       /* DSI_VID_VFP_LINES is 10 bits */
-	assert(VSYNC + VBP + H < vtotal);          /* the CDC200 line IRQ (the flip) lands in blanking */
-	printf("  pclk %.0f Hz, %d x %d total, %.4f Hz, line %.1f kHz, lane %.2f Mbps\n", pclk, htotal, vtotal, hz,
-	       pclk / htotal / 1e3, lane / 1e6);
+	assert(fabs(div - round(div)) < 1e-9 && div >= 2.0 &&
+	       div <= 511.0);             /* mipi_display_e8.c BUILD_ASSERTs */
+	assert(lane <= 500e6);            /* panel-max-lane-bandwidth: the 2-lane ceiling */
+	assert(vfp <= 1023);              /* DSI_VID_VFP_LINES is 10 bits */
+	assert(VSYNC + VBP + H < vtotal); /* the CDC200 line IRQ (the flip) lands in blanking */
+	printf("  pclk %.0f Hz, %d x %d total, %.4f Hz, line %.1f kHz, lane %.2f Mbps\n",
+	       pclk,
+	       htotal,
+	       vtotal,
+	       hz,
+	       pclk / htotal / 1e3,
+	       lane / 1e6);
 	return hz;
 }
 
@@ -106,7 +112,8 @@ int main(void)
 
 		(void)tr_flip_pace_landed(&p, 1000000u);
 		assert(!tr_flip_pace_landed(&p, 1000000u + TR_PANEL_PERIOD_US * 14u / 10u));
-		assert(tr_flip_pace_landed(&p, 1000000u + TR_PANEL_PERIOD_US * 14u / 10u + TR_PANEL_PERIOD_US * 16u / 10u));
+		assert(tr_flip_pace_landed(
+		    &p, 1000000u + TR_PANEL_PERIOD_US * 14u / 10u + TR_PANEL_PERIOD_US * 16u / 10u));
 	}
 
 	/* 2. Real time. Play: TR_GAME_PACE_Q8 is steps per 40 Hz frame (0.5x =
@@ -134,7 +141,7 @@ int main(void)
 	/* The HUD and the A32 animate in 40 Hz frames: a second is 40 of them. */
 	assert(tr_hz_to40(0u) == 0u && tr_hz_to40((uint32_t)TR_PANEL_HZ) == 40u);
 	for (uint32_t f = 0; f < 1000u; f++) {
-		assert(tr_hz_to40(f + 1u) > tr_hz_to40(f)); /* never repeats a frame */
+		assert(tr_hz_to40(f + 1u) > tr_hz_to40(f));      /* never repeats a frame */
 		assert(TR_PANEL_HZ != 40 || tr_hz_to40(f) == f); /* 40 Hz: unchanged */
 	}
 	/* The crash as the A32 sees it: every packet's crash_tick inside the
@@ -142,7 +149,7 @@ int main(void)
 	{
 		tr_game_t     g;
 		tr_frame_in_t in;
-		uint32_t      ph = 0;
+		uint32_t      ph     = 0;
 		int           frames = 1;
 
 		tr_game_init(&g, 3u);
@@ -152,7 +159,8 @@ int main(void)
 		}
 		assert(frames == TR_CRASH_FRAMES);
 		tr_frame_in_from_game(&in, &g, 0, false, false);
-		assert(in.crash_tick <= TR_CRASH_TICKS - 1 && in.crash_tick >= TR_CRASH_TICKS - 1 - 40 / TR_PANEL_HZ);
+		assert(in.crash_tick <= TR_CRASH_TICKS - 1 &&
+		       in.crash_tick >= TR_CRASH_TICKS - 1 - 40 / TR_PANEL_HZ);
 	}
 
 	printf("PASS: panel_hz (%d Hz)\n", TR_PANEL_HZ);

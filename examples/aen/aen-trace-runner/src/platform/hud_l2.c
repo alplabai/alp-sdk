@@ -67,9 +67,11 @@
 BUILD_ASSERT(DT_REG_ADDR(DT_NODELABEL(cdc200)) == 0x49031000u, "CDC200 base (soc.h CDC_BASE)");
 BUILD_ASSERT(DT_PROP(DT_NODELABEL(cdc200), width) == TR_HUD_W, "the HUD spans the panel width");
 BUILD_ASSERT(TR_HUD_FB_SIZE == TR_HUD_W * TR_HUD_H * 2u, "tr_mbox.h TR_HUD_FB_SIZE");
-BUILD_ASSERT(TR_HUD_FB % 64u == 0u, "CDC200 fetch address alignment (bus width 8 B; 64 B for burst)");
+BUILD_ASSERT(TR_HUD_FB % 64u == 0u,
+             "CDC200 fetch address alignment (bus width 8 B; 64 B for burst)");
 /* The layer never touches what the A32 renders into or TF-A's window. */
-BUILD_ASSERT(TR_HUD_FB >= TR_MHU0_WINDOW_HI && TR_HUD_FB >= TR_FB_A + TR_FB_SIZE, "HUD buffer placement");
+BUILD_ASSERT(TR_HUD_FB >= TR_MHU0_WINDOW_HI && TR_HUD_FB >= TR_FB_A + TR_FB_SIZE,
+             "HUD buffer placement");
 
 #define HUD_PITCH (TR_HUD_W * 2u)
 
@@ -132,8 +134,9 @@ bool tr_hud_l2_open(void)
 	wr(CDC_L2_WIN_VPOS, (vs + TR_HUD_H - 1u) << CDC_LN_WIN_VPOS_STOP_POS_SHIFT | vs);
 	wr(CDC_L2_PIX_FORMAT, CDC_PIXEL_FORMAT_ARGB4444);
 	wr(CDC_L2_CONST_ALPHA, 255u);
-	wr(CDC_L2_BLEND_CFG, CDC_BLEND_PIXEL_ALPHA_X_CONST_ALPHA << CDC_LN_BLEND_CFG_F1_SEL_SHIFT |
-				     CDC_BLEND_PIXEL_ALPHA_X_CONST_ALPHA_INV);
+	wr(CDC_L2_BLEND_CFG,
+	   CDC_BLEND_PIXEL_ALPHA_X_CONST_ALPHA << CDC_LN_BLEND_CFG_F1_SEL_SHIFT |
+	       CDC_BLEND_PIXEL_ALPHA_X_CONST_ALPHA_INV);
 	wr(CDC_L2_CFB_ADDR, TR_HUD_FB);
 	wr(CDC_L2_CFB_LENGTH, HUD_PITCH << CDC_LN_CFB_LENGTH_PITCH_SHIFT | (HUD_PITCH + BUS_WIDTH));
 	wr(CDC_L2_CFB_LINES, TR_HUD_H);
@@ -152,11 +155,16 @@ bool tr_hud_l2_open(void)
 	tr_hud_l2_regs[2] = rd(CDC_L2_WIN_VPOS);
 	tr_hud_l2_regs[3] = rd(CDC_L2_CFB_ADDR);
 	tr_hud_l2_regs[4] = rd(CDC_L2_REL_CTRL);
-	printk("hud     : layer 2 %ux%u ARGB4444 @0x%08x win h 0x%08x v 0x%08x rel 0x%x (%d ms)\n", TR_HUD_W,
-	       TR_HUD_H, (unsigned)tr_hud_l2_regs[3], (unsigned)tr_hud_l2_regs[1], (unsigned)tr_hud_l2_regs[2],
-	       (unsigned)tr_hud_l2_regs[4], waited);
-	if ((tr_hud_l2_regs[4] & CDC_LN_REL_CTRL_SH_VBLANK) || !(tr_hud_l2_regs[0] & CDC_LN_CTRL_LAYER_EN) ||
-	    tr_hud_l2_regs[3] != TR_HUD_FB) {
+	printk("hud     : layer 2 %ux%u ARGB4444 @0x%08x win h 0x%08x v 0x%08x rel 0x%x (%d ms)\n",
+	       TR_HUD_W,
+	       TR_HUD_H,
+	       (unsigned)tr_hud_l2_regs[3],
+	       (unsigned)tr_hud_l2_regs[1],
+	       (unsigned)tr_hud_l2_regs[2],
+	       (unsigned)tr_hud_l2_regs[4],
+	       waited);
+	if ((tr_hud_l2_regs[4] & CDC_LN_REL_CTRL_SH_VBLANK) ||
+	    !(tr_hud_l2_regs[0] & CDC_LN_CTRL_LAYER_EN) || tr_hud_l2_regs[3] != TR_HUD_FB) {
 		/* Not provably live: frames stay unflagged, the A32 draws its
 		 * sprite HUD. Switch the layer off in case the reload lands late. */
 		wr(CDC_L2_CTRL, 0u);
@@ -200,7 +208,8 @@ static void perf(void)
 	/* The HP's own status word (P10's sound ring, SRAM0: powered from reset). */
 	raw.hp_magic = ((volatile tr_aring_t *)TR_ARING_ADDR)->magic;
 	raw.hp_state = ((volatile tr_aring_t *)TR_ARING_ADDR)->hp_state;
-	raw.rail5v_mw = tr_rail5v_avg_mw; /* platform/rail5v_power.c, polled off this frame's hot path */
+	raw.rail5v_mw =
+	    tr_rail5v_avg_mw; /* platform/rail5v_power.c, polled off this frame's hot path */
 	/* fix round 5: hp_vision's own beacon (src/ipc/tr_hp_dbg.h), SRAM0, no
 	 * cache maintenance needed (this build runs CONFIG_DCACHE=n, same as
 	 * every other fixed-address cross-core read in this file). Zeroed/
@@ -220,7 +229,8 @@ static void perf(void)
 	/* SRAM: the allocation map (hud.c) with the renderer's real end, read
 	 * from its bench block -- only once tr_a32_boot() found SRAM1 powered
 	 * (an unpowered SRAM1 bus-faults); otherwise its 768 KiB image + .bss budget. */
-	mem.sram_used  = tr_mem_sram_used(tr_a32_link_ok() ? *(volatile uint32_t *)TR_RENDER_IMG_END_ADDR : 0u);
+	mem.sram_used =
+	    tr_mem_sram_used(tr_a32_link_ok() ? *(volatile uint32_t *)TR_RENDER_IMG_END_ADDR : 0u);
 	mem.sram_total = TR_MEM_SRAM_TOTAL;
 	mem.itcm       = (uint32_t)(uintptr_t)_flash_used;
 	mem.dtcm       = (uint32_t)(uintptr_t)_image_ram_size;
@@ -235,8 +245,14 @@ static void perf(void)
 	tr_perf_sample(&g_perf, &raw, &mem, &g_view);
 }
 
-void tr_hud_l2_present(const tr_score_t *s, uint8_t banner, bool attract, uint8_t invite, const tr_zone_t *z,
-		       uint8_t character, const tr_hiscore_t *hs, const tr_initials_t *ini)
+void tr_hud_l2_present(const tr_score_t    *s,
+                       uint8_t              banner,
+                       bool                 attract,
+                       uint8_t              invite,
+                       const tr_zone_t     *z,
+                       uint8_t              character,
+                       const tr_hiscore_t  *hs,
+                       const tr_initials_t *ini)
 {
 	if (!g_up) {
 		return;

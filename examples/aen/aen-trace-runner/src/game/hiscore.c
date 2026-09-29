@@ -122,8 +122,10 @@ bool tr_ini_tilt_frame(tr_initials_t *e, tr_tilt_t *t, int16_t x_q8, int16_t y_q
 
 	if (ax >= TR_TILT_EDGE_Q8 && ax > ay) {
 		e->held = e->held < 0xFFFFu ? (uint16_t)(e->held + 1u) : e->held;
-		if (e->held >= TR_INI_REPEAT_DELAY && (e->held - TR_INI_REPEAT_DELAY) % TR_INI_REPEAT_EVERY == 0u) {
-			in.lane_delta = (int8_t)((x_q8 < 0 ? -1 : 1) * TR_TILT_STEER_SIGN); /* tilt.c's direction */
+		if (e->held >= TR_INI_REPEAT_DELAY &&
+		    (e->held - TR_INI_REPEAT_DELAY) % TR_INI_REPEAT_EVERY == 0u) {
+			in.lane_delta =
+			    (int8_t)((x_q8 < 0 ? -1 : 1) * TR_TILT_STEER_SIGN); /* tilt.c's direction */
 			t->idle_ticks = 0u;
 		}
 	} else {

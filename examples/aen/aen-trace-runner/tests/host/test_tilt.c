@@ -90,7 +90,8 @@ int main(void)
 		}
 		assert(t.playing && t.engages == 1u);
 		/* Still holding the engage tilt: latched, no phantom lane change. */
-		assert(feed(&t, 10, (int16_t)(axis ? 0 : -110), (int16_t)(axis ? -110 : 0)) == TR_TILT_STAY);
+		assert(feed(&t, 10, (int16_t)(axis ? 0 : -110), (int16_t)(axis ? -110 : 0)) ==
+		       TR_TILT_STAY);
 		assert(t.gestures == 0u);
 	}
 
@@ -216,7 +217,7 @@ int main(void)
 		assert(tr_tilt_intent(&t, 48, 0).lane_delta == -1); /* 2026W36-0009: + is a left tilt */
 		assert(tr_tilt_intent(&t, 20, 0).lane_delta == 0);  /* not re-armed at 20 */
 		assert(tr_tilt_intent(&t, 60, 0).lane_delta == 0);
-		assert(tr_tilt_intent(&t, 19, 0).lane_delta == 0);  /* re-armed under 20 */
+		assert(tr_tilt_intent(&t, 19, 0).lane_delta == 0); /* re-armed under 20 */
 		assert(tr_tilt_intent(&t, 48, 0).lane_delta == -1);
 		tr_tilt_init(&t);
 		assert(!tr_tilt_intent(&t, 0, 47).jump && tr_tilt_intent(&t, 0, 48).jump);
@@ -243,7 +244,8 @@ int main(void)
 			assert(tr_tilt_step(&t, noise(18), noise(18), &out) == TR_TILT_STAY && !t.playing);
 		}
 		assert(feed(&t, 50, 0, 0) == TR_TILT_STAY);
-		assert(feed(&t, TR_TILT_ENGAGE_TICKS * 3, 60, 0) == TR_TILT_STAY && !t.playing); /* a steer, not a takeover */
+		assert(feed(&t, TR_TILT_ENGAGE_TICKS * 3, 60, 0) == TR_TILT_STAY &&
+		       !t.playing); /* a steer, not a takeover */
 #endif
 	}
 
@@ -257,7 +259,8 @@ int main(void)
 	 * only). The exhibition build (no takeover) never picks: Probe. */
 	{
 		tr_tilt_t t;
-		int16_t   right = (int16_t)(100 * TR_TILT_STEER_SIGN); /* x of a tilt to the right (lane +1) */
+		int16_t   right =
+		    (int16_t)(100 * TR_TILT_STEER_SIGN); /* x of a tilt to the right (lane +1) */
 
 		tr_tilt_init(&t);
 		assert(t.character == TR_CHAR_PROBE);

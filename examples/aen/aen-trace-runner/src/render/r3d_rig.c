@@ -6,8 +6,10 @@
 
 #include <string.h>
 
-_Static_assert(TR_ANIM_CYCLE == TR_RUN_CYCLE_TICKS, "genmesh.py ANIM_CYCLE != state.h TR_RUN_CYCLE_TICKS");
-_Static_assert(TR_ANIM_CH == 25 && TR_ANIM_SIDE0 == 9 && TR_ANIM_SIDE_N == 8, "r3d_rig.h drifted from meshes.h");
+_Static_assert(TR_ANIM_CYCLE == TR_RUN_CYCLE_TICKS,
+               "genmesh.py ANIM_CYCLE != state.h TR_RUN_CYCLE_TICKS");
+_Static_assert(TR_ANIM_CH == 25 && TR_ANIM_SIDE0 == 9 && TR_ANIM_SIDE_N == 8,
+               "r3d_rig.h drifted from meshes.h");
 _Static_assert(TR_RIG_FACE == TR_RIG_PARTS, "r3d_rig.h drifted");
 
 #define PI_F 3.14159265f
@@ -32,7 +34,7 @@ static m34_t mmul(const m34_t *a, const m34_t *b)
 	for (int r = 0; r < 3; r++) {
 		for (int c = 0; c < 4; c++) {
 			float v = a->m[r * 4 + 0] * b->m[0 * 4 + c] + a->m[r * 4 + 1] * b->m[1 * 4 + c] +
-				  a->m[r * 4 + 2] * b->m[2 * 4 + c];
+			          a->m[r * 4 + 2] * b->m[2 * 4 + c];
 
 			o.m[r * 4 + c] = c == 3 ? v + a->m[r * 4 + 3] : v;
 		}
@@ -44,7 +46,7 @@ static m34_t mmul(const m34_t *a, const m34_t *b)
 static void rotate(m34_t *m, int axis, float deg)
 {
 	float s, c;
-	m34_t r = {{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0}};
+	m34_t r = { { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 } };
 
 	tr_sincosf(deg * (PI_F / 180.0f), &s, &c);
 	if (axis == 0) {
@@ -61,8 +63,10 @@ static void rotate(m34_t *m, int axis, float deg)
  * rig_mats() is the mirror the run cycle was designed through. */
 /* nsc[b]: undoes a mid-joint bone's scale on normals (those bones have no
  * children, so nothing else inherits it). */
-static void rig_bones(const tr_rig_bone_t *bone, const float ch[TR_ANIM_CH], m34_t skin[TR_RIG_BONES],
-		      float nsc[TR_RIG_BONES])
+static void rig_bones(const tr_rig_bone_t *bone,
+                      const float          ch[TR_ANIM_CH],
+                      m34_t                skin[TR_RIG_BONES],
+                      float                nsc[TR_RIG_BONES])
 {
 	m34_t world[TR_RIG_BONES];
 
@@ -73,8 +77,18 @@ static void rig_bones(const tr_rig_bone_t *bone, const float ch[TR_ANIM_CH], m34
 		if (d->parent >= 0) {
 			px = bone[d->parent].jx, py = bone[d->parent].jy, pz = bone[d->parent].jz;
 		}
-		m34_t l = {{1, 0, 0, d->jx - px, 0, 1, 0, d->jy - py + (d->parent < 0 ? ch[TR_ANIM_ROOT_Y] : 0.0f), 0, 0,
-			    1, d->jz - pz}};
+		m34_t l = { { 1,
+			          0,
+			          0,
+			          d->jx - px,
+			          0,
+			          1,
+			          0,
+			          d->jy - py + (d->parent < 0 ? ch[TR_ANIM_ROOT_Y] : 0.0f),
+			          0,
+			          0,
+			          1,
+			          d->jz - pz } };
 
 		for (int k = 0; k < d->nrot; k++) {
 			rotate(&l, d->axis[k], ch[d->ch[k]] * d->k[k]);
@@ -94,9 +108,9 @@ static void rig_bones(const tr_rig_bone_t *bone, const float ch[TR_ANIM_CH], m34
 		world[b] = d->parent >= 0 ? mmul(&world[d->parent], &l) : l;
 		skin[b]  = world[b];
 		for (int r = 0; r < 3; r++) {
-			skin[b].m[r * 4 + 3] = world[b].m[r * 4 + 3] - (world[b].m[r * 4 + 0] * d->jx +
-									world[b].m[r * 4 + 1] * d->jy +
-									world[b].m[r * 4 + 2] * d->jz);
+			skin[b].m[r * 4 + 3] = world[b].m[r * 4 + 3] -
+			                       (world[b].m[r * 4 + 0] * d->jx + world[b].m[r * 4 + 1] * d->jy +
+			                        world[b].m[r * 4 + 2] * d->jz);
 		}
 	}
 }
@@ -152,8 +166,8 @@ static void rot_apt(const m34_t *m, const float p[3], float o[3])
  * chain for that bone, as genmesh.py _hip_frame(). */
 static m34_t hip_frame(const float ch[TR_ANIM_CH], int s)
 {
-	m34_t m = {{1, 0, 0, 0, 0, 1, 0, TR_RIG_HIP_Y + ch[TR_ANIM_ROOT_Y], 0, 0, 1, 0}};
-	m34_t t = {{1, 0, 0, s ? TR_RIG_HIP_X : -TR_RIG_HIP_X, 0, 1, 0, 0, 0, 0, 1, 0}};
+	m34_t m = { { 1, 0, 0, 0, 0, 1, 0, TR_RIG_HIP_Y + ch[TR_ANIM_ROOT_Y], 0, 0, 1, 0 } };
+	m34_t t = { { 1, 0, 0, s ? TR_RIG_HIP_X : -TR_RIG_HIP_X, 0, 1, 0, 0, 0, 0, 1, 0 } };
 
 	rotate(&m, 1, ch[TR_ANIM_P_YAW]);
 	rotate(&m, 0, ch[TR_ANIM_P_PITCH]);
@@ -173,12 +187,12 @@ static m34_t hip_frame(const float ch[TR_ANIM_CH], int s)
  */
 static void leg_ik(float ch[TR_ANIM_CH], int s, const float P[3], float a)
 {
-	static const float ball[3] = {0.0f, TR_ANIM_BALL_Y, TR_ANIM_BALL_Z};
+	static const float ball[3] = { 0.0f, TR_ANIM_BALL_Y, TR_ANIM_BALL_Z };
 	const float        l1 = TR_RIG_THIGH_L, l2 = TR_RIG_SHIN_L;
 	int                c  = TR_ANIM_SIDE0 + TR_ANIM_SIDE_N * s;
 	float              sx = s ? 1.0f : -1.0f;
 	m34_t              w0 = hip_frame(ch, s);
-	float              spl = ch[c + S_SPLAY] * sx, d[3] = {0.0f, -1.0f, 0.0f}, sr, cr, yy, zz, dd, ck, sk, th;
+	float spl = ch[c + S_SPLAY] * sx, d[3] = { 0.0f, -1.0f, 0.0f }, sr, cr, yy, zz, dd, ck, sk, th;
 
 	for (int it = 0; it < 3; it++) {
 		m34_t f = w0;
@@ -194,15 +208,15 @@ static void leg_ik(float ch[TR_ANIM_CH], int s, const float P[3], float a)
 		spl = tr_atan2f(d[0], -d[1]) * RAD;
 	}
 	tr_sincosf(spl / RAD, &sr, &cr);
-	yy = -sr * d[0] + cr * d[1];
-	zz = d[2];
-	dd = __builtin_sqrtf(yy * yy + zz * zz);
-	dd = dd < l1 - l2 + 0.5f ? l1 - l2 + 0.5f : dd; /* l1 > l2 */
-	dd = dd > TR_ANIM_REACH * (l1 + l2) ? TR_ANIM_REACH * (l1 + l2) : dd;
-	ck = (dd * dd - l1 * l1 - l2 * l2) / (2.0f * l1 * l2);
-	ck = ck > 1.0f ? 1.0f : (ck < -1.0f ? -1.0f : ck);
-	sk = __builtin_sqrtf(1.0f - ck * ck);
-	th = tr_atan2f(-zz, -yy) - tr_atan2f(l2 * sk, l1 + l2 * ck);
+	yy              = -sr * d[0] + cr * d[1];
+	zz              = d[2];
+	dd              = __builtin_sqrtf(yy * yy + zz * zz);
+	dd              = dd < l1 - l2 + 0.5f ? l1 - l2 + 0.5f : dd; /* l1 > l2 */
+	dd              = dd > TR_ANIM_REACH * (l1 + l2) ? TR_ANIM_REACH * (l1 + l2) : dd;
+	ck              = (dd * dd - l1 * l1 - l2 * l2) / (2.0f * l1 * l2);
+	ck              = ck > 1.0f ? 1.0f : (ck < -1.0f ? -1.0f : ck);
+	sk              = __builtin_sqrtf(1.0f - ck * ck);
+	th              = tr_atan2f(-zz, -yy) - tr_atan2f(l2 * sk, l1 + l2 * ck);
 	ch[c + S_SPLAY] = spl * sx;
 	ch[c + S_THIGH] = th * RAD;
 	ch[c + S_KNEE]  = tr_atan2f(sk, ck) * RAD;
@@ -218,14 +232,15 @@ void tr_rig_foot_lock(float cycle, float ch[TR_ANIM_CH], float w)
 		u -= (float)(int32_t)u;
 		u += u < 0.0f ? 1.0f : 0.0f;
 		us = u;
-		if (u >= TR_ANIM_STANCE) { /* off the board: easing out after toe-off, in before touch-down */
+		if (u >=
+		    TR_ANIM_STANCE) { /* off the board: easing out after toe-off, in before touch-down */
 			float da = u - TR_ANIM_STANCE, db = 1.0f - u, x;
 
 			us  = da < db ? u : u - 1.0f;
 			off = (da < db ? da : db) / TR_ANIM_LOCK_BLEND;
 			x   = 1.0f - off;
-			x  = x < 0.0f ? 0.0f : x;
-			lw = x * x * (3.0f - 2.0f * x);
+			x   = x < 0.0f ? 0.0f : x;
+			lw  = x * x * (3.0f - 2.0f * x);
 		}
 		lw *= w;
 		if (lw <= 0.0f) {
@@ -259,7 +274,12 @@ const tr_rig_char_t *tr_rig_char(int chr)
 	return &tr_rig_chars[tr_rig_char_id(chr)];
 }
 
-void tr_rig_points(int chr, const float ch[TR_ANIM_CH], int b, int n, const float (*p)[3], float (*out)[3])
+void tr_rig_points(int         chr,
+                   const float ch[TR_ANIM_CH],
+                   int         b,
+                   int         n,
+                   const float (*p)[3],
+                   float (*out)[3])
 {
 	m34_t        skin[TR_RIG_BONES];
 	float        nsc[TR_RIG_BONES];
@@ -269,20 +289,25 @@ void tr_rig_points(int chr, const float ch[TR_ANIM_CH], int b, int n, const floa
 	s = skin[b].m;
 	for (int i = 0; i < n; i++) {
 		for (int k = 0; k < 3; k++) {
-			out[i][k] = s[k * 4 + 0] * p[i][0] + s[k * 4 + 1] * p[i][1] + s[k * 4 + 2] * p[i][2] + s[k * 4 + 3];
+			out[i][k] = s[k * 4 + 0] * p[i][0] + s[k * 4 + 1] * p[i][1] + s[k * 4 + 2] * p[i][2] +
+			            s[k * 4 + 3];
 		}
 	}
 }
 
 void tr_rig_joint(int chr, const float ch[TR_ANIM_CH], int b, float out[3])
 {
-	const tr_rig_bone_t *d = &tr_rig_chars[tr_rig_char_id(chr)].bone[b];
-	const float          j[3] = {d->jx, d->jy, d->jz};
+	const tr_rig_bone_t *d    = &tr_rig_chars[tr_rig_char_id(chr)].bone[b];
+	const float          j[3] = { d->jx, d->jy, d->jz };
 
 	tr_rig_points(chr, ch, d->parent >= 0 ? d->parent : b, 1, &j, (float (*)[3])out);
 }
 
-static const uint8_t face_bone[TR_FACE_V] = {TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD};
+static const uint8_t face_bone[TR_FACE_V] = { TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD,
+	                                          TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD,
+	                                          TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD,
+	                                          TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD,
+	                                          TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD, TR_RIG_HEAD };
 
 static int lod_of(int lod)
 {
@@ -315,13 +340,34 @@ static int8_t q8(float v)
  * middle line. Never thinner than 0.14 of the eye's height: a shut eye is
  * a line. Quads between neighbouring columns, 2 x (TR_FACE_COLS - 1) each.
  */
-static const uint8_t face_tri[TR_FACE_T * 3] = {0, 1, 6, 0, 6, 5, 1, 2, 7, 1, 7, 6, 2, 3, 8, 2, 8, 7, 3, 4, 9, 3, 9, 8, 10, 11, 16, 10, 16, 15, 11, 12, 17, 11, 17, 16, 12, 13, 18, 12, 18, 17, 13, 14, 19, 13, 19, 18};
-static const int8_t  face_n[TR_FACE_T * 3]   = {0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127};
-static const uint8_t face_col[TR_FACE_T]     = {TR_CHAR_EYE, TR_CHAR_EYE, TR_CHAR_EYE, TR_CHAR_EYE, TR_CHAR_EYE, TR_CHAR_EYE, TR_CHAR_EYE, TR_CHAR_EYE, TR_CHAR_EYE, TR_CHAR_EYE, TR_CHAR_EYE, TR_CHAR_EYE, TR_CHAR_EYE, TR_CHAR_EYE, TR_CHAR_EYE, TR_CHAR_EYE};
-static const int8_t  eye_vn[TR_FACE_V * 3]   = {0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127};
+static const uint8_t face_tri[TR_FACE_T * 3] = { 0,  1,  6,  0,  6,  5,  1,  2,  7,  1,  7,  6,
+	                                             2,  3,  8,  2,  8,  7,  3,  4,  9,  3,  9,  8,
+	                                             10, 11, 16, 10, 16, 15, 11, 12, 17, 11, 17, 16,
+	                                             12, 13, 18, 12, 18, 17, 13, 14, 19, 13, 19, 18 };
+static const int8_t  face_n[TR_FACE_T * 3]   = { 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127,
+	                                             0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127,
+	                                             0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127,
+	                                             0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127 };
+static const uint8_t face_col[TR_FACE_T]   = { TR_CHAR_EYE, TR_CHAR_EYE, TR_CHAR_EYE, TR_CHAR_EYE,
+	                                           TR_CHAR_EYE, TR_CHAR_EYE, TR_CHAR_EYE, TR_CHAR_EYE,
+	                                           TR_CHAR_EYE, TR_CHAR_EYE, TR_CHAR_EYE, TR_CHAR_EYE,
+	                                           TR_CHAR_EYE, TR_CHAR_EYE, TR_CHAR_EYE, TR_CHAR_EYE };
+static const int8_t  eye_vn[TR_FACE_V * 3] = {
+	0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127,
+	0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127,
+	0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127
+};
 _Static_assert(TR_FACE_COLS == 5, "face_tri / lens / arch are written for 5 columns");
-static const float   lens[TR_FACE_COLS] = {0.55f, 0.9f, 1.0f, 0.9f, 0.55f}; /* half height per column */
-static const float   arch[TR_FACE_COLS] = {0.1f, 0.62f, 0.9f, 0.62f, 0.1f}; /* happy: the arc's top */
+static const float lens[TR_FACE_COLS] = { 0.55f,
+	                                      0.9f,
+	                                      1.0f,
+	                                      0.9f,
+	                                      0.55f }; /* half height per column */
+static const float arch[TR_FACE_COLS] = { 0.1f,
+	                                      0.62f,
+	                                      0.9f,
+	                                      0.62f,
+	                                      0.1f }; /* happy: the arc's top */
 
 static float clamp01(float v)
 {
@@ -330,21 +376,22 @@ static float clamp01(float v)
 
 static void face_shape(const float *fc, const tr_face_t *f, float v[TR_FACE_V * 3])
 {
-	static const tr_face_t neutral = {1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+	static const tr_face_t neutral = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
 	float                  sz, W, H, open, sq, hp;
 
 	f    = f ? f : &neutral;
 	open = clamp01(f->open), sq = clamp01(f->squint), hp = clamp01(f->happy);
-	sz   = 1.0f + 0.3f * clamp01(f->wide);
+	sz = 1.0f + 0.3f * clamp01(f->wide);
 	W = fc[7] * sz, H = fc[8] * sz;
 	for (int e = 0; e < 2; e++) {
 		float sx = e ? 1.0f : -1.0f;
 
 		for (int j = 0; j < TR_FACE_COLS; j++) {
-			float u     = (float)j / (float)(TR_FACE_COLS - 1); /* 0 .. 1 across */
-			float prof  = lens[j], inner = e ? 1.0f - u : u;          /* the inner corner: toward the nose */
-			float top = H * prof - sq * (0.55f * H * prof + 0.35f * H * inner), bot = -H * prof + sq * 0.25f * H * prof;
-			float ah = H * arch[j], mid, x, y;
+			float u    = (float)j / (float)(TR_FACE_COLS - 1); /* 0 .. 1 across */
+			float prof = lens[j], inner = e ? 1.0f - u : u; /* the inner corner: toward the nose */
+			float top = H * prof - sq * (0.55f * H * prof + 0.35f * H * inner),
+			      bot = -H * prof + sq * 0.25f * H * prof;
+			float ah  = H * arch[j], mid, x, y;
 
 			top = top + (ah - top) * hp;
 			bot = bot + (ah - 0.55f * H - bot) * hp;
@@ -372,9 +419,13 @@ static void face_shape(const float *fc, const tr_face_t *f, float v[TR_FACE_V * 
 	}
 }
 
-void tr_rig_skin(int chr, int lod, const float ch[TR_ANIM_CH], const tr_face_t *face,
-		 float xyz[TR_RIG_DRAWN][TR_RIG_MAX_V * 3], int8_t vn[TR_RIG_DRAWN][TR_RIG_MAX_V * 3],
-		 tr_mesh_t out[TR_RIG_DRAWN])
+void tr_rig_skin(int              chr,
+                 int              lod,
+                 const float      ch[TR_ANIM_CH],
+                 const tr_face_t *face,
+                 float            xyz[TR_RIG_DRAWN][TR_RIG_MAX_V * 3],
+                 int8_t           vn[TR_RIG_DRAWN][TR_RIG_MAX_V * 3],
+                 tr_mesh_t        out[TR_RIG_DRAWN])
 {
 	const tr_rig_char_t *c = &tr_rig_chars[tr_rig_char_id(chr)];
 	m34_t                skin[TR_RIG_BONES];
@@ -386,8 +437,16 @@ void tr_rig_skin(int chr, int lod, const float ch[TR_ANIM_CH], const tr_face_t *
 		out[p] = *c->mesh[lod][p];
 	}
 	face_shape(c->face, face, eye);
-	out[TR_RIG_FACE] = (tr_mesh_t){NULL, face_tri, face_n, face_col, TR_FACE_V, TR_FACE_T, eye_vn, NULL,
-				       c->mesh[lod][0]->pal, c->mesh[lod][0]->emis};
+	out[TR_RIG_FACE] = (tr_mesh_t){ NULL,
+		                            face_tri,
+		                            face_n,
+		                            face_col,
+		                            TR_FACE_V,
+		                            TR_FACE_T,
+		                            eye_vn,
+		                            NULL,
+		                            c->mesh[lod][0]->pal,
+		                            c->mesh[lod][0]->emis };
 	for (int p = 0; p < TR_RIG_DRAWN; p++) {
 		const tr_mesh_t *m  = &out[p];
 		const uint8_t   *bn = tr_rig_bones(chr, lod, p);
@@ -397,14 +456,15 @@ void tr_rig_skin(int chr, int lod, const float ch[TR_ANIM_CH], const tr_face_t *
 			float        x = p == TR_RIG_FACE ? eye[i * 3 + 0] : (float)m->v[i * 3 + 0];
 			float        y = p == TR_RIG_FACE ? eye[i * 3 + 1] : (float)m->v[i * 3 + 1];
 			float        z = p == TR_RIG_FACE ? eye[i * 3 + 2] : (float)m->v[i * 3 + 2];
-			float        nx = (float)m->vn[i * 3 + 0] / 127.0f, ny = (float)m->vn[i * 3 + 1] / 127.0f;
-			float        nz = (float)m->vn[i * 3 + 2] / 127.0f;
-			float        r[3];
+			float nx = (float)m->vn[i * 3 + 0] / 127.0f, ny = (float)m->vn[i * 3 + 1] / 127.0f;
+			float nz = (float)m->vn[i * 3 + 2] / 127.0f;
+			float r[3];
 
 			for (int k = 0; k < 3; k++) {
-				xyz[p][i * 3 + k] = s[k * 4 + 0] * x + s[k * 4 + 1] * y + s[k * 4 + 2] * z + s[k * 4 + 3];
-				r[k]              = s[k * 4 + 0] * nx + s[k * 4 + 1] * ny + s[k * 4 + 2] * nz;
-				vn[p][i * 3 + k]  = q8(r[k] * nsc[bn[i]]);
+				xyz[p][i * 3 + k] =
+				    s[k * 4 + 0] * x + s[k * 4 + 1] * y + s[k * 4 + 2] * z + s[k * 4 + 3];
+				r[k]             = s[k * 4 + 0] * nx + s[k * 4 + 1] * ny + s[k * 4 + 2] * nz;
+				vn[p][i * 3 + k] = q8(r[k] * nsc[bn[i]]);
 			}
 		}
 		out[p].vf = xyz[p];

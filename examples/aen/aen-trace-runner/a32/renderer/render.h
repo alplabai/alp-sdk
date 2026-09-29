@@ -89,7 +89,7 @@ uint32_t render_front(const tr_frame_in_t *in);
  * as render_front()), sets the background and stats, returns n. One core:
  * render_front_part(0) (the whole scene into core 0's DL, never touching
  * part 2's) then render_front_end(0). */
-void     render_front_begin(const tr_frame_in_t *in);
+void render_front_begin(const tr_frame_in_t *in);
 /* Scene detail for the next frames: tr_scene_t.quality (TR_LOD_* bits,
  * r3d_scene.h); 0 = full, the golden image. Core 0, between frames. */
 void     render_set_quality(uint8_t q);

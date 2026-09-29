@@ -55,7 +55,8 @@
 #define TR_HP_STATE_NO_CAMERA 1u /* tr_camera_open() failed or has not been retried yet */
 #define TR_HP_STATE_I2C_STUCK 2u /* the I2C1 unstick sequence did not clear the SCCB bus */
 #define TR_HP_STATE_NO_FRAME  3u /* camera open but no frame arrived this pass (queue empty) */
-#define TR_HP_STATE_SRAM1_NOT_READY 4u /* CAM_POOL (SRAM1) gate not confirmed yet -- design fix
+#define TR_HP_STATE_SRAM1_NOT_READY \
+	4u /* CAM_POOL (SRAM1) gate not confirmed yet -- design fix
                                         * round 2, hp_vision/src/main.c tr_sram1_ready() */
 
 typedef struct {
@@ -77,8 +78,10 @@ typedef struct {
 #include <stddef.h>
 _Static_assert(offsetof(tr_pslot_t, pose) == 0x10, "pose must start at +0x10 (design sec 4)");
 _Static_assert(sizeof(tr_pose_t) == 102, "tr_pose_t layout drifted -- see this file's header note");
-_Static_assert(offsetof(tr_pslot_t, thumb) == 0x84, "thumb offset drifted -- see this file's header note");
-_Static_assert(sizeof(tr_pslot_t) == 0xA84, "tr_pslot_t total size drifted -- update the header note's arithmetic");
+_Static_assert(offsetof(tr_pslot_t, thumb) == 0x84,
+               "thumb offset drifted -- see this file's header note");
+_Static_assert(sizeof(tr_pslot_t) == 0xA84,
+               "tr_pslot_t total size drifted -- update the header note's arithmetic");
 
 /* HP side: write a new pose. Copies pose + infer_us/pre_us/hp_state and the
  * thumbnail (thumb may be NULL to leave it unchanged -- e.g. an hp_state
@@ -86,15 +89,24 @@ _Static_assert(sizeof(tr_pslot_t) == 0xA84, "tr_pslot_t total size drifted -- up
  * bumps seq by one -- see the protocol note above. frame_no is the caller's
  * free-running counter (e.g. total frames captured), carried through same as
  * the body, unlike seq. */
-void tr_pslot_write(volatile tr_pslot_t *s, const tr_pose_t *pose, uint32_t infer_us, uint32_t pre_us,
-                     uint32_t hp_state, const uint8_t *thumb, uint32_t frame_no, void (*barrier)(void));
+void tr_pslot_write(volatile tr_pslot_t *s,
+                    const tr_pose_t     *pose,
+                    uint32_t             infer_us,
+                    uint32_t             pre_us,
+                    uint32_t             hp_state,
+                    const uint8_t       *thumb,
+                    uint32_t             frame_no,
+                    void (*barrier)(void));
 
 /* HE side: copy the slot if seq is EVEN (rejects a write left mid-publish)
  * and unchanged across the copy (rejects one that starts or finishes during
  * the copy), magic/version checked too. Returns false (out untouched) on a
  * torn/mid-publish read, a version/magic mismatch, or seq == last_seq
  * (nothing new). */
-bool tr_pslot_read(const volatile tr_pslot_t *s, uint32_t last_seq, tr_pslot_t *out, uint32_t *seq,
-                    void (*barrier)(void));
+bool tr_pslot_read(const volatile tr_pslot_t *s,
+                   uint32_t                   last_seq,
+                   tr_pslot_t                *out,
+                   uint32_t                  *seq,
+                   void (*barrier)(void));
 
 #endif /* TR_PSLOT_H */

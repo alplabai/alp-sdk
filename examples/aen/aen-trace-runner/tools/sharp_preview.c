@@ -41,13 +41,15 @@ static void raster(uint16_t *f, const tr_dl_t *d, const tr_bg_t *bg)
 
 	tr_bin_build(d, setup, bins, counts, &ov);
 	for (int b = 0; b < TR_BANDS; b++) {
-		tr_raster_band(f, W, b * TR_BAND_H, (b + 1) * TR_BAND_H, zb, cb, bg, d, setup, bins[b], counts[b]);
+		tr_raster_band(
+		    f, W, b * TR_BAND_H, (b + 1) * TR_BAND_H, zb, cb, bg, d, setup, bins[b], counts[b]);
 	}
 }
 
 static void rgb(uint16_t p, float c[3])
 {
-	c[0] = (float)((p >> 11) << 3), c[1] = (float)(((p >> 5) & 63) << 2), c[2] = (float)((p & 31) << 3);
+	c[0] = (float)((p >> 11) << 3), c[1] = (float)(((p >> 5) & 63) << 2),
+	c[2] = (float)((p & 31) << 3);
 }
 
 static float lum3(const float c[3])
@@ -91,7 +93,7 @@ static void zone(uint8_t zn, const char *dir)
 {
 	tr_scene_t s;
 	tr_cam_t   cam;
-	tr_bg_t    bg, b0 = {0};
+	tr_bg_t    bg, b0 = { 0 };
 	char       path[512];
 
 	tr_scene_init(&s);
@@ -147,7 +149,9 @@ static void zone(uint8_t zn, const char *dir)
 		eye[i] = -(m[0][i] * m[0][3] + m[1][i] * m[1][3] + m[2][i] * m[2][3]);
 	}
 	for (int i = 0; i < W * H; i++) {
-		float d[3] = {((float)(i % W) + 0.5f - cam.cx) / cam.f_px, -((float)(i / W) + 0.5f - cam.cy) / cam.f_px, 1.0f};
+		float d[3] = { ((float)(i % W) + 0.5f - cam.cx) / cam.f_px,
+			           -((float)(i / W) + 0.5f - cam.cy) / cam.f_px,
+			           1.0f };
 		float dy   = m[0][1] * d[0] + m[1][1] * d[1] + m[2][1] * d[2];
 		float t    = dy < 0.0f ? -eye[1] / dy : 0.0f;
 
@@ -167,8 +171,11 @@ static void zone(uint8_t zn, const char *dir)
 			con += 0.5 * (fabs(lum(fb[i]) - lum(fb[i + 1])) + fabs(lum(fb[i]) - lum(fb[i + W])));
 		}
 	}
-	printf("sharp %-13s aliased %5.2f %% ground %5.2f %% contrast %5.2f\n", tr_zone_name(zn), 100.0 * (double)al / (W * H),
-	       gn ? 100.0 * (double)gal / (double)gn : 0.0, gn ? con / (double)gn : 0.0);
+	printf("sharp %-13s aliased %5.2f %% ground %5.2f %% contrast %5.2f\n",
+	       tr_zone_name(zn),
+	       100.0 * (double)al / (W * H),
+	       gn ? 100.0 * (double)gal / (double)gn : 0.0,
+	       gn ? con / (double)gn : 0.0);
 	snprintf(path, sizeof(path), "%s/sharp-%u.ppm", dir, zn);
 	write_ppm(path, 0);
 	snprintf(path, sizeof(path), "%s/ssaa-%u.ppm", dir, zn);

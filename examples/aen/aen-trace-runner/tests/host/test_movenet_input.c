@@ -51,7 +51,7 @@ int main(void)
 	assert(rows == 120 && pad == 36); /* 400*192/640 = 120; (192-120)/2 = 36 */
 
 	for (int r = 0; r < TR_MN_IN; r++) {
-		const int8_t *row = g_in + r * TR_MN_IN * 3;
+		const int8_t *row        = g_in + r * TR_MN_IN * 3;
 		bool          in_content = (r >= pad && r < pad + rows);
 
 		for (int c = 0; c < TR_MN_IN * 3; c++) {
@@ -71,8 +71,8 @@ int main(void)
 	}
 	tr_movenet_input(split, FW, FH, g_in);
 	{
-		int mid_row = pad + rows / 2; /* a content row, not a padding one */
-		const int8_t *row = g_in + mid_row * TR_MN_IN * 3;
+		int           mid_row = pad + rows / 2; /* a content row, not a padding one */
+		const int8_t *row     = g_in + mid_row * TR_MN_IN * 3;
 
 		for (int c = 0; c < TR_MN_IN; c++) {
 			int8_t r = row[3 * c], g = row[3 * c + 1], b = row[3 * c + 2];
@@ -117,7 +117,8 @@ int main(void)
 					int8_t q = g_in[(r * TR_MN_IN + c) * 3];
 
 					assert(q == ((c >= 36 && c < 156) ? (int8_t)(G - 128) : 0));
-					assert(g_in[(r * TR_MN_IN + c) * 3 + 1] == q && g_in[(r * TR_MN_IN + c) * 3 + 2] == q);
+					assert(g_in[(r * TR_MN_IN + c) * 3 + 1] == q &&
+					       g_in[(r * TR_MN_IN + c) * 3 + 2] == q);
 				}
 			}
 		}
@@ -130,7 +131,8 @@ int main(void)
 		for (int rot = 90; rot <= 270; rot += 180) {
 			for (int uy = 0; uy < FW; uy++) {
 				for (int ux = 0; ux < FH; ux++) {
-					up[uy * FH + ux] = rot == 90 ? raw[(FH - 1 - ux) * FW + uy] : raw[ux * FW + (FW - 1 - uy)];
+					up[uy * FH + ux] =
+					    rot == 90 ? raw[(FH - 1 - ux) * FW + uy] : raw[ux * FW + (FW - 1 - uy)];
 				}
 			}
 			tr_movenet_input_rot(up, FH, FW, 0, want);

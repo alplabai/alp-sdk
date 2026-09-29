@@ -111,8 +111,9 @@
  * fit (tr_memmap.h, render.c asserts). */
 #define TR_BAND_SHIFT 5
 #define TR_BAND_H     (1 << TR_BAND_SHIFT)
-#define TR_BANDS      ((TR_VIEW_H + TR_BAND_H - 1) / TR_BAND_H) /* ceiling: covers the ragged last band */
-#define TR_BIN_MAX    1536
+#define TR_BANDS \
+	((TR_VIEW_H + TR_BAND_H - 1) / TR_BAND_H) /* ceiling: covers the ragged last band */
+#define TR_BIN_MAX 1536
 
 /* Textures: RGB565, TR_TEX_DIM x TR_TEX_DIM, row-major; a tri's `tex`
  * indexes tr_r3d_tex[] (set by the caller, TR_TEX_MAX slots). u/v are 8.8
@@ -138,7 +139,7 @@ extern const uint16_t *tr_r3d_tex[TR_TEX_MAX];
  * against that. Only for geometry nothing can be behind (y = 0 seen from
  * above). Where NOZ triangles overlap, the later in DL order wins (the scene
  * tucks the board under the shoulder texture that way). */
-#define TR_TRI_NOZ     0x04u
+#define TR_TRI_NOZ 0x04u
 /* Textured, long quad: u/v hold the 8.8 texel coordinate / 8 (1/32 texel,
  * 16 texture widths of range) and a[k].rgb (unused by a texture) holds the
  * 16 fraction bits of a[k].w. One quad spanning many texture repeats instead
@@ -148,7 +149,7 @@ extern const uint16_t *tr_r3d_tex[TR_TEX_MAX];
  * vertex (u, v the stored values, w with its fraction) -- true where u/v
  * grow only as w shrinks, like a ground quad; tri_setup() drops a triangle
  * that breaks it (not drawn). */
-#define TR_TRI_UVX8    0x08u
+#define TR_TRI_UVX8 0x08u
 
 /* Near-clip plane, view-space z (camera-forward depth), world units --
  * chosen in the plan alongside TR_PROJ_Z_NEAR's reasoning (proj.h): stop
@@ -189,7 +190,7 @@ typedef struct {
 
 typedef struct {
 	tr_sv_t    v[3];
-	uint16_t   c; /* final RGB565, already lit + fogged -- see tr_r3d_emit_*() */
+	uint16_t   c;     /* final RGB565, already lit + fogged -- see tr_r3d_emit_*() */
 	uint8_t    tex;   /* tr_r3d_tex[] slot, read only with TR_TRI_TEX */
 	uint8_t    flags; /* TR_TRI_* */
 	tr_vattr_t a[3];  /* attributes of v[0..2] */
@@ -219,13 +220,13 @@ typedef struct {
 } tr_plane_t;
 
 typedef struct {
-	int16_t       y0, y1;   /* rows drawn: [y0, y1); y0 >= y1 == nothing. Only
+	int16_t       y0, y1; /* rows drawn: [y0, y1); y0 >= y1 == nothing. Only
 				 * rows that meet screen columns [0, TR_R3D_W). */
-	int16_t       ax;       /* plane anchor column */
-	uint8_t       ne;       /* edges in e[] (horizontal edges fold into y0/y1) */
-	uint8_t       nr;       /* e[0..nr) are the right bounds, e[nr..ne) the left */
-	tr_edge_dda_t e[3];     /* each at row y0 */
-	tr_plane_t    pl[4];    /* w, then r, g, b (Gouraud) or u*w, v*w (textured) */
+	int16_t       ax;     /* plane anchor column */
+	uint8_t       ne;     /* edges in e[] (horizontal edges fold into y0/y1) */
+	uint8_t       nr;     /* e[0..nr) are the right bounds, e[nr..ne) the left */
+	tr_edge_dda_t e[3];   /* each at row y0 */
+	tr_plane_t    pl[4];  /* w, then r, g, b (Gouraud) or u*w, v*w (textured) */
 } tr_tri_setup_t;
 
 /*
@@ -251,18 +252,18 @@ typedef struct {
  *          inventing a second colour representation.
  */
 typedef struct {
-	const int16_t *v;
-	const uint8_t *tri;
-	const int8_t  *n;
-	const uint8_t *col;
-	uint16_t       nv, nt;
-	const int8_t  *vn; /* nv per-VERTEX normals (x,y,z, 127 == 1.0) for
+	const int16_t  *v;
+	const uint8_t  *tri;
+	const int8_t   *n;
+	const uint8_t  *col;
+	uint16_t        nv, nt;
+	const int8_t   *vn;   /* nv per-VERTEX normals (x,y,z, 127 == 1.0) for
 			    * TR_TRI_GOURAUD; NULL -> the face normal at all 3
 			    * vertices (Gouraud then only carries per-vertex fog). */
-	const float   *vf; /* non-NULL: nv float xyz used instead of v -- a mesh
+	const float    *vf;   /* non-NULL: nv float xyz used instead of v -- a mesh
 			    * posed per frame (the skinned runner, r3d_scene.c);
 			    * generated meshes leave it NULL. */
-	const uint16_t *pal; /* 16 RGB565 colours `col` indexes instead of
+	const uint16_t *pal;  /* 16 RGB565 colours `col` indexes instead of
 			      * tr_r3d_palette (NULL): a runner character's own (P16) */
 	uint16_t        emis; /* bit c: palette colour c is emissive -- drawn at
 			       * full intensity, unlit (still fogged): eyes, glow strips */
@@ -379,18 +380,30 @@ uint16_t tr_r3d_emit_mesh(tr_dl_t *dl, const tr_cam_t *c, const tr_light_t *l, c
  * number of triangles appended (0, 1 or 2 per quad after near-clip).
  * `flags`: TR_TRI_* the triangles carry (TR_TRI_NOZ for ground; 0 usual).
  */
-uint16_t tr_r3d_emit_quad(tr_dl_t *dl, const tr_cam_t *c, const tr_v3_t q[4], uint16_t rgb565, uint8_t flags);
+uint16_t tr_r3d_emit_quad(tr_dl_t        *dl,
+                          const tr_cam_t *c,
+                          const tr_v3_t   q[4],
+                          uint16_t        rgb565,
+                          uint8_t         flags);
 
 /* tr_r3d_emit_quad() with a texture: corner q[k] gets 8.8 texel coords
  * uv[k] = {u, v} (/ 8 with TR_TRI_UVX8 in `flags`); tris carry TR_TRI_TEX |
  * flags and slot `tex`. Near-clip interpolates u/v in camera space, so the
  * clipped tri still maps right. */
-uint16_t tr_r3d_emit_quad_tex(tr_dl_t *dl, const tr_cam_t *c, const tr_v3_t q[4], const uint16_t uv[4][2],
-			      uint8_t tex, uint8_t flags);
+uint16_t tr_r3d_emit_quad_tex(tr_dl_t        *dl,
+                              const tr_cam_t *c,
+                              const tr_v3_t   q[4],
+                              const uint16_t  uv[4][2],
+                              uint8_t         tex,
+                              uint8_t         flags);
 
 /* tr_r3d_emit_quad() with a colour per corner (rgb[k] at q[k]), Gouraud:
  * near-clip interpolates the colour like u/v. */
-uint16_t tr_r3d_emit_quad_rgb(tr_dl_t *dl, const tr_cam_t *c, const tr_v3_t q[4], const uint16_t rgb[4], uint8_t flags);
+uint16_t tr_r3d_emit_quad_rgb(tr_dl_t        *dl,
+                              const tr_cam_t *c,
+                              const tr_v3_t   q[4],
+                              const uint16_t  rgb[4],
+                              uint8_t         flags);
 
 /*
  * Fills screen rows [0, horizon_y) (clamped to [0, TR_R3D_H]) of `fb`
@@ -428,16 +441,22 @@ void tr_r3d_draw(uint16_t *fb, uint32_t stride_px, const tr_dl_t *dl);
  * (triangle, band) pair that found band b already full (that pair is not
  * drawn) -- the caller zeroes it per frame (mailbox out_dropped).
  */
-void tr_bin_build(const tr_dl_t *dl, tr_tri_setup_t *setup, uint16_t bins[TR_BANDS][TR_BIN_MAX],
-		  uint32_t counts[TR_BANDS], uint32_t *overflow);
+void tr_bin_build(const tr_dl_t  *dl,
+                  tr_tri_setup_t *setup,
+                  uint16_t        bins[TR_BANDS][TR_BIN_MAX],
+                  uint32_t        counts[TR_BANDS],
+                  uint32_t       *overflow);
 /* tr_bin_build() in two phases, so the setup can be split across cores:
  * tr_tri_setup_range() builds setup[lo..hi) (each record independent of the
  * others -- any split, any order, same bits); tr_bin_only() then bins all
  * dl->n in DL order from the finished records. Same result as
  * tr_bin_build(). */
 void tr_tri_setup_range(const tr_dl_t *dl, tr_tri_setup_t *setup, uint32_t lo, uint32_t hi);
-void tr_bin_only(const tr_dl_t *dl, const tr_tri_setup_t *setup, uint16_t bins[TR_BANDS][TR_BIN_MAX],
-		 uint32_t counts[TR_BANDS], uint32_t *overflow);
+void tr_bin_only(const tr_dl_t        *dl,
+                 const tr_tri_setup_t *setup,
+                 uint16_t              bins[TR_BANDS][TR_BIN_MAX],
+                 uint32_t              counts[TR_BANDS],
+                 uint32_t             *overflow);
 
 /*
  * Band background. fx == 0: tr_r3d_sky()'s gradient top -> bot over screen
@@ -484,7 +503,7 @@ typedef struct {
  * agree at any depth.
  */
 #define TR_FOG_LEVELS  32
-#define TR_FOG_PAL_MAX 32  /* colours a fogged texture may use */
+#define TR_FOG_PAL_MAX 32 /* colours a fogged texture may use */
 #define TR_FOG_W_SHIFT 4
 #define TR_FOG_LUT_N   512 /* covers w < 8192: view z > 256 */
 typedef struct {
@@ -545,8 +564,17 @@ bool tr_r3d_fog_build(uint8_t slot, const tr_light_t *l, uint8_t *idx, uint16_t 
  * renders bit-identically to one full-screen band. No 64-bit divide runs
  * here at all.
  */
-void tr_raster_band(uint16_t *fb, uint32_t stride_px, int y_lo, int y_hi, uint16_t *zband, uint16_t *cband,
-		    const tr_bg_t *bg, const tr_dl_t *dl, const tr_tri_setup_t *setup, const uint16_t *bin, uint32_t nbin);
+void tr_raster_band(uint16_t             *fb,
+                    uint32_t              stride_px,
+                    int                   y_lo,
+                    int                   y_hi,
+                    uint16_t             *zband,
+                    uint16_t             *cband,
+                    const tr_bg_t        *bg,
+                    const tr_dl_t        *dl,
+                    const tr_tri_setup_t *setup,
+                    const uint16_t       *bin,
+                    uint32_t              nbin);
 
 /*
  * Optional raster profile, build define TR_RASTER_PROF (the A32 renderer

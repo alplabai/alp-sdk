@@ -32,7 +32,8 @@
 
 static uint16_t fb[720 * 1280] __attribute__((aligned(16)));
 
-#define GLYPH_MAX_PX (5 * 4 * 5 * 4) /* generous: >= 5*scale rows x 5*scale cols (M) for any scale used here */
+#define GLYPH_MAX_PX \
+	(5 * 4 * 5 * 4) /* generous: >= 5*scale rows x 5*scale cols (M) for any scale used here */
 
 /* Copies out the glyph cell only (5 rows x 5 cols at `scale`, the widest glyph) as a plain
  * bool-per-pixel array -- a full pattern, not a lossy hash (an earlier
@@ -84,7 +85,9 @@ int main(void)
 		 * "NPU", tr_cam_pip_format_hz()'s "NN.NHz" or "--", and the four
 		 * lamp captions), concatenated -- not a hand-picked char list that
 		 * could itself miss one. */
-		static const char chars[] = "CAMERA 640x400 400x640 NPU -- " "0123456789.Hz" "LEFTRIGHTJUMPDUCK";
+		static const char chars[] = "CAMERA 640x400 400x640 NPU -- "
+		                            "0123456789.Hz"
+		                            "LEFTRIGHTJUMPDUCK";
 
 		for (size_t i = 0; i < sizeof(chars) - 1; i++) {
 			char c = chars[i];
@@ -121,7 +124,8 @@ int main(void)
 			{ 'H', 'N' }, /* fix round 14: both edges-always-on */
 			{ 'M', 'N' }, /* polish round: 3-wide M and N were the same blob */
 		};
-		const int min_different_rows = 3; /* polish round: variable-width N/M make this reachable again */
+		const int min_different_rows =
+		    3; /* polish round: variable-width N/M make this reachable again */
 
 		for (size_t i = 0; i < sizeof(confusable) / sizeof(confusable[0]); i++) {
 			const glyph3x5_t *ga = NULL, *gb = NULL;
@@ -144,12 +148,16 @@ int main(void)
 				}
 			}
 			if (different_rows < min_different_rows) {
-				printf("FAIL: glyph '%c' differs from '%c' in only %d/5 rows (need >= %d)\n", confusable[i].a,
-				       confusable[i].b, different_rows, min_different_rows);
+				printf("FAIL: glyph '%c' differs from '%c' in only %d/5 rows (need >= %d)\n",
+				       confusable[i].a,
+				       confusable[i].b,
+				       different_rows,
+				       min_different_rows);
 			}
 			assert(different_rows >= min_different_rows);
 		}
-		printf("PASS (distinctness): every confusable pair differs in >= %d of 5 rows\n", min_different_rows);
+		printf("PASS (distinctness): every confusable pair differs in >= %d of 5 rows\n",
+		       min_different_rows);
 	}
 
 	/* 3. fix round 14: the row-distinctness check above (section 2) counts
@@ -185,8 +193,12 @@ int main(void)
 		assert(n != NULL && m != NULL);
 		for (int r = 0; r < 5; r++) {
 			if (strcmp(n->rows[r], n_ref[r]) != 0 || strcmp(m->rows[r], m_ref[r]) != 0) {
-				printf("FAIL: row %d: N \"%s\" want \"%s\", M \"%s\" want \"%s\"\n", r, n->rows[r],
-				       n_ref[r], m->rows[r], m_ref[r]);
+				printf("FAIL: row %d: N \"%s\" want \"%s\", M \"%s\" want \"%s\"\n",
+				       r,
+				       n->rows[r],
+				       n_ref[r],
+				       m->rows[r],
+				       m_ref[r]);
 			}
 			assert(strcmp(n->rows[r], n_ref[r]) == 0 && strcmp(m->rows[r], m_ref[r]) == 0);
 			/* The invariant, independent of the typed reference: N's two
@@ -196,7 +208,8 @@ int main(void)
 
 			assert(w >= 4 && n->rows[r][0] == '#' && n->rows[r][w - 1] == '#');
 		}
-		assert(n->rows[1][1] == '#' && n->rows[1][2] == '.' && n->rows[2][1] == '.' && n->rows[2][2] == '#');
+		assert(n->rows[1][1] == '#' && n->rows[1][2] == '.' && n->rows[2][1] == '.' &&
+		       n->rows[2][2] == '#');
 		/* Rendered, the N really is 4 columns wide at the label's scale. */
 		{
 			static bool bits[GLYPH_MAX_PX];

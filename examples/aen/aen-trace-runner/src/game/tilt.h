@@ -65,7 +65,8 @@
  * longer than any knock or table bump (a spike is 1-3 samples), short
  * enough to feel instant to someone who means it. */
 #ifndef TR_TILT_ENGAGE_Q8
-#define TR_TILT_ENGAGE_Q8 64 /* ~0.25 g, ~14.5 deg: firmer than a steer, so a bump cannot start a game */
+#define TR_TILT_ENGAGE_Q8 \
+	64 /* ~0.25 g, ~14.5 deg: firmer than a steer, so a bump cannot start a game */
 #endif
 #ifndef TR_TILT_ENGAGE_TICKS
 #define TR_TILT_ENGAGE_TICKS TR_HZ_FRAMES(20)
@@ -99,11 +100,12 @@ typedef struct {
 	uint32_t engages;   /**< attract -> tilt play transitions. */
 	uint32_t walkaways; /**< tilt play -> attract transitions (timeout or idle game over). */
 	uint32_t gestures;  /**< lane changes + jumps + ducks decoded. */
-	uint8_t  character; /**< P16: the selected character (tr_mbox.h TR_CHAR_*), picked in attract. */
-	int8_t   pick_dir;  /**< A pick flick under way: -1 / +1 once past EDGE, committed back at level. */
-	bool     pick_ready; /**< Seen level since the last pick: the next flick may count. */
-	uint32_t picks;     /**< Bench counter: characters picked. */
-	bool     pinned;    /**< A pick holds against the demo's cycling until the player walks away. */
+	uint8_t character; /**< P16: the selected character (tr_mbox.h TR_CHAR_*), picked in attract. */
+	int8_t
+	     pick_dir; /**< A pick flick under way: -1 / +1 once past EDGE, committed back at level. */
+	bool pick_ready; /**< Seen level since the last pick: the next flick may count. */
+	uint32_t picks;  /**< Bench counter: characters picked. */
+	bool     pinned; /**< A pick holds against the demo's cycling until the player walks away. */
 } tr_tilt_t;
 
 typedef enum {

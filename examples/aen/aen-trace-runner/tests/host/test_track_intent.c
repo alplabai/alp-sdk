@@ -25,9 +25,9 @@ static tr_pose_t person(int cx, int cy, int s)
 	static const struct {
 		int16_t dx, dy; /* in % of s, from the torso centre */
 	} body[TR_POSE_KP] = {
-		{ 0, -85 },  { 5, -90 },   { -5, -90 },  { 10, -88 }, { -10, -88 }, { 30, -50 },
+		{ 0, -85 },   { 5, -90 },  { -5, -90 },  { 10, -88 }, { -10, -88 }, { 30, -50 },
 		{ -30, -50 }, { 38, -5 },  { -38, -5 },  { 36, 35 },  { -36, 35 },  { 18, 50 },
-		{ -18, 50 }, { 18, 110 },  { -18, 110 }, { 18, 170 }, { -18, 170 },
+		{ -18, 50 },  { 18, 110 }, { -18, 110 }, { 18, 170 }, { -18, 170 },
 	};
 	tr_pose_t p;
 
@@ -152,9 +152,9 @@ static void real_jump(void)
 		}
 	}
 	printf("real jump: frames %d..%d\n", first, last);
-	assert(first >= 0 && first <= 1);         /* within 2 frames of the rise */
+	assert(first >= 0 && first <= 1);              /* within 2 frames of the rise */
 	assert(last - first + 1 >= TR_TRACK_HOLD_MIN); /* the lamp is visible */
-	assert(last < 9 + TR_TRACK_HOLD_MIN);      /* released once back down */
+	assert(last < 9 + TR_TRACK_HOLD_MIN);          /* released once back down */
 	stand(&t, 200, 560, 90, 30);
 
 	/* Held up (a step onto something, a tiptoe): capped, then neutral. */
@@ -347,8 +347,12 @@ static void tiny_scale(void)
 
 	boot(&t);
 	for (int n = 0; n < 300; n++) {
-		tr_box_t    b = { .x = (int16_t)(175 + rand() % 5 - 2), .y = (int16_t)(500 + rand() % 7 - 3),
-				  .w = (int16_t)(50 + rand() % 5 - 2), .h = 3, .confidence = HI, .valid = true };
+		tr_box_t    b = { .x          = (int16_t)(175 + rand() % 5 - 2),
+			              .y          = (int16_t)(500 + rand() % 7 - 3),
+			              .w          = (int16_t)(50 + rand() % 5 - 2),
+			              .h          = 3,
+			              .confidence = HI,
+			              .valid      = true };
 		tr_intent_t i = tr_track_update(&t, b);
 
 		assert(i.source == TR_INPUT_VISION && !i.jump && !i.duck);
@@ -358,9 +362,9 @@ static void tiny_scale(void)
 int main(int argc, char **argv)
 {
 	static void (*const scenario[])(void) = { silicon_replay, standing_still, real_jump, duck,
-						  lateral,        approach,       swap,      retreat,
-						  long_duck,      repeated_seq,   tiny_scale };
-	int                   only            = argc > 1 ? atoi(argv[1]) : -1; /* one scenario, by index */
+		                                      lateral,        approach,       swap,      retreat,
+		                                      long_duck,      repeated_seq,   tiny_scale };
+	int only = argc > 1 ? atoi(argv[1]) : -1; /* one scenario, by index */
 
 	srand(11);
 	for (int k = 0; k < (int)(sizeof scenario / sizeof scenario[0]); k++) {

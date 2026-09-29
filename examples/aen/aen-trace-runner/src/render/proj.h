@@ -42,7 +42,7 @@
  * round power of two).
  */
 #define TR_PROJ_Z_RUNNER 256
-#define TR_PROJ_F         TR_PROJ_Z_RUNNER
+#define TR_PROJ_F        TR_PROJ_Z_RUNNER
 
 #define TR_PROJ_HORIZON_Y 384
 #define TR_PROJ_CENTER_X  360

@@ -23,7 +23,7 @@
 /* Q8 fixed point throughout: this runs every tick and the FPU is not enabled.
  * What a sample MEANS (thresholds, hysteresis, the takeover gesture) is
  * game/tilt.c's job, host-tested -- this file only reads the part. */
-#define IMU_FAIL_LIMIT     5
+#define IMU_FAIL_LIMIT 5
 
 /*
  * Counts-per-g at BMI323_ACCEL_FS_2G is 16384 (16-bit signed range split
@@ -56,7 +56,7 @@ static bool bmi323_raw_is_invalid(int16_t v)
 	       v >= (int16_t)(INT16_MAX - BMI323_RAW_SATURATION_MARGIN);
 }
 
-static bmi323_t g_imu;
+static bmi323_t   g_imu;
 static alp_i2c_t *g_bus;
 static bool       g_ok;
 static unsigned   g_fails;

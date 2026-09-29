@@ -24,7 +24,7 @@ uint32_t tr_display_free_fb(void); /* TR_FB_A or TR_FB_B; 0 if the live buffer i
 int      tr_display_flip_to(uint32_t fb_addr);
 /* After a deliberate hold (game-over, fallback banner): the next flip's gap is
  * not a missed refresh, so it does not count toward tr_frame_overrun_count. */
-void     tr_display_pace_reset(void);
+void tr_display_pace_reset(void);
 #else
 
 /*

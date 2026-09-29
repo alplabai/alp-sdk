@@ -17,8 +17,9 @@
  * -- it used to fail silently, forever, indistinguishable from "no player
  * in view").
  */
-#define TR_DETECT_GRID_MAX  4096
-#define TR_DETECT_FG_THRESH 18 /* |cell - background| above this is foreground, on a 0..255 scale. */
+#define TR_DETECT_GRID_MAX 4096
+#define TR_DETECT_FG_THRESH \
+	18 /* |cell - background| above this is foreground, on a 0..255 scale. */
 #define TR_DETECT_CONF_FULL 400 /* Cell count that saturates confidence at 255. */
 
 /*
@@ -58,9 +59,10 @@
  *     roughly 400 frames (~13 s at 30 Hz) once it stops moving -- see
  *     test_detect.c's ghost-heal case.
  */
-#define TR_DETECT_BG_DIV      16
-#define TR_DETECT_FG_BLEED    256
-#define TR_DETECT_BLOWOUT_PCT 50 /* Foreground over this % of the grid is a lighting change, not a player. */
+#define TR_DETECT_BG_DIV   16
+#define TR_DETECT_FG_BLEED 256
+#define TR_DETECT_BLOWOUT_PCT \
+	50 /* Foreground over this % of the grid is a lighting change, not a player. */
 
 /*
  * Fix round 1, finding 7: these used to be one constant (TR_DETECT_EDGE_DIV)
@@ -77,8 +79,10 @@
  * silently retune the other and move the box top (b.y) and width (b.w)
  * that track.c reads as this box's position and scale (track.h).
  */
-#define TR_DETECT_VALLEY_DIV 4 /* A column counts toward a candidate's run at 1/N of that candidate's peak column. */
-#define TR_DETECT_EDGE_DIV   4 /* A row counts toward the subject's own run at 1/N of that run's peak row. */
+#define TR_DETECT_VALLEY_DIV \
+	4 /* A column counts toward a candidate's run at 1/N of that candidate's peak column. */
+#define TR_DETECT_EDGE_DIV \
+	4 /* A row counts toward the subject's own run at 1/N of that run's peak row. */
 
 /*
  * Step 8 (detect.c) picks the column-sum peak, then looks for a second
@@ -131,7 +135,7 @@ typedef struct {
 	uint8_t decim;
 	int16_t bg[TR_DETECT_GRID_MAX]; /* Q7 fixed point -- see TR_DETECT_BG_DIV's comment. */
 	bool    bg_valid;
-	bool    subject_valid;         /* Was there a reported subject last call? */
+	bool    subject_valid;               /* Was there a reported subject last call? */
 	int16_t subject_left, subject_right; /* Its column run, grid units -- the continuity anchor. */
 } tr_detect_t;
 

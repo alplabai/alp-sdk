@@ -70,11 +70,13 @@
 #define TR_ATTRACT_JOIN_TICKS 30
 
 typedef struct {
-	bool     active;               /**< Currently driving the game with synthetic input. */
-	uint32_t idle_ticks;           /**< Consecutive ticks with no player present. */
-	uint32_t join_ticks;           /**< Active: consecutive ticks a player has been present (the join lobby). */
-	uint32_t rng;                  /**< Own LCG stream -- see attract.c's rng_next() comment. */
-	bool     acted[TR_MAX_ENTITIES]; /**< Has this slot's current occupant already had its react/miss roll? */
+	bool     active;     /**< Currently driving the game with synthetic input. */
+	uint32_t idle_ticks; /**< Consecutive ticks with no player present. */
+	uint32_t
+	    join_ticks; /**< Active: consecutive ticks a player has been present (the join lobby). */
+	uint32_t rng;   /**< Own LCG stream -- see attract.c's rng_next() comment. */
+	bool     acted
+	    [TR_MAX_ENTITIES]; /**< Has this slot's current occupant already had its react/miss roll? */
 } tr_attract_t;
 
 void tr_attract_init(tr_attract_t *a);
@@ -86,8 +88,8 @@ void tr_attract_enter(tr_attract_t *a);
 /* tr_attract_step()'s transition this tick. */
 typedef enum {
 	TR_ATTRACT_STAY = 0, /**< No transition. */
-	TR_ATTRACT_ENTERED,  /**< Nobody for TR_ATTRACT_ENTER_TICKS: the run in progress ENDS, attract starts. */
-	TR_ATTRACT_LEFT,     /**< A player joined (present TR_ATTRACT_JOIN_TICKS): a fresh run for them. */
+	TR_ATTRACT_ENTERED, /**< Nobody for TR_ATTRACT_ENTER_TICKS: the run in progress ENDS, attract starts. */
+	TR_ATTRACT_LEFT, /**< A player joined (present TR_ATTRACT_JOIN_TICKS): a fresh run for them. */
 } tr_attract_ev_t;
 
 /*
@@ -117,7 +119,8 @@ typedef enum {
  * caller's cue to tr_game_init() a fresh run and tr_ctl_reset() the control
  * layer. Never latches: every transition clears both counters.
  */
-tr_attract_ev_t tr_attract_step(tr_attract_t *a, tr_track_t *track, bool player_present, uint8_t game_lane);
+tr_attract_ev_t
+tr_attract_step(tr_attract_t *a, tr_track_t *track, bool player_present, uint8_t game_lane);
 
 /* Active with a player in the join lobby: the screen asks them to step in. */
 bool tr_attract_joining(const tr_attract_t *a);

@@ -75,7 +75,7 @@ static uint8_t s_fg_mask[TR_DETECT_GRID_MAX];
  * against a raw sample. */
 #define Q7_SHIFT           7
 #define LEVEL_TO_Q7(level) ((int16_t)((int32_t)(level) << Q7_SHIFT))
-#define Q7_TO_LEVEL(q7)     ((int16_t)((q7) >> Q7_SHIFT))
+#define Q7_TO_LEVEL(q7)    ((int16_t)((q7) >> Q7_SHIFT))
 
 int tr_detect_init(tr_detect_t *d, int16_t frame_w, int16_t frame_h, uint8_t decim)
 {
@@ -124,8 +124,13 @@ static uint8_t sample(const uint8_t *grey8, int16_t frame_w, int16_t gx, int16_t
  * BOX-EDGE decision (is this row still their body?) and needs
  * TR_DETECT_EDGE_DIV. Tuning one on site must not silently retune the
  * other. */
-static void valley_walk(const int16_t *sum, int16_t len, int16_t peak_idx, int16_t peak_val, int16_t div,
-			 int16_t *out_left, int16_t *out_right)
+static void valley_walk(const int16_t *sum,
+                        int16_t        len,
+                        int16_t        peak_idx,
+                        int16_t        peak_val,
+                        int16_t        div,
+                        int16_t       *out_left,
+                        int16_t       *out_right)
 {
 	int16_t thresh = (int16_t)(peak_val / div);
 	int16_t left = peak_idx, right = peak_idx;
@@ -140,14 +145,22 @@ static void valley_walk(const int16_t *sum, int16_t len, int16_t peak_idx, int16
 	*out_right = right;
 }
 
-static void column_run(const int16_t *col_sum, int16_t grid_w, int16_t peak_col, int16_t peak_val,
-			int16_t *out_left, int16_t *out_right)
+static void column_run(const int16_t *col_sum,
+                       int16_t        grid_w,
+                       int16_t        peak_col,
+                       int16_t        peak_val,
+                       int16_t       *out_left,
+                       int16_t       *out_right)
 {
 	valley_walk(col_sum, grid_w, peak_col, peak_val, TR_DETECT_VALLEY_DIV, out_left, out_right);
 }
 
-static void row_run(const int16_t *row_sum, int16_t grid_h, int16_t peak_row, int16_t peak_val,
-		     int16_t *out_top, int16_t *out_bottom)
+static void row_run(const int16_t *row_sum,
+                    int16_t        grid_h,
+                    int16_t        peak_row,
+                    int16_t        peak_val,
+                    int16_t       *out_top,
+                    int16_t       *out_bottom)
 {
 	valley_walk(row_sum, grid_h, peak_row, peak_val, TR_DETECT_EDGE_DIV, out_top, out_bottom);
 }
@@ -170,9 +183,8 @@ tr_box_t tr_detect_frame(tr_detect_t *d, const uint8_t *grey8, size_t len)
 	int16_t want_grid_w = (d->decim > 0) ? (int16_t)(d->frame_w / d->decim) : 0;
 	int16_t want_grid_h = (d->decim > 0) ? (int16_t)(d->frame_h / d->decim) : 0;
 
-	if (d->decim == 0 || d->grid_w != want_grid_w || d->grid_h != want_grid_h ||
-	    d->grid_w <= 0 || d->grid_h <= 0 ||
-	    (int32_t)d->grid_w * (int32_t)d->grid_h > TR_DETECT_GRID_MAX ||
+	if (d->decim == 0 || d->grid_w != want_grid_w || d->grid_h != want_grid_h || d->grid_w <= 0 ||
+	    d->grid_h <= 0 || (int32_t)d->grid_w * (int32_t)d->grid_h > TR_DETECT_GRID_MAX ||
 	    len < (size_t)d->frame_w * (size_t)d->frame_h) {
 		return invalid;
 	}
@@ -206,9 +218,9 @@ tr_box_t tr_detect_frame(tr_detect_t *d, const uint8_t *grey8, size_t len)
 
 	for (int16_t gy = 0; gy < d->grid_h; gy++) {
 		for (int16_t gx = 0; gx < d->grid_w; gx++) {
-			int     idx  = gy * d->grid_w + gx;
-			int16_t cell = (int16_t)sample(grey8, d->frame_w, gx, gy, d->decim);
-			int16_t diff = (int16_t)abs((int)cell - (int)Q7_TO_LEVEL(d->bg[idx]));
+			int     idx   = gy * d->grid_w + gx;
+			int16_t cell  = (int16_t)sample(grey8, d->frame_w, gx, gy, d->decim);
+			int16_t diff  = (int16_t)abs((int)cell - (int)Q7_TO_LEVEL(d->bg[idx]));
 			uint8_t is_fg = (diff > TR_DETECT_FG_THRESH) ? 1 : 0;
 
 			s_fg_mask[idx] = is_fg;
@@ -341,7 +353,7 @@ tr_box_t tr_detect_frame(tr_detect_t *d, const uint8_t *grey8, size_t len)
 		 * Compare doubled centres (left+right) so this stays
 		 * integer-only -- no floating point on this target. */
 		int16_t center2 = d->subject_valid ? (int16_t)(d->subject_left + d->subject_right)
-						    : (int16_t)(d->grid_w - 1);
+		                                   : (int16_t)(d->grid_w - 1);
 		int16_t distA   = (int16_t)abs((int)(left + right) - (int)center2);
 		int16_t distB   = (int16_t)abs((int)(leftB + rightB) - (int)center2);
 

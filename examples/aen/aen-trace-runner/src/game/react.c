@@ -2,16 +2,17 @@
 #include "react.h"
 
 #include "../ipc/tr_mbox.h" /* TR_REACT_* */
-#include "score.h"           /* TR_COMBO_MAX */
+#include "score.h"          /* TR_COMBO_MAX */
 
 void tr_react_init(tr_react_t *r)
 {
-	*r = (tr_react_t){TR_REACT_NONE, 1, 0u, 0u, TR_REACT_MAX_US};
+	*r = (tr_react_t){ TR_REACT_NONE, 1, 0u, 0u, TR_REACT_MAX_US };
 }
 
 /* Priority: the enum order (pass 1 < pickup 2 < near 3 < combo 4). */
-_Static_assert(TR_REACT_PASS < TR_REACT_PICKUP && TR_REACT_PICKUP < TR_REACT_NEAR && TR_REACT_NEAR < TR_REACT_COMBO,
-	       "tr_mbox.h TR_REACT_* is the priority order");
+_Static_assert(TR_REACT_PASS < TR_REACT_PICKUP && TR_REACT_PICKUP < TR_REACT_NEAR &&
+                   TR_REACT_NEAR < TR_REACT_COMBO,
+               "tr_mbox.h TR_REACT_* is the priority order");
 
 void tr_react_step(tr_react_t *r, const tr_game_t *g, uint8_t combo)
 {
@@ -36,11 +37,15 @@ void tr_react_step(tr_react_t *r, const tr_game_t *g, uint8_t combo)
 	r->seq++;
 	if (g->ev & (TR_EV_PASS | TR_EV_NEAR)) {
 		/* where it went by; in the runner's own lane, alternate */
-		r->side = g->ev_lane < g->lane ? (int8_t)-1 : g->ev_lane > g->lane ? (int8_t)1 : (r->seq & 1u) ? (int8_t)1 : (int8_t)-1;
+		r->side = g->ev_lane < g->lane   ? (int8_t)-1
+		          : g->ev_lane > g->lane ? (int8_t)1
+		          : (r->seq & 1u)        ? (int8_t)1
+		                                 : (int8_t)-1;
 	}
 }
 
 void tr_react_frame(tr_react_t *r)
 {
-	r->us = r->us < TR_REACT_MAX_US - TR_PANEL_PERIOD_US ? r->us + TR_PANEL_PERIOD_US : TR_REACT_MAX_US;
+	r->us =
+	    r->us < TR_REACT_MAX_US - TR_PANEL_PERIOD_US ? r->us + TR_PANEL_PERIOD_US : TR_REACT_MAX_US;
 }

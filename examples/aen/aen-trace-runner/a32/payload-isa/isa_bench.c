@@ -54,9 +54,18 @@ static inline uint32_t mpidr(void)
 	return v;
 }
 #else
-static inline uint32_t cyc(void) { return 0; }
-static inline uint32_t cyc_raw(void) { return 0; }
-static inline uint32_t mpidr(void) { return 0; }
+static inline uint32_t cyc(void)
+{
+	return 0;
+}
+static inline uint32_t cyc_raw(void)
+{
+	return 0;
+}
+static inline uint32_t mpidr(void)
+{
+	return 0;
+}
 #endif
 
 static uint32_t rs; /* seeded by each stage that draws: .bss, not .data (isa.ld) */
@@ -86,9 +95,15 @@ static void put(isa_res_t *r, int k, uint32_t c, uint32_t units)
 
 static tr_prof_t hook_prof[2][TR_PROF_N] __attribute__((aligned(64)));
 
-__attribute__((noinline)) static tr_prof_t *hook_core(void) { return hook_prof[mpidr() & 1u]; }
+__attribute__((noinline)) static tr_prof_t *hook_core(void)
+{
+	return hook_prof[mpidr() & 1u];
+}
 
-__attribute__((noinline)) static uint32_t hook_now(void) { return cyc_raw(); }
+__attribute__((noinline)) static uint32_t hook_now(void)
+{
+	return cyc_raw();
+}
 
 static void stage_pmu(isa_res_t *r)
 {
@@ -96,7 +111,8 @@ static void stage_pmu(isa_res_t *r)
 	uint32_t t0 = cyc(), acc = 0;
 
 	for (int i = 0; i < N / 8; i++) {
-		acc += cyc_raw() + cyc_raw() + cyc_raw() + cyc_raw() + cyc_raw() + cyc_raw() + cyc_raw() + cyc_raw();
+		acc += cyc_raw() + cyc_raw() + cyc_raw() + cyc_raw() + cyc_raw() + cyc_raw() + cyc_raw() +
+		       cyc_raw();
 	}
 	put(r, ISA_PMU_READ, cyc() - t0, N);
 	t0 = cyc();
@@ -132,36 +148,55 @@ static void stage_fdiv(isa_res_t *r)
 	t0 = cyc();
 	for (uint32_t i = 0; i < ITERS; i++) {
 		__asm__ volatile(R4("vdiv.f32 %0, %4, %0\n\tvdiv.f32 %1, %4, %1\n\t"
-				    "vdiv.f32 %2, %4, %2\n\tvdiv.f32 %3, %4, %3\n\t")
-				 : "+t"(x), "+t"(x1), "+t"(x2), "+t"(x3)
-				 : "t"(a));
+		                    "vdiv.f32 %2, %4, %2\n\tvdiv.f32 %3, %4, %3\n\t")
+		                 : "+t"(x), "+t"(x1), "+t"(x2), "+t"(x3)
+		                 : "t"(a));
 	}
 	put(r, ISA_FDIV_TPUT, cyc() - t0, ITERS * 16u);
 
 	/* One "divide" = recpe, 2 Newton steps, times a: 6 dependent ops. */
-#define RECP(X, R, T, A)                                                                          \
-	"vrecpe.f32 " R ", " X "\n\tvrecps.f32 " T ", " X ", " R "\n\tvmul.f32 " R ", " R ", " T "\n\t" \
-	"vrecps.f32 " T ", " X ", " R "\n\tvmul.f32 " R ", " R ", " T "\n\tvmul.f32 " X ", " A ", " R "\n\t"
-	float32x2_t d = vdup_n_f32(1.5f), d1 = d, d2 = d, d3 = d, da = vdup_n_f32(3.0f), dr, dt, er, et, fr, ft, gr, gt;
+#define RECP(X, R, T, A) \
+	"vrecpe.f32 " R ", " X "\n\tvrecps.f32 " T ", " X ", " R "\n\tvmul.f32 " R ", " R ", " T \
+	"\n\t" \
+	"vrecps.f32 " T ", " X ", " R "\n\tvmul.f32 " R ", " R ", " T "\n\tvmul.f32 " X ", " A ", " R \
+	"\n\t"
+	float32x2_t d = vdup_n_f32(1.5f), d1 = d, d2 = d, d3 = d, da = vdup_n_f32(3.0f), dr, dt, er, et,
+	            fr, ft, gr, gt;
 
 	t0 = cyc();
 	for (uint32_t i = 0; i < ITERS; i++) {
 		__asm__ volatile(R4(RECP("%P0", "%P1", "%P2", "%P3"))
-				 : "+w"(d), "=&w"(dr), "=&w"(dt)
-				 : "w"(da));
+		                 : "+w"(d), "=&w"(dr), "=&w"(dt)
+		                 : "w"(da));
 	}
 	put(r, ISA_RECP_LAT, cyc() - t0, ITERS * 4u);
 	t0 = cyc();
 	for (uint32_t i = 0; i < ITERS; i++) {
-		__asm__ volatile(				 "vrecpe.f32 %P4, %P0\n\tvrecpe.f32 %P6, %P1\n\tvrecpe.f32 %P8, %P2\n\tvrecpe.f32 %P10, %P3\n\t"
-				 "vrecps.f32 %P5, %P0, %P4\n\tvrecps.f32 %P7, %P1, %P6\n\tvrecps.f32 %P9, %P2, %P8\n\tvrecps.f32 %P11, %P3, %P10\n\t"
-				 "vmul.f32 %P4, %P4, %P5\n\tvmul.f32 %P6, %P6, %P7\n\tvmul.f32 %P8, %P8, %P9\n\tvmul.f32 %P10, %P10, %P11\n\t"
-				 "vrecps.f32 %P5, %P0, %P4\n\tvrecps.f32 %P7, %P1, %P6\n\tvrecps.f32 %P9, %P2, %P8\n\tvrecps.f32 %P11, %P3, %P10\n\t"
-				 "vmul.f32 %P4, %P4, %P5\n\tvmul.f32 %P6, %P6, %P7\n\tvmul.f32 %P8, %P8, %P9\n\tvmul.f32 %P10, %P10, %P11\n\t"
-				 "vmul.f32 %P0, %P12, %P4\n\tvmul.f32 %P1, %P12, %P6\n\tvmul.f32 %P2, %P12, %P8\n\tvmul.f32 %P3, %P12, %P10\n\t"
-				 : "+w"(d), "+w"(d1), "+w"(d2), "+w"(d3), "=&w"(dr), "=&w"(dt), "=&w"(er), "=&w"(et),
-				   "=&w"(fr), "=&w"(ft), "=&w"(gr), "=&w"(gt)
-				 : "w"(da));
+		__asm__ volatile("vrecpe.f32 %P4, %P0\n\tvrecpe.f32 %P6, %P1\n\tvrecpe.f32 %P8, "
+		                 "%P2\n\tvrecpe.f32 %P10, %P3\n\t"
+		                 "vrecps.f32 %P5, %P0, %P4\n\tvrecps.f32 %P7, %P1, %P6\n\tvrecps.f32 %P9, "
+		                 "%P2, %P8\n\tvrecps.f32 %P11, %P3, %P10\n\t"
+		                 "vmul.f32 %P4, %P4, %P5\n\tvmul.f32 %P6, %P6, %P7\n\tvmul.f32 %P8, %P8, "
+		                 "%P9\n\tvmul.f32 %P10, %P10, %P11\n\t"
+		                 "vrecps.f32 %P5, %P0, %P4\n\tvrecps.f32 %P7, %P1, %P6\n\tvrecps.f32 %P9, "
+		                 "%P2, %P8\n\tvrecps.f32 %P11, %P3, %P10\n\t"
+		                 "vmul.f32 %P4, %P4, %P5\n\tvmul.f32 %P6, %P6, %P7\n\tvmul.f32 %P8, %P8, "
+		                 "%P9\n\tvmul.f32 %P10, %P10, %P11\n\t"
+		                 "vmul.f32 %P0, %P12, %P4\n\tvmul.f32 %P1, %P12, %P6\n\tvmul.f32 %P2, "
+		                 "%P12, %P8\n\tvmul.f32 %P3, %P12, %P10\n\t"
+		                 : "+w"(d),
+		                   "+w"(d1),
+		                   "+w"(d2),
+		                   "+w"(d3),
+		                   "=&w"(dr),
+		                   "=&w"(dt),
+		                   "=&w"(er),
+		                   "=&w"(et),
+		                   "=&w"(fr),
+		                   "=&w"(ft),
+		                   "=&w"(gr),
+		                   "=&w"(gt)
+		                 : "w"(da));
 	}
 	put(r, ISA_RECP_TPUT, cyc() - t0, ITERS * 4u);
 
@@ -170,37 +205,37 @@ static void stage_fdiv(isa_res_t *r)
 	t0 = cyc();
 	for (uint32_t i = 0; i < ITERS; i++) {
 		__asm__ volatile(R4(RECP("%q0", "%q1", "%q2", "%q3"))
-				 : "+w"(q), "=&w"(qr), "=&w"(qt)
-				 : "w"(qa));
+		                 : "+w"(q), "=&w"(qr), "=&w"(qt)
+		                 : "w"(qa));
 	}
 	put(r, ISA_RECP_Q4_LAT, cyc() - t0, ITERS * 16u); /* 4 lanes */
 	t0 = cyc();
 	for (uint32_t i = 0; i < ITERS; i++) {
 		__asm__ volatile(R2("vrecpe.f32 %q2, %q0\n\tvrecpe.f32 %q4, %q1\n\t"
-				    "vrecps.f32 %q3, %q0, %q2\n\tvrecps.f32 %q5, %q1, %q4\n\t"
-				    "vmul.f32 %q2, %q2, %q3\n\tvmul.f32 %q4, %q4, %q5\n\t"
-				    "vrecps.f32 %q3, %q0, %q2\n\tvrecps.f32 %q5, %q1, %q4\n\t"
-				    "vmul.f32 %q2, %q2, %q3\n\tvmul.f32 %q4, %q4, %q5\n\t"
-				    "vmul.f32 %q0, %q6, %q2\n\tvmul.f32 %q1, %q6, %q4\n\t")
-				 : "+w"(q), "+w"(q1), "=&w"(qr), "=&w"(qt), "=&w"(sr), "=&w"(st)
-				 : "w"(qa));
+		                    "vrecps.f32 %q3, %q0, %q2\n\tvrecps.f32 %q5, %q1, %q4\n\t"
+		                    "vmul.f32 %q2, %q2, %q3\n\tvmul.f32 %q4, %q4, %q5\n\t"
+		                    "vrecps.f32 %q3, %q0, %q2\n\tvrecps.f32 %q5, %q1, %q4\n\t"
+		                    "vmul.f32 %q2, %q2, %q3\n\tvmul.f32 %q4, %q4, %q5\n\t"
+		                    "vmul.f32 %q0, %q6, %q2\n\tvmul.f32 %q1, %q6, %q4\n\t")
+		                 : "+w"(q), "+w"(q1), "=&w"(qr), "=&w"(qt), "=&w"(sr), "=&w"(st)
+		                 : "w"(qa));
 	}
 	put(r, ISA_RECP_Q4_TPUT, cyc() - t0, ITERS * 16u); /* 2 chains x 2 steps x 4 lanes */
 #undef RECP
 	(void)x1, (void)x2, (void)x3;
 
 	/* Accuracy on projection-like operands (screen x = p.x * f / p.z). */
-	rs = 0x2468ACE1u;
+	rs            = 0x2468ACE1u;
 	uint32_t mism = 0, maxulp = 0;
 
 	for (uint32_t i = 0; i < 4096u; i++) {
-		float       num = (float)((int32_t)(rnd() % 4000001u) - 2000000) * 0.001f;
-		float       den = 16.0f + (float)(rnd() % 2984000u) * 0.001f;
+		float       num  = (float)((int32_t)(rnd() % 4000001u) - 2000000) * 0.001f;
+		float       den  = 16.0f + (float)(rnd() % 2984000u) * 0.001f;
 		float       ieee = num / den;
 		float32x2_t b = vdup_n_f32(den), e = vrecpe_f32(b);
 
-		e = vmul_f32(e, vrecps_f32(b, e));
-		e = vmul_f32(e, vrecps_f32(b, e));
+		e            = vmul_f32(e, vrecps_f32(b, e));
+		e            = vmul_f32(e, vrecps_f32(b, e));
 		float    est = num * vget_lane_f32(e, 0);
 		uint32_t bi, be;
 
@@ -228,7 +263,10 @@ static uint32_t get_fpscr(void)
 	return v;
 }
 
-static void set_fpscr(uint32_t v) { __asm__ volatile("vmsr fpscr, %0" ::"r"(v) : "memory"); }
+static void set_fpscr(uint32_t v)
+{
+	__asm__ volatile("vmsr fpscr, %0" ::"r"(v) : "memory");
+}
 
 static uint32_t fmul_chain(float x, uint32_t fpscr, float *out)
 {
@@ -248,7 +286,7 @@ static uint32_t fmul_chain(float x, uint32_t fpscr, float *out)
 
 static void stage_fz(isa_res_t *r)
 {
-	const uint32_t fzdn = (1u << 24) | (1u << 25);
+	const uint32_t fzdn   = (1u << 24) | (1u << 25);
 	uint32_t       before = get_fpscr(), dbits = 0x000AE398u; /* ~1e-39, subnormal */
 	float          den, out;
 
@@ -260,8 +298,14 @@ static void stage_fz(isa_res_t *r)
 	check(r, ISA_FZ_RESTORED, get_fpscr() == before);
 }
 #else
-static void stage_fdiv(isa_res_t *r) { check(r, ISA_FDIV_OK, 1); }
-static void stage_fz(isa_res_t *r) { check(r, ISA_FZ_RESTORED, 1); }
+static void stage_fdiv(isa_res_t *r)
+{
+	check(r, ISA_FDIV_OK, 1);
+}
+static void stage_fz(isa_res_t *r)
+{
+	check(r, ISA_FZ_RESTORED, 1);
+}
 #endif
 
 /* ---- Gouraud z-tested spans: current (scalar < 8, NEON >= 8 with the
@@ -271,11 +315,13 @@ static void stage_fz(isa_res_t *r) { check(r, ISA_FZ_RESTORED, 1); }
  * would need 8 px of slack after them. */
 
 #if defined(__ARM_NEON)
-static inline __attribute__((always_inline)) void span_gouraud_z_masked(uint16_t *restrict dst, uint16_t *restrict z,
-									int32_t n, const uint32_t s[PL_N],
-									const plane_t pl[PL_N])
+static inline __attribute__((always_inline)) void span_gouraud_z_masked(uint16_t *restrict dst,
+                                                                        uint16_t *restrict z,
+                                                                        int32_t        n,
+                                                                        const uint32_t s[PL_N],
+                                                                        const plane_t  pl[PL_N])
 {
-	static const uint16_t idx[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+	static const uint16_t idx[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
 	const uint32_t        gw = pl[PL_W].gx, gr = pl[PL_R].gx, gg = pl[PL_G].gx, gb = pl[PL_B].gx;
 	uint32x4_t            w0, w1, r0, r1, g0, g1, b0, b1;
 	uint32x4_t            sw = vdupq_n_u32(gw * 8u), sr = vdupq_n_u32(gr * 8u);
@@ -289,8 +335,8 @@ static inline __attribute__((always_inline)) void span_gouraud_z_masked(uint16_t
 		uint16x8_t w   = hi16(w0, w1);
 		uint16x8_t zo  = vld1q_u16(&z[i]);
 		uint16x8_t m   = vcgtq_u16(w, zo);
-		uint16x8_t col = vorrq_u16(vorrq_u16(vshlq_n_u16(hi16(r0, r1), 11), vshlq_n_u16(hi16(g0, g1), 5)),
-					   hi16(b0, b1));
+		uint16x8_t col = vorrq_u16(
+		    vorrq_u16(vshlq_n_u16(hi16(r0, r1), 11), vshlq_n_u16(hi16(g0, g1), 5)), hi16(b0, b1));
 
 		if (n - i < 8) {
 			m = vandq_u16(m, vcltq_u16(vld1q_u16(idx), vdupq_n_u16((uint16_t)(n - i))));
@@ -323,12 +369,16 @@ static void gz_init(void)
 
 static inline __attribute__((always_inline)) uint32_t gz_run(int32_t n, const int variant)
 {
-	plane_t  pl[PL_N] = {{0, 0x00008000u, 0}, {0, 0x00001000u, 0}, {0, 0x00000800u, 0}, {0, 0x00000C00u, 0}};
-	uint32_t t0       = cyc();
+	plane_t pl[PL_N] = {
+		{ 0, 0x00008000u, 0 }, { 0, 0x00001000u, 0 }, { 0, 0x00000800u, 0 }, { 0, 0x00000C00u, 0 }
+	};
+	uint32_t t0 = cyc();
 
 	for (uint32_t rep = 0; rep < GZ_REPS; rep++) {
-		uint32_t  s[PL_N] = {0x40000000u + rep * 0x00200000u, 0x00020000u + rep * 0x100u, 0x00100000u,
-				     0x00030000u + rep * 0x80u};
+		uint32_t  s[PL_N] = { 0x40000000u + rep * 0x00200000u,
+			                  0x00020000u + rep * 0x100u,
+			                  0x00100000u,
+			                  0x00030000u + rep * 0x80u };
 		uint32_t  pos     = (rep * 53u) & 511u;
 		uint16_t *d = &gz_dst[pos], *zz = &gz_z[pos];
 
@@ -343,11 +393,14 @@ static inline __attribute__((always_inline)) uint32_t gz_run(int32_t n, const in
 	return cyc() - t0;
 }
 
-static uint32_t gz_crc(void) { return tr_crc32(tr_crc32(0, gz_dst, sizeof(gz_dst)), gz_z, sizeof(gz_z)); }
+static uint32_t gz_crc(void)
+{
+	return tr_crc32(tr_crc32(0, gz_dst, sizeof(gz_dst)), gz_z, sizeof(gz_z));
+}
 
 static void stage_gouraud(isa_res_t *r)
 {
-	static const int32_t len[6] = {4, 8, 9, 12, 16, 64};
+	static const int32_t len[6] = { 4, 8, 9, 12, 16, 64 };
 	int                  cur_ok = 1, mask_ok = 1;
 
 	for (int k = 0; k < 6; k++) {
@@ -390,9 +443,11 @@ static void edge_make(void)
 		memset(&t, 0, sizeof(t));
 		t.flags = TR_TRI_GOURAUD;
 		for (int k = 0; k < 3; k++) {
-			t.v[k].x = ((cx + (int32_t)(rnd() % (uint32_t)w) - w / 2) << 4) + (int32_t)(rnd() & 15u);
-			t.v[k].y = ((cy + (int32_t)(rnd() % (uint32_t)h) - h / 2) << 4) + (int32_t)(rnd() & 15u);
-			t.a[k].w = (uint16_t)(1000u + (rnd() & 0x3FFFu));
+			t.v[k].x =
+			    ((cx + (int32_t)(rnd() % (uint32_t)w) - w / 2) << 4) + (int32_t)(rnd() & 15u);
+			t.v[k].y =
+			    ((cy + (int32_t)(rnd() % (uint32_t)h) - h / 2) << 4) + (int32_t)(rnd() & 15u);
+			t.a[k].w   = (uint16_t)(1000u + (rnd() & 0x3FFFu));
 			t.a[k].rgb = (uint16_t)rnd();
 		}
 		if (edge(t.v[0], t.v[1], t.v[2]) < 0) {
@@ -437,7 +492,8 @@ __attribute__((noinline)) static uint32_t edge_cur(const tr_tri_setup_t *su)
 			for (int k = 0; k < PL_N; k++) {
 				sv[k] = pl[k].row + pl[k].gx * (uint32_t)(lo - ax);
 			}
-			acc = acc * 31u + (uint32_t)lo + ((uint32_t)hi_excl << 11) + (sv[0] ^ sv[1] ^ sv[2] ^ sv[3]);
+			acc = acc * 31u + (uint32_t)lo + ((uint32_t)hi_excl << 11) +
+			      (sv[0] ^ sv[1] ^ sv[2] ^ sv[3]);
 		}
 		for (int k = 0; k < PL_N; k++) {
 			pl[k].row += pl[k].gy;
@@ -448,15 +504,17 @@ __attribute__((noinline)) static uint32_t edge_cur(const tr_tri_setup_t *su)
 
 /* Same bits, edge count a compile-time constant: the DDAs and planes live in
  * registers, the per-edge loops unroll. */
-static inline __attribute__((always_inline)) uint32_t edge_reg_n(const tr_tri_setup_t *su, const int nr, const int ne)
+static inline __attribute__((always_inline)) uint32_t edge_reg_n(const tr_tri_setup_t *su,
+                                                                 const int             nr,
+                                                                 const int             ne)
 {
 	int32_t  q[3], rm[3], sq[3], sr[3], dn[3];
 	uint32_t row[PL_N], gx[PL_N], gy[PL_N], acc = 0;
 	int32_t  ax = su->ax;
 
 	for (int i = 0; i < ne; i++) {
-		q[i] = su->e[i].quot, rm[i] = su->e[i].rem, sq[i] = su->e[i].step_quot, sr[i] = su->e[i].step_rem,
-		dn[i] = su->e[i].denom;
+		q[i] = su->e[i].quot, rm[i] = su->e[i].rem, sq[i] = su->e[i].step_quot,
+		sr[i] = su->e[i].step_rem, dn[i] = su->e[i].denom;
 	}
 	for (int k = 0; k < PL_N; k++) {
 		row[k] = su->pl[k].row, gx[k] = su->pl[k].gx, gy[k] = su->pl[k].gy;
@@ -481,7 +539,8 @@ static inline __attribute__((always_inline)) uint32_t edge_reg_n(const tr_tri_se
 			uint32_t d = (uint32_t)(lo - ax);
 
 			acc = acc * 31u + (uint32_t)lo + ((uint32_t)hi_excl << 11) +
-			      ((row[0] + gx[0] * d) ^ (row[1] + gx[1] * d) ^ (row[2] + gx[2] * d) ^ (row[3] + gx[3] * d));
+			      ((row[0] + gx[0] * d) ^ (row[1] + gx[1] * d) ^ (row[2] + gx[2] * d) ^
+			       (row[3] + gx[3] * d));
 		}
 		for (int k = 0; k < PL_N; k++) {
 			row[k] += gy[k];
@@ -508,10 +567,10 @@ static inline void fix_init(const edge_dda_t *e, int32_t *x16, int32_t *d16)
 
 __attribute__((noinline)) static uint32_t edge_fix(const tr_tri_setup_t *su, uint32_t *mism)
 {
-	int32_t        x[3], d[3];
-	edge_dda_t     e[3];
-	const int32_t  ne = su->ne, nr = su->nr;
-	uint32_t       acc = 0;
+	int32_t       x[3], d[3];
+	edge_dda_t    e[3];
+	const int32_t ne = su->ne, nr = su->nr;
+	uint32_t      acc = 0;
 
 	for (int32_t i = 0; i < ne; i++) {
 		fix_init(&su->e[i], &x[i], &d[i]);
@@ -586,7 +645,7 @@ static void stage_edge(isa_res_t *r)
 		}
 	}
 	put(r, ISA_TRI_SETUP, cyc() - t0, EDGE_TRIS * PASSES);
-	r->val[ISA_EDGE_ROWS]          = rows;
+	r->val[ISA_EDGE_ROWS]         = rows;
 	r->val[ISA_EDGE_FIX_MISMATCH] = mism;
 	check(r, ISA_EDGE_REG_EXACT, a0 == a1);
 }
@@ -608,7 +667,8 @@ static inline __attribute__((always_inline)) void tex_rows(const int pld)
 			if (pld) { /* two sub-spans ahead */
 				uint32_t u2 = ua + 16u * du, v2 = va + 16u * dv;
 
-				__builtin_prefetch(tb + (((v2 >> 6) & ((TR_TEX_DIM - 1) << 8)) | ((u2 >> 13) & ((TR_TEX_DIM - 1) << 1))));
+				__builtin_prefetch(tb + (((v2 >> 6) & ((TR_TEX_DIM - 1) << 8)) |
+				                         ((u2 >> 13) & ((TR_TEX_DIM - 1) << 1))));
 			}
 			tex_run_noz(&tex_out[y * TR_R3D_W + (uint32_t)x], 8, ua, du, va, dv, tex0);
 			ua += 8u * du;
@@ -623,7 +683,7 @@ static inline __attribute__((always_inline)) void tex_rows(const int pld)
  * MRAM: its low sectors hold TF-A, which may be walled off from NS. */
 static void evict(void)
 {
-	const volatile uint32_t *m = (const volatile uint32_t *)0x02600000u;
+	const volatile uint32_t *m   = (const volatile uint32_t *)0x02600000u;
 	uint32_t                 acc = 0;
 
 	for (uint32_t i = 0; i < (1u << 20) / 4u; i += 16u) {
@@ -632,7 +692,9 @@ static void evict(void)
 	__asm__ volatile("" ::"r"(acc));
 }
 #else
-static void evict(void) {}
+static void evict(void)
+{
+}
 #endif
 
 static void stage_tex(isa_res_t *r)
@@ -713,7 +775,8 @@ static uint8_t  gs_idx[TR_TEX_DIM * TR_TEX_DIM];
 static uint16_t gs_pal[TR_FOG_LEVELS * TR_FOG_PAL_MAX];
 static uint16_t gs_out[2][GS_ROWS * TR_R3D_W] __attribute__((aligned(64)));
 
-static inline __attribute__((always_inline)) void gspan_rows(uint16_t *out, const tr_tex_fog_t *fog, const int cw)
+static inline __attribute__((always_inline)) void
+gspan_rows(uint16_t *out, const tr_tex_fog_t *fog, const int cw)
 {
 	const uint32_t W  = 0x01F40000u; /* w 500: fog level from tr_r3d_fog_lut[31] */
 	persp_t        pw = persp_w(W);
@@ -723,7 +786,7 @@ static inline __attribute__((always_inline)) void gspan_rows(uint16_t *out, cons
 	pl[PL_U].gx = (uint32_t)(((int64_t)2600 << pw.rs) / pw.rw); /* ~1.3 texel/px */
 	pl[PL_V].gx = (uint32_t)(((int64_t)200 << pw.rs) / pw.rw);
 	for (uint32_t y = 0; y < GS_ROWS; y++) {
-		uint32_t s[PL_N] = {W, y * 12345u, y * 54321u, 0};
+		uint32_t s[PL_N] = { W, y * 12345u, y * 54321u, 0 };
 
 		if (cw) {
 			span_tex(&out[y * TR_R3D_W], TR_R3D_W, s, pl, NULL, fog);
@@ -735,7 +798,7 @@ static inline __attribute__((always_inline)) void gspan_rows(uint16_t *out, cons
 
 static void stage_gspan(isa_res_t *r)
 {
-	tr_tex_fog_t fog = {gs_idx, gs_pal, TR_FOG_PAL_MAX};
+	tr_tex_fog_t fog = { gs_idx, gs_pal, TR_FOG_PAL_MAX };
 	uint32_t     t0;
 
 	for (uint32_t i = 0; i < TR_TEX_DIM * TR_TEX_DIM; i++) {
@@ -772,17 +835,19 @@ static inline __attribute__((always_inline)) void fill_one(uint8_t *p, uint32_t 
 		}
 	} else if (how == 2) {
 		__asm__ volatile("vmov.i8 q0, #0\n\tvmov.i8 q1, #0\n"
-				 "1:\tvst1.64 {d0-d3}, [%0:256]!\n\tsubs %1, %1, #32\n\tbgt 1b"
-				 : "+r"(p), "+r"(n)::"d0", "d1", "d2", "d3", "cc", "memory");
+		                 "1:\tvst1.64 {d0-d3}, [%0:256]!\n\tsubs %1, %1, #32\n\tbgt 1b"
+		                 : "+r"(p), "+r"(n)::"d0", "d1", "d2", "d3", "cc", "memory");
 	} else if (how == 3) {
-		__asm__ volatile("vmov.i8 q0, #0\n\tvmov.i8 q1, #0\n\tvmov.i8 q2, #0\n\tvmov.i8 q3, #0\n"
-				 "1:\tvstmia %0!, {d0-d7}\n\tsubs %1, %1, #64\n\tbgt 1b"
-				 : "+r"(p), "+r"(n)::"d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7", "cc", "memory");
+		__asm__ volatile(
+		    "vmov.i8 q0, #0\n\tvmov.i8 q1, #0\n\tvmov.i8 q2, #0\n\tvmov.i8 q3, #0\n"
+		    "1:\tvstmia %0!, {d0-d7}\n\tsubs %1, %1, #64\n\tbgt 1b"
+		    : "+r"(p), "+r"(n)::"d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7", "cc", "memory");
 	} else if (how == 4) {
-		__asm__ volatile("mov r2, #0\n\tmov r3, #0\n"
-				 "1:\tstrd r2, r3, [%0], #8\n\tstrd r2, r3, [%0], #8\n\t"
-				 "strd r2, r3, [%0], #8\n\tstrd r2, r3, [%0], #8\n\tsubs %1, %1, #32\n\tbgt 1b"
-				 : "+r"(p), "+r"(n)::"r2", "r3", "cc", "memory");
+		__asm__ volatile(
+		    "mov r2, #0\n\tmov r3, #0\n"
+		    "1:\tstrd r2, r3, [%0], #8\n\tstrd r2, r3, [%0], #8\n\t"
+		    "strd r2, r3, [%0], #8\n\tstrd r2, r3, [%0], #8\n\tsubs %1, %1, #32\n\tbgt 1b"
+		    : "+r"(p), "+r"(n)::"r2", "r3", "cc", "memory");
 	} else
 #endif
 	{
@@ -803,7 +868,10 @@ static int fill_zero(uint32_t n)
 	return 1;
 }
 
-static inline __attribute__((always_inline)) uint32_t fill_time(uint32_t n, uint32_t reps, const int how, int *ok)
+static inline __attribute__((always_inline)) uint32_t fill_time(uint32_t  n,
+                                                                uint32_t  reps,
+                                                                const int how,
+                                                                int      *ok)
 {
 	uint32_t t0;
 
@@ -847,7 +915,7 @@ static uint16_t       gband[2 * BAND_PX] __attribute__((aligned(64)));
 
 static void stage_golden(isa_res_t *r)
 {
-	static const tr_bg_t  bg          = TR_GOLDEN_BG;
+	static const tr_bg_t  bg         = TR_GOLDEN_BG;
 	static const uint32_t band_crc[] = TR_GOLDEN_BAND_CRC;
 	uint32_t              best_s = 0xFFFFFFFFu, best_r = 0xFFFFFFFFu, ok = 0;
 
@@ -865,8 +933,17 @@ static void stage_golden(isa_res_t *r)
 		for (int b = 0; b < TR_BANDS; b++) {
 			uint32_t t1 = cyc();
 
-			tr_raster_band(NULL, 0, b * TR_BAND_H, (b + 1) * TR_BAND_H, gband, gband + BAND_PX, &bg, &gdl,
-				       gsetup, gbins[b], gcounts[b]);
+			tr_raster_band(NULL,
+			               0,
+			               b * TR_BAND_H,
+			               (b + 1) * TR_BAND_H,
+			               gband,
+			               gband + BAND_PX,
+			               &bg,
+			               &gdl,
+			               gsetup,
+			               gbins[b],
+			               gcounts[b]);
 			tr += cyc() - t1;
 			ok += tr_crc32(0, gband + BAND_PX, BAND_PX * 2u) == band_crc[b];
 		}
@@ -881,9 +958,9 @@ static void stage_golden(isa_res_t *r)
 
 void isa_bench_run(isa_res_t *r)
 {
-	static void (*const stage[])(isa_res_t *) = {stage_pmu,  stage_fdiv, stage_fz,   stage_gouraud,
-						      stage_edge, stage_div,  stage_tex,  stage_gspan, stage_fill,
-						      stage_golden};
+	static void (*const stage[])(isa_res_t *) = { stage_pmu,  stage_fdiv,  stage_fz,  stage_gouraud,
+		                                          stage_edge, stage_div,   stage_tex, stage_gspan,
+		                                          stage_fill, stage_golden };
 
 	r->opt = ISA_OPT;
 	for (uint32_t s = 0; s < sizeof(stage) / sizeof(stage[0]); s++) {
@@ -899,7 +976,7 @@ void isa_bench_run(isa_res_t *r)
 /* `make check`: host cc and qemu-arm (rdimon). Every check must pass. */
 int main(void)
 {
-	static isa_res_t r;
+	static isa_res_t         r;
 	static const char *const names[] = {
 #define ISA_NAME(n) #n,
 		ISA_CHECKS(ISA_NAME)
@@ -908,11 +985,20 @@ int main(void)
 
 	isa_bench_run(&r);
 	for (int i = 0; i < ISA_C_N; i++) {
-		printf("%-16s %s\n", names[i], (r.fail >> i) & 1u ? "FAIL" : (r.pass >> i) & 1u ? "pass" : "not run");
+		printf("%-16s %s\n",
+		       names[i],
+		       (r.fail >> i) & 1u   ? "FAIL"
+		       : (r.pass >> i) & 1u ? "pass"
+		                            : "not run");
 	}
-	printf("recp mismatch %u/%u (max %u ulp), fixed-point edge mismatch %u/%u rows, golden bands %u/40\n",
-	       (unsigned)r.val[ISA_RECP_MISMATCH], (unsigned)r.val[ISA_RECP_SAMPLES], (unsigned)r.val[ISA_RECP_MAX_ULP],
-	       (unsigned)r.val[ISA_EDGE_FIX_MISMATCH], (unsigned)r.val[ISA_EDGE_ROWS], (unsigned)r.val[ISA_GOLD_BANDS_OK]);
+	printf("recp mismatch %u/%u (max %u ulp), fixed-point edge mismatch %u/%u rows, golden bands "
+	       "%u/40\n",
+	       (unsigned)r.val[ISA_RECP_MISMATCH],
+	       (unsigned)r.val[ISA_RECP_SAMPLES],
+	       (unsigned)r.val[ISA_RECP_MAX_ULP],
+	       (unsigned)r.val[ISA_EDGE_FIX_MISMATCH],
+	       (unsigned)r.val[ISA_EDGE_ROWS],
+	       (unsigned)r.val[ISA_GOLD_BANDS_OK]);
 	return (r.fail == 0 && r.pass == (1u << ISA_C_N) - 1u && r.stage == ISA_STAGE_END) ? 0 : 1;
 }
 #endif

@@ -74,7 +74,9 @@ static tr_pose_t figure(int cx)
 		p.kp[k] = (tr_kp_t){ (int16_t)cx, 300, 200 };
 	}
 	p.kp[TR_KP_NOSE] = (tr_kp_t){ (int16_t)cx, 100, 200 };
-	p.kp[TR_KP_LSHO] = (tr_kp_t){ (int16_t)(cx + 40), 160, 200 }; /* anatomical left: image right, facing the camera */
+	p.kp[TR_KP_LSHO] = (tr_kp_t){ (int16_t)(cx + 40),
+		                          160,
+		                          200 }; /* anatomical left: image right, facing the camera */
 	p.kp[TR_KP_RSHO] = (tr_kp_t){ (int16_t)(cx - 40), 160, 200 };
 	p.kp[TR_KP_LHIP] = (tr_kp_t){ (int16_t)(cx + 30), 360, 200 };
 	p.kp[TR_KP_RHIP] = (tr_kp_t){ (int16_t)(cx - 30), 360, 200 };
@@ -105,9 +107,10 @@ int main(void)
 			continue;
 		}
 		assert(is_selfie(rot, tr_cam_mirror_reg(rot)));
-		assert(!is_selfie(rot, tr_cam_mirror_reg(rot) == TR_OV9281_REG_TIMING_FORMAT1
-					       ? TR_OV9281_REG_TIMING_FORMAT2
-					       : TR_OV9281_REG_TIMING_FORMAT1));
+		assert(!is_selfie(rot,
+		                  tr_cam_mirror_reg(rot) == TR_OV9281_REG_TIMING_FORMAT1
+		                      ? TR_OV9281_REG_TIMING_FORMAT2
+		                      : TR_OV9281_REG_TIMING_FORMAT1));
 	}
 
 	/* 2. A marked corner, the bench's TR_CAM_ROTATE=90: the scene's raw

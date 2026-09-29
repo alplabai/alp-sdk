@@ -18,7 +18,8 @@ static tr_box_t box(int16_t x, int16_t y, int16_t w, int16_t h, uint8_t conf)
 }
 
 #if !TR_CAM_MIRROR_X || !TR_CAM_FLIP_Y
-#error "this file must be compiled with -DTR_CAM_MIRROR_X=1 -DTR_CAM_FLIP_Y=1 (see tests/host/runner.sh)"
+#error \
+    "this file must be compiled with -DTR_CAM_MIRROR_X=1 -DTR_CAM_FLIP_Y=1 (see tests/host/runner.sh)"
 #endif
 
 int main(void)

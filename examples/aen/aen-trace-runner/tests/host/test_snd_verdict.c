@@ -16,9 +16,9 @@ static snd_stats_t good(void)
 	s.played_ms              = 23400u;
 	s.want_ms                = 23280u;
 	for (unsigned c = 0; c < 2u; c++) {
-		s.rms[0][c] = 30.0f, s.bin[0][c] = 0.05f;     /* room noise */
-		s.rms[1][c] = 1414.0f, s.bin[1][c] = 1.0e6f;  /* 2000 LSB tone */
-		s.rms[2][c] = 500.0f, s.bin[2][c] = 2.0f;     /* music */
+		s.rms[0][c] = 30.0f, s.bin[0][c] = 0.05f;    /* room noise */
+		s.rms[1][c] = 1414.0f, s.bin[1][c] = 1.0e6f; /* 2000 LSB tone */
+		s.rms[2][c] = 500.0f, s.bin[2][c] = 2.0f;    /* music */
 	}
 	return s;
 }
@@ -59,14 +59,16 @@ int main(void)
 	expect(&s, "playback slower than real time");
 	s = good(), s.rms[0][0] = s.rms[0][1] = 0.0f; /* digitally silent mics, tone + music "loud" */
 	expect(&s, "no live mic (silence window digitally zero)");
-	s = good(), s.bin[1][0] = s.bin[1][1] = 20.0f, s.rms[1][0] = s.rms[1][1] = 6.0f; /* only the 25 floor */
+	s = good(), s.bin[1][0] = s.bin[1][1] = 20.0f,
+	s.rms[1][0] = s.rms[1][1] = 6.0f; /* only the 25 floor */
 	expect(&s, "1 kHz tone not heard");
 	s = good(), s.bin[0][0] = s.bin[0][1] = 20.0f; /* only tone >= 100 x silence */
 	s.bin[1][0] = s.bin[1][1] = 1000.0f, s.rms[1][0] = s.rms[1][1] = 40.0f;
 	expect(&s, "1 kHz tone not heard");
 	s = good(), s.bin[1][0] = s.bin[1][1] = 1000.0f; /* only the 10%-of-power check (rms 1414) */
 	expect(&s, "1 kHz tone not heard");
-	s = good(), s.rms[0][0] = s.rms[0][1] = 1.0f, s.rms[2][0] = s.rms[2][1] = 4.0f; /* only the 5 LSB floor */
+	s = good(), s.rms[0][0] = s.rms[0][1] = 1.0f,
+	s.rms[2][0] = s.rms[2][1] = 4.0f; /* only the 5 LSB floor */
 	expect(&s, "music not heard");
 	s = good(), s.rms[2][0] = s.rms[2][1] = 40.0f; /* only music >= 2 x silence (30) */
 	expect(&s, "music not heard");

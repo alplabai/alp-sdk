@@ -29,10 +29,10 @@
 /* Output quantisation of MoveNet Lightning int8 v4 (Vela keeps I/O quant):
  * real = (q - zp) * scale; scales in Q16 cell units. The heatmaps are a
  * sigmoid at zp -128, scale 1/256, so (q + 128) is the score 0..255. */
-#define TR_MN_OFF_ZP       (-9)
-#define TR_MN_OFF_SCALE    13093 /* 0.19978105 cells */
-#define TR_MN_REG_ZP       (-21)
-#define TR_MN_REG_SCALE    45118 /* 0.68843985 cells */
+#define TR_MN_OFF_ZP    (-9)
+#define TR_MN_OFF_SCALE 13093 /* 0.19978105 cells */
+#define TR_MN_REG_ZP    (-21)
+#define TR_MN_REG_SCALE 45118 /* 0.68843985 cells */
 
 typedef struct {
 	const int8_t *centre;  /* [TR_MN_CELLS] */

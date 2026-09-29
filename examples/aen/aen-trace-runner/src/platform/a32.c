@@ -27,17 +27,20 @@
 /* Marker + the payload identity this image LAUNCHes, in .rodata so the
  * release packaging (a32/release/build-release.sh) can check an HE image
  * against the renderer it ships with (nm + objdump, no guessing). */
-const volatile uint32_t tr_a32_autolaunch_id[3] = {TR_A32_ENTRY, TR_A32_LEN, TR_A32_CRC}; /* volatile: read from ROM */
+const volatile uint32_t tr_a32_autolaunch_id[3] = { TR_A32_ENTRY,
+	                                                TR_A32_LEN,
+	                                                TR_A32_CRC }; /* volatile: read from ROM */
 #endif
 
-#define TR_OUT_TIMEOUT_MS  100  /* no out_seq this long: the A32 is late or gone */
+#define TR_OUT_TIMEOUT_MS 100 /* no out_seq this long: the A32 is late or gone */
 /* Poll period while waiting for out_seq: 100 us (one tick at
  * CONFIG_SYS_CLOCK_TICKS_PER_SEC=10000, pinned in prj.conf and asserted
  * below). A 1 ms poll cost up to 1 ms of the
  * 25 ms frame on every flip -- measured ~5 % missed vsyncs at a 22 ms A32
  * frame. */
 #define TR_POLL_US 100
-BUILD_ASSERT(CONFIG_SYS_CLOCK_TICKS_PER_SEC >= 1000000 / TR_POLL_US, "the 100 us polls need a >= 10 kHz tick");
+BUILD_ASSERT(CONFIG_SYS_CLOCK_TICKS_PER_SEC >= 1000000 / TR_POLL_US,
+             "the 100 us polls need a >= 10 kHz tick");
 /* Boot: how long tr_a32_boot() waits for the stub to come up (mailbox magic)
  * and settle before the game starts; past it the watchdog keeps checking at
  * every missed frame, so a later stub is still LAUNCHed. 2026W36-0009 cold boots
@@ -53,15 +56,18 @@ static volatile tr_mbox_t *const g_mbox = (volatile tr_mbox_t *)TR_MBOX_ADDR;
 /* Bench-readable over the AHB-AP (non-static so `nm` names them). */
 volatile uint32_t tr_a32_timeouts;     /* frames the A32 did not finish in TR_OUT_TIMEOUT_MS */
 volatile uint32_t tr_in_seq_published; /* in_seq of the last frame handed to the A32 */
-volatile uint32_t tr_flip_dropped;     /* finished frames never shown: bad out_fb or swap never landed */
-volatile uint32_t tr_a32_relaunches;   /* watchdog LAUNCH/HALT commands sent this boot (TR_M55_AUTOLAUNCH) */
-volatile uint32_t tr_a32_first_frame_us; /* last LAUNCH (or stub first seen) -> first frame, HE clock */
-volatile uint32_t tr_a32_pending_ms;     /* how long the command in flight has waited (0: none) */
+volatile uint32_t
+    tr_flip_dropped; /* finished frames never shown: bad out_fb or swap never landed */
+volatile uint32_t
+    tr_a32_relaunches; /* watchdog LAUNCH/HALT commands sent this boot (TR_M55_AUTOLAUNCH) */
+volatile uint32_t
+    tr_a32_first_frame_us;           /* last LAUNCH (or stub first seen) -> first frame, HE clock */
+volatile uint32_t tr_a32_pending_ms; /* how long the command in flight has waited (0: none) */
 /* Sum of out_ticks0 / out_ticks1 (CNTVCT, 100 MHz) over every frame that
  * landed: each A32 core's busy time, for the HUD perf panel (hud_l2.c). */
 volatile uint64_t tr_a32_busy_ticks[2];
 
-static uint32_t      g_out_seen; /* last out_seq taken */
+static uint32_t g_out_seen;  /* last out_seq taken */
 static tr_wd_t  g_wd;        /* src/ipc/tr_wd.h: first-frame / stall / backoff rules */
 static bool     g_link_ok;   /* SRAM1 answered: the mailbox may be touched */
 static bool     g_in_flight; /* a frame has been published this boot */
@@ -110,7 +116,8 @@ static void log_first_frame(uint64_t waited_us)
 	const volatile uint32_t *rt = (const volatile uint32_t *)TR_RENDER_T_ADDR;
 
 	tr_a32_first_frame_us = (uint32_t)waited_us;
-	printk("a32     : first frame %u ms after %s\n", (unsigned)(waited_us / 1000u),
+	printk("a32     : first frame %u ms after %s\n",
+	       (unsigned)(waited_us / 1000u),
 	       g_wd.last_cmd == TR_CTRL_LAUNCH ? "our LAUNCH" : "the stub came up");
 
 	/* Only a stub and renderer that wrote their stamps this LAUNCH: marker,
@@ -121,14 +128,19 @@ static void log_first_frame(uint64_t waited_us)
 	uint32_t frame = ticks_us(rt[1], rt[2]);
 	uint32_t total = ticks_us(st[TR_STUB_T_LAUNCH], rt[2]);
 
-	if (*(const volatile uint32_t *)TR_RENDER_STATS_ADDR != TR_RENDER_STATS_MARKER || rt[0] == 0u || rt[1] == 0u ||
-	    rt[2] == 0u || st[TR_STUB_T_LAUNCH] == 0u || st[TR_STUB_T_JUMP] == 0u || copy > TR_STAMP_MAX_US ||
-	    crc > TR_STAMP_MAX_US || init > TR_STAMP_MAX_US || frame > TR_STAMP_MAX_US || total > TR_STAMP_MAX_US) {
+	if (*(const volatile uint32_t *)TR_RENDER_STATS_ADDR != TR_RENDER_STATS_MARKER || rt[0] == 0u ||
+	    rt[1] == 0u || rt[2] == 0u || st[TR_STUB_T_LAUNCH] == 0u || st[TR_STUB_T_JUMP] == 0u ||
+	    copy > TR_STAMP_MAX_US || crc > TR_STAMP_MAX_US || init > TR_STAMP_MAX_US ||
+	    frame > TR_STAMP_MAX_US || total > TR_STAMP_MAX_US) {
 		return;
 	}
 	printk("a32     : A32 us: MRAM copy %u, CRC+sync %u, jump->init done %u, init->first frame %u, "
 	       "launch->first frame %u\n",
-	       (unsigned)copy, (unsigned)crc, (unsigned)init, (unsigned)frame, (unsigned)total);
+	       (unsigned)copy,
+	       (unsigned)crc,
+	       (unsigned)init,
+	       (unsigned)frame,
+	       (unsigned)total);
 }
 
 #if TR_M55_AUTOLAUNCH
@@ -143,7 +155,8 @@ static bool stub_alive(void)
  * release stub self-LAUNCHes with its own header's values). */
 static bool stub_image_ours(void)
 {
-	return g_mbox->ctrl_entry == tr_a32_autolaunch_id[0] && g_mbox->ctrl_len == tr_a32_autolaunch_id[1] &&
+	return g_mbox->ctrl_entry == tr_a32_autolaunch_id[0] &&
+	       g_mbox->ctrl_len == tr_a32_autolaunch_id[1] &&
 	       g_mbox->ctrl_crc == tr_a32_autolaunch_id[2];
 }
 
@@ -156,14 +169,18 @@ static void wd_poll(bool missed)
 	static uint32_t    last_pending_s;
 	tr_wd_why_t        why;
 	uint32_t           state = g_mbox->stub_state, ctrl = g_mbox->ctrl_cmd;
-	uint64_t           now   = now_us();
-	uint32_t cmd = tr_wd_poll(&g_wd, stub_alive(), state, ctrl, stub_image_ours(), missed, now, &why);
+	uint64_t           now = now_us();
+	uint32_t           cmd =
+	    tr_wd_poll(&g_wd, stub_alive(), state, ctrl, stub_image_ours(), missed, now, &why);
 	uint32_t pending_ms = (uint32_t)(tr_wd_pending_us(&g_wd, now) / 1000u);
 
 	tr_a32_pending_ms = pending_ms;
 	if (pending_ms / 1000u != last_pending_s && pending_ms >= 1000u) {
-		printk("a32     : watchdog: %s for %u ms (stub_state=%u ctrl_cmd=%u)%s\n", tr_wd_why_str(why),
-		       (unsigned)pending_ms, state, ctrl,
+		printk("a32     : watchdog: %s for %u ms (stub_state=%u ctrl_cmd=%u)%s\n",
+		       tr_wd_why_str(why),
+		       (unsigned)pending_ms,
+		       state,
+		       ctrl,
 		       pending_ms >= 5000u ? " -- the A32 may be wedged: power-cycle" : "");
 	}
 	last_pending_s = pending_ms / 1000u;
@@ -178,14 +195,21 @@ static void wd_poll(bool missed)
 		g_mbox->ctrl_cmd = cmd;
 		dsb();
 		tr_a32_relaunches++;
-		printk("a32     : watchdog %s #%u: %s (stub_state=%u, launches %u", cmd == TR_CTRL_LAUNCH ? "LAUNCH" : "HALT",
-		       tr_a32_relaunches, tr_wd_why_str(why), state, g_wd.tries);
+		printk("a32     : watchdog %s #%u: %s (stub_state=%u, launches %u",
+		       cmd == TR_CTRL_LAUNCH ? "LAUNCH" : "HALT",
+		       tr_a32_relaunches,
+		       tr_wd_why_str(why),
+		       state,
+		       g_wd.tries);
 		if (why == TR_WD_HALT_FOREIGN) {
-			printk(", running entry 0x%08x len %u crc 0x%08x", g_mbox->ctrl_entry, g_mbox->ctrl_len,
+			printk(", running entry 0x%08x len %u crc 0x%08x",
+			       g_mbox->ctrl_entry,
+			       g_mbox->ctrl_len,
 			       g_mbox->ctrl_crc);
 		}
 		if (cmd == TR_CTRL_LAUNCH) {
-			printk(", first frame due in %u ms", (unsigned)((tr_wd_deadline_us(&g_wd) - now) / 1000u));
+			printk(", first frame due in %u ms",
+			       (unsigned)((tr_wd_deadline_us(&g_wd) - now) / 1000u));
 		}
 		printk(")\n");
 	} else if (why != last_why) {
@@ -218,7 +242,8 @@ static bool sram1_answers(void)
 
 	if (before != 0u) {
 		printk("a32     : clearing an earlier BFSR record 0x%02x (BFAR 0x%08x) to probe SRAM1\n",
-		       (unsigned)(before >> SCB_CFSR_BUSFAULTSR_Pos), (unsigned)SCB->BFAR);
+		       (unsigned)(before >> SCB_CFSR_BUSFAULTSR_Pos),
+		       (unsigned)SCB->BFAR);
 		SCB->CFSR = before;
 		before    = 0u;
 	}
@@ -316,7 +341,7 @@ void tr_a32_boot(void)
 	 * one (tr_wd.h rule 3). A renderer that never delivers is the
 	 * watchdog's, at every missed frame. The dev flow does none of this:
 	 * there the bench LAUNCHes. */
-	int64_t t0 = k_uptime_get();
+	int64_t t0   = k_uptime_get();
 	bool    seen = false;
 
 	for (;;) {
@@ -325,8 +350,11 @@ void tr_a32_boot(void)
 
 		if (!seen && stub_alive()) {
 			seen = true;
-			printk("a32     : stub alive %lld ms after the boot wait began (HE uptime %lld ms), stub_state=%u\n",
-			       (long long)waited, (long long)(t0 + waited), g_mbox->stub_state);
+			printk("a32     : stub alive %lld ms after the boot wait began (HE uptime %lld ms), "
+			       "stub_state=%u\n",
+			       (long long)waited,
+			       (long long)(t0 + waited),
+			       g_mbox->stub_state);
 		}
 		wd_poll(false);
 		if (tr_a32_relaunches != sent) {
@@ -339,17 +367,22 @@ void tr_a32_boot(void)
 			break;
 		}
 		if (waited >= TR_STUB_BOOT_WAIT_MS) {
-			printk("a32     : stub not ready after %d ms (magic=0x%08x stub_state=%u) -- starting anyway, "
+			printk("a32     : stub not ready after %d ms (magic=0x%08x stub_state=%u) -- starting "
+			       "anyway, "
 			       "the watchdog LAUNCHes it when it is\n",
-			       TR_STUB_BOOT_WAIT_MS, g_mbox->magic, g_mbox->stub_state);
+			       TR_STUB_BOOT_WAIT_MS,
+			       g_mbox->magic,
+			       g_mbox->stub_state);
 			break;
 		}
 		k_msleep(1);
 	}
 #endif
 	g_out_seen = g_mbox->out_seq;
-	printk("a32     : m55 boot #%u stub_state=%u in_seq=%u\n", g_mbox->m55_boot_count,
-	       g_mbox->stub_state, g_mbox->in_seq);
+	printk("a32     : m55 boot #%u stub_state=%u in_seq=%u\n",
+	       g_mbox->m55_boot_count,
+	       g_mbox->stub_state,
+	       g_mbox->in_seq);
 }
 
 bool tr_a32_link_ok(void)
@@ -399,8 +432,11 @@ void tr_a32_flush(void)
 	tr_a32_timeouts++;
 	if (!g_timeout_printed) {
 		g_timeout_printed = true;
-		printk("a32     : no out_seq for %d ms (in_seq=%u stub_state=%u) -- holding the last frame\n",
-		       TR_OUT_TIMEOUT_MS, tr_in_seq_published, g_mbox->stub_state);
+		printk(
+		    "a32     : no out_seq for %d ms (in_seq=%u stub_state=%u) -- holding the last frame\n",
+		    TR_OUT_TIMEOUT_MS,
+		    tr_in_seq_published,
+		    g_mbox->stub_state);
 	}
 #if TR_M55_AUTOLAUNCH
 	/* Release flow: tr_wd.h decides -- a first frame gets its own, longer

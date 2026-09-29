@@ -15,12 +15,12 @@ static tr_pose_t figure(int cx, int top, int feet, uint8_t score)
 	int       h = feet - top;
 	tr_pose_t p;
 	static const struct {
-		int8_t dx;
+		int8_t  dx;
 		uint8_t fy; /* % of height below the head top */
 	} body[TR_POSE_KP] = {
-		{ 0, 7 },    { 4, 5 },    { -4, 5 },   { 8, 6 },    { -8, 6 },   { 25, 20 },
-		{ -25, 20 }, { 30, 35 },  { -30, 35 }, { 30, 48 },  { -30, 48 }, { 15, 52 },
-		{ -15, 52 }, { 15, 75 },  { -15, 75 }, { 15, 100 }, { -15, 100 },
+		{ 0, 7 },    { 4, 5 },   { -4, 5 },   { 8, 6 },    { -8, 6 },    { 25, 20 },
+		{ -25, 20 }, { 30, 35 }, { -30, 35 }, { 30, 48 },  { -30, 48 },  { 15, 52 },
+		{ -15, 52 }, { 15, 75 }, { -15, 75 }, { 15, 100 }, { -15, 100 },
 	};
 
 	for (int k = 0; k < TR_POSE_KP; k++) {
@@ -47,22 +47,22 @@ static void box_geometry(void)
 
 	/* The torso box (track.h): shoulders at 20 %, hips at 52 % of 300. */
 	assert(b.valid && b.confidence == 150);
-	assert(b.x == 320 - 25 && b.w == 50);     /* torso centre x, shoulder width */
+	assert(b.x == 320 - 25 && b.w == 50);      /* torso centre x, shoulder width */
 	assert(b.y == 80 + 60 && b.h == 156 - 60); /* shoulder-mid y, torso length */
 
 	/* Arms up, a head turn, legs out of frame: none of it moves the box. */
-	tr_pose_t up = p;
-	up.kp[TR_KP_LWRI] = (tr_kp_t){ 420, 20, 200 };
-	up.kp[TR_KP_RWRI] = (tr_kp_t){ 220, 20, 200 };
-	up.kp[TR_KP_NOSE] = (tr_kp_t){ 360, 70, 200 };
+	tr_pose_t up            = p;
+	up.kp[TR_KP_LWRI]       = (tr_kp_t){ 420, 20, 200 };
+	up.kp[TR_KP_RWRI]       = (tr_kp_t){ 220, 20, 200 };
+	up.kp[TR_KP_NOSE]       = (tr_kp_t){ 360, 70, 200 };
 	up.kp[TR_KP_LANK].score = 10;
 	up.kp[TR_KP_RKNE].score = 10;
-	tr_box_t bu = tr_pose_box(&up);
+	tr_box_t bu             = tr_pose_box(&up);
 	assert(bu.x == b.x && bu.w == b.w && bu.y == b.y && bu.h == b.h);
 
 	/* Hips out of frame: a shoulder-only box, h = 0 (track.c scales it by
 	 * the shoulder width). */
-	tr_pose_t cut = p;
+	tr_pose_t cut            = p;
 	cut.kp[TR_KP_LHIP].score = 10;
 	cut.kp[TR_KP_RHIP].score = 10;
 	tr_box_t bc              = tr_pose_box(&cut);
@@ -82,7 +82,7 @@ static void no_person(void)
 	assert(!tr_pose_box(&p).valid);
 
 	/* Hips without a shoulder is not a body; a shoulder is (a close player). */
-	p = figure(320, 80, 380, 10);
+	p                      = figure(320, 80, 380, 10);
 	p.kp[TR_KP_LHIP].score = 200;
 	p.kp[TR_KP_RHIP].score = 200;
 	assert(!tr_pose_box(&p).valid);

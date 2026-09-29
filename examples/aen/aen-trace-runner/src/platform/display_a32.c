@@ -28,13 +28,14 @@
 #include "../ipc/tr_flip.h"
 #include "display.h"
 
-#define TR_FB_BYTES                                                                                \
+#define TR_FB_BYTES \
 	((size_t)DT_PROP(DT_NODELABEL(cdc200), width) * DT_PROP(DT_NODELABEL(cdc200), height) * 2u)
 
 /* FB A is the SRAM0 partition base (plan section 4); FB B is SRAM1
  * 0x02600000 (tr_mbox.h), outside every DT partition -- cdc200_swap_fb()
  * checks only the size. */
-BUILD_ASSERT(DT_REG_ADDR(DT_NODELABEL(sram0)) == TR_FB_A, "TR_FB_A must be the sram0 partition base");
+BUILD_ASSERT(DT_REG_ADDR(DT_NODELABEL(sram0)) == TR_FB_A,
+             "TR_FB_A must be the sram0 partition base");
 BUILD_ASSERT(TR_FB_BYTES <= DT_REG_SIZE(DT_NODELABEL(sram0)), "FB A must fit the sram0 partition");
 BUILD_ASSERT(TR_FB_A + TR_FB_BYTES <= TR_FB_B, "FB A must end before FB B");
 BUILD_ASSERT(TR_FB_BYTES == TR_FB_SIZE, "panel size != tr_mbox.h TR_FB_SIZE");
@@ -98,26 +99,36 @@ int tr_display_open(void)
 		cdc200_get_framebuffer(g_cdc, CDC_LAYER_1, &fb);
 	}
 	if (!tr_fb_valid((uint32_t)(uintptr_t)fb.fb_addr) || fb.fb_size != TR_FB_BYTES) {
-		printk("RESULT FAIL: CDC200 not flippable (fb=%p size=%u want=%u)\n", (void *)fb.fb_addr,
-		       (unsigned)fb.fb_size, (unsigned)TR_FB_BYTES);
+		printk("RESULT FAIL: CDC200 not flippable (fb=%p size=%u want=%u)\n",
+		       (void *)fb.fb_addr,
+		       (unsigned)fb.fb_size,
+		       (unsigned)TR_FB_BYTES);
 		/* Which half is silent: the controller (CDC_EN in GLB_CTRL bit 0,
 		 * the line IRQ unmasked / latched, the scan position moving) or the
 		 * NVIC (the line IRQ enabled / pending on this core). */
-		uintptr_t r = DT_REG_ADDR(DT_NODELABEL(cdc200));
+		uintptr_t r    = DT_REG_ADDR(DT_NODELABEL(cdc200));
 		uint32_t  pos0 = sys_read32(r + CDC_POS_STAT);
 
 		k_busy_wait(1000);
-		printk("display : CDC200 GLB_CTRL 0x%08x IRQ_MASK0 0x%08x IRQ_STATUS0 0x%08x POS 0x%08x -> 0x%08x "
+		printk("display : CDC200 GLB_CTRL 0x%08x IRQ_MASK0 0x%08x IRQ_STATUS0 0x%08x POS 0x%08x -> "
+		       "0x%08x "
 		       "irq %d en %d pend %d\n",
-		       sys_read32(r + CDC_GLB_CTRL), sys_read32(r + CDC_IRQ_MASK0), sys_read32(r + CDC_IRQ_STATUS0), pos0,
-		       sys_read32(r + CDC_POS_STAT), DT_IRQN(DT_NODELABEL(cdc200)),
-		       irq_is_enabled(DT_IRQN(DT_NODELABEL(cdc200))), NVIC_GetPendingIRQ(DT_IRQN(DT_NODELABEL(cdc200))));
+		       sys_read32(r + CDC_GLB_CTRL),
+		       sys_read32(r + CDC_IRQ_MASK0),
+		       sys_read32(r + CDC_IRQ_STATUS0),
+		       pos0,
+		       sys_read32(r + CDC_POS_STAT),
+		       DT_IRQN(DT_NODELABEL(cdc200)),
+		       irq_is_enabled(DT_IRQN(DT_NODELABEL(cdc200))),
+		       NVIC_GetPendingIRQ(DT_IRQN(DT_NODELABEL(cdc200))));
 		alp_display_close(g_disp);
 		g_disp = NULL;
 		return -2;
 	}
 
-	printk("display : %ux%u RGB565, A32 renders, live=%p\n", g_caps.width, g_caps.height,
+	printk("display : %ux%u RGB565, A32 renders, live=%p\n",
+	       g_caps.width,
+	       g_caps.height,
 	       (void *)fb.fb_addr);
 	return 0;
 }

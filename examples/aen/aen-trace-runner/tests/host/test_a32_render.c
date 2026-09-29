@@ -68,6 +68,7 @@ int main(void)
 		clear_below_view(fb);
 		assert(render_fb_crc(fb) == render_golden_crc);
 	}
-	printf("a32 render: golden crc %08x ok, per band ok, band order free\n", (unsigned)render_golden_crc);
+	printf("a32 render: golden crc %08x ok, per band ok, band order free\n",
+	       (unsigned)render_golden_crc);
 	return 0;
 }

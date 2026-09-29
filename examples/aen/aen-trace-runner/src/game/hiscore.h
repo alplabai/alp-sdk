@@ -66,8 +66,8 @@ void tr_hs_arm(tr_score_t *s, const tr_hiscore_t *t);
 #define TR_INI_TIMEOUT_FRAMES TR_HZ_FRAMES(800) /* 20 s at most, however busy */
 /* A tilt held left / right past the steer edge repeats: after 0.4 s, then
  * every 0.1 s -- the farthest symbol (18 steps either way) in ~2 s. */
-#define TR_INI_REPEAT_DELAY   TR_HZ_FRAMES(16)
-#define TR_INI_REPEAT_EVERY   TR_HZ_FRAMES(4)
+#define TR_INI_REPEAT_DELAY TR_HZ_FRAMES(16)
+#define TR_INI_REPEAT_EVERY TR_HZ_FRAMES(4)
 
 /* tr_initials_t.why */
 #define TR_INI_ENTERING 0u

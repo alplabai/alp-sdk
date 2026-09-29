@@ -25,7 +25,8 @@ tr_intent_t tr_tilt_intent(tr_tilt_t *t, int16_t x_q8, int16_t y_q8)
 	if (abs16(x_q8) < TR_TILT_DEAD_Q8) {
 		t->steer_latched = false; /* back to level: the next tilt may fire again */
 	} else if (!t->steer_latched && abs16(x_q8) >= TR_TILT_EDGE_Q8) {
-		out.lane_delta   = (int8_t)(((x_q8 < 0) ? -1 : 1) * TR_TILT_STEER_SIGN); /* tilt.h: the mounting */
+		out.lane_delta =
+		    (int8_t)(((x_q8 < 0) ? -1 : 1) * TR_TILT_STEER_SIGN); /* tilt.h: the mounting */
 		t->steer_latched = true;
 	}
 

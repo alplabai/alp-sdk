@@ -10,8 +10,10 @@ int main(void)
 {
 	static uint8_t ramp[1024], mix[4097];
 
-	for (unsigned i = 0; i < sizeof(ramp); i++) ramp[i] = (uint8_t)i;
-	for (unsigned i = 0; i < sizeof(mix); i++) mix[i] = (uint8_t)(i * 37u + 11u);
+	for (unsigned i = 0; i < sizeof(ramp); i++)
+		ramp[i] = (uint8_t)i;
+	for (unsigned i = 0; i < sizeof(mix); i++)
+		mix[i] = (uint8_t)(i * 37u + 11u);
 
 	assert(tr_crc32(0, "", 0) == 0x00000000u);
 	assert(tr_crc32(0, "a", 1) == 0xE8B7BE43u);

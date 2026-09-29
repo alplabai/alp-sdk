@@ -20,14 +20,16 @@
 
 #include "../../src/ipc/tr_hp_dbg.h"
 
-static void noop_barrier(void) { }
+static void noop_barrier(void)
+{
+}
 
 /* fix round 12: a barrier that mutates the target's own seq on its FIRST
  * call (used by test 8 below to simulate a write starting mid-read) --
  * file-scope statics, the same pattern g_script/g_i already use above for
  * mock_read, not a nested function (not portable C11). */
 static volatile hp_dbg_t *g_race_target;
-static int                 g_race_calls;
+static int                g_race_calls;
 
 static void race_barrier(void)
 {
@@ -53,8 +55,8 @@ int main(void)
 	{
 		static const uint64_t stable[] = { 42u, 42u, 42u, 42u };
 
-		g_script = stable;
-		g_i      = 0;
+		g_script   = stable;
+		g_i        = 0;
 		uint64_t v = tr_hp_dbg_read_stable(mock_read, NULL);
 
 		assert(v == 42u);
@@ -68,8 +70,8 @@ int main(void)
 	{
 		static const uint64_t torn_once[] = { 100u, 101u, 200u, 200u };
 
-		g_script = torn_once;
-		g_i      = 0;
+		g_script   = torn_once;
+		g_i        = 0;
 		uint64_t v = tr_hp_dbg_read_stable(mock_read, NULL);
 
 		assert(v == 200u); /* the first STABLE pair, not the torn 100/101 */
@@ -81,8 +83,8 @@ int main(void)
 	{
 		static const uint64_t torn_twice[] = { 1u, 2u, 3u, 4u, 5u, 5u };
 
-		g_script = torn_twice;
-		g_i      = 0;
+		g_script   = torn_twice;
+		g_i        = 0;
 		uint64_t v = tr_hp_dbg_read_stable(mock_read, NULL);
 
 		assert(v == 5u);
@@ -104,7 +106,7 @@ int main(void)
 	 * field values round-trip. */
 	{
 		volatile hp_dbg_t s;
-		hp_dbg_t           out;
+		hp_dbg_t          out;
 
 		memset((void *)&s, 0, sizeof(s));
 		s.magic       = TR_HP_DBG_MAGIC;
@@ -121,7 +123,7 @@ int main(void)
 	 * rejection itself is). */
 	{
 		volatile hp_dbg_t s;
-		hp_dbg_t           out;
+		hp_dbg_t          out;
 
 		memset((void *)&s, 0, sizeof(s));
 		s.seq = 7u; /* odd */
@@ -134,7 +136,7 @@ int main(void)
 	 * tr_pslot_write()'s own protocol. */
 	{
 		volatile hp_dbg_t s;
-		hp_dbg_t           out;
+		hp_dbg_t          out;
 
 		memset((void *)&s, 0, sizeof(s));
 		s.seq = 4u;
@@ -162,13 +164,13 @@ int main(void)
 	 * real function must reject it. */
 	{
 		volatile hp_dbg_t s;
-		hp_dbg_t           out;
+		hp_dbg_t          out;
 
 		memset((void *)&s, 0, sizeof(s));
-		s.seq          = 8u; /* even */
-		s.loop_hz_x10  = 251u;
-		g_race_target  = &s;
-		g_race_calls   = 0;
+		s.seq         = 8u; /* even */
+		s.loop_hz_x10 = 251u;
+		g_race_target = &s;
+		g_race_calls  = 0;
 
 		assert(!tr_hp_dbg_read(&s, &out, race_barrier));
 		assert(g_race_calls == 2); /* both barriers ran -- the copy itself was not skipped */

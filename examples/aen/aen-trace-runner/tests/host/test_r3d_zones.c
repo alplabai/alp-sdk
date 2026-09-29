@@ -97,7 +97,9 @@ static void dump(const char *name)
 	assert(f);
 	fprintf(f, "P6\n%d %d\n255\n", W, H);
 	for (int i = 0; i < W * H; i++) {
-		uint8_t rgb[3] = {(uint8_t)((fb[i] >> 11) << 3), (uint8_t)(((fb[i] >> 5) & 63) << 2), (uint8_t)((fb[i] & 31) << 3)};
+		uint8_t rgb[3] = { (uint8_t)((fb[i] >> 11) << 3),
+			               (uint8_t)(((fb[i] >> 5) & 63) << 2),
+			               (uint8_t)((fb[i] & 31) << 3) };
 
 		fwrite(rgb, 1, 3, f);
 	}
@@ -130,7 +132,9 @@ static int16_t mesh_min_y(const tr_mesh_t *m)
 
 static float delta565(uint16_t a, uint16_t b)
 {
-	int d[3] = {(int)(a >> 11) - (int)(b >> 11), (int)((a >> 5) & 63) - (int)((b >> 5) & 63), (int)(a & 31) - (int)(b & 31)};
+	int d[3] = { (int)(a >> 11) - (int)(b >> 11),
+		         (int)((a >> 5) & 63) - (int)((b >> 5) & 63),
+		         (int)(a & 31) - (int)(b & 31) };
 	int m    = 0;
 
 	for (int k = 0; k < 3; k++) {
@@ -162,7 +166,8 @@ int main(void)
 			render(&cam, in, NULL);
 			assert(crc32(fb, sizeof(fb)) == TR_SCENE_GOLDEN_CRC);
 		}
-		printf("zones: no TR_FLAG_ZONE, and zone 0 without a gate == the scene golden %08x\n", TR_SCENE_GOLDEN_CRC);
+		printf("zones: no TR_FLAG_ZONE, and zone 0 without a gate == the scene golden %08x\n",
+		       TR_SCENE_GOLDEN_CRC);
 	}
 
 	/* 2. The gate and the blend, as the HE ships them (tr_zone_t stepped
@@ -175,7 +180,7 @@ int main(void)
 		tr_zone_t z;
 		uint32_t  ph = 0, frames = 0, blend = 0;
 		float     t_prev = 0.0f;
-		tr_bg_t   b_prev = {0};
+		tr_bg_t   b_prev = { 0 };
 		int       have = 0, entered = 0;
 
 		tr_zone_reset(&z);
@@ -231,8 +236,11 @@ int main(void)
 		}
 		assert(entered == 1 && z.gate_y == TR_ZONE_NO_GATE && t_prev == 1.0f);
 		assert(blend >= 24u && blend <= 40u); /* ~1 s at 30 Hz */
-		printf("zones: %u -> %u blend over %u of %u frames at 30 Hz, no step\n", (unsigned)z0, (unsigned)z.zone,
-		       (unsigned)blend, (unsigned)frames);
+		printf("zones: %u -> %u blend over %u of %u frames at 30 Hz, no step\n",
+		       (unsigned)z0,
+		       (unsigned)z.zone,
+		       (unsigned)blend,
+		       (unsigned)frames);
 	}
 
 	/* 3. Every zone's parts: on the board, far LODs cheaper, the right-hand
@@ -273,13 +281,16 @@ int main(void)
 
 			tr_scene_init(&s);
 			for (uint32_t t = 0; t < 600; t += 7) {
-				int16_t       gy = (t / 7) % 3 == 0 ? (int16_t)(TR_ZONE_GATE_Y + (int32_t)(t * 3u % 2470u)) : TR_ZONE_NO_GATE;
+				int16_t       gy = (t / 7) % 3 == 0
+				                       ? (int16_t)(TR_ZONE_GATE_Y + (int32_t)(t * 3u % 2470u))
+				                       : TR_ZONE_NO_GATE;
 				tr_frame_in_t in = zone_in(t, zn, gy);
 
 				if ((t / 7) % 5 == 4) { /* all 16 slots live obstacles, near */
 					for (int i = 0; i < 16; i++) {
-						in.ents[i] = (tr_pkt_ent_t){(uint8_t)(1 + (i & 1) * 2), (uint8_t)(i % 3), (uint8_t)(i & 1), 0,
-									    (int16_t)(700 + 25 * i), 0};
+						in.ents[i] = (tr_pkt_ent_t){ (uint8_t)(1 + (i & 1) * 2), (uint8_t)(i % 3),
+							                         (uint8_t)(i & 1),           0,
+							                         (int16_t)(700 + 25 * i),    0 };
 					}
 				}
 				in.lane = (uint8_t)((t / 50) % 3);
@@ -294,7 +305,9 @@ int main(void)
 			}
 			/* the cull never changes a pixel (tr_scene_wall_r huge = off) */
 			for (int f = 0; f < 6; f++) {
-				tr_frame_in_t in = zone_in(200u + 37u * (uint32_t)f, zn, f & 1 ? (int16_t)(300 + 150 * f) : TR_ZONE_NO_GATE);
+				tr_frame_in_t in = zone_in(200u + 37u * (uint32_t)f,
+				                           zn,
+				                           f & 1 ? (int16_t)(300 + 150 * f) : TR_ZONE_NO_GATE);
 
 				tr_scene_init(&s);
 				tr_scene_step(&s, &in);
@@ -309,8 +322,12 @@ int main(void)
 				render(&cam, &in, NULL);
 				assert(memcmp(ref, fb, sizeof(fb)) == 0);
 			}
-			printf("zones: %-13s %u tris mean, %u max, max band bin %u of %u; culled == unculled\n", tr_zone_name(zn),
-			       (unsigned)(sum / nf), (unsigned)most, (unsigned)worst, TR_BIN_MAX);
+			printf("zones: %-13s %u tris mean, %u max, max band bin %u of %u; culled == unculled\n",
+			       tr_zone_name(zn),
+			       (unsigned)(sum / nf),
+			       (unsigned)most,
+			       (unsigned)worst,
+			       TR_BIN_MAX);
 			assert(worst < TR_BIN_MAX);
 			worst_all = worst > worst_all ? worst : worst_all;
 		}
@@ -379,15 +396,19 @@ int main(void)
 
 			tr_scene_init(&s);
 			for (uint32_t t = 0; t < 300; t += 10) {
-				tr_frame_in_t in = zn < TR_ZONES ? zone_in(t, zn, TR_ZONE_NO_GATE)
-								 : zone_in(t, (uint8_t)(zn - TR_ZONES), (int16_t)(TR_ZONE_GATE_Y + (int32_t)t * 8));
+				tr_frame_in_t in = zn < TR_ZONES
+				                       ? zone_in(t, zn, TR_ZONE_NO_GATE)
+				                       : zone_in(t,
+				                                 (uint8_t)(zn - TR_ZONES),
+				                                 (int16_t)(TR_ZONE_GATE_Y + (int32_t)t * 8));
 
 				memset(prof, 0, sizeof(prof));
 				tr_scene_step(&s, &in);
 				tr_scene_build(&s, &in, &cam, &dl);
 				render(&cam, &in, NULL);
 				px_tex += prof[TR_PROF_NOZ_TEX].px;
-				px_s += prof[TR_PROF_GOURAUD].px + prof[TR_PROF_FLAT].px + prof[TR_PROF_NOZ_FILL].px;
+				px_s +=
+				    prof[TR_PROF_GOURAUD].px + prof[TR_PROF_FLAT].px + prof[TR_PROF_NOZ_FILL].px;
 				spans += prof[TR_PROF_GOURAUD].n + prof[TR_PROF_FLAT].n + prof[TR_PROF_NOZ_FILL].n;
 				rows += prof[TR_PROF_TRI].px;
 				tris += dl.n, nf++;
@@ -395,16 +416,24 @@ int main(void)
 			if (zn == 0) { /* calibrate: the board's spans cost its measured 3.06 ms/core */
 				span_cyc = (3.06 * 800e3 * 2.0 * (double)nf - (double)px_s * 4.5) / (double)spans;
 			}
-			double cyc = (double)px_tex * 21.4 + (double)px_s * 4.5 + (double)spans * span_cyc + (double)rows * 134.0 +
-				     (double)tris * 1.53 * 800.0;
-			double ms = cyc / 800e3 / (double)nf / 2.0;
+			double cyc = (double)px_tex * 21.4 + (double)px_s * 4.5 + (double)spans * span_cyc +
+			             (double)rows * 134.0 + (double)tris * 1.53 * 800.0;
+			double ms  = cyc / 800e3 / (double)nf / 2.0;
 
 			base = zn == 0 ? ms : base;
-			printf("zones: cost %-13s%s tex %6.0f px, spans %6.0f px in %5.0f, %5.0f rows, %4.0f tris a frame: "
-			       "%.2f ms/core est (%+.2f vs the board; span %.0f cyc)\n", tr_zone_name(zn % TR_ZONES),
-			       zn < TR_ZONES ? "      " : " +gate", (double)px_tex / (double)nf,
-			       (double)px_s / (double)nf, (double)spans / (double)nf, (double)rows / (double)nf,
-			       (double)tris / (double)nf, ms, ms - base, span_cyc);
+			printf("zones: cost %-13s%s tex %6.0f px, spans %6.0f px in %5.0f, %5.0f rows, %4.0f "
+			       "tris a frame: "
+			       "%.2f ms/core est (%+.2f vs the board; span %.0f cyc)\n",
+			       tr_zone_name(zn % TR_ZONES),
+			       zn < TR_ZONES ? "      " : " +gate",
+			       (double)px_tex / (double)nf,
+			       (double)px_s / (double)nf,
+			       (double)spans / (double)nf,
+			       (double)rows / (double)nf,
+			       (double)tris / (double)nf,
+			       ms,
+			       ms - base,
+			       span_cyc);
 			assert(ms - base < 4.0); /* the P15 budget: ~+4 ms/core over the board */
 		}
 	}

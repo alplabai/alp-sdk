@@ -47,10 +47,10 @@ int main(void)
 	 * integer truncation, which is the real hardware's own quantisation,
 	 * not a bug in this math). */
 	{
-		int32_t bus_mv    = tr_ina236_bus_mv(3188);
-		int32_t shunt_uv  = tr_ina236_shunt_uv(816 /* 2.04 mV / 2.5 uV */, false);
+		int32_t bus_mv     = tr_ina236_bus_mv(3188);
+		int32_t shunt_uv   = tr_ina236_shunt_uv(816 /* 2.04 mV / 2.5 uV */, false);
 		int32_t current_ua = tr_ina236_current_ua(shunt_uv, 0.020f);
-		int32_t power_mw  = tr_ina236_power_mw(bus_mv, current_ua);
+		int32_t power_mw   = tr_ina236_power_mw(bus_mv, current_ua);
 
 		assert(bus_mv == 5100);
 		assert(shunt_uv == 2040);
@@ -65,8 +65,9 @@ int main(void)
 	assert(tr_ina236_config_ok(TR_INA236_CONFIG));
 	assert(tr_ina236_config_ok(TR_INA236_CONFIG | 0x8000u)); /* RST/reserved bits are not ours */
 	assert(!tr_ina236_config_ok(0x4127u));                   /* power-on reset: AVG 1 */
-	assert(!tr_ina236_config_ok(TR_INA236_CONFIG | 1u << 12)); /* ADCRANGE 1: a 4x shunt LSB error */
-	assert(!tr_ina236_config_ok(0xFFFFu));                   /* a bus reading all ones */
+	assert(
+	    !tr_ina236_config_ok(TR_INA236_CONFIG | 1u << 12)); /* ADCRANGE 1: a 4x shunt LSB error */
+	assert(!tr_ina236_config_ok(0xFFFFu));                  /* a bus reading all ones */
 
 	return 0;
 }

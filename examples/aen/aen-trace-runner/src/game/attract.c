@@ -13,11 +13,13 @@ static uint32_t rng_next(uint32_t *rng)
 
 void tr_attract_init(tr_attract_t *a)
 {
-	*a     = (tr_attract_t){ 0 };
-	a->rng = 0x6a09e667u; /* arbitrary nonzero seed -- see rng_next()'s LCG, which locks at 0 forever from 0. */
+	*a = (tr_attract_t){ 0 };
+	a->rng =
+	    0x6a09e667u; /* arbitrary nonzero seed -- see rng_next()'s LCG, which locks at 0 forever from 0. */
 }
 
-tr_attract_ev_t tr_attract_step(tr_attract_t *a, tr_track_t *track, bool player_present, uint8_t game_lane)
+tr_attract_ev_t
+tr_attract_step(tr_attract_t *a, tr_track_t *track, bool player_present, uint8_t game_lane)
 {
 	if (!a->active) {
 		if (player_present) {
@@ -130,7 +132,7 @@ bool tr_attract_pace(uint32_t *phase_q16)
 
 void tr_lobby_init(tr_lobby_t *l)
 {
-	*l = (tr_lobby_t){0};
+	*l = (tr_lobby_t){ 0 };
 }
 
 void tr_lobby_demo_over(tr_lobby_t *l)

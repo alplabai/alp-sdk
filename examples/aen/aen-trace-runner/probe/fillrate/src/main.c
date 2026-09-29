@@ -48,9 +48,9 @@
 
 /* Panel geometry (must match the shield's cdc200 + panel nodes; checked
  * against alp_display_get_caps() before Phase 3 trusts it). */
-#define PANEL_W 720u
-#define PANEL_H 1280u
-#define PANEL_BPP 2u /* RGB565 */
+#define PANEL_W           720u
+#define PANEL_H           1280u
+#define PANEL_BPP         2u                              /* RGB565 */
 #define PANEL_FRAME_BYTES (PANEL_W * PANEL_H * PANEL_BPP) /* 1,843,200 B */
 
 /* ----------------------------------------------------------------------
@@ -86,11 +86,8 @@ struct sweep_step {
 };
 
 static const struct sweep_step SWEEP[] = {
-	{ 4,    64 },
-	{ 16,   32 },
-	{ 64,   16 }, /* the top of the M55's entire possible D-cache range */
-	{ 256,   4 },
-	{ 1024,  2 }, /* approaching the framebuffer's 1,843,200 B */
+	{ 4, 64 },  { 16, 32 },  { 64, 16 }, /* the top of the M55's entire possible D-cache range */
+	{ 256, 4 }, { 1024, 2 },             /* approaching the framebuffer's 1,843,200 B */
 };
 #define SWEEP_N ((uint32_t)ARRAY_SIZE(SWEEP))
 
@@ -140,10 +137,12 @@ static const struct sweep_step SWEEP[] = {
 #define SRAM1_B ((uint32_t *)(DT_REG_ADDR(SRAM1_NODE) + 0x100000u))
 
 BUILD_ASSERT((2u * SRAM_SWEEP_MAX_BYTES) <= DT_REG_SIZE(SRAM0_NODE),
-	     "phase-1 SRAM0 sweep buffers (A+B at the top sweep size) must fit the shield-shrunk 2 MiB bank");
+             "phase-1 SRAM0 sweep buffers (A+B at the top sweep size) must fit the shield-shrunk 2 "
+             "MiB bank");
 #if PROBE_SRAM1
-BUILD_ASSERT((2u * SRAM_SWEEP_MAX_BYTES) <= FB_SCRATCH_OFFSET,
-	     "phase-1 SRAM1 sweep buffers (A+B at the top sweep size) must stay clear of FB_SCRATCH");
+BUILD_ASSERT(
+    (2u * SRAM_SWEEP_MAX_BYTES) <= FB_SCRATCH_OFFSET,
+    "phase-1 SRAM1 sweep buffers (A+B at the top sweep size) must stay clear of FB_SCRATCH");
 #endif
 
 /* DTCM *is* the kernel's own SRAM here (zephyr,sram = &dtcm), so this is an
@@ -162,7 +161,7 @@ static uint32_t dtcm_b[DTCM_SWEEP_MAX_BYTES / 4u];
 #if PROBE_SRAM1
 #define FB_SCRATCH ((uint16_t *)(DT_REG_ADDR(SRAM1_NODE) + FB_SCRATCH_OFFSET))
 BUILD_ASSERT((FB_SCRATCH_OFFSET + PANEL_FRAME_BYTES) <= DT_REG_SIZE(SRAM1_NODE),
-	     "FB_SCRATCH must fit SRAM1's 4 MiB bank alongside the phase-1 sweep buffers");
+             "FB_SCRATCH must fit SRAM1's 4 MiB bank alongside the phase-1 sweep buffers");
 #else
 /* With SRAM1 unpowered, FB_SCRATCH reuses SRAM0's Phase-1 sweep buffers.
  * Safe because the phases run strictly in sequence: Phase 1 has finished,
@@ -172,7 +171,7 @@ BUILD_ASSERT((FB_SCRATCH_OFFSET + PANEL_FRAME_BYTES) <= DT_REG_SIZE(SRAM1_NODE),
  * collide with. */
 #define FB_SCRATCH ((uint16_t *)SRAM0_A)
 BUILD_ASSERT(PANEL_FRAME_BYTES <= DT_REG_SIZE(SRAM0_NODE),
-	     "FB_SCRATCH must fit the shield-shrunk SRAM0 bank below lcd_fb");
+             "FB_SCRATCH must fit the shield-shrunk SRAM0 bank below lcd_fb");
 #endif
 
 /* Phase-1 table: one (fill target, copy dst=a/src=b, sweep length) triple
@@ -233,7 +232,8 @@ static uint64_t timed_fill(uint32_t *buf, uint32_t words, uint32_t seed, uint32_
  * content is set once (untimed) before timing starts -- the bytes copied
  * per pass don't need to change for a bandwidth measurement, and src/dst are
  * two distinct memory objects the compiler cannot merge or elide. */
-static uint64_t timed_copy(uint32_t *dst, uint32_t *src, uint32_t words, uint32_t seed, uint32_t iters)
+static uint64_t
+timed_copy(uint32_t *dst, uint32_t *src, uint32_t words, uint32_t seed, uint32_t iters)
 {
 	uint64_t t0, t1;
 
@@ -296,19 +296,37 @@ static uint64_t timed_copy_mve(uint32_t *dst, const uint32_t *src, uint32_t word
  * framebuffer fill) -- the whole point of Phase 1's sweep is that this
  * column, not just the MB/s one, is what a reader scans for the cache
  * cliff. */
-static void report_line(const char *region, const char *op, uint32_t kib, uint32_t bytes_total, uint32_t iters,
-			 uint64_t cycles, uint32_t hz, uint32_t ceiling_mbps)
+static void report_line(const char *region,
+                        const char *op,
+                        uint32_t    kib,
+                        uint32_t    bytes_total,
+                        uint32_t    iters,
+                        uint64_t    cycles,
+                        uint32_t    hz,
+                        uint32_t    ceiling_mbps)
 {
-	uint64_t bps  = cycles ? ((uint64_t)bytes_total * hz) / cycles : 0;
-	uint32_t mi   = (uint32_t)(bps / 1000000ull);
-	uint32_t mf   = (uint32_t)((bps / 10000ull) % 100ull);
+	uint64_t bps = cycles ? ((uint64_t)bytes_total * hz) / cycles : 0;
+	uint32_t mi  = (uint32_t)(bps / 1000000ull);
+	uint32_t mf  = (uint32_t)((bps / 10000ull) % 100ull);
 
 	if (kib != 0u) {
-		printk("%-6s %-5s %5uKiB iters=%3u cycles=%10llu MBps=%4u.%02u", region, op, kib, iters, (unsigned long long)cycles, mi,
+		printk("%-6s %-5s %5uKiB iters=%3u cycles=%10llu MBps=%4u.%02u",
+		       region,
+		       op,
+		       kib,
+		       iters,
+		       (unsigned long long)cycles,
+		       mi,
 		       mf);
 	} else {
-		printk("%-6s %-5s bytes=%9u iters=%3u cycles=%10llu MBps=%4u.%02u", region, op, bytes_total, iters,
-		       (unsigned long long)cycles, mi, mf);
+		printk("%-6s %-5s bytes=%9u iters=%3u cycles=%10llu MBps=%4u.%02u",
+		       region,
+		       op,
+		       bytes_total,
+		       iters,
+		       (unsigned long long)cycles,
+		       mi,
+		       mf);
 	}
 	if (mi >= ceiling_mbps) {
 		printk("  ** >= theoretical peak %u MBps -- suspect, do not trust **", ceiling_mbps);
@@ -375,7 +393,7 @@ static uint64_t timed_sprite_blit(uint16_t *dst, uint32_t dst_stride, uint32_t i
  * the full texture width and barely stretches at all); `dst_w` is always
  * one screen row. Nearest-neighbour sampling via a Q16 fixed-point step,
  * the standard renderer technique -- no float, no division per pixel. */
-#define SRC_ROW_MAX_W 720u
+#define SRC_ROW_MAX_W  720u
 #define SCANLINE_ITERS 2000u
 
 static uint16_t src_row[SRC_ROW_MAX_W];
@@ -447,7 +465,8 @@ static alp_display_t *open_display_with_retry(void)
 		}
 		/* Known ~1-in-8-to-10 cold-boot defect, no re-init path (see
 		 * src/platform/display.c) -- retry a few times, a short beat apart. */
-		printk("display: open attempt %d/%d failed (known intermittent panel init defect)\n", attempt + 1,
+		printk("display: open attempt %d/%d failed (known intermittent panel init defect)\n",
+		       attempt + 1,
 		       DISP_OPEN_RETRIES);
 		if (attempt + 1 < DISP_OPEN_RETRIES) {
 			k_msleep(DISP_RETRY_MS);
@@ -458,34 +477,40 @@ static alp_display_t *open_display_with_retry(void)
 
 int main(void)
 {
-	uint32_t hz           = sys_clock_hw_cycles_per_sec();
-	uint32_t ceiling_mbps = (hz * 4u) / 1000000u; /* clock * 4 B/cycle: generous single-cycle-access ceiling */
-	uint32_t seed         = k_cycle_get_32() ^ (uint32_t)(uintptr_t)&seed;
+	uint32_t hz = sys_clock_hw_cycles_per_sec();
+	uint32_t ceiling_mbps =
+	    (hz * 4u) / 1000000u; /* clock * 4 B/cycle: generous single-cycle-access ceiling */
+	uint32_t seed = k_cycle_get_32() ^ (uint32_t)(uintptr_t)&seed;
 
 	printk("\n=== fillrate probe: %s ===\n", CONFIG_BOARD_TARGET);
-	printk("clock: sys_clock_hw_cycles_per_sec()=%u Hz  (theoretical bus peak ~%u MBps)\n", hz, ceiling_mbps);
+	printk("clock: sys_clock_hw_cycles_per_sec()=%u Hz  (theoretical bus peak ~%u MBps)\n",
+	       hz,
+	       ceiling_mbps);
 	printk("timing: k_cycle_get_64(), 1-cycle resolution, no practical wrap\n");
 	/* Cache state up front, next to core identity and clock: a reader's first question about
 	 * any surprising Phase 1 number is "was cache on", and this is where they'll look. dcache
 	 * OFF is the expected/intended state (SoC-wide erratum: SCB_EnableDCache hangs on this
 	 * silicon -- see prj.conf) -- Phase 1's sweep below is what actually PROVES it behaves that
 	 * way, rather than trusting this Kconfig readout alone. */
-	printk("icache: %s   dcache: %s%s\n", IS_ENABLED(CONFIG_ICACHE) ? "ON" : "OFF",
+	printk("icache: %s   dcache: %s%s\n",
+	       IS_ENABLED(CONFIG_ICACHE) ? "ON" : "OFF",
 	       IS_ENABLED(CONFIG_DCACHE) ? "ON" : "OFF",
 	       IS_ENABLED(CONFIG_DCACHE) ? " (unexpected -- verify prj.conf)" : "");
 
 	/* ---------------- Phase 1: raw memory bandwidth, no display -------- */
 	printk("\n--- phase 1: raw memory bandwidth, working-set sweep (spans the M55's whole\n");
 	printk("possible D-cache range 4-64 KiB, then on to framebuffer scale) ---\n");
-	printk("(copy runs at the smallest+largest size only, to fit the console budget; fill spans all sizes)\n");
-	printk("(copy's KiB is the payload moved one direction per pass; actual bus traffic is ~2x that)\n");
+	printk("(copy runs at the smallest+largest size only, to fit the console budget; fill spans "
+	       "all sizes)\n");
+	printk("(copy's KiB is the payload moved one direction per pass; actual bus traffic is ~2x "
+	       "that)\n");
 	{
 		static const struct region regions[] = {
-			{ "SRAM0", SRAM0_A, SRAM0_B, SWEEP_N      },
+			{ "SRAM0", SRAM0_A, SRAM0_B, SWEEP_N },
 #if PROBE_SRAM1
-			{ "SRAM1", SRAM1_A, SRAM1_B, SWEEP_N      },
+			{ "SRAM1", SRAM1_A, SRAM1_B, SWEEP_N },
 #endif
-			{ "DTCM",  dtcm_a,  dtcm_b,  SWEEP_DTCM_N },
+			{ "DTCM", dtcm_a, dtcm_b, SWEEP_DTCM_N },
 		};
 
 		for (size_t i = 0; i < ARRAY_SIZE(regions); i++) {
@@ -498,14 +523,27 @@ int main(void)
 				uint64_t cyc   = timed_fill(r->a, words, seedv, iters);
 
 				mix_checksum(r->a, words);
-				report_line(r->name, "fill", SWEEP[s].kib, words * 4u * iters, iters, cyc, hz,
-					    ceiling_mbps);
+				report_line(r->name,
+				            "fill",
+				            SWEEP[s].kib,
+				            words * 4u * iters,
+				            iters,
+				            cyc,
+				            hz,
+				            ceiling_mbps);
 
-				if (s == 0u || s == r->sweep_n - 1u) { /* extremes only -- see console-budget note above */
+				if (s == 0u ||
+				    s == r->sweep_n - 1u) { /* extremes only -- see console-budget note above */
 					cyc = timed_copy(r->a, r->b, words, seedv, iters);
 					mix_checksum(r->a, words);
-					report_line(r->name, "copy", SWEEP[s].kib, words * 4u * iters, iters, cyc, hz,
-						    ceiling_mbps);
+					report_line(r->name,
+					            "copy",
+					            SWEEP[s].kib,
+					            words * 4u * iters,
+					            iters,
+					            cyc,
+					            hz,
+					            ceiling_mbps);
 				}
 			}
 		}
@@ -534,9 +572,11 @@ int main(void)
 		uint64_t px_per_s    = blits_per_s * (SPR_W * SPR_H);
 
 		mix_checksum((const uint32_t *)FB_SCRATCH, (SPR_H * PANEL_W * PANEL_BPP) / 4u);
-		printk("sprite 4bpp->rgb565 96x96  iters=%u cycles=%llu  blits/s=%u  px/s=%u\n", SPR_ITERS,
+		printk("sprite 4bpp->rgb565 96x96  iters=%u cycles=%llu  blits/s=%u  px/s=%u\n",
+		       SPR_ITERS,
 		       (unsigned long long)cyc,
-		       (uint32_t)blits_per_s, (uint32_t)px_per_s);
+		       (uint32_t)blits_per_s,
+		       (uint32_t)px_per_s);
 	}
 
 	init_src_row(seed);
@@ -551,8 +591,13 @@ int main(void)
 			uint64_t bps  = rows * PANEL_W * PANEL_BPP;
 
 			mix_checksum((const uint32_t *)dst_row, (PANEL_W * PANEL_BPP) / 4u);
-			printk("  srcW=%3u (%ux stretch)  iters=%u cycles=%9llu  rows/s=%6u  MBps=%u.%02u\n", sw,
-			       PANEL_W / sw, SCANLINE_ITERS, (unsigned long long)cyc, (uint32_t)rows, (uint32_t)(bps / 1000000ull),
+			printk("  srcW=%3u (%ux stretch)  iters=%u cycles=%9llu  rows/s=%6u  MBps=%u.%02u\n",
+			       sw,
+			       PANEL_W / sw,
+			       SCANLINE_ITERS,
+			       (unsigned long long)cyc,
+			       (uint32_t)rows,
+			       (uint32_t)(bps / 1000000ull),
 			       (uint32_t)((bps / 10000ull) % 100ull));
 		}
 	}
@@ -578,22 +623,28 @@ int main(void)
 	if (caps.width != PANEL_W || caps.height != PANEL_H || caps.format != ALP_PIXFMT_RGB565) {
 		/* FB_SCRATCH and every byte count below assume exactly this geometry --
 		 * a mismatch here would silently under/overrun it, so bail instead. */
-		printk("RESULT: panel reports %ux%u fmt=%d, expected %ux%u RGB565 -- phase 3 skipped.\n", caps.width,
-		       caps.height, (int)caps.format, PANEL_W, PANEL_H);
+		printk("RESULT: panel reports %ux%u fmt=%d, expected %ux%u RGB565 -- phase 3 skipped.\n",
+		       caps.width,
+		       caps.height,
+		       (int)caps.format,
+		       PANEL_W,
+		       PANEL_H);
 		alp_display_close(disp);
 		goto done;
 	}
-	printk("display: opened %ux%u RGB565 (%u B/frame)\n", caps.width, caps.height, PANEL_FRAME_BYTES);
+	printk(
+	    "display: opened %ux%u RGB565 (%u B/frame)\n", caps.width, caps.height, PANEL_FRAME_BYTES);
 
 	{
-		const struct device *raw_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
+		const struct device *raw_dev       = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
 		uint32_t             bytes_per_run = PANEL_FRAME_BYTES * FILL_TIMED_ITERS;
 		uint64_t             cyc_blanked, cyc_live;
 		uint64_t             mbps_blanked, mbps_live;
 
 		/* Blanking ON: CDC200 scanout stopped -- isolates the CPU's write
 		 * bandwidth to the framebuffer from any DMA read contention. */
-		(void)display_blanking_on(raw_dev); /* optional driver op; CDC200 implements it, ignore the result */
+		(void)display_blanking_on(
+		    raw_dev); /* optional driver op; CDC200 implements it, ignore the result */
 		for (uint32_t n = 0; n < FILL_WARM_ITERS; n++) {
 			alp_display_blit(disp, 0, 0, PANEL_W, PANEL_H, FB_SCRATCH);
 		}
@@ -603,7 +654,8 @@ int main(void)
 			alp_display_blit(disp, 0, 0, PANEL_W, PANEL_H, FB_SCRATCH);
 		}
 		cyc_blanked = k_cycle_get_64() - t0;
-		report_line("panel", "fillOn", 0u, bytes_per_run, FILL_TIMED_ITERS, cyc_blanked, hz, ceiling_mbps);
+		report_line(
+		    "panel", "fillOn", 0u, bytes_per_run, FILL_TIMED_ITERS, cyc_blanked, hz, ceiling_mbps);
 
 		/* Blanking OFF: CDC200 scanning continuously (~80 MB/s of reads at the
 		 * 40 MHz pixel clock) while the same fill runs -- the contended case. */
@@ -616,14 +668,17 @@ int main(void)
 			alp_display_blit(disp, 0, 0, PANEL_W, PANEL_H, FB_SCRATCH);
 		}
 		cyc_live = k_cycle_get_64() - t0;
-		report_line("panel", "fillOff", 0u, bytes_per_run, FILL_TIMED_ITERS, cyc_live, hz, ceiling_mbps);
+		report_line(
+		    "panel", "fillOff", 0u, bytes_per_run, FILL_TIMED_ITERS, cyc_live, hz, ceiling_mbps);
 
 		/* THE number the whole plan turns on: how much the CDC200's continuous
 		 * scanout costs the CPU's own write bandwidth to the same memory. */
 		mbps_blanked = cyc_blanked ? ((uint64_t)bytes_per_run * hz) / cyc_blanked / 1000000ull : 0;
 		mbps_live    = cyc_live ? ((uint64_t)bytes_per_run * hz) / cyc_live / 1000000ull : 0;
 		printk("CONTENTION: blanked=%u MBps  live=%u MBps  delta=%d MBps  (scanout cost)\n",
-		       (uint32_t)mbps_blanked, (uint32_t)mbps_live, (int)(mbps_blanked - mbps_live));
+		       (uint32_t)mbps_blanked,
+		       (uint32_t)mbps_live,
+		       (int)(mbps_blanked - mbps_live));
 
 		/* Sustained repaint: blanking stays off (normal operating condition) --
 		 * fixed frame count, report achieved fps. */
@@ -631,26 +686,32 @@ int main(void)
 		for (uint32_t f = 0; f < REPAINT_FRAMES; f++) {
 			alp_display_blit(disp, 0, 0, PANEL_W, PANEL_H, FB_SCRATCH);
 		}
-		uint64_t cyc_repaint  = k_cycle_get_64() - t0;
-		uint64_t fps_x100     = cyc_repaint ? ((uint64_t)REPAINT_FRAMES * hz * 100ull) / cyc_repaint : 0;
-		uint32_t needed_mbps  = 55u; /* 720x1280 RGB565 @ 30 fps ~= 55.3 MB/s of writes -- see README */
+		uint64_t cyc_repaint = k_cycle_get_64() - t0;
+		uint64_t fps_x100 =
+		    cyc_repaint ? ((uint64_t)REPAINT_FRAMES * hz * 100ull) / cyc_repaint : 0;
+		uint32_t needed_mbps =
+		    55u; /* 720x1280 RGB565 @ 30 fps ~= 55.3 MB/s of writes -- see README */
 
-		printk("sustained repaint: frames=%u cycles=%llu  fps=%u.%02u", REPAINT_FRAMES,
+		printk("sustained repaint: frames=%u cycles=%llu  fps=%u.%02u",
+		       REPAINT_FRAMES,
 		       (unsigned long long)cyc_repaint,
-		       (uint32_t)(fps_x100 / 100u), (uint32_t)(fps_x100 % 100u));
+		       (uint32_t)(fps_x100 / 100u),
+		       (uint32_t)(fps_x100 % 100u));
 		if ((fps_x100 / 100u) < 30u) {
 			printk("  ** below 30 fps at %u MBps needed for writes alone **", needed_mbps);
 		}
 		printk("\n");
 	}
 
-	alp_display_close(disp); /* also restores blanking on, via the same backend that turned it off at open() */
+	alp_display_close(
+	    disp); /* also restores blanking on, via the same backend that turned it off at open() */
 
 done:
-	printk("\nchecksum=0x%08x  (every buffer this probe wrote, folded together -- proves none of the\n"
-	       "above was optimised away; if this run is ever repeated, a different value here with the\n"
-	       "same seed source is expected -- the seed is k_cycle_get_64()-derived, not fixed)\n",
-	       g_checksum);
+	printk(
+	    "\nchecksum=0x%08x  (every buffer this probe wrote, folded together -- proves none of the\n"
+	    "above was optimised away; if this run is ever repeated, a different value here with the\n"
+	    "same seed source is expected -- the seed is k_cycle_get_64()-derived, not fixed)\n",
+	    g_checksum);
 	printk("=== fillrate probe done ===\n");
 	return 0;
 }

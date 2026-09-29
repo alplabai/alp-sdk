@@ -9,7 +9,7 @@
 #include "../../src/platform/panel_retry.h"
 
 typedef struct {
-	unsigned fail_first; /* init fails this many times, then succeeds */
+	unsigned fail_first;   /* init fails this many times, then succeeds */
 	bool     init_sets_bl; /* the driver sets the backlight on success */
 	bool     bl_force_works;
 	unsigned calls, resets;
@@ -44,7 +44,7 @@ static int stub_bl_force(void *ctx)
 
 static uint32_t run(stub_t *s, unsigned max)
 {
-	tr_panel_ops_t ops = {s, stub_init, stub_bl_on, stub_bl_force};
+	tr_panel_ops_t ops = { s, stub_init, stub_bl_on, stub_bl_force };
 
 	return tr_panel_bringup(&ops, max);
 }
@@ -52,31 +52,32 @@ static uint32_t run(stub_t *s, unsigned max)
 int main(void)
 {
 	/* Clean first boot. */
-	stub_t   s = {0, true, true, 0, 0, false};
+	stub_t   s = { 0, true, true, 0, 0, false };
 	uint32_t w = run(&s, 4);
 	assert(w == (1u | TR_PANEL_OK) && s.bl && s.resets == 0);
 
 	/* Fails twice, then comes up: backlight on, three attempts. */
-	s = (stub_t){2, true, true, 0, 0, false};
+	s = (stub_t){ 2, true, true, 0, 0, false };
 	w = run(&s, 4);
 	assert(TR_PANEL_TRIES(w) == 3 && (w & TR_PANEL_OK) && !(w & TR_PANEL_BL_FORCED));
 	assert(s.bl && s.resets == 2);
 
 	/* Never comes up: failure, the count, the errno; backlight left off. */
-	s = (stub_t){99, true, true, 0, 0, false};
+	s = (stub_t){ 99, true, true, 0, 0, false };
 	w = run(&s, 4);
 	assert(TR_PANEL_TRIES(w) == 4 && !(w & TR_PANEL_OK) && TR_PANEL_ERR(w) == 5);
 	assert(!s.bl && s.calls == 4);
 
 	/* Init reports success but the pin is off: forced on. */
-	s = (stub_t){0, false, true, 0, 0, false};
+	s = (stub_t){ 0, false, true, 0, 0, false };
 	w = run(&s, 4);
 	assert(w == (1u | TR_PANEL_OK | TR_PANEL_BL_FORCED) && s.bl);
 
 	/* ... and a force that does not take is a failure, not a silent OK. */
-	s = (stub_t){0, false, false, 0, 0, false};
+	s = (stub_t){ 0, false, false, 0, 0, false };
 	w = run(&s, 4);
-	assert(!(w & TR_PANEL_OK) && (w & TR_PANEL_BL_FORCED) && TR_PANEL_ERR(w) == TR_PANEL_ERR_BL_STUCK);
+	assert(!(w & TR_PANEL_OK) && (w & TR_PANEL_BL_FORCED) &&
+	       TR_PANEL_ERR(w) == TR_PANEL_ERR_BL_STUCK);
 
 	printf("test_panel_retry: ok\n");
 	return 0;

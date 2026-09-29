@@ -114,10 +114,10 @@ static const struct device *g_cdc;
 #define TR_DOUBLE_BUFFER TR_DOUBLE_BUFFER_DEFAULT
 #endif
 
-#define TR_FB_BYTES                                                                                \
+#define TR_FB_BYTES \
 	((size_t)DT_PROP(DT_NODELABEL(cdc200), width) * DT_PROP(DT_NODELABEL(cdc200), height) * 2u)
 BUILD_ASSERT(TR_FB_BYTES <= DT_REG_SIZE(TR_BACK_NODE),
-	     "the back buffer must fit its bank -- there is no external memory on this board");
+             "the back buffer must fit its bank -- there is no external memory on this board");
 
 static uint8_t *g_fb[2];
 static size_t   g_fb_size;
@@ -227,7 +227,8 @@ int tr_display_open(void)
 	if (g_caps.format != ALP_PIXFMT_RGB565) {
 		/* Every draw path below assumes 2 bytes per pixel. */
 		printk("RESULT FAIL: expected ALP_PIXFMT_RGB565 (%d), panel reports %d\n",
-		       (int)ALP_PIXFMT_RGB565, (int)g_caps.format);
+		       (int)ALP_PIXFMT_RGB565,
+		       (int)g_caps.format);
 		alp_display_close(g_disp);
 		g_disp = NULL;
 		return -2;
@@ -246,26 +247,32 @@ int tr_display_open(void)
 	g_fb_size = fb.fb_size;
 
 	g_flip_ok = TR_DOUBLE_BUFFER && device_is_ready(g_cdc) && (fb.fb_addr != NULL) &&
-		    (fb.fb_size == TR_FB_BYTES);
+	            (fb.fb_size == TR_FB_BYTES);
 #if !TR_DOUBLE_BUFFER
 	/* See TR_DOUBLE_BUFFER's comment: with a camera built in, the back buffer
 	 * would have to live in SRAM1, which is power-gated and unpowered at boot
 	 * on this board. Never dereference g_fb[1] as SRAM1 -- even a read
 	 * bus-faults. */
-	printk("display : double buffering OFF (TR_DOUBLE_BUFFER=0) -- camera build, SRAM1 not powered\n");
+	printk(
+	    "display : double buffering OFF (TR_DOUBLE_BUFFER=0) -- camera build, SRAM1 not powered\n");
 #endif
 	if (!g_flip_ok) {
 		/* Not RESULT FAIL: -- the game still runs, it just flickers. */
 		printk("display : no back buffer (cdc ready=%d fb=%p size=%u want=%u) -- "
 		       "single-buffered, expect flicker\n",
-		       (int)device_is_ready(g_cdc), (void *)fb.fb_addr, (unsigned)fb.fb_size,
+		       (int)device_is_ready(g_cdc),
+		       (void *)fb.fb_addr,
+		       (unsigned)fb.fb_size,
 		       (unsigned)TR_FB_BYTES);
 		g_fb[1] = g_fb[0];
 		g_back  = 0u; /* draw straight into the live buffer, as before */
 	}
 
-	printk("display : %ux%u RGB565 front=%p back=%p\n", g_caps.width, g_caps.height,
-	       (void *)g_fb[g_back ^ 1u], (void *)g_fb[g_back]);
+	printk("display : %ux%u RGB565 front=%p back=%p\n",
+	       g_caps.width,
+	       g_caps.height,
+	       (void *)g_fb[g_back ^ 1u],
+	       (void *)g_fb[g_back]);
 	return 0;
 }
 
@@ -288,8 +295,8 @@ uint16_t tr_display_height(void)
  * bounding span: a 96 x 96 sprite is 96 x 192 B of real pixels but spans
  * 96 x 1,440 B of framebuffer, and cleaning the span would do 7x the work.
  */
-static void copy_rect(uint8_t *to, const uint8_t *from, uint16_t x, uint16_t y, uint16_t w,
-		       uint16_t h)
+static void
+copy_rect(uint8_t *to, const uint8_t *from, uint16_t x, uint16_t y, uint16_t w, uint16_t h)
 {
 	size_t         stride = (size_t)g_caps.width * 2u;
 	size_t         row_b  = (size_t)w * 2u;
@@ -321,8 +328,7 @@ int tr_display_blit(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const void *
 	if ((uint32_t)x + w > g_caps.width || (uint32_t)y + h > g_caps.height) {
 		if (!g_blit_err_printed) {
 			g_blit_err_printed = true;
-			printk("display: first blit rejected -- out of bounds at (%u,%u,%ux%u)\n", x, y,
-			       w, h);
+			printk("display: first blit rejected -- out of bounds at (%u,%u,%ux%u)\n", x, y, w, h);
 		}
 		return -1;
 	}
@@ -401,7 +407,7 @@ volatile uint64_t tr_cyc_copyback;
 
 void tr_display_flip(void)
 {
-	struct cdc200_fb_desc fb = { .fb_addr = g_fb[g_back], .fb_size = g_fb_size };
+	struct cdc200_fb_desc fb     = { .fb_addr = g_fb[g_back], .fb_size = g_fb_size };
 	unsigned              waited = 0;
 
 	if (!g_flip_ok || (g_dirty_n == 0u && !g_dirty_all)) {
@@ -447,8 +453,12 @@ void tr_display_flip(void)
 		copy_rect(g_fb[g_back], g_fb[g_back ^ 1u], 0, 0, g_caps.width, g_caps.height);
 	} else {
 		for (unsigned i = 0; i < g_dirty_n; i++) {
-			copy_rect(g_fb[g_back], g_fb[g_back ^ 1u], g_dirty[i].x, g_dirty[i].y,
-				  g_dirty[i].w, g_dirty[i].h);
+			copy_rect(g_fb[g_back],
+			          g_fb[g_back ^ 1u],
+			          g_dirty[i].x,
+			          g_dirty[i].y,
+			          g_dirty[i].w,
+			          g_dirty[i].h);
 		}
 	}
 	tr_cyc_copyback += k_cycle_get_64() - t1;

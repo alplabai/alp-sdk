@@ -50,11 +50,12 @@ static tr_box_t sim_box(sim_t *s, const tr_pose_t *p)
 	tr_box_t b = { .valid = false };
 
 	if (p != NULL) {
-		b     = tr_pose_box(p);
+		b = tr_pose_box(p);
 		s->seq += 2u; /* the pslot seqlock's even generations */
 		b.seq = s->seq;
 	}
-	s->present = tr_presence_step(&s->pr, b, /*need_torso=*/s->a.active); /* the torso is the bar to join */
+	s->present =
+	    tr_presence_step(&s->pr, b, /*need_torso=*/s->a.active); /* the torso is the bar to join */
 	return b;
 }
 
@@ -73,7 +74,8 @@ static tr_pose_t flicker_pose(int i)
 	tr_pose_t p;
 
 	for (int k = 0; k < TR_POSE_KP; k++) {
-		p.kp[k] = (tr_kp_t){ .x = (int16_t)(180 + 4 * k), .y = (int16_t)(480 + 3 * k), .score = 40u };
+		p.kp[k] =
+		    (tr_kp_t){ .x = (int16_t)(180 + 4 * k), .y = (int16_t)(480 + 3 * k), .score = 40u };
 	}
 	if (i % 30 == 0) {
 		p.kp[TR_KP_LSHO].score = TR_POSE_KP_MIN;
@@ -110,7 +112,7 @@ static tr_pose_t hipless(int i)
 {
 	tr_pose_t p = tr_sil_stand[i % TR_SIL_STAND_N];
 
-	p.kp[TR_KP_LHIP].score = 0u;
+	p.kp[TR_KP_LHIP].score     = 0u;
 	p.kp[TR_KP_LHIP + 1].score = 0u;
 	return p;
 }
@@ -173,11 +175,13 @@ int main(void)
 			}
 		}
 		printf("  player steps in: lobby %d ticks, PLAY at tick %d\n", joining, left_at);
-		assert(left_at >= TR_ATTRACT_JOIN_TICKS - 1 && left_at < TR_PRESENT_WIN + TR_ATTRACT_JOIN_TICKS);
+		assert(left_at >= TR_ATTRACT_JOIN_TICKS - 1 &&
+		       left_at < TR_PRESENT_WIN + TR_ATTRACT_JOIN_TICKS);
 		assert(joining == TR_ATTRACT_JOIN_TICKS - 1);
 		assert(!s.a.active);
 		for (int i = 0; i < MINUTE; i++) {
-			assert(sim_tick(&s, &tr_sil_stand[i % TR_SIL_STAND_N]) == TR_ATTRACT_STAY && !s.a.active);
+			assert(sim_tick(&s, &tr_sil_stand[i % TR_SIL_STAND_N]) == TR_ATTRACT_STAY &&
+			       !s.a.active);
 		}
 	}
 
@@ -189,7 +193,8 @@ int main(void)
 
 		sim_init(&s, false);
 		for (int i = 0; i < 300; i++) {
-			assert(sim_tick(&s, &tr_sil_stand[i % TR_SIL_STAND_N]) == TR_ATTRACT_STAY && !s.a.active);
+			assert(sim_tick(&s, &tr_sil_stand[i % TR_SIL_STAND_N]) == TR_ATTRACT_STAY &&
+			       !s.a.active);
 		}
 		expect_attract_holds(&s, silicon_empty, "player leaves mid-run");
 	}
@@ -232,7 +237,8 @@ int main(void)
 		assert(e.name[0] == 'A' && e.name[1] == 'A' && e.name[2] == 'A');
 		assert(tr_attract_run_over(&s.a, s.present) && s.a.active);
 		for (int i = 0; i < MINUTE; i++) {
-			assert(sim_tick(&s, &tr_empty_room[i % TR_EMPTY_ROOM_N]) == TR_ATTRACT_STAY && s.a.active);
+			assert(sim_tick(&s, &tr_empty_room[i % TR_EMPTY_ROOM_N]) == TR_ATTRACT_STAY &&
+			       s.a.active);
 		}
 
 		sim_init(&s, false);
@@ -259,7 +265,7 @@ int main(void)
 		for (int i = 0; i < TR_SIL_STAND_N; i++) {
 			tr_box_t b = tr_pose_box(&tr_sil_stand[i]);
 
-			b.seq = (uint32_t)(4 + 2 * i);
+			b.seq        = (uint32_t)(4 + 2 * i);
 			bool present = tr_presence_step(&pr, b, true);
 
 			assert(present == (i + 1 >= TR_PRESENT_MIN));

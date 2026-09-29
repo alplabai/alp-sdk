@@ -102,12 +102,13 @@
 #else
 #define RENDER_MARKER 0x5E4D0003u
 #endif
-#define RENDER_TTB    ((volatile uint32_t *)TR_MEM_RENDER_TTB)
+#define RENDER_TTB ((volatile uint32_t *)TR_MEM_RENDER_TTB)
 /* SRAM1 MiB 1 spare tail above the core-1 stack (tr_memmap.h: stacks end at
  * 0x025FE000, FB B starts at 0x02600000), WB S=1 in both tables; outside .bss
  * so core 0's zeroing never races core 1's wait. */
-#define RENDER_GATE   ((volatile uint32_t *)0x025FE000u)
-_Static_assert(TR_MEM_A32_STACKS + TR_MEM_A32_STACKS_SIZE == 0x025FE000u, "the gate sits on the core-1 stack top (start.S)");
+#define RENDER_GATE ((volatile uint32_t *)0x025FE000u)
+_Static_assert(TR_MEM_A32_STACKS + TR_MEM_A32_STACKS_SIZE == 0x025FE000u,
+               "the gate sits on the core-1 stack top (start.S)");
 #ifndef RENDER_SINGLE_CORE
 #define RENDER_SINGLE_CORE 0
 #endif
@@ -122,8 +123,8 @@ _Static_assert(TR_MEM_A32_STACKS + TR_MEM_A32_STACKS_SIZE == 0x025FE000u, "the g
  * a core spinning on uncached SRAM1 (which the CDC200 is scanning) forever. */
 #define RENDER_SPIN_TICKS 300000u /* 3 ms */
 /* Both halves of the setup take about as long; core 1 is idle and waiting. */
-#define RENDER_SETUP_TIMEOUT 500000u /* 5 ms */
-#define RENDER_HALT_WAIT    50000000u /* 500 ms, inside the stub's 1 s core-1 wait */
+#define RENDER_SETUP_TIMEOUT 500000u   /* 5 ms */
+#define RENDER_HALT_WAIT     50000000u /* 500 ms, inside the stub's 1 s core-1 wait */
 
 /* Section attributes, same encoding as a32/stub/stub.c. */
 #define SEC_NC     0x00001C12u /* Normal NC, XN */
@@ -157,9 +158,11 @@ _Static_assert(TR_MEM_A32_STACKS + TR_MEM_A32_STACKS_SIZE == 0x025FE000u, "the g
  * over the frame it is about to read (not once a row), and the actual reads
  * are cached loads, not NC bus transactions. */
 #define RENDER_L2_024 ((volatile uint32_t *)0x02402C00u)
-_Static_assert(TR_MEM_CAM_POOL == 0x02480000u && TR_MEM_CAM_POOL + TR_MEM_CAM_POOL_SIZE == 0x02500000u,
-	       "the camera pool must be exactly the 0x024 MiB's upper half for this page split");
-_Static_assert(0x02402C00u + 0x400u <= TR_MEM_MBOX_PAGE_END, "renderer L2 tables past the mailbox scratch");
+_Static_assert(TR_MEM_CAM_POOL == 0x02480000u &&
+                   TR_MEM_CAM_POOL + TR_MEM_CAM_POOL_SIZE == 0x02500000u,
+               "the camera pool must be exactly the 0x024 MiB's upper half for this page split");
+_Static_assert(0x02402C00u + 0x400u <= TR_MEM_MBOX_PAGE_END,
+               "renderer L2 tables past the mailbox scratch");
 
 /* Always-on bench block, NC, renderer-owned (mailbox page tail; decode.py
  * --stats): written at LAUNCH, then per frame.
@@ -179,8 +182,10 @@ _Static_assert(0x02402C00u + 0x400u <= TR_MEM_MBOX_PAGE_END, "renderer L2 tables
 #define RENDER_STATS_ADDR   TR_RENDER_STATS_ADDR
 #define RENDER_STATS        ((volatile uint32_t *)RENDER_STATS_ADDR)
 #define RENDER_STATS_MARKER TR_RENDER_STATS_MARKER
-_Static_assert(RENDER_STATS_ADDR + 12u * 4u == TR_RENDER_T_ADDR, "tr_mbox.h TR_RENDER_T_ADDR: words 12..14");
-_Static_assert(RENDER_STATS_ADDR + 6u * 4u == TR_RENDER_IMG_END_ADDR, "tr_mbox.h TR_RENDER_IMG_END_ADDR");
+_Static_assert(RENDER_STATS_ADDR + 12u * 4u == TR_RENDER_T_ADDR,
+               "tr_mbox.h TR_RENDER_T_ADDR: words 12..14");
+_Static_assert(RENDER_STATS_ADDR + 6u * 4u == TR_RENDER_IMG_END_ADDR,
+               "tr_mbox.h TR_RENDER_IMG_END_ADDR");
 extern char __bss_end[]; /* renderer.ld */
 
 #ifdef TR_RASTER_PROF
@@ -208,7 +213,8 @@ uint32_t tr_prof_now(void)
 static void prof_enable(void)
 {
 	__asm__ volatile("mcr p15, 0, %0, c9, c12, 0\n\t"
-			 "mcr p15, 0, %1, c9, c12, 1\n\tisb" ::"r"(5u), "r"(0x80000000u));
+	                 "mcr p15, 0, %1, c9, c12, 1\n\tisb" ::"r"(5u),
+	                 "r"(0x80000000u));
 }
 
 static void prof_publish(void)
@@ -223,8 +229,12 @@ static void prof_publish(void)
 		d[2 + i] = p[i];
 }
 #else
-static void prof_enable(void) {}
-static void prof_publish(void) {}
+static void prof_enable(void)
+{
+}
+static void prof_publish(void)
+{
+}
 #endif
 
 void render_build_table(void);
@@ -299,35 +309,54 @@ void render_build_table(void)
 	}
 	t[0x023] = 0x02402400u | L1_PAGE;
 }
-_Static_assert(TR_MEM_ARING == 0x0237F000u && TR_MHU0_WINDOW_LO == 0x02380000u &&
-		       TR_MHU0_WINDOW_LO - TR_MEM_ARING == 0x1000u,
-	       "the shared cross-core metadata page (sound ring, pslot, hp_dbg, cam_view) must be exactly "
-	       "one 4 KiB page ending right at the MHU0 window, so the render_build_table loop above maps "
-	       "the whole thing -- and only that -- Normal NC");
-_Static_assert(TR_MEM_PSLOT >= TR_MEM_ARING && TR_MEM_HP_DBG >= TR_MEM_ARING && TR_MEM_CAM_VIEW >= TR_MEM_ARING &&
-		       TR_MEM_CAM_VIEW + sizeof(tr_cam_view_t) <= TR_MHU0_WINDOW_LO,
-	       "tr_pslot_t/hp_dbg_t/tr_cam_view_t must all sit inside the one NC page above");
-_Static_assert(TR_FB_A == 0x02000000u && TR_FB_A + TR_FB_SIZE <= 0x02200000u, "FB A must be SRAM0 MiB 0-1");
-_Static_assert(TR_MEM_A32_DL == TR_FB_A + TR_FB_SIZE && (TR_MEM_A32_DL & 0xFFFu) == 0 && TR_MEM_A32_DL >= 0x02100000u,
-	       "the DL pages start on the 4 KiB page right after FB A, in MiB 0x021");
-_Static_assert(TR_FB_B == 0x02600000u && TR_FB_B + TR_FB_SIZE <= 0x027DE000u, "FB B must be 0x02600000, below TF-A RW");
+_Static_assert(
+    TR_MEM_ARING == 0x0237F000u && TR_MHU0_WINDOW_LO == 0x02380000u &&
+        TR_MHU0_WINDOW_LO - TR_MEM_ARING == 0x1000u,
+    "the shared cross-core metadata page (sound ring, pslot, hp_dbg, cam_view) must be exactly "
+    "one 4 KiB page ending right at the MHU0 window, so the render_build_table loop above maps "
+    "the whole thing -- and only that -- Normal NC");
+_Static_assert(TR_MEM_PSLOT >= TR_MEM_ARING && TR_MEM_HP_DBG >= TR_MEM_ARING &&
+                   TR_MEM_CAM_VIEW >= TR_MEM_ARING &&
+                   TR_MEM_CAM_VIEW + sizeof(tr_cam_view_t) <= TR_MHU0_WINDOW_LO,
+               "tr_pslot_t/hp_dbg_t/tr_cam_view_t must all sit inside the one NC page above");
+_Static_assert(TR_FB_A == 0x02000000u && TR_FB_A + TR_FB_SIZE <= 0x02200000u,
+               "FB A must be SRAM0 MiB 0-1");
+_Static_assert(TR_MEM_A32_DL == TR_FB_A + TR_FB_SIZE && (TR_MEM_A32_DL & 0xFFFu) == 0 &&
+                   TR_MEM_A32_DL >= 0x02100000u,
+               "the DL pages start on the 4 KiB page right after FB A, in MiB 0x021");
+_Static_assert(TR_FB_B == 0x02600000u && TR_FB_B + TR_FB_SIZE <= 0x027DE000u,
+               "FB B must be 0x02600000, below TF-A RW");
 
 /* Core 1's switch to the renderer table: the start.S sequence core 0 ran. */
 static void core1_use_render_table(void)
 {
-	__asm__ volatile("dsb sy\n\t"
-			 "mcr p15, 0, %0, c2, c0, 0\n\t" /* TTBR0 (low bits 0: NC walks, like the stub) */
-			 "isb\n\t"
-			 "mcr p15, 0, %1, c8, c7, 0\n\t" /* TLBIALL */
-			 "mcr p15, 0, %1, c7, c5, 6\n\t" /* BPIALL */
-			 "dsb sy\n\tisb" ::"r"(RENDER_TTB), "r"(0u)
-			 : "memory");
+	__asm__ volatile(
+	    "dsb sy\n\t"
+	    "mcr p15, 0, %0, c2, c0, 0\n\t" /* TTBR0 (low bits 0: NC walks, like the stub) */
+	    "isb\n\t"
+	    "mcr p15, 0, %1, c8, c7, 0\n\t" /* TLBIALL */
+	    "mcr p15, 0, %1, c7, c5, 6\n\t" /* BPIALL */
+	    "dsb sy\n\tisb" ::"r"(RENDER_TTB),
+	    "r"(0u)
+	    : "memory");
 }
 
-static void barrier(void) { __asm__ volatile("dsb sy" ::: "memory"); }
-static void dmb_ish(void) { __asm__ volatile("dmb ish" ::: "memory"); }
-static void sev(void) { __asm__ volatile("sev" ::: "memory"); }
-static void wfe(void) { __asm__ volatile("wfe" ::: "memory"); } /* event stream: <= ~0.66 ms */
+static void barrier(void)
+{
+	__asm__ volatile("dsb sy" ::: "memory");
+}
+static void dmb_ish(void)
+{
+	__asm__ volatile("dmb ish" ::: "memory");
+}
+static void sev(void)
+{
+	__asm__ volatile("sev" ::: "memory");
+}
+static void wfe(void)
+{
+	__asm__ volatile("wfe" ::: "memory");
+} /* event stream: <= ~0.66 ms */
 
 static inline uint32_t cntvct_lo(void)
 {
@@ -340,18 +369,23 @@ static inline uint32_t cntvct_lo(void)
 
 /* Cross-core words, .bss (WB S=1: exclusives need Shareable Normal memory),
  * one cache line each. */
-static volatile uint32_t frame_go __attribute__((aligned(64)));   /* seq of the frame to band, core 0 writes */
+static volatile uint32_t frame_go
+    __attribute__((aligned(64))); /* seq of the frame to band, core 0 writes */
 /* Band claims, LDREX/STREX: [31:8] the frame's seq (low 24 bits), [7:0]
  * the next unclaimed band. A core claims only for the seq it is rendering,
  * so a late core 1 can never take a band of a newer frame. */
 static volatile uint32_t band_claim __attribute__((aligned(64)));
-static volatile uint32_t core1_done __attribute__((aligned(64))); /* seq core 1 finished, core 1 writes */
-static volatile uint32_t core1_ticks;                             /* its busy ticks for core1_done's frame */
-static volatile uint32_t scene_go __attribute__((aligned(64)));   /* seq whose scene part 2 core 1 builds */
+static volatile uint32_t core1_done
+    __attribute__((aligned(64)));     /* seq core 1 finished, core 1 writes */
+static volatile uint32_t core1_ticks; /* its busy ticks for core1_done's frame */
+static volatile uint32_t scene_go
+    __attribute__((aligned(64))); /* seq whose scene part 2 core 1 builds */
 static volatile uint32_t scene_done __attribute__((aligned(64))); /* seq core 1 finished building */
-static volatile uint32_t setup_go __attribute__((aligned(64)));   /* seq whose setup half core 1 does */
-static volatile uint32_t setup_done __attribute__((aligned(64))); /* seq core 1 finished setting up */
-static uint32_t          setup_lo, setup_hi;                      /* core 1's half, written before setup_go */
+static volatile uint32_t setup_go
+    __attribute__((aligned(64))); /* seq whose setup half core 1 does */
+static volatile uint32_t setup_done
+    __attribute__((aligned(64)));   /* seq core 1 finished setting up */
+static uint32_t setup_lo, setup_hi; /* core 1's half, written before setup_go */
 /* fix round 10: claimable work is every 3D band (0..TR_BANDS-1) AND every
  * video band (TR_BANDS..TR_TOTAL_BANDS-1, render.h's TR_VIDEO_BANDS) through
  * the SAME band_claim counter -- the video panel used to be one single-
@@ -360,8 +394,9 @@ static uint32_t          setup_lo, setup_hi;                      /* core 1's ha
  * scheme instead of a fixed half/half split means whichever core is free
  * claims the next unit, 3D or video, no new synchronisation needed. */
 #define TR_TOTAL_BANDS (TR_BANDS + TR_VIDEO_BANDS)
-static volatile uint32_t band_seq[TR_TOTAL_BANDS] __attribute__((aligned(64))); /* seq each band last landed for */
-static uint16_t         *frame_fb; /* written before frame_go */
+static volatile uint32_t band_seq[TR_TOTAL_BANDS]
+    __attribute__((aligned(64))); /* seq each band last landed for */
+static uint16_t *frame_fb;        /* written before frame_go */
 
 /* Claim + render bands (3D, then video) until none are left; each band's
  * pixels are out (dsb) before band_seq says so. */
@@ -370,9 +405,9 @@ static void band_loop(uint32_t core, uint32_t seq, uint16_t *fb)
 	uint32_t v = band_claim;
 
 	for (;;) {
-		if ((v >> 8) != (seq & 0xFFFFFFu) || (v & 0xFFu) >= TR_TOTAL_BANDS)
-			return;
-		if (!__atomic_compare_exchange_n(&band_claim, &v, v + 1u, true, __ATOMIC_RELAXED, __ATOMIC_RELAXED))
+		if ((v >> 8) != (seq & 0xFFFFFFu) || (v & 0xFFu) >= TR_TOTAL_BANDS) return;
+		if (!__atomic_compare_exchange_n(
+		        &band_claim, &v, v + 1u, true, __ATOMIC_RELAXED, __ATOMIC_RELAXED))
 			continue; /* v reloaded */
 
 		uint32_t b = v & 0xFFu;
@@ -383,7 +418,7 @@ static void band_loop(uint32_t core, uint32_t seq, uint16_t *fb)
 			render_video_band(core, (int)(b - TR_BANDS), fb);
 		barrier();
 		band_seq[b] = seq;
-		v = band_claim;
+		v           = band_claim;
 	}
 }
 
@@ -391,12 +426,10 @@ void renderer_core1(volatile tr_mbox_t *m)
 {
 	uint32_t token = m->stub_heartbeat0;
 
-	if (RENDER_SINGLE_CORE)
-		return;
+	if (RENDER_SINGLE_CORE) return;
 	prof_enable();
 	while (*RENDER_GATE != token) {
-		if (m->ctrl_cmd == STUB_CMD_HALT)
-			return;
+		if (m->ctrl_cmd == STUB_CMD_HALT) return;
 		wfe();
 	}
 	dmb_ish();
@@ -405,8 +438,7 @@ void renderer_core1(volatile tr_mbox_t *m)
 		uint32_t seq = scene_go;
 
 		if (seq == seen) {
-			if (m->ctrl_cmd == STUB_CMD_HALT)
-				return; /* core 0 consumes it once we are parked */
+			if (m->ctrl_cmd == STUB_CMD_HALT) return; /* core 0 consumes it once we are parked */
 			wfe();
 			continue;
 		}
@@ -420,8 +452,7 @@ void renderer_core1(volatile tr_mbox_t *m)
 		barrier();
 		sev();
 		while (setup_go != seq) {
-			if (m->ctrl_cmd == STUB_CMD_HALT)
-				return;
+			if (m->ctrl_cmd == STUB_CMD_HALT) return;
 			wfe();
 		}
 		dmb_ish(); /* DL, setup_lo/hi before setup_go */
@@ -431,8 +462,7 @@ void renderer_core1(volatile tr_mbox_t *m)
 		barrier();
 		sev();
 		while (frame_go != seq) {
-			if (m->ctrl_cmd == STUB_CMD_HALT)
-				return;
+			if (m->ctrl_cmd == STUB_CMD_HALT) return;
 			wfe();
 		}
 		dmb_ish(); /* frame_fb, bins, band_claim before frame_go */
@@ -459,8 +489,7 @@ static int join_scene(uint32_t seq)
 	uint32_t t0 = cntvct_lo();
 
 	while (scene_done != seq) {
-		if (cntvct_lo() - t0 > RENDER_SETUP_TIMEOUT)
-			return 0;
+		if (cntvct_lo() - t0 > RENDER_SETUP_TIMEOUT) return 0;
 		wfe();
 	}
 	dmb_ish();
@@ -492,8 +521,7 @@ static int join_core1(uint32_t seq)
 		if (cntvct_lo() - t0 > RENDER_JOIN_TIMEOUT) {
 			dmb_ish();
 			for (uint32_t b = 0; b < TR_TOTAL_BANDS; b++) {
-				if (band_seq[b] == seq)
-					continue;
+				if (band_seq[b] == seq) continue;
 				if (b < TR_BANDS)
 					render_band(0, (int)b, frame_fb);
 				else
@@ -509,10 +537,10 @@ static int join_core1(uint32_t seq)
 
 void renderer_main(volatile tr_mbox_t *m)
 {
-	uint32_t       last = m->out_seq; /* a frame published before LAUNCH is still owed */
-	uint32_t       tmax = 0, crc_ok = 0, crc_bad = 0, drawn_n = 0, timeouts = 0;
-	uint32_t       checks, t_pub = 0;
-	int            t_pub_valid = 0;
+	uint32_t last = m->out_seq; /* a frame published before LAUNCH is still owed */
+	uint32_t tmax = 0, crc_ok = 0, crc_bad = 0, drawn_n = 0, timeouts = 0;
+	uint32_t checks, t_pub = 0;
+	int      t_pub_valid = 0;
 	/* fix round 10 (silicon finding): nothing on the boot path -- not the
 	 * stub, not any earlier renderer LAUNCH -- ever zeroed out_dropped, so a
 	 * cold mailbox page carries whatever garbage word was last at 0x02401154
@@ -526,11 +554,11 @@ void renderer_main(volatile tr_mbox_t *m)
 	RENDER_STATS[12] = cntvct_lo();
 	RENDER_STATS[13] = 0;
 	RENDER_STATS[14] = 0;
-	m->pad3[0] = RENDER_MARKER;
+	m->pad3[0]       = RENDER_MARKER;
 	for (uint32_t i = 1; i < 8u; i++)
 		m->pad3[i] = 0;
-	checks = 0x80000000u | (tr_span_selfcheck() ? 1u : 0u) | (tr_raster_selfcheck() ? 2u : 0u) |
-		 (dual ? 4u : 0u);
+	checks     = 0x80000000u | (tr_span_selfcheck() ? 1u : 0u) | (tr_raster_selfcheck() ? 2u : 0u) |
+	             (dual ? 4u : 0u);
 	m->pad3[1] = checks;
 	RENDER_STATS[1] = 0;
 	RENDER_STATS[2] = 0;
@@ -584,7 +612,8 @@ void renderer_main(volatile tr_mbox_t *m)
 			RENDER_STATS[4] = gap > RENDER_STATS[4] ? gap : RENDER_STATS[4];
 			RENDER_STATS[5] = RENDER_STATS[5] + 1u;
 		}
-		render_set_quality((uint8_t)(RENDER_STATS[1] & (TR_LOD_NO_BACK_RANK | TR_LOD_NEAR | TR_LOD_STILL)));
+		render_set_quality(
+		    (uint8_t)(RENDER_STATS[1] & (TR_LOD_NO_BACK_RANK | TR_LOD_NEAR | TR_LOD_STILL)));
 
 		uint32_t t     = 0;
 		int      drawn = fb == TR_FB_A || fb == TR_FB_B;
@@ -633,8 +662,8 @@ void renderer_main(volatile tr_mbox_t *m)
 			}
 			render_bin();
 			render_stats.bin = cntvct_lo() - tb;
-			frame_fb   = (uint16_t *)fb;
-			band_claim = seq << 8; /* this frame's generation, band 0 */
+			frame_fb         = (uint16_t *)fb;
+			band_claim       = seq << 8; /* this frame's generation, band 0 */
 			if (dual) {
 				dmb_ish(); /* bins, frame_fb, band_claim before frame_go */
 				frame_go = seq;
@@ -668,17 +697,18 @@ void renderer_main(volatile tr_mbox_t *m)
 				uint32_t        v1       = dual ? render_core_stats[1].video_ticks : 0u;
 				uint32_t        panel_us = ((v0 > v1 ? v0 : v1) + render_video_panel_ticks) / 100u;
 
-				panel_us_max     = panel_us > panel_us_max ? panel_us : panel_us_max;
-				RENDER_STATS[15] = panel_us;     /* this frame (fix round 8 item 3, formula fix round 10) */
+				panel_us_max = panel_us > panel_us_max ? panel_us : panel_us_max;
+				RENDER_STATS[15] =
+				    panel_us; /* this frame (fix round 8 item 3, formula fix round 10) */
 				RENDER_STATS[16] = panel_us_max; /* max since this LAUNCH */
 			}
 			barrier(); /* pixels reach SRAM0 before out_seq says so (plan sec 3) */
-			t    = cntvct_lo() - t0;
-			tmax = t > tmax ? t : tmax;
+			t      = cntvct_lo() - t0;
+			tmax   = t > tmax ? t : tmax;
 			o.tris = render_stats.tris;
 			o.dropped += render_stats.dropped + render_stats.dl_dropped;
 			m->pad3[1] = checks | render_core_stats[0].bands << 16 |
-				     (dual ? render_core_stats[1].bands : 0u) << 8 | timeouts << 24;
+			             (dual ? render_core_stats[1].bands : 0u) << 8 | timeouts << 24;
 			m->pad3[2] = render_stats.bin;
 			m->pad3[3] = render_core_stats[0].raster;
 			m->pad3[4] = render_core_stats[0].copy;
@@ -690,15 +720,13 @@ void renderer_main(volatile tr_mbox_t *m)
 		} else {
 			o.dropped++;
 		}
-		if (drawn)
-			prof_publish();
+		if (drawn) prof_publish();
 		o.fb     = fb;
 		o.ticks0 = t;
 		o.frames++;
 		tr_mbox_publish_out(m, &o, seq, barrier);
-		t_pub       = cntvct_lo();
-		if (!t_pub_valid)
-			RENDER_STATS[14] = t_pub;
+		t_pub = cntvct_lo();
+		if (!t_pub_valid) RENDER_STATS[14] = t_pub;
 		t_pub_valid = 1;
 		last        = seq;
 

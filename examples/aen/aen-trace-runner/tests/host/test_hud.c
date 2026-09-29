@@ -43,7 +43,11 @@ static void view_play(tr_hud_view_t *v, uint32_t score, uint32_t metres)
 /* fb must equal a fresh paint of v at the hud's own frame. */
 static void same_as_scratch(const tr_hud_t *h, const tr_hud_view_t *v)
 {
-	tr_hud_paint_all(ref, v, tr_hz_to40(h->frame - 1u), h->popup_start, h->zone_start); /* the HUD's 40 Hz clock */
+	tr_hud_paint_all(ref,
+	                 v,
+	                 tr_hz_to40(h->frame - 1u),
+	                 h->popup_start,
+	                 h->zone_start); /* the HUD's 40 Hz clock */
 	assert(memcmp(fb, ref, sizeof(fb)) == 0);
 }
 
@@ -64,7 +68,8 @@ int main(void)
 	/* 1. Screen choice. */
 	assert(tr_hud_mode_of(TR_BANNER_NONE, false) == TR_HUD_PLAY);
 	assert(tr_hud_mode_of(TR_BANNER_ATTRACT, true) == TR_HUD_ATTRACT);
-	assert(tr_hud_mode_of(TR_BANNER_GAME_OVER, true) == TR_HUD_ATTRACT); /* a demo crash keeps the card */
+	assert(tr_hud_mode_of(TR_BANNER_GAME_OVER, true) ==
+	       TR_HUD_ATTRACT); /* a demo crash keeps the card */
 	assert(tr_hud_mode_of(TR_BANNER_GAME_OVER, false) == TR_HUD_CRASH);
 	assert(tr_hud_mode_of(TR_BANNER_STAND, false) == TR_HUD_BANNER);
 	assert(tr_hud_mode_of(TR_BANNER_STEP_BACK, false) == TR_HUD_BANNER);
@@ -94,18 +99,24 @@ int main(void)
 		assert(!tr_perf_sample(&p, &r, &mem, &v));
 		r.now_us += 100000u; /* 500 ms, 20 flips, core 0 22 ms / core 1 21 ms a frame */
 		r.flips += 4u;
-		r.a32_ticks0 = 20u * 2200000u;
-		r.a32_ticks1 = 20u * 2100000u;
-		r.he_busy_cyc  = 18u;
-		r.he_all_cyc   = 100u;
-		r.rail5v_mw    = 1234; /* platform/rail5v_power.c's EMA, mW */
+		r.a32_ticks0  = 20u * 2200000u;
+		r.a32_ticks1  = 20u * 2100000u;
+		r.he_busy_cyc = 18u;
+		r.he_all_cyc  = 100u;
+		r.rail5v_mw   = 1234; /* platform/rail5v_power.c's EMA, mW */
 		assert(tr_perf_sample(&p, &r, &mem, &v));
 		assert(p.fps_x10 == 400u && p.a32_pct[0] == 88u && p.a32_pct[1] == 84u && p.he_pct == 18u);
-		printf("perf: [%s] [%s] [%s] [%s] [%s] [%s]\n", v.perf[0], v.perf[1], v.perf[2], v.perf[3], v.perf[4],
+		printf("perf: [%s] [%s] [%s] [%s] [%s] [%s]\n",
+		       v.perf[0],
+		       v.perf[1],
+		       v.perf[2],
+		       v.perf[3],
+		       v.perf[4],
 		       v.perf[5]);
 		assert(strcmp(v.perf[0], "FPS 40.0") == 0);
 		assert(strcmp(v.perf[1], "A32#0 88%  A32#1 84%") == 0);
-		assert(strcmp(v.perf[2], "M55-HE 18%  M55-HP --") == 0); /* ring up, no HP sound (2026W36-0009) */
+		assert(strcmp(v.perf[2], "M55-HE 18%  M55-HP --") ==
+		       0); /* ring up, no HP sound (2026W36-0009) */
 		assert(strcmp(v.perf[3], "SRAM 5.61/8.00 MB") == 0);
 		assert(strcmp(v.perf[4], "IMG 0.33 MB  TCM 176+63K") == 0);
 		/* "5V .. mW SoM+LCD", never "SOM": U30 (R127) sits on the carrier's
@@ -118,12 +129,15 @@ int main(void)
 		r.now_us += 1000000u;
 		r.flips += 39u;
 		assert(tr_perf_sample(&p, &r, &mem, &v) && strcmp(v.perf[0], "FPS 39.0") == 0);
-		assert(strcmp(v.perf[1], "A32#0 0%  A32#1 0%") == 0); /* no frame landed ticks this window */
+		assert(strcmp(v.perf[1], "A32#0 0%  A32#1 0%") ==
+		       0); /* no frame landed ticks this window */
 		/* The HP word follows the sound ring's status, never a fixed "idle". */
 		r.now_us += 500000u;
 		r.hp_state = 1u;
-		assert(tr_perf_sample(&p, &r, &mem, &v) && strcmp(v.perf[2], "M55-HE 0%  M55-HP audio") == 0);
-		assert(strcmp(tr_perf_hp(0u, 0u), "--") == 0 && strcmp(tr_perf_hp(0xFFFFFFFFu, 1u), "--") == 0);
+		assert(tr_perf_sample(&p, &r, &mem, &v) &&
+		       strcmp(v.perf[2], "M55-HE 0%  M55-HP audio") == 0);
+		assert(strcmp(tr_perf_hp(0u, 0u), "--") == 0 &&
+		       strcmp(tr_perf_hp(0xFFFFFFFFu, 1u), "--") == 0);
 		assert(strcmp(tr_perf_hp(TR_ARING_MAGIC, TR_ARING_HP_OFF), "--") == 0);
 		assert(strcmp(tr_perf_hp(TR_ARING_MAGIC, TR_ARING_HP_RUNNING), "audio") == 0);
 		assert(strcmp(tr_perf_hp(TR_ARING_MAGIC, TR_ARING_HP_FAULT), "fault") == 0);
@@ -148,7 +162,7 @@ int main(void)
 		r.hp_total_cyc = 2000u;
 		assert(!tr_perf_sample(&p, &r, &mem, &v)); /* opens the window */
 		r.now_us += 500000u;                       /* 500 ms window, closes it */
-		r.hp_busy_cyc += 30u;                       /* 30 of 100 cycles this window: 30% */
+		r.hp_busy_cyc += 30u;                      /* 30 of 100 cycles this window: 30% */
 		r.hp_total_cyc += 100u;
 		assert(tr_perf_sample(&p, &r, &mem, &v));
 		assert(p.hp_pct == 30u);
@@ -222,12 +236,17 @@ int main(void)
 		static const struct {
 			const char *name;
 			uint32_t    base;
-		} want[] = { { "A32 setup", TR_MEM_A32_SETUP }, { "A32 bands", TR_MEM_A32_BANDS },
-			     { "A32 DL1", TR_MEM_A32_DL1 },     { "sound ring", TR_MEM_ARING },
-			     { "stub park", 0x023FE000u },      { "A32 DL", TR_MEM_A32_DL },
-			     { "A32 bins", TR_MEM_A32_BINS },   { "A32 stacks", TR_MEM_A32_STACKS },
-			     { "HUD", TR_HUD_FB },              { "A32 zone tex", TR_MEM_A32_ZTEX },
-			     { "A32 zone idx", TR_MEM_A32_ZIDX } };
+		} want[] = { { "A32 setup", TR_MEM_A32_SETUP },
+			         { "A32 bands", TR_MEM_A32_BANDS },
+			         { "A32 DL1", TR_MEM_A32_DL1 },
+			         { "sound ring", TR_MEM_ARING },
+			         { "stub park", 0x023FE000u },
+			         { "A32 DL", TR_MEM_A32_DL },
+			         { "A32 bins", TR_MEM_A32_BINS },
+			         { "A32 stacks", TR_MEM_A32_STACKS },
+			         { "HUD", TR_HUD_FB },
+			         { "A32 zone tex", TR_MEM_A32_ZTEX },
+			         { "A32 zone idx", TR_MEM_A32_ZIDX } };
 
 		for (unsigned k = 0; k < sizeof(want) / sizeof(want[0]); k++) {
 			unsigned i = 0;
@@ -239,14 +258,18 @@ int main(void)
 		}
 		uint32_t budget = tr_mem_sram_used(0u), real = tr_mem_sram_used(0x02537670u);
 
-		assert(budget - real == 0xC0000u - 0x37670u); /* image + .bss may run to TR_MEM_A32_IMG_END */
+		assert(budget - real ==
+		       0xC0000u - 0x37670u); /* image + .bss may run to TR_MEM_A32_IMG_END */
 		assert(tr_mem_sram_used(0x02600000u) == budget); /* out of range: the budget */
-		printf("mem: SRAM allocated %u B (renderer budget) / %u B (renderer 0x37670), of %u\n", (unsigned)budget,
-		       (unsigned)real, TR_MEM_SRAM_TOTAL);
+		printf("mem: SRAM allocated %u B (renderer budget) / %u B (renderer 0x37670), of %u\n",
+		       (unsigned)budget,
+		       (unsigned)real,
+		       TR_MEM_SRAM_TOTAL);
 	}
 
 	/* 4. Every tagline / prompt character has a glyph. */
-	assert(tr_hud_text_w(TR_HUD_FONT_SMALL, "E1M-AEN803 \x7f Alif Ensemble E8 \x7f 2x Cortex-A32 \x7f 3D at 40 fps") <=
+	assert(tr_hud_text_w(TR_HUD_FONT_SMALL,
+	                     "E1M-AEN803 \x7f Alif Ensemble E8 \x7f 2x Cortex-A32 \x7f 3D at 40 fps") <=
 	       TR_HUD_W - 24);
 	assert(tr_hud_text_w(TR_HUD_FONT_MED, "STEP BACK INTO VIEW") <= TR_HUD_W - 40);
 	assert(tr_hud_text_w(TR_HUD_FONT_BIG, "4,294,967,295") > tr_hud_text_w(TR_HUD_FONT_BIG, "1"));
@@ -274,10 +297,11 @@ int main(void)
 	same_as_scratch(&h, &v);
 	/* P16: the character's name is in the score tile */
 	v.character = 3u;
-	px = tr_hud_update(&h, fb, &v, &dirty);
+	px          = tr_hud_update(&h, fb, &v, &dirty);
 	assert(dirty == 1u && px > 0u);
 	same_as_scratch(&h, &v);
-	assert(strcmp(tr_hud_char_name(3u), "PIXEL") == 0 && strcmp(tr_hud_char_name(9u), "PROBE") == 0);
+	assert(strcmp(tr_hud_char_name(3u), "PIXEL") == 0 &&
+	       strcmp(tr_hud_char_name(9u), "PROBE") == 0);
 	v.character = 0u;
 	(void)tr_hud_update(&h, fb, &v, &dirty);
 
@@ -321,7 +345,8 @@ int main(void)
 
 		tr_score_init(&zs);
 		zs.popup_seq = h.popup_seq; /* no pickup popup over it */
-		tr_hud_view_set(&v, &zs, attract ? TR_BANNER_ATTRACT : TR_BANNER_NONE, attract, TR_HUD_INVITE_NONE);
+		tr_hud_view_set(
+		    &v, &zs, attract ? TR_BANNER_ATTRACT : TR_BANNER_NONE, attract, TR_HUD_INVITE_NONE);
 		tr_hud_view_zone(&v, TR_ZONE_MEM, 7u + (uint32_t)attract);
 		for (uint32_t f = 0; f < TR_HUD_ZONE_FRAMES + 4u; f++) {
 			px = tr_hud_update(&h, fb, &v, &dirty);
@@ -330,7 +355,9 @@ int main(void)
 			int      rows;
 
 			tr_hud_paint_all(none, &v, fr, h.popup_start, h.zone_start - TR_HUD_ZONE_FRAMES);
-			rows = memcmp(&fb[300 * TR_HUD_W], &none[300 * TR_HUD_W], (TR_HUD_H - 300) * TR_HUD_W * 2) != 0;
+			rows = memcmp(&fb[300 * TR_HUD_W],
+			              &none[300 * TR_HUD_W],
+			              (TR_HUD_H - 300) * TR_HUD_W * 2) != 0;
 			assert(memcmp(fb, none, 300 * TR_HUD_W * 2) == 0); /* nothing above the row */
 			if (age < TR_HUD_ZONE_FRAMES) {
 				assert(rows);
@@ -342,11 +369,14 @@ int main(void)
 				quiet++;
 			}
 		}
-		assert(seen + 1u >= TR_HZ_FRAMES(TR_HUD_ZONE_FRAMES) && quiet >= 3u); /* its real time at 30 Hz too */
+		assert(seen + 1u >= TR_HZ_FRAMES(TR_HUD_ZONE_FRAMES) &&
+		       quiet >= 3u); /* its real time at 30 Hz too */
 		/* keyed on the name's alpha, not its age: the row (37,440 px)
 		 * repaints while it fades in (8) and out (16), not every frame */
 		assert(repaints <= 8u + 16u + 2u);
-		printf("hud: zone popup (%s) %u frames, %u row repaints\n", attract ? "attract" : "play", (unsigned)seen,
+		printf("hud: zone popup (%s) %u frames, %u row repaints\n",
+		       attract ? "attract" : "play",
+		       (unsigned)seen,
 		       (unsigned)repaints);
 	}
 	/* The attract row, P16 + P15 (hud.c INV_CHAR_X 190 / INV_SIDE_X 520):
@@ -357,7 +387,9 @@ int main(void)
 
 		assert(190 - wc / 2 - 34 >= 20);
 		for (uint32_t z = 0; z < TR_ZONES + 2u; z++) {
-			const char *side = z < TR_ZONES ? tr_zone_name(z) : z == TR_ZONES ? "TILT TO PLAY" : "STEP IN TO PLAY";
+			const char *side = z < TR_ZONES    ? tr_zone_name(z)
+			                   : z == TR_ZONES ? "TILT TO PLAY"
+			                                   : "STEP IN TO PLAY";
 			int         ws   = tr_hud_text_w(TR_HUD_FONT_MED, side);
 
 			assert(190 + wc / 2 + 34 < 520 - ws / 2 && 520 + ws / 2 <= TR_HUD_W - 20);
@@ -397,9 +429,11 @@ int main(void)
 
 			tr_hud_paint_all(a, &v, fl, 0u - TR_HUD_POPUP_FRAMES, fl + off);
 			tr_hud_paint_all(b, &v, ft, 0u - TR_HUD_POPUP_FRAMES, ft + off);
-			assert(memcmp(a, b, 140 * row) == 0);                            /* above the card: untouched */
-			assert(memcmp(a + 140 * TR_HUD_W, b + 140 * TR_HUD_W, 160 * row) != 0); /* the card's middle turns */
-			assert(memcmp(a + 300 * TR_HUD_W, b + 300 * TR_HUD_W, 52 * row) == 0);  /* the invitation row: not */
+			assert(memcmp(a, b, 140 * row) == 0); /* above the card: untouched */
+			assert(memcmp(a + 140 * TR_HUD_W, b + 140 * TR_HUD_W, 160 * row) !=
+			       0); /* the card's middle turns */
+			assert(memcmp(a + 300 * TR_HUD_W, b + 300 * TR_HUD_W, 52 * row) ==
+			       0); /* the invitation row: not */
 			assert(alpha_px(b, 60, 150, 660, 296) > 8000u);
 			/* the zone's name over the table page: only its row changes */
 			tr_hud_paint_all(c, &v, ft, 0u - TR_HUD_POPUP_FRAMES, ft);
@@ -430,7 +464,7 @@ int main(void)
 			static uint16_t lp[TR_HUD_W * TR_HUD_H], tp[TR_HUD_W * TR_HUD_H];
 			tr_hud_t        hb;
 			uint32_t        seen_t = 0;
-			const size_t    mrow = 160u * TR_HUD_W * 2u;
+			const size_t    mrow   = 160u * TR_HUD_W * 2u;
 
 			tr_hud_paint_all(lp, &v, 0u, 0u - TR_HUD_POPUP_FRAMES, off);
 			tr_hud_paint_all(tp, &v, P, 0u - TR_HUD_POPUP_FRAMES, P + off);
@@ -488,7 +522,8 @@ int main(void)
 			}
 		}
 		assert(worst > 0u && worst <= 110000u / 2u);
-		assert(tr_hud_text_w(TR_HUD_FONT_SMALL, "TILT \x7f LETTER   TOWARD \x7f NEXT   AWAY \x7f BACK") <=
+		assert(tr_hud_text_w(TR_HUD_FONT_SMALL,
+		                     "TILT \x7f LETTER   TOWARD \x7f NEXT   AWAY \x7f BACK") <=
 		       TR_HUD_W - 220 - 2 * 16); /* inside the card (110 .. 610), clear of its edge rule */
 		assert(alpha_px(fb, 230, 190, 490, 290) > 3000u); /* the letters are up */
 		printf("hud: initials entry repaints <= %u px a frame\n", (unsigned)worst);
@@ -523,14 +558,16 @@ int main(void)
 	}
 
 	/* 7. Screen changes + a scripted mix: always equal to scratch. */
-	static const uint8_t banners[] = { TR_BANNER_NONE, TR_BANNER_ATTRACT, TR_BANNER_GAME_OVER, TR_BANNER_STAND,
-					   TR_BANNER_STEP_BACK, TR_BANNER_CHECK_CAMERA };
+	static const uint8_t banners[] = {
+		TR_BANNER_NONE,  TR_BANNER_ATTRACT,   TR_BANNER_GAME_OVER,
+		TR_BANNER_STAND, TR_BANNER_STEP_BACK, TR_BANNER_CHECK_CAMERA
+	};
 	tr_score_t s;
 
 	tr_score_init(&s);
 	for (uint32_t f = 0; f < 400u; f++) {
-		uint8_t ban     = banners[(f / 37u) % 6u];
-		bool    attract = ban == TR_BANNER_ATTRACT || (ban == TR_BANNER_GAME_OVER && (f / 222u) % 2u);
+		uint8_t ban  = banners[(f / 37u) % 6u];
+		bool attract = ban == TR_BANNER_ATTRACT || (ban == TR_BANNER_GAME_OVER && (f / 222u) % 2u);
 
 		s.score    = f * 3u;
 		s.metres   = f / 4u;
@@ -544,7 +581,8 @@ int main(void)
 		}
 		tr_hud_view_set(&v, &s, ban, attract, (uint8_t)(f / 150u % 3u));
 		v.character = (uint8_t)(f / 29u % 5u); /* P16, 4: out of range */
-		tr_hud_view_zone(&v, (uint8_t)(f / 60u % TR_ZONES), f / 60u); /* a zone entry every 60 frames */
+		tr_hud_view_zone(
+		    &v, (uint8_t)(f / 60u % TR_ZONES), f / 60u); /* a zone entry every 60 frames */
 		if (f % 20u == 0u) {
 			snprintf(v.perf[0], TR_PERF_COLS, "FPS %u.0", (unsigned)(30u + f % 11u));
 		}
@@ -577,13 +615,17 @@ int main(void)
 			assert(p1 <= hc.budget || (dirty & (dirty - 1u)) == 0u || (dirty & ~MIDDLE) == 0u);
 			frames++;
 		} while (p1 != 0u && frames < 10u);
-		assert(frames >= 3u && frames <= 5u); /* 253,440 px at <= 100,000 a frame, then one quiet frame */
+		assert(frames >= 3u &&
+		       frames <= 5u); /* 253,440 px at <= 100,000 a frame, then one quiet frame */
 		tr_hud_paint_all(ref, &v, tr_hz_to40(hc.frame - 1u), hc.popup_start, hc.zone_start);
 		assert(memcmp(fb, ref, sizeof(fb)) == 0);
 	}
 
-	printf("hud: %u px repainted over %u frames, host %.2f ns/px (%.1f ms total)\n", (unsigned)n,
-	       TR_HUD_POPUP_FRAMES + 403u, (double)dt / (double)n, (double)dt / 1e6);
+	printf("hud: %u px repainted over %u frames, host %.2f ns/px (%.1f ms total)\n",
+	       (unsigned)n,
+	       TR_HUD_POPUP_FRAMES + 403u,
+	       (double)dt / (double)n,
+	       (double)dt / 1e6);
 	/* Worst single frame: a screen change repaints the whole HUD. */
 	tr_hud_init(&h);
 	t0 = now_ns();

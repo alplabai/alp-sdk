@@ -20,7 +20,7 @@
  * is redrawn unconditionally every frame, even when it has not moved.
  */
 
-#define RGB565(r, g, b) ((uint16_t)(((r) &0xF8) << 8 | ((g) &0xFC) << 3 | (b) >> 3))
+#define RGB565(r, g, b) ((uint16_t)(((r) & 0xF8) << 8 | ((g) & 0xFC) << 3 | (b) >> 3))
 
 /*
  * The board's solder-mask green (see tools/genart.py's PALETTE[MASK],
@@ -71,10 +71,12 @@
  * (finding 4) is the second half, covering the banner path where a chunk's
  * height comes from generated data no BUILD_ASSERT can see.
  */
-BUILD_ASSERT(TR_ATLAS_BLIT_MAX_W <= TR_SPRITE_MAX_W && TR_ATLAS_BLIT_MAX_H <= TR_SPRITE_MAX_H,
-	     "a generated (non-banner) sprite exceeds the scratch buffer -- raise TR_SPRITE_MAX_W/H");
+BUILD_ASSERT(
+    TR_ATLAS_BLIT_MAX_W <= TR_SPRITE_MAX_W && TR_ATLAS_BLIT_MAX_H <= TR_SPRITE_MAX_H,
+    "a generated (non-banner) sprite exceeds the scratch buffer -- raise TR_SPRITE_MAX_W/H");
 BUILD_ASSERT(TR_ATLAS_RUNNER_H == TR_RUNNER_H,
-	     "TR_RUNNER_H (src/game/state.h, the collision line) must match the generated runner sprite height");
+             "TR_RUNNER_H (src/game/state.h, the collision line) must match the generated runner "
+             "sprite height");
 /* The atlas budget gate: task-11-brief.md's "The budget" -- 262,144 B ITCM
  * RAM-run region minus the 130,564 B image this task started from leaves
  * 131,580 B for everything this task adds. Catches the next sprite that
@@ -82,7 +84,8 @@ BUILD_ASSERT(TR_ATLAS_RUNNER_H == TR_RUNNER_H,
 BUILD_ASSERT(TR_ATLAS_BYTES <= 131580, "sprite atlas exceeds the ITCM RAM-run headroom");
 
 /* Run-cycle animation: 4 frames off the existing tick counter. */
-#define TR_RUN_FRAME_TICKS 4 /* ticks per frame; 4 frames * 4 ticks = 16 ticks/cycle (~0.53 s at 30 Hz). */
+#define TR_RUN_FRAME_TICKS \
+	4 /* ticks per frame; 4 frames * 4 ticks = 16 ticks/cycle (~0.53 s at 30 Hz). */
 static const tr_sprite_t *const RUN_CYCLE[4] = {
 	&tr_spr_runner_run_0,
 	&tr_spr_runner_run_1,
@@ -154,8 +157,13 @@ static void fill(uint16_t w, uint16_t h, uint16_t colour)
  * nothing (task-11-review.md finding 1). Every other caller passes 0, where
  * the sign makes no difference.
  */
-static bool paint(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t colour, const tr_sprite_t *spr,
-		   int16_t spr_x_off)
+static bool paint(int16_t            x,
+                  int16_t            y,
+                  uint16_t           w,
+                  uint16_t           h,
+                  uint16_t           colour,
+                  const tr_sprite_t *spr,
+                  int16_t            spr_x_off)
 {
 	if (x < 0 || y < 0 || x + w > g_w || y + h > g_h) {
 		return false; /* Never blit outside the panel: the driver would reject it anyway. */
@@ -276,11 +284,13 @@ static int16_t runner_y(const tr_game_t *g)
  * actual art cannot happen (task-11-review.md finding 5). Obstacles pick
  * their sprite off `low` (see state.h's comment on tr_entity_t); pickups
  * animate off the tick counter, same technique as the runner's run cycle. */
-static const tr_sprite_t *entity_sprite(const tr_game_t *g, const tr_entity_t *e, uint16_t *w, uint16_t *h)
+static const tr_sprite_t *
+entity_sprite(const tr_game_t *g, const tr_entity_t *e, uint16_t *w, uint16_t *h)
 {
 	const tr_sprite_t *spr;
 
-	if (tr_ent_is_obstacle(e->kind)) { /* a live wire (P4b) draws as the obstacle of its height here */
+	if (tr_ent_is_obstacle(
+	        e->kind)) { /* a live wire (P4b) draws as the obstacle of its height here */
 		spr = e->low ? &tr_spr_obstacle_low : &tr_spr_obstacle_high;
 	} else {
 		spr = PICKUP_CYCLE[(g->tick / TR_PICKUP_FRAME_TICKS) % 4u];
@@ -342,11 +352,17 @@ void tr_render_frame(const tr_game_t *g)
 	 * actually there, not a single shared size, or it either leaves stale
 	 * sprite pixels behind or reaches into a neighbouring lane's pixels. */
 	if (g_prev_runner_x >= 0) {
-		paint(g_prev_runner_x, g_prev_runner_y, g_prev_runner_w, g_prev_runner_h, COLOR_BG, NULL, 0);
+		paint(
+		    g_prev_runner_x, g_prev_runner_y, g_prev_runner_w, g_prev_runner_h, COLOR_BG, NULL, 0);
 	}
 	for (unsigned i = 0; i < TR_MAX_ENTITIES; i++) {
 		if (g_prev_ent_x[i] >= 0) {
-			paint(g_prev_ent_x[i], g_prev_ent_y[i], g_prev_ent_w[i], g_prev_ent_h[i], COLOR_BG, NULL,
+			paint(g_prev_ent_x[i],
+			      g_prev_ent_y[i],
+			      g_prev_ent_w[i],
+			      g_prev_ent_h[i],
+			      COLOR_BG,
+			      NULL,
 			      0);
 			g_prev_ent_x[i] = -1;
 		}
@@ -359,10 +375,10 @@ void tr_render_frame(const tr_game_t *g)
 		if (e->kind == TR_ENT_FREE) {
 			continue;
 		}
-		uint16_t            ew, eh;
+		uint16_t           ew, eh;
 		const tr_sprite_t *spr = entity_sprite(g, e, &ew, &eh);
-		int16_t             x  = lane_x(e->lane, ew);
-		int16_t             y  = e->y;
+		int16_t            x   = lane_x(e->lane, ew);
+		int16_t            y   = e->y;
 
 		/*
 		 * No manual pre-check here -- paint() is the sole bounds authority (x
@@ -386,8 +402,8 @@ void tr_render_frame(const tr_game_t *g)
 
 	/* The runner is drawn unconditionally -- see the invariant at the top. */
 	const tr_sprite_t *rspr = runner_sprite(g);
-	int16_t             rx  = lane_x(g->lane, rspr->w);
-	int16_t             ry  = runner_y(g);
+	int16_t            rx   = lane_x(g->lane, rspr->w);
+	int16_t            ry   = runner_y(g);
 
 	if (paint(rx, ry, rspr->w, rspr->h, COLOR_BG, rspr, 0)) {
 		g_prev_runner_x = rx;
@@ -434,8 +450,8 @@ void tr_render_banner(const tr_sprite_t *s)
 
 	for (uint16_t off = 0; off < BANNER_PLATE_W; off = (uint16_t)(off + TR_SPRITE_MAX_W)) {
 		uint16_t cw =
-			(uint16_t)((off + TR_SPRITE_MAX_W <= BANNER_PLATE_W) ? TR_SPRITE_MAX_W
-									      : (BANNER_PLATE_W - off));
+		    (uint16_t)((off + TR_SPRITE_MAX_W <= BANNER_PLATE_W) ? TR_SPRITE_MAX_W
+		                                                         : (BANNER_PLATE_W - off));
 
 		(void)paint((int16_t)(x0 + off), 0, cw, BANNER_PLATE_H, COLOR_PLATE, NULL, 0);
 	}
@@ -444,8 +460,13 @@ void tr_render_banner(const tr_sprite_t *s)
 	 * TR_SPRITE_MAX_W*TR_SPRITE_MAX_H capacity even though it is wider than
 	 * TR_SPRITE_MAX_W: that guard is on AREA, not on width alone. Ties the
 	 * sign to the board rather than reading as a generic UI box. */
-	(void)paint((int16_t)(x0 + 14), (int16_t)(BANNER_PLATE_H - 9), (uint16_t)(BANNER_PLATE_W - 29), 3,
-		    COLOR_COPPER, NULL, 0);
+	(void)paint((int16_t)(x0 + 14),
+	            (int16_t)(BANNER_PLATE_H - 9),
+	            (uint16_t)(BANNER_PLATE_W - 29),
+	            3,
+	            COLOR_COPPER,
+	            NULL,
+	            0);
 
 	int16_t text_y = (int16_t)((BANNER_PLATE_H - s->h) / 2);
 

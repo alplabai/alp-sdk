@@ -43,7 +43,7 @@
 /* ~3 Hz: inside the task's 2-5 Hz band, off the ~30 Hz render hot path. */
 #define RAIL5V_PERIOD_MS 320
 
-volatile int32_t tr_rail5v_avg_mw;
+volatile int32_t  tr_rail5v_avg_mw;
 volatile uint32_t tr_rail5v_config_rb;
 
 /* Polish round (silicon: one of three cold boots read 856-966 mW, the
@@ -65,7 +65,8 @@ static bool     g_cfg_verified;
 
 static void publish_config(void)
 {
-	tr_rail5v_config_rb = (uint32_t)g_cfg_verified << 31 | (uint32_t)g_cfg_rewrites << 16 | g_cfg_rb;
+	tr_rail5v_config_rb =
+	    (uint32_t)g_cfg_verified << 31 | (uint32_t)g_cfg_rewrites << 16 | g_cfg_rb;
 }
 
 static alp_i2c_t *g_bus;
@@ -90,7 +91,9 @@ static alp_status_t reg_read16(uint8_t reg, int16_t *val_out)
 
 static alp_status_t config_write(void)
 {
-	uint8_t buf[3] = { TR_INA236_REG_CONFIG, (uint8_t)(TR_INA236_CONFIG >> 8), (uint8_t)TR_INA236_CONFIG };
+	uint8_t buf[3] = { TR_INA236_REG_CONFIG,
+		               (uint8_t)(TR_INA236_CONFIG >> 8),
+		               (uint8_t)TR_INA236_CONFIG };
 
 	return alp_i2c_write(g_bus, RAIL5V_ADDR, buf, sizeof(buf));
 }
@@ -145,7 +148,9 @@ int tr_rail5v_open(void)
 	}
 	publish_config();
 	if (!g_cfg_verified) {
-		printk("rail5v  : CONFIG readback 0x%04x != 0x%04x -- power HUD disabled\n", g_cfg_rb, TR_INA236_CONFIG);
+		printk("rail5v  : CONFIG readback 0x%04x != 0x%04x -- power HUD disabled\n",
+		       g_cfg_rb,
+		       TR_INA236_CONFIG);
 		alp_i2c_close(g_bus);
 		g_bus = NULL;
 		return -1;
@@ -153,7 +158,8 @@ int tr_rail5v_open(void)
 
 	g_ok          = true;
 	g_have_sample = false;
-	g_next_ms     = k_uptime_get() + RAIL5V_PERIOD_MS; /* the first 282 ms average under the new CONFIG */
+	g_next_ms =
+	    k_uptime_get() + RAIL5V_PERIOD_MS; /* the first 282 ms average under the new CONFIG */
 	printk("rail5v  : READY (+5V net, 0x%02x, CONFIG 0x%04x)\n", RAIL5V_ADDR, g_cfg_rb);
 	return 0;
 }
@@ -190,7 +196,7 @@ void tr_rail5v_poll(void)
 		return;
 	}
 
-	int32_t bus_mv    = tr_ina236_bus_mv(bus_raw);
+	int32_t bus_mv = tr_ina236_bus_mv(bus_raw);
 
 	/* fix round 13 (review, silicon finding): one of three cold boots showed
 	 * the HUD stuck at 793-965 mW where the other two read the true ~2.1 W
@@ -213,7 +219,8 @@ void tr_rail5v_poll(void)
 	if (bus_mv < 4500) {
 		return;
 	}
-	int32_t shunt_uv   = tr_ina236_shunt_uv(shunt_raw, false /* ADCRANGE=0, checked in CONFIG this poll */);
+	int32_t shunt_uv =
+	    tr_ina236_shunt_uv(shunt_raw, false /* ADCRANGE=0, checked in CONFIG this poll */);
 	int32_t current_ua = tr_ina236_current_ua(shunt_uv, RAIL5V_SHUNT_OHMS);
 	int32_t sample_mw  = tr_ina236_power_mw(bus_mv, current_ua);
 

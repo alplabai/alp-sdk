@@ -30,8 +30,8 @@
 /* A metre is TR_PX_PER_M px of track: 72 = the old 18 px/tick x 4 ticks a
  * metre, so a metre stays the same length of board whatever TR_SCROLL_PX
  * is (11 px/tick: 6.1 m/s at the 40 Hz flip rate, was 10 m/s). */
-#define TR_PX_PER_M 72u
-#define TR_COMBO_MAX   5u /* the top multiplier, "x5" */
+#define TR_PX_PER_M  72u
+#define TR_COMBO_MAX 5u /* the top multiplier, "x5" */
 /* Steps from one pickup to the next that keep the streak: 5 s at today's
  * pace, two spawns' worth of room to spare (a pickup is one spawn in four).
  * Steps, not frames: the same stretch of track at any speed (ramp.h). */
@@ -54,7 +54,7 @@ typedef struct {
 	uint8_t  popup_hs;   /* the latest popup is the new-high-score one, not a pickup's */
 	uint8_t  hs_done;    /* this run has popped it */
 	uint8_t  pad;
-	uint32_t hs_top;     /* the score to beat for the celebration (0: none); the caller's, per run */
+	uint32_t hs_top; /* the score to beat for the celebration (0: none); the caller's, per run */
 	uint32_t combo_tick; /* g->tick of the streak's last pickup */
 } tr_score_t;
 

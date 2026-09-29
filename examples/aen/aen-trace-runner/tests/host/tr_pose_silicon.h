@@ -1,3 +1,4 @@
+/* clang-format off */
 /* tests/host/tr_pose_silicon.h -- REAL keypoints read back from 2026W36-0009 over
  * SWD (the HP -> HE pose slot, tr_pslot.h), 2026-09-25, UPRIGHT 400x640
  * frame (TR_CAM_ROTATE=90, TR_CAM_MIRROR=ON), one sample every ~4-5 pose

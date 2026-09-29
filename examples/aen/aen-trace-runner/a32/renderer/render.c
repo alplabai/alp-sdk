@@ -23,15 +23,17 @@
 
 /* The A32 never writes the TF-A MHU0 window, and nothing here skips it any
  * more: no framebuffer may contain it (FB B moved to SRAM1). */
-_Static_assert(STUB_MHU0_WINDOW == TR_MHU0_WINDOW_LO && STUB_MHU0_WINDOW + STUB_MHU0_WINDOW_SIZE == TR_MHU0_WINDOW_HI,
-	       "tr_mbox.h and stub_abi.h disagree on the MHU0 window");
+_Static_assert(STUB_MHU0_WINDOW == TR_MHU0_WINDOW_LO &&
+                   STUB_MHU0_WINDOW + STUB_MHU0_WINDOW_SIZE == TR_MHU0_WINDOW_HI,
+               "tr_mbox.h and stub_abi.h disagree on the MHU0 window");
 _Static_assert(TR_FB_CLEAR_OF_MHU0(TR_FB_A) && TR_FB_CLEAR_OF_MHU0(TR_FB_B),
-	       "a framebuffer overlaps the TF-A MHU0 window [0x02380000, 0x02381000)");
+               "a framebuffer overlaps the TF-A MHU0 window [0x02380000, 0x02381000)");
 _Static_assert(TR_FB_B + TR_FB_SIZE <= 0x027DE000u, "FB B runs into TF-A RW (0x027DE000)");
 _Static_assert(RENDER_FB_BYTES == TR_FB_SIZE, "framebuffer size");
 /* The HE's HUD buffer (layer 2) sits above everything the renderer maps in SRAM0. */
-_Static_assert(TR_HUD_FB >= STUB_MHU0_WINDOW + STUB_MHU0_WINDOW_SIZE && TR_HUD_FB + TR_HUD_FB_SIZE <= STUB_EARLY_PARK,
-	       "HUD buffer overlaps the MHU0 window or the stub's early park page");
+_Static_assert(TR_HUD_FB >= STUB_MHU0_WINDOW + STUB_MHU0_WINDOW_SIZE &&
+                   TR_HUD_FB + TR_HUD_FB_SIZE <= STUB_EARLY_PARK,
+               "HUD buffer overlaps the MHU0 window or the stub's early park page");
 
 #if RENDER_A32
 #include <arm_neon.h>
@@ -39,27 +41,34 @@ _Static_assert(TR_HUD_FB >= STUB_MHU0_WINDOW + STUB_MHU0_WINDOW_SIZE && TR_HUD_F
 /* a32-renderer plan sec 4: SRAM1 MiB 1 (DL, bins) and SRAM0 MiB 2
  * 0x022xxxxx (setup records, per core a z + a colour band), both Normal
  * WB-WA S=1 in the renderer table (core 1 switches to it too). */
-#define DL       ((tr_dl_t *)TR_MEM_A32_DL)
-#define BINS     ((uint16_t (*)[TR_BIN_MAX])TR_MEM_A32_BINS)
-#define SETUP    ((tr_tri_setup_t *)TR_MEM_A32_SETUP)
+#define DL    ((tr_dl_t *)TR_MEM_A32_DL)
+#define BINS  ((uint16_t (*)[TR_BIN_MAX])TR_MEM_A32_BINS)
+#define SETUP ((tr_tri_setup_t *)TR_MEM_A32_SETUP)
 /* Scene part 2's DL (core 1), SRAM0 MiB 3 below the MHU0 window, mapped
  * WB-WA S=1 through 4 KiB pages (renderer.c). */
-#define DL1      ((tr_dl_t *)TR_MEM_A32_DL1)
+#define DL1 ((tr_dl_t *)TR_MEM_A32_DL1)
 /* DL1 must leave room for the HP's NPU arena (tr_memmap.h TR_MEM_NPU_ARENA,
  * docs/superpowers/specs/2026-09-24-npu-body-control-design.md sec 2/9)
  * before the sound ring / MHU0 window page. */
 _Static_assert(TR_MEM_A32_DL1 + sizeof(tr_dl_t) <= TR_MEM_NPU_ARENA, "DL1 runs into the NPU arena");
-_Static_assert(TR_MEM_NPU_ARENA + TR_MEM_NPU_ARENA_SIZE <= TR_MEM_ARING, "NPU arena runs into the MHU0 window / sound ring");
+_Static_assert(TR_MEM_NPU_ARENA + TR_MEM_NPU_ARENA_SIZE <= TR_MEM_ARING,
+               "NPU arena runs into the MHU0 window / sound ring");
 #define ZBAND(c) ((uint16_t *)TR_MEM_A32_BANDS + (c) * 2u * BAND_PX)
 #define CBAND(c) (ZBAND(c) + BAND_PX)
-_Static_assert(TR_MEM_A32_DL >= TR_FB_A + TR_FB_SIZE && TR_MEM_A32_DL + sizeof(tr_dl_t) <= TR_MEM_A32_SETUP,
-	       "DL must sit between FB A and the setup records (SRAM0 MiB 1 tail)");
+_Static_assert(TR_MEM_A32_DL >= TR_FB_A + TR_FB_SIZE &&
+                   TR_MEM_A32_DL + sizeof(tr_dl_t) <= TR_MEM_A32_SETUP,
+               "DL must sit between FB A and the setup records (SRAM0 MiB 1 tail)");
 _Static_assert(TR_MEM_A32_IMG_END <= TR_MEM_A32_BINS, "renderer image + .bss overrun the bins");
-_Static_assert(TR_MEM_A32_BINS + TR_BANDS * TR_BIN_MAX * 2u <= TR_MEM_A32_STACKS, "bins overrun the stacks");
-_Static_assert(TR_MEM_A32_SETUP + sizeof(tr_tri_setup_t) * TR_DL_MAX_TRIS <= TR_MEM_A32_BANDS, "setup records overrun the bands");
-_Static_assert(TR_MEM_A32_BANDS + RENDER_CORES * 4u * BAND_PX <= TR_MEM_A32_ZTEX, "bands overrun the zone textures");
-_Static_assert(TR_MEM_A32_ZTEX + TR_MEM_A32_ZTEX_SIZE <= TR_MEM_A32_ZIDX, "zone textures overrun the zone indices");
-_Static_assert(TR_MEM_A32_ZIDX + TR_MEM_A32_ZIDX_SIZE <= TR_MEM_A32_DL1, "zone indices overrun SRAM0 MiB 2");
+_Static_assert(TR_MEM_A32_BINS + TR_BANDS * TR_BIN_MAX * 2u <= TR_MEM_A32_STACKS,
+               "bins overrun the stacks");
+_Static_assert(TR_MEM_A32_SETUP + sizeof(tr_tri_setup_t) * TR_DL_MAX_TRIS <= TR_MEM_A32_BANDS,
+               "setup records overrun the bands");
+_Static_assert(TR_MEM_A32_BANDS + RENDER_CORES * 4u * BAND_PX <= TR_MEM_A32_ZTEX,
+               "bands overrun the zone textures");
+_Static_assert(TR_MEM_A32_ZTEX + TR_MEM_A32_ZTEX_SIZE <= TR_MEM_A32_ZIDX,
+               "zone textures overrun the zone indices");
+_Static_assert(TR_MEM_A32_ZIDX + TR_MEM_A32_ZIDX_SIZE <= TR_MEM_A32_DL1,
+               "zone indices overrun SRAM0 MiB 2");
 
 static inline uint32_t ticks(void)
 {
@@ -70,10 +79,16 @@ static inline uint32_t ticks(void)
 	return lo;
 }
 
-static inline void copy16(uint16_t *d, const uint16_t *s) { vst1q_u16(d, vld1q_u16(s)); }
-static void        pip_barrier(void) { __asm__ volatile("dsb sy" ::: "memory"); }
+static inline void copy16(uint16_t *d, const uint16_t *s)
+{
+	vst1q_u16(d, vld1q_u16(s));
+}
+static void pip_barrier(void)
+{
+	__asm__ volatile("dsb sy" ::: "memory");
+}
 #else
-static tr_dl_t        dl_mem;
+static tr_dl_t dl_mem;
 #if !RENDER_DL_GOLDEN
 static tr_dl_t dl1_mem;
 #endif
@@ -87,9 +102,17 @@ static uint16_t       band_mem[RENDER_CORES][2 * BAND_PX];
 #define ZBAND(c) band_mem[c]
 #define CBAND(c) (band_mem[c] + BAND_PX)
 
-static inline uint32_t ticks(void) { return 0; }
-static inline void     copy16(uint16_t *d, const uint16_t *s) { memcpy(d, s, 16); }
-static void            pip_barrier(void) { }
+static inline uint32_t ticks(void)
+{
+	return 0;
+}
+static inline void copy16(uint16_t *d, const uint16_t *s)
+{
+	memcpy(d, s, 16);
+}
+static void pip_barrier(void)
+{
+}
 #endif
 
 render_stats_t      render_stats;
@@ -99,9 +122,9 @@ const uint32_t      render_golden_crc                = TR_GOLDEN_RASTER_CRC;
 const uint32_t      render_golden_band_crc[TR_BANDS] = TR_GOLDEN_BAND_CRC;
 
 static uint32_t counts[TR_BANDS];
-static tr_bg_t  frame_bg;                /* this frame's band background */
-static uint32_t hud_score, hud_banner;   /* this frame's HUD, from `in` */
-static uint32_t hud_flags;               /* this frame's TR_FLAG_* (TR_FLAG_HUD_L2: the HE draws the HUD) */
+static tr_bg_t  frame_bg;              /* this frame's band background */
+static uint32_t hud_score, hud_banner; /* this frame's HUD, from `in` */
+static uint32_t hud_flags; /* this frame's TR_FLAG_* (TR_FLAG_HUD_L2: the HE draws the HUD) */
 #if RENDER_DL_GOLDEN
 static uint16_t tex0[TR_TEX_DIM * TR_TEX_DIM];
 #else
@@ -129,9 +152,9 @@ static void build_dl(const tr_frame_in_t *in, tr_dl_t *dl, tr_bg_t *bg)
 
 	(void)in;
 	memcpy(dl->tri, tr_golden_dl, sizeof(tr_golden_dl));
-	dl->n          = TR_GOLDEN_DL_N;
-	*bg            = gbg;
-	tr_dl_dropped  = 0;
+	dl->n         = TR_GOLDEN_DL_N;
+	*bg           = gbg;
+	tr_dl_dropped = 0;
 #else
 	tr_cam_t cam;
 
@@ -144,15 +167,15 @@ static void build_dl(const tr_frame_in_t *in, tr_dl_t *dl, tr_bg_t *bg)
 
 /* HUD geometry: the M55 renderer's (src/render/render.c draw_hud /
  * tr_render_banner) -- score digits top-left, banner plate top-centre. */
-#define HUD_X0         4
-#define HUD_Y0         8
-#define HUD_DIGIT_GAP  2
-#define BANNER_W       480
-#define BANNER_H       64
-#define BANNER_X0      ((TR_R3D_W - BANNER_W) / 2)
+#define HUD_X0          4
+#define HUD_Y0          8
+#define HUD_DIGIT_GAP   2
+#define BANNER_W        480
+#define BANNER_H        64
+#define BANNER_X0       ((TR_R3D_W - BANNER_W) / 2)
 #define RGB565(r, g, b) ((uint16_t)(((r) & 0xF8) << 8 | ((g) & 0xFC) << 3 | (b) >> 3))
-#define COLOR_PLATE    RGB565(40, 40, 48)
-#define COLOR_COPPER   RGB565(176, 100, 40)
+#define COLOR_PLATE     RGB565(40, 40, 48)
+#define COLOR_COPPER    RGB565(176, 100, 40)
 
 static const tr_sprite_t *const digit_spr[10] = {
 	&tr_spr_digit_0, &tr_spr_digit_1, &tr_spr_digit_2, &tr_spr_digit_3, &tr_spr_digit_4,
@@ -160,7 +183,11 @@ static const tr_sprite_t *const digit_spr[10] = {
 };
 /* Indexed by TR_BANNER_* (tr_mbox.h); NULL = none. */
 static const tr_sprite_t *const banner_spr[6] = {
-	NULL, &tr_spr_banner_stand, &tr_spr_banner_step_back, &tr_spr_banner_attract, &tr_spr_banner_game_over,
+	NULL,
+	&tr_spr_banner_stand,
+	&tr_spr_banner_step_back,
+	&tr_spr_banner_attract,
+	&tr_spr_banner_game_over,
 	&tr_spr_banner_check_camera,
 };
 
@@ -188,15 +215,28 @@ static void hud_band(uint16_t *cband, int y_lo)
 	if (ban != NULL) {
 		band_fill(cband, y_lo, BANNER_X0, 0, BANNER_W, BANNER_H, COLOR_PLATE);
 		band_fill(cband, y_lo, BANNER_X0 + 14, BANNER_H - 9, BANNER_W - 29, 3, COLOR_COPPER);
-		tr_sprite_blit(cband, TR_R3D_W, TR_R3D_W, TR_BAND_H, BANNER_X0, (BANNER_H - ban->h) / 2 - y_lo, ban,
-			       tr_spr_palette);
+		tr_sprite_blit(cband,
+		               TR_R3D_W,
+		               TR_R3D_W,
+		               TR_BAND_H,
+		               BANNER_X0,
+		               (BANNER_H - ban->h) / 2 - y_lo,
+		               ban,
+		               tr_spr_palette);
 	}
 
 	uint8_t d[TR_SCORE_MAX_DIGITS];
 	int     n = tr_score_to_digits(hud_score, d), x = HUD_X0;
 
 	for (int i = 0; i < n; i++) {
-		tr_sprite_blit(cband, TR_R3D_W, TR_R3D_W, TR_BAND_H, x, HUD_Y0 - y_lo, digit_spr[d[i]], tr_spr_palette);
+		tr_sprite_blit(cband,
+		               TR_R3D_W,
+		               TR_R3D_W,
+		               TR_BAND_H,
+		               x,
+		               HUD_Y0 - y_lo,
+		               digit_spr[d[i]],
+		               tr_spr_palette);
 		x += digit_spr[d[i]]->w + HUD_DIGIT_GAP;
 	}
 }
@@ -223,15 +263,15 @@ static void hud_band(uint16_t *cband, int y_lo)
 #ifndef TR_CAM_PIP_ENABLE
 #define TR_CAM_PIP_ENABLE 1 /* compile-time switch: 0 leaves the video area untouched */
 #endif
-#define COLOR_PANEL_BG RGB565(12, 14, 18)    /* the video area's dark background */
-#define COLOR_KP       RGB565(80, 255, 96)   /* skeleton: the HUD's accent green */
-#define COLOR_LAMP_ON  RGB565(255, 210, 40)  /* intent lamp, lit */
-#define COLOR_LAMP_OFF RGB565(52, 54, 62)    /* intent lamp, unlit: visible on the dark strip */
-#define COLOR_LABEL    RGB565(235, 245, 235) /* label/caption text */
-#define VID_STRIP_W    160                   /* each side strip: (720 - 400) / 2 */
-#define LAMP_CELL_H    (TR_VID_H / 4)        /* four lamps stacked down the left strip */
-#define LAMP_SQ        96                    /* lamp square, px */
-#define LAMP_CAP_SCALE 4                     /* caption: 3x5 font at 4x -> 20 px tall */
+#define COLOR_PANEL_BG  RGB565(12, 14, 18)    /* the video area's dark background */
+#define COLOR_KP        RGB565(80, 255, 96)   /* skeleton: the HUD's accent green */
+#define COLOR_LAMP_ON   RGB565(255, 210, 40)  /* intent lamp, lit */
+#define COLOR_LAMP_OFF  RGB565(52, 54, 62)    /* intent lamp, unlit: visible on the dark strip */
+#define COLOR_LABEL     RGB565(235, 245, 235) /* label/caption text */
+#define VID_STRIP_W     160                   /* each side strip: (720 - 400) / 2 */
+#define LAMP_CELL_H     (TR_VID_H / 4)        /* four lamps stacked down the left strip */
+#define LAMP_SQ         96                    /* lamp square, px */
+#define LAMP_CAP_SCALE  4                     /* caption: 3x5 font at 4x -> 20 px tall */
 #define LAMP_HOLD_TICKS 10
 
 #if TR_CAM_PIP_ENABLE
@@ -264,7 +304,7 @@ static hp_dbg_t      host_hp_dbg_mem;
 #define CAM_VIEW_ADDR  ((const volatile tr_cam_view_t *)&host_cam_view_mem)
 #define PIP_PSLOT_ADDR ((const volatile tr_pslot_t *)&host_pslot_mem)
 #define HP_DBG_ADDR    ((const volatile hp_dbg_t *)&host_hp_dbg_mem)
-static inline void dcache_inval_range(const void *addr, uint32_t bytes)
+static inline void   dcache_inval_range(const void *addr, uint32_t bytes)
 {
 	(void)addr;
 	(void)bytes;
@@ -304,7 +344,8 @@ static void video_dot(const vcv_t *cv, int x, int y, uint16_t color)
 static void video_line(const vcv_t *cv, int x0, int y0, int x1, int y1, uint16_t color)
 {
 	int dx = x1 > x0 ? x1 - x0 : x0 - x1, sx = x0 < x1 ? 1 : -1;
-	int dy = y1 > y0 ? y0 - y1 : y1 - y0, sy = y0 < y1 ? 1 : -1; /* dy negative, Bresenham's own convention */
+	int dy  = y1 > y0 ? y0 - y1 : y1 - y0,
+	    sy  = y0 < y1 ? 1 : -1; /* dy negative, Bresenham's own convention */
 	int err = dx + dy, steep = dx < -dy;
 
 	for (;;) {
@@ -392,23 +433,39 @@ typedef struct {
 	char rows[5][6]; /* 3 columns, or up to 5 for M/N (the glyph's width is strlen(rows[0])) */
 } glyph3x5_t;
 static const glyph3x5_t font3x5[] = {
-	{ 'C', { "###", "#..", "#..", "#..", "###" } }, { 'A', { "###", "#.#", "###", "#.#", "#.#" } },
-	{ 'M', { "#...#", "##.##", "#.#.#", "#...#", "#...#" } }, { 'E', { "###", "#..", "###", "#..", "###" } },
-	{ 'R', { "##.", "#.#", "##.", "#.#", "#.#" } }, { 'N', { "#..#", "##.#", "#.##", "#..#", "#..#" } },
-	{ 'P', { "##.", "#.#", "##.", "#..", "#.." } }, { 'U', { "#.#", "#.#", "#.#", "#.#", "###" } },
-	{ 'H', { "#.#", "#.#", "###", "#.#", "#.#" } }, { 'z', { "###", "..#", ".#.", "#..", "###" } },
+	{ 'C', { "###", "#..", "#..", "#..", "###" } },
+	{ 'A', { "###", "#.#", "###", "#.#", "#.#" } },
+	{ 'M', { "#...#", "##.##", "#.#.#", "#...#", "#...#" } },
+	{ 'E', { "###", "#..", "###", "#..", "###" } },
+	{ 'R', { "##.", "#.#", "##.", "#.#", "#.#" } },
+	{ 'N', { "#..#", "##.#", "#.##", "#..#", "#..#" } },
+	{ 'P', { "##.", "#.#", "##.", "#..", "#.." } },
+	{ 'U', { "#.#", "#.#", "#.#", "#.#", "###" } },
+	{ 'H', { "#.#", "#.#", "###", "#.#", "#.#" } },
+	{ 'z', { "###", "..#", ".#.", "#..", "###" } },
 	{ 'Z', { "###", "..#", ".#.", "#..", "###" } },
-	{ '0', { "###", "#.#", "#.#", "#.#", "###" } }, { '2', { "###", "..#", "###", "#..", "###" } },
-	{ '3', { "###", "..#", "###", "..#", "###" } }, { '5', { "###", "#..", "###", "..#", "###" } },
-	{ '4', { "#.#", "#.#", "###", "..#", "..#" } }, { '6', { "###", "#..", "###", "#.#", "###" } },
-	{ '7', { "###", "..#", ".#.", "#..", "#.." } }, { '8', { "###", "#.#", "###", "#.#", "###" } },
-	{ '9', { "###", "#.#", "###", "..#", "###" } }, { '1', { ".#.", "##.", ".#.", ".#.", "###" } },
-	{ 'x', { "#.#", ".#.", ".#.", ".#.", "#.#" } }, { '.', { "...", "...", "...", "...", "#.." } },
-	{ '-', { "...", "...", "###", "...", "..." } }, { ' ', { "...", "...", "...", "...", "..." } },
-	{ 'L', { "#..", "#..", "#..", "#..", "###" } }, { 'F', { "###", "#..", "###", "#..", "#.." } },
-	{ 'T', { "###", ".#.", ".#.", ".#.", ".#." } }, { 'I', { "###", ".#.", ".#.", ".#.", "###" } },
-	{ 'G', { "###", "#..", "#.#", "#.#", "###" } }, { 'J', { "..#", "..#", "..#", "#.#", "###" } },
-	{ 'D', { "##.", "#.#", "#.#", "#.#", "##." } }, { 'K', { "#.#", "#.#", "##.", "#.#", "#.#" } },
+	{ '0', { "###", "#.#", "#.#", "#.#", "###" } },
+	{ '2', { "###", "..#", "###", "#..", "###" } },
+	{ '3', { "###", "..#", "###", "..#", "###" } },
+	{ '5', { "###", "#..", "###", "..#", "###" } },
+	{ '4', { "#.#", "#.#", "###", "..#", "..#" } },
+	{ '6', { "###", "#..", "###", "#.#", "###" } },
+	{ '7', { "###", "..#", ".#.", "#..", "#.." } },
+	{ '8', { "###", "#.#", "###", "#.#", "###" } },
+	{ '9', { "###", "#.#", "###", "..#", "###" } },
+	{ '1', { ".#.", "##.", ".#.", ".#.", "###" } },
+	{ 'x', { "#.#", ".#.", ".#.", ".#.", "#.#" } },
+	{ '.', { "...", "...", "...", "...", "#.." } },
+	{ '-', { "...", "...", "###", "...", "..." } },
+	{ ' ', { "...", "...", "...", "...", "..." } },
+	{ 'L', { "#..", "#..", "#..", "#..", "###" } },
+	{ 'F', { "###", "#..", "###", "#..", "#.." } },
+	{ 'T', { "###", ".#.", ".#.", ".#.", ".#." } },
+	{ 'I', { "###", ".#.", ".#.", ".#.", "###" } },
+	{ 'G', { "###", "#..", "#.#", "#.#", "###" } },
+	{ 'J', { "..#", "..#", "..#", "#.#", "###" } },
+	{ 'D', { "##.", "#.#", "#.#", "#.#", "##." } },
+	{ 'K', { "#.#", "#.#", "##.", "#.#", "#.#" } },
 };
 
 static const glyph3x5_t *video_glyph_find(char c)
@@ -468,11 +525,11 @@ static void video_text_c(const vcv_t *cv, int cx, int y0, const char *s, int sca
 
 /* This frame's video-area state, taken once by video_frame_state() (core 0,
  * before any band is claimed -- the frame_go barrier publishes it to core 1). */
-static tr_cam_view_t vid_cv;       /* the camera view, range-checked; .rotate also sets the layout */
-static bool          vid_have_cv;  /* vid_cv is safe to read pixels through */
-static bool          vid_lamp[4];  /* LEFT, RIGHT, JUMP, DUCK */
-static bool          vid_have_hz;  /* hp_vision's loop rate is live */
-static char          vid_hz[12];   /* "NN.NHz" or "--" */
+static tr_cam_view_t vid_cv;      /* the camera view, range-checked; .rotate also sets the layout */
+static bool          vid_have_cv; /* vid_cv is safe to read pixels through */
+static bool          vid_lamp[4]; /* LEFT, RIGHT, JUMP, DUCK */
+static bool          vid_have_hz; /* hp_vision's loop rate is live */
+static char          vid_hz[12];  /* "NN.NHz" or "--" */
 static char          vid_dims[12]; /* the upright image's size, "400x640" */
 
 /* Unsigned decimal into out, no libc; returns the length. */
@@ -505,8 +562,9 @@ static void video_frame_state(void)
 	if (ok) {
 		uint64_t lo = cv.buf_addr, hi = lo + (uint64_t)cv.width * cv.height;
 
-		ok = lo >= TR_MEM_CAM_POOL && hi <= TR_MEM_CAM_POOL + TR_MEM_CAM_POOL_SIZE && cv.width == TR_CAM_SRC_W &&
-		     cv.height == TR_CAM_SRC_H && (cv.rotate == 0u || cv.rotate == 90u || cv.rotate == 270u);
+		ok = lo >= TR_MEM_CAM_POOL && hi <= TR_MEM_CAM_POOL + TR_MEM_CAM_POOL_SIZE &&
+		     cv.width == TR_CAM_SRC_W && cv.height == TR_CAM_SRC_H &&
+		     (cv.rotate == 0u || cv.rotate == 90u || cv.rotate == 270u);
 	}
 	if (!ok) {
 		cv.rotate = TR_CAM_ROTATE; /* layout of the empty area: this build's default */
@@ -567,8 +625,18 @@ static void draw_strips(const vcv_t *cv)
 	for (int i = 0; i < 4; i++) {
 		int y = TR_VID_Y0 + i * LAMP_CELL_H + 16;
 
-		cv_rect(cv, lcx - LAMP_SQ / 2, y, LAMP_SQ, LAMP_SQ, vid_lamp[i] ? COLOR_LAMP_ON : COLOR_LAMP_OFF);
-		video_text_c(cv, lcx, y + LAMP_SQ + 12, cap[i], LAMP_CAP_SCALE, vid_lamp[i] ? COLOR_LAMP_ON : COLOR_LABEL);
+		cv_rect(cv,
+		        lcx - LAMP_SQ / 2,
+		        y,
+		        LAMP_SQ,
+		        LAMP_SQ,
+		        vid_lamp[i] ? COLOR_LAMP_ON : COLOR_LAMP_OFF);
+		video_text_c(cv,
+		             lcx,
+		             y + LAMP_SQ + 12,
+		             cap[i],
+		             LAMP_CAP_SCALE,
+		             vid_lamp[i] ? COLOR_LAMP_ON : COLOR_LABEL);
 	}
 	video_text_c(cv, rcx, TR_VID_Y0 + 32, "CAMERA", 4, COLOR_LABEL);
 	video_text_c(cv, rcx, TR_VID_Y0 + 64, vid_dims, 3, COLOR_LABEL);
@@ -607,9 +675,9 @@ void render_video_band(uint32_t core, int vb, uint16_t *fb)
 	int       rows  = ly0 + TR_BAND_H <= TR_VID_H ? TR_BAND_H : TR_VID_H - ly0;
 
 #if TR_CAM_PIP_ENABLE
-	const vcv_t cv   = { cband, 0, TR_R3D_W, TR_VID_Y0 + ly0, TR_VID_Y0 + ly0 + rows };
-	int         rot  = vid_cv.rotate, ix0 = tr_cam_img_x0(rot), uw = TR_CAM_UP_W(rot);
-	int         top  = tr_cam_img_y0(rot), iy0 = 0, iy1 = 0; /* this band's image rows, area-local */
+	const vcv_t cv  = { cband, 0, TR_R3D_W, TR_VID_Y0 + ly0, TR_VID_Y0 + ly0 + rows };
+	int         rot = vid_cv.rotate, ix0 = tr_cam_img_x0(rot), uw = TR_CAM_UP_W(rot);
+	int         top = tr_cam_img_y0(rot), iy0 = 0, iy1 = 0; /* this band's image rows, area-local */
 
 	if (vid_have_cv) {
 		iy0 = ly0 > top ? ly0 : top;
@@ -634,15 +702,18 @@ void render_video_band(uint32_t core, int vb, uint16_t *fb)
 			/* Landscape comparison path: raw rows 1:1, scalar. */
 			dcache_inval_range(buf + (uint32_t)uy0 * TR_CAM_SRC_W, (uint32_t)n * TR_CAM_SRC_W);
 			for (int r = 0; r < n; r++) {
-				tr_cam_pip_row_grey_to_rgb565(buf + (uint32_t)(uy0 + r) * TR_CAM_SRC_W, TR_CAM_SRC_W,
-							      dst + (uint32_t)r * TR_R3D_W, TR_CAM_SRC_W);
+				tr_cam_pip_row_grey_to_rgb565(buf + (uint32_t)(uy0 + r) * TR_CAM_SRC_W,
+				                              TR_CAM_SRC_W,
+				                              dst + (uint32_t)r * TR_R3D_W,
+				                              TR_CAM_SRC_W);
 			}
 		} else {
 			int c0, c1;
 
 			tr_cam_rot_src_cols(rot, uy0, n, &c0, &c1);
 			for (int s = 0; s < TR_CAM_SRC_H; s++) {
-				dcache_inval_range(buf + (uint32_t)s * TR_CAM_SRC_W + (uint32_t)c0, (uint32_t)(c1 - c0));
+				dcache_inval_range(buf + (uint32_t)s * TR_CAM_SRC_W + (uint32_t)c0,
+				                   (uint32_t)(c1 - c0));
 			}
 #if RENDER_A32 && (defined(__ARM_NEON) || defined(__ARM_NEON__))
 			if (uy0 % 8 == 0 && n % 8 == 0) {
@@ -678,10 +749,12 @@ void render_video_overlay(uint16_t *fb)
 
 	if (vid_have_cv && tr_pslot_read(PIP_PSLOT_ADDR, 0u, &out, &seq, pip_barrier) &&
 	    out.hp_state == TR_HP_STATE_RUNNING) {
-		int         rot = vid_cv.rotate, x0 = tr_cam_img_x0(rot), y0 = TR_VID_Y0 + tr_cam_img_y0(rot);
-		const vcv_t cv  = { fb + (uint32_t)y0 * TR_R3D_W, x0, x0 + TR_CAM_UP_W(rot), y0, y0 + TR_CAM_UP_H(rot) };
-		int16_t     px[TR_POSE_KP], py[TR_POSE_KP];
-		bool        ok[TR_POSE_KP];
+		int rot = vid_cv.rotate, x0 = tr_cam_img_x0(rot), y0 = TR_VID_Y0 + tr_cam_img_y0(rot);
+		const vcv_t cv = {
+			fb + (uint32_t)y0 * TR_R3D_W, x0, x0 + TR_CAM_UP_W(rot), y0, y0 + TR_CAM_UP_H(rot)
+		};
+		int16_t px[TR_POSE_KP], py[TR_POSE_KP];
+		bool    ok[TR_POSE_KP];
 
 		for (int k = 0; k < TR_POSE_KP; k++) {
 			ok[k] = tr_cam_pip_map_kp(&out.pose.kp[k], rot, &px[k], &py[k]);
@@ -776,7 +849,8 @@ void render_front_part(int part)
 	if (part == 0) {
 		tr_dl_dropped = 0;
 	}
-	tr_scene_build_part(&scene, &scene_in, part == 2 ? &cam : &scene_cam, part == 2 ? DL1 : DL, part);
+	tr_scene_build_part(
+	    &scene, &scene_in, part == 2 ? &cam : &scene_cam, part == 2 ? DL1 : DL, part);
 #endif
 }
 
@@ -848,8 +922,17 @@ void render_band(uint32_t core, int b, uint16_t *fb)
 	 * rows are overwritten by video band 0 before the frame publishes. */
 	int y_hi = (b + 1) * TR_BAND_H < TR_VIEW_H ? (b + 1) * TR_BAND_H : TR_VIEW_H;
 
-	tr_raster_band(NULL, 0, b * TR_BAND_H, y_hi, ZBAND(core), CBAND(core), &frame_bg, DL, SETUP, BINS[b],
-		       counts[b]);
+	tr_raster_band(NULL,
+	               0,
+	               b * TR_BAND_H,
+	               y_hi,
+	               ZBAND(core),
+	               CBAND(core),
+	               &frame_bg,
+	               DL,
+	               SETUP,
+	               BINS[b],
+	               counts[b]);
 	/* TR_FLAG_HUD_L2: the HE shows score + banners on CDC200 layer 2 (P9),
 	 * so the bands carry the 3D picture only. */
 	if (render_hud && !(hud_flags & TR_FLAG_HUD_L2)) {

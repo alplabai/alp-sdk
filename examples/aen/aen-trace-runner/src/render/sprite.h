@@ -31,7 +31,10 @@ typedef struct {
  * Zephyr/alp-sdk dependency and does not touch a display itself -- the
  * caller (render.c) owns the buffer, the palette, and the actual blit.
  */
-void tr_sprite_set_target(uint16_t *buf, uint16_t frame_w, uint16_t frame_h, const uint16_t palette[16]);
+void tr_sprite_set_target(uint16_t      *buf,
+                          uint16_t       frame_w,
+                          uint16_t       frame_h,
+                          const uint16_t palette[16]);
 
 /*
  * Draw sprite `s` with its top-left at (x, y) in the target set above,
@@ -49,8 +52,14 @@ void tr_sprite_draw(int16_t x, int16_t y, const tr_sprite_t *s);
  * Same clipping and index-0 transparency as tr_sprite_draw() (which is now
  * this with stride == frame_w).
  */
-void tr_sprite_blit(uint16_t *fb, uint32_t stride_px, uint16_t fb_w, uint16_t fb_h, int32_t x, int32_t y,
-		    const tr_sprite_t *s, const uint16_t palette[16]);
+void tr_sprite_blit(uint16_t          *fb,
+                    uint32_t           stride_px,
+                    uint16_t           fb_w,
+                    uint16_t           fb_h,
+                    int32_t            x,
+                    int32_t            y,
+                    const tr_sprite_t *s,
+                    const uint16_t     palette[16]);
 
 /*
  * Score HUD support (F7, whole-branch review). Pure decimal decomposition,

@@ -18,7 +18,8 @@
 #define UW TR_CAM_UP_W(90) /* 400 */
 #define UH TR_CAM_UP_H(90) /* 640 */
 
-static int8_t centre[TR_MN_CELLS], heat[TR_MN_CELLS * TR_POSE_KP], offs[TR_MN_CELLS * 34], regr[TR_MN_CELLS * 34];
+static int8_t centre[TR_MN_CELLS], heat[TR_MN_CELLS * TR_POSE_KP], offs[TR_MN_CELLS * 34],
+    regr[TR_MN_CELLS * 34];
 
 /* Every keypoint's heat (and the person centre) on one cell, zero offsets:
  * the keypoint is that cell's corner, input px (4 * gx, 4 * gy). */
@@ -58,14 +59,16 @@ static tr_pose_t figure(int cx, int top, int feet)
 		int8_t  dx;
 		uint8_t fy; /* % of height below the head top */
 	} body[TR_POSE_KP] = {
-		{ 0, 7 },    { 4, 5 },    { -4, 5 },   { 8, 6 },    { -8, 6 },   { 25, 20 },
-		{ -25, 20 }, { 30, 35 },  { -30, 35 }, { 30, 48 },  { -30, 48 }, { 15, 52 },
-		{ -15, 52 }, { 15, 75 },  { -15, 75 }, { 15, 100 }, { -15, 100 },
+		{ 0, 7 },    { 4, 5 },   { -4, 5 },   { 8, 6 },    { -8, 6 },    { 25, 20 },
+		{ -25, 20 }, { 30, 35 }, { -30, 35 }, { 30, 48 },  { -30, 48 },  { 15, 52 },
+		{ -15, 52 }, { 15, 75 }, { -15, 75 }, { 15, 100 }, { -15, 100 },
 	};
 	tr_pose_t p;
 
 	for (int k = 0; k < TR_POSE_KP; k++) {
-		p.kp[k] = (tr_kp_t){ (int16_t)(cx + body[k].dx), (int16_t)(top + (feet - top) * body[k].fy / 100), 200 };
+		p.kp[k] = (tr_kp_t){ (int16_t)(cx + body[k].dx),
+			                 (int16_t)(top + (feet - top) * body[k].fy / 100),
+			                 200 };
 	}
 	return p;
 }
@@ -86,9 +89,14 @@ int main(void)
 				assert(abs(p.kp[k].x - ex) <= 1 && abs(p.kp[k].y - ey) <= 1);
 				assert(p.kp[k].x >= 0 && p.kp[k].x < UW && p.kp[k].y >= 0 && p.kp[k].y < UH);
 			}
-			printf("decode: cell (%d,%d) -> upright (%d,%d)\n", cells[i][0], cells[i][1], p.kp[0].x, p.kp[0].y);
+			printf("decode: cell (%d,%d) -> upright (%d,%d)\n",
+			       cells[i][0],
+			       cells[i][1],
+			       p.kp[0].x,
+			       p.kp[0].y);
 		}
-		assert(decode_at(9, 0).kp[0].x == 0 && decode_at(9, 0).kp[0].y == 0); /* exactly the top-left corner */
+		assert(decode_at(9, 0).kp[0].x == 0 &&
+		       decode_at(9, 0).kp[0].y == 0); /* exactly the top-left corner */
 		/* the padding columns decode OFF the upright frame (and so are never
 		 * drawn, cam_pip.h tr_cam_pip_map_kp) */
 		assert(decode_at(0, 20).kp[0].x < 0 && decode_at(47, 20).kp[0].x >= UW);
@@ -101,7 +109,8 @@ int main(void)
 		tr_pose_t   stand = figure(UW / 2, 100, 600);
 		tr_box_t    b     = tr_pose_box(&stand);
 
-		assert(b.valid && b.x == UW / 2 - 25 && b.w == 50 && b.y == 200 && b.h == 160); /* the torso box */
+		assert(b.valid && b.x == UW / 2 - 25 && b.w == 50 && b.y == 200 &&
+		       b.h == 160); /* the torso box */
 		tr_track_init(&t, UW, UH);
 		assert(t.lane_edges[0] == UW / 3 && t.lane_edges[1] == 2 * UW / 3);
 		tr_track_calibrate(&t, b, UW);
@@ -116,7 +125,8 @@ int main(void)
 		assert(in.lane_delta == -1 && t.lane == 0u);
 		tr_track_resync(&t, 1u);
 
-		tr_pose_t up = figure(UW / 2, 100 - 120, 600 - 120); /* the whole body 120 px up (0.75 of the torso) */
+		tr_pose_t up =
+		    figure(UW / 2, 100 - 120, 600 - 120); /* the whole body 120 px up (0.75 of the torso) */
 
 		(void)tr_track_update(&t, tr_pose_box(&up));
 		in = tr_track_update(&t, tr_pose_box(&up)); /* the second frame: TR_TRACK_DEBOUNCE */
@@ -125,7 +135,8 @@ int main(void)
 		for (int i = 0; i < TR_TRACK_HOLD_MIN + TR_TRACK_LAND_COOLDOWN_FRAMES + 2; i++) {
 			(void)tr_track_update(&t, b); /* land */
 		}
-		tr_pose_t crouch = figure(UW / 2, 100 + 80, 600 + 80); /* the torso 80 px down (0.5 of it) */
+		tr_pose_t crouch =
+		    figure(UW / 2, 100 + 80, 600 + 80); /* the torso 80 px down (0.5 of it) */
 
 		(void)tr_track_update(&t, tr_pose_box(&crouch));
 		in = tr_track_update(&t, tr_pose_box(&crouch));

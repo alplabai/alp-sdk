@@ -28,32 +28,22 @@ typedef struct {
 /* NULL = PASS, else the first reason it failed. */
 static inline const char *snd_verdict(const snd_stats_t *s)
 {
-	if (s->write_fail > SND_MAX_FAILS)
-		return "I2S3 writes failed (bit clock not running?)";
-	if (s->mic_fail > SND_MAX_FAILS)
-		return "PDM mic reads failed";
-	if (s->frames != s->want_frames)
-		return "capture incomplete";
-	if (s->played_ms > s->want_ms + s->want_ms / 10u)
-		return "playback slower than real time";
+	if (s->write_fail > SND_MAX_FAILS) return "I2S3 writes failed (bit clock not running?)";
+	if (s->mic_fail > SND_MAX_FAILS) return "PDM mic reads failed";
+	if (s->frames != s->want_frames) return "capture incomplete";
+	if (s->played_ms > s->want_ms + s->want_ms / 10u) return "playback slower than real time";
 
 	unsigned live = 0, tone = 0, music = 0;
 	for (unsigned c = 0; c < 2u; c++) {
-		if (!(s->rms[0][c] >= SND_LIVE_RMS))
-			continue; /* dead or all-zero channel proves nothing */
+		if (!(s->rms[0][c] >= SND_LIVE_RMS)) continue; /* dead or all-zero channel proves nothing */
 		live++;
 		float b0 = s->bin[0][c], b1 = s->bin[1][c], r1 = s->rms[1][c];
-		if (b1 >= SND_TONE_FLOOR && b1 >= 100.0f * b0 && 2.0f * b1 >= 0.1f * r1 * r1)
-			tone++;
-		if (s->rms[2][c] >= SND_MUSIC_FLOOR && s->rms[2][c] >= 2.0f * s->rms[0][c])
-			music++;
+		if (b1 >= SND_TONE_FLOOR && b1 >= 100.0f * b0 && 2.0f * b1 >= 0.1f * r1 * r1) tone++;
+		if (s->rms[2][c] >= SND_MUSIC_FLOOR && s->rms[2][c] >= 2.0f * s->rms[0][c]) music++;
 	}
-	if (live == 0u)
-		return "no live mic (silence window digitally zero)";
-	if (tone == 0u)
-		return "1 kHz tone not heard";
-	if (music == 0u)
-		return "music not heard";
+	if (live == 0u) return "no live mic (silence window digitally zero)";
+	if (tone == 0u) return "1 kHz tone not heard";
+	if (music == 0u) return "music not heard";
 	return 0;
 }
 

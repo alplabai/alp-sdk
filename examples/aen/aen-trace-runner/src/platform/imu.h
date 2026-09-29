@@ -4,7 +4,7 @@
 
 #include <stdint.h>
 
-int         tr_imu_open(void);
+int tr_imu_open(void);
 /* Rest-zeroed accel sample, Q8 g (256 == 1 g): x = steer, y = pitch. Always
  * writes both; (0, 0) = level when there is no IMU. Interpreted by
  * game/tilt.c. */

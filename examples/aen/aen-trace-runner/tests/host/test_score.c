@@ -13,7 +13,9 @@
 static void place(tr_game_t *g, tr_entity_kind_t kind, uint8_t lane)
 {
 	memset(g->ents, 0, sizeof(g->ents));
-	g->ents[0] = (tr_entity_t){ .kind = kind, .lane = lane, .y = (int16_t)(tr_runner_ground_y(TRACK_H) - 1) };
+	g->ents[0] = (tr_entity_t){ .kind = kind,
+		                        .lane = lane,
+		                        .y    = (int16_t)(tr_runner_ground_y(TRACK_H) - 1) };
 }
 
 static void step(tr_game_t *g, tr_score_t *s)
@@ -58,7 +60,8 @@ int main(void)
 		g.tick++; /* tick without spawning anything */
 		tr_score_step(&s, &g);
 	}
-	assert(s.metres == 20u * TR_SCROLL_PX / TR_PX_PER_M && s.metres == 3u && s.score == s.metres && s.combo == 0u);
+	assert(s.metres == 20u * TR_SCROLL_PX / TR_PX_PER_M && s.metres == 3u && s.score == s.metres &&
+	       s.combo == 0u);
 
 	/* 3. Pickups: +10 x combo, the combo growing with each consecutive
 	 * pickup up to TR_COMBO_MAX; a popup per pickup. */
@@ -107,8 +110,9 @@ int main(void)
 			assert(w.combo == (gap == TR_COMBO_WINDOW ? 2u : 0u));
 			place(&wg, TR_ENT_PICKUP, 1);
 			step(&wg, &w); /* `gap` steps after the last pickup */
-			assert(gap == TR_COMBO_WINDOW ? (w.combo == 3u && w.popup_mult == 3u)
-						      : (w.combo == 1u && w.popup_mult == 1u && w.popup_pts == 10u));
+			assert(gap == TR_COMBO_WINDOW
+			           ? (w.combo == 3u && w.popup_mult == 3u)
+			           : (w.combo == 1u && w.popup_mult == 1u && w.popup_pts == 10u));
 			memset(wg.ents, 0, sizeof(wg.ents));
 			for (uint32_t k = 0; k < TR_COMBO_WINDOW + 2u; k++) {
 				wg.ev = 0u;
@@ -215,7 +219,8 @@ int main(void)
 		}
 		place(&hg, TR_ENT_PICKUP, 1);
 		step(&hg, &h);
-		assert(h.popup_seq == 2u && h.popup_hs == 0u && h.popup_pts == 10u); /* a pickup's popup again */
+		assert(h.popup_seq == 2u && h.popup_hs == 0u &&
+		       h.popup_pts == 10u); /* a pickup's popup again */
 		tr_score_run_start(&h);
 		assert(h.hs_top == 0u); /* the caller sets it per run */
 		for (int k = 0; k < 60; k++) {
@@ -244,7 +249,9 @@ int main(void)
 		tr_score_step(&sb, &b);
 	}
 	assert(memcmp(&sa, &sb, sizeof(sa)) == 0 && sa.score > 0u);
-	printf("score: run of 500 ticks -> %u pts, %u m, %u pickups\n", (unsigned)sa.score, (unsigned)sa.metres,
+	printf("score: run of 500 ticks -> %u pts, %u m, %u pickups\n",
+	       (unsigned)sa.score,
+	       (unsigned)sa.metres,
 	       (unsigned)sa.popup_seq);
 	return 0;
 }

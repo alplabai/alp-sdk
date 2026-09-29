@@ -27,9 +27,14 @@
 void payload_main(volatile tr_mbox_t *m);
 
 /* white yellow cyan green magenta red blue black, RGB565 */
-static const uint16_t colour[8] = { 0xFFFF, 0xFFE0, 0x07FF, 0x07E0, 0xF81F, 0xF800, 0x001F, 0x0000 };
+static const uint16_t colour[8] = {
+	0xFFFF, 0xFFE0, 0x07FF, 0x07E0, 0xF81F, 0xF800, 0x001F, 0x0000
+};
 
-static void barrier(void) { __asm__ volatile("dsb sy" ::: "memory"); }
+static void barrier(void)
+{
+	__asm__ volatile("dsb sy" ::: "memory");
+}
 
 static inline uint32_t cntvct_lo(void)
 {
@@ -54,8 +59,8 @@ static void fill_range(uint32_t a, uint32_t b, uint16x8_t v)
 /* Whole framebuffer minus the MHU0 window (only TR_FB_B overlaps it). */
 static void fill_fb(uint32_t fb, uint16_t c)
 {
-	uint16x8_t v = vdupq_n_u16(c);
-	uint32_t end = fb + FB_BYTES;
+	uint16x8_t v   = vdupq_n_u16(c);
+	uint32_t   end = fb + FB_BYTES;
 
 	if (fb < STUB_MHU0_WINDOW + STUB_MHU0_WINDOW_SIZE && STUB_MHU0_WINDOW < end) {
 		fill_range(fb, STUB_MHU0_WINDOW, v);
@@ -67,10 +72,10 @@ static void fill_fb(uint32_t fb, uint16_t c)
 
 void payload_main(volatile tr_mbox_t *m)
 {
-	uint32_t last = m->out_seq; /* a frame published before LAUNCH is still owed */
-	uint32_t tmin = UINT32_MAX, tmax = 0, n = 0;
-	uint64_t tsum = 0;
-	tr_frame_out_t o = { .frames = m->out_frames, .dropped = m->out_dropped };
+	uint32_t       last = m->out_seq; /* a frame published before LAUNCH is still owed */
+	uint32_t       tmin = UINT32_MAX, tmax = 0, n = 0;
+	uint64_t       tsum = 0;
+	tr_frame_out_t o    = { .frames = m->out_frames, .dropped = m->out_dropped };
 
 	m->pad3[0] = ECHO_MARKER;
 	for (uint32_t i = 1; i < 8u; i++)
@@ -78,7 +83,7 @@ void payload_main(volatile tr_mbox_t *m)
 
 	for (;;) {
 		tr_frame_in_t in;
-		uint32_t fb, seq;
+		uint32_t      fb, seq;
 
 		if (m->ctrl_cmd == STUB_CMD_HALT) { /* consumer clears */
 			m->ctrl_cmd = STUB_CMD_NONE;
@@ -96,7 +101,7 @@ void payload_main(volatile tr_mbox_t *m)
 			uint32_t t0 = cntvct_lo();
 			fill_fb(fb, colour[in.tick % 8u]);
 			barrier(); /* pixels reach SRAM0 before out_seq says so (plan sec 3) */
-			t = cntvct_lo() - t0;
+			t    = cntvct_lo() - t0;
 			tmin = t < tmin ? t : tmin;
 			tmax = t > tmax ? t : tmax;
 			tsum += t;
@@ -110,7 +115,7 @@ void payload_main(volatile tr_mbox_t *m)
 		}
 		m->pad3[5] = in.tick;
 
-		o.fb = fb;
+		o.fb     = fb;
 		o.ticks0 = t;
 		o.ticks1 = 0;
 		o.frames++;

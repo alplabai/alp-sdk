@@ -21,10 +21,10 @@ typedef struct {
 /* The result word (tr_panel_init_tries): bits 0..7 attempts made, bit 8 the
  * panel is up with the backlight on, bit 9 the backlight had to be forced
  * after a successful init, bits 16..23 the last error as a positive errno. */
-#define TR_PANEL_OK          (1u << 8)
-#define TR_PANEL_BL_FORCED   (1u << 9)
-#define TR_PANEL_TRIES(w)    ((w) & 0xffu)
-#define TR_PANEL_ERR(w)      (((w) >> 16) & 0xffu)
+#define TR_PANEL_OK           (1u << 8)
+#define TR_PANEL_BL_FORCED    (1u << 9)
+#define TR_PANEL_TRIES(w)     ((w) & 0xffu)
+#define TR_PANEL_ERR(w)       (((w) >> 16) & 0xffu)
 #define TR_PANEL_ERR_BL_STUCK 5u /* EIO: forced, and the pin still reads off */
 
 static inline uint32_t tr_panel_bringup(const tr_panel_ops_t *ops, unsigned max_tries)

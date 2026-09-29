@@ -38,7 +38,8 @@ static void raster(const tr_cam_t *cam, const tr_frame_in_t *in)
 	tr_scene_bg_flash(in, &bg);
 	tr_bin_build(&dl, setup, bins, counts, &overflow);
 	for (int b = 0; b < TR_BANDS; b++) {
-		tr_raster_band(fb, W, b * TR_BAND_H, (b + 1) * TR_BAND_H, zb, cb, &bg, &dl, setup, bins[b], counts[b]);
+		tr_raster_band(
+		    fb, W, b * TR_BAND_H, (b + 1) * TR_BAND_H, zb, cb, &bg, &dl, setup, bins[b], counts[b]);
 	}
 }
 
@@ -53,7 +54,9 @@ static void dump(const char *path)
 	fprintf(f, "P6\n%d %d\n255\n", W, H);
 	for (int i = 0; i < W * H; i++) {
 		uint16_t p      = fb[i];
-		uint8_t  rgb[3] = {(uint8_t)((p >> 11) << 3), (uint8_t)(((p >> 5) & 63) << 2), (uint8_t)((p & 31) << 3)};
+		uint8_t  rgb[3] = { (uint8_t)((p >> 11) << 3),
+			                (uint8_t)(((p >> 5) & 63) << 2),
+			                (uint8_t)((p & 31) << 3) };
 
 		fwrite(rgb, 1, 3, f);
 	}
@@ -66,8 +69,9 @@ static tr_frame_in_t packet(double t, int chr)
 	static const struct {
 		uint8_t kind, lane, low;
 		int16_t y;
-	} e[] = {{1, 0, 1, 40}, {2, 1, 0, 150}, {1, 2, 0, 300}, {2, 0, 0, 420}, {1, 2, 1, 700}, {2, 2, 0, 820}};
-	tr_frame_in_t in = {0};
+	} e[]            = { { 1, 0, 1, 40 },  { 2, 1, 0, 150 }, { 1, 2, 0, 300 },
+		                 { 2, 0, 0, 420 }, { 1, 2, 1, 700 }, { 2, 2, 0, 820 } };
+	tr_frame_in_t in = { 0 };
 	double        g  = t * 20.0 + 1e-9;
 	uint32_t      el = (uint32_t)g;
 
@@ -84,7 +88,7 @@ static tr_frame_in_t packet(double t, int chr)
 	for (unsigned i = 0; i < sizeof(e) / sizeof(e[0]); i++) {
 		int y = e[i].y + (int)(el % 120u) * TR_SCROLL_PX; /* keep the road populated */
 
-		in.ents[i] = (tr_pkt_ent_t){e[i].kind, e[i].lane, e[i].low, 0, (int16_t)(y % 1100), 0};
+		in.ents[i] = (tr_pkt_ent_t){ e[i].kind, e[i].lane, e[i].low, 0, (int16_t)(y % 1100), 0 };
 	}
 	return in;
 }
@@ -105,15 +109,17 @@ static void shot(const tr_scene_t *s, const tr_frame_in_t *in, tr_v3_t eye, tr_v
 {
 	tr_runner_draw_t r;
 	tr_cam_t         cam;
-	const tr_light_t l   = {{0.46f, 0.78f, -0.42f}, 0.38f, {206, 112, 72}, 600.0f, 8800.0f, NULL, 0.0f, 0.0f};
-	float            dx = at.x - eye.x, dy = at.y - eye.y, dz = at.z - eye.z;
+	const tr_light_t l = {
+		{ 0.46f, 0.78f, -0.42f }, 0.38f, { 206, 112, 72 }, 600.0f, 8800.0f, NULL, 0.0f, 0.0f
+	};
+	float dx = at.x - eye.x, dy = at.y - eye.y, dz = at.z - eye.z;
 
 	tr_scene_runner(s, in, &r);
 	tr_cam_build(&cam, eye, atan2f(dx, dz), atan2f(-dy, sqrtf(dx * dx + dz * dz)), 0.0f, f_px);
 	dl.n = 0;
 	{
 		float   z0 = (float)TR_PROJ_Z_RUNNER - 400.0f, z1 = (float)TR_PROJ_Z_RUNNER + 400.0f;
-		tr_v3_t q[4] = {{-500, 0, z0}, {-500, 0, z1}, {500, 0, z1}, {500, 0, z0}};
+		tr_v3_t q[4] = { { -500, 0, z0 }, { -500, 0, z1 }, { 500, 0, z1 }, { 500, 0, z0 } };
 
 		tr_r3d_emit_quad(&dl, &cam, q, 0x2B4A, TR_TRI_NOZ);
 	}
@@ -136,7 +142,10 @@ static void shot(const tr_scene_t *s, const tr_frame_in_t *in, tr_v3_t eye, tr_v
 
 static void front_shot(const tr_scene_t *s, const tr_frame_in_t *in)
 {
-	shot(s, in, (tr_v3_t){-250.0f, 170.0f, (float)TR_PROJ_Z_RUNNER + 330.0f}, (tr_v3_t){0.0f, 95.0f, (float)TR_PROJ_Z_RUNNER},
+	shot(s,
+	     in,
+	     (tr_v3_t){ -250.0f, 170.0f, (float)TR_PROJ_Z_RUNNER + 330.0f },
+	     (tr_v3_t){ 0.0f, 95.0f, (float)TR_PROJ_Z_RUNNER },
 	     1500.0f);
 }
 
@@ -144,13 +153,16 @@ static void front_shot(const tr_scene_t *s, const tr_frame_in_t *in)
  * runner fills about a third of the frame: what a booth visitor sees, closer. */
 static void back_shot(const tr_scene_t *s, const tr_frame_in_t *in)
 {
-	shot(s, in, (tr_v3_t){0.0f, 400.0f, (float)TR_PROJ_Z_RUNNER - 360.0f}, (tr_v3_t){0.0f, 100.0f, (float)TR_PROJ_Z_RUNNER + 20.0f},
+	shot(s,
+	     in,
+	     (tr_v3_t){ 0.0f, 400.0f, (float)TR_PROJ_Z_RUNNER - 360.0f },
+	     (tr_v3_t){ 0.0f, 100.0f, (float)TR_PROJ_Z_RUNNER + 20.0f },
 	     1250.0f);
 }
 
 int main(int argc, char **argv)
 {
-	char             path[512];
+	char              path[512];
 	static tr_scene_t s;
 	tr_cam_t          cam;
 
@@ -208,8 +220,10 @@ int main(int argc, char **argv)
 		/* per character: back (game angle) and front 3/4 mid-run, and back
 		 * views at the pose extremes -- a duck roll, a crash, a spin */
 		for (int c = 0; c < TR_CHARS; c++) {
-			tr_frame_in_t in;
-			static const char *const nm[5] = {"back-run", "front-run", "back-roll", "back-crash", "back-spin"};
+			tr_frame_in_t            in;
+			static const char *const nm[5] = {
+				"back-run", "front-run", "back-roll", "back-crash", "back-spin"
+			};
 
 			for (int v = 0; v < 5; v++) {
 				tr_scene_init(&s);
@@ -224,7 +238,8 @@ int main(int argc, char **argv)
 						in.crash_tick = (uint8_t)((f - 34) * 4 / 3 + 6);
 						in.crash_kind = TR_CRASH_KIND_LOW, in.crash_lane = 1, in.crash_ent = 15;
 					}
-					react_at(&in, f / 30.0, 30 / 30.0, v == 4 ? TR_REACT_COMBO : TR_REACT_NONE, 1, 1);
+					react_at(
+					    &in, f / 30.0, 30 / 30.0, v == 4 ? TR_REACT_COMBO : TR_REACT_NONE, 1, 1);
 					tr_scene_step(&s, &in);
 				}
 				if (v == 1) {

@@ -24,7 +24,8 @@
  * test_r3d_zones.c with -DTR_ZONES_PRINT_ONLY and paste its own printed
  * "zones: golden ..." lines. */
 /* Half/half layout (TR_VIEW_H 640): same procedure. */
-#define TR_ZONE_GOLDEN_CRC       {TR_SCENE_GOLDEN_CRC, 0x8d592172u, 0x039a528cu, 0x17c67be9u, 0x80a3686bu}
+#define TR_ZONE_GOLDEN_CRC \
+	{ TR_SCENE_GOLDEN_CRC, 0x8d592172u, 0x039a528cu, 0x17c67be9u, 0x80a3686bu }
 #define TR_ZONE_BLEND_GOLDEN_CRC 0xd87be5d7u
 
 /* The skinned run cycle at 16 phases, every character (test_r3d_scene case 0), same rule. */
@@ -38,17 +39,17 @@ static inline tr_frame_in_t tr_scene_golden_in(uint32_t tick, uint8_t lane)
 		uint8_t kind, lane, low;
 		int16_t y;
 	} e[] = {
-		{1, 0, 1, 40}, {2, 1, 0, 150}, {1, 2, 0, 300}, {2, 0, 0, 420}, {1, 1, 1, 560},
-		{1, 2, 1, 700}, {2, 2, 0, 820}, {1, 0, 0, 930}, {2, 1, 0, 1010}, {1, 2, 0, 1080},
+		{ 1, 0, 1, 40 },  { 2, 1, 0, 150 }, { 1, 2, 0, 300 }, { 2, 0, 0, 420 },  { 1, 1, 1, 560 },
+		{ 1, 2, 1, 700 }, { 2, 2, 0, 820 }, { 1, 0, 0, 930 }, { 2, 1, 0, 1010 }, { 1, 2, 0, 1080 },
 	};
-	tr_frame_in_t in = {0};
+	tr_frame_in_t in = { 0 };
 
 	in.tick  = tick;
 	in.score = 120;
 	in.flags = TR_FLAG_ALIVE;
 	in.lane  = lane;
 	for (unsigned i = 0; i < sizeof(e) / sizeof(e[0]); i++) {
-		in.ents[i] = (tr_pkt_ent_t){e[i].kind, e[i].lane, e[i].low, 0, e[i].y, 0};
+		in.ents[i] = (tr_pkt_ent_t){ e[i].kind, e[i].lane, e[i].low, 0, e[i].y, 0 };
 	}
 	return in;
 }

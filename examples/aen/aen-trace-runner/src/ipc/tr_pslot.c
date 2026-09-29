@@ -5,11 +5,17 @@
 
 #include <string.h>
 
-void tr_pslot_write(volatile tr_pslot_t *s, const tr_pose_t *pose, uint32_t infer_us, uint32_t pre_us,
-                     uint32_t hp_state, const uint8_t *thumb, uint32_t frame_no, void (*barrier)(void))
+void tr_pslot_write(volatile tr_pslot_t *s,
+                    const tr_pose_t     *pose,
+                    uint32_t             infer_us,
+                    uint32_t             pre_us,
+                    uint32_t             hp_state,
+                    const uint8_t       *thumb,
+                    uint32_t             frame_no,
+                    void (*barrier)(void))
 {
 	s->seq = s->seq + 1u; /* even -> odd: announce a write in progress BEFORE any body byte moves */
-	barrier();             /* the odd seq must be visible before the body write starts */
+	barrier();            /* the odd seq must be visible before the body write starts */
 	s->magic    = TR_PSLOT_MAGIC;
 	s->version  = TR_PSLOT_VERSION;
 	s->frame_no = frame_no;
@@ -20,13 +26,16 @@ void tr_pslot_write(volatile tr_pslot_t *s, const tr_pose_t *pose, uint32_t infe
 	if (thumb != NULL) {
 		memcpy((void *)s->thumb, thumb, sizeof(s->thumb));
 	}
-	barrier(); /* body fully visible before the even bump publishes it */
+	barrier();            /* body fully visible before the even bump publishes it */
 	s->seq = s->seq + 1u; /* odd -> even: publish complete */
-	barrier();             /* seq write retired before the caller signals/returns */
+	barrier();            /* seq write retired before the caller signals/returns */
 }
 
-bool tr_pslot_read(const volatile tr_pslot_t *s, uint32_t last_seq, tr_pslot_t *out, uint32_t *seq,
-                    void (*barrier)(void))
+bool tr_pslot_read(const volatile tr_pslot_t *s,
+                   uint32_t                   last_seq,
+                   tr_pslot_t                *out,
+                   uint32_t                  *seq,
+                   void (*barrier)(void))
 {
 	uint32_t s0 = s->seq;
 

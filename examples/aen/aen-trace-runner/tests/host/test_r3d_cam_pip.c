@@ -37,7 +37,7 @@ int main(void)
 
 		tr_cam_pip_row_grey_to_rgb565(src, 8, dst, 4); /* dst[x] <- src[x*8/4] = src[x*2] */
 		for (int x = 0; x < 4; x++) {
-			uint8_t   g  = src[x * 8 / 4];
+			uint8_t  g    = src[x * 8 / 4];
 			uint16_t want = (uint16_t)(((g >> 3) << 11) | ((g >> 2) << 5) | (g >> 3));
 
 			assert(dst[x] == want);
@@ -71,7 +71,8 @@ int main(void)
 	{
 		int sx, sy;
 
-		assert(TR_CAM_UP_W(90) == 400 && TR_CAM_UP_H(90) == 640 && TR_CAM_UP_W(0) == 640 && TR_CAM_UP_H(0) == 400);
+		assert(TR_CAM_UP_W(90) == 400 && TR_CAM_UP_H(90) == 640 && TR_CAM_UP_W(0) == 640 &&
+		       TR_CAM_UP_H(0) == 400);
 		tr_cam_rot_src(90, W, H, 0, 0, &sx, &sy);
 		assert(sx == 0 && sy == H - 1); /* upright top-left <- raw bottom-left */
 		tr_cam_rot_src(90, W, H, H - 1, W - 1, &sx, &sy);
@@ -95,7 +96,8 @@ int main(void)
 				/* the definition, written out, not through tr_cam_rot_src() */
 				uint8_t g = rot == 90 ? raw[(H - 1 - ux) * W + uy] : raw[ux * W + (W - 1 - uy)];
 
-				want[uy * TR_VID_W + ux] = (uint16_t)(((g >> 3) << 11) | ((g >> 2) << 5) | (g >> 3));
+				want[uy * TR_VID_W + ux] =
+				    (uint16_t)(((g >> 3) << 11) | ((g >> 2) << 5) | (g >> 3));
 			}
 		}
 		memset(got, 0, sizeof(got));
@@ -171,7 +173,7 @@ int main(void)
 		assert(tr_cam_pip_map_kp(&k, 0, &px, &py) && px == 679 && py == 519);
 		/* outside the upright frame (the letterbox padding) or unsure: not drawn */
 		px = py = -7;
-		k = (tr_kp_t){ -1, 10, 255 };
+		k       = (tr_kp_t){ -1, 10, 255 };
 		assert(!tr_cam_pip_map_kp(&k, 90, &px, &py));
 		k = (tr_kp_t){ 400, 10, 255 };
 		assert(!tr_cam_pip_map_kp(&k, 90, &px, &py));
@@ -201,7 +203,8 @@ int main(void)
 		n = tr_cam_pip_format_hz(0u, buf);
 		assert(n == 5 && memcmp(buf, "0.0Hz", 6) == 0);
 		n = tr_cam_pip_format_hz(9u, buf);
-		assert(n == 5 && memcmp(buf, "0.9Hz", 6) == 0); /* single-digit Hz*10 still gets a "0" whole part */
+		assert(n == 5 &&
+		       memcmp(buf, "0.9Hz", 6) == 0); /* single-digit Hz*10 still gets a "0" whole part */
 		n = tr_cam_pip_format_hz(1000u, buf);
 		assert(n == 7 && memcmp(buf, "100.0Hz", 8) == 0); /* 3-digit whole part, no truncation */
 		printf("format_hz: 251->25.1Hz 266->26.6Hz 0->0.0Hz 9->0.9Hz 1000->100.0Hz\n");

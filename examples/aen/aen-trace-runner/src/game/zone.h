@@ -53,21 +53,24 @@
  * scene fades it in there like a part, ~10 s out, on the visible far road.
  * On the TR_SCROLL_PX grid, so it lands on the runner line exactly. */
 #define TR_ZONE_GATE_Y (-1100)
-_Static_assert(TR_ZONE_GATE_Y % TR_SCROLL_PX == 0 && TR_ZONE_GATE_Y >= TR_SPAWN_Y, "the gate's spawn row");
-_Static_assert((1280 - TR_RUNNER_H - TR_RUNNER_GROUND_MARGIN - TR_ZONE_GATE_Y + TR_SCROLL_PX - 1) / TR_SCROLL_PX +
-			       TR_ZONE_GATE_TAIL <
-		       TR_ZONE_STEPS_ATTRACT,
-	       "a gate must spawn inside its zone, after the last one's tail");
+_Static_assert(TR_ZONE_GATE_Y % TR_SCROLL_PX == 0 && TR_ZONE_GATE_Y >= TR_SPAWN_Y,
+               "the gate's spawn row");
+_Static_assert((1280 - TR_RUNNER_H - TR_RUNNER_GROUND_MARGIN - TR_ZONE_GATE_Y + TR_SCROLL_PX - 1) /
+                           TR_SCROLL_PX +
+                       TR_ZONE_GATE_TAIL <
+                   TR_ZONE_STEPS_ATTRACT,
+               "a gate must spawn inside its zone, after the last one's tail");
 
 /* tr_zone_t.gate_y / tr_frame_in_t.gate_y: no gate on the track. */
 #define TR_ZONE_NO_GATE INT16_MIN
 
 typedef struct {
-	uint32_t steps;  /* game steps since this zone was entered, at today's pace (ramp_q8) */
-	uint32_t seq;    /* bumped on every zone entry, reset included (the HUD's popup cue) */
-	int16_t  gate_y; /* model y of the gate to the next zone (like tr_entity_t.y), or TR_ZONE_NO_GATE */
-	uint8_t  zone;   /* the zone the runner is in, 0 .. TR_ZONES - 1 */
-	uint8_t  frac;   /* steps' fraction, Q8 */
+	uint32_t steps; /* game steps since this zone was entered, at today's pace (ramp_q8) */
+	uint32_t seq;   /* bumped on every zone entry, reset included (the HUD's popup cue) */
+	int16_t
+	    gate_y; /* model y of the gate to the next zone (like tr_entity_t.y), or TR_ZONE_NO_GATE */
+	uint8_t zone; /* the zone the runner is in, 0 .. TR_ZONES - 1 */
+	uint8_t frac; /* steps' fraction, Q8 */
 	/* The world speed the next step runs at, Q8 (ramp.h tr_ramp_q8(); 0 or
 	 * 256: today's pace). The caller sets it; a faster step counts for less
 	 * of the zone, and the gate spawns its (faster) lead earlier, so a zone
@@ -78,8 +81,9 @@ typedef struct {
 /* Display name, upper case (the HUD font). */
 static inline const char *tr_zone_name(uint32_t zone)
 {
-	static const char *const names[TR_ZONES] = {"CIRCUIT BOARD", "CPU DIE CITY", "MEMORY CANYON", "ANTENNA FIELD",
-						    "NEON CITY"};
+	static const char *const names[TR_ZONES] = {
+		"CIRCUIT BOARD", "CPU DIE CITY", "MEMORY CANYON", "ANTENNA FIELD", "NEON CITY"
+	};
 
 	return names[zone % TR_ZONES];
 }
@@ -89,7 +93,7 @@ static inline void tr_zone_reset(tr_zone_t *z)
 {
 	uint32_t seq = z->seq;
 
-	*z        = (tr_zone_t){0};
+	*z        = (tr_zone_t){ 0 };
 	z->seq    = seq + 1u;
 	z->gate_y = TR_ZONE_NO_GATE;
 }
@@ -98,7 +102,8 @@ static inline void tr_zone_reset(tr_zone_t *z)
  * height track_h (the same travel as an entity, step.c). */
 static inline uint32_t tr_zone_gate_lead(int16_t track_h)
 {
-	return (uint32_t)((tr_runner_ground_y(track_h) - TR_ZONE_GATE_Y + TR_SCROLL_PX - 1) / TR_SCROLL_PX);
+	return (uint32_t)((tr_runner_ground_y(track_h) - TR_ZONE_GATE_Y + TR_SCROLL_PX - 1) /
+	                  TR_SCROLL_PX);
 }
 
 /* One game step (with tr_game_step(), at the same pace; attract selects the

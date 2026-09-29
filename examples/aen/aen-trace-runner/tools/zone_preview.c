@@ -51,7 +51,8 @@ static void render(tr_scene_t *s, const tr_frame_in_t *in)
 	tr_scene_bg_flash(in, &bg);
 	tr_bin_build(&dl, setup, bins, counts, &ov);
 	for (int b = 0; b < TR_BANDS; b++) {
-		tr_raster_band(fb, W, b * TR_BAND_H, (b + 1) * TR_BAND_H, zb, cb, &bg, &dl, setup, bins[b], counts[b]);
+		tr_raster_band(
+		    fb, W, b * TR_BAND_H, (b + 1) * TR_BAND_H, zb, cb, &bg, &dl, setup, bins[b], counts[b]);
 	}
 }
 
@@ -67,11 +68,11 @@ static void write_ppm(const char *path, int hud)
 	fprintf(f, "P6\n%d %d\n255\n", W, H);
 	for (int i = 0; i < W * H; i++) {
 		uint16_t p      = fb[i];
-		int      rgb[3] = {(p >> 11) << 3, ((p >> 5) & 63) << 2, (p & 31) << 3};
+		int      rgb[3] = { (p >> 11) << 3, ((p >> 5) & 63) << 2, (p & 31) << 3 };
 
 		if (hud && i < TR_HUD_W * TR_HUD_H) {
 			uint16_t q = hudfb[i];
-			int      a = q >> 12, c2[3] = {((q >> 8) & 15) * 17, ((q >> 4) & 15) * 17, (q & 15) * 17};
+			int a = q >> 12, c2[3] = { ((q >> 8) & 15) * 17, ((q >> 4) & 15) * 17, (q & 15) * 17 };
 
 			for (int k = 0; k < 3; k++) {
 				rgb[k] = (a * c2[k] + (15 - a) * rgb[k] + 7) / 15;
@@ -142,8 +143,11 @@ static void hud_frame(sim_t *m, bool attract)
 	tr_hud_view_t v;
 
 	memset(&v, 0, sizeof(v));
-	tr_hud_view_set(&v, &m->score, attract ? TR_BANNER_ATTRACT : TR_BANNER_NONE, attract,
-			attract ? TR_HUD_INVITE_TILT : TR_HUD_INVITE_NONE);
+	tr_hud_view_set(&v,
+	                &m->score,
+	                attract ? TR_BANNER_ATTRACT : TR_BANNER_NONE,
+	                attract,
+	                attract ? TR_HUD_INVITE_TILT : TR_HUD_INVITE_NONE);
 	tr_hud_view_zone(&v, m->z.zone, m->z.seq);
 	v.character = m->chr;
 	tr_hud_update(&m->hud, hudfb, &v, NULL);
@@ -170,8 +174,13 @@ int main(int argc, char **argv)
 							tr_scene_step(&m.s, &in);
 						}
 					}
-					snprintf(path, sizeof(path), "%s/%s-%u-%s.ppm", argv[2], gate ? "gate" : "zone", z,
-						 tr_hud_char_name(c));
+					snprintf(path,
+					         sizeof(path),
+					         "%s/%s-%u-%s.ppm",
+					         argv[2],
+					         gate ? "gate" : "zone",
+					         z,
+					         tr_hud_char_name(c));
 					write_ppm(path, !gate);
 				}
 			}
@@ -181,7 +190,7 @@ int main(int argc, char **argv)
 	if (argc >= 3 && strcmp(argv[1], "attract") == 0) {
 		for (uint8_t z = 0; z < TR_ZONES; z++) {
 			sim_init(&m, z, 400u, (uint8_t)(z % TR_CHAR_N));
-			m.z.seq++; /* an entry: the name shows */
+			m.z.seq++;                     /* an entry: the name shows */
 			for (int f = 0; f < 40; f++) { /* 1.3 s into its 2.75 s */
 				tr_frame_in_t in = sim_frame(&m);
 
@@ -200,14 +209,18 @@ int main(int argc, char **argv)
 	if (argc >= 5 && strcmp(argv[1], "run") == 0) {
 		int n = atoi(argv[4]);
 
-		sim_init(&m, (uint8_t)atoi(argv[3]), argc >= 7 ? (uint32_t)atoi(argv[6]) : 0u, argc >= 6 ? (uint8_t)atoi(argv[5]) : 0u);
+		sim_init(&m,
+		         (uint8_t)atoi(argv[3]),
+		         argc >= 7 ? (uint32_t)atoi(argv[6]) : 0u,
+		         argc >= 6 ? (uint8_t)atoi(argv[5]) : 0u);
 		for (int k = argc >= 8 ? atoi(argv[7]) : 0; k > 0; k--) {
 			tr_frame_in_t in = sim_frame(&m);
 
 			hud_frame(&m, false);
 			tr_scene_step(&m.s, &in);
 		}
-		while (argc < 7 && (m.z.gate_y == TR_ZONE_NO_GATE || m.z.gate_y < 600)) { /* pre-roll: the gate ~2.3 s out */
+		while (argc < 7 && (m.z.gate_y == TR_ZONE_NO_GATE ||
+		                    m.z.gate_y < 600)) { /* pre-roll: the gate ~2.3 s out */
 			tr_frame_in_t in = sim_frame(&m);
 
 			hud_frame(&m, false);
@@ -226,6 +239,9 @@ int main(int argc, char **argv)
 		}
 		return 0;
 	}
-	fprintf(stderr, "usage: %s still OUTDIR | attract OUTDIR | run OUTDIR ZONE FRAMES [CHR [LEAD [SKIP]]]\n", argv[0]);
+	fprintf(
+	    stderr,
+	    "usage: %s still OUTDIR | attract OUTDIR | run OUTDIR ZONE FRAMES [CHR [LEAD [SKIP]]]\n",
+	    argv[0]);
 	return 2;
 }

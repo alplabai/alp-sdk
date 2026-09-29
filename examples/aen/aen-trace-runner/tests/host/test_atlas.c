@@ -40,8 +40,8 @@ int main(void)
 	 * last nibble is unused), byte2 hi=4 lo=5, byte3 hi=6 lo=<unused>. */
 	{
 		static const uint8_t px[] = { 0x12, 0x30, 0x45, 0x60 };
-		tr_sprite_t           s   = { .w = 3, .h = 2, .px = px };
-		uint16_t               buf[3 * 2];
+		tr_sprite_t          s    = { .w = 3, .h = 2, .px = px };
+		uint16_t             buf[3 * 2];
 
 		for (int i = 0; i < 3 * 2; i++) {
 			buf[i] = SENTINEL;
@@ -52,7 +52,8 @@ int main(void)
 		assert(buf[0] == test_palette[1]);
 		assert(buf[1] == test_palette[2]);
 		assert(buf[2] == test_palette[3]);
-		assert(buf[3] == test_palette[4]); /* row 1, col 0 -- would read palette[0] (SENTINEL) if the
+		assert(buf[3] ==
+		       test_palette[4]); /* row 1, col 0 -- would read palette[0] (SENTINEL) if the
 						       reader treated px[] as a flat, non-row-aligned stream */
 		assert(buf[4] == test_palette[5]);
 		assert(buf[5] == test_palette[6]);
@@ -61,8 +62,8 @@ int main(void)
 	/* 2. Index 0 is skipped rather than drawn as palette colour 0. */
 	{
 		static const uint8_t px[] = { 0x01 }; /* pixel0 = idx 0, pixel1 = idx 1 */
-		tr_sprite_t           s   = { .w = 2, .h = 1, .px = px };
-		uint16_t               buf[2];
+		tr_sprite_t          s    = { .w = 2, .h = 1, .px = px };
+		uint16_t             buf[2];
 
 		buf[0] = SENTINEL;
 		buf[1] = SENTINEL;
@@ -79,8 +80,8 @@ int main(void)
 	{
 		/* Row0: idx 1,2,0,3  Row1: idx 4,0,5,6 -> packed high-nibble-first. */
 		static const uint8_t px[] = { 0x12, 0x03, 0x40, 0x56 };
-		tr_sprite_t           s   = { .w = 4, .h = 2, .px = px };
-		uint16_t               buf[4 * 2];
+		tr_sprite_t          s    = { .w = 4, .h = 2, .px = px };
+		uint16_t             buf[4 * 2];
 
 		for (int i = 0; i < 4 * 2; i++) {
 			buf[i] = SENTINEL;
@@ -106,18 +107,18 @@ int main(void)
 	 * "some but not all"), computed by hand below for a 4x4 sprite clipped
 	 * into a 6x6 frame. */
 	{
-		#define GW 6u
-		#define GH 6u
-		#define GUARD 8u
+#define GW    6u
+#define GH    6u
+#define GUARD 8u
 		static const uint8_t px4[] = {
 			/* 4x4, all opaque index 1, high-nibble-first packed. */
 			0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
 		};
 		static const uint8_t px8[] = {
 			/* 8x8, all opaque index 1 -- larger than the 6x6 frame below. */
-			0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
-			0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
-			0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
+			0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
+			0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
+			0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
 		};
 		tr_sprite_t s4 = { .w = 4, .h = 4, .px = px4 };
 		tr_sprite_t s8 = { .w = 8, .h = 8, .px = px8 };
@@ -133,14 +134,14 @@ int main(void)
 		const tr_sprite_t *sprites[] = { &s4, &s4, &s4, &s4, &s4, &s8 };
 		int                offx[]    = { -2, (int)GW - 2, 2, 2, -2, 0 };
 		int                offy[]    = { 2, 2, -2, (int)GH - 2, -2, 0 };
-		unsigned            expect[]  = {
-                    8u,  /* left clip only */
-                    8u,  /* right clip only */
-                    8u,  /* top clip only */
-                    8u,  /* bottom clip only */
-                    4u,  /* both edges at once (top-left corner): 2 cols * 2 rows */
-                    36u, /* oversized: an 8x8 sprite fully covers the 6x6 frame */
-                };
+		unsigned           expect[]  = {
+			8u,  /* left clip only */
+			8u,  /* right clip only */
+			8u,  /* top clip only */
+			8u,  /* bottom clip only */
+			4u,  /* both edges at once (top-left corner): 2 cols * 2 rows */
+			36u, /* oversized: an 8x8 sprite fully covers the 6x6 frame */
+		};
 
 		for (unsigned c = 0; c < sizeof(sprites) / sizeof(sprites[0]); c++) {
 			for (unsigned i = 0; i < GUARD; i++) {
@@ -166,16 +167,16 @@ int main(void)
 			}
 			assert(changed == expect[c]);
 		}
-		#undef GW
-		#undef GH
-		#undef GUARD
+#undef GW
+#undef GH
+#undef GUARD
 	}
 
 	/* 5. A sprite drawn entirely off-screen writes nothing. */
 	{
 		static const uint8_t px[] = { 0x11, 0x11 };
-		tr_sprite_t           s   = { .w = 4, .h = 1, .px = px };
-		uint16_t               buf[4 * 4];
+		tr_sprite_t          s    = { .w = 4, .h = 1, .px = px };
+		uint16_t             buf[4 * 4];
 
 		for (int i = 0; i < 4 * 4; i++) {
 			buf[i] = SENTINEL;
@@ -183,8 +184,8 @@ int main(void)
 		tr_sprite_set_target(buf, 4, 4, test_palette);
 		tr_sprite_draw(1000, 1000, &s);
 		tr_sprite_draw(-1000, -1000, &s);
-		tr_sprite_draw(-10, 0, &s);   /* entirely left of the frame (w=4, x=-10) */
-		tr_sprite_draw(0, -10, &s);   /* entirely above the frame */
+		tr_sprite_draw(-10, 0, &s); /* entirely left of the frame (w=4, x=-10) */
+		tr_sprite_draw(0, -10, &s); /* entirely above the frame */
 
 		for (int i = 0; i < 4 * 4; i++) {
 			assert(buf[i] == SENTINEL);
@@ -203,9 +204,9 @@ int main(void)
 	 * render.c itself is never host-compiled. An 8x1 sprite drawn through
 	 * two 4-wide chunks, mirroring that exact call shape. */
 	{
-		static const uint8_t   px[]     = { 0x11, 0x11, 0x11, 0x11 }; /* 8x1, all opaque index 1. */
-		tr_sprite_t             s        = { .w = 8, .h = 1, .px = px };
-		const uint16_t          chunk_w  = 4;
+		static const uint8_t px[]    = { 0x11, 0x11, 0x11, 0x11 }; /* 8x1, all opaque index 1. */
+		tr_sprite_t          s       = { .w = 8, .h = 1, .px = px };
+		const uint16_t       chunk_w = 4;
 
 		for (uint16_t off = 0; off < s.w; off = (uint16_t)(off + chunk_w)) {
 			uint16_t buf[4];

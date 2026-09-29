@@ -13,11 +13,13 @@
 static int same(const tr_game_t *a, const tr_game_t *b)
 {
 	if (a->tick != b->tick || a->score != b->score || a->lane != b->lane || a->alive != b->alive ||
-	    a->airborne != b->airborne || a->ducking != b->ducking || a->rng != b->rng || a->crashed != b->crashed) {
+	    a->airborne != b->airborne || a->ducking != b->ducking || a->rng != b->rng ||
+	    a->crashed != b->crashed) {
 		return 0;
 	}
 	for (int i = 0; i < TR_MAX_ENTITIES; i++) {
-		if (a->ents[i].kind != b->ents[i].kind || a->ents[i].y != b->ents[i].y || a->ents[i].lane != b->ents[i].lane) {
+		if (a->ents[i].kind != b->ents[i].kind || a->ents[i].y != b->ents[i].y ||
+		    a->ents[i].lane != b->ents[i].lane) {
 			return 0;
 		}
 	}
@@ -94,7 +96,8 @@ int main(void)
 	 * (32768, the 40 Hz play pace), so the step frames are known at any
 	 * TR_PANEL_HZ. */
 	{
-		tr_intent_t h = tr_intent_none(), j = tr_intent_none(), l = tr_intent_none(), r = tr_intent_none(), st;
+		tr_intent_t h = tr_intent_none(), j = tr_intent_none(), l = tr_intent_none(),
+		            r = tr_intent_none(), st;
 		tr_game_t   g;
 		uint32_t    ph = 0;
 
@@ -168,8 +171,12 @@ int main(void)
 		}
 		assert(same(&a, &b));
 		assert(steps == (int)((3000u * (uint64_t)speed) >> 16)); /* 40 Hz 1500, 30 Hz 2000 */
-		printf("pace %s: %d steps in 3000 frames, run %s at tick %u, score %u\n", k ? "1.0" : "0.5", steps,
-		       a.alive ? "alive" : "over", (unsigned)a.tick, (unsigned)a.score);
+		printf("pace %s: %d steps in 3000 frames, run %s at tick %u, score %u\n",
+		       k ? "1.0" : "0.5",
+		       steps,
+		       a.alive ? "alive" : "over",
+		       (unsigned)a.tick,
+		       (unsigned)a.score);
 	}
 
 	/* 4. No collision skipped: an obstacle in the lane with no input hits
@@ -178,12 +185,15 @@ int main(void)
 	for (int k = 0; k < 2; k++) {
 		uint32_t  speed = k ? 65536u : TR_PLAY_SPEED_Q16, phase = 0;
 		tr_game_t g;
-		int16_t   ry = tr_runner_ground_y(1280);
+		int16_t   ry    = tr_runner_ground_y(1280);
 		int       steps = 0;
 
 		tr_game_init(&g, 3u);
 		memset(g.ents, 0, sizeof(g.ents));
-		g.ents[0] = (tr_entity_t){.kind = TR_ENT_OBSTACLE, .lane = g.lane, .y = (int16_t)(ry - 20 * TR_SCROLL_PX), .low = true};
+		g.ents[0] = (tr_entity_t){ .kind = TR_ENT_OBSTACLE,
+			                       .lane = g.lane,
+			                       .y    = (int16_t)(ry - 20 * TR_SCROLL_PX),
+			                       .low  = true };
 		for (int f = 0; f < 200 && g.alive; f++) {
 			if (tr_game_pace(&phase, speed)) {
 				tr_game_step(&g, tr_intent_none(), 1280);
@@ -204,7 +214,7 @@ int main(void)
 		for (int moved = 0; moved < 2; moved++) {
 			tr_game_t   g, g2;
 			tr_intent_t held = tr_intent_none(), step_in, right = tr_intent_none();
-			uint32_t    ph = 0;
+			uint32_t    ph    = 0;
 			int         steps = 0;
 
 			right.lane_delta = 1;
@@ -214,10 +224,15 @@ int main(void)
 				tr_game_init(x, 9u);
 				memset(x->ents, 0, sizeof(x->ents));
 				x->lane    = 1;
-				x->ents[0] = (tr_entity_t){.kind = TR_ENT_OBSTACLE, .lane = 1, .y = (int16_t)(ry - TR_SCROLL_PX), .low = true};
+				x->ents[0] = (tr_entity_t){ .kind = TR_ENT_OBSTACLE,
+					                        .lane = 1,
+					                        .y    = (int16_t)(ry - TR_SCROLL_PX),
+					                        .low  = true };
 				held = tr_intent_none(), ph = 0, steps = 0;
 				for (int f = 0; f < 6; f++) {
-					tr_intent_t in = (moved && f == 0) ? right : tr_intent_none(); /* frame 0 does not step at 0.5x */
+					tr_intent_t in = (moved && f == 0)
+					                     ? right
+					                     : tr_intent_none(); /* frame 0 does not step at 0.5x */
 
 					if (tr_play_frame(x, &held, in, &ph, 32768u, &step_in)) {
 						tr_game_step(x, step_in, 1280);

@@ -7,8 +7,8 @@
 static tr_intent_t move(int8_t d)
 {
 	tr_intent_t i = tr_intent_none();
-	i.lane_delta   = d;
-	i.source       = TR_INPUT_VISION;
+	i.lane_delta  = d;
+	i.source      = TR_INPUT_VISION;
 	return i;
 }
 
@@ -143,7 +143,8 @@ int main(void)
 		/* lane 2 (the runner starts at lane 1): stays an untouched obstacle
 		 * the whole way through the band, so its y can be inspected freely
 		 * without the collision/clear logic consuming or scoring it. */
-		g.ents[0] = (tr_entity_t){ .kind = TR_ENT_OBSTACLE, .lane = 2, .y = TR_SPAWN_Y, .low = true };
+		g.ents[0] =
+		    (tr_entity_t){ .kind = TR_ENT_OBSTACLE, .lane = 2, .y = TR_SPAWN_Y, .low = true };
 
 		assert(g.ents[0].y < ry); /* spawn()'s real position is well above the band, not past it */
 
@@ -160,7 +161,8 @@ int main(void)
 		 * -440, 101 from y 0, 62 at the pre-P3c 18 px/tick) -- not the
 		 * 4-tick warning the reversed scroll produced. */
 		assert(g.ents[0].y >= ry && g.ents[0].y < ry + TR_SCROLL_PX);
-		assert(ticks == (ry - TR_SPAWN_Y + TR_SCROLL_PX - 1) / TR_SCROLL_PX && ticks >= 241); /* never less warning */
+		assert(ticks == (ry - TR_SPAWN_Y + TR_SCROLL_PX - 1) / TR_SCROLL_PX &&
+		       ticks >= 241); /* never less warning */
 
 		/* and spawn() really puts a new part on that row */
 		tr_game_init(&g, 19u);
@@ -187,7 +189,8 @@ int main(void)
 		g.ents[0] = (tr_entity_t){
 			.kind = TR_ENT_OBSTACLE, .lane = 1, .y = (int16_t)(ry - 2 * TR_SCROLL_PX), .low = true
 		};
-		tr_game_step(&g, tr_intent_none(), track_h); /* now at ry - TR_SCROLL_PX: still one tick out. */
+		tr_game_step(
+		    &g, tr_intent_none(), track_h); /* now at ry - TR_SCROLL_PX: still one tick out. */
 		assert(g.alive);
 		tr_game_step(&g, tr_intent_none(), track_h); /* now at ry: exactly the runner's position. */
 		assert(!g.alive);
@@ -219,7 +222,8 @@ int main(void)
 	 * TR_RUNNER_GROUND_MARGIN in state.h is a loud, intentional diff here
 	 * rather than a silent mismatch between step.c and render.c.
 	 */
-	assert(tr_runner_ground_y(1280) == 1104); /* 1280 - TR_RUNNER_H(96) - TR_RUNNER_GROUND_MARGIN(80) */
+	assert(tr_runner_ground_y(1280) ==
+	       1104); /* 1280 - TR_RUNNER_H(96) - TR_RUNNER_GROUND_MARGIN(80) */
 
 	/* A pickup in the lane scores and frees its slot. y=0: the real spawn()
 	 * position, not an arbitrary one -- and the score check below is tight
@@ -269,7 +273,9 @@ int main(void)
 		tr_game_init(&g, 21u);
 		assert(!g.crashed && !tr_game_crash_step(&g));
 		memset(g.ents, 0, sizeof(g.ents));
-		g.ents[5] = (tr_entity_t){ .kind = TR_ENT_OBSTACLE, .lane = 1, .y = (int16_t)(ry - 1), .low = false };
+		g.ents[5] = (tr_entity_t){
+			.kind = TR_ENT_OBSTACLE, .lane = 1, .y = (int16_t)(ry - 1), .low = false
+		};
 		tr_game_step(&g, tr_intent_none(), track_h);
 		assert(!g.alive && g.crashed && g.hit == 5u && g.crash_ticks == 0u);
 
@@ -297,7 +303,7 @@ int main(void)
 	{
 		tr_game_t w1, w2;
 		unsigned  kinds[4] = { 0 }, wlow = 0, n = 0;
-		uint32_t  crc      = 0;
+		uint32_t  crc = 0;
 
 		tr_game_init(&w1, 77u);
 		tr_game_init(&w2, 77u);
@@ -311,7 +317,8 @@ int main(void)
 				if (e->kind == TR_ENT_FREE) {
 					continue;
 				}
-				assert(e->kind == w2.ents[i].kind && e->lane == w2.ents[i].lane && e->low == w2.ents[i].low);
+				assert(e->kind == w2.ents[i].kind && e->lane == w2.ents[i].lane &&
+				       e->low == w2.ents[i].low);
 				kinds[e->kind]++;
 				wlow += e->kind == TR_ENT_WIRE && e->low;
 				crc = crc * 31u + (uint32_t)e->kind * 7u + e->lane * 3u + e->low;
@@ -325,8 +332,12 @@ int main(void)
 		assert(wlow > 0u && wlow < kinds[TR_ENT_WIRE]);
 		assert(tr_ent_is_obstacle(TR_ENT_WIRE) && tr_ent_is_obstacle(TR_ENT_OBSTACLE) &&
 		       !tr_ent_is_obstacle(TR_ENT_PICKUP) && !tr_ent_is_obstacle(TR_ENT_FREE));
-		printf("spawn mix: %u obstacles, %u wires (%u low), %u pickups, kinds crc %08x\n", kinds[TR_ENT_OBSTACLE],
-		       kinds[TR_ENT_WIRE], wlow, kinds[TR_ENT_PICKUP], (unsigned)crc);
+		printf("spawn mix: %u obstacles, %u wires (%u low), %u pickups, kinds crc %08x\n",
+		       kinds[TR_ENT_OBSTACLE],
+		       kinds[TR_ENT_WIRE],
+		       wlow,
+		       kinds[TR_ENT_PICKUP],
+		       (unsigned)crc);
 		assert(crc == 0x12ae7934u);
 	}
 
@@ -342,9 +353,11 @@ int main(void)
 
 			tr_game_init(&g, 31u);
 			memset(g.ents, 0, sizeof(g.ents));
-			g.ents[3] = (tr_entity_t){ .kind = TR_ENT_WIRE, .lane = 1, .y = (int16_t)(ry - 3 * TR_SCROLL_PX), .low = low };
-			in.jump   = act == 1;
-			in.duck   = act == 2;
+			g.ents[3] = (tr_entity_t){
+				.kind = TR_ENT_WIRE, .lane = 1, .y = (int16_t)(ry - 3 * TR_SCROLL_PX), .low = low
+			};
+			in.jump = act == 1;
+			in.duck = act == 2;
 			for (int k = 0; k < 6; k++) {
 				tr_game_step(&g, k == 0 ? in : tr_intent_none(), track_h);
 			}
@@ -382,7 +395,8 @@ int main(void)
 		assert(tr_game_wire_level(&g, track_h) == 255u);
 		g.ents[1].y = (int16_t)(ry + TR_SCROLL_PX);
 		assert(tr_game_wire_level(&g, track_h) == 0u);
-		assert(tr_game_wire_level(&g, (int16_t)(TR_RUNNER_H + TR_RUNNER_GROUND_MARGIN)) == 0u); /* ry 0: no divide */
+		assert(tr_game_wire_level(&g, (int16_t)(TR_RUNNER_H + TR_RUNNER_GROUND_MARGIN)) ==
+		       0u); /* ry 0: no divide */
 	}
 
 	/*
@@ -406,7 +420,8 @@ int main(void)
 			for (unsigned i = 0; i < TR_MAX_ENTITIES; i++) {
 				tr_entity_t *e = &g.ents[i];
 
-				if (tr_ent_is_obstacle(e->kind) && e->lane == g.lane && e->y + TR_SCROLL_PX >= ry && e->y < ry) {
+				if (tr_ent_is_obstacle(e->kind) && e->lane == g.lane && e->y + TR_SCROLL_PX >= ry &&
+				    e->y < ry) {
 					e->lane = (uint8_t)((e->lane + 1u) % TR_LANES);
 				}
 			}
@@ -421,8 +436,11 @@ int main(void)
 			most = alive > most ? alive : most;
 		}
 		assert(spawns == 4000u / TR_SPAWN_TICKS && most <= TR_ENT_ALIVE_MAX);
-		printf("step: %u spawns in 4000 steps, one every %u (1 s), at most %u of %u slots alive\n", (unsigned)spawns,
-		       (unsigned)TR_SPAWN_TICKS, (unsigned)most, (unsigned)TR_MAX_ENTITIES);
+		printf("step: %u spawns in 4000 steps, one every %u (1 s), at most %u of %u slots alive\n",
+		       (unsigned)spawns,
+		       (unsigned)TR_SPAWN_TICKS,
+		       (unsigned)most,
+		       (unsigned)TR_MAX_ENTITIES);
 	}
 
 	tr_game_t a, b;

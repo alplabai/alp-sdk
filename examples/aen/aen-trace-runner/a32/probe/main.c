@@ -21,10 +21,10 @@
 
 #include "results.h"
 
-#define NC_BUF_ADDR  0x02000000u
-#define WB_BUF_ADDR  0x02100000u
-#define NC_DST_ADDR  0x02200000u
-#define SRAM1_ADDR   0x02400000u
+#define NC_BUF_ADDR 0x02000000u
+#define WB_BUF_ADDR 0x02100000u
+#define NC_DST_ADDR 0x02200000u
+#define SRAM1_ADDR  0x02400000u
 
 #define ONE_MIB_WORDS     (1024u * 1024u / 4u)
 #define SIXTEEN_KIB_WORDS (16u * 1024u / 4u)
@@ -50,7 +50,8 @@
 #define SRAM1_MAILBOX_ADDR 0x02401000u
 #define MAILBOX_SENTINEL   0x54524D42u /* "TRMB" -- addendum item E */
 
-#define DUAL_WB_S1_ADDR    0x02500000u /* 1 MiB, Inner Shareable -- addendum item A: dual-core
+#define DUAL_WB_S1_ADDR \
+	0x02500000u /* 1 MiB, Inner Shareable -- addendum item A: dual-core
                                          * fill/clean/read use THIS buffer, not the stage-1
                                          * WB_BUF_ADDR (S=0), so stage-1's single-core WB numbers
                                          * stay comparable to what was already measured on silicon */
@@ -76,11 +77,11 @@
  * MHz: generous for what should be a microseconds-scale handshake. */
 #define BARRIER_TIMEOUT_TICKS 100000000ull
 
-extern uint64_t probe_read32(uint32_t addr);       /* start.S: r0=value(0 if fault), r1=fault(0/1) */
-extern uint64_t pmu_try_read(void);                 /* start.S: r0=PMCCNTR(0 if unavail), r1=avail */
-extern uint32_t psci_cpu_on_secondary(void);        /* start.S: PSCI CPU_ON, returns SMC ret code */
+extern uint64_t probe_read32(uint32_t addr); /* start.S: r0=value(0 if fault), r1=fault(0/1) */
+extern uint64_t pmu_try_read(void);          /* start.S: r0=PMCCNTR(0 if unavail), r1=avail */
+extern uint32_t psci_cpu_on_secondary(void); /* start.S: PSCI CPU_ON, returns SMC ret code */
 extern void atomic_increment_n(volatile uint32_t *addr, uint32_t count); /* start.S: LDREX/STREX */
-void secondary_main(void); /* called from start.S's secondary_entry via `bl`; not static */
+void        secondary_main(void); /* called from start.S's secondary_entry via `bl`; not static */
 
 /* Fill pattern for scalar_fill: word[i] = SCALAR_BASE ^ i ^ pass, varies
  * across passes just so consecutive passes don't write bit-identical data
@@ -125,8 +126,8 @@ static inline uint64_t read_cntvct(void)
 	 * compiler itself reordering the preceding buffer stores/loads past
 	 * this call (review finding F3). */
 	__asm__ volatile("isb\n\t"
-			 "mrrc p15, 1, %0, %1, c14"
-			 : "=r"(lo), "=r"(hi)::"memory");
+	                 "mrrc p15, 1, %0, %1, c14"
+	                 : "=r"(lo), "=r"(hi)::"memory");
 	return ((uint64_t)hi << 32) | lo;
 }
 
@@ -145,9 +146,9 @@ static void neon_fill(uint32_t *buf, uint32_t words)
 {
 	const uint32x4_t basev = vdupq_n_u32(FILL_BASE);
 	const uint32x4_t step4 = vdupq_n_u32(4u * FILL_MUL);
-	uint32x4_t im = { 0u, FILL_MUL, 2u * FILL_MUL, 3u * FILL_MUL }; /* i*MUL for i={0,1,2,3} */
-	uint32_t *p = buf;
-	uint32_t *end = buf + words; /* words is a multiple of 16 for every buffer we use */
+	uint32x4_t im  = { 0u, FILL_MUL, 2u * FILL_MUL, 3u * FILL_MUL }; /* i*MUL for i={0,1,2,3} */
+	uint32_t  *p   = buf;
+	uint32_t  *end = buf + words; /* words is a multiple of 16 for every buffer we use */
 	while (p < end) {
 		vst1q_u32(p + 0, veorq_u32(basev, im)); /* 4 x vst1q_u32 = 4 x 16 B = 64 B per iteration */
 		im = vaddq_u32(im, step4);
@@ -163,8 +164,8 @@ static void neon_fill(uint32_t *buf, uint32_t words)
 
 static uint32_t neon_read_xor(const uint32_t *buf, uint32_t words)
 {
-	uint32x4_t acc = vdupq_n_u32(0);
-	const uint32_t *p = buf;
+	uint32x4_t      acc = vdupq_n_u32(0);
+	const uint32_t *p   = buf;
 	const uint32_t *end = buf + words;
 	while (p < end) {
 		acc = veorq_u32(acc, vld1q_u32(p));
@@ -191,7 +192,7 @@ static void clean_dcache_range(const void *start, uint32_t size)
 	uint32_t line = 4u << ((ctr >> 16) & 0xFu); /* CTR.DminLine: line = 4 << DminLine bytes */
 
 	uintptr_t addr = (uintptr_t)start & ~(uintptr_t)(line - 1);
-	uintptr_t end = (uintptr_t)start + size;
+	uintptr_t end  = (uintptr_t)start + size;
 	for (; addr < end; addr += line) {
 		uint32_t a = (uint32_t)addr;
 		__asm__ volatile("mcr p15, 0, %0, c7, c10, 1" : : "r"(a) : "memory"); /* DCCMVAC */
@@ -199,9 +200,10 @@ static void clean_dcache_range(const void *start, uint32_t size)
 	__asm__ volatile("dsb" ::: "memory");
 }
 
-static void record(volatile results_t *r, uint32_t idx, uint32_t test_id, uint64_t bytes, uint64_t ticks)
+static void
+record(volatile results_t *r, uint32_t idx, uint32_t test_id, uint64_t bytes, uint64_t ticks)
 {
-	r->tests[idx].test_id = test_id;
+	r->tests[idx].test_id  = test_id;
 	r->tests[idx].bytes_lo = (uint32_t)bytes;
 	r->tests[idx].bytes_hi = (uint32_t)(bytes >> 32);
 	r->tests[idx].ticks_lo = (uint32_t)ticks;
@@ -220,10 +222,10 @@ static uint32_t sentinel_check(volatile results_t *r, uint32_t idx, uint32_t buf
 	__asm__ volatile("dsb sy" ::: "memory");
 	uint32_t readback = *(volatile uint32_t *)addr;
 
-	r->tests[idx].test_id = TEST_ID(buf_id, OP_SENTINEL);
-	r->tests[idx].bytes_lo = SENTINEL_PATTERN;                     /* expected */
+	r->tests[idx].test_id  = TEST_ID(buf_id, OP_SENTINEL);
+	r->tests[idx].bytes_lo = SENTINEL_PATTERN;                         /* expected */
 	r->tests[idx].bytes_hi = (readback == SENTINEL_PATTERN) ? 1u : 0u; /* pass flag */
-	r->tests[idx].ticks_lo = readback;                              /* actual */
+	r->tests[idx].ticks_lo = readback;                                 /* actual */
 	r->tests[idx].ticks_hi = 0u;
 	return idx + 1;
 }
@@ -237,14 +239,15 @@ static inline void barrier_signal(volatile uint32_t *flag)
 	__asm__ volatile("dsb sy" ::: "memory"); /* publish everything written before the flag */
 	*flag = 1;
 	__asm__ volatile("dsb sy" ::: "memory"); /* make sure the flag write itself is out */
-	__asm__ volatile("sev");                  /* wake the other core if it's WFE-waiting */
+	__asm__ volatile("sev");                 /* wake the other core if it's WFE-waiting */
 }
 
 static inline void barrier_wait(volatile uint32_t *flag)
 {
 	while (*flag == 0)
 		__asm__ volatile("wfe"); /* re-checks the condition on any wake, spurious or not */
-	__asm__ volatile("dmb sy" ::: "memory"); /* order our reads of the guarded data after the flag */
+	__asm__ volatile("dmb sy" ::
+	                     : "memory"); /* order our reads of the guarded data after the flag */
 }
 
 /* Same as barrier_wait but gives up after max_ticks of CNTVCT (see
@@ -254,8 +257,7 @@ static int barrier_wait_timeout(volatile uint32_t *flag, uint64_t max_ticks)
 {
 	uint64_t start = read_cntvct();
 	while (*flag == 0) {
-		if ((read_cntvct() - start) > max_ticks)
-			return 0;
+		if ((read_cntvct() - start) > max_ticks) return 0;
 		__asm__ volatile("wfe");
 	}
 	__asm__ volatile("dmb sy" ::: "memory");
@@ -268,13 +270,13 @@ static int barrier_wait_timeout(volatile uint32_t *flag, uint64_t max_ticks)
  * at or treated as fatal. */
 static void pmu_clock_test(volatile results_t *r)
 {
-	uint64_t s0 = pmu_try_read();
+	uint64_t s0     = pmu_try_read();
 	uint32_t avail0 = (uint32_t)(s0 >> 32);
-	uint32_t pmcc0 = (uint32_t)s0;
+	uint32_t pmcc0  = (uint32_t)s0;
 
 	if (!avail0) {
-		r->pmu_available = 0;
-		r->pmu_cycles = 0;
+		r->pmu_available    = 0;
+		r->pmu_cycles       = 0;
 		r->pmu_cntvct_ticks = 0;
 		return;
 	}
@@ -287,12 +289,12 @@ static void pmu_clock_test(volatile results_t *r)
 					     * by construction even across a counter wrap, not just in
 					     * the (here, practically impossible) common case */
 
-	uint64_t s1 = pmu_try_read();
+	uint64_t s1     = pmu_try_read();
 	uint32_t avail1 = (uint32_t)(s1 >> 32);
-	uint32_t pmcc1 = (uint32_t)s1;
+	uint32_t pmcc1  = (uint32_t)s1;
 
 	r->pmu_available = avail1 ? 1u : 0u;
-	r->pmu_cycles = pmcc1 - pmcc0; /* PMCCNTR is 32-bit; wraps only after ~1 s even near 4 GHz,
+	r->pmu_cycles    = pmcc1 - pmcc0; /* PMCCNTR is 32-bit; wraps only after ~1 s even near 4 GHz,
 	                                 * safe for a 100 ms window at any plausible clock here */
 	r->pmu_cntvct_ticks = (uint32_t)(v1 - v0); /* actual measured window, target 10,000,000 */
 }
@@ -325,15 +327,16 @@ static inline uint32_t read_isr_async_abort_pending(void)
 	return (isr >> 8) & 1u;
 }
 
-static void cdc_read_set(volatile results_t *r, volatile uint32_t *out_reg, volatile uint32_t *out_fault)
+static void
+cdc_read_set(volatile results_t *r, volatile uint32_t *out_reg, volatile uint32_t *out_fault)
 {
 	for (int i = 0; i < 3; i++) {
-		r->stage = 0xCDC0u + (uint32_t)i;
-		uint64_t res = probe_read32(cdc_addrs[i]);
-		uint32_t sync_fault = (uint32_t)(res >> 32);
+		r->stage               = 0xCDC0u + (uint32_t)i;
+		uint64_t res           = probe_read32(cdc_addrs[i]);
+		uint32_t sync_fault    = (uint32_t)(res >> 32);
 		uint32_t async_pending = read_isr_async_abort_pending();
-		out_reg[i] = (uint32_t)res;
-		out_fault[i] = sync_fault | (async_pending << 1);
+		out_reg[i]             = (uint32_t)res;
+		out_fault[i]           = sync_fault | (async_pending << 1);
 	}
 }
 
@@ -342,7 +345,8 @@ static void cdc_probe(volatile results_t *r)
 	cdc_read_set(r, r->cdc_reg0, r->cdc_fault0);
 
 	uint64_t start = read_cntvct();
-	while ((read_cntvct() - start) < 100000ull) { } /* ~1 ms @ 100 MHz; subtraction form, review
+	while ((read_cntvct() - start) < 100000ull) {
+	} /* ~1 ms @ 100 MHz; subtraction form, review
 							   * item 13 */
 
 	cdc_read_set(r, r->cdc_reg1, r->cdc_fault1);
@@ -354,8 +358,14 @@ static void cdc_probe(volatile results_t *r)
  * so there's exactly one place this logic is written. Returns 1 normally;
  * for core0 only, 0 if core1 never signalled done (see
  * BARRIER_TIMEOUT_TICKS) -- core1's own call always returns 1. */
-static int dual_fill_round(volatile results_t *r, uint32_t round, int is_core0, uint32_t *buf,
-			    uint32_t words, uint32_t buf_id, uint32_t passes, uint32_t out_idx)
+static int dual_fill_round(volatile results_t *r,
+                           uint32_t            round,
+                           int                 is_core0,
+                           uint32_t           *buf,
+                           uint32_t            words,
+                           uint32_t            buf_id,
+                           uint32_t            passes,
+                           uint32_t            out_idx)
 {
 	if (is_core0) {
 		barrier_signal(&r->dual_go[round]);
@@ -372,11 +382,13 @@ static int dual_fill_round(volatile results_t *r, uint32_t round, int is_core0, 
 	__asm__ volatile("dsb sy" ::: "memory"); /* drain stores before the end-time snapshot (F3) */
 	uint64_t t1 = read_cntvct();
 
-	record(r, out_idx, TEST_ID_CORE(is_core0 ? 0u : 1u, buf_id, OP_DUAL_FILL),
-	       (uint64_t)words * 4u * passes, t1 - t0);
+	record(r,
+	       out_idx,
+	       TEST_ID_CORE(is_core0 ? 0u : 1u, buf_id, OP_DUAL_FILL),
+	       (uint64_t)words * 4u * passes,
+	       t1 - t0);
 
-	if (is_core0)
-		return barrier_wait_timeout(&r->dual_done[round], BARRIER_TIMEOUT_TICKS);
+	if (is_core0) return barrier_wait_timeout(&r->dual_done[round], BARRIER_TIMEOUT_TICKS);
 	barrier_signal(&r->dual_done[round]);
 	return 1;
 }
@@ -386,8 +398,14 @@ static int dual_fill_round(volatile results_t *r, uint32_t round, int is_core0, 
  * DISJOINT ranges is architecturally well-defined (unlike the set/way
  * invalidate in start.S, which is exactly why THAT one is core0-only --
  * see secondary_entry's comment). */
-static int dual_clean_round(volatile results_t *r, uint32_t round, int is_core0, uint32_t *buf,
-			     uint32_t words, uint32_t buf_id, uint32_t passes, uint32_t out_idx)
+static int dual_clean_round(volatile results_t *r,
+                            uint32_t            round,
+                            int                 is_core0,
+                            uint32_t           *buf,
+                            uint32_t            words,
+                            uint32_t            buf_id,
+                            uint32_t            passes,
+                            uint32_t            out_idx)
 {
 	if (is_core0) {
 		barrier_signal(&r->dual_go[round]);
@@ -406,18 +424,26 @@ static int dual_clean_round(volatile results_t *r, uint32_t round, int is_core0,
 		ticks += (c1 - c0);
 	}
 
-	record(r, out_idx, TEST_ID_CORE(is_core0 ? 0u : 1u, buf_id, OP_DUAL_CLEAN),
-	       (uint64_t)words * 4u * passes, ticks);
+	record(r,
+	       out_idx,
+	       TEST_ID_CORE(is_core0 ? 0u : 1u, buf_id, OP_DUAL_CLEAN),
+	       (uint64_t)words * 4u * passes,
+	       ticks);
 
-	if (is_core0)
-		return barrier_wait_timeout(&r->dual_done[round], BARRIER_TIMEOUT_TICKS);
+	if (is_core0) return barrier_wait_timeout(&r->dual_done[round], BARRIER_TIMEOUT_TICKS);
 	barrier_signal(&r->dual_done[round]);
 	return 1;
 }
 
 /* Dual-core round 3: each core NEON-reads its own half. */
-static int dual_read_round(volatile results_t *r, uint32_t round, int is_core0, uint32_t *buf,
-			    uint32_t words, uint32_t buf_id, uint32_t passes, uint32_t out_idx)
+static int dual_read_round(volatile results_t *r,
+                           uint32_t            round,
+                           int                 is_core0,
+                           uint32_t           *buf,
+                           uint32_t            words,
+                           uint32_t            buf_id,
+                           uint32_t            passes,
+                           uint32_t            out_idx)
 {
 	if (is_core0) {
 		barrier_signal(&r->dual_go[round]);
@@ -431,11 +457,13 @@ static int dual_read_round(volatile results_t *r, uint32_t round, int is_core0, 
 		(void)neon_read_xor(buf, words);
 	uint64_t t1 = read_cntvct();
 
-	record(r, out_idx, TEST_ID_CORE(is_core0 ? 0u : 1u, buf_id, OP_DUAL_READ),
-	       (uint64_t)words * 4u * passes, t1 - t0);
+	record(r,
+	       out_idx,
+	       TEST_ID_CORE(is_core0 ? 0u : 1u, buf_id, OP_DUAL_READ),
+	       (uint64_t)words * 4u * passes,
+	       t1 - t0);
 
-	if (is_core0)
-		return barrier_wait_timeout(&r->dual_done[round], BARRIER_TIMEOUT_TICKS);
+	if (is_core0) return barrier_wait_timeout(&r->dual_done[round], BARRIER_TIMEOUT_TICKS);
 	barrier_signal(&r->dual_done[round]);
 	return 1;
 }
@@ -472,8 +500,7 @@ static int ldrex_round(volatile results_t *r, int is_core0)
 		r->ldrex_core1_ticks = (uint32_t)(t1 - t0);
 
 	if (is_core0) {
-		if (!barrier_wait_timeout(&r->dual_done[4], BARRIER_TIMEOUT_TICKS))
-			return 0;
+		if (!barrier_wait_timeout(&r->dual_done[4], BARRIER_TIMEOUT_TICKS)) return 0;
 		r->ldrex_final_value = *counter;
 		return 1;
 	}
@@ -488,8 +515,7 @@ static int wait_flag_eq_timeout(volatile uint32_t *flag, uint32_t value, uint64_
 {
 	uint64_t start = read_cntvct();
 	while (*flag != value) {
-		if ((read_cntvct() - start) > max_ticks)
-			return 0;
+		if ((read_cntvct() - start) > max_ticks) return 0;
 		__asm__ volatile("wfe");
 	}
 	__asm__ volatile("dmb sy" ::: "memory");
@@ -548,15 +574,15 @@ static int coherency_round(volatile results_t *r, int is_core0)
 	}
 
 	if (is_core0) {
-		if (!wait_flag_eq_timeout(flag, 1, BARRIER_TIMEOUT_TICKS))
-			return 0;
+		if (!wait_flag_eq_timeout(flag, 1, BARRIER_TIMEOUT_TICKS)) return 0;
 
 		uint32_t seed = (uint32_t)read_cntvct(); /* per-run seed, see comment above */
-		r->coh_seed = seed;
+		r->coh_seed   = seed;
 		uint32_t *buf = (uint32_t *)COH_BUF_ADDR;
 		for (uint32_t i = 0; i < COH_BUF_WORDS; i++)
 			buf[i] = seed + (i * FILL_MUL);
-		__asm__ volatile("dmb ish" ::: "memory"); /* Inner Shareable, matching the S=1 attribute
+		__asm__ volatile("dmb ish" ::
+		                     : "memory"); /* Inner Shareable, matching the S=1 attribute
 							     * on this region (addendum item C says "dmb
 							     * ish" specifically, not a plain dsb) */
 		*flag = 2;
@@ -574,8 +600,7 @@ static int coherency_round(volatile results_t *r, int is_core0)
 	__asm__ volatile("dsb sy" ::: "memory");
 	__asm__ volatile("sev");
 
-	if (!wait_flag_eq_timeout(flag, 2, BARRIER_TIMEOUT_TICKS))
-		return 0;
+	if (!wait_flag_eq_timeout(flag, 2, BARRIER_TIMEOUT_TICKS)) return 0;
 	__asm__ volatile("dmb ish" ::: "memory"); /* pairs with core0's dmb ish above */
 
 	r->coh_actual_checksum = neon_read_xor((const uint32_t *)COH_BUF_ADDR, COH_BUF_WORDS);
@@ -595,33 +620,26 @@ static int coherency_round(volatile results_t *r, int is_core0)
  * diagnosable by its last stage value rather than a bare guess. */
 static void run_dual_core_rounds(volatile results_t *r, int is_core0)
 {
-	uint32_t half = ONE_MIB_WORDS / 2;
-	uint32_t base_idx = is_core0 ? CORE0_DUAL_BASE_IDX : CORE1_DUAL_BASE_IDX;
-	uint32_t *wb_half = (uint32_t *)(DUAL_WB_S1_ADDR + (is_core0 ? 0u : half * 4u));
-	uint32_t *nc_half = (uint32_t *)(NC_BUF_ADDR + (is_core0 ? 0u : half * 4u));
+	uint32_t  half     = ONE_MIB_WORDS / 2;
+	uint32_t  base_idx = is_core0 ? CORE0_DUAL_BASE_IDX : CORE1_DUAL_BASE_IDX;
+	uint32_t *wb_half  = (uint32_t *)(DUAL_WB_S1_ADDR + (is_core0 ? 0u : half * 4u));
+	uint32_t *nc_half  = (uint32_t *)(NC_BUF_ADDR + (is_core0 ? 0u : half * 4u));
 
-	if (is_core0)
-		r->stage = 0xF010u;
+	if (is_core0) r->stage = 0xF010u;
 	if (!dual_fill_round(r, 0, is_core0, wb_half, half, BUF_WB_S1, PASSES_DUAL, base_idx + 0))
 		return;
-	if (is_core0)
-		r->stage = 0xF011u;
-	if (!dual_clean_round(r, 1, is_core0, wb_half, half, BUF_WB_S1, PASSES_DUAL_CLEAN, base_idx + 1))
+	if (is_core0) r->stage = 0xF011u;
+	if (!dual_clean_round(
+	        r, 1, is_core0, wb_half, half, BUF_WB_S1, PASSES_DUAL_CLEAN, base_idx + 1))
 		return;
-	if (is_core0)
-		r->stage = 0xF012u;
-	if (!dual_fill_round(r, 2, is_core0, nc_half, half, BUF_NC, PASSES_DUAL, base_idx + 2))
-		return;
-	if (is_core0)
-		r->stage = 0xF013u;
+	if (is_core0) r->stage = 0xF012u;
+	if (!dual_fill_round(r, 2, is_core0, nc_half, half, BUF_NC, PASSES_DUAL, base_idx + 2)) return;
+	if (is_core0) r->stage = 0xF013u;
 	if (!dual_read_round(r, 3, is_core0, wb_half, half, BUF_WB_S1, PASSES_DUAL, base_idx + 3))
 		return;
-	if (is_core0)
-		r->stage = 0xF014u;
-	if (!ldrex_round(r, is_core0))
-		return;
-	if (is_core0)
-		r->stage = 0xF015u;
+	if (is_core0) r->stage = 0xF014u;
+	if (!ldrex_round(r, is_core0)) return;
+	if (is_core0) r->stage = 0xF015u;
 	(void)coherency_round(r, is_core0);
 }
 
@@ -638,8 +656,15 @@ void secondary_main(void)
  * checksum is threaded through and re-published to the results block after
  * every single test so a fault mid-run still leaves the latest value
  * visible. */
-static uint32_t run_buffer_tests(volatile results_t *r, uint32_t idx, uint32_t *checksum, uint32_t buf_id,
-				  uint32_t *buf, uint32_t words, uint32_t passes, int do_clean, uint32_t passes_clean)
+static uint32_t run_buffer_tests(volatile results_t *r,
+                                 uint32_t            idx,
+                                 uint32_t           *checksum,
+                                 uint32_t            buf_id,
+                                 uint32_t           *buf,
+                                 uint32_t            words,
+                                 uint32_t            passes,
+                                 int                 do_clean,
+                                 uint32_t            passes_clean)
 {
 	uint64_t t0, t1, bytes;
 	uint32_t p;
@@ -650,10 +675,11 @@ static uint32_t run_buffer_tests(volatile results_t *r, uint32_t idx, uint32_t *
 	t0 = read_cntvct();
 	for (p = 0; p < passes; p++)
 		scalar_fill(buf, words, SCALAR_BASE ^ p);
-	__asm__ volatile("dsb sy" ::: "memory"); /* drain the stores before we snapshot end-time (F3):
+	__asm__ volatile("dsb sy" ::
+	                     : "memory"); /* drain the stores before we snapshot end-time (F3):
 						   * without this, a still-in-flight store wouldn't count
 						   * against the measured interval, understating the time */
-	t1 = read_cntvct();
+	t1    = read_cntvct();
 	bytes = (uint64_t)words * 4u * passes;
 	record(r, idx, TEST_ID(buf_id, OP_SCALAR_FILL), bytes, t1 - t0);
 	*checksum ^= *(volatile uint32_t *)buf; /* prove the stores landed; can't be elided */
@@ -667,7 +693,7 @@ static uint32_t run_buffer_tests(volatile results_t *r, uint32_t idx, uint32_t *
 	for (p = 0; p < passes; p++)
 		neon_fill(buf, words);
 	__asm__ volatile("dsb sy" ::: "memory");
-	t1 = read_cntvct();
+	t1    = read_cntvct();
 	bytes = (uint64_t)words * 4u * passes;
 	record(r, idx, TEST_ID(buf_id, OP_NEON_FILL), bytes, t1 - t0);
 	*checksum ^= *(volatile uint32_t *)buf;
@@ -682,11 +708,12 @@ static uint32_t run_buffer_tests(volatile results_t *r, uint32_t idx, uint32_t *
 	 * (deterministic) result exactly once instead; the timed loop below
 	 * exists purely to measure bandwidth. */
 	r->stage = TEST_ID(buf_id, OP_NEON_READ);
-	uint32_t read_sample = neon_read_xor(buf, words); /* untimed warm pass; also the checksum sample */
+	uint32_t read_sample =
+	    neon_read_xor(buf, words); /* untimed warm pass; also the checksum sample */
 	t0 = read_cntvct();
 	for (p = 0; p < passes; p++)
 		(void)neon_read_xor(buf, words);
-	t1 = read_cntvct();
+	t1    = read_cntvct();
 	bytes = (uint64_t)words * 4u * passes;
 	record(r, idx, TEST_ID(buf_id, OP_NEON_READ), bytes, t1 - t0);
 	*checksum ^= read_sample;
@@ -695,13 +722,13 @@ static uint32_t run_buffer_tests(volatile results_t *r, uint32_t idx, uint32_t *
 
 	/* neon copy -> NC destination */
 	uint32_t *dst = (uint32_t *)NC_DST_ADDR;
-	r->stage = TEST_ID(buf_id, OP_NEON_COPY);
+	r->stage      = TEST_ID(buf_id, OP_NEON_COPY);
 	neon_copy(buf, dst, words); /* untimed warm pass */
 	t0 = read_cntvct();
 	for (p = 0; p < passes; p++)
 		neon_copy(buf, dst, words);
 	__asm__ volatile("dsb sy" ::: "memory");
-	t1 = read_cntvct();
+	t1    = read_cntvct();
 	bytes = (uint64_t)words * 4u * passes;
 	record(r, idx, TEST_ID(buf_id, OP_NEON_COPY), bytes, t1 - t0);
 	*checksum ^= *(volatile uint32_t *)dst;
@@ -738,9 +765,9 @@ static uint32_t run_buffer_tests(volatile results_t *r, uint32_t idx, uint32_t *
 
 int main(void)
 {
-	volatile results_t *r = (volatile results_t *)RESULTS_BASE;
-	uint32_t checksum = 0;
-	uint32_t idx = 0;
+	volatile results_t *r        = (volatile results_t *)RESULTS_BASE;
+	uint32_t            checksum = 0;
+	uint32_t            idx      = 0;
 
 	/* Sentinel write/readback per region, before anything else touches
 	 * them -- see the SENTINEL_PATTERN comment above. */
@@ -748,12 +775,26 @@ int main(void)
 	idx = sentinel_check(r, idx, BUF_WB_1MIB, (uint32_t *)WB_BUF_ADDR);
 	idx = sentinel_check(r, idx, BUF_NC_DST, (uint32_t *)NC_DST_ADDR);
 
-	idx = run_buffer_tests(r, idx, &checksum, BUF_NC, (uint32_t *)NC_BUF_ADDR, ONE_MIB_WORDS, PASSES_1MIB,
-				0, 0);
-	idx = run_buffer_tests(r, idx, &checksum, BUF_WB_1MIB, (uint32_t *)WB_BUF_ADDR, ONE_MIB_WORDS,
-				PASSES_1MIB, 1, PASSES_CLEAN_1MIB);
-	idx = run_buffer_tests(r, idx, &checksum, BUF_WB_16KIB, (uint32_t *)WB_BUF_ADDR, SIXTEEN_KIB_WORDS,
-				PASSES_16KIB, 1, PASSES_CLEAN_16KIB);
+	idx = run_buffer_tests(
+	    r, idx, &checksum, BUF_NC, (uint32_t *)NC_BUF_ADDR, ONE_MIB_WORDS, PASSES_1MIB, 0, 0);
+	idx = run_buffer_tests(r,
+	                       idx,
+	                       &checksum,
+	                       BUF_WB_1MIB,
+	                       (uint32_t *)WB_BUF_ADDR,
+	                       ONE_MIB_WORDS,
+	                       PASSES_1MIB,
+	                       1,
+	                       PASSES_CLEAN_1MIB);
+	idx = run_buffer_tests(r,
+	                       idx,
+	                       &checksum,
+	                       BUF_WB_16KIB,
+	                       (uint32_t *)WB_BUF_ADDR,
+	                       SIXTEEN_KIB_WORDS,
+	                       PASSES_16KIB,
+	                       1,
+	                       PASSES_CLEAN_16KIB);
 
 	/* Single-word SRAM1 probe (stage 1's original test, unchanged code and
 	 * meaning intact). If this data-aborts, data_abort_handler in start.S
@@ -763,8 +804,8 @@ int main(void)
 	 * SRAM1 mappings are live this read is expected to simply succeed
 	 * rather than test "is SRAM1 mapped at all" the way it did in stage 1
 	 * alone. */
-	r->stage = 0x5A1u;
-	uint32_t v = *(volatile uint32_t *)SRAM1_ADDR;
+	r->stage      = 0x5A1u;
+	uint32_t v    = *(volatile uint32_t *)SRAM1_ADDR;
 	r->sram1_word = v;
 
 	(void)idx;
@@ -780,7 +821,7 @@ int main(void)
 	 * fails, or core1 never signals ready within BARRIER_TIMEOUT_TICKS,
 	 * skip straight to the rest of core0's own work -- see the
 	 * BARRIER_TIMEOUT_TICKS comment for why this must not just hang. */
-	r->stage = 0xF001u;
+	r->stage           = 0xF001u;
 	r->psci_cpu_on_ret = psci_cpu_on_secondary();
 	if (r->psci_cpu_on_ret == 0 && barrier_wait_timeout(&r->secondary_ready, BARRIER_TIMEOUT_TICKS))
 		run_dual_core_rounds(r, 1);

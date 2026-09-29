@@ -41,9 +41,19 @@ static void check(const char *name, const int16_t flt[17][3], const int16_t ref[
 	tr_movenet_decode(&o, 640, 400, &p);
 
 	for (int k = 0; k < TR_POSE_KP; k++) {
-		printf("%s kp%2d c=(%4d,%4d,%3d) float=(%4d,%4d,%3d) ref=(%4d,%4d,%3d)\n", name, k, p.kp[k].x, p.kp[k].y,
-		       p.kp[k].score, flt[k][0], flt[k][1], flt[k][2], ref[k][0], ref[k][1], ref[k][2]);
-		assert(manhattan(&p.kp[k], flt[k]) <= 2);    /* the same cell, same offset, rounding only */
+		printf("%s kp%2d c=(%4d,%4d,%3d) float=(%4d,%4d,%3d) ref=(%4d,%4d,%3d)\n",
+		       name,
+		       k,
+		       p.kp[k].x,
+		       p.kp[k].y,
+		       p.kp[k].score,
+		       flt[k][0],
+		       flt[k][1],
+		       flt[k][2],
+		       ref[k][0],
+		       ref[k][1],
+		       ref[k][2]);
+		assert(manhattan(&p.kp[k], flt[k]) <= 2); /* the same cell, same offset, rounding only */
 		assert(abs(p.kp[k].score - flt[k][2]) <= 1);
 		/* Against the published model, same pixels: its tail quantises the
 		 * distance map (0.24-cell steps) and so breaks near-ties a cell or

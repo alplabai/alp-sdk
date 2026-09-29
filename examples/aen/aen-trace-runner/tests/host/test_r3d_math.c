@@ -18,7 +18,7 @@
  * also, silently, of tr_cam_build()'s rotation maths. */
 static void identity_cam(tr_cam_t *c, float f_px)
 {
-	tr_cam_build(c, (tr_v3_t){0, 0, 0}, 0.0f, 0.0f, 0.0f, f_px);
+	tr_cam_build(c, (tr_v3_t){ 0, 0, 0 }, 0.0f, 0.0f, 0.0f, f_px);
 }
 
 int main(void)
@@ -35,7 +35,7 @@ int main(void)
 		assert(c.cx == (float)TR_R3D_W / 2.0f && c.cy == (float)TR_VIEW_H / 2.0f);
 
 		/* Straight ahead at z == f_px: scale is 1x, lands dead on centre. */
-		assert(tr_r3d_project(&c, (tr_v3_t){0, 0, 256}, &out, &view_z));
+		assert(tr_r3d_project(&c, (tr_v3_t){ 0, 0, 256 }, &out, &view_z));
 		assert(view_z == 256.0f);
 		assert(out.x == 360 * (1 << TR_R3D_SUB));
 		/* fix round 8: cy is TR_VIEW_H/2 now -- (TR_VIEW_H << SUB) / 2,
@@ -46,19 +46,20 @@ int main(void)
 		/* Off-centre point, same depth: scale 1x means world units and
 		 * screen px coincide 1:1 (same anchor proj.c uses at its own
 		 * Z_RUNNER, see proj.h). */
-		assert(tr_r3d_project(&c, (tr_v3_t){100, 50, 256}, &out, &view_z));
+		assert(tr_r3d_project(&c, (tr_v3_t){ 100, 50, 256 }, &out, &view_z));
 		assert(out.x == 460 * (1 << TR_R3D_SUB));
 		/* fix round 8: cy-centred, not 640 - 50 -- see the centre assert above. */
-		assert(out.y == (TR_VIEW_H << TR_R3D_SUB) / 2 - 50 * (1 << TR_R3D_SUB)); /* y UP -> smaller screen y */
+		assert(out.y == (TR_VIEW_H << TR_R3D_SUB) / 2 -
+		                    50 * (1 << TR_R3D_SUB)); /* y UP -> smaller screen y */
 
 		/* Behind the near plane: view_z is still reported (a clip caller
 		 * needs it), but the function reports not-visible and out is
 		 * untouched. */
 		view_z = -999.0f;
-		assert(!tr_r3d_project(&c, (tr_v3_t){0, 0, 10}, &out, &view_z));
+		assert(!tr_r3d_project(&c, (tr_v3_t){ 0, 0, 10 }, &out, &view_z));
 		assert(view_z == 10.0f);
-		assert(!tr_r3d_project(&c, (tr_v3_t){0, 0, TR_CAM_Z_NEAR - 0.001f}, &out, &view_z));
-		assert(tr_r3d_project(&c, (tr_v3_t){0, 0, TR_CAM_Z_NEAR}, &out, &view_z)); /* inclusive */
+		assert(!tr_r3d_project(&c, (tr_v3_t){ 0, 0, TR_CAM_Z_NEAR - 0.001f }, &out, &view_z));
+		assert(tr_r3d_project(&c, (tr_v3_t){ 0, 0, TR_CAM_Z_NEAR }, &out, &view_z)); /* inclusive */
 	}
 
 	/* 2. Guard-band clamp: a point far enough off-axis (but at a visible
@@ -70,13 +71,13 @@ int main(void)
 		float    view_z;
 
 		identity_cam(&c, 256.0f);
-		assert(tr_r3d_project(&c, (tr_v3_t){1.0e9f, 0, 40}, &out, &view_z));
+		assert(tr_r3d_project(&c, (tr_v3_t){ 1.0e9f, 0, 40 }, &out, &view_z));
 		assert(out.x == TR_R3D_GUARD);
-		assert(tr_r3d_project(&c, (tr_v3_t){-1.0e9f, 0, 40}, &out, &view_z));
+		assert(tr_r3d_project(&c, (tr_v3_t){ -1.0e9f, 0, 40 }, &out, &view_z));
 		assert(out.x == -TR_R3D_GUARD);
-		assert(tr_r3d_project(&c, (tr_v3_t){0, 1.0e9f, 40}, &out, &view_z));
+		assert(tr_r3d_project(&c, (tr_v3_t){ 0, 1.0e9f, 40 }, &out, &view_z));
 		assert(out.y == -TR_R3D_GUARD); /* y up in world -> clamps to the small-y end */
-		assert(tr_r3d_project(&c, (tr_v3_t){0, -1.0e9f, 40}, &out, &view_z));
+		assert(tr_r3d_project(&c, (tr_v3_t){ 0, -1.0e9f, 40 }, &out, &view_z));
 		assert(out.y == TR_R3D_GUARD);
 	}
 
@@ -90,7 +91,7 @@ int main(void)
 	 */
 	{
 		tr_cam_t c;
-		tr_dl_t  dl = {0};
+		tr_dl_t  dl = { 0 };
 
 		identity_cam(&c, 256.0f);
 
@@ -104,10 +105,10 @@ int main(void)
 		 */
 		{
 			tr_v3_t q[4] = {
-				{50, -50, 10}, /* behind */
-				{-50, 0, 10}, /* behind */
-				{0, 50, 200}, /* in front */
-				{0, 50, 200}, /* == q[2]: 2nd tri of the quad is degenerate */
+				{ 50, -50, 10 }, /* behind */
+				{ -50, 0, 10 },  /* behind */
+				{ 0, 50, 200 },  /* in front */
+				{ 0, 50, 200 },  /* == q[2]: 2nd tri of the quad is degenerate */
 			};
 			uint16_t n = tr_r3d_emit_quad(&dl, &c, q, 0x1234, 0);
 
@@ -118,12 +119,12 @@ int main(void)
 		/* 1 vertex behind, 2 in front -> the clipped polygon is a quad
 		 * (4 verts) -> exactly 2 output triangles. */
 		{
-			dl.n = 0;
+			dl.n         = 0;
 			tr_v3_t q[4] = {
-				{50, 0, 200}, /* in front */
-				{-50, 0, 200}, /* in front */
-				{0, 50, 10}, /* behind */
-				{0, 50, 10}, /* == q[2]: 2nd tri of the quad is degenerate */
+				{ 50, 0, 200 },  /* in front */
+				{ -50, 0, 200 }, /* in front */
+				{ 0, 50, 10 },   /* behind */
+				{ 0, 50, 10 },   /* == q[2]: 2nd tri of the quad is degenerate */
 			};
 			uint16_t n = tr_r3d_emit_quad(&dl, &c, q, 0x1234, 0);
 
@@ -137,9 +138,12 @@ int main(void)
 		{
 			uint32_t before = tr_dl_dropped;
 
-			dl.n = 0;
+			dl.n         = 0;
 			tr_v3_t q[4] = {
-				{-50, 0, 10}, {50, 0, 10}, {0, 50, 10}, {0, 50, 10},
+				{ -50, 0, 10 },
+				{ 50, 0, 10 },
+				{ 0, 50, 10 },
+				{ 0, 50, 10 },
 			};
 			uint16_t n = tr_r3d_emit_quad(&dl, &c, q, 0x1234, 0);
 
@@ -156,21 +160,27 @@ int main(void)
 	 */
 	{
 		tr_cam_t c;
-		tr_dl_t  dl = {0};
+		tr_dl_t  dl = { 0 };
 
 		identity_cam(&c, 256.0f);
 
 		tr_v3_t q_front[4] = {
-			{-40, -40, 200}, {-40, 40, 200}, {40, 40, 200}, {40, -40, 200},
+			{ -40, -40, 200 },
+			{ -40, 40, 200 },
+			{ 40, 40, 200 },
+			{ 40, -40, 200 },
 		};
 		uint16_t n_front = tr_r3d_emit_quad(&dl, &c, q_front, 0xABCD, 0);
 
 		assert(n_front == 2);
 		assert(dl.n == 2);
 
-		dl.n = 0;
+		dl.n              = 0;
 		tr_v3_t q_back[4] = {
-			{-40, -40, 200}, {40, -40, 200}, {40, 40, 200}, {-40, 40, 200},
+			{ -40, -40, 200 },
+			{ 40, -40, 200 },
+			{ 40, 40, 200 },
+			{ -40, 40, 200 },
 		};
 		uint16_t n_back = tr_r3d_emit_quad(&dl, &c, q_back, 0xABCD, 0);
 
@@ -186,14 +196,17 @@ int main(void)
 	 */
 	{
 		tr_cam_t c;
-		tr_dl_t  dl = {0};
+		tr_dl_t  dl = { 0 };
 
 		identity_cam(&c, 256.0f);
 		dl.n = TR_DL_MAX_TRIS;
 
 		uint32_t before = tr_dl_dropped;
 		tr_v3_t  q[4]   = {
-			{-40, -40, 200}, {-40, 40, 200}, {40, 40, 200}, {40, -40, 200},
+			{ -40, -40, 200 },
+			{ -40, 40, 200 },
+			{ 40, 40, 200 },
+			{ 40, -40, 200 },
 		};
 		uint16_t n = tr_r3d_emit_quad(&dl, &c, q, 0xABCD, 0);
 
@@ -214,16 +227,16 @@ int main(void)
 		static const int16_t v[3 * 3] = {
 			-40, -40, 0, 40, -40, 0, 0, 40, 0,
 		};
-		static const uint8_t tri[3] = {0, 2, 1}; /* winding chosen front-facing, see test 4 */
-		static const int8_t  nrm[3] = {0, 0, -127}; /* faces -z (toward eye at z=0) */
-		static const uint8_t col[1] = {3}; /* palette[3] is non-black, see r3d_math.c */
-		tr_mesh_t             mesh  = {v, tri, nrm, col, 3, 1, NULL, NULL, NULL, 0};
-		tr_cam_t              c;
-		tr_dl_t               dl = {0};
-		tr_light_t             l = {{0, 0, -1}, 0.2f, {8, 8, 8}, 5000.0f, 9000.0f, NULL, 0.0f, 0.0f};
+		static const uint8_t tri[3] = { 0, 2, 1 };    /* winding chosen front-facing, see test 4 */
+		static const int8_t  nrm[3] = { 0, 0, -127 }; /* faces -z (toward eye at z=0) */
+		static const uint8_t col[1] = { 3 };          /* palette[3] is non-black, see r3d_math.c */
+		tr_mesh_t            mesh   = { v, tri, nrm, col, 3, 1, NULL, NULL, NULL, 0 };
+		tr_cam_t             c;
+		tr_dl_t              dl = { 0 };
+		tr_light_t l = { { 0, 0, -1 }, 0.2f, { 8, 8, 8 }, 5000.0f, 9000.0f, NULL, 0.0f, 0.0f };
 
 		identity_cam(&c, 256.0f);
-		tr_inst_t in = {&mesh, {0, 0, 200}, 0.0f, 1.0f, 0, 0.0f};
+		tr_inst_t in = { &mesh, { 0, 0, 200 }, 0.0f, 1.0f, 0, 0.0f };
 		uint16_t  n  = tr_r3d_emit_mesh(&dl, &c, &l, &in);
 
 		assert(n == 1);

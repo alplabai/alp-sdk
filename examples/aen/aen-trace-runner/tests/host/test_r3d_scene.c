@@ -78,7 +78,9 @@ static void dump(const char *name)
 	fprintf(f, "P6\n%d %d\n255\n", W, H);
 	for (int i = 0; i < W * H; i++) {
 		uint16_t p      = fb[i];
-		uint8_t  rgb[3] = {(uint8_t)((p >> 11) << 3), (uint8_t)(((p >> 5) & 63) << 2), (uint8_t)((p & 31) << 3)};
+		uint8_t  rgb[3] = { (uint8_t)((p >> 11) << 3),
+			                (uint8_t)(((p >> 5) & 63) << 2),
+			                (uint8_t)((p & 31) << 3) };
 
 		fwrite(rgb, 1, 3, f);
 	}
@@ -179,7 +181,7 @@ static float rig_gap(const float *ch)
 
 		for (int i = 0; i < m->nv; i++) {
 			const tr_rig_bone_t *d = &tr_rig_chars[rchr].bone[bn[i]];
-			float                j[3], d0 = 0.0f, d1 = 0.0f, bj[3] = {d->jx, d->jy, d->jz};
+			float                j[3], d0 = 0.0f, d1 = 0.0f, bj[3] = { d->jx, d->jy, d->jz };
 
 			if (d->sc_ch >= 0) {
 				continue;
@@ -222,7 +224,7 @@ static float rig_stretch(void)
 
 					d0 += u * u, d1 += w * w;
 				}
-				if (d0 > 4.0f) { /* ignore sub-2-unit edges */
+				if (d0 > 4.0f) {       /* ignore sub-2-unit edges */
 					float r = d1 / d0; /* squared ratio; the inside of a bend
 							    * folds (compresses) by design */
 
@@ -250,7 +252,8 @@ static void runner_world(const tr_runner_draw_t *r, float *top, float *front)
 	for (int p = 0; p < TR_RIG_DRAWN; p++) {
 		for (int i = 0; i < r->mesh[p].nv; i++) {
 			float ly = r->xyz[p][i * 3 + 1] * r->inst.scale_y, lz = r->xyz[p][i * 3 + 2];
-			float y = ly * cp - lz * sp + r->inst.pos.y, z = ly * sp + lz * cp + r->inst.pos.z - (float)TR_PROJ_Z_RUNNER;
+			float y = ly * cp - lz * sp + r->inst.pos.y,
+			      z = ly * sp + lz * cp + r->inst.pos.z - (float)TR_PROJ_Z_RUNNER;
 
 			*top   = y > *top ? y : *top;
 			*front = z > *front ? z : *front;
@@ -290,7 +293,7 @@ static tr_frame_in_t crash_in(uint8_t ct, int low)
 	int           wire = low >> 1;
 
 	low &= 1;
-	in.ents[4]    = (tr_pkt_ent_t){(uint8_t)(wire ? 3 : 1), 1, (uint8_t)low, 0, 1110, 0};
+	in.ents[4]    = (tr_pkt_ent_t){ (uint8_t)(wire ? 3 : 1), 1, (uint8_t)low, 0, 1110, 0 };
 	in.flags      = TR_FLAG_CRASH;
 	in.crash_tick = ct;
 	in.crash_ent  = 4;
@@ -338,19 +341,20 @@ static void crash_run(tr_scene_t *s, uint8_t ct, int low, tr_cam_t *cam, tr_dl_t
 static float min_world_y(const tr_dl_t *d, const tr_cam_t *cam)
 {
 	const float (*m)[4] = cam->view.m;
-	float       lo      = 1e30f;
+	float lo            = 1e30f;
 
 	for (uint16_t i = 0; i < d->n; i++) {
 		for (int k = 0; k < 3; k++) {
 			const tr_tri_t *t = &d->tri[i];
-			float           w = (float)t->a[k].w + ((t->flags & TR_TRI_UVX8) ? (float)t->a[k].rgb / 65536.0f : 0.0f);
+			float           w = (float)t->a[k].w +
+			                    ((t->flags & TR_TRI_UVX8) ? (float)t->a[k].rgb / 65536.0f : 0.0f);
 
 			if (t->a[k].w == 0xFFFF || w < 65535.0f * TR_CAM_Z_NEAR / 10000.0f) {
 				continue;
 			}
-			float z = 65535.0f * TR_CAM_Z_NEAR / w;
-			float x = ((float)t->v[k].x / 16.0f - cam->cx) * z / cam->f_px;
-			float y = -((float)t->v[k].y / 16.0f - cam->cy) * z / cam->f_px;
+			float z  = 65535.0f * TR_CAM_Z_NEAR / w;
+			float x  = ((float)t->v[k].x / 16.0f - cam->cx) * z / cam->f_px;
+			float y  = -((float)t->v[k].y / 16.0f - cam->cy) * z / cam->f_px;
 			float wy = m[0][1] * (x - m[0][3]) + m[1][1] * (y - m[1][3]) + m[2][1] * (z - m[2][3]);
 
 			lo = wy < lo ? wy : lo;
@@ -368,8 +372,8 @@ static float min_world_y(const tr_dl_t *d, const tr_cam_t *cam)
  * On the board = lowest vertex under y `on`. */
 static float foot_residual(int n, float v, float on, int *samples, float *vz, float *mid)
 {
-	float ch[TR_ANIM_CH], pp[2][3] = {{0}}, worst = 0.0f, sum = 0.0f;
-	int   pat[2] = {-1, -1};
+	float ch[TR_ANIM_CH], pp[2][3] = { { 0 } }, worst = 0.0f, sum = 0.0f;
+	int   pat[2] = { -1, -1 };
 
 	*samples = 0, *mid = 0.0f;
 	for (int k = 0; k <= n; k++) {
@@ -388,7 +392,8 @@ static float foot_residual(int n, float v, float on, int *samples, float *vz, fl
 				float u = (float)k / (float)n + 0.5f * (float)f; /* leg phase, touch-down at 0 */
 
 				u -= (float)(int)u;
-				if (u > 0.01f && u < TR_ANIM_STANCE - 0.01f) { /* mid-stance: the lock at full weight */
+				if (u > 0.01f &&
+				    u < TR_ANIM_STANCE - 0.01f) { /* mid-stance: the lock at full weight */
 					*mid = r > *mid ? r : *mid;
 				}
 				worst = r > worst ? r : worst;
@@ -425,17 +430,19 @@ static tr_frame_in_t hz_in(double t, int hz)
 	double        g  = t * 20.0 + 1e-9; /* game steps at the play pace */
 	uint32_t      el = (uint32_t)g;
 
-	in.hz      = (uint8_t)hz;
-	in.pace_q8 = (uint8_t)((((TR_GAME_PACE_Q8 << 8) * 40u + (uint32_t)hz / 2u) / (uint32_t)hz) >> 8);
+	in.hz = (uint8_t)hz;
+	in.pace_q8 =
+	    (uint8_t)((((TR_GAME_PACE_Q8 << 8) * 40u + (uint32_t)hz / 2u) / (uint32_t)hz) >> 8);
 	if (t >= 2.0) { /* crashed: the world frozen at the fatal step */
 		in.tick       = 3000 + 40;
 		in.flags      = TR_FLAG_CRASH;
 		in.crash_tick = (uint8_t)((t - 2.0) * 40.0 + 1e-6);
-		in.crash_frac = (uint16_t)(((t - 2.0) * 40.0 + 1e-6 - in.crash_tick) * 65536.0); /* as tr_mbox.c */
-		in.crash_ent  = 4, in.crash_lane = in.ents[4].lane, in.crash_kind = TR_CRASH_KIND_LOW;
-		in.pace_q8    = 0;
-		in.lane       = 2;
-		in.score      = 130;
+		in.crash_frac =
+		    (uint16_t)(((t - 2.0) * 40.0 + 1e-6 - in.crash_tick) * 65536.0); /* as tr_mbox.c */
+		in.crash_ent = 4, in.crash_lane = in.ents[4].lane, in.crash_kind = TR_CRASH_KIND_LOW;
+		in.pace_q8 = 0;
+		in.lane    = 2;
+		in.score   = 130;
 		return in;
 	}
 	in.tick  = 3000 + el;
@@ -459,7 +466,8 @@ static tr_frame_in_t hz_in(double t, int hz)
  * 1.3 s, combo spin 1.8 s), then from P16_IDLE_T the attract lobby (the
  * world frozen, TR_FLAG_IDLE, idle_ms). */
 #define P16_IDLE_T 2.8
-#define SCARF_RATE_TOL 15.0f /* 30 vs 40 Hz scarf points, units: 8.4 measured; sub-steps ignoring the rate: 29 */
+#define SCARF_RATE_TOL \
+	15.0f /* 30 vs 40 Hz scarf points, units: 8.4 measured; sub-steps ignoring the rate: 29 */
 static tr_frame_in_t p16_in(double t, int hz, int chr)
 {
 	tr_frame_in_t in = hz_in(t < 1.95 ? t : 1.95, hz);
@@ -467,7 +475,10 @@ static tr_frame_in_t p16_in(double t, int hz, int chr)
 		double  at;
 		uint8_t kind;
 		int8_t  side;
-	} ev[] = {{0.3, TR_REACT_PICKUP, 1}, {0.9, TR_REACT_PASS, -1}, {1.3, TR_REACT_NEAR, 1}, {1.8, TR_REACT_COMBO, 1}};
+	} ev[] = { { 0.3, TR_REACT_PICKUP, 1 },
+		       { 0.9, TR_REACT_PASS, -1 },
+		       { 1.3, TR_REACT_NEAR, 1 },
+		       { 1.8, TR_REACT_COMBO, 1 } };
 
 	in.flags |= TR_FLAG_CHAR;
 	in.character = (uint8_t)chr;
@@ -501,7 +512,8 @@ static void runner_extent(const tr_runner_draw_t *r, float *front, float *bottom
 	*front = -1e30f, *bottom = 1e30f;
 	for (int p = 0; p < TR_RIG_DRAWN; p++) {
 		for (int i = 0; i < r->mesh[p].nv; i++) {
-			float lx = r->xyz[p][i * 3], ly = r->xyz[p][i * 3 + 1] * r->inst.scale_y, lz = r->xyz[p][i * 3 + 2];
+			float lx = r->xyz[p][i * 3], ly = r->xyz[p][i * 3 + 1] * r->inst.scale_y,
+			      lz = r->xyz[p][i * 3 + 2];
 			float y = ly * cp - lz * sp + r->inst.pos.y, z = ly * sp + lz * cp;
 			float wz = -lx * sy + z * cy + r->inst.pos.z - (float)TR_PROJ_Z_RUNNER;
 
@@ -525,7 +537,7 @@ static void cover(const tr_dl_t *d, uint16_t lo, uint16_t hi, uint32_t *rows, ui
 	*rows = 0;
 	memset(fb, 0, sizeof(fb));
 	for (uint16_t i = lo; i < hi; i++) {
-		tr_tri_t t = d->tri[i];
+		tr_tri_t t  = d->tri[i];
 		int      y0 = H, y1 = 0;
 
 		for (int k = 0; k < 3; k++) {
@@ -551,9 +563,9 @@ static void cover(const tr_dl_t *d, uint16_t lo, uint16_t hi, uint32_t *rows, ui
 static void far_quads_match(const char *name, const tr_mesh_t *m, const tr_far_quad_t *q, int n)
 {
 	for (int i = 0; i < n; i++) {
-		float e[4] = {q[i].x0, q[i].x1, q[i].y0, q[i].y1};
-		int   hit[4] = {0, 0, 0, 0}, any = 0;
-		float lo[2] = {1e9f, 1e9f}, hi[2] = {-1e9f, -1e9f};
+		float e[4]   = { q[i].x0, q[i].x1, q[i].y0, q[i].y1 };
+		int   hit[4] = { 0, 0, 0, 0 }, any = 0;
+		float lo[2] = { 1e9f, 1e9f }, hi[2] = { -1e9f, -1e9f };
 
 		for (int t = 0; t < m->nt; t++) {
 			if (m->col[t] != q[i].col) {
@@ -572,11 +584,23 @@ static void far_quads_match(const char *name, const tr_mesh_t *m, const tr_far_q
 				}
 			}
 		}
-		printf("far quad %s %d: x %.0f..%.0f y %.0f..%.0f colour %u (mesh colour %u: x %.0f..%.0f y %.0f..%.0f)\n", name, i,
-		       (double)q[i].x0, (double)q[i].x1, (double)q[i].y0, (double)q[i].y1, q[i].col, q[i].col, (double)lo[0],
-		       (double)hi[0], (double)lo[1], (double)hi[1]);
+		printf("far quad %s %d: x %.0f..%.0f y %.0f..%.0f colour %u (mesh colour %u: x %.0f..%.0f "
+		       "y %.0f..%.0f)\n",
+		       name,
+		       i,
+		       (double)q[i].x0,
+		       (double)q[i].x1,
+		       (double)q[i].y0,
+		       (double)q[i].y1,
+		       q[i].col,
+		       q[i].col,
+		       (double)lo[0],
+		       (double)hi[0],
+		       (double)lo[1],
+		       (double)hi[1]);
 		assert(any && hit[0] && hit[1] && hit[2] && hit[3]);
-		assert(q[i].x0 >= lo[0] && q[i].x1 <= hi[0] && q[i].y0 >= lo[1] && q[i].y1 <= hi[1] && q[i].x0 < q[i].x1 && q[i].y0 < q[i].y1);
+		assert(q[i].x0 >= lo[0] && q[i].x1 <= hi[0] && q[i].y0 >= lo[1] && q[i].y1 <= hi[1] &&
+		       q[i].x0 < q[i].x1 && q[i].y0 < q[i].y1);
 	}
 }
 
@@ -593,9 +617,10 @@ int main(void)
 	uint32_t rig_crc = 0;
 
 	for (int cl = 0; cl < TR_CHARS * TR_RIG_LODS; cl++) {
-		float    ch[TR_ANIM_CH], lo_all = 1e30f, front = -1e30f, stretch = 1.0f, gap = 0.0f, duck_top = 0.0f;
-		float    top = -1e30f;
-		uint32_t crc = 0;
+		float    ch[TR_ANIM_CH], lo_all = 1e30f, front = -1e30f, stretch = 1.0f, gap = 0.0f,
+		                         duck_top = 0.0f;
+		float    top                      = -1e30f;
+		uint32_t crc                      = 0;
 		int      flight = 0, n = 64, nt = 0;
 
 		rchr = cl / TR_RIG_LODS, rlod = cl % TR_RIG_LODS;
@@ -617,7 +642,7 @@ int main(void)
 
 			float lo = rig_low(-1, NULL);
 
-			lo_all  = lo < lo_all ? lo : lo_all;
+			lo_all = lo < lo_all ? lo : lo_all;
 			flight += k < n && lo > 2.0f; /* clear air */
 			front   = rig_front() > front ? rig_front() : front;
 			top     = rig_top() > top ? rig_top() : top;
@@ -638,8 +663,9 @@ int main(void)
 		 * standing, or layered over the run: every one on the board) */
 		for (int p = 0; p < TR_ANIM_POSES; p++) {
 			skin(tr_rig_pose(p));
-			lo_all  = rig_low(-1, NULL) < lo_all ? rig_low(-1, NULL) : lo_all;
-			if (p != TR_ANIM_POSE_DUCK && p < TR_ANIM_POSE_STAND) { /* the duck is drawn rolled, the P16 set
+			lo_all = rig_low(-1, NULL) < lo_all ? rig_low(-1, NULL) : lo_all;
+			if (p != TR_ANIM_POSE_DUCK &&
+			    p < TR_ANIM_POSE_STAND) { /* the duck is drawn rolled, the P16 set
 										 * held by hold_front(): 6f / 11 measure
 										 * them as drawn */
 				front = rig_front() > front ? rig_front() : front;
@@ -651,26 +677,30 @@ int main(void)
 			}
 		}
 		for (int p = 0; p < TR_RIG_PARTS; p++) {
-			nt += tr_rig_chars[rchr].mesh[rlod][p]->nt, assert(tr_rig_chars[rchr].mesh[rlod][p]->nv <= TR_RIG_MAX_V);
+			nt += tr_rig_chars[rchr].mesh[rlod][p]->nt,
+			    assert(tr_rig_chars[rchr].mesh[rlod][p]->nv <= TR_RIG_MAX_V);
 		}
-		nt += TR_FACE_T + 2 * (int)tr_rig_chars[rchr].scarf[3]; /* the eyes, the scarf's side facing the camera */
+		nt +=
+		    TR_FACE_T +
+		    2 * (int)tr_rig_chars[rchr].scarf[3]; /* the eyes, the scarf's side facing the camera */
 		/* P16b: every mesh's normals unit (int8 127 +- rounding) and welded:
 		 * coincident vertices of one bone either share one normal or split
 		 * on purpose (>= 30 deg: a box edge, a cap against a side) --
 		 * nothing in between, which would shade a smooth surface creased */
 		for (int p = 0; p < TR_RIG_PARTS; p++) {
-			const tr_mesh_t *m = tr_rig_chars[rchr].mesh[rlod][p];
+			const tr_mesh_t *m  = tr_rig_chars[rchr].mesh[rlod][p];
 			const uint8_t   *bn = tr_rig_bones(rchr, rlod, p);
 
 			for (int i = 0; i < m->nv; i++) {
-				const int8_t *a = &m->vn[i * 3];
+				const int8_t *a  = &m->vn[i * 3];
 				float         la = sqrtf((float)(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]));
 
 				assert(la > 118.0f && la < 128.0f);
 				for (int j = i + 1; j < m->nv; j++) {
 					const int8_t *b = &m->vn[j * 3];
 
-					if (bn[i] != bn[j] || memcmp(&m->v[i * 3], &m->v[j * 3], 3 * sizeof(int16_t)) != 0) {
+					if (bn[i] != bn[j] ||
+					    memcmp(&m->v[i * 3], &m->v[j * 3], 3 * sizeof(int16_t)) != 0) {
 						continue;
 					}
 					float lb = sqrtf((float)(b[0] * b[0] + b[1] * b[1] + b[2] * b[2]));
@@ -680,20 +710,33 @@ int main(void)
 				}
 			}
 		}
-		printf("rig %s lod %d: pose crc %08x, %d tris, flight %d/%d phases, lowest y %.2f, swing clearance %.2f, front z "
+		printf("rig %s lod %d: pose crc %08x, %d tris, flight %d/%d phases, lowest y %.2f, swing "
+		       "clearance %.2f, front z "
 		       "%.1f, top %.1f, joint gap %.3f, outer-bend stretch x%.2f, duck pose top %.1f\n",
-		       tr_rig_chars[rchr].name, rlod, (unsigned)crc, nt, flight, n, (double)lo_all, (double)clear, (double)front,
-		       (double)top, (double)gap, (double)stretch, (double)duck_top);
+		       tr_rig_chars[rchr].name,
+		       rlod,
+		       (unsigned)crc,
+		       nt,
+		       flight,
+		       n,
+		       (double)lo_all,
+		       (double)clear,
+		       (double)front,
+		       (double)top,
+		       (double)gap,
+		       (double)stretch,
+		       (double)duck_top);
 		rig_crc = rig_crc * 31u + crc;
-		assert(flight >= 37 && flight <= 43 && n == 64); /* both feet off the board 58-67 % (P3d: 40, 62.5 %) */
-		assert(clear > 6.0f); /* a swinging foot never skims the board (7.94) */
-		assert(lo_all > -0.25f);                                  /* nothing under the board */
-		assert(front <= TR_RUNNER_FRONT_Z);                       /* contact bound (CONTACT_DZ) */
-		assert(duck_top < 145.0f);                                /* duck: under the arch bar (150) */
-		assert(gap < 0.5f);                                       /* joints stay closed (units^2) */
-		assert(stretch < 9.0f);                                   /* outer bends: < 3x edge length */
-		assert(nt <= (rlod ? 900 : 1600));                        /* P16b tri caps per character: high / low LOD */
-		assert(top > 150.0f && top < 240.0f);                     /* a runner-sized character */
+		assert(flight >= 37 && flight <= 43 &&
+		       n == 64);                    /* both feet off the board 58-67 % (P3d: 40, 62.5 %) */
+		assert(clear > 6.0f);               /* a swinging foot never skims the board (7.94) */
+		assert(lo_all > -0.25f);            /* nothing under the board */
+		assert(front <= TR_RUNNER_FRONT_Z); /* contact bound (CONTACT_DZ) */
+		assert(duck_top < 145.0f);          /* duck: under the arch bar (150) */
+		assert(gap < 0.5f);                 /* joints stay closed (units^2) */
+		assert(stretch < 9.0f);             /* outer bends: < 3x edge length */
+		assert(nt <= (rlod ? 900 : 1600));  /* P16b tri caps per character: high / low LOD */
+		assert(top > 150.0f && top < 240.0f); /* a runner-sized character */
 
 		/* f. foot lock (P3d): a foot on the board moves with the board
 		 * under it. Before P3d: the planted feet swept at 31.3 units a
@@ -701,19 +744,38 @@ int main(void)
 		 * board speed the rig was designed for is the scroll's. */
 		{
 			int   ns, ns2;
-			float mid, mid2, vz, vz2, res = foot_residual(1200, world, 0.1f, &ns, &vz, &mid); /* on it (sole at 0.00 high LOD, -0.07 low) */
-			float res2 = foot_residual(1200, world, 0.25f, &ns2, &vz2, &mid2); /* + touch-down / lift-off */
+			float mid, mid2, vz, vz2,
+			    res = foot_residual(1200,
+			                        world,
+			                        0.1f,
+			                        &ns,
+			                        &vz,
+			                        &mid); /* on it (sole at 0.00 high LOD, -0.07 low) */
+			float res2 =
+			    foot_residual(1200, world, 0.25f, &ns2, &vz2, &mid2); /* + touch-down / lift-off */
 
-			printf("rig %s: foot lock: %d planted samples, foot vz %.3f units/tick vs board %.3f, residual max %.3f "
-			       "units/tick (%.1f units/s at 20 steps/s, %.2f %% of the board), mid-stance %.3f; within 0.25 "
+			printf("rig %s: foot lock: %d planted samples, foot vz %.3f units/tick vs board %.3f, "
+			       "residual max %.3f "
+			       "units/tick (%.1f units/s at 20 steps/s, %.2f %% of the board), mid-stance "
+			       "%.3f; within 0.25 "
 			       "of the board (%d samples) %.3f; cadence %.2f steps/s\n",
-			       tr_rig_chars[rchr].name, ns, (double)vz, (double)-world, (double)res, (double)(res * 20.0f),
-			       (double)(100.0f * res / world), (double)mid, ns2, (double)res2,
+			       tr_rig_chars[rchr].name,
+			       ns,
+			       (double)vz,
+			       (double)-world,
+			       (double)res,
+			       (double)(res * 20.0f),
+			       (double)(100.0f * res / world),
+			       (double)mid,
+			       ns2,
+			       (double)res2,
 			       (double)(2.0f * 20.0f / (float)TR_ANIM_CYCLE));
 			assert(TR_ANIM_GROUND_V > world - 0.01f && TR_ANIM_GROUND_V < world + 0.01f);
-			assert(ns >= 360);                              /* 2 x 15 % of 1200 phases, + the ease (384) */
-			assert(vz > -world - 0.05f && vz < -world + 0.05f); /* with the board, on average (0.033 off) */
-			assert(mid < 0.06f && res < 0.6f); /* at every sample: < 0.07 % mid-stance, < 0.7 % at its ends */
+			assert(ns >= 360); /* 2 x 15 % of 1200 phases, + the ease (384) */
+			assert(vz > -world - 0.05f &&
+			       vz < -world + 0.05f); /* with the board, on average (0.033 off) */
+			assert(mid < 0.06f &&
+			       res < 0.6f);  /* at every sample: < 0.07 % mid-stance, < 0.7 % at its ends */
 			assert(res2 < 1.6f); /* coming down / leaving: in the air, < 1.8 % (1.41) */
 		}
 
@@ -727,8 +789,14 @@ int main(void)
 			tr_rig_run((float)k / 97.0f, ch, 1.0f);
 			skin(ch);
 		}
-		printf("rig %s: pose + skin %d + %d + %d + %d + %d + %d verts: host %lld ns\n", tr_rig_chars[rchr].name,
-		       rmesh[0].nv, rmesh[1].nv, rmesh[2].nv, rmesh[3].nv, rmesh[4].nv, rmesh[5].nv,
+		printf("rig %s: pose + skin %d + %d + %d + %d + %d + %d verts: host %lld ns\n",
+		       tr_rig_chars[rchr].name,
+		       rmesh[0].nv,
+		       rmesh[1].nv,
+		       rmesh[2].nv,
+		       rmesh[3].nv,
+		       rmesh[4].nv,
+		       rmesh[5].nv,
 		       (long long)((now_ns() - t0) / 2000));
 	}
 	rchr = 0, rlod = 0;
@@ -746,7 +814,10 @@ int main(void)
 	tr_scene_step(&s, &in);
 	tr_scene_build(&s, &in, &cam, &dl);
 	printf("typical: %u tris, dropped %u\n", dl.n, (unsigned)tr_dl_dropped);
-	assert(dl.n >= 1300 && dl.n <= 2700); /* near ground: 20 NOZ tris, not 18 a tile; far scenery billboards to the skyline */
+	assert(
+	    dl.n >= 1300 &&
+	    dl.n <=
+	        2700); /* near ground: 20 NOZ tris, not 18 a tile; far scenery billboards to the skyline */
 	assert(tr_dl_dropped == 0);
 
 	/* 2. Every entity emits: each live slot alone adds triangles to the
@@ -775,9 +846,10 @@ int main(void)
 	 * own colours, not the glow's -- a live wire too. The camera frames the
 	 * runner low: feet near 987 px, horizon near 445 px. */
 	{
-		tr_frame_in_t none = in, one;
-		uint16_t      glow = (uint16_t)(((206 >> 3) << 11) | ((112 >> 2) << 5) | (72 >> 3));
-		int           ys[4] = {TR_SPAWN_Y, 0, TR_SPAWN_Y, 0}, kinds[4] = {1, 1, 3, 3}; /* a resistor, a live wire */
+		tr_frame_in_t none     = in, one;
+		uint16_t      glow     = (uint16_t)(((206 >> 3) << 11) | ((112 >> 2) << 5) | (72 >> 3));
+		int           ys[4]    = { TR_SPAWN_Y, 0, TR_SPAWN_Y, 0 },
+		              kinds[4] = { 1, 1, 3, 3 }; /* a resistor, a live wire */
 
 		memset(none.ents, 0, sizeof(none.ents));
 		for (int k = 0; k < 4; k++) {
@@ -785,7 +857,7 @@ int main(void)
 
 			tr_scene_build(&s, &none, &cam, &dl2);
 			one         = none;
-			one.ents[0] = (tr_pkt_ent_t){(uint8_t)kinds[k], 1, 1, 0, (int16_t)ys[k], 0};
+			one.ents[0] = (tr_pkt_ent_t){ (uint8_t)kinds[k], 1, 1, 0, (int16_t)ys[k], 0 };
 			tr_scene_build(&s, &one, &cam, &dl);
 			total = dl.n - dl2.n;
 			assert((k & 1) ? total > 0 : total == 0); /* spawn row: not grown in yet */
@@ -797,8 +869,9 @@ int main(void)
 				if (!in2) {
 					for (int v = 0; v < 3; v++) {
 						uint16_t c = dl.tri[t].a[v].rgb;
-						int      d = abs((int)(c >> 11) - (glow >> 11)) + abs((int)((c >> 5) & 63) - ((glow >> 5) & 63)) +
-							abs((int)(c & 31) - (glow & 31));
+						int      d = abs((int)(c >> 11) - (glow >> 11)) +
+						             abs((int)((c >> 5) & 63) - ((glow >> 5) & 63)) +
+						             abs((int)(c & 31) - (glow & 31));
 
 						fogged += d <= 2;
 					}
@@ -812,7 +885,7 @@ int main(void)
 
 		tr_scene_build(&s, &none, &cam, &dl2);
 		hy = cam.cy - cam.f_px * cam.view.m[1][2] / cam.view.m[2][2];
-		tr_r3d_project(&cam, (tr_v3_t){s.runner_x, 0, (float)TR_PROJ_Z_RUNNER}, &sv, &vz);
+		tr_r3d_project(&cam, (tr_v3_t){ s.runner_x, 0, (float)TR_PROJ_Z_RUNNER }, &sv, &vz);
 		printf("framing: horizon %.0f px, runner feet %.0f px\n", (double)hy, (double)(sv.y >> 4));
 		/* fix round 9: 240..290 / 790..845 -> 145..195 / 681..731 -- the
 		 * camera pitch moved again (18 -> 23 deg, r3d_scene.h
@@ -827,8 +900,8 @@ int main(void)
 		 * rescaled to TR_VIEW_H (r3d.h TR_VIEW_PX) -- the focal length
 		 * scales with the viewport, so the framing keeps its proportions
 		 * (measured 127/530 px at TR_VIEW_H 640). */
-		assert(hy > (float)TR_VIEW_PX(145) && hy < (float)TR_VIEW_PX(195) && (sv.y >> 4) > TR_VIEW_PX(681) &&
-		       (sv.y >> 4) < TR_VIEW_PX(731));
+		assert(hy > (float)TR_VIEW_PX(145) && hy < (float)TR_VIEW_PX(195) &&
+		       (sv.y >> 4) > TR_VIEW_PX(681) && (sv.y >> 4) < TR_VIEW_PX(731));
 	}
 
 	/* 3. Deterministic: rebuilding, and a fresh scene fed the same input,
@@ -869,8 +942,8 @@ int main(void)
 
 		memset(q.p, 0, sizeof(q.p));
 		tr_scene_build(&q, &in, &cam, &dl);
-		n0        = dl.n;
-		q.p[0]    = (tr_particle_t){{0.0f, -40.0f, 600.0f}, {0.0f, 0.0f, 0.0f}, 5.0f, 5, 0};
+		n0     = dl.n;
+		q.p[0] = (tr_particle_t){ { 0.0f, -40.0f, 600.0f }, { 0.0f, 0.0f, 0.0f }, 5.0f, 5, 0 };
 		tr_scene_build(&q, &in, &cam, &dl);
 		assert(dl.n == n0);
 		q.p[0].pos.y = 2.0f;
@@ -895,7 +968,7 @@ int main(void)
 	 * hash choice of part at every depth -- no DL vertex goes under the
 	 * board and every band's bin fits. */
 	{
-		tr_frame_in_t none = tr_scene_golden_in(0, 1);
+		tr_frame_in_t none   = tr_scene_golden_in(0, 1);
 		float         lowest = 1e30f;
 		uint32_t      worst = 0, most = 0;
 
@@ -924,8 +997,13 @@ int main(void)
 			worst  = b > worst ? b : worst;
 			most   = dl.n > most ? dl.n : most;
 		}
-		printf("walls: %d part meshes on the board, lowest vertex y %.2f, over 134 scroll steps max %u tris, "
-		       "max band bin %u\n", TR_WALL_LOD_N, (double)lowest, (unsigned)most, (unsigned)worst);
+		printf("walls: %d part meshes on the board, lowest vertex y %.2f, over 134 scroll steps "
+		       "max %u tris, "
+		       "max band bin %u\n",
+		       TR_WALL_LOD_N,
+		       (double)lowest,
+		       (unsigned)most,
+		       (unsigned)worst);
 		assert(lowest > -1.5f && worst < TR_BIN_MAX && tr_dl_dropped == 0);
 	}
 
@@ -944,14 +1022,16 @@ int main(void)
 				const tr_mesh_t *m = tr_wall_lod[k][j];
 
 				for (int i = 0; m && i < m->nv; i++) {
-					float x = (float)m->v[i * 3], y = (float)m->v[i * 3 + 1] * TR_WALL_SY_MAX - 100.0f;
+					float x = (float)m->v[i * 3],
+					      y = (float)m->v[i * 3 + 1] * TR_WALL_SY_MAX - 100.0f;
 					float z = (float)m->v[i * 3 + 2], d = x * x + y * y + z * z;
 
 					far = d > far ? d : far;
 				}
 			}
 		}
-		printf("walls: farthest vertex %.1f from the cull centre (TR_WALL_R %.0f)\n", sqrt((double)far),
+		printf("walls: farthest vertex %.1f from the cull centre (TR_WALL_R %.0f)\n",
+		       sqrt((double)far),
 		       (double)TR_WALL_R);
 		assert(far * 1.21f <= TR_WALL_R * TR_WALL_R);
 
@@ -1051,13 +1131,19 @@ int main(void)
 					if (d.n_led) {
 						float xi = d.led.x * (float)side, xo = xi + 2.0f * 34.0f;
 
-						assert(d.led_col < 4 && d.led.y == 0.0f && xi - 10.0f > 360.0f && xo + 10.0f < 760.0f);
-						assert(d.led.z > 600.0f && d.led.z < 650.0f); /* the gap before the tile's parts */
+						assert(d.led_col < 4 && d.led.y == 0.0f && xi - 10.0f > 360.0f &&
+						       xo + 10.0f < 760.0f);
+						assert(d.led.z > 600.0f &&
+						       d.led.z < 650.0f); /* the gap before the tile's parts */
 						rows1 += d.n_led == 1, rows3 += d.n_led == 3;
 					}
 				}
 			}
-			printf("living: %d tile sides, %d fans, %d single LEDs, %d LED rows\n", sides, fans, rows1, rows3);
+			printf("living: %d tile sides, %d fans, %d single LEDs, %d LED rows\n",
+			       sides,
+			       fans,
+			       rows1,
+			       rows3);
 			assert(fans > sides * 14 / 100 && fans < sides * 24 / 100);
 			assert(rows1 > sides * 4 / 10 && rows3 > sides * 2 / 10);
 
@@ -1065,7 +1151,7 @@ int main(void)
 			 * every LED of the row gets its turn; a fan's rotor turns. */
 			for (uint32_t tile = 0; tile < 200; tile++) {
 				tr_deco_t d;
-				int       on = 0, all = 0, lit[3] = {0};
+				int       on = 0, all = 0, lit[3] = { 0 };
 				float     yaw0;
 
 				tr_scene_deco(tile, 1, 600.0f, 0, &a, &d);
@@ -1076,7 +1162,8 @@ int main(void)
 				for (uint32_t q = 0; q < 64 * 16; q++) {
 					tr_frame_in_t b = a;
 
-					b.tick = 1000 + q / 16, b.flags |= TR_FLAG_PHASE, b.phase = (uint16_t)((q & 15u) << 12);
+					b.tick  = 1000 + q / 16, b.flags |= TR_FLAG_PHASE,
+					b.phase = (uint16_t)((q & 15u) << 12);
 					tr_scene_deco(tile, 1, 600.0f, 0, &b, &d);
 					all++;
 					if (d.n_led == 1) {
@@ -1102,7 +1189,9 @@ int main(void)
 				const tr_mesh_t *fm = m ? &tr_mesh_fan : &tr_mesh_fan_frame;
 
 				for (int i = 0; i < fm->nv; i++) {
-					assert(fm->v[i * 3 + 1] >= 0 && fm->v[i * 3] * fm->v[i * 3] + fm->v[i * 3 + 2] * fm->v[i * 3 + 2] <= 2 * 54 * 54);
+					assert(fm->v[i * 3 + 1] >= 0 &&
+					       fm->v[i * 3] * fm->v[i * 3] + fm->v[i * 3 + 2] * fm->v[i * 3 + 2] <=
+					           2 * 54 * 54);
 				}
 			}
 		}
@@ -1151,12 +1240,23 @@ int main(void)
 				wt = dt > wt ? dt : wt, wr = rows > wr ? rows : wr, wp = px > wp ? px : wp;
 				st += dt, sr += rows, sp += px, nf++;
 			}
-			double mean = ((double)st / nf * 1.65e-3 + (double)sr / nf * 134 / 800e3 + (double)sp / nf * 25 / 800e3) / 2;
-			double peak = ((double)wt * 1.65e-3 + (double)wr * 134 / 800e3 + (double)wp * 25 / 800e3) / 2;
+			double mean = ((double)st / nf * 1.65e-3 + (double)sr / nf * 134 / 800e3 +
+			               (double)sp / nf * 25 / 800e3) /
+			              2;
+			double peak =
+			    ((double)wt * 1.65e-3 + (double)wr * 134 / 800e3 + (double)wp * 25 / 800e3) / 2;
 
-			printf("living budget: +%u tris, +%u rows, +%u px mean; worst +%u / +%u / +%u; est +%.2f ms/core mean, "
-			       "+%.2f worst (raster side)\n", (unsigned)(st / nf), (unsigned)(sr / nf), (unsigned)(sp / nf), (unsigned)wt,
-			       (unsigned)wr, (unsigned)wp, mean, peak);
+			printf("living budget: +%u tris, +%u rows, +%u px mean; worst +%u / +%u / +%u; est "
+			       "+%.2f ms/core mean, "
+			       "+%.2f worst (raster side)\n",
+			       (unsigned)(st / nf),
+			       (unsigned)(sr / nf),
+			       (unsigned)(sp / nf),
+			       (unsigned)wt,
+			       (unsigned)wr,
+			       (unsigned)wp,
+			       mean,
+			       peak);
 			assert(wt <= 480 && wr <= 5200 && wp <= 48000);
 		}
 	}
@@ -1170,7 +1270,7 @@ int main(void)
 		uint32_t      bin;
 
 		for (int i = 0; i < 16; i++) {
-			w.ents[i] = (tr_pkt_ent_t){1, (uint8_t)(i % 3), 1, 0, (int16_t)(900 + 16 * i), 0};
+			w.ents[i] = (tr_pkt_ent_t){ 1, (uint8_t)(i % 3), 1, 0, (int16_t)(900 + 16 * i), 0 };
 		}
 		w.flags |= TR_FLAG_CHAR;
 		w.character = (uint8_t)c;
@@ -1183,8 +1283,12 @@ int main(void)
 		tr_scene_step(&s, &w);
 		tr_scene_build(&s, &w, &cam, &dl);
 		bin = render(&cam, &w);
-		printf("worst %s: %u tris, dropped %u, max band bin %u of %u\n", tr_rig_chars[c].name, dl.n,
-		       (unsigned)tr_dl_dropped, (unsigned)bin, TR_BIN_MAX);
+		printf("worst %s: %u tris, dropped %u, max band bin %u of %u\n",
+		       tr_rig_chars[c].name,
+		       dl.n,
+		       (unsigned)tr_dl_dropped,
+		       (unsigned)bin,
+		       TR_BIN_MAX);
 		assert(dl.n < TR_DL_MAX_TRIS && tr_dl_dropped == 0 && bin < TR_BIN_MAX);
 	}
 
@@ -1206,8 +1310,11 @@ int main(void)
 
 		uint32_t crc = crc32(fb, sizeof(fb));
 
-		printf("golden scene crc32 %08x (%u tris); host ns/frame: build %lld, bin+raster %lld\n", (unsigned)crc,
-		       dl.n, (long long)((t1 - t0) / 100), (long long)((t2 - t1) / 20));
+		printf("golden scene crc32 %08x (%u tris); host ns/frame: build %lld, bin+raster %lld\n",
+		       (unsigned)crc,
+		       dl.n,
+		       (long long)((t1 - t0) / 100),
+		       (long long)((t2 - t1) / 20));
 		if (getenv("TR_DUMP")) {
 			dump("scene");
 		}
@@ -1243,9 +1350,9 @@ int main(void)
 		 * was cleared) is left alone. */
 		for (int low = 0; low <= 1; low++) {
 			tr_frame_in_t pre = tr_scene_golden_in(1234, 1), fatal = crash_in(0, low);
-			float         zc  = tr_scene_ent_z(&fatal, 4);
+			float         zc = tr_scene_ent_z(&fatal, 4);
 
-			pre.ents[4] = (tr_pkt_ent_t){1, 1, (uint8_t)low, 0, 1100, 0};
+			pre.ents[4] = (tr_pkt_ent_t){ 1, 1, (uint8_t)low, 0, 1100, 0 };
 			assert(tr_scene_ent_z(&pre, 4) >= zc);
 			pre.ents[4].y = 1090;
 			pre.phase     = 65000;
@@ -1267,10 +1374,11 @@ int main(void)
 		 * crash frame draws it. */
 		for (int low = 0; low <= 1; low++) {
 			tr_frame_in_t pre = tr_scene_golden_in(1234, 1), fatal = crash_in(0, 2 + low);
-			float         zc  = tr_scene_ent_z(&fatal, 4);
+			float         zc = tr_scene_ent_z(&fatal, 4);
 
-			assert(zc == tr_scene_ent_z(&fatal, 4) && zc >= (float)TR_PROJ_Z_RUNNER + TR_RUNNER_FRONT_Z + 24.0f);
-			pre.ents[4] = (tr_pkt_ent_t){3, 1, (uint8_t)low, 0, 1100, 0};
+			assert(zc == tr_scene_ent_z(&fatal, 4) &&
+			       zc >= (float)TR_PROJ_Z_RUNNER + TR_RUNNER_FRONT_Z + 24.0f);
+			pre.ents[4] = (tr_pkt_ent_t){ 3, 1, (uint8_t)low, 0, 1100, 0 };
 			assert(tr_scene_ent_z(&pre, 4) == zc);
 			pre.flags |= low ? TR_FLAG_AIRBORNE : TR_FLAG_DUCKING;
 			assert(tr_scene_ent_z(&pre, 4) < zc);
@@ -1295,7 +1403,7 @@ int main(void)
 			tr_frame_in_t c1 = crash_in(1, 1);
 
 			tr_scene_step(&s, &c1);
-			float         d  = (s.p[0].pos.x - p0.x) - v0.x * 0.35f;
+			float d = (s.p[0].pos.x - p0.x) - v0.x * 0.35f;
 
 			assert(v0.x != 0.0f && d < 1e-3f && d > -1e-3f);
 		}
@@ -1322,9 +1430,11 @@ int main(void)
 			tr_scene_bg_flash(&c, &fl);
 			if (ct == 0) {
 				assert(dl.tri[dl.n - 1].a[0].w == 0xFFFF && (dl.tri[dl.n - 1].c >> 11) > 25);
-				assert((fl.top >> 11) > (plain.top >> 11) && (fl.ground >> 11) > (plain.ground >> 11));
+				assert((fl.top >> 11) > (plain.top >> 11) &&
+				       (fl.ground >> 11) > (plain.ground >> 11));
 				/* the halo turns red and the stars all but go out */
-				assert((fl.halo & 0x1F) < (plain.halo & 0x1F) && plain.star_dim == 0 && fl.star_dim > 200);
+				assert((fl.halo & 0x1F) < (plain.halo & 0x1F) && plain.star_dim == 0 &&
+				       fl.star_dim > 200);
 				render(&cam, &c); /* asserts every band's bin fits */
 			}
 			if (ct == TR_CRASH_TICKS - 1) {
@@ -1406,8 +1516,9 @@ int main(void)
 				int j = fr - 10, d = fr < 90 ? fr - 40 : fr - 90;
 				int air = j >= 0 && j < TR_AIR_TICKS - 1, duck = d >= 0 && d < TR_DUCK_TICKS - 1;
 
-				a.lane       = (uint8_t)(fr < 60 ? 1 : fr < 92 ? 0 : fr < 115 ? 2 : 1);
-				a.flags      = TR_FLAG_ALIVE | (air ? TR_FLAG_AIRBORNE : 0u) | (duck ? TR_FLAG_DUCKING : 0u);
+				a.lane = (uint8_t)(fr < 60 ? 1 : fr < 92 ? 0 : fr < 115 ? 2 : 1);
+				a.flags =
+				    TR_FLAG_ALIVE | (air ? TR_FLAG_AIRBORNE : 0u) | (duck ? TR_FLAG_DUCKING : 0u);
 				a.air_ticks  = (uint8_t)(air ? TR_AIR_TICKS - 1 - j : 0);
 				a.duck_ticks = (uint8_t)(duck ? TR_DUCK_TICKS - 1 - d : 0);
 				tr_scene_step(&s, &a);
@@ -1428,7 +1539,8 @@ int main(void)
 					 * the instance yaw) still shows up. */
 					pullback = tr_front_pullback > pullback ? tr_front_pullback : pullback;
 					if (duck && d >= 2) {
-						top = t > top ? t : top; /* curled (2 frames) and rolling: under the arch bar */
+						top = t > top ? t
+						              : top; /* curled (2 frames) and rolling: under the arch bar */
 					}
 					if (duck) {
 						roll_max = rd.inst.pitch > roll_max ? rd.inst.pitch : roll_max;
@@ -1437,20 +1549,26 @@ int main(void)
 				}
 			}
 		}
-		printf("runner: crash tumble extra lift %.2f, front z over blends %.1f, top while ducking %.1f, hold_front "
+		printf("runner: crash tumble extra lift %.2f, front z over blends %.1f, top while ducking "
+		       "%.1f, hold_front "
 		       "pulled back %.3f u worst\n",
-		       (double)lift, (double)fz, (double)top, (double)pullback);
+		       (double)lift,
+		       (double)fz,
+		       (double)top,
+		       (double)pullback);
 		assert(lift < 0.5f && fz <= TR_RUNNER_FRONT_Z && top < 145.0f);
 		assert(pullback <= 0.05f);
 		/* the duck really rolls: a whole turn, upright again at its end */
-		printf("runner: duck roll to %.2f rad, cos at the end %.3f\n", (double)roll_max, (double)end_cos);
+		printf("runner: duck roll to %.2f rad, cos at the end %.3f\n",
+		       (double)roll_max,
+		       (double)end_cos);
 		assert(roll_max > 6.0f && end_cos > 0.99f);
 
 		/* g. Lane change: a side hop of TR_LANE_HOP over the run it would
 		 * have been, and none out of a duck. */
 		{
 			tr_scene_t    s1, s2;
-			tr_frame_in_t a = tr_scene_golden_in(1000, 1), b;
+			tr_frame_in_t a   = tr_scene_golden_in(1000, 1), b;
 			float         hop = 0.0f;
 
 			tr_scene_init(&s1);
@@ -1460,10 +1578,13 @@ int main(void)
 				b.lane = (uint8_t)(fr < 10 ? 1 : 2);
 				tr_scene_step(&s1, &a);
 				tr_scene_step(&s2, &b);
-				hop = s2.ch[TR_ANIM_ROOT_Y] - s1.ch[TR_ANIM_ROOT_Y] > hop ? s2.ch[TR_ANIM_ROOT_Y] - s1.ch[TR_ANIM_ROOT_Y]
-											  : hop;
+				hop = s2.ch[TR_ANIM_ROOT_Y] - s1.ch[TR_ANIM_ROOT_Y] > hop
+				          ? s2.ch[TR_ANIM_ROOT_Y] - s1.ch[TR_ANIM_ROOT_Y]
+				          : hop;
 			}
-			printf("runner: lane-change hop %.1f (TR_LANE_HOP %.0f)\n", (double)hop, (double)TR_LANE_HOP);
+			printf("runner: lane-change hop %.1f (TR_LANE_HOP %.0f)\n",
+			       (double)hop,
+			       (double)TR_LANE_HOP);
 			assert(hop > TR_LANE_HOP - 3.0f && hop < TR_LANE_HOP + 1.0f);
 
 			/* ... and none while ducking: the same duck with and without a
@@ -1489,14 +1610,14 @@ int main(void)
 		 * on, the drawn pitch moves less than 0.9 rad a frame (the roll
 		 * itself turns ~0.95 a frame; popping upright would be ~2.4). */
 		{
-			tr_frame_in_t a = tr_scene_golden_in(1000, 1);
+			tr_frame_in_t a    = tr_scene_golden_in(1000, 1);
 			float         prev = 0.0f, jump = 0.0f, rolled = 0.0f;
 
 			tr_scene_init(&s);
 			for (int fr = 0; fr < 30; fr++, a.tick++) {
 				int d = fr - 5, hit = fr >= 12;
 
-				a.flags      = hit ? TR_FLAG_CRASH : TR_FLAG_ALIVE | (d >= 0 ? TR_FLAG_DUCKING : 0u);
+				a.flags = hit ? TR_FLAG_CRASH : TR_FLAG_ALIVE | (d >= 0 ? TR_FLAG_DUCKING : 0u);
 				a.duck_ticks = (uint8_t)(!hit && d >= 0 ? TR_DUCK_TICKS - 1 - d : 0);
 				a.crash_tick = (uint8_t)(hit ? fr - 12 : 0);
 				a.crash_lane = 1, a.crash_kind = TR_CRASH_KIND_LOW, a.crash_ent = 0;
@@ -1519,12 +1640,15 @@ int main(void)
 					assert(f <= TR_RUNNER_FRONT_Z + 40.0f); /* knocked back from the contact */
 				}
 			}
-			printf("runner: crash mid-roll (rolled %.2f rad): worst pitch step %.2f rad a frame\n", (double)rolled,
+			printf("runner: crash mid-roll (rolled %.2f rad): worst pitch step %.2f rad a frame\n",
+			       (double)rolled,
 			       (double)jump);
 			assert(rolled > 1.0f && jump < 0.9f);
 		}
 
-		printf("crash: contact ok (and before the hit), burst %d, slow-mo ok, deterministic, flash fades\n", TR_PARTICLES);
+		printf("crash: contact ok (and before the hit), burst %d, slow-mo ok, deterministic, flash "
+		       "fades\n",
+		       TR_PARTICLES);
 	}
 
 	/* 7. Attract interpolation (P7): the sub-tick phase moves entities and
@@ -1540,7 +1664,8 @@ int main(void)
 			float z0 = tr_scene_ent_z(&a, i), zh = tr_scene_ent_z(&h, i);
 			float z1 = (float)tr_proj_depth_of_model_y((int16_t)(a.ents[i].y + TR_SCROLL_PX));
 
-			assert(zh < z0 && zh > z1 && zh - (z0 + z1) * 0.5f < 1.0f && (z0 + z1) * 0.5f - zh < 1.0f);
+			assert(zh < z0 && zh > z1 && zh - (z0 + z1) * 0.5f < 1.0f &&
+			       (z0 + z1) * 0.5f - zh < 1.0f);
 		}
 		tr_scene_init(&s);
 		tr_scene_step(&s, &a);
@@ -1579,7 +1704,7 @@ int main(void)
 			tr_scene_t    sp;
 			tr_frame_in_t f = a;
 			float         prev_z[16], prev_root = 0.0f, worst_root = 0.0f;
-			uint32_t      prev_s = 0;
+			uint32_t      prev_s   = 0;
 			float         prev_cyc = -1.0f;
 
 			tr_scene_init(&sp);
@@ -1594,12 +1719,14 @@ int main(void)
 				tr_scene_step(&sp, &f);
 
 				uint32_t sc  = tr_scene_scroll(f.tick, (fr & 1) ? 32768u : 0u);
-				float    cyc = ((float)(f.tick % TR_RUN_CYCLE_TICKS) + ((fr & 1) ? 0.5f : 0.0f)) / (float)TR_RUN_CYCLE_TICKS;
+				float    cyc = ((float)(f.tick % TR_RUN_CYCLE_TICKS) + ((fr & 1) ? 0.5f : 0.0f)) /
+				               (float)TR_RUN_CYCLE_TICKS;
 
 				for (int i = 0; i < 16; i++) {
 					float z = tr_scene_ent_z(&f, i);
 
-					if (fr > 0 && f.ents[i].kind != 0 && f.ents[i].y < tr_runner_ground_y(TR_R3D_H) - 2 * TR_SCROLL_PX) {
+					if (fr > 0 && f.ents[i].kind != 0 &&
+					    f.ents[i].y < tr_runner_ground_y(TR_R3D_H) - 2 * TR_SCROLL_PX) {
 						assert(z < prev_z[i]); /* (nearer ones may be held at the contact depth) */
 					}
 					prev_z[i] = z;
@@ -1614,7 +1741,8 @@ int main(void)
 					float dc = cyc - prev_cyc;
 
 					assert(sc > prev_s);
-					float step = 0.5f / (float)TR_RUN_CYCLE_TICKS; /* half a tick of a stride a frame */
+					float step =
+					    0.5f / (float)TR_RUN_CYCLE_TICKS; /* half a tick of a stride a frame */
 
 					assert((dc > 0.8f * step && dc < 1.2f * step) || (dc < -0.9f));
 					float dr = sp.ch[TR_ANIM_ROOT_Y] - prev_root;
@@ -1624,8 +1752,11 @@ int main(void)
 				}
 				prev_s = sc, prev_cyc = cyc, prev_root = sp.ch[TR_ANIM_ROOT_Y];
 			}
-			printf("pace 0.5: entities nearer every frame, hip moves <= %.2f a frame\n", (double)worst_root);
-			assert(worst_root < 6.5f); /* P3d: the flight hop, 9 units in ~3 frames (a stride is 12 here; 6.04) */
+			printf("pace 0.5: entities nearer every frame, hip moves <= %.2f a frame\n",
+			       (double)worst_root);
+			assert(
+			    worst_root <
+			    6.5f); /* P3d: the flight hop, 9 units in ~3 frames (a stride is 12 here; 6.04) */
 
 			/* particles move at the game pace: a pickup burst, then one
 			 * frame at 0.5x moves each by half its velocity */
@@ -1657,8 +1788,8 @@ int main(void)
 	 * fresh scene fed it again ends bit-identical. */
 	{
 		static tr_scene_t s30, s40, again;
-		float              worst_x = 0.0f, worst_w = 0.0f, worst_ch = 0.0f, worst_p = 0.0f, worst_spark = 0.0f;
-		int                compared = 0, parts = 0, air_frames = 0;
+		float worst_x = 0.0f, worst_w = 0.0f, worst_ch = 0.0f, worst_p = 0.0f, worst_spark = 0.0f;
+		int   compared = 0, parts = 0, air_frames = 0;
 
 		tr_scene_init(&s30);
 		tr_scene_init(&s40);
@@ -1687,14 +1818,22 @@ int main(void)
 
 				tr_scene_step(&s30, &in);
 				tr_scene_step(&again, &in);
-				if (f == 34) { /* landed at 1.1 s (frame 33): 4/3 of a 40 Hz frame on, -8 x (3 - 4/3) */
+				if (f ==
+				    34) { /* landed at 1.1 s (frame 33): 4/3 of a 40 Hz frame on, -8 x (3 - 4/3) */
 					assert(fabsf(s30.dip + 8.0f * (3.0f - 4.0f / 3.0f)) < 1e-4f);
 				}
 			}
-			float d[] = {s30.runner_x - s40.runner_x, s30.cam_x - s40.cam_x, (s30.cam_roll - s40.cam_roll) * 100.0f,
-				     s30.lift - s40.lift, s30.dip - s40.dip, s30.cam_bob - s40.cam_bob};
-			float w[] = {s30.w_jump - s40.w_jump, s30.w_duck - s40.w_duck, s30.w_crash - s40.w_crash,
-				     s30.w_land - s40.w_land, s30.squash - s40.squash};
+			float d[] = { s30.runner_x - s40.runner_x,
+				          s30.cam_x - s40.cam_x,
+				          (s30.cam_roll - s40.cam_roll) * 100.0f,
+				          s30.lift - s40.lift,
+				          s30.dip - s40.dip,
+				          s30.cam_bob - s40.cam_bob };
+			float w[] = { s30.w_jump - s40.w_jump,
+				          s30.w_duck - s40.w_duck,
+				          s30.w_crash - s40.w_crash,
+				          s30.w_land - s40.w_land,
+				          s30.squash - s40.squash };
 
 			for (unsigned k = 0; k < sizeof(d) / sizeof(d[0]); k++) {
 				worst_x = fabsf(d[k]) > worst_x ? fabsf(d[k]) : worst_x;
@@ -1711,7 +1850,8 @@ int main(void)
 				const tr_particle_t *a = &s30.p[i], *b = &s40.p[i];
 
 				if (a->life > 0.5f && b->life > 0.5f) {
-					float e = fabsf(a->pos.x - b->pos.x) + fabsf(a->pos.y - b->pos.y) + fabsf(a->pos.z - b->pos.z);
+					float  e  = fabsf(a->pos.x - b->pos.x) + fabsf(a->pos.y - b->pos.y) +
+					            fabsf(a->pos.z - b->pos.z);
 					float *wp = a->spark ? &worst_spark : &worst_p;
 
 					*wp = e > *wp ? e : *wp;
@@ -1720,12 +1860,19 @@ int main(void)
 			}
 			compared++;
 		}
-		printf("frame rate: 30 vs 40 Hz at %d common times: slides/lift/dip off by <= %.4f units, blends %.5f, "
+		printf("frame rate: 30 vs 40 Hz at %d common times: slides/lift/dip off by <= %.4f units, "
+		       "blends %.5f, "
 		       "pose %.4f deg, pickup particles %.3f units, crash sparks %.4f (%d compared)\n",
-		       compared, (double)worst_x, (double)worst_w, (double)worst_ch, (double)worst_p, (double)worst_spark,
+		       compared,
+		       (double)worst_x,
+		       (double)worst_w,
+		       (double)worst_ch,
+		       (double)worst_p,
+		       (double)worst_spark,
 		       parts);
 		assert(parts > 200 && air_frames > 10);
-		assert(worst_x < 0.01f && worst_w < 1e-4f && worst_ch < 0.01f && worst_spark < 0.01f && worst_p < 0.75f);
+		assert(worst_x < 0.01f && worst_w < 1e-4f && worst_ch < 0.01f && worst_spark < 0.01f &&
+		       worst_p < 0.75f);
 		assert(memcmp(&s30, &again, sizeof(s30)) == 0); /* deterministic */
 		/* the crash time's fraction moves the knock-back: a 30 Hz frame
 		 * half-way between two crash ticks is drawn half-way */
@@ -1769,11 +1916,12 @@ int main(void)
 		for (int f = 0; f < 20; f++) { /* the lane change lands on frame 8 */
 			tr_frame_in_t in = hz_in((double)f / 40.0, 40);
 			float         e[TR_ANIM_CH], e1[TR_ANIM_CH], hs, hc;
-			float         cyc  = ((float)(in.tick % TR_ANIM_CYCLE) + (float)in.phase / 65536.0f) / (float)TR_ANIM_CYCLE;
-			float         dx   = ((float)in.lane - 1.0f) * (float)TR_PROJ_LANE_W, left;
+			float         cyc = ((float)(in.tick % TR_ANIM_CYCLE) + (float)in.phase / 65536.0f) /
+			                    (float)TR_ANIM_CYCLE;
+			float         dx  = ((float)in.lane - 1.0f) * (float)TR_PROJ_LANE_W, left;
 
 			tr_scene_step(&sh, &in);
-			dx  -= sh.runner_x;
+			dx -= sh.runner_x;
 			left = fabsf(dx) / (float)TR_PROJ_LANE_W;
 			left = left > 1.0f ? 1.0f : left;
 			if (left <= 0.02f) {
@@ -1781,7 +1929,8 @@ int main(void)
 			}
 			tr_sincosf(3.14159265f * (1.0f - left), &hs, &hc);
 			tr_rig_run(cyc, e, 0.0f);
-			e[TR_ANIM_P_ROLL] += dx * 0.08f > 14.0f ? 14.0f : (dx * 0.08f < -14.0f ? -14.0f : dx * 0.08f);
+			e[TR_ANIM_P_ROLL] +=
+			    dx * 0.08f > 14.0f ? 14.0f : (dx * 0.08f < -14.0f ? -14.0f : dx * 0.08f);
 			e[TR_ANIM_ROOT_Y] += TR_LANE_HOP * hs;
 			memcpy(e1, e, sizeof(e));
 			tr_rig_foot_lock(cyc, e, 1.0f - hs);
@@ -1792,13 +1941,17 @@ int main(void)
 			}
 			hops++;
 		}
-		printf("lock weight: %d lane-hop frames posed at 1 - hop, %d channels a full lock would move\n", hops, telling);
+		printf("lock weight: %d lane-hop frames posed at 1 - hop, %d channels a full lock would "
+		       "move\n",
+		       hops,
+		       telling);
 		assert(hops >= 4 && telling > 0);
 	}
 
 	/* 8. Live wires (P4b). */
 	{
-		tr_v3_t a = {-100.0f, 190.0f, 900.0f}, b = {100.0f, 190.0f, 900.0f}, p0[11], p1[11], p2[11];
+		tr_v3_t a = { -100.0f, 190.0f, 900.0f }, b = { 100.0f, 190.0f, 900.0f }, p0[11], p1[11],
+		        p2[11];
 
 		/* a. The arc: ends exact, jitter bounded, one seed one polyline,
 		 * another seed another. */
@@ -1808,9 +1961,11 @@ int main(void)
 		assert(memcmp(p0, p1, sizeof(p0)) == 0 && memcmp(p0, p2, sizeof(p0)) != 0);
 		assert(memcmp(&p0[0], &a, sizeof(a)) == 0 && memcmp(&p0[10], &b, sizeof(b)) == 0);
 		for (int k = 1; k < 10; k++) {
-			float t = (float)k / 10.0f, by = 190.0f - 20.0f * 4.0f * t * (1.0f - t), dy = p0[k].y - by;
+			float t = (float)k / 10.0f, by = 190.0f - 20.0f * 4.0f * t * (1.0f - t),
+			      dy = p0[k].y - by;
 
-			assert(dy <= 16.01f && dy >= -16.01f && p0[k].z - 900.0f <= 4.81f && 900.0f - p0[k].z <= 4.81f);
+			assert(dy <= 16.01f && dy >= -16.01f && p0[k].z - 900.0f <= 4.81f &&
+			       900.0f - p0[k].z <= 4.81f);
 		}
 
 		/* b. The seed: a function of the frame (tick, phase, crash tick)
@@ -1831,7 +1986,7 @@ int main(void)
 		 * obstacles, rebuilds bit for bit, animates from frame to frame,
 		 * and stays above the board. */
 		static tr_dl_t d0, d1;
-		tr_frame_in_t  plain = tr_scene_golden_in(1234, 1);
+		tr_frame_in_t  plain  = tr_scene_golden_in(1234, 1);
 		float          lowest = 1e30f;
 
 		tr_scene_init(&s);
@@ -1840,7 +1995,8 @@ int main(void)
 		tr_scene_build(&s, &f, &cam, &dl);
 		tr_scene_build(&s, &f, &cam, &d1);
 		printf("wires: golden run %u tris, with every obstacle a live wire %u\n", d0.n, dl.n);
-		assert(dl.n > d0.n && dl.n == d1.n && memcmp(dl.tri, d1.tri, dl.n * sizeof(dl.tri[0])) == 0);
+		assert(dl.n > d0.n && dl.n == d1.n &&
+		       memcmp(dl.tri, d1.tri, dl.n * sizeof(dl.tri[0])) == 0);
 		g = f, g.tick++;
 		tr_scene_build(&s, &g, &cam, &d1);
 		assert(dl.n != d1.n || memcmp(dl.tri, d1.tri, dl.n * sizeof(dl.tri[0])) != 0);
@@ -1865,8 +2021,9 @@ int main(void)
 		uint32_t      b0, b1;
 
 		for (int i = 0; i < 16; i++) {
-			w.ents[i] = (tr_pkt_ent_t){(uint8_t)(i & 1 ? 3 : 1), (uint8_t)(i % 3), (uint8_t)(i & 2 ? 1 : 0), 0,
-						   (int16_t)(900 + 16 * i), 0};
+			w.ents[i] = (tr_pkt_ent_t){ (uint8_t)(i & 1 ? 3 : 1), (uint8_t)(i % 3),
+				                        (uint8_t)(i & 2 ? 1 : 0), 0,
+				                        (int16_t)(900 + 16 * i),  0 };
 		}
 		tr_scene_init(&s);
 		tr_scene_step(&s, &w);
@@ -1919,13 +2076,14 @@ int main(void)
 		cl = crash_in(40, 0);
 		tr_scene_runner(&s, &cl, &r2);
 		assert(rd.inst.pos.x == r2.inst.pos.x); /* the shudder is over */
-		printf("wires: arc deterministic per seed, re-seeded per frame, above the board, electric crash\n");
+		printf("wires: arc deterministic per seed, re-seeded per frame, above the board, electric "
+		       "crash\n");
 	}
 
 	/* Crash review frames: crash ticks 0 (the hit), 4 and 10 (slow
 	 * motion), 20, 40; low obstacle, then a high one at 6. */
 	if (getenv("TR_DUMP")) {
-		static const uint8_t ct[6]  = {0, 4, 10, 20, 40, 6};
+		static const uint8_t ct[6] = { 0, 4, 10, 20, 40, 6 };
 		char                 path[64];
 
 		for (int f = 0; f < 6; f++) {
@@ -1945,14 +2103,17 @@ int main(void)
 			const char *name;
 			int16_t     y;
 			uint8_t     low;
-		} v[4] = {{"wire-high-close", 1020, 0}, {"wire-low-close", 1000, 1}, {"wire-high-far", 800, 0},
-			  {"wire-low-far", 800, 1}};
+		} v[4] = { { "wire-high-close", 1020, 0 },
+			       { "wire-low-close", 1000, 1 },
+			       { "wire-high-far", 800, 0 },
+			       { "wire-low-far", 800, 1 } };
 
 		for (int f = 0; f < 4; f++) {
 			tr_frame_in_t a = tr_scene_golden_in(1234, 1);
 
-			a.ents[7] = (tr_pkt_ent_t){3, 1, v[f].low, 0, v[f].y, 0};
-			a.ents[4] = (tr_pkt_ent_t){3, f & 1 ? 0 : 2, (uint8_t)!v[f].low, 0, (int16_t)(v[f].y - 60), 0};
+			a.ents[7] = (tr_pkt_ent_t){ 3, 1, v[f].low, 0, v[f].y, 0 };
+			a.ents[4] = (tr_pkt_ent_t){ 3, f & 1 ? 0 : 2,          (uint8_t)!v[f].low,
+				                        0, (int16_t)(v[f].y - 60), 0 };
 			tr_scene_init(&s);
 			tr_scene_step(&s, &a);
 			tr_scene_build(&s, &a, &cam, &dl);
@@ -1960,7 +2121,7 @@ int main(void)
 			dump(v[f].name);
 		}
 		for (int f = 0; f < 4; f++) {
-			static const uint8_t ct[4] = {0, 3, 8, 16};
+			static const uint8_t ct[4] = { 0, 3, 8, 16 };
 			char                 path[64];
 			tr_frame_in_t        c = crash_in(ct[f], f < 3 ? 2 : 3);
 
@@ -1973,33 +2134,37 @@ int main(void)
 
 	/* 11. P16: the characters, their reactions, the idle set, the scarf. */
 	{
-		static tr_scene_t s2;
+		static tr_scene_t       s2;
 		static tr_runner_draw_t r2;
-		const int     n40 = 40 * 4, r = TR_ANIM_SIDE0 + TR_ANIM_SIDE_N; /* 4 s at 40 Hz; right-side channels */
-		float         worst_front = -1e30f, worst_lo = 1e30f, worst_len = 0.0f, worst_plane = -1e30f, rate = 0.0f;
-		float         scarf_front = -1e30f, scarf_rate = 0.0f, p16_gap = 0.0f;
+		const int               n40 = 40 * 4,
+		                        r = TR_ANIM_SIDE0 + TR_ANIM_SIDE_N; /* 4 s at 40 Hz; right-side channels */
+		float worst_front = -1e30f, worst_lo = 1e30f, worst_len = 0.0f, worst_plane = -1e30f,
+		      rate        = 0.0f;
+		float scarf_front = -1e30f, scarf_rate = 0.0f, p16_gap = 0.0f;
 
 		for (int c = 0; c < TR_CHARS; c++) {
-			const tr_rig_char_t *rc = &tr_rig_chars[c];
+			const tr_rig_char_t *rc  = &tr_rig_chars[c];
 			float                len = rc->scarf[4];
-			int                  n = (int)rc->scarf[3];
+			int                  n   = (int)rc->scarf[3];
 
 			tr_scene_init(&s);
 			tr_scene_init(&s2);
 			for (int f = 0; f <= n40; f++) {
-				double        t  = f / 40.0;
-				tr_frame_in_t a  = p16_in(t, 40, c);
+				double        t = f / 40.0;
+				tr_frame_in_t a = p16_in(t, 40, c);
 				float         fr, lo;
 
 				tr_scene_step(&s, &a);
 				tr_scene_step(&s2, &a);
 				assert(s.chr == c);
 				/* a. deterministic: the same stream, the same state */
-				assert(memcmp(s.ch, s2.ch, sizeof(s.ch)) == 0 && memcmp(s.sc, s2.sc, sizeof(s.sc)) == 0);
+				assert(memcmp(s.ch, s2.ch, sizeof(s.ch)) == 0 &&
+				       memcmp(s.sc, s2.sc, sizeof(s.sc)) == 0);
 				assert(memcmp(&s.face, &s2.face, sizeof(s.face)) == 0 && s.yaw == s2.yaw);
 				tr_scene_runner(&s, &a, &rd);
 				tr_scene_runner(&s2, &a, &r2);
-				assert(memcmp(rd.xyz, r2.xyz, sizeof(rd.xyz)) == 0 && memcmp(rd.sxyz, r2.sxyz, sizeof(rd.sxyz)) == 0);
+				assert(memcmp(rd.xyz, r2.xyz, sizeof(rd.xyz)) == 0 &&
+				       memcmp(rd.sxyz, r2.sxyz, sizeof(rd.sxyz)) == 0);
 				/* b. the runner as drawn: on the board, its front inside
 				 * the contact bound through every reaction, spin and the
 				 * turn to the camera */
@@ -2008,8 +2173,8 @@ int main(void)
 				/* P16b: joints closed through every reaction, spin and the idle set */
 				rchr = c, rlod = 0;
 				skin(s.ch);
-				p16_gap = rig_gap(s.ch) > p16_gap ? rig_gap(s.ch) : p16_gap;
-				worst_lo    = lo < worst_lo ? lo : worst_lo;
+				p16_gap  = rig_gap(s.ch) > p16_gap ? rig_gap(s.ch) : p16_gap;
+				worst_lo = lo < worst_lo ? lo : worst_lo;
 				/* c. the scarf: n segments of its length, never in front
 				 * of the neck, every drawn point on or above the board */
 				assert(s.scarf_n == n && rd.scarf[0].nt == 2 * n && rd.scarf[1].nt == 2 * n);
@@ -2019,10 +2184,13 @@ int main(void)
 					for (int q = 0; q < 3; q++) {
 						d += (s.sc[i][q] - s.sc[i - 1][q]) * (s.sc[i][q] - s.sc[i - 1][q]);
 					}
-					d = sqrtf(d) / len - 1.0f;
-					worst_len = fabsf(d) > worst_len ? fabsf(d) : worst_len;
-					fw        = (s.sc[i][0] - s.sc[0][0]) * sinf(rd.inst.yaw) + (s.sc[i][2] - s.sc[0][2]) * cosf(rd.inst.yaw);
-					worst_plane = fw > worst_plane && t < 1.8 ? fw : worst_plane; /* not mid-spin: the plane turns */
+					d           = sqrtf(d) / len - 1.0f;
+					worst_len   = fabsf(d) > worst_len ? fabsf(d) : worst_len;
+					fw          = (s.sc[i][0] - s.sc[0][0]) * sinf(rd.inst.yaw) +
+					              (s.sc[i][2] - s.sc[0][2]) * cosf(rd.inst.yaw);
+					worst_plane = fw > worst_plane && t < 1.8
+					                  ? fw
+					                  : worst_plane; /* not mid-spin: the plane turns */
 				}
 				for (int v = 0; v < 2 * (n + 1); v++) {
 					float z = rd.sxyz[v * 3 + 2] - (float)TR_PROJ_Z_RUNNER;
@@ -2038,7 +2206,8 @@ int main(void)
 					assert(s.w_react > 0.9f && s.ch[r + 4] < -100.0f && s.face.happy > 0.9f);
 				}
 				if (f == 50) { /* 0.35 s into the glance, to the left: head and chest turned left */
-					assert(s.w_react > 0.9f && s.ch[7] < -40.0f && s.ch[5] < -15.0f && s.face.look_x < -2.0f);
+					assert(s.w_react > 0.9f && s.ch[7] < -40.0f && s.ch[5] < -15.0f &&
+					       s.face.look_x < -2.0f);
 				}
 				if (f == 60) { /* 0.2 s into the near miss: pitched forward, squinting */
 					assert(s.w_react > 0.9f && s.ch[1] > 16.0f && s.face.squint > 0.9f);
@@ -2080,7 +2249,8 @@ int main(void)
 
 						rate = d > rate ? d : rate;
 					}
-					rate = fabsf(s.yaw - s2.yaw) * 57.3f > rate ? fabsf(s.yaw - s2.yaw) * 57.3f : rate;
+					rate =
+					    fabsf(s.yaw - s2.yaw) * 57.3f > rate ? fabsf(s.yaw - s2.yaw) * 57.3f : rate;
 					/* the scarf: 120 Hz sub-steps, 4 a 30 Hz frame, 3 a 40 Hz one */
 					for (int i = 0; i <= (int)tr_rig_chars[c].scarf[3]; i++) {
 						for (int q = 0; q < 3; q++) {
@@ -2106,8 +2276,10 @@ int main(void)
 			for (int f = 0; f < 60; f++, a.tick++) {
 				int d = f - 20;
 
-				a.flags      = TR_FLAG_ALIVE | TR_FLAG_CHAR | (d >= 0 && d < TR_DUCK_TICKS - 1 ? TR_FLAG_DUCKING : 0u);
-				a.duck_ticks = (uint8_t)(d >= 0 && d < TR_DUCK_TICKS - 1 ? TR_DUCK_TICKS - 1 - d : 0);
+				a.flags = TR_FLAG_ALIVE | TR_FLAG_CHAR |
+				          (d >= 0 && d < TR_DUCK_TICKS - 1 ? TR_FLAG_DUCKING : 0u);
+				a.duck_ticks =
+				    (uint8_t)(d >= 0 && d < TR_DUCK_TICKS - 1 ? TR_DUCK_TICKS - 1 - d : 0);
 				tr_scene_step(&s, &a);
 				tr_scene_runner(&s, &a, &rd);
 				rchr = c, rlod = 0; /* ... and through the duck roll */
@@ -2138,24 +2310,34 @@ int main(void)
 				}
 			}
 		}
-		printf("p16: scarf through rolls and crashes: lowest y drawn %.2f, simulated %.2f\n", (double)scarf_lo,
+		printf("p16: scarf through rolls and crashes: lowest y drawn %.2f, simulated %.2f\n",
+		       (double)scarf_lo,
 		       (double)sim_lo);
 		assert(scarf_lo >= 0.0f);
 		assert(sim_lo > 10.0f); /* the sim needs no board constraint (r3d_scene.c scarf_step) */
-		printf("p16b: joint gap over reactions, spins, idle, rolls, crashes %.3f (units^2)\n", (double)p16_gap);
+		printf("p16b: joint gap over reactions, spins, idle, rolls, crashes %.3f (units^2)\n",
+		       (double)p16_gap);
 		assert(p16_gap < 0.5f);
 		rchr = 0;
 
-		printf("p16: front z %.2f (bound %.0f), lowest y %.3f, scarf segment error %.4f, in front of the neck %.3f, "
+		printf("p16: front z %.2f (bound %.0f), lowest y %.3f, scarf segment error %.4f, in front "
+		       "of the neck %.3f, "
 		       "30 vs 40 Hz pose %.4f deg\n",
-		       (double)worst_front, (double)TR_RUNNER_FRONT_Z, (double)worst_lo, (double)worst_len,
-		       (double)worst_plane, (double)rate);
+		       (double)worst_front,
+		       (double)TR_RUNNER_FRONT_Z,
+		       (double)worst_lo,
+		       (double)worst_len,
+		       (double)worst_plane,
+		       (double)rate);
 		assert(worst_front <= TR_RUNNER_FRONT_Z + 0.01f);
 		assert(worst_lo > -0.01f);
 		assert(worst_len < 0.001f && worst_plane < 0.01f);
 		assert(rate < 0.01f);
-		printf("p16: scarf ahead of the runner %.2f (bound %.0f, spins included), 30 vs 40 Hz scarf points %.2f units\n",
-		       (double)scarf_front, (double)TR_RUNNER_FRONT_Z, (double)scarf_rate);
+		printf("p16: scarf ahead of the runner %.2f (bound %.0f, spins included), 30 vs 40 Hz "
+		       "scarf points %.2f units\n",
+		       (double)scarf_front,
+		       (double)TR_RUNNER_FRONT_Z,
+		       (double)scarf_rate);
 		assert(scarf_front <= TR_RUNNER_FRONT_Z);
 		assert(scarf_rate < SCARF_RATE_TOL);
 
@@ -2167,13 +2349,13 @@ int main(void)
 			tr_frame_in_t a = tr_scene_golden_in(1234, 1);
 
 			tr_scene_init(&s);
-			a.character = 3, a.react = TR_REACT_COMBO, a.react_ms = 200, a.react_seq = 2, a.react_side = 1;
+			a.character = 3, a.react = TR_REACT_COMBO, a.react_ms = 200, a.react_seq = 2,
+			a.react_side = 1;
 			for (int f = 0; f < 10; f++, a.tick++) {
 				tr_scene_step(&s, &a);
 				assert(s.chr == 0 && s.w_react == 0.0f && s.yaw == 0.0f && s.face.happy == 0.0f);
 			}
 		}
-
 
 		/* g. the character in the packet picks the meshes: each draws its
 		 * own runner; no TR_FLAG_CHAR (an old HE) or an id out of range:
@@ -2202,8 +2384,14 @@ int main(void)
 					dl2 = dl;
 				}
 			}
-			printf("p16: golden frame tris per character: %u %u %u %u (id 7 -> %u, no flag -> %u)\n", n[0], n[1], n[2],
-			       n[3], n[4], n[5]);
+			printf(
+			    "p16: golden frame tris per character: %u %u %u %u (id 7 -> %u, no flag -> %u)\n",
+			    n[0],
+			    n[1],
+			    n[2],
+			    n[3],
+			    n[4],
+			    n[5]);
 			for (int c = 1; c < TR_CHARS; c++) {
 				assert(n[c] != n[0]);
 			}
@@ -2213,7 +2401,7 @@ int main(void)
 
 	/* Art review frames: a lane change mid-bank, a jump, a pickup burst. */
 	if (getenv("TR_DUMP")) {
-		static const char *const path[3] = {"scene-0", "scene-1", "scene-2"};
+		static const char *const path[3] = { "scene-0", "scene-1", "scene-2" };
 
 		for (int f = 0; f < 3; f++) {
 			tr_frame_in_t a = tr_scene_golden_in(200 + 97 * (uint32_t)f, 1);
@@ -2249,11 +2437,11 @@ int main(void)
 	 * old HE's crash packet (no flag) keeps the renderer's own crash_tick
 	 * shake, bit for bit; shake 0 under the flag is a still camera. */
 	{
-		tr_scene_t    ss;
-		tr_cam_t      c0, c1;
+		tr_scene_t     ss;
+		tr_cam_t       c0, c1;
 		static tr_dl_t d0, d1;
-		float         dx, dy;
-		int           moved = 0, legacy = 0;
+		float          dx, dy;
+		int            moved = 0, legacy = 0;
 
 		tr_scene_init(&ss);
 		for (uint8_t ct = 0; ct < 30u; ct++) {

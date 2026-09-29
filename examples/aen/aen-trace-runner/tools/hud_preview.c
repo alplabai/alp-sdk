@@ -24,15 +24,17 @@ static uint16_t hud[TR_HUD_W * TR_HUD_H];
 int main(int argc, char **argv)
 {
 	if (argc < 4) {
-		fprintf(stderr, "usage: %s SCENE.ppm OUT.ppm play|pickup|combo|hiscore-pop|crash|attract|table|initials|banner [frame]\n",
-			argv[0]);
+		fprintf(stderr,
+		        "usage: %s SCENE.ppm OUT.ppm "
+		        "play|pickup|combo|hiscore-pop|crash|attract|table|initials|banner [frame]\n",
+		        argv[0]);
 		return 2;
 	}
 	FILE *f = fopen(argv[1], "rb");
 	int   w, h, mx;
 
-	if (f == NULL || fscanf(f, "P6 %d %d %d", &w, &h, &mx) != 3 || w != W || h != H || fgetc(f) < 0 ||
-	    fread(img, 1, sizeof(img), f) != sizeof(img)) {
+	if (f == NULL || fscanf(f, "P6 %d %d %d", &w, &h, &mx) != 3 || w != W || h != H ||
+	    fgetc(f) < 0 || fread(img, 1, sizeof(img), f) != sizeof(img)) {
 		fprintf(stderr, "bad scene %s\n", argv[1]);
 		return 1;
 	}
@@ -42,8 +44,8 @@ int main(int argc, char **argv)
 	tr_hud_view_t v;
 	const char   *m     = argv[3];
 	uint32_t      frame = argc > 4 ? (uint32_t)atoi(argv[4]) : 0u, start = 0u - TR_HUD_POPUP_FRAMES;
-	uint8_t       ban   = TR_BANNER_NONE;
-	bool          att   = false;
+	uint8_t       ban = TR_BANNER_NONE;
+	bool          att = false;
 
 	tr_hiscore_t  hs;
 	tr_initials_t ini;
@@ -64,7 +66,7 @@ int main(int argc, char **argv)
 	s.popup_mult = 3u;
 	s.popup_seq  = 7u;
 	if (strcmp(m, "pickup") == 0) {
-		start = 0u; /* popup `frame` frames old */
+		start = 0u;                       /* popup `frame` frames old */
 	} else if (strcmp(m, "combo") == 0) { /* booth: the top multiplier */
 		start        = 0u;
 		s.combo      = 5u;

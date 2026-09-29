@@ -28,8 +28,8 @@
 #define RASTER_CHECK(c) ((void)0)
 #endif
 
-#define SUB_ONE (1 << TR_R3D_SUB) /* 1.0 px in 28.4 */
-#define SUB_HALF (SUB_ONE >> 1)   /* 0.5 px in 28.4 -- pixel-centre sampling */
+#define SUB_ONE  (1 << TR_R3D_SUB) /* 1.0 px in 28.4 */
+#define SUB_HALF (SUB_ONE >> 1)    /* 0.5 px in 28.4 -- pixel-centre sampling */
 
 /*
  * Screen-space edge function from a->b evaluated at p, same formula and
@@ -41,7 +41,8 @@
  */
 static int64_t edge(tr_sv_t a, tr_sv_t b, tr_sv_t p)
 {
-	return (int64_t)(b.x - a.x) * (int64_t)(p.y - a.y) - (int64_t)(b.y - a.y) * (int64_t)(p.x - a.x);
+	return (int64_t)(b.x - a.x) * (int64_t)(p.y - a.y) -
+	       (int64_t)(b.y - a.y) * (int64_t)(p.x - a.x);
 }
 
 /*
@@ -172,8 +173,8 @@ static void edge_dda_init_upper(edge_dda_t *e, tr_sv_t a, tr_sv_t b, int64_t dy,
 	int64_t sq  = floor_div(ddx, denom);
 	int64_t sr  = ddx - sq * denom;
 
-	e->quot = (int32_t)q;
-	e->rem  = (int32_t)r;
+	e->quot      = (int32_t)q;
+	e->rem       = (int32_t)r;
 	e->step_quot = (int32_t)sq;
 	e->step_rem  = (int32_t)sr;
 	e->denom     = (int32_t)denom;
@@ -193,7 +194,7 @@ static void edge_dda_init_lower(edge_dda_t *e, tr_sv_t a, tr_sv_t b, int64_t dy,
 {
 	int64_t dx    = (int64_t)(b.x - a.x);
 	int64_t K     = dx * (int64_t)(pcy0 - a.y) + dy * (int64_t)a.x;
-	int64_t denom = -16 * dy; /* > 0, since dy < 0 */
+	int64_t denom = -16 * dy;                 /* > 0, since dy < 0 */
 	int64_t numer = (8 * dy - K) + denom - 1; /* == -(K - 8*dy) + (denom - 1) */
 	int64_t q     = floor_div(numer, denom);
 	int64_t r     = numer - q * denom;
@@ -204,8 +205,8 @@ static void edge_dda_init_lower(edge_dda_t *e, tr_sv_t a, tr_sv_t b, int64_t dy,
 	int64_t sq  = floor_div(ddx, denom);
 	int64_t sr  = ddx - sq * denom;
 
-	e->quot = (int32_t)q;
-	e->rem  = (int32_t)r;
+	e->quot      = (int32_t)q;
+	e->rem       = (int32_t)r;
 	e->step_quot = (int32_t)sq;
 	e->step_rem  = (int32_t)sr;
 	e->denom     = (int32_t)denom;
@@ -218,9 +219,9 @@ static void edge_dda_init_lower(edge_dda_t *e, tr_sv_t a, tr_sv_t b, int64_t dy,
 static inline void edge_dda_step(edge_dda_t *e)
 {
 	e->quot += e->step_quot;
-	e->rem  += e->step_rem;
+	e->rem += e->step_rem;
 	if (e->rem >= e->denom) {
-		e->rem  -= e->denom;
+		e->rem -= e->denom;
 		e->quot += 1;
 	}
 }
@@ -230,9 +231,9 @@ static void edge_dda_skip(edge_dda_t *e, int32_t n)
 {
 	for (; n >= TR_BAND_H; n -= TR_BAND_H) {
 		e->quot += e->q32;
-		e->rem  += e->r32;
+		e->rem += e->r32;
 		if (e->rem >= e->denom) {
-			e->rem  -= e->denom;
+			e->rem -= e->denom;
 			e->quot += 1;
 		}
 	}
@@ -302,7 +303,8 @@ static int64_t smul_shr(int64_t a, uint64_t b, int sh)
  */
 static uint64_t recip62(uint64_t a)
 {
-#if (defined(__ARM_FP) && (__ARM_FP & 8)) || defined(__x86_64__) || defined(__i386__) || defined(__aarch64__)
+#if (defined(__ARM_FP) && (__ARM_FP & 8)) || defined(__x86_64__) || defined(__i386__) || \
+    defined(__aarch64__)
 	if (a >= 1024u && (a >> 52) == 0) {
 		double   da = (double)(uint32_t)(a >> 32) * 4294967296.0 + (double)(uint32_t)a;
 		double   qd = 4611686018427387904.0 / da; /* 2^62 */
@@ -334,17 +336,23 @@ typedef tr_plane_t plane_t;
  * pixel of anchor distance (<= 0.002 LSB-unit even from a guard-band
  * vertex), then rounded to the per-pixel uint32 step.
  */
-static void plane_init(plane_t *p, int64_t a0, int64_t a1, int64_t a2, const tr_tri_t *t, uint64_t R, int32_t ax,
-		       int32_t ay)
+static void plane_init(plane_t        *p,
+                       int64_t         a0,
+                       int64_t         a1,
+                       int64_t         a2,
+                       const tr_tri_t *t,
+                       uint64_t        R,
+                       int32_t         ax,
+                       int32_t         ay)
 {
 	tr_sv_t  a = t->v[0], b = t->v[1], c = t->v[2];
 	int64_t  d1 = a1 - a0, d2 = a2 - a0;
-	int64_t  nx = d1 * (int64_t)(c.y - a.y) - d2 * (int64_t)(b.y - a.y);
-	int64_t  ny = d2 * (int64_t)(b.x - a.x) - d1 * (int64_t)(c.x - a.x);
+	int64_t  nx    = d1 * (int64_t)(c.y - a.y) - d2 * (int64_t)(b.y - a.y);
+	int64_t  ny    = d2 * (int64_t)(b.x - a.x) - d1 * (int64_t)(c.x - a.x);
 	int64_t  gx_hp = smul_shr(nx, R, 62 - 4 - 8);
 	int64_t  gy_hp = smul_shr(ny, R, 62 - 4 - 8);
-	uint64_t dx = (uint64_t)(int64_t)(ax * SUB_ONE + SUB_HALF - a.x);
-	uint64_t dy = (uint64_t)(int64_t)(ay * SUB_ONE + SUB_HALF - a.y);
+	uint64_t dx    = (uint64_t)(int64_t)(ax * SUB_ONE + SUB_HALF - a.x);
+	uint64_t dy    = (uint64_t)(int64_t)(ay * SUB_ONE + SUB_HALF - a.y);
 	/* wrapping uint64 products: bits 12..43 (all C needs) stay exact */
 	uint64_t off = (uint64_t)gx_hp * dx + (uint64_t)gy_hp * dy + (1u << 11);
 
@@ -400,7 +408,7 @@ static bool strip_rows(const tr_sv_t v[3], int32_t *y0, int32_t *y1)
 		return false; /* wholly left or right of the screen */
 	}
 
-	int32_t r0 = (int32_t)(lo >> TR_R3D_SUB);                /* <= first row with centre >= lo */
+	int32_t r0 = (int32_t)(lo >> TR_R3D_SUB);                 /* <= first row with centre >= lo */
 	int32_t r1 = (int32_t)((hi + SUB_ONE - 1) >> TR_R3D_SUB); /* > last row with centre <= hi */
 
 	*y0 = r0 > *y0 ? r0 : *y0;
@@ -483,7 +491,7 @@ static bool tri_setup(tr_tri_setup_t *s, const tr_tri_t *t, bool planes)
 	int32_t y_max = planes ? TR_VIEW_H : TR_R3D_H;
 	int32_t y0    = clampi(miny >> TR_R3D_SUB, 0, y_max);
 	int32_t y1    = clampi((maxy + SUB_ONE - 1) >> TR_R3D_SUB, 0, y_max);
-	tr_sv_t ea[3] = {a, b, c}, eb[3] = {b, c, a};
+	tr_sv_t ea[3] = { a, b, c }, eb[3] = { b, c, a };
 
 	for (int i = 0; i < 3; i++) {
 		if (eb[i].y == ea[i].y) {
@@ -578,7 +586,7 @@ static bool tri_setup(tr_tri_setup_t *s, const tr_tri_t *t, bool planes)
 		plane_init(&s->pl[PL_U], U[0], U[1], U[2], t, R, ax, yp);
 		plane_init(&s->pl[PL_V], V[0], V[1], V[2], t, R, ax, yp);
 	} else if (t->flags & TR_TRI_GOURAUD) {
-		static const uint8_t sh[3] = {11, 5, 0}, mk[3] = {0x1F, 0x3F, 0x1F};
+		static const uint8_t sh[3] = { 11, 5, 0 }, mk[3] = { 0x1F, 0x3F, 0x1F };
 
 		for (int ch = 0; ch < 3; ch++) {
 			int64_t v[3];
@@ -589,7 +597,12 @@ static bool tri_setup(tr_tri_setup_t *s, const tr_tri_t *t, bool planes)
 			plane_init(&s->pl[PL_R + ch], v[0], v[1], v[2], t, R, ax, yp);
 		}
 	}
-	for (int k = 0, np = (t->flags & TR_TRI_TEX) ? PL_V + 1 : (t->flags & TR_TRI_GOURAUD) ? PL_B + 1 : 1; k < np; k++) {
+	for (int k  = 0,
+	         np = (t->flags & TR_TRI_TEX)       ? PL_V + 1
+	              : (t->flags & TR_TRI_GOURAUD) ? PL_B + 1
+	                                            : 1;
+	     k < np;
+	     k++) {
 		s->pl[k].row += s->pl[k].gy * (uint32_t)(y0 - yp);
 	}
 	return true;
@@ -634,8 +647,12 @@ static inline void persp_uv(uint32_t U, uint32_t V, persp_t p, int32_t *u, int32
  * scalar sequence -- and are checked against the scalar ones by
  * tr_raster_selfcheck(). dst/z never alias each other or the texture.
  */
-static void span_flat_z_scalar(uint16_t *restrict dst, uint16_t *restrict z, int32_t n, uint32_t W, uint32_t gw,
-			       uint16_t c)
+static void span_flat_z_scalar(uint16_t *restrict dst,
+                               uint16_t *restrict z,
+                               int32_t  n,
+                               uint32_t W,
+                               uint32_t gw,
+                               uint16_t c)
 {
 	for (int32_t i = 0; i < n; i++) {
 		uint16_t w = (uint16_t)(W >> 16);
@@ -648,8 +665,11 @@ static void span_flat_z_scalar(uint16_t *restrict dst, uint16_t *restrict z, int
 	}
 }
 
-static void span_gouraud_z_scalar(uint16_t *restrict dst, uint16_t *restrict z, int32_t n, const uint32_t s[PL_N],
-				  const plane_t pl[PL_N])
+static void span_gouraud_z_scalar(uint16_t *restrict dst,
+                                  uint16_t *restrict z,
+                                  int32_t        n,
+                                  const uint32_t s[PL_N],
+                                  const plane_t  pl[PL_N])
 {
 	uint32_t W = s[PL_W], R = s[PL_R], G = s[PL_G], B = s[PL_B];
 	uint32_t gw = pl[PL_W].gx, gr = pl[PL_R].gx, gg = pl[PL_G].gx, gb = pl[PL_B].gx;
@@ -669,7 +689,10 @@ static void span_gouraud_z_scalar(uint16_t *restrict dst, uint16_t *restrict z, 
 }
 
 /* TR_TRI_NOZ Gouraud: the same colours, no z read or write. */
-static void span_gouraud_scalar(uint16_t *restrict dst, int32_t n, const uint32_t s[PL_N], const plane_t pl[PL_N])
+static void span_gouraud_scalar(uint16_t *restrict dst,
+                                int32_t        n,
+                                const uint32_t s[PL_N],
+                                const plane_t  pl[PL_N])
 {
 	uint32_t R = s[PL_R], G = s[PL_G], B = s[PL_B];
 
@@ -688,7 +711,7 @@ static void span_gouraud_scalar(uint16_t *restrict dst, int32_t n, const uint32_
 /* {base, base+g, base+2g, base+3g} and the next 4 lanes. */
 static inline void lanes(uint32_t base, uint32_t g, uint32x4_t *lo, uint32x4_t *hi)
 {
-	static const uint32_t k[4] = {0, 1, 2, 3};
+	static const uint32_t k[4] = { 0, 1, 2, 3 };
 
 	*lo = vmlaq_n_u32(vdupq_n_u32(base), vld1q_u32(k), g);
 	*hi = vaddq_u32(*lo, vdupq_n_u32(g * 4u));
@@ -713,7 +736,7 @@ static inline uint16x8_t hi16(uint32x4_t lo, uint32x4_t hi)
  * cycles. n < 8: the scalar loop (no vector setup to repay; masking a single
  * chunk measured slower there).
  */
-static const uint16_t lane_idx[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+static const uint16_t lane_idx[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
 
 /* Mask m to its first `left` lanes (left < 8). */
 static inline uint16x8_t lanes_below(uint16x8_t m, int32_t left)
@@ -721,9 +744,13 @@ static inline uint16x8_t lanes_below(uint16x8_t m, int32_t left)
 	return vandq_u16(m, vcltq_u16(vld1q_u16(lane_idx), vdupq_n_u16((uint16_t)left)));
 }
 
-static inline __attribute__((always_inline)) void span_flat_z(uint16_t *restrict dst, uint16_t *restrict z,
-								     int32_t n, uint32_t W, uint32_t gw, uint16_t c,
-								     int32_t room)
+static inline __attribute__((always_inline)) void span_flat_z(uint16_t *restrict dst,
+                                                              uint16_t *restrict z,
+                                                              int32_t  n,
+                                                              uint32_t W,
+                                                              uint32_t gw,
+                                                              uint16_t c,
+                                                              int32_t  room)
 {
 	if (n < 8) {
 		span_flat_z_scalar(dst, z, n, W, gw, c);
@@ -759,9 +786,12 @@ static inline __attribute__((always_inline)) void span_flat_z(uint16_t *restrict
 	}
 }
 
-static inline __attribute__((always_inline)) void span_gouraud_z(uint16_t *restrict dst, uint16_t *restrict z,
-									int32_t n, const uint32_t s[PL_N],
-									const plane_t pl[PL_N], int32_t room)
+static inline __attribute__((always_inline)) void span_gouraud_z(uint16_t *restrict dst,
+                                                                 uint16_t *restrict z,
+                                                                 int32_t        n,
+                                                                 const uint32_t s[PL_N],
+                                                                 const plane_t  pl[PL_N],
+                                                                 int32_t        room)
 {
 	if (n < 8) {
 		span_gouraud_z_scalar(dst, z, n, s, pl);
@@ -782,8 +812,8 @@ static inline __attribute__((always_inline)) void span_gouraud_z(uint16_t *restr
 		uint16x8_t w   = hi16(w0, w1);
 		uint16x8_t zo  = vld1q_u16(&z[i]);
 		uint16x8_t m   = vcgtq_u16(w, zo);
-		uint16x8_t col = vorrq_u16(vorrq_u16(vshlq_n_u16(hi16(r0, r1), 11), vshlq_n_u16(hi16(g0, g1), 5)),
-					   hi16(b0, b1));
+		uint16x8_t col = vorrq_u16(
+		    vorrq_u16(vshlq_n_u16(hi16(r0, r1), 11), vshlq_n_u16(hi16(g0, g1), 5)), hi16(b0, b1));
 
 		RASTER_CHECK(i + 8 <= room); /* this chunk stays inside the row */
 		if (n - i < 8) {
@@ -813,9 +843,11 @@ static inline __attribute__((always_inline)) void span_gouraud_z(uint16_t *restr
 
 /* NOZ Gouraud, 8 px a chunk; the ragged end as span_flat_z() (the
  * overlapped form rewrites the overlapped pixels with the values they hold). */
-static inline __attribute__((always_inline)) void span_gouraud(uint16_t *restrict dst, int32_t n,
-								const uint32_t s[PL_N], const plane_t pl[PL_N],
-								int32_t room)
+static inline __attribute__((always_inline)) void span_gouraud(uint16_t *restrict dst,
+                                                               int32_t        n,
+                                                               const uint32_t s[PL_N],
+                                                               const plane_t  pl[PL_N],
+                                                               int32_t        room)
 {
 	if (n < 8) {
 		span_gouraud_scalar(dst, n, s, pl);
@@ -831,8 +863,8 @@ static inline __attribute__((always_inline)) void span_gouraud(uint16_t *restric
 	lanes(s[PL_G], gg, &g0, &g1);
 	lanes(s[PL_B], gb, &b0, &b1);
 	for (;;) {
-		uint16x8_t col = vorrq_u16(vorrq_u16(vshlq_n_u16(hi16(r0, r1), 11), vshlq_n_u16(hi16(g0, g1), 5)),
-					   hi16(b0, b1));
+		uint16x8_t col = vorrq_u16(
+		    vorrq_u16(vshlq_n_u16(hi16(r0, r1), 11), vshlq_n_u16(hi16(g0, g1), 5)), hi16(b0, b1));
 
 		RASTER_CHECK(i + 8 <= room); /* this chunk stays inside the row */
 		if (n - i < 8) {
@@ -862,7 +894,7 @@ static inline __attribute__((always_inline)) void span_gouraud(uint16_t *restric
 #else
 
 /* No NEON: `room` (the masked-end bound) is unused. */
-#define span_flat_z(d, z, n, W, gw, c, room)  span_flat_z_scalar(d, z, n, W, gw, c)
+#define span_flat_z(d, z, n, W, gw, c, room) span_flat_z_scalar(d, z, n, W, gw, c)
 #define span_gouraud_z(d, z, n, s, pl, room) span_gouraud_z_scalar(d, z, n, s, pl)
 #define span_gouraud(d, n, s, pl, room)      span_gouraud_scalar(d, n, s, pl)
 
@@ -880,8 +912,16 @@ static inline __attribute__((always_inline)) void span_gouraud(uint16_t *restric
  * texel indices are computed in vectors and gathered with scalar loads
  * (every index is masked into the texture, so all 8 loads are in bounds
  * even where the z test fails). tr_raster_selfcheck() compares the two. */
-static inline void tex_run_scalar(uint16_t *restrict dst, uint16_t *restrict z, int32_t m, uint32_t W, uint32_t gw,
-				  uint32_t ua, uint32_t du, uint32_t va, uint32_t dv, const uint16_t *restrict tex)
+static inline void tex_run_scalar(uint16_t *restrict dst,
+                                  uint16_t *restrict z,
+                                  int32_t  m,
+                                  uint32_t W,
+                                  uint32_t gw,
+                                  uint32_t ua,
+                                  uint32_t du,
+                                  uint32_t va,
+                                  uint32_t dv,
+                                  const uint16_t *restrict tex)
 {
 	for (int32_t i = 0; i < m; i++) {
 		uint16_t w = (uint16_t)(W >> 16);
@@ -903,9 +943,13 @@ static inline void tex_run_scalar(uint16_t *restrict dst, uint16_t *restrict z, 
  * 127) << 1), so the A32 needs LSR, AND, LSR, AND, ORR, LDRH, STRH and the two
  * ADDs a pixel (70 instructions per 8-px sub-span, fully unrolled, no
  * spills). Same texel sequence as tex_run_scalar(). */
-static inline __attribute__((always_inline)) void tex_run_noz(uint16_t *restrict dst, int32_t m, uint32_t ua,
-							       uint32_t du, uint32_t va, uint32_t dv,
-							       const uint16_t *restrict tex)
+static inline __attribute__((always_inline)) void tex_run_noz(uint16_t *restrict dst,
+                                                              int32_t  m,
+                                                              uint32_t ua,
+                                                              uint32_t du,
+                                                              uint32_t va,
+                                                              uint32_t dv,
+                                                              const uint16_t *restrict tex)
 {
 	const uint8_t *tb = (const uint8_t *)tex;
 
@@ -922,10 +966,14 @@ static inline __attribute__((always_inline)) void tex_run_noz(uint16_t *restrict
 
 /* tex_run_noz() through a fogged palette row: the texel is a byte, idx[] a
  * byte offset into `pal` (entry * 2), so the A32 adds just one LDRB. */
-static inline __attribute__((always_inline)) void tex_run_noz_fog(uint16_t *restrict dst, int32_t m, uint32_t ua,
-								   uint32_t du, uint32_t va, uint32_t dv,
-								   const uint8_t *restrict idx,
-								   const uint8_t *restrict pal)
+static inline __attribute__((always_inline)) void tex_run_noz_fog(uint16_t *restrict dst,
+                                                                  int32_t  m,
+                                                                  uint32_t ua,
+                                                                  uint32_t du,
+                                                                  uint32_t va,
+                                                                  uint32_t dv,
+                                                                  const uint8_t *restrict idx,
+                                                                  const uint8_t *restrict pal)
 {
 #pragma GCC unroll 8
 	for (int32_t i = 0; i < m; i++) {
@@ -946,8 +994,15 @@ static inline uint32_t fog_level(uint32_t W)
 }
 
 #if defined(__ARM_NEON)
-static inline __attribute__((always_inline)) void tex_run8(uint16_t *restrict dst, uint16_t *restrict z, uint32_t W, uint32_t gw, uint32_t ua,
-			    uint32_t du, uint32_t va, uint32_t dv, const uint16_t *restrict tex)
+static inline __attribute__((always_inline)) void tex_run8(uint16_t *restrict dst,
+                                                           uint16_t *restrict z,
+                                                           uint32_t W,
+                                                           uint32_t gw,
+                                                           uint32_t ua,
+                                                           uint32_t du,
+                                                           uint32_t va,
+                                                           uint32_t dv,
+                                                           const uint16_t *restrict tex)
 {
 	uint32x4_t w0, w1, u0, u1, v0, v1;
 	lanes(W, gw, &w0, &w1);
@@ -961,16 +1016,16 @@ static inline __attribute__((always_inline)) void tex_run8(uint16_t *restrict ds
 	uint16x8_t uh = vcombine_u16(vshrn_n_u32(u0, 13), vshrn_n_u32(u1, 13));
 	uint16x8_t vh = vcombine_u16(vshrn_n_u32(v0, 14), vshrn_n_u32(v1, 14));
 	uint16x8_t of = vorrq_u16(vshlq_n_u16(vandq_u16(vh, vdupq_n_u16(TR_TEX_DIM - 1)), 8),
-				  vandq_u16(uh, vdupq_n_u16((TR_TEX_DIM - 1) << 1)));
+	                          vandq_u16(uh, vdupq_n_u16((TR_TEX_DIM - 1) << 1)));
 	uint64x2_t ix = vreinterpretq_u64_u16(of);
-	uint64_t   a  = vgetq_lane_u64(ix, 0), b = vgetq_lane_u64(ix, 1);
-	uint32_t   q0 = (uint32_t)a, q1 = (uint32_t)(a >> 32), q2 = (uint32_t)b, q3 = (uint32_t)(b >> 32);
+	uint64_t   a = vgetq_lane_u64(ix, 0), b = vgetq_lane_u64(ix, 1);
+	uint32_t q0 = (uint32_t)a, q1 = (uint32_t)(a >> 32), q2 = (uint32_t)b, q3 = (uint32_t)(b >> 32);
 	const uint8_t *tb = (const uint8_t *)tex;
 #define TEXEL(o) ((uint32_t)*(const uint16_t *)(const void *)(tb + (o)))
 	uint64_t t0 = (uint64_t)(TEXEL(q0 & 0xFFFFu) | TEXEL(q0 >> 16) << 16) |
-		      (uint64_t)(TEXEL(q1 & 0xFFFFu) | TEXEL(q1 >> 16) << 16) << 32;
+	              (uint64_t)(TEXEL(q1 & 0xFFFFu) | TEXEL(q1 >> 16) << 16) << 32;
 	uint64_t t1 = (uint64_t)(TEXEL(q2 & 0xFFFFu) | TEXEL(q2 >> 16) << 16) |
-		      (uint64_t)(TEXEL(q3 & 0xFFFFu) | TEXEL(q3 >> 16) << 16) << 32;
+	              (uint64_t)(TEXEL(q3 & 0xFFFFu) | TEXEL(q3 >> 16) << 16) << 32;
 #undef TEXEL
 	uint16x8_t tv = vcombine_u16(vcreate_u16(t0), vcreate_u16(t1));
 
@@ -983,11 +1038,15 @@ static inline __attribute__((always_inline)) void tex_run8(uint16_t *restrict ds
 }
 #endif
 
-static inline __attribute__((always_inline)) void span_tex_z_impl(uint16_t *restrict dst, uint16_t *restrict z,
-									  int32_t n, const uint32_t s[PL_N],
-									  const plane_t pl[PL_N],
-									  const uint16_t *restrict tex, int vec,
-									  const int noz, const tr_tex_fog_t *fog)
+static inline __attribute__((always_inline)) void span_tex_z_impl(uint16_t *restrict dst,
+                                                                  uint16_t *restrict z,
+                                                                  int32_t        n,
+                                                                  const uint32_t s[PL_N],
+                                                                  const plane_t  pl[PL_N],
+                                                                  const uint16_t *restrict tex,
+                                                                  int                 vec,
+                                                                  const int           noz,
+                                                                  const tr_tex_fog_t *fog)
 {
 	uint32_t W = s[PL_W], U = s[PL_U], V = s[PL_V], Wd = W;
 	uint32_t gw = pl[PL_W].gx, gu = pl[PL_U].gx, gv = pl[PL_V].gx;
@@ -1021,7 +1080,8 @@ static inline __attribute__((always_inline)) void span_tex_z_impl(uint16_t *rest
 		if (noz) {
 			uint32_t lv = fog ? fog_level(W) : 0u;
 
-			if (lv != 0 || tex == NULL) { /* NULL: an index-only texture, level 0 through pal too (r3d.h) */
+			if (lv != 0 ||
+			    tex == NULL) { /* NULL: an index-only texture, level 0 through pal too (r3d.h) */
 				const uint8_t *pal = (const uint8_t *)(fog->pal + lv * fog->npal);
 
 				if (m == TR_TEX_SUB) {
@@ -1036,43 +1096,59 @@ static inline __attribute__((always_inline)) void span_tex_z_impl(uint16_t *rest
 			}
 		} else {
 #if TR_TEX_SUB == 8
-		/* One 8-px chunk per sub-span. */
+			/* One 8-px chunk per sub-span. */
 #if defined(__ARM_NEON)
-		if (vec && m == 8) {
-			tex_run8(&dst[x], &z[x], W, gw, ua, du, va, dv, tex);
-		} else if (vec && n >= 8) {
-			/* Ragged end: one chunk ending at pixel n - 1, lanes backed
+			if (vec && m == 8) {
+				tex_run8(&dst[x], &z[x], W, gw, ua, du, va, dv, tex);
+			} else if (vec && n >= 8) {
+				/* Ragged end: one chunk ending at pixel n - 1, lanes backed
 			 * up by 8 - m with this sub-span's own steps. The overlapped
 			 * pixels were z-tested already, so they cannot change (see
 			 * span_flat_z()). */
-			uint32_t bk = 8u - (uint32_t)m;
+				uint32_t bk = 8u - (uint32_t)m;
 
-			tex_run8(&dst[n - 8], &z[n - 8], W - gw * bk, gw, ua - du * bk, du, va - dv * bk, dv, tex);
-		} else
+				tex_run8(&dst[n - 8],
+				         &z[n - 8],
+				         W - gw * bk,
+				         gw,
+				         ua - du * bk,
+				         du,
+				         va - dv * bk,
+				         dv,
+				         tex);
+			} else
 #endif
-		{
-			tex_run_scalar(&dst[x], &z[x], m, W, gw, ua, du, va, dv, tex);
-		}
+			{
+				tex_run_scalar(&dst[x], &z[x], m, W, gw, ua, du, va, dv, tex);
+			}
 #else
-		for (int32_t j = 0; j < m; j += 8) {
-			int32_t  c  = m - j < 8 ? m - j : 8;
-			uint32_t Wj = W + gw * (uint32_t)j, uj = ua + du * (uint32_t)j, vj = va + dv * (uint32_t)j;
+			for (int32_t j = 0; j < m; j += 8) {
+				int32_t  c  = m - j < 8 ? m - j : 8;
+				uint32_t Wj = W + gw * (uint32_t)j, uj = ua + du * (uint32_t)j,
+				         vj = va + dv * (uint32_t)j;
 
 #if defined(__ARM_NEON)
-			if (vec && c == 8) {
-				tex_run8(&dst[x + j], &z[x + j], Wj, gw, uj, du, vj, dv, tex);
-				continue;
-			}
-			if (vec && x + j + c >= 8) { /* ragged end, as above */
-				uint32_t bk = 8u - (uint32_t)c;
+				if (vec && c == 8) {
+					tex_run8(&dst[x + j], &z[x + j], Wj, gw, uj, du, vj, dv, tex);
+					continue;
+				}
+				if (vec && x + j + c >= 8) { /* ragged end, as above */
+					uint32_t bk = 8u - (uint32_t)c;
 
-				tex_run8(&dst[x + j + c - 8], &z[x + j + c - 8], Wj - gw * bk, gw, uj - du * bk, du,
-					 vj - dv * bk, dv, tex);
-				continue;
-			}
+					tex_run8(&dst[x + j + c - 8],
+					         &z[x + j + c - 8],
+					         Wj - gw * bk,
+					         gw,
+					         uj - du * bk,
+					         du,
+					         vj - dv * bk,
+					         dv,
+					         tex);
+					continue;
+				}
 #endif
-			tex_run_scalar(&dst[x + j], &z[x + j], c, Wj, gw, uj, du, vj, dv, tex);
-		}
+				tex_run_scalar(&dst[x + j], &z[x + j], c, Wj, gw, uj, du, vj, dv, tex);
+			}
 #endif
 		}
 		W += gw * (uint32_t)m;
@@ -1081,14 +1157,22 @@ static inline __attribute__((always_inline)) void span_tex_z_impl(uint16_t *rest
 	}
 }
 
-static void span_tex_z_scalar(uint16_t *restrict dst, uint16_t *restrict z, int32_t n, const uint32_t s[PL_N],
-			      const plane_t pl[PL_N], const uint16_t *restrict tex)
+static void span_tex_z_scalar(uint16_t *restrict dst,
+                              uint16_t *restrict z,
+                              int32_t        n,
+                              const uint32_t s[PL_N],
+                              const plane_t  pl[PL_N],
+                              const uint16_t *restrict tex)
 {
 	span_tex_z_impl(dst, z, n, s, pl, tex, 0, 0, NULL);
 }
 
-static void span_tex_z(uint16_t *restrict dst, uint16_t *restrict z, int32_t n, const uint32_t s[PL_N],
-		       const plane_t pl[PL_N], const uint16_t *restrict tex)
+static void span_tex_z(uint16_t *restrict dst,
+                       uint16_t *restrict z,
+                       int32_t        n,
+                       const uint32_t s[PL_N],
+                       const plane_t  pl[PL_N],
+                       const uint16_t *restrict tex)
 {
 	span_tex_z_impl(dst, z, n, s, pl, tex, 1, 0, NULL);
 }
@@ -1101,10 +1185,17 @@ static void span_tex_z(uint16_t *restrict dst, uint16_t *restrict z, int32_t n, 
  * sub-span loop specialised per palette/plain texture. The same values in
  * the same order: tr_raster_selfcheck() holds it to the scalar span.
  */
-static inline __attribute__((always_inline)) void tex_cw_run(uint16_t *restrict dst, int32_t n, uint32_t U,
-							      uint32_t V, uint32_t gu, uint32_t gv, persp_t pw,
-							      const uint16_t *restrict tex, const uint8_t *restrict idx,
-							      const uint8_t *restrict pal, const int fogged)
+static inline __attribute__((always_inline)) void tex_cw_run(uint16_t *restrict dst,
+                                                             int32_t  n,
+                                                             uint32_t U,
+                                                             uint32_t V,
+                                                             uint32_t gu,
+                                                             uint32_t gv,
+                                                             persp_t  pw,
+                                                             const uint16_t *restrict tex,
+                                                             const uint8_t *restrict idx,
+                                                             const uint8_t *restrict pal,
+                                                             const int fogged)
 {
 	int32_t us, vs, ue, ve, x = 0;
 
@@ -1115,7 +1206,8 @@ static inline __attribute__((always_inline)) void tex_cw_run(uint16_t *restrict 
 		persp_uv(U, V, pw, &ue, &ve);
 
 		uint32_t ua = (uint32_t)us << 3, va = (uint32_t)vs << 3;
-		uint32_t du = (uint32_t)((ue - us) * 8 / TR_TEX_SUB), dv = (uint32_t)((ve - vs) * 8 / TR_TEX_SUB);
+		uint32_t du = (uint32_t)((ue - us) * 8 / TR_TEX_SUB),
+		         dv = (uint32_t)((ve - vs) * 8 / TR_TEX_SUB);
 
 		if (fogged) {
 			tex_run_noz_fog(&dst[x], TR_TEX_SUB, ua, du, va, dv, idx, pal);
@@ -1133,7 +1225,8 @@ static inline __attribute__((always_inline)) void tex_cw_run(uint16_t *restrict 
 		persp_uv(U, V, pw, &ue, &ve);
 
 		uint32_t ua = (uint32_t)us << 3, va = (uint32_t)vs << 3;
-		uint32_t du = k ? (uint32_t)((ue - us) * 8 / k) : 0, dv = k ? (uint32_t)((ve - vs) * 8 / k) : 0;
+		uint32_t du = k ? (uint32_t)((ue - us) * 8 / k) : 0,
+		         dv = k ? (uint32_t)((ve - vs) * 8 / k) : 0;
 
 		if (fogged) {
 			tex_run_noz_fog(&dst[x], m, ua, du, va, dv, idx, pal);
@@ -1148,8 +1241,12 @@ static inline __attribute__((always_inline)) void tex_cw_run(uint16_t *restrict 
  * texels on the stack and reload them into NEON for one store, where 8 STRH
  * straight to the band are cheaper. */
 __attribute__((optimize("no-tree-slp-vectorize"))) static void
-span_tex(uint16_t *restrict dst, int32_t n, const uint32_t s[PL_N], const plane_t pl[PL_N], const uint16_t *restrict tex,
-	 const tr_tex_fog_t *fog)
+span_tex(uint16_t *restrict dst,
+         int32_t        n,
+         const uint32_t s[PL_N],
+         const plane_t  pl[PL_N],
+         const uint16_t *restrict tex,
+         const tr_tex_fog_t *fog)
 {
 	if (pl[PL_W].gx != 0) {
 		span_tex_z_impl(dst, NULL, n, s, pl, tex, 0, 1, fog);
@@ -1160,8 +1257,17 @@ span_tex(uint16_t *restrict dst, int32_t n, const uint32_t s[PL_N], const plane_
 	persp_t  pw = persp_w(s[PL_W]);
 
 	if (lv != 0 || tex == NULL) { /* NULL: an index-only texture, level 0 through pal too (r3d.h) */
-		tex_cw_run(dst, n, s[PL_U], s[PL_V], pl[PL_U].gx, pl[PL_V].gx, pw, tex, fog->idx,
-			   (const uint8_t *)(fog->pal + lv * fog->npal), 1);
+		tex_cw_run(dst,
+		           n,
+		           s[PL_U],
+		           s[PL_V],
+		           pl[PL_U].gx,
+		           pl[PL_V].gx,
+		           pw,
+		           tex,
+		           fog->idx,
+		           (const uint8_t *)(fog->pal + lv * fog->npal),
+		           1);
 	} else {
 		tex_cw_run(dst, n, s[PL_U], s[PL_V], pl[PL_U].gx, pl[PL_V].gx, pw, tex, NULL, NULL, 0);
 	}
@@ -1177,20 +1283,32 @@ span_tex(uint16_t *restrict dst, int32_t n, const uint32_t s[PL_N], const plane_
  * cne != 0: the edge counts (cnr right bounds of cne) are constants too
  * (raster_rows_ne()); 0: read from su.
  */
-static inline __attribute__((always_inline)) void raster_rows(uint16_t *fb, uint32_t stride_px, int32_t fb_y0,
-							      const tr_tri_setup_t *su, const edge_dda_t *e,
-							      const plane_t *pl, int32_t ys, int32_t ye, int32_t y_lo,
-							      uint16_t *zband, uint16_t c, const uint16_t *tex,
-							      const tr_tex_fog_t *fog, const int kind, const int cnr,
-							      const int cne)
+static inline __attribute__((always_inline)) void raster_rows(uint16_t             *fb,
+                                                              uint32_t              stride_px,
+                                                              int32_t               fb_y0,
+                                                              const tr_tri_setup_t *su,
+                                                              const edge_dda_t     *e,
+                                                              const plane_t        *pl,
+                                                              int32_t               ys,
+                                                              int32_t               ye,
+                                                              int32_t               y_lo,
+                                                              uint16_t             *zband,
+                                                              uint16_t              c,
+                                                              const uint16_t       *tex,
+                                                              const tr_tex_fog_t   *fog,
+                                                              const int             kind,
+                                                              const int             cnr,
+                                                              const int             cne)
 {
-	const int32_t np = (kind == 3 || kind == 5) ? PL_V + 1 : (kind == 2 || kind == 4) ? PL_B + 1 : kind;
+	const int32_t np = (kind == 3 || kind == 5)   ? PL_V + 1
+	                   : (kind == 2 || kind == 4) ? PL_B + 1
+	                                              : kind;
 	const int32_t ne = cne ? cne : su->ne, nr = cne ? cnr : su->nr, ax = su->ax;
 	const int     pk = kind == 5   ? TR_PROF_NOZ_TEX
-			   : kind == 3 ? TR_PROF_TEX
-			   : kind == 2 ? TR_PROF_GOURAUD
-			   : kind == 1 ? TR_PROF_FLAT
-				       : TR_PROF_NOZ_FILL;
+	                   : kind == 3 ? TR_PROF_TEX
+	                   : kind == 2 ? TR_PROF_GOURAUD
+	                   : kind == 1 ? TR_PROF_FLAT
+	                               : TR_PROF_NOZ_FILL;
 	/* The DDAs and plane rows as locals: with the edge counts constant
 	 * (cne != 0) the loops below unroll and they live in registers. */
 	int32_t  q[3], rm[3], sq[3], sr[3], dn[3];
@@ -1198,7 +1316,8 @@ static inline __attribute__((always_inline)) void raster_rows(uint16_t *fb, uint
 
 	(void)pk;
 	for (int32_t i = 0; i < ne; i++) {
-		q[i] = e[i].quot, rm[i] = e[i].rem, sq[i] = e[i].step_quot, sr[i] = e[i].step_rem, dn[i] = e[i].denom;
+		q[i] = e[i].quot, rm[i] = e[i].rem, sq[i] = e[i].step_quot, sr[i] = e[i].step_rem,
+		dn[i] = e[i].denom;
 	}
 	for (int32_t k = 0; k < np; k++) {
 		row[k] = pl[k].row;
@@ -1225,7 +1344,9 @@ static inline __attribute__((always_inline)) void raster_rows(uint16_t *fb, uint
 
 		if (lo < hi_excl) {
 			uint16_t *dst = &fb[(uint32_t)(py - fb_y0) * stride_px + (uint32_t)lo];
-			uint16_t *zr  = kind >= 1 && kind <= 3 ? &zband[(uint32_t)(py - y_lo) * TR_R3D_W + (uint32_t)lo] : NULL;
+			uint16_t *zr  = kind >= 1 && kind <= 3
+			                    ? &zband[(uint32_t)(py - y_lo) * TR_R3D_W + (uint32_t)lo]
+			                    : NULL;
 			uint32_t  sv[PL_N];
 			int32_t   n = hi_excl - lo;
 
@@ -1260,12 +1381,20 @@ static inline __attribute__((always_inline)) void raster_rows(uint16_t *fb, uint
  * scene, flat, NOZ Gouraud); textured spans keep the generic loop (large
  * span code, few rows). Silicon (a32/payload-isa, 2026-09-23, -O3
  * -funroll-loops): the edge walk 107.2 -> 75.6 cyc/row. */
-static inline __attribute__((always_inline)) void raster_rows_ne(uint16_t *fb, uint32_t stride_px, int32_t fb_y0,
-								 const tr_tri_setup_t *su, const edge_dda_t *e,
-								 const plane_t *pl, int32_t ys, int32_t ye,
-								 int32_t y_lo, uint16_t *zband, uint16_t c,
-								 const uint16_t *tex, const tr_tex_fog_t *fog,
-								 const int kind)
+static inline __attribute__((always_inline)) void raster_rows_ne(uint16_t             *fb,
+                                                                 uint32_t              stride_px,
+                                                                 int32_t               fb_y0,
+                                                                 const tr_tri_setup_t *su,
+                                                                 const edge_dda_t     *e,
+                                                                 const plane_t        *pl,
+                                                                 int32_t               ys,
+                                                                 int32_t               ye,
+                                                                 int32_t               y_lo,
+                                                                 uint16_t             *zband,
+                                                                 uint16_t              c,
+                                                                 const uint16_t       *tex,
+                                                                 const tr_tex_fog_t   *fog,
+                                                                 const int             kind)
 {
 	if (su->ne == 2) {
 		raster_rows(fb, stride_px, fb_y0, su, e, pl, ys, ye, y_lo, zband, c, tex, fog, kind, 1, 2);
@@ -1284,8 +1413,14 @@ static inline __attribute__((always_inline)) void raster_rows_ne(uint16_t *fb, u
  * int32 adds (edge_dda_skip(), one multiply per plane) -- no divide here.
  * zband == NULL is the painter's path (flat `c`, tr_span_fill, no z).
  */
-static void raster_setup(uint16_t *fb, uint32_t stride_px, int32_t fb_y0, const tr_tri_t *t,
-			 const tr_tri_setup_t *su, int32_t y_lo, int32_t y_hi, uint16_t *zband)
+static void raster_setup(uint16_t             *fb,
+                         uint32_t              stride_px,
+                         int32_t               fb_y0,
+                         const tr_tri_t       *t,
+                         const tr_tri_setup_t *su,
+                         int32_t               y_lo,
+                         int32_t               y_hi,
+                         uint16_t             *zband)
 {
 	int32_t ys = su->y0 > y_lo ? su->y0 : y_lo;
 	int32_t ye = su->y1 < y_hi ? su->y1 : y_hi;
@@ -1294,18 +1429,20 @@ static void raster_setup(uint16_t *fb, uint32_t stride_px, int32_t fb_y0, const 
 		return;
 	}
 
-	int32_t        ne = su->ne;
-	edge_dda_t     e[3];
-	plane_t        pl[PL_N];
-	const uint16_t c     = t->c;
-	const uint8_t  flags = zband ? t->flags : 0;
-	const uint16_t *tex  = tr_r3d_tex[t->tex & (TR_TEX_MAX - 1)];
-	const int      noz   = (flags & TR_TRI_NOZ) != 0;
-	const tr_tex_fog_t *fog = tr_r3d_tex_fog[t->tex & (TR_TEX_MAX - 1)].idx ? &tr_r3d_tex_fog[t->tex & (TR_TEX_MAX - 1)] : NULL;
-	int32_t        np    = (flags & TR_TRI_TEX)       ? PL_V + 1
-			       : (flags & TR_TRI_GOURAUD) ? PL_B + 1
-			       : (!zband || noz)          ? 0
-							  : 1;
+	int32_t             ne = su->ne;
+	edge_dda_t          e[3];
+	plane_t             pl[PL_N];
+	const uint16_t      c     = t->c;
+	const uint8_t       flags = zband ? t->flags : 0;
+	const uint16_t     *tex   = tr_r3d_tex[t->tex & (TR_TEX_MAX - 1)];
+	const int           noz   = (flags & TR_TRI_NOZ) != 0;
+	const tr_tex_fog_t *fog   = tr_r3d_tex_fog[t->tex & (TR_TEX_MAX - 1)].idx
+	                                ? &tr_r3d_tex_fog[t->tex & (TR_TEX_MAX - 1)]
+	                                : NULL;
+	int32_t             np    = (flags & TR_TRI_TEX)       ? PL_V + 1
+	                            : (flags & TR_TRI_GOURAUD) ? PL_B + 1
+	                            : (!zband || noz)          ? 0
+	                                                       : 1;
 
 	if ((flags & TR_TRI_TEX) && tex == NULL && !(noz && fog != NULL)) {
 		return; /* no texture (an index-only one draws NOZ through its fog palette, r3d.h) */
@@ -1387,7 +1524,10 @@ void tr_r3d_sky(uint16_t *fb, uint32_t stride_px, int32_t horizon_y, uint16_t to
 
 /* 4x4 Bayer matrix: the ordered-dither threshold of pixel (x, y) is
  * (2 * M[y & 3][x & 3] + 1) / 32 of one RGB565 step. */
-static const uint8_t bayer4[4][4] = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
+static const uint8_t bayer4[4][4] = { { 0, 8, 2, 10 },
+	                                  { 12, 4, 14, 6 },
+	                                  { 3, 11, 1, 9 },
+	                                  { 15, 7, 13, 5 } };
 
 /* RGB565 channels of c, << 8 (channel units, 8 fraction bits). */
 static void ch_q8(uint16_t c, int32_t v[3])
@@ -1418,7 +1558,8 @@ static void sky_q8(const tr_bg_t *bg, int32_t y, int32_t rows, int32_t v[3])
 	ch_q8(a, ca);
 	ch_q8(b, cb);
 	for (int k = 0; k < 3; k++) {
-		v[k] = ca[k] + (int32_t)(((int64_t)(cb[k] - ca[k]) * (int32_t)t) >> 16); /* 32x32 SMULL, no divide */
+		v[k] = ca[k] + (int32_t)(((int64_t)(cb[k] - ca[k]) * (int32_t)t) >>
+		                         16); /* 32x32 SMULL, no divide */
 	}
 }
 
@@ -1449,10 +1590,10 @@ static void fill_pattern(uint16_t *dst, uint32_t px, const uint16_t p[4])
 		uint32_t blk = n & ~63u;
 
 		__asm__ volatile("vmov q8, %q2\n\tvmov q9, %q2\n\tvmov q10, %q2\n\tvmov q11, %q2\n"
-				 "1:\tvstmia %0!, {d16-d23}\n\tsubs %1, %1, #64\n\tbne 1b"
-				 : "+r"(d), "+r"(blk)
-				 : "w"(v)
-				 : "d16", "d17", "d18", "d19", "d20", "d21", "d22", "d23", "cc", "memory");
+		                 "1:\tvstmia %0!, {d16-d23}\n\tsubs %1, %1, #64\n\tbne 1b"
+		                 : "+r"(d), "+r"(blk)
+		                 : "w"(v)
+		                 : "d16", "d17", "d18", "d19", "d20", "d21", "d22", "d23", "cc", "memory");
 		n &= 63u;
 	}
 	for (; n != 0; n -= 16u, d += 16) {
@@ -1519,9 +1660,9 @@ static inline int32_t mul15(int32_t a, int32_t b)
 #define HALO_AC 14745 /* 0.45 Q15 */
 
 typedef struct {
-	int32_t x0, x1;                           /* columns tabulated, multiples of 4 */
-	int16_t g[TR_R3D_W], c[TR_R3D_W];         /* Q15 column factors */
-	uint32_t mg, mc;                          /* exponent per px^2, << 16 */
+	int32_t  x0, x1;                   /* columns tabulated, multiples of 4 */
+	int16_t  g[TR_R3D_W], c[TR_R3D_W]; /* Q15 column factors */
+	uint32_t mg, mc;                   /* exponent per px^2, << 16 */
 } halo_cols_t;
 
 /* Base-2 exponent (1/64 units) of dx px at slope m (<< 16): dx <= halo_r + 3,
@@ -1533,7 +1674,7 @@ static inline uint32_t halo_arg(int32_t dx, uint32_t m)
 
 static void halo_cols(halo_cols_t *hc, const tr_bg_t *bg)
 {
-	int32_t  r = bg->halo_r;
+	int32_t  r  = bg->halo_r;
 	uint32_t r2 = (uint32_t)(r * r);
 
 	hc->mg = (HALO_KG << 16) / r2;
@@ -1549,23 +1690,34 @@ static void halo_cols(halo_cols_t *hc, const tr_bg_t *bg)
 }
 
 /* Pixels [x, x + n) of a halo row, scalar: the reference for the NEON form. */
-static void halo_px_scalar(uint16_t *dst, const halo_cols_t *hc, int32_t x, int32_t n, int32_t rg, int32_t rc,
-			   const int32_t v[3], const int32_t h[3], const uint8_t *bm)
+static void halo_px_scalar(uint16_t          *dst,
+                           const halo_cols_t *hc,
+                           int32_t            x,
+                           int32_t            n,
+                           int32_t            rg,
+                           int32_t            rc,
+                           const int32_t      v[3],
+                           const int32_t      h[3],
+                           const uint8_t     *bm)
 {
 	for (int32_t i = x; i < x + n; i++) {
 		int32_t in = (mul15(hc->g[i], rg) + mul15(hc->c[i], rc)) >> 7; /* 0..255 */
 		int32_t d  = 16 * bm[i & 3] + 8;
 
-		dst[i] = (uint16_t)(((v[0] + in * h[0] + d) >> 8) << 11 | ((v[1] + in * h[1] + d) >> 8) << 5 |
-				    ((v[2] + in * h[2] + d) >> 8));
+		dst[i] = (uint16_t)(((v[0] + in * h[0] + d) >> 8) << 11 |
+		                    ((v[1] + in * h[1] + d) >> 8) << 5 | ((v[2] + in * h[2] + d) >> 8));
 	}
 }
 
 /* The halo over sky row y (channels v, Q8): columns within halo_r of the
  * centre (rounded out to multiples of 4, so an 8-px chunk starts on dither
  * phase 0), re-dithered with the halo added. */
-static void halo_row(uint16_t *dst, const tr_bg_t *bg, const halo_cols_t *hc, int32_t y, const int32_t v[3],
-		     int vec)
+static void halo_row(uint16_t          *dst,
+                     const tr_bg_t     *bg,
+                     const halo_cols_t *hc,
+                     int32_t            y,
+                     const int32_t      v[3],
+                     int                vec)
 {
 	int32_t r = bg->halo_r, dy = y - bg->sun_y;
 
@@ -1582,7 +1734,7 @@ static void halo_row(uint16_t *dst, const tr_bg_t *bg, const halo_cols_t *hc, in
 	}
 
 	/* Halo channels, capped so v + 255 h never passes the channel max. */
-	static const int32_t mx[3] = {31 << 8, 63 << 8, 31 << 8};
+	static const int32_t mx[3] = { 31 << 8, 63 << 8, 31 << 8 };
 	int32_t              h[3];
 	int32_t              rg = mul15(exp2q15(halo_arg(dy, hc->mg)), HALO_AG);
 	int32_t              rc = mul15(exp2q15(halo_arg(dy, hc->mc)), HALO_AC);
@@ -1668,7 +1820,8 @@ static void band_stars(uint16_t *cband, int32_t y_lo, int32_t y_hi, int32_t rows
 		uint32_t b    = 96u + ((h >> 26) << 2) + ((h >> 8) & 3u) * 8u; /* 96..372 */
 		int32_t  fade = ht < 60 ? 0 : ht > 420 ? 360 : ht - 60;
 		uint32_t a    = (b * (uint32_t)fade) / 360u;
-		uint16_t c    = (h & 0x300u) == 0x300u ? 0xFF16u : 0xDF7Fu; /* a quarter warm, the rest blue-white */
+		uint16_t c =
+		    (h & 0x300u) == 0x300u ? 0xFF16u : 0xDF7Fu; /* a quarter warm, the rest blue-white */
 
 		a = a > 256u ? 256u : a;
 		a = (a * (256u - dim)) >> 8;
@@ -1702,8 +1855,8 @@ static void band_background(uint16_t *cband, int32_t y_lo, int32_t y_hi, const t
 {
 	int32_t     rows = clampi(bg->horizon, 0, TR_R3D_H);
 	halo_cols_t hc;
-	int         halo = (bg->fx & TR_BG_DITHER) && bg->halo_r >= 8 && y_lo < rows && y_lo < bg->sun_y + bg->halo_r &&
-		   y_hi > bg->sun_y - bg->halo_r;
+	int         halo = (bg->fx & TR_BG_DITHER) && bg->halo_r >= 8 && y_lo < rows &&
+	                   y_lo < bg->sun_y + bg->halo_r && y_hi > bg->sun_y - bg->halo_r;
 
 	if (halo) {
 		halo_cols(&hc, bg);
@@ -1715,7 +1868,7 @@ static void band_background(uint16_t *cband, int32_t y_lo, int32_t y_hi, const t
 		ys = y_lo;
 	}
 	if (ys < y_hi) {
-		const uint16_t g[4] = {bg->ground, bg->ground, bg->ground, bg->ground};
+		const uint16_t g[4] = { bg->ground, bg->ground, bg->ground, bg->ground };
 
 		fill_pattern(&cband[(uint32_t)(ys - y_lo) * TR_R3D_W], (uint32_t)(y_hi - ys) * TR_R3D_W, g);
 	}
@@ -1724,7 +1877,7 @@ static void band_background(uint16_t *cband, int32_t y_lo, int32_t y_hi, const t
 
 		if (!(bg->fx & TR_BG_DITHER)) {
 			uint16_t c    = sky_row(y, rows, bg->top, bg->bot);
-			uint16_t p[4] = {c, c, c, c};
+			uint16_t p[4] = { c, c, c, c };
 
 			fill_pattern(dst, TR_R3D_W, p);
 		} else {
@@ -1749,10 +1902,11 @@ static void band_background(uint16_t *cband, int32_t y_lo, int32_t y_hi, const t
 /* Finished band -> framebuffer: full rows, write-only to the FB (the FB is
  * Normal non-cacheable on the A32; a read there is a ~97 MB/s bus round
  * trip). NEON: 8-px loads from the cached band, 8-px stores to the FB. */
-static void band_copy(uint16_t *fb, uint32_t stride_px, const uint16_t *cband, int32_t y_lo, int32_t y_hi)
+static void
+band_copy(uint16_t *fb, uint32_t stride_px, const uint16_t *cband, int32_t y_lo, int32_t y_hi)
 {
 	for (int32_t y = y_lo; y < y_hi; y++) {
-		uint16_t *restrict       d = &fb[(uint32_t)y * stride_px];
+		uint16_t *restrict d       = &fb[(uint32_t)y * stride_px];
 		const uint16_t *restrict s = &cband[(uint32_t)(y - y_lo) * TR_R3D_W];
 
 #if defined(__ARM_NEON)
@@ -1765,8 +1919,17 @@ static void band_copy(uint16_t *fb, uint32_t stride_px, const uint16_t *cband, i
 	}
 }
 
-void tr_raster_band(uint16_t *fb, uint32_t stride_px, int y_lo, int y_hi, uint16_t *zband, uint16_t *cband,
-		    const tr_bg_t *bg, const tr_dl_t *dl, const tr_tri_setup_t *setup, const uint16_t *bin, uint32_t nbin)
+void tr_raster_band(uint16_t             *fb,
+                    uint32_t              stride_px,
+                    int                   y_lo,
+                    int                   y_hi,
+                    uint16_t             *zband,
+                    uint16_t             *cband,
+                    const tr_bg_t        *bg,
+                    const tr_dl_t        *dl,
+                    const tr_tri_setup_t *setup,
+                    const uint16_t       *bin,
+                    uint32_t              nbin)
 {
 	PROF_T0();
 	static const uint16_t zero[4];
@@ -1791,8 +1954,11 @@ void tr_tri_setup_range(const tr_dl_t *dl, tr_tri_setup_t *setup, uint32_t lo, u
 	PROF_ADD(TR_PROF_SETUP, 0, hi - lo);
 }
 
-void tr_bin_only(const tr_dl_t *dl, const tr_tri_setup_t *setup, uint16_t bins[TR_BANDS][TR_BIN_MAX],
-		 uint32_t counts[TR_BANDS], uint32_t *overflow)
+void tr_bin_only(const tr_dl_t        *dl,
+                 const tr_tri_setup_t *setup,
+                 uint16_t              bins[TR_BANDS][TR_BIN_MAX],
+                 uint32_t              counts[TR_BANDS],
+                 uint32_t             *overflow)
 {
 	PROF_T0();
 	memset(counts, 0, TR_BANDS * sizeof(counts[0]));
@@ -1803,7 +1969,8 @@ void tr_bin_only(const tr_dl_t *dl, const tr_tri_setup_t *setup, uint16_t bins[T
 			if (setup[i].y0 >= setup[i].y1 || ((dl->tri[i].flags & TR_TRI_NOZ) ? 0u : 1u) != pass) {
 				continue;
 			}
-			for (int32_t b = setup[i].y0 >> TR_BAND_SHIFT; b <= (setup[i].y1 - 1) >> TR_BAND_SHIFT; b++) {
+			for (int32_t b = setup[i].y0 >> TR_BAND_SHIFT; b <= (setup[i].y1 - 1) >> TR_BAND_SHIFT;
+			     b++) {
 				if (counts[b] < TR_BIN_MAX) {
 					bins[b][counts[b]++] = i;
 				} else {
@@ -1815,8 +1982,11 @@ void tr_bin_only(const tr_dl_t *dl, const tr_tri_setup_t *setup, uint16_t bins[T
 	PROF_ADD(TR_PROF_BIN, 0, dl->n);
 }
 
-void tr_bin_build(const tr_dl_t *dl, tr_tri_setup_t *setup, uint16_t bins[TR_BANDS][TR_BIN_MAX],
-		  uint32_t counts[TR_BANDS], uint32_t *overflow)
+void tr_bin_build(const tr_dl_t  *dl,
+                  tr_tri_setup_t *setup,
+                  uint16_t        bins[TR_BANDS][TR_BIN_MAX],
+                  uint32_t        counts[TR_BANDS],
+                  uint32_t       *overflow)
 {
 	tr_tri_setup_range(dl, setup, 0, dl->n);
 	tr_bin_only(dl, setup, bins, counts, overflow);
@@ -1845,7 +2015,7 @@ int tr_raster_selfcheck(void)
 					rs ^= rs << 13, rs ^= rs >> 17, rs ^= rs << 5;
 					sv[k] = rs;
 					rs ^= rs << 13, rs ^= rs >> 17, rs ^= rs << 5;
-					pl[k].gx = rs >> (k == PL_W ? 8 : 12); /* w wraps within a span */
+					pl[k].gx  = rs >> (k == PL_W ? 8 : 12); /* w wraps within a span */
 					pl[k].row = pl[k].gy = 0;
 				}
 				if (kind >= 2) { /* w >= 1/4 of near, u/v in a real range */
@@ -1898,8 +2068,9 @@ int tr_raster_selfcheck(void)
 		uint64_t a;
 
 		rs ^= rs << 13, rs ^= rs >> 17, rs ^= rs << 5;
-		a = i < 400u ? 1000u + i : i < 800u ? ((uint64_t)1 << (10u + i % 42u)) + (i & 3u) - 2u
-						   : (uint64_t)rs << (i % 21u) | 1u;
+		a = i < 400u   ? 1000u + i
+		    : i < 800u ? ((uint64_t)1 << (10u + i % 42u)) + (i & 3u) - 2u
+		               : (uint64_t)rs << (i % 21u) | 1u;
 		if (recip62(a) != ((uint64_t)1 << 62) / a) {
 			return 0;
 		}
@@ -1907,17 +2078,21 @@ int tr_raster_selfcheck(void)
 	/* The halo row: NEON chunks vs the scalar reference, over centres, radii
 	 * and rows that clip it at both screen edges and leave 4-px spans. */
 	{
-		static halo_cols_t hc;
-		static uint16_t    h0[TR_R3D_W], h1[TR_R3D_W];
-		static const int16_t cfg[][3] = {{360, 287, 0}, {5, 40, 20}, {715, 100, 99}, {200, 9, 8}, {-30, 64, 10}};
+		static halo_cols_t   hc;
+		static uint16_t      h0[TR_R3D_W], h1[TR_R3D_W];
+		static const int16_t cfg[][3] = {
+			{ 360, 287, 0 }, { 5, 40, 20 }, { 715, 100, 99 }, { 200, 9, 8 }, { -30, 64, 10 }
+		};
 
 		for (uint32_t k = 0; k < sizeof(cfg) / sizeof(cfg[0]); k++) {
-			tr_bg_t bg = {0};
+			tr_bg_t bg = { 0 };
 
 			bg.sun_x = cfg[k][0], bg.sun_y = 0, bg.halo_r = (uint16_t)cfg[k][1], bg.halo = 0xFFFFu;
 			halo_cols(&hc, &bg);
 			for (int32_t y = -cfg[k][1]; y <= cfg[k][1]; y += 3) {
-				int32_t v[3] = {(int32_t)(rs & 0x1FFFu), (int32_t)(rs >> 13 & 0x3FFFu), (int32_t)(rs >> 3 & 0x1FFFu)};
+				int32_t v[3] = { (int32_t)(rs & 0x1FFFu),
+					             (int32_t)(rs >> 13 & 0x3FFFu),
+					             (int32_t)(rs >> 3 & 0x1FFFu) };
 
 				rs ^= rs << 13, rs ^= rs >> 17, rs ^= rs << 5;
 				v[0] = v[0] > (31 << 8) ? 31 << 8 : v[0]; /* a channel never passes its max */

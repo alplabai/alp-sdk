@@ -173,7 +173,7 @@ int main(void)
 		assert(g.lane == 2u);                                  /* and the game never moved */
 
 		/* Re-acquire: box back in the centre. */
-		in = tr_track_update(&t, box(270, 100, 100, 300, 90));
+		in       = tr_track_update(&t, box(270, 100, 100, 300, 90));
 		bool run = tr_ctl_step(&c, &t, tr_track_player_lost(&t), g.lane);
 
 		assert(!run);

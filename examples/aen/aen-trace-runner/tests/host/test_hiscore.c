@@ -111,7 +111,8 @@ int main(void)
 		tr_initials_t e;
 
 		tr_ini_start(&e, "PRO", 2);
-		assert(strcmp(e.name, "PRO") == 0 && e.pos == 0u && e.rank == 2 && e.why == TR_INI_ENTERING);
+		assert(strcmp(e.name, "PRO") == 0 && e.pos == 0u && e.rank == 2 &&
+		       e.why == TR_INI_ENTERING);
 		assert(tr_ini_step(&e, lane(1)) && e.name[0] == 'Q');
 		assert(tr_ini_step(&e, lane(-1)) && tr_ini_step(&e, lane(-1)) && e.name[0] == 'O');
 		for (int k = 0; k < 14; k++) { /* O is the 15th letter */
@@ -166,7 +167,8 @@ int main(void)
 		}
 		assert(f + 1u == TR_INI_TIMEOUT_FRAMES && e.why == TR_INI_TIMEOUT);
 		assert(strlen(e.name) == 3u && e.pos < 3u);
-		assert(TR_INI_TIMEOUT_FRAMES == TR_HZ_FRAMES(800) && TR_INI_IDLE_FRAMES < TR_INI_TIMEOUT_FRAMES);
+		assert(TR_INI_TIMEOUT_FRAMES == TR_HZ_FRAMES(800) &&
+		       TR_INI_IDLE_FRAMES < TR_INI_TIMEOUT_FRAMES);
 	}
 
 	/* 7. A default that is not three letters is padded / cut to three. */
@@ -216,7 +218,7 @@ int main(void)
 		const int16_t lvl = 0, edge = TR_TILT_EDGE_Q8 + 10, pitch = TR_TILT_EDGE_Q8 + 10;
 		tr_initials_t e;
 		tr_tilt_t     t;
-		uint32_t      f = 0;
+		uint32_t      f    = 0;
 		const char   *want = "IX4"; /* 'P'->'I' 7 back; 'R'->'X' 6 on; 'O'->'4' 18 either way */
 
 		tr_tilt_init(&t);
@@ -224,9 +226,9 @@ int main(void)
 		tr_ini_start(&e, "PRO", 0);
 		for (int i = 0; i < 3; i++) {
 			const char *al = TR_INI_ALPHABET;
-			int         at = (int)(strchr(al, e.name[i]) - al), to = (int)(strchr(al, want[i]) - al);
-			int         fwd = (to - at + 37) % 37;
-			int16_t     x = (int16_t)((fwd <= 37 - fwd ? 1 : -1) * TR_TILT_STEER_SIGN * edge);
+			int     at = (int)(strchr(al, e.name[i]) - al), to = (int)(strchr(al, want[i]) - al);
+			int     fwd = (to - at + 37) % 37;
+			int16_t x   = (int16_t)((fwd <= 37 - fwd ? 1 : -1) * TR_TILT_STEER_SIGN * edge);
 
 			while (e.name[i] != want[i]) { /* hold until it shows */
 				assert(tr_ini_tilt_frame(&e, &t, x, lvl));
@@ -245,7 +247,8 @@ int main(void)
 			}
 		}
 		assert(e.why == TR_INI_DONE && strcmp(e.name, want) == 0);
-		printf("hiscore: worst-case letters entered in %.1f s (timeout %.0f s)\n", (double)f / TR_PANEL_HZ,
+		printf("hiscore: worst-case letters entered in %.1f s (timeout %.0f s)\n",
+		       (double)f / TR_PANEL_HZ,
 		       (double)TR_INI_TIMEOUT_FRAMES / TR_PANEL_HZ);
 		assert(f * 2u < TR_INI_TIMEOUT_FRAMES);
 		assert(!tr_tilt_run_over(&t) && t.playing); /* still here: the next run */
@@ -267,7 +270,10 @@ int main(void)
 		assert(e.name[0] == 'C'); /* the flick, then the first repeat on the delay's frame */
 	}
 
-	printf("hiscore: table of %u, initials idle %u / timeout %u frames at %u Hz\n", (unsigned)TR_HS_N,
-	       (unsigned)TR_INI_IDLE_FRAMES, (unsigned)TR_INI_TIMEOUT_FRAMES, (unsigned)TR_PANEL_HZ);
+	printf("hiscore: table of %u, initials idle %u / timeout %u frames at %u Hz\n",
+	       (unsigned)TR_HS_N,
+	       (unsigned)TR_INI_IDLE_FRAMES,
+	       (unsigned)TR_INI_TIMEOUT_FRAMES,
+	       (unsigned)TR_PANEL_HZ);
 	return 0;
 }

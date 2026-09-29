@@ -22,7 +22,8 @@ void tr_score_run_start(tr_score_t *s)
 
 void tr_score_step(tr_score_t *s, const tr_game_t *g)
 {
-	if (s->combo != 0u && g->tick - s->combo_tick >= TR_COMBO_WINDOW + (g->ev & TR_EV_PICKUP ? 1u : 0u)) {
+	if (s->combo != 0u &&
+	    g->tick - s->combo_tick >= TR_COMBO_WINDOW + (g->ev & TR_EV_PICKUP ? 1u : 0u)) {
 		s->combo = 0u; /* lapsed: this pickup (if any) came too late for it */
 	}
 	if (g->ev & TR_EV_PICKUP) {
@@ -43,7 +44,8 @@ void tr_score_step(tr_score_t *s, const tr_game_t *g)
 		s->metres = g->tick * TR_SCROLL_PX / TR_PX_PER_M;
 	}
 	s->score = s->metres + s->pickup_pts;
-	if (s->hs_top != 0u && !s->hs_done && s->score > s->hs_top && g->tick - s->combo_tick >= TR_HS_POPUP_GAP) {
+	if (s->hs_top != 0u && !s->hs_done && s->score > s->hs_top &&
+	    g->tick - s->combo_tick >= TR_HS_POPUP_GAP) {
 		s->hs_done    = 1u;
 		s->popup_hs   = 1u;
 		s->popup_pts  = 0u;

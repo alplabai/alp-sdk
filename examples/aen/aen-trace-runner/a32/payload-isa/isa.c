@@ -23,7 +23,10 @@ void isa_undef_record(void);
 
 static volatile uint32_t undefs;
 
-void isa_undef_record(void) { undefs++; }
+void isa_undef_record(void)
+{
+	undefs++;
+}
 
 static inline uint64_t vct(void)
 {
@@ -42,25 +45,26 @@ static inline uint32_t pmccntr(void)
 }
 
 /* One read; an UNDEF leaves ISA_REG_UNREAD and sets the register's bit. */
-#define RD(i, ins)                                                              \
-	do {                                                                    \
-		uint32_t v_ = ISA_REG_UNREAD, u_ = undefs;                      \
-		__asm__ volatile(ins : "+r"(v_)::"memory");                     \
-		R->reg[ISA_##i] = v_;                                           \
-		R->undef_mask |= (undefs != u_ ? 1u : 0u) << ISA_##i;           \
+#define RD(i, ins) \
+	do { \
+		uint32_t v_ = ISA_REG_UNREAD, u_ = undefs; \
+		__asm__ volatile(ins : "+r"(v_)::"memory"); \
+		R->reg[ISA_##i] = v_; \
+		R->undef_mask |= (undefs != u_ ? 1u : 0u) << ISA_##i; \
 	} while (0)
-#define RD2(i, j, ins)                                                          \
-	do {                                                                    \
+#define RD2(i, j, ins) \
+	do { \
 		uint32_t lo_ = ISA_REG_UNREAD, hi_ = ISA_REG_UNREAD, u_ = undefs; \
-		__asm__ volatile(ins : "+r"(lo_), "+r"(hi_)::"memory");         \
-		R->reg[ISA_##i] = lo_;                                          \
-		R->reg[ISA_##j] = hi_;                                          \
-		R->undef_mask |= (undefs != u_ ? 3u : 0u) << ISA_##i;           \
+		__asm__ volatile(ins : "+r"(lo_), "+r"(hi_)::"memory"); \
+		R->reg[ISA_##i] = lo_; \
+		R->reg[ISA_##j] = hi_; \
+		R->undef_mask |= (undefs != u_ ? 3u : 0u) << ISA_##i; \
 	} while (0)
 
 static void read_regs(void)
 {
-	_Static_assert(ISA_CPUACTLR_HI == ISA_CPUACTLR_LO + 1 && ISA_CPUECTLR_HI == ISA_CPUECTLR_LO + 1, "pairs");
+	_Static_assert(ISA_CPUACTLR_HI == ISA_CPUACTLR_LO + 1 && ISA_CPUECTLR_HI == ISA_CPUECTLR_LO + 1,
+	               "pairs");
 	RD(MIDR, "mrc p15, 0, %0, c0, c0, 0");
 	RD(MPIDR, "mrc p15, 0, %0, c0, c0, 5");
 	RD(REVIDR, "mrc p15, 0, %0, c0, c0, 6");
@@ -96,11 +100,12 @@ void payload_main(volatile tr_mbox_t *m)
 	R->magic = ISA_MAGIC;
 	isa_install_vectors();
 	/* PMCR.E | PMCR.C, PMCNTENSET.C: the renderer's prof_enable(). */
-	__asm__ volatile("mcr p15, 0, %0, c9, c12, 0\n\tmcr p15, 0, %1, c9, c12, 1\n\tisb" ::"r"(5u), "r"(0x80000000u));
+	__asm__ volatile("mcr p15, 0, %0, c9, c12, 0\n\tmcr p15, 0, %1, c9, c12, 1\n\tisb" ::"r"(5u),
+	                 "r"(0x80000000u));
 	__asm__ volatile("mrc p15, 0, %0, c14, c0, 0" : "=r"(frq));
 	R->cntfrq = frq;
-	t0 = vct();
-	c0 = pmccntr();
+	t0        = vct();
+	c0        = pmccntr();
 	while (vct() - t0 < frq / 100u) /* 10 ms */
 		;
 	R->clk_cyc   = pmccntr() - c0;
@@ -109,6 +114,5 @@ void payload_main(volatile tr_mbox_t *m)
 	isa_bench_run(R);
 	R->undef_n = undefs;
 	__asm__ volatile("dsb sy" ::: "memory");
-	if (m->ctrl_cmd == STUB_CMD_HALT)
-		m->ctrl_cmd = STUB_CMD_NONE;
+	if (m->ctrl_cmd == STUB_CMD_HALT) m->ctrl_cmd = STUB_CMD_NONE;
 }

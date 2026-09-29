@@ -46,7 +46,8 @@ static void ref_frame(tr_scene_t *s, const tr_frame_in_t *in)
 		 * reference must agree with what render_band() actually draws. */
 		int y_hi = (b + 1) * TR_BAND_H < TR_VIEW_H ? (b + 1) * TR_BAND_H : TR_VIEW_H;
 
-		tr_raster_band(ref, W, b * TR_BAND_H, y_hi, rz, rc, &bg, &rdl, rsetup, rbins[b], rcounts[b]);
+		tr_raster_band(
+		    ref, W, b * TR_BAND_H, y_hi, rz, rc, &bg, &rdl, rsetup, rbins[b], rcounts[b]);
 	}
 }
 
@@ -95,16 +96,16 @@ int main(void)
 	 * crash frame at half a tick of attract phase, both dual-core. */
 	in[3]            = in[2];
 	in[3].flags      = TR_FLAG_CRASH;
-	in[3].ents[4]    = (tr_pkt_ent_t){1, 0, 1, 0, 1110, 0};
+	in[3].ents[4]    = (tr_pkt_ent_t){ 1, 0, 1, 0, 1110, 0 };
 	in[3].crash_ent  = 4;
 	in[3].crash_kind = TR_CRASH_KIND_LOW;
 	in[4]            = in[3];
 	in[4].crash_tick = 3;
 	in[4].phase      = 32768;
-	in[4].flags     |= TR_FLAG_PHASE;
+	in[4].flags |= TR_FLAG_PHASE;
 
 	render_init();
-	render_hud     = 0;
+	render_hud = 0;
 	tr_scene_init(&rscene);
 	for (int f = 0; f < 5; f++) {
 		memset(fb, 0xA5 + f, sizeof(fb));
@@ -138,8 +139,11 @@ int main(void)
 
 		uint32_t crc = render_fb_crc(fb);
 
-		printf("a32 scene frame %d: %u tris, max bin %u, crc %08x\n", f, (unsigned)render_stats.tris,
-		       (unsigned)render_stats.max_bin, (unsigned)crc);
+		printf("a32 scene frame %d: %u tris, max bin %u, crc %08x\n",
+		       f,
+		       (unsigned)render_stats.tris,
+		       (unsigned)render_stats.max_bin,
+		       (unsigned)crc);
 		assert(crc == tr_crc32(0, ref, sizeof(ref)));
 		if (f == 0) {
 			assert(crc == TR_SCENE_GOLDEN_CRC);

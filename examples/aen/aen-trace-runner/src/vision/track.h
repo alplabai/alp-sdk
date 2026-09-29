@@ -125,7 +125,7 @@
 #define TR_TRACK_MIN_SCALE            8  /* px: a smaller scale measures nothing */
 
 typedef struct {
-	int16_t x, y, w, h;
+	int16_t  x, y, w, h;
 	uint8_t  confidence;
 	bool     valid;
 	uint32_t seq; /* the pslot seq it was published under; 0 = none, every box is new */
@@ -139,18 +139,19 @@ typedef struct {
 	uint8_t lane;
 	uint8_t lost_frames;
 	/* Rolling baseline, Q4 px; valid when `based`. */
-	bool    based;
-	int32_t base_cy, base_s, base_w;
+	bool     based;
+	int32_t  base_cy, base_s, base_w;
 	uint32_t last_seq; /* tr_box_t.seq of the last pose measured */
 	/* The last TR_TRACK_WIN measured poses: torso centre, shoulder-mid and
 	 * hip-mid y (after TR_CAM_FLIP_Y), the torso length (0: no hips) and
 	 * the shoulder width. */
-	int16_t win_cy[TR_TRACK_WIN], win_sho[TR_TRACK_WIN], win_hip[TR_TRACK_WIN], win_h[TR_TRACK_WIN], win_w[TR_TRACK_WIN];
+	int16_t win_cy[TR_TRACK_WIN], win_sho[TR_TRACK_WIN], win_hip[TR_TRACK_WIN], win_h[TR_TRACK_WIN],
+	    win_w[TR_TRACK_WIN];
 	uint8_t win_n, win_i;
 	/* Gestures: pending = consecutive frames the condition held; active =
 	 * frames since it started (0 = off). */
 	uint8_t jump_pend, duck_pend, jump_on, duck_on, land_cooldown;
-	uint8_t settle; /* poses left with no jump after a mid-stream re-seed */
+	uint8_t settle;      /* poses left with no jump after a mid-stream re-seed */
 	int16_t jump_ref_cy; /* torso centre at the jump's take-off */
 } tr_track_t;
 

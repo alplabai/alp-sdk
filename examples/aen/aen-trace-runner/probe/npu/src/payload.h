@@ -7,7 +7,8 @@
 
 #include <stdint.h>
 
-#define TR_NPU_PAYLOAD_ADDR    0x80100000u /* MRAM; clear of A32_APP (0x80020000) and the ATOC (0x80558000) */
+#define TR_NPU_PAYLOAD_ADDR \
+	0x80100000u /* MRAM; clear of A32_APP (0x80020000) and the ATOC (0x80558000) */
 #define TR_NPU_PAYLOAD_MAGIC   0x504E5254u /* 'TRNP' */
 #define TR_NPU_PAYLOAD_VERSION 1u
 #define TR_NPU_FRAMES_MAX      4u

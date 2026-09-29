@@ -55,10 +55,11 @@
  * printed fallback time.
  */
 #define TICK_MS      33
-#define TR_CAM_DECIM 10   /* 640x400 frame -> 64x40 = 2560 cells; see detect.h's header comment. */
+#define TR_CAM_DECIM 10 /* 640x400 frame -> 64x40 = 2560 cells; see detect.h's header comment. */
 
-#define TR_DISPLAY_OPEN_RETRIES 5   /* See tr_display_open()'s retry loop (whole-branch review F13). */
-#define TR_DISPLAY_RETRY_MS     200 /* Pause between attempts -- a guess at a power-up settling time. */
+#define TR_DISPLAY_OPEN_RETRIES \
+	5                           /* See tr_display_open()'s retry loop (whole-branch review F13). */
+#define TR_DISPLAY_RETRY_MS 200 /* Pause between attempts -- a guess at a power-up settling time. */
 
 /*
  * Bound on the calibration retry loop below: 450 ticks * TICK_MS(33 ms) =
@@ -77,7 +78,8 @@
 #define TR_CALIB_TIMEOUT_TICKS 450
 /* STEP BACK hint must hold this many ticks (~170 ms at 30 Hz) before it shows. */
 #define TR_STEP_BACK_HOLD_TICKS 5u
-#define TR_FALLBACK_BANNER_MS  2000 /* How long CHECK THE CAMERA stays up before play starts in the fallback mode. */
+#define TR_FALLBACK_BANNER_MS \
+	2000 /* How long CHECK THE CAMERA stays up before play starts in the fallback mode. */
 
 /*
  * Whole-branch review F6: the RAM console (the only diagnostic channel this
@@ -108,7 +110,7 @@ static tr_detect_t g_detect;
 #define TR_NPU_STALE_TICKS 5
 static volatile tr_pslot_t *const g_pslot = (volatile tr_pslot_t *)TR_MEM_PSLOT;
 static uint32_t                   g_pslot_seq;
-static uint32_t                   g_pslot_stale = TR_NPU_STALE_TICKS + 1u; /* no pose read yet: start stale */
+static uint32_t g_pslot_stale = TR_NPU_STALE_TICKS + 1u; /* no pose read yet: start stale */
 
 static void pslot_barrier(void)
 {
@@ -188,7 +190,6 @@ static void run_start(tr_game_t *g)
 	tr_react_init(&g_react);
 }
 
-
 /*
  * Presentation seam -- the only place the two TR_RENDER modes differ.
  *
@@ -212,8 +213,8 @@ static void ui_reset(void)
 static void ui_invite(tr_mode_t mode)
 {
 	g_invite = mode == TR_MODE_VISION ? TR_HUD_INVITE_STEP_IN
-		   : TR_TILT_TAKEOVER     ? TR_HUD_INVITE_TILT
-					  : TR_HUD_INVITE_NONE;
+	           : TR_TILT_TAKEOVER     ? TR_HUD_INVITE_TILT
+	                                  : TR_HUD_INVITE_NONE;
 }
 
 static void ui_banner(uint8_t id)
@@ -245,9 +246,10 @@ static void ui_present(const tr_game_t *g, bool attract_active, bool paused)
 	tr_a32_present(&in);
 	/* Published: the A32 renders this frame now, and the HUD repaint
 	 * overlaps it instead of the flip wait (P9). */
-	tr_hud_l2_present(&g_score, g_banner, attract_active, g_invite, &g_zone, tr_tilt.character, &g_hs, g_ini);
+	tr_hud_l2_present(
+	    &g_score, g_banner, attract_active, g_invite, &g_zone, tr_tilt.character, &g_hs, g_ini);
 	g_banner = TR_BANNER_NONE; /* banners are per frame, as in M55 mode's repaints */
-	tr_react_frame(&g_react); /* the reaction clock: real time a frame */
+	tr_react_frame(&g_react);  /* the reaction clock: real time a frame */
 }
 
 /* Hold the presented picture for `ms`: a published frame only reaches the
@@ -318,7 +320,8 @@ static void sfx_push(uint8_t kind, uint8_t param)
 static void sfx_frame(const tr_game_t *g, bool attract_on)
 {
 	tr_aev_t ev[TR_SFX_MAX_EVENTS];
-	unsigned n = tr_sfx_watch(&g_sfx, g, g_score.combo, attract_on, (int16_t)tr_display_height(), ev);
+	unsigned n =
+	    tr_sfx_watch(&g_sfx, g, g_score.combo, attract_on, (int16_t)tr_display_height(), ev);
 
 	for (unsigned i = 0; i < n; i++) {
 		sfx_push(ev[i].kind, ev[i].param);
@@ -581,11 +584,17 @@ static tr_box_t sense(bool joining)
  * camera itself is assumed broken, not just quiet, and this closes it for
  * good this run.
  */
-static void fall_back(tr_mode_t *mode, tr_ctl_t *ctl, tr_track_t **track_ptr, tr_attract_t *attract,
-		       uint32_t waited_ticks, bool imu_ok)
+static void fall_back(tr_mode_t    *mode,
+                      tr_ctl_t     *ctl,
+                      tr_track_t  **track_ptr,
+                      tr_attract_t *attract,
+                      uint32_t      waited_ticks,
+                      bool          imu_ok)
 {
-	printk("camera unresponsive after %u ticks (~%u ms): falling back to %s mode\n", waited_ticks,
-	       waited_ticks * TICK_MS, (TR_FALLBACK_MODE == TR_MODE_TILT) ? "tilt" : "attract");
+	printk("camera unresponsive after %u ticks (~%u ms): falling back to %s mode\n",
+	       waited_ticks,
+	       waited_ticks * TICK_MS,
+	       (TR_FALLBACK_MODE == TR_MODE_TILT) ? "tilt" : "attract");
 #if TR_INPUT_NPU
 	/* fix round 6: the generic message above says only "no usable box",
 	 * which is one hop removed from the real cause when the HP publishes
@@ -596,7 +605,8 @@ static void fall_back(tr_mode_t *mode, tr_ctl_t *ctl, tr_track_t **track_ptr, tr
 	 * one-line diagnosis instead of a reverse-engineering exercise. */
 	printk("  pose slot last hp_state=%u (0=RUNNING, 1=NO_CAMERA, 2=I2C_STUCK, 3=NO_FRAME, "
 	       "4=SRAM1_NOT_READY), stale=%u ticks\n",
-	       g_pslot_last.hp_state, g_pslot_stale);
+	       g_pslot_last.hp_state,
+	       g_pslot_stale);
 #endif
 	if (TR_FALLBACK_MODE == TR_MODE_TILT && !imu_ok) {
 		printk("WARNING : IMU unavailable too -- tilt mode has no input source this run\n");
@@ -659,8 +669,13 @@ static void enter_high_score(tr_game_t *g, tr_mode_t mode, tr_track_t *track, bo
 	}
 	g_ini = NULL;
 	(void)tr_hs_insert(&g_hs, g_score.score, e.name);
-	printk("hiscore : #%d %s %u (%s)\n", rank + 1, e.name, g_score.score,
-	       e.why == TR_INI_DONE ? "entered" : e.why == TR_INI_ENTERING ? "default" : "auto-filled");
+	printk("hiscore : #%d %s %u (%s)\n",
+	       rank + 1,
+	       e.name,
+	       g_score.score,
+	       e.why == TR_INI_DONE       ? "entered"
+	       : e.why == TR_INI_ENTERING ? "default"
+	                                  : "auto-filled");
 }
 
 /* A give-up: stay here, main's stack and every object on it alive, the
@@ -709,7 +724,7 @@ int main(void)
 	 * runs on as it did before the retry existed. */
 	(void)tr_panel_up();
 
-	bool display_ok = false;
+	bool display_ok  = false;
 	int  open_result = -1;
 
 	for (int attempt = 0; attempt < TR_DISPLAY_OPEN_RETRIES; attempt++) {
@@ -725,7 +740,8 @@ int main(void)
 			/* Deliberately not the "RESULT FAIL:" bench-log token (grepped
 			 * for by camera.c too) -- this boot may yet succeed, and that
 			 * token must mean "gave up", not "one attempt failed". */
-			printk("display : retrying open (attempt %d/%d)\n", attempt + 2, TR_DISPLAY_OPEN_RETRIES);
+			printk(
+			    "display : retrying open (attempt %d/%d)\n", attempt + 2, TR_DISPLAY_OPEN_RETRIES);
 			k_msleep(TR_DISPLAY_RETRY_MS);
 		}
 	}
@@ -776,8 +792,9 @@ int main(void)
 	 * is not enough (see detect.h's tr_detect_init() contract). Any other
 	 * outcome falls back to TR_FALLBACK_MODE. */
 	bool camera_ok = (tr_camera_open() == 0);
-	bool detect_ok = camera_ok &&
-			 (tr_detect_init(&g_detect, tr_camera_width(), tr_camera_height(), TR_CAM_DECIM) == 0);
+	bool detect_ok =
+	    camera_ok &&
+	    (tr_detect_init(&g_detect, tr_camera_width(), tr_camera_height(), TR_CAM_DECIM) == 0);
 
 	if (camera_ok && !detect_ok) {
 		/* Nothing will ever call capture_box() in this run: stop the CPI and
@@ -797,10 +814,12 @@ int main(void)
 	 * fallback as tilt -- and this console line is the only way to tell
 	 * which mode a bench run actually chose. */
 	printk("mode    : %s (camera_ok=%d detect_ok=%d imu_ok=%d)\n",
-	       (mode == TR_MODE_VISION)   ? "VISION"
+	       (mode == TR_MODE_VISION)    ? "VISION"
 	       : (mode == TR_MODE_ATTRACT) ? "ATTRACT"
-					   : "TILT",
-	       (int)camera_ok, (int)detect_ok, (int)imu_ok);
+	                                   : "TILT",
+	       (int)camera_ok,
+	       (int)detect_ok,
+	       (int)imu_ok);
 	if (mode == TR_MODE_TILT && !imu_ok) {
 		printk("WARNING : camera unusable and IMU unavailable -- no input source this run\n");
 	}
@@ -832,10 +851,11 @@ int main(void)
 	tr_lobby_init(&g_lobby);
 	tr_zone_reset(&g_zone);
 
-	bool     was_paused  = false;
-	uint32_t dead_ticks  = 0; /* Consecutive ticks the camera looked dead -- see fall_back() (F2). */
-	uint32_t run_count    = 0; /* Printed every TR_RUN_OVER_PRINT_EVERY runs -- see the death branch. */
-	tr_intent_t held      = tr_intent_none(); /* input gathered since the last paced step */
+	bool     was_paused = false;
+	uint32_t dead_ticks = 0; /* Consecutive ticks the camera looked dead -- see fall_back() (F2). */
+	uint32_t run_count =
+	    0; /* Printed every TR_RUN_OVER_PRINT_EVERY runs -- see the death branch. */
+	tr_intent_t held = tr_intent_none(); /* input gathered since the last paced step */
 
 	for (;;) {
 		int64_t  start  = k_uptime_get();
@@ -843,9 +863,9 @@ int main(void)
 
 		tr_rail5v_poll(); /* internally paced to ~3 Hz -- see rail5v_power.c */
 
-		tr_intent_t in           = tr_intent_none();
-		bool        pace_step    = true; /* false on the frames between paced game steps */
-		bool        player_lost  = false;
+		tr_intent_t in          = tr_intent_none();
+		bool        pace_step   = true; /* false on the frames between paced game steps */
+		bool        player_lost = false;
 
 		if (mode == TR_MODE_VISION) {
 			tr_box_t b = sense(attract.active);
@@ -938,8 +958,8 @@ int main(void)
 			 * vision boot starts in attract, which never pauses: there a
 			 * frameless streak is, so a dead camera still falls back. */
 			dead_ticks = now_paused       ? dead_ticks + 1u
-				     : attract.active ? tr_watchdog_tick(dead_ticks, tr_camera_ok())
-						      : 0u;
+			             : attract.active ? tr_watchdog_tick(dead_ticks, tr_camera_ok())
+			                              : 0u;
 #endif
 		}
 		if (mode == TR_MODE_VISION && dead_ticks >= TR_CALIB_TIMEOUT_TICKS) {
@@ -959,9 +979,9 @@ int main(void)
 		}
 		was_paused = now_paused;
 
-		uint64_t t_render = k_cycle_get_64();
+		uint64_t t_render   = k_cycle_get_64();
 		bool     attract_on = (mode == TR_MODE_VISION && attract.active) ||
-				  (mode == TR_MODE_ATTRACT && !tr_tilt.playing);
+		                      (mode == TR_MODE_ATTRACT && !tr_tilt.playing);
 		bool     joining    = mode == TR_MODE_VISION && tr_attract_joining(&attract);
 		/* Someone is there (any confident box on the window) but without
 		 * the torso to join -- hips out of frame, too close: tell them.
@@ -969,10 +989,13 @@ int main(void)
 		 * one pose before the torso window, which would flash the hint
 		 * for a frame ahead of STAND. */
 		static uint8_t step_back_hold;
-		bool     step_back_now = TR_INPUT_NPU && mode == TR_MODE_VISION && attract.active && !joining &&
-				  !g_present && tr_presence_is(&g_presence, false);
-		step_back_hold = step_back_now ? (step_back_hold < TR_STEP_BACK_HOLD_TICKS ? step_back_hold + 1u : step_back_hold) : 0u;
-		bool     step_back  = step_back_hold >= TR_STEP_BACK_HOLD_TICKS;
+		bool step_back_now = TR_INPUT_NPU && mode == TR_MODE_VISION && attract.active && !joining &&
+		                     !g_present && tr_presence_is(&g_presence, false);
+		step_back_hold =
+		    step_back_now
+		        ? (step_back_hold < TR_STEP_BACK_HOLD_TICKS ? step_back_hold + 1u : step_back_hold)
+		        : 0u;
+		bool step_back = step_back_hold >= TR_STEP_BACK_HOLD_TICKS;
 
 		/* The lobby (P16): standing, the world does not step and shows
 		 * no sub-tick motion (an attract intent rolled this frame is
@@ -987,8 +1010,9 @@ int main(void)
 			 * player's input is held over the frames between steps. */
 			tr_intent_t step_in = tr_intent_none();
 
-			pace_step = tr_play_frame(&g, &held, in, &g_phase_q16, tr_ramp_frame_q16(false, g.tick), &step_in);
-			in        = step_in; /* lane moves already applied this frame (state.h) */
+			pace_step = tr_play_frame(
+			    &g, &held, in, &g_phase_q16, tr_ramp_frame_q16(false, g.tick), &step_in);
+			in = step_in; /* lane moves already applied this frame (state.h) */
 		} else if (!run_step) {
 			held = tr_intent_none(); /* paused / resyncing: nothing carries over */
 		}
@@ -1024,7 +1048,9 @@ int main(void)
 			/* The join lobby: the demo plays on under "STEP INTO VIEW"
 			 * (the HUD's banner card, not the attract screen) until the
 			 * player has stood there TR_ATTRACT_JOIN_TICKS. */
-			ui_banner(joining ? TR_BANNER_STAND : step_back ? TR_BANNER_STEP_BACK : TR_BANNER_ATTRACT);
+			ui_banner(joining     ? TR_BANNER_STAND
+			          : step_back ? TR_BANNER_STEP_BACK
+			                      : TR_BANNER_ATTRACT);
 		}
 
 		/*
@@ -1055,7 +1081,10 @@ int main(void)
 			/* Commit the run to the session best -- a demo run never counts. */
 			tr_score_run_end(&g_score, !attract_on);
 			if (++run_count % TR_RUN_OVER_PRINT_EVERY == 0u) {
-				printk("run over: score=%u best=%u ticks=%u (run #%u)\n", g_score.score, g_score.best, g.tick,
+				printk("run over: score=%u best=%u ticks=%u (run #%u)\n",
+				       g_score.score,
+				       g_score.best,
+				       g.tick,
 				       run_count);
 			}
 			/*

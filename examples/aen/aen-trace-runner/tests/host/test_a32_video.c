@@ -40,10 +40,15 @@ static void frame(const tr_frame_in_t *in, uint16_t *f)
 
 int main(void)
 {
-	uint8_t *pool = mmap((void *)(uintptr_t)TR_MEM_CAM_POOL, TR_MEM_CAM_POOL_SIZE, PROT_READ | PROT_WRITE,
-			     MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+	uint8_t *pool = mmap((void *)(uintptr_t)TR_MEM_CAM_POOL,
+	                     TR_MEM_CAM_POOL_SIZE,
+	                     PROT_READ | PROT_WRITE,
+	                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE,
+	                     -1,
+	                     0);
 
-	assert(pool == (uint8_t *)(uintptr_t)TR_MEM_CAM_POOL); /* the renderer range-checks against this */
+	assert(pool ==
+	       (uint8_t *)(uintptr_t)TR_MEM_CAM_POOL); /* the renderer range-checks against this */
 	for (int i = 0; i < TR_CAM_SRC_W * TR_CAM_SRC_H; i++) {
 		pool[i] = (uint8_t)(i * 2654435761u >> 24);
 	}
@@ -75,14 +80,22 @@ int main(void)
 	host_hp_dbg_mem.magic       = TR_HP_DBG_MAGIC;
 	host_hp_dbg_mem.loop_hz_x10 = 251u;
 	for (int rot = 90; rot <= 270; rot += 180) {
-		tr_cam_view_write(&host_cam_view_mem, TR_MEM_CAM_POOL, 42u, TR_CAM_SRC_W, TR_CAM_SRC_H, (uint16_t)rot, 1u,
-				  pip_barrier);
+		tr_cam_view_write(&host_cam_view_mem,
+		                  TR_MEM_CAM_POOL,
+		                  42u,
+		                  TR_CAM_SRC_W,
+		                  TR_CAM_SRC_H,
+		                  (uint16_t)rot,
+		                  1u,
+		                  pip_barrier);
 		frame(&in, fb);
 		tr_cam_rot_rows(pool, TR_CAM_SRC_W, TR_CAM_SRC_H, rot, 0, TR_CAM_SRC_W, ref, TR_VID_W);
 		for (int vy = 0; vy < TR_VID_H; vy++) {
-			assert(memcmp(&fb[(TR_VID_Y0 + vy) * TR_R3D_W + 160], &ref[vy * TR_VID_W], 400u * 2u) == 0);
+			assert(memcmp(&fb[(TR_VID_Y0 + vy) * TR_R3D_W + 160], &ref[vy * TR_VID_W], 400u * 2u) ==
+			       0);
 		}
-		assert(at(fb, 2, 2) == COLOR_PANEL_BG && at(fb, 717, 637) == COLOR_PANEL_BG); /* no border */
+		assert(at(fb, 2, 2) == COLOR_PANEL_BG &&
+		       at(fb, 717, 637) == COLOR_PANEL_BG); /* no border */
 		/* lamps: cells of TR_VID_H/4, the square 16 px down, centred in the left strip */
 		assert(at(fb, 80, 0 * LAMP_CELL_H + 16 + LAMP_SQ / 2) == COLOR_LAMP_OFF); /* LEFT */
 		assert(at(fb, 80, 2 * LAMP_CELL_H + 16 + LAMP_SQ / 2) == COLOR_LAMP_ON);  /* JUMP */
@@ -124,8 +137,16 @@ int main(void)
 	}
 
 	/* 5. rotation 0, the landscape comparison path: 640x400 at x 40, row 120 */
-	tr_pslot_write(&host_pslot_mem, &(tr_pose_t){ 0 }, 0u, 0u, TR_HP_STATE_NO_FRAME, NULL, 2u, pip_barrier); /* no skeleton */
-	tr_cam_view_write(&host_cam_view_mem, TR_MEM_CAM_POOL, 43u, TR_CAM_SRC_W, TR_CAM_SRC_H, 0u, 0u, pip_barrier);
+	tr_pslot_write(&host_pslot_mem,
+	               &(tr_pose_t){ 0 },
+	               0u,
+	               0u,
+	               TR_HP_STATE_NO_FRAME,
+	               NULL,
+	               2u,
+	               pip_barrier); /* no skeleton */
+	tr_cam_view_write(
+	    &host_cam_view_mem, TR_MEM_CAM_POOL, 43u, TR_CAM_SRC_W, TR_CAM_SRC_H, 0u, 0u, pip_barrier);
 	frame(&in, fb);
 	for (int y = 0; y < TR_CAM_SRC_H; y++) {
 		for (int x = 160; x < 560; x++) { /* clear of the strips' own lamps/label */
@@ -137,11 +158,13 @@ int main(void)
 	assert(at(fb, 300, 60) == COLOR_PANEL_BG && at(fb, 300, 600) == COLOR_PANEL_BG);
 
 	/* 6. a view the renderer must not trust: wrong size -> background, no read */
-	tr_cam_view_write(&host_cam_view_mem, TR_MEM_CAM_POOL, 44u, TR_CAM_SRC_W, 200u, 270u, 0u, pip_barrier);
+	tr_cam_view_write(
+	    &host_cam_view_mem, TR_MEM_CAM_POOL, 44u, TR_CAM_SRC_W, 200u, 270u, 0u, pip_barrier);
 	frame(&in, fb);
 	assert(at(fb, 360, 320) == COLOR_PANEL_BG);
 
-	printf("a32 video: upright 1:1 at x 160 (90/270) and landscape at x 40 (0), strips, lamps, Hz, skeleton, "
+	printf("a32 video: upright 1:1 at x 160 (90/270) and landscape at x 40 (0), strips, lamps, Hz, "
+	       "skeleton, "
 	       "band order free\n");
 	return 0;
 }

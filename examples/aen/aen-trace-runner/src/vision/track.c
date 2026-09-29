@@ -20,12 +20,10 @@ static uint8_t band_of(const tr_track_t *t, int16_t centre)
 	int16_t e1 = t->lane_edges[1];
 
 	if (t->lane == 0) {
-		return (centre > e0 + TR_TRACK_HYST_PX) ? ((centre > e1 + TR_TRACK_HYST_PX) ? 2u : 1u)
-						       : 0u;
+		return (centre > e0 + TR_TRACK_HYST_PX) ? ((centre > e1 + TR_TRACK_HYST_PX) ? 2u : 1u) : 0u;
 	}
 	if (t->lane == 2u) {
-		return (centre < e1 - TR_TRACK_HYST_PX) ? ((centre < e0 - TR_TRACK_HYST_PX) ? 0u : 1u)
-						       : 2u;
+		return (centre < e1 - TR_TRACK_HYST_PX) ? ((centre < e0 - TR_TRACK_HYST_PX) ? 0u : 1u) : 2u;
 	}
 	/* Leaving the centre lane uses the plain edge, no margin: the margin only
 	 * guards the RETURN trip (above), which is what stops the flicker. */
@@ -216,7 +214,8 @@ tr_intent_t tr_track_update(tr_track_t *t, tr_box_t b)
 	bool moved = !near_pct(s * 16, t->base_s, TR_TRACK_REBASE_PCT);
 
 	if (t->duck_on > 0u && s * 16 < t->base_s && s * 16 * 2 >= t->base_s) {
-		moved = false; /* a held crouch leans the torso shorter: still the same player, down to half */
+		moved =
+		    false; /* a held crouch leans the torso shorter: still the same player, down to half */
 	}
 	if (!t->based || moved) {
 		bool mid_stream = t->based;
@@ -237,12 +236,13 @@ tr_intent_t tr_track_update(tr_track_t *t, tr_box_t b)
 
 	for (uint8_t k = 0; k < t->win_n; k++) {
 		if (t->win_cy[k] > low_cy) {
-			low_cy = t->win_cy[k], low_sho = t->win_sho[k], low_hip = t->win_hip[k], low_h = t->win_h[k];
+			low_cy = t->win_cy[k], low_sho = t->win_sho[k], low_hip = t->win_hip[k],
+			low_h = t->win_h[k];
 		}
 	}
 	win_push(t, cy, sho, hip, b.h, b.w);
 
-	int32_t k_px       = bs * TR_TRACK_JUMP_K_PCT; /* x100 */
+	int32_t k_px = bs * TR_TRACK_JUMP_K_PCT; /* x100 */
 	/* The torso length change: against the low frame (local) and against
 	 * the baseline, whichever is larger -- one noisy low frame alone lets
 	 * an approach's growth through (track.h). */
@@ -252,13 +252,13 @@ tr_intent_t tr_track_update(tr_track_t *t, tr_box_t b)
 	if (t->settle > 0u) {
 		t->settle--;
 	}
-	int16_t w_med      = width_med3(t);
-	bool    width_kept = w_med > 0 && near_pct((int32_t)w_med * 16, t->base_w, TR_TRACK_SCALE_TOL_PCT);
-	bool    rise       = t->settle == 0u && b.h > 0 && low_h > 0 && width_kept && (bcy - cy) * 100 > k_px &&
-			     (low_sho - sho) * 100 > k_px && (low_hip - hip) * 100 > k_px &&
-			     dh * 100 < (low_cy - cy) * TR_TRACK_JUMP_DH_PCT;
+	int16_t w_med   = width_med3(t);
+	bool width_kept = w_med > 0 && near_pct((int32_t)w_med * 16, t->base_w, TR_TRACK_SCALE_TOL_PCT);
+	bool rise = t->settle == 0u && b.h > 0 && low_h > 0 && width_kept && (bcy - cy) * 100 > k_px &&
+	            (low_sho - sho) * 100 > k_px && (low_hip - hip) * 100 > k_px &&
+	            dh * 100 < (low_cy - cy) * TR_TRACK_JUMP_DH_PCT;
 	bool drop = width_kept && (cy - bcy) * 100 > bs * TR_TRACK_DUCK_K_PCT &&
-		    s * 100 <= bs * (100 + TR_TRACK_SCALE_TOL_PCT);
+	            s * 100 <= bs * (100 + TR_TRACK_SCALE_TOL_PCT);
 
 	if (t->jump_on > 0u) {
 		t->jump_on++;
@@ -275,7 +275,8 @@ tr_intent_t tr_track_update(tr_track_t *t, tr_box_t b)
 			 * test missed, or a new stance. It is the baseline now. */
 			rebase(t, cy, s, b.w);
 			win_push(t, cy, sho, hip, b.h, b.w);
-		} else if (t->duck_on > TR_TRACK_HOLD_MIN && (cy - bcy) * 100 < bs * (TR_TRACK_DUCK_K_PCT / 2)) {
+		} else if (t->duck_on > TR_TRACK_HOLD_MIN &&
+		           (cy - bcy) * 100 < bs * (TR_TRACK_DUCK_K_PCT / 2)) {
 			t->duck_on = 0u;
 		}
 	} else {

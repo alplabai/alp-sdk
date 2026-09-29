@@ -28,10 +28,10 @@
 #define TR_HUD_STRIP 16  /* rows composed per scratch pass */
 
 /* tr_hud_view_t.mode */
-#define TR_HUD_PLAY    0u /* score, distance, combo, BEST, popups, corner logo */
-#define TR_HUD_ATTRACT 1u /* big logo, tagline, invitation */
-#define TR_HUD_CRASH   2u /* run over: final score + BEST card */
-#define TR_HUD_BANNER  3u /* a prompt card (TR_BANNER_STAND / _STEP_BACK / _CHECK_CAMERA) */
+#define TR_HUD_PLAY     0u /* score, distance, combo, BEST, popups, corner logo */
+#define TR_HUD_ATTRACT  1u /* big logo, tagline, invitation */
+#define TR_HUD_CRASH    2u /* run over: final score + BEST card */
+#define TR_HUD_BANNER   3u /* a prompt card (TR_BANNER_STAND / _STEP_BACK / _CHECK_CAMERA) */
 #define TR_HUD_INITIALS 4u /* booth: NEW HIGH SCORE, the three letters being picked */
 
 /* tr_hud_view_t.invite: the attract screen's call to action. */
@@ -39,11 +39,12 @@
 #define TR_HUD_INVITE_TILT    1u /* "TILT TO PLAY" (TR_TILT_TAKEOVER builds) */
 #define TR_HUD_INVITE_STEP_IN 2u /* "STEP IN TO PLAY" (vision mode) */
 
-#define TR_PERF_LINES 6 /* fix round 8 (maintainer ruling): the camera PiP's own label (a32/renderer/
+#define TR_PERF_LINES \
+	6 /* fix round 8 (maintainer ruling): the camera PiP's own label (a32/renderer/
                          * render.c draw_video_panel()) replaced this panel's 7th line, fix round 7
                          * item 5's own addition -- drawn once, in the video panel itself, not
                          * duplicated up here too. */
-#define TR_PERF_COLS  40
+#define TR_PERF_COLS 40
 
 typedef struct {
 	uint8_t  mode;   /* TR_HUD_* */
@@ -60,9 +61,9 @@ typedef struct {
 	uint32_t score, metres, best;
 	char     perf[TR_PERF_LINES][TR_PERF_COLS]; /* NUL-terminated, "" = blank line */
 	/* Booth (tr_hud_view_booth()): */
-	uint8_t       popup_hs; /* the popup is the new-high-score celebration (score.h), not a pickup's */
-	tr_hiscore_t  hs;       /* the table: a page of the attract card */
-	tr_initials_t ini;      /* TR_HUD_INITIALS: the entry as it stands */
+	uint8_t popup_hs;  /* the popup is the new-high-score celebration (score.h), not a pickup's */
+	tr_hiscore_t  hs;  /* the table: a page of the attract card */
+	tr_initials_t ini; /* TR_HUD_INITIALS: the entry as it stands */
 } tr_hud_view_t;
 
 #define TR_HUD_TILES 7
@@ -75,16 +76,18 @@ typedef struct {
 	uint32_t zone_seq;          /* last zone_seq seen */
 	uint32_t zone_start;        /* 40 Hz frame the zone name popup started */
 	bool     drawn;             /* false: every tile repaints on the next update */
-	uint32_t budget;            /* px repainted per update at most (0: no cap); see tr_hud_update() */
-	int      next;              /* the tile a capped update stopped at */
+	uint32_t budget; /* px repainted per update at most (0: no cap); see tr_hud_update() */
+	int      next;   /* the tile a capped update stopped at */
 } tr_hud_t;
 
 /* Blink and popup run on a 40 Hz frame clock (tr_hz_to40() of the update
  * count, game/panel_hz.h), so they keep their real time at a 30 Hz panel. */
 #define TR_HUD_POPUP_FRAMES 32u /* 0.8 s */
-#define TR_HUD_ZONE_FRAMES  110u /* 2.75 s: a zone's name on entry (P15), in the row under the play field's centre */
+#define TR_HUD_ZONE_FRAMES \
+	110u /* 2.75 s: a zone's name on entry (P15), in the row under the play field's centre */
 #define TR_HUD_BLINK_FRAMES 40u /* invitation period, 1 s, on for the first 28 */
-#define TR_HUD_PAGE_FRAMES  240u /* 6 s: the attract card turns between the logo and the high scores */
+#define TR_HUD_PAGE_FRAMES \
+	240u /* 6 s: the attract card turns between the logo and the high scores */
 
 /* Which HUD screen a presented frame gets: attract wins (a demo run's crash
  * keeps the attract card), then a game-over banner, then the prompts. */
@@ -93,7 +96,11 @@ uint8_t tr_hud_mode_of(uint8_t banner, bool attract);
 /* view <- the run's points and the screen; zone 0, no zone entry yet (see
  * tr_hud_view_zone()), no table or entry (tr_hud_view_booth()). perf[] and
  * character are left untouched. */
-void tr_hud_view_set(tr_hud_view_t *v, const tr_score_t *s, uint8_t banner, bool attract, uint8_t invite);
+void tr_hud_view_set(tr_hud_view_t    *v,
+                     const tr_score_t *s,
+                     uint8_t           banner,
+                     bool              attract,
+                     uint8_t           invite);
 
 /* view <- the booth's high-score table (the attract card shows it every
  * other TR_HUD_PAGE_FRAMES, in the card's middle: the character /
@@ -121,7 +128,11 @@ uint32_t tr_hud_update(tr_hud_t *h, uint16_t *fb, const tr_hud_view_t *v, uint32
 /* The whole HUD painted from scratch for `v` at hud frame `frame`, the
  * popups started at popup_start / zone_start (the reference tr_hud_update()
  * must match). */
-void tr_hud_paint_all(uint16_t *fb, const tr_hud_view_t *v, uint32_t frame, uint32_t popup_start, uint32_t zone_start);
+void tr_hud_paint_all(uint16_t            *fb,
+                      const tr_hud_view_t *v,
+                      uint32_t             frame,
+                      uint32_t             popup_start,
+                      uint32_t             zone_start);
 
 /* The character's name as the HUD shows it (out of range: Probe's). */
 const char *tr_hud_char_name(uint8_t character);
@@ -152,7 +163,8 @@ typedef struct {
 	uint64_t he_all_cyc;  /* HE all cycles, idle included (execution_cycles) */
 	uint32_t hp_magic;    /* sound ring identity word (tr_aring.h TR_ARING_MAGIC) */
 	uint32_t hp_state;    /* sound ring hp_state */
-	int32_t  rail5v_mw;   /* platform/rail5v_power.h tr_rail5v_avg_mw: carrier +5V net (SoM+LCD+regs), EMA mW */
+	int32_t
+	    rail5v_mw; /* platform/rail5v_power.h tr_rail5v_avg_mw: carrier +5V net (SoM+LCD+regs), EMA mW */
 	/* fix round 5: hp_vision's OWN beacon (src/ipc/tr_hp_dbg.h), read
 	 * alongside the sound ring's -- only one of the two is ever meaningful
 	 * on a given HP_APP (see tr_hp_dbg_magic's use in tr_perf_sample()).
@@ -174,7 +186,7 @@ typedef struct {
 	bool          have; /* a window start exists */
 	uint16_t      fps_x10;
 	uint8_t       a32_pct[2], he_pct;
-	uint8_t       hp_pct;       /* fix round 5: valid only when the last sample's hp_dbg_magic matched */
+	uint8_t       hp_pct; /* fix round 5: valid only when the last sample's hp_dbg_magic matched */
 	bool          hp_pct_valid; /* fix round 7: true only once hp_pct has been computed from a REAL
 				     * two-sample window, not its BSS-zero starting value -- see
 				     * tr_perf_sample()'s own comment for why "0%" alone is ambiguous
@@ -183,7 +195,10 @@ typedef struct {
 
 /* Returns true (and rewrites v->perf) when a window of >= TR_PERF_PERIOD_US
  * closed; the first call only opens a window. */
-bool tr_perf_sample(tr_perf_t *p, const tr_perf_raw_t *raw, const tr_perf_mem_t *mem, tr_hud_view_t *v);
+bool tr_perf_sample(tr_perf_t           *p,
+                    const tr_perf_raw_t *raw,
+                    const tr_perf_mem_t *mem,
+                    tr_hud_view_t       *v);
 
 /* The M55-HP's word on the panel, from the sound ring's status (P10,
  * tr_aring.h): "--" with no ring or with hp_state OFF (no HP sound firmware,

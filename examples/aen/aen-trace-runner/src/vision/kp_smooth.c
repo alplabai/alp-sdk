@@ -60,8 +60,8 @@ void tr_kp_smooth_step(tr_kp_smooth_t *s, tr_pose_t *p, uint32_t dt_ms)
 			continue;
 		}
 		if (!s->seeded[k]) {
-			s->ch[k][0] = (tr_oe_t){ (float)kp->x, 0.0f };
-			s->ch[k][1] = (tr_oe_t){ (float)kp->y, 0.0f };
+			s->ch[k][0]  = (tr_oe_t){ (float)kp->x, 0.0f };
+			s->ch[k][1]  = (tr_oe_t){ (float)kp->y, 0.0f };
 			s->seeded[k] = true;
 			s->held[k]   = 0u;
 			continue; /* the first sample passes through */

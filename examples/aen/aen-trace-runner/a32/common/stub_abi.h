@@ -76,15 +76,16 @@
 #define TR_STUB_ABI_H
 
 /* Where things are (plan sec 4, SRAM1 MiB 0). */
-#define STUB_MBOX_ADDR      0x02401000 /* == TR_MBOX_ADDR, asserted in stub.c */
-#define STUB_MRAM_BASE      0x80020000 /* A32_APP: TF-A erets here */
-#define STUB_TTB            0x02404000 /* stub L1 table, 16 KiB */
-#define STUB_BASE           0x0240C000 /* stub runs from here after relocation (<= 64 KiB) */
-#define STUB_LIMIT          0x0241C000
-#define STUB_STACK0_TOP     0x02420000 /* 0x0241C000..: core 0 */
-#define STUB_STACK1_TOP     0x02424000 /* 0x02420000..: core 1 */
-#define STUB_PAYLOAD_BASE   0x02500000
-#define STUB_PAYLOAD_LIMIT  0x02580000 /* 512 KiB image (ctrl_len) budget; a payload's .bss may run past it */
+#define STUB_MBOX_ADDR    0x02401000 /* == TR_MBOX_ADDR, asserted in stub.c */
+#define STUB_MRAM_BASE    0x80020000 /* A32_APP: TF-A erets here */
+#define STUB_TTB          0x02404000 /* stub L1 table, 16 KiB */
+#define STUB_BASE         0x0240C000 /* stub runs from here after relocation (<= 64 KiB) */
+#define STUB_LIMIT        0x0241C000
+#define STUB_STACK0_TOP   0x02420000 /* 0x0241C000..: core 0 */
+#define STUB_STACK1_TOP   0x02424000 /* 0x02420000..: core 1 */
+#define STUB_PAYLOAD_BASE 0x02500000
+#define STUB_PAYLOAD_LIMIT \
+	0x02580000 /* 512 KiB image (ctrl_len) budget; a payload's .bss may run past it */
 /* Pre-relocation fault park page in SRAM0 (unused tail above FB B, the
  * probe's old park address): 8 vectors + WFE loop at +0x20, record at +0x40
  * = {STUB_EARLY_MAGIC, core, code, lr}. Written only if a fault hits before
@@ -94,12 +95,12 @@
  * only for diagnosis. == tr_mbox.h TR_MHU0_WINDOW_LO/HI. */
 #define STUB_MHU0_WINDOW      0x02380000
 #define STUB_MHU0_WINDOW_SIZE 0x1000
-#define STUB_EARLY_PARK     0x023FE000
-#define STUB_EARLY_MAGIC    0x544C4645 /* "EFLT" */
+#define STUB_EARLY_PARK       0x023FE000
+#define STUB_EARLY_MAGIC      0x544C4645 /* "EFLT" */
 
 /* Fixed entry points inside the relocated stub (stub start.S, .vectors). */
-#define STUB_REENTER_CORE0  0x0240C020
-#define STUB_REENTER_CORE1  0x0240C024
+#define STUB_REENTER_CORE0 0x0240C020
+#define STUB_REENTER_CORE1 0x0240C024
 
 /* Release header, image offsets (patched by `mkpayload.py release`). The
  * payload lives in MRAM at STUB_MRAM_BASE + payload_off, is copied to
@@ -112,28 +113,28 @@
 #define STUB_MRAM_MAPPED_END 0x80100000 /* only MRAM section 0x800 is mapped */
 
 /* ctrl_cmd / stub_state / stub_core1_state values (tr_mbox.h comments). */
-#define STUB_CMD_NONE       0u
-#define STUB_CMD_LAUNCH     1u
-#define STUB_CMD_HALT       2u
-#define STUB_STATE_PARKED   0u
-#define STUB_STATE_RUNNING  1u
-#define STUB_STATE_FAULT    2u
-#define STUB_CORE1_OFF      0u
-#define STUB_CORE1_PARKED   1u
-#define STUB_CORE1_RUNNING  2u
+#define STUB_CMD_NONE      0u
+#define STUB_CMD_LAUNCH    1u
+#define STUB_CMD_HALT      2u
+#define STUB_STATE_PARKED  0u
+#define STUB_STATE_RUNNING 1u
+#define STUB_STATE_FAULT   2u
+#define STUB_CORE1_OFF     0u
+#define STUB_CORE1_PARKED  1u
+#define STUB_CORE1_RUNNING 2u
 
 /* fault_code values. fault_lr carries the banked LR for 1-4, and the
  * detail value noted for the software faults. */
-#define STUB_FAULT_NONE           0u
-#define STUB_FAULT_UNDEF          1u /* fault PC = lr - 4 */
-#define STUB_FAULT_PABORT         2u /* fault PC = lr - 4; IFSR/IFAR */
-#define STUB_FAULT_DABORT         3u /* fault PC = lr - 8; DFSR/DFAR */
-#define STUB_FAULT_UNEXPECTED     4u /* SVC/IRQ/FIQ/reserved vector */
-#define STUB_FAULT_BAD_CRC        5u /* lr = computed CRC, dfar = ctrl_entry */
-#define STUB_FAULT_BAD_RANGE      6u /* lr = ctrl_len, dfar = ctrl_entry */
-#define STUB_FAULT_CORE1_BUSY     7u /* LAUNCH while core 1 still RUNNING */
-#define STUB_FAULT_CORE1_TIMEOUT  8u /* core 1 did not park within 1 s of core 0 */
-#define STUB_FAULT_PSCI           9u /* lr = CPU_ON return (signed), or 1 = never parked */
+#define STUB_FAULT_NONE          0u
+#define STUB_FAULT_UNDEF         1u  /* fault PC = lr - 4 */
+#define STUB_FAULT_PABORT        2u  /* fault PC = lr - 4; IFSR/IFAR */
+#define STUB_FAULT_DABORT        3u  /* fault PC = lr - 8; DFSR/DFAR */
+#define STUB_FAULT_UNEXPECTED    4u  /* SVC/IRQ/FIQ/reserved vector */
+#define STUB_FAULT_BAD_CRC       5u  /* lr = computed CRC, dfar = ctrl_entry */
+#define STUB_FAULT_BAD_RANGE     6u  /* lr = ctrl_len, dfar = ctrl_entry */
+#define STUB_FAULT_CORE1_BUSY    7u  /* LAUNCH while core 1 still RUNNING */
+#define STUB_FAULT_CORE1_TIMEOUT 8u  /* core 1 did not park within 1 s of core 0 */
+#define STUB_FAULT_PSCI          9u  /* lr = CPU_ON return (signed), or 1 = never parked */
 #define STUB_FAULT_BAD_HEADER    10u /* release header out of range; lr = payload_len */
 
 /* Previous boot's fault record, in the stub-owned ctrl-block padding

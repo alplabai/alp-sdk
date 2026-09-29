@@ -90,13 +90,15 @@ typedef struct {
  * said 0x58) or the fact that TR_MEM_CAM_VIEW started exactly 0x60 past
  * TR_MEM_HP_DBG, leaving zero headroom -- both fixed this round, this
  * assert is what keeps either from silently drifting again. */
-_Static_assert(sizeof(hp_dbg_t) == 0x68, "hp_dbg_t size drifted (fix round 12 finding A added the AE "
-					  "register readback fields) -- update tr_memmap.h's TR_MEM_HP_DBG/"
-					  "TR_MEM_CAM_VIEW comments (headroom) and this assert together");
+_Static_assert(sizeof(hp_dbg_t) == 0x68,
+               "hp_dbg_t size drifted (fix round 12 finding A added the AE "
+               "register readback fields) -- update tr_memmap.h's TR_MEM_HP_DBG/"
+               "TR_MEM_CAM_VIEW comments (headroom) and this assert together");
 _Static_assert(offsetof(hp_dbg_t, busy_cyc) == 0x40 && offsetof(hp_dbg_t, ae_exposure) == 0x50 &&
-		       offsetof(hp_dbg_t, seq) == 0x58 && offsetof(hp_dbg_t, ae_reg_exp_h) == 0x5C &&
-		       offsetof(hp_dbg_t, ae_reg_vts) == 0x62 && offsetof(hp_dbg_t, ae_write_rc) == 0x64,
-	       "hp_dbg_t field offsets drifted -- see this file's own layout comment");
+                   offsetof(hp_dbg_t, seq) == 0x58 && offsetof(hp_dbg_t, ae_reg_exp_h) == 0x5C &&
+                   offsetof(hp_dbg_t, ae_reg_vts) == 0x62 &&
+                   offsetof(hp_dbg_t, ae_write_rc) == 0x64,
+               "hp_dbg_t field offsets drifted -- see this file's own layout comment");
 
 /* fix round 7 (silicon finding: hud.c computed a mathematically correct
  * ratio from these two fields -- host-verified against the exact reported

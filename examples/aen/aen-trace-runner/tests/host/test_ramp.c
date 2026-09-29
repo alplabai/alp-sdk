@@ -18,14 +18,17 @@ int main(void)
 	/* 1. The curve: today's pace at the start, never slower a step later,
 	 * capped at TR_RAMP_MAX_Q8 from TR_RAMP_STEPS on. */
 	{
-		assert(tr_ramp_q8(0u) == 256u && tr_ramp_speed_q16(TR_PLAY_SPEED_Q16, 0u) == TR_PLAY_SPEED_Q16);
+		assert(tr_ramp_q8(0u) == 256u &&
+		       tr_ramp_speed_q16(TR_PLAY_SPEED_Q16, 0u) == TR_PLAY_SPEED_Q16);
 		assert(tr_ramp_speed_q16(TR_ATTRACT_SPEED_Q16, 0u) == TR_ATTRACT_SPEED_Q16);
 		for (uint32_t s = 1; s < 3u * TR_RAMP_STEPS; s++) {
 			assert(tr_ramp_q8(s) >= tr_ramp_q8(s - 1u) && tr_ramp_q8(s) <= TR_RAMP_MAX_Q8);
-			assert(tr_ramp_speed_q16(TR_PLAY_SPEED_Q16, s) >= tr_ramp_speed_q16(TR_PLAY_SPEED_Q16, s - 1u));
+			assert(tr_ramp_speed_q16(TR_PLAY_SPEED_Q16, s) >=
+			       tr_ramp_speed_q16(TR_PLAY_SPEED_Q16, s - 1u));
 			assert(tr_ramp_speed_q16(TR_PLAY_SPEED_Q16, s) <= 65536u); /* never two steps a frame */
 		}
-		assert(tr_ramp_q8(TR_RAMP_STEPS - 1u) < TR_RAMP_MAX_Q8 && tr_ramp_q8(TR_RAMP_STEPS) == TR_RAMP_MAX_Q8);
+		assert(tr_ramp_q8(TR_RAMP_STEPS - 1u) < TR_RAMP_MAX_Q8 &&
+		       tr_ramp_q8(TR_RAMP_STEPS) == TR_RAMP_MAX_Q8);
 		assert(tr_ramp_q8(0xFFFFFFFFu) == TR_RAMP_MAX_Q8); /* no overflow on a very long run */
 		/* gently: no step changes the speed by more than a fraction of a percent */
 		assert((TR_RAMP_MAX_Q8 - 256u) * 1000u / TR_RAMP_STEPS < 256u);
@@ -43,8 +46,11 @@ int main(void)
 		}
 		double secs = (double)frames / TR_PANEL_HZ;
 
-		printf("ramp: cap %u/256 after %u steps, %.1f s of play at %u Hz\n", (unsigned)TR_RAMP_MAX_Q8,
-		       (unsigned)steps, secs, (unsigned)TR_PANEL_HZ);
+		printf("ramp: cap %u/256 after %u steps, %.1f s of play at %u Hz\n",
+		       (unsigned)TR_RAMP_MAX_Q8,
+		       (unsigned)steps,
+		       secs,
+		       (unsigned)TR_PANEL_HZ);
 		assert(secs > 85.0 && secs < 95.0);
 		uint32_t cap = tr_ramp_speed_q16(TR_PLAY_SPEED_Q16, steps);
 
@@ -71,8 +77,8 @@ int main(void)
 	for (int att = 0; att < 2; att++) {
 		tr_zone_t z;
 		uint32_t  phase = 0, steps = 0, last = 0, entries = 0;
-		double    want  = (att ? TR_ZONE_STEPS_ATTRACT : TR_ZONE_STEPS_PLAY) * 65536.0 /
-			      ((double)(att ? TR_ATTRACT_SPEED_Q16 : TR_PLAY_SPEED_Q16) * TR_PANEL_HZ);
+		double    want = (att ? TR_ZONE_STEPS_ATTRACT : TR_ZONE_STEPS_PLAY) * 65536.0 /
+		                 ((double)(att ? TR_ATTRACT_SPEED_Q16 : TR_PLAY_SPEED_Q16) * TR_PANEL_HZ);
 
 		tr_zone_reset(&z);
 		for (uint32_t f = 1; entries < (att ? 12u : 6u); f++) { /* past the cap either way */
@@ -85,8 +91,11 @@ int main(void)
 				double gap = (double)(f - last) / TR_PANEL_HZ;
 
 				assert(z.gate_y >= tr_runner_ground_y(TRACK_H));
-				printf("ramp: %s zone %u entered after %.2f s (ramp %u/256)\n", att ? "attract" : "play",
-				       (unsigned)z.zone, gap, (unsigned)z.ramp_q8);
+				printf("ramp: %s zone %u entered after %.2f s (ramp %u/256)\n",
+				       att ? "attract" : "play",
+				       (unsigned)z.zone,
+				       gap,
+				       (unsigned)z.ramp_q8);
 				assert(gap > want - 0.5 && gap < want + 0.5);
 				last = f;
 				entries++;
@@ -109,7 +118,8 @@ int main(void)
 			assert(q != 0u && (sp < 65536u ? q == sp >> 8 : q == 255u));
 		}
 	}
-	assert(tr_ramp_pace_q8(65536u) == 255u && tr_ramp_pace_q8(TR_PLAY_SPEED_Q16) == TR_PLAY_SPEED_Q16 >> 8);
+	assert(tr_ramp_pace_q8(65536u) == 255u &&
+	       tr_ramp_pace_q8(TR_PLAY_SPEED_Q16) == TR_PLAY_SPEED_Q16 >> 8);
 	if (TR_PANEL_HZ == 30) {
 		assert(tr_ramp_pace_q8(tr_ramp_frame_q16(false, TR_RAMP_STEPS)) == 255u);
 	}
@@ -142,7 +152,9 @@ int main(void)
 
 					tr_game_step(&g, tr_attract_intent(&a, &g, TRACK_H), TRACK_H);
 					done++;
-					hash[paced] = (hash[paced] ^ (g.tick * 31u + g.lane * 7u + g.score * 3u + g.alive)) * 16777619u;
+					hash[paced] =
+					    (hash[paced] ^ (g.tick * 31u + g.lane * 7u + g.score * 3u + g.alive)) *
+					    16777619u;
 					if (paced) {
 						clears += (g.ev & TR_EV_PASS) != 0u;
 						cleared_at_cap += at_cap && (g.ev & TR_EV_PASS);
@@ -162,8 +174,12 @@ int main(void)
 			}
 			assert(hash[0] == hash[1]);
 		}
-		printf("ramp: attract %u clears, %u deaths (%u clears / %u deaths at the cap), longest run %u steps\n",
-		       (unsigned)clears, (unsigned)deaths, (unsigned)cleared_at_cap, (unsigned)deaths_at_cap,
+		printf("ramp: attract %u clears, %u deaths (%u clears / %u deaths at the cap), longest run "
+		       "%u steps\n",
+		       (unsigned)clears,
+		       (unsigned)deaths,
+		       (unsigned)cleared_at_cap,
+		       (unsigned)deaths_at_cap,
 		       (unsigned)longest);
 		assert(longest >= TR_RAMP_STEPS && cleared_at_cap > 50u);
 		/* one miss in TR_ATTRACT_MISS_IN reactions: the deaths stay at

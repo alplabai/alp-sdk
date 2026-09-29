@@ -39,8 +39,8 @@ int main(void)
 	tr_cam_view_t out;
 
 	assert(tr_cam_view_read(&g_slot, &out, noop_barrier));
-	assert(out.buf_addr == 0x02480000u && out.frame_no == 7u && out.width == 640u && out.height == 400u &&
-	       out.rotate == 90u && out.mirror == 1u);
+	assert(out.buf_addr == 0x02480000u && out.frame_no == 7u && out.width == 640u &&
+	       out.height == 400u && out.rotate == 90u && out.mirror == 1u);
 
 	/* 2. Never published (slot still zeroed): magic/version reject it,
 	 * same as tr_pslot_read()'s equivalent case. */
@@ -72,7 +72,14 @@ int main(void)
 	uint32_t seq = g_slot.seq;
 
 	assert(tr_cam_view_still_seq(&g_slot, seq)); /* nothing changed yet */
-	tr_cam_view_write(&g_slot, 0x024C4000u, 2u, 640u, 400u, 90u, 1u, noop_barrier); /* the HP recycled the buffer */
+	tr_cam_view_write(&g_slot,
+	                  0x024C4000u,
+	                  2u,
+	                  640u,
+	                  400u,
+	                  90u,
+	                  1u,
+	                  noop_barrier);              /* the HP recycled the buffer */
 	assert(!tr_cam_view_still_seq(&g_slot, seq)); /* the pixel copy must be discarded */
 
 	printf("PASS: tests/host/test_cam_view.c\n");

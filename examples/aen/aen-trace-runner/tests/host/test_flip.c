@@ -43,8 +43,8 @@ int main(void)
 	assert(tr_flip_hist_bucket(77501u) == 3u && tr_flip_hist_bucket(177500u) == 6u);
 	assert(tr_flip_hist_bucket(177501u) == 7u && tr_flip_hist_bucket(60000000u) == 7u);
 	{
-		volatile uint32_t h[TR_FLIP_HIST_N] = { 0 }, total = 0;
-		tr_flip_pace_t    q = { 0 };
+		volatile uint32_t     h[TR_FLIP_HIST_N] = { 0 }, total = 0;
+		tr_flip_pace_t        q    = { 0 };
 		static const uint64_t at[] = { 1000000u, 1025000u, 1075000u, 1100000u, 1200000u };
 
 		for (unsigned i = 0; i < sizeof(at) / sizeof(at[0]); i++) {

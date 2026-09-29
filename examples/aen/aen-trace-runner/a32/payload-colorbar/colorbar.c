@@ -23,19 +23,23 @@
 #include "stub_abi.h"
 #include "tr_mbox.h"
 
-#define FB_W        720u
-#define FB_H        1280u
-#define BARS        8u
-#define BAR_WORDS   (FB_W / BARS / 2u) /* 90 px = 45 words per bar */
-#define PROGRESS    0xCB0B0000u
+#define FB_W      720u
+#define FB_H      1280u
+#define BARS      8u
+#define BAR_WORDS (FB_W / BARS / 2u) /* 90 px = 45 words per bar */
+#define PROGRESS  0xCB0B0000u
 
 void payload_main(volatile tr_mbox_t *m);
 
 /* white yellow cyan green magenta red blue black, RGB565 */
-static const uint16_t colour[BARS] = { 0xFFFF, 0xFFE0, 0x07FF, 0x07E0, 0xF81F, 0xF800, 0x001F, 0x0000 };
+static const uint16_t colour[BARS] = { 0xFFFF, 0xFFE0, 0x07FF, 0x07E0,
+	                                   0xF81F, 0xF800, 0x001F, 0x0000 };
 static const uint32_t mhu_probe[3] = { 0x02380000u, 0x02380800u, 0x02380FFCu };
 
-static inline void dsb(void) { __asm__ volatile("dsb sy" ::: "memory"); }
+static inline void dsb(void)
+{
+	__asm__ volatile("dsb sy" ::: "memory");
+}
 
 static uint32_t bar_word(uint32_t bar, uint32_t rot)
 {
@@ -54,14 +58,13 @@ static void fill(uint32_t fb, uint32_t rot)
 		for (uint32_t b = 0; b < BARS; b++) {
 			uint32_t c = bar_word(b, rot);
 			for (uint32_t x = 0; x < BAR_WORDS; x++, p++)
-				if ((uint32_t)p - STUB_MHU0_WINDOW >= STUB_MHU0_WINDOW_SIZE)
-					*p = c;
+				if ((uint32_t)p - STUB_MHU0_WINDOW >= STUB_MHU0_WINDOW_SIZE) *p = c;
 		}
 }
 
 void payload_main(volatile tr_mbox_t *m)
 {
-	uint32_t seq = m->out_seq + 1u;
+	uint32_t seq   = m->out_seq + 1u;
 	uint32_t rot_b = seq + BARS / 2u;
 
 	fill(TR_FB_A, seq);
@@ -81,7 +84,7 @@ void payload_main(volatile tr_mbox_t *m)
 	m->pad3[0] = PROGRESS | 3u;
 
 	dsb(); /* pixels reach SRAM0 before out_seq says so (plan sec 3) */
-	m->out_fb = TR_FB_A;
+	m->out_fb     = TR_FB_A;
 	m->out_frames = m->out_frames + 1u;
 	dsb();
 	m->out_seq = seq;

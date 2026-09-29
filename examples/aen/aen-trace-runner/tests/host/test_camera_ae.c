@@ -73,7 +73,8 @@ static int converge(tr_ae_t *ae, uint32_t illum_x4, int frames)
 	}
 	assert(last_change < frames - 20); /* settled, then held for 20+ frames */
 	assert(!ae->hunting);
-	assert(mean >= TR_AE_TARGET_MEAN - TR_AE_BAND_OUT && mean <= TR_AE_TARGET_MEAN + TR_AE_BAND_OUT);
+	assert(mean >= TR_AE_TARGET_MEAN - TR_AE_BAND_OUT &&
+	       mean <= TR_AE_TARGET_MEAN + TR_AE_BAND_OUT);
 	return changes;
 }
 
@@ -116,7 +117,8 @@ int main(void)
 	assert(tr_ae_step(&ae, TR_AE_TARGET_MEAN + TR_AE_BAND_IN + 4, EXP_MIN, EXP_MAX, GAIN_MAX));
 	assert(ae.exposure < e0);
 	ae.settle = 0;
-	assert(!tr_ae_step(&ae, TR_AE_TARGET_MEAN + TR_AE_BAND_IN, EXP_MIN, EXP_MAX, GAIN_MAX) && !ae.hunting);
+	assert(!tr_ae_step(&ae, TR_AE_TARGET_MEAN + TR_AE_BAND_IN, EXP_MIN, EXP_MAX, GAIN_MAX) &&
+	       !ae.hunting);
 
 	/* --- the silicon bang-bang case: a daylight window, from both ends of
 	 * the range, then illumination steps x4 and /4 --- */
@@ -194,7 +196,8 @@ int main(void)
 	{
 		uint8_t h, m, l;
 
-		tr_ae_exposure_regs(681u, &h, &m, &l); /* OV9281_EXPOSURE_DEFAULT, the sensor's own reset value */
+		tr_ae_exposure_regs(
+		    681u, &h, &m, &l); /* OV9281_EXPOSURE_DEFAULT, the sensor's own reset value */
 		assert(h == 0x00u && m == 0x2Au && l == 0x90u);
 
 		tr_ae_exposure_regs(1071u, &h, &m, &l); /* the 640x400@100fps ceiling, VTS 1096 - 25 */

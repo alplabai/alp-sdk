@@ -38,10 +38,12 @@ static void spawn(tr_game_t *g)
 		if (g->ents[i].kind != TR_ENT_FREE) {
 			continue;
 		}
-		uint32_t r      = rng_next(g);
+		uint32_t r = rng_next(g);
 		/* A quarter pickups; of the obstacles one in five is a live wire
 		 * (P4b), from bits no other choice below reads. */
-		g->ents[i].kind = !(r & 3u) ? TR_ENT_PICKUP : ((r >> 16) % 5u == 0u) ? TR_ENT_WIRE : TR_ENT_OBSTACLE;
+		g->ents[i].kind = !(r & 3u)                ? TR_ENT_PICKUP
+		                  : ((r >> 16) % 5u == 0u) ? TR_ENT_WIRE
+		                                           : TR_ENT_OBSTACLE;
 		g->ents[i].lane = (uint8_t)((r >> 3) % TR_LANES);
 		g->ents[i].y    = TR_SPAWN_Y;
 		/* Two thirds of obstacles are low (jump); the rest are high (duck). */
@@ -117,7 +119,8 @@ void tr_game_step(tr_game_t *g, tr_intent_t in, int16_t track_h)
 		if (e->kind == TR_ENT_FREE) {
 			continue;
 		}
-		e->y += TR_SCROLL_PX; /* Down the panel, from spawn() at the top toward the runner at the bottom. */
+		e->y +=
+		    TR_SCROLL_PX; /* Down the panel, from spawn() at the top toward the runner at the bottom. */
 
 		/*
 		 * The runner occupies the band [runner_y, runner_y + TR_SCROLL_PX):
@@ -145,13 +148,13 @@ void tr_game_step(tr_game_t *g, tr_intent_t in, int16_t track_h)
 				g->alive   = false;
 				g->crashed = true;
 				g->ev |= TR_EV_CRASH;
-				g->hit     = (uint8_t)i;
+				g->hit = (uint8_t)i;
 				return;
 			}
 			g->ev |= TR_EV_PASS | (near_clear(g, e->low) ? TR_EV_NEAR : 0u);
 			g->ev_lane = e->lane;
 		} else if (at_runner && tr_ent_is_obstacle(e->kind) && e->lane == g->dodge_lane &&
-			   g->dodge_ticks <= TR_NEAR_TICKS) {
+		           g->dodge_ticks <= TR_NEAR_TICKS) {
 			g->ev |= TR_EV_PASS | TR_EV_NEAR; /* dodged at the last moment */
 			g->ev_lane = e->lane;
 		}
@@ -183,7 +186,7 @@ uint8_t tr_game_wire_level(const tr_game_t *g, int16_t track_h)
 		}
 		int32_t v = e->y >= ry ? 255 : 255 * (int32_t)e->y / ry;
 
-		v = e->lane == g->lane ? v : v / 2;
+		v    = e->lane == g->lane ? v : v / 2;
 		best = v > best ? v : best;
 	}
 	return (uint8_t)best;
@@ -199,8 +202,12 @@ bool tr_game_pace(uint32_t *phase_q16, uint32_t speed_q16)
 	return true;
 }
 
-bool tr_play_frame(tr_game_t *g, tr_intent_t *held, tr_intent_t in, uint32_t *phase_q16, uint32_t speed_q16,
-		   tr_intent_t *step_in)
+bool tr_play_frame(tr_game_t   *g,
+                   tr_intent_t *held,
+                   tr_intent_t  in,
+                   uint32_t    *phase_q16,
+                   uint32_t     speed_q16,
+                   tr_intent_t *step_in)
 {
 	/* A lane move lands now, one lane (a frame never moves two); only the
 	 * jump / duck wait for the step. */

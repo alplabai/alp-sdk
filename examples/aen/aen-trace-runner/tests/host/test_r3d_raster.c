@@ -44,7 +44,8 @@
  */
 static int64_t ref_edge(tr_sv_t a, tr_sv_t b, tr_sv_t p)
 {
-	return (int64_t)(b.x - a.x) * (int64_t)(p.y - a.y) - (int64_t)(b.y - a.y) * (int64_t)(p.x - a.x);
+	return (int64_t)(b.x - a.x) * (int64_t)(p.y - a.y) -
+	       (int64_t)(b.y - a.y) * (int64_t)(p.x - a.x);
 }
 
 static bool ref_is_top_left(tr_sv_t a, tr_sv_t b)
@@ -203,8 +204,8 @@ int main(void)
 		 * a flipped top-left rule would silently pass. See this task's
 		 * report for the red run this offset was added to make fail.
 		 */
-		static const int32_t offs[]      = {0, 3, 6, 8, 11, 14};
-		static const int32_t corner_x[]  = {300, -6, TR_R3D_W - 10, 300, 300};
+		static const int32_t offs[]     = { 0, 3, 6, 8, 11, 14 };
+		static const int32_t corner_x[] = { 300, -6, TR_R3D_W - 10, 300, 300 };
 		/* fix round 8 moved this to TR_VIEW_H - 40 (clear of tri_setup()'s
 		 * then-unconditional TR_VIEW_H clip, load-bearing for the BINNED
 		 * path) rather than fix the real gap: tr_raster_tri() (this
@@ -214,8 +215,8 @@ int main(void)
 		 * clip `planes`-conditional (r3d_raster.c) -- tr_raster_tri()
 		 * genuinely clips to TR_R3D_H again now, so the true bottom-edge
 		 * case is restored, not still an open follow-up. */
-		static const int32_t corner_y[]  = {300, 300, 300, -6, TR_R3D_H - 10};
-		int32_t               side       = 16;
+		static const int32_t corner_y[] = { 300, 300, 300, -6, TR_R3D_H - 10 };
+		int32_t              side       = 16;
 
 		for (size_t oi = 0; oi < sizeof(offs) / sizeof(offs[0]); oi++) {
 			for (size_t ci = 0; ci < 5; ci++) {
@@ -223,10 +224,10 @@ int main(void)
 				int32_t cyf   = PX(corner_y[ci]) + offs[oi];
 				int32_t sidef = PX(side);
 
-				tr_sv_t tl = {cxf, cyf};
-				tr_sv_t tr = {cxf + sidef, cyf};
-				tr_sv_t br = {cxf + sidef, cyf + sidef};
-				tr_sv_t bl = {cxf, cyf + sidef};
+				tr_sv_t tl = { cxf, cyf };
+				tr_sv_t tr = { cxf + sidef, cyf };
+				tr_sv_t br = { cxf + sidef, cyf + sidef };
+				tr_sv_t bl = { cxf, cyf + sidef };
 
 				double ox = (double)cxf / (double)(1 << TR_R3D_SUB);
 				double oy = (double)cyf / (double)(1 << TR_R3D_SUB);
@@ -237,7 +238,7 @@ int main(void)
 				 * even before the union/overlap check below). */
 				fb_reset();
 				{
-					tr_tri_t t1 = {{tl, tr, br}, 0x1111};
+					tr_tri_t t1 = { { tl, tr, br }, 0x1111 };
 
 					tr_raster_tri(fb_origin(), PHYS_W, &t1);
 				}
@@ -252,7 +253,7 @@ int main(void)
 
 				fb_reset();
 				{
-					tr_tri_t t2 = {{tl, br, bl}, 0x2222};
+					tr_tri_t t2 = { { tl, br, bl }, 0x2222 };
 
 					tr_raster_tri(fb_origin(), PHYS_W, &t2);
 				}
@@ -294,7 +295,7 @@ int main(void)
 					}
 
 					for (int32_t x = cwx0; x < cwx1; x++) {
-						size_t idx = row_idx + (size_t)x;
+						size_t idx        = row_idx + (size_t)x;
 						bool   t1_touched = snap1[idx] != SENTINEL;
 						bool   t2_touched = phys[idx] != SENTINEL;
 
@@ -315,7 +316,7 @@ int main(void)
 						double px_c   = (double)x + 0.5;
 						double py_c   = (double)y + 0.5;
 						bool   inside = px_c >= ox && px_c < ox + (double)side && py_c >= oy &&
-								 py_c < oy + (double)side;
+						                py_c < oy + (double)side;
 
 						if (inside) {
 							assert(t1_touched != t2_touched); /* exactly once */
@@ -338,13 +339,13 @@ int main(void)
 	 * exactly 0, which the area <= 0 backface/degenerate test rejects --
 	 * see r3d.h's top comment). */
 	{
-		tr_sv_t a            = {PX(5), PX(5)};
-		tr_sv_t b            = {PX(10), PX(5)};
+		tr_sv_t a            = { PX(5), PX(5) };
+		tr_sv_t b            = { PX(10), PX(5) };
 		tr_sv_t c_coincident = a;
-		tr_sv_t c_collinear  = {PX(15), PX(5)}; /* same row as a, b: collinear */
+		tr_sv_t c_collinear  = { PX(15), PX(5) }; /* same row as a, b: collinear */
 
-		tr_tri_t t_coincident = {{a, b, c_coincident}, 0x3333};
-		tr_tri_t t_collinear  = {{a, b, c_collinear}, 0x3333};
+		tr_tri_t t_coincident = { { a, b, c_coincident }, 0x3333 };
+		tr_tri_t t_collinear  = { { a, b, c_collinear }, 0x3333 };
 
 		fb_reset();
 		tr_raster_tri(fb_origin(), PHYS_W, &t_coincident);
@@ -374,10 +375,10 @@ int main(void)
 		struct {
 			tr_sv_t v[3];
 		} cases[4] = {
-			{{{-far, PX(5)}, {-far + PX(2), PX(6)}, {-far, PX(7)}}},          /* far left */
-			{{{far, PX(5)}, {far + PX(2), PX(6)}, {far, PX(7)}}},             /* far right */
-			{{{PX(5), -far}, {PX(6), -far + PX(2)}, {PX(7), -far}}},          /* far above */
-			{{{PX(5), far}, {PX(6), far + PX(2)}, {PX(7), far}}},             /* far below */
+			{ { { -far, PX(5) }, { -far + PX(2), PX(6) }, { -far, PX(7) } } }, /* far left */
+			{ { { far, PX(5) }, { far + PX(2), PX(6) }, { far, PX(7) } } },    /* far right */
+			{ { { PX(5), -far }, { PX(6), -far + PX(2) }, { PX(7), -far } } }, /* far above */
+			{ { { PX(5), far }, { PX(6), far + PX(2) }, { PX(7), far } } },    /* far below */
 		};
 
 		for (int i = 0; i < 4; i++) {
@@ -388,7 +389,7 @@ int main(void)
 			 * nothing), but keeping every case in this file front-facing
 			 * means "writes nothing" is always because of the SCREEN
 			 * clip, not silently because of the AREA cull. */
-			tr_tri_t t = {{cases[i].v[0], cases[i].v[2], cases[i].v[1]}, 0x4444};
+			tr_tri_t t = { { cases[i].v[0], cases[i].v[2], cases[i].v[1] }, 0x4444 };
 
 			fb_reset();
 			tr_raster_tri(fb_origin(), PHYS_W, &t);
@@ -474,7 +475,7 @@ int main(void)
 				v[i].y = rng_range(-8, WIN + 8) * (1 << TR_R3D_SUB) + rng_range(0, 1 << TR_R3D_SUB);
 			}
 			if (iter % 4 == 0) {
-				int vi = rng_range(0, 3);
+				int vi   = rng_range(0, 3);
 				int sign = (rng_range(0, 2) == 0) ? 1 : -1;
 
 				v[vi].x = sign * rng_range(50000, 2000000);
@@ -490,7 +491,7 @@ int main(void)
 			 * function) so this generator has no dependency on their
 			 * internals. */
 			int64_t area = (int64_t)(v[1].x - v[0].x) * (int64_t)(v[2].y - v[0].y) -
-					(int64_t)(v[1].y - v[0].y) * (int64_t)(v[2].x - v[0].x);
+			               (int64_t)(v[1].y - v[0].y) * (int64_t)(v[2].x - v[0].x);
 
 			if (area <= 0) {
 				tr_sv_t tmp = v[1];
@@ -503,7 +504,8 @@ int main(void)
 
 			for (int32_t y = 0; y < WIN; y++) {
 				for (int32_t x = 0; x < WIN; x++) {
-					tr_sv_t p = {PX(x) + (1 << (TR_R3D_SUB - 1)), PX(y) + (1 << (TR_R3D_SUB - 1))};
+					tr_sv_t p = { PX(x) + (1 << (TR_R3D_SUB - 1)),
+						          PX(y) + (1 << (TR_R3D_SUB - 1)) };
 
 					expected[y][x] = tr_raster_point_inside_ref(v[0], v[1], v[2], p);
 				}
@@ -515,7 +517,7 @@ int main(void)
 				}
 			}
 
-			tr_tri_t tri = {{v[0], v[1], v[2]}, 0x7777};
+			tr_tri_t tri = { { v[0], v[1], v[2] }, 0x7777 };
 
 			tr_raster_tri(fb_origin(), PHYS_W, &tri);
 
@@ -545,17 +547,17 @@ int main(void)
 	 * [20,30)x[20,30).
 	 */
 	{
-		tr_dl_t dl = {0};
+		tr_dl_t dl = { 0 };
 
-		tr_sv_t a_tl = {PX(10), PX(10)}, a_tr = {PX(30), PX(10)};
-		tr_sv_t a_br = {PX(30), PX(30)}, a_bl = {PX(10), PX(30)};
-		tr_sv_t b_tl = {PX(20), PX(20)}, b_tr = {PX(40), PX(20)};
-		tr_sv_t b_br = {PX(40), PX(40)}, b_bl = {PX(20), PX(40)};
+		tr_sv_t a_tl = { PX(10), PX(10) }, a_tr = { PX(30), PX(10) };
+		tr_sv_t a_br = { PX(30), PX(30) }, a_bl = { PX(10), PX(30) };
+		tr_sv_t b_tl = { PX(20), PX(20) }, b_tr = { PX(40), PX(20) };
+		tr_sv_t b_br = { PX(40), PX(40) }, b_bl = { PX(20), PX(40) };
 
-		dl.tri[dl.n++] = (tr_tri_t){{a_tl, a_tr, a_br}, 0xAAAA};
-		dl.tri[dl.n++] = (tr_tri_t){{a_tl, a_br, a_bl}, 0xAAAA};
-		dl.tri[dl.n++] = (tr_tri_t){{b_tl, b_tr, b_br}, 0xBBBB};
-		dl.tri[dl.n++] = (tr_tri_t){{b_tl, b_br, b_bl}, 0xBBBB};
+		dl.tri[dl.n++] = (tr_tri_t){ { a_tl, a_tr, a_br }, 0xAAAA };
+		dl.tri[dl.n++] = (tr_tri_t){ { a_tl, a_br, a_bl }, 0xAAAA };
+		dl.tri[dl.n++] = (tr_tri_t){ { b_tl, b_tr, b_br }, 0xBBBB };
+		dl.tri[dl.n++] = (tr_tri_t){ { b_tl, b_br, b_bl }, 0xBBBB };
 
 		fb_reset();
 		tr_r3d_draw(fb_origin(), PHYS_W, &dl);
@@ -563,9 +565,9 @@ int main(void)
 
 		for (int32_t y = 0; y < 45; y++) {
 			for (int32_t x = 0; x < 45; x++) {
-				bool in_a = x >= 10 && x < 30 && y >= 10 && y < 30;
-				bool in_b = x >= 20 && x < 40 && y >= 20 && y < 40;
-				uint16_t got = at(x, y);
+				bool     in_a = x >= 10 && x < 30 && y >= 10 && y < 30;
+				bool     in_b = x >= 20 && x < 40 && y >= 20 && y < 40;
+				uint16_t got  = at(x, y);
 
 				if (in_b) {
 					assert(got == 0xBBBB); /* B drawn last -- wins the overlap */
@@ -633,9 +635,11 @@ int main(void)
 			 * does, lerp at t=1 (== bot exactly, no rounding possible),
 			 * narrow back -- computed here from first principles, not
 			 * by importing lerp565()'s own formula. */
-			int br = (bot >> 11) & 0x1F, bg = (bot >> 5) & 0x3F, bb = bot & 0x1F;
-			int br8 = (br << 3) | (br >> 2), bg8 = (bg << 2) | (bg >> 4), bb8 = (bb << 3) | (bb >> 2);
-			uint16_t expect_last = (uint16_t)(((br8 & 0xF8) << 8) | ((bg8 & 0xFC) << 3) | (bb8 >> 3));
+			int      br = (bot >> 11) & 0x1F, bg = (bot >> 5) & 0x3F, bb = bot & 0x1F;
+			int      br8 = (br << 3) | (br >> 2), bg8 = (bg << 2) | (bg >> 4),
+			         bb8 = (bb << 3) | (bb >> 2);
+			uint16_t expect_last =
+			    (uint16_t)(((br8 & 0xF8) << 8) | ((bg8 & 0xFC) << 3) | (bb8 >> 3));
 
 			for (int32_t x = 0; x < TR_R3D_W; x += 37) {
 				assert(at(x, horizon - 1) == expect_last);
@@ -667,20 +671,20 @@ int main(void)
 	 */
 	{
 		enum { GRID_COLS = 24, GRID_ROWS = 20, ITERS = 20 };
-		int32_t cell_w = TR_R3D_W / GRID_COLS; /* 30, exact */
-		int32_t cell_h = TR_R3D_H / GRID_ROWS; /* 64, exact */
+		int32_t        cell_w = TR_R3D_W / GRID_COLS; /* 30, exact */
+		int32_t        cell_h = TR_R3D_H / GRID_ROWS; /* 64, exact */
 		static tr_dl_t dl;
 
 		dl.n = 0;
 		for (int32_t gy = 0; gy < GRID_ROWS; gy++) {
 			for (int32_t gx = 0; gx < GRID_COLS; gx++) {
-				int32_t x0 = PX(gx * cell_w), x1 = PX((gx + 1) * cell_w);
-				int32_t y0 = PX(gy * cell_h), y1 = PX((gy + 1) * cell_h);
-				tr_sv_t tl = {x0, y0}, tr = {x1, y0}, br = {x1, y1}, bl = {x0, y1};
+				int32_t  x0 = PX(gx * cell_w), x1 = PX((gx + 1) * cell_w);
+				int32_t  y0 = PX(gy * cell_h), y1 = PX((gy + 1) * cell_h);
+				tr_sv_t  tl = { x0, y0 }, tr = { x1, y0 }, br = { x1, y1 }, bl = { x0, y1 };
 				uint16_t colour = (uint16_t)(0x1111 * ((gx + gy) % 8 + 1));
 
-				dl.tri[dl.n++] = (tr_tri_t){{tl, tr, br}, colour};
-				dl.tri[dl.n++] = (tr_tri_t){{tl, br, bl}, colour};
+				dl.tri[dl.n++] = (tr_tri_t){ { tl, tr, br }, colour };
+				dl.tri[dl.n++] = (tr_tri_t){ { tl, br, bl }, colour };
 			}
 		}
 
@@ -691,12 +695,15 @@ int main(void)
 		}
 		clock_t t1 = clock();
 
-		double  sec         = (double)(t1 - t0) / (double)CLOCKS_PER_SEC;
+		double  sec          = (double)(t1 - t0) / (double)CLOCKS_PER_SEC;
 		double  ns_per_frame = (sec / ITERS) * 1.0e9;
 		int32_t px_per_frame = TR_R3D_W * TR_R3D_H;
 
-		printf("cycle smoke: %u tris, %d px/frame, %.0f ns/frame (host, %d iters)\n", dl.n, (int)px_per_frame,
-		       ns_per_frame, ITERS);
+		printf("cycle smoke: %u tris, %d px/frame, %.0f ns/frame (host, %d iters)\n",
+		       dl.n,
+		       (int)px_per_frame,
+		       ns_per_frame,
+		       ITERS);
 	}
 
 	return 0;

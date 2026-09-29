@@ -28,8 +28,8 @@ _Static_assert(TR_HUD_H <= TR_VIEW_H, "the HUD layer 2 window runs into the vide
 #define C_PANEL  0x013u /* dark navy backing */
 #define C_EDGE   0xE84u /* copper accent */
 #define C_BLACK  0x000u
-#define A_PANEL  10u    /* backing alpha, of 15 */
-#define A_SHADOW 11u    /* text drop shadow, of 16 (scale) */
+#define A_PANEL  10u /* backing alpha, of 15 */
+#define A_SHADOW 11u /* text drop shadow, of 16 (scale) */
 
 /* ---------------------------------------------------------------- canvas
  * A strip of the HUD being composed: w x h pixels whose top-left is HUD
@@ -39,7 +39,10 @@ typedef struct {
 	int       x, y, w, h;
 } canvas_t;
 
-static const tr_font_t *const fonts[4] = { &tr_font_small, &tr_font_med, &tr_font_big, &tr_font_tiny };
+static const tr_font_t *const fonts[4] = { &tr_font_small,
+	                                       &tr_font_med,
+	                                       &tr_font_big,
+	                                       &tr_font_tiny };
 
 /* 65536 / w, rounded up, for the blend weights w = 15 * alpha sums (1..225):
  * a multiply-shift instead of three divides per partly covered pixel. */
@@ -67,11 +70,12 @@ static inline void blend(uint16_t *d, uint32_t c, uint32_t a)
 		return;
 	}
 	uint32_t ws = a * 15u, wd = da * (15u - a), wo = ws + wd, k = inv_w[wo]; /* weights x15 */
-	uint32_t r  = ((((c >> 8) & 15u) * ws + ((dv >> 8) & 15u) * wd) * k + 0x8000u) >> 16;
-	uint32_t g  = ((((c >> 4) & 15u) * ws + ((dv >> 4) & 15u) * wd) * k + 0x8000u) >> 16;
-	uint32_t b  = (((c & 15u) * ws + (dv & 15u) * wd) * k + 0x8000u) >> 16;
+	uint32_t r = ((((c >> 8) & 15u) * ws + ((dv >> 8) & 15u) * wd) * k + 0x8000u) >> 16;
+	uint32_t g = ((((c >> 4) & 15u) * ws + ((dv >> 4) & 15u) * wd) * k + 0x8000u) >> 16;
+	uint32_t b = (((c & 15u) * ws + (dv & 15u) * wd) * k + 0x8000u) >> 16;
 
-	*d = (uint16_t)(((wo * 4370u + 0x8000u) >> 16) << 12 | r << 8 | g << 4 | b); /* 4370 = 65536 / 15 */
+	*d = (uint16_t)(((wo * 4370u + 0x8000u) >> 16) << 12 | r << 8 | g << 4 |
+	                b); /* 4370 = 65536 / 15 */
 }
 
 /* Blends of one colour over one background value, by alpha: nearly every
@@ -115,7 +119,14 @@ static inline void put(uint16_t *d, uint32_t c, uint32_t a, blend_cache_t *bc)
 /* A 4-bit alpha map (w x h, packed two a byte, rows padded to a byte) at
  * HUD (x, y) in colour c, its coverage scaled by s/16. Walks whole bytes:
  * a zero byte (two transparent pixels, most of any glyph) costs one test. */
-static void draw_map(const canvas_t *cv, const uint8_t *bits, int w, int h, int x, int y, uint32_t c, uint32_t s)
+static void draw_map(const canvas_t *cv,
+                     const uint8_t  *bits,
+                     int             w,
+                     int             h,
+                     int             x,
+                     int             y,
+                     uint32_t        c,
+                     uint32_t        s)
 {
 	int           stride = (w + 1) / 2;
 	int           y0 = y > cv->y ? y : cv->y, y1 = y + h < cv->y + cv->h ? y + h : cv->y + cv->h;
@@ -181,8 +192,9 @@ static void text(const canvas_t *cv, int font, int x, int y, const char *s, uint
 	const tr_font_t *f = fonts[font];
 
 	for (int pass = (sc & SHADOW) ? 0 : 1; pass < 2; pass++) {
-		int      px  = x + (pass ? 0 : 2), py = y + (pass ? 0 : 2);
-		uint32_t col = pass ? c : C_BLACK, s2 = pass ? (sc & 0xFFu) : ((sc & 0xFFu) * A_SHADOW) >> 4;
+		int      px = x + (pass ? 0 : 2), py = y + (pass ? 0 : 2);
+		uint32_t col = pass ? c : C_BLACK,
+		         s2  = pass ? (sc & 0xFFu) : ((sc & 0xFFu) * A_SHADOW) >> 4;
 
 		for (const char *p = s; *p; p++) {
 			uint8_t ch = (uint8_t)*p;
@@ -201,12 +213,14 @@ static void text(const canvas_t *cv, int font, int x, int y, const char *s, uint
 	}
 }
 
-static void text_c(const canvas_t *cv, int font, int cx, int y, const char *s, uint32_t c, uint32_t sc)
+static void
+text_c(const canvas_t *cv, int font, int cx, int y, const char *s, uint32_t c, uint32_t sc)
 {
 	text(cv, font, cx - text_w(fonts[font], s) / 2, y, s, c, sc);
 }
 
-static void text_r(const canvas_t *cv, int font, int rx, int y, const char *s, uint32_t c, uint32_t sc)
+static void
+text_r(const canvas_t *cv, int font, int rx, int y, const char *s, uint32_t c, uint32_t sc)
 {
 	text(cv, font, rx - text_w(fonts[font], s), y, s, c, sc);
 }
@@ -224,8 +238,8 @@ static void panel(const canvas_t *cv, int x, int y, int w, int h, uint32_t c, ui
 	for (int yy = y0; yy < y1; yy++) {
 		uint16_t *d   = cv->px + (yy - cv->y) * cv->w - cv->x;
 		int       top = yy - y, bot = y + h - 1 - yy;
-		int       ry  = top < r ? top : (bot < r ? bot : -1); /* corner mask row: distance to the edge */
-		int       m0 = x0, m1 = x1;                          /* the straight part of the row */
+		int ry = top < r ? top : (bot < r ? bot : -1); /* corner mask row: distance to the edge */
+		int m0 = x0, m1 = x1;                          /* the straight part of the row */
 
 		if (ry >= 0) {
 			m0 = x + r > x0 ? (x + r < x1 ? x + r : x1) : x0;
@@ -286,9 +300,10 @@ int tr_hud_fmt_u32(char *buf, uint32_t v)
 #define PERF_X  454 /* perf panel, every screen */
 #define PERF_Y  14
 #define PERF_W  252
-#define PERF_H  120 /* TR_PERF_LINES rows at 18 px + margin; the logo/panels below key off PERF_H, not a literal */
-#define CARD_Y  140 /* attract / crash card */
-#define INV_Y   300 /* the invitation / BEST line row */
+#define PERF_H \
+	120 /* TR_PERF_LINES rows at 18 px + margin; the logo/panels below key off PERF_H, not a literal */
+#define CARD_Y 140 /* attract / crash card */
+#define INV_Y  300 /* the invitation / BEST line row */
 /* The attract card's INV_Y row, split (P16 + P15): the character's name
  * (with the tilt arrows) on the left, the invitation -- or a zone's name
  * on entry -- on the right. */
@@ -307,7 +322,9 @@ _Static_assert(INV_Y + INV_PANEL_H <= TR_HUD_H, "the invitation panels stay in t
 
 #define TR_HUD_STR_(x) #x
 #define TR_HUD_STR(x)  TR_HUD_STR_(x)
-static const char *const tagline = "E1M-AEN803 \x7f Alif Ensemble E8 \x7f 2x Cortex-A32 \x7f 3D at " TR_HUD_STR(TR_PANEL_HZ) " fps";
+static const char *const tagline =
+    "E1M-AEN803 \x7f Alif Ensemble E8 \x7f 2x Cortex-A32 \x7f 3D at " TR_HUD_STR(
+        TR_PANEL_HZ) " fps";
 
 static bool popup_on(uint32_t frame, uint32_t start)
 {
@@ -320,7 +337,7 @@ static bool blink_on(uint32_t frame)
 }
 
 /* P16: the four characters (tr_mbox.h TR_CHAR_* order == meshes.h tr_rig_chars[]). */
-static const char *const char_names[TR_CHAR_N] = {"PROBE", "SOLDER", "FLUX", "PIXEL"};
+static const char *const char_names[TR_CHAR_N] = { "PROBE", "SOLDER", "FLUX", "PIXEL" };
 
 const char *tr_hud_char_name(uint8_t character)
 {
@@ -337,14 +354,19 @@ static bool zone_on(uint32_t frame, uint32_t start)
  * the row repaints only while the name fades (~24 of its 110 frames). */
 static uint32_t zone_alpha(uint32_t age)
 {
-	return age < 8u ? 2u * age + 2u : age + 16u > TR_HUD_ZONE_FRAMES ? TR_HUD_ZONE_FRAMES - age : 16u;
+	return age < 8u                         ? 2u * age + 2u
+	       : age + 16u > TR_HUD_ZONE_FRAMES ? TR_HUD_ZONE_FRAMES - age
+	                                        : 16u;
 }
 
 /* A zone's name, entering (P15): in its zone's colour, centred on x; a
  * short rule either side when centred on the panel (play) -- beside the
  * character on the attract card there is no room for them. */
-static const uint16_t zone_col[TR_ZONES] = {C_GOLD, 0xACFu /* die: nickel-blue */, 0x5FEu /* canyon teal */,
-					    0xBF5u /* antenna lime */, 0xF5Eu /* neon magenta */};
+static const uint16_t zone_col[TR_ZONES] = { C_GOLD,
+	                                         0xACFu /* die: nickel-blue */,
+	                                         0x5FEu /* canyon teal */,
+	                                         0xBF5u /* antenna lime */,
+	                                         0xF5Eu /* neon magenta */ };
 
 static void paint_zone(const canvas_t *cv, const tr_hud_view_t *v, uint32_t age, int x)
 {
@@ -368,8 +390,13 @@ static void paint_score(const canvas_t *cv, const tr_hud_view_t *v)
 	rect(cv, SCORE_X, SCORE_Y + 16, 3, SCORE_H - 32, C_EDGE, 15u);
 	text(cv, TR_HUD_FONT_SMALL, SCORE_X + 16, SCORE_Y + 6, "SCORE", C_DIM, 16u);
 	/* who is running (P16) */
-	text(cv, TR_HUD_FONT_SMALL, SCORE_X + 26 + text_w(&tr_font_small, "SCORE"), SCORE_Y + 6,
-	     tr_hud_char_name(v->character), C_CYAN, 16u);
+	text(cv,
+	     TR_HUD_FONT_SMALL,
+	     SCORE_X + 26 + text_w(&tr_font_small, "SCORE"),
+	     SCORE_Y + 6,
+	     tr_hud_char_name(v->character),
+	     C_CYAN,
+	     16u);
 	tr_hud_fmt_u32(b, v->score);
 	text(cv, TR_HUD_FONT_BIG, SCORE_X + 12, SCORE_Y + 26, b, C_WHITE, 16u);
 	if (v->combo >= 2u) {
@@ -393,15 +420,21 @@ static void paint_perf(const canvas_t *cv, const tr_hud_view_t *v)
 {
 	panel(cv, PERF_X, PERF_Y, PERF_W, PERF_H, C_PANEL, A_PANEL);
 	for (int i = 0; i < TR_PERF_LINES; i++) {
-		text(cv, TR_HUD_FONT_TINY, PERF_X + 14, PERF_Y + 7 + 18 * i, v->perf[i], i == 0 ? C_GREEN : C_DIM, 16u);
+		text(cv,
+		     TR_HUD_FONT_TINY,
+		     PERF_X + 14,
+		     PERF_Y + 7 + 18 * i,
+		     v->perf[i],
+		     i == 0 ? C_GREEN : C_DIM,
+		     16u);
 	}
 }
 
 static void paint_popup(const canvas_t *cv, const tr_hud_view_t *v, uint32_t age)
 {
 	char     b[16];
-	uint32_t s    = age < 20u ? 16u : (TR_HUD_POPUP_FRAMES - age) * 16u / 12u;
-	int      top  = 200 - (int)age * 2;
+	uint32_t s   = age < 20u ? 16u : (TR_HUD_POPUP_FRAMES - age) * 16u / 12u;
+	int      top = 200 - (int)age * 2;
 
 	if (v->popup_hs) {
 		/* booth: the run just passed the table's best -- inside the popup's
@@ -442,7 +475,8 @@ static bool table_page(const tr_hud_view_t *v, uint32_t frame)
  * row a place, the latest entry in gold. */
 #define TABLE_ROW_Y (CARD_Y + 48)
 #define TABLE_ROW_H 22
-_Static_assert(TABLE_ROW_Y + (TR_HS_N - 1) * TABLE_ROW_H + 21 <= INV_Y, "the table stays above the invitation row");
+_Static_assert(TABLE_ROW_Y + (TR_HS_N - 1) * TABLE_ROW_H + 21 <= INV_Y,
+               "the table stays above the invitation row");
 
 static void paint_table(const canvas_t *cv, const tr_hiscore_t *hs)
 {
@@ -462,7 +496,8 @@ static void paint_table(const canvas_t *cv, const tr_hiscore_t *hs)
 	}
 }
 
-static void paint_attract(const canvas_t *cv, const tr_hud_view_t *v, uint32_t frame, uint32_t zone_start)
+static void
+paint_attract(const canvas_t *cv, const tr_hud_view_t *v, uint32_t frame, uint32_t zone_start)
 {
 	char b[24];
 
@@ -480,8 +515,14 @@ static void paint_attract(const canvas_t *cv, const tr_hud_view_t *v, uint32_t f
 	 * middle of the road stay clear. The high-score page keeps the card's
 	 * middle (it is the whole point of that page). */
 	panel(cv, LOGO_CARD_X, LOGO_CARD_Y, SCORE_W, LOGO_CARD_H, C_PANEL, A_PANEL);
-	draw_map(cv, tr_logo_mid, TR_LOGO_MID_W, TR_LOGO_MID_H, LOGO_CARD_X + (SCORE_W - TR_LOGO_MID_W) / 2,
-		 LOGO_CARD_Y + (LOGO_CARD_H - TR_LOGO_MID_H) / 2, 0xEEEu, 16u);
+	draw_map(cv,
+	         tr_logo_mid,
+	         TR_LOGO_MID_W,
+	         TR_LOGO_MID_H,
+	         LOGO_CARD_X + (SCORE_W - TR_LOGO_MID_W) / 2,
+	         LOGO_CARD_Y + (LOGO_CARD_H - TR_LOGO_MID_H) / 2,
+	         0xEEEu,
+	         16u);
 	if (table_page(v, frame)) {
 		panel(cv, 110, CARD_Y, TR_HUD_W - 220, INV_Y - 4 - CARD_Y, C_PANEL, A_PANEL);
 		paint_table(cv, &v->hs);
@@ -497,7 +538,7 @@ static void paint_attract(const canvas_t *cv, const tr_hud_view_t *v, uint32_t f
 	bool        zone = zone_on(frame, zone_start);
 	int         cx   = v->invite == TR_HUD_INVITE_NONE && !zone ? TR_HUD_W / 2 : INV_CHAR_X;
 
-	int         hw   = text_w(&tr_font_med, name) / 2 + (v->invite == TR_HUD_INVITE_TILT ? 34 : 0);
+	int hw = text_w(&tr_font_med, name) / 2 + (v->invite == TR_HUD_INVITE_TILT ? 34 : 0);
 
 	panel(cv, cx - hw - 12, INV_Y, 2 * hw + 24, INV_PANEL_H, C_PANEL, A_PANEL);
 	if (v->invite == TR_HUD_INVITE_TILT) {
@@ -567,8 +608,14 @@ static void paint_initials(const canvas_t *cv, const tr_hud_view_t *v, uint32_t 
 			}
 		}
 	}
-	text_c(cv, TR_HUD_FONT_SMALL, TR_HUD_W / 2, CARD_Y + 120, "TILT \x7f LETTER   TOWARD \x7f NEXT   AWAY \x7f BACK", C_DIM, 16u);
-	static const char *const place[TR_HS_N] = {"1ST", "2ND", "3RD", "4TH", "5TH"};
+	text_c(cv,
+	       TR_HUD_FONT_SMALL,
+	       TR_HUD_W / 2,
+	       CARD_Y + 120,
+	       "TILT \x7f LETTER   TOWARD \x7f NEXT   AWAY \x7f BACK",
+	       C_DIM,
+	       16u);
+	static const char *const place[TR_HS_N] = { "1ST", "2ND", "3RD", "4TH", "5TH" };
 
 	memcpy(b, place[v->ini.rank >= 0 && v->ini.rank < TR_HS_N ? v->ini.rank : 0], 3);
 	memcpy(b + 3, " \x7f ", 3);
@@ -578,19 +625,22 @@ static void paint_initials(const canvas_t *cv, const tr_hud_view_t *v, uint32_t 
 
 static void paint_banner(const canvas_t *cv, const tr_hud_view_t *v)
 {
-	const char *s = v->banner == TR_BANNER_STAND       ? "STEP INTO VIEW"
-			: v->banner == TR_BANNER_STEP_BACK ? "STEP BACK INTO VIEW"
-			: v->banner == TR_BANNER_CHECK_CAMERA ? "CHECK THE CAMERA"
-							      : "";
-	int w = text_w(&tr_font_med, s) + 64;
+	const char *s = v->banner == TR_BANNER_STAND          ? "STEP INTO VIEW"
+	                : v->banner == TR_BANNER_STEP_BACK    ? "STEP BACK INTO VIEW"
+	                : v->banner == TR_BANNER_CHECK_CAMERA ? "CHECK THE CAMERA"
+	                                                      : "";
+	int         w = text_w(&tr_font_med, s) + 64;
 
 	panel(cv, (TR_HUD_W - w) / 2, 196, w, 72, C_PANEL, A_PANEL + 2u);
 	text_c(cv, TR_HUD_FONT_MED, TR_HUD_W / 2, 212, s, C_WHITE, 16u);
 }
 
 /* The whole HUD for v at hud frame `frame`, clipped to cv. */
-static void paint(const canvas_t *cv, const tr_hud_view_t *v, uint32_t frame, uint32_t popup_start,
-		  uint32_t zone_start)
+static void paint(const canvas_t      *cv,
+                  const tr_hud_view_t *v,
+                  uint32_t             frame,
+                  uint32_t             popup_start,
+                  uint32_t             zone_start)
 {
 	paint_perf(cv, v);
 	switch (v->mode) {
@@ -639,10 +689,10 @@ enum { T_SCORE, T_SUB, T_PERF, T_MIDL, T_POP, T_MIDR, T_INV, T_N };
 _Static_assert(T_N == TR_HUD_TILES, "hud.h TR_HUD_TILES");
 
 static const tile_t tiles[T_N] = {
-	[T_SCORE] = { 0, 0, 400, 104 },       [T_SUB] = { 0, 104, 400, CARD_Y },
-	[T_PERF]  = { 400, 0, 720, CARD_Y },  [T_MIDL] = { 0, CARD_Y, 220, INV_Y },
-	[T_POP]   = { 220, CARD_Y, 500, INV_Y }, /* the popup's extent: repainted every popup frame */
-	[T_MIDR]  = { 500, CARD_Y, 720, INV_Y }, [T_INV] = { 0, INV_Y, 720, TR_HUD_H },
+	[T_SCORE] = { 0, 0, 400, 104 },         [T_SUB] = { 0, 104, 400, CARD_Y },
+	[T_PERF] = { 400, 0, 720, CARD_Y },     [T_MIDL] = { 0, CARD_Y, 220, INV_Y },
+	[T_POP]  = { 220, CARD_Y, 500, INV_Y }, /* the popup's extent: repainted every popup frame */
+	[T_MIDR] = { 500, CARD_Y, 720, INV_Y }, [T_INV] = { 0, INV_Y, 720, TR_HUD_H },
 };
 
 static uint32_t fnv(uint32_t h, uint32_t v)
@@ -653,15 +703,17 @@ static uint32_t fnv(uint32_t h, uint32_t v)
 	return h;
 }
 
-static uint32_t tile_key(int t, const tr_hud_view_t *v, uint32_t frame, uint32_t popup_start, uint32_t zone_start)
+static uint32_t
+tile_key(int t, const tr_hud_view_t *v, uint32_t frame, uint32_t popup_start, uint32_t zone_start)
 {
 	uint32_t k = fnv(2166136261u, v->mode);
 
 	switch (t) {
 	case T_SCORE:
 		/* play / crash / banner share the score panel; attract: BEST */
-		return v->mode == TR_HUD_ATTRACT ? fnv(k, v->best)
-						 : fnv(fnv(fnv(fnv(2166136261u, 7u), v->score), v->combo), v->character);
+		return v->mode == TR_HUD_ATTRACT
+		           ? fnv(k, v->best)
+		           : fnv(fnv(fnv(fnv(2166136261u, 7u), v->score), v->combo), v->character);
 	case T_SUB:
 		return v->mode == TR_HUD_ATTRACT ? k : fnv(fnv(fnv(2166136261u, 7u), v->metres), v->best);
 	case T_PERF:
@@ -671,7 +723,8 @@ static uint32_t tile_key(int t, const tr_hud_view_t *v, uint32_t frame, uint32_t
 			}
 			k = fnv(k, 0u);
 		}
-		return fnv(k, v->mode == TR_HUD_ATTRACT ? v->best : 0u); /* attract's BEST panel may be wide */
+		return fnv(k,
+		           v->mode == TR_HUD_ATTRACT ? v->best : 0u); /* attract's BEST panel may be wide */
 	case T_MIDL:
 	case T_POP:
 	case T_MIDR:
@@ -680,27 +733,31 @@ static uint32_t tile_key(int t, const tr_hud_view_t *v, uint32_t frame, uint32_t
 		} else if (v->mode == TR_HUD_BANNER) {
 			k = fnv(k, v->banner);
 		} else if (v->mode == TR_HUD_PLAY && t == T_POP && popup_on(frame, popup_start)) {
-			k = fnv(fnv(fnv(fnv(fnv(k, 1u), frame - popup_start), v->popup_pts), v->popup_mult), v->popup_hs);
+			k = fnv(fnv(fnv(fnv(fnv(k, 1u), frame - popup_start), v->popup_pts), v->popup_mult),
+			        v->popup_hs);
 		} else if (v->mode == TR_HUD_ATTRACT && table_page(v, frame)) {
 			k = fnv(fnv(k, 5u), v->hs.last);
 			for (int i = 0; i < v->hs.n; i++) {
-				k = fnv(fnv(k, v->hs.e[i].score), (uint32_t)v->hs.e[i].name[0] |
-									  (uint32_t)v->hs.e[i].name[1] << 8 |
-									  (uint32_t)v->hs.e[i].name[2] << 16);
+				k = fnv(fnv(k, v->hs.e[i].score),
+				        (uint32_t)v->hs.e[i].name[0] | (uint32_t)v->hs.e[i].name[1] << 8 |
+				            (uint32_t)v->hs.e[i].name[2] << 16);
 			}
 		} else if (v->mode == TR_HUD_INITIALS && t == T_POP) {
 			k = fnv(fnv(fnv(fnv(fnv(k, (uint8_t)v->ini.name[0]), (uint8_t)v->ini.name[1]),
-					(uint8_t)v->ini.name[2]),
-				    v->ini.pos),
-				blink_on(frame));
+			                (uint8_t)v->ini.name[2]),
+			            v->ini.pos),
+			        blink_on(frame));
 		}
 		return k;
 	default: /* T_INV */
 		if (v->mode == TR_HUD_PLAY && zone_on(frame, zone_start)) {
 			return fnv(fnv(fnv(k, 3u), zone_alpha(frame - zone_start)), v->zone);
 		}
-		if (v->mode == TR_HUD_ATTRACT && zone_on(frame, zone_start)) { /* the zone in the invitation's place */
-			return fnv(fnv(fnv(fnv(fnv(k, 3u), zone_alpha(frame - zone_start)), v->zone), v->invite), v->character);
+		if (v->mode == TR_HUD_ATTRACT &&
+		    zone_on(frame, zone_start)) { /* the zone in the invitation's place */
+			return fnv(
+			    fnv(fnv(fnv(fnv(k, 3u), zone_alpha(frame - zone_start)), v->zone), v->invite),
+			    v->character);
 		}
 		if (v->mode == TR_HUD_ATTRACT) {
 			return fnv(fnv(fnv(k, v->invite), blink_on(frame)), v->character);
@@ -718,8 +775,12 @@ static uint32_t tile_key(int t, const tr_hud_view_t *v, uint32_t frame, uint32_t
 /* Scratch strip: one tile row band at a time, then copied out whole. */
 static uint16_t strip[TR_HUD_STRIP * TR_HUD_W];
 
-static uint32_t paint_tile(uint16_t *fb, int t, const tr_hud_view_t *v, uint32_t frame, uint32_t popup_start,
-			   uint32_t zone_start)
+static uint32_t paint_tile(uint16_t            *fb,
+                           int                  t,
+                           const tr_hud_view_t *v,
+                           uint32_t             frame,
+                           uint32_t             popup_start,
+                           uint32_t             zone_start)
 {
 	const tile_t *tl = &tiles[t];
 	int           w  = tl->x1 - tl->x0;
@@ -737,7 +798,11 @@ static uint32_t paint_tile(uint16_t *fb, int t, const tr_hud_view_t *v, uint32_t
 	return (uint32_t)w * (uint32_t)(tl->y1 - tl->y0);
 }
 
-void tr_hud_paint_all(uint16_t *fb, const tr_hud_view_t *v, uint32_t frame, uint32_t popup_start, uint32_t zone_start)
+void tr_hud_paint_all(uint16_t            *fb,
+                      const tr_hud_view_t *v,
+                      uint32_t             frame,
+                      uint32_t             popup_start,
+                      uint32_t             zone_start)
 {
 	inv_init();
 	for (int t = 0; t < T_N; t++) {
@@ -759,7 +824,8 @@ static uint32_t tile_area(int t)
 }
 
 #define MID_BITS (1u << T_MIDL | 1u << T_POP | 1u << T_MIDR)
-_Static_assert(T_POP == T_MIDL + 1 && T_MIDR == T_POP + 1, "the card's middle tiles are consecutive");
+_Static_assert(T_POP == T_MIDL + 1 && T_MIDR == T_POP + 1,
+               "the card's middle tiles are consecutive");
 
 uint32_t tr_hud_update(tr_hud_t *h, uint16_t *fb, const tr_hud_view_t *v, uint32_t *dirty)
 {
@@ -800,10 +866,12 @@ uint32_t tr_hud_update(tr_hud_t *h, uint16_t *fb, const tr_hud_view_t *v, uint32
 		if (mid && (d & MID_BITS) == 0u) {
 			area = 0u;
 			for (int m = T_MIDL; m <= T_MIDR; m++) {
-				area += tile_key(m, v, f, h->popup_start, h->zone_start) != h->key[m] ? tile_area(m) : 0u;
+				area += tile_key(m, v, f, h->popup_start, h->zone_start) != h->key[m] ? tile_area(m)
+				                                                                      : 0u;
 			}
 		}
-		if (h->budget != 0u && px != 0u && !(mid && (d & MID_BITS) != 0u) && px + area > h->budget) {
+		if (h->budget != 0u && px != 0u && !(mid && (d & MID_BITS) != 0u) &&
+		    px + area > h->budget) {
 			h->next = t; /* the rest next frame */
 			break;
 		}
@@ -826,13 +894,18 @@ uint8_t tr_hud_mode_of(uint8_t banner, bool attract)
 	if (banner == TR_BANNER_GAME_OVER) {
 		return TR_HUD_CRASH;
 	}
-	if (banner == TR_BANNER_STAND || banner == TR_BANNER_STEP_BACK || banner == TR_BANNER_CHECK_CAMERA) {
+	if (banner == TR_BANNER_STAND || banner == TR_BANNER_STEP_BACK ||
+	    banner == TR_BANNER_CHECK_CAMERA) {
 		return TR_HUD_BANNER;
 	}
 	return TR_HUD_PLAY;
 }
 
-void tr_hud_view_set(tr_hud_view_t *v, const tr_score_t *s, uint8_t banner, bool attract, uint8_t invite)
+void tr_hud_view_set(tr_hud_view_t    *v,
+                     const tr_score_t *s,
+                     uint8_t           banner,
+                     bool              attract,
+                     uint8_t           invite)
 {
 	v->mode       = tr_hud_mode_of(banner, attract);
 	v->banner     = banner;
@@ -898,7 +971,10 @@ static void fmt_mb(char *b, size_t n, uint32_t bytes)
 	snprintf(b, n, "%u.%02u", (unsigned)(c / 100u), (unsigned)(c % 100u));
 }
 
-bool tr_perf_sample(tr_perf_t *p, const tr_perf_raw_t *raw, const tr_perf_mem_t *mem, tr_hud_view_t *v)
+bool tr_perf_sample(tr_perf_t           *p,
+                    const tr_perf_raw_t *raw,
+                    const tr_perf_mem_t *mem,
+                    tr_hud_view_t       *v)
 {
 	if (!p->have) {
 		p->last = *raw;
@@ -911,11 +987,12 @@ bool tr_perf_sample(tr_perf_t *p, const tr_perf_raw_t *raw, const tr_perf_mem_t 
 		return false;
 	}
 	/* flips x 10 per second, rounded: one decimal of FPS */
-	p->fps_x10    = (uint16_t)(((uint64_t)(raw->flips - p->last.flips) * 10000000u + dt / 2u) / dt);
+	p->fps_x10 = (uint16_t)(((uint64_t)(raw->flips - p->last.flips) * 10000000u + dt / 2u) / dt);
 	/* CNTVCT runs at 100 MHz: 100 ticks a microsecond */
 	p->a32_pct[0] = tr_perf_pct(raw->a32_ticks0 - p->last.a32_ticks0, dt * 100u);
 	p->a32_pct[1] = tr_perf_pct(raw->a32_ticks1 - p->last.a32_ticks1, dt * 100u);
-	p->he_pct     = tr_perf_pct(raw->he_busy_cyc - p->last.he_busy_cyc, raw->he_all_cyc - p->last.he_all_cyc);
+	p->he_pct =
+	    tr_perf_pct(raw->he_busy_cyc - p->last.he_busy_cyc, raw->he_all_cyc - p->last.he_all_cyc);
 	/* fix round 5: only when the HP's own beacon (src/ipc/tr_hp_dbg.h) has
 	 * been seen valid on BOTH ends of this window -- a magic that only
 	 * shows up mid-window (the HP booting, or its dbg block still zeroed
@@ -924,16 +1001,23 @@ bool tr_perf_sample(tr_perf_t *p, const tr_perf_raw_t *raw, const tr_perf_mem_t 
 	 * window, over-reading the % this window covers. */
 	if (raw->hp_dbg_magic == TR_HP_DBG_MAGIC && p->last.hp_dbg_magic == TR_HP_DBG_MAGIC) {
 		p->hp_pct       = tr_perf_pct(raw->hp_busy_cyc - p->last.hp_busy_cyc,
-						raw->hp_total_cyc - p->last.hp_total_cyc);
+		                              raw->hp_total_cyc - p->last.hp_total_cyc);
 		p->hp_pct_valid = true;
 	}
 	p->last = *raw;
 
 	char a[8], b[8];
 
-	snprintf(v->perf[0], TR_PERF_COLS, "FPS %u.%u", (unsigned)(p->fps_x10 / 10u), (unsigned)(p->fps_x10 % 10u));
-	snprintf(v->perf[1], TR_PERF_COLS, "A32#0 %u%%  A32#1 %u%%", (unsigned)p->a32_pct[0],
-		 (unsigned)p->a32_pct[1]);
+	snprintf(v->perf[0],
+	         TR_PERF_COLS,
+	         "FPS %u.%u",
+	         (unsigned)(p->fps_x10 / 10u),
+	         (unsigned)(p->fps_x10 % 10u));
+	snprintf(v->perf[1],
+	         TR_PERF_COLS,
+	         "A32#0 %u%%  A32#1 %u%%",
+	         (unsigned)p->a32_pct[0],
+	         (unsigned)p->a32_pct[1]);
 	/* fix round 5: hp_vision's own beacon, when resident (its magic valid),
 	 * shows a REAL load % from its busy/total cycle counters -- the sound
 	 * ring's "audio"/"fault"/"--" text is the fallback for whichever HP_APP
@@ -941,8 +1025,11 @@ bool tr_perf_sample(tr_perf_t *p, const tr_perf_raw_t *raw, const tr_perf_mem_t 
 	 * TR_SND_HP are mutually exclusive, so only one of the two beacons is
 	 * ever meaningful on a given board). */
 	if (raw->hp_dbg_magic == TR_HP_DBG_MAGIC && p->hp_pct_valid) {
-		snprintf(v->perf[2], TR_PERF_COLS, "M55-HE %u%%  M55-HP %u%%", (unsigned)p->he_pct,
-			 (unsigned)p->hp_pct);
+		snprintf(v->perf[2],
+		         TR_PERF_COLS,
+		         "M55-HE %u%%  M55-HP %u%%",
+		         (unsigned)p->he_pct,
+		         (unsigned)p->hp_pct);
 	} else if (raw->hp_dbg_magic == TR_HP_DBG_MAGIC) {
 		/* fix round 7: the beacon is up but this is the FIRST window since
 		 * (this or the HP's own boot) -- there is no real % yet, so say so
@@ -950,15 +1037,22 @@ bool tr_perf_sample(tr_perf_t *p, const tr_perf_raw_t *raw, const tr_perf_mem_t 
 		 * HP (see tr_perf_sample()'s hp_pct_valid comment). */
 		snprintf(v->perf[2], TR_PERF_COLS, "M55-HE %u%%  M55-HP --", (unsigned)p->he_pct);
 	} else {
-		snprintf(v->perf[2], TR_PERF_COLS, "M55-HE %u%%  M55-HP %s", (unsigned)p->he_pct,
-			 tr_perf_hp(raw->hp_magic, raw->hp_state));
+		snprintf(v->perf[2],
+		         TR_PERF_COLS,
+		         "M55-HE %u%%  M55-HP %s",
+		         (unsigned)p->he_pct,
+		         tr_perf_hp(raw->hp_magic, raw->hp_state));
 	}
 	fmt_mb(a, sizeof(a), mem->sram_used);
 	fmt_mb(b, sizeof(b), mem->sram_total);
 	snprintf(v->perf[3], TR_PERF_COLS, "SRAM %s/%s MB", a, b);
 	fmt_mb(a, sizeof(a), mem->img);
-	snprintf(v->perf[4], TR_PERF_COLS, "IMG %s MB  TCM %u+%uK", a, (unsigned)((mem->itcm + 512u) / 1024u),
-		 (unsigned)((mem->dtcm + 512u) / 1024u));
+	snprintf(v->perf[4],
+	         TR_PERF_COLS,
+	         "IMG %s MB  TCM %u+%uK",
+	         a,
+	         (unsigned)((mem->itcm + 512u) / 1024u),
+	         (unsigned)((mem->dtcm + 512u) / 1024u));
 	/* "SoM+LCD", not "SOM": U30 measures the carrier's whole downstream
 	 * +5V net (module, display, and several carrier regulators/amps
 	 * alongside it -- see platform/rail5v_power.c's header comment), not
@@ -982,18 +1076,20 @@ bool tr_perf_sample(tr_perf_t *p, const tr_perf_raw_t *raw, const tr_perf_mem_t 
 unsigned tr_mem_map(tr_mem_region_t out[TR_MEM_REGIONS], uint32_t renderer_end)
 {
 	uint32_t rend = renderer_end > STUB_PAYLOAD_BASE && renderer_end <= TR_MEM_A32_IMG_END
-				? renderer_end - STUB_PAYLOAD_BASE
-				: TR_MEM_A32_IMG_END - STUB_PAYLOAD_BASE;
+	                    ? renderer_end - STUB_PAYLOAD_BASE
+	                    : TR_MEM_A32_IMG_END - STUB_PAYLOAD_BASE;
 	const tr_mem_region_t map[] = {
 		/* SRAM0 */
 		{ "FB A", TR_FB_A, TR_FB_SIZE },
 		{ "A32 DL", TR_MEM_A32_DL, (uint32_t)sizeof(tr_dl_t) },
 		{ "A32 setup", TR_MEM_A32_SETUP, (uint32_t)sizeof(tr_tri_setup_t) * TR_DL_MAX_TRIS },
-		{ "A32 bands", TR_MEM_A32_BANDS, A32_CORES * 2u * A32_BAND_PX * 2u }, /* z + colour, per core */
-		{ "A32 zone tex", TR_MEM_A32_ZTEX, TR_MEM_A32_ZTEX_SIZE },         /* P15 */
-		{ "A32 zone idx", TR_MEM_A32_ZIDX, TR_MEM_A32_ZIDX_SIZE },         /* P15, 4 bpp unpacked */
-		{ "A32 DL1", TR_MEM_A32_DL1, (uint32_t)sizeof(tr_dl_t) },          /* scene part 2 */
-		{ "sound ring", TR_MEM_ARING, TR_MEM_ARING_SIZE },                 /* P10 */
+		{ "A32 bands",
+		  TR_MEM_A32_BANDS,
+		  A32_CORES * 2u * A32_BAND_PX * 2u },                     /* z + colour, per core */
+		{ "A32 zone tex", TR_MEM_A32_ZTEX, TR_MEM_A32_ZTEX_SIZE }, /* P15 */
+		{ "A32 zone idx", TR_MEM_A32_ZIDX, TR_MEM_A32_ZIDX_SIZE }, /* P15, 4 bpp unpacked */
+		{ "A32 DL1", TR_MEM_A32_DL1, (uint32_t)sizeof(tr_dl_t) },  /* scene part 2 */
+		{ "sound ring", TR_MEM_ARING, TR_MEM_ARING_SIZE },         /* P10 */
 		{ "TF-A MHU0", TR_MHU0_WINDOW_LO, TR_MHU0_WINDOW_HI - TR_MHU0_WINDOW_LO },
 		{ "HUD", TR_HUD_FB, TR_HUD_FB_SIZE },
 		{ "stub park", STUB_EARLY_PARK, 0x100u }, /* fault park page: vectors, loop, record */

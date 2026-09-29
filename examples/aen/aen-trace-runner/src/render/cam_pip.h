@@ -26,7 +26,7 @@
 #define TR_VID_W  TR_R3D_W
 #define TR_VID_H  (TR_R3D_H - TR_VIEW_H)
 _Static_assert(TR_VID_H >= TR_CAM_SENSOR_W && TR_VID_W >= TR_CAM_SENSOR_W,
-	       "the video area must hold the camera at native 1:1 in either orientation");
+               "the video area must hold the camera at native 1:1 in either orientation");
 
 /* Where the upright image of rotation rot sits: centred, native 1:1. x in
  * screen columns, y in video-area rows (add TR_VID_Y0 for the screen row). */
@@ -49,8 +49,14 @@ void tr_cam_pip_row_grey_to_rgb565(const uint8_t *src_row, int src_w, uint16_t *
 /* Scalar reference: UPRIGHT rows [uy0, uy0 + rows) of the src_w x src_h raw
  * frame turned by rot (cam_rot.h), TR_CAM_UP_W(rot) px each, as RGB565 into
  * dst (row r at dst + r * dst_stride). */
-void tr_cam_rot_rows(const uint8_t *src, int src_w, int src_h, int rot, int uy0, int rows, uint16_t *dst,
-		     int dst_stride);
+void tr_cam_rot_rows(const uint8_t *src,
+                     int            src_w,
+                     int            src_h,
+                     int            rot,
+                     int            uy0,
+                     int            rows,
+                     uint16_t      *dst,
+                     int            dst_stride);
 
 /* The raw columns [*c0, *c1) that upright rows [uy0, uy0 + rows) read, over
  * every raw row, for rot 90/270 (a column strip: what the A32 invalidates
@@ -69,7 +75,12 @@ static inline void tr_cam_rot_src_cols(int rot, int uy0, int rows, int *c0, int 
  * output row of the block. Bit-exact against tr_cam_rot_rows()
  * (tests/host/test_r3d_cam_pip.c, under qemu-arm: a plain x86 host never
  * defines __ARM_NEON). */
-void tr_cam_rot_rows_neon(const uint8_t *src, int rot, int uy0, int rows, uint16_t *dst, int dst_stride);
+void tr_cam_rot_rows_neon(const uint8_t *src,
+                          int            rot,
+                          int            uy0,
+                          int            rows,
+                          uint16_t      *dst,
+                          int            dst_stride);
 #endif
 
 /* One pose keypoint (UPRIGHT frame px, pose.h tr_kp_t -- the frame the HP

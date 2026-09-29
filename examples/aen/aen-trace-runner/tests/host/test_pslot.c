@@ -15,8 +15,8 @@
 #include "../../src/ipc/tr_pslot.h"
 
 static volatile tr_pslot_t g_slot;
-static int                 g_tear_on_call; /* 0 = never; N = bump seq during the Nth barrier() call */
-static int                 g_call_count;
+static int g_tear_on_call; /* 0 = never; N = bump seq during the Nth barrier() call */
+static int g_call_count;
 
 static void noop_barrier(void)
 {
@@ -35,7 +35,9 @@ static tr_pose_t make_pose(int16_t x0)
 	tr_pose_t p = { 0 };
 
 	for (int k = 0; k < TR_POSE_KP; k++) {
-		p.kp[k] = (tr_kp_t){ .x = (int16_t)(x0 + k), .y = (int16_t)(100 + k), .score = (uint8_t)(k * 10) };
+		p.kp[k] = (tr_kp_t){ .x     = (int16_t)(x0 + k),
+			                 .y     = (int16_t)(100 + k),
+			                 .score = (uint8_t)(k * 10) };
 	}
 	return p;
 }
@@ -75,8 +77,9 @@ int main(void)
 	assert(g_slot.seq == 4u);
 	ok = tr_pslot_read(&g_slot, 0u, &out, &seq, noop_barrier);
 	assert(ok && seq == 4u && out.hp_state == TR_HP_STATE_NO_CAMERA);
-	assert(memcmp((void *)out.thumb, thumb, sizeof(thumb)) == 0); /* still the first write's bytes */
-	assert(memcmp(out.pose.kp, p2.kp, sizeof(p2.kp)) == 0);       /* pose itself DID update */
+	assert(memcmp((void *)out.thumb, thumb, sizeof(thumb)) ==
+	       0);                                              /* still the first write's bytes */
+	assert(memcmp(out.pose.kp, p2.kp, sizeof(p2.kp)) == 0); /* pose itself DID update */
 
 	/* --- torn read: the writer races in between the seq read and the body
 	 * copy (tear_on_call 1) --- */
@@ -111,12 +114,12 @@ int main(void)
 	 * ok=true with a torn kp[0]/kp[1] mix. The fix's entry check
 	 * (`s0 & 1u`) rejects it before ever touching the body. --- */
 	memset((void *)&g_slot, 0, sizeof(g_slot));
-	g_slot.magic   = TR_PSLOT_MAGIC;
-	g_slot.version = TR_PSLOT_VERSION;
-	g_slot.pose    = make_pose(10);   /* the "old" publish's keypoints ... */
-	g_slot.pose.kp[0].x = 999;        /* ... except kp[0], already overwritten by the stalled "new" one */
-	g_slot.seq = 1u;                  /* ODD: mid-publish, never finished */
-	ok         = tr_pslot_read(&g_slot, 0u, &out, &seq, noop_barrier);
+	g_slot.magic        = TR_PSLOT_MAGIC;
+	g_slot.version      = TR_PSLOT_VERSION;
+	g_slot.pose         = make_pose(10); /* the "old" publish's keypoints ... */
+	g_slot.pose.kp[0].x = 999; /* ... except kp[0], already overwritten by the stalled "new" one */
+	g_slot.seq          = 1u;  /* ODD: mid-publish, never finished */
+	ok                  = tr_pslot_read(&g_slot, 0u, &out, &seq, noop_barrier);
 	assert(!ok);
 
 	return 0;

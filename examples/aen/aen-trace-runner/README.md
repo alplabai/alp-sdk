@@ -7,9 +7,12 @@ work at once. The player steers by moving their body in front of the camera. Mov
 estimation runs on the M55-HP's Ethos-U55, the game logic and HUD run on the M55-HE, and a
 bare-metal Cortex-A32 renders the 3D scene.
 
-**Bench status:** the release built from these sources (HE + HP vision + A32 renderer) is
-resident on an E1M-AEN803 (2026W36-0009) on the E1M-EVK. After a cold power cycle on 2026-09-25
-it booted standalone into attract mode and measured 30.0 fps with 0 dropped frames.
+**Bench status:** on 2026-09-29 the release was built from this directory (HE + HP vision + A32
+renderer), packaged with `a32/release/build-release.sh` and flashed with
+`a32/release/flash-release.sh` onto an E1M-AEN803 (2026W36-0009) on the E1M-EVK. After each of
+three cold power cycles it booted standalone into the game, running 30.0 fps (300 panel flips in
+10 s) with 0 dropped frames. The A32 image built here was byte-identical to the one already
+resident on that unit.
 
 ## Core split
 

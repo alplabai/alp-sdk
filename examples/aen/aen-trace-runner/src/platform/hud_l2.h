@@ -22,8 +22,14 @@ bool tr_hud_l2_up(void);
  * the frame's banner (TR_BANNER_*), attract, the invitation
  * (TR_HUD_INVITE_*), the world zone (its name on entry, P15) and the
  * character (TR_CHAR_*, P16). Repaints only what changed. */
-void tr_hud_l2_present(const tr_score_t *s, uint8_t banner, bool attract, uint8_t invite, const tr_zone_t *z,
-		       uint8_t character, const tr_hiscore_t *hs, const tr_initials_t *ini);
+void tr_hud_l2_present(const tr_score_t    *s,
+                       uint8_t              banner,
+                       bool                 attract,
+                       uint8_t              invite,
+                       const tr_zone_t     *z,
+                       uint8_t              character,
+                       const tr_hiscore_t  *hs,
+                       const tr_initials_t *ini);
 
 /* Counters the perf panel reads (display_a32.c, a32.c). */
 extern volatile uint32_t tr_flip_count;

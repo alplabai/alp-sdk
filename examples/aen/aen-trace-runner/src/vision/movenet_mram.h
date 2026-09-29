@@ -11,6 +11,7 @@
 #define TR_MOVENET_MRAM_H
 
 #define TR_MOVENET_MRAM_ADDR 0x80100000u
-#define TR_MOVENET_MRAM_SIZE 2429520u /* design doc's model table: cut model, Vela'd, --optimise Size */
+#define TR_MOVENET_MRAM_SIZE \
+	2429520u /* design doc's model table: cut model, Vela'd, --optimise Size */
 
 #endif /* TR_MOVENET_MRAM_H */

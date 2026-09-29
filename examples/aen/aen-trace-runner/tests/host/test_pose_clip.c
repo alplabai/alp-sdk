@@ -51,8 +51,16 @@ int main(void)
 			continue;
 		}
 		g_in[n] = tr_track_update(&t, b);
-		printf("%3d box=%s x=%4d y=%4d w=%3d h=%3d c=%3d  lane%+d%s%s\n", n, b.valid ? "Y" : "-", b.x, b.y,
-		       b.w, b.h, b.confidence, g_in[n].lane_delta, g_in[n].jump ? " JUMP" : "",
+		printf("%3d box=%s x=%4d y=%4d w=%3d h=%3d c=%3d  lane%+d%s%s\n",
+		       n,
+		       b.valid ? "Y" : "-",
+		       b.x,
+		       b.y,
+		       b.w,
+		       b.h,
+		       b.confidence,
+		       g_in[n].lane_delta,
+		       g_in[n].jump ? " JUMP" : "",
 		       g_in[n].duck ? " DUCK" : "");
 		if (n == TR_POSE_CLIP_FRAMES - 1) {
 			lost_at_end = tr_track_player_lost(&t);

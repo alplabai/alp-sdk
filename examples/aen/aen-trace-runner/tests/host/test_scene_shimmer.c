@@ -34,7 +34,7 @@
 /* The accepted board levels, near / mid / far: its shoulders near 8.45 %
  * (magnified, raw texels: every zone's art >= 2 texels a feature keeps to
  * it), mid 5.2 % after fade_detail() (was 13.5), far well under. */
-static const double shimmer_max[3] = {9.0, 7.0, 7.0};
+static const double shimmer_max[3] = { 9.0, 7.0, 7.0 };
 
 static uint16_t       fb[W * H], idb[W * H];
 static uint16_t       zb[W * TR_BAND_H], cb[W * TR_BAND_H];
@@ -50,13 +50,15 @@ static void raster(uint16_t *f, const tr_dl_t *d, const tr_bg_t *bg)
 
 	tr_bin_build(d, setup, bins, counts, &ov);
 	for (int b = 0; b < TR_BANDS; b++) {
-		tr_raster_band(f, W, b * TR_BAND_H, (b + 1) * TR_BAND_H, zb, cb, bg, d, setup, bins[b], counts[b]);
+		tr_raster_band(
+		    f, W, b * TR_BAND_H, (b + 1) * TR_BAND_H, zb, cb, bg, d, setup, bins[b], counts[b]);
 	}
 }
 
 static float lum(uint16_t p)
 {
-	return 0.299f * (float)((p >> 11) << 3) + 0.587f * (float)(((p >> 5) & 63) << 2) + 0.114f * (float)((p & 31) << 3);
+	return 0.299f * (float)((p >> 11) << 3) + 0.587f * (float)(((p >> 5) & 63) << 2) +
+	       0.114f * (float)((p & 31) << 3);
 }
 
 /* Control: proves the flip rule (e = render - truth; flip when |e - e0| >=
@@ -86,10 +88,12 @@ static uint16_t ctrl_pal[TR_FOG_LEVELS * TR_FOG_PAL_MAX];
 
 static double control_shimmer(void)
 {
-	static const tr_light_t l = {{0.0f, 1.0f, 0.0f}, 0.0f, {206, 112, 72}, 600.0f, 8800.0f, NULL, 3600.0f, 72000.0f};
-	tr_scene_t               s;
-	tr_cam_t                 cam;
-	uint64_t                 hit = 0, tot = 0;
+	static const tr_light_t l = {
+		{ 0.0f, 1.0f, 0.0f }, 0.0f, { 206, 112, 72 }, 600.0f, 8800.0f, NULL, 3600.0f, 72000.0f
+	};
+	tr_scene_t s;
+	tr_cam_t   cam;
+	uint64_t   hit = 0, tot = 0;
 
 	for (uint32_t i = 0; i < TR_TEX_DIM * TR_TEX_DIM; i++) {
 		ctrl_tex[i] = (((i % TR_TEX_DIM) >> 1) + ((i / TR_TEX_DIM) >> 1)) & 1u ? 0xffffu : 0x0000u;
@@ -100,7 +104,7 @@ static double control_shimmer(void)
 		tr_frame_in_t in = tr_scene_golden_in(3000, 1);
 		double        g  = n * 20.0 / 30.0 + 1e-9;
 		uint32_t      el = (uint32_t)g;
-		tr_bg_t       bg, b0 = {0};
+		tr_bg_t       bg, b0 = { 0 };
 
 		in.hz      = 30;
 		in.pace_q8 = (uint8_t)((((TR_GAME_PACE_Q8 << 8) * 40u + 15u) / 30u) >> 8);
@@ -139,15 +143,17 @@ static double control_shimmer(void)
 		raster(fb, &dl, &bg);
 
 		const float (*m)[4] = cam.view.m;
-		float             eye[3];
+		float eye[3];
 
 		for (int i = 0; i < 3; i++) {
 			eye[i] = -(m[0][i] * m[0][3] + m[1][i] * m[1][3] + m[2][i] * m[2][3]);
 		}
 		for (int i = 0; i < W * H; i++) {
-			float e = lum(fb[i]) - truth[i];
-			float d[3] = {((float)(i % W) + 0.5f - cam.cx) / cam.f_px, -((float)(i / W) + 0.5f - cam.cy) / cam.f_px, 1.0f};
-			float dy = m[0][1] * d[0] + m[1][1] * d[1] + m[2][1] * d[2];
+			float e    = lum(fb[i]) - truth[i];
+			float d[3] = { ((float)(i % W) + 0.5f - cam.cx) / cam.f_px,
+				           -((float)(i / W) + 0.5f - cam.cy) / cam.f_px,
+				           1.0f };
+			float dy   = m[0][1] * d[0] + m[1][1] * d[1] + m[2][1] * d[2];
 
 			if (n > 0 && !idb[i] && dy < 0.0f) {
 				float t  = -eye[1] / dy; /* d.z == 1: t is the view depth */
@@ -166,8 +172,8 @@ static double control_shimmer(void)
 }
 
 /* flips / px per [motion][lanes, shoulders][near, mid, far] */
-static uint64_t flips[2][2][3], px[2][2][3];
-static const float band_z[4] = {250.0f, 700.0f, 2200.0f, 6000.0f};
+static uint64_t    flips[2][2][3], px[2][2][3];
+static const float band_z[4] = { 250.0f, 700.0f, 2200.0f, 6000.0f };
 
 static void run(uint8_t zone, int lane_change)
 {
@@ -179,7 +185,7 @@ static void run(uint8_t zone, int lane_change)
 		tr_frame_in_t in = tr_scene_golden_in(3000, (uint8_t)(lane_change && n >= 4 ? 2 : 1));
 		double        g  = n * 20.0 / 30.0 + 1e-9;
 		uint32_t      el = (uint32_t)g;
-		tr_bg_t       bg, b0 = {0};
+		tr_bg_t       bg, b0 = { 0 };
 
 		in.hz      = 30;
 		in.pace_q8 = (uint8_t)((((TR_GAME_PACE_Q8 << 8) * 40u + 15u) / 30u) >> 8);
@@ -223,9 +229,11 @@ static void run(uint8_t zone, int lane_change)
 			eye[i] = -(m[0][i] * m[0][3] + m[1][i] * m[1][3] + m[2][i] * m[2][3]);
 		}
 		for (int i = 0; i < W * H; i++) {
-			float e = lum(fb[i]) - truth[i];
-			float d[3] = {((float)(i % W) + 0.5f - cam.cx) / cam.f_px, -((float)(i / W) + 0.5f - cam.cy) / cam.f_px, 1.0f};
-			float dy = m[0][1] * d[0] + m[1][1] * d[1] + m[2][1] * d[2];
+			float e    = lum(fb[i]) - truth[i];
+			float d[3] = { ((float)(i % W) + 0.5f - cam.cx) / cam.f_px,
+				           -((float)(i / W) + 0.5f - cam.cy) / cam.f_px,
+				           1.0f };
+			float dy   = m[0][1] * d[0] + m[1][1] * d[1] + m[2][1] * d[2];
 
 			if (n > 0 && !idb[i] && dy < 0.0f) {
 				float t  = -eye[1] / dy; /* d.z == 1: t is the view depth */
@@ -246,7 +254,7 @@ static void run(uint8_t zone, int lane_change)
 
 int main(void)
 {
-	static const char *reg[2] = {"lanes", "shoulders"}, *bnd[3] = {"near", "mid", "far"};
+	static const char *reg[2] = { "lanes", "shoulders" }, *bnd[3] = { "near", "mid", "far" };
 	double             worst = 0.0;
 
 	for (uint8_t zn = 0; zn < TR_ZONES; zn++) {
@@ -258,7 +266,8 @@ int main(void)
 			printf("shimmer %-13s %-8s", tr_zone_name(zn), mo ? "lane chg" : "straight");
 			for (int r = 0; r < 2; r++) {
 				for (int b = 0; b < 3; b++) {
-					double f = px[mo][r][b] ? 100.0 * (double)flips[mo][r][b] / (double)px[mo][r][b] : 0.0;
+					double f =
+					    px[mo][r][b] ? 100.0 * (double)flips[mo][r][b] / (double)px[mo][r][b] : 0.0;
 
 					printf(" %s/%s %5.2f %%", reg[r], bnd[b], f);
 					/* sample floor, screen px: tuned at TR_VIEW_TUNED_H, scaled
@@ -278,8 +287,14 @@ int main(void)
 	 * independent of the art preset -- see control_shimmer()) */
 	double ctrl = control_shimmer();
 	assert(ctrl > 4.0);
-	printf("shimmer control: synthetic 2-texel checker via the real pipeline %.2f %% (metric still detects flicker)\n", ctrl);
-	printf("shimmer: worst %.2f %% (|d(render - 16x SSAA)| >= %.0f; max near %.1f, mid / far %.1f)\n", worst, (double)FLIP,
-	       shimmer_max[0], shimmer_max[1]);
+	printf("shimmer control: synthetic 2-texel checker via the real pipeline %.2f %% (metric still "
+	       "detects flicker)\n",
+	       ctrl);
+	printf(
+	    "shimmer: worst %.2f %% (|d(render - 16x SSAA)| >= %.0f; max near %.1f, mid / far %.1f)\n",
+	    worst,
+	    (double)FLIP,
+	    shimmer_max[0],
+	    shimmer_max[1]);
 	return 0;
 }

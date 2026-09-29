@@ -26,7 +26,8 @@
 #include "../../src/render/r3d_scene.h"
 #include "tr_scene_golden.h"
 
-#define TR_BB_STEP_PX 120 /* pixels a tile's switch may change, both sides (a dish in the antenna field: 108) */
+#define TR_BB_STEP_PX \
+	120 /* pixels a tile's switch may change, both sides (a dish in the antenna field: 108) */
 
 static uint16_t       bins[TR_BANDS][TR_BIN_MAX];
 static uint32_t       counts[TR_BANDS];
@@ -49,17 +50,20 @@ static void render(const tr_scene_t *s, const tr_frame_in_t *in, uint16_t *out)
 		 * is sized to TR_BANDS now), matching render_band() (r3d.h). */
 		int y_hi = (b + 1) * TR_BAND_H < TR_VIEW_H ? (b + 1) * TR_BAND_H : TR_VIEW_H;
 
-		tr_raster_band(out, TR_R3D_W, b * TR_BAND_H, y_hi, zb, cb, &bg, &dl, setup, bins[b], counts[b]);
+		tr_raster_band(
+		    out, TR_R3D_W, b * TR_BAND_H, y_hi, zb, cb, &bg, &dl, setup, bins[b], counts[b]);
 	}
 	/* Zero the ragged band's stale tail so repeated render() calls (this
 	 * file compares two consecutive frames pixel-by-pixel) never depend
 	 * on band-buffer call history. */
-	memset(&out[TR_VIEW_H * TR_R3D_W], 0, (size_t)(TR_R3D_H - TR_VIEW_H) * TR_R3D_W * sizeof(out[0]));
+	memset(
+	    &out[TR_VIEW_H * TR_R3D_W], 0, (size_t)(TR_R3D_H - TR_VIEW_H) * TR_R3D_W * sizeof(out[0]));
 }
 
 static int contrast(uint16_t a, uint16_t b)
 {
-	int d = abs((a >> 11) - (b >> 11)) * 8 + abs(((a >> 5) & 63) - ((b >> 5) & 63)) * 4 + abs((a & 31) - (b & 31)) * 8;
+	int d = abs((a >> 11) - (b >> 11)) * 8 + abs(((a >> 5) & 63) - ((b >> 5) & 63)) * 4 +
+	        abs((a & 31) - (b & 31)) * 8;
 
 	return d;
 }
@@ -73,12 +77,13 @@ int main(void)
 	for (int mode = 0; mode < 3; mode++) {
 		int          attract = mode == 1, ramp = mode == 2;
 		tr_game_t    g;
-		tr_zone_t    z = {0};
+		tr_zone_t    z = { 0 };
 		tr_attract_t a;
 		tr_scene_t   s;
-		uint32_t     worst[TR_ZONES] = {0}, frames = 0, gates = 0,
+		uint32_t worst[TR_ZONES] = { 0 }, frames = 0, gates = 0,
 		         steps = attract ? 2u * 5u * TR_ZONE_STEPS_ATTRACT
-				 : 5u * TR_ZONE_STEPS_PLAY * (ramp ? TR_RAMP_MAX_Q8 : 256u) / 256u + 400u;
+		                         : 5u * TR_ZONE_STEPS_PLAY * (ramp ? TR_RAMP_MAX_Q8 : 256u) / 256u +
+		                               400u;
 
 		tr_game_init(&g, 2024u + (uint32_t)attract);
 		tr_zone_reset(&z);
@@ -141,8 +146,14 @@ int main(void)
 					w = counts[b] > w ? counts[b] : w;
 				}
 				if (ov) {
-					printf("load: %s step %u zone %s%s: %u triangle-bands dropped\n", ramp ? "ramp" : attract ? "attract" : "play",
-					       (unsigned)t, tr_zone_name(z.zone), v ? (ramp ? " (phase 1/2)" : " (shaken crash)") : "", (unsigned)ov);
+					printf("load: %s step %u zone %s%s: %u triangle-bands dropped\n",
+					       ramp      ? "ramp"
+					       : attract ? "attract"
+					                 : "play",
+					       (unsigned)t,
+					       tr_zone_name(z.zone),
+					       v ? (ramp ? " (phase 1/2)" : " (shaken crash)") : "",
+					       (unsigned)ov);
 				}
 				assert(ov == 0 && tr_dl_dropped == 0);
 			}
@@ -150,7 +161,10 @@ int main(void)
 			frames++;
 		}
 		printf("load (%s, %u steps x2 frames, %u with a gate): fullest bin per zone",
-		       ramp ? "play at 1.5x, + phase 1/2" : attract ? "attract, + shaken crash" : "play, + shaken crash", (unsigned)frames,
+		       ramp      ? "play at 1.5x, + phase 1/2"
+		       : attract ? "attract, + shaken crash"
+		                 : "play, + shaken crash",
+		       (unsigned)frames,
 		       (unsigned)gates);
 		for (int zn = 0; zn < TR_ZONES; zn++) {
 			printf(" %u", (unsigned)worst[zn]);
@@ -187,8 +201,10 @@ int main(void)
 			}
 			most = n > most ? n : most;
 		}
-		printf("billboard switch at %.0f deep, %-13s: at most %d px of the frame step\n", (double)TR_WALL_BB_Z,
-		       tr_zone_name(zn), most);
+		printf("billboard switch at %.0f deep, %-13s: at most %d px of the frame step\n",
+		       (double)TR_WALL_BB_Z,
+		       tr_zone_name(zn),
+		       most);
 		assert(most <= TR_BB_STEP_PX);
 	}
 

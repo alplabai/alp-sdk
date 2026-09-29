@@ -38,14 +38,18 @@ uint32_t tr_dl_dropped;
  */
 void tr_sincosf(float x, float *s, float *c)
 {
-	float    kf = x * 0.63661975f;
-	int32_t  k  = (int32_t)(kf + (kf >= 0.0f ? 0.5f : -0.5f));
-	float    r  = (x - (float)k * 1.5703125f) - (float)k * 4.8382679233e-4f;
-	float    r2 = r * r;
-	float    sn = r + r * r2 * (-1.6666667e-1f + r2 * (8.3333338e-3f + r2 * (-1.9841270e-4f + r2 * 2.7557319e-6f)));
-	float    cs = 1.0f + r2 * (-0.5f + r2 * (4.1666668e-2f + r2 * (-1.3888889e-3f + r2 * (2.4801587e-5f +
-										    r2 * -2.7557319e-7f))));
-	uint32_t q  = (uint32_t)k & 3u;
+	float   kf = x * 0.63661975f;
+	int32_t k  = (int32_t)(kf + (kf >= 0.0f ? 0.5f : -0.5f));
+	float   r  = (x - (float)k * 1.5703125f) - (float)k * 4.8382679233e-4f;
+	float   r2 = r * r;
+	float   sn = r + r * r2 *
+	                     (-1.6666667e-1f +
+	                      r2 * (8.3333338e-3f + r2 * (-1.9841270e-4f + r2 * 2.7557319e-6f)));
+	float   cs =
+	    1.0f +
+	    r2 * (-0.5f + r2 * (4.1666668e-2f +
+	                        r2 * (-1.3888889e-3f + r2 * (2.4801587e-5f + r2 * -2.7557319e-7f))));
+	uint32_t q = (uint32_t)k & 3u;
 
 	*s = q == 0 ? sn : q == 1 ? cs : q == 2 ? -sn : -cs;
 	*c = q == 0 ? cs : q == 1 ? -sn : q == 2 ? -cs : sn;
@@ -68,8 +72,14 @@ float tr_atan2f(float y, float x)
 		off = 0.78539816f;
 	}
 	t2 = t * t;
-	r  = off + t + t * t2 * (-1.0f / 3.0f + t2 * (0.2f + t2 * (-1.0f / 7.0f + t2 * (1.0f / 9.0f +
-				    t2 * (-1.0f / 11.0f + t2 * (1.0f / 13.0f + t2 * (-1.0f / 15.0f + t2 * (1.0f / 17.0f))))))));
+	r  = off + t +
+	     t * t2 *
+	         (-1.0f / 3.0f +
+	          t2 * (0.2f + t2 * (-1.0f / 7.0f +
+	                             t2 * (1.0f / 9.0f +
+	                                   t2 * (-1.0f / 11.0f +
+	                                         t2 * (1.0f / 13.0f +
+	                                               t2 * (-1.0f / 15.0f + t2 * (1.0f / 17.0f))))))));
 	if (ay > ax) {
 		r = 1.57079633f - r;
 	}
@@ -139,9 +149,9 @@ void tr_cam_build(tr_cam_t *c, tr_v3_t eye, float yaw, float pitch, float roll, 
 
 	/* Ryaw * Rpitch * Rroll, expanded -- Rcw[row][col]. */
 	float rcw[3][3] = {
-		{cy * cr + sy * sp * sr, -cy * sr + sy * sp * cr, sy * cp},
-		{cp * sr, cp * cr, -sp},
-		{-sy * cr + cy * sp * sr, sy * sr + cy * sp * cr, cy * cp},
+		{ cy * cr + sy * sp * sr, -cy * sr + sy * sp * cr, sy * cp },
+		{ cp * sr, cp * cr, -sp },
+		{ -sy * cr + cy * sp * sr, sy * sr + cy * sp * cr, cy * cp },
 	};
 
 	for (int row = 0; row < 3; row++) {
@@ -267,7 +277,7 @@ static int clip_near(const cvert_t cam[3], cvert_t out[4])
 			float t = (TR_CAM_Z_NEAR - a.p.z) / (b.p.z - a.p.z);
 
 			out[n++] = (cvert_t){
-				{lerpf(a.p.x, b.p.x, t), lerpf(a.p.y, b.p.y, t), lerpf(a.p.z, b.p.z, t)},
+				{ lerpf(a.p.x, b.p.x, t), lerpf(a.p.y, b.p.y, t), lerpf(a.p.z, b.p.z, t) },
 				lerpf(a.u, b.u, t),
 				lerpf(a.v, b.v, t),
 				lerpf(a.r, b.r, t),
@@ -285,7 +295,8 @@ static int clip_near(const cvert_t cam[3], cvert_t out[4])
  * guard-band coordinates (+-262144 in 28.4) multiply past int32. */
 static int64_t signed_area(tr_sv_t a, tr_sv_t b, tr_sv_t c)
 {
-	return (int64_t)(b.x - a.x) * (int64_t)(c.y - a.y) - (int64_t)(b.y - a.y) * (int64_t)(c.x - a.x);
+	return (int64_t)(b.x - a.x) * (int64_t)(c.y - a.y) -
+	       (int64_t)(b.y - a.y) * (int64_t)(c.x - a.x);
 }
 
 /* Appends one front-facing triangle to `dl`, honouring TR_DL_MAX_TRIS --
@@ -307,7 +318,8 @@ static bool dl_append(tr_dl_t *dl, const tr_tri_t *t)
 
 static uint16_t pack565(float r, float g, float b)
 {
-	return (uint16_t)(((uint32_t)lround_f(r) << 11) | ((uint32_t)lround_f(g) << 5) | (uint32_t)lround_f(b));
+	return (uint16_t)(((uint32_t)lround_f(r) << 11) | ((uint32_t)lround_f(g) << 5) |
+	                  (uint32_t)lround_f(b));
 }
 
 static void unpack565(uint16_t c, cvert_t *v)
@@ -357,8 +369,13 @@ static tr_vattr_t vattr(const cvert_t *v, uint8_t flags)
  * `colour`, `flags` and `tex`. Fan triangulation is correct here
  * specifically because clip_near()'s output is always CONVEX. Returns how
  * many triangles were appended. */
-static uint16_t emit_fan(tr_dl_t *dl, const tr_cam_t *c, const cvert_t cam[4], int count, uint16_t colour,
-			 uint8_t flags, uint8_t tex)
+static uint16_t emit_fan(tr_dl_t        *dl,
+                         const tr_cam_t *c,
+                         const cvert_t   cam[4],
+                         int             count,
+                         uint16_t        colour,
+                         uint8_t         flags,
+                         uint8_t         tex)
 {
 	tr_sv_t    sv[4];
 	tr_vattr_t va[4];
@@ -369,7 +386,9 @@ static uint16_t emit_fan(tr_dl_t *dl, const tr_cam_t *c, const cvert_t cam[4], i
 		va[i] = vattr(&cam[i], flags);
 	}
 	for (int i = 1; i + 1 < count; i++) {
-		tr_tri_t t = {{sv[0], sv[i], sv[i + 1]}, colour, tex, flags, {va[0], va[i], va[i + 1]}};
+		tr_tri_t t = {
+			{ sv[0], sv[i], sv[i + 1] }, colour, tex, flags, { va[0], va[i], va[i + 1] }
+		};
 
 		if (dl_append(dl, &t)) {
 			emitted++;
@@ -378,11 +397,17 @@ static uint16_t emit_fan(tr_dl_t *dl, const tr_cam_t *c, const cvert_t cam[4], i
 	return emitted;
 }
 
-static uint16_t emit_quad_common(tr_dl_t *dl, const tr_cam_t *c, const tr_v3_t q[4], const uint16_t uv[4][2],
-				 uint16_t rgb565, const uint16_t *rgb4, uint8_t flags, uint8_t tex)
+static uint16_t emit_quad_common(tr_dl_t        *dl,
+                                 const tr_cam_t *c,
+                                 const tr_v3_t   q[4],
+                                 const uint16_t  uv[4][2],
+                                 uint16_t        rgb565,
+                                 const uint16_t *rgb4,
+                                 uint8_t         flags,
+                                 uint8_t         tex)
 {
-	static const uint8_t tris[2][3] = {{0, 1, 2}, {0, 2, 3}};
-	uint16_t              emitted   = 0;
+	static const uint8_t tris[2][3] = { { 0, 1, 2 }, { 0, 2, 3 } };
+	uint16_t             emitted    = 0;
 
 	for (int t = 0; t < 2; t++) {
 		cvert_t cam[3], clipped[4];
@@ -400,18 +425,27 @@ static uint16_t emit_quad_common(tr_dl_t *dl, const tr_cam_t *c, const tr_v3_t q
 	return emitted;
 }
 
-uint16_t tr_r3d_emit_quad(tr_dl_t *dl, const tr_cam_t *c, const tr_v3_t q[4], uint16_t rgb565, uint8_t flags)
+uint16_t
+tr_r3d_emit_quad(tr_dl_t *dl, const tr_cam_t *c, const tr_v3_t q[4], uint16_t rgb565, uint8_t flags)
 {
 	return emit_quad_common(dl, c, q, NULL, rgb565, NULL, flags, 0);
 }
 
-uint16_t tr_r3d_emit_quad_rgb(tr_dl_t *dl, const tr_cam_t *c, const tr_v3_t q[4], const uint16_t rgb[4], uint8_t flags)
+uint16_t tr_r3d_emit_quad_rgb(tr_dl_t        *dl,
+                              const tr_cam_t *c,
+                              const tr_v3_t   q[4],
+                              const uint16_t  rgb[4],
+                              uint8_t         flags)
 {
 	return emit_quad_common(dl, c, q, NULL, rgb[0], rgb, TR_TRI_GOURAUD | flags, 0);
 }
 
-uint16_t tr_r3d_emit_quad_tex(tr_dl_t *dl, const tr_cam_t *c, const tr_v3_t q[4], const uint16_t uv[4][2],
-			      uint8_t tex, uint8_t flags)
+uint16_t tr_r3d_emit_quad_tex(tr_dl_t        *dl,
+                              const tr_cam_t *c,
+                              const tr_v3_t   q[4],
+                              const uint16_t  uv[4][2],
+                              uint8_t         tex,
+                              uint8_t         flags)
 {
 	return emit_quad_common(dl, c, q, uv, 0, NULL, TR_TRI_TEX | flags, tex);
 }
@@ -421,7 +455,8 @@ uint16_t tr_r3d_emit_quad_tex(tr_dl_t *dl, const tr_cam_t *c, const tr_v3_t q[4]
  * direction, unaffected by depth) and its WORLD-space unit normal
  * `wnormal` (already yaw-rotated by the caller, see tr_r3d_emit_mesh()).
  * Returns RGB565. */
-static void shade_terms(const tr_light_t *l, tr_v3_t wnormal, float view_z, float *intensity, float *fog_t)
+static void
+shade_terms(const tr_light_t *l, tr_v3_t wnormal, float view_z, float *intensity, float *fog_t)
 {
 	float ndotl   = v3_dot(wnormal, l->dir);
 	float lambert = clampf(ndotl, 0.0f, 1.0f);
@@ -437,10 +472,13 @@ static void shade_terms(const tr_light_t *l, tr_v3_t wnormal, float view_z, floa
 float tr_r3d_fog_amount(const tr_light_t *l, float view_z)
 {
 	int   far = l->fog_far > 0.0f && view_z > l->fog_knee;
-	float t   = clampf(((far ? l->fog_knee : view_z) - l->fog_start) / (l->fog_end - l->fog_start), 0.0f, 1.0f);
-	float a   = t * (2.0f - t);
+	float t   = clampf(
+	    ((far ? l->fog_knee : view_z) - l->fog_start) / (l->fog_end - l->fog_start), 0.0f, 1.0f);
+	float a = t * (2.0f - t);
 
-	return far ? a + (1.0f - a) * clampf((view_z - l->fog_knee) / (l->fog_far - l->fog_knee), 0.0f, 1.0f) : a;
+	return far ? a + (1.0f - a) *
+	                     clampf((view_z - l->fog_knee) / (l->fog_far - l->fog_knee), 0.0f, 1.0f)
+	           : a;
 }
 
 static uint16_t shade_apply(const tr_light_t *l, uint16_t base, float intensity, float fog_t)
@@ -497,15 +535,15 @@ static tr_v3_t yaw_normal(const int8_t *n, float cy, float sy, float cp, float s
 		nlz = nly * sp + nlz * cp;
 		nly = y;
 	}
-	return (tr_v3_t){nlx * cy + nlz * sy, nly, -nlx * sy + nlz * cy};
+	return (tr_v3_t){ nlx * cy + nlz * sy, nly, -nlx * sy + nlz * cy };
 }
 
 uint16_t tr_r3d_emit_mesh(tr_dl_t *dl, const tr_cam_t *c, const tr_light_t *l, const tr_inst_t *in)
 {
-	const tr_mesh_t *mesh    = in->mesh;
-	float             cy, sy;
-	uint16_t          emitted = 0;
-	uint8_t           flags   = in->flags & (TR_TRI_GOURAUD | TR_TRI_NOZ);
+	const tr_mesh_t *mesh = in->mesh;
+	float            cy, sy;
+	uint16_t         emitted = 0;
+	uint8_t          flags   = in->flags & (TR_TRI_GOURAUD | TR_TRI_NOZ);
 	/* Per-instance vertex cache (meshes have nv <= 256, tri indices are
 	 * uint8_t): each vertex transformed, projected, given its w and its
 	 * Gouraud shade terms once, not once per triangle using it. On the
@@ -541,7 +579,9 @@ uint16_t tr_r3d_emit_mesh(tr_dl_t *dl, const tr_cam_t *c, const tr_light_t *l, c
 		/* Yaw-only rotation about world y, then translate -- see
 		 * r3d.h's tr_inst_t comment for why this is deliberately not
 		 * a general rotation. */
-		tr_v3_t wv = {lx * cy + lz * sy + in->pos.x, ly + in->pos.y, -lx * sy + lz * cy + in->pos.z};
+		tr_v3_t wv = { lx * cy + lz * sy + in->pos.x,
+			           ly + in->pos.y,
+			           -lx * sy + lz * cy + in->pos.z };
 
 		vc_cam[i] = to_camera(&c->view, wv);
 		if (vc_cam[i].z >= TR_CAM_Z_NEAR) {
@@ -549,14 +589,18 @@ uint16_t tr_r3d_emit_mesh(tr_dl_t *dl, const tr_cam_t *c, const tr_light_t *l, c
 			vc_w[i]  = w16_of(vc_cam[i].z);
 		}
 		if ((flags & TR_TRI_GOURAUD) && mesh->vn) {
-			shade_terms(l, yaw_normal(&mesh->vn[i * 3], cy, sy, cp, sp, tip), vc_cam[i].z, &vc_in[i], &vc_fog[i]);
+			shade_terms(l,
+			            yaw_normal(&mesh->vn[i * 3], cy, sy, cp, sp, tip),
+			            vc_cam[i].z,
+			            &vc_in[i],
+			            &vc_fog[i]);
 		}
 	}
 
 	for (uint16_t t = 0; t < mesh->nt; t++) {
-		const uint8_t *ix    = &mesh->tri[t * 3];
-		bool           front = vc_cam[ix[0]].z >= TR_CAM_Z_NEAR && vc_cam[ix[1]].z >= TR_CAM_Z_NEAR &&
-				       vc_cam[ix[2]].z >= TR_CAM_Z_NEAR;
+		const uint8_t *ix = &mesh->tri[t * 3];
+		bool front        = vc_cam[ix[0]].z >= TR_CAM_Z_NEAR && vc_cam[ix[1]].z >= TR_CAM_Z_NEAR &&
+		                    vc_cam[ix[2]].z >= TR_CAM_Z_NEAR;
 
 		/* No near clip: a backface costs nothing more (dl_append would
 		 * refuse it anyway, and shading has no side effects). */
@@ -572,14 +616,15 @@ uint16_t tr_r3d_emit_mesh(tr_dl_t *dl, const tr_cam_t *c, const tr_light_t *l, c
 			cam[k].v = 0.0f;
 		}
 
-		uint8_t  ci     = mesh->col[t] & 0xF;
+		uint8_t ci = mesh->col[t] & 0xF;
 		/* A character's own palette (P16), else the zone's (l->pal, P15),
 		 * else tr_r3d_palette. */
 		uint16_t base   = (mesh->pal ? mesh->pal : pal)[ci];
 		bool     lit    = !((mesh->emis >> ci) & 1u);
 		tr_v3_t  wn     = yaw_normal(&mesh->n[t * 3], cy, sy, cp, sp, tip);
 		float    ctr_z  = (cam[0].p.z + cam[1].p.z + cam[2].p.z) / 3.0f;
-		uint16_t shaded = lit ? shade(l, wn, ctr_z, base) : shade_apply(l, base, 1.0f, tr_r3d_fog_amount(l, ctr_z));
+		uint16_t shaded = lit ? shade(l, wn, ctr_z, base)
+		                      : shade_apply(l, base, 1.0f, tr_r3d_fog_amount(l, ctr_z));
 		uint16_t vcol[3];
 
 		for (int k = 0; k < 3; k++) {
@@ -589,8 +634,8 @@ uint16_t tr_r3d_emit_mesh(tr_dl_t *dl, const tr_cam_t *c, const tr_light_t *l, c
 				 * normal when the mesh has none) + per-vertex fog;
 				 * an emissive colour takes the fog only. */
 				vcol[k] = !lit       ? shade_apply(l, base, 1.0f, tr_r3d_fog_amount(l, cam[k].p.z))
-					  : mesh->vn ? shade_apply(l, base, vc_in[ix[k]], vc_fog[ix[k]])
-						     : shade(l, wn, cam[k].p.z, base);
+				          : mesh->vn ? shade_apply(l, base, vc_in[ix[k]], vc_fog[ix[k]])
+				                     : shade(l, wn, cam[k].p.z, base);
 			}
 			unpack565(vcol[k], &cam[k]);
 		}
@@ -598,11 +643,13 @@ uint16_t tr_r3d_emit_mesh(tr_dl_t *dl, const tr_cam_t *c, const tr_light_t *l, c
 		if (front) {
 			/* == emit_fan() of the unclipped triangle: u = v = 0 and
 			 * pack565(unpack565(c)) == c, so only w and rgb vary. */
-			tr_tri_t tri = {{vc_sv[ix[0]], vc_sv[ix[1]], vc_sv[ix[2]]},
-					shaded,
-					0,
-					flags,
-					{{vc_w[ix[0]], 0, 0, vcol[0]}, {vc_w[ix[1]], 0, 0, vcol[1]}, {vc_w[ix[2]], 0, 0, vcol[2]}}};
+			tr_tri_t tri = { { vc_sv[ix[0]], vc_sv[ix[1]], vc_sv[ix[2]] },
+				             shaded,
+				             0,
+				             flags,
+				             { { vc_w[ix[0]], 0, 0, vcol[0] },
+				               { vc_w[ix[1]], 0, 0, vcol[1] },
+				               { vc_w[ix[2]], 0, 0, vcol[2] } } };
 
 			emitted += dl_append(dl, &tri) ? 1u : 0u;
 		} else {
@@ -618,7 +665,7 @@ bool tr_r3d_fog_build(uint8_t slot, const tr_light_t *l, uint8_t *idx, uint16_t 
 	uint16_t        col[TR_FOG_PAL_MAX];
 	uint32_t        n = 0;
 
-	tr_r3d_tex_fog[slot & (TR_TEX_MAX - 1)] = (tr_tex_fog_t){NULL, NULL, 0};
+	tr_r3d_tex_fog[slot & (TR_TEX_MAX - 1)] = (tr_tex_fog_t){ NULL, NULL, 0 };
 	if (tex == NULL) {
 		return false;
 	}
@@ -638,7 +685,7 @@ bool tr_r3d_fog_build(uint8_t slot, const tr_light_t *l, uint8_t *idx, uint16_t 
 	}
 	tr_r3d_fog_pal(l, col, n, pal);
 	tr_r3d_fog_lut_build(l);
-	tr_r3d_tex_fog[slot & (TR_TEX_MAX - 1)] = (tr_tex_fog_t){idx, pal, n};
+	tr_r3d_tex_fog[slot & (TR_TEX_MAX - 1)] = (tr_tex_fog_t){ idx, pal, n };
 	return true;
 }
 

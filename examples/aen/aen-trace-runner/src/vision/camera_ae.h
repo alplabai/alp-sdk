@@ -70,9 +70,9 @@ extern const uint8_t tr_ae_gain_reg_map[TR_AE_GAIN_IDX_MAX + 1u];
 
 typedef struct {
 	uint16_t exposure; /* whole lines, what apply_ae() writes */
-	uint8_t  gain_idx;  /* index into tr_ae_gain_reg_map[] */
-	uint8_t  settle;    /* frames still to skip after the last change */
-	bool     hunting;   /* outside the inner band, still converging */
+	uint8_t  gain_idx; /* index into tr_ae_gain_reg_map[] */
+	uint8_t  settle;   /* frames still to skip after the last change */
+	bool     hunting;  /* outside the inner band, still converging */
 } tr_ae_t;
 
 void tr_ae_init(tr_ae_t *ae, uint16_t exposure0, uint8_t gain_idx0);
@@ -90,7 +90,11 @@ uint8_t tr_ae_meter(const uint8_t *grey, int w, int h);
  * 0x05 fixed, max = mode->vts - OV9281_EXP_MAX_OFFSET, so the caller passes
  * it rather than this file hard-coding a mode-specific number).
  */
-bool tr_ae_step(tr_ae_t *ae, uint8_t mean, uint16_t exposure_min, uint16_t exposure_max, uint8_t gain_idx_max);
+bool tr_ae_step(tr_ae_t *ae,
+                uint8_t  mean,
+                uint16_t exposure_min,
+                uint16_t exposure_max,
+                uint8_t  gain_idx_max);
 
 /* fix round 11 (silicon finding: raw frame mean 16.5/255, "far too dark"),
  * story corrected in fix round 13 (maintainer): TR_AE_EXP_MAX (0x2a9 = 681,

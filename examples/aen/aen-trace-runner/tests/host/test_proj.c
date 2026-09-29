@@ -84,7 +84,7 @@ int main(void)
 	 * everywhere in that range.
 	 */
 	{
-		int32_t sample_z[] = {TR_PROJ_Z_NEAR, 100, TR_PROJ_Z_RUNNER, 1000, 4096, TR_PROJ_Z_FAR};
+		int32_t sample_z[] = { TR_PROJ_Z_NEAR, 100, TR_PROJ_Z_RUNNER, 1000, 4096, TR_PROJ_Z_FAR };
 
 		for (size_t i = 0; i < sizeof(sample_z) / sizeof(sample_z[0]); i++) {
 			int32_t z    = sample_z[i];

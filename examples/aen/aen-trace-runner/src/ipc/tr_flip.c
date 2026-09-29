@@ -8,10 +8,8 @@ bool tr_fb_valid(uint32_t fb)
 
 uint32_t tr_fb_free(uint32_t live)
 {
-	if (live == TR_FB_A)
-		return TR_FB_B;
-	if (live == TR_FB_B)
-		return TR_FB_A;
+	if (live == TR_FB_A) return TR_FB_B;
+	if (live == TR_FB_B) return TR_FB_A;
 	return 0u;
 }
 
@@ -38,11 +36,12 @@ uint32_t tr_flip_hist_bucket(uint64_t gap_us)
 	return k;
 }
 
-void tr_flip_hist_note(const tr_flip_pace_t *p, uint64_t now_us, volatile uint32_t hist[TR_FLIP_HIST_N],
-		       volatile uint32_t *total)
+void tr_flip_hist_note(const tr_flip_pace_t *p,
+                       uint64_t              now_us,
+                       volatile uint32_t     hist[TR_FLIP_HIST_N],
+                       volatile uint32_t    *total)
 {
-	if (!p->have)
-		return;
+	if (!p->have) return;
 	hist[tr_flip_hist_bucket(now_us - p->last_us)]++;
 	(*total)++;
 }

@@ -26,7 +26,8 @@ static unsigned s_snap_n;
 static void trace_barrier(void)
 {
 	if (s_snap_n < 4u) {
-		volatile tr_aev_t *slot = &s_ring.ev[(s_ring.head - (s_snap_n ? 1u : 0u)) & (TR_ARING_CAP - 1u)];
+		volatile tr_aev_t *slot =
+		    &s_ring.ev[(s_ring.head - (s_snap_n ? 1u : 0u)) & (TR_ARING_CAP - 1u)];
 		s_snap[s_snap_n].head       = s_ring.head;
 		s_snap[s_snap_n].tail       = s_ring.tail;
 		s_snap[s_snap_n].slot_kind  = slot->kind;
@@ -62,22 +63,28 @@ static void test_ring(void)
 	assert(!tr_aring_pop(&s_ring, &e, barrier));
 
 	/* FIFO order, params preserved */
-	for (unsigned i = 0; i < 10u; i++) assert(tr_aring_push(&s_ring, (uint8_t)(1u + i % 9u), (uint8_t)i, barrier));
+	for (unsigned i = 0; i < 10u; i++)
+		assert(tr_aring_push(&s_ring, (uint8_t)(1u + i % 9u), (uint8_t)i, barrier));
 	assert(drain(k, p, 128) == 10u);
-	for (unsigned i = 0; i < 10u; i++) assert(k[i] == 1u + i % 9u && p[i] == i);
+	for (unsigned i = 0; i < 10u; i++)
+		assert(k[i] == 1u + i % 9u && p[i] == i);
 
 	/* full: CAP accepted, the rest refused and counted, nothing overwritten */
-	for (unsigned i = 0; i < TR_ARING_CAP + 5u; i++) (void)tr_aring_push(&s_ring, TR_AEV_JUMP, (uint8_t)i, barrier);
+	for (unsigned i = 0; i < TR_ARING_CAP + 5u; i++)
+		(void)tr_aring_push(&s_ring, TR_AEV_JUMP, (uint8_t)i, barrier);
 	assert(s_ring.dropped == 5u);
 	assert(drain(k, p, 128) == TR_ARING_CAP);
-	for (unsigned i = 0; i < TR_ARING_CAP; i++) assert(p[i] == i);
+	for (unsigned i = 0; i < TR_ARING_CAP; i++)
+		assert(p[i] == i);
 
 	/* 32-bit index wrap */
 	s_ring.head = s_ring.tail = 0xFFFFFFF0u;
-	for (unsigned i = 0; i < 40u; i++) assert(tr_aring_push(&s_ring, TR_AEV_DUCK, (uint8_t)i, barrier));
+	for (unsigned i = 0; i < 40u; i++)
+		assert(tr_aring_push(&s_ring, TR_AEV_DUCK, (uint8_t)i, barrier));
 	assert(s_ring.head == 0x00000018u);
 	assert(drain(k, p, 128) == 40u);
-	for (unsigned i = 0; i < 40u; i++) assert(p[i] == i);
+	for (unsigned i = 0; i < 40u; i++)
+		assert(p[i] == i);
 
 	/* head more than CAP ahead (corrupt / producer restarted): resync, no stale replay */
 	s_ring.head = s_ring.tail + TR_ARING_CAP + 3u;
@@ -89,7 +96,7 @@ static void test_ring(void)
 	(void)tr_aring_push(&s_ring, TR_AEV_PICKUP, 1, barrier);
 	s_ring.hp_heartbeat = 1234u;
 	s_ring.hp_state     = TR_ARING_HP_RUNNING;
-	uint32_t t = s_ring.tail;
+	uint32_t t          = s_ring.tail;
 	tr_aring_init(&s_ring, barrier);
 	assert(s_ring.tail == t && s_ring.head == t && s_ring.hp_heartbeat == 1234u);
 	assert(s_ring.hp_state == TR_ARING_HP_OFF); /* a live HP re-asserts it; none -> HUD "--" */
@@ -104,7 +111,8 @@ static void test_ring(void)
 	s_snap_n   = 0;
 	(void)tr_aring_push(&s_ring, TR_AEV_WIRE, 77, trace_barrier);
 	assert(s_snap_n == 2);
-	assert(s_snap[0].slot_kind == TR_AEV_WIRE && s_snap[0].slot_param == 77 && s_snap[0].head == h0);
+	assert(s_snap[0].slot_kind == TR_AEV_WIRE && s_snap[0].slot_param == 77 &&
+	       s_snap[0].head == h0);
 	assert(s_snap[1].head == h0 + 1u);
 	s_snap_n = 0;
 	assert(tr_aring_pop(&s_ring, &e, trace_barrier) && e.kind == TR_AEV_WIRE && e.param == 77);
@@ -157,20 +165,21 @@ static void test_watch(void)
 	assert(n == 1u && has(ev, n, TR_AEV_MUSIC, TR_MUSIC_PLAY));
 
 	/* jump on the rising edge only; no footsteps in the air */
-	g.tick = 3;
+	g.tick     = 3;
 	g.airborne = true;
-	n = watch(&w, &g, false, ev);
+	n          = watch(&w, &g, false, ev);
 	assert(n == 1u && has(ev, n, TR_AEV_JUMP, -1));
 	g.tick = 8;
-	n = watch(&w, &g, false, ev);
+	n      = watch(&w, &g, false, ev);
 	assert(n == 0u);
 
 	/* landed: footsteps every TR_SFX_STEP_TICKS, alternating feet */
-	g.airborne = false;
+	g.airborne     = false;
 	unsigned steps = 0, feet = 0;
-	for (uint32_t t = 9; t < 9u + 4u * TR_SFX_STEP_TICKS; t++) { /* any 4 x TR_SFX_STEP_TICKS ticks: 4 steps */
+	for (uint32_t t = 9; t < 9u + 4u * TR_SFX_STEP_TICKS;
+	     t++) { /* any 4 x TR_SFX_STEP_TICKS ticks: 4 steps */
 		g.tick = t;
-		n = watch(&w, &g, false, ev);
+		n      = watch(&w, &g, false, ev);
 		if (has(ev, n, TR_AEV_FOOTSTEP, -1)) {
 			steps++;
 			feet += ev[0].param;
@@ -181,7 +190,7 @@ static void test_watch(void)
 	/* duck: rising edge */
 	g.tick++;
 	g.ducking = true;
-	n = watch(&w, &g, false, ev);
+	n         = watch(&w, &g, false, ev);
 	assert(has(ev, n, TR_AEV_DUCK, -1));
 	g.ducking = false;
 
@@ -196,7 +205,7 @@ static void test_watch(void)
 		g.tick = 102u + 40u * i;
 		g.score += 10u;
 		s_combo = combo[i];
-		n = watch(&w, &g, false, ev);
+		n       = watch(&w, &g, false, ev);
 		assert(has(ev, n, TR_AEV_PICKUP, want[i]));
 	}
 	s_combo = 0u;
@@ -207,7 +216,7 @@ static void test_watch(void)
 	g.crashed = true;
 	g.hit     = 3;
 	g.ents[3] = (tr_entity_t){ .kind = TR_ENT_OBSTACLE, .lane = 1, .y = 1100, .low = true };
-	n = watch(&w, &g, false, ev);
+	n         = watch(&w, &g, false, ev);
 	assert(has(ev, n, TR_AEV_CRASH, TR_CRASH_KIND_LOW));
 	g.crash_ticks = 5;
 	assert(watch(&w, &g, false, ev) == 0u); /* crash frames: no repeat */
@@ -217,12 +226,12 @@ static void test_watch(void)
 	tr_game_init(&g, 2u);
 	g.tick = 1;
 	assert(watch(&w, &g, false, ev) == 0u);
-	g.tick = 2;
-	g.alive = false;
+	g.tick    = 2;
+	g.alive   = false;
 	g.crashed = true;
-	g.hit = 0;
+	g.hit     = 0;
 	g.ents[0] = (tr_entity_t){ .kind = TR_ENT_OBSTACLE, .lane = 0, .y = 1100, .low = false };
-	n = watch(&w, &g, false, ev);
+	n         = watch(&w, &g, false, ev);
 	assert(has(ev, n, TR_AEV_CRASH, TR_CRASH_KIND_HIGH));
 
 	/* live wire ahead: hum every TR_SFX_WIRE_TICKS at tr_game_wire_level();
@@ -230,11 +239,11 @@ static void test_watch(void)
 	tr_sfx_watch_init(&w);
 	tr_game_init(&g, 4u);
 	(void)watch(&w, &g, false, ev);
-	g.ents[5] = (tr_entity_t){ .kind = TR_ENT_WIRE, .lane = g.lane, .y = 600, .low = true };
+	g.ents[5]     = (tr_entity_t){ .kind = TR_ENT_WIRE, .lane = g.lane, .y = 600, .low = true };
 	unsigned hums = 0;
 	for (uint32_t t = 1; t <= 4u * TR_SFX_WIRE_TICKS; t++) {
 		g.tick = t;
-		n = watch(&w, &g, false, ev);
+		n      = watch(&w, &g, false, ev);
 		for (unsigned i = 0; i < n; i++) {
 			if (ev[i].kind == TR_AEV_WIRE) {
 				hums++;
@@ -253,7 +262,7 @@ static void test_watch(void)
 	(void)watch(&w, &g, false, ev);
 	for (uint32_t t = 1; t <= 2u * TR_SFX_WIRE_TICKS; t++) {
 		g.tick = t;
-		n = watch(&w, &g, false, ev);
+		n      = watch(&w, &g, false, ev);
 		assert(!has(ev, n, TR_AEV_WIRE, -1));
 	}
 
@@ -266,9 +275,9 @@ static void test_watch(void)
 	g.ducking  = true;
 	g.score    = 10u;
 	g.alive    = true;
-	n = watch(&w, &g, true, ev);
-	assert(has(ev, n, TR_AEV_ATTRACT, 0) && has(ev, n, TR_AEV_DUCK, -1) && has(ev, n, TR_AEV_PICKUP, 0) &&
-	       has(ev, n, TR_AEV_FOOTSTEP, -1));
+	n          = watch(&w, &g, true, ev);
+	assert(has(ev, n, TR_AEV_ATTRACT, 0) && has(ev, n, TR_AEV_DUCK, -1) &&
+	       has(ev, n, TR_AEV_PICKUP, 0) && has(ev, n, TR_AEV_FOOTSTEP, -1));
 }
 
 int main(void)

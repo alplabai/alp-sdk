@@ -23,7 +23,8 @@ int main(void)
 			assert(tr_attract_step(&a, &t, /*player_present=*/false, 1u) == TR_ATTRACT_STAY);
 			assert(!a.active);
 		}
-		assert(tr_attract_step(&a, &t, false, 1u) == TR_ATTRACT_ENTERED); /* the caller ends the run */
+		assert(tr_attract_step(&a, &t, false, 1u) ==
+		       TR_ATTRACT_ENTERED); /* the caller ends the run */
 		assert(a.active);
 	}
 
@@ -93,8 +94,8 @@ int main(void)
 		tr_game_init(&g, 1u);
 
 		bool lane_changed = false;
-		bool cleared       = false; /* out.jump or out.duck fired at least once */
-		int  restarts      = 0;
+		bool cleared      = false; /* out.jump or out.duck fired at least once */
+		int  restarts     = 0;
 
 		for (int tick = 0; tick < 600; tick++) {
 			tr_intent_t in = tr_attract_intent(&a, &g, TRACK_H);
@@ -132,7 +133,8 @@ int main(void)
 			for (uint32_t k = 0; k < TR_ATTRACT_ENTER_TICKS; k++) {
 				tr_attract_ev_t ev = tr_attract_step(&a, &t, false, 1u);
 
-				assert(ev == ((k + 1 < TR_ATTRACT_ENTER_TICKS) ? TR_ATTRACT_STAY : TR_ATTRACT_ENTERED));
+				assert(ev ==
+				       ((k + 1 < TR_ATTRACT_ENTER_TICKS) ? TR_ATTRACT_STAY : TR_ATTRACT_ENTERED));
 				assert((k + 1 < TR_ATTRACT_ENTER_TICKS) ? !a.active : a.active);
 			}
 			assert(a.active);
@@ -170,7 +172,7 @@ int main(void)
 	 * Q0.16 fraction. */
 	{
 		uint32_t phase = 0, ticks = 0;
-		int      idle  = 0;
+		int      idle = 0;
 
 		for (uint32_t f = 0; f < 65536u; f++) {
 			bool step = tr_attract_pace(&phase);
@@ -183,7 +185,7 @@ int main(void)
 		assert(ticks == TR_ATTRACT_SPEED_Q16 && phase == 0u);
 		assert(TR_ATTRACT_SPEED_Q16 * 10u / 7u + 2u >= TR_PLAY_SPEED_Q16 &&
 		       TR_ATTRACT_SPEED_Q16 * 10u / 7u <= TR_PLAY_SPEED_Q16); /* 0.7 of play */
-		assert(TR_ATTRACT_WANDER_IN >= 80); /* calmer self-play */
+		assert(TR_ATTRACT_WANDER_IN >= 80);                           /* calmer self-play */
 	}
 
 	/* 8. P4b: the attract player reacts to a live wire in its lane like to
@@ -202,8 +204,11 @@ int main(void)
 			for (unsigned i = 0; i < TR_MAX_ENTITIES; i++) {
 				g.ents[i].kind = TR_ENT_FREE;
 			}
-			g.ents[2] = (tr_entity_t){ .kind = TR_ENT_WIRE, .lane = g.lane, .low = low,
-						   .y = (int16_t)(tr_runner_ground_y(TRACK_H) - 3 * TR_SCROLL_PX) };
+			g.ents[2] =
+			    (tr_entity_t){ .kind = TR_ENT_WIRE,
+				               .lane = g.lane,
+				               .low  = low,
+				               .y    = (int16_t)(tr_runner_ground_y(TRACK_H) - 3 * TR_SCROLL_PX) };
 
 			tr_intent_t in = tr_attract_intent(&a, &g, TRACK_H);
 
@@ -239,7 +244,8 @@ int main(void)
 		for (int f = 0; f < 50; f++) {
 			assert(!tr_lobby_frame(&l, false)); /* a player run: never */
 		}
-		assert(tr_lobby_frame(&l, true) && l.idle_us == 0u); /* back into attract (walk-away, fall back) */
+		assert(tr_lobby_frame(&l, true) &&
+		       l.idle_us == 0u); /* back into attract (walk-away, fall back) */
 		tr_lobby_init(&l);
 		assert(!tr_lobby_frame(&l, false)); /* a vision boot: a player first */
 		assert(tr_lobby_frame(&l, true));   /* then the camera attract */

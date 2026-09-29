@@ -5,26 +5,26 @@
 #include "intent.h"
 #include "panel_hz.h"
 
-#define TR_LANES         3
-#define TR_MAX_ENTITIES  16
+#define TR_LANES        3
+#define TR_MAX_ENTITIES 16
 /*
  * Ticks the jump timer is armed with.  The timer is decremented in the same
  * tick it's set, so the runner is actually airborne for TR_AIR_TICKS - 1
  * ticks (~0.43 s at 30 Hz) -- long enough to clear one obstacle.
  */
-#define TR_AIR_TICKS     14
-#define TR_DUCK_TICKS    12
+#define TR_AIR_TICKS  14
+#define TR_DUCK_TICKS 12
 /* Pixels per tick an entity travels down the track. P3c: 18 -> 11 (0.61x): at
  * the A32 build's 40 Hz tick the old 18 ran the board ~17x faster than the
  * runner's feet could plant; 11 with the faster, longer stride of the P3c run
  * cycle brings that to ~3x (test_r3d_scene case 0 measures it). The runner band, approach time (now 101 ticks
  * from spawn to the runner line, was 62) and every scroll mapping derive from
  * it. */
-#define TR_SCROLL_PX     11
+#define TR_SCROLL_PX 11
 /* A spawn attempt every TR_SPAWN_TICKS ticks: 20 x 11 = 220 px apart on the
  * track, as the old 12 x 18 = 216 -- the same density on screen, more time
  * between parts (0.5 s, was 0.3 s). */
-#define TR_SPAWN_TICKS   20
+#define TR_SPAWN_TICKS 20
 /* Spawn row, model px: 1,540 above the panel top (maintainer on glass, three
  * times: "start drawing earlier"). The 3D scene maps model y to depth
  * linearly (proj.c), so this is depth ~21,700 -- the far end of the visible
@@ -36,7 +36,7 @@
  * TR_ENT_ALIVE_MAX below says they still fit ents[]. A multiple of
  * TR_SCROLL_PX, so exactly one step lands in the runner band. The M55 sprite
  * renderer simply does not draw y < 0. */
-#define TR_SPAWN_Y       (-1540)
+#define TR_SPAWN_Y (-1540)
 _Static_assert(TR_SPAWN_Y % TR_SCROLL_PX == 0, "the spawn row sits on the TR_SCROLL_PX grid");
 /* One run-cycle stride (two steps) in ticks: 6.7 steps/s at the 20 steps/s
  * play pace (P3d: short quick strides, so a planted foot can ride the board
@@ -72,15 +72,16 @@ _Static_assert(TR_ENT_ALIVE_MAX <= TR_MAX_ENTITIES, "every spawn must find a fre
  */
 #define TR_GAME_PACE_Q8   128u
 #define TR_PLAY_SPEED_Q16 (((TR_GAME_PACE_Q8 << 8) * 40u + TR_PANEL_HZ / 2u) / TR_PANEL_HZ)
-_Static_assert(TR_GAME_PACE_Q8 > 0u && TR_PLAY_SPEED_Q16 <= 65536u, "at most one game step a frame");
+_Static_assert(TR_GAME_PACE_Q8 > 0u && TR_PLAY_SPEED_Q16 <= 65536u,
+               "at most one game step a frame");
 /*
  * The crash sequence, 1.5 s real time (main.c keeps presenting through it):
  * TR_CRASH_TICKS is its length in 40 Hz frames -- the clock the A32 animates
  * crash_tick in (tr_mbox.c converts) -- and TR_CRASH_FRAMES the frames it
  * takes at TR_PANEL_HZ, the fatal tick's frame included.
  */
-#define TR_CRASH_TICKS   60
-#define TR_CRASH_FRAMES  TR_HZ_FRAMES(TR_CRASH_TICKS)
+#define TR_CRASH_TICKS  60
+#define TR_CRASH_FRAMES TR_HZ_FRAMES(TR_CRASH_TICKS)
 
 /*
  * The runner's fixed footprint and ground position -- the ONE definition of
@@ -143,8 +144,8 @@ typedef struct {
  * left no more than TR_NEAR_TICKS steps before (a dodge); ev_lane = its
  * lane. NEAR: that pass was by a small margin -- the jump / duck started on
  * the last TR_NEAR_TICKS + 1 steps or ends within TR_NEAR_TICKS, or a dodge. */
-#define TR_EV_PASS   (1u << 3)
-#define TR_EV_NEAR   (1u << 4)
+#define TR_EV_PASS    (1u << 3)
+#define TR_EV_NEAR    (1u << 4)
 #define TR_NEAR_TICKS 2
 
 typedef struct {
@@ -199,8 +200,12 @@ bool tr_game_crash_frame(tr_game_t *g, uint32_t *phase_q16);
  * judged only in tr_game_step() against g->lane at that step, so the game
  * is still a pure function of the per-frame input sequence.
  */
-bool tr_play_frame(tr_game_t *g, tr_intent_t *held, tr_intent_t in, uint32_t *phase_q16, uint32_t speed_q16,
-		   tr_intent_t *step_in);
+bool tr_play_frame(tr_game_t   *g,
+                   tr_intent_t *held,
+                   tr_intent_t  in,
+                   uint32_t    *phase_q16,
+                   uint32_t     speed_q16,
+                   tr_intent_t *step_in);
 
 void tr_game_step(tr_game_t *g, tr_intent_t in, int16_t track_h);
 

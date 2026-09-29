@@ -30,7 +30,7 @@ static int mid(const tr_pose_t *p, int a, int *x, int *y, unsigned *conf)
 
 tr_box_t tr_pose_box(const tr_pose_t *p)
 {
-	tr_box_t b = { .valid = false };
+	tr_box_t b  = { .valid = false };
 	int      sx = 0, sy = 0, hx = 0, hy = 0;
 	unsigned conf = 0u;
 	int      ns   = mid(p, TR_KP_LSHO, &sx, &sy, &conf);
@@ -78,7 +78,8 @@ bool tr_still_step(tr_still_t *s, tr_box_t b)
 
 	if (s->frames == 0u || absdiff(b.x + b.w / 2, s->ref.x + s->ref.w / 2) > tol ||
 	    absdiff(b.y, s->ref.y) > tol || absdiff(b.h, s->ref.h) > tol) {
-		s->ref    = b; /* the anchor is the first box of the run, so a slow drift cannot creep past the tolerance */
+		s->ref =
+		    b; /* the anchor is the first box of the run, so a slow drift cannot creep past the tolerance */
 		s->frames = 1u;
 		return false;
 	}
@@ -88,7 +89,8 @@ bool tr_still_step(tr_still_t *s, tr_box_t b)
 	return s->frames >= TR_STILL_FRAMES;
 }
 
-_Static_assert(TR_PRESENT_WIN <= 16 && TR_PRESENT_MIN <= TR_PRESENT_WIN, "tr_presence_t.hist holds 16 poses");
+_Static_assert(TR_PRESENT_WIN <= 16 && TR_PRESENT_MIN <= TR_PRESENT_WIN,
+               "tr_presence_t.hist holds 16 poses");
 
 void tr_presence_init(tr_presence_t *p)
 {

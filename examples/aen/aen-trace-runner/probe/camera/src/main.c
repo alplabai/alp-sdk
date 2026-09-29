@@ -50,8 +50,8 @@
  * e1m_evk_rpi_csi.overlay -- see its boards/e1m_aen.dtsi header. */
 #define I2C_BUS_NODE DT_NODELABEL(csi_i2c)
 /* ov9281@60 on that bus, from innomaker_cam_ov9281.overlay. */
-#define SENSOR_NODE  DT_NODELABEL(ov9281)
-#define SENSOR_ADDR  DT_REG_ADDR(SENSOR_NODE)
+#define SENSOR_NODE DT_NODELABEL(ov9281)
+#define SENSOR_ADDR DT_REG_ADDR(SENSOR_NODE)
 
 /* The video device z_open() actually calls -- e1m_evk_rpi_csi.overlay's
  * `alp-camera0 = &csi_capture_port;` alias, the same DT_ALIAS(alp_camera0)
@@ -82,20 +82,34 @@ static const struct device *const cam     = DEVICE_DT_GET(CAM_NODE);
 static const char *errno_name(int rc)
 {
 	switch (rc < 0 ? -rc : rc) {
-	case 0: return "OK";
-	case EIO: return "EIO";
-	case ENXIO: return "ENXIO";
-	case EAGAIN: return "EAGAIN";
-	case ENOMEM: return "ENOMEM";
-	case EACCES: return "EACCES";
-	case EBUSY: return "EBUSY";
-	case EINVAL: return "EINVAL";
-	case ENOSYS: return "ENOSYS";
-	case ENOBUFS: return "ENOBUFS";
-	case ENOTSUP: return "ENOTSUP";
-	case ENODEV: return "ENODEV";
-	case ETIMEDOUT: return "ETIMEDOUT";
-	default: return "?";
+	case 0:
+		return "OK";
+	case EIO:
+		return "EIO";
+	case ENXIO:
+		return "ENXIO";
+	case EAGAIN:
+		return "EAGAIN";
+	case ENOMEM:
+		return "ENOMEM";
+	case EACCES:
+		return "EACCES";
+	case EBUSY:
+		return "EBUSY";
+	case EINVAL:
+		return "EINVAL";
+	case ENOSYS:
+		return "ENOSYS";
+	case ENOBUFS:
+		return "ENOBUFS";
+	case ENOTSUP:
+		return "ENOTSUP";
+	case ENODEV:
+		return "ENODEV";
+	case ETIMEDOUT:
+		return "ETIMEDOUT";
+	default:
+		return "?";
 	}
 }
 
@@ -140,7 +154,10 @@ static bool run_i2c_control(const char *when)
 	unsigned int n_ack = scan_bus();
 
 	printk("[camprobe] i2c control (%s): %u/112 addresses ACKed (0x%02x..0x%02x)%s\n",
-	       when, n_ack, SCAN_LO, SCAN_HI,
+	       when,
+	       n_ack,
+	       SCAN_LO,
+	       SCAN_HI,
 	       (n_ack >= 100U) ? " -- suspiciously high, most of a fail-open bus" : "");
 
 	uint8_t hi = 0U, lo = 0U;
@@ -148,9 +165,17 @@ static bool run_i2c_control(const char *when)
 	int     rc_lo = (rc_hi == 0) ? ov9281_reg8_read(OV9281_REG_CHIP_ID_LO, &lo) : rc_hi;
 
 	printk("[camprobe] i2c control (%s): reg 0x%04x -> rc=%d (%s) val=0x%02x\n",
-	       when, OV9281_REG_CHIP_ID_HI, rc_hi, errno_name(rc_hi), hi);
+	       when,
+	       OV9281_REG_CHIP_ID_HI,
+	       rc_hi,
+	       errno_name(rc_hi),
+	       hi);
 	printk("[camprobe] i2c control (%s): reg 0x%04x -> rc=%d (%s) val=0x%02x\n",
-	       when, OV9281_REG_CHIP_ID_LO, rc_lo, errno_name(rc_lo), lo);
+	       when,
+	       OV9281_REG_CHIP_ID_LO,
+	       rc_lo,
+	       errno_name(rc_lo),
+	       lo);
 
 	bool healthy = false;
 
@@ -165,7 +190,9 @@ static bool run_i2c_control(const char *when)
 	} else {
 		printk("[camprobe] i2c (%s): UNEXPECTED (chip id 0x%02x%02x, neither the "
 		       "real ID nor an address echo)\n",
-		       when, hi, lo);
+		       when,
+		       hi,
+		       lo);
 	}
 	return healthy;
 }
@@ -194,8 +221,8 @@ static void record_fail(const char *step, int rc, bool no_errno)
 {
 	if (!have_first_fail) {
 		have_first_fail     = true;
-		first_fail_rc        = rc;
-		first_fail_no_errno  = no_errno;
+		first_fail_rc       = rc;
+		first_fail_no_errno = no_errno;
 		strncpy(first_fail_step, step, sizeof(first_fail_step) - 1U);
 		first_fail_step[sizeof(first_fail_step) - 1U] = '\0';
 	}
@@ -218,8 +245,10 @@ int main(void)
 	printk("\n=== camprobe: camera bring-up diagnostic, E1M-AEN803 2026W36-0009 ===\n");
 
 	/* --- Step 1: identify from devicetree, readiness ------------------- */
-	printk("[camprobe] sensor: %s @ 0x%02x on bus %s\n", DT_NODE_FULL_NAME(SENSOR_NODE),
-	       (unsigned int)SENSOR_ADDR, i2c_bus->name);
+	printk("[camprobe] sensor: %s @ 0x%02x on bus %s\n",
+	       DT_NODE_FULL_NAME(SENSOR_NODE),
+	       (unsigned int)SENSOR_ADDR,
+	       i2c_bus->name);
 	printk("[camprobe] device_is_ready(sensor) = %d\n", (int)device_is_ready(sensor));
 	printk("[camprobe] device_is_ready(video)  = %d\n", (int)device_is_ready(cam));
 
@@ -233,16 +262,21 @@ int main(void)
 	 * (no buffers to start streaming, no stream to dequeue from) is
 	 * explicitly SKIPPED with why, not silently omitted. */
 
-	struct video_caps vcaps = { .type = VIDEO_BUF_TYPE_OUTPUT };
-	int                caps_rc = report("video_get_caps", video_get_caps(cam, &vcaps));
+	struct video_caps vcaps   = { .type = VIDEO_BUF_TYPE_OUTPUT };
+	int               caps_rc = report("video_get_caps", video_get_caps(cam, &vcaps));
 
 	if (caps_rc == 0) {
 		unsigned int n = 0U;
 
 		for (const struct video_format_cap *fc = vcaps.format_caps;
-		     fc != NULL && fc->pixelformat != 0U && n < 16U; fc++, n++) {
-			printk("[camprobe]   cap: %s %ux%u..%ux%u\n", VIDEO_FOURCC_TO_STR(fc->pixelformat),
-			       fc->width_min, fc->height_min, fc->width_max, fc->height_max);
+		     fc != NULL && fc->pixelformat != 0U && n < 16U;
+		     fc++, n++) {
+			printk("[camprobe]   cap: %s %ux%u..%ux%u\n",
+			       VIDEO_FOURCC_TO_STR(fc->pixelformat),
+			       fc->width_min,
+			       fc->height_min,
+			       fc->width_max,
+			       fc->height_max);
 		}
 		if (n == 0U) {
 			printk("[camprobe]   (no format_caps entries)\n");
@@ -261,7 +295,7 @@ int main(void)
 	(void)report("video_set_format", video_set_format(cam, &fmt));
 
 	struct video_buffer *vbufs[REQ_VBUF_COUNT] = { NULL };
-	unsigned int          n_enqueued            = 0U;
+	unsigned int         n_enqueued            = 0U;
 
 	for (unsigned int i = 0U; i < REQ_VBUF_COUNT; i++) {
 		char label[32];
@@ -291,14 +325,15 @@ int main(void)
 		printk("[camprobe] video_stream_start        -> SKIPPED (0 of %u buffers enqueued)\n",
 		       REQ_VBUF_COUNT);
 	} else {
-		streaming = report("video_stream_start", video_stream_start(cam, VIDEO_BUF_TYPE_OUTPUT)) == 0;
+		streaming =
+		    report("video_stream_start", video_stream_start(cam, VIDEO_BUF_TYPE_OUTPUT)) == 0;
 	}
 
 	if (!streaming) {
 		printk("[camprobe] video_dequeue             -> SKIPPED (stream not started)\n");
 	} else {
-		struct video_buffer *vb     = NULL;
-		int                   deq_rc = report("video_dequeue", video_dequeue(cam, &vb, K_MSEC(2000)));
+		struct video_buffer *vb = NULL;
+		int deq_rc              = report("video_dequeue", video_dequeue(cam, &vb, K_MSEC(2000)));
 
 		if (deq_rc == 0 && vb != NULL) {
 			printk("[camprobe]   frame: bytesused=%u first16=", vb->bytesused);
@@ -330,8 +365,10 @@ int main(void)
 			printk("RESULT: first failing step = %s, NULL return (no errno available)\n",
 			       first_fail_step);
 		} else {
-			printk("RESULT: first failing step = %s, raw errno = %d (%s)\n", first_fail_step,
-			       first_fail_rc, errno_name(first_fail_rc));
+			printk("RESULT: first failing step = %s, raw errno = %d (%s)\n",
+			       first_fail_step,
+			       first_fail_rc,
+			       errno_name(first_fail_rc));
 		}
 	} else {
 		printk("RESULT: no step returned a nonzero/NULL result\n");

@@ -60,13 +60,13 @@ _Static_assert(TR_AUDIO_RATE == 16000u || (TR_AUDIO_V2 && TR_AUDIO_RATE == 48000
 void tr_audio_init(uint32_t seed);
 /* Returns the event's serial (1, 2, ... since init), see tr_audio_event_voices(). */
 uint32_t tr_audio_event(uint8_t kind, uint8_t param);
-void tr_audio_render(int16_t *buf, unsigned n);
+void     tr_audio_render(int16_t *buf, unsigned n);
 
 /* Diagnostics (host tests, bench counters). */
-uint32_t tr_audio_clipped(void);       /* samples hard-clamped since init */
-uint32_t tr_audio_limited(void);       /* V2: samples the soft limiter bent since init */
+uint32_t tr_audio_clipped(void);                 /* samples hard-clamped since init */
+uint32_t tr_audio_limited(void);                 /* V2: samples the soft limiter bent since init */
 unsigned tr_audio_event_voices(uint32_t serial); /* SFX voices still owned by that event */
-void     tr_audio_seek(uint32_t step); /* jump the music to a sixteenth (bench scripts) */
+void     tr_audio_seek(uint32_t step);           /* jump the music to a sixteenth (bench scripts) */
 
 /* The V3 master high-pass: 4th-order Butterworth (two biquads) at
  * TR_AUDIO_HPF_HZ, Q28 coefficients, int64 accumulate -- exposed for the
@@ -80,8 +80,8 @@ typedef struct {
 typedef struct {
 	tr_biquad_t s[2];
 } tr_hpf_t;
-int32_t tr_audio_hpf(tr_hpf_t *st, int32_t x);
-unsigned tr_audio_sfx_active(void);    /* SFX voices still sounding or scheduled */
-uint32_t tr_audio_song_step(void);     /* music position, 0 .. TR_AUDIO_SONG_STEPS-1 */
+int32_t  tr_audio_hpf(tr_hpf_t *st, int32_t x);
+unsigned tr_audio_sfx_active(void); /* SFX voices still sounding or scheduled */
+uint32_t tr_audio_song_step(void);  /* music position, 0 .. TR_AUDIO_SONG_STEPS-1 */
 
 #endif /* TR_AUDIO_H */

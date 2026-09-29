@@ -22,11 +22,11 @@
 #define TR_CAMERA_WIDTH  640
 #define TR_CAMERA_HEIGHT 400
 
-static alp_camera_t       *g_cam;
-static alp_status_t        g_first_err = ALP_OK;
-static alp_camera_frame_t  g_frame;
-static bool                g_frame_out;    /* a captured frame is out, awaiting release */
-static bool                g_stall_warned; /* fix round 1, finding 7: latch the one-shot
+static alp_camera_t      *g_cam;
+static alp_status_t       g_first_err = ALP_OK;
+static alp_camera_frame_t g_frame;
+static bool               g_frame_out;    /* a captured frame is out, awaiting release */
+static bool               g_stall_warned; /* fix round 1, finding 7: latch the one-shot
                                              * "caller never released a frame" print */
 
 int tr_camera_open(void)
@@ -100,7 +100,7 @@ const uint8_t *tr_camera_frame(size_t *len_out)
 	}
 
 	alp_camera_frame_t f;
-	alp_status_t        st = alp_camera_capture(g_cam, &f, 0); /* 0 ms: never block */
+	alp_status_t       st = alp_camera_capture(g_cam, &f, 0); /* 0 ms: never block */
 
 	if (st == ALP_ERR_TIMEOUT) {
 		return NULL; /* no frame ready yet -- the normal, common case */
@@ -124,7 +124,8 @@ const uint8_t *tr_camera_frame(size_t *len_out)
 		if (g_first_err == ALP_OK) {
 			g_first_err = ALP_ERR_IO;
 			printk("camera: first frame size mismatch %u != %u -- short or overrun\n",
-			       (unsigned)f.size, (unsigned)expected);
+			       (unsigned)f.size,
+			       (unsigned)expected);
 		}
 		(void)alp_camera_release(g_cam, &f); /* do not hand a bad frame downstream */
 		return NULL;

@@ -157,14 +157,15 @@ static void pslot_barrier(void)
  * live VTS *write*, not just this read, and re-verification that camera.c's
  * own frame-timing assumptions still hold at the new interval -- untested,
  * so not attempted blind here). */
-#define TR_AE_EXP_MIN         0x05u
-#define TR_AE_VTS_MARGIN      25u   /* OV9281_EXP_MAX_OFFSET */
-#define TR_AE_VTS_FALLBACK    1096u /* OV9281_MODE_640X400_100FPS's own VTS */
-#define TR_AE_GAIN_IDX_0      8u
+#define TR_AE_EXP_MIN      0x05u
+#define TR_AE_VTS_MARGIN   25u   /* OV9281_EXP_MAX_OFFSET */
+#define TR_AE_VTS_FALLBACK 1096u /* OV9281_MODE_640X400_100FPS's own VTS */
+#define TR_AE_GAIN_IDX_0   8u
 
 /* TR_AE_VTS_FALLBACK's own ceiling, until tr_ae_refresh_exposure_ceiling()
  * (below) corrects it to the sensor's live VTS. */
-static uint32_t g_ae_exp_max = TR_AE_VTS_FALLBACK - TR_AE_VTS_MARGIN; /* whole lines (polish round: the
+static uint32_t g_ae_exp_max =
+    TR_AE_VTS_FALLBACK - TR_AE_VTS_MARGIN; /* whole lines (polish round: the
 									    * round-12 "<< 4" had survived here,
 									    * a 17136-line fallback and an 8568-
 									    * line first exposure) */
@@ -208,7 +209,8 @@ static void tr_ae_refresh_exposure_ceiling(void)
 	int      ret = tr_ae_read_vts(&vts);
 
 	if (ret < 0) {
-		printk("ae      : VTS read failed (%d) -- keeping exposure ceiling %u\n", ret, g_ae_exp_max);
+		printk(
+		    "ae      : VTS read failed (%d) -- keeping exposure ceiling %u\n", ret, g_ae_exp_max);
 		return;
 	}
 	g_ae_exp_max = tr_ae_exposure_max_from_vts(vts, TR_AE_VTS_MARGIN);
@@ -241,7 +243,11 @@ static void tr_cam_mirror_apply(void)
 		rc = ov9281_read_reg8(reg, &v);
 	}
 	g_cam_mirrored = (uint16_t)(rc >= 0 && (v & TR_OV9281_FLIP_BIT) != 0u);
-	printk("camera  : mirror %d -> 0x%04x = 0x%02x (rc %d)%s\n", TR_CAM_MIRROR, reg, v, rc,
+	printk("camera  : mirror %d -> 0x%04x = 0x%02x (rc %d)%s\n",
+	       TR_CAM_MIRROR,
+	       reg,
+	       v,
+	       rc,
 	       rc >= 0 && (bool)g_cam_mirrored == (bool)TR_CAM_MIRROR ? "" : " -- MIRROR NOT APPLIED");
 }
 
@@ -263,12 +269,12 @@ static void tr_ae_camera_opened(void)
 /* fix round 12 finding A registers, direct SCCB (same protocol tr_ae_read_
  * vts() above already uses -- 16-bit big-endian register address, 8-bit
  * data). 0x3503's own comment is below, at its one write site. */
-#define OV9281_REG_EXP_H    0x3500u
-#define OV9281_REG_EXP_M    0x3501u
-#define OV9281_REG_EXP_L    0x3502u
-#define OV9281_REG_MODE     0x3503u
-#define OV9281_REG_GAIN     0x3509u
-#define OV9281_MODE_MANUAL  0x08u /* chips/ov9281's own mode-init table value for this register */
+#define OV9281_REG_EXP_H   0x3500u
+#define OV9281_REG_EXP_M   0x3501u
+#define OV9281_REG_EXP_L   0x3502u
+#define OV9281_REG_MODE    0x3503u
+#define OV9281_REG_GAIN    0x3509u
+#define OV9281_MODE_MANUAL 0x08u /* chips/ov9281's own mode-init table value for this register */
 
 /* fix round 14 (silicon regression on 6fbf7b7): round 13 wrapped the writes
  * below in SC_GROUP (0x3208) start/end/launch on the strength of "the
@@ -359,7 +365,7 @@ static void apply_ae(const tr_ae_t *ae)
 
 	int      rc_worst = rc < 0 ? rc : 0;
 	uint8_t  rb_h = 0, rb_m = 0, rb_l = 0, rb_mode = 0, rb_gain = 0;
-	uint16_t vts  = 0;
+	uint16_t vts = 0;
 
 	rc       = ov9281_read_reg8(OV9281_REG_EXP_H, &rb_h);
 	rc_worst = rc < rc_worst ? rc : rc_worst;
@@ -434,7 +440,7 @@ static void make_thumb(const uint8_t *frame, int16_t fw, int16_t fh)
 		int sy = y * fh / TR_PSLOT_THUMB_H;
 
 		for (int x = 0; x < TR_PSLOT_THUMB_W; x++) {
-			int sx                                 = x * fw / TR_PSLOT_THUMB_W;
+			int sx                            = x * fw / TR_PSLOT_THUMB_W;
 			g_thumb[y * TR_PSLOT_THUMB_W + x] = frame[sy * fw + sx];
 		}
 	}
@@ -456,9 +462,9 @@ static int64_t        g_smooth_ms;
 typedef uint64_t tr_cyc_t;
 
 BUILD_ASSERT(IS_ENABLED(CONFIG_TIMER_HAS_64BIT_CYCLE_COUNTER) &&
-		     CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC >= 100000000,
-	     "stage timing needs a 64-bit kernel cycle counter at the CPU clock (SysTick): "
-	     "the busy/total cycles and the *_us stages would lose their resolution");
+                 CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC >= 100000000,
+             "stage timing needs a 64-bit kernel cycle counter at the CPU clock (SysTick): "
+             "the busy/total cycles and the *_us stages would lose their resolution");
 
 #define TR_CPU_MHZ ((uint32_t)(CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC / 1000000))
 
@@ -480,9 +486,9 @@ static uint64_t cyc(tr_cyc_t a, tr_cyc_t b)
 int main(void)
 {
 	memset((void *)g_dbg, 0, sizeof(*g_dbg));
-	g_dbg->magic = TR_HP_DBG_MAGIC;
-	g_dbg->cpuid = SCB->CPUID;
-	g_dbg->vtor  = SCB->VTOR;
+	g_dbg->magic   = TR_HP_DBG_MAGIC;
+	g_dbg->cpuid   = SCB->CPUID;
+	g_dbg->vtor    = SCB->VTOR;
 	g_dbg->cpu_mhz = TR_CPU_MHZ;
 
 	printk("\n=== trace-runner HP vision (%u MHz) ===\n", g_dbg->cpu_mhz);
@@ -522,7 +528,8 @@ int main(void)
 		 * pose that will never come -- there is nothing else useful this
 		 * core can do. */
 		for (;;) {
-			tr_pslot_write(pslot, &(tr_pose_t){ 0 }, 0u, 0u, TR_HP_STATE_NO_CAMERA, NULL, 0u, pslot_barrier);
+			tr_pslot_write(
+			    pslot, &(tr_pose_t){ 0 }, 0u, 0u, TR_HP_STATE_NO_CAMERA, NULL, 0u, pslot_barrier);
 			g_dbg->heartbeat++;
 			k_msleep(200);
 		}
@@ -538,7 +545,8 @@ int main(void)
 		g_dbg->sram1_ready_at_heartbeat = g_dbg->heartbeat;
 		printk("sram1   : ready word seen -- CAM_POOL (SRAM1) safe to touch\n");
 	} else {
-		printk("RESULT FAIL: SRAM1 ready word not seen yet -- CAM_POOL (SRAM1) NOT touched this pass\n");
+		printk("RESULT FAIL: SRAM1 ready word not seen yet -- CAM_POOL (SRAM1) NOT touched this "
+		       "pass\n");
 	}
 
 	/* Gates the pool's own first real use: tr_camera_open() is where the
@@ -552,8 +560,8 @@ int main(void)
 	if (cam_ok) {
 		tr_ae_camera_opened();
 	}
-	int64_t  hz_t0     = k_uptime_get();
-	uint32_t hz_n       = 0;
+	int64_t  hz_t0 = k_uptime_get();
+	uint32_t hz_n  = 0;
 
 	/* fix round 14 (silicon regression): the NO_FRAME path below already
 	 * published hp_state every empty pass, but never noticed a genuinely
@@ -590,9 +598,9 @@ int main(void)
 		g_dbg->heartbeat++;
 
 		if (!cam_ok) {
-			uint32_t st = !i2c1_ok ? TR_HP_STATE_I2C_STUCK
-					: !sram1_ok ? TR_HP_STATE_SRAM1_NOT_READY
-						    : TR_HP_STATE_NO_CAMERA;
+			uint32_t st = !i2c1_ok    ? TR_HP_STATE_I2C_STUCK
+			              : !sram1_ok ? TR_HP_STATE_SRAM1_NOT_READY
+			                          : TR_HP_STATE_NO_CAMERA;
 
 			tr_pslot_write(pslot, &(tr_pose_t){ 0 }, 0u, 0u, st, NULL, frame_no, pslot_barrier);
 			k_msleep(200);
@@ -608,7 +616,8 @@ int main(void)
 				if (sram1_ok) {
 					g_dbg->sram1_ready_seen         = 1u;
 					g_dbg->sram1_ready_at_heartbeat = g_dbg->heartbeat;
-					printk("sram1   : ready word seen (after retry) -- CAM_POOL (SRAM1) safe to touch\n");
+					printk("sram1   : ready word seen (after retry) -- CAM_POOL (SRAM1) safe to "
+					       "touch\n");
 				}
 			}
 			i2c1_ok = device_is_ready(g_sensor);
@@ -625,8 +634,14 @@ int main(void)
 		tr_cyc_t       tc1   = now_cyc();
 
 		if (frame == NULL) {
-			tr_pslot_write(pslot, &(tr_pose_t){ 0 }, 0u, 0u, TR_HP_STATE_NO_FRAME, NULL, frame_no,
-				       pslot_barrier);
+			tr_pslot_write(pslot,
+			               &(tr_pose_t){ 0 },
+			               0u,
+			               0u,
+			               TR_HP_STATE_NO_FRAME,
+			               NULL,
+			               frame_no,
+			               pslot_barrier);
 			g_dbg->capture_us = us(tc0, tc1);
 			if (k_uptime_get() - last_frame_ms > 500) {
 				/* Stuck, not just between frames -- tear the stream down
@@ -642,7 +657,8 @@ int main(void)
 				if (cam_ok) {
 					tr_ae_camera_opened();
 				}
-				last_frame_ms = k_uptime_get(); /* don't re-trip every pass while the reopen settles */
+				last_frame_ms =
+				    k_uptime_get(); /* don't re-trip every pass while the reopen settles */
 			}
 			continue; /* no k_msleep: the caller (design sec 2) drops stale frames, keeps the newest */
 		}
@@ -659,15 +675,24 @@ int main(void)
 		 * below is UNCHANGED (still right after the pre-process's own
 		 * read) -- tr_cam_view.h's header note is the accepted tear risk
 		 * this ordering trades for zero throughput cost. */
-		tr_cam_view_write(cam_view, (uint32_t)(uintptr_t)frame, frame_no, (uint16_t)tr_camera_width(),
-				   (uint16_t)tr_camera_height(), TR_CAM_ROTATE, g_cam_mirrored, pslot_barrier);
+		tr_cam_view_write(cam_view,
+		                  (uint32_t)(uintptr_t)frame,
+		                  frame_no,
+		                  (uint16_t)tr_camera_width(),
+		                  (uint16_t)tr_camera_height(),
+		                  TR_CAM_ROTATE,
+		                  g_cam_mirrored,
+		                  pslot_barrier);
 
 		tr_cyc_t ta0 = now_cyc();
 
 		/* Every frame: the controller itself skips the frame after a write
 		 * (camera_ae.h), metering is a 1/16 subsample. */
-		if (tr_ae_step(&g_ae, tr_ae_meter(frame, tr_camera_width(), tr_camera_height()), TR_AE_EXP_MIN,
-			       (uint16_t)g_ae_exp_max, TR_AE_GAIN_IDX_MAX)) {
+		if (tr_ae_step(&g_ae,
+		               tr_ae_meter(frame, tr_camera_width(), tr_camera_height()),
+		               TR_AE_EXP_MIN,
+		               (uint16_t)g_ae_exp_max,
+		               TR_AE_GAIN_IDX_MAX)) {
 			apply_ae(&g_ae);
 		}
 		tr_cyc_t ta1 = now_cyc();
@@ -679,7 +704,8 @@ int main(void)
 
 		alp_inference_tensor_t in = { 0 };
 
-		if (alp_inference_get_input(inf, 0, &in) != ALP_OK || in.size_bytes != TR_MN_IN * TR_MN_IN * 3) {
+		if (alp_inference_get_input(inf, 0, &in) != ALP_OK ||
+		    in.size_bytes != TR_MN_IN * TR_MN_IN * 3) {
 			g_dbg->status = alp_last_error();
 			tr_camera_release();
 			continue;
@@ -699,8 +725,14 @@ int main(void)
 		if (st != ALP_OK) {
 			g_dbg->status = st;
 			tr_camera_release();
-			tr_pslot_write(pslot, &(tr_pose_t){ 0 }, 0u, 0u, TR_HP_STATE_NO_CAMERA, NULL, frame_no,
-				       pslot_barrier);
+			tr_pslot_write(pslot,
+			               &(tr_pose_t){ 0 },
+			               0u,
+			               0u,
+			               TR_HP_STATE_NO_CAMERA,
+			               NULL,
+			               frame_no,
+			               pslot_barrier);
 			continue;
 		}
 
@@ -724,8 +756,10 @@ int main(void)
 
 		/* Keypoints in UPRIGHT frame px (portrait when rotated): what the
 		 * A32 skeleton and the HE's tracker both read. */
-		tr_movenet_decode(&mo, TR_CAM_ROTATE != 0 ? tr_camera_height() : tr_camera_width(),
-				  TR_CAM_ROTATE != 0 ? tr_camera_width() : tr_camera_height(), &pose);
+		tr_movenet_decode(&mo,
+		                  TR_CAM_ROTATE != 0 ? tr_camera_height() : tr_camera_width(),
+		                  TR_CAM_ROTATE != 0 ? tr_camera_width() : tr_camera_height(),
+		                  &pose);
 
 		/* Temporal smoothing before the pose is published (src/vision/
 		 * kp_smooth.h, One-Euro per keypoint): Lightning's frame-to-frame
@@ -766,8 +800,14 @@ int main(void)
 		g_dbg->busy_cyc += cyc(ta0, ta1) + cyc(t0, t1) + cyc(t1, t2) + cyc(t2, t3) + cyc(t3, t4);
 		tr_hp_dbg_write_seq_even(g_dbg, pslot_barrier);
 
-		tr_pslot_write(pslot, &pose, g_dbg->infer_us, g_dbg->pre_us, TR_HP_STATE_RUNNING, g_thumb, frame_no,
-			       pslot_barrier);
+		tr_pslot_write(pslot,
+		               &pose,
+		               g_dbg->infer_us,
+		               g_dbg->pre_us,
+		               TR_HP_STATE_RUNNING,
+		               g_thumb,
+		               frame_no,
+		               pslot_barrier);
 
 		hz_n++;
 		int64_t now = k_uptime_get();

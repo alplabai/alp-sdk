@@ -6,8 +6,8 @@
 #include <stdint.h>
 
 int            tr_camera_open(void);             /* 0 on success, negative on failure */
-const uint8_t *tr_camera_frame(size_t *len_out);  /* NULL when no frame is ready */
-void           tr_camera_release(void);           /* returns the frame to the driver */
+const uint8_t *tr_camera_frame(size_t *len_out); /* NULL when no frame is ready */
+void           tr_camera_release(void);          /* returns the frame to the driver */
 int16_t        tr_camera_width(void);
 int16_t        tr_camera_height(void);
 

@@ -57,8 +57,14 @@ typedef struct {
 /* HP side: publish a new frame's location. Same protocol as
  * tr_pslot_write() -- see this file's header for why the buffer itself is
  * NOT held past its normal release. */
-void tr_cam_view_write(volatile tr_cam_view_t *s, uint32_t buf_addr, uint32_t frame_no, uint16_t width,
-			uint16_t height, uint16_t rotate, uint16_t mirror, void (*barrier)(void));
+void tr_cam_view_write(volatile tr_cam_view_t *s,
+                       uint32_t                buf_addr,
+                       uint32_t                frame_no,
+                       uint16_t                width,
+                       uint16_t                height,
+                       uint16_t                rotate,
+                       uint16_t                mirror,
+                       void (*barrier)(void));
 
 /* A32 side: copy the descriptor if seq is even and unchanged across the
  * copy, magic/version checked too -- identical shape to tr_pslot_read().

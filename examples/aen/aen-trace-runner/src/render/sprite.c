@@ -9,7 +9,10 @@ static uint16_t       *g_buf;
 static uint16_t        g_fw, g_fh;
 static const uint16_t *g_pal;
 
-void tr_sprite_set_target(uint16_t *buf, uint16_t frame_w, uint16_t frame_h, const uint16_t palette[16])
+void tr_sprite_set_target(uint16_t      *buf,
+                          uint16_t       frame_w,
+                          uint16_t       frame_h,
+                          const uint16_t palette[16])
 {
 	g_buf = buf;
 	g_fw  = frame_w;
@@ -28,14 +31,20 @@ void tr_sprite_set_target(uint16_t *buf, uint16_t frame_w, uint16_t frame_h, con
 static uint8_t sprite_index(const tr_sprite_t *s, uint16_t sx, uint16_t sy)
 {
 	uint32_t row_stride = ((uint32_t)s->w + 1u) / 2u; /* bytes per row */
-	uint32_t byte_i      = (uint32_t)sy * row_stride + (sx / 2u);
-	uint8_t  byte        = s->px[byte_i];
+	uint32_t byte_i     = (uint32_t)sy * row_stride + (sx / 2u);
+	uint8_t  byte       = s->px[byte_i];
 
 	return (sx & 1u) ? (byte & 0x0Fu) : (byte >> 4);
 }
 
-void tr_sprite_blit(uint16_t *fb, uint32_t stride_px, uint16_t fb_w, uint16_t fb_h, int32_t x, int32_t y,
-		    const tr_sprite_t *s, const uint16_t palette[16])
+void tr_sprite_blit(uint16_t          *fb,
+                    uint32_t           stride_px,
+                    uint16_t           fb_w,
+                    uint16_t           fb_h,
+                    int32_t            x,
+                    int32_t            y,
+                    const tr_sprite_t *s,
+                    const uint16_t     palette[16])
 {
 	/* Clip once per sprite, not per pixel: source ranges [sx0, sx1) x
 	 * [sy0, sy1) that land inside [0, fb_w) x [0, fb_h). */
@@ -79,8 +88,8 @@ int tr_score_to_digits(uint32_t score, uint8_t out[TR_SCORE_MAX_DIGITS])
 		score = max_val; /* saturate -- an honest cap, not a truncated smaller number */
 	}
 
-	uint8_t  tmp[TR_SCORE_MAX_DIGITS];
-	int      count = 0;
+	uint8_t tmp[TR_SCORE_MAX_DIGITS];
+	int     count = 0;
 
 	do {
 		tmp[count] = (uint8_t)(score % 10u);

@@ -12,13 +12,13 @@
 /* Animation channels (meshes.h has the same values): degrees, except
  * TR_ANIM_ROOT_Y (world units). Per side: TR_ANIM_SIDE0 + TR_ANIM_SIDE_N *
  * side (0 left, 1 right) + TR_ANIM_S_*. */
-#define TR_ANIM_CH     25
-#define TR_ANIM_ROOT_Y 0
+#define TR_ANIM_CH      25
+#define TR_ANIM_ROOT_Y  0
 #define TR_ANIM_P_PITCH 1
-#define TR_ANIM_P_YAW  2
-#define TR_ANIM_P_ROLL 3
-#define TR_ANIM_SIDE0  9
-#define TR_ANIM_SIDE_N 8
+#define TR_ANIM_P_YAW   2
+#define TR_ANIM_P_ROLL  3
+#define TR_ANIM_SIDE0   9
+#define TR_ANIM_SIDE_N  8
 
 /* Mesh parts per character (meshes.h: body, head, arms, legs, gear) and
  * levels of detail (0 high: drawn; 1 low: the TR_LOD_NEAR bench bit). */
@@ -54,9 +54,9 @@ const float *tr_rig_pose(int which);
  * packet (tr_mbox.h TR_CHAR_*); all share the legs and the run cycle, each
  * has its own upper-body bones, meshes and palette. A character id out of
  * range is Probe (0). */
-#define TR_RIG_FACE  TR_RIG_PARTS       /* tr_rig_skin()'s extra part: the eyes */
-#define TR_RIG_DRAWN (TR_RIG_PARTS + 1) /* body, head, arms, legs, gear, eyes */
-#define TR_FACE_COLS 5                  /* columns across an eye: a rounded lens */
+#define TR_RIG_FACE  TR_RIG_PARTS           /* tr_rig_skin()'s extra part: the eyes */
+#define TR_RIG_DRAWN (TR_RIG_PARTS + 1)     /* body, head, arms, legs, gear, eyes */
+#define TR_FACE_COLS 5                      /* columns across an eye: a rounded lens */
 #define TR_FACE_V    (2 * 2 * TR_FACE_COLS) /* two eyes x columns x (bottom, top) */
 #define TR_FACE_T    (2 * 2 * (TR_FACE_COLS - 1))
 int tr_rig_char_id(int chr);
@@ -88,9 +88,13 @@ typedef struct {
  * once posed. The Gouraud z-band path shades from vn only; a flat or
  * painter (tr_r3d_draw) path would light the runner wrong.
  */
-void tr_rig_skin(int chr, int lod, const float ch[TR_ANIM_CH], const tr_face_t *face,
-		 float xyz[TR_RIG_DRAWN][TR_RIG_MAX_V * 3],
-		 int8_t vn[TR_RIG_DRAWN][TR_RIG_MAX_V * 3], tr_mesh_t out[TR_RIG_DRAWN]);
+void tr_rig_skin(int              chr,
+                 int              lod,
+                 const float      ch[TR_ANIM_CH],
+                 const tr_face_t *face,
+                 float            xyz[TR_RIG_DRAWN][TR_RIG_MAX_V * 3],
+                 int8_t           vn[TR_RIG_DRAWN][TR_RIG_MAX_V * 3],
+                 tr_mesh_t        out[TR_RIG_DRAWN]);
 
 /* World position of bone `b`'s joint posed by `ch`, carried by its PARENT
  * bone (the root: by itself) -- where the child must stay attached. */
@@ -98,7 +102,12 @@ void tr_rig_joint(int chr, const float ch[TR_ANIM_CH], int b, float out[3]);
 
 /* Bind-pose points p[0..n) (world units) carried by bone `b` of character
  * `chr`, posed by `ch`: the scarf's anchor and collider (r3d_scene.c). */
-void tr_rig_points(int chr, const float ch[TR_ANIM_CH], int b, int n, const float (*p)[3], float (*out)[3]);
+void tr_rig_points(int         chr,
+                   const float ch[TR_ANIM_CH],
+                   int         b,
+                   int         n,
+                   const float (*p)[3],
+                   float (*out)[3]);
 
 /* Bone index per vertex of part `part` at `lod` (TR_RIG_FACE the eyes:
  * all TR_RIG_HEAD), for tests. */

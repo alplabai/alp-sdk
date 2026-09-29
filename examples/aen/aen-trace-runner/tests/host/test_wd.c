@@ -22,8 +22,8 @@
 
 typedef struct {
 	/* scenario */
-	uint64_t alive_at;    /* the stub initialises the mailbox (PARKED) */
-	int      release;     /* self-LAUNCH self_after_us after that (MRAM copy) */
+	uint64_t alive_at; /* the stub initialises the mailbox (PARKED) */
+	int      release;  /* self-LAUNCH self_after_us after that (MRAM copy) */
 	uint64_t self_after_us;
 	uint64_t init_us;     /* LAUNCH -> first frame; HALT is honoured only after it */
 	uint64_t stall_at;    /* the renderer stops publishing (still honours HALT) */
@@ -36,14 +36,14 @@ typedef struct {
 	uint32_t state, ctrl;
 	uint64_t parked_at, launched_at, halt_consumed_at;
 	/* HE side */
-	tr_wd_t  wd;
-	uint64_t t;
-	uint32_t halts, launches, frames, stale_launch_overwritten;
-	uint32_t last_cmd;
+	tr_wd_t     wd;
+	uint64_t    t;
+	uint32_t    halts, launches, frames, stale_launch_overwritten;
+	uint32_t    last_cmd;
 	tr_wd_why_t last_halt_why, last_launch_why;
-	uint64_t last_launch_at, max_launch_gap;
-	uint64_t parked_by_halt_at; /* our HALT parked it here; NEVER when not parked by us */
-	uint64_t max_halted_us;     /* longest a HALT-parked renderer waited for its LAUNCH */
+	uint64_t    last_launch_at, max_launch_gap;
+	uint64_t    parked_by_halt_at; /* our HALT parked it here; NEVER when not parked by us */
+	uint64_t    max_halted_us;     /* longest a HALT-parked renderer waited for its LAUNCH */
 } sim_t;
 
 static void do_launch(sim_t *s)
@@ -54,26 +54,22 @@ static void do_launch(sim_t *s)
 	}
 	s->state       = TR_STUB_RUNNING;
 	s->launched_at = s->t;
-	if (s->fault_at <= s->t)
-		s->fault_at = NEVER; /* one fault */
-	if (s->recover_at != 0 && s->t >= s->recover_at && s->t >= s->stall_at)
-		s->stall_at = NEVER;
+	if (s->fault_at <= s->t) s->fault_at = NEVER; /* one fault */
+	if (s->recover_at != 0 && s->t >= s->recover_at && s->t >= s->stall_at) s->stall_at = NEVER;
 }
 
 static void stub_step(sim_t *s)
 {
 	if (!s->alive) {
-		if (s->t < s->alive_at)
-			return;
-		s->alive = 1;
-		s->state = TR_STUB_PARKED;
-		s->ctrl  = TR_CTRL_NONE; /* stub_main drops a leftover command */
+		if (s->t < s->alive_at) return;
+		s->alive        = 1;
+		s->state        = TR_STUB_PARKED;
+		s->ctrl         = TR_CTRL_NONE; /* stub_main drops a leftover command */
 		s->parked_at    = s->t;
 		s->self_pending = s->release;
 	}
 	if (s->self_pending) {
-		if (s->t < s->parked_at + s->self_after_us)
-			return; /* copying: ctrl_cmd not looked at */
+		if (s->t < s->parked_at + s->self_after_us) return; /* copying: ctrl_cmd not looked at */
 		s->self_pending = 0;
 		do_launch(s);
 		return;
@@ -82,13 +78,12 @@ static void stub_step(sim_t *s)
 		uint32_t c = s->ctrl;
 
 		s->ctrl = TR_CTRL_NONE;
-		if (c == TR_CTRL_LAUNCH)
-			do_launch(s);
+		if (c == TR_CTRL_LAUNCH) do_launch(s);
 		return;
 	}
 	if (s->state == TR_STUB_RUNNING && s->t >= s->fault_at) {
-		s->state    = TR_STUB_FAULT; /* stub_fault: HALT to the sibling, which the re-entry clears */
-		s->ctrl     = TR_CTRL_NONE;
+		s->state = TR_STUB_FAULT; /* stub_fault: HALT to the sibling, which the re-entry clears */
+		s->ctrl  = TR_CTRL_NONE;
 		s->fault_at = NEVER;
 		return;
 	}
@@ -99,7 +94,8 @@ static void stub_step(sim_t *s)
 		}
 		return;
 	}
-	if (s->state == TR_STUB_RUNNING && s->ctrl == TR_CTRL_HALT && s->t >= s->launched_at + s->init_us) {
+	if (s->state == TR_STUB_RUNNING && s->ctrl == TR_CTRL_HALT &&
+	    s->t >= s->launched_at + s->init_us) {
 		s->ctrl             = TR_CTRL_NONE; /* the renderer's main loop consumes HALT, returns */
 		s->halt_consumed_at = s->t;
 	}
@@ -107,19 +103,24 @@ static void stub_step(sim_t *s)
 
 static int frame_ready(const sim_t *s)
 {
-	return s->state == TR_STUB_RUNNING && s->halt_consumed_at == NEVER && s->t >= s->launched_at + s->init_us &&
-	       s->t < s->stall_at && s->t < s->fault_at;
+	return s->state == TR_STUB_RUNNING && s->halt_consumed_at == NEVER &&
+	       s->t >= s->launched_at + s->init_us && s->t < s->stall_at && s->t < s->fault_at;
 }
 
 static void he_poll(sim_t *s, int missed)
 {
 	tr_wd_why_t why;
-	uint32_t    cmd = tr_wd_poll(&s->wd, s->alive, s->alive ? s->state : 0xE2B8D896u, s->alive ? s->ctrl : 0x1234u,
-				     s->ours, missed, s->t, &why);
+	uint32_t    cmd = tr_wd_poll(&s->wd,
+	                             s->alive,
+	                             s->alive ? s->state : 0xE2B8D896u,
+	                             s->alive ? s->ctrl : 0x1234u,
+	                             s->ours,
+	                             missed,
+	                             s->t,
+	                             &why);
 
 	assert(why < TR_WD_WHY_N && tr_wd_why_str(why)[0] != '\0');
-	if (cmd == TR_CTRL_NONE)
-		return;
+	if (cmd == TR_CTRL_NONE) return;
 	assert(s->alive); /* never poke a stub that is not there */
 	if (s->ctrl == TR_CTRL_LAUNCH && cmd == TR_CTRL_HALT)
 		s->stale_launch_overwritten++;
@@ -151,8 +152,7 @@ static void he_boot(sim_t *s)
 		uint32_t before = s->launches + s->halts;
 
 		he_poll(s, 0);
-		if (s->launches + s->halts != before || (s->alive && s->state == TR_STUB_RUNNING))
-			break;
+		if (s->launches + s->halts != before || (s->alive && s->state == TR_STUB_RUNNING)) break;
 	}
 }
 
@@ -163,8 +163,7 @@ static void he_run(sim_t *s, uint64_t until)
 		stub_step(s);
 		/* "never left HALTed": time from our HALT parking it to the next LAUNCH */
 		if (s->last_cmd == TR_CTRL_HALT && s->state == TR_STUB_PARKED && s->ctrl == TR_CTRL_NONE) {
-			if (s->parked_by_halt_at == NEVER)
-				s->parked_by_halt_at = s->t;
+			if (s->parked_by_halt_at == NEVER) s->parked_by_halt_at = s->t;
 			if (s->t - s->parked_by_halt_at > s->max_halted_us)
 				s->max_halted_us = s->t - s->parked_by_halt_at;
 		} else {
@@ -184,9 +183,15 @@ static void he_run(sim_t *s, uint64_t until)
 
 static sim_t sim(uint64_t alive_at, int release, uint64_t init_us)
 {
-	return (sim_t){ .alive_at = alive_at, .release = release, .self_after_us = 20u * MS, .init_us = init_us,
-			.stall_at = NEVER, .fault_at = NEVER, .ours = 1, .halt_consumed_at = NEVER,
-			.parked_by_halt_at = NEVER };
+	return (sim_t){ .alive_at          = alive_at,
+		            .release           = release,
+		            .self_after_us     = 20u * MS,
+		            .init_us           = init_us,
+		            .stall_at          = NEVER,
+		            .fault_at          = NEVER,
+		            .ours              = 1,
+		            .halt_consumed_at  = NEVER,
+		            .parked_by_halt_at = NEVER };
 }
 
 int main(void)
@@ -198,40 +203,60 @@ int main(void)
 
 		tr_wd_init(&w, 0);
 		/* Garbage stub_state (cold SRAM1): nothing, whatever the time. */
-		assert(tr_wd_poll(&w, true, 0xE2B8D896u, 0, true, true, 10000000u, &why) == TR_CTRL_NONE && why == TR_WD_NOT_ALIVE);
-		assert(tr_wd_poll(&w, false, TR_STUB_PARKED, 0, true, true, 10000000u, &why) == TR_CTRL_NONE && why == TR_WD_NOT_ALIVE);
+		assert(tr_wd_poll(&w, true, 0xE2B8D896u, 0, true, true, 10000000u, &why) == TR_CTRL_NONE &&
+		       why == TR_WD_NOT_ALIVE);
+		assert(tr_wd_poll(&w, false, TR_STUB_PARKED, 0, true, true, 10000000u, &why) ==
+		           TR_CTRL_NONE &&
+		       why == TR_WD_NOT_ALIVE);
 		/* First seen alive at 10 s: the settle and first-frame clocks start there. */
-		assert(tr_wd_poll(&w, true, TR_STUB_PARKED, 0, true, false, 10000000u, &why) == TR_CTRL_NONE && why == TR_WD_SETTLING);
-		assert(tr_wd_poll(&w, true, TR_STUB_PARKED, 0, true, true, 10000000u + TR_WD_SETTLE_US - 1u, &why) == TR_CTRL_NONE);
-		assert(tr_wd_poll(&w, true, TR_STUB_PARKED, 0, true, true, 10000000u + TR_WD_SETTLE_US, &why) == TR_CTRL_LAUNCH &&
+		assert(tr_wd_poll(&w, true, TR_STUB_PARKED, 0, true, false, 10000000u, &why) ==
+		           TR_CTRL_NONE &&
+		       why == TR_WD_SETTLING);
+		assert(
+		    tr_wd_poll(
+		        &w, true, TR_STUB_PARKED, 0, true, true, 10000000u + TR_WD_SETTLE_US - 1u, &why) ==
+		    TR_CTRL_NONE);
+		assert(tr_wd_poll(
+		           &w, true, TR_STUB_PARKED, 0, true, true, 10000000u + TR_WD_SETTLE_US, &why) ==
+		           TR_CTRL_LAUNCH &&
 		       why == TR_WD_LAUNCH_BOOT);
 		/* Unconsumed LAUNCH under a parked stub: not stacked. */
-		assert(tr_wd_poll(&w, true, TR_STUB_PARKED, TR_CTRL_LAUNCH, true, true, 11000000u, &why) == TR_CTRL_NONE &&
+		assert(tr_wd_poll(&w, true, TR_STUB_PARKED, TR_CTRL_LAUNCH, true, true, 11000000u, &why) ==
+		           TR_CTRL_NONE &&
 		       why == TR_WD_PENDING);
 		/* Running, first frame not due: a 100 ms miss is not a stall. */
-		assert(tr_wd_poll(&w, true, TR_STUB_RUNNING, 0, true, true, 11000000u, &why) == TR_CTRL_NONE &&
+		assert(tr_wd_poll(&w, true, TR_STUB_RUNNING, 0, true, true, 11000000u, &why) ==
+		           TR_CTRL_NONE &&
 		       why == TR_WD_INITIALISING);
 		uint64_t dl = tr_wd_deadline_us(&w);
 
 		assert(dl == 10000000u + TR_WD_SETTLE_US + TR_WD_FIRST_FRAME_US);
-		assert(tr_wd_poll(&w, true, TR_STUB_RUNNING, 0, true, true, dl, &why) == TR_CTRL_HALT && why == TR_WD_HALT_FIRST);
+		assert(tr_wd_poll(&w, true, TR_STUB_RUNNING, 0, true, true, dl, &why) == TR_CTRL_HALT &&
+		       why == TR_WD_HALT_FIRST);
 		/* Our HALT parked it: LAUNCH at once (a recovery never ends HALTed). */
-		assert(tr_wd_poll(&w, true, TR_STUB_PARKED, 0, true, true, dl + 1u, &why) == TR_CTRL_LAUNCH &&
+		assert(tr_wd_poll(&w, true, TR_STUB_PARKED, 0, true, true, dl + 1u, &why) ==
+		           TR_CTRL_LAUNCH &&
 		       why == TR_WD_LAUNCH_HALTED);
 		/* Second failed LAUNCH: the first-frame timeout doubled. */
 		assert(tr_wd_deadline_us(&w) == dl + 1u + 2u * TR_WD_FIRST_FRAME_US);
 		/* A frame lands: first-frame phase over, then a miss is a stall. */
 		assert(tr_wd_landed(&w, dl + 100000u) && !tr_wd_landed(&w, dl + 133000u));
-		assert(tr_wd_poll(&w, true, TR_STUB_RUNNING, 0, true, false, dl + 200000u, &why) == TR_CTRL_NONE && why == TR_WD_OK);
-		assert(tr_wd_poll(&w, true, TR_STUB_RUNNING, 0, true, true, dl + 233000u, &why) == TR_CTRL_HALT &&
+		assert(tr_wd_poll(&w, true, TR_STUB_RUNNING, 0, true, false, dl + 200000u, &why) ==
+		           TR_CTRL_NONE &&
+		       why == TR_WD_OK);
+		assert(tr_wd_poll(&w, true, TR_STUB_RUNNING, 0, true, true, dl + 233000u, &why) ==
+		           TR_CTRL_HALT &&
 		       why == TR_WD_HALT_STALL);
 		/* A stale LAUNCH under a RUNNING renderer does not block the HALT. */
 		tr_wd_init(&w, 0);
-		assert(tr_wd_poll(&w, true, TR_STUB_RUNNING, TR_CTRL_LAUNCH, true, false, 0, &why) == TR_CTRL_NONE);
+		assert(tr_wd_poll(&w, true, TR_STUB_RUNNING, TR_CTRL_LAUNCH, true, false, 0, &why) ==
+		       TR_CTRL_NONE);
 		(void)tr_wd_landed(&w, 50000u);
-		assert(tr_wd_poll(&w, true, TR_STUB_RUNNING, TR_CTRL_LAUNCH, true, true, 150000u, &why) == TR_CTRL_HALT);
+		assert(tr_wd_poll(&w, true, TR_STUB_RUNNING, TR_CTRL_LAUNCH, true, true, 150000u, &why) ==
+		       TR_CTRL_HALT);
 		/* An unconsumed HALT is not re-sent. */
-		assert(tr_wd_poll(&w, true, TR_STUB_RUNNING, TR_CTRL_HALT, true, true, 250000u, &why) == TR_CTRL_NONE &&
+		assert(tr_wd_poll(&w, true, TR_STUB_RUNNING, TR_CTRL_HALT, true, true, 250000u, &why) ==
+		           TR_CTRL_NONE &&
 		       why == TR_WD_PENDING);
 	}
 
@@ -288,7 +313,8 @@ int main(void)
 		he_boot(&s);
 		he_run(&s, 700000000u);
 		assert(s.halts > 8u && s.launches > 8u);
-		assert(s.max_launch_gap <= (TR_WD_FIRST_FRAME_US << TR_WD_BACKOFF_MAX_SHIFT) + 2u * OUT_TIMEOUT_US);
+		assert(s.max_launch_gap <=
+		       (TR_WD_FIRST_FRAME_US << TR_WD_BACKOFF_MAX_SHIFT) + 2u * OUT_TIMEOUT_US);
 		assert(s.max_launch_gap >= (TR_WD_FIRST_FRAME_US << TR_WD_BACKOFF_MAX_SHIFT));
 		assert(s.max_halted_us <= OUT_TIMEOUT_US);
 		assert(s.state == TR_STUB_RUNNING && frame_ready(&s) && s.frames > 1000u);
@@ -351,7 +377,8 @@ int main(void)
 		tr_wd_why_t why;
 
 		tr_wd_init(&w, 0);
-		assert(tr_wd_poll(&w, true, TR_STUB_FAULT, 0, true, false, 700000u, &why) == TR_CTRL_LAUNCH &&
+		assert(tr_wd_poll(&w, true, TR_STUB_FAULT, 0, true, false, 700000u, &why) ==
+		           TR_CTRL_LAUNCH &&
 		       why == TR_WD_LAUNCH_FAULT);
 	}
 
@@ -411,12 +438,16 @@ int main(void)
 		(void)tr_wd_landed(&w, 50000u);
 		assert(tr_wd_poll(&w, true, TR_STUB_RUNNING, 0, true, true, 150000u, &why) == TR_CTRL_HALT);
 		assert(tr_wd_pending_us(&w, 150000u) == 0u);
-		assert(tr_wd_poll(&w, true, TR_STUB_RUNNING, TR_CTRL_HALT, true, true, 250000u, &why) == TR_CTRL_NONE &&
+		assert(tr_wd_poll(&w, true, TR_STUB_RUNNING, TR_CTRL_HALT, true, true, 250000u, &why) ==
+		           TR_CTRL_NONE &&
 		       why == TR_WD_PENDING);
-		assert(tr_wd_poll(&w, true, TR_STUB_RUNNING, 0, true, true, 350000u, &why) == TR_CTRL_NONE &&
+		assert(tr_wd_poll(&w, true, TR_STUB_RUNNING, 0, true, true, 350000u, &why) ==
+		           TR_CTRL_NONE &&
 		       why == TR_WD_PARKING);
-		assert(tr_wd_pending_us(&w, 1250000u) == 1000000u); /* one clock from the first pending poll */
-		assert(tr_wd_poll(&w, true, TR_STUB_PARKED, 0, true, true, 450000u, &why) == TR_CTRL_LAUNCH);
+		assert(tr_wd_pending_us(&w, 1250000u) ==
+		       1000000u); /* one clock from the first pending poll */
+		assert(tr_wd_poll(&w, true, TR_STUB_PARKED, 0, true, true, 450000u, &why) ==
+		       TR_CTRL_LAUNCH);
 		assert(tr_wd_pending_us(&w, 450000u) == 0u);
 	}
 

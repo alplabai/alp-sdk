@@ -36,8 +36,8 @@ static void put(uint32_t samples)
 
 static void le32(FILE *f, uint32_t v)
 {
-	fputc((int)(v & 0xFFu), f), fputc((int)((v >> 8) & 0xFFu), f), fputc((int)((v >> 16) & 0xFFu), f),
-	    fputc((int)(v >> 24), f);
+	fputc((int)(v & 0xFFu), f), fputc((int)((v >> 8) & 0xFFu), f),
+	    fputc((int)((v >> 16) & 0xFFu), f), fputc((int)(v >> 24), f);
 }
 
 static void le16(FILE *f, uint16_t v)
@@ -55,12 +55,16 @@ static void save(const char *dir, const char *name)
 		exit(1);
 	}
 	fwrite("RIFF", 1, 4, f), le32(f, 36u + s_len * 2u), fwrite("WAVEfmt ", 1, 8, f);
-	le32(f, 16), le16(f, 1), le16(f, 1), le32(f, TR_AUDIO_RATE), le32(f, TR_AUDIO_RATE * 2u), le16(f, 2),
-	    le16(f, 16);
+	le32(f, 16), le16(f, 1), le16(f, 1), le32(f, TR_AUDIO_RATE), le32(f, TR_AUDIO_RATE * 2u),
+	    le16(f, 2), le16(f, 16);
 	fwrite("data", 1, 4, f), le32(f, s_len * 2u);
-	for (uint32_t i = 0; i < s_len; i++) le16(f, (uint16_t)s_pcm[i]);
+	for (uint32_t i = 0; i < s_len; i++)
+		le16(f, (uint16_t)s_pcm[i]);
 	fclose(f);
-	printf("%s  %u ms  clipped %u\n", path, (unsigned)(s_len * 1000u / SEC), (unsigned)tr_audio_clipped());
+	printf("%s  %u ms  clipped %u\n",
+	       path,
+	       (unsigned)(s_len * 1000u / SEC),
+	       (unsigned)tr_audio_clipped());
 	s_len = 0;
 }
 
@@ -75,8 +79,14 @@ static int script(const char *stem)
 	}
 	uint32_t phase = 0;
 	for (unsigned w = 0; w < SND_WINDOWS; w++) {
-		fprintf(t, "%s %u %u %u %u %u\n", snd_windows[w].name, (unsigned)(snd_windows[w].blocks * SND_FRAMES),
-		        snd_windows[w].type, snd_windows[w].kind, snd_windows[w].param, snd_windows[w].hz);
+		fprintf(t,
+		        "%s %u %u %u %u %u\n",
+		        snd_windows[w].name,
+		        (unsigned)(snd_windows[w].blocks * SND_FRAMES),
+		        snd_windows[w].type,
+		        snd_windows[w].kind,
+		        snd_windows[w].param,
+		        snd_windows[w].hz);
 		for (unsigned b = 0; b < snd_windows[w].blocks; b++) {
 			if (s_len + SND_FRAMES > s_cap) {
 				s_cap = (s_len + SND_FRAMES) * 2u;
@@ -90,7 +100,7 @@ static int script(const char *stem)
 	fclose(t);
 	char dir[512], *slash;
 	snprintf(dir, sizeof(dir), "%s", stem);
-	slash = strrchr(dir, '/');
+	slash            = strrchr(dir, '/');
 	const char *base = slash ? slash + 1 : dir;
 	if (slash) *slash = 0;
 	save(slash ? dir : ".", base);
@@ -107,14 +117,19 @@ int main(int argc, char **argv)
 		return 2;
 	}
 	static const struct {
-		uint8_t kind, param;
+		uint8_t     kind, param;
 		const char *name;
 	} k_sfx[] = {
-		{ TR_AEV_FOOTSTEP, 0, "sfx_footstep" }, { TR_AEV_PICKUP, 0, "sfx_pickup" },
-		{ TR_AEV_PICKUP, 6, "sfx_pickup_combo6" }, { TR_AEV_JUMP, 0, "sfx_jump" },
-		{ TR_AEV_DUCK, 0, "sfx_duck" },         { TR_AEV_CRASH, 1, "sfx_crash" },
-		{ TR_AEV_CRASH, 3, "sfx_crash_wire" },  { TR_AEV_WIRE, 255, "sfx_wire" },
-		{ TR_AEV_ATTRACT, 0, "sfx_attract_jingle" }, { TR_AEV_GAME_OVER, 0, "sfx_game_over" },
+		{ TR_AEV_FOOTSTEP, 0, "sfx_footstep" },
+		{ TR_AEV_PICKUP, 0, "sfx_pickup" },
+		{ TR_AEV_PICKUP, 6, "sfx_pickup_combo6" },
+		{ TR_AEV_JUMP, 0, "sfx_jump" },
+		{ TR_AEV_DUCK, 0, "sfx_duck" },
+		{ TR_AEV_CRASH, 1, "sfx_crash" },
+		{ TR_AEV_CRASH, 3, "sfx_crash_wire" },
+		{ TR_AEV_WIRE, 255, "sfx_wire" },
+		{ TR_AEV_ATTRACT, 0, "sfx_attract_jingle" },
+		{ TR_AEV_GAME_OVER, 0, "sfx_game_over" },
 	};
 
 	tr_audio_init(1u);
@@ -144,8 +159,10 @@ int main(int argc, char **argv)
 		if (t % 8u == 0u) tr_audio_event(TR_AEV_FOOTSTEP, (uint8_t)((t / 8u) & 1u));
 		if (t % 70u == 30u) tr_audio_event(TR_AEV_JUMP, 0);
 		if (t % 110u == 60u) tr_audio_event(TR_AEV_DUCK, 0);
-		if (t >= 200u && t < 400u && t % 40u == 0u) tr_audio_event(TR_AEV_PICKUP, (uint8_t)((t - 200u) / 40u));
-		if (t >= 440u && t < 520u && t % 16u == 0u) tr_audio_event(TR_AEV_WIRE, (uint8_t)(100u + (t - 440u)));
+		if (t >= 200u && t < 400u && t % 40u == 0u)
+			tr_audio_event(TR_AEV_PICKUP, (uint8_t)((t - 200u) / 40u));
+		if (t >= 440u && t < 520u && t % 16u == 0u)
+			tr_audio_event(TR_AEV_WIRE, (uint8_t)(100u + (t - 440u)));
 		put(SEC / 40u);
 	}
 	tr_audio_event(TR_AEV_CRASH, TR_CRASH_KIND_WIRE);

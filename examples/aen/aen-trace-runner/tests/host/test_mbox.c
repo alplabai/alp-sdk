@@ -56,7 +56,7 @@ static tr_game_t make_game(void)
 int main(void)
 {
 	/* --- tr_frame_in_from_game(): field-by-field round trip --- */
-	tr_game_t g = make_game();
+	tr_game_t     g = make_game();
 	tr_frame_in_t f;
 	tr_frame_in_from_game(&f, &g, TR_BANNER_STEP_BACK, true, false);
 
@@ -112,9 +112,9 @@ int main(void)
 	assert(!ok);
 
 	/* --- torn read: seq changes between the two barrier() calls --- */
-	g_call_count    = 0;
-	g_tear_on_call  = 2; /* bump seq right after the payload copy, before the re-read */
-	ok              = tr_mbox_take_in(&g_mbox, 0u, &got, &fb, &seq, tearing_barrier);
+	g_call_count   = 0;
+	g_tear_on_call = 2; /* bump seq right after the payload copy, before the re-read */
+	ok             = tr_mbox_take_in(&g_mbox, 0u, &got, &fb, &seq, tearing_barrier);
 	assert(!ok);
 	assert(g_mbox.in_seq == 2u); /* the simulated racer's bump really landed */
 
@@ -129,8 +129,13 @@ int main(void)
 
 	/* --- publish/take `out`: happy path + no-new-frame --- */
 	memset((void *)&g_mbox, 0, sizeof(g_mbox));
-	tr_frame_out_t out = { .fb = TR_FB_B, .ticks0 = 111, .ticks1 = 222, .tris = 4000, .dropped = 3,
-		                .frames = 40, .heartbeat = 9 };
+	tr_frame_out_t out = { .fb        = TR_FB_B,
+		                   .ticks0    = 111,
+		                   .ticks1    = 222,
+		                   .tris      = 4000,
+		                   .dropped   = 3,
+		                   .frames    = 40,
+		                   .heartbeat = 9 };
 	tr_mbox_publish_out(&g_mbox, &out, 7u, noop_barrier);
 	assert(g_mbox.out_seq == 7u && g_mbox.out_fb == TR_FB_B);
 
@@ -138,7 +143,8 @@ int main(void)
 	uint32_t       oseq;
 	ok = tr_mbox_take_out(&g_mbox, 0u, &got_out, &oseq, noop_barrier);
 	assert(ok && oseq == 7u);
-	assert(got_out.tris == 4000 && got_out.dropped == 3 && got_out.frames == 40 && got_out.heartbeat == 9);
+	assert(got_out.tris == 4000 && got_out.dropped == 3 && got_out.frames == 40 &&
+	       got_out.heartbeat == 9);
 
 	ok = tr_mbox_take_out(&g_mbox, 7u, &got_out, &oseq, noop_barrier);
 	assert(!ok);
@@ -151,8 +157,8 @@ int main(void)
 		tr_game_init(&cg, 3u);
 		cg.ents[7] = (tr_entity_t){ .kind = TR_ENT_OBSTACLE, .lane = 2, .y = 1110, .low = true };
 		tr_frame_in_from_game(&f, &cg, TR_BANNER_NONE, false, false);
-		assert(!(f.flags & TR_FLAG_CRASH) && f.crash_tick == 0 && f.crash_ent == 0 && f.crash_kind == 0 &&
-		       f.phase == 0 && f.crash_frac == 0);
+		assert(!(f.flags & TR_FLAG_CRASH) && f.crash_tick == 0 && f.crash_ent == 0 &&
+		       f.crash_kind == 0 && f.phase == 0 && f.crash_frac == 0);
 		assert(f.hz == TR_PANEL_HZ); /* P3d: the A32 eases over this refresh's real time */
 
 		cg.alive       = false;
@@ -160,8 +166,10 @@ int main(void)
 		cg.hit         = 7;
 		cg.crash_ticks = 33;
 		tr_frame_in_from_game(&f, &cg, TR_BANNER_GAME_OVER, true, false);
-		assert((f.flags & TR_FLAG_CRASH) && !(f.flags & TR_FLAG_ALIVE) && (f.flags & TR_FLAG_ATTRACT_ACTIVE));
-		assert(f.crash_tick == tr_hz_to40(33u) && f.crash_ent == 7 && f.crash_lane == 2 && f.crash_kind == TR_CRASH_KIND_LOW);
+		assert((f.flags & TR_FLAG_CRASH) && !(f.flags & TR_FLAG_ALIVE) &&
+		       (f.flags & TR_FLAG_ATTRACT_ACTIVE));
+		assert(f.crash_tick == tr_hz_to40(33u) && f.crash_ent == 7 && f.crash_lane == 2 &&
+		       f.crash_kind == TR_CRASH_KIND_LOW);
 		assert(f.hz == TR_PANEL_HZ);
 		/* P3d: crash time in 40 Hz frames, whole + fraction, is the real
 		 * time exactly -- at 30 Hz 4/3 a frame, evenly (crash_tick alone
@@ -211,7 +219,8 @@ int main(void)
 		uint32_t      bfb, bseq;
 
 		assert(tr_mbox_take_in(&g_mbox, 0u, &back, &bfb, &bseq, noop_barrier));
-		assert(memcmp(&back, &f, sizeof(f)) == 0 && back.phase == 0x8123 && back.crash_tick == tr_hz_to40(33u));
+		assert(memcmp(&back, &f, sizeof(f)) == 0 && back.phase == 0x8123 &&
+		       back.crash_tick == tr_hz_to40(33u));
 	}
 
 	/* P15 zones: tr_frame_in_from_game() leaves the zone off (an old HE's
@@ -219,7 +228,7 @@ int main(void)
 	 * assume); tr_frame_in_set_zone() sets flag + fields, and they cross the
 	 * mailbox inside the old `in` block. */
 	{
-		tr_zone_t z = {0};
+		tr_zone_t z = { 0 };
 
 		tr_frame_in_from_game(&f, &g, TR_BANNER_NONE, false, false);
 		assert(!(f.flags & TR_FLAG_ZONE) && f.zone == 0u && f.gate_y == 0);
@@ -248,8 +257,10 @@ int main(void)
 		memset((void *)&g_mbox, 0, sizeof(g_mbox));
 		tr_mbox_publish_in(&g_mbox, &f, TR_FB_B, noop_barrier);
 		assert(tr_mbox_take_in(&g_mbox, 0u, &back, &bfb, &bseq, noop_barrier));
-		assert(back.zone == TR_ZONE_RF && back.gate_y == TR_ZONE_NO_GATE && (back.flags & TR_FLAG_ZONE));
-		assert(back.character == TR_CHAR_PIXEL && back.idle_ms == 5u && (back.flags & TR_FLAG_CHAR));
+		assert(back.zone == TR_ZONE_RF && back.gate_y == TR_ZONE_NO_GATE &&
+		       (back.flags & TR_FLAG_ZONE));
+		assert(back.character == TR_CHAR_PIXEL && back.idle_ms == 5u &&
+		       (back.flags & TR_FLAG_CHAR));
 	}
 
 	/* Booth crash shake: TR_FLAG_SHAKE (bit 12; 8..11 are taken) + the
@@ -265,9 +276,9 @@ int main(void)
 		tr_game_init(&cg, 3u);
 		tr_frame_in_from_game(&f, &cg, TR_BANNER_NONE, false, false);
 		assert(!(f.flags & TR_FLAG_SHAKE) && f.shake == 0u);
-		cg.alive   = false;
-		cg.crashed = true;
-		cg.hit     = 1;
+		cg.alive      = false;
+		cg.crashed    = true;
+		cg.hit        = 1;
 		uint32_t prev = 256u, shaking = 0;
 
 		for (uint32_t k = 0; k < TR_CRASH_FRAMES; k++) {

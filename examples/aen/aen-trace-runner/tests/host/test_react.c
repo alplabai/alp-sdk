@@ -72,9 +72,12 @@ int main(void)
 			assert(!!(ev & TR_EV_NEAR) == near);
 			n_near += near;
 		}
-		assert(n_near == TR_NEAR_TICKS + 2); /* 3 late jumps + the one landing (2 ticks left) this range reaches */
+		assert(n_near ==
+		       TR_NEAR_TICKS +
+		           2); /* 3 late jumps + the one landing (2 ticks left) this range reaches */
 		one_obstacle(&g, 1, false, 12);
-		assert((run(&g, 12, 12, act(0, 1, 0)) & (TR_EV_PASS | TR_EV_NEAR)) == (TR_EV_PASS | TR_EV_NEAR));
+		assert((run(&g, 12, 12, act(0, 1, 0)) & (TR_EV_PASS | TR_EV_NEAR)) ==
+		       (TR_EV_PASS | TR_EV_NEAR));
 		one_obstacle(&g, 1, false, 12);
 		assert((run(&g, 12, 6, act(0, 1, 0)) & (TR_EV_PASS | TR_EV_NEAR)) == TR_EV_PASS);
 	}
@@ -84,7 +87,8 @@ int main(void)
 	 * long before, or never in it, nothing. */
 	{
 		one_obstacle(&g, 1, true, 10);
-		assert((run(&g, 10, 9, act(0, 0, 1)) & (TR_EV_PASS | TR_EV_NEAR)) == (TR_EV_PASS | TR_EV_NEAR));
+		assert((run(&g, 10, 9, act(0, 0, 1)) & (TR_EV_PASS | TR_EV_NEAR)) ==
+		       (TR_EV_PASS | TR_EV_NEAR));
 		assert(g.ev_lane == 1 && g.lane == 2);
 		one_obstacle(&g, 1, true, 10);
 		assert((run(&g, 10, 2, act(0, 0, 1)) & (TR_EV_PASS | TR_EV_NEAR)) == 0);
@@ -157,7 +161,7 @@ int main(void)
 	/* 4. Deterministic: a whole attract-like run replayed gives the same
 	 * reaction stream (kind, side, seq, ms) frame by frame, twice. */
 	{
-		uint32_t crc[2] = {0, 0};
+		uint32_t crc[2] = { 0, 0 };
 
 		for (int pass = 0; pass < 2; pass++) {
 			tr_game_t  gg;
@@ -171,15 +175,18 @@ int main(void)
 			for (int f = 0; f < 4000 && gg.alive; f++) {
 				tr_intent_t in = none();
 
-				x = x * 1664525u + 1013904223u;
+				x             = x * 1664525u + 1013904223u;
 				in.jump       = (x >> 24) % 9u == 0u;
 				in.duck       = (x >> 24) % 9u == 1u;
-				in.lane_delta = (int8_t)((x >> 20) % 13u == 0u ? 1 : (x >> 20) % 13u == 1u ? -1 : 0);
+				in.lane_delta = (int8_t)((x >> 20) % 13u == 0u   ? 1
+				                         : (x >> 20) % 13u == 1u ? -1
+				                                                 : 0);
 				tr_game_step(&gg, in, H);
 				tr_score_step(&sc, &gg);
 				tr_react_step(&r, &gg, sc.combo);
 				tr_react_frame(&r);
-				crc[pass] = crc[pass] * 31u + r.kind * 7u + (uint8_t)r.side * 3u + r.seq + tr_react_ms(&r);
+				crc[pass] =
+				    crc[pass] * 31u + r.kind * 7u + (uint8_t)r.side * 3u + r.seq + tr_react_ms(&r);
 			}
 		}
 		printf("react: replay crc %08x\n", (unsigned)crc[0]);
@@ -198,7 +205,8 @@ int main(void)
 		r.kind = TR_REACT_NEAR, r.side = -1, r.seq = 9, r.us = 250000u;
 		tr_frame_in_p16(&in, TR_CHAR_FLUX, &r, false, 0u);
 		assert((in.flags & TR_FLAG_CHAR) && !(in.flags & TR_FLAG_IDLE));
-		assert(in.character == TR_CHAR_FLUX && in.react == TR_REACT_NEAR && (int8_t)in.react_side == -1);
+		assert(in.character == TR_CHAR_FLUX && in.react == TR_REACT_NEAR &&
+		       (int8_t)in.react_side == -1);
 		assert(in.react_seq == 9 && in.react_ms == 250 && in.idle_ms == 0);
 		tr_frame_in_p16(&in, 200u, &r, true, 70000000u);
 		assert(in.character == TR_CHAR_PROBE); /* out of range: Probe */

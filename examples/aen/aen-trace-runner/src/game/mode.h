@@ -13,7 +13,7 @@
 typedef enum {
 	TR_MODE_VISION = 0, /**< Stand in front of the board and move. */
 	TR_MODE_TILT,       /**< Hold the board and tilt it. */
-	TR_MODE_ATTRACT,    /**< No camera: plays itself behind an invitation banner until a tilt takes over (game/tilt.h). */
+	TR_MODE_ATTRACT, /**< No camera: plays itself behind an invitation banner until a tilt takes over (game/tilt.h). */
 } tr_mode_t;
 
 /*

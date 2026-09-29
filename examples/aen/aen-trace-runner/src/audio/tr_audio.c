@@ -23,13 +23,14 @@ enum { W_OFF, W_SQUARE, W_SAW, W_TRI, W_SINE, W_NOISE };
 enum { F_NONE, F_LP, F_HP };
 enum { S_ATTACK = 1, S_DECAY, S_RELEASE };
 
-#define ENV_ONE  (1 << 24)
-#define V_MUSIC  6
-#define V_SFX    V3(12, 16) /* V3: a wire crash alone takes 14 (3 impact + 6 debris + zap + 4 crackle) */
-#define V_TOTAL  (V_MUSIC + V_SFX)
-#define MS(ms)   ((uint32_t)(ms) * TR_AUDIO_RATE / 1000u)
-#define HZ(hz)   ((uint32_t)(hz) * 256u) /* Q8 Hz */
-#define CUT(pm)  ((uint16_t)((pm) * 65535u / 1000u)) /* filter coefficient, per mille */
+#define ENV_ONE (1 << 24)
+#define V_MUSIC 6
+#define V_SFX \
+	V3(12, 16) /* V3: a wire crash alone takes 14 (3 impact + 6 debris + zap + 4 crackle) */
+#define V_TOTAL (V_MUSIC + V_SFX)
+#define MS(ms)  ((uint32_t)(ms) * TR_AUDIO_RATE / 1000u)
+#define HZ(hz)  ((uint32_t)(hz) * 256u)             /* Q8 Hz */
+#define CUT(pm) ((uint16_t)((pm) * 65535u / 1000u)) /* filter coefficient, per mille */
 
 /* Music instruments = fixed voice slots. */
 enum { M_BASS, M_ARP, M_LEAD, M_KICK, M_SNARE, M_HAT };
@@ -63,10 +64,10 @@ enum { M_BASS, M_ARP, M_LEAD, M_KICK, M_SNARE, M_HAT };
  * (Q 0.5412, 1.3066), each normalised by a0, Q28: b0 b1 b2 a1 a2. */
 #if TR_AUDIO_RATE == 16000u
 static const int32_t k_hpf[2][5] = { { 229131008, -458262016, 229131008, -454665656, 193422920 },
-	                             { 249556482, -499112964, 249556482, -495196013, 234594459 } };
+	                                 { 249556482, -499112964, 249556482, -495196013, 234594459 } };
 #else
 static const int32_t k_hpf[2][5] = { { 254367729, -508735458, 254367729, -508293902, 240741557 },
-	                             { 262293491, -524586983, 262293491, -524131669, 256606841 } };
+	                                 { 262293491, -524586983, 262293491, -524131669, 256606841 } };
 #endif
 
 static int32_t biquad(const int32_t *k, tr_biquad_t *st, int32_t x)
@@ -77,11 +78,11 @@ static int32_t biquad(const int32_t *k, tr_biquad_t *st, int32_t x)
 	 * returned to digital silence. Products stay below 2^59. */
 	int64_t acc = ((int64_t)k[0] * x + (int64_t)k[1] * st->x1 + (int64_t)k[2] * st->x2) * 4096 -
 	              (int64_t)k[3] * st->y1 - (int64_t)k[4] * st->y2;
-	int32_t yq = (int32_t)(acc >> 28);
-	st->x2     = st->x1;
-	st->x1     = x;
-	st->y2     = st->y1;
-	st->y1     = yq;
+	int32_t yq  = (int32_t)(acc >> 28);
+	st->x2      = st->x1;
+	st->x1      = x;
+	st->y2      = st->y1;
+	st->y1      = yq;
 	return (yq + (yq < 0 ? 4095 : 0)) / 4096; /* toward zero */
 }
 
@@ -96,11 +97,11 @@ typedef struct {
 	int32_t  slide; /* added to inc per sample while slide_n > 0 */
 	uint32_t slide_n;
 	int32_t  env, a_step, d_step, r_step, sus; /* Q24 */
-	uint32_t hold;  /* samples left before release */
-	uint32_t delay; /* samples left before the note starts */
-	int32_t  vol;   /* Q15 */
-	int32_t  lp;    /* filter state */
-	int32_t  cut;   /* Q24 coefficient */
+	uint32_t hold;                             /* samples left before release */
+	uint32_t delay;                            /* samples left before the note starts */
+	int32_t  vol;                              /* Q15 */
+	int32_t  lp;                               /* filter state */
+	int32_t  cut;                              /* Q24 coefficient */
 	int32_t  cut_slide;
 	uint32_t cut_n;
 	uint32_t noise;
@@ -111,9 +112,10 @@ typedef struct {
 /* One note, in musician's units; play() converts to per-sample steps. */
 typedef struct {
 	uint8_t  wave, filt, duty, sus; /* duty: square high part /256 (0 = 50%); sus: % */
-	uint32_t hz0, hz1;              /* Q8 Hz; hz1 == 0: no slide. Noise: sample-and-hold rate, 0 = every sample */
+	uint32_t hz0,
+	    hz1; /* Q8 Hz; hz1 == 0: no slide. Noise: sample-and-hold rate, 0 = every sample */
 	uint16_t a_ms, d_ms, hold_ms, r_ms;
-	uint16_t cut0, cut1;            /* coefficient fraction /65535; cut1 == 0: fixed */
+	uint16_t cut0, cut1; /* coefficient fraction /65535; cut1 == 0: fixed */
 	uint16_t delay_ms;
 	int16_t  vol;
 } note_t;
@@ -146,7 +148,8 @@ static uint32_t rnd(void)
 }
 
 /* Equal temperament, octave 0 (C0 = MIDI 12), Q8 Hz. */
-static const uint32_t k_oct0_q8[12] = { 4186, 4435, 4699, 4978, 5274, 5588, 5920, 6272, 6645, 7040, 7459, 7902 };
+static const uint32_t k_oct0_q8[12] = { 4186, 4435, 4699, 4978, 5274, 5588,
+	                                    5920, 6272, 6645, 7040, 7459, 7902 };
 
 static uint32_t midi_q8(unsigned n)
 {
@@ -187,7 +190,7 @@ static uint16_t cut_at_rate(uint16_t c16)
 	if (TR_AUDIO_RATE == 16000u || c16 == 0u) {
 		return c16;
 	}
-	uint64_t y = (uint64_t)(65535u - c16) << 32; /* (1 - c) in Q48 */
+	uint64_t y  = (uint64_t)(65535u - c16) << 32; /* (1 - c) in Q48 */
 	uint32_t lo = 0, hi = 65536;
 	while (lo < hi) { /* largest x (Q16) with x^3 <= y */
 		uint32_t mid = (lo + hi + 1u) / 2u;
@@ -214,16 +217,16 @@ static void play(voice_t *v, const note_t *n, bool retrigger)
 		memset(v, 0, sizeof(*v));
 		v->noise = rnd() | 1u;
 	}
-	v->wave  = n->wave;
-	v->filt  = n->filt;
-	v->duty  = (uint32_t)(n->duty ? n->duty : 128u) << 24;
-	v->inc   = inc_of(n->hz0);
+	v->wave = n->wave;
+	v->filt = n->filt;
+	v->duty = (uint32_t)(n->duty ? n->duty : 128u) << 24;
+	v->inc  = inc_of(n->hz0);
 #if TR_AUDIO_V2
 	if (n->wave == W_NOISE && n->hz0 == 0u && TR_AUDIO_RATE > 16000u) {
 		v->inc = inc_of(HZ(16000)); /* keep the 16 kHz noise colour */
 	}
 #endif
-	v->slide = 0;
+	v->slide   = 0;
 	v->slide_n = 0;
 	if (n->hz1 != 0u && hold != 0u) {
 		v->slide   = ((int32_t)inc_of(n->hz1) - (int32_t)v->inc) / (int32_t)hold;
@@ -393,7 +396,9 @@ unsigned tr_audio_event_voices(uint32_t serial)
 static void sfx_crackle(unsigned bursts, uint32_t span_ms, int32_t vol, unsigned intensity)
 {
 	for (unsigned i = 0; i < bursts; i++) {
-		note_t n = { .wave = W_NOISE, .filt = F_HP, .cut0 = CUT(500), .d_ms = (uint16_t)(6u + rnd() % 14u) };
+		note_t n = {
+			.wave = W_NOISE, .filt = F_HP, .cut0 = CUT(500), .d_ms = (uint16_t)(6u + rnd() % 14u)
+		};
 		n.hold_ms  = n.d_ms;
 		n.delay_ms = (uint16_t)(rnd() % span_ms);
 		n.vol      = (int16_t)((vol + (int32_t)(rnd() % 1200u)) * (int32_t)intensity / 255);
@@ -406,10 +411,25 @@ static void sfx_wire(unsigned intensity)
 	if (intensity == 0u) {
 		return;
 	}
-	sfx(&(note_t){ .wave = W_SAW, .filt = F_LP, .cut0 = V3(CUT(120), CUT(350)), .hz0 = V3(HZ(100), HZ(500)), .a_ms = 40, .sus = 100,
-	               .hold_ms = 380, .r_ms = 60, .vol = (int16_t)(1800 * (int32_t)intensity / 255) });
-	sfx(&(note_t){ .wave = W_SQUARE, .duty = 64, .filt = F_LP, .cut0 = V3(CUT(80), CUT(300)), .hz0 = V3(HZ(150), HZ(750)), .a_ms = 40,
-	               .sus = 100, .hold_ms = 380, .r_ms = 60, .vol = (int16_t)(800 * (int32_t)intensity / 255) });
+	sfx(&(note_t){ .wave    = W_SAW,
+	               .filt    = F_LP,
+	               .cut0    = V3(CUT(120), CUT(350)),
+	               .hz0     = V3(HZ(100), HZ(500)),
+	               .a_ms    = 40,
+	               .sus     = 100,
+	               .hold_ms = 380,
+	               .r_ms    = 60,
+	               .vol     = (int16_t)(1800 * (int32_t)intensity / 255) });
+	sfx(&(note_t){ .wave    = W_SQUARE,
+	               .duty    = 64,
+	               .filt    = F_LP,
+	               .cut0    = V3(CUT(80), CUT(300)),
+	               .hz0     = V3(HZ(150), HZ(750)),
+	               .a_ms    = 40,
+	               .sus     = 100,
+	               .hold_ms = 380,
+	               .r_ms    = 60,
+	               .vol     = (int16_t)(800 * (int32_t)intensity / 255) });
 	sfx_crackle(5, 380, 1100, intensity);
 }
 
@@ -417,55 +437,121 @@ static void sfx_event(uint8_t kind, uint8_t param)
 {
 	switch (kind) {
 	case TR_AEV_FOOTSTEP:
-		sfx(&(note_t){ .wave = W_NOISE, .filt = F_HP, .cut0 = param ? CUT(550) : CUT(450), .d_ms = 28,
-		               .hold_ms = 28, .vol = 1300 });
-		sfx(&(note_t){ .wave = W_SINE, .hz0 = V3(HZ(95), HZ(900)), .hz1 = V3(HZ(60), HZ(600)), .d_ms = V3(40, 15),
-		               .hold_ms = V3(40, 15), .vol = V3(1200, 900) });
+		sfx(&(note_t){ .wave    = W_NOISE,
+		               .filt    = F_HP,
+		               .cut0    = param ? CUT(550) : CUT(450),
+		               .d_ms    = 28,
+		               .hold_ms = 28,
+		               .vol     = 1300 });
+		sfx(&(note_t){ .wave    = W_SINE,
+		               .hz0     = V3(HZ(95), HZ(900)),
+		               .hz1     = V3(HZ(60), HZ(600)),
+		               .d_ms    = V3(40, 15),
+		               .hold_ms = V3(40, 15),
+		               .vol     = V3(1200, 900) });
 		break;
 	case TR_AEV_PICKUP: {
 		unsigned base = 88u + (param < 12u ? param : 12u); /* E6, a semitone up per combo step */
 		for (unsigned i = 0; i < (param >= 2u ? 3u : 2u); i++) {
 			static const uint8_t k_iv[3] = { 0, 7, 12 };
-			sfx(&(note_t){ .wave = W_SINE, .hz0 = midi_q8(base + k_iv[i]), .a_ms = 2, .d_ms = 220,
-			               .hold_ms = 220, .r_ms = 40, .delay_ms = (uint16_t)(70u * i), .vol = 2800 });
+			sfx(&(note_t){ .wave     = W_SINE,
+			               .hz0      = midi_q8(base + k_iv[i]),
+			               .a_ms     = 2,
+			               .d_ms     = 220,
+			               .hold_ms  = 220,
+			               .r_ms     = 40,
+			               .delay_ms = (uint16_t)(70u * i),
+			               .vol      = 2800 });
 		}
 		break;
 	}
 	case TR_AEV_JUMP:
-		sfx(&(note_t){ .wave = W_NOISE, .filt = F_LP, .cut0 = CUT(40), .cut1 = V2(CUT(450), CUT(250)), .a_ms = 60,
-		               .sus = 100, .hold_ms = 200, .r_ms = 80, .vol = 3200 });
-		sfx(&(note_t){ .wave = W_SQUARE, .filt = F_LP, .cut0 = CUT(300), .hz0 = V3(HZ(260), HZ(600)), .hz1 = V3(HZ(620), HZ(1100)), .a_ms = 2,
-		               .d_ms = 140, .hold_ms = 140, .r_ms = 20, .vol = 1100 });
+		sfx(&(note_t){ .wave    = W_NOISE,
+		               .filt    = F_LP,
+		               .cut0    = CUT(40),
+		               .cut1    = V2(CUT(450), CUT(250)),
+		               .a_ms    = 60,
+		               .sus     = 100,
+		               .hold_ms = 200,
+		               .r_ms    = 80,
+		               .vol     = 3200 });
+		sfx(&(note_t){ .wave    = W_SQUARE,
+		               .filt    = F_LP,
+		               .cut0    = CUT(300),
+		               .hz0     = V3(HZ(260), HZ(600)),
+		               .hz1     = V3(HZ(620), HZ(1100)),
+		               .a_ms    = 2,
+		               .d_ms    = 140,
+		               .hold_ms = 140,
+		               .r_ms    = 20,
+		               .vol     = 1100 });
 		break;
 	case TR_AEV_DUCK:
-		sfx(&(note_t){ .wave = W_NOISE, .filt = F_LP, .cut0 = CUT(450), .cut1 = CUT(30), .a_ms = 10,
-		               .sus = 100, .hold_ms = 180, .r_ms = 60, .vol = 2800 });
-		sfx(&(note_t){ .wave = W_TRI, .hz0 = V3(HZ(520), HZ(900)), .hz1 = V3(HZ(180), HZ(500)), .d_ms = 180, .hold_ms = 180, .vol = 1500 });
+		sfx(&(note_t){ .wave    = W_NOISE,
+		               .filt    = F_LP,
+		               .cut0    = CUT(450),
+		               .cut1    = CUT(30),
+		               .a_ms    = 10,
+		               .sus     = 100,
+		               .hold_ms = 180,
+		               .r_ms    = 60,
+		               .vol     = 2800 });
+		sfx(&(note_t){ .wave    = W_TRI,
+		               .hz0     = V3(HZ(520), HZ(900)),
+		               .hz1     = V3(HZ(180), HZ(500)),
+		               .d_ms    = 180,
+		               .hold_ms = 180,
+		               .vol     = 1500 });
 		break;
 	case TR_AEV_CRASH:
 		g.duck = MS(1200);
-		sfx(&(note_t){ .wave = W_SINE, .hz0 = V3(HZ(110), HZ(1000)), .hz1 = V3(HZ(34), HZ(600)), .d_ms = V3(450, 250),
-		               .hold_ms = V3(450, 250), .r_ms = 30,
-		               .vol = V2(7000, 5000) });
-		sfx(&(note_t){ .wave = V3(W_SQUARE, W_SAW), .filt = F_LP, .cut0 = V3(CUT(100), CUT(400)), .hz0 = V3(HZ(70), HZ(700)),
-		               .hz1 = V3(HZ(40), HZ(500)), .d_ms = 400,
-		               .hold_ms = 400, .vol = V2(2500, 1800) });
-		sfx(&(note_t){ .wave = W_NOISE, .filt = F_LP, .cut0 = CUT(700), .cut1 = CUT(20), .d_ms = 700,
-		               .hold_ms = 700, .vol = V2(4500, 3200) });
+		sfx(&(note_t){ .wave    = W_SINE,
+		               .hz0     = V3(HZ(110), HZ(1000)),
+		               .hz1     = V3(HZ(34), HZ(600)),
+		               .d_ms    = V3(450, 250),
+		               .hold_ms = V3(450, 250),
+		               .r_ms    = 30,
+		               .vol     = V2(7000, 5000) });
+		sfx(&(note_t){ .wave    = V3(W_SQUARE, W_SAW),
+		               .filt    = F_LP,
+		               .cut0    = V3(CUT(100), CUT(400)),
+		               .hz0     = V3(HZ(70), HZ(700)),
+		               .hz1     = V3(HZ(40), HZ(500)),
+		               .d_ms    = 400,
+		               .hold_ms = 400,
+		               .vol     = V2(2500, 1800) });
+		sfx(&(note_t){ .wave    = W_NOISE,
+		               .filt    = F_LP,
+		               .cut0    = CUT(700),
+		               .cut1    = CUT(20),
+		               .d_ms    = 700,
+		               .hold_ms = 700,
+		               .vol     = V2(4500, 3200) });
 		for (unsigned i = 0; i < 6u; i++) { /* debris */
 			/* one rnd() per statement: initializer order is unspecified in C */
 			bool     sq = (rnd() & 1u) != 0u;
 			uint32_t hz = 700u + rnd() % 2600u;
 			uint32_t d  = 25u + rnd() % 40u;
 			uint32_t at = 80u + rnd() % 120u + 110u * i;
-			note_t   n  = { .wave = sq ? W_SQUARE : W_NOISE, .filt = sq ? V2(F_NONE, F_LP) : F_HP, .cut0 = CUT(300),
-			                .hz0 = sq ? HZ(hz) : 0u, .d_ms = (uint16_t)d, .hold_ms = (uint16_t)d,
-			                .delay_ms = (uint16_t)at, .vol = (int16_t)((2000 - 230 * (int32_t)i) * V2(10, 7) / 10) };
+			note_t   n  = { .wave     = sq ? W_SQUARE : W_NOISE,
+				            .filt     = sq ? V2(F_NONE, F_LP) : F_HP,
+				            .cut0     = CUT(300),
+				            .hz0      = sq ? HZ(hz) : 0u,
+				            .d_ms     = (uint16_t)d,
+				            .hold_ms  = (uint16_t)d,
+				            .delay_ms = (uint16_t)at,
+				            .vol      = (int16_t)((2000 - 230 * (int32_t)i) * V2(10, 7) / 10) };
 			sfx(&n);
 		}
 		if (param == TR_CRASH_KIND_WIRE) {
-			sfx(&(note_t){ .wave = W_SAW, .filt = F_HP, .cut0 = CUT(200), .hz0 = HZ(1400), .hz1 = V3(HZ(90), HZ(500)),
-			               .d_ms = 260, .hold_ms = 260, .vol = V2(3500, 2500) });
+			sfx(&(note_t){ .wave    = W_SAW,
+			               .filt    = F_HP,
+			               .cut0    = CUT(200),
+			               .hz0     = HZ(1400),
+			               .hz1     = V3(HZ(90), HZ(500)),
+			               .d_ms    = 260,
+			               .hold_ms = 260,
+			               .vol     = V2(3500, 2500) });
 			sfx_crackle(4, 500, 1400, 255);
 		}
 		break;
@@ -476,25 +562,57 @@ static void sfx_event(uint8_t kind, uint8_t param)
 		static const uint8_t k_notes[5] = { 72, 76, 79, 84, 88 }; /* C5 E5 G5 C6 E6 */
 		for (unsigned i = 0; i < 5u; i++) {
 			bool last = i == 4u;
-			sfx(&(note_t){ .wave = W_SQUARE, .duty = 32, .filt = F_LP, .cut0 = CUT(400), .hz0 = midi_q8(k_notes[i]),
-			               .a_ms = 2, .d_ms = 260, .sus = last ? 40 : 0, .hold_ms = last ? 600 : 260, .r_ms = 120,
-			               .delay_ms = (uint16_t)(90u * i), .vol = 2600 });
+			sfx(&(note_t){ .wave     = W_SQUARE,
+			               .duty     = 32,
+			               .filt     = F_LP,
+			               .cut0     = CUT(400),
+			               .hz0      = midi_q8(k_notes[i]),
+			               .a_ms     = 2,
+			               .d_ms     = 260,
+			               .sus      = last ? 40 : 0,
+			               .hold_ms  = last ? 600 : 260,
+			               .r_ms     = 120,
+			               .delay_ms = (uint16_t)(90u * i),
+			               .vol      = 2600 });
 		}
-		sfx(&(note_t){ .wave = W_TRI, .hz0 = midi_q8(76), .a_ms = 10, .d_ms = 300, .sus = 50, .hold_ms = 700,
-		               .r_ms = 200, .delay_ms = 360, .vol = 1800 });
+		sfx(&(note_t){ .wave     = W_TRI,
+		               .hz0      = midi_q8(76),
+		               .a_ms     = 10,
+		               .d_ms     = 300,
+		               .sus      = 50,
+		               .hold_ms  = 700,
+		               .r_ms     = 200,
+		               .delay_ms = 360,
+		               .vol      = 1800 });
 		break;
 	}
 	case TR_AEV_GAME_OVER: {
 		static const uint8_t k_notes[4] = { 69, 68, 67, 66 }; /* A4 G#4 G4 F#4, falling */
-		g.duck = MS(2000);
+		g.duck                          = MS(2000);
 		for (unsigned i = 0; i < 4u; i++) {
 			bool last = i == 3u;
-			sfx(&(note_t){ .wave = W_SAW, .filt = F_LP, .cut0 = CUT(250), .hz0 = midi_q8(k_notes[i] + V3(0u, 12u)), /* V3: A5.. above the speakers' floor */
-			               .a_ms = 5, .d_ms = last ? 300 : 200, .sus = last ? 70 : 30, .hold_ms = last ? 900 : 220,
-			               .r_ms = last ? 400 : 40, .delay_ms = (uint16_t)(250u * i), .vol = 3000 });
+			sfx(&(note_t){
+			    .wave = W_SAW,
+			    .filt = F_LP,
+			    .cut0 = CUT(250),
+			    .hz0  = midi_q8(k_notes[i] + V3(0u, 12u)), /* V3: A5.. above the speakers' floor */
+			    .a_ms = 5,
+			    .d_ms = last ? 300 : 200,
+			    .sus  = last ? 70 : 30,
+			    .hold_ms  = last ? 900 : 220,
+			    .r_ms     = last ? 400 : 40,
+			    .delay_ms = (uint16_t)(250u * i),
+			    .vol      = 3000 });
 		}
-		sfx(&(note_t){ .wave = W_TRI, .hz0 = midi_q8(V3(57u, 81u)), .a_ms = 10, .d_ms = 400, .sus = 60, .hold_ms = 1000,
-		               .r_ms = 400, .delay_ms = 750, .vol = 2200 });
+		sfx(&(note_t){ .wave     = W_TRI,
+		               .hz0      = midi_q8(V3(57u, 81u)),
+		               .a_ms     = 10,
+		               .d_ms     = 400,
+		               .sus      = 60,
+		               .hold_ms  = 1000,
+		               .r_ms     = 400,
+		               .delay_ms = 750,
+		               .vol      = 2200 });
 		break;
 	}
 	default:
@@ -506,7 +624,10 @@ static void sfx_event(uint8_t kind, uint8_t param)
 
 /* Am F C G, twice per 8 bars: bass root (octave 2/3) and arp triad. */
 static const uint8_t k_bass_root[4] = { 45, 41, 48, 43 };
-static const uint8_t k_triad[4][3]  = { { 69, 72, 76 }, { 65, 69, 72 }, { 67, 72, 76 }, { 67, 71, 74 } };
+static const uint8_t k_triad[4][3]  = { { 69, 72, 76 },
+	                                    { 65, 69, 72 },
+	                                    { 67, 72, 76 },
+	                                    { 67, 71, 74 } };
 /* bass: 8ths on the root, octave jumps on steps 6 and 14 */
 static const int8_t k_bass_pat[16] = { 0, -1, 0, -1, 0, -1, 12, -1, 0, -1, 0, -1, 0, -1, 12, -1 };
 
@@ -529,47 +650,85 @@ static const lead_t k_lead[] = {
 static void music_step(void)
 {
 	uint32_t bar = g.step / 16u, st = g.step % 16u, ch = bar % 4u;
-	voice_t *v   = g.v;
+	voice_t *v = g.v;
 
 	if (k_bass_pat[st] >= 0) {
-		play(&v[M_BASS],
-		     &(note_t){ .wave = W_SAW, .filt = F_LP, .cut0 = V3(CUT(180), CUT(500)), /* V3: an upper-harmonic stack; the 450 Hz high-pass takes the fundamental */
-		                .hz0 = midi_q8(k_bass_root[ch] + (unsigned)k_bass_pat[st] + V3(0u, 12u)), .a_ms = 2, .d_ms = 120, .sus = 40,
-		                .hold_ms = STEP_MS, .r_ms = 40, .vol = 4500 },
-		     true);
+		play(
+		    &v[M_BASS],
+		    &(note_t){
+		        .wave = W_SAW,
+		        .filt = F_LP,
+		        .cut0 = V3(
+		            CUT(180),
+		            CUT(500)), /* V3: an upper-harmonic stack; the 450 Hz high-pass takes the fundamental */
+		        .hz0     = midi_q8(k_bass_root[ch] + (unsigned)k_bass_pat[st] + V3(0u, 12u)),
+		        .a_ms    = 2,
+		        .d_ms    = 120,
+		        .sus     = 40,
+		        .hold_ms = STEP_MS,
+		        .r_ms    = 40,
+		        .vol     = 4500 },
+		    true);
 	}
 	unsigned oct = bar >= 12u ? 12u : 0u;
 	unsigned ai  = st % 4u;
 	play(&v[M_ARP],
-	     &(note_t){ .wave = W_SQUARE, .duty = 64, .filt = F_LP, .cut0 = CUT(350),
-	                .hz0  = midi_q8((ai == 3u ? k_triad[ch][0] + 12u : k_triad[ch][ai]) + oct + V3(0u, 12u)), .a_ms = 1,
-	                .d_ms = 80, .hold_ms = STEP_MS, .r_ms = 30, .vol = 2000 },
+	     &(note_t){ .wave    = W_SQUARE,
+	                .duty    = 64,
+	                .filt    = F_LP,
+	                .cut0    = CUT(350),
+	                .hz0     = midi_q8((ai == 3u ? k_triad[ch][0] + 12u : k_triad[ch][ai]) + oct +
+	                                   V3(0u, 12u)),
+	                .a_ms    = 1,
+	                .d_ms    = 80,
+	                .hold_ms = STEP_MS,
+	                .r_ms    = 30,
+	                .vol     = 2000 },
 	     true);
 	for (unsigned i = 0; i < sizeof(k_lead) / sizeof(k_lead[0]); i++) {
 		if (k_lead[i].bar == bar && k_lead[i].step == st) {
 			play(&v[M_LEAD],
-			     &(note_t){ .wave = W_SAW, .filt = F_LP, .cut0 = CUT(300), .hz0 = midi_q8(k_lead[i].note),
-			                .a_ms = 15, .d_ms = 200, .sus = 60, .hold_ms = (uint16_t)(STEP_MS * k_lead[i].len),
-			                .r_ms = 120, .vol = 2600 },
+			     &(note_t){ .wave    = W_SAW,
+			                .filt    = F_LP,
+			                .cut0    = CUT(300),
+			                .hz0     = midi_q8(k_lead[i].note),
+			                .a_ms    = 15,
+			                .d_ms    = 200,
+			                .sus     = 60,
+			                .hold_ms = (uint16_t)(STEP_MS * k_lead[i].len),
+			                .r_ms    = 120,
+			                .vol     = 2600 },
 			     true);
 		}
 	}
 	if (bar >= 4u && st % 4u == 0u) {
 		play(&v[M_KICK],
-		     &(note_t){ .wave = W_SINE, .hz0 = V3(HZ(150), HZ(900)), .hz1 = V3(HZ(45), HZ(550)), .d_ms = V3(250, 80),
-		                .hold_ms = V3(250, 80), .vol = 6000 },
+		     &(note_t){ .wave    = W_SINE,
+		                .hz0     = V3(HZ(150), HZ(900)),
+		                .hz1     = V3(HZ(45), HZ(550)),
+		                .d_ms    = V3(250, 80),
+		                .hold_ms = V3(250, 80),
+		                .vol     = 6000 },
 		     false);
 	}
 	if (bar >= 4u && (st == 4u || st == 12u || (bar == 15u && st >= 13u))) {
 		play(&v[M_SNARE],
-		     &(note_t){ .wave = W_NOISE, .filt = F_HP, .cut0 = CUT(250), .d_ms = 140, .hold_ms = 140,
-		                .vol = (int16_t)(st >= 13u ? 2400 : 3200) },
+		     &(note_t){ .wave    = W_NOISE,
+		                .filt    = F_HP,
+		                .cut0    = CUT(250),
+		                .d_ms    = 140,
+		                .hold_ms = 140,
+		                .vol     = (int16_t)(st >= 13u ? 2400 : 3200) },
 		     false);
 	}
 	if (st % 4u == 2u || (bar >= 12u && (st & 1u))) {
 		play(&v[M_HAT],
-		     &(note_t){ .wave = W_NOISE, .filt = F_HP, .cut0 = CUT(700), .d_ms = 35, .hold_ms = 35,
-		                .vol = (int16_t)(st & 1u ? 600 : 1000) },
+		     &(note_t){ .wave    = W_NOISE,
+		                .filt    = F_HP,
+		                .cut0    = CUT(700),
+		                .d_ms    = 35,
+		                .hold_ms = 35,
+		                .vol     = (int16_t)(st & 1u ? 600 : 1000) },
 		     false);
 	}
 }

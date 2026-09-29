@@ -32,8 +32,7 @@ uint64_t tr_wd_deadline_us(const tr_wd_t *w)
 {
 	uint32_t shift = w->tries > 0u ? w->tries - 1u : 0u;
 
-	if (shift > TR_WD_BACKOFF_MAX_SHIFT)
-		shift = TR_WD_BACKOFF_MAX_SHIFT;
+	if (shift > TR_WD_BACKOFF_MAX_SHIFT) shift = TR_WD_BACKOFF_MAX_SHIFT;
 	return w->wait_us + ((uint64_t)TR_WD_FIRST_FRAME_US << shift);
 }
 
@@ -82,13 +81,19 @@ static uint32_t send(tr_wd_t *w, uint32_t cmd, uint64_t now_us, tr_wd_why_t why,
 	return cmd;
 }
 
-uint32_t tr_wd_poll(tr_wd_t *w, bool alive, uint32_t stub_state, uint32_t ctrl_cmd, bool ours, bool missed,
-		    uint64_t now_us, tr_wd_why_t *why)
+uint32_t tr_wd_poll(tr_wd_t     *w,
+                    bool         alive,
+                    uint32_t     stub_state,
+                    uint32_t     ctrl_cmd,
+                    bool         ours,
+                    bool         missed,
+                    uint64_t     now_us,
+                    tr_wd_why_t *why)
 {
-	if (missed)
-		w->running = false;
+	if (missed) w->running = false;
 	/* Rule 1. */
-	if (!alive || (stub_state != TR_STUB_PARKED && stub_state != TR_STUB_RUNNING && stub_state != TR_STUB_FAULT)) {
+	if (!alive || (stub_state != TR_STUB_PARKED && stub_state != TR_STUB_RUNNING &&
+	               stub_state != TR_STUB_FAULT)) {
 		w->pending = false;
 		*why       = TR_WD_NOT_ALIVE;
 		return TR_CTRL_NONE;
@@ -100,14 +105,13 @@ uint32_t tr_wd_poll(tr_wd_t *w, bool alive, uint32_t stub_state, uint32_t ctrl_c
 	if (stub_state != TR_STUB_RUNNING)
 		w->halting = false; /* parked (or faulted): any HALT is done with */
 	/* Rule 2. */
-	if (ctrl_cmd != TR_CTRL_NONE && !(ctrl_cmd == TR_CTRL_LAUNCH && stub_state == TR_STUB_RUNNING)) {
-		if (ctrl_cmd == TR_CTRL_HALT)
-			w->halting = true; /* ours or a previous HE boot's */
+	if (ctrl_cmd != TR_CTRL_NONE &&
+	    !(ctrl_cmd == TR_CTRL_LAUNCH && stub_state == TR_STUB_RUNNING)) {
+		if (ctrl_cmd == TR_CTRL_HALT) w->halting = true; /* ours or a previous HE boot's */
 		return in_flight(w, now_us, TR_WD_PENDING, why);
 	}
 	/* Rule 7. */
-	if (w->halting)
-		return in_flight(w, now_us, TR_WD_PARKING, why);
+	if (w->halting) return in_flight(w, now_us, TR_WD_PARKING, why);
 	w->pending = false;
 	/* Rule 3. */
 	if (stub_state != TR_STUB_RUNNING) {
@@ -122,14 +126,16 @@ uint32_t tr_wd_poll(tr_wd_t *w, bool alive, uint32_t stub_state, uint32_t ctrl_c
 			return TR_CTRL_NONE;
 		}
 		if (now_us >= tr_wd_deadline_us(w))
-			return send(w, TR_CTRL_LAUNCH, now_us,
-				    stub_state == TR_STUB_FAULT ? TR_WD_LAUNCH_FAULT : TR_WD_LAUNCH_PARKED, why);
+			return send(w,
+			            TR_CTRL_LAUNCH,
+			            now_us,
+			            stub_state == TR_STUB_FAULT ? TR_WD_LAUNCH_FAULT : TR_WD_LAUNCH_PARKED,
+			            why);
 		*why = TR_WD_BACKING_OFF;
 		return TR_CTRL_NONE;
 	}
 	/* Rule 6. */
-	if (!ours)
-		return send(w, TR_CTRL_HALT, now_us, TR_WD_HALT_FOREIGN, why);
+	if (!ours) return send(w, TR_CTRL_HALT, now_us, TR_WD_HALT_FOREIGN, why);
 	/* Rule 4. */
 	if (w->first) {
 		if (now_us >= tr_wd_deadline_us(w))
@@ -138,8 +144,7 @@ uint32_t tr_wd_poll(tr_wd_t *w, bool alive, uint32_t stub_state, uint32_t ctrl_c
 		return TR_CTRL_NONE;
 	}
 	/* Rule 5. */
-	if (missed)
-		return send(w, TR_CTRL_HALT, now_us, TR_WD_HALT_STALL, why);
+	if (missed) return send(w, TR_CTRL_HALT, now_us, TR_WD_HALT_STALL, why);
 	*why = TR_WD_OK;
 	return TR_CTRL_NONE;
 }

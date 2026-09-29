@@ -13,8 +13,11 @@
 
 #include <string.h>
 
-void tr_frame_in_from_game(tr_frame_in_t *out, const tr_game_t *g, uint8_t banner, bool attract_active,
-                            bool paused)
+void tr_frame_in_from_game(tr_frame_in_t   *out,
+                           const tr_game_t *g,
+                           uint8_t          banner,
+                           bool             attract_active,
+                           bool             paused)
 {
 	memset(out, 0, sizeof(*out));
 
@@ -23,8 +26,9 @@ void tr_frame_in_from_game(tr_frame_in_t *out, const tr_game_t *g, uint8_t banne
 	out->rng   = g->rng;
 
 	out->flags = (g->alive ? TR_FLAG_ALIVE : 0u) | (g->airborne ? TR_FLAG_AIRBORNE : 0u) |
-	             (g->ducking ? TR_FLAG_DUCKING : 0u) | (attract_active ? TR_FLAG_ATTRACT_ACTIVE : 0u) |
-	             (paused ? TR_FLAG_PAUSED : 0u) | (g->crashed ? TR_FLAG_CRASH : 0u);
+	             (g->ducking ? TR_FLAG_DUCKING : 0u) |
+	             (attract_active ? TR_FLAG_ATTRACT_ACTIVE : 0u) | (paused ? TR_FLAG_PAUSED : 0u) |
+	             (g->crashed ? TR_FLAG_CRASH : 0u);
 
 	out->lane       = g->lane;
 	out->air_ticks  = g->air_ticks;
@@ -38,18 +42,20 @@ void tr_frame_in_from_game(tr_frame_in_t *out, const tr_game_t *g, uint8_t banne
 
 	for (unsigned i = 0; i < TR_MAX_ENTITIES; i++) {
 		const tr_entity_t *e = &g->ents[i];
-		out->ents[i].kind = (uint8_t)e->kind;
-		out->ents[i].lane = e->lane;
-		out->ents[i].low  = e->low ? 1u : 0u;
-		out->ents[i].y    = e->y;
+		out->ents[i].kind    = (uint8_t)e->kind;
+		out->ents[i].lane    = e->lane;
+		out->ents[i].low     = e->low ? 1u : 0u;
+		out->ents[i].y       = e->y;
 	}
 
 	if (g->crashed) {
 		const tr_entity_t *e = &g->ents[g->hit % TR_MAX_ENTITIES];
 
-		out->crash_tick = (uint8_t)tr_hz_to40(g->crash_ticks); /* the A32 animates in 40 Hz frames */
+		out->crash_tick =
+		    (uint8_t)tr_hz_to40(g->crash_ticks); /* the A32 animates in 40 Hz frames */
 		/* and the part of a 40 Hz frame the floor dropped (30 Hz: 0, 1/3, 2/3) */
-		out->crash_frac = (uint16_t)(((uint32_t)g->crash_ticks * 40u % TR_PANEL_HZ) * 65536u / TR_PANEL_HZ);
+		out->crash_frac =
+		    (uint16_t)(((uint32_t)g->crash_ticks * 40u % TR_PANEL_HZ) * 65536u / TR_PANEL_HZ);
 		out->crash_ent  = g->hit;
 		out->crash_lane = e->lane;
 		out->crash_kind = tr_game_crash_kind(g);
@@ -58,7 +64,11 @@ void tr_frame_in_from_game(tr_frame_in_t *out, const tr_game_t *g, uint8_t banne
 	}
 }
 
-void tr_frame_in_p16(tr_frame_in_t *out, uint8_t character, const tr_react_t *r, bool idle, uint32_t idle_us)
+void tr_frame_in_p16(tr_frame_in_t    *out,
+                     uint8_t           character,
+                     const tr_react_t *r,
+                     bool              idle,
+                     uint32_t          idle_us)
 {
 	uint32_t ims = idle_us / 1000u;
 
@@ -85,10 +95,15 @@ uint8_t tr_game_crash_kind(const tr_game_t *g)
 	if (!g->crashed) {
 		return 0u;
 	}
-	return e->kind == TR_ENT_WIRE ? TR_CRASH_KIND_WIRE : e->low ? TR_CRASH_KIND_LOW : TR_CRASH_KIND_HIGH;
+	return e->kind == TR_ENT_WIRE ? TR_CRASH_KIND_WIRE
+	       : e->low               ? TR_CRASH_KIND_LOW
+	                              : TR_CRASH_KIND_HIGH;
 }
 
-void tr_mbox_publish_in(volatile tr_mbox_t *m, const tr_frame_in_t *in, uint32_t fb, void (*barrier)(void))
+void tr_mbox_publish_in(volatile tr_mbox_t  *m,
+                        const tr_frame_in_t *in,
+                        uint32_t             fb,
+                        void (*barrier)(void))
 {
 	m->in    = *in;
 	m->in_fb = fb;
@@ -97,26 +112,31 @@ void tr_mbox_publish_in(volatile tr_mbox_t *m, const tr_frame_in_t *in, uint32_t
 	barrier(); /* seq write retired before the caller signals/returns */
 }
 
-bool tr_mbox_take_in(const volatile tr_mbox_t *m, uint32_t last_seq, tr_frame_in_t *out, uint32_t *fb,
-                      uint32_t *seq, void (*barrier)(void))
+bool tr_mbox_take_in(const volatile tr_mbox_t *m,
+                     uint32_t                  last_seq,
+                     tr_frame_in_t            *out,
+                     uint32_t                 *fb,
+                     uint32_t                 *seq,
+                     void (*barrier)(void))
 {
 	uint32_t s0 = m->in_seq;
-	if (s0 == last_seq)
-		return false; /* no new frame since last_seq */
+	if (s0 == last_seq) return false; /* no new frame since last_seq */
 
 	barrier(); /* order the seq read before the payload read */
 	*out = m->in;
 	*fb  = m->in_fb;
 	barrier(); /* order the payload read before the re-check below */
 
-	if (m->in_seq != s0)
-		return false; /* torn: writer started a new publish mid-copy */
+	if (m->in_seq != s0) return false; /* torn: writer started a new publish mid-copy */
 
 	*seq = s0;
 	return true;
 }
 
-void tr_mbox_publish_out(volatile tr_mbox_t *m, const tr_frame_out_t *out, uint32_t seq, void (*barrier)(void))
+void tr_mbox_publish_out(volatile tr_mbox_t   *m,
+                         const tr_frame_out_t *out,
+                         uint32_t              seq,
+                         void (*barrier)(void))
 {
 	m->out_fb        = out->fb;
 	m->out_ticks0    = out->ticks0;
@@ -130,12 +150,14 @@ void tr_mbox_publish_out(volatile tr_mbox_t *m, const tr_frame_out_t *out, uint3
 	barrier();
 }
 
-bool tr_mbox_take_out(const volatile tr_mbox_t *m, uint32_t last_seq, tr_frame_out_t *out, uint32_t *seq,
-                       void (*barrier)(void))
+bool tr_mbox_take_out(const volatile tr_mbox_t *m,
+                      uint32_t                  last_seq,
+                      tr_frame_out_t           *out,
+                      uint32_t                 *seq,
+                      void (*barrier)(void))
 {
 	uint32_t s0 = m->out_seq;
-	if (s0 == last_seq)
-		return false;
+	if (s0 == last_seq) return false;
 
 	barrier();
 	out->fb        = m->out_fb;
@@ -147,8 +169,7 @@ bool tr_mbox_take_out(const volatile tr_mbox_t *m, uint32_t last_seq, tr_frame_o
 	out->heartbeat = m->out_heartbeat;
 	barrier();
 
-	if (m->out_seq != s0)
-		return false;
+	if (m->out_seq != s0) return false;
 
 	*seq = s0;
 	return true;

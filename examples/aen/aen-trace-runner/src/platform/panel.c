@@ -49,9 +49,9 @@
 #define BL_NODE    DT_GPIO_CTLR(PANEL_NODE, bl_gpios)
 
 BUILD_ASSERT(DT_PROP(PANEL_NODE, zephyr_deferred_init),
-	     "panel_deferred.overlay must mark lcd_panel zephyr,deferred-init");
+             "panel_deferred.overlay must mark lcd_panel zephyr,deferred-init");
 
-#define TR_PANEL_MAX_TRIES   4
+#define TR_PANEL_MAX_TRIES     4
 #define TR_PANEL_RESET_HOLD_MS 10 /* RESX low before a retry; driver needs >= 10 us */
 
 /* DesignWare GPIO: port A data (DR) and direction (DDR) registers. */
@@ -104,11 +104,13 @@ static int panel_bl_force(void *ctx)
 
 uint32_t tr_panel_up(void)
 {
-	static const tr_panel_ops_t ops = {NULL, panel_init, panel_bl_on, panel_bl_force};
+	static const tr_panel_ops_t ops = { NULL, panel_init, panel_bl_on, panel_bl_force };
 	uint32_t                    w   = tr_panel_bringup(&ops, TR_PANEL_MAX_TRIES);
 
 	tr_panel_init_tries = w;
-	printk("panel   : %s after %u attempt(s), word 0x%08x\n", (w & TR_PANEL_OK) ? "up" : "FAILED",
-	       (unsigned)TR_PANEL_TRIES(w), (unsigned)w);
+	printk("panel   : %s after %u attempt(s), word 0x%08x\n",
+	       (w & TR_PANEL_OK) ? "up" : "FAILED",
+	       (unsigned)TR_PANEL_TRIES(w),
+	       (unsigned)w);
 	return w;
 }
