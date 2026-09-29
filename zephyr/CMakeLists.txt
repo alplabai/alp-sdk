@@ -109,6 +109,12 @@ if(CONFIG_SOC_SERIES_E8)
         ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif/mpu_regions_e8.c)
 endif()
 
+# Flex-IO bank 1.8 V mode (VBAT GPIO_CTRL bit 0), set only by boards whose
+# VDD_IO_FLEX is a 1.8 V rail.  A pad-level board fact, so applied before the
+# CONFIG_ALP_SDK early-return like the MPU table above.
+zephyr_sources_ifdef(CONFIG_ALIF_FLEX_IO_1V8
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif/flex_io_1v8_e8.c)
+
 if(NOT CONFIG_ALP_SDK)
     return()
 endif()
