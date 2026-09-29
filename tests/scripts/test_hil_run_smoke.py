@@ -558,10 +558,11 @@ def test_ssh_run_has_no_west_build_and_copies_then_runs(tmp_path: Path) -> None:
     flash = run_smoke.flash_command(spec)
     assert flash[0] == "scp" and flash[-1] == "root@board:/tmp/gpio-button-led"
     assert Path(flash[-2]) == Path("/art") / "gpio-button-led"
-    assert run_smoke.capture_command(spec) == [
-        "ssh", "root@board",
-        "chmod +x /tmp/gpio-button-led && /tmp/gpio-button-led",
-    ]
+    cmd = run_smoke.capture_command(spec)
+    assert cmd[:3] == ["ssh", "-tt", "root@board"]
+    assert cmd[3].startswith("chmod +x /tmp/gpio-button-led && { /tmp/gpio-button-led & ")
+    # Bounded by serial.duration_s: a looping example must not hang the runner.
+    assert f"sleep {spec.serial.duration_s}; kill $p" in cmd[3]
 
 
 def test_ssh_run_without_host_fails_the_spec(tmp_path: Path) -> None:
