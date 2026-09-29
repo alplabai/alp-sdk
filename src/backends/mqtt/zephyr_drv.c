@@ -504,10 +504,10 @@ static void alp_mqtt_evt_cb(struct mqtt_client *client, const struct mqtt_evt *e
 static alp_status_t
 z_open(const alp_mqtt_config_t *cfg, alp_mqtt_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 #if defined(CONFIG_ALP_SDK_IOT_MQTT)
 	struct mqtt_be *be = mqtt_be_acquire();
 	if (be == NULL) {
-		caps_out->flags = 0u;
 		return ALP_ERR_NOMEM;
 	}
 
@@ -517,7 +517,6 @@ z_open(const alp_mqtt_config_t *cfg, alp_mqtt_backend_state_t *st, alp_capabilit
 	int      err = parse_broker_uri(cfg->broker_uri, host, sizeof(host), &port, &tls);
 	if (err != 0) {
 		mqtt_be_release(be);
-		caps_out->flags = 0u;
 		return ALP_ERR_INVAL;
 	}
 
@@ -529,7 +528,6 @@ z_open(const alp_mqtt_config_t *cfg, alp_mqtt_backend_state_t *st, alp_capabilit
 		 * resolving the broker address or copying any credentials
 		 * into backend state, so nothing is transmitted. */
 		mqtt_be_release(be);
-		caps_out->flags = 0u;
 		return ALP_ERR_NOSUPPORT;
 	}
 #endif
@@ -537,7 +535,6 @@ z_open(const alp_mqtt_config_t *cfg, alp_mqtt_backend_state_t *st, alp_capabilit
 	err = resolve_broker_addr(host, port, &be->broker_addr);
 	if (err != 0) {
 		mqtt_be_release(be);
-		caps_out->flags = 0u;
 		return errno_to_alp(err);
 	}
 
@@ -583,13 +580,11 @@ z_open(const alp_mqtt_config_t *cfg, alp_mqtt_backend_state_t *st, alp_capabilit
 	be->connected            = false;
 	be->next_msg_id          = 1;
 
-	st->be_data     = be;
-	caps_out->flags = 0u;
+	st->be_data = be;
 	return ALP_OK;
 #else
 	(void)cfg;
 	(void)st;
-	caps_out->flags = 0u;
 	return ALP_ERR_NOSUPPORT;
 #endif
 }

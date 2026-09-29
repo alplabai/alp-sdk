@@ -235,8 +235,11 @@ static int _gpio_set_config(int line_fd, const struct gpio_v2_line_config *cfg)
 
 alp_status_t alp_gpio_configure(alp_gpio_t *pin, alp_gpio_dir_t dir, alp_gpio_pull_t pull)
 {
+	/* NULL-or-closed is a lifecycle condition, not a malformed
+	 * argument -- ALP_ERR_NOT_READY per ADR-0002's amendment,
+	 * matching every Zephyr dispatcher (issue #1734). */
 	if (pin == NULL || !pin->in_use) {
-		return ALP_ERR_INVAL;
+		return ALP_ERR_NOT_READY;
 	}
 	struct gpio_v2_line_config cfg = { 0 };
 	cfg.flags                      = pull_to_flags(pull);
@@ -254,8 +257,10 @@ alp_status_t alp_gpio_configure(alp_gpio_t *pin, alp_gpio_dir_t dir, alp_gpio_pu
 
 alp_status_t alp_gpio_write(alp_gpio_t *pin, bool level)
 {
+	/* NULL-or-closed is a lifecycle condition -- ALP_ERR_NOT_READY,
+	 * matching every Zephyr dispatcher (issue #1734). */
 	if (pin == NULL || !pin->in_use) {
-		return ALP_ERR_INVAL;
+		return ALP_ERR_NOT_READY;
 	}
 	if (!pin->is_output) {
 		/* Writing to an input line is a configuration mistake;
@@ -274,7 +279,14 @@ alp_status_t alp_gpio_write(alp_gpio_t *pin, bool level)
 
 alp_status_t alp_gpio_read(alp_gpio_t *pin, bool *level)
 {
-	if (pin == NULL || !pin->in_use || level == NULL) {
+	/* NULL-or-closed is a lifecycle condition -- ALP_ERR_NOT_READY,
+	 * matching every Zephyr dispatcher (issue #1734).  A NULL @p level
+	 * is a malformed argument, not a lifecycle one -- ALP_ERR_INVAL,
+	 * checked only once the handle itself is known good. */
+	if (pin == NULL || !pin->in_use) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (level == NULL) {
 		return ALP_ERR_INVAL;
 	}
 	struct gpio_v2_line_values vals = {
@@ -467,7 +479,14 @@ static uint64_t edge_to_flags(alp_gpio_edge_t edge)
 alp_status_t
 alp_gpio_irq_enable(alp_gpio_t *pin, alp_gpio_edge_t edge, alp_gpio_cb_t cb, void *user)
 {
-	if (pin == NULL || !pin->in_use || cb == NULL) {
+	/* NULL-or-closed is a lifecycle condition -- ALP_ERR_NOT_READY,
+	 * matching every Zephyr dispatcher (issue #1734).  A NULL @p cb is
+	 * a malformed argument, not a lifecycle one -- ALP_ERR_INVAL,
+	 * checked only once the handle itself is known good. */
+	if (pin == NULL || !pin->in_use) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (cb == NULL) {
 		return ALP_ERR_INVAL;
 	}
 	uint64_t edge_flags = edge_to_flags(edge);
@@ -513,8 +532,10 @@ alp_gpio_irq_enable(alp_gpio_t *pin, alp_gpio_edge_t edge, alp_gpio_cb_t cb, voi
 
 alp_status_t alp_gpio_irq_disable(alp_gpio_t *pin)
 {
+	/* NULL-or-closed is a lifecycle condition -- ALP_ERR_NOT_READY,
+	 * matching every Zephyr dispatcher (issue #1734). */
 	if (pin == NULL || !pin->in_use) {
-		return ALP_ERR_INVAL;
+		return ALP_ERR_NOT_READY;
 	}
 	pthread_mutex_lock(&g_irq.mu);
 	pin->irq_enabled = false;

@@ -45,7 +45,8 @@ alp_renesas_power_supervisor_mode_set(alp_power_t                        *handle
 	if (handle == NULL) {
 		return ALP_ERR_INVAL;
 	}
-	if (handle->backend == NULL || strcmp(handle->backend->vendor, "renesas") != 0) {
+	if (handle->backend == NULL || handle->backend->vendor == NULL ||
+	    strcmp(handle->backend->vendor, "renesas") != 0) {
 		return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
 	}
 

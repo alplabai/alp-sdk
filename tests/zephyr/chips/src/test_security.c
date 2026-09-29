@@ -10,6 +10,7 @@
 
 #include "alp/chips/atecc608b.h"
 #include "alp/chips/optiga_trust_m.h"
+#include "fakes.h"
 #include "alp/e1m_pinout.h"
 #include "alp/peripheral.h"
 
@@ -56,6 +57,33 @@ ZTEST(alp_chips, test_optiga_trust_m_init_validates_7bit_address_bound)
 	zassert_equal(
 	    optiga_trust_m_init(&ctx, bus, 0xFFu), ALP_ERR_INVAL, "0xFF exceeds 7-bit domain");
 
+	alp_i2c_close(bus);
+}
+
+/* Bench, E1M-V2M103 2026W38-0001: Trust M NACKs the first access after
+ * its idle sleep and ACKs the next, so a single probe called a fitted
+ * part absent.  init() must ride out the wake NACK. */
+ZTEST(alp_chips, test_optiga_trust_m_init_rides_out_the_wake_nack)
+{
+	optiga_trust_m_t ctx;
+	alp_i2c_t       *bus = alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = ALP_E1M_I2C0,
+	    .bitrate_hz = 400000,
+	});
+	zassert_not_null(bus);
+
+	fake_optiga_reset();
+	fake_optiga_arm_sleep(1u);
+	zassert_equal(optiga_trust_m_init(&ctx, bus, OPTIGA_TRUST_M_I2C_ADDR), ALP_OK);
+	zassert_equal(fake_optiga_attempts(), 2u, "one NACKed wake access, then the ACKed probe");
+
+	/* A part that never answers still reads as absent, after a bounded try count. */
+	fake_optiga_reset();
+	fake_optiga_arm_sleep(1000u);
+	zassert_equal(optiga_trust_m_init(&ctx, bus, OPTIGA_TRUST_M_I2C_ADDR), ALP_ERR_NOT_READY);
+	zassert_equal(fake_optiga_attempts(), 10u);
+
+	fake_optiga_reset();
 	alp_i2c_close(bus);
 }
 

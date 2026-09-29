@@ -622,22 +622,20 @@ bool alp_ble_test_write_ctx_pool_exhausts(size_t *claimed_out)
 
 static alp_status_t z_open(alp_ble_radio_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 #if defined(CONFIG_ALP_SDK_BLE)
 	if (_radio_be.refcount == 0) {
 		int err = bt_enable(NULL);
 		if (err != 0 && err != -EALREADY) {
-			caps_out->flags = 0u;
 			return errno_to_alp(err);
 		}
 		bt_le_scan_cb_register(&_scan_cb);
 	}
 	_radio_be.refcount++;
-	st->be_data     = &_radio_be;
-	caps_out->flags = 0u;
+	st->be_data = &_radio_be;
 	return ALP_OK;
 #else
 	(void)st;
-	caps_out->flags = 0u;
 	return ALP_ERR_NOSUPPORT;
 #endif
 }

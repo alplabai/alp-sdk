@@ -72,7 +72,7 @@ alp_rtc_t *alp_rtc_open(uint32_t rtc_id)
 	}
 	h->backend              = be;
 	h->state.ops            = ops;
-	alp_capabilities_t caps = { .flags = be->base_caps };
+	alp_capabilities_t caps = { .flags = be->base_caps, .class_flags = be->base_class_flags };
 	if (be->probe != NULL) {
 		uint32_t refined = caps.flags;
 		(void)be->probe(rtc_id, &refined);
