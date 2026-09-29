@@ -298,7 +298,7 @@ def test_v2n_v2m_gd32_entry_keeps_policy_and_update_channel(sku):
 
     `flash_policy` is required on every helper entry with or without a
     `flash_method` -- it answers who may reach a local flash path if one
-    is ever added, and the six AEN `cc3501e_otp` entries are that same
+    is ever added, and the seven AEN `cc3501e_otp` entries are that same
     shape.  `update_channel` is the FIELD update path: protocol v0.6
     Path A, slot-A/B application bootloader with commit and rollback
     over the bridge link, not SWD, and validated end to end on silicon.
@@ -361,7 +361,7 @@ def test_system_manifest_schema_declares_every_projectable_helper_key():
 
 
 def test_aen_cc3501e_entries_are_identical_across_the_six_skus():
-    """metadata/e1m_modules/README.md: the six AEN SKUs must stay in
+    """metadata/e1m_modules/README.md: the seven AEN SKUs must stay in
     lockstep on this block."""
     blocks = {sku: _helper_firmware(sku) for sku in AEN_SKUS}
     reference = blocks[AEN_SKUS[0]]

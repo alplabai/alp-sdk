@@ -138,9 +138,10 @@ mailbox:
 # -- two logical I2S instances, matching ALP_E1M_X_I2S0/I2S1 in
 # include/alp/e1m_x_pinout.h.  Named `i2s0`/`i2s1`, not `i2s_ssiu0`/`1`:
 # SSIU0 does not exist on this pad map (the first channel is SSIU1), and
-# scripts/check_e1m_route_capability.py's `ssiu_to_i2s0` table already
-# aliases this exact SSIU1+SSIU2 pair to the E1M-X I2S0 function, so this
-# name matches an existing convention instead of inventing a new one.
+# the SoM netlist routes this exact SSIU1+SSIU2 pair to the E1M-X I2S0
+# pads (metadata/pinmux/v2n.yaml: SSI1 SCK/WS -> I2S0_SCLK/I2S0_WS, SSI1
+# SDATA P46 -> I2S0_SDI, SSI2 SDATA P47 -> I2S0_SDO), so this name matches
+# the connector instead of inventing a new one.
 #
 # #1170 remainder -- disposition of every further routed net the issue
 # names, verified against the TSV cited above:
@@ -305,7 +306,7 @@ helper_firmware:
     #
     # `flash_policy` STAYS.  It answers who may reach a local flash path
     # if one is ever added, which the schema requires on every helper
-    # entry with or without a `flash_method` -- the six AEN
+    # entry with or without a `flash_method` -- the seven AEN
     # `cc3501e_otp` entries are that same shape (`recovery_only`, no
     # `flash_method`).  Alp Lab programs this part in production; a
     # customer flash is only ever bricked-board recovery with Alp

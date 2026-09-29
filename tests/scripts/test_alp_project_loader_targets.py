@@ -31,6 +31,68 @@ def test_resolve_targets_dedupes_identical_accel_configs():
     assert len(ethos) == 2                                     # one per distinct accel_config
 
 
+def test_resolve_targets_threads_the_soc_specs_vela_profile_onto_ethos_u_targets():
+    # Issue #2312: the SoC spec's `npu_toolchain.vela` block is resolved HERE
+    # (metadata/socs/alif/ensemble/e7.json) and threaded onto every ethos_u
+    # TargetSpec -- never re-read from metadata/ inside the compiler adapter.
+    specs = resolve_targets("E1M-AEN701", metadata_root=_META)
+    eu = next(s for s in specs if s.backend == "ethos_u")
+    assert eu.vela_memory_mode == "Sram_Only"
+    assert eu.vela_vendor_config_filename == "ensemble_vela.ini"
+    # E7 (like every Alif Ensemble part) names NO system_config at all, so
+    # both split fields resolve to None -- correct today, and the fields
+    # exist for the SoC spec that eventually does name one.
+    assert eu.vela_system_config is None and eu.vela_vendor_system_config is None
+    # A non-ethos_u target carries no vela profile at all.
+    cpu = next(s for s in specs if s.backend == "cpu")
+    assert cpu.vela_memory_mode == "" and cpu.vela_system_config is None
+
+
+def test_resolve_targets_splits_a_named_system_config_by_requires_vendor_config():
+    # #2312 item 4: `system_config_requires_vendor_config` decides which of
+    # the two split fields a NAMED `system_config` lands in -- a built-in one
+    # (false) is safe to pass alone; a vendor-gated one (anything else,
+    # fail-closed) is withheld into `vela_vendor_system_config` instead.
+    from alp_project_loader import _soc_targets
+
+    builtin_soc = {"npus": [{"type": "ethos-u55", "mac_per_cycle": 256}],
+                  "npu_toolchain": {"vela": {
+                      "memory_mode": "Sram_Only",
+                      "system_config": "Some_Builtin",
+                      "system_config_requires_vendor_config": False}}}
+    specs = _soc_targets(builtin_soc, "test:soc")
+    assert specs[0].vela_system_config == "Some_Builtin"
+    assert specs[0].vela_vendor_system_config is None
+
+    vendor_soc = {"npus": [{"type": "ethos-u55", "mac_per_cycle": 256}],
+                 "npu_toolchain": {"vela": {
+                     "memory_mode": "Sram_Only",
+                     "system_config": "Some_Vendor_Config",
+                     "system_config_requires_vendor_config": True}}}
+    specs = _soc_targets(vendor_soc, "test:soc")
+    assert specs[0].vela_vendor_system_config == "Some_Vendor_Config"
+    assert specs[0].vela_system_config is None
+
+
+def test_soc_targets_fails_closed_when_requires_vendor_config_key_is_omitted():
+    # #2312 item 4: a `system_config` named with NO
+    # `system_config_requires_vendor_config` key at all (a malformed spec --
+    # the schema requires this key whenever a `vela` block exists) must be
+    # treated exactly as `true`, landing in the vendor-gated field, never the
+    # built-in-safe one. The real check is `is not False`; a mutant that
+    # flips it to `is True` would instead route this omitted-key case into
+    # `vela_system_config` (wrong) and this assertion catches that.
+    from alp_project_loader import _soc_targets
+
+    soc = {"npus": [{"type": "ethos-u55", "mac_per_cycle": 256}],
+           "npu_toolchain": {"vela": {
+               "memory_mode": "Sram_Only",
+               "system_config": "Some_Unmarked_Config"}}}
+    specs = _soc_targets(soc, "test:soc")
+    assert specs[0].vela_vendor_system_config == "Some_Unmarked_Config"
+    assert specs[0].vela_system_config is None
+
+
 def test_resolve_targets_for_v2n101_yields_drpai_plus_cpu():
     # E1M-V2N101 -> renesas:rzv2n:n44 -> DRP-AI NPU + cpu
     specs = resolve_targets("E1M-V2N101", metadata_root=_META)

@@ -45,6 +45,12 @@
  * whichever LOG_MODULE_REGISTER() the including .c file declared before
  * pulling this header in, same as the file-scoped statics that pattern
  * always relied on.
+ *
+ * Also carries alp_camera_read_fps_x1000() (issue #2279): the rate a
+ * backend's open() actually settled on, re-read from the device and
+ * scaled by 1000 for alp_camera_get_fps() -- independent of camera_apply_fps()
+ * above, since a caller may want the settled rate even on a backend that
+ * left the device at its power-up default (cfg->fps == 0).
  */
 
 #ifndef ALP_BACKENDS_CAMERA_FRMIVAL_H
@@ -170,6 +176,23 @@ static inline alp_status_t camera_apply_fps(const struct device  *dev,
 	}
 
 	return ALP_OK;
+}
+
+/* The rate the driver actually settled on, x 1000 (#2279); 0 when the
+ * driver cannot report its frame interval.  Store it in the handle's
+ * state.fps_x1000 at open for alp_camera_get_fps(). Independent read-back:
+ * a caller reads the settled rate even on a backend that left the device
+ * at its power-up default (cfg->fps == 0, camera_apply_fps() above left the
+ * device untouched). */
+static inline uint32_t alp_camera_read_fps_x1000(const struct device *dev)
+{
+	struct video_frmival frmival = { 0 };
+
+	if (video_get_frmival(dev, &frmival) != 0 || frmival.numerator == 0u) {
+		return 0u;
+	}
+	return (uint32_t)(((uint64_t)frmival.denominator * 1000u + frmival.numerator / 2u) /
+	                  frmival.numerator);
 }
 
 #endif /* ALP_BACKENDS_CAMERA_FRMIVAL_H */

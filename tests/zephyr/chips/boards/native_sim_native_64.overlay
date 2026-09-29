@@ -85,6 +85,11 @@
                 compatible = "alp,fake-ina236";
                 reg = <0x40>;
             };
+            /* 0x30 = OPTIGA Trust M default address; NACKs while asleep. */
+            fake_optiga: fake_optiga@30 {
+                compatible = "alp,fake-optiga";
+                reg = <0x30>;
+            };
             /* 0x4D = the AD0/SPICLK "10k to GND" strap (SLASET3D
              * Table 7-3, p.30), which is U27 on the E1M-X EVK.  One
              * instance is enough: nothing this driver does is
@@ -92,6 +97,13 @@
             fake_tas2563: fake_tas2563@4d {
                 compatible = "alp,fake-tas2563";
                 reg = <0x4d>;
+            };
+            /* GD32G553 supervisor-MCU bridge fake -- PING/GET_VERSION
+             * only, driving gd32g553_init()'s OTA-trial retry ladder
+             * (chips/gd32g553/gd32g553.c). */
+            fake_gd32bridge: fake_gd32bridge@2c {
+                compatible = "alp,fake-gd32bridge";
+                reg = <0x2c>;
             };
         };
     };

@@ -77,14 +77,14 @@ typedef struct {
 	                   *   (e.g. the OV5647 only reaches one of a fixed rate
 	                   *   table, and the IMX296 always settles to its one
 	                   *   fixed 60.3 fps rate no matter what was asked). The
-	                   *   settled rate is not reported back to the caller
-	                   *   yet (issue #2279). If this field is NONZERO and
-	                   *   the terminal sensor device has no frame-rate
-	                   *   control at all, @ref alp_camera_open fails loudly
-	                   *   with ALP_ERR_NOSUPPORT rather than silently
-	                   *   ignoring the request -- but if it is left at 0
-	                   *   and only a BACKEND's own internal default rate
-	                   *   fails to apply (e.g. a transient sensor I/O
+	                   *   settled rate is read back with
+	                   *   alp_camera_get_fps() (issue #2279). If this field
+	                   *   is NONZERO and the terminal sensor device has no
+	                   *   frame-rate control at all, @ref alp_camera_open
+	                   *   fails loudly with ALP_ERR_NOSUPPORT rather than
+	                   *   silently ignoring the request -- but if it is left
+	                   *   at 0 and only a BACKEND's own internal default
+	                   *   rate fails to apply (e.g. a transient sensor I/O
 	                   *   error), that failure is not surfaced at all: it
 	                   *   is logged and open() still succeeds, since the
 	                   *   caller never asked for that rate specifically. */
@@ -291,6 +291,24 @@ typedef struct {
  *         optional ISP fabric) / ALP_ERR_IO.
  */
 alp_status_t alp_camera_configure_isp(alp_camera_t *camera, const alp_camera_isp_config_t *isp);
+
+/**
+ * @brief Read the frame rate the backend actually settled on at open.
+ *
+ * @c alp_camera_config_t::fps is only a request; the sensor/mode picks the
+ * nearest rate it supports.  This reports what was really programmed, in
+ * thousandths of a frame per second so a fractional rate (29.97 fps =
+ * 29970) survives -- divide by 1000.0 for fps, or use it directly for a
+ * frame period of 1e6 / @p fps_x1000 seconds.  Read once at open; a later
+ * sensor-side change is not tracked.
+ *
+ * @param[in]  camera     Handle from @ref alp_camera_open.
+ * @param[out] fps_x1000  Settled rate x 1000.  Must be non-NULL.
+ * @return ALP_OK; ALP_ERR_INVAL (@p fps_x1000 NULL); ALP_ERR_NOT_READY
+ *         (NULL or closed @p camera); ALP_ERR_NOSUPPORT (the backend or
+ *         driver cannot read its frame interval back).
+ */
+alp_status_t alp_camera_get_fps(alp_camera_t *camera, uint32_t *fps_x1000);
 
 #ifdef __cplusplus
 }

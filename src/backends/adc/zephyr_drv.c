@@ -181,7 +181,7 @@ z_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st, alp_capabilitie
 	st->resolution_bits = s->resolution_bits;
 
 	caps_out->max_resolution_bits = ALP_SOC_ADC_MAX_RESOLUTION_BITS;
-	caps_out->max_sample_rate     = 0u; /* not advertised by the generic backend */
+	caps_out->max_rate_hz         = 0u; /* not advertised by the generic backend */
 	caps_out->channel_count       = ALP_SOC_ADC_COUNT;
 	return ALP_OK;
 }

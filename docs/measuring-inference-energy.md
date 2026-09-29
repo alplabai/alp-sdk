@@ -331,12 +331,14 @@ runner that lives in `tan-cli` (see alp-sdk#1470 / ADR-0028), tracked by
   and the truncated console looks exactly like a crash. Let the app finish, or
   reset with `RSetType 2; r; g` and wait, before reading.
 - **`JLinkExe mem8` refuses a read larger than 0x10000** ("NumBytes should be
-  <= 0x10000") and returns nothing, so a large `CONFIG_RAM_CONSOLE_BUFFER_SIZE`
-  reads back empty. This app's `CONFIG_RAM_CONSOLE_BUFFER_SIZE` (65536 bytes,
-  `examples/aen/aen-inference-energy/prj.conf`) is sized to sit exactly at that
-  cap with headroom for the documented default knobs, so the default
-  configuration needs only one read; raising the sample/window knobs past the
-  default can require reading the buffer back in two `mem8` calls instead.
+  <= 0x10000") and returns nothing in one call. The bench scripts (`ram-run.sh`,
+  `reread.sh`) chunk any larger read into multiple `mem8` calls automatically
+  via the shared `bench_mem8_chunks()` helper (alp-sdk#2313), so raising
+  `CONFIG_RAM_CONSOLE_BUFFER_SIZE` past 0x10000 to fit more samples/window
+  pairs just works -- no manual two-read recipe needed. This app's
+  `CONFIG_RAM_CONSOLE_BUFFER_SIZE` (65536 bytes,
+  `examples/aen/aen-inference-energy/prj.conf`) still sits at that cap by
+  default with headroom for the documented default knobs.
 - **`JLinkExe` selects a probe only by serial**, and this bench has more than
   one J-Link sharing a cloned serial across different boards (see
   `scripts/bench/aen/bench-env.sh`'s DP-ID safety-gate comment) — a bare

@@ -11,16 +11,32 @@ silicon family without editing existing files.
   per-class linker section (`.alp_backends_adc`).
 
 * **Backend** — one row in a class's section. Declares the silicon
-  ref it supports, the vendor name, base capabilities, a priority,
-  an ops vtable, and an optional probe function for per-instance
-  refinement.
+  ref it supports, the vendor name, base universal capabilities
+  (`base_caps`), base class-scoped capabilities (`base_class_flags`),
+  a priority, an ops vtable, and an optional probe function for
+  per-instance refinement.
 
-* **Capabilities** — two distinct layers:
+* **Capabilities** — three distinct layers:
   * `ALP_CAP_*` macros in `<alp/cap.h>` are SoC-level. They answer
     "does this silicon have an NPU at all?"
-  * `ALP_INSTANCE_CAP_*` flags in `<alp/cap_instance.h>` are
-    handle-level. They answer "does THIS opened ADC handle support
-    DMA?" Populated by the backend's `ops->probe()` at open time.
+  * `alp_capabilities_t.flags` (`ALP_INSTANCE_CAP_*` in
+    `<alp/cap_instance.h>`) are handle-level and universal across
+    every class. They answer "does THIS opened handle support DMA?"
+    and, critically, whether the backend spoke at all
+    (`ALP_INSTANCE_CAP_REPORTED`) -- a descriptor a backend left
+    untouched reads as "not reported", never as "has nothing".
+  * `alp_capabilities_t.class_flags` (`ALP_<CLASS>_CAP_*` in the
+    class's own header, e.g. `ALP_ADC_CAP_HW_OVERSAMPLE` in
+    `<alp/adc.h>`) are handle-level but class-scoped: a bit position
+    here means whatever that class's header says it means, and only
+    once `ALP_INSTANCE_CAP_REPORTED` is set in `flags`.
+  Both `flags` and `class_flags` are pre-seeded by the dispatcher
+  from the registry's `base_caps` / `base_class_flags` before
+  `ops->open()` runs, and refined by the backend's `ops->probe()`
+  where one exists.  A backend with nothing to add MUST leave the
+  pre-seeded descriptor untouched -- zero-filling it is indistinguishable
+  from "not reported" and silently discards whatever `base_caps`
+  declared (#1640).
 
 ## Adding a backend
 

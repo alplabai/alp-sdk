@@ -85,7 +85,18 @@
 #if defined(CONFIG_CAMERA_MJPEG_STREAM_1280X960)
 #define FRAME_W   1280
 #define FRAME_H   960
-#define FRAME_FPS 15
+#define FRAME_FPS CONFIG_CAMERA_MJPEG_STREAM_FPS
+/*
+ * IMX335 note (issue #2338 fix): src/backends/camera/alif_isp_pico.c's cfg->fps request now
+ * reaches whichever real sensor is behind the ISP, not just OV5647 -- so this FRAME_FPS IS
+ * forwarded to IMX335 too. IMX335's imx335_framerates[] ({25, 30, 50, 60}, imx335.c) has no 15
+ * fps entry; it would round the 1280x960 path's normal 15 fps request up to 25, a rate hal_alif
+ * patch 0014's AE envelope (calibrated at exactly 30 fps) was never derived against. The
+ * aen_imx335 scenario in testcase.yaml overrides CONFIG_CAMERA_MJPEG_STREAM_FPS to 30 (see
+ * Kconfig, this directory) so IMX335 keeps landing on its calibrated rate; OV5647 and IMX296 are
+ * unaffected (their scenarios keep the 15 fps default -- OV5647 reaches it exactly, IMX296 is a
+ * fixed 60.3 frame/s regardless of the request).
+ */
 /*
  * Starting quality for this resolution -- bench run 242 (issue #2286):
  * quality 80 (the 640x480 default below) blew MJPEG_HTTP_MAX_JPEG
@@ -100,7 +111,7 @@
 #else
 #define FRAME_W              640
 #define FRAME_H              480
-#define FRAME_FPS            30
+#define FRAME_FPS            CONFIG_CAMERA_MJPEG_STREAM_FPS
 /* Unchanged from before #2286 -- bench run 220 measured this comfortably
  * under the 640x480 128 KiB cap (mjpeg_http.h) even in bright daylight. */
 #define JPEG_QUALITY_DEFAULT 80u

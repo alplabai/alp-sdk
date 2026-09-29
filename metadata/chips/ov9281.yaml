@@ -89,6 +89,17 @@ verification:
                                     # rate (measured 60-frame bursts: ~100,
                                     # ~50, ~100 fps); the sensor test pattern
                                     # is also verified in all three modes.
+                                    # Kept at "verified" (not downgraded to
+                                    # "partial") matching docs/camera-shields.md's
+                                    # own framing -- OV9281 and OV5647 are
+                                    # "fully bench-verified", with the
+                                    # #2287-Stage-B re-bench noted as a
+                                    # caveat, not a verification downgrade:
+                                    # issue #2287 Stage B changed the shared
+                                    # CPI driver's buffer-starvation-pause
+                                    # behaviour AFTER this bench; re-bench on
+                                    # this sensor is pending (see
+                                    # docs/camera-shields.md).
   smoke_tests:    null_arg_guard
 
 physical:

@@ -102,6 +102,16 @@ BUILD_ASSERT(!IS_ENABLED(CONFIG_VIDEO_ALIF_CAM) || !IS_ENABLED(CONFIG_SOC_SERIES
 #define WORKQ_PRIORITY   7
 K_KERNEL_STACK_DEFINE(alif_isr_cb_workq, WORKQ_STACK_SIZE);
 
+/*
+ * Bug #2342 revision (bench run 341): bounded wait, in alif_cam_flush(cancel),
+ * for an armed capture to reach its frame-end STOP before soft-resetting the
+ * CPI -- see the wait's own comment. Not derived from a Kconfig frame-rate
+ * figure; plain constant chosen as generous margin over one frame period at
+ * the slowest frame rate any supported sensor runs at. If it elapses with no
+ * STOP seen, the DMA is idle (no pixels arriving) and resetting is safe.
+ */
+#define CPI_FLUSH_FRAME_END_TIMEOUT_MS 500
+
 extern size_t fourcc_to_plane_size(uint32_t fourcc, uint8_t plane_id, size_t buffer_size);
 extern int fourcc_to_numplanes(uint32_t fourcc);
 extern unsigned int pix_fmt_bpp(uint32_t fmt);
@@ -319,19 +329,81 @@ static inline void hw_cam_soft_reset(uintptr_t regs)
 
 static inline void hw_cam_start_video_capture(const struct device *dev)
 {
-	const struct video_cam_config *config = dev->config;
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
 
 	/* Apply soft reset before starting capture */
 	hw_cam_soft_reset(regs);
 
-	/* Start video capture. */
-	if (config->capture_mode == CPI_CAPTURE_MODE_SNAPSHOT) {
-		sys_write32(CAM_CTRL_FIFO_CLK_SEL | CAM_CTRL_SNAPSHOT | CAM_CTRL_START,
-			    regs + CAM_CTRL);
-	} else {
-		sys_write32(CAM_CTRL_FIFO_CLK_SEL | CAM_CTRL_START, regs + CAM_CTRL);
+	/* Start video capture. Snapshot is the only supported capture mode --
+	 * continuous is rejected at DT build time (alif,cam.yaml's
+	 * capture-mode enum has only "snapshot").
+	 */
+	sys_write32(CAM_CTRL_FIFO_CLK_SEL | CAM_CTRL_SNAPSHOT | CAM_CTRL_START, regs + CAM_CTRL);
+}
+
+/**
+ * @brief Quiesce the CPI: the only bench-proven way to safely stop a capture
+ *
+ * Bug #2342 (E1M-AEN803 2026W36-0001, register-level bench diag run 339):
+ * a bare `CAM_CTRL = 0` write while a SNAPSHOT capture is in flight does
+ * NOT stop the DMA. Mid-frame writes that clear FIFO_CLK_SEL (bit 12,
+ * incl. writing 0) let the DMA keep going for roughly another whole
+ * FCFG-bounded frame past the write (diag arm E: 510,247 B written for a
+ * 259,200 B frame -- one of the two canaries placed past the frame was
+ * overwritten). Clearing SNAPSHOT alone (bit 4) is worse: it turns the
+ * capture continuous with an incrementing address -- a genuine runaway
+ * (arm C: filled all 4 MiB of SRAM0 within 250 ms, BUSY stuck set, no STOP
+ * interrupt ever raised). Clearing START alone (bit 0) does nothing (arm
+ * B, identical to the no-op control, arm A). BUSY read back 0 immediately
+ * after the CAM_CTRL=0 write in arm E, while the DMA was still actively
+ * overrunning the buffer -- so a BUSY poll placed right after a CAM_CTRL
+ * write is not a valid signal that the write took hardware effect; it
+ * proves nothing about whether the capture actually stopped.
+ *
+ * The only sequence that bench-proved a frozen extent with both canaries
+ * intact is the full 3-step soft reset (hw_cam_soft_reset(): CAM_CTRL 0 ->
+ * SW_RESET 0x100 -> 0, diag arm F, 50 us after the runaway write). The Alif
+ * DFP has no mid-frame abort: CPIx_Stop() stops the source, then writes
+ * CAM_CTRL = 0 -- so this sequence had to be bench-derived rather than read
+ * out of the vendor driver.
+ *
+ * Every caller that needs to stop an in-flight (or possibly in-flight)
+ * capture goes through this helper instead of a standalone `CAM_CTRL = 0`.
+ * Ends at the soft reset's final CAM_CTRL = 0, the same end state as the
+ * Alif DFP's CPIx_Stop() (diag arm F) -- no further park write after it.
+ *
+ * Never write CAM_AXI_ERR_STAT (CPI+0x18) to "clear" it: bench-confirmed
+ * (#2342) that register is not writable on this CPI -- a write bus-faults.
+ *
+ * No BUSY poll here (see above for why one is meaningless right after a
+ * CAM_CTRL write) and no wait on the raw CAM_INTR STOP bit either: the
+ * soft reset is unconditional and bench-proved to freeze the DMA
+ * regardless of BUSY or STOP state, so there is nothing left to wait for.
+ *
+ * Bug #2342 revision (bench run 341): this is only safe with no AXI write
+ * burst in flight. Calling this while a capture is still actively writing
+ * mid-frame wedged the SRAM0 write path in 12 of 212 bench events (core
+ * stalls in/just after this call; AXI-AP reads still work but a write never
+ * completes). Every caller must first either stop the source (stream_stop's
+ * stop-source-first order: endpoint/sensor stopped before this call) or wait
+ * for the frame to end (alif_cam_flush(cancel)'s bounded poll on raw CAM_INTR
+ * STOP) before reaching here.
+ *
+ * @param regs CPI register base address
+ * @param irq_mask Interrupts to mask for the duration (0 to leave
+ *                 CAM_INTR_ENA untouched); whatever is already latched in
+ *                 CAM_INTR is cleared unconditionally below.
+ */
+static inline void hw_cam_quiesce(uintptr_t regs, uint32_t irq_mask)
+{
+	if (irq_mask) {
+		hw_disable_interrupts(regs, irq_mask);
 	}
+
+	hw_cam_soft_reset(regs);
+
+	/* Clear any stale latched interrupts after reset. */
+	sys_write32(sys_read32(regs + CAM_INTR), regs + CAM_INTR);
 }
 
 /**
@@ -374,24 +446,9 @@ static inline void hw_cam_start_video_capture(const struct device *dev)
  */
 static inline void hw_cam_cpi_only_stop(uintptr_t regs)
 {
-	uint32_t mask;
-
-	hw_disable_interrupts(regs, INTR_VSYNC | INTR_BRESP_ERR | INTR_OUTFIFO_OVERRUN |
-					     INTR_INFIFO_OVERRUN | INTR_STOP);
-
-	/* Stop the CPI capture engine (mirrors alif_cam_stream_stop()). */
-	sys_write32(0, regs + CAM_CTRL);
-
-	/* Poll BUSY before the reset, same as alif_cam_stream_stop(). */
-	mask = CAM_CTRL_BUSY;
-	for (int i = 0; (i < 1000) && (sys_read32(regs + CAM_CTRL) & mask) == mask; i++) {
-		k_msleep(1);
-	}
-
-	hw_cam_soft_reset(regs);
-
-	/* Clear any stale latched interrupts after reset. */
-	sys_write32(sys_read32(regs + CAM_INTR), regs + CAM_INTR);
+	/* Soft reset via hw_cam_quiesce(); see it for why this is the only safe stop. */
+	hw_cam_quiesce(
+	    regs, INTR_VSYNC | INTR_BRESP_ERR | INTR_OUTFIFO_OVERRUN | INTR_INFIFO_OVERRUN | INTR_STOP);
 }
 
 /*
@@ -695,6 +752,18 @@ static void alif_cam_work_helper(const struct device *dev)
 
 	if (config->axi_bus_ep) {
 		k_mutex_lock(&data->lock, K_FOREVER);
+
+		/*
+		 * alif_cam_stream_stop() may have run (and quiesced the CPI)
+		 * between this STOP interrupt firing and this work item
+		 * running -- data->lock serializes against it, so this read
+		 * is race-free. Nothing left to do for a stream the user
+		 * already asked to stop; re-arming here would restart it.
+		 */
+		if (!data->is_streaming) {
+			k_mutex_unlock(&data->lock);
+			return;
+		}
 
 		vbuf = k_fifo_peek_head(&data->fifo_in);
 		if (vbuf == NULL) {
@@ -1053,7 +1122,6 @@ static int alif_cam_stream_stop(const struct device *dev)
 	const struct video_cam_config *config = dev->config;
 	struct video_cam_data *data = dev->data;
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
-	uint32_t mask;
 	int ret;
 
 	k_mutex_lock(&data->lock, K_FOREVER);
@@ -1081,30 +1149,14 @@ static int alif_cam_stream_stop(const struct device *dev)
 		return ret;
 	}
 
-	/* Disable Interrupts. */
-	hw_disable_interrupts(regs, INTR_VSYNC | INTR_BRESP_ERR | INTR_OUTFIFO_OVERRUN |
-					    INTR_INFIFO_OVERRUN | INTR_STOP);
-
-	/* Stop the Camera sensor to dump image. */
-	sys_write32(0, regs + CAM_CTRL);
+	/* The endpoint/sensor are already stopped above; see hw_cam_quiesce()
+	 * for why this is the only safe way to stop the CPI side.
+	 */
+	hw_cam_quiesce(
+	    regs, INTR_VSYNC | INTR_BRESP_ERR | INTR_OUTFIFO_OVERRUN | INTR_INFIFO_OVERRUN | INTR_STOP);
 
 	/* Set the Current buffer state to NULL */
 	data->curr_vid_buf = 0;
-
-	/*
-	 * Poll on Busy flag of CPI to find out when the video buffer
-	 * is no longer accessed.
-	 */
-	mask = CAM_CTRL_BUSY;
-	for (int i = 0; (i < 1000) && (sys_read32(regs + CAM_CTRL) & mask) == mask; i++) {
-		k_msleep(1);
-	}
-
-	/* Apply soft reset to clear BUSY flag and leave CPI in clean state */
-	hw_cam_soft_reset(regs);
-
-	/* Clear any stale latched interrupts after reset */
-	sys_write32(sys_read32(regs + CAM_INTR), regs + CAM_INTR);
 
 	LOG_DBG("Stream stopped");
 
@@ -1139,7 +1191,6 @@ static int alif_cam_flush(const struct device *dev, bool cancel)
 	struct video_cam_data *data = dev->data;
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
 	struct video_buffer *vbuf = NULL;
-	uint32_t mask;
 
 	if (!cancel) {
 		/*
@@ -1166,28 +1217,100 @@ static int alif_cam_flush(const struct device *dev, bool cancel)
 			k_msleep(1);
 		}
 	} else {
+		struct k_work_sync sync;
+
 		/*
-		 * Disable interrupts to ensures that the current buffer is
-		 * not moved from IN-FIFO to OUT-FIFO on STOP interrupt.
+		 * Mask STOP before cancelling the in-flight work_helper --
+		 * same ordering as isp_flush() (zephyr/drivers/video/isp_pico.c).
+		 * Masking first closes the window where a STOP fires between
+		 * k_work_cancel_sync() returning and this function re-taking
+		 * the lock below: without the mask, that STOP can resubmit
+		 * cb_work, which then runs after hw_cam_quiesce() has already
+		 * reset the CPI, finds an empty IN-FIFO, hits the "Unexpected
+		 * condition" branch in alif_cam_work_helper(), clears
+		 * is_streaming and stalls the stream.
 		 */
-		/* Disable the Stop interrupt. */
+		k_mutex_lock(&data->lock, K_FOREVER);
 		hw_disable_interrupts(regs, INTR_STOP);
-		/* Stop Video capture. */
-		sys_write32(0, regs + CAM_CTRL);
+		k_mutex_unlock(&data->lock);
 
 		/*
-		 * Poll on Busy flag of CPI to find out when the video buffer
-		 * is no longer accessed.
+		 * Cancel any in-flight work_helper next, and OUTSIDE the
+		 * lock -- k_work_cancel_sync() blocks on alif_cam_work_helper()
+		 * (which itself takes data->lock) finishing, so taking the
+		 * lock first would deadlock against it (same reasoning as
+		 * alif_cam_stream_start()'s own cancel). Without this, the
+		 * work helper's STOP-driven re-arm (hw_cam_start_video_capture())
+		 * can race this flush's own hw_cam_quiesce() below and re-arm
+		 * a capture flush(cancel) just stopped.
 		 */
-		mask = CAM_CTRL_BUSY;
-		for (int i = 0; (i < 1000) && (sys_read32(regs + CAM_CTRL) & mask) == mask; i++) {
-			k_msleep(1);
-		}
-
-		/* Apply soft reset to clear BUSY flag and leave CPI in clean state */
-		hw_cam_soft_reset(regs);
+		k_work_cancel_sync(&data->cb_work, &sync);
 
 		k_mutex_lock(&data->lock, K_FOREVER);
+
+		/*
+		 * Bug #2342 revision (bench run 341): a soft reset landing
+		 * mid-frame, while the CPI is still actively writing an AXI
+		 * burst, wedges the SRAM0 write path -- core stalls in/just
+		 * after hw_cam_quiesce() below, 12/212 runs, AXI-AP reads
+		 * still working but a write never completing. Frame-boundary
+		 * resets (0/120) and stream_stop's stop-source-first order
+		 * (0/50) never hung. If a capture is armed (CAM_CTRL START
+		 * set) and the frame hasn't ended yet (raw CAM_INTR STOP not
+		 * yet latched -- FCFG ROW bounds the frame in hardware, so an
+		 * armed capture always reaches STOP within one frame), wait
+		 * for that STOP instead of resetting into the burst.
+		 */
+		if ((sys_read32(regs + CAM_CTRL) & CAM_CTRL_START) &&
+		    !(sys_read32(regs + CAM_INTR) & INTR_STOP)) {
+			bool frame_ended = false;
+			int waited_ms = 0;
+
+			/*
+			 * data->lock dropped for this poll: INTR_STOP is
+			 * already masked and cb_work already cancelled above,
+			 * so nothing re-arms the CPI (hw_cam_start_video_capture())
+			 * behind this wait's back. The only other CAM_CTRL
+			 * writer is alif_cam_enqueue()'s starved-resume path,
+			 * and that only fires once `data->starved` is set,
+			 * which only happens after a capture has already been
+			 * fully stopped (hw_cam_cpi_only_stop()/hw_cam_quiesce())
+			 * -- never while CAM_CTRL START is still set, the very
+			 * condition guarding this branch. Holding the lock
+			 * across the poll would also block every other
+			 * data->lock caller for up to the full timeout.
+			 */
+			k_mutex_unlock(&data->lock);
+
+			while (waited_ms < CPI_FLUSH_FRAME_END_TIMEOUT_MS) {
+				if (sys_read32(regs + CAM_INTR) & INTR_STOP) {
+					frame_ended = true;
+					break;
+				}
+				k_msleep(1);
+				waited_ms++;
+			}
+
+			if (!frame_ended) {
+				LOG_WRN("Timed out waiting for frame end before "
+					"flush(cancel) reset (CAM_CTRL=0x%08x, "
+					"CAM_INTR=0x%08x)",
+					sys_read32(regs + CAM_CTRL),
+					sys_read32(regs + CAM_INTR));
+			}
+
+			k_mutex_lock(&data->lock, K_FOREVER);
+		}
+
+		/* See hw_cam_quiesce() for why this is the only safe way to
+		 * stop: soft reset via hw_cam_quiesce(). INTR_STOP is already
+		 * masked above; passing it again here is a harmless re-mask,
+		 * kept so this call matches every other hw_cam_quiesce() call
+		 * site. The wait above (if it ran) guarantees no AXI write
+		 * burst is in flight when this reset lands (#2342).
+		 */
+		hw_cam_quiesce(regs, INTR_STOP);
+
 		while ((vbuf = k_fifo_get(&data->fifo_in, K_NO_WAIT))) {
 			k_fifo_put(&data->fifo_out, vbuf);
 			LOG_DBG("Video Buffer Aborted!!! - 0x%x", (uint32_t)vbuf->buffer);
@@ -1197,6 +1320,21 @@ static int alif_cam_flush(const struct device *dev, bool cancel)
 			}
 #endif /* defined(CONFIG_POLL) */
 		}
+
+		/*
+		 * hw_cam_quiesce() above masked INTR_STOP and left the CPI
+		 * stopped without re-arming it. If the stream is still
+		 * nominally running (this flush(cancel) wasn't called from
+		 * alif_cam_stream_stop()), nothing else will ever restart it
+		 * -- mark `starved` so the next enqueue() takes the existing
+		 * starved-resume path (re-enables interrupts, reprograms
+		 * CAM_FRAME_ADDR, calls hw_cam_start_video_capture() -- see
+		 * alif_cam_enqueue()), instead of silently sitting parked.
+		 */
+		if (data->is_streaming) {
+			data->starved = true;
+		}
+
 		k_mutex_unlock(&data->lock);
 	}
 
@@ -1484,7 +1622,26 @@ static void __maybe_unused alif_video_cam_isr(const struct device *dev)
 	}
 
 	if (int_st & INTR_STOP) {
-		sys_write32(0, regs + CAM_CTRL);
+		/*
+		 * Keep FIFO_CLK_SEL | SNAPSHOT here rather than following
+		 * hw_cam_quiesce()'s end state (bare CAM_CTRL = 0): this ISR
+		 * can run late, after alif_cam_cpi_resume() has already
+		 * re-armed the CPI for the next frame (see its own header
+		 * comment). If that race happens, a bare 0 here would clear
+		 * FIFO_CLK_SEL mid-capture, on the already re-armed frame --
+		 * bench: ~2x frame overrun, the same failure hw_cam_quiesce()
+		 * exists to avoid. Writing FIFO_CLK_SEL | SNAPSHOT is, relative
+		 * to that already-armed state, equivalent to clearing only
+		 * START -- bench-proven a no-op for a capture already in
+		 * progress (hw_cam_quiesce()'s header comment, arm B); for a
+		 * CPI armed but not yet started this is unproven, but the
+		 * write this replaced (a bare 0) also cleared START, so this
+		 * is not a regression either way. This write clears START
+		 * regardless, so alif_cam_cpi_resume()'s idempotency guard
+		 * (BUSY | START) still lets a genuinely finished capture
+		 * re-arm normally.
+		 */
+		sys_write32(CAM_CTRL_FIFO_CLK_SEL | CAM_CTRL_SNAPSHOT, regs + CAM_CTRL);
 		/* Guard: don't process stale STOP after stream was turned off */
 		if (!data->is_streaming) {
 			return;
@@ -1774,7 +1931,6 @@ static int __maybe_unused alif_video_cam_init(const struct device *dev)
 		.msb = DT_INST_PROP(i, msb),                                                       \
 		.vsync_en = DT_INST_PROP(i, vsync_en),                                             \
 		.wait_vsync = DT_INST_PROP(i, wait_vsync),                                         \
-		.capture_mode = DT_INST_ENUM_IDX(i, capture_mode),                                 \
 		.data_mode = DT_INST_ENUM_IDX(i, data_mode),                                       \
 		.data_mask = DT_INST_ENUM_IDX(i, data_mask),                                       \
 		.code10on8 = DT_INST_PROP(i, code_10_on_8),                                        \

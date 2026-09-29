@@ -102,6 +102,19 @@ typedef enum {
 	ALP_ADC_REF_VDD        = 3  /**< Use VDD as the reference. */
 } alp_adc_ref_t;
 
+/**
+ * @brief ADC class-scoped capability bits.
+ *
+ * Carried in `alp_capabilities_t.class_flags` (see <alp/cap_instance.h>)
+ * -- these are ADC facts, not universal instance facts, so they never
+ * appear in `alp_capabilities_t.flags`.  Only meaningful once
+ * `ALP_INSTANCE_CAP_REPORTED` is set in `flags`; see that header for
+ * the reported/not-reported contract.
+ */
+#define ALP_ADC_CAP_HW_OVERSAMPLE (1u << 0) /**< Hardware oversampling/averaging. */
+#define ALP_ADC_CAP_HW_TRIGGER    (1u << 1) /**< Hardware-triggered (timer/PWM) sampling. */
+#define ALP_ADC_CAP_DIFFERENTIAL  (1u << 2) /**< Differential channel pairs supported. */
+
 /** Opaque ADC channel handle.  Allocate via @ref alp_adc_open. */
 typedef struct alp_adc alp_adc_t;
 
@@ -318,6 +331,9 @@ alp_adc_stream_read_mv(alp_adc_stream_t *stream, uint16_t *mv, size_t cap, size_
  *
  * Issues the backend's stream-end so the DMA channel + ring buffer
  * are freed before the handle returns to the pool.  NULL is a no-op.
+ * Blocks until any in-flight @ref alp_adc_stream_read_mv on the same
+ * handle returns before tearing it down; idempotent (a second close
+ * is a no-op).
  *
  * @param[in] stream  Handle from @ref alp_adc_stream_open, or NULL.
  */
@@ -425,7 +441,9 @@ alp_adc_filter_read_mv(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap, si
  * @brief Close a filter handle.  NULL is a no-op.
  *
  * Releases the internal stream slot + DSP chain.  After this call
- * @p filter is invalid.
+ * @p filter is invalid.  Blocks until any in-flight
+ * @ref alp_adc_filter_read_mv on the same handle returns before
+ * tearing it down; idempotent (a second close is a no-op).
  */
 void alp_adc_filter_close(alp_adc_filter_t *filter);
 
@@ -506,7 +524,12 @@ alp_adc_spectrum_t *alp_adc_spectrum_open(const alp_adc_spectrum_config_t *cfg);
 alp_status_t
 alp_adc_spectrum_read_bins(alp_adc_spectrum_t *spec, float *bins, size_t cap, size_t *got);
 
-/** Close a spectrum handle.  NULL is a no-op. */
+/**
+ * @brief Close a spectrum handle.  NULL is a no-op.  Blocks until any
+ * in-flight @ref alp_adc_spectrum_read_bins on the same handle
+ * returns before tearing it down; idempotent (a second close is a
+ * no-op).
+ */
 void alp_adc_spectrum_close(alp_adc_spectrum_t *spec);
 
 #ifdef __cplusplus

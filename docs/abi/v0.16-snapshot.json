@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-26",
+  "generated": "2026-09-28",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -61,6 +61,18 @@
         }
       },
       "macros": {
+        "ALP_ADC_CAP_DIFFERENTIAL": {
+          "hash": "72399bca19a732bb",
+          "value": "(1u << 2)"
+        },
+        "ALP_ADC_CAP_HW_OVERSAMPLE": {
+          "hash": "16628a3714c4a47d",
+          "value": "(1u << 0)"
+        },
+        "ALP_ADC_CAP_HW_TRIGGER": {
+          "hash": "2448e181a319f6e3",
+          "value": "(1u << 1)"
+        },
         "ALP_ADC_CONFIG_DEFAULT": {
           "hash": "9a982c69993861f5",
           "value": "(id) ((alp_adc_config_t){ .channel_id = (id), .resolution_bits = 0u, .acquisition_us = 0u, .reference = ALP_ADC_REF_INTERNAL, .gain_num = 1u, .gain_den = 1u, .oversampling_ratio = 0u, .sample_cycles = 0u })"
@@ -354,16 +366,17 @@
           "kind": "struct"
         },
         "alp_backend_t": {
-          "definition": "typedef struct alp_backend { const char *silicon_ref; const char *vendor; uint32_t base_caps; uint8_t priority; const void *ops; int (*probe)(uint32_t instance_id, uint32_t *refined_caps); } alp_backend_t;",
+          "definition": "typedef struct alp_backend { const char *silicon_ref; const char *vendor; uint32_t base_caps; uint32_t base_class_flags; uint8_t priority; const void *ops; int (*probe)(uint32_t instance_id, uint32_t *refined_caps); } alp_backend_t;",
           "fields": [
             "const char *silicon_ref",
             "const char *vendor",
             "uint32_t base_caps",
+            "uint32_t base_class_flags",
             "uint8_t priority",
             "const void *ops",
             "int (*probe)(uint32_t instance_id, uint32_t *refined_caps)"
           ],
-          "hash": "906ec51776ee4e08",
+          "hash": "7254497b5b7074df",
           "kind": "struct"
         }
       },
@@ -1370,6 +1383,10 @@
           "hash": "6dec10e01fc58f24",
           "value": "0x69u"
         },
+        "XEVK_I2C_ADDR_INA228_5V": {
+          "hash": "de4d67af37b38474",
+          "value": "0x42u"
+        },
         "XEVK_I2C_ADDR_INA236_1V8": {
           "hash": "c2c588a9640f949e",
           "value": "0x41u"
@@ -1377,10 +1394,6 @@
         "XEVK_I2C_ADDR_INA236_3V3": {
           "hash": "db2f615e7a9f47af",
           "value": "0x40u"
-        },
-        "XEVK_I2C_ADDR_INA236_5V": {
-          "hash": "eca71276506e3164",
-          "value": "0x4Au"
         },
         "XEVK_I2C_ADDR_INA236_VCAM2": {
           "hash": "54c31cdcf2773108",
@@ -1391,8 +1404,16 @@
           "value": "0x49u"
         },
         "XEVK_I2C_ADDR_TCAL9538": {
-          "hash": "bd0e087dfca18e44",
-          "value": "0x72u"
+          "hash": "6870b1cc43d6c734",
+          "value": "XEVK_I2C_ADDR_TCAL9538_MAIN"
+        },
+        "XEVK_I2C_ADDR_TCAL9538_MAIN": {
+          "hash": "3895d68b962ad68c",
+          "value": "0x73u"
+        },
+        "XEVK_I2C_ADDR_TCAL9538_PCIE": {
+          "hash": "14537b3d40f72ff4",
+          "value": "0x71u"
         },
         "XEVK_I2C_BUS_DSI_CSI0": {
           "hash": "73f48edc7f8a3a88",
@@ -1418,10 +1439,6 @@
           "hash": "230bcba87b062cad",
           "value": "4.0f"
         },
-        "XEVK_INA236_MAX_5V_A": {
-          "hash": "4388c012e9236a27",
-          "value": "4.0f"
-        },
         "XEVK_INA236_MAX_VCAM2_A": {
           "hash": "c59a2d78669ccdab",
           "value": "1.6f"
@@ -1436,10 +1453,6 @@
         },
         "XEVK_INA236_SHUNT_3V3_OHMS": {
           "hash": "88f3faeabe5c8b6e",
-          "value": "0.020f"
-        },
-        "XEVK_INA236_SHUNT_5V_OHMS": {
-          "hash": "1feb8cead916ad78",
           "value": "0.020f"
         },
         "XEVK_INA236_SHUNT_VCAM2_OHMS": {
@@ -1599,6 +1612,10 @@
         "alp_camera_configure_isp": {
           "hash": "d99ef9681316b5cd",
           "signature": "alp_status_t alp_camera_configure_isp(alp_camera_t *camera, const alp_camera_isp_config_t *isp);"
+        },
+        "alp_camera_get_fps": {
+          "hash": "832d10277138deb5",
+          "signature": "alp_status_t alp_camera_get_fps(alp_camera_t *camera, uint32_t *fps_x1000);"
         },
         "alp_camera_open": {
           "hash": "e14b545584b912d5",
@@ -1846,25 +1863,24 @@
       "macros": {},
       "typedefs": {
         "alp_capabilities_t": {
-          "definition": "typedef struct alp_capabilities { uint32_t flags; uint32_t max_sample_rate; uint16_t max_resolution_bits; uint16_t channel_count; } alp_capabilities_t;",
+          "definition": "typedef struct alp_capabilities { uint32_t flags; uint32_t class_flags; uint32_t max_rate_hz; uint16_t max_resolution_bits; uint16_t channel_count; } alp_capabilities_t;",
           "fields": [
             "uint32_t flags",
-            "uint32_t max_sample_rate",
+            "uint32_t class_flags",
+            "uint32_t max_rate_hz",
             "uint16_t max_resolution_bits",
             "uint16_t channel_count"
           ],
-          "hash": "0762b67bf529936b",
+          "hash": "7d7228c76a2d2f77",
           "kind": "struct"
         },
         "alp_instance_cap_t": {
-          "definition": "typedef enum { ALP_INSTANCE_CAP_DMA = 1u << 0, ALP_INSTANCE_CAP_HW_OVERSAMPLE = 1u << 1, ALP_INSTANCE_CAP_HW_TRIGGER = 1u << 2, ALP_INSTANCE_CAP_DIFFERENTIAL = 1u << 3, } alp_instance_cap_t;",
+          "definition": "typedef enum { ALP_INSTANCE_CAP_REPORTED = 1u << 0, ALP_INSTANCE_CAP_DMA = 1u << 1, } alp_instance_cap_t;",
           "enumerators": [
-            "ALP_INSTANCE_CAP_DMA = 1u << 0",
-            "ALP_INSTANCE_CAP_HW_OVERSAMPLE = 1u << 1",
-            "ALP_INSTANCE_CAP_HW_TRIGGER = 1u << 2",
-            "ALP_INSTANCE_CAP_DIFFERENTIAL = 1u << 3"
+            "ALP_INSTANCE_CAP_REPORTED = 1u << 0",
+            "ALP_INSTANCE_CAP_DMA = 1u << 1"
           ],
-          "hash": "93c927d1790b87b3",
+          "hash": "a3a02bb1683458c3",
           "kind": "enum"
         }
       },
@@ -4385,6 +4401,14 @@
           "hash": "07af629c5c4972e8",
           "value": "20u"
         },
+        "GD32G553_GPIO_LINE_BT_REG_ON": {
+          "hash": "a26a002ced48af2e",
+          "value": "18u"
+        },
+        "GD32G553_GPIO_LINE_WL_REG_ON": {
+          "hash": "02b7262b21b3b00f",
+          "value": "19u"
+        },
         "GD32G553_HOST_PROTOCOL_MAJOR": {
           "hash": "8cbf9804b6cc9204",
           "value": "0u"
@@ -4396,6 +4420,10 @@
         "GD32G553_OTA_MIN_PROTOCOL_MINOR": {
           "hash": "3081a6e71ff41243",
           "value": "6u"
+        },
+        "GD32G553_REG_ON_MIN_PROTOCOL_MINOR": {
+          "hash": "27d22c83de20f715",
+          "value": "11u"
         },
         "GD32G553_STATUS_CODE_MASK": {
           "hash": "5fac453e1d04fcbd",
@@ -10597,23 +10625,19 @@
     },
     "alp/ext/deepx/inference.h": {
       "functions": {
-        "alp_deepx_inference_dram_tile_reserve": {
-          "hash": "5a70bdc2c7523a54",
-          "signature": "alp_status_t alp_deepx_inference_dram_tile_reserve(alp_inference_t *inf, uint32_t tile_bytes);"
+        "alp_deepx_inference_bind_cores": {
+          "hash": "b08ac660deb57b62",
+          "signature": "alp_status_t alp_deepx_inference_bind_cores(alp_inference_t *inf, alp_deepx_npu_cores_t cores);"
         },
         "alp_deepx_inference_get_status": {
-          "hash": "b461f6c819b47450",
-          "signature": "alp_status_t alp_deepx_inference_get_status(alp_inference_t *inf, uint32_t *status_out);"
-        },
-        "alp_deepx_inference_slot_pin": {
-          "hash": "88c845fb54e20f21",
-          "signature": "alp_status_t alp_deepx_inference_slot_pin(alp_inference_t *inf, alp_deepx_inference_slot_t slot);"
+          "hash": "da530b42aff7691c",
+          "signature": "alp_status_t alp_deepx_inference_get_status(alp_inference_t *inf, alp_deepx_device_status_t *status_out);"
         }
       },
       "macros": {
-        "ALP_DEEPX_INFERENCE_SLOT_COUNT": {
-          "hash": "9ab5d9f7dd966afd",
-          "value": "4u"
+        "ALP_DEEPX_NPU_CORE_COUNT": {
+          "hash": "1721f16ca30a9272",
+          "value": "3u"
         },
         "ALP_EXT_DEEPX_INFERENCE_AVAILABLE": {
           "hash": "2e12530fe6ec1333",
@@ -10621,28 +10645,29 @@
         }
       },
       "typedefs": {
-        "alp_deepx_inference_slot_t": {
-          "definition": "typedef enum { ALP_DEEPX_INFERENCE_SLOT_0 = 0u, ALP_DEEPX_INFERENCE_SLOT_1 = 1u, ALP_DEEPX_INFERENCE_SLOT_2 = 2u, ALP_DEEPX_INFERENCE_SLOT_3 = 3u, } alp_deepx_inference_slot_t;",
-          "enumerators": [
-            "ALP_DEEPX_INFERENCE_SLOT_0 = 0u",
-            "ALP_DEEPX_INFERENCE_SLOT_1 = 1u",
-            "ALP_DEEPX_INFERENCE_SLOT_2 = 2u",
-            "ALP_DEEPX_INFERENCE_SLOT_3 = 3u"
+        "alp_deepx_device_status_t": {
+          "definition": "typedef struct { int32_t temperature_c[ALP_DEEPX_NPU_CORE_COUNT]; uint32_t npu_clock_mhz[ALP_DEEPX_NPU_CORE_COUNT]; uint32_t npu_voltage_mv[ALP_DEEPX_NPU_CORE_COUNT]; uint64_t memory_bytes; } alp_deepx_device_status_t;",
+          "fields": [
+            "int32_t temperature_c[ALP_DEEPX_NPU_CORE_COUNT]",
+            "uint32_t npu_clock_mhz[ALP_DEEPX_NPU_CORE_COUNT]",
+            "uint32_t npu_voltage_mv[ALP_DEEPX_NPU_CORE_COUNT]",
+            "uint64_t memory_bytes"
           ],
-          "hash": "7ab2bf9f10d84737",
-          "kind": "enum"
+          "hash": "a7fb24a6fb286785",
+          "kind": "struct"
         },
-        "alp_deepx_inference_status_t": {
-          "definition": "typedef enum { ALP_DEEPX_INFERENCE_STATUS_IDLE = 0u, ALP_DEEPX_INFERENCE_STATUS_ARMED = 1u << 0, ALP_DEEPX_INFERENCE_STATUS_RUNNING = 1u << 1, ALP_DEEPX_INFERENCE_STATUS_DONE = 1u << 2, ALP_DEEPX_INFERENCE_STATUS_TIMEOUT = 1u << 3, ALP_DEEPX_INFERENCE_STATUS_TRANSPORT_ERR = 1u << 4, } alp_deepx_inference_status_t;",
+        "alp_deepx_npu_cores_t": {
+          "definition": "typedef enum { ALP_DEEPX_NPU_CORES_ALL = 0u, ALP_DEEPX_NPU_CORE_0 = 1u, ALP_DEEPX_NPU_CORE_1 = 2u, ALP_DEEPX_NPU_CORE_2 = 3u, ALP_DEEPX_NPU_CORES_01 = 4u, ALP_DEEPX_NPU_CORES_12 = 5u, ALP_DEEPX_NPU_CORES_02 = 6u, } alp_deepx_npu_cores_t;",
           "enumerators": [
-            "ALP_DEEPX_INFERENCE_STATUS_IDLE = 0u",
-            "ALP_DEEPX_INFERENCE_STATUS_ARMED = 1u << 0",
-            "ALP_DEEPX_INFERENCE_STATUS_RUNNING = 1u << 1",
-            "ALP_DEEPX_INFERENCE_STATUS_DONE = 1u << 2",
-            "ALP_DEEPX_INFERENCE_STATUS_TIMEOUT = 1u << 3",
-            "ALP_DEEPX_INFERENCE_STATUS_TRANSPORT_ERR = 1u << 4"
+            "ALP_DEEPX_NPU_CORES_ALL = 0u",
+            "ALP_DEEPX_NPU_CORE_0 = 1u",
+            "ALP_DEEPX_NPU_CORE_1 = 2u",
+            "ALP_DEEPX_NPU_CORE_2 = 3u",
+            "ALP_DEEPX_NPU_CORES_01 = 4u",
+            "ALP_DEEPX_NPU_CORES_12 = 5u",
+            "ALP_DEEPX_NPU_CORES_02 = 6u"
           ],
-          "hash": "9eb7eaeaca03723c",
+          "hash": "0dd48c5241689c31",
           "kind": "enum"
         }
       },
@@ -14423,6 +14448,14 @@
         "ALP_WDT_CONFIG_DEFAULT": {
           "hash": "1d30b05cbc938689",
           "value": "(id) ((alp_wdt_config_t){ .wdt_id = (id), .timeout_ms = 1000u, .on_timeout = ALP_WDT_RESET_SOC })"
+        },
+        "ALP_WDT_PAUSE_HALTED_BY_DEBUG": {
+          "hash": "c15b217088e018e9",
+          "value": "(1u << 1)"
+        },
+        "ALP_WDT_PAUSE_IN_SLEEP": {
+          "hash": "14cf1c0e38245f32",
+          "value": "(1u << 0)"
         }
       },
       "typedefs": {
@@ -14437,15 +14470,17 @@
           "kind": "enum"
         },
         "alp_wdt_config_t": {
-          "definition": "typedef struct { uint32_t wdt_id; uint32_t timeout_ms; alp_wdt_action_t on_timeout; alp_wdt_expiry_cb_t on_expire; void *user; } alp_wdt_config_t;",
+          "definition": "typedef struct { uint32_t wdt_id; uint32_t timeout_ms; alp_wdt_action_t on_timeout; alp_wdt_expiry_cb_t on_expire; void *user; uint32_t window_min_ms; uint32_t flags; } alp_wdt_config_t;",
           "fields": [
             "uint32_t wdt_id",
             "uint32_t timeout_ms",
             "alp_wdt_action_t on_timeout",
             "alp_wdt_expiry_cb_t on_expire",
-            "void *user"
+            "void *user",
+            "uint32_t window_min_ms",
+            "uint32_t flags"
           ],
-          "hash": "4d8abadbb3481b00",
+          "hash": "df1a8264c2f64e0e",
           "kind": "struct"
         },
         "alp_wdt_expiry_cb_t": {

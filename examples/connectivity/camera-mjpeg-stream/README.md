@@ -187,6 +187,90 @@ region` summary (`west build` prints it after linking) before adding to
 byte count still applies, it moves with every change to this file or its
 dependencies.
 
+### IMX335 build variant (E1M-AEN801/AEN803, 1280x960 ISP crop, issue #2327 Stage B) — bench-verified, runs 332-334
+
+Streams the Sony IMX335 (upstream `zephyr/drivers/video/imx335.c`) through
+the SAME `CONFIG_CAMERA_MJPEG_STREAM_1280X960` path the OV5647/IMX296
+variants above use, but IMX335 has no in-sensor crop this driver uses --
+its native 2x2-binned output is a fixed 1296x972, not 1280x960 -- so this
+sensor's ISP itself crops it down to the same 1280x960
+`boards/overlay-1280x960.conf`'s SRAM0/buffer-pool accounting already
+covers. That crop (`&isp`'s `crop-x0 = 8`/`crop-y0 = 6`) lives in the
+`innomaker_cam_imx335` shield's own overlay
+(`zephyr/boards/shields/innomaker_cam_imx335/innomaker_cam_imx335.overlay`)
+rather than a per-example one — it is a property of this sensor module, not
+of this example — see `docs/camera-shields.md`'s Stage B section for the
+8/6 derivation and `src/backends/camera/alif_isp_pico.c`'s `BUILD_ASSERT`
+that proves the shield's crop still produces 1280x960.
+
+`FRAME_FPS` above (15, the OV5647/IMX296 request) is now forwarded to
+whichever real sensor is behind the ISP (issue #2338, fixed — see
+`src/backends/camera/alif_isp_pico.c`), so IMX335 would otherwise also see
+that 15 fps request. IMX335's `imx335_framerates[]` (`{25, 30, 50, 60}`) has
+no 15 fps entry — the driver would round it up to 25 fps, a rate hal_alif
+patch 0014's AE envelope (calibrated at exactly 30 fps) was never derived
+against. This scenario (`aen_imx335` in `testcase.yaml`) overrides
+`CONFIG_CAMERA_MJPEG_STREAM_FPS` to 30 (`extra_configs`) so IMX335 keeps
+landing on its calibrated rate instead. AE is on (capped at 30.0 dB analog
+gain -- a public Sony datasheet-flyer figure, not bench-derived); AWB stays
+at the ISP's stock ARX3A0 default, same colour-uncalibrated caveat as the
+IMX296 variant above.
+
+```bash
+west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
+    examples/connectivity/camera-mjpeg-stream -- \
+    "-DEXTRA_ZEPHYR_MODULES=<path-to-alp-sdk>;<path-to-hal_alif>" \
+    "-DSHIELD=e1m_evk_rpi_csi innomaker_cam_imx335" \
+    "-DEXTRA_CONF_FILE=boards/overlay-1280x960.conf" \
+    "-DCONFIG_CAMERA_MJPEG_STREAM_FPS=30"
+```
+
+**Bench run 333** (E1M-AEN803 2026W36-0001): 1280x960, app stats `fps=30
+fail=0 retry=0`, one HTTP client measured 29.99 fps / 772.7 KB/s delivered
+over a 30 s window, ~26.3 KB JPEGs, a mild lavender/cyan colour cast (stock
+AWB, expected — no IMX335 colour calibration exists). Only error-class log
+line across the whole run: one `FRAME_SEQ` event at stream start.
+
+**Bench run 334** (same board, after the crop-ownership/gain-rounding/
+exposure-cap follow-up changes below): crop 8/6 confirmed coming from the
+shield's own DT (no per-example overlay), driver `frame_rate` 30, IMX335
+`HMAX 0x0226` / `VMAX 0x001194` read back over I2C, encode `fps=30 fail=0
+retry=0`, one client 29.98 fps / 773.5 KB/s over 30 s, ~26.4 KB JPEGs
+1280x960, only error one `FRAME_SEQ` at start — ran without regression.
+The gain-rounding, exposure-time cap, `isp_open()` rejection, and
+`isp_stream_start()` crop guard added in that same image are NOT
+separately bench-proven by this run — their effect isn't directly
+observable in a passing capture; `tests/zephyr/isp_ae_conv` is the proof
+for the gain-rounding math (see `docs/camera-shields.md`).
+
+Rebuilds clean (`-Werror`) at the SAME SRAM0 usage (98.50%) as the IMX296
+variant above; that variant itself also rebuilds unchanged -- behaviourally
+unchanged, not merely "the same number": `isp_pico.c`'s new
+`isp_stream_start()` crop-vs-output-format guard IS compiled for every
+sensor (IMX296 included), but is a no-op for it (`crop-x0`/`crop-y0`
+default to 0, so the check always passes); the IMX296 build also never
+touches the `sony_imx335` DT compat, so every
+`#if DT_HAS_COMPAT_STATUS_OKAY(sony_imx335)` branch compiles out of it
+entirely, and its own gain-conversion Kconfig values stay at
+`VIDEO_ISP_VSI_SNS_GAIN_CTRL_PER_DB_TENTH`=1/`VIDEO_ISP_VSI_SNS_GAIN_CTRL_STEP`=1
+(both no-ops) -- confirmed by rebuilding it, not inferred from matching
+SRAM0 numbers alone. Colour/AWB/CCM accuracy, the frame rate as measured
+AT THE SENSOR by an independent method (runs 333/334's HMAX/VMAX I2C
+readback confirms the DRIVER'S OWN state, not an external timing
+measurement), and AE behaviour in varied lighting all remain unverified.
+
+**Bench-only note (runs 333/334's J-Link RAM-run, not a product change):** the
+IMX335 build above overflowed ITCM by 4136 B under
+`docs/aen-bench-bringup.md`'s § Flow C RAM-run retarget (`zephyr,flash =
+&itcm`, needed to J-Link-load without touching MRAM) and needed a
+bench-only shell-trim conf layered on top to fit (the same class of
+headroom problem that section's `aen-flowc-itcm.conf` already documents
+for other examples, not something specific to this app's own `prj.conf`).
+This is purely an artifact of the RAM-run bench flow's smaller ITCM
+budget — the product build (Flow D/MRAM-XIP, or any customer build that
+doesn't retarget to ITCM) is unaffected, and `prj.conf` was NOT changed to
+work around it.
+
 ### Ethernet MAC address changes every boot (investigated, not fixed)
 
 Bench runs 312-314 each logged a DIFFERENT MAC address

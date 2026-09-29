@@ -38,7 +38,7 @@ ATOC over SWD in ~0.16 s, verifies it, then a reset of type `nRESET` (RSetType
 2) re-runs the SE boot ROM so the app boots from MRAM.
 
 Requires **J-Link V9.46+ DLL** (the bench has V9.50). Helper:
-`bench-builds/flash-jlink.sh`.
+`scripts/bench/aen/flash-jlink.sh`.
 
 > **Probe firmware gotcha.** A version-mismatched probe forces a J-Link
 > firmware update on first connect. That update **times out over a USB hub** —
@@ -185,11 +185,15 @@ ITCM so J-Link can `loadbin` + run. **Every** RAM-run app overlay must contain:
 ```dts
 / {
     chosen {
-        zephyr,flash = <&itcm>;
+        zephyr,flash = &itcm; /* path-ref form -- the pointer form
+                                 (<&itcm>) makes FLASH_SIZE=0 and
+                                 overflows the link */
         /delete-property/ zephyr,code-partition;
     };
 };
 ```
+
+(The shipped overlay is `scripts/bench/aen/aen-flowc-itcm.overlay`.)
 
 Combine it with the flow-B RAM console `prj.conf` above so you can read the
 result over SWD. Build with the carrier board target and the module paths:
@@ -225,7 +229,7 @@ normal, not a fault.
 start it:
 
 ```
-J-Link> loadbin build/zephyr/zephyr.bin, <ITCM-base>
+J-Link> loadbin build/zephyr/zephyr.bin <ITCM-base>
 J-Link> setpc <ITCM-base>
 J-Link> go
 ```

@@ -75,7 +75,7 @@ alp_counter_t *alp_counter_open(const alp_counter_config_t *cfg)
 	}
 	h->backend              = be;
 	h->state.ops            = ops;
-	alp_capabilities_t caps = { .flags = be->base_caps };
+	alp_capabilities_t caps = { .flags = be->base_caps, .class_flags = be->base_class_flags };
 	if (be->probe != NULL) {
 		uint32_t refined = caps.flags;
 		(void)be->probe(cfg->counter_id, &refined);
@@ -175,6 +175,14 @@ alp_status_t alp_counter_set_alarm(alp_counter_t         *h,
 	} else {
 		rc = h->state.ops->set_alarm(&h->state, ticks_from_now, h);
 	}
+	if (rc != ALP_OK) {
+		/* Backend refused (e.g. ALP_ERR_BUSY) or has no set_alarm op --
+		 * roll back so a leaked driver-side alarm from a PRIOR handle
+		 * can't reach this one through a callback we installed but the
+		 * backend never actually armed. #1627 */
+		h->state.alarm_cb   = NULL;
+		h->state.alarm_user = NULL;
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -210,6 +218,12 @@ void alp_counter_close(alp_counter_t *h)
 	if (h->state.ops != NULL && h->state.ops->close != NULL) {
 		h->state.ops->close(&h->state);
 	}
+	/* Clear the alarm callback the trampoline dereferences (#1627) so
+	 * the NULL guard in _alarm_trampoline is armed for the window
+	 * between this close and the slot's next open, independent of
+	 * what any one backend's close() does. */
+	h->state.alarm_cb   = NULL;
+	h->state.alarm_user = NULL;
 	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	_free(h);
 }

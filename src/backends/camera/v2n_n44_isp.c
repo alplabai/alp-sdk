@@ -221,6 +221,7 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
                              alp_camera_backend_state_t *state,
                              alp_capabilities_t         *caps_out)
 {
+	(void)caps_out;
 	if (cfg == NULL || cfg->camera_id >= ARRAY_SIZE(_devs)) {
 		return ALP_ERR_INVAL;
 	}
@@ -354,6 +355,8 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	}
 	st->vbuf_count = want;
 
+	state->fps_x1000 = alp_camera_read_fps_x1000(dev); /* #2279 */
+
 	state->be_data = st;
 	/* Advertise the ISP-present capability so callers querying
      * alp_camera_capabilities() see a backend-specific flag set;
@@ -361,7 +364,6 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
      * once that bit is allocated (TBD: cap_instance flag bit for
      * "on-die ISP available").  Today base_caps stays 0 so the
      * v0.5 snapshot reflects the surface ABI exactly. */
-	caps_out->flags = 0u;
 	return ALP_OK;
 }
 

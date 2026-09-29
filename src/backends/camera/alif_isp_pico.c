@@ -39,8 +39,10 @@
  *     AE (VIDEO_CID_EXPOSURE_AUTO) turned on via the standard Zephyr video
  *     ctrl registry before the first video_stream_start(), the caller's
  *     requested frame interval (cfg->fps, falling back to a 10 fps default
- *     -- a choice, not a hardware limit -- when unset; see the DT_NODE_EXISTS
- *     block below), then the ISP OUTPUT format.  The ISP MI
+ *     -- a choice, not a hardware limit -- when unset; forwarded to whichever
+ *     real sensor is wired behind the ISP by video_set_frmival(dev, ...)
+ *     itself, see the fps-forwarding block below), then the ISP OUTPUT
+ *     format.  The ISP MI
  *     never produces RGB565 (isp_pico.c's supported_output_fmts is
  *     YUV/mono/Bayer only) -- a caller requesting ALP_PIXFMT_RGB565 gets a
  *     negotiated YUV output (YUV420 planar preferred, YUYV fallback -- see
@@ -109,6 +111,7 @@ LOG_MODULE_REGISTER(alp_camera_alif_isp_pico, CONFIG_LOG_DEFAULT_LEVEL);
 #include "camera_frmival.h"
 #include "camera_ops.h"
 #include "alif_isp_pico.h"
+#include "camera_frmival.h"
 #include "alp_slot_claim.h"
 #include "yuv_to_rgb565.h"
 
@@ -201,10 +204,52 @@ static uint32_t _to_video_fourcc(alp_pixfmt_t fmt)
  * is an unambiguous stand-in for "IMX296 is this board's sensor" -- a board wiring both OV5647 and
  * IMX296 to the same ISP input at once is not a configuration this SDK supports.
  */
-#if DT_HAS_COMPAT_STATUS_OKAY(sony_imx296)
+#if DT_HAS_COMPAT_STATUS_OKAY(sony_imx296) && DT_HAS_COMPAT_STATUS_OKAY(sony_imx335)
+#error "IMX296 and IMX335 both DT_HAS_COMPAT_STATUS_OKAY at once -- ALIF_ISP_INPUT_FOURCC/WIDTH/" \
+	"HEIGHT below and isp_open()'s IMX335 output-size check assume exactly one Bayer sensor " \
+	"is wired to the ISP input (see the comment above), same assumption the fourcc choice " \
+	"already documented before IMX335 existed. A board wiring both at once needs this backend" \
+	" reworked, not silently picking one."
+#endif
+
+#if DT_HAS_COMPAT_STATUS_OKAY(sony_imx296) || DT_HAS_COMPAT_STATUS_OKAY(sony_imx335)
 #define ALIF_ISP_INPUT_FOURCC VIDEO_PIX_FMT_SRGGB10P
 #else
 #define ALIF_ISP_INPUT_FOURCC VIDEO_PIX_FMT_SBGGR10P
+#endif
+
+/*
+ * ISP INPUT size, issue #2327 Stage B: every other sensor's ISP INPUT size equals the caller's
+ * REQUESTED size (cfg->width/height below) -- OV5647's 640x480 native output and IMX296's
+ * 1280x960 ROI crop both already match what a caller asks for. IMX335 has no in-sensor crop this
+ * driver uses: its native 2x2-binned output is a FIXED 1296x972, and the requested 1280x960 is
+ * produced by the ISP's OWN crop instead -- crop-x0/crop-y0 on &isp, set by the SHIELD
+ * (zephyr/boards/shields/innomaker_cam_imx335/innomaker_cam_imx335.overlay, not a per-example
+ * overlay: the crop is a property of THIS SENSOR MODULE, so tying it to one example instead
+ * would leave the pinned 1296/972 input size here disconnected from whatever crop-x0/crop-y0 a
+ * given board happened to set). Reads the shield's own DT values (DT_PROP below) rather than
+ * hardcoding 8/6 a second time, and BUILD_ASSERTs they
+ * still produce the 1280x960 every IMX335 example/scenario budgets its buffers for -- a future
+ * shield edit that changes the crop without updating this backend fails the BUILD, not silently
+ * mismatches at isp_stream_start() (zephyr/drivers/video/isp_pico.c's own out_form_rect check).
+ * 0/0 (every other sensor) means "use cfg->width/height unchanged", the existing behaviour.
+ */
+#if DT_HAS_COMPAT_STATUS_OKAY(sony_imx335)
+#define ALIF_ISP_INPUT_WIDTH       1296
+#define ALIF_ISP_INPUT_HEIGHT      972
+#define ALIF_ISP_IMX335_CROP_X0    DT_PROP(DT_NODELABEL(isp), crop_x0)
+#define ALIF_ISP_IMX335_CROP_Y0    DT_PROP(DT_NODELABEL(isp), crop_y0)
+#define ALIF_ISP_IMX335_OUT_WIDTH  (ALIF_ISP_INPUT_WIDTH - 2 * ALIF_ISP_IMX335_CROP_X0)
+#define ALIF_ISP_IMX335_OUT_HEIGHT (ALIF_ISP_INPUT_HEIGHT - 2 * ALIF_ISP_IMX335_CROP_Y0)
+BUILD_ASSERT(ALIF_ISP_IMX335_OUT_WIDTH == 1280,
+             "innomaker_cam_imx335.overlay's &isp crop-x0 must crop 1296 down to 1280 -- "
+             "update this backend's/every IMX335 example's assumed output size to match");
+BUILD_ASSERT(ALIF_ISP_IMX335_OUT_HEIGHT == 960,
+             "innomaker_cam_imx335.overlay's &isp crop-y0 must crop 972 down to 960 -- "
+             "update this backend's/every IMX335 example's assumed output size to match");
+#else
+#define ALIF_ISP_INPUT_WIDTH  0
+#define ALIF_ISP_INPUT_HEIGHT 0
 #endif
 
 /* Output fourccs this backend converts to RGB565 on the CPU when the
@@ -291,6 +336,7 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
                              alp_camera_backend_state_t *state,
                              alp_capabilities_t         *caps_out)
 {
+	(void)caps_out;
 	if (cfg == NULL || cfg->camera_id >= ARRAY_SIZE(_devs)) {
 		return ALP_ERR_INVAL;
 	}
@@ -301,6 +347,20 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	    cfg->format == ALP_PIXFMT_RAW10) {
 		return ALP_ERR_NOSUPPORT;
 	}
+#if DT_HAS_COMPAT_STATUS_OKAY(sony_imx335)
+	/*
+	 * IMX335's ISP INPUT is pinned to its fixed native
+	 * 1296x972 (ALIF_ISP_INPUT_WIDTH/HEIGHT above), regardless of cfg->width/height -- so a
+	 * caller requesting anything OTHER than the shield's own crop result
+	 * (ALIF_ISP_IMX335_OUT_WIDTH/HEIGHT, BUILD_ASSERTed above to be 1280x960) would silently
+	 * get a 1280x960 frame back no matter what it asked for. Fail loudly here instead of
+	 * letting isp_stream_start()'s own out_form_rect-vs-output_fmt check (isp_pico.c) catch
+	 * the SAME mismatch three calls later with a less specific error.
+	 */
+	if (cfg->width != ALIF_ISP_IMX335_OUT_WIDTH || cfg->height != ALIF_ISP_IMX335_OUT_HEIGHT) {
+		return ALP_ERR_OUT_OF_RANGE;
+	}
+#endif
 	const struct device *dev = _devs[cfg->camera_id];
 	if (dev == NULL || !device_is_ready(dev)) {
 		return ALP_ERR_NOT_READY;
@@ -317,8 +377,8 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	struct video_format in_fmt = {
 		.type        = VIDEO_BUF_TYPE_INPUT,
 		.pixelformat = ALIF_ISP_INPUT_FOURCC,
-		.width       = cfg->width,
-		.height      = cfg->height,
+		.width       = ALIF_ISP_INPUT_WIDTH ? ALIF_ISP_INPUT_WIDTH : cfg->width,
+		.height      = ALIF_ISP_INPUT_HEIGHT ? ALIF_ISP_INPUT_HEIGHT : cfg->height,
 	};
 	int err = video_set_format(dev, &in_fmt);
 	if (err != 0) {
@@ -513,10 +573,10 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 		}
 	}
 
-	state->be_data = st;
+	state->fps_x1000 = alp_camera_read_fps_x1000(dev); /* #2279 */
+	state->be_data   = st;
 	/* base_caps stays 0 so the surface ABI is reflected exactly; the
 	 * ISP-present cap bit is advertised once cap_instance.h allocates it. */
-	caps_out->flags = 0u;
 	return ALP_OK;
 }
 

@@ -63,3 +63,12 @@ alp_status_t alp_camera_configure_isp(alp_camera_t *c, const alp_camera_isp_conf
 	return ALP_ERR_NOSUPPORT;
 }
 #endif /* !ALP_VENDOR_OVERRIDES_CAMERA */
+
+#if !defined(ALP_VENDOR_OVERRIDES_CAMERA)
+alp_status_t alp_camera_get_fps(alp_camera_t *c, uint32_t *fps_x1000)
+{
+	if (fps_x1000 == NULL) return ALP_ERR_INVAL;
+	(void)c;
+	return ALP_ERR_NOSUPPORT;
+}
+#endif /* !ALP_VENDOR_OVERRIDES_CAMERA */

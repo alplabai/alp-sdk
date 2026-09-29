@@ -7,7 +7,7 @@ references SDK identifiers that no longer exist, when a top-level
 doc isn't linked from the docs index, or when CC3501E docs/examples
 describe the current bridge as the obsolete CS-less design.
 
-Five independent checks:
+Seven independent checks:
 
   (a) Dead-symbol references.  Every `ALP_[A-Z0-9_]+` and
       `alp_[a-z0-9_]+` token mentioned in a customer doc -- including a
@@ -87,6 +87,22 @@ Five independent checks:
       one of the matrix's own per-family totals must carry the matching
       numerator.
 
+  (f) Removed chip-driver symbols.  Any whole identifier in the scanned
+      docs that is named in docs/abi/removed-symbols.json (across all
+      releases) but is NOT declared in any include/alp/**/*.h header is
+      drift -- the ledger records deliberate removals, so a live doc
+      still naming one has missed the rename/removal.  A ledger name
+      that has since been re-added to a header is still current.
+
+  (g) Unknown board macros.  Any `X?EVK_[A-Z0-9_]+` token in the scanned
+      docs that is not `#define`d in any include/alp/boards/*.h header is
+      drift (a macro rename or a board that never shipped).  Trailing
+      wildcards (`EVK_PIN_*`) and bare family prefixes (`EVK_`) pass.
+
+      Both (f) and (g) scan docs/*.md (top level), docs/boards/**/*.md,
+      and docs/soms/**/*.md only -- CHANGELOG.md, changelog.d/,
+      docs/abi/**, docs/superpowers/**, and docs/adr/** are exempt.
+
 Run from the repo root:
 
     python3 scripts/check_doc_drift.py                  # both checks
@@ -98,6 +114,7 @@ Exits non-zero if any check finds a problem.
 from __future__ import annotations
 
 import argparse
+import json
 import pathlib
 import re
 import sys
@@ -276,6 +293,28 @@ _BOARD_YML_NAME_RE = re.compile(r"^\s*name:\s*(\S+)", re.MULTILINE)
 
 # docs/ subdirectories scanned recursively for dead symbols.
 _DOC_SUBDIRS = ("tutorials", "soms", "boards", "bench")
+
+# ABI removal ledger (github issue #2346): the removed-symbol and unknown-
+# board-macro checks read the names below but deliberately do NOT scan the
+# ledger's own docs/abi/** surface (it narrates removed names by design).
+_REMOVED_SYMBOLS_JSON = pathlib.Path("docs") / "abi" / "removed-symbols.json"
+
+# Scope for the #2346 checks: docs/*.md (top level only), plus the
+# docs/boards/** and docs/soms/** trees.  Narrower than the dead-symbol
+# scan: no README.md, vendors/**, tutorials/**, bench/**.
+_REMOVED_BOARD_MACRO_DOC_SUBDIRS = ("boards", "soms")
+
+# Whole identifier tokens -- [A-Za-z0-9_]+ already implies word bounds, so
+# membership tests against a symbol set only ever match a full token.
+_IDENT_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
+
+# Board-macro shape (X?EVK_<...>) documented by customer docs; a token
+# not `#define`d in include/alp/boards/*.h is drift.
+_BOARD_MACRO_RE = re.compile(r"^X?EVK_[A-Z0-9_]+$")
+
+# The `#define NAME` sites that prove a board macro is real.
+_BOARD_MACRO_DEFINE_RE = re.compile(r"^\s*#\s*define\s+([A-Za-z0-9_]+)",
+                                    re.MULTILINE)
 
 # Top-level docs/*.md that are forward-looking design / proposal docs:
 # they document APIs that don't exist yet *by intent*, so they are
@@ -556,6 +595,132 @@ def find_dead_symbols(root: pathlib.Path, known: set[str],
     return dead
 
 
+def load_removed_symbols(path: pathlib.Path) -> dict[str, str]:
+    """Return {symbol: replacement} for every entry in the ABI removal
+    ledger (docs/abi/removed-symbols.json), across all releases; the
+    replacement is "" when the ledger names none.  Missing or malformed
+    files yield an empty dict -- absence of the ledger is not itself a
+    drift finding."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {entry["symbol"]: entry.get("replacement") or ""
+            for entry in data.get("removed", []) if entry.get("symbol")}
+
+
+def collect_declared_header_symbols(root: pathlib.Path) -> set[str]:
+    """Return every identifier token that appears in any
+    include/alp/**/*.h header.  A ledger name still present in a header
+    has been re-added, so it is not drift (#2346)."""
+    declared: set[str] = set()
+    include = root / "include"
+    if not include.is_dir():
+        return declared
+    for header in include.rglob("*.h"):
+        try:
+            text = header.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        declared.update(_IDENT_TOKEN_RE.findall(text))
+    return declared
+
+
+def collect_board_macros(root: pathlib.Path) -> set[str]:
+    """Return every macro `#define`d in include/alp/boards/*.h -- the
+    ground truth for the unknown-board-macro check (#2346)."""
+    macros: set[str] = set()
+    boards = root / "include" / "alp" / "boards"
+    if not boards.is_dir():
+        return macros
+    for header in boards.rglob("*.h"):
+        try:
+            text = header.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        macros.update(_BOARD_MACRO_DEFINE_RE.findall(text))
+    return macros
+
+
+def removed_board_macro_doc_files(root: pathlib.Path) -> list[pathlib.Path]:
+    """Customer docs in scope for the #2346 checks: docs/*.md (top level)
+    plus docs/boards/**/*.md and docs/soms/**/*.md."""
+    out: list[pathlib.Path] = []
+    docs = root / "docs"
+    if not docs.is_dir():
+        return out
+    out.extend(sorted(docs.glob("*.md")))                    # top level only
+    for sub in _REMOVED_BOARD_MACRO_DOC_SUBDIRS:
+        d = docs / sub
+        if d.is_dir():
+            out.extend(sorted(d.rglob("*.md")))              # recursive
+    return out
+
+
+def scan_removed_symbol_refs(text: str, removed: dict[str, str],
+                             declared: set[str]) -> list[tuple[int, str]]:
+    """Return [(line_no, name)] for each removed ledger symbol named in
+    `text` that is not currently declared in a header.  A line that also
+    names the ledger's replacement is explaining the rename, not relying
+    on the old name, so it passes."""
+    found: list[tuple[int, str]] = []
+    for line_no, line in enumerate(text.splitlines(), 1):
+        tokens = set(_IDENT_TOKEN_RE.findall(line))
+        for tok in sorted(tokens):
+            if tok not in removed or tok in declared:
+                continue
+            if removed[tok] and removed[tok] in tokens:
+                continue
+            found.append((line_no, tok))
+    return found
+
+
+def scan_unknown_board_macros(text: str, defined: set[str],
+                              removed: frozenset[str] = frozenset()
+                              ) -> list[tuple[int, str]]:
+    """Return [(line_no, name)] for each EVK_/XEVK_ token in `text` that
+    is not `#define`d in a board header.  Trailing-underscore tokens --
+    a `FOO_*` wildcard or a bare `EVK_`/`XEVK_` prefix in prose -- pass,
+    and names in the removal ledger are left to the removed-symbol check
+    so one stale reference is reported once."""
+    found: list[tuple[int, str]] = []
+    for line_no, line in enumerate(text.splitlines(), 1):
+        for m in _IDENT_TOKEN_RE.finditer(line):
+            tok = m.group(0)
+            if not _BOARD_MACRO_RE.match(tok) or tok.endswith("_"):
+                continue
+            if tok not in defined and tok not in removed:
+                found.append((line_no, tok))
+    return found
+
+
+def find_removed_symbol_refs(root: pathlib.Path, removed: dict[str, str],
+                             declared: set[str]) -> list[tuple[str, int, str]]:
+    """Return [(relpath, line_no, name)] for removed ledger symbols still
+    named in customer docs."""
+    refs: list[tuple[str, int, str]] = []
+    for doc in removed_board_macro_doc_files(root):
+        rel = doc.relative_to(root).as_posix()
+        text = doc.read_text(encoding="utf-8", errors="replace")
+        for line_no, tok in scan_removed_symbol_refs(text, removed, declared):
+            refs.append((rel, line_no, tok))
+    return refs
+
+
+def find_unknown_board_macros(root: pathlib.Path, defined: set[str],
+                              removed: frozenset[str] = frozenset()
+                              ) -> list[tuple[str, int, str]]:
+    """Return [(relpath, line_no, name)] for EVK_/XEVK_ tokens named in
+    customer docs but not defined in include/alp/boards/*.h."""
+    unknown: list[tuple[str, int, str]] = []
+    for doc in removed_board_macro_doc_files(root):
+        rel = doc.relative_to(root).as_posix()
+        text = doc.read_text(encoding="utf-8", errors="replace")
+        for line_no, tok in scan_unknown_board_macros(text, defined, removed):
+            unknown.append((rel, line_no, tok))
+    return unknown
+
+
 def find_index_gaps(root: pathlib.Path) -> list[str]:
     """Return top-level docs/*.md filenames not linked from docs/README.md."""
     docs = root / "docs"
@@ -734,6 +899,13 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     known = collect_known_symbols(root) | collect_real_board_names(root)
     dead = find_dead_symbols(root, known, allow)
+    removed_symbols = load_removed_symbols(root / _REMOVED_SYMBOLS_JSON)
+    declared_header_symbols = collect_declared_header_symbols(root)
+    defined_board_macros = collect_board_macros(root)
+    removed_symbol_refs = find_removed_symbol_refs(
+        root, removed_symbols, declared_header_symbols)
+    unknown_board_macros = find_unknown_board_macros(
+        root, defined_board_macros, frozenset(removed_symbols))
     gaps = find_index_gaps(root)
     stale_cc3501e = find_cc3501e_bridge_stale_claims(root)
     e1m_x_pinout_gaps = find_e1m_x_pinout_guidance_gaps(root)
@@ -746,6 +918,19 @@ def main(argv: Optional[list[str]] = None) -> int:
               file=sys.stderr)
         for rel, line_no, tok in dead:
             print(f"  {rel}:{line_no}  {tok}", file=sys.stderr)
+    if removed_symbol_refs:
+        print("Documentation references removed chip-driver symbols "
+              "(declared in docs/abi/removed-symbols.json, not in any "
+              "include/alp/**/*.h):", file=sys.stderr)
+        for rel, line_no, tok in removed_symbol_refs:
+            print(f"  {rel}:{line_no}: references removed symbol {tok} "
+                  f"(docs/abi/removed-symbols.json)", file=sys.stderr)
+    if unknown_board_macros:
+        print("Documentation references board macros not defined in "
+              "include/alp/boards/:", file=sys.stderr)
+        for rel, line_no, tok in unknown_board_macros:
+            print(f"  {rel}:{line_no}: board macro {tok} is not defined in "
+                  f"include/alp/boards/", file=sys.stderr)
     if gaps:
         print("Top-level docs/*.md not linked from docs/README.md:",
               file=sys.stderr)
@@ -779,19 +964,22 @@ def main(argv: Optional[list[str]] = None) -> int:
                   file=sys.stderr)
 
     if (dead or gaps or stale_cc3501e or e1m_x_pinout_gaps
-            or matrix_total_drift or example_preset_count_drift):
+            or matrix_total_drift or example_preset_count_drift
+            or removed_symbol_refs or unknown_board_macros):
         print(f"\ndoc-drift: {len(dead)} dead ref(s), {len(gaps)} index "
               f"gap(s), {len(stale_cc3501e)} stale CC3501E bridge "
               f"claim(s), {len(e1m_x_pinout_gaps)} E1M-X pinout "
               f"guidance gap(s), {len(matrix_total_drift)} stale matrix "
               f"total(s), {len(example_preset_count_drift)} stale example "
-              f"preset count(s) -- failing.", file=sys.stderr)
+              f"preset count(s), {len(removed_symbol_refs)} removed-symbol "
+              f"ref(s), {len(unknown_board_macros)} unknown board "
+              f"macro(s) -- failing.", file=sys.stderr)
         return 1
 
     print("doc-drift: OK (no dead symbol refs, docs index complete, "
           "CC3501E bridge wording current, E1M-X pinout guidance current, "
           "portability-matrix totals in sync, example preset count in "
-          "sync).")
+          "sync, no removed-symbol or unknown board-macro refs).")
     return 0
 
 

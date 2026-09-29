@@ -692,7 +692,17 @@ stage_pytest_scripts() {
         echo "stage_pytest_scripts: python3 ($(command -v python3)) cannot import pytest. Activate the zephyrproject venv or: pip install pytest."
         return 99
     fi
-    python3 -m pytest tests/scripts/ -q || return 1
+    # pytest-xdist (a [dev] dependency since #2328) spreads the ~4,400 tests
+    # over every core, as CI does: a parallel sweep, then the modules that
+    # write into the real checkout on their own (tests/scripts/conftest.py
+    # _REPO_WRITER_MODULES). Without xdist the stage still runs, serially.
+    if python3 -c 'import xdist' >/dev/null 2>&1; then
+        python3 -m pytest tests/scripts/ -q -n auto -m "not repo_writes" || return 1
+        python3 -m pytest tests/scripts/ -q -m repo_writes || return 1
+    else
+        echo "stage_pytest_scripts: pytest-xdist not importable; running serially (pip install -e \".[dev]\" to parallelise)."
+        python3 -m pytest tests/scripts/ -q || return 1
+    fi
 
     # tests/parity/ is NOT under tests/scripts/, so the seam-1 comparator's own
     # 15 unit tests were excluded from this stage AND from parity-seam1.yml,
@@ -764,16 +774,30 @@ stage_required_gate_scripts() {
     # like a real gate break rather than a host gap.  Gate the whole
     # stage: a partial pass here is not a meaningful verdict either.
     require_jsonschema_2020 stage_required_gate_scripts || return 99
-    local script path failed=0 ran=0
+    local script path failed=0 ran=0 jobdir rc
+    # Run the scripts in parallel (read-only checks; ALP_GATE_JOBS, default
+    # 8), then print each one's output in list order so the log reads the
+    # same as the old serial loop.  ~214 s -> ~55 s on alplab-gw.
+    # check_public_private.py is skipped here: stage_public_private runs it.
+    jobdir=$(mktemp -d)
     for script in "${REQUIRED_GATE_SCRIPTS[@]}"; do
+        [ "${script}" = "check_public_private.py" ] && continue
+        [ -f "scripts/${script}" ] && printf '%s
+' "${script}"
+    done | xargs -P "${ALP_GATE_JOBS:-8}" -I{}         sh -c 'python3 "scripts/$1" >"$2/$1.out" 2>&1; echo $? >"$2/$1.rc"' _ {} "${jobdir}"
+    for script in "${REQUIRED_GATE_SCRIPTS[@]}"; do
+        [ "${script}" = "check_public_private.py" ] && continue
         path="scripts/${script}"
         if [ ! -f "${path}" ]; then
             continue
         fi
         ran=1
         echo "--- ${path} ---"
-        python3 "${path}" || failed=1
+        cat "${jobdir}/${script}.out" 2>/dev/null
+        rc=$(cat "${jobdir}/${script}.rc" 2>/dev/null || echo 1)
+        [ "${rc}" = "0" ] || failed=1
     done
+    rm -rf "${jobdir}"
 
     # board.yaml schema sweep -- canonical template + every
     # examples/*/board.yaml + tests/*/board.yaml, mirroring the

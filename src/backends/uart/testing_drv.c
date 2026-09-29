@@ -237,14 +237,14 @@ size_t alp_testing_uart_tx_drain(uint32_t port_id, uint8_t *out, size_t cap)
 static alp_status_t
 t_open(const alp_uart_config_t *cfg, alp_uart_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	alp_testing_uart_slot_t *slot = alp_testing_instance_table_touch(table(), cfg->port_id);
 	if (slot == NULL) return ALP_ERR_NOMEM;
 
-	st->dev         = NULL;
-	st->port_id     = cfg->port_id;
-	st->be_data     = slot;
-	st->rx_ringbuf  = NULL;
-	caps_out->flags = 0u;
+	st->dev        = NULL;
+	st->port_id    = cfg->port_id;
+	st->be_data    = slot;
+	st->rx_ringbuf = NULL;
 	return ALP_OK;
 }
 
