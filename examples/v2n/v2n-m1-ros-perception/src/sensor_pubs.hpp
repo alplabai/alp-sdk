@@ -36,9 +36,9 @@ class SensorPublishers
 	rclcpp::TimerBase::SharedPtr                                 imu_timer_;
 	rclcpp::TimerBase::SharedPtr                                 telem_timer_;
 
-	alp_i2c_t      *i2c_      = nullptr;
-	icm42670_t      imu_{};
-	ina236_t        rail_{};
+	alp_i2c_t *i2c_ = nullptr;
+	icm42670_t imu_{};
+	ina236_t   rail_{};
 };
 
 } // namespace alp
