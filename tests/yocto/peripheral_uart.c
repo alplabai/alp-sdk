@@ -36,7 +36,7 @@
 
 #include "test_assert.h"
 
-/* /dev/ttyS999 will not exist on any sane CI runner. */
+/* A port id inside the valid ranges whose device node will not exist on any CI runner. */
 #define ALP_TEST_PORT_NONEXISTENT \
 	299u /* /dev/ttyUSB99: in range, absent on any host (>= 400 is ALP_ERR_INVAL, #2458) */
 
