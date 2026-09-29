@@ -100,7 +100,8 @@ struct DeepxState {
 	size_t         model_size = 0u;
 
 	/* Guards `engine`, `outputs` and `last_outputs` against a rebind:
-	 * invoke/get_output take it shared, bind_cores exclusive. */
+	 * get_output takes it shared; invoke (writes last_outputs) and
+	 * bind_cores take it exclusive. */
 	std::shared_mutex engine_mtx;
 
 	/* SDK-owned input staging buffers (one contiguous blob per input
@@ -374,7 +375,12 @@ extern "C" alp_status_t alp_inference_deepx_invoke(struct alp_inference *h_)
 	if (st == nullptr) {
 		return ALP_ERR_NOT_READY;
 	}
-	std::shared_lock<std::shared_mutex> lk(st->engine_mtx);
+	/* Exclusive: this writes last_outputs, which get_output() reads under
+	 * the shared lock, and Run() consumes the shared input_bufs.  A shared
+	 * lock here let two invokes (or invoke vs get_output) race on the
+	 * shared_ptr vector.  Run() is synchronous on one engine, so
+	 * serialising invokes costs no real throughput. */
+	std::unique_lock<std::shared_mutex> lk(st->engine_mtx);
 	if (st->engine == nullptr) {
 		return ALP_ERR_NOT_READY;
 	}
