@@ -1884,9 +1884,9 @@ static uint32_t cc3501e_expected_reply_bytes(alp_cc3501e_cmd_t cmd,
 
 static uint32_t cc3501e_reply_header_gate_us(const cc3501e_t *ctx, uint32_t bytes)
 {
-	const uint32_t large_bytes = ctx->fw_fast_reply
-	                                 ? (uint32_t)(ALP_CC3501E_MAX_PAYLOAD - ALP_CC3501E_HEADER_BYTES)
-	                                 : (uint32_t)CC3501E_REPLY_GATE_LARGE_BYTES;
+	const uint32_t large_bytes =
+	    ctx->fw_fast_reply ? (uint32_t)(ALP_CC3501E_MAX_PAYLOAD - ALP_CC3501E_HEADER_BYTES)
+	                       : (uint32_t)CC3501E_REPLY_GATE_LARGE_BYTES;
 	const uint32_t large_us =
 	    ctx->fw_fast_reply ? CC3501E_REPLY_GATE_FAST_LARGE_US : CC3501E_REPLY_GATE_LARGE_US;
 
