@@ -18,16 +18,15 @@
 //   │                                                          │
 //   │   ┌──────────┐ ┌──────────┐ ┌──────────────────┐         │
 //   │   │ sensors  │ │ camera   │ │ DEEPX / DRP-AI   │         │
-//   │   │ (LSM6DSO │ │ capture  │ │ object detector  │         │
-//   │   │  GNSS    │ │ pipeline │ │ (cnn yolov*-style)│         │
-//   │   │  INA236) │ │          │ │                  │         │
+//   │   │ (ICM42670│ │ capture  │ │ object detector  │         │
+//   │   │ +INA236  │ │ pipeline │ │ (cnn yolov*-style)│         │
+//   │   │ 3V3 rail)│ │          │ │                  │         │
 //   │   └─────┬────┘ └─────┬────┘ └────────┬─────────┘         │
 //   │         │            │               │                   │
 //   │         ▼            ▼               ▼                   │
 //   │   /alp/imu        /alp/image    /alp/detections           │
-//   │   /alp/gnss      (sensor_msgs)  (vision_msgs/             │
-//   │   /alp/battery                    Detection2DArray)       │
-//   │   (sensor_msgs)                                           │
+//   │   /alp/rail_3v3  (sensor_msgs)  (vision_msgs/             │
+//   │   (sensor_msgs)                   Detection2DArray)       │
 //   └─────────────────────────────────────────────────────────┘
 //
 //                              ▲
@@ -98,7 +97,7 @@ class PerceptionNode : public rclcpp::Node
 		// on /alp/detections.
 		dispatcher_ = std::make_unique<DeepxDispatcher>(*this);
 
-		// Bring up the sensor publishers (IMU + GNSS + battery).
+		// Bring up the sensor publishers (IMU + 3V3 rail monitor).
 		// sensor_pubs.cpp owns the alp_i2c_t handles + the 50 Hz
 		// sample timer.
 		sensors_ = std::make_unique<SensorPublishers>(*this);
