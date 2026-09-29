@@ -173,6 +173,11 @@ def main() -> int:
         # ccache (when present) turns every unchanged (source, macro-set)
         # compile into a hit on the next run.
         ccache = shutil.which("ccache")
+        # ...unless `cc` already resolves to ccache (a masquerade directory
+        # of compiler-named symlinks): wrapping it again is "Recursive
+        # invocation of ccache".
+        if ccache and Path(shutil.which(cc) or cc).resolve().name.startswith("ccache"):
+            ccache = None
         driver = [ccache, cc] if ccache else [cc]
         combos = _combos()
         # ~30 combos x ~30 stub units of independent compiles: run the combos

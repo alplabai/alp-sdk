@@ -20,7 +20,10 @@ bounded smoke subset -- the suites the changed files sit in plus the fixed
 `hello-world`; ~2-3 min warm) -- and the row and summary say so
 (`PASS (smoke; full set runs in CI)`). The full set is CI's sharded pr-twister
 in the merge queue, which never uses the smoke mode; `--full` and
-`--target main` still run everything locally.
+`--target main` still run everything locally. This applies to the default
+invocation (no `--target`) as well as `--target dev`, which is a change from
+the default's old always-full twister. A git failure or a missing `origin/dev`
+is doubt, not a verdict, so it still runs the full set.
 
 Two pieces of duplicate work went with it. `check_stub_symbol_matrix.py` now
 compiles its 31 override combinations concurrently (through `ccache` when

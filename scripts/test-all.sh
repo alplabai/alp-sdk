@@ -95,8 +95,10 @@
 #                     main-only strict ABI-snapshot diff (pr-abi-snapshot.yml,
 #                     which triggers on main + release/** only).  Use before a
 #                     PR that targets `main` / cutting a release.
-#                     (No --target = the historical "full" run: every stage
-#                     except the main-only ABI strict diff.)
+#                     (No --target = every stage except the main-only ABI
+#                     strict diff; its twister stage is the same changed
+#                     suites + smoke subset as --target dev, not the full
+#                     set.)
 #   --quick           skip twister + Doxygen (the slow stages)
 #
 # Environment:
@@ -125,7 +127,7 @@
 #                     required-gate-scripts stages already ran) are deselected
 #                     from the pytest stage of a full run; CI's plain pytest
 #                     sweep keeps them.
-#   --yocto-only     run only stage 1 + format + metadata
+#   --yocto-only      run only stage 1 + format + metadata
 #   --zephyr-only     run only stage 3 (requires ZEPHYR_BASE)
 #   --no-clean        keep build directories between runs (faster)
 #   --list-required-gate-scripts
@@ -173,7 +175,11 @@ LIST_REQUIRED_GATE_SCRIPTS=0
 #           main-only strict ABI-snapshot diff (pr-abi-snapshot.yml, which
 #           triggers on `main` + `release/**` only).
 #   full -- (default, no flag) every stage except the main-only ABI strict
-#           diff -- the historical test-all.sh behavior, unchanged.
+#           diff.  Its twister stage behaves like dev's: skipped when
+#           select_checks.py proves nothing native_sim builds changed,
+#           otherwise the changed suites + the smoke subset -- NOT the full
+#           set, which is CI's sharded pr-twister job.  Only --target main
+#           and --full run the full twister set locally.
 TARGET=full
 
 while [ $# -gt 0 ]; do
@@ -191,7 +197,7 @@ while [ $# -gt 0 ]; do
         --main)         TARGET=main ;;
         --list-required-gate-scripts) LIST_REQUIRED_GATE_SCRIPTS=1 ;;
         -h|--help)
-            sed -n '3,112p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            sed -n '3,/^set -uo pipefail/{/^set -uo pipefail/!p;}' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -395,7 +401,9 @@ _start_detached() {
         export ALP_GATE_JOBS="${ALP_GATE_JOBS:-4}"
         export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-4}"
         export ALP_GATE_OVERLAP=1
-        "${fn}" >"${DEFER_DIR}/${name}.out" 2>&1
+        # </dev/null: the job is in its own process group, so a stage that
+        # read the terminal would be stopped by SIGTTIN and hang the run.
+        "${fn}" >"${DEFER_DIR}/${name}.out" 2>&1 </dev/null
         rc=$?
         echo "${rc} $((SECONDS - t0))" >"${DEFER_DIR}/${name}.res"
     ) &
@@ -1018,9 +1026,9 @@ stage_pytest_scripts() {
     local phase="${1:-all}"
     # `gate_duplicate` tests re-run, from pytest, the live-repo check a gate
     # stage of THIS invocation already ran (public-private,
-    # required-gate-scripts).  Skip them only when those stages ran here
-    # (SKIP_GATE_DUPLICATES, set in the full-run branch); CI's plain pytest
-    # sweep and --zephyr-only keep them.
+    # required-gate-scripts).  Skip them whenever the full-run branch
+    # schedules those stages (SKIP_GATE_DUPLICATES; a gap in one of them shows
+    # as [GAP], exit 2); CI's plain pytest sweep and --zephyr-only keep them.
     local dup="" alldup=""
     if [ "${SKIP_GATE_DUPLICATES:-0}" = "1" ]; then
         dup=" and not gate_duplicate"
@@ -1148,6 +1156,17 @@ stage_required_gate_scripts() {
         cat "${jobdir}/${script}.out" 2>/dev/null
         rc=$(cat "${jobdir}/${script}.rc" 2>/dev/null || echo 1)
         [ "${rc}" = "0" ] || failed=1
+        # These two gates' pytest twins (gate_duplicate, deselected from this
+        # run's pytest stage) also asserted the success line, which guards a
+        # run that exits 0 without checking anything.  Keep that guard here.
+        case "${script}" in
+            check_emit_snapshots.py|check_zephyr_conf_parity.py)
+                if [ "${rc}" = "0" ] && ! grep -q 'byte-identical' "${jobdir}/${script}.out" 2>/dev/null; then
+                    echo "${script}: exited 0 but printed no 'byte-identical' success line -- a vacuous run"
+                    failed=1
+                fi
+                ;;
+        esac
     done
     rm -rf "${jobdir}"
 
@@ -1523,8 +1542,11 @@ if [ "${ZEPHYR_ONLY}" -eq 1 ]; then
     # dance -- and no second, output-hiding invocation -- is needed.
     run_stage "twister" stage_twister
 else
-    # This branch runs the public-private and required-gate-scripts stages,
-    # so the pytest stage may skip the tests that only re-run them.
+    # This branch schedules the public-private and required-gate-scripts
+    # stages, so the pytest stage deselects the tests that only re-run them.
+    # If either of those stages cannot run (a 99), it surfaces as a [GAP]
+    # (exit 2) -- the run is then flagged incomplete anyway, so the missing
+    # duplicate is never a silent loss.
     SKIP_GATE_DUPLICATES=1
 
     # The full plain-CMake builds are release-grade -- the fast `dev`

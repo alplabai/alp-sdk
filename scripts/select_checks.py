@@ -385,6 +385,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     paths: list[str] = []
+    classified = False  # True only once the change set was really computed
     if args.files is None and not args.base:
         decision, reasons = "full", ["no --base or --files given"]
     else:
@@ -392,13 +393,16 @@ def main(argv: list[str] | None = None) -> int:
             paths = args.files if args.files is not None else \
                 changed_paths(args.base, args.head, args.worktree, args.root)
             decision, reasons = classify(paths, args.root)
+            classified = True
         except (subprocess.CalledProcessError, OSError, IndexError) as exc:
             decision, reasons = "full", [f"git failed ({exc}); fail-safe"]
 
     suites: list[str] = []
-    if args.local and decision == "full":
-        # Every fail-safe above still lands here as `full`; locally that means
-        # the bounded set, never the whole thing.
+    if args.local and decision == "full" and classified:
+        # The change set is KNOWN and something in it can affect native_sim:
+        # locally that means the bounded set (its suites + SMOKE_SUITES).  A
+        # git failure or a missing --base/--files is doubt, not a verdict, so
+        # it stays `full` -- selection never shrinks coverage on a guess.
         decision = "smoke"
         suites = local_suites(paths, args.root)
 

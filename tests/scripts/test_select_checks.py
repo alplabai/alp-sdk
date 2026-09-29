@@ -354,10 +354,37 @@ def test_local_adds_the_suite_a_changed_file_sits_in(capsys):
     assert "tests/unit/adc_registry" in out[1:]
 
 
-def test_local_failsafes_are_smoke_too(capsys):
-    # no --base/--files, an unresolvable base: `full` in CI, bounded locally
+def test_local_without_a_base_is_still_full(capsys):
+    # no --base/--files: the change set is unknown -- doubt stays `full`
     assert sc.main(["--local"]) == 0
-    assert capsys.readouterr().out.split()[0] == "smoke"
+    assert capsys.readouterr().out.split() == ["full"]
+
+
+def test_local_unresolvable_base_is_still_full(tmp_path, capsys):
+    # a git failure (bad --select-base, no origin/dev) is doubt, not a verdict:
+    # no smoke, no suite list -- the full run is what test-all.sh then does
+    root = _base_tree(tmp_path)
+    _git(root, "init", "-q")
+    assert sc.main(["--base", "no-such-ref", "--root", str(root), "--local"]) == 0
+    captured = capsys.readouterr()
+    assert captured.out.split() == ["full"]
+    assert "fail-safe" in captured.err
+
+
+def test_local_classified_core_change_is_smoke_with_its_suites(tmp_path, capsys):
+    # git works and the diff is known: a native_sim-relevant change -> smoke
+    # carrying the suite the changed file sits in
+    root = _base_tree(tmp_path)
+    _git(root, "init", "-q")
+    _git(root, "add", "-A")
+    _git(root, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "base")
+    src = root / "examples" / "x" / "app" / "src"
+    src.mkdir(parents=True)
+    (src / "main.c").write_text("int main(void) { return 0; }" + chr(10), encoding="utf-8")
+    assert sc.main(["--base", "HEAD", "--worktree", "--root", str(root), "--local"]) == 0
+    out = capsys.readouterr().out.split()
+    assert out[0] == "smoke"
+    assert "examples/x/app" in out[1:]
 
 
 def test_ci_mode_without_local_is_unchanged(capsys):

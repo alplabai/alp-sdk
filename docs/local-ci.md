@@ -203,12 +203,18 @@ keep it short:
   `pytest-scripts` row.
 - **No double work.** pytest tests marked `gate_duplicate` re-run, from
   pytest, exactly the live-repo check that a gate stage of the same
-  `test-all.sh` run already ran (public-private, `check_emit_snapshots.py`,
-  `check_zephyr_conf_parity.py`). A full `test-all.sh` run deselects them;
-  `--zephyr-only` and a plain `pytest tests/scripts/` (CI) still run them.
+  `test-all.sh` run runs (public-private, `check_emit_snapshots.py`,
+  `check_zephyr_conf_parity.py`). A full `test-all.sh` run deselects them
+  whenever it schedules those stages; if one of those stages cannot run it
+  shows as `[GAP]` (exit 2), so nothing is dropped silently. The two gate
+  scripts' `byte-identical` success line, which the pytest twins also
+  asserted, is required by the `required-gate-scripts` stage itself.
+  `--zephyr-only` and a plain `pytest tests/scripts/` (CI) still run the
+  pytest twins.
 
 - **Change-aware selection, and a smoke subset instead of the full set.** The
-  twister stage first asks `scripts/select_checks.py` whether the change
+  twister stage (in the default run and in `--target dev`) first asks
+  `scripts/select_checks.py` whether the change
   leaves every native_sim build input alone. It diffs against the merge base
   with `origin/dev` (so `git fetch origin dev` first; `--select-base REF`
   uses another ref) and counts uncommitted and untracked files too. A docs,
