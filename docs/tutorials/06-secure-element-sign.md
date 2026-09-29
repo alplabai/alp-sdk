@@ -57,5 +57,5 @@ a provisioning step, not an example run.
 
 * [`examples/v2n/v2n-secure-element-sign/`](../../examples/v2n/v2n-secure-element-sign/)
 * [`<alp/chips/optiga_trust_m.h>`](../../include/alp/chips/optiga_trust_m.h)
-* [`vendors/optiga-trust-m/`](../../vendors/optiga-trust-m/README.md)
+* `vendors/optiga-trust-m/README.md` -- the vendored host library and its PAL.
 * Infineon "Solution Reference Manual OPTIGA Trust M" (vendor doc).

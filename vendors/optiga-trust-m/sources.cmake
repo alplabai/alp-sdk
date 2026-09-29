@@ -39,7 +39,7 @@ set(ALP_OPTIGA_INCLUDE_DIRS
 # OPTIGA_LIB_EXTERNAL: alp's library config (Shielded Connection off).
 # OPTIGA_USE_SOFT_RESET: SE_RST is not wired to the SoC on V2N/V2M.
 set(ALP_OPTIGA_DEFINES
-    OPTIGA_LIB_EXTERNAL="alp_optiga_lib_config.h"
+    OPTIGA_LIB_EXTERNAL="optiga_lib_config_alp.h"
     OPTIGA_USE_SOFT_RESET)
 
 # Upstream code, kept byte-identical: build it without the SDK's warning

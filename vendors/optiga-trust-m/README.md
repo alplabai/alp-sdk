@@ -21,7 +21,7 @@ not enable it through `board.yaml`.  The source list lives in
 | `src/cmd`, `src/common`, `src/comms`, `src/util` | upstream, byte-identical |
 | `pal_alp/pal_os_datastore.c` | upstream `extras/pal/zephyr/pal_os_datastore.c` (portable RAM store), byte-identical |
 | `pal_alp/pal_alp.c`, `pal_alp.h` | Alp Lab: the PAL on `alp_i2c_*` + `alp_uptime_ms` / `alp_delay_ms` |
-| `pal_alp/alp_optiga_lib_config.h` | Alp Lab: upstream's Trust M V3 config, Shielded Connection off |
+| `pal_alp/optiga_lib_config_alp.h` | Alp Lab: upstream's Trust M V3 config, Shielded Connection off |
 
 Not vendored: `src/crypt` (`optiga_crypt_*`, lands with the PSA driver),
 upstream's other PALs, examples, tests and `external/` (mbedTLS).
@@ -33,7 +33,7 @@ Upstream's Linux PAL opens `/dev/i2c-N` itself and its Zephyr PAL binds
 `alp_i2c` handle.  `pal_alp.c` goes through the portable API instead,
 so one driver serves the A55 and MCU cores.  It is threadless: the
 library's timed callbacks are recorded with a due time and run from the
-driver's wait loop (`alp_optiga_pal_poll()`).
+driver's wait loop (`pal_alp.h`).
 
 ## Updating
 

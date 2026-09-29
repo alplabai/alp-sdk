@@ -58,7 +58,7 @@ still to come.
 
 * [`<alp/chips/optiga_trust_m.h>`](../../../include/alp/chips/optiga_trust_m.h)
   -- driver header.
-* [`vendors/optiga-trust-m`](../../../vendors/optiga-trust-m/README.md)
-  -- the vendored host library and its alp PAL.
+* `vendors/optiga-trust-m/README.md` -- the vendored host library and its
+  alp PAL.
 * Infineon "Solution Reference Manual OPTIGA Trust M"
   (`SRM_OPTIGA_Trust_M.pdf`) -- APDU command set + status codes.
