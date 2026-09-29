@@ -25,6 +25,15 @@
 > graduate (clear `status.preliminary`) until the real silicon
 > backend replaces the placeholder.  Preview a scaffold without
 > writing anything via `tan new-som ... --dry-run`.
+>
+> **Known gap: `tan new-som` does not scaffold `ospi_memories:` /
+> `hyperram:` for `alif:ensemble` parts** (tracked at
+> [tan-cli#1220](https://github.com/alplabai/tan-cli/issues/1220); see
+> alp-sdk#1944 and `changelog.d/1944.md` for why this stays a tan-cli
+> port rather than an alp-sdk one). Fill both blocks in by hand from
+> the template in §5, "Step 2 — Create the SoM YAML", below —
+> `validate_metadata.py` enforces their schema shape either way, so this
+> is a generation-time convenience gap, not a validation gap.
 
 "Porting a new SoM" in the Alp SDK means *adding one row of
 machine-readable metadata*.  It is **not**:
@@ -173,6 +182,7 @@ artifact per silicon SKU.
   ],
   "soc_ram_kb": 13824,
   "soc_flash_mb": 5.5,
+  "soc_flash_base": 2147483648,
   "always_on_sram_kb": 4,
   "peripherals": {},
   "capabilities": {
@@ -225,6 +235,7 @@ artifact per silicon SKU.
 | `peripherals`                   | Counts per peripheral kind; drives `ALP_SOC_*_COUNT` ceilings in the same generated header.  `{}` is legal but trips the `pending_*` warning.          |
 | `peripherals_unverified`        | Array of `peripherals` keys whose count has no datasheet/DFP/HWRM citation in this file (#936) — e.g. a value copied from a sibling part and never independently confirmed. `scripts/gen_soc_caps.py` prints an `UNVERIFIED` comment above the SoC's block in `soc_caps.h`; `validate_metadata.py` warns if a listed key doesn't exist in `peripherals`. Use this — listing every key, if that's every key — even when the WHOLE block is inherited wholesale from a sibling (e.g. E5 from E7): `pending_reference_manual_ingestion: true` means something narrower, "`peripherals: {}` / counts default to zero," which is false for a fully-populated-but-uncited block and produces a wrong `validate_metadata.py` WARN. `pending_reference_manual_ingestion` is for a file that genuinely has no populated counts yet (e.g. i.MX93, still mostly `{}` pending its RM pass); a file can combine both flags when most of the block is genuinely pending but a handful of keys are individually grounded — in that case `peripherals_unverified: []` on the grounded keys tells `gen_soc_caps.py` NOT to also mark them unverified via the wholesale fallback. |
 | `peripheral_instances`          | OPTIONAL, keyed by a SUBSET of `peripherals`' keys (issue #1154). Per-instance register `base`/`size` (lowercase `0x`-prefixed hex strings, `^0x[0-9a-f]+$`) + `interrupts` (`irq`/`priority` decimal ints, `name` when the DTSI names it), one entry per physical instance. `peripherals` stays the count map every other consumer reads; this is additive, for a consumer that needs an actual address rather than just a ceiling. Only populated where a real vendor devicetree/SVD source gives a grounded 1:1 instance count — a key absent here means "not yet projected," not "doesn't exist," same as an absent `peripherals` key. RZ/V2N n44 is the only populated example today: `scripts/gen_soc_peripheral_instances.py` mechanically projects it from the vendored Zephyr `r9a09g056.dtsi`; never hand-edit, regenerate. |
+| `soc_flash_base`                | OPTIONAL base address of the on-die non-volatile aperture (`2147483648` = `0x80000000` on Alif Ensemble, matching upstream Zephyr's `mram: flash@80000000`). Declared once **per SoC, not per variant** — only the aperture's LENGTH varies by SKU, and that already comes from `variants[].mram_mb` (an E3-family SoC ships both 5.5 MB and 1.5 MB order codes off one base). A SKU's aperture is `[soc_flash_base, soc_flash_base + variants[].mram_mb * 1 MiB)`. Scoped to the on-die DEVICE WINDOW, never to a controller: a NOR and a HyperRAM behind the same OSPI controller, distinguished only by `chip_select:`, must not both fall inside it. **Omit** for a SoC whose flash never enters `memory_map:` (e.g. Renesas RZ/V2N, where every `memory_regions` entry is RAM) — an aperture there would gate nothing. If declared on an Alif SoC it must agree with `scripts/gen_zephyr_board.py`'s `_AEN_MRAM_BASE`; `scripts/validate_metadata.py` enforces the agreement. |
 | `variants[].order_code`         | Vendor order code; **must match** the SoM preset's `silicon_variant:` field for the loader to resolve memory layout from this entry's `sram_banks_kb`. |
 | `variants[].alp_module_skus`    | Reverse-lookup hint; lets the validator catch a SoM SKU that references this variant by silicon ref alone (no `silicon_variant:` declared).            |
 | `variants[].debug`                    | Debug-probe identity (`jlink_device`, `jlink_flash_device`, `expect_dpidr`, `pyocd_target`, `openocd_config`, `svd`) consumed by `alp-sdk-vscode` to generate a working launch config, and by the orchestrator's `flash_args`.  Every key optional **except `jlink_flash_device` on an Alif Ensemble SoC — see its own row below**; for the rest, an absent key is the correct, publishable "unknown" state.  Populate each key **only** from the owning tool's own list or a working in-tree invocation (SEGGER's device list / `pyocd list --targets` / an actual `board.cmake` or bench script) — never by pattern-extending a sibling part's string to an unverified one.  #987 shipped a first draft that broke this: it read a *SETOOLS flasher* argument as a J-Link device name and then extended that wrong string to every part by naming convention.  A plausible-looking guess fails at the probe, not at `validate_metadata.py`, so nothing catches it until a customer's launch does. |
@@ -279,6 +290,8 @@ on_module:
   rtc_external:         rv3028c7
   temperature_sensor:   tmp112
   eeprom:               eeprom_24c128
+  # `tan new-som` does not generate this block yet (see the "Known gap"
+  # note in §1) -- fill it in by hand until the scaffold is ported.
   ospi_memories:
     ospi0:
       chip:           TBD
@@ -342,7 +355,9 @@ topology:
 # generation refuses a two-M55 preset with no per-role `<role>_slot0`
 # region, because both cores would boot from the same MRAM slot0
 # address (#1069/#1446). Copy metadata/e1m_modules/E1M-AEN801.yaml's
-# disjoint he_slot0/hp_slot0 pair.
+# disjoint he_slot0/hp_slot0 pair -- including its per-row
+# write_authority: (see "Field rules" below for the six values and the
+# absent-means-unresolved rule).
 
 mailbox:
   controller: TBD                          # Alif IPC controller name pending HW config.
@@ -390,12 +405,68 @@ status:
 | `capabilities`         | SoM extension only                | Yes                       | Only list keys the SoM **adds** to silicon caps (e.g., on-module CAU on V2N, `optiga_trust_m` on AEN/V2N).               |
 | `silicon_capabilities` | Silicon-determined (restriction)  | Omit when unrestricted    | Optional `unpopulated:` list of SoC `capabilities:` keys this SKU does **not** populate; can only remove what the silicon offers (`validate_metadata.py` cross-check). |
 | `topology`             | Silicon-determined (core ids)     | No                        | Keys must match `soc.cores[].id`; `app:` / `board:` / `machine:` / `toolchain:` are SoM-extension.                       |
-| `memory_map`           | Silicon-determined (derived)      | Omit only when the SoM is not a dual-M55 AEN | Declare for non-stock partitioning; otherwise the loader derives from SoC `sram_banks_kb`. On AEN, a region named `<role>_slot0` (`he_slot0`/`hp_slot0`) is what makes `flash_args.slot0_load_address` (tan-cli#353) exist for that core; its `base:` may not be `TBD`/missing (`validate_metadata.py`'s `_check_som_slot0_address_resolved`). A DUAL-M55 AEN SoM must declare a disjoint `he_slot0`/`hp_slot0` pair: declaring it for one M55 role and not its sibling, or omitting it entirely, both make board generation refuse (#1069's disjoint-slot0 rule, extended to the fully-unauthored case by #1446); manifest emission refuses the half-authored case too. |
+| `memory_map`           | Silicon-determined (derived)      | Omit only when the SoM is not a dual-M55 AEN | Declare for non-stock partitioning; otherwise the loader derives from SoC `sram_banks_kb`. On AEN, a region named `<role>_slot0` (`he_slot0`/`hp_slot0`) is what makes `flash_args.slot0_load_address` (tan-cli#353) exist for that core; its `base:` may not be `TBD`/missing (`validate_metadata.py`'s `_check_som_slot0_address_resolved`). A DUAL-M55 AEN SoM must declare a disjoint `he_slot0`/`hp_slot0` pair: declaring it for one M55 role and not its sibling, or omitting it entirely, both make board generation refuse (#1069's disjoint-slot0 rule, extended to the fully-unauthored case by #1446); manifest emission refuses the half-authored case too. Each authored row also carries `write_authority:` — see the explanation immediately below this table for the six values and the absent-means-unresolved rule. |
 | `mailbox.controller`   | Mixed                             | Yes (`"TBD"`)             | Required when any topology entry runs Zephyr or baremetal; controller name comes from the hand-written HW config.        |
 | `pad_routes[]`         | SoM extension                     | Yes (`dispatch: TBD`)     | One row per E1M pad that routes through an on-module mediator; pads NOT listed are implicit `dispatch: direct`. A pad that is physically open on this hardware revision (reaches neither a mediator nor the silicon) MUST get an explicit `dispatch: unrouted` row with a `doc:` — there is no implicit `unrouted`; `alp_gpio_open()` on one refuses with `ALP_ERR_NOSUPPORT` (#1854). |
 | `helper_firmware[]`    | SoM extension                     | Yes (`TBD` per field)     | One entry per on-module helper MCU image (CC3511E firmware, GD32 bridge firmware, …).  Three INDEPENDENT axes: `flash_method`/`flash_args` (how it is written locally), `update_channel` (how it is updated in the field), `flash_policy` (who may invoke the flash method — `customer`/`factory`/`recovery_only`; **required on every entry**, regardless of which of the other two it declares).  No preset declares `flash_method` today — GD32 programming was separated out of `tan` (#1439, tan-cli#732); see `metadata/e1m_modules/README.md`. |
 | `default_hw_rev`       | SoM extension                     | No                        | Must match a key in `metadata/e1m_modules/<family>/hw-revisions.yaml`.                                                  |
 | `status.*`             | SoM extension                     | n/a                       | Flags for tooling (e.g. preliminary, partial HW config).                                                                |
+
+**`memory_map[].write_authority`** records WHO may write a region, and
+when — a second axis from `carveout:`, which only records whether the
+allocator may land shared memory there. Six values, one row each:
+
+- `vendor_image` — a factory-provisioned image, written once at
+  production (e.g. AEN801's `mcuboot`).
+- `customer_image` — written only by the flash tool, never by running
+  code (e.g. `he_slot0`, `hp_slot0`).
+- `customer_runtime` — runtime-writable by the application; the
+  **only** value an IPC carve-out or a runtime mount may ever land on
+  (e.g. `storage`).
+- `secure_enclave` — written by the Secure Enclave at provisioning
+  (e.g. `atoc`). Use this even though the Secure Enclave is not a
+  `topology:` core and can never appear in `accessible_from` — that
+  field is read/execute reachability only and says nothing about who
+  may write.
+- `none` — an explicit no-writer (e.g. ex-scratch `reserved`
+  headroom) — not a catch-all for "not sure yet."
+- `composite` — a whole-device alias spanning contained rows of
+  *different* authority (e.g. `mram_main`, which spans all six
+  fine-grained AEN801 regions); a single value on the alias itself
+  would be false by construction, so consult the contained rows
+  instead.
+
+**Absent means unresolved, never `customer_runtime`** (ADR-0034 clause
+4) — a preset that authors `memory_map:` rows but leaves
+`write_authority` off one of them has not opted into the permissive
+case, it has left the question unanswered, and a consumer must treat
+that row as ineligible for both IPC carve-out and runtime write rather
+than default it. The field is not `required` in som-preset v1 — this
+guide is a public porting reference and a v1 `required` would break an
+already-authored customer `memory_map:` on schema upgrade —
+`scripts/validate_metadata.py` enforces its presence semantically
+instead, and v2 promotes it to `required`.
+
+Three independent consumers enforce this (`scripts/validate_metadata.py`
+at author time is the fourth, upstream of all three): `carveout.py`'s
+`resolve_carve_outs()` refuses an IPC entry from landing on a region with
+the wrong (or absent-on-Alif) authority; `partition.py`'s
+`resolve_storage_partitions()` refuses a `storage[].flash_device:`
+naming one directly, the same way, EXCEPT for `composite`: it is the one
+consumer that accepts a `composite` whole-device alias as an explicit
+pin, and only once every row it contains independently resolves a
+concrete span, declares its own `write_authority`, and together they
+contiguously tile the alias with no gap and no overlap (alp-sdk#2088) —
+a row this can't account for refuses the whole alias rather than
+resolve permissively around the gap; `check_atoc_reservation.py`
+refuses a `customer_runtime` row from owning the SE-anchored top of the
+on-die MRAM window in CI (alp-sdk#2086). All three read the SAME six
+values and the SAME absent-means-unresolved rule described above — for
+five of the six values, one enforcer's refusal is every enforcer's
+refusal. `composite` is the deliberate exception: `carveout.py` refuses
+it outright, never descending into it, while `partition.py`'s
+`flash_device:` path is the only door it can pass through, and only
+after the verification above.
 
 ---
 
@@ -674,12 +745,14 @@ west build \
 > different silicon (the E8 declares `ethosu85`; an E3 carries 2x
 > Ethos-U55 and no U85).  The Renesas RZ/V2N family (`v2n` /
 > `v2n-m1`) generates the family-agnostic files (`board.yml`,
-> `Kconfig.alp_<board>`, the twister `.yaml`) PLUS the pinctrl `.dtsi`
-> and `_defconfig`, sourced from
-> `metadata/e1m_modules/v2n/supervisor-links.yaml` -- only its `.dts`
-> stays hand-authored (mirror the nearest sibling, e.g. E1M-V2N101) until
-> a metadata source for the remaining `.dts`-only facts lands.  TWO files
-> stay hand-authored for
+> `Kconfig.alp_<board>`, the twister `.yaml`) PLUS the pinctrl `.dtsi`,
+> `_defconfig`, and the board `.dts` (issue #655), all sourced from
+> `metadata/e1m_modules/v2n/supervisor-links.yaml` plus the SoM preset's
+> `topology.m33_sm.openamp_ipc` flag (gates the OpenAMP/MHU-B block +
+> CAN-FD-unavailable analysis that only E1M-V2N101 carries today -- a
+> new V2N-family SKU sets it to get that content generated, or leaves it
+> unset to reproduce E1M-V2M101's plainer tree).  This family has no
+> `Kconfig.defconfig` at all.  TWO files stay hand-authored for
 > every family and must be COPIED ACROSS by hand when a generated tree is
 > used as the board directory: `board.cmake` (flasher/debugger runner
 > args -- see `docs/architecture.md`'s generators-inventory entry for

@@ -53,7 +53,7 @@ the PR for experimental symbols.
 
 | Header                | Marker             | Rationale                                                         |
 |-----------------------|--------------------|-------------------------------------------------------------------|
-| `peripheral.h` (I²C/SPI/UART/GPIO) | `[ABI-STABLE]` | v0.1 surface; locked across every since-then release.  v0.9 adds the I²C/SPI target (slave) mode surfaces (`alp_i2c_target_*` / `alp_spi_target_*`) and the `alp_init` / `alp_deinit` SDK-lifecycle entry points, all marked `[ABI-EXPERIMENTAL]` at function granularity (the file-level marker stays STABLE — the mixed-tier mechanism in "What the markers mean" above). |
+| `peripheral.h` (I²C/SPI/UART/GPIO) | `[ABI-STABLE]` | v0.1 surface; locked across every since-then release.  v0.9 adds the I²C/SPI target (slave) mode surfaces (`alp_i2c_target_*` / `alp_spi_target_*`) and the `alp_init` / `alp_deinit` SDK-lifecycle entry points, all marked `[ABI-EXPERIMENTAL]` at function granularity (the file-level marker stays STABLE — the mixed-tier mechanism in "What the markers mean" above).  v0.17 adds `alp_uptime_ms()` (issue #1953) — a portable monotonic millisecond clock, marked `[ABI-EXPERIMENTAL]` at function granularity, that lets OS-agnostic code (e.g. `chips/cc3501e/*.c`, which includes no Zephyr/vendor header) bound a retry loop to a real deadline instead of only charging its own sleeps. |
 | `pwm.h`               | `[ABI-STABLE]`     | v0.2 surface; locked.                                             |
 | `adc.h`               | `[ABI-STABLE]`     | v0.2 + v0.5 additive (filter/spectrum handle types).  Base surface stable; new `alp_adc_filter_t` / `alp_adc_spectrum_t` may evolve `[ABI-EXPERIMENTAL]` at function granularity.  v0.8.0: the DAC half (`alp_dac_*`) split out to `dac.h` (same signatures; a source-include move, not a symbol change).  v0.9.0: `alp_adc_stream_read` / `alp_adc_filter_read` renamed to `alp_adc_stream_read_mv` / `alp_adc_filter_read_mv` so every read entry point carries its unit suffix (pre-1.0 rename; parameter lists unchanged). |
 | `dac.h`               | `[ABI-STABLE]`     | v0.1 surface (`alp_dac_open` / `write_mv` / `read_mv` / `close`); split out of `adc.h` into its own header in v0.8.0 when DAC moved to the registry/dispatcher pattern.  Signatures unchanged.  v0.9.0: additive `alp_dac_capabilities`, aligning DAC with every other opened-handle class. |
@@ -68,7 +68,8 @@ the PR for experimental symbols.
 | `ble.h`               | `[ABI-STABLE]`     | v0.2 decl + v0.3 impl; advertise + connect + GATT-read shape stable. |
 | `inference.h`         | `[ABI-STABLE]`     | v0.3 dispatcher (auto/cpu/ethos_u/drpai/deepx_dxm1); v0.5 adds `alp_inference_open_alpmodel()` + the `.alpmodel` loader/selection engine.  v0.16 adds `alp_inference_last_invoke_latency_us()` (the model-perf-capture latency accessor), marked `[ABI-EXPERIMENTAL]` at function granularity -- the file-level marker stays STABLE. |
 | `mproc.h`             | `[ABI-STABLE]`     | v0.3 mailbox + shmem + hwsem.  v0.9 adds `alp_mproc_boot_core` (peer-core release), marked `[ABI-EXPERIMENTAL]` at function granularity. |
-| `hw_info.h`           | `[ABI-STABLE]`     | v0.3 EEPROM manifest (sole SoM-rev source); `som_board_id_mv` removed pre-1.0 (no-legacy-compat).  v0.9 adds the SoC-identity block (`alp_soc_info_read` / `alp_soc_secure_fw_ping`), marked `[ABI-EXPERIMENTAL]` at function granularity. |
+| `hw_info.h`           | `[ABI-STABLE]`     | v0.3 EEPROM manifest (sole SoM-rev source); `som_board_id_mv` removed pre-1.0 (no-legacy-compat).  v0.9 adds the SoC-identity block (`alp_soc_info_read` / `alp_soc_secure_fw_ping`), marked `[ABI-EXPERIMENTAL]` at function granularity.  v0.17 adds the Secure Data Page mirror format (`alp_secure_page_mirror_t` + `alp_secure_page_mirror_classify`), also marked `[ABI-EXPERIMENTAL]` at (struct/function) granularity -- the format cannot be stable while the chip driver that writes it (`eeprom_24c128_secure_page_write` / `_lock`) is still unverified on silicon; see `docs/verification-status.md`. |
+| `temperature.h`       | `[ABI-EXPERIMENTAL]` | v0.17 new -- portable on-module ambient-temperature read (`alp_temperature_read_milli_c`), issue #2066.  Handle-less, index-less (the SoM preset schema carries at most one `temperature_sensor` per module).  Zephyr AEN backend only today, binding the metadata-emitted `alp-temp0` DT alias through the upstream sensor API; every other target returns `ALP_ERR_NOSUPPORT` until a consumer needs it there. |
 | `e1m_pinout.h`        | `[ABI-STABLE]`     | v0.1 portable instance IDs (`ALP_E1M_I2C0`, etc.); pinned by e1m-spec. |
 | `version.h`           | `[ABI-STABLE]`     | v0.9 new -- compile-time SDK version macros (`ALP_VERSION*`, `ALP_VERSION_AT_LEAST`), the per-class `ALP_ABI_STATUS_*` tier macros mirroring this table, and the runtime `alp_version_string()` getter.  Pure constants + one read-only getter; the values change every release by design, the symbol set is stable. |
 | `soc_caps.h`          | `[ABI-STABLE]`     | v0.1 generated; capability constants.                              |
@@ -110,6 +111,41 @@ stability statement in the file's top doxygen block.  Defaults:
 
 Per-chip status lives in
 [`docs/test-plan.md`](test-plan.md)'s per-row "Status" column.
+
+### Subdirectory + extension headers (`include/alp/{blocks,boards,protocol,ext}/*.h`)
+
+Headers below the top level are contract surfaces too, but they are
+classified in their file-level marker rather than the top-level table
+above (which covers `include/alp/*.h` only).  The **file-level** class is
+the marker in the file's top doxygen block and is what the table records; an
+individual function inside one of these files may additionally carry
+`[ABI-STABLE]` at function granularity, and that co-exists with -- rather
+than contradicts -- an `[ABI-EXPERIMENTAL]` file-level class (the mixed-tier
+mechanism in "What the markers mean" above).  Current classification:
+
+| Header                                  | Marker               | Notes                                                              |
+|-----------------------------------------|----------------------|--------------------------------------------------------------------|
+| `boards/alp_e1m_evk_routes.h`           | `[ABI-STABLE]`       | Generated E1M-EVK board routes (`EVK_*` macros).                    |
+| `boards/alp_e1m_x_evk_routes.h`         | `[ABI-STABLE]`       | Generated E1M-X-EVK board routes (`XEVK_*` macros).                 |
+| `boards/alp_e1m_x_evk.h`                | `[ABI-EXPERIMENTAL]` | E1M-X-EVK convenience include; declares no symbols of its own (the `XEVK_*` macros live in the routes header). |
+| `boards/alp_e1m_evk.h`                  | `[ABI-EXPERIMENTAL]` | Defines the E1M EVK's own `EVK_ARD_*` / `EVK_MB_*` macros and `evk_cam_select_t` -- not a facade (the `EVK_*` routes macros come from the generated header). |
+| `blocks/button_led.h`                   | `[ABI-EXPERIMENTAL]` | Caller-owned button+LED helper (`alp_button_led_*`).                |
+| `blocks/pdm_mic.h`                      | `[ABI-EXPERIMENTAL]` | PDM-mic capture block (`alp_pdm_mic_*`).                            |
+| `protocol/crc16.h`                      | `[ABI-EXPERIMENTAL]` | `static inline` CRC-16/CCITT-FALSE helpers (`alp_crc16_ccitt_false[_update]`) -- API, though not linker ABI. |
+| `ext/alif/{adc,camera}.h`               | `[ABI-EXPERIMENTAL]` | Vendor escape hatch (`<alp/ext/...>`); promote per the rules below. |
+| `ext/alif/storage.h`                    | `[ABI-EXPERIMENTAL]` | See the table above for its rationale row.                          |
+| `ext/cc3501e/console.h`                 | `[ABI-EXPERIMENTAL]` | See the table above for its rationale row.                          |
+| `ext/deepx/inference.h`                 | `[ABI-EXPERIMENTAL]` | Vendor escape hatch.                                                |
+| `ext/nxp/storage.h`                     | `[ABI-EXPERIMENTAL]` | Vendor escape hatch.                                                |
+| `ext/renesas/{camera,inference,power}.h`| `[ABI-EXPERIMENTAL]` | Vendor escape hatches.                                              |
+
+Headers that declare **no ABI symbols of their own** carry no
+`@par ABI status:` tag, matching the `board.h`/`console.h` facade
+convention above.  `protocol/cc3501e.h` is the one such header here:
+it is the canonical wire-contract type header cited by
+`chips/cc3501e/`, declaring shared frame types rather than dispatch
+symbols, and its stability statement lives in the file's top
+doxygen block like the chip drivers' does.
 
 ### Internal headers (`include/alp/internal/*.h`, `src/**/*.h`)
 

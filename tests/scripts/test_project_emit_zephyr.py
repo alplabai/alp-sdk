@@ -13,6 +13,7 @@ Or via CI as configured in .github/workflows/pr-metadata-validate.yml.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -287,7 +288,8 @@ class TestAlpBoardDefineEmit(unittest.TestCase):
                  "--input", str(path),
                  "--emit", "cmake-args",
                  "--core", core],
-                capture_output=True, text=True, check=False,
+                capture_output=True, text=True, encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
             )
         return rv.returncode, rv.stdout, rv.stderr
 
@@ -309,7 +311,8 @@ class TestAlpBoardDefineEmit(unittest.TestCase):
                  "--input", str(path),
                  "--emit", "zephyr-conf",
                  "--core", core],
-                capture_output=True, text=True, check=False,
+                capture_output=True, text=True, encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
             )
         return rv.returncode, rv.stdout, rv.stderr
 
@@ -349,7 +352,8 @@ class TestAlpBoardDefineEmit(unittest.TestCase):
                  "--input", str(path),
                  "--emit", "cmake-args",
                  "--core", "m55_hp"],
-                capture_output=True, text=True, check=False,
+                capture_output=True, text=True, encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
             )
         self.assertEqual(rv.returncode, 0, msg=rv.stderr)
         self.assertNotIn("ALP_BOARD_", rv.stdout,
@@ -407,7 +411,8 @@ class TestAlpBoardDefineEmit(unittest.TestCase):
                  "--input", str(path),
                  "--emit", "zephyr-conf",
                  "--core", "m55_hp"],
-                capture_output=True, text=True, check=False,
+                capture_output=True, text=True, encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
             )
         self.assertEqual(rv.returncode, 0, msg=rv.stderr)
         self.assertNotIn("ALP_BOARD_", rv.stdout,

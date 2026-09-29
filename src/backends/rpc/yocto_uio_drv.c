@@ -344,7 +344,7 @@ static const char *uio_dev_name(enum uio_region_id id)
  * +0x0C/10/14.
  *
  * The M33 fw runs its CA55<->CM33 link on logical channel 5.  BENCH-PROVEN
- * (alp-sdk #697 cycle 5, on e1mx-v2n-m1-01): the register whose MSG_INT is
+ * (alp-sdk #697 cycle 5, on a V2N bench unit): the register whose MSG_INT is
  * routed to the M33's MHU_MSG5_NS_IRQn(293) is R_MHU_NS5 -- the slot that
  * MATCHES the channel number (0x50480000 + 5*0x20 = 0x504800A0; A55 alias
  * 0x104800A0), NOT the bsp_mhu_b.h R_BSP_MHU_B_NS_REG_PAIR_BODY {36,NS36,8,NS8}
@@ -939,7 +939,7 @@ static void rpc_be_teardown(struct rpc_be *ch)
 static alp_status_t
 y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
-	if (caps_out != NULL) caps_out->flags = 0u;
+	(void)caps_out;
 	if (cfg == NULL || cfg->name == NULL || cfg->name[0] == '\0') {
 		return ALP_ERR_INVAL;
 	}
@@ -966,7 +966,7 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 	 * rpmsg_create_ept() rejects with RPMSG_ERR_PARAM -- the OpenAMP address
 	 * bitmap is only 128 wide above the 1024 reserved base, so any src >= 1152
 	 * is unconditionally refused, breaking attach for ~half of all service
-	 * names.  Silicon-root-caused on e1mx-v2n-m1-01 (#683/#697 bench cycle 2,
+	 * names.  Silicon-root-caused on a V2N bench unit (#683/#697 bench cycle 2,
 	 * 2026-07-11).  The M33 endpoint (src=1024, dst=ANY, NS-announce) learns
 	 * our src from the first frame, so ANY binds cleanly. */
 	ch->src_ept = cfg->src_ept != 0u ? cfg->src_ept : RPMSG_ADDR_ANY;
@@ -1037,7 +1037,7 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 		 * m33_sm/main.c) -- it must NOT be applied to the master-side DA
 		 * registration, or the vring lookup (da=0x4f8xxxxx) matches no
 		 * region (all at 0x9f8xxxxx) -> remoteproc_create_virtio() returns
-		 * NULL -> ALP_ERR_NOT_READY.  Silicon-root-caused on e1mx-v2n-m1-01
+		 * NULL -> ALP_ERR_NOT_READY.  Silicon-root-caused on a V2N bench unit
 		 * (#683/#697 bench, 2026-07-11). */
 		metal_phys_addr_t da = pa;
 		remoteproc_init_mem(
@@ -1398,9 +1398,9 @@ static void y_destroy(alp_rpc_backend_state_t *st)
 static alp_status_t
 y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	(void)cfg;
 	(void)st;
-	if (caps_out != NULL) caps_out->flags = 0u;
 	return ALP_ERR_NOSUPPORT;
 }
 

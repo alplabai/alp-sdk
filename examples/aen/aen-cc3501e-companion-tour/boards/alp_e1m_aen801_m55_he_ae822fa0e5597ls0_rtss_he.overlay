@@ -132,15 +132,19 @@
 	status = "okay";
 };
 
-/*
- * gpio2 for the host-IRQ/READY input (CC35 GPIO17 -> Alif P2_6, alp_pins[2]).
- * P2_6's reset-default mux is function 0 = GPIO (PIN_P2_6__GPIO), so no pinctrl
- * group is needed; gpio_dw defaults the pin to input, which the app confirms via
- * alp_gpio_configure(INPUT).  The READY line lets the host gate reply phases on
- * the slave's actual re-arm instead of a fixed settle gap. */
-&gpio2 {
-	status = "okay";
-};
+/* P2_6 (E1M AH7 / I2S1_SCLK) is NOT the CC3501E READY net on the R2 module this
+ * bridge targets -- it is E1M pad AH7 / I2S1_SCLK, which the E1M EVK carrier
+ * repurposes as the Arduino header's CK_RST (metadata/boards/e1m-evk.yaml);
+ * the real READY net lands on E1M pad G3 / IO16 instead
+ * (metadata/e1m_modules/aen/from-cc3501e.tsv). This app therefore does not
+ * enable &gpio2 or claim P2_6 as READY -- see src/cc3501e_bridge.c and
+ * chips/cc3501e/cc3501e_core.c's cc3501e_reply_gate() comment. A board (or a
+ * hand-reworked r1 unit) that genuinely wires GPIO17 to P2_6 can opt back
+ * in: enable &gpio2, add a pinctrl group that enables P2_6's INPUT BUFFER --
+ * reset-default mux already IS GPIO, but GPIO function alone does not enable
+ * the input path; skip that group and cc3501e_reply_gate()'s read comes back
+ * a constant 0 forever, indistinguishable from a stuck-LOW pad -- add an
+ * alp_pins entry for it, and set fw->ready_pin in cc3501e_bridge_bringup(). */
 
 /*
  * Host-side peripheral DMA for continuous SPI streams over the CC3501E bridge.
@@ -193,17 +197,17 @@
 	};
 
 	/*
-	 * Compact 2-entry control array for the SoM-internal CC3501E nets, in
-	 * the order the app's CC3501E_PIN_* indices expect.  These are NOT E1M
-	 * edge pads, so this bring-up app intentionally does NOT use the
+	 * Compact 2-entry control array for the SoM-internal CC3501E control
+	 * nets, in the order the app's CC3501E_PIN_* indices expect.  These are
+	 * NOT E1M edge pads, so this bring-up app intentionally does NOT use the
 	 * 52-slot positional E1M map; a production board file appends such
-	 * SoM-internal control nets after the E1M pad slots.
+	 * SoM-internal control nets after the E1M pad slots.  No READY entry
+	 * here -- see the P2_6 comment above &gpio2's removal further up.
 	 */
 	alp_pins: alp-pins {
 		compatible = "alp,pin-array";
-		gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>,   /* [0] WIFI_EN     (P15_5)      */
-			<&lpgpio 1 GPIO_ACTIVE_HIGH>,   /* [1] E_WIFI.NRST (P15_1_FLEX) */
-			<&gpio2 6 GPIO_ACTIVE_HIGH>;    /* [2] host-IRQ/READY (P2_6 <- CC35 GPIO17) */
+		gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>, /* [0] WIFI_EN     (P15_5)      */
+			<&lpgpio 1 GPIO_ACTIVE_HIGH>; /* [1] E_WIFI.NRST (P15_1_FLEX) */
 	};
 };
 

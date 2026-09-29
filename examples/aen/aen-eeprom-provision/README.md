@@ -48,35 +48,45 @@ is left carrying whatever application the line intends — not this tool.
 ```sh
 # 0. Hold the bench reservation, as for any bench operation.
 export LG_COORDINATOR=100.64.0.1:20408
-labgrid-client -p e1m-aen-evk-01 acquire
+labgrid-client -p <your-bench-place> acquire
 
 # 1. Pack this unit's identity on the host.  The serial must come from the
 #    allocation ledger, not from your head.
 python3 scripts/program_eeprom.py \
     --board-yaml examples/aen/aen-eeprom-provision/board.yaml \
-    --serial 2026W36-0001 \
-    --mfg-date 2026-09-04 \
-    --output /tmp/manifest-2026W36-0001.bin
+    --serial <SERIAL> \
+    --mfg-date <MFG-DATE> \
+    --output /tmp/manifest-<SERIAL>.bin
 
 # 2. Build ITCM-linked, with that blob baked in.
 B=scripts/bench/aen
 bash $B/build.sh "$PWD/examples/aen/aen-eeprom-provision" \
-    -DALP_MANIFEST_BIN=/tmp/manifest-2026W36-0001.bin \
+    -DALP_MANIFEST_BIN=/tmp/manifest-<SERIAL>.bin \
     "-DEXTRA_CONF_FILE=$PWD/$B/aen-bench-shared.conf;$PWD/$B/aen-flowc-itcm.conf" \
     "-DEXTRA_DTC_OVERLAY_FILE=$PWD/$B/aen-flowc-itcm.overlay"
 
 # 3. Write it.
+export BENCH_PLACE=<your-bench-place>
+export AEN_JLINK_RUN=<board-farm>/bin/jlink-run.sh
 bash $B/ram-run.sh "$PWD/build/aen-eeprom-provision"
 
-labgrid-client -p e1m-aen-evk-01 release
+labgrid-client -p <your-bench-place> release
 ```
+
+`<SERIAL>` and `<MFG-DATE>` are placeholders on purpose. An earlier revision of
+this file used the real allocated serial `2026W36-0001` with `sku=E1M-AEN801`,
+which is wrong twice over: that unit is an **E1M-AEN803** (alp-sdk#2001), and a
+worked example is not a provisioning record. The SKU below comes from this
+example's own `board.yaml` (`som.sku: E1M-AEN801`), not from any module -- keep
+it that way, and take the serial from the allocation ledger as step 1 already
+says.
 
 Expected on a blank module:
 
 ```
-[provision] to write: family=aen sku=E1M-AEN801 hw_rev=r2 serial=2026W36-0001 mfg=2026-09-04
+[provision] to write: family=aen sku=E1M-AEN801 hw_rev=r2 serial=<SERIAL> mfg=<MFG-DATE>
 [provision] wrote 128 bytes at offset 0
-[provision] verified on device: family=aen sku=E1M-AEN801 hw_rev=r2 serial=2026W36-0001 mfg=2026-09-04
+[provision] verified on device: family=aen sku=E1M-AEN801 hw_rev=r2 serial=<SERIAL> mfg=<MFG-DATE>
 RESULT PASS: manifest written and verified on device
 ```
 
@@ -104,6 +114,8 @@ Trust the reader, not this app's own read-back — a different binary exercising
 different code path is the stronger check:
 
 ```sh
+export BENCH_PLACE=<your-bench-place>
+export AEN_JLINK_RUN=<board-farm>/bin/jlink-run.sh
 bash scripts/bench/aen/ram-run.sh "$PWD/build/aen-eeprom-manifest"
 ```
 
@@ -122,6 +134,89 @@ Do this **before** anything that burns a fuse. The EEPROM is rewritable, so a
 wrong manifest here is a re-run. The CC3501E's root-of-trust and MAC fuses are
 one-time and OR-only — a mistake there is a scrapped part. Prove the module with
 the reversible step first.
+
+## Secure Data Page mirror + lock (a later, separate step)
+
+The same EEPROM answers a second I²C address, `0x58` -- the same physical
+part, not a second chip. Selector `0x00` there is a 64-byte **Secure Data
+Page** that can be permanently locked. This app also carries the write +
+lock tooling for it, as two build-time modes distinct from the array write
+above. Do this only after the array manifest has been written and verified
+(this file's default flow) and, per
+`docs/som-batch-provisioning-procedure.md` §7 (alp-sdk-internal), only after
+cold-cycling the board.
+
+```sh
+# 1. Build the 64-byte mirror blob (same inputs as the manifest above).
+python3 scripts/program_eeprom_secure_page.py \
+    --board-yaml examples/aen/aen-eeprom-provision/board.yaml \
+    --serial <SERIAL> --mfg-date <MFG-DATE> \
+    --output /tmp/secure-page-<SERIAL>.bin
+
+# 2. Write it and verify the read-back IN THIS SAME RUN. Never locks.
+B=scripts/bench/aen
+bash $B/build.sh "$PWD/examples/aen/aen-eeprom-provision" \
+    -DALP_MANIFEST_BIN=/tmp/manifest-<SERIAL>.bin \
+    -DALP_SECURE_PAGE_BIN=/tmp/secure-page-<SERIAL>.bin \
+    "-DEXTRA_CONF_FILE=$PWD/$B/aen-bench-shared.conf;$PWD/$B/aen-flowc-itcm.conf" \
+    "-DEXTRA_DTC_OVERLAY_FILE=$PWD/$B/aen-flowc-itcm.overlay"
+bash $B/ram-run.sh "$PWD/build/aen-eeprom-provision"
+
+# 3. Cold-power-cycle the board. Not optional -- a RAM-run cannot prove
+#    anything survived a power cycle it never experienced.
+
+# 4. Lock. PERMANENT. Irreversible. Both flags are required: the second is
+#    your attestation that step 3's cold power cycle actually happened.
+bash $B/build.sh "$PWD/examples/aen/aen-eeprom-provision" \
+    -DALP_MANIFEST_BIN=/tmp/manifest-<SERIAL>.bin \
+    -DALP_SECURE_PAGE_BIN=/tmp/secure-page-<SERIAL>.bin \
+    -DALP_LOCK_SECURE_PAGE=1 \
+    -DALP_SECURE_PAGE_COLD_CYCLED=1 \
+    "-DEXTRA_CONF_FILE=$PWD/$B/aen-bench-shared.conf;$PWD/$B/aen-flowc-itcm.conf" \
+    "-DEXTRA_DTC_OVERLAY_FILE=$PWD/$B/aen-flowc-itcm.overlay"
+bash $B/ram-run.sh "$PWD/build/aen-eeprom-provision"
+```
+
+`ALP_MANIFEST_BIN` stays required to configure any of the three modes (the
+build does not make it conditional), even though the two Secure-Data-Page
+modes never reference its contents.
+
+Before it locks, mode 3 refuses on any of these, without touching the part:
+
+1. `ALP_SECURE_PAGE_COLD_CYCLED` not set.
+2. The baked-in blob fails its own magic / schema / CRC check.
+3. `0x58` does not answer (the footprint-compatible alternate part).
+4. The page is already locked and does not match the blob.
+5. The page now on the device is not byte-exact against the blob.
+6. The page byte-matched but does not parse as a mirror.
+7. **The array manifest at `0x50` disagrees with the mirror** on sku,
+   hw_rev, serial or the mfg date -- or is missing, or fails its CRC. The
+   message names the field and both values.
+
+And after the lock returns, it re-reads Lock Status and the page and refuses
+to print PASS unless the lock bit is confirmed in that read *and* the
+payload still matches.
+
+Why two separate app invocations for step 2 and step 4, not one flag that
+does both: a RAM-run cannot span a power cycle. The lock refuses to run at
+all without `-DALP_SECURE_PAGE_BIN` even when `-DALP_LOCK_SECURE_PAGE=1` is
+set (see `CMakeLists.txt`) -- it never locks blind, and it never locks as a
+side effect of writing.
+
+`ALP_SECURE_PAGE_COLD_CYCLED` is an attestation, not proof: nothing inside a
+single RAM-run can observe the power rail, and a Flow C RAM-run is a
+halt-load-go over SWD that never interrupts it. Set it only when the rail
+was confirmed at 0.0 V, and record that telemetry in the run log.
+
+After the lock: the page still reads, forever, but every future write to it
+NAKs at the hardware level. There is no unlock.
+
+On a board populated with the approved footprint-compatible alternate part
+(STMicro `M24128-BFMH6TG`, no second device-select header at all), both
+modes above fail cleanly with a "no second device-select header" message
+rather than corrupting anything -- the array manifest is unaffected either
+way, and nothing in the SDK's runtime read path depends on this mirror
+existing.
 
 ## Known gap: no `manufacturer` field
 

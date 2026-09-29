@@ -6,6 +6,7 @@ to confirm the current script does NOT yet print the diagnostic codes.
 Step 3 (passing): run after the wire-in to confirm it does.
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -20,7 +21,8 @@ def test_alp_project_exits_nonzero_on_bad_yaml():
         [sys.executable, str(SCRIPT), "--input",
          str(FIX_BAD / "ALP-B001-missing-required.yaml"),
          "--emit", "zephyr-conf"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
     assert proc.returncode != 0
     assert "ALP-B001" in proc.stderr or "ALP-B001" in proc.stdout
@@ -31,7 +33,8 @@ def test_alp_project_exits_nonzero_on_board_preset_family_mismatch():
         [sys.executable, str(SCRIPT), "--input",
          str(FIX_BAD / "ALP-B007-board-preset-family.yaml"),
          "--emit", "zephyr-conf"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
     assert proc.returncode != 0
     assert "ALP-B007" in proc.stderr or "ALP-B007" in proc.stdout

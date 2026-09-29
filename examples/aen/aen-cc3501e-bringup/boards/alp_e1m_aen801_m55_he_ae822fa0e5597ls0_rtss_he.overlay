@@ -62,19 +62,33 @@
 		};
 
 		/*
-		 * P2_6 = the CC3501E READY/host-IRQ input (CC35 GPIO17).  Its mux default
-		 * IS GPIO, but on Alif the pad INPUT BUFFER is a PADCTRL bit that only
-		 * pinctrl sets -- gpio_dw drives direction in the controller and never
-		 * touches the pad, and snps,designware-gpio has no pinctrl-0 property of
-		 * its own.  Without this group the buffer stays off and
-		 * alp_gpio_read(P2_6) returns 0 forever no matter what the CC35 drives
-		 * (scope 2026-08-24: a clean 1.767 V line idling HIGH with narrow LOW
-		 * pulses), so the host silently fell back to fixed settle gaps.
+		 * P2_6 (E1M AH7 / I2S1_SCLK) is muxed as a plain GPIO input here -- but NOT for
+		 * the cc3501e_reply_gate() READY use (cc3501e_bridge.c does not wire
+		 * fw->ready_pin: on the R2 module this bench currently holds, P2_6
+		 * is E1M pad AH7 / I2S1_SCLK, the EVK's Arduino CK_RST net, NOT CC35's
+		 * GPIO17 READY -- see cc3501e_reply_gate()'s own doc comment in
+		 * chips/cc3501e/cc3501e_core.c). This group exists ONLY for the
+		 * alp,cc3501e-attn node below, which reads the same pad directly for
+		 * the async-event attention edge (#1721/#130) -- a separate mechanism
+		 * from the reply-gate.
 		 *
-		 * It lives HERE rather than in a standalone state applied at runtime
-		 * because P2_6's alternate function is SPI1_SCLK_A: a second pinctrl pass
-		 * after SPI1 is up killed the bridge on silicon.  In the SPI driver's
-		 * single init pass it is inert.
+		 * REVISION CAVEAT: the "clean 1.767 V line idling HIGH with narrow LOW
+		 * pulses" once measured here (scope 2026-08-24) was on a separately
+		 * hand-reworked r1 unit (its own serial was never recorded -- see
+		 * changelog.d/1799.md) where GPIO17 really was bodge-wired to P2_6 --
+		 * not evidence for the R2 module. On a standard R2 module this pad is
+		 * not connected to the CC3501E at all, so the attn node below will
+		 * simply never fire; it costs nothing to leave enabled.
+		 *
+		 * On Alif the pad INPUT BUFFER is a PADCTRL bit that only pinctrl sets
+		 * -- gpio_dw drives direction in the controller and never touches the
+		 * pad, and snps,designware-gpio has no pinctrl-0 property of its own --
+		 * so without this group alp_gpio_read(P2_6) would read 0 forever
+		 * regardless of what (if anything) drives it. It lives HERE rather than
+		 * in a standalone state applied at runtime because P2_6's alternate
+		 * function is SPI1_SCLK_A: a second pinctrl pass after SPI1 is up
+		 * killed the bridge on silicon. In the SPI driver's single init pass it
+		 * is inert.
 		 */
 		group2 {
 			pinmux = <PIN_P2_6__GPIO>;
@@ -135,9 +149,20 @@
 		clock-frequency = <200000000>; /* real SSI functional clock (was mis-set 400M; proven via BAUDR scaling) */
 		dwc-ssi;
 		fifo-depth = <16>;
-		/* MISO capture delay in SSI clocks.  Needed at 25 MHz (40 ns bit period):
-		 * silicon-measured on e1m-aen-evk-01, rx-delay 0 fails outright and 4
-		 * fails too; 2 is the working point.  Harmless at 14.29 MHz. */
+		/* MISO capture delay in SSI clocks -- INERT here, and NOT what the link
+		 * runs at.  spi_dw_alif.c writes RX_SAMPLE_DLY (0xf0) from this property
+		 * at init and at PM resume only; spi_dw_configure never touches the
+		 * register, so src/cc3501e_bridge.c's poke right after alp_spi_open()
+		 * overwrites this value with CC3501E_BRIDGE_RX_SAMPLE_DLY.
+		 *
+		 * It is kept because that poke is guarded on the constant being non-zero:
+		 * set the constant to 0 and this property is what survives.
+		 *
+		 * The earlier claim here -- that 0 "fails outright" and 4 "fails too" --
+		 * is contradicted by the N = 0..10 sweep on E1M-AEN803 serial
+		 * 2026W36-0002 at 25 MHz: 0 and 4 each passed 3 runs of 3, and 8 is the
+		 * value that hard-fails.  Sweep the constant, not this property; the
+		 * measurements are recorded in src/cc3501e_bridge.h. */
 		rx-delay = <2>;
 		pinctrl-0 = <&pinctrl_spi1>;
 		pinctrl-names = "default";
@@ -157,12 +182,12 @@
 };
 
 /*
- * gpio2 for the host-IRQ/READY input (CC35 GPIO17 -> Alif P2_6, alp_pins[2]).
- * P2_6's reset-default mux IS function 0 = GPIO (PIN_P2_6__GPIO), but the pad
- * still needs an input-enable group to turn its INPUT BUFFER on -- that lives in
- * pinctrl_spi1 group2 above.  gpio_dw defaults the pin to input, which the app
- * confirms via alp_gpio_configure(INPUT).  The READY line lets the host gate reply phases on
- * the slave's actual re-arm instead of a fixed settle gap. */
+ * gpio2 (P2_6) for the alp,cc3501e-attn async-event node below -- NOT the
+ * cc3501e_reply_gate() READY input: P2_6 is not CC35 GPIO17 on this R2
+ * module (see the pinctrl_spi1 group2 comment above). P2_6's reset-default
+ * mux IS function 0 = GPIO (PIN_P2_6__GPIO), but the pad still needs an
+ * input-enable group to turn its INPUT BUFFER on -- that lives in
+ * pinctrl_spi1 group2 above. gpio_dw defaults the pin to input. */
 &gpio2 {
 	status = "okay";
 };
@@ -221,12 +246,16 @@
 		 * companion console's edge ISR schedules a GET_PENDING_EVENTS drain
 		 * instead of waiting for the ~500 ms timer poll.
 		 *
-		 * SAME PIN as alp_pins[2] above, deliberately.  There is one
-		 * slave->master wire and it already carries READY flow control; the
-		 * firmware (built with CC3501E_ATTN_PULSE) gives it an edge when an
-		 * event is queued while the bridge is idle.  Draining on ANY rising
-		 * edge is safe -- an empty ring answers with an empty list -- so the
-		 * host never has to tell attention from an ordinary re-arm.
+		 * SAME PIN &gpio2 6 (P2_6) the pinctrl group2 comment above enables --
+		 * there is no `alp_pins[2]` entry for it (cc3501e_bridge.c does not
+		 * wire fw->ready_pin on this R2 module; see that comment).  On a unit
+		 * where this net genuinely carries CC35 GPIO17 -- a hand-reworked r1
+		 * unit, not the stock R2 module -- there is one slave->master wire and
+		 * it already carries READY flow control; the firmware (built with
+		 * CC3501E_ATTN_PULSE) gives it an edge when an event is queued while
+		 * the bridge is idle.  Draining on ANY rising edge is safe -- an empty
+		 * ring answers with an empty list -- so the host never has to tell
+		 * attention from an ordinary re-arm.
 		 *
 		 * BODGE-GATED: this net is a rev-1 wire, absent on the stock EVK,
 		 * which is why CONFIG_ALP_SDK_CC3501E_EVENT_IRQ stays default-off.
@@ -248,17 +277,17 @@
 	};
 
 	/*
-	 * Compact 2-entry control array for the SoM-internal CC3501E nets, in
-	 * the order the app's CC3501E_PIN_* indices expect.  These are NOT E1M
-	 * edge pads, so this bring-up app intentionally does NOT use the
+	 * Compact 2-entry control array for the SoM-internal CC3501E control
+	 * nets, in the order the app's CC3501E_PIN_* indices expect.  These are
+	 * NOT E1M edge pads, so this bring-up app intentionally does NOT use the
 	 * 52-slot positional E1M map; a production board file appends such
-	 * SoM-internal control nets after the E1M pad slots.
-	 */
+	 * SoM-internal control nets after the E1M pad slots.  No READY entry
+	 * here -- P2_6/&gpio2 stays enabled above only for the cc3501e-attn node,
+	 * which reads it directly, not through this array. */
 	alp_pins: alp-pins {
 		compatible = "alp,pin-array";
-		gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>,   /* [0] WIFI_EN     (P15_5)      */
-			<&lpgpio 1 GPIO_ACTIVE_HIGH>,   /* [1] E_WIFI.NRST (P15_1_FLEX) */
-			<&gpio2 6 GPIO_ACTIVE_HIGH>;    /* [2] host-IRQ/READY (P2_6 <- CC35 GPIO17) */
+		gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>, /* [0] WIFI_EN     (P15_5)      */
+			<&lpgpio 1 GPIO_ACTIVE_HIGH>; /* [1] E_WIFI.NRST (P15_1_FLEX) */
 	};
 };
 

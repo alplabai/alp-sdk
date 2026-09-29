@@ -45,6 +45,13 @@ def _validate(path: Path, validator: jsonschema.Draft202012Validator, pubkey_pat
             loc = "/".join(str(p) for p in err.absolute_path) or "<root>"
             print(f"  · {loc}: {err.message}")
         return 1
+    # JSON Schema cannot say "unique by role"; consumers look components up by role.
+    roles = [c["role"] for c in doc["components"]]
+    dupes = sorted({r for r in roles if roles.count(r) > 1})
+    if dupes:
+        print(f"FAIL {rel}")
+        print(f"  · components: duplicate role(s) {dupes}")
+        return 1
     sig = doc.get("signature")
     if sig:
         import som_signing  # lazy: only the verify path needs cryptography

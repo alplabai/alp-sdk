@@ -149,6 +149,7 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_i2s.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_can.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_rtc.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_temperature.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_wdt.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_display.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_camera.c
@@ -789,10 +790,11 @@ endif()
 # inference_deepx.cpp is written against the real DEEPX dx_rt C++ API #
 # (#include "dxrt/dxrt_api.h", namespace dxrt).  dx_rt is PROPRIETARY  #
 # (DEEPX EULA) and is NOT vendored in this repo; the headers + libdxrt #
-# come from the Yocto sysroot (the meta-deepx-m1 dx-rt recipe), or for #
-# a maintainer header-check from a local clone pointed at by           #
-# ALP_DEEPX_DXRT_HOME (expects <root>/lib/include + <root>/lib).       #
-# BENCH-UNVERIFIED: compiles/header-checks; not run on silicon.        #
+# come from the Yocto sysroot (the meta-deepx-m1 dx-rt recipe), or    #
+# from ALP_DEEPX_DXRT_HOME (<root>/lib/include + <root>/lib).  That    #
+# include dir must be the INSTALLED header set (dx-rt-dev): a dx_rt    #
+# source clone lacks the build-generated dxrt/gen.h.  Verified on      #
+# DX-M1 silicon against an ONNX Runtime CPU reference (#1262).        #
 # ------------------------------------------------------------------ #
 if(ALP_SDK_USE_DEEPX_DXM1)
     # PROBE FIRST, then decide whether to compile the backend in.
@@ -808,7 +810,10 @@ if(ALP_SDK_USE_DEEPX_DXM1)
     # as the DRP-AI block below.
     if(DEFINED ENV{ALP_DEEPX_DXRT_HOME})
         set(_alp_deepx_inc $ENV{ALP_DEEPX_DXRT_HOME}/lib/include)
-        find_library(DXRT_LIB dxrt PATHS $ENV{ALP_DEEPX_DXRT_HOME}/lib)
+        # An explicit host path: keep a cross toolchain file's
+        # CMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY (every Yocto SDK sets it)
+        # from re-rooting it into the sysroot, where it never exists (#1262).
+        find_library(DXRT_LIB dxrt PATHS $ENV{ALP_DEEPX_DXRT_HOME}/lib NO_CMAKE_FIND_ROOT_PATH)
     else()
         find_path(DXRT_INCLUDE_DIR dxrt/dxrt_api.h)
         set(_alp_deepx_inc ${DXRT_INCLUDE_DIR})
@@ -1022,7 +1027,7 @@ endif()
 # vendor fork -- see metadata/libraries/onnxruntime.yaml), built by    #
 # meta-alp-sdk/recipes-devtools/onnxruntime and staged onto the Yocto  #
 # sysroot as libonnxruntime + onnxruntime_c_api.h.  Not installed on   #
-# this dev host -- BENCH-UNVERIFIED, same posture as DEEPX/DRP-AI      #
+# this dev host -- BENCH-UNVERIFIED, same posture as DRP-AI            #
 # above.  Same probe-first shape as the (simpler) DEEPX block: a       #
 # single header + a single library, no multi-input stack like DRP-AI's.#
 # ------------------------------------------------------------------ #

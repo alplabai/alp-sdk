@@ -9,6 +9,7 @@ convention the generator itself uses (see check_emit_kconfig_contract.py).
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -271,7 +272,8 @@ def _zephyr_available() -> bool:
 def test_check_mode_passes_on_committed_n44_json():
     proc = subprocess.run(
         [sys.executable, str(SCRIPT), "--check"],
-        capture_output=True, text=True, cwd=REPO,
+        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=REPO,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
 

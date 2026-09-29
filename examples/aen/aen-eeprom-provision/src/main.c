@@ -29,6 +29,31 @@
  * A wrong manifest here is a re-run, not a scrapped part.  That is exactly why the
  * order in docs matters: do this step, and prove the module, BEFORE anything that
  * burns a fuse.
+ *
+ * THREE MODES, mutually exclusive, selected at configure time:
+ *
+ *   1. Default (neither flag below set): write the 128-byte array manifest, as
+ *      described above.  Unchanged from before the Secure Data Page mirror
+ *      existed.
+ *   2. -DALP_SECURE_PAGE_BIN=<path> (and NOT ALP_LOCK_SECURE_PAGE): write the
+ *      64-byte Secure Data Page mirror at 0x58 selector 0x00 and verify the
+ *      read-back in this same run.  Run this AFTER the array manifest has
+ *      already been written, cold-cycled, and verified separately -- see
+ *      docs/som-batch-provisioning-procedure.md §7 steps 3-5 (alp-sdk-internal).
+ *   3. -DALP_SECURE_PAGE_BIN=<path> -DALP_LOCK_SECURE_PAGE=1
+ *      -DALP_SECURE_PAGE_COLD_CYCLED=1: PERMANENTLY lock the Secure Data Page.
+ *      Irreversible.  Run this only after a COLD POWER CYCLE (rail confirmed
+ *      at 0.0 V, not a warm reset) following mode 2 -- a single RAM-run cannot
+ *      span a power cycle, so this is deliberately a separate app invocation,
+ *      not a flag that also writes.  ALP_SECURE_PAGE_COLD_CYCLED is a SEPARATE
+ *      flag from ALP_LOCK_SECURE_PAGE and is an operator ATTESTATION that the
+ *      cold cycle actually happened -- a Flow C RAM-run over SWD never
+ *      interrupts the rail, so this mode cannot detect a skipped cold cycle on
+ *      its own; see this mode's own comment for why.  Refuses to lock unless
+ *      the page currently on the device reads back byte-exact against the
+ *      same blob mode 2 wrote AND agrees field-for-field with the array
+ *      manifest at 0x50; never locks blind, and re-verifies the payload after
+ *      the lock before ever printing PASS.
  */
 
 #include <stdio.h>
@@ -42,15 +67,32 @@
 
 /* The manifest bytes, generated at configure time from -DALP_MANIFEST_BIN.
  * Defines alp_manifest_blob[] and ALP_MANIFEST_BLOB_LEN.  Generated into the
- * build tree, never committed -- it carries one specific module's serial. */
+ * build tree, never committed -- it carries one specific module's serial.
+ * Only included (and only used) in the default array-write mode -- see this
+ * file's header comment for the three modes -- so an unused-static warning
+ * never fires in the other two. */
+#if !defined(ALP_HAVE_SECURE_PAGE_BLOB)
 #include "manifest_blob.h"
+#endif
+
+/* The Secure Data Page mirror bytes, generated at configure time from
+ * -DALP_SECURE_PAGE_BIN.  Defines alp_secure_page_blob[] and
+ * ALP_SECURE_PAGE_BLOB_LEN.  Present only in modes 2 and 3 -- see this
+ * file's header comment. */
+#if defined(ALP_HAVE_SECURE_PAGE_BLOB)
+#include "secure_page_blob.h"
+#endif
 
 /* CRC-32 ISO-3309 (poly 0xEDB88320, init/xor-out 0xFFFFFFFF) -- matches
  * zlib.crc32, the algorithm scripts/program_eeprom.py uses to seal the blob.
  * Table-free bit-at-a-time form: the manifest is 128 bytes, so a lookup table
  * would only add flash footprint without a measurable speed win here.
  * Deliberately identical to the read sibling's copy: this app must compute the
- * CRC the same way the reader will, or a "verified" write still fails at boot. */
+ * CRC the same way the reader will, or a "verified" write still fails at boot.
+ *
+ * Used by all three modes: 1 and 2 sanity-check a baked-in blob's CRC before
+ * writing; 3 (lock) sanity-checks the blob it is about to permanently seal
+ * against, not just byte-compares it -- see that mode's secure_page_blob_is_sane(). */
 static uint32_t crc32_iso3309(const uint8_t *buf, size_t len)
 {
 	uint32_t crc = 0xFFFFFFFFu;
@@ -63,6 +105,12 @@ static uint32_t crc32_iso3309(const uint8_t *buf, size_t len)
 	}
 	return ~crc;
 }
+
+#if !defined(ALP_HAVE_SECURE_PAGE_BLOB)
+/* ------------------------------------------------------------------------
+ * Mode 1 (default): write the 128-byte array manifest.  See this file's
+ * header comment for the three modes.
+ * ------------------------------------------------------------------------ */
 
 /**
  * @brief Sanity-check the baked-in blob before it reaches the bus.
@@ -83,53 +131,76 @@ static bool blob_is_sane(void)
 		return false;
 	}
 
-	const alp_hw_info_eeprom_t *m = (const alp_hw_info_eeprom_t *)alp_manifest_blob;
+	/* memcpy, not a cast -- alp_manifest_blob is a generated uint8_t[]
+	 * (alignment 1); alp_hw_info_eeprom_t needs alignment 4 for its
+	 * uint32_t magic/schema_version/crc32 and uint16_t mfg_year. Reading
+	 * through a cast pointer is the same misaligned-access bug already
+	 * fixed for the Secure Data Page blob in this same file (see
+	 * secure_page_blob_is_sane() below) -- an earlier sweep fixed that
+	 * side and left this one, the array path, unswept. */
+	alp_hw_info_eeprom_t m;
+	memcpy(&m, alp_manifest_blob, sizeof(m));
 
-	if (m->magic != ALP_HW_INFO_MAGIC) {
+	if (m.magic != ALP_HW_INFO_MAGIC) {
 		printf("[provision] blob magic = 0x%08x, expected 0x%08x\n",
-		       (unsigned)m->magic,
+		       (unsigned)m.magic,
 		       (unsigned)ALP_HW_INFO_MAGIC);
 		return false;
 	}
-	if (m->schema_version != ALP_HW_INFO_SCHEMA_VERSION) {
+	if (m.schema_version != ALP_HW_INFO_SCHEMA_VERSION) {
 		printf("[provision] blob schema_version = %u, this build expects %u\n",
-		       (unsigned)m->schema_version,
+		       (unsigned)m.schema_version,
 		       (unsigned)ALP_HW_INFO_SCHEMA_VERSION);
 		return false;
 	}
 
 	/* The CRC covers everything up to but excluding the trailing crc32 field --
-	 * the same span scripts/program_eeprom.py seals and the reader re-checks. */
-	const size_t   covered = sizeof(*m) - sizeof(m->crc32);
+	 * the same span scripts/program_eeprom.py seals and the reader re-checks.
+	 * Computed over the raw bytes directly (not through `m`), same as every
+	 * other CRC check in this file -- crc32_iso3309() is byte-wise and does
+	 * not care about alignment. */
+	const size_t   covered = sizeof(m) - sizeof(m.crc32);
 	const uint32_t calc    = crc32_iso3309(alp_manifest_blob, covered);
-	if (calc != m->crc32) {
+	if (calc != m.crc32) {
 		printf("[provision] blob crc32 = 0x%08x (stored) vs 0x%08x (computed)\n",
-		       (unsigned)m->crc32,
+		       (unsigned)m.crc32,
 		       (unsigned)calc);
 		return false;
 	}
 	return true;
 }
 
-/** @brief Print the identity a blob carries, so the operator log records what was
- *         written without needing a separate read pass. */
-static void print_identity(const alp_hw_info_eeprom_t *m, const char *tag)
+/**
+ * @brief Print the identity a manifest carries, so the operator log records
+ *   what was written without needing a separate read pass.
+ *
+ * Takes the raw 128 bytes, not `const alp_hw_info_eeprom_t *`, and copies
+ * through `memcpy` internally -- ONE contract regardless of where @p raw
+ * comes from (the compiled-in blob, a pre-read buffer, or a device
+ * read-back), instead of three call sites each separately responsible for
+ * handing this an aligned pointer. Same reasoning as
+ * print_secure_page_identity() below, for the array manifest instead of the
+ * Secure Data Page mirror.
+ */
+static void print_identity(const uint8_t *raw, const char *tag)
 {
+	alp_hw_info_eeprom_t m;
+	memcpy(&m, raw, sizeof(m));
 	/* The char[] fields are not guaranteed NUL-terminated when full, so bound
 	 * every print by its field width rather than trusting a terminator. */
 	printf("[provision] %s family=%.*s sku=%.*s hw_rev=%.*s serial=%.*s mfg=%u-%02u-%02u\n",
 	       tag,
-	       (int)sizeof(m->family),
-	       m->family,
-	       (int)sizeof(m->sku),
-	       m->sku,
-	       (int)sizeof(m->hw_rev),
-	       m->hw_rev,
-	       (int)sizeof(m->serial),
-	       m->serial,
-	       (unsigned)m->mfg_year,
-	       (unsigned)m->mfg_month,
-	       (unsigned)m->mfg_day);
+	       (int)sizeof(m.family),
+	       m.family,
+	       (int)sizeof(m.sku),
+	       m.sku,
+	       (int)sizeof(m.hw_rev),
+	       m.hw_rev,
+	       (int)sizeof(m.serial),
+	       m.serial,
+	       (unsigned)m.mfg_year,
+	       (unsigned)m.mfg_month,
+	       (unsigned)m.mfg_day);
 }
 
 int main(void)
@@ -140,7 +211,7 @@ int main(void)
 		printf("RESULT FAIL: baked-in manifest blob failed its own checks\n");
 		return 0;
 	}
-	print_identity((const alp_hw_info_eeprom_t *)alp_manifest_blob, "to write:");
+	print_identity(alp_manifest_blob, "to write:");
 
 	/* Portable bus 0 -> SoC I2C2 (the board overlay aliases alp-i2c0 to &i2c2 and
 	 * supplies pinctrl_i2c2 on P5_6/P5_7).  100 kHz: the on-module bus has no
@@ -173,9 +244,12 @@ int main(void)
 		return 0;
 	}
 
-	const alp_hw_info_eeprom_t *old = (const alp_hw_info_eeprom_t *)existing;
-	if (old->magic == ALP_HW_INFO_MAGIC) {
-		print_identity(old, "already present:");
+	/* memcpy, not a cast -- existing is a uint8_t[] (alignment 1); see
+	 * blob_is_sane()'s identical reasoning above. */
+	alp_hw_info_eeprom_t old;
+	memcpy(&old, existing, sizeof(old));
+	if (old.magic == ALP_HW_INFO_MAGIC) {
+		print_identity(existing, "already present:");
 #if !defined(ALP_PROVISION_FORCE) || (ALP_PROVISION_FORCE == 0)
 		printf("[provision] module already carries a manifest -- refusing to "
 		       "overwrite.  Rebuild with -DALP_PROVISION_FORCE=1 if this is "
@@ -215,17 +289,685 @@ int main(void)
 	/* Re-derive the CRC from the bytes now on the device.  A byte-compare against
 	 * our own buffer and a CRC over the device's bytes answer different questions;
 	 * the second is what the boot-time reader will actually do. */
-	const alp_hw_info_eeprom_t *back    = (const alp_hw_info_eeprom_t *)readback;
-	const size_t                covered = sizeof(*back) - sizeof(back->crc32);
-	const uint32_t              calc    = crc32_iso3309(readback, covered);
-	if (calc != back->crc32) {
+	/* memcpy, not a cast -- readback is a uint8_t[] (alignment 1); see
+	 * blob_is_sane()'s identical reasoning above. */
+	alp_hw_info_eeprom_t back;
+	memcpy(&back, readback, sizeof(back));
+	const size_t   covered = sizeof(back) - sizeof(back.crc32);
+	const uint32_t calc    = crc32_iso3309(readback, covered);
+	if (calc != back.crc32) {
 		printf("RESULT FAIL: on-device crc32 0x%08x != computed 0x%08x\n",
-		       (unsigned)back->crc32,
+		       (unsigned)back.crc32,
 		       (unsigned)calc);
 		return 0;
 	}
 
-	print_identity(back, "verified on device:");
+	print_identity(readback, "verified on device:");
 	printf("RESULT PASS: manifest written and verified on device\n");
 	return 0;
 }
+
+#elif !defined(ALP_LOCK_SECURE_PAGE) || (ALP_LOCK_SECURE_PAGE == 0)
+/* ------------------------------------------------------------------------
+ * Mode 2: write the 64-byte Secure Data Page mirror and verify the
+ * read-back IN THIS SAME RUN.  Never locks.  Run mode 3 in a SEPARATE
+ * invocation, after a cold power cycle -- see this file's header comment.
+ * ------------------------------------------------------------------------ */
+
+/** @brief Sanity-check the baked-in Secure Data Page blob before it reaches
+ *         the bus -- same idea as mode 1's blob_is_sane(), for the 64-byte
+ *         mirror struct instead of the 128-byte manifest. */
+static bool secure_page_blob_is_sane(void)
+{
+	if (ALP_SECURE_PAGE_BLOB_LEN != sizeof(alp_secure_page_mirror_t)) {
+		printf("[provision] secure-page blob is %u bytes, expected %u\n",
+		       (unsigned)ALP_SECURE_PAGE_BLOB_LEN,
+		       (unsigned)sizeof(alp_secure_page_mirror_t));
+		return false;
+	}
+
+	/* memcpy, not a cast.  alp_secure_page_blob is a generated uint8_t[]
+	 * (alignment 1); alp_secure_page_mirror_t needs alignment 4 for its
+	 * uint32_t magic and uint32_t crc32.  Reading through a cast pointer is
+	 * the same misaligned-access bug already fixed on the device-read path
+	 * and in print_secure_page_identity().  The size equality above is what
+	 * makes this copy safe. */
+	alp_secure_page_mirror_t m;
+	memcpy(&m, alp_secure_page_blob, sizeof(m));
+
+	if (m.magic != ALP_SECURE_PAGE_MAGIC) {
+		printf("[provision] secure-page blob magic = 0x%08x, expected 0x%08x\n",
+		       (unsigned)m.magic,
+		       (unsigned)ALP_SECURE_PAGE_MAGIC);
+		return false;
+	}
+	if (m.schema_version != ALP_SECURE_PAGE_SCHEMA_VERSION) {
+		printf("[provision] secure-page blob schema_version = %u, this build expects %u\n",
+		       (unsigned)m.schema_version,
+		       (unsigned)ALP_SECURE_PAGE_SCHEMA_VERSION);
+		return false;
+	}
+
+	const size_t   covered = sizeof(m) - sizeof(m.crc32);
+	const uint32_t calc    = crc32_iso3309(alp_secure_page_blob, covered);
+	if (calc != m.crc32) {
+		printf("[provision] secure-page blob crc32 = 0x%08x (stored) vs 0x%08x (computed)\n",
+		       (unsigned)m.crc32,
+		       (unsigned)calc);
+		return false;
+	}
+	return true;
+}
+
+/**
+ * @brief Print the identity a Secure Data Page mirror carries.
+ *
+ * Takes the raw 64 bytes, not `const alp_secure_page_mirror_t *`, and
+ * copies through `memcpy` internally -- ONE contract regardless of where
+ * @p page comes from (the compiled-in blob `alp_secure_page_blob`, a
+ * classified local `alp_secure_page_mirror_t`, or a buffer straight off
+ * the device), instead of three call sites each separately responsible
+ * for handing this an aligned pointer. `alp_secure_page_blob` in
+ * particular is a generated `uint8_t[]` (alignment 1); casting it
+ * straight to `const alp_secure_page_mirror_t *` (alignment 4, for its
+ * `uint32_t magic` / `uint16_t mfg_year` / `uint32_t crc32`) is the exact
+ * misaligned-access bug already fixed on the device-read path -- see
+ * alp_secure_page_mirror_classify()'s doc comment in include/alp/hw_info.h.
+ */
+static void print_secure_page_identity(const uint8_t *page, const char *tag)
+{
+	alp_secure_page_mirror_t m;
+	memcpy(&m, page, sizeof(m));
+	printf("[provision] %s sku=%.*s hw_rev=%.*s serial=%.*s mfg=%u-%02u-%02u\n",
+	       tag,
+	       (int)sizeof(m.sku),
+	       m.sku,
+	       (int)sizeof(m.hw_rev),
+	       m.hw_rev,
+	       (int)sizeof(m.serial),
+	       m.serial,
+	       (unsigned)m.mfg_year,
+	       (unsigned)m.mfg_month,
+	       (unsigned)m.mfg_day);
+}
+
+/**
+ * @brief Is @p page (exactly @ref EEPROM_24C128_SECURE_PAGE_BYTES raw bytes,
+ *   as read off the device) blank/unprovisioned?
+ *
+ * Per EEPROM-MANIFEST-SPEC.md's blank-page rule: test the magic field, not
+ * "every byte reads 0xFF" -- an erased page happens to BE all 0xFF today,
+ * but the magic test is what stays correct if that ever changes, and it is
+ * what the runtime array-manifest reader already does for the same reason.
+ */
+static bool secure_page_is_blank(const uint8_t page[EEPROM_24C128_SECURE_PAGE_BYTES])
+{
+	uint32_t magic;
+	memcpy(&magic, page, sizeof(magic));
+	return magic != ALP_SECURE_PAGE_MAGIC;
+}
+
+int main(void)
+{
+	printf("[provision] aen-eeprom-provision (secure-page mirror write)\n");
+
+	if (!secure_page_blob_is_sane()) {
+		printf("RESULT FAIL: baked-in secure-page blob failed its own checks\n");
+		return 0;
+	}
+	print_secure_page_identity(alp_secure_page_blob, "to write:");
+
+	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = 0u,
+	    .bitrate_hz = 100000u,
+	});
+	if (bus == NULL) {
+		printf("RESULT FAIL: alp_i2c_open -> NULL, err=%d\n", (int)alp_last_error());
+		return 0;
+	}
+
+	eeprom_24c128_t ee;
+	alp_status_t    s = eeprom_24c128_init(&ee, bus, 0x50u);
+	if (s != ALP_OK) {
+		printf("RESULT FAIL: eeprom_24c128_init -> %d\n", (int)s);
+		return 0;
+	}
+
+	eeprom_24c128_identity_t id;
+	s = eeprom_24c128_read_identity(&ee, &id);
+	if (s != ALP_OK) {
+		printf("RESULT FAIL: eeprom_24c128_read_identity -> %d\n", (int)s);
+		return 0;
+	}
+	/* Graceful degradation: the footprint-compatible alternate part
+     * (M24128-BFMH6TG) has no second device-select header at all, so
+     * read_identity() above returns ALP_OK with secure_page_valid false
+     * rather than an I/O error -- see that function's doc comment. There is
+     * nothing to write on such a part; the array manifest is unaffected. */
+	if (!id.secure_page_valid) {
+		printf("RESULT FAIL: no Secure Data Page answered at 0x58 -- this part "
+		       "has no second device-select header (the M24128-BFMH6TG "
+		       "alternate?); nothing to write\n");
+		return 0;
+	}
+	/* Mode 3 demands both secure_page_valid AND lock_valid before proceeding
+     * (see its own gate below); this mode must too -- writing without
+     * knowing the lock state risks the same false confidence a missing
+     * check produces there. */
+	if (!id.lock_valid) {
+		printf("RESULT FAIL: could not read Secure Page Lock Status at 0x58 -- "
+		       "refusing to write without knowing the lock state\n");
+		return 0;
+	}
+	if (id.secure_page_locked) {
+		printf("RESULT FAIL: Secure Data Page is already locked -- refusing to "
+		       "write (the device would NAK this anyway; this check exists so "
+		       "the failure reason is unambiguous)\n");
+		return 0;
+	}
+
+	/* Same refusal shape as ALP_PROVISION_FORCE in mode 1: a page that
+     * already carries a mirror has a serial someone recorded; silently
+     * replacing it orphans that record.  Print what is about to be
+     * destroyed BEFORE the force branch overwrites it -- the operator log
+     * needs that serial, the same way mode 1 prints "already present:"
+     * before its own FORCE decision. */
+	if (!secure_page_is_blank(id.secure_page)) {
+		alp_secure_page_mirror_t existing;
+		if (alp_secure_page_mirror_classify(id.secure_page, &existing)) {
+			print_secure_page_identity(id.secure_page, "already present:");
+		} else {
+			printf("[provision] Secure Data Page is not blank, but does not parse "
+			       "as a valid mirror either (bad magic/schema) -- proceeding would "
+			       "overwrite unrecognised content, not necessarily a prior mirror\n");
+		}
+#if !defined(ALP_PROVISION_FORCE) || (ALP_PROVISION_FORCE == 0)
+		printf("[provision] Secure Data Page is not blank -- refusing to "
+		       "overwrite.  Rebuild with -DALP_PROVISION_FORCE=1 if this is "
+		       "a deliberate re-provision, and record why.\n");
+		printf("RESULT FAIL: refused to overwrite a non-blank Secure Data Page\n");
+		return 0;
+#else
+		printf("[provision] ALP_PROVISION_FORCE set -- overwriting the "
+		       "existing (non-blank) Secure Data Page contents above\n");
+#endif
+	}
+
+	s = eeprom_24c128_secure_page_write(&ee, alp_secure_page_blob, ALP_SECURE_PAGE_BLOB_LEN);
+	if (s != ALP_OK) {
+		printf("RESULT FAIL: eeprom_24c128_secure_page_write -> %d\n", (int)s);
+		return 0;
+	}
+	printf("[provision] wrote %u bytes to the Secure Data Page\n",
+	       (unsigned)EEPROM_24C128_SECURE_PAGE_BYTES);
+
+	/* Read back from the device, not from our own buffer -- same reasoning
+     * as mode 1's read-back. This is a same-session check only; the
+     * doc-required COLD-CYCLE read-back happens in a separate invocation
+     * of mode 3, which re-reads fresh after power has actually cycled. */
+	s = eeprom_24c128_read_identity(&ee, &id);
+	if (s != ALP_OK) {
+		printf("RESULT FAIL: read-back read_identity -> %d\n", (int)s);
+		return 0;
+	}
+	if (!id.secure_page_valid) {
+		printf("RESULT FAIL: Secure Data Page stopped answering after the write\n");
+		return 0;
+	}
+	if (memcmp(id.secure_page, alp_secure_page_blob, ALP_SECURE_PAGE_BLOB_LEN) != 0) {
+		printf("RESULT FAIL: read-back does not match what was written\n");
+		return 0;
+	}
+
+	alp_secure_page_mirror_t back;
+	if (!alp_secure_page_mirror_classify(id.secure_page, &back)) {
+		printf("RESULT FAIL: read-back byte-matched the blob but failed to parse "
+		       "(bad magic/schema) -- should not happen; treat as a hardware fault\n");
+		return 0;
+	}
+	print_secure_page_identity(id.secure_page, "verified on device (same session):");
+	printf("[provision] NOT locked. Cold-cycle the board, then run this app again "
+	       "with -DALP_LOCK_SECURE_PAGE=1 to lock permanently.\n");
+	printf("RESULT PASS: secure-page mirror written and verified on device\n");
+	return 0;
+}
+
+#else
+/* ------------------------------------------------------------------------
+ * Mode 3: PERMANENTLY lock the Secure Data Page.  Irreversible.  Run this
+ * only after a cold power cycle following mode 2 -- see this file's header
+ * comment.  Never writes; refuses to lock unless the page currently on the
+ * device reads back byte-exact against the same blob mode 2 wrote.
+ * ------------------------------------------------------------------------ */
+
+/**
+ * @brief Print the identity a Secure Data Page mirror carries.
+ *
+ * Duplicated from mode 2's identical function -- see that copy's doc
+ * comment for why it takes raw bytes and memcpy's internally rather than
+ * `const alp_secure_page_mirror_t *`.
+ */
+static void print_secure_page_identity(const uint8_t *page, const char *tag)
+{
+	alp_secure_page_mirror_t m;
+	memcpy(&m, page, sizeof(m));
+	printf("[provision] %s sku=%.*s hw_rev=%.*s serial=%.*s mfg=%u-%02u-%02u\n",
+	       tag,
+	       (int)sizeof(m.sku),
+	       m.sku,
+	       (int)sizeof(m.hw_rev),
+	       m.hw_rev,
+	       (int)sizeof(m.serial),
+	       m.serial,
+	       (unsigned)m.mfg_year,
+	       (unsigned)m.mfg_month,
+	       (unsigned)m.mfg_day);
+}
+
+/**
+ * @brief Sanity-check the baked-in Secure Data Page blob before it becomes
+ *   the lock gate.
+ *
+ * Duplicated from mode 2's identical function rather than shared: each mode
+ * is a self-contained #if branch of this file (see the header comment), and
+ * this check matters MORE here than in mode 2 -- a size-only check would let
+ * an operator accidentally point `-DALP_SECURE_PAGE_BIN` at a stale or
+ * corrupt blob and still lock against it, because the gate below only
+ * byte-compares against whatever this function did not already reject.
+ */
+static bool secure_page_blob_is_sane(void)
+{
+	if (ALP_SECURE_PAGE_BLOB_LEN != sizeof(alp_secure_page_mirror_t)) {
+		printf("[provision] secure-page blob is %u bytes, expected %u\n",
+		       (unsigned)ALP_SECURE_PAGE_BLOB_LEN,
+		       (unsigned)sizeof(alp_secure_page_mirror_t));
+		return false;
+	}
+
+	/* memcpy, not a cast.  alp_secure_page_blob is a generated uint8_t[]
+	 * (alignment 1); alp_secure_page_mirror_t needs alignment 4 for its
+	 * uint32_t magic and uint32_t crc32.  Reading through a cast pointer is
+	 * the same misaligned-access bug already fixed on the device-read path
+	 * and in print_secure_page_identity().  The size equality above is what
+	 * makes this copy safe. */
+	alp_secure_page_mirror_t m;
+	memcpy(&m, alp_secure_page_blob, sizeof(m));
+
+	if (m.magic != ALP_SECURE_PAGE_MAGIC) {
+		printf("[provision] secure-page blob magic = 0x%08x, expected 0x%08x\n",
+		       (unsigned)m.magic,
+		       (unsigned)ALP_SECURE_PAGE_MAGIC);
+		return false;
+	}
+	if (m.schema_version != ALP_SECURE_PAGE_SCHEMA_VERSION) {
+		printf("[provision] secure-page blob schema_version = %u, this build expects %u\n",
+		       (unsigned)m.schema_version,
+		       (unsigned)ALP_SECURE_PAGE_SCHEMA_VERSION);
+		return false;
+	}
+
+	const size_t   covered = sizeof(m) - sizeof(m.crc32);
+	const uint32_t calc    = crc32_iso3309(alp_secure_page_blob, covered);
+	if (calc != m.crc32) {
+		printf("[provision] secure-page blob crc32 = 0x%08x (stored) vs 0x%08x (computed)\n",
+		       (unsigned)m.crc32,
+		       (unsigned)calc);
+		return false;
+	}
+	return true;
+}
+
+/**
+ * @brief Compare one field between the two independently
+ *   generated objects as a NUL-terminated string, not a raw byte range.
+ *
+ * The array manifest and the Secure Data Page mirror budget DIFFERENT
+ * widths for the same logical field (sku 24 vs 16 bytes, hw_rev 8 vs 12,
+ * serial 24 vs 23 -- see include/alp/hw_info.h's field-width comments), so a
+ * raw memcmp across the two would treat that width difference itself as a
+ * disagreement. Both formats guarantee their strings are NUL-terminated, so
+ * bound-copy each field by ITS OWN width into a NUL-terminated local buffer,
+ * then strcmp the results.
+ *
+ * @return true if the two fields read the same string; on a mismatch,
+ *   prints "<label>: manifest <A> vs mirror <B>" (both values named, per
+ *   the review's requirement) and returns false.
+ */
+static bool field_matches(const char *label,
+                          const char *manifest_field,
+                          size_t      manifest_width,
+                          const char *mirror_field,
+                          size_t      mirror_width)
+{
+	char   mbuf[ALP_HW_INFO_SERIAL_LEN + 1];     /* widest manifest field used here (24) + NUL */
+	char   sbuf[ALP_SECURE_PAGE_SERIAL_LEN + 1]; /* widest mirror field used here (23) + NUL */
+	size_t mcopy = manifest_width < sizeof(mbuf) ? manifest_width : sizeof(mbuf) - 1u;
+	size_t scopy = mirror_width < sizeof(sbuf) ? mirror_width : sizeof(sbuf) - 1u;
+
+	memcpy(mbuf, manifest_field, mcopy);
+	mbuf[mcopy] = '\0';
+	memcpy(sbuf, mirror_field, scopy);
+	sbuf[scopy] = '\0';
+
+	if (strcmp(mbuf, sbuf) != 0) {
+		printf("[provision] %s: manifest %s vs mirror %s\n", label, mbuf, sbuf);
+		return false;
+	}
+	return true;
+}
+
+/**
+ * @brief Read + integrity-check the array manifest at 0x50, and
+ *   refuse to lock unless it agrees with @p mirror field for field.
+ *
+ * The array manifest and the Secure Data Page mirror are written by two
+ * separate tool runs, in two different production steps, from two separate
+ * .bin files. Nothing before this point ever compares them: mode 3 proves
+ * only that the on-device page matches the blob THIS BUILD baked in, so a
+ * mirror that is internally self-consistent (sane magic/schema/CRC) but
+ * belongs to a different module, or carries a typo'd --serial or the wrong
+ * --mfg-date, passes every check upstream of this one and would be locked
+ * forever onto a module whose array manifest says something else.
+ *
+ * KNOW WHAT THIS DOES NOT CATCH. scripts/program_eeprom_secure_page.py
+ * imports scripts/program_eeprom.py and reuses its board.yaml loader, so
+ * sku and hw_rev come from the same field, resolved by the same code, in
+ * whatever board.yaml each run was pointed at. Generate both blobs from ONE
+ * board.yaml and those two fields carry no independent signal -- a
+ * board.yaml that is wrong for the module poisons both objects identically
+ * and agrees with itself here. Independence on sku/hw_rev exists only when
+ * the two runs are given different inputs, as the operator wrapper does by
+ * synthesising the manifest's board.yaml from an explicit SKU argument.
+ * serial and mfg date are genuinely independent either way: they are
+ * per-invocation CLI arguments, and the array is written in an earlier
+ * production step than the mirror.
+ *
+ * "No manifest" is NOT "nothing to disagree with": a blank/erased array (no
+ * ALPH magic) or one that fails its own CRC refuses here exactly like a
+ * real field disagreement -- locking against an unverifiable array is the
+ * same blind-lock risk this whole gate exists to close.
+ *
+ * @param ee      Driver context already open + initialised at the array
+ *   address (0x50) -- the same @c ee this file's main() already uses for
+ *   read_identity() at 0x58.
+ * @param mirror  The Secure Data Page mirror about to be sealed.
+ * @return true only when the array manifest is present, integrity-checks
+ *   clean, and agrees with @p mirror on sku, hw_rev, serial, and the mfg
+ *   date.
+ */
+static bool array_manifest_agrees_with_mirror(eeprom_24c128_t                *ee,
+                                              const alp_secure_page_mirror_t *mirror)
+{
+	uint8_t      raw[sizeof(alp_hw_info_eeprom_t)];
+	alp_status_t s = eeprom_24c128_read(ee, 0u, raw, sizeof(raw));
+	if (s != ALP_OK) {
+		printf("[provision] array manifest: read at 0x50 -> %d -- refusing to lock "
+		       "without a manifest to cross-check against\n",
+		       (int)s);
+		return false;
+	}
+
+	/* memcpy, not a cast -- raw is a uint8_t[] (alignment 1);
+	 * alp_hw_info_eeprom_t needs alignment 4 -- same reasoning as
+	 * secure_page_blob_is_sane() above. */
+	alp_hw_info_eeprom_t manifest;
+	memcpy(&manifest, raw, sizeof(manifest));
+
+	if (manifest.magic != ALP_HW_INFO_MAGIC) {
+		printf("[provision] array manifest: no ALPH magic at 0x50 -- absent, which is "
+		       "NOT \"nothing to disagree with\"; refusing to lock\n");
+		return false;
+	}
+	if (manifest.schema_version != ALP_HW_INFO_SCHEMA_VERSION) {
+		printf("[provision] array manifest: schema_version %u, this build expects %u -- "
+		       "refusing to lock\n",
+		       (unsigned)manifest.schema_version,
+		       (unsigned)ALP_HW_INFO_SCHEMA_VERSION);
+		return false;
+	}
+	const size_t   covered = sizeof(manifest) - sizeof(manifest.crc32);
+	const uint32_t calc    = crc32_iso3309(raw, covered);
+	if (calc != manifest.crc32) {
+		printf("[provision] array manifest: crc32 0x%08x (stored) vs 0x%08x (computed) -- "
+		       "refusing to lock\n",
+		       (unsigned)manifest.crc32,
+		       (unsigned)calc);
+		return false;
+	}
+
+	bool ok = true;
+	if (!field_matches(
+	        "sku", manifest.sku, sizeof(manifest.sku), mirror->sku, sizeof(mirror->sku))) {
+		ok = false;
+	}
+	if (!field_matches("hw_rev",
+	                   manifest.hw_rev,
+	                   sizeof(manifest.hw_rev),
+	                   mirror->hw_rev,
+	                   sizeof(mirror->hw_rev))) {
+		ok = false;
+	}
+	if (!field_matches("serial",
+	                   manifest.serial,
+	                   sizeof(manifest.serial),
+	                   mirror->serial,
+	                   sizeof(mirror->serial))) {
+		ok = false;
+	}
+	if (manifest.mfg_year != mirror->mfg_year || manifest.mfg_month != mirror->mfg_month ||
+	    manifest.mfg_day != mirror->mfg_day) {
+		printf("[provision] mfg date: manifest %u-%02u-%02u vs mirror %u-%02u-%02u\n",
+		       (unsigned)manifest.mfg_year,
+		       (unsigned)manifest.mfg_month,
+		       (unsigned)manifest.mfg_day,
+		       (unsigned)mirror->mfg_year,
+		       (unsigned)mirror->mfg_month,
+		       (unsigned)mirror->mfg_day);
+		ok = false;
+	}
+	return ok;
+}
+
+int main(void)
+{
+	printf("[provision] aen-eeprom-provision (secure-page PERMANENT LOCK)\n");
+	printf("[provision] this is irreversible -- see "
+	       "docs/som-batch-provisioning-procedure.md #7 in alp-sdk-internal\n");
+
+	/* Operator ATTESTATION that a real cold power cycle (rail confirmed at
+	 * 0.0 V, not a warm reset) happened between the mode 2 write and this
+	 * run. A Flow C RAM-run is a J-Link/OpenOCD halt-load-go over SWD --
+	 * the rail is never interrupted by that, so an operator CAN run mode 2,
+	 * then RAM-run this mode and lock, with power continuous the whole
+	 * time; nothing inside a single RAM-run can detect that mechanically
+	 * (see the comment on the read_identity() call below for why this run's
+	 * own freshness proves nothing about the rail). This flag does NOT
+	 * prove a cold cycle happened -- it is the operator's word for it. The
+	 * actual evidence belongs in the bench log's power telemetry, recorded
+	 * separately from this build. */
+#if !defined(ALP_SECURE_PAGE_COLD_CYCLED) || (ALP_SECURE_PAGE_COLD_CYCLED == 0)
+	printf("RESULT FAIL: refusing to lock -- rebuild with "
+	       "-DALP_SECURE_PAGE_COLD_CYCLED=1, and only do so after a COLD POWER "
+	       "CYCLE (rail confirmed at 0.0 V, not a warm reset) between the mode 2 "
+	       "write and this run\n");
+	return 0;
+#endif
+
+	if (!secure_page_blob_is_sane()) {
+		printf("RESULT FAIL: baked-in secure-page blob failed its own checks -- "
+		       "refusing to use it as the lock gate\n");
+		return 0;
+	}
+
+	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = 0u,
+	    .bitrate_hz = 100000u,
+	});
+	if (bus == NULL) {
+		printf("RESULT FAIL: alp_i2c_open -> NULL, err=%d\n", (int)alp_last_error());
+		return 0;
+	}
+
+	eeprom_24c128_t ee;
+	alp_status_t    s = eeprom_24c128_init(&ee, bus, 0x50u);
+	if (s != ALP_OK) {
+		printf("RESULT FAIL: eeprom_24c128_init -> %d\n", (int)s);
+		return 0;
+	}
+
+	/* This read is fresh off the device -- a RAM-run cannot survive its own
+     * SWD session ending, so nothing here is cached from an earlier
+     * invocation of this app. That is NOT the same claim as "the power rail
+     * cycled between the write and this read": a Flow C RAM-run never
+     * touches the rail at all, so this freshness is exactly as true whether
+     * or not a cold cycle happened. The ALP_SECURE_PAGE_COLD_CYCLED gate
+     * above -- an operator attestation, not something this read can verify
+     * -- is what actually stands in for the cold-cycle requirement; this
+     * comment used to claim this read WAS that requirement, which was
+     * false. See that gate's comment for why: a page write that is latched
+     * but not committed reads back correct while powered and wrong only
+     * after the rail actually drops, and this read cannot distinguish
+     * those two cases from inside a single powered session. */
+	eeprom_24c128_identity_t id;
+	s = eeprom_24c128_read_identity(&ee, &id);
+	if (s != ALP_OK) {
+		printf("RESULT FAIL: eeprom_24c128_read_identity -> %d\n", (int)s);
+		return 0;
+	}
+	if (!id.secure_page_valid || !id.lock_valid) {
+		printf("RESULT FAIL: no Secure Data Page / Lock Status answered at "
+		       "0x58 -- this part has no second device-select header (the "
+		       "M24128-BFMH6TG alternate?); nothing to lock\n");
+		return 0;
+	}
+	/* Log the byte, not just the decode.  secure_page_locked is this byte's
+     * bit 1, and that polarity has never been confirmed against a part that
+     * was actually locked -- so the raw value before and after is the only
+     * evidence that can tell a failed lock from a correct lock whose
+     * indication is not where we think it is. */
+	printf("[provision] Lock Status before: 0x%02x, Device Config: 0x%02x\n",
+	       (unsigned)id.lock_status,
+	       (unsigned)id.device_config);
+	if (id.secure_page_locked) {
+		/* Do NOT report PASS on trust alone. A wrongly-locked page (an
+         * all-0xFF page locked before ever being written, or one locked
+         * with the wrong identity) is a SCRAPPED module, and this is the
+         * LAST moment that is distinguishable from a correct lock -- it is
+         * exactly the path an operator reaches after a lock whose ACK-poll
+         * falsely timed out (see eeprom_24c128_secure_page_lock's doc
+         * comment for why that poll no longer runs). memcmp against the
+         * validated blob first; only PASS on an exact match. */
+		alp_secure_page_mirror_t locked;
+		if (!alp_secure_page_mirror_classify(id.secure_page, &locked)) {
+			printf("RESULT FAIL: Secure Data Page is locked but does not parse as "
+			       "a valid mirror (bad magic/schema) -- this module is SCRAPPED, "
+			       "its identity cannot be trusted, and the lock cannot be undone\n");
+			return 0;
+		}
+		if (memcmp(id.secure_page, alp_secure_page_blob, ALP_SECURE_PAGE_BLOB_LEN) != 0) {
+			print_secure_page_identity(id.secure_page, "locked, but WRONG identity:");
+			printf("RESULT FAIL: Secure Data Page is already locked and does NOT "
+			       "match the supplied blob -- this module is SCRAPPED, the lock "
+			       "cannot be undone\n");
+			return 0;
+		}
+		print_secure_page_identity(id.secure_page, "already locked, verified:");
+		printf("RESULT PASS: Secure Data Page was already locked and matches the "
+		       "expected identity -- nothing to do\n");
+		return 0;
+	}
+
+	/* THE gate: refuse to lock unless what's on the device right now, after
+     * the cold cycle, is byte-exact against the operator-supplied blob.
+     * This subsumes the blank-page case too -- a blank (all-0xFF) page
+     * cannot byte-match a sane blob (sane requires the ALSP magic), so it
+     * fails here with the same message rather than needing a separate
+     * check. */
+	if (memcmp(id.secure_page, alp_secure_page_blob, ALP_SECURE_PAGE_BLOB_LEN) != 0) {
+		printf("RESULT FAIL: on-device Secure Data Page does not byte-match "
+		       "the supplied blob -- refusing to lock a page that might not "
+		       "carry the intended identity\n");
+		return 0;
+	}
+
+	alp_secure_page_mirror_t to_lock;
+	if (!alp_secure_page_mirror_classify(id.secure_page, &to_lock)) {
+		printf("RESULT FAIL: on-device Secure Data Page byte-matched the blob "
+		       "but failed to parse (bad magic/schema) -- should not happen; "
+		       "treat as a hardware fault\n");
+		return 0;
+	}
+
+	/* The array manifest at 0x50 and this mirror are generated by
+     * two different scripts from two different inputs (see
+     * array_manifest_agrees_with_mirror()'s doc comment) -- nothing above
+     * this point has ever cross-checked them. Refuse to seal a mirror that
+     * disagrees with the module's own array manifest. */
+	if (!array_manifest_agrees_with_mirror(&ee, &to_lock)) {
+		printf("RESULT FAIL: array manifest at 0x50 disagrees with the Secure "
+		       "Data Page mirror about to be sealed -- refusing to lock (see "
+		       "above for which field, and scripts/program_eeprom.py vs "
+		       "scripts/program_eeprom_secure_page.py for why the two can "
+		       "disagree)\n");
+		return 0;
+	}
+
+	print_secure_page_identity(id.secure_page, "locking:");
+	s = eeprom_24c128_secure_page_lock(&ee);
+	if (s != ALP_OK) {
+		printf("RESULT FAIL: eeprom_24c128_secure_page_lock -> %d\n", (int)s);
+		return 0;
+	}
+
+	/* eeprom_24c128_secure_page_lock() confirms only the Lock
+     * Status bit, never the payload -- a lock-frame bug that ALSO writes
+     * INTO the page (two such bugs were already found and fixed on this
+     * driver during review; see its wire-frame comments) would still
+     * return ALP_OK here. Re-read fresh off the device and byte-compare
+     * against the blob before ever printing PASS -- the "already locked"
+     * branch above already does exactly this check for the case where the
+     * page was found pre-locked; this is its missing counterpart for the
+     * branch that just performed the lock itself. */
+	eeprom_24c128_identity_t post;
+	s = eeprom_24c128_read_identity(&ee, &post);
+	if (s != ALP_OK) {
+		printf("RESULT FAIL: post-lock read_identity -> %d -- lock state "
+		       "unconfirmed and the lock cannot be undone\n",
+		       (int)s);
+		return 0;
+	}
+	/* Re-confirm the lock state from THIS read, not from the lock call's own
+     * verdict. eeprom_24c128_read_identity() only sets lock_valid on a
+     * successful Lock Status write_read, so a lock that changed how selector
+     * 0x04 answers would come back ALP_OK with lock_valid false and a matching
+     * payload -- and without this check the app would print PASS for a module
+     * whose lock state it never actually confirmed. The already-locked branch
+     * above reaches its verdict from id.secure_page_locked; this is the same
+     * evidence for the branch that just did the locking. */
+	printf("[provision] Lock Status after: 0x%02x, Device Config: 0x%02x\n",
+	       (unsigned)post.lock_status,
+	       (unsigned)post.device_config);
+	if (!post.lock_valid || !post.secure_page_locked) {
+		printf("RESULT FAIL: Secure Data Page lock state is UNCONFIRMED after "
+		       "the lock (lock_valid=%d, locked=%d, raw=0x%02x) -- do not ship "
+		       "this module until Lock Status has been read back successfully; "
+		       "the lock cannot be undone\n",
+		       (int)post.lock_valid,
+		       (int)post.secure_page_locked,
+		       (unsigned)post.lock_status);
+		return 0;
+	}
+	if (!post.secure_page_valid ||
+	    memcmp(post.secure_page, alp_secure_page_blob, ALP_SECURE_PAGE_BLOB_LEN) != 0) {
+		print_secure_page_identity(post.secure_page, "locked, but WRONG payload:");
+		printf("RESULT FAIL: Secure Data Page is locked but its payload does "
+		       "NOT match the intended identity -- this module is SCRAPPED, "
+		       "the lock cannot be undone\n");
+		return 0;
+	}
+
+	printf("RESULT PASS: Secure Data Page locked and confirmed\n");
+	return 0;
+}
+
+#endif

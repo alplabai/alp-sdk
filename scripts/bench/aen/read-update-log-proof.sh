@@ -37,9 +37,10 @@ if [ "$#" -ne 0 ]; then
 	exit 2
 fi
 
-JLINK="$(bench_jlink_exe)" || exit $?
-JLINK_ARGS=("$JLINK")
-[ -n "${JLINK_SN:-}" ] && JLINK_ARGS+=(-SelectEmuBySN "$JLINK_SN")
+# Routed through bench_jlink_run (bench-env.sh, alp-sdk#2064): masks every
+# OTHER probe out of a private namespace so -SelectEmuBySN resolves
+# unambiguously to the ONE probe LG_PLACE actually owns.
+JLINK_ARGS=(bench_jlink_run)
 
 # SAFETY GATE (alp-sdk#813) -- confirm the AEN E8 answered BEFORE the mem32
 # reads below (both here and the SWD MRAM-fallback read further down this

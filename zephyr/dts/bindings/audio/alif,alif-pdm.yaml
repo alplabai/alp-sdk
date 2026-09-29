@@ -1,7 +1,26 @@
 # Copyright (C) 2025 Alif Semiconductor
 # SPDX-License-Identifier: Apache-2.0
 
-description: Alif Pulse Density Module
+description: |
+  Alif Pulse Density Module
+
+  Decimator settling (issue #2133 round 4e/4f): PCM delivered shortly after
+  every DMIC_TRIGGER_START -- including a restart after an
+  overrun/STOP-then-START cycle, not just the very first capture -- may
+  contain the FIR/decimator's startup transient and read as full-scale
+  (silicon observed +/-32767) or otherwise non-representative. MEASURED
+  bound (round 4f): a raw hex dump of the start of capture showed roughly 7
+  zero samples followed by ~25 samples of ring-down at 48 kHz -- under 1 ms
+  total, well inside this driver's typical 100 ms block. This is not a
+  driver bug and is not filtered by the driver: upstream Zephyr dmic
+  drivers don't discard a settling block either, and the dmic API has no
+  settling contract for a driver to implement against. Consumers should
+  discard AT LEAST 1 ms of samples after every START, or the first block,
+  WHICHEVER IS LONGER -- discarding only "the first block" is not enough
+  for a consumer using a block size smaller than ~1 ms, which could still
+  see settling in its second block. examples/aen/aen-pdm-mic-alif excludes
+  its first (anchor) block from signal-level stats for this reason, which
+  covers it at that example's 100 ms block size.
 
 compatible: "alif,alif-pdm"
 
@@ -35,3 +54,92 @@ properties:
     enum:
       - 0
       - 1
+
+  # clk-frequency-min/clk-frequency-max: the SAME property names Zephyr's own
+  # zephyr/dts/bindings/audio/pdm-dmic.yaml ("Digital microphone common
+  # configuration", landed 2ceda8506e7) uses for a mic's PDM clock range --
+  # reused here rather than inventing alif-local names (issue #2133 round 4a).
+  # Upstream models the mic as a SEPARATE CHILD node (compatible
+  # "zephyr,pdm-dmic", which `include: [pdm-dmic.yaml]`s and thereby makes
+  # clk-frequency-min/max/clk-duty-cycle-min/max/channel-left/right ALL
+  # required); this driver does NOT yet adopt that child-node model -- these
+  # two properties are applied directly to the CONTROLLER node instead, and
+  # stay optional here. `include: [pdm-dmic.yaml]` was checked and rejected:
+  # it would make the two duty-cycle properties required on every
+  # alif,alif-pdm node, which nothing here reads. Migrating to the real
+  # zephyr,pdm-dmic child-node model is a follow-up, not this round.
+  clk-frequency-min:
+    type: int
+    description: |
+      Minimum PDM bit-clock frequency (Hz) the mic(s) wired to this instance
+      accept. Board-level fact, not a SoC/driver one -- e.g. the E1M-EVK's
+      MP34DT05TR-A mics need >= 1.2 MHz (ST's in-tree mpxxdtyy.h:
+      MPXXDTYY_MIN_PDM_FREQ). Optional: when unset, dmic_alif_pdm_configure()
+      only enforces the caller's dmic_cfg.io window (issue #2133). If both
+      clk-frequency-min and clk-frequency-max are set, min must not exceed
+      max -- PDM_INIT's BUILD_ASSERT catches an inverted range at build time.
+
+  clk-frequency-max:
+    type: int
+    description: |
+      Maximum PDM bit-clock frequency (Hz) the mic(s) wired to this instance
+      accept -- see clk-frequency-min. E1M-EVK MP34DT05TR-A: <= 3.25 MHz
+      (mpxxdtyy.h: MPXXDTYY_MAX_PDM_FREQ). Optional, same fallback as
+      clk-frequency-min.
+
+  channel-gain:
+    type: int
+    default: 0x200
+    description: |
+      Per-channel PDM_CH_GAIN value applied to every enabled hardware channel
+      by dmic_alif_pdm_configure() (issue #2143). GAIN is an UNSIGNED 8.4
+      fixed-point field, bits [11:0] of PDM_CH_GAIN, reset 0x10 = 1.0x (Alif
+      SVD AE822FA0E5597BS0_CM55_HP_View.svd, PDM_CH_GAIN register, GAIN
+      field, lines ~19081-19092: "Gain in unsigned 8.4 format", bitRange
+      [11:0]; matches the Alif DFP's PDM_MAX_GAIN_CTRL 0xFFFU,
+      drivers/include/pdm.h). A value written above PDM_CH_GAIN_MAX (0xFFF)
+      truncates to bits [11:0] -- 0x1000 exactly truncates to 0, which MUTES
+      the channel -- see PDM_INIT's BUILD_ASSERT below.
+
+      The default (0x200 = 32.0x = +30.1 dB) is PROVISIONAL, pending a
+      calibrated full-scale measurement, not a tuned value. Full-scale
+      headroom at 0x200 is UNMEASURED: issue #2133 round 4e's silicon run
+      (gain 0x800 = 128x, quiet room, no controlled stimulus) put every
+      unclipped sample at a multiple of 0x80 (the gain is a saturating
+      multiply applied AFTER the datapath quantizes, so a coarser gain step
+      doesn't cost resolution) and pinned the start transient / post-restart
+      window at full scale -- evidence 0x800 clips a close clap or any start
+      transient, but not a calibrated pre-gain full-scale figure. 0x200 is
+      NOT "clearly below the clip point" as an earlier round claimed. It is
+      also NOT a documented "voice-tuned" value: BLE Audio's
+      `ALIF_BLE_AUDIO_PDM_MICROPHONE_GAIN` Kconfig (`range 1 256`,
+      left-shifted by 4 before writing this register) has three different
+      values in the same codebase and none is described as tuned for
+      anything -- `0x140` is its Kconfig DEFAULT (20), `0x320` is a
+      DIFFERENT `#ifndef` FALLBACK (50, sdk-alif
+      subsys/bluetooth/le_audio/audio_source_pdm.c), and sdk-alif
+      samples/bluetooth/le_audio/unicast_initiator's `prj.conf` ships a
+      THIRD value, 100 (`0x640`). A round 4f speaker-to-mic loopback
+      (TAS2563 speakers -> PDM mics, E1M-AEN803 serial 2026W36-0002, PROBE_LOOPBACK mode of
+      examples/aen/aen-i2s-tas2563-probe on branch
+      test/u46-i2s-tas2563-on-reworked-mux, issue #2143) confirmed 0x200
+      captures frequency- and level-correct audio on mic ch0/ch1 (PDM
+      controller 0) -- see zephyr/drivers/audio/alif_pdm.c's top-of-file
+      STATUS comment for the numbers; the D2 pair (HW 4/5) is register-level
+      verified only. Full-scale headroom at 0x200 remains UNMEASURED by that
+      test (it used a fixed loudspeaker level, not a calibration sweep).
+      Alif's own audio-capture references are NOT a clean precedent for a
+      48 kHz default either: `alif_kws`'s `AudioBackend.cpp` sets 0xF00, but
+      that sample's shipped model runs at 16 kHz (`g_AudioRate = 16000`,
+      generated/kws/kws_micronet_m_vela_H128.tflite.cc), which selects mode
+      4, not the mode 7 this driver defaults to -- 0xF00 was never
+      Alif-validated at 48 kHz. The GitHub-hosted
+      alifsemi/alif_ml-embedded-evaluation-kit's mic_listener.c uses 0x800
+      (not vendored locally, so not a `path:NNN` citation). The driver's OLD
+      hardcoded default (0x0D) is Alif's register-level driver test value
+      (sdk-alif tests/drivers/pdm/src/alif_test_pdm.h:88-123, and sdk-alif
+      samples/drivers/audio/dmic_alif/src/main.c:22) -- never an audio-tuned
+      value: 0x0D = 0.8125x (-1.8 dB vs unity), 31.9 dB below the
+      provisional 0x200 (issue #2133 round 4d). Override per board/mic once
+      a controlled-stimulus calibration exists; PDM_INIT's BUILD_ASSERT
+      rejects an out-of-range value at build time.

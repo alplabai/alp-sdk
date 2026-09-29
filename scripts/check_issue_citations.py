@@ -29,10 +29,32 @@ CATCHES:
 
 DOES NOT CATCH, on purpose (scope, per #1950's own design discussion):
   * a citation anywhere else -- `changelog.d/`, `CHANGELOG.md`, ADR prose,
-    `notes:` blocks, any other YAML field's comment. Those files are full of
-    legitimate historical references ("fixed in #N") and a blanket `#NNNN`
-    harvest over them is noise from day one. Widening the harvester there is
-    filed as a follow-up, #1958, if it turns out to be cheap.
+    `notes:` blocks, any other YAML field's comment. #1958 asked whether
+    widening the harvester there is cheap enough to do; it was MEASURED, not
+    guessed, and the answer is no, not with this heuristic. Applying the same
+    historical/futurity classifier to a naive `#NNNN` harvest over all four
+    locations on the real tree (2026-09) found 1627 citations, of which 17
+    would have hard-failed the gate. All 17 were read by hand and every one
+    is a false positive: changelog/ADR prose narrates history in vocabulary
+    the driver-status word-list was never tuned for ("Added ADC oversample +
+    resolution control (#494)", "Settled (#1244): ...", "#495, #494 and #496
+    ... wasn't complete") with none of `_HISTORICAL_RE`'s marker words
+    nearby, so each reads as a live blocker to this classifier though every
+    cited issue is long since closed. Worse, `CHANGELOG.md`'s released
+    sections describe a past tree on purpose (see
+    `check_changelog_citations.py`'s identical carve-out for `path:line`
+    citations) -- a "the order code stays TBD (#1241)" note that was
+    accurate the day it shipped becomes an unfixable false positive the
+    moment #1241 later closes, with no way to "correct" already-published
+    history. And widening would have missed the one REAL drift the same
+    corpus already contains (`docs/adr/0023-ethernet-out-of-the-alp-
+    surface.md:221`, "#1241, still open" -- #1241 is in fact CLOSED): the
+    neighbouring clause's "#1244, now fixed" trips `_HISTORICAL_RE` for the
+    whole compound sentence, clearing #1241's flag too. A gate that is
+    `gate: true` cannot ship 17-for-17 false positives to buy one still-
+    missed catch. Declined; #1958 is closed with this measurement rather
+    than widened. If the corpus or the classifier changes enough to move
+    that count, re-run the measurement -- don't re-guess it.
   * a citation whose surrounding clause reads as historical rather than a
     blocker claim (see HISTORICAL below) -- reported as neither pass nor
     fail; it is simply not examined.
@@ -61,11 +83,33 @@ misclassified a plainly-historical citation as a live blocker -- the
 false-positive direction this gate must never take. This is a word-list
 heuristic, not comprehension -- it is deliberately biased to UNDER-flag:
 "if you cannot distinguish blocked-on from landed-via, do not flag it".
-A blocker phrased with one of those words (e.g. "not yet fixed") can still
-slip through unflagged; that is the accepted cost of not spamming every
-"landed via #N" reference as a fresh failure. Measured: 4 of 11 realistic
-blocker phrasings are skipped this way. Tracked in #1963 -- NOT #1958,
-which is the unrelated harvester-scope widening cited at the top.
+A blocker phrased with one of those words used to slip through unflagged
+whenever the marker sat anywhere in the clause, regardless of tense --
+measured at 4 of 11 realistic blocker phrasings (#1963): "not yet fixed",
+"until ... lands", "waiting on ... resolved", "must be done before ...".
+`_FUTURITY_RE` now overrides `_HISTORICAL_RE` back to a live blocker when
+one of those four negation/futurity cues (`not yet`, `until`, `waiting on`,
+`must be`) is BOUND to the marker match -- adjacent to it, with no
+coordinating conjunction (`_CONJUNCTION_RE`: `and`, `but`, `or`, ...)
+sitting between them -- the marker word alone no longer wins. Binding, not
+mere co-occurrence anywhere in the clause, matters: a clause can narrate
+history for one citation and then, joined only by ", and"/", but"/etc.,
+go on to describe an unrelated live TODO for a different subject ("landed
+via #1241, and the C driver must be reworked") -- treating any cue
+anywhere in the clause as attaching to the marker read that as a live
+blocker for #1241 too. Caught in review before this change shipped:
+reproduced against `metadata/chips/dp83825.yaml`'s real "landed via
+#1241" prose plus five constructed variants of the same shape, 6 for 6.
+See `_is_historical` for the pairwise binding check.
+This is still a word-list heuristic, not comprehension, and it is still
+biased to UNDER-flag by construction: a blocker phrased with a marker word
+and NONE of those four cues (e.g. bare "not fixed", no "yet"), or with a
+cue only reachable through a coordinating conjunction, still slips through
+unflagged; that residual gap is the accepted cost of never flipping a
+historical citation into a false positive. #1963 is otherwise addressed by
+this change (a PR closing it needs the `Closes #1963` keyword, not just
+the number in the subject) -- NOT #1958, which is the unrelated
+harvester-scope widening cited at the top and which closed separately.
 
 STALENESS -- this gate is OFFLINE
 ----------------------------------
@@ -142,6 +186,101 @@ _HISTORICAL_RE = re.compile(
     r"\b(via|closed|closing|land(?:ed|s)?|fixed|resolved|merged|shipped|done|already)\b",
     re.IGNORECASE,
 )
+
+#: Negation/futurity override for `_HISTORICAL_RE` (#1963) -- a marker word
+#: anywhere in the clause used to win outright, so a genuine blocker claim
+#: that merely *mentions* what would land it ("not yet fixed", "until ...
+#: lands", "waiting on ... resolved", "must be done before ...") classified
+#: as historical and was silently skipped. Measured: 4 of 11 realistic
+#: blocker phrasings probed on #1963 do this. Each pairs a marker word with
+#: one of these four cues signalling the marker verb HASN'T happened yet;
+#: any hit here overrides `_HISTORICAL_RE` back to a live blocker regardless
+#: of where the marker sits. Checked against the real tree's 15 harvested
+#: citations (`python3 scripts/check_issue_citations.py`): none contain any
+#: of these cues, so this tightening flags zero currently-passing citations
+#: -- the four fixtures below are synthetic, not from the tree.
+#: Deliberately NOT a general leading-vs-trailing-phrase classifier (the
+#: gate's bias is to under-flag): a blocker phrased without one of these
+#: four cues (e.g. bare "not fixed" with no "yet") still slips through
+#: unflagged, same as before.
+_FUTURITY_RE = re.compile(
+    r"\bnot\s+yet\b|\buntil\b|\bwaiting\s+on\b|\bmust\s+be\b",
+    re.IGNORECASE,
+)
+
+#: A coordinating conjunction marking a NEW sub-thought within the same
+#: `.`/`;`-delimited clause -- `_clause_around` only splits on
+#: `.`/`;`, so "landed via #1241, and the C driver must be reworked" stays
+#: ONE clause. `_is_historical` below used to run `_FUTURITY_RE` over that
+#: whole clause, so it found "must be" and overrode the "via"/"landed"
+#: marker for #1241, though "must be" describes an unrelated LATER subject
+#: ("the C driver"), not #1241's own verb -- mere co-occurrence in the
+#: clause is not the same as the cue actually attaching to the marker it is
+#: meant to override. A futurity cue only counts now if no coordinating
+#: conjunction sits between it and the marker match -- see `_is_historical`.
+_CONJUNCTION_RE = re.compile(
+    r"\b(?:and|but|or|nor|so|yet|though|although|while)\b", re.IGNORECASE
+)
+
+#: Punctuation that opens a new sub-thought just as a coordinating
+#: conjunction does, inside the same `.`/`;`-delimited clause.  A
+#: conjunction is not English's only pivot: a parenthetical, a colon and
+#: an em/en dash each introduce a second subject that a following
+#: futurity cue belongs to, rather than to the marker verb before it.
+#: Measured against the `_CONJUNCTION_RE`-only rule, both of these
+#: wrongly flipped a plainly historical citation to a live blocker:
+#:
+#:     "register access closed via #730 (the register map must be
+#:      re-derived from the datasheet)."     -> BLOCKER, want historical
+#:     "landed via #1241: the C driver must be reworked."
+#:                                            -> BLOCKER, want historical
+#:
+#: while the `, and` / `, but` / `;` shapes the conjunction rule already
+#: covered stayed correct.  Neither shape occurs in the tree today -- the
+#: whole-tree run is rc=0, 15 of 15 citations historical, 0 evaluated --
+#: so this closes the hole before prose reaches it rather than after.
+#: This gate is `gate: true`: a false positive blocks the merge queue,
+#: while a false negative only misses one stale citation.
+_SUBTHOUGHT_RE = re.compile(r"[(:]|--|—|–")
+
+
+def _is_historical(clause: str) -> bool:
+    """Whether `clause` reads as historical narration rather than a live
+    blocker claim (see HISTORICAL in the module docstring).
+
+    A marker word (`_HISTORICAL_RE`) makes a clause historical UNLESS a
+    negation/futurity cue (`_FUTURITY_RE`) is BOUND to that same marker
+    match: adjacent to it, with no coordinating conjunction
+    (`_CONJUNCTION_RE`) sitting between them. Binding, not mere
+    co-occurrence anywhere in the clause -- "not yet fixed (#1234)" binds
+    ("not yet" sits directly against "fixed"); "landed via #1241, and the
+    C driver must be reworked" does NOT bind ("must be" is separated from
+    "via"/"landed" by ", and", so it describes the driver, not #1241's own
+    verb). Reproduced against `metadata/chips/dp83825.yaml`'s real
+    "... this manifest itself landed via #1241 ..." prose plus five
+    constructed variants sharing this shape -- all 6 wrongly flipped a
+    historical citation to a live blocker before this fix. Every pair of
+    marker/cue matches is checked (not just the first of each): if ANY
+    pair binds, the futurity override applies.
+    """
+    hist_matches = list(_HISTORICAL_RE.finditer(clause))
+    if not hist_matches:
+        return False
+    fut_matches = list(_FUTURITY_RE.finditer(clause))
+    if not fut_matches:
+        return True
+    for hm in hist_matches:
+        for fm in fut_matches:
+            if hm.end() <= fm.start():
+                gap = clause[hm.end() : fm.start()]
+            elif fm.end() <= hm.start():
+                gap = clause[fm.end() : hm.start()]
+            else:
+                gap = ""  # overlapping matches -- trivially bound
+            if not _CONJUNCTION_RE.search(gap) and not _SUBTHOUGHT_RE.search(gap):
+                return False  # a bound pair -- futurity overrides
+    return True  # every pair is split by a conjunction or sub-thought pivot
+
 
 #: A decimal or dotted-version token -- `0.75`, `29.5`, `1.5`, `v0.3.x`.
 #: `.`s inside one of these are never a clause boundary (round 5): naively
@@ -231,7 +370,7 @@ def _citations_in_block(block_text: str) -> list[tuple[int, bool, str]]:
     out = []
     for m in _CITATION_RE.finditer(block_text):
         clause = _clause_around(block_text, m.start(), m.end())
-        historical = bool(_HISTORICAL_RE.search(clause))
+        historical = _is_historical(clause)
         out.append((int(m.group(1)), historical, clause))
     return out
 

@@ -8,6 +8,7 @@ gate, including the #448/#520 known-content-quality-gap rule.
 """
 import copy
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -22,7 +23,8 @@ CATALOG = REPO / "metadata" / "templates" / "catalog-v1.json"
 
 def _run(*args):
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True)
+        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"})
 
 
 def _catalog() -> dict:
@@ -122,6 +124,59 @@ def test_cores_dir_drift_rejected(tmp_path):
     proc = _run("--catalog", str(p))
     assert proc.returncode != 0
     assert "drift" in proc.stdout
+
+
+def test_undeclared_core_source_rejected(tmp_path):
+    """issue #2241: `--emit scaffold` copies exactly `files.user_owned`, so a
+    file in a core's app dir that the list omits is silently missing from
+    every scaffold (iot shipped without src/cc3501e_bridge.{c,h} while its
+    CMakeLists.txt still compiled the .c). The gate must name the file."""
+    doc = copy.deepcopy(_catalog())
+    t = next(t for t in doc["templates"] if t["id"] == "edge-ai")
+    t["files"]["user_owned"].remove("src/cold_chain.h")
+    p = _write(tmp_path, doc)
+    proc = _run("--catalog", str(p))
+    assert proc.returncode != 0
+    assert "src/cold_chain.h" in proc.stdout
+    assert "user_owned" in proc.stdout
+
+
+def test_core_dir_testcase_yaml_is_exempt():
+    """A core dir's testcase.yaml is SDK CI wiring, deliberately kept out of
+    `files.user_owned` and listed in `test.testcase_yaml` instead -- it must
+    not trip the #2241 check (multicore-mailbox's peer/testcase.yaml)."""
+    rec = next(t for t in _catalog()["templates"] if t["id"] == "multicore-mailbox")
+    assert "peer/testcase.yaml" not in rec["files"]["user_owned"]
+    assert ctc._check_core_files_declared(rec) == []
+
+
+def test_root_app_dir_core_is_not_walked():
+    """Characterises the documented blind spot: a core whose `dir` is the
+    example root is skipped, so even an undeclared source there passes this
+    check. Pinned so extending coverage is a deliberate change, not drift."""
+    rec = copy.deepcopy(next(t for t in _catalog()["templates"] if t["id"] == "iot"))
+    rec["cores"][0]["dir"] = "."
+    rec["files"]["user_owned"] = ["board.yaml"]
+    assert ctc._check_core_files_declared(rec) == []
+
+
+def test_core_dir_with_no_tracked_files_is_vacuous():
+    """A `dir` git tracks nothing under yields no #2241 problem -- the stale
+    path is `_check_cores_match_board_yaml`'s to report, not this check's."""
+    rec = copy.deepcopy(next(t for t in _catalog()["templates"] if t["id"] == "iot"))
+    rec["cores"][0]["dir"] = "./no-such-app-dir"
+    assert ctc._check_core_files_declared(rec) == []
+
+
+def test_core_files_check_reports_git_failure(monkeypatch):
+    """Outside a git checkout the #2241 check must fail through the gate's
+    own `FAIL · problem` output, never escape as a raw traceback."""
+    def _boom(_rel_dir):
+        raise subprocess.CalledProcessError(128, ["git", "ls-files"])
+    monkeypatch.setattr(ctc, "_tracked_files_under", _boom)
+    rec = next(t for t in _catalog()["templates"] if t["id"] == "iot")
+    problems = ctc._check_core_files_declared(rec)
+    assert problems and "cannot list the files git tracks" in problems[0]
 
 
 def test_cores_missing_entry_rejected(tmp_path):

@@ -9,7 +9,7 @@ adapter.
 > Peer docs: [`bring-up-v2n.md`](bring-up-v2n.md),
 > [`bring-up-v2n-m1.md`](bring-up-v2n-m1.md),
 > [`bring-up-imx93.md`](bring-up-imx93.md).  This guide covers the
-> AEN family specifically (AEN301..801, Alif Ensemble silicon).
+> AEN family specifically (AEN301..801 plus AEN803, Alif Ensemble silicon).
 
 ## 0. Pre-flight
 
@@ -41,13 +41,48 @@ Inventory check before powering anything:
   (Carrier parts ride **I2C2** (`ALP_E1M_I2C0`) / the EVK headers, not
   the SoM's BRD_I2C trio -- see the bus table in §5.1.)
 
-> **This batch: the SoM's OSPI memories are NOT populated.** The
-> OSPI0 octal bus (BOM-optional NOR flash on CS0 + HyperRAM on CS1,
-> both `assembled: optional` in the SKU preset) is un-stuffed on the
-> AEN801 modules on the bench, so boot **and** app storage run from
-> on-die **MRAM only** (5.5 MB on `AE822FA0E5597LS0`).  Don't expect
-> an external flash / XIP device on this hardware; MCUboot slots and
-> any storage partition must target MRAM, not OSPI.
+> **OSPI0 population is SKU-scoped, not a blanket "this batch" fact.**
+> On the **E1M-AEN801** SKU both OSPI0 devices are DNI
+> (`ospi_memories.ospi0.assembled: false` and `hyperram.assembled: false`
+> in [`E1M-AEN801.yaml`](../metadata/e1m_modules/E1M-AEN801.yaml)), so
+> boot **and** app storage on an AEN801 module run from on-die **MRAM
+> only** (5.5 MB on `AE822FA0E5597LS0`). The **E1M-AEN803** SKU fits
+> **both** external memories -- the `IS25WX256-JHLE` NOR on CS1 and the
+> `S80KS5122GABHM02` HyperRAM on CS0, both `assembled: true` in
+> [`E1M-AEN803.yaml`](../metadata/e1m_modules/E1M-AEN803.yaml) -- and on
+> the **AEN803** bench module serial `2026W36-0002` the NOR answers a
+> JEDEC ID read on OSPI0 **CS1** with `9d 5b 19 10` (ISSI, IS25WX256) at
+> a 20 MHz test rate (`ser` is a **bitmask**: `0x00000002` selects CS1,
+> not the index `1`). The same read at the driver's 100 MHz DT-derived
+> default comes back `4e ad 8c 88` with `RISR=0x00000001` -- a sampling
+> error, not silence -- so headroom above 20 MHz is unmeasured
+> (alp-sdk#2041). This corrects an earlier version of this same
+> paragraph, which had the chip-select mapping backwards (NOR on CS0,
+> HyperRAM on CS1) -- a probe wired from that wording would aim a NOR
+> opcode at CS0 and could misread a live NOR as dead. That CS1 result
+> says nothing about the HyperRAM's own behaviour. The OSPI0 pinctrl
+> gap this paragraph used to name as the blocker is **closed**
+> (alp-sdk#2041, closed 2026-09-12):
+> `zephyr/drivers/flash/flash_ospi_alif.c` now applies
+> `pinctrl_apply_state(config->pcfg, PINCTRL_STATE_DEFAULT)` at the top
+> of `ospi_alif_init()`, before the clock-enable, and
+> `examples/aen/aen-ospi-regcheck`'s overlay now muxes the module's own
+> 13-pad OSPI0 route (ports 0/2/6/12, all function 1, per
+> [`alif-ospi.tsv`](../metadata/e1m_modules/aen/alif-ospi.tsv)) rather
+> than the Alif DevKit's -- and that example's PASS banner no longer
+> prints the stale "no part populated this batch" claim. The apply is
+> bench-verified on two E1M-AEN803 modules (serial 2026W36-0001, serial 2026W36-0002): it is
+> fail-closed and runs before the clock-enable, so the device reaching
+> READY proves it returned 0. The pad-mux registers were **not** read
+> back, though, so "pinctrl applied without error" is measured and "the
+> pads carry the intended function" is not. **Keep MCUboot slots and
+> any storage partition on MRAM regardless of SKU anyway** -- for a
+> reason that outlived the pinctrl one: `flash_ospi_alif.c` implements
+> no `flash_driver_api` at all (it does init / XIP-enable / AES-inline
+> / DDR config only, see that file's own header), so there is no
+> read/write/erase path for a partition to sit on, and nothing in tree
+> performs an OSPI device-level transfer of any kind. That is
+> alp-sdk#915 -- recheck this paragraph when **that** issue closes.
 
 ## 1. First-power smoke test
 
@@ -84,9 +119,12 @@ PMIC's `EVENT_00` status register over BRD_I2C.
 
    The SW-DP IDR (the debug-port identification register — a property of
    the ADIv5 SW-DP, **not** a core ID) reads **`0x4C013477`** on the E8
-   (BENCH-VERIFIED). Note this is *not* the generic `0x6BA02477` this repo
-   reads for the GD32/Cortex-M33 — a wrong value means wrong target or
-   reversed SWD wiring.
+   (BENCH-VERIFIED). Note this is *not* `0x6BA02477`, the generic
+   Cortex-M33 r0p1 SW-DPv2 default this repo carries as
+   `GD32_SWD_GENERIC_CM33_R0P1_IDCODE` (never measured on a GD32; #1440,
+   #1369) and separately the bench-measured V2N CM33 DAP value on this
+   same rack — a wrong value on the E8 means wrong target or reversed
+   SWD wiring.
 
    > pyocd works too, but its `-t` target id depends on the installed
    > `alif_ensemble-cmsis-dfp` CMSIS-pack (do NOT assume an `alif_e8` id).
@@ -219,8 +257,9 @@ trio (OPTIGA / RTC / TMP112) is on the separate, shared **BRD_I2C**
 > [`docs/soms/aen.md`](soms/aen.md) "On-module housekeeping I2C (BRD_I2C)" for
 > the customer-facing writeup, its limitations (no `VBACKUP` supply, so no
 > timekeeping across a power cycle; `RTC_CLKOUT` carrier-only), and the
-> `0x40`-instead-of-`0x48` per-unit TMP112 defect. #1814's blocker is cleared:
-> `rv3028c7` is reachable.
+> TMP112 design address: `0x40`, not the earlier-declared `0x48`, which was a
+> metadata error (alp-sdk#1978). #1814's blocker is cleared: `rv3028c7` is
+> reachable.
 >
 > Unrelated but corrected in the same pass: `LPI2C1` **is** master-capable
 > (HWRM: "Two Low-Power I2C modules (LPI2C0 slave-only and LPI2C1
@@ -247,27 +286,40 @@ this bus actually measured.
 | 24C128 | `0x50` | EEPROM (manifest) | I2C2 | SoM |
 | OPTIGA TM | `0x30` | Secure element | BRD_I2C (I2C0) | SoM — **DNI on this bench batch** |
 | RV-3028-C7 | `0x52` | RTC | BRD_I2C (I2C0) | SoM |
-| TMP112 | `0x48` | Thermometer | BRD_I2C (I2C0) | SoM |
-| TCAL9538 | `0x72` | GPIO expander (U35 main) | I2C2 | EVK carrier |
-| TCAL9538 | `0x71` | GPIO expander (U37, PCIe) | I2C2 | EVK carrier |
+| TMP112 | `0x40` | Thermometer -- design address for the fitted TMP112DIDPWR (X2SON-5, ADD0->GND per SBOS473L Table 7-4); the earlier-declared `0x48` was a metadata error, corrected under alp-sdk#1978 | BRD_I2C (I2C0) | SoM |
+| TCAL9538 | `0x73` | GPIO expander (U35 main) | I2C2 | EVK carrier |
+| TCAL9538 | `0x71` | GPIO expander (U37, PCIe -- NOT ASSEMBLED, alp-sdk#1974) | I2C2 | EVK carrier |
 | INA236 | `0x40`..`0x42`, `0x49`..`0x4B` | Power monitor (6x) | I2C2 | EVK carrier |
 | BMP581 | `0x47` | Barometer | I2C2 | EVK carrier |
+| 24C128 | `0x58` | SAME EEPROM as above, second device-select header (`1010` -> 0x50, `1011` -> 0x58, same A2/A1/A0 straps) -- not a second chip | I2C2 | SoM (alp-sdk#1976) |
 
+> **CORRECTED 2026-09-05 (alp-sdk#1974):** U35 main is `0x73` (A1=1, A0=1),
+> not `0x72` as this table said when first written -- the maintainer's EVK
+> I2C schedule gives `1110011 = 0x73`, and 2 of 2 boards answer there and
+> are silent at `0x72`.
+>
 > Two address caveats when reading a scan of I2C2:
 >
 > * **`0x48` on I2C2 is not the TMP112.** The TMP112 above is on BRD_I2C,
 >   which this scan cannot reach. On **PRE-RESPIN** carriers `0x48` on I2C2
 >   is U32 INA236B (+V_CAM0 rail), re-strapped to `0x4B` from the next batch
->   (`metadata/boards/e1m-evk.yaml:294-295`).
-> * **U35 answers at `0x20`, not `0x72`,** when it is assembled as the
+>   (`metadata/boards/e1m-evk.yaml:316-317`). On **POST-RESPIN** carriers,
+>   `0x48` is the TAS2563 GLOBAL/broadcast address — every fitted TAS2563
+>   answers there in addition to its own unit address (`0x4D`/`0x4E`), so an
+>   I2C census will always list `0x48` here; it is not an unidentified device
+>   (`metadata/boards/e1m-evk.yaml:303`, alp-sdk#1976).
+> * **U35 answers at `0x20`, not `0x73`,** when it is assembled as the
 >   TCA6408ARSVR alternative (R112 fitted, R145 DNP) — register-compatible,
->   so `chips/tcal9538` drives it unchanged (`metadata/boards/e1m-evk.yaml:276-277`).
+>   so `chips/tcal9538` drives it unchanged (`metadata/boards/e1m-evk.yaml:297-298`).
 
-> **This bench batch (2026-06-15):** the **OPTIGA Trust M (`0x30`) is not
-> populated**, and that is *expected*, not a fault. OPTIGA is in the
-> E1M-AEN801 SoM design (`on_module`); the absence is a current-batch
-> population fact (like the un-stuffed OSPI memories). Skip §5.2 on these
-> boards. Note the evidence is the population record, **not** a scan miss --
+> **The OPTIGA Trust M (`0x30`) is not populated**, and that is
+> *expected*, not a fault. OPTIGA is in the E1M-AEN801 SoM design
+> (`on_module`); the absence is a population fact that holds across
+> **both** AEN SKUs on the bench -- `optiga_trust_m` is `assembled:
+> false` in both `metadata/e1m_modules/E1M-AEN801.yaml:123` and
+> `metadata/e1m_modules/E1M-AEN803.yaml:129` (unlike OSPI0 in §0, this
+> population fact is not SKU-differentiated). Skip §5.2 on these boards.
+> Note the evidence is the population record, **not** a scan miss --
 > OPTIGA sits on BRD_I2C, a working bus as of the 2026-09-05 R2 run (§5.1)
 > that is deliberately not blind-scanned here regardless (a scan is a real transaction against a
 > secure element); the driver's targeted `optiga_trust_m_init` probe is the
@@ -326,8 +378,10 @@ of cable insert.
 
 These are optional and SKU-/carrier-dependent.  The E1M-EVK
 carries a `CAM_MUX_PI3WVR626` MIPI CSI 2:1 mux (selected via
-`EVK_PIN_CAM_MUX_SEL`), but no camera-mux truth table is published
-yet -- treat the wiring as TBD until the carrier camera doc lands.
+`EVK_PIN_CAM_MUX_SEL`); its truth table and the Raspberry Pi
+connector (J5, input A) wiring are in
+[`boards/e1m-evk.md`](boards/e1m-evk.md), which also shows the
+`e1m_evk_rpi_csi` shield build for a Raspberry Pi camera module.
 
 
 **Bench-settled 2026-09-05** on an **R2** module (`E1M-AEN801` 2626-R2, Flow A,
@@ -336,8 +390,8 @@ pull-up alone.**
 
 | Address | Part | Result |
 |---|---|---|
-| `0x52` | RV-3028-C7 | ACK; ID reg `0x28` = `0x44`; seconds `0x01` -> `0x02` (oscillator running) |
-| `0x48` | TMP112 | ACK; `CONFIG` `0x60a0` / `T_LOW` `0x4b00` / `T_HIGH` `0x5000` = datasheet defaults; 28.062 °C |
+| `0x52` | RV-3028-C7 | ACK; ID reg `0x28` = `0x44` (HID nibble `0x4` matches; VID nibble is production-line, not identity, per RV-3028-C7 Application Manual Rev. 1.4 §3.14); seconds `0x01` -> `0x02` (oscillator running) |
+| `0x40` | TMP112 | ACK; `CONFIG` `0x60a0` / `T_LOW` `0x4b00` / `T_HIGH` `0x5000` = datasheet defaults; 28.062 °C |
 | `0x30` | OPTIGA Trust M | no answer -- DNP on this batch, the expected negative control |
 
 Every non-response was a clean `rc=-5` (`-EIO`) NACK: **zero `-ETIMEDOUT`,
@@ -390,10 +444,14 @@ top of the per-subsystem checks.
 > toolchain + silicon before switching to the carrier board.  (Alif's
 > own `sdk-alif` / `zephyr_alif` fork -- board `alif_e8_dk` -- and the
 > CMSIS-Pack DFP (`alif_ensemble-cmsis-dfp`, device `AE822FA0E5597`)
-> are opt-in alternatives; Yocto/A32 is `meta-alif-ensemble` branch
-> **scarthgap**, `devkit-e8.conf` / `appkit-e8.conf`.  Note E7 is not in
-> upstream Zephyr v4.4 at all -- only e4/e6/e8/e1c -- another reason E8
-> leads.)
+> are opt-in alternatives; Yocto/A32 is intended to ride
+> `meta-alif-ensemble`, but that path does not build today -- there is
+> no `scarthgap` branch, no `devkit-e8.conf` on the one branch that
+> exists, and the layer is Yocto-series-incompatible with this repo's
+> Scarthgap baseline regardless (issues #1967 / #1968 / #1971 / #1982;
+> see `meta-alp-sdk/README.md`'s "Alif Ensemble E8" section and #264
+> for the rebuild).  Note E7 is not in upstream Zephyr v4.4 at all --
+> only e4/e6/e8/e1c -- another reason E8 leads.)
 >
 > Per-core builds use plain `west build -b <target> <app>`.
 > (`tan build --project <app>` is the multi-core planner/executor: it fans a
@@ -449,19 +507,23 @@ top of the per-subsystem checks.
    in §7 -- but a *non-ACKing* EEPROM is a wiring/pull-up fault.
 
 4. **CC3501E PING / GET_VERSION.**  Bring the on-module Wi-Fi/BLE
-   coprocessor to life over the inter-chip SPI1 bus.  Issue the
-   two META-group opcodes from the bridge host driver (see the
-   wire frame in `cc3501e-bridge-firmware:DESIGN.md`):
-   `PING` (opcode `0x00`) then `GET_VERSION` (opcode `0x01`).
-   A standalone host-side helper for the M55 side is **TBD**
-   (only the device firmware ships today), so drive it from app
-   code via the bridge dispatch for now.
+   coprocessor to life over the inter-chip SPI1 bus.  The full
+   host-side driver ships in-tree: `cc3501e_init()` from
+   `<alp/chips/cc3501e.h>` (`chips/cc3501e/`) issues
+   `PING` (opcode `0x00`) then `GET_VERSION` (opcode `0x01`)
+   over the bridge dispatch and refuses a protocol-major
+   mismatch; the runnable `cc3501e_bridge_bringup()` helper is
+   in `examples/aen/aen-cc3501e-bringup/`, and the
+   `alp companion` console verbs exercise the link
+   interactively.
 
    * `PING` must return `RESP_OK` with empty data -- the liveness
      signal.
    * `GET_VERSION` must return the firmware's wire-protocol
      version; cross-check it against
      `cc3501e-bridge-firmware:prebuilt/CHANGELOG.md`.
+     Modules ship factory-flashed with the latest CC3501E
+     firmware (v0.9.0 as of this writing).
 
    No `RESP_OK` usually means the CC3501E hasn't been flashed yet
    (`helper_firmware[].firmware_path` is still TBD in the SKU

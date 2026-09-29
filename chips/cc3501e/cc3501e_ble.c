@@ -200,7 +200,15 @@ alp_status_t cc3501e_ble_gatt_register(cc3501e_t     *ctx,
                                        uint32_t       timeout_ms)
 {
 	if (num_handles_out != NULL) *num_handles_out = 0u;
-	if (descriptor == NULL || len == 0u || len > ALP_CC3501E_MAX_PAYLOAD) return ALP_ERR_INVAL;
+	/* #2035: ALP_CC3501E_MAX_PAYLOAD alone overstates what actually fits --
+	 * cc3501e_request()'s own tx_len ceiling (cc3501e_core.c) already
+	 * subtracts ALP_CC3501E_CRC_BYTES once this ctx has negotiated a MAJOR-4
+	 * peer (the trailer it then appends), so a descriptor sized to the bare
+	 * MAX_PAYLOAD bound gets rejected two frames deeper with no explanation.
+	 * Subtract it here too so this check is the one a caller actually hits. */
+	if (descriptor == NULL || len == 0u ||
+	    len > (size_t)(ALP_CC3501E_MAX_PAYLOAD - ALP_CC3501E_CRC_BYTES))
+		return ALP_ERR_INVAL;
 	if (handles_out == NULL && handles_cap > 0u) return ALP_ERR_INVAL;
 
 	/* BLE_GATT_REGISTER (0x38): the firmware handle_ble_gatt_register takes the
@@ -255,7 +263,9 @@ alp_status_t cc3501e_ble_gatt_notify(cc3501e_t     *ctx,
                                      uint32_t       timeout_ms)
 {
 	if (data == NULL && len > 0u) return ALP_ERR_INVAL;
-	if (len > (size_t)(ALP_CC3501E_MAX_PAYLOAD - 2u)) return ALP_ERR_INVAL;
+	/* #2035: leave room for the MAJOR-4 CRC trailer cc3501e_request() appends --
+	 * see cc3501e_ble_gatt_register()'s comment above. */
+	if (len > (size_t)(ALP_CC3501E_MAX_PAYLOAD - 2u - ALP_CC3501E_CRC_BYTES)) return ALP_ERR_INVAL;
 	/* BLE_GATT_NOTIFY (0x39) wire (firmware handle_ble_gatt_notify): handle(LE16)
 	 * | value bytes.  No header struct -- layout from the firmware handler. */
 	uint8_t buf[2u + (ALP_CC3501E_MAX_PAYLOAD - 2u)];
@@ -293,7 +303,9 @@ alp_status_t cc3501e_ble_gatt_write(cc3501e_t     *ctx,
                                     uint32_t       timeout_ms)
 {
 	if (data == NULL && len > 0u) return ALP_ERR_INVAL;
-	if (len > (size_t)(ALP_CC3501E_MAX_PAYLOAD - 2u)) return ALP_ERR_INVAL;
+	/* #2035: leave room for the MAJOR-4 CRC trailer cc3501e_request() appends --
+	 * see cc3501e_ble_gatt_register()'s comment above. */
+	if (len > (size_t)(ALP_CC3501E_MAX_PAYLOAD - 2u - ALP_CC3501E_CRC_BYTES)) return ALP_ERR_INVAL;
 	/* BLE_GATT_WRITE (0x3B) wire (firmware handle_ble_gatt_write): handle(LE16) |
 	 * value bytes -- identical framing to NOTIFY. */
 	uint8_t buf[2u + (ALP_CC3501E_MAX_PAYLOAD - 2u)];

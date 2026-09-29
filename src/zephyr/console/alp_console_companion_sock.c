@@ -212,7 +212,13 @@ static void companion_serve_event_cb(uint8_t opcode, const uint8_t *payload, siz
 	if (opcode != (uint8_t)ALP_CC3501E_EVT_SOCK_ACCEPTED) {
 		return;
 	}
-	if (cc3501e_sock_accepted_decode(payload, len, &ev) != ALP_OK) {
+	/* #2126 review: companion_cc3501e is the ctx this event's companion was
+	 * registered on -- NULL here would mean this callback fired after
+	 * unregistration, which cc3501e_add_event_callback()'s own contract
+	 * does not allow, but link_epoch defaults 0 on a fresh ctx either way,
+	 * so this stays a defensive no-op rather than a NULL-deref either way. */
+	const uint8_t epoch = (companion_cc3501e != NULL) ? companion_cc3501e->link_epoch : 0u;
+	if (cc3501e_sock_accepted_decode(payload, len, epoch, &ev) != ALP_OK) {
 		return;
 	}
 	/* Queue-full drops the handle, which LEAKS a firmware socket -- the firmware
@@ -345,11 +351,15 @@ static int cmd_companion_sock_serve(const struct shell *sh, size_t argc, char **
 		shell_error(sh, "sock open failed (%d)", (int)s);
 		return -EIO;
 	}
-	/* Print the handle: the firmware hands out lwIP fd + 1, so a handle that
-	 * climbs across successive runs is the visible symptom of a listening socket
-	 * that was not released, and a bind/listen failure is only diagnosable
-	 * against the handle it was attempted on. */
-	shell_print(sh, "listen handle %u", (unsigned)srv);
+	/* Print the handle as fd + epoch, not one number (issue #2126): the low
+	 * byte is the firmware's own lwIP fd + 1, so a low byte that climbs across
+	 * successive runs is still the visible symptom of a listening socket that
+	 * was not released, while the upper byte is the link epoch the handle was
+	 * opened under -- it changes only when the driver warm-resets the bridge,
+	 * and printing the raw u16 would make that jump of 256 look like a leak. A
+	 * bind/listen failure is only diagnosable against the handle it was
+	 * attempted on, so print both halves. */
+	shell_print(sh, "listen handle %u (epoch %u)", (unsigned)(srv & 0xFFu), (unsigned)(srv >> 8));
 	/* NULL ip = INADDR_ANY: the AP address does not exist until the role is up,
 	 * so binding it explicitly would race the role-up. */
 	s = cc3501e_sock_bind(companion_cc3501e, srv, NULL, (uint16_t)port, ALP_COMPANION_SOCK_OP_MS);
@@ -383,7 +393,10 @@ static int cmd_companion_sock_serve(const struct shell *sh, size_t argc, char **
 		if (k_msgq_get(&companion_accept_q, &handle, K_MSEC(200)) != 0) {
 			continue; /* nobody connected in this window */
 		}
-		shell_print(sh, "accepted handle %u", (unsigned)handle);
+		shell_print(sh,
+		            "accepted handle %u (epoch %u)",
+		            (unsigned)(handle & 0xFFu),
+		            (unsigned)(handle >> 8));
 		(void)companion_serve_one(sh, handle);
 		(void)cc3501e_sock_close(companion_cc3501e, handle, ALP_COMPANION_SOCK_OP_MS);
 		served++;

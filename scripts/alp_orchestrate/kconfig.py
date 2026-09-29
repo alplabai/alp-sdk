@@ -85,14 +85,27 @@ def _emit_extra_library_profile(
     `CONFIG_*=y` or `# ...` comment); empty list when the profile
     parses but nothing matches and there's no sw_fallback.
 
-    Failures (malformed YAML, missing keys) emit a single `#`-prefixed
-    diagnostic comment so the customer sees the failure in the slice's
-    alp.conf rather than getting silent drop-out.
+    Failures reading or parsing the profile (missing/unreadable file,
+    non-UTF-8 bytes, malformed YAML, missing keys) emit a single
+    `#`-prefixed diagnostic comment so the customer sees the failure in
+    the slice's alp.conf rather than getting silent drop-out or an
+    unhandled exception out of an emit-time helper (issue #1961:
+    `read_text(encoding="utf-8")` raises `UnicodeDecodeError` -- a
+    `ValueError` subclass, not an `OSError` -- on non-UTF-8 bytes,
+    before the YAML parser ever runs; the original `except (OSError,
+    yaml.YAMLError)` missed it).  Matches tan-cli's relocated copy
+    (`python/tan/planner/kconfig.py`): `.resolve()` is dropped -- only
+    `read_text` needs the path, so nothing here needs a canonicalized
+    one -- which also removes `.resolve()`'s own `RuntimeError` on a
+    symlink loop (ELOOP) as a source of failure.  A symlink-loop or
+    permission-denied `profile:` is rejected earlier, at board.yaml
+    load time, by `validate.py`'s `_validate_consistency` before this
+    emit-time helper is ever reached.
     """
-    profile_path = (REPO / profile_rel).resolve()
     try:
+        profile_path = REPO / profile_rel
         doc = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as e:
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as e:
         return [f"# extra_libraries[{name}] profile parse failed: {e}"]
     if not isinstance(doc, dict):
         return [f"# extra_libraries[{name}] profile is not a mapping"]
@@ -641,8 +654,8 @@ def _emit_soc_summary(project: "BoardProject", slice_: "Slice") -> list[str]:
     the SoM preset's `memory:` block (off-SoC OSPI RAM/flash the SKU's
     BOM actually populates -- distinct from the SoC facts above: two SKUs
     on the identical PCB/silicon can differ here, e.g. E1M-AEN803's 512
-    Mbit HyperRAM + 256 Mbit NOR vs E1M-AEN801's 256 Mbit HyperRAM only,
-    NOR left DNI/optional) for CONFIG_ALP_SDK_SOM_{DRAM,FLASH}_MBIT.
+    Mbit HyperRAM + 256 Mbit NOR vs E1M-AEN801, which populates neither)
+    for CONFIG_ALP_SDK_SOM_{DRAM,FLASH}_MBIT.
 
     `alp_banner.c` prefers these over its devicetree fallback (one
     image's chosen sram/flash REGION size, not the SoM's actual
@@ -1364,8 +1377,8 @@ def _emit_inference(
         # stream errors a 128-MAC NPU at invoke (register-proven on E8), so a
         # blind max() would mis-size the HE slice.  Prefer the core-paired
         # instance; fall back to the most-capable of the variant when the chosen
-        # variant is not core-paired (the E8 U85 on the shared HG subsystem) or
-        # the SoC JSON predates paired_core.
+        # variant is not core-paired (the E8 U85, a shared SoC-level NPU --
+        # Alif block name NPU_HG) or the SoC JSON predates paired_core.
         paired = [n["mac_per_cycle"] for n in npus_of_type
                   if n.get("paired_core") == slice_.core_id]
         macs   = [n["mac_per_cycle"] for n in npus_of_type]

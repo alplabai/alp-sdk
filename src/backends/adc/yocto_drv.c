@@ -257,9 +257,8 @@ y_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st, alp_capabilitie
 	st->reference_uv    = (uint32_t)ref;
 	st->resolution_bits = (uint16_t)Y_ADC_RES_BITS;
 
-	caps_out->flags               = 0u;
 	caps_out->max_resolution_bits = (uint16_t)Y_ADC_RES_BITS;
-	caps_out->max_sample_rate     = 0u; /* one-shot sysfs read; rate not advertised */
+	caps_out->max_rate_hz         = 0u; /* one-shot sysfs read; rate not advertised */
 	caps_out->channel_count       = 1u;
 	return ALP_OK;
 }

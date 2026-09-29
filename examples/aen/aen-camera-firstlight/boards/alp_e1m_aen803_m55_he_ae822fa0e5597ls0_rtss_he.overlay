@@ -1,0 +1,25 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-camera-firstlight board overlay for the E1M-AEN803 (Ensemble E8,
+ * M55-HE) RAM-run.
+ *
+ * No camera-specific DT wiring lives here: the CSI-2 -> CPI graph (dphy /
+ * csi / cam, all status="okay") and the sensor node itself come from the
+ * two shields stacked at build time (`-DSHIELD="e1m_evk_rpi_csi <camera
+ * shield>"`) -- see zephyr/boards/shields/e1m_evk_rpi_csi/ and the sensor
+ * shield's own overlay. This file only carries the RAM-run retarget every
+ * sibling *-regcheck / *-firstlight bench app needs.
+ */
+
+/*
+ * RAM-run: retarget ROM to ITCM (path-reference form &itcm; the phandle-array
+ * form makes FLASH_SIZE=0 and overflows the link).
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};

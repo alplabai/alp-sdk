@@ -1,21 +1,19 @@
 # board.yaml -- realtime YOLOv8-tiny object detection demo.
 #
-# Camera -> NPU inference -> bounding-box overlay on display +
-# live FPS counter.  Targets the V2N-M1 (DEEPX DX-M1, 29 TOPS)
-# E1M-X SoM out of the box; swap `som.sku` to E1M-V2M201 for the
-# V2H-M1 (DEEPX DX-M2, 113 TOPS) variant when it lands -- the
-# app source is portable and doesn't change.
+# Camera -> inference -> bounding-box overlay on display + live FPS
+# counter.  The checked-in project is the V2N-M1 supervisor-M33
+# skeleton, so it has TFLM CPU inference only.  A production DEEPX
+# deployment adds the A55/Yocto consumer that owns the DX-M1 runtime.
 #
 # Pipeline:
 #
 #     OV5640  -->  <alp/camera.h>  -->  <alp/inference.h>  -->  <alp/display.h>
-#     (MIPI)        RGB565 frame       YOLOv8-tiny .dxnn       bounding-box
-#                                      on DEEPX DX-M1          overlay + FPS
+#     (MIPI)        RGB565 frame       TFLM on this M33         bounding-box
+#                                      (DEEPX on A55/Yocto)    overlay + FPS
 #
-# The §D.lib loader resolves the inference backend from the
-# SKU's preferred_backend (`deepx_dxm1` for V2M101).  Customers
-# don't touch source to retarget AEN -> V2N -> V2N-M1 -- the
-# board.yaml picks the right NPU shim.
+# The dispatcher is slice-scoped: Zephyr/M33 gets TFLM, while the
+# DRP-AI3 and DEEPX runtimes live on A55/Linux.  Board-level SoM
+# capabilities must not be mistaken for M33 backend availability.
 
 libraries:
   - name: tflite-micro
@@ -26,9 +24,8 @@ libraries:
 som:
   # E1M-V2M101 == V2N-M1 (Renesas RZ/V2N host + DEEPX DX-M1 NPU
   # on-module via PCIe).  V2M101's `capabilities:` block declares
-  # drp_ai: true + deepx_dx: true -- both dispatchers compile in;
-  # apps pick per-handle at runtime via
-  # alp_inference_open(.backend = DEEPX_DXM1 or DRPAI).
+  # both engines for its A55/Linux side; neither is an M33/Zephyr
+  # inference backend.  This M33-only skeleton therefore gets TFLM.
   sku: E1M-V2M101
 
 preset: e1m-x-evk
@@ -50,20 +47,18 @@ chips:
 # an M33 system-manager.  This example currently builds only the M33
 # producer half (Zephyr); the Yocto Linux consumer remains stubbed in
 # the SoM topology default until the customer adds an app: ./linux
-# override.  Set a55_cluster os: off here because the inference path
-# stays on the M33 + DEEPX bridge for the demo's deterministic
-# latency budget.
+# override.  With a55_cluster off, neither DRP-AI3 nor DEEPX is
+# available to this M33 skeleton; a real accelerated V2M deployment
+# needs an A55/Yocto app for those runtimes.
 cores:
   a55_cluster:
     os: "off"
   m33_sm:
     app: ./src
-    # Library set: tflite_micro carries the universal NPU dispatch +
-    # the CPU fallback kernels; the §D.lib loader picks the DEEPX
-    # DXNN backend shim from the `integration.zephyr.hw_backends:`
-    # block in metadata/libraries/tflite-micro.yaml when the SKU's
-    # preferred_backend is `deepx_dxm1`.  CMSIS-DSP handles the
-    # pre-/post-process (resize, NMS) on the host CPU.
+    # Library set: tflite_micro supplies the M33 CPU kernels.
+    # CMSIS-DSP handles the pre-/post-process (resize, NMS) on the
+    # host CPU; the A55-side accelerator runtimes are out of scope
+    # while a55_cluster is off.
     peripherals:
       - i2c                   # OV5640 SCCB + display init.
       - spi                   # ST7789 framebuffer push.

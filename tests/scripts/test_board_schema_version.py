@@ -30,7 +30,7 @@ def test_gate_clean_on_unstamped(tmp_path):
     # Lazy floor: an unstamped board.yaml IS v1 == LATEST, so it is NOT drift.
     b = tmp_path / "examples" / "x"
     b.mkdir(parents=True)
-    (b / "board.yaml").write_text("som:\n  sku: X\ncores:\n  m55_hp:\n    app: ./src\n")
+    (b / "board.yaml").write_text("som:\n  sku: X\ncores:\n  m55_hp:\n    app: ./src\n", encoding="utf-8")
     assert gate.find_drift(tmp_path) == []
 
 
@@ -38,7 +38,7 @@ def test_gate_clean_on_explicit_latest(tmp_path):
     b = tmp_path / "examples" / "x"
     b.mkdir(parents=True)
     (b / "board.yaml").write_text(
-        f"schemaVersion: {gate.alp_migrate.LATEST}\nsom:\n  sku: X\n")
+        f"schemaVersion: {gate.alp_migrate.LATEST}\nsom:\n  sku: X\n", encoding="utf-8")
     assert gate.find_drift(tmp_path) == []
 
 
@@ -49,7 +49,7 @@ def test_gate_delegates_to_plan(tmp_path, monkeypatch):
     monkeypatch.setattr(gate.alp_migrate, "LATEST", 2)
     b = tmp_path / "examples" / "x"
     b.mkdir(parents=True)
-    (b / "board.yaml").write_text("som:\n  sku: X\n")  # v1, below new LATEST
+    (b / "board.yaml").write_text("som:\n  sku: X\n", encoding="utf-8")  # v1, below new LATEST
     assert gate.find_drift(tmp_path) == [b / "board.yaml"]
 
 
@@ -59,10 +59,10 @@ def test_board_yaml_files_prunes_build_output_dirs(tmp_path):
     check_library_registry.py's #1197 followup)."""
     real = tmp_path / "examples" / "x" / "board.yaml"
     real.parent.mkdir(parents=True)
-    real.write_text("som:\n  sku: X\n")
+    real.write_text("som:\n  sku: X\n", encoding="utf-8")
     junk = tmp_path / "twister-out" / "x" / "board.yaml"
     junk.parent.mkdir(parents=True)
-    junk.write_text("schemaVersion: 999\nsom:\n  sku: X\n")  # would be drift
+    junk.write_text("schemaVersion: 999\nsom:\n  sku: X\n", encoding="utf-8")  # would be drift
     found = gate._board_yaml_files(tmp_path)
     assert real in found
     assert junk not in found

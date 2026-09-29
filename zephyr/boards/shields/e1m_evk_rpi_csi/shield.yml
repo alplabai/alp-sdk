@@ -1,0 +1,8 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+shield:
+  name: e1m_evk_rpi_csi
+  full_name: E1M-EVK Raspberry Pi camera connector (J5, MIPI CSI-2)
+  vendor: alp
+  supported_features:
+    - video

@@ -30,10 +30,10 @@
  *   ┌──────────────────────────────────────────────────────────────┐
  *   │ <alp/inference.h>  RNNoise-style denoiser (gain mask per     │
  *   │ bin)                                                          │
- *   │   - AUTO routes to DX-M1 on V2N-M1, CPU TFLM kernels on V2N. │
+ *   │   - AUTO: CPU TFLM kernels on this M33 slice (V2N, V2N-M1). │
  *   │   - ~50k params, int8 quantised, fits in 96 KiB arena.       │
  *   │ Output: per-bin gain mask -> applied to FFT bins -> inverse  │
- *   │ FFT (TODO v0.6) -> clean PCM block.                          │
+ *   │ FFT (still stubbed) -> clean PCM block.                      │
  *   └────────────────────────────┬─────────────────────────────────┘
  *                                │
  *                                ▼ I2S0 TX
@@ -48,9 +48,9 @@
  *   1. "Can we ship a USB-C headset / earbud with cloud-grade
  *      noise suppression at <10 ms latency?"  Yes -- the V2N's
  *      M33 + GD32 bridge FFT path keeps the spectral work on
- *      silicon close to the codec, and the on-die NPU (V2N-M1)
- *      runs the gain-mask model below the human-perceivable
- *      glass-to-glass threshold.
+ *      silicon close to the codec, and the gain-mask model runs
+ *      on that same M33 slice (CPU TFLM kernels), inside the
+ *      human-perceivable glass-to-glass threshold.
  *   2. "Same source for the desktop / conferencing rig?"  Yes --
  *      flipping `som.sku` to a V2H / V2N-M1 retargets the
  *      inference backend without touching app code.
@@ -64,8 +64,8 @@
  *
  *     Mic -> I2S RX DMA:        ~2.0 ms   (one block worth)
  *     <alp/dsp.h> FFT pipe:     ~1.5 ms   (GD32 bridge offload)
- *     <alp/inference.h> invoke: ~3.0 ms   (DX-M1 NPU burst)
- *     Mask apply + IFFT:        ~1.5 ms   (TODO v0.6)
+ *     <alp/inference.h> invoke: ~3.0 ms   (TFLM; unmeasured estimate)
+ *     Mask apply + IFFT:        ~1.5 ms   (still stubbed)
  *     I2S TX DMA push:          ~2.0 ms
  *     ────────────────────────────────
  *     Total:                    ~10.0 ms  (one block period)
@@ -418,9 +418,10 @@ int main(void)
 	/* ── Open the inference backend ────────────────────────
      *
      * AUTO routes to whatever the §D.lib loader resolved from
-     * the SoM preset -- DX-M1 on V2N-M1, CPU TFLM on V2N
-     * (no NPU), DX-M2 on V2H once that SKU lands.  App source
-     * doesn't change. */
+     * the SoM preset for THIS slice.  This project is M33-only,
+     * so on V2N and V2N-M1 alike that is CPU TFLM: DRP-AI3 and
+     * DEEPX DX-M1 are A55/Yocto-side and unreachable from here.
+     * App source doesn't change. */
 	alp_inference_config_t inf_cfg = {
 		.backend     = ALP_INFERENCE_BACKEND_AUTO,
 		.format      = ALP_INFERENCE_MODEL_TFLITE,

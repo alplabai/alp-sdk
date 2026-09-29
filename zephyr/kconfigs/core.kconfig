@@ -98,6 +98,63 @@ config ALP_SDK_WERROR
 	  Adds -Werror on top of CONFIG_ALP_SDK_STRICT_WARNINGS's flag set,
 	  for this module's own zephyr_library only.
 
+config ALP_SDK_FAST_MEMCPY
+	bool "Override memcpy() with a word-copy loop (issue #2285)"
+	default n
+	depends on SOC_FAMILY_ENSEMBLE || SOC_FAMILY_ENSEMBLE_RTSS
+	depends on SIZE_OPTIMIZATIONS
+	depends on PICOLIBC_USE_TOOLCHAIN
+	depends on "$(TOOLCHAIN_VARIANT_COMPILER)" = "gnu"
+	help
+	  On an Alif Ensemble (AEN) image built at -Os,
+	  CONFIG_SIZE_OPTIMIZATIONS links picolibc's "space" multilib, whose
+	  memcpy() copies one byte at a time -- a throughput-sensitive copy
+	  path (bench run 223, camera-mjpeg-stream: 24-30 ms HTTP send time
+	  per 32-41 KB frame, 45-51% of frames dropped against a 60 fps
+	  camera). That run's drops were traced to Ethernet buffer
+	  starvation and taken to 0% by buffer sizing alone (see this
+	  example's board confs and README) -- the only bench-proven fix
+	  here. A same-scene A/B (E1M-AEN803, module 2026W36-0001, 640x480 @
+	  30 fps, camera-bound) against that buffer-sizing-only baseline
+	  found no measurable gain from this word-copy override: 30.03 fps /
+	  ~1.09 MB/s with it on and with it off alike, 0 drops either way;
+	  the send-bound case run 223 actually hit is still unmeasured. The
+	  full CONFIG_SPEED_OPTIMIZATIONS build copies faster but is not
+	  always an option: it overflowed that same app's ITCM budget by
+	  about 41 KB running from ITCM RAM.
+
+	  This overrides memcpy()/__aeabi_memcpy*() with a word-at-a-time
+	  loop (src/common/alp_fast_memcpy_core.c) that keeps -Os code
+	  size. It only takes the word path when the source and destination
+	  share the same 4-byte alignment phase (mod 4); a mismatched
+	  alignment pair falls back to picolibc's byte loop for the whole
+	  copy, same as with this option off.
+
+	  Default n: no measured gain yet justifies flipping memcpy() on
+	  every -Os Ensemble image -- enable it explicitly per app instead
+	  (examples/connectivity/camera-mjpeg-stream's AEN801/AEN803 board
+	  confs do, alongside the Ethernet buffer sizing above).
+
+	  GCC-only: the core loop's self-recursion guard (next paragraph) is
+	  a GCC attribute, and Clang's own -Os loop-idiom pass would still
+	  rewrite the loop into a memcpy() call regardless -- Clang builds
+	  fall back to picolibc's byte loop instead of failing to build;
+	  src/common/alp_fast_memcpy_core.c also #errors if compiled under
+	  Clang, as a belt-and-suspenders check on this depends.
+
+	  The core loop carries
+	  __attribute__((optimize("no-tree-loop-distribute-patterns"))):
+	  without it, GCC's loop-idiom pass could rewrite the byte-copy loop
+	  shape back into a call to memcpy() -- which, since this function
+	  IS memcpy(), would recurse forever and hang the board. Confirmed
+	  against GCC 14.3, that pass does not rewrite this exact loop shape
+	  at plain -Os; the guard is insurance against a future -O2 build of
+	  this TU and against a future loop edit or GCC version that does
+	  rewrite it -- this file originally paired the guard with a local
+	  optimize("O2"), and it was under that O2 pairing that the
+	  recursion hung the board for real (bench run 227, before the
+	  network came up).
+
 config ALP_STATUS_DESCRIPTIONS
 	bool "Compile alp_status_description() string table"
 	default y
@@ -130,20 +187,32 @@ config ALP_SDK_SOM_HW_REV
 	  back to the SKU preset's `default_hw_rev`), emitted into the
 	  generated alp.conf by scripts/alp_orchestrate.py
 	  (kconfig.py::_emit_som_caps).  This is the build's resolved
-	  identity ONLY -- nothing in the compiled firmware derives a
-	  pad-routing table from it.  The SoM preset's `pad_routes`/
-	  `pad_route_overrides` data (scripts/alp_project_loader.py) is
-	  read only by scripts/alp_project_emit/bom_netlist.py, for the
-	  debug/BOM `--emit composed-route-table` / `--emit carrier-netlist`
-	  surfaces -- no header/C table/DT overlay a real build produces is
-	  generated from it.
+	  identity, primarily consumed as a comparison target, not a
+	  pad-routing source: the SoM preset's `pad_routes`/
+	  `pad_route_overrides` data (scripts/alp_project_loader.py) is read
+	  at BUILD time by scripts/alp_project_emit/bom_netlist.py (debug/BOM
+	  `--emit composed-route-table` / `--emit carrier-netlist`) and by
+	  scripts/gen_cc3501e_gpio_routes.py, which resolves it into each AEN
+	  example's cc3501e_gpio_routes[] -- this symbol is NOT itself an
+	  input to that resolution (the board.yaml `som.hw_rev` field is), it
+	  is only compared against what was already resolved.  At RUNTIME,
+	  on an AEN target with CONFIG_ALP_SDK_GPIO_CC3501E_PROXY on,
+	  src/backends/gpio/cc3501e_proxy.c's px_open() DOES derive a per-pin
+	  decision from this symbol: it refuses IO8/IO10/IO21 (the pads
+	  metadata/e1m_modules/aen/hw-revisions.yaml `pad_route_overrides:`
+	  moves across hw_revs) with ALP_ERR_NOSUPPORT unless a CRC-valid
+	  identity-EEPROM manifest confirms the running module's hw_rev
+	  equals THIS symbol -- see issue #2144.
 
-	  When CONFIG_ALP_SDK_HW_INFO is also on, the boot banner compares
-	  this against the LIVE revision read from the on-module identity
-	  EEPROM and warns on a mismatch -- see
-	  CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL and issue #1853.  Empty when
-	  built without alp_orchestrate.py, in which case there is nothing
-	  to compare and the check never fires.
+	  When CONFIG_ALP_SDK_HW_INFO is also on, the boot banner separately
+	  compares this against the LIVE revision read from the on-module
+	  identity EEPROM and warns on a mismatch -- see
+	  CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL and issue #1853.  Empty means
+	  the CC3501E proxy guard above fails CLOSED (refuses every
+	  revision-dependent pin, since there is nothing to confirm a match
+	  against) rather than "the check never fires"; the boot-banner
+	  compare specifically never fires when built without
+	  alp_orchestrate.py, since there is nothing for IT to compare.
 
 config ALP_SDK_HW_REV_MISMATCH_FATAL
 	bool "Halt boot on a SoM hw_rev mismatch instead of only warning"
@@ -221,7 +290,7 @@ config ALP_SDK_SOM_DRAM_MBIT
 	  Off-SoC RAM the SoM SKU actually populates (som-preset `memory.
 	  dram_mbit`, e.g. the AEN HyperRAM on OSPI0 CS0) -- this is a MODULE
 	  fact, not a SoC one: two SKUs on the same PCB/silicon can differ
-	  here (E1M-AEN803 populates 512 Mbit, E1M-AEN801 256 Mbit).  0 means
+	  here (E1M-AEN803 populates 512 Mbit, E1M-AEN801 populates none).  0 means
 	  the preset declares none or leaves it TBD; the banner omits the
 	  line entirely rather than print a false zero.
 

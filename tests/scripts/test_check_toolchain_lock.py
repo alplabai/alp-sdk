@@ -17,6 +17,7 @@ Run locally:
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -106,7 +107,7 @@ def _make_fake_zephyr_repo(tmp_path: Path, sdk_version_at_tag: str, tag: str) ->
     zephyr_dir = tmp_path / "fake-zephyr"
     zephyr_dir.mkdir()
     run = lambda *args: subprocess.run(  # noqa: E731
-        ["git", *args], cwd=zephyr_dir, check=True, capture_output=True, text=True,
+        ["git", *args], cwd=zephyr_dir, check=True, capture_output=True, text=True, encoding="utf-8",
     )
     run("init", "-q")
     run("config", "user.email", "test@example.invalid")
@@ -120,7 +121,8 @@ def _make_fake_zephyr_repo(tmp_path: Path, sdk_version_at_tag: str, tag: str) ->
 
 def test_default_corpus_passes():
     proc = subprocess.run(
-        [sys.executable, str(SCRIPT)], capture_output=True, text=True,
+        [sys.executable, str(SCRIPT)], capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
 

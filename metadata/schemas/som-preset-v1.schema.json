@@ -184,37 +184,22 @@
     "memory": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "dram_mbit",
-        "flash_mbit"
-      ],
-      "description": "Off-SoC module memory capacities, REQUIRED on every preset in one canonical shape.  `0` means the SKU populates NONE of that class (e.g. E1M-AEN801, which runs from the SoC's on-die MRAM); `TBD` encodes 'pending the authoritative HW config' or 'per-BOM-variant' (per the no-inventing-values rule).  The two are NOT interchangeable: 0 is a known absence, TBD is an unknown.  On-die SRAM/MRAM is derived from the SoC variant, never declared here.",
+      "required": ["dram_mbit", "flash_mbit"],
+      "description": "Off-SoC module memory capacities, REQUIRED on every preset in one canonical shape.  Three states, and they are NOT interchangeable: a positive integer is a populated capacity; `0` means the module populates NO such part (the controller and even a designed-in footprint may still exist -- population per part is stated by `on_module.ospi_memories[].assembled` / `on_module.hyperram.assembled`, and the designed-in part's own capacity by their `capacity_mbit`); `TBD` means the capacity is still pending the authoritative HW config.  `0` is a RESOLVED fact and `TBD` is an open question -- never spell a known-absent part `TBD` (per the no-inventing-values rule), or a consumer cannot tell a module with no DRAM from one whose DRAM nobody has written down yet.  On-die SRAM/MRAM is derived from the SoC variant, never declared here.",
       "properties": {
         "dram_mbit": {
           "oneOf": [
-            {
-              "type": "integer",
-              "minimum": 0
-            },
-            {
-              "type": "string",
-              "const": "TBD"
-            }
+            { "type": "integer", "minimum": 0 },
+            { "type": "string", "const": "TBD" }
           ],
-          "description": "External volatile memory in Mbit (LPDDR4X on V2N/V2M, HyperRAM on AEN).  0 = none populated on this SKU."
+          "description": "External volatile memory in Mbit (LPDDR4X on V2N/V2M, HyperRAM on AEN).  `0` = no external volatile memory populated on any current BOM variant of this SKU."
         },
         "flash_mbit": {
           "oneOf": [
-            {
-              "type": "integer",
-              "minimum": 0
-            },
-            {
-              "type": "string",
-              "const": "TBD"
-            }
+            { "type": "integer", "minimum": 0 },
+            { "type": "string", "const": "TBD" }
           ],
-          "description": "External non-volatile memory in Mbit (eMMC on V2N/V2M, OSPI NOR on AEN).  0 = none populated on this SKU."
+          "description": "External non-volatile memory in Mbit (eMMC on V2N/V2M, OSPI NOR on AEN).  `0` = no external non-volatile memory populated on any current BOM variant of this SKU; on-die MRAM is not counted here (it is derived from the SoC variant)."
         }
       }
     },
@@ -485,7 +470,9 @@
         },
         "chip_select": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 1,
+          "description": "OSPI0 chip-select index. Every AEN preset's shared OSPI0 octal bus has exactly two chip-select lines wired (OSPI0_SS0/OSPI0_SS1 per the E1M-AEN-2626-R2 netlist) -- 0 or 1, never more."
         },
         "role": {
           "type": "string",
@@ -526,7 +513,9 @@
         },
         "chip_select": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 1,
+          "description": "OSPI0 chip-select index. Mirrors ospi_memory.chip_select: the shared OSPI0 octal bus has exactly two chip-select lines wired (OSPI0_SS0/OSPI0_SS1 per the E1M-AEN-2626-R2 netlist) -- 0 or 1, never more."
         },
         "assembled": {
           "oneOf": [
@@ -600,6 +589,10 @@
         "zephyr_twister_name": {
           "type": "string",
           "description": "Twister board-metadata `name:` field for `os: zephyr` entries, when it differs from `zephyr_full_name` (some families drop the SoC parenthetical here). Defaults to `zephyr_full_name` when absent."
+        },
+        "openamp_ipc": {
+          "type": "boolean",
+          "description": "True when this core's board `.dts` (V2N/V2M family, `--emit zephyr-board`'s `_v2n_dts()`, issue #655 slice 2) carries the OpenAMP/MHU-B reserved-memory block and the CAN-FD-unavailable analysis comment.  A board-tree-content fact, not a claim that OpenAMP is unsupported where absent. E1M-V2N101 and E1M-V2M101 set it (same RZ/V2N die and MHU-B, #1948). Absent defaults to false."
         }
       },
       "allOf": [
@@ -707,7 +700,13 @@
         },
         "carveout": {
           "type": "boolean",
-          "description": "When explicitly false, this region is excluded from IPC carve-out allocation (scripts/alp_orchestrate/carveout.py resolve_carve_outs) even though it declares a real `base`.  For a flash-class region (e.g. an MRAM MCUboot/slot0/reserved/storage sub-region that must publish a base so the board generator can lay out its partition table) that base is NOT byte-addressable shared memory a raw_shmem/rpmsg carve-out can safely land in.  Defaults to true (eligible).  Setting this false ALSO removes the region from `_known_flash_devices()` and refuses it as a board.yaml `storage[].flash_device:` target (#1484) -- a second, overloaded meaning; #1365 tracks giving carveout eligibility and flash-device eligibility their own, principled fields instead of sharing this flag."
+          "description": "LEGACY OVERRIDE (#1365 split B) that MUST AGREE with the region's DERIVED class where one is resolvable; it is no longer the primary signal.  `scripts/alp_orchestrate/carveout.py` (IPC carve-out eligibility) and `scripts/alp_orchestrate/partition.py` (flash-device eligibility) now derive a region's class against the SoC's declared on-die MRAM aperture (`scripts/alp_orchestrate/aperture.py`) -- a region CONTAINED in the aperture is flash-class regardless of this flag.  This field is honoured VERBATIM only as a fallback: where the SoC declares no aperture at all (every non-Alif SoM), or this region's own `base` is unresolved (e.g. `mram_main`'s `\"TBD\"`), there is nothing to derive a class from, so the authored value here decides -- and it decides BEFORE `write_authority:` in that fallback: when a region's base is unresolved and BOTH fields are authored, `carveout:` wins (the conservative, pre-split-B signal) and `write_authority:` is consulted only when this field is absent.  Historically (pre-split-B): when explicitly false, the region was excluded from IPC carve-out allocation and from `_known_flash_devices()`/`storage[].flash_device:` (#1484) even though it declares a real `base` -- for a flash-class region (e.g. an MRAM MCUboot/slot0/reserved/storage sub-region that must publish a base so the board generator can lay out its partition table) that base is NOT byte-addressable shared memory a raw_shmem/rpmsg carve-out can safely land in.  Defaults to true (eligible).  NOT deprecated or removed -- `additionalProperties: false` would break every existing `carveout: false` row and any customer copy -- but a value that DISAGREES with a resolvable derived class is a metadata bug to fix, not a silently-honoured override."
+        },
+        "write_authority": {
+          "type": "string",
+          "enum": ["customer_image", "vendor_image", "customer_runtime", "secure_enclave", "none", "composite"],
+          "description": "WHO may write this region, and WHEN.  Modelled on `helper_firmware_entry.flash_policy`, and deliberately two-axis: a one-axis customer/vendor/secure split collapses `he_slot0` onto `storage` (both customer) and cannot separate flash-time from runtime, which is the distinction the hazard needs.  `customer_image` = written only by the flash tool, never by running code (`he_slot0`, `hp_slot0`).  `vendor_image` = a factory-provisioned image (`mcuboot`).  `customer_runtime` = runtime-writable by the application, and the ONLY value a row may claim DIRECTLY for an IPC carve-out or a runtime mount to land on (`storage`).  `secure_enclave` = written by the Secure Enclave at provisioning (`atoc`); the SE is not a `topology:` core, so it can never appear in `accessible_from` and no core id can express this.  `none` = nobody writes it (`reserved` headroom) -- an explicit no-writer, not a catch-all.  `composite` = a whole-device alias spanning contained rows of DIFFERENT authority (`mram_main`), where a single value would be false by construction; consult the contained rows -- `scripts/alp_orchestrate/partition.py`'s `flash_device:` resolver is the one consumer that accepts `composite` as an explicit-pin target, and only once EVERY contained row independently resolves a concrete span, declares its own `write_authority`, and together they contiguously tile the alias with no gap and no overlap (alp-sdk#2088); every other consumer (an IPC carve-out, `carveout.py`) refuses a `composite` row outright, never descending into it.  ABSENT MEANS UNRESOLVED, NEVER `customer_runtime` -- a consumer must treat an authored region carrying no `write_authority` as ineligible for both IPC carve-out and runtime write, and say so, rather than defaulting permissively (ADR-0034 clause 4).  Not in `required` for som-preset v1 because `docs/porting-new-som.md` is a public porting guide and a customer preset that authored `memory_map:` rows would break at `tan validate` on upgrade; `scripts/validate_metadata.py` enforces presence semantically instead, and v2 promotes it.  NOTE `accessible_from:` is read/execute reachability only and says nothing about write authority: `atoc` lists `[m55_he, m55_hp]` and neither may write it (#1365).",
+          "$comment": "ADR-0027's role->region mapping must consume this field rather than growing a parallel flag: a `role:` may only resolve onto a `customer_runtime` region -- never `composite`, unlike the explicit-pin `flash_device:` path (`scripts/alp_orchestrate/partition.py`, alp-sdk#2088), which DOES accept a `composite` whole-device alias, but only once every row it contains is independently verified `customer_runtime`-safe. `role:` is not implemented yet (ADR-0027 status: Proposed); when it is, it should resolve directly to the verified `customer_runtime` row itself, not to a `composite` alias it would then have to re-verify."
         },
         "access_windows": {
           "type": "object",

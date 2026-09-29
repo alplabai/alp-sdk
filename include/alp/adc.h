@@ -102,6 +102,19 @@ typedef enum {
 	ALP_ADC_REF_VDD        = 3  /**< Use VDD as the reference. */
 } alp_adc_ref_t;
 
+/**
+ * @brief ADC class-scoped capability bits.
+ *
+ * Carried in `alp_capabilities_t.class_flags` (see <alp/cap_instance.h>)
+ * -- these are ADC facts, not universal instance facts, so they never
+ * appear in `alp_capabilities_t.flags`.  Only meaningful once
+ * `ALP_INSTANCE_CAP_REPORTED` is set in `flags`; see that header for
+ * the reported/not-reported contract.
+ */
+#define ALP_ADC_CAP_HW_OVERSAMPLE (1u << 0) /**< Hardware oversampling/averaging. */
+#define ALP_ADC_CAP_HW_TRIGGER    (1u << 1) /**< Hardware-triggered (timer/PWM) sampling. */
+#define ALP_ADC_CAP_DIFFERENTIAL  (1u << 2) /**< Differential channel pairs supported. */
+
 /** Opaque ADC channel handle.  Allocate via @ref alp_adc_open. */
 typedef struct alp_adc alp_adc_t;
 
