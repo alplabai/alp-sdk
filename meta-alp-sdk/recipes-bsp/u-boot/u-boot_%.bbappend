@@ -339,11 +339,11 @@ SRC_URI:append:rzv2n-family = " file://0009-rzv2n-dev-ALP-E1M-publish-sku-to-cho
 # scripts/alp_eth_mac.py.
 SRC_URI:append:rzv2n-family = " file://0010-rzv2n-dev-ALP-E1M-serial-derived-eth-mac.patch"
 
-# 0011 (GD32_NRST release): the ACT88760 PMIC's OTP powers GPIO register
+# 0011 (GD32_NRST release): early units' ACT88760 OTP powers GPIO register
 # 0x10 up as 0x88, which holds the GD32 supervisor in reset through GPIO4.
 # board_late_init() clears bit 7 (0x88 -> 0x08) on every boot, before the
-# kernel, so the gpio-gd32-bridge driver finds the GD32 at probe. This is
-# the intended workaround for that OTP default; see the patch header.
+# kernel, so the gpio-gd32-bridge driver finds the GD32 at probe. Production
+# OTP already reads 0x08, so the step is a no-op there; see the patch header.
 SRC_URI:append:rzv2n-family = " file://0011-rzv2n-dev-ALP-E1M-gd32-nrst-release.patch"
 
 # Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot

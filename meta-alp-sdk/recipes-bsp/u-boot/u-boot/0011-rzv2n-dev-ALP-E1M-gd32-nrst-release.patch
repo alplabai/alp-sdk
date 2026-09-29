@@ -4,20 +4,23 @@ Date: Tue, 29 Sep 2026 11:30:00 +0000
 Subject: [PATCH] rzv2n-dev: ALP E1M release GD32_NRST from the ACT88760 at
  boot
 
-The ACT88760 PMIC (BRD_I2C, 7-bit 0x25) powers up with GPIO register 0x10
-= 0x88: its OTP drives GPIO4, which is wired to the GD32 supervisor's
-NRST, so the GD32 stays in reset and the gpio-gd32-bridge driver finds
-nothing at probe ("bridge not answering (-6)"). Clearing bit 7 (0x88 ->
-0x08) releases it. That write is the intended workaround for this OTP
-default. It is volatile, so it has to run on every boot; until now it
-only existed as a hand-installed Linux service on one bench unit, and the
-release image shipped without it.
+On early units the ACT88760 PMIC (BRD_I2C, 7-bit 0x25) powers up with
+GPIO register 0x10 = 0x88: that OTP revision drives GPIO4, which is wired
+to the GD32 supervisor's NRST, so the GD32 stays in reset and the
+gpio-gd32-bridge driver finds nothing at probe ("bridge not answering
+(-6)"). Production units carry the fixed OTP and read 0x08 at power-on.
+Clearing bit 7 (0x88 -> 0x08) releases the GD32 on an early unit. The
+write is volatile, so it has to run on every boot; until now it only
+existed as a hand-installed Linux service on one bench unit (E1M-V2M103
+2026W38-0001), and the release image booted that unit with the bridge
+dead.
 
 board_late_init() now runs alp_gd32_nrst_release() first, before the
 clock-generator fixup, MAC and DEEPX rail steps, so the GD32 boots while
 U-Boot is still running and answers when Linux probes the bridge. Only
-bit 7 is changed (read-modify-write); a part that already reads bit 7
-clear is left alone. Each outcome prints one "ALP:" line.
+bit 7 is changed (read-modify-write). A production unit, whose register
+already reads bit 7 clear, is left alone: the step is a no-op there and
+prints "already released". Each outcome prints one "ALP:" line.
 
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
@@ -34,14 +37,14 @@ index 219eb219..49567d4a 100644
 +/*
 + * ALP E1M V2N family: release GD32_NRST from the ACT88760 PMIC.
 + *
-+ * The ACT88760 (BRD_I2C, 7-bit 0x25) powers up with GPIO register 0x10 =
-+ * 0x88: its OTP drives GPIO4, which is wired to GD32_NRST, so the GD32
-+ * supervisor sits in reset.  Clearing bit 7 (0x88 -> 0x08) releases it.
++ * Early units' ACT88760 OTP (BRD_I2C, 7-bit 0x25) powers GPIO register
++ * 0x10 up as 0x88: GPIO4 is wired to GD32_NRST, so the GD32 supervisor
++ * sits in reset.  Clearing bit 7 (0x88 -> 0x08) releases it.  Production
++ * units carry the fixed OTP (0x08 at power-on), so this is a no-op there.
 + * The write is volatile and lost at power-off, so it runs on every boot,
 + * before the kernel: the gpio-gd32-bridge driver then finds the GD32
-+ * answering at probe.  This is the intended workaround for the OTP
-+ * default, not a fault path.  Only bit 7 is touched; any other bit keeps
-+ * its OTP value, and a part that already reads bit 7 clear is left alone.
++ * answering at probe.  Only bit 7 is touched; any other bit keeps its
++ * OTP value.
 + */
 +#define ALP_ACT88760_I2C_BUS   8	/* DM I2C bus for RIIC8 / BRD_I2C */
 +#define ALP_ACT88760_I2C_ADDR  0x25
