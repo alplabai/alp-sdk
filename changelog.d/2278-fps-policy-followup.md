@@ -48,7 +48,7 @@ node the stacked shield actually defines -- OV5647 (unchanged, default
 looking for OV5647. A nonzero `cfg.fps` with NEITHER sensor node present now
 declines with `ALP_ERR_NOSUPPORT` --
 `src/backends/camera/alif_isp_pico.c:509`
-("\"camera%u: %u fps requested but no known sensor node exists on this \"")
+("camera%u: %u fps requested but no known sensor node exists on this ")
 -- rather than silently no-op'ing.
 
 `video_alif.c` and `video_csi_dw.c` (the CPI / CSI-2 endpoint forwarders
