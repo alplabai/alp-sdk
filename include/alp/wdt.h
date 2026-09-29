@@ -135,9 +135,9 @@ typedef struct {
 	uint32_t flags;
 } alp_wdt_config_t;
 
-/** @ref alp_wdt_config_t::flags: stop the counter while the CPU sleeps. */
+/** @ref alp_wdt_config_t::flags -- stop the counter while the CPU sleeps. */
 #define ALP_WDT_PAUSE_IN_SLEEP (1u << 0)
-/** @ref alp_wdt_config_t::flags: stop the counter while a debugger halts the CPU. */
+/** @ref alp_wdt_config_t::flags -- stop the counter while a debugger halts the CPU. */
 #define ALP_WDT_PAUSE_HALTED_BY_DEBUG (1u << 1)
 
 /**
