@@ -357,7 +357,16 @@ def capture_command(spec: SmokeSpec) -> list[str]:
     if spec.flash_method == SSH_RUN:
         host = spec.ssh_host or "<unresolved: pass --ssh-host or set ALP_HIL_SSH_HOST>"
         remote = f"/tmp/{_artifact_name(spec)}"
-        return ["ssh", host, f"chmod +x {remote} && {remote}"]
+        # Bound the run to serial.duration_s like the serial path: some
+        # examples (v2n-power-monitor) loop forever.  The target's busybox
+        # has no `timeout`, so a background sleeper kills the example.
+        # -tt gives it a pty, so its stdout is line-buffered: a killed
+        # example would otherwise lose everything still in its buffer.
+        secs = spec.serial.duration_s
+        return ["ssh", "-tt", host,
+                f"chmod +x {remote} && {{ {remote} & p=$!; "
+                f"(sleep {secs}; kill $p) >/dev/null 2>&1 & w=$!; "
+                f"wait $p; kill $w 2>/dev/null; }}"]
     port = spec.serial_port or "<unresolved: pass --serial-port or set ALP_HIL_SERIAL_PORT>"
     return [
         "/opt/alp-hil/capture-serial.sh",

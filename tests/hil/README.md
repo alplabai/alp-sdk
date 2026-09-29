@@ -191,8 +191,10 @@ python tests/hil/run_smoke.py tests/hil/v2m103-x-evk --no-common     --ssh-host 
 ```
 
 The runner copies each binary to `/tmp/` on the target with `scp`, runs
-it over `ssh`, and applies the spec's `serial:` expectations to its
-output.  `--ssh-host` falls back to `ALP_HIL_SSH_HOST`; like the serial
+it over `ssh -tt`, and applies the spec's `serial:` expectations to its
+output.  The run is stopped after `serial.duration_s`, so an example that
+loops forever (`v2n-power-monitor`) still finishes; the pty keeps its
+stdout line-buffered, so nothing it printed is lost when it is stopped.  `--ssh-host` falls back to `ALP_HIL_SSH_HOST`; like the serial
 port, it has no default.
 
 ---
