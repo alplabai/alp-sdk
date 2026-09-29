@@ -625,7 +625,7 @@ ZTEST(alp_chips, test_gd32g553_ota_get_state_pre_v14_peer_has_no_err_byte)
 
 	gd32g553_t ctx;
 	alp_i2c_t *bus = open_fake_gd32bridge_bus();
-	zassert_equal(gd32g553_init(&ctx, NULL, bus, 0x1Eu), ALP_OK);
+	zassert_equal(gd32g553_init(&ctx, NULL, bus, 0x2Cu), ALP_OK);
 
 	gd32g553_ota_state_info_t st = { 0 };
 	zassert_equal(gd32g553_ota_get_state(&ctx, &st), ALP_OK);
@@ -647,7 +647,7 @@ ZTEST(alp_chips, test_gd32g553_ota_get_state_v14_peer_decodes_err_cause)
 
 	gd32g553_t ctx;
 	alp_i2c_t *bus = open_fake_gd32bridge_bus();
-	zassert_equal(gd32g553_init(&ctx, NULL, bus, 0x1Eu), ALP_OK);
+	zassert_equal(gd32g553_init(&ctx, NULL, bus, 0x2Cu), ALP_OK);
 
 	gd32g553_ota_state_info_t st = { 0 };
 	zassert_equal(gd32g553_ota_get_state(&ctx, &st), ALP_OK);
