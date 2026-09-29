@@ -1,7 +1,7 @@
 ### Fixed — grade fps-apply declines by who asked, not the errno, and make TPG-mode `alif_isp_pico` builds fail loudly on a caller request (#2278)
 
 This refines #2376 and #2338: those two shipped the "one shared helper" plumbing
-(`camera_apply_fps()` in `src/backends/camera/camera_frmival.h:96`
+(`camera_apply_fps()` in `src/backends/camera/camera_frmival.h:101`
 ("static inline alp_status_t camera_apply_fps(const struct device")) and the
 sensor-agnostic ISP-chain forwarding (`video_alif.c`'s `alif_cam_set_frmival()`,
 `video_csi_dw.c`'s `csi2_dw_set_frmival()`, and `isp_pico.c`'s own
@@ -14,12 +14,12 @@ The policy is now graded by WHO asked, not by the errno a
 `video_set_frmival()` call returns:
 
   - `requested_fps == 0` (only a backend's own internal default asked) --
-    `src/backends/camera/camera_frmival.h:123`
+    `src/backends/camera/camera_frmival.h:128`
     ("if (requested_fps == 0u) {"): ANY negative rc -- `-ENOSYS`, a
     transient I2C/SCCB NAK, anything -- is a quiet `LOG_WRN` + `ALP_OK`,
     same tolerance #2376/#2338 already had.
   - `requested_fps != 0` (the CALLER explicitly asked) --
-    `src/backends/camera/camera_frmival.h:132`
+    `src/backends/camera/camera_frmival.h:137`
     ("if (rc == -ENOSYS || rc == -ENOTSUP) {"): this is now the ONLY case
     that declines with `ALP_ERR_NOSUPPORT` + `LOG_ERR`; any other negative
     rc maps through the shared errno baseline (`alp_errno.h`) and `open()`
@@ -38,7 +38,7 @@ The policy is now graded by WHO asked, not by the errno a
     value, so comparing against that overwritten value instead of the
     original request made every "settled differently" case compare equal to
     itself and never log. A failed readback, or one reporting a zero
-    interval -- `src/backends/camera/camera_frmival.h:149`
+    interval -- `src/backends/camera/camera_frmival.h:154`
     ("if (get_rc != 0 || actual.numerator == 0u || actual.denominator == 0u) {")
     -- falls back to reporting the original request as settled.
 

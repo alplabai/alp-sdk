@@ -72,11 +72,16 @@
  * @brief Apply @c alp_camera_config_t::fps to @p dev, honoring or loudly
  *        declining the request (#2278).
  *
- * @param[in]  dev            Frame-interval-capable video device to
- *                             program (the sensor endpoint, not
- *                             necessarily the camera_id's top-level
- *                             device -- e.g. alif_isp_pico.c passes its
- *                             OV5647 sensor device, not the ISP `dev`).
+ * @param[in]  dev            Device to call video_set_frmival()/
+ *                             video_get_frmival() on directly -- either the
+ *                             sensor itself (zephyr_video.c, v2n_n44_isp.c),
+ *                             or a device whose own driver forwards the
+ *                             call down to the real sensor (alif_isp_pico.c
+ *                             passes the ISP `dev`; isp_pico.c's
+ *                             .get_frmival/.set_frmival forward to
+ *                             `controller`, and video_alif.c/
+ *                             video_csi_dw.c forward one hop further to
+ *                             their own endpoint -- issue #2338).
  * @param[in]  camera_id       Portable camera_id, log lines only.
  * @param[in]  requested_fps   @c cfg->fps as the caller set it; 0 means
  *                             "no explicit request".
