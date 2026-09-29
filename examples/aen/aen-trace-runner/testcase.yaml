@@ -18,6 +18,7 @@ common:
   tags: aen display game demo example
   build_only: true
   platform_allow:
+    - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
     - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
 
 tests:
