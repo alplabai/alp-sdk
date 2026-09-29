@@ -3120,16 +3120,18 @@
           "kind": "fnptr"
         },
         "cc3501e_t": {
-          "definition": "typedef struct cc3501e { bool initialised; uint8_t fw_proto_major; uint8_t fw_proto_minor; alp_spi_t *bus; alp_gpio_t *enable_pin; alp_gpio_t *reset_pin; alp_gpio_t *ready_pin; struct { cc3501e_event_cb_t cb; void *user; } event_subs[CC3501E_EVENT_SUBSCRIBERS]; uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t wifi_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t ble_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t evt_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t sock_buf[ALP_CC3501E_MAX_PAYLOAD]; bool wifi_scan_busy; bool ble_scan_busy; bool evt_busy; bool sock_busy; uint8_t sock_send_seq; uint8_t req_seq; uint8_t sock_recv_seq; uint8_t spi1_tx_buf[sizeof(alp_cc3501e_spi1_transfer_t) + ALP_CC3501E_SPI1_MAX_XFER]; uint8_t spi1_rx_buf[sizeof(alp_cc3501e_spi1_transfer_resp_t) + ALP_CC3501E_SPI1_MAX_XFER]; bool spi1_busy; bool spi1_configured; uint8_t spi1_seq; bool request_lock; uint32_t recover_count; uint32_t recover_attempt_count; uint64_t last_recover_ms; uint8_t recover_fail_streak; bool recovering; uint8_t link_epoch; cc3501e_recover_cb_t recover_cb; void *recover_cb_user; bool ota_session_active; uint8_t link_log_probe_fail_count; uint8_t link_log_recover_streak; cc3501e_link_log_entry_t link_log[CC3501E_LINK_LOG_LEN]; uint8_t link_log_count; uint8_t link_log_next; bool link_log_suppress; uint32_t link_log_fail_streak; uint32_t link_log_last_probe_word; uint32_t link_log_last_probe_ms; } cc3501e_t;",
+          "definition": "typedef struct cc3501e { bool initialised; uint8_t fw_proto_major; uint8_t fw_proto_minor; uint8_t fw_fast_reply; alp_spi_t *bus; alp_gpio_t *enable_pin; alp_gpio_t *reset_pin; alp_gpio_t *ready_pin; struct { cc3501e_event_cb_t cb; void *user; } event_subs[CC3501E_EVENT_SUBSCRIBERS]; uint64_t last_xfer_end_us; uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t wifi_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t ble_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t evt_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t sock_buf[ALP_CC3501E_MAX_PAYLOAD]; bool wifi_scan_busy; bool ble_scan_busy; bool evt_busy; bool sock_busy; uint8_t sock_send_seq; uint8_t req_seq; uint8_t sock_recv_seq; uint8_t spi1_tx_buf[sizeof(alp_cc3501e_spi1_transfer_t) + ALP_CC3501E_SPI1_MAX_XFER]; uint8_t spi1_rx_buf[sizeof(alp_cc3501e_spi1_transfer_resp_t) + ALP_CC3501E_SPI1_MAX_XFER]; bool spi1_busy; bool spi1_configured; uint8_t spi1_seq; bool request_lock; uint32_t recover_count; uint32_t recover_attempt_count; uint64_t last_recover_ms; uint8_t recover_fail_streak; bool recovering; uint8_t link_epoch; cc3501e_recover_cb_t recover_cb; void *recover_cb_user; bool ota_session_active; uint8_t link_log_probe_fail_count; uint8_t link_log_recover_streak; cc3501e_link_log_entry_t link_log[CC3501E_LINK_LOG_LEN]; uint8_t link_log_count; uint8_t link_log_next; bool link_log_suppress; uint32_t link_log_fail_streak; uint32_t link_log_last_probe_word; uint32_t link_log_last_probe_ms; } cc3501e_t;",
           "fields": [
             "bool initialised",
             "uint8_t fw_proto_major",
             "uint8_t fw_proto_minor",
+            "uint8_t fw_fast_reply",
             "alp_spi_t *bus",
             "alp_gpio_t *enable_pin",
             "alp_gpio_t *reset_pin",
             "alp_gpio_t *ready_pin",
             "struct { cc3501e_event_cb_t cb; void *user; } event_subs[CC3501E_EVENT_SUBSCRIBERS]",
+            "uint64_t last_xfer_end_us",
             "uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]",
             "uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]",
             "uint8_t wifi_scan_buf[ALP_CC3501E_MAX_PAYLOAD]",
@@ -3168,7 +3170,7 @@
             "uint32_t link_log_last_probe_word",
             "uint32_t link_log_last_probe_ms"
           ],
-          "hash": "cfa4c2ee79c7f87f",
+          "hash": "ee886fc2dfd7e78c",
           "kind": "struct"
         }
       },
@@ -11976,6 +11978,10 @@
         "alp_uptime_ms": {
           "hash": "3773450cbf6a197e",
           "signature": "uint64_t alp_uptime_ms(void);"
+        },
+        "alp_uptime_us": {
+          "hash": "3db9984a7ab76507",
+          "signature": "uint64_t alp_uptime_us(void);"
         }
       },
       "macros": {
@@ -12635,7 +12641,7 @@
           "kind": "struct"
         },
         "alp_cc3501e_capability_t": {
-          "definition": "typedef enum { ALP_CC3501E_CAP_WIFI_STA = 0x00000001u, ALP_CC3501E_CAP_WIFI_AP = 0x00000002u, ALP_CC3501E_CAP_SOCK_CLIENT = 0x00000004u, ALP_CC3501E_CAP_SOCK_LISTEN = 0x00000008u, ALP_CC3501E_CAP_BLE = 0x00000010u, ALP_CC3501E_CAP_OTA = 0x00000020u, ALP_CC3501E_CAP_GPIO_PROXY = 0x00000040u, ALP_CC3501E_CAP_SPI1_MASTER = 0x00000080u, ALP_CC3501E_CAP_CAMERA = 0x00000100u, ALP_CC3501E_CAP_POWER_POLICY = 0x00000200u, ALP_CC3501E_CAP_DIAG_STATS = 0x00000400u, ALP_CC3501E_CAP_EVENTS = 0x00000800u, } alp_cc3501e_capability_t;",
+          "definition": "typedef enum { ALP_CC3501E_CAP_WIFI_STA = 0x00000001u, ALP_CC3501E_CAP_WIFI_AP = 0x00000002u, ALP_CC3501E_CAP_SOCK_CLIENT = 0x00000004u, ALP_CC3501E_CAP_SOCK_LISTEN = 0x00000008u, ALP_CC3501E_CAP_BLE = 0x00000010u, ALP_CC3501E_CAP_OTA = 0x00000020u, ALP_CC3501E_CAP_GPIO_PROXY = 0x00000040u, ALP_CC3501E_CAP_SPI1_MASTER = 0x00000080u, ALP_CC3501E_CAP_CAMERA = 0x00000100u, ALP_CC3501E_CAP_POWER_POLICY = 0x00000200u, ALP_CC3501E_CAP_DIAG_STATS = 0x00000400u, ALP_CC3501E_CAP_EVENTS = 0x00000800u, ALP_CC3501E_CAP_FAST_REPLY = 0x00001000u, } alp_cc3501e_capability_t;",
           "enumerators": [
             "ALP_CC3501E_CAP_WIFI_STA = 0x00000001u",
             "ALP_CC3501E_CAP_WIFI_AP = 0x00000002u",
@@ -12648,9 +12654,10 @@
             "ALP_CC3501E_CAP_CAMERA = 0x00000100u",
             "ALP_CC3501E_CAP_POWER_POLICY = 0x00000200u",
             "ALP_CC3501E_CAP_DIAG_STATS = 0x00000400u",
-            "ALP_CC3501E_CAP_EVENTS = 0x00000800u"
+            "ALP_CC3501E_CAP_EVENTS = 0x00000800u",
+            "ALP_CC3501E_CAP_FAST_REPLY = 0x00001000u"
           ],
-          "hash": "4c9c7d537555655c",
+          "hash": "3242103f44ad94d6",
           "kind": "enum"
         },
         "alp_cc3501e_cmd_t": {
