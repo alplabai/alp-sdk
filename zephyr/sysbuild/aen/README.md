@@ -117,13 +117,16 @@ both if it differs.)  Shipped modules then boot
 out-of-box, and customers load apps into slot0 with a plain J-Link (no
 SETOOLS/SE-UART of their own -- see
 [`docs/aen-provisioning.md`](../../../docs/aen-provisioning.md) §0.5,
-Option B). **Not `west flash`'s `alif_flash` runner**: since alp-sdk#2262
-it reads this resident `MCUBOOT-` entry back before burning and REFUSES
-(it is foreign to whatever `ALP-HE`/`ALP-HP` section the customer's own
-build stages), because burning would otherwise silently delist this
-factory bootloader -- see `docs/aen-provisioning.md` §0.5's Option A
-warning before pointing a customer at `west flash` on a pre-provisioned
-module.
+Option B). **Not `west flash`'s `alif_flash` runner**: on a pre-provisioned
+module it refuses regardless -- since alp-sdk#2274 it refuses ANY
+multi-domain sysbuild flash outright, before touching anything, because
+this sysbuild always produces two domains (`mcuboot` + app); even without
+that, since alp-sdk#2262 it separately reads the resident `MCUBOOT-` entry
+back before burning and refuses (foreign to whatever `ALP-HE`/`ALP-HP`
+section the customer's own build stages), because burning would otherwise
+silently delist this factory bootloader -- see `docs/aen-provisioning.md`
+§0.5's Option A warning before pointing a customer at `west flash` on a
+pre-provisioned module.
 
 ## Usage
 
@@ -135,32 +138,52 @@ west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
     -- -DSB_CONF_FILE=/abs/path/to/alp-sdk/zephyr/sysbuild/aen/sysbuild.conf
 
 # Produces:
-#   build/zephyr/zephyr.signed.bin     -- signed application image
-#   build/mcuboot/zephyr/zephyr.bin    -- MCUboot bootloader
-#
-# Flash both (once the module's MCUboot ATOC is provisioned and the SES
-# has released the core, so SWD/west flash is available):
-west flash --bin-file build/mcuboot/zephyr/zephyr.bin --domain mcuboot
-west flash --bin-file build/zephyr/zephyr.signed.bin
+#   build/<app>/zephyr/zephyr.signed.bin  -- signed application image
+#   build/mcuboot/zephyr/zephyr.bin       -- MCUboot bootloader
 ```
 
-> **Not the `alif_flash` runner (SETOOLS/SE-UART) for BOTH of the above --
-> see alp-sdk#2274.** `alif_flash` runs once per domain (Zephyr's own
-> `flash.py`/`run_common.py` resolve one runner invocation per
-> `--domain`, or per entry in `domains.yaml` in flash order for a plain
-> multi-domain `west flash`). The `#2262` ATOC guard identifies a
-> resident entry by NAME ONLY, and both the MCUboot domain (ITCM
-> `0x58000000`) and the HE app domain map to the SAME ATOC section name
-> `ALP-HE` (`_atoc_section_name`) -- so the SECOND `alif_flash` invocation
-> sees the first's own `ALP-HE` entry as already-allowed, not foreign, and
-> reports `clear`. It still burns a fresh single-entry ATOC, silently
-> replacing whatever the first invocation wrote. This is not a regression
-> (the pre-`#2262` runner did the same with no check at all): the guard
-> only ever detects a FOREIGN name, never a same-name overwrite. Two
-> `alif_flash` invocations at ATOC-writing SETOOLS/SE-UART targets are
-> unsupported for this reason until alp-sdk#2274 lands; the plain J-Link
-> path above (Option B, `docs/aen-provisioning.md` §0.5) never touches
-> the ATOC and is unaffected.
+> **`west flash` REFUSES on this sysbuild -- see alp-sdk#2274.**
+> `alif_flash` runs once per domain (Zephyr's own `flash.py`/
+> `run_common.py` resolve one runner invocation per `--domain`, or per
+> entry in `domains.yaml`'s flash order for a plain multi-domain `west
+> flash`). The `#2262` ATOC guard identifies a resident entry by NAME
+> ONLY, and both the MCUboot domain (ITCM `0x58000000`) and the HE app
+> domain map to the SAME ATOC section name `ALP-HE` (`_atoc_section_name`)
+> -- so a SECOND `alif_flash` invocation would see any `ALP-HE` entry a
+> previous run of the other domain wrote as already-allowed, not foreign,
+> and report `clear`, then burn a fresh single-entry ATOC, silently
+> replacing whatever that earlier run wrote. Rather than let that happen,
+> `do_run` now checks the build's own `domains.yaml` BEFORE any
+> staging/gettoc/burn side effect and refuses outright whenever it
+> declares more than one flashable domain -- including a single
+> `--domain <x>` invocation of such a build, since flashing only one
+> domain would still replace any `ALP-HE` entry a previous run of the
+> other domain wrote, the same way.
+
+Flash your app the supported way instead: a plain J-Link `loadbin` of your
+`imgtool`-signed image straight to slot0, no SETOOLS/ATOC/SE-UART at all
+(Option B, [`docs/aen-provisioning.md`](../../../docs/aen-provisioning.md)
+§0.5 -- copied verbatim below; see that section for the two hazards
+(alp-sdk#2233) if you type this by hand rather than use its scripted
+path):
+
+```
+si SWD
+speed 4000
+device AE822FA0E5597LS0_M55_HE
+connect
+loadbin build/<app>/zephyr/zephyr.signed.bin 0x80010000
+verifybin build/<app>/zephyr/zephyr.signed.bin 0x80010000
+qc
+```
+
+Then power-cycle. `device AE822FA0E5597LS0_M55_HE` is **required** -- the
+bare `AE822FA0E5597LS0` hangs on the GUI device picker even with
+`-nogui 1`.
+
+> Option B writes the app only; without a resident MCUboot the module
+> will not boot (recoverable via SETOOLS re-provisioning -- the
+> `app-gen-toc`/`app-write-mram` steps above).
 
 ## Key management
 

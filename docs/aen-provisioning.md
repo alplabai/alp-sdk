@@ -69,41 +69,48 @@ in lifecycle state **DM** (development — debug open, fully re-provisionable).
 So out of the box your module:
 
 - **boots on its own** (the self-test runs — proves the unit at our QA), and
-- the M55 core is **already released**, so both `west flash` and SWD attach
-  just work.
+- the M55 core is **already released**, so SWD attach just works. A plain
+  **non-sysbuild** `west flash` also refuses here (#2262: the resident
+  factory MCUboot ATOC entry is foreign to any build's own section) —
+  that door is for bare/recovered modules only.
 
 That means your day-1 path needs **no hand-run SETOOLS and no SE-UART
 wiring of your own**.
 
-**Option A — `west flash` (alif_flash runner) — NOT the day-1 path on a
-pre-provisioned module, see the warning below.**  Builds + signs your
-app, then writes it into slot0 for you over the SE-UART via SETOOLS:
+**Option A — `west flash` (alif_flash runner) — REFUSED on every module,
+bare or pre-provisioned, since alp-sdk#2274; see the warning below.** The
+recipe below is what this door used to do (build + sign, then write into
+slot0 over the SE-UART via SETOOLS) before that refusal landed:
 
 ```bash
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <your-app> \
     --sysbuild -- -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf
-west flash    # alif_flash runner: signs + writes your MCUboot-signed image
-              # into slot0 via SETOOLS over the SE-UART (not SWD)
+west flash    # REFUSES (alp-sdk#2274) -- see the warning below. Historical
+              # intent: alif_flash runner signs + writes your MCUboot-signed
+              # image into slot0 via SETOOLS over the SE-UART (not SWD).
 ```
 
-> **On a pre-provisioned module, the `west flash` above now REFUSES
-> (#2262).** The `alif_flash` runner reads the resident ATOC back before
-> burning, finds the factory `MCUBOOT-` entry
-> (`zephyr/sysbuild/aen/README.md`'s provisioning section) foreign to the
-> `ALP-HE`/`ALP-HP` section your own build stages, and refuses rather than
-> silently delisting it the way a pre-#2262 `west flash` did — burning
-> `DEVICE + ALP-HE` only replaces the WHOLE ATOC, so the factory MCUboot
-> bootloader would vanish with no error and no SES warning, leaving the
-> module unable to boot MCUboot at all. `--replace-atoc` overrides the
-> refusal, but it does exactly that deletion — it is NOT the remedy for a
+> **On a pre-provisioned module, a `west flash` here would ALSO have
+> refused independently (#2262).** The `alif_flash` runner reads the
+> resident ATOC back before burning, finds the factory MCUboot entry
+> (entry name TBD/unverified, see `zephyr/sysbuild/aen/README.md`'s
+> provisioning section) foreign to the `ALP-HE`/`ALP-HP` section your own
+> build stages, and refuses rather than silently delisting it the way a
+> pre-#2262 `west flash` did — burning `DEVICE + ALP-HE` only replaces
+> the WHOLE ATOC, so the factory MCUboot bootloader would vanish with no
+> error and no SES warning, leaving the module unable to boot MCUboot at
+> all. `--replace-atoc` overrides the refusal, but it **deletes the
+> factory MCUboot ATOC entry** — it is NOT the remedy for a
 > pre-provisioned module. **Use Option B below instead**, which never
-> touches the ATOC. (**TBD, unverified**: the exact literal `MCUBOOT-` the
-> guard checks for traces to `zephyr/sysbuild/aen/README.md`'s own
-> provisioning section, not a captured `gettoc` off a real pre-provisioned
-> module — none exists in this repo yet. If the real name differs, the
-> guard still refuses the burn; it only loses this entry's dedicated
-> message and falls back to the generic foreign-entry one, which no longer
-> defaults to steering you at `--replace-atoc` either.)
+> touches the ATOC.
+>
+> **On the E1M-AEN boards, `west flash` on a sysbuild (MCUboot) build
+> refuses on its own (alp-sdk#2274), on EVERY module**, independent of
+> the above: the `alif_flash` runner cannot stage both domains' ATOC
+> entries in one burn. Use Option B below (a module whose MCUboot is
+> already provisioned) or the SETOOLS MCUboot provisioning in
+> `zephyr/sysbuild/aen/README.md` (a bare/wiped/re-keyed module)
+> instead.
 
 **Option B — plain J-Link, no SETOOLS, no ATOC, no SE-UART (the
 day-1 path for a pre-provisioned module).**  Proven
@@ -198,14 +205,24 @@ ATOC guard is already reading, is that home now.)
 unverified read; any other `query_status` with a non-empty `foreign` means
 it overrode a genuinely foreign entry.
 
-**A refused run always leaves a verdict — with one honest exception.** The
+**A refused run always leaves a verdict — with two honest exceptions.** The
 guard writes `atoc-guard.json` before every `raise`, specifically so a
 refusal is never silent to a machine reader. That guarantee assumes the
 build directory itself is writable: if it is not, writing the verdict fails
 the same way writing the transcript does, and `_run_atoc_guard` raises a
 `RuntimeError` naming the path instead of leaving any file at all (a burn is
 still never reached — this is a fail-closed abort, just one with no verdict
-JSON to inspect afterward, since there is nowhere to put it).
+JSON to inspect afterward, since there is nowhere to put it). Second
+exception: any **#2274 domains.yaml refusal** (see §0.5's Option A
+warning) fires before this guard ever runs — a multi-domain sysbuild, this
+build's own `build_dir` not listed in its `domains.yaml`, or a
+`domains.yaml` that is unreadable, malformed, empty, or names a duplicate
+domain, refuse the same way. Every one of these leaves *no* `atoc-guard.json`
+at all, and REMOVES any stale one a previous run left behind, so a caller
+never mistakes an old `clear`/`replaced` verdict for this attempt's own
+result. `atoc-before.txt` is NOT written or removed on a #2274 refusal
+either (the guard step that writes it is never reached), so an existing
+one is always from an earlier run, not this attempt's.
 
 ## 1. What you need
 
