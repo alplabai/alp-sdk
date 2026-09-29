@@ -82,7 +82,7 @@
 #                     and untracked files) is a native_sim build input --
 #                     e.g. a docs/changelog/Yocto/pytest-only change.  Any
 #                     doubt (unknown path, lookup failure, no origin/dev)
-#                     runs it.  ALP_SELECT_BASE overrides the base ref.
+#                     runs it.  --select-base REF overrides the base ref.
 #   --full            with --target dev: always run twister (no selection).
 #   --target main     THOROUGH release-grade profile: every stage PLUS the
 #                     main-only strict ABI-snapshot diff (pr-abi-snapshot.yml,
@@ -134,6 +134,7 @@ YOCTO_ONLY=0
 ZEPHYR_ONLY=0
 NO_CLEAN=0
 FORCE_FULL=0
+SELECT_BASE=origin/dev
 LIST_REQUIRED_GATE_SCRIPTS=0
 # TARGET selects a CI profile matching the branch a PR targets:
 #   dev  -- the FAST set a dev PR is graded on (skip the slow release-only
@@ -153,6 +154,8 @@ while [ $# -gt 0 ]; do
         --zephyr-only)  ZEPHYR_ONLY=1 ;;
         --no-clean)     NO_CLEAN=1 ;;
         --full)         FORCE_FULL=1 ;;
+        --select-base)  shift; SELECT_BASE="${1:-}" ;;
+        --select-base=*) SELECT_BASE="${1#--select-base=}" ;;
         --target)       shift; TARGET="${1:-}" ;;
         --target=*)     TARGET="${1#--target=}" ;;
         --dev)          TARGET=dev ;;
@@ -1214,7 +1217,7 @@ else
         if [ "${QUICK}" -eq 1 ]; then
             skip_stage "twister" "--quick" scope
         elif [ "${TARGET}" = "dev" ] && [ "${FORCE_FULL}" -eq 0 ] \
-            && [ "$(python3 scripts/select_checks.py --base "${ALP_SELECT_BASE:-origin/dev}" --worktree)" = "skip" ]; then
+            && [ "$(python3 scripts/select_checks.py --base "${SELECT_BASE}" --worktree)" = "skip" ]; then
             # select_checks.py printed its per-path proof above.  Anything it
             # cannot prove -- or any error (empty stdout) -- falls through to
             # the full run below: selection fails safe.  --target main never

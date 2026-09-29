@@ -188,7 +188,7 @@ keep it short:
 - **Change-aware selection.** With `--target dev`, the twister stage runs
   only if `scripts/select_checks.py` cannot prove the change leaves every
   native_sim build input alone. It diffs against the merge base with
-  `origin/dev` (so `git fetch origin dev` first; set `ALP_SELECT_BASE` to use
+  `origin/dev` (so `git fetch origin dev` first; `--select-base REF` uses
   another ref) and counts uncommitted and untracked files too. A docs,
   changelog, Yocto-layer or pytest-only change skips twister; anything the
   script cannot classify runs it. Pass `--full` to force twister, and note
