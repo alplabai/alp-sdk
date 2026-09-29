@@ -285,7 +285,12 @@ struct cc3501e {
 	 * returned -- a caller that wants to compare two probes' raw bytes must
 	 * snapshot this into its own buffer between them, not hold a pointer
 	 * across a second call. */
-	uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
+	/* alp_uptime_us() when the last bridge SPI transfer returned (0 = none
+	 * yet).  The inter-phase settles count from here, not from the moment
+	 * the gate is called, so host work done in between overlaps them
+	 * (#2052). */
+	uint64_t last_xfer_end_us;
+	uint8_t  rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
 	uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
 	/* Per-context decode scratch for the scan/event helpers (issue #740).
 	 * Each of these used to be a function-local `static` buffer in

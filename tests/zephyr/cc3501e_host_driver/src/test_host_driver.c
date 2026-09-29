@@ -1588,6 +1588,14 @@ uint64_t alp_uptime_ms(void)
 {
 	return g_fake_now_ms;
 }
+
+/* #2052: the bridge's settles count from the last transfer's end via
+ * alp_uptime_us(); derived from this suite's millisecond clock so both
+ * readings stay on the same (virtual) timeline. */
+uint64_t alp_uptime_us(void)
+{
+	return alp_uptime_ms() * 1000u;
+}
 alp_gpio_t *alp_gpio_open(uint32_t pin_id)
 {
 	(void)pin_id;
@@ -1813,7 +1821,7 @@ ZTEST(cc3501e_host_driver, test_reply_gate_interpolates_between_the_two_measured
 ZTEST(cc3501e_host_driver, test_reply_gate_fast_reply_firmware_uses_short_table)
 {
 	/* #2052: firmware reporting ALP_CC3501E_CAP_FAST_REPLY gets 200 us at
-	 * 536 B rising to 800 us at the 4092 B ceiling (plateau from there). */
+	 * 536 B rising to 450 us at the 4092 B ceiling (plateau from there). */
 	static uint8_t reply[4096];
 	size_t         got = 0u;
 
@@ -1822,11 +1830,11 @@ ZTEST(cc3501e_host_driver, test_reply_gate_fast_reply_firmware_uses_short_table)
 	zassert_equal(
 	    cc3501e_request(&fw, ALP_CC3501E_CMD_PING, NULL, 0, reply, sizeof(reply), &got, 100u),
 	    ALP_OK);
-	zassert_equal(g_delay_us_log[1], 800u, "4096 B cap is past the 4092 B fast ceiling");
+	zassert_equal(g_delay_us_log[1], 450u, "4096 B cap is past the 4092 B fast ceiling");
 	delay_log_reset();
 	zassert_equal(cc3501e_request(&fw, ALP_CC3501E_CMD_PING, NULL, 0, reply, 2314u, &got, 100u),
 	              ALP_OK);
-	zassert_equal(g_delay_us_log[1], 500u, "2314 B is halfway between 536 B and 4092 B");
+	zassert_equal(g_delay_us_log[1], 325u, "2314 B is halfway between 536 B and 4092 B");
 	fw.fw_fast_reply = 0u;
 }
 
