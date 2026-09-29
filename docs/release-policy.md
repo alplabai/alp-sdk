@@ -122,7 +122,12 @@ The cut happens on `main`, and only after `dev` has been promoted to
    `python3 scripts/assemble_changelog.py` (see `changelog.d/README.md`,
    #1395). `scripts/bump_version.py` refuses the next step while any
    fragment remains, so a skipped fold fails loudly here rather than
-   silently dropping the cycle's entries from the release.
+   silently dropping the cycle's entries from the release. It also runs
+   `check_changelog_citations.py --strict-lines` against `[Unreleased]`
+   before touching any file, and refuses the bump if a citation has
+   drifted -- a citation that is merely advisory everywhere else must
+   already be correct right before step 5 freezes it into history, since
+   a released section is never rewritten by `--fix` afterward (#2350).
 5. Slice the `## [Unreleased]` section of `CHANGELOG.md` into
    `## [v<N>] - YYYY-MM-DD`.
 6. Tag: `git tag -s v<N>` (signed).

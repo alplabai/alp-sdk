@@ -199,7 +199,8 @@ def test_a_full_bump_regenerates_the_emit_goldens_too(bv, monkeypatch, capsys):
     monkeypatch.setattr(bv, "ABI_DIR", bv.REPO / "docs" / "abi")
 
     calls: list[list[str]] = []
-    monkeypatch.setattr(bv.subprocess, "check_call", lambda cmd: calls.append(list(cmd)))
+    monkeypatch.setattr(bv.subprocess, "check_call",
+                        lambda cmd, **kw: calls.append(list(cmd)))
     monkeypatch.setattr(sys, "argv", ["bump_version.py", "--to", "0.16.0"])
 
     rc = bv.main()
@@ -208,6 +209,74 @@ def test_a_full_bump_regenerates_the_emit_goldens_too(bv, monkeypatch, capsys):
     emit_calls = [c for c in calls if str(bv.EMIT_SNAPSHOT_TOOL) in c]
     assert len(emit_calls) == 1, f"expected exactly one --emit-goldens refresh, got: {calls}"
     assert "--update" in emit_calls[0]
+
+
+# ---------------------------------------------------------------------
+# alp-sdk#2350 round 2: `verify_changelog_citations()` is the release-time
+# hook that closes the drift window `slice_changelog()` would otherwise
+# open -- a drift left unresolved at exactly the moment [Unreleased]
+# freezes into history ships wrong forever, since a released section is
+# never rewritten by `--fix`.
+# ---------------------------------------------------------------------
+
+
+def test_verify_changelog_citations_passes_when_the_check_succeeds(
+        bv, monkeypatch, capsys):
+    """A clean `--strict-lines` run just reports OK and returns -- no raise."""
+    calls: list[list[str]] = []
+    kwargs: list[dict] = []
+    monkeypatch.setattr(
+        bv.subprocess, "check_call",
+        lambda cmd, **kw: (calls.append(list(cmd)), kwargs.append(kw)))
+
+    bv.verify_changelog_citations()
+
+    assert len(calls) == 1
+    assert calls[0][1:] == [str(bv.CHANGELOG_CITATIONS_TOOL), "--strict-lines"]
+    # Pinned to the repo root (alp-sdk#2350 round 3): the checker grades the
+    # tree its cwd resolves to, so an out-of-checkout bump must not leak in.
+    assert kwargs[0].get("cwd") == bv.REPO
+    assert "OK (--strict-lines)" in capsys.readouterr().out
+
+
+def test_verify_changelog_citations_refuses_when_the_check_fails(bv, monkeypatch):
+    """A drifted (or otherwise broken) citation must abort the bump before
+    anything is written -- naming `--fix` as the remedy, not running it."""
+    import subprocess as _subprocess
+
+    def _fail(cmd, **kw):
+        raise _subprocess.CalledProcessError(1, cmd)
+
+    monkeypatch.setattr(bv.subprocess, "check_call", _fail)
+
+    with pytest.raises(SystemExit) as excinfo:
+        bv.verify_changelog_citations()
+
+    assert "--strict-lines" in str(excinfo.value)
+    assert "check_changelog_citations.py --fix" in str(excinfo.value)
+
+
+def test_main_refuses_the_bump_before_writing_anything_on_a_citation_failure(
+        bv, monkeypatch):
+    """The hook runs FIRST in main(), before any file is touched -- a bump
+    that already wrote half its files then aborted would be worse than one
+    that never started."""
+    import subprocess as _subprocess
+
+    bv.SDK_VERSION_YAML.write_text("version: 0.15.0\n", encoding="utf-8")
+
+    def _fail(cmd, **kw):
+        raise _subprocess.CalledProcessError(1, cmd)
+
+    monkeypatch.setattr(bv.subprocess, "check_call", _fail)
+    monkeypatch.setattr(sys, "argv", ["bump_version.py", "--to", "0.16.0"])
+
+    with pytest.raises(SystemExit):
+        bv.main()
+
+    # sdk_version.yaml must be untouched -- the refusal happened before any
+    # write step ran.
+    assert bv.SDK_VERSION_YAML.read_text(encoding="utf-8") == "version: 0.15.0\n"
 
 
 def test_the_repo_changelog_has_exactly_one_heading_per_version():

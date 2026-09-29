@@ -15,6 +15,11 @@ Workflow:
     #    folding explicitly here keeps the diff reviewable before the bump.
     python3 scripts/assemble_changelog.py
 
+    # 0.5. This tool itself refuses to bump while [Unreleased] carries a
+    #    drifted citation (alp-sdk#2350 round 2, verify_changelog_citations()
+    #    below) -- fix one by hand if it does:
+    python3 scripts/check_changelog_citations.py --fix
+
     # 1. Verify everything looks ready (no-op dry run)
     python3 scripts/bump_version.py --to 1.0.0 --dry-run
 
@@ -115,6 +120,7 @@ BANNER_C = REPO / "src" / "zephyr" / "alp_banner.c"
 ABI_DIR = REPO / "docs" / "abi"
 ABI_SNAPSHOT_TOOL = REPO / "scripts" / "abi_snapshot.py"
 EMIT_SNAPSHOT_TOOL = REPO / "scripts" / "check_emit_snapshots.py"
+CHANGELOG_CITATIONS_TOOL = REPO / "scripts" / "check_changelog_citations.py"
 
 SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-([\w.]+))?$")
 
@@ -225,6 +231,52 @@ def slice_changelog(new_version: str, dry_run: bool) -> None:
     if not dry_run:
         CHANGELOG.write_text(new_text, encoding="utf-8", newline="")
     print(f"  sliced {CHANGELOG.relative_to(REPO)}: [Unreleased] -> [v{new_version}] - {today}")
+
+
+def verify_changelog_citations() -> None:
+    """Refuse to bump while `[Unreleased]` carries a drifted citation (#2350).
+
+    `check_changelog_citations.py`'s plain run only advisory-notes a
+    pre-existing citation that relocated to a new, unique, long-enough line
+    -- never blocking, so an unrelated PR is never reddened by a line it
+    never touched. But `slice_changelog()` above FREEZES today's
+    `[Unreleased]` into a released `## [vX]` section, and a released section
+    is NEVER rewritten by `--fix` afterward (see that script's own CHANGELOG
+    comment) -- so a drift left unresolved at exactly this moment ships
+    wrong FOREVER. That is the #1387 failure mode again, arriving through
+    the release path instead of a rebase.
+
+    `--strict-lines` is the flag that turns that same drift into a hard
+    ERROR here, before the freeze. Deliberately NOT run with `--fix` baked
+    in: a version-bump command silently rewriting changelog fragments as a
+    side effect would be its own surprise, so this only CHECKS and names the
+    remedy -- the operator runs `--fix`, reviews the diff, and re-bumps.
+
+    Runs even under `--dry-run`: this is a readiness check, matching this
+    tool's own "step 1: verify everything looks ready" contract, not a
+    write of its own.
+
+    Uses `subprocess.check_call`, not `.run()` -- the same call shape every
+    other subprocess step in this file uses (`regenerate_abi_snapshot`,
+    `regenerate_emit_snapshots`), so it is mockable the same way in tests.
+    `cwd=REPO` is pinned because the checker finds the tree it grades with
+    `git rev-parse --show-toplevel` from its cwd: run from outside the
+    checkout, it would grade the wrong tree or exit "not inside a git
+    worktree" (alp-sdk#2350 round 3).
+    """
+    try:
+        subprocess.check_call(
+            [sys.executable, str(CHANGELOG_CITATIONS_TOOL), "--strict-lines"],
+            cwd=REPO)
+    except subprocess.CalledProcessError:
+        raise SystemExit(
+            "bump_version: changelog citations failed --strict-lines (see "
+            "above) -- a drifted citation would freeze into released "
+            "history here and never be rewritten again. Run `python3 "
+            "scripts/check_changelog_citations.py --fix`, review the "
+            "rewrite, commit it, and re-run this bump."
+        )
+    print("  changelog citations: OK (--strict-lines)")
 
 
 def _next_candidate(version: str) -> str:
@@ -369,6 +421,7 @@ def main() -> int:
 
     print(f"bump_version: {current} -> {args.to}" + ("  [dry run]" if args.dry_run else ""))
     print()
+    verify_changelog_citations()
     update_sdk_version_yaml(args.to, args.dry_run)
     slice_changelog(args.to, args.dry_run)
     update_version_h(args.to, args.dry_run)
