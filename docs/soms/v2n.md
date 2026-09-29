@@ -40,7 +40,7 @@ Full chip catalogue + manifest URLs:
 [`metadata/chips/`](../../metadata/chips/).
 Per-SKU populated parts: [`metadata/e1m_modules/E1M-V2N10{1,2,3}.yaml`](../../metadata/e1m_modules/).
 
-## Real-time clock
+## Real-time clock {#real-time-clock}
 
 The on-module RV-3028-C7 is the RTC of record, bound as `/dev/rtc0`
 (kernel `rtc-rv3028`, `CONFIG_RTC_DRV_RV3028=y`) -- use `hwclock`/`date`
