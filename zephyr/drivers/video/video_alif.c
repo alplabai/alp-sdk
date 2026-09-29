@@ -1512,6 +1512,16 @@ static int alif_cam_get_caps(const struct device *dev, struct video_caps *caps)
 	const struct video_cam_config *config = dev->config;
 	int err = -ENODEV;
 
+	/* The endpoint (CSI-2 host or parallel sensor) may init after this CPI
+	 * (sensor priority 60 > CPI 59), so its readiness can only be checked at
+	 * call time.  An absent sensor fails its own chip-ID init; report that
+	 * as -ENODEV here instead of letting the first set_format NACK as -EIO
+	 * (#2249).
+	 */
+	if (!device_is_ready(config->endpoint_dev)) {
+		return -ENODEV;
+	}
+
 	err = video_get_caps(config->endpoint_dev, caps);
 	caps->min_vbuf_count = CPI_MIN_VBUF;
 
