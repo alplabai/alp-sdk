@@ -1,11 +1,11 @@
 # v2n-secure-element-sign
 
-Probe the OPTIGA Trust M on V2N's BRD_I2C and confirm the current
-probe-only driver contract, from a Linux/Yocto user-space app on the
-V2N Cortex-A55 cluster.  The driver reads I2C_STATE to prove the
-part is reachable; product-info and raw-APDU helpers return
-`ALP_ERR_NOSUPPORT` until the Infineon host-library transport is
-integrated.
+Talk to the OPTIGA Trust M on V2N's BRD_I2C from a Linux/Yocto
+user-space app on the V2N Cortex-A55 cluster: probe it, read its
+Coprocessor UID, and run a raw APDU session.  The driver runs
+Infineon's host library (`vendors/optiga-trust-m`) through a PAL on the
+portable `<alp/peripheral.h>` I2C and timing calls.  Nothing here
+writes to the chip.
 
 > RIIC8/BRD_I2C is Cortex-A55/Linux-exclusive
 > (`metadata/e1m_modules/v2n/core-ownership.yaml`) -- the CM33 must
@@ -20,44 +20,45 @@ integrated.
    `e1m-v2n-som.dtsi` aliases `i2c8 = &i2c8;`) at 400 kHz and
    initialising
    [`optiga_trust_m_t`](../../../include/alp/chips/optiga_trust_m.h).
-   `optiga_trust_m_init` performs an I2C_STATE register read only;
-   failing this means the chip is not on the bus or is not strapped to
-   address 0x30.
-2. `optiga_trust_m_read_product_info` returns `ALP_ERR_NOSUPPORT`
-   because GET_DATA_OBJECT needs the full APDU transport.
-3. `optiga_trust_m_send_apdu` validates a non-empty APDU buffer and
-   returns `ALP_ERR_NOSUPPORT` without fabricating a signature.
+   `optiga_trust_m_init` reads the I2C_STATE register only; failing it
+   means the chip is not on the bus or is not strapped to address 0x30.
+2. `optiga_trust_m_read_product_info` opens the Trust M application
+   and reads the 27-byte Coprocessor UID (data object 0xE0C2).
+3. `optiga_trust_m_send_apdu` runs a raw session: the app sends
+   OpenApplication itself, then GetDataObject(0xE0C2), and checks the
+   bytes match step 2.
 
 ## Expected output (OPTIGA-populated SoM)
 
+Bench, E1M-V2M103 2026W38-0001 on the E1M-X EVK V2:
+
 ```
 [se] I2C_STATE probe -> ALP_OK
-[se] read_product_info -> -6 (expected NOSUPPORT)
-[se] send_apdu -> -6 resp_len=0 (expected NOSUPPORT, zero bytes)
-[se] RESULT PASS: Trust M I2C_STATE probe works; product-info/raw-APDU are cleanly blocked with ALP_ERR_NOSUPPORT
+[se] UID: cim CD platform 16 model 33 fw 80101071 build 2564
+[se] raw APDU UID matches (27 bytes)
+[se] RESULT PASS: Trust M probe, Coprocessor UID and raw APDU session work
 ```
 
 ## Expected output (missing or held-in-reset chip)
 
 ```
-[se] RESULT FAIL: optiga_trust_m_init -> -2 (Trust M not ACKing)
+[se] RESULT FAIL: optiga_trust_m_init (Trust M not ACKing) -> -2
 ```
-
-The eventual signing path belongs with the Infineon host-library/PSA
-integration, not a partial hand-rolled APDU transport in this example.
 
 ## Wiring this into a real app
 
-The example calls `optiga_trust_m_send_apdu` only to prove the current
-driver returns `ALP_ERR_NOSUPPORT` for APDU transport.  Once Infineon's
-Host Library is integrated and registered as a PSA driver against
-`<alp/security.h>`'s MbedTLS PSA wrapper, application code can call
-`alp_aead_open` / future `alp_sign_*` and get hardware acceleration
-transparently.
+The raw APDU session reaches every Trust M command (key generation,
+ECDSA, secure NVM) today, with the caller owning the command bytes and
+the application session.  Typed calls for those commands, and a PSA
+driver registered with `<alp/security.h>`'s MbedTLS wrapper so
+`alp_aead_open` / future `alp_sign_*` use the chip transparently, are
+still to come.
 
 ## See also
 
 * [`<alp/chips/optiga_trust_m.h>`](../../../include/alp/chips/optiga_trust_m.h)
-  -- driver header (I2C_STATE probe + NOSUPPORT APDU/product-info stubs).
+  -- driver header.
+* [`vendors/optiga-trust-m`](../../../vendors/optiga-trust-m/README.md)
+  -- the vendored host library and its alp PAL.
 * Infineon "Solution Reference Manual OPTIGA Trust M"
   (`SRM_OPTIGA_Trust_M.pdf`) -- APDU command set + status codes.
