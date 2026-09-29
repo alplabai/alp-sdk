@@ -59,21 +59,27 @@ properties:
     description: |
       TPG output frame width in pixels, fed to VSI_MPI_ISP_SetChnAttr as the
       INPUT_TPG port rect (see isp_configure() in isp_pico.c).  0 (the
-      binding default) leaves the geometry unset, which alp-sdk#2256 traced
-      to a "Setting the Channel config failed!" (-EINVAL from SetChnAttr, a
-      0x0 port rect).  There is no register or Alif/VeriSilicon
-      documentation in this tree for the TPG's actual internal frame size
-      per tpg-image-idx pattern -- do not guess a value here; the board
-      overlay enabling a TPG image MUST also set this from a
-      silicon/vendor-confirmed number, or isp_configure() refuses to start.
+      binding default) leaves the geometry unset, which alp-sdk#2256 finding
+      1 traced to a "Setting the Channel config failed!" (-EINVAL from
+      SetChnAttr, a 0x0 port rect); bench runs 179-181 (E1M-AEN803
+      2026W36-0009) confirmed 1280x720 and 1920x1080 both make SetChnAttr
+      succeed. The board overlay enabling a TPG image MUST set this to a
+      silicon-confirmed value (examples/aen/aen-isp-regcheck uses 1280x720),
+      or isp_configure() refuses to start; the binding itself stays 0 by
+      default (fail closed) since no single geometry fits every board.
+      Note: this rect only satisfies SetChnAttr -- alp-sdk#2256 finding 2
+      (every TPG frame still raising INTR_SIZE_ERR, because the TPG
+      pattern's own internal frame size lives inside the closed libisp/VSI
+      middleware, absent from both the DFP and hal_alif's vsi_comm_isp.h)
+      stays open regardless of this value.
 
   tpg-height:
     type: int
     required: false
     default: 0
     description: |
-      TPG output frame height in pixels.  See tpg-width; the same "no
-      silicon-confirmed default" rule applies.
+      TPG output frame height in pixels.  See tpg-width; the same rules
+      apply.
 
   isp-subsampling:
     type: string

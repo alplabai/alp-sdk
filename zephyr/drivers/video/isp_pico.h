@@ -304,7 +304,8 @@ struct isp_config {
 
 	/* alp-sdk#2256: the TPG's actual frame geometry (fed to
 	 * VSI_MPI_ISP_SetChnAttr's INPUT_TPG port rect).  0/0 leaves the port
-	 * rect at 0x0, which isp_configure() now refuses -- see isp-vsi.yaml.
+	 * rect at 0x0, which isp_configure() now refuses -- see
+	 * zephyr/dts/bindings/video/vsi,isp-pico.yaml.
 	 */
 	uint32_t tpg_width;
 	uint32_t tpg_height;

@@ -17,6 +17,14 @@
  */
 #include <zephyr/ztest.h>
 
+/*
+ * isp_pico.h pulls in the upstream Zephyr video ctrl registry's
+ * "video_ctrls.h" (see the test's CMakeLists.txt), whose struct video_ctrl
+ * embeds a struct video_ctrl_range the header itself does not declare --
+ * isp_pico.c gets it via <zephyr/drivers/video-controls.h>, included first
+ * there; do the same here so isp_pico.h parses standalone.
+ */
+#include <zephyr/drivers/video-controls.h>
 #include "isp_pico.h"
 
 ZTEST_SUITE(isp_pico_tpg_geometry, NULL, NULL, NULL, NULL, NULL);
@@ -50,7 +58,11 @@ ZTEST(isp_pico_tpg_geometry, test_geometry_table)
 		const struct geometry_case *tc = &cases[i];
 		bool                        ok = isp_tpg_geometry_is_valid(tc->width, tc->height);
 
-		zassert_equal(ok, tc->want_valid, "case '%s': expected valid=%d, got %d", tc->name,
-			      tc->want_valid, ok);
+		zassert_equal(ok,
+		              tc->want_valid,
+		              "case '%s': expected valid=%d, got %d",
+		              tc->name,
+		              tc->want_valid,
+		              ok);
 	}
 }

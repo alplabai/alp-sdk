@@ -39,4 +39,14 @@
 	tpg-image-idx = "3x3-Color-Block";
 	tpg-pix-width = <1>;
 	tpg-bayer-pattern = "BGGR";
+	/*
+	 * alp-sdk#2256 finding 1 (bench runs 179-181, E1M-AEN803
+	 * 2026W36-0009): 1280x720 is the geometry that made
+	 * VSI_MPI_ISP_SetChnAttr succeed on real silicon, not a guess.
+	 * Finding 2 (every TPG frame still raising INTR_SIZE_ERR because the
+	 * TPG pattern's own internal frame size lives inside the closed
+	 * libisp/VSI middleware) stays open -- see changelog.d/2256.md.
+	 */
+	tpg-width = <1280>;
+	tpg-height = <720>;
 };
