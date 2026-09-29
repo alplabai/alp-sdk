@@ -37,7 +37,8 @@
 #include "test_assert.h"
 
 /* /dev/ttyS999 will not exist on any sane CI runner. */
-#define ALP_TEST_PORT_NONEXISTENT 999u
+#define ALP_TEST_PORT_NONEXISTENT \
+	299u /* /dev/ttyUSB99: in range, absent on any host (>= 400 is ALP_ERR_INVAL, #2458) */
 
 /* Internal seam -- see src/yocto/peripheral_uart.c.  Not declared in
  * any public header (not part of the public alp/ headers); this file
