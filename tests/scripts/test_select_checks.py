@@ -323,3 +323,93 @@ def test_cmake_time_alp_project_reads_nothing_selection_skips(tmp_path, argv, re
             assert rel in closure, f"{rel} is read at CMake time but outside the closure"
         else:
             assert sc.classify([rel], REPO, real_tree)[0] == "full", f"{rel} read at CMake time but skippable"
+
+
+# -- local mode: full -> smoke (CI keeps the two-answer contract) ------------
+
+def _local(capsys, *files: str, root: Path = REPO) -> list[str]:
+    assert sc.main(["--files", *files, "--root", str(root), "--local"]) == 0
+    return capsys.readouterr().out.split()
+
+
+def test_local_maps_full_to_smoke_with_the_fixed_set(capsys):
+    out = _local(capsys, "include/alp/i2c.h")
+    assert out[0] == "smoke"
+    assert set(sc.SMOKE_SUITES) <= set(out[1:])
+
+
+def test_local_smoke_banner_says_the_full_set_is_deferred(capsys):
+    sc.main(["--files", "include/alp/i2c.h", "--local"])
+    assert ("select_checks: twister=smoke (full set deferred to CI pr-twister shards; "
+            "--full forces it locally)") in capsys.readouterr().err
+
+
+def test_local_keeps_skip_as_skip_with_no_suites(capsys):
+    assert _local(capsys, "docs/a.md", "changelog.d/1.md") == ["skip"]
+
+
+def test_local_adds_the_suite_a_changed_file_sits_in(capsys):
+    out = _local(capsys, "tests/unit/adc_registry/src/main.c")
+    assert out[0] == "smoke"
+    assert "tests/unit/adc_registry" in out[1:]
+
+
+def test_local_without_a_base_is_still_full(capsys):
+    # no --base/--files: the change set is unknown -- doubt stays `full`
+    assert sc.main(["--local"]) == 0
+    assert capsys.readouterr().out.split() == ["full"]
+
+
+def test_local_unresolvable_base_is_still_full(tmp_path, capsys):
+    # a git failure (bad --select-base, no origin/dev) is doubt, not a verdict:
+    # no smoke, no suite list -- the full run is what test-all.sh then does
+    root = _base_tree(tmp_path)
+    _git(root, "init", "-q")
+    assert sc.main(["--base", "no-such-ref", "--root", str(root), "--local"]) == 0
+    captured = capsys.readouterr()
+    assert captured.out.split() == ["full"]
+    assert "fail-safe" in captured.err
+
+
+def test_local_classified_core_change_is_smoke_with_its_suites(tmp_path, capsys):
+    # git works and the diff is known: a native_sim-relevant change -> smoke
+    # carrying the suite the changed file sits in
+    root = _base_tree(tmp_path)
+    _git(root, "init", "-q")
+    _git(root, "add", "-A")
+    _git(root, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "base")
+    src = root / "examples" / "x" / "app" / "src"
+    src.mkdir(parents=True)
+    (src / "main.c").write_text("int main(void) { return 0; }" + chr(10), encoding="utf-8")
+    assert sc.main(["--base", "HEAD", "--worktree", "--root", str(root), "--local"]) == 0
+    out = capsys.readouterr().out.split()
+    assert out[0] == "smoke"
+    assert "examples/x/app" in out[1:]
+
+
+def test_ci_mode_without_local_is_unchanged(capsys):
+    assert sc.main(["--files", "include/alp/i2c.h"]) == 0
+    assert capsys.readouterr().out.split() == ["full"]
+
+
+def test_pr_twister_workflow_never_asks_for_the_local_answer():
+    wf = (REPO / ".github" / "workflows" / "pr-twister.yml").read_text(encoding="utf-8")
+    assert "select_checks.py" in wf and "--local" not in wf
+
+
+def test_smoke_suites_are_real_native_sim_suites():
+    tree = sc.Tree(REPO)
+    for suite in sc.SMOKE_SUITES:
+        assert any((REPO / suite / y).is_file() for y in sc._SUITE_YAML), suite
+        yaml_text = "".join((REPO / suite / y).read_text(encoding="utf-8")
+                            for y in sc._SUITE_YAML if (REPO / suite / y).is_file())
+        assert "native_sim" in yaml_text, f"{suite} does not allow native_sim"
+        if suite.count("/") >= 2:  # suite_dir never attributes a two-level root like tests/console
+            assert tree.suite_dir(suite + "/x") == suite
+
+
+def test_test_all_only_asks_for_smoke_when_not_forced_or_main():
+    text = (REPO / "scripts" / "test-all.sh").read_text(encoding="utf-8")
+    m = re.search(r'if \[ "\$\{TARGET\}" != "main" \] && \[ "\$\{FORCE_FULL\}" -eq 0 \]; then\n'
+                  r'\s+twister_plan="\$\(python3 scripts/select_checks.py [^\n]*--local\)"', text)
+    assert m, "--full / --target main must bypass select_checks --local"
