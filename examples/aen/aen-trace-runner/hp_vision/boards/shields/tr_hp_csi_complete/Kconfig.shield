@@ -1,0 +1,4 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+config SHIELD_TR_HP_CSI_COMPLETE
+	def_bool $(shields_list_contains,tr_hp_csi_complete)

@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""Trace Runner atlas packer.
+
+Needs Pillow, same as tools/genart.py:
+
+    .venv/bin/python tools/mkatlas.py
+
+Reads every art/*.png and emits src/render/atlas.h: one 4-bit indexed pixel
+array per sprite (two pixels per byte, high nibble first, index 0
+transparent), a tr_sprite_t naming each, and the shared 16-entry RGB565
+palette every sprite's indices are looked up against. See task-11-brief.md
+"The budget" for why 4-bit indexed and not RGB565 + alpha mask.
+
+PALETTE and EXPECTED_SIZES are imported from tools/genart.py, not duplicated:
+genart.py has no module-level side effects (its work is all under
+`if __name__ == "__main__"`), so importing it costs nothing and removes the
+class of bug a hand-duplicated copy has -- a *reorder* of two palette entries
+in genart.py alone used to recolour the whole atlas with no diagnostic from
+either tool (task-11-review.md finding 6); importing the same list object
+makes that impossible instead of merely detected.
+"""
+
+import sys
+from pathlib import Path
+
+from PIL import Image
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from genart import EXPECTED_SIZES, PALETTE  # noqa: E402
+
+assert len(PALETTE) == 16
+
+RGB_TO_INDEX = {rgb: i for i, rgb in enumerate(PALETTE)}
+
+
+def rgb565(rgb):
+    r, g, b = rgb
+    return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+
+
+def sym(stem):
+    """art/foo-bar.png -> tr_spr_foo_bar (nm-visible: see task-11-brief.md
+    step 8's `nm ... tr_spr_` check)."""
+    return "tr_spr_" + "".join(c if (c.isalnum() or c == "_") else "_" for c in stem)
+
+
+def pack(im):
+    """RGBA image -> (bytes, pixel_count_nonzero). Two 4-bit indices per
+    byte, high nibble first, row-aligned: each row is its own byte run (see
+    sprite.h's struct comment -- sprite.c's reader must agree on this or the
+    image shears one nibble further per row, silently). An odd width leaves
+    that row's last byte's low nibble unused (0). Fails loudly on any pixel
+    outside the shared palette, or with partial alpha -- a silently remapped
+    or silently-flattened-to-opaque pixel is an art bug that only shows up on
+    glass."""
+    w, h = im.size
+    px = im.load()
+    out = bytearray()
+    nonzero = 0
+    for y in range(h):
+        row = []
+        for x in range(w):
+            r, g, b, a = px[x, y]
+            if a == 0:
+                idx = 0
+            elif a == 255:
+                key = (r, g, b)
+                if key not in RGB_TO_INDEX:
+                    raise SystemExit(
+                        f"mkatlas: {im.filename} pixel ({x},{y}) colour {key} "
+                        f"is not in the shared palette -- fix the art, do not remap it"
+                    )
+                idx = RGB_TO_INDEX[key]
+                nonzero += 1
+            else:
+                raise SystemExit(
+                    f"mkatlas: {im.filename} pixel ({x},{y}) has partial alpha {a} -- "
+                    f"this target has no blending, art must be fully opaque or fully "
+                    f"transparent (index 0)"
+                )
+            row.append(idx)
+        for i in range(0, w, 2):
+            hi = row[i]
+            lo = row[i + 1] if i + 1 < w else 0
+            out.append((hi << 4) | lo)
+    return bytes(out), nonzero
+
+
+def check_known_sprite(png):
+    """Fail loudly on a PNG that doesn't match one of genart.py's known
+    sprite families (name prefix -> expected size), so a stray mockup or
+    reference image dropped into art/ can't get silently linked into the
+    firmware (task-11-review.md finding 9), and a regenerated sprite whose
+    size drifted from what genart.py itself expects is caught here too, not
+    just by render.c's build-time footprint check."""
+    for prefix, size in EXPECTED_SIZES.items():
+        if png.stem.startswith(prefix):
+            im = Image.open(png)
+            if im.size != size:
+                raise SystemExit(
+                    f"mkatlas: {png} is {im.size[0]}x{im.size[1]}, expected {size[0]}x{size[1]} "
+                    f"for the '{prefix}' family (see tools/genart.py's EXPECTED_SIZES)"
+                )
+            return
+    raise SystemExit(
+        f"mkatlas: {png} does not match any known sprite family prefix "
+        f"({', '.join(EXPECTED_SIZES)}) -- stray file in art/?"
+    )
+
+
+def emit_array(lines, name, data):
+    lines.append(f"static const uint8_t {name}[{len(data)}] = {{")
+    for i in range(0, len(data), 16):
+        chunk = ", ".join(f"0x{b:02x}" for b in data[i : i + 16])
+        lines.append(f"\t{chunk},")
+    lines.append("};")
+
+
+def main():
+    root = Path(__file__).resolve().parent.parent
+    art_dir = root / "art"
+    out_path = root / "src" / "render" / "atlas.h"
+
+    pngs = sorted(art_dir.glob("*.png"))
+    if not pngs:
+        raise SystemExit(f"mkatlas: no PNGs found in {art_dir}")
+    for png in pngs:
+        check_known_sprite(png)
+
+    lines = [
+        "/* src/render/atlas.h -- GENERATED by tools/mkatlas.py from the art/ PNGs. DO NOT EDIT. */",
+        "#ifndef TR_ATLAS_H",
+        "#define TR_ATLAS_H",
+        "",
+        "#include <stdint.h>",
+        "",
+        '#include "sprite.h"',
+        "",
+        "/* Shared 16-entry RGB565 palette; index 0 is never sampled (transparent). */",
+        "static const uint16_t tr_spr_palette[16] = {",
+    ]
+    lines.append("\t" + ", ".join(f"0x{rgb565(rgb):04x}" for rgb in PALETTE) + ",")
+    lines.append("};")
+    lines.append("")
+
+    total_bytes = 16 * 2  # the palette array itself
+    sprite_names = []
+    # (stem, w, h) for every sprite NOT drawn through the chunked banner path
+    # -- render.c blits these directly at their own size, so all of them
+    # must fit TR_SPRITE_MAX_W x TR_SPRITE_MAX_H; banners are wider by
+    # design (see tr_render_banner()) and are deliberately excluded.
+    blit_sizes = []
+    runner_heights = []
+    for png in pngs:
+        im = Image.open(png)
+        im.filename = str(png)
+        if im.mode != "RGBA":
+            raise SystemExit(f"mkatlas: {png} is not RGBA (mode={im.mode})")
+        w, h = im.size
+        data, nonzero = pack(im)
+        stem = png.stem
+        name = sym(stem)
+        px_name = f"tr_pix_{stem}"
+
+        emit_array(lines, px_name, data)
+        lines.append(f"static const tr_sprite_t {name} = {{ {w}, {h}, {px_name} }};")
+        lines.append("")
+
+        total_bytes += len(data)
+        sprite_names.append(name)
+        if not stem.startswith("banner_"):
+            blit_sizes.append((w, h))
+        if stem.startswith("runner_"):
+            runner_heights.append(h)
+        print(f"packed {png.name}  {w}x{h}  {len(data)} B  ({nonzero} opaque px)")
+
+    blit_max_w = max(w for w, _ in blit_sizes)
+    blit_max_h = max(h for _, h in blit_sizes)
+    runner_h = max(runner_heights)
+
+    lines.append(f"#define TR_ATLAS_BYTES {total_bytes} /* palette + every sprite's pixel array */")
+    lines.append(
+        f"#define TR_ATLAS_BLIT_MAX_W {blit_max_w} /* max w over every directly-blitted "
+        f"(non-banner) sprite */"
+    )
+    lines.append(f"#define TR_ATLAS_BLIT_MAX_H {blit_max_h} /* same, height */")
+    lines.append(f"#define TR_ATLAS_RUNNER_H {runner_h} /* max height over every runner_* sprite */")
+    lines.append("")
+    lines.append("#endif /* TR_ATLAS_H */")
+
+    out_path.write_text("\n".join(lines) + "\n")
+    print(f"wrote {out_path}  {len(sprite_names)} sprites")
+    print(f"TOTAL ATLAS BYTES: {total_bytes}")
+
+
+if __name__ == "__main__":
+    main()
