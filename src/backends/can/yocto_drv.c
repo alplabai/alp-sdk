@@ -624,9 +624,13 @@ static alp_status_t y_add_filter(alp_can_backend_state_t *st,
 	f->user           = user;
 	f->kf.can_id      = filter->id & (filter->ext_id ? CAN_EFF_MASK : CAN_SFF_MASK);
 	f->kf.can_mask    = filter->mask;
+	/* Always compare the EFF bit so an ext_id=false filter rejects 29-bit
+     * frames (else their low 11 bits alias onto it); can_id carries it
+     * only for ext_id=true.  _dispatch_rx()'s cmp already sets it per
+     * frame, so the software match follows the same rule. */
+	f->kf.can_mask |= CAN_EFF_FLAG;
 	if (filter->ext_id) {
 		f->kf.can_id |= CAN_EFF_FLAG;
-		f->kf.can_mask |= CAN_EFF_FLAG; /* require EFF frames to match */
 	}
 	f->in_use = true;
 
