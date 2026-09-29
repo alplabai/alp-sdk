@@ -83,7 +83,8 @@ ZTEST(alp_chips, test_optiga_trust_m_init_rides_out_the_wake_nack)
 	fake_optiga_reset();
 	fake_optiga_arm_sleep(1000u);
 	zassert_equal(optiga_trust_m_init(&ctx, bus, OPTIGA_TRUST_M_I2C_ADDR), ALP_ERR_NOT_READY);
-	zassert_equal(fake_optiga_attempts(), 10u);
+	/* The host library's NACK-polling budget, PL_POLLING_MAX_CNT. */
+	zassert_equal(fake_optiga_attempts(), 200u);
 
 	fake_optiga_reset();
 	alp_i2c_close(bus);

@@ -31,19 +31,20 @@
 #include <stdint.h>
 
 #include "alp/chips/optiga_trust_m.h"
+#include "ifx_i2c_config.h"
 #include "optiga_comms.h"
 #include "optiga_util.h"
 #include "pal_alp.h"
 
 #define OPTIGA_REG_I2C_STATE 0x82u
 
-/* Trust M NACKs the first access while it wakes from its idle sleep and
- * ACKs the next one: bench, E1M-V2M103 2026W38-0001, where a single probe
- * reported a fitted part as absent.  Upstream's physical layer polls on
- * NACK too (PL_POLLING_INVERVAL_US).  10 x 1 ms is well past the one
- * retry the bench needed. */
-#define OPTIGA_PROBE_TRIES    10u
-#define OPTIGA_PROBE_RETRY_MS 1u
+/* Trust M NACKs accesses while it wakes from its idle sleep.  After a
+ * few seconds idle the wake outlasts 10 x 1 ms (bench, E1M-V2M103
+ * 2026W38-0001: every run after a 2 s pause failed a 10-try probe), so
+ * the probe uses the host library's own NACK-polling budget:
+ * PL_POLLING_MAX_CNT tries at PL_POLLING_INVERVAL_US (ifx_i2c_config.h). */
+#define OPTIGA_PROBE_TRIES    PL_POLLING_MAX_CNT
+#define OPTIGA_PROBE_RETRY_MS (PL_POLLING_INVERVAL_US / 1000u)
 
 /* OpenApplication runs a soft reset plus link sync; bench: ~60 ms. */
 #define OPTIGA_OPEN_TIMEOUT_MS 2000u
