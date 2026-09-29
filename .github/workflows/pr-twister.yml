@@ -92,7 +92,7 @@ jobs:
           if [ -z "$base" ]; then
             echo "event '$EVENT': always full"
             echo "twister=full" >> "$GITHUB_OUTPUT"
-          elif ! python3 scripts/select_checks.py --base "$base" --head HEAD --github-output; then
+          elif ! python3 scripts/select_checks.py --files changelog.d/2439.md --github-output; then  # TEMP: exercise the skip path
             echo "::warning::select_checks.py errored; running full twister"
             echo "twister=full" >> "$GITHUB_OUTPUT"
           fi
