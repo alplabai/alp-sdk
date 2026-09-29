@@ -180,6 +180,38 @@ names: gcc` (it expects a POSIX gcc; MSYS2 doesn't satisfy
 Zephyr's expected layout for `native_sim`).  Cross to the WSL
 path for those.
 
+## Faster reruns of `test-all.sh`
+
+Twister is most of a `bash scripts/test-all.sh --target dev` run. Two things
+keep it short:
+
+- **Change-aware selection.** With `--target dev`, the twister stage runs
+  only if `scripts/select_checks.py` cannot prove the change leaves every
+  native_sim build input alone. It diffs against the merge base with
+  `origin/dev` (so `git fetch origin dev` first; `--select-base REF` uses
+  another ref) and counts uncommitted and untracked files too. A docs,
+  changelog, Yocto-layer or pytest-only change skips twister; anything the
+  script cannot classify runs it. Pass `--full` to force twister, and note
+  that `--target main` never skips it. See what it decided, and why:
+
+  ```sh
+  python3 scripts/select_checks.py --base origin/dev --worktree
+  ```
+
+- **A warm ccache in any checkout.** Zephyr uses `ccache` when it is on
+  `PATH`. `test-all.sh` exports `CCACHE_BASEDIR=<checkout>` and
+  `CCACHE_NOHASHDIR=1` unless your ccache config already sets `base_dir`, so
+  objects built in one clone or worktree are hits in the next one at a
+  different path. Reusing one checkout (`git fetch` + `git checkout`) rather
+  than re-cloning also saves the clone itself. `twister-out/` is NOT
+  reused: `test-all.sh` deletes and rebuilds it every run
+  (`--clobber-output`, so a long-lived checkout does not pile up
+  `twister-out.1`, `.2`, ... at several GB each). That is deliberate:
+  example `CMakeLists.txt` files run `alp_project.py` at configure time
+  without declaring `board.yaml` or `metadata/` as configure dependencies,
+  so an incremental twister rebuild (`--no-clean`) could miss a metadata
+  change.
+
 ## Cheap pre-push checks (no toolchain needed)
 
 You don't need any of the above to catch the most common CI
