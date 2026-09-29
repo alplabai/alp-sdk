@@ -124,6 +124,9 @@
  * into the RZ/V sysroot as ${includedir}/linux/drpai.h from meta-rz-drpai's
  * drpai_1.4.0 recipe, so the ALP_SDK_USE_DRPAI_V2N=ON build must carry a
  * `drpai` DEPENDS (recipe-side; not this file's to add). */
+#include <pthread.h>
+#include <signal.h>
+#include <time.h>
 #include <fcntl.h>
 #include <linux/drpai.h>
 #include <sys/ioctl.h>
@@ -283,8 +286,25 @@ alp_status_t _stage_drpai_blob(const void *data, size_t len, std::string &out_di
 		return ALP_ERR_IO;
 	}
 
+	/* `tar` exits at the first bad header, so a write into its closed stdin
+	 * raises SIGPIPE, whose default action killed the calling app
+	 * (bench, E1M-V2M103: rc 141).  Block it on this thread for the write
+	 * and pclose, then drain a pending one before restoring the mask; the
+	 * short write / non-zero exit below turns it into ALP_ERR_IO. */
+	sigset_t pipe_set, old_set;
+	sigemptyset(&pipe_set);
+	sigaddset(&pipe_set, SIGPIPE);
+	const bool masked = ::pthread_sigmask(SIG_BLOCK, &pipe_set, &old_set) == 0;
+
 	size_t wrote = (len > 0) ? std::fwrite(data, 1, len, p) : 0;
 	int    rc    = ::pclose(p);
+
+	if (masked) {
+		const struct timespec zero = { 0, 0 };
+		while (::sigtimedwait(&pipe_set, nullptr, &zero) == SIGPIPE) {
+		}
+		::pthread_sigmask(SIG_SETMASK, &old_set, nullptr);
+	}
 	if (wrote != len || rc != 0) {
 		_rm_rf(dir);
 		return ALP_ERR_IO;

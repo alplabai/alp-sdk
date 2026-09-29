@@ -218,6 +218,23 @@ alp_status_t alp_camera_configure_isp(alp_camera_t *h, const alp_camera_isp_conf
 	return rc;
 }
 
+alp_status_t alp_camera_get_fps(alp_camera_t *h, uint32_t *fps_x1000)
+{
+	if (fps_x1000 == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	const uint32_t v = h->state.fps_x1000;
+	alp_handle_op_leave(&h->active_ops);
+	if (v == 0u) {
+		return ALP_ERR_NOSUPPORT;
+	}
+	*fps_x1000 = v;
+	return ALP_OK;
+}
+
 void alp_camera_close(alp_camera_t *h)
 {
 	if (h == NULL) {

@@ -14,8 +14,10 @@
 # `E1M-V2N101` layer stack (meta-renesas + meta-rz-features, MACHINE
 # `e1m-v2n101-a55`) via `bitbake -p` then `bitbake-layers show-recipes
 # onnxruntime` -> `onnxruntime: 1.28.0`.  See the PR for the state of the full
-# `bitbake onnxruntime` build -- nothing here is a build claim, and no SKU has
-# run ORT on silicon.  `E1M-NX9101` cannot be exercised at all yet: the i.MX 93
+# `bitbake onnxruntime` build -- nothing here is a build claim.  The SDK's ORT
+# backend has run on E1M-V2M103 silicon (#1255, 2026-09-28), but against the
+# DEEPX layer's libonnxruntime 1.20.1, not this 1.28.0 recipe.
+# `E1M-NX9101` cannot be exercised at all yet: the i.MX 93
 # side needs `meta-imx` / `meta-freescale`, which no Alp build host carries.
 # V2M101/102 likewise await a build pass of their own.
 #
