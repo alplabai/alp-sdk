@@ -1,11 +1,11 @@
-### Changed — CC3501E bridge: the shared CRC-16 is byte-wise, +22% STREAM_WRITE throughput
+### Changed — CC3501E bridge: the shared CRC-16 is table-driven, +22% STREAM_WRITE throughput
 
 `alp_crc16_ccitt_false_update()` (`include/alp/protocol/crc16.h`) ran an
 8-step bit loop per byte. The CC3501E bridge CRCs every request once the
 link negotiates wire v4, and bulk frames reach 4 KiB, so on the M55-HE that
-loop cost about 1.3 ms per 4092-byte `STREAM_WRITE` frame. It now folds a
-byte at a time with the standard shift form of the 0x1021 polynomial:
-identical output, no lookup table.
+loop cost about 1.3 ms per 4092-byte `STREAM_WRITE` frame. It now uses a
+256-entry lookup table (512 bytes of const data): identical output, about
+0.3 ms per 4 KiB frame at `-O2`.
 
 Measured on an E1M-AEN803 (2026W36-0009), `aen-cc3501e-socket-throughput`
 bridge sweep, D-cache on and `CONFIG_SPI_DW_ALIF_PACK32=y`: 4092-byte frames

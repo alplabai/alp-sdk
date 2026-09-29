@@ -1,29 +1,43 @@
-### Fixed — CC3501E bridge: 2048-byte frames get the full reply-header gate, and the throughput example packs its SPI FIFO (#2052)
+### Changed — CC3501E bridge reaches 1.27 MB/s: faster host path, a SPI FIFO fix, and a shorter reply gate for fast firmware (#2052)
 
-The host waits a blind, size-scaled gap before reading a reply header,
-because READY is not readable on this carrier. The gap was interpolated
-linearly between 200 us at 536 B and 2000 us at 4092 B, which gave about
-970 us at 2048 B. Once the host got faster, with `CONFIG_SPI_DW_ALIF_PACK32`
-or with the D-cache on, that was too short. On E1M-AEN803 2026W36-0009,
-2048-byte `STREAM_WRITE` accounted for 4 of the 6 `rc=-5` failures seen on
-2026-09-28. The link-failure ring showed a reply-header read of all zeros,
-meaning the slave had not re-armed yet, and every retry after it failed too.
-The plateau now starts at 2048 B. Below that the gate still interpolates
-from the 536 B floor.
+On E1M-AEN803 2026W36-0009, 4092-byte `STREAM_WRITE` frames went from
+561 KB/s to 1,276,266-1,277,817 B/s (3 of 3 clean sweeps). That needs this
+change plus cc3501e-bridge-firmware `perf/bridge-hot-path-ram`.
 
-`aen-cc3501e-socket-throughput` now sets `CONFIG_SPI_DW_ALIF_PACK32=y`, as
-`aen-cc3501e-bringup` already does (#1725). Measured on the same unit in
-the app's own configuration (D-cache off, M55-HE Flow C RAM-run), bridge
-sweep:
+Host side, per 4092-byte frame:
 
-| gate plateau | runs clean | 1024 B | 2048 B | 4092 B |
-|---|---|---|---|---|
-| old (4092 B), PACK32 | 1 of 2 | 274 KB/s | 316 KB/s (failed `-5` in the other run) | 342 KB/s |
-| 2048 B, PACK32 | 3 of 3 | 251 KB/s | 271 KB/s | 342 KB/s |
+- **`spi_dw_alif`: the polled loops no longer overflow the RX FIFO.** The
+  refill budget counted the TX and RX FIFO levels but not the frame sitting
+  in the shift register. A loop fast enough to keep the TX FIFO full (seen
+  at `-O2`) then had one frame more in flight than the RX FIFO holds. RX
+  never completed, and the transfer ended in `packed transfer stalled` /
+  `rc=-4`.
+- The request payload is clocked TX-only (`rx = NULL`), because nothing
+  reads the slave's dummy bytes. Without RX drains the polled loop runs at
+  wire speed: 1.31 ms for 4094 B at 25 MHz, down from 1.91 ms.
+- Only the bytes each read phase clocks are cleared. A `memset` of the whole
+  4100-byte scratch buffer cost up to 165 µs per request under `-Os`.
+- The shared CRC-16 uses a lookup table (see the #1677 CRC fragment).
 
-A plateau from 1024 B was also 3 of 3 clean, but it cut 1024-byte frames to
-192 KB/s, so it was not taken. Without PACK32 the same app measured
-269 KB/s at 4092 B.
+Reply-header gate:
 
-The host-driver ztests move the interpolation midpoint to 1292 B and pin
-2048 B to the 2000 us plateau.
+- Old firmware: the 2000 µs plateau now starts at 2048 B. Interpolated,
+  2048 B only got about 970 µs, and 2048-byte frames caused 4 of the 6
+  `rc=-5` wedges seen on 2026-09-28.
+- New firmware: firmware that reports the new
+  `ALP_CC3501E_CAP_FAST_REPLY` capability (bit `0x00001000`) runs its
+  per-frame path from RAM and arms the reply for a 4 KiB frame in 300 to
+  600 µs. `cc3501e_reset()` reads the capability, and the gate then rises
+  from 200 µs at 536 B to 800 µs at 4092 B, about 1.8× the measured need.
+  Firmware without the bit keeps the conservative gate.
+- The flag is stored in `cc3501e_t::fw_fast_reply`, in padding, so the
+  struct layout does not move.
+
+`aen-cc3501e-socket-throughput` now builds the way a product runs:
+`CONFIG_DCACHE=y` (the board default), `CONFIG_SPEED_OPTIMIZATIONS=y` and
+`CONFIG_SPI_DW_ALIF_PACK32=y`. With the D-cache off, the same link measures
+~563 KB/s, because the host becomes CPU-bound. `aen-bench-shared.conf` still
+forces the cache off, so a Flow C measurement must pass `-DCONFIG_DCACHE=y`.
+
+New host-driver ztests pin the 2048 B plateau and the fast-reply table.
+All nine CC3501E suites pass (535 cases).
