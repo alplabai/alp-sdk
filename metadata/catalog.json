@@ -3637,6 +3637,7 @@
         "alp_camera_capture",
         "alp_camera_close",
         "alp_camera_configure_isp",
+        "alp_camera_get_fps",
         "alp_camera_open",
         "alp_camera_release",
         "alp_camera_start",
