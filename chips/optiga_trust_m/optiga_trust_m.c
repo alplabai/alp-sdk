@@ -125,13 +125,17 @@ alp_status_t optiga_trust_m_init(optiga_trust_m_t *ctx, alp_i2c_t *bus, uint8_t 
 	/* Probe by reading the I2C state register.  Trust M ACKs at
 	 * its address before OPEN_APPLICATION; if it still does not ACK
 	 * after the wake retries, NOT_READY tells the caller the chip isn't
-	 * populated / mis-strapped. */
+	 * populated / mis-strapped.  Register address and data go in two
+	 * transactions with a STOP between them, as upstream's physical
+	 * layer does: the part NACKs a repeated-start write-read (bench,
+	 * E1M-V2M103 2026W38-0001). */
 	uint8_t      reg      = OPTIGA_REG_I2C_STATE;
 	uint8_t      state[4] = { 0 };
 	alp_status_t s        = ALP_ERR_NOT_READY;
 	for (unsigned i = 0; i < OPTIGA_PROBE_TRIES && s != ALP_OK; i++) {
 		if (i != 0u) alp_delay_ms(OPTIGA_PROBE_RETRY_MS);
-		s = alp_i2c_write_read(ctx->bus, ctx->addr, &reg, 1, state, sizeof(state));
+		s = alp_i2c_write(ctx->bus, ctx->addr, &reg, 1);
+		if (s == ALP_OK) s = alp_i2c_read(ctx->bus, ctx->addr, state, sizeof(state));
 	}
 	if (s != ALP_OK) return ALP_ERR_NOT_READY;
 

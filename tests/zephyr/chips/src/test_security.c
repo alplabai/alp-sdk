@@ -75,7 +75,9 @@ ZTEST(alp_chips, test_optiga_trust_m_init_rides_out_the_wake_nack)
 	fake_optiga_reset();
 	fake_optiga_arm_sleep(1u);
 	zassert_equal(optiga_trust_m_init(&ctx, bus, OPTIGA_TRUST_M_I2C_ADDR), ALP_OK);
-	zassert_equal(fake_optiga_attempts(), 2u, "one NACKed wake access, then the ACKed probe");
+	zassert_equal(fake_optiga_attempts(),
+	              3u,
+	              "one NACKed wake access, then the register write and the state read");
 
 	/* A part that never answers still reads as absent, after a bounded try count. */
 	fake_optiga_reset();
@@ -104,16 +106,14 @@ ZTEST(alp_chips, test_optiga_trust_m_calls_reject_uninitialised)
 	optiga_trust_m_deinit(NULL);
 }
 
-ZTEST(alp_chips, test_optiga_trust_m_probe_only_api_contract)
+ZTEST(alp_chips, test_optiga_trust_m_rejects_bad_arguments)
 {
-	optiga_trust_m_t              ctx = { .initialised = true };
-	optiga_trust_m_product_info_t info;
-	uint8_t                       apdu[4] = { 0x31u, 0x11u, 0x00u, 0x00u };
-	uint8_t                       resp[8];
-	size_t                        resp_len = 123u;
+	optiga_trust_m_t ctx      = { .initialised = true };
+	uint8_t          apdu[4]  = { 0x31u, 0x11u, 0x00u, 0x00u };
+	uint8_t          resp[8]  = { 0 };
+	size_t           resp_len = 123u;
 
 	zassert_equal(optiga_trust_m_read_product_info(&ctx, NULL), ALP_ERR_INVAL);
-	zassert_equal(optiga_trust_m_read_product_info(&ctx, &info), ALP_ERR_NOSUPPORT);
 
 	zassert_equal(
 	    optiga_trust_m_send_apdu(&ctx, NULL, sizeof apdu, resp, sizeof resp, &resp_len, 100u),
@@ -127,12 +127,7 @@ ZTEST(alp_chips, test_optiga_trust_m_probe_only_api_contract)
 	              ALP_ERR_INVAL);
 	zassert_equal(optiga_trust_m_send_apdu(&ctx, apdu, sizeof apdu, resp, sizeof resp, NULL, 100u),
 	              ALP_ERR_INVAL);
-
-	resp_len = 123u;
-	zassert_equal(
-	    optiga_trust_m_send_apdu(&ctx, apdu, sizeof apdu, resp, sizeof resp, &resp_len, 100u),
-	    ALP_ERR_NOSUPPORT);
-	zassert_equal(resp_len, 0u);
+	zassert_equal(resp_len, 0u, "a refused call still zeroes *resp_len");
 }
 
 /* ------------------------------------------------------------------ */

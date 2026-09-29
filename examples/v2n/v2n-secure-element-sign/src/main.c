@@ -45,12 +45,12 @@
 
 /* OpenApplication (0xF0) with the Trust M application's 16-byte AID. */
 static const uint8_t k_open_app[] = { 0xF0u, 0x00u, 0x00u, 0x10u, 0xD2u, 0x76u, 0x00u,
-	                              0x00u, 0x04u, 0x47u, 0x65u, 0x6Eu, 0x41u, 0x75u,
-	                              0x74u, 0x68u, 0x41u, 0x70u, 0x70u, 0x6Cu };
+	                                  0x00u, 0x04u, 0x47u, 0x65u, 0x6Eu, 0x41u, 0x75u,
+	                                  0x74u, 0x68u, 0x41u, 0x70u, 0x70u, 0x6Cu };
 
 /* GetDataObject (0x81), read data: OID 0xE0C2, offset 0, 27 bytes. */
 static const uint8_t k_get_uid[] = { 0x81u, 0x00u, 0x00u, 0x06u, 0xE0u,
-	                             0xC2u, 0x00u, 0x00u, 0x00u, 0x1Bu };
+	                                 0xC2u, 0x00u, 0x00u, 0x00u, 0x1Bu };
 
 #define APDU_RESP_HEADER 4u
 
@@ -105,13 +105,13 @@ int main(void)
 	 *    on a fresh link, so OpenApplication comes first. */
 	uint8_t resp[64];
 	size_t  resp_len = 0;
-	s = optiga_trust_m_send_apdu(&se, k_open_app, sizeof k_open_app, resp, sizeof resp,
-	                             &resp_len, 1000u);
+	s                = optiga_trust_m_send_apdu(
+	    &se, k_open_app, sizeof k_open_app, resp, sizeof resp, &resp_len, 1000u);
 	if (s != ALP_OK || resp_len < 1u || resp[0] != 0x00u) {
 		return fail(&se, bus, "raw OpenApplication", s != ALP_OK ? s : resp[0]);
 	}
-	s = optiga_trust_m_send_apdu(&se, k_get_uid, sizeof k_get_uid, resp, sizeof resp,
-	                             &resp_len, 1000u);
+	s = optiga_trust_m_send_apdu(
+	    &se, k_get_uid, sizeof k_get_uid, resp, sizeof resp, &resp_len, 1000u);
 	if (s != ALP_OK || resp_len != APDU_RESP_HEADER + sizeof info || resp[0] != 0x00u) {
 		return fail(&se, bus, "raw GetDataObject(0xE0C2)", s != ALP_OK ? s : resp[0]);
 	}
