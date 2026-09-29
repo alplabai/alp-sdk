@@ -1,0 +1,20 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * fillrate probe overlay for the E1M-AEN803 (Ensemble E8, M55-HE) RAM-run.
+ * Identical retarget to trace-runner's own board overlay and to
+ * examples/aen/aen-dsi-display's: ROM to ITCM (path-reference form &itcm --
+ * the phandle-array form makes FLASH_SIZE=0 and overflows the link), no
+ * MCUboot code partition. The display chain, panel, carrier expander and the
+ * 720x1280 RGB565 framebuffer region all come from the
+ * e1m_evk_rk055hdmipi4ma0 shield (CMakeLists.txt); the framebuffer is used by
+ * address (SRAM0), so it adds nothing to this RAM-run .bin.
+ */
+
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};

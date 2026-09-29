@@ -107,6 +107,11 @@ not a soc-info read) is not intercepted. Call `se_service_get_se_revision()` (or
 `alp_soc_info_read()`) explicitly as the first diagnostic step regardless of
 whether the warning has fired.
 
+With the `alif,se-trng` entropy driver chosen as `zephyr,entropy`, the first
+`sys_csrand_get()` / `sys_rand_get()` (and so the first TLS handshake or DHCP
+transaction) becomes an SE `SERVICE_CRYPTOCELL_GET_RND` request -- exactly
+this first-request trigger. Check the SERAM version before enabling it.
+
 A module below v109 must have its SERAM updated — a **System Package update**
 over the SE-UART with SETOOLS. Changing the application cannot fix a mismatched
 pair; it can only move the symptom.
@@ -157,6 +162,7 @@ These never change device state. All confirmed `rc=0` on the E8 bench (#197):
 | `se_service_get_run_cfg(run_profile_t*)` | live power/clock profile | DCDC **825 mV**, `power_domains=0x16d`, `cpu_clk_freq=4`, `run_clk_src=2` |
 | `se_service_get_off_cfg(off_profile_t*)` | standby/wake profile | DCDC 825 mV, no wake/EWIC configured |
 | `se_service_get_rnd_num(u8*, len)` | SE TRNG bytes | 8 random bytes |
+| `alif,se-trng` entropy driver (`CONFIG_ENTROPY_ALIF_SE`, #2192) | `zephyr,entropy` over `se_service_get_rnd_num()` in <= `MAX_RND_LENGTH` chunks | two 300 B draws differ, `sys_csrand_get()` rc=0, on M55-HE and M55-HP |
 
 `se_service_get_last_set_run_cfg()` returns the cached run profile without an SE
 round-trip (faster).

@@ -75,6 +75,27 @@ def test_v2n_core_field_matches_verified_ownership_only():
             assert p["owner"] == "renesas"
 
 
+def test_canfd_rows_resolve_the_e1m_x_can_crosswalk():
+    """The four CANFD2/CANFD3 rows (#2332's on-module CAN-FD transceivers)
+    resolve to real E1M-X edge pads instead of "TBD", per the schematic-
+    sourced transceiver-to-channel mapping in #2332: CANFD3 (U15, P86/P87)
+    is carrier CAN0, CANFD2 (U16, P84/P85) is carrier CAN1. Pad ids and
+    silkscreen names come from the public e1m-spec E1M-X pinout (`B21`/
+    `B22`/`B24`/`B25`), not from any private netlist."""
+    doc = yaml.safe_load((gpc.PINMUX_DIR / "v2n.yaml").read_text(encoding="utf-8"))
+    by_peripheral = {p["silicon_peripheral"]: p for p in doc["pads"]}
+    expected = {
+        "CANFD2_CTX2": ("B24", "CAN1H/CAN1_TX"),
+        "CANFD2_CRX2": ("B25", "CAN1L/CAN1_RX"),
+        "CANFD3_CTX3": ("B21", "CAN0H/CAN0_TX"),
+        "CANFD3_CRX3": ("B22", "CAN0L/CAN0_RX"),
+    }
+    for peripheral, (e1m_pad, e1m_function) in expected.items():
+        row = by_peripheral[peripheral]
+        assert row["e1m_pad"] == e1m_pad
+        assert row["e1m_function"] == e1m_function
+
+
 def _write_core_ownership(tmp_path: Path, entries: list[dict]) -> Path:
     modules = tmp_path / "e1m_modules"
     v2n_dir = modules / "v2n"

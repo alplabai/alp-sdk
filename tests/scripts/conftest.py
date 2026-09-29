@@ -50,6 +50,13 @@ def pytest_configure(config):
         "repo_writes: writes into the real checkout; run serially, never "
         "alongside pytest-xdist workers (see _REPO_WRITER_MODULES)",
     )
+    config.addinivalue_line(
+        "markers",
+        "gate_duplicate: re-runs, from pytest, exactly the live-repo check a "
+        "scripts/check_*.py gate stage already runs; scripts/test-all.sh "
+        "deselects these when that stage ran in the same invocation, CI's "
+        "plain pytest sweep still runs them",
+    )
     here = Path(__file__).resolve().parent
     stale = sorted(m for m in _REPO_WRITER_MODULES if not (here / f"{m}.py").is_file())
     if stale:

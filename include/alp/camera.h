@@ -127,8 +127,11 @@ typedef struct {
  *         itself -- e.g. ALP_ERR_INVAL (zephyr_video / v2n_n44_isp /
  *         alif_isp_pico: out-of-range @c camera_id), ALP_ERR_NOT_READY
  *         (zephyr_video: no camera aliased in devicetree for the
- *         requested @c camera_id), or ALP_ERR_NOT_IMPLEMENTED
- *         (zephyr_stub, on silicon with no real backend).
+ *         requested @c camera_id, OR the aliased device -- or a device
+ *         it depends on, e.g. an absent sensor that failed its own
+ *         chip-ID check at init -- never reached device_is_ready()),
+ *         or ALP_ERR_NOT_IMPLEMENTED (zephyr_stub, on silicon with no
+ *         real backend).
  */
 alp_camera_t *alp_camera_open(const alp_camera_config_t *cfg);
 

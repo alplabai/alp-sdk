@@ -12,17 +12,13 @@ v0.6 block (`boot:`, `ota:`, `security.psa:`, `storage:`,
 `diagnostics.modules:`) appears in this `board.yaml` at the
 production stance the SDK recommends for shipping product.
 
-> **One thing here is not production-ready, and it is a
-> cryptographic one (#2192).** The stance this app demonstrates is
-> about structure -- signed boot, provisioned identity, attested
-> updates -- and that structure is real. The randomness underneath
-> its TLS is not: mbedTLS' PSA crypto core needs a cryptographically
-> secure RNG, no Alif Ensemble entropy driver exists in this tree or
-> upstream, and an AEN build is therefore *refused* unless it
-> acknowledges a predictable generator with
-> `CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y`. Do not read "production
-> stance" as covering key material until the Secure Enclave TRNG is
-> wired through a real entropy driver.
+> **Randomness on AEN comes from the Secure Enclave TRNG (#2192).**
+> mbedTLS' PSA crypto core needs a cryptographically secure RNG;
+> every AEN board chooses the SE TRNG entropy driver (`alif,se-trng`,
+> bench-proven on both M55 cores) as `zephyr,entropy` by default, so
+> the TLS key material in this production stance is seeded from real
+> hardware entropy. The native_sim build has no such source and
+> acknowledges that explicitly in its own `native_sim.conf`.
 
 ## The v0.6 block walkthrough
 
@@ -33,7 +29,7 @@ boot:
   method: mcuboot
   signing:
     algorithm: ecdsa_p256
-    key_file:  keys/mcuboot_dev_ecdsa_p256.pem
+    key_file:  keys/mcuboot_shared_dev_ecdsa_p256.pem
 ```
 
 Drives sysbuild's MCUboot child image. ECDSA-P256 matches the

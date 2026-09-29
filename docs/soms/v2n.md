@@ -40,17 +40,23 @@ Full chip catalogue + manifest URLs:
 [`metadata/chips/`](../../metadata/chips/).
 Per-SKU populated parts: [`metadata/e1m_modules/E1M-V2N10{1,2,3}.yaml`](../../metadata/e1m_modules/).
 
-## Real-time clock
+## Real-time clock {#real-time-clock}
 
 The on-module RV-3028-C7 is the RTC of record, bound as `/dev/rtc0`
 (kernel `rtc-rv3028`, `CONFIG_RTC_DRV_RV3028=y`) -- use `hwclock`/`date`
 from userspace. **CA55 (Linux) is the sole master of the whole
 RIIC8/BRD_I2C bus** the RTC and every other BRD_I2C device sit on
 (`metadata/e1m_modules/v2n/core-ownership.yaml`); the CM33 must never
-issue I2C transactions there. No `trickle-resistor-ohms` is configured
-(the RV-3028-C7's VBACKUP/backup-cap wiring isn't confirmed on this
-SoM's schematic) and the alarm INT line isn't wired to a kernel
-interrupt yet -- both are open follow-ups.
+issue I2C transactions there. **Confirmed 2026-09-29 on E1M-V2M103
+2026W38-0001:** the RV-3028-C7 has no time backup across a power cycle
+unless the carrier fits pad `P10` (VBACKUP); no `trickle-resistor-ohms`
+is configured for it. Without a backup source, the image resyncs the
+RTC on every boot: `systemd-timesyncd` pulls wall-clock over NTP once
+networked, and the kernel writes the result back to `rtc0`
+(`hwclock -w`-equivalent via `systemd-time-wait-sync` / `hwclock` unit)
+so `/dev/rtc0` reads the corrected time on the next cold boot. The
+alarm INT line isn't wired to a kernel interrupt yet -- that remains an
+open follow-up.
 
 The RZ/V2N's own RTC (RTCA-3, RTXIN/RTXOUT) is a second, SoC-internal
 timebase and is enabled in the SoM devicetree (`&rtc` in
@@ -106,6 +112,14 @@ host driver speaks both transports:
   7-bit `0x70`.  Use when you're already on BRD_I2C for the
   PMIC fleet.
 
+**Two BRD_I2C addresses are held by kernel drivers on the Linux
+image:** `0x70` (`gpio-gd32-bridge`) and `0x52` (`rtc-rv3028`, see
+[Real-time clock](#real-time-clock) above). A standard userspace
+`i2c-tools` transaction against either address is refused because the
+kernel already owns it -- use `i2c -f` (force) from userspace, or go
+through the owning kernel driver, rather than probing those two
+addresses directly.
+
 Wire spec: [`docs/gd32-bridge-protocol.md`](../gd32-bridge-protocol.md).
 Firmware tree: [`docs/gd32-bridge.md`](../gd32-bridge.md).
 Host driver: [`<alp/chips/gd32g553.h>`](../../include/alp/chips/gd32g553.h).
@@ -121,6 +135,17 @@ Two PMICs cooperate to bring V2N up:
 2. **DA9292** (secondary) -- CH1 is the 0.8 V Renesas core rail
    (strap-enabled at boot).  CH2 is **disabled on V2N base**;
    only V2N-M1 firmware brings it up (DEEPX rail).
+
+**Early-OTP ACT88760 units hold the GD32 in reset.** Some units carry an
+early ACT88760 OTP revision that drives GPIO register `0x10` up as `0x88`
+at power-on; that GPIO4 bit is wired to `GD32_NRST`, so the GD32 supervisor
+never comes out of reset. U-Boot patch 0011 clears bit 7 (`0x10`:
+`0x88` -> `0x08`) in `board_late_init()` on every boot, before the GD32
+bridge is probed, and prints `ALP: ACT88760 GD32_NRST released (0x10: 0x88
+-> 0x08)`. This is a workaround for the early OTP, not a defect fix --
+production units carry the fixed OTP, already read `0x08` at power-on, and
+the same step is a no-op there (prints `ALP: ACT88760 GD32_NRST already
+released`).
 
 ## Boot + identification
 

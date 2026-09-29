@@ -50,22 +50,25 @@ def default_corpus_run():
     return _run()
 
 
+# The same live-repo run test-all.sh's required-gate-scripts stage executes
+# (check_zephyr_conf_parity.py, no args), hence gate_duplicate.
+@pytest.mark.gate_duplicate
 def test_default_corpus_byte_identical(default_corpus_run):
     proc = default_corpus_run
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "byte-identical" in proc.stdout
 
 
-def test_finds_every_core_scoped_example(default_corpus_run):
+def test_finds_every_core_scoped_example():
     # A regression here (an example silently dropping out of the corpus,
     # e.g. a `--core` regex mismatch on a new formatting variant) is as
     # dangerous as a byte mismatch -- it would just stop checking silently.
-    proc = default_corpus_run
-    assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "0 example(s)" not in proc.stdout
-    ok_count = proc.stdout.count("OK   examples/")
-    assert ok_count >= 90, (
-        f"expected ~92 --core-scoped examples, only found {ok_count} -- "
+    # Asked of the discovery function directly, not of a full gate run: the
+    # count is the only thing this test adds, and it must not force the
+    # ~40 s corpus run that test_default_corpus_byte_identical owns.
+    found = len(_load_gate()._find_cases())
+    assert found >= 90, (
+        f"expected ~92 --core-scoped examples, only found {found} -- "
         f"the discovery regex may have regressed")
 
 
