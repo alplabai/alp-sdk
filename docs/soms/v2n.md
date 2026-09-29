@@ -332,6 +332,15 @@ Re-run 2026-09-27 with the BT stack as modules: `bluetooth`/`hci_uart`/`btbcm`
 autoload after rootfs, the `brcm/BCM.hcd` patch loads (chip id 157), and
 `hci0` comes UP+RUNNING.
 
+## Linux UART ports (SCIF)
+
+The on-module RZ/V2N SCIF UARTs enumerate as `/dev/ttySC<N>` (console on
+`ttySC0`, Bluetooth HCI on `ttySC4`). `alp_uart_open()` reaches them with
+`port_id = 300 + N` (300..399 -> `/dev/ttySC<N>`), so no hand-written tty
+wrapper is needed: `alp_uart_config_t cfg = ALP_UART_CONFIG_DEFAULT(300u + 1u);`
+opens `/dev/ttySC1`. Don't open a port the kernel already owns (the console or
+the BT UART).
+
 ## Bring-up
 
 Step-by-step bench bring-up: [`docs/bring-up-v2n.md`](../bring-up-v2n.md).
