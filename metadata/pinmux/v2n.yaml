@@ -27,10 +27,10 @@ pads:
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "BT_UART.RTS", silicon_pad: "P42" }
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "BT_UART.RXD", silicon_pad: "P40" }
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "BT_UART.TXD", silicon_pad: "P41" }
-  - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "CANFD2_CRX2", silicon_pad: "P85" }
-  - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "CANFD2_CTX2", silicon_pad: "P84" }
-  - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "CANFD3_CRX3", silicon_pad: "P87" }
-  - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "CANFD3_CTX3", silicon_pad: "P86" }
+  - { e1m_pad: "B25", e1m_function: "CAN1L/CAN1_RX", owner: "renesas", silicon_peripheral: "CANFD2_CRX2", silicon_pad: "P85" }
+  - { e1m_pad: "B24", e1m_function: "CAN1H/CAN1_TX", owner: "renesas", silicon_peripheral: "CANFD2_CTX2", silicon_pad: "P84" }
+  - { e1m_pad: "B22", e1m_function: "CAN0L/CAN0_RX", owner: "renesas", silicon_peripheral: "CANFD3_CRX3", silicon_pad: "P87" }
+  - { e1m_pad: "B21", e1m_function: "CAN0H/CAN0_TX", owner: "renesas", silicon_peripheral: "CANFD3_CTX3", silicon_pad: "P86" }
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "DA9292_INT", silicon_pad: "P37" }
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "DA9292_TW", silicon_pad: "P36" }
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", core: "a55", silicon_peripheral: "DEEPX_CORE_0P75_EN", silicon_pad: "P64" }
