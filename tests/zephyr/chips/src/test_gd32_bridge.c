@@ -605,6 +605,63 @@ ZTEST(alp_chips, test_gd32g553_ota_ops_reject_pre_v06_peer)
 }
 
 /* ------------------------------------------------------------------ */
+/* gh#101 -- CMD_OTA_GET_STATE's reply widened 5 -> 6 bytes in         */
+/* protocol v0.14, adding an `err` byte.  gd32g553_ota_get_state()     */
+/* picks the reply width off ctx->version.minor (negotiated at         */
+/* init()), NOT a compile-time constant, so this pins BOTH shapes:     */
+/* an older peer must still decode cleanly at 5 bytes with err forced  */
+/* to NONE, and a >= 0.14 peer must decode the real cause at 6.        */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_gd32g553_ota_get_state_pre_v14_peer_has_no_err_byte)
+{
+	fake_gd32bridge_reset();
+	fake_gd32bridge_set_version(GD32G553_HOST_PROTOCOL_MAJOR, 13u, 0u);
+	/* err=0x05 (VERIFY_CRC) armed on the wire but at reply_width=5: a
+	 * pre-v0.14 peer never sends this byte, so the driver must not
+	 * read it -- and must report NONE, not accidentally see the
+	 * fake's backing byte through an off-by-one. */
+	fake_gd32bridge_arm_ota_get_state(4u /* ERROR */, 0u, 0xFFu, 7u, 0x05u, 5u);
+
+	gd32g553_t ctx;
+	alp_i2c_t *bus = open_fake_gd32bridge_bus();
+	zassert_equal(gd32g553_init(&ctx, NULL, bus, 0x1Eu), ALP_OK);
+
+	gd32g553_ota_state_info_t st = { 0 };
+	zassert_equal(gd32g553_ota_get_state(&ctx, &st), ALP_OK);
+	zassert_equal(st.state, GD32G553_OTA_STATE_ERROR);
+	zassert_equal(st.boot_count, 7u);
+	zassert_equal(
+	    st.err, GD32G553_OTA_ERR_NONE, "a pre-v0.14 peer must report NONE, not a stale byte");
+
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_gd32g553_ota_get_state_v14_peer_decodes_err_cause)
+{
+	fake_gd32bridge_reset();
+	fake_gd32bridge_set_version(
+	    GD32G553_HOST_PROTOCOL_MAJOR, GD32G553_OTA_ERR_MIN_PROTOCOL_MINOR, 0u);
+	fake_gd32bridge_arm_ota_get_state(
+	    4u /* ERROR */, 1u, 0xFFu, 3u, GD32G553_OTA_ERR_VERIFY_CRC, 6u);
+
+	gd32g553_t ctx;
+	alp_i2c_t *bus = open_fake_gd32bridge_bus();
+	zassert_equal(gd32g553_init(&ctx, NULL, bus, 0x1Eu), ALP_OK);
+
+	gd32g553_ota_state_info_t st = { 0 };
+	zassert_equal(gd32g553_ota_get_state(&ctx, &st), ALP_OK);
+	zassert_equal(st.state, GD32G553_OTA_STATE_ERROR);
+	zassert_equal(st.active_slot, GD32G553_OTA_SLOT_B);
+	zassert_equal(st.boot_count, 3u);
+	zassert_equal(st.err,
+	              GD32G553_OTA_ERR_VERIFY_CRC,
+	              "a >= v0.14 peer must attribute the ERROR to its real cause (gh#101)");
+
+	alp_i2c_close(bus);
+}
+
+/* ------------------------------------------------------------------ */
 /* #2035 -- gd32g553_ota_image_crc32() (src/zephyr/gd32g553_ota_crc_    */
 /* zephyr.c).  native_sim never selects CONFIG_CRC_ALIF (no Alif        */
 /* devicetree node exists there), so every case below exercises the     */
