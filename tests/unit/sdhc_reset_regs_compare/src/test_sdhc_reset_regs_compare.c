@@ -66,10 +66,10 @@ ZTEST(sdhc_reset_regs_compare, test_each_field_alone_flips_the_verdict)
 	zassert_false(sdhc_reset_regs_equal(&before, &after), "CLK_CTRL_R must matter");
 }
 
-/* The reading #2181 predicts from today's driver: sdhc_dwc_reset() issues
- * SW_RST_ALL only and never re-calls sdhc_dwc_set_def_config(), so a
- * register-file reset that clears these fields to their POR defaults is
- * exactly the MISMATCH this comparison must report, not silently pass. */
+/* A guard against a silently-wrong comparator, not a prediction about
+ * today's driver: if the register file ever DID come back at POR defaults
+ * (e.g. a set_def_config() re-apply that silently no-ops), that is exactly
+ * the MISMATCH this comparison must report, not a false pass. */
 ZTEST(sdhc_reset_regs_compare, test_por_default_reset_is_a_mismatch)
 {
 	struct sdhc_reset_regs before = base_regs();

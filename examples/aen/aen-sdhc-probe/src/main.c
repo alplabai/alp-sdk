@@ -135,10 +135,17 @@
  * (bits[31:24]) and CLK_CTRL_R in bytes 0-1 (bits[15:0]). */
 #define SD_REG_CLK_SWRST_WORD (SD_REG_BASE + 0x02Cu)
 #define SD_CLK_CTRL_Msk       0x0000FFFFu
-#define SD_SW_RST_R_Pos       24u
-#define SD_SW_RST_ALL_Msk     0x01u /* bit0 of the SW_RST_R byte: register-file reset */
-#define SD_SW_RST_CMD_Msk     0x02u /* bit1: command-circuit reset */
-#define SD_SW_RST_DAT_Msk     0x04u /* bit2: data-circuit reset */
+/*
+ * bit1 of CLK_CTRL_R is INTERNAL_CLK_STABLE, a hardware status flag the
+ * driver polls-to-set, not a value set_def_config() programs -- mask it
+ * out of the #2181 capture so a clock still settling doesn't flip the
+ * MATCH/MISMATCH verdict on its own.
+ */
+#define SD_CLK_CTRL_STABLE_BIT 0x0002u
+#define SD_SW_RST_R_Pos        24u
+#define SD_SW_RST_ALL_Msk      0x01u /* bit0 of the SW_RST_R byte: register-file reset */
+#define SD_SW_RST_CMD_Msk      0x02u /* bit1: command-circuit reset */
+#define SD_SW_RST_DAT_Msk      0x04u /* bit2: data-circuit reset */
 
 /* CLK_CTRL_R bit0 -- believed to ARM a reset handshake into the CMD/DAT
  * circuits that runs on the card clock rather than the host clock. */
@@ -262,7 +269,7 @@ static void sdhc_reset_capture(struct sdhc_reset_regs *out)
 	out->normal_error_int_signal_en = sys_read32(SD_REG_NORMAL_INT_SIGNAL_EN);
 	out->host_ctrl2                 = (uint16_t)(hostctrl2_word >> SD_HOST_CTRL2_Pos);
 	out->pwr_ctrl                   = (uint8_t)((pwr_word >> SD_PWR_CTRL_Pos) & 0xFFu);
-	out->clk_ctrl                   = (uint16_t)(clk_swrst & SD_CLK_CTRL_Msk);
+	out->clk_ctrl = (uint16_t)(clk_swrst & SD_CLK_CTRL_Msk & ~SD_CLK_CTRL_STABLE_BIT);
 }
 
 static void sdhc_reset_print_capture(const char *label, const struct sdhc_reset_regs *r)
@@ -278,6 +285,43 @@ static void sdhc_reset_print_capture(const char *label, const struct sdhc_reset_
 	       (unsigned)r->host_ctrl2,
 	       (unsigned)r->pwr_ctrl,
 	       (unsigned)r->clk_ctrl);
+}
+
+/*
+ * #2181 -- on a MISMATCH, name only the field(s) that actually differ.
+ * Prints no cause: what changed a register is for the reader to chase,
+ * not a claim this file can make from a register value alone.
+ */
+static void sdhc_reset_print_mismatch(const struct sdhc_reset_regs *before,
+                                      const struct sdhc_reset_regs *after)
+{
+	if (before->normal_error_int_stat_en != after->normal_error_int_stat_en) {
+		printf("[sd][reset-capture] MISMATCH NORMAL/ERROR_INT_STAT_EN: "
+		       "0x%08x -> 0x%08x\n",
+		       (unsigned)before->normal_error_int_stat_en,
+		       (unsigned)after->normal_error_int_stat_en);
+	}
+	if (before->normal_error_int_signal_en != after->normal_error_int_signal_en) {
+		printf("[sd][reset-capture] MISMATCH NORMAL/ERROR_INT_SIGNAL_EN: "
+		       "0x%08x -> 0x%08x\n",
+		       (unsigned)before->normal_error_int_signal_en,
+		       (unsigned)after->normal_error_int_signal_en);
+	}
+	if (before->host_ctrl2 != after->host_ctrl2) {
+		printf("[sd][reset-capture] MISMATCH HOST_CTRL2: 0x%04x -> 0x%04x\n",
+		       (unsigned)before->host_ctrl2,
+		       (unsigned)after->host_ctrl2);
+	}
+	if (before->pwr_ctrl != after->pwr_ctrl) {
+		printf("[sd][reset-capture] MISMATCH PWR_CTRL: 0x%02x -> 0x%02x\n",
+		       (unsigned)before->pwr_ctrl,
+		       (unsigned)after->pwr_ctrl);
+	}
+	if (before->clk_ctrl != after->clk_ctrl) {
+		printf("[sd][reset-capture] MISMATCH CLK_CTRL_R: 0x%04x -> 0x%04x\n",
+		       (unsigned)before->clk_ctrl,
+		       (unsigned)after->clk_ctrl);
+	}
 }
 
 #define SD_DIAG_MAX_CMD_SAMPLES   4u  /* covers CMD0, CMD8, ACMD41 (or its first retry), CMD2/3 */
@@ -372,6 +416,19 @@ static int sd_diag_send_cmd0(void)
 int main(void)
 {
 	sd_diag_print_int_enables("main() entry");
+
+	/*
+	 * #2181's baseline: captured here, before PROBE 1 or any reset call
+	 * runs, so it reflects what sdhc_dwc_init() programmed at boot --
+	 * step 4 of the issue. Capturing it after PROBE 2's sdhc_hw_reset()
+	 * instead would compare one post-reset state to another and could
+	 * never show a MISMATCH even if reset() failed to restore config.
+	 */
+	struct sdhc_reset_regs reset_before;
+
+	sdhc_reset_capture(&reset_before);
+	sdhc_reset_print_capture("main() entry, before any reset", &reset_before);
+
 	sd_diag_print_int_enables("before PROBE 1 (CMD0, no reset)");
 
 	/*
@@ -425,52 +482,62 @@ int main(void)
 
 	/*
 	 * --- PROBE 3: reset()-restores-config capture (#2181) ---------------
-	 * The unmeasured half of #2122: does sdhc_hw_reset() (the driver's
-	 * public .reset entry, sdhc_dwc_reset()) leave the seven registers
-	 * below matching what sdhc_dwc_set_def_config() programmed at init,
-	 * or does the SW_RST_ALL it issues clear them back to silicon
-	 * defaults? sdhc_dwc_reset() is JUST sdhc_dwc_hw_reset(dev,
-	 * SW_RST_ALL) -- it never calls set_def_config() again -- so this
-	 * capture is expected, on today's driver, to show a MISMATCH; that
-	 * is the honest reading of the code, not a claim this run has been
-	 * executed on silicon. This only prints paired before/after captures
-	 * for a bench run to produce; see sdhc_reset_capture.h for the
-	 * host-testable comparison half.
+	 * #2122 made sdhc_dwc_reset() re-call sdhc_dwc_set_def_config()
+	 * after its SW_RST_ALL, unconditionally -- even on a reset timeout
+	 * -- so on today's driver these seven registers are EXPECTED to
+	 * read back MATCH against the main()-entry baseline captured above.
+	 * What #2122 didn't verify is whether that re-programming actually
+	 * lands and holds on real silicon; a MISMATCH here would be the
+	 * unexpected result worth chasing. This only prints the after
+	 * capture and compares it to the pre-any-reset baseline for a bench
+	 * run to produce; see sdhc_reset_capture.h for the host-testable
+	 * comparison half.
 	 */
-	struct sdhc_reset_regs reset_before, reset_after;
-
-	sdhc_reset_capture(&reset_before);
-	sdhc_reset_print_capture("PROBE 3, before sdhc_hw_reset()", &reset_before);
-
 	int hwreset3_rc = sdhc_hw_reset(SDHC_DEV);
 	printf("[sd] PROBE 3: sdhc_hw_reset(sdhc0) -> %d\n", hwreset3_rc);
+
+	struct sdhc_reset_regs reset_after;
 
 	sdhc_reset_capture(&reset_after);
 	sdhc_reset_print_capture("PROBE 3, after sdhc_hw_reset()", &reset_after);
 
 	bool reset_restored_config = sdhc_reset_regs_equal(&reset_before, &reset_after);
 
-	printf("[sd] PROBE 3 RESULT %s (#2181): reset()-restores-config -- %s. This is a "
-	       "MEASUREMENT of this run only; it does not by itself establish silicon "
-	       "behaviour across reworked-carrier runs -- see the printed pairs above.\n",
-	       reset_restored_config ? "MATCH" : "MISMATCH",
-	       reset_restored_config
-	           ? "the seven captured registers read back identical before and after "
-	             "sdhc_hw_reset()"
-	           : "the seven captured registers differ before vs after sdhc_hw_reset() -- "
-	             "sdhc_dwc_reset() issues SW_RST_ALL only and never re-calls "
-	             "sdhc_dwc_set_def_config()");
+	if (hwreset3_rc != 0) {
+		printf("[sd] PROBE 3 RESULT INCONCLUSIVE (#2181): sdhc_hw_reset() returned "
+		       "%d (non-zero) -- a reset that didn't report success makes the %s "
+		       "verdict below unreliable; sdhc_dwc_reset() still runs "
+		       "set_def_config() on a timeout, but treat this run as not "
+		       "measuring a clean reset.\n",
+		       hwreset3_rc,
+		       reset_restored_config ? "MATCH" : "MISMATCH");
+	} else if (reset_restored_config) {
+		printf("[sd] PROBE 3 RESULT MATCH (#2181): reset()-restores-config -- the "
+		       "seven captured registers read back identical before any reset and "
+		       "after sdhc_hw_reset(), as #2122's set_def_config() re-apply "
+		       "predicts. This is a MEASUREMENT of this run only.\n");
+	} else {
+		sdhc_reset_print_mismatch(&reset_before, &reset_after);
+		printf("[sd] PROBE 3 RESULT MISMATCH (#2181): reset()-restores-config -- see "
+		       "the field(s) flagged above; this does not match what #2122's "
+		       "set_def_config() re-apply predicts and is worth chasing on this "
+		       "specific run. This is a MEASUREMENT of this run only; it does not "
+		       "by itself establish silicon behaviour across reworked-carrier "
+		       "runs.\n");
+	}
 
 	sd_diag_print_static_regs();
 	sd_diag_print_int_enables("before exit");
 
 	printf("[sd] RESULT: controller-level probes complete (CMD0 no-reset -> %d, "
-	       "CMD0 post-reset -> %d, sdhc_hw_reset -> %d, PROBE 3 reset-restores-config -> "
-	       "%s). This board does not enable the card path -- see the file header\n",
+	       "CMD0 post-reset -> %d, sdhc_hw_reset -> %d, PROBE 3 sdhc_hw_reset -> %d, "
+	       "PROBE 3 reset-restores-config -> %s). This board does not enable the card "
+	       "path -- see the file header\n",
 	       cmd0a_rc,
 	       cmd0b_rc,
 	       hwreset2_rc,
-	       reset_restored_config ? "MATCH" : "MISMATCH");
+	       hwreset3_rc,
+	       hwreset3_rc != 0 ? "INCONCLUSIVE" : (reset_restored_config ? "MATCH" : "MISMATCH"));
 	printf("[sd] done\n");
 	return 0;
 }

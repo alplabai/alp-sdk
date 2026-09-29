@@ -89,18 +89,20 @@ without a second app to maintain:
    Captures the seven registers `sdhc_dwc_set_def_config()` programs at
    init (`NORMAL_INT_STAT_EN`, `ERROR_INT_STAT_EN`, `NORMAL_INT_SIGNAL_EN`,
    `ERROR_INT_SIGNAL_EN`, `HOST_CTRL2`, `PWR_CTRL`, `CLK_CTRL_R`) into a
-   `struct sdhc_reset_regs` (`src/sdhc_reset_capture.h`), calls
-   `sdhc_hw_reset()`, captures the same set again, prints both, and prints
-   MATCH/MISMATCH. `sdhc_dwc_reset()` (the driver's `.reset` entry point) is
-   `sdhc_dwc_hw_reset(dev, SW_RST_ALL)` and nothing else — it never re-calls
-   `sdhc_dwc_set_def_config()` — so a MISMATCH is the expected reading of
-   today's code; this app measures, it does not assert an outcome. **This
-   capture has not been run on silicon as of this head** — it produces the
-   evidence #2181 asks for the next time this app runs on the
-   reworked-mux carrier; see the issue for the bench-side traps (`ram-run.sh`
-   truncating output, rc=0 on HardFault, `DCRSR`/`DCRDR` needing a halted
-   core). The comparison logic itself (`sdhc_reset_regs_equal()`) is
-   host-tested without hardware in `tests/unit/sdhc_reset_regs_compare/`.
+   `struct sdhc_reset_regs` (`src/sdhc_reset_capture.h`) at `main()` entry,
+   before any reset call, then calls `sdhc_hw_reset()`, captures the same
+   set again, prints both, and prints MATCH/MISMATCH. `sdhc_dwc_reset()`
+   (the driver's `.reset` entry point) issues `SW_RST_ALL` and then, as of
+   #2122, unconditionally re-calls `sdhc_dwc_set_def_config()` — so a
+   MATCH is the expected reading of today's code; this app measures, it
+   does not assert an outcome, and a MISMATCH would be the unexpected
+   result worth chasing. **This capture has not been run on silicon as of
+   this head** — it produces the evidence #2181 asks for the next time
+   this app runs on the reworked-mux carrier; see the issue for the
+   bench-side traps (`ram-run.sh` truncating output, rc=0 on HardFault,
+   `DCRSR`/`DCRDR` needing a halted core). The comparison logic itself
+   (`sdhc_reset_regs_equal()`) is host-tested without hardware in
+   `tests/unit/sdhc_reset_regs_compare/`.
 
 **Still read-only by construction** — no `CONFIG_FILE_SYSTEM`, no `fs_*`
 call, no `disk_access_write`, no `mkfs` anywhere in this app; none of that

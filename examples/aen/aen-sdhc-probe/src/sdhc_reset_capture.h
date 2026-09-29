@@ -8,12 +8,16 @@
  * init, or does the bare SW_RST_ALL it issues leave those registers at
  * their post-reset silicon defaults?
  *
- * sdhc_dwc_reset() (zephyr/drivers/sdhc/sdhc_dwc.c) is
- * `sdhc_dwc_hw_reset(dev, DWC_SDHC_SW_RST_ALL_Msk)` and NOTHING else -- it
- * never calls sdhc_dwc_set_def_config() a second time. Whether the seven
- * registers #2181 names survive SW_RST_ALL unchanged is exactly what is
- * unmeasured. This header only captures and compares; it draws no
- * conclusion a bench run hasn't produced.
+ * sdhc_dwc_reset() (this repo's zephyr/drivers/sdhc/sdhc_dwc.c, the ALP-SDK
+ * delta over upstream) issues `sdhc_dwc_hw_reset(dev,
+ * DWC_SDHC_SW_RST_ALL_Msk)` and then, as of #2122, re-calls
+ * sdhc_dwc_set_def_config() unconditionally -- even on a reset timeout --
+ * so a MATCH is the expected reading of today's code. What #2122 fixed is
+ * the register-programming half; whether that re-programming actually
+ * lands and survives on real silicon (register write ordering, timing,
+ * clock-gate races the source can't show) is exactly what is unmeasured.
+ * This header only captures and compares; it draws no conclusion a bench
+ * run hasn't produced.
  *
  * Split in two on purpose:
  *   - sdhc_reset_capture()    reads real silicon (sys_read32) -- lives in
