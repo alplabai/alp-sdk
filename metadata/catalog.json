@@ -295,7 +295,7 @@
         ],
         "path": "examples/aen/aen-secure-element-sign",
         "som": "E1M-AEN801",
-        "summary": "Probe the OPTIGA Trust M on the E1M-AEN's **BRD_I2C** and confirm the current probe-only driver contract. The driver reads I2C_STATE to prove the part is reachable; product-info and raw-APDU helpers return `ALP_ERR_NOSUPPORT` until the Infineon host-library transport is integrated."
+        "summary": "Probe the OPTIGA Trust M on the E1M-AEN's **BRD_I2C** and read its Coprocessor UID. The driver runs Infineon's host library (`vendors/optiga-trust-m`) through a PAL on the portable `<alp/*>` I2C and timing calls. Nothing here writes to the chip."
       },
       {
         "board": "e1m-evk",
@@ -3194,7 +3194,7 @@
         ],
         "path": "examples/v2n/v2n-secure-element-sign",
         "som": "E1M-V2N101",
-        "summary": "Probe the OPTIGA Trust M on V2N's BRD_I2C and confirm the current probe-only driver contract, from a Linux/Yocto user-space app on the V2N Cortex-A55 cluster. The driver reads I2C_STATE to prove the part is reachable; product-info and raw-APDU helpers return `ALP_ERR_NOSUPPORT` until the Infineon host-library transport is integrated."
+        "summary": "Talk to the OPTIGA Trust M on V2N's BRD_I2C from a Linux/Yocto user-space app on the V2N Cortex-A55 cluster: probe it, read its Coprocessor UID, and run a raw APDU session. The driver runs Infineon's host library (`vendors/optiga-trust-m`) through a PAL on the portable `<alp/peripheral.h>` I2C and timing calls. Nothing here writes to the chip."
       },
       {
         "board": "e1m-x-evk",

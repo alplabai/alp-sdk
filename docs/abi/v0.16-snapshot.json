@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-28",
+  "generated": "2026-09-29",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -6073,24 +6073,34 @@
       },
       "typedefs": {
         "optiga_trust_m_product_info_t": {
-          "definition": "typedef struct { uint8_t chip_type[6]; uint8_t fw_id[2]; uint8_t fw_build[2]; uint8_t reserved[10]; } optiga_trust_m_product_info_t;",
+          "definition": "typedef struct { uint8_t cim_id; uint8_t platform_id; uint8_t model_id; uint8_t rom_mask_id[2]; uint8_t chip_type[6]; uint8_t batch_num[6]; uint8_t x_coord[2]; uint8_t y_coord[2]; uint8_t fw_id[4]; uint8_t esw_build[2]; } optiga_trust_m_product_info_t;",
           "fields": [
+            "uint8_t cim_id",
+            "uint8_t platform_id",
+            "uint8_t model_id",
+            "uint8_t rom_mask_id[2]",
             "uint8_t chip_type[6]",
-            "uint8_t fw_id[2]",
-            "uint8_t fw_build[2]",
-            "uint8_t reserved[10]"
+            "uint8_t batch_num[6]",
+            "uint8_t x_coord[2]",
+            "uint8_t y_coord[2]",
+            "uint8_t fw_id[4]",
+            "uint8_t esw_build[2]"
           ],
-          "hash": "2b508522f267b6da",
+          "hash": "aa7842828da2490b",
           "kind": "struct"
         },
         "optiga_trust_m_t": {
-          "definition": "typedef struct { bool initialised; alp_i2c_t *bus; uint8_t addr; } optiga_trust_m_t;",
+          "definition": "typedef struct { bool initialised; alp_i2c_t *bus; uint8_t addr; void *util; void *comms; uint8_t session; volatile uint16_t op_status; } optiga_trust_m_t;",
           "fields": [
             "bool initialised",
             "alp_i2c_t *bus",
-            "uint8_t addr"
+            "uint8_t addr",
+            "void *util",
+            "void *comms",
+            "uint8_t session",
+            "volatile uint16_t op_status"
           ],
-          "hash": "3ae697d26ef83eb9",
+          "hash": "aaaf1bc9d17de9da",
           "kind": "struct"
         }
       },

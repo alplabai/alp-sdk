@@ -20,9 +20,9 @@ on:
     branches: [main, dev]
   # A queued PR waits on the branch's required contexts, and GitHub raises
   # `merge_group` -- not `push` or `pull_request` -- for a merge-queue entry.
-  # Four of `dev`'s five required contexts come from this file
-  # (`twister-shard 1/4` .. `4/4`), so without this trigger a queued PR would
-  # wait on checks that can never fire (#1415). Neither job here is gated to
+  # `dev`'s and `main`'s required twister context is the aggregator
+  # `twister · native_sim/native/64` from this file, so without this trigger
+  # a queued PR would wait on a check that can never fire (#1415). Neither job here is gated to
   # `pull_request`: `twister-shard` carries no job-level `if:` and `twister`
   # carries `if: always()` -- read, not assumed.
   merge_group:
@@ -35,10 +35,10 @@ concurrency:
 
 jobs:
   twister-shard:
-    # NB: this job's checks (`twister-shard 1/4` ...) are NOT the
+    # NB: this job's checks (`twister-shard 1/6` ...) are NOT the
     # required context -- the aggregator `twister` job below is.  The
     # shard count can change here without touching branch protection.
-    name: twister-shard ${{ matrix.shard }}/4
+    name: twister-shard ${{ matrix.shard }}/6
     runs-on: ubuntu-latest
 
     # #1319: this job carried NO timeout-minutes at all -- neither
@@ -74,7 +74,7 @@ jobs:
       # doesn't mask failures in the other shards.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6]
 
     # We deliberately do NOT use the zephyrprojectrtos/ci docker
     # image here.  The image bundles Zephyr SDK 1.0.1 (~17 GB on disk
@@ -90,7 +90,7 @@ jobs:
       ZEPHYR_TOOLCHAIN_VARIANT: host
       # ccache is content-addressed; persisting it across runs turns
       # the per-shard cold builds warm.  Each shard caches its own
-      # objects (the `--subset i/4` partition is deterministic, so a
+      # objects (the `--subset i/6` partition is deterministic, so a
       # shard rebuilds the same suites run-to-run -> high hit rate).
       CCACHE_DIR: ${{ github.workspace }}/.ccache
 
@@ -282,11 +282,11 @@ jobs:
       # stall (that misattribution is what #1274 was filed about).
       # Warm-ccache runs cluster at 300-470s; cold ones at 800-1210s.
       # Worst SUCCESSFUL run across the 128-shard-job sample was 1210s
-      # (20m10s, shard 3/4).  45min = 2700s = 2.23x that, matching the
+      # (20m10s, shard 3/4 in the old 4-shard split).  45min = 2700s = 2.23x that, matching the
       # precedent's headroom ratio and leaving room for the suite to
       # grow with every new example -- it is a ceiling that makes a hang
       # legible under this step's own name, not a performance target.
-      - name: twister · run shard ${{ matrix.shard }}/4 on native_sim/native/64
+      - name: twister · run shard ${{ matrix.shard }}/6 on native_sim/native/64
         working-directory: ${{ github.workspace }}/zephyrproject
         timeout-minutes: 45
         env:
@@ -297,16 +297,18 @@ jobs:
           # of the ${{ github.workspace }} expansion which the runner
           # may render as a host path on container jobs.
           #
-          # --subset i/4 deterministically partitions the SAME suite
-          # list across the 4 shards; their union == a single full run,
-          # so no test is dropped (coverage unchanged, ~4x faster wall).
+          # --subset i/6 deterministically partitions the SAME suite
+          # list across the 6 shards; their union == a single full run,
+          # so no test is dropped (coverage unchanged).  #2429: 4 shards
+          # ran 12-25 min each (the partition splits by suite count, not
+          # time); 6 shortens the long pole on the dev merge queue.
           python3 zephyr/scripts/twister \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/tests/unit" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/tests/zephyr" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/tests/console" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples" \
             -p native_sim/native/64 \
-            --subset ${{ matrix.shard }}/4 \
+            --subset ${{ matrix.shard }}/6 \
             --inline-logs \
             --no-detailed-test-id
 
@@ -476,7 +478,7 @@ jobs:
       # job (moved out in PR review on #1212): this job's Zephyr pin
       # (`--mr v4.4.1` above) is the FULL twister oracle -- any future
       # bump that happens to touch dts/arm/renesas/rz/rzv/r9a09g056.dtsi
-      # would make `--check` go STALE here, failing `twister-shard 1/4`,
+      # would make `--check` go STALE here, failing `twister-shard 1/6`,
       # which fails the required aggregator `twister ·
       # native_sim/native/64` and blocks every PR to `dev`, not just V2N
       # ones, under a context name that says nothing about metadata. See

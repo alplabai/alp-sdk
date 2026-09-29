@@ -221,6 +221,9 @@
 		compatible = "audio-graph-card2";
 		label = "e1m-x-evk-tas2563";
 		links = <&sound_multi_cpu>;
+		/* Off until playback moves to SSI2's data line (#2331): see
+		 * &rcar_sound below. */
+		status = "disabled";
 
 		multi {
 			#address-cells = <1>;
@@ -287,12 +290,17 @@
  * therefore drives the amps' SDOUT net, not their SDIN: no audio, and the
  * SoC and the amps' IV-sense transmit can contend on that net. The fix is
  * playback on SSI2's data line with SSI1's SCK/WS, which the BSP rsnd
- * driver's pin sharing (SSI0-parent only) does not cover yet. Do not run
- * playback on this card until it lands. */
+ * driver's pin sharing (SSI0-parent only) does not cover yet.
+ *
+ * Until it does, the SSI block and the sound card above are disabled, so
+ * no ALSA card exists and sound_pins is never applied: P44/P45/P46 stay
+ * at their reset state and nothing on the SoC side can drive the amps'
+ * SDOUT net. The TAS2563 codec nodes below still probe over I2C0. To
+ * re-enable, fix the data line first, then set both nodes to "okay". */
 &rcar_sound {
 	pinctrl-0 = <&sound_pins>;
 	pinctrl-names = "default";
-	status = "okay";
+	status = "disabled";
 
 	#sound-dai-cells = <1>;
 

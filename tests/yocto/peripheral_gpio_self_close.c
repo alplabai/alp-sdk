@@ -217,9 +217,84 @@ static void test_cross_pin_close_from_callback_no_deadlock(void)
 	(void)close(pipe_b[1]);
 }
 
+/* ------------------------------------------------------------------ */
+/* 3. Issue #1962: a torn-down/invalid line_fd disables just that      */
+/*    slot instead of hot-spinning the shared dispatcher forever.      */
+/* ------------------------------------------------------------------ */
+
+static atomic_int g_torn_cb_called;
+
+static void torn_cb(alp_gpio_t *pin, void *user)
+{
+	(void)pin;
+	(void)user;
+	/* Never expected to fire -- a torn-down line_fd is never readable,
+     * it's an error condition.  Recorded on an atomic instead of an
+     * ALP_ASSERT_* call because this would run on the dispatcher
+     * thread, racing the main thread's own unsynchronised assertion
+     * counters (same reasoning as this file's self_close_cb()). */
+	atomic_store(&g_torn_cb_called, 1);
+}
+
+/* Bounded poll for the dispatcher clearing irq_enabled on `pin` --
+ * this file's stand-in for "the fix actually ran", since the error
+ * path fires no callback to wait on. */
+static bool wait_until_irq_disabled(struct alp_gpio *pin, int timeout_ms)
+{
+	int waited_ms = 0;
+	while (waited_ms < timeout_ms) {
+		pthread_mutex_lock(&g_irq.mu);
+		bool disabled = !pin->irq_enabled;
+		pthread_mutex_unlock(&g_irq.mu);
+		if (disabled) {
+			return true;
+		}
+		sleep_ms(1);
+		++waited_ms;
+	}
+	return false;
+}
+
+static void test_torn_down_line_fd_disables_slot_instead_of_spinning(void)
+{
+	reset_fixture();
+	atomic_store(&g_torn_cb_called, 0);
+
+	int              pipe_fds[2];
+	struct alp_gpio *pin = open_fake_pin(pipe_fds);
+	ALP_ASSERT_TRUE(pin != NULL);
+
+	ALP_ASSERT_EQ_INT(alp_gpio_irq_enable(pin, ALP_GPIO_EDGE_RISING, torn_cb, NULL), ALP_OK);
+
+	/* Tear the line_fd down out from under the dispatcher WITHOUT going
+     * through alp_gpio_close()/alp_gpio_irq_disable() -- the shape of a
+     * real gpiochip hot-removal, not an app-initiated close.  The next
+     * poll() on this now-closed read-end fd returns a POSITIVE rc with
+     * POLLNVAL set in revents (issue #1962's "torn down or invalid
+     * fd"), never POLLIN, so the pre-fix code's
+     * `!(fds[i].revents & POLLIN)` guard just `continue`s straight back
+     * into another immediate-return poll() -- a hot spin that leaves
+     * irq_enabled stuck true forever, which is the signal this test
+     * waits on below. */
+	ALP_ASSERT_EQ_INT(close(pipe_fds[0]), 0);
+
+	/* Pre-#1962 fix: this never fires within TEST_TIMEOUT_MS -- the
+     * shared dispatcher spins poll() at 100% of a core forever instead
+     * of ever disabling the slot. */
+	ALP_ASSERT_TRUE(wait_until_irq_disabled(pin, TEST_TIMEOUT_MS));
+	ALP_ASSERT_TRUE(atomic_load(&g_torn_cb_called) == 0);
+
+	pthread_mutex_lock(&g_irq.mu);
+	pin->line_fd = -1; /* already closed above; avoid pool_release() double-closing it */
+	pthread_mutex_unlock(&g_irq.mu);
+	pool_release(pin);
+	(void)close(pipe_fds[1]);
+}
+
 int main(void)
 {
 	test_self_close_from_callback_no_deadlock();
 	test_cross_pin_close_from_callback_no_deadlock();
+	test_torn_down_line_fd_disables_slot_instead_of_spinning();
 	ALP_TEST_SUMMARY();
 }

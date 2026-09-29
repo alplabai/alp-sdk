@@ -16,3 +16,30 @@
 # bbappend: :remove would also strip the recipe's own :append entries,
 # and listing a package twice is a packaging error.)
 FILES:${PN}:remove = "${bindir}/*"
+
+# #2398: run DX-M1 clients through the dxrtd service.  dx-rt_3.2.0.bb
+# builds -DUSE_SERVICE=OFF, so two processes using the DX-M1 at once
+# hang (no daemon arbitrates the device) and a client killed mid-request
+# wedges the NPU until reboot.  Build the client library in service mode
+# and start dxrtd at boot.  Upstream's dx-rt_3.2.0-1.bb does the same
+# but ships only a SysV init script (its dxrt.service is commented out);
+# this image runs systemd, so install upstream's unit instead.  The
+# PREFERRED_VERSION pin in e1m-v2m-deepx.inc stays on 3.2.0 (firmware
+# lockstep).  Limit on dx-rt 3.2.0 even with dxrtd: processes sharing
+# one DX-M1 must use the same NPU core set (see <alp/ext/deepx/inference.h>).
+EXTRA_OECMAKE:remove = "-DUSE_SERVICE=OFF"
+EXTRA_OECMAKE += "-DUSE_SERVICE=ON"
+
+inherit systemd
+
+SRC_URI += "file://dxrt.service"
+
+SYSTEMD_PACKAGES = "${PN}-cli"
+SYSTEMD_SERVICE:${PN}-cli = "dxrt.service"
+SYSTEMD_AUTO_ENABLE:${PN}-cli = "enable"
+
+do_install:append() {
+	install -Dm 0644 ${WORKDIR}/dxrt.service ${D}${systemd_system_unitdir}/dxrt.service
+}
+
+FILES:${PN}-cli += "${systemd_system_unitdir}/dxrt.service"

@@ -63,7 +63,8 @@ KERNEL_MODULE_AUTOLOAD:append = "${@' dx_dma dxrt_driver' if d.getVar('ALP_ENABL
 # mismatch on-target.
 #
 # "3.2.0" deliberately selects the dx-rt_3.2.0.bb recipe, not the
-# dx-rt_3.2.0-1.bb USE_SERVICE variant: BitBake splits a PREFERRED_VERSION
+# dx-rt_3.2.0-1.bb USE_SERVICE variant (the dxrtd service mode is enabled
+# on 3.2.0 by meta-alp-sdk's dx-rt_%.bbappend instead, #2398): BitBake splits a PREFERRED_VERSION
 # containing "-" into PV-PR, so a value of "3.2.0-1" would try to match
 # PV "3.2.0" at PR "1" -- it would NOT select the recipe literally named
 # dx-rt_3.2.0-1.bb.  Leave the trailing "-1" off on purpose.

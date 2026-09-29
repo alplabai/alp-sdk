@@ -261,13 +261,12 @@ config ALP_SDK_CHIP_OPTIGA_TRUST_M
 	bool "Infineon OPTIGA Trust M secure element (SLS32AIA010)"
 	depends on I2C
 	help
-	  Compile chips/optiga_trust_m/optiga_trust_m.c.  Hardware
-	  security IC with ECC / RSA / AES / SHA-256 / TRNG and
-	  10 KB secure NVM.  v0.3 ships a thin driver covering
-	  init + I2C connectivity-probe; full APDU command set
-	  lands in v0.3.x via Infineon's host library, registered
-	  with MbedTLS PSA so <alp/security.h> picks up HW
-	  acceleration transparently.
+	  Compile chips/optiga_trust_m/optiga_trust_m.c and the
+	  vendored Infineon host library it runs on
+	  (vendors/optiga-trust-m).  Hardware security IC with ECC /
+	  RSA / AES / SHA-256 / TRNG and 10 KB secure NVM.  The driver
+	  probes the part, reads its Coprocessor UID and runs raw APDU
+	  sessions; the library allocates its instances with malloc().
 
 config ALP_SDK_CHIP_EEPROM_24C128
 	bool "Generic 24Cxx-class 128-Kbit I2C EEPROM"
