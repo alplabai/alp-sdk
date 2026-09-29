@@ -131,7 +131,7 @@ alp_status_t deepx_dxm1_set_reset_polarity(deepx_dxm1_t *ctx, deepx_dxm1_reset_p
  * Post-conditions:
  *   - M1_RESET is in the "run" state.
  *   - PCIe muxes are routing to DEEPX.
- *   - Linux kernel driver can attempt `dxrt_init()` after the boot
+ *   - Linux kernel driver can open `/dev/dxrt0` (`dxrt::InferenceEngine` construction) after the boot
  *     delay has elapsed.
  *
  * @param ctx      DEEPX DX-M1 sequencer context (must be initialised first).

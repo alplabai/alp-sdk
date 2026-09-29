@@ -151,10 +151,11 @@ If the SoM is running Yocto with the `meta-deepx-m1` layer wired
 into `e1m-v2m101-a55.conf`:
 
 * `dx_rt_npu_linux_driver` opens the PCIe device at `lspci`-time.
-* `dxrt_init()` from user-space succeeds; load a `.dxnn` model
+* constructing a `dxrt::InferenceEngine` from user-space succeeds (it
+  opens `/dev/dxrt0`; `dxrt.service` must be running); load a `.dxnn` model
   and run inferences.
 
-If the kernel comes up but `dxrt_init()` returns an error, see the
+If the kernel comes up but `dxrt::InferenceEngine` construction fails, see the
 upstream DEEPX troubleshooting docs at
 [`github.com/DEEPX-AI/dx_rt`](https://github.com/DEEPX-AI/dx_rt).
 
@@ -176,7 +177,8 @@ After every change in the bring-up flow, re-run these in order:
 3. DA9292 CH2 in regulation: `da9292_get_status().ch2_pg == true`.
 4. Three DEEPX TPS628640 instances ACK at their addresses.
 5. `lspci` lists the DEEPX device.
-6. `dxrt_init()` returns success.
+6. `dxrt::InferenceEngine` construction succeeds (`/dev/dxrt0` opens with
+   `dxrt.service` running).
 7. A reference `dx_app` inference runs to completion.
 
 ## Common gotchas
