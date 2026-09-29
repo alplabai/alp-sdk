@@ -36,7 +36,7 @@ over `linter.scan(...)`:
 
 `.github/workflows/cross-platform-zephyr.yml`'s step comment no longer says
 IMPLICIT-ENCODING warnings "still exit 0, being grandfathered":
-`.github/workflows/cross-platform-zephyr.yml:122` ("the step now fails on any finding,").
+`.github/workflows/cross-platform-zephyr.yml:135` ("the step now fails on any finding,").
 `docs/cross-platform-setup.md` §6.2 is rewritten to match, against a live run
 of the script: `docs/cross-platform-setup.md:681`
 ("check_cross_platform: 0 finding(s)"). ADR 0012's already-merged #2195
