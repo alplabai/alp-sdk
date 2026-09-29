@@ -119,7 +119,7 @@ The blocking CI check runs in its OWN job,
 `.github/workflows/pr-metadata-peripheral-instances.yml` -- deliberately
 NOT a step in `pr-twister.yml` (moved out in PR review on #1212): that
 job's Zephyr pin is the full twister oracle, so a future bump touching
-`r9a09g056.dtsi` would fail the required `twister-shard 1/4` ->
+`r9a09g056.dtsi` would fail the required `twister-shard 1/6` ->
 `twister · native_sim/native/64` aggregator and block every PR to `dev`,
 not only V2N ones, under a context name that says nothing about
 metadata. The dedicated job sparse-checks-out just the one DTSI file at

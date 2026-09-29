@@ -29,11 +29,22 @@ the private repository.
    that differs is recorded as an override.
 3. **Secure Data Page: write + verify now, lock later.** `run --lock` is a
    separate invocation behind the preconditions below.
-4. **Known power-chip defect units are bench-only.** When the ACT88760
-   register `0x10` reads its known-bad value, the tool applies the volatile
-   workaround, records `act88760_gpio4_defect: yes` (never downgraded by a
-   later run), defaults `disposition` to `bench-only`, and the ship check
-   refuses the unit. The tool never sets a shippable disposition.
+4. **An ACT88760 GPIO4 OTP of `0x88` is an early-unit condition with a known
+   workaround, not a defect.** Most units' factory OTP already holds register
+   `0x10` at `0x08`; a few early units (e.g. E1M-V2M103 2026W38-0001) have OTP
+   `0x88`, which holds GD32_NRST in reset until released (maintainer decision
+   2026-09-29). U-Boot's `board_late_init` releases it every boot (a no-op on
+   an already-`0x08` unit). When the tool itself still finds `0x10 == 0x88`
+   (`census`, `gd32_flash`), it applies the same volatile release (`0x10 =
+   0x08`, lost at power-off) and records how the release happened in
+   `act88760_gpio4_workaround`: `none` (OTP already `0x08`), `u-boot` (an
+   0x88-OTP unit U-Boot released on its own by the last cold boot), or
+   `provision (volatile 0x08)` (the tool had to release it). `cold_boot_test`
+   re-reads `0x10` after every cold boot and records
+   `act88760_gpio4_after_boot`; the ship check refuses a unit only when that
+   read is still `0x88` -- i.e. the shipped image did not release the GD32 on
+   its own. A legacy `act88760_gpio4_defect: yes` key from before this
+   decision is informational only and no longer blocks shipping.
 
 ## Commands
 
@@ -86,7 +97,7 @@ walks the steps in order: probe; `Satisfied` → skip; otherwise run and
 (operator steps, `bootstrap` and `cold_boot_test`, whose result cannot be
 observed right away, count as done after a clean run). The first failure
 stops the run, but **`record` still runs**, so what was learnt (the census,
-a defect) reaches the ledger.
+a GPIO4 workaround applied) reaches the ledger.
 
 Progress is kept in `ledger/<SKU>/<serial>.state.json` in the private
 ledger: per-step status and evidence, the tool revision, the bundle
@@ -110,12 +121,12 @@ state recorded against a **different bundle or tool revision** is moved to
 | `write_rootfs` | stream the wic into the eMMC user area (refused while Linux runs from the eMMC), `fsck -n`, `/boot/<dtb>` present |
 | `census` | read-only: every auto ledger key the unit can provide |
 | `eeprom_manifest` | preconditions, 128-byte manifest in 8 × 16-byte page writes at `0x50`, readback, cold cycle, re-read; only then the staged blob is promoted to `<serial>.manifest.bin` |
-| `gd32_flash` | DP-ID gate (`0x0BE12477` only), `loadbin` × 3, verify with `savebin` in fresh probe sessions, bridge ACK at `0x70` |
+| `gd32_flash` | applies the ACT88760 GPIO4 volatile release if still at the OTP default, DP-ID gate (`0x0BE12477` only), `loadbin` × 3, verify with `savebin` in fresh probe sessions, bridge ACK at `0x70` |
 | `dxm1_npu_flash` | `v2n-m1` only, **skipped by default** (`--enable-dxm1-flash`): DX-M1 SPI-NAND over the UART recovery path. **BENCH-PENDING** -- see below |
 | `pmic_verify` | compare registers against `--pmic-expect` |
 | `secure_page` | write the 64-byte Secure Data Page, read back, compare. Never locks |
 | `dsw1_xspi_remove_sd` | operator: boot switch to xSPI, remove the microSD |
-| `cold_boot_test` | `--cold-cycles N`: clean BL2, DRAM tier, rail line (`v2n-m1`), login, `SYS_LSI_MODE`, I2C scans |
+| `cold_boot_test` | `--cold-cycles N`: clean BL2, DRAM tier, rail line (`v2n-m1`), login, `SYS_LSI_MODE`, ACT88760 reg `0x10` after boot, I2C scans (GD32 exempted only while `0x10` still reads `0x88`) |
 | `clkgen_verify` | the on-SoM 5L35023B (`BRD_I2C`, `0x69`) OTP image against U-Boot's fixup |
 | `hil_smoke` | optional `tests/hil/run_smoke.py` |
 | `record` | merge auto keys into `<serial>.unit.yaml` (manual keys never touched), append `<serial>.md`, logs, xlsx, ship check |
@@ -234,9 +245,10 @@ dxm1:
 All must hold: `secure_page` and `cold_boot_test` done for this bundle;
 `<serial>.manifest.bin` committed and byte-equal to the array; the Secure
 Data Page re-read equals `<serial>.secure-page.staged.bin`; Lock Status
-bit 1 clear; the unit passes the ledger ship check (disposition `ship`, no
-defect, no override, not a `--build-dir` unit); and the operator retypes the
-serial. After the lock frame, only a re-read with bit 1 set counts.
+bit 1 clear; the unit passes the ledger ship check (disposition `ship`, GD32
+released on its own by the last cold boot, no known defects, no override,
+not a `--build-dir` unit); and the operator retypes the serial. After the
+lock frame, only a re-read with bit 1 set counts.
 
 ## Hazards
 

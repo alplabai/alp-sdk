@@ -171,7 +171,12 @@ class Ctx:
         return self.bench
 
     def need_linux(self):
-        """The Linux target, or None in a dry run without one (plan only)."""
+        """The Linux target, or None in a dry run without one (plan only).
+        Like linux_up(), attach the bench's configured host when an --only /
+        --from / --force-step run starts past the step that normally
+        attaches it, instead of refusing a board that is already up."""
+        if self.linux is None and self.bench is not None and self.bench.linux_host:
+            self.linux = lt.LinuxTarget(self.bench.linux_host, self.bench.linux_user)
         if self.linux is None and self.execute:
             raise Refused("no Linux target: boot_sd_linux has not run")
         return self.linux
@@ -750,10 +755,19 @@ class Census(Step):
         facts, notes = lt.census(t, bus, sizes)
         if bus["pmic"] is not None:
             try:
-                if lt.act88760_gpio4_defect(t, bus["pmic"]):
-                    facts["act88760_gpio4_defect"] = "yes"   # "no" is never inferred from a live read
+                # The value seen before any release: most production units'
+                # OTP is already 0x08 (fixed); only some early units (e.g.
+                # E1M-V2M103 2026W38-0001) still carry OTP 0x88 and need the
+                # GD32_NRST release workaround. A 0x08 seen here is already
+                # conclusive (no release has happened yet -- census runs
+                # before gd32_flash); "u-boot" is decided later, from
+                # cold_boot_test's own post-cold-cycle read.
+                raw = lt.i2c_get(t, bus["pmic"], lt.ACT88760_ADDR, lt.ACT88760_GPIO_REG)
+                facts["act88760_gpio4_otp"] = f"{raw:#04x}"
+                if raw == lt.ACT88760_GPIO4_RELEASED:
+                    facts["act88760_gpio4_workaround"] = "none"
             except BenchError as e:
-                notes.append(f"act88760_gpio4_defect: {e}")
+                notes.append(f"act88760_gpio4_otp: {e}")
         ctx.step_logs[self.name] = "\n".join(notes)
         return self.result(ctx, f"{len(facts)} keys" + (f"; unread: {'; '.join(notes)}" if notes else ""),
                            facts, status="done")
@@ -872,9 +886,9 @@ class Gd32Flash(Step):
         t = ctx.need_linux()
         if t is not None:
             pmic = ctx.i2c("pmic")
-            if lt.act88760_gpio4_defect(t, pmic):
-                ev["act88760_gpio4_defect"] = "yes"
-                ev["act88760_gpio4_workaround"] = "volatile 0x08"
+            if lt.act88760_gpio4_held(t, pmic):
+                ev["act88760_gpio4_otp"] = f"{lt.ACT88760_GPIO4_OTP_DEFAULT:#04x}"
+                ev["act88760_gpio4_workaround"] = "provision (volatile 0x08)"
                 ctx.mutate("ACT88760 0x25 reg 0x10 = 0x08 (volatile GPIO4 / GD32_NRST release)",
                            lambda: lt.act88760_gpio4_release(t, pmic))
         b = ctx.need_bench()
@@ -994,7 +1008,10 @@ class PmicVerify(Step):
         spec = ctx.expected_registers
         if not spec:
             raise Refused("no --pmic-expect (expected-registers) given")
-        defect = ctx.facts.get("act88760_gpio4_defect") == "yes"
+        # census/gd32_flash may have observed reg 0x10 still at the OTP default
+        # (workaround not applied/effective yet, e.g. a dry run) -- that is a
+        # known, already-explained mismatch, not a new failure.
+        otp_default_seen = ctx.facts.get("act88760_gpio4_otp") == f"{lt.ACT88760_GPIO4_OTP_DEFAULT:#04x}"
         bad, notes = [], []
         for dev, d in (spec.get("devices") or {}).items():
             fams = d.get("families")
@@ -1007,8 +1024,9 @@ class PmicVerify(Step):
                 if got & mask == int(r["expect"]) & mask:
                     continue
                 line = f"{dev} {int(d['addr']):#04x} reg {int(r['reg']):#04x} = {got:#04x}, want {int(r['expect']):#04x}"
-                if dev == "act88760" and int(r["reg"]) == lt.ACT88760_GPIO_REG and got == lt.ACT88760_GPIO4_DEFECT and defect:
-                    notes.append(line + " (known GPIO4 defect, recorded by gd32_flash)")
+                if (dev == "act88760" and int(r["reg"]) == lt.ACT88760_GPIO_REG
+                        and got == lt.ACT88760_GPIO4_OTP_DEFAULT and otp_default_seen):
+                    notes.append(line + " (ACT88760 GPIO4 workaround not yet applied; recorded by census/gd32_flash)")
                 else:
                     bad.append(line)
         ctx.step_logs[self.name] = "\n".join(bad + notes)
@@ -1090,22 +1108,55 @@ class ColdBootTest(Step):
             return self.result(ctx, f"would run {n} cold cycles")
         expected = {bus: a for bus, a in lt.expected_i2c(ctx.preset, ctx.bench.i2c_bus).items()
                     if bus is not None}
-        if ctx.facts.get("act88760_gpio4_defect") == "yes":
-            # the volatile release is lost at every power-off: the GD32 stays in reset
-            expected = {bus: a - {GD32_BRIDGE_ADDR} for bus, a in expected.items()}
-            ev["cold_boot_note"] = f"{GD32_BRIDGE_ADDR:#04x} not required: act88760_gpio4_defect recorded"
+        pmic_bus = ctx.i2c("pmic")
         for i in range(1, n + 1):
             text = ctx.mutate(f"cold cycle {i}/{n}", lambda: boot_to_linux(ctx))
             probs = [f"BL2: {e}" for e in uboot.bl2_errors(text)]
-            tier, tev = tier_gate(ctx, uboot.parse_dram_banner(text))
+            mib = uboot.parse_dram_banner(text)
+            tier, tev = tier_gate(ctx, mib)
             if not tier.ok:
                 probs.append(tier.detail)
+            if mib:
+                # boot_sd_linux records these too, but a unit that already
+                # boots from eMMC (phase B only) never runs it (#2301).
+                ev["dram_size_mib"] = str(mib)
+                ev["uboot_dram_banner"] = next(ln.strip() for ln in text.splitlines()
+                                               if ln.startswith("DRAM:"))
             if ctx.family == "v2n-m1" and not uboot.has_rail_pg(text):
                 probs.append(f"no {uboot.RAIL_PG!r}")
             mode = uboot.parse_sys_lsi(text).get("soc_sys_lsi_mode")
             if mode != SYS_LSI_MODE_XSPI:
                 probs.append(f"SYS_LSI_MODE {mode} != {SYS_LSI_MODE_XSPI}")
-            probs += lt.i2c_check(ctx.linux, expected)
+            # ACT88760 reg 0x10 after this (plain, tool-uninvolved) cold boot:
+            # most units' OTP is already 0x08 (production/fixed); an early-OTP
+            # unit (OTP 0x88, e.g. E1M-V2M103 2026W38-0001) needs U-Boot's
+            # board_late_init to release GD32_NRST every boot -- a no-op on a
+            # fixed unit. Only when it is STILL 0x88 here do we exempt the
+            # GD32 bridge from the i2c scan (it legitimately stays in reset).
+            after = lt.i2c_get(ctx.linux, pmic_bus, lt.ACT88760_ADDR, lt.ACT88760_GPIO_REG)
+            ev["act88760_gpio4_after_boot"] = f"{after:#04x}"
+            cycle_expected = expected
+            if after == lt.ACT88760_GPIO4_OTP_DEFAULT:
+                cycle_expected = {bus: a - {GD32_BRIDGE_ADDR} for bus, a in expected.items()}
+                ev["cold_boot_note"] = (f"{GD32_BRIDGE_ADDR:#04x} not required: image did not release "
+                                        "GD32_NRST (ACT88760 reg 0x10 = 0x88)")
+            else:
+                # census/gd32_flash having ever seen 0x88 marks this as an
+                # early-OTP unit; a clean 0x08 here (a plain cold boot, no
+                # provisioning-tool release in it) means U-Boot did it itself.
+                # U-Boot 0011's own console line says which case this boot
+                # was; fall back to what census/gd32_flash saw this run.
+                nrst = uboot.parse_gd32_nrst(text)
+                if nrst == "released":
+                    ev["act88760_gpio4_otp"] = f"{lt.ACT88760_GPIO4_OTP_DEFAULT:#04x}"
+                    ev["act88760_gpio4_workaround"] = "u-boot"
+                elif nrst == "already":
+                    ev["act88760_gpio4_otp"] = f"{lt.ACT88760_GPIO4_RELEASED:#04x}"
+                    ev["act88760_gpio4_workaround"] = "none"
+                else:
+                    otp_seen_88 = ctx.facts.get("act88760_gpio4_otp") == f"{lt.ACT88760_GPIO4_OTP_DEFAULT:#04x}"
+                    ev["act88760_gpio4_workaround"] = "u-boot" if otp_seen_88 else "none"
+            probs += lt.i2c_check(ctx.linux, cycle_expected)
             ev.update(tev)
             ev["soc_sys_lsi_mode"] = mode or ""
             ev["cold_boots_passed"] = f"{i - 1 if probs else i}/{n}"
@@ -1176,17 +1227,22 @@ class Record(Step):
         auto = {k: v for k, v in ctx.facts.items()
                 if (catalogue.get(k, {}).get("mode") == "auto" or k.startswith("test_")) and v != ""}
         before = ledger_out.read_unit_yaml(unit_yaml)
-        if before.get("act88760_gpio4_defect", "").lower() == "yes":   # sticky: never auto-downgraded
-            auto.pop("act88760_gpio4_defect", None)
-            auto.pop("act88760_gpio4_workaround", None)
+        # act88760_gpio4_defect is a legacy key from before the maintainer decision
+        # (2026-09-29) that the ACT88760 GPIO4 OTP default is an expected workaround,
+        # not a defect; the tool no longer writes it, doesn't block on it (see
+        # ledger_out.ship_check) and doesn't hold it sticky -- it is informational
+        # only, noted below.
+        legacy_defect = before.get("act88760_gpio4_defect", "").strip().lower() == "yes"
         merged = {**before, **auto}
-        bench_only = (merged.get("act88760_gpio4_defect", "").lower() == "yes"
-                      or merged.get("rootfs_bundle_version", "").startswith("build-dir:"))
+        bench_only = merged.get("rootfs_bundle_version", "").startswith("build-dir:")
         defaults = {"disposition": "bench-only"} if bench_only else {}
         would = [k for k, v in auto.items() if before.get(k) != str(v)] + [k for k in defaults if k not in before]
         changed = ctx.mutate(f"merge {len(would)} key(s) into {unit_yaml.name}: {', '.join(would)}",
                              lambda: ledger_out.merge_unit_yaml(unit_yaml, auto, catalogue, defaults))
         body = "\n".join(f"- `{k}`: {v}" for k, v in sorted(auto.items()))
+        if legacy_defect:
+            body += ("\n- `act88760_gpio4_defect` (legacy `yes`): informational only, no longer "
+                     "ship-blocking; see `act88760_gpio4_workaround` / `act88760_gpio4_after_boot`")
         who = f"by {ctx.by}" + (f" at {ctx.station}" if ctx.station else "")
         ctx.mutate(f"append a dated section to {ctx.serial}.md",
                    lambda: ledger_out.append_md_section(ctx.unit_dir / f"{ctx.serial}.md",
@@ -1381,8 +1437,9 @@ def run_steps(ctx: Ctx, only: list[str] | None = None, start: str | None = None,
                 "status": res.status, "at": _now(), "detail": res.detail, "evidence": res.evidence}
             save_state(ctx.state_path, ctx.state)
         if res.status == "failed":
-            # Record still runs: facts learnt so far (a defect, the census)
-            # must reach the ledger even when a later step stops the run.
+            # Record still runs: facts learnt so far (the census, a
+            # workaround applied) must reach the ledger even when a later
+            # step stops the run.
             if Record in selected and cls is not Record:
                 results.append(run_one(Record(), ctx))
             break

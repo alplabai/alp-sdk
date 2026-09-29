@@ -35,7 +35,7 @@ pads:
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "DA9292_TW", silicon_pad: "P36" }
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", core: "a55", silicon_peripheral: "DEEPX_CORE_0P75_EN", silicon_pad: "P64" }
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", core: "a55", silicon_peripheral: "DEEPX_PWR_EN_REQ", silicon_pad: "P65" }
-  - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "eMMC_V_SEL", silicon_pad: "PA0" }
+  - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", core: "a55", silicon_peripheral: "eMMC_V_SEL", silicon_pad: "PA0" }
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "ET0_MDC", silicon_pad: "K27" }
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "ET0_MDIO", silicon_pad: "J29" }
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "ET0_PHY_INTR", silicon_pad: "M27" }

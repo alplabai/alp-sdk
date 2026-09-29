@@ -1224,7 +1224,14 @@ bounded run of `STATUS_BUSY` right after an OTA reset committing a
 trial-capable image (firmware release >= 0.2.14, a separate axis from
 this wire-protocol version — see §10); a host that already treats
 `STATUS_BUSY` as retryable (as `gd32g553_init()` now does) sees no
-behaviour change beyond that widened retry window.
+behaviour change beyond that widened retry window.  **v0.14**
+(gh#101) widens `OTA_GET_STATE`'s reply 5 -> 6 bytes, appending the
+`err` cause byte documented above (§10) -- additive per the
+opcode-derived-length rule, so a host below
+`GD32G553_OTA_ERR_MIN_PROTOCOL_MINOR` (14) keeps working unchanged and
+simply never learns the 6th byte exists. `GET_VERSION`'s SPI reply
+for `0.14.0` is `A5 00 00 0E 00 30 3B` (same field layout as v0.11's
+vector above; recompute from the algorithm rather than hand-copying).
 
 ## 9. Reference vectors
 
@@ -1280,7 +1287,7 @@ firmware in `gd32-bridge-firmware:src/ota.c`):
 | `0xF2` | `OTA_VERIFY` | _empty_ | `computed_crc32:u32 verified:u8` |
 | `0xF3` | `OTA_COMMIT` | _empty_ | _empty_ (resets on success) |
 | `0xF4` | `OTA_ROLLBACK` | _empty_ | _empty_ (resets on success) |
-| `0xF5` | `OTA_GET_STATE` | _empty_ | `state:u8 active:u8 pending:u8 boot_count:u16` |
+| `0xF5` | `OTA_GET_STATE` | _empty_ | `state:u8 active:u8 pending:u8 boot_count:u16` `[err:u8]` (v0.14 additive: the cause of the most recent `state = ERROR`, gh#101; a peer below protocol minor 14 never appends this byte -- see below) |
 | `0xF6` | `OTA_ABORT` | _empty_ | _empty_ |
 
 Value encodings: `state` = 0 IDLE / 1 READY / 2 BUSY / 3 VERIFIED /
@@ -1313,6 +1320,36 @@ COMMIT/ROLLBACK's reset run inside the request transaction, their
 reply transaction can miss — hosts treat an I/O error there as
 "issued" and confirm via `OTA_GET_STATE` (or by re-initialising
 against the rebooted bridge after COMMIT/ROLLBACK).
+
+**`OTA_GET_STATE`'s `err` byte (v0.14, gh#101).** Before this bump,
+every OTA failure collapsed into `state = ERROR` with nothing else on
+the wire, so a failed session was unattributable for the host and
+indistinguishable on the bench. `err` names the cause (`0` when
+`state != ERROR`, or when it is but nothing yet recorded a specific
+cause):
+
+| `err` | Name | Meaning |
+|-------|------|---------|
+| `0x00` | `NONE` | No error recorded. |
+| `0x01` | `SESSION_RANGE` | `BEGIN`/`VERIFY`/`COMMIT` image size out of range. |
+| `0x02` | `ERASE_FAILED` | Background page erase failed. |
+| `0x03` | `CHUNK_RANGE` | Chunk offset/length rejected. |
+| `0x04` | `PROGRAM_FAILED` | Flash program failed (PGERR/PGSERR). |
+| `0x05` | `VERIFY_CRC` | `VERIFY`'s CRC comparison failed. |
+| `0x06` | `COMMIT_FAILED` | `COMMIT`: bootability check or metadata commit failed. |
+| `0x07` | `ERASE_TARGET` | Erase target would intersect the running slot. |
+| `0x08` | `NOT_TRIAL_CAPABLE` | `COMMIT` refused: candidate image has no valid trial marker. |
+| `0x09` | `META_DEMOTE_FAILED` | `BEGIN`: metadata commit demoting the stale target slot failed. |
+
+The host mirror is `gd32g553_ota_err_t`
+(`<alp/chips/gd32g553.h>`); `gd32g553_ota_get_state()` reads this byte
+only against a peer advertising protocol minor >=
+`GD32G553_OTA_ERR_MIN_PROTOCOL_MINOR` (14) — an older bridge never
+appends it, and reading past what it sent would desync the reply CRC
+over a byte that was never on the wire. Against an older peer, the
+host-side `err` field always reads `NONE` regardless of the real
+cause, same as before this bump. `OTA_ABORT` clears the recorded
+cause back to `NONE`.
 
 **TRIAL boot, confirm, and watchdog revert (v0.12, firmware >= 0.2.14).**
 `COMMIT` and `ROLLBACK` don't hand control straight to a trusted
