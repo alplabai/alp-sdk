@@ -122,7 +122,9 @@ def test_status_reports_steps_and_ship_blockers(tmp_path):
     p = _run("status", "--sku", SKU, "--serial", SERIAL, "--ledger-root", ledger)
     assert p.returncode == 0          # a blocked ship check is normal after provisioning
     assert "preflight" in p.stdout and "done" in p.stdout and "override tier_triangle" in p.stdout
-    assert "gpio4_defect" in p.stdout and "missing eeprom_unique_id" in p.stdout
+    # the legacy act88760_gpio4_defect key is informational only, not a ship blocker;
+    # disposition (bench-only, not ship) + the missing required key still block
+    assert "missing eeprom_unique_id" in p.stdout and "not ship" in p.stdout
     p = _run("status", "--sku", SKU, "--serial", SERIAL, "--ledger-root", ledger,
              "--require-shippable")
     assert p.returncode == 1
