@@ -117,6 +117,7 @@ static alp_status_t _errno_to_alp(int err)
 static alp_status_t
 z_open(const alp_spi_config_t *cfg, alp_spi_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	if (cfg->bus_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;
 	if (cfg->bus_id >= ALP_SOC_SPI_COUNT) return ALP_ERR_OUT_OF_RANGE;
 	const struct device *dev = _devs[cfg->bus_id];
@@ -151,10 +152,9 @@ z_open(const alp_spi_config_t *cfg, alp_spi_backend_state_t *st, alp_capabilitie
 		s->cs_present    = true;
 	}
 
-	st->dev         = (void *)dev;
-	st->bus_id      = cfg->bus_id;
-	st->be_data     = s;
-	caps_out->flags = 0u;
+	st->dev     = (void *)dev;
+	st->bus_id  = cfg->bus_id;
+	st->be_data = s;
 	return ALP_OK;
 }
 

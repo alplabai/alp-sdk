@@ -236,6 +236,18 @@ uint32_t fake_gd32bridge_attempts_seen(void);
 /** Reset version, armed faults and the counters to defaults. */
 void fake_gd32bridge_reset(void);
 
+/* ------------------------------------------------------------------ */
+/* fake OPTIGA Trust M                                                 */
+/* ------------------------------------------------------------------ */
+
+/** NACK the next @p count accesses, as the part does while waking. */
+void fake_optiga_arm_sleep(unsigned count);
+
+/** Total accesses attempted (NACKed ones included) since the last reset. */
+uint32_t fake_optiga_attempts(void);
+
+void fake_optiga_reset(void);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

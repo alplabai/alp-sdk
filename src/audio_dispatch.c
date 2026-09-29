@@ -129,7 +129,7 @@ alp_audio_in_t *alp_audio_in_open(const alp_audio_config_t *cfg)
 	h->backend              = be;
 	h->state.cfg            = *cfg;
 	h->state.ops            = ops;
-	alp_capabilities_t caps = { .flags = be->base_caps };
+	alp_capabilities_t caps = { .flags = be->base_caps, .class_flags = be->base_class_flags };
 	alp_status_t       rc   = ops->in_open(cfg, &h->state, &caps);
 	if (rc != ALP_OK) {
 		_free_in(h);
@@ -249,7 +249,7 @@ alp_audio_out_t *alp_audio_out_open(const alp_audio_config_t *cfg)
 	h->state.cfg            = *cfg;
 	h->state.volume         = 255u; /* unity by default; matches legacy Q8.8 unity */
 	h->state.ops            = ops;
-	alp_capabilities_t caps = { .flags = be->base_caps };
+	alp_capabilities_t caps = { .flags = be->base_caps, .class_flags = be->base_class_flags };
 	alp_status_t       rc   = ops->out_open(cfg, &h->state, &caps);
 	if (rc != ALP_OK) {
 		_free_out(h);

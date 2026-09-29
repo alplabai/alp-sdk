@@ -340,8 +340,9 @@ alp_status_t alp_gpio_configure(alp_gpio_t *pin, alp_gpio_dir_t dir, alp_gpio_pu
  * @param[in] pin    Handle from @ref alp_gpio_open.
  * @param[in] level  true = drive high, false = drive low.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY (pin not
- *         configured as output) / ALP_ERR_IO.
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY (NULL or closed
+ *         @p pin; also a pin not configured as output, on backends
+ *         that report that case this way) / ALP_ERR_IO.
  */
 alp_status_t alp_gpio_write(alp_gpio_t *pin, bool level);
 
@@ -1147,8 +1148,11 @@ size_t alp_uart_rx_ringbuf_count(const alp_uart_rx_ringbuf_t *rb);
  * @brief Detach the ring buffer and release the handle.
  *
  * Disables the IRQ-driven RX path on the underlying port and returns
- * the slot to the pool.  Idempotent on NULL.  The caller's backing
- * store may be reused or freed once this returns.
+ * the slot to the pool.  Idempotent on NULL, and idempotent on a
+ * repeat call (a second detach is a no-op).  Blocks until any
+ * in-flight alp_uart_rx_ringbuf_pop() / _count() on the same handle
+ * returns before tearing it down.  The caller's backing store may be
+ * reused or freed once this returns.
  *
  * @param rb   Handle from alp_uart_rx_ringbuf_attach.
  */

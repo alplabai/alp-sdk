@@ -85,6 +85,20 @@
  *     heap, no fds) -- just releases the pool slot.  Called exactly
  *     once by the dispatcher, strictly after its own active-op drain.
  *
+ * @par Subscribe-table lock (#1632)
+ * z_subscribe()/z_unsubscribe() (application thread) and
+ * rpc_ept_recv()'s async dispatch (ipc_service worker thread) all
+ * touch the same per-channel `subs[]` table; every access now takes
+ * `be->lock` -- the same spinlock the close protocol above already
+ * uses.  The dispatch side snapshots `cb`+`user` into locals under the
+ * lock and invokes the callback OUTSIDE it, since the callback may
+ * self-close (see rpc_ept_recv()'s own doc comment): holding the lock
+ * across the call would deadlock against z_shutdown()'s own
+ * `be->lock` use.  This closes the write/write and write/read races
+ * on the table itself; it does not, and cannot, guarantee a callback
+ * never fires after the matching alp_rpc_unsubscribe() has returned --
+ * see rpc_ept_recv()'s doc comment for that residual window.
+ *
  * @par Link liveness (issue #1643)
  * ipc_service exposes `bound` / `unbound` / `received` / `error`
  * endpoint callbacks; this file used to wire only `bound` +
@@ -595,6 +609,18 @@ static void rpc_ept_bound(void *priv)
  * exclusion is real, not incidental scheduling luck. */
 static void (*g_rpc_recv_test_sync_hook)(void) = NULL;
 
+/* Test-only synchronisation hook (default no-op) for #1632's async
+ * dispatch fix -- mirrors g_rpc_recv_test_sync_hook above.  Called
+ * from INSIDE rpc_ept_recv()'s subscribe-table critical section
+ * (below, right after `sub` is found, before cb+user are read into
+ * locals) so a test can wake a concurrent z_subscribe()/
+ * z_unsubscribe() attempt at the exact instant a torn read would
+ * otherwise be possible; that writer needs the SAME `be->lock` to
+ * proceed, so it can only actually run once this critical section has
+ * released it.  Non-blocking, same contract as
+ * g_rpc_recv_test_sync_hook. */
+static void (*g_rpc_dispatch_test_sync_hook)(void) = NULL;
+
 static void rpc_ept_recv(const void *data, size_t len, void *priv)
 {
 	struct rpc_be *be = (struct rpc_be *)priv;
@@ -669,9 +695,12 @@ static void rpc_ept_recv(const void *data, size_t len, void *priv)
          * deadlock the very self-close the deferred epilogue below
          * exists to serve.  Snapshot-then-call is the shape
          * src/backends/rpc/yocto_drv.c's rpc_rx_main() already uses. */
-		uint32_t            h    = fnv1a_32(method);
-		k_spinlock_key_t    key  = k_spin_lock(&be->lock);
-		struct rpc_sub     *sub  = sub_find(be, method, h);
+		uint32_t         h   = fnv1a_32(method);
+		k_spinlock_key_t key = k_spin_lock(&be->lock);
+		struct rpc_sub  *sub = sub_find(be, method, h);
+		if (g_rpc_dispatch_test_sync_hook != NULL) {
+			g_rpc_dispatch_test_sync_hook();
+		}
 		alp_rpc_method_cb_t cb   = (sub != NULL) ? sub->cb : NULL;
 		void               *user = (sub != NULL) ? sub->user : NULL;
 		k_spin_unlock(&be->lock, key);
@@ -773,7 +802,7 @@ static void rpc_ept_error(const char *message, void *priv)
 static alp_status_t
 z_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
-	caps_out->flags = 0u;
+	(void)caps_out;
 	if (cfg == NULL || cfg->name == NULL || cfg->name[0] == '\0') {
 		return ALP_ERR_INVAL;
 	}

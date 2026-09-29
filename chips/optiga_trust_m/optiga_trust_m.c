@@ -98,6 +98,14 @@
 #define OPTIGA_REG_DATA_REG_LEN 0x81u
 #define OPTIGA_REG_I2C_STATE    0x82u
 
+/* Trust M NACKs the first access while it wakes from its idle sleep and
+ * ACKs the next one: bench, E1M-V2M103 2026W38-0001, where a single probe
+ * reported a fitted part as absent.  Upstream's physical layer polls on
+ * NACK too (PL_POLLING_INVERVAL_US).  10 x 1 ms is well past the one
+ * retry the bench needed. */
+#define OPTIGA_PROBE_TRIES    10u
+#define OPTIGA_PROBE_RETRY_MS 1u
+
 alp_status_t optiga_trust_m_init(optiga_trust_m_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit)
 {
 	if (ctx == NULL || bus == NULL) return ALP_ERR_INVAL;
@@ -111,11 +119,16 @@ alp_status_t optiga_trust_m_init(optiga_trust_m_t *ctx, alp_i2c_t *bus, uint8_t 
 	ctx->addr = (addr_7bit != 0) ? addr_7bit : OPTIGA_TRUST_M_I2C_ADDR;
 
 	/* Probe by reading the I2C state register.  Trust M ACKs at
-	 * its address before OPEN_APPLICATION; if no ACK, NOT_READY tells
-	 * the caller the chip isn't populated / mis-strapped. */
+	 * its address before OPEN_APPLICATION; if it still does not ACK
+	 * after the wake retries, NOT_READY tells the caller the chip isn't
+	 * populated / mis-strapped. */
 	uint8_t      reg      = OPTIGA_REG_I2C_STATE;
 	uint8_t      state[4] = { 0 };
-	alp_status_t s        = alp_i2c_write_read(ctx->bus, ctx->addr, &reg, 1, state, sizeof(state));
+	alp_status_t s        = ALP_ERR_NOT_READY;
+	for (unsigned i = 0; i < OPTIGA_PROBE_TRIES && s != ALP_OK; i++) {
+		if (i != 0u) alp_delay_ms(OPTIGA_PROBE_RETRY_MS);
+		s = alp_i2c_write_read(ctx->bus, ctx->addr, &reg, 1, state, sizeof(state));
+	}
 	if (s != ALP_OK) return ALP_ERR_NOT_READY;
 
 	ctx->initialised = true;
