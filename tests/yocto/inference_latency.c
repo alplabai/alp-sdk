@@ -92,6 +92,22 @@ void alp_inference_deepx_close(struct alp_inference *h)
 	h->be_state = NULL;
 }
 
+/* <alp/ext/deepx/inference.h> hooks -- unused here, present so the
+ * dispatcher links (see src/yocto/inference_yocto.c). */
+alp_status_t alp_inference_deepx_bind_cores(struct alp_inference *h, unsigned bound)
+{
+	(void)h;
+	(void)bound;
+	return ALP_ERR_NOSUPPORT;
+}
+
+alp_status_t alp_inference_deepx_get_status(struct alp_inference *h, alp_deepx_device_status_t *out)
+{
+	(void)h;
+	(void)out;
+	return ALP_ERR_NOSUPPORT;
+}
+
 static alp_inference_t *open_fake_handle(void)
 {
 	static const uint8_t   model[16] = { 0xDE, 0xAD, 0xBE, 0xEF };
