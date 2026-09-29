@@ -48,7 +48,6 @@
 #ifdef __ZEPHYR__
 #include <zephyr/sys/util_macro.h>
 
-
 #endif
 
 static void
@@ -2320,8 +2319,8 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 			/* Build payload+CRC as one contiguous buffer.  The header's bytes
 			 * are already folded into req_crc (above), so reusing tx_scratch
 			 * for the payload here cannot corrupt the CRC. */
-			const uint16_t crc = alp_crc16_ccitt_false_update(
-			    req_crc, tx_payload + crc_done, tx_len - crc_done);
+			const uint16_t crc =
+			    alp_crc16_ccitt_false_update(req_crc, tx_payload + crc_done, tx_len - crc_done);
 			if (tx_len > 0) memcpy(ctx->tx_scratch, tx_payload, tx_len);
 			ctx->tx_scratch[tx_len]      = (uint8_t)(crc & 0xFFu);
 			ctx->tx_scratch[tx_len + 1u] = (uint8_t)((crc >> 8) & 0xFFu);
