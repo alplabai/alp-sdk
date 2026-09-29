@@ -35,8 +35,9 @@ distinct, silicon-gated follow-up this pass does not fake by guessing at an
 untested command sequence.
 
 `CONFIG_OSPI_ALIF` now `select`s `FLASH_HAS_DRIVER_ENABLED` and
-`FLASH_JESD216` (an app opts into `CONFIG_FLASH_JESD216_API` itself, as
-`examples/aen/aen-ospi-regcheck` already did for its JEDEC-ID bench target).
+`FLASH_JESD216` (an app opts into `CONFIG_FLASH_JESD216_API` itself to reach
+`read_jedec_id`/`sfdp_read`; `examples/aen/aen-ospi-regcheck` does not enable
+it yet and makes no device-level call).
 
 Unchanged: no XiP path. `alif_hal_ospi_xip_enable()` still targets the
 `OSPI_XIP_SER` register, absent on AE822 (`SOC_FEAT_OSPI_HAS_XIP_SER 0`),
@@ -46,6 +47,20 @@ E1M-AEN803 board `.dts` comments and `scripts/gen_zephyr_board.py`'s shared
 `_AEN_OSPI_XIP_GAP` string, which both used to say "ships no
 `flash_driver_api` at all"; that clause is no longer true, so they now say
 the API "never calls it" instead, with the reasoning unchanged.
+
+`examples/aen/aen-ospi-regcheck`'s board overlays now set `cs-pin = <1>` and
+`bus-speed = <20000000>` on both the E1M-AEN803 and E1M-AEN801 targets (the
+dtsi default is CS0 @ 100 MHz — CS0 is the HyperRAM footprint, not the NOR,
+and 100 MHz is the rate issue #915's own bench capture measured returning
+garbage). Any future `flash_driver_api` call on this node inherits the
+correct chip select and rate from the overlay rather than the unverified
+dtsi default.
+
+Note: `fix/915-ospi-flash-api` (PR #2223, open) already carries this same
+driver plus a regcheck rewrite that exercises the API end to end on
+E1M-AEN803 silicon; that PR predates recent `dev` by hundreds of files and
+was not used as a base here. This fragment's own regcheck app still makes no
+device-level transfer — see the `CONFIG_FLASH_JESD216_API` paragraph above.
 
 Not run here: a bench build/flash/read cycle on real E1M-AEN803 silicon —
 this pass is code + a native build verification only (`west build` for

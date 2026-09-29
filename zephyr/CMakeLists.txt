@@ -471,8 +471,10 @@ endif()
 # hal_alif's own ospi CMakeLists is header-self-contained (its
 # zephyr_include_directories(include) fires when USE_ALIF_HAL_OSPI pulls the
 # subdirectory in), so no extra include path is needed here.  See the
-# OSPI_ALIF Kconfig help + examples/aen/aen-ospi-regcheck for the current
-# read/write/erase coverage (#915).
+# OSPI_ALIF Kconfig help + flash_ospi_alif.c's own header for the current
+# read/write/erase coverage (#915: read/read_jedec_id/sfdp_read only, write/
+# erase are fail-closed stubs); examples/aen/aen-ospi-regcheck exercises the
+# controller-register path only and makes no flash_driver_api call.
 zephyr_library_sources_ifdef(CONFIG_OSPI_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/flash/flash_ospi_alif.c)
 

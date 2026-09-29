@@ -1531,7 +1531,8 @@ config CAN_RBUF_AFWL
 # silicon-verify against -- for that SKU this only proves the ospi0 node
 # BINDS + the hal_alif init entry point COMPILES/LINKS. E1M-AEN803 DOES fit
 # an OSPI0 NOR (ISSI IS25WX256-JHLE) and its flash_driver_api read path
-# (JEDEC ID / SFDP / addressed read) is bench-verified there -- see
+# (JEDEC ID / SFDP / addressed read) matches issue #915's own bench capture
+# against it (CS1 @ 20 MHz) -- not yet re-run from this tree, see
 # zephyr/drivers/flash/flash_ospi_alif.c and examples/aen/aen-ospi-regcheck.
 # write/erase remain fail-closed stubs (#915): the bench evidence is that
 # they need the fitted part's Octal-DDR mode switch, not 1-1-1 SPI.
@@ -1556,9 +1557,10 @@ config OSPI_ALIF
 	  (USE_ALIF_HAL_OSPI pulls in modules/hal/alif drivers/ospi).  Octal-SPI
 	  NOR flash + HyperBus/HyperRAM XIP modes are both driven through the same
 	  controller; this driver programs the controller (ospi_init) and
-	  registers a flash_driver_api: read/read_jedec_id/sfdp_read (bench-proven
-	  on E1M-AEN803's fitted IS25WX256, over the DW-SSI EEPROM-read transfer
-	  mode in 1-1-1 SPI) and fail-closed write/erase stubs (#915: program/
+	  registers a flash_driver_api: read/read_jedec_id/sfdp_read (framing
+	  matches issue #915's own bench capture against E1M-AEN803's fitted
+	  IS25WX256, over the DW-SSI EEPROM-read transfer mode in 1-1-1 SPI, not
+	  yet re-run from this tree) and fail-closed write/erase stubs (#915: program/
 	  erase need the part's Octal-DDR mode switch, not implemented here). No
 	  XiP window (xip_enable) -- that call bus-faults on AE822, see the
 	  driver's file-header FOURTH section.

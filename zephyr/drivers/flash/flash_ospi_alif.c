@@ -26,7 +26,9 @@
  * independent compile+link+reachability proof.
  *
  * flash_driver_api (#915): E1M-AEN803 DOES fit an OSPI0 NOR (ISSI
- * IS25WX256-JHLE on CS1) and the read side is now bench-proven on it --
+ * IS25WX256-JHLE on CS1) and the read-side framing matches what issue #915's
+ * own bench capture measured against it (CS1 @ 20 MHz) -- not yet re-run
+ * from this tree, see the changelog fragment's "Not run here" paragraph.
  * `read_jedec_id`, `sfdp_read` and 4-byte-address `read` all use the DW-SSI
  * EEPROM-read transfer mode in 1-1-1 (standard single-lane) SPI, the frame
  * format the part answers in coming out of reset. `write`/`erase` are
@@ -614,7 +616,15 @@ static int ospi_alif_cmd_read_locked(const struct device *dev,
 		return -EINVAL;
 	}
 	if (ospi_busy(regs)) {
-		return -EBUSY;
+		/* A prior caller's transfer may have stalled without this one's
+		 * cmd_read_locked() being reached to run the usual post-transfer
+		 * recovery below (e.g. a timeout mid-transfer left BUSY set). Force
+		 * the controller idle once and retry the check instead of wedging
+		 * every later caller behind a state nothing else can clear. */
+		ospi_alif_recover_transfer(dev);
+		if (ospi_busy(regs)) {
+			return -EBUSY;
+		}
 	}
 
 	ospi_disable(regs);
@@ -673,16 +683,24 @@ static int ospi_alif_cmd_read(const struct device *dev,
  * in its SFDP 4-byte address instruction table (DWORD1 bit 0, read on
  * silicon as 43 0e ff ff), and a 4-byte opcode works whatever address mode
  * the part was left in. No dummy cycles at this bus rate.
- * ponytail: no array-size bound -- the node carries no size and the part
- * wraps past its end; add one from SFDP BFPT DWORD2 when a consumer needs
- * it. */
+ * ponytail: no per-part array-size bound -- the DT binding is vendored
+ * VERBATIM from the fork (no `size` property to add without diverging from
+ * it) and this driver serves whatever part is on the node, not just the
+ * bench-known IS25WX256, so a hardcoded density would be wrong for a
+ * different part; add a real bound from SFDP BFPT DWORD2 (parsed at init)
+ * when a consumer needs it. What IS bounded below: the 4-byte address
+ * itself, so an offset the command can't even encode fails loudly instead
+ * of silently wrapping into a valid-looking, wrong address. */
 #define OSPI_ALIF_READ4 0x13U
 
 static int ospi_alif_read(const struct device *dev, off_t offset, void *buffer, size_t len)
 {
 	uint8_t *out = buffer;
 
-	if (offset < 0 || (buffer == NULL && len != 0U)) {
+	if (offset < 0 || (uint64_t)offset > UINT32_MAX || (buffer == NULL && len != 0U)) {
+		return -EINVAL;
+	}
+	if (len > 0U && (uint64_t)offset + (len - 1U) > UINT32_MAX) {
 		return -EINVAL;
 	}
 	while (len > 0U) {
