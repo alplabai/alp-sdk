@@ -73,3 +73,10 @@ maintainer with bench access should re-run `aen-ospi-regcheck` on
 E1M-AEN803 before treating this pass as bench-proven itself. Program/erase
 remain open and need the Octal-DDR mode-switch work above, which is a
 silicon-gated follow-up, not implementable blind.
+
+Bench-verified on E1M-AEN803 2026W36-0001 (Flow C RAM-run on the M55-HE, a
+throwaway probe calling the flash API on the `snps,designware-ospi` device with
+this branch's `aen-ospi-regcheck` AEN803 overlay):
+`flash_read_jedec_id` -> `9d 5b 19` (ISSI), `flash_sfdp_read` -> signature
+`SFDP`, revision 1.9, 3 parameter headers, `flash_read` at offset 0 -> `0xff`
+(erased), and `flash_write` -> `-ENOTSUP` as designed.
