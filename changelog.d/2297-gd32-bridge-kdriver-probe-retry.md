@@ -36,3 +36,5 @@ removed.
 Compile-checked out-of-tree against the real E1M-V2M103 kernel source and
 a configured `kernel-build-artifacts` tree with the SDK cross-toolchain;
 bench-pending (no bench access from this change).
+
+On a reply CRC mismatch the driver now logs the raw reply bytes (`cmd 0x01: reply CRC mismatch: ...`, rate-limited), so the next cold-boot `-EBADMSG` shows which bytes were torn instead of only the errno (alplabai/gd32-bridge-firmware#295).

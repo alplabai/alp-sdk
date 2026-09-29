@@ -101,8 +101,8 @@ Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  drivers/gpio/Kconfig            |   9 +
  drivers/gpio/Makefile           |   1 +
- drivers/gpio/gpio-gd32-bridge.c | 915 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
- 3 files changed, 925 insertions(+)
+ drivers/gpio/gpio-gd32-bridge.c | 920 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 930 insertions(+)
  create mode 100644 drivers/gpio/gpio-gd32-bridge.c
 
 diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
@@ -142,7 +142,7 @@ new file mode 100644
 index 000000000..b202babc2
 --- /dev/null
 +++ b/drivers/gpio/gpio-gd32-bridge.c
-@@ -0,0 +1,915 @@
+@@ -0,0 +1,920 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * GPIO driver for the Alp Lab GD32 IO-MCU bridge (I2C transport).
@@ -444,8 +444,13 @@ index 000000000..b202babc2
 +
 +	crc = crc_itu_t(0xFFFF, rbuf, 1 + rsp_len);
 +	if (rbuf[1 + rsp_len] != (crc & 0xFF) ||
-+	    rbuf[2 + rsp_len] != (crc >> 8))
++	    rbuf[2 + rsp_len] != (crc >> 8)) {
++		/* Log the torn reply so a cold-boot -EBADMSG says which bytes
++		 * were wrong (gd32-bridge-firmware#295). */
++		dev_warn_ratelimited(&cl->dev, "cmd 0x%02x: reply CRC mismatch: %*ph\n",
++				     cmd, rlen, rbuf);
 +		return -EBADMSG;
++	}
 +	if (rbuf[0] != GD32_STATUS_OK)
 +		return -EIO;
 +	if (rsp_len)
