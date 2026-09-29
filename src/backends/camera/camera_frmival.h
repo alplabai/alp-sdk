@@ -146,18 +146,22 @@ static inline alp_status_t camera_apply_fps(const struct device  *dev,
 
 	/* Don't trust the write-back -- a driver may clamp to its own
 	 * supported-rate table, so read back what actually landed.  A failed
-	 * read-back, or one reporting a zero interval, falls back to the
-	 * ORIGINAL request (not set_arg, which set_frmival may have already
-	 * overwritten). */
+	 * read-back, or one reporting a zero interval, reports the ORIGINAL
+	 * request (not set_arg, which set_frmival may have already
+	 * overwritten) -- but only as a best guess: it is logged as unverified
+	 * and never as an exact settle, since nothing confirmed it. */
 	struct video_frmival actual = { 0 };
 	int                  get_rc = video_get_frmival(dev, &actual);
 	if (get_rc != 0 || actual.numerator == 0u || actual.denominator == 0u) {
 		LOG_WRN("camera%u: video_get_frmival() %s after a successful "
-		        "video_set_frmival(); reporting the %u fps request as settled",
+		        "video_set_frmival(); the %u fps request is unverified",
 		        camera_id,
 		        (get_rc != 0) ? "failed" : "returned a zero interval",
 		        effective);
-		actual = request;
+		if (settled != NULL) {
+			*settled = request;
+		}
+		return ALP_OK;
 	}
 
 	if (settled != NULL) {

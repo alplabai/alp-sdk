@@ -474,6 +474,10 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	 * write to the active mode's VTS - 4 lines. */
 	alp_status_t fps_status = camera_apply_fps(dev, cfg->camera_id, cfg->fps, 10u, NULL);
 	if (fps_status != ALP_OK) {
+		/* The formats set above stay applied on the shared ISP device on
+		 * purpose, same as the min_vbuf_count / bytes_per_buf failure paths
+		 * below: nothing streams from them, and the next open() sets its
+		 * own format before it gets here. */
 		_free_state(st);
 		return fps_status;
 	}

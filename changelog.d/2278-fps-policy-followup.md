@@ -40,7 +40,8 @@ The policy is now graded by WHO asked, not by the errno a
     itself and never log. A failed readback, or one reporting a zero
     interval -- `src/backends/camera/camera_frmival.h:154`
     ("if (get_rc != 0 || actual.numerator == 0u || actual.denominator == 0u) {")
-    -- falls back to reporting the original request as settled.
+    -- reports the original request as a best guess with a `LOG_WRN` that it
+    is unverified, and never logs it as an exact settle.
 
 `src/backends/camera/zephyr_video.c:275` ("fps AFTER format, never before:")
 and `src/backends/camera/v2n_n44_isp.c:285`
