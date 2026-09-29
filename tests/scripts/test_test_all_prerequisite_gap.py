@@ -176,6 +176,37 @@ def test_fail_wins_over_a_simultaneous_gap(harness_pieces, tmp_path):
     assert "[GAP]" in proc.stdout
 
 
+def test_smoke_twister_pass_is_labelled_and_is_not_a_gap(harness_pieces, tmp_path):
+    """A local smoke twister pass is a deliberate scope choice: labelled on its
+    row and in a NOTE, exit 0 (not the [GAP] exit 2), the usual success text."""
+    proc = _run_harness(
+        harness_pieces,
+        'TWISTER_SMOKE=1\nrun_stage "twister" fake_pass\n',
+        tmp_path,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "[twister] PASS (smoke; full set runs in CI)" in proc.stdout
+    assert "NOTE: twister ran the local SMOKE subset only" in proc.stdout
+    assert "[GAP]" not in proc.stdout
+    assert "All runnable stages passed" in proc.stdout
+
+
+def test_full_twister_pass_carries_no_smoke_label(harness_pieces, tmp_path):
+    proc = _run_harness(harness_pieces, 'run_stage "twister" fake_pass\n', tmp_path)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "smoke" not in proc.stdout.lower()
+
+
+def test_a_failing_smoke_twister_still_exits_1(harness_pieces, tmp_path):
+    proc = _run_harness(
+        harness_pieces,
+        'TWISTER_SMOKE=1\nrun_stage "twister" fake_fail\n',
+        tmp_path,
+    )
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "All runnable stages passed" not in proc.stdout
+
+
 def test_skip_stage_rejects_missing_kind_argument(harness_pieces, tmp_path):
     """Every real call site must say scope-or-gap on purpose -- an
     omitted/invalid third argument must fail loudly, not silently

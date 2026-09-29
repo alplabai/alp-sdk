@@ -83,7 +83,14 @@
 #                     e.g. a docs/changelog/Yocto/pytest-only change.  Any
 #                     doubt (unknown path, lookup failure, no origin/dev)
 #                     runs it.  --select-base REF overrides the base ref.
-#   --full            with --target dev: always run twister (no selection).
+#                     When it cannot prove that, twister still does NOT run
+#                     the full ~270-config set locally: it runs a bounded
+#                     SMOKE subset (the suites the changed files sit in plus
+#                     the fixed SMOKE_SUITES in scripts/select_checks.py,
+#                     ~2-3 min) and the row reads `PASS (smoke; full set runs
+#                     in CI)`.  The full set is CI's sharded pr-twister job.
+#   --full            always run the FULL twister set here (no selection, no
+#                     smoke subset).  `--target main` does too.
 #   --target main     THOROUGH release-grade profile: every stage PLUS the
 #                     main-only strict ABI-snapshot diff (pr-abi-snapshot.yml,
 #                     which triggers on main + release/** only).  Use before a
@@ -152,6 +159,10 @@ YOCTO_ONLY=0
 ZEPHYR_ONLY=0
 NO_CLEAN=0
 FORCE_FULL=0
+# Set when the local twister stage runs the bounded smoke subset (see the
+# orchestration): TWISTER_SUITES are the suite directories it builds.
+TWISTER_SMOKE=0
+TWISTER_SUITES=()
 SELECT_BASE=origin/dev
 LIST_REQUIRED_GATE_SCRIPTS=0
 # TARGET selects a CI profile matching the branch a PR targets:
@@ -234,8 +245,14 @@ _record_stage() {
         STAGE_NAMES+=("${name}"); STAGE_STATUS+=("SKIP"); STAGE_KIND+=("gap"); STAGE_NOTES+=("prerequisite unavailable"); STAGE_SECS+=("${secs}")
         echo "[${name}] SKIP (prerequisite unavailable) (${secs}s)"
     elif [ "${rc}" -eq 0 ]; then
-        STAGE_NAMES+=("${name}"); STAGE_STATUS+=("PASS"); STAGE_KIND+=(""); STAGE_NOTES+=(""); STAGE_SECS+=("${secs}")
-        echo "[${name}] PASS (${secs}s)"
+        # A smoke twister pass is a deliberate scope choice, not full coverage:
+        # say so on the row so a local green is never read as the full set.
+        local note=""
+        if [ "${name}" = "twister" ] && [ "${TWISTER_SMOKE:-0}" = "1" ]; then
+            note="smoke; full set runs in CI"
+        fi
+        STAGE_NAMES+=("${name}"); STAGE_STATUS+=("PASS"); STAGE_KIND+=(""); STAGE_NOTES+=("${note}"); STAGE_SECS+=("${secs}")
+        echo "[${name}] PASS${note:+ (${note})} (${secs}s)"
     else
         STAGE_NAMES+=("${name}"); STAGE_STATUS+=("FAIL"); STAGE_KIND+=(""); STAGE_NOTES+=("exit=${rc}"); STAGE_SECS+=("${secs}")
         echo "[${name}] FAIL (exit=${rc}) (${secs}s)"
@@ -654,12 +671,25 @@ stage_twister() {
     # --clobber-output: delete the previous twister-out/ instead of renaming
     # it to twister-out.N -- in a reused checkout the renamed copies (several
     # GB each) otherwise pile up run after run.
+    # The full run scans all four roots; the local smoke run scans only the
+    # suite directories select_checks.py --local chose.
+    local -a roots=()
+    local suite
+    if [ "${#TWISTER_SUITES[@]}" -gt 0 ]; then
+        echo "stage_twister: SMOKE subset (${#TWISTER_SUITES[@]} suite dir(s)); the full native_sim set runs in CI's pr-twister shards -- pass --full to run it here:"
+        for suite in "${TWISTER_SUITES[@]}"; do
+            echo "  ${suite}"
+            roots+=(--testsuite-root "${REPO_ROOT}/${suite}")
+        done
+    else
+        roots=(--testsuite-root "${REPO_ROOT}/tests/unit"
+               --testsuite-root "${REPO_ROOT}/tests/zephyr"
+               --testsuite-root "${REPO_ROOT}/tests/console"
+               --testsuite-root "${REPO_ROOT}/examples")
+    fi
     python3 "${ZEPHYR_BASE}/scripts/twister" \
         "${twister_jobs[@]+"${twister_jobs[@]}"}" \
-        --testsuite-root "${REPO_ROOT}/tests/unit" \
-        --testsuite-root "${REPO_ROOT}/tests/zephyr" \
-        --testsuite-root "${REPO_ROOT}/tests/console" \
-        --testsuite-root "${REPO_ROOT}/examples" \
+        "${roots[@]}" \
         -p native_sim/native/64 \
         --extra-args=CONFIG_COMPILER_WARNINGS_AS_ERRORS=y \
         --clobber-output \
@@ -1510,17 +1540,32 @@ else
     if [ "${YOCTO_ONLY}" -eq 0 ]; then
         if [ "${QUICK}" -eq 1 ]; then
             launch_skip "twister" "--quick" scope
-        elif [ "${TARGET}" = "dev" ] && [ "${FORCE_FULL}" -eq 0 ] \
-            && [ "$(python3 scripts/select_checks.py --base "${SELECT_BASE}" --worktree)" = "skip" ]; then
-            # select_checks.py printed its per-path proof above.  Anything it
-            # cannot prove -- or any error (empty stdout) -- falls through to
-            # the full run below: selection fails safe.  --target main never
-            # gets here; release-grade runs are always full.
-            launch_skip "twister" "no native_sim build input changed (select_checks.py; --full forces it)" scope
-        elif [ -z "${ZEPHYR_BASE:-}" ]; then
-            launch_skip "twister" "ZEPHYR_BASE not set (run scripts/bootstrap.sh first)" gap
         else
-            launch_bg "twister" stage_twister
+            # Local runs never build the full ~270-config native_sim set --
+            # CI's sharded pr-twister does that in the merge queue.
+            # select_checks.py --local answers `skip` (no native_sim input
+            # changed), or `smoke` followed by the suite directories to build
+            # (the changed suites + SMOKE_SUITES).  It printed its per-path
+            # proof on stderr above.  --full and --target main bypass it and
+            # run everything; an empty answer (the script crashed) also falls
+            # through to the full run -- a bug must not shrink coverage.
+            twister_plan=""
+            if [ "${TARGET}" != "main" ] && [ "${FORCE_FULL}" -eq 0 ]; then
+                twister_plan="$(python3 scripts/select_checks.py --base "${SELECT_BASE}" --worktree --local)"
+            fi
+            if [ "${twister_plan%%$'\n'*}" = "skip" ]; then
+                launch_skip "twister" "no native_sim build input changed (select_checks.py; --full forces it)" scope
+            elif [ -z "${ZEPHYR_BASE:-}" ]; then
+                launch_skip "twister" "ZEPHYR_BASE not set (run scripts/bootstrap.sh first)" gap
+            else
+                if [ "${twister_plan%%$'\n'*}" = "smoke" ]; then
+                    TWISTER_SMOKE=1
+                    while IFS= read -r _suite; do
+                        [ -n "${_suite}" ] && TWISTER_SUITES+=("${_suite}")
+                    done <<< "${twister_plan#*$'\n'}"
+                fi
+                launch_bg "twister" stage_twister
+            fi
         fi
     fi
 
@@ -1673,6 +1718,12 @@ for i in "${!STAGE_NAMES[@]}"; do
     printf "  %-28s %s %s%s (%ss)\n" "${STAGE_NAMES[$i]}" "${STAGE_STATUS[$i]}" "${tag}" "${STAGE_NOTES[$i]}" "${STAGE_SECS[$i]}"
     [ "${STAGE_STATUS[$i]}" = "FAIL" ] && fail_count=$((fail_count + 1))
 done
+
+if [ "${TWISTER_SMOKE:-0}" -eq 1 ]; then
+    echo
+    echo "NOTE: twister ran the local SMOKE subset only (changed suites + a fixed smoke set)."
+    echo "      The full native_sim set runs in CI's sharded pr-twister; --full runs it here."
+fi
 
 if [ "${fail_count}" -gt 0 ]; then
     echo

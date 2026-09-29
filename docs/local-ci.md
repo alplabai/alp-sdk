@@ -207,17 +207,26 @@ keep it short:
   `check_zephyr_conf_parity.py`). A full `test-all.sh` run deselects them;
   `--zephyr-only` and a plain `pytest tests/scripts/` (CI) still run them.
 
-- **Change-aware selection.** With `--target dev`, the twister stage runs
-  only if `scripts/select_checks.py` cannot prove the change leaves every
-  native_sim build input alone. It diffs against the merge base with
-  `origin/dev` (so `git fetch origin dev` first; `--select-base REF` uses
-  another ref) and counts uncommitted and untracked files too. A docs,
-  changelog, Yocto-layer or pytest-only change skips twister; anything the
-  script cannot classify runs it. Pass `--full` to force twister, and note
-  that `--target main` never skips it. See what it decided, and why:
+- **Change-aware selection, and a smoke subset instead of the full set.** The
+  twister stage first asks `scripts/select_checks.py` whether the change
+  leaves every native_sim build input alone. It diffs against the merge base
+  with `origin/dev` (so `git fetch origin dev` first; `--select-base REF`
+  uses another ref) and counts uncommitted and untracked files too. A docs,
+  changelog, Yocto-layer or pytest-only change skips twister. Anything the
+  script cannot prove irrelevant does **not** run the full ~270-config set
+  locally: it runs a bounded **smoke** subset -- the suites the changed files
+  sit in plus a fixed set (`SMOKE_SUITES` in `scripts/select_checks.py`: the
+  core peripheral API, one chip-driver suite, the console, an errno and a
+  registry unit test, and `hello-world`), about 2-3 minutes on a warm
+  `ccache`. The stage row reads `PASS (smoke; full set runs in CI)` and the
+  summary ends with a note, so a local green is never mistaken for full
+  twister coverage. The full set is CI's job: `pr-twister.yml` runs it in six
+  shards in the merge queue (CI never uses the smoke mode). Pass `--full` to
+  run the whole set locally; `--target main` always does. See what it
+  decided, and why:
 
   ```sh
-  python3 scripts/select_checks.py --base origin/dev --worktree
+  python3 scripts/select_checks.py --base origin/dev --worktree --local
   ```
 
 - **A warm ccache in any checkout.** Zephyr uses `ccache` when it is on

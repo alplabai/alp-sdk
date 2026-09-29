@@ -13,6 +13,15 @@ checkout -- `generated-files`, `alp-lock`, `abi-strict` and the
 after twister and the pool, because regenerating headers under a live twister
 build is what flakes `ALP_SOC_REF_STR undeclared`.
 
+A local run also no longer builds the full ~270-config native_sim set. Where
+`select_checks.py` cannot prove a change irrelevant (`--local`), twister runs a
+bounded smoke subset -- the suites the changed files sit in plus the fixed
+`SMOKE_SUITES` (peripheral API, one chip-driver suite, console, two unit tests,
+`hello-world`; ~2-3 min warm) -- and the row and summary say so
+(`PASS (smoke; full set runs in CI)`). The full set is CI's sharded pr-twister
+in the merge queue, which never uses the smoke mode; `--full` and
+`--target main` still run everything locally.
+
 Two pieces of duplicate work went with it. `check_stub_symbol_matrix.py` now
 compiles its 31 override combinations concurrently (through `ccache` when
 present), 49 s -> 10 s on a Windows box with the same byte-identical golden.
