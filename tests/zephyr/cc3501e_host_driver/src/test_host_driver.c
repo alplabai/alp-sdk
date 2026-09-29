@@ -1312,7 +1312,7 @@ static void slave_dispatch(void)
 		const uint32_t freq_hz = (uint32_t)slave.req_pl[0] | ((uint32_t)slave.req_pl[1] << 8) |
 		                         ((uint32_t)slave.req_pl[2] << 16) |
 		                         ((uint32_t)slave.req_pl[3] << 24);
-		const uint8_t d[8] = {
+		const uint8_t  d[8]    = {
 			(uint8_t)(freq_hz & 0xFFu),
 			(uint8_t)((freq_hz >> 8) & 0xFFu),
 			(uint8_t)((freq_hz >> 16) & 0xFFu),
@@ -1808,6 +1808,26 @@ ZTEST(cc3501e_host_driver, test_reply_gate_interpolates_between_the_two_measured
 	zassert_equal(g_delay_us_log[1],
 	              1100u,
 	              "the exact byte-count midpoint interpolates to the gate midpoint");
+}
+
+ZTEST(cc3501e_host_driver, test_reply_gate_fast_reply_firmware_uses_short_table)
+{
+	/* #2052: firmware reporting ALP_CC3501E_CAP_FAST_REPLY gets 200 us at
+	 * 536 B rising to 800 us at the 4092 B ceiling (plateau from there). */
+	static uint8_t reply[4096];
+	size_t         got = 0u;
+
+	fw.fw_fast_reply = 1u;
+	delay_log_reset();
+	zassert_equal(
+	    cc3501e_request(&fw, ALP_CC3501E_CMD_PING, NULL, 0, reply, sizeof(reply), &got, 100u),
+	    ALP_OK);
+	zassert_equal(g_delay_us_log[1], 800u, "4096 B cap is past the 4092 B fast ceiling");
+	delay_log_reset();
+	zassert_equal(cc3501e_request(&fw, ALP_CC3501E_CMD_PING, NULL, 0, reply, 2314u, &got, 100u),
+	              ALP_OK);
+	zassert_equal(g_delay_us_log[1], 500u, "2314 B is halfway between 536 B and 4092 B");
+	fw.fw_fast_reply = 0u;
 }
 
 ZTEST(cc3501e_host_driver, test_reply_gate_2048_reaches_the_plateau)

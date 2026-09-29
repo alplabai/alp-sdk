@@ -937,6 +937,10 @@ typedef enum {
 	ALP_CC3501E_CAP_POWER_POLICY = 0x00000200u, /**< power-policy control         */
 	ALP_CC3501E_CAP_DIAG_STATS   = 0x00000400u, /**< DIAG_GET_STATS counters      */
 	ALP_CC3501E_CAP_EVENTS       = 0x00000800u, /**< the polled async-event queue */
+	/** The per-frame slave path runs from RAM, so the reply header is armed
+	 *  within a bounded, size-proportional time after the request ends.  A
+	 *  host that sees this may use a shorter blind reply gate (#2052). */
+	ALP_CC3501E_CAP_FAST_REPLY = 0x00001000u,
 } alp_cc3501e_capability_t;
 
 /** Reply DATA for CMD_GET_CAPABILITIES (opcode 0x06).

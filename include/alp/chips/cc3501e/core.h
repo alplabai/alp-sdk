@@ -212,6 +212,10 @@ struct cc3501e {
 	 * reports what the build IMPLEMENTS, not what its number implies. */
 	uint8_t     fw_proto_major;
 	uint8_t     fw_proto_minor;
+	/* True when the firmware reported ALP_CC3501E_CAP_FAST_REPLY at the last
+	 * cc3501e_reset(); selects the shorter reply-header gate (#2052).  Sits
+	 * in the padding before @c bus, so the struct layout does not move. */
+	uint8_t fw_fast_reply;
 	alp_spi_t  *bus;        /**< SPI1 to the CC3501E (Alif master). */
 	alp_gpio_t *enable_pin; /**< WIFI.EN (P15_5).  May be NULL on boards that tie it on. */
 	alp_gpio_t *reset_pin;  /**< E_WIFI.NRST (P15_1_FLEX). */

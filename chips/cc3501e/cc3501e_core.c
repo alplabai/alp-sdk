@@ -691,6 +691,7 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx)
 	const uint8_t prior_minor = ctx->fw_proto_minor;
 	ctx->fw_proto_major       = 0u;
 	ctx->fw_proto_minor       = 0u;
+	ctx->fw_fast_reply        = 0u;
 
 	/* Wire-protocol compatibility gate (issue #1371): cc3501e-bridge-firmware:DESIGN.md
      * has always documented "host refuses a mismatch" for GET_VERSION, but
@@ -788,6 +789,15 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx)
 	 * its version number implies. */
 	ctx->fw_proto_major = fw_major;
 	ctx->fw_proto_minor = fw_minor;
+
+	/* #2052: a firmware whose per-frame path runs from RAM arms its reply
+	 * header far sooner; only then may the reply gate shrink.  Any failure
+	 * here just keeps the conservative gate -- it is not a reset failure. */
+	uint32_t caps = 0u;
+	if (cc3501e_get_capabilities(ctx, &caps) == ALP_OK &&
+	    (caps & (uint32_t)ALP_CC3501E_CAP_FAST_REPLY) != 0u) {
+		ctx->fw_fast_reply = 1u;
+	}
 
 	return ALP_OK;
 }
@@ -1865,16 +1875,29 @@ static uint32_t cc3501e_expected_reply_bytes(alp_cc3501e_cmd_t cmd,
 	return (uint32_t)rx_cap;
 }
 
-static uint32_t cc3501e_reply_header_gate_us(uint32_t bytes)
+/* #2052: with ALP_CC3501E_CAP_FAST_REPLY firmware the reply header is armed
+ * in ~0.1 us per frame byte (measured on E1M-AEN803 2026W36-0009: a 4094 B
+ * STREAM_WRITE needed more than 300 us and less than 600 us; 2050 B was clean
+ * at 300 us).  The fast gate interpolates 200 us at 536 B to 800 us at the
+ * 4092 B frame ceiling -- about 1.8x the measured need at both ends. */
+#define CC3501E_REPLY_GATE_FAST_LARGE_US 800u
+
+static uint32_t cc3501e_reply_header_gate_us(const cc3501e_t *ctx, uint32_t bytes)
 {
+	const uint32_t large_bytes = ctx->fw_fast_reply
+	                                 ? (uint32_t)(ALP_CC3501E_MAX_PAYLOAD - ALP_CC3501E_HEADER_BYTES)
+	                                 : (uint32_t)CC3501E_REPLY_GATE_LARGE_BYTES;
+	const uint32_t large_us =
+	    ctx->fw_fast_reply ? CC3501E_REPLY_GATE_FAST_LARGE_US : CC3501E_REPLY_GATE_LARGE_US;
+
 	if (bytes <= CC3501E_REPLY_GATE_SMALL_BYTES) {
 		return CC3501E_REPLY_GATE_FLOOR_US;
 	}
-	if (bytes >= CC3501E_REPLY_GATE_LARGE_BYTES) {
-		return CC3501E_REPLY_GATE_LARGE_US;
+	if (bytes >= large_bytes) {
+		return large_us;
 	}
-	const uint32_t span_bytes = CC3501E_REPLY_GATE_LARGE_BYTES - CC3501E_REPLY_GATE_SMALL_BYTES;
-	const uint32_t span_us    = CC3501E_REPLY_GATE_LARGE_US - CC3501E_REPLY_GATE_FLOOR_US;
+	const uint32_t span_bytes = large_bytes - CC3501E_REPLY_GATE_SMALL_BYTES;
+	const uint32_t span_us    = large_us - CC3501E_REPLY_GATE_FLOOR_US;
 	const uint32_t over_bytes = bytes - CC3501E_REPLY_GATE_SMALL_BYTES;
 	return CC3501E_REPLY_GATE_FLOOR_US + (over_bytes * span_us) / span_bytes;
 }
@@ -2277,7 +2300,11 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 			ctx->tx_scratch[tx_len + 1u] = (uint8_t)((crc >> 8) & 0xFFu);
 			tx_ptr                       = ctx->tx_scratch;
 		}
-		s = alp_spi_transceive(ctx->bus, tx_ptr, ctx->rx_scratch, wire_tx_len);
+		/* TX-only (NULL rx): the slave drives dummy zeros during the payload
+		 * phase and nothing reads them.  Without an RX side the polled loop never waits
+		 * on RX FIFO drains and runs at wire speed (#2052: 1.31 ms for 4094 B
+		 * at 25 MHz, against 1.91 ms full-duplex). */
+		s = alp_spi_transceive(ctx->bus, tx_ptr, NULL, wire_tx_len);
 		if (s != ALP_OK) goto out;
 	}
 	link_phase = CC3501E_LINK_LOG_PHASE_REPLY_HEADER; /* #2136 ring */
@@ -2293,10 +2320,13 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 	const uint32_t expected_reply = cc3501e_expected_reply_bytes(cmd, tx_payload, tx_len, rx_cap);
 	const uint32_t gate_bytes =
 	    (expected_reply > (uint32_t)wire_tx_len) ? expected_reply : (uint32_t)wire_tx_len;
-	cc3501e_reply_gate(ctx, cc3501e_reply_header_gate_us(gate_bytes));
+	cc3501e_reply_gate(ctx, cc3501e_reply_header_gate_us(ctx, gate_bytes));
 
 	/* Dummies for the read transactions (MOSI is don't-care on a read). */
-	memset(ctx->tx_scratch, 0xFF, sizeof(ctx->tx_scratch));
+	/* Only the bytes each read phase clocks: the reply header now, the reply
+	 * payload once its length is known.  Clearing all 4100 B here cost up to
+	 * 165 us per request under -Os (#2052). */
+	memset(ctx->tx_scratch, 0xFF, ALP_CC3501E_HEADER_BYTES);
 
 	/* 3. Reply header -> learn the reply payload length. */
 	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
@@ -2339,6 +2369,7 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 	 * its ISR only after the reply-header transfer completes). */
 	cc3501e_reply_gate(ctx, CC3501E_PHASE_SETTLE_US);
 	/* 4. Reply payload: status byte followed by the response data. */
+	memset(ctx->tx_scratch, 0xFF, resp_payload_len);
 	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, resp_payload_len);
 	if (s != ALP_OK) goto out;
 
