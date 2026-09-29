@@ -52,6 +52,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "alp/ext/deepx/inference.h"
 #include "alp/inference.h"
 
 #include "alp_internal.h"
@@ -111,6 +112,9 @@ alp_status_t
 alp_inference_deepx_get_output(struct alp_inference *h, size_t index, alp_inference_tensor_t *out);
 alp_status_t alp_inference_deepx_invoke(struct alp_inference *h);
 void         alp_inference_deepx_close(struct alp_inference *h);
+alp_status_t alp_inference_deepx_bind_cores(struct alp_inference *h, unsigned bound);
+alp_status_t alp_inference_deepx_get_status(struct alp_inference      *h,
+                                            alp_deepx_device_status_t *out);
 #endif
 
 #if defined(ALP_SDK_USE_DRPAI_V2N)
@@ -214,21 +218,30 @@ alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg)
 	 * comment for why every OTHER access to this field is atomic). */
 	h->last_invoke_latency_us = UINT64_MAX;
 
+	/* Each compiled-in backend loads exactly one model format.  Refuse a
+	 * mismatch HERE, before its open hook sees the bytes: on E1M-V2M103 an
+	 * `.onnx` blob opened under AUTO (DRP-AI resolved) went straight into
+	 * the DRP-AI tar extractor, which is the wrong parser and, before its
+	 * SIGPIPE guard, killed the app.  The header already documents
+	 * "unsupported model format" as ALP_ERR_INVAL. */
 	alp_status_t rc = ALP_ERR_NOSUPPORT;
 	switch (backend) {
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
 	case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
-		rc = alp_inference_deepx_open(h, cfg);
+		rc = cfg->format == ALP_INFERENCE_MODEL_DXNN ? alp_inference_deepx_open(h, cfg)
+		                                             : ALP_ERR_INVAL;
 		break;
 #endif
 #if defined(ALP_SDK_USE_DRPAI_V2N)
 	case ALP_INFERENCE_BACKEND_DRPAI:
-		rc = alp_inference_drpai_open(h, cfg);
+		rc = cfg->format == ALP_INFERENCE_MODEL_DRPAI ? alp_inference_drpai_open(h, cfg)
+		                                              : ALP_ERR_INVAL;
 		break;
 #endif
 #if defined(ALP_SDK_USE_ORT_CPU)
 	case ALP_INFERENCE_BACKEND_CPU:
-		rc = alp_inference_ort_open(h, cfg);
+		rc = cfg->format == ALP_INFERENCE_MODEL_ONNX ? alp_inference_ort_open(h, cfg)
+		                                             : ALP_ERR_INVAL;
 		break;
 #endif
 	default:
@@ -527,4 +540,37 @@ void alp_inference_close(alp_inference_t *inf)
 	}
 	alp_lifecycle_set(&inf->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	pool_release(inf);
+}
+
+/* ------------------------------------------------------------------ */
+/* <alp/ext/deepx/inference.h> (#482)                                  */
+/* ------------------------------------------------------------------ */
+
+alp_status_t alp_deepx_inference_bind_cores(alp_inference_t *inf, alp_deepx_npu_cores_t cores)
+{
+	if (inf == NULL || (unsigned)cores > (unsigned)ALP_DEEPX_NPU_CORES_02) return ALP_ERR_INVAL;
+	if (!alp_handle_op_enter(&inf->lifecycle, &inf->active_ops)) return ALP_ERR_NOT_READY;
+	alp_status_t rc = ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
+#if defined(ALP_SDK_USE_DEEPX_DXM1)
+	if (inf->backend == ALP_INFERENCE_BACKEND_DEEPX_DXM1) {
+		rc = alp_inference_deepx_bind_cores(inf, (unsigned)cores);
+	}
+#endif
+	alp_handle_op_leave(&inf->active_ops);
+	return rc;
+}
+
+alp_status_t alp_deepx_inference_get_status(alp_inference_t           *inf,
+                                            alp_deepx_device_status_t *status_out)
+{
+	if (inf == NULL || status_out == NULL) return ALP_ERR_INVAL;
+	if (!alp_handle_op_enter(&inf->lifecycle, &inf->active_ops)) return ALP_ERR_NOT_READY;
+	alp_status_t rc = ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
+#if defined(ALP_SDK_USE_DEEPX_DXM1)
+	if (inf->backend == ALP_INFERENCE_BACKEND_DEEPX_DXM1) {
+		rc = alp_inference_deepx_get_status(inf, status_out);
+	}
+#endif
+	alp_handle_op_leave(&inf->active_ops);
+	return rc;
 }

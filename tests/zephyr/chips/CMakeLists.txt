@@ -99,6 +99,7 @@ target_sources(app PRIVATE
     src/fake_bmi323.c
     src/fake_bmp581.c
     src/fake_ina236.c
+    src/fake_optiga.c
     src/fake_tas2563.c
     src/fake_gd32bridge.c
 )

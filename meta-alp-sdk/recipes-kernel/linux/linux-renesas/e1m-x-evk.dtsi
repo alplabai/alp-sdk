@@ -221,6 +221,9 @@
 		compatible = "audio-graph-card2";
 		label = "e1m-x-evk-tas2563";
 		links = <&sound_multi_cpu>;
+		/* Off until playback moves to SSI2's data line (#2331): see
+		 * &rcar_sound below. */
+		status = "disabled";
 
 		multi {
 			#address-cells = <1>;
@@ -278,15 +281,26 @@
 	clock-frequency = <24576000>;
 };
 
-/* SoC audio block (SCU/ADG/SSIU/SSI/AUDMAPP). Only SSI1 (playback,
- * SSIU1 SCK/WS + its own SDATA) is wired to the carrier -- SSIU2's extra
- * SDATA line is unused for this playback-only stereo pair (both TAS2563
- * mono amps tap the one shared SDATA line; each is configured over I2C
- * to consume its own TDM slot, not a second physical data line). */
+/* SoC audio block (SCU/ADG/SSIU/SSI/AUDMAPP).
+ *
+ * KNOWN WRONG DATA LINE (#2331): per the SoM + carrier netlists, SSI1's
+ * SDATA (P46) reaches E1M pad AQ4 I2S0_SDI -> TMUX1574 U46 -> the TAS2563
+ * SDOUT pins (U27/U28 pin 10), and SSI2's SDATA (P47) reaches AR4
+ * I2S0_SDO -> the TAS2563 SDIN pins (pin 11). Playback on ssi1 below
+ * therefore drives the amps' SDOUT net, not their SDIN: no audio, and the
+ * SoC and the amps' IV-sense transmit can contend on that net. The fix is
+ * playback on SSI2's data line with SSI1's SCK/WS, which the BSP rsnd
+ * driver's pin sharing (SSI0-parent only) does not cover yet.
+ *
+ * Until it does, the SSI block and the sound card above are disabled, so
+ * no ALSA card exists and sound_pins is never applied: P44/P45/P46 stay
+ * at their reset state and nothing on the SoC side can drive the amps'
+ * SDOUT net. The TAS2563 codec nodes below still probe over I2C0. To
+ * re-enable, fix the data line first, then set both nodes to "okay". */
 &rcar_sound {
 	pinctrl-0 = <&sound_pins>;
 	pinctrl-names = "default";
-	status = "okay";
+	status = "disabled";
 
 	#sound-dai-cells = <1>;
 

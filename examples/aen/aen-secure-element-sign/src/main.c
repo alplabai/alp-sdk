@@ -2,8 +2,8 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * aen-secure-element-sign -- exercise the current OPTIGA Trust M
- * probe-only contract on the E1M-AEN (Alif Ensemble) SoM.
+ * aen-secure-element-sign -- talk to the OPTIGA Trust M on the E1M-AEN
+ * (Alif Ensemble) SoM.
  *
  * On the E1M-AEN the Trust M sits on **BRD_I2C** -- the on-module
  * housekeeping bus (SoC I2C0, function C, P7_1 SCL / P7_0 SDA --
@@ -24,11 +24,10 @@
  * confirmed external pull-up (see the board overlay's pinctrl comment) --
  * do not add bias-pull-down.
  *
- * The in-tree v0.3 driver probes the Trust M I2C_STATE register only.
- * Product-info and raw-APDU helpers are declared for the planned host
- * library integration, but return ALP_ERR_NOSUPPORT today after
- * argument validation.  This example keeps the historical name while
- * making that probe-only contract explicit.
+ * The driver probes I2C_STATE, then reads the Coprocessor UID through
+ * Infineon's host library.  examples/v2n/v2n-secure-element-sign also
+ * runs a raw APDU session; it is the bench-verified variant (E1M-V2M103).
+ * Nothing here writes to the chip.
  */
 
 #include <zephyr/kernel.h>
@@ -92,46 +91,31 @@ int main(void)
 
 	printk("[se] I2C_STATE probe -> ALP_OK\n");
 
-	/* GET_DATA_OBJECT needs the full Infineon APDU transport, which isn't
-	 * integrated yet -- the driver validates args then returns NOSUPPORT
-	 * rather than fabricating a response. NOSUPPORT is therefore the PASS
-	 * value here: this asserts the stub's contract hasn't silently drifted
-	 * (e.g. started returning stale/zeroed info instead of refusing). */
+	/* Coprocessor UID (data object 0xE0C2): opens the Trust M application
+	 * through the host library and reads it.  Read-only. */
 	optiga_trust_m_product_info_t info;
 	s = optiga_trust_m_read_product_info(&se, &info);
-	printk("[se] read_product_info -> %d (expected NOSUPPORT)\n", (int)s);
-	if (s != ALP_ERR_NOSUPPORT) {
-		printk("[se] RESULT FAIL: product-info path no longer matches the probe-only contract\n");
+	if (s != ALP_OK) {
+		printk("[se] RESULT FAIL: read_product_info -> %d\n", (int)s);
 		optiga_trust_m_deinit(&se);
 		alp_i2c_close(bus);
 		printk("[se] done\n");
 		return 0;
 	}
-
-	/* Same contract check for the raw-APDU path: this APDU (SET DATA OBJECT,
-	 * tag 0x11) is a stand-in -- it never reaches the wire, since the driver
-	 * rejects it at argument validation before any I2C transaction. resp_len
-	 * is pre-poisoned (123) so the check below proves the driver zeroes it
-	 * on the NOSUPPORT path rather than leaving stale data. */
-	uint8_t apdu[4]  = { 0x31u, 0x11u, 0x00u, 0x00u };
-	uint8_t resp[8]  = { 0 };
-	size_t  resp_len = 123u;
-	s = optiga_trust_m_send_apdu(&se, apdu, sizeof apdu, resp, sizeof resp, &resp_len, 1000u);
-	printk("[se] send_apdu -> %d resp_len=%u (expected NOSUPPORT, zero bytes)\n",
-	       (int)s,
-	       (unsigned)resp_len);
-	if (s != ALP_ERR_NOSUPPORT || resp_len != 0u) {
-		printk("[se] RESULT FAIL: raw-APDU path no longer matches the probe-only contract\n");
-		optiga_trust_m_deinit(&se);
-		alp_i2c_close(bus);
-		printk("[se] done\n");
-		return 0;
-	}
+	printk("[se] UID: cim %02X platform %02X model %02X fw %02X%02X%02X%02X build %02X%02X\n",
+	       info.cim_id,
+	       info.platform_id,
+	       info.model_id,
+	       info.fw_id[0],
+	       info.fw_id[1],
+	       info.fw_id[2],
+	       info.fw_id[3],
+	       info.esw_build[0],
+	       info.esw_build[1]);
 
 	optiga_trust_m_deinit(&se);
 	alp_i2c_close(bus);
-	printk("[se] RESULT PASS: Trust M I2C_STATE probe works; product-info/raw-APDU are "
-	       "cleanly blocked with ALP_ERR_NOSUPPORT\n");
+	printk("[se] RESULT PASS: Trust M probe and Coprocessor UID read work\n");
 	printk("[se] done\n");
 	return 0;
 }
