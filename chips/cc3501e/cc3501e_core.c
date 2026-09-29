@@ -47,7 +47,6 @@
  * standalone, dependency-free macro header (no kernel.h pulled in). */
 #ifdef __ZEPHYR__
 #include <zephyr/sys/util_macro.h>
-
 #endif
 
 static void
