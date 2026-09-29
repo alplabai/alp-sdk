@@ -534,3 +534,56 @@ def test_aen701_board_inherits_common_only() -> None:
         assert spec_path.parent.name == "_common", (
             f"unexpected per-board spec in aen701-evk: {spec_path}"
         )
+
+
+# ---------------------------------------------------------------------
+# ssh-run (Linux A55 examples, #1160)
+# ---------------------------------------------------------------------
+
+
+def _ssh_spec(tmp: Path) -> "run_smoke.SmokeSpec":
+    d = _make_spec_dir(tmp)
+    spec = run_smoke.parse_spec(d / "smoke.yaml")
+    import dataclasses
+
+    return dataclasses.replace(spec, flash_method=run_smoke.SSH_RUN)
+
+
+def test_ssh_run_has_no_west_build_and_copies_then_runs(tmp_path: Path) -> None:
+    import dataclasses
+
+    spec = dataclasses.replace(
+        _ssh_spec(tmp_path), ssh_host="root@board", artifact_dir="/art")
+    assert run_smoke.build_command(spec) is None
+    flash = run_smoke.flash_command(spec)
+    assert flash[0] == "scp" and flash[-1] == "root@board:/tmp/gpio-button-led"
+    assert Path(flash[-2]) == Path("/art") / "gpio-button-led"
+    assert run_smoke.capture_command(spec) == [
+        "ssh", "root@board",
+        "chmod +x /tmp/gpio-button-led && /tmp/gpio-button-led",
+    ]
+
+
+def test_ssh_run_without_host_fails_the_spec(tmp_path: Path) -> None:
+    result = run_smoke.run_spec(_ssh_spec(tmp_path))
+    assert not result.ok
+    assert "ALP_HIL_SSH_HOST" in result.failures[0]
+
+
+def test_ssh_run_without_artifact_fails_the_spec(tmp_path: Path) -> None:
+    import dataclasses
+
+    spec = dataclasses.replace(
+        _ssh_spec(tmp_path), ssh_host="root@board", artifact_dir=str(tmp_path))
+    result = run_smoke.run_spec(spec)
+    assert not result.ok
+    assert "prebuilt binary not found" in result.failures[0]
+
+
+def test_v2n_temp_sensor_specs_run_on_the_a55() -> None:
+    """The example is a Linux app; flashing it to the CM33 the board
+    runner targets cannot work (#1160)."""
+    for board in ("v2n101-x-evk", "v2m103-x-evk"):
+        spec = run_smoke.parse_spec(REPO / "tests" / "hil" / board / "v2n-temp-sensor.yaml")
+        assert spec.flash_method == run_smoke.SSH_RUN
+        assert "[temp] done" in spec.serial.expect_contains
