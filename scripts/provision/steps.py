@@ -171,7 +171,12 @@ class Ctx:
         return self.bench
 
     def need_linux(self):
-        """The Linux target, or None in a dry run without one (plan only)."""
+        """The Linux target, or None in a dry run without one (plan only).
+        Like linux_up(), attach the bench's configured host when an --only /
+        --from / --force-step run starts past the step that normally
+        attaches it, instead of refusing a board that is already up."""
+        if self.linux is None and self.bench is not None and self.bench.linux_host:
+            self.linux = lt.LinuxTarget(self.bench.linux_host, self.bench.linux_user)
         if self.linux is None and self.execute:
             raise Refused("no Linux target: boot_sd_linux has not run")
         return self.linux

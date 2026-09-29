@@ -981,6 +981,19 @@ def test_linux_up_attaches_the_configured_host_when_detect_was_skipped(tmp_path,
     assert not steps.Ctx.linux_up(_ctx(tmp_path / "b", bench=_bench()))
 
 
+def test_need_linux_attaches_the_configured_host_on_a_forced_step(tmp_path):
+    # --only gd32_flash --force-step gd32_flash on a board already up: the
+    # step calls need_linux() without any probe having attached ctx.linux,
+    # which refused with "boot_sd_linux has not run" (E1M-V2M103, 2026-09-29).
+    b = _bench()
+    b.linux_host = "192.0.2.7"
+    ctx = _ctx(tmp_path, bench=b, execute=True)
+    assert ctx.linux is None
+    assert ctx.need_linux().host == "192.0.2.7"
+    with pytest.raises(steps.Refused):
+        _ctx(tmp_path / "b", bench=_bench(), execute=True).need_linux()
+
+
 def test_preflight_refuses_execute_without_pmic_expect(tmp_path):
     ctx = _ctx(tmp_path, execute=True, expected_registers=None)
     res = steps.Preflight().run(ctx)
