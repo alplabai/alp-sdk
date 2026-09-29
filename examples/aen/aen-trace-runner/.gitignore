@@ -1,0 +1,12 @@
+build/
+*.o
+*.elf
+*.bin
+.venv/
+__pycache__/
+*.map
+*.jlink
+!tests/host/data/*.bin
+# The repo-root .gitignore ignores Makefile (CMake build trees); the A32
+# images are built with these hand-written ones.
+!a32/**/Makefile

@@ -555,6 +555,9 @@ def _stranded_boards_dir_problems(root: Path) -> list[str]:
             if (i >= 3 and parts[i - 2] == "sysbuild"
                     and (app.parent.parent / "CMakeLists.txt").is_file()):
                 continue  # <app>/sysbuild/<image>/boards/: sysbuild's own
+            if (i >= 3 and parts[i - 2] == "shields" and parts[i - 3] == "boards"
+                    and (root.joinpath(*parts[:i - 3]) / "CMakeLists.txt").is_file()):
+                continue  # <app>/boards/shields/<shield>/boards/: a shield's own
             if not (app / "CMakeLists.txt").is_file():
                 stranded.setdefault(boards, []).append(
                     "/".join(parts[i + 1:]))
