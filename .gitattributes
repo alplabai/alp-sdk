@@ -57,11 +57,9 @@ CMakeLists.txt text eol=lf
 *.bin     binary
 *.elf     binary
 
-<<<<<<< HEAD
 # Vendor data under its own terms (ADR 0032): stored byte-identical to
 # upstream, CRLF and all, so the SHA-256s in metadata/svd/alif/README.md hold.
 metadata/svd/** -text
-=======
+
 # Raw console captures (CR CR LF line endings, leading NULs) replayed byte-exact by tests.
 tests/scripts/fixtures/provision/*.log -text
->>>>>>> origin/dev
