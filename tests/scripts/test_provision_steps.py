@@ -625,6 +625,29 @@ def test_cold_boot_fixed_otp_unit_records_workaround_none(tmp_path):
     assert cb.evidence.get("act88760_gpio4_workaround") == "none"
 
 
+def test_cold_boot_reads_the_uboot_gd32_nrst_line(tmp_path):
+    """U-Boot 0011 prints what it did to reg 0x10; that line, not a guess,
+    decides between an early-OTP unit (u-boot) and a fixed one (none)."""
+    for line, otp, how in (
+            ("ALP: ACT88760 GD32_NRST released (0x10: 0x88 -> 0x08)", "0x88", "u-boot"),
+            ("ALP: ACT88760 GD32_NRST already released (0x10=0x08)", "0x08", "none")):
+        board = Board(act_0x10=0x08)
+        board.host = "10.0.0.2"
+        board._answer_orig = board._answer
+        board._answer = lambda cmd, b=board: (0, _everyone_acks()) if cmd.startswith("i2cdetect") else b._answer_orig(cmd)
+        console = _login_console()
+        bench = _bench(console=console)
+        bench.power.on_hook = lambda c=console, ln=line: c.feed(
+            "NOTICE:  BL2: v2.10\nNOTICE:  BL2: SYS_LSI_MODE: 0X3c06\nDRAM:  3.9 GiB\n"
+            f"{ln}\n{gates.RAIL_PG}\n\ne1m login: ")
+        ctx = _ctx(tmp_path / how, bench=bench, linux=board, execute=True, cold_cycles=1)
+        res = steps.run_steps(ctx, only=["cold_boot_test"], force=["cold_boot_test"])
+        cb = res[-1]
+        assert cb.status == "done", cb.detail
+        assert cb.evidence.get("act88760_gpio4_otp") == otp, cb.evidence
+        assert cb.evidence.get("act88760_gpio4_workaround") == how, cb.evidence
+
+
 def test_build_dir_unit_defaults_to_bench_only(tmp_path):
     ctx = _ctx(tmp_path, execute=True)
     ctx.bundle["release_version"] = "build-dir:deploy"

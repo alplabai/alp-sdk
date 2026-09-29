@@ -1139,8 +1139,18 @@ class ColdBootTest(Step):
                 # census/gd32_flash having ever seen 0x88 marks this as an
                 # early-OTP unit; a clean 0x08 here (a plain cold boot, no
                 # provisioning-tool release in it) means U-Boot did it itself.
-                otp_seen_88 = ctx.facts.get("act88760_gpio4_otp") == f"{lt.ACT88760_GPIO4_OTP_DEFAULT:#04x}"
-                ev["act88760_gpio4_workaround"] = "u-boot" if otp_seen_88 else "none"
+                # U-Boot 0011's own console line says which case this boot
+                # was; fall back to what census/gd32_flash saw this run.
+                nrst = uboot.parse_gd32_nrst(text)
+                if nrst == "released":
+                    ev["act88760_gpio4_otp"] = f"{lt.ACT88760_GPIO4_OTP_DEFAULT:#04x}"
+                    ev["act88760_gpio4_workaround"] = "u-boot"
+                elif nrst == "already":
+                    ev["act88760_gpio4_otp"] = f"{lt.ACT88760_GPIO4_RELEASED:#04x}"
+                    ev["act88760_gpio4_workaround"] = "none"
+                else:
+                    otp_seen_88 = ctx.facts.get("act88760_gpio4_otp") == f"{lt.ACT88760_GPIO4_OTP_DEFAULT:#04x}"
+                    ev["act88760_gpio4_workaround"] = "u-boot" if otp_seen_88 else "none"
             probs += lt.i2c_check(ctx.linux, cycle_expected)
             ev.update(tev)
             ev["soc_sys_lsi_mode"] = mode or ""
