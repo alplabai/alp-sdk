@@ -28,6 +28,15 @@
 
 #include "../../src/backends/can/yocto_drv.c"
 
+/* The _rx_loop() epilogue in yocto_drv.c calls this dispatch-layer hook
+ * (src/can_dispatch.c).  This test exercises only filter matching and
+ * never closes a handle, so a no-op keeps it linkable without pulling in
+ * the whole dispatch layer. */
+void alp_can_close_finalize(void *owner)
+{
+	(void)owner;
+}
+
 static int g_hits;
 
 static int fake_apply_filters(y_can_data_t *d, const struct can_filter *set, size_t n)
