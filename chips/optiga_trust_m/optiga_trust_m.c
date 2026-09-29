@@ -136,7 +136,12 @@ alp_status_t optiga_trust_m_init(optiga_trust_m_t *ctx, alp_i2c_t *bus, uint8_t 
 	for (unsigned i = 0; i < OPTIGA_PROBE_TRIES && s != ALP_OK; i++) {
 		if (i != 0u) alp_delay_ms(OPTIGA_PROBE_RETRY_MS);
 		s = alp_i2c_write(ctx->bus, ctx->addr, &reg, 1);
-		if (s == ALP_OK) s = alp_i2c_read(ctx->bus, ctx->addr, state, sizeof(state));
+		if (s != ALP_OK) continue;
+		/* The part needs PL_GUARD_TIME_INTERVAL_US (50 us) between the
+		 * register write and the read; alp_delay_ms is the finest
+		 * portable wait. */
+		alp_delay_ms(1);
+		s = alp_i2c_read(ctx->bus, ctx->addr, state, sizeof(state));
 	}
 	if (s != ALP_OK) return ALP_ERR_NOT_READY;
 
