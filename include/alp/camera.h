@@ -74,9 +74,9 @@ typedef struct {
 	                   *   whatever rate it powered up with); nonzero is a
 	                   *   REQUEST, not a guarantee -- the backend settles on
 	                   *   the nearest rate its sensor/mode actually supports
-	                   *   (e.g. the OV5647 only reaches one of a fixed rate
-	                   *   table, and the IMX296 always settles to its one
-	                   *   fixed 60.3 fps rate no matter what was asked). The
+	                   *   (e.g. each ISP-Pico sensor only reaches one of its
+	                   *   own fixed rate table; some sensors have exactly one
+	                   *   fixed rate and ignore the request entirely). The
 	                   *   settled rate is read back with
 	                   *   alp_camera_get_fps() (issue #2279). If this field
 	                   *   is NONZERO and the terminal sensor device has no

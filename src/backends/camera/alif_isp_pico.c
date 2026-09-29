@@ -111,7 +111,6 @@ LOG_MODULE_REGISTER(alp_camera_alif_isp_pico, CONFIG_LOG_DEFAULT_LEVEL);
 #include "camera_frmival.h"
 #include "camera_ops.h"
 #include "alif_isp_pico.h"
-#include "camera_frmival.h"
 #include "alp_slot_claim.h"
 #include "yuv_to_rgb565.h"
 
@@ -434,84 +433,49 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	struct video_control ae_ctrl = { .id = VIDEO_CID_EXPOSURE_AUTO, .val = VIDEO_EXPOSURE_AUTO };
 	(void)video_set_ctrl(dev, &ae_ctrl);
 
-	/* Apply the caller's fps request to whichever sensor this shield
-	 * actually wires up -- OV5647 (2-lane) or IMX296 (1-lane, fixed
-	 * 60.3 fps) -- via the shared policy (issue #2276 first wired this
-	 * up for OV5647 only, hand-rolled; #2278 moved the body into
-	 * camera_frmival.h's camera_apply_fps() so zephyr_video.c /
-	 * v2n_n44_isp.c share it, and generalised the sensor lookup so an
-	 * IMX296 build (camera-mjpeg-stream, #2287/#2305) stops silently
-	 * ignoring cfg->fps the way it used to). cfg->fps == 0 means
-	 * "backend default" (see <alp/camera.h>'s alp_camera_config_t::fps
-	 * doc) -- NOT the same convention width/height use just above
-	 * (those are a "you must choose" sentinel that alp_camera_open()
-	 * rejects outright).
+	/* Request the caller's fps on whichever real sensor is wired behind this
+	 * ISP -- OV5647, IMX296, IMX335, or a future sensor -- through the ISP
+	 * device itself, with no per-sensor DT nodelabel list (issue #2338: this
+	 * used to reach only DEVICE_DT_GET(DT_NODELABEL(ov5647)), silently
+	 * dropping the request for every other sensor). cfg->fps == 0 means
+	 * "backend default" (see <alp/camera.h>'s alp_camera_config_t::fps doc)
+	 * -- NOT the same convention width/height use just above (those are a
+	 * "you must choose" sentinel that alp_camera_open() rejects outright;
+	 * an unset fps is not an error, it just falls back to this backend's
+	 * own default of 10 fps -- a *choice* that buys AE the most exposure
+	 * headroom in a dim scene on a sensor with a wide rate table like the
+	 * OV5647 (ov5647_framerates[] in ov5647.c: {10, 15, 30, 45, 60, 90,
+	 * 120}), not a hardware floor any sensor needs.
 	 *
-	 * isp_pico.c can't be asked generically here: it derives its own AE
-	 * envelope from video_get_frmival(config->controller, ...) (isp ->
-	 * cam -> csi -> sensor chain, sensor-agnostic -- see that file's AE
-	 * comment), but `controller` is private to its driver config, not
-	 * reachable from this backend, and isp_pico's video_driver_api
-	 * doesn't implement .set_frmival/.get_frmival itself. So this stays
-	 * scoped to whichever sensor's own DT node this shield defines; a
-	 * future sensor on this ISP path needs its own #elif branch here.
+	 * A single video_set_frmival(dev, ...) on the ISP device itself reaches
+	 * the real sensor generically: isp_pico.c's own .get_frmival/.set_frmival
+	 * (forwarding to `controller`, isp_pico.c:2672-2699) match
+	 * video_alif.c's alif_cam_set_frmival() (forwards to its endpoint) and
+	 * video_csi_dw.c's csi2_dw_set_frmival() (forwards to
+	 * config->sensor[data->current_sensor]) -- the three-hop
+	 * isp -> cam -> csi -> sensor forward chain exists on both the get and
+	 * set side, so camera_apply_fps() (#2278) below reaches whichever
+	 * sensor this shield actually wires up and reads the settled rate back
+	 * rather than assume the request landed exactly (VTS-clamped for
+	 * OV5647; IMX296's all-pixel-scan mode has exactly one fixed 60.3
+	 * frame/s rate, imx296.c's imx296_set_frmival(), which always overwrites
+	 * the request and returns success regardless of what was asked).
 	 *
-	 * OV5647's own default of 10 fps (its lowest supported rate,
-	 * ov5647_framerates[] in ov5647.c) buys AE the most exposure
-	 * headroom in a dim scene -- a *choice*, not a hardware floor; the
-	 * sensor driver owns the exposure ceiling regardless
-	 * (ov5647_set_ctrl_exposure() clamps every VIDEO_CID_EXPOSURE write
-	 * to the active mode's VTS - 4 lines). IMX296 has no such choice:
-	 * imx296_set_frmival() always overwrites the request with its one
-	 * fixed all-pixel-scan rate (10/603 = 60.3 fps) and returns success
-	 * regardless of what was asked, so there is nothing sensible to
-	 * request by default -- camera_apply_fps() just settles-and-logs
-	 * (LOG_INF, since the settled rate never matches a nonzero request)
-	 * whatever the caller asked for and never declines it.
+	 * In TPG mode (config->controller == NULL, no real sensor) isp_pico.c's
+	 * own .set_frmival returns -ENOSYS -- camera_apply_fps()'s shared policy
+	 * treats that as "nothing to do" for a backend-only default (cfg->fps ==
+	 * 0, same tolerance this backend had before #2278/#2338) but as a loud
+	 * ALP_ERR_NOSUPPORT decline for an explicit CALLER request -- stricter
+	 * than this backend's pre-#2278 posture, which only ever logged
+	 * LOG_INF and never declined.
 	 *
-	 * The shared policy is stricter than this backend used to be for an
-	 * explicit CALLER request: a nonzero cfg->fps the sensor can't honor
-	 * at all now fails open() with ALP_ERR_NOSUPPORT instead of only
-	 * warning -- but a failed backend-only default (e.g. a transient
-	 * SCCB NAK) still only warns, same tolerance as before #2278. */
-#if DT_NODE_EXISTS(DT_NODELABEL(ov5647))
-	const struct device *sensor_dev         = DEVICE_DT_GET(DT_NODELABEL(ov5647));
-	uint8_t              sensor_default_fps = 10u;
-#elif DT_NODE_EXISTS(DT_NODELABEL(imx296))
-	const struct device *sensor_dev = DEVICE_DT_GET(DT_NODELABEL(imx296));
-	uint8_t sensor_default_fps      = 0u; /* fixed-rate sensor -- no default worth forcing */
-#else
-	const struct device *sensor_dev         = NULL;
-	uint8_t              sensor_default_fps = 0u;
-#endif
-
-	if (sensor_dev != NULL) {
-		if (device_is_ready(sensor_dev)) {
-			alp_status_t fps_status = camera_apply_fps(
-			    sensor_dev, cfg->camera_id, cfg->fps, sensor_default_fps, &st->frmival);
-			if (fps_status != ALP_OK) {
-				_free_state(st);
-				return fps_status;
-			}
-		} else if (cfg->fps == 0u) {
-			LOG_WRN("camera%u: sensor device not ready; fps request (%u) not applied",
-			        cfg->camera_id,
-			        cfg->fps);
-		} else {
-			/* An explicit CALLER rate on a sensor that isn't even
-			 * ready yet -- open() would fail once streaming
-			 * starts anyway; fail it here instead of pretending
-			 * the request succeeded. */
-			_free_state(st);
-			return ALP_ERR_NOT_READY;
-		}
-	} else if (cfg->fps != 0u) {
-		LOG_ERR("camera%u: %u fps requested but no known sensor node exists on this "
-		        "shield",
-		        cfg->camera_id,
-		        cfg->fps);
+	 * The sensor driver owns the exposure ceiling regardless: e.g. OV5647's
+	 * ov5647_set_ctrl_exposure() (ov5647.c) clamps every VIDEO_CID_EXPOSURE
+	 * write to the active mode's VTS - 4 lines. */
+	alp_status_t fps_status = camera_apply_fps(dev, cfg->camera_id, cfg->fps, 10u, NULL);
+	if (fps_status != ALP_OK) {
 		_free_state(st);
-		return ALP_ERR_NOSUPPORT;
+		return fps_status;
 	}
 
 	uint8_t want = ARRAY_SIZE(st->vbufs);

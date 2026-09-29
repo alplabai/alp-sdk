@@ -81,10 +81,6 @@ static const struct device *const _devs[] = {
 typedef struct {
 	const struct device *dev;
 	struct video_format  fmt;
-	/** Frame interval camera_apply_fps() actually settled on at open()
-	 *  (#2278); {0, 0} if fps was left at the device's own default.
-	 *  Not read back by any getter yet -- see issue #2279. */
-	struct video_frmival frmival;
 	struct video_buffer *vbufs[CONFIG_ALP_SDK_CAMERA_ZEPHYR_VIDEO_VBUF_COUNT];
 	uint8_t              vbuf_count;
 	bool                 streaming;
@@ -282,7 +278,7 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
 	 * set_format would be silently overwritten (#2278).  No backend
 	 * default here -- cfg->fps == 0 leaves this device at whatever
 	 * rate the sensor's default mode already runs. */
-	alp_status_t fps_status = camera_apply_fps(dev, cfg->camera_id, cfg->fps, 0u, &st->frmival);
+	alp_status_t fps_status = camera_apply_fps(dev, cfg->camera_id, cfg->fps, 0u, NULL);
 	if (fps_status != ALP_OK) {
 		/* Nothing allocated yet (vbufs come after this) -- releasing
 		 * the state slot is the only cleanup an open failure this

@@ -166,6 +166,16 @@ ZTEST(alp_camera_zephyr_video_fps, test_fps_200_clamps_to_generators_ceiling)
 	zassert_equal(fi.numerator, 1u, NULL);
 	zassert_equal(fi.denominator, 60u, "clamped to the generator's own ceiling");
 
+	/* alp_camera_get_fps() (#2279) is a SEPARATE read of the device, not a
+	 * cache of what camera_apply_fps() settled on (that settled value is
+	 * passed as NULL and discarded at this call site -- see
+	 * zephyr_video.c's z_open()) -- pin that the getter agrees with the
+	 * clamped 60 fps the raw video_get_frmival() call above just read. */
+	uint32_t fps_x1000 = 0u;
+	zassert_ok(alp_camera_get_fps(current_cam, &fps_x1000), NULL);
+	zassert_equal(
+	    fps_x1000, 60000u, "getter must report the clamped 60 fps, not the 200 requested");
+
 	alp_camera_close(current_cam);
 	current_cam = NULL;
 }
@@ -192,6 +202,16 @@ ZTEST(alp_camera_zephyr_video_fps, test_fps_zero_on_no_frmival_device_opens)
 	 * the absence rather than crash. */
 	struct video_frmival fi = { 0 };
 	zassert_equal(video_get_frmival(cam1_dev, &fi), -ENOSYS);
+
+	/* alp_camera_get_fps() (#2279) reads the SAME device and must surface
+	 * the same "cannot report" outcome as ALP_ERR_NOSUPPORT, not a stale
+	 * or fabricated rate -- camera_dispatch.c's alp_camera_get_fps()
+	 * maps a 0 fps_x1000 (alp_camera_read_fps_x1000() returns 0 when
+	 * video_get_frmival() fails) to ALP_ERR_NOSUPPORT. */
+	uint32_t fps_x1000 = 0u;
+	zassert_equal(alp_camera_get_fps(current_cam, &fps_x1000),
+	              ALP_ERR_NOSUPPORT,
+	              "getter must decline when the device can't report its frame interval");
 
 	alp_camera_close(current_cam);
 	current_cam = NULL;

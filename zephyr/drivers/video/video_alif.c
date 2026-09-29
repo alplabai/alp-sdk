@@ -1019,8 +1019,12 @@ static int alif_cam_get_frmival(const struct device *dev, struct video_frmival *
 }
 
 /*
- * #2278: same forwarding shape as alif_cam_get_frmival() above -- set/enum
- * mirror get exactly. Alp Lab AB.
+ * Issue #2338: same forwarding shape as alif_cam_get_frmival() above, for the
+ * SET side -- an app-level caller (e.g. src/backends/camera/alif_isp_pico.c)
+ * setting the rate through the ISP now reaches this device too
+ * (isp_pico.c's own new set_frmival forwards to `controller`, this device);
+ * forward it one more hop to the real endpoint (sensor, or the next CSI
+ * device downstream) exactly like the GET side already does. Alp Lab AB.
  */
 static int alif_cam_set_frmival(const struct device *dev, struct video_frmival *frmival)
 {
@@ -1031,17 +1035,6 @@ static int alif_cam_set_frmival(const struct device *dev, struct video_frmival *
 	}
 
 	return video_set_frmival(config->endpoint_dev, frmival);
-}
-
-static int alif_cam_enum_frmival(const struct device *dev, struct video_frmival_enum *fie)
-{
-	const struct video_cam_config *config = dev->config;
-
-	if (!fie) {
-		return -EINVAL;
-	}
-
-	return video_enum_frmival(config->endpoint_dev, fie);
 }
 
 static int alif_cam_stream_start(const struct device *dev)
@@ -1548,7 +1541,6 @@ static DEVICE_API(video, cam_driver_api) = {
 	.get_format = alif_cam_get_fmt,
 	.get_frmival = alif_cam_get_frmival,
 	.set_frmival = alif_cam_set_frmival,
-	.enum_frmival = alif_cam_enum_frmival,
 	.set_stream = alif_cam_set_stream,
 	.flush = alif_cam_flush,
 	.enqueue = alif_cam_enqueue,

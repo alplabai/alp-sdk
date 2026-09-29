@@ -1061,12 +1061,11 @@ static int csi2_dw_get_frmival(const struct device *dev, struct video_frmival *f
 }
 
 /*
- * #2278: same forwarding shape as csi2_dw_get_frmival() above -- set/enum
- * mirror get exactly, including the "no sensor selected" guard. Forwards to
- * the SAME config->sensor[data->current_sensor] the GET side reads, so a
- * 2-sensor CSI node's AE (which reads back through .get_frmival) sees the
- * rate this sets on the currently-selected sensor, not a stale/different
- * one. Alp Lab AB.
+ * Issue #2338: same forwarding shape as csi2_dw_get_frmival() above, for the
+ * SET side -- forwards to the SAME config->sensor[data->current_sensor] the
+ * GET side reads, so a 2-sensor CSI node's AE (which reads back through
+ * .get_frmival) sees the rate this sets on the currently-selected sensor,
+ * not a stale/different one. Alp Lab AB.
  */
 static int csi2_dw_set_frmival(const struct device *dev, struct video_frmival *frmival)
 {
@@ -1083,23 +1082,6 @@ static int csi2_dw_set_frmival(const struct device *dev, struct video_frmival *f
 	}
 
 	return video_set_frmival(config->sensor[data->current_sensor], frmival);
-}
-
-static int csi2_dw_enum_frmival(const struct device *dev, struct video_frmival_enum *fie)
-{
-	const struct csi2_dw_config *config = dev->config;
-	struct csi2_dw_data *data = dev->data;
-
-	if (!fie) {
-		return -EINVAL;
-	}
-
-	if (!config->sensor[data->current_sensor]) {
-		LOG_ERR("Invalid sensor selected!");
-		return -ENODEV;
-	}
-
-	return video_enum_frmival(config->sensor[data->current_sensor], fie);
 }
 
 /* v4.4 video-API shim (Alp Lab AB): dropped the `enum video_endpoint_id ep`
@@ -1142,7 +1124,6 @@ static DEVICE_API(video, csi2_dw_driver_api) = {
 	.get_format = csi2_dw_get_format,
 	.get_frmival = csi2_dw_get_frmival,
 	.set_frmival = csi2_dw_set_frmival,
-	.enum_frmival = csi2_dw_enum_frmival,
 	.set_stream = csi2_dw_set_stream,
 	.get_caps = csi2_dw_get_caps,
 };

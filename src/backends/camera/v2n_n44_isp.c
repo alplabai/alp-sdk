@@ -291,7 +291,7 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	 * V2N board or overlay in this repo populates alp-camera0..3 with a
 	 * real drivers/video/ device today, so this call has never had a
 	 * real device to reach in practice, same as the rest of isp_open(). */
-	alp_status_t fps_status = camera_apply_fps(dev, cfg->camera_id, cfg->fps, 0u, &st->frmival);
+	alp_status_t fps_status = camera_apply_fps(dev, cfg->camera_id, cfg->fps, 0u, NULL);
 	if (fps_status != ALP_OK) {
 		_free_state(st);
 		return fps_status;
