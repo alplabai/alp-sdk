@@ -66,10 +66,13 @@ ZTEST(sdhc_reset_regs_compare, test_each_field_alone_flips_the_verdict)
 	zassert_false(sdhc_reset_regs_equal(&before, &after), "CLK_CTRL_R must matter");
 }
 
-/* A guard against a silently-wrong comparator, not a prediction about
- * today's driver: if the register file ever DID come back at POR defaults
- * (e.g. a set_def_config() re-apply that silently no-ops), that is exactly
- * the MISMATCH this comparison must report, not a false pass. */
+/* A guard against a silently-wrong comparator: if two captures differ, a
+ * changed field must not compare equal. This is NOT what PROBE 3's real
+ * before-capture would see -- on real hardware the "before" capture is
+ * itself post-sdhc_dwc_init()'s own reset (see sdhc_reset_capture.h), so a
+ * set_def_config() that silently no-ops would leave BOTH captures at POR
+ * and sdhc_reset_regs_equal() would report MATCH; catching that case is
+ * sdhc_reset_regs_matches_def_config()'s job, tested below. */
 ZTEST(sdhc_reset_regs_compare, test_por_default_reset_is_a_mismatch)
 {
 	struct sdhc_reset_regs before = base_regs();
@@ -77,4 +80,33 @@ ZTEST(sdhc_reset_regs_compare, test_por_default_reset_is_a_mismatch)
 
 	zassert_false(sdhc_reset_regs_equal(&before, &after),
 	              "a register file that reset to all-zero must not read back as restored");
+}
+
+/*
+ * sdhc_reset_regs_matches_def_config() is what actually catches the
+ * silently-no-op case above: a POR-all-zero capture must fail it (nothing
+ * set_def_config() programs is ever zero), and the values it genuinely
+ * writes (see sdhc_reset_capture.h's comment) must pass it, even though
+ * they never equal an identical "before" capture in the same test.
+ */
+ZTEST(sdhc_reset_regs_compare, test_por_default_does_not_match_def_config)
+{
+	struct sdhc_reset_regs after = { 0 };
+
+	zassert_false(sdhc_reset_regs_matches_def_config(&after),
+	              "an all-POR capture must not read back as set_def_config() having run");
+}
+
+ZTEST(sdhc_reset_regs_compare, test_def_config_values_match)
+{
+	struct sdhc_reset_regs after = {
+		.normal_error_int_stat_en   = 0x7effeu,
+		.normal_error_int_signal_en = 0xffff001fu,
+		.host_ctrl2                 = 0x5000u,
+		.pwr_ctrl                   = 0x0fu,
+		.clk_ctrl                   = 0x0005u,
+	};
+
+	zassert_true(sdhc_reset_regs_matches_def_config(&after),
+	             "the values sdhc_dwc_set_def_config() actually programs must pass");
 }

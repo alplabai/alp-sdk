@@ -51,9 +51,16 @@
  *   PROBE 3 (#2181) -- captures the seven registers `sdhc_dwc_set_def_config()`
  *     programs at init (`NORMAL_INT_STAT_EN`, `ERROR_INT_STAT_EN`,
  *     `NORMAL_INT_SIGNAL_EN`, `ERROR_INT_SIGNAL_EN`, `HOST_CTRL2`,
- *     `PWR_CTRL`, `CLK_CTRL_R`) before and after `sdhc_hw_reset()`, and
- *     prints whether they came back identical. This is the before/after
- *     capture #2181 asks for -- see `sdhc_reset_capture.h`.
+ *     `PWR_CTRL`, `CLK_CTRL_R`) at `main()` entry (boot state, itself
+ *     already after `sdhc_dwc_init()`'s own `sdhc_dwc_reset()` call) and
+ *     again after this probe's own `sdhc_hw_reset()`. The PRIMARY verdict
+ *     checks the after-capture against the fixed values
+ *     `sdhc_dwc_set_def_config()` programs (`sdhc_reset_regs_matches_def_config()`,
+ *     `sdhc_reset_capture.h`) -- the boot-state capture is ALSO a
+ *     post-reset reading, so comparing the two captures to each other
+ *     alone could never show a MISMATCH even if `set_def_config()` were a
+ *     silent no-op on this silicon. The before/after comparison
+ *     (`sdhc_reset_regs_equal()`) runs too, as a secondary check.
  *
  * SD PERIPHERAL CLOCK GATE, RESOLVED (#2035, #2051): `CLKCTL_PER_MST` bit
  * 16 is `SDC_CKEN`, a plain peripheral clock ENABLE (Alif's own DFP
@@ -418,16 +425,21 @@ int main(void)
 	sd_diag_print_int_enables("main() entry");
 
 	/*
-	 * #2181's baseline: captured here, before PROBE 1 or any reset call
-	 * runs, so it reflects what sdhc_dwc_init() programmed at boot --
-	 * step 4 of the issue. Capturing it after PROBE 2's sdhc_hw_reset()
-	 * instead would compare one post-reset state to another and could
-	 * never show a MISMATCH even if reset() failed to restore config.
+	 * #2181's baseline: captured here, before PROBE 1 or this app's own
+	 * reset calls, so it reflects the BOOT-STATE config -- step 4 of the
+	 * issue. It is NOT a pre-reset reading: sdhc_dwc_init() (POST_KERNEL,
+	 * before main() runs) already calls sdhc_dwc_reset() once, so this is
+	 * itself a post-set_def_config() capture. Capturing it after PROBE
+	 * 2's sdhc_hw_reset() instead would only push that same caveat one
+	 * reset later, so PROBE 3's verdict below checks the after-capture
+	 * against set_def_config()'s actual values, not just against this
+	 * baseline -- see sdhc_reset_capture.h.
 	 */
 	struct sdhc_reset_regs reset_before;
 
 	sdhc_reset_capture(&reset_before);
-	sdhc_reset_print_capture("main() entry, before any reset", &reset_before);
+	sdhc_reset_print_capture("main() entry, boot state (after sdhc_dwc_init()'s own reset)",
+	                         &reset_before);
 
 	sd_diag_print_int_enables("before PROBE 1 (CMD0, no reset)");
 
@@ -484,14 +496,16 @@ int main(void)
 	 * --- PROBE 3: reset()-restores-config capture (#2181) ---------------
 	 * #2122 made sdhc_dwc_reset() re-call sdhc_dwc_set_def_config()
 	 * after its SW_RST_ALL, unconditionally -- even on a reset timeout
-	 * -- so on today's driver these seven registers are EXPECTED to
-	 * read back MATCH against the main()-entry baseline captured above.
-	 * What #2122 didn't verify is whether that re-programming actually
-	 * lands and holds on real silicon; a MISMATCH here would be the
-	 * unexpected result worth chasing. This only prints the after
-	 * capture and compares it to the pre-any-reset baseline for a bench
-	 * run to produce; see sdhc_reset_capture.h for the host-testable
-	 * comparison half.
+	 * -- so on today's driver these seven registers are EXPECTED to come
+	 * back non-POR after this sdhc_hw_reset(). What #2122 didn't verify
+	 * is whether that re-programming actually lands and holds on real
+	 * silicon; PRIMARY verdict below checks the after-capture against
+	 * set_def_config()'s actual values (sdhc_reset_regs_matches_def_config(),
+	 * sdhc_reset_capture.h) -- the boot-state baseline captured above is
+	 * ALSO a post-set_def_config() reading, so comparing it to the after
+	 * capture alone could never show a failure even if set_def_config()
+	 * silently no-ops. That before/after comparison still runs, as a
+	 * SECONDARY check.
 	 */
 	int hwreset3_rc = sdhc_hw_reset(SDHC_DEV);
 	printf("[sd] PROBE 3: sdhc_hw_reset(sdhc0) -> %d\n", hwreset3_rc);
@@ -501,29 +515,37 @@ int main(void)
 	sdhc_reset_capture(&reset_after);
 	sdhc_reset_print_capture("PROBE 3, after sdhc_hw_reset()", &reset_after);
 
-	bool reset_restored_config = sdhc_reset_regs_equal(&reset_before, &reset_after);
+	bool after_matches_def_config = sdhc_reset_regs_matches_def_config(&reset_after);
+	bool reset_restored_config    = sdhc_reset_regs_equal(&reset_before, &reset_after);
 
 	if (hwreset3_rc != 0) {
 		printf("[sd] PROBE 3 RESULT INCONCLUSIVE (#2181): sdhc_hw_reset() returned "
-		       "%d (non-zero) -- a reset that didn't report success makes the %s "
-		       "verdict below unreliable; sdhc_dwc_reset() still runs "
+		       "%d (non-zero) -- a reset that didn't report success makes the "
+		       "verdicts below unreliable; sdhc_dwc_reset() still runs "
 		       "set_def_config() on a timeout, but treat this run as not "
-		       "measuring a clean reset.\n",
+		       "measuring a clean reset. (absolute check would have said %s, "
+		       "before/after would have said %s)\n",
 		       hwreset3_rc,
+		       after_matches_def_config ? "RESTORED" : "NOT RESTORED",
 		       reset_restored_config ? "MATCH" : "MISMATCH");
-	} else if (reset_restored_config) {
-		printf("[sd] PROBE 3 RESULT MATCH (#2181): reset()-restores-config -- the "
-		       "seven captured registers read back identical before any reset and "
-		       "after sdhc_hw_reset(), as #2122's set_def_config() re-apply "
-		       "predicts. This is a MEASUREMENT of this run only.\n");
+	} else if (!after_matches_def_config) {
+		printf("[sd] PROBE 3 RESULT NOT RESTORED (#2181): after sdhc_hw_reset(), the "
+		       "captured registers do NOT match the fixed values "
+		       "sdhc_dwc_set_def_config() programs -- config was NOT restored on "
+		       "this run (secondary before/after compare: %s). This is a "
+		       "MEASUREMENT of this run only.\n",
+		       reset_restored_config ? "MATCH" : "MISMATCH");
 	} else {
-		sdhc_reset_print_mismatch(&reset_before, &reset_after);
-		printf("[sd] PROBE 3 RESULT MISMATCH (#2181): reset()-restores-config -- see "
-		       "the field(s) flagged above; this does not match what #2122's "
-		       "set_def_config() re-apply predicts and is worth chasing on this "
-		       "specific run. This is a MEASUREMENT of this run only; it does not "
-		       "by itself establish silicon behaviour across reworked-carrier "
-		       "runs.\n");
+		printf("[sd] PROBE 3 RESULT RESTORED (#2181): after sdhc_hw_reset(), the "
+		       "captured registers match the fixed values "
+		       "sdhc_dwc_set_def_config() programs, as #2122's set_def_config() "
+		       "re-apply predicts (secondary before/after compare: %s). This is a "
+		       "MEASUREMENT of this run only; it does not by itself establish "
+		       "silicon behaviour across reworked-carrier runs.\n",
+		       reset_restored_config ? "MATCH" : "MISMATCH");
+		if (!reset_restored_config) {
+			sdhc_reset_print_mismatch(&reset_before, &reset_after);
+		}
 	}
 
 	sd_diag_print_static_regs();
@@ -531,13 +553,15 @@ int main(void)
 
 	printf("[sd] RESULT: controller-level probes complete (CMD0 no-reset -> %d, "
 	       "CMD0 post-reset -> %d, sdhc_hw_reset -> %d, PROBE 3 sdhc_hw_reset -> %d, "
-	       "PROBE 3 reset-restores-config -> %s). This board does not enable the card "
-	       "path -- see the file header\n",
+	       "PROBE 3 reset-restores-config -> %s, secondary before/after -> %s). This "
+	       "board does not enable the card path -- see the file header\n",
 	       cmd0a_rc,
 	       cmd0b_rc,
 	       hwreset2_rc,
 	       hwreset3_rc,
-	       hwreset3_rc != 0 ? "INCONCLUSIVE" : (reset_restored_config ? "MATCH" : "MISMATCH"));
+	       hwreset3_rc != 0 ? "INCONCLUSIVE"
+	                        : (after_matches_def_config ? "RESTORED" : "NOT RESTORED"),
+	       reset_restored_config ? "MATCH" : "MISMATCH");
 	printf("[sd] done\n");
 	return 0;
 }

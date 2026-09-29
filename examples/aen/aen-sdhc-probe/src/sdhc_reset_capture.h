@@ -27,6 +27,15 @@
  *     includes this header directly, same pattern
  *     tests/unit/rail_features/ uses for examples/ai/rail-predictive-
  *     maintenance/src/rail_features.c.
+ *
+ * sdhc_reset_regs_equal() alone cannot catch a silently-broken
+ * set_def_config(): `sdhc_dwc_init()` (POST_KERNEL, before main() ever
+ * runs) already calls `sdhc_dwc_reset()` once, so main.c's "before" capture
+ * is ALSO a post-set_def_config() reading, not a pre-reset one. If
+ * set_def_config() were a no-op on some silicon, both captures would read
+ * POR and still compare equal. sdhc_reset_regs_matches_def_config() checks
+ * the after-capture against the fixed values set_def_config() itself
+ * programs, independent of any earlier capture -- see main.c, PROBE 3.
  */
 
 #ifndef SDHC_RESET_CAPTURE_H_
@@ -66,6 +75,39 @@ static inline bool sdhc_reset_regs_equal(const struct sdhc_reset_regs *before,
 	       before->normal_error_int_signal_en == after->normal_error_int_signal_en &&
 	       before->host_ctrl2 == after->host_ctrl2 && before->pwr_ctrl == after->pwr_ctrl &&
 	       before->clk_ctrl == after->clk_ctrl;
+}
+
+/*
+ * The fixed values `sdhc_dwc_set_def_config()` (zephyr/drivers/sdhc/
+ * sdhc_dwc.c) itself programs -- all POR-zero, so a capture reading POR on
+ * every one of these bits means set_def_config() never ran or never landed,
+ * regardless of what any earlier capture shows:
+ *   - NORMAL_INT_STAT_EN / ERROR_INT_STAT_EN: ORed with NORM_INTR_ALL_Msk /
+ *     ERROR_INTR_ALL_Msk (0xFFFF each, less the card IRQ bit) -- non-zero.
+ *   - NORMAL_INT_SIGNAL_EN / ERROR_INT_SIGNAL_EN: ORed with CC|TC|DMA|BWR|
+ *     BRR / ERROR_INTR_ALL_Msk -- non-zero.
+ *   - HOST_CTRL2: ASYNC_INT_EN (bit14) | VER4_EN (bit12) set.
+ *   - PWR_CTRL: bit0 (VDD1 bus power) set by set_power(SDHC_POWER_ON).
+ *   - CLK_CTRL_R: bit0 (INTERNAL_CLK_EN) and bit2 (CLK_EN) set by
+ *     sdhc_dwc_clock_set() once the clock reports stable -- bit1 (the
+ *     STABLE status flag) is already masked out of the capture, see
+ *     main.c's SD_CLK_CTRL_STABLE_BIT.
+ */
+#define SDHC_RESET_CAPTURE_HOST_CTRL2_EXPECT_Msk 0x5000u /* ASYNC_INT_EN | VER4_EN */
+#define SDHC_RESET_CAPTURE_PWR_CTRL_VDD1_Msk     0x01u
+#define SDHC_RESET_CAPTURE_CLK_CTRL_EXPECT_Msk   0x05u /* INTERNAL_CLK_EN | CLK_EN */
+
+static inline bool sdhc_reset_regs_matches_def_config(const struct sdhc_reset_regs *r)
+{
+	return (r->normal_error_int_stat_en & 0xFFFFu) != 0u &&
+	       (r->normal_error_int_stat_en >> 16) != 0u &&
+	       (r->normal_error_int_signal_en & 0xFFFFu) != 0u &&
+	       (r->normal_error_int_signal_en >> 16) != 0u &&
+	       (r->host_ctrl2 & SDHC_RESET_CAPTURE_HOST_CTRL2_EXPECT_Msk) ==
+	           SDHC_RESET_CAPTURE_HOST_CTRL2_EXPECT_Msk &&
+	       (r->pwr_ctrl & SDHC_RESET_CAPTURE_PWR_CTRL_VDD1_Msk) != 0u &&
+	       (r->clk_ctrl & SDHC_RESET_CAPTURE_CLK_CTRL_EXPECT_Msk) ==
+	           SDHC_RESET_CAPTURE_CLK_CTRL_EXPECT_Msk;
 }
 
 #endif /* SDHC_RESET_CAPTURE_H_ */
