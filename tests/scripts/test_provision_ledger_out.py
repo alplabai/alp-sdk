@@ -59,10 +59,18 @@ def test_ship_check():
     r = lo.ship_check({**ok, "act88760_gpio4_defect": "yes", "disposition": "bench-only",
                        "uboot_version": ""}, CAT)
     assert "missing uboot_version" in r
-    assert any("gpio4_defect" in x for x in r) and any("bench-only" in x for x in r)
+    assert any("bench-only" in x for x in r)
+    assert not any("gpio4_defect" in x for x in r)          # legacy key: informational, never a blocker
     assert lo.ship_check({**ok, "known_defects": "cracked"}, CAT) == ["known_defects: cracked"]
     assert lo.ship_check({**ok, "provision_overrides": "tier_triangle: rework"}, CAT) ==         ["provision_overrides: tier_triangle: rework"]
     assert lo.ship_check({**ok, "rootfs_bundle_version": "build-dir:deploy"}, CAT)
+
+
+def test_ship_check_blocks_only_when_the_image_did_not_release_the_gd32():
+    ok = {"eeprom_unique_id": "06", "uboot_version": "U", "disposition": "ship", "known_defects": "none"}
+    assert lo.ship_check({**ok, "act88760_gpio4_after_boot": "0x08"}, CAT) == []
+    r = lo.ship_check({**ok, "act88760_gpio4_after_boot": "0x88"}, CAT)
+    assert any("act88760_gpio4_after_boot" in x and "0x88" in x for x in r)
 
 
 def test_catalogue_loader(tmp_path):
