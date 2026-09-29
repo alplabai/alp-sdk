@@ -107,7 +107,7 @@ z_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilitie
 	st->cfg                               = *cfg;
 	const bool             interrupt_only = (cfg->on_timeout == ALP_WDT_INTERRUPT_ONLY);
 	struct wdt_timeout_cfg zcfg           = {
-		.window   = { .min = 0u, .max = cfg->timeout_ms },
+		.window   = { .min = cfg->window_min_ms, .max = cfg->timeout_ms },
 		.callback = interrupt_only ? _expiry_trampoline : NULL,
 		.flags    = interrupt_only ? WDT_FLAG_RESET_NONE
 		                           : (cfg->on_timeout == ALP_WDT_RESET_CPU ? WDT_FLAG_RESET_CPU_CORE
@@ -161,9 +161,21 @@ z_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilitie
 		}
 		channel_id = wdt_install_timeout(dev, &zcfg);
 	}
-	if (channel_id < 0) return _errno_to_alp(channel_id);
+	if (channel_id < 0) {
+		/* Zephyr answers a window its driver cannot do with -EINVAL; the
+		 * dispatcher already proved window.min < window.max, so here that
+		 * is "this watchdog has no window mode" -- NOSUPPORT, as wdt.h's
+		 * window_min_ms documents, not a caller argument error (#1637). */
+		if (channel_id == -EINVAL && cfg->window_min_ms != 0u) return ALP_ERR_NOSUPPORT;
+		return _errno_to_alp(channel_id);
+	}
 	st->channel_id = channel_id;
-	int err        = wdt_setup(dev, 0);
+	/* Sleep / debug pause (#1637): a driver that cannot pause answers
+	 * -ENOTSUP, which _errno_to_alp() maps to ALP_ERR_NOSUPPORT. */
+	uint8_t opts = 0u;
+	if ((cfg->flags & ALP_WDT_PAUSE_IN_SLEEP) != 0u) opts |= WDT_OPT_PAUSE_IN_SLEEP;
+	if ((cfg->flags & ALP_WDT_PAUSE_HALTED_BY_DEBUG) != 0u) opts |= WDT_OPT_PAUSE_HALTED_BY_DBG;
+	int err = wdt_setup(dev, opts);
 	if (err != 0) return _errno_to_alp(err);
 	if (interrupt_only) {
 		/* Publish AFTER wdt_setup succeeds: on any earlier return the

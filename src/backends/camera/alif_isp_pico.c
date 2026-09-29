@@ -110,6 +110,7 @@ LOG_MODULE_REGISTER(alp_camera_alif_isp_pico, CONFIG_LOG_DEFAULT_LEVEL);
 #include "alp_errno.h"
 #include "camera_ops.h"
 #include "alif_isp_pico.h"
+#include "camera_frmival.h"
 #include "alp_slot_claim.h"
 #include "yuv_to_rgb565.h"
 
@@ -494,9 +495,8 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 			 * print a misleading rounded (or zero) fps. The request
 			 * was always {.numerator = 1, .denominator =
 			 * requested_fps}, so compare against that rather than
-			 * requested_fps alone. Only logged, not reported back to
-			 * the caller -- <alp/camera.h> has no settled-fps field
-			 * yet (issue #2279). */
+			 * requested_fps alone. The caller reads the same settled
+			 * rate back through alp_camera_get_fps() (#2279). */
 			bool settled_as_requested =
 			    (actual.numerator == 1u) && (actual.denominator == requested_fps);
 
@@ -575,7 +575,8 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 		}
 	}
 
-	state->be_data = st;
+	state->fps_x1000 = alp_camera_read_fps_x1000(dev); /* #2279 */
+	state->be_data   = st;
 	/* base_caps stays 0 so the surface ABI is reflected exactly; the
 	 * ISP-present cap bit is advertised once cap_instance.h allocates it. */
 	return ALP_OK;

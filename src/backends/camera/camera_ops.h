@@ -29,6 +29,9 @@ typedef struct alp_camera_ops alp_camera_ops_t;
 typedef struct alp_camera_backend_state {
 	void                   *be_data;
 	const alp_camera_ops_t *ops;
+	/** Settled frame rate x 1000, recorded by the backend at open;
+	 *  0 = not known (alp_camera_get_fps() then answers NOSUPPORT). */
+	uint32_t fps_x1000;
 } alp_camera_backend_state_t;
 
 /** Vtable each camera backend implements. */

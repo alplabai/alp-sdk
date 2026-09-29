@@ -340,6 +340,7 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
 	st->vbuf_count = want;
 
 	alp_camera_apply_fps(dev, cfg->camera_id, cfg->fps);
+	state->fps_x1000 = alp_camera_read_fps_x1000(dev); /* #2279 */
 
 	state->be_data = st;
 	/* No special caps from the portable Zephyr video class -- ISP

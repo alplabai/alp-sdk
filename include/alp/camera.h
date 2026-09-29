@@ -75,8 +75,8 @@ typedef struct {
 	                   *   (e.g. each ISP-Pico sensor only reaches one of its
 	                   *   own fixed rate table; some sensors have exactly one
 	                   *   fixed rate and ignore the request entirely). The
-	                   *   settled rate is not reported back to the caller yet
-	                   *   (issue #2279). A driver with no settable rate
+	                   *   settled rate is read back with
+	                   *   alp_camera_get_fps() (issue #2279). A driver with no settable rate
 	                   *   keeps its own rate and logs that the request was
 	                   *   not applied (#2278). */
 	alp_pixfmt_t format;
@@ -275,6 +275,24 @@ typedef struct {
  *         optional ISP fabric) / ALP_ERR_IO.
  */
 alp_status_t alp_camera_configure_isp(alp_camera_t *camera, const alp_camera_isp_config_t *isp);
+
+/**
+ * @brief Read the frame rate the backend actually settled on at open.
+ *
+ * @c alp_camera_config_t::fps is only a request; the sensor/mode picks the
+ * nearest rate it supports.  This reports what was really programmed, in
+ * thousandths of a frame per second so a fractional rate (29.97 fps =
+ * 29970) survives -- divide by 1000.0 for fps, or use it directly for a
+ * frame period of 1e6 / @p fps_x1000 seconds.  Read once at open; a later
+ * sensor-side change is not tracked.
+ *
+ * @param[in]  camera     Handle from @ref alp_camera_open.
+ * @param[out] fps_x1000  Settled rate x 1000.  Must be non-NULL.
+ * @return ALP_OK; ALP_ERR_INVAL (@p fps_x1000 NULL); ALP_ERR_NOT_READY
+ *         (NULL or closed @p camera); ALP_ERR_NOSUPPORT (the backend or
+ *         driver cannot read its frame interval back).
+ */
+alp_status_t alp_camera_get_fps(alp_camera_t *camera, uint32_t *fps_x1000);
 
 #ifdef __cplusplus
 }
