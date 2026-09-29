@@ -2330,7 +2330,7 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 		 * phase and nothing reads them.  Without an RX side the polled loop never waits
 		 * on RX FIFO drains and runs at wire speed (#2052: 1.31 ms for 4094 B
 		 * at 25 MHz, against 1.91 ms full-duplex). */
-		s = alp_spi_transceive(ctx->bus, tx_ptr, NULL, wire_tx_len);
+		s                     = alp_spi_transceive(ctx->bus, tx_ptr, NULL, wire_tx_len);
 		ctx->last_xfer_end_us = alp_uptime_us();
 		if (s != ALP_OK) goto out;
 	}
