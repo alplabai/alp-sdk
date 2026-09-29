@@ -14,23 +14,21 @@
 #include <stdint.h>
 
 /*
- * #757 regression coverage: the CH2_PG poll loop in
- * da9292_v2n_m1_enable_deepx_rail() decides, once per pass, whether
- * the remaining poll budget covers one more `poll_us` slice. Factored
- * out as a pure function so the boundary arithmetic (in particular
- * the `timeout_us == UINT32_MAX` case) is directly testable without
- * needing the I2C test double to sequence per-register responses
- * (its canned response is an address-keyed snapshot, not a queue --
- * see include-testing/alp/testing/i2c.h -- so it cannot make
- * da9292_get_status() report "not yet powered good" on some polls and
- * "powered good" on others).
+ * #757 regression coverage: every poll loop in da9292_ch2_sequence()
+ * (the DEEPX_PWR_EN_REQ wait and the CH2_PG wait) decides, once per
+ * pass, whether the remaining budget covers one more `poll` slice.
+ * Factored out as a pure function so the boundary arithmetic (in
+ * particular a UINT32_MAX budget) is directly testable without the I2C
+ * test double having to sequence per-register responses (its canned
+ * response is an address-keyed snapshot, not a queue -- see
+ * include-testing/alp/testing/i2c.h).
  *
  * Returns true if the caller should poll again (and has already
- * decremented *remaining_us by poll_us), false if the budget is
- * exhausted (*remaining_us left unmodified -- caller returns
- * ALP_ERR_TIMEOUT). Strictly decreasing every call that returns true,
- * so a caller looping on this can never spin forever regardless of
- * the initial *remaining_us value (including UINT32_MAX).
+ * decremented *remaining by poll), false if the budget is exhausted
+ * (*remaining left unmodified -- the caller times out). Strictly
+ * decreasing every call that returns true, so a loop on this can never
+ * spin forever whatever the initial *remaining (including UINT32_MAX).
+ * Unit-agnostic: the sequence counts milliseconds.
  */
 bool da9292_poll_budget_step(uint32_t *remaining_us, uint32_t poll_us);
 

@@ -135,6 +135,42 @@
       "issue": 482,
       "reason": "The header modelled DX-M1 hardware that does not exist (four slots, a 256 MB DDR carve-out, DRAM-tile reservation) and every call returned NOSUPPORT; libdxrt offers NPU-core binding and DeviceStatus instead.",
       "replacement": "ALP_DEEPX_NPU_CORE_COUNT"
+    },
+    {
+      "header": "alp/chips/act8760.h",
+      "category": "function",
+      "symbol": "act8760_rail_set_vset",
+      "release": "v0.17.0",
+      "issue": 1165,
+      "reason": "Unguarded raw VSET write -- could program any code in any range on a rail the running SoC depends on.",
+      "replacement": "act8760_rail_set_voltage_mv"
+    },
+    {
+      "header": "alp/chips/da9292.h",
+      "category": "function",
+      "symbol": "da9292_v2n_base_init",
+      "release": "v0.17.0",
+      "issue": 1165,
+      "reason": "Cleared a live CH2_EN unconditionally -- drops the DEEPX rail on a warm reboot.",
+      "replacement": "da9292_ch2_sequence"
+    },
+    {
+      "header": "alp/chips/da9292.h",
+      "category": "function",
+      "symbol": "da9292_v2n_m1_enable_deepx_rail",
+      "release": "v0.17.0",
+      "issue": 1165,
+      "reason": "Diverged from the bench-proven U-Boot sequence (no identity / STATUS_01 / CH1 / DEEPX_PWR_EN_REQ checks, cleared a live CH2_EN).",
+      "replacement": "da9292_ch2_sequence"
+    },
+    {
+      "header": "alp/chips/tps628640.h",
+      "category": "function",
+      "symbol": "tps628640_write_reg",
+      "release": "v0.17.0",
+      "issue": 1165,
+      "reason": "Unguarded raw write reaching VOUT/CONTROL; every documented register is now owned by a window/critical-guarded typed API.",
+      "replacement": null
     }
   ]
 }
