@@ -100,8 +100,8 @@ ZTEST(sdhc_reset_regs_compare, test_por_default_does_not_match_def_config)
 ZTEST(sdhc_reset_regs_compare, test_def_config_values_match)
 {
 	struct sdhc_reset_regs after = {
-		.normal_error_int_stat_en   = 0x7effeu,
-		.normal_error_int_signal_en = 0xffff001fu,
+		.normal_error_int_stat_en   = 0xfffffeffu,
+		.normal_error_int_signal_en = 0xffff003bu,
 		.host_ctrl2                 = 0x5000u,
 		.pwr_ctrl                   = 0x0fu,
 		.clk_ctrl                   = 0x0005u,

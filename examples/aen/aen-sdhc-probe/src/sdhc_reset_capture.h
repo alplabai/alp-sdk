@@ -12,7 +12,8 @@
  * delta over upstream) issues `sdhc_dwc_hw_reset(dev,
  * DWC_SDHC_SW_RST_ALL_Msk)` and then, as of #2122, re-calls
  * sdhc_dwc_set_def_config() unconditionally -- even on a reset timeout --
- * so a MATCH is the expected reading of today's code. What #2122 fixed is
+ * so RESTORED is the expected reading of today's code (NOT RESTORED is the
+ * #2122 regression signal). What #2122 fixed is
  * the register-programming half; whether that re-programming actually
  * lands and survives on real silicon (register write ordering, timing,
  * clock-gate races the source can't show) is exactly what is unmeasured.
