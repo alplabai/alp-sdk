@@ -107,6 +107,22 @@ def test_unreferenced_gate_script_skips(tmp_path):
     assert sc.classify(["scripts/check_something.py"], _base_tree(tmp_path))[0] == "skip"
 
 
+def test_data_file_inside_a_closure_package_is_full(tmp_path):
+    root = _tree(_base_tree(tmp_path), {"scripts/alp_helper.py": "import emitpkg\n",
+                                        "scripts/emitpkg/__init__.py": "",
+                                        "scripts/emitpkg/render.py": "",
+                                        "scripts/emitpkg/tmpl.j2": "{{ x }}\n"})
+    assert "scripts/emitpkg/tmpl.j2" in sc.Tree(root).closure()
+    assert sc.classify(["scripts/emitpkg/render.py"], root)[0] == "full"
+
+
+def test_non_python_scripts_file_outside_bench_is_full(tmp_path):
+    root = _base_tree(tmp_path, **{"scripts__requirements.txt": "west\n",
+                                    "scripts__bench__aen__flash.sh": "echo\n"})
+    assert sc.classify(["scripts/requirements.txt"], root)[0] == "full"
+    assert sc.classify(["scripts/bench/aen/flash.sh"], root)[0] == "skip"
+
+
 def test_a_comment_mention_does_not_enter_the_closure(tmp_path):
     root = _base_tree(tmp_path, zephyr__Kconfig="# see scripts/check_something.py\n")
     assert sc.classify(["scripts/check_something.py"], root)[0] == "skip"

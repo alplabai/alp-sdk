@@ -15,12 +15,14 @@ A path is "outside" only if one of these rules proves it:
 
   1. It is under an explicit prose/CI/other-OS prefix (SKIP_PREFIXES), or
      is a Markdown file.
-  2. It is a scripts/ file outside the build-time closure: every scripts/
-     path a build file (CMakeLists.txt, *.cmake, Kconfig*, *.conf,
-     *.overlay, testcase/sample.yaml, module.yml) names outside a comment,
-     plus every scripts/ module those Python files name, transitively.
-     Computed from the tree on every run, so a new CMake-time script widens
-     the closure by itself.
+  2. It is a scripts/**.py file (or anything under scripts/bench/) outside
+     the build-time closure: every scripts/ path a build file
+     (CMakeLists.txt, *.cmake, Kconfig*, *.conf, *.overlay,
+     testcase/sample.yaml, module.yml) names outside a comment, plus every
+     scripts/ module or package (all of its files, data included) those
+     Python files name, transitively.  Computed from the tree on every run,
+     so a new CMake-time script widens the closure by itself.  Other
+     non-Python scripts/ files (bootstrap, requirements.txt, ...) are full.
   3. It is inside a twister suite directory (examples/**, tests/{unit,
      zephyr,console}/** holding a testcase.yaml/sample.yaml) whose every
      scenario pins platform_allow to non-native_sim boards, has no nested
@@ -189,7 +191,8 @@ class Tree:
                     names[entry.stem] = [f"scripts/{entry.name}"]
                 elif entry.is_dir() and (entry / "__init__.py").exists():
                     names[entry.name] = [p.relative_to(root).as_posix()
-                                         for p in entry.rglob("*.py")]
+                                         for p in entry.rglob("*")
+                                         if p.is_file() and "__pycache__" not in p.parts]
 
         closure: set[str] = set()
         while todo:
@@ -278,8 +281,10 @@ def classify(paths: list[str], root: Path = REPO,
         if path.startswith("scripts/"):
             if path in tree.closure():
                 return "full", [f"{path}: in the native_sim build-time closure"]
-            reasons.append(f"{path}: scripts/ file outside the build-time closure")
-            continue
+            if path.endswith(".py") or path.startswith("scripts/bench/"):
+                reasons.append(f"{path}: scripts/ file outside the build-time closure")
+                continue
+            return "full", [f"{path}: non-Python scripts/ file (not provably unused)"]
         if _MARKDOWN.search(path):
             reasons.append(f"{path}: Markdown")
             continue
