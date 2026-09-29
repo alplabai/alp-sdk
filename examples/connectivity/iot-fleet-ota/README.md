@@ -30,7 +30,7 @@ boot:
   method: mcuboot
   signing:
     algorithm: ecdsa_p256
-    key_file:  keys/mcuboot_dev_ecdsa_p256.pem
+    key_file:  keys/mcuboot_shared_dev_ecdsa_p256.pem
   # swap_algorithm: intentionally omitted -- E1M-AEN801's disjoint-slot0
   # `memory_map:` (#1069, #1413) has no slot1/scratch partition, so the
   # per-target default resolves to single-app boot.  Setting
@@ -57,7 +57,7 @@ config:
 - `boot:` -> sysbuild MCUboot child image. `scripts/alp_orchestrate/`
   emits `SB_CONFIG_BOOTLOADER_MCUBOOT=y`,
   `SB_CONFIG_BOOT_SIGNATURE_TYPE_ECDSA_P256=y`,
-  `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="keys/mcuboot_dev_ecdsa_p256.pem"`,
+  `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="keys/mcuboot_shared_dev_ecdsa_p256.pem"`,
   and -- since this SKU's disjoint-slot0 `memory_map:` has no
   slot1/scratch partition -- `SB_CONFIG_MCUBOOT_MODE_SINGLE_APP=y`
   into the sysbuild overlay.
