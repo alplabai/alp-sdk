@@ -48,6 +48,12 @@
  *   PROBE 2 -- a READ-ONLY check that the SD peripheral clock gate
  *     (`CLKCTL_PER_MST` bit 16, `SDC_CKEN`) is set, then a real
  *     `sdhc_hw_reset()` + CMD0 exercise.
+ *   PROBE 3 (#2181) -- captures the seven registers `sdhc_dwc_set_def_config()`
+ *     programs at init (`NORMAL_INT_STAT_EN`, `ERROR_INT_STAT_EN`,
+ *     `NORMAL_INT_SIGNAL_EN`, `ERROR_INT_SIGNAL_EN`, `HOST_CTRL2`,
+ *     `PWR_CTRL`, `CLK_CTRL_R`) before and after `sdhc_hw_reset()`, and
+ *     prints whether they came back identical. This is the before/after
+ *     capture #2181 asks for -- see `sdhc_reset_capture.h`.
  *
  * SD PERIPHERAL CLOCK GATE, RESOLVED (#2035, #2051): `CLKCTL_PER_MST` bit
  * 16 is `SDC_CKEN`, a plain peripheral clock ENABLE (Alif's own DFP
@@ -106,6 +112,8 @@
                                    * below */
 #include <zephyr/kernel.h>
 
+#include "sdhc_reset_capture.h" /* struct sdhc_reset_regs, sdhc_reset_regs_equal() -- #2181 */
+
 /* sdhc0 -- the node label the board overlay gives the DWC SDHC controller. */
 #define SDHC_DEV DEVICE_DT_GET(DT_NODELABEL(sdhc0))
 
@@ -150,6 +158,17 @@
  * peripheral clock at the SoC clock-tree level, upstream of anything the
  * SDHC's own Clock Control Register does; defined once, above the #if, so
  * the disabled-board clock-gate proof (the #else branch) shares it. */
+
+/* PROBE 3 (#2181) additions -- HOST_CTRL2 and PWR_CTRL are not read by any
+ * probe above, so their aligned 32-bit words need their own defines.
+ * HOST_CTRL1(0x028,8b)/PWR_CTRL(0x029,8b)/BGAP_CTRL(0x02A,8b)/WUP_CTRL(0x02B,8b)
+ * share one word, little-endian, so PWR_CTRL is byte 1. AUTO_CMD_STAT
+ * (0x03C,16b,read-only)/HOST_CTRL2(0x03E,16b) share the next word, so
+ * HOST_CTRL2 is the high 16 bits. */
+#define SD_REG_HOSTCTRL1_PWR_WORD  (SD_REG_BASE + 0x028u)
+#define SD_PWR_CTRL_Pos            8u
+#define SD_REG_ACMD_HOSTCTRL2_WORD (SD_REG_BASE + 0x03Cu)
+#define SD_HOST_CTRL2_Pos          16u
 
 /* Print the four "before" registers: does the pad setting, the clock gate and
  * the capability field this app depends on actually look right on THIS
@@ -225,6 +244,40 @@ static void sd_diag_print_int_enables(const char *label)
 	       (unsigned)(signal_en & 0xFFFFu),
 	       (unsigned)(SD_REG_NORMAL_INT_SIGNAL_EN + 2u),
 	       (unsigned)(signal_en >> 16));
+}
+
+/*
+ * #2181 -- capture the seven registers the issue names, into a
+ * struct sdhc_reset_regs (sdhc_reset_capture.h). Zephyr-only (sys_read32);
+ * the struct + sdhc_reset_regs_equal() it feeds are the host-testable half,
+ * exercised without hardware in tests/unit/sdhc_reset_regs_compare/.
+ */
+static void sdhc_reset_capture(struct sdhc_reset_regs *out)
+{
+	uint32_t pwr_word       = sys_read32(SD_REG_HOSTCTRL1_PWR_WORD);
+	uint32_t hostctrl2_word = sys_read32(SD_REG_ACMD_HOSTCTRL2_WORD);
+	uint32_t clk_swrst      = sys_read32(SD_REG_CLK_SWRST_WORD);
+
+	out->normal_error_int_stat_en   = sys_read32(SD_REG_NORMAL_INT_STAT_EN);
+	out->normal_error_int_signal_en = sys_read32(SD_REG_NORMAL_INT_SIGNAL_EN);
+	out->host_ctrl2                 = (uint16_t)(hostctrl2_word >> SD_HOST_CTRL2_Pos);
+	out->pwr_ctrl                   = (uint8_t)((pwr_word >> SD_PWR_CTRL_Pos) & 0xFFu);
+	out->clk_ctrl                   = (uint16_t)(clk_swrst & SD_CLK_CTRL_Msk);
+}
+
+static void sdhc_reset_print_capture(const char *label, const struct sdhc_reset_regs *r)
+{
+	printf("[sd][reset-capture] %s: NORMAL_INT_STAT_EN=0x%04x ERROR_INT_STAT_EN=0x%04x "
+	       "NORMAL_INT_SIGNAL_EN=0x%04x ERROR_INT_SIGNAL_EN=0x%04x HOST_CTRL2=0x%04x "
+	       "PWR_CTRL=0x%02x CLK_CTRL_R=0x%04x\n",
+	       label,
+	       (unsigned)(r->normal_error_int_stat_en & 0xFFFFu),
+	       (unsigned)(r->normal_error_int_stat_en >> 16),
+	       (unsigned)(r->normal_error_int_signal_en & 0xFFFFu),
+	       (unsigned)(r->normal_error_int_signal_en >> 16),
+	       (unsigned)r->host_ctrl2,
+	       (unsigned)r->pwr_ctrl,
+	       (unsigned)r->clk_ctrl);
 }
 
 #define SD_DIAG_MAX_CMD_SAMPLES   4u  /* covers CMD0, CMD8, ACMD41 (or its first retry), CMD2/3 */
@@ -370,15 +423,54 @@ int main(void)
 	sd_diag_print_clk_swrst("PROBE 2, after CMD0");
 	printf("[sd] PROBE 2: CMD0 (GO_IDLE_STATE) -> %d\n", cmd0b_rc);
 
+	/*
+	 * --- PROBE 3: reset()-restores-config capture (#2181) ---------------
+	 * The unmeasured half of #2122: does sdhc_hw_reset() (the driver's
+	 * public .reset entry, sdhc_dwc_reset()) leave the seven registers
+	 * below matching what sdhc_dwc_set_def_config() programmed at init,
+	 * or does the SW_RST_ALL it issues clear them back to silicon
+	 * defaults? sdhc_dwc_reset() is JUST sdhc_dwc_hw_reset(dev,
+	 * SW_RST_ALL) -- it never calls set_def_config() again -- so this
+	 * capture is expected, on today's driver, to show a MISMATCH; that
+	 * is the honest reading of the code, not a claim this run has been
+	 * executed on silicon. This only prints paired before/after captures
+	 * for a bench run to produce; see sdhc_reset_capture.h for the
+	 * host-testable comparison half.
+	 */
+	struct sdhc_reset_regs reset_before, reset_after;
+
+	sdhc_reset_capture(&reset_before);
+	sdhc_reset_print_capture("PROBE 3, before sdhc_hw_reset()", &reset_before);
+
+	int hwreset3_rc = sdhc_hw_reset(SDHC_DEV);
+	printf("[sd] PROBE 3: sdhc_hw_reset(sdhc0) -> %d\n", hwreset3_rc);
+
+	sdhc_reset_capture(&reset_after);
+	sdhc_reset_print_capture("PROBE 3, after sdhc_hw_reset()", &reset_after);
+
+	bool reset_restored_config = sdhc_reset_regs_equal(&reset_before, &reset_after);
+
+	printf("[sd] PROBE 3 RESULT %s (#2181): reset()-restores-config -- %s. This is a "
+	       "MEASUREMENT of this run only; it does not by itself establish silicon "
+	       "behaviour across reworked-carrier runs -- see the printed pairs above.\n",
+	       reset_restored_config ? "MATCH" : "MISMATCH",
+	       reset_restored_config
+	           ? "the seven captured registers read back identical before and after "
+	             "sdhc_hw_reset()"
+	           : "the seven captured registers differ before vs after sdhc_hw_reset() -- "
+	             "sdhc_dwc_reset() issues SW_RST_ALL only and never re-calls "
+	             "sdhc_dwc_set_def_config()");
+
 	sd_diag_print_static_regs();
 	sd_diag_print_int_enables("before exit");
 
 	printf("[sd] RESULT: controller-level probes complete (CMD0 no-reset -> %d, "
-	       "CMD0 post-reset -> %d, sdhc_hw_reset -> %d). This board does not enable the "
-	       "card path -- see the file header\n",
+	       "CMD0 post-reset -> %d, sdhc_hw_reset -> %d, PROBE 3 reset-restores-config -> "
+	       "%s). This board does not enable the card path -- see the file header\n",
 	       cmd0a_rc,
 	       cmd0b_rc,
-	       hwreset2_rc);
+	       hwreset2_rc,
+	       reset_restored_config ? "MATCH" : "MISMATCH");
 	printf("[sd] done\n");
 	return 0;
 }
