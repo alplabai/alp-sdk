@@ -42,13 +42,16 @@ covers the game design, and `docs/superpowers/` holds the implementation plans.
 The game can also run without the A32 and without the HP: `-DTR_RENDER=M55` renders on the HE
 itself, and tilting the board (IMU) steers. The steps below build the full exhibition release.
 
-1. Build the A32 stub and renderer, then generate the header the HE needs to launch them:
+1. Build the A32 stub and renderer, then generate the header the HE needs to launch them. The
+   A32 images are built with GNU make; on Windows, run this step in WSL2.
 
+<!-- cross-platform-lint:ignore -->
    ```sh
    make -C a32/stub
    make -C a32/renderer
    python3 a32/stub/mkpayload.py info a32/renderer/renderer.bin --c-header build/tr_launch.h
    ```
+<!-- cross-platform-lint:resume -->
 
 2. Build the M55-HE game in A32 mode, with auto-launch, the 30 Hz panel timing and pose input
    from the HP:

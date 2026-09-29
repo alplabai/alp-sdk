@@ -1,4 +1,5 @@
 #!/bin/bash
+# Cross-platform scope: Linux-side bench/host tooling (runs under WSL2 on Windows).
 # a32/release/build-release.sh -- T-A9 release ATOC for E1M-AEN803 EVK
 # (plan sec 8): stub + embedded renderer as A32_APP, the trace-runner HE
 # A32-mode image as HE_APP (SE-loaded to ITCM 0x58000000, booted), the

@@ -119,7 +119,7 @@ only way to reach the probe) refuses outright without `LG_SWD_PATH`:
 export LG_SWD_PATH=<usb-path>   # the J-Link's USB topology path, e.g. from `labgrid-client show`
 export SETOOLS_DIR=<dir>        # a PRIVATE `cp -a` of Alif's SETOOLS (app-release-exec-linux);
                                 # app-gen-toc rewrites its build/ tree
-export SE_UART=/dev/serial/by-id/<se-uart-adapter>   # the board's SE-UART, for the ATOC guard
+export SE_UART=<your-serial-device>   # the board's SE-UART, for the ATOC guard
 ```
 
 ## The exact SETOOLS recovery / pre-write gate command
@@ -130,7 +130,7 @@ automatically whenever `SE_UART` is exported -- spelled out here so the bench-ru
 BY HAND first and see the resident TOC before trusting the script:
 
 ```sh
-cd <PRIVATE-SETOOLS-COPY> && ./maintenance -b 57600 -c /dev/serial/by-id/usb-FTDI_FT232R_USB_UART_BG04503B-if00-port0 -opt gettoc
+cd <PRIVATE-SETOOLS-COPY> && ./maintenance -b 57600 -c <your-serial-device> -opt gettoc
 ```
 
 If `gettoc` fails, STOP -- do not attempt any write, original or recovery, until it succeeds (that
@@ -147,7 +147,7 @@ debugger access surviving the bad write):
 # e.g. the ATOC range, or a whole flowd/ item):
 dd if="$RB_PRE" of=/tmp/recovery-slice.bin bs=1 skip=<OFFSET> count=<SIZE>
 
-cd "$SETOOLS_DIR" && ./app-write-mram -b 57600 -c /dev/serial/by-id/usb-FTDI_FT232R_USB_UART_BG04503B-if00-port0 \
+cd "$SETOOLS_DIR" && ./app-write-mram -b 57600 -c <your-serial-device> \
   -i "/tmp/recovery-slice.bin <ADDR>"
 ```
 

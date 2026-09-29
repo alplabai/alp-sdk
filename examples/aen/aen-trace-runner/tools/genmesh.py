@@ -1904,7 +1904,7 @@ def main():
                f"#define TR_WIRE_Y_LOW {WIRE_Y_LOW}.0f\n\n")
     src.append(c_rig(coef, poses, chars))
     src.append("#endif /* TR_MESHES_H */\n")
-    OUT.write_text("".join(src))
+    OUT.write_text("".join(src), encoding="utf-8")
     for m in meshes:
         print(f"{m.name:24s} nv {len(m.v):3d} nt {len(m.tri):3d}")
 

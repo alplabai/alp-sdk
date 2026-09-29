@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Cross-platform scope: Linux-side bench/host tooling (runs under WSL2 on Windows).
 # probe/npu/flash-probe.sh -- Flow D for the M55-HP NPU probe (README.md).
 #
 #   flash-probe.sh readback OUT.bin                      # 1. save live MRAM 0x80000000..0x8057FFFF (read-only)
@@ -14,11 +15,11 @@
 # (scripts/bench/aen/bench-env.sh, the #2233 sector pad + read-back proof +
 # race check), exactly as flash-jlink-hp.sh drives it; this only adds the
 # second blob. Needs LG_PLACE, SETOOLS_DIR (any; the ATOC comes from
-# SETOOLS_COPY), and ALP_SDK_BENCH (default <alp-sdk>).
+# SETOOLS_COPY), and ALP_SDK_BENCH (default: the alp-sdk checkout this example sits in).
 set -euo pipefail
 
 # shellcheck source=/dev/null
-source "${ALP_SDK_BENCH:-<alp-sdk>}/scripts/bench/aen/bench-env.sh"
+source "${ALP_SDK_BENCH:-$(cd "$(dirname "$0")/../../../../.." && pwd)}/scripts/bench/aen/bench-env.sh"
 
 PAYLOAD_ADDR=0x80100000
 RESULT_ADDR=0x0237F200
@@ -102,7 +103,6 @@ write)
 	st="$(realpath "${1:?SETOOLS_COPY}")"
 	pl="$(realpath "${2:?PAYLOAD}")"
 	shift 2
-	case "$st" in <SETOOLS> | <SETOOLS>/*) die "$st is the SHARED SETOOLS tree" ;; esac
 	pkg="$st/build/AppTocPackage.bin"
 	addr=$(grep -a "APP Package Start Address:" "$st/build/app-package-map.txt" | awk "{print \$NF}" | tail -1)
 	[ -f "$pkg" ] && [ -n "$addr" ] || die "no ATOC package in $st/build (run app-gen-toc, README.md)"

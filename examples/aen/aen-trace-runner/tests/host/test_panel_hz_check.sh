@@ -1,4 +1,5 @@
 #!/bin/bash
+# Cross-platform scope: Linux-side bench/host tooling (runs under WSL2 on Windows).
 # tests/host/test_panel_hz_check.sh -- the TR_PANEL_HZ interlock of
 # a32/release/build-release.sh (panel_hz_check.sh): a release HE not
 # explicitly built with -DTR_PANEL_HZ=30 is refused, the override lets one

@@ -173,7 +173,7 @@ def reference(cap, stem):
     subprocess.run([exe, "--script", stem + "_ref"], check=True, stdout=subprocess.DEVNULL)
     x, rate = read_wav(stem + "_ref.wav")
     names, clips, keys, base = [], [], [], 0
-    for line in open(stem + "_ref.txt"):
+    for line in open(stem + "_ref.txt", encoding="utf-8"):
         name, n, typ, kind, param, hz = line.split()
         names.append(name)
         clips.append(x[base:base + int(n)].astype(np.float64))

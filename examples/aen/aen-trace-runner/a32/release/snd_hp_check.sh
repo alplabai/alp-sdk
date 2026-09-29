@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # a32/release/snd_hp_check.sh -- sourced by build-release.sh (and
 # tests/host/test_snd_hp_check.sh). snd_hp_check SOUND_BUILD_DIR SERIAL
 # ALLOWLIST NM: 0 when the P10 sound image may go into HP_APP for that unit,

@@ -1190,7 +1190,7 @@ def main():
     for f, i in names.items():
         src.append(f"#define TR_ZPART_{f[len('tr_zmesh_'):].upper()} {i}\n")
     src.append("\n#endif /* TR_ZONES_H */\n")
-    args.out.write_text("".join(src))
+    args.out.write_text("".join(src), encoding="utf-8")
     for m in allm:
         if not m.name.endswith("_r"):
             print(f"{m.name:24s} nv {len(m.v):3d} nt {len(m.tri):3d}")

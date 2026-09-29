@@ -189,7 +189,7 @@ def main():
     lines.append("")
     lines.append("#endif /* TR_ATLAS_H */")
 
-    out_path.write_text("\n".join(lines) + "\n")
+    out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"wrote {out_path}  {len(sprite_names)} sprites")
     print(f"TOTAL ATLAS BYTES: {total_bytes}")
 

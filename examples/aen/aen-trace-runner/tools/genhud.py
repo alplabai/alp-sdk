@@ -343,7 +343,7 @@ def svg_polys(path_d, tx, ty):
 
 
 def build_logo(name, width):
-    s = open(LOGO).read()
+    s = open(LOGO, encoding="utf-8").read()
     vb = [float(v) for v in re.search(r'viewBox="([^"]+)"', s).group(1).split()]
     tx, ty = [float(v) for v in re.search(r'translate\(([-\d.]+),([-\d.]+)\)', s).group(1, 2)]
     polys = []
@@ -401,9 +401,9 @@ def emit():
 if __name__ == "__main__":
     text = emit()
     if "--check" in sys.argv:
-        ok = os.path.exists(OUT) and open(OUT).read() == text
+        ok = os.path.exists(OUT) and open(OUT, encoding="utf-8").read() == text
         print("genhud: %s is %s" % (OUT, "up to date" if ok else "STALE"))
         sys.exit(0 if ok else 1)
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
-    open(OUT, "w").write(text)
+    open(OUT, "w", encoding="utf-8").write(text)
     print("genhud: wrote %s (%d B)" % (OUT, len(text)))

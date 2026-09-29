@@ -38,7 +38,7 @@ front of the camera cannot reach the board to tilt it, so tilt cannot be the mai
 | IMU tilt | **secondary mode** for handheld play, chosen in the menu | works today |
 | Touch | menus, swipe controls | blocked: this panel's GT911 config block reads blank |
 | BLE | two-board head-to-head race | later milestone |
-| Audio | music and effects | EVK-03 only; not on the display board |
+| Audio | music and effects | 2026W36-0002 only; not on the display board |
 
 The two control modes are exclusive and chosen at the title screen: *stand up and play*, or
 *hold it and tilt*. Neither is a fallback for the other mid-run, because switching control
@@ -72,7 +72,7 @@ Measured on `E1M-AEN803` serial `2026W36-0009` unless noted.
 | OSPI NOR (ISSI IS25WX256, 32 MB) | working on this unit | `cfg[0x00]=0xe7`, `cfg[0x07]=0xfd` |
 | OSPI HyperRAM (64 MB) | blocked in hardware | CK/CK# crossed at U9; `SCPOL` does not reach the pads on AE822; needs the R3 fix |
 | Touch (GT911) | blocked | config block `0x8047..0x8100` reads all `0x00`; upstream driver rejects it |
-| Audio | not on this board | EVK-03 only |
+| Audio | not on this board | 2026W36-0002 only |
 
 Two consequences worth stating plainly: there is no external RAM, so the design lives
 inside ~6 MB of SRAM; and the image plus assets exceed the 256 KB ITCM RAM-run, so this
@@ -190,7 +190,7 @@ Each one is a standalone demo; none leaves the board in a non-working state.
 | M5 | GPU2D sprite path replacing CPU blits | the 2D accelerator |
 | M6 | Assets streamed from NOR | external flash |
 | M7 | Touch menus | needs the GT911 config resolved first |
-| M8 | Audio on EVK-03, BLE two-board race | audio + radio |
+| M8 | Audio on 2026W36-0002, BLE two-board race | audio + radio |
 
 M2 before M3 is deliberate: the tracking is shown on screen and judged by eye while it
 still cannot break the game. Only once it looks solid does it take the controls.

@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # a32/release/panel_hz_check.sh -- sourced by build-release.sh (and
 # tests/host/test_panel_hz_check.sh). panel_hz_check HE_BUILD_DIR: 0 when
 # the HE was configured with -DTR_PANEL_HZ=30 (or the override is set), else

@@ -1,4 +1,5 @@
 #!/bin/bash
+# Cross-platform scope: Linux-side bench/host tooling (runs under WSL2 on Windows).
 # tests/host/runner.sh -- builds and runs every host test; exits non-zero if any test failed.
 set -u
 cd "$(dirname "$0")/../.." || exit 1

@@ -1,4 +1,5 @@
 #!/bin/bash
+# Cross-platform scope: Linux-side bench/host tooling (runs under WSL2 on Windows).
 # tests/host/test_snd_hp_check.sh -- the TR_SND_HP=ON interlock of
 # a32/release/build-release.sh (snd_hp_check.sh + sound-carriers.txt): every
 # refusal path refuses, the one allowed configuration passes, and the full

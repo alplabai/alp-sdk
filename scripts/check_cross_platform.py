@@ -244,6 +244,16 @@ PY_SCAN_ROOTS: tuple[str, ...] = ("scripts", "tests", "examples")
 # whitelist exists so we can ratchet down the lint without flagging
 # the well-documented exceptions.
 INTENTIONALLY_BASH_HELPERS: frozenset[str] = frozenset({
+    # examples/aen/aen-trace-runner: the game's A32 release packaging /
+    # J-Link flash scripts and its host-test runner -- Linux-side bench and
+    # host tooling (SETOOLS, JLinkExe, cc), each with a header note.
+    "examples/aen/aen-trace-runner/a32/release/build-release.sh",
+    "examples/aen/aen-trace-runner/a32/release/flash-release.sh",
+    "examples/aen/aen-trace-runner/probe/npu/flash-probe.sh",
+    "examples/aen/aen-trace-runner/tests/host/runner.sh",
+    "examples/aen/aen-trace-runner/tests/host/test_hp_vision_check.sh",
+    "examples/aen/aen-trace-runner/tests/host/test_panel_hz_check.sh",
+    "examples/aen/aen-trace-runner/tests/host/test_snd_hp_check.sh",
     "scripts/bootstrap.sh",
     "scripts/test-all.sh",
     "scripts/setup-clang-format.sh",

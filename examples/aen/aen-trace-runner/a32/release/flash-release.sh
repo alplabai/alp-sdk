@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Cross-platform scope: Linux-side bench/host tooling (runs under WSL2 on Windows).
 # a32/release/flash-release.sh -- Flow D for the trace-runner NPU-body
 # release (a32/release/build-release.sh TR_HP_VISION=ON output). Reuses the
 # SAME proven machinery probe/npu/flash-probe.sh already uses for the NPU

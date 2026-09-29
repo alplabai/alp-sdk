@@ -41,10 +41,14 @@ and self-review of the cache/MMU sequence.
 
 ## Build
 
+GNU make; on Windows, run this in WSL2.
+
+<!-- cross-platform-lint:ignore -->
 ```
 cd a32/probe
 make
 ```
+<!-- cross-platform-lint:resume -->
 
 Produces `a32_probe.bin` (flat binary to replace `xipImage.bin` in the ATOC
 entry `A32_APP`), `a32_probe.map`, and a `size` summary. Uses

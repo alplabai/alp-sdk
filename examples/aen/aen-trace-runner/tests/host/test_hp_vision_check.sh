@@ -1,4 +1,5 @@
 #!/bin/bash
+# Cross-platform scope: Linux-side bench/host tooling (runs under WSL2 on Windows).
 # tests/host/test_hp_vision_check.sh -- the TR_HP_VISION=ON interlock of
 # a32/release/build-release.sh (hp_vision_check.sh): every refusal path
 # refuses, the one allowed configuration passes, and the full script refuses

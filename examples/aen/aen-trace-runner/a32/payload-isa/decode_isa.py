@@ -24,7 +24,7 @@ HEAD = ["magic", "stage", "opt", "pass", "fail", "cntfrq", "clk_cyc", "clk_ticks
 def xlist(name, text=None):
     """Names in `#define NAME(X) X(A) X(B) ...` of isa_bench.h, in order."""
     if text is None:
-        with open(os.path.join(HERE, "isa_bench.h")) as f:
+        with open(os.path.join(HERE, "isa_bench.h"), encoding="utf-8") as f:
             text = f.read()
     m = re.search(r"#define %s\(X\)((?:[^\n]*\\\n)*[^\n]*)" % name, text)
     return re.findall(r"X\((\w+)\)", m.group(1))
@@ -32,7 +32,7 @@ def xlist(name, text=None):
 
 def layout():
     regs, tims, vals, chks = (xlist(n) for n in ("ISA_REGS", "ISA_TIMINGS", "ISA_VALS", "ISA_CHECKS"))
-    magic = int(re.search(r"#define ISA_MAGIC\s+(0x[0-9A-Fa-f]+)", open(os.path.join(HERE, "isa_bench.h")).read())
+    magic = int(re.search(r"#define ISA_MAGIC\s+(0x[0-9A-Fa-f]+)", open(os.path.join(HERE, "isa_bench.h"), encoding="utf-8").read())
                 .group(1), 16)
     return regs, tims, vals, chks, magic
 
@@ -107,7 +107,7 @@ def synth():
 
 def selftest():
     regs, tims, vals, chks, _ = layout()
-    hdr = open(os.path.join(HERE, "isa_bench.h")).read()
+    hdr = open(os.path.join(HERE, "isa_bench.h"), encoding="utf-8").read()
     assert len(regs) > 20 and "CPUECTLR_HI" in regs and tims[0] == "PMU_READ" and "GOLD_RASTER" in tims
     assert len(HEAD) * 4 + 4 * (len(regs) + len(vals)) + 8 * len(tims) <= SIZE
     assert "#define ISA_RES_ADDR  0x02401C00u" in hdr

@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # a32/release/hp_vision_check.sh -- sourced by build-release.sh (and
 # tests/host/test_hp_vision_check.sh). hp_vision_check HP_BUILD_DIR
 # MODEL_FILE NM: 0 when the hp_vision image + Vela'd model may be packaged as
