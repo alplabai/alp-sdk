@@ -547,6 +547,9 @@ def test_defect_unit_cold_boot_does_not_require_the_gd32(tmp_path):
     cb = res[-1]
     assert cb.name == "cold_boot_test" and "0x70" not in cb.detail, cb.detail
     assert "0x70 not required" in cb.evidence.get("cold_boot_note", ""), cb.evidence
+    # the DRAM banner is recorded here too, for units that never run boot_sd_linux
+    assert cb.evidence.get("dram_size_mib"), cb.evidence
+    assert cb.evidence.get("uboot_dram_banner", "").startswith("DRAM:"), cb.evidence
 
 
 def test_build_dir_unit_defaults_to_bench_only(tmp_path):
