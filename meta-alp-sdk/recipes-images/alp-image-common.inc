@@ -186,6 +186,16 @@ IMAGE_INSTALL += " \
     rng-tools-service              \
 "
 
+# RZ/V2N family: no rngd. rngd 6.16 finds no usable source on this SoC --
+# hwrng (no /dev/hwrng), rndr and jitter all fail initialisation -- so
+# rng-tools.service failed on every boot after ~16 s of CPU and credited
+# nothing (E1M-V2M103, 2026-09-29). The kernel CRNG initialises on its own
+# (`random: crng init done` at ~6.9 s, CONFIG_CRYPTO_JITTERENTROPY=y and
+# CONFIG_RANDOM_TRUST_CPU=y), and getrandom() blocks until then, so
+# first-boot key generation is not starved. Drop this once the SoC has a
+# hwrng driver.
+IMAGE_INSTALL:remove:rzv2n-family = "rng-tools rng-tools-service"
+
 # scripts/provision_som.py runs on the unit's own Linux: write_emmc_boot
 # reads and sets the eMMC boot config (EXT_CSD[177]/[179]) with `mmc`.
 # busybox has no equivalent, and no image carried it before (2026-09-28,
