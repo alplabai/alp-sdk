@@ -151,6 +151,13 @@ def test_aen_only_suite_skips(tmp_path):
     assert "platform_allow" in reasons[0]
 
 
+def test_the_suite_yaml_itself_is_full_even_when_pinned_off_native_sim(tmp_path):
+    # twister parses and schema-checks every testcase.yaml it discovers, so a
+    # broken AEN-only one still fails the native_sim run.
+    root = _base_tree(tmp_path, **{"examples__aen__demo__testcase.yaml": AEN_ONLY})
+    assert sc.classify(["examples/aen/demo/testcase.yaml"], root)[0] == "full"
+
+
 def test_suite_that_allows_native_sim_is_full(tmp_path):
     root = _base_tree(tmp_path)
     (root / "examples/x/app/src").mkdir()

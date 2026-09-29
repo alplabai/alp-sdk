@@ -27,7 +27,8 @@ A path is "outside" only if one of these rules proves it:
      zephyr,console}/** holding a testcase.yaml/sample.yaml) whose every
      scenario pins platform_allow to non-native_sim boards, has no nested
      suite, and whose directory name no build or C file outside it mentions
-     -- so nothing native_sim builds can include it.
+     -- so nothing native_sim builds can include it.  Not the suite yaml
+     itself: every twister run parses and schema-checks it.
 
 Anything else -- a new top-level directory, CMake, Kconfig, a header,
 metadata/ (read at CMake time by scripts/alp_project.py) -- means ``full``.
@@ -106,16 +107,26 @@ _C_LINE_COMMENT = re.compile(r"(^|\s)//[^\n]*")
 _HASH_COMMENT_LINE = re.compile(r"^\s*#[^\n]*", re.MULTILINE)
 _SCRIPTS_REF = re.compile(r"scripts/[A-Za-z0-9_./-]+")
 _WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-_PRUNE = {".git", "__pycache__", "node_modules"}
+_PRUNE = {".git", "__pycache__"}
 
 
 def _walk(root: Path):
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames
-                       if d not in _PRUNE and not d.startswith(("twister-out", "build", ".venv"))]
-        for name in filenames:
-            path = Path(dirpath, name)
-            yield path, path.relative_to(root).as_posix()
+    """(path, repo-relative posix path) for every tracked or untracked,
+    non-ignored file -- build output (twister-out/, build dirs) excluded by
+    .gitignore, not by guessing directory names.  Outside a git checkout
+    (unit-test trees) it walks the directory instead."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others",
+             "--exclude-standard"], check=True, capture_output=True).stdout
+        rels = sorted({r for r in out.decode("utf-8", "replace").split("\0") if r})
+    except (subprocess.CalledProcessError, OSError):
+        rels = []
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d not in _PRUNE]
+            rels.extend(Path(dirpath, n).relative_to(root).as_posix() for n in filenames)
+    for rel in rels:
+        yield root / rel, rel
 
 
 def _read(path: Path) -> str:
@@ -291,7 +302,9 @@ def classify(paths: list[str], root: Path = REPO,
         if any(path == p or (p.endswith("/") and path.startswith(p)) for p in SKIP_PREFIXES):
             reasons.append(f"{path}: outside the twister inputs")
             continue
-        d = tree.suite_dir(path)
+        # The suite yaml itself is parsed and schema-checked by EVERY twister
+        # run, whatever its platform_allow -- a broken one fails native_sim.
+        d = None if path.rsplit("/", 1)[-1] in _SUITE_YAML else tree.suite_dir(path)
         why = tree.suite_skips_native_sim(d) if d else None
         if why:
             reasons.append(f"{path}: {why}")
