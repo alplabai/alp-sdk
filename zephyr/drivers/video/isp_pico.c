@@ -2812,6 +2812,23 @@ static int isp_configure(const struct device *dev)
 			return -EINVAL;
 		}
 		port->tpg_image_idx = config->tpg_img_idx;
+
+		/*
+		 * alp-sdk#2256: this branch used to leave port_fmt.width/height
+		 * at 0, so VSI_MPI_ISP_SetChnAttr got a 0x0 port rect and
+		 * refused it with -EINVAL.  Require the board overlay to supply
+		 * a real geometry via DT tpg-width/tpg-height instead -- see
+		 * isp_tpg_geometry_is_valid()'s comment for why this driver
+		 * cannot default those to a silicon-confirmed value itself.
+		 */
+		if (!isp_tpg_geometry_is_valid(config->tpg_width, config->tpg_height)) {
+			LOG_ERR("TPG enabled but tpg-width/tpg-height are unset in DT "
+				"(%ux%u) -- see zephyr/dts/bindings/video/vsi,isp-pico.yaml",
+				config->tpg_width, config->tpg_height);
+			return -EINVAL;
+		}
+		port->port_fmt.width = config->tpg_width;
+		port->port_fmt.height = config->tpg_height;
 	}
 
 	port->hdr = LINEAR;
@@ -2932,6 +2949,8 @@ int video_isp_init(const struct device *dev)
 		.tpg_bayer_pattern = DT_INST_ENUM_IDX(i, tpg_bayer_pattern),                  \
 		.tpg_img_idx = DT_INST_ENUM_IDX(i, tpg_image_idx),                            \
 		.tpg_pix_width = DT_INST_ENUM_IDX_OR(i, tpg_pix_width, 2),                    \
+		.tpg_width = DT_INST_PROP_OR(i, tpg_width, 0),                                \
+		.tpg_height = DT_INST_PROP_OR(i, tpg_height, 0),                              \
 		.irqn = DT_INST_IRQ_BY_NAME(i, isp, irq),                                     \
 		.mi_irqn = DT_INST_IRQ_BY_NAME(i, mi_isp, irq),                               \
 	};                                                                                    \
