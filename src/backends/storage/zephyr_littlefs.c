@@ -125,6 +125,7 @@ static alp_status_t lfs_open(const alp_storage_config_t  *cfg,
                              alp_storage_backend_state_t *st,
                              alp_capabilities_t          *caps_out)
 {
+	(void)caps_out;
 	/* littlefs is layered on top of a flash partition -- only the
      * QSPI / OSPI / INTERNAL_FLASH kinds make sense here.  SD/MMC
      * routes to a different backend. */
@@ -148,10 +149,9 @@ static alp_status_t lfs_open(const alp_storage_config_t  *cfg,
 		_lfs_free(s);
 		return _errno_to_alp(err);
 	}
-	s->open         = true;
-	st->dev         = NULL;
-	st->be_data     = s;
-	caps_out->flags = 0u;
+	s->open     = true;
+	st->dev     = NULL;
+	st->be_data = s;
 	return ALP_OK;
 }
 

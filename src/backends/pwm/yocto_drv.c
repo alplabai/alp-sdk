@@ -254,6 +254,7 @@ static void _unexport_if_owned(const y_pwm_data_t *d)
 static alp_status_t
 y_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	/* alp_pwm reserves channel_id 0..7 for every form factor (see the
 	 * file-header "Channel-id mapping" note) -- an index outside that
 	 * space isn't a possible PWM instance on ANY silicon, so it's a
@@ -381,10 +382,9 @@ y_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilitie
 		}
 	}
 
-	st->dev         = NULL;
-	st->channel_id  = cfg->channel_id;
-	st->be_data     = d;
-	caps_out->flags = 0u;
+	st->dev        = NULL;
+	st->channel_id = cfg->channel_id;
+	st->be_data    = d;
 	return ALP_OK;
 }
 

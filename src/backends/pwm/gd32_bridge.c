@@ -82,6 +82,7 @@ static void _free_state(gd32_pwm_state_t *s)
 static alp_status_t
 br_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	/* E1M spec reserves 8 PWM channels; ALL EIGHT map to a real GD32
      * timer/channel on V2N (metadata/chips/gd32g553.yaml pwm_routing:
      * PWM0..7 -> TIMER0/TIMER7, no gaps) -- unlike zephyr_drv.c /
@@ -139,10 +140,9 @@ br_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabiliti
 	bs->period_ns  = h->period_ns;
 	bs->duty_ns    = 0u;
 
-	st->dev         = NULL; /* bridge sentinel */
-	st->channel_id  = cfg->channel_id;
-	st->be_data     = bs;
-	caps_out->flags = 0u; /* no HW dead-time/break advertised via bridge */
+	st->dev        = NULL; /* bridge sentinel */
+	st->channel_id = cfg->channel_id;
+	st->be_data    = bs;
 	return ALP_OK;
 }
 

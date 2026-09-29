@@ -91,7 +91,7 @@ alp_storage_t *alp_storage_open(const alp_storage_config_t *cfg)
 	h->state.read_only   = cfg->read_only;
 	h->state.instance_id = cfg->instance_id;
 
-	alp_capabilities_t caps = { .flags = be->base_caps };
+	alp_capabilities_t caps = { .flags = be->base_caps, .class_flags = be->base_class_flags };
 	if (be->probe != NULL) {
 		uint32_t refined = caps.flags;
 		(void)be->probe(cfg->instance_id, &refined);

@@ -153,6 +153,7 @@ static void _disarm_and_close(int fd, bool attempt_magic_close)
 static alp_status_t
 y_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	/* No ISR trampoline on this backend -- WDIOC has no
 	 * expiry-notification ioctl, so INTERRUPT_ONLY is rejected below
 	 * before there is anything to wire up. */
@@ -216,12 +217,11 @@ y_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilitie
 		d->magic_close = (info.options & WDIOF_MAGICCLOSE) != 0u;
 	}
 
-	st->dev         = NULL;
-	st->wdt_id      = cfg->wdt_id;
-	st->channel_id  = 0;
-	st->cfg         = *cfg;
-	st->be_data     = d;
-	caps_out->flags = 0u;
+	st->dev        = NULL;
+	st->wdt_id     = cfg->wdt_id;
+	st->channel_id = 0;
+	st->cfg        = *cfg;
+	st->be_data    = d;
 	return ALP_OK;
 }
 

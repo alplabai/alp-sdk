@@ -105,6 +105,7 @@ static alp_status_t _errno_to_alp(int err)
 static alp_status_t
 z_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	if (cfg->channel_id >= ARRAY_SIZE(_specs)) return ALP_ERR_INVAL;
 	if (cfg->channel_id >= ALP_SOC_PWM_COUNT) return ALP_ERR_OUT_OF_RANGE;
 
@@ -126,9 +127,8 @@ z_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilitie
 	int err = pwm_set(spec->dev, h->channel, h->period_ns, 0u, h->flags);
 	if (err != 0) return _errno_to_alp(err);
 
-	st->dev         = (void *)spec->dev;
-	st->channel_id  = cfg->channel_id;
-	caps_out->flags = 0u;
+	st->dev        = (void *)spec->dev;
+	st->channel_id = cfg->channel_id;
 	return ALP_OK;
 }
 

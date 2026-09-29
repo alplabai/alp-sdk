@@ -102,13 +102,13 @@ wifi_event_handler(struct net_mgmt_event_callback *cb, uint32_t mgmt_event, stru
 
 static alp_status_t z_open(alp_wifi_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 #if defined(CONFIG_ALP_SDK_IOT_WIFI)
 	struct wifi_radio_be *be = &_radio_be;
 	memset(be, 0, sizeof(*be));
 
 	be->iface = net_if_get_default();
 	if (be->iface == NULL) {
-		caps_out->flags = 0u;
 		return ALP_ERR_NOT_READY;
 	}
 
@@ -117,12 +117,10 @@ static alp_status_t z_open(alp_wifi_backend_state_t *st, alp_capabilities_t *cap
 	                             wifi_event_handler,
 	                             NET_EVENT_WIFI_CONNECT_RESULT | NET_EVENT_WIFI_DISCONNECT_RESULT);
 	net_mgmt_add_event_callback(&be->wifi_cb);
-	st->be_data     = be;
-	caps_out->flags = 0u;
+	st->be_data = be;
 	return ALP_OK;
 #else
 	(void)st;
-	caps_out->flags = 0u;
 	return ALP_ERR_NOSUPPORT;
 #endif
 }

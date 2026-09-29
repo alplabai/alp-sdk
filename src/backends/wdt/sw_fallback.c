@@ -22,6 +22,7 @@
 static alp_status_t
 sw_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	/* No timer, no ISR -- on_expire is accepted (the dispatcher already
 	 * required it non-NULL for INTERRUPT_ONLY) but never invoked.
 	 * Matches this backend's documented "never actually resets
@@ -34,11 +35,10 @@ sw_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabiliti
 		 * honours it (#1637). */
 		return ALP_ERR_NOSUPPORT;
 	}
-	st->dev         = NULL;
-	st->wdt_id      = cfg->wdt_id;
-	st->channel_id  = 0;
-	st->be_data     = NULL;
-	caps_out->flags = 0u;
+	st->dev        = NULL;
+	st->wdt_id     = cfg->wdt_id;
+	st->channel_id = 0;
+	st->be_data    = NULL;
 	return ALP_OK;
 }
 

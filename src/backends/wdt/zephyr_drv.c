@@ -86,6 +86,7 @@ static void _expiry_trampoline(const struct device *dev, int channel_id)
 static alp_status_t
 z_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	/* The owner back-ref the ISR trampoline needs (Zephyr's
 	 * wdt_callback_t carries no user_data cookie of its own, unlike
 	 * counter_alarm_cfg's) is recovered with CONTAINER_OF instead of
@@ -196,7 +197,6 @@ z_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilitie
 		_expiry[wdt_id].channel_id = channel_id;
 		__atomic_store_n(&_expiry[wdt_id].owner, owner, __ATOMIC_RELEASE);
 	}
-	caps_out->flags = 0u;
 	return ALP_OK;
 }
 
