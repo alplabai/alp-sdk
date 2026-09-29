@@ -53,3 +53,7 @@ core_ownership:
     pad: "P65"
     core: "a55"
     evidence: "Bench-verified (2026-09-24, feat/v2m-deepx-rail-uboot, E1M-V2M103): U-Boot's board_late_init() (same patch as DEEPX_CORE_0P75_EN above) is the sole reader of P65 (input, polled up to 500ms) before enabling the DA9292's CH2_EN. No CM33 board file may claim this pad. Flashed and booted end to end on real silicon (v4 u-boot.bin, WSL Ubuntu-22.04: rzv2n-dev_defconfig + deepx-rail.cfg + fdtfile-v2m.cfg + no-dirty-version.cfg + gigadevice-xspi.cfg, aarch64-linux-gnu gcc 11.4.0, rc=0, 0 warnings): P65 read live and confirmed DEEPX_PWR_EN_REQ before console showed `ALP: DA9292 programmed CTRL_01=0x01 VOUT_CH2=0x96/0x96` then `ALP: DEEPX rail 0.75V up (PG)`; post-boot readback CTRL_01=0x03, VOUT_CH2=0x96/0x96, STATUS_00=0x03 (CH2_PG set, no UV/OV/OC), STATUS_01=0x00. See changelog.d/2045."
+  - peripheral: "eMMC_V_SEL"
+    pad: "PA0"
+    core: "a55"
+    evidence: "Maintainer decision 2026-09-29 (#1142): the A55 owns PA0. U-Boot drives eMMC_V_SEL (PA0) high in board_init before the first MMC access (meta-alp-sdk/recipes-bsp/u-boot/u-boot_%.bbappend:63-68), and Linux keeps it there with the emmc_v_sel_1v8 gpio-hog (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi:658-661) so the eMMC stays at 1.8 V I/O for HS200. Boot-critical rail select: no CM33 board file may claim this pad (none does; the CM33 GD32 SPI uses P76/P77/P96/P97). eMMC HS200 boot bench-verified on E1M-V2M103 with this pairing."
