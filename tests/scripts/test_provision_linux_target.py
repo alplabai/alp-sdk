@@ -323,9 +323,9 @@ def test_i2c_scan_counts_uu():
     assert lt.i2c_scan(t, 8) == {0x1E, 0x25, 0x52}
 
 
-def test_act88760_release_only_on_defect():
+def test_act88760_release_only_when_held():
     t, fake = target([("i2cget -y -f 8 0x25 0x10", ["0x88", "0x88", "0x08"]), ("i2cset", "")])
-    assert lt.act88760_gpio4_defect(t, 8)
+    assert lt.act88760_gpio4_held(t, 8)
     lt.act88760_gpio4_release(t, 8)
     assert "i2cset -y 8 0x25 0x10 0x08" in fake.commands
     t, fake = target([("i2cget -y -f 8 0x25 0x10", "0x08")])
