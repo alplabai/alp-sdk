@@ -76,7 +76,14 @@
 # Flags:
 #   --target dev      FAST profile a dev PR is graded on: skip the slow
 #                     release-only full CMake builds + Doxygen.  Use before
-#                     opening a PR that targets `dev`.
+#                     opening a PR that targets `dev`.  Twister is skipped
+#                     when scripts/select_checks.py proves no changed path
+#                     (vs the merge base with origin/dev, plus uncommitted
+#                     and untracked files) is a native_sim build input --
+#                     e.g. a docs/changelog/Yocto/pytest-only change.  Any
+#                     doubt (unknown path, lookup failure, no origin/dev)
+#                     runs it.  ALP_SELECT_BASE overrides the base ref.
+#   --full            with --target dev: always run twister (no selection).
 #   --target main     THOROUGH release-grade profile: every stage PLUS the
 #                     main-only strict ABI-snapshot diff (pr-abi-snapshot.yml,
 #                     which triggers on main + release/** only).  Use before a
@@ -126,6 +133,7 @@ QUICK=0
 YOCTO_ONLY=0
 ZEPHYR_ONLY=0
 NO_CLEAN=0
+FORCE_FULL=0
 LIST_REQUIRED_GATE_SCRIPTS=0
 # TARGET selects a CI profile matching the branch a PR targets:
 #   dev  -- the FAST set a dev PR is graded on (skip the slow release-only
@@ -144,13 +152,14 @@ while [ $# -gt 0 ]; do
         --yocto-only)   YOCTO_ONLY=1 ;;
         --zephyr-only)  ZEPHYR_ONLY=1 ;;
         --no-clean)     NO_CLEAN=1 ;;
+        --full)         FORCE_FULL=1 ;;
         --target)       shift; TARGET="${1:-}" ;;
         --target=*)     TARGET="${1#--target=}" ;;
         --dev)          TARGET=dev ;;
         --main)         TARGET=main ;;
         --list-required-gate-scripts) LIST_REQUIRED_GATE_SCRIPTS=1 ;;
         -h|--help)
-            sed -n '3,104p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            sed -n '3,112p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -333,6 +342,22 @@ stage_twister() {
     _modules+=("${REPO_ROOT}")
     _joined=$(IFS=';'; echo "${_modules[*]}")
     export EXTRA_ZEPHYR_MODULES="${_joined}"
+    # ccache survives a fresh clone / new worktree only if the object key is
+    # path-independent.  Zephyr's build uses ccache when it is on PATH, but
+    # ccache's defaults hash absolute source paths and, because the build
+    # compiles with -g, the build directory itself (hash_dir) -- so every
+    # new checkout path was a cold cache.  Relativise paths under this
+    # checkout and stop hashing the cwd, unless the user's ccache config
+    # already made a choice (an env var here would override it).
+    if command -v ccache >/dev/null 2>&1; then
+        if [ -z "${CCACHE_BASEDIR:-}" ] && [ -z "$(ccache -k base_dir 2>/dev/null)" ]; then
+            export CCACHE_BASEDIR="${REPO_ROOT}"
+        fi
+        if [ -z "${CCACHE_HASHDIR:-}${CCACHE_NOHASHDIR:-}" ] \
+            && [ "$(ccache -k hash_dir 2>/dev/null)" = "true" ]; then
+            export CCACHE_NOHASHDIR=1
+        fi
+    fi
     # Match pr-twister.yml FAITHFULLY: same testsuite roots (incl.
     # tests/unit) AND warnings-as-errors.  Twister builds strict in CI, so
     # a warning like -Werror=comment ('/*' inside a comment) fails there;
@@ -370,6 +395,9 @@ stage_twister() {
              "-- up to $((ALP_TWISTER_JOBS * CMAKE_BUILD_PARALLEL_LEVEL)) concurrent compilers"
     fi
 
+    # --clobber-output: delete the previous twister-out/ instead of renaming
+    # it to twister-out.N -- in a reused checkout the renamed copies (several
+    # GB each) otherwise pile up run after run.
     python3 "${ZEPHYR_BASE}/scripts/twister" \
         "${twister_jobs[@]+"${twister_jobs[@]}"}" \
         --testsuite-root "${REPO_ROOT}/tests/unit" \
@@ -378,6 +406,7 @@ stage_twister() {
         --testsuite-root "${REPO_ROOT}/examples" \
         -p native_sim/native/64 \
         --extra-args=CONFIG_COMPILER_WARNINGS_AS_ERRORS=y \
+        --clobber-output \
         --inline-logs \
         --no-detailed-test-id
 }
@@ -1184,6 +1213,13 @@ else
     if [ "${YOCTO_ONLY}" -eq 0 ]; then
         if [ "${QUICK}" -eq 1 ]; then
             skip_stage "twister" "--quick" scope
+        elif [ "${TARGET}" = "dev" ] && [ "${FORCE_FULL}" -eq 0 ] \
+            && [ "$(python3 scripts/select_checks.py --base "${ALP_SELECT_BASE:-origin/dev}" --worktree)" = "skip" ]; then
+            # select_checks.py printed its per-path proof above.  Anything it
+            # cannot prove -- or any error (empty stdout) -- falls through to
+            # the full run below: selection fails safe.  --target main never
+            # gets here; release-grade runs are always full.
+            skip_stage "twister" "no native_sim build input changed (select_checks.py; --full forces it)" scope
         elif [ -z "${ZEPHYR_BASE:-}" ]; then
             skip_stage "twister" "ZEPHYR_BASE not set (run scripts/bootstrap.sh first)" gap
         else
