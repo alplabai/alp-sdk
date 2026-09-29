@@ -46,6 +46,7 @@ def _load():
     return mod
 
 
+@pytest.mark.gate_duplicate  # required-gate-scripts runs check_emit_snapshots.py itself
 def test_every_committed_golden_is_in_sync():
     """The gate itself, run from pytest.
 

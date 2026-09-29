@@ -38,7 +38,9 @@ resolve, and a missing PyYAML.
 Used by scripts/test-all.sh (local; ``--full`` and ``--target main`` bypass
 it) and .github/workflows/pr-twister.yml (pull_request + merge_group only;
 push to dev/main, the nightly schedule and workflow_dispatch always run
-full).
+full).  Locally the answer is called with ``--local``, which turns ``full``
+into ``smoke`` (the changed suites plus SMOKE_SUITES): the full set is CI's
+job.  CI never passes ``--local`` and keeps the two-answer contract above.
 """
 
 from __future__ import annotations
@@ -96,6 +98,23 @@ _BUILD_ROOTS = ("zephyr/", "examples/", "tests/", "cmake/", "src/", "chips/", "v
                 "include/", "include-testing/", "blocks/", "firmware/", "CMakeLists.txt")
 _SUITE_ROOTS = ("examples/", "tests/unit/", "tests/zephyr/", "tests/console/")
 _SUITE_YAML = ("testcase.yaml", "sample.yaml")
+
+# The one place the LOCAL smoke set is defined (test-all.sh reads it through
+# ``--local``).  A local gate never runs the full ~270-config native_sim set --
+# CI's 6-shard pr-twister does, in the merge queue -- so when a change cannot be
+# proven irrelevant the local run builds the suites the changed files sit in
+# plus these: core peripheral API, one chip-driver suite, the console, one
+# registry unit test, one errno unit test and one example.  Sized for ~2-3 min
+# on a warm ccache.  Every entry must be a suite directory (a testcase.yaml
+# inside) that allows native_sim; tests/scripts/test_select_checks.py pins it.
+SMOKE_SUITES = (
+    "tests/unit/errno_mapping",
+    "tests/unit/i2c_registry",
+    "tests/zephyr/peripheral",
+    "tests/zephyr/chips",
+    "tests/console",
+    "examples/peripheral-io/hello-world",
+)
 # C-preprocessed files: `#` is a directive there, comments are /* */ and //.
 _C_FAMILY = re.compile(r"\.(c|h|cpp|hpp|cc|S|ld|dts|dtsi|overlay)$")
 _C_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
@@ -313,6 +332,20 @@ def classify(paths: list[str], root: Path = REPO,
     return "skip", reasons
 
 
+def local_suites(paths: list[str], root: Path = REPO,
+                 tree: "Tree | None" = None) -> list[str]:
+    """Suite directories a bounded LOCAL twister run builds: SMOKE_SUITES plus
+    every suite a changed path sits inside (the nearest ancestor holding a
+    testcase.yaml/sample.yaml).  Sorted, existing directories only."""
+    tree = tree or Tree(root)
+    suites = set(SMOKE_SUITES)
+    for path in paths:
+        d = tree.suite_dir(path)
+        if d:
+            suites.add(d)
+    return sorted(s for s in suites if (root / s).is_dir())
+
+
 def changed_paths(base: str, head: str | None, worktree: bool, root: Path) -> list[str]:
     """Paths changed from `base` to `head` (or from merge-base(base, HEAD)).
 
@@ -345,8 +378,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--root", type=Path, default=REPO)
     ap.add_argument("--github-output", action="store_true",
                     help="also append twister=full|skip to $GITHUB_OUTPUT")
+    ap.add_argument("--local", action="store_true",
+                    help="local-run mode: where CI would run the full set, answer "
+                         "``smoke`` instead and follow it with the suite directories "
+                         "to build (changed suites + SMOKE_SUITES), one per line")
     args = ap.parse_args(argv)
 
+    paths: list[str] = []
+    classified = False  # True only once the change set was really computed
     if args.files is None and not args.base:
         decision, reasons = "full", ["no --base or --files given"]
     else:
@@ -354,18 +393,34 @@ def main(argv: list[str] | None = None) -> int:
             paths = args.files if args.files is not None else \
                 changed_paths(args.base, args.head, args.worktree, args.root)
             decision, reasons = classify(paths, args.root)
+            classified = True
         except (subprocess.CalledProcessError, OSError, IndexError) as exc:
             decision, reasons = "full", [f"git failed ({exc}); fail-safe"]
+
+    suites: list[str] = []
+    if args.local and decision == "full" and classified:
+        # The change set is KNOWN and something in it can affect native_sim:
+        # locally that means the bounded set (its suites + SMOKE_SUITES).  A
+        # git failure or a missing --base/--files is doubt, not a verdict, so
+        # it stays `full` -- selection never shrinks coverage on a guess.
+        decision = "smoke"
+        suites = local_suites(paths, args.root)
 
     for reason in reasons[:40]:
         print(f"  {reason}", file=sys.stderr)
     if len(reasons) > 40:
         print(f"  ... and {len(reasons) - 40} more", file=sys.stderr)
-    print(f"select_checks: twister={decision}", file=sys.stderr)
+    if decision == "smoke":
+        print("select_checks: twister=smoke (full set deferred to CI pr-twister shards; "
+              "--full forces it locally)", file=sys.stderr)
+    else:
+        print(f"select_checks: twister={decision}", file=sys.stderr)
     if args.github_output and os.environ.get("GITHUB_OUTPUT"):
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8", newline="\n") as fh:
             fh.write(f"twister={decision}\n")
     print(decision)
+    for suite in suites:
+        print(suite)
     return 0
 
 
