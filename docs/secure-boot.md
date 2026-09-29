@@ -77,7 +77,7 @@ signing key lifecycle that makes it work.
 │   - Signed by the production private key held on the        │
 │     air-gapped signing workstation.  (In-chip custody in    │
 │     OPTIGA Trust M is the intended end state -- the driver  │
-│     is probe-only today; see "Signing key lifecycle".)      │
+│     has no signing call yet; see "Signing key lifecycle".)  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -183,17 +183,14 @@ who's ever cloned the repo".  Never use it in a fielded device.
 ### Production
 
 > **The OPTIGA Trust M signing path described below is NOT
-> implemented.**  The SDK's OPTIGA Trust M driver is
-> **probe-only**: `optiga_trust_m_init` reads the I2C_STATE
-> register to confirm the part ACKs, and every other entry point
-> -- product info, raw APDU transport, `CalcSign`, `GenKeyPair`,
-> ECDH -- returns `ALP_ERR_NOSUPPORT` after argument validation
-> (`chips/optiga_trust_m/optiga_trust_m.c`; the contract is pinned
-> by `tests/scripts/test_optiga_probe_only_contract.py`).  There is
-> no key generation, no key export, and no signing through the
-> secure element today.  **Do not architect a product's key
-> management around it** until the Infineon host-library transport
-> is integrated (issue #481).
+> implemented.**  The SDK's OPTIGA Trust M driver probes the part, reads
+> its Coprocessor UID and runs raw APDU sessions through Infineon's host
+> library (`chips/optiga_trust_m/`, `vendors/optiga-trust-m/`).  There
+> is no typed key generation, key export or signing call, no PSA driver,
+> and the Shielded Connection is off (the contract is pinned by
+> `tests/scripts/test_optiga_trust_m_contract.py`).  **Do not
+> architect a product's key management around it** until typed calls and
+> binding-secret provisioning land (#1164).
 >
 > Use the air-gapped workstation flow below.  The OPTIGA design is
 > retained here as the intended end state, clearly marked.

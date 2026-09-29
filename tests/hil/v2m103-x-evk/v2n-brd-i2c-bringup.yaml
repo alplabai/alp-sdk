@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Read-only BRD_I2C health check for examples/v2n/v2n-brd-i2c-bringup
+# on E1M-V2M103: every on-module I2C part (RTC, TMP112, clock generator,
+# ACT88760 + DA9292 PMICs, OPTIGA Trust M) must answer.  The example
+# never writes a voltage, enable or control register.  TPS628640 is an
+# assembly option (SKIP) and the GD32 bridge is kernel-owned (SKIP).
+#
+# A55/Linux app (BRD_I2C is Linux-exclusive): flash_method ssh-run.
+# The OPTIGA row needs the split write/STOP/read probe from #1164.
+
+schema_version: 1
+name: v2n-brd-i2c-bringup
+description: |
+  E1M-V2M103 BRD_I2C: all on-module parts answer, read-only.
+
+example: examples/v2n/v2n-brd-i2c-bringup
+flash_method: ssh-run
+
+serial:
+  duration_s: 30
+  expect_contains:
+    - "==== BRD_I2C report ===="
+    - "optiga trust m   0x30  PASS"
+    - "da9292 PMIC      0x1E  PASS"
+    - "VERDICT: BRD_I2C fully alive."
+  expect_absent:
+    - " FAIL "
+    - "FATAL"

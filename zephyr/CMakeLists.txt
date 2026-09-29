@@ -1232,8 +1232,15 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_TMP112
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/tmp112/tmp112.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_RV3028C7
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/rv3028c7/rv3028c7.c)
-zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_OPTIGA_TRUST_M
-    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/optiga_trust_m/optiga_trust_m.c)
+if(CONFIG_ALP_SDK_CHIP_OPTIGA_TRUST_M)
+    # The driver runs Infineon's host library (#1164).
+    include(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/optiga-trust-m/sources.cmake)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/chips/optiga_trust_m/optiga_trust_m.c
+        ${ALP_OPTIGA_SOURCES})
+    zephyr_library_include_directories(${ALP_OPTIGA_INCLUDE_DIRS})
+    zephyr_library_compile_definitions(${ALP_OPTIGA_DEFINES})
+endif()
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_EEPROM_24C128
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/eeprom_24c128/eeprom_24c128.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_CAM_MUX_PI3WVR626
