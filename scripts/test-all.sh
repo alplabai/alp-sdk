@@ -774,16 +774,30 @@ stage_required_gate_scripts() {
     # like a real gate break rather than a host gap.  Gate the whole
     # stage: a partial pass here is not a meaningful verdict either.
     require_jsonschema_2020 stage_required_gate_scripts || return 99
-    local script path failed=0 ran=0
+    local script path failed=0 ran=0 jobdir rc
+    # Run the scripts in parallel (read-only checks; ALP_GATE_JOBS, default
+    # 8), then print each one's output in list order so the log reads the
+    # same as the old serial loop.  ~214 s -> ~55 s on alplab-gw.
+    # check_public_private.py is skipped here: stage_public_private runs it.
+    jobdir=$(mktemp -d)
     for script in "${REQUIRED_GATE_SCRIPTS[@]}"; do
+        [ "${script}" = "check_public_private.py" ] && continue
+        [ -f "scripts/${script}" ] && printf '%s
+' "${script}"
+    done | xargs -P "${ALP_GATE_JOBS:-8}" -I{}         sh -c 'python3 "scripts/$1" >"$2/$1.out" 2>&1; echo $? >"$2/$1.rc"' _ {} "${jobdir}"
+    for script in "${REQUIRED_GATE_SCRIPTS[@]}"; do
+        [ "${script}" = "check_public_private.py" ] && continue
         path="scripts/${script}"
         if [ ! -f "${path}" ]; then
             continue
         fi
         ran=1
         echo "--- ${path} ---"
-        python3 "${path}" || failed=1
+        cat "${jobdir}/${script}.out" 2>/dev/null
+        rc=$(cat "${jobdir}/${script}.rc" 2>/dev/null || echo 1)
+        [ "${rc}" = "0" ] || failed=1
     done
+    rm -rf "${jobdir}"
 
     # board.yaml schema sweep -- canonical template + every
     # examples/*/board.yaml + tests/*/board.yaml, mirroring the

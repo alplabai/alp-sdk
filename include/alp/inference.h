@@ -40,7 +40,7 @@
  *
  * Vendor-specific accelerator paths -- `<alp/ext/renesas/inference.h>`
  * (DRP-AI3 pipeline-stage + AI-SRAM pinning) and
- * `<alp/ext/deepx/inference.h>` (DX-M1 slot + DRAM-tile pinning) --
+ * `<alp/ext/deepx/inference.h>` (DX-M1 NPU-core binding + device telemetry) --
  * remain available as escape hatches when the unified API can't
  * express what the vendor SDK offers.  Both currently return
  * ALP_ERR_NOSUPPORT on every call past the vendor-handle gate: the

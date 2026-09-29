@@ -186,6 +186,12 @@ IMAGE_INSTALL += " \
     rng-tools-service              \
 "
 
+# scripts/provision_som.py runs on the unit's own Linux: write_emmc_boot
+# reads and sets the eMMC boot config (EXT_CSD[177]/[179]) with `mmc`.
+# busybox has no equivalent, and no image carried it before (2026-09-28,
+# E1M-V2M103 2026W38-0001: "mmc: command not found").
+IMAGE_INSTALL += " mmc-utils"
+
 # Assert the network story: the vendor build template's
 # EXTRA_IMAGE_FEATURES (local.conf) includes tools-testapps, whose
 # packagegroup drags in connman -- a second DHCP manager fighting
