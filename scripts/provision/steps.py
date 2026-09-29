@@ -1097,9 +1097,16 @@ class ColdBootTest(Step):
         for i in range(1, n + 1):
             text = ctx.mutate(f"cold cycle {i}/{n}", lambda: boot_to_linux(ctx))
             probs = [f"BL2: {e}" for e in uboot.bl2_errors(text)]
-            tier, tev = tier_gate(ctx, uboot.parse_dram_banner(text))
+            mib = uboot.parse_dram_banner(text)
+            tier, tev = tier_gate(ctx, mib)
             if not tier.ok:
                 probs.append(tier.detail)
+            if mib:
+                # boot_sd_linux records these too, but a unit that already
+                # boots from eMMC (phase B only) never runs it (#2301).
+                ev["dram_size_mib"] = str(mib)
+                ev["uboot_dram_banner"] = next(ln.strip() for ln in text.splitlines()
+                                               if ln.startswith("DRAM:"))
             if ctx.family == "v2n-m1" and not uboot.has_rail_pg(text):
                 probs.append(f"no {uboot.RAIL_PG!r}")
             mode = uboot.parse_sys_lsi(text).get("soc_sys_lsi_mode")
