@@ -177,6 +177,26 @@ key is accepted here too if you want to pin one for your own bench,
 but the shipped `_runner.yaml` files deliberately omit it -- see
 "Serial port" above.
 
+### Linux (A55) examples: `flash_method: ssh-run`
+
+V2N-family examples that run on the Cortex-A55 under Linux (anything
+touching BRD_I2C, which the CM33 must never master) set
+`flash_method: ssh-run` in their spec.  There is no west build and no
+serial console: build the example for the target first (Yocto or the SDK
+toolchain), put the binary in one directory named after the example
+directory, then run
+
+```sh
+python tests/hil/run_smoke.py tests/hil/v2m103-x-evk --no-common     --ssh-host root@<board-ip> --artifact-dir <dir-with-binaries>
+```
+
+The runner copies each binary to `/tmp/` on the target with `scp`, runs
+it over `ssh -tt`, and applies the spec's `serial:` expectations to its
+output.  The run is stopped after `serial.duration_s`, so an example that
+loops forever (`v2n-power-monitor`) still finishes; the pty keeps its
+stdout line-buffered, so nothing it printed is lost when it is stopped.  `--ssh-host` falls back to `ALP_HIL_SSH_HOST`; like the serial
+port, it has no default.
+
 ---
 
 ## What this tree does NOT do

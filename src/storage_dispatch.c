@@ -91,7 +91,7 @@ alp_storage_t *alp_storage_open(const alp_storage_config_t *cfg)
 	h->state.read_only   = cfg->read_only;
 	h->state.instance_id = cfg->instance_id;
 
-	alp_capabilities_t caps = { .flags = be->base_caps };
+	alp_capabilities_t caps = { .flags = be->base_caps, .class_flags = be->base_class_flags };
 	if (be->probe != NULL) {
 		uint32_t refined = caps.flags;
 		(void)be->probe(cfg->instance_id, &refined);
@@ -176,7 +176,7 @@ alp_status_t alp_storage_erase(alp_storage_t *storage, uint64_t off, uint64_t le
 	}
 	alp_status_t rc;
 	if (storage->state.read_only) {
-		rc = ALP_ERR_INVAL;
+		rc = ALP_ERR_NOT_READY;
 	} else if (len == 0u) {
 		rc = ALP_OK;
 	} else if (storage->state.ops->erase == NULL) {

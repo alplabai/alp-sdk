@@ -200,7 +200,7 @@ void fake_tas2563_fail_write_at(uint8_t book, uint8_t page, uint8_t reg);
 void fake_tas2563_reset(void);
 
 /* ------------------------------------------------------------------ */
-/* fake GD32G553 supervisor-MCU bridge (PING/GET_VERSION only)         */
+/* fake GD32G553 supervisor-MCU bridge (PING/GET_VERSION/GET_STATE)    */
 /* ------------------------------------------------------------------ */
 /* Models the OTA post-COMMIT/ROLLBACK TRIAL window's STATUS_BUSY reply
  * (and the confirm-triggered second reset's raw link drop) -- see
@@ -235,6 +235,30 @@ uint32_t fake_gd32bridge_attempts_seen(void);
 
 /** Reset version, armed faults and the counters to defaults. */
 void fake_gd32bridge_reset(void);
+
+/** Arm CMD_OTA_GET_STATE's next reply.  @p reply_width selects the wire
+ *  shape: 5 (pre-v0.14, no err byte -- @p err is ignored by the fake but
+ *  still stored) or 6 (v0.14+, err appended) -- see gh#101.  A width of
+ *  0 (the post-reset default) makes the fake fall through to its
+ *  unarmed-opcode STATUS_BUSY answer instead. */
+void fake_gd32bridge_arm_ota_get_state(uint8_t  state,
+                                       uint8_t  active,
+                                       uint8_t  pending,
+                                       uint16_t boot_count,
+                                       uint8_t  err,
+                                       uint8_t  reply_width);
+
+/* ------------------------------------------------------------------ */
+/* fake OPTIGA Trust M                                                 */
+/* ------------------------------------------------------------------ */
+
+/** NACK the next @p count accesses, as the part does while waking. */
+void fake_optiga_arm_sleep(unsigned count);
+
+/** Total accesses attempted (NACKed ones included) since the last reset. */
+uint32_t fake_optiga_attempts(void);
+
+void fake_optiga_reset(void);
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -39,8 +39,12 @@ CATALOGUE = {
     "schema": 1, "family": "v2n",
     "keys": {
         "eeprom_unique_id": {"group": "identity", "source": "0x58", "mode": "auto", "ship_required": True},
+        # act88760_gpio4_defect: legacy, no longer written by the tool; kept here only
+        # so an existing unit.yaml carrying it still round-trips as informational.
         "act88760_gpio4_defect": {"group": "power", "source": "0x25", "mode": "auto", "ship_required": False},
+        "act88760_gpio4_otp": {"group": "power", "source": "0x25", "mode": "auto", "ship_required": False},
         "act88760_gpio4_workaround": {"group": "power", "source": "", "mode": "auto", "ship_required": False},
+        "act88760_gpio4_after_boot": {"group": "power", "source": "0x25", "mode": "auto", "ship_required": False},
         "gd32_dp_id": {"group": "gd32", "source": "", "mode": "auto", "ship_required": False},
         "disposition": {"group": "disposition", "source": "operator", "mode": "manual", "ship_required": True},
         "notes": {"group": "disposition", "source": "operator", "mode": "manual", "ship_required": False},
@@ -401,9 +405,11 @@ def test_lock_success_and_dry_run_plan_only(tmp_path):
     assert board.lock & 0x02 and r.evidence["secure_page_state"] == "locked"
 
 
-# --- GPIO4 defect -> bench-only ------------------------------------------------------------------
+# --- ACT88760 GPIO4 early-OTP workaround ----------------------------------------------------------
 
-def test_gpio4_defect_unit_is_bench_only(tmp_path):
+def test_gd32_flash_applies_the_early_otp_workaround(tmp_path):
+    """An 0x88-OTP unit: gd32_flash applies the volatile release and records
+    how; this is no longer, by itself, a ship-blocking or bench-only fact."""
     fw = _gd32_fw(tmp_path)
     board = Board(act_0x10=0x88)
     ctx = _ctx(tmp_path, bench=_bench(), linux=board, gd32_fw=fw, execute=True)
@@ -416,18 +422,20 @@ def test_gpio4_defect_unit_is_bench_only(tmp_path):
     assert board.regs[(8, 0x25, 0x10)] == 0x08                     # volatile workaround applied
     assert "i2cset -y 8 0x25 0x10 0x08" in board.commands
     text = unit.read_text(encoding="utf-8")
-    assert "act88760_gpio4_defect: yes" in text
-    assert "act88760_gpio4_workaround: volatile 0x08" in text
-    assert "disposition: bench-only" in text
+    assert "act88760_gpio4_otp: 0x88" in text
+    assert "act88760_gpio4_workaround: provision (volatile 0x08)" in text
+    assert "disposition: bench-only" not in text                     # no longer auto-defaulted for this
     assert "notes: see repo#1234" in text                            # manual key, inline '#', untouched
-    assert "blocked" in res[-1].detail and "gpio4_defect" in res[-1].detail
+    # still blocked (disposition unset, eeprom_unique_id missing), just not because of GPIO4
+    assert "blocked" in res[-1].detail
+    assert "gpio4" not in res[-1].detail.lower()
     # verify used fresh probe sessions (savebin after the loadbins)
     kinds = [c[0] for c in ctx.bench.probe.calls]
     last_load = max(i for i, k in enumerate(kinds) if k == "loadbin")
     assert kinds[last_load + 1:kinds.index("reset_run")].count("savebin") == len(steps.GD32_IMAGES)
 
 
-def test_defect_never_replaces_an_operator_disposition(tmp_path):
+def test_gd32_flash_workaround_does_not_touch_an_operator_disposition(tmp_path):
     ctx = _ctx(tmp_path, bench=_bench(), linux=Board(act_0x10=0x88), gd32_fw=_gd32_fw(tmp_path), execute=True)
     unit = ctx.unit_dir / f"{SERIAL}.unit.yaml"
     unit.parent.mkdir(parents=True)
@@ -514,22 +522,38 @@ def test_new_bundle_supersedes_recorded_steps(tmp_path):
     assert len(ctx.state["superseded"]) == 1
 
 
-def test_defect_is_sticky_and_census_detects_it(tmp_path):
+def test_legacy_defect_key_is_informational_not_sticky_and_not_blocking(tmp_path):
+    """A unit.yaml carrying the pre-decision `act88760_gpio4_defect: yes` key
+    (e.g. E1M-V2M103 2026W38-0001) is never overwritten -- the tool no longer
+    writes that key -- but it also no longer forces bench-only or blocks the
+    ship check by itself (see test_ship_check in test_provision_ledger_out.py
+    for the ship-check side)."""
     ctx = _ctx(tmp_path, bench=_bench(), linux=Board(act_0x10=0x08), execute=True)
     unit = ctx.unit_dir / f"{SERIAL}.unit.yaml"
     unit.parent.mkdir(parents=True)
-    unit.write_text("act88760_gpio4_defect: yes\nact88760_gpio4_workaround: volatile 0x08\n", encoding="utf-8")
-    ctx.facts.update(act88760_gpio4_defect="no", act88760_gpio4_workaround="none")
+    unit.write_text("act88760_gpio4_defect: yes\n", encoding="utf-8")
     steps.run_steps(ctx, only=["record"])
     text = unit.read_text(encoding="utf-8")
-    assert "act88760_gpio4_defect: yes" in text and "volatile 0x08" in text
-    assert "disposition: bench-only" in text
+    assert "act88760_gpio4_defect: yes" in text          # left alone, not in the auto set any more
+    assert "disposition: bench-only" not in text          # no longer auto-defaulted from the legacy key
+
+
+def test_census_records_otp_and_workaround_none_when_already_released(tmp_path):
+    ctx = _ctx(tmp_path / "c", bench=_bench(), linux=Board(act_0x10=0x08))
+    res = steps.run_steps(ctx, only=["census"])
+    assert res[-1].evidence["act88760_gpio4_otp"] == "0x08"
+    assert res[-1].evidence["act88760_gpio4_workaround"] == "none"
+    assert "act88760_gpio4_defect" not in res[-1].evidence
+
+
+def test_census_records_otp_default_without_a_workaround_verdict(tmp_path):
     ctx = _ctx(tmp_path / "c", bench=_bench(), linux=Board(act_0x10=0x88))
     res = steps.run_steps(ctx, only=["census"])
-    assert res[-1].evidence["act88760_gpio4_defect"] == "yes"
+    assert res[-1].evidence["act88760_gpio4_otp"] == "0x88"
+    assert "act88760_gpio4_workaround" not in res[-1].evidence   # decided later, by cold_boot_test
 
 
-def test_defect_unit_cold_boot_does_not_require_the_gd32(tmp_path):
+def test_cold_boot_early_otp_unit_not_released_exempts_the_gd32(tmp_path):
     board = Board(act_0x10=0x88)
     board.host = "10.0.0.2"
     board._answer_orig = board._answer
@@ -542,11 +566,86 @@ def test_defect_unit_cold_boot_does_not_require_the_gd32(tmp_path):
         "NOTICE:  BL2: v2.10\nNOTICE:  BL2: SYS_LSI_MODE: 0X3c06\nDRAM:  3.9 GiB\n"
         f"{gates.RAIL_PG}\n\ne1m login: ")
     ctx = _ctx(tmp_path, bench=bench, linux=board, execute=True, cold_cycles=1)
-    ctx.facts["act88760_gpio4_defect"] = "yes"
     res = steps.run_steps(ctx, only=["cold_boot_test"], force=["cold_boot_test"])
     cb = res[-1]
     assert cb.name == "cold_boot_test" and "0x70" not in cb.detail, cb.detail
     assert "0x70 not required" in cb.evidence.get("cold_boot_note", ""), cb.evidence
+    assert cb.evidence.get("act88760_gpio4_after_boot") == "0x88"
+    # the DRAM banner is recorded here too, for units that never run boot_sd_linux
+    assert cb.evidence.get("dram_size_mib"), cb.evidence
+    assert cb.evidence.get("uboot_dram_banner", "").startswith("DRAM:"), cb.evidence
+
+
+def _everyone_acks():
+    """i2cdetect output where every address 0x00..0x7f answers, including
+    0x70 (the GD32): used to test the "GD32 required" path without an
+    unrelated on-module device (e.g. the RTC, the PMIC) reporting missing."""
+    return "".join(f"{r:x}0: " + " ".join(f"{r * 16 + c:02x}" for c in range(16)) + "\n" for r in range(8))
+
+
+def test_cold_boot_released_unit_requires_the_gd32_and_records_after_boot(tmp_path):
+    """reg 0x10 == 0x08 after a plain cold boot: the GD32 is required like
+    any other on-module device (no exemption note), and the release is
+    attributed to U-Boot for an early-OTP unit (act88760_gpio4_otp was seen
+    at 0x88 earlier in this run)."""
+    board = Board(act_0x10=0x08)
+    board.host = "10.0.0.2"
+    board._answer_orig = board._answer
+    board._answer = lambda cmd: (0, _everyone_acks()) if cmd.startswith("i2cdetect") else board._answer_orig(cmd)
+    console = _login_console()
+    bench = _bench(console=console)
+    bench.power.on_hook = lambda: console.feed(
+        "NOTICE:  BL2: v2.10\nNOTICE:  BL2: SYS_LSI_MODE: 0X3c06\nDRAM:  3.9 GiB\n"
+        f"{gates.RAIL_PG}\n\ne1m login: ")
+    ctx = _ctx(tmp_path, bench=bench, linux=board, execute=True, cold_cycles=1)
+    ctx.facts["act88760_gpio4_otp"] = "0x88"    # this run's census/gd32_flash saw the early-OTP default
+    res = steps.run_steps(ctx, only=["cold_boot_test"], force=["cold_boot_test"])
+    cb = res[-1]
+    assert cb.status == "done", cb.detail
+    assert "0x70" not in cb.detail, cb.detail                       # no exemption note; GD32 was required
+    assert cb.evidence.get("act88760_gpio4_after_boot") == "0x08"
+    assert cb.evidence.get("act88760_gpio4_workaround") == "u-boot"
+
+
+def test_cold_boot_fixed_otp_unit_records_workaround_none(tmp_path):
+    board = Board(act_0x10=0x08)
+    board.host = "10.0.0.2"
+    board._answer_orig = board._answer
+    board._answer = lambda cmd: (0, _everyone_acks()) if cmd.startswith("i2cdetect") else board._answer_orig(cmd)
+    console = _login_console()
+    bench = _bench(console=console)
+    bench.power.on_hook = lambda: console.feed(
+        "NOTICE:  BL2: v2.10\nNOTICE:  BL2: SYS_LSI_MODE: 0X3c06\nDRAM:  3.9 GiB\n"
+        f"{gates.RAIL_PG}\n\ne1m login: ")
+    ctx = _ctx(tmp_path, bench=bench, linux=board, execute=True, cold_cycles=1)
+    res = steps.run_steps(ctx, only=["cold_boot_test"], force=["cold_boot_test"])
+    cb = res[-1]
+    assert cb.status == "done", cb.detail
+    assert cb.evidence.get("act88760_gpio4_after_boot") == "0x08"
+    assert cb.evidence.get("act88760_gpio4_workaround") == "none"
+
+
+def test_cold_boot_reads_the_uboot_gd32_nrst_line(tmp_path):
+    """U-Boot 0011 prints what it did to reg 0x10; that line, not a guess,
+    decides between an early-OTP unit (u-boot) and a fixed one (none)."""
+    for line, otp, how in (
+            ("ALP: ACT88760 GD32_NRST released (0x10: 0x88 -> 0x08)", "0x88", "u-boot"),
+            ("ALP: ACT88760 GD32_NRST already released (0x10=0x08)", "0x08", "none")):
+        board = Board(act_0x10=0x08)
+        board.host = "10.0.0.2"
+        board._answer_orig = board._answer
+        board._answer = lambda cmd, b=board: (0, _everyone_acks()) if cmd.startswith("i2cdetect") else b._answer_orig(cmd)
+        console = _login_console()
+        bench = _bench(console=console)
+        bench.power.on_hook = lambda c=console, ln=line: c.feed(
+            "NOTICE:  BL2: v2.10\nNOTICE:  BL2: SYS_LSI_MODE: 0X3c06\nDRAM:  3.9 GiB\n"
+            f"{ln}\n{gates.RAIL_PG}\n\ne1m login: ")
+        ctx = _ctx(tmp_path / how, bench=bench, linux=board, execute=True, cold_cycles=1)
+        res = steps.run_steps(ctx, only=["cold_boot_test"], force=["cold_boot_test"])
+        cb = res[-1]
+        assert cb.status == "done", cb.detail
+        assert cb.evidence.get("act88760_gpio4_otp") == otp, cb.evidence
+        assert cb.evidence.get("act88760_gpio4_workaround") == how, cb.evidence
 
 
 def test_build_dir_unit_defaults_to_bench_only(tmp_path):
@@ -880,6 +979,19 @@ def test_linux_up_attaches_the_configured_host_when_detect_was_skipped(tmp_path,
     assert ctx.linux is None and ctx.linux_up()
     assert seen == ["192.0.2.7"]
     assert not steps.Ctx.linux_up(_ctx(tmp_path / "b", bench=_bench()))
+
+
+def test_need_linux_attaches_the_configured_host_on_a_forced_step(tmp_path):
+    # --only gd32_flash --force-step gd32_flash on a board already up: the
+    # step calls need_linux() without any probe having attached ctx.linux,
+    # which refused with "boot_sd_linux has not run" (E1M-V2M103, 2026-09-29).
+    b = _bench()
+    b.linux_host = "192.0.2.7"
+    ctx = _ctx(tmp_path, bench=b, execute=True)
+    assert ctx.linux is None
+    assert ctx.need_linux().host == "192.0.2.7"
+    with pytest.raises(steps.Refused):
+        _ctx(tmp_path / "b", bench=_bench(), execute=True).need_linux()
 
 
 def test_preflight_refuses_execute_without_pmic_expect(tmp_path):

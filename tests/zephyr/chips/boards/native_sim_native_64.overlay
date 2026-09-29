@@ -85,6 +85,11 @@
                 compatible = "alp,fake-ina236";
                 reg = <0x40>;
             };
+            /* 0x30 = OPTIGA Trust M default address; NACKs while asleep. */
+            fake_optiga: fake_optiga@30 {
+                compatible = "alp,fake-optiga";
+                reg = <0x30>;
+            };
             /* 0x4D = the AD0/SPICLK "10k to GND" strap (SLASET3D
              * Table 7-3, p.30), which is U27 on the E1M-X EVK.  One
              * instance is enough: nothing this driver does is

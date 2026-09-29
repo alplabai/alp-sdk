@@ -1356,20 +1356,24 @@ alp_status_t gd32g553_ota_get_state(gd32g553_t *ctx, gd32g553_ota_state_info_t *
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (out == NULL) return ALP_ERR_INVAL;
 
-	/* Reply: state(u8) + active(u8) + pending(u8) + boot_count(u16 LE). */
-	uint8_t      reply[5] = { 0 };
-	alp_status_t s        = cmd_send(ctx,
-	                                 GD32G553_TRANSPORT_DEFAULT,
-	                                 GD32G553_CMD_OTA_GET_STATE,
-	                                 NULL,
-	                                 0u,
-	                                 reply,
-	                                 sizeof(reply));
+	/* Reply: state(u8) + active(u8) + pending(u8) + boot_count(u16 LE)
+	 * [+ err(u8) since protocol v0.14, gh#101].  The wire carries no
+	 * length (docs/gd32-bridge-protocol.md §4), so the host must know
+	 * up front how many bytes to clock -- branch on the MINOR this
+	 * link negotiated at init() rather than always reading 6: an older
+	 * bridge never appends the err byte, and reading past what it sent
+	 * would desync the CRC over a byte that was never on the wire. */
+	const bool   has_err   = ctx->version.minor >= GD32G553_OTA_ERR_MIN_PROTOCOL_MINOR;
+	const size_t reply_len = has_err ? 6u : 5u;
+	uint8_t      reply[6]  = { 0 };
+	alp_status_t s         = cmd_send(
+	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_OTA_GET_STATE, NULL, 0u, reply, reply_len);
 	if (s != ALP_OK) return s;
 	out->state        = (gd32g553_ota_state_t)reply[0];
 	out->active_slot  = (gd32g553_ota_slot_t)reply[1];
 	out->pending_slot = (gd32g553_ota_slot_t)reply[2];
 	out->boot_count   = (uint16_t)reply[3] | ((uint16_t)reply[4] << 8);
+	out->err          = has_err ? (gd32g553_ota_err_t)reply[5] : GD32G553_OTA_ERR_NONE;
 	return ALP_OK;
 }
 

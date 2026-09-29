@@ -33,13 +33,19 @@ static int demo_realhw_probe(uint32_t instance_id, uint32_t *caps)
 	return 0;
 }
 
+/* "demo" is a fictional class with no dedicated ALP_DEMO_CAP_* header
+ * (see demo_class.h) -- DEMO_CAP_WIDGET stands in for a class-scoped
+ * bit the way a real class's ALP_<CLASS>_CAP_* would. */
+#define DEMO_CAP_WIDGET (1u << 0)
+
 ALP_BACKEND_REGISTER(demo,
                      realhw,
                      {
-                         .silicon_ref = "alif:ensemble:e7",
-                         .vendor      = "alif",
-                         .base_caps   = (uint32_t)ALP_INSTANCE_CAP_HW_OVERSAMPLE,
-                         .priority    = 100,
-                         .ops         = &demo_realhw_ops,
-                         .probe       = demo_realhw_probe,
+                         .silicon_ref      = "alif:ensemble:e7",
+                         .vendor           = "alif",
+                         .base_caps        = (uint32_t)ALP_INSTANCE_CAP_REPORTED,
+                         .base_class_flags = (uint32_t)DEMO_CAP_WIDGET,
+                         .priority         = 100,
+                         .ops              = &demo_realhw_ops,
+                         .probe            = demo_realhw_probe,
                      });

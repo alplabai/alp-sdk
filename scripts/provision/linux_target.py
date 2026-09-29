@@ -40,8 +40,16 @@ SYS_REGS_NOTE = "unverified addr"
 
 ACT88760_ADDR = 0x25
 ACT88760_GPIO_REG = 0x10
-ACT88760_GPIO4_DEFECT = 0x88   # known-bad reg 0x10 default on some units (bench-only; see the private runbook)
-ACT88760_GPIO4_RELEASE = 0x08  # volatile workaround, lost at power-off
+# OTP GPIO4 (GD32_NRST) default. Most units' factory OTP already holds this
+# reg at 0x08; a few early units (e.g. E1M-V2M103 2026W38-0001) have the OTP
+# default 0x88, which holds the GD32 in reset until released -- an expected,
+# known-workaround condition, not a defect (maintainer decision 2026-09-29).
+# U-Boot's board_late_init releases it every boot (a no-op on an already-0x08
+# unit); a provisioning tool run that still finds 0x88 applies the same
+# volatile release itself, so provisioning never depends on the U-Boot fix
+# having landed yet.
+ACT88760_GPIO4_OTP_DEFAULT = 0x88
+ACT88760_GPIO4_RELEASED = 0x08  # released (by U-Boot or the tool); volatile, lost at power-off
 DA9292_ADDR = 0x1E
 DA9292_REGS = {
     "da9292_status": (0x00, 0x01),
@@ -461,7 +469,8 @@ def gd32_bridge_version(t: LinuxTarget, bus: int, addr: int = 0x70) -> tuple[int
     repeated-start read [status][major][minor][patch][crc lo][crc hi], CRC-16/CCITT-FALSE
     over cmd (+payload) / status+payload.  `-f` because the kernel driver binds 0x70.
     Asking the bridge beats grepping dmesg: the driver logs the protocol only if the
-    GD32 answers AT PROBE, which a late-released GD32 (ACT88760 GPIO4 defect) never does."""
+    GD32 answers AT PROBE, which a GD32 still held in reset (ACT88760 GPIO4 not yet
+    released) never does."""
     crc = _crc16_ccitt_false(b"")
     r = t.run(f"i2ctransfer -f -y {bus} w4@{addr:#04x} 0x00 0x01 {crc & 0xFF:#04x} {crc >> 8:#04x} r6")
     rsp = _parse_bytes(r.stdout, 6)
@@ -472,33 +481,43 @@ def gd32_bridge_version(t: LinuxTarget, bus: int, addr: int = 0x70) -> tuple[int
     return rsp[1], rsp[2], rsp[3]
 
 
-def i2c_scan(t: LinuxTarget, bus: int) -> set[int]:
-    """i2cdetect -r (read-byte probe, no quick-write); UU counts as present."""
-    out = t.run(f"i2cdetect -y -r {bus}").stdout
+def i2c_scan(t: LinuxTarget, bus: int, span: tuple[int, int] | None = None,
+             wake: bool = False) -> set[int]:
+    """i2cdetect -r (read-byte probe, no quick-write), optionally limited to
+    span=(first, last); UU counts as present. wake=True runs a throwaway
+    probe first in the same command, for parts that NACK while asleep."""
+    cmd = f"i2cdetect -y -r {bus}" + (f" {span[0]:#04x} {span[1]:#04x}" if span else "")
+    out = t.run(f"{cmd} >/dev/null 2>&1; {cmd}" if wake else cmd).stdout
     found: set[int] = set()
     for ln in out.splitlines():
-        m = re.match(r"([0-7]0):\s(.*)", ln)
+        m = re.match(r"([0-7]0): ", ln)
         if not m:
             continue
         base = int(m[1], 16)
-        for i, cell in enumerate(m[2].split()):
+        # Fixed 3-char columns: blanks pad the addresses outside the probed
+        # range, so a whitespace split would shift every cell after them.
+        for i in range(16):
+            cell = ln[4 + 3 * i:6 + 3 * i]
             if cell == "UU" or re.fullmatch(r"[0-9a-f]{2}", cell):
                 found.add(base + i)
     return found
 
 
-def act88760_gpio4_defect(t: LinuxTarget, bus: int) -> bool:
-    return i2c_get(t, bus, ACT88760_ADDR, ACT88760_GPIO_REG) == ACT88760_GPIO4_DEFECT
+def act88760_gpio4_held(t: LinuxTarget, bus: int) -> bool:
+    """True while GD32_NRST is still held by the OTP GPIO4 default (0x88):
+    the GD32 has not been released yet, by U-Boot or by us."""
+    return i2c_get(t, bus, ACT88760_ADDR, ACT88760_GPIO_REG) == ACT88760_GPIO4_OTP_DEFAULT
 
 
 def act88760_gpio4_release(t: LinuxTarget, bus: int) -> None:
-    """Volatile workaround (lost at power-off): release GD32_NRST. Only on a defect unit."""
-    if not act88760_gpio4_defect(t, bus):
-        raise BenchError(f"ACT88760 reg {ACT88760_GPIO_REG:#04x} is not {ACT88760_GPIO4_DEFECT:#04x}; refusing to write")
-    i2c_set(t, bus, ACT88760_ADDR, ACT88760_GPIO_REG, ACT88760_GPIO4_RELEASE)
+    """Volatile workaround (lost at power-off): release GD32_NRST. Only when
+    reg 0x10 still holds the OTP default -- never writes EEPROM/OTP."""
+    if not act88760_gpio4_held(t, bus):
+        raise BenchError(f"ACT88760 reg {ACT88760_GPIO_REG:#04x} is not {ACT88760_GPIO4_OTP_DEFAULT:#04x}; refusing to write")
+    i2c_set(t, bus, ACT88760_ADDR, ACT88760_GPIO_REG, ACT88760_GPIO4_RELEASED)
     got = i2c_get(t, bus, ACT88760_ADDR, ACT88760_GPIO_REG)
-    if got != ACT88760_GPIO4_RELEASE:
-        raise BenchError(f"ACT88760 reg {ACT88760_GPIO_REG:#04x} reads {got:#04x} after writing {ACT88760_GPIO4_RELEASE:#04x}")
+    if got != ACT88760_GPIO4_RELEASED:
+        raise BenchError(f"ACT88760 reg {ACT88760_GPIO_REG:#04x} reads {got:#04x} after writing {ACT88760_GPIO4_RELEASED:#04x}")
 
 
 def expected_i2c(preset: dict, i2c_bus: dict[str, int]) -> dict[int, set[int]]:
@@ -521,6 +540,12 @@ def i2c_check(t: LinuxTarget, expected: dict[int, set[int]]) -> list[str]:
     problems = []
     for bus, want in sorted(expected.items()):
         missing = want - i2c_scan(t, bus)
+        # Parts that sleep NACK the first access after idle and ACK one made
+        # right after it: the OPTIGA Trust M at 0x30 misses a plain scan and
+        # falls back asleep between separate SSH commands (bench, E1M-V2M103
+        # 2026W38-0001). Re-probe only the expected-but-silent addresses, each
+        # as wake-then-scan inside one command.
+        missing = {a for a in missing if a not in i2c_scan(t, bus, (a, a), wake=True)}
         if missing:
             problems.append(f"i2c-{bus}: missing " + " ".join(f"{a:#04x}" for a in sorted(missing)))
     return problems

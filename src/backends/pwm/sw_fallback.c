@@ -62,15 +62,15 @@
 static alp_status_t
 sw_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	struct alp_pwm *h = CONTAINER_OF(st, struct alp_pwm, state);
 	h->channel        = cfg->channel_id;
 	h->period_ns      = (cfg->period_ns != 0u) ? cfg->period_ns : 1000000u; /* 1 kHz */
 	h->flags          = 0u;
 
-	st->dev         = NULL;
-	st->channel_id  = cfg->channel_id;
-	st->be_data     = NULL;
-	caps_out->flags = 0u;
+	st->dev        = NULL;
+	st->channel_id = cfg->channel_id;
+	st->be_data    = NULL;
 	return ALP_OK;
 }
 

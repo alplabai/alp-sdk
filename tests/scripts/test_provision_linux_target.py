@@ -25,12 +25,12 @@ def _hx(data: bytes) -> str:
     return " ".join(f"0x{b:02x}" for b in data)
 
 
-def _i2cdetect(addrs: set[int]) -> str:
+def _i2cdetect(addrs: set[int], first: int = 0x03, last: int = 0x77) -> str:
     rows = ["     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f"]
     for base in range(0, 0x80, 0x10):
         cells = []
         for a in range(base, base + 0x10):
-            if a < 0x03 or a > 0x77:
+            if a < first or a > last:
                 cells.append("  ")
             elif a in addrs:
                 cells.append("UU" if a == 0x52 else f"{a:02x}")
@@ -323,9 +323,9 @@ def test_i2c_scan_counts_uu():
     assert lt.i2c_scan(t, 8) == {0x1E, 0x25, 0x52}
 
 
-def test_act88760_release_only_on_defect():
+def test_act88760_release_only_when_held():
     t, fake = target([("i2cget -y -f 8 0x25 0x10", ["0x88", "0x88", "0x08"]), ("i2cset", "")])
-    assert lt.act88760_gpio4_defect(t, 8)
+    assert lt.act88760_gpio4_held(t, 8)
     lt.act88760_gpio4_release(t, 8)
     assert "i2cset -y 8 0x25 0x10 0x08" in fake.commands
     t, fake = target([("i2cget -y -f 8 0x25 0x10", "0x08")])
@@ -341,8 +341,29 @@ def test_expected_i2c_and_check():
     exp = lt.expected_i2c(preset, {"eeprom": 0, "brd": 8, "pmic": 8})
     assert exp == {8: {0x1E}, 0: {0x50, 0x58}}
     t, _ = target([("i2cdetect -y -r 0", _i2cdetect({0x40, 0x50, 0x58, 0x69})),
-                   ("i2cdetect -y -r 8", _i2cdetect(set()))])
+                   ("i2cdetect -y -r 8", _i2cdetect(set())),
+                   (re.escape("i2cdetect -y -r 8 0x1e 0x1e >/dev/null 2>&1; i2cdetect -y -r 8 0x1e 0x1e"), _i2cdetect(set(), 0x1E, 0x1E))])
     assert lt.i2c_check(t, exp) == ["i2c-8: missing 0x1e"]
+
+
+def test_i2c_check_wakes_a_part_that_nacks_while_asleep():
+    # Bench, E1M-V2M103 2026W38-0001: the OPTIGA Trust M at 0x30 NACKs the
+    # first access after idle and ACKs one made right after it, but sleeps
+    # again between separate SSH commands. One full scan missed it and the
+    # SoM-presence gate refused a healthy unit.
+    wake = "i2cdetect -y -r 8 0x30 0x30 >/dev/null 2>&1; i2cdetect -y -r 8 0x30 0x30"
+    t, fake = target([(re.escape(wake), _i2cdetect({0x30}, 0x30, 0x30)),
+                      ("i2cdetect -y -r 8", _i2cdetect({0x1E, 0x25}))])
+    assert lt.i2c_check(t, {8: {0x1E, 0x25, 0x30}}) == []
+    assert fake.commands.count(wake) == 1
+    assert not any("-q" in c for c in fake.commands)
+
+
+def test_i2c_scan_span_keeps_columns():
+    # i2cdetect pads out-of-range cells with blanks; a whitespace split
+    # would read row 0x10's lone "1e" as 0x10.
+    t, _ = target([("i2cdetect -y -r 8 0x1e 0x1e", _i2cdetect({0x1E}, 0x1E, 0x1E))])
+    assert lt.i2c_scan(t, 8, (0x1E, 0x1E)) == {0x1E}
 
 
 # --- clock generator (5L35023B) -------------------------------------------------------

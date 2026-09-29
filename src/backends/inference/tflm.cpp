@@ -258,6 +258,7 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
                               alp_inference_backend_state_t *state,
                               alp_capabilities_t            *caps_out)
 {
+	(void)caps_out;
 	/* Pinned-backend gate (the dispatcher contract in
 	 * src/inference_dispatch.c: a pinned open the serving backend
 	 * cannot honour returns NOSUPPORT).  This vtable serves the CPU
@@ -389,9 +390,12 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
 		return ALP_ERR_NOSUPPORT;
 	}
 
-	state->be_data  = st;
-	state->dev      = nullptr;
-	caps_out->flags = 0u; /* per-instance flags layered by NPU backends */
+	/* Leave *caps_out untouched: the dispatcher has already pre-seeded it
+     * from the registry's base_caps/base_class_flags (#1640). Zeroing
+     * caps_out->flags here would clobber that pre-seed and turn a
+     * REPORTED descriptor back into "not reported". */
+	state->be_data = st;
+	state->dev     = nullptr;
 	return ALP_OK;
 }
 
@@ -466,6 +470,7 @@ ALP_BACKEND_REGISTER(inference,
                          /* .silicon_ref */ "*",
                          /* .vendor      */ "tflm",
                          /* .base_caps   */ 0u,
+                         /* .base_class_flags */ 0u,
                          /* .priority    */ 50,
                          /* .ops         */ &alp_inference_tflm_ops,
                          /* .probe       */ NULL,
