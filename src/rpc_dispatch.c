@@ -313,7 +313,7 @@ alp_rpc_channel_t *alp_rpc_open(const alp_rpc_config_t *cfg)
      * its rx/worker thread can call alp_rpc_close_finalize(owner)
      * exactly once from its own epilogue. */
 	h->state.owner          = h;
-	alp_capabilities_t caps = { .flags = be->base_caps };
+	alp_capabilities_t caps = { .flags = be->base_caps, .class_flags = be->base_class_flags };
 	alp_status_t       rc   = ops->open(cfg, &h->state, &caps);
 	if (rc != ALP_OK) {
 		_free_rpc(h);

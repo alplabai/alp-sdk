@@ -208,8 +208,21 @@ static void probe_rtc(alp_i2c_t *bus)
 	}
 	struct rtc_time rt;
 	if (ioctl(fd, RTC_RD_TIME, &rt) < 0) {
-		report("rv3028c7 RTC", RV3028C7_I2C_ADDR, R_FAIL, "RTC_RD_TIME: %s", strerror(errno));
+		int err = errno;
 		close(fd);
+		if (err == EINVAL) {
+			/* rtc-rv3028 answers EINVAL after reading STATUS over I2C and
+			 * finding PORF set: the chip is alive, its time is not.  On the
+			 * E1M-X EVK V2 the RTC's VBACKUP (SoM VBAT, pad AQ25 +S_CAP)
+			 * only reaches header P10, so with nothing fitted there the
+			 * time is lost at every power-off.  `hwclock -w` sets it. */
+			report("rv3028c7 RTC",
+			       RV3028C7_I2C_ADDR,
+			       R_PASS,
+			       "alive, time not set since power loss (PORF); no backup on P10?");
+			return;
+		}
+		report("rv3028c7 RTC", RV3028C7_I2C_ADDR, R_FAIL, "RTC_RD_TIME: %s", strerror(err));
 		return;
 	}
 	close(fd);

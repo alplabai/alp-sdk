@@ -43,4 +43,18 @@ static inline void alp_camera_apply_fps(const struct device *dev, uint32_t camer
 	}
 }
 
+/* The rate the driver actually settled on, x 1000 (#2279); 0 when the
+ * driver cannot report its frame interval.  Store it in the handle's
+ * state.fps_x1000 at open for alp_camera_get_fps(). */
+static inline uint32_t alp_camera_read_fps_x1000(const struct device *dev)
+{
+	struct video_frmival frmival = { 0 };
+
+	if (video_get_frmival(dev, &frmival) != 0 || frmival.numerator == 0u) {
+		return 0u;
+	}
+	return (uint32_t)(((uint64_t)frmival.denominator * 1000u + frmival.numerator / 2u) /
+	                  frmival.numerator);
+}
+
 #endif /* ALP_BACKENDS_CAMERA_FRMIVAL_H */

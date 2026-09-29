@@ -75,7 +75,9 @@ alp_wdt_t *alp_wdt_open(const alp_wdt_config_t *cfg)
 	alp_z_clear_last_error();
 	if (cfg == NULL || cfg->timeout_ms == 0u ||
 	    cfg->wdt_id >= (uint32_t)CONFIG_ALP_SDK_MAX_WDT_HANDLES ||
-	    (cfg->on_timeout == ALP_WDT_INTERRUPT_ONLY && cfg->on_expire == NULL)) {
+	    (cfg->on_timeout == ALP_WDT_INTERRUPT_ONLY && cfg->on_expire == NULL) ||
+	    cfg->window_min_ms >= cfg->timeout_ms ||
+	    (cfg->flags & ~(ALP_WDT_PAUSE_IN_SLEEP | ALP_WDT_PAUSE_HALTED_BY_DEBUG)) != 0u) {
 		/* The last arm rejects an INTERRUPT_ONLY request with no way to
 		 * observe the interrupt -- that combination neither resets the
 		 * SoC nor notifies anyone, which is strictly worse than not
@@ -103,7 +105,7 @@ alp_wdt_t *alp_wdt_open(const alp_wdt_config_t *cfg)
 	}
 	h->backend              = be;
 	h->state.ops            = ops;
-	alp_capabilities_t caps = { .flags = be->base_caps };
+	alp_capabilities_t caps = { .flags = be->base_caps, .class_flags = be->base_class_flags };
 	if (be->probe != NULL) {
 		uint32_t refined = caps.flags;
 		(void)be->probe(cfg->wdt_id, &refined);

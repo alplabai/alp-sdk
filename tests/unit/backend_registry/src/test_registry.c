@@ -55,11 +55,18 @@ ZTEST(alp_registry, test_probe_refines_caps_per_instance)
 	zassert_false(alp_capabilities_has(demo_capabilities(&h1), ALP_INSTANCE_CAP_DMA));
 }
 
-ZTEST(alp_registry, test_oversample_cap_inherited_from_base_caps)
+ZTEST(alp_registry, test_reported_and_class_flags_inherited_from_base_caps)
 {
+	/* Universal REPORTED comes from base_caps; the fictional class's
+     * own bit comes from base_class_flags (demo has no dedicated
+     * ALP_DEMO_CAP_* header, so the raw bit is re-declared here to
+     * match demo_backend_realhw.c's DEMO_CAP_WIDGET). */
+	const uint32_t demo_cap_widget = 1u << 0;
+
 	demo_handle_t h = { 0 };
 	zassert_equal(demo_open(&h, 0u), 0);
-	zassert_true(alp_capabilities_has(demo_capabilities(&h), ALP_INSTANCE_CAP_HW_OVERSAMPLE));
+	zassert_true(alp_capabilities_has(demo_capabilities(&h), ALP_INSTANCE_CAP_REPORTED));
+	zassert_true((demo_capabilities(&h)->class_flags & demo_cap_widget) != 0u);
 }
 
 ZTEST(alp_registry, test_read_dispatches_through_ops)

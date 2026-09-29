@@ -23,6 +23,13 @@ Modes:
                         set ALP_HIL_SERIAL_PORT (no hardcoded default;
                         see docs/ci/HW-IN-LOOP.md).
 
+flash_method: ssh-run is for Linux (A55) examples: no west build and no
+serial console.  The example's binary is built beforehand (Yocto or the
+SDK toolchain) and found as <--artifact-dir>/<example dir name>; the
+runner copies it to the target with scp, runs it over ssh, and applies
+the spec's `serial:` expectations to its output.  The target comes from
+--ssh-host or ALP_HIL_SSH_HOST (no default, same rule as the serial port).
+
 Exit codes:
   0  every spec passed
   1  one or more specs failed (assertion miss, build error, …)
@@ -79,6 +86,8 @@ class SmokeSpec:
     flash_method: str
     serial: SerialSpec
     source_path: Path            # for error messages
+    ssh_host: str = ""           # ssh-run: resolved from --ssh-host / env
+    artifact_dir: str = ""       # ssh-run: where prebuilt binaries live
 
 
 @dc.dataclass(frozen=True)
@@ -289,10 +298,20 @@ def is_board_dir(target: Path) -> bool:
 # ---------------------------------------------------------------------
 
 
-def build_command(spec: SmokeSpec) -> list[str]:
+SSH_RUN = "ssh-run"
+
+
+def _artifact_name(spec: SmokeSpec) -> str:
+    return spec.example.name
+
+
+def build_command(spec: SmokeSpec) -> list[str] | None:
     """`west build -p always -b <board> <example>`.  The runner host's
     workspace is expected to have alp-sdk on the module path (CI sets
-    EXTRA_ZEPHYR_MODULES; humans use a west-init workspace)."""
+    EXTRA_ZEPHYR_MODULES; humans use a west-init workspace).  None for
+    ssh-run: that binary is prebuilt."""
+    if spec.flash_method == SSH_RUN:
+        return None
     return [
         "west", "build", "-p", "always",
         "-b", spec.board,
@@ -308,9 +327,13 @@ def flash_command(spec: SmokeSpec) -> list[str]:
     if spec.flash_method == "pyocd-flash":
         return ["pyocd", "flash", "--target", spec.board,
                 "build/zephyr/zephyr.elf"]
+    if spec.flash_method == SSH_RUN:
+        host = spec.ssh_host or "<unresolved: pass --ssh-host or set ALP_HIL_SSH_HOST>"
+        local = Path(spec.artifact_dir or "<artifact-dir>") / _artifact_name(spec)
+        return ["scp", "-q", str(local), f"{host}:/tmp/{_artifact_name(spec)}"]
     raise SpecError(
         f"{spec.source_path}: unknown flash_method '{spec.flash_method}' "
-        "(supported: westflash, pyocd-flash)"
+        "(supported: westflash, pyocd-flash, ssh-run)"
     )
 
 
@@ -331,6 +354,10 @@ def capture_command(spec: SmokeSpec) -> list[str]:
     before a REAL run -- see run_spec's guard -- but this builder stays
     pure/side-effect-free so --dry-run can still print it when the
     port isn't resolved yet (--dry-run touches no hardware)."""
+    if spec.flash_method == SSH_RUN:
+        host = spec.ssh_host or "<unresolved: pass --ssh-host or set ALP_HIL_SSH_HOST>"
+        remote = f"/tmp/{_artifact_name(spec)}"
+        return ["ssh", host, f"chmod +x {remote} && {remote}"]
     port = spec.serial_port or "<unresolved: pass --serial-port or set ALP_HIL_SERIAL_PORT>"
     return [
         "/opt/alp-hil/capture-serial.sh",
@@ -382,8 +409,12 @@ def run_spec(spec: SmokeSpec, *, dry_run: bool = False) -> SmokeResult:
         for label, cmd in (("build", build_command(spec)),
                            ("flash", flash_command(spec)),
                            ("capture", capture_command(spec))):
-            print(f"  [{label}] " + " ".join(cmd))
+            if cmd is not None:
+                print(f"  [{label}] " + " ".join(cmd))
         return SmokeResult(spec=spec, ok=True, failures=())
+
+    if spec.flash_method == SSH_RUN:
+        return _run_ssh_spec(spec)
 
     # 1. Build.
     rc, out = _run(build_command(spec))
@@ -419,6 +450,26 @@ def run_spec(spec: SmokeSpec, *, dry_run: bool = False) -> SmokeResult:
 
     # 4. Assert.
     failures = assert_serial(spec, captured)
+    return SmokeResult(spec, not failures, tuple(failures))
+
+
+def _run_ssh_spec(spec: SmokeSpec) -> SmokeResult:
+    """ssh-run: copy the prebuilt binary, run it, assert on its output."""
+    if not spec.ssh_host:
+        return SmokeResult(spec, False, (
+            "no ssh host resolved -- pass --ssh-host or set ALP_HIL_SSH_HOST",))
+    artifact = Path(spec.artifact_dir) / _artifact_name(spec)
+    if not spec.artifact_dir or not artifact.is_file():
+        return SmokeResult(spec, False, (
+            f"prebuilt binary not found: {artifact} -- build the example for "
+            "the target and pass --artifact-dir",))
+    rc, out = _run(flash_command(spec))
+    if rc != 0:
+        return SmokeResult(spec, False, (f"copy failed (rc={rc}): {out.strip()[:400]}",))
+    # The example's exit code is not asserted: examples report PASS/FAIL
+    # on stdout, which the spec's expectations check.
+    _, out = _run(capture_command(spec))
+    failures = assert_serial(spec, out)
     return SmokeResult(spec, not failures, tuple(failures))
 
 
@@ -470,6 +521,16 @@ def main() -> int:
              "var when omitted -- there is no hardcoded default; see "
              "docs/ci/HW-IN-LOOP.md.",
     )
+    parser.add_argument(
+        "--ssh-host",
+        help="ssh-run specs: the target to run on (e.g. root@<board-ip>).  "
+             "Falls back to ALP_HIL_SSH_HOST; no default.",
+    )
+    parser.add_argument(
+        "--artifact-dir", type=Path,
+        help="ssh-run specs: directory holding each example's prebuilt "
+             "binary, named after the example directory.",
+    )
     args = parser.parse_args()
 
     if not args.target.exists():
@@ -510,6 +571,9 @@ def main() -> int:
     port_override = args.serial_port or os.environ.get("ALP_HIL_SERIAL_PORT")
     if port_override:
         specs = [dc.replace(s, serial_port=port_override) for s in specs]
+    ssh_host = args.ssh_host or os.environ.get("ALP_HIL_SSH_HOST") or ""
+    artifact_dir = str(args.artifact_dir) if args.artifact_dir else ""
+    specs = [dc.replace(s, ssh_host=ssh_host, artifact_dir=artifact_dir) for s in specs]
 
     if args.validate:
         for s in specs:
@@ -524,7 +588,8 @@ def main() -> int:
         return 0
 
     # Real run -- pre-flight check that west is available.
-    if not shutil.which("west"):
+    needs_west = any(s.flash_method != SSH_RUN for s in specs)
+    if needs_west and not shutil.which("west"):
         print("run_smoke: `west` not on PATH -- HiL runs need the "
               "Zephyr workspace + west.", file=sys.stderr)
         return 2

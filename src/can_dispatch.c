@@ -93,7 +93,7 @@ alp_can_t *alp_can_open(const alp_can_config_t *cfg)
 	 * worker thread can call alp_can_close_finalize(owner) exactly once
 	 * from its own epilogue. */
 	h->state.owner          = h;
-	alp_capabilities_t caps = { .flags = be->base_caps };
+	alp_capabilities_t caps = { .flags = be->base_caps, .class_flags = be->base_class_flags };
 	if (be->probe != NULL) {
 		uint32_t refined = caps.flags;
 		(void)be->probe(cfg->bus_id, &refined);

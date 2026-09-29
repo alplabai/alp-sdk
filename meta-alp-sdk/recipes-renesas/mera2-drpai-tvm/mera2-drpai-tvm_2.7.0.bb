@@ -130,7 +130,7 @@ S = "${WORKDIR}"
 # pass resolves that RDEPENDS on its own (a real build-time DEPENDS + link,
 # unlike the RUHMI libraries below, which are copied, not built, and so
 # need the explicit RDEPENDS block instead -- see there for why).
-DEPENDS = "spdlog asio"
+DEPENDS = "spdlog fmt asio"
 
 # do_configure: nothing to configure, prebuilt/compiled straight from a
 # builder-supplied checkout.  do_compile is a REAL step now (#1145's third
@@ -290,7 +290,12 @@ python do_compile() {
         # refs against ITS full link line, not what an intermediate .so
         # left unresolved in ITS OWN build.
         "-lmera2_runtime", "-lmera2_plan_io", "-ldrp_tvm_rt",
-        "-lspdlog", "-lpthread",
+        # fmt: with SPDLOG_FMT_EXTERNAL the wrapper calls fmt::v10::vformat*
+        # directly (spdlog's header templates expand into this .so), and
+        # nothing else in its DT_NEEDED chain pulls libfmt in -- without
+        # -lfmt every consumer's final link (e.g. alp-drpai-inference)
+        # fails "undefined reference to fmt::v10::detail::vformat_to".
+        "-lspdlog", "-lfmt", "-lpthread",
     ]
     bb.note("mera2-drpai-tvm: compiling %s -> %s" % (wrapper_cpp, out_so))
     subprocess.run(cmd, check=True, cwd=d.getVar("B"))

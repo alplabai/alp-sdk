@@ -235,8 +235,11 @@ static int _gpio_set_config(int line_fd, const struct gpio_v2_line_config *cfg)
 
 alp_status_t alp_gpio_configure(alp_gpio_t *pin, alp_gpio_dir_t dir, alp_gpio_pull_t pull)
 {
+	/* NULL-or-closed is a lifecycle condition, not a malformed
+	 * argument -- ALP_ERR_NOT_READY per ADR-0002's amendment,
+	 * matching every Zephyr dispatcher (issue #1734). */
 	if (pin == NULL || !pin->in_use) {
-		return ALP_ERR_INVAL;
+		return ALP_ERR_NOT_READY;
 	}
 	struct gpio_v2_line_config cfg = { 0 };
 	cfg.flags                      = pull_to_flags(pull);
@@ -254,8 +257,10 @@ alp_status_t alp_gpio_configure(alp_gpio_t *pin, alp_gpio_dir_t dir, alp_gpio_pu
 
 alp_status_t alp_gpio_write(alp_gpio_t *pin, bool level)
 {
+	/* NULL-or-closed is a lifecycle condition -- ALP_ERR_NOT_READY,
+	 * matching every Zephyr dispatcher (issue #1734). */
 	if (pin == NULL || !pin->in_use) {
-		return ALP_ERR_INVAL;
+		return ALP_ERR_NOT_READY;
 	}
 	if (!pin->is_output) {
 		/* Writing to an input line is a configuration mistake;
@@ -274,7 +279,14 @@ alp_status_t alp_gpio_write(alp_gpio_t *pin, bool level)
 
 alp_status_t alp_gpio_read(alp_gpio_t *pin, bool *level)
 {
-	if (pin == NULL || !pin->in_use || level == NULL) {
+	/* NULL-or-closed is a lifecycle condition -- ALP_ERR_NOT_READY,
+	 * matching every Zephyr dispatcher (issue #1734).  A NULL @p level
+	 * is a malformed argument, not a lifecycle one -- ALP_ERR_INVAL,
+	 * checked only once the handle itself is known good. */
+	if (pin == NULL || !pin->in_use) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (level == NULL) {
 		return ALP_ERR_INVAL;
 	}
 	struct gpio_v2_line_values vals = {
@@ -368,6 +380,20 @@ static void *irq_dispatcher(void *arg)
 			return NULL;
 		}
 
+		if (fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+			/* A torn-down wake_fd makes poll() return a POSITIVE rc
+             * with the error bit set in revents, NOT rc < 0 (issue
+             * #1962) -- the rc<0 guard above never catches this, and
+             * this loop's infinite timeout gives it nothing else to
+             * stop re-polling and returning immediately forever.
+             * wake_fd is as fatal to the whole dispatcher as the rc<0
+             * case above, so the same exit path applies. */
+			pthread_mutex_lock(&g_irq.mu);
+			g_irq.started = false;
+			pthread_mutex_unlock(&g_irq.mu);
+			return NULL;
+		}
+
 		if (fds[0].revents & POLLIN) {
 			uint64_t drain;
 			(void)read(g_irq.wake_fd, &drain, sizeof(drain));
@@ -384,6 +410,27 @@ static void *irq_dispatcher(void *arg)
          * slot is observed by that slot's own re-validation before it
          * is read/dispatched. */
 		for (size_t i = 1; i < nfds; ++i) {
+			if (fds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+				/* This one pin's line_fd went bad (its gpiochip was
+                 * hot-removed, say) -- issue #1962.  Unlike the
+                 * whole-dispatcher wake_fd case above, treating this
+                 * as fatal to the dispatcher would silently kill IRQ
+                 * delivery for every OTHER unrelated pin too, and with
+                 * this loop's infinite timeout poll() would otherwise
+                 * keep re-reporting the same error forever.  Disable
+                 * just this slot -- the same state transition
+                 * alp_gpio_irq_disable() makes -- so the next snapshot
+                 * excludes it from fds[]. */
+				struct alp_gpio *p = slot_pins[i - 1];
+				pthread_mutex_lock(&g_irq.mu);
+				if (p->in_use && p->irq_enabled && p->line_fd == fds[i].fd) {
+					p->irq_enabled = false;
+					p->irq_cb      = NULL;
+					p->irq_user    = NULL;
+				}
+				pthread_mutex_unlock(&g_irq.mu);
+				continue;
+			}
 			if (!(fds[i].revents & POLLIN)) {
 				continue;
 			}
@@ -467,7 +514,14 @@ static uint64_t edge_to_flags(alp_gpio_edge_t edge)
 alp_status_t
 alp_gpio_irq_enable(alp_gpio_t *pin, alp_gpio_edge_t edge, alp_gpio_cb_t cb, void *user)
 {
-	if (pin == NULL || !pin->in_use || cb == NULL) {
+	/* NULL-or-closed is a lifecycle condition -- ALP_ERR_NOT_READY,
+	 * matching every Zephyr dispatcher (issue #1734).  A NULL @p cb is
+	 * a malformed argument, not a lifecycle one -- ALP_ERR_INVAL,
+	 * checked only once the handle itself is known good. */
+	if (pin == NULL || !pin->in_use) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (cb == NULL) {
 		return ALP_ERR_INVAL;
 	}
 	uint64_t edge_flags = edge_to_flags(edge);
@@ -513,8 +567,10 @@ alp_gpio_irq_enable(alp_gpio_t *pin, alp_gpio_edge_t edge, alp_gpio_cb_t cb, voi
 
 alp_status_t alp_gpio_irq_disable(alp_gpio_t *pin)
 {
+	/* NULL-or-closed is a lifecycle condition -- ALP_ERR_NOT_READY,
+	 * matching every Zephyr dispatcher (issue #1734). */
 	if (pin == NULL || !pin->in_use) {
-		return ALP_ERR_INVAL;
+		return ALP_ERR_NOT_READY;
 	}
 	pthread_mutex_lock(&g_irq.mu);
 	pin->irq_enabled = false;

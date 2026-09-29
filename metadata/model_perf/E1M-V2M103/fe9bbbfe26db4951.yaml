@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+schema_version: 1
+sku: E1M-V2M103
+hw_rev: r1
+model:
+  name: yolox-s-voc
+  src_sha: 39cbfc13431c6a5c32d1af34e7607a879c465b90f3e4fb65315e1bad4a3fc828
+  format: onnx
+target:
+  backend: cpu
+  accel_config: ''
+  core: a55_cluster
+  compiler_version: onnxruntime 1.20.1
+perf:
+  req_sram_kib: 0
+  arena_bytes: 0
+  latency_ms:
+    mean: 1668.488
+    p50: 1668.004
+    p95: 1674.121
+    stdev: 2.164
+    runs: 30
+capture:
+  date: '2026-09-28'
+  operator: Alp Lab
+  bench_id: E1M-V2M103/2026W38-0001
+  notes: 'RUHMI app_yolox_cam yolox-S_VOC.onnx through the ONNX Runtime CPU backend (libonnxruntime 1.20.1
+    from the DEEPX layer, default CPU EP), NCHW float32 1x3x640x640. A55 Linux backend: the model and
+    its tensors are DDR-resident, so there is no on-chip SRAM arena (req_sram_kib / arena_bytes = 0).
+    5 warm-up invokes discarded, then back-to-back good invokes timed with alp_inference_last_invoke_latency_us()
+    (CLOCK_MONOTONIC). SoC thermal zones 63-64 C. Bench-only unit (ACT88760 GPIO4 OTP defect, DX-M1 IO19
+    strap bodge). alp-sdk dev f958b6083 + #2389.'
