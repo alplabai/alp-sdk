@@ -1,0 +1,3 @@
+### Fixed
+
+- V2N family U-Boot (`meta-alp-sdk`, patch 0011): `board_late_init()` now releases the GD32 supervisor from reset on every boot. It clears bit 7 of ACT88760 (BRD_I2C 0x25) GPIO register 0x10, changing 0x88 to 0x08. That write is the intended workaround for the PMIC's OTP default. Until now it existed only as a hand-installed Linux service on one bench unit, so the release image booted with the GD32 held in reset: `gpio-gd32-bridge 8-0070: bridge not answering (-6)`, and every bridge GPIO write (Wi-Fi REG_ON included) failed. Found on E1M-V2M103 2026W38-0001 booting the eMMC release image (#2301).

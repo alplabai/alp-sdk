@@ -1,0 +1,97 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Tue, 29 Sep 2026 11:30:00 +0000
+Subject: [PATCH] rzv2n-dev: ALP E1M release GD32_NRST from the ACT88760 at
+ boot
+
+The ACT88760 PMIC (BRD_I2C, 7-bit 0x25) powers up with GPIO register 0x10
+= 0x88: its OTP drives GPIO4, which is wired to the GD32 supervisor's
+NRST, so the GD32 stays in reset and the gpio-gd32-bridge driver finds
+nothing at probe ("bridge not answering (-6)"). Clearing bit 7 (0x88 ->
+0x08) releases it. That write is the intended workaround for this OTP
+default. It is volatile, so it has to run on every boot; until now it
+only existed as a hand-installed Linux service on one bench unit, and the
+release image shipped without it.
+
+board_late_init() now runs alp_gd32_nrst_release() first, before the
+clock-generator fixup, MAC and DEEPX rail steps, so the GD32 boots while
+U-Boot is still running and answers when Linux probes the bridge. Only
+bit 7 is changed (read-modify-write); a part that already reads bit 7
+clear is left alone. Each outcome prints one "ALP:" line.
+
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
+---
+ 1 file changed, 53 insertions(+)
+
+diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
+index 219eb219..49567d4a 100644
+--- a/board/renesas/rzv2n-dev/rzv2n-dev.c
++++ b/board/renesas/rzv2n-dev/rzv2n-dev.c
+@@ -1172,11 +1172,64 @@ U_BOOT_CMD(alp_eth_mac, 1, 0, do_alp_eth_mac,
+ 	   ""
+ );
+ 
++/*
++ * ALP E1M V2N family: release GD32_NRST from the ACT88760 PMIC.
++ *
++ * The ACT88760 (BRD_I2C, 7-bit 0x25) powers up with GPIO register 0x10 =
++ * 0x88: its OTP drives GPIO4, which is wired to GD32_NRST, so the GD32
++ * supervisor sits in reset.  Clearing bit 7 (0x88 -> 0x08) releases it.
++ * The write is volatile and lost at power-off, so it runs on every boot,
++ * before the kernel: the gpio-gd32-bridge driver then finds the GD32
++ * answering at probe.  This is the intended workaround for the OTP
++ * default, not a fault path.  Only bit 7 is touched; any other bit keeps
++ * its OTP value, and a part that already reads bit 7 clear is left alone.
++ */
++#define ALP_ACT88760_I2C_BUS   8	/* DM I2C bus for RIIC8 / BRD_I2C */
++#define ALP_ACT88760_I2C_ADDR  0x25
++#define ALP_ACT88760_GPIO_REG  0x10
++#define ALP_ACT88760_GPIO4_HOLD BIT(7)	/* set: GD32_NRST held low */
++
++static void alp_gd32_nrst_release(void)
++{
++	struct udevice *dev;
++	u8 before, after;
++	int ret;
++
++	ret = i2c_get_chip_for_busnum(ALP_ACT88760_I2C_BUS, ALP_ACT88760_I2C_ADDR, 1, &dev);
++	if (ret) {
++		printf("ALP: ACT88760 not reachable on RIIC8/BRD_I2C (%d); GD32_NRST not released\n", ret);
++		return;
++	}
++	ret = dm_i2c_read(dev, ALP_ACT88760_GPIO_REG, &before, 1);
++	if (ret) {
++		printf("ALP: ACT88760 reg 0x%02x read failed (%d); GD32_NRST not released\n",
++		       ALP_ACT88760_GPIO_REG, ret);
++		return;
++	}
++	if (!(before & ALP_ACT88760_GPIO4_HOLD)) {
++		printf("ALP: ACT88760 GD32_NRST already released (0x%02x=0x%02x)\n",
++		       ALP_ACT88760_GPIO_REG, before);
++		return;
++	}
++	after = before & ~ALP_ACT88760_GPIO4_HOLD;
++	ret = dm_i2c_write(dev, ALP_ACT88760_GPIO_REG, &after, 1);
++	if (!ret)
++		ret = dm_i2c_read(dev, ALP_ACT88760_GPIO_REG, &after, 1);
++	if (ret || (after & ALP_ACT88760_GPIO4_HOLD)) {
++		printf("ALP: ACT88760 GD32_NRST release failed (0x%02x: 0x%02x -> 0x%02x, %d)\n",
++		       ALP_ACT88760_GPIO_REG, before, after, ret);
++		return;
++	}
++	printf("ALP: ACT88760 GD32_NRST released (0x%02x: 0x%02x -> 0x%02x)\n",
++	       ALP_ACT88760_GPIO_REG, before, after);
++}
++
+ int board_late_init(void)
+ {
+ 	bool v2n_m1;
+ 	bool rail_ok = true;
+ 
++	alp_gd32_nrst_release();
+ 	alp_clk5l_fixup();
+ 
+ 	v2n_m1 = alp_som_is_v2n_m1();
+-- 
+2.43.0
+
