@@ -1092,11 +1092,22 @@ static int csi2_dw_get_caps(const struct device *dev, struct video_caps *caps)
 	const struct csi2_dw_config *config = dev->config;
 	struct csi2_dw_data *data = dev->data;
 
+	const struct device *sensor = config->sensor[data->current_sensor];
+
+	/* The sensor inits after this bridge (priority 60 > 41); an absent one
+	 * fails its chip-ID read and stays not-ready.  Its get_caps only returns
+	 * a static table, so check readiness here or the absence first shows up
+	 * as an I2C NACK (-EIO) on set_format (#2249).
+	 */
+	if (sensor == NULL || !device_is_ready(sensor)) {
+		return -ENODEV;
+	}
+
 	/*
 	 * Get the pipeline capabilities from sensor and
 	 * send the same data to user.
 	 */
-	return video_get_caps(config->sensor[data->current_sensor], caps);
+	return video_get_caps(sensor, caps);
 }
 
 /*
