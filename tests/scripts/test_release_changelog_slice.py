@@ -36,6 +36,7 @@ so a regression in the real step (not a copy of it) turns them red:
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -90,6 +91,8 @@ def _run_changelog_step(
         cwd=str(tmp_path),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         timeout=30,
     )
 

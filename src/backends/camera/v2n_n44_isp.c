@@ -115,6 +115,11 @@
 #include "v2n_n44_isp.h"
 #include "alp_slot_claim.h"
 
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(alp_camera_v2n_n44_isp, CONFIG_LOG_DEFAULT_LEVEL);
+
+#include "camera_frmival.h"
+
 #ifndef CONFIG_ALP_SDK_CAMERA_V2N_N44_ISP_VBUF_COUNT
 #define CONFIG_ALP_SDK_CAMERA_V2N_N44_ISP_VBUF_COUNT 2
 #endif
@@ -217,8 +222,16 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
                              alp_camera_backend_state_t *state,
                              alp_capabilities_t         *caps_out)
 {
+	(void)caps_out;
 	if (cfg == NULL || cfg->camera_id >= ARRAY_SIZE(_devs)) {
 		return ALP_ERR_INVAL;
+	}
+	/* The ISP only outputs processed RGB.  A raw or mono request must fail
+	 * here: _to_video_fourcc() maps it to 0 ("no format requested"), which
+	 * would keep the ISP's default RGB output and hand back the wrong format. */
+	if (cfg->format == ALP_PIXFMT_GREY8 || cfg->format == ALP_PIXFMT_RAW8 ||
+	    cfg->format == ALP_PIXFMT_RAW10) {
+		return ALP_ERR_NOSUPPORT;
 	}
 	const struct device *dev = _devs[cfg->camera_id];
 	if (dev == NULL || !device_is_ready(dev)) {
@@ -300,8 +313,14 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 		bytes_per_buf = 64u;
 	}
 
+	/* Round the tail up to the pool's alignment too, so the last cache line
+	 * of this buffer isn't shared with the next heap chunk. */
+	bytes_per_buf = ROUND_UP(bytes_per_buf, CONFIG_VIDEO_BUFFER_POOL_ALIGN);
+
 	for (uint8_t i = 0; i < want; ++i) {
-		st->vbufs[i] = video_buffer_alloc(bytes_per_buf, K_NO_WAIT);
+		/* Pool-aligned, not video_buffer_alloc()'s sizeof(void *): see zephyr_video.c. */
+		st->vbufs[i] =
+		    video_buffer_aligned_alloc(bytes_per_buf, CONFIG_VIDEO_BUFFER_POOL_ALIGN, K_NO_WAIT);
 		if (st->vbufs[i] == NULL) {
 			/* Pool exhausted: give back vbufs[0..i-1] (already
 			 * enqueued) before failing (#246). */
@@ -322,6 +341,9 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	}
 	st->vbuf_count = want;
 
+	alp_camera_apply_fps(dev, cfg->camera_id, cfg->fps);
+	state->fps_x1000 = alp_camera_read_fps_x1000(dev); /* #2279 */
+
 	state->be_data = st;
 	/* Advertise the ISP-present capability so callers querying
      * alp_camera_capabilities() see a backend-specific flag set;
@@ -329,7 +351,6 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
      * once that bit is allocated (TBD: cap_instance flag bit for
      * "on-die ISP available").  Today base_caps stays 0 so the
      * v0.5 snapshot reflects the surface ABI exactly. */
-	caps_out->flags = 0u;
 	return ALP_OK;
 }
 

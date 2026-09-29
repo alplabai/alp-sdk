@@ -26,6 +26,7 @@ Run locally:
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import textwrap
@@ -397,7 +398,8 @@ def _run_validate_board_yaml(path: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(REPO / "scripts" / "validate_board_yaml.py"),
          "--input", str(path), "--no-color"],
-        cwd=REPO, capture_output=True, text=True, check=False,
+        cwd=REPO, capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
     )
 
 
@@ -462,9 +464,9 @@ def test_board_preset_status_enum_matches_hw_revisions_v1():
     import json
 
     family_schema = json.loads(
-        (METADATA_ROOT / "schemas/hw-revisions-v1.schema.json").read_text())
+        (METADATA_ROOT / "schemas/hw-revisions-v1.schema.json").read_text(encoding="utf-8"))
     preset_schema = json.loads(
-        (METADATA_ROOT / "schemas/board-preset.schema.json").read_text())
+        (METADATA_ROOT / "schemas/board-preset.schema.json").read_text(encoding="utf-8"))
 
     family_enum = family_schema["$defs"]["hw_rev_entry"]["properties"]["status"]["enum"]
     preset_enum = preset_schema["properties"]["hw_revisions"]["additionalProperties"][

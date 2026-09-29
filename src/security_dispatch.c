@@ -234,7 +234,8 @@ alp_hash_t *alp_hash_open(alp_hash_alg_t alg)
 			memset(&h->state, 0, sizeof(h->state));
 			h->backend              = be;
 			h->state.ops            = ops;
-			alp_capabilities_t caps = { .flags = be->base_caps };
+			alp_capabilities_t caps = { .flags       = be->base_caps,
+				                        .class_flags = be->base_class_flags };
 			rc                      = ops->hash_open(alg, &h->state, &caps);
 			if (rc == ALP_OK) {
 				h->cached_caps = caps;
@@ -352,7 +353,8 @@ alp_aead_t *alp_aead_open(alp_aead_alg_t alg, const uint8_t *key, size_t key_len
 			memset(&a->state, 0, sizeof(a->state));
 			a->backend              = be;
 			a->state.ops            = ops;
-			alp_capabilities_t caps = { .flags = be->base_caps };
+			alp_capabilities_t caps = { .flags       = be->base_caps,
+				                        .class_flags = be->base_class_flags };
 			rc                      = ops->aead_open(alg, key, key_len, &a->state, &caps);
 			if (rc == ALP_OK) {
 				a->cached_caps = caps;

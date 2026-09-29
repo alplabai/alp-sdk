@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# scripts/bench/aen/flash-run.sh <build-dir> [post_boot_read_bytes_hex]
+# scripts/bench/aen/flash-run.sh [--replace-atoc] [--] <build-dir> [post_boot_read_bytes_hex]
+#
+# A <build-dir> that itself begins with "-" needs the "--" above ahead of
+# it (standard getopt-style shape) -- without it, the flag parser below
+# rejects it as an unknown flag (exit 2).
 #
 # Cross-platform scope: Linux-side bench helper (sources bench-env.sh;
 # drives the Alif SETOOLS over the SE-UART + JLinkExe, both Linux
@@ -21,6 +25,15 @@ set -e
 # shellcheck source=scripts/bench/aen/bench-env.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/bench-env.sh"
 
+REPLACE_ATOC=0
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--replace-atoc) REPLACE_ATOC=1; shift ;;
+	--) shift; break ;;
+	-*) echo "unknown flag: $1" >&2; exit 2 ;;
+	*) break ;;
+	esac
+done
 BD="$1"
 SIZE="${2:-0x500}"
 bench_require_setools || exit $?
@@ -31,38 +44,97 @@ if [ -z "${SE_UART:-}" ]; then
 fi
 SET="$SETOOLS_DIR"
 OBJ="$(bench_tool_prefix)" || exit $?
-JLINK="$(bench_jlink_exe)" || exit $?
-# See ram-run.sh for why the selector is conditional on JLINK_SN.
-JLINK_ARGS=("$JLINK")
-[ -n "${JLINK_SN:-}" ] && JLINK_ARGS+=(-SelectEmuBySN "$JLINK_SN")
+# Routed through bench_jlink_run (bench-env.sh, alp-sdk#2064): masks every
+# OTHER probe out of a private namespace so -SelectEmuBySN resolves
+# unambiguously to the ONE probe LG_PLACE actually owns.
+JLINK_ARGS=(bench_jlink_run)
 NAME=$(basename "$BD")
 BIN="$BD/zephyr/zephyr.bin"
 ELF="$BD/zephyr/zephyr.elf"
 # See ram-run.sh (issue #935): if BUF_SYM is empty, do NOT fold it into BUF --
-# BUF would silently become the bare string "0x" and step 3's `mem8 $BUF,
+# BUF would silently become the bare string "0x" and step 4's `mem8 $BUF,
 # $SIZE` would run as `mem8 0x, $SIZE`, printing an EMPTY "RAM console" block
-# indistinguishable from a boot failure. Step 3 below checks BUF_SYM directly.
+# indistinguishable from a boot failure. Step 4 below checks BUF_SYM directly.
 BUF_SYM=$($OBJ-nm "$ELF" | awk '/ ram_console_buf$/{print $1}')
 BUF=0x$BUF_SYM
 
-# 1. stage the image + a per-app signed-ATOC config (keeps the factory DEVICE cfg)
+# 1. stage the image + a per-app signed-ATOC config. app-write-mram -p REPLACES
+#    the device's ENTIRE ATOC with exactly what is in this JSON -- it is not a
+#    merge. Only "DEVICE" and "ALP-HE" below survive the write; any OTHER
+#    resident entry (a second core's app, MCUboot+slot0, an A32 Linux boot
+#    chain, ...) is silently delisted with no error and no SES warning. See
+#    the GUARD in step 2, alp-sdk#2025.
+#
+# THE ATOC SHAPE MUST MATCH HOW THE IMAGE IS LINKED (#1902).  Two shapes exist:
+#
+#   ITCM load-and-boot : "loadAddress": "0x58000000", flags ["load","boot"]
+#                        -- the SE copies the image into ITCM and starts it.
+#   MRAM slot0 XIP     : "mramAddress": "0x80010000", flags ["boot"]
+#                        -- the image already sits in MRAM; the SE just boots it.
+#
+# This script used to hardcode the ITCM shape.  That silently MIS-BOOTS every
+# slot0-linked app (`CONFIG_USE_DT_CODE_PARTITION=y`, `CONFIG_FLASH_LOAD_OFFSET=
+# 0x10000`, reset vector 0x8001xxxx), which since alp-sdk#1067 is what a plain
+# build produces -- and most of examples/aen/* are now that shape.
+#
+# It fails in two ways, neither of which says "wrong ATOC", which is why it went
+# unnoticed.  Bench-measured 2026-09-04:
+#   - With a slot0 image still resident, `app-write-mram` reports
+#     "MRAM write: Done" and the SES boots the RESIDENT slot0 image in preference
+#     to the freshly written ITCM-load ATOC.  The console shows the OLD app, so
+#     the flash looks like it worked.  (`PC = 8001A652`, and mem32 0x80010000
+#     matching the PREVIOUS image, is the tell.)
+#   - With slot0 erased, the MRAM-linked image is copied into ITCM and branches
+#     into now-empty MRAM: `CFSR (0xE000ED28) = 0x00010000` (UFSR UNDEFINSTR),
+#     `BFAR (0xE000ED38) = 0x00000000`.
+#
+# So select the shape from the image's own reset vector, exactly as
+# flash-jlink-mramxip.sh does.
 cp -f "$BIN" "$SET/build/images/$NAME.bin"
+RV=$(xxd -e -l 8 "$BIN" | awk '{print $3}')   # 2nd LE word = reset vector
+case "$RV" in
+  8001*)
+    echo ">>> ATOC shape: MRAM slot0 XIP (reset vector 0x$RV)" >&2
+    ENTRY='"mramAddress": "0x80010000", "flags": ["boot"]'
+    ;;
+  802b*)
+    echo "!! reset vector 0x$RV is HP-slot0-linked (0x802bxxxx), not HE." >&2
+    echo "   flash-run.sh is HE-only (cpu_id M55_HE); use the HP flow." >&2
+    exit 3
+    ;;
+  *)
+    echo ">>> ATOC shape: ITCM load-and-boot (reset vector 0x$RV)" >&2
+    ENTRY='"loadAddress": "0x58000000", "flags": ["load", "boot"]'
+    ;;
+esac
 cat > "$SET/build/config/$NAME.json" <<JSON
 {
     "DEVICE":  { "disabled": false, "binary": "app-device-config.json", "version": "0.5.00", "signed": true },
     "ALP-HE":  { "disabled": false, "binary": "$NAME.bin", "version": "1.0.0", "signed": true,
-                 "cpu_id": "M55_HE", "loadAddress": "0x58000000", "flags": ["load", "boot"] }
+                 "cpu_id": "M55_HE", $ENTRY }
 }
 JSON
 
 cd "$SET"
 echo ">>> FLASH $NAME  (ram_console_buf=${BUF_SYM:-none (UART console)})" >&2
 ./app-gen-toc -f "build/config/$NAME.json" >/tmp/gentoc.log 2>&1 || { echo "gen-toc FAILED"; tail /tmp/gentoc.log; exit 1; }
-# 2. write to MRAM over the SE-UART (SES auto-enters maintenance, burns, resets+boots)
+
+# 2. GUARD (alp-sdk#2025) -- app-write-mram -p below REPLACES the whole
+# resident ATOC, it does not merge (step 1 comment). One Flow A run on
+# an AEN EVK bench unit (2026-09-07) silently delisted a live A32 Linux boot chain
+# (BOOTLOAD/A32_APP/HP_APP/HE_APP) down to just DEVICE + the freshly written
+# ALP-HE -- no error, no SES warning ("[SES] ATOC ok" prints either way).
+#
+# Shared with every other script that commits a fresh ATOC -- see
+# bench_atoc_replace_guard in bench-env.sh for the full rationale and the
+# `maintenance -opt gettoc` query it runs.
+bench_atoc_replace_guard "$REPLACE_ATOC" flash-run ALP-HE || exit $?
+
+# 3. write to MRAM over the SE-UART (SES auto-enters maintenance, burns, resets+boots)
 ./app-write-mram -c "$SE_UART" -p >/tmp/wrmram.log 2>&1 || true
 if grep -q "Done" /tmp/wrmram.log; then echo "MRAM write: Done ($(grep -oE '[0-9]+\.[0-9]+ seconds' /tmp/wrmram.log | tail -1))"; else echo "MRAM write FAILED:"; tail -5 /tmp/wrmram.log; exit 1; fi
 
-# 3. SES has booted the app; attach J-Link read-only and dump the RAM console
+# 4. SES has booted the app; attach J-Link read-only and dump the RAM console
 if [ -z "$BUF_SYM" ]; then
 	echo "----- $NAME RAM console: no 'ram_console_buf' in this image (UART-console app) -----" >&2
 	echo "      the MRAM write above still completed -- this is not a boot failure. Read the" >&2

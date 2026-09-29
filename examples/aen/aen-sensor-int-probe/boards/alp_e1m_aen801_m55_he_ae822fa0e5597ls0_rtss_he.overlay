@@ -1,0 +1,32 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-sensor-int-probe -- app overlay for the E1M-AEN801 (Alif Ensemble E8,
+ * M55-HE), bench RAM-run via J-Link.
+ *
+ * THIS OVERLAY DELIBERATELY CARRIES ONLY THE BENCH ITCM RETARGET.
+ *
+ * The carrier bus this app's ICM-42670 / BMP581 / TCAL9538 sit on --
+ * ALP_E1M_I2C0, portable alias alp-i2c0 (SoC I2C2, pads P5_6 SCL / P5_7
+ * SDA) -- is a board fact, not an app fact: the board layer already enables
+ * it (i2c2 status "okay" + pinctrl_i2c2 + the alp-i2c0 alias,
+ * metadata/e1m_modules/aen/on-module-links.yaml `e1m_i2c0` entry), so every
+ * AEN801 app gets it for free. Re-declaring it here would duplicate a
+ * board fact one layer too high -- see examples/aen/aen-temp-sensor's
+ * overlay for the same argument made in full for BRD_I2C.
+ */
+
+/*
+ * MANDATORY bench RAM-run retarget: run from ITCM so J-Link can loadbin+run
+ * without programming MRAM, and drop the MCUboot code-partition fixup.
+ */
+/ {
+	chosen {
+		/* PATH-REFERENCE form (&itcm), NOT the <&itcm> phandle-array form:
+		 * the phandle-array form yields CONFIG_FLASH_SIZE=0 and the image
+		 * overflows the (empty) FLASH region at link time. */
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};

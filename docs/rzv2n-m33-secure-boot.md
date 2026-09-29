@@ -21,8 +21,9 @@ The v6.30 TF-A has a built-in CM33 boot path, gated by `PLAT_M33_BOOT_SUPPORT`:
 So the M33 FW is a raw image at xSPI `0x200000`, loaded to `0x08000000`, and the
 CM33 boots at `0x08003000`.
 
-## The two-line TF-A enablement — `docs/rzv2n-tfa-m33-boot.patch`
-Apply against the v6.30 TFA tree, then rebuild BL2 (`build_custom_bl2_v630.sh`).
+## The two-line TF-A enablement — `meta-alp-sdk/recipes-bsp/trusted-firmware-a/trusted-firmware-a/0001-rzv2n-boot-the-CM33-from-xSPI.patch`
+Applied by `trusted-firmware-a_%.bbappend` on every `rzv2n-family` MACHINE, so
+`bitbake firmware-pack` produces a BL2 that boots the CM33 (#2354).
 
 1. `v2n_common.mk`: `PLAT_M33_BOOT_SUPPORT := 1` (keep `BOOT_TFA_USING_CM33 := 0`
    so the CA55-boot flash layout is unchanged: BL2@0, FIP@0x60000, M33 FW@0x200000).

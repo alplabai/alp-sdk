@@ -19,15 +19,54 @@ Disjoint files cannot conflict. One file per change removes the entire class.
 
 ## How
 
-Create `changelog.d/<issue>.md`, where `<issue>` is the GitHub issue or PR
-number the entry belongs to — it only has to make the filename unique, it is
-not parsed for meaning.
+Create `changelog.d/<issue>.md`, where `<issue>` is the GitHub issue number
+the entry belongs to.
 
 ```
 changelog.d/1358.md
 changelog.d/1366.md
 changelog.d/1379.md
 ```
+
+### A second fragment for the same issue
+
+An issue can legitimately be closed by more than one PR — a tiered fix, a
+split, or two independent defects filed under one number. If
+`changelog.d/<issue>.md` is already taken, do **not** overwrite it, append
+into it (that just trades the file conflict for a merge conflict), or rename
+your fragment after the PR instead of the issue. Add a disambiguating suffix
+and keep the issue number leading:
+
+```
+changelog.d/<issue>-<slug>.md
+```
+
+`<slug>` is lowercase alphanumeric segments joined by single hyphens — short,
+descriptive, no leading/trailing/doubled hyphen (matches
+`^\d+(-[a-z0-9]+(-[a-z0-9]+)*)?\.md$`).
+
+```
+changelog.d/1909-diagnostic-format-uri.md
+```
+
+**Ordering.** `assemble_changelog.py` sorts fragments by leading issue
+number, then by the full filename as a tie-breaker, so `<issue>.md` always
+sorts before `<issue>-<slug>.md` for the same issue — the plain filename is
+a strict prefix of the suffixed one, so it compares as "less". Two suffixed
+fragments for the same issue sort against each other by slug text.
+
+**Enforced join key.** The leading digits must match the issue number this
+fragment's own `### ... (#N)` heading cites, keeping them the join key back
+to that issue for `assemble_changelog.py`'s sort order and for anyone
+grepping `changelog.d/` by number. `scripts/check_changelog_fragment_issue.py`
+(alp-sdk#1957) checks the two agree wherever a heading cites exactly one
+issue number, or cites several and the filename's leading digits are outside
+both the cited set and the span between the smallest and largest of them
+(e.g. citing `#1848, #1814` from a `1940.md` filename); a heading citing a
+range or several issues that the filename's leading digits DO fall inside
+(e.g. `#1757-#1783` from a `1761.md` filename), or no `(#N)` at all, is
+outside what that check can decide and is left to hand review — the suffix
+only breaks the filename tie.
 
 The file's content is **the entry exactly as it should appear** in
 `CHANGELOG.md`, starting with its own heading line:
@@ -51,6 +90,26 @@ or summarises a fragment's text. This changelog carries registers, hex, bit
 fields, addresses, SKUs, hw_rev, diagnostic codes, error strings and paths
 verbatim — a "helpful" rewrap can silently corrupt one of those. Write the
 entry exactly as it should ship.
+
+## Citing code
+
+Every new `` `path:line` `` citation must carry an anchor: a short verbatim
+quote from the cited lines, in parentheses of its own, right after it.
+
+```
+the guard at `scripts/foo.py:42` ("if not fragments:")
+```
+
+`scripts/check_changelog_citations.py` fails the PR when the quote is not in
+the cited range, so a citation cannot silently go stale when the code moves.
+The quote goes AFTER the citation — `` (`scripts/foo.py:42`, "if not
+fragments:") `` looks anchored and is rejected as a near miss — and stays on
+one markdown line. For a range, quote its FIRST line: `--fix` restarts the
+range at the line the anchor is found on, so `:10-14` anchored on line 13
+becomes `:16-20` after a 3-line shift, not `:13-17`. When a merge of `dev`
+moves the code, `--fix` re-derives the line number from the anchor;
+`--against-merge` grades the merge before you make it. The script's docstring
+has the full rules.
 
 ## Release time
 

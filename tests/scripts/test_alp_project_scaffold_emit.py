@@ -13,6 +13,7 @@ directly.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -25,7 +26,8 @@ HELLO_WORLD = REPO / "examples" / "peripheral-io" / "hello-world"
 def _run(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(ALP_PROJECT), *args],
-        capture_output=True, text=True, cwd=REPO, check=False,
+        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=REPO, check=False,
     )
 
 
@@ -50,6 +52,21 @@ def test_scaffold_emits_json_envelope_for_the_examples_own_sku():
         assert by_path[rel] == (HELLO_WORLD / rel).read_text(encoding="utf-8"), rel
     assert "--core m55_hp" in by_path["CMakeLists.txt"]
     assert "ALP_SDK_ROOT is not set" in by_path["CMakeLists.txt"]
+
+
+def test_iot_scaffold_emits_the_cc3501e_bridge_it_compiles():
+    """issue #2241: the iot template's CMakeLists.txt compiles
+    src/cc3501e_bridge.c, so the scaffold must carry it and its header --
+    before the fix the envelope had neither and the emitted project could
+    not link."""
+    proc = _run("--emit", "scaffold", "--template", "iot",
+                "--sku", "E1M-AEN801")
+    assert proc.returncode == 0, proc.stderr
+    by_path = {item["path"]: item["contents"] for item in json.loads(proc.stdout)}
+    assert "src/cc3501e_bridge.c" in by_path["CMakeLists.txt"]
+    example = REPO / "examples" / "connectivity" / "mqtt-telemetry"
+    for rel in ("src/cc3501e_bridge.c", "src/cc3501e_bridge.h"):
+        assert by_path.get(rel) == (example / rel).read_text(encoding="utf-8"), rel
 
 
 def test_scaffold_substitutes_sku_and_preset_for_a_different_sku():
@@ -80,7 +97,8 @@ def test_scaffold_substitutes_sku_and_preset_for_a_different_sku():
         check = subprocess.run(
             [sys.executable, str(ALP_PROJECT), "--input", str(board_yaml_path),
              "--emit", "zephyr-conf", "--core", "m33_sm"],
-            capture_output=True, text=True, cwd=REPO, check=False)
+            capture_output=True, text=True, encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=REPO, check=False)
         assert check.returncode == 0, check.stderr
 
 

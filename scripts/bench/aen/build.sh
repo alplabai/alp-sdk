@@ -8,8 +8,8 @@
 #
 # Pristine-build an AEN bench app for the E8 M55-HE target.
 # Overlays auto-apply: this builds the fully-qualified $AEN_BOARD target
-# (alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he), so Zephyr picks up
-# boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay and
+# (alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he), so Zephyr picks up
+# boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay and
 # app.overlay by name automatically -- no explicit -DEXTRA_DTC_OVERLAY_FILE
 # force needed (the examples ship fully-qualified overlay names, not the
 # bare board name that would silently drop). For a Flow C RAM-run, pass
@@ -23,6 +23,11 @@
 # summary only.
 set -e
 
+# A pure `west build` wrapper -- never touches SE_UART or a J-Link probe --
+# so an operator's LG_PLACE (exported for OTHER helpers in the same shell)
+# must not abort a plain compile on a labgrid/reservation problem that has
+# nothing to do with building (alp-sdk#2064 review).
+BENCH_ENV_NO_PROBE=1
 # shellcheck source=scripts/bench/aen/bench-env.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/bench-env.sh"
 
@@ -43,6 +48,41 @@ if [ -d "$APP" ]; then
 	APP_DIR="$APP"
 else
 	APP_DIR="$ALP_SDK_DIR/$APP"
+fi
+
+# Zephyr auto-applies a per-app devicetree overlay ONLY when its filename
+# matches the fully-qualified board target with '/' replaced by '_'. This
+# script never forces EXTRA_DTC_OVERLAY_FILE, so an app that ships overlays
+# for a DIFFERENT target builds with NO overlay applied and says nothing --
+# the silent-misbuild hazard bench-env.sh's AEN_BOARD note describes. That
+# is the failure mode #2094 exists to stop: a bench operator gets a binary
+# shaped for the wrong module and no indication of it, and the first
+# symptom is a peripheral behaving oddly on real silicon.
+#
+# Refuse that build. An app with NO boards/ overlays at all is fine -- there
+# is nothing to miss -- so only a non-empty overlay set that lacks THIS
+# board's file is an error.
+BOARD_OVERLAY="${BOARD//\//_}.overlay"
+if [ -d "$APP_DIR/boards" ]; then
+	have_overlay=0
+	for ovl in "$APP_DIR"/boards/*.overlay; do
+		[ -e "$ovl" ] || continue
+		have_overlay=1
+		break
+	done
+	if [ "$have_overlay" = 1 ] && [ ! -e "$APP_DIR/boards/$BOARD_OVERLAY" ]; then
+		echo "build: $NAME ships board overlays, but none for $BOARD" >&2
+		echo "build:   expected: $APP_DIR/boards/$BOARD_OVERLAY" >&2
+		echo "build:   present:" >&2
+		for ovl in "$APP_DIR"/boards/*.overlay; do
+			[ -e "$ovl" ] || continue
+			echo "build:     $(basename "$ovl")" >&2
+		done
+		echo "build: refusing to build with no overlay applied (alp-sdk#2094)." >&2
+		echo "build: to build anyway, name the board explicitly:" >&2
+		echo "build:   AEN_BOARD=<fully-qualified board> $0 $APP" >&2
+		exit 2
+	fi
 fi
 
 cd "$ALP_SDK_DIR"

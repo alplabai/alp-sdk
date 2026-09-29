@@ -61,7 +61,7 @@ Backend selection:
 | `_AUTO` | Picks per SoM: Ethos-U on AEN/N93, DRP-AI on V2N, DEEPX on V2M, CPU fallback otherwise. |
 | `_ETHOS_U` | AEN (E3..E8 with Ethos-U55 + E4/E6/E8 with Ethos-U85) + N93 (Ethos-U65). |
 | `_DRPAI` | V2N + V2M (DRP-AI3). |
-| `_DEEPX_DXM1` | V2M101 / V2M102 (DEEPX DX-M1 on a PCIe-like link). |
+| `_DEEPX_DXM1` | V2M101 / V2M102 / V2M103 (DEEPX DX-M1 on a PCIe-like link). |
 | `_CPU` | TFLM reference / Helium / NEON kernels; always available. |
 
 The `ETHOS_U` token is a single customer-facing handle that
@@ -377,8 +377,9 @@ Per-backend latency baselines (native_sim CPU + AEN Ethos-U55):
 | MobileNet v2 96x96 quant | ~120 ms | ~1 ms |
 
 Real numbers per silicon land in
-`tests/bench/baselines/E1M-AEN801-zephyr.yaml` once HiL is
-provisioned.
+`tests/bench/baselines/` (only the `native-sim-cpu.yaml` row
+exists today; the E1M-AEN801-zephyr row arrives once HiL is
+provisioned).
 
 ## 8. Troubleshooting
 

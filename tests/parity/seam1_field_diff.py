@@ -90,6 +90,18 @@ appends its own default ``build`` level. Allowed ONLY for the six named
 fields and ONLY for that exact one-segment insertion -- see
 ``_NESTED_ARTIFACT_TAILS``.
 
+alp-sdk #1982 (the AEN801/AEN701 ``a32_cluster`` MACHINE refusal) is
+NOT a fourth allowance: it is the same class of change as alp-sdk#999
+above (a doomed command the planner now refuses to emit) and is handled
+the same way #999 was -- by re-freezing the two affected oracle
+fixtures (``multicore_rpmsg-aen.build-plan.json`` and
+``audio_i2s-tone.build-plan.json``, both ``a32_cluster`` slices)
+directly, recorded in ``ORACLE-PROVENANCE.txt``, rather than by adding
+a comparator tolerance. See ADR-0020's post-mortem of tan-cli's
+``_ALLOWED_COMMAND_TO_NULL`` for why a permanent comparator allowance
+standing in for a one-file oracle sync is the failure mode to avoid
+here.
+
 Any OTHER diff -- a changed command, a changed env value, a changed slice
 count, a probe change to anything other than that exact openocd->null
 transition, a new key with any other value, an artifact path that moved
@@ -443,12 +455,12 @@ def emit_live_plan(sdk_root: Path, board_yaml: str) -> dict:
     resolved relative to `cwd=sdk_root`, so `board_yaml` is passed as the
     same repo-relative path the oracle's own `boardYaml` field records.
     """
-    env = dict(os.environ)
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     env["PYTHONPATH"] = str(sdk_root / "scripts")
     proc = subprocess.run(
         [sys.executable, "-m", "alp_orchestrate",
          "--input", board_yaml, "--emit", "build-plan"],
-        cwd=sdk_root, env=env, capture_output=True, text=True,
+        cwd=sdk_root, env=env, capture_output=True, text=True, encoding="utf-8",
     )
     if proc.returncode != 0:
         raise ComparatorError(
@@ -476,7 +488,7 @@ def run(sdk: Path, oracle_dir: Path, boards: list[str]) -> bool:
             all_ok = False
             continue
 
-        oracle_plan = json.loads(oracle_path.read_text())
+        oracle_plan = json.loads(oracle_path.read_text(encoding="utf-8"))
         board_yaml = oracle_plan.get("boardYaml")
         if not board_yaml:
             print(f"FAIL {board}: oracle fixture has no boardYaml field")

@@ -1,5 +1,6 @@
 """Unit tests for scripts/check_vendor_ext_tags.py."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -10,7 +11,8 @@ SCRIPT = REPO / "scripts" / "check_vendor_ext_tags.py"
 
 def _run(*args, **kw):
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, **kw,
+        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, encoding="utf-8",
+        env={**(kw.pop("env", None) or os.environ), "PYTHONIOENCODING": "utf-8"}, **kw,
     )
 
 
@@ -27,7 +29,8 @@ def test_function_with_tag_passes(tmp_path):
         "/**\n"
         " * @par Supported silicon: alif:ensemble:e3, e5, e7\n"
         " */\n"
-        "int alp_alif_adc_set_oversampling(void);\n"
+        "int alp_alif_adc_set_oversampling(void);\n",
+        encoding="utf-8"
     )
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -38,7 +41,8 @@ def test_function_without_tag_fails(tmp_path):
     h.parent.mkdir(parents=True)
     h.write_text(
         "/** untagged */\n"
-        "int alp_alif_adc_set_oversampling(void);\n"
+        "int alp_alif_adc_set_oversampling(void);\n",
+        encoding="utf-8"
     )
     proc = _run("--root", str(tmp_path))
     assert proc.returncode != 0

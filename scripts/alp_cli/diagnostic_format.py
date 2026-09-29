@@ -30,8 +30,10 @@ contract did not retire with it.
 
 from __future__ import annotations
 
-from pathlib import Path
+import re
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Iterable
+from urllib.parse import quote
 
 from alp_cli import __version__ as _ALP_CLI_VERSION
 from alp_cli.diagnostic import Diagnostic, _doc_url
@@ -49,8 +51,57 @@ SARIF_SCHEMA_URI = (
 _SARIF_LEVEL = {"error": "error", "warning": "warning", "note": "note"}
 
 
+#: A Windows drive letter at the string's own start (`C:...`) -- mirrors
+#: tan-cli's `_WINDOWS_DRIVE_RE` (alplabai/tan-cli#1111,
+#: python/tan/core/uri_reference.py), the reference implementation for
+#: this exact defect (#1909).
+_WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
+
+
+def _is_windows_spelled(path: str) -> bool:
+    """Whether `path` is WINDOWS-spelled, judged from the string itself --
+    the host rendering the diagnostic may not match the path's own
+    spelling (e.g. a board.yaml path collected on Windows, formatted on
+    Linux CI), so this can't use `os.name` or `Path.as_uri()` alone.
+
+    A leading `/` is decided POSIX before any later backslash is even
+    consulted: a backslash is a legal character inside a POSIX filename
+    (`/tmp/proj/we\\ird.yaml`), so a leading `/` must win over a stray
+    backslash elsewhere in the string."""
+    if path.startswith("/"):
+        return False
+    return "\\" in path or bool(_WINDOWS_DRIVE_RE.match(path))
+
+
+def _path_to_uri_reference(path: str) -> str:
+    """`path` rendered as a valid URI reference (RFC 3986), per #1909.
+
+    Both SARIF 2.1.0's `artifactLocation.uri` and LSP's `DocumentUri`
+    define this field as a URI reference, not a bare filesystem path.
+    An ABSOLUTE path becomes an absolute `file:` URI
+    (`file:///C:/w/proj/board.yaml` for a Windows-spelled root,
+    `file:///w/proj/board.yaml` for a POSIX one); a RELATIVE path is
+    already a legal URI reference (RFC 3986 SS4.2) and is left relative,
+    with `\\` swapped to `/` and percent-encoding applied.
+
+    Mirrors tan-cli's `path_to_uri_reference`
+    (alplabai/tan-cli#1111, python/tan/core/uri_reference.py) -- ported
+    rather than reimplemented from scratch so the two SARIF/LSP exporters
+    agree on this field again.
+    """
+    if _is_windows_spelled(path):
+        win = PureWindowsPath(path)
+        if win.is_absolute():
+            return win.as_uri()
+        return quote(path.replace("\\", "/"), safe="/")
+    posix = PurePosixPath(path)
+    if posix.is_absolute():
+        return posix.as_uri()
+    return quote(path, safe="/")
+
+
 def _uri(diag: Diagnostic) -> str:
-    return diag.path.as_posix() if hasattr(diag.path, "as_posix") else str(diag.path)
+    return _path_to_uri_reference(str(diag.path))
 
 
 def _documentation_uri(diag: Diagnostic) -> str:

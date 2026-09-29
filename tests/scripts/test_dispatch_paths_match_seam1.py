@@ -74,6 +74,7 @@ EXPECTED_HAND_PORT_PATHS = {
     "scripts/alp_project_emit/**",
     "scripts/alp_template.py",
     "scripts/sentinels.py",
+    "scripts/whole_device_alias.py",
     "scripts/strict_loaders.py",
 }
 

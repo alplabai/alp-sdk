@@ -14,13 +14,28 @@ runtime on Linux (Yocto first-class target).
 
 ## Status
 
-**Backend body written against the real dx_rt runtime
-(BENCH-UNVERIFIED).**  `src/yocto/inference_deepx.cpp` is implemented
-against DEEPX's *real* dx_rt C++ API -- `#include "dxrt/dxrt_api.h"`,
-namespace `dxrt` (`dxrt::InferenceEngine`, `dxrt::Tensor`,
-`dxrt::InferenceOption`).  It header-compiles against the real dx_rt
-headers; it has NOT been run on silicon (needs a V2N-M1 module with the
-DX-M1 on PCIe + the dx_rt runtime/driver on the sysroot).
+**Backend verified on silicon (#1262, 2026-09-28).**
+`src/yocto/inference_deepx.cpp` is implemented against DEEPX's *real*
+dx_rt C++ API -- `#include "dxrt/dxrt_api.h"`, namespace `dxrt`
+(`dxrt::InferenceEngine`, `dxrt::Tensor`, `dxrt::InferenceOption`). On an
+E1M-V2M103 (dx-rt 3.2.0, FW 2.4.0) a yolo11n `.dxnn` opens and invokes
+through `<alp/inference.h>`:
+- AUTO selects DEEPX.
+- Invokes take about 47 ms.
+- `close()` against an in-flight `invoke()` drains cleanly.
+- The decoded output matches ONNX Runtime CPU on the same model (box
+  correlation 0.9997, class-score correlation 0.9946).
+
+**Runtime path bench-verified separately (2026-09-26, E1M-V2M103).**
+The DEEPX kernel driver + userspace runtime this vendor wrapper
+targets -- `dx-driver` 1.8.0 + `dx-rt` 3.2.0 from `meta-deepx-m1` --
+is confirmed working on real V2N-M1 silicon: the DX-M1 flash-boots
+firmware 2.4.0, enumerates as PCIe `1ff4:0000` Gen3 x2, `/dev/dxrt0`
+comes up `0660 root:video`, and `dxrt-cli -s` reports rc `0` against
+the pinned stack. See [`docs/soms/v2n-m1.md`](../../docs/soms/v2n-m1.md)'s
+"DEEPX DX-M1 bring-up" section for the full writeup, including why no
+`dxrtd` service unit is enabled at this pin. This is the Yocto
+driver/runtime path the SDK backend above runs on.
 
 dx_rt is **proprietary** (DEEPX EULA -- see "Licensing" below), so the
 SDK does **not** vendor its headers or libs.  This directory is now a
@@ -31,8 +46,10 @@ removed).  The backend resolves the real dx_rt headers + `libdxrt`:
 
 - inside a **Yocto cross-build**, from the sysroot (the
   `meta-deepx-m1` `dx-rt` recipe); or
-- for a **maintainer header-check**, from a dx_rt clone pointed at by
-  `ALP_DEEPX_DXRT_HOME` (expects `<root>/lib/include` + `<root>/lib`).
+- outside Yocto, or from a Yocto SDK toolchain, from
+  `ALP_DEEPX_DXRT_HOME` (`<root>/lib/include` + `<root>/lib`). The
+  include dir must be the **installed** dx-rt headers (the `dx-rt-dev`
+  package): a dx_rt source clone has no build-generated `dxrt/gen.h`.
 
 All of this is wired directly in `src/yocto/CMakeLists.txt`'s
 `ALP_SDK_USE_DEEPX_DXM1` block (default **OFF**).  When ON the backend
@@ -64,10 +81,21 @@ Two additional repos are useful but not on the runtime path:
 ### Yocto integration (V2N-M1)
 
 `meta-alp-sdk`'s `conf/layer.conf` `LAYERRECOMMENDS` the Renesas V2N
-base BSP plus `meta-deepx-m1`, and `conf/machine/e1m-v2m101-a55.conf`
-(and `e1m-v2m102-a55.conf`)
-appends `dx-driver dx-rt` to `IMAGE_INSTALL` so V2N-M1 images
-ship the DEEPX stack by default.
+base BSP plus `meta-deepx-m1` (the real `BBFILE_COLLECTIONS` name of
+DEEPX's official layer), and `conf/machine/include/e1m-v2m-deepx.inc`
+(`require`d from `e1m-v2m101-a55.conf` / `e1m-v2m102-a55.conf` /
+`e1m-v2m103-a55.conf`) appends `dx-driver dx-rt dx-rt-cli` to
+`IMAGE_INSTALL` when `ALP_ENABLE_DEEPX_DXM1 = "1"` (the default once
+`meta-deepx-m1` is in `bblayers.conf`), so V2N-M1
+images ship the DEEPX stack (the tools, `dxrt-cli` included, are in the
+`dx-rt-cli` sub-package).  At this pin `meta-deepx-m1` also carries
+`dx-stream`, `dx-stream-sample`, `dx-yolo26` and `dx-yolo26-sample`;
+`dx-yolo26` fetches a private DEEPX repository, so keep those recipes
+out of `IMAGE_INSTALL` and `bitbake world` unless you have that access.  A
+`dynamic-layers/meta-deepx-m1/` bbappend also tightens dx-driver's
+udev device-node permissions (world-writable by default upstream) --
+see `meta-alp-sdk/README.md`.  Verified against commit
+`8d09b25f20f81104c16c7de90928ff8920eb482d` on branch `scarthgap`.
 
 Upstream `meta-deepx-m1` (per its README, scarthgap branch) ships
 two recipes:
@@ -85,6 +113,7 @@ Adding the layer to a Yocto workspace:
 ```bash
 git clone -b scarthgap https://github.com/DEEPX-AI/meta-deepx-m1.git \
     ../meta-deepx-m1
+git -C ../meta-deepx-m1 checkout 8d09b25f20f81104c16c7de90928ff8920eb482d
 bitbake-layers add-layer ../meta-deepx-m1
 ```
 

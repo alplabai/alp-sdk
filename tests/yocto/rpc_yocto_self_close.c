@@ -153,6 +153,22 @@
  * the wait in alp_rpc_close_finalize() below is a no-op for them. */
 static atomic_int g_test_op_count;
 
+/* alp_rpc_notify_link() is normally defined by src/rpc_dispatch.c
+ * (declared in rpc_ops.h, issue #1643); this binary does not link
+ * alp::sdk.  The backend under test calls it on every link
+ * transition, so the symbol has to exist for this scenario to link at
+ * all.  Recording the last state is enough here -- this test exercises
+ * the close/open path, not link-callback delivery, which
+ * tests/unit/ covers.  Deliberately NOT gated through the reentrancy
+ * window: the real dispatcher does not gate it either (rpc_ops.h:214). */
+static alp_rpc_link_state_t g_last_link_state = ALP_RPC_LINK_UP;
+
+void alp_rpc_notify_link(void *owner, alp_rpc_link_state_t state)
+{
+	(void)owner;
+	g_last_link_state = state;
+}
+
 /* alp_rpc_close_finalize() is normally defined by src/rpc_dispatch.c;
  * this binary does not link alp::sdk.  `owner` is always the address
  * of the calling scenario's own alp_rpc_backend_state_t here.

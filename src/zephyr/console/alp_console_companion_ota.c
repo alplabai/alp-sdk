@@ -118,11 +118,17 @@ static int cmd_companion_ota_begin(const struct shell *sh, size_t argc, char **a
 	}
 	s = cc3501e_ota_begin(companion_cc3501e, (uint32_t)total_len, ALP_COMPANION_OTA_MS);
 
-	if (s == ALP_ERR_NOT_READY) {
-		shell_warn(sh, "OTA not available (no PSA-FWU in this CC3501E image)");
-		return -ENOTSUP;
-	}
 	if (s != ALP_OK) {
+		/* #2126 review: BEGIN failed after update mode was already entered
+		 * above (ota_session_active latched true) -- back out the same way
+		 * cc3501e_ota_update()'s own ota_update_bail() does, or the flag
+		 * sticks true forever and cc3501e_link_check_and_recover() silently
+		 * refuses to ever probe/recover this ctx again. */
+		(void)cc3501e_ota_update_mode(companion_cc3501e, false, ALP_COMPANION_OTA_MS);
+		if (s == ALP_ERR_NOT_READY) {
+			shell_warn(sh, "OTA not available (no PSA-FWU in this CC3501E image)");
+			return -ENOTSUP;
+		}
 		shell_error(sh, "ota begin failed (%d)", (int)s);
 		return -EIO;
 	}
@@ -142,6 +148,14 @@ static int cmd_companion_ota_abort(const struct shell *sh, size_t argc, char **a
 		return -ENODEV;
 	}
 	alp_status_t s = cc3501e_ota_abort(companion_cc3501e, ALP_COMPANION_OTA_MS);
+
+	/* #2126 review: ABORT alone only issues the wire opcode -- it does not
+	 * touch ota_session_active, so follow it with the same update_mode(ctx,
+	 * false, ...) exit cc3501e_ota_update()'s ota_update_bail() always
+	 * pairs it with, or the flag is left stuck true and auto-recovery on
+	 * this ctx is silently disabled from here on. Best-effort: run it
+	 * regardless of ABORT's own verdict, same as ota_update_bail(). */
+	(void)cc3501e_ota_update_mode(companion_cc3501e, false, ALP_COMPANION_OTA_MS);
 
 	if (s != ALP_OK) {
 		shell_error(sh, "ota abort failed (%d)", (int)s);

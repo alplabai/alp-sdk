@@ -24,8 +24,8 @@
 # alp-sdk dev key -- left in deliberately (see note above) rather than
 # silently dropped from this sweep.
 #
-# Filtered OUT of the native_sim PR gate (platform_allow = AEN801 M55-HE
-# only, no native_sim overlay); build_only in the advisory pr-twister-aen.yml
+# Filtered OUT of the native_sim PR gate (platform_allow = the AEN801/AEN803
+# M55-HE board targets, no native_sim overlay); build_only in the advisory pr-twister-aen.yml
 # gate -- the boot-chain proof is a slot0 bench flash, not a CI run.
 
 sample:
@@ -40,6 +40,7 @@ tests:
   alp_sdk.examples.aen.mcuboot_smoke.aen:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
     sysbuild: true
     tags:
       - alp-sdk

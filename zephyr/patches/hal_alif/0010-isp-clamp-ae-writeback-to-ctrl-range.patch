@@ -1,0 +1,133 @@
+--- a/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
++++ b/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
+@@ -106,6 +106,59 @@
+  */
+ static bool gain_write_err_logged;
+ static bool exposure_write_err_logged;
++
++/*
++ * alp-sdk fix (Alp Lab AB): the ISP library's own AE algorithm
++ * computes gain/exposure targets in its own fixed-point scale, and nothing
++ * upstream of isp_vsi_bottom_half() clamps the result to what the sensor's
++ * registered video control actually accepts. On E1M-AEN803 + OV5647 (bench
++ * runs 211/212), AE settled on an EXPOSURE writeback (intLine 94470, so
++ * ctrl.val = intLine * 16 = 1511520) out of OV5647's registered
++ * VIDEO_CID_EXPOSURE range [0, 0xFFFFF] -- video_set_ctrl() rejected it
++ * with -EINVAL every single frame (Zephyr drivers/video/video_ctrls.c's
++ * IN_RANGE check), and cached_sns_config only updates on a successful write,
++ * so it never stopped retrying. Saturate into [min, max] before the write.
++ * (The GAIN writeback that same run, aGain 0x2000 / dGain 0x9cd, computed
++ * ctrl.val = 313 -- inside OV5647's registered VIDEO_CID_ANALOGUE_GAIN
++ * range [0, 1023] the whole time.)
++ *
++ * This clamp is a DEFENSIVE layer, not the fix for why AE drove outside
++ * its configured ceiling in the first place: isp_pico.c's isp_apply_ae()
++ * DOES push a correct, sensor-queried int_time_max -- but SetCalib()
++ * (isp_vsi_init(), below) loads isp_param_conf.h's compiled-in AE
++ * calibration block into the library FIRST, and the values it loaded
++ * (expTimeRange.max 3000000 us -> 94470 lines) decode exactly against
++ * runs 211/212's writeback, consistent with the library enforcing
++ * whichever ceiling it loaded from that block. hal_alif patch 0011
++ * brings isp_param_conf.h's OV5647 calibration arm to match this
++ * sensor's real envelope; bench run 213 with 0011 applied held within
++ * that envelope (int_time_max=98000, again_max=65472) with 0 rejected
++ * writes -- but the exact mechanism by which the calibration block wins
++ * over isp_apply_ae()'s push is not established against the closed
++ * VSI_MPI_ISP library, so this clamp stays as defense in depth either
++ * way.
++ */
++static inline int32_t isp_clamp_ctrl_val(int32_t val, int32_t min, int32_t max)
++{
++	if (val < min) {
++		return min;
++	}
++	if (val > max) {
++		return max;
++	}
++	return val;
++}
++
++/*
++ * alp-sdk fix (Alp Lab AB): latched like gain_write_err_logged /
++ * exposure_write_err_logged above -- log the FIRST time a clamp actually
++ * changes ctrl.val (not every frame it stays clamped), and re-arm once the
++ * library's own value returns inside range. The message prints the raw
++ * library terms so the bench can tell which one exceeded its configured
++ * ceiling.
++ */
++static bool gain_clamp_logged;
++static bool exposure_clamp_logged;
+ #endif /* defined(CONFIG_ISP_LIB_AE_MODULE) */
+ 
+ extern int log_level(void);
+@@ -732,12 +785,39 @@
+ 		 * (0x350a) uses register value 0x10 = 1x -- scale by 16/1024.
+ 		 */
+ 		struct video_control ctrl;
++		struct video_ctrl_query cq = {
++			.dev = dev,
++			.id  = VIDEO_CID_ANALOGUE_GAIN,
++		};
++		int32_t computed_val;
+ 
+ 		totalGain = ((vsi_u64_t)sns_config.aGain *
+ 				sns_config.dGain) / ISP_SNS_GAIN_ACCU;
+ 
+ 		ctrl.id  = VIDEO_CID_ANALOGUE_GAIN;
+ 		ctrl.val = (int32_t)((vsi_u64_t)totalGain * 16 / ISP_SNS_GAIN_ACCU);
++		computed_val = ctrl.val;
++		/*
++		 * alp-sdk fix (Alp Lab AB): saturate to the sensor's registered
++		 * range before the write -- see isp_clamp_ctrl_val()'s comment.
++		 * A failed query leaves ctrl.val unclamped, same as before this
++		 * fix; video_set_ctrl() below still rejects an out-of-range
++		 * value, it just cannot be pre-empted here.
++		 */
++		if (video_query_ctrl(&cq) == 0) {
++			ctrl.val = isp_clamp_ctrl_val(ctrl.val, cq.range.min, cq.range.max);
++			if (ctrl.val != computed_val) {
++				if (!gain_clamp_logged) {
++					LOG_WRN("AE gain clamp: aGain=%u dGain=%u ctrl=%d "
++						"clamped=%d (max=%d)",
++						sns_config.aGain, sns_config.dGain,
++						computed_val, ctrl.val, cq.range.max);
++					gain_clamp_logged = true;
++				}
++			} else {
++				gain_clamp_logged = false;
++			}
++		}
+ 		ret = video_set_ctrl(dev, &ctrl);
+ 		if (ret) {
+ 			if (!gain_write_err_logged) {
+@@ -759,9 +839,30 @@
+ 		 * exposure convention) -- scale by 16.
+ 		 */
+ 		struct video_control ctrl;
++		struct video_ctrl_query cq = {
++			.dev = dev,
++			.id  = VIDEO_CID_EXPOSURE,
++		};
++		int32_t computed_val;
+ 
+ 		ctrl.id  = VIDEO_CID_EXPOSURE;
+ 		ctrl.val = (int32_t)(sns_config.intLine * 16);
++		computed_val = ctrl.val;
++		/* alp-sdk fix (Alp Lab AB): same clamp as the gain writeback above. */
++		if (video_query_ctrl(&cq) == 0) {
++			ctrl.val = isp_clamp_ctrl_val(ctrl.val, cq.range.min, cq.range.max);
++			if (ctrl.val != computed_val) {
++				if (!exposure_clamp_logged) {
++					LOG_WRN("AE exposure clamp: intLine=%u ctrl=%d "
++						"clamped=%d (max=%d)",
++						sns_config.intLine, computed_val,
++						ctrl.val, cq.range.max);
++					exposure_clamp_logged = true;
++				}
++			} else {
++				exposure_clamp_logged = false;
++			}
++		}
+ 		ret = video_set_ctrl(dev, &ctrl);
+ 		if (ret) {
+ 			if (!exposure_write_err_logged) {

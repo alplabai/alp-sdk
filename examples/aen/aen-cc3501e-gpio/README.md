@@ -73,9 +73,11 @@ The two camera-enable LDOs are `which=0` → CAM_EN_LDO0 (CC35 GPIO_1) and
 
 ## The r2 host-IRQ caveat (read before using interrupts)
 
-This HW rev uses hardware SS0 for SPI framing and a READY input for per-phase
-gating, but it still does not expose GPIO edge events as portable application
-callbacks. The Alif is always master; the CC3501E is always slave. Without a
+This HW rev uses hardware SS0 for SPI framing and an OPTIONAL READY input for
+per-phase gating (unwired, `fw->ready_pin` stays NULL, in this app -- see
+`src/cc3501e_bridge.c`), but it still does not expose GPIO edge events as
+portable application callbacks. The Alif is always master; the CC3501E is
+always slave. Without a
 dedicated async event delivery path, the slave cannot spontaneously tell the
 master "an edge happened on a GPIO".
 

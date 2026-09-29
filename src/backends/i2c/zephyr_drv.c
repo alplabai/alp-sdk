@@ -53,6 +53,7 @@ static alp_status_t _errno_to_alp(int err)
 static alp_status_t
 z_open(const alp_i2c_config_t *cfg, alp_i2c_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	if (cfg->bus_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;
 	if (cfg->bus_id >= ALP_SOC_I2C_COUNT) return ALP_ERR_OUT_OF_RANGE;
 	const struct device *dev = _devs[cfg->bus_id];
@@ -60,9 +61,8 @@ z_open(const alp_i2c_config_t *cfg, alp_i2c_backend_state_t *st, alp_capabilitie
 	uint32_t flags = I2C_MODE_CONTROLLER | _alp_to_zephyr_bitrate_flags(cfg->bitrate_hz);
 	int      err   = i2c_configure(dev, flags);
 	if (err != 0) return _errno_to_alp(err);
-	st->dev         = (void *)dev;
-	st->bus_id      = cfg->bus_id;
-	caps_out->flags = 0u;
+	st->dev    = (void *)dev;
+	st->bus_id = cfg->bus_id;
 	return ALP_OK;
 }
 

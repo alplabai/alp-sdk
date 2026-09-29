@@ -69,8 +69,10 @@ uart:~$ alp companion ble scan
 
 > **Order matters on older bench firmware:** if a stale CC3501E image returns
 > `-4` after back-to-back heavy radio ops, cold-boot the companion and update the
-> bridge firmware. Current AEN hardware uses SS0 framing and READY gating, so the
-> host link should remain framed across Wi-Fi/BLE radio work.
+> bridge firmware. Current AEN hardware uses SS0 (hardware chip-select) framing,
+> so the host link should remain framed across Wi-Fi/BLE radio work regardless
+> of READY -- this app leaves `fw->ready_pin` NULL (see `src/cc3501e_bridge.c`),
+> so it relies on the fixed settle alone, not READY gating.
 
 ### Serving over the soft-AP
 
@@ -84,10 +86,10 @@ uart:~$ alp companion wifi ap alp-serve alpserve123
 ap "alp-serve" up (wpa2)
 uart:~$ alp companion sock serve 80 60
 ap ip: 10.0.0.3
-listen handle 1
+listen handle 1 (epoch 0)
 listening on :80 for 60 s (the shell is blocked until then)
 [event] opcode 0x2c (len 12)
-accepted handle 2
+accepted handle 2 (epoch 0)
   request: GET /s1 HTTP/1.1
   replied 154 bytes
 ```

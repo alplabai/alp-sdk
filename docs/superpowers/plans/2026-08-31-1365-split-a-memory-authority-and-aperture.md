@@ -187,12 +187,18 @@ Each step is independently reviewable and leaves the tree green.
 `metadata/socs/renesas/rzv2n/n44.json`'s regions are all RAM. Making the field
 or the tiling check mandatory would block every non-Alif family for no benefit.
 
-**Aperture is per device window, not per controller.** E1M-AEN801 has the NOR
-`MX25UM25645GXDI00` (Macronix OctaFlash, xSPI NOR) on `chip_select: 0` and the
-HyperRAM `W958D8NBYA5I` (Winbond OctalRAM, HyperBus) on `chip_select: 1` —
-byte-addressable RAM and flash behind the **same OSPI0 controller**. A
-controller-scoped or XIP-window-scoped aperture would classify that RAM as
-flash. Scope it to the MRAM window, `[0x80000000, 0x80580000)` on E8.
+**Aperture is per device window, not per controller.** E1M-AEN803 is the SKU
+on this shared PCB that populates OSPI0 (E1M-AEN801 populates neither
+device — `assembled: false` on both — and runs from on-die MRAM instead):
+the NOR footprint `U10`, measured in #2041 as an ISSI `IS25WX256-JHLE` (not
+the Macronix `MX25UM25645GXDI00` this paragraph originally named), sits on
+`chip_select: 1`, and the HyperRAM `S80KS5122GABHM02` (Infineon/Cypress
+HyperRAM) `U9` sits on `chip_select: 0` — the reverse of this paragraph's
+original CS mapping (corrected in `44200cab`, #1944/#1990/PR #2007). Either
+way, byte-addressable RAM and flash sit behind the **same OSPI0
+controller**. A controller-scoped or XIP-window-scoped aperture would
+classify that RAM as flash. Scope it to the MRAM window,
+`[0x80000000, 0x80580000)` on E8.
 
 *Exit condition:* `python3 scripts/validate_metadata.py` green; each AEN
 variant's declared aperture length equals its `mram_mb`.
@@ -240,7 +246,7 @@ presets with no `memory_map:`.
   Disagreement is an error. This is the check that makes the six hand-authored
   flags unable to rot.
 
-  **Miss semantics are normative, per ADR-0033 clause 4:** a region whose base
+  **Miss semantics are normative, per ADR-0034 clause 4:** a region whose base
   does not resolve — the `"TBD"` string, or a derived region with no base at all
   (`scripts/alp_project_loader.py`, "silicon-default bases stay unset") — is
   **unresolved**, and unresolved is never silently "not flash". Skip it and say
@@ -282,7 +288,7 @@ a later refactor from turning "unknown" into "not flash".
 - `python3 scripts/gen_catalog.py`, commit `metadata/catalog.json` if it moves.
 - `changelog.d/1365.md` — a fragment naming the ATOC and `storage` hazard and
   stating plainly that A changes no allocator behaviour.
-- `docs/board-config-hardware.md` and `docs/porting-new-som.md` — a porting
+- `docs/board-config-features.md` and `docs/porting-new-som.md` — a porting
   author now has a field to fill; say what it means and how to choose a value.
 
 ## Verification
@@ -342,8 +348,8 @@ a real platform bug, not a base-baseline flake.
 - **ADR-0026 clause 2** keeps `metadata/` and `metadata/schemas/` in alp-sdk
   under every migration outcome, which is what makes A safe to land during the
   migration. Its amendment section G step 2 is what B waits on.
-- **ADR-0033** supplies two rules A follows: deriving the class and shipping the
-  outcome is its prong (b), and clause 4's normative miss semantics are why step
-  4c must skip an unresolved base instead of guessing. The authority field is
-  **not** ADR-0033 declared policy; who writes the ATOC changes when the silicon
-  changes, so it is hardware truth.
+- **ADR-0034** supplies two rules A follows: deriving the class and shipping the
+  outcome is its clause 6 prong (b), and clause 4's normative miss semantics are
+  why step 4c must skip an unresolved base instead of guessing. The authority
+  field is **not** ADR-0034 declared policy; who writes the ATOC changes when
+  the silicon changes, so it is hardware truth.

@@ -116,8 +116,8 @@ The portable bus + GPIO + analog surfaces.  Start here.
 
 | Directory                       | What it shows                                                                 |
 |---------------------------------|-------------------------------------------------------------------------------|
-| `ai-camera-viewer`              | Capture frames → person-detect on the Ethos-U NPU → preview + boxes on a 240×240 LVGL display. **(AEN)** |
-| `ai-object-detection-realtime`  | Realtime YOLOv8-tiny on the DEEPX NPU -- camera → inference → bbox overlay + live FPS. **(V2N-M1)** |
+| `ai-camera-viewer`              | Capture frames → person-detect on the Ethos-U NPU → preview + boxes on a 240×320 ST7789 LVGL display. **(AEN)** |
+| `ai-object-detection-realtime`  | Realtime YOLOv8-tiny skeleton -- camera → inference → bbox overlay + live FPS; the checked-in project runs TFLM on the M33 slice, the DX-M1 NPU needs an A55/Yocto app + compiled model (see its README). **(V2N-M1)** |
 
 ### AI / Inference
 
@@ -125,6 +125,7 @@ The portable bus + GPIO + analog surfaces.  Start here.
 |------------------------------------|------------------------------------------------------------------------------|
 | `ai-anomaly-detection-vibration`   | Predictive maintenance -- sliding-window vibration → 1D-CNN anomaly score via TFLM. **(AEN)** |
 | `aen/edgeai-vision-aen`            | On-device vision inference with Ethos-U on an AEN SoM. **(AEN)**              |
+| `v2n/v2n-drpai-inference`          | DRP-AI3 on-die NPU still-frame inference through `<alp/inference.h>` -- the exhibition booth demo. **(V2N, Yocto)** |
 | `v2n/v2n-m1-deepx-inference`       | DEEPX DX-M1 NPU bring-up + a single inference through `<alp/inference.h>`. **(V2N-M1)** |
 | `v2n/v2n-m1-ros-perception`        | ROS 2 perception node -- detection on DEEPX, DRP-AI3 fallback on plain V2N. **(V2N / V2N-M1, Yocto)** |
 | `cold-chain-monitor`               | Pharma/food cold-chain integrity monitor -- BME280 T/RH/P samples → anomaly classification; v0.9 paper-correct, HiL bench-gated. |
@@ -139,6 +140,7 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | Directory                | What it shows                                                                     |
 |--------------------------|-----------------------------------------------------------------------------------|
 | `iot-connected-camera`   | End-to-end IoT -- capture a frame, publish it to MQTT.                             |
+| `camera-mjpeg-stream`    | Capture, JPEG-encode, and serve an MJPEG stream over a plain BSD TCP socket -- browser/VLC/ffmpeg client, no host tool. **(AEN)** |
 | `iot-dashboard`          | BME280 env samples → MQTT-over-TLS publish + a live LVGL dashboard. **(AEN)**      |
 | `iot-fleet-ota`          | Secure OTA firmware update with rollback; the v0.6 declarative `boot:` + `ota:` reference. |
 | `firmware-update-log`    | Portable update audit log -- software tamper-evident tier everywhere, TF-M secure-owner hardware tier where the secure backend is wired. |
@@ -231,7 +233,6 @@ SoM EEPROM manifest).
 | `v2n/v2n-board-id-readout`      | Read the SoM EEPROM manifest + assert the SKU matches the firmware build. |
 | `v2n/v2n-ethernet-dual`         | Bring up both RTL8211FDI PHYs (ET0 + ET1) -- probe, reset, autoneg, link, WoL. |
 | `v2n/v2n-eeprom-manifest-dump`  | Hexdump + decode the 128-byte EEPROM manifest at offset 0x0000.          |
-| `v2n/v2n-rtc-multi-alarm`       | Register per-source callbacks on the rv3028c7 multi-source dispatcher.   |
 | `v2n/v2n-temp-sensor`           | Read the on-module TMP112 once per second; print degrees C.              |
 | `v2n/v2n-pwm-fan-control`       | Ramp a GD32-side PWM channel along a five-stop fan curve (25 kHz board). |
 | `v2n/v2n-secure-element-sign`   | OPTIGA Trust M I2C_STATE probe; product-info/raw-APDU return `ALP_ERR_NOSUPPORT`. |
@@ -249,9 +250,9 @@ SoM EEPROM manifest).
 These live under `examples/aen/` and target the E1M-AEN (Alif
 Ensemble) family on the E1M-EVK board (lead part: E8).
 
-`examples/aen/` has 66 directories total; the 9 below are the
+`examples/aen/` has 84 tracked directories; the 10 below are the
 customer-facing catalog (the ones carrying a `board.yaml`).  The
-remaining 57 are internal bring-up/regression apps (per-driver
+remaining 74 are internal bring-up/regression apps (per-driver
 regcheck, bench smoke tests, dual-core internal validation) --
 `board.yaml` presence is the reliable way to tell them apart, not
 their filename (some of those internal dirs don't follow a
@@ -267,6 +268,7 @@ their filename (some of those internal dirs don't follow a
 | `aen/aen-cc3501e-gatt-register` | Bench PASS/FAIL gate for `alp_ble_gatt_register_service()` (#480/#892) -- registers a service on the CC3501E's NimBLE host over the inter-chip bridge; peer-free, no central-side discovery. |
 | `aen/aen-cc3501e-gpio`          | CC3501E GPIO proxy + camera-enable demo over the inter-chip SPI bridge. |
 | `aen/aen-eeprom-manifest`       | Read + decode the 128-byte Alp hardware-info manifest from the on-module 24C128 EEPROM over the portable `<alp/*>` API. |
+| `aen/aen-eeprom-provision`      | Write (and lock down) the 128-byte Alp hardware-info manifest into the on-module 24C128 EEPROM -- the production sibling of `aen-eeprom-manifest`. |
 | `aen/aen-secure-element-sign`   | OPTIGA Trust M I2C_STATE probe over BRD_I2C (M55-HE); product-info/raw-APDU return `ALP_ERR_NOSUPPORT`. |
 
 ## Anatomy of a single-OS example
