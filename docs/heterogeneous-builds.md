@@ -246,6 +246,15 @@ A55 `0x40000000`, **256 MiB**, while `ddr_main` spans 4 GiB from
 `0x147f80000`, a 33-bit address that truncates to `0x47f80000` — below
 the DDR base — the moment it is cast to a pointer on the M33.
 
+**The A55 view of the CM33 OpenAMP window must be reserved no-map.**
+The CM33 board trees place `openamp_shm` at CM33-non-secure
+`0x9f700000`, size `0x900000` (9 MiB); the A55 sees the same physical
+memory at `0x4f700000` (`CM33-NS - 0x50000000`). Without a matching
+Linux `reserved-memory` entry that range is ordinary System RAM, so a
+CM33 image with IPC enabled writes its resource table and vrings into
+pages Linux has already handed out. `e1m-v2n-som.dtsi` reserves it
+no-map (#2374, tracked for downstream docs at #2415).
+
 For each `ipc:` entry, `tan build`
 emits a header both halves `#include`:
 
