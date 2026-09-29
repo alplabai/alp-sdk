@@ -8,17 +8,15 @@ the field?".
 Targets every E1M-X SoM family. native_sim build verified; HiL
 verification gates on a staged Mender server (separate repo).
 
-> **TLS randomness is not production-grade on AEN yet (#2192).**
+> **TLS randomness on AEN comes from the Secure Enclave TRNG (#2192).**
 > This app's HTTPS poll and its ECDSA-P256 verification run on
 > mbedTLS' PSA crypto core, which needs a cryptographically secure
-> RNG. There is no Alif Ensemble entropy driver in this tree or
-> upstream, so an AEN build is *refused* unless it sets
-> `CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y` to acknowledge a predictable
-> generator. The CI scenario sets it because it only compiles; a
-> shipping image must not. Until the Secure Enclave TRNG is wired
-> through a real entropy driver, treat the OTA trust chain
-> demonstrated here as structurally complete and cryptographically
-> unproven.
+> RNG. Every AEN board chooses the SE TRNG entropy driver
+> (`alif,se-trng`, bench-proven on both M55 cores) as
+> `zephyr,entropy` by default, so the AEN build seeds from real
+> hardware entropy and needs no weak-RNG opt-in. The native_sim build
+> has no such source and still sets `CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y`
+> on its own scenario.
 
 ## What lands declaratively in v0.6
 
@@ -30,7 +28,7 @@ boot:
   method: mcuboot
   signing:
     algorithm: ecdsa_p256
-    key_file:  keys/mcuboot_dev_ecdsa_p256.pem
+    key_file:  keys/mcuboot_shared_dev_ecdsa_p256.pem
   # swap_algorithm: intentionally omitted -- E1M-AEN801's disjoint-slot0
   # `memory_map:` (#1069, #1413) has no slot1/scratch partition, so the
   # per-target default resolves to single-app boot.  Setting
@@ -57,7 +55,7 @@ config:
 - `boot:` -> sysbuild MCUboot child image. `scripts/alp_orchestrate/`
   emits `SB_CONFIG_BOOTLOADER_MCUBOOT=y`,
   `SB_CONFIG_BOOT_SIGNATURE_TYPE_ECDSA_P256=y`,
-  `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="keys/mcuboot_dev_ecdsa_p256.pem"`,
+  `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="keys/mcuboot_shared_dev_ecdsa_p256.pem"`,
   and -- since this SKU's disjoint-slot0 `memory_map:` has no
   slot1/scratch partition -- `SB_CONFIG_MCUBOOT_MODE_SINGLE_APP=y`
   into the sysbuild overlay.

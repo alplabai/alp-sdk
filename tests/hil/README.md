@@ -242,7 +242,7 @@ and `ssh_files`.  Print a marker (`echo HIL_..._OK`) from the command
 rather than matching the command's own text.
 
 ```sh
-python tests/hil/run_smoke.py tests/hil/v2m103-x-evk --no-common --ssh-host root@192.168.1.241
+python tests/hil/run_smoke.py tests/hil/v2m103-x-evk --no-common --ssh-host root@<bench-host>
 ```
 
 ---
