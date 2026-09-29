@@ -378,10 +378,22 @@ static void *_rx_loop(void *arg)
 	return NULL;
 }
 
+/* Netdev for E1M bus @p bus_id.  On the E1M-X SoMs the BSP's udev rule
+ * (meta-alp-sdk alp-canfd-udev) names the netdevs can_e1m<N> by SoC
+ * channel, because rcar_canfd's probe-order can0/can1 are swapped
+ * against the E1M numbering (#2352).  Elsewhere (hosts, vcan, other
+ * SoMs) the plain can<N> name is the E1M bus. */
+static int can_ifname(uint32_t bus_id, char *out, size_t cap)
+{
+	int k = snprintf(out, cap, "can_e1m%u", (unsigned)bus_id);
+	if (k >= 0 && (size_t)k < cap && if_nametoindex(out) != 0u) return k;
+	return snprintf(out, cap, "can%u", (unsigned)bus_id);
+}
+
 /**
- * @brief Open a CAN_RAW socket bound to canN and stash it in the handle.
+ * @brief Open a CAN_RAW socket bound to the bus netdev; stash it in the handle.
  *
- * Resolves the "can<bus_id>" interface ifindex via SIOCGIFINDEX and
+ * Resolves the bus netdev (can_ifname()) ifindex via SIOCGIFINDEX and
  * binds an AF_CAN raw socket to it.  For ALP_CAN_MODE_FD the socket is
  * switched to CAN_RAW_FD_FRAMES so it can carry 64-byte canfd_frames;
  * if the kernel/interface lacks FD support the setsockopt fails and we
@@ -400,7 +412,7 @@ y_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st, alp_capabilitie
 	if (cfg == NULL) return ALP_ERR_INVAL;
 
 	char ifname[IFNAMSIZ];
-	int  k = snprintf(ifname, sizeof(ifname), "can%u", (unsigned)cfg->bus_id);
+	int  k = can_ifname(cfg->bus_id, ifname, sizeof(ifname));
 	if (k < 0 || (size_t)k >= sizeof(ifname)) return ALP_ERR_INVAL;
 
 	int fd = socket(PF_CAN, SOCK_RAW | SOCK_CLOEXEC, CAN_RAW);

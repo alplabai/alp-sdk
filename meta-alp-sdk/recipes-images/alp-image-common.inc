@@ -225,3 +225,7 @@ IMAGE_LINGUAS = "en-us"
 # everything-on alp-image-edge so all variants share one Mender slot size.
 IMAGE_ROOTFS_EXTRA_SPACE = "1048576"
 IMAGE_ROOTFS_SIZE = "4194304"
+
+# E1M-X V2N family: name the on-module CAN-FD netdevs by E1M bus
+# (can_e1m0 = E1M_X_CAN0 = SoC channel 3), not by driver probe order (#2352).
+IMAGE_INSTALL += "${@bb.utils.contains('MACHINE_FEATURES', 'v2n', 'alp-canfd-udev', '', d)}"
