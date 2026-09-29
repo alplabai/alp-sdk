@@ -79,15 +79,25 @@
  *     property documents the wiring only: the 6.1 tas2562 driver never
  *     requests an IRQ, so amp faults are not signalled to Linux.
  *
- *     STILL OPEN, not resolved by this landing: I2C-address ownership.
- *     Landing the kernel `ti,tas2563` codec nodes below means the kernel
- *     binds i2c0@0x4d/0x4e for ALSA -- the SDK's own userspace
- *     chips/tas2563 driver (reachable over alp_i2c_* on this same bus)
- *     must not ALSO be wired up against this board/SoM combination, or
- *     the two would race the same registers. No alp-chips PACKAGECONFIG
- *     currently enables it for e1m-v2n101/e1m-v2m101, so there is no
- *     live conflict today -- flagging so a future userspace-driver
- *     enablement on these MACHINEs does not silently reintroduce one.
+ *     I2C-address ownership (issue #2331 item 1): landing the kernel
+ *     `ti,tas2563` codec nodes below means the kernel binds
+ *     i2c0@0x4d/0x4e for ALSA -- the SDK's own userspace chips/tas2563
+ *     driver (reachable over alp_i2c_* on this same bus) must not ALSO
+ *     be wired up against this board/SoM combination, or the two would
+ *     race the same registers. Resolved as a NON-FIGHTING ownership
+ *     contract rather than a PACKAGECONFIG lock-out: tas2563_init()
+ *     already propagates its bus call's status verbatim (#2077), so
+ *     when a kernel driver holds one of these addresses,
+ *     `ioctl(I2C_SLAVE)` on `/dev/i2c-0` fails `EBUSY` before any
+ *     transaction is even attempted, and that surfaces as
+ *     `ALP_ERR_BUSY` out of `tas2563_init()` -- see the @retval
+ *     ALP_ERR_BUSY note on that function in
+ *     `include/alp/chips/tas2563.h`. A future userspace-driver
+ *     enablement on e1m-v2n101/e1m-v2m101 competing with this DT node
+ *     gets a clear, distinct refusal rather than a silent register
+ *     race or a misleading ALP_ERR_NOT_READY ("no chip present").  No
+ *     live conflict today either way (this DT node is the only bound
+ *     client at these addresses, and the driver does not fight it).
  *
  *     Kernel config: the mainline ASoC `tas2562` driver covers the
  *     TAS2563; CONFIG_SND_SOC_RCAR is already `=y` in this BSP's
