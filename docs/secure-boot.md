@@ -158,8 +158,12 @@ via `storage:` if you want it explicit.
 ### Development
 
 1. Clone the repo.
-2. Run `bash keys/generate_dev_key.sh` once.  Generates
-   `keys/mcuboot_dev_ecdsa_p256.pem` (gitignored).
+2. Nothing to generate: the build signs with the committed **shared
+   development key** `keys/mcuboot_shared_dev_ecdsa_p256.pem`, which the
+   factory MCUboot on pre-provisioned modules trusts (#2421). It is public
+   and gives no security. To use your own key instead, run
+   `bash keys/generate_dev_key.sh` and re-provision MCUboot built with it
+   (see [`keys/README.md`](../keys/README.md)).
 3. Build with sysbuild:
    ```bash
    west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
