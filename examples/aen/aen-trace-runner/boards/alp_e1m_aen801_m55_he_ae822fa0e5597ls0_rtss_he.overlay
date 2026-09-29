@@ -1,0 +1,35 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-dsi-display overlay for the E1M-AEN801 (Ensemble E8, M55-HE) RAM-run.
+ *
+ * The display chain, the panel, the carrier expander and the framebuffer
+ * region all come from the e1m_evk_rk055hdmipi4ma0 shield (CMakeLists.txt).
+ * This overlay only retargets the image for the bench RAM-run: ROM to ITCM
+ * (path-reference form &itcm; the phandle-array form makes FLASH_SIZE=0 and
+ * overflows the link), with no MCUboot code partition.  The 720x1280 RGB565
+ * framebuffer is not in ITCM -- it is the shield's region at the top of SRAM0,
+ * used by address, so it adds nothing to the RAM-run .bin.
+ */
+
+#include <zephyr/dt-bindings/memory-attr/memory-attr-arm.h>
+
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+/*
+ * SRAM1 is shared with the A32 pair (mailbox at 0x02401000, later the camera
+ * pool at 0x02480000): an MPU region makes it Normal non-cacheable for this
+ * core, so the mailbox never goes stale even if a previous image left the
+ * D-cache on (CONFIG_DCACHE=n does not switch it off). Zephyr's ARM MPU
+ * programs this from zephyr,memory-attr (CONFIG_MEM_ATTR). Attribute only:
+ * it does not power SRAM1.
+ */
+&sram1 {
+	zephyr,memory-attr = <DT_MEM_ARM(ATTR_MPU_RAM_NOCACHE)>;
+};
