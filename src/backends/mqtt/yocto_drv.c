@@ -395,8 +395,11 @@ static alp_status_t y_connect(alp_mqtt_backend_state_t *state, uint32_t timeout_
 	if (rc != MOSQ_ERR_SUCCESS) {
 		return mosq_to_alp(rc);
 	}
-	/* Drive the loop once so the CONNACK callback fires. */
-	rc = mosquitto_loop(be->mosq, (int)timeout_ms, 1);
+	/* Drive the loop once so the CONNACK callback fires.  mosquitto_loop's
+     * timeout is int-typed; clamp at INT_MAX so a caller passing
+     * UINT32_MAX-as-forever doesn't roll over (mirrors y_loop below). */
+	int t = (timeout_ms > (uint32_t)INT_MAX) ? INT_MAX : (int)timeout_ms;
+	rc    = mosquitto_loop(be->mosq, t, 1);
 	if (rc != MOSQ_ERR_SUCCESS) {
 		return mosq_to_alp(rc);
 	}

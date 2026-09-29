@@ -175,7 +175,18 @@ z_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilitie
 	if ((cfg->flags & ALP_WDT_PAUSE_IN_SLEEP) != 0u) opts |= WDT_OPT_PAUSE_IN_SLEEP;
 	if ((cfg->flags & ALP_WDT_PAUSE_HALTED_BY_DEBUG) != 0u) opts |= WDT_OPT_PAUSE_HALTED_BY_DBG;
 	int err = wdt_setup(dev, opts);
-	if (err != 0) return _errno_to_alp(err);
+	if (err != 0) {
+		/* wdt_install_timeout above already programmed a channel on
+		 * dev; a bail-out that skips this leaks it on retry.  Left
+		 * open: wdt_disable() is not the fix -- it is device-wide
+		 * (uninstalls every channel, not just this one) and is a
+		 * no-op on nrfx/renesas_rz/gd32-fwdgt in exactly this
+		 * pre-setup state (-EFAULT/-EPERM), while on wdt_counter it
+		 * would stop the shared counter backing every installed
+		 * channel without clearing any bookkeeping.  Needs a
+		 * per-driver-class fix, not a device-wide disable. */
+		return _errno_to_alp(err);
+	}
 	if (interrupt_only) {
 		/* Publish AFTER wdt_setup succeeds: on any earlier return the
 		 * dispatcher frees this slot without calling close(), so a

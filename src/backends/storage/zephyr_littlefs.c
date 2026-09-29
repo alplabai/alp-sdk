@@ -166,6 +166,17 @@ static alp_status_t lfs_get_info(alp_storage_backend_state_t *st, alp_storage_in
 	/* littlefs has no fixed block boundary at the SDK layer --
      * report 1-byte granularity so callers don't pad. */
 	info->block_size = 1u;
+	/* Deliberately 1u, not derived like the raw-flash sibling
+     * (src/backends/storage/zephyr_flash.c, which reads the real page
+     * size via flash_get_page_info_by_offs()).  This handle only ever
+     * touches the mount by path (fs_open/fs_stat above) -- it never
+     * gets a struct device or flash_area to query, and littlefs's own
+     * logical block is a wear-levelling unit the FS chooses, not the
+     * underlying physical erase geometry.  A byte granule is the
+     * honest answer to "what must I align to" once littlefs sits
+     * between the caller and the flash.  Two storage backends
+     * reporting different erase_size semantics here is deliberate,
+     * not drift (alp-sdk#1635). */
 	info->erase_size = 1u;
 	return ALP_OK;
 }

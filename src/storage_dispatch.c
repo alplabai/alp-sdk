@@ -176,7 +176,7 @@ alp_status_t alp_storage_erase(alp_storage_t *storage, uint64_t off, uint64_t le
 	}
 	alp_status_t rc;
 	if (storage->state.read_only) {
-		rc = ALP_ERR_INVAL;
+		rc = ALP_ERR_NOT_READY;
 	} else if (len == 0u) {
 		rc = ALP_OK;
 	} else if (storage->state.ops->erase == NULL) {

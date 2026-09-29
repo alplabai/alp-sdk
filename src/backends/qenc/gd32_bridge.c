@@ -9,6 +9,7 @@
 
 #include <alp/backend.h>
 #include <alp/cap_instance.h>
+#include <alp/chips/gd32g553.h>
 #include <alp/counter.h>
 #include <alp/peripheral.h>
 
@@ -18,6 +19,11 @@
 static alp_status_t
 br_open(const alp_qenc_config_t *cfg, alp_qenc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	/* Mirror the adc/dac/pwm gd32-bridge siblings: bound the id here,
+     * before it is narrowed to uint8_t below -- else encoder_id >= 256
+     * aliases back into a valid channel and silently reports ALP_OK. */
+	if (cfg->encoder_id >= GD32G553_BRIDGE_QENC_CHANNELS) return ALP_ERR_INVAL;
+
 	/* Probe the supervisor up front so open() surfaces bus failures
      * instead of deferring them to the first read. */
 	gd32g553_t  *ctx = NULL;

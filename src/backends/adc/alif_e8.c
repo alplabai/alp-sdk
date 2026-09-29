@@ -264,7 +264,8 @@ alp_status_t alp_alif_adc_set_trigger_source(alp_adc_t *h, alp_alif_adc_trigger_
 	if (h == NULL) {
 		return ALP_ERR_INVAL;
 	}
-	if (strcmp(h->backend->vendor, "alif") != 0) {
+	if (h->backend == NULL || h->backend->vendor == NULL ||
+	    strcmp(h->backend->vendor, "alif") != 0) {
 		return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
 	}
 	if ((unsigned)src > (unsigned)ALP_ALIF_ADC_TRIGGER_EXT_PIN) {
