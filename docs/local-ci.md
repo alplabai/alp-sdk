@@ -182,8 +182,30 @@ path for those.
 
 ## Faster reruns of `test-all.sh`
 
-Twister is most of a `bash scripts/test-all.sh --target dev` run. Two things
+Twister is most of a `bash scripts/test-all.sh --target dev` run. Four things
 keep it short:
+
+- **Overlap.** When twister runs, it starts in the background. The read-only
+  stages (clang-format, shellcheck, bash32-parse, metadata, the gate scripts,
+  the parallel half of pytest, ...) run as a bounded pool of at most
+  `ALP_GATE_STAGE_JOBS` (default 4) at once, slowest first, whether or not
+  twister runs -- so a docs-only run that skips twister still overlaps its
+  slow stages with each other. Their output is captured and printed in the
+  usual stage order at the end. The stages that write the checkout --
+  `generated-files`, `alp-lock`, `abi-strict` (main) and the
+  `pytest-repo-writes` row (the `repo_writes` pytest modules) -- run only
+  after twister and the whole pool have finished, because regenerating headers
+  under a live twister build flakes it. Every stage line and SUMMARY row
+  carries its wall seconds. The overlap is skipped automatically when
+  `ALP_TWISTER_JOBS` is set (the memory-tight signal) or `MemAvailable` is
+  below `ALP_GATE_MIN_MEM_KB` (default 12 GiB), and `ALP_GATE_SERIAL=1` turns
+  it off by hand for debugging: one stage at a time, live output, one
+  `pytest-scripts` row.
+- **No double work.** pytest tests marked `gate_duplicate` re-run, from
+  pytest, exactly the live-repo check that a gate stage of the same
+  `test-all.sh` run already ran (public-private, `check_emit_snapshots.py`,
+  `check_zephyr_conf_parity.py`). A full `test-all.sh` run deselects them;
+  `--zephyr-only` and a plain `pytest tests/scripts/` (CI) still run them.
 
 - **Change-aware selection.** With `--target dev`, the twister stage runs
   only if `scripts/select_checks.py` cannot prove the change leaves every

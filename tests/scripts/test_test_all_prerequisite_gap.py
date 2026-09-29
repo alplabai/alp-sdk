@@ -74,6 +74,7 @@ def _extract_summary_block(text: str) -> str:
 def harness_pieces():
     text = TEST_ALL.read_text(encoding="utf-8")
     return {
+        "_record_stage": _extract_function(text, "_record_stage"),
         "run_stage": _extract_function(text, "run_stage"),
         "skip_stage": _extract_function(text, "skip_stage"),
         "summary": _extract_summary_block(text),
@@ -89,9 +90,10 @@ def _run_harness(harness_pieces, body: str, tmp_path: Path) -> subprocess.Comple
     script.write_text(
         "#!/usr/bin/env bash\n"
         "set -uo pipefail\n"
-        "declare -a STAGE_NAMES STAGE_STATUS STAGE_NOTES STAGE_KIND\n"
+        "declare -a STAGE_NAMES STAGE_STATUS STAGE_NOTES STAGE_KIND STAGE_SECS\n"
         "TARGET=dev\n"
         "START=0\n"
+        f"{harness_pieces['_record_stage']}\n"
         f"{harness_pieces['run_stage']}\n"
         f"{harness_pieces['skip_stage']}\n"
         "fake_pass() { return 0; }\n"
@@ -204,7 +206,8 @@ def test_every_call_site_in_the_real_script_passes_a_kind():
     otherwise only be caught at runtime, and only if that code path is
     actually exercised)."""
     text = TEST_ALL.read_text(encoding="utf-8")
-    calls = re.findall(r'skip_stage\s+"[^"]+"\s+"[^"]*"(\s+\S+)?', text)
+    # launch_skip is skip_stage's overlap-aware twin; both take the same args.
+    calls = re.findall(r'\b(?:skip_stage|launch_skip)\s+"[^"]+"\s+"[^"]*"(\s+\S+)?', text)
     assert calls, "no skip_stage call sites found -- marker/regex drifted"
     for trailing in calls:
         kind = trailing.strip()
