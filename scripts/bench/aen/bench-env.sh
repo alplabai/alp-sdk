@@ -1590,6 +1590,21 @@ export FLOWD_WINDOW_HI="${FLOWD_WINDOW_HI:-0x8057FFFF}"
 # checkout with no extra config; override only for a test double.
 export FLOWD_SECTOR_PAD_PY="${FLOWD_SECTOR_PAD_PY:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/flowd_sector_pad.py}"
 
+# ATOC package extent guard (#2234). SETOOLS grows the package down from the
+# top of App MRAM, and an ITCM load image lives INSIDE it, so a Flow A
+# package (measured 89152 B) reaches past the 32 KiB `atoc` band into the
+# preset's customer `storage` region. Call right after app-gen-toc, with the
+# SETOOLS dir as cwd. ALP_ATOC_ALLOW_OVER_STORAGE=1 accepts the overlap for
+# an image that never writes `storage`.
+export AEN_ATOC_PY="${AEN_ATOC_PY:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)/aen_atoc.py}"
+bench_atoc_extent_guard() { # <app-package-map.txt>
+	if [ "${ALP_ATOC_ALLOW_OVER_STORAGE:-0}" = 1 ]; then
+		python3 "$AEN_ATOC_PY" --package-map "$1" --allow-over-storage
+	else
+		python3 "$AEN_ATOC_PY" --package-map "$1"
+	fi
+}
+
 # bench_flowd_python <args...> -- run the pure host-side helper. Pinned
 # PYTHONIOENCODING=utf-8: this subshell's own locale is not guaranteed
 # UTF-8 (the IMPLICIT-ENCODING lint -- a Windows host defaults a Python

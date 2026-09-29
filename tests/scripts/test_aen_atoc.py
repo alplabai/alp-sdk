@@ -223,3 +223,40 @@ def test_cli_main_rejects_and_exits_nonzero(tmp_path, aen_atoc):
         ' "ALP-HP": {"cpu_id": "M55_HP", "mramAddress": "0x80010000", "flags": ["boot"]}}',
         encoding="utf-8")
     assert aen_atoc.main([str(cfg)]) == 1
+
+
+# --- #2234: generated package extent ---------------------------------------
+
+_MAP_89K = 'APP Package Start Address: 0x8056A3C0\n'  # measured Flow A package, 89152 B
+
+
+def test_package_start_from_map_takes_last_start_line(aen_atoc) -> None:
+    text = 'APP Package Start Address: 0x80570000\n' + _MAP_89K
+    assert aen_atoc.package_start_from_map(text) == 0x8056A3C0
+
+
+def test_package_start_from_map_without_start_line_raises(aen_atoc) -> None:
+    with pytest.raises(aen_atoc.AtocValidationError):
+        aen_atoc.package_start_from_map('no package here\n')
+
+
+def test_package_inside_the_atoc_band_is_accepted(aen_atoc) -> None:
+    aen_atoc.validate_package_extent(0x80578000)
+    aen_atoc.validate_package_extent(0x8057EA50)
+
+
+def test_package_below_the_atoc_band_is_refused(aen_atoc) -> None:
+    with pytest.raises(aen_atoc.AtocValidationError, match='56384 B below'):
+        aen_atoc.validate_package_extent(0x8056A3C0)
+
+
+def test_package_below_the_band_is_accepted_when_explicitly_allowed(aen_atoc) -> None:
+    aen_atoc.validate_package_extent(0x8056A3C0, allow_over_storage=True)
+
+
+def test_cli_package_map_refuses_then_allows(aen_atoc, tmp_path) -> None:
+    m = tmp_path / 'app-package-map.txt'
+    m.write_text(_MAP_89K, encoding='utf-8')
+    assert aen_atoc.main(['--package-map', str(m)]) == 1
+    assert aen_atoc.main(['--package-map', str(m), '--allow-over-storage']) == 0
+    assert aen_atoc.main(['--package-map', str(m), '--bogus']) == 2
