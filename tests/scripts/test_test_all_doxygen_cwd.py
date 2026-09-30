@@ -18,6 +18,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -33,7 +34,11 @@ def _extract_function(text: str, name: str) -> str:
     return m.group(0)
 
 
-@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+@pytest.mark.skipif(
+    sys.platform.startswith("win") or shutil.which("bash") is None,
+    reason="scripts/test-all.sh is a POSIX bash script; on Windows `bash` "
+    "resolves to the WSL launcher, not a shell. Runs on Linux/macOS/WSL.",
+)
 def test_stage_doxygen_runs_doxygen_from_repo_root(tmp_path: Path) -> None:
     fn = _extract_function(TEST_ALL.read_text(encoding="utf-8"), "stage_doxygen")
 
