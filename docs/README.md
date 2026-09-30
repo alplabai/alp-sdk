@@ -133,6 +133,8 @@ into the topic-specific docs.
   (wifi / ble / sock / diag) + the host-driver OTA + GPIO-proxy APIs.
 - [console.md](console.md) — the interactive `alp` command tree on the
   Zephyr shell (safety tiers, command list, companion binding, banner).
+- [v2n-camera-csi.md](v2n-camera-csi.md) — opt-in Linux MIPI CSI-2
+  camera path (IMX219 placeholder), bench-unverified.
 - [build-yocto-v2n.md](build-yocto-v2n.md) — building + deploying
   the V2N Linux kernel + rootfs (Yocto) for E1M-V2N101/102.
 - [provisioning.md](provisioning.md) — provisioning a SoM from a
