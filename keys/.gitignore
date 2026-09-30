@@ -13,3 +13,8 @@
 # here once provisioning is in place).
 !*.pub.pem
 !*.pub.key
+
+# The SHARED development key (#2421) is deliberately committed: Alp Lab's
+# factory MCUboot trusts it, so images signed from a fresh clone boot on a
+# pre-provisioned module. It is public and gives no security.
+!mcuboot_shared_dev_ecdsa_p256.pem

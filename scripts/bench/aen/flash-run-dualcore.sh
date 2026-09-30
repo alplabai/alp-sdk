@@ -120,6 +120,7 @@ python3 "$ALP_SDK_DIR/scripts/aen_atoc.py" "$SET/build/config/dualcore.json" || 
 cd "$SET"
 echo ">>> FLASH dual-core HP=$HP_NAME (master) HE=$HE_NAME (deferred peer, entry id ALP-HE)" >&2
 ./app-gen-toc -f "build/config/dualcore.json" >/tmp/gentoc-dual.log 2>&1 || { echo "gen-toc FAILED"; tail /tmp/gentoc-dual.log; exit 1; }
+bench_atoc_extent_guard build/app-package-map.txt || exit 1
 
 # 1b. GUARD (alp-sdk#2025) -- see bench_atoc_replace_guard in bench-env.sh.
 # ALP-HP and ALP-HE are what THIS run itself is about to (re)write, so they

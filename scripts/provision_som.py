@@ -405,7 +405,7 @@ def _v2n_parser() -> argparse.ArgumentParser:
                            "recorded as an override)")
     work.add_argument("--allow-tier-mismatch", metavar="REASON")
     work.add_argument("--reprovision-from", type=Path, metavar="MANIFEST")
-    work.add_argument("--cold-cycles", type=int, default=3)
+    work.add_argument("--cold-cycles", type=_positive_int, default=3)
     work.add_argument("--transfer", choices=("sd", "xmodem"), default="sd")
     work.add_argument("--carrier", default="")
     work.add_argument("--hil-spec", type=Path)
@@ -444,6 +444,13 @@ def _bundle_from_build_dir(d: Path) -> dict:
         comps.append({"role": role, "file": hits[0].name, "sha256": _sha256(hits[0]),
                       "size_bytes": hits[0].stat().st_size, "flash_target": target})
     return {"status": "complete", "release_version": f"build-dir:{d.name}", "components": comps}
+
+
+def _positive_int(v: str) -> int:
+    n = int(v)
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"must be >= 1 (got {n})")
+    return n
 
 
 def _csv(v: str | None) -> list[str] | None:
@@ -487,12 +494,15 @@ def _status(a) -> int:
         print(f"  override {o['gate']}: {o['reason']} ({o['at']})")
     cat = ledger_out.load_catalogue(a.catalogue or a.ledger_root / "schema" / "v2n.keys.yaml")
     blockers = ledger_out.ship_check(ledger_out.read_unit_yaml(d / f"{a.serial}.unit.yaml"), cat)
-    print("ship check: " + ("SHIPPABLE" if not blockers else "blocked"))
+    failed = [n for n, v in state.get("steps", {}).items() if v.get("status") == "failed"]
+    print("ship check: " + ("SHIPPABLE" if not blockers and not failed else "blocked"))
     for b in blockers:
         print(f"  - {b}")
     # A blocked ship check is the normal state right after provisioning (the
     # disposition is set later), so it is not an error unless asked for.
-    if a.require_shippable and (blockers or stale):
+    for n in failed:
+        print(f"  - step {n} failed in the latest run")
+    if a.require_shippable and (blockers or stale or failed):
         return 1
     return 0
 

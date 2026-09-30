@@ -1,0 +1,3 @@
+### Fixed - `v2n-m1-ros-perception` drove parts the E1M-X EVK does not have (#2461)
+
+The example opened an LSM6DSO (not fitted; the EVK has an ICM-42670 at `0x69` and a BMI323 at `0x68`), a u-blox NEO-M9N on `E1M_X_UART0` (the EVK console, `XEVK_UART_PORT_DEBUG`; no GNSS is fitted), and calibrated the +3V3 monitor U21 (`0x40`, 20 mOhm shunt) as 10 mOhm while publishing it as `/alp/battery`. It now reads the ICM-42670 via `XEVK_I2C_ADDR_ICM42670`, drops the GNSS path and `/alp/gnss`, calibrates U21 from `XEVK_INA236_SHUNT_3V3_OHMS` / `XEVK_INA236_MAX_3V3_A`, and publishes it as `/alp/rail_3v3`. The README states what is fitted and that the camera path needs a sensor (#1149).

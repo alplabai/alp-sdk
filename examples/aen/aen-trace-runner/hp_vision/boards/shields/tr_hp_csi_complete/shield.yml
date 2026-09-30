@@ -1,0 +1,11 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# ponytail: NOT a real shield -- there is no extra board. A local ordering
+# fix so the real e1m_evk_rpi_csi + innomaker_cam_ov9281 shields link on
+# rtss_hp; see boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay's
+# header for the full story and the upstream home this belongs at instead.
+shield:
+  name: tr_hp_csi_complete
+  full_name: trace-runner HP completion for e1m_evk_rpi_csi (local ordering fix)
+  vendor: alp

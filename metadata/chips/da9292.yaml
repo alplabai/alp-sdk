@@ -25,15 +25,65 @@ i2c:
 # the chip's capabilities.
 operation_mode:   "2ch_dual_phase"   # set by board CONF strap
 
+# Per-channel register facts (datasheet Rev 2.2 Tables 12-27).  VOUT byte:
+#   VSTEP=0: mV = 300 + (byte - 0x3C) * 5   (0x3C..0xFF -> 300..1275 mV)
+#   VSTEP=1: the same byte x2, 10 mV step, capped at 1900 mV
+#   codes 0x00..0x3B reserved.  VSTEP is writable only while CHx_EN = 0.
+# SoM-specific nets / targets / guard windows / criticality live in
+# metadata/e1m_modules/v2n/power-tree.yaml.
 channels:
   - id: ch1
     phases:        [phase1, phase2]
-    role_v2n:      "0.8 V Renesas rail; enabled at boot via EN1 strap"
+    role_v2n:      "RZ/V2N 0.8 V rail; enabled at boot via EN1 strap"
     voltage_range: "0.3..1.275 V (VSTEP=0) or 0.6..1.9 V (VSTEP=1)"
+    ctrl_reg:      0x07          # PMC_CTRL_01
+    en_bit:        0
+    vsel_bit:      2
+    dis_pd_bit:    4
+    vstep_bit:     6
+    vsel_lo_reg:   0x0A
+    vsel_hi_reg:   0x0B
+    abs_min_mv:    300           # VSTEP=0 grid (the only range the drivers program)
+    abs_max_mv:    1275
+    step_mv:       5
   - id: ch2
     phases:        [phase3, phase4]
-    role_v2n:      "DISABLED on V2N base"
-    role_v2n_m1:   "0.75 V DEEPX rail; sequenced entirely by U-Boot's board_late_init() (meta-alp-sdk 0004-rzv2n-dev-ALP-E1M-DEEPX-rail-bringup.patch), NOT by this driver -- RIIC8/BRD_I2C is Cortex-A55/Linux-exclusive, so no alp-sdk core may call da9292_v2n_m1_enable_deepx_rail() for this purpose; the function stays public for diagnostic/read-only use only (see include/alp/chips/da9292.h)"
+    role_v2n:      "unused on V2N base (DEEPX not fitted)"
+    role_v2n_m1:   "0.75 V DEEPX core rail; sequenced by U-Boot in A55-boot mode (same steps as da9292_ch2_sequence()); CM33-boot mode is blocked -- the CM33 must not master RIIC8 (metadata/e1m_modules/v2n/core-ownership.yaml, power-tree.yaml boot_modes). OTP PMC_CFG_00 (0x0E) = 0xFF enables the EN2 / VSEL2 pin functions: driving EN2 before the sequence finishes puts the OTP 1.80 V on the DEEPX core"
+    voltage_range: "0.3..1.275 V (VSTEP=0) or 0.6..1.9 V (VSTEP=1); OTP boots VSTEP=1"
+    ctrl_reg:      0x07
+    en_bit:        1
+    vsel_bit:      3
+    dis_pd_bit:    5
+    vstep_bit:     7
+    vsel_lo_reg:   0x0C
+    vsel_hi_reg:   0x0D
+    abs_min_mv:    300
+    abs_max_mv:    1275
+    step_mv:       5
+
+# Register map + raw-write policy (da9292_write_reg()):
+#   allow   -- raw write permitted (once a limits table is installed);
+#   guarded -- only via a typed, window/critical-guarded API;
+#   deny    -- never written.  A register not listed is `deny`.
+register_table:
+  - { addr: 0x00, name: "PMC_STATUS_00", type: r,  write: deny,    summary: "CH2_OC/CH1_OC/CH2_OV/CH1_OV/CH2_UV/CH1_UV/CH2_PG/CH1_PG, bit7..0 (live)" }
+  - { addr: 0x01, name: "PMC_STATUS_01", type: r,  write: deny,    summary: "TEMP_WARN bit2 / TEMP_CRIT bit1 / VIN_UVLO bit0 (live)" }
+  - { addr: 0x02, name: "PMC_EVENT_00",  type: rw, write: allow,   summary: "latched STATUS_00 events, write-1-to-clear" }
+  - { addr: 0x03, name: "PMC_EVENT_01",  type: rw, write: allow,   summary: "latched STATUS_01 events, write-1-to-clear" }
+  - { addr: 0x04, name: "PMC_MASK_00",   type: rw, write: allow,   summary: "INT_N masks for EVENT_00" }
+  - { addr: 0x05, name: "PMC_MASK_01",   type: rw, write: allow,   summary: "INT_N masks for EVENT_01" }
+  - { addr: 0x06, name: "PMC_CTRL_00",   type: rw, write: deny,    summary: "not used by the drivers" }
+  - { addr: 0x07, name: "PMC_CTRL_01",   type: rw, write: guarded, summary: "CH2_VSTEP/CH1_VSTEP/CH2_DIS_PD/CH1_DIS_PD/CH2_VSEL/CH1_VSEL/CH2_EN/CH1_EN, bit7..0" }
+  - { addr: 0x08, name: "PMC_CTRL_02",   type: rw, write: deny,    summary: "not used by the drivers" }
+  - { addr: 0x09, name: "PMC_CTRL_03",   type: rw, write: deny,    summary: "not used by the drivers" }
+  - { addr: 0x0A, name: "PMC_VOUT_CH1_00", type: rw, write: guarded, summary: "CH1 VSEL_LO setpoint" }
+  - { addr: 0x0B, name: "PMC_VOUT_CH1_01", type: rw, write: guarded, summary: "CH1 VSEL_HI setpoint" }
+  - { addr: 0x0C, name: "PMC_VOUT_CH2_00", type: rw, write: guarded, summary: "CH2 VSEL_LO setpoint" }
+  - { addr: 0x0D, name: "PMC_VOUT_CH2_01", type: rw, write: guarded, summary: "CH2 VSEL_HI setpoint" }
+  - { addr: 0x19, name: "PMC_DEV_ID",    type: r,  write: deny,    summary: "OTP variant id (0xEA on V2N)" }
+  - { addr: 0x1A, name: "PMC_REV_ID",    type: r,  write: deny,    summary: "silicon revision (0x42 on V2N)" }
+  - { addr: 0x1B, name: "PMC_CFG_REV",   type: r,  write: deny,    summary: "OTP config revision (0x11 on V2N)" }
 
 # Signals exiting the chip that the board must route.
 signals:
@@ -153,7 +203,9 @@ physical:
 kconfig:
   zephyr:         ALP_SDK_CHIP_DA9292
   baremetal:      ALP_SDK_CHIP_DA9292
-  yocto:          n/a            # Linux uses kernel regulator framework
+  yocto:          da9292         # meta-alp-sdk alp-chips PACKAGECONFIG[da9292]: the
+                                 # same OS-agnostic driver over <alp/i2c.h> (i2c-dev);
+                                 # no upstream Linux regulator driver for this part
 
 families:
   - v2n

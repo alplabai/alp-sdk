@@ -100,12 +100,22 @@ silicon, confirm with a scope whether CH2 tracks P64 or the I2C
 `CH2_EN` bit, and file a follow-up against #2045 rather than assuming
 a rail fault.
 
-`da9292_v2n_m1_enable_deepx_rail()` and `da9292_init()` still exist in
-`chips/da9292/` and are safe to call from a bench diagnostic app for
-**read-only verification** (`da9292_get_status()`,
-`da9292_read_and_clear_events()`) -- but never to re-run the enable
-sequence from the CM33, which would be a second, uncoordinated writer
-of the same PMIC U-Boot already programmed.
+The same sequence exists as an OS-agnostic driver function,
+`da9292_ch2_sequence()` in `chips/da9292/` (caller-opened GPIOs + a delay
+callback; it also checks CH2 OV / OC after P64 goes high, because the OTP
+masks OV out of PG).  Only U-Boot runs it on the A55; do not run it from the
+CM33, which would be a second, uncoordinated writer of the PMIC U-Boot
+already programmed.
+
+The DA9292-AROVx OTP enables the EN2 / VSEL2 pin functions (PMC_CFG_00
+`0x0E` = `0xFF`; `da9292_ch2_sequence()` reports it in `res.pmc_cfg_00`).
+Anything that drives the EN2 pin before the sequence finishes brings CH2 up
+at the OTP default (VSTEP=1, 1.80 V) on the 0.75 V DEEPX core.  Resolve the
+EN2 / VSEL2 nets before running a bench build that touches them.  A bench
+diagnostic app may use the read-only calls (`da9292_get_status()`,
+`da9292_get_channel_state()`, `da9292_peek_events()`) at any time; every
+control write is refused unless a limits table is installed with
+`da9292_set_limits()`.
 
 ### 3. Sequence M1_RESET + PCIe muxes
 
@@ -151,10 +161,11 @@ If the SoM is running Yocto with the `meta-deepx-m1` layer wired
 into `e1m-v2m101-a55.conf`:
 
 * `dx_rt_npu_linux_driver` opens the PCIe device at `lspci`-time.
-* `dxrt_init()` from user-space succeeds; load a `.dxnn` model
+* constructing a `dxrt::InferenceEngine` from user-space succeeds (it
+  opens `/dev/dxrt0`; `dxrt.service` must be running); load a `.dxnn` model
   and run inferences.
 
-If the kernel comes up but `dxrt_init()` returns an error, see the
+If the kernel comes up but `dxrt::InferenceEngine` construction fails, see the
 upstream DEEPX troubleshooting docs at
 [`github.com/DEEPX-AI/dx_rt`](https://github.com/DEEPX-AI/dx_rt).
 
@@ -176,7 +187,8 @@ After every change in the bring-up flow, re-run these in order:
 3. DA9292 CH2 in regulation: `da9292_get_status().ch2_pg == true`.
 4. Three DEEPX TPS628640 instances ACK at their addresses.
 5. `lspci` lists the DEEPX device.
-6. `dxrt_init()` returns success.
+6. `dxrt::InferenceEngine` construction succeeds (`/dev/dxrt0` opens with
+   `dxrt.service` running).
 7. A reference `dx_app` inference runs to completion.
 
 ## Common gotchas

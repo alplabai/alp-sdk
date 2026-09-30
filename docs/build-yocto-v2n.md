@@ -141,12 +141,16 @@ fall through and boot whatever devicetree is left in RAM.
 
 The boot medium is auto-detected **per boot**: if an SD card is
 present, root = `/dev/mmcblk1p2` (the carrier microSD, `&sdhi1` — see
-`e1m-x-evk.dtsi`; **not bench-confirmed**, the microSD boot path has
-never been exercised on real hardware), otherwise eMMC
-`/dev/mmcblk0p2` (`ALP_BOOT_DEVICE ?= "emmc"` names the provisioning
-default, not a build split). The kernel cmdline is rebuilt by the Alp
-override with `console=ttySC0,115200` pinned; dev builds keep
-`earlycon`.
+`e1m-x-evk.dtsi`), otherwise eMMC `/dev/mmcblk0p2`
+(`ALP_BOOT_DEVICE ?= "emmc"` names the provisioning default, not a
+build split). **Bench-confirmed 2026-09-29 on E1M-V2M103
+2026W38-0001:** U-Boot prefers a present microSD unconditionally --
+this selection is independent of the DSW1 boot-mode switch. DSW1
+(BOOT 2 = xSPI) only selects where **BL2/FIP** load from at boot ROM
+time; it does not choose the Linux root device. Removing the microSD
+falls through to eMMC (`root=/dev/mmcblk0p2`, HS200) with no DSW1
+change required. The kernel cmdline is rebuilt by the Alp override
+with `console=ttySC0,115200` pinned; dev builds keep `earlycon`.
 
 **Production boot variant:** set `ALP_PROD_BOOT = "1"` for
 release-bundle builds only — quiet cmdline (`quiet loglevel=4`, no

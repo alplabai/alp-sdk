@@ -26,8 +26,8 @@ find_package(cv_bridge REQUIRED)
 # alp-sdk is provided as a Yocto-installed runtime (shared lib +
 # headers).  meta-alp-sdk's recipe sysroots libalp_sdk.so under
 # ${STAGING_LIBDIR}; the include path is on the toolchain's
-# default search list.  The on-board chip drivers (LSM6DSO, INA236,
-# u-blox NEO-M9N, ...) live in the static libalp_chips.a from the
+# default search list.  The on-board chip drivers (ICM-42670, INA236,
+# ...) live in the static libalp_chips.a from the
 # alp-chips recipe; it must link before libalp_sdk.so so the chip
 # objects' alp_* peripheral callbacks resolve against the shared lib.
 find_library(ALP_SDK_LIB alp_sdk REQUIRED)

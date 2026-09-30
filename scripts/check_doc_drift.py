@@ -129,6 +129,13 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 # the gate is catching genuine drift that belongs fixed in the docs
 # instead.  Justify every entry.
 _ALLOWLIST: set[str] = {
+    # scripts/test-all.sh environment knobs documented in docs/local-ci.md
+    # (stage overlap / job caps / memory guard, #2439): shell-only, never
+    # in headers, Kconfig or generators.
+    "ALP_GATE_STAGE_JOBS",
+    "ALP_GATE_MIN_MEM_KB",
+    "ALP_GATE_SERIAL",
+    "ALP_TWISTER_JOBS",
     # The canonical ABI symbol-versioning *example* in release-policy.md
     # ("alp_foo" gets a "@2" version node -> alp_foo_v2): not real APIs.
     "alp_foo",
