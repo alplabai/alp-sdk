@@ -4,7 +4,7 @@ Reference applications for the E1M-AEN family (lead part: Alif
 Ensemble E8 -- dual-M55 + Ethos-U85/U55 NPUs, on-module ISP /
 camera path, GPU2D).  Build any of these against an E1M-AEN SoM
 populated on the E1M-EVK board; where an example ships a
-per-example `board.yaml` (9 of the 66 directories here), that
+per-example `board.yaml` (10 of the 84 tracked directories here), that
 file carries the exact SKU + board.
 
 Apps tagged **bench** are on-silicon RAM-run validations read over SWD via the
@@ -17,6 +17,7 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 | Directory                                          | What it shows                                                                |
 |----------------------------------------------------|------------------------------------------------------------------------------|
 | [`edgeai-vision-aen`](edgeai-vision-aen/)          | End-to-end EdgeAI vision pipeline -- CSI camera -> ISP Pico -> Ethos-U55 inference -> OLED overlay. The flagship AEN demo. |
+| [`aen-trace-runner`](aen-trace-runner/)            | **bench** -- Trace Runner, the exhibition endless-runner game: M55-HE game + HUD, M55-HP camera + Ethos-U55 MoveNet pose input, bare-metal Cortex-A32 3D renderer on the RK055HDMIPI4MA0 panel; built from this directory and flashed onto an E1M-AEN803 (2026W36-0009): 30.0 fps, 0 dropped frames over three cold boots (2026-09-29). |
 | [`aen-mcuboot-smoke`](aen-mcuboot-smoke/)          | **bench** -- production secure-boot chain `SES -> MCUboot -> slot0 -> app` on the E8 (SE root-of-trust, `sysbuild/aen`); RESULT PASS end-to-end. |
 | [`aen-hp-core-smoke`](aen-hp-core-smoke/)          | **bench** -- first light on the second M55 (RTSS-HP); every other AEN app runs on the M55-HE. |
 | [`aen-power-smoke`](aen-power-smoke/)              | **bench** -- Stage-A low-power smoke: architectural Cortex-M55 WFI sleep + wake, no PM subsystem. |
@@ -43,7 +44,7 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 | [`aen-se-service-info`](aen-se-service-info/)      | **staging** -- SE SERVICE transport binds + a single LCS read over the bench RAM-run flow (deliberately vendor-specific bring-up regcheck; customer code uses the portable wrappers instead). |
 | [`aen-se-service-query`](aen-se-service-query/)    | **bench** -- READ-ONLY dump of the portable SE-backed surfaces: SoC identity (`<alp/hw_info.h>`), RUN/STANDBY profiles (`<alp/power.h>`), TRNG (`<alp/security.h>`). |
 | [`aen-se-crypto`](aen-se-crypto/)                  | SHA-256 known-answer + AES-128-GCM round-trip + TRNG through `<alp/security.h>`, backed by the SE CryptoCell (else MbedTLS-PSA fallback). |
-| [`aen-secure-element-sign`](aen-secure-element-sign/) | OPTIGA Trust M I2C_STATE probe over BRD_I2C (I2C0, M55-HE); product-info/raw-APDU return `ALP_ERR_NOSUPPORT` until host-library integration. |
+| [`aen-secure-element-sign`](aen-secure-element-sign/) | OPTIGA Trust M probe and Coprocessor UID read over BRD_I2C (I2C0, M55-HE). |
 
 ### NPU + AI accelerators
 
@@ -54,13 +55,14 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 | [`aen-npu-inference`](aen-npu-inference/)          | **bench** -- first on-silicon NPU inference: a fused subgraph dispatched to the Ethos-U85 (256-MAC) via the Arm core driver. |
 | [`aen-npu-inference-alif`](aen-npu-inference-alif/)| **bench** -- matched-runtime Vela int8 inference end-to-end via the Arm `InferenceProcess` wrapper -> TFLM; hermetic fixture. |
 | [`aen-npu-inference-person-mram`](aen-npu-inference-person-mram/) | **bench** -- the real `person_detect` MobileNet (int8) end-to-end with the model resident in MRAM slot0 (production-scale). |
+| [`aen-inference-energy`](aen-inference-energy/)    | **bench** -- millijoules per inference, measured: picks the compute rail from the six EVK INA236 monitors, then integrates matched active/idle windows. A trivial model reports FAIL by design. |
 | [`aen-gpu2d-bench`](aen-gpu2d-bench/)              | **bench** -- GPU2D software-fallback validation on the M55-HE. |
 
 ### Camera / display / media
 
 | Directory                                          | What it shows                                                                |
 |----------------------------------------------------|------------------------------------------------------------------------------|
-| [`aen-camera-firstlight`](aen-camera-firstlight/)  | **bench** -- Raspberry-Pi-style CSI-2 camera first light (OV5647 / OV9281 on the E1M-EVK's J5) through the portable `<alp/camera.h>` API; OV9281 bench-verified on an E1M-AEN803 on the E1M-EVK (2026-09-21, all three modes); OV5647 bench-verified (2026-09-22, RAW10 640x480, issue #2248). |
+| [`aen-camera-firstlight`](aen-camera-firstlight/)  | **bench** -- Raspberry-Pi-style CSI-2 camera first light (OV5647 / OV9281 / IMX296 / IMX335 on the E1M-EVK's J5) through the portable `<alp/camera.h>` API; OV9281 bench-verified on an E1M-AEN803 on the E1M-EVK (2026-09-21, all three modes); OV5647 bench-verified (2026-09-22, RAW10 640x480, issue #2248) -- both due for a re-bench after issue #2287 Stage B's shared CPI driver change, pending; IMX296 Stage A + Stage B (Stage B via `aen-isp-capture` / `camera-mjpeg-stream`) bench-verified (issue #2287); IMX335 raw-capture bench-verified (issue #2327, runs 316-330: 6/6 clean 1296x972 frames) -- see [`docs/camera-shields.md`](../../docs/camera-shields.md). |
 | [`aen-isp-regcheck`](aen-isp-regcheck/)            | **staging** -- VeriSilicon ISP Pico (`vsi,isp-pico`) bind-only staging check. |
 | [`aen-dsi-regcheck`](aen-dsi-regcheck/)            | **staging** -- Alif C2-MIPI-DSI display stack bind-only check (the TX twin of the CSI camera path). |
 | [`aen-dsi-display`](aen-dsi-display/)              | **bench** -- live RK055HDMIPI4MA0 pixels-on-glass path through CDC200 + DesignWare MIPI-DSI + D-PHY, via the `e1m_evk_rk055hdmipi4ma0` shield. |

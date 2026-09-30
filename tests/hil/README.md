@@ -177,6 +177,74 @@ key is accepted here too if you want to pin one for your own bench,
 but the shipped `_runner.yaml` files deliberately omit it -- see
 "Serial port" above.
 
+### Linux (A55) examples: `flash_method: ssh-run`
+
+V2N-family examples that run on the Cortex-A55 under Linux (anything
+touching BRD_I2C, which the CM33 must never master) set
+`flash_method: ssh-run` in their spec.  There is no west build and no
+serial console: build the example for the target first (Yocto or the SDK
+toolchain), put the binary in one directory named after the example
+directory, then run
+
+```sh
+python tests/hil/run_smoke.py tests/hil/v2m103-x-evk --no-common     --ssh-host root@<board-ip> --artifact-dir <dir-with-binaries>
+```
+
+The runner copies each binary to `/tmp/` on the target with `scp`, runs
+it over `ssh -tt`, and applies the spec's `serial:` expectations to its
+output.  The run is stopped after `serial.duration_s`, so an example that
+loops forever (`v2n-power-monitor`) still finishes; the pty keeps its
+stdout line-buffered, so nothing it printed is lost when it is stopped.  `--ssh-host` falls back to `ALP_HIL_SSH_HOST`; like the serial
+port, it has no default.
+
+#### Passing argv and extra files (`ssh_args:` / `ssh_files:`)
+
+An `ssh-run` example that takes filename argv besides its own binary --
+`v2n-drpai-inference <model.tar> <frame0.bin> [frame1.bin ...]` is the
+one that needs this today -- declares two optional keys:
+
+```yaml
+flash_method: ssh-run
+
+# Remote paths, passed as argv to the binary in that order.
+ssh_args:
+  - "/tmp/model.tar"
+  - "/tmp/frame0.bin"
+
+# Extra inputs to scp alongside the binary before it runs.  `local` is
+# relative to --artifact-dir (same directory the binary itself is
+# named after); `remote` is the absolute path on the target -- match it
+# to the corresponding ssh_args entry above.
+ssh_files:
+  - local: model.tar
+    remote: /tmp/model.tar
+  - local: frame0.bin
+    remote: /tmp/frame0.bin
+```
+
+Both default to empty when omitted -- every other `ssh-run` spec in this
+tree (no argv, no extra files) is unaffected. `ssh_files` are scp'd
+after the binary and before it runs; the real run fails cleanly with
+"ssh_files input not found" if a declared `local` file isn't under
+`--artifact-dir`. `ssh_args` values are shell-quoted before reaching the
+remote invocation, so a path is passed through unmangled. The
+`serial.duration_s` bound and `ssh -tt` pty still apply exactly as
+above -- only the invoked command line changes.
+
+#### Checking the running image (`ssh_command:`)
+
+For facts about the booted Linux image (dmesg, `/dev` nodes, systemd)
+there is no binary to build.  A spec may carry `ssh_command:` instead of
+`example:` -- a read-only shell one-liner the runner runs over plain
+`ssh <host> <command>`; `serial:` expectations apply to its output.  No
+`--artifact-dir`, no scp.  `ssh_command` excludes `example`, `ssh_args`
+and `ssh_files`.  Print a marker (`echo HIL_..._OK`) from the command
+rather than matching the command's own text.
+
+```sh
+python tests/hil/run_smoke.py tests/hil/v2m103-x-evk --no-common --ssh-host root@<bench-host>
+```
+
 ---
 
 ## What this tree does NOT do

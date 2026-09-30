@@ -9,18 +9,20 @@ sits in `AWAITING_CHECKS` until the queue's `check_response_timeout_minutes`
 expires and drops it. The queue does not fail loudly; it simply never merges
 anything.
 
-`dev`'s six required contexts come from three files:
+`dev`'s three required contexts come from three files:
 
-    twister-shard 1/4 .. 4/4     .github/workflows/pr-twister.yml
-    clang-format · diff-only     .github/workflows/pr-static-analysis.yml
-    distro install · all         .github/workflows/pr-bootstrap-distro-install.yml
+    twister · native_sim/native/64   .github/workflows/pr-twister.yml
+    clang-format · diff-only         .github/workflows/pr-static-analysis.yml
+    distro install · all             .github/workflows/pr-bootstrap-distro-install.yml
 
-Read from branch protection on 2026-08-18:
+Read from branch protection on 2026-09-29 (the four per-shard contexts were
+replaced by the shard aggregator that day, #2429, so the shard count can
+change without a protection edit):
 
     $ gh api repos/alplabai/alp-sdk/branches/dev/protection \\
         --jq '.required_status_checks.contexts'
-    ["twister-shard 1/4","twister-shard 2/4","twister-shard 3/4",
-     "twister-shard 4/4","clang-format · diff-only","distro install · all"]
+    ["clang-format · diff-only","distro install · all",
+     "twister · native_sim/native/64"]
 
 That list lives in branch protection, not in this repo, so this gate cannot
 derive it -- the three filenames below are pinned by hand and this docstring is
@@ -34,7 +36,7 @@ new `python-smoke · all` summary job that file's `jobs:` block adds --
 see that file's header NOTE). It is deliberately NOT added to
 REQUIRED_CONTEXT_WORKFLOWS below yet: `python-smoke · all` is not a
 required context on `dev` or `main` today, and adding it here would
-misstate this docstring's own "dev's six required contexts come from
+misstate this docstring's own "dev's three required contexts come from
 three files" claim. Add cross-platform-zephyr.yml to the map in the
 same PR that actually promotes `python-smoke · all` to required --
 until then, a regression that drops its `merge_group:` trigger is a
@@ -54,7 +56,7 @@ WORKFLOWS = REPO / ".github" / "workflows"
 
 #: file -> the required context(s) it produces, for the failure message.
 REQUIRED_CONTEXT_WORKFLOWS = {
-    "pr-twister.yml": "twister-shard 1/4 .. 4/4",
+    "pr-twister.yml": "twister · native_sim/native/64",
     "pr-static-analysis.yml": "clang-format · diff-only",
     "pr-bootstrap-distro-install.yml": "distro install · all",
 }

@@ -978,7 +978,30 @@ static bool spi_dw_should_dma(const struct spi_dw_config *info,
 		return false;
 	}
 	len = MAX(spi_dw_bufset_len(tx_bufs), spi_dw_bufset_len(rx_bufs));
-	return len >= (size_t)CONFIG_SPI_DW_ALIF_DMA_MIN_LEN;
+	if (len < (size_t)CONFIG_SPI_DW_ALIF_DMA_MIN_LEN) {
+		return false;
+	}
+#if defined(CONFIG_DCACHE)
+	/* The RX path invalidates each destination after the DMA lands (#1830).
+	 * An invalidate works on whole cache lines, so a buffer that starts or
+	 * ends mid-line also discards any not-yet-written-back CPU store to the
+	 * bytes sharing that line -- on the CC3501E bridge those were fields of
+	 * the cc3501e_t around rx_scratch[], and the result was a dead link and
+	 * an MPU fault through a clobbered pointer (#2397).  Only take DMA when
+	 * every RX buffer owns its lines outright; otherwise use the PIO path.
+	 */
+	if (rx_bufs != NULL) {
+		for (size_t i = 0; i < rx_bufs->count; i++) {
+			const struct spi_buf *b = &rx_bufs->buffers[i];
+
+			if (b->buf != NULL &&
+			    (((uintptr_t)b->buf | b->len) & (CONFIG_DCACHE_LINE_SIZE - 1U)) != 0U) {
+				return false;
+			}
+		}
+	}
+#endif
+	return true;
 }
 #endif /* CONFIG_SPI_DW_ALIF_USE_DMA */
 
@@ -1029,7 +1052,11 @@ static bool spi_dw_poll_xfer_u8(const struct device *dev)
 		if (spi_context_rx_on(ctx)) {
 			const uint32_t rxlvl = read_rxflr(dev);
 
-			room = (room > rxlvl) ? (room - rxlvl) : 0u;
+			/* +1: the frame in the shift register is in flight but in
+			 * neither FIFO level.  Without it a loop fast enough to keep
+			 * the TX FIFO full overflows the RX FIFO by one frame and the
+			 * transfer never completes (#2052, seen at -O2). */
+			room = (room > rxlvl + 1u) ? (room - rxlvl - 1u) : 0u;
 		}
 
 		while (room--) {
@@ -1164,7 +1191,11 @@ static bool spi_dw_poll_xfer_packed(const struct device *dev)
 		if (spi_context_rx_on(ctx)) {
 			const uint32_t rxlvl = read_rxflr(dev);
 
-			room = (room > rxlvl) ? (room - rxlvl) : 0u;
+			/* +1: the frame in the shift register is in flight but in
+			 * neither FIFO level.  Without it a loop fast enough to keep
+			 * the TX FIFO full overflows the RX FIFO by one frame and the
+			 * transfer never completes (#2052, seen at -O2). */
+			room = (room > rxlvl + 1u) ? (room - rxlvl - 1u) : 0u;
 		}
 
 		while (room--) {

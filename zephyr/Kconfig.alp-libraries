@@ -371,6 +371,19 @@ config ALP_SDK_MBEDTLS_PSA_CRYPTO
 	  in-tree mbedtls without TF-M.  Not a user knob: without it the
 	  pinned mbedtls does not compile its SSL sources at all (issue #2173).
 
+# The PSA core above seeds its DRBG during system init, which runs on the
+# main thread's stack before main() is entered -- and that SHA-256 path alone
+# outgrows Zephyr's 1024-byte MAIN_STACK_SIZE default.  Measured on an
+# E1M-AEN803 M55-HP running examples/connectivity/mqtt-telemetry: the default
+# stack overflowed inside mbedtls_internal_sha256_process() before the first
+# line of main() printed; with CONFIG_INIT_STACKS the same image peaked at
+# 1352 bytes by the end of CC3501E bridge bring-up (#2385).  4096 leaves room
+# for the app's own frames on top.  Only the default moves: modules/Kconfig is
+# sourced ahead of kernel/Kconfig, so this default wins over the kernel's
+# 1024, and an app or board that sets MAIN_STACK_SIZE itself still wins.
+config MAIN_STACK_SIZE
+	default 4096 if ALP_SDK_MBEDTLS_PSA_CRYPTO
+
 # ----------------------------------------------------------------------
 # Weak-RNG policy for the PSA core above (issue #2192)
 # ----------------------------------------------------------------------
@@ -414,7 +427,8 @@ config ALP_SDK_ALLOW_TEST_ENTROPY
 
 	  Without this, a build whose ALP_SDK_MBEDTLS_WEAK_RNG is y fails at
 	  CMake time naming the target and this symbol.  On AEN the real fix
-	  is an entropy driver over the Secure Enclave TRNG, not this opt-in
+	  is the Secure Enclave TRNG entropy driver (alif,se-trng,
+	  CONFIG_ENTROPY_ALIF_SE) chosen as zephyr,entropy, not this opt-in
 	  (issue #2192).
 
 # ----------------------------------------------------------------------

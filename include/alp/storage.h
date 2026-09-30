@@ -245,8 +245,9 @@ alp_storage_write(alp_storage_t *storage, uint64_t offset, const void *data, siz
  * @param[in] offset   Byte offset from device start; @c erase_size-aligned.
  * @param[in] len      Region length; @c erase_size-aligned.
  *
- * @return ALP_OK / ALP_ERR_INVAL (alignment, read_only, or the Yocto
- *         safety gate above) / ALP_ERR_NOT_READY / ALP_ERR_OUT_OF_RANGE /
+ * @return ALP_OK / ALP_ERR_NOT_READY (device not present, or the handle
+ *         was opened @c read_only) / ALP_ERR_INVAL (alignment, or the
+ *         Yocto safety gate above) / ALP_ERR_OUT_OF_RANGE /
  *         ALP_ERR_NOSUPPORT / ALP_ERR_IO.
  */
 alp_status_t alp_storage_erase(alp_storage_t *storage, uint64_t offset, uint64_t len);

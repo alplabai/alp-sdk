@@ -184,7 +184,7 @@ alif_e8_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st, alp_capab
 	st->resolution_bits = s->resolution_bits;
 
 	caps_out->max_resolution_bits = ALP_SOC_ADC_MAX_RESOLUTION_BITS;
-	caps_out->max_sample_rate     = 0u; /* not advertised at v0.7 */
+	caps_out->max_rate_hz         = 0u; /* not advertised at v0.7 */
 	caps_out->channel_count       = ALP_SOC_ADC_COUNT;
 	return ALP_OK;
 }
@@ -249,12 +249,13 @@ static const alp_adc_ops_t alif_e8_ops = {
 ALP_BACKEND_REGISTER(adc,
                      alif_e8,
                      {
-                         .silicon_ref = "alif:ensemble:e8",
-                         .vendor      = "alif",
-                         .base_caps   = (uint32_t)ALP_INSTANCE_CAP_HW_TRIGGER,
-                         .priority    = 100,
-                         .ops         = &alif_e8_ops,
-                         .probe       = NULL,
+                         .silicon_ref      = "alif:ensemble:e8",
+                         .vendor           = "alif",
+                         .base_caps        = (uint32_t)ALP_INSTANCE_CAP_REPORTED,
+                         .base_class_flags = (uint32_t)ALP_ADC_CAP_HW_TRIGGER,
+                         .priority         = 100,
+                         .ops              = &alif_e8_ops,
+                         .probe            = NULL,
                      });
 
 /* === Vendor-extension bodies === */
@@ -264,7 +265,8 @@ alp_status_t alp_alif_adc_set_trigger_source(alp_adc_t *h, alp_alif_adc_trigger_
 	if (h == NULL) {
 		return ALP_ERR_INVAL;
 	}
-	if (strcmp(h->backend->vendor, "alif") != 0) {
+	if (h->backend == NULL || h->backend->vendor == NULL ||
+	    strcmp(h->backend->vendor, "alif") != 0) {
 		return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
 	}
 	if ((unsigned)src > (unsigned)ALP_ALIF_ADC_TRIGGER_EXT_PIN) {

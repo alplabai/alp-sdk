@@ -18,7 +18,7 @@ tiny CNN and a real yolo11n both emit a single ``<stem>.dxnn``; `compiler.log`
 only appears with `--gen_log`. dxcom also requires >15 GB host RAM.)
 
 The wheel is not redistributable, so it is NOT bundled; is_available() is True
-only when `dxcom` is on PATH or ALP_DEEPX_SDK_HOME points at an install. The
+only when `dxcom` is on PATH or under ALP_DEEPX_SDK_HOME (bin/, Scripts/ or root). The
 per-model config + calibration come from board.yaml `models[].compile.deepx_dxm1`
 (threaded in as `opts`). The dx_rt A55/PCIe *runtime* backend
 (`src/yocto/inference_deepx.cpp`) is Stage 2 step 4 (bench-gated)."""
@@ -28,7 +28,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from . import CompilerAdapter, Blob
+from . import CompilerAdapter, Blob, TargetSpec
 
 # dxcom does post-training quantization + compilation (torch/onnx under the
 # hood); minutes for a real model, but never unbounded in CI.
@@ -41,7 +41,7 @@ def _dxcom_version() -> str:
     lowercase console-script name 'dxcom') so a perf point written during a
     probe failure still carries the same token downstream consumers match on."""
     try:
-        proc = subprocess.run(["dxcom", "-v"], capture_output=True, text=True, encoding="utf-8",
+        proc = subprocess.run([_dxcom_exe() or "dxcom", "-v"], capture_output=True, text=True, encoding="utf-8",
                               env={**os.environ, "PYTHONIOENCODING": "utf-8"}, timeout=60)
     except (OSError, subprocess.SubprocessError):
         return "DX-COM <unknown>"
@@ -49,29 +49,46 @@ def _dxcom_version() -> str:
     return f"DX-COM {m.group(1)}" if m else "DX-COM <unknown>"
 
 
+def _dxcom_exe() -> str | None:
+    """Resolve the dxcom executable: PATH first (the dx-com wheel's console
+    script), else the bin/Scripts dirs of an ALP_DEEPX_SDK_HOME install.
+    None when neither yields one. Shared by is_available() and compile() so
+    the two can never disagree."""
+    found = shutil.which("dxcom")
+    if found:
+        return found
+    root = os.environ.get("ALP_DEEPX_SDK_HOME")
+    if not root or not Path(root).is_dir():
+        return None
+    dirs = [str(Path(root) / d) for d in ("bin", "Scripts", ".")]
+    return shutil.which("dxcom", path=os.pathsep.join(dirs))
+
+
 class DeepxAdapter(CompilerAdapter):
     backend = "deepx_dxm1"
     requires_compile_opts = True          # needs a per-model dxcom JSON config
 
     def is_available(self) -> bool:
-        if shutil.which("dxcom"):            # the dx-com wheel's console script
-            return True
-        root = os.environ.get("ALP_DEEPX_SDK_HOME")
-        return bool(root) and Path(root).is_dir()
+        return _dxcom_exe() is not None
 
     def accepts(self, src_format: str) -> bool:
         return src_format == "onnx"          # dxcom is an ONNX frontend
 
     def compile(self, source: Path, *, accel_config: str, out_dir: Path,
-                opts: dict | None = None) -> Blob:
+                opts: dict | None = None, target: TargetSpec | None = None) -> Blob:
         config = (opts or {}).get("config")
         if not config:
             raise RuntimeError(
                 "DEEPX compile needs models[].compile.deepx_dxm1.config "
                 "(a dxcom JSON config; the calibration set is referenced from it)")
+        exe = _dxcom_exe()
+        if exe is None:
+            raise RuntimeError(
+                "dxcom not found: install the dx-com wheel on PATH, or set "
+                "ALP_DEEPX_SDK_HOME to an install containing bin/dxcom")
         dst = out_dir / f"{source.stem}_dxnn"
         dst.mkdir(parents=True, exist_ok=True)
-        cmd = ["dxcom", "-m", str(source), "-c", str(config), "-o", str(dst)]
+        cmd = [exe, "-m", str(source), "-c", str(config), "-o", str(dst)]
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
                                   env={**os.environ, "PYTHONIOENCODING": "utf-8"}, timeout=_DXCOM_TIMEOUT_S)

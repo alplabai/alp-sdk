@@ -511,6 +511,25 @@ typedef struct {
  *                        ALP_ERR_NOT_READY (bus handle closed) or
  *                        ALP_ERR_NOSUPPORT.  See @ref alp_i2c_write
  *                        and @ref alp_i2c_write_read for the full set.
+ * @retval ALP_ERR_BUSY   On the Yocto backend (`src/yocto/peripheral_i2c.c`),
+ *                        this specific status means a KERNEL DRIVER
+ *                        already owns @p addr_7bit on this bus -- its
+ *                        `ioctl(I2C_SLAVE)` fails `EBUSY` (kernel
+ *                        `i2c_check_addr_busy()`, walking the adapter's
+ *                        client list) before this driver ever issues a
+ *                        transaction, and that verbatim propagation is
+ *                        the same #2077 contract as the other retvals
+ *                        above -- no separate detection code needed.
+ *                        On the E1M-X-EVK (V2N family) this happens
+ *                        when the `ti,tas2563` ALSA codec node in
+ *                        `e1m-x-evk.dtsi` is bound at i2c0@0x4d/0x4e:
+ *                        the kernel sound card and this userspace
+ *                        driver cannot both control the same amp, so
+ *                        do NOT retry or fall back to another address
+ *                        on this status -- pick one owner per board/
+ *                        MACHINE (see issue #2331 item 1).  Zephyr/CM33
+ *                        targets have no such kernel client and do not
+ *                        exercise this path.
  *
  * sd_n configure/write failures also pass their own status straight
  * through, same as the connectivity probe.

@@ -109,6 +109,13 @@ uint64_t alp_uptime_ms(void)
 	return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
 }
 
+uint64_t alp_uptime_us(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t)ts.tv_sec * 1000000u + (uint64_t)ts.tv_nsec / 1000u;
+}
+
 #else /* !__linux__ -- no OS clock; fall back to an over-provisioned spin */
 
 /* Deliberately large: chosen so even a multi-GHz core still spins for
@@ -167,6 +174,11 @@ void alp_delay_ms(uint32_t ms)
 uint64_t alp_uptime_ms(void)
 {
 	return z_uptime_stub_us / 1000u;
+}
+
+uint64_t alp_uptime_us(void)
+{
+	return z_uptime_stub_us;
 }
 
 #endif /* __linux__ */

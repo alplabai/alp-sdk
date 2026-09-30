@@ -71,6 +71,14 @@
       "supports": ["RNN", "CNN"]
     }
   ],
+  "npu_toolchain": {
+    "vela": {
+      "memory_mode": "Sram_Only",
+      "system_config_requires_vendor_config": true,
+      "vendor_config_filename": "ensemble_vela.ini",
+      "source": "examples/aen/aen-npu-inference-alp-u55/CMakeLists.txt:40"
+    }
+  },
   "soc_ram_kb": 13824,
   "inference_arena_sram_kib": 0,
   "soc_flash_mb": 5.5,

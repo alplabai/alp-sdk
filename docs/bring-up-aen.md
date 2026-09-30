@@ -77,11 +77,12 @@ Inventory check before powering anything:
 > back, though, so "pinctrl applied without error" is measured and "the
 > pads carry the intended function" is not. **Keep MCUboot slots and
 > any storage partition on MRAM regardless of SKU anyway** -- for a
-> reason that outlived the pinctrl one: `flash_ospi_alif.c` implements
-> no `flash_driver_api` at all (it does init / XIP-enable / AES-inline
-> / DDR config only, see that file's own header), so there is no
-> read/write/erase path for a partition to sit on, and nothing in tree
-> performs an OSPI device-level transfer of any kind. That is
+> reason that outlived the pinctrl one: `flash_ospi_alif.c` now registers
+> a `flash_driver_api` (#915), but only its `read`/`read_jedec_id`/
+> `sfdp_read` side; `write`/`erase` are deliberate fail-closed `-ENOTSUP`
+> stubs (the fitted IS25WX256 needs an Octal-DDR mode switch this driver
+> does not yet drive, see that file's own header). There is still no
+> write/erase path for a partition to sit on. That gap is
 > alp-sdk#915 -- recheck this paragraph when **that** issue closes.
 
 ## 1. First-power smoke test
@@ -507,19 +508,23 @@ top of the per-subsystem checks.
    in §7 -- but a *non-ACKing* EEPROM is a wiring/pull-up fault.
 
 4. **CC3501E PING / GET_VERSION.**  Bring the on-module Wi-Fi/BLE
-   coprocessor to life over the inter-chip SPI1 bus.  Issue the
-   two META-group opcodes from the bridge host driver (see the
-   wire frame in `cc3501e-bridge-firmware:DESIGN.md`):
-   `PING` (opcode `0x00`) then `GET_VERSION` (opcode `0x01`).
-   A standalone host-side helper for the M55 side is **TBD**
-   (only the device firmware ships today), so drive it from app
-   code via the bridge dispatch for now.
+   coprocessor to life over the inter-chip SPI1 bus.  The full
+   host-side driver ships in-tree: `cc3501e_init()` from
+   `<alp/chips/cc3501e.h>` (`chips/cc3501e/`) issues
+   `PING` (opcode `0x00`) then `GET_VERSION` (opcode `0x01`)
+   over the bridge dispatch and refuses a protocol-major
+   mismatch; the runnable `cc3501e_bridge_bringup()` helper is
+   in `examples/aen/aen-cc3501e-bringup/`, and the
+   `alp companion` console verbs exercise the link
+   interactively.
 
    * `PING` must return `RESP_OK` with empty data -- the liveness
      signal.
    * `GET_VERSION` must return the firmware's wire-protocol
      version; cross-check it against
      `cc3501e-bridge-firmware:prebuilt/CHANGELOG.md`.
+     Modules ship factory-flashed with the latest CC3501E
+     firmware (v0.9.0 as of this writing).
 
    No `RESP_OK` usually means the CC3501E hasn't been flashed yet
    (`helper_firmware[].firmware_path` is still TBD in the SKU

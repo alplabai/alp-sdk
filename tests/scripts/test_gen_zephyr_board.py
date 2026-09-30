@@ -27,6 +27,7 @@ either board's claim set.
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
@@ -35,11 +36,13 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts"))
 
+import gen_zephyr_board as gzb  # noqa: E402
 from gen_zephyr_board import ZephyrBoardEmitError, _load_soc_spec, emit_zephyr_board  # noqa: E402
 import validate_metadata as validate_metadata_module  # noqa: E402
 
@@ -252,23 +255,33 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
             },
         )
 
-    def test_v2m_dts_reproduces_the_missing_openamp_block(self) -> None:
-        """E1M-V2M101's `topology.m33_sm.openamp_ipc` is absent (defaults
-        false), so its generated `.dts` must NOT carry the OpenAMP/MHU-B
-        block or the CAN-FD analysis that E1M-V2N101's does -- the
-        committed V2M101 tree doesn't have either, and `_parity()` only
-        catches drift if this generator can actually produce the SHORTER
-        file, not just the longer one."""
+    def test_v2m_dts_carries_the_openamp_block(self) -> None:
+        """E1M-V2M101 is the same RZ/V2N die as E1M-V2N101, so it sets
+        `topology.m33_sm.openamp_ipc: true` too (#1948) and its `.dts`
+        carries the same OpenAMP/MHU-B carve-out."""
         files = emit_zephyr_board("E1M-V2M101", "m33_sm", METADATA_ROOT)
+        dts = files["alp_e1m_v2m101_m33_sm/alp_e1m_v2m101_m33_sm_r9a09g056n48gbg_cm33.dts"]
+        self.assertIn("openamp_shm: memory@9f700000", dts)
+        self.assertIn("mbox1: mhu@", dts)
+
+    def test_openamp_ipc_false_drops_the_block(self) -> None:
+        """No committed board sets `openamp_ipc: false` any more, so the
+        shorter path is exercised on a preset with the flag cleared: it must
+        not leak any of the OpenAMP/MHU-B or CAN-FD-analysis content."""
+        real = gzb._resolve_sku
+
+        def cleared(sku, root):
+            preset = copy.deepcopy(real(sku, root))
+            preset["topology"]["m33_sm"]["openamp_ipc"] = False
+            return preset
+
+        with mock.patch.object(gzb, "_resolve_sku", cleared):
+            files = emit_zephyr_board("E1M-V2M101", "m33_sm", METADATA_ROOT)
         dts = files["alp_e1m_v2m101_m33_sm/alp_e1m_v2m101_m33_sm_r9a09g056n48gbg_cm33.dts"]
         self.assertNotIn("OpenAMP", dts)
         self.assertNotIn("reserved-memory", dts)
         self.assertNotIn("mbox1: mhu@", dts)
         self.assertNotIn("No &canfd node", dts)
-        # The wdt0 comment DOES mention "mbox1" in prose (contrasting the
-        # V2N101 sibling, which has the real node) -- that's the exact
-        # committed V2M101 text, not a leak of the OpenAMP block.
-        self.assertIn("contrast the V2N101 sibling board's mbox1", dts)
 
     def test_families_list_is_load_bearing_for_v2m(self) -> None:
         """`supervisor-links.yaml`'s `families:` list gates
@@ -855,21 +868,21 @@ class TestAenHardwareFactsComeFromMetadata(unittest.TestCase):
         # not exist") does not prove XIP is impossible here -- Alif's own
         # ospi_psram_xip.c still calls aes_enable_xip() under that same
         # guard.  The real, non-overreaching reason: hal_alif's OWN XIP
-        # enable path targets that absent register, and flash_ospi_alif.c
-        # ships no flash_driver_api at all (#915) -- true regardless of
+        # enable path targets that absent register, and flash_ospi_alif.c's
+        # flash_driver_api (#915) never calls it -- true regardless of
         # silicon capability.
         self.assertIn(
             "OSPI0 NOR (TEST-NOR-PART) + HyperRAM (TEST-RAM-PART) are "
             "populated; neither is used for XIP boot here (hal_alif's "
             "alif_hal_ospi_xip_enable() targets the XIP_SER register, "
-            "absent on this die, and flash_ospi_alif.c ships no "
-            "flash_driver_api -- #915)", flat)
+            "absent on this die, and flash_ospi_alif.c's flash_driver_api "
+            "never calls it -- #915)", flat)
         self.assertIn(
             "MRAM-only regardless: OSPI0 NOR (TEST-NOR-PART) + HyperRAM "
             "(TEST-RAM-PART) are populated; hal_alif's "
             "alif_hal_ospi_xip_enable() targets the XIP_SER register, "
-            "absent on this die, and flash_ospi_alif.c ships no "
-            "flash_driver_api -- #915", flat)
+            "absent on this die, and flash_ospi_alif.c's flash_driver_api "
+            "never calls it -- #915", flat)
         self.assertNotIn("not populated", flat)
         # The die-level fact must never stand alone as the "why" -- if a
         # future edit reintroduces "so" right after it, this is the wrong

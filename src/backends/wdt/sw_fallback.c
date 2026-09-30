@@ -22,17 +22,23 @@
 static alp_status_t
 sw_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	/* No timer, no ISR -- on_expire is accepted (the dispatcher already
 	 * required it non-NULL for INTERRUPT_ONLY) but never invoked.
 	 * Matches this backend's documented "never actually resets
 	 * anything" contract: apps that depend on the watchdog action,
 	 * including a notification, MUST NOT rely on this backend in
 	 * production. */
-	st->dev         = NULL;
-	st->wdt_id      = cfg->wdt_id;
-	st->channel_id  = 0;
-	st->be_data     = NULL;
-	caps_out->flags = 0u;
+	if (cfg->window_min_ms != 0u || cfg->flags != 0u) {
+		/* No timer to window or pause: refuse, so a caller relying on
+		 * either cannot mistake this no-op backend for one that
+		 * honours it (#1637). */
+		return ALP_ERR_NOSUPPORT;
+	}
+	st->dev        = NULL;
+	st->wdt_id     = cfg->wdt_id;
+	st->channel_id = 0;
+	st->be_data    = NULL;
 	return ALP_OK;
 }
 

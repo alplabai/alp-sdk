@@ -144,7 +144,8 @@ externally, from J5 pin 11 to J5 pin 15 (`+3V3`).
 Measured effect on the InnoMaker CAM-OV5647, which has no pull-up of
 its own: before the rework, a full `0x08`..`0x77` sweep of the camera
 I2C bus found zero devices and `alp_camera_open` returned
-`ALP_ERR_IO`. With the pull-up fitted, the sensor answers at `0x36`
+`ALP_ERR_IO` (an unanswered chip-ID probe now reports `ALP_ERR_NOT_READY`,
+#2249). With the pull-up fitted, the sensor answers at `0x36`
 with chip ID `0x5647` (registers `0x300a`/`0x300b` read `56 47`), and
 the board's draw rises from 0.065-0.067 A to 0.074-0.080 A at 16.0 V.
 The InnoMaker CAM-OV9281 self-enables and needs no rework.
@@ -242,14 +243,23 @@ responder to 0 and back with `CAM_EN`.
 
   On an E1M-AEN SoM, build a camera app with the board-side shield
   `e1m_evk_rpi_csi` paired with a sensor shield that follows
-  Zephyr's Raspberry Pi camera contract, e.g. the InnoMaker CAM-OV9281
-  or the RPi Camera Module 1 (OV5647) -- both bench-verified, see below:
+  Zephyr's Raspberry Pi camera contract, e.g. the InnoMaker CAM-OV9281,
+  the RPi Camera Module 1 (OV5647), the INNO-MAKER CAM-IMX296RAW-TRIGGER
+  (IMX296), or the InnoMaker CAM-IMX335-5MP (IMX335) -- all four
+  bench-verified (OV9281/OV5647 due for a re-bench after issue #2287 Stage
+  B's shared CPI driver change, see below):
 
       west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <app> -- \
         -DSHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"
       # ... or:
       west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <app> -- \
         -DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1"
+      # ... or:
+      west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <app> -- \
+        -DSHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera"
+      # ... or:
+      west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <app> -- \
+        -DSHIELD="e1m_evk_rpi_csi innomaker_cam_imx335"
 
   `e1m_evk_rpi_csi` wires J5 to the E8's dedicated CSI-2 receive
   D-PHY, hogs `IO2` low (input A), enables SoC I2C1 as the sensor
@@ -287,18 +297,37 @@ responder to 0 and back with `CAM_EN`.
   patched (`scripts/bootstrap.sh` does it).
 
   [`examples/aen/aen-camera-firstlight`](../../examples/aen/aen-camera-firstlight/)
-  is the bench first-light app for this connector: it opens the OV9281 or
-  the OV5647 shield through `<alp/camera.h>`, starts the
+  is the bench first-light app for this connector: it opens the OV9281,
+  OV5647, IMX296, or IMX335 shield through `<alp/camera.h>`, starts the
   stream, and waits for one frame with a 2 s timeout, printing a CRC32
   + histogram + sample row bytes on success or a diagnosed failure
-  otherwise. See its README for what each printed line means. Both shields
-  are bench-verified: OV9281 (2026-09-21, an E1M-AEN803 on the E1M-EVK):
-  live GREY8 frames land in memory in all three modes (640x400, 1280x720,
-  1280x800), each at its configured frame rate, with the sensor test
-  pattern also verified in all three; OV5647 (2026-09-22, needing the
+  otherwise. See its README for what each printed line means. All four
+  shields are bench-verified: OV9281 (2026-09-21, an E1M-AEN803 on the
+  E1M-EVK): live GREY8 frames land in memory in all three modes (640x400,
+  1280x720, 1280x800), each at its configured frame rate, with the sensor
+  test pattern also verified in all three; OV5647 (2026-09-22, needing the
   [J5 pin 11 pull-up rework](#j5-pin-11-pull-up-rework) above), RAW10
   640x480 -- see [`docs/camera-shields.md`](../camera-shields.md)'s
-  OV5647 driver section.
+  OV5647 driver section. Both OV9281 and OV5647 are due for a re-bench
+  after issue #2287 Stage B changed the shared CPI driver's
+  buffer-starvation-pause behaviour -- re-bench on these two sensors is
+  pending, see [`docs/camera-shields.md`](../camera-shields.md). IMX296
+  (issue #2287) is Stage A + Stage B bench-verified, Stage B via
+  `examples/aen/aen-isp-capture` and
+  `examples/connectivity/camera-mjpeg-stream` -- see
+  [`docs/camera-shields.md`](../camera-shields.md)'s IMX296 driver section
+  for the full bench history. Issue #2287's IMX296 bench ran on an
+  E1M-AEN803 (serial 2026W36-0001) on an E1M-EVK carrying the
+  [J5 pin-11 pull-up rework](#j5-pin-11-pull-up-rework) above (the rework
+  is on the EVK's J5, not the SoM, and was fitted for the OV5647 bench on
+  the same board); whether the IMX296 module self-enables without that
+  rework is not established. IMX335 (issue #2327) has its raw capture
+  bench-verified: 6/6 consecutive clean 1296x972 RAW10 frames (runs
+  316-330), 0 CSI/IPI errors -- see
+  [`docs/camera-shields.md`](../camera-shields.md)'s IMX335 driver
+  section. That bench also ran on the same E1M-AEN803 (serial
+  2026W36-0001) on the same reworked E1M-EVK; whether the IMX335 module
+  self-enables without that rework is likewise not established.
 
   > **Important.**  E1M `IO2` was previously documented as the RGB
   > LED-blue channel.  That was a placeholder guess; the EVK

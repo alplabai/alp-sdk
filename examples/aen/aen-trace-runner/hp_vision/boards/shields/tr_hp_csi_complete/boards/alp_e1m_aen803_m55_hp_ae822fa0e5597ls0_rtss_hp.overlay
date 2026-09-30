@@ -1,0 +1,150 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * ponytail: local copy of alp-sdk-lcd's e1m_evk_rpi_csi shield's own
+ * per-board completion -- its boards/ only ships
+ * alp_e1m_aen80{1,3}_m55_he_..._rtss_he.overlay (both just
+ * `#include "e1m_aen.dtsi"`), so on rtss_hp neither
+ * `csi_interface`/`csi_i2c`/`csi_capture_port` nor `&i2c1`/`&csi`/`&cam`/
+ * `&dphy`'s enabling ever get defined, and innomaker_cam_ov9281.overlay
+ * (which references `&csi_interface`) fails devicetree parsing before this
+ * app's C code is ever reached.
+ *
+ * WHY A SEPARATE LOCAL "SHIELD" AND NOT JUST hp_vision/boards/<board>.overlay:
+ * tried that first -- it builds (Zephyr finds it), but devicetree overlays
+ * are concatenated and parsed IN ORDER, and Zephyr always places an
+ * application's own boards/<board>.overlay AFTER every -DSHIELD overlay.
+ * innomaker_cam_ov9281.overlay (a SHIELD overlay) is parsed before the app
+ * overlay is even reached, so by the time `csi_interface` needed defining,
+ * it was already too late regardless of what the app overlay contained
+ * (confirmed: moving this content there reproduced the identical "undefined
+ * node label" error). Packaging it as its own tiny shield, listed in
+ * CMakeLists.txt's SHIELD before innomaker_cam_ov9281, puts this content at
+ * the right point in the concatenation order -- shields fill their own
+ * boards/<board>.overlay slot in SHIELD list order, same mechanism
+ * e1m_evk_rpi_csi's own boards/ directory already uses for rtss_he.
+ *
+ * UPSTREAM HOME: this file's content belongs at
+ * alp-sdk-lcd/zephyr/boards/shields/e1m_evk_rpi_csi/boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay
+ * as a plain `#include "e1m_aen.dtsi"` (byte-identical to the HE variant) --
+ * once that lands, delete this whole hp_vision/boards/shields/tr_hp_csi_complete/
+ * directory AND drop it from hp_vision/CMakeLists.txt's SHIELD list; a real
+ * e1m_evk_rpi_csi per-board overlay makes this ordering trick unnecessary.
+ * Out of trace-runner's own repo scope to land there directly (a different
+ * repo, its own gates); local detour authorized 2026-09-24 rather than
+ * block this phase on it.
+ *
+ * CONFIRMATION THIS IS NOT AN HE-ONLY PATH: alp-sdk-lcd's
+ * zephyr/dts/alif/ensemble_e8_peripherals.dtsi declares i2c1 (0x49011000),
+ * csi (0x49033000), cam (0x49030000) and dphy (0x49033000/0x49032000/
+ * 0x4903F000) ONCE, in the file both the rtss_he AND rtss_hp board .dts
+ * `#include` verbatim (confirmed by diffing their #include lines) -- SoC
+ * -global peripheral-space nodes (the same 0x4903xxxx block, disabled by
+ * default, a board/shield flips status), NOT core-local aliases. This SoC
+ * draws that distinction explicitly elsewhere in the SAME file: ethosu55 IS
+ * core-local (0x400e1000 aliases to whichever RTSS core's own NPU, per that
+ * node's own comment) -- and hp_vision already enables that HP-local
+ * Ethos-U55-256 successfully (probe/npu proved it on silicon, same node).
+ * csi/cam/dphy/i2c1 carry no such core-local comment or aliasing; their
+ * IRQs (133, 344, 345) sit in the ordinary global-peripheral range, unlike
+ * ethosu55's core-private one (55). Silicon reachability from the HP core
+ * is still UNPROVEN (design sec 2's own "CSI on the HP is unproven" caveat
+ * stands) -- this confirms only that nothing in the devicetree SOURCE
+ * declares or implies an HE-only restriction.
+ *
+ * The content below is alp-sdk-lcd's e1m_aen.dtsi verbatim (E1M-EVK J5
+ * camera connector, SoC side; see that file's own header for the full
+ * rationale -- csi_i2c = E1M I2C1 SCL P3_7/SDA P7_2, CSI mux SEL = P12_5
+ * hogged low for input A = J5, D-PHY id 0).
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/video/video-interfaces.h>
+
+&pinctrl {
+	pinctrl_i2c1: pinctrl_i2c1 {
+		group0 {
+			pinmux = <PIN_P3_7__I2C1_SCL_B>, <PIN_P7_2__I2C1_SDA_C>;
+			input-enable;
+			bias-pull-up;
+		};
+
+		group1 {
+			pinmux = <PIN_P12_5__GPIO>;
+		};
+	};
+};
+
+csi_i2c: &i2c1 {
+	pinctrl-0 = <&pinctrl_i2c1>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&gpio12 {
+	status = "okay";
+
+	csi_mux_sel_a {
+		gpio-hog;
+		gpios = <5 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "CAM_MUX_SEL";
+	};
+};
+
+&dphy {
+	status = "okay";
+};
+
+csi_interface: &csi {
+	phy-if = <&dphy 0>;
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+
+			csi_ep_in: endpoint {
+			};
+		};
+
+		port@2 {
+			reg = <2>;
+
+			csi_ep_out: endpoint {
+				bus-type = <VIDEO_BUS_TYPE_PARALLEL>;
+				remote-endpoint-label = "cam_ep_in";
+			};
+		};
+	};
+};
+
+csi_capture_port: &cam {
+	status = "okay";
+	csi-halt-en;
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+
+			cam_ep_in: endpoint {
+				remote-endpoint-label = "csi_ep_out";
+			};
+		};
+
+		port@1 {
+			reg = <1>;
+
+			cam_ep_out: endpoint {
+				remote-endpoint-label = "application";
+			};
+		};
+	};
+};

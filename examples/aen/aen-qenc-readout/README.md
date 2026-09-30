@@ -176,10 +176,13 @@ repo calls against this board (this example binds the raw Zephyr sensor
 device directly instead, and the portable-API demo
 `examples/peripheral-io/qenc-readout` has no AEN801 overlay of its own).
 `zephyr_drv.c`'s own comment already anticipates a "v0.3 input-subsystem
-fast-path"; whether to build a `gpio-qdec`-backed variant of it, and have
-this example migrate onto `alp_qenc_open()` once it exists, is tracked in
-[alplabai/alp-sdk#2095](https://github.com/alplabai/alp-sdk/issues/2095),
-not decided here.
+fast-path": `src/backends/qenc/gpio_qdec.c` now exists, registered at
+priority 110 (above `zephyr_drv`'s 100) for any `alp-qenc<N>` alias whose
+node is compatible `gpio-qdec`. It does not apply to the UTIMER QEC channel
+this example diagnoses — that channel is a sensor-class device, not a
+plain-GPIO quadrature pair — so this example's own migration onto
+`alp_qenc_open()` is still open work, tracked in
+[alplabai/alp-sdk#2095](https://github.com/alplabai/alp-sdk/issues/2095).
 
 ## Hardware liveness ratio (diagnostic build only)
 

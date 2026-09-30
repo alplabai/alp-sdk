@@ -367,7 +367,7 @@
       "board_category": "gpio",
       "board_macro": "XEVK_PIN_USB_MUX_SEL",
       "board_role": null,
-      "dispatch": "gd32_bridge",
+      "dispatch": "unrouted",
       "endpoints": [
         {
           "kind": "e1m",
@@ -379,12 +379,11 @@
         },
         {
           "kind": "som-dispatch",
-          "ref": "gd32_bridge",
-          "pin": "PC14"
+          "ref": "unrouted"
         }
       ],
       "board_doc": "USB path-mux select.",
-      "dispatch_pin": "PC14"
+      "som_doc": "Not a GD32 pad; nothing drives it on V2N (no DX-M1 fitted). Bridge bit 8 answers STATUS_IO (#2453)."
     },
     {
       "net_id": "XEVK_PIN_SDIO_MUX_SEL",
@@ -455,12 +454,12 @@
         {
           "kind": "som-dispatch",
           "ref": "gd32_bridge",
-          "pin": "PC2"
+          "pin": "PE9"
         }
       ],
       "board_doc": "Rotary encoder (PEC12R-4222F) push switch; pull-up + RC debounce.",
       "active_low": true,
-      "dispatch_pin": "PC2"
+      "dispatch_pin": "PE9"
     },
     {
       "net_id": "XEVK_PIN_BMI323_INT1",

@@ -120,7 +120,25 @@ typedef struct {
 	 *  offering the mode. */
 	alp_wdt_expiry_cb_t on_expire;
 	void               *user; /**< Forwarded to @c on_expire; otherwise unused. */
+	/** Windowed watchdog: a feed earlier than this many milliseconds after
+	 *  the previous one (or after open) counts as a violation, exactly like
+	 *  a missed deadline.  0 = no window (the default).  Must be below
+	 *  @c timeout_ms.  Only the Zephyr backend implements it, and only on a
+	 *  driver with window support; elsewhere a non-zero value makes
+	 *  @ref alp_wdt_open fail with @ref ALP_ERR_NOSUPPORT rather than be
+	 *  silently ignored. */
+	uint32_t window_min_ms;
+	/** Bitwise OR of @ref ALP_WDT_PAUSE_IN_SLEEP /
+	 *  @ref ALP_WDT_PAUSE_HALTED_BY_DEBUG; 0 = the counter always runs.
+	 *  A flag the backend or driver cannot honour fails
+	 *  @ref alp_wdt_open with @ref ALP_ERR_NOSUPPORT. */
+	uint32_t flags;
 } alp_wdt_config_t;
+
+/** @ref alp_wdt_config_t::flags -- stop the counter while the CPU sleeps. */
+#define ALP_WDT_PAUSE_IN_SLEEP (1u << 0)
+/** @ref alp_wdt_config_t::flags -- stop the counter while a debugger halts the CPU. */
+#define ALP_WDT_PAUSE_HALTED_BY_DEBUG (1u << 1)
 
 /**
  * @brief Default-initialize an @ref alp_wdt_config_t for watchdog @p id.
@@ -164,8 +182,10 @@ typedef struct {
  *                 when @c on_timeout == @ref ALP_WDT_INTERRUPT_ONLY.
  * @return Open handle on success;
  *         NULL with @ref alp_last_error set to:
- *           @ref ALP_ERR_INVAL (NULL @p cfg; zero @c timeout_ms; or
- *             INTERRUPT_ONLY requested with @c on_expire NULL);
+ *           @ref ALP_ERR_INVAL (NULL @p cfg; zero @c timeout_ms;
+ *             INTERRUPT_ONLY requested with @c on_expire NULL;
+ *             @c window_min_ms not below @c timeout_ms; or an unknown
+ *             bit in @c flags);
  *           @ref ALP_ERR_OUT_OF_RANGE (@c wdt_id is a valid C index
  *             for the pool but exceeds the SoC's actual watchdog
  *             count, e.g. @c ALP_SOC_WDT_COUNT == 1);
@@ -185,7 +205,8 @@ typedef struct {
  *           @ref ALP_ERR_NOSUPPORT (the backend cannot honour
  *             @c on_timeout -- e.g. the Yocto backend rejects
  *             INTERRUPT_ONLY, which the Linux watchdog ABI has no way
- *             to deliver);
+ *             to deliver -- or a non-zero @c window_min_ms / a
+ *             @c flags bit the backend or driver cannot apply);
  *           or another backend-reported code if the SoC rejected the
  *           requested timeout (too long for the hardware).
  */

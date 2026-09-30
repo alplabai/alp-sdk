@@ -71,6 +71,11 @@
         "$ref": "#/$defs/i2c_device_entry"
       }
     },
+    "i2c_devices_bus": {
+      "type": "string",
+      "pattern": "^E1M(_X)?_I[23]C[0-9]+$",
+      "description": "The one E1M bus every `i2c_devices:` entry sits on (the bus the board's `*_I2C_BUS_SENSORS` route names).  scripts/check_i2c_address_uniqueness.py checks `i2c_devices:` and any `audio.codecs[]` entry naming the same `i2c_bus` as ONE bus, so a codec strapped onto a monitor's address is caught (#2348)."
+    },
     "overlay_pins": {
       "type": "array",
       "description": "Board-repurposed pads exposed past the standard E1M pinout's 52 entries, for boards that expose them to an `alp,pin-array` devicetree overlay (see zephyr/dts/bindings/alp,pin-array.yaml).  Each entry gets `EVK_PIN_OVERLAY_BASE + N`, where N is the entry's position in THIS list (0-based) -- an ordinal, not an independent hardware fact, so it is never written by hand; scripts/gen_board_header.py computes it from list order via `enumerate()`.  Reordering entries changes every macro after the moved one, exactly like reordering the backing devicetree overlay's `gpios` phandle list would.",

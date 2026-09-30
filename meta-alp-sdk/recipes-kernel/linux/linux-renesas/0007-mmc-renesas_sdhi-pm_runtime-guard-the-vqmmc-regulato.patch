@@ -1,0 +1,140 @@
+From 68408d9aea6676e78a91f1fbe569fa97e9d0e22d Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Fri, 25 Sep 2026 11:11:42 +0200
+Subject: [PATCH] mmc: renesas_sdhi: pm_runtime-guard the vqmmc regulator's
+ is_enabled/get_voltage reads
+
+Copyright (c) 2026 Alp Lab AB
+SPDX-License-Identifier: GPL-2.0
+
+renesas_sdhi_regulator_is_enabled() and renesas_sdhi_regulator_get_voltage()
+read CTL_SD_STATUS (a raw sd_ctrl_read32()) with no pm_runtime claim on the
+host device. regulator_late_cleanup() calls is_enabled() on every
+registered regulator at late_initcall time with no guarantee the SDHI has
+ever been runtime-resumed, and a manual sysfs/debugfs regulator read hits
+the same path later in the boot. A register read while the controller's
+clock is gated takes a synchronous external abort on this SoC -- bench-
+observed on an E1M V2N-family SoM as an oops that killed the console-input
+IRQ mid-boot (see meta-alp-sdk/recipes-kernel/linux/linux-renesas/
+e1m-v2n-som.dtsi's sdhi2_vqmmc comment for the full signature).
+
+`regulator-always-on` on the vqmmc-regulator node works around the specific
+case regulator_late_cleanup() itself creates (its own `if (c->always_on)
+return 0;` early-return skips the call before it happens) but does nothing
+for any other is_enabled()/get_voltage() caller -- a sysfs "state" or
+"microvolts" read, or a future regulator consumer that queries status
+during its own probe.
+
+Guard on pm_runtime_enabled(), not an unconditional resume/put pair:
+devm_regulator_register() -- called from renesas_sdhi_probe(), further
+down this file -- is itself the FIRST caller of is_enabled()/
+get_voltage() (through machine_constraints_voltage() establishing the
+regulator's initial state), and it runs BEFORE tmio_mmc_host_probe()
+calls pm_runtime_enable() on this device. An unconditional
+pm_runtime_resume_and_get() in that window returns -EACCES ("not
+runtime-PM-enabled yet"), which devm_regulator_register() propagates
+straight out as "regulator register failed err=-13", aborting sdhi2's
+probe on every boot -- a strictly worse regression than the bug being
+fixed. The register is safe to read directly in that window regardless:
+renesas_sdhi_probe() has already called renesas_sdhi_clk_enable() a few
+lines above the registration call. Once pm_runtime_enable() has run (any
+call after probe -- regulator_late_cleanup(), a later sysfs read), guard
+normally.
+
+Upstream-Status: Pending
+
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
+---
+ drivers/mmc/host/renesas_sdhi_core.c | 52 ++++++++++++++++++++++++++++
+ 1 file changed, 52 insertions(+)
+
+diff --git a/drivers/mmc/host/renesas_sdhi_core.c b/drivers/mmc/host/renesas_sdhi_core.c
+index d787e8ba5..83f1d4c78 100644
+--- a/drivers/mmc/host/renesas_sdhi_core.c
++++ b/drivers/mmc/host/renesas_sdhi_core.c
+@@ -31,6 +31,7 @@
+ #include <linux/pinctrl/pinctrl-state.h>
+ #include <linux/platform_device.h>
+ #include <linux/pm_domain.h>
++#include <linux/pm_runtime.h>
+ #include <linux/regulator/consumer.h>
+ #include <linux/regulator/driver.h>
+ #include <linux/regulator/of_regulator.h>
+@@ -950,23 +951,74 @@ static int renesas_sdhi_regulator_enable(struct regulator_dev *rdev)
+ 	return 0;
+ }
+ 
++/*
++ * is_enabled/get_voltage read CTL_SD_STATUS directly (no host->mmc claim,
++ * no do_start_signal_voltage_switch caller) -- regulator_late_cleanup()
++ * calls is_enabled() on every registered regulator at late_initcall time,
++ * with no guarantee the SDHI has ever been runtime-resumed. A raw MMIO
++ * read while the controller is clock-gated takes a synchronous external
++ * abort on this SoC. Resume around the read (mirrors ALP's own
++ * regulator-always-on comment in e1m-v2n-som.dtsi, which only protects
++ * regulator_late_cleanup's own always_on early-return -- a manual sysfs/
++ * debugfs regulator read is not covered by that early-return and still
++ * needs this).
++ *
++ * devm_regulator_register() itself -- called from renesas_sdhi_probe(),
++ * further down this file -- is the FIRST caller of is_enabled()/
++ * get_voltage() (via machine_constraints_voltage() establishing the
++ * regulator's initial state), and it runs BEFORE tmio_mmc_host_probe()
++ * calls pm_runtime_enable() on this device. A pm_runtime_resume_and_get()
++ * unconditionally here would hit that ordering and return -EACCES ("not
++ * runtime-PM-enabled yet"), which devm_regulator_register() propagates
++ * straight out as a probe failure ("regulator register failed err=-13")
++ * -- turning a suspended-read hazard into an every-boot regression.
++ * Guard on pm_runtime_enabled(): take/release the reference only once
++ * it is meaningful. In the pre-enable window the guard is unnecessary
++ * anyway -- renesas_sdhi_probe() has already called
++ * renesas_sdhi_clk_enable() a few lines above the registration call, so
++ * the register is live without runtime PM's help.
++ */
+ static int renesas_sdhi_regulator_is_enabled(struct regulator_dev *rdev)
+ {
+ 	struct tmio_mmc_host *host = rdev_get_drvdata(rdev);
++	struct device *dev = &host->pdev->dev;
++	bool pm = pm_runtime_enabled(dev);
+ 	u32 sd_status;
++	int ret;
++
++	if (pm) {
++		ret = pm_runtime_resume_and_get(dev);
++		if (ret)
++			return ret;
++	}
+ 
+ 	sd_status = sd_ctrl_read32(host, CTL_SD_STATUS);
+ 
++	if (pm)
++		pm_runtime_put(dev);
++
+ 	return (sd_status & SD_STATUS_PWEN) ? 1 : 0;
+ }
+ 
+ static int renesas_sdhi_regulator_get_voltage(struct regulator_dev *rdev)
+ {
+ 	struct tmio_mmc_host *host = rdev_get_drvdata(rdev);
++	struct device *dev = &host->pdev->dev;
++	bool pm = pm_runtime_enabled(dev);
+ 	u32 sd_status;
++	int ret;
++
++	if (pm) {
++		ret = pm_runtime_resume_and_get(dev);
++		if (ret)
++			return ret;
++	}
+ 
+ 	sd_status = sd_ctrl_read32(host, CTL_SD_STATUS);
+ 
++	if (pm)
++		pm_runtime_put(dev);
++
+ 	return (sd_status & SD_STATUS_IOVS) ? 1800000 : 3300000;
+ }
+ 
+-- 
+2.55.0
+

@@ -454,3 +454,15 @@ def test_yaml_comment_does_not_satisfy_supported_board_variant(
         "-DALP_BOARD_E1M_X_EVK -- a mention elsewhere (description, tags, "
         "...) doesn't build the board"
     ]
+
+
+def test_non_chip_headers_under_alp_chips_need_no_chips_entry(tmp_path: Path) -> None:
+    """Shared-type / generated headers under alp/chips/ are not chips."""
+    example = _write_example(tmp_path, "som:\n  sku: E1M-V2N101\n")
+    _write_source(example, "src/main.c", """
+        #include <alp/chips/pmic_rail_limit.h>
+        #include <alp/chips/v2n_power_tree.h>
+        #include <alp/chips/da9292.h>
+        """)
+    errors = portability.check_chip_includes_declared(example, [])
+    assert len(errors) == 1 and "da9292" in errors[0]

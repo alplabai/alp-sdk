@@ -4573,16 +4573,14 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 		 * zephyr/dts/bindings/audio/alif,alif-pdm.yaml), so skipping
 		 * just block 0 covers it.
 		 *
-		 * NOTE: this path needs a mic sample rate whose PDM clock is
-		 * >= 1.2 MHz on this EVK. At SOUND_SAMPLE_RATE_HZ (16000u,
-		 * above), mode 4's 1024 kHz clock is REJECTED by the board
-		 * overlay's clk-frequency-min = <1200000> -- alp_audio_in_open()
-		 * (mic == NULL) or alp_audio_in_start() (mic_rc != ALP_OK)
-		 * fails with -EINVAL on this EVK at 16 kHz, so this whole
-		 * baseline/correlation block is skipped when playback is on.
-		 * See issue #2134 for a software-resample fix that would let
-		 * the mic capture at an in-spec rate independent of the
-		 * speaker rate. */
+		 * NOTE: the EVK's mics need a PDM clock >= 1.2 MHz (board
+		 * overlay clk-frequency-min = <1200000>), which PDM mode 4 for
+		 * SOUND_SAMPLE_RATE_HZ (16000u) does not reach. Since #2134 the
+		 * <alp/audio.h> backend opens the PDM at 32 kHz instead and
+		 * decimates to 16 kHz in software, so alp_audio_in_open() at
+		 * 16 kHz succeeds on this EVK (bench-verified at 16042 Hz
+		 * delivered, via a standalone probe -- this phase itself stays
+		 * gated behind AEN_EVKDEMO_SOUND_PLAYBACK). */
 		for (unsigned b = 0; b < SOUND_BASELINE_BLOCKS + 1u; b++) {
 			size_t       got = 0;
 			alp_status_t r   = alp_audio_in_read(mic, mic_buf, SOUND_FRAMES_PER_BLOCK, &got, 200u);

@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# V2N-family HiL smoke for examples/v2n/v2n-drpai-inference (#1160): the
+# DRP-AI3 on-die NPU inference demo.  Like v2n-temp-sensor.yaml alongside
+# it, this is an A55/Linux app (board.yaml: `cores.a55_cluster.app`), so
+# it runs over ssh (flash_method: ssh-run) rather than flashing the CM33
+# the board runner targets.
+#
+# Unlike every other ssh-run spec in this tree, the example takes TWO
+# extra inputs as argv, not just its own binary (see main.c's usage()):
+#   argv[1] = a compiled `drpai_dir` bundle tar (model.tar)
+#   argv[2..] = one or more raw 640x640x3 float32 NCHW frame files
+# `ssh_args:` supplies the remote paths as argv; `ssh_files:` scp's the
+# local files (named relative to --artifact-dir) to those remote paths
+# before the binary runs -- see tests/hil/README.md.
+#
+# Neither input is checked into this repo: no SDK-supported compile path
+# exists yet for the target model (RUHMI's yolox-S_VOC.onnx -- see the
+# example's own header comment and alp-sdk#2236 / #1268).  Whoever runs
+# this spec on the bench must first compile a `drpai_dir` bundle per
+# docs/bring-up-drpai-v2n.md Sec 2/5, tar it as `model.tar`, and provide
+# at least one matching raw frame as `frame0.bin`, both placed under
+# --artifact-dir.
+#
+# This spec is NOT bench-run by this change -- it documents the expected
+# printouts (main.c's "[drpai] model open:" banner and the per-frame
+# "... ms, output=... bytes, dtype=..." line) for whoever runs it next.
+
+schema_version: 1
+name: v2n-drpai-inference
+description: |
+  V2N-family DRP-AI3 NPU inference: opens a compiled model bundle,
+  invokes one or more raw NCHW frames through the on-die NPU, and
+  prints per-frame timing + top raw scores.
+
+example: examples/v2n/v2n-drpai-inference
+flash_method: ssh-run
+
+ssh_args:
+  - "/tmp/model.tar"
+  - "/tmp/frame0.bin"
+ssh_files:
+  - local: model.tar
+    remote: /tmp/model.tar
+  - local: frame0.bin
+    remote: /tmp/frame0.bin
+
+serial:
+  duration_s: 30
+  expect_contains:
+    - "[drpai] model open:"
+    - "ms, output="
+  expect_absent:
+    - "open returned NULL"
+    - "PANIC"
+    - "ASSERT"

@@ -331,6 +331,19 @@ def test_sysbuild_image_boards_dir_is_accepted(tmp_path):
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
+def test_app_local_shield_boards_dir_is_accepted(tmp_path):
+    """<app>/boards/shields/<shield>/boards/ is a shield's per-board overlay
+    dir (Zephyr's shield layout under an app-local BOARD_ROOT)."""
+    app = _tracked_app(tmp_path)
+    boards = app / "boards" / "shields" / "my_shield" / "boards"
+    boards.mkdir(parents=True)
+    (boards / "alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay"
+     ).write_text("/ { };\n", encoding="utf-8")
+    _git(tmp_path, "add", "examples")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
 def test_tracked_stranded_boards_dir_fails(tmp_path):
     """The git-tracked path, not just the plain-directory fallback."""
     _tracked_app(tmp_path)
