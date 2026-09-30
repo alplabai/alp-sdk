@@ -26,6 +26,11 @@ Run on the target (root):
   not re-acquire them after re-bind, so a reboot may be needed afterwards.
   A SIGINT/SIGTERM/SIGHUP during the run re-binds before exiting, even
   if it lands during the unbind itself.
+- A run interrupted mid-session (SIGINT) leaves the bridge's OTA session
+  open (state READY/BUSY/VERIFIED) until OTA_ABORT. The next run (not
+  `--status`) sends OTA_ABORT at startup, prints it, re-reads the state and
+  fails unless it is IDLE. ERROR is left for BEGIN to restart. The signal
+  handler only re-binds; it sends no I2C.
 - A chunk that times out twice is re-sent at half the length, 8-aligned
   (56, 32, 16, 8), then full-size chunks resume. If BEGIN's reply was lost,
   chunks default to 56 bytes.

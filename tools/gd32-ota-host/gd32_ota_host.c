@@ -266,6 +266,24 @@ int main(int argc, char **argv)
 		goto out;
 	}
 
+	/* A previous run killed mid-session (SIGINT) leaves the bridge's OTA session open until
+	 * OTA_ABORT.  ERROR is left alone: BEGIN restarts from it.  Never sent from the signal
+	 * handler: it runs here, on the normal path, at startup. */
+	if (before.state == GD32G553_OTA_STATE_READY || before.state == GD32G553_OTA_STATE_BUSY ||
+	    before.state == GD32G553_OTA_STATE_VERIFIED) {
+		printf("stale OTA session (state=%s): sending OTA_ABORT
+", ota_state_name(before.state));
+		alp_status_t as = gd32g553_ota_abort(&g);
+		if (as != ALP_OK || gd32g553_ota_get_state(&g, &before) != ALP_OK ||
+		    before.state != GD32G553_OTA_STATE_IDLE) {
+			fprintf(stderr, "FAIL: OTA_ABORT status=%d, state=%s
+", (int)as, ota_state_name(before.state));
+			goto out;
+		}
+		printf("OTA_ABORT ok: state=%s
+", ota_state_name(before.state));
+	}
+
 	const uint32_t crc = crc32_zlib(buf, len);
 	printf("image: %s size=%zu crc32=0x%08x version=%u.%u.%u\n", image, len, crc, vm, vn, vp);
 
