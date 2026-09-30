@@ -80,7 +80,7 @@ driver, so `src/backends/i2s/zephyr_drv.c` has nothing to bind on `m33_sm`
 so `zephyr/CMakeLists.txt:1680` leaves it out (gated on `CONFIG_I2S`).
 `src/common/stub/stub_i2s.c` is not built on Zephyr at all.  What `m33_sm`
 actually links is `src/backends/i2s/sw_fallback.c` (`zephyr/CMakeLists.txt:1683`,
-compiled unconditionally despite the comment at line 1674), registered at
+compiled unconditionally despite the comment at `zephyr/CMakeLists.txt:1677` ("sw_fallback is gated on CONFIG_ALP_SDK_I2S_SW_FALLBACK")), registered at
 priority 0, `silicon_ref = "*"` (`src/backends/i2s/sw_fallback.c:105-111`).
 `alp_i2s_open()` selects it, so `open`/`start`/`stop` return `ALP_OK` and only
 `read`/`write` return `ALP_ERR_NOSUPPORT`.
