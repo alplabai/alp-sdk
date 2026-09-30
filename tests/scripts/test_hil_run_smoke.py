@@ -505,7 +505,7 @@ def test_shipped_board_specs_all_parse(board_name: str) -> None:
             f"{spec_path.name} on {board_name}: spec.board "
             f"{spec.board!r} != runner.board {expected_board!r}"
         )
-        assert spec.example.exists(), (
+        assert spec.ssh_command or spec.example.exists(), (
             f"{spec_path.name}: example path doesn't exist: {spec.example}"
         )
 
@@ -675,3 +675,26 @@ def test_run_ssh_spec_fails_when_an_ssh_files_input_is_missing(tmp_path: Path) -
     result = run_smoke.run_spec(spec)
     assert not result.ok
     assert "ssh_files input not found" in result.failures[0]
+
+
+def test_ssh_command_spec_runs_plain_ssh_and_asserts_output(tmp_path: Path) -> None:
+    import dataclasses
+
+    d = _make_spec_dir(tmp_path)
+    (d / "cmd.yaml").write_text(
+        "schema_version: 1\nname: cmd\nflash_method: ssh-run\n"
+        "ssh_command: \"echo HIL_OK\"\nserial:\n  expect_contains: [HIL_OK]\n"
+        "  expect_absent: [HIL_BAD]\n", encoding="utf-8")
+    spec = run_smoke.parse_spec(d / "cmd.yaml")
+    assert spec.example is None
+    spec = dataclasses.replace(spec, ssh_host="root@board")
+    assert run_smoke.capture_command(spec) == ["ssh", "root@board", "echo HIL_OK"]
+    assert run_smoke.assert_serial(spec, "HIL_OK\n") == []
+    assert run_smoke.assert_serial(spec, "HIL_OK HIL_BAD") != []
+    # ssh_command excludes an example binary.
+    (d / "bad.yaml").write_text(
+        "schema_version: 1\nname: bad\nflash_method: ssh-run\nssh_command: x\n"
+        "example: examples/v2n/v2n-power-monitor\nserial:\n  expect_contains: [a]\n",
+        encoding="utf-8")
+    with pytest.raises(run_smoke.SpecError):
+        run_smoke.parse_spec(d / "bad.yaml")

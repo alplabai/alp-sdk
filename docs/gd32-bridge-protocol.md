@@ -1002,10 +1002,17 @@ host that reads a CRC-valid reply whose stamp has **not advanced**
 past its previously accepted reply knows its request was never
 decoded, and re-sends it (the `gd32g553` driver does this once
 automatically, counting occurrences in `ctx->seq_stale_count`).
-Because a stale verdict proves the request was never executed, the
-re-send is safe even for non-idempotent opcodes.  The stamp wraps
-mod 16; replies re-served across the wrap remain detectable because
-detection compares against the last accepted stamp, not zero.
+While the slave keeps stamping, a stale verdict means the request was
+never decoded, so the re-send is safe even for non-idempotent opcodes.
+That inference is void across a slave **reset** (OTA commit/rollback,
+watchdog): the feature reverts to off and every reply is stamped 0.
+The `gd32g553` driver treats a CRC-valid stamp of 0 after a non-zero
+baseline as that signature, and never re-sends -- it drops its
+sequencing state, re-negotiates `LINK_FEATURES`, and fails the call
+with `ALP_ERR_IO` (the request may or may not have executed).  The
+stamp wraps mod 16; replies re-served across the wrap remain
+detectable because detection compares against the last accepted
+stamp, and the one legitimate advance to 0 (from 0xF) is accepted.
 I2C replies are **never** stamped (`STATUS_NO_PENDING` owns bit 7
 on that transport, and the hazard is SPI-specific).
 
