@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Wed, 30 Sep 2026 12:00:00 +0200
+Subject: [PATCH] gpiolib: sysfs: reject export of a number in a chipless
+ gpio_device
+
+A gpio_device outlives its gpio_chip while consumers still hold
+descriptors: gpiochip_remove() sets gdev->chip to NULL and leaves the
+device on gpio_devices with its base/ngpio range intact.  gpio_to_desc()
+still resolves a legacy global number inside that range, so
+export_store() loads gc = desc->gdev->chip == NULL and passes it to
+gpiochip_line_is_valid(), which reads gc->valid_mask / gc->init_valid_mask
+and oopses:
+
+  Unable to handle kernel NULL pointer dereference at 0x1e0
+  pc : gpiochip_line_is_valid+0x0/0x30
+  lr : export_store+0x78/0x1b0
+
+Reproduced on 6.1.141-cip43 by unbinding and rebinding gpio-gd32-bridge
+(its base moved 394 -> 372, Wi-Fi/BT consumers kept the old device
+alive) and writing a number from the old range to /sys/class/gpio/export.
+
+Return -ENODEV when the chip is gone.  unexport_store() needs no change:
+it only reaches gpiod_free(), which already validates the descriptor.
+
+This is a minimal local guard, not a backport.  Upstream closed the wider
+class (every path that dereferences gdev->chip racing chip removal) later,
+by making gpio_device chip access SRCU-protected; that series is far too
+large to take into a 6.1 CIP tree.  The check-then-use window between this
+test and gpiochip_line_is_valid() is not closed here.
+---
+ drivers/gpio/gpiolib-sysfs.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/drivers/gpio/gpiolib-sysfs.c b/drivers/gpio/gpiolib-sysfs.c
+--- a/drivers/gpio/gpiolib-sysfs.c
++++ b/drivers/gpio/gpiolib-sysfs.c
+@@ -688,5 +688,8 @@ static ssize_t export_store(struct class *class,
+ 		return -EINVAL;
+ 	}
+ 	gc = desc->gdev->chip;
++	/* the chip was removed but a consumer keeps its gpio_device alive */
++	if (!gc)
++		return -ENODEV;
+ 	offset = gpio_chip_hwgpio(desc);
+ 	if (!gpiochip_line_is_valid(gc, offset)) {
+-- 
+2.43.0
