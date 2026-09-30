@@ -110,7 +110,7 @@ hardware revision.
 
 Linux plays through the ALSA card `e1m-x-evk-tas2563` (`e1m-x-evk.dtsi` in
 `meta-alp-sdk`): SSI2 carries the data (P47), with SCK/WS taken from SSI1
-(P44/P45) via the `alp,shared-pin-ssi1` property added by kernel patch 0013.
+(P44/P45) via the `alp,shared-pin-ssi1` property added by kernel patch 0014.
 P46 (SSI1 SDATA, the amps' SDOUT net) is deliberately left unmuxed so the SoC
 never drives it; there is no capture or IV-sense path.  Bench listen is still
 pending (#2331).
