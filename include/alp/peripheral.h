@@ -960,6 +960,13 @@ typedef enum {
 } alp_uart_flow_t;
 
 typedef struct {
+	/**
+	 * Port selector.  On Yocto/Linux it picks a tty family by range:
+	 * 0..99 -> `/dev/ttyS<n>`, 100..199 -> `/dev/ttyAMA<n - 100>`,
+	 * 200..299 -> `/dev/ttyUSB<n - 200>`, 300..399 -> `/dev/ttySC<n - 300>`
+	 * (Renesas SCIF, e.g. RZ/V2N); anything >= 400 fails with
+	 * @ref ALP_ERR_INVAL.  On Zephyr it is the backend's UART index.
+	 */
 	uint32_t          port_id;
 	uint32_t          baudrate;
 	uint8_t           data_bits; /**< Usually 8. */

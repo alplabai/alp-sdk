@@ -18,8 +18,7 @@ def generate_launch_description():
                 # Customer launch files override these to merge the
                 # ALP topics into a wider robot graph.
                 ('/alp/imu',        '/robot/imu'),
-                ('/alp/gnss',       '/robot/gnss'),
-                ('/alp/battery',    '/robot/battery'),
+                ('/alp/rail_3v3',   '/robot/rail_3v3'),
                 ('/alp/image',      '/robot/camera/image_raw'),
                 ('/alp/detections', '/robot/perception/detections'),
                 ('/alp/cmd_vel',    '/robot/cmd_vel'),

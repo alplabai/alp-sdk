@@ -109,6 +109,12 @@ if(CONFIG_SOC_SERIES_E8)
         ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif/mpu_regions_e8.c)
 endif()
 
+# Flex-IO bank 1.8 V mode (VBAT GPIO_CTRL bit 0), set only by boards whose
+# VDD_IO_FLEX is a 1.8 V rail.  A pad-level board fact, so applied before the
+# CONFIG_ALP_SDK early-return like the MPU table above.
+zephyr_sources_ifdef(CONFIG_ALIF_FLEX_IO_1V8
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif/flex_io_1v8_e8.c)
+
 if(NOT CONFIG_ALP_SDK)
     return()
 endif()
@@ -329,6 +335,12 @@ endif()
 # binding: zephyr/dts/bindings/mbox/alif,mhuv2-mbox.yaml.
 zephyr_library_sources_ifdef(CONFIG_MBOX_ALIF_MHUV2
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mbox/mbox_alif_mhuv2.c)
+
+# Alif Ensemble Secure-Enclave TRNG entropy driver (#2192) -- Tier 1.5 glue over
+# hal_alif's se_service_get_rnd_num(). Binding:
+# zephyr/dts/bindings/entropy/alif,se-trng.yaml.
+zephyr_library_sources_ifdef(CONFIG_ENTROPY_ALIF_SE
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/entropy/entropy_alif_se.c)
 
 # Alif Ensemble hardware-semaphore (HWSEM) driver -- vendor-ext, BENCH-UNVERIFIED.
 # AMP request/release latch shared between the two RTSS cores (M55-HE <-> M55-HP).
@@ -1727,8 +1739,10 @@ if(CONFIG_ALP_SDK_MBEDTLS_WEAK_RNG AND NOT CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY)
         "secure random source: CONFIG_CSPRNG_ENABLED is not set, or the only "
         "entropy driver in this build declares itself a fake. TLS would "
         "negotiate and derive key material from a predictable generator.\n"
-        "  Fix it: bind a real entropy driver for this target (on Alif "
-        "Ensemble that is the Secure Enclave TRNG -- open work, issue "
+        "  Fix it: bind a real entropy driver for this target. Alif Ensemble "
+        "E8 boards get the Secure Enclave TRNG (&se_trng, "
+        "CONFIG_ENTROPY_ALIF_SE) as zephyr,entropy by default -- if this "
+        "fires there, something disabled it or ENTROPY_GENERATOR (issue "
         "#2192).\n"
         "  Or, for a simulator, a test, or a bench-only bring-up image that "
         "never ships, acknowledge it explicitly with "

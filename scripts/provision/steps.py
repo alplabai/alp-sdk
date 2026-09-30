@@ -1100,6 +1100,9 @@ class ColdBootTest(Step):
 
     def run(self, ctx):
         n = ctx.cold_cycles
+        if n < 1:
+            # 0 boots must never satisfy the precondition of the irreversible lock.
+            raise Refused(f"cold_cycles must be >= 1 (got {n}): a run with no cold boots proves nothing")
         ev: dict[str, str] = {}
         if not ctx.execute:
             ctx.mutate(f"{n} cold cycles: clean BL2, DRAM tier, "
@@ -1163,6 +1166,8 @@ class ColdBootTest(Step):
             if probs:
                 ctx.facts.update(ev)
                 raise Refused(f"cold cycle {i}/{n}: " + "; ".join(probs))
+        if ev.get("cold_boots_passed") != f"{n}/{n}":
+            raise Refused(f"cold_boot_test observed {ev.get('cold_boots_passed', '0')} clean boots, want {n}/{n}")
         return self.result(ctx, f"{n}/{n} cold boots clean", ev)
 
 
@@ -1216,6 +1221,11 @@ class HilSmoke(Step):
         return self.result(ctx, "HiL smoke passed" if ctx.execute else "HiL spec validated", ev)
 
 
+FLASH_STEPS = ("write_xspi", "write_emmc_boot", "write_rootfs")
+BUNDLE_FACTS = ("bl2_sha256", "rootfs_wic_sha256", "rootfs_bundle_version", "fip_sha256",
+                "fip_fdtfile", "fip_rail_string")
+
+
 class Record(Step):
     name = "record"
     always_run = True
@@ -1226,6 +1236,13 @@ class Record(Step):
         unit_yaml = ctx.unit_dir / f"{ctx.serial}.unit.yaml"
         auto = {k: v for k, v in ctx.facts.items()
                 if (catalogue.get(k, {}).get("mode") == "auto" or k.startswith("test_")) and v != ""}
+        # Bundle facts describe what the bundle CONTAINS; they are ledger facts
+        # about the unit only once every flash step succeeded (done, or skipped
+        # because the probe found the bundle's bytes already on the unit).
+        if not all(ctx.state.get("steps", {}).get(n, {}).get("status") in ("done", "skipped")
+                   for n in FLASH_STEPS):
+            for k in BUNDLE_FACTS:
+                auto.pop(k, None)
         before = ledger_out.read_unit_yaml(unit_yaml)
         # act88760_gpio4_defect is a legacy key from before the maintainer decision
         # (2026-09-29) that the ACT88760 GPIO4 OTP default is an expected workaround,
@@ -1277,6 +1294,15 @@ class SecurePageLock(Step):
         for s in ("secure_page", "cold_boot_test"):
             if not ctx.state_done(s):
                 bad.append(f"{s} not done in the state file")
+        # Fail closed: the recorded evidence must show >= 1 clean cold boot,
+        # all of the requested ones (a done state alone is not proof).
+        m = re.fullmatch(r"(\d+)/(\d+)",
+                         str(ctx.state.get("steps", {}).get("cold_boot_test", {})
+                             .get("evidence", {}).get("cold_boots_passed", "")))
+        if ctx.state_done("cold_boot_test") and not (m and int(m[1]) >= 1 and m[1] == m[2]):
+            bad.append("cold_boot_test recorded no clean cold boots (cold_boots_passed missing or < 1)")
+        bad += [f"{n} failed in the state file"
+                for n, v in ctx.state.get("steps", {}).items() if v.get("status") == "failed"]
         bus = ctx.i2c("eeprom")
         written = ctx.unit_dir / f"{ctx.serial}.manifest.bin"
         if not written.is_file():

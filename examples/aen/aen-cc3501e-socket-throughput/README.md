@@ -160,7 +160,8 @@ measurement of a different, smaller piece of the path.
 
 ### What it sweeps, and the trap it avoids
 
-`STREAM_WRITE` payload sizes **64, 128, 256, and 512 bytes**, each over its
+`STREAM_WRITE` payload sizes **64, 128, 256, 512, 1024, 2048 and 4092 bytes**
+(4092 is the wrapper's own ceiling), each over its
 own **1 MiB window** — well above the 128 KiB floor this app's own
 `SOCKTP_BYTE_BUDGET` reasoning derives (see "Why the window is at least
 4 MiB" above; the same millisecond-granularity artifact applies to
@@ -170,13 +171,29 @@ was chosen over the 128 KiB floor because it is cheap — about a second per
 size at the link's real rate — and pushes the same quantisation error down
 another order of magnitude.
 
-**The sweep never goes past 512 bytes, and this is a hard constraint, not a
-style choice.** Measured, reproducible 3 of 3 on bench: 64 B and 256 B
-`STREAM_WRITE` calls pass 5 of 5, while 1024 B and 4092 B (the wrapper's
-own ceiling) both fail with `rc=-5` and the link does not recover for the
-rest of that run. 512 B has since been measured clean 4 of 4 on this
-bench, but the ceiling stays where it is: nothing above it has ever
-completed.
+**The 1024-byte trap is gone on a matched host/firmware pair.** An earlier
+bench (host and CC3501E firmware on mismatched protocol revisions) failed
+1024 B and 4092 B with `rc=-5` and a link that never recovered, so the sweep
+used to stop at 512 B. Re-measured 2026-09-28 on E1M-AEN803 2026W36-0009
+against the bridge firmware's main branch (`GET_VERSION` v1024), 2 of 2
+runs plus a final run of the committed seven-size sweep, each size over the
+full 1 MiB window:
+
+| size | rate |
+| --- | --- |
+| 64 B | 44968 B/s |
+| 128 B | 79329 B/s |
+| 256 B | 128344 B/s |
+| 512 B | 186281 B/s |
+| 1024 B | 226083 B/s |
+| 2048 B | 252973 B/s |
+| 4092 B | 269031 B/s |
+
+Per-size gains grow up to 512 B and shrink after it, toward ~270 KB/s: each
+call carries a fixed ~1.1 ms of per-call cost on top of the payload, so
+bigger calls amortise it. (The app's own verdict line reports "does NOT
+flatten" on this curve because its test is strict monotonic shrinking from
+the first step.)
 Sizes run **ascending**, and the sweep reports each size **the instant it
 completes** — so a wedge partway through still leaves every already-
 completed size's real numbers on the console. On the first `STREAM_WRITE`

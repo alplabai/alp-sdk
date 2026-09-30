@@ -134,13 +134,12 @@ west flash --bin-file build/zephyr/zephyr.signed.bin
 ## Key management
 
 The reference config points at
-[`<repo>/keys/mcuboot_dev_ecdsa_p256.pem`](../../../keys/README.md)
--- a **development key**, not for production.  Generate it
-locally:
-
-```bash
-bash keys/generate_dev_key.sh
-```
+[`<repo>/keys/mcuboot_shared_dev_ecdsa_p256.pem`](../../../keys/README.md)
+-- the committed **shared development key** that the factory MCUboot on
+pre-provisioned modules trusts (#2421).  It is public, so it gives no
+security and is never for production.  Your own key comes from
+`bash keys/generate_dev_key.sh`, and only an MCUboot re-provisioned with
+it will accept images signed by it.
 
 For production, regenerate the key from a secure source and
 hand the public half over to the bootloader build via a

@@ -295,7 +295,9 @@ typedef struct {
  *         - @ref ALP_ERR_NOSUPPORT on SoMs without a streaming backend,
  *         - @ref ALP_ERR_NOT_READY when the backend transport is not
  *           configured (e.g. V2N supervisor with no bus ids set),
- *         - @ref ALP_ERR_BUSY when all stream slots are already in use,
+ *         - @ref ALP_ERR_BUSY when all stream slots are already in use
+ *           (including a slot whose earlier close could not confirm the
+ *           backend stream-end -- see @ref alp_adc_stream_close),
  *         - @ref ALP_ERR_NOMEM when the handle pool is exhausted.
  */
 alp_adc_stream_t *alp_adc_stream_open(const alp_adc_stream_config_t *cfg);
@@ -333,7 +335,12 @@ alp_adc_stream_read_mv(alp_adc_stream_t *stream, uint16_t *mv, size_t cap, size_
  * are freed before the handle returns to the pool.  NULL is a no-op.
  * Blocks until any in-flight @ref alp_adc_stream_read_mv on the same
  * handle returns before tearing it down; idempotent (a second close
- * is a no-op).
+ * is a no-op).  The handle is always released, but the backend slot
+ * is recycled only once the stream-end is confirmed: if the backend
+ * stayed busy/unreachable through a bounded retry, the slot stays
+ * reserved (a later open reports @ref ALP_ERR_BUSY) so a still-running
+ * backend stream is never reused.  This function is void and cannot
+ * report that.
  *
  * @param[in] stream  Handle from @ref alp_adc_stream_open, or NULL.
  */

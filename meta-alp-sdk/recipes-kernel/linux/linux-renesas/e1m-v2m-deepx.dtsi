@@ -28,7 +28,7 @@
  * could release the reset before the rail is confirmed up.
  *
  * STATUS: UNVALIDATED — first DEEPX PCIe bring-up; verify on the bench
- * (lspci shows the NPU, dxrt_init succeeds).
+ * (lspci shows the NPU, dxrt::InferenceEngine opens /dev/dxrt0).
  */
 
 /* The base SoC dts enables pcie0 as root complex by default
