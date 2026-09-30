@@ -70,6 +70,12 @@ typedef struct {
 	uint8_t esw_build[2];   /**< Embedded-software build number. */
 } optiga_trust_m_product_info_t;
 
+/** Drives the part's RESET line: @p assert true pulls it low, false
+ *  releases it.  On V2N/V2M SE_RST hangs off the GD32 supervisor, which the
+ *  kernel bridge driver owns on Linux: drive the driver's "se-rst" GPIO
+ *  line (see examples/v2n/v2n-secure-element-sign/src/se_reset_gpio.h). */
+typedef alp_status_t (*optiga_trust_m_reset_fn_t)(void *user, bool assert);
+
 typedef struct {
 	bool       initialised;
 	alp_i2c_t *bus;
@@ -87,6 +93,22 @@ typedef struct {
  *  address (mis-strap / not populated).  Does not open a Trust M
  *  application session; the first product-info read or APDU does. */
 alp_status_t optiga_trust_m_init(optiga_trust_m_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit);
+
+/** @brief optiga_trust_m_init() with a hardware-reset fallback.
+ *
+ *  After more than about 10 s idle the part can stop answering I2C
+ *  entirely and only a hardware reset revives it (#2507).  If the probe
+ *  runs out of NACK-polling budget and @p reset is non-NULL, the driver
+ *  pulses RESET through it (low for the host library's RESET_LOW_TIME_MSEC,
+ *  then the library's STARTUP_TIME_MSEC start-up wait) and probes once
+ *  more.  ALP_ERR_NOT_READY therefore means the part stayed silent even
+ *  after a reset.  Reset-hook failures also surface as ALP_ERR_NOT_READY.
+ *  With @p reset NULL this is exactly optiga_trust_m_init(). */
+alp_status_t optiga_trust_m_init_with_reset(optiga_trust_m_t         *ctx,
+                                            alp_i2c_t                *bus,
+                                            uint8_t                   addr_7bit,
+                                            optiga_trust_m_reset_fn_t reset,
+                                            void                     *reset_user);
 
 /** @brief Read the Coprocessor UID (GET_DATA_OBJECT 0xE0C2).
  *
