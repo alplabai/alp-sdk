@@ -24,7 +24,11 @@ Run on the target (root):
   interleave with OTA frames. Caveat: unbinding removes the bridge gpiochip
   while WiFi REG_ON and other bridge GPIOs may still be held; consumers do
   not re-acquire them after re-bind, so a reboot may be needed afterwards.
-  A SIGINT/SIGTERM during the run re-binds before exiting.
+  A SIGINT/SIGTERM/SIGHUP during the run re-binds before exiting, even
+  if it lands during the unbind itself.
+- A chunk that times out twice is re-sent at half the length, 8-aligned
+  (56, 32, 16, 8), then full-size chunks resume. If BEGIN's reply was lost,
+  chunks default to 56 bytes.
 - The image must be the slot the bridge is NOT running (BEGIN reports the
   target slot). `--version` is recorded in the A/B metadata
   `fw_version[slot]` at COMMIT (the `after:` line prints the protocol
