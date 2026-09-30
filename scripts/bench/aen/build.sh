@@ -61,29 +61,43 @@ fi
 #
 # Refuse that build. An app with NO boards/ overlays at all is fine -- there
 # is nothing to miss -- so only a non-empty overlay set that lacks THIS
-# board's file is an error.
-BOARD_OVERLAY="${BOARD//\//_}.overlay"
-if [ -d "$APP_DIR/boards" ]; then
-	have_overlay=0
-	for ovl in "$APP_DIR"/boards/*.overlay; do
-		[ -e "$ovl" ] || continue
-		have_overlay=1
+# board's file is an error. A board-qualified .conf is auto-applied by the
+# same filename rule, so it gets the same guard (#2235).
+#
+# Scope: only files whose stem looks board-qualified for an AEN target
+# (alp_e1m_*_rtss_he / _rtss_hp) count. A native_sim .conf, or an explicit
+# EXTRA_CONF_FILE fragment such as firmware-update-log's
+# ..._firewall_probe.conf, is never auto-applied by board name and must not
+# trip the guard. Zephyr also accepts the short qualified stem that drops the
+# SoC segment (alp_e1m_aen803_m55_he_rtss_he), so either stem satisfies it.
+BOARD_STEM="${BOARD//\//_}"
+BOARD_STEM_SHORT="${BOARD%%/*}_${BOARD##*/}"
+require_board_qualified() {
+	local ext="$1" f have=0
+	[ -d "$APP_DIR/boards" ] || return 0
+	for f in "$APP_DIR"/boards/alp_e1m_*_rtss_h[ep]."$ext"; do
+		[ -e "$f" ] || continue
+		have=1
 		break
 	done
-	if [ "$have_overlay" = 1 ] && [ ! -e "$APP_DIR/boards/$BOARD_OVERLAY" ]; then
-		echo "build: $NAME ships board overlays, but none for $BOARD" >&2
-		echo "build:   expected: $APP_DIR/boards/$BOARD_OVERLAY" >&2
-		echo "build:   present:" >&2
-		for ovl in "$APP_DIR"/boards/*.overlay; do
-			[ -e "$ovl" ] || continue
-			echo "build:     $(basename "$ovl")" >&2
-		done
-		echo "build: refusing to build with no overlay applied (alp-sdk#2094)." >&2
-		echo "build: to build anyway, name the board explicitly:" >&2
-		echo "build:   AEN_BOARD=<fully-qualified board> $0 $APP" >&2
-		exit 2
-	fi
-fi
+	[ "$have" = 1 ] || return 0
+	[ -e "$APP_DIR/boards/$BOARD_STEM.$ext" ] && return 0
+	[ -e "$APP_DIR/boards/$BOARD_STEM_SHORT.$ext" ] && return 0
+	echo "build: $NAME ships AEN board .$ext files, but none for $BOARD" >&2
+	echo "build:   expected: $APP_DIR/boards/$BOARD_STEM.$ext" >&2
+	echo "build:        (or: $APP_DIR/boards/$BOARD_STEM_SHORT.$ext)" >&2
+	echo "build:   present:" >&2
+	for f in "$APP_DIR"/boards/alp_e1m_*_rtss_h[ep]."$ext"; do
+		[ -e "$f" ] || continue
+		echo "build:     $(basename "$f")" >&2
+	done
+	echo "build: refusing to build without this board's .$ext applied (alp-sdk#2094, #2235)." >&2
+	echo "build: to build anyway, name the board explicitly:" >&2
+	echo "build:   AEN_BOARD=<fully-qualified board> $0 $APP" >&2
+	exit 2
+}
+require_board_qualified overlay
+require_board_qualified conf
 
 cd "$ALP_SDK_DIR"
 echo ">>> build $NAME  (overlay: auto-applied by FQ board name)" >&2

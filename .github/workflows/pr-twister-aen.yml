@@ -103,6 +103,10 @@ on:
       - 'examples/connectivity/iot-fleet-ota/**'
       - 'examples/connectivity/mqtt-telemetry/**'
       - 'examples/peripheral-io/drone-autopilot/**'
+      - 'examples/peripheral-io/alp-console/**'
+      - 'examples/peripheral-io/blink/**'
+      - 'examples/peripheral-io/pwm-led-fade/**'
+      - 'examples/peripheral-io/qenc-readout/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
       - 'zephyr/boards/alp/e1m_aen803_m55_he/**'
@@ -130,6 +134,10 @@ on:
       - 'examples/connectivity/iot-fleet-ota/**'
       - 'examples/connectivity/mqtt-telemetry/**'
       - 'examples/peripheral-io/drone-autopilot/**'
+      - 'examples/peripheral-io/alp-console/**'
+      - 'examples/peripheral-io/blink/**'
+      - 'examples/peripheral-io/pwm-led-fade/**'
+      - 'examples/peripheral-io/qenc-readout/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
       - 'zephyr/boards/alp/e1m_aen803_m55_he/**'
@@ -406,7 +414,12 @@ jobs:
       # already predate this addition by an amount this change did not
       # introduce (neither matches this measurement's own 83+78=161
       # baseline either, so the drift is pre-existing, not new here).
-      - name: twister · ${{ matrix.label }} on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota + camera-mjpeg-stream
+      # examples/peripheral-io/{alp-console,blink,pwm-led-fade,qenc-readout}
+      # are four more bounded roots (issue #2235, #2095): each ships AEN801
+      # and AEN803 board overlays and a build_only AEN scenario naming both
+      # SKUs, so an overlay that stops compiling fails a PR rather than a
+      # hand-invoked bench build.
+      - name: twister · ${{ matrix.label }} on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota + camera-mjpeg-stream + peripheral-io board twins
         working-directory: ${{ github.workspace }}
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
@@ -431,6 +444,10 @@ jobs:
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/mqtt-telemetry" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/iot-fleet-ota" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/camera-mjpeg-stream" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/alp-console" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/blink" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/pwm-led-fade" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/qenc-readout" \
             --inline-logs \
             --no-detailed-test-id
 
