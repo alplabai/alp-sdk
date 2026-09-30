@@ -17,8 +17,23 @@
 
 cmake_minimum_required(VERSION 3.20)
 
+# Bench-only discriminator for the TAS2563 fault-pin arming (#2182): seeds
+# INT_MASK0, calls tas2563_arm_fault_irq(), and reads the register back to
+# tell a real read-modify-write apart from a blind write that happens to
+# land on the same byte -- then drives a real TDM-clock-fault stimulus
+# through the pin. OFF by default; mirrors
+# examples/connectivity/firmware-update-log's
+# ALP_AEN_UPDATE_LOG_FIREWALL_PROBE CACHE BOOL gate.
+set(ALP_AEN_EVK_DEMO_PROBE_FAULT_PIN OFF CACHE BOOL
+    "Build the TAS2563 fault-pin seeded-RMW probe + TDM-clock-fault stimulus (#2182)")
+
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(aen_evk_demo LANGUAGES C)
+
+if(ALP_AEN_EVK_DEMO_PROBE_FAULT_PIN)
+  message(STATUS "aen-evk-demo TAS2563 fault-pin probe enabled")
+  target_compile_definitions(app PRIVATE ALP_AEN_EVK_DEMO_PROBE_FAULT_PIN=1)
+endif()
 
 target_sources(app PRIVATE src/main.c)
 # Phase 8's CC3501E bring-up. cc3501e_bridge.{c,h} is the SoM bring-up TEMPLATE

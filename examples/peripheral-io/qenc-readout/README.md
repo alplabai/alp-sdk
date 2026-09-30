@@ -20,6 +20,19 @@ west build -b native_sim/native/64 examples/peripheral-io/qenc-readout \
 west build -t run
 ```
 
+On the E1M EVK with an AEN SoM (M55-HE), the board overlay in `boards/`
+binds `ALP_E1M_ENC0` to the EVK's rotary encoder through Zephyr's
+`gpio-qdec` driver (the E8 has no hardware quadrature decoder):
+
+```bash
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
+    examples/peripheral-io/qenc-readout \
+    -- -DEXTRA_ZEPHYR_MODULES=$(pwd) -DCONFIG_COMPILER_OPT=\"-DALP_BOARD_E1M_EVK\"
+```
+
+Use `alp_e1m_aen803_m55_he/...` for an AEN803 SoM. Turn the knob while it
+runs; at rest the position stays 0.
+
 ## Reference
 
 - [`<alp/counter.h>`](../../../include/alp/counter.h)

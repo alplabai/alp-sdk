@@ -5,7 +5,9 @@
  * v2n-secure-element-sign -- talk to the on-module OPTIGA Trust M.
  *
  * Three steps, each one layer deeper:
- *   1. optiga_trust_m_init() probes the chip's I2C_STATE register.
+ *   1. optiga_trust_m_init_with_reset() probes the chip's I2C_STATE register,
+ *      pulsing SE_RST (a kernel-exported GPIO line) if the part went
+ *      silent when idle.
  *   2. optiga_trust_m_read_product_info() opens the Trust M application
  *      through Infineon's host library and reads the Coprocessor UID
  *      (data object 0xE0C2).
@@ -31,6 +33,7 @@
 
 #include "alp/peripheral.h"
 #include "alp/chips/optiga_trust_m.h"
+#include "se_reset_gpio.h"
 
 /* BRD_I2C = Linux /dev/i2c-8: meta-alp-sdk's e1m-v2n-som.dtsi
  * aliases `i2c8 = &i2c8;`, so `alp_i2c_open(.bus_id = 8)` here opens
@@ -54,10 +57,11 @@ static const uint8_t k_get_uid[] = { 0x81u, 0x00u, 0x00u, 0x06u, 0xE0u,
 
 #define APDU_RESP_HEADER 4u
 
-static int fail(optiga_trust_m_t *se, alp_i2c_t *bus, const char *why, int s)
+static int fail(optiga_trust_m_t *se, se_reset_gpio_t *rst, alp_i2c_t *bus, const char *why, int s)
 {
 	printf("[se] RESULT FAIL: %s -> %d\n", why, s);
 	if (se != NULL) optiga_trust_m_deinit(se);
+	if (rst != NULL) se_reset_gpio_close(rst);
 	alp_i2c_close(bus);
 	printf("[se] done\n");
 	return 1;
@@ -80,16 +84,38 @@ int main(void)
 		return 1;
 	}
 
-	/* 1. Probe: is the chip fitted and answering on its address? */
+	/* 1. Probe: is the chip fitted and answering on its address?
+	 *
+	 *    A Trust M idle for more than ~10 s can stop ACKing I2C entirely;
+	 *    only a hardware reset brings it back (#2507).  SE_RST hangs off the
+	 *    GD32 supervisor, whose BRD_I2C address the kernel's
+	 *    alplab,gd32-bridge-gpio driver owns -- so we do not talk to the
+	 *    GD32 ourselves.  The driver exports SE_RST as the "se-rst" GPIO
+	 *    line and se_reset_gpio.h drives it through /dev/gpiochipN.  The
+	 *    Trust M driver resets only after the normal NACK-polling budget is
+	 *    spent, and a healthy part is never reset.  On an image without that
+	 *    line we pass no hook and get the plain probe.  -2 (NOT_READY) then
+	 *    means "silent even after a reset" when the hook ran, else "not
+	 *    fitted, or idle-wedged with no reset available". */
+	se_reset_gpio_t  rst;
+	bool             have_rst = se_reset_gpio_open(&rst) == 0;
 	optiga_trust_m_t se;
-	alp_status_t     s = optiga_trust_m_init(&se, bus, OPTIGA_TRUST_M_I2C_ADDR);
-	if (s != ALP_OK) return fail(NULL, bus, "optiga_trust_m_init (Trust M not ACKing)", s);
+	alp_status_t     s = optiga_trust_m_init_with_reset(&se,
+	                                                    bus,
+	                                                    OPTIGA_TRUST_M_I2C_ADDR,
+	                                                    have_rst ? se_reset_gpio_hook : NULL,
+	                                                    have_rst ? &rst : NULL);
+	/* The driver keeps the hook and its pointer for later opens (#2517),
+	 * so the reset line stays open until after deinit. */
+	if (s != ALP_OK)
+		return fail(
+		    NULL, have_rst ? &rst : NULL, bus, "optiga_trust_m_init (Trust M not ACKing)", s);
 	printf("[se] I2C_STATE probe -> ALP_OK\n");
 
 	/* 2. Coprocessor UID through the driver's typed call. */
 	optiga_trust_m_product_info_t info;
 	s = optiga_trust_m_read_product_info(&se, &info);
-	if (s != ALP_OK) return fail(&se, bus, "read_product_info", s);
+	if (s != ALP_OK) return fail(&se, have_rst ? &rst : NULL, bus, "read_product_info", s);
 	printf("[se] UID: cim %02X platform %02X model %02X fw %02X%02X%02X%02X build %02X%02X\n",
 	       info.cim_id,
 	       info.platform_id,
@@ -108,19 +134,25 @@ int main(void)
 	s                = optiga_trust_m_send_apdu(
 	    &se, k_open_app, sizeof k_open_app, resp, sizeof resp, &resp_len, 1000u);
 	if (s != ALP_OK || resp_len < 1u || resp[0] != 0x00u) {
-		return fail(&se, bus, "raw OpenApplication", s != ALP_OK ? s : resp[0]);
+		return fail(
+		    &se, have_rst ? &rst : NULL, bus, "raw OpenApplication", s != ALP_OK ? s : resp[0]);
 	}
 	s = optiga_trust_m_send_apdu(
 	    &se, k_get_uid, sizeof k_get_uid, resp, sizeof resp, &resp_len, 1000u);
 	if (s != ALP_OK || resp_len != APDU_RESP_HEADER + sizeof info || resp[0] != 0x00u) {
-		return fail(&se, bus, "raw GetDataObject(0xE0C2)", s != ALP_OK ? s : resp[0]);
+		return fail(&se,
+		            have_rst ? &rst : NULL,
+		            bus,
+		            "raw GetDataObject(0xE0C2)",
+		            s != ALP_OK ? s : resp[0]);
 	}
 	if (memcmp(resp + APDU_RESP_HEADER, &info, sizeof info) != 0) {
-		return fail(&se, bus, "raw UID differs from read_product_info", -1);
+		return fail(&se, have_rst ? &rst : NULL, bus, "raw UID differs from read_product_info", -1);
 	}
 	printf("[se] raw APDU UID matches (%u bytes)\n", (unsigned)sizeof info);
 
 	optiga_trust_m_deinit(&se);
+	if (have_rst) se_reset_gpio_close(&rst);
 	alp_i2c_close(bus);
 	printf("[se] RESULT PASS: Trust M probe, Coprocessor UID and raw APDU session work\n");
 	printf("[se] done\n");

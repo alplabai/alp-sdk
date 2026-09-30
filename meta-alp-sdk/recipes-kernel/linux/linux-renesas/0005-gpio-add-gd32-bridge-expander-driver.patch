@@ -16,6 +16,9 @@ Wire format:
   - Read:  [status][payload][CRC-16/CCITT-FALSE lo][hi] (no SOF on I2C)
   - The slave clock-stretches until the reply is ready.
 
+Line 21 ("se-rst") is the OPTIGA Trust M RESET pad, driven by
+CMD_SE_RESET rather than GPIO_WRITE, and never replayed.
+
 Sticky-output caveat: CMD_GPIO_WRITE promotes a pad to push-pull
 output permanently (until GD32 reset). direction_input() returns
 -EPERM on a line that has ever been written; this matches the
@@ -101,8 +104,8 @@ Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  drivers/gpio/Kconfig            |   9 +
  drivers/gpio/Makefile           |   1 +
- drivers/gpio/gpio-gd32-bridge.c | 924 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
- 3 files changed, 934 insertions(+)
+ drivers/gpio/gpio-gd32-bridge.c | 1008 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 1018 insertions(+)
  create mode 100644 drivers/gpio/gpio-gd32-bridge.c
 
 diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
@@ -142,7 +145,7 @@ new file mode 100644
 index 000000000..b202babc2
 --- /dev/null
 +++ b/drivers/gpio/gpio-gd32-bridge.c
-@@ -0,0 +1,924 @@
+@@ -0,0 +1,1008 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * GPIO driver for the Alp Lab GD32 IO-MCU bridge (I2C transport).
@@ -257,10 +260,29 @@ index 000000000..b202babc2
 +#define GD32_CMD_GET_VERSION	0x01
 +#define GD32_CMD_GPIO_READ	0x10
 +#define GD32_CMD_GPIO_WRITE	0x11
++#define GD32_CMD_SE_RESET	0x41
 +#define GD32_STATUS_OK		0x00
 +
 +#define GD32_NGPIO_BASE		18
 +#define GD32_NGPIO_WIFI_BT	20
++
++/*
++ * Line 21, "se-rst" (Refs #2507): the OPTIGA Trust M RESET pad. Unlike lines
++ * 0..19 it is not a GPIO_READ/GPIO_WRITE pad -- .set() sends
++ * CMD_SE_RESET(assert u8) instead, active-high assert = hold the secure
++ * element in reset. It exists so userspace can reset a Trust M that wedged
++ * idle WITHOUT opening the bridge behind this driver's back (an I2C_RDWR
++ * from userspace ignores the driver binding and interleaves with this
++ * driver's own frames). It is never added to output_mask, so the replay work
++ * does not touch it: the bridge releases SE_RST on its own reset, which is
++ * exactly the safe state, and a stale "asserted" must never be replayed.
++ */
++/* Line 20 is reserved for can-stby (bridge bit 20, protocol 0.13; the
++ * CAN-FD bring-up in alp-sdk#2341). Until that lands, .request() refuses
++ * it so nothing drives the transceivers' standby pad by accident. */
++#define GD32_RESERVED_LINE	20
++#define GD32_SE_RST_LINE	21
++#define GD32_NGPIO_TOTAL	22
 +
 +/* Bridge protocol minor at which lines 18/19 (bt-reg-on/wl-reg-on) first
 + * exist. A bridge below this minor has no notion of them. */
@@ -281,6 +303,8 @@ index 000000000..b202babc2
 +#define GD32_PROBE_HANDSHAKE_RETRIES		3
 +#define GD32_PROBE_HANDSHAKE_RETRY_MIN_US	10000
 +#define GD32_PROBE_HANDSHAKE_RETRY_MAX_US	20000
++#define GD32_SE_RST_RELEASE_TRIES		3
++#define GD32_SE_RST_RELEASE_RETRY_MS		10
 +
 +/*
 + * gd32_bridge_resolve_work() poll period (Refs #2297): independent of, and
@@ -379,6 +403,12 @@ index 000000000..b202babc2
 +	 */
 +	struct delayed_work resolve_work;
 +	unsigned int resolve_attempts;
++	/* Last SE_RST level sent (line 21); guarded by state_lock. Not part of
++	 * output_mask/output_vals, so never replayed. */
++	bool se_rst_asserted;
++	/* Set (under state_lock) by gd32_bridge_teardown() at unbind, before
++	 * the works are cancelled: once set, nothing may queue replay_work. */
++	bool removing;
 +};
 +
 +/* Peek the cached lines-18/19 status without triggering a new bridge
@@ -458,6 +488,10 @@ index 000000000..b202babc2
 +	u32 mask = BIT(offset), levels;
 +	int ret;
 +
++	/* SE_RST has no read-back on the wire; report the last level sent. */
++	if (offset == GD32_SE_RST_LINE)
++		return READ_ONCE(gd32->se_rst_asserted);
++
 +	/*
 +	 * Defensive: .request() already refuses lines 18/19 until
 +	 * gd32_bridge_resolve_wifi_bt() confirms support, so an in-kernel
@@ -476,6 +510,45 @@ index 000000000..b202babc2
 +	return !!(levels & mask);
 +}
 +
++/* Line 21: CMD_SE_RESET instead of GPIO_WRITE; outside the replay mask. */
++static int gd32_bridge_se_rst_set(struct gd32_bridge_gpio *gd32, int value)
++{
++	u8 req = value ? 1 : 0;
++	int ret;
++
++	mutex_lock(&gd32->state_lock);
++	/* Never assert during teardown: nothing would be left to release it. */
++	if (gd32->removing && value) {
++		mutex_unlock(&gd32->state_lock);
++		return -ESHUTDOWN;
++	}
++	ret = gd32_bridge_xfer(gd32, GD32_CMD_SE_RESET, &req, 1, NULL, 0);
++	if (!ret)
++		WRITE_ONCE(gd32->se_rst_asserted, !!value);
++	mutex_unlock(&gd32->state_lock);
++
++	return ret;
++}
++
++/* Release SE_RST, retrying a few times: a failed release leaves the Trust M
++ * held in reset with nobody left to retry. */
++static void gd32_bridge_se_rst_release(struct gd32_bridge_gpio *gd32)
++{
++	unsigned int attempt;
++	int ret = 0;
++
++	for (attempt = 0; attempt < GD32_SE_RST_RELEASE_TRIES; attempt++) {
++		ret = gd32_bridge_se_rst_set(gd32, 0);
++		if (!ret)
++			return;
++		if (attempt + 1 < GD32_SE_RST_RELEASE_TRIES)
++			msleep(GD32_SE_RST_RELEASE_RETRY_MS);
++	}
++	dev_warn(gd32->chip.parent,
++		 "failed to release SE_RST after %u attempts (%d); Trust M may stay in reset\n",
++		 GD32_SE_RST_RELEASE_TRIES, ret);
++}
++
 +static int gd32_bridge_gpio_do_set(struct gd32_bridge_gpio *gd32,
 +				   unsigned int offset, int value)
 +{
@@ -483,6 +556,9 @@ index 000000000..b202babc2
 +	u32 mask = BIT(offset);
 +	bool is_wifi_bt = mask & GD32_WIFI_BT_LINE_MASK;
 +	int ret = 0;
++
++	if (offset == GD32_SE_RST_LINE)
++		return gd32_bridge_se_rst_set(gd32, value);
 +
 +	/*
 +	 * Latch the requested state and hold state_lock across the transfer
@@ -520,9 +596,10 @@ index 000000000..b202babc2
 +	 * while output_mask is 0 (nothing to replay), so the first write of
 +	 * any line needs to (re)kick it. Idempotent if already queued.
 +	 */
-+	queue_delayed_work(system_freezable_power_efficient_wq,
-+			   &gd32->replay_work,
-+			   msecs_to_jiffies(GD32_REPLAY_PERIOD_MS));
++	if (!gd32->removing)
++		queue_delayed_work(system_freezable_power_efficient_wq,
++				   &gd32->replay_work,
++				   msecs_to_jiffies(GD32_REPLAY_PERIOD_MS));
 +	mutex_unlock(&gd32->state_lock);
 +
 +	return ret;
@@ -573,7 +650,8 @@ index 000000000..b202babc2
 +				     "GPIO write line %u failed (%d)\n",
 +				     offset, ret);
 +
-+	return 0;
++	/* SE_RST is not a boot-sequenced consumer line: surface the failure. */
++	return offset == GD32_SE_RST_LINE ? ret : 0;
 +}
 +
 +static int gd32_bridge_gpio_dir_in(struct gpio_chip *chip, unsigned int offset)
@@ -587,7 +665,7 @@ index 000000000..b202babc2
 +	 * in the safe direction (a just-promoted pad briefly still reading
 +	 * as input), never the other way.
 +	 */
-+	if (READ_ONCE(gd32->output_mask) & BIT(offset))
++	if (offset == GD32_SE_RST_LINE || (READ_ONCE(gd32->output_mask) & BIT(offset)))
 +		return -EPERM;
 +	return 0;	/* input; pull behaviour depends on bridge firmware version */
 +}
@@ -597,6 +675,8 @@ index 000000000..b202babc2
 +{
 +	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(chip);
 +
++	if (offset == GD32_SE_RST_LINE)
++		return GPIO_LINE_DIRECTION_OUT;
 +	return (READ_ONCE(gd32->output_mask) & BIT(offset)) ? GPIO_LINE_DIRECTION_OUT
 +							     : GPIO_LINE_DIRECTION_IN;
 +}
@@ -673,7 +753,11 @@ index 000000000..b202babc2
 +{
 +	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(chip);
 +
-+	if (offset < GD32_NGPIO_BASE)
++	if (offset == GD32_RESERVED_LINE)
++		return -ENODEV;
++
++	/* Line 21 (se-rst) is not gated on the wifi/bt protocol minor. */
++	if (offset < GD32_NGPIO_BASE || offset == GD32_SE_RST_LINE)
 +		return 0;
 +
 +	/*
@@ -696,6 +780,18 @@ index 000000000..b202babc2
 +	 * stuck on stale request state.
 +	 */
 +	return gd32_bridge_resolve_wifi_bt(gd32);
++}
++
++/*
++ * A consumer that dies between assert and release would otherwise leave the
++ * Trust M held in reset: gpiolib frees the line without touching its value.
++ */
++static void gd32_bridge_gpio_free(struct gpio_chip *chip, unsigned int offset)
++{
++	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(chip);
++
++	if (offset == GD32_SE_RST_LINE && READ_ONCE(gd32->se_rst_asserted))
++		gd32_bridge_se_rst_release(gd32);
 +}
 +
 +/*
@@ -764,20 +860,13 @@ index 000000000..b202babc2
 +			gd32->replay_failing = false;
 +		}
 +	}
-+	active = mask != 0;
++	active = mask != 0 && !gd32->removing;
 +	mutex_unlock(&gd32->state_lock);
 +
 +	if (active)
 +		queue_delayed_work(system_freezable_power_efficient_wq,
 +				   &gd32->replay_work,
 +				   msecs_to_jiffies(GD32_REPLAY_PERIOD_MS));
-+}
-+
-+static void gd32_bridge_cancel_replay(void *data)
-+{
-+	struct gd32_bridge_gpio *gd32 = data;
-+
-+	cancel_delayed_work_sync(&gd32->replay_work);
 +}
 +
 +/*
@@ -877,10 +966,27 @@ index 000000000..b202babc2
 +			   &gd32->resolve_work, msecs_to_jiffies(period_ms));
 +}
 +
-+static void gd32_bridge_cancel_resolve(void *data)
++/*
++ * Unbind teardown, registered AFTER devm_gpiochip_add_data() so devm runs it
++ * BEFORE gpiochip_remove(). Consumers (wlan-pwrseq, hci_bcm, panel reset,
++ * userspace line fds) can still call .set()/.direction_output() until the
++ * chip is removed, and do_set() queues replay_work: `removing` (under
++ * state_lock, which do_set()/replay_work test) stops any new queueing, and
++ * only then are the works cancelled, so nothing can re-arm them afterwards.
++ * SE_RST is released last-chance here if a consumer left it asserted.
++ */
++static void gd32_bridge_teardown(void *data)
 +{
 +	struct gd32_bridge_gpio *gd32 = data;
 +
++	mutex_lock(&gd32->state_lock);
++	gd32->removing = true;
++	mutex_unlock(&gd32->state_lock);
++
++	if (READ_ONCE(gd32->se_rst_asserted))
++		gd32_bridge_se_rst_release(gd32);
++
++	cancel_delayed_work_sync(&gd32->replay_work);
 +	cancel_delayed_work_sync(&gd32->resolve_work);
 +}
 +
@@ -918,7 +1024,7 @@ index 000000000..b202babc2
 +	 * immediately instead; individual GPIO ops fail gracefully (see
 +	 * gd32_bridge_gpio_get/_set) and start working once the bridge is up.
 +	 *
-+	 * The chip always registers all GD32_NGPIO_WIFI_BT lines -- lines
++	 * The chip always registers all GD32_NGPIO_TOTAL lines -- lines
 +	 * 18/19 are gated per-consumer in .request(), not by this probe-time
 +	 * handshake (see the file-header comment and
 +	 * gd32_bridge_resolve_wifi_bt()). If this handshake happens to land
@@ -950,7 +1056,7 @@ index 000000000..b202babc2
 +			gd32->wifi_bt_reg_on_status = 0;
 +	}
 +
-+	gd32->chip.ngpio	  = GD32_NGPIO_WIFI_BT;
++	gd32->chip.ngpio	  = GD32_NGPIO_TOTAL;
 +	/*
 +	 * Deliberately NO chip.names: gpiolib's gpiochip_set_desc_names()
 +	 * walks every gpio_device on the global list through
@@ -964,6 +1070,7 @@ index 000000000..b202babc2
 +	 * assigns without that walk.
 +	 */
 +	gd32->chip.request	  = gd32_bridge_gpio_request;
++	gd32->chip.free		  = gd32_bridge_gpio_free;
 +	gd32->chip.get		  = gd32_bridge_gpio_get;
 +	gd32->chip.set		  = gd32_bridge_gpio_set;
 +	gd32->chip.direction_output = gd32_bridge_gpio_dir_out;
@@ -971,41 +1078,21 @@ index 000000000..b202babc2
 +	gd32->chip.get_direction    = gd32_bridge_gpio_get_dir;
 +	gd32->chip.can_sleep	  = true;
 +
-+	/*
-+	 * Register the gpiochip BEFORE the two delayed_work cancel actions
-+	 * below, not after (bench-observed 2026-09-29, E1M-V2M103: a WARN
-+	 * stack trace at this function on re-probe after
-+	 * `echo 8-0070 > .../unbind` then bind). devm teardown runs LIFO, so
-+	 * registration order here is also unbind order in reverse: with the
-+	 * gpiochip's own devm cleanup registered LAST (as it used to be,
-+	 * after both cancel actions), gpiochip_remove() ran FIRST on unbind,
-+	 * while replay_work/resolve_work could still be queued or actively
-+	 * running against the chip/state it was tearing down -- a live race
-+	 * between this driver's own workqueue and its unbind path, not
-+	 * anything the consumers (wlan-pwrseq, hci_bcm) are doing. Adding the
-+	 * gpiochip here first means its devm cleanup is registered first, so
-+	 * it unwinds LAST: both delayed_work items are cancelled and
-+	 * confirmed finished (cancel_delayed_work_sync) before the gpiochip
-+	 * they touch is removed, and only then is gd32 itself freed.
-+	 */
 +	ret = devm_gpiochip_add_data(&client->dev, &gd32->chip, gd32);
 +	if (ret)
 +		return ret;
 +
-+	ret = devm_add_action_or_reset(&client->dev, gd32_bridge_cancel_replay,
-+					gd32);
-+	if (ret)
-+		return ret;
 +	/*
-+	 * Nothing to replay yet: output_mask starts at 0, so the periodic
-+	 * work is not queued here. gd32_bridge_gpio_do_set() (re)kicks it
-+	 * the first time any line is written.
++	 * Registered AFTER the gpiochip on purpose: devm unwinds LIFO, so this
++	 * runs first on unbind, while consumers can still reach .set(); see
++	 * gd32_bridge_teardown(). Nothing to replay yet (output_mask starts
++	 * at 0); gd32_bridge_gpio_do_set() kicks replay_work on first write.
 +	 */
-+
-+	ret = devm_add_action_or_reset(&client->dev, gd32_bridge_cancel_resolve,
++	ret = devm_add_action_or_reset(&client->dev, gd32_bridge_teardown,
 +					gd32);
 +	if (ret)
 +		return ret;
++
 +	/*
 +	 * Kick off the independent lines-18/19 resolver now if the
 +	 * best-effort handshake above didn't already land -- see
