@@ -184,7 +184,7 @@ index 000000000..b202babc2
 + * the bridge pad map at firmware 0.2.12 / PROTOCOL_VERSION_MINOR 11
 + * (pad count 18 -> 20; GD32 boots them OUTPUT LOW).
 + *
-+ * The chip always registers all 21 lines now: a fixed line count
++ * The chip always registers all 22 lines now: a fixed line count
 + * decided from a single best-effort GET_VERSION at probe() bakes in
 + * whatever the bridge's boot race happened to answer at that instant
 + * (~1.5 s in, this consistently reads "bridge not answering (-6)" --
@@ -299,7 +299,7 @@ index 000000000..b202babc2
 +
 +/*
 + * Line 21, "se-rst" (Refs #2507): the OPTIGA Trust M RESET pad. Unlike lines
-+ * 0..19 it is not a GPIO_READ/GPIO_WRITE pad -- .set() sends
++ * 0..20 it is not a GPIO_READ/GPIO_WRITE pad -- .set() sends
 + * CMD_SE_RESET(assert u8) instead, active-high assert = hold the secure
 + * element in reset. It exists so userspace can reset a Trust M that wedged
 + * idle WITHOUT opening the bridge behind this driver's back (an I2C_RDWR

@@ -331,7 +331,7 @@
 
 /* GD32G553 supervisor MCU bridge -- I2C slave transport on BRD_I2C.
  * Exposes the GD32-routed E1M IO pads plus sideband control lines
- * (logical bridge map, 21 lines) as a Linux gpiochip: line 5 =
+ * (logical bridge map, 22 lines incl. se-rst) as a Linux gpiochip: line 5 =
  * IO13/LCD1_RST, line 3 = IO11/CTP1_RST, line 1 = IO9/CTP1_INT (input
  * only -- the GT911 drives it), line 18 = bt-reg-on (the `bluetooth`
  * node's shutdown-gpios below), line 19 = wl-reg-on (the
