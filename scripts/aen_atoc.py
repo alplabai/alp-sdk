@@ -22,6 +22,14 @@ The remaining call sites (``flash-jlink.sh``, ``flash-jlink-hp.sh``,
 entries only -- this guard is a deliberate no-op for those (see
 ``validate_atoc_entries`` below), so they don't call it.
 
+Every call site above, plus the west runner, DOES call the second guard
+here, ``validate_package_extent`` (#2234), right after ``app-gen-toc``: the
+bench scripts through ``bench_atoc_extent_guard`` in
+``scripts/bench/aen/bench-env.sh`` (which runs ``aen_atoc.py --package-map``),
+the runner directly. It reads the package start SETOOLS records in
+``build/app-package-map.txt`` and refuses a package that grew below the
+``atoc`` band into the preset's customer ``storage`` region.
+
 Per-core App-MRAM slot0 windows (disjoint since #1069) -- mirrors the
 `memory_map:` block in metadata/e1m_modules/E1M-AEN801.yaml. These are
 generator-policy constants, not re-derived from that YAML at flash time
@@ -71,6 +79,7 @@ Two known gaps, NOT closed by this guard (see #1069's PR body):
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -207,13 +216,56 @@ def validate_atoc_config_file(path: "str | Path") -> None:
     validate_atoc_entries(data)
 
 
+_PACKAGE_START_RE = re.compile(r'APP Package Start Address:\s*(0x[0-9A-Fa-f]+)')
+
+
+def package_start_from_map(text: str) -> int:
+    """The package start address SETOOLS records in app-package-map.txt."""
+    found = _PACKAGE_START_RE.findall(text)
+    if not found:
+        raise AtocValidationError(
+            'app-package-map.txt has no "APP Package Start Address:" line')
+    return int(found[-1], 16)
+
+
+def validate_package_extent(start: int, allow_over_storage: bool = False) -> None:
+    """Refuse a generated ATOC package that grows below the `atoc` band (#2234).
+
+    SETOOLS top-anchors the package at MRAM_END and grows it downward by its
+    size, and an ITCM load image (`loadAddress`) is stored INSIDE the package.
+    A one-image Flow A package measured 89152 B, far past the 32 KiB band, so
+    it reached down into the preset's customer `storage` region. A runtime
+    that writes `storage` (NVS, littlefs, settings) or erase-storage.sh would
+    then overwrite the boot image. *allow_over_storage* is the caller's
+    explicit statement that the image never writes `storage`.
+    """
+    if start < _A32_0_CEILING and not allow_over_storage:
+        raise AtocValidationError(
+            f'the ATOC package starts at 0x{start:08X}, {_A32_0_CEILING - start} B below the '
+            f'atoc band base 0x{_A32_0_CEILING:08X}: it overlaps the customer `storage` region, '
+            'and anything that writes `storage` will overwrite the boot image (#2234). Shrink '
+            'the load images, or pass --allow-over-storage (ALP_ATOC_ALLOW_OVER_STORAGE=1 in '
+            'the bench scripts) only if this image never writes `storage`')
+
+
 def main(argv: "list[str] | None" = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    if len(argv) != 1:
-        print('usage: aen_atoc.py <staged-atoc-config.json>', file=sys.stderr)
-        return 2
     try:
+        if argv[:1] == ['--package-map'] and len(argv) in (2, 3):
+            allow = argv[2:] == ['--allow-over-storage']
+            if len(argv) == 3 and not allow:
+                raise IndexError
+            start = package_start_from_map(Path(argv[1]).read_text(encoding='utf-8'))
+            validate_package_extent(start, allow)
+            return 0
+        if len(argv) != 1 or argv[0].startswith('--'):
+            raise IndexError
         validate_atoc_config_file(argv[0])
+    except IndexError:
+        print('usage: aen_atoc.py <staged-atoc-config.json>\n'
+              '       aen_atoc.py --package-map <app-package-map.txt> [--allow-over-storage]',
+              file=sys.stderr)
+        return 2
     except (AtocValidationError, OSError, json.JSONDecodeError) as exc:
         print(f'aen_atoc: REJECTED: {exc}', file=sys.stderr)
         return 1

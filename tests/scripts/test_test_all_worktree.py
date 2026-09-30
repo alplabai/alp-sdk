@@ -270,3 +270,18 @@ def test_repo_root_resolves_to_worktree_not_primary_checkout(real_worktree):
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+def test_module_is_pinned_before_any_stage_forks() -> None:
+    """Since the #2472 stage overlap, stages run in background subshells, so
+    an `export` made inside one never reaches the others.  The module pin
+    must therefore run at top level, before orchestration starts -- a pin
+    inside stage_twister left pytest-scripts and required-gate-scripts, whose
+    `west build --cmake-only` probes need the alp boards, without it."""
+    lines = TEST_ALL.read_text(encoding="utf-8").splitlines()
+    start = lines.index("START=$(date +%s)")
+    top_level_calls = [i for i, line in enumerate(lines) if line == "pin_alp_zephyr_module"]
+    assert top_level_calls, "pin_alp_zephyr_module is not called at top level"
+    assert all(i > start for i in top_level_calls)
+    first_stage = next(i for i, line in enumerate(lines) if i > start and "run_stage" in line)
+    assert top_level_calls[0] < first_stage
