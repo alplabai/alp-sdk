@@ -311,7 +311,7 @@ jobs:
       # falls back to the latest cache for this shard so warm builds
       # reuse it.  Restore-only here; the save step after twister runs on
       # push/schedule alone.  Every PR and merge-queue run used to save
-      # its own ~3.1 GB set (8 shards) into the repo's 10 GB Actions
+      # its own ~3.1 GB set (measured at 6 shards; 8 now) into the repo's 10 GB Actions
       # cache -- usage sat at 11.1 GB on 2026-09-29 -- evicting dev's
       # entries, which are the only ones a PR run can restore anyway
       # (a PR sees its own ref, its base branch and the default branch;
@@ -396,7 +396,11 @@ jobs:
           # list across the 8 shards; their union == a single full run,
           # so no test is dropped (coverage unchanged).  #2429: 4 shards
           # ran 12-25 min each (the partition splits by suite count, not
-          # time); 6 shortens the long pole on the dev merge queue.
+          # time).  6 shards still left a 13.4-13.7 min long pole (shards
+          # 4/5/6; shards 1/2/3 took 8-11 min; ~2.5 min of each is setup;
+          # dev merge_group runs 36766415005 / 36772820214, 2026-09-30),
+          # vs 23 min at 4 shards (run 36546876623, 2026-09-29); 8 cuts
+          # each slice by a quarter.
           ccache -z >/dev/null
           python3 zephyr/scripts/twister \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/tests/unit" \
