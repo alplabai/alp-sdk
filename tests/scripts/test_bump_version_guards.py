@@ -387,3 +387,33 @@ def test_ga_bump_after_an_rc_slices_the_changelog_normally(bv):
     text = bv.CHANGELOG.read_text(encoding="utf-8")
     assert "## [v0.16.0]" in text
     assert "## [v0.16.0-rc1]" not in text  # never created
+
+
+def _stub_bump_steps(bv, monkeypatch, calls):
+    monkeypatch.setattr(bv, "read_current_version", lambda: "0.0.0")
+    monkeypatch.setattr(bv, "verify_changelog_citations", lambda: calls.append("citations"))
+    for name in (
+        "update_sdk_version_yaml",
+        "slice_changelog",
+        "update_version_h",
+        "update_pyproject",
+        "update_banner_c",
+        "regenerate_abi_snapshot",
+        "regenerate_emit_snapshots",
+    ):
+        monkeypatch.setattr(bv, name, lambda *a, **k: None)
+
+
+@pytest.mark.parametrize(
+    "target, expected",
+    [("1.2.3", ["citations"]), ("1.2.3-rc1", [])],
+)
+def test_the_strict_citation_check_runs_only_on_ga_bumps(bv, monkeypatch, target, expected):
+    """A GA bump freezes [Unreleased] into history, so drifted citations must
+    be refused first; an rc bump freezes nothing (slice_changelog returns
+    early), so it must not be blocked by advisory drift (#2350)."""
+    calls: list[str] = []
+    _stub_bump_steps(bv, monkeypatch, calls)
+    monkeypatch.setattr(sys, "argv", ["bump_version.py", "--to", target, "--dry-run"])
+    assert bv.main() == 0
+    assert calls == expected
