@@ -200,6 +200,30 @@ hard gate.
   boundary on `dev` or `main` (creates topology
   noise + makes bisect harder).
 
+### Keeping a long-lived feature branch in sync with `dev`
+
+**Rebase the feature branch onto `dev`; don't merge `dev` into
+it.**  A `Merge origin/dev into <branch>` commit at the branch head
+has been observed to make GitHub's rendered PR diff ("Files
+changed", and `gh pr diff`) disagree with the actual tree at the
+branch head — a reviewer can be shown a hunk that names symbols or
+values that don't exist at `HEAD` (see #2349).  Rebasing keeps the
+branch a linear sequence of its own commits on top of current
+`dev`, so the rendered diff and `git diff $(git merge-base
+origin/dev HEAD) HEAD` stay identical.
+
+- If the branch is still small / not yet reviewed: `git fetch origin
+  dev && git rebase origin/dev`, resolve conflicts, force-push (this
+  is fine on a feature branch before review starts — see "Push
+  policies" above).
+- If the branch is large / long-stale enough that a rebase would
+  re-open many resolved conflicts: prefer a fresh branch off current
+  `dev` with the original commits cherry-picked, over a `dev`-into-
+  feature merge.
+- Either way: **never trust the GitHub PR diff alone** when a merge
+  commit is unavoidably at the head — verify a reviewed hunk against
+  `git show <headRefOid>:<path>` before acting on it.
+
 ### Commit-message style (enforced informally; pre-commit hint)
 
 ```
