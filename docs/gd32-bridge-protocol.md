@@ -636,9 +636,10 @@ reply is empty.
 * `oversample_ratio` is one of 1/2/4/8/16/32/64/128/256.  0 means
   "firmware default" (per-channel-configured at build time).  The
   firmware rounds down to the nearest power-of-two.
-* `sample_cycles` is the raw sample-time register count (RSMP; the
-  vendor `adc_routine_channel_config` `sample_time` argument), NOT a
-  time unit; the firmware clamps it into `2..638`.  `0` means "firmware default"
+* `sample_cycles` is the raw RSMP value in ADCCK cycles (sample time =
+  value + 2.5 cycles; the vendor `adc_routine_channel_config`
+  `sample_time` argument), not microseconds and not a rung selector; the
+  firmware clamps it into `2..638`.  `0` means "firmware default"
   (240 cycles) -- a `0` here is NOT the fastest window, so an
   oversample-only reconfigure keeps the settling time its high-Z
   inputs need.
