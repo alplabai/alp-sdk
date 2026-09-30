@@ -85,6 +85,9 @@ typedef struct {
 	void             *comms;
 	uint8_t           session;
 	volatile uint16_t op_status;
+	/* Reset hook from optiga_trust_m_init_with_reset(), or NULL. */
+	optiga_trust_m_reset_fn_t reset;
+	void                     *reset_user;
 } optiga_trust_m_t;
 
 /** @brief Probe the chip's I2C_STATE register.
@@ -103,7 +106,12 @@ alp_status_t optiga_trust_m_init(optiga_trust_m_t *ctx, alp_i2c_t *bus, uint8_t 
  *  then the library's STARTUP_TIME_MSEC start-up wait) and probes once
  *  more.  ALP_ERR_NOT_READY therefore means the part stayed silent even
  *  after a reset.  Reset-hook failures also surface as ALP_ERR_NOT_READY.
- *  With @p reset NULL this is exactly optiga_trust_m_init(). */
+ *  With @p reset NULL this is exactly optiga_trust_m_init().
+ *
+ *  The hook and @p reset_user are kept in @p ctx and must outlive it: a
+ *  later read_product_info() / send_apdu() that has to open a session and
+ *  finds the part idled out (#2517) pulses RESET through it once and
+ *  opens again.  A session that is already open is not retried. */
 alp_status_t optiga_trust_m_init_with_reset(optiga_trust_m_t         *ctx,
                                             alp_i2c_t                *bus,
                                             uint8_t                   addr_7bit,

@@ -98,10 +98,8 @@ static void session_close(optiga_trust_m_t *ctx)
 	ctx->session = SESSION_NONE;
 }
 
-static alp_status_t session_open(optiga_trust_m_t *ctx, uint8_t kind)
+static alp_status_t session_open_once(optiga_trust_m_t *ctx, uint8_t kind)
 {
-	if (ctx->session == kind) return ALP_OK;
-	session_close(ctx);
 	alp_optiga_pal_bind(ctx->bus, ctx->addr);
 
 	optiga_lib_status_t rc;
@@ -118,6 +116,26 @@ static alp_status_t session_open(optiga_trust_m_t *ctx, uint8_t kind)
 	if (rc != OPTIGA_LIB_SUCCESS) return ALP_ERR_IO;
 	alp_status_t s = op_wait(ctx, OPTIGA_OPEN_TIMEOUT_MS);
 	if (s == ALP_OK) ctx->session = kind;
+	return s;
+}
+
+static alp_status_t hw_reset(optiga_trust_m_reset_fn_t reset, void *user);
+
+/* Open a session.  A part that idled out after init NACKs the open (#2517):
+ * if init was given a reset hook, pulse RESET once and open again.  Only
+ * an I/O or timeout failure is retried, and only once.  An already-open
+ * session is not re-opened, so an idle-out between two calls on the same
+ * session still surfaces to the caller: a reset would drop the caller's
+ * APDU state (OpenApplication, session context), which it must redo. */
+static alp_status_t session_open(optiga_trust_m_t *ctx, uint8_t kind)
+{
+	if (ctx->session == kind) return ALP_OK;
+	session_close(ctx);
+	alp_status_t s = session_open_once(ctx, kind);
+	if ((s == ALP_ERR_IO || s == ALP_ERR_TIMEOUT) && ctx->reset != NULL &&
+	    hw_reset(ctx->reset, ctx->reset_user) == ALP_OK) {
+		s = session_open_once(ctx, kind);
+	}
 	return s;
 }
 
@@ -173,6 +191,9 @@ alp_status_t optiga_trust_m_init_with_reset(optiga_trust_m_t         *ctx,
 	memset(ctx, 0, sizeof(*ctx));
 	ctx->bus  = bus;
 	ctx->addr = (addr_7bit != 0) ? addr_7bit : OPTIGA_TRUST_M_I2C_ADDR;
+	/* Kept for session_open()'s reset-and-retry (#2517). */
+	ctx->reset      = reset;
+	ctx->reset_user = reset_user;
 
 	/* If it still does not ACK after the wake retries, either it is
 	 * wedged in its idle state (#2507) or it isn't populated /
