@@ -300,11 +300,21 @@ int main(int argc, char **argv)
 		for (;;) {
 			s = gd32g553_ota_write_chunk(&g, (uint32_t)off, buf + off, n, &got);
 			if (s == ALP_OK && got >= off + n) break;
-			if (++tries > 3) {
+			if (++tries <= 2) {
+				alp_delay_ms(20);
+				continue;
+			}
+			/* gd32-bridge-firmware#315: a BRD_I2C slave at 0x55 holds SDA low
+			 * after certain byte sequences, so the same frame times out every
+			 * time.  The same bytes framed at a different length pass: re-send
+			 * this chunk as a shorter 8-aligned piece, then resume full size. */
+			if (n <= 8) {
 				fprintf(stderr, "FAIL: chunk @%zu status=%d got=%u\n", off, (int)s, got);
 				goto out;
 			}
-			alp_delay_ms(20);
+			n     = ((n / 2) + 7) & ~(size_t)7;
+			tries = 0;
+			printf("chunk @%zu: stalled, retrying as %zu bytes\n", off, n);
 		}
 		off += n;
 	}
