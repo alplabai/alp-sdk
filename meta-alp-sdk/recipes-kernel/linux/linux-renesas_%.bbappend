@@ -78,6 +78,10 @@ SRC_URI:append = " \
     file://uio.cfg \
 "
 
+# 0012 (UIO default match, #2374): uio_pdrv_genirq binds no DT node until
+# of_id is set, and the stored U-Boot bootargs cannot be relied on to carry
+# uio_pdrv_genirq.of_id=generic-uio; the patch defaults it to "generic-uio".
+#
 # 0010 (SDHI internal-DMAC bounce buffer, #2357): the DMAC takes one
 # contiguous buffer per request and the RZ/V2N SDHI has no IOMMU, so every
 # page-cache write reached the card as a separate 4 KiB command (microSD

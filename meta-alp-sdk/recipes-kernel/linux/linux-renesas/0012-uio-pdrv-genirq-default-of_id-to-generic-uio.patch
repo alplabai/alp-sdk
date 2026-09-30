@@ -1,4 +1,4 @@
-From 0a1c2e3d4b5f60718293a4b5c6d7e8f901234567 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
 Date: Wed, 30 Sep 2026 10:00:00 +0200
 Subject: [PATCH] uio: uio_pdrv_genirq: default of_id to "generic-uio"

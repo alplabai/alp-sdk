@@ -180,13 +180,10 @@
  * the M33 fw's channel 5 actually uses (see the MHU-B NS register comment
  * above): KICK = MSG_INT_SET on R_MHU_NS8 (0x10480104), ACK = RSP_INT_CLR on
  * R_MHU_NS36 (0x10480494).  These offsets are silicon-authoritative from the
- * FSP headers (bsp_mhu_b.h + mhu_iodefine.h).  The one remaining TBD --
- * because meta-rz-multi-os is license-gated and not on this host -- is the
- * A55 GIC SPI the `mhu-uio` DT node must carry for the RECEIVE direction:
- * the M33 sends on its RSP interrupt (MHU_RSP5_NS_IRQn = 293+6 = 299), so
- * the A55 must be wired to rsp_ch5_ns, NOT the msg_ch5_ns line the openamp
- * UIO dtsi currently declares (that is the M33's OWN receive line).  Confirm
- * the A55 rsp_ch5 SPI against the vendor overlay or a bench IRQ-walk.
+ * FSP headers (bsp_mhu_b.h + mhu_iodefine.h).  The A55 receive line is
+ * declared by `mhu-uio@10480000` in e1m-v2n-som.dtsi as GIC_SPI 404
+ * (INTID 436, MHU-B SWINT unit 12, GIC-measured in #697 cycle 10); the M33
+ * rings the A55 through that SWINT unit, and `uio_mhu_ack()` clears it.
  *
  * @par What is NOT vendored here
  * The Renesas Multi-OS Package's `meta-rz-multi-os` layer (the Linux
@@ -354,8 +351,9 @@ static const char *uio_dev_name(enum uio_region_id id)
  * the two INT halves as the two directions:
  *   - KICK the M33 (raise MHU_MSG5_NS_IRQn=293) = MSG_INT_SET on R_MHU_NS5
  *                                                 -> A55 0x104800A4.
- *   - RECEIVE/ack the M33's send (its RSP half, MHU_RSP5_NS_IRQn=299, dtb
- *     mhu-uio GIC_SPI 267) = RSP_INT_CLR on R_MHU_NS5 -> A55 0x104800B4.
+ *   - RECEIVE/ack the M33's send (its RSP half, MHU_RSP5_NS_IRQn=299, which
+ *     does not reach the CA55; the A55 line is SWINT unit 12 = GIC_SPI 404)
+ *     = RSP_INT_CLR on R_MHU_NS5 -> A55 0x104800B4.
  * The M33 side must correspondingly bind its ch5 RX/TX to R_MHU_NS5 (see the
  * r_mhu_b_ns.c port's channel-5 override) -- otherwise its ISR clears the
  * wrong register and the interrupt storms.  Earlier revisions aimed at a SWINT
