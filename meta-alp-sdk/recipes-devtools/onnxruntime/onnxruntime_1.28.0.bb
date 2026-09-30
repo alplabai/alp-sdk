@@ -264,7 +264,8 @@ OECMAKE_SOURCEPATH = "${S}/cmake"
 # convention, NOT verified by actually unzipping any of these 11 archives
 # on this host):
 SRC_URI += " \
-    https://github.com/protocolbuffers/protobuf/archive/refs/tags/v21.12.zip;downloadfilename=protobuf-21.12.zip;name=protobuf;subdir=deps/protobuf;sha1sum=7cf2733949036c7d52fda017badcab093fe73bfa \n    https://github.com/abseil/abseil-cpp/archive/refs/tags/20250814.0.zip;name=abseil_cpp;subdir=deps/abseil_cpp;sha1sum=a9eb1d648cbca4d4d788737e971a6a7a63726b07 \
+    https://github.com/protocolbuffers/protobuf/archive/refs/tags/v21.12.zip;downloadfilename=protobuf-21.12.zip;name=protobuf;subdir=deps/protobuf;sha1sum=7cf2733949036c7d52fda017badcab093fe73bfa \
+    https://github.com/abseil/abseil-cpp/archive/refs/tags/20250814.0.zip;name=abseil_cpp;subdir=deps/abseil_cpp;sha1sum=a9eb1d648cbca4d4d788737e971a6a7a63726b07 \
     https://github.com/HowardHinnant/date/archive/refs/tags/v3.0.1.zip;name=date;subdir=deps/date;sha1sum=2dac0c81dc54ebdd8f8d073a75c053b04b56e159 \
     https://github.com/eigen-mirror/eigen/archive/1d8b82b0740839c0de7f1242a3585e3390ff5f33/eigen-1d8b82b0740839c0de7f1242a3585e3390ff5f33.zip;name=eigen;subdir=deps/eigen;sha1sum=05b19b49e6fbb91246be711d801160528c135e34 \
     https://github.com/google/flatbuffers/archive/refs/tags/v23.5.26.zip;name=flatbuffers;subdir=deps/flatbuffers;sha1sum=59422c3b5e573dd192fead2834d25951f1c1670c \
