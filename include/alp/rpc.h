@@ -407,6 +407,11 @@ alp_rpc_subscribe(alp_rpc_channel_t *ch, const char *method, alp_rpc_method_cb_t
 /**
  * @brief Remove a prior @ref alp_rpc_subscribe registration.
  *
+ * Waits for an in-flight callback of that method to return (except when
+ * called from that callback itself), so the caller may free the
+ * callback's user pointer afterwards.  A callback must therefore not
+ * block on anything the unsubscribing thread holds.
+ *
  * @param[in] ch      Channel handle.
  * @param[in] method  Method name previously passed to
  *                    @ref alp_rpc_subscribe.
@@ -539,7 +544,12 @@ alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload, siz
  *                                    synchronous call on this OS yet
  *                                    (Linux side ships partial in
  *                                    v0.6 -- see src/yocto/rpc_yocto.c)
+ *          - @ref ALP_ERR_BUSY    (UIO/OpenAMP backend) called from a
+ *                                  subscribe callback, whose thread is
+ *                                  the one that delivers replies
  *
+ * @note Do not call this from a subscribe callback on the UIO/OpenAMP
+ *       backend: it returns @ref ALP_ERR_BUSY instead of blocking.
  * @note Concurrent calls on the same channel from multiple threads
  *       are serialised by the SDK; the second caller blocks until
  *       the first call returns or times out.

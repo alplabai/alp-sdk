@@ -139,7 +139,9 @@
  *     yocto_drv.c).  Detects self-close via `recv_active &&
  *     pthread_equal(pthread_self(), ch->recv_thread)` under
  *     `call_mutex`: external -> `metal_irq_unregister()` (safe, see
- *     above) then a bounded sleep-poll drain of `cb_active` (mirrors
+ *     above) then a sleep-poll drain of `cb_active` AND `isr_active`
+ *     (the whole-handler count raised at the top of
+ *     `uio_rproc_notify_isr()`; mirrors
  *     zephyr_drv.c's identical drain -- "sleep, never spin", see
  *     src/rpc_dispatch.c's `_rpc_drain()` doc comment) before
  *     returning `ALP_RPC_SHUTDOWN_DONE`; self -> returns
@@ -156,12 +158,29 @@
  *     order lib/rpmsg/rpmsg_virtio.c's `rpmsg_deinit_vdev()` /
  *     lib/remoteproc/remoteproc.c's `remoteproc_remove_virtio()`
  *     require -- `rpmsg_deinit_vdev()` NULLs `rvdev.vdev` as a side
- *     effect, so the heap-owning `virtio_device*` is captured into a
- *     local BEFORE that call, then handed to `remoteproc_remove_virtio()`
- *     -- confirmed by reading both functions' sources rather than
- *     guessing the order), closes every `metal_device`, and calls
+ *     effect, so the heap-owning `virtio_device*` is saved at create
+ *     time in `vdev_raw` and handed to `remoteproc_remove_virtio()`
+ *     regardless; `rpmsg_deinit_vdev()` runs only when `rvdev_ready`
+ *     says `rpmsg_init_vdev()` succeeded), closes every `metal_device`, and calls
  *     `metal_finish()`.  Called exactly once by the dispatcher, strictly
  *     after the active-op count has drained.
+ *
+ * @par Call/send locking and unsubscribe
+ * `call_serial` serialises `y_call()`s and is held across the reply
+ * wait; the IRQ thread never takes it, and `y_call()` returns
+ * ALP_ERR_BUSY when invoked on that thread (a callback cannot receive
+ * its own reply).  `tx_mutex` covers only frame build + trysend, so a
+ * callback's `y_send()` never waits behind a pending call.
+ * `y_unsubscribe()` waits (sleep-poll) while `cb_slot` names the slot
+ * it cleared, so the caller may free `user` on return; it skips the
+ * wait on the IRQ thread itself.
+ *
+ * @par Known limitation (ponytail)
+ * Between libmetal's IRQ thread loading the handler/arg and
+ * `uio_rproc_notify_isr()` raising `isr_active`, a concurrent external
+ * close can still unregister, see zero, and free the channel.  The
+ * window is a few instructions; closing it needs a sync point inside
+ * libmetal.
  *
  * @par Single-link limitation (documented, not a TODO)
  * REFERENCE.md's memory map describes exactly ONE physical M33 peer;
@@ -894,7 +913,11 @@ static int uio_rproc_notify_isr(int irq, void *arg)
 
 	/* Counted BEFORE the first touch of ch (ack, get_notification, epilogue)
 	 * so y_shutdown()'s drain covers the whole handler, not just
-	 * uio_ept_cb(). */
+	 * uio_ept_cb().
+	 * ponytail: libmetal's IRQ thread loads this handler + arg from its
+	 * unsynchronised table before we get here, so a close that unregisters
+	 * and frees ch in those few instructions still races this increment.
+	 * Closing it needs a libmetal-side sync point; see the changelog. */
 	atomic_fetch_add(&ch->isr_active, 1);
 	uio_mhu_ack(ch);
 	/* May invoke uio_ept_cb() synchronously, zero or more times, on
@@ -1303,9 +1326,18 @@ static alp_status_t y_call(alp_rpc_backend_state_t *st,
 		g_y_call_test_late_staging_hook();
 	}
 
+	/* A call from a subscribe callback runs on the shared IRQ thread, the
+	 * only thread that can deliver its reply (and it would queue behind
+	 * another thread's pending call on call_serial).  Refuse it. */
+	pthread_mutex_lock(&ch->call_mutex);
+	bool on_irq_thread = ch->recv_active && pthread_equal(pthread_self(), ch->recv_thread);
+	pthread_mutex_unlock(&ch->call_mutex);
+	if (on_irq_thread) return ALP_ERR_BUSY;
+
 	/* One call in flight at a time.  call_serial (not tx_mutex) is held for
-	 * the wait: the IRQ thread never takes it, so a subscribe callback that
-	 * send()s or call()s cannot block the thread that delivers our reply. */
+	 * the wait: the IRQ thread never takes it (y_call() refuses to run on
+	 * that thread), so a subscribe callback that send()s cannot block the
+	 * thread that delivers our reply. */
 	pthread_mutex_lock(&ch->call_serial);
 
 	pthread_mutex_lock(&ch->call_mutex);
