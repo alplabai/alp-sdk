@@ -1,20 +1,9 @@
-### Docs — document rebase-not-merge for long-lived feature branches (#2349)
+### Docs — how to check a PR whose head is a `dev` merge (#2349)
 
-`gh pr diff` / GitHub's "Files changed" view has been observed to disagree
-with the actual branch head when the head is a `Merge origin/dev into
-<branch>` commit — a reviewer can be shown a hunk naming symbols that
-don't exist at `HEAD` (verified instance: #1839, `src/backends/adc/alif_e7.c`).
-
-Changes:
-- `docs/branching-and-merge-policy.md:203` ("Keeping a long-lived feature branch in sync with `dev`")
-  adds the missing convention: rebase (or a fresh branch + cherry-pick)
-  instead of merging `dev` into a feature branch, plus a verification step
-  (`git show <headRefOid>:<path>`) for when a merge commit at the head is
-  unavoidable.
-
-No code change: the underlying stale-diff behaviour is GitHub/`gh`-side
-rendering, not something alp-sdk's own tooling produces or can patch. A
-CI guard that diffs `gh pr diff` against `git diff $(merge-base) HEAD`
-was suggested in the issue as an optional follow-up; adding a new
-`check_*.py` gate for it is a separate maintainer decision, not folded
-into this fix.
+With a `Merge origin/dev into <branch>` commit at the head, GitHub's
+rendered PR diff has been seen to disagree with the tree at the head
+(#1839, `src/backends/adc/alif_e7.c`). Merging `dev` into feature branches
+stays the convention; `docs/branching-and-merge-policy.md` now documents
+checking a reviewed hunk against `git show <headRefOid>:<path>` and the
+merge-base diff before acting on it. The stale rendering itself is
+GitHub-side, not something alp-sdk tooling produces.
