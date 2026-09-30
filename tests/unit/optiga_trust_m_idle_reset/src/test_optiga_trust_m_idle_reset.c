@@ -199,3 +199,18 @@ ZTEST(optiga_idle_reset, test_mid_app_open_failure_without_hook_is_not_reset)
 	zassert_equal(g.asserts, 0u);
 	optiga_trust_m_deinit(&ctx);
 }
+
+/* A timed-out open leaves the library op in flight.  The next open must
+ * report busy and must not pulse RESET over a part that may be fine. */
+ZTEST(optiga_idle_reset, test_open_still_in_flight_is_busy_not_reset)
+{
+	optiga_trust_m_t              ctx;
+	optiga_trust_m_product_info_t info;
+
+	zassert_equal(optiga_trust_m_init_with_reset(&ctx, bus, 0, reset_hook, &g), ALP_OK);
+	ctx.open_pending = 1u;      /* SESSION_UTIL, as left by a timed-out open */
+	ctx.op_status    = 0x0001u; /* OPTIGA_LIB_BUSY: never completes here */
+	zassert_equal(optiga_trust_m_read_product_info(&ctx, &info), ALP_ERR_BUSY);
+	zassert_equal(g.asserts, 0u, "no reset while the op is in flight");
+	zassert_equal(ctx.open_pending, 1u, "still pending");
+}

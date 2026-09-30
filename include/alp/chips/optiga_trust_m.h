@@ -84,6 +84,7 @@ typedef struct {
 	void             *util;
 	void             *comms;
 	uint8_t           session;
+	uint8_t           open_pending; /* kind of a timed-out open still in flight */
 	volatile uint16_t op_status;
 	/* Reset hook from optiga_trust_m_init_with_reset(), or NULL. */
 	optiga_trust_m_reset_fn_t reset;

@@ -113,9 +113,12 @@ static alp_status_t session_open_once(optiga_trust_m_t *ctx, uint8_t kind)
 		if (ctx->comms == NULL) return ALP_ERR_NOMEM;
 		rc = optiga_comms_open(ctx->comms);
 	}
+	/* The library refused the call: nothing ran on the bus. */
+	if (rc == OPTIGA_LIB_BUSY) return ALP_ERR_BUSY;
 	if (rc != OPTIGA_LIB_SUCCESS) return ALP_ERR_IO;
 	alp_status_t s = op_wait(ctx, OPTIGA_OPEN_TIMEOUT_MS);
 	if (s == ALP_OK) ctx->session = kind;
+	if (s == ALP_ERR_TIMEOUT) ctx->open_pending = kind;
 	return s;
 }
 
@@ -123,15 +126,24 @@ static alp_status_t hw_reset(optiga_trust_m_reset_fn_t reset, void *user);
 
 /* Open a session.  A part that idled out after init NACKs the open (#2517):
  * if init was given a reset hook, pulse RESET once and open again.  Only
- * an I/O failure is retried, and only once.  A timeout is not: the library
- * op is still in flight, so a second open would fail without touching the
- * bus and mask the timeout.  An already-open
+ * an I/O failure of a completed op is retried, and only once.  A timeout
+ * is not: the library op is still in flight, so it is drained on the next
+ * call (ALP_ERR_BUSY while it still runs) and never reset over.  An
+ * already-open
  * session is not re-opened, so an idle-out between two calls on the same
  * session still surfaces to the caller: a reset would drop the caller's
  * APDU state (OpenApplication, session context), which it must redo. */
 static alp_status_t session_open(optiga_trust_m_t *ctx, uint8_t kind)
 {
 	if (ctx->session == kind) return ALP_OK;
+	if (ctx->open_pending != SESSION_NONE) {
+		/* A timed-out open is still running in the library.  Let it
+		 * finish; if it opened a session, close that before opening
+		 * again.  Still running: report busy, do not reset. */
+		if (op_wait(ctx, OPTIGA_OPEN_TIMEOUT_MS) == ALP_ERR_TIMEOUT) return ALP_ERR_BUSY;
+		if (ctx->op_status == OPTIGA_LIB_SUCCESS) ctx->session = ctx->open_pending;
+		ctx->open_pending = SESSION_NONE;
+	}
 	session_close(ctx);
 	alp_status_t s = session_open_once(ctx, kind);
 	if (s == ALP_ERR_IO && ctx->reset != NULL && hw_reset(ctx->reset, ctx->reset_user) == ALP_OK) {
