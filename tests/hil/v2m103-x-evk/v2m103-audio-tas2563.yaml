@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # E1M-V2M103 + E1M-X-EVK audio: ALSA card e1m-x-evk-tas2563 registered and a
-# 2 s S16_LE 48 kHz stereo playback of /dev/zero (silence) on hw:0,0 finishes in
+# 2 s S16_LE 48 kHz stereo playback of /dev/zero (silence) on the card finishes in
 # 1.8..2.5 s wall time.  Timed off /proc/uptime (10 ms resolution) because
 # BusyBox date has no %N.  Skips (still passes) when the card is absent: older
 # images ship audio disabled (see v2m103-boot-emmc-no-audio).  Read-only.
+# NOTE: vacuous (always SKIP) until #2331 enables the sound node; the card
+# index is taken from /proc/asound/cards, not assumed to be 0.
 
 schema_version: 1
 name: v2m103-audio-tas2563
@@ -18,8 +20,9 @@ ssh_command: |-
     echo HIL_AUDIO_DONE
     exit 0
   fi
+  c=$(awk '/e1m-x-evk-tas2563/ && $1 ~ /^[0-9]+$/ {print $1; exit}' /proc/asound/cards)
   a=$(cut -d' ' -f1 /proc/uptime)
-  aplay -D hw:0,0 -f S16_LE -r 48000 -c 2 -d 2 /dev/zero >/dev/null 2>&1 || echo "HIL_AUDIO_BAD aplay rc=$?"
+  aplay -D hw:$c,0 -f S16_LE -r 48000 -c 2 -d 2 /dev/zero >/dev/null 2>&1 || echo "HIL_AUDIO_BAD aplay rc=$?"
   b=$(cut -d' ' -f1 /proc/uptime)
   awk -v a="$a" -v b="$b" 'BEGIN { d = b - a; print "HIL_AUDIO elapsed=" d; if (d >= 1.8 && d <= 2.5) print "HIL_AUDIO_OK"; else print "HIL_AUDIO_BAD elapsed out of range" }'
   echo HIL_AUDIO_DONE
