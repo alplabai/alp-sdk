@@ -15,7 +15,7 @@ driver at its existing `vendor-sdks` pin in `west.yml`:
   is an AXI master and the driver does no address translation, so it cannot
   reach M55-HE DTCM. Surfaces have the same requirement.
 - Each operation now waits for its own pixels
-  (`src/backends/gpu2d/alif_dave2d.c:270` ("static void _submit_and_wait(d2_device *dev)")):
+  (`src/backends/gpu2d/alif_dave2d.c:303` ("static void _submit_and_wait(d2_device *dev)")):
   `d2_startframe()` starts the previous frame's render buffer, so every result
   had arrived one call late.
 - Fills and copies store colour and alpha as given (the default colour blend
