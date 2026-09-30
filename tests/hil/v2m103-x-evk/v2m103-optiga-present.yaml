@@ -7,7 +7,8 @@
 # probe, is not a valid transaction and is NACKed (bench 2026-09-30,
 # #2507).  Writing 0x82 only selects the register to read; nothing is
 # written to the device's data or NVM.  The part NACKs the FIRST
-# transaction after idle while it wakes from sleep, so the probe retries.
+# transaction(s) after idle while it wakes from sleep (seconds after a
+# long idle), so the probe retries for up to ~5 s.
 # Presence + protocol liveness only; the APDU-level check is
 # v2n-secure-element-sign.
 
@@ -18,7 +19,7 @@ description: |
 
 flash_method: ssh-run
 ssh_command: |-
-  for i in $(seq 1 20); do
+  for i in $(seq 1 100); do
     if i2ctransfer -f -y 8 w1@0x30 0x82 >/dev/null 2>&1; then
       sleep 0.01
       s=$(i2ctransfer -f -y 8 r4@0x30 2>/dev/null) && { echo "HIL_OPTIGA_I2C_STATE $s"; echo HIL_OPTIGA_ACK; break; }
@@ -27,6 +28,6 @@ ssh_command: |-
   done
 
 serial:
-  duration_s: 10
+  duration_s: 15
   expect_contains:
     - "HIL_OPTIGA_ACK"
