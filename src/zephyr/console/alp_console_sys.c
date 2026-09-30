@@ -11,6 +11,8 @@
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
 
+#include "../alp_soc_cpus.h"
+
 #if IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_CMD_REBOOT) && IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_UNSAFE) && \
     IS_ENABLED(CONFIG_REBOOT)
 #include <zephyr/sys/reboot.h>
@@ -74,7 +76,10 @@ static int cmd_res(const struct shell *sh, size_t argc, char **argv)
 
 #if defined(CONFIG_ALP_SDK_SOC_CPUS)
 	if (CONFIG_ALP_SDK_SOC_CPUS[0] != '\0') {
-		shell_print(sh, "cores   : %s", CONFIG_ALP_SDK_SOC_CPUS);
+		static char cpus[sizeof(CONFIG_ALP_SDK_SOC_CPUS) + sizeof(ALP_SOC_CPUS_ACTIVE)];
+
+		alp_soc_cpus_format(cpus, sizeof(cpus), CONFIG_ALP_SDK_SOC_CPUS, CONFIG_BOARD_TARGET);
+		shell_print(sh, "cores   : %s", cpus);
 		shell_print(sh,
 		            "          (this image runs the active core; other "
 		            "cores are not started by it)");

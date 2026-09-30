@@ -75,6 +75,8 @@
 
 #include <alp/version.h> /* ALP_VERSION_STRING -- the single SDK-version source */
 
+#include "alp_soc_cpus.h" /* alp_soc_cpus_format() -- active core from the board target, #2469 */
+
 #if defined(CONFIG_ALP_SDK_HW_INFO)
 #include <alp/hw_info.h>      /* alp_hw_info_read(), alp_hw_info_t, ALP_OK */
 #include "hw_info_manifest.h" /* alp_hw_info_build_hw_rev_mismatch() -- internal, issue #1853 */
@@ -130,7 +132,8 @@ static void alp_print_soc_and_eol(void)
 /*
  * System summary.  Preferred path: the SoC spec complement (every CPU core +
  * NPU + the SoC's total on-chip SRAM/MRAM, emitted from the SoC JSON by
- * alp_orchestrate.py -- the active core is marked and listed first) plus, when
+ * alp_orchestrate.py -- the core this image runs on is marked and listed first,
+ * see alp_soc_cpus.h) plus, when
  * the SoM SKU's BOM populates any, the external OSPI RAM/NOR the SoC itself
  * does not carry (CONFIG_ALP_SDK_SOM_{DRAM,FLASH}_MBIT, emitted from the SoM
  * preset's `memory:` block -- a MODULE fact: two SKUs on the identical
@@ -143,7 +146,10 @@ static void alp_print_sysinfo(void)
 {
 #if defined(CONFIG_ALP_SDK_SOC_CPUS)
 	if (CONFIG_ALP_SDK_SOC_CPUS[0] != '\0') {
-		printk("  CPU: %s\n", CONFIG_ALP_SDK_SOC_CPUS);
+		static char cpus[sizeof(CONFIG_ALP_SDK_SOC_CPUS) + sizeof(ALP_SOC_CPUS_ACTIVE)];
+
+		alp_soc_cpus_format(cpus, sizeof(cpus), CONFIG_ALP_SDK_SOC_CPUS, CONFIG_BOARD_TARGET);
+		printk("  CPU: %s\n", cpus);
 		printk("  NPU: %s   |   SRAM %u KB | MRAM %u.%u MB\n",
 		       CONFIG_ALP_SDK_SOC_NPUS,
 		       (unsigned int)CONFIG_ALP_SDK_SOC_SRAM_KB,

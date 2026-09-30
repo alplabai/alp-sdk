@@ -20,7 +20,7 @@ CONFIG_UART_INTERRUPT_DRIVEN=y
 
 # Boot-banner SoC identity + system summary (from the SoC spec JSON + SoM preset `memory:`; see alp_banner.c).
 CONFIG_ALP_SDK_SOC_NAME="Alif Ensemble E8"
-CONFIG_ALP_SDK_SOC_CPUS="M55-HE @160MHz (active) + 2x Cortex-A32 @800MHz + M55-HP @400MHz"
+CONFIG_ALP_SDK_SOC_CPUS="M55-HE @160MHz (active)|rtss_he + 2x Cortex-A32 @800MHz + M55-HP @400MHz|rtss_hp"
 CONFIG_ALP_SDK_SOC_NPUS="Ethos-U85 + 2x Ethos-U55"
 CONFIG_ALP_SDK_SOC_SRAM_KB=9984
 CONFIG_ALP_SDK_SOC_MRAM_KB=5632
@@ -86,7 +86,7 @@ CONFIG_UART_INTERRUPT_DRIVEN=y
 
 # Boot-banner SoC identity + system summary (from the SoC spec JSON + SoM preset `memory:`; see alp_banner.c).
 CONFIG_ALP_SDK_SOC_NAME="Alif Ensemble E8"
-CONFIG_ALP_SDK_SOC_CPUS="M55-HP @400MHz (active) + 2x Cortex-A32 @800MHz + M55-HE @160MHz"
+CONFIG_ALP_SDK_SOC_CPUS="M55-HP @400MHz (active)|rtss_hp + 2x Cortex-A32 @800MHz + M55-HE @160MHz|rtss_he"
 CONFIG_ALP_SDK_SOC_NPUS="Ethos-U85 + 2x Ethos-U55"
 CONFIG_ALP_SDK_SOC_SRAM_KB=9984
 CONFIG_ALP_SDK_SOC_MRAM_KB=5632
