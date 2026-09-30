@@ -613,18 +613,17 @@ alp_status_t gd32g553_pwm_configure(gd32g553_t          *ctx,
  *  @param oversample_ratio   1 / 2 / 4 / 8 / 16 / 32 / 64 / 128 / 256.
  *                            Firmware rounds down to the nearest
  *                            power-of-two; 0 means "firmware default".
- *  @param sample_cycles      Sample-and-hold time in ADC cycles --
- *                            one of 2/6/12/24/47/92/247/640 (rounded
- *                            down on the firmware side).  0 means
- *                            "firmware default".
- *  @param resolution_bits    6 / 8 / 10 / 12 / 14 / 16.  14- and
- *                            16-bit modes require oversampling >= 4 /
- *                            16 respectively per the datasheet's
- *                            effective-resolution table.  0 means
+ *  @param sample_cycles      Raw sample-time register count (the RSMP
+ *                            value the vendor library takes), NOT a
+ *                            time unit.  Firmware clamps it to 2..638;
+ *                            0 means "firmware default" (240).
+ *  @param resolution_bits    6 / 8 / 10 / 12.  The GD32G553 hardware
+ *                            supports no wider width; 14 and 16 are
+ *                            rejected with ALP_ERR_NOSUPPORT.  0 means
  *                            "firmware default" (12-bit).
  *
  *  @return ALP_OK / ALP_ERR_INVAL (bad resolution) / ALP_ERR_OUT_OF_RANGE /
- *          ALP_ERR_NOSUPPORT (firmware HAL body not yet wired).
+ *          ALP_ERR_NOSUPPORT (14/16-bit resolution).
  */
 alp_status_t gd32g553_adc_configure(gd32g553_t *ctx,
                                     uint8_t     channel,

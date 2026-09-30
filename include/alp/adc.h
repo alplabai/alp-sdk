@@ -133,9 +133,9 @@ typedef struct {
      *  represent.  Backends without HW oversampling ignore this field; the
      *  SoC-cap layer documents which SoMs honour it. */
 	uint16_t oversampling_ratio;
-	/** Extra sample-and-hold cycles at the ADC clock.  Backend rounds to
-     *  its nearest discrete tap (8 taps on the GD32 IO MCU; vendor-defined
-     *  elsewhere).  0 means "backend default".  Mutually independent from
+	/** Extra sample-and-hold cycles at the ADC clock.  Backend-defined
+     *  unit: on the GD32 IO MCU it is the raw RSMP register count (not a
+     *  time unit), clamped to 2..638; vendor-defined elsewhere.  0 means "backend default".  Mutually independent from
      *  @c acquisition_us -- @c acquisition_us is a portable time-domain
      *  expression; @c sample_cycles is the backend-rounded discrete-tap
      *  expression for callers that already know which tap they want. */
