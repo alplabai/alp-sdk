@@ -968,7 +968,7 @@
           "ref": "XEVK_CAN_BUS0"
         }
       ],
-      "board_doc": "CAN0 via TCAN1044 transceiver (U51)."
+      "board_doc": "CAN0 via the on-module TCAN1044 transceiver U15 (SoM rev 2625-R2, SoC CANFD channel 3), not a carrier part."
     },
     {
       "net_id": "XEVK_CAN_BUS1",
@@ -987,7 +987,7 @@
           "ref": "XEVK_CAN_BUS1"
         }
       ],
-      "board_doc": "CAN1 via TCAN1044 transceiver (U52)."
+      "board_doc": "CAN1 via the on-module TCAN1044 transceiver U16 (SoM rev 2625-R2, SoC CANFD channel 2), not a carrier part."
     },
     {
       "net_id": "XEVK_ENC_ROTARY",

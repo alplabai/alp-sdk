@@ -107,8 +107,8 @@ extern "C" {
 /* CAN buses (ALP_E1M_CAN<N> -> board-side bus role) */
 /* ------------------------------------------------------------------ */
 
-#define XEVK_CAN_BUS0 ALP_E1M_X_CAN0  /**< CAN0 via TCAN1044 transceiver (U51). */
-#define XEVK_CAN_BUS1 ALP_E1M_X_CAN1  /**< CAN1 via TCAN1044 transceiver (U52). */
+#define XEVK_CAN_BUS0 ALP_E1M_X_CAN0  /**< CAN0 via the on-module TCAN1044 transceiver U15 (SoM rev 2625-R2, SoC CANFD channel 3), not a carrier part. */
+#define XEVK_CAN_BUS1 ALP_E1M_X_CAN1  /**< CAN1 via the on-module TCAN1044 transceiver U16 (SoM rev 2625-R2, SoC CANFD channel 2), not a carrier part. */
 
 /* ------------------------------------------------------------------ */
 /* Quadrature encoder channels (ALP_E1M_ENC<N> -> board-side encoder) */
