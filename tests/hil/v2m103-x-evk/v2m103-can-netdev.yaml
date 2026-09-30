@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 CAN netdevs (only on the CAN image): any interface of
+# ARPHRD_CAN type (280) counts.  Skip-if-absent: on a non-CAN image the spec
+# prints HIL_CAN_SKIP and passes; HIL_CAN_BAD is never printed.
+
+schema_version: 1
+name: v2m103-can-netdev
+description: |
+  CAN netdev present, or skipped when the image has none.
+
+flash_method: ssh-run
+ssh_command: |-
+  n=0
+  for i in /sys/class/net/*; do
+    [ "$(cat $i/type 2>/dev/null)" = 280 ] && { echo "HIL_CAN_NETDEV ${i##*/}"; n=1; }
+  done
+  [ "$n" = 1 ] && echo HIL_CAN_OK || echo "HIL_CAN_SKIP no CAN netdev on this image"
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "HIL_CAN_"
+  expect_absent:
+    - "HIL_CAN_BAD"

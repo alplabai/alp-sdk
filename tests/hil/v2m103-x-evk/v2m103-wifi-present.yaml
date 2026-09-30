@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 Wi-Fi: wlan0 is registered and the kernel log shows no
+# firmware load failure from the brcmfmac / cyw fmac driver.  Read-only.  The
+# firmware banner (if any) is echoed for the log but is not required.
+
+schema_version: 1
+name: v2m103-wifi-present
+description: |
+  wlan0 present and no fmac firmware load failure in dmesg.
+
+flash_method: ssh-run
+ssh_command: |-
+  [ -e /sys/class/net/wlan0 ] && echo HIL_WIFI_IF_OK
+  dmesg | grep -iE 'brcmfmac|cyw' | grep -i 'firmware' | tail -n 2
+  dmesg | grep -iE 'brcmfmac|cyw' | grep -iE 'firmware.*(fail|error)|fail.*firmware' && echo HIL_WIFI_FW_BAD
+  echo HIL_WIFI_DONE
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "HIL_WIFI_IF_OK"
+  expect_absent:
+    - "HIL_WIFI_FW_BAD"

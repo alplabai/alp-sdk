@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 Bluetooth: hci0 is registered and, when hciconfig is on the
+# image, reports UP.  Read-only.
+
+schema_version: 1
+name: v2m103-bt-hci-up
+description: |
+  hci0 present; UP when hciconfig can tell.
+
+flash_method: ssh-run
+ssh_command: |-
+  [ -e /sys/class/bluetooth/hci0 ] && echo HIL_BT_HCI_OK
+  if command -v hciconfig >/dev/null; then
+    hciconfig hci0 | grep -q 'UP RUNNING' && echo HIL_BT_UP_OK || echo HIL_BT_DOWN
+  fi
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "HIL_BT_HCI_OK"
+  expect_absent:
+    - "HIL_BT_DOWN"

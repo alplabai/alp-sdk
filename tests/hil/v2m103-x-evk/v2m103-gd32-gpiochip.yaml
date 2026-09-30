@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 GD32 bridge GPIO expander as seen by the Linux gpiolib: a
+# gpiochip labelled gd32-bridge-gpio exists and exposes >= 20 lines (22 once
+# #2520 lands; the floor is tolerant of both).  Read-only sysfs.
+
+schema_version: 1
+name: v2m103-gd32-gpiochip
+description: |
+  gpiochip gd32-bridge-gpio present with >= 20 lines.
+
+flash_method: ssh-run
+ssh_command: |-
+  for c in /sys/bus/gpio/devices/gpiochip*; do
+    [ "$(cat $c/label 2>/dev/null)" = gd32-bridge-gpio ] || continue
+    n=$(cat $c/ngpio)
+    echo "HIL_GD32_GPIOCHIP ${c##*/} lines=$n"
+    [ "$n" -ge 20 ] && echo HIL_GD32_GPIOCHIP_OK
+  done
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "HIL_GD32_GPIOCHIP_OK"
