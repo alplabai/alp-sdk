@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# aen-npu-inference-alp-u55 -- real person_detect through <alp/inference.h>
+# on the E1M-AEN801/803 (Ensemble E8) core-local Ethos-U55, on either the
+# M55-HE (128-MAC) or the M55-HP (256-MAC).  build_only: the Vela-compiled
+# model needs Alif's PROPRIETARY ensemble_vela.ini (AEN_NPU_VELA_CONFIG) to
+# match the bench runtime, and this app boots via MRAM slot0/Flow D -- a
+# bench flash, not a twister run.
+
+sample:
+  name: aen-npu-inference-alp-u55
+  description: |
+    Real person_detect NPU inference through the portable alp_inference_open()
+    API, driving whichever core-local Ethos-U55 the board target names
+    (M55-HE 128-MAC or M55-HP 256-MAC). vendor-ext, BENCH target.
+
+tests:
+  alp_sdk.examples.aen.npu_inference_alp_u55.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+      - alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - npu
+      - ethos-u
+      - vendor-ext
+    build_only: true
