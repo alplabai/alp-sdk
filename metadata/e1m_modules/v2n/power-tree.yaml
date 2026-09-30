@@ -37,8 +37,8 @@
 #   - E1M-X V2N-M1 power-sequence report (2026-04-02): net names, targets,
 #     on/off delays and dependency chain.  The ACT88760 rail -> net mapping
 #     below matches each CMI rail's voltage + trigger + startup delay to
-#     exactly one report net; LDO3 -> VDD_eMMC_3V3 is the one match made by
-#     elimination (the only remaining 3.3 V net) -- see its `evidence:`.
+#     exactly one report net; all 13 outputs were then confirmed against the
+#     module schematic (2026-09-30), including LDO3 -> VDD_eMMC_3V3.
 #   - AA82BZ register-map workbook Rev 1.1 (bit fields; see
 #     metadata/chips/act8760.yaml).
 #   - Bench, E1M-V2M103, 2026-09-24 (RIIC8 = /dev/i2c-8): DA9292 identity,
@@ -241,7 +241,7 @@ rails:
     control: voltage
     owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
     populated_on: [v2n, v2n-m1]
-    evidence: "CMI LDO3 3.3 V range 1 (trigger Buck3 +16 ms); report VDD_eMMC_3V3 is the only 3.3 V net left after Buck1=VDD_3V3 -- mapping by elimination, confirm against the schematic"
+    evidence: "CMI LDO3 3.3 V range 1 (trigger Buck3 +16 ms); schematic-confirmed 2026-09-30: LDO3 output feeds VDD_eMMC_3V3 (earlier report match was by elimination)"
   - id: vdd_1v8
     chip: act8760
     channel: ldo4
