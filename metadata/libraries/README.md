@@ -58,7 +58,7 @@ headers rather than papered over:
 - `ros2` is **Tier B (recipe-only)**: its wiring is grounded in-tree
   (`rclcpp` in `meta-alp-sdk/recipes-images/alp-image-common.inc`,
   `meta-ros2-humble` as a `LAYERRECOMMENDS`), but alp-sdk CI does not build it.
-  A build must add `meta-ros2-humble` to `bblayers.conf` (named follow-up).
+  A build adds `meta-ros2-humble` to `bblayers.conf` (`meta-alp-sdk/README.md` step 4b).
 - The **cross-core RMW bridge** (micro-ROS↔ROS 2 over UDP-on-virtio or a custom
   RMW over the existing RPMsg transport, ADR 0016) is **bench-gated** and out of
   scope here — likely its own ADR.
