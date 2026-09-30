@@ -10,3 +10,9 @@ build-only twister scenario, `alp_sdk.example.qenc_readout.aen`, keeps the
 two targets building. Bench, E1M-AEN803 serial 2026W36-0001, M55-HE RAM-run:
 `alp_qenc_open` and `alp_qenc_reset_position` return `ALP_OK` and the
 position reads `0` at rest; a turn of the knob has not been captured yet.
+
+Also fixes the AEN twister matrix on `dev`: `src/backends/qenc/gpio_qdec.c`'s
+input callback was unreferenced in any AEN build whose `alp-qenc<N>` aliases
+name no `gpio-qdec` node (`examples/aen/aen-qenc-readout`), which
+`-Werror=unused-function` turned into a build failure; it is now
+`__maybe_unused`.
