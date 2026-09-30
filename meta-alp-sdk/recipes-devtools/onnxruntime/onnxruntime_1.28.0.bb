@@ -210,11 +210,14 @@ OECMAKE_SOURCEPATH = "${S}/cmake"
 #                           INCLUDED; moved here and dropped from SRC_URI/
 #                           EXTRA_OECMAKE once the real configure proved it
 #                           unreachable.
-#   kleidiai, kleidiai-qmx - Arm Kleidi micro-kernel EP
-#                           (-Donnxruntime_USE_KLEIDIAI), default OFF; the
-#                           plan names this an explicit follow-up, not this
-#                           backend -- not enabled here even though the
-#                           dependency happens to already be pinned upstream
+#   kleidiai              - Arm Kleidi micro-kernel library, gated by
+#                           PACKAGECONFIG[kleidiai] below (#1258): staged in
+#                           SRC_URI always (offline fetch), but only wired
+#                           into the build when the knob is on; default OFF
+#                           until a before/after on real E1M-V2N101 silicon.
+#   kleidiai-qmx          - Qualcomm KleidiAI fork
+#                           (-Donnxruntime_USE_QMX_KLEIDIAI_COEXIST), never
+#                           reached: that option stays OFF.
 #   googlexnnpack, fp16, fxdiv, psimd, pthreadpool - the XNNPACK EP
 #                           dependency chain (-Donnxruntime_USE_XNNPACK,
 #                           default OFF); this recipe requests the CPU EP's
@@ -262,6 +265,7 @@ SRC_URI += " \
     https://github.com/pytorch/cpuinfo/archive/4628dc060ce4e82345dc166bbac875609db4ff69.zip;name=pytorch_cpuinfo;subdir=deps/pytorch_cpuinfo;sha1sum=e58d4b47c16a982111c897e669ae4f1821a393d7 \
     https://github.com/google/re2/archive/refs/tags/2024-07-02.zip;name=re2;subdir=deps/re2;sha1sum=646e1728269cde7fcef990bf4a8e87b047882e88 \
     https://github.com/dcleblanc/SafeInt/archive/refs/tags/3.0.28.zip;name=safeint;subdir=deps/safeint;sha1sum=23f252040ff6cb9f1fd18575b32fa8fb5928daac \
+    https://github.com/ARM-software/kleidiai/archive/refs/tags/v1.20.0.tar.gz;name=kleidiai;subdir=deps/kleidiai;sha1sum=6895e72b3d5cf1173358164cb3d64c9d7d33cc84 \
 "
 
 # BitBake's own fetcher requires a sha256sum in addition to the sha1sum
@@ -282,6 +286,9 @@ SRC_URI[onnx.sha256sum] = "8dc1181d33529a1249e031226126d0699ac9bdfc571ee530ee3a1
 SRC_URI[pytorch_cpuinfo.sha256sum] = "2ed3ebc6c2656cc0aafc7af319e5cb0f97cc9b415eae180f566def84f1ca6a29"
 SRC_URI[re2.sha256sum] = "a835fe55fbdcd8e80f38584ab22d0840662c67f2feb36bd679402da9641dc71e"
 SRC_URI[safeint.sha256sum] = "3ffbd9a2fdff45da77da3e7269e9aa512ea43bed5c38ce8fd8f3d1068a032c3f"
+# kleidiai: sha256 computed locally from the v1.20.0 tarball (its sha1 matches
+# cmake/deps.txt); the other entries above are from a real do_fetch log.
+SRC_URI[kleidiai.sha256sum] = "e4b84c369f0f39af1660ac71c30f74038d4b89e1f20dde070bb96398382a111f"
 
 # FETCHCONTENT_SOURCE_DIR_<NAME> must match the name CMake's own
 # FetchContent_Declare() call used, upper-cased -- NOT the deps.txt/SRC_URI
@@ -413,6 +420,13 @@ CXXFLAGS:append = " \
     -fmacro-prefix-map=${WORKDIR}/deps=${TARGET_DBGSRC_DIR}/deps \
     -fdebug-prefix-map=${WORKDIR}/deps=${TARGET_DBGSRC_DIR}/deps \
 "
+
+# KleidiAI EP (#1258).  Opt-in: `PACKAGECONFIG:append:pn-onnxruntime = " kleidiai"`
+# in local.conf/the image.  ORT itself downgrades to OFF with a warning on a
+# non-aarch64 target.  The FETCHCONTENT dir is only passed when enabled; the
+# archive unpacks to kleidiai-1.20.0/ (tarball top-level, verified).
+PACKAGECONFIG ??= ""
+PACKAGECONFIG[kleidiai] = "-Donnxruntime_USE_KLEIDIAI=ON -DFETCHCONTENT_SOURCE_DIR_KLEIDIAI=${WORKDIR}/deps/kleidiai/kleidiai-1.20.0,-Donnxruntime_USE_KLEIDIAI=OFF"
 
 EXTRA_OECMAKE += " \
     --compile-no-warning-as-error \
