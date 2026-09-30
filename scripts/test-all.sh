@@ -18,7 +18,7 @@
 #   1. Plain-CMake / Yocto build + ctest
 #   2. Plain-CMake / baremetal build (compile-only -- no tests yet)
 #   3. Zephyr twister (skipped if ZEPHYR_BASE is unset)
-#   4. clang-format diff vs HEAD~1 (skipped if no clang-format)
+#   4. clang-format diff vs merge-base origin/dev (skipped if no clang-format)
 #   5. shellcheck over every shipped *.sh (repo-wide `git ls-files
 #      '*.sh'`; skipped if that tool isn't installed)
 #   6. bash -n parse of every shipped *.sh under REAL bash 3.2.57 in a
@@ -901,8 +901,21 @@ stage_clang_format() {
         echo "clang-format is installed but no clang-format-diff(.py) helper was found on PATH or under /usr/share/clang -- skipping"
         return 99
     fi
-    # Default to HEAD~1; consumers in CI override via $DIFF_BASE.
-    local base="${DIFF_BASE:-HEAD~1}"
+    # Default: the merge-base with origin/dev, the same base
+    # pr-static-analysis.yml diffs (`git merge-base $BASE_SHA HEAD`), so
+    # this grades every line the PR changes. HEAD~1 is NOT equivalent: on
+    # a batch branch built with `git merge --no-edit` (or any branch with
+    # more than one commit) it is only the LAST merge's delta and hides
+    # everything merged before it. Falls back to HEAD~1 when origin/dev is
+    # absent or HEAD sits on it (merge-base == HEAD would diff nothing),
+    # matching CI's push/merge_group `HEAD~1`. $DIFF_BASE overrides.
+    local base="${DIFF_BASE:-}"
+    if [ -z "${base}" ]; then
+        base=$(git merge-base origin/dev HEAD 2>/dev/null || true)
+        if [ -z "${base}" ] || [ "${base}" = "$(git rev-parse HEAD)" ]; then
+            base="HEAD~1"
+        fi
+    fi
     if ! git rev-parse "${base}" >/dev/null 2>&1; then
         # Shallow clone -- nothing to diff against.
         return 99
