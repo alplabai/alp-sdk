@@ -4,9 +4,9 @@
  *
  * <alp/jpeg.h> -- caller-geometry bounds tests (#1645).  Before this
  * fix, alp_jpeg_encode() checked only non-NULL pointers and non-zero
- * width/height: a y_stride of 0 aliased every row to row 0 in
- * sw_baseline (returning ALP_OK with a wrong-but-valid JPEG), a
- * stride below width read across row boundaries, and the backend's
+ * width/height: a stride below width read across row boundaries
+ * (a y_stride of 0 is now defined as tightly packed and normalised to
+ * width by src/jpeg_dispatch.c, #1918), and the backend's
  * advertised max_width/max_height were never enforced against the
  * caller's request.  native_sim always wins the sw_baseline backend
  * (priority 50, no HW competitor), so these tests exercise the
