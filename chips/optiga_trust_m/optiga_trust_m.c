@@ -46,6 +46,16 @@
 #define OPTIGA_PROBE_TRIES    PL_POLLING_MAX_CNT
 #define OPTIGA_PROBE_RETRY_MS (PL_POLLING_INVERVAL_US / 1000u)
 
+/* After a longer idle (>~10 s, alplabai/alp-sdk#2507) the part stops
+ * answering at all and only a hardware reset revives it.  The library's
+ * own reset sequence (ifx_i2c.c, IFX_I2C_STATE_RESET_PIN_LOW / _HIGH)
+ * holds RESET low RESET_LOW_TIME_MSEC and then waits STARTUP_TIME_MSEC
+ * before the first access.  Despite the name both constants are
+ * microseconds (they feed pal_os_event_register_callback_oneshot's
+ * time_us): 2 ms low, 12 ms start-up.  Round up to whole milliseconds. */
+#define OPTIGA_RESET_LOW_MS (RESET_LOW_TIME_MSEC / 1000u)
+#define OPTIGA_STARTUP_MS   ((STARTUP_TIME_MSEC + 999u) / 1000u)
+
 /* OpenApplication runs a soft reset plus link sync; bench: ~60 ms. */
 #define OPTIGA_OPEN_TIMEOUT_MS 2000u
 #define OPTIGA_READ_TIMEOUT_MS 1000u
@@ -111,25 +121,13 @@ static alp_status_t session_open(optiga_trust_m_t *ctx, uint8_t kind)
 	return s;
 }
 
-alp_status_t optiga_trust_m_init(optiga_trust_m_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit)
+/* Probe by reading the I2C state register.  Trust M ACKs at its address
+ * before OPEN_APPLICATION.  Register address and data go in two
+ * transactions with a STOP between them, as upstream's physical layer
+ * does: the part NACKs a repeated-start write-read (bench, E1M-V2M103
+ * 2026W38-0001). */
+static alp_status_t probe_i2c_state(optiga_trust_m_t *ctx)
 {
-	if (ctx == NULL || bus == NULL) return ALP_ERR_INVAL;
-	/* addr_7bit == 0 is the documented "fall back to the default
-	 * provisioned address" sentinel; the address is otherwise
-	 * provisioning-defined (no fixed strap range this driver can
-	 * assert), so only the generic 7-bit domain bound applies here. */
-	if (addr_7bit > 0x7Fu) return ALP_ERR_INVAL;
-	memset(ctx, 0, sizeof(*ctx));
-	ctx->bus  = bus;
-	ctx->addr = (addr_7bit != 0) ? addr_7bit : OPTIGA_TRUST_M_I2C_ADDR;
-
-	/* Probe by reading the I2C state register.  Trust M ACKs at
-	 * its address before OPEN_APPLICATION; if it still does not ACK
-	 * after the wake retries, NOT_READY tells the caller the chip isn't
-	 * populated / mis-strapped.  Register address and data go in two
-	 * transactions with a STOP between them, as upstream's physical
-	 * layer does: the part NACKs a repeated-start write-read (bench,
-	 * E1M-V2M103 2026W38-0001). */
 	uint8_t      reg      = OPTIGA_REG_I2C_STATE;
 	uint8_t      state[4] = { 0 };
 	alp_status_t s        = ALP_ERR_NOT_READY;
@@ -143,10 +141,57 @@ alp_status_t optiga_trust_m_init(optiga_trust_m_t *ctx, alp_i2c_t *bus, uint8_t 
 		alp_delay_ms(1);
 		s = alp_i2c_read(ctx->bus, ctx->addr, state, sizeof(state));
 	}
+	return s;
+}
+
+/* Pulse RESET through the caller's hook: low for the library's reset
+ * time, then release and wait the library's start-up time.  RESET is
+ * always released, even if asserting it failed. */
+static alp_status_t hw_reset(optiga_trust_m_reset_fn_t reset, void *user)
+{
+	alp_status_t a = reset(user, true);
+	if (a == ALP_OK) alp_delay_ms(OPTIGA_RESET_LOW_MS);
+	alp_status_t r = reset(user, false);
+	if (a != ALP_OK) return a;
+	if (r != ALP_OK) return r;
+	alp_delay_ms(OPTIGA_STARTUP_MS);
+	return ALP_OK;
+}
+
+alp_status_t optiga_trust_m_init_with_reset(optiga_trust_m_t         *ctx,
+                                            alp_i2c_t                *bus,
+                                            uint8_t                   addr_7bit,
+                                            optiga_trust_m_reset_fn_t reset,
+                                            void                     *reset_user)
+{
+	if (ctx == NULL || bus == NULL) return ALP_ERR_INVAL;
+	/* addr_7bit == 0 is the documented "fall back to the default
+	 * provisioned address" sentinel; the address is otherwise
+	 * provisioning-defined (no fixed strap range this driver can
+	 * assert), so only the generic 7-bit domain bound applies here. */
+	if (addr_7bit > 0x7Fu) return ALP_ERR_INVAL;
+	memset(ctx, 0, sizeof(*ctx));
+	ctx->bus  = bus;
+	ctx->addr = (addr_7bit != 0) ? addr_7bit : OPTIGA_TRUST_M_I2C_ADDR;
+
+	/* If it still does not ACK after the wake retries, either it is
+	 * wedged in its idle state (#2507) or it isn't populated /
+	 * mis-strapped.  With a reset hook, reset once and probe again, so
+	 * NOT_READY means a fitted part failed to answer even after a
+	 * hardware reset. */
+	alp_status_t s = probe_i2c_state(ctx);
+	if (s != ALP_OK && reset != NULL) {
+		if (hw_reset(reset, reset_user) == ALP_OK) s = probe_i2c_state(ctx);
+	}
 	if (s != ALP_OK) return ALP_ERR_NOT_READY;
 
 	ctx->initialised = true;
 	return ALP_OK;
+}
+
+alp_status_t optiga_trust_m_init(optiga_trust_m_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit)
+{
+	return optiga_trust_m_init_with_reset(ctx, bus, addr_7bit, NULL, NULL);
 }
 
 alp_status_t optiga_trust_m_send_apdu(optiga_trust_m_t *ctx,
