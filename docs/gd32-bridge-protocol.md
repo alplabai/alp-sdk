@@ -63,7 +63,7 @@ byte; their numeric encoding is:
 | `0x61` | `QENC_RESET`          | `encoder:u8`                                       | _empty_                                            |
 | `0x70` | `COUNTER_READ`        | `counter:u8`                                       | `ticks:u32`                                        |
 | `0x22` | `PWM_CONFIGURE`       | `channel:u8 align:u8 dead_time_ns:u32 break_cfg:u8` | _empty_ (see §3.8; `align` applied, `dead_time_ns`/`break_cfg` return `STATUS_NOSUPPORT` -- V2N routes only single-ended outputs / no BRK pad) |
-| `0x32` | `ADC_CONFIGURE`       | `channel:u8 reserved:u8 oversample:u16 sample_cycles:u16 resolution:u8` | _empty_ (see §3.9; `sample_cycles`/`oversample`/6-12b `resolution` sticky; 14/16b return `STATUS_NOSUPPORT`) |
+| `0x32` | `ADC_CONFIGURE`       | `channel:u8 reserved:u8 oversample:u16 sample_cycles:u16 resolution:u8` | _empty_ (see §3.9; `sample_cycles`/`oversample`/6-12b `resolution` sticky; 14/16b unsupported by the hardware, return `STATUS_NOSUPPORT`) |
 | `0x33` | `ADC_STREAM_BEGIN`    | `stream_id:u8 channel:u8 reserved:u8 sample_rate_hz:u32` | _empty_                                      |
 | `0x34` | `ADC_STREAM_READ`     | `stream_id:u8 max_samples:u8`                      | `got:u8 mv[max_samples]:u16` (zero-padded)         |
 | `0x35` | `ADC_STREAM_END`      | `stream_id:u8`                                     | _empty_                                            |
@@ -636,18 +636,18 @@ reply is empty.
 * `oversample_ratio` is one of 1/2/4/8/16/32/64/128/256.  0 means
   "firmware default" (per-channel-configured at build time).  The
   firmware rounds down to the nearest power-of-two.
-* `sample_cycles` is a direct sample-and-hold cycle count written to
-  the routine-sequence `SMP` field (GD32G5x3 accepts `2..638` ADCCK);
-  the firmware clamps into that range.  `0` means "firmware default"
+* `sample_cycles` is the raw RSMP value in ADCCK cycles (sample time =
+  value + 2.5 cycles; the vendor `adc_routine_channel_config`
+  `sample_time` argument), not microseconds and not a rung selector; the
+  firmware clamps it into `2..638`.  `0` means "firmware default"
   (240 cycles) -- a `0` here is NOT the fastest window, so an
   oversample-only reconfigure keeps the settling time its high-Z
   inputs need.
 * `resolution_bits` is 0 (default = 12) / 6 / 8 / 10 / 12 (hardware
-  `DRES`) / 14 / 16.  The mV conversion divides by the width's
+  `DRES`); 14 / 16 are accepted on the wire but unsupported.  The mV conversion divides by the width's
   full-scale (`4095`/`1023`/`255`/`63` for 12/10/8/6).  `14`/`16` are
-  effective-resolution modes reachable only by under-shifting an
-  oversampled accumulator (the `DRES` field tops out at 12-bit); that
-  extension has not landed, so they reply `STATUS_NOSUPPORT`.  Any
+  not supported by the GD32G553 (the `DRES` field tops out at 12-bit),
+  so they reply `STATUS_NOSUPPORT`.  Any
   other width replies `STATUS_INVAL`.
 
 The GD32 returns ADC readings as 16-bit millivolts (`ADC_READ` /
@@ -669,9 +669,8 @@ the converter on the next `ADC_READ` / `ADC_STREAM_BEGIN` (inside the
 * `resolution_bits` `0` means default (12); `6`/`8`/`10`/`12` map to the
   hardware `DRES` field and the mV conversion divides by that width's
   full-scale (`4095`/`1023`/`255`/`63`).  `14`/`16` are
-  effective-resolution modes reachable only by under-shifting an
-  oversampled accumulator (the `DRES` field tops out at 12-bit); that
-  extension has not landed, so they still return `STATUS_NOSUPPORT`.
+  not supported by the GD32G553 (the `DRES` field tops out at 12-bit),
+  so they return `STATUS_NOSUPPORT`.
   Any other width returns `STATUS_INVAL`.
 
 ### 3.10 ADC streaming (`v0.3+`)
@@ -1002,10 +1001,17 @@ host that reads a CRC-valid reply whose stamp has **not advanced**
 past its previously accepted reply knows its request was never
 decoded, and re-sends it (the `gd32g553` driver does this once
 automatically, counting occurrences in `ctx->seq_stale_count`).
-Because a stale verdict proves the request was never executed, the
-re-send is safe even for non-idempotent opcodes.  The stamp wraps
-mod 16; replies re-served across the wrap remain detectable because
-detection compares against the last accepted stamp, not zero.
+While the slave keeps stamping, a stale verdict means the request was
+never decoded, so the re-send is safe even for non-idempotent opcodes.
+That inference is void across a slave **reset** (OTA commit/rollback,
+watchdog): the feature reverts to off and every reply is stamped 0.
+The `gd32g553` driver treats a CRC-valid stamp of 0 after a non-zero
+baseline as that signature, and never re-sends -- it drops its
+sequencing state, re-negotiates `LINK_FEATURES`, and fails the call
+with `ALP_ERR_IO` (the request may or may not have executed).  The
+stamp wraps mod 16; replies re-served across the wrap remain
+detectable because detection compares against the last accepted
+stamp, and the one legitimate advance to 0 (from 0xF) is accepted.
 I2C replies are **never** stamped (`STATUS_NO_PENDING` owns bit 7
 on that transport, and the hazard is SPI-specific).
 

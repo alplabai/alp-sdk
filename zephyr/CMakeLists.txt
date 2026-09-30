@@ -336,6 +336,12 @@ endif()
 zephyr_library_sources_ifdef(CONFIG_MBOX_ALIF_MHUV2
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mbox/mbox_alif_mhuv2.c)
 
+# Alif Ensemble Secure-Enclave TRNG entropy driver (#2192) -- Tier 1.5 glue over
+# hal_alif's se_service_get_rnd_num(). Binding:
+# zephyr/dts/bindings/entropy/alif,se-trng.yaml.
+zephyr_library_sources_ifdef(CONFIG_ENTROPY_ALIF_SE
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/entropy/entropy_alif_se.c)
+
 # Alif Ensemble hardware-semaphore (HWSEM) driver -- vendor-ext, BENCH-UNVERIFIED.
 # AMP request/release latch shared between the two RTSS cores (M55-HE <-> M55-HP).
 # HWSEM has no upstream Zephyr device class, so this is a "misc" (no-class) driver
@@ -470,8 +476,11 @@ endif()
 # add_subdirectory_ifdef precedent shared with USE_ALIF_HAL_UTIMER/_ANALOG).
 # hal_alif's own ospi CMakeLists is header-self-contained (its
 # zephyr_include_directories(include) fires when USE_ALIF_HAL_OSPI pulls the
-# subdirectory in), so no extra include path is needed here.  HW-BLOCKED /
-# BUILD-ONLY this batch: see the OSPI_ALIF Kconfig help + examples/aen/aen-ospi-regcheck.
+# subdirectory in), so no extra include path is needed here.  See the
+# OSPI_ALIF Kconfig help + flash_ospi_alif.c's own header for the current
+# read/write/erase coverage (#915: read/read_jedec_id/sfdp_read only, write/
+# erase are fail-closed stubs); examples/aen/aen-ospi-regcheck exercises the
+# controller-register path only and makes no flash_driver_api call.
 zephyr_library_sources_ifdef(CONFIG_OSPI_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/flash/flash_ospi_alif.c)
 
@@ -1726,8 +1735,10 @@ if(CONFIG_ALP_SDK_MBEDTLS_WEAK_RNG AND NOT CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY)
         "secure random source: CONFIG_CSPRNG_ENABLED is not set, or the only "
         "entropy driver in this build declares itself a fake. TLS would "
         "negotiate and derive key material from a predictable generator.\n"
-        "  Fix it: bind a real entropy driver for this target (on Alif "
-        "Ensemble that is the Secure Enclave TRNG -- open work, issue "
+        "  Fix it: bind a real entropy driver for this target. Alif Ensemble "
+        "E8 boards get the Secure Enclave TRNG (&se_trng, "
+        "CONFIG_ENTROPY_ALIF_SE) as zephyr,entropy by default -- if this "
+        "fires there, something disabled it or ENTROPY_GENERATOR (issue "
         "#2192).\n"
         "  Or, for a simulator, a test, or a bench-only bring-up image that "
         "never ships, acknowledge it explicitly with "

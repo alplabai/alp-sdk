@@ -581,6 +581,7 @@ def test_deepx_compile_invokes_dxcom_and_returns_dxnn(tmp_path, monkeypatch):
         return _C()
 
     monkeypatch.setattr("alp_model.adapters.deepx.subprocess.run", fake_run)
+    monkeypatch.setattr("alp_model.adapters.deepx._dxcom_exe", lambda: "dxcom")
     blob = DeepxAdapter().compile(src, accel_config="", out_dir=tmp_path,
                                   opts={"config": str(cfg)})
     assert seen["cmd"][:3] == ["dxcom", "-m", str(src)]
@@ -591,6 +592,49 @@ def test_deepx_compile_invokes_dxcom_and_returns_dxnn(tmp_path, monkeypatch):
     assert blob.compiler_version == "DX-COM 2.3.0"
     assert seen["probe_io"] == ("utf-8", "utf-8")
     assert seen["compile_io"] == ("utf-8", "utf-8")
+
+
+def test_deepx_compile_uses_dxcom_from_sdk_home_when_not_on_path(tmp_path, monkeypatch):
+    # is_available() accepts ALP_DEEPX_SDK_HOME; compile() must run that same
+    # dxcom, not a bare 'dxcom' that raises FileNotFoundError off PATH (#2455).
+    import shutil
+    import sys
+    real_which = shutil.which
+    monkeypatch.setattr("alp_model.adapters.deepx.shutil.which",
+                        lambda n, path=None: real_which(n, path=path) if path else None)
+    bindir = tmp_path / "sdk" / "bin"; bindir.mkdir(parents=True)
+    exe = bindir / ("dxcom.bat" if sys.platform == "win32" else "dxcom")
+    exe.write_text("", encoding="utf-8"); exe.chmod(0o755)
+    monkeypatch.setenv("ALP_DEEPX_SDK_HOME", str(tmp_path / "sdk"))
+    src = tmp_path / "m.onnx"; src.write_bytes(b"ONNX-IN")
+    cfg = tmp_path / "m.json"; cfg.write_text("{}", encoding="utf-8")
+    seen = []
+
+    def fake_run(cmd, **kw):
+        seen.append(cmd)
+        if "-v" not in cmd:
+            out = Path(cmd[cmd.index("-o") + 1]); out.mkdir(parents=True, exist_ok=True)
+            (out / "m.dxnn").write_bytes(b"DXNN")
+
+        class _R:
+            returncode = 0
+            stdout = "DX-COM 2.3.0"
+            stderr = ""
+        return _R()
+
+    monkeypatch.setattr("alp_model.adapters.deepx.subprocess.run", fake_run)
+    a = DeepxAdapter()
+    assert a.is_available() is True
+    assert a.compile(src, accel_config="", out_dir=tmp_path, opts={"config": str(cfg)}).payload == b"DXNN"
+    assert all(Path(c[0]) == exe for c in seen)
+
+
+def test_deepx_compile_raises_runtimeerror_when_dxcom_missing(tmp_path, monkeypatch):
+    monkeypatch.delenv("ALP_DEEPX_SDK_HOME", raising=False)
+    monkeypatch.setattr("alp_model.adapters.deepx.shutil.which", lambda n, path=None: None)
+    src = tmp_path / "m.onnx"; src.write_bytes(b"x")
+    with pytest.raises(RuntimeError, match="dxcom not found"):
+        DeepxAdapter().compile(src, accel_config="", out_dir=tmp_path, opts={"config": "c.json"})
 
 
 def test_deepx_compile_raises_when_no_dxnn_produced(tmp_path, monkeypatch):
@@ -613,6 +657,7 @@ def test_deepx_compile_raises_when_no_dxnn_produced(tmp_path, monkeypatch):
         return _C()
 
     monkeypatch.setattr("alp_model.adapters.deepx.subprocess.run", fake_run)
+    monkeypatch.setattr("alp_model.adapters.deepx._dxcom_exe", lambda: "dxcom")
     with pytest.raises(RuntimeError, match="no .dxnn"):
         DeepxAdapter().compile(src, accel_config="", out_dir=tmp_path, opts={"config": str(cfg)})
 

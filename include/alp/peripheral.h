@@ -286,6 +286,27 @@ void alp_delay_ms(uint32_t ms);
  */
 uint64_t alp_uptime_ms(void);
 
+/**
+ * @brief Microseconds since an unspecified, backend-defined epoch.
+ *
+ * Same contract as @ref alp_uptime_ms, in microseconds: only the
+ * difference between two readings in the same process is meaningful.
+ * Exists so OS-agnostic code can wait "until N us after an event" instead
+ * of "N us from now", letting CPU work it does in between count toward the
+ * wait (the CC3501E bridge's inter-phase settles, #2052).
+ *
+ * @par Resolution: sub-microsecond where the backend has a cycle counter
+ *      (Zephyr with CONFIG_TIMER_HAS_64BIT_CYCLE_COUNTER, e.g. AEN), else
+ *      one kernel tick; CLOCK_MONOTONIC on Linux.  A reading can lag real
+ *      time by up to one resolution step, so a deadline wait built on it
+ *      may run short by that much on a tick-resolution backend.
+ *
+ * @return Microseconds since the epoch.
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL] -- v0.17 new.
+ */
+uint64_t alp_uptime_us(void);
+
 /* ------------------------------------------------------------------ */
 /* GPIO                                                                */
 /* ------------------------------------------------------------------ */
@@ -960,6 +981,13 @@ typedef enum {
 } alp_uart_flow_t;
 
 typedef struct {
+	/**
+	 * Port selector.  On Yocto/Linux it picks a tty family by range:
+	 * 0..99 -> `/dev/ttyS<n>`, 100..199 -> `/dev/ttyAMA<n - 100>`,
+	 * 200..299 -> `/dev/ttyUSB<n - 200>`, 300..399 -> `/dev/ttySC<n - 300>`
+	 * (Renesas SCIF, e.g. RZ/V2N); anything >= 400 fails with
+	 * @ref ALP_ERR_INVAL.  On Zephyr it is the backend's UART index.
+	 */
 	uint32_t          port_id;
 	uint32_t          baudrate;
 	uint8_t           data_bits; /**< Usually 8. */

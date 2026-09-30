@@ -47,6 +47,14 @@ uint64_t alp_uptime_ms(void)
 	return g_fake_now_ms;
 }
 
+/* #2052: the bridge's settles count from the last transfer's end via
+ * alp_uptime_us(); derived from this suite's millisecond clock so both
+ * readings stay on the same (virtual) timeline. */
+uint64_t alp_uptime_us(void)
+{
+	return alp_uptime_ms() * 1000u;
+}
+
 void alp_delay_ms(uint32_t ms)
 {
 	g_fake_now_ms += ms;

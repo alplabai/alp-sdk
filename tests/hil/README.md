@@ -231,6 +231,20 @@ remote invocation, so a path is passed through unmangled. The
 `serial.duration_s` bound and `ssh -tt` pty still apply exactly as
 above -- only the invoked command line changes.
 
+#### Checking the running image (`ssh_command:`)
+
+For facts about the booted Linux image (dmesg, `/dev` nodes, systemd)
+there is no binary to build.  A spec may carry `ssh_command:` instead of
+`example:` -- a read-only shell one-liner the runner runs over plain
+`ssh <host> <command>`; `serial:` expectations apply to its output.  No
+`--artifact-dir`, no scp.  `ssh_command` excludes `example`, `ssh_args`
+and `ssh_files`.  Print a marker (`echo HIL_..._OK`) from the command
+rather than matching the command's own text.
+
+```sh
+python tests/hil/run_smoke.py tests/hil/v2m103-x-evk --no-common --ssh-host root@<bench-host>
+```
+
 ---
 
 ## What this tree does NOT do
