@@ -63,17 +63,62 @@ TAS2563 amps on `ALP_E1M_X_I2C0`, I2S on `ALP_E1M_X_I2S0`, the TMUX1574 path
 mux, the `\SD_N` / `IRQ_N` control lines on E1M IOs, and `board_id` on
 `ALP_E1M_X_ADC7`.
 
-Still pending, and **data-gated** rather than merely unwritten: adding the
-`ti,tas2563` codec nodes + audio-graph-card to the carrier
-`e1m-x-evk.dtsi` needs four SoC-side values this repo does not carry —
-the SSI/SSIU node label the linux-renesas 6.1.141-cip43 `r9a09g056` dtsi
-exposes, its binding, the PFC function for the SSIU pads
-(`metadata/pinmux/v2n.yaml` still reads `e1m_pad`/`e1m_function` `"TBD"`
-on every SSIU row), and the MCLK source + rate.  A
-`CONFIG_SND_SOC_TAS2562=y` kernel fragment used to be staged ahead of
-those nodes; it was removed in #1171 because a codec driver with no DT
-consumer cannot bind, and it lands again in the same change as the nodes.
-The on-board control-line wiring on the current PCB rev is also pending.
+## Audio: A55 today, CM33 gap (#1171)
+
+**A55 / Linux** plays through `rcar_sound` (SSIU1 + SSIU2; PR #2536, #2331):
+SSI2 carries the data line and SSI1 supplies SCK/WS
+(`SSIU_SSI_MODE1.ssi2_pin`, R01UH1072EJ0120 8.5.2.3.16).  The card runs from
+Audio_CLKB only (24.576 MHz from the clock generator); Audio_CLKA and
+Audio_CLKC are unfed on the SoM and carrier, and listing them makes the CPG
+fail with `-110`.  Playback was run on E1M-V2M103; nobody has listened to the
+speaker yet, and capture and the SSIU3/SSIU4 group are untried.
+
+**CM33 / Zephyr has no I2S path.** Neither Zephyr `drivers/i2s` (RA `ssie`,
+NXP, STM32, ...; nothing for RZ/V) nor hal_renesas (`r_ssi` exists only for
+RA; RZ carries just register headers for RZ/A and RZ/G) provides an SSIU
+driver, so `src/backends/i2s/zephyr_drv.c` has nothing to bind on `m33_sm`
+and the class resolves to `src/common/stub/stub_i2s.c` (`ALP_ERR_NOSUPPORT`).
+A CM33 backend therefore means writing a new Zephyr `i2s_*` driver against
+the SSIU registers.  Manual references (R01UH1071EJ0120 Rev.1.20, register
+detail in R01UH1072EJ0120):
+
+| Need | Where |
+|---|---|
+| SSIU overview, ten SSI modules, SCK 297.3 kHz to 12.5 MHz | 8.5.1 |
+| Register access port and DMA access port | 8.5.2.1, 8.5.2.2 |
+| `SSIU_SSIn_BUSIF_*`, `SSIU_SSIq_MODE/CONTROL/STATUS`, `SSIU_SSI_MODE1..3`, `SSIU_SSICRn/SSISRn/SSIWSRn/SSIFMRn`, `SSIU_SSIn_BUSIF` FIFO | 8.5.2.3.1 to 8.5.2.3.34 |
+| Basic configuration, shared-SCK groups, full duplex, bus formats | 8.5.3.2, 8.5.3.3, 8.5.3.7, 8.5.3.8 |
+| Tx/Rx sequence, bit-clock control, pin connections, interrupts | 8.5.3.10 to 8.5.3.14 |
+| Audio clock generator (ADG) input dividers and audio master clocks | 8.1.3.6.1, 8.1.3.6.3, 8.1.3.6.4, 8.3 |
+| Bus addresses: SSIU registers and SSIU (DMAC) FIFO port, secure and non-secure windows | 4.x memory map (SSIU 0x43C3_0000 / 0x53C3_0000, SSIU DMAC 0x43C4_0000 / 0x53C4_0000) |
+| DMA request lines `ssipNM_dreq_rx/tx` per SSI in the ICU input-event list | Table 4.6-23 |
+| Clock and reset: SSIF clock, SSI module resets, MSTOP | 4.4 (CPG) |
+
+Facts a driver author must plan for:
+
+- **FSP/HAL:** no FSP module exists for this IP on RZ/V2N, so the register
+  layer, the CPG clock/reset/MSTOP calls, and the pinmux calls are new code.
+  Reuse only the existing FSP DMAC-B glue (`bringing-up-a-cm33-amp-peripheral-link`
+  lists its channel-parking traps) and the `renesas,rz-*` DT/pinctrl idiom.
+- **DMA path:** the SSIU FIFO is fed through the SSIU (DMAC) window with the
+  per-SSI DREQ lines; the ICU must route those events to the DMAC unit the
+  CM33 owns.  The CM33 reaches DDR only through the 128 MiB window described
+  in `metadata/socs/renesas/rzv2n/n44.json`, so audio buffers must sit in
+  CM33-reachable RAM.
+- **Clocks:** the only usable audio master is Audio_CLKB (the SoM's clock
+  generator SE3 output, 24.576 MHz).  Do not enable Audio_CLKA or Audio_CLKC.
+  The SSIF module clock is a CPG-owned clock the A55 also gates (see the
+  RSCI7 keep-on precedent in `meta-alp-sdk`).
+- **Ownership:** SSIU1/SSIU2 (I2S0 pads P44, P45, P47) are A55-owned today.
+  The SSIU register block and the audio clock generator are shared silicon;
+  A55 and CM33 cannot both drive SSI1/SSI2 (SSI2 is slaved to SSI1's pins),
+  so the CM33 may own an SSI group only if the Linux DT disables `rcar_sound`
+  for it.  The natural split is per group: I2S0 (SSIU1+2) on one core and
+  I2S1 (SSIU3+4, pads P12/P13/P04/P15) on the other.  Never share ADG state.
+
+Until a maintainer picks the ownership split and a driver is written,
+`i2s0`/`i2s1` on `m33_sm` stay `driver_status: none` and the class stays
+NOSUPPORT there.
 
 ## Follow-ups (not blockers)
 

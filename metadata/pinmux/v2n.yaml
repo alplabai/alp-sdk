@@ -123,10 +123,10 @@ pads:
   - { e1m_pad: "AQ34", e1m_function: "SD_DET", owner: "renesas", silicon_peripheral: "SD1_SD1CD", silicon_pad: "PA1" }
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "SD1_SD1PWEN", silicon_pad: "PA3" }
   - { e1m_pad: "AR32", e1m_function: "SD_RST", owner: "renesas", silicon_peripheral: "SDCARD_RST", silicon_pad: "PA4" }
-  - { e1m_pad: "AQ5", e1m_function: "I2S0_SCLK", owner: "renesas", silicon_peripheral: "SSIU1_SSI1_SCK", silicon_pad: "P44" }
+  - { e1m_pad: "AQ5", e1m_function: "I2S0_SCLK", owner: "renesas", core: "a55", silicon_peripheral: "SSIU1_SSI1_SCK", silicon_pad: "P44" }
   - { e1m_pad: "AQ4", e1m_function: "I2S0_SDI", owner: "renesas", silicon_peripheral: "SSIU1_SSI1_SDATA", silicon_pad: "P46" }
-  - { e1m_pad: "AR5", e1m_function: "I2S0_WS", owner: "renesas", silicon_peripheral: "SSIU1_SSI1_WS", silicon_pad: "P45" }
-  - { e1m_pad: "AR4", e1m_function: "I2S0_SDO", owner: "renesas", silicon_peripheral: "SSIU2_SSI2_SDATA", silicon_pad: "P47" }
+  - { e1m_pad: "AR5", e1m_function: "I2S0_WS", owner: "renesas", core: "a55", silicon_peripheral: "SSIU1_SSI1_WS", silicon_pad: "P45" }
+  - { e1m_pad: "AR4", e1m_function: "I2S0_SDO", owner: "renesas", core: "a55", silicon_peripheral: "SSIU2_SSI2_SDATA", silicon_pad: "P47" }
   - { e1m_pad: "AR11", e1m_function: "I2S1_SCLK", owner: "renesas", silicon_peripheral: "SSIU3_SSI3_SCK", silicon_pad: "P12" }
   - { e1m_pad: "AR10", e1m_function: "I2S1_SDI", owner: "renesas", silicon_peripheral: "SSIU3_SSI3_SDATA", silicon_pad: "P04" }
   - { e1m_pad: "AQ11", e1m_function: "I2S1_WS", owner: "renesas", silicon_peripheral: "SSIU3_SSI3_WS", silicon_pad: "P13" }

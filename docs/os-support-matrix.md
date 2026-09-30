@@ -91,7 +91,7 @@ plan in `VERSIONS.md`.
 | **PWM** (`<alp/pwm.h>`)   | code complete¹                | code complete¹         | code complete¹            | code complete¹            |
 | **ADC** (`<alp/adc.h>`)   | code complete¹                | code complete¹         | code complete¹            | code complete¹            |
 | **Counter / QEnc** (`<alp/counter.h>`) | code complete¹  | code complete¹         | code complete¹            | code complete¹            |
-| **I²S / SAI** (`<alp/i2s.h>`) | code complete¹ (ALSA)     | code complete¹ (ALSA)  | code complete¹ (ALSA)     | code complete¹ (ALSA)     |
+| **I²S / SAI** (`<alp/i2s.h>`) | code complete¹ (ALSA)     | code complete¹ (ALSA; SSI2 data + SSI1 SCK/WS, Audio_CLKB)² | code complete¹ (ALSA)     | code complete¹ (ALSA)     |
 | **CAN / CAN-FD** (`<alp/can.h>`) | code complete¹         | code complete¹         | code complete¹            | code complete¹            |
 | **RTC** (`<alp/rtc.h>`)   | code complete¹                | code complete¹         | code complete¹            | code complete¹            |
 | **Watchdog** (`<alp/wdt.h>`) | code complete¹             | code complete¹         | code complete¹            | code complete¹            |
@@ -115,7 +115,7 @@ plan in `VERSIONS.md`.
 | **PWM** (`<alp/pwm.h>`)   | **GA** (Zephyr `pwm_*`)  | **GA** (Zephyr `pwm_*`)  | **GA** (Zephyr `pwm_*`)   | **GA** (Zephyr `pwm_*`)   | stub               | stub                 | stub               |
 | **ADC** (`<alp/adc.h>`)   | **GA** (Zephyr `adc_*`)  | **GA** (Zephyr `adc_*`)  | **GA** (Zephyr `adc_*`)   | **GA** (Zephyr `adc_*`)   | stub               | stub                 | stub               |
 | **Counter / QEnc** (`<alp/counter.h>`) | **GA** (Zephyr `counter_*` + `sensor_*`) | **GA** (Zephyr `counter_*` + `sensor_*`) | **GA** (Zephyr `counter_*` + `sensor_*`) | **GA** (Zephyr `counter_*` + `sensor_*`) | stub | stub | stub |
-| **I²S / SAI** (`<alp/i2s.h>`) | **GA** (Zephyr `i2s_*`) | **GA** (Zephyr `i2s_*`) | **GA** (Zephyr `i2s_*`)   | **GA** (Zephyr `i2s_*`)   | stub               | stub                 | stub               |
+| **I²S / SAI** (`<alp/i2s.h>`) | **GA** (Zephyr `i2s_*`) | **GA** (Zephyr `i2s_*`) | **GA** (Zephyr `i2s_*`)   | **GA** (Zephyr `i2s_*`)   | stub (no SSIU driver, #1171)³ | stub (no SSIU driver, #1171)³ | stub               |
 | **CAN / CAN-FD** (`<alp/can.h>`) | **GA** (Zephyr `can_*`) | **GA** (Zephyr `can_*`) | **GA** (Zephyr `can_*`) | **GA** (Zephyr `can_*`) | stub               | stub                 | stub               |
 | **RTC** (`<alp/rtc.h>`)   | **GA** (Zephyr `rtc_*`)  | **GA** (Zephyr `rtc_*`)  | **GA** (Zephyr `rtc_*`)   | **GA** (Zephyr `rtc_*`)   | code complete¹     | code complete¹       | code complete¹     |
 | **Watchdog** (`<alp/wdt.h>`) | **GA** (Zephyr `wdt_*`) | **GA** (Zephyr `wdt_*`) | **GA** (Zephyr `wdt_*`)   | **GA** (Zephyr `wdt_*`)   | code complete¹     | code complete¹       | code complete¹     |
@@ -142,6 +142,18 @@ sysroot / real device nodes in CI; the mqtt/security backends additionally lack
 `libmosquitto`/OpenSSL dev headers on the CI host, so their real paths are
 compile-verified only where those are installed).  The cross-core
 RPMsg proxy is a separate slice.
+
+² **V2N I²S on Linux** — ALSA through `rcar_sound` (SSIU1/SSIU2 pads only: SSI2
+carries the data line, SSI1 supplies SCK/WS; `SSIU_SSI_MODE1.ssi2_pin` per
+R01UH1072EJ0120 8.5.2.3.16).  Only Audio_CLKB is usable on the E1M-X carrier
+(Audio_CLKA/CLKC are unfed).  Landing with PR #2536 (#2331); playback ran on
+E1M-V2M103, capture and the SSIU3/SSIU4 group (`i2s1`) are untried.
+
+³ **V2N/V2M I²S on Zephyr (CM33)** — no driver exists: Zephyr has no RZ/V2N SSIU
+`i2s_*` driver and hal_renesas ships no `r_ssi` FSP module for RZ/V.  The class
+falls through to the NOSUPPORT stub.  Scope and gap write-up in
+`docs/e1m-x-v2n-sdk-integration.md` ("Audio: A55 today, CM33 gap"); tracked in
+#1171.  SSI1/SSI2 are A55-owned (`metadata/e1m_modules/v2n/core-ownership.yaml`).
 
 ### Cross-cutting v0.2 capability infrastructure
 
