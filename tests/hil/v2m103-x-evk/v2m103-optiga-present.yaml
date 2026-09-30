@@ -1,27 +1,28 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# E1M-V2M103 OPTIGA Trust M (U33, BRD_I2C = i2c-8, 0x30): the address ACKs
-# to a plain 2-byte read.  Presence only; the APDU-level check is
-# v2n-secure-element-sign.  Read-only: one i2c read transaction, no write.
-# Bench fact (2026-09-30): the OPTIGA does NOT answer i2cdetect's
-# single-byte SMBus probe (shows "--" even when present), but ACKs a
-# multi-byte read, so this spec uses i2ctransfer r2 (neighbours 0x2f/0x31
-# NACK the same read, so the ACK is not a bus artifact).  After a few
-# seconds idle the part NACKs the FIRST transaction while it wakes from
-# sleep and ACKs the next, so the probe retries for about 1 s (20 x 50 ms), the same order as
-# the driver's own NACK-polling budget (chips/optiga_trust_m).  On the
-# 2026-09-30 bench unit the part is intermittent even beyond that (#2507),
-# so a FAIL here is a real finding, not a flaky spec.
+# E1M-V2M103 OPTIGA Trust M (U33, BRD_I2C = i2c-8, 0x30): read the IFX
+# I2C protocol I2C_STATE register (address 0x82, 4 bytes).  The IFX I2C
+# protocol is register-addressed: a transaction writes the register
+# address, then reads.  A bare read, or i2cdetect's SMBus quick/read-byte
+# probe, is not a valid transaction and is NACKed (bench 2026-09-30,
+# #2507).  Writing 0x82 only selects the register to read; nothing is
+# written to the device's data or NVM.  The part NACKs the FIRST
+# transaction after idle while it wakes from sleep, so the probe retries.
+# Presence + protocol liveness only; the APDU-level check is
+# v2n-secure-element-sign.
 
 schema_version: 1
 name: v2m103-optiga-present
 description: |
-  OPTIGA Trust M answers at 0x30 on i2c-8.
+  OPTIGA Trust M answers the IFX I2C I2C_STATE read (reg 0x82) at 0x30 on i2c-8.
 
 flash_method: ssh-run
 ssh_command: |-
   for i in $(seq 1 20); do
-    if i2ctransfer -f -y 8 r2@0x30 >/dev/null 2>&1; then echo HIL_OPTIGA_ACK; break; fi
+    if i2ctransfer -f -y 8 w1@0x30 0x82 >/dev/null 2>&1; then
+      sleep 0.01
+      s=$(i2ctransfer -f -y 8 r4@0x30 2>/dev/null) && { echo "HIL_OPTIGA_I2C_STATE $s"; echo HIL_OPTIGA_ACK; break; }
+    fi
     sleep 0.05
   done
 
