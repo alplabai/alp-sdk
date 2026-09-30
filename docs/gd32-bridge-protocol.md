@@ -1274,8 +1274,10 @@ USART-only (User Manual Rev1.2 §1.4).
 normal upgrade path).**
 
 * A 32 KB bootloader lives at the base of GD32 flash, never
-  overwritten by a field upgrade; two 236 KB **slots** sit in upper
-  flash with an A/B metadata pair between them.  The active slot
+  overwritten by a field upgrade, followed by the A/B metadata pair
+  (`0x08008000`) and two 216 KB **slots**: slot A at `0x0800A000` in
+  flash bank 0 and slot B at `0x08040000`, the start of bank 1, so an
+  upgrade erases only the bank the running image is not executing from.  The active slot
   runs at boot while the inactive slot receives the upgrade;
   roll-back is a metadata flip + reset.  Destructive flashing is
   armed only in `-DBRIDGE_OTA_PARTITIONED` firmware builds — the
@@ -1298,7 +1300,10 @@ firmware in `gd32-bridge-firmware:src/ota.c`):
 
 Value encodings: `state` = 0 IDLE / 1 READY / 2 BUSY / 3 VERIFIED /
 4 ERROR; slot bytes = 0 A / 1 B / `0xFF` none-pending.  `WRITE_CHUNK`
-offsets must land on 8-byte (FMC doubleword) boundaries; the image
+offsets must land on 8-byte (FMC doubleword) boundaries -- firmware
+advertises `chunk_max` = 56 (the largest multiple of 8 that fits the
+envelope), and a misaligned offset answers `STATUS_INVAL` (0x01) with
+the session left READY, so the host can resend at a valid offset; the image
 CRC-32 is IEEE 802.3 reflected (zlib-compatible) -- host code computes
 the `expected_crc32` BEGIN wants (and cross-checks VERIFY's
 `computed_crc32`) with `gd32g553_ota_image_crc32()`
