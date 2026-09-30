@@ -231,14 +231,17 @@ the release is signed; a release without signatures is labelled `UNSIGNED`
 in its notes and proves integrity only). Its
 [`docs/RECOVERY.md`](https://github.com/alplabai/gd32-bridge-firmware/blob/dev/docs/RECOVERY.md)
 is the flashing guide for both routes above (external SWD probe, and
-host-driven SWD from the V2N A55) and the `GET_VERSION` check over
-BRD_I2C at `0x70`. Verify a signed release against
+host-driven SWD from the V2N A55, for which this repository carries the
+working master, `examples/v2n/v2n-gd32-swd-flash/`) and the `GET_VERSION`
+check over BRD_I2C at `0x70`. Verify a signed release against
 [`keys/alp_release_signing_ecdsa_p256.pub.pem`](../keys/alp_release_signing_ecdsa_p256.pub.pem);
 see [`som-release-signing.md`](som-release-signing.md) for the key model.
-Binaries and signing material stay in the firmware repository, never here.
+The binaries are published by the firmware repository, never committed
+here, and the private signing key is never stored in any repository.
 
 The boundary: **public recovery** is restoring a known image at the
-addresses above with a probe or the on-SoM SWD route. **Manufacturing** is
+addresses (bootloader `0x08000000`, metadata record `0x08008000`, slot A
+`0x0800A000`, slot B `0x08040000`) with a probe or the on-SoM SWD route. **Manufacturing** is
 internal and out of scope for this SDK: option-byte provisioning (write
 protection, BOOTLK, SPC), per-unit records, factory fixtures and the bench
 scripts. Recovery never needs those to bring the bridge back.
