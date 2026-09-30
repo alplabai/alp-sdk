@@ -19,8 +19,11 @@ the first group (for example a class whose Zephyr driver symbol is not enabled)
 no longer gets a handle that drives nothing. With no backend linked the
 dispatcher returns NULL with `last_error = ALP_ERR_NOT_PRESENT_ON_THIS_SOC`
 (`src/adc_dispatch.c:93` ("alp_z_set_last_error(ALP_ERR_NOT_PRESENT_ON_THIS_SOC);")).
-dac and i3c always link their `zephyr_drv` backend, so they return its open
-code instead: `ALP_ERR_INVAL` or `ALP_ERR_NOT_READY` when the driver is on
+That applies where the class's `zephyr_drv` is itself Kconfig-gated and unset
+(i2c, spi, uart, gpio, pwm, i2s, can, rtc, wdt, counter, qenc, storage).
+Classes that always link `zephyr_drv` with a wildcard `silicon_ref` (dac, i3c,
+usb, ble, wifi, mqtt, mproc, rpc, audio) return that backend's own open error
+instead, e.g. for i3c `ALP_ERR_INVAL` or `ALP_ERR_NOT_READY` when the driver is on
 (`src/backends/i3c/zephyr_drv.c:82` ("if (cfg->bus_id >= ARRAY_SIZE(alp_i3c_devs)) return ALP_ERR_INVAL;")
 and `src/backends/i3c/zephyr_drv.c:84` ("if (dev == NULL || !device_is_ready(dev)) return ALP_ERR_NOT_READY;")),
 or `ALP_ERR_NOSUPPORT` when `CONFIG_DAC` / `CONFIG_I3C_CONTROLLER` is off
