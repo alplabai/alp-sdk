@@ -64,9 +64,7 @@ def test_detector_flags_plain_and_accepts_gated():
     gated = "zephyr_library_sources_ifdef(CONFIG_X_SW_FALLBACK\n  ${D}/src/backends/i2c/sw_fallback.c)\n"
     in_if = "if(A AND CONFIG_T_SW_FALLBACK)\n    zephyr_library_sources(\n  ${D}/src/backends/tmu/sw_fallback.c)\n"
     allowed = "zephyr_library_sources(\n  ${D}/src/backends/dsp/sw_fallback.c)\n"
-    wrong_sym = "zephyr_library_sources_ifdef(CONFIG_I2C
-  ${D}/src/backends/i2c/sw_fallback.c)
-"
+    wrong_sym = "zephyr_library_sources_ifdef(CONFIG_I2C\n  ${D}/src/backends/i2c/sw_fallback.c)\n"
     assert ungated(wrong_sym) == ["i2c"]
     assert ungated(plain) == ["i2c"]
     assert ungated(gated) == []
