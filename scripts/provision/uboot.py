@@ -158,6 +158,24 @@ def parse_clkgen_line(text: str) -> str | None:
     return next((ln for ln in alp_lines(text) if ln.startswith(CLKGEN_LINE_PREFIX)), None)
 
 
+GD32_NRST_LINE_PREFIX = "ALP: ACT88760 GD32_NRST"
+
+
+def parse_gd32_nrst(text: str) -> str | None:
+    """What U-Boot patch 0011 did to ACT88760 reg 0x10 this boot:
+    ``"released"`` (early OTP: 0x88 -> 0x08), ``"already"`` (OTP already
+    0x08, nothing written) or ``"failed"``. None if the line is absent
+    (a bootloader without 0011)."""
+    line = next((ln for ln in alp_lines(text) if ln.startswith(GD32_NRST_LINE_PREFIX)), None)
+    if line is None:
+        return None
+    if "already released" in line:
+        return "already"
+    if "release failed" in line or "not released" in line:
+        return "failed"
+    return "released" if "released" in line else None
+
+
 def bl2_errors(text: str) -> list[str]:
     """Error lines in the BL2/BL31 part of a boot log (text before U-Boot)."""
     m = UBOOT_BANNER_RE.search(text)

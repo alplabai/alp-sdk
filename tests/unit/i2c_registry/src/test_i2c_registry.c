@@ -160,3 +160,36 @@ ZTEST(alp_i2c_registry, test_sw_fallback_loopback_round_trip)
 		zassert_equal(rx_long[i], 0u);
 	}
 }
+
+/* ---------- (g) pre-seeded caps survive a "nothing to report" backend ----- */
+
+ZTEST(alp_i2c_registry, test_sw_fallback_leaves_preseeded_caps_untouched)
+{
+	/* alp_i2c_open() pre-seeds caps from the registry's base_caps /
+     * base_class_flags BEFORE calling ops->open() -- a backend with
+     * nothing to say must leave that descriptor alone (Wave 1, #1640).
+     * sw_fallback is exactly such a backend.  Seed a sentinel that no
+     * real base_caps value would produce and assert it survives the
+     * call: this is the guard that fails if sw_open() re-introduces a
+     * `caps_out->flags = 0u;` clobber. */
+	const alp_i2c_ops_t *ops = _find_sw_fallback_ops();
+	zassert_not_null(ops);
+
+	alp_i2c_backend_state_t st   = { 0 };
+	alp_capabilities_t      caps = {
+		.flags         = ALP_INSTANCE_CAP_REPORTED,
+		.class_flags   = 0xBEEFu,
+		.max_rate_hz   = 12345u,
+		.channel_count = 7u,
+	};
+	alp_i2c_config_t cfg = { .bus_id = 0u, .bitrate_hz = 100000u };
+
+	zassert_equal(ops->open(&cfg, &st, &caps), ALP_OK);
+
+	zassert_equal(caps.flags,
+	              (uint32_t)ALP_INSTANCE_CAP_REPORTED,
+	              "sw_fallback must not clobber a pre-seeded caps_out->flags");
+	zassert_equal(caps.class_flags, 0xBEEFu);
+	zassert_equal(caps.max_rate_hz, 12345u);
+	zassert_equal(caps.channel_count, 7u);
+}

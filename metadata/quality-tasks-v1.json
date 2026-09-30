@@ -193,7 +193,7 @@
     },
     {
       "id": "changelog-citations",
-      "description": "Every `path:line` citation in a changelog.d/*.md fragment resolves to a real file and an in-range line, and an anchored citation's quoted text is still inside the cited range, so a release note cannot point at code that moved (#1416); a citation added since DIFF_BASE must be anchored, and a near-miss anchor the gate cannot parse is an error (#2186).",
+      "description": "Every `path:line` citation in a changelog.d/*.md fragment resolves to a real file, and an anchored citation's quoted text is still trustworthy: in-range is always a pass, and a PRE-EXISTING citation whose text drifted to one unique, long-enough (16+ char), in-bounds line elsewhere in the file also passes (advisory note) rather than failing on an unrelated line shift alone (#1416, #2350); a citation ADDED since DIFF_BASE gets none of that drift tolerance -- its line must already be right -- and a near-miss anchor the gate cannot parse is an error either way (#2186); `--strict-lines` (wired into scripts/bump_version.py before a release cut) turns the same drift into a hard error so it cannot freeze into released history unresolved.",
       "runner": "check-script",
       "script": "scripts/check_changelog_citations.py",
       "gate": true,

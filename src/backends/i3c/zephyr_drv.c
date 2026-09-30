@@ -78,14 +78,14 @@ static alp_status_t _errno_to_alp(int err)
 static alp_status_t
 z_open(const alp_i3c_config_t *cfg, alp_i3c_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	if (cfg->bus_id >= ARRAY_SIZE(alp_i3c_devs)) return ALP_ERR_INVAL;
 	const struct device *dev = alp_i3c_devs[cfg->bus_id];
 	if (dev == NULL || !device_is_ready(dev)) return ALP_ERR_NOT_READY;
 	/* Timing + DAA are devicetree-owned (i3c-scl-hz, od-thigh-min-ns);
 	 * no i3c_configure() call here on purpose -- see file header. */
-	st->dev         = (void *)dev;
-	st->bus_id      = cfg->bus_id;
-	caps_out->flags = 0u;
+	st->dev    = (void *)dev;
+	st->bus_id = cfg->bus_id;
 	return ALP_OK;
 }
 

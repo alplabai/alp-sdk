@@ -20,7 +20,7 @@ does not keep those. `Finding.baselined`, the scan's `file_baselined` branch,
 and the `n_baselined` summary trailer go with it, and `main()` now fails
 `--fail-on-warning` on every IMPLICIT-ENCODING finding, the same as every
 other category:
-`scripts/check_cross_platform.py:1208` ("if findings and args.fail_on_warning").
+`scripts/check_cross_platform.py:1218` ("if findings and args.fail_on_warning").
 
 `tests/scripts/test_check_cross_platform.py` drops the four baseline-specific
 tests in section 12; the behaviour they covered -- an IMPLICIT-ENCODING
@@ -36,7 +36,7 @@ over `linter.scan(...)`:
 
 `.github/workflows/cross-platform-zephyr.yml`'s step comment no longer says
 IMPLICIT-ENCODING warnings "still exit 0, being grandfathered":
-`.github/workflows/cross-platform-zephyr.yml:122` ("the step now fails on any finding,").
+`.github/workflows/cross-platform-zephyr.yml:135` ("the step now fails on any finding,").
 `docs/cross-platform-setup.md` §6.2 is rewritten to match, against a live run
 of the script: `docs/cross-platform-setup.md:681`
 ("check_cross_platform: 0 finding(s)"). ADR 0012's already-merged #2195

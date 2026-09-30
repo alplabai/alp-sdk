@@ -79,15 +79,25 @@
  *     property documents the wiring only: the 6.1 tas2562 driver never
  *     requests an IRQ, so amp faults are not signalled to Linux.
  *
- *     STILL OPEN, not resolved by this landing: I2C-address ownership.
- *     Landing the kernel `ti,tas2563` codec nodes below means the kernel
- *     binds i2c0@0x4d/0x4e for ALSA -- the SDK's own userspace
- *     chips/tas2563 driver (reachable over alp_i2c_* on this same bus)
- *     must not ALSO be wired up against this board/SoM combination, or
- *     the two would race the same registers. No alp-chips PACKAGECONFIG
- *     currently enables it for e1m-v2n101/e1m-v2m101, so there is no
- *     live conflict today -- flagging so a future userspace-driver
- *     enablement on these MACHINEs does not silently reintroduce one.
+ *     I2C-address ownership (issue #2331 item 1): landing the kernel
+ *     `ti,tas2563` codec nodes below means the kernel binds
+ *     i2c0@0x4d/0x4e for ALSA -- the SDK's own userspace chips/tas2563
+ *     driver (reachable over alp_i2c_* on this same bus) must not ALSO
+ *     be wired up against this board/SoM combination, or the two would
+ *     race the same registers. Resolved as a NON-FIGHTING ownership
+ *     contract rather than a PACKAGECONFIG lock-out: tas2563_init()
+ *     already propagates its bus call's status verbatim (#2077), so
+ *     when a kernel driver holds one of these addresses,
+ *     `ioctl(I2C_SLAVE)` on `/dev/i2c-0` fails `EBUSY` before any
+ *     transaction is even attempted, and that surfaces as
+ *     `ALP_ERR_BUSY` out of `tas2563_init()` -- see the @retval
+ *     ALP_ERR_BUSY note on that function in
+ *     `include/alp/chips/tas2563.h`. A future userspace-driver
+ *     enablement on e1m-v2n101/e1m-v2m101 competing with this DT node
+ *     gets a clear, distinct refusal rather than a silent register
+ *     race or a misleading ALP_ERR_NOT_READY ("no chip present").  No
+ *     live conflict today either way (this DT node is the only bound
+ *     client at these addresses, and the driver does not fight it).
  *
  *     Kernel config: the mainline ASoC `tas2562` driver covers the
  *     TAS2563; CONFIG_SND_SOC_RCAR is already `=y` in this BSP's
@@ -221,6 +231,9 @@
 		compatible = "audio-graph-card2";
 		label = "e1m-x-evk-tas2563";
 		links = <&sound_multi_cpu>;
+		/* Off until playback moves to SSI2's data line (#2331): see
+		 * &rcar_sound below. */
+		status = "disabled";
 
 		multi {
 			#address-cells = <1>;
@@ -278,15 +291,26 @@
 	clock-frequency = <24576000>;
 };
 
-/* SoC audio block (SCU/ADG/SSIU/SSI/AUDMAPP). Only SSI1 (playback,
- * SSIU1 SCK/WS + its own SDATA) is wired to the carrier -- SSIU2's extra
- * SDATA line is unused for this playback-only stereo pair (both TAS2563
- * mono amps tap the one shared SDATA line; each is configured over I2C
- * to consume its own TDM slot, not a second physical data line). */
+/* SoC audio block (SCU/ADG/SSIU/SSI/AUDMAPP).
+ *
+ * KNOWN WRONG DATA LINE (#2331): per the SoM + carrier netlists, SSI1's
+ * SDATA (P46) reaches E1M pad AQ4 I2S0_SDI -> TMUX1574 U46 -> the TAS2563
+ * SDOUT pins (U27/U28 pin 10), and SSI2's SDATA (P47) reaches AR4
+ * I2S0_SDO -> the TAS2563 SDIN pins (pin 11). Playback on ssi1 below
+ * therefore drives the amps' SDOUT net, not their SDIN: no audio, and the
+ * SoC and the amps' IV-sense transmit can contend on that net. The fix is
+ * playback on SSI2's data line with SSI1's SCK/WS, which the BSP rsnd
+ * driver's pin sharing (SSI0-parent only) does not cover yet.
+ *
+ * Until it does, the SSI block and the sound card above are disabled, so
+ * no ALSA card exists and sound_pins is never applied: P44/P45/P46 stay
+ * at their reset state and nothing on the SoC side can drive the amps'
+ * SDOUT net. The TAS2563 codec nodes below still probe over I2C0. To
+ * re-enable, fix the data line first, then set both nodes to "okay". */
 &rcar_sound {
 	pinctrl-0 = <&sound_pins>;
 	pinctrl-names = "default";
-	status = "okay";
+	status = "disabled";
 
 	#sound-dai-cells = <1>;
 
@@ -332,10 +356,11 @@
 		 * amp up (SDZ is active-low shutdown), so the line is ACTIVE_HIGH:
 		 * ACTIVE_LOW held both amps in shutdown (they NACK I2C while SDZ is low). */
 		shutdown-gpios = <&pinctrl RZV2N_GPIO(1, 2) GPIO_ACTIVE_HIGH>;
-		/* AMP.FAULT (IRQ_N), shared -- see header comment. SSIU4_SSI4_
-		 * SDATA / P15 (E1M-X I2S1_SDI repurposed as plain GPIO). */
+		/* AMP.FAULT (IRQ_N), shared -- see header comment. SSIU3_SSI3_
+		 * SDATA / P04, pad AR10 (E1M-X I2S1_SDI repurposed as plain GPIO;
+		 * NOT P15, which is I2S1_SDO). */
 		interrupt-parent = <&pinctrl>;
-		interrupts = <RZV2N_GPIO(1, 5) IRQ_TYPE_EDGE_FALLING>;
+		interrupts = <RZV2N_GPIO(0, 4) IRQ_TYPE_EDGE_FALLING>;
 		ti,imon-slot-no = <0>;
 		ti,vmon-slot-no = <2>;
 

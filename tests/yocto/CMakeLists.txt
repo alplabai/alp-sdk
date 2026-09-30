@@ -258,6 +258,39 @@ else()
         "Linux (#1995).  CI's ubuntu-latest yocto job covers it (#1747).")
 endif()
 
+# Regression for issue #1729: src/yocto/inference_tensor_shape.h, the
+# rank/shape-copy helper shared by the ORT and DEEPX Yocto inference
+# backends -- see the header's own file comment. Deliberately NOT linked
+# against alp::sdk: the header pulls in nothing from the SDK besides
+# <alp/inference.h> itself.
+add_executable(alp_test_inference_tensor_shape
+    ${CMAKE_CURRENT_SOURCE_DIR}/inference_tensor_shape.cpp
+)
+target_include_directories(alp_test_inference_tensor_shape PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+)
+
+add_test(NAME alp_test_inference_tensor_shape
+         COMMAND alp_test_inference_tensor_shape)
+
+# Regression for issue #1635: src/yocto/drpai_deploy_shapes.h, the
+# hand-rolled deploy.json (TVM graph-runtime JSON) parser backing the
+# Renesas DRP-AI inference backend, split out of inference_drpai.cpp
+# into its own header specifically so it has ZERO dependency on
+# MeraDrpRuntimeWrapper.h / <linux/drpai.h> / the RUHMI DRP-AI TVM
+# sysroot -- see the test's own header comment. Deliberately NOT linked
+# against alp::sdk: the header pulls in nothing from the SDK.
+add_executable(alp_test_inference_drpai_deploy_shapes
+    ${CMAKE_CURRENT_SOURCE_DIR}/inference_drpai_deploy_shapes.cpp
+)
+target_include_directories(alp_test_inference_drpai_deploy_shapes PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+add_test(NAME alp_test_inference_drpai_deploy_shapes
+         COMMAND alp_test_inference_drpai_deploy_shapes)
+
 # alp_inference_last_invoke_latency_us() end-to-end regression: the last-
 # successful-invoke-latency accessor added alongside <alp/inference.h>'s
 # model-perf-capture support. #includes src/yocto/inference_yocto.c
@@ -281,6 +314,27 @@ target_compile_features(alp_test_inference_latency PRIVATE c_std_99)
 
 add_test(NAME alp_test_inference_latency
          COMMAND alp_test_inference_latency)
+
+# Format-vs-backend gate regression (issue #2389): alp_inference_open()
+# must reject a cfg->format the resolved backend cannot parse (AUTO
+# resolving to DRP-AI, fed an ONNX blob) with ALP_ERR_INVAL before any
+# backend open hook runs.  Same #include-the-.c technique as
+# alp_test_inference_latency, through two fake backends (DRPAI + CPU).
+add_executable(alp_test_inference_format_gate
+    ${CMAKE_CURRENT_SOURCE_DIR}/inference_format_gate.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
+)
+target_include_directories(alp_test_inference_format_gate PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+)
+target_compile_features(alp_test_inference_format_gate PRIVATE c_std_99)
+
+add_test(NAME alp_test_inference_format_gate
+         COMMAND alp_test_inference_format_gate)
 
 # Issue #1254 end-to-end regression: an "onnx" blob_format .alpmodel,
 # decoded by the REAL zcbor-backed alp_model_parse() (src/common/
@@ -865,6 +919,23 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_peripheral_uart_flow_control
              COMMAND alp_test_peripheral_uart_flow_control)
 
+    # port_id -> tty path mapping (incl. /dev/ttySC<N>); same
+    # #include-the-.c technique as alp_test_peripheral_uart_flow_control.
+    add_executable(alp_test_peripheral_uart_resolve_path
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_uart_resolve_path.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+    )
+    target_include_directories(alp_test_peripheral_uart_resolve_path PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_peripheral_uart_resolve_path PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_uart_resolve_path
+             COMMAND alp_test_peripheral_uart_resolve_path)
+
     add_executable(alp_test_peripheral_gpio
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_gpio.c
     )
@@ -934,6 +1005,37 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
     add_test(NAME alp_test_peripheral_gpio_irq_rollback
              COMMAND alp_test_peripheral_gpio_irq_rollback)
+
+    # Closed-pin status-code regression for issue #1734: every op on a
+    # NULL-or-closed `pin` must return ALP_ERR_NOT_READY, matching every
+    # Zephyr dispatcher and ADR-0002's 2026-08-27 amendment, instead of
+    # the ALP_ERR_INVAL this backend used to return for both cases.
+    # peripheral_gpio_closed_pin_status.c #includes the real
+    # src/yocto/peripheral_gpio.c directly (same technique as
+    # alp_test_peripheral_gpio_irq_rollback above) to reach
+    # pool_acquire()/pool_release() and build a genuinely closed,
+    # non-NULL handle without a real /dev/gpiochipN line.  Deliberately
+    # NOT linked against alp::sdk -- same ODR rationale as
+    # alp_test_peripheral_gpio_irq_rollback above.
+    add_executable(alp_test_peripheral_gpio_closed_pin_status
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_gpio_closed_pin_status.c
+        # alp_gpio_open() (compiled in as part of the #include-the-.c-file
+        # technique, even though this test never calls it) references
+        # alp_internal_set_last_error(); pull in its one canonical
+        # definition so the link is self-contained without alp::sdk.
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+    )
+    target_link_libraries(alp_test_peripheral_gpio_closed_pin_status PRIVATE Threads::Threads)
+    target_include_directories(alp_test_peripheral_gpio_closed_pin_status PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_peripheral_gpio_closed_pin_status PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_gpio_closed_pin_status
+             COMMAND alp_test_peripheral_gpio_closed_pin_status)
 
     # Post-open failure rollback + timeout-overflow regression for issue
     # #760 (Yocto watchdog backend): every failure after open() must
@@ -1349,6 +1451,24 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
     add_test(NAME alp_test_can_yocto_self_close
              COMMAND alp_test_can_yocto_self_close)
+
+    # ext_id filter rule (std filter must not match 29-bit frames); same
+    # #include-the-.c technique as alp_test_can_yocto_self_close.
+    add_executable(alp_test_can_yocto_filter_ext_id
+        ${CMAKE_CURRENT_SOURCE_DIR}/can_yocto_filter_ext_id.c
+    )
+    target_link_libraries(alp_test_can_yocto_filter_ext_id PRIVATE Threads::Threads)
+    target_include_directories(alp_test_can_yocto_filter_ext_id PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/can
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_can_yocto_filter_ext_id PRIVATE c_std_99)
+
+    add_test(NAME alp_test_can_yocto_filter_ext_id
+             COMMAND alp_test_can_yocto_filter_ext_id)
 
     # Dev-review follow-up on issue #756: alp_can_close() racing the
     # FIRST-EVER alp_can_add_filter() (the one that lazily spawns the RX

@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 eMMC (SD0, 16 GB): /dev/mmcblk0 exists, the host runs
+# HS200 timing on mmcblk0's own host (RZ/V2N SDHI cannot run HS400; HS200 is
+# the ceiling), no `mmc_select_hs200 failed` in dmesg, and a 64 MiB sequential read from the
+# block device completes.  Strictly read-only: dd only ever reads.
+
+schema_version: 1
+name: v2m103-emmc-block
+description: |
+  mmcblk0 present, HS200 timing on mmcblk0's host, 64 MiB read OK.
+
+flash_method: ssh-run
+ssh_command: |-
+  test -b /dev/mmcblk0 && echo HIL_EMMC_BLK_OK
+  h=$(basename "$(dirname "$(readlink -f /sys/block/mmcblk0/device)")")
+  t=BAD
+  grep -Eq 'timing spec:.*\(mmc HS200\)' "/sys/kernel/debug/$h/ios" 2>/dev/null && t=OK
+  echo HIL_EMMC_TIMING_$t
+  dmesg 2>/dev/null | grep -q 'mmc_select_hs200 failed' && echo HIL_EMMC_HS200_FAILED
+  dd if=/dev/mmcblk0 of=/dev/null bs=1M count=64 2>&1 | grep -q '^64+0 records out' && echo HIL_EMMC_READ_OK
+
+serial:
+  duration_s: 30
+  expect_contains:
+    - "HIL_EMMC_BLK_OK"
+    - "HIL_EMMC_READ_OK"
+    - "HIL_EMMC_TIMING_OK"
+  expect_absent:
+    - "HIL_EMMC_HS200_FAILED"

@@ -653,8 +653,13 @@ static alp_status_t se_aead_encrypt(alp_aead_backend_state_t *state,
 	}
 
 #if defined(CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM)
-	uint32_t key_bits;
-	(void)se_aead_keybits(state->alg, be->key_len, &key_bits);
+	/* open() validated alg/key_len, so this cannot fail today; propagate
+	 * anyway rather than send an unset key size to the SE. */
+	uint32_t     key_bits;
+	alp_status_t kb_st = se_aead_keybits(state->alg, be->key_len, &key_bits);
+	if (kb_st != ALP_OK) {
+		return kb_st;
+	}
 
 	/* Issue #246: the SE forwards send_iv_length / send_tag_length to its
 	 * mbedtls core unchecked, so a short tag would silently downgrade the
@@ -772,8 +777,13 @@ static alp_status_t se_aead_decrypt(alp_aead_backend_state_t *state,
 	}
 
 #if defined(CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM)
-	uint32_t key_bits;
-	(void)se_aead_keybits(state->alg, be->key_len, &key_bits);
+	/* open() validated alg/key_len, so this cannot fail today; propagate
+	 * anyway rather than send an unset key size to the SE. */
+	uint32_t     key_bits;
+	alp_status_t kb_st = se_aead_keybits(state->alg, be->key_len, &key_bits);
+	if (kb_st != ALP_OK) {
+		return kb_st;
+	}
 
 	/* Issues #245/#246: same parameter validation as se_aead_encrypt --
 	 * 12-B IV + 16-B tag per the <alp/security.h> contract and PSA-backend

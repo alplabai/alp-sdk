@@ -3,8 +3,16 @@
 # Runner defaults for E1M-V2M103 (V2M101 silicon + DEEPX DX-M1;
 # catalogued 4 GB RAM / 16 GB eMMC memory tier,
 # metadata/e1m_modules/E1M-V2M103.yaml) + E1M-X-EVK.  Inherits the
-# portable spec set from tests/hil/_common/.  No SoM-specific specs
-# exist in this dir yet.
+# portable spec set from tests/hil/_common/.  SoM-specific specs
+# in this dir (A55, ssh-run): v2n-temp-sensor.yaml,
+# v2n-brd-i2c-bringup.yaml, v2n-secure-element-sign.yaml,
+# v2n-power-monitor.yaml, v2n-drpai-inference.yaml; ssh_command image
+# checks: v2m103-gd32-bridge-linux, v2m103-dx-m1-present,
+# v2m103-boot-emmc-no-audio, v2m103-systemd-no-failed-units; read-only
+# peripheral checks: v2m103-ethernet-link, v2m103-emmc-block,
+# v2m103-xspi-mtd, v2m103-eeprom-read, v2m103-optiga-present,
+# v2m103-gd32-getversion-i2c, v2m103-thermal-zones, v2m103-gd32-gpiochip,
+# v2m103-rtc-ticks, v2m103-wifi-present, v2m103-bt-hci-up, v2m103-dx-m1-pcie.
 #
 # NOTE: E1M-V2M101's OWN catalogue entry declares the same 4 GB
 # dram_mbit as this SKU, yet V2M101 currently ships the family-default

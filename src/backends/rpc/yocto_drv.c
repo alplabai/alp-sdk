@@ -407,6 +407,16 @@ static void *rpc_rx_main(void *arg)
 			alp_rpc_notify_link(ch->owner, ALP_RPC_LINK_LOST);
 			break;
 		}
+		if (fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+			/* A torn-down endpoint fd makes poll() return a POSITIVE
+             * rc with the error bit set in revents, NOT rc < 0 (issue
+             * #1962) -- report the same LINK_LOST as the rc<0 and
+             * read()-EOF branches instead of looping straight back
+             * into a poll() with an infinite timeout and no deadline
+             * to ever stop it. */
+			alp_rpc_notify_link(ch->owner, ALP_RPC_LINK_LOST);
+			break;
+		}
 		if (fds[1].revents & POLLIN) {
 			break; /* close-side notification */
 		}
@@ -680,7 +690,7 @@ static void rpc_be_open_fail(struct rpc_be *ch, unsigned init_mask)
 static alp_status_t
 y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
-	if (caps_out != NULL) caps_out->flags = 0u;
+	(void)caps_out;
 	if (cfg == NULL || cfg->name == NULL || cfg->name[0] == '\0') {
 		return ALP_ERR_INVAL;
 	}
@@ -1271,9 +1281,9 @@ static void y_destroy(alp_rpc_backend_state_t *st)
 static alp_status_t
 y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	(void)cfg;
 	(void)st;
-	if (caps_out != NULL) caps_out->flags = 0u;
 	return ALP_ERR_NOSUPPORT;
 }
 

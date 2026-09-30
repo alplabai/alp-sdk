@@ -153,6 +153,16 @@ struct video_cam_data {
 	struct k_mutex lock;
 
 	/*
+	 * #2499: `cpi_armed` is set whenever a snapshot is started and cleared by
+	 * the STOP interrupt that ends it. alif_cam_cpi_resume() arriving while a
+	 * snapshot is still armed latches `rearm_pending` instead of being dropped,
+	 * and the STOP interrupt honours it. Both are only touched with interrupts
+	 * locked or from the ISR.
+	 */
+	bool cpi_armed;
+	bool rearm_pending;
+
+	/*
 	 * #2287 Stage B (stall-recovery gap found in bench runs 307-310): in ISP-consumer mode, isp_pico.c is the ONLY thing that re-arms the CPI
 	 * (isp_bottom_half()'s successful-attach path, alif_cam_cpi_resume()) -- but
 	 * alif_video_cam_isr()'s own corrupted-frame path (INTR_OUTFIFO_OVERRUN/

@@ -10,6 +10,17 @@
 # `twister · native_sim/native/64` gates on all shards, so that name
 # stays the single required branch-protection context (no protection
 # change needed when the shard count changes).
+#
+# Change-aware selection: on pull_request and merge_group the `select` job
+# runs scripts/select_checks.py over the change set.  When it PROVES no
+# changed path is a native_sim build input (docs, changelog, Yocto layer,
+# pytest gates, scripts outside the CMake-time closure, AEN/V2N-only
+# examples), only shard 1 runs -- its Zephyr-oracle checks still execute --
+# and its twister step is skipped; the aggregator still reports, so the
+# required context goes green instead of blocking the merge queue.  Any
+# doubt means the full 6-shard run.  push to dev/main, the nightly schedule
+# and workflow_dispatch are always full, so nothing reaches `main` without
+# a full twister run on `dev`.
 
 name: pr-twister
 
@@ -20,25 +31,78 @@ on:
     branches: [main, dev]
   # A queued PR waits on the branch's required contexts, and GitHub raises
   # `merge_group` -- not `push` or `pull_request` -- for a merge-queue entry.
-  # Four of `dev`'s five required contexts come from this file
-  # (`twister-shard 1/4` .. `4/4`), so without this trigger a queued PR would
-  # wait on checks that can never fire (#1415). Neither job here is gated to
+  # `dev`'s and `main`'s required twister context is the aggregator
+  # `twister · native_sim/native/64` from this file, so without this trigger
+  # a queued PR would wait on a check that can never fire (#1415). Neither job here is gated to
   # `pull_request`: `twister-shard` carries no job-level `if:` and `twister`
   # carries `if: always()` -- read, not assumed.
   merge_group:
   workflow_dispatch:
+  # Nightly full run on the default branch (dev): the backstop behind
+  # change-aware selection, and it refreshes the ccache that PR runs restore.
+  schedule:
+    - cron: '17 2 * * *'
 
-# Cancel in-flight runs on the same branch when a new commit lands.
+# Cancel in-flight runs on the same branch when a new commit lands.  The
+# event name keeps the nightly (ref = dev) from cancelling a dev push run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Decides full vs skip for this event (see the header comment).  Any error
+  # in here falls back to full, never to skip.
+  select:
+    name: twister · select
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      twister: ${{ steps.select.outputs.twister }}
+      shards: ${{ steps.select.outputs.twister == 'skip' && '[1]' || '[1, 2, 3, 4, 5, 6]' }}
+    steps:
+      # fetch-depth 2: a pull_request checkout is the merge commit, whose
+      # first parent is the base-branch tip -- HEAD^1..HEAD is exactly what
+      # this PR changes on top of the base it will merge into.
+      - name: Checkout alp-sdk
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Select twister scope (scripts/select_checks.py)
+        id: select
+        timeout-minutes: 5
+        env:
+          EVENT: ${{ github.event_name }}
+          MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}
+        run: |
+          set -u
+          base=
+          case "$EVENT" in
+            pull_request) base=HEAD^1 ;;
+            # A queue entry's base_sha is dev plus every entry ahead of it;
+            # each of those is proven by its own group run, so this group
+            # only has to prove its own delta.
+            merge_group)
+              if git fetch --no-tags --depth=1 origin "$MERGE_GROUP_BASE"; then
+                base="$MERGE_GROUP_BASE"
+              fi ;;
+          esac
+          if [ -z "$base" ]; then
+            echo "event '$EVENT': always full"
+            echo "twister=full" >> "$GITHUB_OUTPUT"
+          elif ! python3 scripts/select_checks.py --base "$base" --head HEAD --github-output; then
+            echo "::warning::select_checks.py errored; running full twister"
+            echo "twister=full" >> "$GITHUB_OUTPUT"
+          fi
+
   twister-shard:
-    # NB: this job's checks (`twister-shard 1/4` ...) are NOT the
+    # NB: this job's checks (`twister-shard 1/6` ...) are NOT the
     # required context -- the aggregator `twister` job below is.  The
     # shard count can change here without touching branch protection.
-    name: twister-shard ${{ matrix.shard }}/4
+    name: twister-shard ${{ matrix.shard }}/6
+    needs: select
     runs-on: ubuntu-latest
 
     # #1319: this job carried NO timeout-minutes at all -- neither
@@ -74,7 +138,9 @@ jobs:
       # doesn't mask failures in the other shards.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        # [1..6], or [1] alone when `select` proved twister unaffected --
+        # shard 1 still runs its Zephyr-oracle checks below.
+        shard: ${{ fromJSON(needs.select.outputs.shards) }}
 
     # We deliberately do NOT use the zephyrprojectrtos/ci docker
     # image here.  The image bundles Zephyr SDK 1.0.1 (~17 GB on disk
@@ -90,7 +156,7 @@ jobs:
       ZEPHYR_TOOLCHAIN_VARIANT: host
       # ccache is content-addressed; persisting it across runs turns
       # the per-shard cold builds warm.  Each shard caches its own
-      # objects (the `--subset i/4` partition is deterministic, so a
+      # objects (the `--subset i/6` partition is deterministic, so a
       # shard rebuilds the same suites run-to-run -> high hit rate).
       CCACHE_DIR: ${{ github.workspace }}/.ccache
 
@@ -145,6 +211,24 @@ jobs:
         timeout-minutes: 20
         run: pip3 install west
 
+      # #1319: actions/cache@ makes its own network round trip to the
+      # cache service and can hang on a backend issue.  Worst successful
+      # run 122s (median 38s); 5min = 300s = 2.46x.
+      #
+      # Restored BEFORE `west init` so a hit actually replaces the network
+      # fetch.  It used to run after `west update`, so every shard paid the
+      # full 121-194s fetch (measured over 30 shard jobs, 2026-09-29) and
+      # then unpacked the same 1.9 GB tree on top of it.
+      - name: Cache Zephyr modules
+        id: zephyr-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        timeout-minutes: 5
+        with:
+          path: |
+            ${{ github.workspace }}/zephyrproject/modules
+            ${{ github.workspace }}/zephyrproject/zephyr
+          key: zephyr-v4.4.1-host-${{ runner.os }}
+
       # Zephyr workspace lives next to alp-sdk.  We use west init
       # from a temporary topdir so alp-sdk itself isn't relocated.
       #
@@ -158,6 +242,8 @@ jobs:
       - name: west init zephyr workspace
         working-directory: ${{ github.workspace }}
         timeout-minutes: 25
+        env:
+          ZEPHYR_CACHE_HIT: ${{ steps.zephyr-cache.outputs.cache-hit }}
         run: |
           # #1549: git-over-https had none of the protection apt got.
           # `Acquire::*::Timeout` is an apt knob and reaches nothing here,
@@ -187,7 +273,20 @@ jobs:
           # Pin to the Zephyr release the v0.1 dependency matrix
           # documents (VERSIONS.md).  Bump intentionally; do not
           # track main.
-          west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.4.1 .
+          #
+          # A cache hit restored zephyr/ + modules/ but not .west/, so
+          # adopt the restored manifest repo with `west init -l`.  The
+          # cache key carries the same Zephyr pin as `--mr` (both are
+          # held equal by check_bootstrap_manifest.py), so a hit IS the
+          # pinned tree.  `west update` below then fetches only projects
+          # whose pinned revision is missing locally (west's default
+          # update.fetch=smart) -- nothing, on a warm cache.
+          if [ "$ZEPHYR_CACHE_HIT" = "true" ] && [ -d zephyr/.git ]; then
+            west init -l zephyr
+          else
+            rm -rf zephyr modules
+            west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.4.1 .
+          fi
           # `west init` is deliberately OUTSIDE the retry loop: it is not
           # idempotent -- it refuses on an already-initialised workspace
           # -- so a loop wrapping both would fail attempt 2 at `init`,
@@ -208,24 +307,19 @@ jobs:
           done
           west zephyr-export
 
-      # #1319: actions/cache@ makes its own network round trip to the
-      # cache service and can hang on a backend issue.  Worst successful
-      # run 122s (median 38s); 5min = 300s = 2.46x.
-      - name: Cache Zephyr modules
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
-        timeout-minutes: 5
-        with:
-          path: |
-            ${{ github.workspace }}/zephyrproject/modules
-            ${{ github.workspace }}/zephyrproject/zephyr
-          key: zephyr-v4.4.1-host-${{ runner.os }}
-
-      # Persist ccache objects across runs, per shard.  The save key is
-      # per-SHA so each run writes a fresh entry; restore-keys falls
-      # back to the latest cache for this shard so warm builds reuse it.
+      # Persist ccache objects across runs, per shard.  restore-keys
+      # falls back to the latest cache for this shard so warm builds
+      # reuse it.  Restore-only here; the save step after twister runs on
+      # push/schedule alone.  Every PR and merge-queue run used to save
+      # its own ~3.1 GB set (6 shards) into the repo's 10 GB Actions
+      # cache -- usage sat at 11.1 GB on 2026-09-29 -- evicting dev's
+      # entries, which are the only ones a PR run can restore anyway
+      # (a PR sees its own ref, its base branch and the default branch;
+      # a merge-queue ref is deleted after the merge).
       # #1319: worst successful run 14s; 2min = 8.6x.
-      - name: Cache ccache objects
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      - name: Restore ccache objects
+        if: needs.select.outputs.twister != 'skip'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         timeout-minutes: 5
         with:
           path: ${{ github.workspace }}/.ccache
@@ -282,11 +376,12 @@ jobs:
       # stall (that misattribution is what #1274 was filed about).
       # Warm-ccache runs cluster at 300-470s; cold ones at 800-1210s.
       # Worst SUCCESSFUL run across the 128-shard-job sample was 1210s
-      # (20m10s, shard 3/4).  45min = 2700s = 2.23x that, matching the
+      # (20m10s, shard 3/4 in the old 4-shard split).  45min = 2700s = 2.23x that, matching the
       # precedent's headroom ratio and leaving room for the suite to
       # grow with every new example -- it is a ceiling that makes a hang
       # legible under this step's own name, not a performance target.
-      - name: twister · run shard ${{ matrix.shard }}/4 on native_sim/native/64
+      - name: twister · run shard ${{ matrix.shard }}/6 on native_sim/native/64
+        if: needs.select.outputs.twister != 'skip'
         working-directory: ${{ github.workspace }}/zephyrproject
         timeout-minutes: 45
         env:
@@ -297,18 +392,40 @@ jobs:
           # of the ${{ github.workspace }} expansion which the runner
           # may render as a host path on container jobs.
           #
-          # --subset i/4 deterministically partitions the SAME suite
-          # list across the 4 shards; their union == a single full run,
-          # so no test is dropped (coverage unchanged, ~4x faster wall).
+          # --subset i/6 deterministically partitions the SAME suite
+          # list across the 6 shards; their union == a single full run,
+          # so no test is dropped (coverage unchanged).  #2429: 4 shards
+          # ran 12-25 min each (the partition splits by suite count, not
+          # time); 6 shortens the long pole on the dev merge queue.
+          ccache -z >/dev/null
           python3 zephyr/scripts/twister \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/tests/unit" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/tests/zephyr" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/tests/console" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples" \
             -p native_sim/native/64 \
-            --subset ${{ matrix.shard }}/4 \
+            --subset ${{ matrix.shard }}/6 \
             --inline-logs \
             --no-detailed-test-id
+          # Hit rate in the log, so a cold cache is visible, not guessed.
+          ccache -s
+
+      # Save the working set this run actually used: entries a run never
+      # touched keep their old mtime and are evicted first, so the saved
+      # set does not grow without bound across saves (ccache refreshes an
+      # entry's mtime on every hit; the job ceiling is under 3h).
+      # #1319: same backend round trip as the restore; 5min cap.
+      - name: Trim ccache to this run's working set (dev push + nightly only)
+        if: github.ref == 'refs/heads/dev' && (github.event_name == 'push' || github.event_name == 'schedule')
+        timeout-minutes: 5
+        run: ccache --evict-older-than 3h
+      - name: Save ccache objects (dev push + nightly only)
+        if: github.ref == 'refs/heads/dev' && (github.event_name == 'push' || github.event_name == 'schedule')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        timeout-minutes: 5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-${{ runner.os }}-twister-shard${{ matrix.shard }}-${{ github.sha }}
 
       # The SB_CONFIG_* class gate (#807 / #814) asserts every symbol
       # emit_sysbuild_conf() produces names a real `config` in the
@@ -476,7 +593,7 @@ jobs:
       # job (moved out in PR review on #1212): this job's Zephyr pin
       # (`--mr v4.4.1` above) is the FULL twister oracle -- any future
       # bump that happens to touch dts/arm/renesas/rz/rzv/r9a09g056.dtsi
-      # would make `--check` go STALE here, failing `twister-shard 1/4`,
+      # would make `--check` go STALE here, failing `twister-shard 1/6`,
       # which fails the required aggregator `twister ·
       # native_sim/native/64` and blocks every PR to `dev`, not just V2N
       # ones, under a context name that says nothing about metadata. See
@@ -518,7 +635,9 @@ jobs:
   # is red (a plain `needs` without it would be skipped, not failed).
   twister:
     name: twister · native_sim/native/64
-    needs: twister-shard
+    # A failed `select` leaves twister-shard `skipped`, which is not
+    # `success` -- so a broken selector reds this context, never greens it.
+    needs: [select, twister-shard]
     if: always()
     runs-on: ubuntu-latest
     # #1319: this job is the required context itself, so it gets a
@@ -531,6 +650,7 @@ jobs:
       - name: Gate on all twister shards
         run: |
           result='${{ needs.twister-shard.result }}'
+          echo "select: ${{ needs.select.result }} (twister=${{ needs.select.outputs.twister }})"
           echo "twister-shard aggregate result: $result"
           if [ "$result" != "success" ]; then
             echo "::error::one or more twister shards did not pass ($result)"

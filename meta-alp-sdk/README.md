@@ -279,6 +279,23 @@ DISTRO=alp bitbake alp-image-prod      # key-only SSH, no debug tooling, "Alp SD
 See the edge-vs-prod posture table + `DISTRO=alp` notes in
 [`../docs/build-yocto-v2n.md`](../docs/build-yocto-v2n.md#edge-vs-production-image).
 
+#### Verifying the ROS 2 payload lands (#372)
+
+The one supported command for a ROS 2-carrying image is steps 4b + 7 + 8
+above: `MACHINE = "e1m-v2n101-a55"` (or `e1m-v2m101-a55`), then
+`bitbake alp-image-edge`, with `meta-ros2-humble` added to `bblayers.conf`.
+`alp-image-edge.bb` turns on `IMAGE_FEATURES += "alp-ros"`, which
+`alp-image-common.inc`'s `FEATURE_PACKAGES_alp-ros` maps to
+`packagegroup-alp-ros` -- whose `RDEPENDS:${PN}` names both `rclcpp` and
+`alp-perception` (`recipes-core/packagegroups/packagegroup-alp-ros.bb`).
+Without a Yocto CI build lane in alp-sdk CI, that dependency chain --
+not a finished image manifest -- is the grounded proof this command puts
+both packages on the rootfs; `tests/scripts/test_library_layer.py`
+(`test_ros2_edge_image_pulls_rclcpp_and_alp_perception`) pins the chain so
+it can't silently drift. That gap (no real Yocto CI build) is also why
+`ros2.yaml` stays Tier B: ADR 0018 Tier A requires "built in CI for at
+least one board", which a doc-only proof cannot satisfy.
+
 The resulting `alp-image-edge-<machine>.wic[.gz]` is the kernel +
 rootfs (the bootloader is production-flashed by Alp).  See
 [`../docs/build-yocto-v2n.md`](../docs/build-yocto-v2n.md) for the
@@ -350,6 +367,13 @@ E8 story is real for the M55 HP/HE cores (see
 [`../docs/bring-up-aen.md`](../docs/bring-up-aen.md)) — it is only the
 A32 Linux cluster's Yocto path that is unbuilt.  alp-sdk does **not**
 redistribute or fork the Alif BSP.
+
+Once this path builds, TF-A's BL32 console needs a carrier-specific
+UART base + pinmux, not the Alif DevKit's UART2 default — see
+`recipes-bsp/trusted-firmware-a/trusted-firmware-a/alif-console-uart-build-knobs.patch`
+and the `:e1m-aen801`/`:e1m-aen701` knobs in
+`trusted-firmware-a_%.bbappend` (#1979). That patch is inert today for
+the same reason this whole section is broken.
 
 ```bash
 # BROKEN -- kept for documentation only, see the callout above.

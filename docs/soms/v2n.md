@@ -40,17 +40,23 @@ Full chip catalogue + manifest URLs:
 [`metadata/chips/`](../../metadata/chips/).
 Per-SKU populated parts: [`metadata/e1m_modules/E1M-V2N10{1,2,3}.yaml`](../../metadata/e1m_modules/).
 
-## Real-time clock
+## Real-time clock {#real-time-clock}
 
 The on-module RV-3028-C7 is the RTC of record, bound as `/dev/rtc0`
 (kernel `rtc-rv3028`, `CONFIG_RTC_DRV_RV3028=y`) -- use `hwclock`/`date`
 from userspace. **CA55 (Linux) is the sole master of the whole
 RIIC8/BRD_I2C bus** the RTC and every other BRD_I2C device sit on
 (`metadata/e1m_modules/v2n/core-ownership.yaml`); the CM33 must never
-issue I2C transactions there. No `trickle-resistor-ohms` is configured
-(the RV-3028-C7's VBACKUP/backup-cap wiring isn't confirmed on this
-SoM's schematic) and the alarm INT line isn't wired to a kernel
-interrupt yet -- both are open follow-ups.
+issue I2C transactions there. **Confirmed 2026-09-29 on E1M-V2M103
+2026W38-0001:** the RV-3028-C7 has no time backup across a power cycle
+unless the carrier fits pad `P10` (VBACKUP); no `trickle-resistor-ohms`
+is configured for it. Without a backup source, the image resyncs the
+RTC on every boot: `systemd-timesyncd` pulls wall-clock over NTP once
+networked, and the kernel writes the result back to `rtc0`
+(`hwclock -w`-equivalent via `systemd-time-wait-sync` / `hwclock` unit)
+so `/dev/rtc0` reads the corrected time on the next cold boot. The
+alarm INT line isn't wired to a kernel interrupt yet -- that remains an
+open follow-up.
 
 The RZ/V2N's own RTC (RTCA-3, RTXIN/RTXOUT) is a second, SoC-internal
 timebase and is enabled in the SoM devicetree (`&rtc` in
@@ -106,6 +112,14 @@ host driver speaks both transports:
   7-bit `0x70`.  Use when you're already on BRD_I2C for the
   PMIC fleet.
 
+**Two BRD_I2C addresses are held by kernel drivers on the Linux
+image:** `0x70` (`gpio-gd32-bridge`) and `0x52` (`rtc-rv3028`, see
+[Real-time clock](#real-time-clock) above). A standard userspace
+`i2c-tools` transaction against either address is refused because the
+kernel already owns it -- use `i2c -f` (force) from userspace, or go
+through the owning kernel driver, rather than probing those two
+addresses directly.
+
 Wire spec: [`docs/gd32-bridge-protocol.md`](../gd32-bridge-protocol.md).
 Firmware tree: [`docs/gd32-bridge.md`](../gd32-bridge.md).
 Host driver: [`<alp/chips/gd32g553.h>`](../../include/alp/chips/gd32g553.h).
@@ -121,6 +135,50 @@ Two PMICs cooperate to bring V2N up:
 2. **DA9292** (secondary) -- CH1 is the 0.8 V Renesas core rail
    (strap-enabled at boot).  CH2 is **disabled on V2N base**;
    only V2N-M1 firmware brings it up (DEEPX rail).
+
+**Early-OTP ACT88760 units hold the GD32 in reset.** Some units carry an
+early ACT88760 OTP revision that drives GPIO register `0x10` up as `0x88`
+at power-on; that GPIO4 bit is wired to `GD32_NRST`, so the GD32 supervisor
+never comes out of reset. U-Boot patch 0011 clears bit 7 (`0x10`:
+`0x88` -> `0x08`) in `board_late_init()` on every boot, before the GD32
+bridge is probed, and prints `ALP: ACT88760 GD32_NRST released (0x10: 0x88
+-> 0x08)`. This is a workaround for the early OTP, not a defect fix --
+production units carry the fixed OTP, already read `0x08` at power-on, and
+the same step is a no-op there (prints `ALP: ACT88760 GD32_NRST already
+released`).
+
+### Runtime readings and guarded control
+
+The three drivers (`<alp/chips/act8760.h>`, `<alp/chips/da9292.h>`,
+`<alp/chips/tps628640.h>`) read every rail, status bit and ACT88760
+GPIO at any time.  **Every control write is fail-closed:** with no limits
+table installed it returns `ALP_ERR_NOSUPPORT`.  The tables come from
+`metadata/e1m_modules/v2n/power-tree.yaml` (net names, targets, windows,
+critical flags, per-boot-mode owners), generated into
+`<alp/chips/v2n_power_tree.h>` (`V2N_POWER_*` for V2N, `V2N_M1_POWER_*`
+for V2N-M1), and installed with `act8760_set_limits()` /
+`da9292_set_limits()` / `tps628640_set_limits()`.  With a table installed:
+
+- a voltage write must encode inside the rail's window (default target
+  +/-5 %, rounded inward to the chip's step) and is read back;
+- a `critical` rail (every ACT88760 rail, DA9292 CH1, TPS628640 `0x4D`)
+  can never be disabled by software;
+- the ACT88760 raw write path reaches only MSTR `0x01`, `0x05`,
+  `0x2B`, `0x33`; `0x07` (MR / SLEEP / DPSLP / POWER OFF / watchdog),
+  `0x09`, `0x0A`, the IO-delay / WDTIME registers `0x0B` / `0x0C`, `0x14`
+  (POK_OV / VSYSWARN thresholds -- a bad value can trip PMIC shutdown),
+  the factory ranges `0x15`-`0x26` and `0x2D`-`0x32`, every MODEx, every
+  tile register and all of ADD2 are refused;
+- the only ACT88760 GPIO polarity that may be written is GPIO4
+  `GD32_NRST` (MODE4 `0x10`: some units' OTP reads `0x88`, holding the
+  GD32 in reset; the volatile fix is `0x08`).
+
+The DEEPX DA9292 CH2 sequence is `da9292_ch2_sequence()`, run by U-Boot
+(`board_late_init()`) in `a55_boot` mode; afterwards CA55/Linux is the sole
+RIIC8 master (see above).  Boot-mode ownership is recorded in
+`metadata/e1m_modules/v2n/power-tree.yaml` (`boot_modes:`); `cm33_boot` is
+blocked there.
+Bench tool: [`examples/v2n/v2n-pmic-inspect/`](../../examples/v2n/v2n-pmic-inspect/).
 
 ## Boot + identification
 
@@ -332,6 +390,15 @@ Re-run 2026-09-27 with the BT stack as modules: `bluetooth`/`hci_uart`/`btbcm`
 autoload after rootfs, the `brcm/BCM.hcd` patch loads (chip id 157), and
 `hci0` comes UP+RUNNING.
 
+## Linux UART ports (SCIF)
+
+The on-module RZ/V2N SCIF UARTs enumerate as `/dev/ttySC<N>` (console on
+`ttySC0`, Bluetooth HCI on `ttySC4`). `alp_uart_open()` reaches them with
+`port_id = 300 + N` (300..399 -> `/dev/ttySC<N>`), so no hand-written tty
+wrapper is needed: `alp_uart_config_t cfg = ALP_UART_CONFIG_DEFAULT(300u + 1u);`
+opens `/dev/ttySC1`. Don't open a port the kernel already owns (the console or
+the BT UART).
+
 ## Bring-up
 
 Step-by-step bench bring-up: [`docs/bring-up-v2n.md`](../bring-up-v2n.md).
@@ -359,7 +426,7 @@ Both files are tab-delimited; consume directly or via
 | `v2n-eeprom-manifest-dump`       | Hexdump + decode the 128-byte EEPROM manifest.              |
 | `v2n-temp-sensor`                | TMP112 read loop -- classic starter app.                    |
 | `v2n-pwm-fan-control`            | Ramp a GD32-side PWM channel along a five-stop fan curve.   |
-| `v2n-secure-element-sign`        | OPTIGA Trust M I2C_STATE probe; APDU/product-info paths return `ALP_ERR_NOSUPPORT` today. |
+| `v2n-secure-element-sign`        | OPTIGA Trust M probe, Coprocessor UID read and raw APDU session (host library). |
 | `v2n-xspi-flash-readwrite`       | Erase + write + verify one page on the on-module xSPI NOR.  |
 | `v2n-emmc-block-stat`            | Read on-module eMMC geometry + first block via disk-access. |
 | `v2n-gd32-swd-flash`             | Host-driven SWD bit-bang -- IDCODE read, halt, erase/write/verify, reset. |
@@ -375,7 +442,7 @@ See [`examples/README.md`](../../examples/README.md).
 | Boot console silent                           | Check the primary PMIC's `nRESET` -- should release within a few ms of `V_IN`. See [`docs/troubleshooting.md`](../troubleshooting.md). |
 | Ethernet PHY won't ACK on MDIO                | 1.8 V rail not up, or the 1 kΩ pull-ups missing.                                              |
 | `gd32g553_init` returns `ALP_ERR_NOSUPPORT`   | Firmware major version mismatch; reflash bridge firmware from matching commit.               |
-| `da9292_v2n_m1_enable_deepx_rail` -> TIMEOUT  | This call is V2N-M1 only -- the V2N base SoM doesn't have a DEEPX load.                       |
+| `da9292_ch2_sequence` -> NOSUPPORT            | V2N base: the CH2 limits entry is all-zero (no DEEPX load), so the sequence is refused.       |
 | Ethernet PHY ID reads `0x0000`                | Wrong PHY address; check strap on schematic (default `0x00` after reset).                     |
 | SoC RTC (`&rtc`) fails to probe, `-ETIMEDOUT` | The on-module clock-generator fixup didn't apply (old/bypassed U-Boot). See [On-module clock-generator fixup](#on-module-clock-generator-fixup) above. |
 

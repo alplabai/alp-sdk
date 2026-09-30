@@ -57,3 +57,11 @@ i.MX93, DEEPX DX-M1) are NOT redistributed in this repository. They are
 obtained directly from the vendor under the vendor's own license. The
 vendors/<name>/ directories here contain only Alp Lab's own integration
 shims (Apache-2.0) plus instructions; see each vendors/<name>/README.md.
+
+One exception, carried under the vendor's own terms rather than Apache-2.0
+(ADR 0032): metadata/svd/alif/ contains Alif Semiconductor's CMSIS-SVD
+register descriptions for the Ensemble E8 (AE822) M55-HE and M55-HP cores,
+copied unmodified from alifsemi/alif_ensemble-cmsis-dfp, with Alif's
+unmodified License.txt beside them. Those files are not covered by this
+repository's Apache-2.0 LICENSE; use is restricted to Alif silicon. See
+metadata/svd/alif/README.md.

@@ -427,7 +427,8 @@ config ALP_SDK_ALLOW_TEST_ENTROPY
 
 	  Without this, a build whose ALP_SDK_MBEDTLS_WEAK_RNG is y fails at
 	  CMake time naming the target and this symbol.  On AEN the real fix
-	  is an entropy driver over the Secure Enclave TRNG, not this opt-in
+	  is the Secure Enclave TRNG entropy driver (alif,se-trng,
+	  CONFIG_ENTROPY_ALIF_SE) chosen as zephyr,entropy, not this opt-in
 	  (issue #2192).
 
 # ----------------------------------------------------------------------

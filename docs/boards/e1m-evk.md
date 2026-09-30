@@ -144,7 +144,8 @@ externally, from J5 pin 11 to J5 pin 15 (`+3V3`).
 Measured effect on the InnoMaker CAM-OV5647, which has no pull-up of
 its own: before the rework, a full `0x08`..`0x77` sweep of the camera
 I2C bus found zero devices and `alp_camera_open` returned
-`ALP_ERR_IO`. With the pull-up fitted, the sensor answers at `0x36`
+`ALP_ERR_IO` (an unanswered chip-ID probe now reports `ALP_ERR_NOT_READY`,
+#2249). With the pull-up fitted, the sensor answers at `0x36`
 with chip ID `0x5647` (registers `0x300a`/`0x300b` read `56 47`), and
 the board's draw rises from 0.065-0.067 A to 0.074-0.080 A at 16.0 V.
 The InnoMaker CAM-OV9281 self-enables and needs no rework.

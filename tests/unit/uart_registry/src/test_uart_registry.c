@@ -170,6 +170,39 @@ ZTEST(alp_uart_registry, test_sw_fallback_loopback_round_trip)
 	zassert_equal(rx2[1], 0x02u);
 }
 
+/* ---------- (f2) sw_fallback empty read returns TIMEOUT, not OK ----------- */
+
+ZTEST(alp_uart_registry, test_sw_fallback_empty_read_returns_timeout)
+{
+	/* include/alp/peripheral.h alp_uart_read: "If the deadline is
+     * reached with zero bytes collected, the call returns
+     * ALP_ERR_TIMEOUT."  sw_fallback never blocks, so an empty ring
+     * must hit this on every call regardless of timeout_ms -- ALP_OK
+     * with an untouched buffer is a silent-failure contract
+     * violation. */
+	const alp_uart_ops_t *ops = _find_sw_fallback_ops();
+	zassert_not_null(ops);
+
+	struct alp_uart h;
+	memset(&h, 0, sizeof(h));
+	alp_uart_backend_state_t *st   = &h.state;
+	alp_capabilities_t        caps = { 0 };
+	alp_uart_config_t         cfg  = {
+		.port_id   = 0u,
+		.baudrate  = 115200u,
+		.data_bits = 8u,
+		.stop_bits = 1u,
+		.parity    = ALP_UART_PARITY_NONE,
+	};
+	zassert_equal(ops->open(&cfg, st, &caps), ALP_OK);
+
+	/* Freshly opened ring is empty; both timeout_ms == 0 (single poll)
+     * and a nonzero timeout must return ALP_ERR_TIMEOUT, never ALP_OK. */
+	uint8_t rx[4] = { 0xAA, 0xAA, 0xAA, 0xAA };
+	zassert_equal(ops->read(st, rx, sizeof(rx), 0u), ALP_ERR_TIMEOUT);
+	zassert_equal(ops->read(st, rx, sizeof(rx), 100u), ALP_ERR_TIMEOUT);
+}
+
 /* ---------- (g) rx_ringbuf returns NOSUPPORT on sw_fallback --------------- */
 
 #if defined(CONFIG_ALP_SDK_UART_RX_RINGBUF)

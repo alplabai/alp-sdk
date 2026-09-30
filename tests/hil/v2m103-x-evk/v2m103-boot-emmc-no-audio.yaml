@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 booted from eMMC (root=/dev/mmcblk0p2) and no ALSA sound
+# card registered -- audio stays disabled until #2331.  Flip the second
+# expectation when that lands.  Read-only.
+
+schema_version: 1
+name: v2m103-boot-emmc-no-audio
+description: |
+  root=/dev/mmcblk0p2 on the kernel cmdline; no ALSA card.
+
+flash_method: ssh-run
+ssh_command: >-
+  cat /proc/cmdline;
+  if grep -q '^ *[0-9]' /proc/asound/cards 2>/dev/null;
+  then echo HIL_ALSA_CARD_PRESENT; else echo HIL_ALSA_NO_CARD; fi
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "root=/dev/mmcblk0p2"
+    - "HIL_ALSA_NO_CARD"
+  expect_absent:
+    - "HIL_ALSA_CARD_PRESENT"

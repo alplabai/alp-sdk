@@ -77,6 +77,18 @@ So out of the box your module:
 That means your day-1 path needs **no hand-run SETOOLS and no SE-UART
 wiring of your own**.
 
+**Which key signs your app.** The factory MCUboot trusts the SDK's shared
+development key, [`keys/mcuboot_shared_dev_ecdsa_p256.pem`](../keys/README.md),
+which is committed to this repository. The AEN sysbuild configuration
+(`zephyr/sysbuild/aen/sysbuild.conf`) already signs with it, so an image built
+from a fresh clone boots on an Alp Lab-provisioned module without any key
+setup. The key is public: it gives **no** security, which matches the DM
+lifecycle the module ships in. For a product, build MCUboot with your own key
+and re-provision it (the re-keying path below). If a module's MCUboot was built
+with a different key, it refuses your image with `E: Unable to find bootable
+image`; that failure is safe (the debug port stays alive, see below), and the
+fix is to re-provision MCUboot.
+
 **Option A — `west flash` (alif_flash runner) — REFUSED on every module,
 bare or pre-provisioned, since alp-sdk#2274; see the warning below.** The
 recipe below is what this door used to do (build + sign, then write into

@@ -46,6 +46,15 @@ struct fake_gd32bridge_data {
 	unsigned io_fail_remaining;      /* raw bus failure -- models a link drop */
 	uint32_t calls_seen;             /* decoded (non-io-failed) requests */
 	uint32_t attempts_seen;          /* every transfer(), incl. io-failed ones */
+	/* gh#101: CMD_OTA_GET_STATE canned reply.  ota_reply_width picks the
+	 * pre-/post-v0.14 wire shape independently of `minor` above so a
+	 * test can pin the OLD-firmware 5-byte shape even while otherwise
+	 * running at a >= 0.14 `minor` (GET_VERSION and GET_STATE are
+	 * different opcodes; nothing ties their widths together but the
+	 * driver's own version.minor gate under test). */
+	uint8_t  ota_state, ota_active, ota_pending, ota_err;
+	uint16_t ota_boot_count;
+	uint8_t  ota_reply_width; /* 5 or 6; 0 = not armed (falls through to BUSY) */
 };
 
 static struct fake_gd32bridge_data *g_fake_gd32bridge;
@@ -62,10 +71,11 @@ static void seed_defaults(struct fake_gd32bridge_data *d)
 }
 
 /* STATUS_BUSY = 0x03 (docs/gd32-bridge-protocol.md §6). */
-#define FAKE_GD32BRIDGE_STATUS_BUSY 0x03u
-#define FAKE_GD32BRIDGE_STATUS_OK   0x00u
-#define FAKE_GD32BRIDGE_CMD_PING    0x00u
-#define FAKE_GD32BRIDGE_CMD_VERSION 0x01u
+#define FAKE_GD32BRIDGE_STATUS_BUSY       0x03u
+#define FAKE_GD32BRIDGE_STATUS_OK         0x00u
+#define FAKE_GD32BRIDGE_CMD_PING          0x00u
+#define FAKE_GD32BRIDGE_CMD_VERSION       0x01u
+#define FAKE_GD32BRIDGE_CMD_OTA_GET_STATE 0xF5u
 
 static void write_ok_reply(uint8_t *buf, size_t len, const uint8_t *payload, size_t payload_len)
 {
@@ -139,6 +149,28 @@ fake_gd32bridge_transfer(const struct emul *target, struct i2c_msg *msgs, int nu
 	case FAKE_GD32BRIDGE_CMD_VERSION: {
 		const uint8_t payload[3] = { d->major, d->minor, d->patch };
 		write_ok_reply(msgs[1].buf, msgs[1].len, payload, sizeof(payload));
+		return 0;
+	}
+	case FAKE_GD32BRIDGE_CMD_OTA_GET_STATE: {
+		if (d->ota_reply_width == 0u) {
+			write_status_reply(FAKE_GD32BRIDGE_STATUS_BUSY, msgs[1].buf, msgs[1].len);
+			return 0;
+		}
+		/* state, active, pending, boot_count(LE) [, err]: the driver
+		 * under test picks msgs[1].len (5 or 6) via its own
+		 * version.minor gate -- this fake just writes exactly what
+		 * was armed, so a width mismatch between the two shows up as
+		 * a CRC failure on the host side, not a silently-truncated
+		 * reply. */
+		const uint8_t payload[5] = { d->ota_state,
+			                         d->ota_active,
+			                         d->ota_pending,
+			                         (uint8_t)(d->ota_boot_count & 0xFFu),
+			                         (uint8_t)(d->ota_boot_count >> 8) };
+		uint8_t       full[6];
+		memcpy(full, payload, sizeof(payload));
+		full[5] = d->ota_err;
+		write_ok_reply(msgs[1].buf, msgs[1].len, full, d->ota_reply_width);
 		return 0;
 	}
 	default:
@@ -215,4 +247,20 @@ uint32_t fake_gd32bridge_attempts_seen(void)
 void fake_gd32bridge_reset(void)
 {
 	if (g_fake_gd32bridge != NULL) seed_defaults(g_fake_gd32bridge);
+}
+
+void fake_gd32bridge_arm_ota_get_state(uint8_t  state,
+                                       uint8_t  active,
+                                       uint8_t  pending,
+                                       uint16_t boot_count,
+                                       uint8_t  err,
+                                       uint8_t  reply_width)
+{
+	if (g_fake_gd32bridge == NULL) return;
+	g_fake_gd32bridge->ota_state       = state;
+	g_fake_gd32bridge->ota_active      = active;
+	g_fake_gd32bridge->ota_pending     = pending;
+	g_fake_gd32bridge->ota_boot_count  = boot_count;
+	g_fake_gd32bridge->ota_err         = err;
+	g_fake_gd32bridge->ota_reply_width = reply_width;
 }

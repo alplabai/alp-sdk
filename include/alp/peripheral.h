@@ -286,6 +286,27 @@ void alp_delay_ms(uint32_t ms);
  */
 uint64_t alp_uptime_ms(void);
 
+/**
+ * @brief Microseconds since an unspecified, backend-defined epoch.
+ *
+ * Same contract as @ref alp_uptime_ms, in microseconds: only the
+ * difference between two readings in the same process is meaningful.
+ * Exists so OS-agnostic code can wait "until N us after an event" instead
+ * of "N us from now", letting CPU work it does in between count toward the
+ * wait (the CC3501E bridge's inter-phase settles, #2052).
+ *
+ * @par Resolution: sub-microsecond where the backend has a cycle counter
+ *      (Zephyr with CONFIG_TIMER_HAS_64BIT_CYCLE_COUNTER, e.g. AEN), else
+ *      one kernel tick; CLOCK_MONOTONIC on Linux.  A reading can lag real
+ *      time by up to one resolution step, so a deadline wait built on it
+ *      may run short by that much on a tick-resolution backend.
+ *
+ * @return Microseconds since the epoch.
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL] -- v0.17 new.
+ */
+uint64_t alp_uptime_us(void);
+
 /* ------------------------------------------------------------------ */
 /* GPIO                                                                */
 /* ------------------------------------------------------------------ */
@@ -340,8 +361,9 @@ alp_status_t alp_gpio_configure(alp_gpio_t *pin, alp_gpio_dir_t dir, alp_gpio_pu
  * @param[in] pin    Handle from @ref alp_gpio_open.
  * @param[in] level  true = drive high, false = drive low.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY (pin not
- *         configured as output) / ALP_ERR_IO.
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY (NULL or closed
+ *         @p pin; also a pin not configured as output, on backends
+ *         that report that case this way) / ALP_ERR_IO.
  */
 alp_status_t alp_gpio_write(alp_gpio_t *pin, bool level);
 
@@ -959,6 +981,13 @@ typedef enum {
 } alp_uart_flow_t;
 
 typedef struct {
+	/**
+	 * Port selector.  On Yocto/Linux it picks a tty family by range:
+	 * 0..99 -> `/dev/ttyS<n>`, 100..199 -> `/dev/ttyAMA<n - 100>`,
+	 * 200..299 -> `/dev/ttyUSB<n - 200>`, 300..399 -> `/dev/ttySC<n - 300>`
+	 * (Renesas SCIF, e.g. RZ/V2N); anything >= 400 fails with
+	 * @ref ALP_ERR_INVAL.  On Zephyr it is the backend's UART index.
+	 */
 	uint32_t          port_id;
 	uint32_t          baudrate;
 	uint8_t           data_bits; /**< Usually 8. */
@@ -1147,8 +1176,11 @@ size_t alp_uart_rx_ringbuf_count(const alp_uart_rx_ringbuf_t *rb);
  * @brief Detach the ring buffer and release the handle.
  *
  * Disables the IRQ-driven RX path on the underlying port and returns
- * the slot to the pool.  Idempotent on NULL.  The caller's backing
- * store may be reused or freed once this returns.
+ * the slot to the pool.  Idempotent on NULL, and idempotent on a
+ * repeat call (a second detach is a no-op).  Blocks until any
+ * in-flight alp_uart_rx_ringbuf_pop() / _count() on the same handle
+ * returns before tearing it down.  The caller's backing store may be
+ * reused or freed once this returns.
  *
  * @param rb   Handle from alp_uart_rx_ringbuf_attach.
  */

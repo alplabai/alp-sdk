@@ -1,0 +1,20 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Alif Ensemble Secure-Enclave TRNG as a Zephyr entropy source (#2192).
+#
+# The Ensemble's hardware TRNG sits inside the Secure Enclave, not on the RTSS
+# memory map, so this node has no reg/clocks/pinctrl. The driver
+# (zephyr/drivers/entropy/entropy_alif_se.c) asks the SE for random bytes over
+# the SE-service MHUv2 channel via hal_alif's public se_service_get_rnd_num()
+# (SERVICE_CRYPTOCELL_GET_RND). That channel must be enabled too: the
+# se_service root node and its two mailboxes.
+#
+# Point `zephyr,entropy` at this node so Zephyr's CSPRNG (and through it the
+# mbedTLS PSA core) seeds from the SE instead of TEST_RANDOM_GENERATOR.
+
+description: Alif Ensemble Secure-Enclave TRNG (entropy over SE services)
+
+compatible: "alif,se-trng"
+
+include: base.yaml

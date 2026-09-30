@@ -44,7 +44,9 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <zephyr/drivers/entropy.h>
 #include <zephyr/kernel.h>
+#include <zephyr/random/random.h>
 #include <zephyr/sys/printk.h>
 
 #include <alp/security.h>
@@ -169,6 +171,51 @@ static bool test_trng(void)
 	return ok;
 }
 
+/* The zephyr,entropy device (the SE TRNG, #2192) and the CSPRNG seeded from
+ * it. 300 bytes crosses the SE's 256-byte single-request ceiling, so the
+ * driver's chunking runs; two draws must differ and neither may be all-zero. */
+static bool test_zephyr_entropy(void)
+{
+#if DT_HAS_CHOSEN(zephyr_entropy)
+	const struct device *dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_entropy));
+	static uint8_t       a[300];
+	static uint8_t       b[300];
+
+	if (!device_is_ready(dev)) {
+		printk("zephyr,entropy       : %s not ready FAIL\n", dev->name);
+		return false;
+	}
+	int ra = entropy_get_entropy(dev, a, sizeof(a));
+	int rb = entropy_get_entropy(dev, b, sizeof(b));
+
+	bool nonzero = false;
+	for (size_t i = 0u; i < sizeof(a); i++) {
+		if ((a[i] != 0u) && (b[i] != 0u)) {
+			nonzero = true;
+			break;
+		}
+	}
+	uint8_t cs[16] = { 0 };
+	int     rc     = sys_csrand_get(cs, sizeof(cs));
+
+	const bool differ = memcmp(a, b, sizeof(a)) != 0;
+	const bool ok     = (ra == 0) && (rb == 0) && nonzero && differ && (rc == 0);
+	printk("zephyr,entropy (%s): get=%d/%d differ=%d csrand=%d %s\n",
+	       dev->name,
+	       ra,
+	       rb,
+	       (int)differ,
+	       rc,
+	       ok ? "OK" : "FAIL");
+	hexdump("entropy    ", a, 16);
+	hexdump("csrand     ", cs, sizeof(cs));
+	return ok;
+#else
+	printk("zephyr,entropy       : no chosen node in this build -- skipped\n");
+	return true;
+#endif
+}
+
 int main(void)
 {
 	printk("\n=== aen-se-crypto (SE CryptoCell via <alp/security.h>) ===\n");
@@ -176,19 +223,22 @@ int main(void)
 	const bool sha_ok  = test_sha256_abc();
 	const bool gcm_ok  = test_aes128_gcm_roundtrip();
 	const bool trng_ok = test_trng();
+	const bool ent_ok  = test_zephyr_entropy();
 
-	if (sha_ok && gcm_ok && trng_ok) {
+	if (sha_ok && gcm_ok && trng_ok && ent_ok) {
 		printk("RESULT PASS: SHA-256(\"abc\") known-answer MATCH + AES-128-GCM round-trip "
-		       "MATCH + TRNG OK -- the portable <alp/security.h> surface answered through "
-		       "the selected crypto backend (SE CryptoCell on E8 when the send seam is "
+		       "MATCH + TRNG OK + zephyr,entropy OK -- the portable <alp/security.h> surface "
+		       "answered through the selected crypto backend (SE CryptoCell on E8 when the send "
+		       "seam is "
 		       "wired; MbedTLS-PSA fallthrough otherwise)\n");
 	} else {
-		printk("RESULT FAIL: sha=%d gcm=%d trng=%d -- see the per-test lines above (a "
+		printk("RESULT FAIL: sha=%d gcm=%d trng=%d entropy=%d -- see the per-test lines above (a "
 		       "MISMATCH means the backend computed a wrong value; a 'no backend' open "
 		       "FAIL means no security backend linked / selected)\n",
 		       (int)sha_ok,
 		       (int)gcm_ok,
-		       (int)trng_ok);
+		       (int)trng_ok,
+		       (int)ent_ok);
 	}
 
 	return 0;

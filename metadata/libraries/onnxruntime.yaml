@@ -14,8 +14,10 @@
 # `E1M-V2N101` layer stack (meta-renesas + meta-rz-features, MACHINE
 # `e1m-v2n101-a55`) via `bitbake -p` then `bitbake-layers show-recipes
 # onnxruntime` -> `onnxruntime: 1.28.0`.  See the PR for the state of the full
-# `bitbake onnxruntime` build -- nothing here is a build claim, and no SKU has
-# run ORT on silicon.  `E1M-NX9101` cannot be exercised at all yet: the i.MX 93
+# `bitbake onnxruntime` build -- nothing here is a build claim.  The SDK's ORT
+# backend has run on E1M-V2M103 silicon (#1255, 2026-09-28), but against the
+# DEEPX layer's libonnxruntime 1.20.1, not this 1.28.0 recipe.
+# `E1M-NX9101` cannot be exercised at all yet: the i.MX 93
 # side needs `meta-imx` / `meta-freescale`, which no Alp build host carries.
 # V2M101/102 likewise await a build pass of their own.
 #
@@ -31,6 +33,11 @@
 #   manifest deliberately describes the UPSTREAM build -- one recipe, one
 #   version, true on every family we enable -- rather than a per-vendor-fork
 #   split (2026-08-05 own-recipe decision).
+#
+# KleidiAI (#1258): the recipe carries an opt-in PACKAGECONFIG[kleidiai]
+#   (-Donnxruntime_USE_KLEIDIAI, Arm micro-kernels for the CPU EP's MLAS
+#   path; KleidiAI v1.20.0 as pinned by ORT's cmake/deps.txt).  Default OFF:
+#   no perf claim until a before/after on real E1M-V2N101 silicon.
 #
 # Version:  1.28.0 -- upstream `microsoft/onnxruntime` release tag `v1.28.0`
 #   (published 2026-07-25), pinned in meta-alp-sdk's own
