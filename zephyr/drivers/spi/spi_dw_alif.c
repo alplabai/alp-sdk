@@ -1052,7 +1052,11 @@ static bool spi_dw_poll_xfer_u8(const struct device *dev)
 		if (spi_context_rx_on(ctx)) {
 			const uint32_t rxlvl = read_rxflr(dev);
 
-			room = (room > rxlvl) ? (room - rxlvl) : 0u;
+			/* +1: the frame in the shift register is in flight but in
+			 * neither FIFO level.  Without it a loop fast enough to keep
+			 * the TX FIFO full overflows the RX FIFO by one frame and the
+			 * transfer never completes (#2052, seen at -O2). */
+			room = (room > rxlvl + 1u) ? (room - rxlvl - 1u) : 0u;
 		}
 
 		while (room--) {
@@ -1187,7 +1191,11 @@ static bool spi_dw_poll_xfer_packed(const struct device *dev)
 		if (spi_context_rx_on(ctx)) {
 			const uint32_t rxlvl = read_rxflr(dev);
 
-			room = (room > rxlvl) ? (room - rxlvl) : 0u;
+			/* +1: the frame in the shift register is in flight but in
+			 * neither FIFO level.  Without it a loop fast enough to keep
+			 * the TX FIFO full overflows the RX FIFO by one frame and the
+			 * transfer never completes (#2052, seen at -O2). */
+			room = (room > rxlvl + 1u) ? (room - rxlvl - 1u) : 0u;
 		}
 
 		while (room--) {

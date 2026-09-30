@@ -35,6 +35,48 @@ ZTEST(alp_chips, test_gd32g553_frame_crc16_check_vector)
 	zassert_equal(crc, 0x29B1u, "CRC-16/CCITT-FALSE check-vector mismatch: got 0x%04x", crc);
 }
 
+/* The shared helper folds a byte at a time with shifts (it used to run an
+ * 8-step bit loop per byte, ~1 ms per 4 KiB bridge frame on an M55).  One
+ * check vector cannot catch a shortcut that is only wrong for some register
+ * values, so compare against the bit loop over every length up to a full
+ * CC3501E frame, from a non-default starting register, and across a split
+ * (the header-then-payload chaining the bridge does). */
+static uint16_t crc16_bitwise_ref(uint16_t crc, const uint8_t *buf, size_t len)
+{
+	for (size_t i = 0; i < len; ++i) {
+		crc ^= (uint16_t)buf[i] << 8;
+		for (unsigned b = 0; b < 8; ++b) {
+			crc = (crc & 0x8000u) ? (uint16_t)((crc << 1) ^ 0x1021u) : (uint16_t)(crc << 1);
+		}
+	}
+	return crc;
+}
+
+ZTEST(alp_chips, test_crc16_bytewise_matches_bitwise)
+{
+	static uint8_t buf[4096];
+	uint32_t       x = 0x12345678u;
+
+	for (size_t i = 0; i < sizeof(buf); i++) {
+		x      = x * 1664525u + 1013904223u;
+		buf[i] = (uint8_t)(x >> 24);
+	}
+	for (size_t len = 0; len <= sizeof(buf); len += 97u) {
+		const uint16_t seed = (uint16_t)(0xFFFFu - len);
+		zassert_equal(alp_crc16_ccitt_false_update(seed, buf, len),
+		              crc16_bitwise_ref(seed, buf, len),
+		              "len %u",
+		              (unsigned)len);
+	}
+	const uint16_t whole = alp_crc16_ccitt_false(buf, sizeof(buf));
+	const uint16_t split = alp_crc16_ccitt_false_update(
+	    alp_crc16_ccitt_false_update(ALP_CRC16_CCITT_FALSE_INIT, buf, 4u),
+	    buf + 4,
+	    sizeof(buf) - 4u);
+	zassert_equal(whole, split);
+	zassert_equal(whole, crc16_bitwise_ref(ALP_CRC16_CCITT_FALSE_INIT, buf, sizeof(buf)));
+}
+
 /* ------------------------------------------------------------------ */
 /* gd32g553 -- V2N supervisor MCU host driver, NULL-arg validation     */
 /* ------------------------------------------------------------------ */

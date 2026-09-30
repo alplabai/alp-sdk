@@ -3940,7 +3940,8 @@
         "alp_uart_rx_ringbuf_detach",
         "alp_uart_rx_ringbuf_pop",
         "alp_uart_write",
-        "alp_uptime_ms"
+        "alp_uptime_ms",
+        "alp_uptime_us"
       ],
       "header": "include/alp/peripheral.h"
     },
