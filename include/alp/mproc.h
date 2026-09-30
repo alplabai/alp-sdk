@@ -219,15 +219,17 @@ typedef struct {
  * call exists at all.  So `cacheable = false` is the only setting with
  * defined behaviour on a shared-memory path.
  *
- * The same gap is wider than this one field.  Two AEN backends hand raw CPU
- * pointers straight to DMA masters and contain no maintenance call --
- * `src/backends/jpeg/alif_hantro.c` (the JPEG AXI master) and
- * `src/backends/camera/alif_isp_pico.c`.  On a part where those masters are
- * not coherent with the M55 D-cache, that is a correctness problem
- * independent of anything this header offers.
+ * The two AEN DMA paths are NOT part of this gap.  `alif_hantro.c` and
+ * `alif_isp_pico.c` hand buffers to the Zephyr video drivers, and those
+ * drivers do the maintenance: `zephyr/drivers/video/jpeg_hantro_vc9000e.c`
+ * flushes+invalidates the input (line 513) and output (line 551) buffers
+ * before the encode and invalidates the compressed output afterwards (line
+ * 681); `zephyr/drivers/video/isp_pico.c` flushes+invalidates on enqueue
+ * (line 2565) and invalidates the captured frame on dequeue (line 2632).
+ * The remaining gap is only the shared-memory path above (`cacheable = true`).
  *
  * This is recorded rather than fixed on purpose.  Adding cache maintenance
- * to a DMA path without measuring on real silicon trades a visible,
+ * to a shared-memory path without measuring on real silicon trades a visible,
  * documented gap for an intermittent corruption that reproduces once a
  * week.  Closing it needs an owner, bench time on E1M-AEN801, and a
  * measurement -- it is an architecture gap, not a sweep item.  Tracked in
