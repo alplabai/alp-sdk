@@ -110,7 +110,7 @@ alp_camera_t *alp_camera_open(const alp_camera_config_t *cfg)
 	}
 	h->backend              = be;
 	h->state.ops            = ops;
-	alp_capabilities_t caps = { .flags = be->base_caps };
+	alp_capabilities_t caps = { .flags = be->base_caps, .class_flags = be->base_class_flags };
 	alp_status_t       rc   = ops->open(cfg, &h->state, &caps);
 	if (rc != ALP_OK) {
 		_free(h);
@@ -216,6 +216,23 @@ alp_status_t alp_camera_configure_isp(alp_camera_t *h, const alp_camera_isp_conf
 	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
+}
+
+alp_status_t alp_camera_get_fps(alp_camera_t *h, uint32_t *fps_x1000)
+{
+	if (fps_x1000 == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	const uint32_t v = h->state.fps_x1000;
+	alp_handle_op_leave(&h->active_ops);
+	if (v == 0u) {
+		return ALP_ERR_NOSUPPORT;
+	}
+	*fps_x1000 = v;
+	return ALP_OK;
 }
 
 void alp_camera_close(alp_camera_t *h)

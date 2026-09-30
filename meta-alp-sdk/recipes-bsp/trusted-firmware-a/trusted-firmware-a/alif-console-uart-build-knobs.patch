@@ -1,0 +1,104 @@
+From: Alp Lab AB
+Subject: [PATCH] alif devkit_e7: build-time knobs for the console UART base and pads
+
+Alif's TF-A hardcodes the BL32 console to the DevKit's UART2 in two
+independent places that must move together: the register base
+(platform_def.h, PLAT_ALIF_{BOOT,RUN}_UART_BASE) and the pinmux
+(devkit_e7_sp_min_setup.c, devkit_e7_pinmux_init()). A carrier that
+routes a different UART cannot get BL32 output without patching the
+vendor tree -- and changing only the register base is a silent
+failure: BL32 initialises a console, writes to it, and it is routed
+nowhere, with nothing in the log to say why (alp-sdk#1972).
+
+Add six #ifndef-guarded macros (ALIF_CONSOLE_UART_BASE,
+ALIF_CONSOLE_{RX,TX}_{PORT,PIN}, ALIF_CONSOLE_PIN_FUNC), defaulted in
+platform.mk to the unmodified DevKit UART2 values, so an unset build
+is byte-identical to today's. A carrier passes its own values on the
+make command line (or via TF-A_EXTRA_OPTIONS in a Yocto recipe).
+
+Verified against alifsemi/trusted-firmware-a_alif, branch
+alif_lts-v2.10.8 (`patch -p1 --dry-run` applies clean); not yet
+bench-verified on real E1M-AEN801 silicon -- see alp-sdk#1979.
+
+Upstream-Status: Pending
+Signed-off-by: Alp Lab AB
+---
+--- a/plat/alif/board/devkit_e7/common/include/platform_def.h
++++ b/plat/alif/board/devkit_e7/common/include/platform_def.h
+@@ -183,11 +183,18 @@
+ #define PLATFORM_STACK_SIZE		UL(0x440)
+
+ /* platform console parameters */
+-#define PLAT_ALIF_BOOT_UART_BASE	UL(0x4901A000)
++/* Carrier console UART base, build-time override.  Defaults to the
++ * DevKit's UART2 -- unset, this expands to byte-identical DevKit output.
++ * See ALIF_CONSOLE_UART_BASE in platform.mk; the pinmux knobs that must
++ * move with this one live in devkit_e7_sp_min_setup.c. */
++#ifndef ALIF_CONSOLE_UART_BASE
++#define ALIF_CONSOLE_UART_BASE		0x4901A000
++#endif
++#define PLAT_ALIF_BOOT_UART_BASE	UL(ALIF_CONSOLE_UART_BASE)
+ #define PLAT_ALIF_BOOT_UART_CLK_IN_HZ	100000000
+ #define PLAT_ALIF_CONSOLE_BAUDRATE	115200
+
+-#define PLAT_ALIF_RUN_UART_BASE		UL(0x4901A000)
++#define PLAT_ALIF_RUN_UART_BASE		UL(ALIF_CONSOLE_UART_BASE)
+ #define PLAT_ALIF_RUN_UART_CLK_IN_HZ	100000000
+
+ #define SYS_COUNTER_FREQ_IN_TICKS       UL(100000000) /* 100MHz */
+--- a/plat/alif/board/devkit_e7/sp_min/devkit_e7_sp_min_setup.c
++++ b/plat/alif/board/devkit_e7/sp_min/devkit_e7_sp_min_setup.c
+@@ -67,11 +67,24 @@
++/* Carrier console UART pads, build-time override.  Defaults to the
++ * DevKit's UART2 pins (P1_0/P1_1, alternate function 1) -- unset, this
++ * expands to the original pinconf_set() calls below.  Must move together
++ * with ALIF_CONSOLE_UART_BASE in platform_def.h: changing only the
++ * register base routes the console to nowhere, silently. */
++#ifndef ALIF_CONSOLE_RX_PORT
++#define ALIF_CONSOLE_RX_PORT		PORT_1
++#define ALIF_CONSOLE_RX_PIN		PIN_0
++#define ALIF_CONSOLE_TX_PORT		PORT_1
++#define ALIF_CONSOLE_TX_PIN		PIN_1
++#define ALIF_CONSOLE_PIN_FUNC		PINMUX_ALTERNATE_FUNCTION_1
++#endif
++
+ /**
+  * @brief Initialize platform pinmux configuration
+  */
+ static void devkit_e7_pinmux_init(void)
+ {
+-    /* Configure pinmux for OSPI signals */
+-    pinconf_set(PORT_1, PIN_0, PINMUX_ALTERNATE_FUNCTION_1, PADCTRL_READ_ENABLE);
+-    pinconf_set(PORT_1, PIN_1, PINMUX_ALTERNATE_FUNCTION_1, 0);
++    /* Configure pinmux for console UART signals */
++    pinconf_set(ALIF_CONSOLE_RX_PORT, ALIF_CONSOLE_RX_PIN, ALIF_CONSOLE_PIN_FUNC, PADCTRL_READ_ENABLE);
++    pinconf_set(ALIF_CONSOLE_TX_PORT, ALIF_CONSOLE_TX_PIN, ALIF_CONSOLE_PIN_FUNC, 0);
+ }
+
+ /**
+--- a/plat/alif/board/devkit_e7/platform.mk
++++ b/plat/alif/board/devkit_e7/platform.mk
+@@ -23,6 +23,23 @@
+ ALIF_SOC_E8		?=	1
+ $(eval $(call add_define,ALIF_SOC_E8))
+
++# Carrier console UART: register base + pinmux, all default to the DevKit's
++# UART2 (P1_0/P1_1, alternate function 1) so an unmodified build is
++# byte-identical.  The base and the pads MUST move together -- see the
++# #ifndef guards in platform_def.h and devkit_e7_sp_min_setup.c.
++ALIF_CONSOLE_UART_BASE	?=	0x4901A000
++ALIF_CONSOLE_RX_PORT	?=	PORT_1
++ALIF_CONSOLE_RX_PIN	?=	PIN_0
++ALIF_CONSOLE_TX_PORT	?=	PORT_1
++ALIF_CONSOLE_TX_PIN	?=	PIN_1
++ALIF_CONSOLE_PIN_FUNC	?=	PINMUX_ALTERNATE_FUNCTION_1
++$(eval $(call add_define,ALIF_CONSOLE_UART_BASE))
++$(eval $(call add_define,ALIF_CONSOLE_RX_PORT))
++$(eval $(call add_define,ALIF_CONSOLE_RX_PIN))
++$(eval $(call add_define,ALIF_CONSOLE_TX_PORT))
++$(eval $(call add_define,ALIF_CONSOLE_TX_PIN))
++$(eval $(call add_define,ALIF_CONSOLE_PIN_FUNC))
++
+ ifeq "1" "${AES_EN}"
+ ifneq "1" "${ISSI_FLASH_EN}"
+ ifneq "1" "${MX_FLASH_EN}"

@@ -74,6 +74,41 @@ ZTEST(alp_peripheral, test_wdt_interrupt_only_with_callback_passes_validation)
 	                  "a well-formed INTERRUPT_ONLY request must not fail dispatcher validation");
 }
 
+ZTEST(alp_peripheral, test_wdt_window_not_below_timeout_rejected)
+{
+	/* #1637: a window that opens at or after the deadline leaves no
+     * legal moment to feed -- refused in the dispatcher. */
+	alp_wdt_t *w = alp_wdt_open(&(alp_wdt_config_t){ .wdt_id        = 0,
+	                                                 .timeout_ms    = 1000u,
+	                                                 .on_timeout    = ALP_WDT_RESET_SOC,
+	                                                 .window_min_ms = 1000u });
+	zassert_is_null(w);
+	zassert_equal(alp_last_error(), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_peripheral, test_wdt_unknown_flag_rejected)
+{
+	alp_wdt_t *w = alp_wdt_open(&(alp_wdt_config_t){
+	    .wdt_id = 0, .timeout_ms = 1000u, .on_timeout = ALP_WDT_RESET_SOC, .flags = 1u << 7 });
+	zassert_is_null(w);
+	zassert_equal(alp_last_error(), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_peripheral, test_wdt_window_and_pause_pass_validation)
+{
+	/* A well-formed window + both pause flags clear the dispatcher; the
+     * backend then fails for its own reason (no alp-wdt0 alias on
+     * native_sim), which is not INVAL. */
+	alp_wdt_t *w = alp_wdt_open(
+	    &(alp_wdt_config_t){ .wdt_id        = 0,
+	                         .timeout_ms    = 1000u,
+	                         .on_timeout    = ALP_WDT_RESET_SOC,
+	                         .window_min_ms = 100u,
+	                         .flags = ALP_WDT_PAUSE_IN_SLEEP | ALP_WDT_PAUSE_HALTED_BY_DEBUG });
+	zassert_is_null(w);
+	zassert_not_equal(alp_last_error(), ALP_ERR_INVAL);
+}
+
 ZTEST(alp_peripheral, test_wdt_feed_null_handle_not_ready)
 {
 	/* §C.22: feeding a closed / NULL watchdog should fail safely;

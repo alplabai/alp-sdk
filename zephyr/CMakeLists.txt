@@ -109,6 +109,12 @@ if(CONFIG_SOC_SERIES_E8)
         ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif/mpu_regions_e8.c)
 endif()
 
+# Flex-IO bank 1.8 V mode (VBAT GPIO_CTRL bit 0), set only by boards whose
+# VDD_IO_FLEX is a 1.8 V rail.  A pad-level board fact, so applied before the
+# CONFIG_ALP_SDK early-return like the MPU table above.
+zephyr_sources_ifdef(CONFIG_ALIF_FLEX_IO_1V8
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif/flex_io_1v8_e8.c)
+
 if(NOT CONFIG_ALP_SDK)
     return()
 endif()
@@ -330,6 +336,12 @@ endif()
 zephyr_library_sources_ifdef(CONFIG_MBOX_ALIF_MHUV2
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mbox/mbox_alif_mhuv2.c)
 
+# Alif Ensemble Secure-Enclave TRNG entropy driver (#2192) -- Tier 1.5 glue over
+# hal_alif's se_service_get_rnd_num(). Binding:
+# zephyr/dts/bindings/entropy/alif,se-trng.yaml.
+zephyr_library_sources_ifdef(CONFIG_ENTROPY_ALIF_SE
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/entropy/entropy_alif_se.c)
+
 # Alif Ensemble hardware-semaphore (HWSEM) driver -- vendor-ext, BENCH-UNVERIFIED.
 # AMP request/release latch shared between the two RTSS cores (M55-HE <-> M55-HP).
 # HWSEM has no upstream Zephyr device class, so this is a "misc" (no-class) driver
@@ -464,8 +476,11 @@ endif()
 # add_subdirectory_ifdef precedent shared with USE_ALIF_HAL_UTIMER/_ANALOG).
 # hal_alif's own ospi CMakeLists is header-self-contained (its
 # zephyr_include_directories(include) fires when USE_ALIF_HAL_OSPI pulls the
-# subdirectory in), so no extra include path is needed here.  HW-BLOCKED /
-# BUILD-ONLY this batch: see the OSPI_ALIF Kconfig help + examples/aen/aen-ospi-regcheck.
+# subdirectory in), so no extra include path is needed here.  See the
+# OSPI_ALIF Kconfig help + flash_ospi_alif.c's own header for the current
+# read/write/erase coverage (#915: read/read_jedec_id/sfdp_read only, write/
+# erase are fail-closed stubs); examples/aen/aen-ospi-regcheck exercises the
+# controller-register path only and makes no flash_driver_api call.
 zephyr_library_sources_ifdef(CONFIG_OSPI_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/flash/flash_ospi_alif.c)
 
@@ -1021,6 +1036,12 @@ zephyr_library_sources(
 zephyr_library_sources_ifdef(CONFIG_GPIO
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/qenc/zephyr_drv.c)
 
+# gpio-qdec input-subsystem backend (issue #2095): only meaningful once
+# Zephyr's input subsystem is compiled in.  Priority 110 vs zephyr_drv's
+# 100 -- see gpio_qdec.c's header comment for the open-time fall-through.
+zephyr_library_sources_ifdef(CONFIG_INPUT
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/qenc/gpio_qdec.c)
+
 if(CONFIG_ALP_SDK_V2N_SUPERVISOR)
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/qenc/gd32_bridge.c)
@@ -1056,6 +1077,13 @@ endif()
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_DSP
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/dsp_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/dsp/sw_fallback.c)
+
+# The <alp/dsp.h> decimator is standalone portable C (no pool, no backend).
+# The chain API needs it, and so does PDM capture: the audio-in backend
+# resamples to a rate the mic can't be clocked for (#2134).
+if(CONFIG_ALP_SDK_DSP OR CONFIG_ALP_SDK_AUDIO_IN)
+    zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/src/dsp_decimator.c)
+endif()
 
 # The DSP body + stats surface call CMSIS-DSP kernels (arm_rfft_fast_f32,
 # arm_mean/rms/min/max/absmax_f32) when the cmsis-dsp module is linked,
@@ -1225,8 +1253,15 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_TMP112
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/tmp112/tmp112.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_RV3028C7
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/rv3028c7/rv3028c7.c)
-zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_OPTIGA_TRUST_M
-    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/optiga_trust_m/optiga_trust_m.c)
+if(CONFIG_ALP_SDK_CHIP_OPTIGA_TRUST_M)
+    # The driver runs Infineon's host library (#1164).
+    include(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/optiga-trust-m/sources.cmake)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/chips/optiga_trust_m/optiga_trust_m.c
+        ${ALP_OPTIGA_SOURCES})
+    zephyr_library_include_directories(${ALP_OPTIGA_INCLUDE_DIRS})
+    zephyr_library_compile_definitions(${ALP_OPTIGA_DEFINES})
+endif()
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_EEPROM_24C128
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/eeprom_24c128/eeprom_24c128.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_CAM_MUX_PI3WVR626
@@ -1713,8 +1748,10 @@ if(CONFIG_ALP_SDK_MBEDTLS_WEAK_RNG AND NOT CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY)
         "secure random source: CONFIG_CSPRNG_ENABLED is not set, or the only "
         "entropy driver in this build declares itself a fake. TLS would "
         "negotiate and derive key material from a predictable generator.\n"
-        "  Fix it: bind a real entropy driver for this target (on Alif "
-        "Ensemble that is the Secure Enclave TRNG -- open work, issue "
+        "  Fix it: bind a real entropy driver for this target. Alif Ensemble "
+        "E8 boards get the Secure Enclave TRNG (&se_trng, "
+        "CONFIG_ENTROPY_ALIF_SE) as zephyr,entropy by default -- if this "
+        "fires there, something disabled it or ENTROPY_GENERATOR (issue "
         "#2192).\n"
         "  Or, for a simulator, a test, or a bench-only bring-up image that "
         "never ships, acknowledge it explicitly with "

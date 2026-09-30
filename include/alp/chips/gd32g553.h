@@ -180,6 +180,38 @@ extern "C" {
  *  BEFORE any erase/program (#751).  See docs/gd32-bridge-protocol.md §8. */
 #define GD32G553_OTA_MIN_PROTOCOL_MINOR 6u
 
+/** Minimum protocol MINOR a peer must advertise before @ref
+ *  gd32g553_ota_get_state decodes a 6th (`err`) byte off the wire.
+ *  CMD_OTA_GET_STATE's reply widened 5 -> 6 bytes in v0.14 (gh#101);
+ *  the wire carries no length, so a host that read 6 bytes from an
+ *  older bridge would desync the CRC over a byte the firmware never
+ *  sent.  Below this minor, @ref gd32g553_ota_state_info_t::err reads
+ *  as @ref GD32G553_OTA_ERR_NONE regardless of the real cause -- the
+ *  same "unattributable" state gh#101 fixed, just for older peers. */
+#define GD32G553_OTA_ERR_MIN_PROTOCOL_MINOR 14u
+
+/** GPIO expander line carrying the on-module Murata LBEE5HY2FY-922
+ *  (Infineon CYW55513) Bluetooth core's BT_REG_ON enable (GD32 pad
+ *  `PE14`).  Valid only on bridges advertising protocol minor
+ *  @ref GD32G553_REG_ON_MIN_PROTOCOL_MINOR or newer -- see that macro. */
+#define GD32G553_GPIO_LINE_BT_REG_ON 18u
+
+/** GPIO expander line carrying the on-module Murata LBEE5HY2FY-922
+ *  (Infineon CYW55513) Wi-Fi core's WL_REG_ON enable (GD32 pad
+ *  `PE15`).  Valid only on bridges advertising protocol minor
+ *  @ref GD32G553_REG_ON_MIN_PROTOCOL_MINOR or newer -- see that macro. */
+#define GD32G553_GPIO_LINE_WL_REG_ON 19u
+
+/** Minimum protocol MINOR at which the bridge's GPIO expander grows
+ *  from 18 to 20 lines, adding @ref GD32G553_GPIO_LINE_BT_REG_ON and
+ *  @ref GD32G553_GPIO_LINE_WL_REG_ON (firmware 0.2.12).  A bridge
+ *  reporting a lower minor -- or a nonzero major, which is a
+ *  wire-format change this driver cannot assume is backward
+ *  compatible -- never learned these two pads; issuing GPIO_WRITE
+ *  against them would silently power nothing while reporting success.
+ *  See docs/gd32-bridge-protocol.md's version-history table. */
+#define GD32G553_REG_ON_MIN_PROTOCOL_MINOR 11u
+
 /** v0.7 link-feature bits (CMD_LINK_FEATURES payload).  STATUS_SEQ:
  *  once granted, every SPI reply's STATUS byte carries a 4-bit
  *  slave-side sequence stamp in bits [7:4] that advances per freshly
@@ -581,18 +613,17 @@ alp_status_t gd32g553_pwm_configure(gd32g553_t          *ctx,
  *  @param oversample_ratio   1 / 2 / 4 / 8 / 16 / 32 / 64 / 128 / 256.
  *                            Firmware rounds down to the nearest
  *                            power-of-two; 0 means "firmware default".
- *  @param sample_cycles      Sample-and-hold time in ADC cycles --
- *                            one of 2/6/12/24/47/92/247/640 (rounded
- *                            down on the firmware side).  0 means
- *                            "firmware default".
- *  @param resolution_bits    6 / 8 / 10 / 12 / 14 / 16.  14- and
- *                            16-bit modes require oversampling >= 4 /
- *                            16 respectively per the datasheet's
- *                            effective-resolution table.  0 means
+ *  @param sample_cycles      Raw RSMP value in ADCCK cycles (sample
+ *                            time = value + 2.5 cycles), not
+ *                            microseconds and not a rung selector.  Firmware clamps it to 2..638;
+ *                            0 means "firmware default" (240).
+ *  @param resolution_bits    6 / 8 / 10 / 12.  The GD32G553 hardware
+ *                            supports no wider width; 14 and 16 are
+ *                            rejected with ALP_ERR_NOSUPPORT.  0 means
  *                            "firmware default" (12-bit).
  *
  *  @return ALP_OK / ALP_ERR_INVAL (bad resolution) / ALP_ERR_OUT_OF_RANGE /
- *          ALP_ERR_NOSUPPORT (firmware HAL body not yet wired).
+ *          ALP_ERR_NOSUPPORT (14/16-bit resolution).
  */
 alp_status_t gd32g553_adc_configure(gd32g553_t *ctx,
                                     uint8_t     channel,
@@ -1072,6 +1103,32 @@ typedef enum {
 	GD32G553_OTA_SLOT_NONE = 0xFFu, /**< No slot (e.g. nothing pending). */
 } gd32g553_ota_slot_t;
 
+/** OTA failure cause -- the `err` byte CMD_OTA_GET_STATE's reply gained
+ *  in protocol v0.14 (gh#101).  Values are the WIRE encoding from the
+ *  firmware's `gd32_bridge_ota_err_t` (gd32-bridge-firmware:src/protocol.h)
+ *  -- keep numerically identical; do NOT renumber.  Meaningless (always
+ *  @ref GD32G553_OTA_ERR_NONE) against a peer below @ref
+ *  GD32G553_OTA_ERR_MIN_PROTOCOL_MINOR, which never sends this byte. */
+typedef enum {
+	GD32G553_OTA_ERR_NONE               = 0x00, /**< No error recorded. */
+	GD32G553_OTA_ERR_SESSION_RANGE      = 0x01, /**< BEGIN/VERIFY/COMMIT image
+	                                              *   size out of range. */
+	GD32G553_OTA_ERR_ERASE_FAILED       = 0x02, /**< Background page erase failed. */
+	GD32G553_OTA_ERR_CHUNK_RANGE        = 0x03, /**< Chunk offset/length rejected. */
+	GD32G553_OTA_ERR_PROGRAM_FAILED     = 0x04, /**< Flash program failed
+	                                              *   (PGERR/PGSERR). */
+	GD32G553_OTA_ERR_VERIFY_CRC         = 0x05, /**< VERIFY's CRC comparison failed. */
+	GD32G553_OTA_ERR_COMMIT_FAILED      = 0x06, /**< COMMIT: bootability check or
+	                                              *   metadata commit failed. */
+	GD32G553_OTA_ERR_ERASE_TARGET       = 0x07, /**< Erase target would intersect
+	                                              *   the running slot. */
+	GD32G553_OTA_ERR_NOT_TRIAL_CAPABLE  = 0x08, /**< COMMIT refused: image has no
+	                                              *   valid trial marker. */
+	GD32G553_OTA_ERR_META_DEMOTE_FAILED = 0x09, /**< BEGIN: metadata commit that
+	                                              *   demotes the stale target
+	                                              *   slot failed. */
+} gd32g553_ota_err_t;
+
 /** Read-only telemetry of the OTA state machine. */
 typedef struct {
 	gd32g553_ota_state_t state;        /**< @ref gd32g553_ota_state_t. */
@@ -1081,6 +1138,11 @@ typedef struct {
                                         *   COMMIT); NONE when no session
                                         *   is open. */
 	uint16_t             boot_count;   /**< Monotonic boot counter from the metadata page. */
+	gd32g553_ota_err_t   err;          /**< @ref gd32g553_ota_err_t; cause of the
+                                        *   most recent OTA_ST_ERROR, or NONE.
+                                        *   Always NONE against a peer below
+                                        *   @ref GD32G553_OTA_ERR_MIN_PROTOCOL_MINOR
+                                        *   (gh#101). */
 } gd32g553_ota_state_info_t;
 
 /**

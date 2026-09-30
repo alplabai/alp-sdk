@@ -2,101 +2,114 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Infineon OPTIGA Trust M (SLS32AIA010MLUSON10XTMA2) secure
- * element -- v0.3 thin driver.
+ * Infineon OPTIGA Trust M (SLS32AIA010MLUSON10XTMA2) secure element.
  *
- * Trust M's wire protocol is multi-layer: an I2C data-link layer
- * with PRESET / GET frames, an info-pack layer that carries
- * sequence numbers + CRC16, then APDUs at the top.  Implementing
- * the full stack here would duplicate Infineon's Host Library, so
- * this driver deliberately does not.
+ * Trust M's wire protocol is multi-layer: an I2C data-link layer with
+ * sequence-numbered, CRC16-protected frames, a transport layer that
+ * chains APDUs across frames, then APDUs at the top.  This driver does
+ * not reimplement that stack: it runs Infineon's host library
+ * (vendors/optiga-trust-m, release-v5.8.3, MIT) through a PAL written on
+ * the portable alp surface (vendors/optiga-trust-m/pal_alp/pal_alp.c), so
+ * the same code path serves the A55 and an MCU core (#1164).
  *
- * That library is github.com/Infineon/optiga-trust-m, MIT, and it
- * does ship a Zephyr PAL (extras/pal/zephyr/).  What it does NOT
- * ship is a Zephyr *module*: at release-v5.8.1 the tree has no
- * zephyr/module.yml and no library-level CMakeLists, so a plain
- * west project pin would be inert for exactly the reason
- * vendors/u8g2/README.md describes.  Consuming it therefore means
- * vendored source (src/ + include/ are 19,777 lines) plus module
- * glue alp-sdk writes itself -- not a one-line manifest entry.
- * Two hardware facts gate that work as much as the vendoring does:
- * the PAL resolves its bus through DT_ALIAS(optiga_i2c), which no
- * alp-sdk board declares, and its optional reset support wants
- * DT_ALIAS(optiga_reset) as a SoC GPIO -- but on V2N/V2M SE_RST is
- * not wired to the SoC at all.  It hangs off the GD32 supervisor
- * (PC13), reachable only via gd32g553_se_reset().  See #1164.
+ *   - init() probes I2C_STATE (0x82) only.  No application session is
+ *     opened, so a caller that only wants "is it fitted" pays one read.
+ *   - read_product_info() opens the Trust M application through the
+ *     library's util layer and reads the Coprocessor UID (0xE0C2).
+ *   - send_apdu() runs a raw session on the library's comms layer: the
+ *     caller owns the APDU sequence, including OpenApplication.
  *
- * #1164 also asks whether a minimal in-tree APDU implementation --
- * just the handful of commands this SDK needs -- beats vendoring the
- * host library.  It doesn't, and not by a small margin.  Upstream's own
- * comms stack sizes the transport this driver would have to
- * hand-derive from the wire spec instead of reusing:
- * ifx_i2c_data_link_layer.c (608 lines) implements an 11-state
- * retry/resend/ack/nack machine (DL_STATE_TX/RX/ACK/RESEND/NACK/ERROR/
- * RX_DF/RX_CF/...) plus a CRC16 over every frame, and
- * ifx_i2c_transport_layer.c (479 lines) chains APDUs across frames --
- * both required before OpenApplication/CloseApplication (APDU commands
- * 0x70/0x71, src/cmd/optiga_cmd.c:31,33) or any other command APDU can
- * run.  That is 1,087 lines at minimum -- not "a handful of commands"
- * -- and it excludes ifx_i2c_presentation_layer.c (1086 lines): that
- * file's entire body is guarded #ifdef OPTIGA_COMMS_SHIELDED_CONNECTION
- * (verified against a fresh clone of release-v5.8.1), i.e. the OPTIONAL
- * Shielded Connection encryption layer, not part of the required path.
- * Vendoring the whole src/comms/ifx_i2c/ directory instead -- the three
- * files above plus ifx_i2c_physical_layer.c (720), ifx_i2c.c (315) and
- * ifx_i2c_config.c (140) -- totals 3,348 lines, already tested against
- * real silicon.  Hand-deriving even the 1,087-line minimum is written
- * blind against a security element with no silicon in reach to run it
- * against even once.  A wrong CRC polynomial, a wrong sequence-toggle
- * bit, or a mishandled retry transition is silent until it corrupts a
- * real command to a real key-storage part, and nothing in this repo can
- * catch that without a bench.  That's the real cost of "minimal
- * in-tree," and it's not desk-safe to ship as anything other than
- * NOSUPPORT without a way to verify it.
+ * The two sessions share the library's single IFX I2C instance, so they
+ * are exclusive: switching mode closes the other session first.
  *
- * This is this driver's own call, made on the cost above -- not
- * something #1164's comment thread (2026-08-30) already decided.  That
- * thread says the opposite on feasibility ("writing the APDU transport
- * layer itself is desk work") and leaves speculative-vs-wait open
- * ("Worth deciding whether to write it speculatively or wait, since an
- * unverified security-chip driver is not much better than a stub").
- *
- * Anything that changes send_apdu()/read_product_info() away from
- * NOSUPPORT must move every one of these NOSUPPORT sites in the same
- * change, or the chips suite goes red on the first run:
- * tests/zephyr/chips/src/test_security.c:88,104-106;
- * examples/v2n/v2n-secure-element-sign/src/main.c:52,73;
- * examples/aen/aen-secure-element-sign/src/main.c:103,123
- * (both example READMEs document the NOSUPPORT line as the PASS case);
- * docs/tutorials/06-secure-element-sign.md:23-30 documents the same
- * contract for a reader, not just a test.
- *
- * For v0.3 we ship:
- *   - I2C address probe via a 4-byte read of the I2C_STATE register
- *     at 0x82.  The register numbers below and that 4-byte length
- *     match upstream's own physical layer
- *     (src/comms/ifx_i2c/ifx_i2c_physical_layer.c: PL_REG_DATA 0x80,
- *     PL_REG_DATA_REG_LEN 0x81, PL_REG_I2C_STATE 0x82,
- *     PL_REG_LEN_I2C_STATE 4U), so the probe stays correct when the
- *     real transport lands on top of it.
- *   - Argument validation for the future product-info and raw-APDU
- *     entry points.
- *
- * The send_apdu / read_product_info paths return NOSUPPORT after
- * validation.  Trust M's APDU transport requires the sequence-numbered
- * info-pack layer; that should come from Infineon's host library rather
- * than a partial in-repo reimplementation.  This driver confirms wiring
- * + I2C connectivity only.
+ * Shielded Connection (link encryption) is off: it needs a platform
+ * binding secret written into the chip, an irreversible provisioning
+ * step that is not designed yet.
  */
 
 #include <string.h>
 #include <stdint.h>
 
 #include "alp/chips/optiga_trust_m.h"
+#include "ifx_i2c_config.h"
+#include "optiga_comms.h"
+#include "optiga_util.h"
+#include "pal_alp.h"
 
-#define OPTIGA_REG_DATA         0x80u /* Data register (where APDUs flow) */
-#define OPTIGA_REG_DATA_REG_LEN 0x81u
-#define OPTIGA_REG_I2C_STATE    0x82u
+#define OPTIGA_REG_I2C_STATE 0x82u
+
+/* Trust M NACKs accesses while it wakes from its idle sleep.  After a
+ * few seconds idle the wake outlasts 10 x 1 ms (bench, E1M-V2M103
+ * 2026W38-0001: every run after a 2 s pause failed a 10-try probe), so
+ * the probe uses the host library's own NACK-polling budget:
+ * PL_POLLING_MAX_CNT tries at PL_POLLING_INVERVAL_US (ifx_i2c_config.h). */
+#define OPTIGA_PROBE_TRIES    PL_POLLING_MAX_CNT
+#define OPTIGA_PROBE_RETRY_MS (PL_POLLING_INVERVAL_US / 1000u)
+
+/* OpenApplication runs a soft reset plus link sync; bench: ~60 ms. */
+#define OPTIGA_OPEN_TIMEOUT_MS 2000u
+#define OPTIGA_READ_TIMEOUT_MS 1000u
+
+#define OPTIGA_OID_COPROCESSOR_UID 0xE0C2u
+
+enum { SESSION_NONE = 0, SESSION_UTIL, SESSION_RAW };
+
+static void op_done(void *context, optiga_lib_status_t status)
+{
+	((optiga_trust_m_t *)context)->op_status = status;
+}
+
+/* Drive the library until the pending operation completes: its timed
+ * callbacks run from here (pal_alp.c is threadless). */
+static alp_status_t op_wait(optiga_trust_m_t *ctx, uint32_t timeout_ms)
+{
+	uint64_t deadline = alp_uptime_ms() + timeout_ms;
+	while (ctx->op_status == OPTIGA_LIB_BUSY) {
+		if (alp_optiga_pal_poll()) continue;
+		if (alp_uptime_ms() >= deadline) return ALP_ERR_TIMEOUT;
+		alp_delay_ms(1);
+	}
+	return ctx->op_status == OPTIGA_LIB_SUCCESS ? ALP_OK : ALP_ERR_IO;
+}
+
+static void session_close(optiga_trust_m_t *ctx)
+{
+	if (ctx->session == SESSION_UTIL) {
+		ctx->op_status = OPTIGA_LIB_BUSY;
+		if (optiga_util_close_application(ctx->util, 0) == OPTIGA_LIB_SUCCESS) {
+			(void)op_wait(ctx, OPTIGA_OPEN_TIMEOUT_MS);
+		}
+	} else if (ctx->session == SESSION_RAW) {
+		ctx->op_status = OPTIGA_LIB_BUSY;
+		if (optiga_comms_close(ctx->comms) == OPTIGA_LIB_SUCCESS) {
+			(void)op_wait(ctx, OPTIGA_OPEN_TIMEOUT_MS);
+		}
+	}
+	ctx->session = SESSION_NONE;
+}
+
+static alp_status_t session_open(optiga_trust_m_t *ctx, uint8_t kind)
+{
+	if (ctx->session == kind) return ALP_OK;
+	session_close(ctx);
+	alp_optiga_pal_bind(ctx->bus, ctx->addr);
+
+	optiga_lib_status_t rc;
+	ctx->op_status = OPTIGA_LIB_BUSY;
+	if (kind == SESSION_UTIL) {
+		if (ctx->util == NULL) ctx->util = optiga_util_create(OPTIGA_INSTANCE_ID_0, op_done, ctx);
+		if (ctx->util == NULL) return ALP_ERR_NOMEM;
+		rc = optiga_util_open_application(ctx->util, 0);
+	} else {
+		if (ctx->comms == NULL) ctx->comms = optiga_comms_create(op_done, ctx);
+		if (ctx->comms == NULL) return ALP_ERR_NOMEM;
+		rc = optiga_comms_open(ctx->comms);
+	}
+	if (rc != OPTIGA_LIB_SUCCESS) return ALP_ERR_IO;
+	alp_status_t s = op_wait(ctx, OPTIGA_OPEN_TIMEOUT_MS);
+	if (s == ALP_OK) ctx->session = kind;
+	return s;
+}
 
 alp_status_t optiga_trust_m_init(optiga_trust_m_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit)
 {
@@ -111,11 +124,25 @@ alp_status_t optiga_trust_m_init(optiga_trust_m_t *ctx, alp_i2c_t *bus, uint8_t 
 	ctx->addr = (addr_7bit != 0) ? addr_7bit : OPTIGA_TRUST_M_I2C_ADDR;
 
 	/* Probe by reading the I2C state register.  Trust M ACKs at
-	 * its address before OPEN_APPLICATION; if no ACK, NOT_READY tells
-	 * the caller the chip isn't populated / mis-strapped. */
+	 * its address before OPEN_APPLICATION; if it still does not ACK
+	 * after the wake retries, NOT_READY tells the caller the chip isn't
+	 * populated / mis-strapped.  Register address and data go in two
+	 * transactions with a STOP between them, as upstream's physical
+	 * layer does: the part NACKs a repeated-start write-read (bench,
+	 * E1M-V2M103 2026W38-0001). */
 	uint8_t      reg      = OPTIGA_REG_I2C_STATE;
 	uint8_t      state[4] = { 0 };
-	alp_status_t s        = alp_i2c_write_read(ctx->bus, ctx->addr, &reg, 1, state, sizeof(state));
+	alp_status_t s        = ALP_ERR_NOT_READY;
+	for (unsigned i = 0; i < OPTIGA_PROBE_TRIES && s != ALP_OK; i++) {
+		if (i != 0u) alp_delay_ms(OPTIGA_PROBE_RETRY_MS);
+		s = alp_i2c_write(ctx->bus, ctx->addr, &reg, 1);
+		if (s != ALP_OK) continue;
+		/* The part needs PL_GUARD_TIME_INTERVAL_US (50 us) between the
+		 * register write and the read; alp_delay_ms is the finest
+		 * portable wait. */
+		alp_delay_ms(1);
+		s = alp_i2c_read(ctx->bus, ctx->addr, state, sizeof(state));
+	}
 	if (s != ALP_OK) return ALP_ERR_NOT_READY;
 
 	ctx->initialised = true;
@@ -130,16 +157,25 @@ alp_status_t optiga_trust_m_send_apdu(optiga_trust_m_t *ctx,
                                       size_t           *resp_len,
                                       uint32_t          timeout_ms)
 {
-	(void)timeout_ms;
 	if (resp_len != NULL) *resp_len = 0;
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (apdu == NULL || apdu_len == 0u || resp == NULL || resp_cap == 0u || resp_len == NULL) {
 		return ALP_ERR_INVAL;
 	}
-	/* Full transport (info-pack sequence + CRC16) lands via Infineon's
-	 * host library.  Returning NOSUPPORT here is faithful to that
-	 * contract without surfacing fake success. */
-	return ALP_ERR_NOSUPPORT;
+	/* The comms layer counts in uint16_t. */
+	if (apdu_len > UINT16_MAX) return ALP_ERR_INVAL;
+	uint16_t rx_len = resp_cap > UINT16_MAX ? UINT16_MAX : (uint16_t)resp_cap;
+
+	alp_status_t s = session_open(ctx, SESSION_RAW);
+	if (s != ALP_OK) return s;
+	ctx->op_status = OPTIGA_LIB_BUSY;
+	if (optiga_comms_transceive(ctx->comms, apdu, (uint16_t)apdu_len, resp, &rx_len) !=
+	    OPTIGA_LIB_SUCCESS) {
+		return ALP_ERR_IO;
+	}
+	s = op_wait(ctx, timeout_ms);
+	if (s == ALP_OK) *resp_len = rx_len;
+	return s;
 }
 
 alp_status_t optiga_trust_m_read_product_info(optiga_trust_m_t              *ctx,
@@ -147,14 +183,32 @@ alp_status_t optiga_trust_m_read_product_info(optiga_trust_m_t              *ctx
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (out == NULL) return ALP_ERR_INVAL;
-	/* GET_DATA_OBJECT(0xE0C2) needs the full APDU stack; defer for the
-	 * same reason as send_apdu. */
-	return ALP_ERR_NOSUPPORT;
+
+	alp_status_t s = session_open(ctx, SESSION_UTIL);
+	if (s != ALP_OK) return s;
+	uint8_t  uid[sizeof(*out)];
+	uint16_t len   = sizeof(uid);
+	ctx->op_status = OPTIGA_LIB_BUSY;
+	if (optiga_util_read_data(ctx->util, OPTIGA_OID_COPROCESSOR_UID, 0, uid, &len) !=
+	    OPTIGA_LIB_SUCCESS) {
+		return ALP_ERR_IO;
+	}
+	s = op_wait(ctx, OPTIGA_READ_TIMEOUT_MS);
+	if (s != ALP_OK) return s;
+	/* The object is exactly the 27-byte UID laid out as the struct. */
+	if (len != sizeof(uid)) return ALP_ERR_IO;
+	memcpy(out, uid, sizeof(uid));
+	return ALP_OK;
 }
 
 void optiga_trust_m_deinit(optiga_trust_m_t *ctx)
 {
 	if (ctx == NULL) return;
+	if (ctx->initialised) session_close(ctx);
+	if (ctx->util != NULL) (void)optiga_util_destroy(ctx->util);
+	if (ctx->comms != NULL) optiga_comms_destroy(ctx->comms);
+	ctx->util        = NULL;
+	ctx->comms       = NULL;
 	ctx->initialised = false;
 	ctx->bus         = NULL;
 }

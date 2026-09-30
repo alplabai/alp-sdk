@@ -243,13 +243,13 @@ class TestV2n101XEvk:
 
     def test_route_table_has_both_dispatch_kinds(self, result):
         """The composition mixes gd32_bridge (V2N101.pad_routes) and direct
-        (undeclared) rows.  Exact split today: 40 gd32_bridge + 25 direct =
+        (undeclared) rows.  Exact split today: 39 gd32_bridge + 25 direct + 1 unrouted (E1M IO24, DX-M1-owned, #2453) =
         65; the direct count shrinks as V2N101.pad_routes gains the
         currently-undeclared pads (see the class docstring)."""
         routes = result["routes"]
         gd32 = [r for r in routes if r["dispatch"] == "gd32_bridge"]
         direct = [r for r in routes if r["dispatch"] == "direct"]
-        assert len(gd32) == 40
+        assert len(gd32) == 39
         assert len(direct) == 25
         assert len(routes) == 65
 

@@ -13,7 +13,7 @@ This cookbook ties three other docs together:
 
 - [`docs/portability-matrix.md`](portability-matrix.md) — the empirical
   guarantee.  Every cell is a SKU × example compile test;
-  18 / 21 cells green for E1M (NX9101's only hw_rev is `status: tbd` --
+  21 / 24 cells green for E1M (NX9101's only hw_rev is `status: tbd` --
   refused outright by the hw_rev-buildable gate, #1025 --
   so all 3 of its cells currently fail), 12 / 18 for E1M-X (the
   `adc-voltmeter` example fails on all six E1M-X presets --
@@ -48,7 +48,8 @@ The promise has a **scope**.  It is not "any SoM, any time".  It is:
 ### Scope — INTRA-family
 
 - **E1M family.**  `E1M-AEN301` ↔ `E1M-AEN401` ↔ `E1M-AEN501` ↔
-  `E1M-AEN601` ↔ `E1M-AEN701` ↔ `E1M-AEN801` ↔ `E1M-NX9101`.
+  `E1M-AEN601` ↔ `E1M-AEN701` ↔ `E1M-AEN801` ↔ `E1M-AEN803` ↔
+  `E1M-NX9101`.
   Same 35 × 35 mm form factor, same `<alp/e1m_pinout.h>` symbol
   namespace, same E1M-spec instance reservations
   (`ALP_E1M_I2C_COUNT == 2`, `ALP_E1M_PWM_COUNT == 8`, etc.).
@@ -577,16 +578,31 @@ check's scope by construction.
 
 ### 4.5  V2N/V2M analog and counter classes (bridge-served, no native leg)
 
-On V2N/V2M, `alp_adc_*`, `alp_pwm_*`, `alp_dac_*`, `alp_counter_*`,
-and `alp_qenc_*` are served entirely by the GD32 IO-MCU bridge. No
-SoC-native RZ/V2N leg exists: the wildcard `zephyr_drv` leg
-(`src/backends/{adc,pwm,dac,counter,qenc}/zephyr_drv.c`) is compiled
-on a V2N build but never selected, because an exact `silicon_ref`
-match beats the wildcard at equal backend priority. This is a
-routing fact, not a preference: no SoC pin reaches an E1M-standard
-analog or counter pad on this family, so a native leg would have
-nothing to attach to even if it were selected
+On V2N/V2M, `alp_adc_*`, `alp_pwm_*`, `alp_dac_*`, and `alp_counter_*`
+are served entirely by the GD32 IO-MCU bridge. No SoC-native RZ/V2N
+leg exists for those four: the wildcard `zephyr_drv` leg
+(`src/backends/{adc,pwm,dac,counter}/zephyr_drv.c`) is compiled on a
+V2N build but never selected, because an exact `silicon_ref` match
+beats the wildcard at equal backend priority. This is a routing
+fact, not a preference: no SoC pin reaches an E1M-standard analog or
+counter pad on this family, so a native leg would have nothing to
+attach to even if it were selected
 (`docs/adr/0024-v2n-analog-and-counter-classes-stay-on-the-gd32-bridge.md`).
+
+`alp_qenc_*` is the one exception to "bridge-served, no native leg":
+`src/backends/qenc/gpio_qdec.c` (issue #2095) is a **wildcard**
+backend at priority **110**, above `gd32_bridge`'s exact-match
+priority **100** -- and priority is the selector's first tiebreaker
+(section 4's `candidate_beats_best`), ahead of exact-vs-wildcard. So
+on a V2N build with `CONFIG_INPUT=y`, if an `alp-qenc<N>` alias
+resolves to a devicetree node compatible `gpio-qdec`, `gpio_qdec`
+wins the open and the GD32 bridge is never tried for that instance.
+`gpio_qdec` declines every other alias (a sensor-class QDEC, or no
+alias at all) with `ALP_ERR_NOSUPPORT`, and the dispatcher's
+open-time fall-through then walks down to `gd32_bridge` as before.
+No current V2N/V2M board wires a plain-GPIO quadrature pair through
+a `gpio-qdec` alias, so this is a live routing hazard, not (yet) an
+observed behaviour change.
 
 Capability deltas to plan around at the portable surface: the ADC
 backend advertises `base_caps = 0u` — an SDK-side gap at SDK v0.7,
@@ -840,9 +856,12 @@ Headline numbers, measured against the generated block in
 `docs/portability-matrix.md` (re-run `python3
 scripts/gen_portability_matrix.py` to reproduce):
 
-- **E1M family.**  18 / 21 (SKU × example) cells generate cleanly.
-  All 6 AEN SKUs produce byte-identical `alp.conf` for every
-  example, after stripping the SoC identity comment.  The other
+- **E1M family.**  21 / 24 (SKU × example) cells generate cleanly.
+  Across the 7 AEN SKUs (AEN301..801 + AEN803) the generated
+  `alp.conf` differs only in the documented expected-diff line
+  families (per-silicon identity, OPTIGA population, and
+  AEN803's on-module OSPI memory sizes) — not a byte-identity
+  claim; see the matrix's diff catalogue.  The other
   3 cells all belong to E1M-NX9101 — a placeholder MPN whose only
   hw_rev (imx93 r1) is `status: tbd`, which the hw_rev-buildable
   gate refuses outright, so none of its cells currently pass.

@@ -285,21 +285,30 @@ def test_the_failure_entry_is_a_str_like_every_sibling(
     assert isinstance(failures[0][0], str), type(failures[0][0])
 
 
-def test_no_soc_declares_svd_today() -> None:
-    """Pins the deliberate absence, and fails loudly the day it changes.
+def test_only_authorised_vendors_declare_svd() -> None:
+    """Pins exactly which SoCs declare `debug.svd`, and that each vendored
+    file carries the ADR 0032 furniture beside it.
 
     Whether Alp Lab redistributes a vendor's SVD under that vendor's terms is
     a per-vendor maintainer decision (ADR 0032 records the mechanism, not an
-    authorisation). If a `debug.svd` value ever lands, this test should be
-    updated in the same change that argues for it -- not quietly deleted.
+    authorisation). Alif was authorised on 2026-09-28 (#948) for the E8. A
+    new vendor's `debug.svd` must update this list in the same change that
+    argues for it -- not quietly delete the test.
     """
-    declared = []
+    authorised = {"metadata/socs/alif/ensemble/e8.json:AE822FA0E5597LS0"}
+    declared = set()
     for soc in sorted((REPO / "metadata" / "socs").rglob("*.json")):
         doc = json.loads(soc.read_text(encoding="utf-8"))
         for v in doc.get("variants") or []:
             if isinstance(v, dict) and isinstance(v.get("debug"), dict) \
                     and "svd" in v["debug"]:
-                declared.append(f"{soc.relative_to(REPO)}:{v.get('order_code')}")
-    assert declared == [], (
-        "a SoC now declares `debug.svd`: " + ", ".join(declared) + ". That is "
-        "a licensing decision, not a metadata edit -- see ADR 0032 and #948.")
+                declared.add(f"{soc.relative_to(REPO).as_posix()}:{v.get('order_code')}")
+                for path in v["debug"]["svd"].values():
+                    vendored = REPO / path
+                    assert vendored.is_file(), path
+                    for companion in ("License.txt", "README.md"):
+                        assert (vendored.parent / companion).is_file(), (
+                            f"{vendored.parent} lacks {companion} (ADR 0032)")
+    assert declared == authorised, (
+        f"`debug.svd` declarations changed: {sorted(declared)}. A new vendor's "
+        "SVD is a licensing decision, not a metadata edit -- see ADR 0032 and #948.")

@@ -41,6 +41,23 @@ ZTEST(alp_peripheral, test_pwm_configure_null_handle_yields_not_ready)
 	zassert_equal(s, ALP_ERR_NOT_READY, "got %d", (int)s);
 }
 
+ZTEST(alp_peripheral, test_pwm_configure_rejects_undefined_break_bits)
+{
+	/* #1648: a break_cfg bit outside the ALP_PWM_BREAK_* flags is refused
+	 * by the dispatcher with INVAL on every backend, before the backend's
+	 * own NOSUPPORT, rather than being passed through and dropped. */
+	alp_pwm_t *pwm = alp_pwm_open(&(alp_pwm_config_t){
+	    .channel_id = 0,
+	    .period_ns  = 1000000,
+	});
+	if (pwm == NULL) {
+		ztest_test_skip();
+	}
+	alp_status_t s = alp_pwm_configure(pwm, ALP_PWM_ALIGN_EDGE, 0u, 0x80u);
+	alp_pwm_close(pwm);
+	zassert_equal(s, ALP_ERR_INVAL, "got %d", (int)s);
+}
+
 /* ------------------------------------------------------------------ */
 /* §2B.2 -- single-pulse output + input capture (NOSUPPORT contract)  */
 /*                                                                    */

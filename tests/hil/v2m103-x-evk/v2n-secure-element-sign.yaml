@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# OPTIGA Trust M (U33, BRD_I2C 0x30) on E1M-V2M103 through the Infineon
+# host library (#1164): init probe, Coprocessor UID (0xE0C2) through the
+# util layer, then the same UID over a raw APDU session.  Read-only: no
+# key generation, no data-object write, no Shielded Connection binding.
+#
+# A55/Linux app (BRD_I2C is Linux-exclusive): flash_method ssh-run.
+
+schema_version: 1
+name: v2n-secure-element-sign
+description: |
+  E1M-V2M103 OPTIGA Trust M: probe, Coprocessor UID and raw APDU session.
+
+example: examples/v2n/v2n-secure-element-sign
+flash_method: ssh-run
+
+serial:
+  duration_s: 30
+  expect_contains:
+    - "[se] I2C_STATE probe -> ALP_OK"
+    - "[se] raw APDU UID matches (27 bytes)"
+    - "[se] RESULT PASS"
+  expect_absent:
+    - "RESULT FAIL"
+    - "FATAL"

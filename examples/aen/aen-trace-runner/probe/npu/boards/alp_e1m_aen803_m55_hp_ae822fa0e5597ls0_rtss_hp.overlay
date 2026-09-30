@@ -1,0 +1,19 @@
+/* SPDX-License-Identifier: Apache-2.0
+ *
+ * M55-HP NPU probe: link into the HP ITCM (the SE loads HP_APP to
+ * 0x50000000, scripts/bench/aen/flash-jlink-hp.sh), and bind the HP-paired
+ * Ethos-U55 instead of the board default U85. */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+&ethosu55 {
+	status = "okay";
+};
+
+&ethosu85 {
+	status = "disabled";
+};

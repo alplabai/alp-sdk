@@ -112,10 +112,9 @@ y_open(const alp_i3c_config_t *cfg, alp_i3c_backend_state_t *st, alp_capabilitie
 	if (cfg == NULL || st == NULL || caps_out == NULL) return ALP_ERR_INVAL;
 	if (!_bus_present(cfg->bus_id)) return ALP_ERR_NOT_READY;
 
-	st->dev         = NULL;
-	st->bus_id      = cfg->bus_id;
-	st->be_data     = NULL;
-	caps_out->flags = 0u;
+	st->dev     = NULL;
+	st->bus_id  = cfg->bus_id;
+	st->be_data = NULL;
 	return ALP_OK;
 }
 

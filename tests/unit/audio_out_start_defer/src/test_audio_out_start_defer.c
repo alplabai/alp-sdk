@@ -19,7 +19,9 @@
  *     fix moved to the I2S layer) composes correctly with a deferred
  *     start across multiple sub-writes -- stereo, > 128 frames per
  *     block so the loop runs at least twice, set_volume(4): the exact
- *     shape the silicon repro (examples/aen/aen-i2s-tas2563-probe) used.
+ *     shape the silicon repro used (the bench-only aen-i2s-tas2563-probe
+ *     on branch test/2149-underrun-bench; the maintained in-tree caller
+ *     is examples/aen/aen-evk-demo).
  *
  * Every test closes its handle BEFORE any zassert_* -- see
  * tests/unit/i2s_start_defer's file comment for why (pool-exhaustion
@@ -54,7 +56,8 @@ static alp_audio_out_t *open_mono(void)
 /* Stereo, 200 frames/block: with the chunk buffer's 256 int16 slots
  * split across 2 channels, chunk_frames = 128, so 200 frames needs TWO
  * chunks (128 + 72) -- the exact shape set_volume(4) forced on the
- * silicon repro (examples/aen/aen-i2s-tas2563-probe). */
+ * silicon repro (the bench-only aen-i2s-tas2563-probe on branch
+ * test/2149-underrun-bench). */
 #define STEREO_FRAMES 200u
 
 static alp_audio_out_t *open_stereo(void)

@@ -21,8 +21,8 @@ within-product-line option flip:
 
 - **E1M** (35×35 mm) -- mW-class single-die SoCs.  Core mix is
   per-SKU, not uniform: Cortex-M-only on AEN301/AEN401,
-  heterogeneous Cortex-A32 + Cortex-M55 on AEN501..AEN801.  Today:
-  Alif Ensemble (`E1M-AEN301..AEN801`) and NXP i.MX 93
+  heterogeneous Cortex-A32 + Cortex-M55 on AEN501..AEN803.  Today:
+  Alif Ensemble (`E1M-AEN301..AEN803`) and NXP i.MX 93
   (`E1M-NX9101`, a heterogeneous 2x Cortex-A55 + Cortex-M33 part --
   the E1M-side app targets its M33 RT core only, per
   `topology.m33:` in `metadata/e1m_modules/E1M-NX9101.yaml`).
@@ -60,11 +60,12 @@ new preset under `metadata/e1m_modules/E1M-AEN801.yaml`,
 regenerates `alp.conf` with the AEN801-specific Kconfig flags,
 and `west build` does the rest.
 
-For the empirical proof that this generates a byte-identical
-`alp.conf` across every E1M family SKU (modulo documented
-silicon-determined deltas), see
-[`docs/portability-matrix.md`](../portability-matrix.md) -- 18
-of 21 E1M cells (all 6 AEN SKUs; NX9101's 3 cells fail -- its only
+For the empirical proof that this generates an `alp.conf` that
+differs across E1M family SKUs only in the documented
+silicon-determined expected-diff lines, see
+[`docs/portability-matrix.md`](../portability-matrix.md) -- 21
+of 24 E1M cells (all 7 AEN SKUs, AEN301..801 + AEN803; NX9101's 3
+cells fail -- its only
 hw_rev, imx93 r1, is `status: tbd`, refused outright by the
 hw_rev-buildable gate, #1025) and 12 of 18 E1M-X cells generate
 cleanly today (the `adc-voltmeter` example fails on all six
@@ -92,7 +93,8 @@ carries two source trees -- only the pinout `#include` and
 `som.sku:` differ, but the two app entry points are distinct
 artefacts.  The cross-cutting `<alp/...>` surface
 (`<alp/inference.h>`, `<alp/peripheral.h>`, `<alp/iot.h>`,
-`<alp/log.h>`, ...) IS shared and works the same on both lines.
+`<alp/console.h>`, ...) IS shared and works the same on both
+lines.
 
 The architectural reasoning lives at
 [`docs/adr/0011-intra-family-portability.md`](../adr/0011-intra-family-portability.md).

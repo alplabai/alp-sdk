@@ -37,3 +37,12 @@ uint64_t alp_uptime_ms(void)
 {
 	return (uint64_t)k_uptime_get();
 }
+
+uint64_t alp_uptime_us(void)
+{
+#if defined(CONFIG_TIMER_HAS_64BIT_CYCLE_COUNTER)
+	return k_cyc_to_us_floor64(k_cycle_get_64());
+#else
+	return k_ticks_to_us_floor64((uint64_t)k_uptime_ticks());
+#endif
+}

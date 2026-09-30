@@ -10,7 +10,7 @@ CONFIG_LOG_DEFAULT_LEVEL=3
 
 # Boot-banner SoC identity + system summary (from the SoC spec JSON + SoM preset `memory:`; see alp_banner.c).
 CONFIG_ALP_SDK_SOC_NAME="Renesas RZ/V2N R9A09G056N44GBG"
-CONFIG_ALP_SDK_SOC_CPUS="Cortex-M33 @200MHz (active) + 4x Cortex-A55 @1800MHz"
+CONFIG_ALP_SDK_SOC_CPUS="Cortex-M33 @200MHz (active)|cm33 + 4x Cortex-A55 @1800MHz"
 CONFIG_ALP_SDK_SOC_NPUS="Drp-Ai"
 CONFIG_ALP_SDK_SOC_SRAM_KB=1536
 CONFIG_ALP_SDK_SOM_DRAM_MBIT=32768

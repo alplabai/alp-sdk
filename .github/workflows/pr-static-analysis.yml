@@ -103,11 +103,24 @@ jobs:
         # applied here too for consistency even though base.sha is a
         # commit hash of the PR's own target branch, not fork-controlled
         # data.
+        #
+        # #2349: resolving to $BASE_SHA itself (a two-dot diff) is wrong
+        # whenever the branch head is a merge commit -- e.g. a long-lived
+        # feature branch that merged `dev` into itself. That merge commit
+        # can carry hunks that revert or reshape content `dev` already
+        # changed since the branch point, so `git diff $BASE_SHA HEAD`
+        # includes lines that are not actually part of this PR's own
+        # changes (and, per the issue, disagree with `gh pr diff`'s
+        # rendering too). `git merge-base $BASE_SHA HEAD` finds the
+        # branch point instead, matching the three-dot semantics GitHub
+        # itself uses to render a PR diff, so this job diffs the same
+        # lines a reviewer sees.
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "ref=$BASE_SHA" >> "$GITHUB_OUTPUT"
+            MERGE_BASE=$(git merge-base "$BASE_SHA" HEAD)
+            echo "ref=$MERGE_BASE" >> "$GITHUB_OUTPUT"
           else
             echo "ref=HEAD~1" >> "$GITHUB_OUTPUT"
           fi

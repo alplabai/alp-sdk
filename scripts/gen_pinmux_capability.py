@@ -176,6 +176,10 @@ def _pads_for_family(spec: dict) -> list[dict[str, str]]:
                 e1m_pad = "TBD"
                 e1m_function = (peripheral[len("E1M "):]
                                 if peripheral.startswith("E1M ") else "TBD")
+                # Optional 3rd/4th columns: the E1M edge ball + function the
+                # SoM netlist routes this pad to (#2331). Absent -> TBD.
+                if len(cells) >= 4 and cells[2]:
+                    e1m_pad, e1m_function = cells[2], cells[3]
             elif len(cells) == 3:
                 e1m_pad, e1m_function, peripheral, pad = (
                     cells[0], cells[1], "", cells[2])

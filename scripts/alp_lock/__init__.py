@@ -123,7 +123,8 @@ def _python_hashes(root: Path) -> dict:
 # metadata/error-catalog.json) -- a stale regenerated-but-uncommitted
 # file is exactly the drift this lock exists to catch, same as any
 # hand-written input. Deliberately OUTSIDE this tuple:
-# `.md` (documentation) and `.gitkeep` (placeholder) -- neither can change
+# `.md` (documentation), `.gitkeep` (placeholder), and the vendored
+# `metadata/svd/` debugger files (`.svd`, `License.txt`) -- none can change
 # what a build produces, so hashing them would only manufacture false drift
 # on doc-only edits. `tests/scripts/test_alp_lock_metadata_coverage.py`
 # asserts every tracked file under metadata/ is covered by one of these

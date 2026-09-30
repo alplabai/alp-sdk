@@ -1,10 +1,9 @@
 # aen-secure-element-sign
 
-Probe the OPTIGA Trust M on the E1M-AEN's **BRD_I2C** and confirm the
-current probe-only driver contract.  The driver reads I2C_STATE to prove
-the part is reachable; product-info and raw-APDU helpers return
-`ALP_ERR_NOSUPPORT` until the Infineon host-library transport is
-integrated.
+Probe the OPTIGA Trust M on the E1M-AEN's **BRD_I2C** and read its
+Coprocessor UID.  The driver runs Infineon's host library
+(`vendors/optiga-trust-m`) through a PAL on the portable `<alp/*>` I2C
+and timing calls.  Nothing here writes to the chip.
 
 This is the **E1M-AEN (Alif Ensemble) sibling** of
 [`examples/v2n/v2n-secure-element-sign`](../../v2n/v2n-secure-element-sign).
@@ -56,18 +55,18 @@ west flash
    `optiga_trust_m_init` performs an I2C_STATE register read only;
    failing this means the chip is not on the bus or is not strapped to
    address 0x30.
-2. `optiga_trust_m_read_product_info` returns `ALP_ERR_NOSUPPORT`
-   because GET_DATA_OBJECT needs the full APDU transport.
-3. `optiga_trust_m_send_apdu` validates a non-empty APDU buffer and
-   returns `ALP_ERR_NOSUPPORT` without fabricating a signature.
+2. `optiga_trust_m_read_product_info` opens the Trust M application
+   and reads the 27-byte Coprocessor UID (data object 0xE0C2).
 
 ## Expected output (OPTIGA-populated SoM)
 
+Not yet run on an OPTIGA-populated AEN; the same driver path is
+bench-verified on E1M-V2M103 (see the V2N variant):
+
 ```
 [se] I2C_STATE probe -> ALP_OK
-[se] read_product_info -> -6 (expected NOSUPPORT)
-[se] send_apdu -> -6 resp_len=0 (expected NOSUPPORT, zero bytes)
-[se] RESULT PASS: Trust M I2C_STATE probe works; product-info/raw-APDU are cleanly blocked with ALP_ERR_NOSUPPORT
+[se] UID: cim CD platform 16 model 33 fw 80101071 build 2564
+[se] RESULT PASS: Trust M probe and Coprocessor UID read work
 ```
 
 ## Expected output (current AEN bench gates)
@@ -82,15 +81,12 @@ or, once BRD_I2C opens but the assembly is OPTIGA-DNI:
 [se] RESULT SKIP: optiga_trust_m_init -> -2 (Trust M not ACKing; current AEN bench assemblies may be OPTIGA-DNI)
 ```
 
-The eventual signing path belongs with the Infineon host-library/PSA
-integration, not a partial hand-rolled APDU transport in this example.
-
 ## See also
 
 * [`examples/v2n/v2n-secure-element-sign`](../../v2n/v2n-secure-element-sign)
-  -- the V2N variant with the same probe-only contract.
+  -- the V2N variant, which also runs a raw APDU session.
 * [`<alp/chips/optiga_trust_m.h>`](../../../include/alp/chips/optiga_trust_m.h)
-  -- driver header (I2C_STATE probe + NOSUPPORT APDU/product-info stubs).
+  -- driver header.
 * [`docs/bring-up-aen.md`](../../../docs/bring-up-aen.md) §5.2 -- where
   this example is the OPTIGA bench sanity check.
 * Infineon "Solution Reference Manual OPTIGA Trust M"
