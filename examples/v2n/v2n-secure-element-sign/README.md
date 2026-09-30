@@ -22,11 +22,15 @@ writes to the chip.
    [`optiga_trust_m_t`](../../../include/alp/chips/optiga_trust_m.h).
    `optiga_trust_m_init_with_reset` reads the I2C_STATE register only.
    A Trust M idle for more than about 10 s can stop ACKing until it is
-   hardware-reset (#2507), so the app opens the GD32 bridge and passes
-   `gd32g553_se_reset_hook` as the reset hook: if the part is silent the
-   driver pulses SE_RST once and probes again.  Failing after that means
-   the chip is not on the bus, is not strapped to address 0x30, or is held
-   in reset.  With no reachable GD32 the app passes no hook (plain probe).
+   hardware-reset (#2507).  SE_RST hangs off the GD32 supervisor, which the
+   kernel's `alplab,gd32-bridge-gpio` driver owns, so the app does not talk
+   to the GD32: `src/se_reset_gpio.h` finds the `se-rst` line on the
+   `gd32-bridge-gpio` gpiochip and passes it as the reset hook.  If the
+   part is silent the driver pulses SE_RST once and probes again.  Failing
+   after that means the chip is not on the bus, is not strapped to address
+   0x30, or is held in reset.  An image whose kernel lacks the `se-rst`
+   line gets no hook (plain probe).  Needs a kernel built with the
+   `0005-gpio-add-gd32-bridge-expander-driver.patch` that exports it.
 2. `optiga_trust_m_read_product_info` opens the Trust M application
    and reads the 27-byte Coprocessor UID (data object 0xE0C2).
 3. `optiga_trust_m_send_apdu` runs a raw session: the app sends

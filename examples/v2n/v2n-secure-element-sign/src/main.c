@@ -6,7 +6,8 @@
  *
  * Three steps, each one layer deeper:
  *   1. optiga_trust_m_init_with_reset() probes the chip's I2C_STATE register,
- *      pulsing SE_RST via the GD32 bridge if the part went silent when idle.
+ *      pulsing SE_RST (a kernel-exported GPIO line) if the part went
+ *      silent when idle.
  *   2. optiga_trust_m_read_product_info() opens the Trust M application
  *      through Infineon's host library and reads the Coprocessor UID
  *      (data object 0xE0C2).
@@ -31,8 +32,8 @@
 #include <string.h>
 
 #include "alp/peripheral.h"
-#include "alp/chips/gd32g553.h"
 #include "alp/chips/optiga_trust_m.h"
+#include "se_reset_gpio.h"
 
 /* BRD_I2C = Linux /dev/i2c-8: meta-alp-sdk's e1m-v2n-som.dtsi
  * aliases `i2c8 = &i2c8;`, so `alp_i2c_open(.bus_id = 8)` here opens
@@ -85,23 +86,25 @@ int main(void)
 	/* 1. Probe: is the chip fitted and answering on its address?
 	 *
 	 *    A Trust M idle for more than ~10 s can stop ACKing I2C entirely;
-	 *    only a hardware reset brings it back (#2507).  Its SE_RST line
-	 *    hangs off the GD32 supervisor, so we open the bridge and give the
-	 *    driver a reset hook that pulses SE_RST through it.  The driver
-	 *    resets only after the normal NACK-polling budget is spent, and a
-	 *    healthy part is never reset.  Without a reachable GD32 we pass no
-	 *    hook and get the plain probe.  -2 (NOT_READY) then means "silent
-	 *    even after a reset" when the hook ran, else "not fitted, or
-	 *    idle-wedged with no reset available". */
-	gd32g553_t mcu;
-	bool have_mcu = gd32g553_init(&mcu, NULL, bus, GD32G553_BRIDGE_DEFAULT_I2C_ADDR) == ALP_OK;
+	 *    only a hardware reset brings it back (#2507).  SE_RST hangs off the
+	 *    GD32 supervisor, whose BRD_I2C address the kernel's
+	 *    alplab,gd32-bridge-gpio driver owns -- so we do not talk to the
+	 *    GD32 ourselves.  The driver exports SE_RST as the "se-rst" GPIO
+	 *    line and se_reset_gpio.h drives it through /dev/gpiochipN.  The
+	 *    Trust M driver resets only after the normal NACK-polling budget is
+	 *    spent, and a healthy part is never reset.  On an image without that
+	 *    line we pass no hook and get the plain probe.  -2 (NOT_READY) then
+	 *    means "silent even after a reset" when the hook ran, else "not
+	 *    fitted, or idle-wedged with no reset available". */
+	se_reset_gpio_t  rst;
+	bool             have_rst = se_reset_gpio_open(&rst) == 0;
 	optiga_trust_m_t se;
 	alp_status_t     s = optiga_trust_m_init_with_reset(&se,
 	                                                    bus,
 	                                                    OPTIGA_TRUST_M_I2C_ADDR,
-	                                                    have_mcu ? gd32g553_se_reset_hook : NULL,
-	                                                    have_mcu ? &mcu : NULL);
-	if (have_mcu) gd32g553_deinit(&mcu);
+	                                                    have_rst ? se_reset_gpio_hook : NULL,
+	                                                    have_rst ? &rst : NULL);
+	if (have_rst) se_reset_gpio_close(&rst);
 	if (s != ALP_OK) return fail(NULL, bus, "optiga_trust_m_init (Trust M not ACKing)", s);
 	printf("[se] I2C_STATE probe -> ALP_OK\n");
 

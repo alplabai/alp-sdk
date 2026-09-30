@@ -47,9 +47,12 @@
  *              the report says so explicitly instead of printing
  *              nine cryptic per-device NAKs.  A kernel-owned address
  *              (EBUSY) is reported as present, not as a NAK.
- *   Phase 1 -- per-IC probe, strictly READ-ONLY: nothing in this
- *              example ever writes a voltage, enable, or control
- *              register, and the RTC is read through /dev/rtc0 rather
+ *   Phase 1 -- per-IC probe, READ-ONLY with one exception:
+ *              probe_optiga() pulses the Trust M's SE_RST line (the
+ *              kernel's "se-rst" GPIO), and only when the part has
+ *              stopped ACKing.  Nothing writes a voltage, enable, or
+ *              control register, and the RTC is read through /dev/rtc0
+ *              rather
  *              than the chip driver's own init handshake (which would
  *              both EBUSY against the kernel and, if it ever won that
  *              race, clear the RTC's power-on flag as a side effect --
@@ -77,6 +80,7 @@
 #include <alp/chips/tps628640.h>
 #include <alp/chips/optiga_trust_m.h>
 #include <alp/chips/gd32g553.h>
+#include "se_reset_gpio.h"
 
 /* BRD_I2C = Linux /dev/i2c-8 -- see the file header for the DT-alias
  * citation. */
@@ -382,18 +386,17 @@ static void probe_optiga(alp_i2c_t *bus)
 
 	/* After >~10 s idle the Trust M can stop ACKing entirely and only a
 	 * hardware reset revives it (#2507).  SE_RST hangs off the GD32
-	 * supervisor, so hand the driver a reset hook that pulses it through the
-	 * bridge.  If the GD32 is kernel-owned or absent, fall back to the plain
-	 * probe: no hook, no reset. */
-	gd32g553_t mcu;
-	bool have_mcu  = probe_addr(bus, GD32G553_BRIDGE_DEFAULT_I2C_ADDR) == PROBE_ACK &&
-	                 gd32g553_init(&mcu, NULL, bus, GD32G553_BRIDGE_DEFAULT_I2C_ADDR) == ALP_OK;
-	alp_status_t s = optiga_trust_m_init_with_reset(&se,
-	                                                bus,
-	                                                OPTIGA_TRUST_M_I2C_ADDR,
-	                                                have_mcu ? gd32g553_se_reset_hook : NULL,
-	                                                have_mcu ? &mcu : NULL);
-	if (have_mcu) gd32g553_deinit(&mcu);
+	 * supervisor, which the kernel's bridge driver owns, so the reset goes
+	 * through the driver's "se-rst" GPIO line (se_reset_gpio.h), not the
+	 * bridge protocol.  With no such line: plain probe, no reset. */
+	se_reset_gpio_t rst;
+	bool            have_rst = se_reset_gpio_open(&rst) == 0;
+	alp_status_t    s        = optiga_trust_m_init_with_reset(&se,
+	                                                          bus,
+	                                                          OPTIGA_TRUST_M_I2C_ADDR,
+	                                                          have_rst ? se_reset_gpio_hook : NULL,
+	                                                          have_rst ? &rst : NULL);
+	if (have_rst) se_reset_gpio_close(&rst);
 	if (s != ALP_OK) {
 		report("optiga trust m", OPTIGA_TRUST_M_I2C_ADDR, R_FAIL, "no ACK on I2C_STATE");
 		return;

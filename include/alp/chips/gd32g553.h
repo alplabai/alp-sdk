@@ -516,19 +516,6 @@ alp_status_t gd32g553_da9292_status_forward(gd32g553_t *ctx, uint8_t *status);
  */
 alp_status_t gd32g553_se_reset(gd32g553_t *ctx, bool assert);
 
-/** @brief gd32g553_se_reset() with a `void *` context, for callbacks.
- *
- *  Matches optiga_trust_m_reset_fn_t: pass it as the reset hook to
- *  optiga_trust_m_init_with_reset() with a `gd32g553_t *` as the user
- *  pointer.  A wrapper rather than a cast, because calling a
- *  `gd32g553_t *` function through a `void *` pointer type is undefined
- *  behaviour.
- *
- *  @param user    A `gd32g553_t *` (initialised).
- *  @param assert  @c true holds the SE in reset; @c false releases it.
- *  @return As gd32g553_se_reset(). */
-alp_status_t gd32g553_se_reset_hook(void *user, bool assert);
-
 /** @brief Program a DAC channel's output voltage in millivolts.
  *
  *  The firmware rounds to its hardware-achievable resolution
