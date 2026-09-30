@@ -212,7 +212,7 @@ transceivers stay in standby).
 ```bash
 ip -br link | grep can_e1m                        # can_e1m0 + can_e1m1 present
 cat /sys/class/net/can_e1m0/dev_port              # 3   (can_e1m1 -> 2)
-ip link set can_e1m0 type can bitrate 500000 sample-point 0.8 dbitrate 2000000 dsample-point 0.7 fd on      # repeat for can_e1m1
+ip link set can_e1m0 type can bitrate 500000 dbitrate 2000000 fd on      # repeat for can_e1m1; keep the driver's default sample points
 ip link set can_e1m0 up
 ip -d link show can_e1m0                          # shows the timing clock + bitrate + "fd on"
 ```

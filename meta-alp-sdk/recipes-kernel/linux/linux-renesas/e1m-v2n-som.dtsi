@@ -837,8 +837,12 @@
  * an operator step, not a DT property (a fixed `bitrate` here would
  * also force one rate on every deployment). Until it is set the
  * channel stays down and cannot disturb a live bus:
- *   ip link set can_e1m0 type can bitrate 500000 sample-point 0.8 \
- *       dbitrate 2000000 dsample-point 0.7 fd on
+ *   ip link set can_e1m0 type can bitrate 500000 dbitrate 2000000 fd on
+ * Let the driver pick the sample points (87.5 % / 75 % at 80 MHz).  Forcing
+ * sample-point 0.8 gives phase-seg2 32 and the controller then goes
+ * BUS-OFF on tx-dominant-bit-error with a healthy transceiver (E1M-V2M103
+ * bench 2026-09-30); the defaults sit at ERROR-PASSIVE (ACK errors only)
+ * on a lone node, as they should.
  *   ip link set can_e1m0 up
  * (repeat for can_e1m1). `ip -d link show can_e1m0` prints the clock
  * the kernel is using and the achievable bitrate/sample-point limits.
