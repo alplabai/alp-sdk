@@ -200,17 +200,57 @@ ZTEST(optiga_idle_reset, test_mid_app_open_failure_without_hook_is_not_reset)
 	optiga_trust_m_deinit(&ctx);
 }
 
-/* A timed-out open leaves the library op in flight.  The next open must
- * report busy and must not pulse RESET over a part that may be fine. */
-ZTEST(optiga_idle_reset, test_open_still_in_flight_is_busy_not_reset)
+/* A timed-out op leaves the library op in flight.  The next call must
+ * report busy and must not pulse RESET over a part that may be fine.  The
+ * mock cannot make the library time out, so the in-flight state is set
+ * directly (op_pending 1 = open of the util session, op_status 0x0001 =
+ * OPTIGA_LIB_BUSY, which never completes here). */
+ZTEST(optiga_idle_reset, test_op_still_in_flight_is_busy_not_reset)
 {
 	optiga_trust_m_t              ctx;
 	optiga_trust_m_product_info_t info;
 
 	zassert_equal(optiga_trust_m_init_with_reset(&ctx, bus, 0, reset_hook, &g), ALP_OK);
-	ctx.open_pending = 1u;      /* SESSION_UTIL, as left by a timed-out open */
-	ctx.op_status    = 0x0001u; /* OPTIGA_LIB_BUSY: never completes here */
+	ctx.op_pending = 1u;
+	ctx.op_status  = 0x0001u;
 	zassert_equal(optiga_trust_m_read_product_info(&ctx, &info), ALP_ERR_BUSY);
 	zassert_equal(g.asserts, 0u, "no reset while the op is in flight");
-	zassert_equal(ctx.open_pending, 1u, "still pending");
+	zassert_equal(ctx.op_pending, 1u, "still pending");
+	optiga_trust_m_deinit(&ctx);
+}
+
+/* A timed-out op that has since completed is drained, then the call goes
+ * on as a normal open: on a part that idled out that is one reset pulse.
+ * op_pending 3 = an op that left no session behind; op_status 0x0000 is
+ * OPTIGA_LIB_SUCCESS, 0x0002 a failed op. */
+ZTEST(optiga_idle_reset, test_completed_op_is_drained_then_open_proceeds)
+{
+	optiga_trust_m_t              ctx;
+	optiga_trust_m_product_info_t info;
+
+	zassert_equal(optiga_trust_m_init_with_reset(&ctx, bus, 0, reset_hook, &g), ALP_OK);
+	g.wedged         = true;
+	g.survives_reset = false;
+	ctx.op_pending   = 3u;
+	ctx.op_status    = 0x0000u;
+	zassert_not_equal(optiga_trust_m_read_product_info(&ctx, &info), ALP_ERR_BUSY);
+	zassert_equal(ctx.op_pending, 0u, "drained");
+	zassert_equal(g.asserts, 1u, "then the normal open ran, one reset");
+	optiga_trust_m_deinit(&ctx);
+}
+
+ZTEST(optiga_idle_reset, test_failed_op_is_drained_then_open_proceeds)
+{
+	optiga_trust_m_t              ctx;
+	optiga_trust_m_product_info_t info;
+
+	zassert_equal(optiga_trust_m_init_with_reset(&ctx, bus, 0, reset_hook, &g), ALP_OK);
+	g.wedged         = true;
+	g.survives_reset = false;
+	ctx.op_pending   = 3u;
+	ctx.op_status    = 0x0002u;
+	zassert_not_equal(optiga_trust_m_read_product_info(&ctx, &info), ALP_ERR_BUSY);
+	zassert_equal(ctx.op_pending, 0u, "drained");
+	zassert_equal(g.asserts, 1u, "then the normal open ran, one reset");
+	optiga_trust_m_deinit(&ctx);
 }

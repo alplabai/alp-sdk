@@ -64,22 +64,45 @@
 
 enum { SESSION_NONE = 0, SESSION_UTIL, SESSION_RAW };
 
+/* What a timed-out library op was.  The library still holds the op, its
+ * buffers and ctx as the callback context, so ctx->op_pending records it
+ * until op_drain() sees it finish.  The first two values match the
+ * session kind an open would have produced. */
+enum { PEND_NONE = 0, PEND_OPEN_UTIL = SESSION_UTIL, PEND_OPEN_RAW = SESSION_RAW, PEND_OTHER };
+
 static void op_done(void *context, optiga_lib_status_t status)
 {
 	((optiga_trust_m_t *)context)->op_status = status;
 }
 
 /* Drive the library until the pending operation completes: its timed
- * callbacks run from here (pal_alp.c is threadless). */
-static alp_status_t op_wait(optiga_trust_m_t *ctx, uint32_t timeout_ms)
+ * callbacks run from here (pal_alp.c is threadless).  On timeout the op
+ * is still in flight and is recorded as @p pend. */
+static alp_status_t op_wait(optiga_trust_m_t *ctx, uint32_t timeout_ms, uint8_t pend)
 {
 	uint64_t deadline = alp_uptime_ms() + timeout_ms;
 	while (ctx->op_status == OPTIGA_LIB_BUSY) {
 		if (alp_optiga_pal_poll()) continue;
-		if (alp_uptime_ms() >= deadline) return ALP_ERR_TIMEOUT;
+		if (alp_uptime_ms() >= deadline) {
+			ctx->op_pending = pend;
+			return ALP_ERR_TIMEOUT;
+		}
 		alp_delay_ms(1);
 	}
 	return ctx->op_status == OPTIGA_LIB_SUCCESS ? ALP_OK : ALP_ERR_IO;
+}
+
+/* Let a timed-out op finish before anything else touches the library.
+ * ALP_ERR_BUSY while it still runs.  A finished open that succeeded left
+ * a session behind: adopt it so the caller closes or reuses it. */
+static alp_status_t op_drain(optiga_trust_m_t *ctx)
+{
+	uint8_t pend = ctx->op_pending;
+	if (pend == PEND_NONE) return ALP_OK;
+	if (op_wait(ctx, OPTIGA_OPEN_TIMEOUT_MS, pend) == ALP_ERR_TIMEOUT) return ALP_ERR_BUSY;
+	if (ctx->op_status == OPTIGA_LIB_SUCCESS && pend != PEND_OTHER) ctx->session = pend;
+	ctx->op_pending = PEND_NONE;
+	return ALP_OK;
 }
 
 static void session_close(optiga_trust_m_t *ctx)
@@ -87,12 +110,12 @@ static void session_close(optiga_trust_m_t *ctx)
 	if (ctx->session == SESSION_UTIL) {
 		ctx->op_status = OPTIGA_LIB_BUSY;
 		if (optiga_util_close_application(ctx->util, 0) == OPTIGA_LIB_SUCCESS) {
-			(void)op_wait(ctx, OPTIGA_OPEN_TIMEOUT_MS);
+			(void)op_wait(ctx, OPTIGA_OPEN_TIMEOUT_MS, PEND_OTHER);
 		}
 	} else if (ctx->session == SESSION_RAW) {
 		ctx->op_status = OPTIGA_LIB_BUSY;
 		if (optiga_comms_close(ctx->comms) == OPTIGA_LIB_SUCCESS) {
-			(void)op_wait(ctx, OPTIGA_OPEN_TIMEOUT_MS);
+			(void)op_wait(ctx, OPTIGA_OPEN_TIMEOUT_MS, PEND_OTHER);
 		}
 	}
 	ctx->session = SESSION_NONE;
@@ -113,12 +136,12 @@ static alp_status_t session_open_once(optiga_trust_m_t *ctx, uint8_t kind)
 		if (ctx->comms == NULL) return ALP_ERR_NOMEM;
 		rc = optiga_comms_open(ctx->comms);
 	}
-	/* The library refused the call: nothing ran on the bus. */
-	if (rc == OPTIGA_LIB_BUSY) return ALP_ERR_BUSY;
+	/* The library refused the call because its instance is busy: nothing
+	 * ran on the bus, so this is not a wedged part. */
+	if (rc == OPTIGA_UTIL_ERROR_INSTANCE_IN_USE) return ALP_ERR_BUSY;
 	if (rc != OPTIGA_LIB_SUCCESS) return ALP_ERR_IO;
-	alp_status_t s = op_wait(ctx, OPTIGA_OPEN_TIMEOUT_MS);
+	alp_status_t s = op_wait(ctx, OPTIGA_OPEN_TIMEOUT_MS, kind);
 	if (s == ALP_OK) ctx->session = kind;
-	if (s == ALP_ERR_TIMEOUT) ctx->open_pending = kind;
 	return s;
 }
 
@@ -127,25 +150,20 @@ static alp_status_t hw_reset(optiga_trust_m_reset_fn_t reset, void *user);
 /* Open a session.  A part that idled out after init NACKs the open (#2517):
  * if init was given a reset hook, pulse RESET once and open again.  Only
  * an I/O failure of a completed op is retried, and only once.  A timeout
- * is not: the library op is still in flight, so it is drained on the next
- * call (ALP_ERR_BUSY while it still runs) and never reset over.  An
- * already-open
- * session is not re-opened, so an idle-out between two calls on the same
- * session still surfaces to the caller: a reset would drop the caller's
- * APDU state (OpenApplication, session context), which it must redo. */
+ * is not: the library op is still in flight, so every entry point drains
+ * it first (ALP_ERR_BUSY while it still runs) and never resets over it.
+ * An already-open session is not re-opened, so an idle-out between two
+ * calls on the same session still surfaces to the caller: a reset would
+ * drop the caller's APDU state (OpenApplication, session context), which
+ * it must redo. */
 static alp_status_t session_open(optiga_trust_m_t *ctx, uint8_t kind)
 {
+	alp_status_t s = op_drain(ctx);
+	if (s != ALP_OK) return s;
 	if (ctx->session == kind) return ALP_OK;
-	if (ctx->open_pending != SESSION_NONE) {
-		/* A timed-out open is still running in the library.  Let it
-		 * finish; if it opened a session, close that before opening
-		 * again.  Still running: report busy, do not reset. */
-		if (op_wait(ctx, OPTIGA_OPEN_TIMEOUT_MS) == ALP_ERR_TIMEOUT) return ALP_ERR_BUSY;
-		if (ctx->op_status == OPTIGA_LIB_SUCCESS) ctx->session = ctx->open_pending;
-		ctx->open_pending = SESSION_NONE;
-	}
 	session_close(ctx);
-	alp_status_t s = session_open_once(ctx, kind);
+	if (ctx->op_pending != PEND_NONE) return ALP_ERR_BUSY;
+	s = session_open_once(ctx, kind);
 	if (s == ALP_ERR_IO && ctx->reset != NULL && hw_reset(ctx->reset, ctx->reset_user) == ALP_OK) {
 		s = session_open_once(ctx, kind);
 	}
@@ -243,17 +261,20 @@ alp_status_t optiga_trust_m_send_apdu(optiga_trust_m_t *ctx,
 	}
 	/* The comms layer counts in uint16_t. */
 	if (apdu_len > UINT16_MAX) return ALP_ERR_INVAL;
-	uint16_t rx_len = resp_cap > UINT16_MAX ? UINT16_MAX : (uint16_t)resp_cap;
+	/* The library writes the received length when the op completes, which
+	 * after a timeout is a later call: keep it in ctx, not on the stack.
+	 * resp is the caller's and must stay valid until the next call. */
+	ctx->xfer_len = resp_cap > UINT16_MAX ? UINT16_MAX : (uint16_t)resp_cap;
 
 	alp_status_t s = session_open(ctx, SESSION_RAW);
 	if (s != ALP_OK) return s;
 	ctx->op_status = OPTIGA_LIB_BUSY;
-	if (optiga_comms_transceive(ctx->comms, apdu, (uint16_t)apdu_len, resp, &rx_len) !=
+	if (optiga_comms_transceive(ctx->comms, apdu, (uint16_t)apdu_len, resp, &ctx->xfer_len) !=
 	    OPTIGA_LIB_SUCCESS) {
 		return ALP_ERR_IO;
 	}
-	s = op_wait(ctx, timeout_ms);
-	if (s == ALP_OK) *resp_len = rx_len;
+	s = op_wait(ctx, timeout_ms, PEND_OTHER);
+	if (s == ALP_OK) *resp_len = ctx->xfer_len;
 	return s;
 }
 
@@ -265,24 +286,27 @@ alp_status_t optiga_trust_m_read_product_info(optiga_trust_m_t              *ctx
 
 	alp_status_t s = session_open(ctx, SESSION_UTIL);
 	if (s != ALP_OK) return s;
-	uint8_t  uid[sizeof(*out)];
-	uint16_t len   = sizeof(uid);
+	/* Buffers live in ctx: a timed-out read completes during a later call. */
+	ctx->xfer_len  = sizeof(ctx->uid);
 	ctx->op_status = OPTIGA_LIB_BUSY;
-	if (optiga_util_read_data(ctx->util, OPTIGA_OID_COPROCESSOR_UID, 0, uid, &len) !=
+	if (optiga_util_read_data(ctx->util, OPTIGA_OID_COPROCESSOR_UID, 0, ctx->uid, &ctx->xfer_len) !=
 	    OPTIGA_LIB_SUCCESS) {
 		return ALP_ERR_IO;
 	}
-	s = op_wait(ctx, OPTIGA_READ_TIMEOUT_MS);
+	s = op_wait(ctx, OPTIGA_READ_TIMEOUT_MS, PEND_OTHER);
 	if (s != ALP_OK) return s;
 	/* The object is exactly the 27-byte UID laid out as the struct. */
-	if (len != sizeof(uid)) return ALP_ERR_IO;
-	memcpy(out, uid, sizeof(uid));
+	if (ctx->xfer_len != sizeof(ctx->uid)) return ALP_ERR_IO;
+	memcpy(out, ctx->uid, sizeof(ctx->uid));
 	return ALP_OK;
 }
 
 void optiga_trust_m_deinit(optiga_trust_m_t *ctx)
 {
 	if (ctx == NULL) return;
+	/* Best effort: the library holds ctx as the op callback context, so
+	 * let a timed-out op finish before the instances are destroyed. */
+	(void)op_drain(ctx);
 	if (ctx->initialised) session_close(ctx);
 	if (ctx->util != NULL) (void)optiga_util_destroy(ctx->util);
 	if (ctx->comms != NULL) optiga_comms_destroy(ctx->comms);

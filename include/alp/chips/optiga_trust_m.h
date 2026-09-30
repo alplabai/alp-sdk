@@ -84,7 +84,9 @@ typedef struct {
 	void             *util;
 	void             *comms;
 	uint8_t           session;
-	uint8_t           open_pending; /* kind of a timed-out open still in flight */
+	uint8_t           op_pending; /* a timed-out library op is still in flight */
+	uint16_t          xfer_len;   /* in-flight op length; must outlive the call */
+	uint8_t           uid[27];    /* in-flight read buffer; must outlive the call */
 	volatile uint16_t op_status;
 	/* Reset hook from optiga_trust_m_init_with_reset(), or NULL. */
 	optiga_trust_m_reset_fn_t reset;
@@ -126,7 +128,9 @@ alp_status_t optiga_trust_m_init_with_reset(optiga_trust_m_t         *ctx,
  *
  *  @return ALP_OK, ALP_ERR_NOT_READY (not initialised), ALP_ERR_INVAL
  *          (@p out NULL), ALP_ERR_TIMEOUT or ALP_ERR_IO (the chip or
- *          link failed), ALP_ERR_NOMEM (host-library instance).
+ *          link failed), ALP_ERR_NOMEM (host-library instance),
+ *          ALP_ERR_BUSY (a timed-out operation is still in flight; retry
+ *          later).
  */
 alp_status_t optiga_trust_m_read_product_info(optiga_trust_m_t              *ctx,
                                               optiga_trust_m_product_info_t *out);
@@ -150,7 +154,9 @@ alp_status_t optiga_trust_m_read_product_info(optiga_trust_m_t              *ctx
  *
  * @return ALP_OK, ALP_ERR_NOT_READY (not initialised), ALP_ERR_INVAL
  *         (bad pointer or length), ALP_ERR_TIMEOUT, ALP_ERR_IO,
- *         ALP_ERR_NOMEM.
+ *         ALP_ERR_NOMEM, ALP_ERR_BUSY (a timed-out operation is still in
+ *         flight; retry later).  After ALP_ERR_TIMEOUT @p resp must stay
+ *         valid until the next call, which drains the operation.
  */
 alp_status_t optiga_trust_m_send_apdu(optiga_trust_m_t *ctx,
                                       const uint8_t    *apdu,
