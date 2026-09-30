@@ -230,6 +230,15 @@ PACKAGECONFIG[drpai]    = "-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=O
 # to force it, or ALP_ENABLE_DRPAI = "0" to keep it out.
 PACKAGECONFIG:append = "${@' drpai' if ('rzv2n-family' in (d.getVar('MACHINEOVERRIDES') or '').split(':') and d.getVar('ALP_ENABLE_DRPAI') == '1' and d.getVar('RUHMI_DRPAI_TVM_DIR')) else ''}"
 
+# ort -> ONNX Runtime CPU floor (own recipe, recipes-devtools/onnxruntime).
+#       REQUIRED rides with the enable, same shape as `drpai`: a missing ORT
+#       stack must fail the bake, not silently drop the CPU backend.  Auto-on
+#       only where the MACHINE conf sets ALP_ENABLE_ORT_CPU = "1" (V2M101/
+#       V2M102/V2M103/V2N102, #1259).  RDEPENDS puts libonnxruntime in the
+#       image.  Never reaches resolve_auto() ahead of an NPU backend.
+PACKAGECONFIG[ort]      = "-DALP_SDK_USE_ORT_CPU=ON -DALP_SDK_ORT_REQUIRED=ON,-DALP_SDK_USE_ORT_CPU=OFF,onnxruntime,onnxruntime"
+PACKAGECONFIG:append = "${@' ort' if d.getVar('ALP_ENABLE_ORT_CPU') == '1' else ''}"
+
 PACKAGECONFIG[deepx-dxm1] = "-DALP_SDK_USE_DEEPX_DXM1=ON -DALP_SDK_DEEPX_REQUIRED=ON,-DALP_SDK_USE_DEEPX_DXM1=OFF,dx-rt,"
 PACKAGECONFIG:append = "${@bb.utils.contains('MACHINE_FEATURES', 'deepx-dxm1', ' deepx-dxm1' if d.getVar('ALP_ENABLE_DEEPX_DXM1') == '1' else '', '', d)}"
 
