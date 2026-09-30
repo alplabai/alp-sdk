@@ -109,13 +109,26 @@ SRC_URI = "git://github.com/microsoft/onnxruntime.git;protocol=https;nobranch=1"
 SRCREV = "da9b5e364c465de65c49d91e696cd6485270757f"
 S = "${WORKDIR}/git"
 
-# Carried over from NXP's onnxruntime.inc, which proves these are the real
-# link-time deps for a shared-lib ORT build; protobuf-native is ADDED to
-# that set (NXP's fork does not need it the same way -- see the
-# ONNX_CUSTOM_PROTOC_EXECUTABLE comment below) because our build must not
-# let deps.txt's prebuilt protoc_linux_aarch64 binary stand in for a host
-# protoc during a cross-compile.
-DEPENDS = "zlib libpng protobuf protobuf-native"
+# PROTOBUF / ABSEIL ABI (#2500).  ORT is built against the FETCHED abseil
+# 20250814 (inline namespace lts_20250814, static inside libonnxruntime.so).
+# The first cut of this recipe listed the distro `protobuf` in DEPENDS, so
+# ORT compiled its generated ONNX *.pb.h against the distro protobuf 4.25.8
+# headers (which inline abseil types at the 20250814 layout) but linked the
+# distro libprotobuf-lite.so.25.8.0, built against distro abseil 20240116.
+# Result: SIGSEGV in RepeatedPtrFieldBase::MergeIntoClearedMessages on the
+# first model load (silicon-proven, E1M-V2M103).  The distro cannot supply
+# a matching abseil (only 20240116.3 exists in scarthgap) and ORT 1.28 wants
+# >= 20250814, so the system-abseil route is closed.
+#
+# FIX: ORT's own deps.txt pins protobuf v21.12, which predates protobuf's
+# abseil dependency entirely.  We stage that source (FETCHCONTENT_SOURCE_DIR_
+# PROTOBUF below, which also stops FetchContent's FIND_PACKAGE_ARGS from
+# finding the distro copy), so ORT links a private static libprotobuf-lite
+# and NEEDs no distro libprotobuf.  Its generated code needs a matching
+# protoc, supplied by protobuf-ort-native (not the distro protobuf-native,
+# whose 4.25.8 output the 21.12 headers reject).  deps.txt's prebuilt
+# protoc_linux_aarch64 stays unused: it cannot run on the build host.
+DEPENDS = "zlib libpng protobuf-ort-native"
 
 inherit cmake python3native
 
@@ -259,6 +272,7 @@ OECMAKE_SOURCEPATH = "${S}/cmake"
 # convention, NOT verified by actually unzipping any of these 11 archives
 # on this host):
 SRC_URI += " \
+    https://github.com/protocolbuffers/protobuf/archive/refs/tags/v21.12.zip;downloadfilename=protobuf-21.12.zip;name=protobuf;subdir=deps/protobuf;sha1sum=7cf2733949036c7d52fda017badcab093fe73bfa \
     https://github.com/abseil/abseil-cpp/archive/refs/tags/20250814.0.zip;name=abseil_cpp;subdir=deps/abseil_cpp;sha1sum=a9eb1d648cbca4d4d788737e971a6a7a63726b07 \
     https://github.com/HowardHinnant/date/archive/refs/tags/v3.0.1.zip;name=date;subdir=deps/date;sha1sum=2dac0c81dc54ebdd8f8d073a75c053b04b56e159 \
     https://github.com/eigen-mirror/eigen/archive/1d8b82b0740839c0de7f1242a3585e3390ff5f33/eigen-1d8b82b0740839c0de7f1242a3585e3390ff5f33.zip;name=eigen;subdir=deps/eigen;sha1sum=05b19b49e6fbb91246be711d801160528c135e34 \
@@ -283,6 +297,7 @@ SRC_URI += "${@bb.utils.contains('PACKAGECONFIG', 'kleidiai', 'https://github.co
 # above cross-checks against upstream. These are NOT re-derived by hand;
 # they are BitBake's own `do_fetch` "Missing SRC_URI checksum" error output
 # on a real BitBake host, transcribed verbatim:
+SRC_URI[protobuf.sha256sum] = "6a31b662deaeb0ac35e6287bda2f3369b19836e6c9f8828d4da444346f420298"
 SRC_URI[abseil_cpp.sha256sum] = "b2bdcf6682d8cb53df365bcc5d6c318a22e55821d9978a10fdb61404c026daff"
 SRC_URI[date.sha256sum] = "f4300b96f7a304d4ef9bf6e0fa3ded72159f7f2d0f605bdde3e030a0dba7cf9f"
 SRC_URI[eigen.sha256sum] = "6a60d76351f97132669daeeb721d6bf14b008101883ad2d687a3201c5c461eb0"
@@ -448,7 +463,7 @@ EXTRA_OECMAKE += " \
     -Donnxruntime_BUILD_UNIT_TESTS=OFF \
     -Donnxruntime_ENABLE_PYTHON=OFF \
     -DCMAKE_BUILD_TYPE=Release \
-    -DONNX_CUSTOM_PROTOC_EXECUTABLE=${STAGING_BINDIR_NATIVE}/protoc \
+    -DONNX_CUSTOM_PROTOC_EXECUTABLE=${STAGING_LIBDIR_NATIVE}/protobuf-ort/protoc \
     -DFETCHCONTENT_FULLY_DISCONNECTED=ON \
     -DFETCHCONTENT_SOURCE_DIR_ABSEIL_CPP=${WORKDIR}/deps/abseil_cpp/abseil-cpp-20250814.0 \
     -DFETCHCONTENT_SOURCE_DIR_DATE=${WORKDIR}/deps/date/date-3.0.1 \
@@ -457,6 +472,7 @@ EXTRA_OECMAKE += " \
     -DFETCHCONTENT_SOURCE_DIR_NLOHMANN_JSON=${WORKDIR}/deps/json/json-3.11.3 \
     -DFETCHCONTENT_SOURCE_DIR_GSL=${WORKDIR}/deps/microsoft_gsl/GSL-4.2.1 \
     -DFETCHCONTENT_SOURCE_DIR_MP11=${WORKDIR}/deps/mp11/mp11-boost-1.82.0 \
+    -DFETCHCONTENT_SOURCE_DIR_PROTOBUF=${WORKDIR}/deps/protobuf/protobuf-21.12 \
     -DFETCHCONTENT_SOURCE_DIR_ONNX=${WORKDIR}/deps/onnx/onnx-1.22.0 \
     -DFETCHCONTENT_SOURCE_DIR_PYTORCH_CPUINFO=${WORKDIR}/deps/pytorch_cpuinfo/cpuinfo-4628dc060ce4e82345dc166bbac875609db4ff69 \
     -DFETCHCONTENT_SOURCE_DIR_RE2=${WORKDIR}/deps/re2/re2-2024-07-02 \
