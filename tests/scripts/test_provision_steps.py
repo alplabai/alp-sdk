@@ -376,6 +376,7 @@ def _lock_ready(tmp_path, board, disposition="ship", done=True):
         f"eeprom_unique_id: 00 11\ndisposition: {disposition}\n", encoding="utf-8")
     if done:
         ctx.state = {"steps": {s: {"status": "done"} for s in ("secure_page", "cold_boot_test")}}
+        ctx.state["steps"]["cold_boot_test"]["evidence"] = {"cold_boots_passed": "3/3"}
     return ctx
 
 
@@ -655,6 +656,7 @@ def test_build_dir_unit_defaults_to_bench_only(tmp_path):
                                                         "ship_required": False})
     (ctx.ledger_root / "schema" / "v2n.keys.yaml").write_text(
         yaml.safe_dump({"schema": 1, "family": "v2n", "keys": cat}), encoding="utf-8")
+    ctx.state = {"steps": {n: {"status": "done"} for n in steps.FLASH_STEPS}}
     res = steps.run_steps(ctx, only=["record"])
     text = (ctx.unit_dir / f"{SERIAL}.unit.yaml").read_text(encoding="utf-8")
     assert "disposition: bench-only" in text and "--build-dir" in res[-1].detail
@@ -1015,3 +1017,55 @@ def test_detect_keeps_the_bootstrap_record_when_bl2_prints(tmp_path):
     ctx.state = {"steps": {"bootstrap": {"status": "done"}}}
     steps.Detect().run(ctx)
     assert ctx.state_done("bootstrap")
+
+
+# --- fail-closed cold boots / record only after flashing (#2464, #2465) -------------------------
+
+@pytest.mark.parametrize("n", [0, -1])
+def test_cold_boot_test_with_no_cycles_fails_not_passes(tmp_path, n):
+    ctx = _ctx(tmp_path, bench=_bench(), linux=Board(), execute=True, cold_cycles=n)
+    res = steps.run_steps(ctx, only=["cold_boot_test"], force=["cold_boot_test"])
+    assert res[-1].status == "failed" and ">= 1" in res[-1].detail, res[-1]
+    assert not ctx.state_done("cold_boot_test")
+
+
+@pytest.mark.parametrize("evidence", [{}, {"cold_boots_passed": "0/0"}, {"cold_boots_passed": "1/3"}])
+def test_lock_refused_without_recorded_clean_cold_boots(tmp_path, evidence):
+    board = Board()
+    ctx = _lock_ready(tmp_path, board)
+    ctx.state["steps"]["cold_boot_test"]["evidence"] = evidence     # state says done, evidence says no boots
+    r = steps.run_steps(ctx, steps=[steps.SecurePageLock])[0]
+    assert r.status == "failed" and "no clean cold boots" in r.detail, r.detail
+    assert board.lock == 0xFD
+
+
+def test_lock_refused_when_any_step_failed_in_the_state(tmp_path):
+    board = Board()
+    ctx = _lock_ready(tmp_path, board)
+    ctx.state["steps"]["write_rootfs"] = {"status": "failed"}
+    r = steps.run_steps(ctx, steps=[steps.SecurePageLock])[0]
+    assert r.status == "failed" and "write_rootfs failed" in r.detail, r.detail
+
+
+def _record_with_bundle_facts(tmp_path, flash_status):
+    ctx = _ctx(tmp_path, execute=True)
+    cat = dict(CATALOGUE["keys"], **{k: {"group": "firmware", "source": "", "mode": "auto",
+                                        "ship_required": False}
+                                    for k in ("bl2_sha256", "rootfs_bundle_version")})
+    (ctx.ledger_root / "schema" / "v2n.keys.yaml").write_text(
+        yaml.safe_dump({"schema": 1, "family": "v2n", "keys": cat}), encoding="utf-8")
+    ctx.state = {"steps": {n: {"status": flash_status} for n in steps.FLASH_STEPS}}
+    ctx.facts.update(bl2_sha256="ab" * 32, rootfs_bundle_version="som-9.9.9", gd32_dp_id="0x1")
+    steps.run_steps(ctx, only=["record"])
+    return (ctx.unit_dir / f"{SERIAL}.unit.yaml").read_text(encoding="utf-8")
+
+
+def test_record_omits_bundle_facts_when_flashing_did_not_succeed(tmp_path):
+    text = _record_with_bundle_facts(tmp_path, "failed")
+    assert "bl2_sha256" not in text and "rootfs_bundle_version" not in text, text
+    assert "gd32_dp_id" in text          # facts observed on the unit still land
+
+
+def test_record_writes_bundle_facts_after_successful_flashing(tmp_path):
+    text = _record_with_bundle_facts(tmp_path, "done")
+    assert "bl2_sha256" in text and "rootfs_bundle_version: som-9.9.9" in text, text

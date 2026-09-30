@@ -578,25 +578,13 @@ stage_baremetal_build() {
     cmake --build "${build_dir}" --parallel || return 1
 }
 
-stage_twister() {
-    if [ -z "${ZEPHYR_BASE:-}" ]; then
-        return 99
-    fi
-    # ZEPHYR_BASE being set proves nothing about the python3 that will
-    # actually run twister below: on a system interpreter without
-    # natsort, twister's own import chain
-    # (zephyr/scripts/pylib/twister/twisterlib/hardwaremap.py does
-    # `from natsort import natsorted`) raises ModuleNotFoundError before
-    # a single test runs -- previously that read as this stage FAILING
-    # ("nothing wrong with the tree" reported red) instead of the
-    # missing-prerequisite SKIP it actually is (alp-sdk#1396). Same
-    # `return 99` idiom as the ZEPHYR_BASE check above.
-    if ! python3 -c 'import natsort' >/dev/null 2>&1; then
-        echo "stage_twister: python3 ($(command -v python3)) cannot import natsort, which twister's own hardwaremap.py requires. Activate the zephyrproject venv (or: pip install natsort) so a python3 with it resolves first on PATH."
-        return 99
-    fi
-    # Pin THIS checkout as the alp-sdk Zephyr module -- always, even
-    # if EXTRA_ZEPHYR_MODULES is already set (e.g. exported from a
+# Pin THIS checkout as the alp-sdk Zephyr module for every stage.  Called at
+# orchestration start, before any stage forks: a background stage (#2472
+# overlap) exports into its own subshell only, so pinning from inside
+# stage_twister left pytest-scripts and required-gate-scripts, whose
+# `west build --cmake-only` probes need the module, with no alp boards.
+pin_alp_zephyr_module() {
+    # Always, even if EXTRA_ZEPHYR_MODULES is already set (e.g. exported from a
     # shell rc pointing at a primary checkout, per docs/local-ci.md).
     # Without this, running test-all.sh from a `git worktree add`
     # checkout compiled tests from the worktree against alp-sdk
@@ -623,6 +611,25 @@ stage_twister() {
     _modules+=("${REPO_ROOT}")
     _joined=$(IFS=';'; echo "${_modules[*]}")
     export EXTRA_ZEPHYR_MODULES="${_joined}"
+}
+
+stage_twister() {
+    if [ -z "${ZEPHYR_BASE:-}" ]; then
+        return 99
+    fi
+    # ZEPHYR_BASE being set proves nothing about the python3 that will
+    # actually run twister below: on a system interpreter without
+    # natsort, twister's own import chain
+    # (zephyr/scripts/pylib/twister/twisterlib/hardwaremap.py does
+    # `from natsort import natsorted`) raises ModuleNotFoundError before
+    # a single test runs -- previously that read as this stage FAILING
+    # ("nothing wrong with the tree" reported red) instead of the
+    # missing-prerequisite SKIP it actually is (alp-sdk#1396). Same
+    # `return 99` idiom as the ZEPHYR_BASE check above.
+    if ! python3 -c 'import natsort' >/dev/null 2>&1; then
+        echo "stage_twister: python3 ($(command -v python3)) cannot import natsort, which twister's own hardwaremap.py requires. Activate the zephyrproject venv (or: pip install natsort) so a python3 with it resolves first on PATH."
+        return 99
+    fi
     # ccache survives a fresh clone / new worktree only if the object key is
     # path-independent.  Zephyr's build uses ccache when it is on PATH, but
     # ccache's defaults hash absolute source paths and, because the build
@@ -1332,7 +1339,7 @@ stage_generated_files() {
     # some of its artifacts is not a drift check.
     require_jsonschema_2020 stage_generated_files || return 99
     local gens=(gen_soc_caps gen_status_strings gen_board_header
-                gen_cc3501e_gpio_routes
+                gen_cc3501e_gpio_routes gen_power_tree
                 gen_pinmux_capability gen_support_matrix
                 gen_portability_matrix gen_catalog gen_error_catalog
                 gen_verification_status)
@@ -1535,6 +1542,7 @@ $(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null 
 # -------- Orchestration -------------------------------------------------------
 
 START=$(date +%s)
+pin_alp_zephyr_module
 
 if [ "${ZEPHYR_ONLY}" -eq 1 ]; then
     # Run the suite exactly once.  run_stage() already turns a 99

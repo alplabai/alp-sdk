@@ -34,6 +34,11 @@
 #   version, true on every family we enable -- rather than a per-vendor-fork
 #   split (2026-08-05 own-recipe decision).
 #
+# KleidiAI (#1258): the recipe carries an opt-in PACKAGECONFIG[kleidiai]
+#   (-Donnxruntime_USE_KLEIDIAI, Arm micro-kernels for the CPU EP's MLAS
+#   path; KleidiAI v1.20.0 as pinned by ORT's cmake/deps.txt).  Default OFF:
+#   no perf claim until a before/after on real E1M-V2N101 silicon.
+#
 # Version:  1.28.0 -- upstream `microsoft/onnxruntime` release tag `v1.28.0`
 #   (published 2026-07-25), pinned in meta-alp-sdk's own
 #   recipes-devtools/onnxruntime recipe.  Never a vendor fork version.

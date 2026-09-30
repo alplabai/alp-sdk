@@ -30,6 +30,15 @@
  * NOR at SS1 on E1M-AEN803 (see src/main.c).  Pad config
  * (input-enable/drive-strength=12/slew-rate=fast) is unchanged from the
  * prior group -- generic Alif pad electrical settings, not route-specific.
+ *
+ * cs-pin/bus-speed below override the dtsi defaults (cs-pin 0, 100 MHz):
+ * SS1/CS1 is where the fitted IS25WX256-JHLE answers, not CS0 (that's the
+ * HyperRAM footprint), and 20 MHz is the rate issue #915's own bench capture
+ * used (100 MHz returned garbage, RISR error bit set). Without this override
+ * any flash_driver_api call on this node targets the wrong chip select at an
+ * unverified rate. The paired AEN801 overlay carries the same two values to
+ * preserve the same-PCB content invariant, even though that SKU fits no
+ * target and never transfers.
  */
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 
@@ -73,4 +82,6 @@
 	status = "okay";
 	pinctrl-0 = <&pinctrl_ospi0>;
 	pinctrl-names = "default";
+	cs-pin = <1>;
+	bus-speed = <20000000>;
 };

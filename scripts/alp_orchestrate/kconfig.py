@@ -599,7 +599,11 @@ def _soc_cpu_complement(soc_spec: dict[str, Any], active_core_id: Optional[str])
         prefix = f"{int(count)}x " if isinstance(count, (int, float)) and count > 1 else ""
         freq_str = f" @{int(freq)}MHz" if isinstance(freq, (int, float)) else ""
         marker = " (active)" if core.get("id") == active_core_id else ""
-        parts.append(f"{prefix}{label}{freq_str}{marker}")
+        # `|<cluster>` lets alp_banner.c move the marker to the core the
+        # image is actually built for (#2469) -- see src/zephyr/alp_soc_cpus.h.
+        cluster = core.get("zephyr_cpucluster")
+        tag = f"|{cluster}" if cluster else ""
+        parts.append(f"{prefix}{label}{freq_str}{marker}{tag}")
     return " + ".join(parts)
 
 

@@ -1654,14 +1654,15 @@ _AEN_OSPI_STATE_PHRASE = {
 #: AE822 doing XiP "through a single FIFO location". The real reasons this
 #: driver stack never attempts it: hal_alif's OWN `alif_hal_ospi_xip_enable()`
 #: unconditionally targets the absent `XIP_SER` register (a bus fault, not a
-#: graceful no-op), and `flash_ospi_alif.c` ships no `flash_driver_api` at all
-#: (#915) -- so there is no in-tree driver path that would use OSPI0 for XIP
-#: today regardless of population. Never follow the die-level fact alone with
-#: a "so" -- always cite this instead.
+#: graceful no-op), and `flash_ospi_alif.c`'s `flash_driver_api` -- read/
+#: read_jedec_id/sfdp_read, bench-verified on E1M-AEN803's fitted NOR -- never
+#: calls it either (#915) -- so there is no in-tree driver path that would use
+#: OSPI0 for XIP today regardless of population. Never follow the die-level
+#: fact alone with a "so" -- always cite this instead.
 _AEN_OSPI_XIP_GAP = (
     "hal_alif's alif_hal_ospi_xip_enable() targets the XIP_SER register, "
-    "absent on this die, and flash_ospi_alif.c ships no flash_driver_api "
-    "-- #915")
+    "absent on this die, and flash_ospi_alif.c's flash_driver_api never "
+    "calls it -- #915")
 
 
 def _aen_ospi_device_state(
