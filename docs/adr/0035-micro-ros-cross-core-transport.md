@@ -149,7 +149,7 @@ Evidence must come from a real run, not simulation.
 4. A55: `meta-alp-sdk` recipes for `micro_ros_agent` (Humble, alongside the
    `meta-ros2-humble` layer, #372) and for `alp-microros-bridge`, behind an
    opt-in image feature, not the default image.
-5. Bench per the list above; then promote `micro-ros` Tier B to A (#370's bar:
+5. Bench per the list above; then promote `micro-ros` Tier B to A (the Tier A bar in `metadata/libraries/README.md`:
    CI lane, shipped example, breakage blocks release) and deliver the teaching
    example (#375).
 
