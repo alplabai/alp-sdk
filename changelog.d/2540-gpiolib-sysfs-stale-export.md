@@ -7,4 +7,5 @@ oopsed in `gpiochip_line_is_valid`. New kernel patch
 `meta-alp-sdk/recipes-kernel/linux/linux-renesas/0015-gpiolib-sysfs-reject-export-of-a-number-in-a-chipless-gpio_device.patch`
 makes `export_store()` return `-ENODEV` instead. It is a local guard, not an
 upstream backport, and the check-then-use window against a concurrent chip
-removal is not closed. Not build-tested against a kernel tree.
+removal is not closed. Checked with `git apply --check` against the real
+6.1.141 kernel source; not boot-tested.
