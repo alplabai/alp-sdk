@@ -220,6 +220,29 @@ candidate on record, and it too **has not been measured on a GD32
 with a probe attached**.  See #1369 for the open issue tracking that
 measurement, and #1440 for the `0x6BA02477` mislabeling above.
 
+### Prebuilt recovery images (public) vs. manufacturing (internal)
+
+The recovery binaries are not in this repository. They are published as
+assets of a tagged GitHub Release of the public
+[`alplabai/gd32-bridge-firmware`](https://github.com/alplabai/gd32-bridge-firmware/releases)
+repository (bootloader, slot A, slot B, the factory A/B metadata record,
+a full-flash image, `SHA256SUMS`, and detached ECDSA-P256 signatures when
+the release is signed; a release without signatures is labelled `UNSIGNED`
+in its notes and proves integrity only). Its
+[`docs/RECOVERY.md`](https://github.com/alplabai/gd32-bridge-firmware/blob/dev/docs/RECOVERY.md)
+is the flashing guide for both routes above (external SWD probe, and
+host-driven SWD from the V2N A55) and the `GET_VERSION` check over
+BRD_I2C at `0x70`. Verify a signed release against
+[`keys/alp_release_signing_ecdsa_p256.pub.pem`](../keys/alp_release_signing_ecdsa_p256.pub.pem);
+see [`som-release-signing.md`](som-release-signing.md) for the key model.
+Binaries and signing material stay in the firmware repository, never here.
+
+The boundary: **public recovery** is restoring a known image at the
+addresses above with a probe or the on-SoM SWD route. **Manufacturing** is
+internal and out of scope for this SDK: option-byte provisioning (write
+protection, BOOTLK, SPC), per-unit records, factory fixtures and the bench
+scripts. Recovery never needs those to bring the bridge back.
+
 **`docs/tutorials/07-recovering-a-bricked-bridge.md`'s "IDCODE caveat"
 section now agrees with this one**: both treat `0x0BE12477` as an
 unattested, claimed-but-unmeasured value, and neither presents it as
