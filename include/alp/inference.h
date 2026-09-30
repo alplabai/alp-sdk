@@ -224,13 +224,16 @@ typedef struct {
  *         ALP_ERR_NOT_IMPLEMENTED (registered backend has no open
  *         hook), ALP_ERR_NOSUPPORT (a pinned @c backend the selected
  *         backend can't serve, e.g. ETHOS_U pinned on a CPU-only
- *         build; OR, on the ONNX Runtime / DEEPX DX-M1 / TFLM backends,
- *         any model tensor whose rank exceeds 4 -- @ref
+ *         build; on the ONNX Runtime / DEEPX DX-M1 / TFLM backends, any
+ *         model tensor whose rank exceeds 4 -- @ref
  *         alp_inference_tensor_t's @c shape has exactly 4 slots, and
  *         a model that doesn't fit is refused rather than opened with
- *         a silently-truncated shape), ALP_ERR_NOMEM (handle-pool or
- *         arena allocation failure), or ALP_ERR_IO (backend's
- *         tensor-arena allocation failed).
+ *         a silently-truncated shape; on the ONNX Runtime / TFLM
+ *         backends, a tensor dim too large for the @c shape slots'
+ *         @c uint16_t type; or, on the DEEPX DX-M1 backend, a model
+ *         with more input tensors than the backend can stage),
+ *         ALP_ERR_NOMEM (handle-pool or arena allocation failure), or
+ *         ALP_ERR_IO (backend's tensor-arena allocation failed).
  */
 alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg);
 

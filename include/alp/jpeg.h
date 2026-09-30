@@ -116,11 +116,20 @@ typedef struct {
 	alp_jpeg_subsample_t subsample;
 	uint8_t              quality; /**< 1..100. */
 	const void          *y_plane;
-	uint32_t             y_stride;
-	const void          *u_plane; /**< NULL when subsample is _400, or format is _NV12. */
-	uint32_t             u_stride;
-	const void          *v_plane; /**< NULL when subsample is _400, or format is _NV12. */
-	uint32_t             v_stride;
+	uint32_t             y_stride; /**< Bytes per row of @c y_plane.  0 is a "tightly
+	                                 *   packed" sentinel the dispatcher fills in as
+	                                 *   @c width; a NONZERO value under @c width is
+	                                 *   rejected with @ref ALP_ERR_INVAL rather than
+	                                 *   silently aliasing every row to row 0 or reading
+	                                 *   across row boundaries (#1645). */
+	const void          *u_plane;  /**< NULL when subsample is _400, or format is _NV12. */
+	uint32_t             u_stride; /**< Bytes per row of @c u_plane.  Same 0-sentinel /
+	                                 *   floor-check rule as @c y_stride, against
+	                                 *   (@c width + 1) / 2; consulted only when
+	                                 *   @c format is @ref ALP_PIXFMT_YUV420_PLANAR and
+	                                 *   @c subsample is not @ref ALP_JPEG_SUBSAMPLE_400. */
+	const void          *v_plane;  /**< NULL when subsample is _400, or format is _NV12. */
+	uint32_t             v_stride; /**< Same rule as @c u_stride. */
 } alp_jpeg_encode_req_t;
 
 /** Capabilities of an opened JPEG-encoder handle. */

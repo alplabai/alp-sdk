@@ -174,12 +174,45 @@ void register_default_ops(tflite::MicroMutableOpResolver<32> &r)
 #endif
 }
 
+/** True if every dim of every input/output tensor TFLM has allocated
+ *  fits the descriptor's uint16_t shape[4] slots -- called from
+ *  tflm_open() right after AllocateTensors(), alongside the rank check
+ *  below, so a model with an unrepresentable dim VALUE fails to load
+ *  instead of silently truncating it into the shape[] descriptor on the
+ *  first get_input()/get_output() (#1645, same bug-class as
+ *  inference_ort.cpp's _gather_tensor_info() gate and
+ *  the DEEPX backend's fill_fixed_shape() check).  TFLM tensors are
+ *  always fully static once allocated -- unlike ORT/dx_rt there is no
+ *  symbolic/dynamic-dim case, so a dim outside [0, UINT16_MAX] is
+ *  simply rejected. */
+bool tensor_shapes_fit_descriptor(tflite::MicroInterpreter *interp)
+{
+	for (size_t i = 0; i < interp->inputs_size(); ++i) {
+		const TfLiteIntArray *dims = interp->input(i)->dims;
+		for (int d = 0; d < dims->size; ++d) {
+			if (dims->data[d] < 0 || dims->data[d] > UINT16_MAX) {
+				return false;
+			}
+		}
+	}
+	for (size_t i = 0; i < interp->outputs_size(); ++i) {
+		const TfLiteIntArray *dims = interp->output(i)->dims;
+		for (int d = 0; d < dims->size; ++d) {
+			if (dims->data[d] < 0 || dims->data[d] > UINT16_MAX) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
 /** Fill an alp tensor descriptor from a TFLM TfLiteTensor.
  *
- *  PRECONDITION: @p t's rank is <= 4 -- tflm_open() refuses
- *  (ALP_ERR_NOSUPPORT) any model carrying a tensor that doesn't hold, via
- *  the all_tensor_ranks_fit() walk below, so this never truncates a live
- *  rank > 4 (issue #1729, same posture as the ORT/DEEPX backends). */
+ *  PRECONDITION: @p t's rank is <= 4 AND every dim value fits a
+ *  uint16_t -- tflm_open() refuses (ALP_ERR_NOSUPPORT) any model
+ *  carrying a tensor that doesn't hold, via the all_tensor_ranks_fit()
+ *  walk and tensor_shapes_fit_descriptor() above (issues #1729, #1645,
+ *  same posture as the ORT/DEEPX backends). */
 void fill_tensor_descriptor(const TfLiteTensor *t, alp_inference_tensor_t *out)
 {
 	out->data       = t->data.raw;
@@ -384,6 +417,15 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
 		 * #1729). NOSUPPORT, not IO: the model loaded and allocated fine,
 		 * it is this portable descriptor that has no slot for its rank --
 		 * same posture the ORT and DEEPX backends already take. */
+		delete st->interp;
+		if (st->own_arena) alp_slot_release(&g_default_arena_in_use);
+		delete st;
+		return ALP_ERR_NOSUPPORT;
+	}
+
+	if (!tensor_shapes_fit_descriptor(st->interp)) {
+		/* Same posture, for dim VALUE rather than rank (#1645) -- see the
+		 * function doc above. */
 		delete st->interp;
 		if (st->own_arena) alp_slot_release(&g_default_arena_in_use);
 		delete st;
