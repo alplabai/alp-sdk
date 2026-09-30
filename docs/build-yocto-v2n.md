@@ -322,6 +322,58 @@ cangen can_e1m0 -f -b -g 10 -I 123 -L 8 -n 1000
 ip -s -d link show can_e1m0; ip -s -d link show can_e1m1   # error counters stay 0
 ```
 
+Automated version: `tests/hil/v2m103-x-evk/v2m103-can-two-node.yaml`
+sends a classic, an FD and an FD+BRS frame from `can_e1m0` to `can_e1m1`
+and back, with the driver-default timing above, and checks the state of
+both ports afterwards. It is opt-in because the cable is not always
+fitted: it does nothing unless the board has the marker file
+`/etc/alp-hil-can-cabled` (`touch` it once the cable is fitted, remove it
+when it is not), and it also skips when `can_e1m0` / `can_e1m1` are
+absent. Run it with
+`python3 tests/hil/run_smoke.py --ssh-host root@<board-ip> tests/hil/v2m103-x-evk/v2m103-can-two-node.yaml`.
+A skip prints `HIL_CAN2_SKIP <reason>` and still exits 0, so read the log
+for `HIL_CAN2_SKIP` before treating a green run as a frame exchange. Every
+frame reports `HIL_CAN2_RX <tx>-><rx> <kind> ok` or `HIL_CAN2_FAIL ...`;
+the closing `HIL_CAN2_LINK` lines are `ip -d -s link show` per port, which
+carry the state, `berr-counter` and bus-error counts to record.
+
+Interpreting the result:
+
+- All six `HIL_CAN2_RX` lines ok and both ports ERROR-ACTIVE
+  (`HIL_CAN2_PASS`): the physical exchange works at 500 kbit/s + 2 Mbit/s
+  including BRS. Then the lone-node BRS BUS-OFF above is an ACK-less bus
+  corner, not a fault.
+- Classic ok, FD and FD+BRS lost or a port in BUS-OFF: the data-phase
+  path. With two nodes the ACK is present, so BUS-OFF here is a real
+  bit-error problem: the transmitter reads back a different level at its
+  sample point, i.e. TDC / transceiver loop delay is wrong or the data
+  sample point is too early. Check `tdc-mode auto tdco N` and `tdcv` in
+  `ip -d link show`; `tdcv` at 0 or near a full bit (40 clocks at 80 MHz,
+  2 Mbit/s) means the measured delay is wrong.
+- Nothing received either way, both ports still ERROR-ACTIVE with no bit
+  errors: cabling (CANH/CANL swapped, a missing termination, a
+  disconnected shared standby line) rather than timing.
+- Frames pass one way only: that port's transceiver or wiring.
+
+Manual TDC fallback (needs an iproute2 with `tdc-mode`), when auto mode
+fails but the bus is otherwise sound. `tdco` is the data sample point in
+clock periods (30 at 75 % of 40 clocks); `tdcv` is the fixed delay
+estimate the driver adds to it in manual mode. Apply to BOTH ports:
+
+```bash
+for i in can_e1m0 can_e1m1; do
+  ip link set $i down
+  ip link set $i type can bitrate 500000 dbitrate 2000000 fd on       tdc-mode manual tdco 30 tdcv 12
+  ip link set $i up
+done
+```
+
+Retry with `tdcv` 8, 12, 16 and 20 (a TCAN1044 loop delay of about
+100 to 175 ns is 8 to 14 clocks at 80 MHz) and keep the value at which
+the exchange and the ERROR-ACTIVE check both hold; report it with the
+`ip -d link show` output. The spec deliberately does not set TDC, so a
+manual-mode result is measured with the commands above, not the spec.
+
 Then raise `dbitrate` to 4000000 and 5000000 (TDC is mandatory there; read
 `tdcv` in `ip -d link show`) and repeat `cangen`. If the two-node test is
 clean at 2 Mbit/s but the lone-node BRS test still goes BUS-OFF, the lone

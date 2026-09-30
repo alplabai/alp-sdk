@@ -1,0 +1,78 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 CAN-FD two-node frame exchange (Linux, A55): the two
+# on-module ports can_e1m0 / can_e1m1 cabled to each other (CANH-CANH,
+# CANL-CANL, 120 ohm across CANH/CANL at each end), driver-default timing
+# (bitrate 500000 dbitrate 2000000 fd on).  Sends a classic, an FD and an
+# FD+BRS frame each way and checks the other port receives it, then that
+# neither port left ERROR-ACTIVE.  Runbook: docs/build-yocto-v2n.md,
+# "CAN-FD data phase: TDC and bus-off triage" (two-node test).
+#
+# OPT-IN.  The cable is not always fitted, so the spec does nothing
+# unless the target carries the marker file /etc/alp-hil-can-cabled
+# (`touch` it once the cable is fitted, remove it when it is not).  It
+# also skips when can_e1m0 / can_e1m1 are absent.  A skip prints
+# HIL_CAN2_SKIP and still reports PASS -- read the log for HIL_CAN2_SKIP
+# before counting this spec as a frame exchange.
+#
+# NOT read-only: it reconfigures and downs both ports.
+
+schema_version: 1
+name: v2m103-can-two-node
+description: |
+  can_e1m0 <-> can_e1m1: classic, FD and FD+BRS frames received both ways,
+  no BUS-OFF / ERROR-PASSIVE; skipped unless the cable marker is set.
+
+flash_method: ssh-run
+ssh_command: |-
+  done_() { echo HIL_CAN2_DONE; exit 0; }
+  skip() { echo "HIL_CAN2_SKIP $*"; done_; }
+  [ -e /etc/alp-hil-can-cabled ] || skip cable marker /etc/alp-hil-can-cabled not set
+  for i in can_e1m0 can_e1m1; do
+    [ -e /sys/class/net/$i ] || skip $i absent
+  done
+  command -v candump >/dev/null && command -v cansend >/dev/null \
+    || { echo "HIL_CAN2_FAIL can-utils missing"; done_; }
+  fail=0
+  up() {
+    ip link set $1 down
+    ip link set $1 type can bitrate 500000 dbitrate 2000000 fd on \
+      && ip link set $1 up
+  }
+  # xchg TX RX LABEL CANSEND-FRAME "PAYLOAD AS candump PRINTS IT"
+  xchg() {
+    f=/tmp/hil-can2.$$; rm -f $f
+    candump -n 1 -T 3000 $2 >$f 2>&1 &
+    p=$!
+    sleep 1
+    cansend $1 $4
+    wait $p
+    if grep -q "$5" $f; then
+      echo "HIL_CAN2_RX $1->$2 $3 ok"
+    else
+      echo "HIL_CAN2_FAIL $1->$2 $3 not received"; fail=1
+    fi
+    rm -f $f
+  }
+  up can_e1m0 && up can_e1m1 || { echo "HIL_CAN2_FAIL bring-up"; done_; }
+  for pair in "can_e1m0 can_e1m1" "can_e1m1 can_e1m0"; do
+    set -- $pair
+    xchg $1 $2 classic 123#11223344 "11 22 33 44"
+    xchg $1 $2 fd 123##011223344 "11 22 33 44"
+    xchg $1 $2 fd-brs 123##111223344 "11 22 33 44"
+  done
+  for i in can_e1m0 can_e1m1; do
+    ip -d -s link show $i | sed "s/^/HIL_CAN2_LINK $i /"
+    ip -d link show $i | grep -q "state ERROR-ACTIVE" \
+      || { echo "HIL_CAN2_FAIL $i left ERROR-ACTIVE"; fail=1; }
+    ip link set $i down
+  done
+  [ $fail = 0 ] && echo HIL_CAN2_PASS
+  done_
+
+serial:
+  duration_s: 60
+  expect_contains:
+    - "HIL_CAN2_DONE"
+  expect_absent:
+    - "HIL_CAN2_FAIL"
