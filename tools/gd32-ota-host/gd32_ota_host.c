@@ -17,7 +17,9 @@
  */
 
 #include <errno.h>
+#include <fcntl.h>
 #include <libgen.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,14 +50,15 @@ static const char *ota_state_name(gd32g553_ota_state_t s)
 
 /* ---- sysfs unbind/rebind of the kernel driver holding the address ---- */
 
-static char g_drv[64], g_dev[32];
+static char g_drv[64], g_dev[32], g_bind[128];
 
 static int sysfs_write(const char *path, const char *val)
 {
-	FILE *f = fopen(path, "w");
-	if (f == NULL) return -1;
-	int rc = (fputs(val, f) < 0) ? -1 : 0;
-	if (fclose(f) != 0) rc = -1;
+	int fd = open(path, O_WRONLY);
+	if (fd < 0) return -1;
+	size_t n  = strlen(val);
+	int    rc = (write(fd, val, n) == (ssize_t)n) ? 0 : -1;
+	if (close(fd) != 0) rc = -1;
 	return rc;
 }
 
@@ -73,19 +76,31 @@ static void kernel_unbind(unsigned bus, unsigned addr)
 	tgt[n] = 0;
 	snprintf(g_drv, sizeof(g_drv), "%s", basename(tgt));
 	snprintf(path, sizeof(path), "/sys/bus/i2c/drivers/%s/unbind", g_drv);
-	printf("unbind: %s from %s -> %s\n",
-	       g_dev,
-	       g_drv,
-	       sysfs_write(path, g_dev) == 0 ? "ok" : "FAILED");
+	if (sysfs_write(path, g_dev) != 0) {
+		printf("unbind: %s from %s -> FAILED\n", g_dev, g_drv);
+		g_dev[0] = 0; /* nothing was detached, so nothing to re-bind */
+		return;
+	}
+	printf("unbind: %s from %s -> ok\n", g_dev, g_drv);
+	snprintf(g_bind, sizeof(g_bind), "/sys/bus/i2c/drivers/%s/bind", g_drv);
+}
+
+/* SIGINT/SIGTERM mid-run: re-bind (async-signal-safe calls only) so the
+ * bridge is not left without its kernel driver. */
+static void on_signal(int sig)
+{
+	if (g_dev[0] != 0) (void)sysfs_write(g_bind, g_dev);
+	_exit(128 + sig);
 }
 
 static void kernel_rebind(void)
 {
-	char path[256];
 	if (g_dev[0] == 0) return;
-	snprintf(path, sizeof(path), "/sys/bus/i2c/drivers/%s/bind", g_drv);
-	printf(
-	    "rebind: %s to %s -> %s\n", g_dev, g_drv, sysfs_write(path, g_dev) == 0 ? "ok" : "FAILED");
+	printf("rebind: %s to %s -> %s\n",
+	       g_dev,
+	       g_drv,
+	       sysfs_write(g_bind, g_dev) == 0 ? "ok" : "FAILED");
+	g_dev[0] = 0;
 }
 
 /* ---- OTA phases ---- */
@@ -134,6 +149,15 @@ static void print_link(gd32g553_t *g, const char *tag)
 		       (unsigned)st.err);
 	else
 		printf(" get_state status=%d\n", (int)ss);
+}
+
+/* Build id + OTA state in one go; 0 only when BOTH reads succeeded. */
+static int
+snapshot(gd32g553_t *g, char id[GD32G553_BUILD_ID_LEN + 1], gd32g553_ota_state_info_t *st)
+{
+	memset(id, 0, GD32G553_BUILD_ID_LEN + 1);
+	return gd32g553_get_build_id(g, id) == ALP_OK && gd32g553_ota_get_state(g, st) == ALP_OK ? 0
+	                                                                                         : 1;
 }
 
 /* Poll GET_STATE until state == want (BEGIN's erase / VERIFY's CRC run in
@@ -204,17 +228,27 @@ int main(int argc, char **argv)
 		buf = malloc(len ? len : 1);
 		if (buf == NULL || len == 0 || fread(buf, 1, len, f) != len) {
 			fprintf(stderr, "FAIL: read %s (empty or short)\n", image);
+			fclose(f);
+			free(buf);
 			return 1;
 		}
 		fclose(f);
 	}
 
+	signal(SIGINT, on_signal);
+	signal(SIGTERM, on_signal);
 	if (do_unbind) kernel_unbind(bus, addr);
 
 	int        rc = 1;
 	gd32g553_t g;
 	if (open_link(&g, bus, addr)) goto out;
 	print_link(&g, "before");
+	char                      before_id[GD32G553_BUILD_ID_LEN + 1];
+	gd32g553_ota_state_info_t before;
+	if (snapshot(&g, before_id, &before)) {
+		fprintf(stderr, "FAIL: cannot read build id / OTA state before the run\n");
+		goto out;
+	}
 	if (status_only) {
 		rc = 0;
 		goto out;
@@ -223,13 +257,15 @@ int main(int argc, char **argv)
 	const uint32_t crc = crc32_zlib(buf, len);
 	printf("image: %s size=%zu crc32=0x%08x version=%u.%u.%u\n", image, len, crc, vm, vn, vp);
 
-	const gd32g553_version_t fv        = { (uint8_t)vm, (uint8_t)vn, (uint8_t)vp };
-	uint16_t                 chunk_max = 0;
-	gd32g553_ota_slot_t      slot      = GD32G553_OTA_SLOT_NONE;
+	const gd32g553_version_t fv         = { (uint8_t)vm, (uint8_t)vn, (uint8_t)vp };
+	uint16_t                 chunk_max  = 0;
+	gd32g553_ota_slot_t      slot       = GD32G553_OTA_SLOT_NONE;
+	int                      lost_begin = 0;
 	alp_status_t             s = gd32g553_ota_begin(&g, (uint32_t)len, crc, &fv, &chunk_max, &slot);
 	if (s == ALP_ERR_IO || s == ALP_ERR_TIMEOUT) {
 		/* BEGIN's reply can be lost to the slot erase: confirm via state. */
 		printf("BEGIN reply lost (status=%d), confirming via GET_STATE\n", (int)s);
+		lost_begin = 1;
 	} else if (s != ALP_OK) {
 		fprintf(stderr, "FAIL: BEGIN status=%d\n", (int)s);
 		goto out;
@@ -237,6 +273,23 @@ int main(int argc, char **argv)
 		printf("BEGIN ok: chunk_max=%u target_slot=%u\n", chunk_max, (unsigned)slot);
 	}
 	if (wait_state(&g, GD32G553_OTA_STATE_READY, 30000)) goto out;
+	if (lost_begin) {
+		/* READY may be a stale session from an earlier abort: only trust it
+		 * when it is staging into the slot we are not running. */
+		gd32g553_ota_state_info_t st;
+		if (gd32g553_ota_get_state(&g, &st) != ALP_OK ||
+		    st.pending_slot == GD32G553_OTA_SLOT_NONE || st.pending_slot == before.active_slot) {
+			fprintf(stderr,
+			        "FAIL: lost BEGIN reply and pending slot is not a fresh staging slot\n");
+			goto out;
+		}
+		slot = st.pending_slot;
+		printf("BEGIN confirmed: target_slot=%u\n", (unsigned)slot);
+	}
+	if (slot == before.active_slot) {
+		fprintf(stderr, "FAIL: BEGIN target slot equals the running slot\n");
+		goto out;
+	}
 
 	size_t step = (chunk_max != 0 && chunk_max < WIRE_CHUNK_MAX) ? chunk_max : WIRE_CHUNK_MAX;
 
@@ -251,6 +304,7 @@ int main(int argc, char **argv)
 				fprintf(stderr, "FAIL: chunk @%zu status=%d got=%u\n", off, (int)s, got);
 				goto out;
 			}
+			alp_delay_ms(20);
 		}
 		off += n;
 	}
@@ -259,6 +313,10 @@ int main(int argc, char **argv)
 	bool     ok   = false;
 	uint32_t vcrc = 0;
 	s             = gd32g553_ota_verify(&g, &ok, &vcrc);
+	if (s != ALP_OK && s != ALP_ERR_IO && s != ALP_ERR_TIMEOUT) {
+		fprintf(stderr, "FAIL: VERIFY status=%d\n", (int)s);
+		goto out;
+	}
 	if (s != ALP_OK) {
 		printf("VERIFY reply lost (status=%d), confirming via GET_STATE\n", (int)s);
 		if (wait_state(&g, GD32G553_OTA_STATE_VERIFIED, 30000)) goto out;
@@ -291,6 +349,30 @@ int main(int argc, char **argv)
 		goto out;
 	}
 	print_link(&g, "after");
+
+	/* Strict verdict: the bridge must now run the target slot, on a new build. */
+	char                      after_id[GD32G553_BUILD_ID_LEN + 1];
+	gd32g553_ota_state_info_t after;
+	if (snapshot(&g, after_id, &after)) {
+		fprintf(stderr, "FAIL: cannot read build id / OTA state after COMMIT\n");
+		goto out;
+	}
+	if (after.state == GD32G553_OTA_STATE_ERROR) {
+		fprintf(stderr, "FAIL: OTA state ERROR err=0x%02x after COMMIT\n", (unsigned)after.err);
+		goto out;
+	}
+	if (after.active_slot != slot || after.active_slot == before.active_slot) {
+		fprintf(stderr,
+		        "FAIL: active slot %u (was %u), expected target %u: COMMIT rejected or reverted\n",
+		        (unsigned)after.active_slot,
+		        (unsigned)before.active_slot,
+		        (unsigned)slot);
+		goto out;
+	}
+	if (!strcmp(after_id, before_id)) {
+		fprintf(stderr, "FAIL: build id unchanged (%s) after COMMIT\n", after_id);
+		goto out;
+	}
 	rc = 0;
 out:
 	kernel_rebind();
