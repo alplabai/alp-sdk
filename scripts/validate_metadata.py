@@ -122,6 +122,14 @@ NPU_OPS_SCHEMA = REPO / "metadata" / "schemas" / "npu-ops-v1.schema.json"
 NPU_OPS = REPO / "metadata" / "npu_ops"
 MODEL_PERF_SCHEMA = REPO / "metadata" / "schemas" / "model-perf-v1.schema.json"
 MODEL_PERF = REPO / "metadata" / "model_perf"
+# Model-zoo manifests (ADR-0028: alp-sdk owns the schema + the data, tan owns
+# the engine that reads it -- scripts/alp_model/zoo.py and its tests are
+# ported into tan-cli, not here, tan-cli#1286). One file per model under
+# metadata/model_zoo/ (top-level *.yaml only -- NOT the starters/ subdir,
+# which holds the bundled binaries the `bundled:` source field references).
+MODEL_ZOO_SCHEMA = REPO / "metadata" / "schemas" / "model-zoo-v1.schema.json"
+MODEL_ZOO = REPO / "metadata" / "model_zoo"
+MODEL_ZOO_STARTERS = MODEL_ZOO / "starters"
 # Generated Zephyr board trees (one dir per <board>; each carries a twister
 # .yaml whose `identifier:` is the fully-qualified <board>/<soc>/<cpucluster>
 # triple `west build -b` resolves).  Ground truth for the board-target check.
@@ -3017,6 +3025,93 @@ def _check_model_perf_semantics(model_perf_files) -> list:
     return failures
 
 
+def _check_model_zoo_semantics(model_zoo_files) -> list:
+    """`metadata/model_zoo/<id>.yaml` cross-checks a JSON Schema shape pass
+    can't express (ADR-0028, alp-sdk#2539):
+
+      1. `id:` matches the manifest filename (`<id>.yaml`), the same
+         join-key invariant `_check_library_semantics()` enforces for
+         libraries -- a `tan model zoo` lookup by id always resolves.
+      2. a `source.bundled` path resolves to a real file, and resolves
+         STRICTLY INSIDE `metadata/model_zoo/starters/` -- never outside it
+         (a `../` escape) and never to a missing file.  The schema can only
+         check that the field is a non-empty string; it has no way to
+         stat the filesystem or bound the path to one directory.  Without
+         this, a typo'd or wandering `bundled:` path validates clean and
+         fails only later, opaquely, whenever something actually tries to
+         read the model.
+      3. every `validated_soms[]` entry names a SoM preset that actually
+         exists (`metadata/e1m_modules/<sku>.yaml`), mirroring
+         `_check_model_perf_semantics()`'s own SKU-existence check. The
+         schema's pattern only bounds the SKU to the real family/digit
+         vocabulary -- it cannot know which SKUs within that vocabulary
+         are actually shipped (e.g. `E1M-AEN899` is pattern-valid but no
+         such preset exists) -- so a well-formed but fictitious SKU would
+         otherwise validate clean and read as a real hardware claim.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[str, list[str]]] = []
+    for path in model_zoo_files:
+        try:
+            rel = path.relative_to(REPO).as_posix()
+        except ValueError:
+            rel = path.as_posix()
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+
+        msgs: list[str] = []
+
+        entry_id = doc.get("id")
+        if isinstance(entry_id, str) and entry_id != path.stem:
+            msgs.append(
+                f"id: `{entry_id}` does not match filename `{path.name}` -- "
+                f"a `tan model zoo` lookup by id would not resolve this file")
+
+        source = doc.get("source") if isinstance(doc.get("source"), dict) else {}
+        bundled = source.get("bundled")
+        if isinstance(bundled, str) and bundled:
+            resolved = (MODEL_ZOO / bundled).resolve()
+            try:
+                resolved.relative_to(MODEL_ZOO_STARTERS.resolve())
+                inside_starters = True
+            except ValueError:
+                inside_starters = False
+            if not inside_starters:
+                msgs.append(
+                    f"source.bundled `{bundled}` resolves outside "
+                    f"metadata/model_zoo/starters/ -- a bundled path must "
+                    f"stay inside the starters/ directory it is meant to "
+                    f"ship from")
+            elif not resolved.is_file():
+                try:
+                    resolved_rel = resolved.relative_to(REPO).as_posix()
+                except ValueError:
+                    resolved_rel = resolved.as_posix()
+                msgs.append(
+                    f"source.bundled `{bundled}` does not resolve to a "
+                    f"real file at {resolved_rel}")
+
+        validated_soms = doc.get("validated_soms")
+        if isinstance(validated_soms, list):
+            for sku in validated_soms:
+                if isinstance(sku, str) and not (SOM_PRESETS / f"{sku}.yaml").is_file():
+                    msgs.append(
+                        f"validated_soms: `{sku}`: no metadata/e1m_modules/"
+                        f"{sku}.yaml preset -- this is not a real, shipped SKU")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
 def main() -> int:
     # SoC files (JSON) against soc-spec v1.
     soc_schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
@@ -3251,6 +3346,25 @@ def main() -> int:
             )
             model_perf_failures += _check_model_perf_semantics(model_perf_files)
 
+    # Model-zoo manifests (YAML) against model-zoo v1 (ADR-0028, #2539).
+    # One top-level *.yaml per model -- NOT the starters/ subdir, which
+    # holds the bundled binaries `source.bundled` references (a starter is
+    # data, not a manifest, and has no schema of its own).
+    model_zoo_failures: list = []
+    model_zoo_files: list = []
+    if MODEL_ZOO_SCHEMA.is_file():
+        model_zoo_schema = json.loads(MODEL_ZOO_SCHEMA.read_text(encoding="utf-8"))
+        model_zoo_validator = jsonschema.Draft202012Validator(model_zoo_schema)
+        model_zoo_files = sorted(MODEL_ZOO.glob("*.yaml"))
+        if model_zoo_files:
+            print()
+            model_zoo_failures = _check_files(
+                "YAML", model_zoo_files, model_zoo_validator,
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
+                "id",
+            )
+            model_zoo_failures += _check_model_zoo_semantics(model_zoo_files)
+
     # Library manifests (YAML) against library v1 (ADR 0018).
     library_failures: list = []
     library_semantic_failures: list = []
@@ -3325,6 +3439,7 @@ def main() -> int:
                       + len(block_failures)
                       + len(npu_ops_failures)
                       + len(model_perf_failures)
+                      + len(model_zoo_failures)
                       + len(library_failures) + len(library_semantic_failures)
                       + len(board_target_failures)
                       + len(restriction_failures)
@@ -3343,6 +3458,7 @@ def main() -> int:
           f"{len(board_files)} board preset(s) + {len(chip_files)} chip file(s) + "
           f"{len(block_files)} block file(s) + {len(npu_ops_files)} npu-ops file(s) + "
           f"{len(model_perf_files)} model-perf point(s) + "
+          f"{len(model_zoo_files)} model-zoo entry(ies) + "
           f"{len(library_files)} library manifest(s) + Kconfig registries + "
           f"tier-a-library-ci registry + "
           f"{len(supervisor_links_files)} supervisor-links file(s) + "

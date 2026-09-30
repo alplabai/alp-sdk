@@ -151,6 +151,19 @@ into the topic-specific docs.
 
 ## Models / edge-AI
 
+- `metadata/model_zoo/<id>.yaml` (schema:
+  `metadata/schemas/model-zoo-v1.schema.json`) — the model-zoo data asset:
+  alp-sdk owns the schema + the manifests (`tan model zoo`'s hardware
+  truth), tan owns the engine that reads them
+  ([adr/0028-tan-owns-the-model-engine.md](adr/0028-tan-owns-the-model-engine.md)).
+  Every entry links an upstream `{url, sha256}` source or a genuinely clean,
+  tiny `{bundled}` starter under `metadata/model_zoo/starters/` — no weight
+  redistribution. `scripts/validate_metadata.py` gates the entry's shape and
+  that every `validated_soms[]` SKU names a real, shipped SoM preset; it
+  does NOT gate that the SoM was actually bench-run — a populated
+  `validated_soms` is a claim the entry's author is responsible for, same
+  as `metadata/model_perf/`'s bench-capture points. `validated_soms` stays
+  empty on a smoke/fixture entry like `example-tiny`.
 - [measuring-inference-energy.md](measuring-inference-energy.md) — the
   measured millijoules per inference on E1M-AEN801 silicon: the
   method (rail scan, conversion-ready sampling, idle-subtracted
