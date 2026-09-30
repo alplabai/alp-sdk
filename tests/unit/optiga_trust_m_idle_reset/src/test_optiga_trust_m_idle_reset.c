@@ -164,3 +164,93 @@ ZTEST(optiga_idle_reset, test_no_hook_is_the_plain_probe)
 	zassert_equal(g.writes, PL_POLLING_MAX_CNT);
 	zassert_equal(g.asserts, 0u);
 }
+
+/* #2517: the part idles out AFTER a good init.  The mock cannot speak the
+ * IFX framing, so a reopen cannot succeed here; what is asserted is the
+ * policy: one reset pulse through the hook kept from init, a second open
+ * attempt after it, and none of that without a hook. */
+ZTEST(optiga_idle_reset, test_mid_app_open_failure_pulses_reset_once_and_reopens)
+{
+	optiga_trust_m_t              ctx;
+	optiga_trust_m_product_info_t info;
+
+	zassert_equal(optiga_trust_m_init_with_reset(&ctx, bus, 0, reset_hook, &g), ALP_OK);
+	zassert_equal(g.asserts, 0u);
+
+	g.wedged         = true; /* idled out after init */
+	g.survives_reset = false;
+	zassert_not_equal(optiga_trust_m_read_product_info(&ctx, &info), ALP_OK);
+	zassert_equal(g.asserts, 1u, "one reset, not a loop");
+	zassert_equal(g.releases, 1u, "RESET is released");
+	zassert_true(g.probed_since_release, "opened again after the reset");
+	zassert_true(g.first_probe_after_ms >= (STARTUP_TIME_MSEC + 999u) / 1000u,
+	             "start-up wait before the reopen");
+	optiga_trust_m_deinit(&ctx);
+}
+
+ZTEST(optiga_idle_reset, test_mid_app_open_failure_without_hook_is_not_reset)
+{
+	optiga_trust_m_t              ctx;
+	optiga_trust_m_product_info_t info;
+
+	zassert_equal(optiga_trust_m_init(&ctx, bus, 0), ALP_OK);
+	g.wedged = true;
+	zassert_not_equal(optiga_trust_m_read_product_info(&ctx, &info), ALP_OK);
+	zassert_equal(g.asserts, 0u);
+	optiga_trust_m_deinit(&ctx);
+}
+
+/* A timed-out op leaves the library op in flight.  The next call must
+ * report busy and must not pulse RESET over a part that may be fine.  The
+ * mock cannot make the library time out, so the in-flight state is set
+ * directly (op_pending 1 = open of the util session, op_status 0x0001 =
+ * OPTIGA_LIB_BUSY, which never completes here). */
+ZTEST(optiga_idle_reset, test_op_still_in_flight_is_busy_not_reset)
+{
+	optiga_trust_m_t              ctx;
+	optiga_trust_m_product_info_t info;
+
+	zassert_equal(optiga_trust_m_init_with_reset(&ctx, bus, 0, reset_hook, &g), ALP_OK);
+	ctx.op_pending = 1u;
+	ctx.op_status  = 0x0001u;
+	zassert_equal(optiga_trust_m_read_product_info(&ctx, &info), ALP_ERR_BUSY);
+	zassert_equal(g.asserts, 0u, "no reset while the op is in flight");
+	zassert_equal(ctx.op_pending, 1u, "still pending");
+	optiga_trust_m_deinit(&ctx);
+}
+
+/* A timed-out op that has since completed is drained, then the call goes
+ * on as a normal open: on a part that idled out that is one reset pulse.
+ * op_pending 3 = an op that left no session behind; op_status 0x0000 is
+ * OPTIGA_LIB_SUCCESS, 0x0002 a failed op. */
+ZTEST(optiga_idle_reset, test_completed_op_is_drained_then_open_proceeds)
+{
+	optiga_trust_m_t              ctx;
+	optiga_trust_m_product_info_t info;
+
+	zassert_equal(optiga_trust_m_init_with_reset(&ctx, bus, 0, reset_hook, &g), ALP_OK);
+	g.wedged         = true;
+	g.survives_reset = false;
+	ctx.op_pending   = 3u;
+	ctx.op_status    = 0x0000u;
+	zassert_not_equal(optiga_trust_m_read_product_info(&ctx, &info), ALP_ERR_BUSY);
+	zassert_equal(ctx.op_pending, 0u, "drained");
+	zassert_equal(g.asserts, 1u, "then the normal open ran, one reset");
+	optiga_trust_m_deinit(&ctx);
+}
+
+ZTEST(optiga_idle_reset, test_failed_op_is_drained_then_open_proceeds)
+{
+	optiga_trust_m_t              ctx;
+	optiga_trust_m_product_info_t info;
+
+	zassert_equal(optiga_trust_m_init_with_reset(&ctx, bus, 0, reset_hook, &g), ALP_OK);
+	g.wedged         = true;
+	g.survives_reset = false;
+	ctx.op_pending   = 3u;
+	ctx.op_status    = 0x0002u;
+	zassert_not_equal(optiga_trust_m_read_product_info(&ctx, &info), ALP_ERR_BUSY);
+	zassert_equal(ctx.op_pending, 0u, "drained");
+	zassert_equal(g.asserts, 1u, "then the normal open ran, one reset");
+	optiga_trust_m_deinit(&ctx);
+}

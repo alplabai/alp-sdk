@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+/*
+ * e1m-v2n101-x-evk plus the opt-in IMX219 CAM0 path (#1149).  Built only
+ * when ALP_ENABLE_CAM0_IMX219 = "1"; see e1m-x-evk-cam0-imx219.dtsi.
+ * BENCH-UNVERIFIED.
+ */
+#include "e1m-v2n101-x-evk.dts"
+#include "e1m-x-evk-cam0-imx219.dtsi"
