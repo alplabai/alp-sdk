@@ -416,12 +416,13 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true", help="Show what would change without writing")
     args = ap.parse_args()
 
-    parse_version(args.to)  # validates SemVer shape
+    prerelease = parse_version(args.to)[3]  # validates SemVer shape
     current = read_current_version()
 
     print(f"bump_version: {current} -> {args.to}" + ("  [dry run]" if args.dry_run else ""))
     print()
-    verify_changelog_citations()
+    if not prerelease:  # rc bumps freeze nothing into history (slice_changelog returns early)
+        verify_changelog_citations()
     update_sdk_version_yaml(args.to, args.dry_run)
     slice_changelog(args.to, args.dry_run)
     update_version_h(args.to, args.dry_run)

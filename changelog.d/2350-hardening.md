@@ -54,7 +54,7 @@ by `--fix` afterward, so a drift left unresolved at exactly that moment ships
 wrong forever (the #1387 failure mode again, via the release path instead of
 a rebase). Wired into `scripts/bump_version.py`'s `main()`, before any file
 is touched
-(`scripts/bump_version.py:268` ("subprocess.check_call(")), refusing the
+(`scripts/bump_version.py:236` ("def verify_changelog_citations() -> None:")), refusing the
 bump and naming `--fix` as the remedy rather than running it automatically.
 Never applied to `CHANGELOG.md`'s already-released tail, which stays
 unrewritten and unblocked-on either way — its own drift is now printed and

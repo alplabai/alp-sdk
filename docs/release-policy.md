@@ -123,8 +123,9 @@ The cut happens on `main`, and only after `dev` has been promoted to
    #1395). `scripts/bump_version.py` refuses the next step while any
    fragment remains, so a skipped fold fails loudly here rather than
    silently dropping the cycle's entries from the release. It also runs
-   `check_changelog_citations.py --strict-lines` against `[Unreleased]`
-   before touching any file, and refuses the bump if a citation has
+   `check_changelog_citations.py --strict-lines` (all of `changelog.d/` plus
+   `[Unreleased]`, with the new-citation rule applied against `origin/dev`)
+   before touching any file on a GA bump (pre-release bumps skip it), and refuses the bump if a citation has
    drifted -- a citation that is merely advisory everywhere else must
    already be correct right before step 5 freezes it into history, since
    a released section is never rewritten by `--fix` afterward (#2350).
