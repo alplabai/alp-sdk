@@ -212,7 +212,7 @@ transceivers stay in standby).
 ```bash
 ip -br link | grep can_e1m                        # can_e1m0 + can_e1m1 present
 cat /sys/class/net/can_e1m0/dev_port              # 3   (can_e1m1 -> 2)
-ip link set can_e1m0 type can bitrate 500000 sample-point 0.8     dbitrate 2000000 dsample-point 0.7 fd on      # repeat for can_e1m1
+ip link set can_e1m0 type can bitrate 500000 sample-point 0.8 dbitrate 2000000 dsample-point 0.7 fd on      # repeat for can_e1m1
 ip link set can_e1m0 up
 ip -d link show can_e1m0                          # shows the timing clock + bitrate + "fd on"
 ```
@@ -224,8 +224,12 @@ kernel derives them from the requested rate and the controller clock
 inherited from the SoC dtsi, so read the clock and limits from
 `ip -d link show`, not from this repo. `fd on` is required for the
 data phase (`dbitrate`); without it only classic CAN frames are sent.
-<alp/can.h> does not set the bitrate (see `src/backends/can/yocto_drv.c`),
+`<alp/can.h>` does not set the bitrate (see `src/backends/can/yocto_drv.c`),
 so configure it before opening the port.
+If `can_e1m<N>` is missing and `can<N>` is an `rcar_canfd` netdev whose
+`dev_port` is not the channel of E1M bus N, `alp_can_open()` returns
+`ALP_ERR_NOT_READY` instead of opening the swapped port (install
+`alp-canfd-udev`).
 
 ### Hand-building the kernel (outside bitbake)
 

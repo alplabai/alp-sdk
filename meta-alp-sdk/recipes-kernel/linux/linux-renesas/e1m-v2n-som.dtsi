@@ -282,8 +282,8 @@
  * node's shutdown-gpios below), line 19 = wl-reg-on (the
  * mmc-pwrseq-simple node's reset-gpios below), line 20 = can-stby
  * (sideband, not an E1M pad -- see the gpio-hog below; requires
- * bridge protocol MINOR >= 13, gated the same way as 18/19 in the
- * 0005 kernel patch).
+ * bridge protocol MINOR >= 13, gated at the wire, not in .request();
+ * see can-stby-hog below).
  * Same physical chip as the CM33's SCI7 SPI link peer; Linux only
  * issues short GPIO frames here.
  *
@@ -318,7 +318,7 @@
 		#gpio-cells = <2>;
 
 		/* CAN_STBY (bridge line 20, GD32 PB13,
-		 * metadata/e1m_modules/v2n/gd32-io-mcu-map.csv:38): the
+		 * metadata/e1m_modules/v2n/gd32-io-mcu-map.csv:37): the
 		 * shared standby line for the two on-module TCAN1044 CAN-FD
 		 * transceivers (U15/U16). STB HIGH = standby, STB LOW =
 		 * normal -- the bridge firmware boots the pad HIGH (bus held
@@ -835,7 +835,7 @@
  * an operator step, not a DT property (a fixed `bitrate` here would
  * also force one rate on every deployment). Until it is set the
  * channel stays down and cannot disturb a live bus:
- *   ip link set can_e1m0 type can bitrate 500000 sample-point 0.8  *       dbitrate 2000000 dsample-point 0.7 fd on
+ *   ip link set can_e1m0 type can bitrate 500000 sample-point 0.8 \n *       dbitrate 2000000 dsample-point 0.7 fd on
  *   ip link set can_e1m0 up
  * (repeat for can_e1m1). `ip -d link show can_e1m0` prints the clock
  * the kernel is using and the achievable bitrate/sample-point limits.

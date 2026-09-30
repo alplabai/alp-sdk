@@ -108,9 +108,9 @@ updates both the wifi/bt and can-stby caches from one round-trip,
 not two independent pollers). Requires bridge protocol MINOR >= 13
 (gd32-bridge-firmware feat/can-stby-bridge-gpio, stacked on this
 repo's feat/wifi-bt-reg-on per that repo's own merge-order note);
-an older bridge silently no-ops a line-20 write today, same as lines
-18/19 did before this driver existed, until a future firmware
-confirms >= 0.13 and this gate starts refusing instead.
+on a bridge reporting MINOR < 13 the line-20 write is never sent
+(can_stby_status = -ENODEV, one-shot dev_warn), so both transceivers
+stay in standby; it is replayed once the bridge confirms >= 0.13.
 
 Deviation from a literal "gate line 20 exactly like 18/19" ask: line
 20's ONLY consumer here is a gpio-hog on THIS SAME gpiochip
@@ -613,11 +613,11 @@ index 000000000..b202babc2
 +		gd32->output_vals &= ~mask;
 +
 +	/*
-+	 * Defensive only: .request() refuses lines 18/19/20 until support
-+	 * is confirmed (gd32_bridge_gpio_request()), so do_set() should
-+	 * never actually reach this on a gated, unsupported bit. Skip the
-+	 * wire transfer for those bits anyway rather than assume that can
-+	 * never change -- the level is still latched above regardless, and
++	 * .request() refuses lines 18/19 until support is confirmed, so
++	 * for those this is defensive only; line 20 is always granted by
++	 * .request(), so for it this is the PRIMARY wire gate. Skip the
++	 * wire transfer for gated, unsupported bits -- the level is still
++	 * latched above regardless, and
 +	 * gd32_bridge_replay_work() would re-issue the write if support were
 +	 * ever (re)confirmed, so nothing would be lost even if this were hit.
 +	 */
