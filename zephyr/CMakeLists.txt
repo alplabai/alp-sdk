@@ -194,6 +194,11 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_JPEG_ALIF_HANTRO
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_BANNER
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/alp_banner.c)
 
+# E1M EVK HX8394 panel bring-up with retries (src/zephyr/panel_init_retry.c):
+# compiles to nothing unless a deferred-init `lcd_panel` HX8394 node exists.
+zephyr_library_sources_ifdef(CONFIG_DISPLAY
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/panel_init_retry.c)
+
 # Alp SoM console (CONFIG_ALP_SDK_CONSOLE) -- the `alp` Zephyr-shell command
 # tree.  Each group is its own TU attaching to the `alp` root via the
 # decentralized SHELL_SUBCMD_ADD section mechanism, so they list here flat.
