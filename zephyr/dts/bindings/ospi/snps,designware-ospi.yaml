@@ -13,10 +13,13 @@
 # ospi_hal.h), which is why this binding is vendored rather than re-derived.
 # Bound in-tree by zephyr/drivers/flash/flash_ospi_alif.c.
 #
-# The E1M-AEN801 (Ensemble E8) has no octal-NOR/HyperBus part populated this
-# hardware batch, so this only proves the ospi0 node BINDS + the hal_alif
-# init/XiP-enable entry points compile and link (see
-# examples/aen/aen-ospi-regcheck).  See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
+# E1M-AEN801 (Ensemble E8) has no octal-NOR/HyperBus part populated, so this
+# only proves the ospi0 node BINDS + the hal_alif init entry point compiles
+# and links on that SKU. E1M-AEN803 fits an OSPI0 NOR (ISSI IS25WX256-JHLE)
+# and its flash_driver_api read path (JEDEC ID / SFDP / addressed read) is
+# bench-verified there; write/erase are fail-closed stubs pending the part's
+# Octal-DDR mode switch (#915). See examples/aen/aen-ospi-regcheck and
+# docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
 #
 # Vendored VERBATIM from here down, except `clock-frequency: required` --
 # see the inline note on that property (#1831).
