@@ -403,4 +403,4 @@ hw_revisions:
 
 status:
   preliminary:              true                # routes connector-derived, pending HW-writeup ratification
-  partial_hw_config:        true                # board_id ADC = ANA_S7 (E1M_X_ADC7) now assigned; CAN_STBY resolved (GD32 PB13, metadata/e1m_modules/v2n/gd32-io-mcu-map.csv:37 -- see e1m-v2n-som.dtsi); CAM1_RST still TBD
+  partial_hw_config:        true                # board_id ADC = ANA_S7 (E1M_X_ADC7) now assigned; CAN_STBY resolved (GD32 PB13, metadata/e1m_modules/v2n/gd32-io-mcu-map.csv:38 -- see e1m-v2n-som.dtsi); CAM1_RST still TBD

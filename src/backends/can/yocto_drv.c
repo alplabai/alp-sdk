@@ -396,9 +396,11 @@ static int can_e1m_soc_channel(uint32_t bus_id)
  * the channel of E1M bus N: rcar_canfd probe order swaps can0/can1
  * against E1M numbering (#2352), so opening it would silently hit the
  * other port.  That case is ALP_ERR_NOT_READY (the BSP naming rule is
- * missing) rather than a wrong-port open. */
-static alp_status_t can_pick_ifname(
-    uint32_t bus_id, bool e1m_present, int plain_dev_port, char *out, size_t cap)
+ * missing) rather than a wrong-port open.  This relies on patch 0012:
+ * without it rcar_canfd reports dev_port 0, which reads as "unknown"
+ * and the plain can<N> is opened as before. */
+static alp_status_t
+can_pick_ifname(uint32_t bus_id, bool e1m_present, int plain_dev_port, char *out, size_t cap)
 {
 	int k = snprintf(out, cap, e1m_present ? "can_e1m%u" : "can%u", (unsigned)bus_id);
 	if (k < 0 || (size_t)k >= cap) return ALP_ERR_INVAL;
@@ -421,14 +423,14 @@ static alp_status_t can_ifname(uint32_t bus_id, char *out, size_t cap)
 		return ALP_ERR_INVAL;
 	bool e1m_present = if_nametoindex(e1m) != 0u;
 
-	int  dev_port = -1;
-	char path[128], drv[64];
+	int   dev_port = -1;
+	char  path[128], drv[64];
 	FILE *f;
 	if (!e1m_present) {
 		snprintf(path, sizeof(path), "/sys/class/net/can%u/device/driver", (unsigned)bus_id);
 		ssize_t n = readlink(path, drv, sizeof(drv) - 1);
 		if (n > 0) {
-			drv[n] = '\0';
+			drv[n]           = '\0';
 			const char *base = strrchr(drv, '/');
 			base             = base ? base + 1 : drv;
 			if (strcmp(base, "rcar_canfd") == 0) {
@@ -465,7 +467,7 @@ y_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st, alp_capabilitie
 	(void)caps_out;
 	if (cfg == NULL) return ALP_ERR_INVAL;
 
-	char ifname[IFNAMSIZ];
+	char         ifname[IFNAMSIZ];
 	alp_status_t ns = can_ifname(cfg->bus_id, ifname, sizeof(ifname));
 	if (ns != ALP_OK) return ns;
 	size_t k = strlen(ifname);

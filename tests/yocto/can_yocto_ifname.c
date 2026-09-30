@@ -39,7 +39,8 @@ int main(void)
 {
 	pick(0, true, -1, ALP_OK, "can_e1m0");
 	pick(1, true, 2, ALP_OK, "can_e1m1");
-	/* No udev rename, not rcar_canfd (vcan, USB adapter, host): plain name. */
+	/* No udev rename, dev_port unknown (vcan, USB adapter, host, or an
+	 * rcar_canfd kernel without patch 0012): plain name. */
 	pick(0, false, -1, ALP_OK, "can0");
 	pick(1, false, 0, ALP_OK, "can1");
 	/* rcar_canfd without the rename: probe-order swapped -> must refuse. */
