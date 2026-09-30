@@ -771,6 +771,17 @@ bench-confirmed on E1M-AEN803 2026W36-0001 (bench runs 316-331):
    results (issue #2334)" below for why and for the argument that still
    justifies this fix without that direct measurement.
 
+5. **First boot after a power cycle fails the D-PHY check (issue #2353).**
+   After a power-up the sensor's data lanes are not in LP-11 until it has
+   streamed once, so the DW CSI-2 host reported `D-PHY not locked to
+   Stop-state. PHY status - 0x00010000` on the first boot after every power
+   cycle, and on every later boot until one stream start had happened.
+   `imx335_init()` now ends with a 20 ms `STANDBY` 0 -> 1 pulse, which parks
+   the lanes in LP-11 before any host configures its D-PHY. Bench, E1M-AEN803
+   2026W36-0001, `aen-camera-firstlight` Flow C RAM-run straight after a
+   power cycle: 2/2 fail without the pulse, 3/3 clean 1296x972 captures with
+   it.
+
 If bootstrapping against a Zephyr checkout that already has alp-sdk's
 0001-0003 patches applied, re-running the whole patch list fails
 re-applying 0001 (`west patch` is not idempotent against an already-patched

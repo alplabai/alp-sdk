@@ -1,5 +1,5 @@
 diff --git a/drivers/video/imx335.c b/drivers/video/imx335.c
-index cead6b7..340a07c 100644
+index cead6b7..1ffdc5f 100644
 --- a/drivers/video/imx335.c
 +++ b/drivers/video/imx335.c
 @@ -29,6 +29,28 @@ LOG_MODULE_REGISTER(video_imx335, CONFIG_VIDEO_LOG_LEVEL);
@@ -221,7 +221,7 @@ index cead6b7..340a07c 100644
  }
  
  static int imx335_init(const struct device *dev)
-@@ -745,6 +898,20 @@ static int imx335_init(const struct device *dev)
+@@ -745,6 +898,37 @@ static int imx335_init(const struct device *dev)
  		return ret;
  	}
  
@@ -236,6 +236,23 @@ index cead6b7..340a07c 100644
 +					ARRAY_SIZE(imx335_mipi_timing_1188mbps));
 +	if (ret < 0) {
 +		LOG_ERR("Unable to configure MIPI output timing");
++		return ret;
++	}
++
++	/*
++	 * Alp Lab AB (issue #2353): after a power-up the data lanes are not in
++	 * LP-11 until the sensor has streamed once, so the CSI-2 host's D-PHY
++	 * Stop-state check fails on the first boot after a power cycle. Stream
++	 * briefly and return to STANDBY so the lanes park in LP-11 before any
++	 * host configures its D-PHY.
++	 */
++	ret = video_write_cci_reg(&cfg->i2c, IMX335_STANDBY, IMX335_STANDBY_OPERATING);
++	if (ret < 0) {
++		return ret;
++	}
++	k_sleep(K_MSEC(20));
++	ret = video_write_cci_reg(&cfg->i2c, IMX335_STANDBY, IMX335_STANDBY_STANDBY);
++	if (ret < 0) {
 +		return ret;
 +	}
 +

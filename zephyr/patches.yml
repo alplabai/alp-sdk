@@ -943,7 +943,7 @@ patches:
       format is untouched, so traceconfig.py and tests/kconfig/tracing are
       unaffected. Upstream to Zephyr then drop.
   - path: zephyr/0004-imx335-2lane-link-freq-and-binning.patch
-    sha256sum: ce3725b86521ddcd7f442f79e28cc36f294c65b0df642d54cfcf6a68198e09e9
+    sha256sum: ebb526ef1a2ca063ed37ca511759ed99e1ff3a427a2bf81c4c5b6d68b36496d2
     module: zephyr
     author: Alp Lab AB
     email: contact@alplab.ai
@@ -1056,3 +1056,13 @@ patches:
       concern, unrelated to D-PHY lock); D-PHY lock on any unit/carrier
       other than E1M-AEN803 2026W36-0001 on this specific E1M-EVK.
       Upstream to zephyrproject-rtos/zephyr then drop.
+
+      5. (Issue #2353) After a power-up the sensor's data lanes are not in
+      LP-11 until it has streamed once, so the DW CSI-2 host's D-PHY check
+      failed on the first boot after every power cycle ("D-PHY not locked
+      to Stop-state. PHY status - 0x00010000") and kept failing until one
+      stream start had happened. imx335_init() now ends with a 20 ms
+      STANDBY=0 / STANDBY=1 pulse so the lanes are parked in LP-11 before
+      any host configures its D-PHY. Bench, E1M-AEN803 2026W36-0001,
+      aen-camera-firstlight after a power cycle: 2/2 fail without it, 3/3
+      clean captures with it.
