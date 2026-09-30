@@ -831,7 +831,9 @@
  * clock (the `can_clk`/`fck` inputs of the RZ/V2N CANFD block, sourced
  * from the SoC's CPG via RZ_CLOCK_CANFD(ch) -- see the SoC dtsi
  * `&canfd` node in the BSP kernel, not this repo) is inherited from the
- * SoC dtsi, and rcar_canfd derives NBTP/DBTP from it, so the bitrate is
+ * SoC dtsi -- 80 MHz on silicon (`rcar_canfd 12440000.can: can_clk rate
+ * is 80000000`, E1M-V2M103 bench 2026-09-30) -- and rcar_canfd derives
+ * NBTP/DBTP from it, so the bitrate is
  * an operator step, not a DT property (a fixed `bitrate` here would
  * also force one rate on every deployment). Until it is set the
  * channel stays down and cannot disturb a live bus:
