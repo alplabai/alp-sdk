@@ -85,7 +85,7 @@
 	};
 };
 
-&csi2 {
+&csi20 {
 	status = "okay";
 
 	ports {
