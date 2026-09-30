@@ -45,6 +45,16 @@
 
 #define TEST_TIMEOUT_MS 5000
 
+/* alp_rpc_notify_link() is normally defined by src/rpc_dispatch.c
+ * (rpc_ops.h, #1643); the backend calls it on every link transition.
+ * Stubbed as a no-op: these tests exercise peer-length rejection, not
+ * link-callback delivery (tests/unit/ covers that). */
+void alp_rpc_notify_link(void *owner, alp_rpc_link_state_t state)
+{
+	(void)owner;
+	(void)state;
+}
+
 /* alp_rpc_close_finalize() is normally defined by src/rpc_dispatch.c;
  * this binary does not link alp::sdk (see the #include-the-.c-file
  * note above). Never actually invoked here -- neither test's

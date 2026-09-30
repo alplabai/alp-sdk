@@ -29,7 +29,7 @@
 #include <alp/jpeg.h>
 #include <alp/peripheral.h>
 
-ZTEST(alp_peripheral, test_jpeg_rejects_zero_stride)
+ZTEST(alp_peripheral, test_jpeg_zero_stride_is_tightly_packed)
 {
 	static uint8_t plane[64 * 64];
 	static uint8_t out[8192];
@@ -46,7 +46,7 @@ ZTEST(alp_peripheral, test_jpeg_rejects_zero_stride)
 		.subsample = ALP_JPEG_SUBSAMPLE_400, /* mono -- no chroma planes needed */
 		.quality   = 80,
 		.y_plane   = plane,
-		.y_stride  = 0u, /* the defect: aliases every row to row 0 */
+		.y_stride  = 0u, /* sentinel: dispatcher normalizes to width (#1918) */
 	};
 
 	alp_status_t rc_zero = alp_jpeg_encode(h, &req, out, sizeof(out), &out_len);
@@ -59,8 +59,9 @@ ZTEST(alp_peripheral, test_jpeg_rejects_zero_stride)
 
 	alp_jpeg_close(h);
 
-	zassert_equal(
-	    rc_zero, ALP_ERR_INVAL, "a zero stride must be refused, not encoded as row 0 repeated");
+	/* include/alp/jpeg.h: 0 means tightly packed (normalized to width), so it
+	 * must be accepted exactly like an explicit stride == width. */
+	zassert_equal(rc_zero, rc_ok, "a zero stride must encode as tightly packed");
 	zassert_equal(rc_undersized, ALP_ERR_INVAL, "a stride below width must be refused");
 	zassert_not_equal(rc_ok, ALP_ERR_INVAL, "a correct stride must still be accepted");
 }
