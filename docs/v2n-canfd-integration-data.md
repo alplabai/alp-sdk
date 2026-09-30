@@ -21,7 +21,7 @@ The facts therefore live here until a DT node exists.
 
 | Item | Value | Manual |
 |---|---|---|
-| Instance | one CANFD module, six channels (0-5); module bonds out ch 2 and ch 3 | 7.9.1 |
+| Instance | one CANFD module, six channels (0-5); the E1M-X SoM routes ch 2 and ch 3 (E1M_X_CAN0 = ch 3, E1M_X_CAN1 = ch 2, see #2524) | 7.9.1 |
 | Register base, A55 physical | `0x12440000` | 7.9.2, Table 7.9-4 |
 | Register base, CM33 non-secure | `0x52440000` | Table 7.9-4 |
 | Register base, CM33 secure | `0x42440000` | Table 7.9-4 |
@@ -55,7 +55,7 @@ The CAN-FD sources are **not** fixed SPIs on the CM33.  They are "SELECT
 (CM33)" events: software picks which event feeds each CM33 SPI through
 `ICU_INTM33SELk` (k = 0..42, `<ICU_base> + 0x0200 + 4k`, three 10-bit
 fields `M33SPIk_SEL0..2`; the field value is the event's `SELnnn` number;
-`0x3FF` = none).  CM33 SPI number for field j of register k is
+`0x3FF` is the reset value, no source selected).  CM33 SPI number for field j of register k is
 `353 + 3k + j`, so the 127 slots are SPI 353..479 (register 42 has only
 field 0).  Source: 4.6.1.4, Table 4.6-19 and the `ICU_INTM33SELk`
 register description.
@@ -87,12 +87,12 @@ Which CM33 slots CAN-FD claims is still a project decision (see below):
 
 | Item | Value | Manual |
 |---|---|---|
-| Clock gates | `CPG_CLKON_4` (offset `0x0610`), bits 28 `CGC_CANFD_0_pclk`, 29 `CGC_CANFD_0_clk_ram`, 30 `CGC_CANFD_0_clkc`; monitor `CPG_CLKMON_4` (`0x0810`) | Tables 4.4-14, 4.4-20 |
-| Resets | `CPG_RST_10` (offset `0x0928`): bit 1 `CANFD_0_RSTP_N` (APB), bit 2 `CANFD_0_RSTC_N` (AXI) | Table 4.4-24 |
+| Clock gates | `CPG_CLKON_9` (offset `0x0624`), ON bits 12 `CGC_CANFD_0_pclk`, 13 `CGC_CANFD_0_clk_ram`, 14 `CGC_CANFD_0_clkc`; write-enable bits are 28/29/30 (`CPG_CLKON_m` has ON in 15:0, write-enable in 31:16); monitor `CPG_CLKMON_4` (`0x0810`) bits 28/29/30 | 4.4.4.8, Table 4.4-15, Table 4.4-20 |
+| Resets | `CPG_RST_10` (offset `0x0928`): bit 1 `CANFD_0_RSTP_N` (pclk domain), bit 2 `CANFD_0_RSTC_N` (clkc domain) | Table 4.4-24 |
 | Bus stop | `CPG_BUS_10_MSTOP` (offset `0x0D24`), `MSTOP14_ON` (reset value has it set, i.e. stopped) | Table 4.4-38 |
 | Unit clock supply | shared by all six channels; there is no per-channel gate | 4.4 |
 
-`CPG_CLKON_4`'s reset value is `0x00001800`; CAN-FD is off after reset.
+CAN-FD is off after reset: `CPG_CLKON_9` initial `0x00000000`, `CPG_RST_10` initial `0x00000060` (bits 1/2 = 0, held in reset), `CPG_BUS_10_MSTOP` initial `0x0000DDEF` (bit 14 set, bus stopped).
 
 ## What is still missing on the CM33 side
 
