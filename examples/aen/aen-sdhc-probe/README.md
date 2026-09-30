@@ -85,6 +85,32 @@ without a second app to maintain:
 2. **PROBE 2** — a READ-ONLY check that the SD peripheral clock gate
    (`CLKCTL_PER_MST` bit 16, `SDC_CKEN`) is set, then a real
    `sdhc_hw_reset()` + CMD0 exercise.
+3. **PROBE 3** (#2181) — the reset()-restores-config capture the issue
+   asks for. Captures the seven registers `sdhc_dwc_set_def_config()`
+   programs at init (`NORMAL_INT_STAT_EN`, `ERROR_INT_STAT_EN`,
+   `NORMAL_INT_SIGNAL_EN`, `ERROR_INT_SIGNAL_EN`, `HOST_CTRL2`, `PWR_CTRL`,
+   `CLK_CTRL_R`) into a `struct sdhc_reset_regs` (`src/sdhc_reset_capture.h`)
+   at `main()` entry — boot state, itself already after
+   `sdhc_dwc_init()`'s own `sdhc_dwc_reset()` call (`POST_KERNEL`, before
+   `main()` ever runs) — then again after this probe's own
+   `sdhc_hw_reset()`. The PRIMARY verdict checks the after-capture against
+   the fixed values `sdhc_dwc_set_def_config()` itself programs
+   (`sdhc_reset_regs_matches_def_config()`): comparing the two captures to
+   each other alone could never catch a silently no-op `set_def_config()`,
+   since BOTH captures are post-reset readings. The before/after
+   comparison (`sdhc_reset_regs_equal()`) still runs, as a secondary
+   check, and both get printed. `sdhc_dwc_reset()` (the driver's `.reset`
+   entry point) issues `SW_RST_ALL` and then, as of #2122, unconditionally
+   re-calls `sdhc_dwc_set_def_config()` — so RESTORED is the expected
+   reading of today's code; this app measures, it does not assert an
+   outcome, and NOT RESTORED would be the unexpected result worth
+   chasing. **This capture has not been run on silicon as of this head**
+   — it produces the evidence #2181 asks for the next time this app runs
+   on the reworked-mux carrier; see the issue for the bench-side traps
+   (`ram-run.sh` truncating output, rc=0 on HardFault, `DCRSR`/`DCRDR`
+   needing a halted core). Both comparisons (`sdhc_reset_regs_equal()`,
+   `sdhc_reset_regs_matches_def_config()`) are host-tested without
+   hardware in `tests/unit/sdhc_reset_regs_compare/`.
 
 **Still read-only by construction** — no `CONFIG_FILE_SYSTEM`, no `fs_*`
 call, no `disk_access_write`, no `mkfs` anywhere in this app; none of that
