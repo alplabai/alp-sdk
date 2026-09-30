@@ -177,7 +177,7 @@ twister --testsuite-root tests/zephyr -p native_sim/native/64 \
 bash scripts/setup-clang-format.sh
 
 # Diff-only clang-format (matches CI's pr-static-analysis behaviour).
-git diff -U0 HEAD~1 -- '*.c' '*.h' ':!zephyr/**' ':!vendors/**' | clang-format-diff.py -p1
+git diff -U0 "$(git merge-base origin/dev HEAD)" -- '*.c' '*.h' ':!zephyr/**' ':!vendors/**' ':!tests/scripts/fixtures/rzv2n_svd/**' | clang-format-diff.py -p1
 ```
 
 Skipping the pin step is the single most common cause of green-locally /

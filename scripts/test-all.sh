@@ -1422,8 +1422,8 @@ stage_generated_files() {
     # what to install; otherwise it still skips, loudly.
     if [ -f scripts/gen_npu_ops.py ]; then
         local gen_npu_ops_out npu_ops_touched npu_ops_base
-        # DIFF_BASE overrides, same as the clang-format stage above, but the
-        # default here is merge-base(origin/dev, HEAD), not HEAD~1: a
+        # DIFF_BASE overrides; same default as the clang-format stage above,
+        # merge-base(origin/dev, HEAD) rather than HEAD~1: a
         # multi-commit branch (the normal case for a metadata change like
         # this) has npu_ops-touching commits older than HEAD~1, and HEAD~1
         # would miss them entirely.  If `origin/dev` is unreachable (no such
