@@ -234,10 +234,13 @@ PACKAGECONFIG:append = "${@' drpai' if ('rzv2n-family' in (d.getVar('MACHINEOVER
 #       REQUIRED rides with the enable, same shape as `drpai`: a missing ORT
 #       stack must fail the bake, not silently drop the CPU backend.  Auto-on
 #       only where the MACHINE conf sets ALP_ENABLE_ORT_CPU = "1" (V2M101/
-#       V2M102/V2M103/V2N101/V2N102/V2N103, #1259; V2M defaults it off when
-#       the DEEPX runtime is on -- dx-rt ships its own libonnxruntime).  RDEPENDS puts libonnxruntime in the
-#       image.  Never reaches resolve_auto() ahead of an NPU backend.
-PACKAGECONFIG[ort]      = "-DALP_SDK_USE_ORT_CPU=ON -DALP_SDK_ORT_REQUIRED=ON,-DALP_SDK_USE_ORT_CPU=OFF,onnxruntime,onnxruntime"
+#       V2M102/V2M103/V2N101/V2N102/V2N103, #1259).  With the DEEPX runtime
+#       on, dx-rt ships its own libonnxruntime (1.20.1), so ALP_ORT_PKG
+#       points DEPENDS/RDEPENDS at that one and the layer's onnxruntime is
+#       not built or installed (same libonnxruntime.so files would collide).
+#       RDEPENDS puts libonnxruntime in the image.  Never reaches resolve_auto() ahead of an NPU backend.
+ALP_ORT_PKG = "${@'libonnxruntime' if d.getVar('ALP_ENABLE_DEEPX_DXM1') == '1' else 'onnxruntime'}"
+PACKAGECONFIG[ort]      = "-DALP_SDK_USE_ORT_CPU=ON -DALP_SDK_ORT_REQUIRED=ON,-DALP_SDK_USE_ORT_CPU=OFF,${ALP_ORT_PKG},${ALP_ORT_PKG}"
 PACKAGECONFIG:append = "${@' ort' if d.getVar('ALP_ENABLE_ORT_CPU') == '1' else ''}"
 
 PACKAGECONFIG[deepx-dxm1] = "-DALP_SDK_USE_DEEPX_DXM1=ON -DALP_SDK_DEEPX_REQUIRED=ON,-DALP_SDK_USE_DEEPX_DXM1=OFF,dx-rt,"
