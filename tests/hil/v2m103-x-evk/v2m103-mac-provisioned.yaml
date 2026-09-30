@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 U-Boot-derived Ethernet MAC: end0 carries a locally
+# administered address with the A2: prefix, i.e. not a vendor-OUI default.
+# Reads sysfs only; per-unit octets 2..6 are not asserted.
+
+schema_version: 1
+name: v2m103-mac-provisioned
+description: |
+  /sys/class/net/end0/address is locally administered A2:xx:xx:xx:xx:xx.
+
+flash_method: ssh-run
+ssh_command: |-
+  m=$(cat /sys/class/net/end0/address 2>/dev/null)
+  echo "HIL_MAC_PREFIX ${m%%:*}"
+  case "$m" in
+    [aA]2:??:??:??:??:??) echo HIL_MAC_A2_OK;;
+    *) echo HIL_MAC_NOT_A2;;
+  esac
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "HIL_MAC_A2_OK"
+  expect_absent:
+    - "HIL_MAC_NOT_A2"

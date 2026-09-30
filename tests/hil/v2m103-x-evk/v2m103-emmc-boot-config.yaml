@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 eMMC boot configuration as provisioned: EXT_CSD[179]
+# (PARTITION_CONFIG) = 0x08 and EXT_CSD[177] (BOOT_BUS_CONDITIONS) = 0x02.
+# `mmc extcsd read` is a read-only CMD8; nothing is written.
+
+schema_version: 1
+name: v2m103-emmc-boot-config
+description: |
+  EXT_CSD[179]=0x08 and EXT_CSD[177]=0x02 on /dev/mmcblk0.
+
+flash_method: ssh-run
+ssh_command: |-
+  o=$(mmc extcsd read /dev/mmcblk0 2>&1) || { echo HIL_EXTCSD_READ_FAILED; exit 0; }
+  echo "$o" | grep -E '^\[(PARTITION_CONFIG|BOOT_BUS_CONDITIONS)|\[(179|177)\]'
+  echo "$o" | grep -Eq '\[PARTITION_CONFIG: 0x08\]|\[179\]: 0x08' && echo HIL_EXTCSD_179_OK
+  echo "$o" | grep -Eq '\[BOOT_BUS_CONDITIONS: 0x02\]|\[177\]: 0x02' && echo HIL_EXTCSD_177_OK
+
+serial:
+  duration_s: 15
+  expect_contains:
+    - "HIL_EXTCSD_179_OK"
+    - "HIL_EXTCSD_177_OK"
+  expect_absent:
+    - "HIL_EXTCSD_READ_FAILED"

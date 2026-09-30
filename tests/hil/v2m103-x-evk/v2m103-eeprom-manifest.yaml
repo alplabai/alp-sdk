@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 provisioned EEPROM manifest (docs/tutorials/13-eeprom-provisioning.md
+# layout): bytes 0..3 are the wire magic 'HPLA', bytes 24..47 the
+# NUL-padded SKU.  Reads the first 128 bytes through the at24 sysfs node on
+# i2c-0 @0x50 (read-only, no address-pointer write from userspace).  No
+# serial/hw_rev/CRC assertion: those differ per unit.
+#
+# Same collision caveat as v2m103-eeprom-read: the carrier board-ID EEPROM
+# shares 0x50 on this wire, so a pass means "the part at 0x50 carries an
+# E1M-V2M103 manifest".
+
+schema_version: 1
+name: v2m103-eeprom-manifest
+description: |
+  EEPROM @0x50 on i2c-0 starts with magic 'HPLA' and holds SKU E1M-V2M103.
+
+flash_method: ssh-run
+ssh_command: |-
+  n=/sys/bus/i2c/devices/0-0050/eeprom
+  [ -r "$n" ] || { echo HIL_MANIFEST_NO_NODE; exit 0; }
+  dd if="$n" of=/tmp/hil-manifest bs=128 count=1 2>/dev/null
+  [ "$(dd if=/tmp/hil-manifest bs=1 count=4 2>/dev/null)" = HPLA ] && echo HIL_MANIFEST_MAGIC_OK
+  [ "$(dd if=/tmp/hil-manifest bs=1 skip=24 count=24 2>/dev/null | tr -d '\000')" = E1M-V2M103 ] && echo HIL_MANIFEST_SKU_OK
+  rm -f /tmp/hil-manifest
+
+serial:
+  duration_s: 15
+  expect_contains:
+    - "HIL_MANIFEST_MAGIC_OK"
+    - "HIL_MANIFEST_SKU_OK"
+  expect_absent:
+    - "HIL_MANIFEST_NO_NODE"
