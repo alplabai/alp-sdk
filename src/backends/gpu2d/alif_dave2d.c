@@ -27,8 +27,10 @@
  *   - the texture alpha is modulated by the context's constant alpha.
  * The engine is an AXI master with no address translation in the driver:
  * surfaces and the driver heap must be at globally visible addresses (the
- * SRAM0 bank on the M55-HE, not DTCM). Cache maintenance for surfaces with
- * the D-cache on is not handled here yet.
+ * SRAM0 bank on the M55-HE, not DTCM). Surfaces get cache maintenance around
+ * each op (_cache_pre/_cache_post). The backend requires CONFIG_DCACHE: with
+ * the D-cache off the engine's output never reached the CPU on the bench, and
+ * the software fallback serves <alp/gpu2d.h> in that configuration.
  *
  * Coherency / cache maintenance against the caller's framebuffer
  * (clean src before read, invalidate dst after write -- see
@@ -54,6 +56,10 @@
 /* Documented D/AVE 2D driver API.  Provided by the build-time pack;
  * never vendored here. */
 #include "dave_driver.h"
+#include "dave_registermap.h"
+
+#include <zephyr/cache.h>
+#include <zephyr/sys/barrier.h>
 
 #if defined(CONFIG_D1_MALLOC_D0LIB)
 #include <zephyr/devicetree.h>
@@ -260,6 +266,33 @@ static alp_status_t _bind_dst(d2_device *dev, const alp_gpu2d_surface_t *s)
 }
 
 /*
+ * The engine reads and writes surfaces behind the CPU's data cache. Before an
+ * op: write back dirty source/destination lines so the engine sees the CPU's
+ * pixels, and drop the destination's so no dirty line is written over the
+ * engine's output later. After it: drop the destination again so the CPU
+ * reads the engine's pixels, not stale lines. No-ops without CONFIG_DCACHE.
+ * Bench (D-cache on, before this): fills and blits read back the previous
+ * op's colour.
+ */
+static size_t _surf_bytes(const alp_gpu2d_surface_t *s)
+{
+	return (size_t)s->stride_bytes * (size_t)s->height;
+}
+
+static void _cache_pre(const alp_gpu2d_surface_t *dst, const alp_gpu2d_surface_t *src)
+{
+	if (src != NULL) {
+		(void)sys_cache_data_flush_range(src->base, _surf_bytes(src));
+	}
+	(void)sys_cache_data_flush_and_invd_range(dst->base, _surf_bytes(dst));
+}
+
+static void _cache_post(const alp_gpu2d_surface_t *dst)
+{
+	(void)sys_cache_data_invd_range(dst->base, _surf_bytes(dst));
+}
+
+/*
  * Submit the commands recorded since d2_startframe() and wait for the engine
  * to finish them. d2_startframe() starts the render buffer closed by the
  * PREVIOUS d2_endframe(), and d2_endframe() waits only for that previous one
@@ -270,8 +303,25 @@ static alp_status_t _bind_dst(d2_device *dev, const alp_gpu2d_surface_t *s)
 static void _submit_and_wait(d2_device *dev)
 {
 	d2_endframe(dev);
+	/* The display list is Normal memory the CPU just wrote; the kick is a
+	 * Device register write. Without a DSB the engine can start on a list
+	 * whose last entries are still in the CPU's write buffer -- bench, with
+	 * the D-cache off (no cache maintenance to supply the barrier): every
+	 * result one op late. */
+	barrier_dsync_fence_full();
 	d2_startframe(dev);
 	d2_endframe(dev);
+	/*
+	 * d2_endframe() returns when the display list is done (D2C_DLISTACTIVE
+	 * clear), not when the engine has written its last pixels out. With the
+	 * D-cache off the CPU read the surface before the write-back drained and
+	 * saw the previous op's colour; wait for the enumeration and write-back
+	 * units too.
+	 */
+	d1_device *hw = d2_level1interface(dev);
+
+	while ((d1_getregister(hw, D1_DAVE2D, D2_STATUS) & (D2C_BUSY_ENUM | D2C_BUSY_WRITE)) != 0) {
+	}
 }
 
 static alp_status_t dave2d_open(alp_gpu2d_backend_state_t *state, alp_capabilities_t *caps_out)
@@ -326,6 +376,7 @@ static alp_status_t dave2d_fill_rect(alp_gpu2d_backend_state_t *state,
 	}
 	/* BENCH-UNVERIFIED: clean the dst range from cache after the
      * engine writes it (docs/aen-accelerator-backends-design.md §1). */
+	_cache_pre(dst, NULL);
 	d2_startframe(dev);
 	_set_store(dev);
 	d2_setcolor(dev, 0, (d2_color)argb_color);
@@ -338,6 +389,7 @@ static alp_status_t dave2d_fill_rect(alp_gpu2d_backend_state_t *state,
 	             (d2_width)(w << 4),
 	             (d2_width)(h << 4)); /* 16.4 fixed point */
 	_submit_and_wait(dev);            /* submit-and-wait per the v0.5 API contract */
+	_cache_post(dst);
 	return ALP_OK;
 }
 
@@ -377,6 +429,7 @@ static alp_status_t dave2d_blit(alp_gpu2d_backend_state_t *state,
 	    w > D2_FIXED4_MAX(d2_width) || h > D2_FIXED4_MAX(d2_width)) {
 		return ALP_ERR_OUT_OF_RANGE;
 	}
+	_cache_pre(dst, src);
 	d2_startframe(dev);
 	_set_store(dev);
 	d2_setalpha(dev, 0xff); /* see dave2d_blend() */
@@ -393,6 +446,7 @@ static alp_status_t dave2d_blit(alp_gpu2d_backend_state_t *state,
 	            (d2_point)(dy << 4),
 	            0);
 	_submit_and_wait(dev);
+	_cache_post(dst);
 	return ALP_OK;
 }
 
@@ -451,6 +505,7 @@ static alp_status_t dave2d_blend(alp_gpu2d_backend_state_t *state,
 	    w > D2_FIXED4_MAX(d2_width) || h > D2_FIXED4_MAX(d2_width)) {
 		return ALP_ERR_OUT_OF_RANGE;
 	}
+	_cache_pre(dst, src);
 	d2_startframe(dev);
 	d2_setblendmode(dev, src_bf, dst_bf);
 	d2_setalphablendmode(dev, src_abf, dst_abf);
@@ -470,6 +525,7 @@ static alp_status_t dave2d_blend(alp_gpu2d_backend_state_t *state,
 	            (d2_point)(dy << 4),
 	            d2_bf_usealpha);
 	_submit_and_wait(dev);
+	_cache_post(dst);
 	return ALP_OK;
 }
 

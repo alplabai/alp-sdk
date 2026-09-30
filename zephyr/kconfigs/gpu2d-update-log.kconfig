@@ -42,6 +42,10 @@ config ALP_SDK_GPU2D_SW_FALLBACK
 config ALP_SDK_GPU2D_ALIF_DAVE2D
 	bool "Compile the Alif D/AVE 2D real backend"
 	depends on ALP_SDK_GPU2D
+	# Bench-verified with the D-cache on only; with it off the engine's
+	# output never reached the CPU (#916). Without DCACHE the software
+	# fallback serves <alp/gpu2d.h> instead.
+	depends on DCACHE
 	default n
 	help
 	  Compile src/backends/gpu2d/alif_dave2d.c, the AEN-family

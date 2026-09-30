@@ -29,7 +29,13 @@ backends (the engine scales by 1/256). `examples/aen/aen-gpu2d-bench` gains
 surfaces in SRAM0, reports which backend ran, and checks SRC_OVER to +-1 per
 channel.
 
+With the D-cache on (the board default) each op writes back and invalidates
+the surfaces around the engine's access; before that, fills and blits read back
+the previous op's colour. The backend now requires `CONFIG_DCACHE`: with the
+D-cache off the engine's output never reached the CPU on the bench, so such a
+build gets the software fallback instead of wrong pixels.
+
 Bench: `RESULT PASS: GPU2D D/AVE 2D engine fill/blit/blend
-(REPLACE/SRC_OVER/ADDITIVE/MULTIPLY) all match on E8`, 4 of 4 runs. ADDITIVE and
-MULTIPLY are still served by the software fallback, and surface cache
-maintenance with the D-cache on is not handled yet (the bench runs with it off).
+(REPLACE/SRC_OVER/ADDITIVE/MULTIPLY) all match on E8` with the D-cache on, 9 of 9
+runs across builds (including 3 started from a loader that turned the cache
+off). ADDITIVE and MULTIPLY are still served by the software fallback.
