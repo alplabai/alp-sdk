@@ -908,6 +908,7 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_UPDATE_LOG
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/update_log_boot_metadata.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/update_log/engine.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/update_log/sha256.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/update_log/boot_providers.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/update_log/sw_tier.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/update_log/tfm_psa.c)
 if(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT OR CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_OWNER)
@@ -916,6 +917,14 @@ if(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT OR CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55
 endif()
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_UPDATE_LOG_TFM_PSA_OWNER
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/update_log/tfm_psa_secure_owner.c)
+# Real boot-metadata providers (issue #263). Mutually exclusive choice in
+# gpu2d-update-log.kconfig -- at most one of these compiles the strong
+# alp_update_log_boot_metadata_read() that overrides the weak default in
+# src/update_log_boot_metadata.c above.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_UPDATE_LOG_BOOT_MCUBOOT
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/update_log/mcuboot_boot_metadata.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_UPDATE_LOG_BOOT_ALIF_SE
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/update_log/alif_se_boot_metadata.c)
 # Audio registry sources.  The dispatcher owns two handle pools
 # (alp_audio_in_t + alp_audio_out_t) keyed off the same class
 # registry; the portable Zephyr backend wires DMIC input +

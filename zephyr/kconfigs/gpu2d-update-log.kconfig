@@ -258,3 +258,73 @@ config ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED
 	  It is intentionally fail-closed: on boards without a ready TF-M /
 	  secure-owner backend, open() returns NULL with ALP_ERR_NOSUPPORT
 	  instead of silently continuing with MRAM/NVS persistence.
+
+choice
+	prompt "Trusted boot-metadata provider for alp_update_log_append_boot()"
+	default ALP_SDK_UPDATE_LOG_BOOT_PROVIDER_NONE
+	depends on ALP_SDK_UPDATE_LOG
+	help
+	  Selects the real producer behind alp_update_log_boot_metadata_read()
+	  (issue #263). Mutually exclusive: exactly one platform provider (or
+	  none) can define that symbol's strong override in a given image.
+
+config ALP_SDK_UPDATE_LOG_BOOT_PROVIDER_NONE
+	bool "None -- stays ALP_ERR_NOSUPPORT (default)"
+	help
+	  Keep the weak default (src/update_log_boot_metadata.c):
+	  alp_update_log_append_boot() reports ALP_ERR_NOSUPPORT. The
+	  documented, deterministic answer for a platform with no
+	  authenticated boot metadata wired yet -- never a fabricated entry.
+
+config ALP_SDK_UPDATE_LOG_BOOT_MCUBOOT
+	bool "MCUboot image header + SHA-256 trailer TLV"
+	depends on BOOTLOADER_MCUBOOT && FLASH_MAP
+	help
+	  Compile src/backends/update_log/mcuboot_boot_metadata.c. Reads the
+	  active slot's real MCUboot image header (version) and its
+	  IMAGE_TLV_SHA256 trailer TLV (digest) via the public flash_area API
+	  -- not blinfo_lookup(), which only exposes generic bootloader facts
+	  (mode/slot/bootloader version), and not MCUboot's measured-boot
+	  shared-data TLV, which carries a CBOR-encoded attestation report
+	  rather than a plain version/hash pair. A missing/short header or
+	  SHA-256 TLV reports ALP_ERR_NOSUPPORT rather than a fabricated
+	  entry.
+
+config ALP_SDK_UPDATE_LOG_BOOT_ALIF_SE
+	bool "Alif SE verified-ATOC entry"
+	depends on HAS_ALIF_SE_SERVICES
+	help
+	  Compile src/backends/update_log/alif_se_boot_metadata.c. Scans the
+	  Alif ATOC (se_service_get_toc_number() + the SERVICE_SYSTEM_MGMT_
+	  GET_TOC_INFO packet over se_service_send_request(), the same
+	  generic-send seam src/backends/security/se_cryptocell.c and
+	  src/backends/ext/alif/storage.c already use) for the TOC entry
+	  matching ALP_SDK_UPDATE_LOG_BOOT_ALIF_SE_IMAGE_ID, then hashes that
+	  entry's own [store_address, store_address + image_size) MRAM range
+	  -- the ATOC carries no per-entry digest field of its own. The TOC
+	  entry's verify bit maps to ALP_UPDATE_STATUS_CONFIRMED /
+	  ALP_UPDATE_STATUS_VERIFY_FAILED; no matching or malformed entry
+	  reports ALP_ERR_NOSUPPORT rather than a fabricated entry.
+
+endchoice
+
+config ALP_SDK_UPDATE_LOG_BOOT_ALIF_SE_IMAGE_ID
+	string "ATOC image_identifier (up to 8 bytes) of this build's own image"
+	depends on ALP_SDK_UPDATE_LOG_BOOT_ALIF_SE
+	default "APP"
+	help
+	  The 8-byte (NUL/zero-padded) TOC name this image was flashed under
+	  (SETOOLS app.json "name" / ATOC image_identifier). Must match
+	  exactly -- the provider rejects every other entry on the table, so
+	  a build whose ATOC name differs from this default must set it here.
+
+config ALP_SDK_UPDATE_LOG_BOOT_ALIF_SE_MAX_IMAGE_SIZE
+	int "Max bytes this provider will SHA-256 over an ATOC entry"
+	depends on ALP_SDK_UPDATE_LOG_BOOT_ALIF_SE
+	default 4194304
+	help
+	  Upper bound on the TOC entry's image_size before this provider
+	  hashes it. A entry reporting a size above this is treated as
+	  malformed (ALP_ERR_NOSUPPORT) rather than hashed -- protects
+	  against a corrupt/implausible size turning one boot-log append
+	  into an unbounded MRAM read.
