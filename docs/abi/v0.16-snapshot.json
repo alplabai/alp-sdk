@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-29",
+  "generated": "2026-09-30",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -6255,6 +6255,10 @@
           "hash": "11d2cbbf47ad03a5",
           "signature": "alp_status_t optiga_trust_m_init(optiga_trust_m_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit);"
         },
+        "optiga_trust_m_init_with_reset": {
+          "hash": "91af734144b63e99",
+          "signature": "alp_status_t optiga_trust_m_init_with_reset(optiga_trust_m_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, optiga_trust_m_reset_fn_t reset, void *reset_user);"
+        },
         "optiga_trust_m_read_product_info": {
           "hash": "f95d9c4475dce5ce",
           "signature": "alp_status_t optiga_trust_m_read_product_info(optiga_trust_m_t *ctx, optiga_trust_m_product_info_t *out);"
@@ -6287,6 +6291,11 @@
           ],
           "hash": "aa7842828da2490b",
           "kind": "struct"
+        },
+        "optiga_trust_m_reset_fn_t": {
+          "definition": "typedef alp_status_t (*optiga_trust_m_reset_fn_t)(void *user, bool assert);",
+          "hash": "2c8d75cc44b3b770",
+          "kind": "fnptr"
         },
         "optiga_trust_m_t": {
           "definition": "typedef struct { bool initialised; alp_i2c_t *bus; uint8_t addr; void *util; void *comms; uint8_t session; volatile uint16_t op_status; } optiga_trust_m_t;",
