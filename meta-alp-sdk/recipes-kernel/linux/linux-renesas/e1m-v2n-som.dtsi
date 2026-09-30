@@ -909,6 +909,17 @@
  *   ip link set can_e1m0 up
  * (repeat for can_e1m1). `ip -d link show can_e1m0` prints the clock
  * the kernel is using and the achievable bitrate/sample-point limits.
+ *
+ * TDC is not a DT property and no kernel patch is needed: the BSP
+ * rcar_canfd already enables transmitter delay compensation (TDCE,
+ * TDCO = data sample point in clock periods - 1) whenever the data BRP
+ * is 1 or 2, and `ip ... tdc-mode auto|manual|off tdco N tdcv N`
+ * overrides it (RZ/V2N manual R01UH1071 section 7.9.4.1.5). At 2 Mbit/s
+ * the TCAN1044 loop delay (about 100-175 ns) is well inside the 375 ns
+ * data sample point, so TDC does not explain a lone-node BRS BUS-OFF; an
+ * ACK error alone cannot cause it either (error-passive nodes do not
+ * count ACK errors). docs/build-yocto-v2n.md "CAN-FD data phase: TDC and
+ * bus-off triage" has the discriminating bench steps.
  * docs/build-yocto-v2n.md "CAN-FD bring-up" has the full procedure. */
 &canfd {
 	pinctrl-0 = <&canfd_pins>;
