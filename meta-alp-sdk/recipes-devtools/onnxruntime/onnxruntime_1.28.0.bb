@@ -61,6 +61,12 @@ LICENSE = "MIT & Apache-2.0"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=0f7e3b1308cb5c00b372a6e78835732d \
     file://../deps/onnx/onnx-1.22.0/LICENSE;md5=3b83ef96387f14655fc854ddc3c6bd57"
 
+# KleidiAI (#1258) is Apache-2.0 (every kai/ source carries that SPDX tag; the
+# BSD-3-Clause text in LICENSES/ only covers the bundled googletest, which
+# is not built).  md5 computed from the real v1.20.0 tarball.  Pinned only
+# when the knob is on, since only then is it linked into libonnxruntime.so.
+LIC_FILES_CHKSUM += "${@bb.utils.contains('PACKAGECONFIG', 'kleidiai', 'file://../deps/kleidiai/kleidiai-1.20.0/LICENSES/Apache-2.0.txt;md5=c846ebb396f8b174b10ded4771514fcc', '', d)}"
+
 DESCRIPTION = "ONNX Runtime -- cross-platform inference engine"
 HOMEPAGE = "https://onnxruntime.ai"
 
@@ -155,7 +161,7 @@ OECMAKE_SOURCEPATH = "${S}/cmake"
 # reading the FetchContent calls it makes for THIS EXACT EXTRA_OECMAKE
 # (BUILD_SHARED_LIB=ON, BUILD_UNIT_TESTS=OFF, ENABLE_PYTHON=OFF,
 # USE_XNNPACK unset/default, USE_MIMALLOC unset/default, USE_KLEIDIAI
-# unset/default).  That requires a working CMake configure against ORT's
+# explicitly OFF unless PACKAGECONFIG[kleidiai] is on).  That requires a working CMake configure against ORT's
 # real cmake/CMakeLists.txt, which this host cannot do (no bitbake, no
 # aarch64 cross toolchain, no point downloading the multi-hundred-MB
 # submodule tree just to watch what one `cmake` invocation asks for on a
@@ -210,11 +216,13 @@ OECMAKE_SOURCEPATH = "${S}/cmake"
 #                           INCLUDED; moved here and dropped from SRC_URI/
 #                           EXTRA_OECMAKE once the real configure proved it
 #                           unreachable.
-#   kleidiai, kleidiai-qmx - Arm Kleidi micro-kernel EP
-#                           (-Donnxruntime_USE_KLEIDIAI), default OFF; the
-#                           plan names this an explicit follow-up, not this
-#                           backend -- not enabled here even though the
-#                           dependency happens to already be pinned upstream
+#   kleidiai              - Arm Kleidi micro-kernel library, gated by
+#                           PACKAGECONFIG[kleidiai] below (#1258): fetched
+#                           and wired in only when the knob is on; default OFF
+#                           until a before/after on real E1M-V2N101 silicon.
+#   kleidiai-qmx          - Qualcomm KleidiAI fork
+#                           (-Donnxruntime_USE_QMX_KLEIDIAI_COEXIST), never
+#                           reached: that option stays OFF.
 #   googlexnnpack, fp16, fxdiv, psimd, pthreadpool - the XNNPACK EP
 #                           dependency chain (-Donnxruntime_USE_XNNPACK,
 #                           default OFF); this recipe requests the CPU EP's
@@ -264,6 +272,10 @@ SRC_URI += " \
     https://github.com/dcleblanc/SafeInt/archive/refs/tags/3.0.28.zip;name=safeint;subdir=deps/safeint;sha1sum=23f252040ff6cb9f1fd18575b32fa8fb5928daac \
 "
 
+# KleidiAI (#1258) is fetched only when PACKAGECONFIG[kleidiai] is on, so a
+# default build downloads nothing extra.
+SRC_URI += "${@bb.utils.contains('PACKAGECONFIG', 'kleidiai', 'https://github.com/ARM-software/kleidiai/archive/refs/tags/v1.20.0.tar.gz;name=kleidiai;subdir=deps/kleidiai;sha1sum=6895e72b3d5cf1173358164cb3d64c9d7d33cc84', '', d)}"
+
 # BitBake's own fetcher requires a sha256sum in addition to the sha1sum
 # inline on each SRC_URI entry above -- sha1sum alone is not enough for
 # BitBake, even though it is what cmake/deps.txt itself carries and is
@@ -282,6 +294,9 @@ SRC_URI[onnx.sha256sum] = "8dc1181d33529a1249e031226126d0699ac9bdfc571ee530ee3a1
 SRC_URI[pytorch_cpuinfo.sha256sum] = "2ed3ebc6c2656cc0aafc7af319e5cb0f97cc9b415eae180f566def84f1ca6a29"
 SRC_URI[re2.sha256sum] = "a835fe55fbdcd8e80f38584ab22d0840662c67f2feb36bd679402da9641dc71e"
 SRC_URI[safeint.sha256sum] = "3ffbd9a2fdff45da77da3e7269e9aa512ea43bed5c38ce8fd8f3d1068a032c3f"
+# kleidiai: sha256 computed locally from the v1.20.0 tarball (its sha1 matches
+# cmake/deps.txt); the other entries above are from a real do_fetch log.
+SRC_URI[kleidiai.sha256sum] = "e4b84c369f0f39af1660ac71c30f74038d4b89e1f20dde070bb96398382a111f"
 
 # FETCHCONTENT_SOURCE_DIR_<NAME> must match the name CMake's own
 # FetchContent_Declare() call used, upper-cased -- NOT the deps.txt/SRC_URI
@@ -413,6 +428,19 @@ CXXFLAGS:append = " \
     -fmacro-prefix-map=${WORKDIR}/deps=${TARGET_DBGSRC_DIR}/deps \
     -fdebug-prefix-map=${WORKDIR}/deps=${TARGET_DBGSRC_DIR}/deps \
 "
+
+# KleidiAI EP (#1258).  Opt-in: `PACKAGECONFIG:append:pn-onnxruntime = " kleidiai"`
+# in local.conf/the image.  ORT's own default is OFF (cmake/CMakeLists.txt
+# @da9b5e3:97 `option(onnxruntime_USE_KLEIDIAI ... OFF)`; only tools/ci_build/
+# build.py turns it on for aarch64, and this recipe calls cmake directly), so
+# the explicit OFF below keeps the pre-change behaviour.  The FetchContent
+# name is `kleidiai` (cmake/external/onnxruntime_external_deps.cmake:871
+# `onnxruntime_fetchcontent_declare(kleidiai URL ...)`), hence
+# FETCHCONTENT_SOURCE_DIR_KLEIDIAI.  ORT itself downgrades to OFF with a warning on a
+# non-aarch64 target.  The FETCHCONTENT dir is only passed when enabled; the
+# archive unpacks to kleidiai-1.20.0/ (tarball top-level, verified).
+PACKAGECONFIG ??= ""
+PACKAGECONFIG[kleidiai] = "-Donnxruntime_USE_KLEIDIAI=ON -DFETCHCONTENT_SOURCE_DIR_KLEIDIAI=${WORKDIR}/deps/kleidiai/kleidiai-1.20.0,-Donnxruntime_USE_KLEIDIAI=OFF"
 
 EXTRA_OECMAKE += " \
     --compile-no-warning-as-error \
