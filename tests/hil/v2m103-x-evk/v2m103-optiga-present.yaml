@@ -1,8 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # E1M-V2M103 OPTIGA Trust M (U33, BRD_I2C = i2c-8, 0x30): the address ACKs
-# (or is claimed by a driver, shown as UU).  Presence only; the APDU-level
-# check is v2n-secure-element-sign.  Read-only: one i2cdetect read probe.
+# to a plain 2-byte read.  Presence only; the APDU-level check is
+# v2n-secure-element-sign.  Read-only: one i2c read transaction, no write.
+# Bench fact (2026-09-30): the OPTIGA does NOT answer i2cdetect's
+# single-byte SMBus probe (shows "--" even when present), but ACKs a
+# multi-byte read, so this spec uses i2ctransfer r2 (neighbours 0x2f/0x31
+# NACK the same read, so the ACK is not a bus artifact).
 
 schema_version: 1
 name: v2m103-optiga-present
@@ -11,7 +15,7 @@ description: |
 
 flash_method: ssh-run
 ssh_command: |-
-  i2cdetect -y -r 8 0x30 0x30 | grep -Eq '^30: +(30|UU)' && echo HIL_OPTIGA_ACK
+  i2ctransfer -f -y 8 r2@0x30 >/dev/null 2>&1 && echo HIL_OPTIGA_ACK
 
 serial:
   duration_s: 10
