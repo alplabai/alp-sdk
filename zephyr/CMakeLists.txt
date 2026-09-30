@@ -1033,6 +1033,12 @@ zephyr_library_sources(
 zephyr_library_sources_ifdef(CONFIG_GPIO
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/qenc/zephyr_drv.c)
 
+# gpio-qdec input-subsystem backend (issue #2095): only meaningful once
+# Zephyr's input subsystem is compiled in.  Priority 110 vs zephyr_drv's
+# 100 -- see gpio_qdec.c's header comment for the open-time fall-through.
+zephyr_library_sources_ifdef(CONFIG_INPUT
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/qenc/gpio_qdec.c)
+
 if(CONFIG_ALP_SDK_V2N_SUPERVISOR)
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/qenc/gd32_bridge.c)

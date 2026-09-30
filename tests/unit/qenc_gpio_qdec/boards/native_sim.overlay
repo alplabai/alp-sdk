@@ -1,0 +1,30 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * gpio-qdec node for the alp-qenc0 alias (issue #2095), backed by
+ * native_sim's `gpio0` (zephyr,gpio-emul) controller.  The test
+ * injects INPUT_EV_REL events directly via input_report_rel() rather
+ * than toggling gpio0's pins -- see src/test_qenc_gpio_qdec.c -- so
+ * the two ab-gpio pins below exist only to satisfy the gpio-qdec
+ * binding's required properties; the sampling state machine they
+ * would normally drive is never exercised here.
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+
+/ {
+	aliases {
+		alp-qenc0 = &qdec0;
+	};
+
+	qdec0: qdec0 {
+		compatible = "gpio-qdec";
+		gpios = <&gpio0 10 GPIO_ACTIVE_HIGH>, <&gpio0 11 GPIO_ACTIVE_HIGH>;
+		steps-per-period = <4>;
+		zephyr,axis = <INPUT_REL_WHEEL>;
+		sample-time-us = <2000>;
+		idle-timeout-ms = <200>;
+	};
+};
