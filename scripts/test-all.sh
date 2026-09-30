@@ -1213,14 +1213,24 @@ stage_required_gate_scripts() {
 
 # required-gate-scripts graded changelog citations against the WORKING
 # TREE. CI grades the PR merge commit instead (actions/checkout on a
-# pull_request event checks out refs/pull/N/merge), where a citation into
-# a file dev has since moved is already wrong. This grades that merge,
-# built in the object store from origin/dev and HEAD -- committed work
-# only (alp-sdk#2186). origin/dev is passed explicitly rather than
-# inherited: DIFF_BASE is shared with the clang-format stage, and a base
-# that is already an ancestor of HEAD would grade HEAD, not a merge. The
-# orchestration below probes for git >= 2.38 (merge-tree --write-tree)
-# and for origin/dev first, and reports either as a [GAP] SKIP.
+# pull_request event checks out refs/pull/N/merge), where a citation into a
+# file dev has since moved might be wrong. This grades that merge, built in
+# the object store from origin/dev and HEAD -- committed work only
+# (alp-sdk#2186). origin/dev is passed explicitly rather than inherited:
+# DIFF_BASE is shared with the clang-format stage, and a base that is
+# already an ancestor of HEAD would grade HEAD, not a merge. The
+# orchestration below probes for git >= 2.38 (merge-tree --write-tree) and
+# for origin/dev first, and reports either as a [GAP] SKIP.
+#
+# NOT run with --strict-lines: that flag is the RELEASE-time hook
+# (alp-sdk#2350 round 2, wired into scripts/bump_version.py), not a PR-time
+# one -- it exists to turn a PRE-EXISTING citation's drift into an error
+# right before it freezes into history, and running it here would redden
+# every ordinary PR merged with a `dev` that moved underneath ANY
+# pre-existing citation, which is precisely the treadmill alp-sdk#2350
+# closed. A citation this PR itself ADDS still gets no drift tolerance
+# either way (see `_check_one`'s `added` handling) -- --strict-lines adds
+# nothing for that case that the plain run does not already enforce.
 stage_changelog_citations_merge() {
     DIFF_BASE=origin/dev python3 scripts/check_changelog_citations.py --against-merge
 }
