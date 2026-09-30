@@ -79,9 +79,14 @@
  *     calling this, about to return -- self-close path).
  */
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE /* pipe2() */
+#endif
+
 #if defined(__linux__)
 
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -543,7 +548,7 @@ y_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st, alp_capabilitie
      * time (cheap: two fds) even though the RX thread only spawns
      * lazily on the first add_filter(), matching
      * src/backends/rpc/yocto_drv.c's identical rx_wake_pipe. */
-	if (pipe(d->rx_wake_pipe) != 0) {
+	if (pipe2(d->rx_wake_pipe, O_CLOEXEC) != 0) {
 		int e = errno;
 		pthread_mutex_destroy(&d->lock);
 		close(fd);
