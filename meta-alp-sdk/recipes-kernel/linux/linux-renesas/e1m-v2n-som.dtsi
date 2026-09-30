@@ -317,20 +317,27 @@
 		gpio-controller;
 		#gpio-cells = <2>;
 
-		/* CAN_STBY (bridge line 20, GD32 PB13, gd32-bridge-firmware
-		 * gd32-io-mcu-map.csv:38): the shared standby line for the
-		 * two on-module TCAN1044 CAN-FD transceivers (U15/U16). STB
-		 * HIGH = standby, STB LOW = normal -- the bridge firmware
-		 * boots the pad HIGH (bus held in standby) as its own safe
-		 * default; this hog is Linux actively taking the bus out of
-		 * standby at boot. Gated exactly like lines 18/19 in the
-		 * 0005 kernel patch: requires bridge protocol MINOR >= 13
-		 * (gd32-bridge-firmware feat/can-stby-bridge-gpio); an older
-		 * bridge defers this hog's probe via .request() rather than
-		 * silently no-op the write. No device node consumes this
-		 * line the way `bluetooth`/mmc-pwrseq-simple consume 18/19
-		 * above, so a gpio-hog (not a *-gpios property) is how Linux
-		 * asserts it. */
+		/* CAN_STBY (bridge line 20, GD32 PB13,
+		 * metadata/e1m_modules/v2n/gd32-io-mcu-map.csv:38): the
+		 * shared standby line for the two on-module TCAN1044 CAN-FD
+		 * transceivers (U15/U16). STB HIGH = standby, STB LOW =
+		 * normal -- the bridge firmware boots the pad HIGH (bus held
+		 * in standby) as its own safe default; this hog is Linux
+		 * actively taking the bus out of standby at boot.
+		 *
+		 * Requires bridge protocol MINOR >= 13 (firmware >= 0.2.16).
+		 * Unlike lines 18/19, this line is NOT gated in .request():
+		 * the only consumer is this hog on the same gpiochip, and
+		 * deferring a hog's request would fail the whole gpiochip
+		 * registration (bt-reg-on, wl-reg-on, RTC, Display-1). The
+		 * 0005 kernel patch instead grants the request immediately
+		 * and gates at the wire level (gd32_bridge_gate_blocked()):
+		 * on a bridge below MINOR 13 the line-20 write is never sent,
+		 * so CAN_STBY stays HIGH and BOTH transceivers sit in
+		 * standby indefinitely, with only a one-shot dev_warn.
+		 * There is no deferred probe. When the bridge is merely slow
+		 * to boot, the driver latches the level and replays it once
+		 * the bridge answers. */
 		can-stby-hog {
 			gpio-hog;
 			gpios = <20 GPIO_ACTIVE_HIGH>;
@@ -779,13 +786,24 @@
 	 *   - U16 TxD/RxD = CANFD2_CTX2/CANFD2_CRX2 (P84/P85) -> CAN1_H/L
 	 *     -> carrier E1M_X_CAN1.
 	 * i.e. E1M_X_CAN0 is SoC channel3, E1M_X_CAN1 is SoC channel2.
-	 * Series-0R links R290/R291/R347/R6 are fitted per BOM, so the PHY
-	 * path is live. Pin syntax follows Renesas's own RZ/V2N EVK
-	 * reference dts (kernel-source
+	 *
+	 * Linux netdev names: rcar_canfd names netdevs in channel probe
+	 * order (channel2 -> can0), which swaps the E1M numbering. The
+	 * 0012 kernel patch reports the channel in dev_port and the
+	 * alp-canfd-udev rule renames them: channel3 -> can_e1m0
+	 * (E1M_X_CAN0), channel2 -> can_e1m1 (E1M_X_CAN1). <alp/can.h>
+	 * opens can_e1m<N>.
+	 *
+	 * Series-0R links R290/R291/R347/R6 are fitted per BOM (not
+	 * checkable from this repo), so the PHY path is live. Pin syntax
+	 * follows Renesas's own RZ/V2N EVK reference dts (kernel-source
 	 * arch/arm64/boot/dts/renesas/r9a09g056n48-rzv2n-evk.dts,
 	 * can2_pins/can3_pins). Both transceivers share one STB net,
 	 * driven via the gd32_gpio can-stby-hog above -- see that comment
-	 * for the standby/normal polarity and the protocol-version gate. */
+	 * for the standby/normal polarity and the protocol-version gate.
+	 * TCAN1044 EN is not driven from Linux; UNCONFIRMED whether it is
+	 * strapped high on the SoM (the schematic is not in this repo) --
+	 * if a bench bus stays silent with STB low, check EN first. */
 	canfd_pins: can_pins {
 		can2_pins: can2 {
 			pinmux = <RZV2N_PORT_PINMUX(8, 4, 5)>, /* CANFD2_CTX2 (TX) */
@@ -807,7 +825,21 @@
  * enum (ti,tcan1042 / ti,tcan1043 only), so claiming one of those
  * compatibles for a TCAN1044 would misrepresent the populated part.
  * The gd32_gpio can-stby-hog above drives the shared STB line instead
- * -- an honest static hog beats a dishonest phy binding. */
+ * -- an honest static hog beats a dishonest phy binding.
+ *
+ * Bit timing is deliberately NOT in the DT. The controller's timing
+ * clock (the `can_clk`/`fck` inputs of the RZ/V2N CANFD block, sourced
+ * from the SoC's CPG via RZ_CLOCK_CANFD(ch) -- see the SoC dtsi
+ * `&canfd` node in the BSP kernel, not this repo) is inherited from the
+ * SoC dtsi, and rcar_canfd derives NBTP/DBTP from it, so the bitrate is
+ * an operator step, not a DT property (a fixed `bitrate` here would
+ * also force one rate on every deployment). Until it is set the
+ * channel stays down and cannot disturb a live bus:
+ *   ip link set can_e1m0 type can bitrate 500000 sample-point 0.8  *       dbitrate 2000000 dsample-point 0.7 fd on
+ *   ip link set can_e1m0 up
+ * (repeat for can_e1m1). `ip -d link show can_e1m0` prints the clock
+ * the kernel is using and the achievable bitrate/sample-point limits.
+ * docs/build-yocto-v2n.md "CAN-FD bring-up" has the full procedure. */
 &canfd {
 	pinctrl-0 = <&canfd_pins>;
 	pinctrl-names = "default";

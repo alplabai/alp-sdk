@@ -56,7 +56,7 @@ core_ownership:
   - peripheral: "eMMC_V_SEL"
     pad: "PA0"
     core: "a55"
-    evidence: "Maintainer decision 2026-09-29 (#1142): the A55 owns PA0. U-Boot drives eMMC_V_SEL (PA0) high in board_init before the first MMC access (meta-alp-sdk/recipes-bsp/u-boot/u-boot_%.bbappend:63-68), and Linux keeps it there with the emmc_v_sel_1v8 gpio-hog (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi:658-661) so the eMMC stays at 1.8 V I/O for HS200. Boot-critical rail select: no CM33 board file may claim this pad (none does; the CM33 GD32 SPI uses P76/P77/P96/P97). eMMC HS200 boot bench-verified on E1M-V2M103 with this pairing."
+    evidence: "Maintainer decision 2026-09-29 (#1142): the A55 owns PA0. U-Boot drives eMMC_V_SEL (PA0) high in board_init before the first MMC access (meta-alp-sdk/recipes-bsp/u-boot/u-boot_%.bbappend:63-68), and Linux keeps it there with the emmc_v_sel_1v8 gpio-hog (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi:704-709) so the eMMC stays at 1.8 V I/O for HS200. Boot-critical rail select: no CM33 board file may claim this pad (none does; the CM33 GD32 SPI uses P76/P77/P96/P97). eMMC HS200 boot bench-verified on E1M-V2M103 with this pairing."
   - peripheral: "CANFD2_CTX2"
     pad: "P84"
     core: "a55"

@@ -191,6 +191,42 @@ regressed.
 [`errata-e1m-x-v2n.md`](errata-e1m-x-v2n.md) E1 — until the respin, a
 pair-mirror cable links at 100M.)
 
+### CAN-FD bring-up (on-module TCAN1044 x2)
+
+The two on-module CAN-FD channels come up as network interfaces but
+carry **no bit timing in the device tree**: the bitrate is an operator
+step, and the interfaces stay down (the controller is idle) until it is
+set. Netdev names follow the E1M bus, not the driver's probe order
+(`alp-canfd-udev`, #2352):
+
+| E1M bus | Netdev | SoC channel | Transceiver |
+|---|---|---|---|
+| `E1M_X_CAN0` | `can_e1m0` | CANFD3 (`dev_port` 3) | U15 |
+| `E1M_X_CAN1` | `can_e1m1` | CANFD2 (`dev_port` 2) | U16 |
+
+Both transceivers share one standby line, CAN_STBY, driven low by a
+`gpio-hog` on GD32 bridge line 20 (requires bridge protocol >= 0.13,
+firmware >= 0.2.16; on an older bridge the write is never sent and both
+transceivers stay in standby).
+
+```bash
+ip -br link | grep can_e1m                        # can_e1m0 + can_e1m1 present
+cat /sys/class/net/can_e1m0/dev_port              # 3   (can_e1m1 -> 2)
+ip link set can_e1m0 type can bitrate 500000 sample-point 0.8     dbitrate 2000000 dsample-point 0.7 fd on      # repeat for can_e1m1
+ip link set can_e1m0 up
+ip -d link show can_e1m0                          # shows the timing clock + bitrate + "fd on"
+```
+
+Nominal and data-phase timing must satisfy
+`f = f_can / (BRP * (1 + TSEG1 + TSEG2))`, sample point
+`(1 + TSEG1) / (1 + TSEG1 + TSEG2)`, `SJW <= min(TSEG1, TSEG2)`; the
+kernel derives them from the requested rate and the controller clock
+inherited from the SoC dtsi, so read the clock and limits from
+`ip -d link show`, not from this repo. `fd on` is required for the
+data phase (`dbitrate`); without it only classic CAN frames are sent.
+<alp/can.h> does not set the bitrate (see `src/backends/can/yocto_drv.c`),
+so configure it before opening the port.
+
 ### Hand-building the kernel (outside bitbake)
 
 The bitbake kernel banner is branded automatically. A **manual** kernel
