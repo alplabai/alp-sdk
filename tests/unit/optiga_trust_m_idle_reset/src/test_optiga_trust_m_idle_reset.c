@@ -179,11 +179,10 @@ ZTEST(optiga_idle_reset, test_mid_app_open_failure_pulses_reset_once_and_reopens
 
 	g.wedged         = true; /* idled out after init */
 	g.survives_reset = false;
-	unsigned before_writes = g.writes;
 	zassert_not_equal(optiga_trust_m_read_product_info(&ctx, &info), ALP_OK);
 	zassert_equal(g.asserts, 1u, "one reset, not a loop");
 	zassert_equal(g.releases, 1u, "RESET is released");
-	zassert_true(g.writes > before_writes, "opened again after the reset");
+	zassert_true(g.probed_since_release, "opened again after the reset");
 	zassert_true(g.first_probe_after_ms >= (STARTUP_TIME_MSEC + 999u) / 1000u,
 	             "start-up wait before the reopen");
 	optiga_trust_m_deinit(&ctx);

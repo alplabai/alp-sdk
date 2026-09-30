@@ -123,7 +123,9 @@ static alp_status_t hw_reset(optiga_trust_m_reset_fn_t reset, void *user);
 
 /* Open a session.  A part that idled out after init NACKs the open (#2517):
  * if init was given a reset hook, pulse RESET once and open again.  Only
- * an I/O or timeout failure is retried, and only once.  An already-open
+ * an I/O failure is retried, and only once.  A timeout is not: the library
+ * op is still in flight, so a second open would fail without touching the
+ * bus and mask the timeout.  An already-open
  * session is not re-opened, so an idle-out between two calls on the same
  * session still surfaces to the caller: a reset would drop the caller's
  * APDU state (OpenApplication, session context), which it must redo. */
@@ -132,7 +134,7 @@ static alp_status_t session_open(optiga_trust_m_t *ctx, uint8_t kind)
 	if (ctx->session == kind) return ALP_OK;
 	session_close(ctx);
 	alp_status_t s = session_open_once(ctx, kind);
-	if ((s == ALP_ERR_IO || s == ALP_ERR_TIMEOUT) && ctx->reset != NULL &&
+	if (s == ALP_ERR_IO && ctx->reset != NULL &&
 	    hw_reset(ctx->reset, ctx->reset_user) == ALP_OK) {
 		s = session_open_once(ctx, kind);
 	}
