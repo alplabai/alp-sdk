@@ -52,7 +52,7 @@ headers rather than papered over:
 
 - `micro-ros` is pinned in `west.yml` from the upstream
   `micro_ros_zephyr_module` Humble branch at
-  `cfbddc5e4334317a1036e883ce8f6af12b1da66a`. Its Zephyr integration names the
+  `8477de124763e4701f8029d01216d6f6b524dde9`. Its Zephyr integration names the
   west module and transcribes the real master symbol from
   `modules/libmicroros/Kconfig`: `CONFIG_MICROROS=y`.
 - `ros2` is **Tier B (recipe-only)**: its wiring is grounded in-tree

@@ -7,7 +7,7 @@
 #
 # West pin + Kconfig grounding (verified 2026-07-05):
 #   alp-sdk/west.yml pins github.com/micro-ROS/micro_ros_zephyr_module from the
-#   Humble release branch at cfbddc5e4334317a1036e883ce8f6af12b1da66a.  The
+#   Humble release branch at 8477de124763e4701f8029d01216d6f6b524dde9.  The
 #   module's modules/libmicroros/Kconfig declares `menuconfig MICROROS`, so the
 #   real enable symbol is CONFIG_MICROROS=y.  Transport/RMW/executor details
 #   still belong in app-specific prj.conf / colcon meta; this manifest only
