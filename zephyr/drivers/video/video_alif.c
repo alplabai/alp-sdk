@@ -334,6 +334,8 @@ static inline void hw_cam_start_video_capture(const struct device *dev)
 	/* Apply soft reset before starting capture */
 	hw_cam_soft_reset(regs);
 
+	((struct video_cam_data *)dev->data)->cpi_armed = true;
+
 	/* Start video capture. Snapshot is the only supported capture mode --
 	 * continuous is rejected at DT build time (alif,cam.yaml's
 	 * capture-mode enum has only "snapshot").
@@ -514,19 +516,21 @@ int alif_cam_cpi_resume(const struct device *dev)
 	 * harmless) so a caller that only needed interrupts re-armed (not a fresh START) still
 	 * gets that.
 	 */
-	if (sys_read32(regs + CAM_CTRL) & (CAM_CTRL_BUSY | CAM_CTRL_START)) {
-		/* WRN, not DBG (reviewer fix, bench run 312 round): this skip is the
-		 * idempotency guard's only observable trace -- a caller hitting it
-		 * repeatedly means something IS calling resume() more than once per
-		 * frame (e.g. the stall-recovery error callback firing on errors
-		 * that aren't real stalls), which is worth seeing at default log
-		 * levels, not just when DBG is turned up. */
-		LOG_WRN("CPI already armed/in-flight (CAM_CTRL=0x%08x) -- skipping duplicate "
-			"re-arm",
-			sys_read32(regs + CAM_CTRL));
+	/*
+	 * #2499: the ISP's frame end can reach here before the CPI's own STOP
+	 * interrupt for that frame has been serviced. Dropping the re-arm then
+	 * left the CPI idle for good once the STOP handler rewrote CAM_CTRL, and
+	 * every later capture timed out. Latch it instead: the STOP handler starts
+	 * the next snapshot, so an in-flight one is still never soft-reset.
+	 */
+	unsigned int key = irq_lock();
+
+	if (data->cpi_armed || (sys_read32(regs + CAM_CTRL) & (CAM_CTRL_BUSY | CAM_CTRL_START))) {
+		data->rearm_pending = true;
 	} else {
 		hw_cam_start_video_capture(dev);
 	}
+	irq_unlock(key);
 	k_mutex_unlock(&data->lock);
 
 	return 0;
@@ -877,6 +881,29 @@ static void alif_isr_cb_work(struct k_work *work)
 	alif_cam_work_helper(data->dev);
 }
 
+/*
+ * Alp Lab AB: an absent sensor (or absent CSI-2 host) is caught HERE, at
+ * first USE, not at our own init. The CPI initializes at
+ * CONFIG_VIDEO_ALIF_CAM_INIT_PRIORITY (59 by default) -- strictly BEFORE a
+ * directly-attached sensor's own CONFIG_VIDEO_INIT_PRIORITY (60 by
+ * default) has run on the parallel-interface path. A device_is_ready()
+ * check made from OUR init would therefore always see that sensor as
+ * not-yet-initialized and reject a genuinely PRESENT one too -- confirmed
+ * on a built image's .z_init_POST_KERNEL_P_ link order (csi @ P_41, cam @
+ * P_59, ov9281 @ P_60). By the time an application calls
+ * alp_camera_open() -- after kernel POST_KERNEL init has fully completed
+ * -- every driver's own init has already run, so checking readiness HERE
+ * reflects the real, final state without depending on init-priority
+ * ordering between unrelated Kconfig symbols.
+ */
+static int alif_cam_endpoint_ready(const struct video_cam_config *config)
+{
+	if (!device_is_ready(config->endpoint_dev)) {
+		return -ENODEV;
+	}
+	return 0;
+}
+
 static int alif_cam_set_fmt(const struct device *dev, struct video_format *fmt)
 {
 	const struct video_cam_config *config = dev->config;
@@ -898,6 +925,12 @@ static int alif_cam_set_fmt(const struct device *dev, struct video_format *fmt)
 	if (!bits_pp) {
 		LOG_ERR("Bits-per-pixel - %d", bits_pp);
 		return -EINVAL;
+	}
+
+	ret = alif_cam_endpoint_ready(config);
+	if (ret) {
+		LOG_ERR("Endpoint device is not ready");
+		return ret;
 	}
 
 	/* An unpacked request (SBGGR10..) goes out on the link as its packed
@@ -977,6 +1010,12 @@ static int alif_cam_get_fmt(const struct device *dev, struct video_format *fmt)
 
 	if (!fmt) {
 		return -EINVAL;
+	}
+
+	ret = alif_cam_endpoint_ready(config);
+	if (ret) {
+		LOG_ERR("Endpoint device is not ready");
+		return ret;
 	}
 
 	ret = video_get_format(config->endpoint_dev, fmt);
@@ -1510,7 +1549,13 @@ static int alif_cam_dequeue(const struct device *dev, struct video_buffer **buf,
 static int alif_cam_get_caps(const struct device *dev, struct video_caps *caps)
 {
 	const struct video_cam_config *config = dev->config;
-	int err = -ENODEV;
+	int                            err;
+
+	err = alif_cam_endpoint_ready(config);
+	if (err) {
+		LOG_ERR("Endpoint device is not ready");
+		return err;
+	}
 
 	/* The endpoint (CSI-2 host or parallel sensor) may init after this CPI
 	 * (sensor priority 60 > CPI 59), so its readiness can only be checked at
@@ -1644,9 +1689,16 @@ static void __maybe_unused alif_video_cam_isr(const struct device *dev)
 		 * re-arm normally.
 		 */
 		sys_write32(CAM_CTRL_FIFO_CLK_SEL | CAM_CTRL_SNAPSHOT, regs + CAM_CTRL);
+		data->cpi_armed = false;
 		/* Guard: don't process stale STOP after stream was turned off */
 		if (!data->is_streaming) {
+			data->rearm_pending = false;
 			return;
+		}
+		if (data->rearm_pending) {
+			/* #2499: a re-arm that arrived while this snapshot was armed. */
+			data->rearm_pending = false;
+			hw_cam_start_video_capture(dev);
 		}
 		/* No corruption observed during dumping this frame. */
 		if (is_not_corrupted_frame) {

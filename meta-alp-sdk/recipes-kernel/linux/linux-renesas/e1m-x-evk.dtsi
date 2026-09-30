@@ -356,10 +356,11 @@
 		 * amp up (SDZ is active-low shutdown), so the line is ACTIVE_HIGH:
 		 * ACTIVE_LOW held both amps in shutdown (they NACK I2C while SDZ is low). */
 		shutdown-gpios = <&pinctrl RZV2N_GPIO(1, 2) GPIO_ACTIVE_HIGH>;
-		/* AMP.FAULT (IRQ_N), shared -- see header comment. SSIU4_SSI4_
-		 * SDATA / P15 (E1M-X I2S1_SDI repurposed as plain GPIO). */
+		/* AMP.FAULT (IRQ_N), shared -- see header comment. SSIU3_SSI3_
+		 * SDATA / P04, pad AR10 (E1M-X I2S1_SDI repurposed as plain GPIO;
+		 * NOT P15, which is I2S1_SDO). */
 		interrupt-parent = <&pinctrl>;
-		interrupts = <RZV2N_GPIO(1, 5) IRQ_TYPE_EDGE_FALLING>;
+		interrupts = <RZV2N_GPIO(0, 4) IRQ_TYPE_EDGE_FALLING>;
 		ti,imon-slot-no = <0>;
 		ti,vmon-slot-no = <2>;
 

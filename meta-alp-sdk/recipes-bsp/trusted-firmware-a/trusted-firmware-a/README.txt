@@ -14,3 +14,12 @@ not in the bbappend's do_compile:prepend bbfatal, which only fires in the
 narrower case where the file is present but unreadable/misnamed. The prebuilt
 bl2/fip also live in alp-sdk-internal (production-flashed onto the SoM xSPI by
 ALP).
+
+alif-console-uart-build-knobs.patch (#1979) is UNRELATED to the DDR params
+above -- it targets Alif's TF-A fork (alifsemi/trusted-firmware-a_alif), not
+Renesas's, and is fully PUBLIC (no SoM-hardware-specific content, no private
+overlay needed). It gives platform_def.h and devkit_e7_sp_min_setup.c
+#ifndef-guarded build knobs for the console UART register base and pinmux, so
+a carrier whose console isn't on the Alif DevKit's UART2 doesn't need to hand-
+patch the vendor tree. Gated :e1m-aen801 in the bbappend, which is INERT today
+-- see that bbappend's comment for why.

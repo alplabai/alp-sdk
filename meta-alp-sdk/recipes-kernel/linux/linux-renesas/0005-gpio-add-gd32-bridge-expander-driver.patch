@@ -16,6 +16,9 @@ Wire format:
   - Read:  [status][payload][CRC-16/CCITT-FALSE lo][hi] (no SOF on I2C)
   - The slave clock-stretches until the reply is ready.
 
+Line 21 ("se-rst") is the OPTIGA Trust M RESET pad, driven by
+CMD_SE_RESET rather than GPIO_WRITE, and never replayed.
+
 Sticky-output caveat: CMD_GPIO_WRITE promotes a pad to push-pull
 output permanently (until GD32 reset). direction_input() returns
 -EPERM on a line that has ever been written; this matches the
@@ -101,8 +104,8 @@ Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  drivers/gpio/Kconfig            |   9 +
  drivers/gpio/Makefile           |   1 +
- drivers/gpio/gpio-gd32-bridge.c | 920 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
- 3 files changed, 930 insertions(+)
+ drivers/gpio/gpio-gd32-bridge.c | 988 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 978 insertions(+)
  create mode 100644 drivers/gpio/gpio-gd32-bridge.c
 
 diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
@@ -142,7 +145,7 @@ new file mode 100644
 index 000000000..b202babc2
 --- /dev/null
 +++ b/drivers/gpio/gpio-gd32-bridge.c
-@@ -0,0 +1,920 @@
+@@ -0,0 +1,988 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * GPIO driver for the Alp Lab GD32 IO-MCU bridge (I2C transport).
@@ -257,10 +260,29 @@ index 000000000..b202babc2
 +#define GD32_CMD_GET_VERSION	0x01
 +#define GD32_CMD_GPIO_READ	0x10
 +#define GD32_CMD_GPIO_WRITE	0x11
++#define GD32_CMD_SE_RESET	0x41
 +#define GD32_STATUS_OK		0x00
 +
 +#define GD32_NGPIO_BASE		18
 +#define GD32_NGPIO_WIFI_BT	20
++
++/*
++ * Line 21, "se-rst" (Refs #2507): the OPTIGA Trust M RESET pad. Unlike lines
++ * 0..19 it is not a GPIO_READ/GPIO_WRITE pad -- .set() sends
++ * CMD_SE_RESET(assert u8) instead, active-high assert = hold the secure
++ * element in reset. It exists so userspace can reset a Trust M that wedged
++ * idle WITHOUT opening the bridge behind this driver's back (an I2C_RDWR
++ * from userspace ignores the driver binding and interleaves with this
++ * driver's own frames). It is never added to output_mask, so the replay work
++ * does not touch it: the bridge releases SE_RST on its own reset, which is
++ * exactly the safe state, and a stale "asserted" must never be replayed.
++ */
++/* Line 20 is reserved for can-stby (bridge bit 20, protocol 0.13; the
++ * CAN-FD bring-up in alp-sdk#2341). Until that lands, .request() refuses
++ * it so nothing drives the transceivers' standby pad by accident. */
++#define GD32_RESERVED_LINE	20
++#define GD32_SE_RST_LINE	21
++#define GD32_NGPIO_TOTAL	22
 +
 +/* Bridge protocol minor at which lines 18/19 (bt-reg-on/wl-reg-on) first
 + * exist. A bridge below this minor has no notion of them. */
@@ -321,13 +343,6 @@ index 000000000..b202babc2
 + * BRD_I2C (i2c8) whenever any line is held as output. */
 +#define GD32_REPLAY_PERIOD_MS	1000
 +
-+static const char * const gd32_bridge_gpio_names[GD32_NGPIO_WIFI_BT] = {
-+	"IO8",  "IO9",  "IO10", "IO11", "IO12", "IO13",
-+	"IO14", "IO16", "IO24", "IO25", "IO27", "IO28",
-+	"IO29", "IO30", "IO31", "IO32", "IO34", "IO35",
-+	"bt-reg-on", "wl-reg-on",
-+};
-+
 +struct gd32_bridge_gpio {
 +	struct i2c_client *client;
 +	struct gpio_chip chip;
@@ -386,6 +401,9 @@ index 000000000..b202babc2
 +	 */
 +	struct delayed_work resolve_work;
 +	unsigned int resolve_attempts;
++	/* Last SE_RST level sent (line 21); guarded by state_lock. Not part of
++	 * output_mask/output_vals, so never replayed. */
++	bool se_rst_asserted;
 +};
 +
 +/* Peek the cached lines-18/19 status without triggering a new bridge
@@ -465,6 +483,10 @@ index 000000000..b202babc2
 +	u32 mask = BIT(offset), levels;
 +	int ret;
 +
++	/* SE_RST has no read-back on the wire; report the last level sent. */
++	if (offset == GD32_SE_RST_LINE)
++		return READ_ONCE(gd32->se_rst_asserted);
++
 +	/*
 +	 * Defensive: .request() already refuses lines 18/19 until
 +	 * gd32_bridge_resolve_wifi_bt() confirms support, so an in-kernel
@@ -483,6 +505,21 @@ index 000000000..b202babc2
 +	return !!(levels & mask);
 +}
 +
++/* Line 21: CMD_SE_RESET instead of GPIO_WRITE; outside the replay mask. */
++static int gd32_bridge_se_rst_set(struct gd32_bridge_gpio *gd32, int value)
++{
++	u8 req = value ? 1 : 0;
++	int ret;
++
++	mutex_lock(&gd32->state_lock);
++	ret = gd32_bridge_xfer(gd32, GD32_CMD_SE_RESET, &req, 1, NULL, 0);
++	if (!ret)
++		WRITE_ONCE(gd32->se_rst_asserted, !!value);
++	mutex_unlock(&gd32->state_lock);
++
++	return ret;
++}
++
 +static int gd32_bridge_gpio_do_set(struct gd32_bridge_gpio *gd32,
 +				   unsigned int offset, int value)
 +{
@@ -490,6 +527,9 @@ index 000000000..b202babc2
 +	u32 mask = BIT(offset);
 +	bool is_wifi_bt = mask & GD32_WIFI_BT_LINE_MASK;
 +	int ret = 0;
++
++	if (offset == GD32_SE_RST_LINE)
++		return gd32_bridge_se_rst_set(gd32, value);
 +
 +	/*
 +	 * Latch the requested state and hold state_lock across the transfer
@@ -580,7 +620,8 @@ index 000000000..b202babc2
 +				     "GPIO write line %u failed (%d)\n",
 +				     offset, ret);
 +
-+	return 0;
++	/* SE_RST is not a boot-sequenced consumer line: surface the failure. */
++	return offset == GD32_SE_RST_LINE ? ret : 0;
 +}
 +
 +static int gd32_bridge_gpio_dir_in(struct gpio_chip *chip, unsigned int offset)
@@ -594,7 +635,7 @@ index 000000000..b202babc2
 +	 * in the safe direction (a just-promoted pad briefly still reading
 +	 * as input), never the other way.
 +	 */
-+	if (READ_ONCE(gd32->output_mask) & BIT(offset))
++	if (offset == GD32_SE_RST_LINE || (READ_ONCE(gd32->output_mask) & BIT(offset)))
 +		return -EPERM;
 +	return 0;	/* input; pull behaviour depends on bridge firmware version */
 +}
@@ -604,6 +645,8 @@ index 000000000..b202babc2
 +{
 +	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(chip);
 +
++	if (offset == GD32_SE_RST_LINE)
++		return GPIO_LINE_DIRECTION_OUT;
 +	return (READ_ONCE(gd32->output_mask) & BIT(offset)) ? GPIO_LINE_DIRECTION_OUT
 +							     : GPIO_LINE_DIRECTION_IN;
 +}
@@ -680,7 +723,11 @@ index 000000000..b202babc2
 +{
 +	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(chip);
 +
-+	if (offset < GD32_NGPIO_BASE)
++	if (offset == GD32_RESERVED_LINE)
++		return -ENODEV;
++
++	/* Line 21 (se-rst) is not gated on the wifi/bt protocol minor. */
++	if (offset < GD32_NGPIO_BASE || offset == GD32_SE_RST_LINE)
 +		return 0;
 +
 +	/*
@@ -703,6 +750,18 @@ index 000000000..b202babc2
 +	 * stuck on stale request state.
 +	 */
 +	return gd32_bridge_resolve_wifi_bt(gd32);
++}
++
++/*
++ * A consumer that dies between assert and release would otherwise leave the
++ * Trust M held in reset: gpiolib frees the line without touching its value.
++ */
++static void gd32_bridge_gpio_free(struct gpio_chip *chip, unsigned int offset)
++{
++	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(chip);
++
++	if (offset == GD32_SE_RST_LINE && READ_ONCE(gd32->se_rst_asserted))
++		gd32_bridge_se_rst_set(gd32, 0);
 +}
 +
 +/*
@@ -925,7 +984,7 @@ index 000000000..b202babc2
 +	 * immediately instead; individual GPIO ops fail gracefully (see
 +	 * gd32_bridge_gpio_get/_set) and start working once the bridge is up.
 +	 *
-+	 * The chip always registers all GD32_NGPIO_WIFI_BT lines -- lines
++	 * The chip always registers all GD32_NGPIO_TOTAL lines -- lines
 +	 * 18/19 are gated per-consumer in .request(), not by this probe-time
 +	 * handshake (see the file-header comment and
 +	 * gd32_bridge_resolve_wifi_bt()). If this handshake happens to land
@@ -957,9 +1016,21 @@ index 000000000..b202babc2
 +			gd32->wifi_bt_reg_on_status = 0;
 +	}
 +
-+	gd32->chip.ngpio	  = GD32_NGPIO_WIFI_BT;
-+	gd32->chip.names	  = gd32_bridge_gpio_names;
++	gd32->chip.ngpio	  = GD32_NGPIO_TOTAL;
++	/*
++	 * Deliberately NO chip.names: gpiolib's gpiochip_set_desc_names()
++	 * walks every gpio_device on the global list through
++	 * gdev->chip->ngpio for its duplicate-name check. A consumer that
++	 * still holds a line (wlan-pwrseq wl-reg-on, hci_bcm bt-reg-on, the
++	 * panel reset) keeps the OLD gpio_device alive across unbind with
++	 * gdev->chip == NULL, so a re-bind dereferenced NULL+0xac
++	 * (offsetof(struct gpio_chip, ngpio)) in gpio_name_to_desc() and
++	 * oopsed with the device lock held (Refs #2508). Line names come
++	 * from the "gpio-line-names" DT property instead, which gpiolib
++	 * assigns without that walk.
++	 */
 +	gd32->chip.request	  = gd32_bridge_gpio_request;
++	gd32->chip.free		  = gd32_bridge_gpio_free;
 +	gd32->chip.get		  = gd32_bridge_gpio_get;
 +	gd32->chip.set		  = gd32_bridge_gpio_set;
 +	gd32->chip.direction_output = gd32_bridge_gpio_dir_out;

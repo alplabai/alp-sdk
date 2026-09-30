@@ -76,13 +76,29 @@
 # Flags:
 #   --target dev      FAST profile a dev PR is graded on: skip the slow
 #                     release-only full CMake builds + Doxygen.  Use before
-#                     opening a PR that targets `dev`.
+#                     opening a PR that targets `dev`.  Twister is skipped
+#                     when scripts/select_checks.py proves no changed path
+#                     (vs the merge base with origin/dev, plus uncommitted
+#                     and untracked files) is a native_sim build input --
+#                     e.g. a docs/changelog/Yocto/pytest-only change.  Any
+#                     doubt (unknown path, lookup failure, no origin/dev)
+#                     runs it.  --select-base REF overrides the base ref.
+#                     When it cannot prove that, twister still does NOT run
+#                     the full ~270-config set locally: it runs a bounded
+#                     SMOKE subset (the suites the changed files sit in plus
+#                     the fixed SMOKE_SUITES in scripts/select_checks.py,
+#                     ~2-3 min) and the row reads `PASS (smoke; full set runs
+#                     in CI)`.  The full set is CI's sharded pr-twister job.
+#   --full            always run the FULL twister set here (no selection, no
+#                     smoke subset).  `--target main` does too.
 #   --target main     THOROUGH release-grade profile: every stage PLUS the
 #                     main-only strict ABI-snapshot diff (pr-abi-snapshot.yml,
 #                     which triggers on main + release/** only).  Use before a
 #                     PR that targets `main` / cutting a release.
-#                     (No --target = the historical "full" run: every stage
-#                     except the main-only ABI strict diff.)
+#                     (No --target = every stage except the main-only ABI
+#                     strict diff; its twister stage is the same changed
+#                     suites + smoke subset as --target dev, not the full
+#                     set.)
 #   --quick           skip twister + Doxygen (the slow stages)
 #
 # Environment:
@@ -92,7 +108,25 @@
 #                     own ninja at full core parallelism underneath, so the
 #                     real compiler count is this value TIMES the core count.
 #                     The stage caps that inner build too; see the OOM note on
-#                     stage_twister below.
+#                     stage_twister below.  Setting it also turns the
+#                     twister/read-only-stage overlap off (see below).
+#   ALP_GATE_SERIAL=1 run every stage strictly one after another with live
+#                     output.  By default twister runs in the background and
+#                     the read-only stages run as a bounded concurrent pool
+#                     (slow ones first) -- whether or not twister runs -- with
+#                     their output printed in stage order afterwards; the
+#                     tree-writing stages (generated-files, alp-lock,
+#                     abi-strict and the `pytest-repo-writes` row) run only
+#                     once twister and the whole pool have finished.
+#                     Overlap is also skipped when ALP_TWISTER_JOBS is set or
+#                     MemAvailable < ALP_GATE_MIN_MEM_KB (default 12582912).
+#   ALP_GATE_STAGE_JOBS
+#                     max read-only stages running at once in the pool
+#                     (default 4).
+#   `gate_duplicate` pytest tests (a check the public-private /
+#                     required-gate-scripts stages already ran) are deselected
+#                     from the pytest stage of a full run; CI's plain pytest
+#                     sweep keeps them.
 #   --yocto-only      run only stage 1 + format + metadata
 #   --zephyr-only     run only stage 3 (requires ZEPHYR_BASE)
 #   --no-clean        keep build directories between runs (faster)
@@ -126,6 +160,12 @@ QUICK=0
 YOCTO_ONLY=0
 ZEPHYR_ONLY=0
 NO_CLEAN=0
+FORCE_FULL=0
+# Set when the local twister stage runs the bounded smoke subset (see the
+# orchestration): TWISTER_SUITES are the suite directories it builds.
+TWISTER_SMOKE=0
+TWISTER_SUITES=()
+SELECT_BASE=origin/dev
 LIST_REQUIRED_GATE_SCRIPTS=0
 # TARGET selects a CI profile matching the branch a PR targets:
 #   dev  -- the FAST set a dev PR is graded on (skip the slow release-only
@@ -135,7 +175,11 @@ LIST_REQUIRED_GATE_SCRIPTS=0
 #           main-only strict ABI-snapshot diff (pr-abi-snapshot.yml, which
 #           triggers on `main` + `release/**` only).
 #   full -- (default, no flag) every stage except the main-only ABI strict
-#           diff -- the historical test-all.sh behavior, unchanged.
+#           diff.  Its twister stage behaves like dev's: skipped when
+#           select_checks.py proves nothing native_sim builds changed,
+#           otherwise the changed suites + the smoke subset -- NOT the full
+#           set, which is CI's sharded pr-twister job.  Only --target main
+#           and --full run the full twister set locally.
 TARGET=full
 
 while [ $# -gt 0 ]; do
@@ -144,13 +188,16 @@ while [ $# -gt 0 ]; do
         --yocto-only)   YOCTO_ONLY=1 ;;
         --zephyr-only)  ZEPHYR_ONLY=1 ;;
         --no-clean)     NO_CLEAN=1 ;;
+        --full)         FORCE_FULL=1 ;;
+        --select-base)  shift; SELECT_BASE="${1:-}" ;;
+        --select-base=*) SELECT_BASE="${1#--select-base=}" ;;
         --target)       shift; TARGET="${1:-}" ;;
         --target=*)     TARGET="${1#--target=}" ;;
         --dev)          TARGET=dev ;;
         --main)         TARGET=main ;;
         --list-required-gate-scripts) LIST_REQUIRED_GATE_SCRIPTS=1 ;;
         -h|--help)
-            sed -n '3,104p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            sed -n '3,/^set -uo pipefail/{/^set -uo pipefail/!p;}' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -184,12 +231,14 @@ declare -a STAGE_NAMES STAGE_STATUS STAGE_NOTES STAGE_KIND
 #            runnable stages passed." and exited 0).
 # PASS/FAIL rows carry "" so the four arrays stay index-aligned.
 
-run_stage() {
-    local name="$1"; shift
-    echo
-    echo "===== [${name}] ====="
-    "$@"
-    local rc=$?
+# Wall seconds per stage, index-aligned with the arrays above.
+declare -a STAGE_SECS
+
+# _record_stage NAME RC SECS -- classify a stage's exit code, append its row,
+# print its one-line verdict.  Shared by the live path (run_stage) and the
+# overlapped path (finish_overlap) so both read identically.
+_record_stage() {
+    local name="$1" rc="$2" secs="$3"
     # Convention: a stage function returns 99 to mean "a prerequisite
     # (tool / optional script / env var / importable module) isn't
     # available here" -- that is always a SKIP, never a FAIL, and always
@@ -199,15 +248,31 @@ run_stage() {
     # expressed via skip_stage()'s explicit "scope" callers below,
     # before run_stage() is ever reached for that stage this run).
     if [ "${rc}" -eq 99 ]; then
-        STAGE_NAMES+=("${name}"); STAGE_STATUS+=("SKIP"); STAGE_KIND+=("gap"); STAGE_NOTES+=("prerequisite unavailable")
-        echo "[${name}] SKIP (prerequisite unavailable)"
+        STAGE_NAMES+=("${name}"); STAGE_STATUS+=("SKIP"); STAGE_KIND+=("gap"); STAGE_NOTES+=("prerequisite unavailable"); STAGE_SECS+=("${secs}")
+        echo "[${name}] SKIP (prerequisite unavailable) (${secs}s)"
     elif [ "${rc}" -eq 0 ]; then
-        STAGE_NAMES+=("${name}"); STAGE_STATUS+=("PASS"); STAGE_KIND+=(""); STAGE_NOTES+=("")
-        echo "[${name}] PASS"
+        # A smoke twister pass is a deliberate scope choice, not full coverage:
+        # say so on the row so a local green is never read as the full set.
+        local note=""
+        if [ "${name}" = "twister" ] && [ "${TWISTER_SMOKE:-0}" = "1" ]; then
+            note="smoke; full set runs in CI"
+        fi
+        STAGE_NAMES+=("${name}"); STAGE_STATUS+=("PASS"); STAGE_KIND+=(""); STAGE_NOTES+=("${note}"); STAGE_SECS+=("${secs}")
+        echo "[${name}] PASS${note:+ (${note})} (${secs}s)"
     else
-        STAGE_NAMES+=("${name}"); STAGE_STATUS+=("FAIL"); STAGE_KIND+=(""); STAGE_NOTES+=("exit=${rc}")
-        echo "[${name}] FAIL (exit=${rc})"
+        STAGE_NAMES+=("${name}"); STAGE_STATUS+=("FAIL"); STAGE_KIND+=(""); STAGE_NOTES+=("exit=${rc}"); STAGE_SECS+=("${secs}")
+        echo "[${name}] FAIL (exit=${rc}) (${secs}s)"
     fi
+}
+
+run_stage() {
+    local name="$1"; shift
+    echo
+    echo "===== [${name}] ====="
+    local t0="${SECONDS}"
+    "$@"
+    local rc=$?
+    _record_stage "${name}" "${rc}" "$((SECONDS - t0))"
 }
 
 skip_stage() {
@@ -221,7 +286,232 @@ skip_stage() {
     esac
     echo
     echo "===== [${name}] SKIP: ${reason} ====="
-    STAGE_NAMES+=("${name}"); STAGE_STATUS+=("SKIP"); STAGE_KIND+=("${kind}"); STAGE_NOTES+=("${reason}")
+    STAGE_NAMES+=("${name}"); STAGE_STATUS+=("SKIP"); STAGE_KIND+=("${kind}"); STAGE_NOTES+=("${reason}"); STAGE_SECS+=("0")
+}
+
+# -------- Overlapped execution ------------------------------------------------
+#
+# Two things run concurrently by default, instead of one stage after another:
+#   * twister (~70-90 % of a --target dev run when it is not skipped) starts in
+#     the BACKGROUND (launch_bg), and
+#   * every READ-ONLY stage (launch) joins a bounded pool of at most
+#     ALP_GATE_STAGE_JOBS (default 4) concurrent stages, started longest-first
+#     (POOL_FIRST) so the pool's tail is the short stages.
+# The pool runs whether or not twister is backgrounded: a run that skips
+# twister (docs-only change) still overlaps its slow stages with each other.
+#
+# Stages that WRITE the tree (generated-files, alp-lock, abi-strict,
+# pytest -m repo_writes) are queued with writer_stage and run only after
+# twister AND every pool stage has been reaped: regenerating headers under a
+# live twister build flakes it (`ALP_SOC_REF_STR undeclared`).
+#
+# Every overlapped stage's output goes to a file and is printed, in script
+# order, once everything is done, so the log reads the same as a serial run.
+# bash 3.2: no `wait -n`, no associative arrays -- parallel arrays plus one
+# file trio (.out/.res/.skip) per stage under DEFER_DIR.
+#
+# Overlap is OFF (strictly serial, live output, today's behaviour) when any of:
+#   ALP_GATE_SERIAL=1   the explicit opt-out, for debugging;
+#   ALP_TWISTER_JOBS    set -- the documented "this host is memory-tight"
+#                       signal (see the OOM note on stage_twister); running
+#                       pytest and the gate scripts beside a capped twister
+#                       would undo that cap;
+#   MemAvailable        below ALP_GATE_MIN_MEM_KB (default 12 GiB) at start --
+#                       twister alone peaks near the OOM line on a 20-core host.
+# Whenever stages overlap, each pool stage runs with capped concurrency of its
+# own (ALP_GATE_JOBS / CMAKE_BUILD_PARALLEL_LEVEL default 4, pytest -n
+# min(8, nproc/2)) so the pool and twister together stay inside the machine.
+_decide_overlap() {
+    if [ "${ALP_GATE_SERIAL:-0}" = "1" ]; then
+        return 1
+    fi
+    if [ -n "${ALP_TWISTER_JOBS:-}" ]; then
+        echo "test-all.sh: ALP_TWISTER_JOBS is set -- running stages serially (no overlap)."
+        return 1
+    fi
+    local avail_kb min_kb="${ALP_GATE_MIN_MEM_KB:-12582912}"
+    avail_kb="$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo 2>/dev/null || true)"
+    if [ -n "${avail_kb}" ] && [ "${avail_kb}" -lt "${min_kb}" ]; then
+        echo "test-all.sh: MemAvailable ${avail_kb} kB < ${min_kb} kB -- running stages serially (no overlap)."
+        return 1
+    fi
+    return 0
+}
+OVERLAP=1
+_decide_overlap || OVERLAP=0
+DEFER_DIR=""
+# Initialised to () (not merely declared): `${#a[@]}` on a declared-only array
+# is an unbound-variable error under `set -u` on newer bash.
+DEFER_ORDER=(); WRITER_NAMES=(); WRITER_FNS=(); POOL_NAMES=(); POOL_FNS=()
+RUN_PIDS=(); RUN_NAMES=()
+TWISTER_PID=""
+# The slowest read-only stages, started first (measured on the 20-core gate
+# host: pytest-scripts ~160 s, required-gate-scripts ~55-390 s, bash32-parse ~57 s).
+POOL_FIRST="pytest-scripts required-gate-scripts bash32-parse"
+
+# EXIT trap: stop the background twister's and every running pool stage's whole
+# process group (wrapper subshell, python, ninja, cc1 ...), and on an abnormal
+# exit print any captured output that was never shown so a failure is not
+# silently lost.
+_overlap_cleanup() {
+    local rc=$? f p
+    for p in ${RUN_PIDS[@]+"${RUN_PIDS[@]}"} ${TWISTER_PID:+"${TWISTER_PID}"}; do
+        kill -TERM -- "-${p}" 2>/dev/null || kill -TERM "${p}" 2>/dev/null
+        wait "${p}" 2>/dev/null
+    done
+    RUN_PIDS=(); TWISTER_PID=""
+    if [ -n "${DEFER_DIR}" ]; then
+        if [ "${rc}" -ne 0 ]; then
+            for f in "${DEFER_DIR}"/*.out; do
+                [ -f "${f}" ] || continue
+                echo "--- captured output never printed: ${f##*/} ---"
+                cat "${f}"
+            done
+        fi
+        rm -rf "${DEFER_DIR}"
+    fi
+}
+
+_defer_init() {
+    if [ -z "${DEFER_DIR}" ]; then
+        DEFER_DIR="$(mktemp -d)"
+        trap _overlap_cleanup EXIT
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
+    fi
+}
+
+# launch NAME FN -- a read-only stage.  Overlap off: live, like run_stage.
+# Overlap on: queued for the pool (started by finish_overlap).
+launch() {
+    if [ "${OVERLAP}" -eq 0 ]; then run_stage "$@"; return; fi
+    _defer_init
+    DEFER_ORDER+=("$1")
+    POOL_NAMES+=("$1"); POOL_FNS+=("$2")
+}
+
+# _start_detached NAME FN -- run FN in its own process group (`set -m` so
+# _overlap_cleanup can kill the whole tree; non-interactive bash would leave it
+# in ours), output and result to files.  Sets STARTED_PID.
+_start_detached() {
+    local name="$1" fn="$2"
+    set -m
+    (
+        t0="${SECONDS}"
+        export ALP_GATE_JOBS="${ALP_GATE_JOBS:-4}"
+        export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-4}"
+        export ALP_GATE_OVERLAP=1
+        # </dev/null: the job is in its own process group, so a stage that
+        # read the terminal would be stopped by SIGTTIN and hang the run.
+        "${fn}" >"${DEFER_DIR}/${name}.out" 2>&1 </dev/null
+        rc=$?
+        echo "${rc} $((SECONDS - t0))" >"${DEFER_DIR}/${name}.res"
+    ) &
+    STARTED_PID=$!
+    set +m
+}
+
+# launch_bg NAME FN -- twister: starts NOW, in the background.
+launch_bg() {
+    if [ "${OVERLAP}" -eq 0 ]; then run_stage "$@"; return; fi
+    _defer_init
+    DEFER_ORDER+=("$1")
+    echo "===== [$1] started in the background; read-only stages run beside it ====="
+    _start_detached "$1" "$2"
+    TWISTER_PID="${STARTED_PID}"
+}
+
+# launch_skip NAME REASON KIND -- a skip keeps its place in the output order.
+launch_skip() {
+    if [ "${OVERLAP}" -eq 0 ]; then skip_stage "$@"; return; fi
+    _defer_init
+    DEFER_ORDER+=("$1")
+    printf '%s\n%s\n' "$2" "${3:-}" >"${DEFER_DIR}/$1.skip"
+}
+
+# writer_stage NAME FN -- a stage that writes the tree; runs after everything.
+writer_stage() {
+    if [ "${OVERLAP}" -eq 0 ]; then run_stage "$@"; return; fi
+    WRITER_NAMES+=("$1"); WRITER_FNS+=("$2")
+}
+
+# _run_pool -- run the queued read-only stages, at most ALP_GATE_STAGE_JOBS at a
+# time, POOL_FIRST stages first, then the rest in script order.  Returns once
+# every one has finished.  A stage is finished when its .res exists or its
+# process is gone (killed before it could write one -> read as FAIL later).
+_run_pool() {
+    local jobs="${ALP_GATE_STAGE_JOBS:-4}" n="${#POOL_NAMES[@]}" i j pri
+    local next=0 alive
+    local -a order=() keep_pids keep_names
+    [ "${jobs}" -ge 1 ] 2>/dev/null || jobs=4
+    for pri in ${POOL_FIRST}; do
+        for ((i = 0; i < n; i++)); do
+            [ "${POOL_NAMES[$i]}" = "${pri}" ] && order+=("${i}")
+        done
+    done
+    for ((i = 0; i < n; i++)); do
+        case " ${POOL_FIRST} " in
+            *" ${POOL_NAMES[$i]} "*) ;;
+            *) order+=("${i}") ;;
+        esac
+    done
+    while [ "${next}" -lt "${n}" ] || [ "${#RUN_PIDS[@]}" -gt 0 ]; do
+        keep_pids=(); keep_names=()
+        for ((j = 0; j < ${#RUN_PIDS[@]}; j++)); do
+            alive=1
+            if [ -f "${DEFER_DIR}/${RUN_NAMES[$j]}.res" ] || ! kill -0 "${RUN_PIDS[$j]}" 2>/dev/null; then
+                alive=0
+            fi
+            if [ "${alive}" -eq 1 ]; then
+                keep_pids+=("${RUN_PIDS[$j]}"); keep_names+=("${RUN_NAMES[$j]}")
+            else
+                wait "${RUN_PIDS[$j]}" 2>/dev/null
+            fi
+        done
+        RUN_PIDS=(${keep_pids[@]+"${keep_pids[@]}"}); RUN_NAMES=(${keep_names[@]+"${keep_names[@]}"})
+        while [ "${#RUN_PIDS[@]}" -lt "${jobs}" ] && [ "${next}" -lt "${n}" ]; do
+            i="${order[$next]}"
+            _start_detached "${POOL_NAMES[$i]}" "${POOL_FNS[$i]}"
+            RUN_PIDS+=("${STARTED_PID}"); RUN_NAMES+=("${POOL_NAMES[$i]}")
+            next=$((next + 1))
+        done
+        [ "${#RUN_PIDS[@]}" -gt 0 ] && sleep 0.2
+    done
+}
+
+# finish_overlap -- run the pool, join twister, print every captured stage in
+# script order, then run the queued tree-writing stages live.
+finish_overlap() {
+    [ -n "${DEFER_DIR}" ] || return 0
+    if [ "${#POOL_NAMES[@]}" -gt 0 ]; then
+        _run_pool
+    fi
+    if [ -n "${TWISTER_PID}" ]; then
+        echo
+        echo "===== waiting for the background twister stage ====="
+        wait "${TWISTER_PID}"
+        TWISTER_PID=""
+    fi
+    local name rc secs i sreason skind
+    for name in ${DEFER_ORDER[@]+"${DEFER_ORDER[@]}"}; do
+        if [ -f "${DEFER_DIR}/${name}.skip" ]; then
+            { read -r sreason; read -r skind; } <"${DEFER_DIR}/${name}.skip"
+            # Positional pass-through: skip_stage still validates scope|gap.
+            set -- "${name}" "${sreason}" "${skind}"
+            skip_stage "$@"
+            continue
+        fi
+        echo
+        echo "===== [${name}] ====="
+        cat "${DEFER_DIR}/${name}.out"
+        rm -f "${DEFER_DIR}/${name}.out"
+        rc=1; secs=0
+        read -r rc secs 2>/dev/null <"${DEFER_DIR}/${name}.res" || true
+        _record_stage "${name}" "${rc}" "${secs}"
+    done
+    for i in ${WRITER_NAMES[@]+"${!WRITER_NAMES[@]}"}; do
+        run_stage "${WRITER_NAMES[$i]}" "${WRITER_FNS[$i]}"
+    done
 }
 
 # `import jsonschema` succeeding says NOTHING about whether that
@@ -288,25 +578,13 @@ stage_baremetal_build() {
     cmake --build "${build_dir}" --parallel || return 1
 }
 
-stage_twister() {
-    if [ -z "${ZEPHYR_BASE:-}" ]; then
-        return 99
-    fi
-    # ZEPHYR_BASE being set proves nothing about the python3 that will
-    # actually run twister below: on a system interpreter without
-    # natsort, twister's own import chain
-    # (zephyr/scripts/pylib/twister/twisterlib/hardwaremap.py does
-    # `from natsort import natsorted`) raises ModuleNotFoundError before
-    # a single test runs -- previously that read as this stage FAILING
-    # ("nothing wrong with the tree" reported red) instead of the
-    # missing-prerequisite SKIP it actually is (alp-sdk#1396). Same
-    # `return 99` idiom as the ZEPHYR_BASE check above.
-    if ! python3 -c 'import natsort' >/dev/null 2>&1; then
-        echo "stage_twister: python3 ($(command -v python3)) cannot import natsort, which twister's own hardwaremap.py requires. Activate the zephyrproject venv (or: pip install natsort) so a python3 with it resolves first on PATH."
-        return 99
-    fi
-    # Pin THIS checkout as the alp-sdk Zephyr module -- always, even
-    # if EXTRA_ZEPHYR_MODULES is already set (e.g. exported from a
+# Pin THIS checkout as the alp-sdk Zephyr module for every stage.  Called at
+# orchestration start, before any stage forks: a background stage (#2472
+# overlap) exports into its own subshell only, so pinning from inside
+# stage_twister left pytest-scripts and required-gate-scripts, whose
+# `west build --cmake-only` probes need the module, with no alp boards.
+pin_alp_zephyr_module() {
+    # Always, even if EXTRA_ZEPHYR_MODULES is already set (e.g. exported from a
     # shell rc pointing at a primary checkout, per docs/local-ci.md).
     # Without this, running test-all.sh from a `git worktree add`
     # checkout compiled tests from the worktree against alp-sdk
@@ -333,6 +611,41 @@ stage_twister() {
     _modules+=("${REPO_ROOT}")
     _joined=$(IFS=';'; echo "${_modules[*]}")
     export EXTRA_ZEPHYR_MODULES="${_joined}"
+}
+
+stage_twister() {
+    if [ -z "${ZEPHYR_BASE:-}" ]; then
+        return 99
+    fi
+    # ZEPHYR_BASE being set proves nothing about the python3 that will
+    # actually run twister below: on a system interpreter without
+    # natsort, twister's own import chain
+    # (zephyr/scripts/pylib/twister/twisterlib/hardwaremap.py does
+    # `from natsort import natsorted`) raises ModuleNotFoundError before
+    # a single test runs -- previously that read as this stage FAILING
+    # ("nothing wrong with the tree" reported red) instead of the
+    # missing-prerequisite SKIP it actually is (alp-sdk#1396). Same
+    # `return 99` idiom as the ZEPHYR_BASE check above.
+    if ! python3 -c 'import natsort' >/dev/null 2>&1; then
+        echo "stage_twister: python3 ($(command -v python3)) cannot import natsort, which twister's own hardwaremap.py requires. Activate the zephyrproject venv (or: pip install natsort) so a python3 with it resolves first on PATH."
+        return 99
+    fi
+    # ccache survives a fresh clone / new worktree only if the object key is
+    # path-independent.  Zephyr's build uses ccache when it is on PATH, but
+    # ccache's defaults hash absolute source paths and, because the build
+    # compiles with -g, the build directory itself (hash_dir) -- so every
+    # new checkout path was a cold cache.  Relativise paths under this
+    # checkout and stop hashing the cwd, unless the user's ccache config
+    # already made a choice (an env var here would override it).
+    if command -v ccache >/dev/null 2>&1; then
+        if [ -z "${CCACHE_BASEDIR:-}" ] && [ -z "$(ccache -k base_dir 2>/dev/null)" ]; then
+            export CCACHE_BASEDIR="${REPO_ROOT}"
+        fi
+        if [ -z "${CCACHE_HASHDIR:-}${CCACHE_NOHASHDIR:-}" ] \
+            && [ "$(ccache -k hash_dir 2>/dev/null)" = "true" ]; then
+            export CCACHE_NOHASHDIR=1
+        fi
+    fi
     # Match pr-twister.yml FAITHFULLY: same testsuite roots (incl.
     # tests/unit) AND warnings-as-errors.  Twister builds strict in CI, so
     # a warning like -Werror=comment ('/*' inside a comment) fails there;
@@ -370,14 +683,31 @@ stage_twister() {
              "-- up to $((ALP_TWISTER_JOBS * CMAKE_BUILD_PARALLEL_LEVEL)) concurrent compilers"
     fi
 
+    # --clobber-output: delete the previous twister-out/ instead of renaming
+    # it to twister-out.N -- in a reused checkout the renamed copies (several
+    # GB each) otherwise pile up run after run.
+    # The full run scans all four roots; the local smoke run scans only the
+    # suite directories select_checks.py --local chose.
+    local -a roots=()
+    local suite
+    if [ "${#TWISTER_SUITES[@]}" -gt 0 ]; then
+        echo "stage_twister: SMOKE subset (${#TWISTER_SUITES[@]} suite dir(s)); the full native_sim set runs in CI's pr-twister shards -- pass --full to run it here:"
+        for suite in "${TWISTER_SUITES[@]}"; do
+            echo "  ${suite}"
+            roots+=(--testsuite-root "${REPO_ROOT}/${suite}")
+        done
+    else
+        roots=(--testsuite-root "${REPO_ROOT}/tests/unit"
+               --testsuite-root "${REPO_ROOT}/tests/zephyr"
+               --testsuite-root "${REPO_ROOT}/tests/console"
+               --testsuite-root "${REPO_ROOT}/examples")
+    fi
     python3 "${ZEPHYR_BASE}/scripts/twister" \
         "${twister_jobs[@]+"${twister_jobs[@]}"}" \
-        --testsuite-root "${REPO_ROOT}/tests/unit" \
-        --testsuite-root "${REPO_ROOT}/tests/zephyr" \
-        --testsuite-root "${REPO_ROOT}/tests/console" \
-        --testsuite-root "${REPO_ROOT}/examples" \
+        "${roots[@]}" \
         -p native_sim/native/64 \
         --extra-args=CONFIG_COMPILER_WARNINGS_AS_ERRORS=y \
+        --clobber-output \
         --inline-logs \
         --no-detailed-test-id
 }
@@ -696,13 +1026,46 @@ stage_pytest_scripts() {
     # over every core, as CI does: a parallel sweep, then the modules that
     # write into the real checkout on their own (tests/scripts/conftest.py
     # _REPO_WRITER_MODULES). Without xdist the stage still runs, serially.
+    # phase: all (default) | parallel (read-only sweep + tests/parity) |
+    # writes (only the repo_writes modules).  The overlapped run splits the
+    # stage so the parallel half can run beside twister and the half that
+    # writes the checkout runs after it.
+    local phase="${1:-all}"
+    # `gate_duplicate` tests re-run, from pytest, the live-repo check a gate
+    # stage of THIS invocation already ran (public-private,
+    # required-gate-scripts).  Skip them whenever the full-run branch
+    # schedules those stages (SKIP_GATE_DUPLICATES; a gap in one of them shows
+    # as [GAP], exit 2); CI's plain pytest sweep and --zephyr-only keep them.
+    local dup="" alldup=""
+    if [ "${SKIP_GATE_DUPLICATES:-0}" = "1" ]; then
+        dup=" and not gate_duplicate"
+        alldup="not gate_duplicate"
+    fi
     if python3 -c 'import xdist' >/dev/null 2>&1; then
-        python3 -m pytest tests/scripts/ -q -n auto -m "not repo_writes" || return 1
-        python3 -m pytest tests/scripts/ -q -m repo_writes || return 1
+        if [ "${phase}" != "writes" ]; then
+            # Beside other overlapped stages (ALP_GATE_OVERLAP, set by the pool) take
+            # at most min(8, nproc/2) workers instead of every core.
+            local nworkers=auto ncpu
+            if [ "${ALP_GATE_OVERLAP:-0}" = "1" ]; then
+                ncpu="$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
+                nworkers=$((ncpu / 2))
+                [ "${nworkers}" -gt 8 ] && nworkers=8
+                [ "${nworkers}" -lt 1 ] && nworkers=1
+            fi
+            python3 -m pytest tests/scripts/ -q -n "${nworkers}" -m "not repo_writes${dup}" || return 1
+        fi
+        if [ "${phase}" != "parallel" ]; then
+            python3 -m pytest tests/scripts/ -q -m "repo_writes${dup}" || return 1
+        fi
     else
         echo "stage_pytest_scripts: pytest-xdist not importable; running serially (pip install -e \".[dev]\" to parallelise)."
-        python3 -m pytest tests/scripts/ -q || return 1
+        case "${phase}" in
+            all)      python3 -m pytest tests/scripts/ -q ${alldup:+-m "${alldup}"} || return 1 ;;
+            parallel) python3 -m pytest tests/scripts/ -q -m "not repo_writes${dup}" || return 1 ;;
+            writes)   python3 -m pytest tests/scripts/ -q -m "repo_writes${dup}" || return 1 ;;
+        esac
     fi
+    [ "${phase}" = "writes" ] && return 0
 
     # tests/parity/ is NOT under tests/scripts/, so the seam-1 comparator's own
     # 15 unit tests were excluded from this stage AND from parity-seam1.yml,
@@ -718,6 +1081,10 @@ stage_pytest_scripts() {
         python3 -m pytest tests/parity/test_seam1_field_diff.py -q || return 1
     fi
 }
+
+# The two halves the overlapped run schedules separately (see finish_overlap).
+stage_pytest_parallel() { stage_pytest_scripts parallel; }
+stage_pytest_repo_writes() { stage_pytest_scripts writes; }
 
 # The hard-gate scripts/check_*.py list is the registry's gate set, read at
 # runtime from metadata/quality-tasks-v1.json (single source of truth, drift-
@@ -796,6 +1163,17 @@ stage_required_gate_scripts() {
         cat "${jobdir}/${script}.out" 2>/dev/null
         rc=$(cat "${jobdir}/${script}.rc" 2>/dev/null || echo 1)
         [ "${rc}" = "0" ] || failed=1
+        # These two gates' pytest twins (gate_duplicate, deselected from this
+        # run's pytest stage) also asserted the success line, which guards a
+        # run that exits 0 without checking anything.  Keep that guard here.
+        case "${script}" in
+            check_emit_snapshots.py|check_zephyr_conf_parity.py)
+                if [ "${rc}" = "0" ] && ! grep -q 'byte-identical' "${jobdir}/${script}.out" 2>/dev/null; then
+                    echo "${script}: exited 0 but printed no 'byte-identical' success line -- a vacuous run"
+                    failed=1
+                fi
+                ;;
+        esac
     done
     rm -rf "${jobdir}"
 
@@ -835,14 +1213,24 @@ stage_required_gate_scripts() {
 
 # required-gate-scripts graded changelog citations against the WORKING
 # TREE. CI grades the PR merge commit instead (actions/checkout on a
-# pull_request event checks out refs/pull/N/merge), where a citation into
-# a file dev has since moved is already wrong. This grades that merge,
-# built in the object store from origin/dev and HEAD -- committed work
-# only (alp-sdk#2186). origin/dev is passed explicitly rather than
-# inherited: DIFF_BASE is shared with the clang-format stage, and a base
-# that is already an ancestor of HEAD would grade HEAD, not a merge. The
-# orchestration below probes for git >= 2.38 (merge-tree --write-tree)
-# and for origin/dev first, and reports either as a [GAP] SKIP.
+# pull_request event checks out refs/pull/N/merge), where a citation into a
+# file dev has since moved might be wrong. This grades that merge, built in
+# the object store from origin/dev and HEAD -- committed work only
+# (alp-sdk#2186). origin/dev is passed explicitly rather than inherited:
+# DIFF_BASE is shared with the clang-format stage, and a base that is
+# already an ancestor of HEAD would grade HEAD, not a merge. The
+# orchestration below probes for git >= 2.38 (merge-tree --write-tree) and
+# for origin/dev first, and reports either as a [GAP] SKIP.
+#
+# NOT run with --strict-lines: that flag is the RELEASE-time hook
+# (alp-sdk#2350 round 2, wired into scripts/bump_version.py), not a PR-time
+# one -- it exists to turn a PRE-EXISTING citation's drift into an error
+# right before it freezes into history, and running it here would redden
+# every ordinary PR merged with a `dev` that moved underneath ANY
+# pre-existing citation, which is precisely the treadmill alp-sdk#2350
+# closed. A citation this PR itself ADDS still gets no drift tolerance
+# either way (see `_check_one`'s `added` handling) -- --strict-lines adds
+# nothing for that case that the plain run does not already enforce.
 stage_changelog_citations_merge() {
     DIFF_BASE=origin/dev python3 scripts/check_changelog_citations.py --against-merge
 }
@@ -961,7 +1349,7 @@ stage_generated_files() {
     # some of its artifacts is not a drift check.
     require_jsonschema_2020 stage_generated_files || return 99
     local gens=(gen_soc_caps gen_status_strings gen_board_header
-                gen_cc3501e_gpio_routes
+                gen_cc3501e_gpio_routes gen_power_tree
                 gen_pinmux_capability gen_support_matrix
                 gen_portability_matrix gen_catalog gen_error_catalog
                 gen_verification_status)
@@ -1164,6 +1552,7 @@ $(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null 
 # -------- Orchestration -------------------------------------------------------
 
 START=$(date +%s)
+pin_alp_zephyr_module
 
 if [ "${ZEPHYR_ONLY}" -eq 1 ]; then
     # Run the suite exactly once.  run_stage() already turns a 99
@@ -1171,6 +1560,13 @@ if [ "${ZEPHYR_ONLY}" -eq 1 ]; then
     # dance -- and no second, output-hiding invocation -- is needed.
     run_stage "twister" stage_twister
 else
+    # This branch schedules the public-private and required-gate-scripts
+    # stages, so the pytest stage deselects the tests that only re-run them.
+    # If either of those stages cannot run (a 99), it surfaces as a [GAP]
+    # (exit 2) -- the run is then flagged incomplete anyway, so the missing
+    # duplicate is never a silent loss.
+    SKIP_GATE_DUPLICATES=1
+
     # The full plain-CMake builds are release-grade -- the fast `dev`
     # profile skips them (dev PRs iterate on twister + the cheap gates).
     if [ "${TARGET}" = "dev" ]; then
@@ -1183,27 +1579,49 @@ else
 
     if [ "${YOCTO_ONLY}" -eq 0 ]; then
         if [ "${QUICK}" -eq 1 ]; then
-            skip_stage "twister" "--quick" scope
-        elif [ -z "${ZEPHYR_BASE:-}" ]; then
-            skip_stage "twister" "ZEPHYR_BASE not set (run scripts/bootstrap.sh first)" gap
+            launch_skip "twister" "--quick" scope
         else
-            run_stage "twister" stage_twister
+            # Local runs never build the full ~270-config native_sim set --
+            # CI's sharded pr-twister does that in the merge queue.
+            # select_checks.py --local answers `skip` (no native_sim input
+            # changed), or `smoke` followed by the suite directories to build
+            # (the changed suites + SMOKE_SUITES).  It printed its per-path
+            # proof on stderr above.  --full and --target main bypass it and
+            # run everything; an empty answer (the script crashed) also falls
+            # through to the full run -- a bug must not shrink coverage.
+            twister_plan=""
+            if [ "${TARGET}" != "main" ] && [ "${FORCE_FULL}" -eq 0 ]; then
+                twister_plan="$(python3 scripts/select_checks.py --base "${SELECT_BASE}" --worktree --local)"
+            fi
+            if [ "${twister_plan%%$'\n'*}" = "skip" ]; then
+                launch_skip "twister" "no native_sim build input changed (select_checks.py; --full forces it)" scope
+            elif [ -z "${ZEPHYR_BASE:-}" ]; then
+                launch_skip "twister" "ZEPHYR_BASE not set (run scripts/bootstrap.sh first)" gap
+            else
+                if [ "${twister_plan%%$'\n'*}" = "smoke" ]; then
+                    TWISTER_SMOKE=1
+                    while IFS= read -r _suite; do
+                        [ -n "${_suite}" ] && TWISTER_SUITES+=("${_suite}")
+                    done <<< "${twister_plan#*$'\n'}"
+                fi
+                launch_bg "twister" stage_twister
+            fi
         fi
     fi
 
     if command -v clang-format >/dev/null 2>&1; then
-        run_stage "clang-format-diff" stage_clang_format
+        launch "clang-format-diff" stage_clang_format
     else
-        skip_stage "clang-format-diff" "clang-format not installed" gap
+        launch_skip "clang-format-diff" "clang-format not installed" gap
     fi
 
     # Shell-script static lint -- catches shell bugs (cd-without-guard,
     # set-u empty-array traps, POSIX slips) on Linux before they redden
     # macOS/Windows CI.  Skips cleanly if shellcheck isn't installed.
     if command -v shellcheck >/dev/null 2>&1 || [ -x "${HOME}/.local/bin/shellcheck" ]; then
-        run_stage "shellcheck" stage_shellcheck
+        launch "shellcheck" stage_shellcheck
     else
-        skip_stage "shellcheck" "shellcheck not installed (PATH or ~/.local/bin)" gap
+        launch_skip "shellcheck" "shellcheck not installed (PATH or ~/.local/bin)" gap
     fi
 
     # bash 3.2 parse gate -- catches the class of defect PR #1050 hit
@@ -1214,57 +1632,57 @@ else
     # this unconditionally with real bash 3.2.57, no container needed
     # there.
     if command -v podman >/dev/null 2>&1 || command -v docker >/dev/null 2>&1; then
-        run_stage "bash32-parse" stage_bash32_parse
+        launch "bash32-parse" stage_bash32_parse
     else
-        skip_stage "bash32-parse" "neither podman nor docker on PATH -- CI's macos-latest python-smoke leg runs this unconditionally with real bash 3.2.57" gap
+        launch_skip "bash32-parse" "neither podman nor docker on PATH -- CI's macos-latest python-smoke leg runs this unconditionally with real bash 3.2.57" gap
     fi
 
-    run_stage "metadata-validate" stage_metadata_validate
+    launch "metadata-validate" stage_metadata_validate
 
     # Documentation lint -- cheap, always runnable, no special tooling.
     if [ -f scripts/lint_doc_yaml_fragments.py ]; then
-        run_stage "doc-yaml-fragments" stage_doc_yaml_fragments
+        launch "doc-yaml-fragments" stage_doc_yaml_fragments
     else
-        skip_stage "doc-yaml-fragments" "scripts/lint_doc_yaml_fragments.py missing" gap
+        launch_skip "doc-yaml-fragments" "scripts/lint_doc_yaml_fragments.py missing" gap
     fi
 
     if [ -f scripts/check_public_private.py ]; then
-        run_stage "public-private" stage_public_private
+        launch "public-private" stage_public_private
     else
-        skip_stage "public-private" "scripts/check_public_private.py missing" gap
+        launch_skip "public-private" "scripts/check_public_private.py missing" gap
     fi
 
     # Mirrors cross-platform-zephyr.yml's python-smoke --fail-on-warning
     # step (alp-sdk#1032 A5) so a repo drifting back to N findings is
     # caught locally, not only on three legs of a non-required workflow.
     if [ -f scripts/check_cross_platform.py ]; then
-        run_stage "cross-platform-lint" stage_cross_platform_lint
+        launch "cross-platform-lint" stage_cross_platform_lint
     else
-        skip_stage "cross-platform-lint" "scripts/check_cross_platform.py missing" gap
+        launch_skip "cross-platform-lint" "scripts/check_cross_platform.py missing" gap
     fi
 
     # Required scripts/check_*.py gates -- see REQUIRED_GATE_SCRIPTS
     # above.  Keeps this wrapper's coverage aligned with the hard
     # gates pr-metadata-validate.yml / pr-doc-drift.yml run in CI.
-    run_stage "required-gate-scripts" stage_required_gate_scripts
+    launch "required-gate-scripts" stage_required_gate_scripts
 
     # The same citation gate, graded against the merge CI will check out.
     # Both probes mirror what stage_changelog_citations_merge needs, so a
     # host that cannot build the merge gets a named [GAP], not a FAIL.
     if ! command -v python3 >/dev/null 2>&1 || [ ! -f scripts/check_changelog_citations.py ]; then
-        skip_stage "changelog-citations-merge" "python3 or scripts/check_changelog_citations.py missing" gap
+        launch_skip "changelog-citations-merge" "python3 or scripts/check_changelog_citations.py missing" gap
     elif ! git merge-tree --write-tree HEAD HEAD >/dev/null 2>&1; then
-        skip_stage "changelog-citations-merge" "$(git --version) has no merge-tree --write-tree (needs git >= 2.38)" gap
+        launch_skip "changelog-citations-merge" "$(git --version) has no merge-tree --write-tree (needs git >= 2.38)" gap
     elif ! git rev-parse -q --verify "origin/dev^{commit}" >/dev/null; then
-        skip_stage "changelog-citations-merge" "origin/dev not present here (git fetch origin dev)" gap
+        launch_skip "changelog-citations-merge" "origin/dev not present here (git fetch origin dev)" gap
     else
-        run_stage "changelog-citations-merge" stage_changelog_citations_merge
+        launch "changelog-citations-merge" stage_changelog_citations_merge
     fi
 
     # `check · generated files in sync` -- regenerate every single-sourced
     # artifact + fail on drift.  Catches the class of red that bit #623 /
     # #636 / #642 (new macro/symbol/gate without a committed regen).
-    run_stage "generated-files" stage_generated_files
+    writer_stage "generated-files" stage_generated_files
 
     # alp.lock --check -- both the dev (fast) and main (release-grade)
     # profiles run this unconditionally, same as metadata-validate above.
@@ -1272,30 +1690,37 @@ else
     # longer diffs against a committed lock (#1576), it schema-validates a
     # freshly generated one, so this stage's verdict does not depend on
     # running before or after generated-files regenerates its inputs.
-    run_stage "alp-lock" stage_alp_lock
+    writer_stage "alp-lock" stage_alp_lock
 
     # Main-only: the strict ABI-snapshot diff gate that pr-abi-snapshot.yml
     # runs on `main` + `release/**` only.  The `--target main` release-grade
     # profile adds it; dev/full skip it (generated-files already regenerates
     # the snapshot, but the strict diff-vs-committed is a main-branch gate).
     if [ "${TARGET}" = "main" ]; then
-        run_stage "abi-strict" stage_abi_strict
+        writer_stage "abi-strict" stage_abi_strict
     fi
 
     # Pytest -- subsumes metadata-validate's unittest coverage and adds
     # the linter + regression locks for a3cd4fd / e3a4c6b.
     if command -v python3 >/dev/null 2>&1 && [ -d tests/scripts ]; then
-        run_stage "pytest-scripts" stage_pytest_scripts
+        if [ "${OVERLAP}" -eq 1 ]; then
+            # Parallel sweep in the pool; the modules that write the
+            # checkout (-m repo_writes) run after it, with the other writers.
+            launch "pytest-scripts" stage_pytest_parallel
+            writer_stage "pytest-repo-writes" stage_pytest_repo_writes
+        else
+            launch "pytest-scripts" stage_pytest_scripts
+        fi
     else
-        skip_stage "pytest-scripts" "tests/scripts missing or no python3" gap
+        launch_skip "pytest-scripts" "tests/scripts missing or no python3" gap
     fi
 
     # HiL spec validation -- host-side parse + board-target check
     # for every smoke spec under tests/hil/.  No hardware required.
     if [ -f tests/hil/run_smoke.py ]; then
-        run_stage "hil-spec-validate" stage_hil_spec_validate
+        launch "hil-spec-validate" stage_hil_spec_validate
     else
-        skip_stage "hil-spec-validate" "tests/hil/run_smoke.py missing" gap
+        launch_skip "hil-spec-validate" "tests/hil/run_smoke.py missing" gap
     fi
 
     if [ "${QUICK}" -eq 0 ] && [ "${YOCTO_ONLY}" -eq 0 ] && [ "${TARGET}" != "dev" ]; then
@@ -1303,13 +1728,17 @@ else
         # PATH or in ~/doxybin, so no committed Doxyfile is needed.  The fast
         # dev profile skips it (Doxygen is one of the slow stages).
         if command -v doxygen >/dev/null 2>&1 || [ -x "${HOME}/doxybin/doxygen" ]; then
-            run_stage "doxygen" stage_doxygen
+            launch "doxygen" stage_doxygen
         else
-            skip_stage "doxygen" "doxygen not installed (PATH or ~/doxybin)" gap
+            launch_skip "doxygen" "doxygen not installed (PATH or ~/doxybin)" gap
         fi
     elif [ "${TARGET}" = "dev" ]; then
-        skip_stage "doxygen" "--target dev (slow release-grade stage)" scope
+        launch_skip "doxygen" "--target dev (slow release-grade stage)" scope
     fi
+
+    # Overlapped runs: join twister, print the captured stages in order, then
+    # run the tree-writing stages.  No-op under ALP_GATE_SERIAL=1.
+    finish_overlap
 fi
 
 END=$(date +%s)
@@ -1326,9 +1755,15 @@ for i in "${!STAGE_NAMES[@]}"; do
         tag="[GAP] "
         gap_count=$((gap_count + 1))
     fi
-    printf "  %-28s %s %s%s\n" "${STAGE_NAMES[$i]}" "${STAGE_STATUS[$i]}" "${tag}" "${STAGE_NOTES[$i]}"
+    printf "  %-28s %s %s%s (%ss)\n" "${STAGE_NAMES[$i]}" "${STAGE_STATUS[$i]}" "${tag}" "${STAGE_NOTES[$i]}" "${STAGE_SECS[$i]}"
     [ "${STAGE_STATUS[$i]}" = "FAIL" ] && fail_count=$((fail_count + 1))
 done
+
+if [ "${TWISTER_SMOKE:-0}" -eq 1 ]; then
+    echo
+    echo "NOTE: twister ran the local SMOKE subset only (changed suites + a fixed smoke set)."
+    echo "      The full native_sim set runs in CI's sharded pr-twister; --full runs it here."
+fi
 
 if [ "${fail_count}" -gt 0 ]; then
     echo

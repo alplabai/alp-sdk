@@ -33,9 +33,8 @@
 		 * CM33-NS - 0x50000000, see src/backends/rpc/yocto_uio_drv.c).
 		 * no-map so Linux never hands this RAM out: a CM33 image with
 		 * IPC enabled writes the resource table + vrings here whether or
-		 * not the A55 peer is up (#2374).  The UIO nodes the A55 RPC
-		 * backend opens are not declared yet -- their receive IRQ is
-		 * still bench-TBD. */
+		 * not the A55 peer is up (#2374).  The generic-uio nodes the A55
+		 * RPC backend opens are declared at the end of this file. */
 		openamp_reserved: openamp@4f700000 {
 			no-map;
 			reg = <0x0 0x4f700000 0x0 0x900000>;
@@ -93,6 +92,62 @@
 			reusable;
 			reg = <0x0 0xd0000000 0x0 0x20000000>;
 		};
+	};
+
+	/*
+	 * A55 half of the CM33 OpenAMP link (#2374): generic-uio nodes the
+	 * userspace OpenAMP master (src/backends/rpc/yocto_uio_drv.c) opens
+	 * through libmetal.  The node NAME is load-bearing: sysfs exposes the
+	 * platform device as "<unit-address>.<node-name>" (e.g.
+	 * 4f700000.rsctbl) and the backend looks each region up by exactly
+	 * that string.  Layout = the CM33 board trees' openamp_shm window
+	 * (A55 = CM33-NS - 0x50000000) inside openamp_reserved above.
+	 * uio_pdrv_genirq binds "generic-uio" (uio.cfg + the 0012 patch).
+	 */
+	rsctbl@4f700000 {
+		compatible = "generic-uio";
+		reg = <0x0 0x4f700000 0x0 0x1000>;
+	};
+
+	mhu-shm@4f701000 {
+		compatible = "generic-uio";
+		reg = <0x0 0x4f701000 0x0 0x1000>;
+	};
+
+	vring-ctl0@4f800000 {
+		compatible = "generic-uio";
+		reg = <0x0 0x4f800000 0x0 0x50000>;
+	};
+
+	vring-ctl1@4f850000 {
+		compatible = "generic-uio";
+		reg = <0x0 0x4f850000 0x0 0x50000>;
+	};
+
+	vring-shm0@4f900000 {
+		compatible = "generic-uio";
+		reg = <0x0 0x4f900000 0x0 0x300000>;
+	};
+
+	vring-shm1@4fc00000 {
+		compatible = "generic-uio";
+		reg = <0x0 0x4fc00000 0x0 0x300000>;
+	};
+
+	/*
+	 * MHU-B register block (A55 0x10480000, CM33-view 0x50480000).  The
+	 * M33->A55 doorbell is MHU-B SWINT unit 12, the only CA55-routed
+	 * reverse line: INTID 436 = GIC_SPI 404 (GIC-measured on silicon,
+	 * alp-sdk #697 cycle 10; see yocto_uio_drv.c ALP_MHU_SWINT_RECV_*).
+	 * Level-high: the backend acks by writing SWINT unit 12 CLR.
+	 * uio_pdrv_genirq disables the line at IRQ time and libmetal
+	 * re-enables it after the backend's ack.
+	 */
+	mhu-uio@10480000 {
+		compatible = "generic-uio";
+		reg = <0x0 0x10480000 0x0 0x1000>;
+		interrupt-parent = <&gic>;
+		interrupts = <GIC_SPI 404 IRQ_TYPE_LEVEL_HIGH>;
 	};
 
 	mmngr {
@@ -310,6 +365,15 @@
 		reg = <0x70>;
 		gpio-controller;
 		#gpio-cells = <2>;
+		/* Names come from here, not gpio_chip.names: the driver's
+		 * names[] made a re-bind oops in gpiolib's duplicate-name walk
+		 * (alplabai/alp-sdk#2508). */
+		gpio-line-names =
+			"IO8",  "IO9",  "IO10", "IO11", "IO12", "IO13",
+			"IO14", "IO16", "IO24", "IO25", "IO27", "IO28",
+			"IO29", "IO30", "IO31", "IO32", "IO34", "IO35",
+			"bt-reg-on", "wl-reg-on",
+			"" /* 20: reserved for can-stby, #2341 */, "se-rst";
 	};
 
 	rv3028: rtc@52 {

@@ -20,7 +20,7 @@ does not keep those. `Finding.baselined`, the scan's `file_baselined` branch,
 and the `n_baselined` summary trailer go with it, and `main()` now fails
 `--fail-on-warning` on every IMPLICIT-ENCODING finding, the same as every
 other category:
-`scripts/check_cross_platform.py:1208` ("if findings and args.fail_on_warning").
+`scripts/check_cross_platform.py:1218` ("if findings and args.fail_on_warning").
 
 `tests/scripts/test_check_cross_platform.py` drops the four baseline-specific
 tests in section 12; the behaviour they covered -- an IMPLICIT-ENCODING

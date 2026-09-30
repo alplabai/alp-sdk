@@ -868,6 +868,17 @@ static int csi2_dw_stream_start(const struct device *dev)
 	 */
 	csi2_dw_irq_on(regs, data);
 
+	/*
+	 * Alp Lab AB (issue #2351): a stop can leave the IPI mid-line with data
+	 * still in its FIFO, and re-enabling it from there raised a fatal-IPI
+	 * storm and never delivered another frame. Reset the IPI before enabling.
+	 * Unlike the runtime reset csi2_dw_irq() dropped (#2287), this runs only
+	 * here, with the IPI disabled and the sensor still in standby, so no
+	 * pixel data is in flight.
+	 */
+	sys_write32(0, regs + CSI_IPI_SOFTRSTN);
+	sys_write32(1, regs + CSI_IPI_SOFTRSTN);
+
 	/* Enable CSI streaming */
 	sys_set_bits(regs + CSI_IPI_MODE, CSI_IPI_MODE_ENABLE);
 	LOG_DBG("Stream started");
@@ -943,6 +954,32 @@ static int csi2_dw_set_stream(const struct device *dev, bool enable, enum video_
 	}
 }
 
+/*
+ * Alp Lab AB: an absent sensor is caught HERE, at first USE, not at our own
+ * init. The DW CSI-2 host initializes at
+ * CONFIG_VIDEO_MIPI_CSI2_DW_INIT_PRIORITY (41 by default) -- strictly
+ * BEFORE a sensor's own CONFIG_VIDEO_INIT_PRIORITY (60 by default, e.g.
+ * ov9281.c / arx3a0.c) has run. A device_is_ready() check made from OUR
+ * init would therefore always see the sensor as not-yet-initialized and
+ * reject a genuinely PRESENT sensor too -- confirmed on a built image's
+ * .z_init_POST_KERNEL_P_ link order (csi @ P_41, cam @ P_59, ov9281 @
+ * P_60). By the time an application calls alp_camera_open() -- after
+ * kernel POST_KERNEL init has fully completed -- every driver's own init,
+ * including the sensor's chip-ID check, has already run, so checking
+ * readiness HERE reflects the real, final state without depending on
+ * init-priority ordering between unrelated Kconfig symbols.
+ */
+static int csi2_dw_sensor_ready(const struct csi2_dw_config *config, uint8_t idx)
+{
+	if (!config->sensor[idx]) {
+		return -ENODEV;
+	}
+	if (!device_is_ready(config->sensor[idx])) {
+		return -ENODEV;
+	}
+	return 0;
+}
+
 /* v4.4 video-API shim (Alp Lab AB): dropped the `enum video_endpoint_id ep`
  * param; the sensor-format forwarder loses its `ep` arg.
  */
@@ -955,15 +992,16 @@ static int csi2_dw_set_format(const struct device *dev, struct video_format *fmt
 	int ret;
 	int i;
 
-	if (config->sensor[data->current_sensor]) {
-		ret = video_set_format(config->sensor[data->current_sensor], fmt);
-		if (ret) {
-			LOG_ERR("Failed to set Sensor pixel format!");
-			return ret;
-		}
-	} else {
-		LOG_ERR("Invalid sesnor selected!");
-		return -ENODEV;
+	ret = csi2_dw_sensor_ready(config, data->current_sensor);
+	if (ret) {
+		LOG_ERR("Sensor device is not ready");
+		return ret;
+	}
+
+	ret = video_set_format(config->sensor[data->current_sensor], fmt);
+	if (ret) {
+		LOG_ERR("Failed to set Sensor pixel format!");
+		return ret;
 	}
 
 	if (!csi2_is_format_supported(fmt->pixelformat)) {
@@ -1017,20 +1055,22 @@ static int csi2_dw_set_format(const struct device *dev, struct video_format *fmt
 static int csi2_dw_get_format(const struct device *dev, struct video_format *fmt)
 {
 	const struct csi2_dw_config *config = dev->config;
-	struct csi2_dw_data *data = dev->data;
-	int ret = -ENODEV;
+	struct csi2_dw_data         *data   = dev->data;
+	int                          ret;
 
 	if (!fmt) {
 		return -EINVAL;
 	}
 
-	if (config->sensor[data->current_sensor]) {
-		ret = video_get_format(config->sensor[data->current_sensor], fmt);
-		if (ret) {
-			LOG_ERR("Failed to get sensor format!");
-		}
-	} else {
-		LOG_ERR("Invalid sensor selected!");
+	ret = csi2_dw_sensor_ready(config, data->current_sensor);
+	if (ret) {
+		LOG_ERR("Sensor device is not ready");
+		return ret;
+	}
+
+	ret = video_get_format(config->sensor[data->current_sensor], fmt);
+	if (ret) {
+		LOG_ERR("Failed to get sensor format!");
 	}
 	return ret;
 }
@@ -1090,7 +1130,14 @@ static int csi2_dw_set_frmival(const struct device *dev, struct video_frmival *f
 static int csi2_dw_get_caps(const struct device *dev, struct video_caps *caps)
 {
 	const struct csi2_dw_config *config = dev->config;
-	struct csi2_dw_data *data = dev->data;
+	struct csi2_dw_data         *data   = dev->data;
+	int                          ret;
+
+	ret = csi2_dw_sensor_ready(config, data->current_sensor);
+	if (ret) {
+		LOG_ERR("Sensor device is not ready");
+		return ret;
+	}
 
 	const struct device *sensor = config->sensor[data->current_sensor];
 

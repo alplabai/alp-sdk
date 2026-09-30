@@ -210,10 +210,9 @@ pads:
   - { e1m_pad: "TBD", e1m_function: "IO13", owner: "gd32", silicon_peripheral: "E1M IO13", silicon_pad: "PF1" }
   - { e1m_pad: "TBD", e1m_function: "IO14", owner: "gd32", silicon_peripheral: "E1M IO14", silicon_pad: "PB5" }
   - { e1m_pad: "TBD", e1m_function: "IO16", owner: "gd32", silicon_peripheral: "E1M IO16", silicon_pad: "PC0" }
-  - { e1m_pad: "TBD", e1m_function: "IO24", owner: "gd32", silicon_peripheral: "E1M IO24", silicon_pad: "PC14" }
   - { e1m_pad: "TBD", e1m_function: "IO25", owner: "gd32", silicon_peripheral: "E1M IO25", silicon_pad: "PC15" }
   - { e1m_pad: "TBD", e1m_function: "IO27", owner: "gd32", silicon_peripheral: "E1M IO27", silicon_pad: "PB11" }
-  - { e1m_pad: "TBD", e1m_function: "IO28", owner: "gd32", silicon_peripheral: "E1M IO28", silicon_pad: "PC2" }
+  - { e1m_pad: "TBD", e1m_function: "IO28", owner: "gd32", silicon_peripheral: "E1M IO28", silicon_pad: "PE9" }
   - { e1m_pad: "TBD", e1m_function: "IO29", owner: "gd32", silicon_peripheral: "E1M IO29", silicon_pad: "PD11" }
   - { e1m_pad: "TBD", e1m_function: "IO30", owner: "gd32", silicon_peripheral: "E1M IO30", silicon_pad: "PD10" }
   - { e1m_pad: "TBD", e1m_function: "IO31", owner: "gd32", silicon_peripheral: "E1M IO31", silicon_pad: "PE12" }

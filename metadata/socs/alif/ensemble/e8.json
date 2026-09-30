@@ -245,7 +245,11 @@
         "pyocd_target": "AE822FA0E5597LS0",
         "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
         "jlink_flash_device": "AE822FA0E5597LS0_M55_HE",
-        "expect_dpidr": "0x4C013477"
+        "expect_dpidr": "0x4C013477",
+        "svd": {
+          "m55_hp": "metadata/svd/alif/AE822FA0E5597BS0_CM55_HP_View.svd",
+          "m55_he": "metadata/svd/alif/AE822FA0E5597BS0_CM55_HE_View.svd"
+        }
       }
     }
   ],

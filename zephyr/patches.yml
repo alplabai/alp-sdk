@@ -922,6 +922,22 @@ patches:
       figures are the sensor's true envelope. Board/sensor-specific by
       construction (same status as patch 0005/0013), not upstreamable
       as-is.
+  - path: hal_alif/0015-se-service-toc-entry-id-memcpy.patch
+    sha256sum: c6807eade8274ad73de291c259e00fec72b96e4753c5a0b860dc7c2694ea79ca
+    module: alif
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-09-30
+    upstreamable: true
+    comments: |
+      Issue #2509. se_service_process_toc_entry() fills the SE packet's
+      fixed-width, not NUL-terminated send_entry_id with
+      strncpy(dst, image_id, IMAGE_NAME_LENGTH); GCC at -O2 reports
+      -Wstringop-truncation (bound equals destination size), which the AEN
+      twister job's -Werror turns into a build failure on every scenario
+      linking se_services at -O2 (the Trace Runner example). The packet is
+      memset to zero first, so memcpy of strnlen(image_id,
+      IMAGE_NAME_LENGTH) bytes produces the same bytes without the warning.
   - path: zephyr/0003-kconfig-serialize-missing-deps.patch
     sha256sum: 873ed5171298271804ba89cba22fd2c286fdb749cec2856a7ea7c2e1d7c3c7c5
     module: zephyr
@@ -943,7 +959,7 @@ patches:
       format is untouched, so traceconfig.py and tests/kconfig/tracing are
       unaffected. Upstream to Zephyr then drop.
   - path: zephyr/0004-imx335-2lane-link-freq-and-binning.patch
-    sha256sum: ce3725b86521ddcd7f442f79e28cc36f294c65b0df642d54cfcf6a68198e09e9
+    sha256sum: ebb526ef1a2ca063ed37ca511759ed99e1ff3a427a2bf81c4c5b6d68b36496d2
     module: zephyr
     author: Alp Lab AB
     email: contact@alplab.ai
@@ -1056,3 +1072,13 @@ patches:
       concern, unrelated to D-PHY lock); D-PHY lock on any unit/carrier
       other than E1M-AEN803 2026W36-0001 on this specific E1M-EVK.
       Upstream to zephyrproject-rtos/zephyr then drop.
+
+      5. (Issue #2353) After a power-up the sensor's data lanes are not in
+      LP-11 until it has streamed once, so the DW CSI-2 host's D-PHY check
+      failed on the first boot after every power cycle ("D-PHY not locked
+      to Stop-state. PHY status - 0x00010000") and kept failing until one
+      stream start had happened. imx335_init() now ends with a 20 ms
+      STANDBY=0 / STANDBY=1 pulse so the lanes are parked in LP-11 before
+      any host configures its D-PHY. Bench, E1M-AEN803 2026W36-0001,
+      aen-camera-firstlight after a power cycle: 2/2 fail without it, 3/3
+      clean captures with it.

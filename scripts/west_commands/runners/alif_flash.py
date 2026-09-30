@@ -396,6 +396,20 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
         rel_cfg = os.path.join('build', 'config', cfg_name)
         self.check_call([str(gen_toc), '-f', rel_cfg], cwd=str(setools))
 
+        # 2b. Refuse a package that grew below the `atoc` band into the
+        #     preset's customer `storage` region (#2234): an ITCM load image
+        #     is stored inside the package, so a Flow A-shaped package is
+        #     ~89 KB, not the 32 KiB the band reserves.
+        #     ALP_ATOC_ALLOW_OVER_STORAGE=1 accepts it for an image that
+        #     never writes `storage` (same switch as the bench scripts).
+        try:
+            map_text = (setools / 'build' / 'app-package-map.txt').read_text(encoding='utf-8')
+            _aen_atoc.validate_package_extent(
+                _aen_atoc.package_start_from_map(map_text),
+                os.environ.get('ALP_ATOC_ALLOW_OVER_STORAGE') == '1')
+        except (OSError, _aen_atoc.AtocValidationError) as exc:
+            raise RuntimeError(str(exc)) from exc
+
         # 3. Burn the ATOC (and, for a slot0-XIP build, the standalone app
         #    blob at its mramAddress) to MRAM over the SE-UART in one pass.
         #    -p programs; the SES auto-enters maintenance, writes, resets,

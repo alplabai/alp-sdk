@@ -369,7 +369,7 @@ audio:
   # driver drives logical 1 to power the amp up, and IRQ_N as
   # IRQ_TYPE_EDGE_FALLING. Same wires, two vocabularies.
   shutdown:  { net: AMP.ENABLE, e1m: E1M_X_I2S1_SCLK, active_low: true }   # \SD_N -> codec shutdown-gpios (GPIO out)
-  fault_irq: { net: AMP.FAULT,  e1m: E1M_X_I2S1_SDI,  active_low: true }   # IRQ_N -> fault interrupt (GPIO in); confirm SDI is I2S1 (NOT the live I2S0 audio data line)
+  fault_irq: { net: AMP.FAULT,  e1m: E1M_X_I2S1_SDI,  active_low: true }   # IRQ_N -> fault interrupt (GPIO in); I2S1_SDI -> RZ/V2N P04 (SSIU3_SSI3_SDATA, pad AR10), confirmed against the netlists (NOT the live I2S0 audio data line)
 
 # Inference + display defaults a stock X-EVK app would pick.  Apps
 # override in their board.yaml as needed.

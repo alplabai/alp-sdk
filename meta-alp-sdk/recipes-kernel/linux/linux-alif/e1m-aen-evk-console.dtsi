@@ -1,0 +1,50 @@
+/*
+ * meta-alp-sdk: E1M-AEN EVK Linux console routing (#1979, Linux half).
+ *
+ * PR #2485 fixed the TF-A/BL32 half of #1979 (the console UART base +
+ * pinmux baked into the Alif DevKit's BL32 platform port). This fragment
+ * is the Linux-side half the same issue describes: Alif's
+ * devkit_ex_dct_defines.h hardcodes `UART2_STATUS "okay"`, so
+ * serial@4901a000 (UART2) enumerates as ttyS0 and takes
+ * `console=ttyS0` regardless of what `aliases.serial0` names -- the
+ * 8250 driver assigns ttySN by probe order, not by the DT alias. The
+ * E1M-AEN EVK (E1M-AEN801/E1M-AEN701 share one carrier PCB, see
+ * metadata/pinmux/aen.yaml) does not bring UART2 out; its console
+ * header is SoC UART5 (serial@4901d000, P3_4/P3_5, alternate function
+ * 2), matching the BL32 knobs' :e1m-aen801/:e1m-aen701 values in
+ * trusted-firmware-a_%.bbappend.
+ *
+ * TBD(alif-hw-config): &uart2 / &uart5 are the conventional lowercase
+ * node labels for these two 8250 nodes (matching e1m-x-evk.dtsi's own
+ * `serial0 = &scif;` idiom for the V2N side); the exact label spelling
+ * is set by the vendor devkit-e8/devkit-e7 dts, which does not exist on
+ * any public Scarthgap meta-alif-ensemble branch yet (#1968, #1971).
+ * Confirm both labels against that dts (a wrong label fails loudly at
+ * dtc time -- `ERROR ... label or path ... not found` -- it cannot
+ * silently no-op) before relying on this fragment.
+ *
+ * INERT TODAY, same reason as the TF-A half: no MACHINE that would pull
+ * this recipe in (linux-alif, PREFERRED_PROVIDER_virtual/kernel for
+ * e1m-aen801-a32 / e1m-aen701-a32) parses yet. #include this fragment
+ * from the eventual E1M-AEN board dts once one exists, AFTER the vendor
+ * dtsi that sets UART2_STATUS "okay": a later &uart2 override wins, an
+ * earlier one is overwritten.
+ */
+
+&uart2 {
+	status = "disabled";
+};
+
+&uart5 {
+	status = "okay";
+};
+
+/ {
+	aliases {
+		serial0 = &uart5;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
+};

@@ -258,9 +258,12 @@ config ALP_SDK_SOC_CPUS
 	string "SoC CPU complement description (boot banner)"
 	default ""
 	help
-	  Pre-formatted core list -- the active core marked and listed first --
-	  e.g. "M55-HE @160MHz (active) + M55-HP @400MHz + 2x Cortex-A32 @800MHz".
-	  Emitted from the SoC spec JSON cores[] by scripts/alp_orchestrate.py.
+	  Pre-formatted core list -- the board.yaml slice's core marked and
+	  listed first -- e.g. "M55-HE @160MHz (active)|rtss_he + 2x Cortex-A32
+	  @800MHz + M55-HP @400MHz|rtss_hp".  Emitted from the SoC spec JSON
+	  cores[] by scripts/alp_orchestrate.py.  The `|<cluster>` tags are not
+	  printed: the boot banner marks the core whose tag matches the last
+	  segment of BOARD_TARGET instead (src/zephyr/alp_soc_cpus.h, #2469).
 
 config ALP_SDK_SOC_NPUS
 	string "SoC NPU complement description (boot banner)"

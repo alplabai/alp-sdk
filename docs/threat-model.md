@@ -74,7 +74,7 @@ untrusted from the receiving side's perspective.
 | Asset | Trust requirement | Storage |
 |-------|-------------------|---------|
 | **Firmware image signing key (production)** | Confidential + integrity | OPTIGA Trust M secure NVM only |
-| **Firmware image signing key (development)** | Integrity (test-only) | `keys/mcuboot_dev_ecdsa_p256.pem` -- gitignored |
+| **Firmware image signing key (development)** | None -- public by design (#2421) | `keys/mcuboot_shared_dev_ecdsa_p256.pem` -- committed; trusted only by the factory development MCUboot on DM-lifecycle modules |
 | **OPTIGA Trust M device-unique key** | Confidential | OPTIGA's secure NVM (never leaves) |
 | **MQTT broker TLS client cert + private key** | Confidential + integrity | Application-owned; SDK exposes the pinning API |
 | **EEPROM manifest (SKU + serial + hw_rev)** | Integrity (authenticity) | 24C128 EEPROM (board-side); read-only at runtime |
