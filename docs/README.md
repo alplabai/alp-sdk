@@ -106,6 +106,9 @@ into the topic-specific docs.
   into alp-sdk as the single source of truth.
 - [errata-e1m-x-v2n.md](errata-e1m-x-v2n.md) — hardware findings
   from E1M-X-EVK + V2N-M1 bench bring-up (with software workarounds).
+- [v2n-canfd-integration-data.md](v2n-canfd-integration-data.md) —
+  RZ/V2N CANFD2/3 base, SEL-slot events, PFC, clock/reset facts and the
+  open CM33 gap.
 - [rzv2n-m33-swd-debug.md](rzv2n-m33-swd-debug.md) — attaching to
   the V2N CM33 over the DAP (J-Link), status-block reads, gotchas.
 - [rzv2n-m33-secure-boot.md](rzv2n-m33-secure-boot.md) — the CM33
