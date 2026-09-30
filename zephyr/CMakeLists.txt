@@ -1078,6 +1078,13 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_DSP
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/dsp_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/dsp/sw_fallback.c)
 
+# The <alp/dsp.h> decimator is standalone portable C (no pool, no backend).
+# The chain API needs it, and so does PDM capture: the audio-in backend
+# resamples to a rate the mic can't be clocked for (#2134).
+if(CONFIG_ALP_SDK_DSP OR CONFIG_ALP_SDK_AUDIO_IN)
+    zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/src/dsp_decimator.c)
+endif()
+
 # The DSP body + stats surface call CMSIS-DSP kernels (arm_rfft_fast_f32,
 # arm_mean/rms/min/max/absmax_f32) when the cmsis-dsp module is linked,
 # else the portable-C fallbacks.  The plain-CMake build sets this via

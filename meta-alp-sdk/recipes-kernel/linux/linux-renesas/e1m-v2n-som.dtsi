@@ -310,6 +310,14 @@
 		reg = <0x70>;
 		gpio-controller;
 		#gpio-cells = <2>;
+		/* Names come from here, not gpio_chip.names: the driver's
+		 * names[] made a re-bind oops in gpiolib's duplicate-name walk
+		 * (alplabai/alp-sdk#2508). */
+		gpio-line-names =
+			"IO8",  "IO9",  "IO10", "IO11", "IO12", "IO13",
+			"IO14", "IO16", "IO24", "IO25", "IO27", "IO28",
+			"IO29", "IO30", "IO31", "IO32", "IO34", "IO35",
+			"bt-reg-on", "wl-reg-on";
 	};
 
 	rv3028: rtc@52 {

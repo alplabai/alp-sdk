@@ -80,9 +80,16 @@
  * Architectural deep WIC sleep: program WICCONTROL, set SLEEPDEEP, barrier, WFI.
  * Called with interrupts disabled.  Returns after the wake interrupt fires.
  */
+/* Deep-sleep entries actually taken by the PM hook. main.c requires one per
+ * round: a wake alone would also follow a plain kernel-idle WFI, so it proves
+ * nothing about the PM policy having selected this state. */
+volatile uint32_t aen_iwic_entries;
+
 static void aen_enter_wic_sleep(uint32_t wic_is_iwic)
 {
 	uint32_t regval = WICCONTROL_WIC_Msk | (wic_is_iwic ? WICCONTROL_IWIC_Msk : 0U);
+
+	aen_iwic_entries++;
 
 	/* Select deep WIC sleep of the requested type (IWIC here). */
 	sys_write32(regval, AEN_WICCONTROL_HE);

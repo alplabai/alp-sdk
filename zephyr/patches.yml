@@ -922,6 +922,22 @@ patches:
       figures are the sensor's true envelope. Board/sensor-specific by
       construction (same status as patch 0005/0013), not upstreamable
       as-is.
+  - path: hal_alif/0015-se-service-toc-entry-id-memcpy.patch
+    sha256sum: c6807eade8274ad73de291c259e00fec72b96e4753c5a0b860dc7c2694ea79ca
+    module: alif
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-09-30
+    upstreamable: true
+    comments: |
+      Issue #2509. se_service_process_toc_entry() fills the SE packet's
+      fixed-width, not NUL-terminated send_entry_id with
+      strncpy(dst, image_id, IMAGE_NAME_LENGTH); GCC at -O2 reports
+      -Wstringop-truncation (bound equals destination size), which the AEN
+      twister job's -Werror turns into a build failure on every scenario
+      linking se_services at -O2 (the Trace Runner example). The packet is
+      memset to zero first, so memcpy of strnlen(image_id,
+      IMAGE_NAME_LENGTH) bytes produces the same bytes without the warning.
   - path: zephyr/0003-kconfig-serialize-missing-deps.patch
     sha256sum: 873ed5171298271804ba89cba22fd2c286fdb749cec2856a7ea7c2e1d7c3c7c5
     module: zephyr
