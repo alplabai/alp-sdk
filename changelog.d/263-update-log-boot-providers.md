@@ -55,3 +55,28 @@ Verified: `tests/unit/update_log` passes on `native_sim/native/64`
 `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` AEN target, the MCUboot
 provider on `nrf52840dk/nrf52840` (no in-tree AEN board wires
 `CONFIG_BOOTLOADER_MCUBOOT` yet).
+
+Bench, E1M-AEN803 serial 2026W36-0001 and 2026W36-0009, SES v1.110, Alif SE
+provider driven from a throwaway M55-HE RAM-run. Three defects found and
+fixed before this landed:
+
+- The SE reports verification as a **character** in the TOC entry's
+  `flags_string` (`FLAG_STRING_VERIFY` is an index into it, and a verified
+  entry reads `V`), not as bit 2 of the numeric `flags` word. A verified
+  entry (`flags=0x00000063`, `flags_string` `uLVB`) had come back
+  `VERIFY_FAILED`.
+- `version` is packed `major<<24 | minor<<16 | patch` (the way SETOOLS
+  prints it), so `0x01000000` is now `1.0.0`, not `16777216`.
+- `GET_TOC_INFO` returns `store_address` `0x00000000` for **every**
+  entry on this SES, including `A32_APP` and `BOOTLOAD`, which SETOOLS'
+  own `gettoc` places at `0x80020000` and `0x80002000`. Hashing
+  `[0, image_size)` hashed live TCM, and two runs gave two different
+  digests. The provider now refuses with `ALP_ERR_NOSUPPORT` whenever the
+  SE reports a zero store address.
+
+Consequence: on current silicon, the Alif SE provider always returns
+`ALP_ERR_NOSUPPORT` (measured for `ALP-HE`, `HP_APP` and `A32_APP`), so it
+never fabricates an entry. A working digest needs the image's location
+from the ATOC package itself rather than from this SE service. That is
+tracked on #263, which stays open. The MCUboot provider is untested on
+silicon: no AEN board wires `CONFIG_BOOTLOADER_MCUBOOT` yet.

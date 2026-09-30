@@ -88,7 +88,7 @@ alp_status_t ulog_mcuboot_build_entry(const uint8_t           header32[32],
 alp_status_t ulog_alif_se_build_entry(const uint8_t           toc_image_id[8],
                                       const uint8_t           expect_image_id[8],
                                       uint32_t                toc_version,
-                                      uint32_t                toc_flags,
+                                      char                    toc_verify_char,
                                       const uint8_t           image_hash[32],
                                       bool                    hash_valid,
                                       alp_update_log_entry_t *out)
@@ -106,13 +106,18 @@ alp_status_t ulog_alif_se_build_entry(const uint8_t           toc_image_id[8],
 	}
 
 	memset(out, 0, sizeof(*out));
-	int n = snprintf(out->fw_version, sizeof(out->fw_version), "%u", (unsigned)toc_version);
+	int n = snprintf(out->fw_version,
+	                 sizeof(out->fw_version),
+	                 "%u.%u.%u",
+	                 (unsigned)((toc_version >> 24) & 0xFFu),
+	                 (unsigned)((toc_version >> 16) & 0xFFu),
+	                 (unsigned)(toc_version & 0xFFFFu));
 	if (n < 0) {
 		return ALP_ERR_NOSUPPORT;
 	}
 
 	memcpy(out->image_hash, image_hash, ALP_UPDATE_LOG_HASH_LEN);
-	out->status = (toc_flags & (1u << ULOG_ALIF_TOC_FLAG_VERIFY_BIT))
+	out->status = (toc_verify_char == ULOG_ALIF_TOC_VERIFIED_CHAR)
 	                  ? ALP_UPDATE_STATUS_CONFIRMED
 	                  : ALP_UPDATE_STATUS_VERIFY_FAILED;
 	return ALP_OK;

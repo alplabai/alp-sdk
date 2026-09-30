@@ -1575,10 +1575,10 @@ ZTEST(alp_update_log, test_alif_se_build_entry_verified_maps_confirmed)
 	uint8_t hash[32];
 	memset(hash, 0x11, sizeof(hash));
 
-	alp_update_log_entry_t e              = { 0 };
-	uint32_t               flags_verified = 1u << ULOG_ALIF_TOC_FLAG_VERIFY_BIT;
-	zassert_equal(ulog_alif_se_build_entry(id, id, 42, flags_verified, hash, true, &e), ALP_OK);
-	zassert_equal(strcmp(e.fw_version, "42"), 0);
+	alp_update_log_entry_t e = { 0 };
+	/* Packed as the SE reports it: 1.2.3 -> 0x01020003. */
+	zassert_equal(ulog_alif_se_build_entry(id, id, 0x01020003u, 'V', hash, true, &e), ALP_OK);
+	zassert_equal(strcmp(e.fw_version, "1.2.3"), 0);
 	zassert_equal(e.status, ALP_UPDATE_STATUS_CONFIRMED);
 	zassert_mem_equal(e.image_hash, hash, 32);
 }
@@ -1589,8 +1589,7 @@ ZTEST(alp_update_log, test_alif_se_build_entry_unverified_maps_verify_failed)
 	uint8_t hash[32] = { 0 };
 
 	alp_update_log_entry_t e = { 0 };
-	zassert_equal(ulog_alif_se_build_entry(id, id, 1, 0 /* verify bit clear */, hash, true, &e),
-	              ALP_OK);
+	zassert_equal(ulog_alif_se_build_entry(id, id, 1, '-' /* not 'V' */, hash, true, &e), ALP_OK);
 	zassert_equal(e.status, ALP_UPDATE_STATUS_VERIFY_FAILED);
 }
 
@@ -1602,8 +1601,7 @@ ZTEST(alp_update_log, test_alif_se_build_entry_rejects_image_id_mismatch)
 
 	alp_update_log_entry_t e;
 	/* Never report metadata for a different image on the same TOC. */
-	zassert_equal(ulog_alif_se_build_entry(got, expect, 1, 0xFFFFFFFFu, hash, true, &e),
-	              ALP_ERR_NOSUPPORT);
+	zassert_equal(ulog_alif_se_build_entry(got, expect, 1, 'V', hash, true, &e), ALP_ERR_NOSUPPORT);
 }
 
 ZTEST(alp_update_log, test_alif_se_build_entry_rejects_invalid_hash)
@@ -1614,8 +1612,7 @@ ZTEST(alp_update_log, test_alif_se_build_entry_rejects_invalid_hash)
 	alp_update_log_entry_t e;
 	/* A TOC entry we couldn't safely hash (e.g. implausible image_size)
 	 * must never append a zero-filled fabricated digest. */
-	zassert_equal(ulog_alif_se_build_entry(id, id, 1, 0xFFFFFFFFu, hash, false, &e),
-	              ALP_ERR_NOSUPPORT);
+	zassert_equal(ulog_alif_se_build_entry(id, id, 1, 'V', hash, false, &e), ALP_ERR_NOSUPPORT);
 }
 
 /* --- Persistence (#262): sw-tier store modes ------------------------

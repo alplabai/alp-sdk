@@ -66,11 +66,13 @@ alp_status_t ulog_mcuboot_build_entry(const uint8_t           header32[32],
                                       bool                    confirmed,
                                       alp_update_log_entry_t *out);
 
-/* Bit position of the "verified" flag within an Alif ATOC TOC entry's
- * flags word (se_services/include/services_lib_protocol.h,
- * FLAG_STRING_VERIFY) -- the SE-provisioned proof that the SES validated
- * this entry's signature before it ran. */
-#define ULOG_ALIF_TOC_FLAG_VERIFY_BIT 2u
+/* The SE reports verification as a CHARACTER in the TOC entry's
+ * flags_string, not as a bit of its numeric flags word:
+ * se_services/include/services_lib_protocol.h's FLAG_STRING_VERIFY (2) is
+ * an index into flags_string, and a verified entry reads 'V' there
+ * (bench, E1M-AEN803: flags=0x00000063, flags_string "uLVB"). */
+#define ULOG_ALIF_TOC_FLAG_STRING_VERIFY_IDX 2u
+#define ULOG_ALIF_TOC_VERIFIED_CHAR          'V'
 
 /*
  * Build a trusted boot-metadata entry from one Alif ATOC TOC entry plus a
@@ -80,8 +82,11 @@ alp_status_t ulog_mcuboot_build_entry(const uint8_t           header32[32],
  * @param expect_image_id 8-byte identifier of THIS build's own image
  *                         (board Kconfig), to reject a TOC entry that
  *                         belongs to a different image on the same table.
- * @param toc_version     The TOC entry's version field.
- * @param toc_flags       The TOC entry's flags word.
+ * @param toc_version     The TOC entry's version field, packed
+ *                         major<<24 | minor<<16 | patch (as SETOOLS
+ *                         prints it); rendered "major.minor.patch".
+ * @param toc_verify_char The TOC entry's flags_string character at
+ *                         ULOG_ALIF_TOC_FLAG_STRING_VERIFY_IDX.
  * @param image_hash      32-byte digest the caller computed over
  *                         [store_address, store_address + image_size).
  * @param hash_valid       False if the caller could not safely compute a
@@ -92,14 +97,14 @@ alp_status_t ulog_mcuboot_build_entry(const uint8_t           header32[32],
  * @return ALP_OK; ALP_ERR_NOSUPPORT when @p toc_image_id does not match
  *         @p expect_image_id or @p hash_valid is false; ALP_ERR_INVAL on
  *         NULL args. @c status is ALP_UPDATE_STATUS_CONFIRMED when the
- *         SE's verify bit is set, ALP_UPDATE_STATUS_VERIFY_FAILED
+ *         SE's verify flag reads 'V', ALP_UPDATE_STATUS_VERIFY_FAILED
  *         otherwise -- this function never returns OK while silently
  *         dropping a failed-verify signal.
  */
 alp_status_t ulog_alif_se_build_entry(const uint8_t           toc_image_id[8],
                                       const uint8_t           expect_image_id[8],
                                       uint32_t                toc_version,
-                                      uint32_t                toc_flags,
+                                      char                    toc_verify_char,
                                       const uint8_t           image_hash[32],
                                       bool                    hash_valid,
                                       alp_update_log_entry_t *out);
