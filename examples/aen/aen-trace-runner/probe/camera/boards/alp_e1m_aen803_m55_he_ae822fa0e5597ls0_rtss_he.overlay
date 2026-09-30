@@ -1,0 +1,20 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * camera probe overlay for the E1M-AEN803 (Ensemble E8, M55-HE) RAM-run.
+ * Identical retarget to sibling probe/fillrate's and to
+ * examples/aen/aen-camera-firstlight's: ROM to ITCM (path-reference form
+ * &itcm -- the phandle-array form makes FLASH_SIZE=0 and overflows the
+ * link), no MCUboot code partition. The CSI-2 -> CPI graph and the sensor
+ * node itself come from the two shields stacked at build time
+ * (e1m_evk_rpi_csi + innomaker_cam_ov9281); nothing camera-specific lives
+ * in this file.
+ */
+
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};

@@ -17,6 +17,7 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 | Directory                                          | What it shows                                                                |
 |----------------------------------------------------|------------------------------------------------------------------------------|
 | [`edgeai-vision-aen`](edgeai-vision-aen/)          | End-to-end EdgeAI vision pipeline -- CSI camera -> ISP Pico -> Ethos-U55 inference -> OLED overlay. The flagship AEN demo. |
+| [`aen-trace-runner`](aen-trace-runner/)            | **bench** -- Trace Runner, the exhibition endless-runner game: M55-HE game + HUD, M55-HP camera + Ethos-U55 MoveNet pose input, bare-metal Cortex-A32 3D renderer on the RK055HDMIPI4MA0 panel; built from this directory and flashed onto an E1M-AEN803 (2026W36-0009): 30.0 fps, 0 dropped frames over three cold boots (2026-09-29). |
 | [`aen-mcuboot-smoke`](aen-mcuboot-smoke/)          | **bench** -- production secure-boot chain `SES -> MCUboot -> slot0 -> app` on the E8 (SE root-of-trust, `sysbuild/aen`); RESULT PASS end-to-end. |
 | [`aen-hp-core-smoke`](aen-hp-core-smoke/)          | **bench** -- first light on the second M55 (RTSS-HP); every other AEN app runs on the M55-HE. |
 | [`aen-power-smoke`](aen-power-smoke/)              | **bench** -- Stage-A low-power smoke: architectural Cortex-M55 WFI sleep + wake, no PM subsystem. |

@@ -2026,8 +2026,11 @@
 	 * (dts/arm/alif/ensemble/common/e1.dtsi: seservice0r mhu@40040000 IRQ 37
 	 * "rx"; seservice0s mhu@40050000 IRQ 38 "tx") -- the same SoC, identical
 	 * addresses.  No clocks/pinctrl: the mailboxes are core-internal (no pads, no
-	 * peripheral clock gate).  status="disabled" by default; an app overlay okays
-	 * the pair + the se_service root node below.  ADR 0017 Tier-2 (INTERIM).  BENCH-UNVERIFIED.
+	 * peripheral clock gate).  status="okay" by default since #2192: the pair
+	 * backs the SE TRNG entropy source below.  ADR 0017 Tier-2 (INTERIM).
+	 * Bench-verified 2026-09-28 on E1M-AEN803: SE requests over this pair
+	 * succeed from BOTH the M55-HE and the M55-HP (the mailboxes are
+	 * core-local aliases).
 	 *
 	 * (seservice1r/s @ 0x40060000/0x40070000 IRQ 39/40 are the SE<->second-RTSS
 	 * mailboxes; the rtsshp_rtsshe_* MHUs @ 0x40080000.. are inter-RTSS -- neither
@@ -2038,7 +2041,7 @@
 		reg = <0x40040000 0x1000>;
 		interrupts = <37 3>;
 		interrupt-names = "rx";
-		status = "disabled";
+		status = "okay"; /* SE channel on by default: backs the SE TRNG entropy source (#2192) */
 	};
 
 	seservice0s: mhu@40050000 {
@@ -2046,7 +2049,7 @@
 		reg = <0x40050000 0x1000>;
 		interrupts = <38 3>;
 		interrupt-names = "tx";
-		status = "disabled";
+		status = "okay"; /* SE channel on by default: backs the SE TRNG entropy source (#2192) */
 	};
 
 	/*
@@ -2080,15 +2083,37 @@
  * SE-service root node -- ties the tx + rx MHUv2 mailboxes into one logical
  * channel for the hal_alif SE client (se_service.c DEVICE_DT_GET_OR_NULLs both
  * phandles at SYS_INIT).  Fork e1.dtsi root-level "se_service" node; placed at
- * the root (not inside &soc) to match the fork.  status="disabled"; an app
- * overlay okays it alongside the two mailboxes.
+ * the root (not inside &soc) to match the fork.  status="okay" by default
+ * since #2192, with the two mailboxes.
  */
 &{/} {
 	se_service: se_service {
 		compatible = "alif,secure-enclave-services";
 		mhuv2-send-node = <&seservice0s>;
 		mhuv2-recv-node = <&seservice0r>;
-		status = "disabled";
+		status = "okay";
+	};
+
+	/*
+	 * Secure-Enclave TRNG as a Zephyr entropy source (#2192), reached over
+	 * the se_service channel above -- no registers of its own. ON BY DEFAULT
+	 * (maintainer decision, 2026-09-28) and chosen as zephyr,entropy below,
+	 * so the CSPRNG and the mbedTLS PSA core seed from it on every AEN board
+	 * instead of TEST_RANDOM_GENERATOR. Bench-proven on both M55 cores with
+	 * the same seservice0r/s pair (the mailboxes are core-local). The first
+	 * CSPRNG draw is an SE GET_RND request -- on a module whose SERAM and
+	 * services library are mismatched that is #1700's clock-drop trigger;
+	 * ADR 0030 makes that pairing unsupported, and a matched v110 pair was
+	 * re-tested clean. An app that must avoid SE traffic can override with
+	 * `&se_trng { status = "disabled"; };` and its own zephyr,entropy.
+	 */
+	se_trng: se_trng {
+		compatible = "alif,se-trng";
+		status = "okay";
+	};
+
+	chosen {
+		zephyr,entropy = &se_trng;
 	};
 };
 

@@ -391,6 +391,7 @@ def test_json_output(tmp_path: Path) -> None:
     assert payload["path"] == "README.md"
 
 
+@pytest.mark.gate_duplicate  # test-all.sh's public-private stage runs this same check
 def test_live_repo_is_clean() -> None:
     # Issue #524's six long-standing findings are now closed: two (the
     # CHANGELOG's audit-doc removal/relocation bullet) are exempt because

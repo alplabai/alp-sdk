@@ -24,6 +24,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 SRC_URI = " \
     file://80-alp-wired-dhcp.network \
+    file://10-alp-wait-online-any.conf \
 "
 
 S = "${WORKDIR}"
@@ -36,4 +37,12 @@ do_install() {
     install -d ${D}${sysconfdir}/systemd/network
     install -m 0644 ${WORKDIR}/80-alp-wired-dhcp.network \
         ${D}${sysconfdir}/systemd/network/80-alp-wired-dhcp.network
+
+    # Both GbE ports are managed, so wait-online must accept either one
+    # (see the .conf header).
+    install -d ${D}${sysconfdir}/systemd/system/systemd-networkd-wait-online.service.d
+    sed 's#@WAIT_ONLINE@#${nonarch_libdir}/systemd/systemd-networkd-wait-online#' \
+        ${WORKDIR}/10-alp-wait-online-any.conf \
+        > ${D}${sysconfdir}/systemd/system/systemd-networkd-wait-online.service.d/10-alp-wait-online-any.conf
+    chmod 0644 ${D}${sysconfdir}/systemd/system/systemd-networkd-wait-online.service.d/10-alp-wait-online-any.conf
 }

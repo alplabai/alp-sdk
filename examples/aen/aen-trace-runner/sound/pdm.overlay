@@ -1,0 +1,42 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * PDM mics U19/U20 (TR_SND_MODE=TEST only: the loopback listener). From the
+ * bench-proven aen-i2s-tas2563-probe overlay: C0 = P6_1, D0 = P6_0, 48 kHz
+ * (the MP34DT05 needs a 1.2-3.25 MHz PDM clock; 8/16 kHz modes are below it).
+ */
+&pinctrl {
+	pinctrl_pdm0: pinctrl_pdm0 {
+		group0 {
+			pinmux = <PIN_P6_1__PDM_C0_C>;
+		};
+		group1 {
+			pinmux = <PIN_P6_0__PDM_D0_C>;
+			input-enable;
+		};
+	};
+};
+
+&{/soc} {
+	pdm: pdm@4902d000 {
+		compatible = "alif,alif-pdm";
+		reg = <0x4902d000 0x1000>;
+		interrupts = <145 3>, <146 3>, <147 3>;
+		interrupt-names = "warning_intr", "error_intr", "audio_det_intr";
+		pinctrl-0 = <&pinctrl_pdm0>;
+		pinctrl-names = "default";
+		clocks = <&clockctrl ALIF_PDM_76M8_CLK>;
+		fifo_watermark = <5>;
+		bypass_iir_filter = <1>;
+		clk-frequency-min = <1200000>;
+		clk-frequency-max = <3250000>;
+		status = "okay";
+	};
+};
+
+/ {
+	aliases {
+		alp-pdm0 = &pdm;
+	};
+};

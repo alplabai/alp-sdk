@@ -422,6 +422,23 @@ config HAS_ALIF_SE_SERVICES
 	  enabled (ARM_MHUV2 + the se_service DT node).  ADR 0017: alp-sdk CONSUMES
 	  the hal_alif client (does not reimplement the SE protocol).
 
+# Alif Ensemble Secure-Enclave TRNG as a Zephyr entropy source (#2192).
+# Driver: zephyr/drivers/entropy/entropy_alif_se.c; binding:
+# zephyr/dts/bindings/entropy/alif,se-trng.yaml.
+config ENTROPY_ALIF_SE
+	bool "Alif Ensemble Secure-Enclave TRNG entropy driver"
+	default y
+	depends on ENTROPY_GENERATOR
+	depends on DT_HAS_ALIF_SE_TRNG_ENABLED
+	depends on HAS_ALIF_SE_SERVICES
+	select ENTROPY_HAS_DRIVER
+	help
+	  Entropy driver over the Secure Enclave's hardware TRNG, reached through
+	  hal_alif's se_service_get_rnd_num() on the SE-service MHUv2 channel.
+	  Point the zephyr,entropy chosen node at the alif,se-trng node so the
+	  CSPRNG (and the mbedTLS PSA core) seeds from it instead of
+	  TEST_RANDOM_GENERATOR. Thread context only: there is no ISR variant.
+
 # hal_alif (drivers/CMakeLists.txt) gates its UTIMER HW library on
 # CONFIG_USE_ALIF_HAL_UTIMER but never DEFINES that symbol -- it only `select`s
 # it (under ALIF_BLE_HOST) and uses it in add_subdirectory_ifdef. On upstream
