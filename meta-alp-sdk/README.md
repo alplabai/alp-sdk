@@ -368,6 +368,13 @@ E8 story is real for the M55 HP/HE cores (see
 A32 Linux cluster's Yocto path that is unbuilt.  alp-sdk does **not**
 redistribute or fork the Alif BSP.
 
+Once this path builds, TF-A's BL32 console needs a carrier-specific
+UART base + pinmux, not the Alif DevKit's UART2 default — see
+`recipes-bsp/trusted-firmware-a/trusted-firmware-a/alif-console-uart-build-knobs.patch`
+and the `:e1m-aen801`/`:e1m-aen701` knobs in
+`trusted-firmware-a_%.bbappend` (#1979). That patch is inert today for
+the same reason this whole section is broken.
+
 ```bash
 # BROKEN -- kept for documentation only, see the callout above.
 # 1. Clone the Alif Ensemble BSP under your own licence (there is no
