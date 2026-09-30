@@ -473,7 +473,13 @@ struct rpc_be {
 	struct rpmsg_virtio_device   rvdev;
 	struct rpmsg_endpoint        ept;
 	bool                         ept_created;
-	bool                         vdev_created;
+	/* virtio_device* returned by remoteproc_create_virtio(); owned by the
+	 * rproc until remoteproc_remove_virtio().  Kept here (rpmsg_deinit_vdev()
+	 * NULLs rvdev.vdev) so teardown frees it even if rpmsg_init_vdev() never
+	 * adopted it. */
+	struct virtio_device *vdev_raw;
+	/* Set only once rpmsg_init_vdev() returned 0 -- gates rpmsg_deinit_vdev(). */
+	bool rvdev_ready;
 	/* Set the instant remoteproc_init() returns successfully -- gates
 	 * rpc_be_teardown()'s remoteproc_shutdown()/remoteproc_remove()
 	 * calls (alp-sdk #683 bench fix): both dereference `rproc->ops`
@@ -491,9 +497,17 @@ struct rpc_be {
 	bool rproc_ready;
 	int  mhu_irq; /* fd cast from dev[UIO_MHU]->irq_info */
 
-	pthread_mutex_t    tx_mutex;
-	pthread_mutex_t    sub_mutex;
-	struct alp_rpc_sub subs[ALP_RPC_SUBS_PER_CHANNEL];
+	/* tx_mutex guards only tx_scratch + the trysend (never held across a
+	 * wait); call_serial serialises alp_rpc_call()s and is never taken on
+	 * the IRQ thread, so a subscribe callback that sends/calls cannot
+	 * deadlock behind a pending call. */
+	pthread_mutex_t tx_mutex;
+	pthread_mutex_t call_serial;
+	pthread_mutex_t sub_mutex;
+	/* Slot whose callback is executing on the IRQ thread (guarded by
+	 * sub_mutex); y_unsubscribe() waits for it to clear. */
+	const struct alp_rpc_sub *cb_slot;
+	struct alp_rpc_sub        subs[ALP_RPC_SUBS_PER_CHANNEL];
 
 	uint8_t tx_scratch[ALP_RPC_TX_FRAME_MAX];
 
@@ -519,7 +533,11 @@ struct rpc_be {
 	bool            recv_active; /* true only while uio_ept_cb() runs for THIS channel */
 	pthread_t       recv_thread; /* identity of the CURRENT recv (valid iff recv_active) */
 	atomic_int      cb_active;   /* drain count -- external y_shutdown() waits for 0 */
-	bool            close_from_worker;
+	/* Whole-ISR in-flight count (ack + get_notification + epilogue), not just
+	 * the uio_ept_cb() window -- y_shutdown() drains it so y_destroy() cannot
+	 * free ch under a running uio_rproc_notify_isr(). */
+	atomic_int isr_active;
+	bool       close_from_worker;
 
 	void *owner;
 };
@@ -829,6 +847,7 @@ static int uio_ept_cb(struct rpmsg_endpoint *ept, void *data, size_t len, uint32
 		}
 		alp_rpc_method_cb_t cb   = match ? match->cb : NULL;
 		void               *user = match ? match->user : NULL;
+		ch->cb_slot              = match;
 		pthread_mutex_unlock(&ch->sub_mutex);
 		if (cb != NULL) {
 			/* GHSA-xhm8-7f87-93q5: cb() may call alp_rpc_close() on THIS
@@ -837,6 +856,9 @@ static int uio_ept_cb(struct rpmsg_endpoint *ept, void *data, size_t len, uint32
 			 * ALP_RPC_SHUTDOWN_DEFERRED; the epilogue in
 			 * uio_rproc_notify_isr() below completes the teardown. */
 			cb(payload, payload_len, user);
+			pthread_mutex_lock(&ch->sub_mutex);
+			ch->cb_slot = NULL;
+			pthread_mutex_unlock(&ch->sub_mutex);
 		}
 	}
 
@@ -870,6 +892,10 @@ static int uio_rproc_notify_isr(int irq, void *arg)
 		return METAL_IRQ_HANDLED;
 	}
 
+	/* Counted BEFORE the first touch of ch (ack, get_notification, epilogue)
+	 * so y_shutdown()'s drain covers the whole handler, not just
+	 * uio_ept_cb(). */
+	atomic_fetch_add(&ch->isr_active, 1);
 	uio_mhu_ack(ch);
 	/* May invoke uio_ept_cb() synchronously, zero or more times, on
 	 * THIS thread -- see this file's header comment. */
@@ -887,9 +913,15 @@ static int uio_rproc_notify_isr(int irq, void *arg)
 	pthread_mutex_lock(&ch->call_mutex);
 	bool close_from_worker = ch->close_from_worker;
 	pthread_mutex_unlock(&ch->call_mutex);
+	/* Self-close finalize frees ch: drop the ISR count first (a self-close
+	 * never drains -- y_shutdown() returned DEFERRED -- so nothing waits on
+	 * it), and touch ch no further after the last decrement otherwise. */
+	int   mhu_irq = ch->mhu_irq;
+	void *owner   = ch->owner;
+	atomic_fetch_sub(&ch->isr_active, 1);
 	if (close_from_worker) {
-		metal_irq_unregister(ch->mhu_irq);
-		alp_rpc_close_finalize(ch->owner);
+		metal_irq_unregister(mhu_irq);
+		alp_rpc_close_finalize(owner);
 	}
 	return METAL_IRQ_HANDLED;
 }
@@ -903,15 +935,16 @@ static void rpc_be_teardown(struct rpc_be *ch)
 	if (ch->ept_created) {
 		rpmsg_destroy_ept(&ch->ept);
 	}
-	if (ch->vdev_created) {
-		/* rpmsg_deinit_vdev() NULLs rvdev.vdev as a side effect -- the
-		 * heap-owning virtio_device* must be captured BEFORE that call
-		 * so remoteproc_remove_virtio() (which frees it) still has a
-		 * valid pointer -- confirmed against
-		 * lib/rpmsg/rpmsg_virtio.c / lib/remoteproc/remoteproc.c. */
-		struct virtio_device *vdev = ch->rvdev.vdev;
-		rpmsg_deinit_vdev(&ch->rvdev);
-		remoteproc_remove_virtio(&ch->rproc, vdev);
+	if (ch->vdev_raw != NULL) {
+		/* rpmsg_deinit_vdev() only on an rvdev rpmsg_init_vdev() adopted;
+		 * the heap-owning virtio_device* was saved at create time (the
+		 * deinit NULLs rvdev.vdev) so remoteproc_remove_virtio() always
+		 * frees it -- confirmed against lib/rpmsg/rpmsg_virtio.c /
+		 * lib/remoteproc/remoteproc.c. */
+		if (ch->rvdev_ready) {
+			rpmsg_deinit_vdev(&ch->rvdev);
+		}
+		remoteproc_remove_virtio(&ch->rproc, ch->vdev_raw);
 	}
 	if (ch->rproc_ready) {
 		(void)remoteproc_shutdown(&ch->rproc);
@@ -928,6 +961,7 @@ static void rpc_be_teardown(struct rpc_be *ch)
 	}
 
 	pthread_mutex_destroy(&ch->tx_mutex);
+	pthread_mutex_destroy(&ch->call_serial);
 	pthread_mutex_destroy(&ch->sub_mutex);
 	pthread_cond_destroy(&ch->call_cond);
 	pthread_mutex_destroy(&ch->call_mutex);
@@ -986,6 +1020,7 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 	ch->mhu_irq = -1;
 
 	pthread_mutex_init(&ch->tx_mutex, NULL);
+	pthread_mutex_init(&ch->call_serial, NULL);
 	pthread_mutex_init(&ch->sub_mutex, NULL);
 	pthread_mutex_init(&ch->call_mutex, NULL);
 	pthread_cond_init(&ch->call_cond, NULL);
@@ -1068,7 +1103,7 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 		fprintf(stderr, "alp_rpc: remoteproc_create_virtio() failed\n");
 		goto err;
 	}
-	ch->vdev_created = true;
+	ch->vdev_raw = vdev;
 
 	{
 		struct metal_io_region *shm1_io = metal_device_io_region(ch->dev[UIO_VRING_SHM1], 0);
@@ -1081,6 +1116,7 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 			fprintf(stderr, "alp_rpc: rpmsg_init_vdev() failed\n");
 			goto err;
 		}
+		ch->rvdev_ready = true;
 	}
 
 	/* REFERENCE.md Sec. 5 platform_info.c quirk -- see this file's
@@ -1178,7 +1214,14 @@ static alp_status_t y_unsubscribe(alp_rpc_backend_state_t *st, const char *metho
 	struct rpc_be *ch = rpc_be_data_load(st);
 	if (ch == NULL) return ALP_ERR_NOT_READY;
 
-	uint32_t h = fnv1a_32(method);
+	/* A callback calling unsubscribe on the IRQ thread must not wait on
+	 * itself. */
+	pthread_mutex_lock(&ch->call_mutex);
+	bool on_irq_thread = ch->recv_active && pthread_equal(pthread_self(), ch->recv_thread);
+	pthread_mutex_unlock(&ch->call_mutex);
+
+	uint32_t                  h       = fnv1a_32(method);
+	const struct alp_rpc_sub *cleared = NULL;
 	pthread_mutex_lock(&ch->sub_mutex);
 	alp_status_t rc = ALP_ERR_INVAL;
 	for (size_t i = 0; i < ALP_RPC_SUBS_PER_CHANNEL; ++i) {
@@ -1190,8 +1233,17 @@ static alp_status_t y_unsubscribe(alp_rpc_backend_state_t *st, const char *metho
 			s->method[0]   = '\0';
 			s->method_hash = 0u;
 			rc             = ALP_OK;
+			cleared        = s;
 			break;
 		}
+	}
+	/* Do not return while that slot's callback is still running on the IRQ
+	 * thread -- the caller may free `user` the moment we return. */
+	while (cleared != NULL && !on_irq_thread && ch->cb_slot == cleared) {
+		pthread_mutex_unlock(&ch->sub_mutex);
+		struct timespec ts = { .tv_sec = 0, .tv_nsec = 1000000L };
+		nanosleep(&ts, NULL);
+		pthread_mutex_lock(&ch->sub_mutex);
 	}
 	pthread_mutex_unlock(&ch->sub_mutex);
 	return rc;
@@ -1251,12 +1303,15 @@ static alp_status_t y_call(alp_rpc_backend_state_t *st,
 		g_y_call_test_late_staging_hook();
 	}
 
-	pthread_mutex_lock(&ch->tx_mutex);
+	/* One call in flight at a time.  call_serial (not tx_mutex) is held for
+	 * the wait: the IRQ thread never takes it, so a subscribe callback that
+	 * send()s or call()s cannot block the thread that delivers our reply. */
+	pthread_mutex_lock(&ch->call_serial);
 
 	pthread_mutex_lock(&ch->call_mutex);
 	if (ch->closing) {
 		pthread_mutex_unlock(&ch->call_mutex);
-		pthread_mutex_unlock(&ch->tx_mutex);
+		pthread_mutex_unlock(&ch->call_serial);
 		return ALP_ERR_NOT_READY;
 	}
 	strncpy(ch->call_method, method, sizeof(ch->call_method) - 1);
@@ -1268,6 +1323,7 @@ static alp_status_t y_call(alp_rpc_backend_state_t *st,
 	ch->call_pending  = true;
 	pthread_mutex_unlock(&ch->call_mutex);
 
+	pthread_mutex_lock(&ch->tx_mutex);
 	int          built = frame_build(ch->tx_scratch, sizeof ch->tx_scratch, method, req, req_len);
 	alp_status_t s     = ALP_OK;
 	if (built < 0) {
@@ -1280,12 +1336,13 @@ static alp_status_t y_call(alp_rpc_backend_state_t *st,
 			s = ALP_ERR_IO;
 		}
 	}
+	pthread_mutex_unlock(&ch->tx_mutex);
 
 	if (s != ALP_OK) {
 		pthread_mutex_lock(&ch->call_mutex);
 		ch->call_pending = false;
 		pthread_mutex_unlock(&ch->call_mutex);
-		pthread_mutex_unlock(&ch->tx_mutex);
+		pthread_mutex_unlock(&ch->call_serial);
 		return s;
 	}
 
@@ -1301,7 +1358,7 @@ static alp_status_t y_call(alp_rpc_backend_state_t *st,
 		if (clock_gettime(CLOCK_REALTIME, &deadline) != 0) {
 			ch->call_pending = false;
 			pthread_mutex_unlock(&ch->call_mutex);
-			pthread_mutex_unlock(&ch->tx_mutex);
+			pthread_mutex_unlock(&ch->call_serial);
 			return ALP_ERR_IO;
 		}
 		uint64_t add_s  = (uint64_t)(timeout_ms / 1000u);
@@ -1335,7 +1392,7 @@ static alp_status_t y_call(alp_rpc_backend_state_t *st,
 	}
 	pthread_mutex_unlock(&ch->call_mutex);
 
-	pthread_mutex_unlock(&ch->tx_mutex);
+	pthread_mutex_unlock(&ch->call_serial);
 	return s;
 }
 
@@ -1375,7 +1432,7 @@ static alp_rpc_shutdown_result_t y_shutdown(alp_rpc_backend_state_t *st)
 	if (ch->mhu_irq >= 0) {
 		metal_irq_unregister(ch->mhu_irq);
 	}
-	while (atomic_load(&ch->cb_active) != 0) {
+	while (atomic_load(&ch->cb_active) != 0 || atomic_load(&ch->isr_active) != 0) {
 		/* Sleep, never spin -- see src/rpc_dispatch.c's _rpc_drain() doc
 		 * comment for the priority-inversion trap a busy spin would
 		 * reintroduce here. */
