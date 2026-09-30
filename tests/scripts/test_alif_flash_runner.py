@@ -56,12 +56,23 @@ if "runners.core" not in sys.modules:
 
         def check_call(self, cmd, cwd=None):
             self.calls.append((list(cmd), cwd))
+            _fake_gen_toc_map(cmd, cwd)
 
     _fake_core.RunnerCaps = _RunnerCaps
     _fake_core.ZephyrBinaryRunner = _ZephyrBinaryRunner
     sys.modules["runners.core"] = _fake_core
 
 from runners import alif_flash  # noqa: E402
+
+
+def _fake_gen_toc_map(cmd, cwd):
+    """What a real app-gen-toc leaves behind: build/app-package-map.txt, here
+    with a package start inside the SE-reserved atoc band so the #2234
+    extent check (run before the #2262 guard) passes."""
+    if cmd and Path(str(cmd[0])).name == "app-gen-toc" and cwd:
+        m = Path(cwd) / "build" / "app-package-map.txt"
+        m.parent.mkdir(parents=True, exist_ok=True)
+        m.write_text("APP Package Start Address: 0x8057A000\n", encoding="utf-8", newline="")
 
 
 # ---------------------------------------------------------------------
@@ -372,7 +383,10 @@ def _make_runner(tmp_path, device="AE822FA0E5597LS0_HE", reset_vector=0x58000401
     # import order.
     runner.calls = []
     runner.logger = logging.getLogger("test_alif_flash_runner")
-    runner.check_call = lambda cmd, cwd=None: runner.calls.append((list(cmd), cwd))
+    def _cc(cmd, cwd=None):
+        runner.calls.append((list(cmd), cwd))
+        _fake_gen_toc_map(cmd, cwd)
+    runner.check_call = _cc
     return runner
 
 
