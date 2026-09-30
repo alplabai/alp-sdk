@@ -72,9 +72,16 @@ alp_qenc_t *alp_qenc_open(const alp_qenc_config_t *cfg)
 	 * isn't a gpio-qdec node, so we walk down to the next candidate
 	 * (zephyr_drv, priority 100) instead of failing the whole open --
 	 * issue #2095.  Any other status is a real failure and is
-	 * surfaced immediately. */
+	 * surfaced immediately.
+	 *
+	 * The walk stops before the vendor "sw_fallback" candidate: a
+	 * real backend declining NOSUPPORT means "wrong shape for this
+	 * alias" (try the next real backend), not "no real backend
+	 * exists" -- silently landing on sw_fallback's fake counter here
+	 * would return a plausible-looking position for hardware that
+	 * was never actually opened. */
 	alp_status_t rc = ALP_ERR_NOT_IMPLEMENTED;
-	while (be != NULL) {
+	while (be != NULL && (be->vendor == NULL || strcmp(be->vendor, "sw_fallback") != 0)) {
 		const alp_qenc_ops_t *ops = (const alp_qenc_ops_t *)be->ops;
 		if (ops != NULL && ops->open != NULL) {
 			memset(&h->state, 0, sizeof(h->state));

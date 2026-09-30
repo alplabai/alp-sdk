@@ -14,10 +14,16 @@
  *
  * This backend registers a per-device INPUT_CALLBACK_DEFINE for every
  * alp-qenc<N> alias whose devicetree node is compatible "gpio-qdec"
- * and accumulates the relative events into a position, atomically --
- * the input subsystem's callback runs on its own thread (or inline
- * under CONFIG_INPUT_MODE_SYNCHRONOUS), asynchronously with respect
- * to any get_position()/reset_position() caller.
+ * and accumulates the relative events into a shared per-index
+ * position, atomically -- the input subsystem's callback runs on its
+ * own thread (or inline under CONFIG_INPUT_MODE_SYNCHRONOUS),
+ * asynchronously with respect to any get_position()/reset_position()
+ * caller. Each open() baselines the handle to that shared
+ * accumulator's current value, so get_position()/reset_position() are
+ * relative to the handle's own baseline -- like every other qenc
+ * backend's fresh-open-reads-0 contract -- instead of the raw
+ * monotonic accumulator, which would let one handle's reset zero out
+ * another handle opened earlier.
  *
  * Selection: registered at a higher priority (110) than zephyr_drv's
  * 100, both under silicon_ref "*".  An alp-qenc<N> alias that is NOT
@@ -92,24 +98,28 @@ q_open(const alp_qenc_config_t *cfg, alp_qenc_backend_state_t *st, alp_capabilit
 	 * dispatcher's fall-through tries the sensor backend next. */
 	if (dev == NULL) return ALP_ERR_NOSUPPORT;
 	if (!device_is_ready(dev)) return ALP_ERR_NOT_READY;
-	st->dev           = (void *)dev;
-	st->encoder_id    = cfg->encoder_id;
+	st->dev        = (void *)dev;
+	st->encoder_id = cfg->encoder_id;
+	/* Baseline the handle at the shared accumulator's current value so
+	 * a fresh open() reads back position 0, like every other qenc
+	 * backend -- otherwise a second handle opened after the first has
+	 * already moved the encoder would inherit its offset, and either
+	 * handle's reset_position() would zero the accumulator out from
+	 * under the other. */
 	st->last_position = (int32_t)atomic_get(&_pos[cfg->encoder_id]);
 	return ALP_OK;
 }
 
 static alp_status_t q_get_position(alp_qenc_backend_state_t *st, int32_t *pos_out)
 {
-	int32_t pos       = (int32_t)atomic_get(&_pos[st->encoder_id]);
-	st->last_position = pos;
-	*pos_out          = pos;
+	int32_t pos = (int32_t)atomic_get(&_pos[st->encoder_id]);
+	*pos_out    = pos - st->last_position;
 	return ALP_OK;
 }
 
 static alp_status_t q_reset_position(alp_qenc_backend_state_t *st)
 {
-	atomic_set(&_pos[st->encoder_id], 0);
-	st->last_position = 0;
+	st->last_position = (int32_t)atomic_get(&_pos[st->encoder_id]);
 	return ALP_OK;
 }
 

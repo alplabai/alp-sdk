@@ -28,7 +28,7 @@
 
 ZTEST_SUITE(alp_qenc_gpio_qdec, NULL, NULL, NULL, NULL, NULL);
 
-ZTEST(alp_qenc_gpio_qdec, test_open_selects_gpio_qdec_backend)
+ZTEST(alp_qenc_gpio_qdec, test_open_get_position_uses_gpio_qdec_backend_not_zephyr_drv)
 {
 	const struct device *dev = DEVICE_DT_GET(QDEC_NODE);
 	zassert_true(device_is_ready(dev), "gpio-qdec device not ready");
@@ -36,6 +36,30 @@ ZTEST(alp_qenc_gpio_qdec, test_open_selects_gpio_qdec_backend)
 	alp_qenc_config_t cfg = ALP_QENC_CONFIG_DEFAULT(0);
 	alp_qenc_t        *h  = alp_qenc_open(&cfg);
 	zassert_not_null(h, "expected gpio_qdec backend to accept alp-qenc0");
+
+	/* zephyr_drv (priority 100) would ALSO accept this node's open()
+	 * -- it only checks device_is_ready(), not the compatible string
+	 * -- but its get_position() calls sensor_sample_fetch(), which the
+	 * gpio-qdec input driver does not implement.  A gpio_qdec-backend
+	 * open must win priority (110 > 100) and this call must succeed,
+	 * proving the higher-priority gpio_qdec ops -- not zephyr_drv's --
+	 * are the ones wired into this handle. */
+	int32_t pos = -1;
+	zassert_equal(alp_qenc_get_position(h, &pos), ALP_OK);
+
+	alp_qenc_close(h);
+}
+
+ZTEST(alp_qenc_gpio_qdec, test_open_falls_through_past_non_gpio_qdec_alias)
+{
+	/* alp-qenc1 aliases gpio0 directly -- a real, ready device that
+	 * is NOT compatible "gpio-qdec".  The gpio_qdec backend's open()
+	 * must decline it with ALP_ERR_NOSUPPORT, and the dispatcher must
+	 * walk down to zephyr_drv (priority 100) instead of failing the
+	 * whole open -- issue #2095's open-time fall-through. */
+	alp_qenc_config_t cfg = ALP_QENC_CONFIG_DEFAULT(1);
+	alp_qenc_t        *h  = alp_qenc_open(&cfg);
+	zassert_not_null(h, "expected fall-through to zephyr_drv for a non-gpio-qdec alias");
 	alp_qenc_close(h);
 }
 
