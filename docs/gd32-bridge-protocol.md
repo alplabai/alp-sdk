@@ -355,6 +355,13 @@ Both enables drive their module low-then-high: the host holds
 `GPIO_WRITE` low for >= 10 ms before the rising edge, matching the
 on-module Murata LBEE5HY2FY-922's REG_ON timing requirement.
 
+The Linux `gpio-gd32-bridge` driver additionally exports line 21 `se-rst` (line 20 is
+reserved for `can-stby`, bridge bit 20, #2341), which is not a `GPIO_WRITE` pad: setting it sends `CMD_SE_RESET`
+(`0x41`, payload one byte, 1 = assert = hold the OPTIGA Trust M in reset) and
+it is never replayed, so a bridge reset leaves the part released. Userspace
+pulses it through the gpiochip labelled `gd32-bridge-gpio` instead of opening
+the bridge itself (#2507).
+
 A bridge below minor 11 never learned these two bits; a host driving
 `GPIO_WRITE` against them on such a bridge silently powers nothing
 while the firmware reports success. This is true only through protocol
