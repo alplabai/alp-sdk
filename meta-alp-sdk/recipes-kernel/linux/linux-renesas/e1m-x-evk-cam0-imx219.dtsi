@@ -1,0 +1,103 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+/*
+ * OPT-IN camera path: one Sony IMX219 (RPi Camera Module 2 class, 2-lane
+ * MIPI CSI-2) on the E1M-X-EVK CAM0 connector -> RZ/V2N MIPI CSI-2
+ * receiver -> CRU0 -> /dev/video*.  Issue #1149.
+ *
+ * NOT part of the default dtb.  It is pulled in only by the wrapper dts
+ * (e1m-v2n101-x-evk-cam0.dts / e1m-v2m101-x-evk-cam0.dts), which the
+ * linux-renesas bbappend adds to KERNEL_DEVICETREE when the local.conf
+ * switch ALP_ENABLE_CAM0_IMX219 = "1" is set.  Default: switch off, the
+ * stock dtb is byte-identical to before.
+ *
+ * STATUS: BENCH-UNVERIFIED and UNVALIDATED through dtc.  No sensor was on
+ * the bench and this tree carries no linux-renesas source.  Three things
+ * are assumptions the first bake/boot must confirm:
+ *   1. The SoC labels `csi2` and `cru0` and their OF-graph port layout
+ *      (port@0 = sensor side of the receiver, cru0 `port`/`endpoint`) are
+ *      taken from the Renesas RZ/V BSP convention.  Diff against the
+ *      OV5645 nodes in arch/arm64/boot/dts/renesas/
+ *      r9a09g056n48-rzv2n-evk.dts (BSP v6.30, SHA 6717c06) and fix the
+ *      graph if it differs.
+ *   2. The sensor is a PLACEHOLDER: the carrier metadata names no part
+ *      (e1m-x-evk.yaml: `ov5640: false`, bare connectors).  IMX219 was
+ *      chosen only because it is the mainline-driver RPi-CSI module the
+ *      repo's camera shields already cover.  Swap the compatible / CCI
+ *      address / lane count here if another sensor is fitted.
+ *   3. CAM0 is assumed to land on CSI-2 receiver 0 with 2 lanes.  The
+ *      connector -> receiver -> lane mapping is not in tree (see the CSI
+ *      TODO in e1m-x-evk.dtsi).
+ *
+ * Deliberately NOT modelled (no SoC-side crosswalk in tree): the CAM0
+ * enable / reset / mux GPIOs (XEVK_PIN_CAM0_EN / _RST / _MUX_SEL are
+ * E1M pads, SoC pins TBD) and the GD32-owned camera LDO enables.  The
+ * sensor is therefore not power-sequenced by Linux; it must come up from
+ * the carrier defaults.  CAM1 is not wired: its control bus (E1M-X I2C3)
+ * terminates on the GD32 bridge, not on a Linux I2C master.
+ *
+ * Composes ON TOP of e1m-v2n-som.dtsi + e1m-x-evk.dtsi (which already
+ * reserve the CRU buffer pool, cru_buffer@b4000000).  It touches no node
+ * the audio or CAN carrier work edits.
+ */
+
+#include <dt-bindings/pinctrl/rzg2l-pinctrl.h>
+
+/ {
+	cam0_xclk: cam0-xclk {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <24000000>;
+	};
+};
+
+&pinctrl {
+	/* E1M-X I2C2 (XEVK_I2C_BUS_DSI_CSI0) = RIIC2: SDA P34, SCL P35
+	 * (metadata/e1m_modules/v2n/renesas-peripheral-map.tsv). */
+	i2c2_pins: i2c2 {
+		pinmux = <RZV2N_PORT_PINMUX(3, 4, 1)>, /* I2C2_SDA */
+			 <RZV2N_PORT_PINMUX(3, 5, 1)>; /* I2C2_SCL */
+		bias-pull-up;
+	};
+};
+
+&i2c2 {
+	pinctrl-0 = <&i2c2_pins>;
+	pinctrl-names = "default";
+	clock-frequency = <400000>;
+	status = "okay";
+
+	cam0_sensor: camera@10 {
+		compatible = "sony,imx219";
+		reg = <0x10>;
+		clocks = <&cam0_xclk>;
+
+		port {
+			cam0_sensor_out: endpoint {
+				remote-endpoint = <&csi2_in>;
+				data-lanes = <1 2>;
+				link-frequencies = /bits/ 64 <456000000>;
+			};
+		};
+	};
+};
+
+&csi2 {
+	status = "okay";
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+			csi2_in: endpoint {
+				remote-endpoint = <&cam0_sensor_out>;
+				data-lanes = <1 2>;
+			};
+		};
+	};
+};
+
+&cru0 {
+	status = "okay";
+};

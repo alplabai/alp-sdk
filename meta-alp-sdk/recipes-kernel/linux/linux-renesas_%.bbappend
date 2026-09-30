@@ -271,3 +271,16 @@ SRC_URI:append:e1m-v2m101 = " file://display.cfg"
 # included, carries that override (conf/machine/e1m-v2m10*-a55.conf), so a
 # second :e1m-v2m101 append would add the patch twice and do_patch fails.
 SRC_URI:append:e1m-v2n101 = " file://tas2563-audio.cfg file://0009-ASoC-tas2562-reset-the-amplifier-at-probe.patch"
+
+# Camera (#1149): OPT-IN IMX219 on the E1M-X-EVK CAM0 connector ->
+# CSI-2 receiver -> CRU0.  BENCH-UNVERIFIED.  Off by default: the shipped
+# dtb does not change.  Set ALP_ENABLE_CAM0_IMX219 = "1" in local.conf to
+# ALSO build renesas/e1m-v2{n,m}101-x-evk-cam0.dtb and merge
+# camera-csi.cfg; the bootloader `fdtfile` must then name that dtb (the
+# default dtb stays in KERNEL_DEVICETREE as the fallback).  Placeholder
+# sensor + assumed CSI/CRU labels: see e1m-x-evk-cam0-imx219.dtsi and
+# docs/v2n-camera-csi.md.
+ALP_ENABLE_CAM0_IMX219 ??= "0"
+ALP_CAM0_DTB = "${@'e1m-v2m101-x-evk-cam0' if 'v2m' in d.getVar('MACHINE') else 'e1m-v2n101-x-evk-cam0'}"
+KERNEL_DEVICETREE:append = "${@' renesas/' + d.getVar('ALP_CAM0_DTB') + '.dtb' if d.getVar('ALP_ENABLE_CAM0_IMX219') == '1' else ''}"
+SRC_URI += "${@' file://camera-csi.cfg' if d.getVar('ALP_ENABLE_CAM0_IMX219') == '1' else ''}"
