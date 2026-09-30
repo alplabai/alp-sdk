@@ -212,6 +212,19 @@ extern "C" {
  *  See docs/gd32-bridge-protocol.md's version-history table. */
 #define GD32G553_REG_ON_MIN_PROTOCOL_MINOR 11u
 
+/** GPIO expander line carrying the shared standby (STB) input of the two
+ *  on-module TCAN1044 CAN-FD transceivers (GD32 pad `PB13`).  Boots
+ *  OUTPUT HIGH (standby); drive low to enable the transceivers.  Valid
+ *  only on bridges advertising protocol minor
+ *  @ref GD32G553_CAN_STBY_MIN_PROTOCOL_MINOR or newer. */
+#define GD32G553_GPIO_LINE_CAN_STBY 20u
+
+/** Minimum protocol MINOR at which the bridge's GPIO expander grows to
+ *  21 lines, adding @ref GD32G553_GPIO_LINE_CAN_STBY (firmware 0.2.16).
+ *  Mirrors the kernel driver's GD32_PROTO_MINOR_CAN_STBY.  See
+ *  docs/gd32-bridge-protocol.md's version-history table. */
+#define GD32G553_CAN_STBY_MIN_PROTOCOL_MINOR 13u
+
 /** v0.7 link-feature bits (CMD_LINK_FEATURES payload).  STATUS_SEQ:
  *  once granted, every SPI reply's STATUS byte carries a 4-bit
  *  slave-side sequence stamp in bits [7:4] that advances per freshly

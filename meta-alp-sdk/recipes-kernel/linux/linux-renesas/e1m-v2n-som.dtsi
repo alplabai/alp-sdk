@@ -852,7 +852,7 @@
 	 *
 	 * Linux netdev names: rcar_canfd names netdevs in channel probe
 	 * order (channel2 -> can0), which swaps the E1M numbering. The
-	 * 0012 kernel patch reports the channel in dev_port and the
+	 * 0013 kernel patch reports the channel in dev_port and the
 	 * alp-canfd-udev rule renames them: channel3 -> can_e1m0
 	 * (E1M_X_CAN0), channel2 -> can_e1m1 (E1M_X_CAN1). <alp/can.h>
 	 * opens can_e1m<N>.

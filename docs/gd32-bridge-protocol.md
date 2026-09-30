@@ -350,6 +350,13 @@ CYW55513) Wi-Fi+BT module's two REG_ON enables:
 |-----|------------|----------|--------------|------------|
 | 18  | `bt-reg-on` | `PE14`  | OUTPUT LOW   | `GD32G553_GPIO_LINE_BT_REG_ON` |
 | 19  | `wl-reg-on` | `PE15`  | OUTPUT LOW   | `GD32G553_GPIO_LINE_WL_REG_ON` |
+| 20  | `can-stby`  | `PB13`  | OUTPUT HIGH  | `GD32G553_GPIO_LINE_CAN_STBY` |
+
+Bit 20 (`can-stby`, protocol minor `>= 13`, firmware `0.2.16`) is the shared
+standby line of the two on-module TCAN1044 CAN-FD transceivers (U15/U16);
+it boots HIGH (both transceivers in standby) and the host drives it low to
+enable them. A bridge below minor 13 rejects or ignores the bit, so a host
+must gate on `GD32G553_CAN_STBY_MIN_PROTOCOL_MINOR`.
 
 Both enables drive their module low-then-high: the host holds
 `GPIO_WRITE` low for >= 10 ms before the rising edge, matching the
@@ -1230,7 +1237,11 @@ bounded run of `STATUS_BUSY` right after an OTA reset committing a
 trial-capable image (firmware release >= 0.2.14, a separate axis from
 this wire-protocol version — see §10); a host that already treats
 `STATUS_BUSY` as retryable (as `gd32g553_init()` now does) sees no
-behaviour change beyond that widened retry window.  **v0.14**
+behaviour change beyond that widened retry window.  **v0.13**
+(firmware `0.2.16`) grows the GPIO expander pad map from 20 to 21 lines,
+adding `can-stby` (bit 20, `PB13`, boots OUTPUT HIGH, §3.1) and makes
+`GPIO_WRITE` reject a write to an unknown pad bit outright; `GET_VERSION`'s SPI
+reply for `0.13.0` is `A5 00 00 0D 00 63 6E`.  **v0.14**
 (gh#101) widens `OTA_GET_STATE`'s reply 5 -> 6 bytes, appending the
 `err` cause byte documented above (§10) -- additive per the
 opcode-derived-length rule, so a host below

@@ -76,7 +76,7 @@ SRC_URI:append = " \
     file://0011-irqchip-renesas-rzv2h-mask-the-ICU-error-sources-the-handler-cannot-ack.patch \
     file://0012-uio-pdrv-genirq-default-of_id-to-generic-uio.patch \
     file://uio.cfg \
-    file://0012-can-rcar_canfd-report-the-channel-number-in-dev_port.patch \
+    file://0013-can-rcar_canfd-report-the-channel-number-in-dev_port.patch \
 "
 
 # 0012 (UIO default match, #2374): uio_pdrv_genirq binds no DT node until

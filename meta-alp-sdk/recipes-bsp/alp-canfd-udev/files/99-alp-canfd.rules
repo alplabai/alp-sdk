@@ -5,7 +5,7 @@
 # rcar_canfd probe order.  E1M_X_CAN0 is SoC CANFD channel 3 (U15) and
 # E1M_X_CAN1 is channel 2 (U16); the driver probes channel 2 first, so
 # plain can0/can1 are swapped against the E1M numbering (#2352).
-# dev_port carries the channel (0012-can-rcar_canfd-report-the-channel-
+# dev_port carries the channel (0013-can-rcar_canfd-report-the-channel-
 # number-in-dev_port.patch).  <alp/can.h> opens can_e1m<N> first.
 SUBSYSTEM=="net", ACTION=="add", DRIVERS=="rcar_canfd", ATTR{dev_port}=="3", NAME="can_e1m0"
 SUBSYSTEM=="net", ACTION=="add", DRIVERS=="rcar_canfd", ATTR{dev_port}=="2", NAME="can_e1m1"
