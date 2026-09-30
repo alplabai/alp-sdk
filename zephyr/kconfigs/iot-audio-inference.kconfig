@@ -41,8 +41,7 @@ config ALP_SDK_WIFI_CC3501E
 config ALP_SDK_WIFI_SW_FALLBACK
 	bool "Software Wi-Fi fallback (no-op stub)"
 	depends on ALP_SDK
-	default y if BOARD_NATIVE_SIM || ARCH_POSIX
-	default n
+	default y
 	help
 	  Compiles a no-op Wi-Fi backend that registers as a wildcard
 	  at priority 0.  For native_sim build / test only -- no real
@@ -70,8 +69,7 @@ config ALP_SDK_IOT_MQTT
 config ALP_SDK_MQTT_SW_FALLBACK
 	bool "Software MQTT fallback (no-op stub)"
 	depends on ALP_SDK
-	default y if BOARD_NATIVE_SIM || ARCH_POSIX
-	default n
+	default y
 	help
 	  Compiles a no-op MQTT backend that registers as a wildcard
 	  at priority 0.  For native_sim build / test only -- no real
@@ -141,8 +139,7 @@ config ALP_SDK_AUDIO_OUT
 config ALP_SDK_AUDIO_SW_FALLBACK
 	bool "Software audio fallback (silence source / null sink)"
 	depends on ALP_SDK
-	default y if BOARD_NATIVE_SIM || ARCH_POSIX
-	default n
+	default y
 	help
 	  Compiles a stub audio backend that registers as a wildcard
 	  at priority 0.  For native_sim build / test and for any
@@ -261,7 +258,7 @@ config ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93
 
 config ALP_SDK_INFERENCE_SW_FALLBACK
 	bool "Software fallback (stateless NOSUPPORT stub, priority 0)"
-	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default y
 	help
 	  Compile src/backends/inference/sw_fallback.c.  Registered at
 	  priority 0 against silicon_ref="*" so it loses to every real

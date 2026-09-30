@@ -48,8 +48,7 @@ config ALP_SDK_BLE_CC3501E
 config ALP_SDK_BLE_SW_FALLBACK
 	bool "Software BLE fallback (no-op stub)"
 	depends on ALP_SDK
-	default y if BOARD_NATIVE_SIM || ARCH_POSIX
-	default n
+	default y
 	help
 	  Compiles a no-op BLE backend that registers as a wildcard at
 	  priority 0.  For native_sim build / test only -- no real
@@ -83,8 +82,7 @@ config ALP_SDK_SECURITY
 config ALP_SDK_SECURITY_SW_FALLBACK
 	bool "Software security fallback (no-op / deterministic random)"
 	depends on ALP_SDK
-	default y if BOARD_NATIVE_SIM || ARCH_POSIX
-	default n
+	default y
 	help
 	  Compiles a stub security backend that registers as a wildcard
 	  at priority 0.  For native_sim build / test and for any build

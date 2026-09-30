@@ -10,8 +10,7 @@ config ALP_SDK_MAX_UART_HANDLES
 config ALP_SDK_UART_SW_FALLBACK
 	bool "Software UART fallback (in-memory circular buffer)"
 	depends on ALP_SDK
-	default y if BOARD_NATIVE_SIM || ARCH_POSIX
-	default n
+	default y
 	help
 	  Compiles a deterministic in-memory UART loopback backend that
 	  registers as a wildcard at priority 0.  write() appends bytes
@@ -52,8 +51,7 @@ config ALP_SDK_MAX_GPIO_HANDLES
 config ALP_SDK_GPIO_SW_FALLBACK
 	bool "Software GPIO fallback (stateless stub)"
 	depends on ALP_SDK
-	default y if BOARD_NATIVE_SIM || ARCH_POSIX
-	default n
+	default y
 	help
 	  Compiles a stateless GPIO stub backend that registers as a
 	  wildcard at priority 0.  open() succeeds, configure / write
@@ -91,8 +89,7 @@ config ALP_SDK_MAX_PWM_HANDLES
 config ALP_SDK_PWM_SW_FALLBACK
 	bool "Software PWM fallback (stateless stub)"
 	depends on ALP_SDK
-	default y if BOARD_NATIVE_SIM || ARCH_POSIX
-	default n
+	default y
 	help
 	  Compiles a stateless PWM stub backend that registers as a
 	  wildcard at priority 0.  open() succeeds and primes the
@@ -170,8 +167,7 @@ config ALP_SDK_STORAGE_ZEPHYR_LITTLEFS
 config ALP_SDK_STORAGE_SW_FALLBACK
 	bool "Software storage fallback (stateless stub)"
 	depends on ALP_SDK
-	default y if BOARD_NATIVE_SIM || ARCH_POSIX
-	default n
+	default y
 	help
 	  Compiles a stateless storage backend that registers as a
 	  wildcard at priority 0.  Every op besides open returns

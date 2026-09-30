@@ -11,8 +11,7 @@ config ALP_SDK_MAX_I2S_HANDLES
 config ALP_SDK_I2S_SW_FALLBACK
 	bool "Software I2S fallback (stateless stub)"
 	depends on ALP_SDK
-	default y if BOARD_NATIVE_SIM || ARCH_POSIX
-	default n
+	default y
 	help
 	  Compiles a stateless I2S stub backend that registers as a
 	  wildcard at priority 0.  open() succeeds, start / stop / close
@@ -27,8 +26,7 @@ config ALP_SDK_MAX_CAN_HANDLES
 config ALP_SDK_CAN_SW_FALLBACK
 	bool "Software CAN fallback (stateless stub)"
 	depends on ALP_SDK
-	default y if BOARD_NATIVE_SIM || ARCH_POSIX
-	default n
+	default y
 	help
 	  Compiles a stateless CAN stub backend that registers as a
 	  wildcard at priority 0.  open() succeeds, start / stop / close
@@ -89,8 +87,7 @@ config ALP_SDK_ADC_SW_FALLBACK
 config ALP_SDK_RTC_SW_FALLBACK
 	bool "Software RTC fallback (deterministic frozen clock)"
 	depends on ALP_SDK
-	default y if BOARD_NATIVE_SIM || ARCH_POSIX
-	default n
+	default y
 	help
 	  Compiles a software RTC backend that registers as a wildcard
 	  at priority 0.  Picked only when no hardware backend matches.
@@ -101,8 +98,7 @@ config ALP_SDK_RTC_SW_FALLBACK
 config ALP_SDK_WDT_SW_FALLBACK
 	bool "Software WDT fallback (no-op stub)"
 	depends on ALP_SDK
-	default y if BOARD_NATIVE_SIM || ARCH_POSIX
-	default n
+	default y
 	help
 	  Compiles a no-op software watchdog backend that registers as
 	  a wildcard at priority 0.  For native_sim builds and tests
@@ -112,8 +108,7 @@ config ALP_SDK_WDT_SW_FALLBACK
 config ALP_SDK_COUNTER_SW_FALLBACK
 	bool "Software counter fallback (deterministic tick generator)"
 	depends on ALP_SDK
-	default y if BOARD_NATIVE_SIM || ARCH_POSIX
-	default n
+	default y
 	help
 	  Compiles a deterministic software counter backend that
 	  registers as a wildcard at priority 0.  Alarms are not
@@ -123,8 +118,7 @@ config ALP_SDK_COUNTER_SW_FALLBACK
 config ALP_SDK_QENC_SW_FALLBACK
 	bool "Software QEnc fallback (deterministic step counter)"
 	depends on ALP_SDK
-	default y if BOARD_NATIVE_SIM || ARCH_POSIX
-	default n
+	default y
 	help
 	  Compiles a deterministic software quadrature-encoder backend
 	  that registers as a wildcard at priority 0.  get_position

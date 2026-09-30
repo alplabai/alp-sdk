@@ -42,8 +42,7 @@ config ALP_SDK_MPROC
 config ALP_SDK_MPROC_SW_FALLBACK
 	bool "Software mproc fallback (no-op stubs)"
 	depends on ALP_SDK
-	default y if BOARD_NATIVE_SIM || ARCH_POSIX
-	default n
+	default y
 	help
 	  Compiles a no-op mproc backend that registers as a wildcard
 	  at priority 0.  For native_sim build / test only -- no real
@@ -112,8 +111,7 @@ config ALP_SDK_RPC
 config ALP_SDK_RPC_SW_FALLBACK
 	bool "Software RPC fallback (no-op stub)"
 	depends on ALP_SDK
-	default y if BOARD_NATIVE_SIM || ARCH_POSIX
-	default n
+	default y
 	help
 	  Compiles a no-op RPC backend that registers as a wildcard at
 	  priority 0.  For native_sim build / test only -- no real
@@ -185,8 +183,7 @@ config ALP_SDK_USB
 config ALP_SDK_USB_SW_FALLBACK
 	bool "Software USB fallback (no-op stub)"
 	depends on ALP_SDK
-	default y if BOARD_NATIVE_SIM || ARCH_POSIX
-	default n
+	default y
 	help
 	  Compiles a no-op USB backend that registers as a wildcard at
 	  priority 0.  For native_sim build / test only.
