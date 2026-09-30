@@ -54,6 +54,9 @@
 #include <zephyr/sys/printk.h>
 
 /* Cortex-M System Control Block CPUID, by absolute address (no CMSIS header). */
+/* Deep-sleep entries counted by src/alif_pm_iwic.c. */
+extern volatile uint32_t aen_iwic_entries;
+
 #define SCB_CPUID (*(volatile uint32_t *)0xE000ED00U)
 
 /* Global SRAM0 liveness beacon (always-on on-chip SRAM, master-agnostic addr). */
@@ -170,6 +173,14 @@ int main(void)
 		       PM_ROUNDS);
 		return 0;
 	}
+	if (aen_iwic_entries < PM_ROUNDS) {
+		SRAM0_BEACON[3] = RESULT_FAIL;
+		printk("RESULT FAIL: the IWIC hook ran %u times for %u rounds (the core "
+		       "woke from plain idle, not from the PM deep-sleep state)\n",
+		       (uint32_t)aen_iwic_entries,
+		       PM_ROUNDS);
+		return 0;
+	}
 	if (advanced != PM_ROUNDS) {
 		SRAM0_BEACON[3] = RESULT_FAIL;
 		printk("RESULT FAIL: uptime advanced on only %u/%u rounds "
@@ -181,10 +192,11 @@ int main(void)
 
 	SRAM0_BEACON[3] = RESULT_PASS;
 	printk("RESULT PASS: %u PM suspend-to-idle (deep IWIC) rounds entered + "
-	       "woken; uptime %lld->%lld ms (beacon=%u)\n",
+	       "woken; uptime %lld->%lld ms (beacon=%u, IWIC entries=%u)\n",
 	       PM_ROUNDS,
 	       t_start,
 	       t_now,
-	       (uint32_t)SRAM0_BEACON[2]);
+	       (uint32_t)SRAM0_BEACON[2],
+	       (uint32_t)aen_iwic_entries);
 	return 0;
 }
