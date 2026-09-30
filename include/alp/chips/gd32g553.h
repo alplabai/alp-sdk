@@ -613,9 +613,9 @@ alp_status_t gd32g553_pwm_configure(gd32g553_t          *ctx,
  *  @param oversample_ratio   1 / 2 / 4 / 8 / 16 / 32 / 64 / 128 / 256.
  *                            Firmware rounds down to the nearest
  *                            power-of-two; 0 means "firmware default".
- *  @param sample_cycles      Raw sample-time register count (the RSMP
- *                            value the vendor library takes), NOT a
- *                            time unit.  Firmware clamps it to 2..638;
+ *  @param sample_cycles      Raw RSMP value in ADCCK cycles (sample
+ *                            time = value + 2.5 cycles), not
+ *                            microseconds and not a rung selector.  Firmware clamps it to 2..638;
  *                            0 means "firmware default" (240).
  *  @param resolution_bits    6 / 8 / 10 / 12.  The GD32G553 hardware
  *                            supports no wider width; 14 and 16 are
