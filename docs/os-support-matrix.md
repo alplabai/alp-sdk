@@ -150,8 +150,11 @@ R01UH1072EJ0120 8.5.2.3.16).  Only Audio_CLKB is usable on the E1M-X carrier
 E1M-V2M103, capture and the SSIU3/SSIU4 group (`i2s1`) are untried.
 
 ³ **V2N/V2M I²S on Zephyr (CM33)** — no driver exists: Zephyr has no RZ/V2N SSIU
-`i2s_*` driver and hal_renesas ships no `r_ssi` FSP module for RZ/V.  The class
-falls through to the NOSUPPORT stub.  Scope and gap write-up in
+`i2s_*` driver and hal_renesas ships no `r_ssi` FSP module for RZ/V.  `src/backends/i2s/zephyr_drv.c`
+is not built (`zephyr/CMakeLists.txt:1680`, gated on `CONFIG_I2S`), so the class
+binds the priority-0 wildcard `src/backends/i2s/sw_fallback.c`
+(`zephyr/CMakeLists.txt:1683`; `open`/`start`/`stop` succeed, `read`/`write`
+return NOSUPPORT).  Scope and gap write-up in
 `docs/e1m-x-v2n-sdk-integration.md` ("Audio: A55 today, CM33 gap"); tracked in
 #1171.  SSI1/SSI2 are A55-owned (`metadata/e1m_modules/v2n/core-ownership.yaml`).
 

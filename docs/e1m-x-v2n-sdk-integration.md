@@ -77,7 +77,13 @@ speaker yet, and capture and the SSIU3/SSIU4 group are untried.
 NXP, STM32, ...; nothing for RZ/V) nor hal_renesas (`r_ssi` exists only for
 RA; RZ carries just register headers for RZ/A and RZ/G) provides an SSIU
 driver, so `src/backends/i2s/zephyr_drv.c` has nothing to bind on `m33_sm`
-and the class resolves to `src/common/stub/stub_i2s.c` (`ALP_ERR_NOSUPPORT`).
+so `zephyr/CMakeLists.txt:1680` leaves it out (gated on `CONFIG_I2S`).
+`src/common/stub/stub_i2s.c` is not built on Zephyr at all.  What `m33_sm`
+actually links is `src/backends/i2s/sw_fallback.c` (`zephyr/CMakeLists.txt:1683`,
+compiled unconditionally despite the comment at line 1674), registered at
+priority 0, `silicon_ref = "*"` (`src/backends/i2s/sw_fallback.c:105-111`).
+`alp_i2s_open()` selects it, so `open`/`start`/`stop` return `ALP_OK` and only
+`read`/`write` return `ALP_ERR_NOSUPPORT`.
 A CM33 backend therefore means writing a new Zephyr `i2s_*` driver against
 the SSIU registers.  Manual references (R01UH1071EJ0120 Rev.1.20, register
 detail in R01UH1072EJ0120):
