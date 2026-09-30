@@ -13,7 +13,7 @@ console header is SoC UART5 (`serial@4901d000`, `P3_4`/`P3_5`,
 alternate function 2).
 
 New `meta-alp-sdk/recipes-kernel/linux/linux-alif/e1m-aen-evk-console.dtsi`
-(`meta-alp-sdk/recipes-kernel/linux/linux-alif/e1m-aen-evk-console.dtsi:32`
+(`meta-alp-sdk/recipes-kernel/linux/linux-alif/e1m-aen-evk-console.dtsi:34`
 ("&uart2 {")) disables `&uart2`, enables `&uart5`, sets
 `aliases { serial0 = &uart5; }`, and `chosen { stdout-path =
 "serial0:115200n8"; }`. New
