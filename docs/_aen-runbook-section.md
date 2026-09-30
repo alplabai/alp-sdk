@@ -38,7 +38,7 @@ ATOC over SWD in ~0.16 s, verifies it, then a reset of type `nRESET` (RSetType
 2) re-runs the SE boot ROM so the app boots from MRAM.
 
 Requires **J-Link V9.46+ DLL** (the bench has V9.50). Helper:
-`bench-builds/flash-jlink.sh`.
+`scripts/bench/aen/flash-jlink.sh`.
 
 > **Probe firmware gotcha.** A version-mismatched probe forces a J-Link
 > firmware update on first connect. That update **times out over a USB hub** —
@@ -100,6 +100,16 @@ export SE_UART=<your-serial-device>               # the SE-UART (host-specific)
 west flash      # -> alif_flash runner -> SETOOLS over the SE-UART
 ```
 
+On the E1M-AEN boards, `west flash` on a sysbuild (MCUboot) build refuses
+(alp-sdk#2274): the `alif_flash` runner cannot stage both domains' ATOC
+entries in one burn. Use `docs/aen-provisioning.md` §0.5 (Option B for a
+module whose MCUboot is already provisioned; the SETOOLS MCUboot
+provisioning in `zephyr/sysbuild/aen/README.md`'s provisioning section
+(`app-mcuboot-only.json`) otherwise -- the manual path above is an
+app-only ATOC write, not MCUboot provisioning). Option B writes the app
+only; without a resident MCUboot the module will not boot (recoverable
+via SETOOLS re-provisioning).
+
 **One-off runner setup.** The `alif_flash` runner is **not** in upstream
 Zephyr's `runners` package; alp-sdk ships it
 ([`scripts/west_commands/runners/alif_flash.py`](../scripts/west_commands/runners/alif_flash.py))
@@ -122,11 +132,64 @@ Two host prerequisites:
   as a faster SWD-only alternative that skips the SE-UART reset race, not a
   requirement.
 
+**The ATOC-replace guard (#2262).** `app-write-mram -p` REPLACES the whole
+resident ATOC — it is not a merge — so before burning, `west flash` now reads
+the resident ATOC back over the SE-UART (`maintenance -opt getbanner`/`gettoc`,
+the same non-destructive query the bench scripts use) and refuses to burn if
+that would silently delist a resident app entry outside this build's own
+`ALP-HE`/`ALP-HP` section, or if the read could not be verified. Pass
+`--replace-atoc` once you have confirmed losing the other entry is intended —
+same flag spelling as `flash-run.sh`'s Flow A guard, and distinct from Flow D's
+`--atoc-unqueryable`. Every run leaves `<build_dir>/alif_flash/atoc-before.txt`
+(the raw transcript, NOT removed between runs — its value is being the last
+successfully-read resident ATOC, whether or not the current attempt got far
+enough to read a new one) and `<build_dir>/alif_flash/atoc-guard.json` (the
+machine-readable verdict, written BEFORE any refusal is raised; a run that
+fails EARLIER than the guard step — e.g. no SETOOLS, no `zephyr.bin` —
+removes any verdict left by a previous run instead, so its mere absence
+means "the guard did not reach a verdict this attempt", never a stale
+success read as this run's own).
+
+**The verdict contract, frozen as `alp-sdk.alif-flash-atoc-guard.v1`.**
+Documented review finding (#2262, second round): this fragment's own header
+says it is *"intended to be folded into `docs/bring-up-aen.md`"*, and that
+file never was folded — so the canonical field table lived only here, in an
+unpublished draft, not reachable from any published doc's index or from
+`docs/README.md`. The frozen table now lives in
+[`aen-provisioning.md`](aen-provisioning.md)'s "The ATOC-replace guard
+verdict contract" section (published, and where a reader chasing `west
+flash`'s ATOC guard is already looking) — see it there for the field
+table; `changelog.d/2262.md` points at that same location.
+
+> **Sysbuild multi-domain refusal (alp-sdk#2274).** On the E1M-AEN boards,
+> `west flash` on a sysbuild (MCUboot) build refuses: the `alif_flash`
+> runner cannot stage both domains' ATOC entries in one burn. See the
+> README's #2274 warning in its Usage section
+> (`zephyr/sysbuild/aen/README.md`) and `changelog.d/2274.md`.
+
 > **Pre-provisioned modules from Alp Lab** already carry a dev-signed MCUboot +
-> self-test in slot0 (LCS=DM), so the core is already released and `west flash`
-> works day-1 with no manual SETOOLS step. You only need the manual path above
-> to re-key to your own production key or to recover a wiped/bare module. See
-> [`aen-provisioning.md`](aen-provisioning.md) §0.5.
+> self-test in slot0 (LCS=DM), so the core is already released and SWD/`west
+> debug` attach just works day-1. **`west flash`'s `alif_flash` runner is NOT
+> the day-1 path for these modules, though** — since #2262 it reads the
+> factory ATOC back first and finds the resident `MCUBOOT-` entry (the
+> factory-provisioned bootloader — `zephyr/sysbuild/aen/README.md`'s
+> provisioning section) foreign to whatever `ALP-HE`/`ALP-HP` section your
+> own build stages, and REFUSES rather than silently delisting it. This is
+> the guard doing its job, not a regression to work around with
+> `--replace-atoc`: that flag deletes the factory MCUboot ATOC entry and
+> leaves the module unable to boot until MCUboot is reprovisioned. Load your
+> app onto a pre-provisioned module via **Option B** instead — a plain
+> J-Link `loadbin` of your `imgtool`-signed image straight to slot0, no
+> SETOOLS/ATOC/SE-UART at all, verified and chainloaded by the resident
+> MCUboot — see [`aen-provisioning.md`](aen-provisioning.md) §0.5. The manual
+> SETOOLS path above (or `alif_flash` with `--replace-atoc`) is for
+> re-keying to your own production key or recovering a wiped/bare module,
+> where losing/replacing the factory ATOC is the intended outcome.
+> **TBD, unverified:** the literal `MCUBOOT-` traces to
+> `zephyr/sysbuild/aen/README.md` alone, not a captured `gettoc` off a
+> real pre-provisioned module (none exists in this repo yet) — a wrong
+> literal still leaves the guard refusing, just with the generic message
+> instead of this entry's own.
 
 ---
 
@@ -185,11 +248,15 @@ ITCM so J-Link can `loadbin` + run. **Every** RAM-run app overlay must contain:
 ```dts
 / {
     chosen {
-        zephyr,flash = <&itcm>;
+        zephyr,flash = &itcm; /* path-ref form -- the pointer form
+                                 (<&itcm>) makes FLASH_SIZE=0 and
+                                 overflows the link */
         /delete-property/ zephyr,code-partition;
     };
 };
 ```
+
+(The shipped overlay is `scripts/bench/aen/aen-flowc-itcm.overlay`.)
 
 Combine it with the flow-B RAM console `prj.conf` above so you can read the
 result over SWD. Build with the carrier board target and the module paths:
@@ -225,7 +292,7 @@ normal, not a fault.
 start it:
 
 ```
-J-Link> loadbin build/zephyr/zephyr.bin, <ITCM-base>
+J-Link> loadbin build/zephyr/zephyr.bin <ITCM-base>
 J-Link> setpc <ITCM-base>
 J-Link> go
 ```

@@ -31,10 +31,10 @@
 static alp_status_t
 sw_open(const alp_i3c_config_t *cfg, alp_i3c_backend_state_t *st, alp_capabilities_t *caps_out)
 {
-	st->dev         = NULL;
-	st->bus_id      = cfg->bus_id;
-	st->be_data     = NULL;
-	caps_out->flags = 0u;
+	(void)caps_out;
+	st->dev     = NULL;
+	st->bus_id  = cfg->bus_id;
+	st->be_data = NULL;
 	return ALP_OK;
 }
 

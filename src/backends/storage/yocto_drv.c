@@ -293,9 +293,8 @@ static alp_status_t y_open(const alp_storage_config_t  *cfg,
 		_block_discard_granularity(path, &d->erase_size);
 	}
 
-	st->dev         = NULL;
-	st->be_data     = d;
-	caps_out->flags = 0u;
+	st->dev     = NULL;
+	st->be_data = d;
 	return ALP_OK;
 }
 

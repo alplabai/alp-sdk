@@ -111,16 +111,22 @@ def test_changelog_d_citation_from_changelog_md_is_graded_when_target_exists(
     hasn't run yet) whose anchor drifted was SKIPPED -- silently losing the
     exact grading a fragment doing the identical citation still gets. Now
     gated on `not (REPO / rel).is_file()`, so a citation whose target is
-    genuinely still present is graded normally, not skipped."""
+    genuinely still present is graded normally, not skipped. Since
+    alp-sdk#2350 that grading is the advisory-line-number rule: the anchor
+    is found once elsewhere, so it PASSES with a note rather than erroring."""
     mod = _load()
     mod.REPO = tmp_path
     (tmp_path / "changelog.d").mkdir()
     (tmp_path / "changelog.d" / "2175.md").write_text(
-        "line 1\nline 2\nANCHOR TEXT\n", encoding="utf-8")
-    text = 'cites `changelog.d/2175.md:1` ("ANCHOR TEXT")\n'
-    errors, skips, checked, anchored = mod._check_one(mod.CHANGELOG, text)
+        "line 1\nline 2\nANCHOR TEXT HERE\n", encoding="utf-8")
+    text = 'cites `changelog.d/2175.md:1` ("ANCHOR TEXT HERE")\n'
+    notes: list[str] = []
+    errors, skips, checked, anchored = mod._check_one(
+        mod.CHANGELOG, text, None, None, notes)
     assert skips == [], skips
-    assert len(errors) == 1 and "ANCHOR TEXT" in errors[0]
+    assert errors == [], errors
+    assert anchored == 1, "graded, not skipped"
+    assert len(notes) == 1 and "anchor now at line 3" in notes[0], notes
 
 
 def test_changelog_d_citation_from_changelog_md_is_fixed_when_target_exists(
@@ -132,8 +138,8 @@ def test_changelog_d_citation_from_changelog_md_is_fixed_when_target_exists(
     mod.REPO = tmp_path
     (tmp_path / "changelog.d").mkdir()
     (tmp_path / "changelog.d" / "2175.md").write_text(
-        "line 1\nline 2\nANCHOR TEXT\n", encoding="utf-8")
-    text = 'cites `changelog.d/2175.md:1` ("ANCHOR TEXT")\n'
+        "line 1\nline 2\nANCHOR TEXT HERE\n", encoding="utf-8")
+    text = 'cites `changelog.d/2175.md:1` ("ANCHOR TEXT HERE")\n'
     new, rewrites, problems, unanchored = mod._fix_one(mod.CHANGELOG, text)
     assert "`changelog.d/2175.md:3`" in new, new
     assert len(rewrites) == 1 and problems == []
@@ -387,22 +393,29 @@ def test_fix_skips_foreign_prefix_paths(tmp_path):
 def test_default_run_writes_nothing_and_keeps_its_verdict(
         tmp_path, monkeypatch, capsys):
     """The gate is a required CI context, so the no-flag path must be exactly
-    what it always was: it reports the drift as an error and writes NOTHING.
-    Only --fix rewrites, and it then re-checks its own output.
+    what it always was: it grades the tree and writes NOTHING. Only --fix
+    rewrites, and it then re-checks its own output.
+
+    Since alp-sdk#2350 a citation whose anchor moved -- here the text lives at
+    line 7, the citation says 3 -- passes with an advisory note rather than
+    erroring, so the default path is 0. What this still pins is that the
+    default path never writes: the stale `:3` survives until `--fix`.
 
     Also MUTATION-PROVES the widened alp-sdk#2178 condition did not disturb
     the path the gate actually runs on 364 days a year: with a fragment
     present the early return must not fire, so the verdict never carries its
     "nothing to check" non-verdict text."""
-    fragment = 'see `src/a.c:3` ("DRIFTED ANCHOR")\n'
-    mod, frag = _tree(tmp_path, _source(7, "DRIFTED ANCHOR"), fragment)
+    fragment = 'see `src/a.c:3` ("DRIFTED ANCHOR TEXT")\n'
+    mod, frag = _tree(tmp_path, _source(7, "DRIFTED ANCHOR TEXT"), fragment)
     mod.CHANGELOG.write_text("# Changelog\n\n## [Unreleased]\n\nnone\n",
                              encoding="utf-8")
 
     monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py"])
-    assert mod.main() == 1, "a drifted anchor is still a hard error"
+    assert mod.main() == 0, "a moved anchor is advisory, not a hard error"
+    out = capsys.readouterr().out
+    assert "anchor now at line 7" in out, out
     assert frag.read_text(encoding="utf-8") == fragment, "no --fix means the gate never writes"
-    assert "nothing to check" not in capsys.readouterr().out
+    assert "nothing to check" not in out
 
     monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py", "--fix"])
     assert mod.main() == 0, "--fix re-checks the tree it just wrote"
@@ -520,7 +533,7 @@ def test_fix_rereads_a_cited_fragment_it_rewrote_earlier_in_the_same_run(
     assert "0 need a human" in out, out
 
 
-def test_fix_runs_even_when_changelog_d_is_empty(tmp_path, monkeypatch):
+def test_fix_runs_even_when_changelog_d_is_empty(tmp_path, monkeypatch, capsys):
     """`--fix` must still work on a tree with no fragments left.
 
     `assemble_changelog.py` empties `changelog.d/` at release time by folding
@@ -529,7 +542,9 @@ def test_fix_runs_even_when_changelog_d_is_empty(tmp_path, monkeypatch):
     check" early return fired BEFORE `--fix` did, making it a silent no-op
     exactly there. The first half of this test pins the default path on the
     same tree: since alp-sdk#2178 it GRADES the drifted `[Unreleased]`
-    citation instead of skipping it, and it still writes nothing.
+    citation instead of skipping it, and it still writes nothing. Since
+    alp-sdk#2350 that grading is a PASS with an advisory note -- the anchor is
+    found once, at line 7 -- rather than an error.
     """
     mod, frag = _tree(tmp_path, _source(7, "RELEASE-CANDIDATE ANCHOR"), "x\n")
     frag.unlink()
@@ -538,8 +553,10 @@ def test_fix_runs_even_when_changelog_d_is_empty(tmp_path, monkeypatch):
     mod.CHANGELOG.write_text(drifted, encoding="utf-8")
 
     monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py"])
-    assert mod.main() == 1, (
+    assert mod.main() == 0, (
         "alp-sdk#2178: an empty changelog.d/ no longer skips CHANGELOG.md")
+    assert "anchor now at line 7" in capsys.readouterr().out, (
+        "the citation was GRADED, not skipped")
     assert mod.CHANGELOG.read_text(encoding="utf-8") == drifted, "and still writes nothing"
 
     monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py", "--fix"])
@@ -584,19 +601,22 @@ def test_fix_runs_even_when_changelog_d_is_empty(tmp_path, monkeypatch):
 
 def test_empty_changelog_d_still_grades_a_broken_unreleased_citation(
         tmp_path, monkeypatch, capsys):
-    """THE defect: empty fragment dir + a drifted anchored `[Unreleased]`
-    citation exited 0 and never named the citation."""
-    mod, frag = _tree(tmp_path, _source(7, "RELEASE-CANDIDATE ANCHOR"), "x\n")
+    """THE defect: empty fragment dir + a broken anchored `[Unreleased]`
+    citation exited 0 and never named the citation. Since alp-sdk#2350 a
+    merely STALE line is advisory, so this uses an anchor that is absent from
+    the file -- the case that still has to fail."""
+    mod, frag = _tree(tmp_path, _source(7, "SOMETHING ELSE"), "x\n")
     frag.unlink()
     mod.CHANGELOG.write_text(
         "# Changelog\n\n## [Unreleased]\n\n"
-        'cites `src/a.c:3` ("RELEASE-CANDIDATE ANCHOR")\n', encoding="utf-8")
+        'cites `src/a.c:3` ("AN ANCHOR THAT IS NOWHERE IN THE FILE")\n',
+        encoding="utf-8")
 
     monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py"])
     assert mod.main() == 1, "an empty changelog.d/ is not a pass"
     err = capsys.readouterr().err
     assert "src/a.c:3" in err, "the broken citation must be NAMED, not counted"
-    assert "RELEASE-CANDIDATE ANCHOR" in err
+    assert "AN ANCHOR THAT IS NOWHERE IN THE FILE" in err
 
 
 def test_empty_changelog_d_passes_a_clean_unreleased_section(
@@ -1033,19 +1053,32 @@ _needs_merge_tree = pytest.mark.skipif(
 
 
 def _drifted_merge_repo(tmp_path):
-    """`feature` cites `src/a.c:7`, correct on its tip; `main` has since
-    pushed that line down by three, so the citation is wrong in the merge."""
+    """A PRE-EXISTING fragment (`1.md`, committed to the shared ancestor and
+    never touched by `feature`) cites `src/a.c:7`, correct there; `main` has
+    since pushed that line down by three, so the citation is wrong once
+    merged. Deliberately PRE-EXISTING, not added by `feature`: drift grace
+    exists only for a citation with history (alp-sdk#2350 round 2, point 1)
+    -- a citation `feature` itself just added would get NONE of it, merge or
+    no merge, since there is no unrelated-shift history to forgive. `feature`
+    separately commits its OWN new, correctly-anchored fragment (`2.md`)
+    into `src/b.c`, a file `main` never touches, so the new-citation rule
+    still has something real -- and stable across the merge either way -- to
+    report.
+    """
     mod, git = _git_tree(tmp_path)
-    _write(tmp_path / "src" / "a.c", _source(7, "MOVING ANCHOR"))
+    _write(tmp_path / "src" / "a.c", _source(7, "MOVING ANCHOR TEXT"))
+    _write(tmp_path / "src" / "b.c", _source(3, "STABLE UNTOUCHED MARKER"))
+    _write(mod.FRAGMENT_DIR / "1.md", 'see `src/a.c:7` ("MOVING ANCHOR TEXT")\n')
     git("add", "-A")
-    git("commit", "-qm", "base")
+    git("commit", "-qm", "base (1.md already exists here, pre-existing)")
     git("checkout", "-qb", "feature")
-    _write(mod.FRAGMENT_DIR / "1.md", 'see `src/a.c:7` ("MOVING ANCHOR")\n')
+    _write(mod.FRAGMENT_DIR / "2.md",
+           'see `src/b.c:3` ("STABLE UNTOUCHED MARKER")\n')
     git("add", "-A")
-    git("commit", "-qm", "branch cites line 7")
+    git("commit", "-qm", "branch adds its own new, correctly-anchored fragment")
     git("checkout", "-q", "main")
     _write(tmp_path / "src" / "a.c", "top 1\ntop 2\ntop 3\n"
-           + _source(7, "MOVING ANCHOR"))
+           + _source(7, "MOVING ANCHOR TEXT"))
     git("commit", "-qam", "base inserts three lines above it")
     git("checkout", "-q", "feature")
     return mod, git
@@ -1054,8 +1087,12 @@ def _drifted_merge_repo(tmp_path):
 @_needs_merge_tree
 def test_against_merge_grades_the_merge_not_the_tip(
         tmp_path, monkeypatch, capsys):
-    """The #2186 repro: green on the branch tip, red in the tree that lands.
-    And the merge is built without touching the working tree, index or HEAD."""
+    """The #2186 repro, as the alp-sdk#2350 rule leaves it: `1.md`'s citation
+    is correct on the branch tip, and the merge shifts it. Since the anchor
+    is authoritative the merge is not RED, but the advisory note can only be
+    produced by grading the MERGED tree, so its presence proves which tree
+    was read. The merge is built without touching the working tree, index or
+    HEAD."""
     mod, git = _drifted_merge_repo(tmp_path)
     monkeypatch.setenv("DIFF_BASE", "main")
     head = git("rev-parse", "HEAD")
@@ -1063,11 +1100,14 @@ def test_against_merge_grades_the_merge_not_the_tip(
     assert _run(mod, monkeypatch) == 0, "the branch tip is correct"
     out = capsys.readouterr().out
     assert "graded: the working tree" in out
+    assert "anchor now at line 10" not in out, "the tip's citation is exact"
     assert "1 citation(s) on added lines, every one anchored" in out, (
-        "a pass must say the new-citation rule saw the branch's citation")
-    assert _run(mod, monkeypatch, "--against-merge") == 1
-    err = capsys.readouterr().err
-    assert "1.md: `src/a.c:7`" in err and "the merge of main into HEAD" in err
+        "a pass must say the new-citation rule saw 2.md's own citation")
+    assert _run(mod, monkeypatch, "--against-merge") == 0
+    out = capsys.readouterr().out
+    assert "note: 1.md: `src/a.c:7` anchor now at line 10" in out, (
+        "grading the merge must see the base's three inserted lines")
+    assert "graded: the merge of main into HEAD" in out
     assert git("rev-parse", "HEAD") == head
     assert git("status", "--porcelain") == "", "nothing written or staged"
 
@@ -1077,7 +1117,8 @@ def test_against_merge_refuses_a_conflicting_merge(
         tmp_path, monkeypatch, capsys):
     """A merge with conflicts has no result to grade; say so, exit 1."""
     mod, git = _drifted_merge_repo(tmp_path)
-    _write(tmp_path / "src" / "a.c", "branch 1\n" + _source(7, "MOVING ANCHOR"))
+    _write(tmp_path / "src" / "a.c",
+           "branch 1\n" + _source(7, "MOVING ANCHOR TEXT"))
     git("commit", "-qam", "branch edits the same top line")
     monkeypatch.setenv("DIFF_BASE", "main")
     with pytest.raises(SystemExit) as exc:
@@ -1108,14 +1149,13 @@ def test_against_merge_reads_fragments_and_new_lines_from_the_merge(
     --against-merge silently turns the new-citation rule off."""
     mod, git = _drifted_merge_repo(tmp_path)
     git("checkout", "-q", "main")
-    mod.FRAGMENT_DIR.mkdir(exist_ok=True)  # git drops it: empty on main
     _write(mod.FRAGMENT_DIR / "5.md", 'see (`src/a.c:1`, "top 1") here\n')
     git("add", "-A")
     git("commit", "-qm", "base adds a near-miss fragment")
     git("checkout", "-q", "feature")
     _write(mod.FRAGMENT_DIR / "1.md",
-           'see `src/a.c:7` ("MOVING ANCHOR")\nbare `src/a.c:2` here\n')
-    git("commit", "-qam", "branch adds an un-anchored citation")
+           'see `src/a.c:7` ("MOVING ANCHOR TEXT")\nbare `src/a.c:2` here\n')
+    git("commit", "-qam", "branch appends an un-anchored citation")
     monkeypatch.setenv("DIFF_BASE", "main")
 
     assert _run(mod, monkeypatch, "--against-merge") == 1
@@ -1174,3 +1214,523 @@ def test_hunk_lines_refuses_a_header_it_cannot_read():
     with pytest.raises(SystemExit) as exc:
         mod._hunk_lines(diff)
     assert exc.value.code == 2
+
+
+# ---------------------------------------------------------------------------
+# alp-sdk#2350: the quoted anchor is authoritative and the line number is
+# advisory. An unrelated insertion above the cited code shifts the line but
+# leaves the anchor intact, so the citation PASSES with a note instead of
+# failing. Ambiguity and removal still fail.
+# ---------------------------------------------------------------------------
+
+
+def test_moved_anchor_passes_with_a_note(tmp_path):
+    """Lines inserted above the cited code move the text down; the anchor is
+    found once elsewhere, so the citation passes and an informational note
+    names the line it now lives on."""
+    mod, frag = _tree(tmp_path, _source(7, "MOVED ANCHOR TEXT"),
+                      'see `src/a.c:3` ("MOVED ANCHOR TEXT")\n')
+    notes: list[str] = []
+    errors, skips, checked, anchored = mod._check_one(
+        frag, frag.read_text(encoding="utf-8"), None, None, notes)
+    assert errors == [] and skips == []
+    assert checked == 1 and anchored == 1, "still anchored and text-verified"
+    assert len(notes) == 1, notes
+    assert "note: 9999.md: `src/a.c:3` anchor now at line 7" in notes[0]
+
+
+def test_moved_anchor_note_is_printed_and_does_not_fail_the_gate(
+        tmp_path, monkeypatch, capsys):
+    """End to end: the gate prints the note and exits 0 for a moved anchor."""
+    fragment = 'see `src/a.c:3` ("MOVED ANCHOR TEXT")\n'
+    mod, frag = _tree(tmp_path, _source(7, "MOVED ANCHOR TEXT"), fragment)
+    mod.CHANGELOG.write_text("# Changelog\n\n## [Unreleased]\n\nnone\n",
+                             encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py"])
+    assert mod.main() == 0
+    out = capsys.readouterr().out
+    assert "note: 9999.md: `src/a.c:3` anchor now at line 7" in out, out
+
+
+def test_fix_rewrites_a_moved_anchor_to_the_new_line(tmp_path):
+    """`--fix` rewrites the cited line number to where the anchor now lives."""
+    fragment = 'see `src/a.c:3` ("MOVED ANCHOR TEXT")\n'
+    mod, frag = _tree(tmp_path, _source(7, "MOVED ANCHOR TEXT"), fragment)
+    new, rewrites, problems, unanchored = mod._fix_one(frag, fragment)
+    assert "`src/a.c:7`" in new
+    assert problems == [] and unanchored == 0 and len(rewrites) == 1
+
+
+def test_fix_shifts_both_ends_of_a_range_by_the_same_delta(tmp_path):
+    """For a START-END range the anchor's move shifts BOTH ends: `:2-6`
+    anchored on the text now at line 8 becomes `:8-12`, never a collapsed
+    single line."""
+    mod, frag = _tree(tmp_path, _source(8, "RANGE ANCHOR"),
+                      'see `src/a.c:2-6` ("RANGE ANCHOR")\n')
+    new, rewrites, problems, unanchored = mod._fix_one(
+        frag, frag.read_text(encoding="utf-8"))
+    assert "`src/a.c:8-12`" in new, new
+    assert problems == [] and unanchored == 0 and len(rewrites) == 1
+
+
+def test_duplicated_moved_anchor_is_ambiguous_and_fails(tmp_path):
+    """Found more than once and not in range: the gate cannot know which
+    occurrence the note meant, so it fails and lists the candidates."""
+    lines = [f"line {i}" for i in range(1, 31)]
+    lines[1] = "REPEATED ANCHOR"    # line 2
+    lines[24] = "REPEATED ANCHOR"   # line 25
+    mod, frag = _tree(tmp_path, "\n".join(lines) + "\n",
+                      'see `src/a.c:10` ("REPEATED ANCHOR")\n')
+    notes: list[str] = []
+    errors, _, _, anchored = mod._check_one(
+        frag, frag.read_text(encoding="utf-8"), None, None, notes)
+    assert anchored == 1 and notes == [], "ambiguous is not a pass with a note"
+    assert len(errors) == 1, errors
+    assert "ambiguous" in errors[0] and "[2, 25]" in errors[0], errors[0]
+
+
+def test_anchor_removed_from_the_file_still_fails(tmp_path):
+    """The anchor is nowhere in the file: the code is gone rather than moved,
+    so the citation fails and says the text is absent from the file."""
+    mod, frag = _tree(tmp_path, _source(7, "SOMETHING ELSE"),
+                      'see `src/a.c:3` ("GONE ANCHOR")\n')
+    notes: list[str] = []
+    errors, _, _, anchored = mod._check_one(
+        frag, frag.read_text(encoding="utf-8"), None, None, notes)
+    assert anchored == 1 and notes == []
+    assert len(errors) == 1, errors
+    assert "absent from src/a.c" in errors[0], errors[0]
+
+
+def test_anchor_in_range_passes_unchanged_without_a_note(tmp_path):
+    """The original path is untouched: text in the cited range passes and
+    emits no note."""
+    mod, frag = _tree(tmp_path, _source(5, "GOOD ANCHOR"),
+                      'see `src/a.c:5` ("GOOD ANCHOR")\n')
+    notes: list[str] = []
+    errors, skips, checked, anchored = mod._check_one(
+        frag, frag.read_text(encoding="utf-8"), None, None, notes)
+    assert errors == [] and skips == []
+    assert checked == 1 and anchored == 1
+    assert notes == [], "an in-range anchor is not reported as moved"
+
+
+# ---------------------------------------------------------------------------
+# alp-sdk#2350 round 2, point 1: drift grace is only for PRE-EXISTING
+# citations. A citation on a line ADDED since the base gets NONE of it -- the
+# wrong line is the author's own mistake, made right now, not an unrelated
+# shift with history to forgive.
+# ---------------------------------------------------------------------------
+
+
+def test_check_one_fails_a_new_citations_wrong_line_with_no_drift_grace(
+        tmp_path):
+    """The anchor text resolves UNIQUELY elsewhere in the file -- which would
+    PASS for a pre-existing citation -- but this citation's line is in
+    `added`, so it hard-fails instead of silently re-homing."""
+    mod, frag = _tree(tmp_path, _source(7, "DRIFTED ANCHOR TEXT"),
+                       'see `src/a.c:3` ("DRIFTED ANCHOR TEXT")\n')
+    text = frag.read_text(encoding="utf-8")
+    notes: list[str] = []
+    errors, skips, checked, anchored = mod._check_one(
+        frag, text, {1}, None, notes)
+    assert skips == [] and notes == []
+    assert checked == 1 and anchored == 1
+    assert len(errors) == 1
+    assert "newly added citation" in errors[0]
+    assert "DRIFTED ANCHOR TEXT" in errors[0]
+
+
+def test_check_one_grants_drift_grace_to_the_identical_citation_when_not_added(
+        tmp_path):
+    """Mutation-prove the ONLY difference from the test above is `added`
+    membership: the identical fragment, with `added=None` (the rule off),
+    passes with an advisory note instead."""
+    mod, frag = _tree(tmp_path, _source(7, "DRIFTED ANCHOR TEXT"),
+                       'see `src/a.c:3` ("DRIFTED ANCHOR TEXT")\n')
+    text = frag.read_text(encoding="utf-8")
+    notes: list[str] = []
+    errors, skips, checked, anchored = mod._check_one(
+        frag, text, None, None, notes)
+    assert errors == []
+    assert len(notes) == 1
+
+
+def test_check_one_new_citation_check_does_not_fire_on_an_untouched_line(
+        tmp_path):
+    """The same citation, but its line is NOT in `added` this time (a
+    sibling line in the fragment was touched instead) -- grandfathered, same
+    as before alp-sdk#2350 round 2."""
+    mod, frag = _tree(tmp_path, _source(7, "DRIFTED ANCHOR TEXT"),
+                       'untouched `src/a.c:3` ("DRIFTED ANCHOR TEXT")\n'
+                       'touched line here\n')
+    text = frag.read_text(encoding="utf-8")
+    notes: list[str] = []
+    errors, skips, checked, anchored = mod._check_one(
+        frag, text, {2}, None, notes)
+    assert errors == []
+    assert len(notes) == 1
+
+
+# ---------------------------------------------------------------------------
+# alp-sdk#2350 round 2, point 2 (Fable): uniqueness in TODAY's file is not
+# proof a note still means the same thing when the anchor is short/generic --
+# a `_MIN_DRIFT_ANCHOR_LEN` floor gates the unique-drift PASS.
+# ---------------------------------------------------------------------------
+
+
+def test_check_one_fails_a_uniquely_drifted_but_too_short_anchor(tmp_path):
+    """Uniqueness alone is not enough once the anchor is shorter than
+    `_MIN_DRIFT_ANCHOR_LEN` -- a human (or `--fix`) must decide, never this
+    check silently."""
+    mod, frag = _tree(tmp_path, _source(7, "SHORT ANCHOR"),
+                       'see `src/a.c:3` ("SHORT ANCHOR")\n')
+    notes: list[str] = []
+    errors, skips, checked, anchored = mod._check_one(
+        frag, frag.read_text(encoding="utf-8"), None, None, notes)
+    assert skips == [] and notes == []
+    assert anchored == 1
+    assert len(errors) == 1
+    assert "too generic to re-home safely" in errors[0]
+    assert "12 character(s)" in errors[0]  # len("SHORT ANCHOR") == 12
+
+
+def test_check_one_two_mains_scenario_a_deleted_siblings_survivor_is_refused(
+        tmp_path):
+    """Fable's counterexample, reproduced directly: a `changelog.d/2051.md`
+    -style citation anchors on the identical short, generic
+    `"int main(void)"` that a source file genuinely carries TWICE. Once the
+    main this citation actually described is deleted, the OTHER main
+    "resolves uniquely" -- and trusting that would silently re-home the
+    citation onto an unrelated line it never described. Refused instead."""
+    lines = [f"line {i}" for i in range(1, 21)]
+    lines[17] = "int main(void)"   # line 18: the SURVIVING main
+    mod, frag = _tree(tmp_path, "\n".join(lines) + "\n",
+                       # cites line 10, where a DIFFERENT main used to be,
+                       # now deleted -- :10 no longer holds the text at all.
+                       'see `src/a.c:10` ("int main(void)")\n')
+    notes: list[str] = []
+    errors, skips, checked, anchored = mod._check_one(
+        frag, frag.read_text(encoding="utf-8"), None, None, notes)
+    assert notes == [], "must NOT silently re-home onto the surviving main"
+    assert len(errors) == 1
+    assert "too generic to re-home safely" in errors[0]
+    assert "resolves to exactly one other line (18)" in errors[0]
+
+
+def test_check_one_floor_boundary_15_chars_fails(tmp_path):
+    """One character under the floor is refused -- pins `_MIN_DRIFT_ANCHOR_LEN`
+    from below, so lowering it to 15 turns this test red."""
+    anchor = "A" * 15
+    mod, frag = _tree(tmp_path, _source(7, anchor),
+                       f'see `src/a.c:3` ("{anchor}")\n')
+    assert mod._MIN_DRIFT_ANCHOR_LEN == 16
+    notes: list[str] = []
+    errors, _, _, _ = mod._check_one(
+        frag, frag.read_text(encoding="utf-8"), None, None, notes)
+    assert notes == []
+    assert len(errors) == 1 and "too generic to re-home safely" in errors[0]
+
+
+def test_check_one_floor_boundary_16_chars_drifts(tmp_path):
+    """Exactly at the floor passes as an advisory note -- pins it from above,
+    so raising it to 17 turns this test red."""
+    anchor = "A" * 16
+    mod, frag = _tree(tmp_path, _source(7, anchor),
+                       f'see `src/a.c:3` ("{anchor}")\n')
+    notes: list[str] = []
+    errors, _, _, _ = mod._check_one(
+        frag, frag.read_text(encoding="utf-8"), None, None, notes)
+    assert errors == []
+    assert len(notes) == 1 and "now at line 7" in notes[0]
+
+
+def test_check_one_short_anchor_refusal_names_verify_remedy(tmp_path):
+    """The refusal must not send the author to a `--fix` that re-homes
+    silently -- it names the VERIFY step that makes the rewrite safe."""
+    mod, frag = _tree(tmp_path, _source(7, "SHORT ANCHOR"),
+                       'see `src/a.c:3` ("SHORT ANCHOR")\n')
+    errors, _, _, _ = mod._check_one(frag, frag.read_text(encoding="utf-8"))
+    assert "run --fix and VERIFY the re-homed line" in errors[0]
+    assert "lengthen the quote" in errors[0]
+
+
+def test_fix_flags_a_short_anchor_rehome_with_verify(tmp_path):
+    """`--fix` still rewrites a unique short-anchor drift -- the human
+    running it can read the line, the checker cannot -- but never silently:
+    the rewrite carries a VERIFY note naming the line to check."""
+    mod, frag = _tree(tmp_path, _source(7, "SHORT ANCHOR"),
+                       'see `src/a.c:3` ("SHORT ANCHOR")\n')
+    new, rewrites, problems, _ = mod._fix_one(
+        frag, frag.read_text(encoding="utf-8"))
+    assert problems == []
+    assert "`src/a.c:7`" in new
+    assert len(rewrites) == 1
+    assert "[VERIFY: short anchor 'SHORT ANCHOR'" in rewrites[0]
+    assert "re-homed to line 7" in rewrites[0]
+
+
+def test_fix_does_not_flag_a_long_anchor_rehome(tmp_path):
+    """At or above the floor the checker already trusts uniqueness, so the
+    fixer's rewrite needs no VERIFY note."""
+    anchor = "A" * 16
+    mod, frag = _tree(tmp_path, _source(7, anchor),
+                       f'see `src/a.c:3` ("{anchor}")\n')
+    _, rewrites, _, _ = mod._fix_one(frag, frag.read_text(encoding="utf-8"))
+    assert len(rewrites) == 1 and "VERIFY" not in rewrites[0]
+
+
+def test_run_fix_counts_verify_rewrites_in_its_summary(tmp_path, capsys):
+    """`_run_fix` reports how many of its rewrites need a VERIFY read, not
+    just the total count."""
+    mod, frag = _tree(tmp_path, _source(7, "SHORT ANCHOR"),
+                       'see `src/a.c:3` ("SHORT ANCHOR")\n')
+    mod._run_fix([frag])
+    out = capsys.readouterr().out
+    assert "1 of those rewrites re-homed a short anchor" in out, out
+
+
+# ---------------------------------------------------------------------------
+# alp-sdk#2350 round 2, point 4: the EOF check only hard-fails an UNANCHORED
+# citation. An ANCHORED one gets the whole-file search even when its cited
+# line runs past a SHRUNKEN file -- the anchor can still be intact elsewhere.
+# ---------------------------------------------------------------------------
+
+
+def test_check_one_passes_a_drifted_anchor_even_past_a_shrunken_eof(
+        tmp_path):
+    mod, frag = _tree(
+        tmp_path, _source(5, "SHRUNKEN FILE ANCHOR", total=8),
+        'see `src/a.c:15` ("SHRUNKEN FILE ANCHOR")\n')
+    notes: list[str] = []
+    errors, skips, checked, anchored = mod._check_one(
+        frag, frag.read_text(encoding="utf-8"), None, None, notes)
+    assert errors == [] and skips == []
+    assert checked == 1 and anchored == 1
+    assert len(notes) == 1 and "now at line 5" in notes[0]
+
+
+def test_check_one_still_hard_fails_eof_for_an_unanchored_citation(
+        tmp_path):
+    """The strict pre-#2350 EOF check stands for an UNANCHORED citation --
+    there is no anchor text to search the whole file with."""
+    mod, frag = _tree(tmp_path, _source(5, "irrelevant", total=8),
+                       'see `src/a.c:15` for the constant\n')
+    notes: list[str] = []
+    errors, skips, checked, anchored = mod._check_one(
+        frag, frag.read_text(encoding="utf-8"), None, None, notes)
+    assert skips == [] and notes == [] and anchored == 0
+    assert len(errors) == 1 and "file has only 8 lines" in errors[0]
+
+
+# ---------------------------------------------------------------------------
+# alp-sdk#2350 round 2, point 5: a UNIQUE match that would run past EOF once
+# the cited width is preserved must FAIL, never pass with a dead-end
+# "run --fix" note (`--fix` refuses the identical rewrite), and never
+# collapse the range to sell a pass nobody's claim supports.
+# ---------------------------------------------------------------------------
+
+
+def test_check_one_fails_a_unique_drift_that_would_overflow_eof(tmp_path):
+    mod, frag = _tree(tmp_path, _source(19, "EOF OVERFLOW ANCHOR"),
+                       'see `src/a.c:1-10` ("EOF OVERFLOW ANCHOR")\n')
+    notes: list[str] = []
+    errors, skips, checked, anchored = mod._check_one(
+        frag, frag.read_text(encoding="utf-8"), None, None, notes)
+    assert skips == [] and notes == []
+    assert len(errors) == 1
+    assert "found uniquely at line 19" in errors[0]
+    assert "preserving the cited width of 9 line(s)" in errors[0]
+    assert "would refuse this too" in errors[0]
+
+
+# ---------------------------------------------------------------------------
+# alp-sdk#2350 round 2, point 6: `_anchor_line_hits` must count a needle that
+# occurs TWICE on the SAME line only ONCE -- there is only one LINE to
+# disambiguate with, so `[10, 10]` is not a real ambiguity.
+# ---------------------------------------------------------------------------
+
+
+def test_anchor_line_hits_dedupes_a_repeat_on_the_same_line():
+    mod = _load()
+    lines = [f"line {i}" for i in range(1, 10)]
+    lines[8] = "foo(x); foo(x);"  # line 9, the needle appears twice
+    hits = mod._anchor_line_hits("\n".join(lines), "foo(x);")
+    assert hits == [9]
+
+
+def test_check_one_a_same_line_repeat_still_counts_as_one_candidate(
+        tmp_path):
+    """Without dedup, `_anchor_line_hits` would return `[9, 9]` (length 2)
+    for this fixture and the ambiguous path would wrongly refuse a citation
+    that has exactly one real candidate line."""
+    mod, frag = _tree(
+        tmp_path,
+        _source(9, "REPEAT ON ONE LINE; REPEAT ON ONE LINE;"),
+        'see `src/a.c:3` ("REPEAT ON ONE LINE;")\n')
+    notes: list[str] = []
+    errors, skips, checked, anchored = mod._check_one(
+        frag, frag.read_text(encoding="utf-8"), None, None, notes)
+    assert errors == []
+    assert len(notes) == 1 and "now at line 9" in notes[0]
+
+
+# ---------------------------------------------------------------------------
+# alp-sdk#2350 round 2, point 7: a released-history drift is labelled
+# separately from a fragment/[Unreleased] drift, in both the per-line output
+# and the summary counts -- and never counted in the headline totals.
+# ---------------------------------------------------------------------------
+
+
+def test_check_one_released_drift_note_is_unaffected_by_the_released_flag(
+        tmp_path):
+    """`_check_one` itself still just appends the same note text; the
+    "(released history, not blocking)" label and the exclusion from the
+    headline totals are `_grade`'s job, not `_check_one`'s."""
+    mod, frag = _tree(tmp_path, _source(9, "RELEASED DRIFT ANCHOR"), "x\n")
+    notes: list[str] = []
+    errors, skips, checked, anchored = mod._check_one(
+        frag, 'see `src/a.c:3` ("RELEASED DRIFT ANCHOR")\n',
+        None, None, notes, released=True)
+    assert errors == []
+    assert len(notes) == 1
+    assert "now at line 9" in notes[0]
+
+
+def test_grade_labels_released_history_drift_separately_from_head_drift(
+        tmp_path, monkeypatch, capsys):
+    mod, frag = _tree(tmp_path, _source(9, "RELEASED DRIFT ANCHOR"), "x\n")
+    frag.unlink()
+    mod.CHANGELOG.write_text(
+        "# Changelog\n\n## [Unreleased]\n\nnothing here\n\n"
+        "## [v0.16.0] - 2026-08-01\n\n"
+        'shipped work cites `src/a.c:3` ("RELEASED DRIFT ANCHOR")\n',
+        encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py"])
+
+    assert mod.main() == 0, "released history never blocks"
+    out = capsys.readouterr().out
+    assert ("note: CHANGELOG.md: `src/a.c:3` anchor now at line 9 "
+            "(released history, not blocking)") in out, out
+    assert ("1 released-history citation(s) drifted (not blocking, --fix "
+            "never touches them).") in out
+    assert "released history: 1 citation(s) graded as warnings only" in out
+
+
+def test_grade_excludes_released_history_from_the_headline_totals(
+        tmp_path, monkeypatch, capsys):
+    """A citation graded only as released history must not inflate the
+    "N citation(s) resolved" headline -- it gets its own line instead."""
+    mod, frag = _tree(tmp_path, _source(5, "GOOD ANCHOR"), "x\n")
+    frag.unlink()
+    mod.CHANGELOG.write_text(
+        "# Changelog\n\n## [Unreleased]\n\nnothing here\n\n"
+        "## [v0.16.0] - 2026-08-01\n\n"
+        'shipped work cites `src/a.c:5` ("GOOD ANCHOR")\n',
+        encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py"])
+
+    assert mod.main() == 0
+    out = capsys.readouterr().out
+    assert "OK -- 0 citation(s) resolved" in out, out
+    assert "released history: 1 citation(s) graded as warnings only" in out
+
+
+# ---------------------------------------------------------------------------
+# --strict-lines: the release-time hook that closes the drift window
+# (alp-sdk#2350 round 2, point 3).
+# ---------------------------------------------------------------------------
+
+
+def test_check_one_strict_lines_turns_a_unique_drift_into_an_error(
+        tmp_path):
+    mod, frag = _tree(tmp_path, _source(7, "STRICT LINES DRIFT ANCHOR"),
+                       'see `src/a.c:3` ("STRICT LINES DRIFT ANCHOR")\n')
+    notes: list[str] = []
+    errors, skips, checked, anchored = mod._check_one(
+        frag, frag.read_text(encoding="utf-8"), None, None, notes,
+        strict_lines=True)
+    assert notes == []
+    assert len(errors) == 1
+    assert "--strict-lines requires" in errors[0]
+    assert ":7" in errors[0]
+
+
+def test_check_one_strict_lines_is_ignored_for_released_history(tmp_path):
+    """A released section is never blocked on, with or without the flag."""
+    mod, frag = _tree(tmp_path, _source(7, "STRICT LINES DRIFT ANCHOR"), "x\n")
+    notes: list[str] = []
+    errors, skips, checked, anchored = mod._check_one(
+        frag, 'see `src/a.c:3` ("STRICT LINES DRIFT ANCHOR")\n',
+        None, None, notes, strict_lines=True, released=True)
+    assert errors == []
+    assert len(notes) == 1
+
+
+def test_main_strict_lines_flag_fails_a_drifted_unreleased_citation(
+        tmp_path, monkeypatch, capsys):
+    fragment = 'see `src/a.c:3` ("STRICT LINES DRIFT ANCHOR")\n'
+    mod, frag = _tree(
+        tmp_path, _source(7, "STRICT LINES DRIFT ANCHOR"), fragment)
+    mod.CHANGELOG.write_text("# Changelog\n\n## [Unreleased]\n\nnone\n",
+                             encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py"])
+    assert mod.main() == 0, "advisory without the flag"
+
+    monkeypatch.setattr(
+        sys, "argv", ["check_changelog_citations.py", "--strict-lines"])
+    assert mod.main() == 1, (
+        "the same drift is a hard error under --strict-lines")
+    err = capsys.readouterr().err
+    assert "--strict-lines requires" in err
+
+
+def test_main_strict_lines_passes_once_fix_has_rewritten_it(
+        tmp_path, monkeypatch):
+    """`--strict-lines` composes with `--fix` in one invocation: `--fix`
+    rewrites the stored line first, and the SAME run's fall-through check
+    then honours the flag on the tree it just wrote -- there is nothing left
+    to refuse."""
+    fragment = 'see `src/a.c:3` ("STRICT LINES DRIFT ANCHOR")\n'
+    mod, frag = _tree(
+        tmp_path, _source(7, "STRICT LINES DRIFT ANCHOR"), fragment)
+    mod.CHANGELOG.write_text("# Changelog\n\n## [Unreleased]\n\nnone\n",
+                             encoding="utf-8")
+
+    monkeypatch.setattr(
+        sys, "argv",
+        ["check_changelog_citations.py", "--fix", "--strict-lines"])
+    assert mod.main() == 0
+    assert "`src/a.c:7`" in frag.read_text(encoding="utf-8")
+
+
+def test_main_strict_lines_never_flags_released_history(
+        tmp_path, monkeypatch):
+    mod, frag = _tree(tmp_path, _source(7, "STRICT LINES DRIFT ANCHOR"), "x\n")
+    frag.unlink()
+    mod.CHANGELOG.write_text(
+        "# Changelog\n\n## [Unreleased]\n\nnothing here\n\n"
+        "## [v0.16.0] - 2026-08-01\n\n"
+        'shipped `src/a.c:3` ("STRICT LINES DRIFT ANCHOR")\n',
+        encoding="utf-8")
+    monkeypatch.setattr(
+        sys, "argv", ["check_changelog_citations.py", "--strict-lines"])
+    assert mod.main() == 0, "released history is never blocked, strict or not"
+
+
+@_needs_merge_tree
+def test_against_merge_strict_lines_fails_a_pre_existing_drift(
+        tmp_path, monkeypatch, capsys):
+    """`--strict-lines` composes with `--against-merge` too: a pre-existing
+    citation's drift in the MERGED tree is advisory under a plain
+    `--against-merge` run, and a hard error once `--strict-lines` is added."""
+    mod, git = _drifted_merge_repo(tmp_path)
+    monkeypatch.setenv("DIFF_BASE", "main")
+
+    assert _run(mod, monkeypatch, "--against-merge") == 0
+    assert _run(mod, monkeypatch, "--against-merge", "--strict-lines") == 1
+    err = capsys.readouterr().err
+    assert "--strict-lines requires" in err
+

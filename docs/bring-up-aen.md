@@ -77,11 +77,12 @@ Inventory check before powering anything:
 > back, though, so "pinctrl applied without error" is measured and "the
 > pads carry the intended function" is not. **Keep MCUboot slots and
 > any storage partition on MRAM regardless of SKU anyway** -- for a
-> reason that outlived the pinctrl one: `flash_ospi_alif.c` implements
-> no `flash_driver_api` at all (it does init / XIP-enable / AES-inline
-> / DDR config only, see that file's own header), so there is no
-> read/write/erase path for a partition to sit on, and nothing in tree
-> performs an OSPI device-level transfer of any kind. That is
+> reason that outlived the pinctrl one: `flash_ospi_alif.c` now registers
+> a `flash_driver_api` (#915), but only its `read`/`read_jedec_id`/
+> `sfdp_read` side; `write`/`erase` are deliberate fail-closed `-ENOTSUP`
+> stubs (the fitted IS25WX256 needs an Octal-DDR mode switch this driver
+> does not yet drive, see that file's own header). There is still no
+> write/erase path for a partition to sit on. That gap is
 > alp-sdk#915 -- recheck this paragraph when **that** issue closes.
 
 ## 1. First-power smoke test
@@ -194,19 +195,34 @@ SoM preset at `metadata/e1m_modules/<SKU>.yaml` automatically).
 
 4. An Alp-Lab-provisioned module ships with a dev-signed **MCUboot**
    (the SES-launched ATOC) plus a **self-test** image in slot0, so it
-   boots that on power-up and the M55 core is already released — `west
-   flash`/SWD work directly.  (A *bare* module sourced outside Alp Lab,
-   or one whose ATOC was wiped, reports `No ATOC` and the core stays
-   gated until you provision MCUboot over the SE-UART — see
-   [`aen-provisioning.md`](aen-provisioning.md).)  To take it over with
-   your own image, build with sysbuild so MCUboot signs it into slot0:
+   boots that on power-up and the M55 core is already released — SWD
+   attach works directly. A plain **non-sysbuild** `west flash` also
+   REFUSES here (#2262: the resident factory MCUboot ATOC entry is
+   foreign to any build's own section) — that door is for bare/recovered
+   modules only. (A *bare* module sourced outside Alp Lab, or one whose
+   ATOC was wiped, reports `No ATOC` and the core stays gated until you
+   provision MCUboot over the SE-UART — see
+   [`aen-provisioning.md`](aen-provisioning.md).)
+
+   To take a **pre-provisioned** module over with your own image, use a
+   plain J-Link `loadbin` straight to slot0 instead (Option B,
+   `docs/aen-provisioning.md` §0.5) — the sysbuild + `west flash` recipe
+   below REFUSES on every module, bare or pre-provisioned, since
+   alp-sdk#2274, so it is shown here only as the build step that
+   produces the signed artefact Option B flashes:
 
    ```bash
    west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
        examples/peripheral-io/gpio-button-led \
        --sysbuild -- -DSB_CONF_FILE=$PWD/zephyr/sysbuild/aen/sysbuild.conf
-   west flash
+   west flash    # REFUSES (alp-sdk#2274) -- see docs/aen-provisioning.md §0.5.
    ```
+
+   On a bare/wiped/re-keyed module, provision MCUboot with SETOOLS first
+   (the provisioning section in `zephyr/sysbuild/aen/README.md`), then
+   flash the app the same Option B way. Option B writes the app only;
+   without a resident MCUboot the module will not boot (recoverable via
+   SETOOLS re-provisioning).
 
    One-liner alternative (manifest-driven -- `tan` builds every slice
    declared in the example's `board.yaml`, then flashes them in
@@ -507,19 +523,23 @@ top of the per-subsystem checks.
    in §7 -- but a *non-ACKing* EEPROM is a wiring/pull-up fault.
 
 4. **CC3501E PING / GET_VERSION.**  Bring the on-module Wi-Fi/BLE
-   coprocessor to life over the inter-chip SPI1 bus.  Issue the
-   two META-group opcodes from the bridge host driver (see the
-   wire frame in `cc3501e-bridge-firmware:DESIGN.md`):
-   `PING` (opcode `0x00`) then `GET_VERSION` (opcode `0x01`).
-   A standalone host-side helper for the M55 side is **TBD**
-   (only the device firmware ships today), so drive it from app
-   code via the bridge dispatch for now.
+   coprocessor to life over the inter-chip SPI1 bus.  The full
+   host-side driver ships in-tree: `cc3501e_init()` from
+   `<alp/chips/cc3501e.h>` (`chips/cc3501e/`) issues
+   `PING` (opcode `0x00`) then `GET_VERSION` (opcode `0x01`)
+   over the bridge dispatch and refuses a protocol-major
+   mismatch; the runnable `cc3501e_bridge_bringup()` helper is
+   in `examples/aen/aen-cc3501e-bringup/`, and the
+   `alp companion` console verbs exercise the link
+   interactively.
 
    * `PING` must return `RESP_OK` with empty data -- the liveness
      signal.
    * `GET_VERSION` must return the firmware's wire-protocol
      version; cross-check it against
      `cc3501e-bridge-firmware:prebuilt/CHANGELOG.md`.
+     Modules ship factory-flashed with the latest CC3501E
+     firmware (v0.9.0 as of this writing).
 
    No `RESP_OK` usually means the CC3501E hasn't been flashed yet
    (`helper_firmware[].firmware_path` is still TBD in the SKU
@@ -645,6 +665,15 @@ Once §6's runbook passes:
    [ADR-0006](adr/0006-secure-boot-secure-ota.md)'s 2026-08-25
    amendment), so there is nothing to revert to and OTA stays
    deferred until a slot budget is found.
+
+   On the E1M-AEN boards, `west flash` on a sysbuild (MCUboot) build
+   refuses (alp-sdk#2274): the `alif_flash` runner cannot stage both
+   domains' ATOC entries in one burn. Use `docs/aen-provisioning.md`
+   §0.5 (Option B for a module whose MCUboot is already provisioned;
+   the SETOOLS MCUboot provisioning in `zephyr/sysbuild/aen/README.md`
+   otherwise). Option B writes the app only; without a resident
+   MCUboot the module will not boot (recoverable via SETOOLS
+   re-provisioning).
 
 ## 8. Troubleshooting
 

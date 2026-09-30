@@ -33,6 +33,8 @@ sys.path.insert(0, str(REPO / "scripts"))
 _UNCOVERED_SUFFIXES = {
     ".md": "documentation prose -- cannot change what a build produces",
     ".gitkeep": "empty placeholder marking a tracked-but-empty directory",
+    ".svd": "vendor CMSIS-SVD register map for debuggers (ADR 0032) -- no build step reads it",
+    "License.txt": "vendor licence text shipped beside vendored data (ADR 0032)",
 }
 
 

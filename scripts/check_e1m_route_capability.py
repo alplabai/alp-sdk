@@ -61,6 +61,7 @@ KNOWN_UNBACKED: dict[tuple[str, str], dict[str, str]] = {
         "E1M_X_GPIO_IO5": "X-EVK I2S path-mux select; carrier-side control, not a V2N-backed E1M-X GPIO.",
         "E1M_X_GPIO_IO6": "M.2 E-key UART wake sideband; carrier/M.2 control, not a V2N-backed E1M-X GPIO.",
         "E1M_X_GPIO_IO15": "LCD1 power enable is carrier-pulled on V2N X-EVK; no firmware-controlled V2N E1M-X GPIO route.",
+        "E1M_X_GPIO_IO24": "USB path-mux select; IO24 is not a GD32 pad (DX-M1-driven on V2M, undriven on V2N), so no V2N/V2M route backs it (#2453).",
         "E1M_X_GPIO_IO17": "Display-2 touch interrupt is wired for future dual-DSI SoMs; V2N/V2M do not expose this sideband.",
         "E1M_X_GPIO_IO18": "Camera-0 power enable is a carrier sideband not exposed as a current V2N E1M-X GPIO route.",
         "E1M_X_GPIO_IO19": "Display-2 touch reset is wired for future dual-DSI SoMs; V2N/V2M do not expose this sideband.",
@@ -76,8 +77,11 @@ KNOWN_UNBACKED: dict[tuple[str, str], dict[str, str]] = {
 def _v2n_function_aliases(silicon_peripheral: str) -> list[str]:
     """Aliases for V2N pad-first rows whose E1M function is not in the TSV.
 
-    The V2N Renesas map is pad-first, so direct RIIC/UART/RSPI/SSIU/CAN rows
-    land in `silicon_peripheral` with `e1m_function: TBD`.  These aliases keep
+    The V2N Renesas map is pad-first; rows the SoM netlist routes straight
+    to an E1M edge ball carry that ball's function (RSPI/SSIU/RIIC/UART,
+    #2331), but E1M-X names I2C pads dotted (`I2C0.SCL`) where the netlist
+    uses `I2C0_SCL`, and the CAN pads sit behind on-module transceivers,
+    so those rows still need an alias.  These aliases keep
     the checker from treating present direct buses as unbacked while still
     failing carrier sidebands that have no V2N route at all.
     """
@@ -94,25 +98,6 @@ def _v2n_function_aliases(silicon_peripheral: str) -> list[str]:
     m = re.fullmatch(r"UART(\d+)_TXD\d+", silicon_peripheral)
     if m:
         return [f"UART{m.group(1)}_TX"]
-
-    rspi0_to_spi1 = {
-        "RSPI0_MISOA": "SPI1_MISO",
-        "RSPI0_MOSIA": "SPI1_MOSI",
-        "RSPI0_RSPCKA": "SPI1_SCLK",
-        "RSPI0_SSLA0": "SPI1_CS0",
-        "RSPI0_SSLA1": "SPI1_CS1",
-    }
-    if silicon_peripheral in rspi0_to_spi1:
-        return [rspi0_to_spi1[silicon_peripheral]]
-
-    ssiu_to_i2s0 = {
-        "SSIU1_SSI1_SCK": "I2S0_SCLK",
-        "SSIU1_SSI1_WS": "I2S0_WS",
-        "SSIU1_SSI1_SDATA": "I2S0_SDO",
-        "SSIU2_SSI2_SDATA": "I2S0_SDI",
-    }
-    if silicon_peripheral in ssiu_to_i2s0:
-        return [ssiu_to_i2s0[silicon_peripheral]]
 
     canfd_to_e1m = {
         "CANFD2_CRX2": "CAN0_RX",

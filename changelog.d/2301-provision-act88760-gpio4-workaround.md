@@ -1,0 +1,10 @@
+### Fixed — the ACT88760 GPIO4 OTP default is a known workaround, not a shipping defect (#2301)
+
+An ACT88760 register `0x10` OTP default of `0x88` on some early units (e.g. E1M-V2M103 2026W38-0001) held GD32_NRST in reset until `provision_som.py` released it with a volatile write; the tool then recorded that as `act88760_gpio4_defect: yes`, defaulted `disposition` to `bench-only`, and the ship check permanently refused the unit. Per maintainer decision (2026-09-29), that OTP value is expected on those units and U-Boot's `board_late_init` now releases GD32_NRST every boot (a no-op on the many units whose OTP is already `0x08`) — a separate U-Boot patch, not part of this change.
+
+- **Renamed the concept from defect to workaround.** `linux_target.py`: `ACT88760_GPIO4_DEFECT`/`ACT88760_GPIO4_RELEASE` → `ACT88760_GPIO4_OTP_DEFAULT`/`ACT88760_GPIO4_RELEASED`; `act88760_gpio4_defect()` → `act88760_gpio4_held()`. Register values (`0x10`, `0x88` held, `0x08` released, bit 7) are unchanged, and the tool still never writes EEPROM/OTP.
+- **New ledger keys.** The tool no longer writes `act88760_gpio4_defect`. `census` and `gd32_flash` record `act88760_gpio4_otp` (the raw value observed before any release); `act88760_gpio4_workaround` is `none` (OTP already `0x08`), `u-boot` (an 0x88-OTP unit released by the image on its own by the last cold boot), or `provision (volatile 0x08)` (the tool had to release it). `cold_boot_test` now re-reads register `0x10` after every cold boot and records `act88760_gpio4_after_boot`; the GD32 bridge is exempted from the post-boot I2C scan only while that read is still `0x88`.
+- **Ship check.** No longer blocks on `act88760_gpio4_defect`. Blocks only when `cold_boot_test` saw `act88760_gpio4_after_boot: 0x88` — i.e. the shipped image did not release the GD32 on its own.
+- **Backward compatible.** An existing `unit.yaml` carrying the legacy `act88760_gpio4_defect: yes` key is left untouched (informational only) and no longer forces `bench-only` or blocks shipping by itself.
+
+`py -3 -m pytest tests/scripts -q` green.

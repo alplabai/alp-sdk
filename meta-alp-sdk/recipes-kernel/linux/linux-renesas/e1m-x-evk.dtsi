@@ -50,7 +50,7 @@
  *     Two TAS2563 MONO amps share one physical I2S bus (one SCLK/WS/SDATA
  *     set), so the card is one audio-graph-card2 `multi` link
  *     (sound/soc/generic/audio-graph-card2.c, built in on this kernel):
- *     ONE cpu port (rcar_sound SSI1) fanned out to TWO codec ports in a
+ *     ONE cpu port (rcar_sound SSI2 data, SSI1 SCK/WS) fanned out to TWO codec ports in a
  *     single dai_link, so both amps get the same hw_params, format and
  *     DAPM power sequencing. Bench-verified on E1M-V2M103 (2026-09-27):
  *     both amps' PWR_CTL go software-shutdown -> active with the stream
@@ -79,15 +79,25 @@
  *     property documents the wiring only: the 6.1 tas2562 driver never
  *     requests an IRQ, so amp faults are not signalled to Linux.
  *
- *     STILL OPEN, not resolved by this landing: I2C-address ownership.
- *     Landing the kernel `ti,tas2563` codec nodes below means the kernel
- *     binds i2c0@0x4d/0x4e for ALSA -- the SDK's own userspace
- *     chips/tas2563 driver (reachable over alp_i2c_* on this same bus)
- *     must not ALSO be wired up against this board/SoM combination, or
- *     the two would race the same registers. No alp-chips PACKAGECONFIG
- *     currently enables it for e1m-v2n101/e1m-v2m101, so there is no
- *     live conflict today -- flagging so a future userspace-driver
- *     enablement on these MACHINEs does not silently reintroduce one.
+ *     I2C-address ownership (issue #2331 item 1): landing the kernel
+ *     `ti,tas2563` codec nodes below means the kernel binds
+ *     i2c0@0x4d/0x4e for ALSA -- the SDK's own userspace chips/tas2563
+ *     driver (reachable over alp_i2c_* on this same bus) must not ALSO
+ *     be wired up against this board/SoM combination, or the two would
+ *     race the same registers. Resolved as a NON-FIGHTING ownership
+ *     contract rather than a PACKAGECONFIG lock-out: tas2563_init()
+ *     already propagates its bus call's status verbatim (#2077), so
+ *     when a kernel driver holds one of these addresses,
+ *     `ioctl(I2C_SLAVE)` on `/dev/i2c-0` fails `EBUSY` before any
+ *     transaction is even attempted, and that surfaces as
+ *     `ALP_ERR_BUSY` out of `tas2563_init()` -- see the @retval
+ *     ALP_ERR_BUSY note on that function in
+ *     `include/alp/chips/tas2563.h`. A future userspace-driver
+ *     enablement on e1m-v2n101/e1m-v2m101 competing with this DT node
+ *     gets a clear, distinct refusal rather than a silent register
+ *     race or a misleading ALP_ERR_NOT_READY ("no chip present").  No
+ *     live conflict today either way (this DT node is the only bound
+ *     client at these addresses, and the driver does not fight it).
  *
  *     Kernel config: the mainline ASoC `tas2562` driver covers the
  *     TAS2563; CONFIG_SND_SOC_RCAR is already `=y` in this BSP's
@@ -215,7 +225,7 @@
 	};
 
 	/* TAS2563 stereo pair (U27 left / U28 right), one shared I2S0 bus:
-	 * one audio-graph-card2 `multi` link, SSI1 -> both amps. See this
+	 * one audio-graph-card2 `multi` link, SSI2 -> both amps. See this
 	 * file's header comment for why not simple-audio-card. */
 	sound_card: sound {
 		compatible = "audio-graph-card2";
@@ -278,17 +288,145 @@
 	clock-frequency = <24576000>;
 };
 
-/* SoC audio block (SCU/ADG/SSIU/SSI/AUDMAPP). Only SSI1 (playback,
- * SSIU1 SCK/WS + its own SDATA) is wired to the carrier -- SSIU2's extra
- * SDATA line is unused for this playback-only stereo pair (both TAS2563
- * mono amps tap the one shared SDATA line; each is configured over I2C
- * to consume its own TDM slot, not a second physical data line). */
+/* SoC audio block (SCU/ADG/SSIU/SSI/AUDMAPP).
+ *
+ * Data direction (#2331): per the SoM + carrier netlists, SSI1's SDATA
+ * (P46) reaches E1M pad AQ4 I2S0_SDI -> TMUX1574 U46 -> the TAS2563 SDOUT
+ * pins (U27/U28 pin 10), and SSI2's SDATA (P47) reaches AR4 I2S0_SDO ->
+ * the TAS2563 SDIN pins (pin 11). Playback therefore leaves on SSI2's
+ * data line, while SCK/WS come out of SSI1 (P44/P45). The RZ/V2N SSIU can
+ * do that: SSIU_SSI_MODE1.ssi2_pin{2,1,0} = 110b makes SSI1 the pin
+ * master and SSI2 its slave (RZ/V2N Group Hardware Manual Additional
+ * Document R01UH1072EJ0120, section 8.5.2.3.16; SSICR1.SCKD/SWSD = 1,1,
+ * SSICR2.SCKD/SWSD = 0,0). The stock rsnd driver only knows SSI0 as a
+ * clock parent, so meta-alp-sdk patch 0014 adds the SSI2-under-SSI1 case,
+ * selected by the `alp,shared-pin-ssi1` property on &ssi2 below.
+ *
+ * P46 (SSI1 SDATA, the amps' SDOUT net) is deliberately NOT muxed: the
+ * SoC must never drive it. There is no capture/IV-sense path in this card.
+ *
+ * STATUS: bench-unverified (no sound heard yet); the card is enabled
+ * because playback no longer drives the SDOUT net, but the first bench
+ * listen is still pending (see docs/boards/e1m-x-evk.md audio notes). */
 &rcar_sound {
 	pinctrl-0 = <&sound_pins>;
 	pinctrl-names = "default";
 	status = "okay";
 
 	#sound-dai-cells = <1>;
+
+	/* Clock list = the SoC dtsi's, minus clk_a (module 0xfb) and clk_c
+	 * (0xfd). Audio_CLKA is the AUDIO_EXTAL/AUDIO_XTAL oscillator input and
+	 * Audio_CLKC an unfed pad on this SoM/carrier: both stay at 0 Hz, and
+	 * the CPG only reports CLK_ON (CPG_CLKMON_7 bits 27/29) once a clock is
+	 * actually present, so rzv2h-cpg times out (-110) on the first runtime
+	 * resume of the card. rsnd falls back to a null clock for a clock name
+	 * that is absent (rsnd_adg_get_clkin), so dropping them is safe; the
+	 * card runs from Audio_CLKB (clk_b) only. Bench-confirmed on E1M-V2M103
+	 * (no -110; 2 s of 48 kHz audio plays in 2.06 s). Re-sync this list from
+	 * r9a09g056.dtsi's rcar_sound node on a BSP bump. */
+	clocks = <&cpg CPG_MOD 0xf5>,
+		 <&cpg CPG_MOD 0x18a>,
+		 <&cpg CPG_MOD 0x189>,
+		 <&cpg CPG_MOD 0x188>,
+		 <&cpg CPG_MOD 0x187>,
+		 <&cpg CPG_MOD 0x186>,
+		 <&cpg CPG_MOD 0x185>,
+		 <&cpg CPG_MOD 0x184>,
+		 <&cpg CPG_MOD 0x183>,
+		 <&cpg CPG_MOD 0x182>,
+		 <&cpg CPG_MOD 0x181>,
+		 <&cpg CPG_MOD 0x180>,
+		 <&cpg CPG_MOD 0xf6>,
+		 <&cpg CPG_MOD 0xf7>,
+		 <&cpg CPG_MOD 0x17d>,
+		 <&cpg CPG_MOD 0x17c>,
+		 <&cpg CPG_MOD 0x17b>,
+		 <&cpg CPG_MOD 0x17a>,
+		 <&cpg CPG_MOD 0x179>,
+		 <&cpg CPG_MOD 0x178>,
+		 <&cpg CPG_MOD 0x177>,
+		 <&cpg CPG_MOD 0x176>,
+		 <&cpg CPG_MOD 0x175>,
+		 <&cpg CPG_MOD 0x174>,
+		 <&cpg CPG_MOD 0x17e>,
+		 <&cpg CPG_MOD 0x173>,
+		 <&cpg CPG_MOD 0x172>,
+		 <&cpg CPG_MOD 0x173>,
+		 <&cpg CPG_MOD 0x172>,
+		 <&cpg CPG_MOD 0x170>,
+		 <&cpg CPG_MOD 0x171>,
+		 <&cpg CPG_MOD 0xf8>,
+		 <&cpg CPG_MOD 0xf9>,
+		 <&cpg CPG_MOD 0xfc>,
+		 <&cpg CPG_MOD 0xfa>,
+		 <&cpg CPG_MOD 0x169>,
+		 <&cpg CPG_MOD 0x168>,
+		 <&cpg CPG_MOD 0x167>,
+		 <&cpg CPG_MOD 0x166>,
+		 <&cpg CPG_MOD 0x165>,
+		 <&cpg CPG_MOD 0x164>,
+		 <&cpg CPG_MOD 0x163>,
+		 <&cpg CPG_MOD 0x162>,
+		 <&cpg CPG_MOD 0x161>,
+		 <&cpg CPG_MOD 0x160>,
+		 <&cpg CPG_MOD 0xfe>,
+		 <&cpg CPG_MOD 0xff>,
+		 <&cpg CPG_MOD 0x100>,
+		 <&cpg CPG_MOD 0x16a>,
+		 <&cpg CPG_MOD 0x16b>,
+		 <&cpg CPG_MOD 0x16c>;
+	clock-names = "ssi-all",
+		      "ssi.9",
+		      "ssi.8",
+		      "ssi.7",
+		      "ssi.6",
+		      "ssi.5",
+		      "ssi.4",
+		      "ssi.3",
+		      "ssi.2",
+		      "ssi.1",
+		      "ssi.0",
+		      "ssif_supply_clk",
+		      "scu_clk",
+		      "scu_clkx2",
+		      "src.9",
+		      "src.8",
+		      "src.7",
+		      "src.6",
+		      "src.5",
+		      "src.4",
+		      "src.3",
+		      "src.2",
+		      "src.1",
+		      "src.0",
+		      "scu_supply_clk",
+		      "mix.1",
+		      "mix.0",
+		      "ctu.1",
+		      "ctu.0",
+		      "dvc.0",
+		      "dvc.1",
+		      "audmac-pp",
+		      "adg_clk",
+		      "clk_b",
+		      "clk_i",
+		      "adg.ssi.9",
+		      "adg.ssi.8",
+		      "adg.ssi.7",
+		      "adg.ssi.6",
+		      "adg.ssi.5",
+		      "adg.ssi.4",
+		      "adg.ssi.3",
+		      "adg.ssi.2",
+		      "adg.ssi.1",
+		      "adg.ssi.0",
+		      "spdif.0",
+		      "spdif.1",
+		      "spdif.2",
+		      "adg.spdif.0",
+		      "adg.spdif.1",
+		      "adg.spdif.2";
 
 	ports {
 		#address-cells = <1>;
@@ -303,10 +441,15 @@
 				dai-format = "i2s";
 				bitclock-master;
 				frame-master;
-				playback = <&ssi1>;
+				playback = <&ssi2>;
 			};
 		};
 	};
+};
+
+/* SSI2 plays out of P47; its SCK/WS come from SSI1 (P44/P45), see above. */
+&ssi2 {
+	alp,shared-pin-ssi1;
 };
 
 /* TAS2563 smart-amp pair (I2C0 @0x4D/0x4E). SD_N (shutdown) and IRQ_N
@@ -332,10 +475,11 @@
 		 * amp up (SDZ is active-low shutdown), so the line is ACTIVE_HIGH:
 		 * ACTIVE_LOW held both amps in shutdown (they NACK I2C while SDZ is low). */
 		shutdown-gpios = <&pinctrl RZV2N_GPIO(1, 2) GPIO_ACTIVE_HIGH>;
-		/* AMP.FAULT (IRQ_N), shared -- see header comment. SSIU4_SSI4_
-		 * SDATA / P15 (E1M-X I2S1_SDI repurposed as plain GPIO). */
+		/* AMP.FAULT (IRQ_N), shared -- see header comment. SSIU3_SSI3_
+		 * SDATA / P04, pad AR10 (E1M-X I2S1_SDI repurposed as plain GPIO;
+		 * NOT P15, which is I2S1_SDO). */
 		interrupt-parent = <&pinctrl>;
-		interrupts = <RZV2N_GPIO(1, 5) IRQ_TYPE_EDGE_FALLING>;
+		interrupts = <RZV2N_GPIO(0, 4) IRQ_TYPE_EDGE_FALLING>;
 		ti,imon-slot-no = <0>;
 		ti,vmon-slot-no = <2>;
 
@@ -398,10 +542,16 @@
  * switched card rail. Active-low: 0 = card present.
  *
  * vqmmc: vqmmc_sdhi1 (e1m-v2n-som.dtsi) switches the SD1 IO rail to
- * 1.8 V for UHS, up to SDR104 (200 MHz). The SD1 pads run at
- * output-impedance 2, one step weaker than the eMMC: at 3 (strongest)
- * SDR104 through the carrier SDIO mux fails the data phase with CRC
- * errors (-84); at 2 it is clean.
+ * 1.8 V for UHS. The SD1 pads run at output-impedance 2, one step weaker
+ * than the eMMC: at 3 (strongest) SDR104 through the carrier SDIO mux
+ * fails the data phase with CRC errors (-84); at 2 it is clean.
+ *
+ * Capped at SDR50 (100 MHz, 1.8 V), no sd-uhs-sdr104: SDR104 reads are
+ * fine (~85 MB/s), but host-to-card writes at 208 MHz never complete --
+ * "mmc1: Card stuck being busy!" with 4 KiB requests, a hung request with
+ * 256 KiB ones (#2357). Tuning only calibrates the host's read sampling,
+ * not its outgoing data. SDR50 writes 512 MiB in 20 s (E1M-V2M103, bench
+ * 2026-09-27, with kernel patch 0010).
  *
  * vmmc: card power (PA3/SD1_SD1PWEN) is an always-on hog, not a
  * regulator the MMC core may switch off. The card-detect pull-up sits on
@@ -412,10 +562,11 @@
  * SDIO reset carried through the carrier SDIO mux, so it is left
  * undriven here.
  *
- * The carrier SDIO mux (MUX_SEL.SDIO / SD_MUX_EN, driven by the GD32
- * IO-MCU on E1M IO27/IO29) selects microSD vs M.2 Wi-Fi SDIO; its
- * undriven default selects the microSD socket. See
- * docs/boards/e1m-x-evk.md. */
+ * The carrier SDIO mux (TMUX1574 U38/U39) selects microSD vs M.2 Wi-Fi
+ * SDIO. On the E1M-X EVK V2 its SEL (MUX_SEL.SDIO) is not a GPIO: R239
+ * (100k) pulls it low (= microSD) and header P6 ties it to +3V3 (= M.2);
+ * E1M IO27 is unconnected. Its active-low EN (SD_MUX_EN) is E1M IO29,
+ * with no external pull-down. See docs/boards/e1m-x-evk.md. */
 &sdhi1 {
 	pinctrl-0 = <&sdhi1_pins>;
 	pinctrl-1 = <&sdhi1_pins>;
@@ -424,7 +575,6 @@
 	vqmmc-supply = <&vqmmc_sdhi1>;
 	bus-width = <4>;
 	sd-uhs-sdr50;
-	sd-uhs-sdr104;
 	cd-gpios = <&pinctrl RZV2N_GPIO(A, 1) GPIO_ACTIVE_LOW>;
 	status = "okay";
 };
@@ -538,18 +688,29 @@
 };
 
 /* USB 2.0 host (OTG) + USB 3.0.  The carrier's OVC sense wiring is not
- * usable (errata E3).  PB.1 (usb30) is parked as a GPIO input by the hog
- * below, which keeps the xHCI OVC input inactive.  P9.6 (usb20) can no
- * longer be parked the same way: it is SCK7 of the CM33-owned GD32
- * supervisor SPI, and the CM33 is started by BL2 PRE-Linux -- so the old
- * hog actually clobbered the live SCK7 mux at every Linux boot (~1.9 s,
- * PMC9 byte-RMW; same clobber class as SD1_CD below) until the CM33's
- * own pin re-init took the pad back, which is also why usb20 OVC
- * suppression was lost.  The usb20 channel is instead suppressed at the
- * controller: spurious-oc on the EHCI (generic binding, in-tree) and on
- * the OHCI (kernel patch 0003 adds the same property).  OC processing
- * is fully off for usb20 -- correct here because VBUS is hardwired
- * always-on with no per-port switching to protect. */
+ * usable (errata E3).  P9.6 (usb20) can no longer be parked as a GPIO:
+ * it is SCK7 of the CM33-owned GD32 supervisor SPI, and the CM33 is
+ * started by BL2 PRE-Linux -- so the old hog actually clobbered the
+ * live SCK7 mux at every Linux boot (~1.9 s, PMC9 byte-RMW; same
+ * clobber class as SD1_CD below) until the CM33's own pin re-init took
+ * the pad back, which is also why usb20 OVC suppression was lost.  The
+ * usb20 channel is instead suppressed at the controller: spurious-oc on
+ * the EHCI (generic binding, in-tree) and on the OHCI (kernel patch
+ * 0003 adds the same property).  OC processing is fully off for usb20
+ * -- correct here because VBUS is hardwired always-on with no per-port
+ * switching to protect.
+ *
+ * usb30 has no VBUS pinmux and no OVC-disable GPIO hog: PB0 (VBUS,
+ * func14) and PB1 (usb30 OVC) are on-module WLAN_SDIO.CLK and
+ * WLAN_SDIO.D0 (e1m-v2n-som.dtsi's sd2_wlan_pins, &sdhi2) -- on-module
+ * nets that never reach the E1M connector, so this carrier cannot claim
+ * either pin. The old usb30_pins/hog pair was copied from the Renesas
+ * EVK reference dts without checking the ALP module's netlist. usb30 OC
+ * processing is left at its EHCI/xHCI default (not yet suppressed at
+ * the controller); BENCH TODO: verify xHCI reports no spurious
+ * over-current with PB1 now muxed as SD2DAT0 instead of a parked GPIO
+ * input -- if it does, suppress usb30 OC at the controller the same way
+ * usb20 is suppressed above. */
 &ehci0 {
 	memory-region = <&global_cma>;
 	dr_mode = "otg";
@@ -591,8 +752,6 @@
 };
 
 &xhci0 {
-	pinctrl-0 = <&usb30_pins>;
-	pinctrl-names = "default";
 	memory-region = <&global_cma>;
 	status = "okay";
 };
@@ -658,14 +817,14 @@
 	 * this SoC's own stock RZ/V2N EVK reference dts `sound_pins` node.
 	 * Function 7 + P<port><pin> confirmed against that reference dts's
 	 * SSI3/4 + AUDIO_CLK pinctrl entries (RZV2N_PORT_PINMUX(port, pin,
-	 * 7)) -- see this file's header comment. SSIU2's extra SDATA (P47)
-	 * is left unclaimed: unused for this playback-only pair (see
-	 * &rcar_sound's comment). */
+	 * 7)) -- see this file's header comment. SSI1's own SDATA (P46) is
+	 * left unclaimed on purpose (it is the amps' SDOUT net); playback
+	 * uses SSI2's SDATA (P47). See &rcar_sound's comment. */
 	sound_pins: sound {
-		ssi1_pins: ssi1 {
+		ssi1_pins: ssi1 { /* SCK/WS from SSI1, data from SSI2 */
 			pinmux = <RZV2N_PORT_PINMUX(4, 4, 7)>, /* SSIU1_SSI1_SCK */
 				 <RZV2N_PORT_PINMUX(4, 5, 7)>, /* SSIU1_SSI1_WS */
-				 <RZV2N_PORT_PINMUX(4, 6, 7)>; /* SSIU1_SSI1_SDATA */
+				 <RZV2N_PORT_PINMUX(4, 7, 7)>; /* SSIU2_SSI2_SDATA */
 		};
 
 		audio_clkb_pins: audio_clkb {
@@ -709,27 +868,13 @@
 	};
 
 	/* No usb20 (USB2.0 VBUS) pinmux: VBUS is always-on (hardwired) on this
-	 * carrier, and P95 is the DEEPX PCIe mux-sel on V2M (kept as GPIO). */
-
-	usb30_pins: usb30 {
-		vbus {
-			pinmux = <RZV2N_PORT_PINMUX(B, 0, 14)>; /* VBUS */
-		};
-	};
-
-	/* usb30 OVC (PB.1) parked as a plain GPIO input so the xHCI OVC
-	 * input reads inactive.  P9.6 (usb20 OVC) is DELIBERATELY absent:
-	 * it is the CM33's SCK7.  Linux must never claim or re-mux the
-	 * CM33's P9.6/P9.7, and every Linux port-9 access is a non-atomic
-	 * PMC9/PM9 byte-RMW that can race the CM33 (the SD1_CD/P94 lesson
-	 * above).  The one deliberate exception is the V2M deepx mux-sel
-	 * hog on P9.5 (e1m-v2m-deepx.dtsi) -- see the race note there. */
-	usb-ovc-disable-hog {
-		gpio-hog;
-		gpios = <RZV2N_GPIO(B, 1) GPIO_ACTIVE_HIGH>;
-		input;
-		line-name = "usb_ovc_disable";
-	};
+	 * carrier, and P95 is the DEEPX PCIe mux-sel on V2M (kept as GPIO).
+	 *
+	 * No usb30 pinmux or OVC-disable hog either: PB0 (VBUS, func14) and
+	 * PB1 (usb30 OVC) are the on-module WLAN_SDIO.CLK and WLAN_SDIO.D0
+	 * nets (see &xhci0's comment above) -- they never reach this
+	 * carrier's E1M connector, so no carrier-level pinctrl group may
+	 * claim them. */
 
 	/* Audio_CLKB_OE (P67): host-driven output-enable for the on-module
 	 * 5L35023B's Audio_CLKB. metadata/chips/clk_5l35023b.yaml: "OTP

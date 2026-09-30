@@ -63,6 +63,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <new>
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
@@ -620,7 +621,22 @@ int main(void)
 		return 0;
 	}
 
-	tflite::MicroMutableOpResolver<8> resolver;
+	/* Resolver and interpreter live in static storage built with placement new
+	 * and are NEVER destroyed.  Every exit below is a `return 0` from main(),
+	 * and a stack-local MicroInterpreter's destructor would then run
+	 * FreeSubgraphs(), which re-walks the model flatbuffer in SRAM0.  SRAM0
+	 * is shared by every core: when this image ran on the M55-HP while
+	 * another image was resident on the M55-HE, the HE overwrote model_sram
+	 * (0x02000000) and that teardown faulted in
+	 * flatbuffers::Table::GetOptionalFieldOffset after the RESULT line had
+	 * already printed (#2318).  A one-shot bench app gains nothing from
+	 * freeing the arena on exit, so the teardown is removed outright. */
+	alignas(tflite::MicroMutableOpResolver<8>) static uint8_t
+	    resolver_storage[sizeof(tflite::MicroMutableOpResolver<8>)];
+	alignas(tflite::MicroInterpreter) static uint8_t
+	    interpreter_storage[sizeof(tflite::MicroInterpreter)];
+
+	auto &resolver = *new (resolver_storage) tflite::MicroMutableOpResolver<8>();
 	resolver.AddEthosU();
 	resolver.AddReshape();
 	resolver.AddConv2D();
@@ -630,8 +646,9 @@ int main(void)
 	resolver.AddQuantize();
 	resolver.AddDequantize();
 
-	tflite::MicroInterpreter interpreter(model, resolver, tensor_arena, TENSOR_ARENA_SIZE);
-	TfLiteStatus             alloc = interpreter.AllocateTensors();
+	auto &interpreter = *new (interpreter_storage) tflite::MicroInterpreter(
+	    model, resolver, tensor_arena, TENSOR_ARENA_SIZE);
+	TfLiteStatus alloc             = interpreter.AllocateTensors();
 	g_alloc_status                 = (int)alloc;
 	if (alloc != kTfLiteOk) {
 		printk("RESULT FAIL: AllocateTensors=%d\n", (int)alloc);

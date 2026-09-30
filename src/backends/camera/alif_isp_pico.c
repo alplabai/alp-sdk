@@ -110,6 +110,7 @@ LOG_MODULE_REGISTER(alp_camera_alif_isp_pico, CONFIG_LOG_DEFAULT_LEVEL);
 #include "alp_errno.h"
 #include "camera_ops.h"
 #include "alif_isp_pico.h"
+#include "camera_frmival.h"
 #include "alp_slot_claim.h"
 #include "yuv_to_rgb565.h"
 
@@ -334,6 +335,7 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
                              alp_camera_backend_state_t *state,
                              alp_capabilities_t         *caps_out)
 {
+	(void)caps_out;
 	if (cfg == NULL || cfg->camera_id >= ARRAY_SIZE(_devs)) {
 		return ALP_ERR_INVAL;
 	}
@@ -493,9 +495,8 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 			 * print a misleading rounded (or zero) fps. The request
 			 * was always {.numerator = 1, .denominator =
 			 * requested_fps}, so compare against that rather than
-			 * requested_fps alone. Only logged, not reported back to
-			 * the caller -- <alp/camera.h> has no settled-fps field
-			 * yet (issue #2279). */
+			 * requested_fps alone. The caller reads the same settled
+			 * rate back through alp_camera_get_fps() (#2279). */
 			bool settled_as_requested =
 			    (actual.numerator == 1u) && (actual.denominator == requested_fps);
 
@@ -574,10 +575,10 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 		}
 	}
 
-	state->be_data = st;
+	state->fps_x1000 = alp_camera_read_fps_x1000(dev); /* #2279 */
+	state->be_data   = st;
 	/* base_caps stays 0 so the surface ABI is reflected exactly; the
 	 * ISP-present cap bit is advertised once cap_instance.h allocates it. */
-	caps_out->flags = 0u;
 	return ALP_OK;
 }
 
@@ -613,6 +614,14 @@ static alp_status_t isp_stop(alp_camera_backend_state_t *state)
 	int err = video_stream_stop(st->dev, VIDEO_BUF_TYPE_OUTPUT);
 	if (err == 0) {
 		st->streaming = false;
+		/* The stop's cancel flush parks every queued buffer in the done
+		 * queue; queue them again so the next isp_start() has buffers to
+		 * fill (#2351), as isp_capture()'s starve path does. */
+		struct video_buffer *vb = NULL;
+		while (video_dequeue(st->dev, &vb, K_NO_WAIT) == 0 && vb != NULL) {
+			(void)video_enqueue(st->dev, vb);
+			vb = NULL;
+		}
 	}
 	return _errno_to_alp(err);
 }

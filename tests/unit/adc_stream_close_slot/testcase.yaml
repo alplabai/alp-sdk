@@ -1,0 +1,13 @@
+tests:
+  alp.unit.adc_stream_close_slot:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim
+      - native_sim/native/64
+    tags:
+      - alp
+      - adc
+      - gd32-bridge
+      - unit

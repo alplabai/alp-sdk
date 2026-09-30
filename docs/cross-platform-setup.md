@@ -736,9 +736,19 @@ python3 -m pytest tests/scripts/ -q
 python -m pytest tests\scripts\ -q
 ```
 
-Expected: ~370+ passing tests; matches the Linux baseline.  Any
+Expected: ~4,400 passing tests; matches the Linux baseline.  Any
 divergence here is a cross-platform regression and should be
 filed as an issue.
+
+To run it the way CI does, in parallel (needs the `[dev]` extra, which
+includes `pytest-xdist`), use two passes. The first spreads the tests over
+every core. The second runs the few modules that write into the checkout
+(`tests/scripts/conftest.py` `_REPO_WRITER_MODULES`) on their own:
+
+```bash
+python3 -m pytest tests/scripts/ -q -n auto -m "not repo_writes"
+python3 -m pytest tests/scripts/ -q -m repo_writes
+```
 
 ---
 

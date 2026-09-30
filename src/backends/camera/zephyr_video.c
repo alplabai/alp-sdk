@@ -54,6 +54,11 @@
 #include "camera_ops.h"
 #include "alp_slot_claim.h"
 
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(alp_camera_zephyr_video, CONFIG_LOG_DEFAULT_LEVEL);
+
+#include "camera_frmival.h"
+
 #ifndef CONFIG_ALP_SDK_CAMERA_ZEPHYR_VIDEO_VBUF_COUNT
 #define CONFIG_ALP_SDK_CAMERA_ZEPHYR_VIDEO_VBUF_COUNT 2
 #endif
@@ -201,6 +206,7 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
                            alp_camera_backend_state_t *state,
                            alp_capabilities_t         *caps_out)
 {
+	(void)caps_out;
 	if (cfg == NULL || cfg->camera_id >= ARRAY_SIZE(_devs)) {
 		return ALP_ERR_INVAL;
 	}
@@ -333,10 +339,12 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
 	}
 	st->vbuf_count = want;
 
+	alp_camera_apply_fps(dev, cfg->camera_id, cfg->fps);
+	state->fps_x1000 = alp_camera_read_fps_x1000(dev); /* #2279 */
+
 	state->be_data = st;
 	/* No special caps from the portable Zephyr video class -- ISP
      * gates stay off, vendor backends layer them on. */
-	caps_out->flags = 0u;
 	return ALP_OK;
 }
 
@@ -356,7 +364,18 @@ static alp_status_t z_stop(alp_camera_backend_state_t *state)
 	if (st == NULL) return ALP_ERR_NOT_READY;
 	if (!st->streaming) return ALP_OK;
 	int err = video_stream_stop(st->dev, VIDEO_BUF_TYPE_OUTPUT);
-	if (err == 0) st->streaming = false;
+	if (err == 0) {
+		st->streaming = false;
+		/* The stop's cancel flush moves every queued buffer to the done
+		 * queue as VIDEO_BUF_ABORTED.  Queue them again so the next
+		 * z_start() has buffers to fill (#2351); frames the caller still
+		 * holds come back through z_release() as usual. */
+		struct video_buffer *vb = NULL;
+		while (video_dequeue(st->dev, &vb, K_NO_WAIT) == 0 && vb != NULL) {
+			(void)video_enqueue(st->dev, vb);
+			vb = NULL;
+		}
+	}
 	return _errno_to_alp(err);
 }
 

@@ -77,7 +77,7 @@ signing key lifecycle that makes it work.
 │   - Signed by the production private key held on the        │
 │     air-gapped signing workstation.  (In-chip custody in    │
 │     OPTIGA Trust M is the intended end state -- the driver  │
-│     is probe-only today; see "Signing key lifecycle".)      │
+│     has no signing call yet; see "Signing key lifecycle".)  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -158,8 +158,12 @@ via `storage:` if you want it explicit.
 ### Development
 
 1. Clone the repo.
-2. Run `bash keys/generate_dev_key.sh` once.  Generates
-   `keys/mcuboot_dev_ecdsa_p256.pem` (gitignored).
+2. Nothing to generate: the build signs with the committed **shared
+   development key** `keys/mcuboot_shared_dev_ecdsa_p256.pem`, which the
+   factory MCUboot on pre-provisioned modules trusts (#2421). It is public
+   and gives no security. To use your own key instead, run
+   `bash keys/generate_dev_key.sh` and re-provision MCUboot built with it
+   (see [`keys/README.md`](../keys/README.md)).
 3. Build with sysbuild:
    ```bash
    west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
@@ -170,12 +174,22 @@ via `storage:` if you want it explicit.
    (Or, if your `board.yaml` carries a `boot:` block, the loader's
    emitted overlay at `build/alp_sysbuild.conf` is the canonical
    `-DSB_CONF_FILE` path.)
-4. `build/zephyr/zephyr.signed.bin` is your signed image.
+4. `build/<app>/zephyr/zephyr.signed.bin` is your signed image
+   (`build/mcuboot/zephyr/zephyr.bin` is the MCUboot bootloader).
 5. Flash both the MCUboot bootloader and the signed app:
    ```bash
    west flash --bin-file build/mcuboot/zephyr/zephyr.bin --domain mcuboot
-   west flash --bin-file build/zephyr/zephyr.signed.bin
+   west flash --bin-file build/<app>/zephyr/zephyr.signed.bin
    ```
+
+   On the E1M-AEN boards, `west flash` on a sysbuild (MCUboot) build
+   refuses (alp-sdk#2274): the `alif_flash` runner cannot stage both
+   domains' ATOC entries in one burn. Use `docs/aen-provisioning.md`
+   §0.5 (Option B for a module whose MCUboot is already provisioned;
+   the SETOOLS MCUboot provisioning in `zephyr/sysbuild/aen/README.md`
+   otherwise). Option B writes the app only; without a resident
+   MCUboot the module will not boot (recoverable via SETOOLS
+   re-provisioning).
 
 The dev key has signing power equivalent to "every developer
 who's ever cloned the repo".  Never use it in a fielded device.
@@ -183,17 +197,14 @@ who's ever cloned the repo".  Never use it in a fielded device.
 ### Production
 
 > **The OPTIGA Trust M signing path described below is NOT
-> implemented.**  The SDK's OPTIGA Trust M driver is
-> **probe-only**: `optiga_trust_m_init` reads the I2C_STATE
-> register to confirm the part ACKs, and every other entry point
-> -- product info, raw APDU transport, `CalcSign`, `GenKeyPair`,
-> ECDH -- returns `ALP_ERR_NOSUPPORT` after argument validation
-> (`chips/optiga_trust_m/optiga_trust_m.c`; the contract is pinned
-> by `tests/scripts/test_optiga_probe_only_contract.py`).  There is
-> no key generation, no key export, and no signing through the
-> secure element today.  **Do not architect a product's key
-> management around it** until the Infineon host-library transport
-> is integrated (issue #481).
+> implemented.**  The SDK's OPTIGA Trust M driver probes the part, reads
+> its Coprocessor UID and runs raw APDU sessions through Infineon's host
+> library (`chips/optiga_trust_m/`, `vendors/optiga-trust-m/`).  There
+> is no typed key generation, key export or signing call, no PSA driver,
+> and the Shielded Connection is off (the contract is pinned by
+> `tests/scripts/test_optiga_trust_m_contract.py`).  **Do not
+> architect a product's key management around it** until typed calls and
+> binding-secret provisioning land (#1164).
 >
 > Use the air-gapped workstation flow below.  The OPTIGA design is
 > retained here as the intended end state, clearly marked.

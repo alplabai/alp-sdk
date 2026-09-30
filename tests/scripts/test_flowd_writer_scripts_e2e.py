@@ -178,6 +178,9 @@ def _prepared_script_dir(tmp_path: Path, stub: Path, mutation: tuple[str, str, s
         # race/gate machinery), so echo a harmless placeholder instead of
         # requiring a real toolchain on PATH.
         "bench_tool_prefix() { echo /nonexistent/arm-zephyr-eabi; }\n"
+        # The copied tree has no scripts/aen_atoc.py two levels up; point the
+        # #2234 package-extent guard at the repo's copy.
+        f'export AEN_ATOC_PY="{BENCH.parents[1] / "aen_atoc.py"}"\n'
     )
     envf.write_text(envf.read_text(encoding="utf-8") + override, encoding="utf-8")
     return dst

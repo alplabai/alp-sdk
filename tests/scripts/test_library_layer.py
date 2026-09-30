@@ -562,6 +562,30 @@ def test_ros2_on_non_yocto_target_errors(tmp_path: Path) -> None:
     assert "ros2" in msg and "yocto" in msg
 
 
+def test_ros2_edge_image_pulls_rclcpp_and_alp_perception() -> None:
+    """#372: the README's exact documented command (MACHINE=e1m-v2n101-a55 /
+    e1m-v2m101-a55, `bitbake alp-image-edge`, meta-ros2-humble added to
+    bblayers.conf) must actually reach both rclcpp and alp-perception -- not
+    just document that it does. Pins the whole in-tree chain so a change to
+    any link (IMAGE_FEATURES, the feature->packagegroup map, or the
+    packagegroup's RDEPENDS) that drops either package fails this test
+    instead of silently drifting from the README's claim.
+    """
+    meta = REPO / "meta-alp-sdk"
+    edge_image = (meta / "recipes-images" / "alp-image-edge.bb").read_text(encoding="utf-8")
+    assert "alp-ros" in edge_image.split('IMAGE_FEATURES += "', 1)[1].split('"', 1)[0]
+
+    common_inc = (meta / "recipes-images" / "alp-image-common.inc").read_text(encoding="utf-8")
+    assert 'FEATURE_PACKAGES_alp-ros     = "packagegroup-alp-ros"' in common_inc
+
+    packagegroup = (
+        meta / "recipes-core" / "packagegroups" / "packagegroup-alp-ros.bb"
+    ).read_text(encoding="utf-8")
+    rdepends = packagegroup.split('RDEPENDS:${PN} = "', 1)[1].split('"', 1)[0]
+    assert "rclcpp" in rdepends
+    assert "alp-perception" in rdepends
+
+
 # ---------------------------------------------------------------------
 # ADR 0018 cloud / connectivity Tier-B group
 #

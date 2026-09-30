@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 DEEPX DX-M1 (PCIe 0000:01:00.0, dx_dma_pcie): the runtime
+# device node exists and dxrt.service (/usr/bin/dxrtd) is active.
+# Read-only; does not open the device or run inference.
+
+schema_version: 1
+name: v2m103-dx-m1-present
+description: |
+  /dev/dxrt0 exists and dxrt.service is active.
+
+flash_method: ssh-run
+ssh_command: >-
+  test -c /dev/dxrt0 && echo HIL_DXRT_DEV_OK;
+  [ "$(systemctl is-active dxrt.service)" = active ] && echo HIL_DXRT_ACTIVE
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "HIL_DXRT_DEV_OK"
+    - "HIL_DXRT_ACTIVE"

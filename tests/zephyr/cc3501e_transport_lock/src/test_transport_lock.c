@@ -197,6 +197,14 @@ uint64_t alp_uptime_ms(void)
 {
 	return (uint64_t)k_uptime_get();
 }
+
+/* #2052: the bridge's settles count from the last transfer's end via
+ * alp_uptime_us(); derived from this suite's millisecond clock so both
+ * readings stay on the same (virtual) timeline. */
+uint64_t alp_uptime_us(void)
+{
+	return alp_uptime_ms() * 1000u;
+}
 alp_gpio_t *alp_gpio_open(uint32_t pin_id)
 {
 	ARG_UNUSED(pin_id);

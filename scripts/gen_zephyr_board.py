@@ -64,10 +64,9 @@ Scope (issue #523, first slice; extended by #655 slices 1 and 2):
     plus -- gated on the SoM preset's `topology.m33_sm.openamp_ipc`
     (`metadata/schemas/som-preset-v1.schema.json`) -- the OpenAMP/MHU-B
     reserved-memory block and the CAN-FD-unavailable analysis
-    (alp-sdk #683/#1146).  Only E1M-V2N101 sets that flag today:
-    E1M-V2M101's committed board tree does not carry either block, and
-    this generator reproduces that gap byte-for-byte rather than
-    "completing" a board nobody has written that content for yet.
+    (alp-sdk #683/#1146).  E1M-V2N101 and E1M-V2M101 both set it (the
+    same RZ/V2N die and MHU-B, #1948); a preset that leaves it false gets
+    neither block.
 
   NOT GENERATED (any family): `board.cmake` and a bare `Kconfig`.
   BOTH must be copied across by hand when a generated board tree is
@@ -1655,14 +1654,15 @@ _AEN_OSPI_STATE_PHRASE = {
 #: AE822 doing XiP "through a single FIFO location". The real reasons this
 #: driver stack never attempts it: hal_alif's OWN `alif_hal_ospi_xip_enable()`
 #: unconditionally targets the absent `XIP_SER` register (a bus fault, not a
-#: graceful no-op), and `flash_ospi_alif.c` ships no `flash_driver_api` at all
-#: (#915) -- so there is no in-tree driver path that would use OSPI0 for XIP
-#: today regardless of population. Never follow the die-level fact alone with
-#: a "so" -- always cite this instead.
+#: graceful no-op), and `flash_ospi_alif.c`'s `flash_driver_api` -- read/
+#: read_jedec_id/sfdp_read, bench-verified on E1M-AEN803's fitted NOR -- never
+#: calls it either (#915) -- so there is no in-tree driver path that would use
+#: OSPI0 for XIP today regardless of population. Never follow the die-level
+#: fact alone with a "so" -- always cite this instead.
 _AEN_OSPI_XIP_GAP = (
     "hal_alif's alif_hal_ospi_xip_enable() targets the XIP_SER register, "
-    "absent on this die, and flash_ospi_alif.c ships no flash_driver_api "
-    "-- #915")
+    "absent on this die, and flash_ospi_alif.c's flash_driver_api never "
+    "calls it -- #915")
 
 
 def _aen_ospi_device_state(

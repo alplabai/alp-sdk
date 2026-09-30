@@ -79,17 +79,21 @@
 # headroom left. Those ~50, plus 9 more scenarios that ship no boards/
 # directory at all (an app.overlay-only or overlay-free shape, safe to
 # declare AEN803 for without a matching boards/ file), are declared now,
-# taking a `--dry-run` count over examples/aen + firmware-update-log +
-# drone-autopilot to 153 configurations total (78 AEN801, 75 AEN803) --
-# past the single-job cap on any linear projection. The `twister-aen` job
-# below is now a 2-way SKU matrix (AEN801, AEN803) instead of one job
-# building all four board targets, so the two SKUs build in parallel and
-# each job's own twister step only ever selects its own SKU's two
-# platforms (`-p` flags). Neither is a required branch-protection check on
-# `dev` (the required contexts are `twister-shard 1/4`..`4/4`,
-# `clang-format · diff-only` and `distro install · all`), so the split
-# blocks nothing. The `--testsuite-root` list stays a single block below,
-# shared by both matrix legs, rather than duplicated per SKU.
+# taking a `--dry-run` count AT THAT TIME (#2209) over examples/aen +
+# firmware-update-log + drone-autopilot to 153 configurations total (78
+# AEN801, 75 AEN803) -- past the single-job cap on any linear projection.
+# This count is a historical snapshot, not current -- the tree has grown
+# since; the AUTHORITATIVE current count lives in the camera-mjpeg-stream
+# comment further down this job's twister step (search AUTHORITATIVE), not
+# here. The `twister-aen` job below is now a 2-way SKU matrix (AEN801,
+# AEN803) instead of one job building all four board targets, so the two
+# SKUs build in parallel and each job's own twister step only ever selects
+# its own SKU's two platforms (`-p` flags). Neither is a required
+# branch-protection check on `dev` (the required contexts are
+# `twister-shard 1/4`..`4/4`, `clang-format · diff-only` and `distro
+# install · all`), so the split blocks nothing. The `--testsuite-root`
+# list stays a single block below, shared by both matrix legs, rather than
+# duplicated per SKU.
 
 name: pr-twister-aen
 
@@ -100,6 +104,7 @@ on:
       - 'examples/aen/**'
       - 'examples/connectivity/camera-mjpeg-stream/**'
       - 'examples/connectivity/firmware-update-log/**'
+      - 'examples/connectivity/iot-dashboard/**'
       - 'examples/connectivity/iot-fleet-ota/**'
       - 'examples/connectivity/mqtt-telemetry/**'
       - 'examples/peripheral-io/alp-console/**'
@@ -110,10 +115,14 @@ on:
       - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
       - 'zephyr/boards/alp/e1m_aen803_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen803_m55_hp/**'
+      - 'zephyr/boards/shields/**'
       - 'zephyr/soc-bridge/**'
       - 'src/backends/mproc/**'
+      - 'src/backends/power/alif_se_profile.c'
       - 'src/backends/soc_info/alif_se.c'
       - 'src/backends/update_log/**'
+      - 'zephyr/drivers/display/**'
+      - 'zephyr/drivers/mipi_dsi/**'
       - 'zephyr/drivers/sdhc/**'
       - 'zephyr/dts/alif/**'
       - 'zephyr/include/zephyr/dt-bindings/clock/**'
@@ -129,6 +138,7 @@ on:
       - 'examples/aen/**'
       - 'examples/connectivity/camera-mjpeg-stream/**'
       - 'examples/connectivity/firmware-update-log/**'
+      - 'examples/connectivity/iot-dashboard/**'
       - 'examples/connectivity/iot-fleet-ota/**'
       - 'examples/connectivity/mqtt-telemetry/**'
       - 'examples/peripheral-io/alp-console/**'
@@ -139,10 +149,14 @@ on:
       - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
       - 'zephyr/boards/alp/e1m_aen803_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen803_m55_hp/**'
+      - 'zephyr/boards/shields/**'
       - 'zephyr/soc-bridge/**'
       - 'src/backends/mproc/**'
+      - 'src/backends/power/alif_se_profile.c'
       - 'src/backends/soc_info/alif_se.c'
       - 'src/backends/update_log/**'
+      - 'zephyr/drivers/display/**'
+      - 'zephyr/drivers/mipi_dsi/**'
       - 'zephyr/drivers/sdhc/**'
       - 'zephyr/dts/alif/**'
       - 'zephyr/include/zephyr/dt-bindings/clock/**'
@@ -162,19 +176,19 @@ jobs:
     # #2209: one job per SKU, running in parallel, instead of one job
     # building all four board targets. Each leg selects only its own SKU's
     # two platforms (M55-HE + M55-HP) via matrix.platform_flags -- see the
-    # twister step below. At #2209, a `--dry-run` over examples/aen +
-    # firmware-update-log + drone-autopilot on that (then three-root) tree
+    # twister step below. At #2209 landing time a `--dry-run` over
+    # examples/aen + firmware-update-log + drone-autopilot on that tree
     # counted 78 AEN801 configurations and 75 AEN803 (153 total), against
-    # the pre-split single-job worst case of 92 that took 24m21s (#2198).
-    # Scaling that 1461s/92-build rate linearly, AEN801 (78 builds)
-    # projected to about 1240s/20.7min and AEN803 (75 builds) to about
-    # 1195s/19.9min -- both comfortably under the 30min twister-step cap
-    # and the 41min job ceiling below, so neither was tightened; a
-    # job-level timeout tighter than the shared 41min ceiling would need
-    # its own re-derivation per SKU for a margin that headroom does not
-    # need yet. The current scenario count across all nine testsuite
-    # roots this job now spans is measured in the twister step's own
-    # comment below.
+    # the pre-split single-job worst case of 92 that took 24m21s (#2198);
+    # scaling that 1461s/92-build rate linearly projected both legs
+    # comfortably under the 30min twister-step cap and the 41min job
+    # ceiling below. That snapshot is not current -- do not read 78/75/153
+    # as today's count; see the AUTHORITATIVE `--dry-run` count in the
+    # camera-mjpeg-stream comment further down this job's twister step for
+    # the current figure and margin. Neither is the 41min job ceiling
+    # tightened here; a job-level timeout tighter than that shared ceiling
+    # would need its own re-derivation per SKU for a margin this change
+    # does not need yet.
     strategy:
       fail-fast: false
       matrix:
@@ -399,6 +413,17 @@ jobs:
       # matrix leg and select nothing on the AEN803 one -- these two apps
       # have no AEN803 coverage, and #2209's per-SKU declaration sweep did
       # not reach them (they sit outside examples/aen).
+      # examples/connectivity/iot-dashboard is the third `--testsuite-root`
+      # line below, also issue #2173 item (3): its AEN scenario named
+      # `ensemble_e8_dk/...` the same way iot-fleet-ota's did, and had no
+      # panel wired at all (LVGL needs a `zephyr,display` chosen node, and
+      # the ST7789 its board.yaml used to declare has no working SPI route
+      # on the EVK). The example's own
+      # CMakeLists.txt now applies the e1m_evk_rk055hdmipi4ma0 DSI shield
+      # (the #2204 panel) for the AEN M55-HP board targets, and the scenario
+      # names BOTH alp_e1m_aen801_m55_hp and alp_e1m_aen803_m55_hp -- unlike
+      # mqtt-telemetry/iot-fleet-ota above, this one contributes a scenario
+      # to BOTH matrix legs.
       # examples/connectivity/camera-mjpeg-stream is the sixth bounded root
       # (issue #2265): before this, its AEN801/AEN803 build-only scenario
       # (real camera + Hantro JPEG + interim Ethernet, needing both the
@@ -407,14 +432,18 @@ jobs:
       # board target for it, so a regression in that pipeline would only
       # surface on the next real bench flash. Same shape as the roots
       # above: one example, bounded, build_only, not widened to any other
-      # directory. `--dry-run` against this job's full root list, before
-      # vs. after adding this root: +1 AEN801 configuration (83 -> 84),
-      # +1 AEN803 configuration (78 -> 79) -- one testcase.yaml scenario
-      # with a two-entry platform_allow. NOT reconciled against the two
-      # older total counts above/below this step (153/144) -- both
-      # already predate this addition by an amount this change did not
-      # introduce (neither matches this measurement's own 83+78=161
-      # baseline either, so the drift is pre-existing, not new here).
+      # directory.
+      # AUTHORITATIVE scenario count for this job's root list --
+      # re-derived 2026-09-30 (#2235) with a single `--dry-run` per leg over
+      # the exact ten roots + `-p` flags this step uses, at HEAD after the
+      # dev merge that brought in iot-dashboard (#2173): 103 AEN801
+      # configurations (88 M55-HE + 15 M55-HP), 101 AEN803 (86 M55-HE +
+      # 15 M55-HP), 204 total. This is the only current count in this
+      # file; every other scenario count in it (header, ADVISORY note, job
+      # comments) describes the tree when its cited issue landed, not
+      # HEAD -- trust this one.
+      # The timeout-minutes comment below does the latter -- it does not
+      # carry its own count.
       # examples/peripheral-io/alp-console, .../blink and .../pwm-led-fade
       # are the seventh, eighth and ninth bounded roots (issue #2235, the
       # unlanded remainder of closed PR #2232). None of the three shipped
@@ -433,7 +462,7 @@ jobs:
       # four examples (this trio plus drone-autopilot above), not widened to
       # all of examples/peripheral-io/ -- every OTHER example there stays
       # native_sim-only (see #2106).
-      - name: twister · ${{ matrix.label }} on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota + camera-mjpeg-stream + alp-console + blink + pwm-led-fade
+      - name: twister · ${{ matrix.label }} on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota + camera-mjpeg-stream + iot-dashboard + alp-console + blink + pwm-led-fade
         working-directory: ${{ github.workspace }}
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
@@ -441,37 +470,24 @@ jobs:
         # #1477: worst observed successful run 1167s/19.45min across 10
         # sampled runs of the PRE-#2209 combined job (both SKUs, ~92
         # builds). 30min was already ~1.54x that, kept under the job's own
-        # 41min ceiling (see that job-level comment). Before #2235, dev
-        # built 80 AEN801 + 75 AEN803 configurations across the five
-        # testsuite roots dev's workflow ran (CI run 35436368459; the
-        # AEN801 leg took 1179.76s for those 80 builds). #2235 (this PR)
-        # added the alp-console/blink/pwm-led-fade trio, and #2265
-        # (already on dev) separately added camera-mjpeg-stream, bringing
-        # the testsuite-root list to the nine above. A fresh `twister
-        # --dry-run` over this MERGED nine-root list at this PR's head
-        # (Zephyr v4.4.1, this repo's pin -- includes #2235's own fix
-        # dropping blink/pwm-led-fade's undeclared-core M55-HE twin, and
-        # the further scenarios #2323 and other dev commits landed since
-        # the earlier 90/86 measurement) measures 98 AEN801 + 94
-        # AEN803 (192 total) configurations. Re-derive with a fresh
-        # `--dry-run` rather than by arithmetic on any prior count in this
-        # comment -- the 90/86/176 figure that used to stand here was
-        # itself already stale by the time this comment was re-measured.
-        # Scaling the AEN801 leg's last CI-measured rate (1179.76s/80
-        # builds, CI run 35436368459) linearly projects to about
-        # 1445.2s/24.09min for 98 builds, still comfortably under this
-        # 30min cap; the AEN803 leg's own last-measured rate (693.43s/75
-        # builds, same CI run) projects to about 869s/14.48min for 94
-        # builds, also comfortably under this cap -- both projections are
-        # arithmetic off an OLDER CI timing sample, not a fresh timed run,
-        # so revisit with a real in-CI run if a future scenario count
-        # pushes either leg close to the cap.
+        # 41min ceiling (see that job-level comment). Scenario count is not
+        # re-derived here -- see the AUTHORITATIVE `--dry-run` count in the
+        # camera-mjpeg-stream comment above this step, not restated here.
+        # Scaled linearly off the 1461s/92-build #2198 measurement
+        # (15.9 s/build) at that count: AEN801 (103) projects to
+        # about 1638s/27.3min (~9% headroom under this 30min cap), AEN803
+        # (101) to about 1606s/26.8min (~11% headroom) -- inside the cap,
+        # but thin; #2541 tracks persisting ccache to win headroom back.
+        # Revisit if a future scenario count pushes either leg closer to
+        # it -- the AEN801 leg in particular has less room left than
+        # AEN803.
         timeout-minutes: 30
         run: |
           python3 zephyr/scripts/twister \
             ${{ matrix.platform_flags }} \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/aen" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/firmware-update-log" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/iot-dashboard" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/drone-autopilot" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/mqtt-telemetry" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/iot-fleet-ota" \

@@ -63,7 +63,7 @@ byte; their numeric encoding is:
 | `0x61` | `QENC_RESET`          | `encoder:u8`                                       | _empty_                                            |
 | `0x70` | `COUNTER_READ`        | `counter:u8`                                       | `ticks:u32`                                        |
 | `0x22` | `PWM_CONFIGURE`       | `channel:u8 align:u8 dead_time_ns:u32 break_cfg:u8` | _empty_ (see §3.8; `align` applied, `dead_time_ns`/`break_cfg` return `STATUS_NOSUPPORT` -- V2N routes only single-ended outputs / no BRK pad) |
-| `0x32` | `ADC_CONFIGURE`       | `channel:u8 reserved:u8 oversample:u16 sample_cycles:u16 resolution:u8` | _empty_ (see §3.9; `sample_cycles`/`oversample`/6-12b `resolution` sticky; 14/16b return `STATUS_NOSUPPORT`) |
+| `0x32` | `ADC_CONFIGURE`       | `channel:u8 reserved:u8 oversample:u16 sample_cycles:u16 resolution:u8` | _empty_ (see §3.9; `sample_cycles`/`oversample`/6-12b `resolution` sticky; 14/16b unsupported by the hardware, return `STATUS_NOSUPPORT`) |
 | `0x33` | `ADC_STREAM_BEGIN`    | `stream_id:u8 channel:u8 reserved:u8 sample_rate_hz:u32` | _empty_                                      |
 | `0x34` | `ADC_STREAM_READ`     | `stream_id:u8 max_samples:u8`                      | `got:u8 mv[max_samples]:u16` (zero-padded)         |
 | `0x35` | `ADC_STREAM_END`      | `stream_id:u8`                                     | _empty_                                            |
@@ -179,14 +179,14 @@ base-level pump.  What a bound chain does to the reads:
 * **FFT terminal:** `CMD_ADC_STREAM_READ` returns `STATUS_NOSUPPORT`;
   the spectrum is pulled with `CMD_ADC_SPECTRUM_READ` (`0x3A`).
 
-One FAC and one FFT block exist.  A second `chain_bind` of a FIR/IIR
-(FAC-terminal) chain while the FAC is already serving another bound
-stream returns `STATUS_NOSUPPORT` -- but the firmware does not
-currently apply the same guard to FFT-terminal chains
-(`terminal_kind != 3u` in the busy check at
-`gd32-bridge-firmware:hal/gd32/adc_stream.c:675`), so two streams can
-both bind FFT chains against the single FFT block; tracked as
-[#1717](https://github.com/alplabai/alp-sdk/issues/1717).  The host-side
+One FAC and one FFT block exist.  A second `chain_bind` while the
+matching block is already serving another bound stream returns
+`STATUS_NOSUPPORT`: a FIR/IIR (FAC-terminal) chain against a busy FAC,
+and, since protocol v0.10 (`gd32-bridge-firmware` PR #121), an
+FFT-terminal chain against a busy FFT block
+(`adc_dsp_fft_stream_busy()` in `gd32-bridge-firmware:hal/gd32/adc_dsp_chain.c`).
+The refused chain stays open, so a host can wait for the other stream's
+`stream_end` and retry the same `chain_id`.  The host-side
 standalone API in `<alp/dsp.h>` ships working in v0.5.0 (runs the
 chain locally with CMSIS-DSP or the portable C fallback over
 in-RAM buffers), so application code can test against the same
@@ -297,9 +297,10 @@ the chain's terminal stage:
   must be terminal; WINDOW must immediately precede FFT).
 
 It returns `STATUS_NOSUPPORT` when the single FAC (FIR/IIR) hardware
-block is already serving another bound stream.  The equivalent guard
-for the single FFT block is not yet implemented -- see
-[#1717](https://github.com/alplabai/alp-sdk/issues/1717).
+block, or (since v0.10) the single FFT block, is already serving
+another bound stream of the same terminal class. The chain is not
+released on that refusal; retrying the same `chain_id` after the other
+stream ends is the supported recovery.
 
 #### `CMD_ADC_SPECTRUM_READ` (`0x3A`)
 
@@ -331,14 +332,135 @@ indefinitely; host code SHOULD NOT call it.
 
 `mask` selects which GD32 pads the host wants to read or write.  The
 mask is a **logical** index space owned by the GD32 firmware — the
-bit-to-pad mapping is documented in `gd32-bridge-firmware:README.md` and
-mirrored in the host driver header.  The host MUST NOT assume that
+bit-to-pad mapping (bits 0..19) is documented in
+`gd32-bridge-firmware:README.md`; the host header names only bits 18/19
+(below).  The host MUST NOT assume that
 bit `n` corresponds to GD32 pad `Pxn`.
 
 `GPIO_WRITE` is atomic in the firmware: read-modify-write of the
 pad output register is done with interrupts disabled around the
 masked update so a concurrent `GPIO_WRITE` on the other transport
 cannot interleave a partial state.
+
+At protocol minor `>= 11` (firmware `0.2.12`), the pad map grows from
+18 to 20 lines, adding the on-module Murata LBEE5HY2FY-922 (Infineon
+CYW55513) Wi-Fi+BT module's two REG_ON enables:
+
+| Bit | Name       | GD32 pad | Boot state   | Host macro |
+|-----|------------|----------|--------------|------------|
+| 18  | `bt-reg-on` | `PE14`  | OUTPUT LOW   | `GD32G553_GPIO_LINE_BT_REG_ON` |
+| 19  | `wl-reg-on` | `PE15`  | OUTPUT LOW   | `GD32G553_GPIO_LINE_WL_REG_ON` |
+
+Both enables drive their module low-then-high: the host holds
+`GPIO_WRITE` low for >= 10 ms before the rising edge, matching the
+on-module Murata LBEE5HY2FY-922's REG_ON timing requirement.
+
+The Linux `gpio-gd32-bridge` driver additionally exports line 21 `se-rst` (line 20 is
+reserved for `can-stby`, bridge bit 20, #2341), which is not a `GPIO_WRITE` pad: setting it sends `CMD_SE_RESET`
+(`0x41`, payload one byte, 1 = assert = hold the OPTIGA Trust M in reset) and
+it is never replayed, so a bridge reset leaves the part released. Userspace
+pulses it through the gpiochip labelled `gd32-bridge-gpio` instead of opening
+the bridge itself (#2507).
+
+A bridge below minor 11 never learned these two bits; a host driving
+`GPIO_WRITE` against them on such a bridge silently powers nothing
+while the firmware reports success. This is true only through protocol
+0.12: firmware 0.2.16 / protocol 0.13 rejects a write to an unknown pad
+bit outright (Refs #2341) rather than reporting success. The Linux
+`gpio-gd32-bridge`
+kernel driver resolves this at first *consumer* request rather than
+once at `probe()` (a single best-effort `GET_VERSION` at boot
+consistently races the bridge's own startup) -- see
+`GD32G553_REG_ON_MIN_PROTOCOL_MINOR` in
+[`include/alp/chips/gd32g553.h`](../include/alp/chips/gd32g553.h).
+
+**Host-behaviour note (Refs #2297; bug bench-observed 2026-09-26,
+E1M-V2M103; fix bench-verified 2026-09-26 on E1M-V2M103 with GD32_NRST
+held ~40 s past probe: the resolve poller's fixed 1 Hz ticks (1..30 s,
+then 31, 33, 37, 45, 61 s ...) mean the bridge was first observed by
+the 45 s poll — SDIO card enumerated 48.4 s, brcmfmac firmware 49.7 s,
+hci0 UP+RUNNING 54.8 s, devices_deferred empty, no rebind; a normal
+boot is unchanged):** `.request()`'s single non-blocking `GET_VERSION` attempt can
+end in one of three states -- confirmed supported, confirmed
+unsupported (a bridge that answered and reported a minor below 11 or
+an unexpected major), or *still unresolved* because the bridge hasn't
+answered at all yet. On the bench, that third case used to leave
+`mmc-pwrseq-simple`'s `wlan-pwrseq` (line 19) and `hci_bcm`'s
+`shutdown-gpios` (line 18) consumer sitting in
+`/sys/kernel/debug/devices_deferred` for the whole boot even though the
+bridge answered seconds later, because a bare `-EPROBE_DEFER` only
+gets retried by the kernel when some *other* driver's (un)registration
+happens to walk the deferred-probe list -- nothing guarantees that
+happens on its own. `.request()` must still return `-EPROBE_DEFER`
+rather than grant the request in that still-unresolved case, though:
+`mmc-pwrseq-simple` and `hci_bcm` each run a one-shot power-up sequence
+(`mmc_rescan()` / loading the `.hcd` patch) immediately once
+`.request()` succeeds, and SDHI2 being non-removable means that
+sequence never reruns on its own if it runs before REG_ON can actually
+move.
+
+What resolves a slow bridge instead: a second, independent poll -- a
+dedicated `delayed_work` polls `GET_VERSION` regardless of whether any
+consumer has requested the lines yet (flat at ~1 Hz for the first
+~30 s, then backing off exponentially to a 30 s cap). This poller is
+terminal, not perpetual: it stops rescheduling itself the moment it
+gets a definitive answer (confirmed supported, or confirmed
+unsupported) and kicks deferred probing once. It does not keep running
+afterwards to notice a later bridge reset or OTA A/B swap -- nothing
+re-resolves the lines-18/19 *capability* answer once this poller has
+settled it; only the separate output-state replay below keeps
+re-applying pad *levels* after a reset. On its first definitive answer
+it briefly registers a throwaway `platform_device` purely so that
+device's bind runs `driver_bound()` -> the kernel's own
+`driver_deferred_probe_trigger()` (`drivers/base/dd.c`, called from
+`driver_bound()` on every successful bind) -- a convenient in-tree
+hook module code can use to queue a deferred-probe retry
+(asynchronous, on `system_unbound_wq`) on demand, not the only such
+mechanism (`device_reprobe()` / `bus_rescan_devices()` /
+`wait_for_device_probe()` also exist). That gets `mmc-pwrseq-simple` /
+`hci_bcm` to retry `.request()` with
+the real answer -- granted, or failing outright with `-ENODEV` --
+instead of lingering deferred indefinitely. A confirmed `-ENODEV`
+is cached for the life of the driver instance (until the next reboot);
+it is not re-checked even across a bridge OTA A/B swap, since a
+firmware update that adds REG_ON support mid-boot is not a scenario
+this driver defends against today.
+
+**Any GD32 reset drops both lines low again** (WDT, fault, OTA A/B
+swap, SE reset -- the boot-time OUTPUT LOW default applies on every
+reset), which power-cycles the module. The host must re-assert them
+after a bridge reset, not only at first bring-up.
+
+The Linux `gpio-gd32-bridge` driver does this without reset detection
+(`CMD_RESET_REASON` is clear-on-read on the firmware side, so polling
+it would itself lose the very information a *second* poller needs):
+every line ever written is latched host-side in `output_mask`/
+`output_vals` **before** the write is attempted, so a failed transfer
+never loses the requested state, and a `delayed_work` re-issues one
+idempotent `GPIO_WRITE(output_mask, output_vals)` roughly once a
+second whenever `output_mask != 0`. Re-asserting an already-correct
+level is glitch-free, so this needs no reset detection at all -- it
+just needs to run often enough that a bridge coming back up (first
+bring-up, or after any reset) is re-promoted within about one period.
+This costs one small I2C frame/s on BRD_I2C (`i2c8`) while any line is
+held as output; see `gd32_bridge_replay_work()` (Refs #2297).
+
+Only the Linux `gpio-gd32-bridge` driver does this. The CM33/Zephyr side
+of the bridge does not yet re-assert anything after a reset, so #2297
+stays open for that half. Also note what re-asserting REG_ON does and
+does not fix: it restores the *pin level* only. The Linux Wi-Fi/BT
+drivers (`cyw-fmac` etc.) are not re-initialised by this replay -- a
+GD32 reset that also wedges or resets the Murata module itself still
+needs the normal Linux driver-level recovery, on top of the pin being
+re-asserted.
+
+**Shared-bus caveat:** BRD_I2C (`i2c8`) may be multi-mastered -- the
+CM33 also owns a device on it (DA9292 @ `0x1E`). Arbitration loss on a
+contended bus surfaces to the replay as an ordinary transfer failure
+(the "output state replay failed" warning below), indistinguishable
+from the bridge simply being down. A wedged bus is retried at the same
+~1 Hz rate with no backoff, so a stuck bus gets one failing frame per
+second indefinitely rather than escalating or giving up.
 
 ### 3.2 PWM channels
 
@@ -521,18 +643,18 @@ reply is empty.
 * `oversample_ratio` is one of 1/2/4/8/16/32/64/128/256.  0 means
   "firmware default" (per-channel-configured at build time).  The
   firmware rounds down to the nearest power-of-two.
-* `sample_cycles` is a direct sample-and-hold cycle count written to
-  the routine-sequence `SMP` field (GD32G5x3 accepts `2..638` ADCCK);
-  the firmware clamps into that range.  `0` means "firmware default"
+* `sample_cycles` is the raw RSMP value in ADCCK cycles (sample time =
+  value + 2.5 cycles; the vendor `adc_routine_channel_config`
+  `sample_time` argument), not microseconds and not a rung selector; the
+  firmware clamps it into `2..638`.  `0` means "firmware default"
   (240 cycles) -- a `0` here is NOT the fastest window, so an
   oversample-only reconfigure keeps the settling time its high-Z
   inputs need.
 * `resolution_bits` is 0 (default = 12) / 6 / 8 / 10 / 12 (hardware
-  `DRES`) / 14 / 16.  The mV conversion divides by the width's
+  `DRES`); 14 / 16 are accepted on the wire but unsupported.  The mV conversion divides by the width's
   full-scale (`4095`/`1023`/`255`/`63` for 12/10/8/6).  `14`/`16` are
-  effective-resolution modes reachable only by under-shifting an
-  oversampled accumulator (the `DRES` field tops out at 12-bit); that
-  extension has not landed, so they reply `STATUS_NOSUPPORT`.  Any
+  not supported by the GD32G553 (the `DRES` field tops out at 12-bit),
+  so they reply `STATUS_NOSUPPORT`.  Any
   other width replies `STATUS_INVAL`.
 
 The GD32 returns ADC readings as 16-bit millivolts (`ADC_READ` /
@@ -554,9 +676,8 @@ the converter on the next `ADC_READ` / `ADC_STREAM_BEGIN` (inside the
 * `resolution_bits` `0` means default (12); `6`/`8`/`10`/`12` map to the
   hardware `DRES` field and the mV conversion divides by that width's
   full-scale (`4095`/`1023`/`255`/`63`).  `14`/`16` are
-  effective-resolution modes reachable only by under-shifting an
-  oversampled accumulator (the `DRES` field tops out at 12-bit); that
-  extension has not landed, so they still return `STATUS_NOSUPPORT`.
+  not supported by the GD32G553 (the `DRES` field tops out at 12-bit),
+  so they return `STATUS_NOSUPPORT`.
   Any other width returns `STATUS_INVAL`.
 
 ### 3.10 ADC streaming (`v0.3+`)
@@ -806,9 +927,14 @@ clocks back out on the *next* CS transaction within
 
 The CRC is transmitted **LSB first** (low byte on the wire first, then the
 high byte) — e.g. CRC-16/CCITT-FALSE over the PING request body `A5 00` is
-`0xFF84`, which goes on the wire as `84 FF`. This is the one field in the
-envelope that is little-endian; every other multi-byte field in this protocol
-is big-endian, and that asymmetry is exactly what makes it easy to get wrong.
+`0xFF84`, which goes on the wire as `84 FF`. That is the same little-endian
+order as every other multi-byte field in this protocol (§2): the OTA
+`size`/`crc32`/`offset` fields and the GPIO masks are all packed low byte
+first. The trap is the firmware repo's `protocol_vectors.txt`, which prints CRCs
+MSB-first (`A500FF84`) as hex text; that is the generator's text convention,
+not the wire order. A host that packs OTA fields big-endian gets
+`STATUS_OUT_OF_RANGE` (`0x08`) back from `OTA_BEGIN`, because the byte-swapped
+`size` exceeds the slot (#2307).
 
 Length is **not** carried on the wire because a single opcode has a
 fixed request-payload width and a status-code-determined reply-payload
@@ -882,10 +1008,17 @@ host that reads a CRC-valid reply whose stamp has **not advanced**
 past its previously accepted reply knows its request was never
 decoded, and re-sends it (the `gd32g553` driver does this once
 automatically, counting occurrences in `ctx->seq_stale_count`).
-Because a stale verdict proves the request was never executed, the
-re-send is safe even for non-idempotent opcodes.  The stamp wraps
-mod 16; replies re-served across the wrap remain detectable because
-detection compares against the last accepted stamp, not zero.
+While the slave keeps stamping, a stale verdict means the request was
+never decoded, so the re-send is safe even for non-idempotent opcodes.
+That inference is void across a slave **reset** (OTA commit/rollback,
+watchdog): the feature reverts to off and every reply is stamped 0.
+The `gd32g553` driver treats a CRC-valid stamp of 0 after a non-zero
+baseline as that signature, and never re-sends -- it drops its
+sequencing state, re-negotiates `LINK_FEATURES`, and fails the call
+with `ALP_ERR_IO` (the request may or may not have executed).  The
+stamp wraps mod 16; replies re-served across the wrap remain
+detectable because detection compares against the last accepted
+stamp, and the one legitimate advance to 0 (from 0xF) is accepted.
 I2C replies are **never** stamped (`STATUS_NO_PENDING` owns bit 7
 on that transport, and the hazard is SPI-specific).
 
@@ -1040,8 +1173,10 @@ caller wants liveness confirmation.
   `GET_VERSION`.
 * `major` is bumped on **wire-breaking** changes (frame layout,
   CRC algorithm, command renumbering).
-* `minor` is bumped when **opcodes are added** that older hosts
-  don't have to know about.
+* `minor` is bumped on any **additive, backward-compatible** change
+  older hosts don't have to know about -- not only a new opcode: v0.10
+  (chain-bind refusal) and v0.11 (the REG_ON pad-map growth, §3.1) both
+  bumped `minor` with no new opcode at all.
 * `patch` is bumped on documentation or non-observable firmware
   changes.
 
@@ -1059,8 +1194,10 @@ image data), the host driver **gates the OTA session on `minor`**: an
 OTA cannot start against a peer below `GD32G553_OTA_MIN_PROTOCOL_MINOR`
 (6). `gd32g553_ota_begin` / `gd32g553_ota_write_chunk` return
 `ALP_ERR_NOSUPPORT` **before any erase or program**, and
-`gd32g553_ota_supported()` lets a host check up front (#751). Other
-opcodes remain governed by the exact-lockstep rule above.
+`gd32g553_ota_supported()` lets a host check up front (#751). The
+REG_ON lines 18/19 of `GPIO_WRITE` are the second minor-gated surface
+(`GD32G553_REG_ON_MIN_PROTOCOL_MINOR`, §3.1). Other opcodes remain
+governed by the exact-lockstep rule above.
 
 Version history (pre-1.0): **v0.7** adds `LINK_FEATURES` (0x81) +
 the negotiated `STATUS_SEQ` reply stamp (§3.14, §4.1.1) and the
@@ -1074,14 +1211,40 @@ the ADC-stream DSP pipeline's already-existing `chain_open` /
 actually filters or spectralizes the stream instead of the chain
 sitting unbound — and adds the new opcode `CMD_ADC_SPECTRUM_READ`
 (`0x3A`, §3.x) to pull the FFT terminal's spectrum; a v0.8 host that
-never binds a chain sees no behaviour change.  **v0.12** adds the
+never binds a chain sees no behaviour change.  **v0.10**
+(`gd32-bridge-firmware` PR #121) makes the ADC-stream DSP chain bind
+refuse, up front, a chain the FAC/FFT runtime cannot realise and a
+second FFT bind against the single FFT block; before it, both were
+accepted and failed only at stream time (`STATUS_OK` with zero
+samples forever, or `STATUS_BUSY` forever on both streams).
+**v0.11** (firmware `0.2.12`, `gd32-bridge-firmware` PR #244) grows the GPIO
+expander pad map from 18 to 20 lines, adding `bt-reg-on` (bit 18,
+`PE14`) and `wl-reg-on` (bit 19, `PE15`) for the on-module Murata
+LBEE5HY2FY-922 (Infineon CYW55513) Wi-Fi+BT module's REG_ON enables —
+both boot OUTPUT LOW; the host drives REG_ON low for >= 10 ms then
+high (§3.1). No opcode changed shape; a host below
+`GD32G553_REG_ON_MIN_PROTOCOL_MINOR` (11) simply never learns bits
+18/19 exist. `GET_VERSION`'s SPI reply for `0.11.0` is `A5 00 00 0B 00 C5 C4`
+(`SOF STATUS major minor patch CRClo CRChi`, CRC-16/CCITT-FALSE over
+`SOF..PAYLOAD` per §4.2) -- recompute from the algorithm rather than
+hand-copying, and cross-check any other hand-copied `GET_VERSION`
+vector before relying on it (see `extending-the-gd32-bridge-protocol`'s
+note on inlined wire hex going stale across a `PROTOCOL_VERSION`
+bump).  **v0.12** adds the
 post-COMMIT/ROLLBACK TRIAL-then-confirm boot sequence (§6, §10) — no
 new opcode and no framing change, so it is observable only as a
 bounded run of `STATUS_BUSY` right after an OTA reset committing a
 trial-capable image (firmware release >= 0.2.14, a separate axis from
 this wire-protocol version — see §10); a host that already treats
 `STATUS_BUSY` as retryable (as `gd32g553_init()` now does) sees no
-behaviour change beyond that widened retry window.
+behaviour change beyond that widened retry window.  **v0.14**
+(gh#101) widens `OTA_GET_STATE`'s reply 5 -> 6 bytes, appending the
+`err` cause byte documented above (§10) -- additive per the
+opcode-derived-length rule, so a host below
+`GD32G553_OTA_ERR_MIN_PROTOCOL_MINOR` (14) keeps working unchanged and
+simply never learns the 6th byte exists. `GET_VERSION`'s SPI reply
+for `0.14.0` is `A5 00 00 0E 00 30 3B` (same field layout as v0.11's
+vector above; recompute from the algorithm rather than hand-copying).
 
 ## 9. Reference vectors
 
@@ -1118,8 +1281,10 @@ USART-only (User Manual Rev1.2 §1.4).
 normal upgrade path).**
 
 * A 32 KB bootloader lives at the base of GD32 flash, never
-  overwritten by a field upgrade; two 236 KB **slots** sit in upper
-  flash with an A/B metadata pair between them.  The active slot
+  overwritten by a field upgrade, followed by the A/B metadata pair
+  (`0x08008000`) and two 216 KB **slots**: slot A at `0x0800A000` in
+  flash bank 0 and slot B at `0x08040000`, the start of bank 1, so an
+  upgrade erases only the bank the running image is not executing from.  The active slot
   runs at boot while the inactive slot receives the upgrade;
   roll-back is a metadata flip + reset.  Destructive flashing is
   armed only in `-DBRIDGE_OTA_PARTITIONED` firmware builds — the
@@ -1137,12 +1302,15 @@ firmware in `gd32-bridge-firmware:src/ota.c`):
 | `0xF2` | `OTA_VERIFY` | _empty_ | `computed_crc32:u32 verified:u8` |
 | `0xF3` | `OTA_COMMIT` | _empty_ | _empty_ (resets on success) |
 | `0xF4` | `OTA_ROLLBACK` | _empty_ | _empty_ (resets on success) |
-| `0xF5` | `OTA_GET_STATE` | _empty_ | `state:u8 active:u8 pending:u8 boot_count:u16` |
+| `0xF5` | `OTA_GET_STATE` | _empty_ | `state:u8 active:u8 pending:u8 boot_count:u16` `[err:u8]` (v0.14 additive: the cause of the most recent `state = ERROR`, gh#101; a peer below protocol minor 14 never appends this byte -- see below) |
 | `0xF6` | `OTA_ABORT` | _empty_ | _empty_ |
 
 Value encodings: `state` = 0 IDLE / 1 READY / 2 BUSY / 3 VERIFIED /
 4 ERROR; slot bytes = 0 A / 1 B / `0xFF` none-pending.  `WRITE_CHUNK`
-offsets must land on 8-byte (FMC doubleword) boundaries; the image
+offsets must land on 8-byte (FMC doubleword) boundaries -- firmware
+advertises `chunk_max` = 56 (the largest multiple of 8 that fits the
+envelope), and a misaligned offset answers `STATUS_INVAL` (0x01) with
+the session left READY, so the host can resend at a valid offset; the image
 CRC-32 is IEEE 802.3 reflected (zlib-compatible) -- host code computes
 the `expected_crc32` BEGIN wants (and cross-checks VERIFY's
 `computed_crc32`) with `gd32g553_ota_image_crc32()`
@@ -1170,6 +1338,37 @@ COMMIT/ROLLBACK's reset run inside the request transaction, their
 reply transaction can miss — hosts treat an I/O error there as
 "issued" and confirm via `OTA_GET_STATE` (or by re-initialising
 against the rebooted bridge after COMMIT/ROLLBACK).
+
+**`OTA_GET_STATE`'s `err` byte (v0.14, gh#101).** Before this bump,
+every OTA failure collapsed into `state = ERROR` with nothing else on
+the wire, so a failed session was unattributable for the host and
+indistinguishable on the bench. `err` names the cause (`0` when
+`state != ERROR`, or when it is but nothing yet recorded a specific
+cause):
+
+| `err` | Name | Meaning |
+|-------|------|---------|
+| `0x00` | `NONE` | No error recorded. |
+| `0x01` | `SESSION_RANGE` | `BEGIN`/`VERIFY`/`COMMIT` image size out of range. |
+| `0x02` | `ERASE_FAILED` | Background page erase failed. |
+| `0x03` | `CHUNK_RANGE` | Chunk offset/length rejected. |
+| `0x04` | `PROGRAM_FAILED` | Flash program failed (PGERR/PGSERR). |
+| `0x05` | `VERIFY_CRC` | `VERIFY`'s CRC comparison failed. |
+| `0x06` | `COMMIT_FAILED` | `COMMIT`: bootability check or metadata commit failed. |
+| `0x07` | `ERASE_TARGET` | Erase target would intersect the running slot. |
+| `0x08` | `NOT_TRIAL_CAPABLE` | `COMMIT` refused: candidate image has no valid trial marker. |
+| `0x09` | `META_DEMOTE_FAILED` | `BEGIN`: metadata commit demoting the stale target slot failed. |
+| `0x0A` | `BELOW_FLOOR` | `COMMIT`/`ROLLBACK` refused: the image's version is below the anti-rollback floor. Answers `STATUS_INVAL`; the active slot is untouched. |
+
+The host mirror is `gd32g553_ota_err_t`
+(`<alp/chips/gd32g553.h>`); `gd32g553_ota_get_state()` reads this byte
+only against a peer advertising protocol minor >=
+`GD32G553_OTA_ERR_MIN_PROTOCOL_MINOR` (14) — an older bridge never
+appends it, and reading past what it sent would desync the reply CRC
+over a byte that was never on the wire. Against an older peer, the
+host-side `err` field always reads `NONE` regardless of the real
+cause, same as before this bump. `OTA_ABORT` clears the recorded
+cause back to `NONE`.
 
 **TRIAL boot, confirm, and watchdog revert (v0.12, firmware >= 0.2.14).**
 `COMMIT` and `ROLLBACK` don't hand control straight to a trusted

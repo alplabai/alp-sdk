@@ -4,7 +4,7 @@
 # DRP-AI3) + E1M-X-EVK (45x65 board).  Inherits the portable spec
 # set from tests/hil/_common/.  SoM-specific specs present alongside
 # in this dir: v2n-gd32-bridge-ping.yaml (GD32 bridge ping),
-# v2n-temp-sensor.yaml (on-module TMP112).
+# v2n-temp-sensor.yaml (on-module TMP112, A55 app run over ssh-run).
 # TODO(#1160): not yet written — Ethernet, eMMC, xSPI, EEPROM, OPTIGA.
 
 schema_version: 1

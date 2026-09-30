@@ -99,12 +99,15 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 
 #include <cmsis_core.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
+#include <zephyr/drivers/flash.h>
 #include <zephyr/fatal.h>
 #include <zephyr/kernel.h>
+#include <zephyr/sys/crc.h>
 #include <zephyr/sys/printk.h>
 
 #include <ospi_hal.h>
@@ -168,6 +171,155 @@ void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf)
  */
 #define OSPI_BOUND \
 	(DT_NODE_HAS_STATUS(OSPI_NODE, okay) && DT_NODE_HAS_COMPAT(OSPI_NODE, snps_designware_ospi))
+
+/*
+ * #915 program/erase self-test -- OFF by default. This performs a real
+ * destructive erase + program on ONE sector of whatever OSPI0 CS1 part is
+ * fitted, so it must never run by accident: flip
+ * AEN_OSPI_ENABLE_PROGRAM_ERASE_SELFTEST to 1 (a deliberate source edit, not
+ * a Kconfig a stale build cache could carry over) before flashing this app
+ * if you intend to run it. Always compiled and typechecked either way, so
+ * it cannot silently bit-rot while switched off.
+ *
+ * SECTOR CHOICE: 0x01FF0000, one 4 KiB sector near the top of the 32 MiB
+ * (256 Mbit) IS25WX256 array (FLASH_ISSI_SECTOR_SIZE, alif-dfp-ref
+ * components/Include/IS25WX256.h) -- picked to sit well clear of any low
+ * address a bootloader or XiP image might ever occupy, and named as a
+ * literal constant rather than derived from a part size this driver does
+ * not know at compile time (see flash_ospi_alif.c's read() ponytail note).
+ * The loop below touches ONLY this one address range: it reads it back
+ * before touching anything, restores exactly what it read, and never
+ * computes a second address anywhere.
+ */
+#define AEN_OSPI_ENABLE_PROGRAM_ERASE_SELFTEST 0
+#define AEN_OSPI_SELFTEST_OFFSET               0x01FF0000U
+#define AEN_OSPI_SELFTEST_SECTOR_SIZE          4096U
+
+static uint8_t aen_ospi_selftest_original[AEN_OSPI_SELFTEST_SECTOR_SIZE];
+static uint8_t aen_ospi_selftest_scratch[AEN_OSPI_SELFTEST_SECTOR_SIZE];
+
+/*
+ * Erase + program + restore ONE sector, proving flash_write()/flash_erase()
+ * against a known pattern and leaving the part exactly as found. Never
+ * touches any address outside [AEN_OSPI_SELFTEST_OFFSET,
+ * AEN_OSPI_SELFTEST_OFFSET + AEN_OSPI_SELFTEST_SECTOR_SIZE).
+ */
+static void aen_ospi_program_erase_selftest(const struct device *ospi_dev)
+{
+	uint32_t original_crc, blank_crc, pattern_crc, readback_crc, restored_crc;
+	int      rc;
+
+	printk("\n=== #915 program/erase self-test: sector 0x%08x ===\n", AEN_OSPI_SELFTEST_OFFSET);
+
+	/* 1. Save what's there now -- this is what gets restored at the end. */
+	rc = flash_read(ospi_dev,
+	                AEN_OSPI_SELFTEST_OFFSET,
+	                aen_ospi_selftest_original,
+	                sizeof(aen_ospi_selftest_original));
+	if (rc != 0) {
+		printk("RESULT FAIL: initial flash_read() rc=%d\n", rc);
+		return;
+	}
+	original_crc = crc32_ieee(aen_ospi_selftest_original, sizeof(aen_ospi_selftest_original));
+	printk("original: crc32=0x%08x\n", original_crc);
+
+	/* 2. Erase, then verify the sector actually reads back all-0xFF. */
+	rc = flash_erase(ospi_dev, AEN_OSPI_SELFTEST_OFFSET, AEN_OSPI_SELFTEST_SECTOR_SIZE);
+	if (rc != 0) {
+		printk("RESULT FAIL: flash_erase() rc=%d\n", rc);
+		return;
+	}
+	rc = flash_read(ospi_dev,
+	                AEN_OSPI_SELFTEST_OFFSET,
+	                aen_ospi_selftest_scratch,
+	                sizeof(aen_ospi_selftest_scratch));
+	if (rc != 0) {
+		printk("RESULT FAIL: post-erase flash_read() rc=%d\n", rc);
+		return;
+	}
+	blank_crc     = crc32_ieee(aen_ospi_selftest_scratch, sizeof(aen_ospi_selftest_scratch));
+	bool erase_ok = true;
+
+	for (size_t i = 0; i < sizeof(aen_ospi_selftest_scratch); i++) {
+		if (aen_ospi_selftest_scratch[i] != 0xFFU) {
+			erase_ok = false;
+			break;
+		}
+	}
+	printk("post-erase: crc32=0x%08x all_0xff=%d\n", blank_crc, (int)erase_ok);
+
+	/* 3. Program a known pattern, then read it back and compare. */
+	for (size_t i = 0; i < sizeof(aen_ospi_selftest_scratch); i++) {
+		aen_ospi_selftest_scratch[i] = (uint8_t)(i & 0xFFU);
+	}
+	pattern_crc = crc32_ieee(aen_ospi_selftest_scratch, sizeof(aen_ospi_selftest_scratch));
+	rc          = flash_write(ospi_dev,
+	                          AEN_OSPI_SELFTEST_OFFSET,
+	                          aen_ospi_selftest_scratch,
+	                          sizeof(aen_ospi_selftest_scratch));
+	if (rc != 0) {
+		printk("RESULT FAIL: flash_write() (pattern) rc=%d\n", rc);
+		return;
+	}
+	rc = flash_read(ospi_dev,
+	                AEN_OSPI_SELFTEST_OFFSET,
+	                aen_ospi_selftest_scratch,
+	                sizeof(aen_ospi_selftest_scratch));
+	if (rc != 0) {
+		printk("RESULT FAIL: post-program flash_read() rc=%d\n", rc);
+		return;
+	}
+	readback_crc    = crc32_ieee(aen_ospi_selftest_scratch, sizeof(aen_ospi_selftest_scratch));
+	bool program_ok = (readback_crc == pattern_crc);
+
+	printk("pattern: crc32=0x%08x readback_crc32=0x%08x match=%d\n",
+	       pattern_crc,
+	       readback_crc,
+	       (int)program_ok);
+
+	/* 4. Restore the original contents unconditionally (even on a program
+	 * mismatch above) -- this sector must not be left in the pattern
+	 * state, whatever else this test concludes. */
+	rc = flash_erase(ospi_dev, AEN_OSPI_SELFTEST_OFFSET, AEN_OSPI_SELFTEST_SECTOR_SIZE);
+	if (rc == 0) {
+		rc = flash_write(ospi_dev,
+		                 AEN_OSPI_SELFTEST_OFFSET,
+		                 aen_ospi_selftest_original,
+		                 sizeof(aen_ospi_selftest_original));
+	}
+	if (rc != 0) {
+		printk("RESULT FAIL: restore rc=%d -- sector 0x%08x may be left in the pattern "
+		       "state, NOT its original contents\n",
+		       rc,
+		       AEN_OSPI_SELFTEST_OFFSET);
+		return;
+	}
+	rc = flash_read(ospi_dev,
+	                AEN_OSPI_SELFTEST_OFFSET,
+	                aen_ospi_selftest_scratch,
+	                sizeof(aen_ospi_selftest_scratch));
+	if (rc != 0) {
+		printk("RESULT FAIL: post-restore flash_read() rc=%d\n", rc);
+		return;
+	}
+	restored_crc    = crc32_ieee(aen_ospi_selftest_scratch, sizeof(aen_ospi_selftest_scratch));
+	bool restore_ok = (restored_crc == original_crc);
+
+	printk("restored: crc32=0x%08x match=%d\n", restored_crc, (int)restore_ok);
+
+	if (erase_ok && program_ok && restore_ok) {
+		printk("RESULT PASS: #915 program/erase self-test -- sector 0x%08x erased "
+		       "(all 0xFF), programmed pattern verified byte-for-byte, original "
+		       "contents restored and CRC-verified\n",
+		       AEN_OSPI_SELFTEST_OFFSET);
+	} else {
+		printk("RESULT FAIL: #915 program/erase self-test (erase_ok=%d program_ok=%d "
+		       "restore_ok=%d)\n",
+		       (int)erase_ok,
+		       (int)program_ok,
+		       (int)restore_ok);
+	}
+}
 
 int main(void)
 {
@@ -313,6 +465,22 @@ int main(void)
 		       (int)(ospi_irq == OSPI_IRQ_EXPECTED),
 		       (int)hal_init_ok,
 		       (int)ctrlr0_ok);
+	}
+
+	/*
+	 * #915 program/erase self-test -- OFF unless AEN_OSPI_ENABLE_PROGRAM_
+	 * ERASE_SELFTEST is flipped to 1 above. Requires device_is_ready() to
+	 * have already succeeded (checked here, not just above) -- an erase/
+	 * program attempt against a not-ready device is exactly the kind of
+	 * silent-wrong-address risk this app's node-bind gate exists to catch.
+	 */
+	if (AEN_OSPI_ENABLE_PROGRAM_ERASE_SELFTEST) {
+		if (device_is_ready(ospi_dev)) {
+			aen_ospi_program_erase_selftest(ospi_dev);
+		} else {
+			printk("RESULT FAIL: #915 program/erase self-test SKIPPED -- ospi_dev "
+			       "not ready\n");
+		}
 	}
 
 	return 0;

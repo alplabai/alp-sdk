@@ -102,6 +102,19 @@ typedef enum {
 	ALP_ADC_REF_VDD        = 3  /**< Use VDD as the reference. */
 } alp_adc_ref_t;
 
+/**
+ * @brief ADC class-scoped capability bits.
+ *
+ * Carried in `alp_capabilities_t.class_flags` (see <alp/cap_instance.h>)
+ * -- these are ADC facts, not universal instance facts, so they never
+ * appear in `alp_capabilities_t.flags`.  Only meaningful once
+ * `ALP_INSTANCE_CAP_REPORTED` is set in `flags`; see that header for
+ * the reported/not-reported contract.
+ */
+#define ALP_ADC_CAP_HW_OVERSAMPLE (1u << 0) /**< Hardware oversampling/averaging. */
+#define ALP_ADC_CAP_HW_TRIGGER    (1u << 1) /**< Hardware-triggered (timer/PWM) sampling. */
+#define ALP_ADC_CAP_DIFFERENTIAL  (1u << 2) /**< Differential channel pairs supported. */
+
 /** Opaque ADC channel handle.  Allocate via @ref alp_adc_open. */
 typedef struct alp_adc alp_adc_t;
 
@@ -120,12 +133,10 @@ typedef struct {
      *  represent.  Backends without HW oversampling ignore this field; the
      *  SoC-cap layer documents which SoMs honour it. */
 	uint16_t oversampling_ratio;
-	/** Extra sample-and-hold cycles at the ADC clock.  Backend rounds to
-     *  its nearest discrete tap (8 taps on the GD32 IO MCU; vendor-defined
-     *  elsewhere).  0 means "backend default".  Mutually independent from
-     *  @c acquisition_us -- @c acquisition_us is a portable time-domain
-     *  expression; @c sample_cycles is the backend-rounded discrete-tap
-     *  expression for callers that already know which tap they want. */
+	/** Extra sample-and-hold cycles at the ADC clock.  Backend-defined
+     *  count, e.g. GD32 RSMP cycles (clamped to 2..638); no rounding to
+     *  taps.  0 means "backend default".  Mutually independent from
+     *  @c acquisition_us, which is the portable time-domain expression. */
 	uint16_t sample_cycles;
 } alp_adc_config_t;
 
@@ -282,7 +293,9 @@ typedef struct {
  *         - @ref ALP_ERR_NOSUPPORT on SoMs without a streaming backend,
  *         - @ref ALP_ERR_NOT_READY when the backend transport is not
  *           configured (e.g. V2N supervisor with no bus ids set),
- *         - @ref ALP_ERR_BUSY when all stream slots are already in use,
+ *         - @ref ALP_ERR_BUSY when all stream slots are already in use
+ *           (including a slot whose earlier close could not confirm the
+ *           backend stream-end -- see @ref alp_adc_stream_close),
  *         - @ref ALP_ERR_NOMEM when the handle pool is exhausted.
  */
 alp_adc_stream_t *alp_adc_stream_open(const alp_adc_stream_config_t *cfg);
@@ -318,6 +331,14 @@ alp_adc_stream_read_mv(alp_adc_stream_t *stream, uint16_t *mv, size_t cap, size_
  *
  * Issues the backend's stream-end so the DMA channel + ring buffer
  * are freed before the handle returns to the pool.  NULL is a no-op.
+ * Blocks until any in-flight @ref alp_adc_stream_read_mv on the same
+ * handle returns before tearing it down; idempotent (a second close
+ * is a no-op).  The handle is always released, but the backend slot
+ * is recycled only once the stream-end is confirmed: if the backend
+ * stayed busy/unreachable through a bounded retry, the slot stays
+ * reserved (a later open reports @ref ALP_ERR_BUSY) so a still-running
+ * backend stream is never reused.  This function is void and cannot
+ * report that.
  *
  * @param[in] stream  Handle from @ref alp_adc_stream_open, or NULL.
  */
@@ -425,7 +446,9 @@ alp_adc_filter_read_mv(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap, si
  * @brief Close a filter handle.  NULL is a no-op.
  *
  * Releases the internal stream slot + DSP chain.  After this call
- * @p filter is invalid.
+ * @p filter is invalid.  Blocks until any in-flight
+ * @ref alp_adc_filter_read_mv on the same handle returns before
+ * tearing it down; idempotent (a second close is a no-op).
  */
 void alp_adc_filter_close(alp_adc_filter_t *filter);
 
@@ -506,7 +529,12 @@ alp_adc_spectrum_t *alp_adc_spectrum_open(const alp_adc_spectrum_config_t *cfg);
 alp_status_t
 alp_adc_spectrum_read_bins(alp_adc_spectrum_t *spec, float *bins, size_t cap, size_t *got);
 
-/** Close a spectrum handle.  NULL is a no-op. */
+/**
+ * @brief Close a spectrum handle.  NULL is a no-op.  Blocks until any
+ * in-flight @ref alp_adc_spectrum_read_bins on the same handle
+ * returns before tearing it down; idempotent (a second close is a
+ * no-op).
+ */
 void alp_adc_spectrum_close(alp_adc_spectrum_t *spec);
 
 #ifdef __cplusplus

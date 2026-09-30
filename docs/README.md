@@ -76,7 +76,7 @@ into the topic-specific docs.
   supported modes.
 - [glossary.md](glossary.md) — terms.
 - [adr/README.md](adr/README.md) — Architecture Decision Records
-  index (34 ADRs; recount with `ls docs/adr/[0-9]*.md | wc -l`).
+  index (35 ADRs; recount with `ls docs/adr/[0-9]*.md | wc -l`).
 
 ## Per-SoM bring-up
 
@@ -137,6 +137,8 @@ into the topic-specific docs.
   the V2N Linux kernel + rootfs (Yocto) for E1M-V2N101/102.
 - [provisioning.md](provisioning.md) — provisioning a SoM from a
   versioned release bundle (the `provision_som.py` orchestrator + runbook).
+- [provisioning-v2n.md](provisioning-v2n.md) — the V2N / V2N-M1
+  step machine (`provision_som.py plan|run|status`): flow, gates, hazards.
 - [os-support-matrix.md](os-support-matrix.md) — which OS runs
   on which core, per SoM.
 - [recommended-libraries.md](recommended-libraries.md) — curated

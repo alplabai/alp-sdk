@@ -277,7 +277,7 @@ def test_transcript_with_no_commander_prompt_is_a_hard_error(tmp_path: Path) -> 
 # or a QUOTED `"${TMPDIR:-/tmp}/foo.out"` (the six Flow D writers, converted
 # so concurrent pytest runs against the same host /tmp no longer collide).
 _READBACK_RE = re.compile(
-    r'^[ \t]*\S.*-CommanderScript\s.*?>\s*(?P<out>"\$\{TMPDIR:-/tmp\}/[^"]+"|/tmp/\S+)\s*\|\|\s*true[ \t]*$',
+    r'^[ \t]*\S.*-CommanderScript\s.*?>\s*(?P<out>"\$(?:\{TMPDIR:-/tmp\}|WORKDIR)/[^"]+"|/tmp/\S+)\s*\|\|\s*true[ \t]*$',
     re.M,
 )
 
@@ -621,24 +621,54 @@ def test_bench_flowd_proof_call_is_the_condition_of_a_negated_if(script: str) ->
 # that commits a fresh ATOC (flash-run.sh, flash-run-dualcore.sh,
 # flash-update-log-dual.sh, flash-update-log-firewall-probe.sh) ------------
 
-# A real multi-entry ATOC table, trimmed from the alp-sdk#2025 incident
-# report (PR #2026): two DEVICE rows plus the A32 Linux boot chain that a
-# blind ALP-HE-only write silently delisted.
-_REAL_MULTI_ENTRY_ATOC = """\
+def _boxed(body: str) -> str:
+    """Wrap raw `| Name | CPU | ... |`-shaped data row(s) in the top
+    separator + `| Name | CPU |` header row + separator + ... + closing
+    separator every real gettoc capture carries -- see
+    `aen_atoc._is_table_structurally_complete`. THIRD #2262 review round:
+    the structural-completeness check's boxless exemption is gone, so
+    every fixture standing in for a genuine "this table is complete and
+    trustworthy" outcome must carry both bookends explicitly now."""
+    sep = "+----------+--------+\n"
+    header = "|   Name   |  CPU   |\n"
+    if not body.endswith("\n"):
+        body += "\n"
+    return sep + header + sep + body + sep
+
+
+# A multi-entry ATOC table, trimmed BY HAND from the alp-sdk#2025 incident
+# report's prose (PR #2026), NOT from a real `maintenance -opt gettoc`
+# capture (THIRD #2262 review round correction -- carries no header row,
+# no `+---+` separators, no SERAM Time column): two DEVICE rows plus the
+# A32 Linux boot chain that a blind ALP-HE-only write silently delisted.
+# `_boxed()` here so the foreign-entry-detection tests below exercise a
+# table this guard actually recognises as complete.
+_REAL_MULTI_ENTRY_ATOC = _boxed("""\
 |   DEVICE |  CM0+  | 0x8057C6F0 | 0x8057BCF0 | ---------- | ---------- |      312 |  0.5.0| u V  |
 |   DEVICE |  CM0+  | 0x805C1EC0 | 0x805C14C0 | ---------- | ---------- |      372 |  0.5.0| u V  |
 | BOOTLOAD | A32_0  | 0x80002000 | 0x8057A8F0 | ---------- | 0x80002000 |    28813 |  0.4.3| u VB |
 |  A32_APP | A32_0  | 0x80020000 | 0x8057B2F0 | ---------- | ---------- |  2290048 |  1.0.0| u V  |
 |   HP_APP | M55-HP | 0x8057D230 | 0x8057C830 | 0x50000000 | 0x50000000 |     4480 |  1.0.0| uLVB |
 |   HE_APP | M55-HE | 0x8057EDB0 | 0x8057E3B0 | 0x58000000 | 0x58000000 |     4480 |  1.0.0| uLVB |
-"""
+""")
 
 # The same board immediately after a compliant write: only DEVICE and the
 # entries the caller itself is about to (re)write survive.
-_ONLY_ALLOWED_ATOC = """\
+_ONLY_ALLOWED_ATOC = _boxed("""\
 |   DEVICE |  CM0+  | 0x8057C6F0 | 0x8057BCF0 | ---------- | ---------- |      312 |  0.5.0| u V  |
 |   ALP-HE | M55-HE | 0x8057EDB0 | 0x8057E3B0 | 0x58000000 | 0x58000000 |     4480 |  1.0.0| uLVB |
-"""
+""")
+
+# NEGATIVE CONTROL (third #2262 review round): this suite's one retained
+# boxless case -- a transcript with NEITHER a header nor a separator line
+# at all must refuse as `unverified` (an unrecognised table format), not
+# be read as "ok" the way an earlier, since-closed exemption allowed.
+_BOXLESS_NO_MARKERS_ATOC = (
+    "|   DEVICE |  CM0+  | 0x8057C6F0 | 0x8057BCF0 | ---------- | ---------- |"
+    "      312 |  0.5.0| u V  |\n"
+    "|   ALP-HE | M55-HE | 0x8057EDB0 | 0x8057E3B0 | 0x58000000 | 0x58000000 |"
+    "     4480 |  1.0.0| uLVB |\n"
+)
 
 _NO_ATOC = "No ATOC found on target device.\n"
 
@@ -911,13 +941,36 @@ def test_atoc_guard_aborts_when_gettoc_fails_after_partial_output(tmp_path):
 
 
 @_NEEDS_BASH
+def test_atoc_guard_aborts_on_a_table_with_no_recognised_structure(tmp_path):
+    """THIRD #2262 review round, BLOCKER: a `gettoc` read that exits 0 with
+    a valid banner and parsed row(s), but whose transcript carries NEITHER
+    a `| Name |` header nor any `+---+` separator anywhere, must refuse --
+    an earlier version of the structural-completeness fix wrongly exempted
+    exactly this shape ("nothing to check completeness against"), which
+    reopened the fail-open for a capture that swallows both markers (noise
+    + a timeout, an unrecognised SETOOLS box-drawing style, or interleaved
+    SES boot-banner text). This is this suite's one retained boxless case."""
+    res = _call_atoc_guard(tmp_path, "0", ["ALP-HE"], "fake-uart", _BOXLESS_NO_MARKERS_ATOC)
+    assert res.returncode == 5, (
+        f"a boxless table with no structural markers must refuse, got {res.returncode}\n"
+        f"{res.stdout}{res.stderr}"
+    )
+    assert "matches no recognised" in res.stderr, res.stderr
+    assert "gettoc table format" in res.stderr, res.stderr
+    assert "re-run with --replace-atoc" not in res.stderr, (
+        f"an unrecognised-format refusal must not steer at --replace-atoc "
+        f"the same way a routine unverified failure does. Got:\n{res.stderr}"
+    )
+
+
+@_NEEDS_BASH
 def test_atoc_guard_allows_an_ansi_coloured_compliant_table(tmp_path):
     """alp-sdk#2026 review finding 3: SETOOLS colours its own output on some
     terminals/versions. A compliant table (DEVICE + the caller's own
     ALP-HE) wrapped in ANSI SGR codes must still parse as compliant -- not
     misread the coloured names as foreign and abort on the guard's own
     legitimate output."""
-    ansi_table = (
+    ansi_table = _boxed(
         "|   \x1b[32mDEVICE\x1b[0m |  CM0+  | 0x8057C6F0 | 0x8057BCF0 | ---------- |"
         " ---------- |      312 |  0.5.0| u V  |\n"
         "|   \x1b[32mALP-HE\x1b[0m | M55-HE | 0x8057EDB0 | 0x8057E3B0 | 0x58000000 |"
@@ -1429,8 +1482,14 @@ def test_flowd_guard_aborts_when_maintenance_tool_is_missing_despite_se_uart(tmp
 
 #: Flow A's remedy, verbatim. On Flow A $SE_UART IS the transport, so a failed
 #: query genuinely leaves confirming by hand and overriding as the only way
-#: past -- this must keep saying exactly that.
-_FLOW_A_REMEDY = "Confirm by hand what is resident, then re-run with --replace-atoc."
+#: past -- this must keep saying exactly that. Reworded (#2262, third review
+#: round) to align with alif_flash.py's own unverified-refusal wording --
+#: "only once you know it is safe to lose" -- rather than a bare
+#: "re-run with --replace-atoc." that reads as a routine next step.
+_FLOW_A_REMEDY = (
+    "Confirm by hand what is resident, then re-run with --replace-atoc only "
+    "once you know it is safe to lose."
+)
 
 
 @_NEEDS_BASH

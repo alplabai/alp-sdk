@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regressions for the M55-HE half of the Trace Runner game.
+# Twister has no bench, so these prove the game compiles in each render /
+# input mode, not that it runs. The M55-HP image (hp_vision/, needs the
+# tflite-micro module), the A32 renderer (a32/, arm-none-eabi Makefiles) and
+# the sound image (sound/, reworked carriers only) are not twister targets;
+# see README.md for their builds and tests/host/runner.sh for their tests.
+
+sample:
+  name: aen-trace-runner
+  description: |
+    Exhibition endless-runner game on the E1M-AEN803 + E1M-EVK: M55-HE game
+    logic and HUD, M55-HP camera + Ethos-U55 pose input, Cortex-A32 3D
+    renderer, RK055HDMIPI4MA0 MIPI-DSI panel.
+
+common:
+  tags: aen display game demo example
+  build_only: true
+  platform_allow:
+    - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+
+tests:
+  alp_sdk.examples.aen.trace_runner.a32_render:
+    extra_args:
+      - "TR_PANEL_HZ=30"
+  alp_sdk.examples.aen.trace_runner.a32_render_npu_input:
+    extra_args:
+      - "TR_PANEL_HZ=30"
+      - "TR_INPUT_NPU=ON"
+      - "TR_CAM_ROTATE=90"
+  alp_sdk.examples.aen.trace_runner.m55_render:
+    extra_args:
+      - "TR_RENDER=M55"

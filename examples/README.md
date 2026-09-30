@@ -116,8 +116,8 @@ The portable bus + GPIO + analog surfaces.  Start here.
 
 | Directory                       | What it shows                                                                 |
 |---------------------------------|-------------------------------------------------------------------------------|
-| `ai-camera-viewer`              | Capture frames → person-detect on the Ethos-U NPU → preview + boxes on a 240×240 LVGL display. **(AEN)** |
-| `ai-object-detection-realtime`  | Realtime YOLOv8-tiny on the DEEPX NPU -- camera → inference → bbox overlay + live FPS. **(V2N-M1)** |
+| `ai-camera-viewer`              | Capture frames → person-detect on the Ethos-U NPU → preview + boxes on a 240×320 ST7789 LVGL display. **(AEN)** |
+| `ai-object-detection-realtime`  | Realtime YOLOv8-tiny skeleton -- camera → inference → bbox overlay + live FPS; the checked-in project runs TFLM on the M33 slice, the DX-M1 NPU needs an A55/Yocto app + compiled model (see its README). **(V2N-M1)** |
 
 ### AI / Inference
 
@@ -125,6 +125,7 @@ The portable bus + GPIO + analog surfaces.  Start here.
 |------------------------------------|------------------------------------------------------------------------------|
 | `ai-anomaly-detection-vibration`   | Predictive maintenance -- sliding-window vibration → 1D-CNN anomaly score via TFLM. **(AEN)** |
 | `aen/edgeai-vision-aen`            | On-device vision inference with Ethos-U on an AEN SoM. **(AEN)**              |
+| `v2n/v2n-drpai-inference`          | DRP-AI3 on-die NPU still-frame inference through `<alp/inference.h>` -- the exhibition booth demo. **(V2N, Yocto)** |
 | `v2n/v2n-m1-deepx-inference`       | DEEPX DX-M1 NPU bring-up + a single inference through `<alp/inference.h>`. **(V2N-M1)** |
 | `v2n/v2n-m1-ros-perception`        | ROS 2 perception node -- detection on DEEPX, DRP-AI3 fallback on plain V2N. **(V2N / V2N-M1, Yocto)** |
 | `cold-chain-monitor`               | Pharma/food cold-chain integrity monitor -- BME280 T/RH/P samples → anomaly classification; v0.9 paper-correct, HiL bench-gated. |
@@ -234,7 +235,7 @@ SoM EEPROM manifest).
 | `v2n/v2n-eeprom-manifest-dump`  | Hexdump + decode the 128-byte EEPROM manifest at offset 0x0000.          |
 | `v2n/v2n-temp-sensor`           | Read the on-module TMP112 once per second; print degrees C.              |
 | `v2n/v2n-pwm-fan-control`       | Ramp a GD32-side PWM channel along a five-stop fan curve (25 kHz board). |
-| `v2n/v2n-secure-element-sign`   | OPTIGA Trust M I2C_STATE probe; product-info/raw-APDU return `ALP_ERR_NOSUPPORT`. |
+| `v2n/v2n-secure-element-sign`   | OPTIGA Trust M probe, Coprocessor UID read and raw APDU session. |
 | `v2n/v2n-xspi-flash-readwrite`  | Erase + write + read-back one page on the on-module xSPI NOR.            |
 | `v2n/v2n-emmc-block-stat`       | Disk-access ioctls + first-block read on the on-module eMMC.             |
 | `v2n/v2n-gd32-swd-flash`        | Host-driven SWD bit-bang -- connect, halt, erase, write, verify, reset.  |
@@ -242,6 +243,7 @@ SoM EEPROM manifest).
 | `v2n/v2n-gd32-bridge-functional` | Single-pass functional validation of the GD32G553 supervisor-MCU bridge, followed by a forever PWM7 duty staircase as a live oscilloscope observable. **(V2N-M1)** |
 | `v2n/v2n-gd32-bridge-hil-soak`  | Pass/fail soak of the whole GD32 bridge command set over the 25 MHz SPI fast path -- every opcode round-trips each cycle with self-contained verification. **(V2N-M1)** |
 | `v2n/v2n-gd32-bridge-loopback`  | Jumpered Tier-B loopback validation of the GD32 supervisor bridge -- three physical jumpers close the analog + timer signal paths on real silicon. **(V2N-M1)** |
+| `v2n/v2n-pmic-inspect`          | Read-only-by-default inspector for the on-module power chips (ACT88760, DA9292, TPS628640) from Linux/Yocto user-space on the V2N A55 -- rails, GPIOs, identity vs metadata; guarded `--write` actions (window-checked setpoint, enable/disable with critical rails refused, GPIO4 OTP fix, DEEPX rail sequence). |
 | `v2n/v2n-power-monitor`         | Live per-rail power table from the E1M-X EVK's on-board INA236 current/voltage monitors, read from Linux/Yocto user-space on the V2N Cortex-A55. |
 
 ### AEN platform
@@ -249,9 +251,9 @@ SoM EEPROM manifest).
 These live under `examples/aen/` and target the E1M-AEN (Alif
 Ensemble) family on the E1M-EVK board (lead part: E8).
 
-`examples/aen/` has 66 directories total; the 9 below are the
+`examples/aen/` has 84 tracked directories; the 10 below are the
 customer-facing catalog (the ones carrying a `board.yaml`).  The
-remaining 57 are internal bring-up/regression apps (per-driver
+remaining 74 are internal bring-up/regression apps (per-driver
 regcheck, bench smoke tests, dual-core internal validation) --
 `board.yaml` presence is the reliable way to tell them apart, not
 their filename (some of those internal dirs don't follow a
@@ -267,7 +269,8 @@ their filename (some of those internal dirs don't follow a
 | `aen/aen-cc3501e-gatt-register` | Bench PASS/FAIL gate for `alp_ble_gatt_register_service()` (#480/#892) -- registers a service on the CC3501E's NimBLE host over the inter-chip bridge; peer-free, no central-side discovery. |
 | `aen/aen-cc3501e-gpio`          | CC3501E GPIO proxy + camera-enable demo over the inter-chip SPI bridge. |
 | `aen/aen-eeprom-manifest`       | Read + decode the 128-byte Alp hardware-info manifest from the on-module 24C128 EEPROM over the portable `<alp/*>` API. |
-| `aen/aen-secure-element-sign`   | OPTIGA Trust M I2C_STATE probe over BRD_I2C (M55-HE); product-info/raw-APDU return `ALP_ERR_NOSUPPORT`. |
+| `aen/aen-eeprom-provision`      | Write (and lock down) the 128-byte Alp hardware-info manifest into the on-module 24C128 EEPROM -- the production sibling of `aen-eeprom-manifest`. |
+| `aen/aen-secure-element-sign`   | OPTIGA Trust M probe and Coprocessor UID read over BRD_I2C (M55-HE). |
 
 ## Anatomy of a single-OS example
 

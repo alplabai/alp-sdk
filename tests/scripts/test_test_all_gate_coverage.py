@@ -73,5 +73,20 @@ def test_test_all_would_run_every_declared_gate_script():
     )
 
 
+def test_deselected_gate_duplicates_keep_their_success_line_guard():
+    """check_emit_snapshots.py and check_zephyr_conf_parity.py have pytest
+    twins marked gate_duplicate (deselected from test-all.sh's pytest stage).
+    The twins also asserted the `byte-identical` success line; the
+    required-gate-scripts stage must keep asserting it, or a run that exits 0
+    without checking anything would pass. Pin the guard and that the string
+    is still what both scripts print."""
+    text = TEST_ALL.read_text(encoding="utf-8")
+    assert "check_emit_snapshots.py|check_zephyr_conf_parity.py)" in text
+    assert "grep -q 'byte-identical'" in text
+    for name in ("check_emit_snapshots.py", "check_zephyr_conf_parity.py"):
+        src = (REPO / "scripts" / name).read_text(encoding="utf-8")
+        assert "byte-identical." in src, f"{name} no longer prints its success line"
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

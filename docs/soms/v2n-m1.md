@@ -151,32 +151,29 @@ the NPU. Use a loop count (`-l`): the time-bounded mode (`-t <s>`) stalled
 after its warm-up runs on this setup. `dxrt-cli -s` reports NPU voltage as
 `0 mV` with the no-PMIC firmware, because there is no PMIC read-out.
 
-### DX-RT service mode (`dxrtd`) -- not enabled
+### DX-RT service mode (`dxrtd`) -- enabled (#2398)
 
 DX-RT 3.x has an optional, CMake-time "service mode"
 (`USE_SERVICE`) where `dxrtd` runs as a background daemon so more
 than one process can share the DX-M1 concurrently. The `dx-rt_3.2.0`
 recipe this layer pins (`PREFERRED_VERSION_dx-rt = "3.2.0"`, which
-selects `dx-rt_3.2.0.bb`, not the `-1` suffix) builds with
-`USE_SERVICE=OFF` -- upstream's own default; the same recipe builds
-with `USE_ORT=ON` and depends on `libonnxruntime` -- and
-does not install a `dxrtd` unit at all. `meta-deepx-m1` also ships a
-`dx-rt_3.2.0-1.bb` variant with `USE_SERVICE=ON`, but its
-systemd/SysVinit wiring (`SYSTEMD_SERVICE`, the `do_install:append`
-step that would stage `dxrt.service`) is commented out in
-`meta-deepx-m1` itself, so even that variant ships no *working*
-`dxrtd` service today.
+selects `dx-rt_3.2.0.bb`, not the `-1` suffix) built with
+`USE_SERVICE=OFF` -- upstream's own default -- and shipped no `dxrtd`
+unit at all: two processes using the DX-M1 at once hung, and a client
+killed mid-request wedged the NPU until reboot.
 
-`run_model` and `dxrt-cli` do not need service mode -- both open the
-device directly as a single process, which is exactly what the bench
-run above exercised. `meta-alp-sdk` therefore does **not** bbappend a
-service unit in: there is nothing upstream to enable (the shipped
-recipe never fetches `dxrt.service`), and adding one against a
-runtime built with `USE_SERVICE=OFF` would ship a unit that cannot
-work. Multi-process device sharing is future work, gated on upstream
-re-enabling its own commented-out service wiring (or this layer
-re-pinning to the `-1` variant and rebuilding with `USE_SERVICE=ON`,
-a bigger change than a bbappend).
+`meta-alp-sdk`'s `dx-rt_%.bbappend`
+(`meta-alp-sdk/dynamic-layers/meta-deepx-m1/recipes-runtime/dx-rt/`)
+now flips `EXTRA_OECMAKE` to `-DUSE_SERVICE=ON` and installs upstream's
+`dxrt.service` as an enabled systemd unit in `dx-rt-cli` (`inherit
+systemd`; upstream's own `dx-rt_3.2.0-1.bb` variant ships the same
+unit but commented out, and this image runs systemd rather than
+SysVinit, so the bbappend stages it directly rather than re-pinning).
+The `PREFERRED_VERSION_dx-rt = "3.2.0"` pin is unchanged (firmware
+lockstep). `run_model` and `dxrt-cli` still open the device directly
+and work unchanged against the running `dxrtd`; on dx-rt 3.2.0,
+processes sharing one DX-M1 must still bind the same NPU core set
+(see `<alp/ext/deepx/inference.h>`). See #2398.
 
 ### DX-M1 NAND firmware provisioning
 
@@ -212,7 +209,7 @@ as the NPU integration matures.
 | U-Boot logs `... DEEPX rail not enabled (CH2 may require EN2/P64 high before PG -- see bring-up doc)` | CH2_EN was written over I2C but PG never asserted -- possible EN2/P64 hardware gating (P64 only goes high after PG in the current sequence). See `docs/bring-up-v2n-m1.md` §2 and #2045. |
 | DEEPX rails up but PCIe link never trains            | `M1_RESET` polarity wrong -- the driver default is active-low; board may need override via `deepx_dxm1_set_reset_polarity`. |
 | PCIe link trains but kernel driver reports BAR errors| PCIe muxes on the wrong path -- check `PI3DBS_STATE_PATH_0` matches your board's silk-screen. |
-| `dxrt_init()` returns an error                       | Check the DEEPX kernel driver (`dx_rt_npu_linux_driver`) is loaded.    |
+| `dxrt::InferenceEngine` construction fails          | Check the DEEPX kernel driver (`dx_rt_npu_linux_driver`) is loaded.    |
 
 ## See also
 

@@ -35,6 +35,10 @@ the chip's own protocol, and report SKIP (kernel-owned) for those two
 rows instead of FAIL -- the RTC row then reads the live time through
 `/dev/rtc0`.
 
+The one write it can make is the Trust M's SE_RST pulse, through the
+kernel's `se-rst` GPIO line (`src/se_reset_gpio.h`), and only when the part
+has stopped ACKing (#2507).
+
 The example never writes a PMIC voltage, enable, or control
 register (DA9292 CH2 is U-Boot's alone -- see
 `meta-alp-sdk/recipes-bsp/u-boot/u-boot/

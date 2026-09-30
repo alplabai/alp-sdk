@@ -13,17 +13,18 @@
 # `dx_rt` + `dx_rt_npu_linux_driver` + `meta-deepx-m1` themselves, so
 # there is nothing left for meta-alp-sdk to stub or SKIP_RECIPE.
 
-# GATED behind an explicit opt-in: DEEPX's dx-driver/dx-rt recipes
-# declare LICENSE = "Proprietary", and the dx_rt / dx_rt_npu_linux_driver
-# source they fetch carries DEEPX's customer-only licence terms
-# ("provided exclusively to customers who are supplied with DEEPX
-# NPU" -- see docs/vendor-partnerships.md's DEEPX section; note the
-# driver source files also carry SPDX GPL-2.0 headers in places, an
-# unresolved ambiguity in DEEPX's own upstream, not ours to resolve
-# here).  meta-deepx-m1 itself ships no LICENSE file. A build must
-# both carry the layer AND opt in here. Set ALP_ENABLE_DEEPX_DXM1 =
-# "1" in local.conf once meta-deepx-m1 is in bblayers.conf.
-ALP_ENABLE_DEEPX_DXM1 ?= "0"
+# ON BY DEFAULT whenever meta-deepx-m1 is in bblayers.conf (#482).  The
+# DX-M1 is DEEPX's own chip on every V2M SoM, and DEEPX publishes
+# dx_rt / dx_rt_npu_linux_driver / meta-deepx-m1 openly on GitHub for
+# the users of that chip -- their terms cover "customers who are
+# supplied with DEEPX NPU", which every V2M customer is (see
+# docs/vendor-partnerships.md's DEEPX section).  Nothing for this layer
+# to gate: a V2M image that carries DEEPX's layer ships the runtime.
+# A build WITHOUT the layer still builds (minus the DX-M1 inference
+# path) instead of failing on "Nothing PROVIDES dx-rt".  Force it off
+# with ALP_ENABLE_DEEPX_DXM1 = "0" in local.conf; setting "1" without
+# the layer is a loud bb.fatal in alp-sdk_0.6.bb.
+ALP_ENABLE_DEEPX_DXM1 ?= "${@'1' if 'meta-deepx-m1' in (d.getVar('BBFILE_COLLECTIONS') or '').split() else '0'}"
 
 # `dx-driver` builds the DX-M1 PCIe kernel module(s) (`dx_dma.ko` +
 # `dxrt_driver.ko`).  KERNEL_MODULE_AUTOLOAD below is defensive, not
@@ -62,7 +63,8 @@ KERNEL_MODULE_AUTOLOAD:append = "${@' dx_dma dxrt_driver' if d.getVar('ALP_ENABL
 # mismatch on-target.
 #
 # "3.2.0" deliberately selects the dx-rt_3.2.0.bb recipe, not the
-# dx-rt_3.2.0-1.bb USE_SERVICE variant: BitBake splits a PREFERRED_VERSION
+# dx-rt_3.2.0-1.bb USE_SERVICE variant (the dxrtd service mode is enabled
+# on 3.2.0 by meta-alp-sdk's dx-rt_%.bbappend instead, #2398): BitBake splits a PREFERRED_VERSION
 # containing "-" into PV-PR, so a value of "3.2.0-1" would try to match
 # PV "3.2.0" at PR "1" -- it would NOT select the recipe literally named
 # dx-rt_3.2.0-1.bb.  Leave the trailing "-1" off on purpose.

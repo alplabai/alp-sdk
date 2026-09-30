@@ -106,6 +106,15 @@ Display 2, its LCD2_RST (E1M-X IO21), LCD2_PWR_EN (E1M-X IO22), and CTP2 sideban
 (IO17/IO19) are therefore **permanently unavailable on V2N/V2M** at this
 hardware revision.
 
+## Audio (TAS2563 playback card, V2N Linux)
+
+Linux plays through the ALSA card `e1m-x-evk-tas2563` (`e1m-x-evk.dtsi` in
+`meta-alp-sdk`): SSI2 carries the data (P47), with SCK/WS taken from SSI1
+(P44/P45) via the `alp,shared-pin-ssi1` property added by kernel patch 0014.
+P46 (SSI1 SDATA, the amps' SDOUT net) is deliberately left unmuxed so the SoC
+never drives it; there is no capture or IV-sense path.  Bench listen is still
+pending (#2331).
+
 ## I²C address collision (TAS2563 broadcast)
 
 INA236B (U32) sits at `0x48` on `XEVK_I2C_BUS_SENSORS`
@@ -137,17 +146,22 @@ on-module eMMC (SDHI0) is the production boot.
 | Card power `SD1_SD1PWEN` | `PA3` | Always-on hog; the card-detect pull-up lives on this rail |
 | `SDCARD_RST` | `PA4` | M.2 Wi-Fi SDIO reset through the carrier mux, not a microSD signal; undriven |
 
-The carrier SDIO mux (`MUX_SEL.SDIO` / `SD_MUX_EN`, driven by the GD32
-IO-MCU on E1M `IO27`/`IO29`) switches SD1 between the microSD socket
-and the M.2 E-key Wi-Fi SDIO. Its undriven default selects the microSD
-socket, so the slot works with a blank GD32.
+The carrier SDIO mux (TMUX1574 `U38`/`U39`) switches SD1 between the
+microSD socket and the M.2 E-key Wi-Fi SDIO. On the E1M-X EVK V2 its select
+line `MUX_SEL.SDIO` is not a GPIO: `R239` (100 kOhm) pulls it low (microSD)
+and header `P6` ties it to +3V3 (M.2). E1M `IO27` is unconnected. The
+active-low enable `SD_MUX_EN` is E1M `IO29` (a GD32 pad) with no external
+pull-down, so it rests on the TMUX1574's internal pull-downs; the slot works
+with a blank GD32.
 
-Fastest mode is **SDR104** (1.8 V, 200 MHz). The SD1 pads use
+Fastest mode is **SDR50** (1.8 V, 100 MHz). The SD1 pads use
 `renesas,output-impedance = <2>`, one step weaker than the eMMC's `<3>`:
-at `<3>` SDR104 through the mux fails the data phase with `error -84`
-(CRC). Bench-verified 2026-09-24 on E1M-V2M103 with a 32 GB SDHC card:
-`mmc1: new ultra high speed SDR104 SDHC card`, about 78 MB/s reads, two
-1.5 GiB reads with identical md5, 10/10 re-enumerations, no errors.
+at `<3>` the data phase fails with `error -84` (CRC). SDR104 is not
+enabled: reads work there (about 78-85 MB/s, bench 2026-09-24/27), but
+host-to-card writes at 208 MHz never complete (`mmc1: Card stuck being
+busy!`, #2357). With kernel patch `0010` (bounce buffer for multi-segment
+requests) SDR50 writes 512 MiB in 20 s and HS in 29 s (E1M-V2M103, bench
+2026-09-27); before it every write was a single 4 KiB request (~2.7 MB/s).
 
 **U-Boot numbering differs from Linux.** In U-Boot, `mmc 1` is
 `mmc@15c20000` (SDHI2, the Wi-Fi SDIO controller), not this slot;

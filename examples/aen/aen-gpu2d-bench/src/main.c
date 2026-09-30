@@ -2,39 +2,52 @@
  * Copyright (c) 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * On-silicon GPU2D software-fallback validation for the E1M-AEN801 (Alif
- * Ensemble E8, M55-HE).
+ * On-silicon <alp/gpu2d.h> validation for the E1M-AEN (Alif Ensemble E8,
+ * M55-HE): fill_rect / blit / blend / close through whichever backend the
+ * build selects, each checked against the pixel value the software fallback's
+ * formulas give (src/backends/gpu2d/sw_fallback.c). ARGB8888 packs
+ * little-endian as B,G,R,A, so a uint32 read of a pixel == 0xAARRGGBB.
  *
- * What it proves
- * --------------
- * The portable <alp/gpu2d.h> surface (alp_gpu2d_open / fill_rect / blit / blend /
- * close) runs correctly on the REAL M55-HE core through the priority-0 pure-C
- * sw_fallback backend.  A plain CONFIG_ALP_SDK build selects sw_fallback (the
- * D/AVE 2D HW backend is opt-in + bench-unverified), so this exercises the same
- * dispatcher + CPU pixel path every no-2D-engine SoM (V2N, i.MX 93) and
- * native_sim use -- now confirmed it executes on Alif silicon, not just the host.
+ * Default build: the priority-0 software fallback, the same CPU path every
+ * no-2D-engine SoM uses. With the D/AVE 2D engine (#916):
  *
- * Every op is checked against an EXACT expected pixel value derived from the
- * sw_fallback formulas (src/backends/gpu2d/sw_fallback.c): ARGB8888 packs
- * little-endian as p[0..3] = B,G,R,A, so a uint32 read of a pixel == 0xAARRGGBB.
- * The blend math is rounded straight-alpha: SRC_OVER out = (s*sa + d*(255-sa) +
- * 127)/255 per channel; ADDITIVE = clamp(s+d); MULTIPLY = (s*d + 127)/255.
+ *   west update --group-filter +vendor-sdks     # fetches alif_dave2d-driver
+ *   west build ... -- -DEXTRA_CONF_FILE=overlay-dave2d.conf \
+ *                     -DEXTRA_DTC_OVERLAY_FILE=dave2d.overlay
  *
- * No hardware dependency -- pure CPU work over small RAM buffers.  Console is the
- * RAM buffer 'ram_console_buf' (see prj.conf); the bench UART is not wired to
- * USB.  BENCH-VALIDATION app -- not a customer teaching example.
+ * The surfaces sit in the global SRAM0 bank because the engine is an AXI
+ * master that cannot reach core-local DTCM. Blended channels may differ by 1
+ * from the software values (<alp/gpu2d.h>), so SRC_OVER is checked to +-1.
+ *
+ * Console is the RAM buffer 'ram_console_buf' (see prj.conf).
+ * BENCH-VALIDATION app -- not a customer teaching example.
  */
 
 #include <zephyr/kernel.h>
+#include <zephyr/devicetree.h>
+#include <zephyr/linker/devicetree_regions.h>
 
 #include <alp/gpu2d.h>
 #include <alp/peripheral.h>
 
+#if defined(CONFIG_ALP_SDK_GPU2D_ALIF_DAVE2D)
+#define BACKEND "D/AVE 2D engine"
+#else
+#define BACKEND "sw_fallback"
+#endif
+
 /* Small ARGB8888 work surfaces.  uint32 elements so a pixel read == 0xAARRGGBB
  * (little-endian M55), giving exact-value checks with no byte juggling. */
 #define DIM 8U
-static uint32_t dst_buf[DIM * DIM];
-static uint32_t src_buf[DIM * DIM];
+/* In the global SRAM0 bank, not core-local DTCM: the D/AVE 2D engine is an
+ * AXI master and reads/writes these at the CPU's address. */
+#if DT_NODE_EXISTS(DT_NODELABEL(sram0))
+#define SURF_SECTION Z_GENERIC_SECTION(LINKER_DT_NODE_REGION_NAME(DT_NODELABEL(sram0)))
+#else
+#define SURF_SECTION
+#endif
+static uint32_t SURF_SECTION __aligned(32) dst_buf[DIM * DIM];
+static uint32_t SURF_SECTION __aligned(32) src_buf[DIM * DIM];
 
 static alp_gpu2d_surface_t dst = {
 	.base         = dst_buf,
@@ -70,6 +83,28 @@ static void chk_px(const char *what, const uint32_t *buf, uint32_t x, uint32_t y
 	}
 }
 
+/* Blended channels may differ by 1 between backends (<alp/gpu2d.h>). */
+static void
+chk_px_blend(const char *what, const uint32_t *buf, uint32_t x, uint32_t y, uint32_t expect)
+{
+	uint32_t got = px(buf, x, y);
+
+	for (int sh = 0; sh < 32; sh += 8) {
+		int d = (int)((got >> sh) & 0xFFU) - (int)((expect >> sh) & 0xFFU);
+
+		if (d > 1 || d < -1) {
+			printk("  FAIL %s @(%u,%u): got=0x%08x expect=0x%08x (+-1/channel)\n",
+			       what,
+			       x,
+			       y,
+			       got,
+			       expect);
+			fails++;
+			return;
+		}
+	}
+}
+
 /* Assert a status is ALP_OK; log + count mismatches. */
 static void chk_ok(const char *what, alp_status_t rc)
 {
@@ -81,7 +116,7 @@ static void chk_ok(const char *what, alp_status_t rc)
 
 int main(void)
 {
-	printk("\n=== AEN801 GPU2D software-fallback bench (<alp/gpu2d.h>) ===\n");
+	printk("\n=== AEN GPU2D bench (<alp/gpu2d.h>, " BACKEND ") ===\n");
 
 	alp_gpu2d_t *g = alp_gpu2d_open();
 
@@ -126,7 +161,7 @@ int main(void)
 	chk_ok("blend prep src", alp_gpu2d_fill_rect(g, &src, 0, 0, 1, 1, 0x80FF0000U));
 	chk_ok("blend SRC_OVER",
 	       alp_gpu2d_blend(g, &src, 0, 0, &dst, 0, 0, 1, 1, ALP_GPU2D_BLEND_SRC_OVER));
-	chk_px("blend SRC_OVER", dst_buf, 0, 0, 0xFF80007FU);
+	chk_px_blend("blend SRC_OVER", dst_buf, 0, 0, 0xFF80007FU);
 
 	/* 5. blend ADDITIVE: per-channel clamped add. 0x80402010 + 0x10203040
 	 *    = 0x90605050 (no channel saturates). */
@@ -154,7 +189,7 @@ int main(void)
 	alp_gpu2d_close(g);
 
 	if (fails == 0U) {
-		printk("RESULT PASS: GPU2D sw_fallback fill/blit/blend "
+		printk("RESULT PASS: GPU2D " BACKEND " fill/blit/blend "
 		       "(REPLACE/SRC_OVER/ADDITIVE/MULTIPLY) all match on E8\n");
 	} else {
 		printk("RESULT FAIL: %u GPU2D check(s) mismatched\n", fails);

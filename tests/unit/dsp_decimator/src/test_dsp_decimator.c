@@ -71,7 +71,7 @@ static float goertzel_amplitude(const int16_t *x, size_t n, size_t k)
  * output bin; `sb_bin` is the bin the stopband tone ALIASES to after
  * decimation (input bin index mod n_out, the standard decimation-alias
  * relation for an n_in = ratio * n_out block).  `stopband_db` mirrors
- * the achieved figure in src/dsp_dispatch.c's embedded table comment /
+ * the achieved figure in src/dsp_decimator.c's embedded table comment /
  * this header's alp_dsp_decimator_init Doxygen -- keep the three in
  * sync if the design changes.
  *

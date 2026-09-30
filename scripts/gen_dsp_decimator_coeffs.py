@@ -41,13 +41,13 @@ This is a leaf design tool (the coefficients do not derive from any other
 committed source-of-truth file), so it is intentionally NOT wired into
 test-all.sh's `stage_generated_files` regenerate-and-diff loop the way
 gen_status_strings.py etc. are.  Run with `--check` instead to verify the
-tables embedded in src/dsp_dispatch.c still match this design; re-run
-without `--check` and paste the output into src/dsp_dispatch.c and
+tables embedded in src/dsp_decimator.c still match this design; re-run
+without `--check` and paste the output into src/dsp_decimator.c and
 <alp/dsp.h>'s Doxygen whenever the design parameters above change.
 
 Usage:
     python3 scripts/gen_dsp_decimator_coeffs.py           # print tables
-    python3 scripts/gen_dsp_decimator_coeffs.py --check   # verify src/dsp_dispatch.c matches
+    python3 scripts/gen_dsp_decimator_coeffs.py --check   # verify src/dsp_decimator.c matches
 """
 import re
 import sys
@@ -59,7 +59,7 @@ except ImportError:
     sys.exit("gen_dsp_decimator_coeffs: numpy is required.  Install via `pip install numpy`.")
 
 REPO = Path(__file__).resolve().parents[1]
-DISPATCH_C = REPO / "src" / "dsp_dispatch.c"
+DECIMATOR_C = REPO / "src" / "dsp_decimator.c"
 
 N = 135
 BETA = 6.976  # Kaiser beta; see module docstring -- measured to land ~70 dB on the Q15 taps.
@@ -154,7 +154,7 @@ def main():
 
 def _parse_dispatch_c_tables(text):
     """Extract {ratio: [int, ...]} from the `_alp_dsp_decim_coeffs_r<N>`
-    arrays embedded in src/dsp_dispatch.c."""
+    arrays embedded in src/dsp_decimator.c."""
     found = {}
     pattern = re.compile(
         r"_alp_dsp_decim_coeffs_r(\d+)\[ALP_DSP_DECIMATOR_TAPS\]\s*=\s*\{(.*?)\};", re.DOTALL)
@@ -167,20 +167,20 @@ def _parse_dispatch_c_tables(text):
 
 def check():
     """Re-derive the tables from the design parameters above and compare,
-    tap-for-tap, against what is actually embedded in src/dsp_dispatch.c.
+    tap-for-tap, against what is actually embedded in src/dsp_decimator.c.
     Exits 1 on any mismatch (missing ratio, wrong length, or a differing
     tap)."""
-    if not DISPATCH_C.exists():
-        print(f"gen_dsp_decimator_coeffs --check: {DISPATCH_C} not found", file=sys.stderr)
+    if not DECIMATOR_C.exists():
+        print(f"gen_dsp_decimator_coeffs --check: {DECIMATOR_C} not found", file=sys.stderr)
         return 1
-    embedded = _parse_dispatch_c_tables(DISPATCH_C.read_text(encoding="utf-8"))
+    embedded = _parse_dispatch_c_tables(DECIMATOR_C.read_text(encoding="utf-8"))
     tables = _build_tables()
     ok = True
     for ratio in RATIOS:
         want = [int(v) for v in tables[ratio][0]]
         got = embedded.get(ratio)
         if got is None:
-            print(f"MISMATCH ratio={ratio}: no table found in {DISPATCH_C}", file=sys.stderr)
+            print(f"MISMATCH ratio={ratio}: no table found in {DECIMATOR_C}", file=sys.stderr)
             ok = False
             continue
         if got != want:
@@ -189,7 +189,7 @@ def check():
             ok = False
     if ok:
         print("gen_dsp_decimator_coeffs --check: OK -- "
-              f"{DISPATCH_C} matches the design for ratios {RATIOS}")
+              f"{DECIMATOR_C} matches the design for ratios {RATIOS}")
         return 0
     return 1
 

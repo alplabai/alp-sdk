@@ -7,11 +7,15 @@
  */
 #pragma once
 
+#include <cstdint>
+
 namespace dxrt
 {
 
 struct InferenceOption {
-	int placeholder = 0;
+	/* Which NPU cores the engine runs on (0 = all); set by
+	 * alp_inference_deepx_bind_cores(). */
+	uint32_t boundOption = 0;
 };
 
 inline InferenceOption DefaultInferenceOption;
