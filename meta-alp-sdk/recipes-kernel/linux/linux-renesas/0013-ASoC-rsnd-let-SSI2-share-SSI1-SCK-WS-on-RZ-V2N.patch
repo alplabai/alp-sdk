@@ -17,11 +17,12 @@ diff --git a/sound/soc/sh/rcar/rsnd.h b/sound/soc/sh/rcar/rsnd.h
 index 690f493..d95362e 100644
 --- a/sound/soc/sh/rcar/rsnd.h
 +++ b/sound/soc/sh/rcar/rsnd.h
-@@ -785,6 +785,8 @@ int rsnd_ssi_is_dma_mode(struct rsnd_mod *mod);
+@@ -785,6 +785,9 @@ int rsnd_ssi_is_dma_mode(struct rsnd_mod *mod);
  #define rsnd_ssi_is_pin_sharing(io)	\
  	__rsnd_ssi_is_pin_sharing(rsnd_io_to_mod_ssi(io))
  int __rsnd_ssi_is_pin_sharing(struct rsnd_mod *mod);
-+#define rsnd_ssi_pin_parent_is_ssi1(io)	\n	__rsnd_ssi_pin_parent_is_ssi1(rsnd_io_to_mod_ssi(io))
++#define rsnd_ssi_pin_parent_is_ssi1(io)	\
++	__rsnd_ssi_pin_parent_is_ssi1(rsnd_io_to_mod_ssi(io))
 +int __rsnd_ssi_pin_parent_is_ssi1(struct rsnd_mod *mod);
  
  #define rsnd_ssi_of_node(priv) rsnd_parse_of_node(priv, RSND_NODE_SSI)

@@ -336,7 +336,6 @@
 
 /* SSI2 plays out of P47; its SCK/WS come from SSI1 (P44/P45), see above. */
 &ssi2 {
-	shared-pin;
 	alp,shared-pin-ssi1;
 };
 
