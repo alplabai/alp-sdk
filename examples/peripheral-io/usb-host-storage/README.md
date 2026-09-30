@@ -9,19 +9,24 @@ mass-storage device on the E1M-AEN401 Cortex-M55-HP.
 
 The `uhc_xhci_alif` driver implements the full `uhc_api`: DWC3 host-mode init +
 xHCI reset (`first_light`), command-ring/event-ring processing, root-hub port
-reset + single-device enumeration, `ep_enqueue`/`ep_dequeue` (control, bulk,
-interrupt), bus reset/suspend/resume, disable/shutdown, and an event-ring IRQ
-for hotplug (connect/disconnect) notification.  The USB host controller is
-grounded at `0x48200000` / IRQ 101 from the Alif DFP `soc.h` (AE402FA0E5597).
+reset + single-device enumeration, `ep_enqueue`/`ep_dequeue` (control, bulk --
+NOT interrupt: `ep_enqueue` is fully synchronous, and a real interrupt-IN
+endpoint needs periodic, asynchronous completion this driver doesn't
+implement, so it returns `-ENOTSUP` rather than claim support it can't back),
+bus reset/suspend/resume, disable/shutdown, and an event-ring IRQ for hotplug
+(connect/disconnect) notification.  The USB host controller is grounded at
+`0x48200000` / IRQ 101 from the Alif DFP `soc.h` (AE402FA0E5597).
 
-What has actually run on silicon: the `first_light` + `enable()`/`enumerate()`
-bring-up sequence, proven on an E8 EVK (2026-07-04 -- see the timing comments
-in `uhc_xhci_alif_first_light()`).  `ep_enqueue`/`ep_dequeue`, bus
-suspend/resume, disable/shutdown, and the event-ring ISR follow the same
-register sequencing but have **not themselves been bench-run**.  Separately,
-end-to-end enumeration of a real device on this EVK is blocked on the D+/D-
-signal path, independent of the driver's software state -- see issue #388's
-triage comments.
+What has actually run on silicon: `first_light` plus `enable()`'s own
+controller bring-up (DWC3 host-mode init, xHCI reset, the command/event-ring
+round trip), proven on an E8 EVK (2026-07-04 -- see the timing comments in
+`uhc_xhci_alif_first_light()`).  `enumerate()`'s device-dependent stages
+(Address Device, the GET_DESCRIPTOR control transfer) did **not** reach
+completion on that same bench session -- blocked on the EVK's D+/D- signal
+path, independent of the driver's software state (issue #388's triage
+comments).  `ep_enqueue`/`ep_dequeue`, bus suspend/resume, disable/shutdown,
+and the event-ring ISR follow the same register sequencing but have **not
+themselves been bench-run**.
 
 ## Build
 
