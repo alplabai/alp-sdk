@@ -66,6 +66,13 @@ west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <your-app> \
 west flash
 ```
 
+> **Correction (alp-sdk#2274, added after this plan was written):** the
+> `west flash` above now REFUSES — this is a 2-domain sysbuild (MCUboot +
+> app), and `alif_flash` refuses any multi-domain sysbuild flash outright.
+> See `zephyr/sysbuild/aen/README.md`'s Usage section and
+> `docs/aen-provisioning.md` §0.5 Option B for the current supported path.
+> This historical planning doc is left otherwise unchanged.
+
 What is true, and what is not:
 
 | Claim | Verdict |
