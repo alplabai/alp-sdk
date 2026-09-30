@@ -165,3 +165,5 @@ remains open at #1369 and needs silicon to close, not doc surgery.
 * [`examples/v2n/v2n-gd32-swd-flash/`](../../examples/v2n/v2n-gd32-swd-flash/)
 * [`docs/gd32-bridge-protocol.md`](../gd32-bridge-protocol.md) §10
   -- recovery / OTA path tree.
+* [`docs/gd32-bridge.md`](../gd32-bridge.md) "Prebuilt recovery images"
+  -- where the recovery binaries and their flashing guide are published.

@@ -1277,12 +1277,25 @@ stage_doxygen() {
     out_dir=$(mktemp -d)
     warn_log=$(mktemp)
     project_number=$(git describe --tags --always 2>/dev/null || echo 0.1.0-pre)
-    {
+    # Force the CWD doxygen actually inherits, in a subshell so it can't
+    # leak: every relative path in the Doxyfile (INPUT, and thus the
+    # relative markdown \ref links docs/**/*.md make to files like
+    # vendors/*/README.md) resolves against doxygen's process CWD, not
+    # against REPO_ROOT or the linking doc's own directory.  This
+    # function's own `[ -f docs/doxygen/Doxyfile ]` check above passing
+    # only proves the CWD was REPO_ROOT-relative at THAT point -- a
+    # concurrent gw queue slot has been seen to leave the shell's CWD one
+    # level off by the time this runs (alp-sdk#2473: 0 warnings on a
+    # fresh clone of the identical commit, `unable to resolve reference`
+    # in the shared slot).  Re-pinning here removes the dependency on
+    # whatever left the CWD wherever it was, instead of chasing that
+    # state leak.
+    ( cd "${REPO_ROOT}" && {
         cat docs/doxygen/Doxyfile
         printf 'OUTPUT_DIRECTORY = %s\n' "${out_dir}"
         printf 'WARN_LOGFILE = %s\n' "${warn_log}"
         printf 'PROJECT_NUMBER = "%s"\n' "${project_number}"
-    } | "${dox}" - >/dev/null 2>&1 || true
+    } | "${dox}" - >/dev/null 2>&1 ) || true
     if [ -s "${warn_log}" ]; then
         cat "${warn_log}"
         return 1
