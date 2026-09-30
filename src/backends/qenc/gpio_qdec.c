@@ -72,7 +72,9 @@ static const struct device *const _devs[] = {
  * a handle open, and reset_position() must zero the running count. */
 static atomic_t _pos[ARRAY_SIZE(_devs)];
 
-static void _on_rel_event(struct input_event *evt, void *user_data)
+/* Unreferenced when no alp-qenc<N> alias is a gpio-qdec node (the
+ * callbacks below compile away) -- -Werror on AEN builds. */
+static __maybe_unused void _on_rel_event(struct input_event *evt, void *user_data)
 {
 	if (evt->type != INPUT_EV_REL) return;
 	atomic_add((atomic_t *)user_data, evt->value);

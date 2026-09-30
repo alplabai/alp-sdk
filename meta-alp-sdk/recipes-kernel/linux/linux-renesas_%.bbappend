@@ -276,7 +276,7 @@ SRC_URI:append:e1m-v2m101 = " file://display.cfg"
 # Keyed on e1m-v2n101 ONLY: every V2N-family machine, the V2M ones
 # included, carries that override (conf/machine/e1m-v2m10*-a55.conf), so a
 # second :e1m-v2m101 append would add the patch twice and do_patch fails.
-SRC_URI:append:e1m-v2n101 = " file://tas2563-audio.cfg file://0009-ASoC-tas2562-reset-the-amplifier-at-probe.patch"
+SRC_URI:append:e1m-v2n101 = " file://tas2563-audio.cfg file://0009-ASoC-tas2562-reset-the-amplifier-at-probe.patch file://0014-ASoC-rsnd-let-SSI2-share-SSI1-SCK-WS-on-RZ-V2N.patch"
 
 # Camera (#1149): OPT-IN IMX219 on the E1M-X-EVK CAM0 connector ->
 # CSI-2 receiver -> CRU0.  BENCH-UNVERIFIED.  Off by default: the shipped
