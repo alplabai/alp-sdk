@@ -3,7 +3,8 @@
 sample:
   name: iot-dashboard
   description: |
-    BME280 environment sensor + OPTIGA Trust M + ST7789 TFT.
+    BME280 environment sensor + OPTIGA Trust M + a RK055HDMIPI4MA0
+    DSI panel (applied via the e1m_evk_rk055hdmipi4ma0 shield, #2173).
     mbedtls supplies TLS while MQTT publish enters through the
     portable <alp/iot.h> surface.  The same source builds on AEN
     (on-module CC3501E bridge) or V2N (Linux-owned Murata/CYW).
@@ -22,19 +23,27 @@ tests:
     # native_sim-only panel wiring; see native_sim.conf.
     extra_args:
       - "EXTRA_CONF_FILE=native_sim.conf"
-  # This scenario names `ensemble_e8_dk/...` -- Alif's own DevKit board,
-  # which no -p flag in this repo selects -- so it is not built by any job
-  # here and never has been.  It is deliberately NOT retargeted at the
-  # alp_e1m_aen801_m55_hp target its board.yaml describes, unlike
-  # mqtt-telemetry and iot-fleet-ota (#2173): those two link on AEN now,
-  # this one does not.  LVGL requires a `zephyr,display` chosen node and no
-  # panel is wired for this app on the E1M EVK -- the EVK solders none, its
-  # documented default is an SSD1306 over the I2C/Qwiic header, and this app
-  # declares an ST7789 whose SPI0 pads are all repurposed on the 2626-R2
-  # netlist.  Which panel this demo targets is a hardware decision, so the
-  # scenario is left as-is (still running nowhere) rather than pointed at a
-  # target it cannot build.  Tracked in #2173's changelog fragment.
+  # Issue #2173 item (3): this scenario used to name `ensemble_e8_dk/...`
+  # -- Alif's own DevKit board, which no -p flag in this repo selects --
+  # so it built nowhere and never had. The panel gap that stalled the
+  # retarget (LVGL needs a `zephyr,display` chosen node and this app's
+  # ST7789 SPI0 pads are all repurposed on the 2626-R2 netlist) is now
+  # closed by the e1m_evk_rk055hdmipi4ma0 DSI shield CMakeLists.txt
+  # applies automatically for these two board targets -- the same panel
+  # #2204 wires up for aen-dsi-display. platform_allow now names both AEN
+  # SKUs the bench farm carries (AEN801 + AEN803); pr-twister-aen.yml's
+  # matrix builds each leg separately. build_only asserts the image
+  # links, nothing more -- see changelog.d/2173-iot-dashboard-aen-
+  # display.md for what that does and doesn't prove.
   alp_sdk.examples.iot_dashboard.aen:
     platform_allow:
-      - ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp
+      - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+      - alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp
     build_only: true
+    # The AEN targets have no Ensemble entropy driver at all (#2192), so the
+    # weak-RNG refusal in zephyr/CMakeLists.txt applies and this build has to
+    # acknowledge it to configure. Lives on the scenario, not in the app's
+    # prj.conf (see mqtt-telemetry/testcase.yaml), so a copy scaffolded by
+    # `tan init --from-example` and built for real hardware still refuses.
+    extra_configs:
+      - CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y
