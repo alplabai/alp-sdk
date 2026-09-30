@@ -26,7 +26,9 @@
  * INERT TODAY, same reason as the TF-A half: no MACHINE that would pull
  * this recipe in (linux-alif, PREFERRED_PROVIDER_virtual/kernel for
  * e1m-aen801-a32 / e1m-aen701-a32) parses yet. #include this fragment
- * from the eventual E1M-AEN board dts once one exists.
+ * from the eventual E1M-AEN board dts once one exists, AFTER the vendor
+ * dtsi that sets UART2_STATUS "okay": a later &uart2 override wins, an
+ * earlier one is overwritten.
  */
 
 &uart2 {
