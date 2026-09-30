@@ -868,6 +868,17 @@ static int csi2_dw_stream_start(const struct device *dev)
 	 */
 	csi2_dw_irq_on(regs, data);
 
+	/*
+	 * Alp Lab AB (issue #2351): a stop can leave the IPI mid-line with data
+	 * still in its FIFO, and re-enabling it from there raised a fatal-IPI
+	 * storm and never delivered another frame. Reset the IPI before enabling.
+	 * Unlike the runtime reset csi2_dw_irq() dropped (#2287), this runs only
+	 * here, with the IPI disabled and the sensor still in standby, so no
+	 * pixel data is in flight.
+	 */
+	sys_write32(0, regs + CSI_IPI_SOFTRSTN);
+	sys_write32(1, regs + CSI_IPI_SOFTRSTN);
+
 	/* Enable CSI streaming */
 	sys_set_bits(regs + CSI_IPI_MODE, CSI_IPI_MODE_ENABLE);
 	LOG_DBG("Stream started");
