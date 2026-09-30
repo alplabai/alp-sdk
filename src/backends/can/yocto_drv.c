@@ -379,12 +379,46 @@ static void *_rx_loop(void *arg)
 }
 
 /**
+ * @brief Map a portable E1M CAN bus id to its rcar_canfd netdev index.
+ *
+ * @par Issue #2352 -- E1M_X_CAN0/1 <-> can0/1 swap
+ * This SDK's Linux/A55 CAN support exists ONLY on the RZ/V2N-family
+ * E1M-X SoMs today (E1M-V2N101/102/103, E1M-V2M101/102/103 -- no other
+ * Yocto target populates a `can` class instance in
+ * metadata/e1m_modules/), and their on-module wiring is fixed by this
+ * SDK's own kernel DT overlay
+ * (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi,
+ * issue #2332): E1M_X_CAN0 (bus_id 0) wires to CANFD channel 3 (U15),
+ * E1M_X_CAN1 (bus_id 1) to CANFD channel 2 (U16) -- see
+ * metadata/pinmux/v2n.yaml's CAN0H/L / CAN1H/L rows.  rcar_canfd names
+ * netdevs in channel PROBE order, and the lower-numbered channel node
+ * (channel 2) always probes first, so the visible netdevs land
+ * SWAPPED relative to the portable E1M numbering: "can0" is physically
+ * channel 2 / E1M_X_CAN1, "can1" is physically channel 3 / E1M_X_CAN0.
+ * Swapping bus ids 0 and 1 here makes alp_can_open(E1M_X_CAN0) open
+ * the netdev that actually drives the CAN0 pins.  Unconditional
+ * (not silicon-gated): CONFIG_ALP_SOC_* is a Zephyr/M33 Kconfig symbol
+ * never defined for this Linux/A55 build (src/common/CMakeLists.txt),
+ * so it cannot gate this at compile time, and every Linux CAN target
+ * today is this same swapped family.  Any bus_id besides 0/1 (raw
+ * netdev access, not through the portable E1M enum) passes through
+ * unchanged.
+ */
+static inline unsigned _can_netdev_index(uint32_t bus_id)
+{
+	if (bus_id == 0u) return 1u;
+	if (bus_id == 1u) return 0u;
+	return bus_id;
+}
+
+/**
  * @brief Open a CAN_RAW socket bound to canN and stash it in the handle.
  *
- * Resolves the "can<bus_id>" interface ifindex via SIOCGIFINDEX and
- * binds an AF_CAN raw socket to it.  For ALP_CAN_MODE_FD the socket is
- * switched to CAN_RAW_FD_FRAMES so it can carry 64-byte canfd_frames;
- * if the kernel/interface lacks FD support the setsockopt fails and we
+ * Resolves the "can<bus_id>" interface ifindex (bus_id remapped through
+ * @ref _can_netdev_index, issue #2352) via SIOCGIFINDEX and binds an
+ * AF_CAN raw socket to it.  For ALP_CAN_MODE_FD the socket is switched
+ * to CAN_RAW_FD_FRAMES so it can carry 64-byte canfd_frames; if the
+ * kernel/interface lacks FD support the setsockopt fails and we
  * surface it as ALP_ERR_NOSUPPORT.  For cfg->loopback the socket opts
  * CAN_RAW_LOOPBACK + CAN_RAW_RECV_OWN_MSGS are BOTH enabled so this
  * handle's own TX frames come back through its RX filters (local
@@ -400,7 +434,7 @@ y_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st, alp_capabilitie
 	if (cfg == NULL) return ALP_ERR_INVAL;
 
 	char ifname[IFNAMSIZ];
-	int  k = snprintf(ifname, sizeof(ifname), "can%u", (unsigned)cfg->bus_id);
+	int  k = snprintf(ifname, sizeof(ifname), "can%u", _can_netdev_index(cfg->bus_id));
 	if (k < 0 || (size_t)k >= sizeof(ifname)) return ALP_ERR_INVAL;
 
 	int fd = socket(PF_CAN, SOCK_RAW | SOCK_CLOEXEC, CAN_RAW);
