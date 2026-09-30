@@ -17,8 +17,8 @@ Changes:
 - On the Linux V2N/V2M image the kernel's `alplab,gd32-bridge-gpio` driver owns
   the GD32's BRD_I2C address, and a userspace `I2C_RDWR` bridge frame would
   interleave with it. So SE_RST goes through the driver: `0005-gpio-add-gd32-bridge-expander-driver.patch`
-  adds a 21st line, index 20 `se-rst` (named in `e1m-v2n-som.dtsi`
-  `gpio-line-names`), whose `.set()` sends `CMD_SE_RESET` (`0x41`, assert byte)
+  adds line 21 `se-rst` (named in `e1m-v2n-som.dtsi` `gpio-line-names`; line
+  20 stays reserved for the CAN-FD `can-stby` pad, #2341), whose `.set()` sends `CMD_SE_RESET` (`0x41`, assert byte)
   instead of `GPIO_WRITE`. It is outside the replay mask, so a bridge reset
   leaves the part released. Needs a kernel rebuild to take effect.
 - `v2n-secure-element-sign` and `v2n-brd-i2c-bringup` find that line by name on

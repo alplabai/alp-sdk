@@ -16,7 +16,7 @@ Wire format:
   - Read:  [status][payload][CRC-16/CCITT-FALSE lo][hi] (no SOF on I2C)
   - The slave clock-stretches until the reply is ready.
 
-Line 20 ("se-rst") is the OPTIGA Trust M RESET pad, driven by
+Line 21 ("se-rst") is the OPTIGA Trust M RESET pad, driven by
 CMD_SE_RESET rather than GPIO_WRITE, and never replayed.
 
 Sticky-output caveat: CMD_GPIO_WRITE promotes a pad to push-pull
@@ -104,7 +104,7 @@ Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  drivers/gpio/Kconfig            |   9 +
  drivers/gpio/Makefile           |   1 +
- drivers/gpio/gpio-gd32-bridge.c | 968 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ drivers/gpio/gpio-gd32-bridge.c | 988 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  3 files changed, 978 insertions(+)
  create mode 100644 drivers/gpio/gpio-gd32-bridge.c
 
@@ -145,7 +145,7 @@ new file mode 100644
 index 000000000..b202babc2
 --- /dev/null
 +++ b/drivers/gpio/gpio-gd32-bridge.c
-@@ -0,0 +1,981 @@
+@@ -0,0 +1,988 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * GPIO driver for the Alp Lab GD32 IO-MCU bridge (I2C transport).
@@ -267,7 +267,7 @@ index 000000000..b202babc2
 +#define GD32_NGPIO_WIFI_BT	20
 +
 +/*
-+ * Line 20, "se-rst" (Refs #2507): the OPTIGA Trust M RESET pad. Unlike lines
++ * Line 21, "se-rst" (Refs #2507): the OPTIGA Trust M RESET pad. Unlike lines
 + * 0..19 it is not a GPIO_READ/GPIO_WRITE pad -- .set() sends
 + * CMD_SE_RESET(assert u8) instead, active-high assert = hold the secure
 + * element in reset. It exists so userspace can reset a Trust M that wedged
@@ -277,8 +277,12 @@ index 000000000..b202babc2
 + * does not touch it: the bridge releases SE_RST on its own reset, which is
 + * exactly the safe state, and a stale "asserted" must never be replayed.
 + */
-+#define GD32_SE_RST_LINE	20
-+#define GD32_NGPIO_TOTAL	21
++/* Line 20 is reserved for can-stby (bridge bit 20, protocol 0.13; the
++ * CAN-FD bring-up in alp-sdk#2341). Until that lands, .request() refuses
++ * it so nothing drives the transceivers' standby pad by accident. */
++#define GD32_RESERVED_LINE	20
++#define GD32_SE_RST_LINE	21
++#define GD32_NGPIO_TOTAL	22
 +
 +/* Bridge protocol minor at which lines 18/19 (bt-reg-on/wl-reg-on) first
 + * exist. A bridge below this minor has no notion of them. */
@@ -397,7 +401,7 @@ index 000000000..b202babc2
 +	 */
 +	struct delayed_work resolve_work;
 +	unsigned int resolve_attempts;
-+	/* Last SE_RST level sent (line 20); guarded by state_lock. Not part of
++	/* Last SE_RST level sent (line 21); guarded by state_lock. Not part of
 +	 * output_mask/output_vals, so never replayed. */
 +	bool se_rst_asserted;
 +};
@@ -501,7 +505,7 @@ index 000000000..b202babc2
 +	return !!(levels & mask);
 +}
 +
-+/* Line 20: CMD_SE_RESET instead of GPIO_WRITE; outside the replay mask. */
++/* Line 21: CMD_SE_RESET instead of GPIO_WRITE; outside the replay mask. */
 +static int gd32_bridge_se_rst_set(struct gd32_bridge_gpio *gd32, int value)
 +{
 +	u8 req = value ? 1 : 0;
@@ -719,7 +723,10 @@ index 000000000..b202babc2
 +{
 +	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(chip);
 +
-+	/* Line 20 (se-rst) is not gated on the wifi/bt protocol minor. */
++	if (offset == GD32_RESERVED_LINE)
++		return -ENODEV;
++
++	/* Line 21 (se-rst) is not gated on the wifi/bt protocol minor. */
 +	if (offset < GD32_NGPIO_BASE || offset == GD32_SE_RST_LINE)
 +		return 0;
 +
