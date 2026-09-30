@@ -1527,7 +1527,7 @@
         ],
         "path": "examples/multicore/microros-ros2-v2n",
         "som": "E1M-V2N101",
-        "summary": "> **Status: build-ready, not yet built or run on hardware.** The A55 > bridge compiles warning-free on a Linux host; the M33 firmware needs > `micro_ros_zephyr_module`'s colcon cross-build, which has not been run > for it. See [What is untested](#what-is-untested). Nothing here is > bench evidence."
+        "summary": "> **Status: not yet built or run on hardware.** The A55 bridge compiles > warning-free on a Linux host; the M33 firmware has never been built (it > needs `micro_ros_zephyr_module`'s colcon cross-build, and a small patch > to that module, see `m33_sm/patches/`). See [What is untested](#what-is-untested). Nothing here is > bench evidence."
       },
       {
         "board": "e1m-evk",

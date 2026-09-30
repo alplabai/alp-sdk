@@ -33,8 +33,8 @@
  * WHAT IT DOES NOT DO
  *   No fragmentation: RPMsg carries at most 491 payload bytes per datagram
  *   (496-byte buffer minus the 5-byte method header), so datagrams larger
- *   than BRIDGE_MTU are dropped with a log line.  The XRCE client MTU must be
- *   configured to fit; see README.md.
+ *   than BRIDGE_MTU are dropped with a log line.  The XRCE client MTU is
+ *   set to fit in m33_sm/prj.conf (CONFIG_MICROROS_XRCE_DDS_MTU).
  *
  * Usage: alp-microros-bridge [agent-ip [agent-udp-port]]   (127.0.0.1 8888)
  */

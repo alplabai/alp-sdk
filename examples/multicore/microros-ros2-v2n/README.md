@@ -1,9 +1,9 @@
 # microros-ros2-v2n
 
-> **Status: build-ready, not yet built or run on hardware.** The A55
-> bridge compiles warning-free on a Linux host; the M33 firmware needs
-> `micro_ros_zephyr_module`'s colcon cross-build, which has not been run
-> for it. See [What is untested](#what-is-untested). Nothing here is
+> **Status: not yet built or run on hardware.** The A55 bridge compiles
+> warning-free on a Linux host; the M33 firmware has never been built (it
+> needs `micro_ros_zephyr_module`'s colcon cross-build, and a small patch
+> to that module, see `m33_sm/patches/`). See [What is untested](#what-is-untested). Nothing here is
 > bench evidence.
 
 A **micro-ROS node on the RZ/V2N Cortex-M33** (Zephyr) publishes a
@@ -83,8 +83,7 @@ cd alp-workspace/alp-sdk/examples/multicore/microros-ros2-v2n
 tan build            # both slices; same flow as rpmsg-v2n
 ```
 
-M33 only, for iteration (needs a west workspace with the
-`micro_ros_zephyr_module` group fetched, network access, and the ROS 2
+M33 only, for iteration (needs a west workspace, network access, and the ROS 2
 colcon build prerequisites the module documents):
 
 ```bash
@@ -123,19 +122,25 @@ State of this change, precisely:
   (colcon cross-compile of rcl/rclc/rmw_microxrcedds, done at CMake
   configure time and needing network + the ROS 2 Python build tools) nor
   the Zephyr link has been run here. `prj.conf` Kconfig beyond
-  `CONFIG_MICROROS=y` (`CONFIG_POSIX_API`, stack/heap sizes) is taken
-  from the module's own sample conventions and must be confirmed against
+  `CONFIG_MICROROS=y` (`CONFIG_POSIX_API`, stack/heap sizes, libc
+  choice) deviates from the module's own sample and must be confirmed against
   the pinned revision (`cfbddc5e`). API names in `main.c`
   (`rmw_uros_set_custom_transport`, `rmw_uros_ping_agent`, rclc init
   calls) follow the Humble headers and must be confirmed by the first
   build.
 - **XRCE MTU vs RPMsg payload.** RPMsg carries at most 491 payload bytes
-  (496-byte buffer, 5-byte method header). The XRCE custom-transport MTU
-  (`UXR_CONFIG_CUSTOM_TRANSPORT_MTU`, a colcon-time option of the module)
-  must be set at or below that. Until it is, `transport_write` refuses
-  oversized datagrams and the session will not establish; the value and
-  the actual buffer size from the resource table are ADR 0035 bench items
-  4 and 5.
+  (496-byte buffer, 5-byte method header). `prj.conf` sets
+  `CONFIG_MICROROS_XRCE_DDS_MTU="491"`, which the module maps onto
+  `UCLIENT_CUSTOM_TRANSPORT_MTU` (default 512, too large). The value is
+  configured but unproven; the actual buffer size from the resource table
+  is an ADR 0035 bench item 5.
+- **Module patch.** The pinned module has no bring-your-own-transport
+  Kconfig choice (its `serial` transport needs a `usart1` node label the
+  V2N M33 board lacks). `m33_sm/patches/` adds
+  `MICROROS_TRANSPORT_CUSTOM`; `m33_sm/CMakeLists.txt` applies it to the
+  module checkout and adds `modules/libmicroros` to `ZEPHYR_EXTRA_MODULES`.
+  Neither step has run. Once `west patch` can target this nested module,
+  the patch belongs in `zephyr/patches.yml`.
 - **Bridge on target.** `bridge.c` builds clean with `-Wall -Wextra
   -Wpedantic` on a Linux host; it has not run on the board or against a
   real agent.

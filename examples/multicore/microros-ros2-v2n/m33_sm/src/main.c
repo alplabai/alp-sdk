@@ -30,7 +30,7 @@
  *   so we pass framing=false and each callback moves exactly one XRCE
  *   datagram.
  *
- * STATUS: build-ready, NOT built or bench-run yet.  See README.md
+ * STATUS: NOT built or bench-run yet.  See README.md
  * ("What is untested").
  */
 
@@ -72,8 +72,8 @@ static bool transport_close(struct uxrCustomTransport *t)
 
 /* One call = one datagram to the agent.  Returns the number of bytes written;
  * 0 plus *err != 0 tells the client the write failed.  Datagrams larger than
- * the RPMsg payload (RPMSG_LINK_MTU) are refused -- the XRCE MTU must be
- * configured at or below it (README.md, "What is untested"). */
+ * the RPMsg payload (RPMSG_LINK_MTU) are refused -- prj.conf sets
+ * CONFIG_MICROROS_XRCE_DDS_MTU to 491 so the client never emits one. */
 static size_t
 transport_write(struct uxrCustomTransport *t, const uint8_t *buf, size_t len, uint8_t *err)
 {

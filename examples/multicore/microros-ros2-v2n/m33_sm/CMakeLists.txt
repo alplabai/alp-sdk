@@ -29,6 +29,28 @@ if(NOT _alp_rv EQUAL 0)
 endif()
 list(APPEND EXTRA_CONF_FILE ${_alp_generated})
 
+# micro-ROS: the west project micro_ros_zephyr_module is NOT itself a Zephyr
+# module (no zephyr/module.yml at its root); the module proper is its
+# modules/libmicroros subdirectory, so hand that to Zephyr explicitly.
+set(MICROROS_ZEPHYR_MODULE_DIR
+    "$ENV{ZEPHYR_BASE}/../modules/lib/micro_ros_zephyr_module"
+    CACHE PATH "micro_ros_zephyr_module checkout (west.yml path)")
+set(_microros_patch ${CMAKE_CURRENT_SOURCE_DIR}/patches/0001-microros-custom-transport-choice.patch)
+# The pinned module has no "bring your own transport" Kconfig choice (see the
+# patch header).  Apply it once; already-applied is detected by a reverse check.
+execute_process(
+    COMMAND git -C ${MICROROS_ZEPHYR_MODULE_DIR} apply --reverse --check ${_microros_patch}
+    RESULT_VARIABLE _microros_patched OUTPUT_QUIET ERROR_QUIET)
+if(NOT _microros_patched EQUAL 0)
+    execute_process(
+        COMMAND git -C ${MICROROS_ZEPHYR_MODULE_DIR} apply ${_microros_patch}
+        RESULT_VARIABLE _microros_rv ERROR_VARIABLE _microros_err)
+    if(NOT _microros_rv EQUAL 0)
+        message(FATAL_ERROR "cannot apply ${_microros_patch} to ${MICROROS_ZEPHYR_MODULE_DIR}: ${_microros_err}")
+    endif()
+endif()
+list(APPEND ZEPHYR_EXTRA_MODULES ${MICROROS_ZEPHYR_MODULE_DIR}/modules/libmicroros)
+
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(microros_ros2_v2n_m33_sm LANGUAGES C)
 
