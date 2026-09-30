@@ -67,6 +67,14 @@
 	ALIF_CLK_CFG(CLKCTL_PER_MST, PERIPH_CLK_ENA, 12U, 1U, 0U, 0U, 0U,       \
 		     ALIF_PARENT_CLK_SYST_HCLK)
 
+/* GPU2D (TES D/AVE 2D) clock gate: GPU_CKEN, bit 8 of PERIPH_CLK_ENA in
+ * CLKCTL_PER_MST -> sets bit 8 of 0x4903F00C (E8 SVD
+ * AE822FA0E5597BS0_CM55_HE_View.svd, CLKCTL_PER_MST.PERIPH_CLK_ENA.GPU_CKEN).
+ * The Alif D/AVE 2D driver's dave_base.c enables it through
+ * clock_control_on() with this cell. */
+#define ALIF_GPU_CLK \
+	ALIF_CLK_CFG(CLKCTL_PER_MST, PERIPH_CLK_ENA, 8U, 1U, 0U, 0U, 0U, ALIF_PARENT_CLK_SYST_ACLK)
+
 /* ALP-SDK DELTA (#2051), not upstream: SD/SDMMC peripheral clock gate --
  * bit 16 of PERIPH_CLK_ENA in CLKCTL_PER_MST -> sets bit 16 of 0x4903F00C
  * (SDC_CKEN). Same register/module as ALIF_ETHERNET_CLK above, different bit.

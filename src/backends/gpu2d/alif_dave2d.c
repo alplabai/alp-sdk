@@ -15,18 +15,20 @@
  * the pack is on the include path (mirrors the ALP_HAS_ALIF_HAL
  * model used by the vendors/alif/ sources).
  *
- * ============================ BENCH-UNVERIFIED ============================
- * This backend is STRUCTURAL.  It is authored against the documented
- * d2_* API surface and the D/AVE 2D programming model, but it has
- * NOT been compiled against the real pack and has NOT been run on
- * AEN silicon.  No hardware register value or address is invented
- * here -- every hardware effect goes through a documented d2_*
- * call.  Treat the call sequencing, the format/blend-mode mappings,
- * and the submit-and-wait flush model as a first cut to be confirmed
- * at bench bring-up (issue #24).  Until then the priority-0 software
- * fallback (sw_fallback.c) is the backend that actually runs and is
- * tested on native_sim.
- * =========================================================================
+ * Bench-verified on E1M-AEN803 2026W36-0001 (M55-HE) against the driver at
+ * the `vendor-sdks` west pin: fill, blit and REPLACE / SRC_OVER blends
+ * match the software fallback (SRC_OVER within 1 per channel, see
+ * <alp/gpu2d.h>); ADDITIVE / MULTIPLY are served by the fallback. Three
+ * things the first cut got wrong, all found on silicon:
+ *   - d2_startframe() starts the PREVIOUS frame's render buffer, so every
+ *     op is followed by an empty frame (_submit_and_wait());
+ *   - d2_setcolor() carries no alpha, and the default colour blend is
+ *     alpha / one-minus-alpha, so fills and copies set a plain store;
+ *   - the texture alpha is modulated by the context's constant alpha.
+ * The engine is an AXI master with no address translation in the driver:
+ * surfaces and the driver heap must be at globally visible addresses (the
+ * SRAM0 bank on the M55-HE, not DTCM). Cache maintenance for surfaces with
+ * the D-cache on is not handled here yet.
  *
  * Coherency / cache maintenance against the caller's framebuffer
  * (clean src before read, invalidate dst after write -- see
@@ -53,6 +55,47 @@
  * never vendored here. */
 #include "dave_driver.h"
 
+#if defined(CONFIG_D1_MALLOC_D0LIB)
+#include <zephyr/devicetree.h>
+#include <zephyr/linker/devicetree_regions.h>
+#include <zephyr/sys/util.h>
+
+#include "dave_d0lib.h"
+
+/*
+ * The driver's display lists live in this heap, and the engine is an AXI
+ * master that reads them at the address the CPU sees: the driver does no
+ * CPU-to-bus translation (d1_maptovidmem() is a stub). On the M55-HE the
+ * default data section is core-local DTCM, which the engine cannot reach, so
+ * the heap goes in the global SRAM0 bank when the devicetree has one.
+ * Surfaces handed to this backend have the same requirement.
+ */
+#if DT_NODE_EXISTS(DT_NODELABEL(sram0))
+#define DAVE2D_HEAP_SECTION Z_GENERIC_SECTION(LINKER_DT_NODE_REGION_NAME(DT_NODELABEL(sram0)))
+#else
+#define DAVE2D_HEAP_SECTION
+#endif
+static uint8_t
+    DAVE2D_HEAP_SECTION __aligned(32) _d0_heap[CONFIG_ALP_SDK_GPU2D_ALIF_DAVE2D_HEAP_SIZE];
+static bool             _d0_heap_ready;
+
+/* d2_opendevice() allocates through the D0 heap manager, which must be set up
+ * once before the first device is opened. */
+static bool _d0_heap_init_once(void)
+{
+	if (!_d0_heap_ready) {
+		_d0_heap_ready = d0_initheapmanager(
+		    _d0_heap, sizeof(_d0_heap), d0_mm_fixed_range, NULL, 0, 0, 0, d0_ma_unified);
+	}
+	return _d0_heap_ready;
+}
+#else
+static bool _d0_heap_init_once(void)
+{
+	return true;
+}
+#endif
+
 /**
  * @brief Map an alp_gpu2d_format_t to a D/AVE 2D d2_mode_* constant.
  * @param[in]  fmt   Portable pixel format.
@@ -63,7 +106,7 @@
  * the driver's documented mode set, so it maps to the same
  * d2_mode_argb8888 here; the byte-order difference is a bench
  * follow-up (the engine's source-colour-key + global-alpha path may
- * need an explicit swizzle).  BENCH-UNVERIFIED.
+ * need an explicit swizzle).
  */
 /**
  * @brief Bytes-per-pixel for a portable format (0 if unmapped).
@@ -158,26 +201,44 @@ static alp_status_t _fmt_to_d2(alp_gpu2d_format_t fmt, d2_u32 *out)
  * Revisit if a bench check shows the engine's extended-blend path
  * covers them.  BENCH-UNVERIFIED.
  */
-static alp_status_t _blend_to_d2(alp_gpu2d_blend_mode_t mode, d2_u32 *src_bf, d2_u32 *dst_bf)
+static alp_status_t _blend_to_d2(alp_gpu2d_blend_mode_t mode,
+                                 d2_u32                *src_bf,
+                                 d2_u32                *dst_bf,
+                                 d2_u32                *src_abf,
+                                 d2_u32                *dst_abf)
 {
 	switch (mode) {
 	case ALP_GPU2D_BLEND_REPLACE:
-		*src_bf = d2_bm_one;
-		*dst_bf = d2_bm_zero;
+		*src_bf  = d2_bm_one;
+		*dst_bf  = d2_bm_zero;
+		*src_abf = d2_bm_one;
+		*dst_abf = d2_bm_zero;
 		return ALP_OK;
 	case ALP_GPU2D_BLEND_SRC_OVER:
-		*src_bf = d2_bm_one;
-		*dst_bf = d2_bm_one_minus_alpha;
+		/* Straight (non-premultiplied) alpha, matching sw_fallback:
+		 * rgb = src*a + dst*(1-a), a = a_src + a_dst*(1-a_src). */
+		*src_bf  = d2_bm_alpha;
+		*dst_bf  = d2_bm_one_minus_alpha;
+		*src_abf = d2_bm_one;
+		*dst_abf = d2_bm_one_minus_alpha;
 		return ALP_OK;
 	case ALP_GPU2D_BLEND_ADDITIVE:
 	case ALP_GPU2D_BLEND_MULTIPLY:
-		/* No documented single-pass d2 factor pair; dave2d_blend
-         * delegates these to the sw path before reaching here.
-         * BENCH-UNVERIFIED -- see header. */
+		/* No single-pass d2 factor pair; dave2d_blend delegates these to
+		 * the sw path before reaching here. */
 		return ALP_ERR_NOSUPPORT;
 	default:
 		return ALP_ERR_NOSUPPORT;
 	}
+}
+
+/* Plain store of source colour and alpha: fills and copies must not blend
+ * with what is already there (D/AVE's default colour blend is
+ * alpha / one-minus-alpha). */
+static void _set_store(d2_device *dev)
+{
+	d2_setblendmode(dev, d2_bm_one, d2_bm_zero);
+	d2_setalphablendmode(dev, d2_bm_one, d2_bm_zero);
 }
 
 /**
@@ -198,8 +259,26 @@ static alp_status_t _bind_dst(d2_device *dev, const alp_gpu2d_surface_t *s)
 	return ALP_OK;
 }
 
+/*
+ * Submit the commands recorded since d2_startframe() and wait for the engine
+ * to finish them. d2_startframe() starts the render buffer closed by the
+ * PREVIOUS d2_endframe(), and d2_endframe() waits only for that previous one
+ * (dave_rbuffer.c), so a lone start/end pair leaves each op's pixels unwritten
+ * until the next op -- bench-observed as every result arriving one call late.
+ * Starting and ending an empty frame kicks this op's buffer and waits for it.
+ */
+static void _submit_and_wait(d2_device *dev)
+{
+	d2_endframe(dev);
+	d2_startframe(dev);
+	d2_endframe(dev);
+}
+
 static alp_status_t dave2d_open(alp_gpu2d_backend_state_t *state, alp_capabilities_t *caps_out)
 {
+	if (!_d0_heap_init_once()) {
+		return ALP_ERR_NOMEM;
+	}
 	d2_device *dev = d2_opendevice(0);
 	if (dev == NULL) {
 		return ALP_ERR_NOSUPPORT;
@@ -248,14 +327,17 @@ static alp_status_t dave2d_fill_rect(alp_gpu2d_backend_state_t *state,
 	/* BENCH-UNVERIFIED: clean the dst range from cache after the
      * engine writes it (docs/aen-accelerator-backends-design.md §1). */
 	d2_startframe(dev);
+	_set_store(dev);
 	d2_setcolor(dev, 0, (d2_color)argb_color);
+	/* d2_setcolor() carries RGB only; the written alpha is the constant
+	 * alpha, 0xff unless set -- bench-observed as every fill landing opaque. */
+	d2_setalpha(dev, (d2_alpha)(argb_color >> 24));
 	d2_renderbox(dev,
 	             (d2_point)(x << 4),
 	             (d2_point)(y << 4),
 	             (d2_width)(w << 4),
 	             (d2_width)(h << 4)); /* 16.4 fixed point */
-	d2_endframe(dev);
-	d2_flushframe(dev); /* submit-and-wait per the v0.5 API contract */
+	_submit_and_wait(dev);            /* submit-and-wait per the v0.5 API contract */
 	return ALP_OK;
 }
 
@@ -296,6 +378,8 @@ static alp_status_t dave2d_blit(alp_gpu2d_backend_state_t *state,
 		return ALP_ERR_OUT_OF_RANGE;
 	}
 	d2_startframe(dev);
+	_set_store(dev);
+	d2_setalpha(dev, 0xff); /* see dave2d_blend() */
 	d2_setblitsrc(
 	    dev, src->base, _pitch_px(src), (d2_u32)src->width, (d2_u32)src->height, src_mode);
 	d2_blitcopy(dev,
@@ -308,8 +392,7 @@ static alp_status_t dave2d_blit(alp_gpu2d_backend_state_t *state,
 	            (d2_point)(dx << 4),
 	            (d2_point)(dy << 4),
 	            0);
-	d2_endframe(dev);
-	d2_flushframe(dev);
+	_submit_and_wait(dev);
 	return ALP_OK;
 }
 
@@ -325,7 +408,7 @@ static alp_status_t dave2d_blend(alp_gpu2d_backend_state_t *state,
                                  alp_gpu2d_blend_mode_t     mode)
 {
 	d2_device *dev = (d2_device *)state->be_data;
-	d2_u32     src_bf, dst_bf, src_mode;
+	d2_u32     src_bf, dst_bf, src_abf, dst_abf, src_mode;
 
 	if (mode == ALP_GPU2D_BLEND_ADDITIVE || mode == ALP_GPU2D_BLEND_MULTIPLY) {
 #if defined(CONFIG_ALP_SDK_GPU2D_SW_FALLBACK)
@@ -343,7 +426,7 @@ static alp_status_t dave2d_blend(alp_gpu2d_backend_state_t *state,
 #endif
 	}
 
-	alp_status_t rc = _blend_to_d2(mode, &src_bf, &dst_bf);
+	alp_status_t rc = _blend_to_d2(mode, &src_bf, &dst_bf, &src_abf, &dst_abf);
 	if (rc != ALP_OK) {
 		return rc;
 	}
@@ -370,6 +453,10 @@ static alp_status_t dave2d_blend(alp_gpu2d_backend_state_t *state,
 	}
 	d2_startframe(dev);
 	d2_setblendmode(dev, src_bf, dst_bf);
+	d2_setalphablendmode(dev, src_abf, dst_abf);
+	/* The texture's alpha is modulated by the context's constant alpha,
+	 * which a previous fill may have left below 0xff. */
+	d2_setalpha(dev, 0xff);
 	d2_setblitsrc(
 	    dev, src->base, _pitch_px(src), (d2_u32)src->width, (d2_u32)src->height, src_mode);
 	d2_blitcopy(dev,
@@ -382,8 +469,7 @@ static alp_status_t dave2d_blend(alp_gpu2d_backend_state_t *state,
 	            (d2_point)(dx << 4),
 	            (d2_point)(dy << 4),
 	            d2_bf_usealpha);
-	d2_endframe(dev);
-	d2_flushframe(dev);
+	_submit_and_wait(dev);
 	return ALP_OK;
 }
 
