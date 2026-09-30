@@ -98,8 +98,9 @@ Facts a driver author must plan for:
 
 - **FSP/HAL:** no FSP module exists for this IP on RZ/V2N, so the register
   layer, the CPG clock/reset/MSTOP calls, and the pinmux calls are new code.
-  Reuse only the existing FSP DMAC-B glue (`bringing-up-a-cm33-amp-peripheral-link`
-  lists its channel-parking traps) and the `renesas,rz-*` DT/pinctrl idiom.
+  Reuse only the existing FSP DMAC-B glue (a DMAC-B channel parks after its
+  transfer completes and must be re-armed explicitly; see
+  `docs/rzv2n-m33-swd-debug.md` for the CM33 debug setup) and the `renesas,rz-*` DT/pinctrl idiom.
 - **DMA path:** the SSIU FIFO is fed through the SSIU (DMAC) window with the
   per-SSI DREQ lines; the ICU must route those events to the DMAC unit the
   CM33 owns.  The CM33 reaches DDR only through the 128 MiB window described
@@ -108,7 +109,8 @@ Facts a driver author must plan for:
 - **Clocks:** the only usable audio master is Audio_CLKB (the SoM's clock
   generator SE3 output, 24.576 MHz).  Do not enable Audio_CLKA or Audio_CLKC.
   The SSIF module clock is a CPG-owned clock the A55 also gates (see the
-  RSCI7 keep-on precedent in `meta-alp-sdk`).
+  `0001-clk-renesas-r9a09g056-keep-CM33-owned-RSCI7-on.patch` in
+  `meta-alp-sdk/recipes-kernel/linux/linux-renesas_%.bbappend` is the precedent).
 - **Ownership:** SSIU1/SSIU2 (I2S0 pads P44, P45, P47) are A55-owned today.
   The SSIU register block and the audio clock generator are shared silicon;
   A55 and CM33 cannot both drive SSI1/SSI2 (SSI2 is slaved to SSI1's pins),
