@@ -7,6 +7,7 @@
 #include <alp/update_log.h>
 
 #include "../../../../src/backends/update_log/update_log_ops.h"
+#include "../../../../src/update_log/boot_providers.h"
 #include "../../../../src/update_log/engine.h"
 #include "../../../../src/update_log/store.h"
 #include "../../../../src/update_log/sha256.h"
@@ -1456,6 +1457,165 @@ ZTEST(alp_update_log, test_append_boot_stores_trusted_metadata)
 	alp_update_log_close(log);
 	alp_ulog_sw_tier_test_reset(true);
 	g_boot_meta_ready = false;
+}
+
+/* --- Real boot-metadata provider parsers/policy (#263) ---------------
+ *
+ * These exercise the hardware-independent helpers behind the MCUboot and
+ * Alif SE providers (src/update_log/boot_providers.c) directly, with no
+ * bootloader or SE present -- the platform glue files
+ * (src/backends/update_log/{mcuboot,alif_se}_boot_metadata.c) only fetch
+ * bytes and hand them to these pure functions.
+ */
+
+static void put_le16(uint8_t *p, uint16_t v)
+{
+	p[0] = (uint8_t)v;
+	p[1] = (uint8_t)(v >> 8);
+}
+
+ZTEST(alp_update_log, test_mcuboot_tlv_find_sha256_ok)
+{
+	uint8_t blob[4 + 4 + 32] = { 0 };
+
+	put_le16(blob + 0, ULOG_MCUBOOT_TLV_INFO_MAGIC);
+	put_le16(blob + 2, (uint16_t)sizeof(blob));
+	put_le16(blob + 4, ULOG_MCUBOOT_TLV_SHA256);
+	put_le16(blob + 6, 32);
+	for (int i = 0; i < 32; i++) {
+		blob[8 + i] = (uint8_t)(0xC0 + i);
+	}
+
+	uint8_t hash[32] = { 0 };
+	zassert_true(ulog_mcuboot_tlv_find_sha256(blob, sizeof(blob), hash));
+	for (int i = 0; i < 32; i++) {
+		zassert_equal(hash[i], (uint8_t)(0xC0 + i));
+	}
+}
+
+ZTEST(alp_update_log, test_mcuboot_tlv_find_sha256_rejects_bad_magic)
+{
+	uint8_t blob[8] = { 0 };
+
+	put_le16(blob + 0, 0xDEAD); /* not either TLV-info magic */
+	put_le16(blob + 2, sizeof(blob));
+	uint8_t hash[32];
+	zassert_false(ulog_mcuboot_tlv_find_sha256(blob, sizeof(blob), hash));
+}
+
+ZTEST(alp_update_log, test_mcuboot_tlv_find_sha256_rejects_truncated_entry)
+{
+	/* Entry header claims a 32-byte payload but the buffer was only
+	 * fetched up to 10 bytes -- must refuse rather than read OOB. */
+	uint8_t blob[10] = { 0 };
+
+	put_le16(blob + 0, ULOG_MCUBOOT_TLV_INFO_MAGIC);
+	put_le16(blob + 2, 40);
+	put_le16(blob + 4, ULOG_MCUBOOT_TLV_SHA256);
+	put_le16(blob + 6, 32);
+	uint8_t hash[32];
+	zassert_false(ulog_mcuboot_tlv_find_sha256(blob, sizeof(blob), hash));
+}
+
+ZTEST(alp_update_log, test_mcuboot_tlv_find_sha256_no_match_returns_false)
+{
+	uint8_t blob[4 + 4 + 4] = { 0 };
+
+	put_le16(blob + 0, ULOG_MCUBOOT_TLV_INFO_MAGIC);
+	put_le16(blob + 2, sizeof(blob));
+	put_le16(blob + 4, 0x01 /* IMAGE_TLV_KEYHASH, not SHA256 */);
+	put_le16(blob + 6, 4);
+	uint8_t hash[32];
+	zassert_false(ulog_mcuboot_tlv_find_sha256(blob, sizeof(blob), hash));
+}
+
+static void
+mk_mcuboot_header(uint8_t out[32], uint32_t magic, uint8_t maj, uint8_t min, uint16_t rev)
+{
+	memset(out, 0, 32);
+	out[0]  = (uint8_t)magic;
+	out[1]  = (uint8_t)(magic >> 8);
+	out[2]  = (uint8_t)(magic >> 16);
+	out[3]  = (uint8_t)(magic >> 24);
+	out[20] = maj;
+	out[21] = min;
+	put_le16(out + 22, rev);
+}
+
+ZTEST(alp_update_log, test_mcuboot_build_entry_ok)
+{
+	uint8_t hdr[32];
+	mk_mcuboot_header(hdr, ULOG_MCUBOOT_IMAGE_MAGIC, 3, 2, 1);
+	uint8_t hash[32];
+	memset(hash, 0x77, sizeof(hash));
+
+	alp_update_log_entry_t e = { 0 };
+	zassert_equal(ulog_mcuboot_build_entry(hdr, hash, true, &e), ALP_OK);
+	zassert_equal(strcmp(e.fw_version, "3.2.1"), 0);
+	zassert_equal(e.status, ALP_UPDATE_STATUS_CONFIRMED);
+	zassert_mem_equal(e.image_hash, hash, 32);
+
+	zassert_equal(ulog_mcuboot_build_entry(hdr, hash, false, &e), ALP_OK);
+	zassert_equal(e.status, ALP_UPDATE_STATUS_PENDING_CONFIRM);
+}
+
+ZTEST(alp_update_log, test_mcuboot_build_entry_rejects_bad_magic)
+{
+	uint8_t hdr[32];
+	mk_mcuboot_header(hdr, 0xDEADBEEFu, 1, 0, 0);
+	uint8_t                hash[32] = { 0 };
+	alp_update_log_entry_t e;
+	/* Never fabricate a version from a header that isn't MCUboot's. */
+	zassert_equal(ulog_mcuboot_build_entry(hdr, hash, true, &e), ALP_ERR_NOSUPPORT);
+}
+
+ZTEST(alp_update_log, test_alif_se_build_entry_verified_maps_confirmed)
+{
+	uint8_t id[8] = "APP\0\0\0\0";
+	uint8_t hash[32];
+	memset(hash, 0x11, sizeof(hash));
+
+	alp_update_log_entry_t e              = { 0 };
+	uint32_t               flags_verified = 1u << ULOG_ALIF_TOC_FLAG_VERIFY_BIT;
+	zassert_equal(ulog_alif_se_build_entry(id, id, 42, flags_verified, hash, true, &e), ALP_OK);
+	zassert_equal(strcmp(e.fw_version, "42"), 0);
+	zassert_equal(e.status, ALP_UPDATE_STATUS_CONFIRMED);
+	zassert_mem_equal(e.image_hash, hash, 32);
+}
+
+ZTEST(alp_update_log, test_alif_se_build_entry_unverified_maps_verify_failed)
+{
+	uint8_t id[8]    = "APP\0\0\0\0";
+	uint8_t hash[32] = { 0 };
+
+	alp_update_log_entry_t e = { 0 };
+	zassert_equal(ulog_alif_se_build_entry(id, id, 1, 0 /* verify bit clear */, hash, true, &e),
+	              ALP_OK);
+	zassert_equal(e.status, ALP_UPDATE_STATUS_VERIFY_FAILED);
+}
+
+ZTEST(alp_update_log, test_alif_se_build_entry_rejects_image_id_mismatch)
+{
+	uint8_t got[8]    = "APP\0\0\0\0";
+	uint8_t expect[8] = "OTHER\0\0";
+	uint8_t hash[32]  = { 0 };
+
+	alp_update_log_entry_t e;
+	/* Never report metadata for a different image on the same TOC. */
+	zassert_equal(ulog_alif_se_build_entry(got, expect, 1, 0xFFFFFFFFu, hash, true, &e),
+	              ALP_ERR_NOSUPPORT);
+}
+
+ZTEST(alp_update_log, test_alif_se_build_entry_rejects_invalid_hash)
+{
+	uint8_t id[8]    = "APP\0\0\0\0";
+	uint8_t hash[32] = { 0 };
+
+	alp_update_log_entry_t e;
+	/* A TOC entry we couldn't safely hash (e.g. implausible image_size)
+	 * must never append a zero-filled fabricated digest. */
+	zassert_equal(ulog_alif_se_build_entry(id, id, 1, 0xFFFFFFFFu, hash, false, &e),
+	              ALP_ERR_NOSUPPORT);
 }
 
 /* --- Persistence (#262): sw-tier store modes ------------------------
