@@ -7,8 +7,11 @@ from __future__ import annotations
 import gzip
 import hashlib
 import re
+import shutil
 import subprocess
+import sys
 import zlib
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -90,7 +93,7 @@ def test_run_argv_and_check():
     t, fake = target([("true", "ok\n"), ("false", (1, ""))])
     assert t.run("true").stdout == "ok\n"
     argv = fake.argvs[0]
-    assert argv[0] == "ssh" and "BatchMode=yes" in argv and "StrictHostKeyChecking=accept-new" in argv
+    assert argv[0] == "ssh" and "BatchMode=yes" in argv
     assert argv[-2:] == ["root@unit", "true"]
     with pytest.raises(BenchError, match="rc=1"):
         t.run("false")
@@ -301,6 +304,39 @@ def test_eeprom_write_pages_never_crosses_a_chunk_boundary():
     assert sizes == ["10", "14"]          # 8 + 12 bytes, split at 0x10
     with pytest.raises(ValueError):
         lt.eeprom_write_pages(t, 0, 0, data, page=24)
+
+
+@pytest.mark.skipif(sys.platform.startswith("win") or shutil.which("bash") is None,
+                    reason="needs a POSIX shell (Windows bash is WSL/Git-Bash with different fd semantics)")
+def test_eeprom_ack_poll_exits_zero_after_retries():
+    """The poll loop used to end with a false `[ n -ge N ] && exit 3` as its last
+    command, so a write needing >=1 poll retry returned rc=1. Run the generated
+    shell against a fake i2ctransfer that NACKs the first two polls."""
+    data = b"Z" * 16
+    fake_i2c = ('c=0; i2ctransfer() { case "$3" in w2@*) c=$((c+1)); [ $c -gt 2 ] || return 1;; esac; '
+                'return 0; }; ')
+
+    def sh(cmd):
+        p = subprocess.run(["bash", "-c", fake_i2c + cmd], capture_output=True, text=True, check=False)
+        return p.returncode, p.stdout, p.stderr
+
+    t, fake = target([(r"until", sh), (r"r16", _hx(data))])
+    lt.eeprom_write_pages(t, 0, 0, data)              # rc 0 despite two NACKed polls
+    cmd = next(c for c in fake.commands if "until" in c)
+    assert "; if [ $n -ge" in cmd and "; fi; done" in cmd and "&& exit 3" not in cmd
+
+
+def test_target_ssh_pins_the_unit_host_key(tmp_path):
+    kh = tmp_path / "SN1.known_hosts"
+    fake = FakeSSH([(r"true", "")])
+    t = lt.LinuxTarget("unit", runner=fake, host_alias="E1M-V2N101-SN1-sd", known_hosts=kh)
+    t.run("true")
+    t.put(Path("a"), "/tmp/a")
+    for argv in fake.argvs:
+        for o in ("HostKeyAlias=E1M-V2N101-SN1-sd", f"UserKnownHostsFile={kh.as_posix()}",
+                  "StrictHostKeyChecking=accept-new", "LogLevel=ERROR"):
+            assert o in argv
+        assert "UserKnownHostsFile=/dev/null" not in argv and "StrictHostKeyChecking=no" not in argv
 
 
 def test_eeprom_write_pages_readback_mismatch():
@@ -687,6 +723,8 @@ def _census_responses(array: bytes = b"\xff" * 128):
         (r"devmem 0x10430308", "0x00000002\n"),
         (r"cpuinfo_max_freq", "1800000\n"), (r"meminfo", "MemTotal:        3200000 kB\nMemFree: 1 kB\n"),
         (r"uname -r", "6.1.107-cip28\n"),
+        (r"device-tree/compatible", "alp,e1m-v2m101-x-evk renesas,r9a09g056\n"),
+        (r"device-tree/model", "ALP E1M-V2M101 on E1M-X-EVK\n"),
         (r"device/type", "mmcblk0 SD\nmmcblk1 MMC\nmmcblk1boot1 MMC\n"),
         (r"mmcblk1/device/cid", CID + "\n"), (r"mmcblk1/size", "30535680\n"),
         (r"extcsd read", EXTCSD.format(a=2, b=8)),
@@ -718,6 +756,8 @@ def test_census_collects_ledger_keys_read_only():
     assert facts["secure_page_sha256"] == hashlib.sha256(b"\xff" * 64).hexdigest()
     assert "manifest_sha256" not in facts                      # blank array
     assert facts["soc_sys_lsi_mode"].startswith("0x3c06 (unverified")
+    assert facts["dtb_name"] == ("ALP E1M-V2M101 on E1M-X-EVK "
+                                 "(compatible alp,e1m-v2m101-x-evk renesas,r9a09g056)")
     assert facts["cpu_khz"] == "1800000" and facts["linux_memtotal_kb"] == "3200000"
     assert facts["emmc_cid_pnm"] == "EMMC01" and facts["emmc_cid_psn"] == "0x12345678"
     assert facts["emmc_cid_mid"] == "0xd6" and facts["emmc_cid_mdt"] == "0x9a"
@@ -775,3 +815,15 @@ def test_gd32_bridge_version_frames_and_checks_crc():
     t, _ = target([("i2ctransfer -f", "0x00 0x00 0x0d 0x00 0x9c 0xf3\n")])
     with pytest.raises(BenchError, match="CRC mismatch"):
         lt.gd32_bridge_version(t, 8)
+
+
+def test_ctx_aliases_differ_per_boot_source(tmp_path):
+    from provision import steps
+    ctx = steps.Ctx(sku="E1M-V2N101", serial="SN1", bundle_dir=tmp_path, bundle={}, preset={},
+                    ledger_root=tmp_path, bench=SimpleNamespace(linux_user="root"))
+    sd = ctx.new_linux("10.0.0.2")
+    ctx.boot_src = "emmc"
+    emmc = ctx.new_linux("10.0.0.2")
+    assert "HostKeyAlias=E1M-V2N101-SN1-sd" in sd._opts
+    assert "HostKeyAlias=E1M-V2N101-SN1-emmc" in emmc._opts
+    assert f"UserKnownHostsFile={(tmp_path / 'E1M-V2N101' / 'SN1.known_hosts').as_posix()}" in sd._opts

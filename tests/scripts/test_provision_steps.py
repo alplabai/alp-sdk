@@ -1069,3 +1069,27 @@ def test_record_omits_bundle_facts_when_flashing_did_not_succeed(tmp_path):
 def test_record_writes_bundle_facts_after_successful_flashing(tmp_path):
     text = _record_with_bundle_facts(tmp_path, "done")
     assert "bl2_sha256" in text and "rootfs_bundle_version: som-9.9.9" in text, text
+
+
+def test_record_merges_evidence_of_steps_done_in_earlier_runs(tmp_path):
+    """--only/--from runs: a step finished earlier left its facts as state-file
+    evidence; Record folds them in, and this run's facts win on a clash."""
+    ctx = _ctx(tmp_path, execute=True)
+    ctx.state["steps"] = {
+        "gd32_flash": {"status": "done", "evidence": {"gd32_dp_id": "earlier", "act88760_gpio4_otp": "0x08"}},
+        "eeprom": {"status": "failed", "evidence": {"act88760_gpio4_workaround": "from-failed"}},
+    }
+    ctx.facts["act88760_gpio4_otp"] = "0x88"
+    steps.run_steps(ctx, only=["record"])
+    text = (ctx.unit_dir / f"{SERIAL}.unit.yaml").read_text(encoding="utf-8")
+    assert "gd32_dp_id: earlier" in text
+    assert "act88760_gpio4_otp: 0x88" in text and "0x08" not in text
+    assert "from-failed" not in text
+
+
+def test_gd32_fw_version_reads_the_version_file(tmp_path):
+    fw = _gd32_fw(tmp_path)
+    ctx = _ctx(tmp_path, gd32_fw=fw)
+    assert steps.Gd32Flash._fw_version(ctx) == {}
+    (fw / "VERSION").write_text("0.2.9\n", encoding="utf-8")
+    assert steps.Gd32Flash._fw_version(ctx) == {"gd32_fw_version": "0.2.9"}

@@ -400,6 +400,9 @@ def _v2n_parser() -> argparse.ArgumentParser:
                            "recovery path (v2n-m1 only); needs bench.yaml dxm1.* -- has never "
                            "run on silicon and cannot succeed on the first V2M bench unit yet "
                            "-- default skip until bench-verified")
+    work.add_argument("--hw-rev", metavar="rN",
+                      help="this unit's hardware revision key (e.g. r2) when it differs from "
+                           "the bundle/preset default; a batch can mix revisions")
     work.add_argument("--mfg-date", type=date.fromisoformat,
                       help="default: Monday of the serial's ISO week (a different date is "
                            "recorded as an override)")
@@ -507,6 +510,20 @@ def _status(a) -> int:
     return 0
 
 
+def _check_hw_rev(family: str, key: str) -> None:
+    """--hw-rev must be a `production` key of the family's hw-revisions.yaml (exact case)."""
+    import yaml
+    path = REPO / "metadata" / "e1m_modules" / family / "hw-revisions.yaml"
+    if not path.is_file():
+        raise ValueError(f"no {path.relative_to(REPO).as_posix()} to validate --hw-rev against")
+    revs = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("hw_revisions") or {}
+    status = (revs.get(key) or {}).get("status")
+    if status != "production":
+        ok = ", ".join(k for k, v in revs.items() if (v or {}).get("status") == "production")
+        raise ValueError(f"--hw-rev {key!r} is {'not a known key' if key not in revs else 'status ' + repr(status)} "
+                         f"for family {family}; production keys: {ok}")
+
+
 def v2n_main(argv: list[str]) -> int:
     import yaml
     from provision import bench as bench_mod
@@ -535,6 +552,9 @@ def v2n_main(argv: list[str]) -> int:
             bundle.update(sku=a.sku, family=steps.expected_family(preset),
                           hw_rev=preset.get("default_hw_rev", "r1"))
             bundle_sha = hashlib.sha256(json.dumps(bundle, sort_keys=True).encode()).hexdigest()
+        if a.hw_rev:
+            _check_hw_rev(steps.expected_family(preset), a.hw_rev)
+            bundle = {**bundle, "hw_rev": a.hw_rev}
         markers = json.loads(a.tier_markers.read_text(encoding="utf-8")) if a.tier_markers else None
         regs = yaml.safe_load(a.pmic_expect.read_text(encoding="utf-8")) if a.pmic_expect else None
         if a.cmd == "run" and not a.bench:
@@ -607,7 +627,15 @@ def v2n_main(argv: list[str]) -> int:
     return 1 if any(r.status == "failed" for r in results) else 0
 
 
+def _robust_output() -> None:
+    """Serial text can carry U+FFFD; a cp1252 Windows console must not crash printing it."""
+    for stream in (sys.stdout, sys.stderr):
+        if reconf := getattr(stream, "reconfigure", None):
+            reconf(errors="replace")
+
+
 def _dispatch() -> int:
+    _robust_output()
     if len(sys.argv) > 1 and sys.argv[1] in V2N_SUBCOMMANDS:
         return v2n_main(sys.argv[1:])
     return main()

@@ -92,13 +92,21 @@ class CmdResult:
 
 class LinuxTarget:
     def __init__(self, host: str, user: str = "root", runner=subprocess.run,
-                 ssh: str = "ssh", scp: str = "scp") -> None:
+                 ssh: str = "ssh", scp: str = "scp", host_alias: str | None = None,
+                 known_hosts: Path | None = None) -> None:
         self.host = host
         self.user = user
         self.runner = runner
         self.ssh = ssh
         self.scp = scp
-        self._opts = ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new"]
+        # Per-unit host-key pin: the first contact records the unit's key under a
+        # per-boot-source alias (SD and eMMC images carry different keys); a different
+        # unit behind the same IP then presents another key and is refused.
+        self._opts = ["-o", "BatchMode=yes", "-o", "LogLevel=ERROR"]
+        if host_alias and known_hosts:
+            self._opts += ["-o", f"HostKeyAlias={host_alias}",
+                           "-o", f"UserKnownHostsFile={Path(known_hosts).as_posix()}",
+                           "-o", "StrictHostKeyChecking=accept-new"]
 
     def _exec(self, argv: list[str], timeout: float, stdin_path: Path | None = None) -> CmdResult:
         try:
@@ -409,7 +417,7 @@ def eeprom_write_pages(t: LinuxTarget, bus: int, offset: int, data: bytes,
         # ponytail: poll bound counts attempts (each i2ctransfer spawn >= ~1 ms), not wall time
         t.run(f"i2ctransfer -y {bus} w{take + 2}@{EEPROM_ADDR:#04x} {payload} || exit 2; "
               f"n=0; until i2ctransfer -y {bus} w2@{EEPROM_ADDR:#04x} {hi:#04x} {lo:#04x} "
-              f">/dev/null 2>&1; do n=$((n+1)); [ $n -ge {poll_ms} ] && exit 3; done")
+              f">/dev/null 2>&1; do n=$((n+1)); if [ $n -ge {poll_ms} ]; then exit 3; fi; done")
         pos += take
     got = eeprom_read(t, bus, offset, len(data))
     if got != data:
@@ -803,6 +811,10 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
             raise BenchError("MemTotal not in /proc/meminfo")
         facts["linux_memtotal_kb"] = m[1]
         facts["kernel_version"] = t.run("uname -r").stdout.strip()
+        compat = t.run(r"tr '\0' ' ' < /proc/device-tree/compatible", check=False).stdout.strip()
+        model = t.run(r"tr -d '\0' < /proc/device-tree/model", check=False).stdout.strip()
+        if compat:
+            facts["dtb_name"] = f"{model} (compatible {compat})" if model else compat
 
     def storage():
         dev = emmc or resolve_emmc(t)

@@ -125,6 +125,7 @@ class Ctx:
     ledger_xlsx: Path | None = None
     boot_text: str = ""                   # last console capture after a power cycle
     boot_class: str = ""
+    boot_src: str = "sd"                  # "sd" | "emmc": host-key alias (the images carry different keys)
     step_logs: dict[str, str] = field(default_factory=dict)
     _cache: dict = field(default_factory=dict)
 
@@ -146,6 +147,13 @@ class Ctx:
     @property
     def unit_dir(self) -> Path:
         return self.ledger_root / self.sku
+
+    def new_linux(self, host: str):
+        """LinuxTarget pinned to this unit's host key for the current boot source."""
+        self.unit_dir.mkdir(parents=True, exist_ok=True)
+        return lt.LinuxTarget(host, self.bench.linux_user,
+                              host_alias=f"{self.sku}-{self.serial}-{self.boot_src}",
+                              known_hosts=self.unit_dir / f"{self.serial}.known_hosts")
 
     @property
     def family(self) -> str:
@@ -176,7 +184,7 @@ class Ctx:
         --from / --force-step run starts past the step that normally
         attaches it, instead of refusing a board that is already up."""
         if self.linux is None and self.bench is not None and self.bench.linux_host:
-            self.linux = lt.LinuxTarget(self.bench.linux_host, self.bench.linux_user)
+            self.linux = self.new_linux(self.bench.linux_host)
         if self.linux is None and self.execute:
             raise Refused("no Linux target: boot_sd_linux has not run")
         return self.linux
@@ -186,7 +194,7 @@ class Ctx:
         # ctx.linux; attach a configured host here so a probe does not report
         # Unknown and trigger a needless cold cycle on a board already up.
         if self.linux is None and self.bench is not None and self.bench.linux_host:
-            self.linux = lt.LinuxTarget(self.bench.linux_host, self.bench.linux_user)
+            self.linux = self.new_linux(self.bench.linux_host)
         if self.linux is None:
             return False
         try:
@@ -276,9 +284,11 @@ def connect_linux(ctx: Ctx, force: bool = False) -> None:
         return
     b = ctx.need_bench()
     host = b.linux_host or lt.discover_host(b.console)
-    if ctx.linux is not None and getattr(ctx.linux, "host", None) == host:
+    if (ctx.linux is not None and getattr(ctx.linux, "host", None) == host
+            and (getattr(ctx.linux, "_opts", None) is None     # duck-typed fake
+                 or f"HostKeyAlias={ctx.sku}-{ctx.serial}-{ctx.boot_src}" in ctx.linux._opts)):
         return
-    ctx.linux = lt.LinuxTarget(host, b.linux_user)
+    ctx.linux = ctx.new_linux(host)
 
 
 def _manifest_sku(arr: bytes) -> str:
@@ -444,7 +454,7 @@ class Detect(Step):
             lt.console_login(c, ctx.bench.linux_user)
             connect_linux(ctx, force=True)
         elif ctx.linux is None and ctx.bench.linux_host:
-            ctx.linux = lt.LinuxTarget(ctx.bench.linux_host, ctx.bench.linux_user)
+            ctx.linux = ctx.new_linux(ctx.bench.linux_host)
         up = ctx.linux_up()
         note = ""
         if key == "silent" and ctx.state_done("bootstrap"):
@@ -577,6 +587,7 @@ class BootSdLinux(Step):
                 lt.console_login(b.console, b.linux_user)
                 connect_linux(ctx, force=True)
                 return text + _since(b.console, n)
+            ctx.boot_src = "emmc"
             text = ctx.mutate(f"U-Boot loadx + gzwrite {wic.name} into eMMC (slow fallback), boot", xm)
         else:
             text = ctx.mutate("cold cycle; U-Boot bootcmd_check boots the release wic from microSD; "
@@ -879,7 +890,14 @@ class Gd32Flash(Step):
         for p, _a, key in images:
             if ev[key] != _md5(p.read_bytes()):
                 return Unsatisfied(f"{p.name} not on the GD32")
-        return Satisfied(ev)
+        return Satisfied({**ev, **self._fw_version(ctx)})
+
+    @staticmethod
+    def _fw_version(ctx) -> dict[str, str]:
+        """`<gd32-fw>/VERSION` names the release the images came from; the md5
+        readback above is what ties that name to the bytes on the chip."""
+        v = Path(ctx.gd32_fw) / "VERSION"
+        return {"gd32_fw_version": v.read_text(encoding="utf-8").strip()} if v.is_file() else {}
 
     def run(self, ctx):
         ev: dict[str, str] = {}
@@ -920,6 +938,7 @@ class Gd32Flash(Step):
         line = ctx.mutate(f"GET_VERSION from the bridge at {GD32_BRIDGE_ADDR:#04x}", bridge)
         if line:
             ev["gd32_protocol"] = line
+        ev.update(self._fw_version(ctx))
         return self.result(ctx, "GD32 flashed and verified" if ctx.execute else "would flash the GD32", ev)
 
 
@@ -1104,6 +1123,7 @@ class ColdBootTest(Step):
             # 0 boots must never satisfy the precondition of the irreversible lock.
             raise Refused(f"cold_cycles must be >= 1 (got {n}): a run with no cold boots proves nothing")
         ev: dict[str, str] = {}
+        ctx.boot_src = "emmc"
         if not ctx.execute:
             ctx.mutate(f"{n} cold cycles: clean BL2, DRAM tier, "
                        f"{'rail PG, ' if ctx.family == 'v2n-m1' else ''}login, SYS_LSI_MODE, i2c scans",
@@ -1234,7 +1254,15 @@ class Record(Step):
         cat_path = ctx.ledger_root / "schema" / "v2n.keys.yaml"
         catalogue = ledger_out.load_catalogue(cat_path)
         unit_yaml = ctx.unit_dir / f"{ctx.serial}.unit.yaml"
-        auto = {k: v for k, v in ctx.facts.items()
+        # Steps finished in EARLIER invocations (--only/--from runs) left their facts
+        # as evidence in the state file; this run's facts override them.
+        facts: dict = {}
+        for n in STEP_NAMES:
+            st = ctx.state.get("steps", {}).get(n, {})
+            if st.get("status") in ("done", "skipped"):
+                facts.update(st.get("evidence") or {})
+        facts.update(ctx.facts)
+        auto = {k: v for k, v in facts.items()
                 if (catalogue.get(k, {}).get("mode") == "auto" or k.startswith("test_")) and v != ""}
         # Bundle facts describe what the bundle CONTAINS; they are ledger facts
         # about the unit only once every flash step succeeded (done, or skipped
