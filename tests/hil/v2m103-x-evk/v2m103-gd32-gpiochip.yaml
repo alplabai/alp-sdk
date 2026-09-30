@@ -2,7 +2,8 @@
 #
 # E1M-V2M103 GD32 bridge GPIO expander as seen by the Linux gpiolib: a
 # gpiochip labelled gd32-bridge-gpio exists and exposes >= 20 lines (22 once
-# #2520 lands; the floor is tolerant of both).  Read-only sysfs.
+# #2520 lands; the floor is tolerant of both).  Read-only gpiolib sysfs class
+# (/sys/class/gpio, needs CONFIG_GPIO_SYSFS).
 
 schema_version: 1
 name: v2m103-gd32-gpiochip
@@ -11,7 +12,7 @@ description: |
 
 flash_method: ssh-run
 ssh_command: |-
-  for c in /sys/bus/gpio/devices/gpiochip*; do
+  for c in /sys/class/gpio/gpiochip*; do
     [ "$(cat $c/label 2>/dev/null)" = gd32-bridge-gpio ] || continue
     n=$(cat $c/ngpio)
     echo "HIL_GD32_GPIOCHIP ${c##*/} lines=$n"

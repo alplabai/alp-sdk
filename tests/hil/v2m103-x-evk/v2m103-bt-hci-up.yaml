@@ -12,7 +12,11 @@ flash_method: ssh-run
 ssh_command: |-
   [ -e /sys/class/bluetooth/hci0 ] && echo HIL_BT_HCI_OK
   if command -v hciconfig >/dev/null; then
-    hciconfig hci0 | grep -q 'UP RUNNING' && echo HIL_BT_UP_OK || echo HIL_BT_DOWN
+    # bluetoothd may power the adapter a moment after boot: retry up to ~5 s.
+    for t in 1 2 3 4 5; do
+      hciconfig hci0 | grep -q 'UP RUNNING' && { echo HIL_BT_UP_OK; break; }
+      [ $t = 5 ] && echo HIL_BT_DOWN || sleep 1
+    done
   fi
 
 serial:

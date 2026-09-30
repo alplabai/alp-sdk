@@ -2,22 +2,20 @@
 #
 # E1M-V2M103 RV3028 RTC (0x52) registered as a Linux rtc device and
 # ticking: since_epoch advances across a 2 s sleep.  Read-only; the RTC is not
-# set.  The rtc name must mention rv3028.
+# set.  The DT alias pins rv3028 to rtc0.
 
 schema_version: 1
 name: v2m103-rtc-ticks
 description: |
-  An rv3028 rtc device exists and its clock advances.
+  rtc0 (rv3028) exists and its clock advances.
 
 flash_method: ssh-run
 ssh_command: |-
-  for r in /sys/class/rtc/rtc*; do
-    grep -qi rv3028 $r/name 2>/dev/null || continue
-    a=$(cat $r/since_epoch); sleep 2; b=$(cat $r/since_epoch)
-    echo "HIL_RTC ${r##*/} $a -> $b"
-    [ "$b" -gt "$a" ] && echo HIL_RTC_TICKS_OK
-    break
-  done
+  r=/sys/class/rtc/rtc0
+  a=$(cat $r/since_epoch 2>/dev/null) || { echo "HIL_RTC_UNSET rtc0 unreadable (clock unset?)"; exit 0; }
+  sleep 2; b=$(cat $r/since_epoch)
+  echo "HIL_RTC $(cat $r/name) $a -> $b"
+  [ "$b" -gt "$a" ] && echo HIL_RTC_TICKS_OK
 
 serial:
   duration_s: 10

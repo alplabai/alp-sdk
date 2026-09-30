@@ -2,24 +2,24 @@
 #
 # E1M-V2M103 DEEPX DX-M1 PCIe enumeration (0000:01:00.0, the address
 # recorded in v2m103-dx-m1-present): the device is on the bus and bound to a
-# driver.  Skip-if-absent for images without the PCIe stack.  Read-only sysfs;
+# driver.  The DX-M1 is on-module on every V2M103, so a missing device (link down) fails.  Read-only sysfs;
 # no vendor-ID literal is asserted.
 
 schema_version: 1
 name: v2m103-dx-m1-pcie
 description: |
-  0000:01:00.0 enumerated with a bound driver, or skipped.
+  0000:01:00.0 enumerated with a bound driver.
 
 flash_method: ssh-run
 ssh_command: |-
   d=/sys/bus/pci/devices/0000:01:00.0
-  if [ ! -e $d ]; then echo "HIL_DXPCIE_SKIP no device at 0000:01:00.0"
+  if [ ! -e $d ]; then echo "HIL_DXPCIE_BAD no device at 0000:01:00.0"
   elif [ -e $d/driver ]; then echo "HIL_DXPCIE_OK driver=$(basename $(readlink $d/driver))"
   else echo HIL_DXPCIE_BAD unbound; fi
 
 serial:
   duration_s: 10
   expect_contains:
-    - "HIL_DXPCIE_"
+    - "HIL_DXPCIE_OK"
   expect_absent:
     - "HIL_DXPCIE_BAD"
