@@ -31,22 +31,50 @@
  * from this tree, see the changelog fragment's "Not run here" paragraph.
  * `read_jedec_id`, `sfdp_read` and 4-byte-address `read` all use the DW-SSI
  * EEPROM-read transfer mode in 1-1-1 (standard single-lane) SPI, the frame
- * format the part answers in coming out of reset. `write`/`erase` are
- * DELIBERATE fail-closed stubs, not gaps left by oversight: bench attempts
- * (issue #915 thread) show WREN (06h) never sets WEL in 1-1-1 SPI on this
- * part -- RDSR read 0x00 before and after WREN, from both TX-only and
- * EEPROM-read mode, and a follow-up ERASE (12h/21h) + PROGRAM sequence on a
- * verified-blank sector left it unchanged (597/600 bytes still 0xFF, the
- * other 3 pattern bytes happen to be 0xFF too). The Alif DFP's own IS25WX256
- * driver (components/Source/IS25WX256.c) never programs in 1-1-1 either --
- * it first switches the part to Octal DDR (81h write volatile config,
- * IO mode 0xE7) and only then uses 84h program / 21h erase / 70h flag-status
+ * format the part answers in coming out of reset.
+ *
+ * `write`/`erase` (#915, this pass): bench attempts (issue #915 thread) show
+ * WREN (06h) never sets WEL in 1-1-1 SPI on this part -- RDSR read 0x00
+ * before and after WREN, from both TX-only and EEPROM-read mode, and a
+ * follow-up ERASE (12h/21h) + PROGRAM sequence on a verified-blank sector
+ * left it unchanged. The Alif DFP's own IS25WX256 driver
+ * (components/Source/IS25WX256.c) never programs in 1-1-1 either -- it
+ * first switches the part to Octal DDR (81h write volatile config, IO mode
+ * 0xE7) and only then uses 84h program / 21h erase / 70h flag-status
  * polling; its own comment says the status register only reads correctly
- * after that switch. Implementing program/erase means driving that octal-DDR
- * mode switch and the enhanced (octal) SPI frame format through hal_alif --
- * a distinct, silicon-gated follow-up, not something this pass can fake by
- * guessing at an untested command sequence. See `ospi_alif_write()` /
- * `ospi_alif_erase()` below for the exact citation.
+ * after that switch. This pass follows that same sequence: `write()` and
+ * `erase()` lazily switch the part (and this driver's own framing) to Octal
+ * DDR on first use (`ospi_alif_ensure_octal_ddr()`), then use the DW-SSI
+ * "FRF-defined" enhanced-SPI mode (SPI_CTRLR0.SPI_FRF = Octal,
+ * OSPI_SPI_CTRLR0's INST_L/ADDR_L/WAIT_CYCLES/DDR_EN fields) to drive 84h
+ * page-program (256 B pages) and 21h sector-erase (4 KiB, matching the
+ * SFDP-measured erase type 1 / IS25WX256.h's FLASH_ISSI_SECTOR_SIZE),
+ * polling 70h flag status to completion after each, with the same
+ * fail-closed recovery (`ospi_alif_recover_transfer()`) as the existing read
+ * path on any timeout. Octal DDR frames are 16 bits wide (2 bytes/frame),
+ * matching the vendor driver's own uint16_t-typed data pointers in that
+ * mode -- `write()`/`erase()`/the switched `read()` path all require even
+ * lengths and reject odd ones with -EINVAL rather than silently padding.
+ *
+ * READ AFTER THE SWITCH: once Octal DDR is active the part no longer
+ * answers 1-1-1 SPI at all (that is the whole point of the switch), so
+ * `read()` checks `data->octal_ddr_active` and follows the part into Octal
+ * DDR (opcode 7Ch, the vendor driver's CMD_READ_DATA) rather than switching
+ * back to 1-1-1 per call -- switching back would need its own 81h write
+ * every time and a failure mid-switch would leave read() unable to tell
+ * which framing the part is actually in. `read_jedec_id()`/`sfdp_read()`
+ * are UNCHANGED and stay 1-1-1-only: they are diagnostic reads this driver
+ * never calls itself, and nothing here calls them after a write/erase.
+ *
+ * BENCH-VERIFIED (#915) on E1M-AEN803 serial 2026W36-0001: erase, program,
+ * byte-for-byte readback and restore of one 4 KiB sector through
+ * aen-ospi-regcheck's self-test. It is authored against the DFP's
+ * documented IS25WX256 sequence and hal_alif's own SPI_CTRLR0 field
+ * encoding (modules/hal/alif drivers/ospi/include/ospi.h,
+ * drivers/ospi/include/ospi_hal.h) with no offset/bitfield open-coded
+ * outside those two headers' own names -- same discipline as the existing
+ * read path. See `ospi_alif_write()` / `ospi_alif_erase()` /
+ * `ospi_alif_octal_switch_locked()` below.
  *
  * core_clk: PREVIOUSLY a placeholder that fell back to the node's `bus-speed`
  * (100 MHz) when `clock-frequency` was unset. This value feeds
@@ -406,6 +434,13 @@ struct ospi_alif_data {
 	 * the cmd-then-read helper below owns the register file for the
 	 * duration of one transfer and must not race a second caller. */
 	struct k_mutex lock;
+	/* Set once ospi_alif_ensure_octal_ddr() has switched the part (and
+	 * this driver's own framing) to Octal DDR on the first write()/
+	 * erase() call. See the file-header "READ AFTER THE SWITCH" note --
+	 * read() branches on this to follow the part into Octal DDR instead
+	 * of continuing to speak 1-1-1 SPI to a part that no longer answers
+	 * it. Never cleared: this driver has no reason to switch back. */
+	bool octal_ddr_active;
 };
 
 /* This driver polls hal_alif's IRQ pump because the current OSPI node does
@@ -541,33 +576,435 @@ static int ospi_alif_init(const struct device *dev)
 	return 0;
 }
 
-/* #915: program and erase remain deliberately unsupported -- see the
- * file-header flash_driver_api note for the bench evidence (WREN never sets
- * WEL in 1-1-1 SPI on the fitted IS25WX256; the vendor's own driver only
- * programs/erases after switching the part to Octal DDR). Supplying explicit
- * stubs keeps the registered flash device fail-closed; leaving these
- * mandatory callbacks NULL would fault the caller instead. (read is
- * implemented below, over the command-read helper.) */
+/* #915: program/erase, over the Octal DDR mode switch -- see the
+ * file-header flash_driver_api note. Opcodes and register field values below
+ * are the DFP's IS25WX256 sequence (components/Source/IS25WX256.c) expressed
+ * through hal_alif's own SPI_CTRLR0 field names (ospi.h / ospi_hal.h). */
+
+/* Opcodes used only once the part has left 1-1-1 SPI for Octal DDR. */
+#define OSPI_ALIF_CMD_WREN             0x06U
+#define OSPI_ALIF_CMD_WRITE_VOL_CFG    0x81U
+#define OSPI_ALIF_CMD_PAGE_PROGRAM     0x84U
+#define OSPI_ALIF_CMD_SECTOR_ERASE     0x21U
+#define OSPI_ALIF_CMD_READ_FLAG_STATUS 0x70U
+#define OSPI_ALIF_CMD_OCTAL_READ       0x7CU /* vendor CMD_READ_DATA, Octal DDR fast-read */
+
+/* IS25WX256 volatile-config addresses (IS25WX256.c IO_MODE_ADDRESS /
+ * WAIT_CYCLE_ADDRESS) and the Octal DDR IO-mode value (OCTAL_DDR). */
+#define OSPI_ALIF_VOLCFG_ADDR_IO_MODE  0x00000000U
+#define OSPI_ALIF_VOLCFG_ADDR_WAIT_CYC 0x00000001U
+#define OSPI_ALIF_OCTAL_DDR_IO_MODE    0xE7U
+
+/* Octal DDR array-read dummy cycles, programmed into the part's volatile
+ * wait-cycle config at the switch and used for every 7Ch read afterwards --
+ * the DFP's RTE_ISSI_FLASH_WAIT_CYCLES for this SoC (16). Deliberately NOT
+ * the DT `xip-wait-cycles`: that property is the controller's XiP knob
+ * (255 in ensemble_e8_peripherals.dtsi), which overflowed the 5-bit
+ * SPI_CTRLR0.WAIT_CYCLES field and wrote 0xFF wait cycles into the part, so
+ * every array read came back 0xFF and a successful program looked like a
+ * no-op (bench, #915). */
+#define OSPI_ALIF_OCTAL_READ_WAIT_CYCLES 16U
+
+/* Flag-status register (70h) bits (IS25WX256.c FLAG_STATUS_BUSY/_ERROR).
+ * Counter-intuitively, bit 7 set means the program/erase controller is
+ * READY, not busy -- kept exactly as the vendor driver tests it
+ * (`(val & FLAG_STATUS_BUSY) != 0` clears its own `busy` flag). */
+#define OSPI_ALIF_FLAG_STATUS_READY 0x80U
+#define OSPI_ALIF_FLAG_STATUS_ERROR 0x30U
+
+#define OSPI_ALIF_PAGE_SIZE   256U
+#define OSPI_ALIF_SECTOR_SIZE 4096U /* SFDP erase type 1, opcode 21h (4-byte) */
+
+/* Same rationale as OSPI_ALIF_XFER_POLL_ITERATIONS above: bound every poll
+ * so a wedged part reports an error instead of hanging the caller. Flag
+ * status is itself a bus transaction (opcode + dummy cycles + read), so this
+ * bounds "poll attempts", not raw cycles. */
+#define OSPI_ALIF_READY_POLL_ATTEMPTS      100000
+#define OSPI_ALIF_OCTAL_STATUS_WAIT_CYCLES 8U /* IS25WX256.c ReadStatusReg() */
+
+/*
+ * Low-level Octal DDR ("FRF-defined" enhanced SPI) command helper. Pushes
+ * the opcode and, if `has_addr`, the 32-bit address as their own DR0 entries
+ * -- the DW-SSI enhanced-SPI FIFO protocol takes instruction and address as
+ * one push each regardless of the data frame size, only `data`/`out`
+ * afterward are chunked at the programmed data-frame size (16 bits here, 2
+ * bytes/frame, matching the vendor driver's uint16_t-typed buffers in this
+ * mode) -- then either sends `data_len` bytes (write direction) or receives
+ * `out_len` bytes (read direction); never both in one call. Mirrors
+ * `ospi_alif_cmd_read_locked()`'s polling/recovery shape but for the octal
+ * frame format instead of standard 1-1-1.
+ */
+static int ospi_alif_octal_xfer_locked(const struct device *dev,
+                                       uint8_t              opcode,
+                                       bool                 has_addr,
+                                       uint32_t             addr,
+                                       uint32_t             wait_cycles,
+                                       const uint8_t       *data,
+                                       size_t               data_len,
+                                       uint8_t             *out,
+                                       size_t               out_len)
+{
+	const struct ospi_alif_config *config = dev->config;
+	struct ospi_regs              *regs   = (struct ospi_regs *)config->base_regs;
+	uint32_t                       ctrlr0;
+	size_t                         frames;
+	size_t                         got = 0U;
+	int                            spin;
+	int                            rc = 0;
+
+	if (data_len != 0U && out_len != 0U) {
+		return -EINVAL; /* one direction per call */
+	}
+	if ((data_len % 2U) != 0U || (out_len % 2U) != 0U) {
+		return -EINVAL; /* Octal DDR frames are 2 bytes; caller pads */
+	}
+	if (ospi_busy(regs)) {
+		ospi_alif_recover_transfer(dev);
+		if (ospi_busy(regs)) {
+			return -EBUSY;
+		}
+	}
+
+	frames = (out_len != 0U) ? (out_len / 2U) : (data_len / 2U);
+
+	ospi_disable(regs);
+	ctrlr0 = regs->OSPI_CTRLR0;
+	ctrlr0 &= ~(SPI_CTRLR0_DFS_MASK | SPI_CTRLR0_FRF_MASK | SPI_CTRLR0_TMOD_MASK |
+	            SPI_CTRLR0_SPI_FRF_MASK | SPI_CTRLR0_SPI_HYPERBUS_EN_SSTE_MASK);
+	ctrlr0 |= SPI_CTRLR0_DFS_16bit | SPI_CTRLR0_FRF_MOTOROLA | SPI_CTRLR0_SPI_FRF_OCTAL |
+	          ((out_len != 0U) ? SPI_CTRLR0_TMOD_EEPROM_READ_ONLY : SPI_CTRLR0_TMOD_SEND_ONLY);
+	regs->OSPI_CTRLR0     = ctrlr0;
+	regs->OSPI_CTRLR1     = (out_len != 0U) ? (uint32_t)(frames - 1U) : 0U;
+	regs->OSPI_SPI_CTRLR0 = SPI_TRANS_TYPE_FRF_DEFINED |
+	                        (SPI_CTRLR0_SPI_RXDS_ENABLE << SPI_CTRLR0_SPI_RXDS_EN_OFFSET) |
+	                        (OSPI_DDR_ENABLE << SPI_CTRLR0_SPI_DDR_EN_OFFSET) |
+	                        (OSPI_INST_LENGTH_8_BITS << SPI_CTRLR0_INST_L_OFFSET) |
+	                        ((has_addr ? OSPI_ADDR_LENGTH_32_BITS : OSPI_ADDR_LENGTH_0_BITS)
+	                         << SPI_CTRLR0_ADDR_L_OFFSET) |
+	                        (wait_cycles << SPI_CTRLR0_WAIT_CYCLES_OFFSET);
+	regs->OSPI_IMR        = 0U;
+	regs->OSPI_SER        = 0U;
+	ospi_enable(regs);
+
+	regs->OSPI_DR0 = opcode;
+	if (has_addr) {
+		regs->OSPI_DR0 = addr;
+	}
+	if (out_len == 0U) {
+		const uint16_t *tx16 = (const uint16_t *)data;
+
+		for (size_t i = 0U; i < frames; i++) {
+			regs->OSPI_DR0 = tx16[i];
+		}
+	}
+	regs->OSPI_SER = BIT(config->cs_pin); /* starts the transfer */
+
+	if (out_len != 0U) {
+		uint16_t *rx16 = (uint16_t *)out;
+
+		for (spin = 0; got < frames && spin < OSPI_ALIF_XFER_POLL_ITERATIONS; spin++) {
+			while (got < frames && regs->OSPI_RXFLR != 0U) {
+				rx16[got++] = (uint16_t)regs->OSPI_DR0;
+				spin        = 0;
+			}
+		}
+		if (got < frames) {
+			LOG_ERR("octal ddr opcode 0x%02x read stalled at %u/%u frames",
+			        opcode,
+			        (unsigned int)got,
+			        (unsigned int)frames);
+			rc = -ETIMEDOUT;
+		}
+	} else {
+		for (spin = 0; ospi_busy(regs) && spin < OSPI_ALIF_XFER_POLL_ITERATIONS; spin++) {
+			/* drain until the controller reports idle */
+		}
+		if (ospi_busy(regs)) {
+			LOG_ERR("octal ddr opcode 0x%02x send stalled", opcode);
+			rc = -ETIMEDOUT;
+		}
+	}
+
+	ospi_alif_recover_transfer(dev);
+	return rc;
+}
+
+/* 1-1-1 standard-SPI TX-only send, used only by the Octal DDR switch itself
+ * (the part is still in 1-1-1 SPI at that point). Mirrors
+ * `ospi_alif_cmd_read_locked()`'s register program but TMOD_SEND_ONLY with
+ * no RX phase. */
+static int ospi_alif_std_send_locked(const struct device *dev, const uint8_t *cmd, size_t cmd_len)
+{
+	const struct ospi_alif_config *config = dev->config;
+	struct ospi_regs              *regs   = (struct ospi_regs *)config->base_regs;
+	uint32_t                       ctrlr0;
+	int                            spin;
+
+	if (cmd_len == 0U || cmd_len > OSPI_TX_FIFO_DEPTH) {
+		return -EINVAL;
+	}
+	if (ospi_busy(regs)) {
+		ospi_alif_recover_transfer(dev);
+		if (ospi_busy(regs)) {
+			return -EBUSY;
+		}
+	}
+
+	ospi_disable(regs);
+	ctrlr0 = regs->OSPI_CTRLR0;
+	ctrlr0 &= ~(SPI_CTRLR0_DFS_MASK | SPI_CTRLR0_FRF_MASK | SPI_CTRLR0_TMOD_MASK |
+	            SPI_CTRLR0_SPI_FRF_MASK | SPI_CTRLR0_SPI_HYPERBUS_EN_SSTE_MASK);
+	ctrlr0 |= SPI_CTRLR0_DFS_8bit | SPI_CTRLR0_FRF_MOTOROLA | SPI_CTRLR0_TMOD_SEND_ONLY |
+	          SPI_CTRLR0_SPI_FRF_STANDRAD;
+	regs->OSPI_CTRLR0 = ctrlr0;
+	regs->OSPI_CTRLR1 = 0U;
+	regs->OSPI_IMR    = 0U;
+	regs->OSPI_SER    = 0U;
+	ospi_enable(regs);
+
+	for (size_t i = 0U; i < cmd_len; i++) {
+		regs->OSPI_DR0 = cmd[i];
+	}
+	regs->OSPI_SER = BIT(config->cs_pin);
+
+	for (spin = 0; ospi_busy(regs) && spin < OSPI_ALIF_XFER_POLL_ITERATIONS; spin++) {
+		/* drain until the controller reports idle */
+	}
+	if (ospi_busy(regs)) {
+		LOG_ERR("std spi send stalled (opcode 0x%02x)", cmd[0]);
+		ospi_alif_recover_transfer(dev);
+		return -ETIMEDOUT;
+	}
+
+	ospi_alif_recover_transfer(dev);
+	return 0;
+}
+
+static int ospi_alif_write_enable_locked(const struct device *dev, bool octal)
+{
+	static const uint8_t wren = OSPI_ALIF_CMD_WREN;
+
+	if (octal) {
+		return ospi_alif_octal_xfer_locked(dev, OSPI_ALIF_CMD_WREN, false, 0, 0, NULL, 0, NULL, 0);
+	}
+	return ospi_alif_std_send_locked(dev, &wren, sizeof(wren));
+}
+
+/* Bounded poll of the Octal DDR flag-status register (70h) until the part
+ * reports ready or ERASE/PROGRAM error. See OSPI_ALIF_FLAG_STATUS_READY's
+ * comment for the (counter-intuitive, vendor-matched) polarity. */
+static int ospi_alif_poll_ready_locked(const struct device *dev)
+{
+	uint16_t frame  = 0;
+	uint8_t  status = 0;
+
+	for (int i = 0; i < OSPI_ALIF_READY_POLL_ATTEMPTS; i++) {
+		int rc = ospi_alif_octal_xfer_locked(dev,
+		                                     OSPI_ALIF_CMD_READ_FLAG_STATUS,
+		                                     false,
+		                                     0,
+		                                     OSPI_ALIF_OCTAL_STATUS_WAIT_CYCLES,
+		                                     NULL,
+		                                     0,
+		                                     (uint8_t *)&frame,
+		                                     sizeof(frame));
+
+		if (rc != 0) {
+			return rc;
+		}
+		status = (uint8_t)frame;
+		if ((status & OSPI_ALIF_FLAG_STATUS_READY) != 0U) {
+			return (status & OSPI_ALIF_FLAG_STATUS_ERROR) != 0U ? -EIO : 0;
+		}
+	}
+	LOG_ERR("flag status (70h) never reported ready (last=0x%02x)", status);
+	return -ETIMEDOUT;
+}
+
+/*
+ * Switches the part -- and this driver's own controller framing -- from
+ * 1-1-1 SPI to Octal DDR, mirroring the DFP's IS25WX256_PowerControl()
+ * sequence: WREN + write volatile config[IO_MODE_ADDRESS] = OCTAL_DDR while
+ * still in 1-1-1 SPI (the part's post-reset framing), then WREN + write
+ * volatile config[WAIT_CYCLE_ADDRESS] a second time, now in Octal DDR
+ * framing on both sides. Bench evidence (#915) is that RDSR always reads
+ * 0x00 in 1-1-1 on this part, so -- like the DFP's own driver -- this does
+ * NOT check WEL before either write; the first real correctness signal is
+ * the caller's subsequent `ospi_alif_poll_ready_locked()` succeeding in the
+ * new framing. Called with `data->lock` already held.
+ */
+static int ospi_alif_octal_switch_locked(const struct device *dev)
+{
+	uint8_t  io_mode_cmd[5];
+	uint16_t wait_cyc;
+	int      rc;
+
+	rc = ospi_alif_write_enable_locked(dev, false);
+	if (rc != 0) {
+		return rc;
+	}
+
+	io_mode_cmd[0] = OSPI_ALIF_CMD_WRITE_VOL_CFG;
+	io_mode_cmd[1] = (uint8_t)(OSPI_ALIF_VOLCFG_ADDR_IO_MODE >> 16);
+	io_mode_cmd[2] = (uint8_t)(OSPI_ALIF_VOLCFG_ADDR_IO_MODE >> 8);
+	io_mode_cmd[3] = (uint8_t)OSPI_ALIF_VOLCFG_ADDR_IO_MODE;
+	io_mode_cmd[4] = OSPI_ALIF_OCTAL_DDR_IO_MODE;
+	rc             = ospi_alif_std_send_locked(dev, io_mode_cmd, sizeof(io_mode_cmd));
+	if (rc != 0) {
+		return rc;
+	}
+
+	/* The part is now Octal DDR; switch this driver's framing to match and
+	 * program the array-read wait cycles the 7Ch path below uses. */
+	rc = ospi_alif_write_enable_locked(dev, true);
+	if (rc != 0) {
+		return rc;
+	}
+	wait_cyc =
+	    (uint16_t)((OSPI_ALIF_OCTAL_READ_WAIT_CYCLES << 8) | OSPI_ALIF_OCTAL_READ_WAIT_CYCLES);
+	return ospi_alif_octal_xfer_locked(dev,
+	                                   OSPI_ALIF_CMD_WRITE_VOL_CFG,
+	                                   true,
+	                                   OSPI_ALIF_VOLCFG_ADDR_WAIT_CYC,
+	                                   0,
+	                                   (const uint8_t *)&wait_cyc,
+	                                   sizeof(wait_cyc),
+	                                   NULL,
+	                                   0);
+}
+
+static int ospi_alif_ensure_octal_ddr(const struct device *dev)
+{
+	struct ospi_alif_data *data = dev->data;
+	int                    rc   = 0;
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	if (!data->octal_ddr_active) {
+		rc = ospi_alif_octal_switch_locked(dev);
+		if (rc == 0) {
+			rc = ospi_alif_poll_ready_locked(dev);
+		}
+		if (rc == 0) {
+			data->octal_ddr_active = true;
+		} else {
+			LOG_ERR("octal ddr switch failed: %d -- write/erase unavailable", rc);
+		}
+	}
+	k_mutex_unlock(&data->lock);
+	return rc;
+}
 
 static int ospi_alif_write(const struct device *dev, off_t offset, const void *buffer, size_t len)
 {
-	ARG_UNUSED(dev);
-	ARG_UNUSED(offset);
-	ARG_UNUSED(buffer);
+	struct ospi_alif_data *data = dev->data;
+	const uint8_t         *src  = buffer;
+	int                    rc;
 
-	return len == 0U ? 0 : -ENOTSUP;
+	if (len == 0U) {
+		return 0;
+	}
+	if (offset < 0 || buffer == NULL || (len % 2U) != 0U) {
+		/* Octal DDR data frames are 2 bytes wide; an odd length has no
+		 * representation on this bus and this driver does not invent a
+		 * padding byte on the caller's behalf. */
+		return -EINVAL;
+	}
+
+	rc = ospi_alif_ensure_octal_ddr(dev);
+	if (rc != 0) {
+		return rc;
+	}
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	while (len > 0U) {
+		size_t page_off = (size_t)offset % OSPI_ALIF_PAGE_SIZE;
+		size_t chunk    = MIN(len, OSPI_ALIF_PAGE_SIZE - page_off);
+
+		chunk &= ~(size_t)1U;
+		if (chunk == 0U) {
+			rc = -EINVAL;
+			break;
+		}
+
+		rc = ospi_alif_write_enable_locked(dev, true);
+		if (rc == 0) {
+			rc = ospi_alif_octal_xfer_locked(
+			    dev, OSPI_ALIF_CMD_PAGE_PROGRAM, true, (uint32_t)offset, 0, src, chunk, NULL, 0);
+		}
+		if (rc == 0) {
+			rc = ospi_alif_poll_ready_locked(dev);
+		}
+		if (rc != 0) {
+			ospi_alif_recover_transfer(dev);
+			break;
+		}
+
+		src += chunk;
+		offset += (off_t)chunk;
+		len -= chunk;
+	}
+	k_mutex_unlock(&data->lock);
+	return rc;
 }
 
 static int ospi_alif_erase(const struct device *dev, off_t offset, size_t size)
 {
-	ARG_UNUSED(dev);
-	ARG_UNUSED(offset);
+	struct ospi_alif_data *data = dev->data;
+	int                    rc;
 
-	return size == 0U ? 0 : -ENOTSUP;
+	if (size == 0U) {
+		return 0;
+	}
+	if (offset < 0 || ((uint32_t)offset % OSPI_ALIF_SECTOR_SIZE) != 0U ||
+	    (size % OSPI_ALIF_SECTOR_SIZE) != 0U) {
+		return -EINVAL;
+	}
+
+	rc = ospi_alif_ensure_octal_ddr(dev);
+	if (rc != 0) {
+		return rc;
+	}
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	while (size > 0U) {
+		rc = ospi_alif_write_enable_locked(dev, true);
+		if (rc == 0) {
+			rc = ospi_alif_octal_xfer_locked(
+			    dev, OSPI_ALIF_CMD_SECTOR_ERASE, true, (uint32_t)offset, 0, NULL, 0, NULL, 0);
+		}
+		if (rc == 0) {
+			rc = ospi_alif_poll_ready_locked(dev);
+		}
+		if (rc != 0) {
+			ospi_alif_recover_transfer(dev);
+			break;
+		}
+
+		offset += (off_t)OSPI_ALIF_SECTOR_SIZE;
+		size -= OSPI_ALIF_SECTOR_SIZE;
+	}
+	k_mutex_unlock(&data->lock);
+	return rc;
 }
 
+/*
+ * write_block_size = 2, not 1: Octal DDR page-program only has a 2-byte
+ * (16-bit-frame) granularity on this part/controller (see
+ * `ospi_alif_write()`'s even-length requirement above) -- 1 would claim a
+ * byte-granular program this driver cannot actually perform.
+ *
+ * page_layout (CONFIG_FLASH_PAGE_LAYOUT) is deliberately NOT implemented:
+ * the erase unit here is 4 KiB (OSPI_ALIF_SECTOR_SIZE, SFDP erase type 1,
+ * opcode 21h 4-byte) and `ospi_alif_erase()` enforces that alignment, but a
+ * `flash_pages_layout` callback also needs the part's total array size,
+ * which -- per the existing `read()` ponytail note a few hundred lines up
+ * -- this driver deliberately does not hardcode from the one bench-known
+ * IS25WX256; the DT binding carries no `size` property to add without
+ * diverging from the vendored-verbatim binding. A real page_layout needs
+ * SFDP BFPT density parsing at init, which #915 does not ask for.
+ */
 static const struct flash_parameters ospi_alif_parameters = {
-	.write_block_size = 1,
+	.write_block_size = 2,
 	.erase_value      = 0xFF,
 };
 
@@ -693,15 +1130,63 @@ static int ospi_alif_cmd_read(const struct device *dev,
  * of silently wrapping into a valid-looking, wrong address. */
 #define OSPI_ALIF_READ4 0x13U
 
+/*
+ * Octal DDR read path (7Ch, the vendor CMD_READ_DATA), used once
+ * write()/erase() has switched the part -- see the file-header "READ AFTER
+ * THE SWITCH" note for why this driver follows the part into Octal DDR
+ * rather than switching it back to 1-1-1 per call.
+ */
+static int ospi_alif_read_octal(const struct device *dev, off_t offset, uint8_t *out, size_t len)
+{
+	struct ospi_alif_data *data = dev->data;
+	int                    rc   = 0;
+
+	if ((len % 2U) != 0U) {
+		return -EINVAL; /* odd length has no Octal-DDR-frame form */
+	}
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	while (len > 0U) {
+		/* One RX FIFO's worth of 16-bit frames per chip-select: at Octal
+		 * DDR rates the CPU poll loop cannot drain the FIFO as fast as
+		 * the bus fills it, so a longer transfer overflows RX and stalls
+		 * (bench, #915). The DFP caps its reads the same way
+		 * (IS25WX256.c OSPI_MAX_RX_COUNT). */
+		size_t chunk = MIN(len, (size_t)OSPI_RX_FIFO_DEPTH * 2U) & ~(size_t)1U;
+
+		rc = ospi_alif_octal_xfer_locked(dev,
+		                                 OSPI_ALIF_CMD_OCTAL_READ,
+		                                 true,
+		                                 (uint32_t)offset,
+		                                 OSPI_ALIF_OCTAL_READ_WAIT_CYCLES,
+		                                 NULL,
+		                                 0,
+		                                 out,
+		                                 chunk);
+		if (rc != 0) {
+			break;
+		}
+		out += chunk;
+		offset += (off_t)chunk;
+		len -= chunk;
+	}
+	k_mutex_unlock(&data->lock);
+	return rc;
+}
+
 static int ospi_alif_read(const struct device *dev, off_t offset, void *buffer, size_t len)
 {
-	uint8_t *out = buffer;
+	struct ospi_alif_data *data = dev->data;
+	uint8_t               *out  = buffer;
 
 	if (offset < 0 || (uint64_t)offset > UINT32_MAX || (buffer == NULL && len != 0U)) {
 		return -EINVAL;
 	}
 	if (len > 0U && (uint64_t)offset + (len - 1U) > UINT32_MAX) {
 		return -EINVAL;
+	}
+	if (data->octal_ddr_active) {
+		return ospi_alif_read_octal(dev, offset, out, len);
 	}
 	while (len > 0U) {
 		size_t  chunk = MIN(len, (size_t)OSPI_ALIF_MAX_FRAMES);
