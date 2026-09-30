@@ -35,12 +35,17 @@
  * the carrier defaults.  CAM1 is not wired: its control bus (E1M-X I2C3)
  * terminates on the GD32 bridge, not on a Linux I2C master.
  *
+ * The sensor node also omits VANA/VDIG/VDDL-supply, which the sony,imx219
+ * binding requires (the real rails are the GD32-owned camera LDOs, not
+ * modelled): the driver falls back to dummy regulators with warnings and
+ * dtbs_check will flag the node.  Likewise the RIIC2 pins carry no
+ * internal pull-up: the carrier is assumed to fit external ones, and an
+ * internal pull-up toward an unpowered sensor could back-feed it.
+ *
  * Composes ON TOP of e1m-v2n-som.dtsi + e1m-x-evk.dtsi (which already
  * reserve the CRU buffer pool, cru_buffer@b4000000).  It touches no node
  * the audio or CAN carrier work edits.
  */
-
-#include <dt-bindings/pinctrl/rzg2l-pinctrl.h>
 
 / {
 	cam0_xclk: cam0-xclk {
@@ -56,7 +61,6 @@
 	i2c2_pins: i2c2 {
 		pinmux = <RZV2N_PORT_PINMUX(3, 4, 1)>, /* I2C2_SDA */
 			 <RZV2N_PORT_PINMUX(3, 5, 1)>; /* I2C2_SCL */
-		bias-pull-up;
 	};
 };
 

@@ -207,6 +207,12 @@ do_configure:prepend() {
         "${WORKDIR}/e1m-v2m101-x-evk.dts" \
         "${ALP_DTS_DST}/"
 
+    # Opt-in CAM0 sources (#1149): the wrapper dts + fragment must sit next
+    # to the board dts or the cam0 dtb has no rule to build.
+    if [ "${ALP_ENABLE_CAM0_IMX219}" = "1" ]; then
+        install -m 0644             "${WORKDIR}/e1m-x-evk-cam0-imx219.dtsi"             "${WORKDIR}/e1m-v2n101-x-evk-cam0.dts"             "${WORKDIR}/e1m-v2m101-x-evk-cam0.dts"             "${ALP_DTS_DST}/"
+    fi
+
     # Branch on the bitbake variable, not on the presence of the unpacked
     # file: dropping meta-rz-drpai from bblayers.conf does not scrub a
     # previously-unpacked ${WORKDIR}, so a file test would keep emitting the
@@ -283,4 +289,4 @@ SRC_URI:append:e1m-v2n101 = " file://tas2563-audio.cfg file://0009-ASoC-tas2562-
 ALP_ENABLE_CAM0_IMX219 ??= "0"
 ALP_CAM0_DTB = "${@'e1m-v2m101-x-evk-cam0' if 'v2m' in d.getVar('MACHINE') else 'e1m-v2n101-x-evk-cam0'}"
 KERNEL_DEVICETREE:append = "${@' renesas/' + d.getVar('ALP_CAM0_DTB') + '.dtb' if d.getVar('ALP_ENABLE_CAM0_IMX219') == '1' else ''}"
-SRC_URI += "${@' file://camera-csi.cfg' if d.getVar('ALP_ENABLE_CAM0_IMX219') == '1' else ''}"
+SRC_URI += "${@' file://camera-csi.cfg file://e1m-x-evk-cam0-imx219.dtsi file://e1m-v2n101-x-evk-cam0.dts file://e1m-v2m101-x-evk-cam0.dts' if d.getVar('ALP_ENABLE_CAM0_IMX219') == '1' else ''}"
