@@ -102,6 +102,22 @@ typedef struct alp_audio_in alp_audio_in_t;
 /**
  * @brief Acquire and configure an audio input stream.
  *
+ * @par Software resampling
+ *      On the Zephyr PDM backend, if the microphone cannot be clocked for
+ *      @c cfg->sample_rate_hz (for example 8 or 16 kHz on MEMS mics whose
+ *      minimum PDM clock is above those modes), the stream opens at the
+ *      lowest supported native rate that is an integer multiple of the
+ *      request (32 kHz, then 48 kHz) and decimates in software through
+ *      @ref alp_dsp_decimator_t. @ref alp_audio_in_read still delivers
+ *      frames at the requested rate, and @c frames_per_block still counts
+ *      frames at that rate. Cost: the native block is @c ratio times larger
+ *      (it must fit @c CONFIG_ALP_SDK_AUDIO_BLOCK_BYTES, else the open
+ *      fails with @ref ALP_ERR_OUT_OF_RANGE), the anti-alias
+ *      FIR adds 67 native-rate samples of group delay (about 2.1 ms at
+ *      32 kHz, 1.4 ms at 48 kHz), and every read
+ *      filters @c ratio input frames per output frame. S16 only; a rate no
+ *      native rate divides evenly still fails.
+ *
  * @param[in] cfg  Configuration.  Must be non-NULL.
  * @return Open handle on success, or NULL if the backend can't satisfy
  *         the requested configuration.

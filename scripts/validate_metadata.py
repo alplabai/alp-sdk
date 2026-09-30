@@ -1512,12 +1512,13 @@ def _check_soc_debug_svd_shape(soc_files) -> list:
     slipped the existence half too. The likeliest way to type that is on
     this repo's own Windows maintainer host (#1890 review).
 
-    No SoC declares `svd` today, deliberately: ADR 0032 records the
-    mechanism for carrying vendor data under its own terms, not an
-    authorisation to carry any particular vendor's, so whether Alif's SVDs
-    are redistributed here is still a maintainer decision.  The gate ships
-    ahead of the data on purpose -- the first value to land is then checked
-    by an already-reviewed rule instead of arriving with its own.
+    ADR 0032 records the mechanism for carrying vendor data under its own
+    terms, not an authorisation to carry any particular vendor's.  Alif's
+    were authorised on 2026-09-28 (#948): `alif/ensemble/e8.json` declares
+    the vendored E8 HE/HP views under `metadata/svd/alif/`, so the
+    existence check below applies to them.  The gate shipped ahead of that
+    data on purpose, so the first values to land were checked by an
+    already-reviewed rule instead of arriving with their own.
 
     Returns a failure list shaped like `_check_files()`, and PRINTS each
     message, as every sibling checker does -- a gate whose diagnostics only

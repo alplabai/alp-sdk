@@ -20,17 +20,38 @@ WHAT IT CATCHES, AND WHAT IT DOES NOT -- read this before trusting it
 --------------------------------------------------------------------
 CATCHES, hard failure:
   * a cited path that does not exist in the tree;
-  * a cited line number past the end of the file;
+  * a cited line number past the end of the file, for an UNANCHORED citation
+    -- an ANCHORED one instead gets the whole-file search below, because a
+    shrunk file can still hold its anchor intact elsewhere;
   * a NEW citation with no anchor (see NEW CITATIONS below);
-  * a NEAR-MISS anchor, old or new (see NEAR MISSES below).
+  * a NEW citation whose anchor IS present but whose cited line is wrong --
+    a citation you are writing on THIS branch has no pre-existing history
+    for the drift tolerance below to forgive (alp-sdk#2350 round 2; see
+    ANCHOR TEXT IS AUTHORITATIVE);
+  * a NEAR-MISS anchor, old or new (see NEAR MISSES below);
+  * an anchored citation that resolves to exactly ONE other line but whose
+    anchor text is shorter than `_MIN_DRIFT_ANCHOR_LEN` -- too short/generic
+    for uniqueness alone to be trusted (alp-sdk#2350 round 2);
+  * an anchored citation whose one other occurrence would run PAST EOF once
+    the cited width is preserved there (`--fix` would refuse the identical
+    rewrite; see ANCHOR TEXT IS AUTHORITATIVE below);
+  * a PRE-EXISTING citation that drifted to a new, unique, long-enough line
+    -- but ONLY when run with `--strict-lines`, the release-time hook (see
+    --strict-lines below). Without that flag this exact case PASSES,
+    advisory only -- it is the one case this gate deliberately tolerates.
 
 CATCHES, only for an anchored citation (see ANCHORS below):
   * SEMANTIC ROT -- the line still exists but no longer says what the note
-    claims. **This is the #1387 case, and the existence/range checks alone would
-    NOT have caught it**, because `:682-684` remained a perfectly valid range
-    the whole time. Stating that plainly because a gate whose limits are not
-    written down gets trusted for things it cannot do -- which is the same class
-    of defect this file exists to fight.
+    claims. This is the ORIGINAL #1387 case: `:682-684` remained a perfectly
+    valid range the whole time, so an existence/range check alone would NOT
+    have caught it. Rot is now also caught when the text goes missing
+    entirely, becomes ambiguous, is too short/generic to trust, arrives
+    wrong on a citation just written, or survives un-rewritten into a
+    release under `--strict-lines` -- and tolerated at exactly one point: a
+    PRE-EXISTING citation's text relocating to a new, UNIQUE, long-enough
+    line. Stating the boundary plainly because a gate whose limits are not
+    written down gets trusted for things it cannot do -- which is the same
+    class of defect this file exists to fight.
 
 DOES NOT CATCH:
   * a citation into another repository (e.g. an alp-sdk fragment citing
@@ -83,17 +104,40 @@ gets the same treatment as broken anchor text rather than the SKIP given to
 a citation this gate genuinely cannot resolve (a foreign-repo path, or a
 folded `changelog.d/` fragment).
 
-ANCHOR TEXT IS AUTHORITATIVE, THE LINE NUMBER IS ADVISORY
----------------------------------------------------------
+ANCHOR TEXT IS AUTHORITATIVE, THE LINE NUMBER IS ADVISORY -- for a PRE-EXISTING citation
+-----------------------------------------------------------------------------------------
 A verified citation is resolved by its quoted text, never by its line number.
 If the anchor is found inside the cited range, the citation passes exactly as
-before. If it is not, the whole cited file is searched:
-  * found EXACTLY ONCE elsewhere -- PASS, with an informational note naming
-    the citation and the line the text now lives on ("note: <fragment>:
-    <path>:<old> anchor now at line <new>"). The line number is stale, not
-    wrong, so an unrelated edit that inserted lines above the cited code no
-    longer fails the gate. `--fix` rewrites the citation to that line (for a
-    START-END range both ends shift by the same delta).
+before. If it is not, and the citation is one this branch just wrote (its
+line is in `added`, see NEW CITATIONS below), that is a hard FAIL -- the
+drift tolerance below exists only to forgive an UNRELATED line moving under
+an ALREADY-correct citation, and a citation you are writing right now has no
+such history (alp-sdk#2350 round 2, point 1): a whole-file search here could
+silently paper over your own mistake, possibly onto a coincidentally
+matching but wrong line.
+
+Otherwise, the whole cited file is searched:
+  * found EXACTLY ONCE elsewhere, its text at least `_MIN_DRIFT_ANCHOR_LEN`
+    (16) characters, AND re-anchorable at that line without the cited width
+    running past EOF -- PASS, with an informational note naming the citation
+    and the line the text now lives on ("note: <fragment>: <path>:<old>
+    anchor now at line <new>"). The line number is stale, not wrong, so an
+    unrelated edit that inserted lines above the cited code no longer fails
+    the gate (unless `--strict-lines`, below). `--fix` rewrites the citation
+    to that line (for a START-END range both ends shift by the same delta).
+  * that one occurrence's text is SHORTER than `_MIN_DRIFT_ANCHOR_LEN` --
+    ERROR. Uniqueness in TODAY's file is not proof the note still means the
+    same thing when the anchor is this short/generic: delete a SIBLING
+    occurrence of a common phrase (measured: two different `changelog.d/`
+    citations anchored on the identical 14-character `"int main(void)"` into
+    a file that genuinely has two mains) and the SURVIVING citation's anchor
+    "resolves uniquely" at the wrong one, silently. `--fix` still rewrites
+    such a citation but flags it `[VERIFY: ...]` and counts it in its
+    summary, so a human reads the re-homed line -- see `_fix_one`.
+  * that one occurrence would run PAST EOF once the cited width is preserved
+    there -- ERROR, never a note pointing at a dead end: `--fix` refuses the
+    identical rewrite (see `--fix`'s own EOF refusal below), so telling the
+    author to run it here would send them nowhere.
   * found MORE THAN ONCE -- ERROR, ambiguous. The message lists every
     candidate line; a human picks the occurrence the note meant, because
     guessing between them is how a citation silently retargets.
@@ -101,14 +145,24 @@ before. If it is not, the whole cited file is searched:
     the file rather than merely outside the cited range.
 
 The line number still bounds the range check and is still where `--fix`
-starts; only the anchor decides whether the citation is correct.
+starts; only the anchor decides whether the citation is correct. This
+tolerance is deliberately narrow -- a NEW citation gets none of it, a
+too-short anchor gets none of it, an EOF-overflowing re-anchor gets none of
+it, and a release cut closes it entirely via `--strict-lines` -- because each
+of those is exactly the shape of a mistake that trusting the shift would
+hide, not the unrelated-line-insertion this tolerance exists for.
 
-NEW CITATIONS -- anchors are mandatory, old ones are grandfathered
-------------------------------------------------------------------
+NEW CITATIONS -- anchors are mandatory, lines must already be right, old ones are grandfathered
+--------------------------------------------------------------------------------------------------
 A citation on a line ADDED relative to a base must be anchored, or the gate
-fails (alp-sdk#2186). Existing un-anchored citations are left alone -- there
-is nothing to verify one against, so no tool can anchor it without guessing
--- and the point is only to stop the range-checked-only bucket growing.
+fails (alp-sdk#2186). Since alp-sdk#2350 round 2, an ANCHORED new citation is
+held to the same bar: its cited line must already resolve, or the gate fails
+naming it explicitly as newly added -- it gets NONE of the drift tolerance
+above, because that tolerance forgives an UNRELATED line moving under an
+ALREADY-correct citation, and a citation on THIS branch has no such history.
+Existing un-anchored citations are left alone -- there is nothing to verify
+one against, so no tool can anchor it without guessing -- and the point is
+only to stop the range-checked-only bucket growing.
 
 "Added" is `git diff --unified=0 $(git merge-base BASE HEAD) -- changelog.d/`
 against the WORKING TREE, so staged and unstaged edits count, plus every line
@@ -116,7 +170,9 @@ of an untracked fragment -- a fragment is graded while it is being written,
 not only once committed. The merge base, not BASE itself, keeps lines BASE
 gained after the branch point (or that a merge of BASE brought in) from being
 charged to this branch. Touching a line makes it new: fixing a typo on a line
-carrying an un-anchored citation means anchoring that citation too.
+carrying an un-anchored citation means anchoring that citation too, and
+touching a line carrying an ALREADY-anchored citation means its line must
+already be correct, not merely drift-tolerant.
 
 BASE is `DIFF_BASE`, default `origin/dev`. CI sets `DIFF_BASE=HEAD^1` on a PR
 into `dev`, whose checkout is the PR's merge commit with `dev` as merged for
@@ -224,11 +280,44 @@ take an anchor per line.
 verdict on the tree it just wrote -- it cannot report success on a tree the
 gate would still fail.
 
+--strict-lines -- the release-time hook that closes the drift window (alp-sdk#2350 round 2)
+------------------------------------------------------------------------------------------------
+A drifted-but-unique citation is advisory at PR time on purpose: an unrelated
+PR should not go red over a line it never touched. But `scripts/bump_version.py`'s
+`slice_changelog()` FREEZES today's `[Unreleased]` into a released `## [vX]`
+section, and a released section is NEVER rewritten by `--fix` (see `--fix`
+above and CHANGELOG's own comment) -- so a drift left unresolved at exactly
+that moment ships wrong FOREVER. That is #1387 again, arriving through the
+release path instead of a rebase.
+
+`--strict-lines` closes that window: it grades `changelog.d/` and
+CHANGELOG.md's `[Unreleased]` exactly as the plain run does, EXCEPT that a
+citation which would otherwise pass as an advisory note is instead a hard
+ERROR, naming the stale line and telling the operator to run `--fix`. Never
+applied to CHANGELOG's released tail -- already-shipped history is not
+rewritten and not blocked on, with or without this flag; a released
+section's own drift stays labelled "(released history, not blocking)",
+exactly as under a plain run.
+
+Wired into `scripts/bump_version.py`'s `main()`, BEFORE any file is touched
+(even under `--dry-run`, as a pure readiness check): it runs this script
+with `--strict-lines` and refuses the bump outright if it fails, naming
+`--fix` as the remedy rather than running it automatically -- a version-bump
+command silently rewriting changelog fragments as a side effect would be its
+own surprise. `--strict-lines` composes with `--fix` in one invocation (fix
+first, then the same run's fall-through check honours it -- see `main()`)
+and with `--against-merge` (grade a merge strictly).
+
 Exit codes:
-    0  every citation resolved, every anchored one matched, and every new
-       one was anchored
-    1  at least one citation is broken -- or, with --against-merge, HEAD
-       does not merge cleanly with the base
+    0  every citation resolved -- text-verified at its cited line, or at a
+       single unique, long-enough, in-bounds drifted line reported as an
+       advisory note (never true for a newly-added citation, and never
+       advisory under --strict-lines) -- and every new one was anchored
+    1  at least one citation is broken -- gone entirely, ambiguous with no
+       correct disambiguating line number, too short/generic to trust as a
+       unique drift, wrong on a citation just added, drifted past EOF, or
+       (under --strict-lines) merely drifted on a pre-existing citation --
+       or, with --against-merge, HEAD does not merge cleanly with the base
     2  usage / environment error (an unresolvable `DIFF_BASE`, a failing git)
 """
 
@@ -483,40 +572,100 @@ def _read_worktree(rel: str) -> str | None:
     return target.read_text(encoding="utf-8", errors="replace")
 
 
+#: Minimum length of a STRIPPED anchor quote for the text-authoritative
+#: unique-drift PASS (alp-sdk#2350 round 2 -- Fable's counterexample).
+#: Uniqueness in TODAY's file is not proof a note still means the same thing
+#: when the anchor is this short/generic: `changelog.d/2051.md` anchors two
+#: DIFFERENT citations into `examples/aen/aen-sdhc-probe/src/main.c` on the
+#: identical 14-character phrase `"int main(void)"` (the file legitimately
+#: has two) -- delete either main and the SURVIVING citation's anchor
+#: "resolves uniquely" at the wrong one, silently. Applies ONLY to the
+#: unique-hit PASS path in `_check_one`; the zero-hit and ambiguous FAIL
+#: paths already refuse to guess and need no length floor. `--fix` is
+#: deliberately NOT gated on this same floor -- see `_fix_one`.
+_MIN_DRIFT_ANCHOR_LEN = 16
+
+
 def _anchor_line_hits(body: str, needle: str) -> list[int]:
-    """1-based line numbers where `needle` occurs in the joined `body`.
+    """1-based line numbers where `needle` occurs in the joined `body`, each
+    line counted at most ONCE.
 
     Searched in the joined text, not line by line, so an anchor a fragment
     wrapped across two source lines is found the same way `_check_one` and
     `_fix_one` both look for it -- by containment. Overlapping occurrences
     are not re-counted (`find(..., at + 1)`).
+
+    Deduped (alp-sdk#2350 round 2, point 6): `needle` can occur twice on the
+    SAME line (`foo(x); foo(x);`), and `body.find(needle, at + 1)` finds both
+    -- without dedup that reports as "ambiguous, occurs at lines [10, 10]",
+    which is nonsense (there is only one candidate LINE to disambiguate with)
+    and would wrongly refuse a citation that is not actually ambiguous. Safe
+    to dedupe by comparing only the last appended line: `body.find` scans
+    left to right, so line numbers are non-decreasing as `at` increases and
+    every repeat of a line is therefore adjacent in `hits`.
     """
     hits: list[int] = []
     at = body.find(needle)
     while at != -1:
-        hits.append(body.count("\n", 0, at) + 1)
+        line = body.count("\n", 0, at) + 1
+        if not hits or hits[-1] != line:
+            hits.append(line)
         at = body.find(needle, at + 1)
     return hits
+
+
+def _reanchor_span(lines: list[str], hit: int, width: int) -> tuple[int, int] | None:
+    """The `(new_start, new_end)` a rewrite anchored at line `hit` would use,
+    preserving the cited `width` (`end - start`, widened to cover a
+    multi-line anchor) -- or None if that would run past EOF.
+
+    None is the one case `--fix` itself refuses rather than clamps: `:1-10`
+    re-anchored on line 19 of a 20-line file becoming `:19-20` would silently
+    NARROW the claim to a range nobody wrote, and the checker would then pass
+    it because the anchor sits inside whatever range it is handed. Shared
+    between `_check_one`'s drift search and `_fix_one`'s rewrite so the two
+    never disagree about which re-anchor is safe.
+    """
+    new_end = hit + width
+    return None if new_end > len(lines) else (hit, new_end)
 
 
 def _check_one(frag: Path, text: str, added: set[int] | None = None,
                read: Callable[[str], str | None] | None = None,
                notes: list[str] | None = None,
+               strict_lines: bool = False, released: bool = False,
                ) -> tuple[list[str], list[str], int, int]:
     """Return (errors, skips, checked, anchored) for one fragment.
 
     `added` is the set of 1-based line numbers of `text` that are NEW
     relative to the base (see `_added_lines`); a resolvable citation on one
-    of them must be anchored. None means the rule is off for this document.
+    of them must be anchored, AND -- if it IS anchored but its cited line is
+    wrong -- gets NONE of the drift grace below (alp-sdk#2350 round 2, point
+    1): that grace exists to tolerate an UNRELATED line shift on a citation
+    that was already correct, and a citation being written on THIS branch has
+    no such history, so a wrong line here is a hard FAIL naming that
+    explicitly rather than a whole-file search that might paper over it.
     `read` returns a cited file's text or None, defaulting to the working
     tree; `--against-merge` passes one that reads the merged tree instead.
+
+    `strict_lines` (alp-sdk#2350 round 2, point 3 -- the release-time hook,
+    see `--strict-lines` in the module docstring) turns what would otherwise
+    be an advisory drift note on a PRE-EXISTING citation into a hard ERROR
+    instead. Ignored when `released` is True.
+
+    `released` marks this call as grading CHANGELOG.md's RELEASED tail (as
+    opposed to a fragment or `[Unreleased]`): `strict_lines` is ignored for
+    it -- a released section is never blocked on, by design (the caller is
+    responsible for routing its errors to warnings and its notes to a
+    separate, non-blocking bucket).
 
     An anchored citation is resolved by its QUOTED TEXT, never by the line
     number: the number is advisory and only the anchor is authoritative. When
     the text is not inside the cited range but occurs exactly once in the
-    file, the citation PASSES and an informational note naming the new line
-    is appended to `notes` (see the module docstring). `notes` may be None,
-    which simply suppresses the note.
+    file, is at least `_MIN_DRIFT_ANCHOR_LEN` characters, and re-anchors
+    without running past EOF, the citation PASSES and an informational note
+    naming the new line is appended to `notes` (see the module docstring).
+    `notes` may be None, which simply suppresses the note.
     """
     errors: list[str] = []
     skips: list[str] = []
@@ -530,6 +679,7 @@ def _check_one(frag: Path, text: str, added: set[int] | None = None,
         end = int(m.group("end") or start)
         where = f"{frag.name}: `{rel}:{m.group('start')}" + (
             f"-{m.group('end')}`" if m.group("end") else "`")
+        citation_line = text.count("\n", 0, m.start()) + 1
 
         if rel.startswith(_FOREIGN_PREFIXES):
             skips.append(f"{where} -- path belongs to another repository; "
@@ -550,10 +700,6 @@ def _check_one(frag: Path, text: str, added: set[int] | None = None,
             continue
 
         lines = body.splitlines()
-        if end > len(lines):
-            errors.append(f"{where} -- file has only {len(lines)} lines")
-            continue
-
         checked += 1
 
         rest = text[m.end():]
@@ -578,10 +724,17 @@ def _check_one(frag: Path, text: str, added: set[int] | None = None,
 
         anchor = _ANCHOR.match(rest)
         if not anchor:
+            # UNANCHORED (including a near miss): there is no anchor text to
+            # search the whole file with, so the strict EOF check stands --
+            # only an ANCHORED citation gets the whole-file fallback below
+            # (alp-sdk#2350 round 2, point 4).
+            if end > len(lines):
+                errors.append(f"{where} -- file has only {len(lines)} lines")
+                continue
             near = _near_miss(text, m)
             if near:
                 errors.append(f"{where} -- near-miss anchor: {near}")
-            elif added is not None and text.count("\n", 0, m.start()) + 1 in added:
+            elif added is not None and citation_line in added:
                 errors.append(
                     f"{where} -- new citation with no anchor. A citation "
                     f"added since the base must be text-verified, or a later "
@@ -590,20 +743,56 @@ def _check_one(frag: Path, text: str, added: set[int] | None = None,
                     f"verbatim quote from the cited lines: {m.group(0)} "
                     f"(\"exact text on those lines\").")
             continue
+
         anchored += 1
         needle = anchor.group("text").strip()
-        region = "\n".join(lines[start - 1:end])
-        if needle in region:
+        in_range = end <= len(lines) and needle in "\n".join(lines[start - 1:end])
+        if in_range:
             continue
 
-        # The quoted text is the anchor and the line number is advisory, so
-        # the whole file is searched before the citation is called broken -- an
-        # unrelated line shift ABOVE the cited line no longer fails the gate.
-        hits = _anchor_line_hits("\n".join(lines), needle)
-        if len(hits) == 1:
-            if notes is not None:
-                notes.append(f"note: {where} anchor now at line {hits[0]}")
+        if added is not None and citation_line in added:
+            # alp-sdk#2350 round 2, point 1: drift grace exists ONLY to
+            # tolerate an UNRELATED line moving under a citation that was
+            # already correct. A citation added on this branch has no such
+            # history -- if it is wrong, that is a mistake made just now, and
+            # the whole-file fallback below would silently paper over it
+            # (worse: at a coincidentally-matching but wrong line, if the
+            # text happens to repeat).
+            errors.append(
+                f"{where} -- newly added citation: anchored on {needle!r}, "
+                f"but that text is not in the cited range. This citation "
+                f"was added on this branch, so there is no pre-existing "
+                f"history for drift grace to apply to -- the line is wrong "
+                f"because you just wrote it wrong. Point it at the right "
+                f"line, or run --fix."
+            )
             continue
+
+        # ANCHOR TEXT IS AUTHORITATIVE, THE LINE NUMBER IS ADVISORY
+        # (alp-sdk#2350): the cited range no longer carries the anchor, but
+        # the claim itself might still be true elsewhere in the same file --
+        # an unrelated line inserted or removed ABOVE this citation shifts
+        # its range without the code the note describes ever moving. Search
+        # the whole file the same way `_fix_one` does when repairing a
+        # drifted citation, before failing. A shrunken file (`end >
+        # len(lines)`) is not special-cased here -- the anchor is searched
+        # for exactly like any other in-range miss.
+        hits = _anchor_line_hits("\n".join(lines), needle)
+
+        if not hits:
+            hint = ("The quoted text is broken across a markdown line, and a "
+                    "line break inside the quotes can never match a "
+                    "single-line citation -- rewrap before the '(' instead."
+                    if "\n" in needle and start == end else
+                    "The anchor text is absent from the file, so the quoted "
+                    "code is gone rather than moved; re-resolve the citation "
+                    "by hand.")
+            errors.append(
+                f"{where} -- anchored on {needle!r}, but that text is not in "
+                f"the cited range and is absent from {rel}. {hint}"
+            )
+            continue
+
         if len(hits) > 1:
             errors.append(
                 f"{where} -- anchored on {needle!r}, which occurs at lines "
@@ -611,16 +800,60 @@ def _check_one(frag: Path, text: str, added: set[int] | None = None,
                 f"point at one of those occurrences.")
             continue
 
-        hint = ("The quoted text is broken across a markdown line, and a "
-                "line break inside the quotes can never match a "
-                "single-line citation -- rewrap before the '(' instead."
-                if "\n" in needle and start == end else
-                "The anchor text is absent from the file, so the quoted code "
-                "is gone rather than moved; re-resolve the citation by hand.")
-        errors.append(
-            f"{where} -- anchored on {needle!r}, but that text is not in "
-            f"the cited range and is absent from {rel}. {hint}"
-        )
+        if len(needle) < _MIN_DRIFT_ANCHOR_LEN:
+            # alp-sdk#2350 round 2, point 2 (Fable): uniqueness in TODAY's
+            # file is not proof the note still means the same thing when the
+            # anchor is this short/generic -- delete a SIBLING occurrence of
+            # a common phrase and the survivor "resolves uniquely" at the
+            # wrong line, silently. Require a human (or `--fix`, which
+            # knowingly accepts the same risk) to decide instead of trusting
+            # it on its own.
+            errors.append(
+                f"{where} -- anchored on {needle!r} ({len(needle)} "
+                f"character(s)), which resolves to exactly one other line "
+                f"({hits[0]}) but is shorter than the "
+                f"{_MIN_DRIFT_ANCHOR_LEN}-character floor this gate requires "
+                f"to trust uniqueness alone: a short, generic phrase is "
+                f"exactly what silently re-homes onto an unrelated line the "
+                f"moment some OTHER occurrence of it disappears. The anchor "
+                f"is too generic to re-home safely -- lengthen the quote, or "
+                f"run --fix and VERIFY the re-homed line."
+            )
+            continue
+
+        width = max(end - start, needle.count("\n"))
+        span = _reanchor_span(lines, hits[0], width)
+        if span is None:
+            # alp-sdk#2350 round 2, point 5: `--fix` itself refuses this
+            # exact case (see `_reanchor_span`), so passing it here with a
+            # "run --fix" note would send the author to a dead end -- and the
+            # range must never be silently collapsed to sell a pass nobody's
+            # claim supports.
+            errors.append(
+                f"{where} -- anchored on {needle!r}, found uniquely at line "
+                f"{hits[0]}, but preserving the cited width of {width} "
+                f"line(s) there would run past the end of {rel} "
+                f"({len(lines)} lines). `--fix` would refuse this too "
+                f"(narrowing the range would assert something the note "
+                f"never claimed) -- a human must adjust the range by hand."
+            )
+            continue
+
+        if strict_lines and not released:
+            # alp-sdk#2350 round 2, point 3: advisory at PR time, but a
+            # release FREEZES whatever line is on disk right now --
+            # `--strict-lines` is the release-time hook that refuses to
+            # freeze a stale one (see `--strict-lines`, module docstring).
+            errors.append(
+                f"{where} -- anchored on {needle!r}; that text now lives at "
+                f":{hits[0]}, not the cited line. --strict-lines requires "
+                f"every citation's stored line to already match before a "
+                f"release freezes it -- run --fix, then retry."
+            )
+            continue
+
+        if notes is not None:
+            notes.append(f"note: {where} anchor now at line {hits[0]}")
 
     return errors, skips, checked, anchored
 
@@ -765,6 +998,20 @@ def _fix_one(frag: Path, text: str) -> tuple[str, list[str], list[str], int]:
         if len(hits) > 1:
             note = (f"   [AMBIGUOUS: {needle!r} occurs at lines {hits}; chose "
                     f"{new_start}, nearest the cited {start}]")
+        elif len(needle) < _MIN_DRIFT_ANCHOR_LEN:
+            # The checker refuses exactly this re-home (see `_check_one`),
+            # and its message sends the author here -- so the rewrite is
+            # flagged as loudly as AMBIGUOUS above, never made silently: a
+            # short, generic anchor that is unique TODAY may be unique only
+            # because the occurrence the note actually described was deleted
+            # (alp-sdk#2350 round 2/3). Deliberately NOT gated the same way
+            # the checker gates its PASS -- the human running `--fix` can
+            # read the line the checker cannot, so the rewrite still happens;
+            # it is just never silent about it.
+            note = (f"   [VERIFY: short anchor {needle!r} ({len(needle)} < "
+                    f"{_MIN_DRIFT_ANCHOR_LEN} chars) re-homed to line "
+                    f"{new_start}; read that line and confirm it is still "
+                    f"the code the note describes, or lengthen the quote]")
 
         # Preserve the range's width -- `4372-4376` re-anchored at 4378 is
         # `4378-4382` -- widening only if the anchor itself spans lines.
@@ -776,8 +1023,8 @@ def _fix_one(frag: Path, text: str) -> tuple[str, list[str], list[str], int]:
         # width is kept anyway, because it is part of what the note claimed;
         # verifying it would take an anchor per line.
         width = max(end - start, needle.count("\n"))
-        new_end = new_start + width
-        if new_end > len(lines):
+        span = _reanchor_span(lines, new_start, width)
+        if span is None:
             # NOT clamped to `len(lines)`. Clamping preserves the anchor but
             # silently NARROWS the claim -- `:1-10` re-anchored on line 19 of
             # a 20-line file becomes `:19-20`, and on the last line it
@@ -794,6 +1041,7 @@ def _fix_one(frag: Path, text: str) -> tuple[str, list[str], list[str], int]:
                 f"range the note never made, so this is NOT rewritten; a "
                 f"human has to look.")
             continue
+        new_end = span[1]
         repl = (f"`{rel}:{new_start}-{new_end}`"
                 if m.group("end") or new_end > new_start
                 else f"`{rel}:{new_start}`")
@@ -872,10 +1120,15 @@ def _run_fix(fragments: list[Path]) -> None:
         print(f"  {r}")
     for p in problems:
         print(f"  NEEDS A HUMAN {p}")
+    verify = sum(1 for r in rewrites if "[VERIFY:" in r)
     print(f"check-changelog-citations --fix: rewrote {len(rewrites)} "
           f"citation(s) across {touched} file(s); left {unanchored} "
           f"un-anchored citation(s) alone (nothing to re-derive from); "
           f"{len(problems)} need a human.")
+    if verify:
+        print(f"check-changelog-citations --fix: {verify} of those rewrites "
+              f"re-homed a short anchor (marked VERIFY above) -- read each "
+              f"re-homed line before committing.")
 
 
 #: What a citation counts as NEW against when `DIFF_BASE` is unset.
@@ -1030,17 +1283,23 @@ def _tree_reader(tree: str) -> Callable[[str], str | None]:
 
 def _grade(fragments: list[tuple[Path, str]], changelog: str | None,
            added: dict[str, set[int]] | None, read: Callable[[str], str | None] | None,
-           graded: str, rule: str, verbose: bool) -> int:
+           graded: str, rule: str, verbose: bool, strict_lines: bool = False) -> int:
     """Grade every document and print the verdict; the gate's exit code.
 
     `graded` names the tree, `rule` states whether and against what the
     new-citation rule ran -- both are printed with the verdict, so a pass
     always says what it covered.
+
+    `strict_lines` (alp-sdk#2350 round 2) is threaded to every `_check_one`
+    call EXCEPT CHANGELOG's released tail: a release freezes `[Unreleased]`
+    into history, so drift THERE must be caught before the freeze, but a
+    section already frozen is never rewritten or blocked on, by design.
     """
     all_errors: list[str] = []
     all_skips: list[str] = []
     all_notes: list[str] = []
-    total_checked = total_anchored = new = 0
+    all_released_notes: list[str] = []
+    total_checked = total_anchored = new = released_checked = 0
 
     for frag, text in fragments:
         lines = None
@@ -1050,7 +1309,7 @@ def _grade(fragments: list[tuple[Path, str]], changelog: str | None,
                        if text.count("\n", 0, m.start()) + 1 in lines
                        and not m.group("path").startswith(_FOREIGN_PREFIXES))
         errs, skips, checked, anchored = _check_one(
-            frag, text, lines, read, all_notes)
+            frag, text, lines, read, all_notes, strict_lines=strict_lines)
         all_errors += errs
         all_skips += skips
         total_checked += checked
@@ -1065,18 +1324,21 @@ def _grade(fragments: list[tuple[Path, str]], changelog: str | None,
     if changelog is not None:
         head, tail = _split_changelog(changelog)
         errs, skips, checked, anchored = _check_one(
-            CHANGELOG, head, None, read, all_notes)
+            CHANGELOG, head, None, read, all_notes, strict_lines=strict_lines)
         all_errors += errs
         all_skips += skips
         total_checked += checked
         total_anchored += anchored
         if tail:
             werrs, wskips, wchecked, wanchored = _check_one(
-                CHANGELOG, tail, None, read, all_notes)
+                CHANGELOG, tail, None, read, all_released_notes, released=True)
             all_warnings += werrs
             all_skips += wskips
-            total_checked += wchecked
-            total_anchored += wanchored
+            # NOT folded into total_checked/total_anchored (alp-sdk#2350
+            # round 2, point 7): those count what this run actually grades as
+            # blocking, and released history is warnings-only -- it gets its
+            # own line below instead.
+            released_checked += wchecked
 
     for w in all_warnings:
         print(f"  WARN (released history, not blocking) {w}")
@@ -1086,6 +1348,15 @@ def _grade(fragments: list[tuple[Path, str]], changelog: str | None,
 
     for n in all_notes:
         print(f"  {n}")
+
+    # Released-history drift is printed SEPARATELY and labelled the same way
+    # WARN already is (alp-sdk#2350 round 2, point 7): blending it into
+    # `all_notes` would make the "N of them" counts elsewhere claim more than
+    # the fragments/[Unreleased] scope they are actually reporting on, and
+    # `--fix` never rewrites released history, so its note is never mistaken
+    # for one that does.
+    for n in all_released_notes:
+        print(f"  {n} (released history, not blocking)")
 
     if all_errors:
         print(f"\ncheck-changelog-citations: {len(all_errors)} broken "
@@ -1129,6 +1400,16 @@ def _grade(fragments: list[tuple[Path, str]], changelog: str | None,
     print(f"  new-citation rule: {rule}"
           + (f" -- {new} citation(s) on added lines, every one anchored."
              if added is not None else ""))
+    if released_checked:
+        # Separate from the headline on purpose (alp-sdk#2350 round 2, point
+        # 7): these are already-shipped history, graded as warnings only,
+        # never rewritten by `--fix`, and never blocked on even under
+        # `--strict-lines`.
+        print(f"  released history: {released_checked} citation(s) graded "
+              f"as warnings only (not in the totals above).")
+    if all_released_notes:
+        print(f"  {len(all_released_notes)} released-history citation(s) "
+              f"drifted (not blocking, --fix never touches them).")
     if unanchored and verbose:
         print("  note: an un-anchored citation is only checked for existence "
               "and range.\n  Add a quoted anchor -- `path:12-14` (\"the exact "
@@ -1136,7 +1417,8 @@ def _grade(fragments: list[tuple[Path, str]], changelog: str | None,
     return 0
 
 
-def _main_against_merge(base: str | None, base_ref: str, verbose: bool) -> int:
+def _main_against_merge(base: str | None, base_ref: str, verbose: bool,
+                        strict_lines: bool) -> int:
     """`--against-merge`: grade `base` merged into HEAD, as CI's
     `refs/pull/N/merge` checkout does, without touching the working tree."""
     if base is None:
@@ -1162,7 +1444,8 @@ def _main_against_merge(base: str | None, base_ref: str, verbose: bool) -> int:
         graded = (f"HEAD's own tree ({tree[:12]}) -- {base_ref} is already "
                   f"an ancestor of HEAD, so there was nothing to merge")
     return _grade(fragments, read("CHANGELOG.md"), added, read, graded,
-                  f"lines the merge adds to {base_ref} ({base[:12]})", verbose)
+                  f"lines the merge adds to {base_ref} ({base[:12]})", verbose,
+                  strict_lines)
 
 
 def main() -> int:
@@ -1180,6 +1463,17 @@ def main() -> int:
              "instead of the working tree, the way CI grades a PR's merge "
              "commit. Built with `git merge-tree --write-tree`; touches no "
              "file, index or ref. Committed changes only.")
+    ap.add_argument(
+        "--strict-lines", action="store_true",
+        help="the release-time hook (alp-sdk#2350 round 2): treat a "
+             "drifted-but-unique citation in changelog.d/ or CHANGELOG.md's "
+             "[Unreleased] as a hard ERROR instead of an advisory note. Run "
+             "this right before a release cut freezes [Unreleased] into "
+             "history -- see scripts/bump_version.py -- since a released "
+             "section is never rewritten by --fix afterward. Never applied "
+             "to already-released history, which is not blocked on either "
+             "way. Composes with --fix (fix first, then verify strictly) "
+             "and with --against-merge.")
     args = ap.parse_args()
     if args.fix and args.against_merge:
         ap.error("--fix rewrites the working tree and --against-merge grades "
@@ -1187,7 +1481,8 @@ def main() -> int:
 
     base, base_ref = _resolve_base()
     if args.against_merge:
-        return _main_against_merge(base, base_ref, args.verbose)
+        return _main_against_merge(base, base_ref, args.verbose,
+                                   args.strict_lines)
 
     fragments = _iter_fragments()
 
@@ -1239,7 +1534,7 @@ def main() -> int:
         [(f, f.read_text(encoding="utf-8", errors="replace")) for f in fragments],
         (CHANGELOG.read_text(encoding="utf-8", errors="replace")
          if CHANGELOG.is_file() else None),
-        added, None, "the working tree", rule, args.verbose)
+        added, None, "the working tree", rule, args.verbose, args.strict_lines)
 
 
 if __name__ == "__main__":

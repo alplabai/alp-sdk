@@ -10,7 +10,9 @@ config ALP_SDK_DSP
 	default n
 	help
 	  Compile the DSP registry sources -- src/dsp_dispatch.c plus
-	  src/backends/dsp/sw_fallback.c.  Provides the standalone
+	  src/backends/dsp/sw_fallback.c -- and the standalone decimator
+	  (src/dsp_decimator.c), which ALP_SDK_AUDIO_IN also compiles on its
+	  own for PDM resampling.  Provides the standalone
 	  alp_dsp_chain_* surface for in-RAM FIR / IIR / window /
 	  FFT processing against int16 mV-scale buffers.  Uses
 	  CMSIS-DSP when ALP_HAS_CMSIS_DSP=1; otherwise falls back

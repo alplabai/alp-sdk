@@ -160,3 +160,63 @@ do_compile:prepend:rzv2n-family() {
             ;;
     esac
 }
+
+# ---- Alif Ensemble console UART knobs (#1979) ----
+#
+# Alif's TF-A port (a SEPARATE upstream from the Renesas one above --
+# both happen to share PN=trusted-firmware-a, which is why this single
+# bbappend file matches both) hardcodes its BL32 console to the Alif
+# DevKit's UART2 in two places that must move together: the register
+# base and the console pinmux. alif-console-uart-build-knobs.patch
+# (this recipe's ${PN} dir) replaces both hardcoded values with
+# #ifndef-guarded macros defaulting to the unmodified DevKit UART2, so
+# an unset build is byte-identical. Verified by `patch -p1 --dry-run`
+# and `git apply --check` against the real upstream source
+# (alifsemi/trusted-firmware-a_alif, branch alif_lts-v2.10.8) -- not
+# yet bench-verified on real E1M-AEN801 silicon.
+#
+# Applied to BOTH e1m-aen801 (E8) and e1m-aen701 (E7): they are the
+# same AEN carrier PCB (metadata/pinmux/aen.yaml,
+# metadata/e1m_modules/aen/from-alif.tsv both route SoC UART5 to
+# F2/G2 = P3_5/P3_4 with no per-SKU variant) and both build TF-A via
+# the shared PLAT=devkit_e7 plat directory this patch touches. The two
+# MACHINEs have no common MACHINEOVERRIDES tag other than the
+# repo-wide `e1m` (also shared by e1m-nx9101-a55, which must NOT pick
+# this up), so the knobs are duplicated per-override below rather than
+# hung off a shared override.
+#
+# INERT TODAY: neither MACHINE=e1m-aen801-a32 nor e1m-aen701-a32 parses
+# (see the header of e1m-aen801-a32.conf -- no public Scarthgap
+# meta-alif-ensemble/devkit-e8.conf exists yet, #1968 #1971), so the
+# lines below never fire and cannot affect the working rzv2n-family
+# (Renesas) TF-A build above, which shares this recipe's PN but is
+# gated on a disjoint override. Once an Alif Scarthgap TF-A recipe is
+# wired for e1m-aen801/e1m-aen701, this patch and its knobs activate
+# with no further changes needed here -- confirm PN is still
+# trusted-firmware-a and TF-A_EXTRA_OPTIONS is still the passthrough
+# var (both were true on the devkit-ex-b0-branch recipe used to
+# validate this patch during #1979's bring-up) before relying on that.
+SRC_URI:append:e1m-aen801 = " file://alif-console-uart-build-knobs.patch"
+SRC_URI:append:e1m-aen701 = " file://alif-console-uart-build-knobs.patch"
+
+# E1M-AEN801/E1M-AEN701 EVK routes SoC UART5 (P3_4/P3_5, alternate
+# function 2) to its console header; UART2 (the Alif DevKit default)
+# is not brought out. Verified during the 2026-09-05 E8 A32 Linux
+# bring-up (#1972) by disassembly of a locally-patched build -- the
+# two pinconf_set() call sites loaded r0=3 r1=4 r2=2 / r0=3 r1=5 r2=2,
+# and 4901d000 (UART5) appeared in the image while 4901a000 (UART2)
+# did not. E1M-AEN701 shares the same carrier routing (same PCB, same
+# pinmux table) but this exact base has not itself been disassembled
+# on an E7 build -- flag any discrepancy found during E7 bring-up.
+TF-A_EXTRA_OPTIONS:append:e1m-aen801 = " \
+    ALIF_CONSOLE_UART_BASE=0x4901D000 \
+    ALIF_CONSOLE_RX_PORT=PORT_3 ALIF_CONSOLE_RX_PIN=PIN_4 \
+    ALIF_CONSOLE_TX_PORT=PORT_3 ALIF_CONSOLE_TX_PIN=PIN_5 \
+    ALIF_CONSOLE_PIN_FUNC=PINMUX_ALTERNATE_FUNCTION_2 \
+"
+TF-A_EXTRA_OPTIONS:append:e1m-aen701 = " \
+    ALIF_CONSOLE_UART_BASE=0x4901D000 \
+    ALIF_CONSOLE_RX_PORT=PORT_3 ALIF_CONSOLE_RX_PIN=PIN_4 \
+    ALIF_CONSOLE_TX_PORT=PORT_3 ALIF_CONSOLE_TX_PIN=PIN_5 \
+    ALIF_CONSOLE_PIN_FUNC=PINMUX_ALTERNATE_FUNCTION_2 \
+"

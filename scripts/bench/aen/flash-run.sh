@@ -118,6 +118,7 @@ JSON
 cd "$SET"
 echo ">>> FLASH $NAME  (ram_console_buf=${BUF_SYM:-none (UART console)})" >&2
 ./app-gen-toc -f "build/config/$NAME.json" >/tmp/gentoc.log 2>&1 || { echo "gen-toc FAILED"; tail /tmp/gentoc.log; exit 1; }
+bench_atoc_extent_guard build/app-package-map.txt || exit 1
 
 # 2. GUARD (alp-sdk#2025) -- app-write-mram -p below REPLACES the whole
 # resident ATOC, it does not merge (step 1 comment). One Flow A run on

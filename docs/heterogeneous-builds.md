@@ -255,6 +255,19 @@ CM33 image with IPC enabled writes its resource table and vrings into
 pages Linux has already handed out. `e1m-v2n-som.dtsi` reserves it
 no-map (#2374, tracked for downstream docs at #2415).
 
+The same file declares the seven `generic-uio` nodes the `alp_rpc` UIO
+backend opens, named for their sysfs `name` (`4f700000.rsctbl`,
+`4f701000.mhu-shm`, `4f800000.vring-ctl0`, `4f850000.vring-ctl1`,
+`4f900000.vring-shm0`, `4fc00000.vring-shm1` and `10480000.mhu-uio`).
+Only `mhu-uio` carries an interrupt (`GIC_SPI 404`). `uio.cfg` enables
+`CONFIG_UIO` and `CONFIG_UIO_PDRV_GENIRQ`, and patch 0012 makes
+`generic-uio` the default `uio_pdrv_genirq` match, so
+`uio_pdrv_genirq.of_id=generic-uio` no longer has to be in the bootargs.
+Bench-verified on E1M-V2M103 silicon (2026-09-30): all seven devices bind
+(`uio0` rsctbl `0x4f700000`/`0x1000` through `uio6` mhu-uio
+`0x10480000`/`0x1000`), `/proc/interrupts` shows `GICv3 436 Level mhu-uio`,
+and `0x4f700000-0x4fffffff` is listed `reserved` in `/proc/iomem`.
+
 For each `ipc:` entry, `tan build`
 emits a header both halves `#include`:
 

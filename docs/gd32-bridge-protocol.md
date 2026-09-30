@@ -63,7 +63,7 @@ byte; their numeric encoding is:
 | `0x61` | `QENC_RESET`          | `encoder:u8`                                       | _empty_                                            |
 | `0x70` | `COUNTER_READ`        | `counter:u8`                                       | `ticks:u32`                                        |
 | `0x22` | `PWM_CONFIGURE`       | `channel:u8 align:u8 dead_time_ns:u32 break_cfg:u8` | _empty_ (see §3.8; `align` applied, `dead_time_ns`/`break_cfg` return `STATUS_NOSUPPORT` -- V2N routes only single-ended outputs / no BRK pad) |
-| `0x32` | `ADC_CONFIGURE`       | `channel:u8 reserved:u8 oversample:u16 sample_cycles:u16 resolution:u8` | _empty_ (see §3.9; `sample_cycles`/`oversample`/6-12b `resolution` sticky; 14/16b return `STATUS_NOSUPPORT`) |
+| `0x32` | `ADC_CONFIGURE`       | `channel:u8 reserved:u8 oversample:u16 sample_cycles:u16 resolution:u8` | _empty_ (see §3.9; `sample_cycles`/`oversample`/6-12b `resolution` sticky; 14/16b unsupported by the hardware, return `STATUS_NOSUPPORT`) |
 | `0x33` | `ADC_STREAM_BEGIN`    | `stream_id:u8 channel:u8 reserved:u8 sample_rate_hz:u32` | _empty_                                      |
 | `0x34` | `ADC_STREAM_READ`     | `stream_id:u8 max_samples:u8`                      | `got:u8 mv[max_samples]:u16` (zero-padded)         |
 | `0x35` | `ADC_STREAM_END`      | `stream_id:u8`                                     | _empty_                                            |
@@ -636,18 +636,18 @@ reply is empty.
 * `oversample_ratio` is one of 1/2/4/8/16/32/64/128/256.  0 means
   "firmware default" (per-channel-configured at build time).  The
   firmware rounds down to the nearest power-of-two.
-* `sample_cycles` is a direct sample-and-hold cycle count written to
-  the routine-sequence `SMP` field (GD32G5x3 accepts `2..638` ADCCK);
-  the firmware clamps into that range.  `0` means "firmware default"
+* `sample_cycles` is the raw RSMP value in ADCCK cycles (sample time =
+  value + 2.5 cycles; the vendor `adc_routine_channel_config`
+  `sample_time` argument), not microseconds and not a rung selector; the
+  firmware clamps it into `2..638`.  `0` means "firmware default"
   (240 cycles) -- a `0` here is NOT the fastest window, so an
   oversample-only reconfigure keeps the settling time its high-Z
   inputs need.
 * `resolution_bits` is 0 (default = 12) / 6 / 8 / 10 / 12 (hardware
-  `DRES`) / 14 / 16.  The mV conversion divides by the width's
+  `DRES`); 14 / 16 are accepted on the wire but unsupported.  The mV conversion divides by the width's
   full-scale (`4095`/`1023`/`255`/`63` for 12/10/8/6).  `14`/`16` are
-  effective-resolution modes reachable only by under-shifting an
-  oversampled accumulator (the `DRES` field tops out at 12-bit); that
-  extension has not landed, so they reply `STATUS_NOSUPPORT`.  Any
+  not supported by the GD32G553 (the `DRES` field tops out at 12-bit),
+  so they reply `STATUS_NOSUPPORT`.  Any
   other width replies `STATUS_INVAL`.
 
 The GD32 returns ADC readings as 16-bit millivolts (`ADC_READ` /
@@ -669,9 +669,8 @@ the converter on the next `ADC_READ` / `ADC_STREAM_BEGIN` (inside the
 * `resolution_bits` `0` means default (12); `6`/`8`/`10`/`12` map to the
   hardware `DRES` field and the mV conversion divides by that width's
   full-scale (`4095`/`1023`/`255`/`63`).  `14`/`16` are
-  effective-resolution modes reachable only by under-shifting an
-  oversampled accumulator (the `DRES` field tops out at 12-bit); that
-  extension has not landed, so they still return `STATUS_NOSUPPORT`.
+  not supported by the GD32G553 (the `DRES` field tops out at 12-bit),
+  so they return `STATUS_NOSUPPORT`.
   Any other width returns `STATUS_INVAL`.
 
 ### 3.10 ADC streaming (`v0.3+`)
@@ -1275,8 +1274,10 @@ USART-only (User Manual Rev1.2 §1.4).
 normal upgrade path).**
 
 * A 32 KB bootloader lives at the base of GD32 flash, never
-  overwritten by a field upgrade; two 236 KB **slots** sit in upper
-  flash with an A/B metadata pair between them.  The active slot
+  overwritten by a field upgrade, followed by the A/B metadata pair
+  (`0x08008000`) and two 216 KB **slots**: slot A at `0x0800A000` in
+  flash bank 0 and slot B at `0x08040000`, the start of bank 1, so an
+  upgrade erases only the bank the running image is not executing from.  The active slot
   runs at boot while the inactive slot receives the upgrade;
   roll-back is a metadata flip + reset.  Destructive flashing is
   armed only in `-DBRIDGE_OTA_PARTITIONED` firmware builds — the
@@ -1299,7 +1300,10 @@ firmware in `gd32-bridge-firmware:src/ota.c`):
 
 Value encodings: `state` = 0 IDLE / 1 READY / 2 BUSY / 3 VERIFIED /
 4 ERROR; slot bytes = 0 A / 1 B / `0xFF` none-pending.  `WRITE_CHUNK`
-offsets must land on 8-byte (FMC doubleword) boundaries; the image
+offsets must land on 8-byte (FMC doubleword) boundaries -- firmware
+advertises `chunk_max` = 56 (the largest multiple of 8 that fits the
+envelope), and a misaligned offset answers `STATUS_INVAL` (0x01) with
+the session left READY, so the host can resend at a valid offset; the image
 CRC-32 is IEEE 802.3 reflected (zlib-compatible) -- host code computes
 the `expected_crc32` BEGIN wants (and cross-checks VERIFY's
 `computed_crc32`) with `gd32g553_ota_image_crc32()`

@@ -315,6 +315,27 @@ target_compile_features(alp_test_inference_latency PRIVATE c_std_99)
 add_test(NAME alp_test_inference_latency
          COMMAND alp_test_inference_latency)
 
+# Format-vs-backend gate regression (issue #2389): alp_inference_open()
+# must reject a cfg->format the resolved backend cannot parse (AUTO
+# resolving to DRP-AI, fed an ONNX blob) with ALP_ERR_INVAL before any
+# backend open hook runs.  Same #include-the-.c technique as
+# alp_test_inference_latency, through two fake backends (DRPAI + CPU).
+add_executable(alp_test_inference_format_gate
+    ${CMAKE_CURRENT_SOURCE_DIR}/inference_format_gate.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
+)
+target_include_directories(alp_test_inference_format_gate PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+)
+target_compile_features(alp_test_inference_format_gate PRIVATE c_std_99)
+
+add_test(NAME alp_test_inference_format_gate
+         COMMAND alp_test_inference_format_gate)
+
 # Issue #1254 end-to-end regression: an "onnx" blob_format .alpmodel,
 # decoded by the REAL zcbor-backed alp_model_parse() (src/common/
 # alp_model.c, compiled in place of the ALP_ERR_NOSUPPORT stub only
