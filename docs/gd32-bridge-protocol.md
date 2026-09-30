@@ -332,8 +332,8 @@ indefinitely; host code SHOULD NOT call it.
 
 `mask` selects which GD32 pads the host wants to read or write.  The
 mask is a **logical** index space owned by the GD32 firmware — the
-bit-to-pad mapping (bits 0..19) is documented in
-`gd32-bridge-firmware:README.md`; the host header names only bits 18/19
+bit-to-pad mapping (bits 0..20, 21 pads) is documented in
+`gd32-bridge-firmware:README.md`; the host header names only bits 18/19/20
 (below).  The host MUST NOT assume that
 bit `n` corresponds to GD32 pad `Pxn`.
 
@@ -344,7 +344,8 @@ cannot interleave a partial state.
 
 At protocol minor `>= 11` (firmware `0.2.12`), the pad map grows from
 18 to 20 lines, adding the on-module Murata LBEE5HY2FY-922 (Infineon
-CYW55513) Wi-Fi+BT module's two REG_ON enables:
+CYW55513) Wi-Fi+BT module's two REG_ON enables; at minor `>= 13`
+(firmware `0.2.16`) it grows to 21 lines (bits 0..20) with `can-stby`:
 
 | Bit | Name       | GD32 pad | Boot state   | Host macro |
 |-----|------------|----------|--------------|------------|
@@ -362,8 +363,9 @@ Both enables drive their module low-then-high: the host holds
 `GPIO_WRITE` low for >= 10 ms before the rising edge, matching the
 on-module Murata LBEE5HY2FY-922's REG_ON timing requirement.
 
-The Linux `gpio-gd32-bridge` driver additionally exports line 21 `se-rst` (line 20 is
-`can-stby`, bridge bit 20, #2341, a live hog-driven line), which is not a `GPIO_WRITE` pad: setting it sends `CMD_SE_RESET`
+The Linux `gpio-gd32-bridge` driver exports 22 gpiochip lines: lines 0..20 map 1:1 to
+bridge pad bits 0..20 (line 20 is `can-stby`, #2341, a live hog-driven line), and
+line 21 `se-rst` is not a `GPIO_WRITE` pad: setting it sends `CMD_SE_RESET`
 (`0x41`, payload one byte, 1 = assert = hold the OPTIGA Trust M in reset) and
 it is never replayed, so a bridge reset leaves the part released. Userspace
 pulses it through the gpiochip labelled `gd32-bridge-gpio` instead of opening
