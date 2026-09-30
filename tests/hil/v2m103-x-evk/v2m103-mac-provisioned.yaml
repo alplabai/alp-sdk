@@ -1,26 +1,52 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# E1M-V2M103 U-Boot-derived Ethernet MAC: end0 carries a locally
-# administered address with the A2: prefix, i.e. not a vendor-OUI default.
-# Reads sysfs only; per-unit octets 2..6 are not asserted.
+# E1M-V2M103 U-Boot-derived Ethernet MAC: end0 must equal the MAC derived
+# from the EEPROM serial (bytes 56..67, `YYYYWww-IIII`), per
+# scripts/alp_eth_mac.py and U-Boot patch 0010 (metadata/identity/serial-mac.json):
+#   A2 | 0xC:4 | year-2024:6 | week:6 | Crockford index:20 | iface:2 | 0:2
+# with iface 0 for end0.  The serial is read with the same read-only
+# i2ctransfer as v2m103-eeprom-manifest; the derivation is POSIX shell
+# arithmetic (64-bit), so no python is needed on the target.  Only fails
+# to apply if U-Boot fell back to the eMMC-CID MAC (serial missing/invalid).
 
 schema_version: 1
 name: v2m103-mac-provisioned
 description: |
-  /sys/class/net/end0/address is locally administered A2:xx:xx:xx:xx:xx.
+  /sys/class/net/end0/address equals the MAC derived from the EEPROM serial.
 
 flash_method: ssh-run
 ssh_command: |-
+  d=$(i2ctransfer -f -y 0 w2@0x50 0x00 0x00 r128 2>/dev/null) || { echo HIL_MAC_READ_FAILED; exit 0; }
+  set -- $d; i=0; ser=
+  for b; do
+    v=$((b)); c=; [ "$v" -ne 0 ] && c=$(printf "\\$(printf %03o "$v")")
+    [ "$i" -ge 56 ] && [ "$i" -lt 68 ] && ser=$ser$c
+    i=$((i+1))
+  done
   m=$(cat /sys/class/net/end0/address 2>/dev/null)
-  echo "HIL_MAC_PREFIX ${m%%:*}"
-  case "$m" in
-    [aA]2:??:??:??:??:??) echo HIL_MAC_A2_OK;;
-    *) echo HIL_MAC_NOT_A2;;
+  echo "HIL_MAC_ACTUAL $m SERIAL $ser"
+  case "$ser" in
+    [0-9][0-9][0-9][0-9]W[0-9][0-9]-[0-9A-Za-z][0-9A-Za-z][0-9A-Za-z][0-9A-Za-z]) ;;
+    *) echo HIL_MAC_BAD_SERIAL; exit 0;;
   esac
+  A=0123456789ABCDEFGHJKMNPQRSTVWXYZ
+  y=$(( ${ser%%W*} - 2024 ))
+  r=${ser#*W}; w=$(expr "${r%%-*}" + 0)
+  idx=0
+  for c in $(echo "${r#*-}" | tr a-z A-Z | sed 's/./& /g'); do
+    case "$A" in *$c*) ;; *) echo HIL_MAC_BAD_SERIAL; exit 0;; esac
+    p=${A%%$c*}; idx=$(( idx * 32 + ${#p} ))
+  done
+  pl=$(( (12 << 36) | (y << 30) | (w << 24) | (idx << 4) ))
+  e=$(printf "A2:%02X:%02X:%02X:%02X:%02X" $(( (pl >> 32) & 255 )) $(( (pl >> 24) & 255 )) $(( (pl >> 16) & 255 )) $(( (pl >> 8) & 255 )) $(( pl & 255 )))
+  echo "HIL_MAC_EXPECTED $e"
+  [ "$(echo "$m" | tr a-f A-F)" = "$e" ] && echo HIL_MAC_DERIVED_OK || echo HIL_MAC_MISMATCH
 
 serial:
-  duration_s: 10
+  duration_s: 15
   expect_contains:
-    - "HIL_MAC_A2_OK"
+    - "HIL_MAC_DERIVED_OK"
   expect_absent:
-    - "HIL_MAC_NOT_A2"
+    - "HIL_MAC_MISMATCH"
+    - "HIL_MAC_BAD_SERIAL"
+    - "HIL_MAC_READ_FAILED"

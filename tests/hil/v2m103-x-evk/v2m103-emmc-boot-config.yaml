@@ -12,7 +12,7 @@ description: |
 flash_method: ssh-run
 ssh_command: |-
   o=$(mmc extcsd read /dev/mmcblk0 2>&1) || { echo HIL_EXTCSD_READ_FAILED; exit 0; }
-  echo "$o" | grep -E '^\[(PARTITION_CONFIG|BOOT_BUS_CONDITIONS)|\[(179|177)\]'
+  echo "$o" | grep -E '\[(PARTITION_CONFIG|BOOT_BUS_CONDITIONS)|\[(179|177)\]'
   echo "$o" | grep -Eq '\[PARTITION_CONFIG: 0x08\]|\[179\]: 0x08' && echo HIL_EXTCSD_179_OK
   echo "$o" | grep -Eq '\[BOOT_BUS_CONDITIONS: 0x02\]|\[177\]: 0x02' && echo HIL_EXTCSD_177_OK
 
