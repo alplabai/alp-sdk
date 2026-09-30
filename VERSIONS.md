@@ -599,7 +599,7 @@ target — porting across all four SoMs is additive.
 **ML / AI ecosystem** (the SDK's headline differentiator):
 
 - TensorFlow Lite Micro full integration + per-NPU optimizer hooks (Vela for Ethos-U, DRP-AI converter, DEEPX DX-COM compiler) (medium).
-- ONNX runtime backend — cross-NPU portability so customer models trained in PyTorch run anywhere (large).  **CPU floor landed 2026-08** as the A55/Yocto `ALP_INFERENCE_BACKEND_CPU` backend (`src/yocto/inference_ort.cpp`, own `meta-alp-sdk` recipe against upstream `onnxruntime` v1.28.0) — see CHANGELOG [Unreleased]; default off (`ALP_SDK_USE_ORT_CPU`), not yet run on silicon, no `.alpmodel` route yet.  Cross-NPU execution-provider dispatch remains future work.
+- ONNX runtime backend — cross-NPU portability so customer models trained in PyTorch run anywhere (large).  **CPU floor landed 2026-08** as the A55/Yocto `ALP_INFERENCE_BACKEND_CPU` backend (`src/yocto/inference_ort.cpp`, own `meta-alp-sdk` recipe against upstream `onnxruntime` v1.28.0) — see CHANGELOG [Unreleased]; default off in CMake (`ALP_SDK_USE_ORT_CPU`) but on by default in the V2M101/V2M102/V2M103/V2N101/V2N102/V2N103 images via `ALP_ENABLE_ORT_CPU` (#1259; V2M with the DEEPX runtime defaults it off, dx-rt ships its own libonnxruntime), not yet run on silicon, no `.alpmodel` route yet.  Cross-NPU execution-provider dispatch remains future work.
 - LiteRT (TFLite rebrand) tracking — keep current as Google ships (small ongoing).
 - Model zoo — pre-quantized vision (YOLO-NAS / DETR / EfficientNet) + audio (KWS / VAD / Wake-Word) + anomaly (autoencoder family) per NPU (medium per family).
 - One-command quantize-and-deploy CLI — `tan model deploy model.onnx --target aen701` does the full chain (medium).
