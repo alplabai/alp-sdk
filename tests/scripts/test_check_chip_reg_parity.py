@@ -50,7 +50,7 @@ def test_clean_tree_passes(tmp_path):
 def test_act8760_rail_reg_typo_fails(tmp_path):
     root = _copy_corpus(tmp_path)
     p = root / "metadata" / "chips" / "act8760.yaml"
-    p.write_text(p.read_text().replace("vset0_reg: 0x42,", "vset0_reg: 0x4A,"))
+    p.write_text(encoding="utf-8", data=p.read_text(encoding="utf-8").replace("vset0_reg: 0x42,", "vset0_reg: 0x4A,"))
     problems = gate.find_problems(root)
     assert any("buck1" in msg and "vset0_reg" in msg for msg in problems)
 
@@ -58,8 +58,8 @@ def test_act8760_rail_reg_typo_fails(tmp_path):
 def test_act8760_write_allow_flip_fails(tmp_path):
     root = _copy_corpus(tmp_path)
     p = root / "metadata" / "chips" / "act8760.yaml"
-    p.write_text(
-        p.read_text().replace(
+    p.write_text(encoding="utf-8", data=
+        p.read_text(encoding="utf-8").replace(
             'name: "MODE4_MUX4", type: rw, write: guarded',
             'name: "MODE4_MUX4", type: rw, write: allow',
         )
@@ -71,8 +71,8 @@ def test_act8760_write_allow_flip_fails(tmp_path):
 def test_da9292_ch2_en_bit_move_fails(tmp_path):
     root = _copy_corpus(tmp_path)
     p = root / "chips" / "da9292" / "da9292.c"
-    p.write_text(
-        p.read_text().replace(
+    p.write_text(encoding="utf-8", data=
+        p.read_text(encoding="utf-8").replace(
             "#define DA9292_CTRL01_CH2_EN     (1u << 1)",
             "#define DA9292_CTRL01_CH2_EN     (1u << 2)",
         )
@@ -84,8 +84,8 @@ def test_da9292_ch2_en_bit_move_fails(tmp_path):
 def test_tps628640_vout_reg_typo_fails(tmp_path):
     root = _copy_corpus(tmp_path)
     p = root / "include" / "alp" / "chips" / "tps628640.h"
-    p.write_text(
-        p.read_text().replace(
+    p.write_text(encoding="utf-8", data=
+        p.read_text(encoding="utf-8").replace(
             "#define TPS628640_REG_VOUT1   0x01u",
             "#define TPS628640_REG_VOUT1   0x04u",
         )
