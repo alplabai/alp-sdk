@@ -108,9 +108,9 @@ chips:
 # generated overlay layers AFTER the curated defaults, so a bad value
 # silently overrides `zephyr/sysbuild/aen/sysbuild.conf`.
 #
-# This points at the local development key, matching that same
-# sysbuild.conf.  It is gitignored and generated once per clone:
-#     bash keys/generate_dev_key.sh
+# This points at the committed shared development key, matching that
+# same sysbuild.conf: the factory MCUboot on pre-provisioned modules
+# trusts it (#2421), and it is public, so it gives no security.
 # Production images are re-signed in the manufacturing CA's HSM, where
 # the private key never leaves the signer -- the build-time key is
 # never the production one (see docs/secure-boot.md "Signing key
@@ -119,7 +119,7 @@ boot:
   method: mcuboot
   signing:
     algorithm: ecdsa_p256
-    key_file:  keys/mcuboot_dev_ecdsa_p256.pem
+    key_file:  keys/mcuboot_shared_dev_ecdsa_p256.pem
 
 # ----------------------------------------------------------------
 # OTA (project-wide, board.yaml v0.6 `ota:` block).

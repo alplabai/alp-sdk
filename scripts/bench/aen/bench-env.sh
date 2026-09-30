@@ -521,12 +521,51 @@ bench_jlink_exe() {
 	# pin a specific one deliberately (e.g. to reproduce an older result).
 	# Search root is overridable and defaults under $HOME -- never a hardcoded
 	# maintainer path (scripts/check_public_private.py enforces this).
+	#
+	# alp-sdk#2237: when BENCH_JLINK_RUNNING_FW holds the probe's running
+	# firmware string (bench_jlink_run reads it over OpenOCD first), prefer the
+	# NEWEST install whose bundled Firmwares/JLink_V*.bin carries that exact
+	# string, so JLinkExe never even has a newer image to offer the probe. The
+	# bench J-Links are OEM clones and a SEGGER firmware write to one bricks it
+	# for good; the unconditional `exec DisableAutoUpdateFW` prelude in
+	# bench_jlink_run stays as the second layer. No match (or no string): the
+	# newest install, as before. Same selection as board-farm's jlink-run.sh.
+	# Installs are searched under ALP_JLINK_SEARCH_ROOT (JLink_Linux_V*_x86_64)
+	# and SEGGER's default /opt/SEGGER (JLink_V*); the version is parsed from
+	# the directory name, never a lexical sort of the full path.
 	if [ -z "$exe" ]; then
-		local cand
-		for cand in "${ALP_JLINK_SEARCH_ROOT:-$HOME/segger-latest}"/JLink_Linux_V*_x86_64/JLinkExe; do
-			[ -x "$cand" ] && exe="$cand"
+		local d v b img best_v="" newest_v="" newest="" match=""
+		for d in "${ALP_JLINK_SEARCH_ROOT:-$HOME/segger-latest}"/JLink_Linux_V*_x86_64 \
+			"${ALP_JLINK_OPT_ROOT:-/opt/SEGGER}"/JLink_V*; do
+			[ -x "$d/JLinkExe" ] || continue
+			v=$(basename "$d" | grep -oE 'V[0-9]+' | head -1 | tr -d 'V')
+			[ -n "$v" ] || continue
+			if [ -z "$newest_v" ] || [ "$v" -gt "$newest_v" ]; then
+				newest_v="$v"
+				newest="$d/JLinkExe"
+			fi
+			[ -n "${BENCH_JLINK_RUNNING_FW:-}" ] || continue
+			for img in "$d"/Firmwares/JLink_V*.bin; do
+				[ -f "$img" ] || continue
+				b=$(grep -aoE 'J-Link V[0-9]+ compiled [A-Za-z]+ +[0-9]+ [0-9]{4} [0-9:]+' "$img" | head -1)
+				[ "$b" = "$BENCH_JLINK_RUNNING_FW" ] || continue
+				if [ -z "$best_v" ] || [ "$v" -gt "$best_v" ]; then
+					best_v="$v"
+					match="$d/JLinkExe"
+				fi
+			done
 		done
-		[ -n "$exe" ] || exe="JLinkExe"
+		if [ -n "$match" ]; then
+			exe="$match"
+			echo "bench-env: J-Link install $exe (bundle matches probe firmware '$BENCH_JLINK_RUNNING_FW')" >&2
+		elif [ -n "$newest" ]; then
+			exe="$newest"
+			if [ -n "${BENCH_JLINK_RUNNING_FW:-}" ]; then
+				echo "bench-env: J-Link install $exe (newest; no bundle matches probe firmware '$BENCH_JLINK_RUNNING_FW' -- relying on DisableAutoUpdateFW)" >&2
+			fi
+		else
+			exe="JLinkExe"
+		fi
 	fi
 
 	if ! command -v "$exe" >/dev/null 2>&1 && [ ! -x "$exe" ]; then
@@ -639,6 +678,27 @@ bench_jlink_run() {
 		return 9
 	fi
 	port="$LG_SWD_PATH"
+
+	# alp-sdk#2237: read the probe's RUNNING firmware by USB path over OpenOCD
+	# (which never offers a firmware update) so bench_jlink_exe can pick the
+	# install whose bundle matches it. JLINK_EXE, when set, still wins; a dry
+	# run never touches hardware; an unreadable probe (board off, no openocd)
+	# leaves the old newest-install choice in place.
+	if [ -z "${JLINK_EXE:-}" ] && [ -z "${BENCH_JLINK_RUN_DRY_RUN:-}" ] &&
+		[ -z "${BENCH_JLINK_RUNNING_FW:-}" ] && command -v openocd >/dev/null 2>&1; then
+		local running_fw
+		running_fw=$(openocd -c "adapter driver jlink" -c "adapter usb location $port" \
+			-c "transport select swd" -c "adapter speed 1000" \
+			-c "reset_config none separate" \
+			-c "gdb_port disabled" -c "telnet_port disabled" -c "tcl_port disabled" \
+			-c "swd newdap chip cpu -expected-id 0" \
+			-c "dap create chip.dap -chain-position chip.cpu" \
+			-c "init" -c "shutdown" 2>&1 |
+			grep -oE 'J-Link V[0-9]+ compiled [A-Za-z]+ +[0-9]+ [0-9]{4} [0-9:]+' | head -1 || true)
+		if [ -n "$running_fw" ]; then
+			jlink="$(BENCH_JLINK_RUNNING_FW="$running_fw" bench_jlink_exe)" || return $?
+		fi
+	fi
 	if [ ! -d "$sysfs_root/$port" ]; then
 		echo "bench-env: bench_jlink_run: no USB device at sysfs path '$port' (from LG_SWD_PATH) --" >&2
 		echo "           the probe may have been unplugged/re-enumerated since LG_PLACE was resolved." >&2

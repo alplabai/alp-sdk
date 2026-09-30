@@ -87,6 +87,39 @@ static void bridge_stream_free_slot(uint8_t slot)
 	bridge_streams_used &= (uint8_t)~(1u << slot);
 	k_mutex_unlock(&bridge_stream_lock);
 }
+
+/* Bounded retry for STREAM_END: a busy / timed-out supervisor acquire must
+ * not be read as "stream ended".  5 x (acquire timeout + 20 ms) keeps a
+ * close bounded (~0.6 s worst case at the default 100 ms acquire timeout). */
+#define BRIDGE_STREAM_END_TRIES      5
+#define BRIDGE_STREAM_END_BACKOFF_MS 20
+
+/* Stop the GD32 stream in @p slot, and free the slot ONLY once the GD32
+ * confirmed it is stopped (ALP_OK, or ALP_ERR_INVAL = it reports the
+ * stream not active, e.g. after a GD32 reset).  If STREAM_END cannot be
+ * delivered the GD32 stream is still running, and handing the slot back
+ * would let the next open's STREAM_BEGIN hit that live stream
+ * (STATUS_INVAL, forever).  So the slot stays reserved and the last
+ * error is returned; a later open then reports ALP_ERR_BUSY instead. */
+static alp_status_t bridge_stream_end_and_free(uint8_t slot)
+{
+	alp_status_t s = ALP_ERR_BUSY;
+
+	for (int i = 0; i < BRIDGE_STREAM_END_TRIES; i++) {
+		gd32g553_t *ctx = NULL;
+		s               = alp_z_v2n_supervisor_acquire(&ctx);
+		if (s == ALP_OK) {
+			s = gd32g553_adc_stream_end(ctx, slot);
+			alp_z_v2n_supervisor_release();
+			if (s == ALP_OK || s == ALP_ERR_INVAL) {
+				bridge_stream_free_slot(slot);
+				return ALP_OK;
+			}
+		}
+		k_msleep(BRIDGE_STREAM_END_BACKOFF_MS);
+	}
+	return s;
+}
 #endif /* ALP_ADC_HAS_BRIDGE_PATH */
 
 /* One-shot ADC (alp_adc_open / read_raw / read_uv / close) is served by the
@@ -170,12 +203,10 @@ alp_adc_stream_t *alp_adc_stream_open(const alp_adc_stream_config_t *cfg)
 
 	struct alp_adc_stream *h = alp_z_adc_stream_pool_acquire();
 	if (h == NULL) {
-		/* Roll the bridge stream back so the slot is reusable. */
-		if (alp_z_v2n_supervisor_acquire(&ctx) == ALP_OK) {
-			(void)gd32g553_adc_stream_end(ctx, (uint8_t)slot);
-			alp_z_v2n_supervisor_release();
-		}
-		bridge_stream_free_slot((uint8_t)slot);
+		/* Roll the bridge stream back so the slot is reusable.  If the
+		 * STREAM_END is not confirmed the slot stays reserved (see
+		 * bridge_stream_end_and_free); the caller still gets NOMEM. */
+		(void)bridge_stream_end_and_free((uint8_t)slot);
 		alp_z_set_last_error(ALP_ERR_NOMEM);
 		return NULL;
 	}
@@ -282,12 +313,11 @@ void alp_adc_stream_close(alp_adc_stream_t *stream)
 	}
 #if ALP_ADC_HAS_BRIDGE_PATH
 	if (stream->via_bridge) {
-		gd32g553_t *ctx = NULL;
-		if (alp_z_v2n_supervisor_acquire(&ctx) == ALP_OK) {
-			(void)gd32g553_adc_stream_end(ctx, stream->stream_id);
-			alp_z_v2n_supervisor_release();
-		}
-		bridge_stream_free_slot(stream->stream_id);
+		/* close() is void, so an unconfirmed STREAM_END cannot be
+		 * reported here: the slot just stays reserved (a later open
+		 * returns ALP_ERR_BUSY) rather than being recycled under a
+		 * still-running GD32 stream. */
+		(void)bridge_stream_end_and_free(stream->stream_id);
 	}
 #endif
 	/* UNOPENED before the slot goes back to the pool, so the next

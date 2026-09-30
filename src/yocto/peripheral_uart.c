@@ -4,29 +4,26 @@
  *
  * Linux userspace UART backend for <alp/peripheral.h>'s alp_uart_* surface.
  *
- * Binds against tty character devices at `/dev/ttyN` (16550-style
- * UARTs surfaced through 8250) or `/dev/ttyAMA<N>` / `/dev/ttyS<N>`
- * / `/dev/ttyUSB<N>` depending on the SoC's serial controller.
+ * Binds against tty character devices: `/dev/ttyS<N>`, `/dev/ttyAMA<N>`,
+ * `/dev/ttySC<N>` (Renesas SCIF, e.g. RZ/V2N) or `/dev/ttyUSB<N>`
+ * depending on the SoC's serial controller.
  *
  * Path resolution is intentionally simple: `alp_uart_config_t.port_id`
- * maps to `/dev/tty<port_id>` via a small lookup table.  Boards
+ * selects a device family by range (see resolve_path()).  Boards
  * that need symbolic naming (e.g. "debug-uart" -> "/dev/ttyAMA0")
  * resolve those names ahead of `alp_uart_open` -- this layer is
- * the raw binding.  The lookup table covers the common Linux
- * embedded conventions:
+ * the raw binding.
  *
- *   port_id  device
- *   -------  -----------
- *   0        /dev/ttyS0     (legacy ISA / x86 console)
- *   1        /dev/ttyS1
- *   2..3     /dev/ttyS2/3
- *   100+     /dev/ttyAMA<port_id - 100>   (ARM PL011)
- *   200+     /dev/ttyUSB<port_id - 200>   (USB-serial adapters)
+ *   port_id   device
+ *   --------  -----------
+ *   0..99     /dev/ttyS<port_id>            (8250 / 16550)
+ *   100..199  /dev/ttyAMA<port_id - 100>    (ARM PL011)
+ *   200..299  /dev/ttyUSB<port_id - 200>    (USB-serial adapters)
+ *   300..399  /dev/ttySC<port_id - 300>     (Renesas SCIF, RZ/V2N)
+ *   >= 400    ALP_ERR_INVAL
  *
- * Most embedded SoCs (Alif, NXP) expose UARTs as /dev/ttyS<N>;
- * the 100/200 ranges cover the cases where that convention
- * doesn't fit.  Customers with non-standard paths can hand the
- * raw device through their own thin wrapper on top of this one.
+ * Customers with non-standard paths can hand the raw device through
+ * their own thin wrapper on top of this one.
  *
  * Baud rates come from termios's documented constants (B9600,
  * B115200, ...) -- non-standard rates fall back to BOTHER +
@@ -122,6 +119,12 @@ static void pool_release(struct alp_uart *h)
 
 static int resolve_path(uint32_t port_id, char *out, size_t cap)
 {
+	if (port_id >= 400u) {
+		return -1;
+	}
+	if (port_id >= 300u) {
+		return snprintf(out, cap, "/dev/ttySC%u", port_id - 300u);
+	}
 	if (port_id >= 200u) {
 		return snprintf(out, cap, "/dev/ttyUSB%u", port_id - 200u);
 	}

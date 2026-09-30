@@ -29,6 +29,13 @@ SDK toolchain) and found as <--artifact-dir>/<example dir name>; the
 runner copies it to the target with scp, runs it over ssh, and applies
 the spec's `serial:` expectations to its output.  The target comes from
 --ssh-host or ALP_HIL_SSH_HOST (no default, same rule as the serial port).
+A spec may also carry `ssh_args: [...]` (argv passed to the remote
+binary) and `ssh_files: [{local: <path relative to --artifact-dir>,
+remote: /tmp/...}]` (extra inputs -- a model bundle, input frames -- scp'd
+alongside the binary before it runs); both are optional and default to
+none.  Instead of an example, an ssh-run spec may carry `ssh_command:` -- a
+read-only shell one-liner run on the target over plain ssh (no binary, no
+scp) -- for checks of the running image (dmesg, /dev, systemd).
 
 Exit codes:
   0  every spec passed
@@ -46,6 +53,7 @@ from __future__ import annotations
 import argparse
 import dataclasses as dc
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -80,7 +88,7 @@ class SmokeSpec:
     """A single resolved smoke spec (after merging with _runner.yaml)."""
     name: str
     description: str
-    example: Path                # repo-relative
+    example: Path | None         # repo-relative; None for ssh_command specs
     board: str
     serial_port: str
     flash_method: str
@@ -88,6 +96,13 @@ class SmokeSpec:
     source_path: Path            # for error messages
     ssh_host: str = ""           # ssh-run: resolved from --ssh-host / env
     artifact_dir: str = ""       # ssh-run: where prebuilt binaries live
+    ssh_args: tuple[str, ...] = ()          # ssh-run: argv passed to the remote binary
+    ssh_command: str = ""        # ssh-run: read-only shell one-liner run on the
+    # target INSTEAD of a prebuilt example binary (no example, no scp)
+    ssh_files: tuple[tuple[str, str], ...] = ()  # ssh-run: (local rel to
+    # --artifact-dir, remote path) pairs scp'd before the binary runs --
+    # e.g. a model bundle tar / input frames an example takes as argv,
+    # not just the binary itself (#1160: v2n-drpai-inference needs both).
 
 
 @dc.dataclass(frozen=True)
@@ -102,7 +117,7 @@ class SmokeResult:
 # ---------------------------------------------------------------------
 
 
-_REQUIRED_TOP = ("schema_version", "name", "example", "serial")
+_REQUIRED_TOP = ("schema_version", "name", "serial")
 _SERIAL_REQUIRED = ("expect_contains",)
 
 
@@ -191,20 +206,39 @@ def parse_spec(spec_path: Path, runner_path: Path | None = None) -> SmokeSpec:
     serial_port = data.get("serial_port") or runner.get("serial_port") or ""
     flash_method = data.get("flash_method") or runner.get("flash_method", "westflash")
 
-    example = Path(data["example"])
-    if not example.is_absolute():
-        example_abs = REPO / example
+    ssh_command = str(data.get("ssh_command") or "").strip()
+    if ssh_command:
+        if flash_method != SSH_RUN:
+            raise SpecError(f"{spec_path}: ssh_command needs flash_method: ssh-run")
+        if "example" in data or data.get("ssh_files") or data.get("ssh_args"):
+            raise SpecError(
+                f"{spec_path}: ssh_command excludes example / ssh_args / ssh_files"
+            )
+        example_abs = None
     else:
-        example_abs = example
-    if not example_abs.is_dir():
-        raise SpecError(
-            f"{spec_path}: example path does not exist: {example_abs}"
-        )
+        if "example" not in data:
+            raise SpecError(f"{spec_path}: missing required key 'example'")
+        example = Path(data["example"])
+        example_abs = example if example.is_absolute() else REPO / example
+        if not example_abs.is_dir():
+            raise SpecError(
+                f"{spec_path}: example path does not exist: {example_abs}"
+            )
 
     spec_serial = data["serial"]
     if not isinstance(spec_serial, dict):
         raise SpecError(f"{spec_path}: `serial:` must be a mapping")
     serial = _merge_serial(runner, spec_serial)
+
+    ssh_args = tuple(str(a) for a in (data.get("ssh_args") or ()))
+
+    ssh_files: list[tuple[str, str]] = []
+    for entry in data.get("ssh_files") or ():
+        if not isinstance(entry, dict) or "local" not in entry or "remote" not in entry:
+            raise SpecError(
+                f"{spec_path}: each ssh_files entry needs 'local' and 'remote' keys"
+            )
+        ssh_files.append((str(entry["local"]), str(entry["remote"])))
 
     return SmokeSpec(
         name=data["name"],
@@ -215,6 +249,9 @@ def parse_spec(spec_path: Path, runner_path: Path | None = None) -> SmokeSpec:
         flash_method=str(flash_method),
         serial=serial,
         source_path=spec_path,
+        ssh_args=ssh_args,
+        ssh_files=tuple(ssh_files),
+        ssh_command=ssh_command,
     )
 
 
@@ -302,6 +339,7 @@ SSH_RUN = "ssh-run"
 
 
 def _artifact_name(spec: SmokeSpec) -> str:
+    assert spec.example is not None  # ssh_command specs never reach here
     return spec.example.name
 
 
@@ -312,6 +350,7 @@ def build_command(spec: SmokeSpec) -> list[str] | None:
     ssh-run: that binary is prebuilt."""
     if spec.flash_method == SSH_RUN:
         return None
+    assert spec.example is not None
     return [
         "west", "build", "-p", "always",
         "-b", spec.board,
@@ -327,6 +366,8 @@ def flash_command(spec: SmokeSpec) -> list[str]:
     if spec.flash_method == "pyocd-flash":
         return ["pyocd", "flash", "--target", spec.board,
                 "build/zephyr/zephyr.elf"]
+    if spec.flash_method == SSH_RUN and spec.ssh_command:
+        raise SpecError(f"{spec.source_path}: ssh_command specs have no copy step")
     if spec.flash_method == SSH_RUN:
         host = spec.ssh_host or "<unresolved: pass --ssh-host or set ALP_HIL_SSH_HOST>"
         local = Path(spec.artifact_dir or "<artifact-dir>") / _artifact_name(spec)
@@ -335,6 +376,21 @@ def flash_command(spec: SmokeSpec) -> list[str]:
         f"{spec.source_path}: unknown flash_method '{spec.flash_method}' "
         "(supported: westflash, pyocd-flash, ssh-run)"
     )
+
+
+def ssh_extra_file_commands(spec: SmokeSpec) -> list[list[str]]:
+    """One `scp` command per `ssh_files:` entry -- copies extra inputs
+    (a model bundle, input frames, ...) an ssh-run example takes as
+    argv besides the binary itself.  Runs after the binary copy, same
+    ordering the shell invocation in capture_command() assumes isn't
+    load-bearing (the example only runs once every copy is done, in
+    _run_ssh_spec)."""
+    host = spec.ssh_host or "<unresolved: pass --ssh-host or set ALP_HIL_SSH_HOST>"
+    base = Path(spec.artifact_dir or "<artifact-dir>")
+    return [
+        ["scp", "-q", str(base / local), f"{host}:{remote}"]
+        for local, remote in spec.ssh_files
+    ]
 
 
 def _capture_output_path(spec: SmokeSpec) -> Path:
@@ -354,9 +410,17 @@ def capture_command(spec: SmokeSpec) -> list[str]:
     before a REAL run -- see run_spec's guard -- but this builder stays
     pure/side-effect-free so --dry-run can still print it when the
     port isn't resolved yet (--dry-run touches no hardware)."""
+    if spec.flash_method == SSH_RUN and spec.ssh_command:
+        host = spec.ssh_host or "<unresolved: pass --ssh-host or set ALP_HIL_SSH_HOST>"
+        return ["ssh", host, spec.ssh_command]
     if spec.flash_method == SSH_RUN:
         host = spec.ssh_host or "<unresolved: pass --ssh-host or set ALP_HIL_SSH_HOST>"
         remote = f"/tmp/{_artifact_name(spec)}"
+        # ssh_args (e.g. a model tar's remote path + frame paths, see
+        # #1160) become argv to the remote binary -- shlex-quoted so a
+        # spec author's path/flag survives the remote shell unmangled.
+        argv = " ".join(shlex.quote(a) for a in spec.ssh_args)
+        invocation = f"{remote} {argv}" if argv else remote
         # Bound the run to serial.duration_s like the serial path: some
         # examples (v2n-power-monitor) loop forever.  The target's busybox
         # has no `timeout`, so a background sleeper kills the example.
@@ -364,7 +428,7 @@ def capture_command(spec: SmokeSpec) -> list[str]:
         # example would otherwise lose everything still in its buffer.
         secs = spec.serial.duration_s
         return ["ssh", "-tt", host,
-                f"chmod +x {remote} && {{ {remote} & p=$!; "
+                f"chmod +x {remote} && {{ {invocation} & p=$!; "
                 f"(sleep {secs}; kill $p) >/dev/null 2>&1 & w=$!; "
                 f"wait $p; kill $w 2>/dev/null; }}"]
     port = spec.serial_port or "<unresolved: pass --serial-port or set ALP_HIL_SERIAL_PORT>"
@@ -416,7 +480,8 @@ def run_spec(spec: SmokeSpec, *, dry_run: bool = False) -> SmokeResult:
     each command and skip execution."""
     if dry_run:
         for label, cmd in (("build", build_command(spec)),
-                           ("flash", flash_command(spec)),
+                           ("flash", None if spec.ssh_command else flash_command(spec)),
+                           *(("copy", c) for c in ssh_extra_file_commands(spec)),
                            ("capture", capture_command(spec))):
             if cmd is not None:
                 print(f"  [{label}] " + " ".join(cmd))
@@ -463,18 +528,34 @@ def run_spec(spec: SmokeSpec, *, dry_run: bool = False) -> SmokeResult:
 
 
 def _run_ssh_spec(spec: SmokeSpec) -> SmokeResult:
-    """ssh-run: copy the prebuilt binary, run it, assert on its output."""
+    """ssh-run: copy the prebuilt binary (+ any ssh_files: extra inputs),
+    run it, assert on its output."""
     if not spec.ssh_host:
         return SmokeResult(spec, False, (
             "no ssh host resolved -- pass --ssh-host or set ALP_HIL_SSH_HOST",))
+    if spec.ssh_command:
+        _, out = _run(capture_command(spec))
+        failures = assert_serial(spec, out)
+        return SmokeResult(spec, not failures, tuple(failures))
     artifact = Path(spec.artifact_dir) / _artifact_name(spec)
     if not spec.artifact_dir or not artifact.is_file():
         return SmokeResult(spec, False, (
             f"prebuilt binary not found: {artifact} -- build the example for "
             "the target and pass --artifact-dir",))
+    for local_rel, _remote in spec.ssh_files:
+        local = Path(spec.artifact_dir) / local_rel
+        if not local.is_file():
+            return SmokeResult(spec, False, (
+                f"ssh_files input not found: {local} -- see the spec's "
+                "ssh_files: list and --artifact-dir",))
     rc, out = _run(flash_command(spec))
     if rc != 0:
         return SmokeResult(spec, False, (f"copy failed (rc={rc}): {out.strip()[:400]}",))
+    for cmd in ssh_extra_file_commands(spec):
+        rc, out = _run(cmd)
+        if rc != 0:
+            return SmokeResult(spec, False, (
+                f"ssh_files copy failed (rc={rc}): {out.strip()[:400]}",))
     # The example's exit code is not asserted: examples report PASS/FAIL
     # on stdout, which the spec's expectations check.
     _, out = _run(capture_command(spec))

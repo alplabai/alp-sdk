@@ -898,6 +898,23 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_peripheral_uart_flow_control
              COMMAND alp_test_peripheral_uart_flow_control)
 
+    # port_id -> tty path mapping (incl. /dev/ttySC<N>); same
+    # #include-the-.c technique as alp_test_peripheral_uart_flow_control.
+    add_executable(alp_test_peripheral_uart_resolve_path
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_uart_resolve_path.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+    )
+    target_include_directories(alp_test_peripheral_uart_resolve_path PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_peripheral_uart_resolve_path PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_uart_resolve_path
+             COMMAND alp_test_peripheral_uart_resolve_path)
+
     add_executable(alp_test_peripheral_gpio
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_gpio.c
     )
@@ -1413,6 +1430,24 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
     add_test(NAME alp_test_can_yocto_self_close
              COMMAND alp_test_can_yocto_self_close)
+
+    # ext_id filter rule (std filter must not match 29-bit frames); same
+    # #include-the-.c technique as alp_test_can_yocto_self_close.
+    add_executable(alp_test_can_yocto_filter_ext_id
+        ${CMAKE_CURRENT_SOURCE_DIR}/can_yocto_filter_ext_id.c
+    )
+    target_link_libraries(alp_test_can_yocto_filter_ext_id PRIVATE Threads::Threads)
+    target_include_directories(alp_test_can_yocto_filter_ext_id PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/can
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_can_yocto_filter_ext_id PRIVATE c_std_99)
+
+    add_test(NAME alp_test_can_yocto_filter_ext_id
+             COMMAND alp_test_can_yocto_filter_ext_id)
 
     # Dev-review follow-up on issue #756: alp_can_close() racing the
     # FIRST-EVER alp_can_add_filter() (the one that lazily spawns the RX

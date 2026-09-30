@@ -505,7 +505,7 @@ def test_shipped_board_specs_all_parse(board_name: str) -> None:
             f"{spec_path.name} on {board_name}: spec.board "
             f"{spec.board!r} != runner.board {expected_board!r}"
         )
-        assert spec.example.exists(), (
+        assert spec.ssh_command or spec.example.exists(), (
             f"{spec_path.name}: example path doesn't exist: {spec.example}"
         )
 
@@ -588,3 +588,113 @@ def test_v2n_temp_sensor_specs_run_on_the_a55() -> None:
         spec = run_smoke.parse_spec(REPO / "tests" / "hil" / board / "v2n-temp-sensor.yaml")
         assert spec.flash_method == run_smoke.SSH_RUN
         assert "[temp] done" in spec.serial.expect_contains
+
+
+# ---------------------------------------------------------------------
+# ssh_args / ssh_files (#1160): examples that take a filename argv, not
+# just a binary -- e.g. v2n-drpai-inference's <model.tar> <frame.bin>.
+# ---------------------------------------------------------------------
+
+
+_ARGS_FILES_SPEC = """
+schema_version: 1
+name: drpai-smoke
+example: examples/peripheral-io/gpio-button-led
+flash_method: ssh-run
+ssh_args:
+  - "/tmp/model.tar"
+  - "/tmp/frame0.bin"
+ssh_files:
+  - local: model.tar
+    remote: /tmp/model.tar
+  - local: frame0.bin
+    remote: /tmp/frame0.bin
+serial:
+  duration_s: 20
+  expect_contains:
+    - "[drpai] model open:"
+"""
+
+
+def _args_files_spec(tmp: Path) -> "run_smoke.SmokeSpec":
+    d = tmp / "specs"
+    d.mkdir()
+    _write(d / "_runner.yaml", _MIN_RUNNER)
+    _write(d / "drpai.yaml", _ARGS_FILES_SPEC)
+    return run_smoke.parse_spec(d / "drpai.yaml")
+
+
+def test_ssh_args_become_remote_argv(tmp_path: Path) -> None:
+    import dataclasses
+
+    spec = dataclasses.replace(
+        _args_files_spec(tmp_path), ssh_host="root@board", artifact_dir="/art")
+    cmd = run_smoke.capture_command(spec)
+    assert cmd[:3] == ["ssh", "-tt", "root@board"]
+    assert "/tmp/gpio-button-led /tmp/model.tar /tmp/frame0.bin & " in cmd[3]
+
+
+def test_ssh_files_produce_one_scp_per_entry(tmp_path: Path) -> None:
+    import dataclasses
+
+    spec = dataclasses.replace(
+        _args_files_spec(tmp_path), ssh_host="root@board", artifact_dir="/art")
+    copies = run_smoke.ssh_extra_file_commands(spec)
+    assert len(copies) == 2
+    assert copies[0] == ["scp", "-q", str(Path("/art") / "model.tar"), "root@board:/tmp/model.tar"]
+    assert copies[1] == [
+        "scp", "-q", str(Path("/art") / "frame0.bin"), "root@board:/tmp/frame0.bin",
+    ]
+
+
+def test_spec_without_ssh_args_or_files_defaults_to_empty(tmp_path: Path) -> None:
+    spec = _ssh_spec(tmp_path)
+    assert spec.ssh_args == ()
+    assert spec.ssh_files == ()
+    assert run_smoke.ssh_extra_file_commands(spec) == []
+
+
+def test_ssh_files_entry_missing_a_key_is_a_spec_error(tmp_path: Path) -> None:
+    d = tmp_path / "specs"
+    d.mkdir()
+    _write(d / "_runner.yaml", _MIN_RUNNER)
+    _write(d / "bad.yaml", _ARGS_FILES_SPEC.replace("remote: /tmp/model.tar", "bogus: x"))
+    with pytest.raises(run_smoke.SpecError, match="ssh_files entry needs"):
+        run_smoke.parse_spec(d / "bad.yaml")
+
+
+def test_run_ssh_spec_fails_when_an_ssh_files_input_is_missing(tmp_path: Path) -> None:
+    import dataclasses
+
+    artifact_dir = tmp_path / "art"
+    artifact_dir.mkdir()
+    (artifact_dir / "gpio-button-led").write_bytes(b"binary")
+    # model.tar / frame0.bin deliberately absent.
+    spec = dataclasses.replace(
+        _args_files_spec(tmp_path), ssh_host="root@board", artifact_dir=str(artifact_dir))
+    result = run_smoke.run_spec(spec)
+    assert not result.ok
+    assert "ssh_files input not found" in result.failures[0]
+
+
+def test_ssh_command_spec_runs_plain_ssh_and_asserts_output(tmp_path: Path) -> None:
+    import dataclasses
+
+    d = _make_spec_dir(tmp_path)
+    (d / "cmd.yaml").write_text(
+        "schema_version: 1\nname: cmd\nflash_method: ssh-run\n"
+        "ssh_command: \"echo HIL_OK\"\nserial:\n  expect_contains: [HIL_OK]\n"
+        "  expect_absent: [HIL_BAD]\n", encoding="utf-8")
+    spec = run_smoke.parse_spec(d / "cmd.yaml")
+    assert spec.example is None
+    spec = dataclasses.replace(spec, ssh_host="root@board")
+    assert run_smoke.capture_command(spec) == ["ssh", "root@board", "echo HIL_OK"]
+    assert run_smoke.assert_serial(spec, "HIL_OK\n") == []
+    assert run_smoke.assert_serial(spec, "HIL_OK HIL_BAD") != []
+    # ssh_command excludes an example binary.
+    (d / "bad.yaml").write_text(
+        "schema_version: 1\nname: bad\nflash_method: ssh-run\nssh_command: x\n"
+        "example: examples/v2n/v2n-power-monitor\nserial:\n  expect_contains: [a]\n",
+        encoding="utf-8")
+    with pytest.raises(run_smoke.SpecError):
+        run_smoke.parse_spec(d / "bad.yaml")
