@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 OPTIGA reset line: the gd32-bridge-gpio gpiochip names a line
+# se-rst (#2520).  Only READS the line name (gpioinfo, else
+# /sys/kernel/debug/gpio); the line is never requested or toggled.  Skips
+# (still passes) on kernels that predate #2520 (chip < 22 lines) or when
+# neither gpioinfo nor debugfs is available.
+
+schema_version: 1
+name: v2m103-optiga-se-rst-line
+description: |
+  gd32-bridge-gpio exposes a line named se-rst (read-only, not toggled).
+
+flash_method: ssh-run
+ssh_command: |-
+  n=0
+  for c in /sys/class/gpio/gpiochip*; do
+    [ "$(cat $c/label 2>/dev/null)" = gd32-bridge-gpio ] && n=$(cat $c/ngpio)
+  done
+  if [ "$n" -lt 22 ]; then echo "HIL_SERST_SKIP gd32-bridge-gpio lines=$n (<22, predates #2520)"; echo HIL_SERST_DONE; exit 0; fi
+  if command -v gpioinfo >/dev/null 2>&1; then out=$(gpioinfo 2>/dev/null)
+  elif [ -r /sys/kernel/debug/gpio ]; then out=$(cat /sys/kernel/debug/gpio)
+  else echo "HIL_SERST_SKIP no gpioinfo and no debugfs gpio"; echo HIL_SERST_DONE; exit 0; fi
+  if echo "$out" | grep -q 'se-rst'; then echo HIL_SERST_OK; else echo "HIL_SERST_BAD no se-rst line"; fi
+  echo HIL_SERST_DONE
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "HIL_SERST_DONE"
+  expect_absent:
+    - "HIL_SERST_BAD"

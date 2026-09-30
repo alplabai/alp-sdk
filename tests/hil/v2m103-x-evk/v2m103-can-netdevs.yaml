@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 CAN-FD netdevs: with rcar_canfd loaded (module or built in),
+# can_e1m0 has dev_port 3 and can_e1m1 has dev_port 2.  Skips (still passes)
+# when the driver is absent.  Read-only; the interfaces are not brought up.
+
+schema_version: 1
+name: v2m103-can-netdevs
+description: |
+  can_e1m0 (dev_port 3) and can_e1m1 (dev_port 2) exist when rcar_canfd is present.
+
+flash_method: ssh-run
+ssh_command: |-
+  if [ ! -d /sys/module/rcar_canfd ] && [ ! -d /sys/bus/platform/drivers/rcar_canfd ]; then
+    echo "HIL_CAN_SKIP rcar_canfd not present"; echo HIL_CAN_DONE; exit 0
+  fi
+  for p in can_e1m0:3 can_e1m1:2; do
+    i=${p%:*}; want=${p#*:}
+    got=$(cat /sys/class/net/$i/dev_port 2>/dev/null)
+    echo "HIL_CAN $i dev_port=${got:-none} want=$want"
+    [ "$got" = "$want" ] || echo "HIL_CAN_BAD $i"
+  done
+  echo HIL_CAN_DONE
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "HIL_CAN_DONE"
+  expect_absent:
+    - "HIL_CAN_BAD"

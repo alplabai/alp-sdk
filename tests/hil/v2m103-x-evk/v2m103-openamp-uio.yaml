@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 OpenAMP plumbing exposed to Linux: the UIO nodes rsctbl, mhu-shm,
+# vring-ctl0, vring-ctl1, vring-shm0, vring-shm1 and mhu-uio exist under
+# /sys/class/uio, and /proc/iomem carries the 4f700000-4fffffff reserved
+# carve-out.  Read-only sysfs / procfs; no UIO device is opened.
+
+schema_version: 1
+name: v2m103-openamp-uio
+description: |
+  seven OpenAMP UIO nodes present; 4f700000-4fffffff reserved in iomem.
+
+flash_method: ssh-run
+ssh_command: |-
+  names=$(cat /sys/class/uio/uio*/name 2>/dev/null)
+  for n in rsctbl mhu-shm vring-ctl0 vring-ctl1 vring-shm0 vring-shm1 mhu-uio; do
+    echo "$names" | grep -qx "$n" || echo "HIL_UIO_BAD missing $n"
+  done
+  grep -q '4f700000-4fffffff : reserved' /proc/iomem || echo "HIL_UIO_BAD 4f700000-4fffffff not reserved"
+  echo "HIL_UIO_NAMES $(echo $names)"
+  echo HIL_UIO_DONE
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "HIL_UIO_DONE"
+  expect_absent:
+    - "HIL_UIO_BAD"
