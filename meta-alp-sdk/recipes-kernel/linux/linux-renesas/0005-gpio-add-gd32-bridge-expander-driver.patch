@@ -101,8 +101,8 @@ Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  drivers/gpio/Kconfig            |   9 +
  drivers/gpio/Makefile           |   1 +
- drivers/gpio/gpio-gd32-bridge.c | 920 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
- 3 files changed, 930 insertions(+)
+ drivers/gpio/gpio-gd32-bridge.c | 924 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 934 insertions(+)
  create mode 100644 drivers/gpio/gpio-gd32-bridge.c
 
 diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
@@ -142,7 +142,7 @@ new file mode 100644
 index 000000000..b202babc2
 --- /dev/null
 +++ b/drivers/gpio/gpio-gd32-bridge.c
-@@ -0,0 +1,920 @@
+@@ -0,0 +1,924 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * GPIO driver for the Alp Lab GD32 IO-MCU bridge (I2C transport).
@@ -320,13 +320,6 @@ index 000000000..b202babc2
 + * second, cheap enough (one small I2C frame) to run indefinitely on
 + * BRD_I2C (i2c8) whenever any line is held as output. */
 +#define GD32_REPLAY_PERIOD_MS	1000
-+
-+static const char * const gd32_bridge_gpio_names[GD32_NGPIO_WIFI_BT] = {
-+	"IO8",  "IO9",  "IO10", "IO11", "IO12", "IO13",
-+	"IO14", "IO16", "IO24", "IO25", "IO27", "IO28",
-+	"IO29", "IO30", "IO31", "IO32", "IO34", "IO35",
-+	"bt-reg-on", "wl-reg-on",
-+};
 +
 +struct gd32_bridge_gpio {
 +	struct i2c_client *client;
@@ -958,7 +951,18 @@ index 000000000..b202babc2
 +	}
 +
 +	gd32->chip.ngpio	  = GD32_NGPIO_WIFI_BT;
-+	gd32->chip.names	  = gd32_bridge_gpio_names;
++	/*
++	 * Deliberately NO chip.names: gpiolib's gpiochip_set_desc_names()
++	 * walks every gpio_device on the global list through
++	 * gdev->chip->ngpio for its duplicate-name check. A consumer that
++	 * still holds a line (wlan-pwrseq wl-reg-on, hci_bcm bt-reg-on, the
++	 * panel reset) keeps the OLD gpio_device alive across unbind with
++	 * gdev->chip == NULL, so a re-bind dereferenced NULL+0xac
++	 * (offsetof(struct gpio_chip, ngpio)) in gpio_name_to_desc() and
++	 * oopsed with the device lock held (Refs #2508). Line names come
++	 * from the "gpio-line-names" DT property instead, which gpiolib
++	 * assigns without that walk.
++	 */
 +	gd32->chip.request	  = gd32_bridge_gpio_request;
 +	gd32->chip.get		  = gd32_bridge_gpio_get;
 +	gd32->chip.set		  = gd32_bridge_gpio_set;
