@@ -983,7 +983,7 @@ def test_linux_up_attaches_the_configured_host_when_detect_was_skipped(tmp_path,
     assert not steps.Ctx.linux_up(_ctx(tmp_path / "b", bench=_bench()))
 
 
-def test_need_linux_attaches_the_configured_host_on_a_forced_step(tmp_path, monkeypatch):
+def test_need_linux_attaches_the_configured_host_on_a_forced_step(tmp_path):
     # --only gd32_flash --force-step gd32_flash on a board already up: the
     # step calls need_linux() without any probe having attached ctx.linux,
     # which refused with "boot_sd_linux has not run" (E1M-V2M103, 2026-09-29).
@@ -1199,3 +1199,14 @@ def test_detect_in_uboot_then_bootstrap_is_not_refused(tmp_path, monkeypatch):
     assert ctx.mutate("anything", lambda: "ran") == "ran"
     dry = _ctx(tmp_path / "d", bench=_bench(console=FakeConsole([])))
     assert steps.Bootstrap().run(dry).status != "failed"
+
+
+def test_accept_cid_change_adopts_once_then_refuses_another_swap(tmp_path, monkeypatch):
+    other = "aa" + CID[2:]
+    ctx, _ = _cid_ctx(tmp_path, monkeypatch, other, CID)
+    ctx.accept_cid_change = "eMMC replaced"
+    ctx.need_linux()                                  # adopts `other`
+    third = "bb" + CID[2:]
+    monkeypatch.setattr(lt, "read_emmc_cid", lambda t: third)
+    with pytest.raises(steps.Refused):                # a second swap in the same run is not adopted
+        ctx.need_linux()
