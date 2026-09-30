@@ -145,7 +145,7 @@ new file mode 100644
 index 000000000..b202babc2
 --- /dev/null
 +++ b/drivers/gpio/gpio-gd32-bridge.c
-@@ -0,0 +1,968 @@
+@@ -0,0 +1,981 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * GPIO driver for the Alp Lab GD32 IO-MCU bridge (I2C transport).
@@ -746,6 +746,18 @@ index 000000000..b202babc2
 +}
 +
 +/*
++ * A consumer that dies between assert and release would otherwise leave the
++ * Trust M held in reset: gpiolib frees the line without touching its value.
++ */
++static void gd32_bridge_gpio_free(struct gpio_chip *chip, unsigned int offset)
++{
++	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(chip);
++
++	if (offset == GD32_SE_RST_LINE && READ_ONCE(gd32->se_rst_asserted))
++		gd32_bridge_se_rst_set(gd32, 0);
++}
++
++/*
 + * Periodically re-assert output_mask/output_vals against the bridge. A
 + * GD32 reset (WDT, OTA A/B swap) silently drops every pad back to its
 + * boot default, and a write attempted while the bridge was unreachable
@@ -1011,6 +1023,7 @@ index 000000000..b202babc2
 +	 * assigns without that walk.
 +	 */
 +	gd32->chip.request	  = gd32_bridge_gpio_request;
++	gd32->chip.free		  = gd32_bridge_gpio_free;
 +	gd32->chip.get		  = gd32_bridge_gpio_get;
 +	gd32->chip.set		  = gd32_bridge_gpio_set;
 +	gd32->chip.direction_output = gd32_bridge_gpio_dir_out;

@@ -109,7 +109,14 @@ static inline alp_status_t se_reset_gpio_hook(void *user, bool assert)
 	struct gpio_v2_line_values v;
 	v.mask = 1;
 	v.bits = assert ? 1 : 0;
-	return ioctl(rst->line_fd, GPIO_V2_LINE_SET_VALUES_IOCTL, &v) < 0 ? ALP_ERR_IO : ALP_OK;
+	if (ioctl(rst->line_fd, GPIO_V2_LINE_SET_VALUES_IOCTL, &v) < 0) return ALP_ERR_IO;
+	/* On 6.1 gpio_chip.set() returns void, so a failed bridge frame still
+	 * reports success above.  The driver's get() returns the last level the
+	 * GD32 acknowledged: read it back to catch that. */
+	v.mask = 1;
+	v.bits = 0;
+	if (ioctl(rst->line_fd, GPIO_V2_LINE_GET_VALUES_IOCTL, &v) < 0) return ALP_ERR_IO;
+	return (v.bits & 1) == (assert ? 1u : 0u) ? ALP_OK : ALP_ERR_IO;
 }
 
 /* Release SE_RST (the line keeps its last value after close) and free the
