@@ -1470,6 +1470,24 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_can_yocto_filter_ext_id
              COMMAND alp_test_can_yocto_filter_ext_id)
 
+    # E1M_X_CAN0/1 <-> can0/1 netdev swap (issue #2352); same
+    # #include-the-.c technique as alp_test_can_yocto_self_close.
+    add_executable(alp_test_can_yocto_netdev_swap
+        ${CMAKE_CURRENT_SOURCE_DIR}/can_yocto_netdev_swap.c
+    )
+    target_link_libraries(alp_test_can_yocto_netdev_swap PRIVATE Threads::Threads)
+    target_include_directories(alp_test_can_yocto_netdev_swap PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/can
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_can_yocto_netdev_swap PRIVATE c_std_99)
+
+    add_test(NAME alp_test_can_yocto_netdev_swap
+             COMMAND alp_test_can_yocto_netdev_swap)
+
     # Dev-review follow-up on issue #756: alp_can_close() racing the
     # FIRST-EVER alp_can_add_filter() (the one that lazily spawns the RX
     # thread) mid-spawn.  #includes BOTH src/can_dispatch.c and
