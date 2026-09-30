@@ -8,7 +8,7 @@
 schema_version: 1
 name: v2m103-ethernet-link
 description: |
-  Ethernet carrier up, speed 10/100/1000/2500, gateway (or ssh peer) pings.
+  Ethernet carrier up, speed 10/100/1000, gateway (or ssh peer) pings.
 
 flash_method: ssh-run
 ssh_command: |-
@@ -18,7 +18,7 @@ ssh_command: |-
     if [ "$(cat $d/carrier 2>/dev/null)" = 1 ]; then
       s=$(cat $d/speed 2>/dev/null)
       echo "HIL_ETH_IF $n speed=$s"
-      case "$s" in 10|100|1000|2500) echo HIL_ETH_LINK_UP;; esac
+      case "$s" in 10|100|1000) echo HIL_ETH_LINK_UP;; esac
     fi
   done
   gw=$(ip route | awk '/^default/{print $3; exit}')
