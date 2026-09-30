@@ -378,7 +378,7 @@
 			"IO8",  "IO9",  "IO10", "IO11", "IO12", "IO13",
 			"IO14", "IO16", "IO24", "IO25", "IO27", "IO28",
 			"IO29", "IO30", "IO31", "IO32", "IO34", "IO35",
-			"bt-reg-on", "wl-reg-on", "can-stby";
+			"bt-reg-on", "wl-reg-on", "can-stby", "se-rst";
 
 		/* CAN_STBY (bridge line 20, GD32 PB13,
 		 * metadata/e1m_modules/v2n/gd32-io-mcu-map.csv:38): the

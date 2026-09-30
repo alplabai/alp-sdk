@@ -396,6 +396,12 @@
 		width = <720>;
 		height = <1280>;
 		pixel-format = <MIPI_DSI_PIXFMT_RGB888>;
+		/*
+		 * Initialised before main() by src/zephyr/panel_init_retry.c, which
+		 * retries the DCS init after a RESX pulse; a boot-time kernel init
+		 * would get one try (#2199).
+		 */
+		zephyr,deferred-init;
 		status = "okay";
 	};
 };
