@@ -160,6 +160,18 @@ on:
       - 'west.yml'
       - 'metadata/toolchains.json'
   workflow_dispatch:
+  # #2541: nightly run on the default branch (dev), so the ccache PR runs
+  # restore is refreshed regardless of what changed. A dev push saves it
+  # only when it touches the path list above -- which does not list this
+  # file, so not even the merge that adds the cache would seed it -- while
+  # every alp-sdk source file compiled into these apps (src/**, chips/**)
+  # can move on dev without triggering a save. Offset from
+  # pr-twister.yml's 02:17 so the two nightly runs do not contend for the
+  # same runner slots. Best-effort: the concurrency group below is per
+  # ref, so a dev push landing mid-run cancels the nightly one (that push
+  # run then saves instead, if its paths matched).
+  schedule:
+    - cron: '47 2 * * *'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -218,6 +230,26 @@ jobs:
 
     env:
       ZEPHYR_TOOLCHAIN_VARIANT: zephyr
+      # #2541: Zephyr's cmake/modules/ccache.cmake launches every compile
+      # through ccache whenever the binary is on PATH (the apt step below
+      # installs it), so this job always filled a ccache -- in the runner's
+      # default $HOME/.cache/ccache, thrown away with the runner. Point it
+      # at a directory the restore/save steps below persist, per SKU leg.
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      # Rewrite absolute paths under the workspace to relative ones before
+      # hashing, so an object compiled in one run's checkout still hits in
+      # the next run's.
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      # arm-zephyr-eabi compiles pass --specs=<file> (picolibc); leave it
+      # out of the hash the way upstream Zephyr's own twister.yaml does.
+      CCACHE_IGNOREOPTIONS: '-specs=* --specs=*'
+      # The repo's 10 GB Actions cache was already at 10.6 GB on
+      # 2026-09-30 (six native_sim shard caches, the tier-a caches and
+      # the Zephyr workspace caches), so each leg's set is capped
+      # tighter than pr-twister.yml's shards leave theirs. 1G is a cap,
+      # not a measured working set; the stats step below reports the real
+      # size and hit rate, and #2541 revisits it on that number.
+      CCACHE_MAXSIZE: 1G
 
     steps:
       - name: Checkout alp-sdk
@@ -360,6 +392,22 @@ jobs:
           "$HOME/zephyr-sdk/setup.sh" -t arm-zephyr-eabi -c
           echo "ZEPHYR_SDK_INSTALL_DIR=$HOME/zephyr-sdk" >> "$GITHUB_ENV"
 
+      # #2541: restore this SKU leg's ccache. Restore-only on PRs; the
+      # save step after twister runs on a dev push or the nightly run
+      # alone, the same split pr-twister.yml uses and for the same
+      # reason: a PR can only restore
+      # its own ref's, its base branch's and the default branch's caches,
+      # so a PR-saved set would only evict dev's from the 10 GB budget.
+      # restore-keys falls back to the newest dev set for this SKU.
+      - name: Restore ccache objects
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        timeout-minutes: 5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-${{ runner.os }}-twister-aen-${{ matrix.sku }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-twister-aen-${{ matrix.sku }}-
+
       # Run twister against this matrix leg's own SKU only -- both its
       # M55-HE and M55-HP board targets (matrix.platform_flags, see the
       # job-level `strategy:` above). alp-sdk#2084 -- a board's generated
@@ -435,6 +483,7 @@ jobs:
       # The timeout-minutes comment below does the latter -- it does not
       # carry its own count.
       - name: twister · ${{ matrix.label }} on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota + camera-mjpeg-stream + iot-dashboard
+        id: twister
         working-directory: ${{ github.workspace }}
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
@@ -453,8 +502,20 @@ jobs:
         # Revisit if a future scenario count pushes either leg closer to
         # it -- the AEN801 leg in particular has less room left than
         # AEN803.
-        timeout-minutes: 30
+        # #2541: that projection turned out optimistic. On PR #2239's
+        # merged head (103 AEN801 + 101 AEN803 configurations) the step
+        # measured 1730s/28.8min on AEN801 and 1659s/27.7min on AEN803,
+        # 70s under the old 30min cap. Raised to 34: with the ~3min of
+        # setup ahead of it that leaves ~4min under the 41min job ceiling
+        # for the stats, upload, trim and save steps behind it -- if the
+        # job ceiling fired first the run would count as cancelled and
+        # the timed-out leg would save nothing. The cap is
+        # a stop-gap until the ccache above brings the step back down --
+        # not a new performance target.
+        timeout-minutes: 34
         run: |
+          # Zero the counters so the summary below reports this run only.
+          ccache -z >/dev/null
           python3 zephyr/scripts/twister \
             ${{ matrix.platform_flags }} \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/aen" \
@@ -466,6 +527,14 @@ jobs:
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/camera-mjpeg-stream" \
             --inline-logs \
             --no-detailed-test-id
+
+      # Hit rate in the log, so a cold or ineffective cache is visible,
+      # not guessed (#2541 decides its next step on this number). Its own
+      # step so it also prints after a red or timed-out twister run.
+      - name: ccache statistics
+        if: ${{ !cancelled() }}
+        timeout-minutes: 1
+        run: ccache -s -v
 
       # Persist the twister REPORTS regardless of pass/fail, same
       # rationale (and same NOT-the-whole-twister-out/-tree caveat) as
@@ -485,3 +554,28 @@ jobs:
             twister-out/*.log
           retention-days: 14
           if-no-files-found: ignore
+
+      # #2541: save this leg's ccache on a dev push or the nightly run
+      # only (see the restore step). `!cancelled()` rather than pr-twister.yml's implicit
+      # success(): a twister step that goes red or hits its cap has still
+      # compiled most of its configurations, and ccache is content-
+      # addressed, so a partial set is valid and is exactly what the next
+      # run needs to get back under the cap. The twister step must have
+      # run, though: a run that failed in setup restored a warm set it
+      # never touched, and trimming + saving that would publish a
+      # near-empty set as the newest key every later run restores. Trim to this run's working
+      # set first so the saved set does not grow across saves (ccache
+      # refreshes an entry's mtime on every hit).
+      - name: Trim ccache to this run's working set (dev push + nightly only)
+        if: ${{ !cancelled() && steps.twister.outcome != 'skipped' && github.ref == 'refs/heads/dev' && (github.event_name == 'push' || github.event_name == 'schedule') }}
+        timeout-minutes: 5
+        # 10800s, not 3h: ubuntu-latest's apt ccache (4.9.1) accepts only
+        # the d and s suffixes and exits 1 on "3h" (#2541).
+        run: ccache --evict-older-than 10800s
+      - name: Save ccache objects (dev push + nightly only)
+        if: ${{ !cancelled() && steps.twister.outcome != 'skipped' && github.ref == 'refs/heads/dev' && (github.event_name == 'push' || github.event_name == 'schedule') }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        timeout-minutes: 5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-${{ runner.os }}-twister-aen-${{ matrix.sku }}-${{ github.sha }}

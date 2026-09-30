@@ -418,7 +418,12 @@ jobs:
       - name: Trim ccache to this run's working set (dev push + nightly only)
         if: github.ref == 'refs/heads/dev' && (github.event_name == 'push' || github.event_name == 'schedule')
         timeout-minutes: 5
-        run: ccache --evict-older-than 3h
+        # 10800s, not 3h: ubuntu-latest's apt ccache (4.9.1) accepts only
+        # the d and s suffixes and exits 1 on "3h", which failed this step
+        # and skipped the save below on every dev push and nightly run
+        # since #2440, freezing the shard caches at their 2026-09-29 set
+        # (#2541).
+        run: ccache --evict-older-than 10800s
       - name: Save ccache objects (dev push + nightly only)
         if: github.ref == 'refs/heads/dev' && (github.event_name == 'push' || github.event_name == 'schedule')
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
