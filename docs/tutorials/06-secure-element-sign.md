@@ -48,7 +48,7 @@ a provisioning step, not an example run.
 
 | Symptom                                   | Cause                                              |
 |-------------------------------------------|----------------------------------------------------|
-| `optiga_trust_m_init ... -> -2`           | Chip not present / mis-strapped on this board.     |
+| `optiga_trust_m_init ... -> -2`           | Chip not present / mis-strapped, or (no reset hook) idle-wedged: after >~10 s idle the part NACKs until an SE reset. With `optiga_trust_m_init_with_reset()` it means silent even after a reset. |
 | `read_product_info -> -4` (TIMEOUT)       | Chip stopped answering mid-session.                |
 | `raw OpenApplication` / `GetDataObject` fail | A command APDU was refused; the status byte is printed. |
 | `RESULT PASS`                             | Probe, UID read and raw session all worked.        |

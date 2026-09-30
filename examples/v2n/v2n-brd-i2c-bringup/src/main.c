@@ -380,7 +380,21 @@ static void probe_optiga(alp_i2c_t *bus)
 {
 	optiga_trust_m_t se;
 
-	if (optiga_trust_m_init(&se, bus, OPTIGA_TRUST_M_I2C_ADDR) != ALP_OK) {
+	/* After >~10 s idle the Trust M can stop ACKing entirely and only a
+	 * hardware reset revives it (#2507).  SE_RST hangs off the GD32
+	 * supervisor, so hand the driver a reset hook that pulses it through the
+	 * bridge.  If the GD32 is kernel-owned or absent, fall back to the plain
+	 * probe: no hook, no reset. */
+	gd32g553_t mcu;
+	bool have_mcu  = probe_addr(bus, GD32G553_BRIDGE_DEFAULT_I2C_ADDR) == PROBE_ACK &&
+	                 gd32g553_init(&mcu, NULL, bus, GD32G553_BRIDGE_DEFAULT_I2C_ADDR) == ALP_OK;
+	alp_status_t s = optiga_trust_m_init_with_reset(&se,
+	                                                bus,
+	                                                OPTIGA_TRUST_M_I2C_ADDR,
+	                                                have_mcu ? gd32g553_se_reset_hook : NULL,
+	                                                have_mcu ? &mcu : NULL);
+	if (have_mcu) gd32g553_deinit(&mcu);
+	if (s != ALP_OK) {
 		report("optiga trust m", OPTIGA_TRUST_M_I2C_ADDR, R_FAIL, "no ACK on I2C_STATE");
 		return;
 	}

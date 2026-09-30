@@ -20,8 +20,13 @@ writes to the chip.
    `e1m-v2n-som.dtsi` aliases `i2c8 = &i2c8;`) at 400 kHz and
    initialising
    [`optiga_trust_m_t`](../../../include/alp/chips/optiga_trust_m.h).
-   `optiga_trust_m_init` reads the I2C_STATE register only; failing it
-   means the chip is not on the bus or is not strapped to address 0x30.
+   `optiga_trust_m_init_with_reset` reads the I2C_STATE register only.
+   A Trust M idle for more than about 10 s can stop ACKing until it is
+   hardware-reset (#2507), so the app opens the GD32 bridge and passes
+   `gd32g553_se_reset_hook` as the reset hook: if the part is silent the
+   driver pulses SE_RST once and probes again.  Failing after that means
+   the chip is not on the bus, is not strapped to address 0x30, or is held
+   in reset.  With no reachable GD32 the app passes no hook (plain probe).
 2. `optiga_trust_m_read_product_info` opens the Trust M application
    and reads the 27-byte Coprocessor UID (data object 0xE0C2).
 3. `optiga_trust_m_send_apdu` runs a raw session: the app sends

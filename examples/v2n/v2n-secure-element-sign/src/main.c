@@ -5,7 +5,8 @@
  * v2n-secure-element-sign -- talk to the on-module OPTIGA Trust M.
  *
  * Three steps, each one layer deeper:
- *   1. optiga_trust_m_init() probes the chip's I2C_STATE register.
+ *   1. optiga_trust_m_init_with_reset() probes the chip's I2C_STATE register,
+ *      pulsing SE_RST via the GD32 bridge if the part went silent when idle.
  *   2. optiga_trust_m_read_product_info() opens the Trust M application
  *      through Infineon's host library and reads the Coprocessor UID
  *      (data object 0xE0C2).
@@ -30,6 +31,7 @@
 #include <string.h>
 
 #include "alp/peripheral.h"
+#include "alp/chips/gd32g553.h"
 #include "alp/chips/optiga_trust_m.h"
 
 /* BRD_I2C = Linux /dev/i2c-8: meta-alp-sdk's e1m-v2n-som.dtsi
@@ -80,9 +82,26 @@ int main(void)
 		return 1;
 	}
 
-	/* 1. Probe: is the chip fitted and answering on its address? */
+	/* 1. Probe: is the chip fitted and answering on its address?
+	 *
+	 *    A Trust M idle for more than ~10 s can stop ACKing I2C entirely;
+	 *    only a hardware reset brings it back (#2507).  Its SE_RST line
+	 *    hangs off the GD32 supervisor, so we open the bridge and give the
+	 *    driver a reset hook that pulses SE_RST through it.  The driver
+	 *    resets only after the normal NACK-polling budget is spent, and a
+	 *    healthy part is never reset.  Without a reachable GD32 we pass no
+	 *    hook and get the plain probe.  -2 (NOT_READY) then means "silent
+	 *    even after a reset" when the hook ran, else "not fitted, or
+	 *    idle-wedged with no reset available". */
+	gd32g553_t mcu;
+	bool have_mcu = gd32g553_init(&mcu, NULL, bus, GD32G553_BRIDGE_DEFAULT_I2C_ADDR) == ALP_OK;
 	optiga_trust_m_t se;
-	alp_status_t     s = optiga_trust_m_init(&se, bus, OPTIGA_TRUST_M_I2C_ADDR);
+	alp_status_t     s = optiga_trust_m_init_with_reset(&se,
+	                                                    bus,
+	                                                    OPTIGA_TRUST_M_I2C_ADDR,
+	                                                    have_mcu ? gd32g553_se_reset_hook : NULL,
+	                                                    have_mcu ? &mcu : NULL);
+	if (have_mcu) gd32g553_deinit(&mcu);
 	if (s != ALP_OK) return fail(NULL, bus, "optiga_trust_m_init (Trust M not ACKing)", s);
 	printf("[se] I2C_STATE probe -> ALP_OK\n");
 

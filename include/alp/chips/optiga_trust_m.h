@@ -71,9 +71,8 @@ typedef struct {
 } optiga_trust_m_product_info_t;
 
 /** Drives the part's RESET line: @p assert true pulls it low, false
- *  releases it.  On V2N/V2M SE_RST hangs off the GD32 supervisor, so a
- *  hook wraps `gd32g553_se_reset()` with the gd32g553 context as
- *  @p user. */
+ *  releases it.  On V2N/V2M SE_RST hangs off the GD32 supervisor; pass
+ *  gd32g553_se_reset_hook() with the gd32g553 context as @p user. */
 typedef alp_status_t (*optiga_trust_m_reset_fn_t)(void *user, bool assert);
 
 typedef struct {
@@ -85,9 +84,6 @@ typedef struct {
 	void             *comms;
 	uint8_t           session;
 	volatile uint16_t op_status;
-	/* Optional hardware-reset hook; see optiga_trust_m_init_with_reset(). */
-	optiga_trust_m_reset_fn_t reset;
-	void                     *reset_user;
 } optiga_trust_m_t;
 
 /** @brief Probe the chip's I2C_STATE register.
