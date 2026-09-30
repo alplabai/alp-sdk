@@ -1,0 +1,31 @@
+From 0a1c2e3d4b5f60718293a4b5c6d7e8f901234567 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Wed, 30 Sep 2026 10:00:00 +0200
+Subject: [PATCH] uio: uio_pdrv_genirq: default of_id to "generic-uio"
+
+uio_pdrv_genirq matches no device tree node until the of_id module
+parameter is set, and as a built-in driver the only way to set it is
+uio_pdrv_genirq.of_id=generic-uio on the kernel command line.  The
+command line comes from U-Boot's stored environment, which the image
+does not own, so the A55 OpenAMP UIO nodes silently fail to bind on a
+board whose bootargs lack it.  Ship the same value as the default; the
+parameter still overrides it.
+---
+ drivers/uio/uio_pdrv_genirq.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/uio/uio_pdrv_genirq.c b/drivers/uio/uio_pdrv_genirq.c
+--- a/drivers/uio/uio_pdrv_genirq.c
++++ b/drivers/uio/uio_pdrv_genirq.c
+@@ -276,7 +276,7 @@ static const struct dev_pm_ops uio_pdrv_genirq_dev_pm_ops = {
+ 
+ #ifdef CONFIG_OF
+ static struct of_device_id uio_of_genirq_match[] = {
+-	{ /* This is filled with module_parm */ },
++	{ .compatible = "generic-uio" }, /* overridable via the of_id module param */
+ 	{ /* Sentinel */ },
+ };
+ MODULE_DEVICE_TABLE(of, uio_of_genirq_match);
+-- 
+2.43.0
+
