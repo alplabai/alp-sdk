@@ -92,21 +92,18 @@ class CmdResult:
 
 class LinuxTarget:
     def __init__(self, host: str, user: str = "root", runner=subprocess.run,
-                 ssh: str = "ssh", scp: str = "scp", host_alias: str | None = None,
-                 known_hosts: Path | None = None) -> None:
+                 ssh: str = "ssh", scp: str = "scp") -> None:
         self.host = host
         self.user = user
         self.runner = runner
         self.ssh = ssh
         self.scp = scp
-        # Per-unit host-key pin: the first contact records the unit's key under a
-        # per-boot-source alias (SD and eMMC images carry different keys); a different
-        # unit behind the same IP then presents another key and is refused.
-        self._opts = ["-o", "BatchMode=yes", "-o", "LogLevel=ERROR"]
-        if host_alias and known_hosts:
-            self._opts += ["-o", f"HostKeyAlias={host_alias}",
-                           "-o", f"UserKnownHostsFile={Path(known_hosts).as_posix()}",
-                           "-o", "StrictHostKeyChecking=accept-new"]
+        # Units get reused DHCP addresses and the SD and eMMC images carry different host
+        # keys by design, so host keys identify nothing here; unit identity is the eMMC CID
+        # check in Ctx.need_linux.
+        self._opts = ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no",
+                      "-o", "UserKnownHostsFile=/dev/null", "-o", "ConnectTimeout=5",
+                      "-o", "LogLevel=ERROR"]
 
     def _exec(self, argv: list[str], timeout: float, stdin_path: Path | None = None) -> CmdResult:
         try:
@@ -747,6 +744,27 @@ def dxm1_pcie_present(t: LinuxTarget, vendor_id: str | None = None) -> bool:
 
 
 # --- census ----------------------------------------------------------------------------
+
+def cid_identity(raw: str) -> str:
+    """The comparable part of a 128-bit eMMC CID, as 30 lower-case hex chars.
+
+    Two sources must agree: bootstrap's EM_DCID parse (scif_writer.parse_cid) and the
+    sysfs `cid`. The writer does print the CRC field, but parse_cid still rebuilds the
+    register (reserved bits 119:114 forced to 0, end bit forced to 1), while the kernel
+    host drivers do not agree on the last byte (SDHCI returns an R2 response without the
+    CRC7 + end-bit byte). So byte 15 is not compared and the reserved bits of byte 1 are
+    masked; MID, CBX, OID, PNM, PRV, PSN and MDT are."""
+    raw = "".join(raw.split()).lower()
+    if not re.fullmatch(r"[0-9a-f]{32}", raw):
+        raise ValueError(f"CID must be 32 hex chars, got {raw!r}")
+    return raw[:2] + f"{int(raw[2:4], 16) & 0x03:02x}" + raw[4:30]
+
+
+def read_emmc_cid(t: LinuxTarget) -> str:
+    """Raw sysfs CID of the eMMC (found by sysfs type, as census does)."""
+    name = resolve_emmc(t).rsplit("/", 1)[-1]
+    return t.run(f"cat /sys/block/{name}/device/cid").stdout.strip()
+
 
 def parse_emmc_cid(raw: str) -> dict[str, str]:
     raw = raw.strip().lower()

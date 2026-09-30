@@ -983,7 +983,7 @@ def test_linux_up_attaches_the_configured_host_when_detect_was_skipped(tmp_path,
     assert not steps.Ctx.linux_up(_ctx(tmp_path / "b", bench=_bench()))
 
 
-def test_need_linux_attaches_the_configured_host_on_a_forced_step(tmp_path):
+def test_need_linux_attaches_the_configured_host_on_a_forced_step(tmp_path, monkeypatch):
     # --only gd32_flash --force-step gd32_flash on a board already up: the
     # step calls need_linux() without any probe having attached ctx.linux,
     # which refused with "boot_sd_linux has not run" (E1M-V2M103, 2026-09-29).
@@ -1093,3 +1093,109 @@ def test_gd32_fw_version_reads_the_version_file(tmp_path):
     assert steps.Gd32Flash._fw_version(ctx) == {}
     (fw / "VERSION").write_text("0.2.9\n", encoding="utf-8")
     assert steps.Gd32Flash._fw_version(ctx) == {"gd32_fw_version": "0.2.9"}
+
+
+# --- unit identity: the eMMC CID behind the address must be this serial's --------------------------
+
+CID = "150100464e4d4e414d1234567890ab4f"
+
+
+def _cid_ctx(tmp_path, monkeypatch, seen, recorded):
+    b = _bench()
+    b.linux_host = "192.0.2.7"
+    ctx = _ctx(tmp_path, bench=b, execute=True)
+    if recorded:
+        ctx.state = {"steps": {"bootstrap": {"status": "done", "evidence": {"emmc_cid_raw": recorded}}}}
+    reads = []
+    monkeypatch.setattr(lt, "read_emmc_cid", lambda t: reads.append(t.host) or seen)
+    return ctx, reads
+
+
+def test_need_linux_refuses_a_different_unit_behind_the_address(tmp_path, monkeypatch):
+    ctx, _ = _cid_ctx(tmp_path, monkeypatch, "aa" + CID[2:], CID)
+    with pytest.raises(steps.Refused) as e:
+        ctx.need_linux()
+    msg = str(e.value)
+    assert "192.0.2.7" in msg and "aa" + CID[2:] in msg and CID in msg and SERIAL in msg
+
+
+def test_need_linux_proceeds_on_a_matching_cid_and_reads_fresh_every_time(tmp_path, monkeypatch):
+    # sysfs form: real last byte; bootstrap form: synthesised end byte, upper case
+    ctx, reads = _cid_ctx(tmp_path, monkeypatch, CID, CID[:30].upper() + "01")
+    assert ctx.need_linux().host == "192.0.2.7"
+    ctx.need_linux()
+    assert reads == ["192.0.2.7", "192.0.2.7"]       # no cache: two calls, two reads
+
+
+def test_need_linux_proceeds_on_first_contact_without_reading_the_cid(tmp_path, monkeypatch):
+    ctx, reads = _cid_ctx(tmp_path, monkeypatch, "00" * 16, None)
+    assert ctx.need_linux().host == "192.0.2.7" and reads == []
+
+
+def test_identity_of_the_parse_cid_output_matches_sysfs(tmp_path, monkeypatch):
+    from provision import scif_writer as sw
+    from tests.scripts.test_provision_scif_writer import CID_OUT
+
+    rec = sw.parse_cid(CID_OUT)["emmc_cid_raw"]
+    sysfs = rec[:30] + "00"                          # a host driver that drops CRC7 + end bit
+    ctx, _ = _cid_ctx(tmp_path, monkeypatch, sysfs, rec)
+    assert ctx.need_linux() is not None
+
+
+def test_recorded_cid_survives_a_superseded_state_and_the_unit_yaml(tmp_path, monkeypatch):
+    ctx, _ = _cid_ctx(tmp_path, monkeypatch, "aa" + CID[2:], None)
+    ctx.state = {"steps": {}, "superseded": [
+        {"steps": {"bootstrap": {"status": "done", "evidence": {"emmc_cid_raw": CID}}}}]}
+    with pytest.raises(steps.Refused):
+        ctx.need_linux()
+    ctx.state = {"steps": {}}
+    assert ctx.recorded_cid() == ""
+    ctx.unit_dir.mkdir(parents=True, exist_ok=True)
+    (ctx.unit_dir / f"{SERIAL}.unit.yaml").write_text(f"emmc_cid_raw: {CID}\n", encoding="utf-8")
+    assert ctx.recorded_cid() == CID
+    with pytest.raises(steps.Refused):
+        ctx.need_linux()
+
+
+def test_secure_page_lock_rechecks_identity_right_before_the_write(tmp_path, monkeypatch):
+    board = Board()
+    ctx = _lock_ready(tmp_path / "x", board)
+    calls = []
+    monkeypatch.setattr(type(ctx), "need_linux", lambda self: calls.append(board.lock) or self.linux)
+    assert steps.run_steps(ctx, steps=[steps.SecurePageLock])[0].status == "done"
+    assert calls == [0xFD]                            # checked while still unlocked, before the lock
+
+
+def test_secure_page_lock_refused_when_the_unit_changed(tmp_path, monkeypatch):
+    board = Board()
+    ctx = _lock_ready(tmp_path / "x", board)
+    monkeypatch.setattr(type(ctx), "need_linux",
+                        lambda self: (_ for _ in ()).throw(steps.Refused("another unit")))
+    assert steps.run_steps(ctx, steps=[steps.SecurePageLock])[0].status != "done"
+    assert board.lock == 0xFD
+
+
+def test_accept_cid_change_overrides_only_a_differing_recorded_cid(tmp_path, monkeypatch):
+    other = "aa" + CID[2:]
+    ctx, _ = _cid_ctx(tmp_path, monkeypatch, other, CID)
+    ctx.accept_cid_change = "eMMC replaced"
+    ctx.need_linux()
+    assert [o["gate"] for o in ctx.state["overrides"]] == ["emmc_cid_change"]
+    assert ctx.recorded_cid() == other
+    ctx.need_linux()                                  # anchor adopted: now matches, no new override
+    assert len(ctx.state["overrides"]) == 1
+    first, _ = _cid_ctx(tmp_path / "f", monkeypatch, other, None)
+    first.accept_cid_change = "first"
+    first.need_linux()
+    assert not first.state.get("overrides") and first.recorded_cid() == other
+
+
+def test_detect_in_uboot_then_bootstrap_is_not_refused(tmp_path, monkeypatch):
+    b = _bench(console=FakeConsole([]))
+    b.linux_host = "192.0.2.7"
+    ctx = _ctx(tmp_path, bench=b, execute=True)
+    monkeypatch.setattr(lt.LinuxTarget, "run", lambda self, cmd, **kw: lt.CmdResult(255, "", "no route"))
+    assert "silent" in steps.Detect().run(ctx).detail
+    assert ctx.mutate("anything", lambda: "ran") == "ran"
+    dry = _ctx(tmp_path / "d", bench=_bench(console=FakeConsole([])))
+    assert steps.Bootstrap().run(dry).status != "failed"

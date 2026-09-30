@@ -326,17 +326,28 @@ def test_eeprom_ack_poll_exits_zero_after_retries():
     assert "; if [ $n -ge" in cmd and "; fi; done" in cmd and "&& exit 3" not in cmd
 
 
-def test_target_ssh_pins_the_unit_host_key(tmp_path):
-    kh = tmp_path / "SN1.known_hosts"
+def test_target_ssh_ignores_host_keys():
     fake = FakeSSH([(r"true", "")])
-    t = lt.LinuxTarget("unit", runner=fake, host_alias="E1M-V2N101-SN1-sd", known_hosts=kh)
+    t = lt.LinuxTarget("unit", runner=fake)
     t.run("true")
     t.put(Path("a"), "/tmp/a")
     for argv in fake.argvs:
-        for o in ("HostKeyAlias=E1M-V2N101-SN1-sd", f"UserKnownHostsFile={kh.as_posix()}",
-                  "StrictHostKeyChecking=accept-new", "LogLevel=ERROR"):
+        for o in ("StrictHostKeyChecking=no", "UserKnownHostsFile=/dev/null", "LogLevel=ERROR", "BatchMode=yes"):
             assert o in argv
-        assert "UserKnownHostsFile=/dev/null" not in argv and "StrictHostKeyChecking=no" not in argv
+        assert not any("HostKeyAlias" in a for a in argv)
+
+
+def test_cid_identity_of_the_em_dcid_fixture_equals_the_sysfs_form():
+    from tests.scripts.test_provision_scif_writer import CID_OUT
+    from provision import scif_writer as sw
+
+    cid = sw.parse_cid(CID_OUT)
+    # sysfs as a host that drops the CRC7 + end-bit byte shows it, reserved bits set
+    sysfs = "15fd00414C50544553210a1b2c3d9300\n"
+    assert lt.cid_identity(sysfs) == lt.cid_identity(cid["emmc_cid_raw"]) == "150100414c50544553210a1b2c3d93"
+    assert lt.cid_identity(sysfs) != lt.cid_identity("16" + cid["emmc_cid_raw"][2:])
+    with pytest.raises(ValueError):
+        lt.cid_identity("xyz")
 
 
 def test_eeprom_write_pages_readback_mismatch():
@@ -815,15 +826,3 @@ def test_gd32_bridge_version_frames_and_checks_crc():
     t, _ = target([("i2ctransfer -f", "0x00 0x00 0x0d 0x00 0x9c 0xf3\n")])
     with pytest.raises(BenchError, match="CRC mismatch"):
         lt.gd32_bridge_version(t, 8)
-
-
-def test_ctx_aliases_differ_per_boot_source(tmp_path):
-    from provision import steps
-    ctx = steps.Ctx(sku="E1M-V2N101", serial="SN1", bundle_dir=tmp_path, bundle={}, preset={},
-                    ledger_root=tmp_path, bench=SimpleNamespace(linux_user="root"))
-    sd = ctx.new_linux("10.0.0.2")
-    ctx.boot_src = "emmc"
-    emmc = ctx.new_linux("10.0.0.2")
-    assert "HostKeyAlias=E1M-V2N101-SN1-sd" in sd._opts
-    assert "HostKeyAlias=E1M-V2N101-SN1-emmc" in emmc._opts
-    assert f"UserKnownHostsFile={(tmp_path / 'E1M-V2N101' / 'SN1.known_hosts').as_posix()}" in sd._opts

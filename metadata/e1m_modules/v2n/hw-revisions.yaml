@@ -29,7 +29,7 @@ display_name: "E1M-X-V2N (Renesas RZ/V2N)"
 #
 # BUDGET: the manifest's hw_rev field is ALP_HW_INFO_HW_REV_LEN = 8 bytes, so the
 # composed string may be at most 7 characters plus its NUL.  `2625-r2` is exactly
-# 7 -- there is NO slack.  A future revision key of `r10` (`2625-r10`, 9 chars)
+# 7 -- there is NO slack.  A future revision key of `r10` (`2625-r10`, 8 chars)
 # will not fit and program_eeprom.py will refuse to pack it.  Widening the field
 # is a schema_version bump; see docs/board-id.md.
 board_datecode: "2625"

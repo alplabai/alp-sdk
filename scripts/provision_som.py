@@ -407,6 +407,9 @@ def _v2n_parser() -> argparse.ArgumentParser:
                       help="default: Monday of the serial's ISO week (a different date is "
                            "recorded as an override)")
     work.add_argument("--allow-tier-mismatch", metavar="REASON")
+    work.add_argument("--accept-cid-change", metavar="REASON",
+                      help="the unit's eMMC was legitimately replaced: adopt the CID now behind the "
+                           "address as this serial's identity (recorded as an override; blocks shipping)")
     work.add_argument("--reprovision-from", type=Path, metavar="MANIFEST")
     work.add_argument("--cold-cycles", type=_positive_int, default=3)
     work.add_argument("--transfer", choices=("sd", "xmodem"), default="sd")
@@ -599,7 +602,8 @@ def v2n_main(argv: list[str]) -> int:
     ctx = steps.Ctx(sku=a.sku, serial=serial, bundle_dir=bundle_dir, bundle=bundle, preset=preset,
                     ledger_root=a.ledger_root, execute=execute, lock=getattr(a, "lock", False),
                     bench=bench, tier_markers=markers, expected_registers=regs,
-                    allow_tier_mismatch=a.allow_tier_mismatch, reprovision_from=a.reprovision_from,
+                    allow_tier_mismatch=a.allow_tier_mismatch,
+                    accept_cid_change=a.accept_cid_change, reprovision_from=a.reprovision_from,
                     cold_cycles=a.cold_cycles, hil_spec=hil, flash_writer=a.flash_writer,
                     gd32_fw=a.gd32_fw, dxm1_flash=a.enable_dxm1_flash,
                     transfer=a.transfer, station=a.station, by=a.by,

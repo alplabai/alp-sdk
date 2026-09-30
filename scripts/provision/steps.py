@@ -108,6 +108,7 @@ class Ctx:
     tier_markers: dict | None = None
     expected_registers: dict | None = None
     allow_tier_mismatch: str | None = None
+    accept_cid_change: str | None = None  # operator escape: the eMMC was legitimately replaced
     reprovision_from: Path | None = None
     cold_cycles: int = 3
     hil_spec: Path | None = None
@@ -125,7 +126,6 @@ class Ctx:
     ledger_xlsx: Path | None = None
     boot_text: str = ""                   # last console capture after a power cycle
     boot_class: str = ""
-    boot_src: str = "sd"                  # "sd" | "emmc": host-key alias (the images carry different keys)
     step_logs: dict[str, str] = field(default_factory=dict)
     _cache: dict = field(default_factory=dict)
 
@@ -147,13 +147,6 @@ class Ctx:
     @property
     def unit_dir(self) -> Path:
         return self.ledger_root / self.sku
-
-    def new_linux(self, host: str):
-        """LinuxTarget pinned to this unit's host key for the current boot source."""
-        self.unit_dir.mkdir(parents=True, exist_ok=True)
-        return lt.LinuxTarget(host, self.bench.linux_user,
-                              host_alias=f"{self.sku}-{self.serial}-{self.boot_src}",
-                              known_hosts=self.unit_dir / f"{self.serial}.known_hosts")
 
     @property
     def family(self) -> str:
@@ -184,17 +177,55 @@ class Ctx:
         --from / --force-step run starts past the step that normally
         attaches it, instead of refusing a board that is already up."""
         if self.linux is None and self.bench is not None and self.bench.linux_host:
-            self.linux = self.new_linux(self.bench.linux_host)
+            self.linux = lt.LinuxTarget(self.bench.linux_host, self.bench.linux_user)
         if self.linux is None and self.execute:
             raise Refused("no Linux target: boot_sd_linux has not run")
+        if self.linux is not None and self.execute:
+            self._check_unit_identity(self.linux)
         return self.linux
+
+    def recorded_cid(self) -> str:
+        """The eMMC CID this serial is known by ("" before first contact). The CID is
+        hardware, so it outlives a bundle / tool_rev change: finished steps, then steps
+        moved to ``superseded``, then the committed unit.yaml. An explicit
+        ``--accept-cid-change`` anchor (``cid_anchor``) outranks all of them."""
+        if self.state.get("cid_anchor"):
+            return self.state["cid_anchor"]
+        groups = [self.state.get("steps", {})] + [g.get("steps", {}) for g in self.state.get("superseded", [])]
+        for steps_ in groups:
+            for st in steps_.values():
+                if st.get("status") in ("done", "skipped") and (st.get("evidence") or {}).get("emmc_cid_raw"):
+                    return st["evidence"]["emmc_cid_raw"]
+        return ledger_out.read_unit_yaml(self.unit_dir / f"{self.serial}.unit.yaml").get("emmc_cid_raw", "")
+
+    def _check_unit_identity(self, t) -> None:
+        """Refuse to mutate a Linux target whose eMMC is not this serial's (stale IP).
+        Read fresh on every call, never cached: a power cycle or DHCP renewal can put
+        another unit behind the same address. First contact with nothing recorded is
+        unchecked (bootstrap's EM_DCID records the CID on the normal blank-unit path)."""
+        want = self.recorded_cid()
+        if not want and not self.accept_cid_change:
+            return
+        seen = lt.read_emmc_cid(t)
+        if want and lt.cid_identity(seen) == lt.cid_identity(want):
+            return
+        if self.accept_cid_change:
+            if want:                          # first contact adopts silently; a changed CID is an override
+                _record_override(self, "emmc_cid_change", self.accept_cid_change)
+            self.state["cid_anchor"] = seen.strip().lower()
+            save_state(self.state_path, self.state)
+            return
+        raise Refused(f"{t.host} answers with eMMC CID {seen.strip().lower()}, but unit {self.serial} "
+                      f"recorded {want.strip().lower()}: another unit is behind this address "
+                      "(stale DHCP lease?). Fix the address in bench.yaml and re-run, or "
+                      "--accept-cid-change REASON if the eMMC was replaced.")
 
     def linux_up(self) -> bool:
         # --only/--from can start past detect, which is what normally attaches
         # ctx.linux; attach a configured host here so a probe does not report
         # Unknown and trigger a needless cold cycle on a board already up.
         if self.linux is None and self.bench is not None and self.bench.linux_host:
-            self.linux = self.new_linux(self.bench.linux_host)
+            self.linux = lt.LinuxTarget(self.bench.linux_host, self.bench.linux_user)
         if self.linux is None:
             return False
         try:
@@ -284,11 +315,9 @@ def connect_linux(ctx: Ctx, force: bool = False) -> None:
         return
     b = ctx.need_bench()
     host = b.linux_host or lt.discover_host(b.console)
-    if (ctx.linux is not None and getattr(ctx.linux, "host", None) == host
-            and (getattr(ctx.linux, "_opts", None) is None     # duck-typed fake
-                 or f"HostKeyAlias={ctx.sku}-{ctx.serial}-{ctx.boot_src}" in ctx.linux._opts)):
+    if ctx.linux is not None and getattr(ctx.linux, "host", None) == host:
         return
-    ctx.linux = ctx.new_linux(host)
+    ctx.linux = lt.LinuxTarget(host, b.linux_user)
 
 
 def _manifest_sku(arr: bytes) -> str:
@@ -454,7 +483,7 @@ class Detect(Step):
             lt.console_login(c, ctx.bench.linux_user)
             connect_linux(ctx, force=True)
         elif ctx.linux is None and ctx.bench.linux_host:
-            ctx.linux = ctx.new_linux(ctx.bench.linux_host)
+            ctx.linux = lt.LinuxTarget(ctx.bench.linux_host, ctx.bench.linux_user)
         up = ctx.linux_up()
         note = ""
         if key == "silent" and ctx.state_done("bootstrap"):
@@ -587,7 +616,6 @@ class BootSdLinux(Step):
                 lt.console_login(b.console, b.linux_user)
                 connect_linux(ctx, force=True)
                 return text + _since(b.console, n)
-            ctx.boot_src = "emmc"
             text = ctx.mutate(f"U-Boot loadx + gzwrite {wic.name} into eMMC (slow fallback), boot", xm)
         else:
             text = ctx.mutate("cold cycle; U-Boot bootcmd_check boots the release wic from microSD; "
@@ -1123,7 +1151,6 @@ class ColdBootTest(Step):
             # 0 boots must never satisfy the precondition of the irreversible lock.
             raise Refused(f"cold_cycles must be >= 1 (got {n}): a run with no cold boots proves nothing")
         ev: dict[str, str] = {}
-        ctx.boot_src = "emmc"
         if not ctx.execute:
             ctx.mutate(f"{n} cold cycles: clean BL2, DRAM tier, "
                        f"{'rail PG, ' if ctx.family == 'v2n-m1' else ''}login, SYS_LSI_MODE, i2c scans",
@@ -1372,6 +1399,7 @@ class SecurePageLock(Step):
                 f"PERMANENT: lock the N24S128 identity header of {ctx.sku}. Type the unit serial to confirm:")
             if typed != ctx.serial:
                 raise Refused(f"operator typed {typed!r}, not {ctx.serial!r}")
+        t = ctx.need_linux()                 # fresh identity check right before the irreversible write
         ctx.mutate(f"LOCK: 0x58 frame 04 00 ff on i2c-{bus} (irreversible)",
                    lambda: lt.i2c_transfer(t, bus, gates.identity_frame(gates.IdentityOp.LOCK)))
         return self.result(ctx, "identity header locked" if ctx.execute else "lock plan only (no --execute)")
