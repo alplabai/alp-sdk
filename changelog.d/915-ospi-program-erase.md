@@ -54,11 +54,22 @@ original contents (CRC-verified) of exactly one 4 KiB sector
 (`0x01FF0000`), printing its own `RESULT PASS/FAIL` line. Off by default so
 flashing this app cannot destructively touch the NOR by accident.
 
-**Not verified on silicon.** This task's scope forbade a hardware run
-(bench evidence cited above is all prior work, not from this change): the
-Octal DDR switch sequence, the FIFO push ordering for the enhanced frame
-format's instruction/address/data phases, and the flag-status polarity are
-all best-effort against the DFP's documented IS25WX256 behavior and
-hal_alif's own register field encoding, not bench-confirmed. A silicon run
-of `aen-ospi-regcheck`'s new self-test is the natural next step for whoever
-has bench access to E1M-AEN803.
+Two defects surfaced on the bench and are fixed here. The octal array
+read and the part's wait-cycle config were fed the DT `xip-wait-cycles`
+value -- the controller's XiP knob, `255` on this SoC -- which overflowed
+the 5-bit `SPI_CTRLR0.WAIT_CYCLES` field and wrote `0xFF` wait cycles into
+the part, so every array read returned `0xFF` and a successful program
+looked like a no-op; the driver now uses its own 16-cycle constant, the
+DFP's `RTE_ISSI_FLASH_WAIT_CYCLES` for this SoC. And octal reads were
+issued as one long transfer, which overflows the 256-entry RX FIFO at
+Octal DDR rates and stalls (`-ETIMEDOUT`); they are now chunked at the
+FIFO depth, as the DFP does.
+
+**Verified on silicon:** E1M-AEN803 serial 2026W36-0001, M55-HE Flow C
+RAM-run of `aen-ospi-regcheck` with the self-test enabled, two runs (one
+cold, one warm with the part already in Octal DDR): `post-erase all_0xff=1`,
+pattern `crc32=0xa2912082` read back byte-for-byte, a second erase + the
+restore brought the sector back to its original `crc32=0xf154670a`,
+`RESULT PASS`. Octal DDR `70h`/`05h` reads return real status
+(`WEL` set after `06h`), and an octal `5Ah` SFDP read with 8 dummy cycles
+returns the `SFDP` signature.

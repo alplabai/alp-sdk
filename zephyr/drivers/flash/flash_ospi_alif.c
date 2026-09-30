@@ -599,6 +599,16 @@ static int ospi_alif_init(const struct device *dev)
 #define OSPI_ALIF_VOLCFG_ADDR_WAIT_CYC 0x00000001U
 #define OSPI_ALIF_OCTAL_DDR_IO_MODE    0xE7U
 
+/* Octal DDR array-read dummy cycles, programmed into the part's volatile
+ * wait-cycle config at the switch and used for every 7Ch read afterwards --
+ * the DFP's RTE_ISSI_FLASH_WAIT_CYCLES for this SoC (16). Deliberately NOT
+ * the DT `xip-wait-cycles`: that property is the controller's XiP knob
+ * (255 in ensemble_e8_peripherals.dtsi), which overflowed the 5-bit
+ * SPI_CTRLR0.WAIT_CYCLES field and wrote 0xFF wait cycles into the part, so
+ * every array read came back 0xFF and a successful program looked like a
+ * no-op (bench, #915). */
+#define OSPI_ALIF_OCTAL_READ_WAIT_CYCLES 16U
+
 /* Flag-status register (70h) bits (IS25WX256.c FLAG_STATUS_BUSY/_ERROR).
  * Counter-intuitively, bit 7 set means the program/erase controller is
  * READY, not busy -- kept exactly as the vendor driver tests it
@@ -829,10 +839,9 @@ static int ospi_alif_poll_ready_locked(const struct device *dev)
  */
 static int ospi_alif_octal_switch_locked(const struct device *dev)
 {
-	const struct ospi_alif_config *config = dev->config;
-	uint8_t                        io_mode_cmd[5];
-	uint16_t                       wait_cyc;
-	int                            rc;
+	uint8_t  io_mode_cmd[5];
+	uint16_t wait_cyc;
+	int      rc;
 
 	rc = ospi_alif_write_enable_locked(dev, false);
 	if (rc != 0) {
@@ -850,14 +859,13 @@ static int ospi_alif_octal_switch_locked(const struct device *dev)
 	}
 
 	/* The part is now Octal DDR; switch this driver's framing to match and
-	 * program its default wait-cycles (reusing the DT `xip-wait-cycles`
-	 * value -- the same "IS25WX256 wait cycles" number, whether used for a
-	 * XiP read or this driver's own fast-read path). */
+	 * program the array-read wait cycles the 7Ch path below uses. */
 	rc = ospi_alif_write_enable_locked(dev, true);
 	if (rc != 0) {
 		return rc;
 	}
-	wait_cyc = (uint16_t)((config->xip_wait_cycles << 8) | config->xip_wait_cycles);
+	wait_cyc =
+	    (uint16_t)((OSPI_ALIF_OCTAL_READ_WAIT_CYCLES << 8) | OSPI_ALIF_OCTAL_READ_WAIT_CYCLES);
 	return ospi_alif_octal_xfer_locked(dev,
 	                                   OSPI_ALIF_CMD_WRITE_VOL_CFG,
 	                                   true,
@@ -1134,9 +1142,8 @@ static int ospi_alif_cmd_read(const struct device *dev,
  */
 static int ospi_alif_read_octal(const struct device *dev, off_t offset, uint8_t *out, size_t len)
 {
-	const struct ospi_alif_config *config = dev->config;
-	struct ospi_alif_data         *data   = dev->data;
-	int                            rc     = 0;
+	struct ospi_alif_data *data = dev->data;
+	int                    rc   = 0;
 
 	if ((len % 2U) != 0U) {
 		return -EINVAL; /* odd length has no Octal-DDR-frame form */
@@ -1144,13 +1151,18 @@ static int ospi_alif_read_octal(const struct device *dev, off_t offset, uint8_t 
 
 	k_mutex_lock(&data->lock, K_FOREVER);
 	while (len > 0U) {
-		size_t chunk = MIN(len, (size_t)OSPI_ALIF_MAX_FRAMES * 2U) & ~(size_t)1U;
+		/* One RX FIFO's worth of 16-bit frames per chip-select: at Octal
+		 * DDR rates the CPU poll loop cannot drain the FIFO as fast as
+		 * the bus fills it, so a longer transfer overflows RX and stalls
+		 * (bench, #915). The DFP caps its reads the same way
+		 * (IS25WX256.c OSPI_MAX_RX_COUNT). */
+		size_t chunk = MIN(len, (size_t)OSPI_RX_FIFO_DEPTH * 2U) & ~(size_t)1U;
 
 		rc = ospi_alif_octal_xfer_locked(dev,
 		                                 OSPI_ALIF_CMD_OCTAL_READ,
 		                                 true,
 		                                 (uint32_t)offset,
-		                                 config->xip_wait_cycles,
+		                                 OSPI_ALIF_OCTAL_READ_WAIT_CYCLES,
 		                                 NULL,
 		                                 0,
 		                                 out,
