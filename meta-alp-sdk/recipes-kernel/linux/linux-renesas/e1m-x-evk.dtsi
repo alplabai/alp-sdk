@@ -322,7 +322,9 @@
 	 * actually present, so rzv2h-cpg times out (-110) on the first runtime
 	 * resume of the card. rsnd falls back to a null clock for a clock name
 	 * that is absent (rsnd_adg_get_clkin), so dropping them is safe; the
-	 * card runs from Audio_CLKB (clk_b) only. */
+	 * card runs from Audio_CLKB (clk_b) only. Bench-confirmed on E1M-V2M103
+	 * (no -110; 2 s of 48 kHz audio plays in 2.06 s). Re-sync this list from
+	 * r9a09g056.dtsi's rcar_sound node on a BSP bump. */
 	clocks = <&cpg CPG_MOD 0xf5>,
 		 <&cpg CPG_MOD 0x18a>,
 		 <&cpg CPG_MOD 0x189>,
