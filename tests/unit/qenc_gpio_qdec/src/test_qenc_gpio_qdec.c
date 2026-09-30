@@ -34,7 +34,7 @@ ZTEST(alp_qenc_gpio_qdec, test_open_get_position_uses_gpio_qdec_backend_not_zeph
 	zassert_true(device_is_ready(dev), "gpio-qdec device not ready");
 
 	alp_qenc_config_t cfg = ALP_QENC_CONFIG_DEFAULT(0);
-	alp_qenc_t        *h  = alp_qenc_open(&cfg);
+	alp_qenc_t       *h   = alp_qenc_open(&cfg);
 	zassert_not_null(h, "expected gpio_qdec backend to accept alp-qenc0");
 
 	/* zephyr_drv (priority 100) would ALSO accept this node's open()
@@ -58,7 +58,7 @@ ZTEST(alp_qenc_gpio_qdec, test_open_falls_through_past_non_gpio_qdec_alias)
 	 * walk down to zephyr_drv (priority 100) instead of failing the
 	 * whole open -- issue #2095's open-time fall-through. */
 	alp_qenc_config_t cfg = ALP_QENC_CONFIG_DEFAULT(1);
-	alp_qenc_t        *h  = alp_qenc_open(&cfg);
+	alp_qenc_t       *h   = alp_qenc_open(&cfg);
 	zassert_not_null(h, "expected fall-through to zephyr_drv for a non-gpio-qdec alias");
 	alp_qenc_close(h);
 }
@@ -68,7 +68,7 @@ ZTEST(alp_qenc_gpio_qdec, test_position_accumulates_injected_rel_events)
 	const struct device *dev = DEVICE_DT_GET(QDEC_NODE);
 
 	alp_qenc_config_t cfg = ALP_QENC_CONFIG_DEFAULT(0);
-	alp_qenc_t        *h  = alp_qenc_open(&cfg);
+	alp_qenc_t       *h   = alp_qenc_open(&cfg);
 	zassert_not_null(h);
 
 	/* Baseline: earlier tests in this suite may have already ticked
@@ -96,7 +96,7 @@ ZTEST(alp_qenc_gpio_qdec, test_reset_position_zeroes_accumulator)
 	const struct device *dev = DEVICE_DT_GET(QDEC_NODE);
 
 	alp_qenc_config_t cfg = ALP_QENC_CONFIG_DEFAULT(0);
-	alp_qenc_t        *h  = alp_qenc_open(&cfg);
+	alp_qenc_t       *h   = alp_qenc_open(&cfg);
 	zassert_not_null(h);
 
 	zassert_equal(input_report_rel(dev, INPUT_REL_WHEEL, 5, true, K_NO_WAIT), 0);
@@ -115,7 +115,7 @@ ZTEST(alp_qenc_gpio_qdec, test_unrelated_event_type_ignored)
 	const struct device *dev = DEVICE_DT_GET(QDEC_NODE);
 
 	alp_qenc_config_t cfg = ALP_QENC_CONFIG_DEFAULT(0);
-	alp_qenc_t        *h  = alp_qenc_open(&cfg);
+	alp_qenc_t       *h   = alp_qenc_open(&cfg);
 	zassert_not_null(h);
 	zassert_equal(alp_qenc_reset_position(h), ALP_OK);
 
