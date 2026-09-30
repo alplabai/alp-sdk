@@ -1,0 +1,17 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Opt-in: run this bench on the real D/AVE 2D engine instead of the software
+ * fallback. Needs Alif's D/AVE 2D driver as a Zephyr module; see README.md.
+ */
+
+/ {
+	aliases {
+		d2-inst = &gpu2d;
+	};
+};
+
+&gpu2d {
+	status = "okay";
+};

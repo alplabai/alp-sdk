@@ -1698,6 +1698,21 @@
 		status = "disabled";
 	};
 
+	/*
+	 * GPU2D -- TES D/AVE 2D engine (#916). Driven by Alif's D/AVE 2D driver
+	 * (github.com/alifsemi/alif_dave2d-driver, fetched as a Zephyr module,
+	 * never vendored), which finds it through the `d2-inst` alias. Base, IRQ
+	 * and clock gate from the E8 SVD / DFP: 0x49040000, IRQ 332 on the M55
+	 * cores, PERIPH_CLK_ENA.GPU_CKEN.
+	 */
+	gpu2d: dave2d@49040000 {
+		compatible = "tes,dave2d";
+		reg = <0x49040000 0x1000>;
+		interrupts = <332 3>;
+		clocks = <&clockctrl ALIF_GPU_CLK>;
+		status = "disabled";
+	};
+
 	cam: cam@49030000 {
 		compatible = "alif,cam";
 		reg = <0x49030000 0x1000>;
