@@ -858,8 +858,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_MQTT_SW_FALLBACK
 # portable Zephyr backend covers all three primitives via
 # DT_ALIAS(alp_shmemN) / DT_ALIAS(alp_mboxN) / intra-core k_sem
 # fallback.  Dispatcher + Zephyr backend ship unconditionally;
-# sw_fallback gated on CONFIG_ALP_SDK_<CLASS>_SW_FALLBACK
-# (default y, so it is linked unless a build opts out).
+# sw_fallback gated on CONFIG_ALP_SDK_MPROC_SW_FALLBACK
+# (default y on native_sim only).
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/mproc_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mproc/zephyr_drv.c)

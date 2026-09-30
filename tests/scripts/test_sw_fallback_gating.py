@@ -38,7 +38,11 @@ def ungated(text: str) -> list[str]:
             continue
         call = list(_CALL.finditer(text, 0, m.start()))[-1]
         if not call.group(0).startswith("zephyr_library_sources("):
-            continue  # an _ifdef variant
+            # An _ifdef variant: its first argument must be a *_SW_FALLBACK symbol.
+            arg = re.match(r"zephyr_library_sources_ifdef\(\s*(\w+)", text[call.start():])
+            if not (arg and arg.group(1).endswith("_SW_FALLBACK")):
+                bad.append(cls)
+            continue
         # Plain call: acceptable only inside if(... _SW_FALLBACK ...).
         lead = text[max(0, call.start() - 200):call.start()]
         if not re.search(r"if\([^)]*_SW_FALLBACK[^)]*\)\s*$", lead):
@@ -60,6 +64,10 @@ def test_detector_flags_plain_and_accepts_gated():
     gated = "zephyr_library_sources_ifdef(CONFIG_X_SW_FALLBACK\n  ${D}/src/backends/i2c/sw_fallback.c)\n"
     in_if = "if(A AND CONFIG_T_SW_FALLBACK)\n    zephyr_library_sources(\n  ${D}/src/backends/tmu/sw_fallback.c)\n"
     allowed = "zephyr_library_sources(\n  ${D}/src/backends/dsp/sw_fallback.c)\n"
+    wrong_sym = "zephyr_library_sources_ifdef(CONFIG_I2C
+  ${D}/src/backends/i2c/sw_fallback.c)
+"
+    assert ungated(wrong_sym) == ["i2c"]
     assert ungated(plain) == ["i2c"]
     assert ungated(gated) == []
     assert ungated(in_if) == []

@@ -95,9 +95,10 @@ config ALP_SDK_DAC_SW_FALLBACK
 	  Compiles src/backends/dac/sw_fallback.c, a priority-0 wildcard
 	  whose open() succeeds with an empty capability set while
 	  write_mv / read_mv return ALP_ERR_NOSUPPORT.  For native_sim
-	  build / test only: on silicon without a real DAC backend
-	  alp_dac_open() then reports NOSUPPORT instead of handing out a
-	  handle that drives nothing.
+	  build / test only.  Off, alp_dac_open() never hands out a
+	  handle that drives nothing: the always-linked zephyr_drv backend
+	  returns its own open code (INVAL / NOT_READY, or NOSUPPORT when
+	  CONFIG_DAC is off).
 
 config ALP_SDK_I3C_SW_FALLBACK
 	bool "Software I3C fallback (empty-caps stub)"
@@ -108,8 +109,10 @@ config ALP_SDK_I3C_SW_FALLBACK
 	  Compiles src/backends/i3c/sw_fallback.c, a priority-0 wildcard
 	  whose open() succeeds while every bus op returns
 	  ALP_ERR_NOSUPPORT.  For native_sim build / test only: on
-	  silicon without a real I3C backend alp_i3c_open() then reports
-	  NOSUPPORT instead of handing out a handle with no bus behind it.
+	  Off, alp_i3c_open() never hands out a handle with no bus behind
+	  it: the always-linked zephyr_drv backend returns its own open
+	  code (INVAL / NOT_READY, or NOSUPPORT when CONFIG_I3C_CONTROLLER
+	  is off).
 
 config ALP_SDK_RTC_SW_FALLBACK
 	bool "Software RTC fallback (deterministic frozen clock)"
