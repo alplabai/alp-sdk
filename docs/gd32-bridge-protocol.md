@@ -1358,6 +1358,7 @@ cause):
 | `0x07` | `ERASE_TARGET` | Erase target would intersect the running slot. |
 | `0x08` | `NOT_TRIAL_CAPABLE` | `COMMIT` refused: candidate image has no valid trial marker. |
 | `0x09` | `META_DEMOTE_FAILED` | `BEGIN`: metadata commit demoting the stale target slot failed. |
+| `0x0A` | `BELOW_FLOOR` | `COMMIT`/`ROLLBACK` refused: the image's version is below the anti-rollback floor. Answers `STATUS_INVAL`; the active slot is untouched. |
 
 The host mirror is `gd32g553_ota_err_t`
 (`<alp/chips/gd32g553.h>`); `gd32g553_ota_get_state()` reads this byte
