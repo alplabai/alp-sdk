@@ -6,6 +6,7 @@ land in the committed catalog.
 """
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -46,7 +47,8 @@ def test_committed_file_is_valid_json_with_expected_shape():
 def test_check_mode_passes_on_committed_file():
     proc = subprocess.run(
         [sys.executable, str(SCRIPT), "--check"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
     assert proc.returncode == 0, proc.stderr
 

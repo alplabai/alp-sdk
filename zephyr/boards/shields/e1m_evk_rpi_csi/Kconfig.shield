@@ -1,0 +1,5 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+
+config SHIELD_E1M_EVK_RPI_CSI
+	def_bool $(shields_list_contains,e1m_evk_rpi_csi)

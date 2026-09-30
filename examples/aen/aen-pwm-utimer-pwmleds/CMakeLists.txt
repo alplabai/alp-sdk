@@ -16,8 +16,7 @@
 # the raw Zephyr PWM API + reads back the UTIMER registers, so it needs no
 # <alp/*> portable surface.  Build per the bench recipe with
 #   -DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>
-# and
-#   -DEXTRA_DTC_OVERLAY_FILE=<this app>/boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay
+# Zephyr applies boards/<fully-qualified-board>.overlay by itself.
 
 cmake_minimum_required(VERSION 3.20)
 

@@ -45,21 +45,23 @@ on_module:
       devices:
         - { chip: rv3028c7,         role: rtc,                       address_7bit: "0x52" }
         - { chip: optiga_trust_m,   role: secure_element,            address_7bit: "0x30" }
-        - { chip: tmp112,           role: temp_sensor,               address_7bit: "0x48" }
-        - { chip: clk_5l35023b,     role: clock_generator,           address_7bit: "0x68" }
+        # 0x40 = ADD0 strapped to GND on the fitted TMP112DIDPWR (X2SON-5) --
+        # maintainer-confirmed 2026-09-24 (same class of bug as AEN's #1978:
+        # the naive datasheet ADD0=GND->0x48 strap-table read doesn't match
+        # this package's real strap).
+        - { chip: tmp112,           role: temp_sensor,               address_7bit: "0x40" }
+        # I2C_addr[1:0]=01 (8-bit 0xD2) -- maintainer-confirmed 2026-09-24.
+        - { chip: clk_5l35023b,     role: clock_generator,           address_7bit: "0x69" }
         - { chip: gd32g553,         role: supervisor_mcu_i2c_slave,  address_7bit: "0x70" }
         - { chip: act8760,          role: pmic_main_page0,           address_7bit: "0x25" }
         - { chip: act8760,          role: pmic_main_page1,           address_7bit: "0x26" }
         - { chip: da9292,           role: pmic_secondary,            address_7bit: "0x1E" }
-        # Address UNRESOLVED (#1163, #1845).  The chip-default 0x48 collides
-        # with the on-module tmp112 on this bus.  The unknown is recorded HERE,
-        # on the DEEPX buck, because that part is V2M-only: E1M-V2N101/102
-        # declare the same tmp112 at 0x48 on the same bus, and all four SKUs
-        # share one PCB, so the tmp112 ADD0 strap is a single physical net --
-        # blanking it on the V2M pair alone would make the tree answer the same
-        # hardware question two different ways.  Which part is re-strapped on
-        # the real V2M schematic, and to what, is not known here: do not guess.
-        - { chip: tps628640,        role: deepx_lpddr_0v85,          address_7bit: "TBD" }
+        # Address RESOLVED (#1163, #1845): bench-measured 2026-09-24 on
+        # E1M-V2M103 -- 0x48 appears on BRD_I2C only after P64
+        # (DEEPX_CORE_0P75_EN) is driven high, and its VOUT reads 0x5A
+        # (= 0.85 V: 0.4 V + 90 x 5 mV), matching this role. 0x44 (deepx_ddr5_vdd) and 0x4F
+        # (deepx_ddr5_vddq) were confirmed present on the same bus scan.
+        - { chip: tps628640,        role: deepx_lpddr_0v85,          address_7bit: "0x48" }
         - { chip: tps628640,        role: deepx_ddr5_vdd,            address_7bit: "0x44" }
         - { chip: tps628640,        role: deepx_ddr5_vddq,           address_7bit: "0x4F" }
         - { chip: tps628640,        role: lpddr4x_0v6,               address_7bit: "0x4D", assembled: optional }
@@ -67,6 +69,16 @@ on_module:
       bus_master: renesas-rzv2n
       devices:
         - { chip: eeprom_24c128,    role: eeprom,                    address_7bit: "0x50" }
+        # SAME PHYSICAL PART as the 0x50 entry above, not a second chip --
+        # this line's default population is the onsemi N24S128C4DYT3G (see
+        # metadata/chips/eeprom_24c128.yaml mpn_population), which decodes
+        # `1010` -> 0x50 and `1011` -> 0x58 (Secure Data Page / Unique ID /
+        # lock byte / Device Configuration Register).  The
+        # footprint-compatible M24128-BFMH6TG is an alternate/DNP part, not
+        # the fitted default.  Listed so the unclaimed 0x58 ACK doesn't
+        # collide with a future part (alp-sdk#1976).  Measured on
+        # E1M-AEN803 serial 2026W36-0003.
+        - { chip: eeprom_24c128,    role: eeprom_identity,           address_7bit: "0x58" }
 
 memory:
   dram_mbit:            32768                  # 32 Gbit LPDDR4X
@@ -102,6 +114,11 @@ topology:
     hw_console: false
     zephyr_full_name: "E1M-V2M101 (RZ/V2N + DEEPX DX-M1) Cortex-M33 system manager"
     zephyr_twister_name: "E1M-V2M101 Cortex-M33 system manager"
+    # Same RZ/V2N die, same MHU-B and same CM33-NS DDR alias as E1M-V2N101,
+    # so the CM33 side of the OpenAMP/MHU-B carve-out is the same hardware
+    # fact here (#1948).  Like V2N101, the A55 half (the 4f70xxxx UIO /
+    # reserved-memory nodes) is not in any shipped Linux DT yet.
+    openamp_ipc: true
 
 # Memory layout (SRAM banks + MRAM) is derived from the SoC variant
 # resolved via `silicon_variant:` -- see metadata/socs/<vendor>/<family>/<part>.json
@@ -138,9 +155,10 @@ mailbox:
 # -- two logical I2S instances, matching ALP_E1M_X_I2S0/I2S1 in
 # include/alp/e1m_x_pinout.h.  Named `i2s0`/`i2s1`, not `i2s_ssiu0`/`1`:
 # SSIU0 does not exist on this pad map (the first channel is SSIU1), and
-# scripts/check_e1m_route_capability.py's `ssiu_to_i2s0` table already
-# aliases this exact SSIU1+SSIU2 pair to the E1M-X I2S0 function, so this
-# name matches an existing convention instead of inventing a new one.
+# the SoM netlist routes this exact SSIU1+SSIU2 pair to the E1M-X I2S0
+# pads (metadata/pinmux/v2n.yaml: SSI1 SCK/WS -> I2S0_SCLK/I2S0_WS, SSI1
+# SDATA P46 -> I2S0_SDI, SSI2 SDATA P47 -> I2S0_SDO), so this name matches
+# the connector instead of inventing a new one.
 #
 # #1170 remainder -- disposition of every further routed net the issue
 # names, verified against the TSV cited above:
@@ -249,14 +267,15 @@ pad_routes:
   - { e1m: E1M_X_GPIO_IO13, dispatch: gd32_bridge, dispatch_pin: PF1  }
   - { e1m: E1M_X_GPIO_IO14, dispatch: gd32_bridge, dispatch_pin: PB5  }
   - { e1m: E1M_X_GPIO_IO16, dispatch: gd32_bridge, dispatch_pin: PC0  }
-  - { e1m: E1M_X_GPIO_IO24, dispatch: gd32_bridge, dispatch_pin: PC14 }
+  - { e1m: E1M_X_GPIO_IO24, dispatch: unrouted,
+      doc: "Not a GD32 pad; driven by the DX-M1 on V2M. Bridge bit 8 answers STATUS_IO (#2453)." }
   - { e1m: E1M_X_GPIO_IO25, dispatch: gd32_bridge, dispatch_pin: PC15 }
 
   # E1M-X form-factor GPIO extensions (IO27..IO35, IO33 absent on V2N).
   # See `E1M_X_GPIO_IO27..IO35` in <alp/e1m_x_pinout.h>.
   # Source: metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv
   - { e1m: E1M_X_GPIO_IO27, dispatch: gd32_bridge, dispatch_pin: PB11 }
-  - { e1m: E1M_X_GPIO_IO28, dispatch: gd32_bridge, dispatch_pin: PC2  }
+  - { e1m: E1M_X_GPIO_IO28, dispatch: gd32_bridge, dispatch_pin: PE9  }
   - { e1m: E1M_X_GPIO_IO29, dispatch: gd32_bridge, dispatch_pin: PD11 }
   - { e1m: E1M_X_GPIO_IO30, dispatch: gd32_bridge, dispatch_pin: PD10 }
   - { e1m: E1M_X_GPIO_IO31, dispatch: gd32_bridge, dispatch_pin: PE12 }
@@ -293,7 +312,7 @@ helper_firmware:
     #
     # `flash_policy` STAYS.  It answers who may reach a local flash path
     # if one is ever added, which the schema requires on every helper
-    # entry with or without a `flash_method` -- the six AEN
+    # entry with or without a `flash_method` -- the seven AEN
     # `cc3501e_otp` entries are that same shape (`recovery_only`, no
     # `flash_method`).  Alp Lab programs this part in production; a
     # customer flash is only ever bricked-board recovery with Alp

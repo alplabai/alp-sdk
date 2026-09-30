@@ -32,9 +32,12 @@ reply-arming framing (the one fix that can't be checked off-silicon).
 | `SPI1.MOSI`  | `P14_5`      | out | `GPIO_28`               |
 | `SPI1.MISO`  | `P14_4`      | in  | `GPIO_29`               |
 
-This HW rev uses the dwc-ssi **hardware SS0** chip-select on P14_7 and a READY
-input for per-phase gating. The application still passes `ALP_SPI_NO_CS` so no
-software GPIO CS is installed; the SPI driver drives SS0 from the controller.
+This HW rev uses the dwc-ssi **hardware SS0** chip-select on P14_7 and an
+OPTIONAL READY input for per-phase gating -- opt-in only, and NULL (unwired)
+by default on the R2 module this app targets (see `src/cc3501e_bridge.c` and
+`src/main.c`'s READY probe for why). The application still passes
+`ALP_SPI_NO_CS` so no software GPIO CS is installed; the SPI driver drives
+SS0 from the controller.
 
 ## What it does
 

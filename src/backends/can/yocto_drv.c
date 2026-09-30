@@ -332,6 +332,15 @@ static void *_rx_loop(void *arg)
 			if (errno == EINTR) continue;
 			break; /* fatal poll() error -> stop */
 		}
+		if (fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+			/* A torn-down/invalid socket fd makes poll() return a
+             * POSITIVE rc with the error bit set in revents, NOT
+             * rc < 0 (issue #1962) -- the rc<0 guard above never
+             * catches this, and with this loop's infinite timeout
+             * there is nothing else to stop it from re-polling and
+             * returning immediately forever. */
+			break; /* fatal socket error -> stop, same as rc < 0 above */
+		}
 		if (fds[1].revents & POLLIN) {
 			break; /* close-side wake notification (issue #756) */
 		}
@@ -387,6 +396,7 @@ static void *_rx_loop(void *arg)
 static alp_status_t
 y_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	if (cfg == NULL) return ALP_ERR_INVAL;
 
 	char ifname[IFNAMSIZ];
@@ -472,10 +482,9 @@ y_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st, alp_capabilitie
 		return _errno_to_alp(e);
 	}
 
-	st->dev         = NULL;
-	st->bus_id      = cfg->bus_id;
-	st->be_data     = d;
-	caps_out->flags = 0u;
+	st->dev     = NULL;
+	st->bus_id  = cfg->bus_id;
+	st->be_data = d;
 	return ALP_OK;
 }
 
@@ -615,9 +624,13 @@ static alp_status_t y_add_filter(alp_can_backend_state_t *st,
 	f->user           = user;
 	f->kf.can_id      = filter->id & (filter->ext_id ? CAN_EFF_MASK : CAN_SFF_MASK);
 	f->kf.can_mask    = filter->mask;
+	/* Always compare the EFF bit so an ext_id=false filter rejects 29-bit
+     * frames (else their low 11 bits alias onto it); can_id carries it
+     * only for ext_id=true.  _dispatch_rx()'s cmp already sets it per
+     * frame, so the software match follows the same rule. */
+	f->kf.can_mask |= CAN_EFF_FLAG;
 	if (filter->ext_id) {
 		f->kf.can_id |= CAN_EFF_FLAG;
-		f->kf.can_mask |= CAN_EFF_FLAG; /* require EFF frames to match */
 	}
 	f->in_use = true;
 

@@ -1,7 +1,7 @@
 # board.yaml -- per-app project configuration for the
 # aen-secure-element-sign example.
 #
-# OPTIGA Trust M probe-only sanity on the E1M-AEN (Alif Ensemble) SoM.
+# OPTIGA Trust M probe + Coprocessor UID read on the E1M-AEN (Alif Ensemble) SoM.
 # The Trust M is on BRD_I2C -- SoC I2C0, function C (CORRECTED #1848; was
 # believed to be the slave-only LPI2C0) -- reached via this example's own
 # board overlay, targeting m55_he.  Everything else goes through the

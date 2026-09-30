@@ -1,5 +1,6 @@
 """Unit tests for scripts/check_board_target_tree_parity.py."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -10,7 +11,8 @@ SCRIPT = REPO / "scripts" / "check_board_target_tree_parity.py"
 
 def _run(*args, **kw):
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, **kw,
+        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, encoding="utf-8",
+        env={**(kw.pop("env", None) or os.environ), "PYTHONIOENCODING": "utf-8"}, **kw,
     )
 
 
@@ -18,14 +20,15 @@ def _write_preset(tmp_path: Path, sku: str, core: str, board: str) -> None:
     d = tmp_path / "metadata" / "e1m_modules"
     d.mkdir(parents=True, exist_ok=True)
     (d / f"{sku}.yaml").write_text(
-        f"sku: {sku}\ntopology:\n  {core}:\n    board: {board}\n"
+        f"sku: {sku}\ntopology:\n  {core}:\n    board: {board}\n",
+        encoding="utf-8"
     )
 
 
 def _write_board_tree(tmp_path: Path, dir_name: str, board_name: str) -> None:
     d = tmp_path / "zephyr" / "boards" / "alp" / dir_name
     d.mkdir(parents=True, exist_ok=True)
-    (d / "board.yml").write_text(f"board:\n  name: {board_name}\n")
+    (d / "board.yml").write_text(f"board:\n  name: {board_name}\n", encoding="utf-8")
 
 
 def test_empty_tree_passes(tmp_path):

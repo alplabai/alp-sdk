@@ -7,6 +7,7 @@ that matches zero rows, two entries duplicating the same (peripheral, pad)
 key in the ownership file, and one entry whose key matches two emitted rows.
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -30,7 +31,8 @@ def test_committed_files_match_generator():
 
 def test_check_mode_passes_on_committed_files():
     proc = subprocess.run(
-        [sys.executable, str(SCRIPT), "--check"], capture_output=True, text=True,
+        [sys.executable, str(SCRIPT), "--check"], capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
     assert proc.returncode == 0, proc.stderr
 
@@ -42,8 +44,16 @@ def test_v2n_core_field_matches_verified_ownership_only():
     pinning today's pad list (issue #1157, 2026-08-12 comment: a hardcoded
     `m33_pads == {...}` would go red the moment a newly-verified pad is
     added and force the next person to argue with the test instead of the
-    data). Also asserts the two invariants the issue does want fixed: no
-    `a55` row yet, and every `core`-tagged row is `owner: "renesas"`."""
+    data). Also asserts every `core`-tagged row is `owner: "renesas"`.
+
+    `a55` rows are real now (feat/v2m-deepx-rail-uboot, 2026-09-24):
+    RIIC8_SCL8/SDA8 flipped from `m33` (CA55/Linux is RIIC8's sole
+    master), and DEEPX_CORE_0P75_EN/DEEPX_PWR_EN_REQ (P64/P65) are new
+    `a55` rows (U-Boot's board_late_init() is their sole driver) --
+    both covered by the `actual == expected` equality above, which is
+    exactly the "derive from the ownership file" contract the docstring
+    describes; no separate "no a55 yet" assertion is needed or correct
+    any more."""
     doc = yaml.safe_load((gpc.PINMUX_DIR / "v2n.yaml").read_text(encoding="utf-8"))
     ownership = yaml.safe_load(
         (REPO / "metadata" / "e1m_modules" / "v2n" / "core-ownership.yaml")
@@ -58,13 +68,32 @@ def test_v2n_core_field_matches_verified_ownership_only():
         if "core" in p
     }
     assert actual == expected
-    # No row anywhere claims "a55" -- nothing in this batch is verified a55.
-    assert not any(p.get("core") == "a55" for p in doc["pads"])
     # Every m33 row is renesas-owned (the AMP-core ambiguity is a renesas
     # fact; the GD32's own pads never carry `core`).
     for p in doc["pads"]:
         if "core" in p:
             assert p["owner"] == "renesas"
+
+
+def test_canfd_rows_resolve_the_e1m_x_can_crosswalk():
+    """The four CANFD2/CANFD3 rows (#2332's on-module CAN-FD transceivers)
+    resolve to real E1M-X edge pads instead of "TBD", per the schematic-
+    sourced transceiver-to-channel mapping in #2332: CANFD3 (U15, P86/P87)
+    is carrier CAN0, CANFD2 (U16, P84/P85) is carrier CAN1. Pad ids and
+    silkscreen names come from the public e1m-spec E1M-X pinout (`B21`/
+    `B22`/`B24`/`B25`), not from any private netlist."""
+    doc = yaml.safe_load((gpc.PINMUX_DIR / "v2n.yaml").read_text(encoding="utf-8"))
+    by_peripheral = {p["silicon_peripheral"]: p for p in doc["pads"]}
+    expected = {
+        "CANFD2_CTX2": ("B24", "CAN1H/CAN1_TX"),
+        "CANFD2_CRX2": ("B25", "CAN1L/CAN1_RX"),
+        "CANFD3_CTX3": ("B21", "CAN0H/CAN0_TX"),
+        "CANFD3_CRX3": ("B22", "CAN0L/CAN0_RX"),
+    }
+    for peripheral, (e1m_pad, e1m_function) in expected.items():
+        row = by_peripheral[peripheral]
+        assert row["e1m_pad"] == e1m_pad
+        assert row["e1m_function"] == e1m_function
 
 
 def _write_core_ownership(tmp_path: Path, entries: list[dict]) -> Path:

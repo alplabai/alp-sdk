@@ -246,6 +246,28 @@ A55 `0x40000000`, **256 MiB**, while `ddr_main` spans 4 GiB from
 `0x147f80000`, a 33-bit address that truncates to `0x47f80000` — below
 the DDR base — the moment it is cast to a pointer on the M33.
 
+**The A55 view of the CM33 OpenAMP window must be reserved no-map.**
+The CM33 board trees place `openamp_shm` at CM33-non-secure
+`0x9f700000`, size `0x900000` (9 MiB); the A55 sees the same physical
+memory at `0x4f700000` (`CM33-NS - 0x50000000`). Without a matching
+Linux `reserved-memory` entry that range is ordinary System RAM, so a
+CM33 image with IPC enabled writes its resource table and vrings into
+pages Linux has already handed out. `e1m-v2n-som.dtsi` reserves it
+no-map (#2374, tracked for downstream docs at #2415).
+
+The same file declares the seven `generic-uio` nodes the `alp_rpc` UIO
+backend opens, named for their sysfs `name` (`4f700000.rsctbl`,
+`4f701000.mhu-shm`, `4f800000.vring-ctl0`, `4f850000.vring-ctl1`,
+`4f900000.vring-shm0`, `4fc00000.vring-shm1` and `10480000.mhu-uio`).
+Only `mhu-uio` carries an interrupt (`GIC_SPI 404`). `uio.cfg` enables
+`CONFIG_UIO` and `CONFIG_UIO_PDRV_GENIRQ`, and patch 0012 makes
+`generic-uio` the default `uio_pdrv_genirq` match, so
+`uio_pdrv_genirq.of_id=generic-uio` no longer has to be in the bootargs.
+Bench-verified on E1M-V2M103 silicon (2026-09-30): all seven devices bind
+(`uio0` rsctbl `0x4f700000`/`0x1000` through `uio6` mhu-uio
+`0x10480000`/`0x1000`), `/proc/interrupts` shows `GICv3 436 Level mhu-uio`,
+and `0x4f700000-0x4fffffff` is listed `reserved` in `/proc/iomem`.
+
 For each `ipc:` entry, `tan build`
 emits a header both halves `#include`:
 
@@ -346,7 +368,12 @@ part of the declarative output either.
 single derived projection of `board.yaml` — one `slices[]` entry per
 per-core image (its `os`, `build_dir`, `output_artefact`,
 `board`/`machine`, and `flash_method`/`flash_args`), plus the `ipc:`
-links and `helper_mcus:`.  Tools — the alp-sdk-vscode extension, CI,
+links, `helper_mcus:`, the resolved `storage:` partitions, and the
+`memory:` region table those last two refer INTO by name
+(`ipc[].carve_out_region` and `storage[].flash_device` each name a
+`memory[].name`).  `storage:` and `memory:` are each OMITTED rather
+than emitted empty, so an absent pane means "nothing resolved here",
+never "this SoM has none".  Tools — the alp-sdk-vscode extension, CI,
 the flasher — read **this** to manage a multi-image project instead of
 re-deriving folder layout and build wiring from `board.yaml` + the SoM
 presets.  Its shape is pinned by

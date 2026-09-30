@@ -19,7 +19,8 @@
  * the ICM-42670-P; apps that want sensor fusion or redundancy can
  * read both.  Notable quirks:
  *
- *   - 16-bit register addressing (most IMUs use 8-bit).
+ *   - Each register holds a 16-bit value, addressed by a single
+ *     8-bit register index (NOT 16-bit addressing).
  *   - Each register read returns a 2-byte dummy prefix that
  *     callers must skip (Bosch quirk for SPI alignment, also
  *     applies on I²C for consistency).
@@ -91,6 +92,57 @@ typedef struct {
 	int16_t z;
 } bmi323_axes_t;
 
+/** Which axis/axes had fresh data available (STATUS.drdy_acc /
+ *  STATUS.drdy_gyr, BST-BMI323-DS000-13 Rev 1.7, p.66). */
+typedef struct {
+	bool accel;
+	bool gyro;
+} bmi323_data_ready_t;
+
+/**
+ * Physical interrupt pin.  On the E1M EVK (UG-E1M-001) INT1 is a direct
+ * SoC/E1M edge pin (E2 pin F3, pad IO15) -- this driver only exposes the
+ * registers, the caller wires the GPIO.
+ */
+typedef enum { BMI323_INT_PIN1 = 0, BMI323_INT_PIN2 = 1 } bmi323_int_pin_t;
+
+/** INT1/INT2 active level (IO_INT_CTRL.int1_lvl / int2_lvl,
+ *  BST-BMI323-DS000-13 Rev 1.7, p.102). */
+typedef enum {
+	BMI323_INT_LEVEL_ACTIVE_LOW  = 0,
+	BMI323_INT_LEVEL_ACTIVE_HIGH = 1
+} bmi323_int_level_t;
+
+/** INT1/INT2 drive circuit (IO_INT_CTRL.int1_od / int2_od,
+ *  BST-BMI323-DS000-13 Rev 1.7, p.102). */
+typedef enum { BMI323_INT_DRIVE_PUSH_PULL = 0, BMI323_INT_DRIVE_OPEN_DRAIN = 1 } bmi323_int_drive_t;
+
+/** Electrical configuration for one INT pin. */
+typedef struct {
+	bmi323_int_level_t level;
+	bmi323_int_drive_t drive;
+	bool               output_enable; /**< IO_INT_CTRL.int1/2_output_en. */
+} bmi323_int_pin_config_t;
+
+/** Interrupt clear behaviour, device-wide -- not per pin (INT_CONF.int_latch,
+ *  BST-BMI323-DS000-13 Rev 1.7, p.103). */
+typedef enum {
+	BMI323_INT_LATCH_NON_LATCHED = 0, /**< Auto-clears; see p.103 for the exact timing. */
+	BMI323_INT_LATCH_PERMANENT   = 1  /**< Stays asserted until the INT_STATUS_* flag is read. */
+} bmi323_int_latch_t;
+
+/**
+ * Where a data-ready source is routed (INT_MAP2 2-bit fields,
+ * BST-BMI323-DS000-13 Rev 1.7, pp.106-107).  Same 4 values on every
+ * INT_MAP2 field this driver touches.
+ */
+typedef enum {
+	BMI323_INT_ROUTE_DISABLED = 0x0,
+	BMI323_INT_ROUTE_INT1     = 0x1,
+	BMI323_INT_ROUTE_INT2     = 0x2,
+	BMI323_INT_ROUTE_I3C_IBI  = 0x3
+} bmi323_int_route_t;
+
 /** Driver context.  Treat as opaque. */
 typedef struct {
 	alp_i2c_t        *bus;
@@ -98,18 +150,67 @@ typedef struct {
 	bmi323_accel_fs_t accel_fs;
 	bmi323_gyro_fs_t  gyro_fs;
 	bool              initialised;
+	/* STATUS.por_detected (bit0) as last seen -- and cleared, it's
+     * R/C (BST-BMI323-DS000-13 Rev 1.7 p.66) -- by bmi323_init().
+     * Stored here because the bit is gone from the device after that
+     * one read: every later reader, including a diagnostic that runs
+     * after init() fails, would otherwise always see 0 regardless of
+     * what init() actually observed (#2035).  Query via
+     * bmi323_was_por_detected(). */
+	bool por_detected;
+	/* Communication access restriction state (BST-BMI323-DS000-13
+     * Rev 1.7, section 7.3 p.205; section 5.4 p.20): true from
+     * bmi323_init() (every POR/soft-reset leaves the device in
+     * suspend) until bmi323_set_accel() or bmi323_set_gyro() first
+     * takes a sensor to normal/high-performance mode.  Selects the
+     * post-access idle time -- 450 us suspended, 2 us not -- applied
+     * after every register access; see access_idle() in bmi323.c. */
+	bool comm_suspend;
 } bmi323_t;
 
 /**
  * @brief Bind a driver context to an open I²C bus and verify chip ID.
  *
- * The BMI323 uses 16-bit register addressing -- the wrapper writes
- * a 2-byte address pointer for every transaction.  Reads return
- * a 2-byte dummy prefix that the wrapper strips internally.
+ * Each BMI323 register holds a 16-bit value at a single 8-bit
+ * register index (not 16-bit addressing).  Reads return a 2-byte
+ * dummy prefix that the wrapper strips internally.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_IO (wrong CHIP_ID).
+ * Call @ref bmi323_was_por_detected afterwards -- including after a
+ * non-ALP_OK return -- to learn what STATUS.por_detected read as; see
+ * that function for why this can't just be re-read later.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL (`dev`/`bus` NULL or `i2c_addr` 0) /
+ *   ALP_ERR_NOT_READY (STATUS.por_detected was clear -- the soft
+ *   reset never demonstrably landed) / ALP_ERR_IO (CHIP_ID read
+ *   failed or mismatched, or ERR_REG.fatal_err was set) / whatever
+ *   the underlying bus returns.
  */
 alp_status_t bmi323_init(bmi323_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);
+
+/**
+ * @brief Report STATUS.por_detected as observed by the last
+ *   @ref bmi323_init call on this context.
+ *
+ * STATUS.por_detected (bit0, BST-BMI323-DS000-13 Rev 1.7 p.66) is
+ * read/clear: bmi323_init() has to read it to gate on it, and that
+ * read consumes it, so it reads back 0 to any caller from then on.
+ * This reports what init() saw before that happened.
+ *
+ * Deliberately usable even when the last @ref bmi323_init call
+ * returned an error -- init() stores the bit the moment it reads
+ * STATUS, before deciding whether to fail on it, so the failing paths
+ * (POR gate rejected, or a later CHIP_ID mismatch/read error) are
+ * exactly the callers this exists for.  Unlike this driver's other
+ * accessors, this does not require `dev->initialised`.
+ *
+ * @param dev Context previously passed to @ref bmi323_init (that call
+ *   must have reached its STATUS read; a dev whose init() failed
+ *   before then -- e.g. ALP_ERR_INVAL on the arguments themselves --
+ *   reports false).
+ * @param out Set to true if STATUS.por_detected was set.
+ * @return ALP_OK / ALP_ERR_INVAL (`dev` or `out` NULL).
+ */
+alp_status_t bmi323_was_por_detected(const bmi323_t *dev, bool *out);
 
 /** Read CHIP_ID for liveness checks. */
 alp_status_t bmi323_read_id(bmi323_t *dev, uint8_t *id_out);
@@ -136,6 +237,62 @@ alp_status_t bmi323_read_gyro(bmi323_t *dev, bmi323_axes_t *out);
 
 /** Read the on-die temperature sensor (raw int16; offset = 0 °C @ 23.0). */
 alp_status_t bmi323_read_temp(bmi323_t *dev, int16_t *temp_raw);
+
+/**
+ * @brief Configure one INT pin's electrical behaviour (level/drive/output-enable).
+ *
+ * Read-modify-write: IO_INT_CTRL (0x38) packs both INT1 (bits[2:0]) and
+ * INT2 (bits[10:8]) into one 16-bit register, so this only touches the
+ * bits belonging to `pin`.
+ *
+ * This does not by itself route anything to `pin` -- pair with
+ * @ref bmi323_set_int_latch and @ref bmi323_route_data_ready_int.
+ *
+ * @return ALP_OK / ALP_ERR_NOT_READY (uninitialised) / ALP_ERR_INVAL
+ *   (`pin` not a declared enum member, or `cfg` NULL).
+ */
+alp_status_t
+bmi323_configure_int_pin(bmi323_t *dev, bmi323_int_pin_t pin, const bmi323_int_pin_config_t *cfg);
+
+/**
+ * @brief Set the device-wide interrupt latch mode (INT_CONF.int_latch).
+ *
+ * Full write: INT_CONF (0x39) has no other live field (reserved bits
+ * write 0).
+ *
+ * @return ALP_OK / ALP_ERR_NOT_READY (uninitialised).
+ */
+alp_status_t bmi323_set_int_latch(bmi323_t *dev, bmi323_int_latch_t mode);
+
+/**
+ * @brief Route the accelerometer and/or gyroscope data-ready interrupt.
+ *
+ * Read-modify-write: INT_MAP2 (0x3B) also carries temp/FIFO/tap/i3c/err
+ * routing this driver does not manage, so only the acc_drdy_int
+ * (bits[11:10]) and gyr_drdy_int (bits[9:8]) fields are touched.
+ *
+ * @return ALP_OK / ALP_ERR_NOT_READY (uninitialised).
+ */
+alp_status_t bmi323_route_data_ready_int(bmi323_t          *dev,
+                                         bmi323_int_route_t accel_route,
+                                         bmi323_int_route_t gyro_route);
+
+/**
+ * @brief Poll STATUS.drdy_acc / STATUS.drdy_gyr (BST-BMI323-DS000-13
+ *   Rev 1.7, p.66) without wiring a physical interrupt pin.
+ *
+ * Both flags are clear-on-read; reading this also clears
+ * STATUS.drdy_acc the same way reading ACC_DATA_X..Z does (Rev 1.7,
+ * p.23 "Accelerometer Data Ready Notification").  This complements, it
+ * does not replace, the fixed accel/gyro start-up waits in
+ * @ref bmi323_set_accel / @ref bmi323_set_gyro -- polling before the
+ * relevant tA,SU/tG,SU floor has elapsed is meaningless, the flag
+ * simply has not been asserted yet.
+ *
+ * @return ALP_OK / ALP_ERR_NOT_READY (uninitialised) / ALP_ERR_INVAL
+ *   (`out` NULL).
+ */
+alp_status_t bmi323_data_ready(bmi323_t *dev, bmi323_data_ready_t *out);
 
 /** Release the driver context. */
 void bmi323_deinit(bmi323_t *dev);

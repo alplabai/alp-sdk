@@ -1,22 +1,29 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Build-only regression for the Alif ADC driver (zephyr/drivers/adc/adc_alif.c,
-# compatible "alif,adc") on the E1M-AEN801 (Ensemble E8, M55-HE).
+# compatible "alif,adc") on the E1M-AEN801 and E1M-AEN803 (both Ensemble E8).
 #
-# Compile-checks the driver + DT node on the real E8 board target; filtered OUT
-# of the native_sim PR gate (platform_allow = the AEN801 HE board only).
+# Compile-checks the driver + DT node on the real E8 board targets; filtered
+# OUT of the native_sim PR gate (platform_allow = the AEN801/AEN803 boards
+# only). AEN803 is the same E8 silicon as AEN801, dual-external-memory BOM
+# (#2084) -- its two board targets get the same compile-only coverage here so
+# the generated tree is proven by more than generator-vs-committed byte
+# parity (alp-sdk#2084 review).
 
 sample:
   name: aen-adc-regcheck
   description: |
-    Bench RAM-run ADC (alif,adc) bind proof for the E1M-AEN801 (Alif Ensemble
-    E8, Cortex-M55-HE): validates the Alif ADC driver against the real ADC
-    DT node through the bench RAM-run + RAM-console flow.
+    Bench RAM-run ADC (alif,adc) bind proof for the E1M-AEN801 / E1M-AEN803
+    (Alif Ensemble E8, both Cortex-M55 clusters): validates the Alif ADC
+    driver against the real ADC DT node through the bench RAM-run +
+    RAM-console flow.
 
 tests:
   alp_sdk.examples.aen.adc_regcheck.aen:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp
     tags:
       - alp-sdk
       - example

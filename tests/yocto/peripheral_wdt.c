@@ -216,6 +216,48 @@ static void test_close_attempts_magic_write_when_supported(void)
 	ALP_ASSERT_TRUE(g_disarm_last_magic);
 }
 
+static void test_interrupt_only_rejected_before_any_syscall(void)
+{
+	/* #1637: the Linux watchdog ABI has no expiry-notification ioctl,
+     * so on_expire could never fire on this backend -- y_open() must
+     * reject INTERRUPT_ONLY outright rather than silently arming a
+     * watchdog whose configured action can never be observed.  The
+     * open hook, if reached, would set g_last_open_fd -- leaving it
+     * wired (rather than NULL) is what makes "still -1 after the
+     * call" proof that open() was never attempted, not a NULL-hook
+     * coincidence. */
+	reset_fixture();
+	g_wdt_test_open_hook = open_hook_pipe_fd;
+
+	alp_wdt_backend_state_t st   = { 0 };
+	alp_capabilities_t      caps = { 0 };
+	alp_wdt_config_t        cfg  = { .wdt_id     = 0u,
+		                             .timeout_ms = 1000u,
+		                             .on_timeout = ALP_WDT_INTERRUPT_ONLY };
+
+	alp_status_t rc = y_open(&cfg, &st, &caps);
+	ALP_ASSERT_EQ_INT(rc, ALP_ERR_NOSUPPORT);
+	ALP_ASSERT_EQ_INT(g_last_open_fd, -1); /* the wired hook never ran */
+}
+
+static void test_window_and_pause_rejected_before_any_syscall(void)
+{
+	/* #1637: WDIOC has no window or sleep/debug pause control, so both
+	 * are refused up front instead of arming a plain watchdog. */
+	alp_wdt_config_t cfgs[3] = { default_cfg(1000u), default_cfg(1000u), default_cfg(1000u) };
+	cfgs[0].window_min_ms    = 100u;
+	cfgs[1].flags            = ALP_WDT_PAUSE_IN_SLEEP;
+	cfgs[2].flags            = ALP_WDT_PAUSE_HALTED_BY_DEBUG;
+	for (size_t i = 0; i < 3u; i++) {
+		reset_fixture();
+		g_wdt_test_open_hook         = open_hook_pipe_fd;
+		alp_wdt_backend_state_t st   = { 0 };
+		alp_capabilities_t      caps = { 0 };
+		ALP_ASSERT_EQ_INT(y_open(&cfgs[i], &st, &caps), ALP_ERR_NOSUPPORT);
+		ALP_ASSERT_EQ_INT(g_last_open_fd, -1); /* the wired hook never ran */
+	}
+}
+
 int main(void)
 {
 	/* fake_magic_write intercepts the only write() the backend makes,
@@ -229,6 +271,8 @@ int main(void)
 	test_settimeout_hard_failure_disarms();
 	test_timeout_ms_uint32_max_does_not_overflow();
 	test_close_attempts_magic_write_when_supported();
+	test_interrupt_only_rejected_before_any_syscall();
+	test_window_and_pause_rejected_before_any_syscall();
 
 	ALP_TEST_SUMMARY();
 }

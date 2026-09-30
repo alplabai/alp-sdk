@@ -118,15 +118,43 @@ alp_i2s_t *alp_i2s_open(const alp_i2s_config_t *cfg);
 /**
  * @brief Begin streaming.  TX direction starts producing the bit clock.
  *
+ * Calling this before the first @ref alp_i2s_write on a TX handle is
+ * legal and does not fail merely because nothing is queued yet -- some
+ * backends (e.g. the Zephyr DesignWare driver) cannot trigger the real
+ * hardware start with an empty queue, so the trigger is deferred until
+ * the first @ref alp_i2s_write actually queues a block. A trigger
+ * failure discovered at that point surfaces from that
+ * @ref alp_i2s_write call instead of from here, and every subsequent
+ * write retries the trigger until it succeeds. Calling this after data
+ * is already queued (write-then-start) triggers immediately, as does
+ * the RX direction always (it has nothing to defer).
+ *
+ * A TX stream that underran (the queue ran dry while playing) or an RX
+ * stream that overran (the slab or queue was exhausted while capturing)
+ * is recovered transparently: this call resumes the I2S stream instead
+ * of failing forever. Calling this right after an underrun/overrun
+ * behaves like calling it on a fresh handle -- if nothing is queued yet
+ * on TX, the real start is deferred exactly as above; the caller does
+ * not need to detect or clear the condition itself. An external codec
+ * or amplifier that shut itself down when the bit clock stopped is not
+ * re-armed by this layer (see issue #2146).
+ *
  * @param[in] i2s  Handle from @ref alp_i2s_open.
  *
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_NOSUPPORT /
- *         ALP_ERR_IO.
+ *         ALP_ERR_IO / ALP_ERR_BUSY (issue #2150 phase 1: an RX start
+ *         refused because TX is live on the same shared bit clock at a
+ *         different rate -- retry once TX stops, or reconfigures to the
+ *         same rate).
  */
 alp_status_t alp_i2s_start(alp_i2s_t *i2s);
 
 /**
  * @brief Drain any in-flight frames and stop the clock.
+ *
+ * Recovers transparently from a TX underrun or RX overrun -- stopping a
+ * stream in that state still returns @ref ALP_OK and releases whatever
+ * was queued, instead of failing because the stream is not RUNNING.
  *
  * @param[in] i2s  Handle from @ref alp_i2s_open.
  *
@@ -142,6 +170,21 @@ alp_status_t alp_i2s_stop(alp_i2s_t *i2s);
  * memcpy's @p block into the driver-owned slab so the caller's buffer
  * can be reused immediately on return.
  *
+ * On a TX handle whose @ref alp_i2s_start was deferred (see its doc),
+ * a successful queue here also retries the real hardware start; if
+ * that retry fails, the block that was just queued is released and
+ * this call returns the start failure -- a write that returns an error
+ * has NEVER left a block queued, so the caller's slab room is never
+ * silently consumed by a stream that isn't playing. The next write
+ * retries the deferred start again.
+ *
+ * A gap between writes long enough for the stream to underrun is
+ * recovered transparently: the write that follows the gap resumes the
+ * I2S stream instead of failing forever. The caller does not need to
+ * call @ref alp_i2s_stop / @ref alp_i2s_start to clear the condition
+ * first -- writing again is enough (see @ref alp_i2s_start's doc for
+ * what this recovery does not cover downstream of the bus).
+ *
  * @param[in] i2s         Handle from @ref alp_i2s_open with TX direction.
  * @param[in] block       Source PCM data.
  * @param[in] bytes       Source length.  Must not exceed the block size
@@ -150,7 +193,7 @@ alp_status_t alp_i2s_stop(alp_i2s_t *i2s);
  *                        @ref ALP_ERR_OUT_OF_RANGE rather than truncated.
  * @param[in] timeout_ms  Max wait for an available slab block.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE /
- *         ALP_ERR_TIMEOUT.
+ *         ALP_ERR_TIMEOUT / a deferred-start trigger failure (see above).
  */
 alp_status_t alp_i2s_write(alp_i2s_t *i2s, const void *block, size_t bytes, uint32_t timeout_ms);
 

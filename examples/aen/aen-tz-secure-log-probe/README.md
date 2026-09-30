@@ -48,7 +48,7 @@ Read the SRAM0 beacon at `0x02001100` over SWD:
 | 4 | `SCB->SFSR` | bit3 `AUVIOL` + bit6 `SFARVALID` set (e.g. `0x48`) |
 | 5 | `SCB->SFAR` | `0x80090000` — the faulting address is the log window |
 
-Silicon-proven on E8 (`e1m-aen-evk-01`, 2026-07-06): `SFSR=0x48`, `SFAR=0x80090000`.
+Silicon-proven on E8 (an AEN EVK bench unit, 2026-07-06): `SFSR=0x48`, `SFAR=0x80090000`.
 `AUVIOL` (not `INVEP`) + the log-window `SFAR` + a set `MSP_NS` together prove the
 core was genuinely Non-Secure and its write to the Secure log window was rejected.
 
@@ -59,6 +59,8 @@ MRAM (the canonical slot0 image is preserved):
 
 ```
 scripts/bench/aen/build.sh   $PWD/examples/aen/aen-tz-secure-log-probe
+export BENCH_PLACE=<your-bench-place>               # your held labgrid-client place
+export AEN_JLINK_RUN=<board-farm>/bin/jlink-run.sh
 scripts/bench/aen/ram-run.sh "$BENCH_ROOT/build/aen-tz-secure-log-probe"
 # then read the beacon at 0x02001100 over SWD (see the table above)
 ```

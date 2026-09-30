@@ -1,6 +1,7 @@
 """Unit tests for scripts/check_som_topology_parity.py."""
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -11,7 +12,8 @@ SCRIPT = REPO / "scripts" / "check_som_topology_parity.py"
 
 def _run(*args, **kw):
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, **kw,
+        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, encoding="utf-8",
+        env={**(kw.pop("env", None) or os.environ), "PYTHONIOENCODING": "utf-8"}, **kw,
     )
 
 
@@ -19,7 +21,8 @@ def _write_soc(tmp_path: Path, vendor: str, family: str, part: str, core_ids: li
     d = tmp_path / "metadata" / "socs" / vendor / family
     d.mkdir(parents=True, exist_ok=True)
     (d / f"{part}.json").write_text(
-        json.dumps({"cores": [{"id": cid} for cid in core_ids]})
+        json.dumps({"cores": [{"id": cid} for cid in core_ids]}),
+        encoding="utf-8"
     )
 
 
@@ -28,7 +31,8 @@ def _write_preset(tmp_path: Path, sku: str, silicon: str, topology_cores: list[s
     d.mkdir(parents=True, exist_ok=True)
     topology = "\n".join(f"  {c}:\n    os: zephyr" for c in topology_cores)
     (d / f"{sku}.yaml").write_text(
-        f"sku: {sku}\nsilicon: {silicon}\ntopology:\n{topology}\n"
+        f"sku: {sku}\nsilicon: {silicon}\ntopology:\n{topology}\n",
+        encoding="utf-8"
     )
 
 
@@ -87,6 +91,6 @@ def test_preset_with_no_topology_is_skipped(tmp_path):
     topology: continue`)."""
     d = tmp_path / "metadata" / "e1m_modules"
     d.mkdir(parents=True, exist_ok=True)
-    (d / "E1M-TEST.yaml").write_text("sku: E1M-TEST\nsilicon: alif:ensemble:e8\n")
+    (d / "E1M-TEST.yaml").write_text("sku: E1M-TEST\nsilicon: alif:ensemble:e8\n", encoding="utf-8")
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 0, proc.stdout + proc.stderr

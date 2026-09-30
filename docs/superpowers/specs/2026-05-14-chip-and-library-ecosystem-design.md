@@ -234,7 +234,7 @@ binding.
 
 | Library | NPU / ML | GPU / 2D | DSP / SIMD | Crypto | DMA / timing | SW fallback |
 |---|---|---|---|---|---|---|
-| `tflite_micro` | Ethos-U (AEN), DRP-AI (V2N), CMSIS-NN (Helium MVE), Neon (A55) | — | Helium MVE / Neon | — | DMA for input tensor copy | ref kernels |
+| `tflite_micro` | Ethos-U (AEN); DRP-AI is an A55/Yocto runtime, not a Zephyr TFLM shim | — | Helium MVE / Neon | — | DMA for input tensor copy | ref kernels |
 | `cmsis_dsp` | — | — | Helium MVE (AEN HE), Neon (A55), TMU CORDIC + FFT (GD32 bridge) | — | DMA for ADC stream chaining | scalar |
 | `lvgl` | — | GPU2D (AEN), DAVE2D (Alif), TMU rotate/scale (GD32 bridge) | — | — | DMA2D + display tearing-effect | pure-C blit |
 | `u8g2` | — | DMA2D (AEN), TMU (GD32 bridge) | — | — | I²C/SPI DMA frame push | pure-C |
@@ -270,7 +270,6 @@ accelerators:
   - class: ml_npu
     priority:
       - { soc_family: alif_ensemble,    backend: ethos_u,  kconfig: CONFIG_ALP_TFLM_ETHOS_U=y }
-      - { soc_family: renesas_rzv2n,    backend: drp_ai,   kconfig: CONFIG_ALP_TFLM_DRP_AI=y }
   - class: simd
     priority:
       - { soc_family: alif_ensemble,    cpu: cortex_m55,  backend: helium_mve, kconfig: CONFIG_ALP_TFLM_HELIUM=y }

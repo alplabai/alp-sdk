@@ -47,6 +47,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import tempfile
@@ -349,7 +350,8 @@ def run_cell(example_dir: Path, sku: str, presets: dict[str, dict],
              "--input", str(tmp_yaml),
              "--core", core,
              "--emit", "zephyr-conf"],
-            capture_output=True, text=True, cwd=REPO,
+            capture_output=True, text=True, encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=REPO,
         )
         if proc.returncode != 0:
             # Console gets the full diagnostic; the doc cell stays a
@@ -362,10 +364,27 @@ def run_cell(example_dir: Path, sku: str, presets: dict[str, dict],
 def notes_for(preset: dict) -> str:
     """Project the Notes cell from preset metadata only (never hand-typed).
 
-    Tags, in a fixed order: DRAM density (memory.dram_mbit), on-SoC
-    Ethos-U variants (from the SoC JSON npus[]), on-module NPU +
-    PCIe mux chips (on_module.npu / on_module.pcie_mux), and the
+    Tags, in a fixed order: DRAM density (memory.dram_mbit), absent
+    external flash (memory.flash_mbit), on-SoC Ethos-U variants (from
+    the SoC JSON npus[]), on-module NPU + PCIe mux chips
+    (on_module.npu / on_module.pcie_mux), and the
     status.partial_hw_config flag.
+
+    `0` gets its OWN tag rather than falling through to no tag at all:
+    0 is a resolved fact ("this SKU populates no such external memory"
+    -- the AEN family), and rendering it as silence would make it
+    indistinguishable from `TBD` ("nobody has written the capacity down
+    yet" -- E1M-NX9101), which is the exact distinction the schema's
+    `memory:` block asks consumers to preserve.  `TBD` stays untagged,
+    since a Notes cell has nothing true to say about it.
+
+    That rule applies to BOTH figures.  It shipped on `dram_mbit` alone,
+    which left `E1M-AEN801` (`flash_mbit: 0`, resolved: MRAM-only) and
+    `E1M-NX9101` (`flash_mbit: TBD`, open) rendering identically -- the
+    same silence this docstring calls a defect, on the figure that
+    decides storage and MCUboot partitioning.  A POSITIVE `flash_mbit`
+    stays untagged: the eMMC densities it would print are an editorial
+    addition to the cell, not a distinction anything is collapsing.
     """
     tags: list[str] = []
 
@@ -375,6 +394,12 @@ def notes_for(preset: dict) -> str:
             tags.append(f"{dram // 1024} Gbit DRAM")
         else:
             tags.append(f"{dram} Mbit DRAM")
+    elif isinstance(dram, int) and dram == 0:
+        tags.append("no external DRAM")
+
+    flash = (preset.get("memory") or {}).get("flash_mbit")
+    if isinstance(flash, int) and not isinstance(flash, bool) and flash == 0:
+        tags.append("no external flash")
 
     # On-SoC Ethos-U variants -- from the SoC JSON npus[] (the silicon truth),
     # not restated in the SoM preset (its `inference.npu_population` is

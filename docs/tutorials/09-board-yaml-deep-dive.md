@@ -60,9 +60,9 @@ for production SoMs plus placeholder presets for active bring-up:
 
 | Family            | MPNs (paste any into `som.sku`)                                               |
 |-------------------|-------------------------------------------------------------------------------|
-| Alif Ensemble     | `E1M-AEN301`, `AEN401`, `AEN501`, `AEN601`, `AEN701`, `AEN801`                 |
-| Renesas RZ/V2N    | `E1M-V2N101`, `V2N102`                                                        |
-| RZ/V2N + DEEPX    | `E1M-V2M101`, `V2M102`                                                        |
+| Alif Ensemble     | `E1M-AEN301`, `AEN401`, `AEN501`, `AEN601`, `AEN701`, `AEN801`, `AEN803`       |
+| Renesas RZ/V2N    | `E1M-V2N101`, `V2N102`, `V2N103`                                             |
+| RZ/V2N + DEEPX    | `E1M-V2M101`, `V2M102`, `V2M103`                                             |
 | NXP i.MX 93       | `E1M-NX9101` (placeholder MPN; production `E1M-NX9xxx` TBD pending HW config) |
 
 `hw_rev` selects an entry from the family's `hw-revisions.yaml` to
@@ -452,7 +452,7 @@ against either the SoM's `memory_map:` regions (auto-derived from
 the SoC variant when not overridden) or `on_module.ospi_memories:`
 keys (when the SoM ships with external OSPI flash).  A `memory_map:`
 region marked `carveout: false` is a partition *inside* a flash-class
-node rather than a flash device of its own (on E1M-AEN301..801 that's
+node rather than a flash device of its own (on E1M-AEN301..803 that's
 `mcuboot`, `he_slot0`, `hp_slot0`, `reserved`, `storage`, and `atoc`,
 all living inside the `mram_storage` flash node) and is refused as a
 `flash_device:` target with a reason (#1484).

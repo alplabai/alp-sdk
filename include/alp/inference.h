@@ -31,15 +31,16 @@
  *   - **DEEPX DX-M1**: real A55/Yocto-side backend
  *     (`src/yocto/inference_deepx.cpp`) against the real
  *     `dxrt::InferenceEngine` runtime.  Gated
- *     `ALP_SDK_USE_DEEPX_DXM1` (default OFF); BENCH-UNVERIFIED
- *     (issue #59).
+ *     `ALP_SDK_USE_DEEPX_DXM1` (default OFF).  Verified on DX-M1
+ *     silicon, outputs matching an ONNX Runtime CPU reference
+ *     (issue #1262).
  *   - **sw_fallback** (priority 0): every call returns
  *     ALP_ERR_NOSUPPORT; wins only when no other backend links for
  *     the active silicon.
  *
  * Vendor-specific accelerator paths -- `<alp/ext/renesas/inference.h>`
  * (DRP-AI3 pipeline-stage + AI-SRAM pinning) and
- * `<alp/ext/deepx/inference.h>` (DX-M1 slot + DRAM-tile pinning) --
+ * `<alp/ext/deepx/inference.h>` (DX-M1 NPU-core binding + device telemetry) --
  * remain available as escape hatches when the unified API can't
  * express what the vendor SDK offers.  Both currently return
  * ALP_ERR_NOSUPPORT on every call past the vendor-handle gate: the
@@ -140,8 +141,13 @@ typedef struct {
 	void                 *data;       /**< Backend-owned buffer. */
 	size_t                size_bytes; /**< Total buffer size. */
 	alp_inference_dtype_t dtype;
-	uint8_t               rank;     /**< 0..4 typical. */
-	uint16_t              shape[4]; /**< Most-significant first. */
+	/** 0..4.  A model whose real rank exceeds this fixed width cannot be
+	 *  described here: @ref alp_inference_get_input / @ref
+	 *  alp_inference_get_output refuse it with ALP_ERR_NOSUPPORT instead
+	 *  of reporting it truncated to 4 (issue #1729). */
+	uint8_t  rank;
+	uint16_t shape[4]; /**< Most-significant first; valid through index
+	                    *   `rank - 1`, 0 past it. */
 	/** Quantisation params (only meaningful when dtype is integer). */
 	float   scale;
 	int32_t zero_point;
@@ -291,7 +297,10 @@ size_t alp_inference_num_outputs(alp_inference_t *inf);
  * @param[out] out    Filled with the tensor descriptor.
  *                    Must be non-NULL.
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE /
- *         ALP_ERR_NOT_READY.
+ *         ALP_ERR_NOT_READY / ALP_ERR_NOSUPPORT (the model's real rank for
+ *         this tensor exceeds the fixed `shape[4]` -- the ORT, DEEPX, and
+ *         TFLM backends all refuse rather than silently truncate, issue
+ *         #1729).
  */
 alp_status_t
 alp_inference_get_input(alp_inference_t *inf, size_t index, alp_inference_tensor_t *out);
@@ -309,7 +318,10 @@ alp_inference_get_input(alp_inference_t *inf, size_t index, alp_inference_tensor
  * @param[out] out    Filled with the tensor descriptor.
  *                    Must be non-NULL.
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE /
- *         ALP_ERR_NOT_READY.
+ *         ALP_ERR_NOT_READY / ALP_ERR_NOSUPPORT (the model's real rank for
+ *         this tensor exceeds the fixed `shape[4]` -- the ORT, DEEPX, and
+ *         TFLM backends all refuse rather than silently truncate, issue
+ *         #1729).
  */
 alp_status_t
 alp_inference_get_output(alp_inference_t *inf, size_t index, alp_inference_tensor_t *out);

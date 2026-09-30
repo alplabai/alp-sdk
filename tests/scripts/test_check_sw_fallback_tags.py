@@ -1,5 +1,6 @@
 """Unit tests for scripts/check_sw_fallback_tags.py."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -10,7 +11,8 @@ SCRIPT = REPO / "scripts" / "check_sw_fallback_tags.py"
 
 def _run(*args, **kw):
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, **kw,
+        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, encoding="utf-8",
+        env={**(kw.pop("env", None) or os.environ), "PYTHONIOENCODING": "utf-8"}, **kw,
     )
 
 
@@ -25,7 +27,8 @@ def test_sw_fallback_with_both_tags_passes(tmp_path):
     d.mkdir(parents=True)
     (d / "sw_fallback.c").write_text(
         "/*\n * @par Cost: ROM ~2 KB, RAM 0\n"
-        " * @par Performance: deterministic saw wave; no DMA, no real conversion\n */\n"
+        " * @par Performance: deterministic saw wave; no DMA, no real conversion\n */\n",
+        encoding="utf-8"
     )
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 0, proc.stdout
@@ -34,7 +37,7 @@ def test_sw_fallback_with_both_tags_passes(tmp_path):
 def test_sw_fallback_missing_cost_tag_fails(tmp_path):
     d = tmp_path / "src" / "backends" / "adc"
     d.mkdir(parents=True)
-    (d / "sw_fallback.c").write_text("/* @par Performance: slow */\n")
+    (d / "sw_fallback.c").write_text("/* @par Performance: slow */\n", encoding="utf-8")
     proc = _run("--root", str(tmp_path))
     assert proc.returncode != 0
     assert "Cost" in proc.stdout + proc.stderr

@@ -38,6 +38,7 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_i2s.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_can.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_rtc.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_temperature.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_wdt.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_display.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_camera.c
@@ -75,6 +76,7 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../i3c_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/i3c/sw_fallback.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../dsp_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../dsp_decimator.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/dsp/sw_fallback.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../ahrs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../pid.c

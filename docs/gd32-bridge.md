@@ -74,6 +74,16 @@ Output: `build/gd32-bridge.elf`, `.hex`, `.bin`.
   [`vendors/gd32_firmware_library/README.md`](../vendors/gd32_firmware_library/README.md)
   for the licence-redistribution constraints + the version-bump procedure.
 
+**A flashable image must link the IRC8M clock override.** This build
+takes its `SystemInit()` from the alp-sdk `overrides/system_gd32g5x3.c`
+(`__SYSTEM_CLOCK_216M_PLL_IRC8M`), not the vendor submodule's stock
+216M-PLL-HXTAL file -- on these SoMs the GD32 HXTAL input (fed by the
+5L35023B SE2) never starts, so the stock HXTAL init hangs forever
+before `main()` and the bridge never comes up. The firmware repo's
+`BRIDGE_ALLOW_STOCK_SYSTEM_INIT=ON` switch exists only to let CI
+compile the stock path for coverage; it must never be set for an image
+you intend to flash to a real board.
+
 ## Source layout
 
 ```
@@ -124,7 +134,7 @@ change.
 | Method                                | Status today      | Notes                                                                                                                                  |
 |---------------------------------------|-------------------|----------------------------------------------------------------------------------------------------------------------------------------|
 | External SWD probe (J-Link, ST-Link)  | **Supported.**    | SWDIO + SWCLK accessible on the V2N module's programming header.                                                                       |
-| In-system upgrade over SPI / I2C      | **Implemented, gated — silicon-validated 2026-06-04.** | Application-bootloader path; the `0xF0..0xFF` opcodes route through `src/bootloader/` into the OTA state machine in [`src/ota.c`](https://github.com/alplabai/gd32-bridge-firmware) (FMC backend `hal/fmc_ota.c`). Destructive flashing is armed only with `-DBRIDGE_OTA_PARTITIONED`; default builds reply `STATUS_NOSUPPORT` (can't brick the running image). The armed build emits the partitioned set (32 KB bootloader + slot-A/B apps); first-flash also needs the factory metadata record from [`tools/gen_ota_metadata.py`](https://github.com/alplabai/gd32-bridge-firmware) at `0x08008000`. Validated end-to-end on the bench: stream → verify → commit → boot new slot → rollback (protocol v0.6). See [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10 Path A. |
+| In-system upgrade over SPI / I2C      | **Implemented, gated — silicon-validated 2026-06-04.** | Application-bootloader path; the `0xF0..0xFF` opcodes route through `src/bootloader/` into the OTA state machine in [`src/ota.c`](https://github.com/alplabai/gd32-bridge-firmware) (FMC backend `hal/fmc_ota.c`). Destructive flashing is armed only with `-DBRIDGE_OTA_PARTITIONED`; default builds reply `STATUS_NOSUPPORT` (can't brick the running image). The armed build emits the partitioned set (32 KB bootloader + slot-A/B apps); first-flash also needs the factory metadata record from [`tools/gen_ota_metadata.py`](https://github.com/alplabai/gd32-bridge-firmware) at `0x08008000`, padded out to 8 KiB so the write covers -- and erases -- the second metadata record (`REC1`) along with `REC0`. Validated end-to-end on the bench: stream → verify → commit → boot new slot → rollback (protocol v0.6). See [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10 Path A. |
 | Host-driven SWD bit-bang from V2N     | **Scaffolded.**   | Renesas-side software SWD controller drives `GD32_SWDIO` + `GD32_SWCLK` (routed back to V2N pads per the 2026-05-12 HW decision); universal recovery + factory first-flash.  Driver lives at [`chips/gd32_swd/`](../chips/gd32_swd/) (`driver_status: partial` until exercised on real silicon).  See [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10 Path B. |
 
 ### Who flashes it, and when
@@ -134,8 +144,8 @@ arrives over the in-system OTA path above.  Direct SWD flashing exists
 for one customer case only: **recovering a bricked bridge**, with Alp
 Lab-supplied binaries.
 
-The four V2N / V2M SoM presets state exactly that, but as **two** keys,
-not three -- `flash_method` and `flash_args` are absent from all four
+The six V2N / V2M SoM presets state exactly that, but as **two** keys,
+not three -- `flash_method` and `flash_args` are absent from all six
 entries, on purpose:
 
 ```yaml
@@ -190,12 +200,19 @@ programming header and flash an Alp Lab-supplied binary with
 `flash_args` block removed by #1439 used to carry (partitioned images
 also need the factory A/B metadata record at `0x08008000` -- see
 [`gd32-bridge-firmware:README.md`](https://github.com/alplabai/gd32-bridge-firmware#readme)).
-Note the SW-DP ID guard is **unarmed** on that
-procedure: `metadata/chips/gd32_swd.yaml` currently arms its
-wrong-board guard with `0x6BA02477`, but that value is not a GD32
-reading -- it is the bench-measured SW-DP ID of the V2N CM33 DAP, a
-third J-Link on this rack (`scripts/bench/aen/bench-env.sh:145-147`,
-measured 2026-08-08, `Found Cortex-M33 r0p4`; the `e1mx-v2n-m1-01`
+Note the SW-DP ID guard is **unarmed** on that procedure, and on the
+on-SoM path too: `metadata/chips/gd32_swd.yaml`'s `target_expected_idcode`
+is deliberately absent -- same stance `metadata/schemas/soc-spec-v1.schema.json`'s
+own `expect_dpidr` field guidance takes for every Alif Ensemble SoC
+variant (#1355): an absent key is the correct published "unknown", and a
+guessed value is strictly worse than absent because a wrong-board guard
+armed with it can pass on exactly the board it exists to exclude (see
+`metadata/socs/alif/ensemble/e8.json`'s `expect_dpidr` note for the live,
+actually-measured instance of that stance).
+The manifest previously carried `0x6BA02477` there, but that value is
+not a GD32 reading -- it is the bench-measured SW-DP ID of the V2N CM33
+DAP, a third J-Link on this rack (`scripts/bench/aen/bench-env.sh:391-393`,
+measured 2026-08-08, `Found Cortex-M33 r0p4`; the V2N bench unit's
 probe table, `CHANGELOG.md:3364` and `CHANGELOG.md:3367`), tracked as
 #1440.  An
 unattributed `0x0BE12477` elsewhere in this repo is the only GD32
@@ -203,35 +220,41 @@ candidate on record, and it too **has not been measured on a GD32
 with a probe attached**.  See #1369 for the open issue tracking that
 measurement, and #1440 for the `0x6BA02477` mislabeling above.
 
-**This disagrees with `docs/tutorials/07-recovering-a-bricked-bridge.md`'s
-"IDCODE caveat" section**, which tables `0x0BE12477` as a bench-measured
-fact ("A healthy, correctly-wired GD32 answers `0x0BE12477`").  Do not
-silently pick a winner between the two documents: whether `0x0BE12477`
-was ever read off a GD32 with a probe attached is #1440's and #1369's
-open question, and it needs silicon to close, not doc surgery.  Until it
-does, **this section governs the J-Link/external-probe recovery-flash
-decision** (the alternative to this tutorial's on-SoM bit-bang route,
-`chips/gd32_swd/` -- SWDIO/SWCLK/NRST on P70/P71/P74, no J-Link, no
-cloned serial) -- it is the one an operator follows immediately before a
-write that can reach the wrong board, which is exactly the moment
-treating an unattested value as a pass condition would matter.  The
-tutorial's table is the weaker claim: it reproduces
-`scripts/bench/aen/bench-env.sh`'s `GD32_DPIDR` export, and that export
-formerly carried its own "BENCH-VERIFIED" banner covering `GD32_DPIDR`
-too; that banner cited `docs/aen-bench-bringup.md`, which does not
-mention the GD32 at all, and is now hedged
-(`scripts/bench/aen/bench-env.sh:148-151`) -- so the tutorial's "fact"
-traces back to a since-hedged, uncited assertion, not an independent
-measurement.
+**`docs/tutorials/07-recovering-a-bricked-bridge.md`'s "IDCODE caveat"
+section now agrees with this one**: both treat `0x0BE12477` as an
+unattested, claimed-but-unmeasured value, and neither presents it as
+what a healthy GD32 answers. That was not always true -- the tutorial
+previously tabled `0x0BE12477` as a bench-measured fact ("A healthy,
+correctly-wired GD32 answers `0x0BE12477`"), which is what this
+paragraph used to warn readers not to pick a winner between. #1369 is
+why the disagreement existed: neither candidate value is measured, so
+neither document got to assert one as ground truth.  **This section
+still governs the J-Link/external-probe recovery-flash decision** (the
+alternative to that tutorial's on-SoM bit-bang route, `chips/gd32_swd/`
+-- SWDIO/SWCLK/NRST on P70/P71/P74, no J-Link, no cloned serial) -- it
+is the one an operator follows immediately before a write that can
+reach the wrong board, which is exactly the moment treating an
+unattested value as a pass condition would matter.  The tutorial's
+table reproduces `scripts/bench/aen/bench-env.sh`'s `GD32_DPIDR`
+export, and that export formerly carried its own "BENCH-VERIFIED"
+banner covering `GD32_DPIDR` too; that banner cited
+`docs/aen-bench-bringup.md`, which does not mention the GD32 at all,
+and is now hedged (`scripts/bench/aen/bench-env.sh:394-397`).
 
 **Required step on the alplab-gw bench: read the DPIDR by hand before
 flashing, and abort on a match to either of two known-wrong boards.**
-The GD32 probe (USB path `3-4.2`) and the AEN E8 probe (`3-4.4.3`)
+The GD32 probe (USB path `3-4.2`) and the AEN E8 probe (USB path
+resolved per-board from labgrid, e.g. `labgrid-client -p <your-bench-place>
+show` -- **do not hardcode a path here**: all three AEN EVK boards on
+this bench answer the same DPIDR `0x4c013477`, so the USB path is the
+only thing that tells them apart, and it is per-board, not a fixed
+"AEN E8" constant; `3-4.4.3` was observed on one specific bench board
+and is NOT another board's path)
 enumerate the same J-Link serial `603000869`, and `JLinkExe` selects
 an adapter only by serial -- with no port selector and no armed
 DPIDR guard on this out-of-`tan` path, probe choice for the cloned
 pair is ambiguous by construction
-(`scripts/bench/aen/bench-env.sh:138-143`).  Setting the shell
+(`scripts/bench/aen/bench-env.sh:384-386`).  Setting the shell
 variable `JLINK_SN` has **no effect on a hand-run `JLinkExe`
 invocation**: `JLinkExe` takes a probe selector only from a
 `-SelectEmuBySN <sn>` command-line flag or a `SelectEmuBySN` line
@@ -256,11 +279,15 @@ cloned-serial ambiguity for every invocation that follows:
    ambiguity for every invocation from here on.
 
    Identify the two probes at the connector before pulling either
-   one: run `lsusb -t` and match USB path `3-4.4.3` to the AEN E8
-   against `3-4.2` for the GD32 (both enumerate under the shared
-   J-Link serial `603000869`; those USB paths are recorded at
-   `CHANGELOG.md:2736` and `CHANGELOG.md:3339`, not in
-   `bench-env.sh`).  After detaching, re-run `lsusb -t` and confirm
+   one: run `lsusb -t` and match the AEN E8's USB path -- resolved for
+   the specific board on the bench via `labgrid-client -p
+   <your-bench-place> show` (never a hardcoded path: with three AEN EVK
+   boards sharing DPIDR `0x4c013477`, the USB path is the only board
+   selector, and it is per-board, not a fixed constant -- `3-4.4.3`,
+   as recorded at `CHANGELOG.md:2736` and `CHANGELOG.md:3339`, is one
+   specific board's path, not another board's) -- against `3-4.2`
+   for the GD32 (both enumerate under the shared J-Link serial
+   `603000869`).  After detaching, re-run `lsusb -t` and confirm
    exactly one `603000869` probe still enumerates before moving on to
    step 2.
 
@@ -293,12 +320,12 @@ cloned-serial ambiguity for every invocation that follows:
    setup` state, a rejected command line, or any other transcript
    with no SW-DP ID line at all is a STOP, not a silent permit to
    proceed, mirroring `bench_jlink_assert_aen_dpidr`'s own
-   abort-unless-seen shape (`scripts/bench/aen/bench-env.sh:181-185`)
+   abort-unless-seen shape (`scripts/bench/aen/bench-env.sh:454-468`)
    rather than aborting only on a positive match to a known-wrong ID.
    When the line is present, abort before any write if the ID matches
    `AEN_DPIDR` (`4C013477` -- bench-verified AEN E8) **or**
    `V2N_CM33_DPIDR` (`6BA02477` -- the V2N CM33 DAP,
-   `scripts/bench/aen/bench-env.sh:154`; see #1440) -- both are an
+   `scripts/bench/aen/bench-env.sh:442`; see #1440) -- both are an
    unconditional STOP, not merely "not the AEN E8".  Do not treat
    `GD32_DPIDR` (`0BE12477` -- a claimed-but-unattested GD32 value;
    see #1369) as a pass condition, and **do not proceed on any ID the
@@ -309,7 +336,7 @@ cloned-serial ambiguity for every invocation that follows:
    guess.  `bench-env.sh` formerly carried a "BENCH-VERIFIED" label on
    `GD32_DPIDR` citing `docs/aen-bench-bringup.md`, which does not
    mention the GD32 at all; that label is now hedged
-   (`scripts/bench/aen/bench-env.sh:148-151`), so rely on the manual
+   (`scripts/bench/aen/bench-env.sh:394-397`), so rely on the manual
    read, not the `GD32_DPIDR` value, to prove the probe is not on a
    known-wrong board.
 4. **Flash immediately** after a passing read, using the same
@@ -345,6 +372,34 @@ measured GD32 DPIDR to arm a real guard against.
 from the CC3501E's `alp_ota_spi_otp`: this channel streams into the
 slot-A/B application bootloader with commit + rollback, it does not
 program an OTP the GD32 does not have.
+
+### Prebuilt recovery images (public) vs. manufacturing (internal)
+
+The recovery binaries are not in this repository. They are published as
+assets of a tagged GitHub Release of the public
+[`alplabai/gd32-bridge-firmware`](https://github.com/alplabai/gd32-bridge-firmware/releases)
+repository, named `gd32-bridge-vX.Y.Z-{bootloader,slot-a,slot-b,ota-meta-rec0,full-flash}.bin`
+(bootloader, slot A, slot B, the factory A/B metadata record,
+a full-flash image), plus `SHA256SUMS`, and detached ECDSA-P256 signatures when
+the release is signed; a release without signatures is labelled `UNSIGNED`
+in its notes and proves integrity only. Its
+[`docs/RECOVERY.md`](https://github.com/alplabai/gd32-bridge-firmware/blob/dev/docs/RECOVERY.md)
+is the flashing guide for both routes above (external SWD probe, and
+host-driven SWD from the V2N A55, for which this repository carries the
+working master, `examples/v2n/v2n-gd32-swd-flash/`) and the `GET_VERSION`
+check over BRD_I2C at `0x70`. Verify a signed release (`openssl dgst -sha256 -verify <key> -signature
+SHA256SUMS.sig SHA256SUMS`, then `sha256sum -c SHA256SUMS`) against
+[`keys/alp_release_signing_ecdsa_p256.pub.pem`](../keys/alp_release_signing_ecdsa_p256.pub.pem);
+see [`som-release-signing.md`](som-release-signing.md) for the key model.
+The binaries are published by the firmware repository, never committed
+here, and the private signing key is never stored in any repository.
+
+The boundary: **public recovery** is restoring a known image at the
+addresses (bootloader `0x08000000`, metadata record `0x08008000`, slot A
+`0x0800A000`, slot B `0x08040000`) with a probe or the on-SoM SWD route. **Manufacturing** is
+internal and out of scope for this SDK: option-byte provisioning (write
+protection, BOOTLK, SPC), per-unit records, factory fixtures and the bench
+scripts. Recovery never needs those to bring the bridge back.
 
 ## Cross-link
 

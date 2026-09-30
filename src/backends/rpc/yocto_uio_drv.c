@@ -169,24 +169,20 @@
  * `y_open()` with ALP_ERR_BUSY rather than pretending to support
  * multiple simultaneous UIO/OpenAMP links this hardware doesn't have.
  *
- * @par MHU doorbell -- registers resolved; A55 receive GIC SPI overlay-gated
+ * @par A55 receive line = GIC_SPI 404 (MHU-B SWINT unit 12)
  * `uio_rproc_notify()`/`uio_mhu_ack()` below poke the MHU channel-1
  * scratch (`mhu-shm`) + the MHU-B NS message registers inside `mhu-uio`.
  * CORRECTED (alp-sdk #683/#697 bench cycle 2): earlier revisions aimed first
  * at ICU page 0x10400000 (routes-only, no SET reg), then at a SWINT unit
  * SET (block +0x800) -- a DIFFERENT MHU-B sub-block whose IRQ is not the
  * M33's channel-5 line, so the kick never landed.  `mhu-uio` maps the real
- * MHU-B block (A55 0x10480000); the kick/ack now target the crossbar slots
- * the M33 fw's channel 5 actually uses (see the MHU-B NS register comment
- * above): KICK = MSG_INT_SET on R_MHU_NS8 (0x10480104), ACK = RSP_INT_CLR on
- * R_MHU_NS36 (0x10480494).  These offsets are silicon-authoritative from the
- * FSP headers (bsp_mhu_b.h + mhu_iodefine.h).  The one remaining TBD --
- * because meta-rz-multi-os is license-gated and not on this host -- is the
- * A55 GIC SPI the `mhu-uio` DT node must carry for the RECEIVE direction:
- * the M33 sends on its RSP interrupt (MHU_RSP5_NS_IRQn = 293+6 = 299), so
- * the A55 must be wired to rsp_ch5_ns, NOT the msg_ch5_ns line the openamp
- * UIO dtsi currently declares (that is the M33's OWN receive line).  Confirm
- * the A55 rsp_ch5 SPI against the vendor overlay or a bench IRQ-walk.
+ * MHU-B block (A55 0x10480000); the KICK targets the crossbar slot the M33
+ * fw's channel 5 actually uses, R_MHU_NS5 (MSG_INT_SET, A55 0x104800A4, see
+ * the comment below).  The ACK clears SWINT unit 12 CLR (A55 0x104808C8),
+ * not an NS slot.  The A55 receive line is
+ * declared by `mhu-uio@10480000` in e1m-v2n-som.dtsi as GIC_SPI 404
+ * (INTID 436, MHU-B SWINT unit 12, GIC-measured in #697 cycle 10); the M33
+ * rings the A55 through that SWINT unit, and `uio_mhu_ack()` clears it.
  *
  * @par What is NOT vendored here
  * The Renesas Multi-OS Package's `meta-rz-multi-os` layer (the Linux
@@ -344,7 +340,7 @@ static const char *uio_dev_name(enum uio_region_id id)
  * +0x0C/10/14.
  *
  * The M33 fw runs its CA55<->CM33 link on logical channel 5.  BENCH-PROVEN
- * (alp-sdk #697 cycle 5, on e1mx-v2n-m1-01): the register whose MSG_INT is
+ * (alp-sdk #697 cycle 5, on a V2N bench unit): the register whose MSG_INT is
  * routed to the M33's MHU_MSG5_NS_IRQn(293) is R_MHU_NS5 -- the slot that
  * MATCHES the channel number (0x50480000 + 5*0x20 = 0x504800A0; A55 alias
  * 0x104800A0), NOT the bsp_mhu_b.h R_BSP_MHU_B_NS_REG_PAIR_BODY {36,NS36,8,NS8}
@@ -354,13 +350,20 @@ static const char *uio_dev_name(enum uio_region_id id)
  * the two INT halves as the two directions:
  *   - KICK the M33 (raise MHU_MSG5_NS_IRQn=293) = MSG_INT_SET on R_MHU_NS5
  *                                                 -> A55 0x104800A4.
- *   - RECEIVE/ack the M33's send (its RSP half, MHU_RSP5_NS_IRQn=299, dtb
- *     mhu-uio GIC_SPI 267) = RSP_INT_CLR on R_MHU_NS5 -> A55 0x104800B4.
+ *   - RECEIVE/ack the M33's send: R_MHU_NS5's RSP half (MHU_RSP5_NS_IRQn=299)
+ *     does not reach the CA55.  The A55 line is SWINT unit 12 = GIC_SPI 404,
+ *     and the ack is SWINT unit 12 CLR (ALP_MHU_SWINT_RECV_CLR_OFF =
+ *     0x800 + 12*0x10 + 0x08 -> A55 0x104808C8), see uio_mhu_ack().
  * The M33 side must correspondingly bind its ch5 RX/TX to R_MHU_NS5 (see the
  * r_mhu_b_ns.c port's channel-5 override) -- otherwise its ISR clears the
- * wrong register and the interrupt storms.  Earlier revisions aimed at a SWINT
- * unit (block +0x800, cycle 2) then NS8/NS36 (cycle 3-4); this is the
- * bench-confirmed target. */
+ * wrong register and the interrupt storms.  Earlier revisions aimed the kick
+ * at a SWINT unit (block +0x800, cycle 2) then NS8/NS36 (cycle 3-4); R_MHU_NS5
+ * is the bench-confirmed KICK target (NS5 is the A55->M33 kick only).
+ *
+ * Bench (E1M-V2M103 silicon, 2026-09-30): all seven generic-uio devices bind
+ * (uio0 rsctbl 0x4f700000/0x1000 ... uio6 mhu-uio 0x10480000/0x1000),
+ * /proc/interrupts shows "GICv3 436 Level mhu-uio", and
+ * 0x4f700000-0x4fffffff is listed "reserved" in /proc/iomem. */
 /* R_MHU0_Type layout (hal_renesas mhu_iodefine.h): MSG_INT STS/SET/CLR at
  * +0x00/04/08, then a RESERVED[4] word at +0x0C, then RSP_INT STS/SET/CLR at
  * +0x10/14/18.  The RESERVED gap was silicon-confirmed on the #697 cycle-9
@@ -939,7 +942,7 @@ static void rpc_be_teardown(struct rpc_be *ch)
 static alp_status_t
 y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
-	if (caps_out != NULL) caps_out->flags = 0u;
+	(void)caps_out;
 	if (cfg == NULL || cfg->name == NULL || cfg->name[0] == '\0') {
 		return ALP_ERR_INVAL;
 	}
@@ -966,7 +969,7 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 	 * rpmsg_create_ept() rejects with RPMSG_ERR_PARAM -- the OpenAMP address
 	 * bitmap is only 128 wide above the 1024 reserved base, so any src >= 1152
 	 * is unconditionally refused, breaking attach for ~half of all service
-	 * names.  Silicon-root-caused on e1mx-v2n-m1-01 (#683/#697 bench cycle 2,
+	 * names.  Silicon-root-caused on a V2N bench unit (#683/#697 bench cycle 2,
 	 * 2026-07-11).  The M33 endpoint (src=1024, dst=ANY, NS-announce) learns
 	 * our src from the first frame, so ANY binds cleanly. */
 	ch->src_ept = cfg->src_ept != 0u ? cfg->src_ept : RPMSG_ADDR_ANY;
@@ -1037,7 +1040,7 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 		 * m33_sm/main.c) -- it must NOT be applied to the master-side DA
 		 * registration, or the vring lookup (da=0x4f8xxxxx) matches no
 		 * region (all at 0x9f8xxxxx) -> remoteproc_create_virtio() returns
-		 * NULL -> ALP_ERR_NOT_READY.  Silicon-root-caused on e1mx-v2n-m1-01
+		 * NULL -> ALP_ERR_NOT_READY.  Silicon-root-caused on a V2N bench unit
 		 * (#683/#697 bench, 2026-07-11). */
 		metal_phys_addr_t da = pa;
 		remoteproc_init_mem(
@@ -1398,9 +1401,9 @@ static void y_destroy(alp_rpc_backend_state_t *st)
 static alp_status_t
 y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	(void)cfg;
 	(void)st;
-	if (caps_out != NULL) caps_out->flags = 0u;
 	return ALP_ERR_NOSUPPORT;
 }
 

@@ -10,6 +10,7 @@
 #ifndef ALP_TEST_FAKES_H
 #define ALP_TEST_FAKES_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -57,6 +58,291 @@ void fake_bme280_set_reg(uint8_t reg, uint8_t val);
 
 /** Reset all registers + the synthetic calibration block. */
 void fake_bme280_reset(void);
+
+/* ------------------------------------------------------------------ */
+/* fake RV-3028-C7                                                     */
+/* ------------------------------------------------------------------ */
+
+/** Read/write the RAM register file (STATUS, CONTROL_1/2, EEADDR/
+ *  EEDATA/EECMD, the EEPROM_CLKOUT/EEPROM_BACKUP RAM mirror, ...). */
+uint8_t fake_rv3028c7_get_reg(uint8_t reg);
+void    fake_rv3028c7_set_reg(uint8_t reg, uint8_t val);
+
+/** Read/write the separate EEPROM backing store, indexed by EEADDR --
+ *  distinct from the RAM mirror above; only an EECMD 0x21/0x22 commit/
+ *  readback touches this. */
+uint8_t fake_rv3028c7_get_eeprom(uint8_t addr);
+void    fake_rv3028c7_set_eeprom(uint8_t addr, uint8_t val);
+
+/** Ordered log of every APPLIED register write (reg, val) since the
+ *  last fake_rv3028c7_wlog_reset() / fake_rv3028c7_reset() -- a write
+ *  that failed via an armed fault (fake_rv3028c7_fail_next_write) is
+ *  NOT appended. */
+size_t  fake_rv3028c7_wlog_len(void);
+uint8_t fake_rv3028c7_wlog_reg(size_t i);
+uint8_t fake_rv3028c7_wlog_val(size_t i);
+void    fake_rv3028c7_wlog_reset(void);
+
+/** Arm a one-shot NACK for the next write that matches EXACTLY
+ *  (reg, val) -- not just "the next write" -- so a test can fail one
+ *  step of a multi-write commit sequence without disturbing the
+ *  steps before it. */
+void fake_rv3028c7_fail_next_write(uint8_t reg, uint8_t val);
+
+/** Reset registers, EEPROM backing store, the write log, and any
+ *  armed fault. */
+void fake_rv3028c7_reset(void);
+
+/* ------------------------------------------------------------------ */
+/* fake TCAL9538 / TCA6408A                                            */
+/* ------------------------------------------------------------------ */
+/* Two instances are wired in the overlay (0x73 TCAL9538 strap, 0x20
+ * TCA6408A alt-strap); every accessor takes the 7-bit address to
+ * disambiguate which one. */
+
+uint8_t  fake_tcal9538_get_reg(uint8_t addr, uint8_t reg);
+void     fake_tcal9538_set_reg(uint8_t addr, uint8_t reg, uint8_t val);
+uint32_t fake_tcal9538_write_count(uint8_t addr, uint8_t reg);
+uint32_t fake_tcal9538_read_count(uint8_t addr, uint8_t reg);
+/** Total I2C transactions (of any shape) this instance has seen. */
+uint32_t fake_tcal9538_total_transactions(uint8_t addr);
+void     fake_tcal9538_reset(uint8_t addr);
+
+/* ------------------------------------------------------------------ */
+/* fake ICM-42670-P                                                    */
+/* ------------------------------------------------------------------ */
+
+uint8_t  fake_icm42670_get_reg(uint8_t reg);
+void     fake_icm42670_set_reg(uint8_t reg, uint8_t val);
+uint32_t fake_icm42670_write_count(uint8_t reg);
+void     fake_icm42670_reset(void);
+
+/* ------------------------------------------------------------------ */
+/* fake BMI323                                                         */
+/* ------------------------------------------------------------------ */
+/* 16-bit-per-register wire protocol -- see fake_bmi323.c. */
+
+uint16_t fake_bmi323_get_reg(uint8_t reg);
+void     fake_bmi323_set_reg(uint8_t reg, uint16_t val);
+uint32_t fake_bmi323_write_count(uint8_t reg);
+void     fake_bmi323_reset(void);
+
+/* ------------------------------------------------------------------ */
+/* fake BMP581                                                         */
+/* ------------------------------------------------------------------ */
+
+uint8_t  fake_bmp581_get_reg(uint8_t reg);
+void     fake_bmp581_set_reg(uint8_t reg, uint8_t val);
+uint32_t fake_bmp581_write_count(uint8_t reg);
+void     fake_bmp581_reset(void);
+uint32_t fake_bmp581_log_len(void);
+uint8_t  fake_bmp581_log_reg(uint32_t idx);
+uint8_t  fake_bmp581_log_val(uint32_t idx);
+
+/* ------------------------------------------------------------------ */
+/* fake INA236                                                         */
+/* ------------------------------------------------------------------ */
+/* 16-bit big-endian register wire protocol -- see fake_ina236.c. */
+
+uint16_t fake_ina236_get_reg(uint8_t reg);
+void     fake_ina236_set_reg(uint8_t reg, uint16_t val);
+uint32_t fake_ina236_read_count(uint8_t reg);
+void     fake_ina236_reset(void);
+
+/* ------------------------------------------------------------------ */
+/* fake TAS2563                                                        */
+/* ------------------------------------------------------------------ */
+/* Book/page-paged register file -- see fake_tas2563.c.  get_reg /
+ * set_reg / write_count address BOOK 0 / PAGE 0, the only page with a
+ * backing store; the write log below is how a test sees writes aimed
+ * at any other book or page. */
+
+/** One applied register write, tagged with the book/page selected at
+ *  the time -- so a test can assert the ORDER and the paging of a
+ *  sequence, not just its end state. */
+struct fake_tas2563_write {
+	uint8_t book;
+	uint8_t page;
+	uint8_t reg;
+	uint8_t val;
+};
+
+/** Write-log capacity.  Long enough for the tuning-replay sequences
+ *  the ztests exercise; writes past it are dropped, not wrapped. */
+#define FAKE_TAS2563_LOG_MAX 64
+
+uint8_t  fake_tas2563_get_reg(uint8_t reg);
+void     fake_tas2563_set_reg(uint8_t reg, uint8_t val);
+uint32_t fake_tas2563_write_count(uint8_t reg);
+
+/** Currently selected book/page, as the last PAGE/BOOK write left it. */
+uint8_t fake_tas2563_cur_book(void);
+uint8_t fake_tas2563_cur_page(void);
+
+/** Ordered log of every APPLIED write since the last reset.  A write
+ *  that a fake_tas2563_fail_write_at() fault NACKed is NOT logged. */
+size_t                           fake_tas2563_log_len(void);
+const struct fake_tas2563_write *fake_tas2563_log(size_t i);
+void                             fake_tas2563_log_reset(void);
+
+/** Force the fake's current book/page selection without going through
+ *  a PAGE/BOOK write -- models a device left mid-tuning by a previous
+ *  firmware, which software shutdown would preserve (SLASET3D
+ *  §7.3.11.2, p.34). */
+void fake_tas2563_force_paging(uint8_t book, uint8_t page);
+
+/** Arm a one-shot NACK for the next write to (@p book, @p page,
+ *  @p reg), so a test can fail one step of a multi-write sequence
+ *  without disturbing the steps before it. */
+void fake_tas2563_fail_write_at(uint8_t book, uint8_t page, uint8_t reg);
+
+/** Reset registers to their datasheet POR values, clear the write
+ *  log, the counters, the book/page selection and any armed fault. */
+void fake_tas2563_reset(void);
+
+/* ------------------------------------------------------------------ */
+/* fake GD32G553 supervisor-MCU bridge (PING/GET_VERSION/GET_STATE)    */
+/* ------------------------------------------------------------------ */
+/* Models the OTA post-COMMIT/ROLLBACK TRIAL window's STATUS_BUSY reply
+ * (and the confirm-triggered second reset's raw link drop) -- see
+ * fake_gd32bridge.c. */
+
+void fake_gd32bridge_set_version(uint8_t major, uint8_t minor, uint8_t patch);
+
+/** Answer the given wire status byte (short error envelope) to the
+ *  next @p count requests regardless of opcode, then resume normal
+ *  replies.  Answered BEFORE any armed io failures (see
+ *  fake_gd32bridge.c's header comment for why that ordering matches
+ *  the real TRIAL-window sequence). */
+void fake_gd32bridge_arm_status_replies(uint8_t wire_status, unsigned count);
+
+/** Convenience wrapper: fake_gd32bridge_arm_status_replies(STATUS_BUSY, count). */
+void fake_gd32bridge_arm_busy_replies(unsigned count);
+
+/** Fail the next @p count bus transactions at the transport level
+ *  (-EIO, no reply at all) -- models the second reset's link drop.
+ *  Consumed only after any armed status replies are exhausted. */
+void fake_gd32bridge_arm_io_failures(unsigned count);
+
+/** Total decoded (non-io-failed) requests seen since the last reset. */
+uint32_t fake_gd32bridge_calls_seen(void);
+
+/** Total bus transactions attempted since the last reset, INCLUDING
+ *  ones that failed at the transport level (io failures) -- use this
+ *  to prove a call failed fast (e.g. exactly 1 attempt) when
+ *  fake_gd32bridge_calls_seen() alone can't distinguish "never tried"
+ *  from "tried once and transport-failed". */
+uint32_t fake_gd32bridge_attempts_seen(void);
+
+/** Reset version, armed faults and the counters to defaults. */
+void fake_gd32bridge_reset(void);
+
+/** Arm CMD_OTA_GET_STATE's next reply.  @p reply_width selects the wire
+ *  shape: 5 (pre-v0.14, no err byte -- @p err is ignored by the fake but
+ *  still stored) or 6 (v0.14+, err appended) -- see gh#101.  A width of
+ *  0 (the post-reset default) makes the fake fall through to its
+ *  unarmed-opcode STATUS_BUSY answer instead. */
+void fake_gd32bridge_arm_ota_get_state(uint8_t  state,
+                                       uint8_t  active,
+                                       uint8_t  pending,
+                                       uint16_t boot_count,
+                                       uint8_t  err,
+                                       uint8_t  reply_width);
+
+/* ------------------------------------------------------------------ */
+/* fake OPTIGA Trust M                                                 */
+/* ------------------------------------------------------------------ */
+
+/** NACK the next @p count accesses, as the part does while waking. */
+void fake_optiga_arm_sleep(unsigned count);
+
+/** Total accesses attempted (NACKed ones included) since the last reset. */
+uint32_t fake_optiga_attempts(void);
+
+void fake_optiga_reset(void);
+
+/* ------------------------------------------------------------------ */
+/* fake ACT88760                                                       */
+/* ------------------------------------------------------------------ */
+/* Two i2c-emul nodes (ADD1 0x25 = page 0, ADD2 0x26 = page 1) share one
+ * register image -- see fake_act8760.c.  Every accessor takes the page. */
+
+/** One write the driver put on the bus, in order. */
+struct fake_act8760_write {
+	uint8_t page;
+	uint8_t reg;
+	uint8_t val;
+};
+
+/** Write-log capacity; writes past it are counted but not logged. */
+#define FAKE_ACT8760_LOG_MAX 64
+
+uint8_t                          fake_act8760_get_reg(uint8_t page, uint8_t reg);
+void                             fake_act8760_set_reg(uint8_t page, uint8_t reg, uint8_t val);
+uint32_t                         fake_act8760_write_count(uint8_t page, uint8_t reg);
+size_t                           fake_act8760_log_len(void);
+const struct fake_act8760_write *fake_act8760_log(size_t i);
+/** Zero both pages, the counters and the log. */
+void fake_act8760_reset(void);
+
+/* ------------------------------------------------------------------ */
+/* fake DA9292                                                         */
+/* ------------------------------------------------------------------ */
+/* Stateful CTRL_01 / CH2_PG / W1C-event model -- see fake_da9292.c. */
+
+/** One write the driver put on the bus (applied or ignored), in order. */
+struct fake_da9292_write {
+	uint8_t reg;
+	uint8_t val;
+};
+
+/** Write-log capacity; writes past it are counted but not logged. */
+#define FAKE_DA9292_LOG_MAX 64
+
+uint8_t fake_da9292_get_reg(uint8_t reg);
+/** Set a register directly, bypassing the CTRL_01 / W1C rules (models
+ *  the chip changing under the driver). */
+void                            fake_da9292_force_reg(uint8_t reg, uint8_t val);
+uint32_t                        fake_da9292_write_count(uint8_t reg);
+size_t                          fake_da9292_log_len(void);
+const struct fake_da9292_write *fake_da9292_log(size_t i);
+/** Clear the write log and counters, keep the registers. */
+void fake_da9292_log_reset(void);
+/** CH2_PG asserts on this many-th STATUS_00 read after CH2_EN rises
+ *  (0 = the first read); UINT32_MAX = never. */
+void fake_da9292_set_pg_delay(uint32_t reads);
+/** Restore the V2N OTP power-on image, PG delay 2, clear the log. */
+void fake_da9292_reset(void);
+
+/* ------------------------------------------------------------------ */
+/* fake TPS628640                                                      */
+/* ------------------------------------------------------------------ */
+/* One instance per address (0x44, 0x48, 0x4F); every accessor takes
+ * the 7-bit address. */
+
+uint8_t  fake_tps628640_get_reg(uint8_t addr, uint8_t reg);
+void     fake_tps628640_set_reg(uint8_t addr, uint8_t reg, uint8_t val);
+uint32_t fake_tps628640_write_count(uint8_t addr, uint8_t reg);
+void     fake_tps628640_reset(uint8_t addr);
+/** Arm a one-shot NACK for the next READ of @p reg on the instance at
+ *  @p addr (writes are unaffected). Self-disarms after firing once. */
+void fake_tps628640_fail_next_read(uint8_t addr, uint8_t reg);
+/** Arm a one-shot NACK for the next WRITE of exactly (@p reg, @p val) on
+ *  the instance at @p addr -- matched on the byte VALUE too, not just the
+ *  register, so a specific write (e.g. the FPWM/ramp-restore byte inside
+ *  tps628640_reset_to_defaults()) can be failed without also failing the
+ *  RESET-bit write that always lands on REG_CONTROL first. Self-disarms
+ *  after firing once; a NACK'd write is never counted or applied. */
+void fake_tps628640_fail_next_write(uint8_t addr, uint8_t reg, uint8_t val);
+/** Testing-only knob: a RESET-bit write normally mirrors VOUT1's POR
+ *  value into VOUT2 (see fake_tps628640.c's regs_revert_to_por()) --
+ *  this overrides VOUT2's OWN post-reset code for the instance at
+ *  @p addr, modelling a real silicon fact this fake can't otherwise
+ *  observe (no bench reading of VOUT2 exists).  Lets a ztest prove the
+ *  driver's VOUT2 check is real by giving it a genuinely different
+ *  post-reset value from VOUT1, which the mirrored default can never
+ *  produce. Cleared back to the mirrored default by fake_tps628640_reset(). */
+void fake_tps628640_set_vout2_por(uint8_t addr, uint8_t code);
 
 #ifdef __cplusplus
 } /* extern "C" */

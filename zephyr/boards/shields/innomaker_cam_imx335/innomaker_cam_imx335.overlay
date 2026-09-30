@@ -1,0 +1,164 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * INNO-MAKER CAM-IMX335-5MP (Sony IMX335), 24 MHz module oscillator, CCI
+ * address 0x1A, 2 MIPI CSI-2 data lanes. Issue #2327, Stage A: raw
+ * first-light capture only (no ISP/AE/streaming). Board-agnostic: follows
+ * the upstream raspberry_pi_camera_module_2 shield's label contract EXACTLY
+ * (`chosen zephyr,camera`, `&csi_interface`, `&csi_ep_in`, `&csi_i2c`) --
+ * see zephyrproject-rtos/zephyr
+ * boards/shields/raspberry_pi_camera_module_2/raspberry_pi_camera_module_2.overlay
+ * -- so it plugs into ANY carrier connector shield that defines those
+ * labels. On alp-sdk that carrier shield is the E1M-EVK's e1m_evk_rpi_csi
+ * connector shield (owned + provided separately); build with
+ * SHIELD="e1m_evk_rpi_csi innomaker_cam_imx335".
+ *
+ * Driver: upstream Zephyr v4.4.1 drivers/video/imx335.c (CONFIG_VIDEO_IMX335,
+ * compatible "sony,imx335") -- reused as-is, NOT vendored into alp-sdk (ADR
+ * 0017 Tier 1, upstream-native). It carries one repo patch
+ * (zephyr/patches/zephyr/0004-imx335-2lane-link-freq-and-binning.patch,
+ * zephyr/patches.yml, applied per-module by scripts/bootstrap.sh at `west
+ * update` time and checked by scripts/verify_west_patches.py) that registers
+ * VIDEO_CID_LINK_FREQ, writes the SYSMODE + MIPI output-timing registers this
+ * lane count/bit rate needs, and fixes the 2x2-binned mode's HNUM/Y_OUT_SIZE
+ * -- see that patch's own comment in zephyr/patches.yml for the full
+ * derivation and bench evidence (runs 316-330).
+ *
+ * Silicon facts established on unit E1M-AEN803 2026W36-0001 (bench runs
+ * 316-330; see metadata/chips/imx335.yaml and changelog.d/2327.md for the
+ * full history): the module answered at CCI 0x1A (the only device on the J5
+ * camera bus) with CAM_EN untouched -- that bench unit's E1M-EVK carries the
+ * J5 pin-11 pull-up rework (docs/boards/e1m-evk.md, originally fitted for
+ * OV5647), so whether this module self-enables on a STOCK carrier (no
+ * rework) is NOT established. With the patch above applied, this shield
+ * bench-verified 6/6 consecutive clean 1296x972 RAW10 raw captures (run
+ * 330): 0 CSI CRC errors, 0 IPI-fatal events, correct stride, no overrun.
+ * NOT bench-verified: frame rate/fps (not measured), ISP/AE/colour, the
+ * sensor's full-resolution mode, and D-PHY lock through the E1M SoM R2
+ * pinout adapter at anything other than the lane count this shield uses (see
+ * this shield's doc/index.rst for the full not-verified list).
+ */
+
+#include <zephyr/dt-bindings/gpio/raspberrypi-csi-connector.h>
+#include <zephyr/dt-bindings/video/video-interfaces.h>
+
+/ {
+	chosen {
+		zephyr,camera = &csi_capture_port;
+	};
+
+	imx335_input_clock: imx335-input-clock {
+		compatible = "fixed-clock";
+		clock-frequency = <24000000>;
+		#clock-cells = <0>;
+	};
+};
+
+&csi_interface {
+	status = "okay";
+};
+
+/*
+ * Issue #2327, bench runs 316-330 (E1M-AEN803 2026W36-0001): Camera mode with
+ * an explicit csi-pixclk-hz. Controller mode cannot be made to match this
+ * sensor's measured timing and is not used here.
+ *
+ * Why not Controller mode: it requires stating this sensor's own line/frame
+ * length as fixed IPI-pixclk-cycle counts (csi-hline/csi-vtotal), derived
+ * from the sensor's line pacing -- a fact this driver's own registers never
+ * expose directly. Bench measurement (runs 329/330, VSYNC/HSYNC counters
+ * read back over the CSI-2 host) found the sensor's ACTUAL binned-mode line
+ * period is 29.63 us (~4H at HMAX 550) with 972 HSYNC pulses per frame -- a
+ * measured fact, not an inference, but one this driver's own imx335.c never
+ * surfaces as a control or register read, so a shield can't derive a
+ * Controller-mode csi-hline/csi-vtotal pair from it without hand-verifying
+ * against a bench capture on every future change. Camera mode instead lets
+ * the DW CSI-2 host derive its own H/V timing from the D-PHY bit rate + an
+ * explicit pixel clock, with no fixed line/frame-length DT constants to
+ * re-derive.
+ *
+ * Why csi-pixclk-hz is still needed under Camera mode: the DW CSI-2 host's
+ * default Camera-mode pixel-clock request (pll_fin * 2 * lanes / bpp * 1.2
+ * bandwidth margin, csi2_dw_validate_data()'s CAM branch, video_csi_dw.c) is
+ * 594e6 * 2 * 2 / 10 * 1.2 = 285.12 MHz for this 2-lane sensor -- and even
+ * the BARE rate without the margin (237.6 MHz) already exceeds
+ * alif_pixclk_set_rate()'s ~200 MHz practical ceiling, unlike IMX296's
+ * single-lane case where the margined rate still fits. csi-pixclk-hz (issue
+ * #2327, snps,designware-csi.yaml, now effective in Camera mode too) states
+ * 200 MHz explicitly instead -- the highest rate this clock actually
+ * reaches -- bypassing both the margined and bare derived requests.
+ *
+ * Bench-verified (runs 329/330, this exact configuration): 0 IPI-fatal
+ * events, correct 1296x972 stride, no FIFO overflow, 6/6 consecutive clean
+ * raw captures (run 330). Frame rate/fps was NOT measured. D-PHY Stop-state
+ * check (STOPSTATE 0x00010003 before stream start) passed normally once the
+ * patch's MIPI-timing registers were written -- no no-lp11-clock-lane-park-
+ * style skip property was needed for this sensor.
+ *
+ * The first captured frame after STANDBY release had darkened lower rows in
+ * one run (329) but not the next (330) -- see aen-camera-firstlight's own
+ * fix discarding the first frame for this sensor (src/main.c) rather than
+ * claiming this is understood.
+ *
+ * ipi-fs-sync: unset (default false, unchanged controller behaviour) -- moot
+ * for Camera mode (only read by the Controller-mode path this shield does
+ * not use); issue #2287's own bench investigation of this bit found no
+ * effect on IMX296 either.
+ * no-lp11-clock-lane-park: NOT set -- not needed; see the D-PHY Stop-state
+ * result above.
+ */
+&csi {
+	ipi-mode = "Camera";
+	csi-pixclk-hz = <200000000>;
+};
+
+&csi_ep_in {
+	remote-endpoint-label = "imx335_ep_out";
+	bus-type = <VIDEO_BUS_TYPE_CSI2_DPHY>;
+	data-lanes = <1 2>;
+};
+
+&csi_i2c {
+	imx335: imx335@1a {
+		compatible = "sony,imx335";
+		clocks = <&imx335_input_clock>;
+		reg = <0x1a>;
+
+		port {
+			imx335_ep_out: endpoint {
+				remote-endpoint-label = "csi_ep_in";
+				bus-type = <VIDEO_BUS_TYPE_CSI2_DPHY>;
+				data-lanes = <1 2>;
+			};
+		};
+	};
+};
+
+/*
+ * Issue #2327 Stage B (bench-verified, runs 332-334, E1M-AEN803 2026W36-0001): this sensor's
+ * native 2x2-binned output is a fixed 1296x972 with no in-sensor crop this driver uses --
+ * whatever crops that down to a usable ISP OUTPUT size is a property of THIS SENSOR MODULE, not
+ * of any one example, so it lives here rather than in a per-example board overlay.
+ *
+ * crop-x0/crop-y0 (zephyr/dts/bindings/video/vsi,isp-pico.yaml) feed isp_pico.c's out_form_rect:
+ * width = port_fmt.width - (left << 1), height = port_fmt.height - (top << 1) -- i.e. both
+ * properties crop SYMMETRICALLY (left AND right by crop-x0, top AND bottom by crop-y0), not from
+ * one corner. 1296 - 1280 = 16, so crop-x0 = 8 (8 px off each side); 972 - 960 = 12, so crop-y0 =
+ * 6 (6 px off top and bottom) -- landing on 1280x960, the frame size every IMX335 example/
+ * scenario budgets its buffers for. src/backends/camera/alif_isp_pico.c reads these SAME two
+ * properties back (DT_PROP(DT_NODELABEL(isp), crop_x0/crop_y0)) and BUILD_ASSERTs they still
+ * produce 1280x960 -- a future edit here that changes the crop without updating every IMX335
+ * example's assumed output size fails the BUILD, not a silent isp_stream_start() -EINVAL three
+ * calls later (zephyr/drivers/video/isp_pico.c's own out_form_rect-vs-output_fmt check).
+ *
+ * Harmless on a build that stacks this shield but never enables the ISP (e.g.
+ * aen-camera-firstlight's raw-capture-only path) -- these are plain DT properties on a node that
+ * stays `status = "disabled"` unless an example's own board overlay sets `&isp { status = "okay";
+ * ... };`.
+ */
+&isp {
+	crop-x0 = <8>;
+	crop-y0 = <6>;
+};

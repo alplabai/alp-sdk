@@ -37,6 +37,15 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+# Explicit path bootstrap (not a bare `import alp_eth_mac`): this file is
+# loaded two ways -- as a script (`python3 scripts/program_eeprom.py`,
+# where Python already puts scripts/ on sys.path[0]) and dynamically via
+# importlib.util.spec_from_file_location (tests/scripts/test_program_eeprom.py),
+# which does NOT add its directory to sys.path. Insert it explicitly so
+# the sibling import below resolves either way.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from alp_eth_mac import AlpEthMacError, parse_serial  # noqa: E402
+
 try:
     import yaml  # type: ignore[import-untyped]
 except ImportError:
@@ -151,6 +160,26 @@ def _resolve_hw_rev(project: dict[str, Any], metadata_root: Path) -> str:
     return str(default)
 
 
+def _resolve_board_datecode(family: str, metadata_root: Path) -> str | None:
+    """Read the family's Altium board-number datecode, if it declares one.
+
+    The physical board is `E1M-AEN-2626-R2`: `2626` is a YYWW datecode carried by
+    the board number and shared across every revision of that PCB.  A module whose
+    manifest says only `r2` cannot be tied back to its board number, so the
+    datecode belongs in the identity -- see the note in the family's
+    hw-revisions.yaml.
+
+    Returns None for a family that declares no datecode, in which case the bare
+    revision key is used and nothing changes for that family.
+    """
+    revs = metadata_root / "e1m_modules" / family / "hw-revisions.yaml"
+    if not revs.is_file():
+        return None
+    doc = yaml.safe_load(revs.read_text(encoding="utf-8")) or {}
+    datecode = doc.get("board_datecode")
+    return str(datecode) if datecode else None
+
+
 def _parse_date(s: str) -> date:
     try:
         return date.fromisoformat(s)
@@ -185,7 +214,10 @@ def main() -> int:
     parser.add_argument("--board-yaml", type=Path, default=Path("board.yaml"),
                         help="Path to the project's board.yaml (default: ./board.yaml).")
     parser.add_argument("--serial", required=True,
-                        help="Factory-assigned serial number (max 23 ASCII chars).")
+                        help="Factory-assigned serial number, YYYYWww-IIII "
+                             "(e.g. 2026W38-0001; IIII is a 4-char Crockford "
+                             "base32 index) -- validated against "
+                             "scripts/alp_eth_mac.py's parser.")
     parser.add_argument("--mfg-date", required=True,
                         help="Manufacturing date in ISO format (YYYY-MM-DD).")
     parser.add_argument("--output", type=Path, default=Path("eeprom-manifest.bin"),
@@ -195,6 +227,13 @@ def main() -> int:
                         help="Override the metadata search root.")
     args = parser.parse_args()
 
+    try:
+        parse_serial(args.serial)
+    except AlpEthMacError as e:
+        sys.exit(f"program_eeprom: --serial {args.serial!r} is not a valid "
+                 f"YYYYWww-IIII serial ({e}) -- refusing to program a "
+                 f"manifest whose Ethernet MAC could never be derived from it")
+
     project = _load_board_yaml(args.board_yaml)
     sku = (project.get("som") or {}).get("sku")
     if not sku:
@@ -203,7 +242,16 @@ def main() -> int:
     hw_rev = _resolve_hw_rev(project, args.metadata_root)
     mfg = _parse_date(args.mfg_date)
 
-    blob = _build_manifest(family, sku, hw_rev, args.serial, mfg)
+    # Compose the full board designator when the family declares a datecode:
+    # `2626` + `r2` -> `2626-r2`, matching the physical board `E1M-AEN-2626-R2`.
+    # The rev KEY stays `r2` everywhere else -- board.yaml, the loader's
+    # hw_revisions lookup, pad_route_overrides -- because that is the key those
+    # tables are indexed by.  Only the identity written onto the module carries
+    # the composed form, since only the module needs to name its own board.
+    datecode = _resolve_board_datecode(family, args.metadata_root)
+    hw_rev_field = f"{datecode}-{hw_rev}" if datecode else hw_rev
+
+    blob = _build_manifest(family, sku, hw_rev_field, args.serial, mfg)
     if len(blob) != MANIFEST_SIZE:
         sys.exit(f"program_eeprom: manifest is {len(blob)} bytes, "
                  f"expected {MANIFEST_SIZE} -- header layout bug")
@@ -213,7 +261,7 @@ def main() -> int:
     print(f"program_eeprom: wrote {len(blob)} bytes to {args.output}")
     print(f"  family   {family}")
     print(f"  sku      {sku}")
-    print(f"  hw_rev   {hw_rev}")
+    print(f"  hw_rev   {hw_rev_field}")
     print(f"  serial   {args.serial}")
     print(f"  mfg_date {mfg.isoformat()}")
     return 0

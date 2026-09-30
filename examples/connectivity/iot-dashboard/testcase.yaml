@@ -3,7 +3,8 @@
 sample:
   name: iot-dashboard
   description: |
-    BME280 environment sensor + OPTIGA Trust M + ST7789 TFT.
+    BME280 environment sensor + OPTIGA Trust M + a RK055HDMIPI4MA0
+    DSI panel (applied via the e1m_evk_rk055hdmipi4ma0 shield, #2173).
     mbedtls supplies TLS while MQTT publish enters through the
     portable <alp/iot.h> surface.  The same source builds on AEN
     (on-module CC3501E bridge) or V2N (Linux-owned Murata/CYW).
@@ -15,12 +16,34 @@ tests:
     platform_allow: native_sim/native/64
     build_only: true
     # native_sim.conf loads LAST (after alp.conf's EXTRA_CONF_FILE
-    # emit) so it can flip CONFIG_MBEDTLS off -- works around the
-    # Zephyr 4.4 / mbedtls 3.6 ssl_misc.h include-order bug; see
-    # native_sim.conf for the full rationale.
+    # emit) so it wins over the alp.conf-emitted defaults.  It no
+    # longer carries a CONFIG_MBEDTLS=n workaround -- that break is
+    # fixed at its root (#2173) and this target now builds the same
+    # TLS-enabled configuration the SoM does.  What is left is the
+    # native_sim-only panel wiring; see native_sim.conf.
     extra_args:
       - "EXTRA_CONF_FILE=native_sim.conf"
+  # Issue #2173 item (3): this scenario used to name `ensemble_e8_dk/...`
+  # -- Alif's own DevKit board, which no -p flag in this repo selects --
+  # so it built nowhere and never had. The panel gap that stalled the
+  # retarget (LVGL needs a `zephyr,display` chosen node and this app's
+  # ST7789 SPI0 pads are all repurposed on the 2626-R2 netlist) is now
+  # closed by the e1m_evk_rk055hdmipi4ma0 DSI shield CMakeLists.txt
+  # applies automatically for these two board targets -- the same panel
+  # #2204 wires up for aen-dsi-display. platform_allow now names both AEN
+  # SKUs the bench farm carries (AEN801 + AEN803); pr-twister-aen.yml's
+  # matrix builds each leg separately. build_only asserts the image
+  # links, nothing more -- see changelog.d/2173-iot-dashboard-aen-
+  # display.md for what that does and doesn't prove.
   alp_sdk.examples.iot_dashboard.aen:
     platform_allow:
-      - ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp
+      - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+      - alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp
     build_only: true
+    # The AEN targets have no Ensemble entropy driver at all (#2192), so the
+    # weak-RNG refusal in zephyr/CMakeLists.txt applies and this build has to
+    # acknowledge it to configure. Lives on the scenario, not in the app's
+    # prj.conf (see mqtt-telemetry/testcase.yaml), so a copy scaffolded by
+    # `tan init --from-example` and built for real hardware still refuses.
+    extra_configs:
+      - CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y

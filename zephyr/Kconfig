@@ -19,6 +19,7 @@ rsource "kconfigs/i2c-spi-handles.kconfig"
 rsource "kconfigs/vendor-renesas-spi.kconfig"
 rsource "kconfigs/vendor-renesas-mhu.kconfig"
 rsource "kconfigs/vendor-alif-peripherals.kconfig"
+rsource "kconfigs/video-sensors.kconfig"
 rsource "kconfigs/peripherals-handles.kconfig"
 rsource "kconfigs/v2n-supervisor.kconfig"
 rsource "kconfigs/peripherals-wrappers.kconfig"
@@ -47,6 +48,23 @@ rsource "Kconfig.alp-libraries"
 rsource "drivers/usb/uhc/Kconfig"
 
 endif # ALP_SDK
+
+# Alif Ensemble flex-IO bank (P7_4..P7_7 + LPGPIO flex pins) input/output
+# level.  The bank has its own supply pin, VDD_IO_FLEX, and a VBAT register
+# bit (VBAT->GPIO_CTRL bit 0, 0x1A609000) that must match it; the reset value
+# is 0 = 3.3 V mode.  Left at reset on a board that supplies 1.8 V, a flex pin
+# never reads HIGH (VIH sits above the rail).  Visible outside CONFIG_ALP_SDK
+# (MCUboot builds too) because it is a pad-level board fact, like the MPU table.
+config ALIF_FLEX_IO_1V8
+	bool "Alif flex-IO bank supplied at 1.8 V (VBAT GPIO_CTRL bit 0)"
+	depends on SOC_SERIES_E8
+	help
+	  Set ONLY by a board whose VDD_IO_FLEX pin is wired to a 1.8 V rail
+	  (the E1M-AEN SoM: VDD_IO_FLEX = +1V8).  Commands the flex-IO pads
+	  into 1.8 V mode at PRE_KERNEL_1, as the Alif DFP's board_pins_config()
+	  does under FLEX_IO_VOLTAGE_1V8.  Never enable it on a board that
+	  supplies VDD_IO_FLEX from 3.3 V: the DFP warns against 1.8 V mode on
+	  a 3.3 V supply.
 
 # ---------------------------------------------------------------------------
 # Alif Ensemble MRAM flash driver -- DELIBERATELY OUTSIDE `if ALP_SDK`.

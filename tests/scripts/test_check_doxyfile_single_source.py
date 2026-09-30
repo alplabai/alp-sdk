@@ -2,6 +2,7 @@
 """Unit tests for scripts/check_doxyfile_single_source.py."""
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -88,7 +89,8 @@ def test_cli_exits_nonzero_on_violation(tmp_path):
     result = subprocess.run(
         [sys.executable, str(REPO / "scripts" / "check_doxyfile_single_source.py"),
          "--root", str(tmp_path)],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
     assert result.returncode == 1
     assert "test-all.sh" in result.stderr

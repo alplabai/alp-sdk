@@ -17,6 +17,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 REPO = Path(__file__).resolve().parents[2]
@@ -79,8 +80,17 @@ def test_linux_claim_on_m33_pad_fails(tmp_path: Path) -> None:
     assert "P96" in problems[0] and "GD32_SPI.SCLK" in problems[0]
 
 
-def test_pinmux_group_claim_on_m33_pad_fails(tmp_path: Path) -> None:
-    """A pinctrl group claim counts too, not just a gpio-hog."""
+def test_pinmux_group_claim_on_m33_pad_fails(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A pinctrl group claim counts too, not just a gpio-hog.
+
+    `gate.EXEMPT` is empty on the real tree now (RIIC8/BRD_I2C moved to
+    `core: "a55"`, feat/v2m-deepx-rail-uboot 2026-09-24 -- see
+    `test_real_tree_is_clean`), so the "exemption's own named peripheral
+    is allowed" half of this test synthesises a throwaway exemption
+    rather than resting on a real (peripheral, pad) fact that can drift
+    out from under it again."""
+    monkeypatch.setattr(gate, "EXEMPT", {("RIIC8_SCL8", "P07"): "test-only"})
     # P07 under the peripheral its exemption names: allowed.
     assert gate.find_problems(
         _root(tmp_path, _PINCTRL_GROUP,

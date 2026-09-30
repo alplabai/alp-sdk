@@ -6,9 +6,9 @@
 # headset / hearable / conferencing market: the V2N (and V2H,
 # same source via SKU flip) supervisor M33 owns the audio loop,
 # the spectral work routes through the GD32G553 bridge's FFT/FAC
-# blocks, and the denoiser CNN dispatches via TFLM (DEEPX DX-M1
-# on V2N-M1, or the Renesas DRP-AI3 path on V2H once the §D.lib
-# loader resolves a HW backend).
+# blocks, and the denoiser CNN dispatches through TFLM's CPU kernels.
+# The Renesas DRP-AI3 engine is owned by the A55/Yocto side and is not
+# reachable from this M33-only project.
 #
 # Customer workflow: `tan init --from-example audio/audio-noise-suppression`, change `som.sku` to
 # your V2N / V2H MPN, edit `preset:` if you're on a custom
@@ -47,10 +47,9 @@ cores:
     os: "off"
   m33_sm:
     app: ./src
-    # Inference dispatcher set comes from the SoM preset's
-    # `capabilities:` -- on V2M101 DEEPX + DRPAI both compile in,
-    # on V2N101 only DRPAI, with TFLM CPU fallback always present.
-    # Apps pick per-handle at runtime via alp_inference_open(.backend=...).
+    # This M33/Zephyr slice gets the TFLM CPU dispatcher.  V2N101's
+    # DRP-AI3 engine (and V2M101's DRP-AI3 + DEEPX engines) are
+    # A55/Linux-side runtimes; using them requires an A55/Yocto app.
     inference:
       default_arena_kib: 96   # ~50k-param RNNoise-style denoiser.
     # Library set: tflite_micro carries the universal NPU dispatch +

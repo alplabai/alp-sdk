@@ -9,7 +9,7 @@
 # hal_ethos_u is already an unconditional west.yml group (issue #1076 Q2), so
 # no extra module wiring is needed here.  Compile-checks the driver + DT node
 # on the real E8 board target; filtered OUT of the native_sim PR gate
-# (platform_allow = the AEN801 HE board only).
+# (platform_allow = the AEN801/AEN803 M55-HE board targets).
 
 sample:
   name: aen-npu-ethosu-regcheck
@@ -23,6 +23,7 @@ tests:
   alp_sdk.examples.aen.npu_ethosu_regcheck.aen:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
     tags:
       - alp-sdk
       - example

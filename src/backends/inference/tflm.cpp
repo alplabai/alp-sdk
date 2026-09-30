@@ -181,9 +181,9 @@ void register_default_ops(tflite::MicroMutableOpResolver<32> &r)
  *  instead of silently truncating it into the shape[] descriptor on the
  *  first get_input()/get_output() (#1645, same bug-class as
  *  inference_ort.cpp's _gather_tensor_info() gate and
- *  inference_deepx.cpp's shapes_fit_descriptor()).  TFLM tensors are
+ *  the DEEPX backend's fill_fixed_shape() check).  TFLM tensors are
  *  always fully static once allocated -- unlike ORT/dx_rt there is no
- *  symbolic/dynamic-dim case to pin, so a dim outside [0, UINT16_MAX] is
+ *  symbolic/dynamic-dim case, so a dim outside [0, UINT16_MAX] is
  *  simply rejected. */
 bool tensor_shapes_fit_descriptor(tflite::MicroInterpreter *interp)
 {
@@ -291,6 +291,7 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
                               alp_inference_backend_state_t *state,
                               alp_capabilities_t            *caps_out)
 {
+	(void)caps_out;
 	/* Pinned-backend gate (the dispatcher contract in
 	 * src/inference_dispatch.c: a pinned open the serving backend
 	 * cannot honour returns NOSUPPORT).  This vtable serves the CPU
@@ -431,9 +432,12 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
 		return ALP_ERR_NOSUPPORT;
 	}
 
-	state->be_data  = st;
-	state->dev      = nullptr;
-	caps_out->flags = 0u; /* per-instance flags layered by NPU backends */
+	/* Leave *caps_out untouched: the dispatcher has already pre-seeded it
+     * from the registry's base_caps/base_class_flags (#1640). Zeroing
+     * caps_out->flags here would clobber that pre-seed and turn a
+     * REPORTED descriptor back into "not reported". */
+	state->be_data = st;
+	state->dev     = nullptr;
 	return ALP_OK;
 }
 
@@ -508,6 +512,7 @@ ALP_BACKEND_REGISTER(inference,
                          /* .silicon_ref */ "*",
                          /* .vendor      */ "tflm",
                          /* .base_caps   */ 0u,
+                         /* .base_class_flags */ 0u,
                          /* .priority    */ 50,
                          /* .ops         */ &alp_inference_tflm_ops,
                          /* .probe       */ NULL,

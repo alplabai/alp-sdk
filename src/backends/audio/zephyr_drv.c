@@ -16,6 +16,13 @@
  *   - struct hw_in_be   (dmic device + k_mem_slab + DSP filter state)
  *   - struct hw_out_be  (alp_i2s_t handle + started flag + Q8.8 vol)
  *
+ * issue #2132: the DesignWare I2S TX driver refuses to start with an
+ * empty queue.  That is fixed once, at the lowest shared layer both
+ * this backend and the portable <alp/i2s.h> API route through --
+ * src/backends/i2s/zephyr_drv.c's z_start()/z_write()/z_stop() -- not
+ * here.  This backend stays a thin alp_i2s_* wrapper; see that file's
+ * header comment for the deferred-start state machine.
+ *
  * The dispatcher (src/audio_dispatch.c) owns the public-facing
  * struct alp_audio_in / struct alp_audio_out pools; this backend
  * carries only the Zephyr-specific per-handle blobs.
@@ -43,6 +50,7 @@
 #include <zephyr/sys/util.h>
 
 #include <alp/audio.h>
+#include <alp/dsp.h>
 #include <alp/backend.h>
 #include <alp/cap_instance.h>
 #include <alp/i2s.h>
@@ -95,6 +103,12 @@ struct hw_in_be {
      * at 16 kHz -- inaudible but kills DC bias from PDM mics. */
 	int32_t dc_x_prev[2];
 	int32_t dc_y_prev[2];
+	/* Software resample (#2134): when the PDM cannot be clocked for the
+	 * requested rate, it runs at native = requested * ratio and every
+	 * block is decimated by `ratio` before it reaches the caller. ratio 1
+	 * means native, no decimator. */
+	uint32_t            ratio;
+	alp_dsp_decimator_t dec;
 	bool    in_use;
 };
 
@@ -124,8 +138,20 @@ static alp_status_t errno_to_alp(int err)
 	/* Delegates to the shared negative-errno baseline (issue #1638).
 	 * This switch was one of 27 hand-copied copies that had drifted; the
 	 * arms it carried all agreed with the baseline, so the mapping it
-	 * produced for them is unchanged. */
-	return alp_status_from_zephyr_errno(err);
+	 * produced for them is unchanged.
+	 *
+	 * One local override (issue #2133 round 4d): a non-blocking empty
+	 * read (alp_audio_in_read(..., timeout_ms=0)) reaches k_msgq_get()
+	 * with K_NO_WAIT, which returns -ENOMSG for "nothing queued right
+	 * now" -- the baseline has no arm for it, so it fell through to
+	 * ALP_ERR_IO ("dropped data, sticky") instead of the timeout this
+	 * actually is. Mirrors the existing -EAGAIN override one arm up in
+	 * the shared baseline.
+	 */
+	static const alp_errno_override_t overrides[] = {
+		{ -ENOMSG, ALP_ERR_TIMEOUT },
+	};
+	return alp_status_from_zephyr_errno_ex(err, overrides, ARRAY_SIZE(overrides));
 }
 
 #endif /* CONFIG_ALP_SDK_AUDIO_IN */
@@ -246,39 +272,86 @@ static alp_status_t z_in_open(const alp_audio_config_t     *cfg,
 	struct hw_in_be *be = alloc_in_be();
 	if (be == NULL) return ALP_ERR_NOMEM;
 
-	be->dev = dev;
-	int err =
-	    k_mem_slab_init(&be->slab, be->slab_buf, block_bytes, CONFIG_ALP_SDK_AUDIO_IN_SLAB_BLOCKS);
-	if (err != 0) {
-		free_in_be(be);
-		return errno_to_alp(err);
-	}
+	be->dev   = dev;
+	be->ratio = 1U;
 
-	struct pcm_stream_cfg stream = {
-		.pcm_rate   = cfg->sample_rate_hz,
-		.pcm_width  = pcm_width_for(cfg->format),
-		.block_size = block_bytes,
-		.mem_slab   = &be->slab,
-	};
-	struct dmic_cfg dcfg = {
-        .io =
-            {
-                .min_pdm_clk_freq = 1000000,
-                .max_pdm_clk_freq = 3500000,
-                .min_pdm_clk_dc   = 40,
-                .max_pdm_clk_dc   = 60,
-            },
-        .streams                 = &stream,
-        .channel.req_num_chan    = cfg->channels,
-        .channel.req_num_streams = 1,
-        .channel.req_chan_map_lo =
-            (cfg->channels >= 1) ? dmic_build_channel_map(0, 0, PDM_CHAN_LEFT) : 0,
-    };
-	if (cfg->channels == 2) {
-		dcfg.channel.req_chan_map_lo |= dmic_build_channel_map(1, 0, PDM_CHAN_RIGHT);
-	}
+	/* Try the requested rate natively first; boards whose mics can be
+	 * clocked for it are untouched. If the PDM rejects it, open at the
+	 * lowest in-spec native rate that is an integer multiple of the request
+	 * and decimate in software (#2134). S16 only: the decimator is int16. */
+	static const uint32_t native_rates[] = { 32000U, 48000U };
+	int                   err            = -EINVAL;
 
-	err = dmic_configure(dev, &dcfg);
+	for (size_t attempt = 0; attempt <= ARRAY_SIZE(native_rates); attempt++) {
+		uint32_t rate  = cfg->sample_rate_hz;
+		uint32_t ratio = 1U;
+
+		if (attempt > 0) {
+			rate = native_rates[attempt - 1];
+			if (cfg->format != ALP_AUDIO_FMT_S16_LE || cfg->sample_rate_hz == 0U ||
+			    rate % cfg->sample_rate_hz != 0U) {
+				continue;
+			}
+			ratio = rate / cfg->sample_rate_hz;
+			if (ratio < 2U || alp_dsp_decimator_init(&be->dec, ratio, cfg->channels) != ALP_OK) {
+				continue;
+			}
+		}
+
+		size_t native_block = block_bytes * ratio;
+		if (native_block > CONFIG_ALP_SDK_AUDIO_BLOCK_BYTES) {
+			err = -ERANGE; /* -> ALP_ERR_OUT_OF_RANGE, like an oversized caller block */
+			continue;
+		}
+		/* Re-initialised per attempt because the block size depends on the
+		 * rate. Harmless unless CONFIG_OBJ_CORE_MEM_SLAB is on, where each
+		 * init re-links the slab's object-core node -- the same limit a
+		 * reopen of this handle already had. */
+		err = k_mem_slab_init(
+		    &be->slab, be->slab_buf, native_block, CONFIG_ALP_SDK_AUDIO_IN_SLAB_BLOCKS);
+		if (err != 0) {
+			break;
+		}
+
+		struct pcm_stream_cfg stream = {
+			.pcm_rate   = rate,
+			.pcm_width  = pcm_width_for(cfg->format),
+			.block_size = native_block,
+			.mem_slab   = &be->slab,
+		};
+		struct dmic_cfg dcfg = {
+		    /* Generic PDM bit-clock window -- this PORTABLE backend names no mic
+		     * part number, so it declares no mic-specific range here. A real
+		     * mic's clock limits are a BOARD fact and belong in the SoM/carrier
+		     * devicetree instead (alif,alif-pdm.yaml's clk-frequency-min/
+		     * clk-frequency-max, issue #2133 round 3); dmic_alif_pdm_configure()
+		     * enforces the intersection of this window and that DT range. */
+		    .io =
+		        {
+		            .min_pdm_clk_freq = 1000000,
+		            .max_pdm_clk_freq = 3500000,
+		            .min_pdm_clk_dc   = 40,
+		            .max_pdm_clk_dc   = 60,
+		        },
+		    .streams                 = &stream,
+		    .channel.req_num_chan    = cfg->channels,
+		    .channel.req_num_streams = 1,
+		    .channel.req_chan_map_lo =
+		        (cfg->channels >= 1) ? dmic_build_channel_map(0, 0, PDM_CHAN_LEFT) : 0,
+		};
+		if (cfg->channels == 2) {
+			dcfg.channel.req_chan_map_lo |= dmic_build_channel_map(1, 0, PDM_CHAN_RIGHT);
+		}
+
+		err = dmic_configure(dev, &dcfg);
+		if (err == 0) {
+			be->ratio = ratio;
+			break;
+		}
+		if (err != -EINVAL) {
+			break; /* a real failure, not a rate the PDM refuses */
+		}
+	}
 	if (err != 0) {
 		free_in_be(be);
 		return errno_to_alp(err);
@@ -300,6 +373,10 @@ static alp_status_t z_in_start(alp_audio_in_backend_state_t *state)
 #if defined(CONFIG_ALP_SDK_AUDIO_IN)
 	struct hw_in_be *be = (struct hw_in_be *)state->be_data;
 	if (be == NULL) return ALP_ERR_NOT_READY;
+	if (be->ratio > 1U) {
+		/* Fresh session: drop filter history from before a stop. */
+		(void)alp_dsp_decimator_reset(&be->dec);
+	}
 	int err = dmic_trigger(be->dev, DMIC_TRIGGER_START);
 	if (err == 0) be->started = true;
 	return errno_to_alp(err);
@@ -340,10 +417,30 @@ static alp_status_t z_in_read(alp_audio_in_backend_state_t *state,
 
 	size_t bf       = bytes_per_frame(&state->cfg);
 	size_t got_frms = got / bf;
-	size_t want     = MIN(got_frms, frames);
-	size_t cpy      = want * bf;
-	memcpy(buf, block, cpy);
-	k_mem_slab_free(&be->slab, block);
+	size_t want;
+
+	if (be->ratio > 1U) {
+		/* Native-rate block -> requested rate. A block of
+		 * frames_per_block * ratio native frames yields exactly
+		 * frames_per_block output frames once the decimator phase is
+		 * settled; the process call refuses (and consumes nothing) if
+		 * the caller's buffer is too small. */
+		/* Feed at most frames * ratio native frames so a caller buffer
+		 * smaller than one block truncates exactly as the native path
+		 * does, instead of the decimator refusing and the block being
+		 * lost. */
+		size_t       in_frms = MIN(got_frms, frames * be->ratio);
+		alp_status_t ds      = alp_dsp_decimator_process(
+		    &be->dec, (const int16_t *)block, in_frms, (int16_t *)buf, frames, &want);
+		k_mem_slab_free(&be->slab, block);
+		if (ds != ALP_OK) {
+			return ds;
+		}
+	} else {
+		want = MIN(got_frms, frames);
+		memcpy(buf, block, want * bf);
+		k_mem_slab_free(&be->slab, block);
+	}
 
 	/* DSP chain -- DC-block runs in place on the caller's buffer.
      * S16 only in v0.2; S24/S32 paths land alongside the v0.3
@@ -461,6 +558,9 @@ static alp_status_t z_out_start(alp_audio_out_backend_state_t *state)
 #if defined(CONFIG_ALP_SDK_AUDIO_OUT)
 	struct hw_out_be *be = (struct hw_out_be *)state->be_data;
 	if (be == NULL) return ALP_ERR_NOT_READY;
+	/* issue #2132: alp_i2s_start() itself now tolerates -- and defers
+	 * past -- an empty TX queue (src/backends/i2s/zephyr_drv.c), so this
+	 * is a plain pass-through again; no audio-level bookkeeping needed. */
 	alp_status_t s = alp_i2s_start(be->i2s);
 	if (s == ALP_OK) be->started = true;
 	return s;
@@ -475,6 +575,10 @@ static alp_status_t z_out_stop(alp_audio_out_backend_state_t *state)
 #if defined(CONFIG_ALP_SDK_AUDIO_OUT)
 	struct hw_out_be *be = (struct hw_out_be *)state->be_data;
 	if (be == NULL) return ALP_ERR_NOT_READY;
+	/* issue #2132: alp_i2s_stop() itself now picks DROP vs DRAIN
+	 * correctly depending on whether a real START ever fired
+	 * (src/backends/i2s/zephyr_drv.c), so this stays a plain
+	 * pass-through regardless of what be->started believes. */
 	alp_status_t s = alp_i2s_stop(be->i2s);
 	if (s == ALP_OK) be->started = false;
 	return s;
@@ -526,6 +630,11 @@ static alp_status_t z_out_write(alp_audio_out_backend_state_t *state,
 			alp_status_t s =
 			    alp_i2s_write(be->i2s, chunk, n * bytes_per_frame(&state->cfg), timeout_ms);
 			if (s != ALP_OK) {
+				/* issue #2132: an alp_i2s_write() failure -- including a
+				 * still-pending start() retry that failed -- never
+				 * leaves a block queued (src/backends/i2s/zephyr_drv.c
+				 * DROPs it before returning), so this chunk was NOT
+				 * queued and must not be counted toward out_frames. */
 				if (out_frames != NULL) *out_frames = pushed;
 				return s;
 			}
@@ -576,6 +685,10 @@ static void z_out_close(alp_audio_out_backend_state_t *state)
 #if defined(CONFIG_ALP_SDK_AUDIO_OUT)
 	struct hw_out_be *be = (struct hw_out_be *)state->be_data;
 	if (be == NULL) return;
+	/* issue #2132: whether or not be->started is accurate, alp_i2s_close()
+	 * below now unconditionally releases any queued/in-flight TX blocks
+	 * (src/backends/i2s/zephyr_drv.c's z_close()), so this stop-if-started
+	 * shortcut is just a courtesy DRAIN, not load-bearing for safety. */
 	if (be->started) {
 		(void)alp_i2s_stop(be->i2s);
 		be->started = false;

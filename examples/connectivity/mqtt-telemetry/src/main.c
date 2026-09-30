@@ -20,6 +20,15 @@
  * calls <alp/iot.h>.  The bridge is silicon-validated (2026-06-24);
  * this is a real transport, not a stub.
  *
+ * Bridge bring-up (#2112): alp_wifi_open() only resolves to the CC3501E
+ * backend once an application has attached a live bridge handle --
+ * cc3501e_bridge_bringup() (src/cc3501e_bridge.c, the same copyable
+ * template every examples/aen/aen-cc3501e-* app uses) does exactly that
+ * before this app calls alp_wifi_open() below.  On native_sim the bring-up
+ * fails fast (ALP_ERR_NOT_PRESENT_ON_THIS_SOC -- no SPI/GPIO backend
+ * matches that SoC ref) and this app falls through to the same
+ * NULL-with-NOT_READY framing path as before.
+ *
  * The "sensor reading": to keep the focus on the transport, this
  * template publishes a synthetic metric (device uptime).  Swap
  * read_telemetry_value() for a real sensor read -- e.g. compose it
@@ -53,6 +62,7 @@
 #include <string.h>
 
 #include "alp/iot.h"
+#include "cc3501e_bridge.h" /* cc3501e_bridge_bringup() -- the SoM bring-up template, #2112 */
 
 /* Broker + topic identity.  In a real fleet these come from the
  * device's provisioning step; hardcoded here as documentation.
@@ -78,8 +88,15 @@
 #define PUBLISH_COUNT    3u
 #define PUBLISH_PERIOD_S 5u
 
-/* Handshake budgets. */
-#define WIFI_CONNECT_TIMEOUT_MS 10000u
+/* Handshake budgets.
+ *
+ * WIFI_CONNECT_TIMEOUT_MS: on E1M-AEN801 with the CC3501E bridge attached,
+ * alp_wifi_connect() routes to the CC3501E backend
+ * (src/backends/wifi/cc3501e.c), and the bridge's own worst case for one STA
+ * connect is 10s Wlan_RoleUp + 30s L2 association + a 30s DHCP-lease poll
+ * (hal/ti/cc3501e_hw_ti_wifi.c) = 70s. On other Wi-Fi backends this value is
+ * only an upper bound, not a derived worst case. */
+#define WIFI_CONNECT_TIMEOUT_MS 75000u
 #define MQTT_CONNECT_TIMEOUT_MS 10000u
 
 /* Read one telemetry value.
@@ -116,6 +133,14 @@ static size_t build_payload(char *buf, size_t cap, uint32_t value)
  * Wi-Fi backend on this build -- the native_sim / sw_fallback path. */
 static alp_wifi_t *telemetry_wifi_up(void)
 {
+	/* STATIC, not a local -- cc3501e_t embeds several
+	 * ALP_CC3501E_MAX_PAYLOAD scratch buffers; see cc3501e_bridge.h. */
+	static cc3501e_t bridge = { 0 };
+
+	printf("[mqtt] wifi: bridge bring-up\n");
+	alp_status_t bridge_rc = cc3501e_bridge_bringup(&bridge);
+	printf("[mqtt] wifi: cc3501e_bridge_bringup -> %s\n", alp_status_name(bridge_rc));
+
 	printf("[mqtt] wifi: opening station\n");
 	alp_wifi_t *w = alp_wifi_open();
 	if (w == NULL) {

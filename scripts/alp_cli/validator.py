@@ -26,6 +26,7 @@ import yaml
 from alp_cli.diagnostic import Diagnostic, DiagnosticCollector
 from alp_cli.yaml_pos import load_with_positions, node_position
 from alp_project_loader import split_silicon_ref
+from strict_loaders import fast_safe_load
 
 REPO = Path(__file__).resolve().parents[2]
 SCHEMA_PATH = REPO / "metadata" / "schemas" / "board.schema.json"
@@ -305,7 +306,9 @@ def _chip_suggestion(chip: str, *, chip_dir: Path = CHIP_DIR) -> str | None:
 
 def _load_metadata_yaml(path: Path) -> dict[str, Any] | None:
     try:
-        doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        # libyaml-backed yaml.safe_load: the hottest metadata read in the
+        # validator (#2328).
+        doc = fast_safe_load(path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError:
         return None
     return doc if isinstance(doc, dict) else None

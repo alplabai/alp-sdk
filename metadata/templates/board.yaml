@@ -47,8 +47,8 @@ description: "..."            # optional, free-form
 som:
   # Stock SKU.  Recognised values:
   #   E1M-AEN301 / AEN401 / AEN501 / AEN601 / AEN701 / AEN801   (Alif Ensemble)
-  #   E1M-V2N101 / V2N102                                       (Renesas RZ/V2N)
-  #   E1M-V2M101 / V2M102                                       (V2N + DEEPX DX-M1)
+  #   E1M-V2N101 / V2N102 / V2N103                              (Renesas RZ/V2N)
+  #   E1M-V2M101 / V2M102 / V2M103                              (V2N + DEEPX DX-M1)
   #   E1M-NX9xxx                                                (NXP i.MX 93)
   #
   # The SDK ships per-SKU presets at:

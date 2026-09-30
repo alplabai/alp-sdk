@@ -148,6 +148,7 @@ def _run(
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=30,
         check=False,
     )
@@ -325,6 +326,7 @@ def test_fails_when_gh_is_missing_from_path(tmp_path: Path) -> None:
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=10,
         check=False,
     )

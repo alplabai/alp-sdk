@@ -164,7 +164,7 @@ static void broker_thread_entry(void *p1, void *p2, void *p3)
  * one burst before the client ever reads, so the whole payload is
  * already sitting in the socket's receive buffer and
  * mqtt_read_publish_payload() never sees -EAGAIN -- the ONE arrangement
- * where drain_mqtt_payload()'s poll-to-deadline path (zephyr_drv.c,
+ * where mqtt_drain_step()'s poll-to-deadline path (zephyr_drv.c,
  * finding 3) is never exercised. Splits the PUBLISH exactly at the
  * rx_buf boundary and sleeps for real between the two halves, forcing
  * an -EAGAIN mid-drain that only a fix surviving -EAGAIN can recover
@@ -376,7 +376,7 @@ ZTEST(alp_mqtt_peer_length, test_oversized_publish_split_across_reads_still_drai
 
 	/* The first chunk (CONNACK + up through the rx_buf boundary) is
 	 * already on the wire; the outer poll below returns as soon as
-	 * that arrives. drain_mqtt_payload() then has to ride out the
+	 * that arrives. mqtt_drain_step() then has to ride out the
 	 * broker's 200ms k_sleep() internally (its own poll-to-deadline
 	 * loop, independent of this outer timeout_ms) before this call
 	 * returns -- ALP_MQTT_DRAIN_TIMEOUT_MS (5000ms) comfortably covers

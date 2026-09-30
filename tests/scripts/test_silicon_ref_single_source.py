@@ -87,7 +87,7 @@ def test_resolve_targets_still_raises_valueerror_on_a_malformed_ref(tmp_path):
     checking the disk) 'ref fine, file absent'. Callers of resolve_targets()
     distinguish the two, so the site re-raises ValueError itself.
     """
-    from alp_model.targets import resolve_targets
+    from alp_project_loader import resolve_targets
 
     meta = tmp_path / "metadata"
     (meta / "e1m_modules").mkdir(parents=True)
@@ -100,7 +100,7 @@ def test_resolve_targets_still_raises_valueerror_on_a_malformed_ref(tmp_path):
 
 def test_resolve_targets_still_raises_filenotfound_for_a_wellformed_missing_spec(tmp_path):
     """The other half of the pair -- a good ref naming a spec that isn't there."""
-    from alp_model.targets import resolve_targets
+    from alp_project_loader import resolve_targets
 
     meta = tmp_path / "metadata"
     (meta / "e1m_modules").mkdir(parents=True)

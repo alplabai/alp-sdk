@@ -13,16 +13,16 @@
 #   still belong in app-specific prj.conf / colcon meta; this manifest only
 #   enables the module's master support switch.
 #
-# Cross-core transport (BENCH-GATED, its own follow-up):
-#   A micro-ROS node on M reaches the ROS 2 agent on A either over UDP on a
-#   virtual net or a custom RMW over RPMsg.  alp-sdk already has the RPMsg
-#   substrate the latter would ride: open-amp is pinned (west module
-#   `open-amp`), the A55/Linux side has a framed RPMsg transport
-#   (src/backends/rpc/yocto_drv.c binding <alp/rpc.h> onto /dev/rpmsg_ctrl0,
-#   ADR 0016), and examples/multicore/rpmsg-v2n proves the A55<->M33 channel.
-#   But NOTHING wires a micro-ROS RMW onto it today, and there is no ROS 2
-#   agent packaged on the A side yet.  The RMW bridge is a separate design
-#   (likely its own ADR) and must be proven on the bench -- it is NOT built here.
+# Cross-core transport (BENCH-GATED, its own follow-up; see docs/adr/0035):
+#   A micro-ROS node on M reaches the ROS 2 agent on A via a custom XRCE
+#   transport over the ADR 0016 RPMsg channel (the pluggable seam is the XRCE
+#   transport, not the RMW).  The substrate exists: open-amp is pinned (west
+#   module `open-amp`), <alp/rpc.h> frames RPMsg on the A side, and
+#   examples/multicore/rpmsg-v2n proves the A55<->M33 channel.  On V2N the
+#   A55 side is the UIO backend (src/backends/rpc/yocto_uio_drv.c), not
+#   kernel rpmsg.  But NOTHING wires the XRCE transport onto it today, and
+#   there is no ROS 2 agent packaged on the A side yet.  It must be proven on
+#   the bench -- it is NOT built here.
 #
 # Version:  `humble` -- the micro-ROS Humble release line, chosen to pair with
 #   the meta-ros2-humble A-side that meta-alp-sdk already grounds (ros2.yaml).

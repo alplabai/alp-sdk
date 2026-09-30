@@ -46,16 +46,31 @@ machinery:
      recognised.
 
   2. Preset check -- every SoM preset declaring an explicit `memory_map:`:
-     the region reaching the highest `base + size` must be named `atoc`, and
-     no other region may intersect it.
+     the region reaching the top of the SoC's declared MRAM aperture must be
+     named `atoc`. Where no aperture resolves for that preset (a non-Alif
+     SoC, or a fixture with no `silicon:`), the fallback is the region
+     reaching the highest `base + size` in the whole table (#2069) -- see
+     `_check_preset()` for why an aperture-scoped top is the correct read:
+     a row above the App MRAM window (e.g. an OSPI0 HyperRAM at its own,
+     much higher, XIP base) must never win this comparison just for being
+     highest. EVERY row ending at that top must also not be
+     `write_authority: customer_runtime` (#2086) -- a correctly-named
+     `atoc` row, or a whole-device alias that necessarily reaches the
+     top too, is still the ATOC band if the application can write it at
+     runtime; naming it right is not enough.
 
-The window top is DERIVED per board/preset (the highest partition/region end
-in that same table), never hardcoded: the AEN SKUs do not share an MRAM size,
+The window top is DERIVED per board/preset -- the SoC's declared MRAM
+aperture end where one resolves, else the highest partition/region end in
+that same table -- never hardcoded: the AEN SKUs do not share an MRAM size,
 and a hardcoded 0x80580000 would pass vacuously on every part that isn't the
 E8.
 
-Three checks, because two invariants over the same AEN partition tables have
-turned out to need three different sources of truth (#1482):
+Four checks, because the same "keep the SE-owned ATOC band unwritable" invariant
+is asserted in four different places and each needs its own source of truth
+(#1482, #1981). Note check 4 is the odd one: checks 1-3 read AEN partition
+tables (board DTS, SoM preset memory_map), while check 4 reads a Python
+constant -- `aen_atoc.SLOT0_WINDOWS` -- because that is where the guard the
+provisioning path actually consults lives:
 
   1. DTS check -- as above.
 
@@ -73,6 +88,14 @@ turned out to need three different sources of truth (#1482):
      boards as check 1, for the same reason -- nothing else reads a committed
      board `.dts` for these two SKUs.
 
+  4. Slot0-window-ceiling check -- every preset that declares an `atoc`
+     `memory_map:` region: none of `scripts/aen_atoc.SLOT0_WINDOWS`'s
+     per-cpu_id ceilings may reach past that region's `base:` (#1981 --
+     the module originally hardcoded its `A32_0` ceiling at raw System
+     MRAM end instead of the atoc band's base, silently accepting an A32
+     mramAddress entry inside the SE-owned boot table; this check exists
+     so that specific vacuous-hardcode shape can't recur unnoticed).
+
 Run locally:
 
     python3 scripts/check_atoc_reservation.py
@@ -81,6 +104,7 @@ Run locally:
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -91,16 +115,110 @@ import yaml
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 
+import aen_atoc  # noqa: E402  -- scripts/aen_atoc.py's shared slot0 windows (#1981)
+from alp_orchestrate.aperture import region_extent as _region_extent  # noqa: E402
+from alp_orchestrate.aperture import resolve_aperture as _resolve_aperture_impl  # noqa: E402
 from alp_orchestrate.loader import _resolve_slot0_load_address  # noqa: E402
+from alp_orchestrate.memregion import _region_size_bytes  # noqa: E402
 from alp_orchestrate.models import OrchestratorError  # noqa: E402
 from gen_zephyr_board import _AEN_MRAM_BASE  # noqa: E402
 
 PRESETS = REPO / "metadata" / "e1m_modules"
+METADATA_ROOT = REPO / "metadata"
+SOCS = METADATA_ROOT / "socs"
 
 # The one region name allowed to own the top of the window.  An explicit
 # allowlist rather than a "doesn't look like storage" heuristic, so a future
 # rename is a one-line change here instead of a regex tweak.
 _ATOC_NAMES = {"atoc"}
+
+# `write_authority` value that means "writable by the application at
+# runtime" -- read only by `_check_preset()`'s top-of-window rule (#2086):
+# ONE guard there, not one per 4b/4c site, since EVERY row ending at the
+# declared window top covers the SE-owned atoc band -- SETOOLS
+# top-anchors the ATOC there and grows it DOWNWARD -- so checking the
+# top-of-window row already covers the whole-device-alias case too. Per
+# `write_authority`'s description
+# (metadata/schemas/som-preset-v1.schema.json), `customer_runtime` is THE
+# ONLY value meaning "writable by the application at runtime" -- every
+# other declared value (`customer_image`/`vendor_image`: flash-tool only;
+# `secure_enclave`: SE at provisioning; `none`: nobody; `composite`: a
+# whole-device alias spanning contained rows of DIFFERENT authority,
+# deferring to them -- `mram_main`'s own tag today) is not runtime-writable
+# by the row itself. ABSENT means unresolved, and the schema says a
+# consumer must treat an absent `write_authority` as ineligible for
+# runtime write (ADR-0034 clause 4) -- so absent stays exempt too (not
+# defaulting permissively means never treating it AS `customer_runtime`,
+# not refusing it as though it were), but is worth a SKIP note since the
+# schema also says a consumer must "say so", not stay silent.
+_RUNTIME_WRITABLE_AUTHORITY = "customer_runtime"
+
+
+def _runtime_writable_top_failure(
+    rel: str, sku: str, name: str, lo: int, hi: int, wa: Any,
+    floor: int, top: int, aperture_resolved: bool,
+) -> str:
+    """A region ending exactly at the declared window top IS the ATOC
+    band, regardless of its own name or extent. A row there that the
+    application can write at runtime is exactly the hazard this gate
+    exists to refuse -- whether it is a partition mis-named something
+    other than 'atoc' (#2069) or a whole-device alias spanning the
+    entire window (#2086).
+
+    `aperture_resolved` selects the justification: where the SoC's
+    on-die MRAM aperture resolved, `top` IS the confirmed ATOC anchor
+    point (SETOOLS top-anchors there and grows the table DOWNWARD,
+    #1289). Where no aperture resolved, `top` is only the file-wide
+    max standing in fail-closed -- it is NOT a confirmed SETOOLS anchor
+    point (an out-of-window OSPI0 HyperRAM row can sit far above the
+    real window, same as the aperture-scoped rule above guards against)
+    -- so the message must not claim SETOOLS anchors there.
+
+    `name not in _ATOC_NAMES and floor == lo and top == hi` (the same
+    exact-extent test 4b/4c use for their whole-device-alias exemption,
+    plus a name check) decides which `write_authority` value the remedy
+    names: `composite` for a whole-device alias (`mram_main`'s own tag
+    today), `secure_enclave` for the atoc band itself -- suggesting
+    `composite` for a correctly-named `atoc` row would let an author
+    retag a mis-authored one `composite` and pass, since that value is
+    itself exempt. The name check matters on its own, not just as a
+    belt-and-braces: in the no-aperture fallback, `floor`/`top` are the
+    file-wide min/max over rows with a RESOLVED base -- if `atoc` is the
+    only such row (e.g. `mram_main` is still `base: "TBD"`), the extent
+    test alone is trivially true for `atoc` itself, since it IS the
+    only resolved row spanning floor..top (#2086 follow-up)."""
+    if aperture_resolved:
+        why = (
+            f"SETOOLS top-anchors the ATOC application table at that "
+            f"exact address and grows it DOWNWARD (#1289); a row there "
+            f"that the application can write at runtime is the hazard "
+            f"this gate exists to refuse, whatever the row is named or "
+            f"however wide it is.")
+    else:
+        why = (
+            f"no SoC aperture resolves for this preset, so this gate "
+            f"cannot confirm where SETOOLS would anchor the ATOC -- the "
+            f"highest declared address stands in for the top, "
+            f"fail-closed, and a row there that the application can "
+            f"write at runtime is refused on the same grounds as a "
+            f"confirmed aperture top.")
+    if name not in _ATOC_NAMES and lo == floor and hi == top:
+        remedy = (
+            f"give it a non-runtime-writable write_authority -- "
+            f"'composite' is the value a whole-device alias like this "
+            f"should carry (mram_main's own tag today)")
+    else:
+        remedy = (
+            f"give it a non-runtime-writable write_authority -- "
+            f"'secure_enclave' is the value the atoc band itself should "
+            f"carry")
+    return (
+        f"{rel}: preset {sku} -- region {name!r} [0x{lo:x}, 0x{hi:x}) "
+        f"reaches the top of the declared window (0x{top:x}) and carries "
+        f"write_authority={wa!r}, which IS runtime-writable by the "
+        f"application.\n"
+        f"    {why} {remedy[0].upper()}{remedy[1:]} or move it out of "
+        f"the top band (#2086).")
 
 # `partition@<hex> { ... label = "<name>"; reg = <0x<hex> DT_SIZE_K(<n>)>; }`
 _PARTITION_RE = re.compile(
@@ -232,14 +350,308 @@ def _check_slot0_address(path: Path) -> "list[str]":
     return []
 
 
-def _region_size_kib(region: "dict[str, Any]") -> "int | None":
-    size_kib = region.get("size_kib")
-    if isinstance(size_kib, int):
-        return size_kib
-    size_mib = region.get("size_mib")
-    if isinstance(size_mib, int):
-        return size_mib * 1024
-    return None
+def _rel_or_str(path: Path) -> str:
+    """`path.relative_to(REPO)` when possible, else the raw path.
+
+    A test that monkeypatches `SOCS` to a directory outside the checkout
+    (so it never has to write a fixture into tracked `metadata/socs/`)
+    hands these functions a `path` that isn't under `REPO` -- fall back
+    to the raw string instead of raising `ValueError` out of a message
+    builder.
+    """
+    try:
+        return path.relative_to(REPO).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _check_aperture_declared() -> "list[str]":
+    """4a: every Alif Ensemble SoC must declare `soc_flash_base`
+    (#1365 split A).
+
+    `_resolve_aperture()` treats an absent `soc_flash_base` as "no
+    aperture declared, skip every aperture-anchored check" -- the
+    correct read for a non-Alif SoC (Renesas RZ/V2N legitimately
+    declares none), but it is silently indistinguishable from an
+    Ensemble part that simply forgot the field: 4b/4c switch off for
+    every preset resolving to that SoC while `validate_metadata.py`,
+    `gen_catalog.py`, and every other new test stay green, because
+    nothing else asserts the field is actually there (reviewer
+    mutation, 2026-09: deleting `soc_flash_base` from e3-e7.json left
+    `check_atoc_reservation.py` rc=0). `soc_flash_base` must stay
+    OPTIONAL in `soc-spec-v1` -- this is a family-scoped presence
+    check, not schema-wide requiredness, so RZ/V2N keeps declaring
+    none without tripping it.
+    """
+    out: "list[str]" = []
+    ensemble_dir = SOCS / "alif" / "ensemble"
+    if not ensemble_dir.is_dir():
+        return out
+    for path in sorted(ensemble_dir.glob("*.json")):
+        try:
+            spec = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            out.append(f"{_rel_or_str(path)}: unparseable JSON ({exc})")
+            continue
+        if not isinstance(spec, dict) or spec.get("family") != "Ensemble":
+            continue
+        if "soc_flash_base" not in spec:
+            out.append(
+                f"{_rel_or_str(path)}: Alif Ensemble SoC declares no "
+                f"`soc_flash_base` -- every Ensemble part must declare "
+                f"the on-die MRAM aperture base, or 4b/4c (aperture "
+                f"tiling, flash-class agreement) silently skip every "
+                f"preset resolving to this SoC with every other signal "
+                f"green (#1365 split A).")
+    return out
+
+
+def _check_aperture_cross_check() -> "list[str]":
+    """4a-adjacent: every Alif SoC declaring `soc_flash_base` must agree
+    with `_AEN_MRAM_BASE` (#1365 split A).
+
+    `gen_zephyr_board.py`'s `_aen_flash_partitions` already REFUSES a
+    board whose `mcuboot` region disagrees with `_AEN_MRAM_BASE`, and
+    `alp_orchestrate/loader.py::_resolve_slot0_load_address` resolves
+    every AEN slot0 load address off the very same constant --
+    `soc_flash_base` is therefore a SECOND declared source of one
+    hardware fact. A wrong aperture base does not fail loudly: it
+    silently reclassifies every region in that SKU, because 4b/4c below
+    both key off it. Scoped to Alif only -- `_AEN_MRAM_BASE` is an
+    Ensemble-family constant, so a non-Alif SoC is out of scope no
+    matter what (or whether) it declares `soc_flash_base`.
+    """
+    out: "list[str]" = []
+    if not SOCS.is_dir():
+        return out
+    for path in sorted((SOCS / "alif").glob("**/*.json")) if (SOCS / "alif").is_dir() else []:
+        try:
+            spec = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            out.append(f"{_rel_or_str(path)}: unparseable JSON ({exc})")
+            continue
+        if not isinstance(spec, dict):
+            continue
+        base = spec.get("soc_flash_base")
+        if base is None:
+            continue  # OPTIONAL -- omitted is a valid, if incomplete, state.
+        rel = _rel_or_str(path)
+        if not isinstance(base, int) or base != _AEN_MRAM_BASE:
+            out.append(
+                f"{rel}: soc_flash_base={base!r} disagrees with "
+                f"scripts/gen_zephyr_board.py's _AEN_MRAM_BASE "
+                f"(0x{_AEN_MRAM_BASE:x}) -- these are two declared "
+                f"sources of the same Ensemble App MRAM window base and "
+                f"must never drift; a wrong aperture base silently "
+                f"reclassifies every region in this SKU (#1365).")
+    return out
+
+
+# `_resolve_aperture` / `_region_extent` used to be defined here (#1365 split
+# A); the math now lives in `alp_orchestrate.aperture` so `carveout.py` /
+# `partition.py` (#1365 split B) derive a region's flash/RAM class off the
+# SAME aperture math this gate already validates, instead of a second copy
+# drifting from it. `_region_extent` is a straight re-export (unchanged
+# signature); `_resolve_aperture` keeps this module's original one-argument
+# call signature -- the shared `resolve_aperture(preset, metadata_root)`
+# always takes this module's own `METADATA_ROOT` here.
+def _resolve_aperture(preset: "dict[str, Any]") -> "tuple[int, int] | None":
+    return _resolve_aperture_impl(preset, METADATA_ROOT)
+
+
+def _check_aperture_tiling(
+    path: Path, doc: "dict[str, Any]", memory_map: "list[Any]",
+    aperture: "tuple[int, int]",
+) -> "tuple[list[str], list[str]]":
+    """4b: the authored regions CONTAINED IN the declared aperture must
+    tile it exactly -- no gaps, no overlaps (#1365 split A).
+
+    Anchors on the SoC aperture, never on `mram_main`: on every AEN
+    preset today `mram_main`'s `base` is concrete (`0x80000000`,
+    resolved by #2053), but anchoring on it would still be wrong -- it
+    is the whole-device alias, not one of the fine-grained children it
+    sums to, so tiling against it directly would compare the sum against
+    itself. Before #2053, `mram_main`'s `base` was the string `"TBD"`
+    while its children were concrete, which made this doubly true: an
+    unresolved anchor would have collapsed the check outright. Rows that
+    fall entirely OUTSIDE the aperture are ignored, not counted as gaps
+    -- Ensemble's OSPI XIP windows and the E1M-AEN801 SRAM row an IPC
+    carve-out might one day author both live outside
+    `[soc_flash_base, ...)` legitimately (E1M-AEN801.yaml:241-243). A
+    region whose extent equals the FULL aperture (`mram_main`, on every
+    AEN preset since #2053) is the whole-device alias, not a partition,
+    and is exempt. A region with an unresolved base is skipped --
+    returned as a non-failing entry in the second tuple element so the
+    caller can print it -- never guessed at; no shipped AEN preset
+    authors one today, but the skip path stays live for any future
+    region (or preset) that does.
+
+    A whole-device alias's `write_authority` is checked once, by
+    `_check_preset()`'s top-of-window rule, not here -- an alias's
+    extent always reaches the aperture top, so that single guard already
+    covers this case; a second copy here would just duplicate the
+    failure (#2086).
+
+    Returns `(failures, skips)`. `skips` must never make the gate red.
+    """
+    rel = path.relative_to(REPO).as_posix()
+    sku = doc.get("sku", rel)
+    full_lo, full_hi = aperture
+    contained: "list[tuple[int, int, str]]" = []
+    skips: "list[str]" = []
+    for region in memory_map:
+        if not isinstance(region, dict):
+            continue
+        name = str(region.get("name"))
+        ext = _region_extent(region)
+        if ext is None:
+            skips.append(
+                f"{rel}: preset {sku} -- region {name!r} has an "
+                f"unresolved base ({region.get('base')!r}) -- skipped "
+                f"from aperture tiling (4b), not guessed at.")
+            continue
+        lo, hi = ext
+        if lo == full_lo and hi == full_hi:
+            continue  # whole-device alias -- the device, not a partition.
+        if hi <= full_lo or lo >= full_hi:
+            continue  # entirely outside the aperture -- not a gap.
+        contained.append((lo, hi, name))
+
+    if not contained:
+        return [], skips
+
+    contained.sort()
+    out: "list[str]" = []
+    cursor = full_lo
+    for lo, hi, name in contained:
+        if lo < full_lo:
+            out.append(
+                f"{rel}: preset {sku} -- region {name!r} "
+                f"[0x{lo:x}, 0x{hi:x}) starts at 0x{lo:x}, below the "
+                f"declared aperture floor 0x{full_lo:x}: it straddles "
+                f"the aperture's own boundary, not a preceding contained "
+                f"region (the symmetric top-overflow case is reported "
+                f"separately, below).")
+        elif lo > cursor:
+            out.append(
+                f"{rel}: preset {sku} -- aperture gap [0x{cursor:x}, "
+                f"0x{lo:x}) precedes region {name!r}: no authored region "
+                f"covers this span of the declared MRAM aperture "
+                f"[0x{full_lo:x}, 0x{full_hi:x}).")
+        elif lo < cursor:
+            out.append(
+                f"{rel}: preset {sku} -- region {name!r} "
+                f"[0x{lo:x}, 0x{hi:x}) overlaps the preceding contained "
+                f"region ending at 0x{cursor:x}.")
+        cursor = max(cursor, hi)
+    if cursor < full_hi:
+        out.append(
+            f"{rel}: preset {sku} -- aperture gap [0x{cursor:x}, "
+            f"0x{full_hi:x}) at the top of the declared MRAM aperture "
+            f"[0x{full_lo:x}, 0x{full_hi:x}): no authored region covers "
+            f"it.")
+    elif cursor > full_hi:
+        out.append(
+            f"{rel}: preset {sku} -- contained regions extend to "
+            f"0x{cursor:x}, past the declared aperture top 0x{full_hi:x}.")
+    return out, skips
+
+
+def _check_class_disagreement(
+    path: Path, doc: "dict[str, Any]", memory_map: "list[Any]",
+    aperture: "tuple[int, int]",
+) -> "tuple[list[str], list[str]]":
+    """4c: a region CONTAINED IN the declared aperture must carry
+    `carveout: false` (#1365 split A -- the check that keeps the six
+    hand-authored flags from rotting).
+
+    Containment is a ONE-DIRECTIONAL test: inside the aperture proves
+    flash, so `carveout` must be exactly `False` there. Outside the
+    aperture proves NOTHING -- Ensemble's OSPI XIP windows sit outside
+    `[soc_flash_base, ...)` and are still flash, and the same OSPI0
+    controller also carries the OSPI0 HyperRAM on `chip_select: 0` (see
+    `on_module.hyperram` -- the fitted part is per-SKU, not named here),
+    so a row outside the aperture with `carveout: false` is a legitimate
+    RAM reservation (the schema's own
+    text: reserving SRAM for a hardware secure enclave), not a defect --
+    the symmetric direction is never asserted. A region with an
+    unresolved base is skipped, never classified -- returned as a
+    non-failing entry in the second tuple element so the caller can
+    print it. The whole-device alias (extent == full aperture) is
+    exempt, same as 4b. Its `write_authority` is checked once by
+    `_check_preset()`'s top-of-window rule, not here -- see 4b's
+    docstring (#2086).
+
+    Returns `(failures, skips)`. `skips` must never make the gate red.
+    """
+    rel = path.relative_to(REPO).as_posix()
+    sku = doc.get("sku", rel)
+    full_lo, full_hi = aperture
+    out: "list[str]" = []
+    skips: "list[str]" = []
+    for region in memory_map:
+        if not isinstance(region, dict):
+            continue
+        name = str(region.get("name"))
+        ext = _region_extent(region)
+        if ext is None:
+            skips.append(
+                f"{rel}: preset {sku} -- region {name!r} has an "
+                f"unresolved base ({region.get('base')!r}) -- skipped "
+                f"from flash-class agreement (4c), never classified.")
+            continue
+        lo, hi = ext
+        if lo == full_lo and hi == full_hi:
+            continue  # whole-device alias -- exempt, same as 4b.
+        contained = lo >= full_lo and hi <= full_hi
+        if not contained:
+            continue  # outside proves nothing -- one-directional (#1365).
+        if region.get("carveout") is not False:
+            out.append(
+                f"{rel}: preset {sku} -- region {name!r} "
+                f"[0x{lo:x}, 0x{hi:x}) is contained in the declared MRAM "
+                f"aperture [0x{full_lo:x}, 0x{full_hi:x}) (flash by "
+                f"containment) but carries carveout={region.get('carveout')!r}, "
+                f"not `false` -- a flash-class region must be excluded "
+                f"from IPC carve-out allocation.")
+    return out, skips
+
+
+def _check_top_write_authority(
+    at_top: "list[tuple[int, int, int, str, Any]]", rel: str, sku: str,
+    floor: int, top: int, aperture_resolved: bool,
+) -> "list[str]":
+    """Refuse any row in `at_top` (every row ending exactly at the
+    declared window top) that IS runtime-writable -- that top band is
+    the ATOC band regardless of the row's name or whether it is a
+    partition or a whole-device alias.  ONE guard, called from both the
+    aperture-scoped top rule and the no-aperture fallback (#2086):
+    naming the top row 'atoc' is not sufficient on its own, and a
+    whole-device alias's extent always reaches the same top, so one
+    check over `at_top` covers both shapes instead of two per-check
+    copies.  `floor`/`aperture_resolved` are passed straight through to
+    `_runtime_writable_top_failure()` -- see that function for what they
+    select.
+
+    A row with NO `write_authority` at all stays exempt -- the schema
+    says absent means unresolved, never `customer_runtime` (ADR-0034
+    clause 4) -- but is SKIP-noted rather than silent: the schema also
+    says a consumer must treat it as ineligible for runtime write "and
+    say so".
+    """
+    out: "list[str]" = []
+    for _, lo, hi, name, wa in at_top:
+        if wa == _RUNTIME_WRITABLE_AUTHORITY:
+            out.append(_runtime_writable_top_failure(
+                rel, sku, name, lo, hi, wa, floor, top, aperture_resolved))
+        elif wa is None:
+            print(
+                f"SKIP {rel}: preset {sku} -- region {name!r} "
+                f"[0x{lo:x}, 0x{hi:x}) reaches the top of the declared "
+                f"window (0x{top:x}) with no write_authority -- treated "
+                f"as ineligible for runtime write, never guessed at "
+                f"(ADR-0034 clause 4), not verified safe.")
+    return out
 
 
 def _check_preset(path: Path) -> "list[str]":
@@ -250,32 +662,136 @@ def _check_preset(path: Path) -> "list[str]":
     memory_map = doc.get("memory_map")
     if not isinstance(memory_map, list) or not memory_map:
         return []
-    spans: "list[tuple[int, int, str]]" = []
+    spans: "list[tuple[int, int, str, Any]]" = []
     for region in memory_map:
         if not isinstance(region, dict):
             continue
         base = region.get("base")
-        size_kib = _region_size_kib(region)
+        size_bytes = _region_size_bytes(region)
         # `base: TBD` regions (not yet HW-mapped) carry no address to check.
-        if isinstance(base, int) and size_kib is not None:
-            spans.append((base, base + size_kib * 1024, str(region.get("name"))))
+        if isinstance(base, int) and size_bytes is not None:
+            spans.append((base, base + size_bytes, str(region.get("name")),
+                          region.get("write_authority")))
     if not spans:
         return []
     rel = path.relative_to(REPO).as_posix()
-    window_top = max(hi for _, hi, _ in spans)
-    # A whole-device region (e.g. `mram_main`) legitimately spans the window;
-    # the check is about the SMALLEST region owning the top.
-    at_top = sorted((hi - lo, lo, hi, name)
-                    for lo, hi, name in spans if hi == window_top)
-    _, _, _, top_name = at_top[0]
+    sku = doc.get("sku", rel)
     out: "list[str]" = []
-    if top_name not in _ATOC_NAMES:
-        out.append(
-            f"{rel}: region {top_name!r} reaches the top of the declared "
-            f"window (0x{window_top:x}) but is not named 'atoc'.\n"
-            f"    That band is where SETOOLS top-anchors the ATOC "
-            f"application table (#1289); a region there that reads as "
-            f"customer storage is the boot table in disguise.")
+
+    # #1981 review: scripts/aen_atoc.py hardcodes its own slot0-window
+    # ceilings rather than parsing this YAML at flash time (see that
+    # module's docstring -- it must stay stdlib-only and importable from
+    # a bare west/SETOOLS environment), so nothing else in the tree
+    # catches one of those ceilings drifting past the SE-owned `atoc`
+    # band the way the checks below already catch it for a DTS partition
+    # table or a `memory_map:` region. A ceiling landing IN the band is
+    # exactly the vacuous-hardcode failure this module's own docstring
+    # warns against, just reproduced inside aen_atoc.py instead of here.
+    atoc_base = next((lo for lo, _hi, name, _wa in spans if name == "atoc"), None)
+    if atoc_base is not None:
+        for cpu_id, (win_base, win_size) in aen_atoc.SLOT0_WINDOWS.items():
+            win_top = win_base + win_size
+            if win_top > atoc_base:
+                out.append(
+                    f"{rel}: scripts/aen_atoc.SLOT0_WINDOWS[{cpu_id!r}] "
+                    f"ceiling 0x{win_top:x} reaches past this preset's "
+                    f"'atoc' band base 0x{atoc_base:x} -- an aen_atoc "
+                    "mramAddress entry could be accepted inside the "
+                    "SE-owned boot table (#1289, #1981).")
+
+    # Resolve the aperture BEFORE deciding what "the top" means (#2069): the
+    # hazard is defined by where SETOOLS anchors the ATOC -- the SoC
+    # variant's declared MRAM aperture end -- not by the highest row someone
+    # happened to author. Without this, an OSPI0 HyperRAM row (base
+    # 0xA0000000, well above the MRAM window) becomes the file-wide max and
+    # gets refused as "the boot table in disguise" purely for being highest.
+    aperture = _resolve_aperture(doc)
+
+    if aperture is not None:
+        full_lo, full_hi = aperture
+        # The rows ENDING exactly at the aperture top decide who owns it.
+        # `hi > lo` excludes a zero-size row: an authored `{name: atoc,
+        # base: <full_hi>, size_kib: 0}` reserves nothing and must not be
+        # able to satisfy this rule by merely existing at the right
+        # address (#2069 review round 1, finding 6).
+        at_top = sorted((hi - lo, lo, hi, name, wa)
+                        for lo, hi, name, wa in spans if hi == full_hi and hi > lo)
+        if not at_top:
+            out.append(
+                f"{rel}: no region in the declared memory_map ends at "
+                f"0x{full_hi:x}, the top of the SoC's declared MRAM "
+                f"aperture.\n"
+                f"    SETOOLS top-anchors the ATOC application table at "
+                f"that exact address regardless of what the authored "
+                f"table says (#1289); a short tiling or a straddling "
+                f"`atoc` both leave that anchor point unowned. Reserve a "
+                f"region named 'atoc' ending at 0x{full_hi:x}.")
+        else:
+            _, _, _, top_name, _ = at_top[0]
+            if top_name not in _ATOC_NAMES:
+                out.append(
+                    f"{rel}: region {top_name!r} reaches the top of the "
+                    f"SoC's declared MRAM aperture (0x{full_hi:x}) but is "
+                    f"not named 'atoc'.\n"
+                    f"    That band is where SETOOLS top-anchors the ATOC "
+                    f"application table (#1289); a region there that reads "
+                    f"as customer storage is the boot table in disguise.")
+            # Naming it 'atoc' is not enough -- ANY row ending at the
+            # aperture top (a correctly-named partition or a whole-device
+            # alias) must also not be runtime-writable (#2086).
+            out += _check_top_write_authority(
+                at_top, rel, sku, full_lo, full_hi, aperture_resolved=True)
+    else:
+        # No aperture resolves (a non-Alif SoC, or an Ensemble variant/
+        # fixture that omits `silicon:`/`soc_flash_base`) -- fall back to
+        # today's file-wide-max behaviour for the name check. Deliberately
+        # fail-closed -- NOT because SETOOLS is known to anchor the ATOC
+        # at the highest declared address: it does not, an out-of-window
+        # OSPI0 HyperRAM row can sit far above the real window (see the
+        # aperture-scoped comment above, #2069). With no aperture to scope
+        # "the top" to, the file-wide max is the only stand-in this gate
+        # has, so it refuses loudly there for lack of a confirmed anchor
+        # point rather than silently pass -- and that includes the
+        # runtime-writable-top guard below (#2086), whose own message
+        # must not claim a confirmed SETOOLS anchor point either.
+        window_top = max(hi for _, hi, _, _ in spans)
+        window_lo = min(lo for lo, _, _, _ in spans)
+        # A whole-device region (e.g. `mram_main`) legitimately spans the
+        # window; the check is about the SMALLEST region owning the top.
+        at_top = sorted((hi - lo, lo, hi, name, wa)
+                        for lo, hi, name, wa in spans if hi == window_top)
+        _, _, _, top_name, _ = at_top[0]
+        if top_name not in _ATOC_NAMES:
+            out.append(
+                f"{rel}: region {top_name!r} reaches the top of the "
+                f"declared window (0x{window_top:x}) but is not named "
+                f"'atoc'.\n"
+                f"    That band is where SETOOLS top-anchors the ATOC "
+                f"application table (#1289); a region there that reads as "
+                f"customer storage is the boot table in disguise.")
+        out += _check_top_write_authority(
+            at_top, rel, sku, window_lo, window_top, aperture_resolved=False)
+
+    # 4b/4c (#1365 split A): where the SoC declares an on-die MRAM
+    # aperture, the contained regions must tile it and agree with it on
+    # flash/RAM class. Skipped entirely when no aperture resolves (a
+    # non-Alif SoC, or an Alif SoC/variant that omits the field) --
+    # never guessed at (ADR-0034 clause 4). A region skipped WITHIN an
+    # aperture that DID resolve (an unresolved `base:` on that region --
+    # no shipped AEN preset authors one today; `mram_main`'s `"TBD"` was
+    # the standing example until #2053 resolved it on all seven) is not
+    # silently absorbed either: both checks hand back a non-failing skip
+    # note, printed here so the gate says so instead of a docstring
+    # nobody reads at gate-run time.
+    if aperture is not None:
+        tiling_failures, tiling_skips = _check_aperture_tiling(
+            path, doc, memory_map, aperture)
+        class_failures, class_skips = _check_class_disagreement(
+            path, doc, memory_map, aperture)
+        for note in tiling_skips + class_skips:
+            print(f"SKIP {note}")
+        out += tiling_failures
+        out += class_failures
     return out
 
 
@@ -295,14 +811,20 @@ def main(argv=None) -> int:
         checked_presets += 1
         failures += _check_preset(path)
 
+    failures += _check_aperture_declared()
+    aperture_cross_check_failures = _check_aperture_cross_check()
+    failures += aperture_cross_check_failures
+
     if failures:
         print("check_atoc_reservation: FAIL", file=sys.stderr)
         for f in failures:
             print(f"  {f}", file=sys.stderr)
         return 1
-    print(f"OK: {checked_dts} AEN board .dts + {checked_presets} SoM preset(s) "
-          f"checked, ATOC band reserved and slot0 address matches its preset "
-          f"in each.")
+    print(f"OK: {checked_dts} AEN board .dts + {checked_presets} SoM "
+          f"preset(s) checked -- ATOC band reserved, slot0 address "
+          f"matches its preset, aen_atoc.SLOT0_WINDOWS stays inside the "
+          f"atoc band, aperture tiling/class agree, and every declared "
+          f"aperture matches _AEN_MRAM_BASE, in each.")
     return 0
 
 
