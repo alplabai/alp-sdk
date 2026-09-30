@@ -301,10 +301,10 @@ index 000000000..b202babc2
 + * unchanged.
 + */
 +#define GD32_PROBE_HANDSHAKE_RETRIES		3
-+#define GD32_SE_RST_RELEASE_TRIES		3
-+#define GD32_SE_RST_RELEASE_RETRY_MS		10
 +#define GD32_PROBE_HANDSHAKE_RETRY_MIN_US	10000
 +#define GD32_PROBE_HANDSHAKE_RETRY_MAX_US	20000
++#define GD32_SE_RST_RELEASE_TRIES		3
++#define GD32_SE_RST_RELEASE_RETRY_MS		10
 +
 +/*
 + * gd32_bridge_resolve_work() poll period (Refs #2297): independent of, and
@@ -545,8 +545,7 @@ index 000000000..b202babc2
 +			msleep(GD32_SE_RST_RELEASE_RETRY_MS);
 +	}
 +	dev_warn(gd32->chip.parent,
-+		 "failed to release SE_RST after %u attempts (%d); Trust M may stay in reset
-",
++		 "failed to release SE_RST after %u attempts (%d); Trust M may stay in reset\n",
 +		 GD32_SE_RST_RELEASE_TRIES, ret);
 +}
 +
