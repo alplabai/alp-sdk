@@ -45,7 +45,7 @@ def _run(repo, tmp_path):
     )
     return subprocess.run(
         ["bash", "-c", "source " + str(tmp_path / "func.sh") + " && stage_clang_format"],
-        cwd=repo, capture_output=True, text=True,
+        cwd=repo, capture_output=True, text=True, encoding="utf-8",
         env={**os.environ, "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}"},
     )
 
