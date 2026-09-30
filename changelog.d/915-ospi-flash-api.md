@@ -56,27 +56,12 @@ garbage). Any future `flash_driver_api` call on this node inherits the
 correct chip select and rate from the overlay rather than the unverified
 dtsi default.
 
-Note: `fix/915-ospi-flash-api` (PR #2223, open) already carries this same
-driver plus a regcheck rewrite that exercises the API end to end on
-E1M-AEN803 silicon; that PR predates recent `dev` by hundreds of files and
-was not used as a base here. This fragment's own regcheck app still makes no
-device-level transfer — see the `CONFIG_FLASH_JESD216_API` paragraph above.
-
-Not run here: a bench build/flash/read cycle on real E1M-AEN803 silicon —
-this pass is code + a native build verification only (`west build` for
-both `alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he` and
-`alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`), not a bench run. The
-read path's command framing matches what issue #915's own bench thread
-already captured working on silicon (JEDEC ID `9d 5b 19`, SFDP signature
-`53 46 44 50`, `flash_read()` returning `0xFF` off the erased array), but a
-maintainer with bench access should re-run `aen-ospi-regcheck` on
-E1M-AEN803 before treating this pass as bench-proven itself. Program/erase
-remain open and need the Octal-DDR mode-switch work above, which is a
-silicon-gated follow-up, not implementable blind.
-
 Bench-verified on E1M-AEN803 2026W36-0001 (Flow C RAM-run on the M55-HE, a
 throwaway probe calling the flash API on the `snps,designware-ospi` device with
 this branch's `aen-ospi-regcheck` AEN803 overlay):
 `flash_read_jedec_id` -> `9d 5b 19` (ISSI), `flash_sfdp_read` -> signature
 `SFDP`, revision 1.9, 3 parameter headers, `flash_read` at offset 0 -> `0xff`
 (erased), and `flash_write` -> `-ENOTSUP` as designed.
+
+Program and erase stay open: they need the Octal-DDR mode switch above, a
+silicon-gated follow-up.
