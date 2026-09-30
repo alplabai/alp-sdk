@@ -68,8 +68,7 @@ FIFO depth, as the DFP does.
 **Verified on silicon:** E1M-AEN803 serial 2026W36-0001, M55-HE Flow C
 RAM-run of `aen-ospi-regcheck` with the self-test enabled, two runs (one
 cold, one warm with the part already in Octal DDR): `post-erase all_0xff=1`,
-pattern `crc32=0xa2912082` read back byte-for-byte, a second erase + the
-restore brought the sector back to its original `crc32=0xf154670a`,
-`RESULT PASS`. Octal DDR `70h`/`05h` reads return real status
+the test pattern read back byte-for-byte, and a second erase + the restore
+brought the sector back to its original CRC-32, `RESULT PASS`. Octal DDR `70h`/`05h` reads return real status
 (`WEL` set after `06h`), and an octal `5Ah` SFDP read with 8 dummy cycles
 returns the `SFDP` signature.
