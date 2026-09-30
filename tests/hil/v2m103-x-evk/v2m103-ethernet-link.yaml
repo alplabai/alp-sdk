@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 Ethernet (Linux, A55): some non-loopback netdev has carrier,
+# reports a sane link speed, and the default gateway answers ping.  Works
+# on any network: with no default route it pings the ssh peer instead.
+# Read-only: no ip/ethtool state change.
+
+schema_version: 1
+name: v2m103-ethernet-link
+description: |
+  Ethernet carrier up, speed 10/100/1000/2500, gateway (or ssh peer) pings.
+
+flash_method: ssh-run
+ssh_command: |-
+  for d in /sys/class/net/*; do
+    n=${d##*/}; [ "$n" = lo ] && continue
+    [ -e "$d/device" ] || continue
+    if [ "$(cat $d/carrier 2>/dev/null)" = 1 ]; then
+      s=$(cat $d/speed 2>/dev/null)
+      echo "HIL_ETH_IF $n speed=$s"
+      case "$s" in 10|100|1000|2500) echo HIL_ETH_LINK_UP;; esac
+    fi
+  done
+  gw=$(ip route | awk '/^default/{print $3; exit}')
+  [ -n "$gw" ] || gw=${SSH_CLIENT%% *}
+  ping -c 2 -W 2 "$gw" >/dev/null 2>&1 && echo HIL_ETH_PING_OK
+
+serial:
+  duration_s: 20
+  expect_contains:
+    - "HIL_ETH_LINK_UP"
+    - "HIL_ETH_PING_OK"

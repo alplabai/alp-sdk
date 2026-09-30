@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 OPTIGA Trust M (U33, BRD_I2C = i2c-8, 0x30): the address ACKs
+# (or is claimed by a driver, shown as UU).  Presence only; the APDU-level
+# check is v2n-secure-element-sign.  Read-only: one i2cdetect read probe.
+
+schema_version: 1
+name: v2m103-optiga-present
+description: |
+  OPTIGA Trust M answers at 0x30 on i2c-8.
+
+flash_method: ssh-run
+ssh_command: |-
+  i2cdetect -y -r 8 0x30 0x30 | grep -Eq '^30: +(30|UU)' && echo HIL_OPTIGA_ACK
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "HIL_OPTIGA_ACK"

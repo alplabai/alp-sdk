@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 SoM EEPROM (eeprom_24c128, E1M_I2C0, 0x50, see
+# metadata/e1m_modules/E1M-V2M103.yaml): ACKs a random read of 4 bytes at
+# offset 0 on at least one /dev/i2c-N.  The bus number is not fixed across
+# images, so every bus is tried.
+#
+# READ-ONLY, ALWAYS.  Only `w2 <addr>` (sets the read pointer) + `r4` is
+# issued -- no data write, and 0x58 (Secure Data Page / lock byte) is never
+# addressed.  The EEPROM must never be written or locked from a HIL spec.
+
+schema_version: 1
+name: v2m103-eeprom-read
+description: |
+  SoM EEPROM 0x50 answers a 4-byte read at offset 0.
+
+flash_method: ssh-run
+ssh_command: |-
+  for d in /dev/i2c-*; do
+    n=${d#/dev/i2c-}
+    r=$(i2ctransfer -y "$n" w2@0x50 0x00 0x00 r4 2>/dev/null) && echo "HIL_EEPROM_BUS $n: $r" && echo HIL_EEPROM_READ_OK
+  done
+
+serial:
+  duration_s: 20
+  expect_contains:
+    - "HIL_EEPROM_READ_OK"

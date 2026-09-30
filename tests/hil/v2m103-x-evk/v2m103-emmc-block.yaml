@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 eMMC (SD0, 16 GB): /dev/mmcblk0 exists, the host runs
+# HS200/HS400 timing when debugfs exposes it (debugfs absent -> skipped,
+# reported as HIL_EMMC_TIMING_SKIP), and a 64 MiB sequential read from the
+# block device completes.  Strictly read-only: dd only ever reads.
+
+schema_version: 1
+name: v2m103-emmc-block
+description: |
+  mmcblk0 present, HS200/HS400 timing (if readable), 64 MiB read OK.
+
+flash_method: ssh-run
+ssh_command: |-
+  test -b /dev/mmcblk0 && echo HIL_EMMC_BLK_OK
+  t=SKIP
+  for i in /sys/kernel/debug/mmc*/ios; do
+    [ -r "$i" ] || continue
+    grep -Eq 'timing spec:.*(HS200|HS400)' "$i" && t=OK
+    [ "$t" = OK ] || t=BAD
+  done
+  echo HIL_EMMC_TIMING_$t
+  dd if=/dev/mmcblk0 of=/dev/null bs=1M count=64 2>&1 | grep -q '^64+0 records out' && echo HIL_EMMC_READ_OK
+
+serial:
+  duration_s: 30
+  expect_contains:
+    - "HIL_EMMC_BLK_OK"
+    - "HIL_EMMC_READ_OK"
+  expect_absent:
+    - "HIL_EMMC_TIMING_BAD"

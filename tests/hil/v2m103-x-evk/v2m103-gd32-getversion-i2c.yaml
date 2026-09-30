@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 GD32 bridge, wire level: GET_VERSION frame to 0x70 on BRD_I2C
+# (i2c-8) via i2ctransfer; the reply's first byte is the status and must be
+# 0x00 (bench 2026-09-29 reply: 00 00 0e 00 cf a7).  -f because the kernel
+# GD32 bridge driver already owns the address.  GET_VERSION is a pure read
+# command; nothing on the GD32 changes.
+
+schema_version: 1
+name: v2m103-gd32-getversion-i2c
+description: |
+  GD32 GET_VERSION over i2c-8 @0x70 returns status 0x00.
+
+flash_method: ssh-run
+ssh_command: |-
+  r=$(i2ctransfer -f -y 8 w4@0x70 0x00 0x01 0xd1 0xf1 r6) || exit 0
+  echo "HIL_GD32_REPLY $r"
+  set -- $r
+  [ "$1" = 0x00 ] && echo HIL_GD32_STATUS_OK
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "HIL_GD32_STATUS_OK"
