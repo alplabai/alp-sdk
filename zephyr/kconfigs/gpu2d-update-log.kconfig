@@ -40,8 +40,12 @@ config ALP_SDK_GPU2D_SW_FALLBACK
 	  so alp_gpu2d_open() succeeds portably everywhere.
 
 config ALP_SDK_GPU2D_ALIF_DAVE2D
-	bool "Compile the Alif D/AVE 2D real backend (bench-unverified)"
+	bool "Compile the Alif D/AVE 2D real backend"
 	depends on ALP_SDK_GPU2D
+	# Bench-verified with the D-cache on only; with it off the engine's
+	# output never reached the CPU (#916). Without DCACHE the software
+	# fallback serves <alp/gpu2d.h> instead.
+	depends on DCACHE
 	default n
 	help
 	  Compile src/backends/gpu2d/alif_dave2d.c, the AEN-family
@@ -62,6 +66,16 @@ config ALP_SDK_GPU2D_ALIF_DAVE2D
 	  delegates those two modes to the software fallback's CPU path
 	  when ALP_SDK_GPU2D_SW_FALLBACK is also enabled (the default),
 	  and returns NOSUPPORT for them otherwise.
+
+config ALP_SDK_GPU2D_ALIF_DAVE2D_HEAP_SIZE
+	int "D/AVE 2D driver heap (display lists), bytes"
+	depends on ALP_SDK_GPU2D_ALIF_DAVE2D
+	default 65536
+	help
+	  Size of the D0 heap the Alif D/AVE 2D driver allocates its display
+	  lists from. Placed in the global SRAM0 bank when the devicetree has
+	  one, because the engine reads it as an AXI master and cannot reach
+	  core-local TCM.
 
 config ALP_SDK_UPDATE_LOG
 	bool "Enable <alp/update_log.h> firmware-update audit-log surface (experimental)"

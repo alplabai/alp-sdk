@@ -373,6 +373,34 @@ from the CC3501E's `alp_ota_spi_otp`: this channel streams into the
 slot-A/B application bootloader with commit + rollback, it does not
 program an OTP the GD32 does not have.
 
+### Prebuilt recovery images (public) vs. manufacturing (internal)
+
+The recovery binaries are not in this repository. They are published as
+assets of a tagged GitHub Release of the public
+[`alplabai/gd32-bridge-firmware`](https://github.com/alplabai/gd32-bridge-firmware/releases)
+repository, named `gd32-bridge-vX.Y.Z-{bootloader,slot-a,slot-b,ota-meta-rec0,full-flash}.bin`
+(bootloader, slot A, slot B, the factory A/B metadata record,
+a full-flash image), plus `SHA256SUMS`, and detached ECDSA-P256 signatures when
+the release is signed; a release without signatures is labelled `UNSIGNED`
+in its notes and proves integrity only. Its
+[`docs/RECOVERY.md`](https://github.com/alplabai/gd32-bridge-firmware/blob/dev/docs/RECOVERY.md)
+is the flashing guide for both routes above (external SWD probe, and
+host-driven SWD from the V2N A55, for which this repository carries the
+working master, `examples/v2n/v2n-gd32-swd-flash/`) and the `GET_VERSION`
+check over BRD_I2C at `0x70`. Verify a signed release (`openssl dgst -sha256 -verify <key> -signature
+SHA256SUMS.sig SHA256SUMS`, then `sha256sum -c SHA256SUMS`) against
+[`keys/alp_release_signing_ecdsa_p256.pub.pem`](../keys/alp_release_signing_ecdsa_p256.pub.pem);
+see [`som-release-signing.md`](som-release-signing.md) for the key model.
+The binaries are published by the firmware repository, never committed
+here, and the private signing key is never stored in any repository.
+
+The boundary: **public recovery** is restoring a known image at the
+addresses (bootloader `0x08000000`, metadata record `0x08008000`, slot A
+`0x0800A000`, slot B `0x08040000`) with a probe or the on-SoM SWD route. **Manufacturing** is
+internal and out of scope for this SDK: option-byte provisioning (write
+protection, BOOTLK, SPC), per-unit records, factory fixtures and the bench
+scripts. Recovery never needs those to bring the bridge back.
+
 ## Cross-link
 
 * Wire spec: [`gd32-bridge-protocol.md`](gd32-bridge-protocol.md).
