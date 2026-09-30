@@ -90,7 +90,7 @@
 # SKUs build in parallel and each job's own twister step only ever selects
 # its own SKU's two platforms (`-p` flags). Neither is a required
 # branch-protection check on `dev` (the required contexts are
-# `twister-shard 1/4`..`4/4`, `clang-format · diff-only` and `distro
+# `twister · native_sim/native/64` (aggregator of `twister-shard i/N`), `clang-format · diff-only` and `distro
 # install · all`), so the split blocks nothing. The `--testsuite-root`
 # list stays a single block below, shared by both matrix legs, rather than
 # duplicated per SKU.
