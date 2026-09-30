@@ -9,7 +9,9 @@ ORT_MACHINES = {
     "e1m-v2m101-a55",
     "e1m-v2m102-a55",
     "e1m-v2m103-a55",
+    "e1m-v2n101-a55",
     "e1m-v2n102-a55",
+    "e1m-v2n103-a55",
 }
 
 
@@ -17,7 +19,7 @@ def test_ort_enabled_on_exactly_the_pinned_machines():
     enabled = {
         p.stem
         for p in (LAYER / "conf" / "machine").glob("*.conf")
-        if re.search(r'^ALP_ENABLE_ORT_CPU \?= "1"', p.read_text(encoding="utf-8"), re.M)
+        if re.search(r'^ALP_ENABLE_ORT_CPU \?= "(1|\$\{@)', p.read_text(encoding="utf-8"), re.M)
     }
     assert enabled == ORT_MACHINES
 
@@ -25,4 +27,11 @@ def test_ort_enabled_on_exactly_the_pinned_machines():
 def test_alp_sdk_recipe_wires_ort_packageconfig():
     bb = (LAYER / "recipes-core" / "alp-sdk" / "alp-sdk_0.6.bb").read_text(encoding="utf-8")
     assert "-DALP_SDK_USE_ORT_CPU=ON -DALP_SDK_ORT_REQUIRED=ON" in bb
-    assert "ALP_ENABLE_ORT_CPU" in bb
+    assert re.search(r"^PACKAGECONFIG:append = \"\$\{@' ort' if d.getVar\('ALP_ENABLE_ORT_CPU'\) == '1'", bb, re.M)
+
+
+def test_v2m_defaults_ort_off_when_deepx_on():
+    # dx-rt ships its own libonnxruntime; ORT 1.28.0 on top collides.
+    for n in ("v2m101", "v2m102", "v2m103"):
+        conf = (LAYER / "conf" / "machine" / f"e1m-{n}-a55.conf").read_text(encoding="utf-8")
+        assert "'0' if d.getVar('ALP_ENABLE_DEEPX_DXM1') == '1' else '1'" in conf
