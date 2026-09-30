@@ -134,8 +134,7 @@ static alp_status_t session_open(optiga_trust_m_t *ctx, uint8_t kind)
 	if (ctx->session == kind) return ALP_OK;
 	session_close(ctx);
 	alp_status_t s = session_open_once(ctx, kind);
-	if (s == ALP_ERR_IO && ctx->reset != NULL &&
-	    hw_reset(ctx->reset, ctx->reset_user) == ALP_OK) {
+	if (s == ALP_ERR_IO && ctx->reset != NULL && hw_reset(ctx->reset, ctx->reset_user) == ALP_OK) {
 		s = session_open_once(ctx, kind);
 	}
 	return s;

@@ -57,8 +57,7 @@ static const uint8_t k_get_uid[] = { 0x81u, 0x00u, 0x00u, 0x06u, 0xE0u,
 
 #define APDU_RESP_HEADER 4u
 
-static int fail(
-    optiga_trust_m_t *se, se_reset_gpio_t *rst, alp_i2c_t *bus, const char *why, int s)
+static int fail(optiga_trust_m_t *se, se_reset_gpio_t *rst, alp_i2c_t *bus, const char *why, int s)
 {
 	printf("[se] RESULT FAIL: %s -> %d\n", why, s);
 	if (se != NULL) optiga_trust_m_deinit(se);
@@ -108,7 +107,9 @@ int main(void)
 	                                                    have_rst ? &rst : NULL);
 	/* The driver keeps the hook and its pointer for later opens (#2517),
 	 * so the reset line stays open until after deinit. */
-	if (s != ALP_OK) return fail(NULL, have_rst ? &rst : NULL, bus, "optiga_trust_m_init (Trust M not ACKing)", s);
+	if (s != ALP_OK)
+		return fail(
+		    NULL, have_rst ? &rst : NULL, bus, "optiga_trust_m_init (Trust M not ACKing)", s);
 	printf("[se] I2C_STATE probe -> ALP_OK\n");
 
 	/* 2. Coprocessor UID through the driver's typed call. */
@@ -133,12 +134,17 @@ int main(void)
 	s                = optiga_trust_m_send_apdu(
 	    &se, k_open_app, sizeof k_open_app, resp, sizeof resp, &resp_len, 1000u);
 	if (s != ALP_OK || resp_len < 1u || resp[0] != 0x00u) {
-		return fail(&se, have_rst ? &rst : NULL, bus, "raw OpenApplication", s != ALP_OK ? s : resp[0]);
+		return fail(
+		    &se, have_rst ? &rst : NULL, bus, "raw OpenApplication", s != ALP_OK ? s : resp[0]);
 	}
 	s = optiga_trust_m_send_apdu(
 	    &se, k_get_uid, sizeof k_get_uid, resp, sizeof resp, &resp_len, 1000u);
 	if (s != ALP_OK || resp_len != APDU_RESP_HEADER + sizeof info || resp[0] != 0x00u) {
-		return fail(&se, have_rst ? &rst : NULL, bus, "raw GetDataObject(0xE0C2)", s != ALP_OK ? s : resp[0]);
+		return fail(&se,
+		            have_rst ? &rst : NULL,
+		            bus,
+		            "raw GetDataObject(0xE0C2)",
+		            s != ALP_OK ? s : resp[0]);
 	}
 	if (memcmp(resp + APDU_RESP_HEADER, &info, sizeof info) != 0) {
 		return fail(&se, have_rst ? &rst : NULL, bus, "raw UID differs from read_product_info", -1);
