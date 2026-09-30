@@ -1036,6 +1036,12 @@ zephyr_library_sources(
 zephyr_library_sources_ifdef(CONFIG_GPIO
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/qenc/zephyr_drv.c)
 
+# gpio-qdec input-subsystem backend (issue #2095): only meaningful once
+# Zephyr's input subsystem is compiled in.  Priority 110 vs zephyr_drv's
+# 100 -- see gpio_qdec.c's header comment for the open-time fall-through.
+zephyr_library_sources_ifdef(CONFIG_INPUT
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/qenc/gpio_qdec.c)
+
 if(CONFIG_ALP_SDK_V2N_SUPERVISOR)
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/qenc/gd32_bridge.c)
@@ -1071,6 +1077,13 @@ endif()
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_DSP
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/dsp_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/dsp/sw_fallback.c)
+
+# The <alp/dsp.h> decimator is standalone portable C (no pool, no backend).
+# The chain API needs it, and so does PDM capture: the audio-in backend
+# resamples to a rate the mic can't be clocked for (#2134).
+if(CONFIG_ALP_SDK_DSP OR CONFIG_ALP_SDK_AUDIO_IN)
+    zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/src/dsp_decimator.c)
+endif()
 
 # The DSP body + stats surface call CMSIS-DSP kernels (arm_rfft_fast_f32,
 # arm_mean/rms/min/max/absmax_f32) when the cmsis-dsp module is linked,

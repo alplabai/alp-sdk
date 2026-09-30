@@ -313,6 +313,7 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../i3c_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/i3c/sw_fallback.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../dsp_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../dsp_decimator.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/dsp/sw_fallback.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../ahrs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../pid.c
