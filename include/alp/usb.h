@@ -45,9 +45,12 @@
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
  *      Surface skeleton; device enable/disable is real on Zephyr,
- *      host lifecycle routes to `usbh_*`/`uhc_xhci_alif` but is
- *      BENCH-UNVERIFIED (the UHC driver is a TODO(aen401-bench)
- *      skeleton), endpoint I/O is not yet wired.
+ *      host lifecycle routes to `usbh_*`/`uhc_xhci_alif` and is
+ *      BENCH-UNVERIFIED beyond the `uhc_xhci_alif_first_light()`/
+ *      `enable()` bring-up path (the UHC driver itself implements the
+ *      full `uhc_api`, including transfers -- see issue #388); this
+ *      `<alp/usb.h>` surface's own endpoint I/O
+ *      (`alp_usb_host_read`/`write`) is not yet wired to it.
  *      See docs/abi-markers.md for the convention.
  */
 

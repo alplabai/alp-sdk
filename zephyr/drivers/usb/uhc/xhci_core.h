@@ -28,7 +28,12 @@ struct xhci_trb {
 #define XHCI_TRB_TYPE_DATA     3u  /* Data Stage (§6.4.1.2.2) */
 #define XHCI_TRB_TYPE_STATUS   4u  /* Status Stage (§6.4.1.2.3) */
 #define XHCI_TRB_TYPE_ENABLE_SLOT 9u  /* Enable Slot Command (§6.4.3.2) */
+#define XHCI_TRB_TYPE_DISABLE_SLOT 10u /* Disable Slot Command (§6.4.3.3) */
 #define XHCI_TRB_TYPE_ADDRESS_DEVICE 11u /* Address Device Command (§6.4.3.4) */
+#define XHCI_TRB_TYPE_CONFIGURE_ENDPOINT 12u /* Configure Endpoint Command (§6.4.3.5) */
+#define XHCI_TRB_TYPE_RESET_ENDPOINT 14u /* Reset Endpoint Command (§6.4.3.8) */
+#define XHCI_TRB_TYPE_STOP_ENDPOINT 15u /* Stop Endpoint Command (§6.4.3.9) */
+#define XHCI_TRB_TYPE_SET_TR_DEQUEUE 16u /* Set TR Dequeue Pointer Command (§6.4.3.10... Table 6-91) */
 #define XHCI_TRB_TYPE_NOOP_CMD 23u /* No Op Command (§6.4.3.10) */
 #define XHCI_TRB_TYPE_TRANSFER_EVENT 32u /* Transfer Event (§6.4.2.1) */
 #define XHCI_TRB_TYPE_CMD_COMPLETION 33u /* Command Completion Event (§6.4.2.2) */
@@ -40,11 +45,19 @@ struct xhci_trb {
 #define XHCI_TRB_DIR_IN       (1u << 16) /* Data/Status stage direction = IN */
 #define XHCI_TRB_TRT_IN       (3u << 16) /* Setup TRT = IN data stage */
 #define XHCI_SLOT_ID(c)       ((uint32_t)(c) << 24) /* command TRB Slot ID field */
+#define XHCI_EP_ID(dci)       ((uint32_t)(dci) << 16) /* command TRB Endpoint ID field (§6.4.3.8/.9) */
 /* Event/completion helpers: completion code is status[31:24]; SUCCESS = 1.
- * A Command Completion Event carries the Slot ID in control[31:24]. */
+ * A Command Completion Event carries the Slot ID in control[31:24]. A
+ * Transfer Event's status[23:0] is the TRB Transfer Length residual (bytes
+ * the xHC did NOT move -- 0 on a full transfer, nonzero on a short packet). */
 #define XHCI_TRB_GET_CC(status)   (((status) >> 24) & 0xFFu)
 #define XHCI_TRB_GET_SLOT(control) (((control) >> 24) & 0xFFu)
+#define XHCI_TRB_GET_RESIDUAL(status) ((status) & 0x00FFFFFFu)
 #define XHCI_CC_SUCCESS      1u
+#define XHCI_CC_TRB_ERROR    5u  /* spec Table 6-90 */
+#define XHCI_CC_STALL        6u  /* spec Table 6-90 */
+#define XHCI_CC_SHORT_PACKET 13u /* spec Table 6-90 */
+#define XHCI_CC_STOPPED      26u /* spec Table 6-90 -- Stop Endpoint completed it */
 
 /* A producer ring: `size` TRBs, the last reserved as a Link TRB. */
 struct xhci_ring {

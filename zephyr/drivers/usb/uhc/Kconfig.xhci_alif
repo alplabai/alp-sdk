@@ -10,15 +10,19 @@ config UHC_XHCI_ALIF
 	  xHCI USB-2.0 host driver for the Alif Ensemble USB (DWC3-family,
 	  controller base 0x48200000, IRQ 101).
 
-	  The uhc_api op table, DT binding, xHCI capability register map
-	  (from the xHCI spec §5.3), and DWC3 G*-register init comments
-	  (GCTL @ 0xC110 from the Alif DFP) are real.  Every host bring-up
-	  path (DWC3 soft-reset, port-power, event-ring ISR, slot/endpoint
-	  context management, transfer TRB rings) carries a TODO(aen401-bench)
-	  marker with the intended register sequence as a code comment.
+	  Implements the full uhc_api: DWC3 host-mode init + xHCI reset,
+	  command/event-ring processing, root-hub port reset + single-device
+	  enumeration, ep_enqueue/ep_dequeue (control/bulk/interrupt), bus
+	  reset/suspend/resume, disable/shutdown, and an event-ring IRQ for
+	  hotplug notification.
 
-	  Do NOT enable this driver in production until the bench-gated paths
-	  are filled in and validated on real AEN401 silicon.
+	  Bring-up through *_enable()/enumerate() was proven on an E8 EVK
+	  (see the timing comments in uhc_xhci_alif_first_light()). Later
+	  additions (ep_enqueue/ep_dequeue, bus suspend/resume, disable/
+	  shutdown, the ISR) follow the same register sequencing but have
+	  NOT themselves been bench-run -- see issue #388 for the open bench
+	  checklist, including the EVK's own D+/D- signal-path fix needed
+	  before end-to-end enumeration of a real device can be proven.
 
 	  Driver: zephyr/drivers/usb/uhc/uhc_xhci_alif.c
 	  Binding: zephyr/dts/bindings/usb/alif,xhci-uhc.yaml

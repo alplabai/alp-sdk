@@ -11,12 +11,17 @@
  *       examples/peripheral-io/usb-host-storage -d /tmp/usb_host
  *
  * Bring-up status:
- *   The xHCI uhc driver (uhc_xhci_alif) is a SKELETON: the usbh
- *   stack registers the controller and calls the op table, but the actual
- *   bus-reset / channel-programming / transfer-completion sequences are
- *   bench-gated (TODO(aen401-bench) markers inside the driver).  This
- *   example compiles + links the full host path end-to-end; live USB
- *   enumeration requires bench bring-up.
+ *   The xHCI uhc driver (uhc_xhci_alif) implements the full uhc_api --
+ *   register bring-up, ring/transfer processing, root-hub enumeration,
+ *   bus ops, and an event-ring IRQ (see the driver's own header comment).
+ *   This example only drives the open/enable/disable/close lifecycle
+ *   through the portable <alp/usb.h> surface, which does not yet wire
+ *   endpoint I/O through to a mass-storage class driver (issue #388 is
+ *   the software-completion tracking issue; that class-driver wiring is
+ *   separate follow-on work).  Register bring-up was bench-proven on an
+ *   E8 EVK; everything past that (transfers, bus suspend/resume, the
+ *   ISR) has not itself been bench-run, and end-to-end enumeration on
+ *   this EVK also needs a D+/D- signal-path fix -- see issue #388.
  */
 #include <stdio.h>
 
@@ -42,12 +47,13 @@ int main(void)
 	}
 
 	printf("USB host enabled -- attach a mass-storage device\n");
-	printf("(enumeration is bench-gated; xHCI bring-up required)\n");
+	printf("(this example doesn't mount it yet -- see the file header)\n");
 
 	/*
-	 * TODO(aen401-bench): on real silicon, wait here for a connect event
-	 * from the usbh subsystem, then mount the MSC LUN via Zephyr's
-	 * usb_host MSC class driver and list the root directory.
+	 * Not yet wired: mounting the MSC LUN via Zephyr's usb_host MSC class
+	 * driver and listing the root directory needs the <alp/usb.h>
+	 * surface's own endpoint I/O, which does not exist yet (separate
+	 * follow-on work from issue #388 -- see the file header comment).
 	 */
 	k_sleep(K_SECONDS(2));
 

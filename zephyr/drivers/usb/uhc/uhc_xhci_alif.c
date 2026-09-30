@@ -4,12 +4,22 @@
  *
  * Alif Ensemble USB host (xHCI USB-2.0 dual-role, DWC3-family) UHC driver.
  *
- * SKELETON: the xHCI register map (CAP/op/runtime/doorbell @ 0x48200000),
+ * Implemented: the xHCI register map (CAP/op/runtime/doorbell @ 0x48200000),
  * the standard xHCI ring/context structures (per the xHCI spec §5), the DWC3
- * G*-register host-mode init (GCTL @ 0xC110, PrtCapDir=host), and the
- * uhc_api wiring are real; the ring processing / transfer completion / event
- * ISR / root-hub enumeration that need the live controller are
- * TODO(aen401-bench).  Not a validated driver.
+ * G*-register host-mode init (GCTL @ 0xC110, PrtCapDir=host), command-ring /
+ * event-ring processing (bounded polling, §4.9), root-hub port reset +
+ * single-device enumeration, the full uhc_api (enqueue/dequeue, bus
+ * reset/suspend/resume, disable/shutdown), and the event-ring IRQ (hotplug
+ * connect/disconnect notification via Port Status Change).
+ *
+ * NOT VALIDATED ON SILICON beyond the bring-up path noted per-function below
+ * (first-light + the enable()/enumerate() bench sequence were proven on an
+ * E8 EVK, 2026-07-04 -- see the timing comments in
+ * uhc_xhci_alif_first_light()).  Everything added after that bench session
+ * (ep_enqueue/ep_dequeue, bus_reset/suspend/resume, disable/shutdown, the
+ * ISR) follows the same register sequencing but has NOT itself been run
+ * against the live controller -- needs a bench pass per issue #388's
+ * tracking comment before it can be called validated.
  *
  * Grounded from the Alif DFP soc.h (AE402FA0E5597):
  *   USB_BASE         0x48200000  (DFP soc.h line 3578)
@@ -39,8 +49,11 @@
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/usb/uhc.h>
+#include <zephyr/usb/usb_ch9.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/sys_io.h>
+#include <zephyr/cache.h>
+#include <zephyr/irq.h>
 #include <errno.h>
 #include <string.h>
 #include "uhc_common.h"
@@ -78,6 +91,30 @@ static const struct xhci_tcm_map xhci_tcm = {
 static uint64_t xhci_l2g(const void *p)
 {
 	return xhci_local_to_global(&xhci_tcm, p);
+}
+
+/* The xHCI controller is an AXI-master DMA engine: it reads/writes system RAM
+ * directly, bypassing the M55's D-cache.  Every ring/context/data buffer the
+ * CPU hands to it needs explicit cache maintenance at the handoff:
+ *   - CPU produced data the xHC will read (TRBs we enqueue, DCBAA/ERST,
+ *     input contexts, OUT transfer data) -- flush (clean) before ringing the
+ *     doorbell, or the xHC can read stale/partial data still sitting in cache.
+ *   - Data the xHC produced that the CPU will read (event-ring TRBs, IN
+ *     transfer data) -- invalidate before reading, or the CPU can read its
+ *     own stale cached copy instead of what the DMA engine wrote.
+ * sys_cache_data_{flush,invd}_range() are safe no-ops when
+ * CONFIG_CACHE_MANAGEMENT/CONFIG_DCACHE aren't set, so these calls are
+ * unconditional.  UNVERIFIED ON SILICON: whether the M55's cache is enabled
+ * for the region backing these buffers (TCM is typically cached; the exact
+ * line size / MPU attributes are a bench question, not a software one). */
+static void xhci_alif_flush(const void *addr, size_t len)
+{
+	sys_cache_data_flush_range((void *)addr, len);
+}
+
+static void xhci_alif_invd(const volatile void *addr, size_t len)
+{
+	sys_cache_data_invd_range((void *)(uintptr_t)addr, len);
 }
 
 /* ---------------------------------------------------------------------------
@@ -138,8 +175,31 @@ static uint64_t xhci_l2g(const void *p)
 #define XHCI_OP_USBCMD          0x00u
 #define XHCI_OP_USBSTS          0x04u
 #define XHCI_USBCMD_HCRST       (1u << 1)   /* Host Controller Reset (§5.4.1) */
+#define XHCI_USBCMD_INTE        (1u << 2)   /* Interrupter Enable (§5.4.1)    */
 #define XHCI_USBSTS_CNR         (1u << 11)  /* Controller Not Ready (§5.4.2)  */
 #define XHCI_USBSTS_HCH         (1u << 0)   /* HCHalted (§5.4.2)              */
+
+/* Primary interrupter management register (IMAN, §5.5.2.1) at RT+0x20. */
+#define XHCI_IMAN_IP            (1u << 0)   /* Interrupt Pending (write-1-clear) */
+#define XHCI_IMAN_IE            (1u << 1)   /* Interrupt Enable */
+
+/* PORTSC (§5.4.8) link-state fields used by bus_reset/suspend/resume. */
+#define XHCI_PORTSC_CCS         (1u << 0)   /* Current Connect Status */
+#define XHCI_PORTSC_PP          (1u << 9)   /* Port Power */
+#define XHCI_PORTSC_LWS         (1u << 16)  /* Link State Write Strobe */
+#define XHCI_PORTSC_PLS_SHIFT   5u
+#define XHCI_PORTSC_PLS_MASK    (0xFu << XHCI_PORTSC_PLS_SHIFT)
+#define XHCI_PORTSC_PLS_U0      (0u << XHCI_PORTSC_PLS_SHIFT)
+#define XHCI_PORTSC_PLS_U3      (3u << XHCI_PORTSC_PLS_SHIFT)
+#define XHCI_PORTSC_PLS_RESUME  (15u << XHCI_PORTSC_PLS_SHIFT)
+#define XHCI_PORTSC_PLC         (1u << 22)  /* Port Link State Change (RW1C) */
+#define XHCI_PORTSC_PRC         (1u << 21)  /* Port Reset Change (RW1C) */
+#define XHCI_PORTSC_PR          (1u << 4)   /* Port Reset */
+#define XHCI_PORTSC_SPEED_SHIFT 10u
+#define XHCI_PORTSC_SPEED_MASK  (0xFu << XHCI_PORTSC_SPEED_SHIFT)
+/* RW1C change bits [23:17] plus PED[1]: never write these back as 1 by
+ * accident when updating PLS/PR/PP, or a real pending change gets eaten. */
+#define XHCI_PORTSC_RW1C_MASK   ((0x7Fu << 17) | (1u << 1))
 
 /* ---------------------------------------------------------------------------
  * xHCI capability registers (at controller base; xHCI spec §5.3).
@@ -189,6 +249,13 @@ struct uhc_xhci_alif_config {
 	uintptr_t base;
 	/** Called during init to connect the SoC interrupt line (IRQ 101). */
 	void (*irq_config)(void);
+	/**
+	 * IRQ number (DT_INST_IRQN), used to mask the event-ring IRQ around
+	 * every synchronous command/transfer poll below (uhc_xhci_alif_wait_event())
+	 * so the ISR never races a thread-context poll over the shared
+	 * event_deq/event_cycle consumer state on this single-core M55.
+	 */
+	unsigned int irqn;
 };
 
 struct uhc_xhci_alif_data {
@@ -238,15 +305,39 @@ struct uhc_xhci_alif_data {
 	 *  (DCBAA[0], §6.6) + one page the xHC owns for internal state. */
 	uint64_t scratchpad_array[1] __aligned(64);
 	uint8_t  scratchpad_buf[4096] __aligned(4096);
-	/* Enumeration (device slot 1): 64-byte contexts (HCCPARAMS1.CSZ=1).  Input
-	 * context = input-control + slot + EP0 (3 x 64B); device context = slot + EP0
-	 * (2 x 64B, pointed at by DCBAA[slot]).  EP0 control transfer ring + a buffer
-	 * for GET_DESCRIPTOR data.  All in SRAM0 (DMA-reachable). */
-	uint32_t input_ctx[3 * 16] __aligned(64);
-	uint32_t device_ctx[2 * 16] __aligned(64);
+	/*
+	 * Enumeration + endpoint contexts: 64-byte contexts (HCCPARAMS1.CSZ=1).
+	 * Position layout (spec §6.2.1, Table 6-1): [0]=input-control (input
+	 * context only), [1]=slot, [1+dci]=endpoint context for Device Context
+	 * Index `dci`.  Sized for XHCI_MAX_DCI (EP0 control + endpoints 1 and 2,
+	 * each direction -- e.g. one bulk-only mass-storage interface's OUT+IN
+	 * pair) -- a device using endpoint numbers beyond that needs this raised.
+	 * All in SRAM0/TCM (DMA-reachable via xhci_l2g()).
+	 */
+#define XHCI_MAX_DCI 5 /* EP0(1) + EP1 OUT(2)/IN(3) + EP2 OUT(4)/IN(5) */
+	uint32_t input_ctx[(2 + XHCI_MAX_DCI) * 16] __aligned(64);
+	uint32_t device_ctx[(1 + XHCI_MAX_DCI) * 16] __aligned(64);
 	struct xhci_trb ep0_ring[16] __aligned(64);
 	struct xhci_ring ep0;
 	uint8_t  descriptor_buf[64] __aligned(64);
+	/**
+	 * Non-control endpoint rings (bulk/interrupt), allocated on first use by
+	 * uhc_xhci_alif_ep_ctx_get().  `dci` is the Device Context Index this
+	 * slot is bound to once `used`.  ep_enqueue() is synchronous (one
+	 * transfer processed to completion per call, spec-legal but
+	 * ponytail: no per-endpoint transfer pipelining -- add a real
+	 * pending-transfer queue, drained from uhc_xhci_alif_isr(), if a
+	 * consumer needs more than one transfer in flight per endpoint).
+	 */
+	struct {
+		uint8_t          used;
+		uint8_t          dci;
+		struct xhci_ring ring;
+		struct xhci_trb  seg[16] __aligned(64);
+	} ep_ctx[4]; /* covers every non-EP0 DCI up to XHCI_MAX_DCI (2..5) at once */
+	/** Highest DCI configured so far (drives the slot context's
+	 * ContextEntries field on each Configure Endpoint command). */
+	uint32_t max_dci_configured;
 	/**
 	 * First-light snapshot: the xHCI capability registers read after the DWC3
 	 * host-mode init + xHCI HCRST.  Populated by uhc_xhci_alif_first_light() so a
@@ -567,26 +658,43 @@ static int uhc_xhci_alif_init(const struct device *dev)
 /* Consume the next event of `want` type from the event ring, advancing the
  * dequeue pointer + ERDP (spec §4.9.4).  Any other event types seen first are
  * consumed and skipped (e.g. a Port Status Change before a Transfer Event).
- * Returns the completion code (0 on timeout); *slot_id gets the event's Slot ID. */
-static uint8_t uhc_xhci_alif_wait_event(struct uhc_xhci_alif_data *data,
-					uint8_t want, uint8_t *slot_id)
+ * Returns the completion code (0 on timeout); *slot_id gets the event's Slot
+ * ID, *residual (if non-NULL) gets the Transfer Event's untransferred byte
+ * count (0 for a full transfer / non-Transfer-Event).
+ *
+ * Brackets the poll with irq_disable(irqn)/irq_enable(irqn): the same
+ * event_deq/event_cycle consumer state is shared with uhc_xhci_alif_isr(),
+ * which runs once IMAN.IE is armed at the end of *_enable() (for hotplug
+ * notification).  Masking the USB IRQ for the poll's duration is the
+ * critical section -- cheap here since M55 is single-core, this IRQ line is
+ * dedicated to the controller, and the mask window is the same bounded
+ * timeout already in effect. */
+static uint8_t uhc_xhci_alif_wait_event(struct uhc_xhci_alif_data *data, unsigned int irqn,
+					uint8_t want, uint8_t *slot_id, uint32_t *residual)
 {
 	const uintptr_t ir = data->rt_base + XHCI_IR0;
 	int timeout = 500000;
+	uint8_t cc = 0u;
 
 	if (slot_id != NULL) {
 		*slot_id = 0u;
 	}
+	if (residual != NULL) {
+		*residual = 0u;
+	}
+	irq_disable(irqn);
 	while (timeout-- > 0) {
 		volatile struct xhci_trb *evt = &data->event_ring_seg[data->event_deq];
 
+		xhci_alif_invd(evt, sizeof(*evt));
 		if ((evt->control & XHCI_TRB_CYCLE) != (uint32_t)data->event_cycle) {
 			k_busy_wait(1);
 			continue;
 		}
 		uint8_t etype = XHCI_TRB_GET_TYPE(evt->control);
-		uint8_t cc = XHCI_TRB_GET_CC(evt->status);
+		uint8_t got_cc = XHCI_TRB_GET_CC(evt->status);
 		uint8_t slot = XHCI_TRB_GET_SLOT(evt->control);
+		uint32_t resid = XHCI_TRB_GET_RESIDUAL(evt->status);
 
 		data->event_deq++;
 		if (data->event_deq >= ARRAY_SIZE(data->event_ring_seg)) {
@@ -601,19 +709,25 @@ static uint8_t uhc_xhci_alif_wait_event(struct uhc_xhci_alif_data *data,
 			if (slot_id != NULL) {
 				*slot_id = slot;
 			}
-			return cc;
+			if (residual != NULL) {
+				*residual = resid;
+			}
+			cc = got_cc;
+			break;
 		}
 	}
-	return 0u;
+	irq_enable(irqn);
+	return cc;
 }
 
 /* Enqueue a command TRB, ring DB[0], wait for its Command Completion Event. */
-static uint8_t uhc_xhci_alif_submit_cmd(struct uhc_xhci_alif_data *data,
+static uint8_t uhc_xhci_alif_submit_cmd(struct uhc_xhci_alif_data *data, unsigned int irqn,
 					const struct xhci_trb *cmd, uint8_t *slot_id)
 {
 	xhci_ring_enqueue(&data->cmd_ring, cmd);
+	xhci_alif_flush(data->cmd_ring_seg, sizeof(data->cmd_ring_seg));
 	sys_write32(0u, data->db_base); /* DB[0] = command doorbell */
-	return uhc_xhci_alif_wait_event(data, XHCI_TRB_TYPE_CMD_COMPLETION, slot_id);
+	return uhc_xhci_alif_wait_event(data, irqn, XHCI_TRB_TYPE_CMD_COMPLETION, slot_id, NULL);
 }
 
 /* Enumerate the device on root-hub port 0 (spec §4.3): reset the port, Address
@@ -621,7 +735,8 @@ static uint8_t uhc_xhci_alif_submit_cmd(struct uhc_xhci_alif_data *data,
  * control GET_DESCRIPTOR(device, 8) over EP0 -- the core of USB enumeration.
  * Records how far it got + the first descriptor bytes in fl.  No-op if no device
  * is attached (PORTSC.CCS=0). */
-static void uhc_xhci_alif_enumerate(struct uhc_xhci_alif_data *data, uintptr_t op)
+static void uhc_xhci_alif_enumerate(struct uhc_xhci_alif_data *data, uintptr_t op,
+				     unsigned int irqn)
 {
 	const uint8_t slot = (uint8_t)data->fl.slot_id;
 	uint32_t portsc;
@@ -697,6 +812,11 @@ static void uhc_xhci_alif_enumerate(struct uhc_xhci_alif_data *data, uintptr_t o
 	data->input_ctx[34] = (uint32_t)(ep0g & ~0xFu) | 1u; /* DCS=1 */
 	data->input_ctx[35] = (uint32_t)(ep0g >> 32);
 	data->dcbaa[slot] = xhci_l2g(data->device_ctx);
+	data->max_dci_configured = 1u; /* EP0 only so far */
+
+	xhci_alif_flush(data->input_ctx, sizeof(data->input_ctx));
+	xhci_alif_flush(data->device_ctx, sizeof(data->device_ctx));
+	xhci_alif_flush(data->dcbaa, sizeof(data->dcbaa));
 
 	/* 4. Address Device command. */
 	struct xhci_trb addr = {0};
@@ -705,7 +825,7 @@ static void uhc_xhci_alif_enumerate(struct uhc_xhci_alif_data *data, uintptr_t o
 	addr.param_lo = (uint32_t)ing;
 	addr.param_hi = (uint32_t)(ing >> 32);
 	addr.control = XHCI_TRB_TYPE(XHCI_TRB_TYPE_ADDRESS_DEVICE) | XHCI_SLOT_ID(slot);
-	data->fl.addr_cc = uhc_xhci_alif_submit_cmd(data, &addr, NULL);
+	data->fl.addr_cc = uhc_xhci_alif_submit_cmd(data, irqn, &addr, NULL);
 	if (data->fl.addr_cc != XHCI_CC_SUCCESS) {
 		return;
 	}
@@ -737,9 +857,12 @@ static void uhc_xhci_alif_enumerate(struct uhc_xhci_alif_data *data, uintptr_t o
 	sstage.control = XHCI_TRB_TYPE(XHCI_TRB_TYPE_STATUS) | XHCI_TRB_IOC;
 	xhci_ring_enqueue(&data->ep0, &sstage);
 
+	xhci_alif_flush(data->ep0_ring, sizeof(data->ep0_ring));
 	sys_write32(1u, data->db_base + (uint32_t)slot * 4u); /* DB[slot] EP0 = DCI 1 */
-	data->fl.xfer_cc = uhc_xhci_alif_wait_event(data, XHCI_TRB_TYPE_TRANSFER_EVENT, NULL);
+	data->fl.xfer_cc =
+		uhc_xhci_alif_wait_event(data, irqn, XHCI_TRB_TYPE_TRANSFER_EVENT, NULL, NULL);
 
+	xhci_alif_invd(data->descriptor_buf, sizeof(data->descriptor_buf));
 	data->fl.desc0 = sys_read32((uintptr_t)&data->descriptor_buf[0]);
 	data->fl.desc1 = sys_read32((uintptr_t)&data->descriptor_buf[4]);
 	if (data->fl.xfer_cc == XHCI_CC_SUCCESS) {
@@ -749,6 +872,7 @@ static void uhc_xhci_alif_enumerate(struct uhc_xhci_alif_data *data, uintptr_t o
 
 static int uhc_xhci_alif_enable(const struct device *dev)
 {
+	const struct uhc_xhci_alif_config *cfg = dev->config;
 	struct uhc_xhci_alif_data *data = dev->data;
 	const uintptr_t op = data->op_base;
 	const uintptr_t rt = data->rt_base;
@@ -760,6 +884,8 @@ static int uhc_xhci_alif_enable(const struct device *dev)
 	uint64_t dcbaa_g = xhci_l2g(data->dcbaa);
 	uint64_t cmdr_g = xhci_l2g(data->cmd_ring_seg);
 
+	xhci_alif_flush(data->dcbaa, sizeof(data->dcbaa));
+	xhci_alif_flush(data->cmd_ring_seg, sizeof(data->cmd_ring_seg));
 	sys_write32((uint32_t)(dcbaa_g & 0xFFFFFFC0u), op + XHCI_OP_DCBAAP_LO);
 	sys_write32((uint32_t)(dcbaa_g >> 32), op + XHCI_OP_DCBAAP_HI);
 	sys_write32((uint32_t)(cmdr_g & 0xFFFFFFC0u) | XHCI_CRCR_RCS, op + XHCI_OP_CRCR_LO);
@@ -776,6 +902,8 @@ static int uhc_xhci_alif_enable(const struct device *dev)
 	data->erst[0].base_hi = (uint32_t)(evtr_g >> 32);
 	data->erst[0].size = ARRAY_SIZE(data->event_ring_seg);
 	data->erst[0].rsvd = 0u;
+	xhci_alif_flush(data->event_ring_seg, sizeof(data->event_ring_seg));
+	xhci_alif_flush(data->erst, sizeof(data->erst));
 	sys_write32(1u, ir + XHCI_IR_ERSTSZ); /* 1 segment */
 	sys_write32((uint32_t)evtr_g, ir + XHCI_IR_ERDP_LO);
 	sys_write32((uint32_t)(evtr_g >> 32), ir + XHCI_IR_ERDP_HI);
@@ -802,7 +930,7 @@ static int uhc_xhci_alif_enable(const struct device *dev)
 	struct xhci_trb noop = {0};
 
 	noop.control = XHCI_TRB_TYPE(XHCI_TRB_TYPE_NOOP_CMD);
-	data->fl.noop_cc = uhc_xhci_alif_submit_cmd(data, &noop, NULL);
+	data->fl.noop_cc = uhc_xhci_alif_submit_cmd(data, cfg->irqn, &noop, NULL);
 
 	/* 5. Enable Slot command: a REAL command -- the xHC allocates a device slot
 	 *    and returns its Slot ID in the completion event (still no device needed;
@@ -811,7 +939,7 @@ static int uhc_xhci_alif_enable(const struct device *dev)
 	uint8_t slot_id = 0u;
 
 	en_slot.control = XHCI_TRB_TYPE(XHCI_TRB_TYPE_ENABLE_SLOT);
-	data->fl.slot_cc = uhc_xhci_alif_submit_cmd(data, &en_slot, &slot_id);
+	data->fl.slot_cc = uhc_xhci_alif_submit_cmd(data, cfg->irqn, &en_slot, &slot_id);
 	data->fl.slot_id = slot_id;
 
 	/* 6. Root-hub port: apply power (PORTSC.PP, bit 9) and snapshot the status
@@ -824,7 +952,7 @@ static int uhc_xhci_alif_enable(const struct device *dev)
 
 	/* 7. If a device is attached (PORTSC.CCS), enumerate it: port reset ->
 	 *    Address Device -> control GET_DESCRIPTOR over EP0. */
-	uhc_xhci_alif_enumerate(data, op);
+	uhc_xhci_alif_enumerate(data, op, cfg->irqn);
 
 	data->fl.run_usbsts = sys_read32(op + XHCI_OP_USBSTS);
 
@@ -834,6 +962,15 @@ static int uhc_xhci_alif_enable(const struct device *dev)
 		data->fl.enum_stage, data->fl.port_speed, data->fl.addr_cc,
 		data->fl.xfer_cc, data->fl.desc0, data->fl.desc1);
 
+	/* 8. Steady state: arm this interrupter (IMAN.IE) + the controller-level
+	 * interrupter enable (USBCMD.INTE) so a later connect/disconnect on an
+	 * otherwise-idle root port reaches uhc_xhci_alif_isr() instead of needing
+	 * a poller (the synchronous bring-up above intentionally ran with both
+	 * clear, so it never raced uhc_xhci_alif_isr() over the shared
+	 * event_deq/event_cycle consumer state -- see uhc_xhci_alif_wait_event()). */
+	sys_write32(sys_read32(ir) | XHCI_IMAN_IE, ir);
+	sys_write32(sys_read32(op + XHCI_OP_USBCMD) | XHCI_USBCMD_INTE, op + XHCI_OP_USBCMD);
+
 	/* Controller-level bring-up PASS = running + command/event ring proven (No-Op
 	 * + Enable Slot).  Enumeration (enum_stage 3) only completes with a device on
 	 * the port; report it separately in fl. */
@@ -841,91 +978,481 @@ static int uhc_xhci_alif_enable(const struct device *dev)
 		data->fl.slot_cc == XHCI_CC_SUCCESS && data->fl.slot_id != 0u) ? 0 : -EIO;
 }
 
+/* xHCI endpoint-context Endpoint Type values (spec Table 6-9). */
+#define XHCI_EP_TYPE_BULK_OUT 2u
+#define XHCI_EP_TYPE_CONTROL  4u
+#define XHCI_EP_TYPE_BULK_IN  6u
+#define XHCI_EP_TYPE_INT_OUT  3u
+#define XHCI_EP_TYPE_INT_IN   7u
+
+/* Map a USB endpoint address (bit7=dir, bits3:0=number) to its Device
+ * Context Index (spec §4.5.1 Table 4-5): EP0 (control) is always DCI 1;
+ * otherwise DCI = 2*EPNum + (IN ? 1 : 0). */
+static uint8_t xhci_dci_for_ep(uint8_t ep_addr)
+{
+	uint8_t num = USB_EP_GET_IDX(ep_addr);
+
+	if (num == 0u) {
+		return 1u;
+	}
+	return (uint8_t)(2u * num + (USB_EP_DIR_IS_IN(ep_addr) ? 1u : 0u));
+}
+
+/* Find the endpoint-ring slot already bound to `dci`, or configure a new one
+ * (Configure Endpoint Command, spec §4.6.6) if none exists yet.  Returns NULL
+ * if the endpoint pool is exhausted, the slot isn't addressed, or the
+ * command failed.
+ *
+ * ponytail: XHCI_MAX_DCI + ARRAY_SIZE(data->ep_ctx) bound the endpoints this
+ * driver can track per device to control (EP0) + 3 more -- enough for one
+ * bulk-only mass-storage interface (BOT: EP0 + one bulk OUT + one bulk IN).
+ * A device needing more concurrently-active endpoints needs both raised.
+ * UNVERIFIED ON SILICON: this whole command path (never bench-run). */
+static struct xhci_ring *uhc_xhci_alif_ep_ctx_get(struct uhc_xhci_alif_data *data,
+						   unsigned int irqn, uint8_t dci,
+						   uint32_t ep_type, uint16_t mps)
+{
+	uint8_t slot = (uint8_t)data->fl.slot_id;
+	size_t i, free_i = ARRAY_SIZE(data->ep_ctx);
+	uint64_t ring_g, ing;
+	uint32_t entries;
+	struct xhci_trb *link;
+	struct xhci_trb cfg_trb = {0};
+
+	if (slot == 0u || dci == 0u || dci > XHCI_MAX_DCI) {
+		return NULL;
+	}
+	for (i = 0; i < ARRAY_SIZE(data->ep_ctx); i++) {
+		if (data->ep_ctx[i].used && data->ep_ctx[i].dci == dci) {
+			return &data->ep_ctx[i].ring;
+		}
+		if (!data->ep_ctx[i].used && free_i == ARRAY_SIZE(data->ep_ctx)) {
+			free_i = i;
+		}
+	}
+	if (free_i == ARRAY_SIZE(data->ep_ctx)) {
+		return NULL; /* pool exhausted */
+	}
+
+	xhci_ring_init(&data->ep_ctx[free_i].ring, data->ep_ctx[free_i].seg,
+		       ARRAY_SIZE(data->ep_ctx[free_i].seg));
+	ring_g = xhci_l2g(data->ep_ctx[free_i].seg);
+	link = &data->ep_ctx[free_i].seg[ARRAY_SIZE(data->ep_ctx[free_i].seg) - 1u];
+	link->param_lo = (uint32_t)ring_g;
+	link->param_hi = (uint32_t)(ring_g >> 32);
+
+	/* New endpoint: Configure Endpoint (add flags A0|A(dci), an updated
+	 * slot ContextEntries, and the new EP's context) so the xHC accepts
+	 * transfers on it (spec §4.6.6). */
+	entries = (dci > data->max_dci_configured) ? dci : data->max_dci_configured;
+	memset(data->input_ctx, 0, sizeof(data->input_ctx));
+	data->input_ctx[1] = (1u << 0) | (1u << dci); /* Add flags: A0 (slot) | A(dci) */
+	xhci_build_slot_context(&data->input_ctx[16], 0u /* route: root-hub attached */,
+				 data->fl.port_speed ? data->fl.port_speed : 1u, entries);
+	data->input_ctx[17] = (1u << 16); /* root-hub port = 1 */
+	xhci_build_ep_context(&data->input_ctx[(1u + dci) * 16u], ep_type, mps, ring_g, 1);
+	xhci_alif_flush(data->input_ctx, sizeof(data->input_ctx));
+
+	ing = xhci_l2g(data->input_ctx);
+	cfg_trb.param_lo = (uint32_t)ing;
+	cfg_trb.param_hi = (uint32_t)(ing >> 32);
+	cfg_trb.control = XHCI_TRB_TYPE(XHCI_TRB_TYPE_CONFIGURE_ENDPOINT) | XHCI_SLOT_ID(slot);
+	if (uhc_xhci_alif_submit_cmd(data, irqn, &cfg_trb, NULL) != XHCI_CC_SUCCESS) {
+		return NULL;
+	}
+
+	data->max_dci_configured = entries;
+	data->ep_ctx[free_i].used = 1u;
+	data->ep_ctx[free_i].dci = dci;
+	return &data->ep_ctx[free_i].ring;
+}
+
+/* A control transfer over EP0 (DCI 1): Setup (immediate data) + an optional
+ * Data stage (direction from bmRequestType bit7) + Status (opposite
+ * direction, IOC set).  Reuses data->ep0/ep0_ring, already addressed by
+ * uhc_xhci_alif_enumerate() during *_enable() -- this driver supports one
+ * device per root port, addressed once at enable time. */
+static int uhc_xhci_alif_ep0_transfer(struct uhc_xhci_alif_data *data, unsigned int irqn,
+				       uint8_t slot, struct uhc_transfer *xfer)
+{
+	struct xhci_trb setup = {0};
+	struct xhci_trb sstage = {0};
+	bool data_in = (xfer->setup_pkt[0] & 0x80u) != 0u;
+	uint16_t wlen = (uint16_t)xfer->setup_pkt[6] | ((uint16_t)xfer->setup_pkt[7] << 8);
+	uint8_t cc;
+	uint32_t residual = 0u;
+
+	memcpy(&setup.param_lo, &xfer->setup_pkt[0], 4u);
+	memcpy(&setup.param_hi, &xfer->setup_pkt[4], 4u);
+	setup.status = 8u;
+	setup.control = XHCI_TRB_TYPE(XHCI_TRB_TYPE_SETUP) | XHCI_TRB_IDT |
+			(wlen == 0u ? 0u : (data_in ? XHCI_TRB_TRT_IN : (2u << 16)));
+	xhci_ring_enqueue(&data->ep0, &setup);
+
+	if (wlen != 0u && xfer->buf != NULL) {
+		struct xhci_trb dstage = {0};
+		uint64_t bufg = xhci_l2g(xfer->buf->data);
+
+		if (!data_in) {
+			xhci_alif_flush(xfer->buf->data, wlen);
+		}
+		dstage.param_lo = (uint32_t)bufg;
+		dstage.param_hi = (uint32_t)(bufg >> 32);
+		dstage.status = wlen;
+		dstage.control =
+			XHCI_TRB_TYPE(XHCI_TRB_TYPE_DATA) | (data_in ? XHCI_TRB_DIR_IN : 0u);
+		xhci_ring_enqueue(&data->ep0, &dstage);
+	}
+
+	sstage.control = XHCI_TRB_TYPE(XHCI_TRB_TYPE_STATUS) | XHCI_TRB_IOC |
+			 ((wlen != 0u && data_in) ? 0u : XHCI_TRB_DIR_IN);
+	xhci_ring_enqueue(&data->ep0, &sstage);
+
+	xhci_alif_flush(data->ep0_ring, sizeof(data->ep0_ring));
+	sys_write32(1u, data->db_base + (uint32_t)slot * 4u); /* DB[slot] EP0 = DCI 1 */
+	cc = uhc_xhci_alif_wait_event(data, irqn, XHCI_TRB_TYPE_TRANSFER_EVENT, NULL, &residual);
+
+	if (wlen != 0u && xfer->buf != NULL && data_in) {
+		size_t got = (residual <= wlen) ? (size_t)(wlen - residual) : 0u;
+
+		xhci_alif_invd(xfer->buf->data, wlen);
+		(void)net_buf_add(xfer->buf, got);
+	}
+
+	if (cc == XHCI_CC_STALL) {
+		return -EPIPE;
+	}
+	return (cc == XHCI_CC_SUCCESS || cc == XHCI_CC_SHORT_PACKET) ? 0 : -EIO;
+}
+
+/* A bulk or interrupt transfer: one Normal TRB (IOC set) on the endpoint's
+ * own ring.  ponytail: one TRB per xfer, so one transfer is bounded to a
+ * single TRB's addressable length -- ample for the block sizes this driver's
+ * consumer (usb-host-storage) moves; a caller needing to chain multiple TRBs
+ * per transfer needs this extended. */
+static int uhc_xhci_alif_bulk_transfer(struct uhc_xhci_alif_data *data, unsigned int irqn,
+					uint8_t slot, uint8_t dci, struct xhci_ring *ring,
+					struct uhc_transfer *xfer)
+{
+	bool in = USB_EP_DIR_IS_IN(xfer->ep);
+	size_t len;
+	struct xhci_trb normal = {0};
+	uint64_t bufg;
+	uint8_t cc;
+	uint32_t residual = 0u;
+
+	if (xfer->buf == NULL) {
+		return -EINVAL;
+	}
+	len = in ? net_buf_tailroom(xfer->buf) : xfer->buf->len;
+	if (len == 0u) {
+		return -EINVAL;
+	}
+	bufg = xhci_l2g(in ? net_buf_tail(xfer->buf) : xfer->buf->data);
+	if (!in) {
+		xhci_alif_flush(xfer->buf->data, len);
+	}
+	normal.param_lo = (uint32_t)bufg;
+	normal.param_hi = (uint32_t)(bufg >> 32);
+	normal.status = (uint32_t)len;
+	normal.control = XHCI_TRB_TYPE(XHCI_TRB_TYPE_NORMAL) | XHCI_TRB_IOC;
+	xhci_ring_enqueue(ring, &normal);
+	xhci_alif_flush(ring->seg, (size_t)ring->size * sizeof(struct xhci_trb));
+
+	sys_write32(dci, data->db_base + (uint32_t)slot * 4u); /* DB[slot] target DCI */
+	cc = uhc_xhci_alif_wait_event(data, irqn, XHCI_TRB_TYPE_TRANSFER_EVENT, NULL, &residual);
+
+	if (in) {
+		size_t got = (residual <= len) ? (len - residual) : 0u;
+
+		xhci_alif_invd(net_buf_tail(xfer->buf), got);
+		(void)net_buf_add(xfer->buf, got);
+	}
+
+	if (cc == XHCI_CC_STALL) {
+		return -EPIPE;
+	}
+	return (cc == XHCI_CC_SUCCESS || cc == XHCI_CC_SHORT_PACKET) ? 0 : -EIO;
+}
+
+/* Event-ring ISR: reached only once *_enable() arms IMAN.IE (hotplug
+ * notification while otherwise idle -- see the comment there).  Drains every
+ * pending event; a Port Status Change reports connect/disconnect to the host
+ * stack.  Any other event type here means it arrived while nobody was
+ * synchronously polling for it -- logged and dropped, never blocked on,
+ * since uhc_xhci_alif_wait_event() masks this same IRQ for the duration of
+ * every synchronous wait and so cannot be the one racing this handler. */
+static void uhc_xhci_alif_isr(const struct device *dev)
+{
+	struct uhc_xhci_alif_data *data = dev->data;
+	const uintptr_t ir = data->rt_base + XHCI_IR0;
+
+	sys_write32(sys_read32(ir) | XHCI_IMAN_IP, ir); /* ack (write-1-clear) */
+
+	for (;;) {
+		volatile struct xhci_trb *evt = &data->event_ring_seg[data->event_deq];
+		uint8_t etype;
+		uint64_t erdp;
+
+		xhci_alif_invd(evt, sizeof(*evt));
+		if ((evt->control & XHCI_TRB_CYCLE) != (uint32_t)data->event_cycle) {
+			break; /* ring drained */
+		}
+		etype = XHCI_TRB_GET_TYPE(evt->control);
+
+		data->event_deq++;
+		if (data->event_deq >= ARRAY_SIZE(data->event_ring_seg)) {
+			data->event_deq = 0u;
+			data->event_cycle ^= 1u;
+		}
+		erdp = xhci_l2g(&data->event_ring_seg[data->event_deq]);
+		sys_write32((uint32_t)erdp | XHCI_ERDP_EHB, ir + XHCI_IR_ERDP_LO);
+		sys_write32((uint32_t)(erdp >> 32), ir + XHCI_IR_ERDP_HI);
+
+		if (etype == XHCI_TRB_TYPE_PORT_STATUS) {
+			uint32_t portsc = sys_read32(data->op_base + XHCI_OP_PORTSC(0));
+			enum uhc_event_type t;
+
+			if ((portsc & XHCI_PORTSC_CCS) != 0u) {
+				uint32_t speed = (portsc & XHCI_PORTSC_SPEED_MASK) >>
+						 XHCI_PORTSC_SPEED_SHIFT;
+
+				t = (speed == 3u) ? UHC_EVT_DEV_CONNECTED_HS
+				  : (speed == 1u) ? UHC_EVT_DEV_CONNECTED_FS
+						  : UHC_EVT_DEV_CONNECTED_LS;
+			} else {
+				t = UHC_EVT_DEV_REMOVED;
+			}
+			uhc_submit_event(dev, t, 0);
+		} else {
+			LOG_WRN("xhci isr: unclaimed event type %u", etype);
+		}
+	}
+}
+
 static int uhc_xhci_alif_disable(const struct device *dev)
 {
-	/* TODO(aen401-bench): clear USBCMD.R/S; mask IMAN.IE; disable IRQ. */
-	return 0;
+	struct uhc_xhci_alif_data *data = dev->data;
+	const uintptr_t op = data->op_base;
+	const uintptr_t ir = data->rt_base + XHCI_IR0;
+	int timeout;
+
+	/* Mask the interrupter first so a hotplug event mid-teardown can't
+	 * land on a controller we're about to stop, then clear USBCMD.R/S (+
+	 * INTE) and poll for USBSTS.HCH to set (spec §5.4.1). */
+	sys_write32(sys_read32(ir) & ~XHCI_IMAN_IE, ir);
+	sys_write32(sys_read32(op + XHCI_OP_USBCMD) & ~(XHCI_USBCMD_RS | XHCI_USBCMD_INTE),
+		    op + XHCI_OP_USBCMD);
+	for (timeout = 100000; timeout > 0; timeout--) {
+		if ((sys_read32(op + XHCI_OP_USBSTS) & XHCI_USBSTS_HCH) != 0u) {
+			break;
+		}
+		k_busy_wait(1);
+	}
+	return (timeout > 0) ? 0 : -ETIMEDOUT;
 }
 
 static int uhc_xhci_alif_shutdown(const struct device *dev)
 {
-	/* TODO(aen401-bench): USBCMD.HCRST; poll HCH; gate PHY clock. */
-	return 0;
+	int ret = uhc_xhci_alif_disable(dev);
+
+	/* Power down: re-assert the PHY POR and gate the peripheral clock --
+	 * the exact mirror of the two steps uhc_xhci_alif_first_light() took
+	 * to bring them up (CLKCTL_PER_MST, §"Grounded from the Alif DFP"
+	 * above). */
+	sys_set_bits(CLKCTL_USB_CTRL2, CLKCTL_USB_CTRL2_PHY_POR);
+	sys_clear_bits(CLKCTL_PERIPH_CLK_ENA, CLKCTL_PERIPH_CLK_ENA_USB);
+	return ret;
 }
 
 static int uhc_xhci_alif_bus_reset(const struct device *dev)
 {
-	/*
-	 * TODO(aen401-bench): USB bus (port) reset via PORTSC:
-	 *   1. Set PORTSC.PR (bit 4) on the target port.
-	 *   2. Poll until PORTSC.PRC (bit 21) is set (reset complete).
-	 *   3. Read PORTSC.SPD (bits 13:10) for negotiated speed.
-	 *   4. Emit uhc_submit_event(dev, UHC_EVT_RESETED, 0).
-	 */
-	return 0;
+	struct uhc_xhci_alif_data *data = dev->data;
+	const uintptr_t op = data->op_base;
+	uint32_t portsc = sys_read32(op + XHCI_OP_PORTSC(0));
+	int t;
+
+	sys_write32((portsc & ~XHCI_PORTSC_RW1C_MASK) | XHCI_PORTSC_PP | XHCI_PORTSC_PR,
+		    op + XHCI_OP_PORTSC(0));
+	for (t = 500000; t > 0; t--) {
+		portsc = sys_read32(op + XHCI_OP_PORTSC(0));
+		if ((portsc & XHCI_PORTSC_PRC) != 0u) {
+			break;
+		}
+		k_busy_wait(1);
+	}
+	if (t == 0) {
+		return -ETIMEDOUT;
+	}
+	sys_write32((portsc & ~XHCI_PORTSC_RW1C_MASK) | XHCI_PORTSC_PP | XHCI_PORTSC_PRC,
+		    op + XHCI_OP_PORTSC(0)); /* ack PRC only */
+	data->fl.port_speed = (portsc & XHCI_PORTSC_SPEED_MASK) >> XHCI_PORTSC_SPEED_SHIFT;
+	return uhc_submit_event(dev, UHC_EVT_RESETED, 0);
 }
 
 static int uhc_xhci_alif_sof_enable(const struct device *dev)
 {
 	/*
-	 * TODO(aen401-bench): xHCI schedules SOF automatically when
-	 * USBCMD.R/S is set and a port is enabled; no explicit SOF-enable
-	 * register in xHCI (unlike OHCI/UHCI/EHCI).  This op may be a no-op
-	 * or used to (re-)start the microframe counter after a suspend.
+	 * xHCI schedules SOF automatically once USBCMD.R/S is set and a port
+	 * is enabled -- there is no explicit SOF-enable register (unlike
+	 * OHCI/UHCI/EHCI).  Nothing to do: SOF generation resumes on its own
+	 * once bus_resume() re-requests U0.  This is the real, final answer
+	 * for this op, not a placeholder.
 	 */
+	ARG_UNUSED(dev);
 	return 0;
 }
 
 static int uhc_xhci_alif_bus_suspend(const struct device *dev)
 {
-	/*
-	 * TODO(aen401-bench): set PORTSC.U3 (LPM state) or PORTSC.PLS=U3
-	 * (bits 8:5 = 0b0011) to request suspend; poll PORTSC.PLC;
-	 * clear USBCMD.R/S; emit UHC_EVT_SUSPENDED.
-	 */
-	return 0;
+	uintptr_t op = ((struct uhc_xhci_alif_data *)dev->data)->op_base;
+	uint32_t portsc = sys_read32(op + XHCI_OP_PORTSC(0));
+	int t;
+
+	sys_write32((portsc & ~(XHCI_PORTSC_RW1C_MASK | XHCI_PORTSC_PLS_MASK)) | XHCI_PORTSC_PP |
+			    XHCI_PORTSC_PLS_U3 | XHCI_PORTSC_LWS,
+		    op + XHCI_OP_PORTSC(0));
+	for (t = 100000; t > 0; t--) {
+		portsc = sys_read32(op + XHCI_OP_PORTSC(0));
+		if ((portsc & XHCI_PORTSC_PLC) != 0u) {
+			break;
+		}
+		k_busy_wait(1);
+	}
+	if (t == 0) {
+		return -ETIMEDOUT;
+	}
+	sys_write32((portsc & ~XHCI_PORTSC_RW1C_MASK) | XHCI_PORTSC_PP | XHCI_PORTSC_PLC,
+		    op + XHCI_OP_PORTSC(0)); /* ack PLC */
+	return uhc_submit_event(dev, UHC_EVT_SUSPENDED, 0);
 }
 
 static int uhc_xhci_alif_bus_resume(const struct device *dev)
 {
-	/*
-	 * TODO(aen401-bench): set PORTSC.PLS = Resume (0b1111) to drive
-	 * K-state for >= 20 ms; then set PLS = U0 (0b0000); poll PLC;
-	 * re-set USBCMD.R/S; emit UHC_EVT_RESUMED.
-	 */
-	return 0;
+	uintptr_t op = ((struct uhc_xhci_alif_data *)dev->data)->op_base;
+	uint32_t portsc = sys_read32(op + XHCI_OP_PORTSC(0));
+	int t;
+
+	/* Drive Resume (K-state) for >= 20 ms (spec §4.19.1.2.4), then U0. */
+	sys_write32((portsc & ~(XHCI_PORTSC_RW1C_MASK | XHCI_PORTSC_PLS_MASK)) | XHCI_PORTSC_PP |
+			    XHCI_PORTSC_PLS_RESUME | XHCI_PORTSC_LWS,
+		    op + XHCI_OP_PORTSC(0));
+	k_busy_wait(20000);
+	portsc = sys_read32(op + XHCI_OP_PORTSC(0));
+	sys_write32((portsc & ~(XHCI_PORTSC_RW1C_MASK | XHCI_PORTSC_PLS_MASK)) | XHCI_PORTSC_PP |
+			    XHCI_PORTSC_PLS_U0 | XHCI_PORTSC_LWS,
+		    op + XHCI_OP_PORTSC(0));
+	for (t = 100000; t > 0; t--) {
+		portsc = sys_read32(op + XHCI_OP_PORTSC(0));
+		if ((portsc & XHCI_PORTSC_PLC) != 0u) {
+			break;
+		}
+		k_busy_wait(1);
+	}
+	if (t == 0) {
+		return -ETIMEDOUT;
+	}
+	sys_write32((portsc & ~XHCI_PORTSC_RW1C_MASK) | XHCI_PORTSC_PP | XHCI_PORTSC_PLC,
+		    op + XHCI_OP_PORTSC(0)); /* ack PLC */
+	return uhc_submit_event(dev, UHC_EVT_RESUMED, 0);
 }
 
 static int uhc_xhci_alif_ep_enqueue(const struct device *dev,
 				     struct uhc_transfer *const xfer)
 {
-	/*
-	 * TODO(aen401-bench): map the transfer to a slot/endpoint context and
-	 * enqueue TRBs on the endpoint transfer ring:
-	 *   Control: Setup TRB (type 2) + Data TRB (type 3) + Status TRB (4).
-	 *   Bulk/Int: Normal TRBs (type 1) with IOC set on the last one.
-	 *   Ring the doorbell: DB[slot] with endpoint target (ep_ctx index).
-	 *   Completion arrives as Transfer Event TRB in the event ring ISR;
-	 *   call uhc_xfer_return(dev, xfer, err) from the event handler.
-	 *   Slot/device-context setup (Enable Slot + Address Device commands)
-	 *   must precede the first transfer on a new device.
-	 */
-	ARG_UNUSED(xfer);
-	return -ENOTSUP;
+	const struct uhc_xhci_alif_config *cfg = dev->config;
+	struct uhc_xhci_alif_data *data = dev->data;
+	uint8_t slot = (uint8_t)data->fl.slot_id;
+	uint8_t dci = xhci_dci_for_ep(xfer->ep);
+	int err;
+
+	if (slot == 0u) {
+		return -ENODEV; /* no device was addressed during *_enable() */
+	}
+	uhc_xfer_append(dev, xfer);
+
+	if (dci == 1u) {
+		/*
+		 * SET_ADDRESS is already implicit in the Address Device
+		 * Command *_enable() issued (spec §4.6.5) -- do not re-send
+		 * it on the wire, which would re-address an already-addressed
+		 * device.  UNVERIFIED: whether the Zephyr host stack's own
+		 * enumeration sequence ever routes a SET_ADDRESS through
+		 * ep_enqueue given this driver's Address-Device-in-enable()
+		 * design has not been exercised against a live usbh/class-
+		 * driver stack.
+		 */
+		if (xfer->setup_pkt[1] == USB_SREQ_SET_ADDRESS) {
+			uhc_xfer_return(dev, xfer, 0);
+			return 0;
+		}
+		err = uhc_xhci_alif_ep0_transfer(data, cfg->irqn, slot, xfer);
+	} else {
+		struct xhci_ring *ring;
+		uint32_t ep_type;
+
+		switch (xfer->type) {
+		case USB_EP_TYPE_BULK:
+			ep_type = USB_EP_DIR_IS_IN(xfer->ep) ? XHCI_EP_TYPE_BULK_IN
+							      : XHCI_EP_TYPE_BULK_OUT;
+			break;
+		case USB_EP_TYPE_INTERRUPT:
+			ep_type = USB_EP_DIR_IS_IN(xfer->ep) ? XHCI_EP_TYPE_INT_IN
+							      : XHCI_EP_TYPE_INT_OUT;
+			break;
+		default:
+			uhc_xfer_return(dev, xfer, -ENOTSUP); /* isochronous: out of scope */
+			return 0;
+		}
+
+		ring = uhc_xhci_alif_ep_ctx_get(data, cfg->irqn, dci, ep_type, xfer->mps);
+		if (ring == NULL) {
+			uhc_xfer_return(dev, xfer, -ENOMEM);
+			return 0;
+		}
+		err = uhc_xhci_alif_bulk_transfer(data, cfg->irqn, slot, dci, ring, xfer);
+	}
+
+	uhc_xfer_return(dev, xfer, err);
+	return 0;
 }
 
 static int uhc_xhci_alif_ep_dequeue(const struct device *dev,
 				     struct uhc_transfer *const xfer)
 {
+	const struct uhc_xhci_alif_config *cfg = dev->config;
+	struct uhc_xhci_alif_data *data = dev->data;
+	uint8_t slot = (uint8_t)data->fl.slot_id;
+	uint8_t dci = xhci_dci_for_ep(xfer->ep);
+	struct xhci_trb stop = {0};
+
+	if (slot == 0u) {
+		return -ENODEV;
+	}
 	/*
-	 * TODO(aen401-bench): issue a Stop Endpoint command (via the command
-	 * ring); wait for Command Completion Event TRB; then dequeue the TRB
-	 * from the transfer ring and call uhc_xfer_return(dev, xfer,
-	 * -ECONNABORTED).  Use the Set TR Dequeue Pointer command to reset
-	 * the ring dequeue pointer.
+	 * Best-effort: ep_enqueue() above is synchronous (it blocks until the
+	 * transfer's Transfer Event arrives, then returns), so by the time
+	 * ep_dequeue() could run on another thread the transfer has either
+	 * already completed (xfer->queued is already clear -- nothing to do,
+	 * checked below) or is genuinely mid-flight on the hardware with no
+	 * software-side queue entry left to remove.  Stop Endpoint halts
+	 * whatever the xHC is doing on this DCI's ring (spec §4.6.9); the
+	 * transfer is then reported aborted.  UNVERIFIED ON SILICON: this
+	 * whole command path, and whether Stop Endpoint on an idle endpoint
+	 * is accepted as SUCCESS (spec says it should be).  Also NOT
+	 * reissuing Set TR Dequeue Pointer afterwards -- if the xHC actually
+	 * stopped mid-ring, the next transfer on this endpoint could start
+	 * from a stale software dequeue assumption; add that command if a
+	 * dequeue-while-truly-in-flight case turns out to matter in practice.
 	 */
-	ARG_UNUSED(xfer);
-	return -ENOTSUP;
+	stop.control = XHCI_TRB_TYPE(XHCI_TRB_TYPE_STOP_ENDPOINT) | XHCI_SLOT_ID(slot) |
+		       XHCI_EP_ID(dci);
+	(void)uhc_xhci_alif_submit_cmd(data, cfg->irqn, &stop, NULL);
+
+	if (xfer->queued) {
+		uhc_xfer_return(dev, xfer, -ECONNABORTED);
+	}
+	return 0;
 }
 
 /* ---------------------------------------------------------------------------
@@ -955,6 +1482,7 @@ static const struct uhc_api uhc_xhci_alif_api = {
 
 static int uhc_xhci_alif_driver_init(const struct device *dev)
 {
+	const struct uhc_xhci_alif_config *cfg = dev->config;
 	struct uhc_xhci_alif_data *data = dev->data;
 
 	/* Initialize the UHC subsystem mutex (required before any API call).
@@ -962,31 +1490,27 @@ static int uhc_xhci_alif_driver_init(const struct device *dev)
 	 * uhc_lock_internal / uhc_unlock_internal is valid. */
 	k_mutex_init(&data->common.mutex);
 
-	/* TODO(aen401-bench): connect the SoC IRQ:
-	 *   const struct uhc_xhci_alif_config *cfg = dev->config;
-	 *   cfg->irq_config();
-	 * The IRQ handler (not yet written) will drain the xHCI event ring
-	 * and dispatch Transfer/Command-Completion/Port-SC-Change events. */
+	/* Connect + enable the SoC IRQ (IRQ 101, DFP soc.h USB_IRQ_IRQn) at the
+	 * NVIC now.  The controller-side gate is IMAN.IE/USBCMD.INTE, armed
+	 * only once *_enable() finishes its synchronous bring-up (see the
+	 * comment there) -- until then this fires for nothing, since the
+	 * interrupter itself never asserts. */
+	cfg->irq_config();
 	return 0;
 }
 
 #define UHC_XHCI_ALIF_INIT(n)                                                 \
 	static void uhc_xhci_alif_irq_config_##n(void)                        \
 	{                                                                      \
-		/*                                                             \
-		 * TODO(aen401-bench): connect and enable the USB IRQ:        \
-		 *   IRQ_CONNECT(DT_INST_IRQN(n),                             \
-		 *               DT_INST_IRQ(n, priority),                    \
-		 *               uhc_xhci_alif_isr,                           \
-		 *               DEVICE_DT_INST_GET(n), 0);                   \
-		 *   irq_enable(DT_INST_IRQN(n));                             \
-		 * IRQ 101 confirmed from DFP soc.h USB_IRQ_IRQn = 101.       \
-		 */                                                            \
+		IRQ_CONNECT(DT_INST_IRQN(n), DT_INST_IRQ(n, priority),        \
+			    uhc_xhci_alif_isr, DEVICE_DT_INST_GET(n), 0);      \
+		irq_enable(DT_INST_IRQN(n));                                   \
 	}                                                                      \
                                                                                \
 	static const struct uhc_xhci_alif_config uhc_xhci_alif_cfg_##n = {    \
 		.base       = DT_INST_REG_ADDR(n),                            \
 		.irq_config = uhc_xhci_alif_irq_config_##n,                   \
+		.irqn       = DT_INST_IRQN(n),                                \
 	};                                                                     \
                                                                                \
 	static struct uhc_xhci_alif_data uhc_xhci_alif_data_##n;              \
