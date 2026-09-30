@@ -211,14 +211,16 @@ typedef struct {
  * responsibility unless @c cacheable = false", but the SDK gives the caller
  * nothing to discharge that responsibility with.  There is no clean, no
  * invalidate and no barrier helper anywhere on the public `alp_` surface,
- * and a tree-wide sweep of `src/` finds no `sys_cache_data_`, `arch_dcache_`
- * or `SCB_CleanDCache`-class call at all: every occurrence of the word
- * "cache" under `src/` is a dispatch-ops pointer cache, not CPU data-cache
- * maintenance.  So `cacheable = false` is the only setting with defined
- * behaviour on a shared-memory path.
+ * and the only cache-maintenance calls under `src/` are private to one
+ * backend: `sys_cache_data_flush_range()` / `sys_cache_data_flush_and_invd_range()`
+ * / `sys_cache_data_invd_range()` around the D/AVE-2D surfaces in
+ * `src/backends/gpu2d/alif_dave2d.c` (lines 285, 287, 292).  Nothing on the
+ * shared-memory path calls them, and no `arch_dcache_*` or `SCB_*DCache`
+ * call exists at all.  So `cacheable = false` is the only setting with
+ * defined behaviour on a shared-memory path.
  *
  * The same gap is wider than this one field.  Two AEN backends hand raw CPU
- * pointers straight to DMA masters and perform no maintenance either --
+ * pointers straight to DMA masters and contain no maintenance call --
  * `src/backends/jpeg/alif_hantro.c` (the JPEG AXI master) and
  * `src/backends/camera/alif_isp_pico.c`.  On a part where those masters are
  * not coherent with the M55 D-cache, that is a correctness problem
@@ -228,8 +230,8 @@ typedef struct {
  * to a DMA path without measuring on real silicon trades a visible,
  * documented gap for an intermittent corruption that reproduces once a
  * week.  Closing it needs an owner, bench time on E1M-AEN801, and a
- * measurement -- it is an architecture gap, not a sweep item.  Tracked as
- * follow-up work off issue #1645.
+ * measurement -- it is an architecture gap, not a sweep item.  Tracked in
+ * issue #2556.
  */
 
 /**
