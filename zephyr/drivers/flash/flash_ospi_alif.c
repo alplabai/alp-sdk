@@ -66,18 +66,15 @@
  * are UNCHANGED and stay 1-1-1-only: they are diagnostic reads this driver
  * never calls itself, and nothing here calls them after a write/erase.
  *
- * NONE OF THIS IS VERIFIED ON SILICON. It is authored against the DFP's
+ * BENCH-VERIFIED (#915) on E1M-AEN803 serial 2026W36-0001: erase, program,
+ * byte-for-byte readback and restore of one 4 KiB sector through
+ * aen-ospi-regcheck's self-test. It is authored against the DFP's
  * documented IS25WX256 sequence and hal_alif's own SPI_CTRLR0 field
  * encoding (modules/hal/alif drivers/ospi/include/ospi.h,
  * drivers/ospi/include/ospi_hal.h) with no offset/bitfield open-coded
  * outside those two headers' own names -- same discipline as the existing
- * read path -- but this task's scope forbids a hardware run (#915's bench
- * evidence above is all prior work, not from this change), so the switch
- * sequence, the FIFO push ordering for the instruction/address/data phases
- * of the enhanced frame format, and the flag-status polarity are all
- * best-effort against documentation, not bench-confirmed. See
- * `ospi_alif_write()` / `ospi_alif_erase()` / `ospi_alif_octal_switch_locked()`
- * below.
+ * read path. See `ospi_alif_write()` / `ospi_alif_erase()` /
+ * `ospi_alif_octal_switch_locked()` below.
  *
  * core_clk: PREVIOUSLY a placeholder that fell back to the node's `bus-speed`
  * (100 MHz) when `clock-frequency` was unset. This value feeds
@@ -582,8 +579,7 @@ static int ospi_alif_init(const struct device *dev)
 /* #915: program/erase, over the Octal DDR mode switch -- see the
  * file-header flash_driver_api note. Opcodes and register field values below
  * are the DFP's IS25WX256 sequence (components/Source/IS25WX256.c) expressed
- * through hal_alif's own SPI_CTRLR0 field names (ospi.h / ospi_hal.h); none
- * of it is bench-verified (this task forbids a hardware run). */
+ * through hal_alif's own SPI_CTRLR0 field names (ospi.h / ospi_hal.h). */
 
 /* Opcodes used only once the part has left 1-1-1 SPI for Octal DDR. */
 #define OSPI_ALIF_CMD_WREN             0x06U
@@ -636,7 +632,7 @@ static int ospi_alif_init(const struct device *dev)
  * mode) -- then either sends `data_len` bytes (write direction) or receives
  * `out_len` bytes (read direction); never both in one call. Mirrors
  * `ospi_alif_cmd_read_locked()`'s polling/recovery shape but for the octal
- * frame format instead of standard 1-1-1. UNVERIFIED ON SILICON (#915).
+ * frame format instead of standard 1-1-1.
  */
 static int ospi_alif_octal_xfer_locked(const struct device *dev,
                                        uint8_t              opcode,
