@@ -1,0 +1,55 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-npu-inference-alp-u55 overlay for the E1M-AEN803 (Ensemble E8, M55-HP).
+ * This is the HP-core twin of the M55-HE overlays: the SoC ALSO carries an
+ * Ethos-U55 paired with the M55-HP cluster (same DT node/address as the
+ * HE-paired one, ethosu55@400e1000, IRQ 55 -- core-LOCAL, each M55 only sees
+ * its own; see ensemble_e8_peripherals.dtsi), but the HP-paired U55 is
+ * 256-MAC (the HE-paired one is 128-MAC; see the board's prj.conf/.conf and
+ * CMakeLists.txt, which pick CONFIG_ETHOS_U55_256 + --accel ethos-u55-256 for
+ * this board target). The U85 (HG subsystem, ethosu85@49042000) is this
+ * board's default-enabled NPU; disable it so the U55-configured driver binds
+ * exactly one node.
+ *
+ * The core Ethos-U driver compiles for exactly ONE accelerator config (a
+ * single Kconfig `choice`), and binds every status="okay" arm,ethos-u node --
+ * so we ENABLE the U55 node and DISABLE the U85 node, or a U55-configured
+ * driver would try to init the U85 hardware (base 0x49042000) and fault. DMA
+ * placement is identical to the HE path: model + arena live in NPU-reachable
+ * global SRAM0 (@0x02000000, the SoC-dtsi sram0 node's linker region); the
+ * SDK's strong ethosu_address_remap / ethosu_config_select
+ * (src/backends/inference/ethos_u_aen.cpp) are variant-agnostic and route the
+ * SRAM0 accesses over the NPU's SRAM AXI port. CONFIG_DCACHE=n (prj.conf)
+ * keeps CPU + NPU coherent with no maintenance calls.
+ */
+
+/*
+ * global_base for hal_alif soc_memory_map.h local_to_global() -- the itcm/dtcm
+ * nodes' upstream bindings carry no global_base, so re-compatible them onto the
+ * alp-sdk alif,itcm/alif,dtcm bindings and set the E8 RTSS-HP global views
+ * (transcribed from the Apache-2.0 zephyr_alif fork ensemble_rtss_hp.dtsi):
+ * ITCM global_base = 0x50000000, DTCM global_base = 0x50800000.
+ */
+&itcm {
+	compatible = "alif,itcm";
+	global_base = <0x50000000>;
+};
+
+&dtcm {
+	compatible = "alif,dtcm";
+	global_base = <0x50800000>;
+};
+
+/* Run the U55 (M55-HP-paired) instead of the U85: enable the ethosu55 node
+ * (declared status="disabled" in the SoC peripherals dtsi) and disable the
+ * ethosu85 the generated board leaves okay, so the U55-configured Arm driver
+ * binds exactly one node -- the U55 at 0x400e1000. */
+&ethosu55 {
+	status = "okay";
+};
+
+&ethosu85 {
+	status = "disabled";
+};
