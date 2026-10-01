@@ -319,7 +319,7 @@ class LabgridPower(Power):
     def _lg(self, action: str) -> str:
         argv = [self._exe, "-p", self.place, "power", action]
         try:
-            r = self._runner(argv, capture_output=True, text=True, timeout=60)
+            r = self._runner(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
         except (OSError, subprocess.TimeoutExpired) as e:
             raise BenchError(f"{' '.join(argv)}: {e}") from e
         if r.returncode != 0:
@@ -424,7 +424,7 @@ class JLinkProbe(Probe):
                 "-CommanderScript", str(cmdfile),
             ]  # fmt: skip
             try:
-                r = self._runner(argv, capture_output=True, text=True, timeout=300)
+                r = self._runner(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=300)
             except (OSError, subprocess.TimeoutExpired) as e:
                 raise BenchError(f"J-Link {self.serial_no}: {e}") from e
         out = (r.stdout or "") + (r.stderr or "")
@@ -478,7 +478,7 @@ class ScriptProbe(Probe):
             *args,
         ]
         try:
-            r = self._runner(argv, capture_output=True, text=True, timeout=300)
+            r = self._runner(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=300)
         except (OSError, subprocess.TimeoutExpired) as e:
             raise BenchError(f"{' '.join(argv)}: {e}") from e
         if r.returncode != 0:

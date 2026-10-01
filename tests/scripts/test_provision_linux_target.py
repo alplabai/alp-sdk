@@ -100,6 +100,16 @@ def test_run_argv_and_check():
     assert t.run("false", check=False).rc == 1
 
 
+def test_ssh_children_never_consume_stdin():
+    seen = {}
+
+    def runner(argv, **kw):
+        seen.update(kw)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+    lt.LinuxTarget("unit", runner=runner).run("true")
+    assert seen["stdin"] is subprocess.DEVNULL    # a piped operator answer must reach the prompt
+
+
 def test_run_timeout_is_bench_error():
     def runner(argv, **kw):
         raise subprocess.TimeoutExpired(argv, 1)
