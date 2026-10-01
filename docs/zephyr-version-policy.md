@@ -14,7 +14,7 @@ upstream releases.**
 | Surface                              | Pinned to                | Where                                                                                |
 |--------------------------------------|--------------------------|--------------------------------------------------------------------------------------|
 | Zephyr release                       | **v4.4.0** (stable)      | [`metadata/bootstrap.json`](../metadata/bootstrap.json) (`zephyr.version` -- the bootstrap-facts single source of truth, issue #917), [`west.yml`](../west.yml) (manifest), [`.github/workflows/pr-twister.yml`](../.github/workflows/pr-twister.yml), [`.github/workflows/pr-tier-a-libraries.yml`](../.github/workflows/pr-tier-a-libraries.yml), [`.github/workflows/pr-getting-started-aen801.yml`](../.github/workflows/pr-getting-started-aen801.yml) (CI), [`.github/workflows/nightly-aen-hil.yml`](../.github/workflows/nightly-aen-hil.yml) (HIL), and the `Zephyr-vX.Y.Z` badge in [`README.md`](../README.md) |
-| Zephyr CI docker image               | `v0.27.4`                | [`.github/workflows/pr-twister.yml`](../.github/workflows/pr-twister.yml)             |
+| Zephyr CI docker image               | not used                 | [`.github/workflows/pr-twister.yml`](../.github/workflows/pr-twister.yml) installs the toolchain deps directly on the runner; the `zephyrprojectrtos/ci` image is deliberately skipped |
 | `hal_alif` Zephyr module             | Whatever ships with the pinned Zephyr | (we do **not** re-pin -- Zephyr's own west.yml owns this revision)         |
 
 All pins above move together when we bump.  Drift between them fails
@@ -61,7 +61,7 @@ Five reasons, in order of weight:
 3. **CI cost.**  Every Zephyr bump invalidates the `actions/cache`
    build artefacts under `~/zephyrproject` -- a clean rebuild adds
    ~5 min per PR.  Patch bumps stay within the cache key
-   (`zephyr-v4.4.0-${{ runner.os }}`); minor bumps blow it away
+   (`zephyr-v4.4.0-host-${{ runner.os }}`); minor bumps blow it away
    intentionally.
 4. **Customer support window.**  Per [`VERSIONS.md`](../VERSIONS.md),
    alp-sdk v1.0 carries a 24-month LTS commitment.  That commitment
@@ -90,8 +90,6 @@ When a new Zephyr LTS lands and we want to adopt it:
    - `.github/workflows/pr-getting-started-aen801.yml` &mdash; cache key
      (does **not** track the separate `ZEPHYR_SDK_VERSION` toolchain pin)
    - `.github/workflows/nightly-aen-hil.yml` &mdash; `--mr` arg
-   - `.github/workflows/pr-twister.yml`'s docker `image:` tag (the
-     Zephyr `ci:vX.Y.Z` image tracks the LTS line).
    - `README.md`'s `Zephyr-vX.Y.Z` badge
    - Run `python3 scripts/check_bootstrap_manifest.py` locally -- it fails
      loudly on any pin left behind.

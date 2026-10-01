@@ -4,9 +4,9 @@ This document describes the chain of trust from immutable ROM
 through to the application on E1M-AEN-family SoMs, plus the
 signing key lifecycle that makes it work.
 
-> **Status: v0.4-prep.**  Scaffolding lands in this revision --
-> the sysbuild config, dev-key generation script, and this
-> document.  Compile-verification gates on the real in-tree board
+> **Status: landed.**  The sysbuild config, the dev-key
+> generation script, and this document are in-tree.
+> Compile-verification gates on the real in-tree board
 > file (`alp_e1m_aen801_m55_he` / `alp_e1m_aen801_m55_hp`, under
 > [`zephyr/boards/alp/`](../zephyr/boards/alp/)).  Full HIL
 > secure-boot verification (signed boot, tampered-image rollback,
@@ -206,5 +206,5 @@ safety net for OTA.
   key generation.
 - [`docs/cc3501e-bridge.md`](cc3501e-bridge.md) -- the CC3501E
   Wi-Fi bridge's role in OTA delivery on AEN.
-- [`VERSIONS.md`](../VERSIONS.md) -- versioned roadmap; secure
-  boot / OTA shipped together in v0.4.
+- [`VERSIONS.md`](../VERSIONS.md) -- versioned roadmap; the
+  secure-boot / OTA scaffolding landed in the v0.4 cycle.

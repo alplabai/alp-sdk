@@ -87,10 +87,9 @@ AEN-first order inverted:
    HS200, USB-OVC, CA55-cluster watchdog, branded/reproducible
    firmware banners, and the hardened `alp-image-prod` /
    `alp` distro) boots the bench board from eMMC.
-2. **next** -- E1M-AEN801 bring-up.  Verifies the AEN-family
-   chip drivers (the on-module ones: act8760, da9292,
-   clk_5l35023b, etc.) + a representative sample of the §D.AI
-   chips (st7789, sh1106, the camera SCCB path).
+2. **done (2026-06)** -- E1M-AEN801 bring-up.  The on-silicon
+   bench campaign + per-subsystem results live in
+   [`docs/aen-bench-bringup.md`](aen-bench-bringup.md).
 3. **then** -- E1M-V2M101 (adds DEEPX DX-M1) and E1M-NX9101
    (adds Ethos-U65), bench-availability permitting.
 4. **v1.0** -- All four families verified.  `[UNTESTED]` tags

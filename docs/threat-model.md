@@ -146,7 +146,7 @@ CPU, dump RAM, reflash.
 - Production-side: lock the SWD interface via the SoC's
   debug-disable fuse + the secure-boot lock register.  See
   the per-SoM bring-up docs (e.g.
-  [`bring-up-v2n.md`](bring-up-v2n.md) "Production lock-down").
+  [`bring-up-v2n.md`](bring-up-v2n.md)).
 - Pre-production / dev builds: SWD open.  Customers should
   blow the lock fuse for production runs.
 
@@ -166,8 +166,8 @@ keys, or insert a backdoored vendor library.
 - Release tarballs ship SHA-256 + SHA-512 checksums per the
   `release.yml` workflow.
 - Release builds emit SLSA L3 provenance attestations per
-  Pillar 8 of `docs/v1.0-readiness.md` (L2 landed in Â§C.18, upgraded
-  to L3 in Â§C.27).
+  Pillar 8 of `docs/v1.0-readiness.md` (L2 landed in §C.18, upgraded
+  to L3 in §C.27).
 - `keys/.gitignore` excludes every `*.pem` file; only the
   generator script + README live in the keys dir.
 - Production signing key never leaves the OPTIGA secure NVM;
