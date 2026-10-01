@@ -39,3 +39,19 @@ first, up to three tries; markers are now plain `ALPB`/`ALPE`), and `put()`
 writes each chunk to its own file, md5-checks it on arrival and re-sends only the
 bad chunk. The discovered host is exported as `ALP_PROVISION_HOST` to the bench's
 probe wrapper.
+
+`record` now recovers every step's facts (not only the three flash steps) from the
+newest superseded run that has an entry for the step, when that run's
+`bundle_sha256` equals the current bundle and the step was done or skipped, so a
+unit provisioned across several tool revisions (even a test-only change) can reach
+SHIPPABLE without re-running everything; the `.md` notes each recovered step with
+its tool_rev and timestamp. A probe-satisfied `gd32_flash` also records
+`gd32_dp_id` (read-only IDCODE).
+
+`ship_check` now blocks a v2n-m1 (DEEPX) unit that lacks the DX-M1 firmware
+evidence `dxm1_npu_flash` records (`dxm1_fw_version`, `dxm1_fw_md5`,
+`dxm1_fw_uart_boot_md5`), so a blank DX-M1 is never SHIPPABLE; the v2n family is
+unaffected. `--only gd32_flash` discovers the host over the console when none is
+pinned (the probe wrapper gets `ALP_PROVISION_HOST`), and `eeprom_manifest`
+rediscovers the host after its cold cycle because the MAC change can bring a new
+DHCP address.

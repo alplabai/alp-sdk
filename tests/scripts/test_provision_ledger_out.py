@@ -66,6 +66,15 @@ def test_ship_check():
     assert lo.ship_check({**ok, "rootfs_bundle_version": "build-dir:deploy"}, CAT)
 
 
+def test_ship_check_requires_dxm1_firmware_for_the_deepx_family_only():
+    ok = {"eeprom_unique_id": "06", "uboot_version": "U", "disposition": "ship", "known_defects": "none"}
+    r = lo.ship_check(ok, CAT, "v2n-m1")
+    assert [x for x in r if "dxm1_" in x] == [f"missing {k} (DX-M1 firmware not flashed)" for k in lo.DXM1_SHIP_KEYS]
+    dx = {**ok, **{k: "x" for k in lo.DXM1_SHIP_KEYS}}
+    assert lo.ship_check(dx, CAT, "v2n-m1") == []
+    assert lo.ship_check(ok, CAT, "v2n") == [] and lo.ship_check(ok, CAT) == []
+
+
 def test_ship_check_blocks_only_when_the_image_did_not_release_the_gd32():
     ok = {"eeprom_unique_id": "06", "uboot_version": "U", "disposition": "ship", "known_defects": "none"}
     assert lo.ship_check({**ok, "act88760_gpio4_after_boot": "0x08"}, CAT) == []

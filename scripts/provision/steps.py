@@ -337,7 +337,7 @@ def _since(console, n: int) -> str:
 
 
 def boot_to_linux(ctx: Ctx, timeout: float = 240.0, need_ip: bool = True,
-                  resume_mark: int | None = None) -> str:
+                  resume_mark: int | None = None, rediscover: bool = False) -> str:
     """Cold cycle, let the unit autoboot to a login, log in, (re)discover the
     Linux target. Returns the whole boot text. Execute-mode only.
 
@@ -358,7 +358,7 @@ def boot_to_linux(ctx: Ctx, timeout: float = 240.0, need_ip: bool = True,
     ctx.boot_text = text
     lt.console_login(b.console, b.linux_user)
     try:
-        connect_linux(ctx, force=True)
+        connect_linux(ctx, force=True, rediscover=rediscover)
         if not need_ip:
             ctx.linux.run("true")
     except BenchError:
@@ -386,12 +386,14 @@ def cold_boot_phy_retry(ctx: Ctx, ev: dict) -> str:
     return text
 
 
-def connect_linux(ctx: Ctx, force: bool = False) -> None:
-    """Attach ctx.linux: bench.yaml linux.host, else discover over the console."""
+def connect_linux(ctx: Ctx, force: bool = False, rediscover: bool = False) -> None:
+    """Attach ctx.linux: bench.yaml linux.host, else discover over the console.
+    ``rediscover`` ignores a pinned host: DHCP may have handed a new address after
+    the MAC changed (eeprom_manifest)."""
     if ctx.linux is not None and not force:
         return
     b = ctx.need_bench()
-    host = b.linux_host or lt.discover_host(b.console)
+    host = lt.discover_host(b.console) if rediscover else (b.linux_host or lt.discover_host(b.console))
     if ctx.linux is not None and getattr(ctx.linux, "host", None) == host:
         return
     ctx.attach_linux(host)
@@ -979,7 +981,8 @@ class EepromManifest(Step):
                    lambda: lt.eeprom_write_pages(t, bus, 0, blob))
 
         def recheck():
-            boot_to_linux(ctx)
+            # the MAC just changed (CID- to serial-derived): DHCP may hand a new IP
+            boot_to_linux(ctx, rediscover=True)
             got = lt.eeprom_read(ctx.linux, bus, 0, lt.MANIFEST_LEN)
             if got != blob:
                 raise BenchError("manifest differs after the cold cycle")
@@ -1017,6 +1020,15 @@ class Gd32Flash(Step):
     def probe(self, ctx):
         if ctx.bench is None or ctx.bench.probe is None or ctx.gd32_fw is None:
             return Unknown("no probe or no --gd32-fw")
+        if (ctx.execute and ctx.linux is None and not ctx.bench.linux_host
+                and getattr(ctx.bench.probe, "env", None) is not None):
+            # --only gd32_flash starts past the step that attaches the Linux target;
+            # the probe wrapper needs ALP_PROVISION_HOST, so discover it over the console.
+            try:
+                lt.console_login(ctx.bench.console, ctx.bench.linux_user, timeout=20.0)
+                connect_linux(ctx)
+            except BenchError:
+                pass   # no shell / no IP: the probe runs without a host, as before
         try:
             dp = ctx.bench.probe.dp_id()
             if dp != GD32_DP_OK:
@@ -1028,7 +1040,7 @@ class Gd32Flash(Step):
         for p, _a, key in images:
             if ev[key] != _md5(p.read_bytes()):
                 return Unsatisfied(f"{p.name} not on the GD32")
-        return Satisfied({**ev, **self._fw_version(ctx)})
+        return Satisfied({**ev, "gd32_dp_id": f"0x{dp:08x}", **self._fw_version(ctx)})
 
     @staticmethod
     def _fw_version(ctx) -> dict[str, str]:
@@ -1452,16 +1464,18 @@ class Record(Step):
         # Steps finished in EARLIER invocations (--only/--from runs) left their facts
         # as evidence in the state file; this run's facts override them.
         facts: dict = {}
-        # A tool_rev-only change moves finished steps to ``superseded`` although the
-        # unit still carries the SAME bundle's bytes; a flash step finished there
-        # (same bundle_sha256) counts as done. A different bundle's flash does not.
-        flashed = {}
-        for n in FLASH_STEPS:
+        # A tool_rev change (even test-only) moves finished steps to ``superseded``
+        # although the unit still carries the SAME bundle's bytes; a step finished
+        # there (same bundle_sha256) counts as done. A different bundle's does not.
+        # Applies to every step, so a unit provisioned across several tool revisions
+        # keeps its facts.
+        recovered = {}
+        for n in STEP_NAMES:
             cur = ctx.state.get("steps", {}).get(n)
             if cur is not None:
                 # The current run's own entry decides; no fallback past a failed/running one.
                 if cur.get("status") in ("done", "skipped"):
-                    flashed[n] = ("", cur)
+                    recovered[n] = ("", cur)
                 continue
             # The NEWEST superseded group holding an entry for n decides: an older
             # same-bundle write was overwritten by whatever came after it.
@@ -1470,14 +1484,11 @@ class Record(Step):
                 continue
             old = g["steps"][n]
             if g.get("bundle_sha256") == ctx.state.get("bundle_sha256") and old.get("status") in ("done", "skipped"):
-                flashed[n] = (f" (flash step {n} from superseded run, tool_rev {str(g.get('tool_rev'))[:12]}, "
-                              f"{old.get('finished') or old.get('ts') or old.get('at') or 'time n/a'})", old)
-        for n, (_, old) in flashed.items():
+                recovered[n] = (f" (step {n} from superseded run, tool_rev {str(g.get('tool_rev'))[:12]}, "
+                                f"{old.get('finished') or old.get('ts') or old.get('at') or 'time n/a'})", old)
+        flashed = {n: v for n, v in recovered.items() if n in FLASH_STEPS}
+        for _, old in recovered.values():
             facts.update(old.get("evidence") or {})
-        for n in STEP_NAMES:
-            st = ctx.state.get("steps", {}).get(n, {})
-            if st.get("status") in ("done", "skipped"):
-                facts.update(st.get("evidence") or {})
         facts.update(ctx.facts)
         auto = {k: v for k, v in facts.items()
                 if (catalogue.get(k, {}).get("mode") == "auto" or k.startswith("test_")) and v != ""}
@@ -1501,9 +1512,9 @@ class Record(Step):
         changed = ctx.mutate(f"merge {len(would)} key(s) into {unit_yaml.name}: {', '.join(would)}",
                              lambda: ledger_out.merge_unit_yaml(unit_yaml, auto, catalogue, defaults))
         body = "\n".join(f"- `{k}`: {v}" for k, v in sorted(auto.items()))
-        for note, _ in flashed.values():
+        for note, _ in recovered.values():
             if note:
-                body += f"\n- bundle facts from{note}"
+                body += f"\n- facts from{note}"
         if legacy_defect:
             body += ("\n- `act88760_gpio4_defect` (legacy `yes`): informational only, no longer "
                      "ship-blocking; see `act88760_gpio4_workaround` / `act88760_gpio4_after_boot`")
@@ -1525,7 +1536,7 @@ class Record(Step):
             ctx.mutate("regenerate shipped-units.xlsx", regen)
         after = {**before, **{k: str(v) for k, v in auto.items() if catalogue.get(k, {}).get("mode") != "manual"},
                  **{k: v for k, v in defaults.items() if k not in before}}
-        blockers = ledger_out.ship_check(after, catalogue)
+        blockers = ledger_out.ship_check(after, catalogue, ctx.family)
         detail = f"{len(changed) if changed is not None else len(would)} key(s) " \
                  f"{'updated' if ctx.execute else 'would change'}; ship check: " + \
                  ("SHIPPABLE" if not blockers else "blocked: " + "; ".join(blockers))
@@ -1567,7 +1578,7 @@ class SecurePageLock(Step):
             bad.append(f"secure page differs from {staged.name}")
         unit = ledger_out.read_unit_yaml(ctx.unit_dir / f"{ctx.serial}.unit.yaml")
         catalogue = ledger_out.load_catalogue(ctx.ledger_root / "schema" / "v2n.keys.yaml")
-        bad += [f"ship check: {b}" for b in ledger_out.ship_check(unit, catalogue)]
+        bad += [f"ship check: {b}" for b in ledger_out.ship_check(unit, catalogue, ctx.family)]
         return bad
 
     def probe(self, ctx):

@@ -188,7 +188,7 @@ def ct_tools():
 def test_boot_to_linux_without_ip_leaves_linux_unset_when_allowed(tmp_path, monkeypatch):
     monkeypatch.setattr(steps.lt, "console_login", lambda c, u: None)
 
-    def no_ip(ctx, force=False):
+    def no_ip(ctx, force=False, **kw):
         raise BenchError("no inet address")
     monkeypatch.setattr(steps, "connect_linux", no_ip)
     con = FakeConsole([])

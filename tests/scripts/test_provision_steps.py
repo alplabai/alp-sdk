@@ -373,7 +373,8 @@ def _lock_ready(tmp_path, board, disposition="ship", done=True):
     (ctx.unit_dir / f"{SERIAL}.manifest.bin").write_bytes(bytes(board.array))
     (ctx.unit_dir / f"{SERIAL}.secure-page.staged.bin").write_bytes(bytes(board.page))
     (ctx.unit_dir / f"{SERIAL}.unit.yaml").write_text(
-        f"eeprom_unique_id: 00 11\ndisposition: {disposition}\n", encoding="utf-8")
+        f"eeprom_unique_id: 00 11\ndisposition: {disposition}\n"
+        "dxm1_fw_version: v\ndxm1_fw_md5: m\ndxm1_fw_uart_boot_md5: u\n", encoding="utf-8")
     if done:
         ctx.state = {"steps": {s: {"status": "done"} for s in ("secure_page", "cold_boot_test")}}
         ctx.state["steps"]["cold_boot_test"]["evidence"] = {"cold_boots_passed": "3/3"}
@@ -491,6 +492,30 @@ def test_eeprom_manifest_and_secure_page_execute(tmp_path):
     assert board.lock == 0xFD                                        # secure_page never locks
     page_writes = [c for c in board.commands if "w66@0x58" in c]
     assert len(page_writes) == 1 and page_writes[0].startswith("i2ctransfer -y 0 w66@0x58 0x00 0x00 ")
+
+
+def test_eeprom_manifest_rediscovers_a_pinned_host_after_the_mac_change(tmp_path, monkeypatch):
+    board = Board(xspi_bl2=BL2, xspi_fip=FIP)
+    board.host = "10.0.0.9"                       # the pre-manifest (CID-MAC) address
+    console = _login_console()                    # DHCP now answers 10.0.0.2
+    bench = _bench(console=console)
+    bench.linux_host = "10.0.0.9"
+    bench.power.on_hook = lambda: console.feed("NOTICE:  BL2: v2.10\n\ne1m login: ")
+    ctx = _ctx(tmp_path, bench=bench, linux=board, execute=True)
+    attached = []
+    monkeypatch.setattr(ctx, "attach_linux", lambda h: (attached.append(h), setattr(board, "host", h)))
+    res = steps.run_steps(ctx, only=["eeprom_manifest"])
+    assert _statuses(res)["eeprom_manifest"] == "done", [(r.name, r.detail) for r in res]
+    assert attached == ["10.0.0.2"]
+
+
+def test_gd32_probe_discovers_the_host_when_only_starts_at_gd32_flash(tmp_path):
+    fw = _gd32_fw(tmp_path)
+    probe = FakeProbe(memory={a: (fw / n).read_bytes() for n, a, _k in steps.GD32_IMAGES})
+    probe.env = {}
+    ctx = _ctx(tmp_path, bench=_bench(console=_login_console(), probe=probe), gd32_fw=fw, execute=True)
+    assert isinstance(steps.Gd32Flash().probe(ctx), steps.Satisfied)
+    assert probe.env == {"ALP_PROVISION_HOST": "10.0.0.2"}
 
 
 def test_eeprom_manifest_refuses_locked_or_foreign_array(tmp_path):
@@ -1120,6 +1145,47 @@ def test_record_current_failed_flash_blocks_the_superseded_fallback(tmp_path):
 def test_record_newest_superseded_same_bundle_failed_write_blocks_fallback(tmp_path):
     _no_bundle_facts(_record_after_supersession(
         tmp_path, None, groups=lambda g: [g("cur"), g("cur", "failed")]))
+
+
+def _record_multi_revision(tmp_path, old_sha):
+    ctx = _ctx(tmp_path, execute=True)
+    ctx.state = {
+        "bundle_sha256": "cur",
+        "steps": {"cold_boot_test": {"status": "done", "evidence": {"act88760_gpio4_after_boot": "0x08"}}},
+        "superseded": [{"bundle_sha256": old_sha, "tool_rev": "oldrev", "steps": {
+            "eeprom_manifest": {"status": "done", "at": "2026-09-30T20:42:45Z",
+                                "evidence": {"eeprom_unique_id": "ab12"}},
+            "secure_page": {"status": "done", "evidence": {"act88760_gpio4_otp": "0x88"}},
+            "gd32_flash": {"status": "skipped", "evidence": {"gd32_dp_id": "0x0be12477"}}}}]}
+    steps.run_steps(ctx, only=["record"])
+    u = ctx.unit_dir / f"{SERIAL}.unit.yaml"
+    return ctx, u.read_text(encoding="utf-8") if u.exists() else ""
+
+
+def test_record_takes_every_steps_facts_from_a_same_bundle_older_revision(tmp_path):
+    ctx, text = _record_multi_revision(tmp_path, "cur")
+    for want in ("eeprom_unique_id", "act88760_gpio4_otp", "gd32_dp_id", "act88760_gpio4_after_boot"):
+        assert f"{want}:" in text, text
+    assert "step eeprom_manifest from superseded run, tool_rev oldrev" in (
+        ctx.unit_dir / f"{SERIAL}.md").read_text(encoding="utf-8")
+    f = tmp_path / "w.unit.yaml"
+    f.write_text(text, encoding="utf-8")
+    # only the operator-set disposition may still block; no recorded fact is missing
+    assert [r for r in ledger_out.ship_check(ledger_out.read_unit_yaml(f), CATALOGUE["keys"])
+            if r.startswith("missing") and "disposition" not in r] == []
+
+
+def test_record_ignores_other_bundle_older_revision_for_non_flash_steps(tmp_path):
+    _, text = _record_multi_revision(tmp_path, "other")
+    assert "eeprom_unique_id" not in text and "act88760_gpio4_otp" not in text, text
+
+
+def test_probe_satisfied_gd32_flash_records_dp_id(tmp_path):
+    fw = _gd32_fw(tmp_path)
+    mem = {a: (fw / n).read_bytes() for n, a, _k in steps.GD32_IMAGES}
+    ctx = _ctx(tmp_path, bench=_bench(probe=FakeProbe(memory=mem)), gd32_fw=fw)
+    r = steps.Gd32Flash().probe(ctx)
+    assert isinstance(r, steps.Satisfied) and r.evidence["gd32_dp_id"] == "0x0be12477", r
 
 
 def test_record_superseded_build_dir_provenance_still_blocks_ship(tmp_path):

@@ -165,7 +165,9 @@ def _shippable_unit(tmp_path, failed_step):
     st = {"write_xspi": {"status": "failed" if failed_step else "done", "at": "2026-09-24T00:00:00Z"}}
     (d / f"{SERIAL}.state.json").write_text(json.dumps(
         {"schema": 1, "tool_rev": steps.tool_rev(), "steps": st}), encoding="utf-8")
-    (d / f"{SERIAL}.unit.yaml").write_text("eeprom_unique_id: 00 11\ndisposition: ship\n", encoding="utf-8")
+    (d / f"{SERIAL}.unit.yaml").write_text(
+        "eeprom_unique_id: 00 11\ndisposition: ship\n"
+        "dxm1_fw_version: v\ndxm1_fw_md5: m\ndxm1_fw_uart_boot_md5: u\n", encoding="utf-8")
     return _run("status", "--sku", SKU, "--serial", SERIAL, "--ledger-root", ledger, "--require-shippable")
 
 

@@ -253,7 +253,7 @@ def test_dsw1_emmc_insert_sd_then_boot_sd_linux_cycles_exactly_once(tmp_path, mo
     from .test_provision_steps import _bench, _ctx
 
     monkeypatch.setattr(lt, "console_login", lambda *a, **k: None)
-    monkeypatch.setattr(steps, "connect_linux", lambda ctx, force=False: (_ for _ in ()).throw(bench.BenchError("no ip")))
+    monkeypatch.setattr(steps, "connect_linux", lambda ctx, force=False, **kw: (_ for _ in ()).throw(bench.BenchError("no ip")))
     b = _bench(console=FakeConsole([]))
     b.power.on_hook = lambda: b.console.feed("Hit any key to stop autoboot: 3\r\nlogin: ")
     ctx = _ctx(tmp_path, bench=b, execute=True)
@@ -300,7 +300,7 @@ def _console_only_ctx(tmp_path, monkeypatch):
     monkeypatch.setattr(lt, "console_login", lambda *a, **k: None)
     monkeypatch.setattr(lt, "root_device", lambda t: "mmcblk1p2")
     monkeypatch.setattr(lt, "resolve_emmc", lambda t: "mmcblk0")
-    monkeypatch.setattr(steps, "connect_linux", lambda ctx, force=False: (_ for _ in ()).throw(bench.BenchError("no ip")))
+    monkeypatch.setattr(steps, "connect_linux", lambda ctx, force=False, **kw: (_ for _ in ()).throw(bench.BenchError("no ip")))
     monkeypatch.setattr(steps, "som_presence_problems", lambda ctx, t: [])
     monkeypatch.setattr(steps, "tier_gate", lambda ctx, mib: (SimpleNamespace(ok=True, detail=""), {}))
     b = _bench(console=FakeConsole([]))
