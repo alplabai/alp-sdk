@@ -8,7 +8,7 @@
  * The pattern this example shows
  * ==============================
  *
- * Two Cortex-M55 cores share a small region of cache-coherent
+ * Two Cortex-M55 cores share a small region of non-cached
  * SRAM + a hardware mailbox + a hardware semaphore.  An app on
  * the M55-HP (the "application" core) sends a payload to the
  * M55-HE (the "high-efficiency" peer) and waits for a reply.
@@ -111,8 +111,8 @@ int main(void)
 	}
 
 	/* Get a pointer view of the shared region.  Both cores see
-     * the same physical bytes; cache flush on the producer side
-     * is the backend's responsibility (cacheable=false above). */
+     * the same physical bytes; the region is non-cacheable
+     * (cacheable=false above), so no cache flush is needed. */
 	void  *shmem_base = NULL;
 	size_t shmem_size = 0u;
 	if (alp_shmem_view(shmem, &shmem_base, &shmem_size) != ALP_OK) {

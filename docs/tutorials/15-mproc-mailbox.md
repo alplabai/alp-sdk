@@ -55,7 +55,7 @@ Splitting work across cores buys:
   NPU-bound.
 
 The shape that makes this work: a hardware mailbox + a region
-of cache-coherent shared SRAM + a hardware semaphore.
+of non-cacheable shared SRAM + a hardware semaphore.
 
 ## 1. The three primitives
 
@@ -96,12 +96,14 @@ mailbox + put the actual bytes in shared SRAM.
 
 ### Shared memory (`alp_shmem_*`)
 
-A region of cache-coherent SRAM both cores can read/write.
+A region of non-cacheable SRAM both cores can read/write.
 @ref alp_shmem_view hands back the mapped base pointer + size;
 the caller reads and writes through that pointer directly
 (`memcpy`, struct stores).  Opening the region non-cacheable
-(`.cacheable = false`) lets the backend keep the two cores
-coherent without the caller issuing DSB / barrier instructions.
+(`.cacheable = false`, the only accepted value -- `true` is refused
+with `ALP_ERR_NOSUPPORT`, as the SDK has no cache-maintenance API yet)
+means no cache flush or invalidate is needed; ordering the payload
+stores before the mailbox doorbell is up to the mbox driver.
 
 ```c
 alp_shmem_t *shmem = alp_shmem_open(&(alp_shmem_config_t){
