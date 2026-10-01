@@ -89,7 +89,7 @@ def test_twin_sku_gets_its_own_som_facts(tmp_path):
     """#2597: AEN803's populated OSPI memories reach an AEN801-declared app."""
     d = tmp_path / "alp-console"
     d.mkdir()
-    (d / "CMakeLists.txt").write_text(GEN._HOOK)
+    (d / "CMakeLists.txt").write_text(GEN._HOOK, encoding="utf-8")
     src = _example("examples/peripheral-io/alp-console")
     case = next(c for c in CASES if c[0] == src)
     GEN.generate(d, case[1], case[2])
@@ -111,7 +111,7 @@ def test_identical_twin_fragment_writes_no_subdir(tmp_path, monkeypatch):
     case = next(c for c in CASES if c[0] == _example("examples/peripheral-io/alp-console"))
     d = tmp_path / "app"
     d.mkdir()
-    (d / "CMakeLists.txt").write_text(GEN._HOOK)
+    (d / "CMakeLists.txt").write_text(GEN._HOOK, encoding="utf-8")
     monkeypatch.setattr(GEN, "_slice_alp_conf", lambda *a: "same\n")
     GEN.generate(d, case[1], case[2])
     assert [p.name for p in (d / "generated").iterdir()] == ["alp.conf"]
