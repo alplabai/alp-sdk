@@ -12,10 +12,11 @@
  * This build keeps the software tamper-evident tier registered (priority 10)
  * but forbids the dispatcher from ever binding it. A stand-in HW_ENFORCED
  * backend (priority 20) plays the trusted owner; its ready() verdict models
- * the three real states: owner answers + firewall proven (ALP_OK), owner
- * absent or firewall unproven (ALP_ERR_NOSUPPORT), and a hard fault.
+ * the three real states: owner answers (ALP_OK), owner absent
+ * (ALP_ERR_NOSUPPORT), and a hard fault. The firewall is not modelled: it is
+ * asserted by the build, not checked at runtime.
  *
- * The property under test: with the requirement set, an absent or unproven
+ * The property under test: with the requirement set, an absent
  * owner makes alp_update_log_open() return NULL with ALP_ERR_NOSUPPORT --
  * it never silently hands the caller the software tier.
  */
@@ -75,8 +76,8 @@ ALP_BACKEND_REGISTER(update_log,
                          .probe       = NULL,
                      });
 
-/* Owner absent / firewall unproven: open() fails closed, no SW fallback. */
-ZTEST(alp_update_log_require_hw, test_open_fails_when_owner_unproven)
+/* Owner absent: open() fails closed, no SW fallback. */
+ZTEST(alp_update_log_require_hw, test_open_fails_when_owner_absent)
 {
 	g_owner_ready         = ALP_ERR_NOSUPPORT;
 	alp_update_log_t *log = alp_update_log_open();

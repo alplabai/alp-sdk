@@ -208,7 +208,6 @@ config ALP_SDK_UPDATE_LOG_AEN_M55_APP_IMMUTABLE_PROFILE
 	bool "Select the provisioned app-immutable Alif dual-M55 update-log profile"
 	default n
 	depends on ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT
-	depends on !ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROBE
 	select ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED
 	help
 	  Select the app-immutable profile for a board whose provisioning has
@@ -220,8 +219,12 @@ config ALP_SDK_UPDATE_LOG_AEN_M55_APP_IMMUTABLE_PROFILE
 	  derives ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROVEN, so the client may
 	  report ALP_UPDATE_LOG_HW_ENFORCED once the owner answers, and it
 	  selects ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED so an image built for
-	  this profile can never silently fall back to the software tier on a
-	  board that was not provisioned.
+	  this profile fails open() closed when the trusted owner is absent.
+
+	  The firewall itself is NOT checked at runtime: provisioning is
+	  asserted by this build option, and only the firewall probe (a
+	  separate negative-proof image) verifies it. Do not combine this
+	  with ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROBE (a build error).
 
 	  This option does not program the firewall. That policy is provisioned
 	  outside the public SDK by Alif SE/DEVICE configuration tooling; see

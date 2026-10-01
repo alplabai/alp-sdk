@@ -88,8 +88,9 @@ tests:
       - update_log
       - security
       - rtss-he
-    # The provisioned app-immutable profile (#111 P1): the profile conf must
-    # keep deriving CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROVEN, which
-    # scripts/bench/aen/flash-update-log-dual.sh greps for. Build-only: the
-    # property itself is bench-proven on a firewall-provisioned board.
+    # The provisioned app-immutable profile (#111 P1). The example's
+    # CMakeLists.txt fails the configure step if the profile does not derive
+    # CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROVEN (which
+    # scripts/bench/aen/flash-update-log-dual.sh greps for), so this build
+    # guards it. Build-only: the firewall itself is bench-proven.
     build_only: true

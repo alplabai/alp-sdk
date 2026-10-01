@@ -68,9 +68,9 @@ true:
 The profile is the one provisioning assertion. It derives
 `CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROVEN` (no longer settable by hand)
 and selects `CONFIG_ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED`, so a profile image
-cannot silently degrade to the software tier on an unprovisioned board. In this
-example the profile is chosen with `-DALP_AEN_UPDATE_LOG_FIREWALL_PROVEN=ON`,
-which layers `boards/alp_e1m_aen801_m55_he_firewall_proven.conf`. The profile
+cannot silently degrade to the software tier when the HP owner is absent. In this
+example the profile is chosen with
+`-DALP_AEN_UPDATE_LOG_FIREWALL_PROVEN=ON`, which layers `boards/alp_e1m_aen801_m55_he_firewall_proven.conf`. The profile
 does not program the firewall; it is the public build-time latch saying the
 SE/device firewall policy has already been provisioned and silicon-proven.
 
@@ -167,11 +167,15 @@ that prerequisite to a verified `HW_ENFORCED` deployment, using the helpers in
 6. **Confirm on the console** that the HE application prints
    `[update-log] assurance: HW_ENFORCED (secure tier)`.
 
-Rolling the same HE image onto a board that was *not* provisioned is safe: the
-profile still sets `REQUIRE_HW_ENFORCED`, so `alp_update_log_open()` returns
-`NULL` with `ALP_ERR_NOSUPPORT` instead of falling back to the software tier. The
-`SWD`-based readback cannot read the carved-out window on the HE debug port (see
-the notes above); use the SE `getmramdata` read for byte-level confirmation.
+The profile does not check the firewall at runtime: provisioning is asserted by
+the build, and `aen_ready()` only confirms that the HP owner answers. On a board
+that was *not* provisioned, a profile image still reports `HW_ENFORCED` as long
+as the owner runs. The profile fails closed only when the trusted owner is
+absent (`alp_update_log_open()` returns `NULL` with `ALP_ERR_NOSUPPORT` instead of
+falling back to the software tier). The step-2 negative probe is the only check
+that the firewall really blocks HE, so never skip it. The SWD-based readback
+cannot read the carved-out window on the HE debug port (see the notes above); use
+the SE `getmramdata` read for byte-level confirmation.
 
 ### Anti-rollback across a full reflash (#111)
 
@@ -307,7 +311,8 @@ For the dual-core AEN package, use a two-entry ATOC: HP is `M55_HP`
 `0x58000000`. HP then releases HE at runtime with the portable
 `alp_mproc_boot_core()` path and serves HE's update-log requests over MHU.
 The bench helper below builds that exact package. Keep the normal HE build
-fail-closed. Use the `-DALP_AEN_UPDATE_LOG_FIREWALL_PROVEN=ON` (app-immutable profile) build only after
+fail-closed. Use the app-immutable profile build
+(`-DALP_AEN_UPDATE_LOG_FIREWALL_PROVEN=ON`) only after
 the board has been provisioned so the MRAM log partition rejects HE writes.
 `--package-only` validates the app-only ATOC without writing MRAM.
 
