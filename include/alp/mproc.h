@@ -196,9 +196,10 @@ typedef struct alp_shmem alp_shmem_t;
 typedef struct {
 	const char *name;      /**< Region name shared across cores (DT-anchored). */
 	size_t      size;      /**< Required bytes; rounded up to MMU/MPU page. */
-	bool        cacheable; /**< false ⇒ allocate non-cacheable; required for
-                                 the simple "core A writes, core B reads"
-                                 pattern. */
+	bool        cacheable; /**< Must be false: only non-cacheable regions
+                                 are supported, with no cache maintenance
+                                 needed. true is refused: alp_shmem_open
+                                 returns NULL, ALP_ERR_NOSUPPORT. */
 } alp_shmem_config_t;
 
 /**
