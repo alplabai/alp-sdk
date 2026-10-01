@@ -30,7 +30,9 @@ reads per image: `HE_APP`, `HP_APP` and `A32_APP` each report
 `ALP_UPDATE_STATUS_CONFIRMED`, with version 0.1.0 / 1.0.0 / 0.1.0 and SHA-256
 digests `a38da2c7…`, `1020e3e3…` and `a0a083b1…`. Each digest is identical
 across reads and equal to the hash in that entry's signed content certificate
-(cross-checked against a full-MRAM dump). Hashing the 0x71100-byte `A32_APP`
-takes about 18 ms at 160 MHz. The call chain needs about 1 KiB of stack.
+(cross-checked against a full-MRAM dump). `BOOTLOAD` (`bafebc9c…`) also reads back
+CONFIRMED. Hashing the 0x71100-byte `A32_APP` measured 38,013,028 cycles
+(about 240 ms at 160 MHz, roughly 80 cycles per byte), so a boot-log append
+over a large image costs a noticeable fraction of a second. The call chain needs about 1 KiB of stack.
 One run with a 1 KiB main stack overflowed inside `sha256_transform`, so the
 Kconfig help now asks for at least 2 KiB.
