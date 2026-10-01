@@ -32,7 +32,7 @@ manifest-driven **top-level** `libraries:` selection.
 | `ros2`      | B    | humble     | Apache-2.0 | yocto     | Cortex-A; meta-ros2-humble layer ‡ |
 | `lwm2m`     | B    | 4.4.1      | Apache-2.0 | zephyr    | Zephyr (in-tree subsys) |
 | `coap`      | B    | 4.4.1      | Apache-2.0 | zephyr    | Zephyr (in-tree subsys) |
-| `aws-iot`   | B    | v3.1.5     | Apache-2.0 | zephyr    | Zephyr; west project pin § |
+| `aws-iot`   | B    | 202412.00     | MIT | zephyr    | Zephyr; west project pin § |
 | `azure-iot` | B    | 1.5.0      | MIT        | zephyr    | Zephyr; west project pin § |
 | `canopennode` | B  | dec12fa3f0d790cafa8414a4c2930ea71ab72ffd | Apache-2.0 | zephyr | Cortex-M; optional west pin; CAN controller |
 | `micropython` | B  | v1.24.1    | MIT        | zephyr    | Cortex-M; source pin; dedicated owner needed |
@@ -80,13 +80,16 @@ device-to-cloud story; all Tier B (recipe-only), split by grounding:
   entry). Unlike the micro-ROS flagship, neither generic CMake C SDK has an
   official upstream **Zephyr module.yml** or master Kconfig symbol, so
   Zephyr-side packaging/build glue remains a follow-up. The source pins are now
-  exact and reproducible: AWS `aws-iot-device-sdk-embedded-C` at `v3.1.5`
-  (Apache-2.0) and Azure `azure-sdk-for-c` at `1.5.0` (MIT). Each declares an
+  exact and reproducible: AWS `aws-iot-device-sdk-embedded-C` at `202412.00`
+  (MIT) and Azure `azure-sdk-for-c` at `1.5.0` (MIT). Each declares an
   **enable-by-presence** Zephyr section (`module:` naming the real upstream repo,
   `west:` carrying the exact project pin, **no** `kconfig:`) — no enable symbol
   is invented; emit renders the selection tag and `--emit west-libraries` emits
   concrete west project entries, with no `CONFIG_` line until packaging confirms
   a real symbol.
+  The same pins also sit in the repo's `west.yml` under the opt-in `extras-cloud`
+  group (off by default; `west update --group-filter +extras-cloud`), tier stays
+  B (no CI build lane).
 
 **The ADR 0018 industrial / scripting additions.** Three manifests close the
 remaining curation set without inventing capabilities or symbols:
@@ -178,7 +181,7 @@ integration:                   # at least one OS section required
     west:                      # optional exact west project pin when Zephyr does not import it
       name: aws-iot-device-sdk-embedded-C
       url: https://github.com/aws/aws-iot-device-sdk-embedded-C.git
-      revision: v3.1.5         # exact tag/SHA, never main/master
+      revision: "202412.00"         # exact tag/SHA, never main/master
       path: modules/lib/aws-iot-device-sdk-embedded-C
   yocto:                       # emitted into the slice's local.conf
     image_install: [lvgl]      # appended to IMAGE_INSTALL

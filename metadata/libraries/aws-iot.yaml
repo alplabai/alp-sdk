@@ -11,9 +11,17 @@
 #   nanopb-not-listed / open-amp / zcbor (+ hals + mcuboot); there is no
 #   aws / iot entry, and `ls $ZEPHYR_BASE/../modules/lib` has none.  The
 #   manifest therefore carries its own west project pin:
-#     https://github.com/aws/aws-iot-device-sdk-embedded-C.git @ v3.1.5
-#     (tag object 380929bbc27dfa2443892c2e96c62ba62cf09afd; peeled commit
-#      fea3abbb65e102dd03f1238b34eecf8da311daf0).
+#     https://github.com/aws/aws-iot-device-sdk-embedded-C.git @ 202412.00
+#     (annotated tag object 6d82c0be02db96c3df6da9e1295bb9e33dc006da; peeled
+#      commit da99638ec373c791a45557b0cd91fc20968d492d).
+#   202412.00 is the current LTS release.  Its coreMQTT / coreHTTP / coreJSON /
+#   corePKCS11 / backoffAlgorithm / device-shadow / jobs / device-defender /
+#   fleet-provisioning / SigV4 libraries are git SUBMODULES (.gitmodules).  The
+#   repo's west.yml project sets `submodules: true`, so `west update
+#   --group-filter +extras-cloud` initialises them.  The `west:` block below
+#   cannot carry that key, so a project entry emitted by `--emit west-libraries`
+#   must add `submodules: true` by hand.  One umbrella pin (not per-library
+#   west projects) keeps the pin identical to what AWS tests together.
 #   The AWS SDK is still a generic CMake C SDK with NO official upstream Zephyr
 #   module.yml or master Kconfig symbol, so packaging/build glue is a follow-up;
 #   the pin at least makes the source revision reproducible and lets
@@ -27,11 +35,10 @@
 # the selection tag with no CONFIG line until packaging confirms a real enable
 # symbol, if one exists.
 #
-# Version:  `v3.1.5` -- exact upstream release tag from
+# Version:  `202412.00` -- exact upstream LTS release tag from
 #   github.com/aws/aws-iot-device-sdk-embedded-C.
-# License:  Apache-2.0 -- cited from the upstream AWS IoT Device SDK for
-#   Embedded C project (Apache-2.0).  NOT verified from an in-tree LICENSE file,
-#   because the SDK is not in this checkout (not-in-tree-verified).
+# License:  MIT -- verified from the LICENSE blob at tag 202412.00 ("MIT License",
+#   Copyright Amazon.com, Inc.); not an in-tree file (SDK is not in this checkout).
 #
 # TLS note (bench-gated follow-up): the MQTT transport needs a TLS stack; the
 # workspace already pins mbedtls (west module `mbedtls`), the natural provider,
@@ -39,10 +46,10 @@
 # built here.
 schema_version: 1
 name: aws-iot
-description: "AWS IoT Device SDK for Embedded C -- MQTT / device-shadow / jobs client."
+description: "AWS IoT Device SDK for Embedded C -- MQTT / device-shadow / jobs client (202412.00 LTS umbrella)."
 tier: B
-version: "v3.1.5"
-license: Apache-2.0
+version: "202412.00"
+license: MIT
 
 requires:
   # Only the Zephyr integration path is expressible today (see header), so
@@ -60,5 +67,5 @@ integration:
     west:
       name: aws-iot-device-sdk-embedded-C
       url: https://github.com/aws/aws-iot-device-sdk-embedded-C.git
-      revision: v3.1.5
+      revision: "202412.00"
       path: modules/lib/aws-iot-device-sdk-embedded-C

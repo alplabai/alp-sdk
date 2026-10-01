@@ -76,7 +76,7 @@ class TestWestLibrariesEmit(unittest.TestCase):
             out = rv.stdout
             self.assertIn("name: aws-iot-device-sdk-embedded-C", out)
             self.assertIn("url: https://github.com/aws/aws-iot-device-sdk-embedded-C.git", out)
-            self.assertIn("revision: v3.1.5", out)
+            self.assertIn("revision: 202412.00", out)
             self.assertIn("path: modules/lib/aws-iot-device-sdk-embedded-C", out)
             self.assertIn("name: azure-sdk-for-c", out)
             self.assertIn("url: https://github.com/Azure/azure-sdk-for-c.git", out)
