@@ -26,6 +26,7 @@ struct fake {
 struct fake_anchor {
 	uint64_t floor;
 	bool     fail_advance; /* inject: crash after the counter, before the anchor */
+	bool     fail_read;
 };
 
 static int fs_find(struct fake *f, const char *key)
@@ -82,6 +83,7 @@ static alp_status_t fc_inc(void *c, uint32_t id, uint64_t *v)
 }
 static alp_status_t fa_read(void *c, uint64_t *floor)
 {
+	if (((struct fake_anchor *)c)->fail_read) return ALP_ERR_NOT_READY;
 	*floor = ((struct fake_anchor *)c)->floor;
 	return ALP_OK;
 }
@@ -214,4 +216,102 @@ ZTEST(alp_update_log_anchor, test_no_anchor_behaviour_unchanged)
 	memset(&r.f, 0, sizeof(r.f));
 	zassert_equal(ulog_engine_verify(&r.s, &r.c, &v, &bad), ALP_OK);
 	zassert_equal(v, ALP_UPDATE_LOG_VERIFY_OK);
+}
+
+/* Review item 1: a rewound store must not accept appends (seq reuse), or a
+ * later count climbing past the floor would erase the rollback evidence. */
+ZTEST(alp_update_log_anchor, test_append_refused_on_rewound_store)
+{
+	struct rig r;
+	rig_init(&r);
+	for (int i = 0; i < 4; i++)
+		zassert_equal(add(&r, i), ALP_OK);
+	memset(&r.f, 0, sizeof(r.f)); /* reflash: floor 4, store 0 */
+	for (int i = 0; i < 6; i++)
+		zassert_equal(add(&r, i), ALP_ERR_IO, "append must refuse, not reuse seqs");
+	zassert_equal(r.f.counter, 0);
+	zassert_equal(r.a.floor, 4);
+	zassert_equal(vfy(&r, true), ALP_UPDATE_LOG_VERIFY_ROLLED_BACK);
+}
+
+ZTEST(alp_update_log_anchor, test_anchor_read_failure_propagates_status)
+{
+	struct rig r;
+	rig_init(&r);
+	zassert_equal(add(&r, 0), ALP_OK);
+	r.a.fail_read = true;
+	alp_update_log_verdict_t v;
+	uint64_t                 bad;
+	zassert_equal(ulog_engine_verify_anchored(&r.s, &r.c, &r.an, &v, &bad), ALP_ERR_NOT_READY);
+	zassert_equal(add(&r, 1), ALP_ERR_NOT_READY);
+	zassert_equal(r.f.counter, 1, "failed anchor read must not commit");
+}
+
+ZTEST(alp_update_log_anchor, test_null_callbacks_rejected_before_commit)
+{
+	struct rig r;
+	rig_init(&r);
+	alp_update_log_verdict_t v;
+	uint64_t                 bad;
+	r.an.advance = NULL;
+	zassert_equal(add(&r, 0), ALP_ERR_INVAL);
+	zassert_equal(ulog_engine_verify_anchored(&r.s, &r.c, &r.an, &v, &bad), ALP_ERR_INVAL);
+	zassert_equal(r.f.counter, 0);
+	zassert_equal(fs_find(&r.f, "ulog.0"), -1, "nothing committed");
+	r.an.advance = fa_advance;
+	r.an.read    = NULL;
+	zassert_equal(add(&r, 0), ALP_ERR_INVAL);
+	zassert_equal(r.f.counter, 0);
+}
+
+ZTEST(alp_update_log_anchor, test_advance_is_max_only)
+{
+	struct fake_anchor a = { .floor = 5 };
+	zassert_equal(fa_advance(&a, 3), ALP_OK);
+	zassert_equal(a.floor, 5, "a lower advance must not lower the floor");
+	zassert_equal(fa_advance(&a, 7), ALP_OK);
+	zassert_equal(a.floor, 7);
+}
+
+/* Double failed advance (two crashes in a row): the second append is refused
+ * while the floor cannot be levelled, so the lag stays one entry. */
+ZTEST(alp_update_log_anchor, test_double_lag_bounded_and_healed)
+{
+	struct rig r;
+	rig_init(&r);
+	zassert_equal(add(&r, 0), ALP_OK);
+	r.a.fail_advance = true;
+	zassert_equal(add(&r, 1), ALP_ERR_IO); /* committed, floor 1, count 2 */
+	zassert_equal(add(&r, 2), ALP_ERR_IO); /* recover's sync fails: refused pre-commit */
+	zassert_equal(r.f.counter, 2, "no entry may be appended while the lag is unhealed");
+	zassert_equal(r.a.floor, 1);
+	/* verify also tries to heal; failure is reported, not swallowed. */
+	alp_update_log_verdict_t v;
+	uint64_t                 bad;
+	zassert_equal(ulog_engine_verify_anchored(&r.s, &r.c, &r.an, &v, &bad), ALP_ERR_IO);
+	r.a.fail_advance = false;
+	zassert_equal(vfy(&r, true), ALP_UPDATE_LOG_VERIFY_OK); /* no-op-path recover heals */
+	zassert_equal(r.a.floor, 2);
+	zassert_equal(add(&r, 3), ALP_OK);
+	zassert_equal(r.a.floor, 3);
+}
+
+/* Failed advance inside recover on the orphan-adoption path. */
+ZTEST(alp_update_log_anchor, test_failed_advance_in_recover_after_orphan)
+{
+	struct rig r;
+	rig_init(&r);
+	zassert_equal(add(&r, 0), ALP_OK);
+	r.f.fail_meta_put = true;
+	zassert_equal(add(&r, 1), ALP_ERR_IO); /* orphan entry 1 */
+	r.f.fail_meta_put = false;
+	r.a.fail_advance  = true;
+	alp_update_log_verdict_t v;
+	uint64_t                 bad;
+	zassert_equal(ulog_engine_verify_anchored(&r.s, &r.c, &r.an, &v, &bad), ALP_ERR_IO);
+	zassert_equal(r.f.counter, 2, "orphan adopted even though the floor could not follow");
+	zassert_equal(r.a.floor, 1);
+	r.a.fail_advance = false;
+	zassert_equal(vfy(&r, true), ALP_UPDATE_LOG_VERIFY_OK);
+	zassert_equal(r.a.floor, 2);
 }
