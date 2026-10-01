@@ -3,8 +3,11 @@
 # True when both west `extras-cloud` checkouts exist: at the path given by
 # $ALP_AWS_IOT_SDK_DIR / $ALP_AZURE_IOT_SDK_DIR if set, else where west puts
 # them (vendors/cloud-sdk-dir.cmake resolves them the same way).  Evaluated
-# during twister's Kconfig-only filter pass, which never runs CMake.
+# during twister's Kconfig-only filter pass, which never runs CMake, so it
+# reads ENVIRONMENT variables only: a CMake -DALP_*_SDK_DIR override does not
+# affect this skip.  The AWS probe also needs an initialised submodule
+# (coreMQTT), so an AWS checkout without `--recurse-submodules` skips.
 config CLOUD_SDKS_PRESENT
-	def_bool "$(shell,test -d "${ALP_AWS_IOT_SDK_DIR:-$ZEPHYR_BASE/../modules/lib/aws-iot-device-sdk-embedded-C}" && test -d "${ALP_AZURE_IOT_SDK_DIR:-$ZEPHYR_BASE/../modules/lib/azure-sdk-for-c}" && echo y)" = "y"
+	def_bool "$(shell,test -f "${ALP_AWS_IOT_SDK_DIR:-$ZEPHYR_BASE/../modules/lib/aws-iot-device-sdk-embedded-C}/libraries/standard/coreMQTT/mqttFilePaths.cmake" && test -d "${ALP_AZURE_IOT_SDK_DIR:-$ZEPHYR_BASE/../modules/lib/azure-sdk-for-c}" && echo y)" = "y"
 
 source "Kconfig.zephyr"

@@ -16,6 +16,17 @@ if(NOT ALP_AWS_IOT_DIR)
         "or set ALP_AWS_IOT_SDK_DIR to its path (submodules initialised).")
 endif()
 
+foreach(_f libraries/standard/coreMQTT/mqttFilePaths.cmake
+           libraries/standard/coreJSON/jsonFilePaths.cmake)
+    if(NOT EXISTS ${ALP_AWS_IOT_DIR}/${_f})
+        message(FATAL_ERROR
+            "${ALP_AWS_IOT_DIR}/${_f} not found: the AWS IoT checkout has "
+            "uninitialised submodules.  Run `git -C ${ALP_AWS_IOT_DIR} "
+            "submodule update --init --recursive` (west does this for "
+            "`west update --group-filter +extras-cloud`).")
+    endif()
+endforeach()
+
 # Upstream's own file lists (also define the *_INCLUDE_PUBLIC_DIRS).
 include(${ALP_AWS_IOT_DIR}/libraries/standard/coreMQTT/mqttFilePaths.cmake)
 include(${ALP_AWS_IOT_DIR}/libraries/standard/coreJSON/jsonFilePaths.cmake)
@@ -27,5 +38,8 @@ zephyr_library_sources(${MQTT_SOURCES} ${MQTT_SERIALIZER_SOURCES} ${JSON_SOURCES
 zephyr_include_directories(${MQTT_INCLUDE_PUBLIC_DIRS} ${JSON_INCLUDE_PUBLIC_DIRS})
 
 # coreMQTT otherwise #includes an application-supplied core_mqtt_config.h;
-# use the upstream defaults (core_mqtt_config_defaults.h) instead.
-zephyr_compile_definitions(MQTT_DO_NOT_USE_CUSTOM_CONFIG)
+# by default use the upstream defaults (core_mqtt_config_defaults.h) instead.
+# Apps set CONFIG_ALP_AWS_IOT_DEFAULT_CONFIG=n to supply their own header.
+if(CONFIG_ALP_AWS_IOT_DEFAULT_CONFIG)
+    zephyr_compile_definitions(MQTT_DO_NOT_USE_CUSTOM_CONFIG)
+endif()

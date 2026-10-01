@@ -463,6 +463,15 @@ config ALP_AWS_IOT
 	  `west update --group-filter +extras-cloud`.  The TLS transport
 	  (transport_interface.h) is application-supplied; no shim ships.
 
+config ALP_AWS_IOT_DEFAULT_CONFIG
+	bool "Use coreMQTT's default configuration"
+	default y
+	depends on ALP_AWS_IOT
+	help
+	  Defines MQTT_DO_NOT_USE_CUSTOM_CONFIG so coreMQTT uses its built-in
+	  defaults (core_mqtt_config_defaults.h).  Set to n to supply your own
+	  core_mqtt_config.h on the application's include path.
+
 config ALP_AZURE_IOT
 	bool "Build the Azure SDK for Embedded C (az_core + IoT Hub client)"
 	depends on ALP_SDK
