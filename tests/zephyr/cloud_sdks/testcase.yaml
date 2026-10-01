@@ -2,9 +2,12 @@
 
 tests:
   alp_sdk.cloud_sdks.build:
-    # Skipped unless the extras-cloud sources are present: CMakeLists.txt only
-    # merges cloud.conf (which sets both symbols) when it finds both checkouts.
-    filter: CONFIG_ALP_AWS_IOT and CONFIG_ALP_AZURE_IOT
+    # Opt-in: the sources come from the west `extras-cloud` group, which is
+    # off by default.  Twister's filter pass runs before the app's
+    # CMakeLists.txt, so it cannot probe the workspace; it skips the test
+    # unless both checkout paths are supplied, either as environment
+    # variables or `west twister -x=ALP_AWS_IOT_SDK_DIR=... -x=ALP_AZURE_IOT_SDK_DIR=...`.
+    filter: ALP_AWS_IOT_SDK_DIR and ALP_AZURE_IOT_SDK_DIR
     platform_allow:
       - native_sim
       - native_sim/native/64
