@@ -75,18 +75,17 @@ device-to-cloud story; all Tier B (recipe-only), split by grounding:
   transport in. LwM2M could merit Tier A on strength, but the ADR groups
   connectivity/cloud as B and there is no CI build lane + example yet
   (promotion is a named follow-up).
-- **§ `aws-iot` / `azure-iot` are pinned source manifests** — verified **not
-  imported by Zephyr's own west manifest** (`west list` has no aws/azure/iot
-  entry). Unlike the micro-ROS flagship, neither generic CMake C SDK has an
-  official upstream **Zephyr module.yml** or master Kconfig symbol, so
-  Zephyr-side packaging/build glue remains a follow-up. The source pins are now
-  exact and reproducible: AWS `aws-iot-device-sdk-embedded-C` at `202412.00`
-  (MIT) and Azure `azure-sdk-for-c` at `1.5.0` (MIT). Each declares an
-  **enable-by-presence** Zephyr section (`module:` naming the real upstream repo,
-  `west:` carrying the exact project pin, **no** `kconfig:`) — no enable symbol
-  is invented; emit renders the selection tag and `--emit west-libraries` emits
-  concrete west project entries, with no `CONFIG_` line until packaging confirms
-  a real symbol.
+- **§ `aws-iot` / `azure-iot` are pinned source manifests with in-tree glue** —
+  verified **not imported by Zephyr's own west manifest** (`west list` has no
+  aws/azure/iot entry), and neither generic CMake C SDK has an upstream **Zephyr
+  module.yml** or Kconfig symbol. The source pins are exact and reproducible: AWS
+  `aws-iot-device-sdk-embedded-C` at `202412.00` (MIT) and Azure
+  `azure-sdk-for-c` at `1.5.0` (MIT). Each declares `module:` naming the real
+  upstream repo, `west:` carrying the exact project pin, and an alp-sdk-owned
+  `kconfig:` gate (`CONFIG_ALP_AWS_IOT` / `CONFIG_ALP_AZURE_IOT`) over the
+  in-tree build glue under `vendors/aws-iot/` and `vendors/azure-iot/`
+  (coreMQTT + coreJSON; az_core + the IoT Hub client). The TLS transport shim is
+  not provided.
   The same pins also sit in the repo's `west.yml` under the opt-in `extras-cloud`
   group (off by default; `west update --group-filter +extras-cloud`), tier stays
   B (no CI build lane).

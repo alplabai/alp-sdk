@@ -151,6 +151,48 @@ tan image     # -> build/image-bundle/alp-system.zip + .swu
 tan flash     # walks boot_order: from the manifest
 ```
 
+## Bench: one RPC round trip over the UIO backend (V2N / V2M)
+
+Proves alp-sdk #2374's last item: an A55 `<alp/rpc.h>` call reaching an
+IPC-enabled CM33 image through `yocto_uio_drv.c`.  The CM33 window is
+`0x9f700000` (CM33-NS view) = `0x4f700000` (A55 view), 9 MiB.
+
+1. **Build the CM33 image** (V2M shown; use
+   `alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33` on V2N):
+
+   ```bash
+   west build -p always -b alp_e1m_v2m101_m33_sm/r9a09g056n48gbg/cm33        examples/multicore/rpmsg-v2n/m33_sm
+   ```
+
+2. **Pad and flash to mtd1 @ 0x1a0000** (from the board, after copying
+   `zephyr.bin` over; size the erase from the file):
+
+   ```sh
+   head -c 12288 /dev/zero > /tmp/m33_fw.bin; cat /tmp/zephyr.bin >> /tmp/m33_fw.bin
+   SZ=$(stat -c %s /tmp/m33_fw.bin); BLKS=$(( (SZ + 4095) / 4096 ))
+   flash_erase /dev/mtd1 0x1a0000 $BLKS
+   mtd_debug write /dev/mtd1 0x1a0000 $SZ /tmp/m33_fw.bin
+   mtd_debug read  /dev/mtd1 0x1a0000 $SZ /tmp/rb.bin && md5sum /tmp/rb.bin /tmp/m33_fw.bin
+   ```
+
+   The two md5s must match.  The CM33 cannot be restarted from Linux:
+   do a full SoC reboot (or PSU cold-cycle).
+   The board must boot in DSW1 mode 2 (xSPI BL2): under the mode 1
+   eMMC-boot BL2 the CM33 never starts.  Attach once per CM33 boot; a
+   second attach in the same boot currently fails (cold-cycle between
+   runs).
+
+3. **Check the A55 half**: `cat /sys/class/uio/uio*/name` lists `rsctbl`,
+   `mhu-shm`, `vring-ctl0`, `vring-ctl1`, `vring-shm0`, `vring-shm1`,
+   `mhu-uio`; `/proc/iomem` shows `4f700000-4fffffff : reserved`.
+
+4. **Run the round trip.**  Either the HIL spec
+   (`tests/hil/v2m103-x-evk/v2m103-rpmsg-echo-uio.yaml`, binary at
+   `<artifact-dir>/linux`) or, with the static bench binary from
+   `tests/yocto/build_rpc_uio_bench_aarch64.sh`, run it directly on the
+   board.  Pass = `[rpmsg-v2n] done (4/4 round trips verified)`; the
+   `/proc/interrupts` `mhu-uio` count rises.
+
 ## Reference
 
 - [`docs/heterogeneous-builds.md`](../../../docs/heterogeneous-builds.md)

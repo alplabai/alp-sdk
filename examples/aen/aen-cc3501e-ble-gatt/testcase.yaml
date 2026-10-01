@@ -26,4 +26,4 @@ tests:
     # (which sets CONFIG_RAM_CONSOLE=y from board.yaml diagnostics.console:
     # ram). native_sim has no RAM console -> picolibc __stdout_hook_install
     # link failure without this. See native_sim.conf.
-    extra_args: EXTRA_CONF_FILE=native_sim.conf
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf;native_sim.conf

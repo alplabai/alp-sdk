@@ -142,6 +142,8 @@ sudo apt-get install -y libmosquitto-dev libasound2-dev libssl-dev pkg-config
 
 ```bash
 export ZEPHYR_BASE="$PWD/../zephyr"
+# Examples load a pre-generated per-core Kconfig fragment (#866):
+python3 scripts/gen_example_alp_conf.py
 python3 "$ZEPHYR_BASE/scripts/twister" \
     --testsuite-root tests/zephyr \
     --testsuite-root examples \

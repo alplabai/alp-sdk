@@ -3,6 +3,7 @@
  * OS-conditional piece is the lock right below (Zephyr/POSIX/bare-metal),
  * selected purely off predefined compiler macros -- no vendor HAL, no PSA,
  * still links standalone in the fuzz/unit-test host build. */
+#include <stdbool.h>
 #include <string.h>
 
 #include "update_log/engine.h"
@@ -363,6 +364,63 @@ static alp_status_t ulog_prev_hash_of_predecessor(const alp_secure_store_if *sto
 	return ALP_OK;
 }
 
+/*
+ * Anchor ordering (issue #111 P2). The anchor is an OPTIONAL floor held
+ * outside the store. Invariant: anchor <= committed entry count, across any
+ * crash. append() therefore advances it LAST -- after the entry put, the
+ * meta put and the counter increment.
+ *
+ *   - Crash/failure before the anchor advance (entry + counter committed,
+ *     anchor behind): the append reports the advance error ("committed,
+ *     anchor lagging") and the anchor lags by one. verify sees
+ *     anchor <= count: no false ROLLED_BACK.
+ *   - Crash before the entry commit: the anchor was never touched, so it
+ *     cannot be ahead of the store.
+ *
+ * The opposite order (anchor first) would leave anchor > store after a crash
+ * before the commit, i.e. a false ROLLED_BACK on an honest torn append.
+ *
+ * Lag bound: ulog_sync_anchor() runs on EVERY recover (append / verify /
+ * count), after torn-append adoption, and raises the floor to the committed
+ * count (advance is max-only, so a repeat after a crash is harmless). The
+ * floor therefore lags by at most ONE entry, and only until the next engine
+ * call that can reach the anchor; a failed advance there is returned to the
+ * caller and the next call retries -- the lag never accumulates because no
+ * entry can be appended while the floor cannot be brought level first.
+ *
+ * Rollback guard: after that sync, floor > count means the store (and its
+ * counter) was rewound (full reflash / tail truncation). verify() reports
+ * ROLLED_BACK; append() REFUSES (ALP_ERR_IO) so seqs are never reused and a
+ * later count can never climb past the floor and erase the evidence.
+ * Residual: an attacker who rewinds by exactly the one entry the floor lags,
+ * inside the crash window, is caught only once the floor catches up.
+ */
+static alp_status_t ulog_sync_anchor(const alp_monotonic_counter_if *ctr,
+                                     const alp_counter_anchor_if    *anchor,
+                                     bool                           *rolled_back)
+{
+	*rolled_back = false;
+	if (anchor == NULL) return ALP_OK;
+	uint64_t     hw = 0, floor = 0;
+	alp_status_t rc = ctr->read(ctr->ctx, 0, &hw);
+	if (rc != ALP_OK) return rc;
+	rc = anchor->read(anchor->ctx, &floor); /* status propagated as-is */
+	if (rc != ALP_OK) return rc;
+	if (floor > hw) {
+		*rolled_back = true;
+		return ALP_OK;
+	}
+	if (floor < hw) return anchor->advance(anchor->ctx, hw);
+	return ALP_OK;
+}
+
+/* Both callbacks are required when an anchor is supplied; checked before
+ * any commit so a half-wired anchor fails up front, not mid-append. */
+static bool ulog_anchor_valid(const alp_counter_anchor_if *anchor)
+{
+	return anchor == NULL || (anchor->read != NULL && anchor->advance != NULL);
+}
+
 /* Re-derive meta + the counter from the newest committed entry,
  * forward-committing AT MOST ONE interrupted append (never loops -- see
  * the block comment above for why a second orphan must be left for
@@ -423,15 +481,20 @@ static alp_status_t ulog_recover(const alp_secure_store_if      *store,
 	 * a counter rollback as a clean VERIFY_OK. See the block comment. */
 }
 
-alp_status_t ulog_engine_append(const alp_secure_store_if      *store,
-                                const alp_monotonic_counter_if *ctr,
-                                const alp_update_log_entry_t   *entry)
+alp_status_t ulog_engine_append_anchored(const alp_secure_store_if      *store,
+                                         const alp_monotonic_counter_if *ctr,
+                                         const alp_counter_anchor_if    *anchor,
+                                         const alp_update_log_entry_t   *entry)
 {
 	if (store == NULL || ctr == NULL || entry == NULL) return ALP_ERR_INVAL;
+	if (!ulog_anchor_valid(anchor)) return ALP_ERR_INVAL;
 
 	ulog_engine_lock();
 
-	alp_status_t rc = ulog_recover(store, ctr);
+	alp_status_t rc          = ulog_recover(store, ctr);
+	bool         rolled_back = false;
+	if (rc == ALP_OK) rc = ulog_sync_anchor(ctr, anchor, &rolled_back);
+	if (rc == ALP_OK && rolled_back) rc = ALP_ERR_IO; /* rewound store: refuse, see above */
 	if (rc != ALP_OK) {
 		ulog_engine_unlock();
 		return rc;
@@ -544,21 +607,40 @@ alp_status_t ulog_engine_append(const alp_secure_store_if      *store,
 
 	uint64_t newhw = 0;
 	rc             = ctr->increment(ctr->ctx, 0, &newhw);
+	/* Committed. An advance failure here means "committed, anchor lagging":
+	 * reported, and healed by ulog_sync_anchor() on the next call. */
+	if (rc == ALP_OK && anchor != NULL) rc = anchor->advance(anchor->ctx, hw + 1u);
 	ulog_engine_unlock();
 	return rc;
 }
 
-alp_status_t ulog_engine_verify(const alp_secure_store_if      *store,
+alp_status_t ulog_engine_append(const alp_secure_store_if      *store,
                                 const alp_monotonic_counter_if *ctr,
-                                alp_update_log_verdict_t       *verdict_out,
-                                uint64_t                       *bad_seq_out)
+                                const alp_update_log_entry_t   *entry)
+{
+	return ulog_engine_append_anchored(store, ctr, NULL, entry);
+}
+
+alp_status_t ulog_engine_verify_anchored(const alp_secure_store_if      *store,
+                                         const alp_monotonic_counter_if *ctr,
+                                         const alp_counter_anchor_if    *anchor,
+                                         alp_update_log_verdict_t       *verdict_out,
+                                         uint64_t                       *bad_seq_out)
 {
 	if (store == NULL || ctr == NULL || verdict_out == NULL) return ALP_ERR_INVAL;
+	if (!ulog_anchor_valid(anchor)) return ALP_ERR_INVAL;
 	if (bad_seq_out) *bad_seq_out = 0;
 
 	ulog_engine_lock();
 
-	alp_status_t rc = ulog_recover(store, ctr);
+	alp_status_t rc          = ulog_recover(store, ctr);
+	bool         rolled_back = false;
+	if (rc == ALP_OK) rc = ulog_sync_anchor(ctr, anchor, &rolled_back);
+	if (rc == ALP_OK && rolled_back) {
+		*verdict_out = ALP_UPDATE_LOG_VERIFY_ROLLED_BACK;
+		ulog_engine_unlock();
+		return ALP_OK;
+	}
 	if (rc != ALP_OK) {
 		ulog_engine_unlock();
 		return rc;
@@ -693,6 +775,14 @@ out:
 	return rc;
 }
 
+alp_status_t ulog_engine_verify(const alp_secure_store_if      *store,
+                                const alp_monotonic_counter_if *ctr,
+                                alp_update_log_verdict_t       *verdict_out,
+                                uint64_t                       *bad_seq_out)
+{
+	return ulog_engine_verify_anchored(store, ctr, NULL, verdict_out, bad_seq_out);
+}
+
 alp_status_t ulog_engine_count(const alp_secure_store_if      *store,
                                const alp_monotonic_counter_if *ctr,
                                uint64_t                       *count_out)
@@ -701,6 +791,8 @@ alp_status_t ulog_engine_count(const alp_secure_store_if      *store,
 
 	ulog_engine_lock();
 
+	/* count has no anchor seam: the floor is synced by append/verify (see
+	 * "Anchor ordering"), and count never writes or relies on it. */
 	alp_status_t rc = ulog_recover(store, ctr);
 	if (rc == ALP_OK) {
 		rc = ctr->read(ctr->ctx, 0, count_out);

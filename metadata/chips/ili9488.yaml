@@ -91,3 +91,5 @@ physical:
     - { pad: "DGND",      signal: "GND" }
     - { pad: "AGND",      signal: "GND" }
     - { pad: "VGS",       signal: "GND" }
+tracking:
+  blocker: "no child issue filed; not scheduled, deferred until a product selects the part"

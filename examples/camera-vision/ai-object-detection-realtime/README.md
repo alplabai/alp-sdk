@@ -50,7 +50,9 @@ The Renesas RZ/V2N Zephyr board file currently lives in a private
 Renesas Zephyr fork; once the public board lands the M33 build will be:
 
 ```
-west build -b rzv2n_evk examples/camera-vision/ai-object-detection-realtime
+# writes examples/camera-vision/ai-object-detection-realtime/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/camera-vision/ai-object-detection-realtime
+west build -b rzv2n_evk examples/camera-vision/ai-object-detection-realtime -- -DEXTRA_CONF_FILE=generated/alp.conf
 ```
 
 That build does not run the A55-owned DX-M1 runtime.  Add an A55/Yocto
@@ -59,8 +61,10 @@ app to the project for real DEEPX inference.
 **AEN fallback (works today on the public stack):**
 
 ```
+# writes examples/camera-vision/ai-object-detection-realtime/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/camera-vision/ai-object-detection-realtime
 west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp \
-           examples/camera-vision/ai-object-detection-realtime
+           examples/camera-vision/ai-object-detection-realtime -- -DEXTRA_CONF_FILE=generated/alp.conf
 ```
 
 The AEN fallback dispatches inference to Ethos-U instead of
@@ -70,7 +74,9 @@ the §D.lib.loader based on the SKU's `capabilities:` block.
 **native_sim (build smoke-test, no hardware):**
 
 ```
-west build -b native_sim/native/64 examples/camera-vision/ai-object-detection-realtime
+# writes examples/camera-vision/ai-object-detection-realtime/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/camera-vision/ai-object-detection-realtime
+west build -b native_sim/native/64 examples/camera-vision/ai-object-detection-realtime -- -DEXTRA_CONF_FILE=generated/alp.conf
 ```
 
 The camera + NPU surfaces NOSUPPORT-stub on native_sim; the

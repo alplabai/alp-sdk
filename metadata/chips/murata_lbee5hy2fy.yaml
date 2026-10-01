@@ -71,3 +71,5 @@ physical:
   operating_temp_deg_c: "-40..85"
   visibility:           public
   provenance:           web_provisional
+tracking:
+  blocker: "SDIO, BT-UART and I2S data paths stay in the Yocto/Linux stack; no open tracker"

@@ -60,3 +60,5 @@ physical:
     - { role: decouple, value: 100nF, net: VCC, refdes_prefix: C }   # standard MCU-side bypass practice; not chip-datasheet-specified
     - { role: pullup,   value: 4k7,   net: SDA, refdes_prefix: R }
     - { role: pullup,   value: 4k7,   net: SCL, refdes_prefix: R }
+tracking:
+  blocker: "vendor library licence review pending"

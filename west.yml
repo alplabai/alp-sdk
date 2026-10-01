@@ -152,8 +152,10 @@ manifest:
   # `extras-cloud`   - aws-iot-device-sdk-embedded-C (202412.00 LTS, MIT)
   #                    + azure-sdk-for-c (1.5.0, MIT): source pins only,
   #                    matching metadata/libraries/{aws-iot,azure-iot}.yaml
-  #                    (ADR 0018 Tier B -- no CI build lane, no Zephyr
-  #                    module.yml, no enable Kconfig).  Disabled by default
+  #                    (ADR 0018 Tier B; no upstream Zephyr module.yml, so
+  #                    the in-tree glue under vendors/{aws,azure}-iot/ builds
+  #                    them under CONFIG_ALP_AWS_IOT / CONFIG_ALP_AZURE_IOT;
+  #                    nightly-cloud-sdks.yml is the build lane).  Disabled by default
   #                    so workspaces stay light; flip via
   #                    `west update --group-filter +extras-cloud`.  The AWS
   #                    repo vendors coreMQTT/coreHTTP/... as git submodules;

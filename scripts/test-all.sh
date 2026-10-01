@@ -702,6 +702,10 @@ stage_twister() {
                --testsuite-root "${REPO_ROOT}/tests/console"
                --testsuite-root "${REPO_ROOT}/examples")
     fi
+    # Examples' testcase.yaml files point EXTRA_CONF_FILE at their
+    # generated/alp.conf; twister configures from the source tree, so write
+    # those fragments first (#866).
+    python3 "${REPO_ROOT}/scripts/gen_example_alp_conf.py" || return 1
     python3 "${ZEPHYR_BASE}/scripts/twister" \
         "${twister_jobs[@]+"${twister_jobs[@]}"}" \
         "${roots[@]}" \
