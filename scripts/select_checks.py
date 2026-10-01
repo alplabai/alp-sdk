@@ -82,6 +82,7 @@ FULL_EXACT = frozenset({
     ".github/workflows/pr-twister.yml",
     "scripts/ci/apt-bounded.sh",
     "scripts/test-all.sh",
+    "scripts/gen_example_alp_conf.py",
     "scripts/select_checks.py",
 })
 

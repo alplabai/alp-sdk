@@ -14,6 +14,8 @@ For the qualified board target (e.g.
 is wired for you out of the box:
 
 ```sh
+# A board.yaml-driven app needs its alp.conf first: prefer `tan build`, or pass
+# -DEXTRA_CONF_FILE=<alp.conf> (docs/board-config-emit.md; #866).
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <your-app>
 west debug        # or: west attach   (attach without resetting first)
 ```

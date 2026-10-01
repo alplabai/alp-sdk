@@ -33,9 +33,8 @@ from alp_project_loader import METADATA_ROOT, _sku_family
 #                                      ALP_HW_BUILD_SOM_SKU,
 #                                      ALP_HW_BUILD_SOM_HW_REV);
 #
-# The CMakeLists.txt example pattern (mirroring the zephyr-conf
-# emission) writes the header to `${CMAKE_BINARY_DIR}/generated/`
-# and adds that path to the include search.
+# A CMakeLists.txt consuming it writes the header to
+# `${CMAKE_BINARY_DIR}/generated/` and adds that path to the include search.
 
 
 def _pick_primary_core_os(cores: dict[str, str]) -> tuple[str, str]:

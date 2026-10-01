@@ -643,7 +643,7 @@ def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
     # the test-runner's CWD -- `_write_board` drops board.yaml straight
     # into `tmp_path`, so that IS base_dir here. ${PROJECT_ROOT}-tokened
     # (#865), not an absolute path.
-    assert args[-3:] == [
+    assert args[-4:-1] == [
         "--",
         "-DPython3_EXECUTABLE=${PYTHON}",
         "-DSB_CONF_FILE=${PROJECT_ROOT}/build/alp_sysbuild.conf",
@@ -653,12 +653,14 @@ def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
     # Windows, since CMake's cmake_path() (which sysbuild_kconfig.cmake
     # uses to split the `;`-joined list) only recognises `/`.
     assert args.index("--sysbuild") < args.index("--")
-    assert "\\" not in args[-1]
-    # Option A (#871): a --sysbuild slice carries NO bare
-    # -DEXTRA_CONF_FILE -- it would land on the sysbuild image, not the
-    # app (silent OTA config-miss); the per-core alp.conf reaches the app
-    # via the --core-scoped CMakeLists.txt bridge (#870) instead.
+    assert "\\" not in args[-2]
+    # #866: a --sysbuild slice never carries a bare -DEXTRA_CONF_FILE (it
+    # would land on the sysbuild image); it carries the image-scoped
+    # -D<image>_EXTRA_CONF_FILE, <image> = the app dir's basename.
     assert not any(a.startswith("-DEXTRA_CONF_FILE=") for a in args)
+    # `app: ./m33` -> sysbuild's app image is named `m33`.
+    assert args[-1] == (
+        f"-Dm33_EXTRA_CONF_FILE=${{PROJECT_ROOT}}/{z['buildDir']}/alp.conf")
 
     # Without boot: -> no sysbuild overlay -> no flag, bare command.
     path2 = _write_board(tmp_path, V2N_HAPPY, name="board-noboot.yaml")

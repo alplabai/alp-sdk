@@ -40,7 +40,9 @@ WACT,12.80,IDLE,0.74,1,4.8
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/ai/wearable-activity-fall
+# writes examples/ai/wearable-activity-fall/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/ai/wearable-activity-fall
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/ai/wearable-activity-fall -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 
