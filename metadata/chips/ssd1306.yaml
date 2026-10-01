@@ -127,3 +127,5 @@ physical:
     - { pad: "74", signal: "VDD" }
     - { pad: "82", signal: "VCC" }
     - { pad: "83", signal: "VCC" }
+tracking:
+  blocker: "no child issue filed; maintainer triage on #500"

@@ -100,3 +100,5 @@ kconfig:
                                      # Ethernet target exists in this tree.
   yocto:          n/a               # no A32/Linux Ethernet enablement exists
                                      # for AEN in this tree.
+tracking:
+  blocker: "no child issue filed; maintainer triage on #500"

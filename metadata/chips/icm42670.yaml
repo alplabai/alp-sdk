@@ -76,3 +76,5 @@ physical:
     - { role: decouple, value: 10nF,  net: VDDIO, refdes_prefix: C }
     - { role: pullup,   value: 10k,   net: SCL,   refdes_prefix: R }
     - { role: pullup,   value: 10k,   net: SDA,   refdes_prefix: R }
+tracking:
+  blocker: "no child issue filed; maintainer triage on #500"

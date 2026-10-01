@@ -71,3 +71,5 @@ physical:
   operating_temp_deg_c: "-40..85"
   visibility:           public
   provenance:           web_provisional
+tracking:
+  issue: 479

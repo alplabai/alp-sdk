@@ -91,3 +91,5 @@ physical:
     - { pad: "DGND",      signal: "GND" }
     - { pad: "AGND",      signal: "GND" }
     - { pad: "VGS",       signal: "GND" }
+tracking:
+  blocker: "no child issue filed; maintainer triage on #500"

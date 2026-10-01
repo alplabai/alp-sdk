@@ -74,3 +74,5 @@ verification:
   # power end-to-end HiL accuracy is still pending.
   hil_silicon:    untested
   smoke_tests:    null_arg_guard
+tracking:
+  blocker: "no child issue filed; maintainer triage on #500"

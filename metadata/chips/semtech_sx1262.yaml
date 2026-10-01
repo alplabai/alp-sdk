@@ -88,3 +88,5 @@ physical:
     - { pad: "22", signal: RFI_N }
     - { pad: "23", signal: RFO }
     - { pad: "24", signal: VR_PA }
+tracking:
+  blocker: "no child issue filed; maintainer triage on #500"

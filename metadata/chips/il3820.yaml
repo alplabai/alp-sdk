@@ -100,3 +100,5 @@ physical:
     # text: "an external capacitor is required between VDD and VSS").
     - { role: decouple, value: 1uF, net: VCI, refdes_prefix: C }
     - { role: decouple, value: 1uF, net: VDD, refdes_prefix: C }
+tracking:
+  blocker: "no child issue filed; maintainer triage on #500"

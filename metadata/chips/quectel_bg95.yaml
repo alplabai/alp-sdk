@@ -52,3 +52,5 @@ physical:
   operating_temp_deg_c: "-35..75 (operating); -40..85 (extended)"
   visibility:           public
   provenance:           web_provisional
+tracking:
+  blocker: "no child issue filed; maintainer triage on #500"

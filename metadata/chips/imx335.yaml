@@ -204,3 +204,5 @@ verification:
                                      # sensor's Zephyr-level coverage decision (why no
                                      # tests/zephyr/video_sensors/ emulator suite was added for
                                      # this upstream driver).
+tracking:
+  blocker: "no child issue filed; maintainer triage on #500"

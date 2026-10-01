@@ -101,3 +101,5 @@ physical:
     - { pad: "26", signal: GND }
     - { pad: "27", signal: PA_BOOST }
     - { pad: "28", signal: RFO_LF }
+tracking:
+  blocker: "no child issue filed; maintainer triage on #500"

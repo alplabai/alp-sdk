@@ -115,3 +115,5 @@ physical:
     - { pad: G4, signal: Y5 }
     - { pad: G5, signal: Y7 }
     - { pad: G6, signal: Y9 }
+tracking:
+  blocker: "no child issue filed; maintainer triage on #500"

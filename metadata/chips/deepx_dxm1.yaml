@@ -72,3 +72,5 @@ verification:
                                    # docs/soms/v2n-m1.md's "DEEPX DX-M1 bring-up" section. Do not
                                    # conflate the two: this field tracks the former only.
   smoke_tests:    null_arg_guard
+tracking:
+  issue: 482
