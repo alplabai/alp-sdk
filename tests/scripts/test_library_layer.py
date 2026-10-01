@@ -618,11 +618,11 @@ def test_aws_azure_are_module_only_prerequisites() -> None:
     """The cloud manifests name real upstream repos with exact west pins and NO
     fabricated Kconfig (generic C SDKs, enable-by-presence)."""
     aws = yaml.safe_load((LIBRARIES_DIR / "aws-iot.yaml").read_text(encoding="utf-8"))
-    assert aws["license"] == "Apache-2.0"
-    assert aws["version"] == "v3.1.5"
+    assert aws["license"] == "MIT"
+    assert aws["version"] == "202412.00"
     zephyr = aws["integration"]["zephyr"]
     assert zephyr.get("module") == "aws-iot-device-sdk-embedded-C"
-    assert zephyr["west"]["revision"] == "v3.1.5"
+    assert zephyr["west"]["revision"] == "202412.00"
     assert zephyr["west"]["path"] == "modules/lib/aws-iot-device-sdk-embedded-C"
     assert "kconfig" not in zephyr, "no Kconfig may be invented without a real symbol"
 
@@ -680,7 +680,7 @@ def test_emit_aws_iot_module_only_no_kconfig(tmp_path: Path) -> None:
     out = _slice_alp_conf(project, project.cores["m33_sm"])
     assert "ADR 0018" in out
     assert "aws-iot-device-sdk-embedded-C" in out   # module named in the tag
-    assert "aws-iot v3.1.5" in out                   # version transcribed
+    assert "aws-iot v202412.00" in out                  # version transcribed
     assert "CONFIG_AWS" not in out                   # nothing invented
 
 
