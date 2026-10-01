@@ -12,13 +12,13 @@ E1M-AEN701 share one carrier PCB) does not bring UART2 out; its real
 console header is SoC UART5 (`serial@4901d000`, `P3_4`/`P3_5`,
 alternate function 2).
 
-New `meta-alp-sdk/recipes-kernel/linux/linux-alif/e1m-aen-evk-console.dtsi`
-(`meta-alp-sdk/recipes-kernel/linux/linux-alif/e1m-aen-evk-console.dtsi:34`
+New `meta-alp-sdk/dynamic-layers/meta-alif-ensemble/recipes-kernel/linux/linux-alif/e1m-aen-evk-console.dtsi`
+(`meta-alp-sdk/dynamic-layers/meta-alif-ensemble/recipes-kernel/linux/linux-alif/e1m-aen-evk-console.dtsi:34`
 ("&uart2 {")) disables `&uart2`, enables `&uart5`, sets
 `aliases { serial0 = &uart5; }`, and `chosen { stdout-path =
 "serial0:115200n8"; }`. New
-`meta-alp-sdk/recipes-kernel/linux/linux-alif_%.bbappend`
-(`meta-alp-sdk/recipes-kernel/linux/linux-alif_%.bbappend:32`
+`meta-alp-sdk/dynamic-layers/meta-alif-ensemble/recipes-kernel/linux/linux-alif_%.bbappend`
+(`meta-alp-sdk/dynamic-layers/meta-alif-ensemble/recipes-kernel/linux/linux-alif_%.bbappend:32`
 ("SRC_URI:append:e1m-aen801 = \" file://e1m-aen-evk-console.dtsi\"")) gates
 the fragment on `:e1m-aen801`/`:e1m-aen701`, mirroring the TF-A
 bbappend's per-carrier knobs.

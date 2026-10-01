@@ -41,6 +41,9 @@ meta-alp-sdk/
 │       └── include/
 │           └── e1m-v2m-deepx.inc        # Shared DEEPX block `require`d by the three V2M confs above.
 ├── dynamic-layers/
+│   ├── meta-alif-ensemble/
+│   │   └── recipes-kernel/linux/
+│   │       └── linux-alif_%.bbappend    # E1M-AEN console routing (parsed only when meta-alif-ensemble is in bblayers.conf).
 │   └── meta-deepx-m1/
 │       └── recipes-runtime/dx-driver/
 │           └── dx-driver_%.bbappend     # Tightens the 99-dx-dma.rules udev MODE (parsed only when meta-deepx-m1 is in bblayers.conf).
