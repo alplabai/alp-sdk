@@ -479,23 +479,26 @@ def _slice_command(
         # `base_dir` (issue #596), never Path.cwd(), so the plan is
         # byte-identical wherever it is emitted.
         #
-        # NOT on a --sysbuild build: a bare -DEXTRA_CONF_FILE there lands
-        # on the SYSBUILD image, not the default application image
-        # (sysbuild scopes per-image as -D<image>_VAR), so it would NOT
-        # reach the app -- silently dropping the per-core alp.conf on
-        # boot:/OTA projects. The app-image name is not derivable from
-        # board.yaml (it is the app CMakeLists `project()` name), so the
-        # image-prefixed form cannot be emitted here. Sysbuild slices
-        # still get the per-core alp.conf via the app's own --core-scoped
-        # CMakeLists.txt bridge (#870); a plan-native per-image sysbuild
-        # wiring is the remaining half of #866.
-        if not is_sysbuild:
-            alp_conf = Path(slice_.build_dir) / "alp.conf"
-            if not alp_conf.is_absolute():
-                alp_conf = Path(base_dir) / alp_conf
-            alp_conf = alp_conf.resolve()
-            defines.append(
-                f"-DEXTRA_CONF_FILE={_tokenize(alp_conf, base_dir, REPO)}")
+        # A --sysbuild build scopes per-image variables as
+        # -D<image>_VAR: a bare -DEXTRA_CONF_FILE would land on the
+        # SYSBUILD image, not the application, silently dropping the
+        # per-core alp.conf on boot:/OTA projects. The application image's
+        # name IS derivable: sysbuild names it after the basename of the
+        # app directory (`get_filename_component(app_name ${APP_DIR}
+        # NAME)` in share/sysbuild/CMakeLists.txt), i.e. the directory
+        # `west build` is handed above -- so emit the image-prefixed form
+        # (#866, the plan-native replacement for the per-example
+        # CMakeLists.txt bridge #870).
+        alp_conf = Path(slice_.build_dir) / "alp.conf"
+        if not alp_conf.is_absolute():
+            alp_conf = Path(base_dir) / alp_conf
+        alp_conf = alp_conf.resolve()
+        extra_var = "EXTRA_CONF_FILE"
+        if is_sysbuild:
+            image = _zephyr_app_dir(slice_.app, base_dir).name
+            extra_var = f"{image}_EXTRA_CONF_FILE"
+        defines.append(
+            f"-D{extra_var}={_tokenize(alp_conf, base_dir, REPO)}")
         cmd += ["--", *defines]
         return cmd
     if slice_.os == "yocto":

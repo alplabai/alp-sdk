@@ -270,6 +270,13 @@ def _project_relpath(plan: dict) -> str:
 # included, would silently hide exactly that regression (a sysbuild slice
 # wrongly gaining the arg) from the comparator instead of catching it.
 # KEEP IN LOCKSTEP with tan-cli's vendored copy of this comparator.
+def _is_image_scoped_extra_conf(arg):
+    """`-D<image>_EXTRA_CONF_FILE=...` (the sysbuild per-image form)."""
+    name = arg.split("=", 1)[0]
+    return (name.startswith("-D") and name != "-DEXTRA_CONF_FILE"
+            and name.endswith("_EXTRA_CONF_FILE"))
+
+
 def _strip_863_extra_conf_file_arg(plan):
     """Remove the intended #863/#871 `-DEXTRA_CONF_FILE=` command arg from
     every NON-sysbuild slice's command in a (normalized) plan dict."""
@@ -277,11 +284,14 @@ def _strip_863_extra_conf_file_arg(plan):
         cmd = slice_.get("command")
         if not (isinstance(cmd, dict) and isinstance(cmd.get("args"), list)):
             continue
-        if "--sysbuild" in cmd["args"]:
-            continue
+        # A sysbuild slice carries the image-scoped form
+        # `-D<image>_EXTRA_CONF_FILE=` (#866); a bare `-DEXTRA_CONF_FILE=`
+        # there is the Option-A regression and must still fail.
+        sysbuild = "--sysbuild" in cmd["args"]
         cmd["args"] = [a for a in cmd["args"]
-                       if not (isinstance(a, str)
-                               and a.startswith("-DEXTRA_CONF_FILE="))]
+                       if not (isinstance(a, str) and (
+                           _is_image_scoped_extra_conf(a) if sysbuild
+                           else a.startswith("-DEXTRA_CONF_FILE=")))]
     return plan
 
 
