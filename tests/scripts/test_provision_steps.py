@@ -1441,6 +1441,11 @@ def test_record_newest_group_wins_on_a_shared_key(tmp_path):
 
 def test_record_ship_check_uses_the_preset_family_not_the_bundle_field(tmp_path):
     ctx = _ctx(tmp_path, execute=True)             # preset is a DEEPX (v2n-m1) SKU
+    cat = {**CATALOGUE["keys"], "dxm1_fw_version": {
+        "group": "dxm1", "source": "", "mode": "auto", "ship_required": False,
+        "ship_required_for": ["v2n-m1"]}}
+    (ctx.ledger_root / "schema" / "v2n.keys.yaml").write_text(
+        yaml.safe_dump({"schema": 1, "family": "v2n", "keys": cat}), encoding="utf-8")
     ctx.bundle["family"] = "v2n"                   # a wrong/stale bundle field must not hide DX-M1
     res = steps.run_steps(ctx, only=["record"])
     assert "dxm1_fw_version" in res[-1].detail

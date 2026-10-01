@@ -127,22 +127,16 @@ def regen_xlsx(ledger_root: Path, tool: Path, output: Path) -> subprocess.Comple
         env={**os.environ, "PYTHONIOENCODING": "utf-8"})
 
 
-# A v2n-m1 (DEEPX) unit ships with the DX-M1 firmware the dxm1_npu_flash step
-# records; a blank DX-M1 must not be SHIPPABLE. The catalogue keeps these
-# ship_required: false for the other family, so the rule lives here.
-DXM1_SHIP_KEYS = ("dxm1_fw_version", "dxm1_fw_md5", "dxm1_fw_uart_boot_md5")
-
-
 def ship_check(unit: dict[str, str], catalogue: dict[str, dict], family: str = "") -> list[str]:
     """Why this unit cannot ship; [] = shippable. Same rules as the private
     ledger_xlsx.py Ship check (minus its staged-manifest leg)."""
     reasons = []
     for key, spec in catalogue.items():
-        if spec.get("ship_required") and "*" not in key and not str(unit.get(key, "")).strip():
+        # ship_required_for: manifest families (e.g. v2n-m1, whose DX-M1 must be flashed)
+        # for which the key is required although the other families may leave it blank.
+        required = spec.get("ship_required") or family in spec.get("ship_required_for", ())
+        if required and "*" not in key and not str(unit.get(key, "")).strip():
             reasons.append(f"missing {key}")
-    if family == "v2n-m1":
-        reasons += [f"missing {k} (DX-M1 firmware not flashed)" for k in DXM1_SHIP_KEYS
-                    if not str(unit.get(k, "")).strip()]
     # The ACT88760 GPIO4 OTP default is an expected workaround, not a defect
     # (maintainer decision 2026-09-29) -- U-Boot releases it every boot. Block
     # only when cold_boot_test's own post-boot read shows it was NOT released;

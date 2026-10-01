@@ -66,13 +66,16 @@ def test_ship_check():
     assert lo.ship_check({**ok, "rootfs_bundle_version": "build-dir:deploy"}, CAT)
 
 
-def test_ship_check_requires_dxm1_firmware_for_the_deepx_family_only():
+DXM1 = ("dxm1_fw_uart_boot_md5", "dxm1_fw_md5", "dxm1_fw_version")
+CAT_DXM1 = {**CAT, **{k: {"group": "dxm1", "source": "x", "mode": "auto", "ship_required": False,
+                          "ship_required_for": ["v2n-m1"]} for k in DXM1}}
+
+
+def test_ship_check_requires_catalogue_listed_keys_for_their_family_only():
     ok = {"eeprom_unique_id": "06", "uboot_version": "U", "disposition": "ship", "known_defects": "none"}
-    r = lo.ship_check(ok, CAT, "v2n-m1")
-    assert [x for x in r if "dxm1_" in x] == [f"missing {k} (DX-M1 firmware not flashed)" for k in lo.DXM1_SHIP_KEYS]
-    dx = {**ok, **{k: "x" for k in lo.DXM1_SHIP_KEYS}}
-    assert lo.ship_check(dx, CAT, "v2n-m1") == []
-    assert lo.ship_check(ok, CAT, "v2n") == [] and lo.ship_check(ok, CAT) == []
+    assert lo.ship_check(ok, CAT_DXM1, "v2n-m1") == [f"missing {k}" for k in DXM1]
+    assert lo.ship_check({**ok, **{k: "x" for k in DXM1}}, CAT_DXM1, "v2n-m1") == []
+    assert lo.ship_check(ok, CAT_DXM1, "v2n") == [] and lo.ship_check(ok, CAT_DXM1) == []
 
 
 def test_ship_check_blocks_only_when_the_image_did_not_release_the_gd32():

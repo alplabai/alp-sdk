@@ -64,3 +64,8 @@ command, and a retry is skipped when the end marker already arrived. A step now
 has a `running` entry in the state file while it executes, so a killed run cannot
 fall back to an older superseded result. Superseded facts are applied oldest
 first (current run wins), and `ship_check` takes the family from the preset.
+
+The DX-M1 ship rule is now data, not code: a catalogue key may carry
+`ship_required_for: [v2n-m1]`, and `ship_check` (and the private `ledger_xlsx.py`
+Ship check) require it for those families. The paired alp-sdk-internal catalogue
+change must be merged for the rule to take effect.
