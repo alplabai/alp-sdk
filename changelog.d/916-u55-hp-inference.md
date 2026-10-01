@@ -29,3 +29,11 @@ links (FLASH 419,360 B of 2688 KiB slot0). The Flow C ITCM bench fragments
 do NOT fit this model on HP ITCM either (overflows by ~154 KiB, same as the
 existing HE build) -- both cores still boot this app via MRAM slot0/Flow D,
 not a J-Link ITCM RAM-run.
+
+Bench, E1M-AEN803 serial 2026W36-0009: the HP build written to the HP's
+MRAM slot0 at `0x802B0000` with an `M55_HP` MRAM-XIP ATOC entry boots on
+the M55-HP (banner `alp_e1m_aen803_m55_hp | CPU 400 MHz`) and runs the
+network on the HP-local U55: `RESULT PASS: NPU inference via
+alp_inference_open -- model=person_detect_u55 out_bytes=2 argmax=0`, again
+after a cold power cycle. The image (419,360 B) does not fit the HP's
+256 KiB ITCM, so it has no Flow C RAM-run path.
