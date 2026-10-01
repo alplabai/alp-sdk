@@ -499,7 +499,10 @@ def _status(a) -> int:
     for o in state.get("overrides", []):
         print(f"  override {o['gate']}: {o['reason']} ({o['at']})")
     cat = ledger_out.load_catalogue(a.catalogue or a.ledger_root / "schema" / "v2n.keys.yaml")
-    blockers = ledger_out.ship_check(ledger_out.read_unit_yaml(d / f"{a.serial}.unit.yaml"), cat)
+    import yaml
+    preset = yaml.safe_load((REPO / "metadata" / "e1m_modules" / f"{a.sku}.yaml").read_text(encoding="utf-8"))
+    blockers = ledger_out.ship_check(ledger_out.read_unit_yaml(d / f"{a.serial}.unit.yaml"), cat,
+                                     steps.expected_family(preset))
     failed = [n for n, v in state.get("steps", {}).items() if v.get("status") == "failed"]
     print("ship check: " + ("SHIPPABLE" if not blockers and not failed else "blocked"))
     for b in blockers:

@@ -15,12 +15,13 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from provision.bench import BenchError
+from provision.bench import BenchError, ExpectTimeout
 from provision.gates import CM33_REGION_OFFSET
 
 if TYPE_CHECKING:
@@ -172,22 +173,99 @@ def _host_md5(path: Path) -> str:
 _SHELL = r"(?:^|\n)[^\n]*[#$] $"
 
 
+_CPR_QUERY = "\x1b[6n"       # "report the cursor position": the image's profile runs a resize
+_CPR_REPLY = b"\x1b[24;80R"
+CONSOLE_SETTLE_S = 0.5
+
+
+def _expect_answering_cpr(console: Console, patterns: dict[str, str], timeout: float) -> str:
+    """expect_any(), but a cursor-position query on the way is answered (an
+    unanswered resize leaves the shell busy and garbles the next commands)."""
+    deadline = time.monotonic() + timeout
+    pats = {**patterns, "cpr": re.escape(_CPR_QUERY)}
+    while True:
+        key, _ = console.expect_any(pats, max(deadline - time.monotonic(), 0.1))
+        if key != "cpr":
+            return key
+        console.write(_CPR_REPLY)
+
+
+def _settle(console: Console) -> None:
+    """Let the login scripts finish: answer any late cursor query, wait for quiet."""
+    while True:
+        text = console.drain(CONSOLE_SETTLE_S, 10.0)
+        if _CPR_QUERY not in text:
+            return
+        console.write(_CPR_REPLY)
+
+
+def send_checked(console: Console, line: str, echo_timeout: float = 5.0) -> None:
+    """Send one command line paced, and verify the tty echoed it intact (head of
+    the line). On a mismatch: Ctrl-C, let the prompt settle, resend once."""
+    head = re.escape(line.split("\n")[0][:40])
+    for attempt in (1, 2):
+        console.send_line(line, paced=True)
+        try:
+            console.expect(head, echo_timeout)
+            return
+        except ExpectTimeout as e:
+            if attempt == 2:
+                raise BenchError(f"console echo of {line[:40]!r} never matched what was sent "
+                                 f"(corrupted RX?): {e.tail[-120:]!r}") from e
+            console.write(b"\x03")
+            console.drain(CONSOLE_SETTLE_S, 5.0)
+
+
+SYSTEM_SETTLE_CAP_S = 90.0
+SYSTEM_POLL_S = 2.0
+
+
+def wait_system_settled(console: Console, cap: float | None = None) -> bool:
+    """Poll ``systemctl is-system-running`` (paced, cheap) until it says running or
+    degraded. Right after login systemd is still starting units (logind restarting)
+    and the console RX can corrupt a byte; commands typed minutes later are clean.
+    Returns False when the cap ran out (the caller proceeds anyway) and True otherwise;
+    an image without systemctl counts as settled."""
+    deadline = time.monotonic() + (SYSTEM_SETTLE_CAP_S if cap is None else cap)
+    pats = {
+        "done": r"(?m)^(?:running|degraded)\r?$",
+        "busy": r"(?m)^(?:starting|initializing|stopping|offline|maintenance)\r?$",
+        "none": r"not found|No such file",
+    }
+    while time.monotonic() < deadline:
+        try:
+            send_checked(console, "systemctl is-system-running")
+            key, _ = console.expect_any(pats, 10.0)
+        except (ExpectTimeout, BenchError):
+            key = "busy"
+        if key in ("done", "none"):
+            console.drain(CONSOLE_SETTLE_S, 5.0)
+            return True
+        time.sleep(SYSTEM_POLL_S)
+        console.drain(CONSOLE_SETTLE_S, 5.0)
+    return False
+
+
 def console_login(console: Console, user: str = "root", timeout: float = 120.0) -> None:
     """Get a shell prompt on the Linux console (passwordless dev images only)."""
     console.send_line("")
-    key, _ = console.expect_any({"login": r"login: *$", "shell": _SHELL}, timeout)
-    if key == "shell":
-        return
-    console.send_line(user)
-    key, _ = console.expect_any({"password": r"[Pp]assword: *$", "shell": _SHELL}, 30.0)
-    if key == "password":
-        raise BenchError(f"console login for {user!r} asks for a password; only passwordless images are supported")
+    key = _expect_answering_cpr(console, {"login": r"login: *$", "shell": _SHELL}, timeout)
+    if key == "login":
+        console.send_line(user, paced=True)
+        key = _expect_answering_cpr(console, {"password": r"[Pp]assword: *$", "shell": _SHELL}, 30.0)
+        if key == "password":
+            raise BenchError(f"console login for {user!r} asks for a password; only passwordless images are supported")
+    _settle(console)
+    # no more escape-sequence queries from the shell or its profile
+    send_checked(console, "export TERM=dumb")
+    console.expect(_SHELL, 10.0)
+    wait_system_settled(console)
 
 
 def discover_host(console: Console, iface: str | None = None) -> str:
     """First global-scope IPv4 address, read over the logged-in console."""
     dev = f" dev {iface}" if iface else ""
-    console.send_line(f"ip -4 -o addr show scope global{dev}")
+    send_checked(console, f"ip -4 -o addr show scope global{dev}")
     m = console.expect(r"inet (\d{1,3}(?:\.\d{1,3}){3})/", 10.0)
     console.drain()
     return m.group(1)

@@ -30,7 +30,15 @@ from provision.bench import BenchError, Console
 from provision.gates import BL2_MMC_SECTOR, FIP_SECTOR  # noqa: F401  (re-exported)
 
 # --- prompts (module constants) ---
-ROM_BANNER = r"SCI Download mode"
+ROM_BANNER = r"SCI Download mode\s*\(Normal SCI boot\)"
+# The ROM falls back to download mode on a boot-parameter error, i.e. DSW1 is
+# probably not in SCIF mode 3 or the board is faulty: never proceed on it.
+ROM_FALLBACK = r"SCI Download mode\s*\(Due to parameter error\)"
+ROM_FALLBACK_MSG = (
+    "boot ROM entered SCI download mode 'Due to parameter error' (fallback, not a "
+    "normal SCIF boot): DSW1 is probably not set to SCIF download mode, or the board "
+    "is faulty. Check DSW1 and the unit before retrying."
+)
 # The ROM still prints after the banner; stream only after its full prompt line.
 ROM_READY = r"Load Program to SRAM\s*-+\r?\n"
 ROM_SETTLE_S = 0.3
@@ -94,10 +102,15 @@ def _ask(console: Console, prompt: str, what: str, timeout: float = PROMPT_TIMEO
     return m
 
 
-def load_writer(console: Console, mot: Path, timeout: float = 120.0) -> None:
-    """Wait for the boot-ROM banner, stream the Flash Writer ``.mot``, wait for its prompt."""
+def load_writer(console: Console, mot: Path, timeout: float = 120.0, banner_seen: bool = False) -> None:
+    """Wait for the boot-ROM banner (unless ``banner_seen``: detect already
+    consumed it and left the unit at the ROM prompt), stream the Flash Writer
+    ``.mot``, wait for its prompt."""
     image = Path(mot).read_bytes()
-    console.expect(ROM_BANNER, timeout)
+    if not banner_seen:
+        key, _ = console.expect_any({"ok": ROM_BANNER, "fallback": ROM_FALLBACK}, timeout)
+        if key == "fallback":
+            raise BenchError(ROM_FALLBACK_MSG)
     console.expect(ROM_READY, timeout)
     time.sleep(ROM_SETTLE_S)
     _stream(console, _crlf(image))

@@ -362,7 +362,7 @@ def test_refuses_fip_without_rail_string(tmp_path):
 
 def test_refuses_gd32_wrong_debug_port(tmp_path):
     ctx = _ctx(tmp_path, bench=_bench(probe=FakeProbe(dp_id_value=0x6BA02477)),
-               linux=Board(), gd32_fw=_gd32_fw(tmp_path))
+               linux=Board(), execute=True, gd32_fw=_gd32_fw(tmp_path))
     res = steps.run_steps(ctx, only=["gd32_flash"])
     assert res[-1].status == "failed" and "wrong target" in res[-1].detail
 
@@ -373,7 +373,8 @@ def _lock_ready(tmp_path, board, disposition="ship", done=True):
     (ctx.unit_dir / f"{SERIAL}.manifest.bin").write_bytes(bytes(board.array))
     (ctx.unit_dir / f"{SERIAL}.secure-page.staged.bin").write_bytes(bytes(board.page))
     (ctx.unit_dir / f"{SERIAL}.unit.yaml").write_text(
-        f"eeprom_unique_id: 00 11\ndisposition: {disposition}\n", encoding="utf-8")
+        f"eeprom_unique_id: 00 11\ndisposition: {disposition}\n"
+        "dxm1_fw_version: v\ndxm1_fw_md5: m\ndxm1_fw_uart_boot_md5: u\n", encoding="utf-8")
     if done:
         ctx.state = {"steps": {s: {"status": "done"} for s in ("secure_page", "cold_boot_test")}}
         ctx.state["steps"]["cold_boot_test"]["evidence"] = {"cold_boots_passed": "3/3"}
@@ -464,7 +465,9 @@ def test_mfg_date_is_monday_of_serial_week(tmp_path):
 def _login_console():
     """Console for one cold cycle to a login, then console_login + discover_host."""
     return FakeConsole([(r"^\r$", "\nroot@e1m:~# "),
-                        (r"^ip -4 -o addr", "2: eth0    inet 10.0.0.2/24 brd 10.0.0.255 scope global eth0\n")])
+                        (r"^export TERM=dumb", "export TERM=dumb\r\nroot@e1m:~# "),
+                        (r"^systemctl is-system-running", "systemctl is-system-running\r\nrunning\r\nroot@e1m:~# "),
+                        (r"^ip -4 -o addr", "ip -4 -o addr show scope global\r\n2: eth0    inet 10.0.0.2/24 brd 10.0.0.255 scope global eth0\n")])
 
 
 def test_eeprom_manifest_and_secure_page_execute(tmp_path):
@@ -489,6 +492,30 @@ def test_eeprom_manifest_and_secure_page_execute(tmp_path):
     assert board.lock == 0xFD                                        # secure_page never locks
     page_writes = [c for c in board.commands if "w66@0x58" in c]
     assert len(page_writes) == 1 and page_writes[0].startswith("i2ctransfer -y 0 w66@0x58 0x00 0x00 ")
+
+
+def test_eeprom_manifest_rediscovers_a_pinned_host_after_the_mac_change(tmp_path, monkeypatch):
+    board = Board(xspi_bl2=BL2, xspi_fip=FIP)
+    board.host = "10.0.0.9"                       # the pre-manifest (CID-MAC) address
+    console = _login_console()                    # DHCP now answers 10.0.0.2
+    bench = _bench(console=console)
+    bench.linux_host = "10.0.0.9"
+    bench.power.on_hook = lambda: console.feed("NOTICE:  BL2: v2.10\n\ne1m login: ")
+    ctx = _ctx(tmp_path, bench=bench, linux=board, execute=True)
+    attached = []
+    monkeypatch.setattr(ctx, "attach_linux", lambda h: (attached.append(h), setattr(board, "host", h)))
+    res = steps.run_steps(ctx, only=["eeprom_manifest"])
+    assert _statuses(res)["eeprom_manifest"] == "done", [(r.name, r.detail) for r in res]
+    assert attached == ["10.0.0.2"]
+
+
+def test_gd32_probe_discovers_the_host_when_only_starts_at_gd32_flash(tmp_path):
+    fw = _gd32_fw(tmp_path)
+    probe = FakeProbe(memory={a: (fw / n).read_bytes() for n, a, _k in steps.GD32_IMAGES})
+    probe.env = {}
+    ctx = _ctx(tmp_path, bench=_bench(console=_login_console(), probe=probe), gd32_fw=fw, execute=True)
+    assert isinstance(steps.Gd32Flash().probe(ctx), steps.Satisfied)
+    assert probe.env == {"ALP_PROVISION_HOST": "10.0.0.2"}
 
 
 def test_eeprom_manifest_refuses_locked_or_foreign_array(tmp_path):
@@ -1120,6 +1147,47 @@ def test_record_newest_superseded_same_bundle_failed_write_blocks_fallback(tmp_p
         tmp_path, None, groups=lambda g: [g("cur"), g("cur", "failed")]))
 
 
+def _record_multi_revision(tmp_path, old_sha):
+    ctx = _ctx(tmp_path, execute=True)
+    ctx.state = {
+        "bundle_sha256": "cur",
+        "steps": {"cold_boot_test": {"status": "done", "evidence": {"act88760_gpio4_after_boot": "0x08"}}},
+        "superseded": [{"bundle_sha256": old_sha, "tool_rev": "oldrev", "steps": {
+            "eeprom_manifest": {"status": "done", "at": "2026-09-30T20:42:45Z",
+                                "evidence": {"eeprom_unique_id": "ab12"}},
+            "secure_page": {"status": "done", "evidence": {"act88760_gpio4_otp": "0x88"}},
+            "gd32_flash": {"status": "skipped", "evidence": {"gd32_dp_id": "0x0be12477"}}}}]}
+    steps.run_steps(ctx, only=["record"])
+    u = ctx.unit_dir / f"{SERIAL}.unit.yaml"
+    return ctx, u.read_text(encoding="utf-8") if u.exists() else ""
+
+
+def test_record_takes_every_steps_facts_from_a_same_bundle_older_revision(tmp_path):
+    ctx, text = _record_multi_revision(tmp_path, "cur")
+    for want in ("eeprom_unique_id", "act88760_gpio4_otp", "gd32_dp_id", "act88760_gpio4_after_boot"):
+        assert f"{want}:" in text, text
+    assert "step eeprom_manifest from superseded run, tool_rev oldrev" in (
+        ctx.unit_dir / f"{SERIAL}.md").read_text(encoding="utf-8")
+    f = tmp_path / "w.unit.yaml"
+    f.write_text(text, encoding="utf-8")
+    # only the operator-set disposition may still block; no recorded fact is missing
+    assert [r for r in ledger_out.ship_check(ledger_out.read_unit_yaml(f), CATALOGUE["keys"])
+            if r.startswith("missing") and "disposition" not in r] == []
+
+
+def test_record_ignores_other_bundle_older_revision_for_non_flash_steps(tmp_path):
+    _, text = _record_multi_revision(tmp_path, "other")
+    assert "eeprom_unique_id" not in text and "act88760_gpio4_otp" not in text, text
+
+
+def test_probe_satisfied_gd32_flash_records_dp_id(tmp_path):
+    fw = _gd32_fw(tmp_path)
+    mem = {a: (fw / n).read_bytes() for n, a, _k in steps.GD32_IMAGES}
+    ctx = _ctx(tmp_path, bench=_bench(probe=FakeProbe(memory=mem)), gd32_fw=fw)
+    r = steps.Gd32Flash().probe(ctx)
+    assert isinstance(r, steps.Satisfied) and r.evidence["gd32_dp_id"] == "0x0be12477", r
+
+
 def test_record_superseded_build_dir_provenance_still_blocks_ship(tmp_path):
     text = _record_after_supersession(tmp_path, "cur", version="build-dir:/x")
     assert "rootfs_bundle_version: build-dir:/x" in text
@@ -1261,6 +1329,28 @@ def test_detect_in_uboot_then_bootstrap_is_not_refused(tmp_path, monkeypatch):
     assert steps.Bootstrap().run(dry).status != "failed"
 
 
+def test_detect_then_bootstrap_cycles_power_exactly_once(tmp_path, monkeypatch):
+    from provision import scif_writer as sw
+    banner = "SCI Download mode (Normal SCI boot)\r\n-- Load Program to SRAM ---------------\r\n\r\n>"
+    b = _bench(console=FakeConsole([(None, banner)]))
+    (tmp_path / "w.mot").write_bytes(b"S0030000FC")
+    b.scif["flash_writer"] = tmp_path / "w.mot"
+    ctx = _ctx(tmp_path, bench=b, execute=True)
+    for fn in ("_stream", "em_w", "em_secsd", "em_dcid"):
+        monkeypatch.setattr(sw, fn, lambda *a, **k: None)
+    monkeypatch.setattr(steps.Ctx, "artefact_bytes", lambda self, k: b"x")
+    assert steps.Detect().run(ctx).status == "done" and ctx.boot_class == "scif-rom"
+    assert steps.Bootstrap().run(ctx).status == "done"
+    assert b.power.events == ["off", "on"]
+
+
+def test_detect_refuses_the_parameter_error_fallback_banner(tmp_path):
+    b = _bench(console=FakeConsole([(None, "SCI Download mode (Due to parameter error)\r\n")]))
+    ctx = _ctx(tmp_path, bench=b, execute=True)
+    res = steps.run_one(steps.Detect(), ctx)
+    assert res.status == "failed" and "parameter error" in res.detail
+
+
 def test_accept_cid_change_adopts_once_then_refuses_another_swap(tmp_path, monkeypatch):
     other = "aa" + CID[2:]
     ctx, _ = _cid_ctx(tmp_path, monkeypatch, other, CID)
@@ -1283,3 +1373,79 @@ def test_census_after_gd32_flash_keeps_the_early_otp_evidence(tmp_path):
     assert ctx.facts["act88760_gpio4_workaround"] == "provision (volatile 0x08)"
     census = next(r for r in res if r.name == "census")
     assert "act88760_gpio4_otp" not in census.evidence
+
+
+# --- review round: identity on every attach, running entries, precedence, family ---------------
+
+def _ip_console():
+    return FakeConsole([(r"^ip -4 -o addr", "ip -4 -o addr show scope global\r\n"
+                         "2: eth0    inet 10.0.0.2/24 brd x scope global eth0\n")])
+
+
+def test_connect_linux_refuses_a_different_unit_behind_the_rediscovered_host(tmp_path, monkeypatch):
+    ctx, _ = _cid_ctx(tmp_path, monkeypatch, "aa" + CID[2:], CID)
+    ctx.bench.console = _ip_console()
+    with pytest.raises(steps.Refused, match="eMMC CID"):
+        steps.connect_linux(ctx, force=True, rediscover=True)
+
+
+def test_mac_change_flag_makes_every_later_attach_discover_instead_of_using_the_pin(tmp_path, monkeypatch):
+    ctx, reads = _cid_ctx(tmp_path, monkeypatch, CID, CID)
+    ctx.bench.console = _ip_console()           # DHCP answers 10.0.0.2; bench.yaml pins 192.0.2.7
+    ctx.rediscover_host = True
+    assert ctx.pinned_host is None
+    steps.connect_linux(ctx, force=True)           # no explicit rediscover: the flag decides
+    assert ctx.linux.host == "10.0.0.2" and reads == ["10.0.0.2"]
+
+
+def test_eeprom_manifest_sets_the_rediscover_flag(tmp_path, monkeypatch):
+    board = Board(xspi_bl2=BL2, xspi_fip=FIP)
+    board.host = "10.0.0.2"
+    console = _login_console()
+    bench = _bench(console=console)
+    bench.power.on_hook = lambda: console.feed("NOTICE:  BL2: v2.10\n\ne1m login: ")
+    ctx = _ctx(tmp_path, bench=bench, linux=board, execute=True)
+    steps.run_steps(ctx, only=["eeprom_manifest"])
+    assert ctx.rediscover_host is True
+
+
+def test_a_running_entry_is_saved_before_the_step_runs_and_blocks_the_superseded_fallback(tmp_path):
+    class Boom(steps.Step):
+        name = "census"
+        always_run = True
+
+        def run(self, ctx):
+            assert ctx.state["steps"]["census"]["status"] == "running"
+            assert json.loads(ctx.state_path.read_text(encoding="utf-8"))["steps"]["census"]["status"] == "running"
+            raise KeyboardInterrupt            # killed mid-step: nothing after run_one executes
+    ctx = _ctx(tmp_path, execute=True)
+    ctx.state = {"bundle_sha256": "cur", "steps": {}, "superseded": [{
+        "bundle_sha256": "cur", "tool_rev": "old",
+        "steps": {"census": {"status": "done", "evidence": {"eeprom_unique_id": "ab12"}}}}]}
+    with pytest.raises(KeyboardInterrupt):
+        steps.run_steps(ctx, steps=[Boom])
+    steps.run_steps(ctx, only=["record"])
+    u = ctx.unit_dir / f"{SERIAL}.unit.yaml"
+    assert "eeprom_unique_id" not in (u.read_text(encoding="utf-8") if u.exists() else "")
+
+
+def test_record_newest_group_wins_on_a_shared_key(tmp_path):
+    ctx = _ctx(tmp_path, execute=True)
+    ctx.state = {"bundle_sha256": "cur",
+                 "steps": {"cold_boot_test": {"status": "done", "evidence": {"act88760_gpio4_otp": "0x08"}}},
+                 "superseded": [{"bundle_sha256": "cur", "tool_rev": "old", "steps": {
+                     "secure_page": {"status": "done", "evidence": {"act88760_gpio4_otp": "0x88"}}}}]}
+    steps.run_steps(ctx, only=["record"])
+    assert "act88760_gpio4_otp: 0x08" in (ctx.unit_dir / f"{SERIAL}.unit.yaml").read_text(encoding="utf-8")
+
+
+def test_record_ship_check_uses_the_preset_family_not_the_bundle_field(tmp_path):
+    ctx = _ctx(tmp_path, execute=True)             # preset is a DEEPX (v2n-m1) SKU
+    cat = {**CATALOGUE["keys"], "dxm1_fw_version": {
+        "group": "dxm1", "source": "", "mode": "auto", "ship_required": False,
+        "ship_required_for": ["v2n-m1"]}}
+    (ctx.ledger_root / "schema" / "v2n.keys.yaml").write_text(
+        yaml.safe_dump({"schema": 1, "family": "v2n", "keys": cat}), encoding="utf-8")
+    ctx.bundle["family"] = "v2n"                   # a wrong/stale bundle field must not hide DX-M1
+    res = steps.run_steps(ctx, only=["record"])
+    assert "dxm1_fw_version" in res[-1].detail
