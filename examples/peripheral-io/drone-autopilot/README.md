@@ -43,7 +43,7 @@ motor mixer → ESCs.
 
 ## Hardware
 
-- E1M-AEN801 SoM.
+- E1M-AEN801 SoM (or its E1M-AEN803 twin -- see Build below).
 - E1M-EVK board (4× PWM out, 1× SBUS UART in, I²C0).
 - External 4S LiPo battery wired through the board's INA236
   shunt for telemetry.
@@ -58,6 +58,17 @@ motor mixer → ESCs.
 # writes examples/peripheral-io/drone-autopilot/generated/alp.conf, which west reads below (#866)
 python3 scripts/gen_example_alp_conf.py examples/peripheral-io/drone-autopilot
 west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/peripheral-io/drone-autopilot -- -DEXTRA_CONF_FILE=generated/alp.conf
+west flash
+```
+
+This app also ships an E1M-AEN803 twin of the AEN801 overlay above
+(`boards/alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay`):
+[`boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay`](boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay)
+(identical DT content). After setting `som.sku: E1M-AEN803` in
+`board.yaml`, build it with:
+
+```
+west build -b alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp examples/peripheral-io/drone-autopilot
 west flash
 ```
 

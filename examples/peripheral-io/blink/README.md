@@ -85,7 +85,23 @@ this exact gap (tracked as
 `tan doctor` to confirm what's missing before re-running.
 
 To target a different SoM / board, edit `board.yaml` -- nothing else
-needs to change.
+needs to change. For example, this app already ships an E1M-AEN803
+twin of its board-qualified overlay, with DT content identical to the
+AEN801 file beside it. After you set `som.sku: E1M-AEN803` in
+`board.yaml`, `tan build` applies
+[`boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay`](boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay)
+(this app declares only `cores: m55_hp`). There is no M55-HE twin: the
+AEN bench farm's default target
+(`scripts/bench/aen/bench-env.sh`'s `AEN_BOARD`) is M55-HE, an
+undeclared core for this app. `scripts/bench/aen/build.sh`, run with
+that default `AEN_BOARD`, refuses with exit 2 (its board-qualified
+preflight, alp-sdk#2094/#2235) rather than silently applying the
+M55-HP-derived config to the wrong core. For the bench, build M55-HP
+instead (`AEN_BOARD=alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp`).
+The preflight guards only
+`build.sh` itself, though -- a raw `west build -b
+alp_e1m_aen803_m55_he/...` bypasses it, applies no overlay, and is
+unsupported.
 
 ### native_sim (host, no hardware)
 

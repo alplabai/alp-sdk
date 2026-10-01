@@ -106,7 +106,11 @@ on:
       - 'examples/connectivity/iot-dashboard/**'
       - 'examples/connectivity/iot-fleet-ota/**'
       - 'examples/connectivity/mqtt-telemetry/**'
+      - 'examples/peripheral-io/alp-console/**'
+      - 'examples/peripheral-io/blink/**'
       - 'examples/peripheral-io/drone-autopilot/**'
+      - 'examples/peripheral-io/pwm-led-fade/**'
+      - 'examples/peripheral-io/qenc-readout/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
       - 'zephyr/boards/alp/e1m_aen803_m55_he/**'
@@ -137,7 +141,11 @@ on:
       - 'examples/connectivity/iot-dashboard/**'
       - 'examples/connectivity/iot-fleet-ota/**'
       - 'examples/connectivity/mqtt-telemetry/**'
+      - 'examples/peripheral-io/alp-console/**'
+      - 'examples/peripheral-io/blink/**'
       - 'examples/peripheral-io/drone-autopilot/**'
+      - 'examples/peripheral-io/pwm-led-fade/**'
+      - 'examples/peripheral-io/qenc-readout/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
       - 'zephyr/boards/alp/e1m_aen803_m55_he/**'
@@ -444,11 +452,12 @@ jobs:
       # tree gets no real CI coverage without a -p flag AND a matching
       # platform_allow entry; a testcase.yaml change alone selects nothing
       # here. The --testsuite-root list below is scoped to examples/aen --
-      # the testcase.yaml files whose platform_allow names an AEN target
-      # are the entire point; nothing outside that tree is in scope for
-      # this job. examples/connectivity/firmware-update-log is a second,
-      # bounded root (issue #1101): it is the one non-examples/aen example
-      # with AEN801 platform_allow entries, kept as its own
+      # plus the bounded roots enumerated below; the testcase.yaml files
+      # whose platform_allow names an AEN target are the entire point;
+      # nothing outside these ten roots is in scope for this job.
+      # examples/connectivity/firmware-update-log is a second,
+      # bounded root (issue #1101): at #1101 it was the one non-examples/aen
+      # example with AEN801 platform_allow entries, kept as its own
       # --testsuite-root rather than widened to all of examples/ (this
       # job's stated disk-budget concern, see the header comment) or moved
       # under examples/aen (it is a portable <alp/update_log.h> demo, not
@@ -467,8 +476,9 @@ jobs:
       # its AEN hardware scenario named a board target it shipped no
       # overlay for, so the alp-i2c0/alp-uart1/alp-pwm0..3 aliases its
       # overlay wires were silently dropped and nothing built to notice.
-      # Bounded to this one example, not widened to examples/peripheral-io/
-      # -- every other example there is native_sim-only (see #2106).
+      # #2235 adds its AEN803 M55-HP boards/ overlay and widens that same
+      # scenario's platform_allow to name the AEN803 M55-HP target too, so
+      # this root now declares both SKUs.
       # examples/connectivity/mqtt-telemetry and .../iot-fleet-ota are the
       # fourth and fifth bounded roots (issue #2173). Neither had ANY AEN
       # coverage here: mqtt-telemetry shipped no AEN scenario at all, and
@@ -502,17 +512,47 @@ jobs:
       # board target for it, so a regression in that pipeline would only
       # surface on the next real bench flash. Same shape as the roots
       # above: one example, bounded, build_only, not widened to any other
-      # directory. AUTHORITATIVE scenario count for this job's root list --
-      # re-derived 2026-09-27 (#2173) with a single `--dry-run` per leg over
-      # the exact roots + `-p` flags this step uses, at HEAD after the dev
-      # merge and this change's own iot-dashboard AEN board overlay
-      # backfill: 96 AEN801 configurations (both HE + HP), 91 AEN803 (187
-      # total). This is the only current count in this file; every other
-      # scenario count in it (header, ADVISORY note, job comments) describes
-      # the tree when its cited issue landed, not HEAD -- trust this one.
+      # directory.
+      # AUTHORITATIVE scenario count for this job's root list --
+      # re-derived 2026-10-01 (#2235, folding in #2521's qenc-readout root)
+      # with a single `--dry-run` per leg over the exact eleven roots +
+      # `-p` flags this step uses, at HEAD after the dev merge that brought
+      # in #2541's ccache/subset split: 107 AEN801 configurations
+      # (90 M55-HE + 17 M55-HP), 105 AEN803 (88 M55-HE + 17 M55-HP), 212
+      # total. This is the only current count in this file; every other
+      # scenario count in it (header, ADVISORY note, job comments)
+      # describes the tree when its cited issue landed, not HEAD -- trust
+      # this one.
       # The timeout-minutes comment below does the latter -- it does not
       # carry its own count.
-      - name: twister · ${{ matrix.label }} · ${{ matrix.subset }}/2 on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota + camera-mjpeg-stream + iot-dashboard
+      # examples/peripheral-io/alp-console, .../blink and .../pwm-led-fade
+      # are the seventh, eighth and ninth bounded roots (issue #2235, the
+      # unlanded remainder of closed PR #2232). None of the three shipped
+      # an AEN803 boards/ overlay on dev -- each had only its AEN801
+      # boards/ files (blink and pwm-led-fade shipped HE + HP AEN801
+      # overlays; alp-console an overlay + .conf), and no testcase.yaml
+      # scenario ever selected even that, so the three examples were
+      # native_sim-only in CI and neither SKU's
+      # real-silicon build was gated. #2235 adds each example's AEN803
+      # boards/ twin (DT/Kconfig content held equal to the AEN801 file by
+      # check_example_board_overlay_content_parity.py) plus one build_only
+      # AEN scenario naming both SKUs for every core it ships an overlay
+      # for (alp-console: M55-HE; blink and pwm-led-fade: M55-HP only --
+      # both declare only cores.m55_hp in board.yaml, so no M55-HE twin).
+      # Bounded to these
+      # four examples (this trio plus drone-autopilot above), not widened to
+      # all of examples/peripheral-io/ -- every OTHER example there stays
+      # native_sim-only (see #2106).
+      # examples/peripheral-io/qenc-readout is the tenth bounded root
+      # (issue #2521, folded into #2235/#2239 on review): its AEN scenario
+      # (alp_sdk.example.qenc_readout.aen, landed by #2522) names all four
+      # AEN board targets -- both SKUs, both cores -- but no CI job ever
+      # selected it, since this was the only `--testsuite-root` list that
+      # reaches an AEN target and it had no entry for this example. It
+      # ships an AEN803 twin overlay/.conf pair for both cores already
+      # (`examples/peripheral-io/qenc-readout/boards/`), so adding the root
+      # here is a pure CI-coverage gap fix, not a new example change.
+      - name: twister · ${{ matrix.label }} · ${{ matrix.subset }}/2 on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota + camera-mjpeg-stream + iot-dashboard + alp-console + blink + pwm-led-fade + qenc-readout
         id: twister
         working-directory: ${{ github.workspace }}
         env:
@@ -525,10 +565,10 @@ jobs:
         # re-derived here -- see the AUTHORITATIVE `--dry-run` count in the
         # camera-mjpeg-stream comment above this step, not restated here.
         # Scaled linearly off the 1461s/92-build #2198 measurement
-        # (15.9 s/build) at that count: AEN801 projects to about
-        # 1525s/25.4min (~15% headroom under this 30min cap), AEN803 to
-        # about 1445s/24.1min (~20% headroom) -- inside the cap, but not
-        # the wide margin an earlier draft of this comment claimed.
+        # (15.9 s/build) at that count: AEN801 (103) projects to
+        # about 1638s/27.3min (~9% headroom under this 30min cap), AEN803
+        # (101) to about 1606s/26.8min (~11% headroom) -- inside the cap,
+        # but thin; #2541 tracks persisting ccache to win headroom back.
         # Revisit if a future scenario count pushes either leg closer to
         # it -- the AEN801 leg in particular has less room left than
         # AEN803.
@@ -561,6 +601,10 @@ jobs:
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/mqtt-telemetry" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/iot-fleet-ota" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/camera-mjpeg-stream" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/alp-console" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/blink" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/pwm-led-fade" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/qenc-readout" \
             --inline-logs \
             --no-detailed-test-id
 
