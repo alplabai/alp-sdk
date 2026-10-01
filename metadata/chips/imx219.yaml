@@ -119,4 +119,4 @@ physical:
     - { role: decouple, value: 2.2uF, net: VCP, refdes_prefix: C }
     - { role: decouple, value: 1.0uF, net: VBO, refdes_prefix: C }
 tracking:
-  blocker: "no child issue filed; maintainer triage on #500"
+  blocker: "no child issue filed; not scheduled, deferred until a product selects the part"

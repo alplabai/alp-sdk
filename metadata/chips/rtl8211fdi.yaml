@@ -122,4 +122,4 @@ physical:
     - { pad: "40", signal: AVDD }    # AVDD33 -- 3.3V analog
     - { pad: "41", signal: GND }     # + Exposed Pad (E-Pad), analog+digital ground
 tracking:
-  blocker: "no child issue filed; maintainer triage on #500"
+  blocker: "no child issue filed; not scheduled, deferred until a product selects the part"

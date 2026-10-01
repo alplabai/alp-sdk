@@ -95,4 +95,4 @@ verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
 tracking:
-  blocker: "no child issue filed; maintainer triage on #500"
+  blocker: "no child issue filed; not scheduled, deferred until a product selects the part"

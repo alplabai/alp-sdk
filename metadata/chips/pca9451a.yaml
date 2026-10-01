@@ -137,4 +137,4 @@ physical:
     - { pad: "56", signal: INL1 }
     - { pad: "EP",  signal: GND }
 tracking:
-  issue: 474
+  blocker: "silicon verification pending (HIL untested); no open tracker"
