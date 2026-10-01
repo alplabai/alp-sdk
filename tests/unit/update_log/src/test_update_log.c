@@ -1791,3 +1791,180 @@ ZTEST(alp_update_log, test_ram_fallback_entries_do_not_survive_reinit)
 }
 
 #endif /* CONFIG_ALP_SDK_UPDATE_LOG_PERSIST */
+
+/* ---- Alif ATOC package locator (synthetic MRAM, base 0x80000000) ---- */
+
+#define M_BASE   0x80000000u
+#define M_LEN    0x10000u
+#define M_ALIAS  0x10000000u
+#define M_EMB    0x1000u /* obj of entry "APP" ; image embedded at obj+0xA00 */
+#define M_OBJ2   0x2000u /* obj of entry "EXT" ; image external at M_IMG2 */
+#define M_IMG2   0x4000u
+#define M_IMG2_N 0x300u
+#define M_EMB_N  0x100u
+
+static uint8_t g_mram[M_LEN];
+
+static void put32(uint32_t off, uint32_t v)
+{
+	for (int i = 0; i < 4; i++) {
+		g_mram[off + i] = (uint8_t)(v >> (8 * i));
+	}
+}
+
+/* Key cert (0x72 words) followed by a content cert at obj; returns nothing. */
+static void
+mk_cert(uint32_t obj, bool key_first, uint32_t img_off, uint32_t len, const uint8_t *img)
+{
+	uint32_t c = obj;
+
+	if (key_first) {
+		put32(c, 0x53426B63u);
+		put32(c + 4, 0x00010000u);
+		put32(c + 8, 0x72u);
+		c += 0x72u * 4 + 384;
+	}
+	put32(c, 0x53426363u);
+	put32(c + 4, 0x00010000u);
+	put32(c + 8, 0x77u);
+	put32(c + 12, 0x0001010fu);
+	ulog_sha256(img, len, &g_mram[c + 0x1B0]);
+	put32(c + 0x1D8, 0);
+	put32(c + 0x77 * 4 + 384, M_BASE + M_ALIAS + img_off);
+	put32(c + 0x77 * 4 + 384 + 4, len);
+}
+
+static void mk_entry_at(uint32_t e, uint32_t obj, uint32_t size, const char *name, uint32_t ver)
+{
+	put32(e, obj);
+	put32(e + 4, size);
+	put32(e + 8, 4);
+	put32(e + 0x10, ver);
+	memcpy(&g_mram[e + 0x14], name, strlen(name));
+}
+
+static void mk_mram(void)
+{
+	uint32_t hdr = 0x800;
+
+	memset(g_mram, 0, sizeof(g_mram));
+	for (uint32_t i = 0; i < M_IMG2_N; i++) {
+		g_mram[M_IMG2 + i] = (uint8_t)(i * 7 + 1);
+	}
+	mk_cert(M_EMB, true, M_EMB + 0xA00, M_EMB_N, &g_mram[M_EMB + 0xA00]);
+	for (uint32_t i = 0; i < M_EMB_N; i++) {
+		g_mram[M_EMB + 0xA00 + i] = (uint8_t)(i + 3);
+	}
+	/* hash must cover the final bytes */
+	mk_cert(M_EMB, true, M_EMB + 0xA00, M_EMB_N, &g_mram[M_EMB + 0xA00]);
+	mk_cert(M_OBJ2, false, M_IMG2, M_IMG2_N, &g_mram[M_IMG2]);
+
+	memcpy(&g_mram[hdr], "OEMTOC01", 8);
+	put32(hdr + 8, 0x00020020u);
+	mk_entry_at(hdr + 0x20, M_BASE + M_EMB, M_EMB_N, "APP", 0x01020300u);
+	mk_entry_at(hdr + 0x40, M_BASE + M_OBJ2, M_IMG2_N, "EXT", 0x04050600u);
+	/* The object addresses above are bus addresses. */
+	put32(M_LEN - 12, M_BASE + hdr);
+	put32(M_LEN - 8, M_BASE + 0x400);
+	put32(M_LEN - 4, 0x8000u);
+}
+
+static alp_status_t locate(const char *name, uint32_t max, uint32_t *a, uint32_t *l, uint8_t *h)
+{
+	uint8_t  id[8] = { 0 };
+	uint32_t v;
+
+	memcpy(id, name, strlen(name));
+	return ulog_alif_atoc_locate(g_mram, M_LEN, M_BASE, id, max, a, l, h, &v);
+}
+
+ZTEST(alp_update_log, test_atoc_locate_ok)
+{
+	uint32_t a, l, v;
+	uint8_t  h[32], exp[32], id[8] = { 'A', 'P', 'P' };
+
+	mk_mram();
+	zassert_equal(locate("APP", 4096, &a, &l, h), ALP_OK);
+	zassert_equal(a, M_BASE + M_EMB + 0xA00);
+	zassert_equal(l, M_EMB_N);
+	ulog_sha256(&g_mram[M_EMB + 0xA00], M_EMB_N, exp);
+	zassert_mem_equal(h, exp, 32);
+	zassert_equal(ulog_alif_atoc_locate(g_mram, M_LEN, M_BASE, id, 4096, &a, &l, h, &v), ALP_OK);
+	zassert_equal(v, 0x01020300u);
+
+	zassert_equal(locate("EXT", 4096, &a, &l, h), ALP_OK);
+	zassert_equal(a, M_BASE + M_IMG2);
+	zassert_equal(l, M_IMG2_N);
+	ulog_sha256(&g_mram[M_IMG2], M_IMG2_N, exp);
+	zassert_mem_equal(h, exp, 32);
+}
+
+#define EXPECT_NOSUP(name, max) \
+	do { \
+		uint32_t a_, l_; \
+		uint8_t  h_[32]; \
+		zassert_equal(locate(name, max, &a_, &l_, h_), ALP_ERR_NOSUPPORT); \
+	} while (0)
+
+ZTEST(alp_update_log, test_atoc_locate_refusals)
+{
+	const uint32_t hdr = 0x800, ccert = M_OBJ2;
+
+	mk_mram();
+	EXPECT_NOSUP("NOPE", 4096);
+
+	mk_mram();
+	EXPECT_NOSUP("EXT", 0x100); /* oversize */
+
+	mk_mram();
+	put32(M_LEN - 12, 0x90000000u); /* header outside MRAM */
+	EXPECT_NOSUP("EXT", 4096);
+
+	mk_mram();
+	put32(M_LEN - 8, M_BASE + 0x900); /* header not inside package */
+	EXPECT_NOSUP("EXT", 4096);
+
+	mk_mram();
+	put32(M_LEN - 4, 0x20000u); /* package overruns MRAM */
+	EXPECT_NOSUP("EXT", 4096);
+
+	mk_mram();
+	g_mram[hdr] = 'X'; /* bad OEMTOC magic */
+	EXPECT_NOSUP("EXT", 4096);
+
+	mk_mram();
+	put32(hdr + 8, 0x00020040u); /* entry size != 0x20 */
+	EXPECT_NOSUP("EXT", 4096);
+
+	mk_mram();
+	put32(hdr + 8, 0xFFFF0020u); /* count runs into trailer */
+	EXPECT_NOSUP("NOPE", 4096);
+
+	mk_mram();
+	put32(ccert, 0x12345678u); /* bad cert magic */
+	EXPECT_NOSUP("EXT", 4096);
+
+	mk_mram();
+	put32(ccert + 12, 0x0002010fu); /* two records */
+	EXPECT_NOSUP("EXT", 4096);
+
+	mk_mram();
+	put32(ccert + 8, 0x78u); /* body length mismatch */
+	EXPECT_NOSUP("EXT", 4096);
+
+	mk_mram();
+	put32(ccert + 0x1D8, 1); /* aes encrypted */
+	EXPECT_NOSUP("EXT", 4096);
+
+	mk_mram();
+	put32(ccert + 0x77 * 4 + 384, 0x90000000u + M_LEN); /* flash_addr outside */
+	EXPECT_NOSUP("EXT", 4096);
+
+	mk_mram();
+	put32(ccert + 0x77 * 4 + 384 + 4, M_IMG2_N - 1); /* length != entry size */
+	EXPECT_NOSUP("EXT", 4096);
+
+	mk_mram();
+	put32(hdr + 0x40, M_BASE + M_LEN - 8); /* object runs off MRAM */
+	EXPECT_NOSUP("EXT", 4096);
+}

@@ -13,15 +13,15 @@
  * src/backends/security/se_cryptocell.c and src/backends/ext/alif/
  * storage.c already use for services with no dedicated wrapper.
  *
- * The ATOC has no per-entry digest field (SERVICES_toc_info_t carries
- * image_identifier/version/store_address/image_size/flags, not a hash), so
- * this backend computes the SHA-256 itself over the TOC entry's own
- * [store_address, store_address + image_size) MRAM range -- the same
- * bytes the SE already verified against the entry's signature before
- * this image ran. That range is independently bounded by
- * CONFIG_ALP_SDK_UPDATE_LOG_BOOT_ALIF_SE_MAX_IMAGE_SIZE before it is ever
- * hashed, so a corrupt/huge image_size field cannot turn this into an
- * unbounded read or a multi-second stall.
+ * The ATOC has no per-entry digest field, and SES v1.110 reports
+ * store_address 0 for every entry, so this backend locates the image
+ * through the ATOC package in MRAM (ulog_alif_atoc_locate(): trailer ->
+ * OEMTOC01 header -> entry -> CryptoCell-312 certificate chain -> image
+ * range + signed hash), computes the SHA-256 itself and compares it with
+ * the signed content-cert hash. A mismatch is reported as VERIFY_FAILED.
+ * The located range is bounded by
+ * CONFIG_ALP_SDK_UPDATE_LOG_BOOT_ALIF_SE_MAX_IMAGE_SIZE before it is
+ * hashed, so a corrupt size field cannot cause an unbounded read.
  *
  * Overrides the weak default alp_update_log_boot_metadata_read()
  * (src/update_log_boot_metadata.c). The identity/verify policy (image-id
@@ -32,6 +32,8 @@
  */
 
 #include <string.h>
+
+#include <zephyr/devicetree.h>
 
 #include <se_service.h>
 
@@ -94,28 +96,39 @@ alp_status_t alp_update_log_boot_metadata_read(alp_update_log_entry_t *entry_out
 			return ALP_ERR_NOSUPPORT;
 		}
 
-		uint32_t store = pkt.resp_toc_entry.resp_store_address;
+		/* The SE's store_address is unreliable (SES v1.110 reports 0 for
+		 * every entry), so locate the image through the ATOC package in
+		 * MRAM and check its bytes against the signed content-cert hash. */
+		uint32_t img_addr, img_len, ent_ver;
+		uint8_t  cert_hash[32];
+		uint8_t  hash[32];
 
-		if (store == 0u) {
-			/* SES v1.110 reports store_address 0 for every TOC entry
-			 * (bench, E1M-AEN803, including A32_APP and BOOTLOAD that
-			 * SETOOLS places at 0x80020000 / 0x80002000). Hashing
-			 * [0, size) would digest live TCM, not the image. */
+		if (ulog_alif_atoc_locate(
+		        (const uint8_t *)(uintptr_t)DT_REG_ADDR(DT_NODELABEL(mram_storage)),
+		        DT_REG_SIZE(DT_NODELABEL(mram_storage)),
+		        DT_REG_ADDR(DT_NODELABEL(mram_storage)),
+		        got_id,
+		        CONFIG_ALP_SDK_UPDATE_LOG_BOOT_ALIF_SE_MAX_IMAGE_SIZE,
+		        &img_addr,
+		        &img_len,
+		        cert_hash,
+		        &ent_ver) != ALP_OK) {
 			return ALP_ERR_NOSUPPORT;
 		}
 
-		uint8_t hash[32];
+		ulog_sha256((const unsigned char *)(uintptr_t)img_addr, img_len, hash);
 
-		ulog_sha256((const unsigned char *)(uintptr_t)store, size, hash);
+		char verify_char =
+		    (char)pkt.resp_toc_entry.resp_flags_string[ULOG_ALIF_TOC_FLAG_STRING_VERIFY_IDX];
+
+		if (memcmp(hash, cert_hash, sizeof(hash)) != 0) {
+			/* Bytes in MRAM do not match the signed hash: report
+			 * VERIFY_FAILED (any non-'V' char maps there). */
+			verify_char = '\0';
+		}
 
 		return ulog_alif_se_build_entry(
-		    got_id,
-		    expect_id,
-		    pkt.resp_toc_entry.resp_version,
-		    (char)pkt.resp_toc_entry.resp_flags_string[ULOG_ALIF_TOC_FLAG_STRING_VERIFY_IDX],
-		    hash,
-		    true,
-		    entry_out);
+		    got_id, expect_id, pkt.resp_toc_entry.resp_version, verify_char, hash, true, entry_out);
 	}
 
 	/* No TOC entry matched this build's configured image id: never
