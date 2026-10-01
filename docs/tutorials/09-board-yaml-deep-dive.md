@@ -338,15 +338,14 @@ APIs):
 
 - `etl`         -- ETL (Embedded Template Library)
 - `fmt`         -- {fmt}
-- `nlohmann_json` -- JSON for Modern C++
+- `nlohmann-json` -- JSON for Modern C++
 - `doctest`     -- doctest unit-test framework
 - `lvgl`        -- LVGL
 - `mbedtls`     -- MbedTLS (exposed alongside `<alp/security.h>`)
-- `cmsis_dsp`   -- CMSIS-DSP (exposed alongside `<alp/dsp.h>`)
+- `cmsis-dsp`   -- CMSIS-DSP (exposed alongside `<alp/dsp.h>`)
 - `littlefs`    -- LittleFS
-- `tflite_micro`, `pid`, `modbus`, `nanopb`, ... -- see the
-  full enum in
-  [`metadata/schemas/board.schema.json`](../../metadata/schemas/board.schema.json).
+- `tflite-micro`, `pid`, `modbus`, `nanopb`, ... -- the valid
+  names are the manifests under `metadata/libraries/`.
 
 ### `cores.<id>.extra_libraries` -- open-set escape hatch (v0.6)
 
@@ -596,6 +595,6 @@ orchestrator consistency error.
 - [`metadata/templates/board.yaml`](../../metadata/templates/board.yaml)
   -- a heavily-commented template you can copy as a starting
   point.
-- Tutorial [12: Mender OTA on Yocto](12-mender-ota.md) (TBD)
+- Tutorial [12: Mender OTA on Yocto](12-mender-ota.md)
   for how `board.yaml`'s OTA-config block threads through to
   meta-alp-sdk.

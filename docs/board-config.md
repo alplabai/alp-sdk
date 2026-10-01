@@ -101,7 +101,7 @@ by `scripts/alp_project.py`.
 Concretely:
 
 - **Don't edit `prj.conf` directly.**  The minimum-correct
-  `prj.conf` in a v0.3 alp-sdk app is empty (or carries only a
+  `prj.conf` in an alp-sdk app is empty (or carries only a
   comment).  `tan build` (or `scripts/gen_example_alp_conf.py` for twister
   and a bare `west build`) generates `alp.conf` from `board.yaml` and
   layers it over `prj.conf` via Zephyr's `EXTRA_CONF_FILE` cmake variable;

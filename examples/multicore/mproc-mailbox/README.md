@@ -12,8 +12,9 @@ hardware mailbox, wait for a reply, read the result back.
 - Resolving a raw pointer view of the shared region with
   `alp_shmem_view()`, then staging payload bytes by `memcpy`
   through that pointer (the surface hands back a base pointer +
-  size and trusts the caller to write through it; the backend
-  handles cache-coherency for `cacheable = false` regions).
+  size and trusts the caller to write through it; the region is
+  non-cacheable, so no cache maintenance is needed; `cacheable = true`
+  is refused with `ALP_ERR_NOSUPPORT`).
 - Signalling the peer with `alp_mbox_send` carrying a small
   tuple (offset + length) that points at the staged bytes.
 - Receiving the reply through an inbound callback registered with

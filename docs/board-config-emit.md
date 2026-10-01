@@ -172,8 +172,8 @@ manifest:
 ```
 
 Run `west update` and only the modules board.yaml actually
-references land in the workspace.  Closes the second v0.4 gap
-this doc previously flagged.
+references land in the workspace -- the `west.yml` auto-pinning
+gap is closed.
 
 ### Build-time identifier header (`--emit hw-info-h`)
 

@@ -10,8 +10,8 @@ Status keys:
 - **planned** — declared roadmap, no code yet.
 - **n/a** — combination not targeted.
 
-> **Calibration note (2026-06-24; updated 2026-06-24).** v0.8.0 ships
-> silicon-verified silicon: V2N GD32-bridge campaign (since v0.6),
+> **Calibration note (2026-06-24).** v0.8.0 ships
+> silicon-verified work: V2N GD32-bridge campaign (since v0.6),
 > AEN801 (E8) peripheral matrix (15/17 apps PASS on real silicon, 2
 > PARTIAL hardware-gated), and cc3501e bridge (hardware SS0, real
 > BLE/Wi-Fi scan, GPIO proxy, production warm-program flow) — all on
@@ -208,8 +208,8 @@ their own `pkg_check_modules` check (`libmosquitto`, `alsa`,
 without the matching `-dev` package on the sysroot degrade to the
 priority-0 `sw_fallback` backend of the class (not the old
 stub_backend.c NOSUPPORT stubs).  Per-class
-`ALP_VENDOR_OVERRIDES_<CLASS>` macros in
-`src/common/stub_backend.c` let each surface roll out independently
+`ALP_VENDOR_OVERRIDES_<CLASS>` macros in the per-class stub sources
+under `src/common/stub/` let each surface roll out independently
 across backends -- the currently-defined class gates include `I2C`,
 `SPI`, `UART`, `GPIO`, `MQTT`, `AUDIO_IN`, `AUDIO_OUT`, `SECURITY`,
 `WIFI`, `BLE`, `CAN`, `PWM`, `ADC`, `I2S`, `COUNTER`, `RTC`, `WDT`,
