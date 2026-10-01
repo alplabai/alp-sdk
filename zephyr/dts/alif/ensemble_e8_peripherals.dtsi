@@ -1857,10 +1857,10 @@
 	 * clock: ALIF_CANFD0_160M_CLK is re-authored into the UPSTREAM 8-arg
 	 * clockctrl encoding in alif-ensemble-clocks-ext.h (the fork's 7-arg packed
 	 * value MUST NOT be copied) -- gate CKEN=bit12, src-sel bit16=1 (160 MHz),
-	 * in CANFD_CTRL of CLKCTL_PER_SLV.  clock-frequency carries the controller's
-	 * input clock for the bit-timing math; the driver's set_rate is a no-op on
-	 * our upstream clockctrl, so this value is what the bit-timing uses (confirm
-	 * the divided rate vs the Alif TRM).  BENCH-UNVERIFIED.
+	 * in CANFD_CTRL of CLKCTL_PER_SLV.  clock-frequency is the CAN core clock: the
+	 * driver programs CANFD_CTRL.CKDIV (bits [7:0]) = 160 MHz / clock-frequency
+	 * (integer divisor 2..255; Alif DFP Driver_CAN.c), bench-verified at 20 MHz
+	 * (CKDIV 8) on E1M-AEN803.  The clockctrl set_rate is not used.
 	 *
 	 * A board enables it (status="okay") + supplies pinctrl_can0 + the alp_can0
 	 * alias.  Declared disabled here.
