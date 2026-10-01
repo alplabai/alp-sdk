@@ -8,8 +8,9 @@ exists only in `meta-alif-ensemble`, so any other MACHINE (for example
 
 It now lives at
 `meta-alp-sdk/dynamic-layers/meta-alif-ensemble/recipes-kernel/linux/linux-alif_%.bbappend`
-and is registered in `BBFILES_DYNAMIC`
-(`meta-alp-sdk/conf/layer.conf:34`, "meta-alif-ensemble:${LAYERDIR}/dynamic-layers/meta-alif-ensemble/*/*/*.bbappend"),
+and is registered in `BBFILES_DYNAMIC` at
+`meta-alp-sdk/conf/layer.conf:34`
+("meta-alif-ensemble:${LAYERDIR}/dynamic-layers/meta-alif-ensemble/*/*/*.bbappend"),
 the same way `meta-deepx-m1` is, so it is parsed only when that collection is in
 `bblayers.conf`. The `e1m-aen-evk-console.dtsi` fragment moved alongside it.
 The collection name `meta-alif-ensemble` matches the existing
