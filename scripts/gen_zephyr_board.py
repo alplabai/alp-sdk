@@ -62,7 +62,7 @@ Scope (issue #523, first slice; extended by #655 slices 1 and 2):
     The board `.dts` (`_v2n_dts()`, #655 slice 2) reuses the upstream
     RZ/V2N SoC devicetree and layers on the supervisor-links pin wiring,
     plus -- gated on the SoM preset's `topology.m33_sm.openamp_ipc`
-    (`metadata/schemas/som-preset-v1.schema.json`) -- the OpenAMP/MHU-B
+    (`metadata/schemas/som-preset-v2.schema.json`) -- the OpenAMP/MHU-B
     reserved-memory block and the CAN-FD-unavailable analysis
     (alp-sdk #683/#1146).  E1M-V2N101 and E1M-V2M101 both set it (the
     same RZ/V2N die and MHU-B, #1948); a preset that leaves it false gets

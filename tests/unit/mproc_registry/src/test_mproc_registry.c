@@ -73,6 +73,13 @@ ZTEST(alp_mproc_registry, test_select_returns_null_for_null_silicon_ref)
 
 /* ---------- Public-API behaviour tests ------------------------------ */
 
+ZTEST(alp_mproc_registry, test_shmem_open_refuses_cacheable)
+{
+	alp_shmem_config_t cfg = { .name = "alp_shmem0", .size = 64, .cacheable = true };
+	zassert_is_null(alp_shmem_open(&cfg));
+	zassert_equal(alp_last_error(), ALP_ERR_NOSUPPORT);
+}
+
 ZTEST(alp_mproc_registry, test_shmem_open_inval_on_null_args)
 {
 	/* Dispatcher must reject NULL cfg / NULL cfg->name before

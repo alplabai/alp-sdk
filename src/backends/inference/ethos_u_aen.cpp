@@ -23,8 +23,7 @@
  * (ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN +
  *  ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55/U85 +
  *  ALP_SDK_INFERENCE_TFLM_KERNEL_HELIUM) for AEN slices from
- * the SoM preset's inference.npu_population[] + the SoC JSON's
- * cores[<id>].vector_extension.
+ * the SoC JSON's npus[] + cores[<id>].vector_extension.
  *
  * The NPU attach is NOT Alif-proprietary.  The "arm,ethos-u"
  * nodes (ethosu85@49042000 / ethosu55@400e1000 in the AEN dtsi,

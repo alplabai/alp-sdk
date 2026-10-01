@@ -74,8 +74,10 @@ edgeai-vision-aen/
 ## Build (v0.1, host smoke)
 
 ```bash
+# writes examples/aen/edgeai-vision-aen/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/aen/edgeai-vision-aen
 west build -b native_sim/native/64 examples/aen/edgeai-vision-aen \
-    -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
 ```
 
 The app prints which v0.1 SDK pieces it successfully initialised
@@ -87,7 +89,9 @@ The board file ships in-tree at
 [`zephyr/boards/alp/e1m_aen801_m55_hp/`](../../../zephyr/boards/alp/e1m_aen801_m55_hp/):
 
 ```bash
-west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp .
+# from the example directory; writes ./generated/alp.conf (#866)
+python3 ../../../scripts/gen_example_alp_conf.py .
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp . -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 

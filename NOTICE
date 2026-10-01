@@ -49,6 +49,15 @@ respective component (under vendors/<name>/ or the referenced upstream).
 - nanopb — zlib license. Copyright (c) Petteri Aimonen.
   Integrated under vendors/nanopb/.
 
+- AWS IoT Device SDK for Embedded C (coreMQTT, coreJSON) — MIT.
+  Copyright (c) Amazon.com, Inc. or its affiliates.
+  Not redistributed; fetched at build time via west group `extras-cloud`
+  (see vendors/aws-iot/).
+
+- Azure SDK for Embedded C — MIT. Copyright (c) Microsoft Corporation.
+  Not redistributed; fetched at build time via west group `extras-cloud`
+  (see vendors/azure-iot/).
+
 --------------------------------------------------------------------------------
 Vendor BSPs and SDK binaries
 

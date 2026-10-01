@@ -14,6 +14,10 @@ sample:
 
 tests:
   alp_sdk.examples.aen.cc3501e_gatt_register.native_sim:
+    # native_sim can't build board.yaml's `diagnostics.console: ram` (see
+    # boards/native_sim_console.conf); listed AFTER alp.conf so it wins the merge.
+    # (A CMakeLists list(APPEND EXTRA_CONF_FILE) is dropped once this CLI value is set.)
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf;boards/native_sim_console.conf
     platform_allow:
       - native_sim/native/64
     tags:

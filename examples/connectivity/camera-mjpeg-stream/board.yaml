@@ -3,8 +3,9 @@
 #
 # Customer workflow: `tan init --from-example connectivity/camera-mjpeg-stream`,
 # change `som.sku` to your AEN MPN, edit `preset:` if you fork the EVK, and
-# `tan build`.  CMakeLists.txt invokes scripts/alp_project.py at configure
-# time and layers the generated alp.conf over prj.conf via EXTRA_CONF_FILE.
+# `tan build`, which plans alp.conf from this file; twister and a bare
+# west build read the pre-generated generated/alp.conf instead
+# (scripts/gen_example_alp_conf.py).
 #
 # No `chips:` list: the app talks to the camera + JPEG encoder purely
 # through <alp/camera.h> + <alp/jpeg.h>, gated on alp_has() rather than a

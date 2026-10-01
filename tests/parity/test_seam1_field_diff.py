@@ -303,3 +303,27 @@ def test_relocation_allowance_does_not_reach_outputdir_or_other_fields():
     mutated = _nest(oracle)
     mutated["slices"][1]["command"]["cwd"] = "build/m55_he-zephyr/build"
     assert _fails(oracle, mutated)
+
+
+def test_sysbuild_slice_image_scoped_extra_conf_file_stripped():
+    """#866: a sysbuild slice's `-D<image>_EXTRA_CONF_FILE=` is the intended
+    plan-native delta and does not, on its own, fail the comparator."""
+    oracle = _load("connectivity_iot-fleet-ota")
+    mutated = copy.deepcopy(oracle)
+    sl = mutated["slices"][0]
+    args = list(sl["command"]["args"])
+    app = args[args.index("--sysbuild") - 1]
+    image = app.rstrip("/").rsplit("/", 1)[-1]
+    sl["command"]["args"] = args + [
+        f"-D{image}_EXTRA_CONF_FILE=/some/path/alp.conf"]
+    assert not _fails(oracle, mutated)
+
+
+def test_sysbuild_slice_wrong_image_extra_conf_file_still_fails():
+    """#866: a prefix naming another image (e.g. mcuboot) is a regression."""
+    oracle = _load("connectivity_iot-fleet-ota")
+    mutated = copy.deepcopy(oracle)
+    sl = mutated["slices"][0]
+    sl["command"]["args"] = list(sl["command"]["args"]) + [
+        "-Dmcuboot_EXTRA_CONF_FILE=/some/path/alp.conf"]
+    assert _fails(oracle, mutated)
