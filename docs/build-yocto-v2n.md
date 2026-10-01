@@ -84,7 +84,7 @@ differ only in posture:
 
 Build the production image against the **`alp` distro** so the rootfs
 carries an Alp identity (`/etc/os-release`, `/etc/issue`, the login
-banner say `Alp SDK 6.30`) instead of the upstream
+banner say `Alp SDK <version>`, read from `include/alp/version.h`) instead of the upstream
 `Poky (Yocto Project Reference Distro)` reference-distro banner:
 
 ```bash
