@@ -104,16 +104,17 @@ esac
 
 HE_IMG=firmware-update-log-he-firewall-probe.bin
 cp -f "$HE_BIN" "$SET/build/images/$HE_IMG"
-DEVICE_CONFIG_JSON="${ALP_AEN_DEVICE_CONFIG_JSON:-app-device-config.json}"
+DEVICE_BIN=$(bench_stage_device_config "$SET") || { echo "could not stage DEVICE config" >&2; exit 1; }
 
 {
 	echo "{"
-	if [ "${ALP_AEN_INCLUDE_DEVICE_CONFIG:-no}" = "yes" ]; then
+	if [ -n "$DEVICE_BIN" ]; then
 		printf '    "DEVICE":   { "disabled": false, "binary": "%s", "version": "0.5.00", "signed": true },\n' \
-			"$DEVICE_CONFIG_JSON"
-		echo ">>> including DEVICE config in firewall-probe ATOC: $DEVICE_CONFIG_JSON" >&2
+			"$DEVICE_BIN"
+		echo ">>> including DEVICE config in firewall-probe ATOC: $DEVICE_BIN" >&2
 	else
-		echo ">>> app-only firewall-probe ATOC; preserving existing DEVICE/firewall policy" >&2
+		echo "!! WARNING: no DEVICE entry. The package REPLACES the ATOC, so on SES v1.110 this" >&2
+		echo "   removes any provisioned FC8 firewall; the probe will then FAIL by design." >&2
 	fi
 	cat <<JSON
     "HE-PROBE": { "disabled": false, "binary": "$HE_IMG", "version": "1.0.0", "signed": true,

@@ -17,3 +17,12 @@ Changes:
   `REQUIRE_HW_ENFORCED` behaviour (owner absent, hard error, ready).
 - `docs/os-support-matrix.md` and `include/alp/update_log.h` state the tier is
   app-immutable, not reflash-immutable.
+- The deployment recipe now carries the FC8 DEVICE config in every ATOC package
+  (a package without it de-provisions the firewall on SES v1.110).
+  `flash-update-log-dual.sh` and `flash-update-log-firewall-probe.sh` take
+  `ALP_AEN_DEVICE_CONFIG_JSON` (a path, which implies inclusion) and warn when it
+  is absent; the example ships `fc8-dual-device-config.json`. The recipe also
+  documents `ALP_ATOC_ALLOW_OVER_STORAGE`, the 64 KB deny window and the A32_APP
+  overlap caution.
+- The HE client now prints that its store is owned by the HP owner instead of
+  "RAM fallback", and `read-update-log-proof.sh` uses a private `mktemp` dir.

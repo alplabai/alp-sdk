@@ -50,7 +50,10 @@
 
 #include <zephyr/storage/flash_map.h>
 
-#if defined(CONFIG_ALP_SDK_UPDATE_LOG_PERSIST) && PARTITION_EXISTS(alp_ulog_partition)
+#if defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT)
+/* A client never mounts a store of its own: the HP owner owns the MRAM NVS. */
+#define UPDATE_LOG_STORAGE_STR "owned by the HP owner (MRAM NVS, reached over MHU)"
+#elif defined(CONFIG_ALP_SDK_UPDATE_LOG_PERSIST) && PARTITION_EXISTS(alp_ulog_partition)
 /* Whether alp_ulog_partition backs onto the on-die MRAM is a SoC/silicon
  * fact (Alif Ensemble E8, either core, either SKU sharing that die), not a
  * board or SKU one -- CONFIG_SOC_AE822FA0E5597LS0 is select-ed by both
