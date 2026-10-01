@@ -11,8 +11,8 @@ top of it (push the bit-bang tools, run them on the board, pull results).
 Console framing: every command is wrapped between two markers whose echoed
 copy (the tty echoes what we type) cannot match the marker regex, because
 the typed form splits the marker with ``""``. Files travel as base64 in
-chunks that fit the tty's 4096-byte line limit, one marker wait per chunk,
-and are checked with ``md5sum`` on the board against the host's digest.
+1024-character chunks (well under the tty's 4096-byte line limit), one marker wait per chunk,
+and are decoded with python3 (the board image has no ``base64``) and checked with ``md5sum`` on the board against the host's digest.
 """
 
 from __future__ import annotations
@@ -26,8 +26,10 @@ from pathlib import Path
 from provision.bench import BenchError, Console, Probe
 from provision.linux_target import CmdResult
 
-RAW_CHUNK = 2304        # bytes -> 3072 base64 chars; with the command < 4096 (tty line limit)
+RAW_CHUNK = 768         # bytes -> 1024 base64 chars per line, the size proven on silicon
 REMOTE_DIR = "/tmp/v2n-swd"
+_DECODE = "import base64,sys;open(sys.argv[2],'wb').write(base64.b64decode(open(sys.argv[1]).read()))"
+_ENCODE = "import base64,sys;print(base64.encodebytes(open(sys.argv[1],'rb').read()).decode())"
 _DPID = re.compile(r"id=(0x[0-9a-fA-F]{8})")
 
 
@@ -56,15 +58,17 @@ class ConsoleTarget:
 
     def put(self, local: Path, remote: str) -> None:
         data, q = Path(local).read_bytes(), shlex.quote(remote)
-        self.run(f": > {q}")
+        # The board image has no base64 binary: collect the text, decode with python3.
+        self.run(f": > {q}.b64")
         for i in range(0, len(data), RAW_CHUNK):
             b64 = base64.b64encode(data[i:i + RAW_CHUNK]).decode("ascii")
-            self.run(f"printf %s {b64} | base64 -d >> {q}")
+            self.run(f"printf %s {b64} >> {q}.b64")
+        self.run(f"python3 -c {shlex.quote(_DECODE)} {q}.b64 {q} && rm {q}.b64")
         self._check_md5(q, data, f"push {local}")
 
     def get(self, remote: str, local: Path) -> None:
         q = shlex.quote(remote)
-        out = self.run(f"base64 {q}", timeout=600.0).stdout
+        out = self.run(f"python3 -c {shlex.quote(_ENCODE)} {q}", timeout=600.0).stdout
         data = base64.b64decode(re.sub(r"\s+", "", out))
         self._check_md5(q, data, f"pull {remote}")
         Path(local).write_bytes(data)

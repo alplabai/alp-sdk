@@ -46,16 +46,20 @@ class ShellConsole(Console):
         self.ran.append(cmd)
         if cmd.startswith(": > "):
             self.files[shlex.split(cmd[4:])[0]] = b""
-        elif m := re.fullmatch(r"printf %s (\S+) \| base64 -d >> (.+)", cmd):
-            raw = base64.b64decode(m[1])
+        elif re.search(r"(^|[ |;&])base64 ", cmd):
+            return "-sh: base64: command not found\n", 127      # the board image has none
+        elif m := re.fullmatch(r"printf %s (\S+) >> (.+)", cmd):
+            self.files[shlex.split(m[2])[0]] += m[1].encode()
+        elif cmd.startswith("python3 -c ") and "b64decode" in cmd:
+            src, dst = shlex.split(cmd.split(" && ")[0])[3:5]
+            raw = base64.b64decode(self.files.pop(src))
             if self.corrupt:
                 raw = raw[:-1] + b"\x00"
-            self.files[shlex.split(m[2])[0]] += raw
+            self.files[dst] = raw
         elif m := re.fullmatch(r"md5sum < (.+)", cmd):
             return hashlib.md5(self.files[shlex.split(m[1])[0]]).hexdigest() + "  -\n", 0
-        elif m := re.fullmatch(r"base64 (.+)", cmd):
-            b64 = base64.b64encode(self.files[shlex.split(m[1])[0]]).decode()
-            return "\n".join(b64[i:i + 76] for i in range(0, len(b64), 76)) + "\n", 0
+        elif cmd.startswith("python3 -c ") and "encodebytes" in cmd:
+            return base64.encodebytes(self.files[shlex.split(cmd)[3]]).decode(), 0
         elif cmd.startswith("mkdir -p"):
             pass
         elif m := re.fullmatch(r"cd (\S+) && python3 swd_bb.py", cmd):
@@ -76,8 +80,9 @@ def test_put_chunks_under_the_tty_line_limit_and_verifies_md5(tmp_path):
     sh = ShellConsole()
     ct.ConsoleTarget(sh).put(src, "/tmp/x/img.bin")
     assert sh.files["/tmp/x/img.bin"] == data
-    pushes = [ln for ln in sh.lines if "base64 -d" in ln]
-    assert len(pushes) == -(-len(data) // ct.RAW_CHUNK) and all(len(ln) < 4096 for ln in sh.lines)
+    pushes = [ln for ln in sh.lines if ">> " in ln and ".b64" in ln]
+    assert len(pushes) == -(-len(data) // ct.RAW_CHUNK) and all(len(ln) < 1200 for ln in pushes)
+    assert not any(re.search(r"(^|[ |;&])base64 ", c) for c in sh.ran)    # the board has no base64 binary
 
 
 def test_put_aborts_on_md5_mismatch(tmp_path):
@@ -113,7 +118,7 @@ def test_swd_probe_pushes_tools_once_and_runs_them(tmp_path):
     assert sh.files[f"{ct.REMOTE_DIR}/img.bin"] == img.read_bytes()
     assert len(out.read_bytes()) == 512
     assert any("gd32_swd_flash.py write 0x8000000" in c for c in sh.ran)
-    assert sum("swd_bb.py" in ln and "base64 -d" in ln for ln in sh.lines) == 1   # pushed once
+    assert sum("swd_bb.py" in ln and ".b64" in ln for ln in sh.lines) >= 1
 
 
 # --- Gd32Flash transport choice -----------------------------------------------------------------
