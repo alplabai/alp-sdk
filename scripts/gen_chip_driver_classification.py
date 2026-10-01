@@ -213,6 +213,16 @@ def build(root: Path = REPO) -> str:
             f"that are complete/absent: {stale}). Edit EVIDENCE in "
             "scripts/gen_chip_driver_classification.py."
         )
+    untracked = sorted(
+        c for c in nc
+        if EVIDENCE[c][0] != "vendor_stack" and nc[c]["driver_status"] != "planned"
+        and not ((nc[c].get("tracking") or {}).get("issue") or (nc[c].get("tracking") or {}).get("blocker"))
+    )
+    if untracked:
+        sys.exit(
+            "chip-driver-classification: Alp-owned non-complete chips need "
+            f"`tracking.issue` or `tracking.blocker` in metadata/chips/<chip>.yaml: {untracked}"
+        )
     rows, tiers, stats = [], {}, {}
     for cid in sorted(nc):
         d = nc[cid]
@@ -234,11 +244,14 @@ def build(root: Path = REPO) -> str:
             src.append("upstream: " + ", ".join(f"{k} `{v}`" for k, v in up.items()))
         if deps:
             src.append("chip deps: " + ", ".join(f"`{x}`" for x in deps))
+        tr = d.get("tracking") or {}
+        iss = str(tr["issue"]).lstrip("#") if tr.get("issue") else ""
+        link = "; ".join(x for x in (f"#{iss}" if iss else "", tr.get("blocker", "")) if x) or NR
         rows.append(
             f"| `{cid}` | `{st}` | {', '.join(bld)} | `{hil}` "
             f"| {', '.join(d.get('families') or [NR])} "
             f"| {_demand(cid, soms, boards)} | {tier}: {ev} | {owner} "
-            f"| {'; '.join(src) or NR} | {NR} | {NR} | {_advance(st, str(hil), kind)}; gap: {gap} |"
+            f"| {'; '.join(src) or NR} | {d.get('license') or NR} | {link} | {_advance(st, str(hil), kind)}; gap: {gap} |"
         )
     sc = ", ".join(f"{k} {stats[k]}" for k in ("partial", "stub", "planned", "none") if k in stats)
     tc = ", ".join(f"{k} {tiers[k]}" for k in TIER_ORDER if k in tiers)
@@ -247,7 +260,7 @@ def build(root: Path = REPO) -> str:
      run `python3 scripts/gen_chip_driver_classification.py`. -->
 # Chip driver classification (non-complete)
 
-Generated for issue #500. Every chip whose `metadata/chips/<part>.yaml` has `driver_status` other than `complete` ({len(nc)} of {len(chips)}). The chip schema is unchanged. Fields the metadata does not record are marked "{NR}" rather than guessed.
+Generated for issue #500. Every chip whose `metadata/chips/<part>.yaml` has `driver_status` other than `complete` ({len(nc)} of {len(chips)}). The chip schema carries optional `tracking` and `license` fields. Fields the metadata does not record are marked "{NR}" rather than guessed.
 
 Status counts: {sc}.
 
@@ -259,7 +272,7 @@ Tier counts: {tc}.
 - Buildability: presence of `chips/<part>/`, `include/alp/chips/<part>.h` and a `kconfig.zephyr` symbol. Three separate notions are reported and none implies another: `driver_status` is code completeness, the Buildability column is buildability, `hil_silicon` is silicon verification (`ov9281` and `dp83825` show they can disagree).
 - Demand: SoM presets (`metadata/e1m_modules`) and board files (`metadata/boards`) that reference the chip. A `populated: false` entry is shown as DNI/optional.
 - ADR 0017 tier: a function of the evidence kind (rules in the script header, citing [ADR 0017](adr/0017-alp-sdk-over-the-vendor-sdk.md)). The evidence (upstream Zephyr v4.4.1 tree or vendor ecosystem findings, and the remaining gap) is the one reviewer-recorded input, kept in the script. The generator fails if a non-complete chip has no disposition there.
-- Owner: a function of the tier. Licence, blocker and linked child issue are not recorded in metadata; Alp-owned work needs a focused child issue before it starts.
+- Owner: a function of the tier. Licence, blocker and child issue come from the optional `license` and `tracking` (`issue`, `blocker`) chip fields; the generator fails if an Alp-owned (non-T2, non-`planned`) row has neither `tracking.issue` nor `tracking.blocker`.
 
 ## Table
 

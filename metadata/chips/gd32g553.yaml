@@ -218,3 +218,5 @@ verification:
                                     # docs/test-plan.md "v0.6.0 -- V2N GD32-bridge
                                     # silicon campaign" and docs/verification-status.md.
   smoke_tests:    null_arg_guard
+tracking:
+  blocker: "ADR 0017 tier decision pending"

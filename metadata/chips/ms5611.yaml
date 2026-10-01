@@ -68,3 +68,5 @@ physical:
     # "VDD Capacitor From VDD to GND 100nF min" per the datasheet's
     # electrical-characteristics table.
     - { role: decouple, value: 100nF, net: VDD, refdes_prefix: C }
+tracking:
+  blocker: "ADR 0017 tier decision pending"
