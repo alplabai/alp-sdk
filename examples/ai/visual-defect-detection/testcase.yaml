@@ -12,6 +12,7 @@ common:
   tags: ai inference vision industrial defect-detection marketing showcase
 tests:
   alp_sdk.example.visual_defect_detection.e1m_evk:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     extra_configs:
       - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
     platform_allow:
@@ -30,6 +31,7 @@ tests:
         - "\\[defect\\] done"
 
   alp_sdk.example.visual_defect_detection.e1m_x_evk:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     extra_configs:
       - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
     platform_allow:
@@ -48,6 +50,7 @@ tests:
         - "\\[defect\\] done"
 
   alp_sdk.example.visual_defect_detection.aen_build:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     extra_configs:
       - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
     platform_allow:

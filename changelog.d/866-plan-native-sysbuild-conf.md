@@ -23,3 +23,17 @@ changed (one new arg per slice); no other snapshot did.
 Not yet done in this change: the per-example `CMakeLists.txt` bridge still
 runs and merges the same fragment, so the app image sees it twice (harmless,
 idempotent) until the bridge is retired in follow-up slices.
+
+### Changed — twister and a bare `west build` read a pre-generated `generated/alp.conf` (#866)
+
+`scripts/gen_example_alp_conf.py` walks every example `CMakeLists.txt` that
+emits a `--core`-scoped `zephyr-conf` and writes
+`<example>/generated/alp.conf` (git-ignored) from the same
+`_slice_alp_conf` the build plan's `configArtefacts` use. Each example's
+`testcase.yaml` now passes it first in `EXTRA_CONF_FILE`, joined with any
+existing `native_sim.conf` / `overlay-*.conf` entry by `;` (twister's
+`extra_args` replaces rather than appends, so a second `-DEXTRA_CONF_FILE`
+would drop the first); later overlays still win. `pr-twister.yml`,
+`pr-twister-aen.yml` and `scripts/test-all.sh` run the generator before
+twister. The `CMakeLists.txt` bridge still runs alongside; it is retired in a
+follow-up slice.

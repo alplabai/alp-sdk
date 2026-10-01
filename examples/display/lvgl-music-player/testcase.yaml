@@ -16,8 +16,9 @@ tests:
     # native_sim has no real panel -- bind the dummy display via the
     # per-example overlay so the dummy-panel knob never reaches the
     # real-silicon build.
-    extra_args: EXTRA_CONF_FILE=native_sim.conf
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf;native_sim.conf
   alp_sdk.examples.lvgl_music_player.aen:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     platform_allow:
       - ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp
     build_only: true

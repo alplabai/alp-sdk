@@ -402,6 +402,10 @@ jobs:
           # vs 23 min at 4 shards (run 36546876623, 2026-09-29); 8 cuts
           # each slice by a quarter.
           ccache -z >/dev/null
+          # Each example's testcase.yaml points EXTRA_CONF_FILE at its
+          # generated/alp.conf; twister configures from the source tree, so
+          # write those fragments first (#866).
+          python3 "$GITHUB_WORKSPACE/alp-sdk/scripts/gen_example_alp_conf.py"
           python3 zephyr/scripts/twister \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/tests/unit" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/tests/zephyr" \

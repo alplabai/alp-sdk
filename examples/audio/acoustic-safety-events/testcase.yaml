@@ -15,7 +15,7 @@ tests:
       - native_sim/native/64
     integration_platforms:
       - native_sim/native/64
-    extra_args: CONFIG_AUDIO_DMIC=y
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf CONFIG_AUDIO_DMIC=y
     tags:
       - alp-sdk
       - example
@@ -29,6 +29,7 @@ tests:
         - "\\[ase\\] done"
 
   alp_sdk.example.acoustic_safety_events.aen_build:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     platform_allow:
       - ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp
     build_only: true
