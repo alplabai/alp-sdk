@@ -10,7 +10,7 @@
 # transaction(s) after idle while it wakes from sleep (seconds after a
 # long idle), so the probe retries for up to ~5 s.
 # Presence + protocol liveness only; the APDU-level check is
-# v2n-secure-element-sign.
+# ../v2m103-x-evk/v2n-secure-element-sign.yaml.
 
 schema_version: 1
 name: v2n101-optiga-present

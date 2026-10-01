@@ -1,9 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Provenance: derived from the v2m103 spec of the same name (same carrier
-# PCB, same populated part per metadata/e1m_modules/E1M-V2N101.yaml).
-# UNVERIFIED on a V2N101 unit; bench evidence cited below is V2M103.
-#
 # E1M-V2N101 GD32 bridge, wire level: GET_VERSION frame to 0x70 on BRD_I2C
 # (i2c-8) via i2ctransfer; the reply's status byte must be 0x00 and bytes 2-4 the
 # protocol version 0x00 0x0e 0x00 (0.14.0; bench 2026-09-29 reply: 00 00 0e 00 cf a7).
