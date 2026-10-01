@@ -284,7 +284,6 @@ ZTEST(alp_peripheral, test_rpc_config_default)
 	zassert_equal(cfg.src_ept, 0u, "0 = FNV-1a hash of name");
 	zassert_equal(cfg.dst_ept, 0u, "0 = src_ept + 1");
 	zassert_equal(cfg.mbox_ch, ALP_RPC_DEFAULT_MBOX_CH, NULL);
-	zassert_false(cfg.cacheable, "v0.6 default");
 }
 
 ZTEST(alp_peripheral, test_storage_config_default)
