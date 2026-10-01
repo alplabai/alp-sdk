@@ -87,6 +87,9 @@ device-to-cloud story; all Tier B (recipe-only), split by grounding:
   is invented; emit renders the selection tag and `--emit west-libraries` emits
   concrete west project entries, with no `CONFIG_` line until packaging confirms
   a real symbol.
+  The same pins also sit in the repo's `west.yml` under the opt-in `extras-cloud`
+  group (off by default; `west update --group-filter +extras-cloud`), tier stays
+  B (no CI build lane).
 
 **The ADR 0018 industrial / scripting additions.** Three manifests close the
 remaining curation set without inventing capabilities or symbols:
