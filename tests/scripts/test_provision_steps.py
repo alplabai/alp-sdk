@@ -362,7 +362,7 @@ def test_refuses_fip_without_rail_string(tmp_path):
 
 def test_refuses_gd32_wrong_debug_port(tmp_path):
     ctx = _ctx(tmp_path, bench=_bench(probe=FakeProbe(dp_id_value=0x6BA02477)),
-               linux=Board(), gd32_fw=_gd32_fw(tmp_path))
+               linux=Board(), execute=True, gd32_fw=_gd32_fw(tmp_path))
     res = steps.run_steps(ctx, only=["gd32_flash"])
     assert res[-1].status == "failed" and "wrong target" in res[-1].detail
 
@@ -464,7 +464,9 @@ def test_mfg_date_is_monday_of_serial_week(tmp_path):
 def _login_console():
     """Console for one cold cycle to a login, then console_login + discover_host."""
     return FakeConsole([(r"^\r$", "\nroot@e1m:~# "),
-                        (r"^ip -4 -o addr", "2: eth0    inet 10.0.0.2/24 brd 10.0.0.255 scope global eth0\n")])
+                        (r"^export TERM=dumb", "export TERM=dumb\r\nroot@e1m:~# "),
+                        (r"^systemctl is-system-running", "systemctl is-system-running\r\nrunning\r\nroot@e1m:~# "),
+                        (r"^ip -4 -o addr", "ip -4 -o addr show scope global\r\n2: eth0    inet 10.0.0.2/24 brd 10.0.0.255 scope global eth0\n")])
 
 
 def test_eeprom_manifest_and_secure_page_execute(tmp_path):
@@ -1259,6 +1261,28 @@ def test_detect_in_uboot_then_bootstrap_is_not_refused(tmp_path, monkeypatch):
     assert ctx.mutate("anything", lambda: "ran") == "ran"
     dry = _ctx(tmp_path / "d", bench=_bench(console=FakeConsole([])))
     assert steps.Bootstrap().run(dry).status != "failed"
+
+
+def test_detect_then_bootstrap_cycles_power_exactly_once(tmp_path, monkeypatch):
+    from provision import scif_writer as sw
+    banner = "SCI Download mode (Normal SCI boot)\r\n-- Load Program to SRAM ---------------\r\n\r\n>"
+    b = _bench(console=FakeConsole([(None, banner)]))
+    (tmp_path / "w.mot").write_bytes(b"S0030000FC")
+    b.scif["flash_writer"] = tmp_path / "w.mot"
+    ctx = _ctx(tmp_path, bench=b, execute=True)
+    for fn in ("_stream", "em_w", "em_secsd", "em_dcid"):
+        monkeypatch.setattr(sw, fn, lambda *a, **k: None)
+    monkeypatch.setattr(steps.Ctx, "artefact_bytes", lambda self, k: b"x")
+    assert steps.Detect().run(ctx).status == "done" and ctx.boot_class == "scif-rom"
+    assert steps.Bootstrap().run(ctx).status == "done"
+    assert b.power.events == ["off", "on"]
+
+
+def test_detect_refuses_the_parameter_error_fallback_banner(tmp_path):
+    b = _bench(console=FakeConsole([(None, "SCI Download mode (Due to parameter error)\r\n")]))
+    ctx = _ctx(tmp_path, bench=b, execute=True)
+    res = steps.run_one(steps.Detect(), ctx)
+    assert res.status == "failed" and "parameter error" in res.detail
 
 
 def test_accept_cid_change_adopts_once_then_refuses_another_swap(tmp_path, monkeypatch):

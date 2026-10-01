@@ -127,6 +127,15 @@ class Ctx:
     ledger_xlsx: Path | None = None
     boot_text: str = ""                   # last console capture after a power cycle
     boot_class: str = ""
+    # Power.on_count when detect left the unit live at the SCIF ROM prompt
+    # (banner consumed); valid only while no later ON has happened.
+    rom_live_on_count: int | None = None
+    # (Power.on_count, console transcript mark) of the boot dsw1_emmc_insert_sd
+    # started and left running; boot_sd_linux continues it instead of re-cycling.
+    live_boot: tuple[int, int] | None = None
+    # Power.on_count of a boot_sd_linux that reached a console login with no IP
+    # (blank GD32): its probe accepts that state; gd32_flash then works over the console.
+    console_linux_on_count: int | None = None
     step_logs: dict[str, str] = field(default_factory=dict)
     _cache: dict = field(default_factory=dict)
 
@@ -172,13 +181,21 @@ class Ctx:
             raise Refused("no --bench")
         return self.bench
 
+    def attach_linux(self, host: str) -> None:
+        """Attach the Linux target at ``host`` and hand the host to the bench's probe
+        wrapper (it reads ALP_PROVISION_HOST; the bench.yaml says to set it)."""
+        b = self.need_bench()
+        self.linux = lt.LinuxTarget(host, b.linux_user)
+        if getattr(b.probe, "env", None) is not None:
+            b.probe.env["ALP_PROVISION_HOST"] = host
+
     def need_linux(self):
         """The Linux target, or None in a dry run without one (plan only).
         Like linux_up(), attach the bench's configured host when an --only /
         --from / --force-step run starts past the step that normally
         attaches it, instead of refusing a board that is already up."""
         if self.linux is None and self.bench is not None and self.bench.linux_host:
-            self.linux = lt.LinuxTarget(self.bench.linux_host, self.bench.linux_user)
+            self.attach_linux(self.bench.linux_host)
         if self.linux is None and self.execute:
             raise Refused("no Linux target: boot_sd_linux has not run")
         if self.linux is not None and self.execute:
@@ -227,7 +244,7 @@ class Ctx:
         # ctx.linux; attach a configured host here so a probe does not report
         # Unknown and trigger a needless cold cycle on a board already up.
         if self.linux is None and self.bench is not None and self.bench.linux_host:
-            self.linux = lt.LinuxTarget(self.bench.linux_host, self.bench.linux_user)
+            self.attach_linux(self.bench.linux_host)
         if self.linux is None:
             return False
         try:
@@ -292,20 +309,50 @@ def _record_override(ctx: Ctx, gate: str, reason: str) -> None:
 # console / Linux helpers
 # --------------------------------------------------------------------------
 
+def _elide_long_lines(text: str, limit: int = 200) -> str:
+    """Collapse runs of very long lines (the gd32_flash base64 push echo) to
+    head + tail + a byte count, so a step log stays readable."""
+    out, run = [], []
+
+    def flush():
+        if len(run) > 2:
+            out.append(run[0][:60] + "...")
+            out.append(f"[{len(run) - 2} long lines, {sum(len(x) for x in run[1:-1])} bytes elided]")
+            out.append("..." + run[-1][-20:])
+        else:
+            out.extend(x[:60] + f"...[{len(x)} bytes]" for x in run)
+        run.clear()
+    for line in text.split("\n"):
+        if len(line) > limit:
+            run.append(line)
+        else:
+            flush()
+            out.append(line)
+    flush()
+    return "\n".join(out)
+
+
 def _since(console, n: int) -> str:
     return "".join(console.transcript[n:])
 
 
-def boot_to_linux(ctx: Ctx, timeout: float = 240.0, need_ip: bool = True) -> str:
+def boot_to_linux(ctx: Ctx, timeout: float = 240.0, need_ip: bool = True,
+                  resume_mark: int | None = None) -> str:
     """Cold cycle, let the unit autoboot to a login, log in, (re)discover the
     Linux target. Returns the whole boot text. Execute-mode only.
 
     ``need_ip=False`` tolerates a unit with no network (blank GD32 or a latched
-    PHY, #2582): ctx.linux is then None and the console shell is the only way in."""
+    PHY, #2582): ctx.linux is then None and the console shell is the only way in.
+
+    ``resume_mark`` (a console transcript index) continues a boot that is already
+    running instead of cycling: the text is taken from that mark."""
     b = ctx.need_bench()
-    n = len(b.console.transcript)
-    b.console.drain()
-    b.power.cycle(b.off_s, b.console)
+    if resume_mark is None:
+        n = len(b.console.transcript)
+        b.console.drain()
+        b.power.cycle(b.off_s, b.console)
+    else:
+        n = resume_mark
     b.console.expect(LOGIN_RE, timeout)
     text = _since(b.console, n)
     ctx.boot_text = text
@@ -347,7 +394,7 @@ def connect_linux(ctx: Ctx, force: bool = False) -> None:
     host = b.linux_host or lt.discover_host(b.console)
     if ctx.linux is not None and getattr(ctx.linux, "host", None) == host:
         return
-    ctx.linux = lt.LinuxTarget(host, b.linux_user)
+    ctx.attach_linux(host)
 
 
 def _manifest_sku(arr: bytes) -> str:
@@ -482,7 +529,7 @@ class Detect(Step):
             return self.result(ctx, "no --bench: offline plan", status="skipped")
         c = ctx.bench.console
         from provision import scif_writer
-        classes = {"scif-rom": scif_writer.ROM_BANNER, "linux-login": LOGIN_RE, "uboot": uboot.PROMPT}
+        classes = {"scif-rom": scif_writer.ROM_BANNER, "scif-fallback": scif_writer.ROM_FALLBACK, "linux-login": LOGIN_RE, "uboot": uboot.PROMPT}
         n = len(c.transcript)
         if ctx.execute:
             if ctx.linux is not None:
@@ -505,6 +552,9 @@ class Detect(Step):
         if key is None:
             key = "bl2" if uboot.BL2_VERSION_RE.search(text) else "silent"
         ctx.boot_class, ctx.boot_text = key, text
+        if key == "scif-fallback":
+            raise Refused(scif_writer.ROM_FALLBACK_MSG)
+        ctx.rom_live_on_count = ctx.bench.power.on_count if key == "scif-rom" and ctx.execute else None
         ev = {**uboot.parse_bl2(text), **uboot.parse_bl31(text)}
         ev.pop("bl2_boot_source", None)
         if v := uboot.parse_uboot_version(text):
@@ -513,7 +563,7 @@ class Detect(Step):
             lt.console_login(c, ctx.bench.linux_user)
             connect_linux(ctx, force=True)
         elif ctx.linux is None and ctx.bench.linux_host:
-            ctx.linux = lt.LinuxTarget(ctx.bench.linux_host, ctx.bench.linux_user)
+            ctx.attach_linux(ctx.bench.linux_host)
         up = ctx.linux_up()
         note = ""
         if key == "silent" and ctx.state_done("bootstrap"):
@@ -575,10 +625,18 @@ class Bootstrap(_PreLinux):
         c = b.console
 
         def load():
+            live = ctx.rom_live_on_count is not None and ctx.rom_live_on_count == b.power.on_count
+            ctx.rom_live_on_count = None  # one-shot: a retry must not trust a stale ROM state
+            if live:
+                # detect just left the unit at the ROM prompt: another cycle would
+                # be a second power toggle for nothing (and a PHY power-rule risk)
+                ctx.plan_log.append("reuse live SCIF ROM state from detect (no power cycle)")
+                sw.load_writer(c, Path(mot), banner_seen=True)
+                return
             c.drain()
             b.power.cycle(b.off_s, b.console)
             sw.load_writer(c, Path(mot))
-        ctx.mutate(f"power cycle; load Flash Writer {Path(mot).name} over SCIF", load)
+        ctx.mutate(f"power cycle (unless detect left the ROM live); load Flash Writer {Path(mot).name} over SCIF", load)
         ctx.mutate(f"EM_W area {sw.BOOT1_AREA} sector {sw.BL2_MMC_SECTOR:#x}: bl2_mmc ({len(bl2)} bytes)",
                    lambda: sw.em_w(c, sw.BOOT1_AREA, sw.BL2_MMC_SECTOR, ps["bl2_mmc"], bl2))
         ctx.mutate(f"EM_W area {sw.BOOT1_AREA} sector {sw.FIP_SECTOR:#x}: fip ({len(fip)} bytes)",
@@ -608,6 +666,7 @@ class OpDsw1EmmcInsertSd(_PreLinux):
             b.power.cycle(b.off_s, b.console)
             b.console.expect(uboot.AUTOBOOT, 60.0)
             ctx.boot_text = _since(b.console, n)
+            ctx.live_boot = (b.power.on_count, n)
         ctx.mutate("cold cycle; expect U-Boot autoboot from eMMC", check)
         return self.result(ctx, "U-Boot boots from eMMC boot1")
 
@@ -617,6 +676,9 @@ class BootSdLinux(Step):
 
     def probe(self, ctx):
         if not ctx.linux_up():
+            if ctx.bench is not None and ctx.console_linux_on_count == ctx.bench.power.on_count:
+                return Satisfied({}, "console login on the live boot, root on the microSD, no IP yet "
+                                     "(gd32_flash runs next over the console)")
             return Unknown("no Linux target reachable")
         try:
             root = lt.root_device(ctx.linux)
@@ -648,8 +710,16 @@ class BootSdLinux(Step):
                 return text + _since(b.console, n)
             text = ctx.mutate(f"U-Boot loadx + gzwrite {wic.name} into eMMC (slow fallback), boot", xm)
         else:
-            text = ctx.mutate("cold cycle; U-Boot bootcmd_check boots the release wic from microSD; "
-                              "console login; discover the IPv4 host", lambda: boot_to_linux(ctx, need_ip=False))
+            def boot():
+                live, ctx.live_boot = ctx.live_boot, None   # one-shot
+                if live is not None and live[0] == b.power.on_count:
+                    # dsw1_emmc_insert_sd just booted the unit: continue that boot
+                    ctx.plan_log.append("continue the live boot from dsw1_emmc_insert_sd (no power cycle)")
+                    return boot_to_linux(ctx, need_ip=False, resume_mark=live[1])
+                return boot_to_linux(ctx, need_ip=False)
+            text = ctx.mutate("cold cycle (unless dsw1_emmc_insert_sd left the unit booting); U-Boot "
+                              "bootcmd_check boots the release wic from microSD; "
+                              "console login; discover the IPv4 host", boot)
         if text is None:
             return self.result(ctx, f"would boot Linux ({ctx.transfer} path)")
         mib = uboot.parse_dram_banner(text)
@@ -670,6 +740,7 @@ class BootSdLinux(Step):
             # No IP yet: a blank GD32 leaves both gbeth ports without an RX clock.
             # Everything below is read over the console; gd32_flash runs next.
             t = ConsoleTarget(b.console)
+            ctx.console_linux_on_count = b.power.on_count
             ev["network"] = "none yet (blank GD32 suspected); gd32_flash runs next over the console"
         else:
             t.run("true")
@@ -972,7 +1043,10 @@ class Gd32Flash(Step):
         are preferred. With no network (a blank GD32 kills both gbeth ports) and
         a root shell on the console, the SWD tools are pushed over the console."""
         b = ctx.need_bench()
-        if not ctx.execute or ctx.linux_up():
+        if not ctx.execute:
+            # plan only: no probe or console traffic, but name the transport execute would take
+            return None, None, not ctx.linux_up()
+        if ctx.linux_up():
             return ctx.need_linux(), b.probe, False
         if b.console_swd is None:
             raise Refused("no network and bench.yaml has no script probe to push over the console")
@@ -985,11 +1059,30 @@ class Gd32Flash(Step):
         ctx._check_unit_identity(t)          # the same eMMC-CID gate the SSH path gets in need_linux
         return t, ConsoleSwdProbe(t, tools_dir, tools), True
 
+    def _plan(self, ctx, ev, via_console):
+        """Dry run: WOULD lines only. The probe wrapper is never invoked (it needs
+        a host/IP the dry run does not have)."""
+        images = self._images(ctx)
+        if via_console:
+            ctx.mutate("no reachable IP: console login, push the SWD tools and the images "
+                       "(base64, md5-checked on the board)", lambda: None)
+        ctx.mutate(f"DP-ID gate ({GD32_DP_OK:#010x} only)", lambda: None)
+        for p, addr, _key in images:
+            ctx.mutate(f"loadbin {p.name} @ {addr:#010x}", lambda: None)
+        ctx.mutate("verify each region with savebin in a FRESH probe session, md5", lambda: None)
+        ctx.mutate("reset/run the GD32", lambda: None)
+        ctx.mutate(f"GET_VERSION from the bridge at {GD32_BRIDGE_ADDR:#04x}", lambda: None)
+        if via_console:
+            ctx.mutate("cold cycle; re-check the IP", lambda: None)
+        return self.result(ctx, "would flash the GD32", ev)
+
     def run(self, ctx):
         ev: dict[str, str] = {}
         t, probe, via_console = self._transport(ctx)
         if via_console:
             ev["gd32_flash_transport"] = "console (no network)"
+        if not ctx.execute:
+            return self._plan(ctx, ev, via_console)
         if t is not None:
             pmic = ctx.i2c("pmic")
             if lt.act88760_gpio4_held(t, pmic):
@@ -1572,10 +1665,20 @@ def run_one(step: Step, ctx: Ctx, force: bool = False) -> StepResult:
         if isinstance(probe, Unsatisfied) and ctx.state_done(step.name):
             ctx.plan_log.append(f"NOTE: {step.name} recorded done but probe says: {probe.reason}; re-running")
         start = len(ctx.plan_log)
+        plog = ctx.bench.power.log if ctx.bench is not None else []
+        pstart = len(plog)
+        tstart = len(ctx.bench.console.transcript) if ctx.bench is not None else 0
         try:
             res = step.run(ctx)
         except (BenchError, Refused, ValueError, OSError) as e:
             res = StepResult(step.name, "failed", str(e))
+        ctx.plan_log.extend(plog[pstart:])  # audit trail: every PSU command, timestamped
+        if ctx.bench is not None and ctx.execute:
+            # Everything the console said during the step, so a silicon failure is diagnosable.
+            seen = _elide_long_lines(_since(ctx.bench.console, tstart))
+            ctx.step_logs[step.name] = "\n".join(
+                filter(None, [ctx.step_logs.get(step.name, ""), *plog[pstart:],
+                              "--- console transcript ---", seen]))
         res.commands = ctx.plan_log[start:]
         if res.status == "done" and not step.always_run:
             post = _safe_probe(step, ctx)
@@ -1584,6 +1687,18 @@ def run_one(step: Step, ctx: Ctx, force: bool = False) -> StepResult:
             elif not (step.trust_run and isinstance(post, Unknown)):
                 res.status = "failed"
                 res.detail += f"; post-run probe: {getattr(post, 'reason', post)}"
+                if step.name in ctx.step_logs:
+                    ctx.step_logs[step.name] += f"\npost-run probe flipped the step to failed: {res.detail}"
+        if ctx.bench is not None and ctx.execute and step.name in ctx.step_logs:
+            # Written for every outcome (incl. a post-run probe flip): `--only` runs never
+            # reach Record, and a failure may end the run early.
+            try:
+                ledger_out.write_log(ctx.ledger_root, ctx.sku, ctx.serial, step.name, ctx.step_logs[step.name])
+            except OSError as e:
+                note = f"NOTE: could not write the {step.name} log: {e}"
+                ctx.plan_log.append(note)
+                res.commands.append(note)
+                print(f"provision: could not write the {step.name} log: {e}", file=sys.stderr)
     ctx.facts.update({k: v for k, v in res.evidence.items() if v is not None})
     return res
 

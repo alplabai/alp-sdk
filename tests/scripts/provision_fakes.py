@@ -72,6 +72,7 @@ class FakePower(Power):
 
     def on(self) -> None:
         self.events.append("on")
+        self._mark_on()
         self.state = True
         if self.on_hook:
             self.on_hook()

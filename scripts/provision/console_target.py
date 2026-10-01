@@ -23,9 +23,11 @@ import re
 import shlex
 from pathlib import Path
 
-from provision.bench import BenchError, Console, Probe
+from provision.bench import BenchError, Console, ExpectTimeout, Probe
 from provision.linux_target import CmdResult
 
+RUN_ATTEMPTS = 3        # a command whose begin marker never shows is re-sent (Ctrl-C first)
+BEGIN_WINDOW_S = 10.0
 RAW_CHUNK = 768         # bytes -> 1024 base64 chars per line, the size proven on silicon
 REMOTE_DIR = "/tmp/v2n-swd"
 _DECODE = "import base64,sys;open(sys.argv[2],'wb').write(base64.b64decode(open(sys.argv[1]).read()))"
@@ -45,13 +47,22 @@ class ConsoleTarget:
         if stdin_path is not None:
             raise BenchError("console target cannot stream a file on stdin; use put()")
         global _marker
-        _marker += 1
-        n = _marker
-        self.console.drain(0.1, 2.0)
-        self.console.send_line(
-            f'echo "@@B""{n}"; ( {cmd}\n) 2>&1; echo "@@E""{n}:$?"')
-        m = self.console.expect(
-            rf"(?s)@@B{n}\r?\n(?P<out>.*?)@@E{n}:(?P<rc>\d+)", timeout)
+        for attempt in range(RUN_ATTEMPTS):
+            _marker += 1                       # a fresh marker per attempt: a stale one may still be buffered
+            n = _marker
+            self.console.drain(0.1, 2.0)
+            self.console.send_line(f'echo "ALPB""{n}"; ( {cmd}\n) 2>&1; echo "ALPE""{n}:$?"', paced=True)
+            try:
+                # a corrupted command line never prints its begin marker
+                self.console.expect(rf"ALPB{n}\r?\n", BEGIN_WINDOW_S)
+                break
+            except ExpectTimeout as e:
+                if attempt == RUN_ATTEMPTS - 1:
+                    raise BenchError(f"console command never started after {RUN_ATTEMPTS} tries "
+                                     f"(corrupted RX?): {cmd[:80]!r}: {e.tail[-120:]!r}") from e
+                self.console.write(b"\x03")
+                self.console.drain(0.5, 5.0)
+        m = self.console.expect(rf"(?s)(?P<out>.*?)ALPE{n}:(?P<rc>\d+)", timeout)
         out, rc = m.group("out").replace("\r\n", "\n"), int(m.group("rc"))
         if check and rc != 0:
             raise BenchError(f"rc={rc}: {cmd[:200]}: {out.strip()[-500:]}")
@@ -60,11 +71,20 @@ class ConsoleTarget:
     def put(self, local: Path, remote: str) -> None:
         data, q = Path(local).read_bytes(), shlex.quote(remote)
         # The board image has no base64 binary: collect the text, decode with python3.
-        self.run(f": > {q}.b64")
-        for i in range(0, len(data), RAW_CHUNK):
+        # Each chunk goes to its own numbered file and is md5-checked on arrival, so a
+        # byte corrupted on the way is re-sent alone; the parts are assembled at the end.
+        self.run(f"rm -f {q}.p* {q}.b64")
+        for idx, i in enumerate(range(0, len(data), RAW_CHUNK)):
             b64 = base64.b64encode(data[i:i + RAW_CHUNK]).decode("ascii")
-            self.run(f"printf %s {b64} >> {q}.b64")
-        self.run(f"python3 -c {shlex.quote(_DECODE)} {q}.b64 {q} && rm {q}.b64")
+            part, want = f"{q}.p{idx:05d}", hashlib.md5(b64.encode()).hexdigest()
+            for attempt in range(RUN_ATTEMPTS):
+                got = self.run(f"printf %s {b64} > {part}; md5sum < {part}", check=False).stdout.split()
+                if got and got[0] == want:
+                    break
+            else:
+                raise BenchError(f"console push {local}: chunk {idx} still corrupted after {RUN_ATTEMPTS} tries")
+        self.run(f"cat {q}.p* > {q}.b64 && rm -f {q}.p* && "
+                 f"python3 -c {shlex.quote(_DECODE)} {q}.b64 {q} && rm {q}.b64")
         self._check_md5(q, data, f"push {local}")
 
     def get(self, remote: str, local: Path) -> None:

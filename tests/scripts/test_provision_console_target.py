@@ -20,8 +20,13 @@ from .test_provision_steps import _bench, _ctx, _gd32_fw
 class ShellConsole(Console):
     """A root shell: understands the marker framing and a tiny file model."""
 
-    def __init__(self, corrupt_pushes: bool = False) -> None:
+    def __init__(self, corrupt_pushes: bool = False, flip_in_first: int = 0, seed: int = 1) -> None:
         super().__init__()
+        # flip_in_first=N: one random bit of the first N bytes received is flipped (once)
+        import random
+        self._flip_at = random.Random(seed).randrange(flip_in_first) if flip_in_first else None
+        self._rx_count = 0
+        self.flipped = 0
         self.files: dict[str, bytes] = {}
         self.lines: list[str] = []
         self.ran: list[str] = []
@@ -34,29 +39,45 @@ class ShellConsole(Console):
         return data
 
     def _write_raw(self, data: bytes) -> None:
-        line = data.decode().rstrip("\r\n")
+        if data == b"\x03":
+            self._acc = b""
+            self._out += b"^C\r\nroot@unit:~# "
+            return
+        if self._flip_at is not None and self._rx_count <= self._flip_at < self._rx_count + len(data):
+            b = bytearray(data)
+            b[self._flip_at - self._rx_count] ^= 1 << (self._flip_at % 8)
+            data, self.flipped = bytes(b), self.flipped + 1
+        self._rx_count += len(data)
+        self._acc = getattr(self, "_acc", b"") + data
+        if not self._acc.endswith(b"\r"):       # paced writes arrive in chunks
+            return
+        line, self._acc = self._acc.decode("latin-1").rstrip("\r\n"), b""
         self.lines.append(line)
-        m = re.fullmatch(r'echo "@@B""(\d+)"; \( (.*)\n\) 2>&1; echo "@@E""\d+:\$\?"', line, re.S)
-        assert m, line
+        m = re.fullmatch(r'echo "ALPB""(\d+)"; \( (.*)\n\) 2>&1; echo "ALPE""\d+:\$\?"', line, re.S)
+        if not m:                                  # a corrupted line: the shell just complains
+            self._out += (line + "\r\n-sh: syntax error\r\nroot@unit:~# ").encode("latin-1")
+            return
         n, cmd = m.groups()
         out, rc = self._exec(cmd)
         # the tty echoes what was typed first; markers in the echo are split by ""
-        self._out = (line + "\r\n").encode() + f"@@B{n}\r\n{out}@@E{n}:{rc}\r\n".encode()
+        self._out = (line + "\r\n").encode("latin-1") + f"ALPB{n}\r\n{out}ALPE{n}:{rc}\r\n".encode()
 
     def _exec(self, cmd: str) -> tuple[str, int]:
         self.ran.append(cmd)
-        if cmd.startswith(": > "):
-            self.files[shlex.split(cmd[4:])[0]] = b""
+        if cmd.startswith("rm -f "):
+            pass
+        elif m := re.fullmatch(r"printf %s (\S+) > (\S+); md5sum < (\S+)", cmd):
+            self.files[shlex.split(m[2])[0]] = m[1].encode()
+            return hashlib.md5(m[1].encode()).hexdigest() + "  -\n", 0
+        elif m := re.match(r"cat (\S+)\.p\* > (\S+) && rm -f \S+ && (python3 -c .*)", cmd):
+            base = shlex.split(m[1])[0] + ".p"
+            parts = sorted(k for k in self.files if k.startswith(base))
+            self.files[shlex.split(m[2])[0]] = b"".join(self.files.pop(k) for k in parts)
+            src, dst = shlex.split(m[3].split(" && ")[0])[3:5]
+            raw = base64.b64decode(self.files.pop(src))
+            self.files[dst] = raw[:-1] + b"\x00" if self.corrupt else raw
         elif re.search(r"(^|[ |;&])base64 ", cmd):
             return "-sh: base64: command not found\n", 127      # the board image has none
-        elif m := re.fullmatch(r"printf %s (\S+) >> (.+)", cmd):
-            self.files[shlex.split(m[2])[0]] += m[1].encode()
-        elif cmd.startswith("python3 -c ") and "b64decode" in cmd:
-            src, dst = shlex.split(cmd.split(" && ")[0])[3:5]
-            raw = base64.b64decode(self.files.pop(src))
-            if self.corrupt:
-                raw = raw[:-1] + b"\x00"
-            self.files[dst] = raw
         elif m := re.fullmatch(r"md5sum < (.+)", cmd):
             return hashlib.md5(self.files[shlex.split(m[1])[0]]).hexdigest() + "  -\n", 0
         elif cmd.startswith("python3 -c ") and "encodebytes" in cmd:
@@ -84,7 +105,7 @@ def test_put_chunks_under_the_tty_line_limit_and_verifies_md5(tmp_path):
     sh = ShellConsole()
     ct.ConsoleTarget(sh).put(src, "/tmp/x/img.bin")
     assert sh.files["/tmp/x/img.bin"] == data
-    pushes = [ln for ln in sh.lines if ">> " in ln and ".b64" in ln]
+    pushes = [ln for ln in sh.lines if "printf %s" in ln]
     assert len(pushes) == -(-len(data) // ct.RAW_CHUNK) and all(len(ln) < 1200 for ln in pushes)
     assert not any(re.search(r"(^|[ |;&])base64 ", c) for c in sh.ran)    # the board has no base64 binary
 
@@ -232,7 +253,9 @@ def test_cycle_powers_back_on_when_the_console_dies(monkeypatch):
         def _read_raw(self, timeout):
             raise BenchError("port vanished")
     with pytest.raises(BenchError, match="power restored"):
-        P().cycle(0.01, Dead())
+        p = P()
+        p._sleep, p._clock = (lambda s: None), (lambda: 0.0)
+        p.cycle(0.01, Dead())
     assert events == ["off", "on"]
 
 
@@ -310,3 +333,151 @@ def test_console_path_checks_the_emmc_cid_before_touching_anything(tmp_path, mon
     with pytest.raises(Refused, match="another unit"):
         steps.Gd32Flash().run(ctx)
     assert sh.flashed == {} and not any("swd_bb" in c for c in sh.ran)
+
+
+# ---- login CPR query, paced writes, echo verification -----------------------------
+
+LONG = "echo " + " ".join(["word"] * 20)      # > 64 bytes, full of spaces
+
+
+class _Tty(Console):
+    """A shell console that, after login, asks for the cursor position (the image's
+    profile runs a resize) and garbles an unpaced burst: space -> '@' in any single
+    write longer than 64 bytes, once. Chunked (paced) writes arrive intact."""
+
+    def __init__(self, garble_every_burst=False):
+        super().__init__()
+        self._out = b"unit login: "
+        self.writes, self.cpr_replies, self.garbled = [], 0, 0
+        self.garble_every_burst = garble_every_burst
+        self._line = b""
+        self.cmds = []
+        self.polls, self.starting_polls = 0, 0
+
+    def _read_raw(self, timeout):
+        data, self._out = self._out, b""
+        return data
+
+    def _write_raw(self, data):
+        self.writes.append(data)
+        if data == b"\x03":
+            self._line = b""
+            self._out += b"^C\r\nroot@unit:~# "
+            return
+        if data.endswith(b"R") and data.startswith(b"\x1b["):
+            self.cpr_replies += 1
+            self._out += b"root@unit:~# "
+            return
+        if len(data) > 64 and (self.garble_every_burst or not self.garbled):
+            self.garbled += 1
+            data = data.replace(b" ", b"@")
+        self._line += data
+        if self._line.endswith(b"\r"):
+            line, self._line = self._line.rstrip(b"\r"), b""
+            if not line:
+                return                      # a bare Enter at the login prompt: nothing new
+            self._out += line + b"\r\n"
+            if line == b"":
+                pass
+            elif line == b"root":
+                self._out += b"\x1b7\x1b[r\x1b[999;999H\x1b[6n"   # resize: waits for our reply
+            elif line.startswith(b"export TERM"):
+                self._out += b"root@unit:~# "
+            elif line == b"systemctl is-system-running":
+                self.polls += 1
+                self._out += (b"running" if self.polls > self.starting_polls else b"starting") + b"\r\nroot@unit:~# "
+            else:
+                self.cmds.append(line.decode())
+                self._out += b"out\r\nroot@unit:~# "
+
+
+def test_console_login_answers_the_cursor_position_query_then_sets_term_dumb(monkeypatch):
+    from provision import linux_target as lt
+    monkeypatch.setattr(lt, "CONSOLE_SETTLE_S", 0.01)
+    tty = _Tty()
+    lt.console_login(tty)
+    assert tty.cpr_replies == 1
+    assert any(w.startswith(b"export TERM=dumb") for w in tty.writes)
+    assert tty.writes.index(b"\x1b[24;80R") < next(i for i, w in enumerate(tty.writes) if w.startswith(b"export"))
+
+
+def test_command_lines_are_sent_in_small_paced_chunks_and_survive_the_garbling(monkeypatch):
+    from provision import linux_target as lt
+    monkeypatch.setattr(lt, "CONSOLE_SETTLE_S", 0.01)
+    monkeypatch.setattr(Console, "PACE_GAP_S", 0.0)
+    tty = _Tty()
+    lt.console_login(tty)
+    lt.send_checked(tty, LONG)
+    assert all(len(w) <= Console.PACE_CHUNK for w in tty.writes)
+    assert tty.garbled == 0                         # paced chunks stay under the garble threshold
+
+
+def test_echo_mismatch_sends_ctrl_c_and_resends_once(monkeypatch):
+    from provision import linux_target as lt
+    monkeypatch.setattr(lt, "CONSOLE_SETTLE_S", 0.01)
+    monkeypatch.setattr(Console, "PACE_GAP_S", 0.0)
+    monkeypatch.setattr(Console, "PACE_CHUNK", 4096)     # unpaced on purpose: first burst gets garbled
+    tty = _Tty()
+    lt.console_login(tty)
+    lt.send_checked(tty, LONG, echo_timeout=0.05)
+    assert tty.garbled == 1 and b"\x03" in tty.writes
+    assert tty.cmds[-1] == LONG and tty.cmds.count(LONG) == 1   # resent intact exactly once
+
+
+def test_echo_mismatch_twice_is_an_error(monkeypatch):
+    from provision import linux_target as lt
+    monkeypatch.setattr(lt, "CONSOLE_SETTLE_S", 0.01)
+    monkeypatch.setattr(Console, "PACE_GAP_S", 0.0)
+    monkeypatch.setattr(Console, "PACE_CHUNK", 4096)
+    tty = _Tty(garble_every_burst=True)
+    lt.console_login(tty)
+    with pytest.raises(BenchError, match="never matched"):
+        lt.send_checked(tty, LONG, echo_timeout=0.05)
+
+
+# ---- settle wait + robust run/put against a flaky early console ---------------------
+
+def _fast(monkeypatch):
+    from provision import linux_target as lt
+    monkeypatch.setattr(lt, "CONSOLE_SETTLE_S", 0.01)
+    monkeypatch.setattr(lt, "SYSTEM_POLL_S", 0.0)
+    monkeypatch.setattr(Console, "PACE_GAP_S", 0.0)
+    monkeypatch.setattr(ct, "BEGIN_WINDOW_S", 0.1)
+    return lt
+
+
+def test_login_waits_until_systemd_stops_starting(monkeypatch):
+    lt = _fast(monkeypatch)
+    tty = _Tty()
+    tty.starting_polls = 3
+    lt.console_login(tty)
+    assert tty.polls == 4                           # three "starting" answers, then "running"
+
+
+def test_login_proceeds_after_the_settle_cap(monkeypatch):
+    lt = _fast(monkeypatch)
+    monkeypatch.setattr(lt, "SYSTEM_SETTLE_CAP_S", 0.05)
+    tty = _Tty()
+    tty.starting_polls = 10 ** 6
+    lt.console_login(tty)                           # never settles: gives up waiting, no error
+    assert tty.polls >= 1
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_run_survives_one_flipped_bit_in_the_first_bytes(seed, monkeypatch):
+    _fast(monkeypatch)
+    sh = ShellConsole(flip_in_first=50, seed=seed)
+    assert ct.ConsoleTarget(sh).run("ls /tmp", check=False).rc == 127     # ran, got a real rc
+    assert sh.flipped == 1
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_put_survives_one_flipped_bit_and_resends_only_the_bad_chunk(seed, tmp_path, monkeypatch):
+    _fast(monkeypatch)
+    data = bytes(range(256)) * 12
+    src = tmp_path / "img.bin"
+    src.write_bytes(data)
+    sh = ShellConsole(flip_in_first=400, seed=seed)
+    ct.ConsoleTarget(sh).put(src, "/tmp/x/img.bin")
+    assert sh.files["/tmp/x/img.bin"] == data
+    assert sh.flipped == 1

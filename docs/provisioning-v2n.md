@@ -155,14 +155,24 @@ step recorded `done` whose probe now says `Unsatisfied` runs again, and a
 state recorded against a **different bundle or tool revision** is moved to
 `superseded` so every step runs again.
 
+## Power safety
+
+The RTL8211F(I) PHY needs both 3.3 V and its 1.0 V rail at 0 V when the 3.3 V
+source is toggled, with a period over 100 ms (datasheet Rev 1.7, Table 53 notes
+1-2). The tool therefore enforces, below any `bench.yaml` setting: an OFF dwell
+of at least **10 s** (`power.off_s` below that is raised to 10 s with a
+warning; default 15 s) and at least **5 s** ON before any OFF, counted from the
+last ON this process issued or, for a fresh process, assumed to be just now.
+Every PSU command is logged with a monotonic timestamp in the step log.
+
 ## Steps
 
 | step | what it does |
 |---|---|
 | `preflight` | offline gates: bundle schema, artefact sha256 / size / role set (`bl2`, `bl2_mmc`, `fip`, `system_image` -- enforced here, not by the bundle schema, because flat-flow bundles such as som-0.2.0 legitimately carry no `bl2_mmc`), xSPI and boot1 size limits, family, SKU triangle, DDR tier triangle, FIP rail string (`v2n-m1`), FDT present in the wic `/boot`, N24S128 frame-table self-check |
-| `detect` | power cycle and classify the console: SCIF ROM, BL2, U-Boot, Linux login, silent |
+| `detect` | power cycle and classify the console: SCIF ROM, BL2, U-Boot, Linux login, silent. The ROM banner `SCI Download mode (Due to parameter error)` is the ROM's fallback (DSW1 probably not in SCIF mode 3, or a board fault) and is **refused** with an operator message; only `(Normal SCI boot)` proceeds |
 | `dsw1_scif` | operator: boot switch to SCIF download |
-| `bootstrap` | Flash Writer: `EM_W` boot1 sector `0x1` ← `bl2_mmc`, sector `0x300` ← `fip`; `EM_SECSD` EXT_CSD `[177]=0x02` (BOOT_BUS_CONDITIONS), `[179]=0x08` (PARTITION_CONFIG); `EM_DCID` |
+| `bootstrap` | reuses the live SCIF ROM state `detect` left in this run (no second power cycle); cycles only if no ON has happened since. Flash Writer: `EM_W` boot1 sector `0x1` ← `bl2_mmc`, sector `0x300` ← `fip`; `EM_SECSD` EXT_CSD `[177]=0x02` (BOOT_BUS_CONDITIONS), `[179]=0x08` (PARTITION_CONFIG); `EM_DCID` |
 | `dsw1_emmc_insert_sd` | operator: boot switch to eMMC, insert the release microSD; U-Boot must autoboot |
 | `boot_sd_linux` | U-Boot boots the wic from microSD; log in, find the host, confirm the root is on the SD, then the live SoM check: every non-optional on-module I2C device the SoM preset declares must ACK (the GD32 excepted) before any destructive step runs. Fallback `--transfer xmodem`: `loadx` + `gzwrite` the wic from the U-Boot prompt. No IP is not a failure here: the checks run over the console and `gd32_flash` runs next |
 | `gd32_flash` | applies the ACT88760 GPIO4 volatile release if still at the OTP default, DP-ID gate (`0x0BE12477` only), `loadbin` × 3, verify with `savebin` in fresh probe sessions, bridge ACK at `0x70`. With no network (a blank GD32 leaves both gbeth ports dead) it pushes the SWD tools and the three images over the console (base64, md5-checked on the board), then cold-cycles and re-checks the IP; SSH is used when it is up |

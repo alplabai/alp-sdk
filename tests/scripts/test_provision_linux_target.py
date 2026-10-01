@@ -139,7 +139,9 @@ def test_console_login_and_discover_host():
     con = FakeConsole([
         (r"^\r$", "\r\nunit login: "),
         (r"^root\r$", "root\r\nroot@unit:~# "),
-        (r"ip -4 -o addr show scope global", "2: eth0    inet 10.0.0.7/24 brd 10.0.0.255 scope global eth0\r\n# "),
+        (r"^export TERM=dumb", "export TERM=dumb\r\n# "),
+        (r"^systemctl is-system-running", "systemctl is-system-running\r\nrunning\r\n# "),
+        (r"ip -4 -o addr show scope global", "ip -4 -o addr show scope global\r\n2: eth0    inet 10.0.0.7/24 brd 10.0.0.255 scope global eth0\r\n# "),
     ])
     lt.console_login(con)
     assert lt.discover_host(con) == "10.0.0.7"
