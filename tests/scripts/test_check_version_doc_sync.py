@@ -198,3 +198,29 @@ def test_prerelease_suffix_leaking_into_pyproject_fails(tmp_path):
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 1
     assert "pyproject.toml" in proc.stdout + proc.stderr
+
+
+def _distro_conf(root: Path, line: str):
+    conf = root / "meta-alp-sdk" / "conf" / "distro"
+    conf.mkdir(parents=True, exist_ok=True)
+    (conf / "alp.conf").write_text(f'DISTRO = "alp"\n{line}\n', encoding="utf-8")
+
+
+def test_yocto_hardcoded_distro_version_fails(tmp_path):
+    _scaffold(tmp_path)
+    _distro_conf(tmp_path, 'DISTRO_VERSION = "0.7.0"')
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    assert "alp.conf" in proc.stdout + proc.stderr
+
+
+def test_yocto_derived_distro_version_passes(tmp_path):
+    _scaffold(tmp_path)
+    _distro_conf(tmp_path, 'DISTRO_VERSION := "${@derive(d)}"')
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_real_meta_alp_sdk_derives_distro_version():
+    proc = _run()
+    assert "HARDCODED" not in proc.stdout + proc.stderr
