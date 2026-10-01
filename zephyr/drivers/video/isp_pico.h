@@ -301,6 +301,14 @@ struct isp_config {
 	uint32_t tpg_bayer_pattern: 2;
 	uint32_t tpg_img_idx: 3;
 	uint32_t tpg_pix_width: 2;
+
+	/* alp-sdk#2256: the TPG's actual frame geometry (fed to
+	 * VSI_MPI_ISP_SetChnAttr's INPUT_TPG port rect).  0/0 leaves the port
+	 * rect at 0x0, which isp_configure() now refuses -- see
+	 * zephyr/dts/bindings/video/vsi,isp-pico.yaml.
+	 */
+	uint32_t tpg_width;
+	uint32_t tpg_height;
 };
 
 /*
@@ -403,5 +411,30 @@ struct isp_data {
 	 */
 	struct k_mutex lib_lock;
 };
+
+/**
+ * @brief Validate a TPG output frame geometry before it is handed to
+ * VSI_MPI_ISP_SetChnAttr as the INPUT_TPG port rect.
+ *
+ * alp-sdk#2256: isp_configure()'s TPG branch used to leave
+ * port->port_fmt.width/height at their zero-initialized value, so
+ * SetChnAttr got a 0x0 port rect and failed with -EINVAL ("Setting the
+ * Channel config failed!").  0x0 is never a valid frame size, so this
+ * guard is dependency-free (no register/MMIO access, no libisp call) and
+ * safe to unit test on host: it only catches that one bug class.  It does
+ * NOT validate the geometry against the TPG pattern's real internal frame
+ * size -- that value lives inside the closed libisp/VSI middleware and is
+ * not available in this tree (see the tpg-width/tpg-height binding
+ * description); a board overlay must supply a silicon-confirmed value.
+ *
+ * @param width TPG output frame width in pixels (DT tpg-width).
+ * @param height TPG output frame height in pixels (DT tpg-height).
+ *
+ * @return true if the geometry is non-degenerate (both dimensions > 0).
+ */
+static inline bool isp_tpg_geometry_is_valid(uint32_t width, uint32_t height)
+{
+	return (width > 0) && (height > 0);
+}
 
 #endif /* _VIDEO_ALIF_ISP_H_ */
