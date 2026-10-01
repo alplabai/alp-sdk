@@ -16,10 +16,11 @@
 #      commit da99638ec373c791a45557b0cd91fc20968d492d).
 #   202412.00 is the current LTS release.  Its coreMQTT / coreHTTP / coreJSON /
 #   corePKCS11 / backoffAlgorithm / device-shadow / jobs / device-defender /
-#   fleet-provisioning / SigV4 libraries are git SUBMODULES (.gitmodules), which
-#   `west update` does not initialise: run
-#   `git submodule update --init --recursive` in the checkout after
-#   `west update --group-filter +extras-cloud`.  One umbrella pin (not per-library
+#   fleet-provisioning / SigV4 libraries are git SUBMODULES (.gitmodules).  The
+#   repo's west.yml project sets `submodules: true`, so `west update
+#   --group-filter +extras-cloud` initialises them.  The `west:` block below
+#   cannot carry that key, so a project entry emitted by `--emit west-libraries`
+#   must add `submodules: true` by hand.  One umbrella pin (not per-library
 #   west projects) keeps the pin identical to what AWS tests together.
 #   The AWS SDK is still a generic CMake C SDK with NO official upstream Zephyr
 #   module.yml or master Kconfig symbol, so packaging/build glue is a follow-up;

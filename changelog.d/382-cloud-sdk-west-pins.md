@@ -7,5 +7,6 @@ that is disabled by default, so `west update` stays light; enable it with
 `west update --group-filter +extras-cloud`. Both libraries remain Tier B: there
 is no CI build lane, no upstream Zephyr `module.yml` and no enable Kconfig symbol.
 The AWS LTS repo vendors coreMQTT, coreHTTP and the other libraries as git
-submodules, which `west update` does not initialise; run
-`git submodule update --init --recursive` in the checkout afterwards.
+submodules; its `west.yml` project sets `submodules: true`, so `west update`
+initialises them. An entry emitted by `--emit west-libraries` must add that key
+by hand (the library manifest's `west:` block cannot carry it yet).

@@ -155,11 +155,10 @@ manifest:
   #                    (ADR 0018 Tier B -- no CI build lane, no Zephyr
   #                    module.yml, no enable Kconfig).  Disabled by default
   #                    so workspaces stay light; flip via
-  #                    `west update --group-filter +extras-cloud`.  NOTE:
-  #                    the AWS repo vendors coreMQTT/coreHTTP/... as git
-  #                    SUBMODULES, which `west update` does not initialise;
-  #                    run `git submodule update --init --recursive` in the
-  #                    checkout before building against it.
+  #                    `west update --group-filter +extras-cloud`.  The AWS
+  #                    repo vendors coreMQTT/coreHTTP/... as git submodules;
+  #                    its project sets `submodules: true` so west
+  #                    initialises them.
   # `vendor-sdks`    - public vendor SDK repos pinned to the
   #                    verified tags (Alif sdk-alif, Renesas
   #                    rzv-fsp, NXP mcuxsdk-manifests).  Carries
@@ -438,6 +437,7 @@ manifest:
                                   # peeled commit
                                   # da99638ec373c791a45557b0cd91fc20968d492d.
       path: modules/lib/aws-iot-device-sdk-embedded-C
+      submodules: true
       groups:
         - extras-cloud
     - name: azure-sdk-for-c
