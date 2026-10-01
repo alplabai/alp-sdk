@@ -301,7 +301,7 @@ def boot_to_linux(ctx: Ctx, timeout: float = 240.0) -> str:
     b = ctx.need_bench()
     n = len(b.console.transcript)
     b.console.drain()
-    b.power.cycle(float(b.raw.get("power", {}).get("off_s", 3.0)), b.console)
+    b.power.cycle(b.off_s, b.console)
     b.console.expect(LOGIN_RE, timeout)
     text = _since(b.console, n)
     ctx.boot_text = text
@@ -464,7 +464,7 @@ class Detect(Step):
                 except BenchError:
                     pass
             ctx.mutate("power cycle and classify the console",
-                       lambda: ctx.bench.power.cycle(float(ctx.bench.raw.get("power", {}).get("off_s", 3.0)), c))
+                       lambda: ctx.bench.power.cycle(ctx.bench.off_s, c))
             try:
                 key, _ = c.expect_any(classes, 240.0)
             except ExpectTimeout:
@@ -547,7 +547,7 @@ class Bootstrap(_PreLinux):
 
         def load():
             c.drain()
-            b.power.cycle(float(b.raw.get("power", {}).get("off_s", 3.0)), b.console)
+            b.power.cycle(b.off_s, b.console)
             sw.load_writer(c, Path(mot))
         ctx.mutate(f"power cycle; load Flash Writer {Path(mot).name} over SCIF", load)
         ctx.mutate(f"EM_W area {sw.BOOT1_AREA} sector {sw.BL2_MMC_SECTOR:#x}: bl2_mmc ({len(bl2)} bytes)",
@@ -576,7 +576,7 @@ class OpDsw1EmmcInsertSd(_PreLinux):
         def check():
             n = len(b.console.transcript)
             b.console.drain()
-            b.power.cycle(float(b.raw.get("power", {}).get("off_s", 3.0)), b.console)
+            b.power.cycle(b.off_s, b.console)
             b.console.expect(uboot.AUTOBOOT, 60.0)
             ctx.boot_text = _since(b.console, n)
         ctx.mutate("cold cycle; expect U-Boot autoboot from eMMC", check)
@@ -608,7 +608,7 @@ class BootSdLinux(Step):
             wic = ctx.artefact("system_image")
 
             def xm():
-                text = uboot.cold_to_prompt(b.console, b.power)
+                text = uboot.cold_to_prompt(b.console, b.power, b.off_s)
                 ctx.boot_text = text
                 uboot.loadx_gzwrite(b.console, wic, 0, int(addr), chunk)
                 n = len(b.console.transcript)

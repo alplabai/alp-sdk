@@ -361,6 +361,8 @@ def test_load_bench(tmp_path):
     assert b.scif["flash_writer"] == tmp_path / "fw/writer.mot"
     assert b.scif["program_start"] == {"bl2_mmc": None, "fip": 0x1234}
     assert b.raw["console"]["host"] == "consolehost"
+    assert b.off_s == bench.DEFAULT_OFF_S == 15.0     # power.off_s absent -> 15 s dwell
+    assert b.console_swd == (tmp_path / "tools", bench.CONSOLE_SWD_TOOLS)
 
 
 @pytest.mark.parametrize(

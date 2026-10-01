@@ -512,6 +512,10 @@ class ScriptProbe(Probe):
 # --------------------------------------------------------------------------
 
 
+DEFAULT_OFF_S = 15.0  # the V2N rails and the 5L35023B need this long to discharge
+CONSOLE_SWD_TOOLS = ("swd_bb.py", "gd32_swd_flash.py")
+
+
 @dataclass
 class Bench:
     console: Console
@@ -523,6 +527,13 @@ class Bench:
     i2c_bus: dict[str, int]  # values may be None while TBD
     scif: dict  # {"flash_writer": Path, "baud": int, "program_start": {"bl2_mmc": int|None, "fip": int|None}}
     raw: dict
+    # (dir, tool filenames) the console-push SWD fallback copies to the board
+    console_swd: tuple[Path, tuple[str, ...]] | None = None
+
+    @property
+    def off_s(self) -> float:
+        """Power-off dwell for a cold cycle: bench.yaml power.off_s, else DEFAULT_OFF_S."""
+        return float((self.raw.get("power") or {}).get("off_s", DEFAULT_OFF_S))
 
 
 def _need(d: dict, key: str, where: str):
@@ -595,6 +606,13 @@ def load_bench(path: Path, operator: Operator | None = None) -> Bench:
                 f"bench.yaml: probe.kind must be jlink|script, got {kind!r}"
             )
 
+    console_swd = None
+    if pr and pr.get("kind") == "script":
+        console_swd = (
+            rel(pr["wrapper"]).parent,
+            tuple(pr.get("console_tools") or CONSOLE_SWD_TOOLS),
+        )
+
     linux = raw.get("linux") or {}
 
     ib = _need(raw, "i2c_bus", "")
@@ -626,4 +644,5 @@ def load_bench(path: Path, operator: Operator | None = None) -> Bench:
         i2c_bus=i2c_bus,
         scif=scif,
         raw=raw,
+        console_swd=console_swd,
     )
