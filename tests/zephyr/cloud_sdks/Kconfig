@@ -5,6 +5,6 @@
 # them (vendors/cloud-sdk-dir.cmake resolves them the same way).  Evaluated
 # during twister's Kconfig-only filter pass, which never runs CMake.
 config CLOUD_SDKS_PRESENT
-	def_bool "$(shell,test -d "$${ALP_AWS_IOT_SDK_DIR:-$$ZEPHYR_BASE/../modules/lib/aws-iot-device-sdk-embedded-C}" && test -d "$${ALP_AZURE_IOT_SDK_DIR:-$$ZEPHYR_BASE/../modules/lib/azure-sdk-for-c}" && echo y)" = "y"
+	def_bool "$(shell,test -d "${ALP_AWS_IOT_SDK_DIR:-$ZEPHYR_BASE/../modules/lib/aws-iot-device-sdk-embedded-C}" && test -d "${ALP_AZURE_IOT_SDK_DIR:-$ZEPHYR_BASE/../modules/lib/azure-sdk-for-c}" && echo y)" = "y"
 
 source "Kconfig.zephyr"
