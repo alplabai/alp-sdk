@@ -133,6 +133,9 @@ class Ctx:
     # (Power.on_count, console transcript mark) of the boot dsw1_emmc_insert_sd
     # started and left running; boot_sd_linux continues it instead of re-cycling.
     live_boot: tuple[int, int] | None = None
+    # Set once eeprom_manifest changed the MAC: the bench.yaml pinned host (CID-MAC
+    # era) is stale from then on, so every later attach rediscovers over the console.
+    rediscover_host: bool = False
     # Power.on_count of a boot_sd_linux that reached a console login with no IP
     # (blank GD32): its probe accepts that state; gd32_flash then works over the console.
     console_linux_on_count: int | None = None
@@ -189,13 +192,18 @@ class Ctx:
         if getattr(b.probe, "env", None) is not None:
             b.probe.env["ALP_PROVISION_HOST"] = host
 
+    @property
+    def pinned_host(self) -> str | None:
+        """bench.yaml linux.host, unless the MAC changed since (then None: discover)."""
+        return None if self.rediscover_host or self.bench is None else self.bench.linux_host
+
     def need_linux(self):
         """The Linux target, or None in a dry run without one (plan only).
         Like linux_up(), attach the bench's configured host when an --only /
         --from / --force-step run starts past the step that normally
         attaches it, instead of refusing a board that is already up."""
-        if self.linux is None and self.bench is not None and self.bench.linux_host:
-            self.attach_linux(self.bench.linux_host)
+        if self.linux is None and self.pinned_host:
+            self.attach_linux(self.pinned_host)
         if self.linux is None and self.execute:
             raise Refused("no Linux target: boot_sd_linux has not run")
         if self.linux is not None and self.execute:
@@ -243,8 +251,8 @@ class Ctx:
         # --only/--from can start past detect, which is what normally attaches
         # ctx.linux; attach a configured host here so a probe does not report
         # Unknown and trigger a needless cold cycle on a board already up.
-        if self.linux is None and self.bench is not None and self.bench.linux_host:
-            self.attach_linux(self.bench.linux_host)
+        if self.linux is None and self.pinned_host:
+            self.attach_linux(self.pinned_host)
         if self.linux is None:
             return False
         try:
@@ -393,10 +401,13 @@ def connect_linux(ctx: Ctx, force: bool = False, rediscover: bool = False) -> No
     if ctx.linux is not None and not force:
         return
     b = ctx.need_bench()
-    host = lt.discover_host(b.console) if rediscover else (b.linux_host or lt.discover_host(b.console))
-    if ctx.linux is not None and getattr(ctx.linux, "host", None) == host:
-        return
-    ctx.attach_linux(host)
+    host = lt.discover_host(b.console) if rediscover or ctx.rediscover_host else (
+        b.linux_host or lt.discover_host(b.console))
+    if ctx.linux is None or getattr(ctx.linux, "host", None) != host:
+        ctx.attach_linux(host)
+    if ctx.execute:
+        # A new address after a power cycle may belong to another unit: never test it blind.
+        ctx._check_unit_identity(ctx.linux)
 
 
 def _manifest_sku(arr: bytes) -> str:
@@ -564,8 +575,8 @@ class Detect(Step):
         if key == "linux-login" and ctx.execute:
             lt.console_login(c, ctx.bench.linux_user)
             connect_linux(ctx, force=True)
-        elif ctx.linux is None and ctx.bench.linux_host:
-            ctx.attach_linux(ctx.bench.linux_host)
+        elif ctx.linux is None and ctx.pinned_host:
+            ctx.attach_linux(ctx.pinned_host)
         up = ctx.linux_up()
         note = ""
         if key == "silent" and ctx.state_done("bootstrap"):
@@ -982,6 +993,7 @@ class EepromManifest(Step):
 
         def recheck():
             # the MAC just changed (CID- to serial-derived): DHCP may hand a new IP
+            ctx.rediscover_host = True
             boot_to_linux(ctx, rediscover=True)
             got = lt.eeprom_read(ctx.linux, bus, 0, lt.MANIFEST_LEN)
             if got != blob:
@@ -1487,7 +1499,8 @@ class Record(Step):
                 recovered[n] = (f" (step {n} from superseded run, tool_rev {str(g.get('tool_rev'))[:12]}, "
                                 f"{old.get('finished') or old.get('ts') or old.get('at') or 'time n/a'})", old)
         flashed = {n: v for n, v in recovered.items() if n in FLASH_STEPS}
-        for _, old in recovered.values():
+        # Newest wins: superseded-run facts first, then the current group's, then this run's.
+        for note, old in sorted(recovered.values(), key=lambda v: not v[0]):
             facts.update(old.get("evidence") or {})
         facts.update(ctx.facts)
         auto = {k: v for k, v in facts.items()
@@ -1536,7 +1549,7 @@ class Record(Step):
             ctx.mutate("regenerate shipped-units.xlsx", regen)
         after = {**before, **{k: str(v) for k, v in auto.items() if catalogue.get(k, {}).get("mode") != "manual"},
                  **{k: v for k, v in defaults.items() if k not in before}}
-        blockers = ledger_out.ship_check(after, catalogue, ctx.family)
+        blockers = ledger_out.ship_check(after, catalogue, expected_family(ctx.preset))
         detail = f"{len(changed) if changed is not None else len(would)} key(s) " \
                  f"{'updated' if ctx.execute else 'would change'}; ship check: " + \
                  ("SHIPPABLE" if not blockers else "blocked: " + "; ".join(blockers))
@@ -1578,7 +1591,7 @@ class SecurePageLock(Step):
             bad.append(f"secure page differs from {staged.name}")
         unit = ledger_out.read_unit_yaml(ctx.unit_dir / f"{ctx.serial}.unit.yaml")
         catalogue = ledger_out.load_catalogue(ctx.ledger_root / "schema" / "v2n.keys.yaml")
-        bad += [f"ship check: {b}" for b in ledger_out.ship_check(unit, catalogue, ctx.family)]
+        bad += [f"ship check: {b}" for b in ledger_out.ship_check(unit, catalogue, expected_family(ctx.preset))]
         return bad
 
     def probe(self, ctx):
@@ -1680,6 +1693,11 @@ def run_one(step: Step, ctx: Ctx, force: bool = False) -> StepResult:
         pstart = len(plog)
         tstart = len(ctx.bench.console.transcript) if ctx.bench is not None else 0
         try:
+            if ctx.execute and step.name not in ctx.state.get("steps", {}):
+                # A run killed mid-step must leave an entry, or Record would fall back
+                # to an older same-bundle done entry from a superseded group.
+                ctx.state.setdefault("steps", {})[step.name] = {"status": "running", "at": _now()}
+                save_state(ctx.state_path, ctx.state)
             res = step.run(ctx)
         except (BenchError, Refused, ValueError, OSError) as e:
             res = StepResult(step.name, "failed", str(e))

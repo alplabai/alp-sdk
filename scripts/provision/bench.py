@@ -97,6 +97,10 @@ class Console:
             self._buf += text
         return True
 
+    def peek(self) -> str:
+        """The unconsumed console text, without consuming it."""
+        return self._buf
+
     def expect(self, pattern: str | re.Pattern[str], timeout: float) -> re.Match[str]:
         """Wait until `pattern` matches the unconsumed console text.
 

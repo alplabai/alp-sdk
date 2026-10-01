@@ -53,14 +53,18 @@ class ShellConsole(Console):
             return
         line, self._acc = self._acc.decode("latin-1").rstrip("\r\n"), b""
         self.lines.append(line)
-        m = re.fullmatch(r'echo "ALPB""(\d+)"; \( (.*)\n\) 2>&1; echo "ALPE""\d+:\$\?"', line, re.S)
+        m = re.fullmatch(r'(\S+) "ALPB""(\d+)" && \( (.*)\n\) 2>&1; echo "ALPE""\d+:\$\?"', line, re.S)
+        if m and m.group(1) != "echo":             # garbled echo word: && skips the command, $? = 127
+            self._out = (line + f"\r\n-sh: {m.group(1)}: not found\r\nALPE{m.group(2)}:127\r\n").encode("latin-1")
+            return
         if not m:                                  # a corrupted line: the shell just complains
             self._out += (line + "\r\n-sh: syntax error\r\nroot@unit:~# ").encode("latin-1")
             return
-        n, cmd = m.groups()
+        _, n, cmd = m.groups()
         out, rc = self._exec(cmd)
+        begin = "" if getattr(self, "lose_begin", False) else f"ALPB{n}\r\n"   # RX corrupted the marker
         # the tty echoes what was typed first; markers in the echo are split by ""
-        self._out = (line + "\r\n").encode("latin-1") + f"ALPB{n}\r\n{out}ALPE{n}:{rc}\r\n".encode()
+        self._out = (line + "\r\n").encode("latin-1") + f"{begin}{out}ALPE{n}:{rc}\r\n".encode()
 
     def _exec(self, cmd: str) -> tuple[str, int]:
         self.ran.append(cmd)
@@ -481,3 +485,27 @@ def test_put_survives_one_flipped_bit_and_resends_only_the_bad_chunk(seed, tmp_p
     ct.ConsoleTarget(sh).put(src, "/tmp/x/img.bin")
     assert sh.files["/tmp/x/img.bin"] == data
     assert sh.flipped == 1
+
+
+def test_garbled_echo_word_never_runs_the_command_and_is_not_retried(monkeypatch):
+    sh = ShellConsole()
+    orig, flipped = sh._write_raw, []
+
+    def garble(data):
+        if data.startswith(b"echo") and not flipped:
+            flipped.append(1)
+            data = b"ecXo" + data[4:]
+        orig(data)
+    monkeypatch.setattr(sh, "_write_raw", garble)
+    monkeypatch.setattr(ct, "BEGIN_WINDOW_S", 0.05)
+    with pytest.raises(BenchError, match="rc=127"):
+        ct.ConsoleTarget(sh).run("cd /x && python3 gd32_swd_flash.py write 0x0 /tmp/f")
+    assert sh.ran == [] and len([ln for ln in sh.lines if "ALPB" in ln]) == 1   # no resend
+
+
+def test_lost_begin_marker_with_the_end_marker_present_does_not_rerun(monkeypatch):
+    sh = ShellConsole()
+    sh.lose_begin = True
+    monkeypatch.setattr(ct, "BEGIN_WINDOW_S", 0.05)
+    r = ct.ConsoleTarget(sh).run("mkdir -p /x", check=False)
+    assert r.rc == 0 and len(sh.ran) == 1

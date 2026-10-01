@@ -1373,3 +1373,74 @@ def test_census_after_gd32_flash_keeps_the_early_otp_evidence(tmp_path):
     assert ctx.facts["act88760_gpio4_workaround"] == "provision (volatile 0x08)"
     census = next(r for r in res if r.name == "census")
     assert "act88760_gpio4_otp" not in census.evidence
+
+
+# --- review round: identity on every attach, running entries, precedence, family ---------------
+
+def _ip_console():
+    return FakeConsole([(r"^ip -4 -o addr", "ip -4 -o addr show scope global\r\n"
+                         "2: eth0    inet 10.0.0.2/24 brd x scope global eth0\n")])
+
+
+def test_connect_linux_refuses_a_different_unit_behind_the_rediscovered_host(tmp_path, monkeypatch):
+    ctx, _ = _cid_ctx(tmp_path, monkeypatch, "aa" + CID[2:], CID)
+    ctx.bench.console = _ip_console()
+    with pytest.raises(steps.Refused, match="eMMC CID"):
+        steps.connect_linux(ctx, force=True, rediscover=True)
+
+
+def test_mac_change_flag_makes_every_later_attach_discover_instead_of_using_the_pin(tmp_path, monkeypatch):
+    ctx, reads = _cid_ctx(tmp_path, monkeypatch, CID, CID)
+    ctx.bench.console = _ip_console()           # DHCP answers 10.0.0.2; bench.yaml pins 192.0.2.7
+    ctx.rediscover_host = True
+    assert ctx.pinned_host is None
+    steps.connect_linux(ctx, force=True)           # no explicit rediscover: the flag decides
+    assert ctx.linux.host == "10.0.0.2" and reads == ["10.0.0.2"]
+
+
+def test_eeprom_manifest_sets_the_rediscover_flag(tmp_path, monkeypatch):
+    board = Board(xspi_bl2=BL2, xspi_fip=FIP)
+    board.host = "10.0.0.2"
+    console = _login_console()
+    bench = _bench(console=console)
+    bench.power.on_hook = lambda: console.feed("NOTICE:  BL2: v2.10\n\ne1m login: ")
+    ctx = _ctx(tmp_path, bench=bench, linux=board, execute=True)
+    steps.run_steps(ctx, only=["eeprom_manifest"])
+    assert ctx.rediscover_host is True
+
+
+def test_a_running_entry_is_saved_before_the_step_runs_and_blocks_the_superseded_fallback(tmp_path):
+    class Boom(steps.Step):
+        name = "census"
+        always_run = True
+
+        def run(self, ctx):
+            assert ctx.state["steps"]["census"]["status"] == "running"
+            assert json.loads(ctx.state_path.read_text(encoding="utf-8"))["steps"]["census"]["status"] == "running"
+            raise KeyboardInterrupt            # killed mid-step: nothing after run_one executes
+    ctx = _ctx(tmp_path, execute=True)
+    ctx.state = {"bundle_sha256": "cur", "steps": {}, "superseded": [{
+        "bundle_sha256": "cur", "tool_rev": "old",
+        "steps": {"census": {"status": "done", "evidence": {"eeprom_unique_id": "ab12"}}}}]}
+    with pytest.raises(KeyboardInterrupt):
+        steps.run_steps(ctx, steps=[Boom])
+    steps.run_steps(ctx, only=["record"])
+    u = ctx.unit_dir / f"{SERIAL}.unit.yaml"
+    assert "eeprom_unique_id" not in (u.read_text(encoding="utf-8") if u.exists() else "")
+
+
+def test_record_newest_group_wins_on_a_shared_key(tmp_path):
+    ctx = _ctx(tmp_path, execute=True)
+    ctx.state = {"bundle_sha256": "cur",
+                 "steps": {"cold_boot_test": {"status": "done", "evidence": {"act88760_gpio4_otp": "0x08"}}},
+                 "superseded": [{"bundle_sha256": "cur", "tool_rev": "old", "steps": {
+                     "secure_page": {"status": "done", "evidence": {"act88760_gpio4_otp": "0x88"}}}}]}
+    steps.run_steps(ctx, only=["record"])
+    assert "act88760_gpio4_otp: 0x08" in (ctx.unit_dir / f"{SERIAL}.unit.yaml").read_text(encoding="utf-8")
+
+
+def test_record_ship_check_uses_the_preset_family_not_the_bundle_field(tmp_path):
+    ctx = _ctx(tmp_path, execute=True)             # preset is a DEEPX (v2n-m1) SKU
+    ctx.bundle["family"] = "v2n"                   # a wrong/stale bundle field must not hide DX-M1
+    res = steps.run_steps(ctx, only=["record"])
+    assert "dxm1_fw_version" in res[-1].detail

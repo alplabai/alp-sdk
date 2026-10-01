@@ -55,3 +55,12 @@ unaffected. `--only gd32_flash` discovers the host over the console when none is
 pinned (the probe wrapper gets `ALP_PROVISION_HOST`), and `eeprom_manifest`
 rediscovers the host after its cold cycle because the MAC change can bring a new
 DHCP address.
+
+Every console-discovered or re-attached Linux host now passes the eMMC-CID unit
+identity check, and after `eeprom_manifest` changes the MAC every later attach
+rediscovers over the console instead of reusing the pinned address. Console
+commands are sent as `echo ALPB && ( cmd )`, so a garbled echo word never runs the
+command, and a retry is skipped when the end marker already arrived. A step now
+has a `running` entry in the state file while it executes, so a killed run cannot
+fall back to an older superseded result. Superseded facts are applied oldest
+first (current run wins), and `ship_check` takes the family from the preset.

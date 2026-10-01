@@ -51,7 +51,9 @@ class ConsoleTarget:
             _marker += 1                       # a fresh marker per attempt: a stale one may still be buffered
             n = _marker
             self.console.drain(0.1, 2.0)
-            self.console.send_line(f'echo "ALPB""{n}"; ( {cmd}\n) 2>&1; echo "ALPE""{n}:$?"', paced=True)
+            # `&&`, not `;`: a garbled echo word must not let the command run unannounced
+            # (a retry would then run it twice, e.g. a flash write).
+            self.console.send_line(f'echo "ALPB""{n}" && ( {cmd}\n) 2>&1; echo "ALPE""{n}:$?"', paced=True)
             try:
                 # a corrupted command line never prints its begin marker
                 self.console.expect(rf"ALPB{n}\r?\n", BEGIN_WINDOW_S)
@@ -60,9 +62,11 @@ class ConsoleTarget:
                 if attempt == RUN_ATTEMPTS - 1:
                     raise BenchError(f"console command never started after {RUN_ATTEMPTS} tries "
                                      f"(corrupted RX?): {cmd[:80]!r}: {e.tail[-120:]!r}") from e
+                if re.search(rf"ALPE{n}:\d+", self.console.peek()):
+                    break       # the command ran (only its begin marker was lost): never re-run it
                 self.console.write(b"\x03")
                 self.console.drain(0.5, 5.0)
-        m = self.console.expect(rf"(?s)(?P<out>.*?)ALPE{n}:(?P<rc>\d+)", timeout)
+        m =self.console.expect(rf"(?s)(?P<out>.*?)ALPE{n}:(?P<rc>\d+)", timeout)
         out, rc = m.group("out").replace("\r\n", "\n"), int(m.group("rc"))
         if check and rc != 0:
             raise BenchError(f"rc={rc}: {cmd[:200]}: {out.strip()[-500:]}")
