@@ -762,7 +762,11 @@ def _census_responses(array: bytes = b"\xff" * 128):
         (r"w2@0x50 0x00 0x00 r128", _hx(array)),
         (r"i2cget", i2cget),
         (r"i2cdetect -y -r 8", _i2cdetect({0x1E, 0x25, 0x26, 0x44, 0x48, 0x4F, 0x52, 0x69, 0x70})),
-        (r"eth0/", "aa:bb:cc:00:00:01\nup\n"), (r"eth1/", (1, "")),
+        (r"^ls /sys/class/net", "end0\nend1\nlo\n"),
+        (r"end0/address", "aa:bb:cc:00:00:01\nup\n"), (r"end1/address", (1, "")),
+        (r"end0/carrier", "1\n"), (r"end0/speed", "1000\n"),
+        (r"ethtool end0", "Settings for end0:\n\tLink partner advertised link modes:  1000baseT/Full\n"
+                          "\t                                100baseT/Full\n"),
     ]
 
 
@@ -795,8 +799,10 @@ def test_census_collects_ledger_keys_read_only():
     assert facts["tps_vout"].startswith("0x44=0x5a")
     assert facts["rtc_rv3028_reg_0x37"] == "0x10"
     assert facts["clkgen_5l35023b_regs"] == "ack at 0x69"
-    assert facts["eth0_mac"] == "aa:bb:cc:00:00:01" and facts["eth0_link"] == "up"
-    assert notes == ["eth1: not present"]
+    assert facts["end0_mac"] == "aa:bb:cc:00:00:01" and facts["end0_link"] == "up"
+    assert (facts["end0_carrier"], facts["end0_speed"]) == ("1", "1000")
+    assert facts["end0_anlpar"] == "1000baseT/Full"
+    assert notes == ["end1: address/operstate unreadable"]
     # read-only: no writes of any kind reached the unit
     assert not [c for c in fake.commands if re.search(r"i2cset|flash_erase|mtd_debug write|\bdd\b[^|]*\bof=|mmc boot", c)]
     assert not [c for c in fake.commands if re.search(r"w(?!2@)\d+@0x5[08]", c)]
