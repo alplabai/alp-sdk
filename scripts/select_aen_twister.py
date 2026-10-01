@@ -86,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             diff = subprocess.run(
                 ["git", "diff", "--name-only", "--no-renames", args.base, args.head],
-                check=True, capture_output=True, text=True,
+                check=True, capture_output=True, text=True, encoding="utf-8",
             ).stdout
             paths = [p for p in diff.splitlines() if p]
         except (OSError, subprocess.CalledProcessError):

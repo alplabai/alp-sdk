@@ -47,7 +47,7 @@ def test_bad_base_fails_safe_to_all_legs(tmp_path, monkeypatch):
     out = tmp_path / "out"
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
     assert s.main(["--base", "no-such-rev", "--github-output"]) == 0
-    line = out.read_text().strip()
+    line = out.read_text(encoding="utf-8").strip()
     assert line.startswith("matrix=")
     import json
 
