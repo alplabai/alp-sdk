@@ -2330,22 +2330,9 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 		 * phase and nothing reads them.  Without an RX side the polled loop never waits
 		 * on RX FIFO drains and runs at wire speed (#2052: 1.31 ms for 4094 B
 		 * at 25 MHz, against 1.91 ms full-duplex). */
-		/* #1818: a POLLED slave (OTA update mode) mis-receives any request payload
-		 * phase longer than CC3501E_POLLED_PAYLOAD_SEG (bench: 70 B ok, 71 B lost), so
-		 * send it as consecutive SS0-framed segments (the slave counts bytes per phase
-		 * and ignores SS0 deasserts between transfers).  The CRC above already covers
-		 * the whole payload; the segments are slices of the same contiguous buffer.
-		 * Normal mode: seg == wire_tx_len, one transfer, no extra delay -- identical
-		 * to before. */
-		const bool polled = cc3501e_peer_is_polled();
-		for (uint16_t sent = 0u; sent < wire_tx_len;) {
-			const uint16_t seg = cc3501e_payload_seg_len((uint16_t)(wire_tx_len - sent), polled);
-			if (sent != 0u) alp_delay_us(CC3501E_POLLED_SEG_SETTLE_US);
-			s                     = alp_spi_transceive(ctx->bus, tx_ptr + sent, NULL, seg);
-			ctx->last_xfer_end_us = alp_uptime_us();
-			if (s != ALP_OK) goto out;
-			sent = (uint16_t)(sent + seg);
-		}
+		s                     = alp_spi_transceive(ctx->bus, tx_ptr, NULL, wire_tx_len);
+		ctx->last_xfer_end_us = alp_uptime_us();
+		if (s != ALP_OK) goto out;
 	}
 	link_phase = CC3501E_LINK_LOG_PHASE_REPLY_HEADER; /* #2136 ring */
 
