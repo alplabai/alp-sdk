@@ -34,6 +34,24 @@ LOG_MODULE_REGISTER(CAN, CONFIG_CAN_LOG_LEVEL);
 /* Define base masks for mode categories */
 #define CAN_CAST_BASE_MODE_MASK  (CAN_MODE_LOOPBACK | CAN_MODE_LISTENONLY)
 
+/*
+ * CGU_CLK_ENA (soc_common.h) bit 23: the CAN-FD core needs it set in addition
+ * to bit 20, or no frame ever leaves the transmit buffer (E1M-AEN803 bench
+ * 2026W36-0001: CGU_CLK_ENA cold = 0xfe33fff1 -> TX stuck, 0xfeb3fff1 -> all
+ * frame types pass).  Matches the Alif Zephyr fork soc/alif/ensemble/common/
+ * soc_common.c (`sys_set_bits(CGU_CLK_ENA, BIT(20) | BIT(23))` under can0 okay).
+ * Bit 23 is named HFOSC in the fork but CLK38P4M in dphy_dw.c
+ * (DPHY_CGU_CLK_ENA_CLK38P4M); the names disagree, so it is named neutrally here.
+ */
+#define CAN_CGU_CLK_ENA_BIT20 BIT(20)
+#define CAN_CGU_CLK_ENA_BIT23 BIT(23)
+
+/* Saturating countdown: a timeout that is not a multiple of step must not wrap */
+static inline uint64_t can_cast_countdown_us(uint64_t remaining, uint32_t step)
+{
+	return (remaining > step) ? (remaining - step) : 0U;
+}
+
 #define DEV_CFG(_dev)  ((const struct can_cast_config *)((_dev)->config))
 #define DEV_DATA(_dev) ((struct can_cast_data *)((_dev)->data))
 
@@ -307,6 +325,9 @@ static int can_cast_init(const struct device *dev)
 		return err;
 	}
 #endif
+
+	/* Same CGU enables as the Alif fork's soc_common.c for an okay can0 */
+	sys_set_bits(CGU_CLK_ENA, CAN_CGU_CLK_ENA_BIT20 | CAN_CGU_CLK_ENA_BIT23);
 
 	/* Enables Standby mode */
 	can_cast_enable_standby_mode(can_base);
@@ -589,6 +610,7 @@ static int can_cast_set_timing(const struct device *dev, const struct can_timing
 	struct can_cast_data *data = DEV_DATA(dev);
 	uint32_t can_base;
 	struct can_timing loc_timing;
+	bool                          reset_was_off;
 
 	if (data->common.started) {
 		return -EBUSY;
@@ -639,8 +661,15 @@ static int can_cast_set_timing(const struct device *dev, const struct can_timing
 
 	k_mutex_lock(&data->inst_mutex, K_FOREVER);
 
-	/* Invokes below function to set the nominal bitrate */
+	/* Timing registers only latch while the core is in reset; set_mode leaves it
+	 * released, so hold reset around the write and restore the prior state.
+	 */
+	reset_was_off = !(sys_read8(can_base + CAN_CFG_STAT) & BIT(CAN_CFG_STAT_RESET));
+	can_cast_reset_enable(can_base);
 	can_cast_set_nominal_bit_time(can_base, loc_timing);
+	if (reset_was_off) {
+		can_cast_reset_disable(can_base);
+	}
 
 	k_mutex_unlock(&data->inst_mutex);
 
@@ -662,6 +691,7 @@ static int can_cast_set_timing_data(const struct device *dev, const struct can_t
 	struct can_cast_data *data = DEV_DATA(dev);
 	uint32_t can_base;
 	struct can_timing loc_timing;
+	bool                          reset_was_off;
 	uint8_t tdc;
 
 	if (data->common.started) {
@@ -715,8 +745,13 @@ static int can_cast_set_timing_data(const struct device *dev, const struct can_t
 	/* Calculates Transmitter delay compensation */
 	tdc = (loc_timing.prescaler * loc_timing.phase_seg1);
 
-	/* Invokes below function to set the Fast-data bitrate */
+	/* See can_cast_set_timing(): write the FD timing with the core held in reset */
+	reset_was_off = !(sys_read8(can_base + CAN_CFG_STAT) & BIT(CAN_CFG_STAT_RESET));
+	can_cast_reset_enable(can_base);
 	can_cast_set_fd_bit_time(can_base, loc_timing, tdc);
+	if (reset_was_off) {
+		can_cast_reset_disable(can_base);
+	}
 
 	k_mutex_unlock(&data->inst_mutex);
 
@@ -809,7 +844,7 @@ static int can_cast_send(const struct device *dev, const struct can_frame *frame
 				break;
 			}
 			k_usleep(100);
-			usec_timeout -= 100;
+			usec_timeout = can_cast_countdown_us(usec_timeout, 100U);
 		}
 	}
 
@@ -837,7 +872,7 @@ static int can_cast_send(const struct device *dev, const struct can_frame *frame
 				break;
 			}
 			k_usleep(100);
-			usec_timeout -= 100;
+			usec_timeout = can_cast_countdown_us(usec_timeout, 100U);
 		}
 	}
 
@@ -942,7 +977,7 @@ static void can_cast_remove_rx_filter(const struct device *dev, int filter_id)
 	uint32_t can_base;
 
 	/* Invalid Filter ID */
-	if (filter_id >= CAN_MAX_ACCEPTANCE_FILTERS) {
+	if (filter_id < 0 || filter_id >= CONFIG_CAN_MAX_FILTER) {
 		return;
 	}
 
@@ -1088,6 +1123,25 @@ static int can_cast_get_core_clk(const struct device *dev, uint32_t *rate)
 		return -EINVAL;
 	}
 
+	/*
+	 * The real core clock is source / CKDIV from CANFD_CTRL (Alif DFP
+	 * sys_ctrl_canfd.h + Driver_CAN.c).  Bench read 0x00111010 = 160 MHz source,
+	 * CKDIV 0x10 -> 10 MHz.  The DT clock-frequency (20 MHz) and the clockctrl
+	 * parent (200 MHz) are both NOT what the core runs at.
+	 */
+	if (config->can_fd_ctrl_reg != 0U) {
+		uint32_t ctrl = sys_read32(config->can_fd_ctrl_reg);
+		uint32_t div  = ctrl & CAN_CTRL_CKDIV_Msk;
+
+		if (div >= 2U) {
+			uint32_t src =
+			    (ctrl & CAN_CTRL_CLK_SEL_160M) ? CAN_CLK_SRC_160MHZ : CAN_CLK_SRC_38P4MHZ;
+
+			*rate = src / div;
+			return 0;
+		}
+	}
+
 	/* Get CAN clock rate */
 #if DT_ANY_INST_HAS_PROP_STATUS_OKAY(clocks)
 	int ret;
@@ -1123,7 +1177,16 @@ static int can_cast_get_max_filters(const struct device *dev, bool ide)
 	ARG_UNUSED(dev);
 	ARG_UNUSED(ide);
 
-	return CAN_MAX_ACCEPTANCE_FILTERS;
+	return CONFIG_CAN_MAX_FILTER;
+}
+
+/* Releases the current RX buffer slot so the next frame (or RIF clear) can proceed */
+static void can_cast_release_rbuf(uint32_t can_base)
+{
+	uint8_t rctrl = sys_read8(can_base + CAN_RCTRL);
+
+	rctrl |= BIT(CAN_RCTRL_RREL);
+	sys_write8(rctrl, (can_base + CAN_RCTRL));
 }
 
 /**
@@ -1152,6 +1215,8 @@ static int can_cast_receive(uint32_t can_base, struct can_frame *dest_frame)
 
 #if !CONFIG_CAN_ACCEPT_RTR
 	if (dest_frame->flags & CAN_FRAME_RTR) {
+		/* Still release the RX buffer, or RIF stays set and the IRQ retriggers forever */
+		can_cast_release_rbuf(can_base);
 		return -ENOTSUP;
 	}
 #endif
@@ -1172,10 +1237,7 @@ static int can_cast_receive(uint32_t can_base, struct can_frame *dest_frame)
 	dest_frame->timestamp = rx_msg->rx_timestamp[0U];
 #endif
 
-	/* Release the buffer */
-	loc_var = sys_read8(can_base + CAN_RCTRL);
-	loc_var |= BIT(CAN_RCTRL_RREL);
-	sys_write8(loc_var, (can_base + CAN_RCTRL));
+	can_cast_release_rbuf(can_base);
 
 	return 0;
 }
@@ -1373,6 +1435,44 @@ static uint32_t can_cast_get_irq_event(uint32_t can_base)
 	return event;
 }
 
+/*
+ * Completes every queued frame the hardware has finished. TSSTAT only gives an
+ * occupancy band, so complete (pending - upper bound of frames still in the STB):
+ * never early, and the last frame's IRQ always finds the STB empty and drains all.
+ */
+static void can_cast_complete_tx(const struct device *dev, uint32_t can_base)
+{
+	struct can_cast_data *data      = DEV_DATA(dev);
+	uint8_t               tsstat    = sys_read8(can_base + CAN_TCTRL) & CAN_TCTRL_TSSTAT_Msk;
+	uint32_t              in_hw_max = 0U;
+
+	if (tsstat == 1U) {
+		in_hw_max = CAN_MAX_STB_SLOTS / 2U;
+	} else if (tsstat == 2U) {
+		in_hw_max = CAN_MAX_STB_SLOTS - 1U;
+	} else if (tsstat == CAN_TCTRL_SEC_BUF_FULL) {
+		in_hw_max = CAN_MAX_STB_SLOTS;
+	}
+
+	while (data->tx_queue.tail != data->tx_queue.head) {
+		uint32_t pending =
+		    (data->tx_queue.head + CAN_MAX_STB_SLOTS - data->tx_queue.tail) % CAN_MAX_STB_SLOTS;
+		can_tx_callback_t cb;
+		void             *cb_arg;
+
+		if (pending <= in_hw_max) {
+			break;
+		}
+
+		cb     = data->tx_queue.cb_list[data->tx_queue.tail].cb;
+		cb_arg = data->tx_queue.cb_list[data->tx_queue.tail].cb_arg;
+		QUEUE_TAIL_NEXT(data->tx_queue.tail);
+		if (cb) {
+			cb(dev, 0, cb_arg);
+		}
+	}
+}
+
 /**
  * @fn      static int can_cast_irq_handler(const struct device *dev)
  * @brief   Handle CAN Interrupt
@@ -1381,7 +1481,6 @@ static uint32_t can_cast_get_irq_event(uint32_t can_base)
  */
 void can_cast_irq_handler(const struct device *dev)
 {
-	struct can_cast_data *data = DEV_DATA(dev);
 	uint32_t can_base;
 	uint32_t irq_event;
 
@@ -1409,12 +1508,13 @@ void can_cast_irq_handler(const struct device *dev)
 		/* If the Secondary buf Tx interrupt is occurred
 		 * then performs below operation
 		 */
-		irq_event = CAN_SECONDARY_BUF_TX_COMPLETE_EVENT;
-		if (data->tx_queue.tail != data->tx_queue.head) {
-			data->tx_queue.cb_list[data->tx_queue.tail].cb(
-				dev, 0, data->tx_queue.cb_list[data->tx_queue.tail].cb_arg);
-			QUEUE_TAIL_NEXT(data->tx_queue.tail);
-		}
+		/* Clear TSIF BEFORE sampling the buffer state: a frame finishing after
+		 * the clear raises a fresh IRQ, one finishing before it is seen below.
+		 * (Clearing last lost completions: 200 frames gave 23 callbacks.)
+		 */
+		can_cast_clear_interrupt(can_base, CAN_SECONDARY_BUF_TX_COMPLETE_EVENT);
+		irq_event = 0U;
+		can_cast_complete_tx(dev, can_base);
 	} else {
 		can_cast_handle_error(dev, irq_event);
 	}

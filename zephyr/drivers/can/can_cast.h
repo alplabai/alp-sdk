@@ -117,6 +117,16 @@ extern "C" {
 #define CAN_CFG_STAT_TACTIVE		(1U)
 #define CAN_CFG_STAT_BUSOFF		(0U)
 
+/* CLKCTL_PER_SLV CANFD_CTRL (can-fd-ctrl-reg) E8 layout, from the Alif DFP
+ * drivers/include/sys_ctrl_canfd.h: CLK_SEL bit16 (1 = 160 MHz, 0 = 38.4 MHz),
+ * CKDIV bits[7:0]; the DFP derives the core clock as source / CKDIV
+ * (Driver_CAN.c CANFD0_CLK_DIVISOR = CLK_SRC / RTE_CANFD0_CLK_SPEED).
+ */
+#define CAN_CTRL_CLK_SEL_160M BIT(16)
+#define CAN_CTRL_CKDIV_Msk    (0xFFU)
+#define CAN_CLK_SRC_160MHZ    (160000000U)
+#define CAN_CLK_SRC_38P4MHZ   (38400000U)
+
 /* Macros for Command Register bit fields */
 #define CAN_TCMD_TBSEL			(7U)
 #define CAN_TCMD_LOM			(6U)
@@ -339,9 +349,12 @@ struct can_cast_filter_t {
  *    1. Device MMIO information
  */
 struct can_cast_config {
+	/* Zephyr's can.h requires `common` to be the FIRST member (the generic API
+	 * casts dev->config to struct can_driver_config).
+	 */
+	struct can_driver_config common;
 	DEVICE_MMIO_NAMED_ROM(can_reg);
 	DEVICE_MMIO_NAMED_ROM(can_cnt_reg);
-	struct can_driver_config common;
 #if DT_ANY_INST_HAS_PROP_STATUS_OKAY(clocks)
 	/* clock controller dev instance */
 	const struct device *clk_dev;
@@ -360,9 +373,10 @@ struct can_cast_config {
  * Device data structure. Includes:
  */
 struct can_cast_data {
+	/* `common` must be the FIRST member (see can_cast_config). */
+	struct can_driver_data common;
 	DEVICE_MMIO_NAMED_RAM(can_reg);
 	DEVICE_MMIO_NAMED_RAM(can_cnt_reg);
-	struct can_driver_data common;
 	struct k_mutex inst_mutex;
 	struct can_driver_state state;
 	struct can_cast_tx_queue_t tx_queue;
@@ -475,8 +489,10 @@ static inline void can_cast_enable_tx_interrupts(uint32_t can_base)
 {
 	uint8_t temp = sys_read8(can_base + CAN_RTIE);
 
-	/* Enables CAN Tx interrupt */
-	temp &= BIT(CAN_RTIE_TPIE);
+	/* Enables CAN Tx interrupt: only the secondary-buffer (STB) interrupt is used,
+	 * so clear TPIE and keep every other RTIE bit (the old `&= BIT(TPIE)` wiped them).
+	 */
+	temp &= ~BIT(CAN_RTIE_TPIE);
 	temp |= BIT(CAN_RTIE_TSIE);
 	sys_write8(temp, (can_base + CAN_RTIE));
 }
@@ -753,7 +769,7 @@ static inline bool can_cast_stb_empty(uint32_t can_base)
  */
 static inline bool can_cast_stb_single_shot_mode(uint32_t can_base)
 {
-	return ((sys_read8(can_base + CAN_CFG_STAT) & CAN_CFG_STAT_TSSS) != 0);
+	return ((sys_read8(can_base + CAN_CFG_STAT) & BIT(CAN_CFG_STAT_TSSS)) != 0);
 }
 
 /**
