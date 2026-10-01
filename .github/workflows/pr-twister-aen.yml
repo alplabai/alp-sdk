@@ -55,12 +55,11 @@
 # across a handful of AEN-touching PRs (same graduation criteria as
 # pr-renode-aen-smoke.yml).
 #
-# Two known gaps this job does NOT paper over (both tracked, neither fixed
-# here -- neither has a testcase.yaml, so neither is selected today):
-# aen-npu-inference* (the tflite-micro/Ethos-U family) will need
-# `ethos-u-vela` on PATH once it gains a testcase.yaml -- tflite-micro and
-# hal_ethos_u are already unconditional west.yml groups, so no manifest
-# change, just a `pip install ethos-u-vela` step here. `aen-sdcard-readout`
+# aen-npu-inference-alp-u55 (the tflite-micro/Ethos-U family) has a
+# testcase.yaml since #916, so this job pip-installs `ethos-u-vela` below;
+# tflite-micro and hal_ethos_u are already unconditional west.yml groups.
+# Its build uses Vela's built-in system config (no proprietary Alif .ini in
+# CI), so it proves the build, not the bench command stream. `aen-sdcard-readout`
 # (renamed aen-sdhc-probe by #2051) was the one example #1095 left without a
 # testcase.yaml, because its driver
 # (zephyr/drivers/sdhc/sdhc_dwc.c) expanded
@@ -368,6 +367,19 @@ jobs:
         run: |
           set -euo pipefail
           pip3 install -r "${GITHUB_WORKSPACE}/zephyr/scripts/requirements.txt"
+
+      # aen-npu-inference-alp-u55's testcase.yaml (#916) Vela-compiles its
+      # model at CMake time, so `vela` must be on PATH or every leg that
+      # selects it fails "vela not found". Same release pyproject.toml pins
+      # for the committed NPU op tables -- read from there, not repeated.
+      - name: pip install ethos-u-vela (pyproject.toml pin)
+        timeout-minutes: 20
+        run: |
+          set -euo pipefail
+          pin=$(grep -o '"ethos-u-vela==[0-9.]*"' "${GITHUB_WORKSPACE}/alp-sdk/pyproject.toml" | tr -d '"')
+          test -n "$pin"
+          pip3 install "$pin"
+          vela --version
 
       # metadata/toolchains.json (issue #949 item 3) is the single source
       # for the pinned Zephyr SDK version/URL/sha256 -- scripts/
