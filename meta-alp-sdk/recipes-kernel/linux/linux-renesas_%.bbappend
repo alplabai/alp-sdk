@@ -210,8 +210,9 @@ do_configure:prepend() {
 
     # Opt-in CAM0 sources (#1149): the wrapper dts + fragment must sit next
     # to the board dts or the cam0 dtb has no rule to build.
-    if [ "${ALP_ENABLE_CAM0_IMX219}" = "1" ]; then
-        install -m 0644             "${WORKDIR}/e1m-x-evk-cam0-imx219.dtsi"             "${WORKDIR}/e1m-v2n101-x-evk-cam0.dts"             "${WORKDIR}/e1m-v2m101-x-evk-cam0.dts"             "${ALP_DTS_DST}/"
+    if [ -n "${ALP_CAM0_SENSOR}" ]; then
+        install -m 0644 "${WORKDIR}/e1m-x-evk-cam0-${ALP_CAM0_SENSOR}.dtsi"             "${ALP_DTS_DST}/e1m-x-evk-cam0-sensor.dtsi"
+        install -m 0644             "${WORKDIR}/e1m-v2n101-x-evk-cam0.dts"             "${WORKDIR}/e1m-v2m101-x-evk-cam0.dts"             "${ALP_DTS_DST}/"
     fi
 
     # Branch on the bitbake variable, not on the presence of the unpacked
@@ -288,6 +289,18 @@ SRC_URI:append:e1m-v2n101 = " file://tas2563-audio.cfg file://0009-ASoC-tas2562-
 # sensor + assumed CSI/CRU labels: see e1m-x-evk-cam0-imx219.dtsi and
 # docs/v2n-camera-csi.md.
 ALP_ENABLE_CAM0_IMX219 ??= "0"
+# Camera (#2612): OPT-IN OV9281 (mono, RPi-style module) on the same CAM0
+# connector (J5).  Mutually exclusive with the IMX219 switch.  Adds
+# camera-csi.cfg (CONFIG_VIDEO_OV9282) and the same cam0 dtb; see
+# e1m-x-evk-cam0-ov9281.dtsi and docs/v2n-camera-csi.md.
+ALP_ENABLE_CAM0_OV9281 ??= "0"
+python () {
+    imx219 = d.getVar('ALP_ENABLE_CAM0_IMX219') == '1'
+    ov9281 = d.getVar('ALP_ENABLE_CAM0_OV9281') == '1'
+    if imx219 and ov9281:
+        bb.fatal("ALP_ENABLE_CAM0_IMX219 and ALP_ENABLE_CAM0_OV9281 are mutually exclusive: both are CAM0 sensors")
+    d.setVar('ALP_CAM0_SENSOR', 'imx219' if imx219 else 'ov9281' if ov9281 else '')
+}
 ALP_CAM0_DTB = "${@'e1m-v2m101-x-evk-cam0' if 'v2m' in d.getVar('MACHINE') else 'e1m-v2n101-x-evk-cam0'}"
-KERNEL_DEVICETREE:append = "${@' renesas/' + d.getVar('ALP_CAM0_DTB') + '.dtb' if d.getVar('ALP_ENABLE_CAM0_IMX219') == '1' else ''}"
-SRC_URI += "${@' file://camera-csi.cfg file://e1m-x-evk-cam0-imx219.dtsi file://e1m-v2n101-x-evk-cam0.dts file://e1m-v2m101-x-evk-cam0.dts' if d.getVar('ALP_ENABLE_CAM0_IMX219') == '1' else ''}"
+KERNEL_DEVICETREE:append = "${@' renesas/' + d.getVar('ALP_CAM0_DTB') + '.dtb' if d.getVar('ALP_CAM0_SENSOR') else ''}"
+SRC_URI += "${@' file://camera-csi.cfg file://e1m-x-evk-cam0-' + d.getVar('ALP_CAM0_SENSOR') + '.dtsi file://e1m-v2n101-x-evk-cam0.dts file://e1m-v2m101-x-evk-cam0.dts' if d.getVar('ALP_CAM0_SENSOR') else ''}"

@@ -78,3 +78,62 @@ bootloader `fdtfile` at it to use it; the stock dtb stays the fallback.
    (wrong sensor / lanes), no frames (lane count or graph mismatch).
 
 Report the outcome on #1149 before treating any of this as verified.
+
+## OV9281 on CAM0 (J5), opt-in (#2612)
+
+A monochrome OmniVision OV9281 (RPi-style 15-pin module) on the E1M-X-EVK
+CAM0 connector. Same receiver path as the IMX219 above (`csi20` -> `cru0`),
+selected with a second switch. **BENCH-UNVERIFIED.**
+
+```
+# conf/local.conf  (mutually exclusive with ALP_ENABLE_CAM0_IMX219 -- the
+# bake aborts if both are "1")
+ALP_ENABLE_CAM0_OV9281 = "1"
+```
+
+The fragment is `e1m-x-evk-cam0-ov9281.dtsi`; `camera-csi.cfg` adds
+`CONFIG_VIDEO_OV9282=y`. The default dtb is unchanged with the switch off.
+
+Carrier facts the fragment encodes:
+
+- CSI: J5 (2 lanes + clock) goes through a 2:1 CSI mux onto E1M-X CSI0.
+  Mux select = E1M IO16 (`CAM0_MUX.SEL`), a GD32 bridge GPIO on V2N/V2M
+  (line 7 of `gd32_gpio`). It is hogged LOW (`cam0-mux-sel`) to pick J5.
+- I2C: J5 -> level shifter -> E1M-X I2C2 (pads E63/E64) = RIIC2 (P34/P35)
+  = `&i2c2`. Sensor at `0x60` (typical RPi OV9281); some modules use
+  `0x70` -- change `reg` if `i2cdetect` shows that.
+- Camera enable (J5 pin 11, E1M IO18): not modelled. On V2M, IO18 is a
+  DEEPX DX-M1 GPIO/strap, not a Linux GPIO; the carrier pull-down leaves
+  the FET off.
+- Power: J5 3V3 is always on. Clock: the module's own 24 MHz oscillator,
+  represented by a `fixed-clock`.
+
+6.1.141-cip43 `ov9282.c` facts: compatible is `ovti,ov9282` only (the
+OV9281 shares chip ID `0x9281`); 2 lanes; link frequency `400000000` Hz
+only; one mode, **1280x720 `Y10_1X10`** (no native 1280x800 mode). The
+RZ/G2L CSI-2/CRU format tables in this kernel list no Y10 code, so link
+or format validation may refuse the pipeline: that would need kernel
+work, not DT changes. Record what you see.
+
+Bench verification (needs `i2c-tools`, `v4l-utils`; find the RIIC2 bus
+number with `ls -l /sys/bus/i2c/devices/` -- the adapter whose device
+path contains `14400c00.i2c`):
+
+```
+dmesg | grep -iE "ov9282|csi|cru"
+i2cdetect -y <riic2 bus>           # expect 0x60 (UU once bound)
+media-ctl -p                       # CRU video node + entity names
+v4l2-ctl -d /dev/video0 --list-formats-ext
+```
+
+Set the pipeline (entity names from `media-ctl -p`):
+
+```
+media-ctl -d /dev/media0 -V "'ov9282 <bus>-0060':0 [fmt:Y10_1X10/1280x720]"
+media-ctl -d /dev/media0 -V "'<csi2 entity>':0 [fmt:Y10_1X10/1280x720]"
+v4l2-ctl -d /dev/video0 --stream-mmap --stream-count=10 --stream-to=/tmp/f.raw
+```
+
+Pass: 10 frames, no CSI errors in `dmesg`. If `i2cdetect` sees nothing,
+check the mux select (`gpioinfo | grep cam0-mux-sel` must read output,
+low) and the module's I2C address.
