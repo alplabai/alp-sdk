@@ -1,0 +1,123 @@
+From 5c1d0a7e3b9f4a6d8e2f10c4b7a9d3e5f6a8b0c1 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Fri, 2 Oct 2026 09:00:00 +0000
+Subject: [PATCH] media: rzg2l-csi2: honour lane-polarities via SWAPCTL
+
+The RZ/V2H-family D-PHY has CRUm_SWAPCTL (CSI-2 base + 0x438) to swap
+the DP/DN pair of the receiver lanes, but the driver always wrote 0 to
+it and ignored the standard lane-polarities endpoint property.
+
+Bench symptom (E1M-V2M103 + E1M-X EVK J5 OV9281, kernel 6.1.141-cip43,
+CSI-2 receiver matched as renesas,r9a09g057-csi2): the CSI0 P/N pairs
+arrive swapped at the receiver, so with SWAPCTL = 0 CSI2nRXST stays 0,
+DLST0/DLST1 read 0x4 (ECT ErrControl on the data lanes), PMST reads
+0x000F40CF (clock-lane ULPS entry/exit flags) and no packet is ever
+received.  Writing 0x30 to SWAPCTL delivered frames (30/30 at 16.9 fps,
+real image).
+
+Per the RZ/V2H hardware manual (R01UH1032EJ0130, section 9.2):
+
+- bit 5 S_DPDN_SWAP_DAT swaps DP/DN of all slave data lanes;
+- bit 4 S_DPDN_SWAP_CLK swaps DP/DN of the slave clock lane;
+- bits 1/0 M_DPDN_SWAP_* must not be changed from 0.
+
+Parse lane-polarities from the receiver endpoint (index 0 is the clock
+lane, 1..N the data lanes) and program bits 5/4 accordingly.  The
+hardware can only swap all data lanes or none, so a mixed data-lane
+setting fails probe with -EINVAL.  Bits 1/0 are never set.  The RZ/G2L
+D-PHY has no SWAPCTL: polarities are ignored with a warning if set.
+---
+ drivers/media/platform/renesas/rzg2l-cru/rzg2l-csi2.c | 32 +++++++++++++++++++++++++++++++-
+ 1 file changed, 31 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/renesas/rzg2l-cru/rzg2l-csi2.c b/drivers/media/platform/renesas/rzg2l-cru/rzg2l-csi2.c
+--- a/drivers/media/platform/renesas/rzg2l-cru/rzg2l-csi2.c
++++ b/drivers/media/platform/renesas/rzg2l-cru/rzg2l-csi2.c
+@@ -94,6 +94,8 @@
+ #define CRUm_S_DPHYCTL_MSB_DESKEW	BIT(1)
+ 
+ #define CRUm_SWAPCTL			0x438
++#define CRUm_SWAPCTL_S_DPDN_SWAP_DAT	BIT(5)
++#define CRUm_SWAPCTL_S_DPDN_SWAP_CLK	BIT(4)
+ 
+ #define VSRSTS_RETRIES			20
+ 
+@@ -131,6 +133,9 @@
+ 	unsigned short lanes;
+ 	unsigned long hsfreq;
+ 
++	bool swap_clk;
++	bool swap_dat;
++
+ 	bool dphy_enabled;
+ };
+ 
+@@ -138,6 +143,7 @@
+ 	int (*dphy_enable)(struct rzg2l_csi2 *csi2);
+ 	int (*dphy_disable)(struct rzg2l_csi2 *csi2);
+ 	bool has_system_clk;
++	bool has_swapctl;
+ 	unsigned long vclk_rec_rate;
+ 	const struct rzg2l_csi2_format *format;
+ 	unsigned int num_formats;
+@@ -655,7 +661,10 @@
+ 	if (i == ARRAY_SIZE(rzv2h_s_hssettlectl))
+ 		return -EINVAL;
+ 
+-	rzg2l_csi2_write(csi2, CRUm_SWAPCTL, 0);
++	/* Bits 1/0 (M_DPDN_SWAP_*) must stay 0. */
++	rzg2l_csi2_write(csi2, CRUm_SWAPCTL,
++			 (csi2->swap_dat ? CRUm_SWAPCTL_S_DPDN_SWAP_DAT : 0) |
++			 (csi2->swap_clk ? CRUm_SWAPCTL_S_DPDN_SWAP_CLK : 0));
+ 
+ 	hssettle = rzv2h_s_hssettlectl[i].s_hssettlectl;
+ 	rzg2l_csi2_write(csi2, CRUm_S_TIMCTL,
+@@ -674,6 +683,7 @@
+ }
+ 
+ static const struct rzg2l_csi2_info rzv2h_csi2_info = {
++	.has_swapctl = true,
+ 	.dphy_enable = rzv2h_csi2_dphy_enable,
+ 	.dphy_disable = rzv2h_csi2_dphy_disable,
+ 	.has_system_clk = false,
+@@ -932,12 +942,38 @@
+ static int rzg2l_csi2_parse_v4l2(struct rzg2l_csi2 *csi2,
+ 				 struct v4l2_fwnode_endpoint *vep)
+ {
++	unsigned int i, ndat_inv = 0;
++	bool swap_clk;
++
+ 	/* Only port 0 endpoint 0 is valid. */
+ 	if (vep->base.port || vep->base.id)
+ 		return -ENOTCONN;
+ 
+ 	csi2->lanes = vep->bus.mipi_csi2.num_data_lanes;
+ 
++	/* lane_polarities[0] is the clock lane, [1..N] the data lanes. */
++	swap_clk = vep->bus.mipi_csi2.lane_polarities[0];
++	for (i = 1; i <= csi2->lanes; i++) {
++		if (vep->bus.mipi_csi2.lane_polarities[i])
++			ndat_inv++;
++	}
++
++	if (ndat_inv && ndat_inv != csi2->lanes) {
++		dev_err(csi2->dev,
++			"lane-polarities: the D-PHY can only invert all data lanes or none\n");
++		return -EINVAL;
++	}
++
++	if (!csi2->info->has_swapctl) {
++		if (swap_clk || ndat_inv)
++			dev_warn(csi2->dev,
++				 "lane-polarities ignored: no P/N swap on this D-PHY\n");
++		return 0;
++	}
++
++	csi2->swap_clk = swap_clk;
++	csi2->swap_dat = ndat_inv;
++
+ 	return 0;
+ }
+ 
+-- 
+2.34.1

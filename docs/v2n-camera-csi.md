@@ -83,7 +83,7 @@ Report the outcome on #1149 before treating any of this as verified.
 
 A monochrome OmniVision OV9281 (RPi-style 15-pin module) on the E1M-X-EVK
 CAM0 connector. Same receiver path as the IMX219 above (`csi20` -> `cru0`),
-selected with a second switch. **BENCH-UNVERIFIED**; needs patch 0016.
+selected with a second switch. Bench-proven on E1M-V2M103 (30/30 frames, 16.9 fps); needs patches 0016 and 0017.
 
 ```
 # conf/local.conf  (mutually exclusive with ALP_ENABLE_CAM0_IMX219 -- the
@@ -119,6 +119,20 @@ reads back as `UYVY8_1X16`, and `VIDIOC_STREAMON` fails with `-EPIPE`.
 With the patch the CRU captures it as `CR10` (RAW10, 64-bit packed: six
 10-bit pixels per 8 bytes, MSBs padded).
 
+**Lane polarity (patch 0017).** On E1M-V2M103 + X-EVK J5 the CSI0 P/N
+pairs arrive swapped at the RZ/V2N receiver. Without the swap the receiver
+sees `CSI2nRXST = 0`, `DLST0`/`DLST1 = 0x4` (ECT ErrControl on the data
+lanes), `PMST = 0x000F40CF` (clock-lane ULPS flags) and never a packet.
+`e1m-x-evk-cam0-ov9281.dtsi` sets `lane-polarities = <1 1 1>;` (clock + 2
+data lanes inverted) on the `csi20` endpoint, and
+`0017-media-rzg2l-csi2-honour-lane-polarities-via-SWAPCTL.patch` (applied
+unconditionally) programs `CRUm_SWAPCTL` from it: bit 5 `S_DPDN_SWAP_DAT`
+(all data lanes), bit 4 `S_DPDN_SWAP_CLK` (clock lane), bits 1/0 left 0
+(RZ/V2H manual R01UH1032EJ0130 section 9.2). The hardware swaps all data
+lanes or none, so a mixed data-lane setting fails probe with `-EINVAL`.
+Nothing needs to be written by hand. Where in the chain the swap
+physically happens (camera FPC, carrier or SoM) is TBD.
+
 Bench verification (needs `i2c-tools`, `v4l-utils`; find the RIIC2 bus
 number with `ls -l /sys/bus/i2c/devices/` -- the adapter whose device
 path contains `14400c00.i2c`):
@@ -143,8 +157,18 @@ v4l2-ctl -d /dev/video0 --stream-mmap --stream-count=10 --stream-to=/tmp/f.raw
 
 `CR10` bytesperline is `1280 * 8 = 10240` and sizeimage
 `10240 * 720 = 7372800` (the driver reserves 8 bytes per pixel; the CRU
-writes the 64-bit packed data into each line). An 8-bit greyscale sensor
+writes the 64-bit packed data into each line). Observed line layout: 1280 px
+= 214 packed 64-bit words (1712 B) plus 2 trailing words, well inside the
+10240 B bytesperline. An 8-bit greyscale sensor
 (`Y8_1X8`) uses `pixelformat=GREY` instead.
+
+The default image is dark (the `ov9282` driver defaults to exposure 642,
+analogue gain 16). Raise them on the **sensor** subdev (find it with
+`media-ctl -p`):
+
+```
+v4l2-ctl -d /dev/v4l-subdevN -c exposure=1000,analogue_gain=100
+```
 
 Pass: 10 frames, no CSI errors in `dmesg`. If `i2cdetect` sees nothing,
 check the mux select (`gpioinfo | grep cam0-mux-sel` must read output,

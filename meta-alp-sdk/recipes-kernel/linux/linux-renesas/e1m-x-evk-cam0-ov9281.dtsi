@@ -10,7 +10,8 @@
  * e1m-x-evk-cam0-imx219.dtsi (same labels, same nodes; the bbappend
  * refuses both).
  *
- * STATUS: BENCH-UNVERIFIED.  The csi20 / cru0 graph and the caveats in
+ * STATUS: bench-proven on E1M-V2M103 + X-EVK J5 (needs patches 0016, 0017).
+ * The csi20 / cru0 graph and the caveats in
  * e1m-x-evk-cam0-imx219.dtsi (labels from the Renesas BSP convention, CAM0
  * = receiver 0, no sensor power sequencing from Linux) apply unchanged.
  *
@@ -109,6 +110,15 @@
 			csi2_in: endpoint {
 				remote-endpoint = <&cam0_sensor_out>;
 				data-lanes = <1 2>;
+				/*
+				 * Clock + 2 data lanes inverted: bench-proven on E1M-V2M103 +
+				 * X-EVK J5 that the CSI0 P/N pairs arrive swapped at the
+				 * RZ/V2N receiver (rzg2l-csi2 patch 0017 writes CRUm_SWAPCTL).
+				 * Where in the chain the swap happens (camera FPC, carrier or
+				 * SoM symbol) is TBD; the netlists name P/N consistently.  Set
+				 * on the receiver side because that is what the driver parses.
+				 */
+				lane-polarities = <1 1 1>;
 			};
 		};
 	};

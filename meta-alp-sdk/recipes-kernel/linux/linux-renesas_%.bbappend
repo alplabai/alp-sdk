@@ -77,6 +77,7 @@ SRC_URI:append = " \
     file://0012-uio-pdrv-genirq-default-of_id-to-generic-uio.patch \
     file://0015-gpiolib-sysfs-reject-export-of-a-number-in-a-chipless-gpio_device.patch \
     file://0016-media-rzg2l-cru-add-Y10-Y8-greyscale-formats.patch \
+    file://0017-media-rzg2l-csi2-honour-lane-polarities-via-SWAPCTL.patch \
     file://uio.cfg \
 "
 
@@ -85,6 +86,14 @@ SRC_URI:append = " \
 # csi20 pad and STREAMON failed -EPIPE.  The patch adds Y10_1X10 (-> CR10,
 # RAW10) and Y8_1X8 (-> GREY, RAW8) to the CSI-2 and CRU tables; no other
 # sensor's behaviour changes, so it applies unconditionally.
+#
+# 0017 (CSI-2 lane polarity, #2612): the RZ/V2H-family D-PHY swaps a lane's
+# DP/DN pair through CRUm_SWAPCTL, but the driver always wrote 0 and ignored
+# the DT lane-polarities property.  On E1M-V2M103 + X-EVK J5 the CSI0 pairs
+# arrive swapped (ErrControl on the data lanes, no packets) until SWAPCTL =
+# 0x30.  The patch programs it from lane-polarities (all data lanes or none);
+# the cam0 dtsi fragments set <1 1 1> on the csi20 endpoint.  Applied
+# unconditionally: with no lane-polarities the register is still written 0.
 #
 # 0012 (UIO default match, #2374): uio_pdrv_genirq binds no DT node until
 # of_id is set, and the stored U-Boot bootargs cannot be relied on to carry
