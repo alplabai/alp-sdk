@@ -97,11 +97,11 @@ export HAL_ALIF_DIR
 # --------------------------------------------------------------------
 # Board target (the bench default: AEN803 / E8 / M55-HE, RTSS-HE)
 # --------------------------------------------------------------------
-# Every module on the Alp Lab AEN bench farm is an E1M-AEN803, so
-# this is the default build.sh uses unconditionally. Its own preflight
-# (alp-sdk#2094) refuses -- exit 2 -- when an app ships boards/*.overlay and
-# none match the resolved target, naming the files it found; an app with
-# no boards/ overlays at all is untouched. AEN_BOARD still overrides.
+# Every module on the Alp Lab AEN bench farm is an E1M-AEN803, so this is
+# the default build.sh uses unconditionally. Its own preflight (alp-sdk#2094)
+# checks overlay and .conf files SEPARATELY -- exit 2 -- scoped to AEN
+# board-qualified alp_e1m_*_rtss_h[ep] names (plus same-board near-misses),
+# never every board-qualified file; AEN_BOARD still overrides (see build.sh).
 export AEN_BOARD="${AEN_BOARD:-alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he}"
 
 # --------------------------------------------------------------------
@@ -1769,6 +1769,24 @@ bench_atoc_extent_guard() { # <app-package-map.txt>
 	else
 		python3 "$AEN_ATOC_PY" --package-map "$1"
 	fi
+}
+
+# bench_stage_device_config <setools-dir> -- print the DEVICE-config binary name
+# to put in an ATOC JSON's "DEVICE" entry, or nothing when none was requested.
+# ALP_AEN_DEVICE_CONFIG_JSON may be a file path (copied into build/config) or a
+# name already under the SETOOLS build/config dir. Setting it implies inclusion;
+# ALP_AEN_INCLUDE_DEVICE_CONFIG=yes alone means app-device-config.json.
+bench_stage_device_config() {
+	local set_dir="$1" json="${ALP_AEN_DEVICE_CONFIG_JSON:-}"
+	if [ -z "$json" ]; then
+		[ "${ALP_AEN_INCLUDE_DEVICE_CONFIG:-no}" = "yes" ] || return 0
+		json=app-device-config.json
+	fi
+	if [ -f "$json" ]; then
+		cp -f "$json" "$set_dir/build/config/" || return 1
+		json=$(basename "$json")
+	fi
+	printf '%s' "$json"
 }
 
 # bench_flowd_python <args...> -- run the pure host-side helper. Pinned

@@ -1358,9 +1358,18 @@ static int can_cast_receive(uint32_t can_base, struct can_frame *dest_frame)
 
 	dest_frame->dlc = ((rx_msg->control >> CAN_MSG_DLC_Pos) & 0xFU);
 
+	/* ISO 11898-1: a classic (FDF=0) frame with wire DLC 9..15 carries 8 data bytes. Report
+	 * dlc 8 so can_dlc_to_bytes() never exposes stale RBUF words beyond the 8 real bytes.
+	 */
+	if (!(dest_frame->flags & CAN_FRAME_FDF) && dest_frame->dlc > CAN_MAX_DLC) {
+		dest_frame->dlc = CAN_MAX_DLC;
+	}
+
 	loc_var = can_dlc_to_bytes(dest_frame->dlc);
 	if (loc_var > CAN_MAX_DLEN) {
-		/* Same as the RTR drop: release the buffer or the IRQ retriggers forever */
+		/* FD frame on a non-FD build: no room in struct can_frame. Same as the RTR drop:
+		 * release the buffer or the IRQ retriggers forever
+		 */
 		can_cast_release_rbuf(can_base);
 		return -ENOTSUP;
 	}
