@@ -1793,6 +1793,13 @@ def validate(
             dst.parent.mkdir(parents=True, exist_ok=True)
             dst.write_bytes(src.read_bytes())
 
+        # The copied testcase.yaml loads `generated/alp.conf` via
+        # EXTRA_CONF_FILE; nothing else writes it in a temp tree.
+        import check_zephyr_conf_parity as _parity
+        import gen_example_alp_conf as _gen
+        for cml, board_yaml, core_id in _parity.find_cases(tmp):
+            _gen.generate(cml, board_yaml, core_id)
+
         outdir = tmp / "twister-out"
         env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
         env["ZEPHYR_BASE"] = zephyr_base

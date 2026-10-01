@@ -22,8 +22,8 @@ def _load():
 
 
 GEN = _load()
-CASES = [c for c in GEN.parity._find_cases()
-         if c[0].relative_to(REPO).as_posix() not in GEN.parity._EXCLUDED_WITH_REASON]
+CASES = [c for c in GEN.parity.find_cases()
+         if c[0].relative_to(REPO).as_posix() not in GEN.parity.EXCLUDED_WITH_REASON]
 
 
 def _example(rel):
@@ -70,3 +70,16 @@ def test_every_test_loads_generated_alp_conf_first(tc):
         vals = [a.split("=", 1)[1].strip('"') for a in args if a.startswith(key + "=")]
         assert len(vals) == 1, f"{name}: {vals}"
         assert vals[0].split(";")[0] == "generated/alp.conf", f"{name}: {vals[0]}"
+
+
+def test_no_testcase_references_alp_conf_without_a_generating_cmakelists():
+    """Reverse guard: a testcase.yaml naming generated/alp.conf in a dir the
+    generator doesn't cover would fail configure with 'File not found'."""
+    covered = {c[0].parent for c in CASES}
+    for tc in (REPO / "examples").glob("**/testcase.yaml"):
+        if "generated/alp.conf" in tc.read_text(encoding="utf-8"):
+            assert tc.parent in covered, tc.relative_to(REPO).as_posix()
+
+
+def test_unmatched_dir_fails(capsys):
+    assert GEN.main([str(_example("examples/aen/aen-mcuboot-smoke"))]) == 1

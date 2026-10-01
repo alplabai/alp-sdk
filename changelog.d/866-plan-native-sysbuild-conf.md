@@ -37,3 +37,16 @@ would drop the first); later overlays still win. `pr-twister.yml`,
 `pr-twister-aen.yml` and `scripts/test-all.sh` run the generator before
 twister. The `CMakeLists.txt` bridge still runs alongside; it is retired in a
 follow-up slice.
+
+`gen_example_alp_conf.py` now exits non-zero for a requested example directory
+that matches no `--core` zephyr-conf case (a typo or a non-zephyr-conf example)
+instead of printing `wrote 0`, and the case walker and exclusion table it shares
+with `check_zephyr_conf_parity.py` are public (`find_cases`,
+`EXCLUDED_WITH_REASON`). `alp_template.py validate` writes the same fragment
+into its temp tree before running twister (its copied `testcase.yaml` names
+`generated/alp.conf`), and the PR template, `docs/testing.md`,
+`docs/local-ci.md`, `docs/cross-platform-setup.md`, the native-sim container
+README and the example READMEs that run twister now run the generator first.
+Until the `CMakeLists.txt` bridge is retired a stale fragment is harmless (the
+bridge's fresh build-dir copy wins); the retiring slice must regenerate it
+before every build.

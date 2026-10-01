@@ -92,6 +92,7 @@ This is the path that matches GitHub Actions exactly.
    ```sh
    wsl -d Ubuntu -- bash -lc '
      cd ~/dev/alp-sdk &&
+     python3 scripts/gen_example_alp_conf.py &&
      python3 $ZEPHYR_BASE/scripts/twister \
         --testsuite-root examples \
         -p native_sim/native/64 \

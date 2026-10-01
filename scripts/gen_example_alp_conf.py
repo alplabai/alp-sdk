@@ -50,18 +50,22 @@ def generate(cmakelists: Path, board_yaml: Path, core_id: str) -> Path:
 def main(argv: list[str]) -> int:
     only = {Path(a).resolve() for a in argv}
     failures, n = [], 0
-    for cmakelists, board_yaml, core_id in parity._find_cases():
+    seen: set[Path] = set()
+    for cmakelists, board_yaml, core_id in parity.find_cases():
         if only and cmakelists.parent.resolve() not in only:
             continue
+        seen.add(cmakelists.parent.resolve())
         rel = cmakelists.relative_to(REPO).as_posix()
-        if rel in parity._EXCLUDED_WITH_REASON:
-            print(f"SKIP {rel}: {parity._EXCLUDED_WITH_REASON[rel]}")
+        if rel in parity.EXCLUDED_WITH_REASON:
+            print(f"SKIP {rel}: {parity.EXCLUDED_WITH_REASON[rel]}")
             continue
         try:
             generate(cmakelists, board_yaml, core_id)
             n += 1
         except (OrchestratorError, OSError) as e:
             failures.append(f"{rel}: {e}")
+    for d in sorted(only - seen):
+        failures.append(f"{d}: matches no --core zephyr-conf example")
     for f in failures:
         print(f"gen_example_alp_conf: {f}", file=sys.stderr)
     print(f"gen_example_alp_conf: wrote {n} generated/alp.conf")

@@ -62,7 +62,7 @@ _EMIT_RE = re.compile(r"--emit\s+zephyr-conf\b")
 # `main()` re-asserts each entry's (family_dir, hw_rev) via
 # assert_exclusion_still_not_buildable every run, and fails loudly the
 # moment a reason stops holding -- this dict alone is not self-enforcing.
-_EXCLUDED_WITH_REASON: dict[str, str] = {
+EXCLUDED_WITH_REASON: dict[str, str] = {
     "examples/multicore/rpmsg-imx93/m33/CMakeLists.txt":
         "E1M-NX9101's only hw_rev (imx93 r1) is `status: tbd` -- refused "
         "outright by the hw_rev-buildable gate (#1025). Remove this entry "
@@ -70,17 +70,18 @@ _EXCLUDED_WITH_REASON: dict[str, str] = {
         "buildable status.",
 }
 # (family_dir, hw_rev) each excluded path's reason cites, for the ratchet
-# assertion above -- keyed the same as _EXCLUDED_WITH_REASON.
-_EXCLUDED_FAMILY_HWREV: dict[str, tuple[str, str]] = {
+# assertion above -- keyed the same as EXCLUDED_WITH_REASON.
+EXCLUDED_FAMILY_HWREV: dict[str, tuple[str, str]] = {
     "examples/multicore/rpmsg-imx93/m33/CMakeLists.txt": ("imx93", "r1"),
 }
 
 
-def _find_cases() -> list[tuple[Path, Path, str]]:
+def find_cases(root: Path = REPO / "examples") -> list[tuple[Path, Path, str]]:
     """(CMakeLists.txt path, board.yaml path, core id) for every scoped
-    `--emit zephyr-conf --core <id>` invocation under `examples/**`."""
+    `--emit zephyr-conf --core <id>` invocation under `root` (default
+    `examples/`; public so gen_example_alp_conf.py and alp_template.py share it)."""
     cases = []
-    for cmakelists in sorted(REPO.glob("examples/**/CMakeLists.txt")):
+    for cmakelists in sorted(root.glob("**/CMakeLists.txt")):
         text = cmakelists.read_text(encoding="utf-8")
         core_m = _CORE_RE.search(text)
         if core_m is None:
@@ -95,7 +96,7 @@ def _find_cases() -> list[tuple[Path, Path, str]]:
 def _find_unscoped_emits(repo: Path = REPO) -> list[Path]:
     """CMakeLists.txt files with a `--emit zephyr-conf` invocation that is
     NOT `--core`-scoped -- the cross-core Kconfig leak ADR-0020's addendum
-    retired. `_find_cases` silently skips a `--core`-less invocation, so
+    retired. `find_cases` silently skips a `--core`-less invocation, so
     without this guard a re-introduced unscoped emit would pass the gate
     while shipping cross-core-contaminated firmware. Fail loudly instead."""
     leaks = []
@@ -117,7 +118,7 @@ def main() -> int:
             print(f"  · {leak.relative_to(REPO).as_posix()}", file=sys.stderr)
         return 1
 
-    cases = _find_cases()
+    cases = find_cases()
     if not cases:
         print("check_zephyr_conf_parity: no --core-scoped zephyr-conf "
               "CMakeLists.txt found -- suspiciously empty corpus",
@@ -127,15 +128,15 @@ def main() -> int:
     failures: list[str] = []
     for cmakelists, board_yaml, core_id in cases:
         rel = cmakelists.relative_to(REPO).as_posix()
-        if rel in _EXCLUDED_WITH_REASON:
-            family_dir, hw_rev = _EXCLUDED_FAMILY_HWREV[rel]
+        if rel in EXCLUDED_WITH_REASON:
+            family_dir, hw_rev = EXCLUDED_FAMILY_HWREV[rel]
             stale = assert_exclusion_still_not_buildable(
                 REPO / "metadata", family_dir, hw_rev,
                 gate=f"check_zephyr_conf_parity.py ({rel})")
             if stale:
                 failures.append(stale)
             else:
-                print(f"SKIP {rel}: {_EXCLUDED_WITH_REASON[rel]}")
+                print(f"SKIP {rel}: {EXCLUDED_WITH_REASON[rel]}")
             continue
         if not board_yaml.is_file():
             failures.append(f"{rel}: board.yaml not found at {board_yaml}")

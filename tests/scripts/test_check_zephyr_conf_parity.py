@@ -66,7 +66,7 @@ def test_finds_every_core_scoped_example():
     # Asked of the discovery function directly, not of a full gate run: the
     # count is the only thing this test adds, and it must not force the
     # ~40 s corpus run that test_default_corpus_byte_identical owns.
-    found = len(_load_gate()._find_cases())
+    found = len(_load_gate().find_cases())
     assert found >= 90, (
         f"expected ~92 --core-scoped examples, only found {found} -- "
         f"the discovery regex may have regressed")

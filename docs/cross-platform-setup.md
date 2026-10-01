@@ -713,6 +713,8 @@ same way [`docs/testing.md`](testing.md)'s Zephyr suite does:
 # run this inside WSL2 — there is no native-Windows native_sim target):
 cd ../alp-workspace
 export ZEPHYR_BASE="$PWD/zephyr"
+# Examples load a pre-generated per-core Kconfig fragment (#866):
+python3 alp-sdk/scripts/gen_example_alp_conf.py
 python3 "$ZEPHYR_BASE/scripts/twister" \
     -T alp-sdk/examples/peripheral-io/gpio-button-led \
     -s alp_sdk.example.gpio_button_led.e1m_evk \
