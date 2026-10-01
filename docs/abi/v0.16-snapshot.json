@@ -6298,7 +6298,7 @@
           "kind": "fnptr"
         },
         "optiga_trust_m_t": {
-          "definition": "typedef struct { bool initialised; alp_i2c_t *bus; uint8_t addr; void *util; void *comms; uint8_t session; volatile uint16_t op_status; } optiga_trust_m_t;",
+          "definition": "typedef struct { bool initialised; alp_i2c_t *bus; uint8_t addr; void *util; void *comms; uint8_t session; uint8_t op_pending; uint16_t xfer_len; uint8_t uid[27]; volatile uint16_t op_status; optiga_trust_m_reset_fn_t reset; void *reset_user; } optiga_trust_m_t;",
           "fields": [
             "bool initialised",
             "alp_i2c_t *bus",
@@ -6306,9 +6306,14 @@
             "void *util",
             "void *comms",
             "uint8_t session",
-            "volatile uint16_t op_status"
+            "uint8_t op_pending",
+            "uint16_t xfer_len",
+            "uint8_t uid[27]",
+            "volatile uint16_t op_status",
+            "optiga_trust_m_reset_fn_t reset",
+            "void *reset_user"
           ],
-          "hash": "aaaf1bc9d17de9da",
+          "hash": "671f0195207f3364",
           "kind": "struct"
         }
       },

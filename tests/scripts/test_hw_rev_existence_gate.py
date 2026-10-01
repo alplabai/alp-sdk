@@ -90,8 +90,8 @@ def test_status_reserved_and_no_status_key_both_pass():
     ("aen", "r2"),      # status: production
     ("aen", "r3"),      # status: reserved
     ("v2n", "r1"),      # status: production
-    ("v2n", "r2"),      # status: reserved (was status-less pre-#1025 status half)
-    ("v2n-m1", "r2"),   # status: reserved (was status-less pre-#1025 status half)
+    ("v2n", "r2"),      # status: production
+    ("v2n-m1", "r2"),   # status: production
     ("imx93", "r1"),    # status: tbd, and an in-tree example builds it
 ])
 def test_family_revision_known_passes_every_real_status_in_tree(family, rev):
@@ -164,8 +164,8 @@ def test_revision_buildable_is_false_for_a_malformed_present_entry():
     ("aen", "r1", True),         # status: production
     ("aen", "r3", False),        # status: reserved
     ("v2n", "r1", True),         # status: production
-    ("v2n", "r2", False),        # status: reserved
-    ("v2n-m1", "r2", False),     # status: reserved
+    ("v2n", "r2", True),         # status: production (board 2625-R2)
+    ("v2n-m1", "r2", True),      # status: production (board 2625-R2)
     ("imx93", "r1", False),      # status: tbd -- the KNOWN FALLOUT
 ])
 def test_family_revision_buildable_matches_every_real_status_in_tree(family, rev, expected):

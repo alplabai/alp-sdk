@@ -75,6 +75,55 @@ always runs). `--build-dir` builds an unsigned bundle from a deploy
 directory for bench work; such a unit is recorded `bench-only` and the ship
 check refuses it.
 
+`run --hw-rev <key>` sets this unit's hardware revision when it differs from
+the bundle/preset default (a batch can mix revisions). The key must be
+status `production` in the family's `hw-revisions.yaml` (exact case, e.g.
+`r2`); anything else exits rc 2 and lists the production keys.
+
+### SSH and unit identity
+
+The tool SSHes into the unit with `StrictHostKeyChecking=no`,
+`UserKnownHostsFile=/dev/null`, `ConnectTimeout=5`, `LogLevel=ERROR` and
+`BatchMode=yes`: bench units get reused DHCP addresses and the SD and eMMC
+images carry different host keys by design, so a host key identifies nothing
+here.
+
+The real risk is mutating the wrong unit behind a stale IP, so identity is the
+eMMC CID. `bootstrap` records `emmc_cid_raw` (from `EM_DCID`) and `census`
+records it again from sysfs. Only `Ctx.need_linux()`, the gateway every
+Linux-mutating step goes through, checks: it reads the eMMC CID over SSH (found
+by sysfs `device/type`, like census) and compares it with the recorded one. The
+read is fresh on every call (nothing is cached, so a power cycle or DHCP renewal
+is caught), and `secure_page_lock` calls `need_linux()` again immediately before
+the irreversible lock write. Probes, `detect`, `linux_up()` and the console are
+not checked.
+
+The recorded CID is the first found of: `emmc_cid_raw` in any finished step of
+the current state, in a `superseded` state (the CID is hardware and survives a
+bundle or tool revision change), then `emmc_cid_raw` in the committed
+`<serial>.unit.yaml`. A `--accept-cid-change` anchor (`cid_anchor` in the state
+file) outranks all of them.
+
+The compare covers MID..MDT (first 15 bytes, lower-cased, whitespace stripped)
+with the reserved bits 119:114 masked. The last byte is not compared: the writer
+does print the CRC field, but `scif_writer.parse_cid` rebuilds the register with
+the reserved bits cleared and the end bit forced to 1, and kernel host drivers
+differ in the last byte they return (SDHCI drops the CRC7 + end-bit byte). A
+mismatch is refused:
+
+    <host> answers with eMMC CID <seen>, but unit <serial> recorded <expected>:
+    another unit is behind this address (stale DHCP lease?). Fix the address in
+    bench.yaml and re-run, or --accept-cid-change REASON if the eMMC was replaced.
+
+Limitation: first contact with no recorded CID is unchecked. On the normal
+blank-unit path `bootstrap`'s `EM_DCID` records the CID, so every later step is
+checked.
+
+`run --accept-cid-change REASON` is the escape for a legitimately replaced eMMC:
+it adopts the CID seen over SSH as the new anchor. The `emmc_cid_change`
+override (blocks shipping like the other overrides) is recorded only when a
+recorded CID existed and differed, not on first contact.
+
 ## Package `scripts/provision/`
 
 | module | responsibility |

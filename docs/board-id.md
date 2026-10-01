@@ -124,7 +124,7 @@ alp_hw_info_t info;
 alp_hw_info_read(&info);
 alp_hw_info_assert_matches_build(&info,
                                   /* expected_sku    */ "E1M-V2N101",
-                                  /* expected_hw_rev */ "r1");
+                                  /* expected_hw_rev */ "2625-r1");
 ```
 
 ### `hw_rev` carries the full board designator

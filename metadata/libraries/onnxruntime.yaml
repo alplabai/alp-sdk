@@ -19,7 +19,10 @@
 # DEEPX layer's libonnxruntime 1.20.1, not this 1.28.0 recipe.
 # `E1M-NX9101` cannot be exercised at all yet: the i.MX 93
 # side needs `meta-imx` / `meta-freescale`, which no Alp build host carries.
-# V2M101/102 likewise await a build pass of their own.
+# V2M101/102 and V2N102 are now wired into the image (alp-sdk `ort`
+# PACKAGECONFIG, ALP_ENABLE_ORT_CPU in their MACHINE confs, #1259) but await a
+# build + silicon pass of their own; V2N102 has no DX-M1, so its CPU floor sits
+# behind DRP-AI only.
 #
 # WHY THIS IS OUR OWN RECIPE, NOT A VENDOR LAYER DEPENDENCY.
 #   Neither `openembedded-core` nor `meta-openembedded` -- the only layers

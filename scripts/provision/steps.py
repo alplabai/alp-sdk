@@ -108,6 +108,7 @@ class Ctx:
     tier_markers: dict | None = None
     expected_registers: dict | None = None
     allow_tier_mismatch: str | None = None
+    accept_cid_change: str | None = None  # operator escape: the eMMC was legitimately replaced
     reprovision_from: Path | None = None
     cold_cycles: int = 3
     hil_spec: Path | None = None
@@ -179,7 +180,45 @@ class Ctx:
             self.linux = lt.LinuxTarget(self.bench.linux_host, self.bench.linux_user)
         if self.linux is None and self.execute:
             raise Refused("no Linux target: boot_sd_linux has not run")
+        if self.linux is not None and self.execute:
+            self._check_unit_identity(self.linux)
         return self.linux
+
+    def recorded_cid(self) -> str:
+        """The eMMC CID this serial is known by ("" before first contact). The CID is
+        hardware, so it outlives a bundle / tool_rev change: finished steps, then steps
+        moved to ``superseded``, then the committed unit.yaml. An explicit
+        ``--accept-cid-change`` anchor (``cid_anchor``) outranks all of them."""
+        if self.state.get("cid_anchor"):
+            return self.state["cid_anchor"]
+        groups = [self.state.get("steps", {})] + [g.get("steps", {}) for g in self.state.get("superseded", [])]
+        for steps_ in groups:
+            for st in steps_.values():
+                if st.get("status") in ("done", "skipped") and (st.get("evidence") or {}).get("emmc_cid_raw"):
+                    return st["evidence"]["emmc_cid_raw"]
+        return ledger_out.read_unit_yaml(self.unit_dir / f"{self.serial}.unit.yaml").get("emmc_cid_raw", "")
+
+    def _check_unit_identity(self, t) -> None:
+        """Refuse to mutate a Linux target whose eMMC is not this serial's (stale IP).
+        Read fresh on every call, never cached: a power cycle or DHCP renewal can put
+        another unit behind the same address. First contact with nothing recorded is
+        unchecked (bootstrap's EM_DCID records the CID on the normal blank-unit path)."""
+        want = self.recorded_cid()
+        if not want and not self.accept_cid_change:
+            return
+        seen = lt.read_emmc_cid(t)
+        if want and lt.cid_identity(seen) == lt.cid_identity(want):
+            return
+        if self.accept_cid_change:
+            if want:                          # first contact adopts silently; a changed CID is an override
+                _record_override(self, "emmc_cid_change", self.accept_cid_change)
+            self.state["cid_anchor"] = seen.strip().lower()
+            save_state(self.state_path, self.state)
+            return
+        raise Refused(f"{t.host} answers with eMMC CID {seen.strip().lower()}, but unit {self.serial} "
+                      f"recorded {want.strip().lower()}: another unit is behind this address "
+                      "(stale DHCP lease?). Fix the address in bench.yaml and re-run, or "
+                      "--accept-cid-change REASON if the eMMC was replaced.")
 
     def linux_up(self) -> bool:
         # --only/--from can start past detect, which is what normally attaches
@@ -879,7 +918,14 @@ class Gd32Flash(Step):
         for p, _a, key in images:
             if ev[key] != _md5(p.read_bytes()):
                 return Unsatisfied(f"{p.name} not on the GD32")
-        return Satisfied(ev)
+        return Satisfied({**ev, **self._fw_version(ctx)})
+
+    @staticmethod
+    def _fw_version(ctx) -> dict[str, str]:
+        """`<gd32-fw>/VERSION` names the release the images came from; the md5
+        readback above is what ties that name to the bytes on the chip."""
+        v = Path(ctx.gd32_fw) / "VERSION"
+        return {"gd32_fw_version": v.read_text(encoding="utf-8").strip()} if v.is_file() else {}
 
     def run(self, ctx):
         ev: dict[str, str] = {}
@@ -920,6 +966,7 @@ class Gd32Flash(Step):
         line = ctx.mutate(f"GET_VERSION from the bridge at {GD32_BRIDGE_ADDR:#04x}", bridge)
         if line:
             ev["gd32_protocol"] = line
+        ev.update(self._fw_version(ctx))
         return self.result(ctx, "GD32 flashed and verified" if ctx.execute else "would flash the GD32", ev)
 
 
@@ -1234,7 +1281,15 @@ class Record(Step):
         cat_path = ctx.ledger_root / "schema" / "v2n.keys.yaml"
         catalogue = ledger_out.load_catalogue(cat_path)
         unit_yaml = ctx.unit_dir / f"{ctx.serial}.unit.yaml"
-        auto = {k: v for k, v in ctx.facts.items()
+        # Steps finished in EARLIER invocations (--only/--from runs) left their facts
+        # as evidence in the state file; this run's facts override them.
+        facts: dict = {}
+        for n in STEP_NAMES:
+            st = ctx.state.get("steps", {}).get(n, {})
+            if st.get("status") in ("done", "skipped"):
+                facts.update(st.get("evidence") or {})
+        facts.update(ctx.facts)
+        auto = {k: v for k, v in facts.items()
                 if (catalogue.get(k, {}).get("mode") == "auto" or k.startswith("test_")) and v != ""}
         # Bundle facts describe what the bundle CONTAINS; they are ledger facts
         # about the unit only once every flash step succeeded (done, or skipped
@@ -1344,6 +1399,7 @@ class SecurePageLock(Step):
                 f"PERMANENT: lock the N24S128 identity header of {ctx.sku}. Type the unit serial to confirm:")
             if typed != ctx.serial:
                 raise Refused(f"operator typed {typed!r}, not {ctx.serial!r}")
+        t = ctx.need_linux()                 # fresh identity check right before the irreversible write
         ctx.mutate(f"LOCK: 0x58 frame 04 00 ff on i2c-{bus} (irreversible)",
                    lambda: lt.i2c_transfer(t, bus, gates.identity_frame(gates.IdentityOp.LOCK)))
         return self.result(ctx, "identity header locked" if ctx.execute else "lock plan only (no --execute)")

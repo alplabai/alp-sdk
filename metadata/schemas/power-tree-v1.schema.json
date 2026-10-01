@@ -116,7 +116,38 @@
       }
     },
     "chips": {
-      "type": "object"
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["act8760", "da9292"],
+      "properties": {
+        "act8760": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["addr_add1", "addr_add2"],
+          "properties": {
+            "addr_add1": { "type": "integer", "minimum": 0, "maximum": 127 },
+            "addr_add2": { "type": "integer", "minimum": 0, "maximum": 127 }
+          }
+        },
+        "da9292": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["addr", "identity"],
+          "properties": {
+            "addr": { "type": "integer", "minimum": 0, "maximum": 127 },
+            "identity": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["dev_id", "rev_id", "cfg_rev"],
+              "properties": {
+                "dev_id": { "type": "integer", "minimum": 0, "maximum": 255 },
+                "rev_id": { "type": "integer", "minimum": 0, "maximum": 255 },
+                "cfg_rev": { "type": "integer", "minimum": 0, "maximum": 255 }
+              }
+            }
+          }
+        }
+      }
     },
     "rails": {
       "type": "array",

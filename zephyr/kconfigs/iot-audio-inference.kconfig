@@ -261,14 +261,16 @@ config ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93
 
 config ALP_SDK_INFERENCE_SW_FALLBACK
 	bool "Software fallback (stateless NOSUPPORT stub, priority 0)"
-	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default y
 	help
 	  Compile src/backends/inference/sw_fallback.c.  Registered at
 	  priority 0 against silicon_ref="*" so it loses to every real
 	  backend; picked only when no other inference backend is
-	  linked in.  Useful for native_sim builds without
-	  CONFIG_TENSORFLOW_LITE_MICRO; open() succeeds with empty caps
-	  and every other op returns NOSUPPORT.
+	  linked in.  Every op, open() included, returns NOSUPPORT (the
+	  dispatcher relays it as a NULL handle + last_error), so it
+	  never fakes an inference result.  That is why it defaults y on
+	  every target, unlike the other classes' fallbacks (which fake
+	  success and default to native_sim only).
 
 # Per-variant Ethos-U kernel selectors.  Emitted by the orchestrator
 # (scripts/alp_orchestrate.py) from the SoM preset's

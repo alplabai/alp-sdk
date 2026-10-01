@@ -98,7 +98,12 @@ class LinuxTarget:
         self.runner = runner
         self.ssh = ssh
         self.scp = scp
-        self._opts = ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new"]
+        # Units get reused DHCP addresses and the SD and eMMC images carry different host
+        # keys by design, so host keys identify nothing here; unit identity is the eMMC CID
+        # check in Ctx.need_linux.
+        self._opts = ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no",
+                      "-o", "UserKnownHostsFile=/dev/null", "-o", "ConnectTimeout=5",
+                      "-o", "LogLevel=ERROR"]
 
     def _exec(self, argv: list[str], timeout: float, stdin_path: Path | None = None) -> CmdResult:
         try:
@@ -409,7 +414,7 @@ def eeprom_write_pages(t: LinuxTarget, bus: int, offset: int, data: bytes,
         # ponytail: poll bound counts attempts (each i2ctransfer spawn >= ~1 ms), not wall time
         t.run(f"i2ctransfer -y {bus} w{take + 2}@{EEPROM_ADDR:#04x} {payload} || exit 2; "
               f"n=0; until i2ctransfer -y {bus} w2@{EEPROM_ADDR:#04x} {hi:#04x} {lo:#04x} "
-              f">/dev/null 2>&1; do n=$((n+1)); [ $n -ge {poll_ms} ] && exit 3; done")
+              f">/dev/null 2>&1; do n=$((n+1)); if [ $n -ge {poll_ms} ]; then exit 3; fi; done")
         pos += take
     got = eeprom_read(t, bus, offset, len(data))
     if got != data:
@@ -740,6 +745,27 @@ def dxm1_pcie_present(t: LinuxTarget, vendor_id: str | None = None) -> bool:
 
 # --- census ----------------------------------------------------------------------------
 
+def cid_identity(raw: str) -> str:
+    """The comparable part of a 128-bit eMMC CID, as 30 lower-case hex chars.
+
+    Two sources must agree: bootstrap's EM_DCID parse (scif_writer.parse_cid) and the
+    sysfs `cid`. The writer does print the CRC field, but parse_cid still rebuilds the
+    register (reserved bits 119:114 forced to 0, end bit forced to 1), while the kernel
+    host drivers do not agree on the last byte (SDHCI returns an R2 response without the
+    CRC7 + end-bit byte). So byte 15 is not compared and the reserved bits of byte 1 are
+    masked; MID, CBX, OID, PNM, PRV, PSN and MDT are."""
+    raw = "".join(raw.split()).lower()
+    if not re.fullmatch(r"[0-9a-f]{32}", raw):
+        raise ValueError(f"CID must be 32 hex chars, got {raw!r}")
+    return raw[:2] + f"{int(raw[2:4], 16) & 0x03:02x}" + raw[4:30]
+
+
+def read_emmc_cid(t: LinuxTarget) -> str:
+    """Raw sysfs CID of the eMMC (found by sysfs type, as census does)."""
+    name = resolve_emmc(t).rsplit("/", 1)[-1]
+    return t.run(f"cat /sys/block/{name}/device/cid").stdout.strip()
+
+
 def parse_emmc_cid(raw: str) -> dict[str, str]:
     raw = raw.strip().lower()
     if not re.fullmatch(r"[0-9a-f]{32}", raw):
@@ -803,6 +829,10 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
             raise BenchError("MemTotal not in /proc/meminfo")
         facts["linux_memtotal_kb"] = m[1]
         facts["kernel_version"] = t.run("uname -r").stdout.strip()
+        compat = t.run(r"tr '\0' ' ' < /proc/device-tree/compatible", check=False).stdout.strip()
+        model = t.run(r"tr -d '\0' < /proc/device-tree/model", check=False).stdout.strip()
+        if compat:
+            facts["dtb_name"] = f"{model} (compatible {compat})" if model else compat
 
     def storage():
         dev = emmc or resolve_emmc(t)

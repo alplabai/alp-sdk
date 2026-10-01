@@ -396,13 +396,15 @@ static void probe_optiga(alp_i2c_t *bus)
 	                                                          OPTIGA_TRUST_M_I2C_ADDR,
 	                                                          have_rst ? se_reset_gpio_hook : NULL,
 	                                                          have_rst ? &rst : NULL);
-	if (have_rst) se_reset_gpio_close(&rst);
 	if (s != ALP_OK) {
+		if (have_rst) se_reset_gpio_close(&rst);
 		report("optiga trust m", OPTIGA_TRUST_M_I2C_ADDR, R_FAIL, "no ACK on I2C_STATE");
 		return;
 	}
 	report("optiga trust m", OPTIGA_TRUST_M_I2C_ADDR, R_PASS, "I2C_STATE readable");
 	optiga_trust_m_deinit(&se);
+	/* The driver keeps the hook until deinit, so close the line after it. */
+	if (have_rst) se_reset_gpio_close(&rst);
 }
 
 static void probe_gd32(alp_i2c_t *bus)
