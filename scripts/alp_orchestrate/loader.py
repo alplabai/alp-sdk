@@ -1317,7 +1317,11 @@ def load_board_yaml(path: Path, *,
     project = _load_and_validate_yaml(path, metadata_root)
     if sku:
         # Per-target SKU (#2597): the SoM facts follow the board being
-        # built, not the single static `som.sku` an example declares.
+        # built, not the single static `som.sku` an example declares.  Safe
+        # after schema validation: the override only changes the SKU string,
+        # and every SKU-derived value (_resolve_board's preset + SoC variant
+        # lookup, hw_rev checks, topology, storage) is computed below from
+        # it.  Callers pass a SKU taken from metadata/e1m_modules/.
         project["som"]["sku"] = sku
 
     # Fold the unified top-level `libraries:` list into the per-core /

@@ -201,3 +201,4 @@ oe-workdir
 # Per-example alp.conf pre-generated for twister / bare west by
 # scripts/gen_example_alp_conf.py (#866); regenerable, never committed.
 examples/**/generated/alp.conf
+examples/**/generated/*/alp.conf

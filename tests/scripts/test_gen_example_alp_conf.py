@@ -89,6 +89,7 @@ def test_twin_sku_gets_its_own_som_facts(tmp_path):
     """#2597: AEN803's populated OSPI memories reach an AEN801-declared app."""
     d = tmp_path / "alp-console"
     d.mkdir()
+    (d / "CMakeLists.txt").write_text(GEN._HOOK)
     src = _example("examples/peripheral-io/alp-console")
     case = next(c for c in CASES if c[0] == src)
     GEN.generate(d, case[1], case[2])
@@ -97,3 +98,34 @@ def test_twin_sku_gets_its_own_som_facts(tmp_path):
     assert "SOM_DRAM_MBIT" not in base
     assert "CONFIG_ALP_SDK_SOM_DRAM_MBIT=512" in twin
     assert "CONFIG_ALP_SDK_SOM_FLASH_MBIT=256" in twin
+
+
+def test_load_board_yaml_sku_override():
+    from alp_orchestrate import load_board_yaml
+    case = next(c for c in CASES if c[0] == _example("examples/peripheral-io/alp-console"))
+    assert load_board_yaml(case[1]).sku != "E1M-AEN803"
+    assert load_board_yaml(case[1], sku="E1M-AEN803").sku == "E1M-AEN803"
+
+
+def test_identical_twin_fragment_writes_no_subdir(tmp_path, monkeypatch):
+    case = next(c for c in CASES if c[0] == _example("examples/peripheral-io/alp-console"))
+    d = tmp_path / "app"
+    d.mkdir()
+    (d / "CMakeLists.txt").write_text(GEN._HOOK)
+    monkeypatch.setattr(GEN, "_slice_alp_conf", lambda *a: "same\n")
+    GEN.generate(d, case[1], case[2])
+    assert [p.name for p in (d / "generated").iterdir()] == ["alp.conf"]
+
+
+def test_twins_only_for_examples_with_the_hook():
+    hooked = 0
+    for app_dir, board_yaml, core in CASES:
+        GEN.generate(app_dir, board_yaml, core)
+        twins = list((app_dir / "generated").glob("*/alp.conf"))
+        if GEN._has_hook(app_dir):
+            hooked += 1
+        else:
+            assert not twins, app_dir
+    assert hooked >= 5
+    assert (_example("examples/peripheral-io/alp-console")
+            / "generated/aen803/alp.conf").is_file()

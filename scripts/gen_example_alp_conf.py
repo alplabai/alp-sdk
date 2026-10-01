@@ -43,6 +43,16 @@ def _write(out: Path, text: str) -> None:
         f.write(text)
 
 
+# An example opts into twin fragments by carrying this selector line in its
+# CMakeLists.txt (the #2597 hook); only those get generated/<sku>/alp.conf.
+_HOOK = "generated/${CMAKE_MATCH_1}/alp.conf"
+
+
+def _has_hook(app_dir: Path) -> bool:
+    cm = app_dir / "CMakeLists.txt"
+    return cm.is_file() and _HOOK in cm.read_text(encoding="utf-8")
+
+
 def _twin_skus(sku: str) -> list[str]:
     """Other SoM SKUs on the same silicon part as `sku` (e.g. E1M-AEN803 for
     E1M-AEN801): same PCB, so an app built for either board, but their
@@ -64,7 +74,8 @@ def generate(app_dir: Path, board_yaml: Path, core_id: str) -> Path:
     A twin SKU whose fragment differs also gets
     ``generated/<sku-lowercase-sans-E1M->/alp.conf`` (e.g. ``aen803``); the
     example's CMakeLists.txt points EXTRA_CONF_FILE at it when BOARD names that
-    SKU, so the SoM facts follow the board being built, not ``som.sku``.
+    SKU, so the SoM facts follow the board being built, not ``som.sku``. Only
+    examples whose CMakeLists.txt carries that hook get twins.
     """
     project = load_board_yaml(board_yaml)
     if core_id not in project.cores:
@@ -72,11 +83,13 @@ def generate(app_dir: Path, board_yaml: Path, core_id: str) -> Path:
     text = _slice_alp_conf(project, project.cores[core_id])
     out = app_dir / "generated" / "alp.conf"
     _write(out, text)
-    for sku in _twin_skus(project.sku):
+    for sku in _twin_skus(project.sku) if _has_hook(app_dir) else []:
         try:
             twin = load_board_yaml(board_yaml, sku=sku)
             ttext = _slice_alp_conf(twin, twin.cores[core_id])
-        except (OrchestratorError, KeyError):
+        except (OrchestratorError, KeyError) as e:
+            print(f"gen_example_alp_conf: {app_dir.name}: twin {sku} skipped: "
+                  f"{e!r}", file=sys.stderr)
             continue
         if ttext != text:
             _write(app_dir / "generated" / sku[4:].lower() / "alp.conf", ttext)
