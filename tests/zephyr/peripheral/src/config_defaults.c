@@ -249,7 +249,6 @@ ZTEST(alp_peripheral, test_shmem_config_default)
 	zassert_str_equal(cfg.name, "alp_shmem0", NULL);
 	zassert_equal(
 	    cfg.size, 0u, "advisory -- backend derives extent from DT; set size to document intent");
-	zassert_false(cfg.cacheable, "required for the simple core A/B pattern");
 }
 
 ZTEST(alp_peripheral, test_mqtt_config_default)

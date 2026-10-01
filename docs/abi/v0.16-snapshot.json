@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-30",
+  "generated": "2026-10-01",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -12082,8 +12082,8 @@
           "value": "(id) ((alp_mbox_config_t){ .channel = (id), .peer = ALP_CORE_SELF })"
         },
         "ALP_SHMEM_CONFIG_DEFAULT": {
-          "hash": "c6db9d60e4dd12ab",
-          "value": "(id) ((alp_shmem_config_t){ .name = (id), .size = 0u, .cacheable = false })"
+          "hash": "ca286eca8e6d3db1",
+          "value": "(id) ((alp_shmem_config_t){ .name = (id), .size = 0u })"
         }
       },
       "typedefs": {
@@ -12128,13 +12128,12 @@
           "kind": "opaque"
         },
         "alp_shmem_config_t": {
-          "definition": "typedef struct { const char *name; size_t size; bool cacheable; } alp_shmem_config_t;",
+          "definition": "typedef struct { const char *name; size_t size; } alp_shmem_config_t;",
           "fields": [
             "const char *name",
-            "size_t size",
-            "bool cacheable"
+            "size_t size"
           ],
-          "hash": "7c8e4233772e1edb",
+          "hash": "cb7a715731dea259",
           "kind": "struct"
         },
         "alp_shmem_t": {
