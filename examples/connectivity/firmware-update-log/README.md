@@ -96,14 +96,14 @@ bench, 2026-07-06). The key was targeting the right firewall component:
 
 Notes for anyone reproducing this:
 
-- Provision the FC8 policy over the SE-UART (`app-write-mram -e APP` then `-p`), not
-  J-Link Flow D: a bricking firewall config can't be cleared by Flow D because its
-  MRAM loader runs its RAMCode on the HE core. The SE writes MRAM independently, so
-  the SE-UART path both provisions and recovers.
+- The flash helpers write the package over J-Link Flow D, and the FC8 policy it
+  carries persists across cold cycles (re-measured 2026-10-01). Keep an SE-UART
+  connection for **recovery**: a firewall config that walls off the HE can't be
+  cleared by Flow D, because its MRAM loader runs on the HE core. The SE writes
+  MRAM independently (`app-write-mram`), so the SE-UART path always recovers.
 - The deny carve-out also blocks the **HE debug AP** read of the window, so the
-  SWD-based `read-update-log-proof.sh` verdict false-fails ("MRAM changed"). Verify
-  with the SE read (`getmramdata`, master 0) instead, or keep the design's read path
-  on a non-HE master. Tracked upstream (#111).
+  probe verdict is taken from the SE read (`getmramdata`, master 0), which
+  `read-update-log-proof.sh` uses; do not judge it from an HE-AP SWD read.
 
 The full dual-core path is also proven end-to-end on E8 (2026-07-06): with the FC8
 policy active (deny sized to the whole 64 KB `alp_ulog_partition`), the SES boots the
@@ -168,7 +168,10 @@ this profile on such a board without relocating one of them.
    ```
 
 2. **Run the negative probe**, with the FC8 DEVICE config in the package, using
-   `flash-update-log-firewall-probe.sh` and read it back with `read-update-log-proof.sh --expect-firewall-probe`. Proceed only
+   `flash-update-log-firewall-probe.sh` (needs `ALP_CONFIRM_DESTRUCTIVE_FLASH=yes`,
+   and `--replace-atoc` on a board whose ATOC lists other apps -- without it the
+   guard refuses with rc 5 rather than silently delisting them) and read it back
+   with `read-update-log-proof.sh --expect-firewall-probe`. Proceed only
    on `firewall verdict: PASS`. A `FAIL` means the partition is writable: fix the
    OEM device config, do not continue. (`--package-only` validates the ATOC
    package without writing MRAM.)

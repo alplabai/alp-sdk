@@ -26,3 +26,18 @@ Changes:
   overlap caution.
 - The HE client now prints that its store is owned by the HP owner instead of
   "RAM fallback", and `read-update-log-proof.sh` uses a private `mktemp` dir.
+
+Bench, E1M-AEN803 serial 2026W36-0009, SES v1.110, following the README
+recipe:
+- **Step 2:** the probe with the shipped FC8 config reports
+  `firewall verdict: PASS`. The SES logs
+  `Firewall exception from FC8, caused by Master ID 0x11 at address 0x80090000`.
+- **Step 4:** the dual flash keeps `ATOC DEVICE ok` and FC8 region 1 across
+  cold cycles; before this change, the DEVICE entry was dropped.
+- **Console:** the HE prints
+  `[update-log] assurance: HW_ENFORCED (secure tier)` and
+  `storage: owned by the HP owner`.
+- **Fail-closed:** without the HP owner, the HE prints
+  `HW_ENFORCED required, but no secure owner/firewall-backed backend is active`.
+
+The board's MRAM was restored byte-exact afterwards.

@@ -6,12 +6,11 @@
 # Runs under WSL2 on Windows. See docs/aen-bench-bringup.md.
 #
 # Build and optionally flash the HE direct-write MRAM firewall probe for
-# examples/connectivity/firmware-update-log. The default package is app-only so
-# it preserves the board's existing DEVICE policy (SETOOLS keeps DEVICE when a
-# JSON omits it, docs/aen-provisioning.md section 4). Set
-# ALP_AEN_INCLUDE_DEVICE_CONFIG=yes only when intentionally replacing that
-# policy; set ALP_AEN_DEVICE_CONFIG_JSON to a config filename under the SETOOLS
-# build/config directory when using a board-specific policy. Every OTHER
+# examples/connectivity/firmware-update-log. Set ALP_AEN_DEVICE_CONFIG_JSON to
+# the FC8 device config (a path, or a name under the SETOOLS build/config
+# directory): on SES v1.110 a package WITHOUT a DEVICE entry drops the board's
+# existing DEVICE/firewall policy (measured), so the helper warns loudly when it
+# is unset. Every OTHER
 # resident app entry NOT named HE-PROBE is a different matter: the `loadbin`
 # below writes the SAME signed ATOC structure `app-write-mram -p` would
 # (docs/debugging-aen.md), which REPLACES rather than merges, so a foreign app
