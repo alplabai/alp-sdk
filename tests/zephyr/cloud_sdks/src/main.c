@@ -33,16 +33,16 @@ ZTEST(cloud_sdks, test_aws_coremqtt_serializer)
 
 ZTEST(cloud_sdks, test_azure_span_and_hub_client)
 {
-	az_span s = AZ_SPAN_FROM_STR("hub.azure-devices.net");
+	az_span           s = AZ_SPAN_FROM_STR("hub.azure-devices.net");
 	az_iot_hub_client client;
-	char topic[64];
-	size_t len;
+	char              topic[64];
+	size_t            len;
 
 	zassert_equal(az_span_size(s), 21);
-	zassert_true(az_result_succeeded(az_iot_hub_client_init(
-		&client, s, AZ_SPAN_FROM_STR("dev1"), NULL)));
-	zassert_true(az_result_succeeded(az_iot_hub_client_telemetry_get_publish_topic(
-		&client, NULL, topic, sizeof(topic), &len)));
+	zassert_true(
+	    az_result_succeeded(az_iot_hub_client_init(&client, s, AZ_SPAN_FROM_STR("dev1"), NULL)));
+	zassert_true(az_result_succeeded(
+	    az_iot_hub_client_telemetry_get_publish_topic(&client, NULL, topic, sizeof(topic), &len)));
 	zassert_str_equal(topic, "devices/dev1/messages/events/");
 }
 
