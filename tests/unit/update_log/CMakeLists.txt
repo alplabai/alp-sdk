@@ -9,6 +9,8 @@ if(CONFIG_ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED)
 else()
   target_sources(app PRIVATE src/test_update_log.c)
 endif()
+# The anchor suite drives the engine directly, so it runs in every scenario.
+target_sources(app PRIVATE src/test_update_log_anchor.c)
 # The test drives the engine directly via its module-private header, which
 # resolves its own siblings (update_log/store.h, update_log/sha256.h)
 # relative to the SDK's src/ root -- put that on the test's include path.
