@@ -1299,7 +1299,8 @@ def _normalize_libraries(project: dict[str, Any],
 
 
 def load_board_yaml(path: Path, *,
-                    metadata_root: Path = METADATA_ROOT) -> BoardProject:
+                    metadata_root: Path = METADATA_ROOT,
+                    sku: Optional[str] = None) -> BoardProject:
     """Load + validate a board.yaml.
 
     Raises OrchestratorError on any schema / preset / topology error.
@@ -1314,6 +1315,10 @@ def load_board_yaml(path: Path, *,
     unchanged.
     """
     project = _load_and_validate_yaml(path, metadata_root)
+    if sku:
+        # Per-target SKU (#2597): the SoM facts follow the board being
+        # built, not the single static `som.sku` an example declares.
+        project["som"]["sku"] = sku
 
     # Fold the unified top-level `libraries:` list into the per-core /
     # project-wide channels the downstream resolution expects, so topology +

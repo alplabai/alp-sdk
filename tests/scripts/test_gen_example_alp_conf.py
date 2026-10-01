@@ -83,3 +83,17 @@ def test_no_testcase_references_alp_conf_in_an_uncovered_dir():
 def test_unmatched_dir_fails(capsys):
     # aen-mcuboot-smoke has no board.yaml, so no per-core alp.conf to write.
     assert GEN.main([str(_example("examples/aen/aen-mcuboot-smoke"))]) == 1
+
+
+def test_twin_sku_gets_its_own_som_facts(tmp_path):
+    """#2597: AEN803's populated OSPI memories reach an AEN801-declared app."""
+    d = tmp_path / "alp-console"
+    d.mkdir()
+    src = _example("examples/peripheral-io/alp-console")
+    case = next(c for c in CASES if c[0] == src)
+    GEN.generate(d, case[1], case[2])
+    base = (d / "generated" / "alp.conf").read_text(encoding="utf-8")
+    twin = (d / "generated" / "aen803" / "alp.conf").read_text(encoding="utf-8")
+    assert "SOM_DRAM_MBIT" not in base
+    assert "CONFIG_ALP_SDK_SOM_DRAM_MBIT=512" in twin
+    assert "CONFIG_ALP_SDK_SOM_FLASH_MBIT=256" in twin

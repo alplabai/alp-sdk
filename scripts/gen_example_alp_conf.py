@@ -26,6 +26,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import yaml
+
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 
@@ -34,16 +36,50 @@ from alp_orchestrate import load_board_yaml, OrchestratorError  # noqa: E402
 from alp_orchestrate.kconfig import _slice_alp_conf  # noqa: E402
 
 
-def generate(app_dir: Path, board_yaml: Path, core_id: str) -> Path:
-    """Write and return ``<app_dir>/generated/alp.conf``."""
-    project = load_board_yaml(board_yaml)
-    if core_id not in project.cores:
-        raise OrchestratorError(f"--core {core_id} not in {board_yaml}")
-    out = app_dir / "generated" / "alp.conf"
+def _write(out: Path, text: str) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     # newline="" keeps the fragment byte-identical to the planner's on Windows.
     with open(out, "w", encoding="utf-8", newline="") as f:
-        f.write(_slice_alp_conf(project, project.cores[core_id]))
+        f.write(text)
+
+
+def _twin_skus(sku: str) -> list[str]:
+    """Other SoM SKUs on the same silicon part as `sku` (e.g. E1M-AEN803 for
+    E1M-AEN801): same PCB, so an app built for either board, but their
+    populated-memory facts differ (#2597)."""
+    mods = REPO / "metadata" / "e1m_modules"
+
+    def key(name: str):
+        d = yaml.safe_load((mods / f"{name}.yaml").read_text(encoding="utf-8"))
+        return d.get("silicon"), d.get("silicon_variant")
+
+    me = key(sku)
+    return sorted(p.stem for p in mods.glob("E1M-*.yaml")
+                  if p.stem != sku and key(p.stem) == me)
+
+
+def generate(app_dir: Path, board_yaml: Path, core_id: str) -> Path:
+    """Write and return ``<app_dir>/generated/alp.conf``.
+
+    A twin SKU whose fragment differs also gets
+    ``generated/<sku-lowercase-sans-E1M->/alp.conf`` (e.g. ``aen803``); the
+    example's CMakeLists.txt points EXTRA_CONF_FILE at it when BOARD names that
+    SKU, so the SoM facts follow the board being built, not ``som.sku``.
+    """
+    project = load_board_yaml(board_yaml)
+    if core_id not in project.cores:
+        raise OrchestratorError(f"--core {core_id} not in {board_yaml}")
+    text = _slice_alp_conf(project, project.cores[core_id])
+    out = app_dir / "generated" / "alp.conf"
+    _write(out, text)
+    for sku in _twin_skus(project.sku):
+        try:
+            twin = load_board_yaml(board_yaml, sku=sku)
+            ttext = _slice_alp_conf(twin, twin.cores[core_id])
+        except (OrchestratorError, KeyError):
+            continue
+        if ttext != text:
+            _write(app_dir / "generated" / sku[4:].lower() / "alp.conf", ttext)
     return out
 
 
