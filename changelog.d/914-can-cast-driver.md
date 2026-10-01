@@ -16,11 +16,23 @@ transmitted them. Fixes:
 - **Timing dropped after `can_set_mode()`.** `can_set_timing()` and
   `can_set_timing_data()` now hold the core in reset around the register write
   and restore the previous reset state, so the standard order
-  (`set_timing` -> `set_mode` -> `start`) and the reverse both apply.
+  (`set_timing` -> `set_mode` -> `start`) applies. The reset pulse clears
+  `CFG_STAT.LBMI` (and listen-only / one-shot), so the mode bits are re-applied
+  after it (shared `can_cast_apply_mode_bits()` with `set_mode`), which keeps
+  the reverse order working. `can_send()` now returns `-ENETDOWN` if the core is
+  held in reset and `-EIO` if loopback was requested but `LBMI` is clear,
+  instead of returning 0 and silently dropping the frame.
+- **Core clock now follows the DT `clock-frequency`.** `can_cast_init()` programs
+  `CANFD_CTRL.CKDIV` (bits [7:0]) as source / `clock-frequency` (160 MHz / 20 MHz
+  = 8; Alif DFP `sys_ctrl_canfd.h` / `Driver_CAN.c`), where the clockctrl node
+  only left the reset value 0x10 (10 MHz, which made 2 Mbit/s data phase
+  unreachable: `can_set_bitrate_data(2000000)` returned -ERANGE).
+- **Data-phase timing limits** match the DFP (`Driver_CAN.c`: seg1 2..0x11,
+  seg2 1..8, prescaler 1..4): `can_set_timing_data()` accepted prescaler <= 2
+  only, and `CAN_MIN_BIT_TIME_DATA` required `phase_seg2` >= 2.
 - **`can_get_core_clock()`** reports `CANFD_CTRL` source / `CKDIV` (Alif DFP
   `sys_ctrl_canfd.h` / `Driver_CAN.c`) instead of the 200 MHz clockctrl parent;
-  falls back to the old path if `CKDIV` < 2. Bench `CANFD_CTRL = 0x00111010`
-  is 160 MHz / 16 = 10 MHz.
+  falls back to the old path if `CKDIV` < 2.
 - **Lost TX-done callbacks.** The IRQ now clears TSIF first, then completes every
   queued frame the transmit buffer no longer holds (200 frames gave 23 callbacks).
 - **RTR livelock with `CONFIG_CAN_ACCEPT_RTR=n`.** The early return now releases

@@ -72,13 +72,11 @@ extern "C" {
 		.phase_seg2 = 0x10,	\
 		.prescaler = 0x4	\
 	}
-#define CAN_MIN_BIT_TIME_DATA {		\
-		.sjw = 0x1,		\
-		.prop_seg = 0x0,	\
-		.phase_seg1 = 0x0,	\
-		.phase_seg2 = 0x2,	\
-		.prescaler = 0x1	\
-	}
+/* Data-phase limits from the Alif DFP Driver_CAN.c:317-329 (seg1 2..0x11,
+ * seg2 1..8, prescaler 1..4); can_cast_set_timing_data() enforces the same.
+ */
+#define CAN_MIN_BIT_TIME_DATA \
+	{ .sjw = 0x1, .prop_seg = 0x0, .phase_seg1 = 0x0, .phase_seg2 = 0x1, .prescaler = 0x1 }
 #define CAN_MAX_BIT_TIME_DATA {		\
 		.sjw = 0x8,		\
 		.prop_seg = 0x8,	\

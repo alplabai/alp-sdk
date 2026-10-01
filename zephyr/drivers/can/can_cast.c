@@ -326,6 +326,25 @@ static int can_cast_init(const struct device *dev)
 	}
 #endif
 
+	/*
+	 * CKDIV (CANFD_CTRL bits [7:0], Alif DFP sys_ctrl_canfd.h CANFD0_CTRL_CKDIV_Pos)
+	 * is left at its reset value (0x10 -> 10 MHz) by the clockctrl node, so program
+	 * it from the DT clock-frequency: core clock = source / CKDIV
+	 * (Driver_CAN.c CANFD0_CLK_DIVISOR = CLK_SRC / RTE_CANFD0_CLK_SPEED, 2..255).
+	 */
+	if (config->can_fd_ctrl_reg != 0U && config->clk_freq != 0U) {
+		uint32_t ctrl = sys_read32(config->can_fd_ctrl_reg);
+		uint32_t src  = (ctrl & CAN_CTRL_CLK_SEL_160M) ? CAN_CLK_SRC_160MHZ : CAN_CLK_SRC_38P4MHZ;
+		uint32_t div  = src / config->clk_freq;
+
+		if (div >= 2U && div <= CAN_CTRL_CKDIV_Msk) {
+			ctrl = (ctrl & ~CAN_CTRL_CKDIV_Msk) | div;
+			sys_write32(ctrl, config->can_fd_ctrl_reg);
+		} else {
+			LOG_WRN("clock-frequency %u gives CKDIV %u outside 2..255", config->clk_freq, div);
+		}
+	}
+
 	/* Same CGU enables as the Alif fork's soc_common.c for an okay can0 */
 	sys_set_bits(CGU_CLK_ENA, CAN_CGU_CLK_ENA_BIT20 | CAN_CGU_CLK_ENA_BIT23);
 
@@ -502,6 +521,29 @@ static int can_cast_stop(const struct device *dev)
 	return 0;
 }
 
+/*
+ * Programs everything set_mode() writes into the controller. A reset pulse
+ * (set_timing / set_timing_data) clears these, so they are re-applied after it.
+ */
+static void can_cast_apply_mode_bits(uint32_t can_base, can_mode_t mode)
+{
+	if (mode & CAN_MODE_LOOPBACK) {
+		can_cast_enable_internal_loop_back_mode(can_base);
+	} else if (mode & CAN_MODE_LISTENONLY) {
+		can_cast_enable_listen_only_mode(can_base);
+	} else {
+		can_cast_enable_normal_mode(can_base);
+	}
+
+	if (mode & CAN_MODE_ONE_SHOT) {
+		can_cast_set_tx_single_shot_mode(can_base, true);
+	}
+
+	/* Sets the CAN Error and Rx buf almost full warning limits */
+	can_cast_set_err_warn_limit(can_base, CAN_ERROR_WARN_LIMIT);
+	can_cast_set_rbuf_almost_full_warn_limit(can_base, CONFIG_CAN_RBUF_AFWL);
+}
+
 /**
  * @fn      static int can_cast_set_mode(const struct device *dev,
  *                                       can_mode_t mode)
@@ -548,23 +590,14 @@ static int can_cast_set_mode(const struct device *dev, can_mode_t mode)
 	can_cast_disable_error_interrupts(can_base);
 	can_cast_clear_interrupts(can_base);
 
-	if (mode & CAN_MODE_LOOPBACK) {
+	if ((mode & CAN_MODE_LOOPBACK) && can_cast_comm_active(can_base)) {
 		/* If msg transmission is happening then return Busy */
-		if (can_cast_comm_active(can_base)) {
-			LOG_ERR("Device is busy in communication");
-			k_mutex_unlock(&data->inst_mutex);
-			return -EBUSY;
-		}
-
-		/* Enables Internal Loopback Mode */
-		can_cast_enable_internal_loop_back_mode(can_base);
-	} else if (mode & CAN_MODE_LISTENONLY) {
-		/* Enables Listen Only Mode */
-		can_cast_enable_listen_only_mode(can_base);
-	} else {
-		/* Enables Normal mode */
-		can_cast_enable_normal_mode(can_base);
+		LOG_ERR("Device is busy in communication");
+		k_mutex_unlock(&data->inst_mutex);
+		return -EBUSY;
 	}
+
+	can_cast_apply_mode_bits(can_base, mode);
 
 #if CONFIG_CAN_FD_MODE
 	if (mode & CAN_MODE_FD) {
@@ -580,14 +613,6 @@ static int can_cast_set_mode(const struct device *dev, can_mode_t mode)
 
 	}
 #endif
-
-	if (mode & CAN_MODE_ONE_SHOT) {
-		can_cast_set_tx_single_shot_mode(can_base, true);
-	}
-
-	/* Sets the CAN Error and Rx buf almost full warning limits */
-	can_cast_set_err_warn_limit(can_base, CAN_ERROR_WARN_LIMIT);
-	can_cast_set_rbuf_almost_full_warn_limit(can_base, CONFIG_CAN_RBUF_AFWL);
 
 	data->common.mode = mode;
 
@@ -669,6 +694,8 @@ static int can_cast_set_timing(const struct device *dev, const struct can_timing
 	can_cast_set_nominal_bit_time(can_base, loc_timing);
 	if (reset_was_off) {
 		can_cast_reset_disable(can_base);
+		/* The reset pulse cleared LBMI / listen-only / one-shot: restore them */
+		can_cast_apply_mode_bits(can_base, data->common.mode);
 	}
 
 	k_mutex_unlock(&data->inst_mutex);
@@ -735,7 +762,7 @@ static int can_cast_set_timing_data(const struct device *dev, const struct can_t
 	}
 
 	loc_timing.prescaler = timing_data->prescaler;
-	if ((loc_timing.prescaler < 0x1U) || (loc_timing.prescaler > 0x2U)) {
+	if ((loc_timing.prescaler < 0x1U) || (loc_timing.prescaler > 0x4U)) {
 		LOG_ERR("Invalid Prescaler data");
 		return -ENOTSUP;
 	}
@@ -751,6 +778,8 @@ static int can_cast_set_timing_data(const struct device *dev, const struct can_t
 	can_cast_set_fd_bit_time(can_base, loc_timing, tdc);
 	if (reset_was_off) {
 		can_cast_reset_disable(can_base);
+		/* The reset pulse cleared LBMI / listen-only / one-shot: restore them */
+		can_cast_apply_mode_bits(can_base, data->common.mode);
 	}
 
 	k_mutex_unlock(&data->inst_mutex);
@@ -790,6 +819,18 @@ static int can_cast_send(const struct device *dev, const struct can_frame *frame
 
 	if (data->err_state == CAN_STATE_BUS_OFF) {
 		return -ENETUNREACH;
+	}
+
+	/* A frame queued into a core held in reset, or one whose loopback bit was
+	 * lost, is never sent and never completes: fail instead of dropping silently.
+	 */
+	if (sys_read8(can_base + CAN_CFG_STAT) & BIT(CAN_CFG_STAT_RESET)) {
+		return -ENETDOWN;
+	}
+	if ((data->common.mode & CAN_MODE_LOOPBACK) &&
+	    !(sys_read8(can_base + CAN_CFG_STAT) & BIT(CAN_CFG_STAT_LBMI))) {
+		LOG_ERR("Loopback requested but LBMI is clear");
+		return -EIO;
 	}
 
 	/* Returns error if in Listen Only mode */
