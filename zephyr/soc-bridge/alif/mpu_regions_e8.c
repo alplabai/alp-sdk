@@ -177,6 +177,10 @@
 		.r_limit = REGION_LIMIT_ADDR(base, size),     /* Region Limit */  \
 	}
 
+#define SRAM0_IS_FLASH \
+	(DT_NODE_EXISTS(DT_NODELABEL(sram0)) && \
+	 CONFIG_FLASH_BASE_ADDRESS == DT_REG_ADDR(DT_NODELABEL(sram0)))
+
 static const struct arm_mpu_region mpu_regions[] = {
 	/* Region 0: executable MRAM (boot + slot0, minus the MCUboot trailer
 	 * sector under CONFIG_BOOTLOADER_MCUBOOT). RO even for privileged
@@ -216,6 +220,21 @@ static const struct arm_mpu_region mpu_regions[] = {
 	                 MRAM_RESERVED_BASE_ADDR,
 	                 REGION_MRAM_RESERVED_ATTR(MRAM_RESERVED_BASE_ADDR, MRAM_RESERVED_SIZE)),
 #endif
+#if SRAM0_IS_FLASH
+	/* Conditional: SRAM0 -- executable, RO, cacheable normal memory, exactly
+	 * the ITCM entry's attributes (REGION_FLASH_ATTR). Present ONLY when
+	 * `zephyr,flash = &sram0` (bench RAM-run of SRAM0-linked code, #2180),
+	 * so every other build's table stays byte-identical. The span is
+	 * disjoint from ITCM/DTCM/MRAM, so PMSAv8-M's no-overlap rule holds.
+	 * Base/size come from the sram0 node (0x02000000, 4 MiB); PMSAv8-M
+	 * needs only 32-byte alignment (REGION_LIMIT_ADDR keeps limit = last
+	 * byte), which 4 MiB at 0x02000000 satisfies. Data must then live in
+	 * DTCM (`zephyr,sram = &dtcm`): this region is RO. */
+	MPU_REGION_ENTRY(
+	    "SRAM0",
+	    DT_REG_ADDR(DT_NODELABEL(sram0)),
+	    REGION_FLASH_ATTR(DT_REG_ADDR(DT_NODELABEL(sram0)), DT_REG_SIZE(DT_NODELABEL(sram0)))),
+#endif
 };
 
 const struct arm_mpu_config mpu_config = {
@@ -224,12 +243,12 @@ const struct arm_mpu_config mpu_config = {
 };
 
 /* Flow-awareness, checked: whichever memory `zephyr,flash` currently
- * designates must already be covered by ITCM (Flow C) or MRAM_EXEC (Flow
- * D/A) above. If a future flow points `zephyr,flash` somewhere else, this
+ * designates must already be covered by ITCM (Flow C), SRAM0 (Flow C
+ * variant, #2180) or MRAM_EXEC (Flow D/A) above. If a future flow points `zephyr,flash` somewhere else, this
  * fails the build instead of silently shipping an unprotected/uncovered
  * image -- see the file header's "THE FIX" section for why no separate,
  * generic CONFIG_FLASH_BASE_ADDRESS-sized region is added here. */
 BUILD_ASSERT(CONFIG_FLASH_BASE_ADDRESS == DT_REG_ADDR(DT_NODELABEL(itcm)) ||
-                 CONFIG_FLASH_BASE_ADDRESS == MRAM_EXEC_BASE_ADDR,
+                 CONFIG_FLASH_BASE_ADDRESS == MRAM_EXEC_BASE_ADDR || SRAM0_IS_FLASH,
              "zephyr,flash targets a memory region this board's custom MPU table "
              "(mpu_regions_e8.c) does not cover -- add it before shipping");
