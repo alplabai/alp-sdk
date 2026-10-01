@@ -114,6 +114,13 @@ alp_shmem_t *alp_shmem_open(const alp_shmem_config_t *cfg)
 		alp_z_set_last_error(ALP_ERR_INVAL);
 		return NULL;
 	}
+	/* No backend honours cacheable and the SDK has no cache-maintenance
+	 * primitive, so cacheable=true has no safe use (#2556).  Refuse it
+	 * here, once, for every backend. */
+	if (cfg->cacheable) {
+		alp_z_set_last_error(ALP_ERR_NOSUPPORT);
+		return NULL;
+	}
 	const alp_backend_t *be = alp_backend_select("mproc", ALP_SOC_REF_STR);
 	if (be == NULL) {
 		alp_z_set_last_error(ALP_ERR_NOT_PRESENT_ON_THIS_SOC);

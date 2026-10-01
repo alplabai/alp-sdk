@@ -1,0 +1,3 @@
+### Fixed — `alp_shmem_open` now refuses `cacheable = true` instead of silently ignoring it (#2556)
+
+No backend ever read `alp_shmem_config_t.cacheable` and the SDK has no cache flush/invalidate primitive, so `cacheable = true` had no safe use yet looked supported. `alp_shmem_open` now returns NULL with `alp_last_error() == ALP_ERR_NOSUPPORT` ( `src/mproc_dispatch.c:120` ("if (cfg->cacheable)") ), for every backend; only non-cacheable regions can be opened. The field is documented as must-be-false at `include/alp/mproc.h:` ("Must be false"). A real maintenance API (`sys_cache_data_flush_range` / `sys_cache_data_invd_range`) needs E1M-AEN801 bench measurement and is not part of this change.
