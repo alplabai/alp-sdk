@@ -465,9 +465,8 @@ not written.
 `attestation_root: optiga_trust_m` only validates when the SoM preset
 physically ships OPTIGA Trust M (AEN family + V2N family today); the
 emitter additionally surfaces `CONFIG_ALP_SDK_PSA_ATTESTATION_OPTIGA=y`
-plus a comment noting the attestation root is anchored in the
-on-module OPTIGA Trust M secure element
-(`chips/optiga_trust_m/` carries the chip driver).
+and a comment pointing at the `src/security/optiga_trust_m_bridge.c`
+PSA <-> OPTIGA bridge driver.
 
 The TF-M secure partition runs on the same M55-HP core as the
 non-secure app via the Armv8-M security extension (TrustZone-M split,

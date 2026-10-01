@@ -10,8 +10,8 @@ Status keys:
 - **planned** — declared roadmap, no code yet.
 - **n/a** — combination not targeted.
 
-> **Calibration note (2026-06-24).** v0.8.0 ships silicon-verified work:
-> V2N GD32-bridge campaign (since v0.6),
+> **Calibration note (2026-06-24).** v0.8.0 ships
+> silicon-verified work: V2N GD32-bridge campaign (since v0.6),
 > AEN801 (E8) peripheral matrix (15/17 apps PASS on real silicon, 2
 > PARTIAL hardware-gated), and cc3501e bridge (hardware SS0, real
 > BLE/Wi-Fi scan, GPIO proxy, production warm-program flow) — all on

@@ -352,10 +352,7 @@ deliberately does *not* get a stub here.
 ### What the real aiPM backend owns
 
 - **Run profiles / DVFS** across the A32 cluster, the M55-HP / M55-HE,
-  and the NPU domains — the aiPM headline feature.  (The M55-side
-  profile get/set is already served SE-mediated by
-  `alif_se_profile.c`; the A32 / NPU-domain control is the
-  HAL-owned part.)
+  and the NPU domains — the aiPM headline feature.
 - **PMIC / rail sequencer**: rail enable / disable ordering, honouring
   the cold-boot constraint in `e8.json` errata **ER004** (VDD_MAIN /
   VDD_BUCK must ramp monotonically and never dip below 1.65 V once

@@ -914,6 +914,10 @@ occupied — a fresh `BEGIN`/`FINISH` short-circuits and can never re-arm
 the swap request.  `OTA_PROMOTE` arms the same deferred swap-reboot
 `FINISH` would, promoting the pending image without a new session.  If
 nothing is pending the reboot is a clean no-op.
+Host helpers: `cc3501e_ota_update()` (whole-image convenience) plus the
+granular `cc3501e_ota_begin/_write/_finish/_abort/_status()` and
+`cc3501e_ota_promote()` in
+[`include/alp/chips/cc3501e/ota.h`](../include/alp/chips/cc3501e/ota.h).
 
 Each OTA payload is itself a signed vendor image whose version must
 exceed the running primary (monotonic anti-rollback).  Build, signing,

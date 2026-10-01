@@ -25,7 +25,7 @@ into alp-sdk so a clean checkout reproduces a working board.
 
 | # | Gap | State | Where |
 |---|-----|-------|-------|
-| 1 | Carrier device tree | **Staged, HW-validated content** | `meta-alp-sdk/recipes-kernel/linux/` (layered `e1m-v2n-som.dtsi` → `e1m-x-evk.dtsi` → per-board `e1m-v2n101-x-evk.dts`/`e1m-v2m101-x-evk.dts`, plus six kernel-source patches 0001–0006, via `linux-renesas_%.bbappend`); machine confs updated |
+| 1 | Carrier device tree | **Staged, HW-validated content** | `meta-alp-sdk/recipes-kernel/linux/` (layered `e1m-v2n-som.dtsi` → `e1m-x-evk.dtsi` → per-board `e1m-v2n101-x-evk.dts`/`e1m-v2m101-x-evk.dts`, plus kernel-source patches 0001–0007, 0010–0012 and 0015 for every machine and 0009 and 0014 for e1m-v2n101, via `linux-renesas_%.bbappend`); machine confs updated |
 | 2 | Bootloader (alp DDR in BL2) | **Recipe + binary + DDR.c → alp-sdk-internal** | not in public alp-sdk (licensing) |
 | 3 | Metadata values | **Audio + board_id captured**; `ti,tas2563` audio nodes + HW wiring pending | `metadata/boards/e1m-x-evk.yaml` |
 | 4 | Errata | **Done** | `docs/errata-e1m-x-v2n.md` |
