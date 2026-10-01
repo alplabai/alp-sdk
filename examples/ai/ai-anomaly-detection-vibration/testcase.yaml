@@ -13,6 +13,7 @@ common:
   tags: ai inference industrial predictive-maintenance marketing showcase
 tests:
   alp_sdk.example.ai_anomaly_detection_vibration.e1m_evk:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     extra_configs:
       - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
     platform_allow:
@@ -34,6 +35,7 @@ tests:
         - "\\[anomaly\\] done"
 
   alp_sdk.example.ai_anomaly_detection_vibration.e1m_x_evk:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     extra_configs:
       - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
     platform_allow:

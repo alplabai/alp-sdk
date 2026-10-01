@@ -136,3 +136,5 @@ physical:
     - { pad: "55", signal: LDO5 }
     - { pad: "56", signal: INL1 }
     - { pad: "EP",  signal: GND }
+tracking:
+  blocker: "silicon verification pending (HIL untested); no open tracker"

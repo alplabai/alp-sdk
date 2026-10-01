@@ -90,7 +90,9 @@ bytes.
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/camera-vision/ai-camera-viewer
+# writes examples/camera-vision/ai-camera-viewer/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/camera-vision/ai-camera-viewer
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/camera-vision/ai-camera-viewer -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 

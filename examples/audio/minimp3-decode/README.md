@@ -79,6 +79,7 @@ west flash
 ## Verified
 
 ```
+python3 scripts/gen_example_alp_conf.py examples/audio/minimp3-decode   # writes generated/alp.conf (#866)
 west twister -T examples/audio/minimp3-decode -p native_sim/native/64 \
     -x ZEPHYR_MODULES="<alp-sdk>" -v
 ```

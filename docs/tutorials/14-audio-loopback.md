@@ -103,7 +103,9 @@ scale -- open the handle `S16_LE` if you need `alp_audio_out_set_volume`.
 ### native_sim
 
 ```bash
-west build -b native_sim/native/64 examples/audio/audio-loopback
+# writes examples/audio/audio-loopback/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/audio/audio-loopback
+west build -b native_sim/native/64 examples/audio/audio-loopback -- -DEXTRA_CONF_FILE=generated/alp.conf
 west build -t run
 ```
 

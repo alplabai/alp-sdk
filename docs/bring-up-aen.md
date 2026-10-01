@@ -212,9 +212,11 @@ SoM preset at `metadata/e1m_modules/<SKU>.yaml` automatically).
    produces the signed artefact Option B flashes:
 
    ```bash
+   # writes examples/peripheral-io/gpio-button-led/generated/alp.conf, which west reads below (#866)
+   python3 scripts/gen_example_alp_conf.py examples/peripheral-io/gpio-button-led
    west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
        examples/peripheral-io/gpio-button-led \
-       --sysbuild -- -DSB_CONF_FILE=$PWD/zephyr/sysbuild/aen/sysbuild.conf
+       --sysbuild -- -Dgpio-button-led_EXTRA_CONF_FILE=generated/alp.conf -DSB_CONF_FILE=$PWD/zephyr/sysbuild/aen/sysbuild.conf
    west flash    # REFUSES (alp-sdk#2274) -- see docs/aen-provisioning.md §0.5.
    ```
 
@@ -364,7 +366,9 @@ BRD_I2C.  (It is the AEN sibling of the V2N variant -- identical
 BRD_I2C to portable bus 2.)
 
 ```bash
-west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-secure-element-sign
+# writes examples/aen/aen-secure-element-sign/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/aen/aen-secure-element-sign
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-secure-element-sign -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 
@@ -552,7 +556,9 @@ top of the per-subsystem checks.
    carrier board for the carrier-accurate routing:
 
    ```bash
-   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/peripheral-io/gpio-button-led
+   # writes examples/peripheral-io/gpio-button-led/generated/alp.conf, which west reads below (#866)
+   python3 scripts/gen_example_alp_conf.py examples/peripheral-io/gpio-button-led
+   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/peripheral-io/gpio-button-led -- -DEXTRA_CONF_FILE=generated/alp.conf
    west flash
    ```
 
@@ -587,7 +593,9 @@ top of the per-subsystem checks.
    `alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`.
 
    ```bash
-   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/multicore/mproc-mailbox/peer
+   # writes examples/multicore/mproc-mailbox/peer/generated/alp.conf, which west reads below (#866)
+   python3 scripts/gen_example_alp_conf.py examples/multicore/mproc-mailbox/peer
+   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/multicore/mproc-mailbox/peer -- -DEXTRA_CONF_FILE=generated/alp.conf
    # peer image: -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/multicore/mproc-mailbox
    west flash
    ```
@@ -604,7 +612,9 @@ top of the per-subsystem checks.
    reports the detected variant:
 
    ```bash
-   west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/aen/edgeai-vision-aen
+   # writes examples/aen/edgeai-vision-aen/generated/alp.conf, which west reads below (#866)
+   python3 scripts/gen_example_alp_conf.py examples/aen/edgeai-vision-aen
+   west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/aen/edgeai-vision-aen -- -DEXTRA_CONF_FILE=generated/alp.conf
    west flash
    ```
 

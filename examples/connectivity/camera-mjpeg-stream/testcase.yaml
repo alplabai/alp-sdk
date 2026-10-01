@@ -20,6 +20,7 @@ sample:
 
 tests:
   alp_sdk.examples.camera_mjpeg_stream.native_sim:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     platform_allow:
       - native_sim
       - native_sim/native/64
@@ -49,6 +50,7 @@ tests:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
       - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
     extra_args:
+      - EXTRA_CONF_FILE=generated/alp.conf
       - SHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1"
     tags:
       - alp-sdk
@@ -72,7 +74,7 @@ tests:
       - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
     extra_args:
       - SHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1"
-      - EXTRA_CONF_FILE="boards/overlay-1280x960.conf"
+      - EXTRA_CONF_FILE="generated/alp.conf;boards/overlay-1280x960.conf"
     tags:
       - alp-sdk
       - example
@@ -95,7 +97,7 @@ tests:
       - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
     extra_args:
       - SHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera"
-      - EXTRA_CONF_FILE="boards/overlay-1280x960.conf"
+      - EXTRA_CONF_FILE="generated/alp.conf;boards/overlay-1280x960.conf"
     tags:
       - alp-sdk
       - example
@@ -121,7 +123,7 @@ tests:
       - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
     extra_args:
       - SHIELD="e1m_evk_rpi_csi innomaker_cam_imx335"
-      - EXTRA_CONF_FILE="boards/overlay-1280x960.conf"
+      - EXTRA_CONF_FILE="generated/alp.conf;boards/overlay-1280x960.conf"
     # Issue #2338: the ISP-Pico backend now forwards cfg->fps to IMX335 too
     # (previously OV5647-only), so the 1280x960 path's normal 15 fps default
     # (Kconfig, this directory) would round up to IMX335's nearest supported

@@ -79,7 +79,7 @@ The server side (Hakan's repo) hands the device an artifact
 * `<alp/security.h>` -- runtime crypto surface that Mender uses
   for signature verification.
 
-## GD32 bridge firmware OTA (planned)
+## GD32 bridge firmware OTA
 
 ### Status
 
@@ -121,7 +121,7 @@ including `0xF6 OTA_ABORT`.
 0x08080000  └──────────────────────────────────────────────┘
 ```
 
-Exact `N` TBD pending bootloader implementation; ~32 KiB is a
+Exact `N` TBD; ~32 KiB is a
 reasonable starting estimate for a Cortex-M33 bootloader.
 
 ### Crypto
@@ -163,7 +163,8 @@ but that's a post-1.0 problem.
 
 ## See also
 
-* [`docs/ota.md`](ota.md) -- v0.3 OTA design (high-level).
+* [`docs/ota.md`](ota.md) -- high-level OTA design (trust model +
+  Yocto Mender flow).
 * [`docs/secure-boot.md`](secure-boot.md) -- trust model + signing.
 * [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10 --
   GD32 bootloader-OTA opcode reservation.

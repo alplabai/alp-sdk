@@ -81,6 +81,15 @@
     "channels": { "type": "array", "items": { "$ref": "#/$defs/channel_item" } },
     "control_lines": { "type": "array" },
     "upstream": { "type": "object" },
+    "license": { "type": "string" },
+    "tracking": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "issue": { "type": ["integer", "string"], "pattern": "^#?[0-9]+$" },
+        "blocker": { "type": "string" }
+      }
+    },
     "dependencies": { "type": "array" },
     "capacity": { "type": "object" },
     "pwm_routing": { "type": "object" },

@@ -196,9 +196,10 @@ typedef struct alp_shmem alp_shmem_t;
 typedef struct {
 	const char *name;      /**< Region name shared across cores (DT-anchored). */
 	size_t      size;      /**< Required bytes; rounded up to MMU/MPU page. */
-	bool        cacheable; /**< false ⇒ allocate non-cacheable; required for
-                                 the simple "core A writes, core B reads"
-                                 pattern. */
+	bool        cacheable; /**< Must be false: only non-cacheable regions
+                                 are supported, with no cache maintenance
+                                 needed. true is refused: alp_shmem_open
+                                 returns NULL, ALP_ERR_NOSUPPORT. */
 } alp_shmem_config_t;
 
 /**
@@ -210,8 +211,7 @@ typedef struct {
  * open() neither consults nor rejects it -- set it to document the
  * bytes both cores agreed to share (and for a future size-checking
  * backend), not because open() requires it. @c cacheable defaults to
- * false, the documented choice "required for the simple core A writes,
- * core B reads pattern."
+ * false, the only supported value.
  *
  * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
  *       SDK's toolchains; standard through C23).  Usable as an initializer
@@ -224,13 +224,17 @@ typedef struct {
 /**
  * @brief Acquire access to a named shared-memory region.
  *
- * Both cores opening the same @c name see the same physical bytes;
- * cache coherency is the caller's responsibility unless
- * @c cacheable = false.
+ * Both cores opening the same @c name see the same physical bytes.
+ * The region is accessed as the platform maps it (non-cached carve-out);
+ * the SDK provides no cache flush/invalidate, so @c cacheable = true is
+ * refused until such a primitive exists (#2556).
  *
- * @param[in] cfg  Configuration.  Must be non-NULL with a non-empty name.
+ * @param[in] cfg  Configuration.  Must be non-NULL with a non-empty name
+ *                 and @c cacheable = false.
  * @return Open handle on success, or NULL if the region isn't declared
- *         in the build's DT or isn't reachable from this core.
+ *         in the build's DT or isn't reachable from this core, or NULL
+ *         with @c alp_last_error() == @ref ALP_ERR_NOSUPPORT when
+ *         @c cacheable is true.
  *
  * @note The region pool is built at compile time from the DT aliases
  *       @c alp-shmem0 .. @c alp-shmemN; @p cfg->name must match the
@@ -244,8 +248,8 @@ alp_shmem_t *alp_shmem_open(const alp_shmem_config_t *cfg);
 /**
  * @brief Get a pointer + length view of the region.
  *
- * Both cores receive the same bytes; cache flush/invalidate is
- * handled by the backend when @c cacheable = false at open.
+ * Both cores receive the same bytes; no cache maintenance is needed
+ * because only non-cacheable regions can be opened.
  *
  * @param[in]  s         Region handle.
  * @param[out] base_out  Receives the region base pointer.

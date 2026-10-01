@@ -1318,8 +1318,7 @@ def _emit_inference(
     # silicon-determined capability counts (ethos_u{55,65,85}_count, resolved
     # from the SoC JSON npus[] via resolve_capabilities).  This is the single
     # source: an on-die NPU cannot be depopulated at the SoM level, so the SoM
-    # preset does NOT restate the variant list (the SoM `inference.npu_population`
-    # field is deprecated and no longer read here).
+    # preset does NOT restate the variant list.
     ethos_variants: set[str] = set()
     if (capabilities.get("ethos_u55_count") or 0) > 0:
         ethos_variants.add("u55")
@@ -2077,7 +2076,8 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     # §D.lib.loader -- per-`libraries:` HW-accelerator backend wiring
     # (CONFIG_ALP_<LIB>_<BACKEND>=y). This is the single source both the
     # planner's build-plan `configArtefacts` and `alp_project.py --emit
-    # zephyr-conf --core <id>` (the CMakeLists.txt-driven path) now share
+    # zephyr-conf --core <id>` (what gen_example_alp_conf.py's pre-generation
+    # for twister / bare `west build` mirrors) share
     # -- folded in here (2026-07-20) so the two paths cannot silently
     # diverge on a `libraries:` entry with a hw_backends matcher; see
     # docs/adr/0020-sdk-owns-build-execution.md addendum.

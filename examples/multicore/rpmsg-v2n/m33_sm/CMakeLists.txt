@@ -5,9 +5,9 @@
 #
 # This is the build entry point Zephyr's machinery picks up when the
 # orchestrator dispatches the M33 slice (board target
-# `alp_e1m_v2n101_m33_sm`).  alp_project.py renders this slice's
-# `cores.m33_sm.*` block from ../board.yaml into a Kconfig fragment
-# that gets layered over prj.conf via EXTRA_CONF_FILE.
+# `alp_e1m_v2n101_m33_sm`).  The slice's `cores.m33_sm.*` block of
+# ../board.yaml is rendered into a Kconfig fragment (generated/alp.conf)
+# by the build plan / scripts/gen_example_alp_conf.py, not by this file.
 
 cmake_minimum_required(VERSION 3.20)
 
@@ -26,32 +26,12 @@ else()
 endif()
 
 # ---------------------------------------------------------------------
-# 2. Python3 BEFORE Zephyr -- alp_project.py renders this slice's
-# board.yaml view into a Kconfig fragment that Zephyr then layers
-# over prj.conf via EXTRA_CONF_FILE.  find_package(Python3 ...) MUST
-# run before find_package(Zephyr ...) because Zephyr's CMake
-# machinery pins a Python interpreter the moment it imports.
+# 2. Python3 BEFORE Zephyr -- alp_project.py renders the IPC contract
+# header below.  find_package(Python3 ...) MUST run before
+# find_package(Zephyr ...) because Zephyr's CMake machinery pins a
+# Python interpreter the moment it imports.
 # ---------------------------------------------------------------------
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
-
-set(_alp_generated ${CMAKE_BINARY_DIR}/generated/alp.conf)
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${ALP_SDK_ROOT}/scripts/alp_project.py
-            --input ${CMAKE_CURRENT_SOURCE_DIR}/../board.yaml
-            --emit zephyr-conf --core m33_sm
-            --output ${_alp_generated}
-    RESULT_VARIABLE _alp_rv
-    OUTPUT_VARIABLE _alp_stdout
-    ERROR_VARIABLE  _alp_stderr
-)
-if(NOT _alp_rv EQUAL 0)
-    message(FATAL_ERROR
-        "alp_project.py failed (rv=${_alp_rv}); "
-        "check ${CMAKE_CURRENT_SOURCE_DIR}/../board.yaml.\n"
-        "stderr: ${_alp_stderr}")
-endif()
-
-list(APPEND EXTRA_CONF_FILE ${_alp_generated})
 
 # Generate <alp/system_ipc.h> from the board.yaml `ipc:` block.  The
 # producer (src/main.c) opens RPC channels via the auto-emitted macros

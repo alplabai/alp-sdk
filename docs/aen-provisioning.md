@@ -95,6 +95,8 @@ recipe below is what this door used to do (build + sign, then write into
 slot0 over the SE-UART via SETOOLS) before that refusal landed:
 
 ```bash
+# A board.yaml-driven app needs its alp.conf first: prefer `tan build`, or pass
+# -DEXTRA_CONF_FILE=<alp.conf> (docs/board-config-emit.md; #866).
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <your-app> \
     --sysbuild -- -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf
 west flash    # REFUSES (alp-sdk#2274) -- see the warning below. Historical

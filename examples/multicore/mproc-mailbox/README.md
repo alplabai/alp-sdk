@@ -12,8 +12,9 @@ hardware mailbox, wait for a reply, read the result back.
 - Resolving a raw pointer view of the shared region with
   `alp_shmem_view()`, then staging payload bytes by `memcpy`
   through that pointer (the surface hands back a base pointer +
-  size and trusts the caller to write through it; the backend
-  handles cache-coherency for `cacheable = false` regions).
+  size and trusts the caller to write through it; the region is
+  non-cacheable, so no cache maintenance is needed; `cacheable = true`
+  is refused with `ALP_ERR_NOSUPPORT`).
 - Signalling the peer with `alp_mbox_send` carrying a small
   tuple (offset + length) that points at the staged bytes.
 - Receiving the reply through an inbound callback registered with
@@ -28,7 +29,9 @@ hardware mailbox, wait for a reply, read the result back.
 ### native_sim (no peer core; HP-side init only)
 
 ```bash
-west build -b native_sim/native/64 examples/multicore/mproc-mailbox
+# writes examples/multicore/mproc-mailbox/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/multicore/mproc-mailbox
+west build -b native_sim/native/64 examples/multicore/mproc-mailbox -- -DEXTRA_CONF_FILE=generated/alp.conf
 west build -t run
 ```
 
@@ -62,11 +65,15 @@ Each core can also be built standalone with `west build` directly
 
 ```bash
 # HP side.
-west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/multicore/mproc-mailbox
+# writes examples/multicore/mproc-mailbox/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/multicore/mproc-mailbox
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/multicore/mproc-mailbox -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 
 # HE side.
-west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_he examples/multicore/mproc-mailbox/peer
+# writes examples/multicore/mproc-mailbox/peer/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/multicore/mproc-mailbox/peer
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_he examples/multicore/mproc-mailbox/peer -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 

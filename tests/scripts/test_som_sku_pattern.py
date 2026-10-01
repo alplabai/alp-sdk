@@ -1,6 +1,6 @@
 # tests/scripts/test_som_sku_pattern.py
 """The SoM SKU regex is duplicated (by design -- JSON Schema has no $ref-able
-cross-file pattern reuse here) across two schema files: `som-preset-v1.schema.json`
+cross-file pattern reuse here) across two schema files: `som-preset-v2.schema.json`
 (the preset's own `sku`) and `board.schema.json` (a customer's `som.sku`). Pin
 them equal so a one-sided edit (widening one, forgetting the other) fails loudly
 instead of silently reintroducing the drift fixed in #1089.
@@ -26,7 +26,7 @@ import pytest
 _ROOT = Path(__file__).resolve().parents[2]
 _SCHEMAS = _ROOT / "metadata" / "schemas"
 
-_SOM_PRESET_SCHEMA = json.loads((_SCHEMAS / "som-preset-v1.schema.json").read_text(encoding="utf-8"))
+_SOM_PRESET_SCHEMA = json.loads((_SCHEMAS / "som-preset-v2.schema.json").read_text(encoding="utf-8"))
 _BOARD_SCHEMA = json.loads((_SCHEMAS / "board.schema.json").read_text(encoding="utf-8"))
 
 _PRESET_SKU_PATTERN = _SOM_PRESET_SCHEMA["properties"]["sku"]["pattern"]
@@ -34,7 +34,7 @@ _BOARD_SKU_PATTERN = _BOARD_SCHEMA["properties"]["som"]["properties"]["sku"]["pa
 
 
 def test_som_sku_pattern_matches_across_schemas():
-    """som-preset-v1.schema.json:sku and board.schema.json:som.sku must be
+    """som-preset-v2.schema.json:sku and board.schema.json:som.sku must be
     byte-identical -- these are two copies of the same constraint, not two
     independent constraints, and drifting apart is exactly the #1089 bug."""
     assert _PRESET_SKU_PATTERN == _BOARD_SKU_PATTERN
