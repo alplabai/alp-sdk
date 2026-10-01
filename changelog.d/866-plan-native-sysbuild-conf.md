@@ -99,3 +99,8 @@ The bare `west build` command lines in `docs/` and the example READMEs now run
 entrypoint do the same. The example `board.yaml` / `prj.conf` teaching comments
 that described the bridge now describe `tan build` and the generator, and the
 scaffold snapshots were regenerated.
+
+`docs/adr/0020-sdk-owns-build-execution.md` now records #866 as done, and
+`check_zephyr_conf_parity.py` (kept, repurposed: generator output vs the
+`alp_project.py` CLI emit, plus the re-added-bridge guard pinned by
+`tests/scripts/test_check_zephyr_conf_parity.py`) is the standing guard.

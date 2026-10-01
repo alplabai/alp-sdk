@@ -114,6 +114,7 @@ it under audit; they do not re-derive it from prose.**
    `alp_project.py` at all. An earlier draft of this clause said 251, which no
    measurement reproduces -- the figure is load-bearing for this clause and for
    the alternative rejected below, so it is stated with its command.
+   (Historical: #866 later retired the 96 `CMakeLists.txt` configure-time calls; the `west alp-*` commands still need the importable evaluator.)
    An evaluator those paths cannot reach is not an option.
 
 3. **Consumers call it or port it under a hash-pinned audit.** No consumer

@@ -220,7 +220,7 @@ blocked until the remediation is met. Tracked in #855.
    per-core config on `boot:`/OTA projects; `<image>` is the basename of the
    app directory handed to `west build` (sysbuild's own application image
    name), so the plan wires the per-core `alp.conf` itself instead of via
-   the app's `--core`-scoped `CMakeLists.txt` bridge (#870; that bridge is since retired, #866). When the app
+   the app's `--core`-scoped `CMakeLists.txt` bridge (#870). **#866 is done:** every example `CMakeLists.txt` bridge is deleted, `scripts/check_zephyr_conf_parity.py` fails if one returns, and twister / a bare `west build` read `generated/alp.conf` from `scripts/gen_example_alp_conf.py`. When the app
    directory is the project root the name depends on the root's directory
    name, so a consumer relocating a tokened plan must re-derive it. The seam-2 real-build proof of the
    sysbuild path (`iot-fleet-ota`) is the one deferred box on #871.
