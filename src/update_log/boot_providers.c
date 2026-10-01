@@ -255,3 +255,25 @@ alp_status_t ulog_alif_atoc_locate(const uint8_t *mram,
 	*entry_version = get_u32le(ent + ATOC_ENT_VER);
 	return ALP_OK;
 }
+
+alp_status_t ulog_alif_se_entry_from_located(const uint8_t           toc_id[8],
+                                             const uint8_t           expect_id[8],
+                                             uint32_t                toc_version,
+                                             uint32_t                toc_size,
+                                             char                    verify_char,
+                                             uint32_t                loc_version,
+                                             uint32_t                loc_len,
+                                             const uint8_t           computed[32],
+                                             const uint8_t           signed_hash[32],
+                                             alp_update_log_entry_t *out)
+{
+	if (computed == NULL || signed_hash == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	if (loc_len != toc_size || loc_version != toc_version ||
+	    memcmp(computed, signed_hash, 32) != 0) {
+		return ALP_ERR_NOSUPPORT;
+	}
+	return ulog_alif_se_build_entry(
+	    toc_id, expect_id, toc_version, verify_char, computed, true, out);
+}

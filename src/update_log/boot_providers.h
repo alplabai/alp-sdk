@@ -138,15 +138,15 @@ alp_status_t ulog_alif_se_build_entry(const uint8_t           toc_image_id[8],
  * spec; the caller self-checks it by comparing the SHA-256 of the located
  * bytes against @p cert_hash.
  *
- * @param mram        Byte view of the whole MRAM window.
- * @param mram_len    Length of @p mram.
- * @param mram_base   Bus address of mram[0].
- * @param image_id    8-byte zero-padded TOC name to find.
- * @param[out] img_addr  Bus address of the image bytes.
- * @param[out] img_len   Image length in bytes.
- * @param[out] cert_hash Signed SHA-256 from the content certificate.
+ * @param[in]  mram          Byte view of the whole MRAM window.
+ * @param[in]  mram_len      Length of @p mram.
+ * @param[in]  mram_base     Bus address of mram[0].
+ * @param[in]  image_id      8-byte zero-padded TOC name to find.
+ * @param[in]  max_len       Largest image length accepted.
+ * @param[out] img_addr      Bus address of the image bytes.
+ * @param[out] img_len       Image length in bytes.
+ * @param[out] cert_hash     Signed SHA-256 from the content certificate.
  * @param[out] entry_version Entry version field.
- * @param[in]  max_len  Largest image length accepted.
  * @return ALP_OK; ALP_ERR_NOSUPPORT on any failed check (unknown layout,
  *         encrypted image, bounds, name not found); ALP_ERR_INVAL on NULL.
  */
@@ -159,5 +159,40 @@ alp_status_t ulog_alif_atoc_locate(const uint8_t *mram,
                                    uint32_t      *img_len,
                                    uint8_t        cert_hash[32],
                                    uint32_t      *entry_version);
+
+/**
+ * Build the boot-metadata entry for an Alif SE TOC image that was located
+ * through the ATOC package, applying the layout self-checks first.
+ *
+ * Every mismatch between the SE's TOC entry and what the locator found, or
+ * between the hash computed over the located bytes and the signed
+ * content-cert hash, means the located bytes may not be the image: the
+ * result is ALP_ERR_NOSUPPORT, never a status reported over them.
+ * VERIFY_FAILED comes only from the SE's own verify character.
+ *
+ * @param[in]  toc_id       Image id from the SE's TOC entry.
+ * @param[in]  expect_id    Image id this build configured.
+ * @param[in]  toc_version  SE TOC entry version (major<<24 | minor<<16 | patch).
+ * @param[in]  toc_size     SE TOC entry image size.
+ * @param[in]  verify_char  SE TOC verify flag character ('V' = verified).
+ * @param[in]  loc_version  Entry version read from the ATOC package.
+ * @param[in]  loc_len      Image length the locator found.
+ * @param[in]  computed     SHA-256 computed over the located bytes.
+ * @param[in]  signed_hash  SHA-256 from the signed content certificate.
+ * @param[out] out          Populated on ALP_OK.
+ * @return ALP_OK; ALP_ERR_NOSUPPORT on an id, size, version or hash
+ *         mismatch (see ulog_alif_se_build_entry() for the rest);
+ *         ALP_ERR_INVAL on NULL args.
+ */
+alp_status_t ulog_alif_se_entry_from_located(const uint8_t           toc_id[8],
+                                             const uint8_t           expect_id[8],
+                                             uint32_t                toc_version,
+                                             uint32_t                toc_size,
+                                             char                    verify_char,
+                                             uint32_t                loc_version,
+                                             uint32_t                loc_len,
+                                             const uint8_t           computed[32],
+                                             const uint8_t           signed_hash[32],
+                                             alp_update_log_entry_t *out);
 
 #endif /* ALP_UPDATE_LOG_BOOT_PROVIDERS_H */

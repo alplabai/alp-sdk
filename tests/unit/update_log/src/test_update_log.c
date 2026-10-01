@@ -1604,6 +1604,29 @@ ZTEST(alp_update_log, test_alif_se_build_entry_rejects_image_id_mismatch)
 	zassert_equal(ulog_alif_se_build_entry(got, expect, 1, 'V', hash, true, &e), ALP_ERR_NOSUPPORT);
 }
 
+ZTEST(alp_update_log, test_alif_se_entry_from_located)
+{
+	uint8_t                id[8] = "APP\0\0\0\0";
+	uint8_t                h[32], h2[32];
+	alp_update_log_entry_t e;
+
+	memset(h, 0xAB, sizeof(h));
+	memcpy(h2, h, sizeof(h));
+	zassert_equal(ulog_alif_se_entry_from_located(id, id, 7, 100, 'V', 7, 100, h, h2, &e), ALP_OK);
+	zassert_equal(e.status, ALP_UPDATE_STATUS_CONFIRMED);
+	zassert_equal(ulog_alif_se_entry_from_located(id, id, 7, 100, '-', 7, 100, h, h2, &e), ALP_OK);
+	zassert_equal(e.status, ALP_UPDATE_STATUS_VERIFY_FAILED);
+
+	h2[5] ^= 1; /* hash mismatch: layout self-check failed */
+	zassert_equal(ulog_alif_se_entry_from_located(id, id, 7, 100, 'V', 7, 100, h, h2, &e),
+	              ALP_ERR_NOSUPPORT);
+	h2[5] ^= 1;
+	zassert_equal(ulog_alif_se_entry_from_located(id, id, 7, 100, 'V', 7, 99, h, h2, &e),
+	              ALP_ERR_NOSUPPORT); /* size mismatch */
+	zassert_equal(ulog_alif_se_entry_from_located(id, id, 7, 100, 'V', 8, 100, h, h2, &e),
+	              ALP_ERR_NOSUPPORT); /* version mismatch */
+}
+
 ZTEST(alp_update_log, test_alif_se_build_entry_rejects_invalid_hash)
 {
 	uint8_t id[8]    = "APP\0\0\0\0";
@@ -1812,7 +1835,7 @@ static void put32(uint32_t off, uint32_t v)
 	}
 }
 
-/* Key cert (0x72 words) followed by a content cert at obj; returns nothing. */
+/* Optional key cert (0x72 words), then a content cert at obj. */
 static void
 mk_cert(uint32_t obj, bool key_first, uint32_t img_off, uint32_t len, const uint8_t *img)
 {
@@ -1928,6 +1951,16 @@ ZTEST(alp_update_log, test_atoc_locate_refusals)
 	put32(M_LEN - 4, 0x20000u); /* package overruns MRAM */
 	EXPECT_NOSUP("EXT", 4096);
 
+	/* Header whose 0x20 bytes would run into the trailer, count 0, so only
+	 * the header-vs-trailer bound can refuse it. */
+	mk_mram();
+	put32(M_LEN - 8, M_BASE + 0x400);
+	put32(M_LEN - 4, M_LEN - 0x400); /* package ends exactly at MRAM end */
+	put32(M_LEN - 12, M_BASE + M_LEN - 0x18);
+	memcpy(&g_mram[M_LEN - 0x18], "OEMTOC01", 8);
+	put32(M_LEN - 16, 0x00000020u); /* "count 0, entry len 0x20" overlaps trailer word 0 */
+	EXPECT_NOSUP("EXT", 4096);
+
 	mk_mram();
 	g_mram[hdr] = 'X'; /* bad OEMTOC magic */
 	EXPECT_NOSUP("EXT", 4096);
@@ -1937,8 +1970,29 @@ ZTEST(alp_update_log, test_atoc_locate_refusals)
 	EXPECT_NOSUP("EXT", 4096);
 
 	mk_mram();
-	put32(hdr + 8, 0xFFFF0020u); /* count runs into trailer */
+	put32(hdr + 8, 0xFFFF0020u); /* count runs far past the trailer */
 	EXPECT_NOSUP("NOPE", 4096);
+
+	/* count=2 puts entry 1 over the trailer while entry 0 ("EXT") is
+	 * valid: only the count bound refuses it. */
+	mk_mram();
+	{
+		uint32_t h2 = M_LEN - 0x60;
+
+		memcpy(&g_mram[h2], "OEMTOC01", 8);
+		put32(h2 + 8, 0x00020020u);
+		mk_entry_at(h2 + 0x20, M_BASE + M_OBJ2, M_IMG2_N, "EXT", 0x04050600u);
+		put32(M_LEN - 12, M_BASE + h2);
+		put32(M_LEN - 4, M_LEN - 0x400);
+		EXPECT_NOSUP("EXT", 4096);
+		put32(h2 + 8, 0x00010020u); /* count 1 fits: same bytes now locate */
+		{
+			uint32_t a_, l_;
+			uint8_t  h_[32];
+
+			zassert_equal(locate("EXT", 4096, &a_, &l_, h_), ALP_OK);
+		}
+	}
 
 	mk_mram();
 	put32(ccert, 0x12345678u); /* bad cert magic */
@@ -1966,5 +2020,39 @@ ZTEST(alp_update_log, test_atoc_locate_refusals)
 
 	mk_mram();
 	put32(hdr + 0x40, M_BASE + M_LEN - 8); /* object runs off MRAM */
+	EXPECT_NOSUP("EXT", 4096);
+
+	/* Content-cert header fits at MRAM end but body+sig+param does not. */
+	mk_mram();
+	put32(M_LEN - 0x20, 0x53426363u);
+	put32(M_LEN - 0x20 + 8, 0x77u);
+	put32(M_LEN - 0x20 + 12, 0x0001010fu);
+	put32(hdr + 0x40, M_BASE + M_LEN - 0x20);
+	EXPECT_NOSUP("EXT", 4096);
+
+	/* Key-cert cap: 4 key certs then the content cert locate, 5 do not. */
+	for (uint32_t nk = 4; nk <= 5; nk++) {
+		uint32_t a_, l_, c = M_OBJ2;
+		uint8_t  h_[32];
+
+		mk_mram();
+		for (uint32_t k = 0; k < nk; k++) {
+			put32(c, 0x53426B63u);
+			put32(c + 8, 0x72u);
+			c += 0x72u * 4 + 384;
+		}
+		mk_cert(c, false, M_IMG2, M_IMG2_N, &g_mram[M_IMG2]);
+		zassert_equal(locate("EXT", 4096, &a_, &l_, h_), nk == 4 ? ALP_OK : ALP_ERR_NOSUPPORT);
+	}
+
+	/* len == 0 with a matching zero entry size is still refused. */
+	mk_mram();
+	put32(hdr + 0x40 + 4, 0);
+	put32(ccert + 0x77 * 4 + 384 + 4, 0);
+	EXPECT_NOSUP("EXT", 4096);
+
+	/* flash_addr below the SE alias base. */
+	mk_mram();
+	put32(ccert + 0x77 * 4 + 384, M_ALIAS - 1);
 	EXPECT_NOSUP("EXT", 4096);
 }

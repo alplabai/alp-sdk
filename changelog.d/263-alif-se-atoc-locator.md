@@ -6,8 +6,11 @@ entry). The new pure helper `ulog_alif_atoc_locate()` in
 `src/update_log/boot_providers.c` walks the ATOC package in MRAM (trailer,
 `OEMTOC01` header, entry, CryptoCell-312 certificate chain) to find the
 image's address and length plus the signed SHA-256 from its content
-certificate. The backend hashes the located bytes and reports
-`VERIFY_FAILED` if they differ from the signed hash.
+certificate. The backend hashes the located bytes and returns
+`ALP_ERR_NOSUPPORT` if they differ from the signed hash, or if the located
+length or version differs from the SE's TOC entry (the layout self-check
+failed; `VERIFY_FAILED` comes only from the SE's own verify flag). This
+replaces the interim zero-store refusal from #2573.
 
 - The certificate format follows TF-M's public CryptoCell-312 runtime; the
   package framing was measured on SES v1.110 (E1M-AEN803 serial
@@ -15,7 +18,12 @@ certificate. The backend hashes the located bytes and reports
   signed hash (all 5 entries of that module matched).
 - Any unexpected layout, encrypted image or out-of-range pointer returns
   `ALP_ERR_NOSUPPORT` rather than a fabricated entry.
-- Native_sim unit tests cover the located entries and each refusal path.
+- Native_sim unit tests (also run under AddressSanitizer) cover the located
+  entries, the layout refusal paths (bounds, count, cert-chain cap,
+  encrypted image, zero length, flash alias) and the mismatch checks.
+
+Benched on the M55-HE only (M55-HP and other SoCs untested; a misframing
+fails safe as `ALP_ERR_NOSUPPORT`).
 
 Bench, E1M-AEN803 serial 2026W36-0009, SES v1.110, M55-HE RAM-run, three
 reads per image: `HE_APP`, `HP_APP` and `A32_APP` each report

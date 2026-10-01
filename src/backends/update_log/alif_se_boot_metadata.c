@@ -121,14 +121,16 @@ alp_status_t alp_update_log_boot_metadata_read(alp_update_log_entry_t *entry_out
 		char verify_char =
 		    (char)pkt.resp_toc_entry.resp_flags_string[ULOG_ALIF_TOC_FLAG_STRING_VERIFY_IDX];
 
-		if (memcmp(hash, cert_hash, sizeof(hash)) != 0) {
-			/* Bytes in MRAM do not match the signed hash: report
-			 * VERIFY_FAILED (any non-'V' char maps there). */
-			verify_char = '\0';
-		}
-
-		return ulog_alif_se_build_entry(
-		    got_id, expect_id, pkt.resp_toc_entry.resp_version, verify_char, hash, true, entry_out);
+		return ulog_alif_se_entry_from_located(got_id,
+		                                       expect_id,
+		                                       pkt.resp_toc_entry.resp_version,
+		                                       size,
+		                                       verify_char,
+		                                       ent_ver,
+		                                       img_len,
+		                                       hash,
+		                                       cert_hash,
+		                                       entry_out);
 	}
 
 	/* No TOC entry matched this build's configured image id: never
