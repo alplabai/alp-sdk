@@ -1961,6 +1961,15 @@ ZTEST(alp_update_log, test_atoc_locate_refusals)
 	put32(M_LEN - 16, 0x00000020u); /* "count 0, entry len 0x20" overlaps trailer word 0 */
 	EXPECT_NOSUP("EXT", 4096);
 
+	/* Header in the last 4 bytes of MRAM: the header-vs-trailer bound is
+	 * the only guard before the 8-byte magic compare, which would read past
+	 * the end (the ASAN scenario turns that into a failure). */
+	mk_mram();
+	put32(M_LEN - 8, M_BASE + 0x400);
+	put32(M_LEN - 4, M_LEN - 0x400);
+	put32(M_LEN - 12, M_BASE + M_LEN - 4);
+	EXPECT_NOSUP("EXT", 4096);
+
 	mk_mram();
 	g_mram[hdr] = 'X'; /* bad OEMTOC magic */
 	EXPECT_NOSUP("EXT", 4096);
