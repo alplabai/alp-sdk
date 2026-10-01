@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-30",
+  "generated": "2026-10-01",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -12082,8 +12082,8 @@
           "value": "(id) ((alp_mbox_config_t){ .channel = (id), .peer = ALP_CORE_SELF })"
         },
         "ALP_SHMEM_CONFIG_DEFAULT": {
-          "hash": "c6db9d60e4dd12ab",
-          "value": "(id) ((alp_shmem_config_t){ .name = (id), .size = 0u, .cacheable = false })"
+          "hash": "ca286eca8e6d3db1",
+          "value": "(id) ((alp_shmem_config_t){ .name = (id), .size = 0u })"
         }
       },
       "typedefs": {
@@ -12128,13 +12128,12 @@
           "kind": "opaque"
         },
         "alp_shmem_config_t": {
-          "definition": "typedef struct { const char *name; size_t size; bool cacheable; } alp_shmem_config_t;",
+          "definition": "typedef struct { const char *name; size_t size; } alp_shmem_config_t;",
           "fields": [
             "const char *name",
-            "size_t size",
-            "bool cacheable"
+            "size_t size"
           ],
-          "hash": "7c8e4233772e1edb",
+          "hash": "cb7a715731dea259",
           "kind": "struct"
         },
         "alp_shmem_t": {
@@ -13765,8 +13764,8 @@
       },
       "macros": {
         "ALP_RPC_CONFIG_DEFAULT": {
-          "hash": "ddb0cc491ee91637",
-          "value": "(id) ((alp_rpc_config_t){ .name = (id), .src_ept = 0u, .dst_ept = 0u, .mbox_ch = ALP_RPC_DEFAULT_MBOX_CH, .cacheable = false })"
+          "hash": "b43af1ae7dc66ee8",
+          "value": "(id) ((alp_rpc_config_t){ .name = (id), .src_ept = 0u, .dst_ept = 0u, .mbox_ch = ALP_RPC_DEFAULT_MBOX_CH })"
         },
         "ALP_RPC_DEFAULT_MBOX_CH": {
           "hash": "0a9d80500b4b162f",
@@ -13784,15 +13783,14 @@
           "kind": "opaque"
         },
         "alp_rpc_config_t": {
-          "definition": "typedef struct { const char *name; uint32_t src_ept; uint32_t dst_ept; uint32_t mbox_ch; bool cacheable; } alp_rpc_config_t;",
+          "definition": "typedef struct { const char *name; uint32_t src_ept; uint32_t dst_ept; uint32_t mbox_ch; } alp_rpc_config_t;",
           "fields": [
             "const char *name",
             "uint32_t src_ept",
             "uint32_t dst_ept",
-            "uint32_t mbox_ch",
-            "bool cacheable"
+            "uint32_t mbox_ch"
           ],
-          "hash": "bc14a9238bc4dab0",
+          "hash": "24e965270aa45bba",
           "kind": "struct"
         },
         "alp_rpc_link_cb_t": {

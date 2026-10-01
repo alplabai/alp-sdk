@@ -203,7 +203,6 @@ struct rpc_be {
 	uint32_t src_ept;
 	uint32_t dst_ept;
 	uint32_t mbox_ch;
-	bool     cacheable;
 
 	/* Zephyr ipc_service handles. */
 	const struct device *ipc_dev;
@@ -817,10 +816,9 @@ z_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 	}
 
 	strncpy(be->name, cfg->name, sizeof(be->name) - 1);
-	be->src_ept   = cfg->src_ept != 0u ? cfg->src_ept : (0x400u | (fnv1a_32(cfg->name) & 0x0FFu));
-	be->dst_ept   = cfg->dst_ept != 0u ? cfg->dst_ept : be->src_ept + 1u;
-	be->mbox_ch   = cfg->mbox_ch != 0u ? cfg->mbox_ch : ALP_RPC_DEFAULT_MBOX_CH;
-	be->cacheable = cfg->cacheable;
+	be->src_ept = cfg->src_ept != 0u ? cfg->src_ept : (0x400u | (fnv1a_32(cfg->name) & 0x0FFu));
+	be->dst_ept = cfg->dst_ept != 0u ? cfg->dst_ept : be->src_ept + 1u;
+	be->mbox_ch = cfg->mbox_ch != 0u ? cfg->mbox_ch : ALP_RPC_DEFAULT_MBOX_CH;
 
 	k_mutex_init(&be->tx_mutex);
 	k_sem_init(&be->call_sem, 0, 1);

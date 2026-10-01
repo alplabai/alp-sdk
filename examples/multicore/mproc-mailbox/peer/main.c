@@ -81,8 +81,8 @@ static void mbox_inbound(uint32_t channel, const void *data, size_t len, void *u
 	printf("[mproc-peer] request offset=%u len=%u\n", (unsigned)offset, (unsigned)req_len);
 
 	/* Pull the request bytes out of shared memory.  The region
-     * is non-cacheable (cacheable=false at open), so no cache
-     * invalidate is needed before the read. */
+     * is non-cacheable, so no cache invalidate is needed before
+     * the read. */
 	char request_buf[MAX_PAYLOAD + 1] = { 0 };
 	memcpy(request_buf, (const uint8_t *)g_peer.shmem_base + offset, req_len);
 	request_buf[req_len] = '\0';
@@ -126,9 +126,8 @@ int main(void)
 	printf("[mproc-peer] HE side coming up\n");
 
 	const alp_shmem_config_t shmem_cfg = {
-		.name      = SHMEM_REGION_NAME,
-		.size      = SHMEM_REGION_SIZE,
-		.cacheable = false,
+		.name = SHMEM_REGION_NAME,
+		.size = SHMEM_REGION_SIZE,
 	};
 	g_peer.shmem = alp_shmem_open(&shmem_cfg);
 
