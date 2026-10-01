@@ -219,10 +219,15 @@ typedef struct {
  * @brief Acquire access to a named shared-memory region.
  *
  * Both cores opening the same @c name see the same physical bytes.
- * Shared-memory carve-outs are non-cacheable by design: the platform
- * (MPU / devicetree) must map the region non-cacheable on every core
- * that opens it.  The SDK performs no cache flush or invalidate, so a
- * region mapped cacheable is not coherent between cores.
+ * Shared-memory carve-outs are non-cacheable by design and the SDK
+ * performs no cache flush or invalidate.  For board.yaml @c ipc:
+ * endpoints the generator emits @c CONFIG_DCACHE=n for every endpoint
+ * core; hand-written firmware must map the carve-out non-cacheable in
+ * the MPU on every core that opens it.  A region left cacheable is not
+ * coherent between cores unless the application does its own cache
+ * maintenance -- the board.yaml @c raw_shmem @c cacheable: @c true
+ * opt-out exists for that case and only suppresses the generated
+ * @c CONFIG_DCACHE=n; the SDK still does no maintenance.
  *
  * @param[in] cfg  Configuration.  Must be non-NULL with a non-empty name.
  * @return Open handle on success, or NULL if the region isn't declared

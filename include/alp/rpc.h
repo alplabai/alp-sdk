@@ -162,6 +162,12 @@ typedef struct alp_rpc_channel alp_rpc_channel_t;
  * Every member except @c name is optional; uninitialised fields
  * adopt the defaults documented per-field.  Pass a designated-
  * initialiser literal directly to @ref alp_rpc_open for terse use.
+ *
+ * The RPMsg carve-out is non-cacheable by design and the SDK performs no
+ * cache flush or invalidate.  For board.yaml @c ipc: endpoints the
+ * generator emits @c CONFIG_DCACHE=n for every endpoint core; hand-written
+ * firmware must map the carve-out non-cacheable in the MPU.  There is no
+ * per-channel cache setting here.
  */
 typedef struct {
 	/** RPMsg endpoint name (matches @c ALP_IPC_<NAME>_NAME from the
@@ -185,12 +191,6 @@ typedef struct {
 	/** Mailbox channel index (@c ALP_IPC_<NAME>_MBOX_CH).  Defaults
      *  to @ref ALP_RPC_DEFAULT_MBOX_CH when 0. */
 	uint32_t mbox_ch;
-
-	/** Memory-caching policy for the carve-out.  @c false picks the
-     *  non-cacheable region (the v0.6 default).  Set to @c true on
-     *  AEN where M55 caches are enabled and the carve-out is in
-     *  cacheable MRAM. */
-	bool cacheable;
 } alp_rpc_config_t;
 
 /**
@@ -200,8 +200,7 @@ typedef struct {
  * ALREADY-documented per-field default: @c src_ept = 0 (the backend
  * derives it from @c name via FNV-1a hash), @c dst_ept = 0 (the
  * backend uses `src_ept + 1`), @c mbox_ch = @ref
- * ALP_RPC_DEFAULT_MBOX_CH, @c cacheable = false (the v0.6 default --
- * non-cacheable carve-out).
+ * ALP_RPC_DEFAULT_MBOX_CH.
  *
  * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
  *       SDK's toolchains; standard through C23).  Usable as an initializer
@@ -209,11 +208,8 @@ typedef struct {
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
 #define ALP_RPC_CONFIG_DEFAULT(id) \
-	((alp_rpc_config_t){ .name      = (id), \
-	                     .src_ept   = 0u, \
-	                     .dst_ept   = 0u, \
-	                     .mbox_ch   = ALP_RPC_DEFAULT_MBOX_CH, \
-	                     .cacheable = false })
+	((alp_rpc_config_t){ \
+	    .name = (id), .src_ept = 0u, .dst_ept = 0u, .mbox_ch = ALP_RPC_DEFAULT_MBOX_CH })
 
 /**
  * @brief Generic inbound-message callback.

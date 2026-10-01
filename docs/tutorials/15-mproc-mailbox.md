@@ -100,8 +100,12 @@ A region of non-cacheable SRAM both cores can read/write.
 @ref alp_shmem_view hands back the mapped base pointer + size;
 the caller reads and writes through that pointer directly
 (`memcpy`, struct stores).  Carve-outs are non-cacheable by design
-(the platform MPU/DT maps them so; the SDK performs no cache flush or
-invalidate), so none is needed; ordering the payload
+and the SDK performs no cache flush or invalidate.  For board.yaml
+`ipc:` endpoints the generator emits `CONFIG_DCACHE=n`; hand-written
+firmware must map the carve-out non-cacheable in the MPU.  (A
+`raw_shmem` entry can set `cacheable: true` when the application owns
+cache maintenance itself; that only drops the generated
+`CONFIG_DCACHE=n`, the SDK still does none.)  Ordering the payload
 stores before the mailbox doorbell is up to the mbox driver.
 
 ```c
