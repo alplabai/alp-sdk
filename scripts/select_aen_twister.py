@@ -64,6 +64,8 @@ def matrix(skus: list[str]) -> list[dict]:
         flags = " ".join(
             f"-p alp_{prefix}{cpu}/ae822fa0e5597ls0/{soc}" for cpu, soc in CPU.items()
         )
+        # Two twister --subset shards per SKU: halves the leg wall time, and
+        # spreads the slow HE builds (skewed heavy) across both legs.
         for subset in (1, 2):
             legs.append(
                 {"sku": sku, "subset": subset, "label": label, "platform_flags": flags}
@@ -83,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.base:
         try:
             diff = subprocess.run(
-                ["git", "diff", "--name-only", args.base, args.head],
+                ["git", "diff", "--name-only", "--no-renames", args.base, args.head],
                 check=True, capture_output=True, text=True,
             ).stdout
             paths = [p for p in diff.splitlines() if p]

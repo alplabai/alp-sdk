@@ -32,3 +32,23 @@ def test_matrix_shape():
     legs = s.matrix(["aen803"])
     assert [(x["sku"], x["subset"]) for x in legs] == [("aen803", 1), ("aen803", 2)]
     assert "alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp" in legs[0]["platform_flags"]
+
+
+def test_md_and_tests_scripts_neutral():
+    assert s.affected_skus([B803.replace("board.yml", "README.md")]) == []
+    assert s.affected_skus(["tests/scripts/test_x.py"]) == []
+
+
+def test_selector_change_runs_both():
+    assert s.affected_skus(["scripts/select_aen_twister.py"]) == ["aen801", "aen803"]
+
+
+def test_bad_base_fails_safe_to_all_legs(tmp_path, monkeypatch):
+    out = tmp_path / "out"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+    assert s.main(["--base", "no-such-rev", "--github-output"]) == 0
+    line = out.read_text().strip()
+    assert line.startswith("matrix=")
+    import json
+
+    assert len(json.loads(line[len("matrix="):])) == 4
