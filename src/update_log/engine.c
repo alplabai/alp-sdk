@@ -363,6 +363,34 @@ static alp_status_t ulog_prev_hash_of_predecessor(const alp_secure_store_if *sto
 	return ALP_OK;
 }
 
+/*
+ * Anchor ordering (issue #111 P2). The anchor is an OPTIONAL floor held
+ * outside the store. Invariant: anchor <= committed entry count, always,
+ * across any crash. append() therefore advances it LAST -- after the entry
+ * put, the meta put and the counter increment -- and ulog_recover() advances
+ * it after adopting a torn append.
+ *
+ *   - Crash before the anchor advance (entry committed, anchor behind):
+ *     the anchor lags by one. Verify sees anchor <= count: no false
+ *     ROLLED_BACK; the next append/recover raises the floor.
+ *   - Crash before the entry commit: the anchor was never touched, so it
+ *     cannot be ahead of the store.
+ *
+ * The opposite order (anchor first) would leave anchor > store after a crash
+ * before the commit, i.e. a false ROLLED_BACK on an honest torn append.
+ * verify() compares the floor to the count only AFTER ulog_recover(), so a
+ * torn append that recovery adopts is counted before the comparison. Cost:
+ * an attacker who rewinds the store by exactly the one entry the anchor
+ * lags (a crash window) is not caught until the next append -- inherent to
+ * crash-safe ordering with a non-transactional anchor.
+ */
+static alp_status_t ulog_anchor_advance(const alp_counter_anchor_if *anchor, uint64_t count)
+{
+	if (anchor == NULL) return ALP_OK;
+	if (anchor->advance == NULL) return ALP_ERR_INVAL;
+	return anchor->advance(anchor->ctx, count);
+}
+
 /* Re-derive meta + the counter from the newest committed entry,
  * forward-committing AT MOST ONE interrupted append (never loops -- see
  * the block comment above for why a second orphan must be left for
@@ -370,7 +398,8 @@ static alp_status_t ulog_prev_hash_of_predecessor(const alp_secure_store_if *sto
  * Idempotent: a no-op once meta/counter already agree with the store.
  * Must be called with g_engine_lock held. */
 static alp_status_t ulog_recover(const alp_secure_store_if      *store,
-                                 const alp_monotonic_counter_if *ctr)
+                                 const alp_monotonic_counter_if *ctr,
+                                 const alp_counter_anchor_if    *anchor)
 {
 	uint64_t     hw = 0;
 	alp_status_t rc = ctr->read(ctr->ctx, 0, &hw);
@@ -418,20 +447,23 @@ static alp_status_t ulog_recover(const alp_secure_store_if      *store,
 	if (rc != ALP_OK) return rc;
 
 	uint64_t newhw = 0;
-	return ctr->increment(ctr->ctx, 0, &newhw);
+	rc             = ctr->increment(ctr->ctx, 0, &newhw);
+	if (rc != ALP_OK) return rc;
+	return ulog_anchor_advance(anchor, hw + 1u);
 	/* Deliberately do not loop: adopting a second entry here would hide
 	 * a counter rollback as a clean VERIFY_OK. See the block comment. */
 }
 
-alp_status_t ulog_engine_append(const alp_secure_store_if      *store,
-                                const alp_monotonic_counter_if *ctr,
-                                const alp_update_log_entry_t   *entry)
+alp_status_t ulog_engine_append_anchored(const alp_secure_store_if      *store,
+                                         const alp_monotonic_counter_if *ctr,
+                                         const alp_counter_anchor_if    *anchor,
+                                         const alp_update_log_entry_t   *entry)
 {
 	if (store == NULL || ctr == NULL || entry == NULL) return ALP_ERR_INVAL;
 
 	ulog_engine_lock();
 
-	alp_status_t rc = ulog_recover(store, ctr);
+	alp_status_t rc = ulog_recover(store, ctr, anchor);
 	if (rc != ALP_OK) {
 		ulog_engine_unlock();
 		return rc;
@@ -544,21 +576,30 @@ alp_status_t ulog_engine_append(const alp_secure_store_if      *store,
 
 	uint64_t newhw = 0;
 	rc             = ctr->increment(ctr->ctx, 0, &newhw);
+	if (rc == ALP_OK) rc = ulog_anchor_advance(anchor, hw + 1u);
 	ulog_engine_unlock();
 	return rc;
 }
 
-alp_status_t ulog_engine_verify(const alp_secure_store_if      *store,
+alp_status_t ulog_engine_append(const alp_secure_store_if      *store,
                                 const alp_monotonic_counter_if *ctr,
-                                alp_update_log_verdict_t       *verdict_out,
-                                uint64_t                       *bad_seq_out)
+                                const alp_update_log_entry_t   *entry)
+{
+	return ulog_engine_append_anchored(store, ctr, NULL, entry);
+}
+
+alp_status_t ulog_engine_verify_anchored(const alp_secure_store_if      *store,
+                                         const alp_monotonic_counter_if *ctr,
+                                         const alp_counter_anchor_if    *anchor,
+                                         alp_update_log_verdict_t       *verdict_out,
+                                         uint64_t                       *bad_seq_out)
 {
 	if (store == NULL || ctr == NULL || verdict_out == NULL) return ALP_ERR_INVAL;
 	if (bad_seq_out) *bad_seq_out = 0;
 
 	ulog_engine_lock();
 
-	alp_status_t rc = ulog_recover(store, ctr);
+	alp_status_t rc = ulog_recover(store, ctr, anchor);
 	if (rc != ALP_OK) {
 		ulog_engine_unlock();
 		return rc;
@@ -569,6 +610,22 @@ alp_status_t ulog_engine_verify(const alp_secure_store_if      *store,
 	if (rc != ALP_OK) {
 		ulog_engine_unlock();
 		return ALP_ERR_IO;
+	}
+
+	/* External anchor, compared AFTER torn-append recovery (see "Anchor
+	 * ordering"): a floor above the store's count means the store (and its
+	 * counter) was rewound -- full reflash or tail truncation. */
+	if (anchor != NULL) {
+		uint64_t floor = 0;
+		if (anchor->read == NULL || anchor->read(anchor->ctx, &floor) != ALP_OK) {
+			rc = ALP_ERR_IO;
+			goto out;
+		}
+		if (floor > hw) {
+			*verdict_out = ALP_UPDATE_LOG_VERIFY_ROLLED_BACK;
+			rc           = ALP_OK;
+			goto out;
+		}
 	}
 
 	struct ulog_meta m;
@@ -693,6 +750,14 @@ out:
 	return rc;
 }
 
+alp_status_t ulog_engine_verify(const alp_secure_store_if      *store,
+                                const alp_monotonic_counter_if *ctr,
+                                alp_update_log_verdict_t       *verdict_out,
+                                uint64_t                       *bad_seq_out)
+{
+	return ulog_engine_verify_anchored(store, ctr, NULL, verdict_out, bad_seq_out);
+}
+
 alp_status_t ulog_engine_count(const alp_secure_store_if      *store,
                                const alp_monotonic_counter_if *ctr,
                                uint64_t                       *count_out)
@@ -701,7 +766,7 @@ alp_status_t ulog_engine_count(const alp_secure_store_if      *store,
 
 	ulog_engine_lock();
 
-	alp_status_t rc = ulog_recover(store, ctr);
+	alp_status_t rc = ulog_recover(store, ctr, NULL);
 	if (rc == ALP_OK) {
 		rc = ctr->read(ctr->ctx, 0, count_out);
 	}
