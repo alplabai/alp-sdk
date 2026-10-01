@@ -45,9 +45,7 @@
  *   - Optional reset-gpios; none is wired here.
  *   - I2C address 0x60 (typical RPi OV9281 modules); some modules strap
  *     0x70 -- change `reg` and the unit name if i2cdetect shows that.
- *   - The 6.1 RZ/G2L CSI-2 receiver / CRU format tables list no Y10 code,
- *     so link validation may refuse the pipeline; if so it needs kernel
- *     work, not DT changes.  See docs/v2n-camera-csi.md.
+ *   - Y10_1X10 -> CR10 via patch 0016.  See docs/v2n-camera-csi.md.
  */
 
 / {

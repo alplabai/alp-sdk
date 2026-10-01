@@ -1,4 +1,4 @@
-From 0f8b4b3e01801a31d8eb7455e7ddf27db70f1559 Mon Sep 17 00:00:00 2001
+From 7679afdb16ad30000f3180b01f86ba651a2da061 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
 Date: Thu, 1 Oct 2026 21:36:12 +0000
 Subject: [PATCH] media: rzg2l-cru: add Y10 and Y8 greyscale formats
@@ -26,6 +26,11 @@ bypass (no demosaic or colour conversion) and the packed CR10 output
   was already accepted).
 
 Other sensors are unaffected: no existing code changes meaning.
+
+Y10 shares the Bayer-tagged CR10 entry, so RZ/G2L RGB/YUV output would
+demosaic grey; RZ/V2H-type CRUs reject demosaic, so V2N/V2M are unaffected.
+
+Upstream-Status: Pending [generic driver fix; no SoM-specific code]
 ---
  drivers/media/platform/renesas/rzg2l-cru/rzg2l-cru.h   | 6 +++---
  drivers/media/platform/renesas/rzg2l-cru/rzg2l-csi2.c  | 8 ++++++++

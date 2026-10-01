@@ -1,4 +1,4 @@
-From 5c1d0a7e3b9f4a6d8e2f10c4b7a9d3e5f6a8b0c1 Mon Sep 17 00:00:00 2001
+From e441fe222a5e88de90e411fdce59faf34b19169a Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
 Date: Fri, 2 Oct 2026 09:00:00 +0000
 Subject: [PATCH] media: rzg2l-csi2: honour lane-polarities via SWAPCTL
@@ -26,11 +26,14 @@ lane, 1..N the data lanes) and program bits 5/4 accordingly.  The
 hardware can only swap all data lanes or none, so a mixed data-lane
 setting fails probe with -EINVAL.  Bits 1/0 are never set.  The RZ/G2L
 D-PHY has no SWAPCTL: polarities are ignored with a warning if set.
+
+Upstream-Status: Pending [generic driver fix; no SoM-specific code]
 ---
- drivers/media/platform/renesas/rzg2l-cru/rzg2l-csi2.c | 32 +++++++++++++++++++++++++++++++-
- 1 file changed, 31 insertions(+), 1 deletion(-)
+ .../platform/renesas/rzg2l-cru/rzg2l-csi2.c   | 38 ++++++++++++++++++-
+ 1 file changed, 37 insertions(+), 1 deletion(-)
 
 diff --git a/drivers/media/platform/renesas/rzg2l-cru/rzg2l-csi2.c b/drivers/media/platform/renesas/rzg2l-cru/rzg2l-csi2.c
+index fd5eaeb4a301..dcc4a13eb7a8 100644
 --- a/drivers/media/platform/renesas/rzg2l-cru/rzg2l-csi2.c
 +++ b/drivers/media/platform/renesas/rzg2l-cru/rzg2l-csi2.c
 @@ -94,6 +94,8 @@
@@ -42,7 +45,7 @@ diff --git a/drivers/media/platform/renesas/rzg2l-cru/rzg2l-csi2.c b/drivers/med
  
  #define VSRSTS_RETRIES			20
  
-@@ -131,6 +133,9 @@
+@@ -131,6 +133,9 @@ struct rzg2l_csi2 {
  	unsigned short lanes;
  	unsigned long hsfreq;
  
@@ -52,7 +55,7 @@ diff --git a/drivers/media/platform/renesas/rzg2l-cru/rzg2l-csi2.c b/drivers/med
  	bool dphy_enabled;
  };
  
-@@ -138,6 +143,7 @@
+@@ -138,6 +143,7 @@ struct rzg2l_csi2_info {
  	int (*dphy_enable)(struct rzg2l_csi2 *csi2);
  	int (*dphy_disable)(struct rzg2l_csi2 *csi2);
  	bool has_system_clk;
@@ -60,7 +63,7 @@ diff --git a/drivers/media/platform/renesas/rzg2l-cru/rzg2l-csi2.c b/drivers/med
  	unsigned long vclk_rec_rate;
  	const struct rzg2l_csi2_format *format;
  	unsigned int num_formats;
-@@ -655,7 +661,10 @@
+@@ -655,7 +661,10 @@ static int rzv2h_csi2_dphy_enable(struct rzg2l_csi2 *csi2)
  	if (i == ARRAY_SIZE(rzv2h_s_hssettlectl))
  		return -EINVAL;
  
@@ -72,7 +75,7 @@ diff --git a/drivers/media/platform/renesas/rzg2l-cru/rzg2l-csi2.c b/drivers/med
  
  	hssettle = rzv2h_s_hssettlectl[i].s_hssettlectl;
  	rzg2l_csi2_write(csi2, CRUm_S_TIMCTL,
-@@ -674,6 +683,7 @@
+@@ -674,6 +683,7 @@ static int rzv2h_csi2_dphy_enable(struct rzg2l_csi2 *csi2)
  }
  
  static const struct rzg2l_csi2_info rzv2h_csi2_info = {
@@ -80,7 +83,7 @@ diff --git a/drivers/media/platform/renesas/rzg2l-cru/rzg2l-csi2.c b/drivers/med
  	.dphy_enable = rzv2h_csi2_dphy_enable,
  	.dphy_disable = rzv2h_csi2_dphy_disable,
  	.has_system_clk = false,
-@@ -932,12 +942,38 @@
+@@ -932,12 +942,38 @@ static const struct v4l2_async_notifier_operations rzg2l_csi2_notify_ops = {
  static int rzg2l_csi2_parse_v4l2(struct rzg2l_csi2 *csi2,
  				 struct v4l2_fwnode_endpoint *vep)
  {
@@ -100,17 +103,17 @@ diff --git a/drivers/media/platform/renesas/rzg2l-cru/rzg2l-csi2.c b/drivers/med
 +			ndat_inv++;
 +	}
 +
-+	if (ndat_inv && ndat_inv != csi2->lanes) {
-+		dev_err(csi2->dev,
-+			"lane-polarities: the D-PHY can only invert all data lanes or none\n");
-+		return -EINVAL;
-+	}
-+
 +	if (!csi2->info->has_swapctl) {
 +		if (swap_clk || ndat_inv)
 +			dev_warn(csi2->dev,
 +				 "lane-polarities ignored: no P/N swap on this D-PHY\n");
 +		return 0;
++	}
++
++	if (ndat_inv && ndat_inv != csi2->lanes) {
++		dev_err(csi2->dev,
++			"lane-polarities: the D-PHY can only invert all data lanes or none\n");
++		return -EINVAL;
 +	}
 +
 +	csi2->swap_clk = swap_clk;
@@ -120,4 +123,5 @@ diff --git a/drivers/media/platform/renesas/rzg2l-cru/rzg2l-csi2.c b/drivers/med
  }
  
 -- 
-2.34.1
+2.43.0
+
