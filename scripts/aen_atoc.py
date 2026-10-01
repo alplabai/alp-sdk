@@ -417,6 +417,13 @@ def _is_table_structurally_complete(gettoc_text: str) -> bool:
     AND a closing `+---+` separator strictly AFTER the last parsed data
     row -- the BLOCKER finding of the second #2262 review round.
 
+    MEASURED (alp-sdk#2538, E1M-AEN803 serial 2026W36-0009, SES A1 v1.110.0): a stalled SE-UART read makes `maintenance -opt gettoc` exit 0 with a truncated
+    table (4/7/8 rows, or header only), because the host prints each row on arrival and
+    the closing `+---+` line ONLY when the 0xa8 end packet arrives. This rule is
+    therefore the PRIMARY defence against a stalled read. A closed port exits 1, and a
+    complete table followed by `[ERROR] ... readSerial reporting disconnected` is caught
+    only by the exit code, so a non-zero exit is still refused.
+
     A `gettoc` read that stops mid-download (a serial timeout after the SE
     has printed only its first few rows) can still exit rc=0 with a valid
     banner and >=1 real resident row -- e.g. just the two `DEVICE` rows plus
@@ -482,8 +489,9 @@ def compute_query_status(
       REGARDLESS of what `gettoc` itself returned -- a gettoc read off the
       wrong serial device (the SE-UART vs. the app console) is not a safe
       verdict;
-    - a non-zero `gettoc` exit (e.g. a serial timeout mid-table) is never
-      "ok" from the partial text alone;
+    - a non-zero `gettoc` exit (a closed port; a stall mid-packet) is never
+      "ok"; a stall after a complete entry exits 0 and is caught by the
+      closing-separator rule below, measured in alp-sdk#2538;
     - the exact "No ATOC found" line means a genuinely empty board;
     - otherwise "ok" only if at least one resident row parsed AND the table
       is structurally complete (see `_is_table_structurally_complete`) --

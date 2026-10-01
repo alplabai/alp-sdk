@@ -1055,6 +1055,10 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
                 self.se_uart, self.se_uart_baud, maintenance_available,
                 banner_text, banner_rc, gettoc_text, gettoc_rc))
 
+        # Measured (alp-sdk#2538): a stalled SE-UART read exits 0 with a table
+        # lacking the closing '+---+' line (printed only on the 0xa8 end packet),
+        # so that closing-line rule is the primary defence; a closed port exits 1
+        # and is refused by the non-zero exit.
         query_status = _aen_atoc.compute_query_status(
             maintenance_available, banner_text, banner_rc, gettoc_text,
             gettoc_rc)
