@@ -750,8 +750,35 @@
 	status = "okay";
 };
 
-&usb3_phy0 {
-	status = "okay";
+/* USB 3.0 Type-A host VBUS: a carrier power switch whose enable net is
+ * USB30_VBUSEN = E1M-X pad AQ10 (I2S1_SDO) = RZ/V2N P15 (SSIU4_SSI4_SDATA,
+ * metadata/e1m_modules/v2n/renesas-peripheral-map.tsv).  Bench-proven
+ * 2026-10-01: with P15 unclaimed the port is unpowered and nothing
+ * enumerates; driving it high enumerates a stick on xhci.  Nothing else in
+ * the carrier/SoM/DEEPX dtsi claims P15 (the TAS2563 pair uses P12 and P04
+ * from the same I2S1 group).
+ *
+ * The 6.1 renesas usb3 PHY (phy-rz-usb3.c) and rzv2h xHCI driver consume no
+ * vbus supply, so there is no phy/xhci property to hang this on: the
+ * regulator is regulator-always-on + regulator-boot-on, which makes the
+ * regulator core drive the GPIO high at boot.  No OVC feedback is wired
+ * (see the usb30 note above).  The USB 2.0 VBUS enable (USB20_VBUSEN, pad
+ * AQ11 / P13) feeds an unused switch output on this carrier and is left
+ * alone. */
+/ {
+	reg_usb30_vbus: regulator-usb30-vbus {
+		compatible = "regulator-fixed";
+		regulator-name = "usb30-vbus";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		gpios = <&pinctrl RZV2N_GPIO(1, 5) GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+};
+
+&usb3_phy0 {	status = "okay";
 };
 
 &xhci0 {
