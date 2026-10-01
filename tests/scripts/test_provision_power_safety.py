@@ -319,7 +319,7 @@ def test_console_only_boot_sd_linux_stays_done_and_gd32_flash_goes_over_the_cons
     # the next step picks the console transport (no IP)
     tools = tmp_path / "tools"
     tools.mkdir()
-    (tools / "a.py").write_text("x")
+    (tools / "a.py").write_text("x", encoding="utf-8")
     b.console_swd = (tools, ("a.py",))
     monkeypatch.setattr(type(ctx), "_check_unit_identity", lambda self, t: None)
     t, probe, via_console = steps.Gd32Flash._transport(ctx)
