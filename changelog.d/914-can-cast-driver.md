@@ -43,3 +43,11 @@ transmitted them. Fixes:
   `can_cast_enable_tx_interrupts()` `&= BIT(TPIE)` is now `&= ~BIT(TPIE)` so it
   stops clearing the other RTIE bits; the send timeout countdown saturates at 0
   instead of wrapping for timeouts that are not a multiple of 100 us.
+
+A received frame whose DLC exceeds `CAN_MAX_DLEN` (an FD frame on a build with
+`CONFIG_CAN_FD_MODE=n`) now also releases the receive buffer before it is
+dropped, like the RTR drop above, so it cannot leave the RX interrupt
+retriggering. Bench, E1M-AEN803 serial 2026W36-0001, internal loopback after
+round two: every frame type 100/100, burst TX callbacks 200/200, core clock
+20 MHz (`CKDIV` 8), 2 Mbit/s data phase at 10 tq, `LBMI` kept when timing is
+set after `set_mode`, and no livelock with `CONFIG_CAN_ACCEPT_RTR=n`.

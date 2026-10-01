@@ -1266,6 +1266,8 @@ static int can_cast_receive(uint32_t can_base, struct can_frame *dest_frame)
 
 	loc_var = can_dlc_to_bytes(dest_frame->dlc);
 	if (loc_var > CAN_MAX_DLEN) {
+		/* Same as the RTR drop: release the buffer or the IRQ retriggers forever */
+		can_cast_release_rbuf(can_base);
 		return -ENOTSUP;
 	}
 
