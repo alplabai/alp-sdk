@@ -83,3 +83,19 @@ point at `tan build` / the generator.
 
 A bare `west build` of an SDK example now needs the fragment passed explicitly
 (see above); before this change the CMake bridge supplied it silently.
+
+The sysbuild half needs a matching tan-cli planner change, because tan plans in
+process with its own relocated planner: `alplabai/tan-cli` branch
+`fix/866-sysbuild-image-extra-conf` ports the image-prefixed define. Until a tan
+release carries it, `tan build` of a sysbuild example (`iot-fleet-ota`,
+`production-deployment`, or any `board.yaml` with `boot:` / TF-M) configures
+without its `CONFIG_ALP_*` fragment; gate this change's release on that tan
+release.
+
+The bare `west build` command lines in `docs/` and the example READMEs now run
+`scripts/gen_example_alp_conf.py` first and pass `-DEXTRA_CONF_FILE=generated/alp.conf`
+(`-D<image>_EXTRA_CONF_FILE` under `--sysbuild`); the
+`pr-getting-started-aen801.yml` workflow and the native-sim container's default
+entrypoint do the same. The example `board.yaml` / `prj.conf` teaching comments
+that described the bridge now describe `tan build` and the generator, and the
+scaffold snapshots were regenerated.

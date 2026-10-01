@@ -5,7 +5,8 @@ Read a button and toggle an LED -- both as plain GPIO, through the
 
 This example is also the **canonical demonstration of the board.yaml
 + loader workflow**: every `CONFIG_*` knob the build needs comes from
-`board.yaml` -> `scripts/alp_project.py` -> `build/generated/alp.conf`.
+`board.yaml` -> `tan build` -> `alp.conf` (`scripts/gen_example_alp_conf.py`
+writes `generated/alp.conf` for twister and a bare `west build`).
 
 ## The interesting part: pin-as-GPIO
 
@@ -66,5 +67,6 @@ needs to change.
   pin-array invariant.
 - [`docs/board-config-schema.md`](../../../docs/board-config-schema.md)
   -- the authoritative field reference for `board.yaml`.
-- [`scripts/alp_project.py`](../../../scripts/alp_project.py) -- the
-  loader this example's `CMakeLists.txt` invokes.
+- [`scripts/gen_example_alp_conf.py`](../../../scripts/gen_example_alp_conf.py)
+  -- writes the per-core `generated/alp.conf` for twister and a bare
+  `west build`; `tan build` plans the same fragment itself.
