@@ -322,12 +322,25 @@ config ALP_SDK_UPDATE_LOG_BOOT_ALIF_SE
 	  GET_TOC_INFO packet over se_service_send_request(), the same
 	  generic-send seam src/backends/security/se_cryptocell.c and
 	  src/backends/ext/alif/storage.c already use) for the TOC entry
-	  matching ALP_SDK_UPDATE_LOG_BOOT_ALIF_SE_IMAGE_ID, then hashes that
-	  entry's own [store_address, store_address + image_size) MRAM range
-	  -- the ATOC carries no per-entry digest field of its own. The TOC
-	  entry's verify bit maps to ALP_UPDATE_STATUS_CONFIRMED /
+	  matching ALP_SDK_UPDATE_LOG_BOOT_ALIF_SE_IMAGE_ID, then locates
+	  the image through the ATOC package in MRAM (SES v1.110 reports
+	  store_address 0, so the SE's store field is not used), hashes it
+	  and compares with the signed content-cert hash. A hash, size or
+	  version mismatch between the located image and the SE's TOC entry
+	  reports ALP_ERR_NOSUPPORT (the layout self-check failed), never a
+	  status over bytes that may not be the image. The TOC entry's
+	  verify bit maps to ALP_UPDATE_STATUS_CONFIRMED /
 	  ALP_UPDATE_STATUS_VERIFY_FAILED; no matching or malformed entry
 	  reports ALP_ERR_NOSUPPORT rather than a fabricated entry.
+
+	  The ATOC package framing was benched on the M55-HE only; M55-HP
+	  and other SoCs are untested, and a misframing there fails safe as
+	  ALP_ERR_NOSUPPORT.
+
+	  Stack: the provider plus the SHA-256 it runs needs about 0.7 KiB
+	  of the calling thread's stack (frames measured on the M55-HE
+	  build). A 1 KiB main stack overflowed on E1M-AEN803 when an
+	  interrupt landed mid-hash; give the caller at least 2 KiB.
 
 endchoice
 

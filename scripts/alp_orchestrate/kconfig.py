@@ -1455,12 +1455,11 @@ def _emit_cross_core_shmem_cache(
     declares a matching carve-out:
 
       - `kind: rpmsg` is covered too (#1088's conservative fix), for the
-        identical reason `raw_shmem` is: `cfg->cacheable` is stored on the
-        backend struct (`src/backends/rpc/{zephyr,yocto}_drv.c`) and never
-        read again -- there is no `sys_cache_*` call anywhere under `src/`
-        or `include/`.  A `cacheable: true` rpmsg channel would therefore
-        select a code path with no maintenance behind it, so the loader
-        (`loader.py`) rejects `cacheable: true` on a `rpmsg` entry outright
+        identical reason `raw_shmem` is: `<alp/rpc.h>` has no cache-
+        maintenance layer (no `sys_cache_*` call anywhere under `src/` or
+        `include/`, and no per-channel cache field).  A `cacheable: true`
+        rpmsg channel would therefore select a path with no maintenance
+        behind it, so the loader (`loader.py`) rejects `cacheable: true` on a `rpmsg` entry outright
         rather than silently honouring it -- any entry that reaches this
         function is already non-cacheable, and the D-cache goes off
         unconditionally for its endpoints.  The real fix --

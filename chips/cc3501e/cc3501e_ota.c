@@ -144,6 +144,12 @@ alp_status_t cc3501e_ota_begin(cc3501e_t *ctx, uint32_t total_len, uint32_t time
 	return (s == ALP_OK) ? ALP_ERR_TIMEOUT : s;
 }
 
+static alp_status_t cc3501e_ota_write_frame(cc3501e_t     *ctx,
+                                            uint32_t       offset,
+                                            const uint8_t *data,
+                                            size_t         len,
+                                            uint32_t       timeout_ms);
+
 alp_status_t cc3501e_ota_write(cc3501e_t     *ctx,
                                uint32_t       offset,
                                const uint8_t *data,
@@ -153,7 +159,38 @@ alp_status_t cc3501e_ota_write(cc3501e_t     *ctx,
 	if (data == NULL || len == 0u || len > ALP_CC3501E_OTA_MAX_CHUNK) {
 		return ALP_ERR_INVAL;
 	}
-	/* Frame = offset(LE32) followed by the raw image bytes (<= MAX_PAYLOAD). */
+	/* #1818: host workaround for a firmware limitation.  The update-mode (polled)
+	 * slave mis-receives any request payload phase longer than 70 B (bench: 70 B
+	 * ok, 71 B -> -5; splitting one phase across SS0 transfers does not help).  A
+	 * frame is offset(4) + data + CRC(2) on a CRC-framing peer, so <= 64 data bytes
+	 * per frame keeps it under the boundary.  Split a larger caller buffer into
+	 * consecutive <= CC3501E_POLLED_OTA_CHUNK frames, advancing the offset; stop at
+	 * the first non-OK frame.  A BUSY/IO after earlier frames landed means the
+	 * device cursor moved past `offset`: the caller must re-sync from OTA_STATUS
+	 * (cc3501e_ota_update does, by clamping its own chunk to one frame).  Normal
+	 * mode (not polled) is untouched: one frame. */
+	if (cc3501e_peer_is_polled() && len > CC3501E_POLLED_OTA_CHUNK) {
+		size_t done = 0u;
+		while (done < len) {
+			size_t n = len - done;
+			if (n > CC3501E_POLLED_OTA_CHUNK) n = CC3501E_POLLED_OTA_CHUNK;
+			const alp_status_t fs =
+			    cc3501e_ota_write_frame(ctx, (uint32_t)(offset + done), data + done, n, timeout_ms);
+			if (fs != ALP_OK) return fs;
+			done += n;
+		}
+		return ALP_OK;
+	}
+	return cc3501e_ota_write_frame(ctx, offset, data, len, timeout_ms);
+}
+
+/* One OTA_WRITE frame: offset(LE32) followed by the raw image bytes. */
+static alp_status_t cc3501e_ota_write_frame(cc3501e_t     *ctx,
+                                            uint32_t       offset,
+                                            const uint8_t *data,
+                                            size_t         len,
+                                            uint32_t       timeout_ms)
+{
 	uint8_t buf[4u + ALP_CC3501E_OTA_MAX_CHUNK];
 	buf[0] = (uint8_t)(offset & 0xFFu);
 	buf[1] = (uint8_t)((offset >> 8) & 0xFFu);
@@ -633,7 +670,9 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
 	 * per-frame timeout (silicon 2026-06-19).  Keep host chunks page-aligned.
 	 * (The final remainder chunk is < 256 B; psa_fwu accepts the partial tail,
 	 * as the selftest's last write did.) */
-	const size_t chunk = 256u;
+	/* #1818: one polled-safe frame per chunk, so a BUSY/IO retry re-sends exactly
+	 * the chunk that was refused (see cc3501e_ota_write). */
+	const size_t chunk = cc3501e_peer_is_polled() ? CC3501E_POLLED_OTA_CHUNK : 256u;
 	uint32_t     stall = 0u; /* consecutive hold-offs with no cursor movement */
 	for (size_t off = 0u; off < len;) {
 		size_t n = len - off;

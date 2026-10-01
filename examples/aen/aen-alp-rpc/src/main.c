@@ -213,13 +213,12 @@ int main(void)
 	 * Open the RPC channel.  This is the whole point of the example: one call
 	 * resolves DT_CHOSEN(zephyr_ipc) -> ipc0, opens the ipc_service instance,
 	 * and registers the local endpoint -- exactly what the raw pingpong did by
-	 * hand.  cacheable=false matches CONFIG_DCACHE=n on this bench.  src/dst
-	 * ept are left 0 so the backend derives them deterministically from the
-	 * channel name (both cores hash the same name, so they agree).
+	 * hand.  src/dst ept are left 0 so the backend derives them
+	 * deterministically from the channel name (both cores hash the same
+	 * name, so they agree).
 	 */
 	g_ch = alp_rpc_open(&(alp_rpc_config_t){
-	    .name      = RPC_CHANNEL,
-	    .cacheable = false,
+	    .name = RPC_CHANNEL,
 	});
 	if (g_ch == NULL) {
 		/* alp_last_error() carries the reason (e.g. ALP_ERR_NOT_READY if the
