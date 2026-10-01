@@ -35,8 +35,31 @@ transmitted them. Fixes:
   falls back to the old path if `CKDIV` < 2.
 - **Lost TX-done callbacks.** The IRQ now clears TSIF first, then completes every
   queued frame the transmit buffer no longer holds (200 frames gave 23 callbacks).
-- **RTR livelock with `CONFIG_CAN_ACCEPT_RTR=n`.** The early return now releases
-  the RX buffer; before, IRQ 104 retriggered forever and froze the M55-HE.
+- **RX-buffer livelock on dropped frames.** The early return for an RTR frame
+  with `CONFIG_CAN_ACCEPT_RTR=n`, and for a frame whose DLC exceeds
+  `CAN_MAX_DLEN` (an FD frame on a `CONFIG_CAN_FD_MODE=n` build), now releases
+  the receive buffer; before, IRQ 104 retriggered forever and froze the M55-HE.
+- **Lost last callback.** `can_send()` now publishes the callback queue head under
+  `irq_lock()` before it starts the transmit, so a TSIF IRQ in between no longer
+  sees an empty queue; the head/tail reset in `can_stop()` is locked too.
+- **Full callback queue.** 16 queued callbacks read as an empty queue
+  (`head == tail`); the queue now holds 15 and `can_send()` returns `-EAGAIN`
+  beyond that.
+- **Reset pulse re-applies more than the mode.** After `can_set_timing()` /
+  `can_set_timing_data()` the shared `can_cast_reapply_after_reset()` also
+  re-programs `TCTRL.FD_ISO`, `TCTRL.TSMODE` and the installed RX filters, so
+  filters added before `can_set_bitrate()` keep working. Neither the Alif DFP
+  nor the register map says what `CFG_STAT.RESET` clears, so this is defensive.
+- **`can_send()` guards.** Argument checks (`-EINVAL`) run before state checks,
+  `CFG_STAT` is read once, and a lost `LBMI` is logged as an internal fault
+  (`-EIO`).
+- **Arbitration loss.** The handler no longer dereferences a NULL callback and
+  only completes the queue entry (callback with error 1, tail popped) in
+  single-shot mode; otherwise the hardware retries and `complete_tx` reports
+  success once.
+- **CGU enable ordering and clock rounding.** The `CGU_CLK_ENA` bits are set
+  before `CANFD_CTRL` is written, and a `clock-frequency` that does not divide
+  the 160 MHz source logs a warning.
 - **Smaller defects:** `can_cast_stb_single_shot_mode()` masked with the bit
   index (`3`) instead of `BIT(3)`; `get_max_filters` and `remove_rx_filter` use
   `CONFIG_CAN_MAX_FILTER` instead of 16 (out-of-bounds write);
@@ -44,10 +67,7 @@ transmitted them. Fixes:
   stops clearing the other RTIE bits; the send timeout countdown saturates at 0
   instead of wrapping for timeouts that are not a multiple of 100 us.
 
-A received frame whose DLC exceeds `CAN_MAX_DLEN` (an FD frame on a build with
-`CONFIG_CAN_FD_MODE=n`) now also releases the receive buffer before it is
-dropped, like the RTR drop above, so it cannot leave the RX interrupt
-retriggering. Bench, E1M-AEN803 serial 2026W36-0001, internal loopback after
-round two: every frame type 100/100, burst TX callbacks 200/200, core clock
-20 MHz (`CKDIV` 8), 2 Mbit/s data phase at 10 tq, `LBMI` kept when timing is
-set after `set_mode`, and no livelock with `CONFIG_CAN_ACCEPT_RTR=n`.
+Bench, E1M-AEN803 serial 2026W36-0001, internal loopback after round two: every
+frame type 100/100, burst TX callbacks 200/200, core clock 20 MHz (`CKDIV` 8),
+2 Mbit/s data phase at 10 tq, `LBMI` kept when timing is set after `set_mode`,
+and no livelock with `CONFIG_CAN_ACCEPT_RTR=n`.

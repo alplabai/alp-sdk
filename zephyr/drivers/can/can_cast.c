@@ -326,6 +326,9 @@ static int can_cast_init(const struct device *dev)
 	}
 #endif
 
+	/* Same CGU enables as the Alif fork's soc_common.c for an okay can0 */
+	sys_set_bits(CGU_CLK_ENA, CAN_CGU_CLK_ENA_BIT20 | CAN_CGU_CLK_ENA_BIT23);
+
 	/*
 	 * CKDIV (CANFD_CTRL bits [7:0], Alif DFP sys_ctrl_canfd.h CANFD0_CTRL_CKDIV_Pos)
 	 * is left at its reset value (0x10 -> 10 MHz) by the clockctrl node, so program
@@ -338,15 +341,18 @@ static int can_cast_init(const struct device *dev)
 		uint32_t div  = src / config->clk_freq;
 
 		if (div >= 2U && div <= CAN_CTRL_CKDIV_Msk) {
+			if ((src % config->clk_freq) != 0U) {
+				LOG_WRN("clock-frequency %u does not divide %u: core clock is %u Hz",
+				        config->clk_freq,
+				        src,
+				        src / div);
+			}
 			ctrl = (ctrl & ~CAN_CTRL_CKDIV_Msk) | div;
 			sys_write32(ctrl, config->can_fd_ctrl_reg);
 		} else {
 			LOG_WRN("clock-frequency %u gives CKDIV %u outside 2..255", config->clk_freq, div);
 		}
 	}
-
-	/* Same CGU enables as the Alif fork's soc_common.c for an okay can0 */
-	sys_set_bits(CGU_CLK_ENA, CAN_CGU_CLK_ENA_BIT20 | CAN_CGU_CLK_ENA_BIT23);
 
 	/* Enables Standby mode */
 	can_cast_enable_standby_mode(can_base);
@@ -495,9 +501,14 @@ static int can_cast_stop(const struct device *dev)
 
 	can_cast_clear_interrupts(can_base);
 
-	/* Reset Tx queue */
-	data->tx_queue.head = 0U;
-	data->tx_queue.tail = 0U;
+	/* Reset Tx queue (the TSIF ISR walks head/tail) */
+	{
+		unsigned int key = irq_lock();
+
+		data->tx_queue.head = 0U;
+		data->tx_queue.tail = 0U;
+		irq_unlock(key);
+	}
 
 	/* Stop CAN communication */
 	can_cast_reset_enable(can_base);
@@ -542,6 +553,42 @@ static void can_cast_apply_mode_bits(uint32_t can_base, can_mode_t mode)
 	/* Sets the CAN Error and Rx buf almost full warning limits */
 	can_cast_set_err_warn_limit(can_base, CAN_ERROR_WARN_LIMIT);
 	can_cast_set_rbuf_almost_full_warn_limit(can_base, CONFIG_CAN_RBUF_AFWL);
+}
+
+/*
+ * Re-applies everything configured before a reset pulse (set_timing /
+ * set_timing_data hold CFG_STAT.RESET to latch the bit-time registers).
+ * Neither the Alif DFP (drivers/include/canfd.h, drivers/source/canfd.c,
+ * Alif_CMSIS/Source/Driver_CAN.c) nor this driver's register map states which
+ * registers RESET clears; the DFP only shows LBMI/LBME being cleared together with
+ * RESET (canfd.c canfd_enable_*_mode) and the bench saw LBMI lost. So it
+ * defensively re-programs the mode bits, the ISO/priority bits written once by init
+ * (TCTRL.FD_ISO, TCTRL.TSMODE) and every installed acceptance filter.
+ * Interrupt enables need no restore: they are only enabled by start(), after timing.
+ */
+static void can_cast_reapply_after_reset(const struct device *dev, uint32_t can_base)
+{
+	struct can_cast_data *data = DEV_DATA(dev);
+
+	can_cast_apply_mode_bits(can_base, data->common.mode);
+	can_cast_set_iso_spec(can_base);
+	can_cast_set_tbuf_op_mode_priority(can_base);
+
+	for (uint8_t i = 0U; i < CONFIG_CAN_MAX_FILTER; i++) {
+		const struct can_cast_filter_t *f = &data->filter[i];
+		struct can_acpt_fltr_t          cfg;
+
+		if (f->rx_cb == NULL) {
+			continue;
+		}
+
+		cfg.frame_type = (f->rx_filter.flags & CAN_FILTER_IDE) ? CAN_ACPT_FILTER_CFG_EXT_FRAMES
+		                                                       : CAN_ACPT_FILTER_CFG_STD_FRAMES;
+		cfg.ac_code    = f->rx_filter.id;
+		cfg.ac_mask    = f->rx_filter.mask;
+		cfg.filter     = i;
+		can_cast_enable_acpt_fltr(can_base, cfg);
+	}
 }
 
 /**
@@ -694,8 +741,8 @@ static int can_cast_set_timing(const struct device *dev, const struct can_timing
 	can_cast_set_nominal_bit_time(can_base, loc_timing);
 	if (reset_was_off) {
 		can_cast_reset_disable(can_base);
-		/* The reset pulse cleared LBMI / listen-only / one-shot: restore them */
-		can_cast_apply_mode_bits(can_base, data->common.mode);
+		/* The reset pulse may clear mode, ISO/priority and filters: restore them */
+		can_cast_reapply_after_reset(dev, can_base);
 	}
 
 	k_mutex_unlock(&data->inst_mutex);
@@ -778,8 +825,8 @@ static int can_cast_set_timing_data(const struct device *dev, const struct can_t
 	can_cast_set_fd_bit_time(can_base, loc_timing, tdc);
 	if (reset_was_off) {
 		can_cast_reset_disable(can_base);
-		/* The reset pulse cleared LBMI / listen-only / one-shot: restore them */
-		can_cast_apply_mode_bits(can_base, data->common.mode);
+		/* The reset pulse may clear mode, ISO/priority and filters: restore them */
+		can_cast_reapply_after_reset(dev, can_base);
 	}
 
 	k_mutex_unlock(&data->inst_mutex);
@@ -810,33 +857,14 @@ static int can_cast_send(const struct device *dev, const struct can_frame *frame
 	bool fifo_free = true;
 	uint32_t can_base;
 	uint64_t usec_timeout;
+	uint8_t               cfg_stat;
+	unsigned int          key;
 
 	can_base = DEVICE_MMIO_NAMED_GET(dev, can_reg);
 
-	if (!data->common.started) {
-		return -ENETDOWN;
-	}
-
-	if (data->err_state == CAN_STATE_BUS_OFF) {
-		return -ENETUNREACH;
-	}
-
-	/* A frame queued into a core held in reset, or one whose loopback bit was
-	 * lost, is never sent and never completes: fail instead of dropping silently.
-	 */
-	if (sys_read8(can_base + CAN_CFG_STAT) & BIT(CAN_CFG_STAT_RESET)) {
-		return -ENETDOWN;
-	}
-	if ((data->common.mode & CAN_MODE_LOOPBACK) &&
-	    !(sys_read8(can_base + CAN_CFG_STAT) & BIT(CAN_CFG_STAT_LBMI))) {
-		LOG_ERR("Loopback requested but LBMI is clear");
-		return -EIO;
-	}
-
-	/* Returns error if in Listen Only mode */
-	if (data->common.mode & CAN_MODE_LISTENONLY) {
-		LOG_ERR("Mode: ListenOnly");
-		return -ENOTSUP;
+	/* Argument checks first */
+	if (frame == NULL) {
+		return -EINVAL;
 	}
 
 	/* Returns error if RTR is requested to send in FD mode */
@@ -864,6 +892,36 @@ static int can_cast_send(const struct device *dev, const struct can_frame *frame
 					   (!(data->common.mode & CAN_MODE_FD)))) {
 		LOG_ERR("FD mode OFF");
 		return -EINVAL;
+	}
+
+	/* State checks */
+	if (!data->common.started) {
+		return -ENETDOWN;
+	}
+
+	if (data->err_state == CAN_STATE_BUS_OFF) {
+		return -ENETUNREACH;
+	}
+
+	/* A frame queued into a core held in reset is never sent and never completes */
+	cfg_stat = sys_read8(can_base + CAN_CFG_STAT);
+	if (cfg_stat & BIT(CAN_CFG_STAT_RESET)) {
+		return -ENETDOWN;
+	}
+
+	/* Internal-fault guard: set_mode/set_timing re-apply LBMI, so a clear LBMI under a
+	 * loopback request means the driver lost its own state. Fail instead of letting
+	 * the frame go to the pins and never complete.
+	 */
+	if ((data->common.mode & CAN_MODE_LOOPBACK) && !(cfg_stat & BIT(CAN_CFG_STAT_LBMI))) {
+		LOG_ERR("Loopback requested but LBMI is clear (internal fault)");
+		return -EIO;
+	}
+
+	/* Returns error if in Listen Only mode */
+	if (data->common.mode & CAN_MODE_LISTENONLY) {
+		LOG_ERR("Mode: ListenOnly");
+		return -ENOTSUP;
 	}
 
 	/* If the error warning, then returns an error */
@@ -896,15 +954,30 @@ static int can_cast_send(const struct device *dev, const struct can_frame *frame
 
 	k_mutex_lock(&data->inst_mutex, K_FOREVER);
 
-	/* Store the callback info */
+	/* The TSIF ISR walks head/tail: publish the callback before the frame can complete,
+	 * else an IRQ between "start transmit" and "advance head" sees an empty queue and
+	 * the last frame's callback is lost. The queue holds CAN_MAX_STB_SLOTS - 1 entries
+	 * (head == tail means empty), so a full queue is refused rather than read as empty.
+	 */
+	key = irq_lock();
+	if (callback && (((data->tx_queue.head + 1U) % CAN_MAX_STB_SLOTS) == data->tx_queue.tail)) {
+		irq_unlock(key);
+		k_mutex_unlock(&data->inst_mutex);
+		LOG_ERR("Tx callback queue full");
+		return -EAGAIN;
+	}
+
 	data->tx_queue.cb_list[data->tx_queue.head].cb = callback;
 	data->tx_queue.cb_list[data->tx_queue.head].cb_arg = user_data;
 
-	can_cast_prepare_send_msg(can_base, frame);
-
 	if (callback) {
 		QUEUE_HEAD_NEXT(data->tx_queue.head);
-	} else {
+	}
+
+	can_cast_prepare_send_msg(can_base, frame);
+	irq_unlock(key);
+
+	if (!callback) {
 		usec_timeout = k_ticks_to_us_near64(K_TICKS_FOREVER);
 
 		/* Wait for Tx buffer to get empty*/
@@ -1382,11 +1455,17 @@ static void can_cast_handle_error(const struct device *dev, uint32_t event)
 	err_cnt.rx_err_cnt = can_cast_get_rx_error_count(can_base);
 
 	if (event & CAN_ARBTR_LOST_EVENT) {
-		if (data->tx_queue.tail != data->tx_queue.head) {
-			data->tx_queue.cb_list[data->tx_queue.tail].cb(
-				dev, 1, data->tx_queue.cb_list[data->tx_queue.tail].cb_arg);
-			if (can_cast_stb_single_shot_mode(can_base)) {
-				QUEUE_TAIL_NEXT(data->tx_queue.tail);
+		/* Normally the hardware retries after losing arbitration and complete_tx() fires
+		 * the callback once on success. Only in single-shot mode is the frame dropped:
+		 * report it once and pop it, exactly as complete_tx() pops a finished frame.
+		 */
+		if (can_cast_stb_single_shot_mode(can_base) && data->tx_queue.tail != data->tx_queue.head) {
+			can_tx_callback_t cb     = data->tx_queue.cb_list[data->tx_queue.tail].cb;
+			void             *cb_arg = data->tx_queue.cb_list[data->tx_queue.tail].cb_arg;
+
+			QUEUE_TAIL_NEXT(data->tx_queue.tail);
+			if (cb) {
+				cb(dev, 1, cb_arg);
 			}
 		}
 		CAN_STATS_BIT1_ERROR_INC(dev);
