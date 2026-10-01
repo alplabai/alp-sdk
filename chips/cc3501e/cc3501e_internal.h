@@ -133,6 +133,33 @@ void cc3501e_set_peer_polled(bool on);
 /* True when the host believes the peer is running the POLLED update-mode boot. */
 bool cc3501e_peer_is_polled(void);
 
+/* #1818: bench-measured on the update-mode (polled, SPI_WAIT_FOREVER) slave: a
+ * request payload phase of <= 70 B is received, >= 71 B is lost (-5, reply header
+ * 00000000) and >= 1024 B misframes.  64 keeps margin under the 70/71 boundary.
+ * The slave counts bytes per phase and ignores SS0 deasserts between transfers, so
+ * the host splits the payload phase into SS0-framed segments of at most this size.
+ * Normal (callback SPI) mode takes 4092 B in one transfer and is never split. */
+#ifndef CC3501E_POLLED_PAYLOAD_SEG
+#define CC3501E_POLLED_PAYLOAD_SEG 64u
+#endif
+
+/* Host-side gap between segments.  The polled slave is already inside one blocking
+ * SPI_transfer for the remaining byte count, so nothing needs re-arming; this only
+ * covers the SS0 deassert/reassert and the slave's FIFO drain.  50 us is a guess
+ * with margin (not bench-tuned) and small against the 250 us per-phase settle: a
+ * 262 B OTA chunk pays it 4 times.  Override to tune from bench data. */
+#ifndef CC3501E_POLLED_SEG_SETTLE_US
+#define CC3501E_POLLED_SEG_SETTLE_US 50u
+#endif
+
+/* Length of the next request-payload segment: all of `remaining` in normal mode,
+ * at most CC3501E_POLLED_PAYLOAD_SEG when the peer is polled. */
+static inline uint16_t cc3501e_payload_seg_len(uint16_t remaining, bool polled)
+{
+	return (polled && remaining > CC3501E_POLLED_PAYLOAD_SEG) ? (uint16_t)CC3501E_POLLED_PAYLOAD_SEG
+	                                                          : remaining;
+}
+
 /* True once cc3501e_reply_gate() has ever given up waiting on a stuck-LOW
  * ready_pin (CC3501E_READY_STUCK_LOW_STREAK consecutive full-budget
  * timeouts) and latched g_ready_ignored, process-wide.  Production code never

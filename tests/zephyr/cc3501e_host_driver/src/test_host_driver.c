@@ -62,6 +62,9 @@ static struct {
 	                          * flags_log below only ever holds HISTORY, not the current
 	                          * in-flight request a dispatch function is deciding for. */
 	uint16_t         req_len; /* declared request payload length                    */
+	uint16_t         req_got; /* request payload bytes received so far (#1818)   */
+	uint16_t         req_segs; /* request payload transfers seen for this request */
+	uint16_t         connect_last_req_segs;
 	uint8_t          req_pl[ALP_CC3501E_MAX_PAYLOAD]; /* captured request payload    */
 
 	/* Staged reply (built at request completion, drained over phases 3+4). */
@@ -873,6 +876,7 @@ static void slave_dispatch(void)
 		 * WORKER_IDLE ack -- unless a test forces the #1378 dead-phase-alias
 		 * scenario via g_connect_submit_force_ok. */
 		slave.connect_last_req_len = slave.req_len;
+		slave.connect_last_req_segs = slave.req_segs;
 		memcpy(slave.connect_last_req_pl, slave.req_pl, slave.req_len);
 		slave.connect_submit_count++;
 		stage_status(g_connect_submit_force_ok ? ALP_CC3501E_RESP_OK_LEGACY
@@ -1484,6 +1488,8 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 			 * pattern. */
 			memset(rx, g_req_hdr_desynced ? 0x00u : ALP_CC3501E_SYNC_IDLE, len);
 		}
+		slave.req_got  = 0u;
+		slave.req_segs = 0u;
 		if (slave.req_len > 0u) {
 			slave.phase = PH_REQ_PL;
 		} else {
@@ -1492,12 +1498,18 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 		}
 		break;
 	case PH_REQ_PL:
-		memcpy(slave.req_pl, tx, len);
+		/* #1818: the slave counts bytes per phase across SS0-framed segments
+		 * (the polled update-mode behaviour); dispatch once req_len arrived. */
+		memcpy(&slave.req_pl[slave.req_got], tx, len);
+		slave.req_got += (uint16_t)len;
+		slave.req_segs++;
 		if (rx != NULL) {
 			memset(rx, ALP_CC3501E_SYNC_IDLE, len);
 		}
-		slave_dispatch();
-		slave.phase = PH_REPLY_HDR;
+		if (slave.req_got >= slave.req_len) {
+			slave_dispatch();
+			slave.phase = PH_REPLY_HDR;
+		}
 		break;
 	case PH_REPLY_HDR:
 		/* #2136: g_reply_hdr_deaf models a slave that armed the request-header
@@ -2843,6 +2855,49 @@ ZTEST(cc3501e_host_driver, test_wifi_sec_kind_and_name)
 	zassert_str_equal(cc3501e_wifi_sec_name(0x0000u), "open", "name open");
 	zassert_str_equal(cc3501e_wifi_sec_name(0x0400u), "wpa2", "name wpa2");
 	zassert_str_equal(cc3501e_wifi_sec_name(0x0800u), "wpa3", "name wpa3");
+}
+
+/* #1818: split arithmetic -- normal mode never splits; polled caps at the seg size. */
+ZTEST(cc3501e_host_driver, test_payload_seg_len_1818)
+{
+	zassert_equal(cc3501e_payload_seg_len(4094u, false), 4094u, "normal: one transfer");
+	zassert_equal(cc3501e_payload_seg_len(262u, true), CC3501E_POLLED_PAYLOAD_SEG, "polled: cap");
+	zassert_equal(cc3501e_payload_seg_len(CC3501E_POLLED_PAYLOAD_SEG, true),
+	              CC3501E_POLLED_PAYLOAD_SEG,
+	              "polled: exactly one seg");
+	zassert_equal(cc3501e_payload_seg_len(6u, true), 6u, "polled: tail");
+	zassert_true(CC3501E_POLLED_PAYLOAD_SEG <= 70u, "below the bench 70/71 boundary");
+	/* 262 B = a 256 B OTA chunk + 4 B op header + 2 B CRC -> 64*4 + 6 */
+	uint16_t rem = 262u, n = 0u, last = 0u;
+	while (rem > 0u) {
+		last = cc3501e_payload_seg_len(rem, true);
+		rem  = (uint16_t)(rem - last);
+		n++;
+	}
+	zassert_equal(n, 5u, "262 B -> 5 segments");
+	zassert_equal(last, 6u, "tail seg");
+}
+
+/* #1818: end-to-end -- a polled peer gets a >64 B payload as several transfers,
+ * reassembled intact; normal mode stays one transfer. */
+ZTEST(cc3501e_host_driver, test_polled_payload_is_segmented_1818)
+{
+	const char *ssid = "01234567890123456789012345678901";                 /* 32, the SSID max */
+	const char *psk  = "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuv"; /* 48 */
+
+	cc3501e_set_peer_polled(true);
+	alp_status_t s = cc3501e_wifi_connect(&fw, ssid, 1u, psk, 100u);
+	cc3501e_set_peer_polled(false);
+	zassert_equal(s, ALP_OK, "polled CONNECT -> OK (s=%d)", (int)s);
+	zassert_true(slave.connect_last_req_segs >= 2u, "payload split into segments");
+	zassert_equal(slave.connect_last_req_len, 4u + 32u + 48u, "declared length");
+	zassert_mem_equal(&slave.connect_last_req_pl[4], ssid, 32u, "ssid intact");
+	zassert_mem_equal(&slave.connect_last_req_pl[36], psk, 48u, "psk intact");
+
+	slave_reset();
+	s = cc3501e_wifi_connect(&fw, ssid, 1u, psk, 100u);
+	zassert_equal(s, ALP_OK, "normal CONNECT -> OK");
+	zassert_equal(slave.connect_last_req_segs, 1u, "normal mode: single transfer");
 }
 
 /* CONNECT packs the connect header (ssid_len | psk_len | security | rsvd) then

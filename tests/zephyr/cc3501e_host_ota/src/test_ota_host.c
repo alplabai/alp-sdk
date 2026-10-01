@@ -49,6 +49,7 @@ static struct {
 	enum slave_phase phase;
 	uint8_t          cmd;     /* opcode of the in-flight request         */
 	uint16_t         req_len; /* declared request payload length         */
+	uint16_t         req_got; /* payload bytes received so far (#1818)    */
 	uint8_t          req_pl[ALP_CC3501E_MAX_PAYLOAD];
 
 	/* Sticky BEGIN witness.  cc3501e_ota_begin() (#1610) no longer trusts
@@ -294,6 +295,7 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 		/* [cmd | flags | payload_len(LE16)] */
 		slave.cmd     = tx[0];
 		slave.req_len = (uint16_t)tx[2] | ((uint16_t)tx[3] << 8);
+		slave.req_got = 0u;
 		if (slave.cmd == ALP_CC3501E_CMD_OTA_BEGIN) {
 			slave.begin_seen    = true;
 			slave.begin_req_len = slave.req_len;
@@ -309,12 +311,17 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 		}
 		break;
 	case PH_REQ_PL:
-		memcpy(slave.req_pl, tx, len);
+		/* #1818: a polled slave receives the payload as SS0-framed segments and
+		 * counts bytes; dispatch once the declared length has arrived. */
+		memcpy(&slave.req_pl[slave.req_got], tx, len);
+		slave.req_got += (uint16_t)len;
 		if (rx != NULL) {
 			memset(rx, ALP_CC3501E_SYNC_IDLE, len);
 		}
-		slave_dispatch();
-		slave.phase = PH_REPLY_HDR;
+		if (slave.req_got >= slave.req_len) {
+			slave_dispatch();
+			slave.phase = PH_REPLY_HDR;
+		}
 		break;
 	case PH_REPLY_HDR:
 		/* Reply header echoes the cmd + declares the reply payload length. */
