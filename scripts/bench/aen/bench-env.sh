@@ -1771,6 +1771,24 @@ bench_atoc_extent_guard() { # <app-package-map.txt>
 	fi
 }
 
+# bench_stage_device_config <setools-dir> -- print the DEVICE-config binary name
+# to put in an ATOC JSON's "DEVICE" entry, or nothing when none was requested.
+# ALP_AEN_DEVICE_CONFIG_JSON may be a file path (copied into build/config) or a
+# name already under the SETOOLS build/config dir. Setting it implies inclusion;
+# ALP_AEN_INCLUDE_DEVICE_CONFIG=yes alone means app-device-config.json.
+bench_stage_device_config() {
+	local set_dir="$1" json="${ALP_AEN_DEVICE_CONFIG_JSON:-}"
+	if [ -z "$json" ]; then
+		[ "${ALP_AEN_INCLUDE_DEVICE_CONFIG:-no}" = "yes" ] || return 0
+		json=app-device-config.json
+	fi
+	if [ -f "$json" ]; then
+		cp -f "$json" "$set_dir/build/config/" || return 1
+		json=$(basename "$json")
+	fi
+	printf '%s' "$json"
+}
+
 # bench_flowd_python <args...> -- run the pure host-side helper. Pinned
 # PYTHONIOENCODING=utf-8: this subshell's own locale is not guaranteed
 # UTF-8 (the IMPLICIT-ENCODING lint -- a Windows host defaults a Python

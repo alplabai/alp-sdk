@@ -24,6 +24,11 @@ tests:
       - CONFIG_FLASH=y
       - CONFIG_FLASH_MAP=y
       - CONFIG_NVS=y
+  # Fail-closed requirement: with REQUIRE_HW_ENFORCED the software tier is
+  # never bound, so open() must fail unless the trusted owner is ready.
+  alp.unit.update_log.require_hw:
+    extra_configs:
+      - CONFIG_ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED=y
   # Same engine + locator tests under AddressSanitizer so an out-of-bounds
   # read in the ATOC parser fails the run.
   alp.unit.update_log.asan:

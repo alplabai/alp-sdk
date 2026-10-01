@@ -204,19 +204,42 @@ config ALP_SDK_UPDATE_LOG_AEN_M55_OWNER
 	  partition's mere existence in the devicetree, that this guard
 	  gates.
 
-config ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROVEN
-	bool "Assert that the Alif MRAM log partition is firewall-protected"
+config ALP_SDK_UPDATE_LOG_AEN_M55_APP_IMMUTABLE_PROFILE
+	bool "Select the provisioned app-immutable Alif dual-M55 update-log profile"
 	default n
 	depends on ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT
+	select ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED
 	help
-	  Let the AEN dual-M55 client report HW_ENFORCED after the owner also
-	  answers ready(). Enable only in a board/profile whose provisioning
-	  has already locked the MRAM log partition so the application core
-	  cannot write or erase it, and after a silicon test has proven that a
-	  direct application-core write is rejected.
+	  Select the app-immutable profile for a board whose provisioning has
+	  already locked the MRAM log partition against application-core
+	  writes (the OEM device-config firewall step) and whose direct-write
+	  rejection has been proven on silicon with the firewall probe.
 
-	  This option does not program the firewall. The policy is provisioned
-	  outside the public SDK by Alif SE/DEVICE configuration tooling.
+	  This is the single provisioning assertion for the profile. It
+	  derives ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROVEN, so the client may
+	  report ALP_UPDATE_LOG_HW_ENFORCED once the owner answers, and it
+	  selects ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED so an image built for
+	  this profile fails open() closed when the trusted owner is absent.
+
+	  The firewall itself is NOT checked at runtime: provisioning is
+	  asserted by this build option, and only the firewall probe (a
+	  separate negative-proof image) verifies it. Do not combine this
+	  with ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROBE (a build error).
+
+	  This option does not program the firewall. That policy is provisioned
+	  outside the public SDK by Alif SE/DEVICE configuration tooling; see
+	  examples/connectivity/firmware-update-log/README.md for the
+	  deployment recipe.
+
+config ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROVEN
+	bool
+	default y if ALP_SDK_UPDATE_LOG_AEN_M55_APP_IMMUTABLE_PROFILE
+	depends on ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT
+	help
+	  Derived, not user-settable: true exactly when the app-immutable
+	  profile (ALP_SDK_UPDATE_LOG_AEN_M55_APP_IMMUTABLE_PROFILE) is
+	  selected. The AEN client reads it to decide whether its ready()
+	  probe may claim ALP_UPDATE_LOG_HW_ENFORCED.
 
 config ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROBE
 	bool "Run the Alif HE direct-write firewall probe"

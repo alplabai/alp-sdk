@@ -32,9 +32,13 @@
  *      store live behind a hardware boundary the application core cannot
  *      rewrite. The TF-M route (@c CONFIG_ALP_SDK_UPDATE_LOG_TFM) uses a
  *      secure owner with PSA Protected Storage. The Alif E4/E8 AEN route uses
- *      a trusted M55 owner plus an SE/device-firewalled MRAM log partition;
- *      physical rollback protection still depends on a board-provisioned
- *      non-decrementable counter or equivalent device policy.
+ *      a trusted M55 owner plus an SE/device-firewalled MRAM log partition,
+ *      selected by the provisioned profile
+ *      @c CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_APP_IMMUTABLE_PROFILE. That tier
+ *      is app-immutable, NOT reflash-immutable: a full reflash rewinds the
+ *      store and its counter together, so rollback across a reflash is not
+ *      yet detected (it needs a counter anchored outside the rewritable
+ *      store).
  *      If the trusted owner or the hardware isolation proof is absent,
  *      @ref alp_update_log_open transparently falls through to the software
  *      tier, or fails closed when
