@@ -132,6 +132,7 @@ on:
       - 'west.yml'
       - 'metadata/toolchains.json'
       - '.github/workflows/pr-twister-aen.yml'
+      - 'scripts/select_aen_twister.py'
   push:
     branches: [main, dev]
     paths:
@@ -185,53 +186,53 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Per-SKU change-aware selection (#2541).  On a pull_request this drops the
+  # SKU whose legs cannot build anything the PR changed (see
+  # scripts/select_aen_twister.py); push, schedule and dispatch always run
+  # every leg.  Any error falls back to the full matrix.  This workflow is
+  # path-filtered, so it is not a required context: a zero-leg PR run simply
+  # skips `twister-aen`.
+  select:
+    name: twister-aen · select
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      # fetch-depth 2: HEAD^1 is the base tip of the merge commit.
+      - name: Checkout alp-sdk
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Select AEN SKU legs (scripts/select_aen_twister.py)
+        id: select
+        timeout-minutes: 5
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -u
+          base=
+          [ "$EVENT" = pull_request ] && base=HEAD^1
+          if ! python3 scripts/select_aen_twister.py ${base:+--base "$base"} --github-output; then
+            echo "::warning::select_aen_twister.py errored; running every AEN leg"
+            python3 - >> "$GITHUB_OUTPUT" <<'PY'
+          import sys
+          sys.path.insert(0, "scripts")
+          import json, select_aen_twister as s
+          print("matrix=" + json.dumps(s.matrix(list(s.SKUS))))
+          PY
+          fi
+
   twister-aen:
-    # #2209: one job per SKU, running in parallel, instead of one job
-    # building all four board targets. Each leg selects only its own SKU's
-    # two platforms (M55-HE + M55-HP) via matrix.platform_flags -- see the
-    # twister step below. At #2209 landing time a `--dry-run` over
-    # examples/aen + firmware-update-log + drone-autopilot on that tree
-    # counted 78 AEN801 configurations and 75 AEN803 (153 total), against
-    # the pre-split single-job worst case of 92 that took 24m21s (#2198);
-    # scaling that 1461s/92-build rate linearly projected both legs
-    # comfortably under the 30min twister-step cap and the 41min job
-    # ceiling below. That snapshot is not current -- do not read 78/75/153
-    # as today's count; see the AUTHORITATIVE `--dry-run` count in the
-    # camera-mjpeg-stream comment further down this job's twister step for
-    # the current figure and margin. Neither is the 41min job ceiling
-    # tightened here; a job-level timeout tighter than that shared ceiling
-    # would need its own re-derivation per SKU for a margin this change
-    # does not need yet.
-    # #2541: each SKU leg is further split in two with twister's
-    # `--subset ${{ matrix.subset }}/2` (four jobs). Measured on PR #2553,
-    # one leg's ~100 configurations took anywhere from 1521s to 2172s
-    # depending on the runner, so a cold leg could not reliably fit any
-    # step cap the 41min job ceiling leaves room for, and a warm ccache
-    # cannot help a PR that touches Kconfig or the AEN DTS, since those
-    # change every configuration's generated headers. `--subset` is a
-    # deterministic partition of the same test list (pr-twister.yml's
-    # shards rely on the same property), so the two halves' union is the
-    # full SKU leg and coverage is unchanged. Split by subset rather than
-    # by platform: the configurations are ~85% M55-HE (88 HE + 15 HP on
-    # AEN801 at #2239's head), so a per-platform split leaves one half
-    # nearly as long as the whole. Neither context is required on dev,
-    # so the renamed jobs need no branch-protection edit.
+    needs: select
+    if: needs.select.outputs.matrix != '[]'
     strategy:
       fail-fast: false
       matrix:
-        sku: [aen801, aen803]
-        subset: [1, 2]
-        include:
-          - sku: aen801
-            label: AEN801 (M55-HE + M55-HP)
-            platform_flags: >-
-              -p alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
-              -p alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
-          - sku: aen803
-            label: AEN803 (M55-HE + M55-HP)
-            platform_flags: >-
-              -p alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
-              -p alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp
+        include: ${{ fromJSON(needs.select.outputs.matrix) }}
     name: twister · ${{ matrix.label }} · ${{ matrix.subset }}/2
     runs-on: ubuntu-latest
     # #1477: raised from 30 -> 41 (corrected from a 3-run sample that
