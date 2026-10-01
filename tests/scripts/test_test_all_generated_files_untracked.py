@@ -77,6 +77,7 @@ def fake_git_repo(tmp_path):
     (tmp_path / "docs" / "portability-matrix.md").write_text("x\n", encoding="utf-8")
     (tmp_path / "docs" / "peripheral-support-matrix.md").write_text("x\n", encoding="utf-8")
     (tmp_path / "docs" / "verification-status.md").write_text("x\n", encoding="utf-8")
+    (tmp_path / "docs" / "chip-driver-classification.md").write_text("x\n", encoding="utf-8")
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "cap.c").write_text("/* stub */\n", encoding="utf-8")
     (tmp_path / "src" / "status_strings.c").write_text("/* stub */\n", encoding="utf-8")

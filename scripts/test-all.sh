@@ -1378,7 +1378,7 @@ stage_generated_files() {
                 gen_cc3501e_gpio_routes gen_power_tree
                 gen_pinmux_capability gen_support_matrix
                 gen_portability_matrix gen_catalog gen_error_catalog
-                gen_verification_status)
+                gen_verification_status gen_chip_driver_classification)
     local g rc
     local gen_total=0 gen_skipped=0
     for g in "${gens[@]}"; do
@@ -1525,6 +1525,7 @@ $(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null 
         metadata/socs/renesas/rzv2n/n44.json \
         docs/portability-matrix.md docs/peripheral-support-matrix.md \
         docs/verification-status.md \
+        docs/chip-driver-classification.md \
         examples/aen \
         src/backends/gpio/cc3501e_rev_dependent_pins.c \
         docs/diagnostics 2>/dev/null; then
@@ -1550,6 +1551,7 @@ $(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null 
             metadata/socs/renesas/rzv2n/n44.json \
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/verification-status.md \
+            docs/chip-driver-classification.md \
             examples/aen \
             src/backends/gpio/cc3501e_rev_dependent_pins.c \
             docs/diagnostics 2>/dev/null; then
@@ -1560,6 +1562,7 @@ $(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null 
             metadata/socs/renesas/rzv2n/n44.json \
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/verification-status.md \
+            docs/chip-driver-classification.md \
             examples/aen \
             src/backends/gpio/cc3501e_rev_dependent_pins.c \
             docs/diagnostics 2>/dev/null | tail -20
