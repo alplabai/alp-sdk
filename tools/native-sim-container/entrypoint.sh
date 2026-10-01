@@ -28,6 +28,9 @@ fi
 # Default: freeze pr-twister.yml's twister step.  Run from the baked
 # Zephyr workspace; testsuite-roots point into the mounted alp-sdk.
 cd "${ZEPHYR_BASE%/zephyr}"
+# Each example testcase.yaml points EXTRA_CONF_FILE at generated/alp.conf;
+# write those fragments first (#866), as pr-twister.yml does.
+python3 "${ALP_SDK}/scripts/gen_example_alp_conf.py"
 exec python3 zephyr/scripts/twister \
 	--testsuite-root "${ALP_SDK}/tests/unit" \
 	--testsuite-root "${ALP_SDK}/tests/zephyr" \

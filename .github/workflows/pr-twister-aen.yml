@@ -55,12 +55,11 @@
 # across a handful of AEN-touching PRs (same graduation criteria as
 # pr-renode-aen-smoke.yml).
 #
-# Two known gaps this job does NOT paper over (both tracked, neither fixed
-# here -- neither has a testcase.yaml, so neither is selected today):
-# aen-npu-inference* (the tflite-micro/Ethos-U family) will need
-# `ethos-u-vela` on PATH once it gains a testcase.yaml -- tflite-micro and
-# hal_ethos_u are already unconditional west.yml groups, so no manifest
-# change, just a `pip install ethos-u-vela` step here. `aen-sdcard-readout`
+# aen-npu-inference-alp-u55 (the tflite-micro/Ethos-U family) has a
+# testcase.yaml since #916, so this job pip-installs `ethos-u-vela` below;
+# tflite-micro and hal_ethos_u are already unconditional west.yml groups.
+# Its build uses Vela's built-in system config (no proprietary Alif .ini in
+# CI), so it proves the build, not the bench command stream. `aen-sdcard-readout`
 # (renamed aen-sdhc-probe by #2051) was the one example #1095 left without a
 # testcase.yaml, because its driver
 # (zephyr/drivers/sdhc/sdhc_dwc.c) expanded
@@ -111,6 +110,7 @@ on:
       - 'examples/peripheral-io/blink/**'
       - 'examples/peripheral-io/drone-autopilot/**'
       - 'examples/peripheral-io/pwm-led-fade/**'
+      - 'examples/peripheral-io/qenc-readout/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
       - 'zephyr/boards/alp/e1m_aen803_m55_he/**'
@@ -145,6 +145,7 @@ on:
       - 'examples/peripheral-io/blink/**'
       - 'examples/peripheral-io/drone-autopilot/**'
       - 'examples/peripheral-io/pwm-led-fade/**'
+      - 'examples/peripheral-io/qenc-readout/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
       - 'zephyr/boards/alp/e1m_aen803_m55_he/**'
@@ -375,6 +376,19 @@ jobs:
           set -euo pipefail
           pip3 install -r "${GITHUB_WORKSPACE}/zephyr/scripts/requirements.txt"
 
+      # aen-npu-inference-alp-u55's testcase.yaml (#916) Vela-compiles its
+      # model at CMake time, so `vela` must be on PATH or every leg that
+      # selects it fails "vela not found". Same release pyproject.toml pins
+      # for the committed NPU op tables -- read from there, not repeated.
+      - name: pip install ethos-u-vela (pyproject.toml pin)
+        timeout-minutes: 20
+        run: |
+          set -euo pipefail
+          pin=$(grep -o '"ethos-u-vela==[0-9.]*"' "${GITHUB_WORKSPACE}/alp-sdk/pyproject.toml" | tr -d '"')
+          test -n "$pin"
+          pip3 install "$pin"
+          vela --version
+
       # metadata/toolchains.json (issue #949 item 3) is the single source
       # for the pinned Zephyr SDK version/URL/sha256 -- scripts/
       # check_toolchain_lock.py gates this file staying in lockstep with it.
@@ -440,7 +454,7 @@ jobs:
       # here. The --testsuite-root list below is scoped to examples/aen --
       # plus the bounded roots enumerated below; the testcase.yaml files
       # whose platform_allow names an AEN target are the entire point;
-      # nothing outside these nine roots is in scope for this job.
+      # nothing outside these ten roots is in scope for this job.
       # examples/connectivity/firmware-update-log is a second,
       # bounded root (issue #1101): at #1101 it was the one non-examples/aen
       # example with AEN801 platform_allow entries, kept as its own
@@ -500,14 +514,15 @@ jobs:
       # above: one example, bounded, build_only, not widened to any other
       # directory.
       # AUTHORITATIVE scenario count for this job's root list --
-      # re-derived 2026-09-30 (#2235) with a single `--dry-run` per leg over
-      # the exact ten roots + `-p` flags this step uses, at HEAD after the
-      # dev merge that brought in iot-dashboard (#2173): 103 AEN801
-      # configurations (88 M55-HE + 15 M55-HP), 101 AEN803 (86 M55-HE +
-      # 15 M55-HP), 204 total. This is the only current count in this
-      # file; every other scenario count in it (header, ADVISORY note, job
-      # comments) describes the tree when its cited issue landed, not
-      # HEAD -- trust this one.
+      # re-derived 2026-10-01 (#2235, folding in #2521's qenc-readout root)
+      # with a single `--dry-run` per leg over the exact eleven roots +
+      # `-p` flags this step uses, at HEAD after the dev merge that brought
+      # in #2541's ccache/subset split: 107 AEN801 configurations
+      # (90 M55-HE + 17 M55-HP), 105 AEN803 (88 M55-HE + 17 M55-HP), 212
+      # total. This is the only current count in this file; every other
+      # scenario count in it (header, ADVISORY note, job comments)
+      # describes the tree when its cited issue landed, not HEAD -- trust
+      # this one.
       # The timeout-minutes comment below does the latter -- it does not
       # carry its own count.
       # examples/peripheral-io/alp-console, .../blink and .../pwm-led-fade
@@ -528,7 +543,16 @@ jobs:
       # four examples (this trio plus drone-autopilot above), not widened to
       # all of examples/peripheral-io/ -- every OTHER example there stays
       # native_sim-only (see #2106).
-      - name: twister · ${{ matrix.label }} · ${{ matrix.subset }}/2 on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota + camera-mjpeg-stream + iot-dashboard + alp-console + blink + pwm-led-fade
+      # examples/peripheral-io/qenc-readout is the tenth bounded root
+      # (issue #2521, folded into #2235/#2239 on review): its AEN scenario
+      # (alp_sdk.example.qenc_readout.aen, landed by #2522) names all four
+      # AEN board targets -- both SKUs, both cores -- but no CI job ever
+      # selected it, since this was the only `--testsuite-root` list that
+      # reaches an AEN target and it had no entry for this example. It
+      # ships an AEN803 twin overlay/.conf pair for both cores already
+      # (`examples/peripheral-io/qenc-readout/boards/`), so adding the root
+      # here is a pure CI-coverage gap fix, not a new example change.
+      - name: twister · ${{ matrix.label }} · ${{ matrix.subset }}/2 on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota + camera-mjpeg-stream + iot-dashboard + alp-console + blink + pwm-led-fade + qenc-readout
         id: twister
         working-directory: ${{ github.workspace }}
         env:
@@ -563,6 +587,10 @@ jobs:
         run: |
           # Zero the counters so the summary below reports this run only.
           ccache -z >/dev/null
+          # Each example's testcase.yaml points EXTRA_CONF_FILE at its
+          # generated/alp.conf; twister configures from the source tree, so
+          # write those fragments first (#866).
+          python3 "$GITHUB_WORKSPACE/alp-sdk/scripts/gen_example_alp_conf.py"
           python3 zephyr/scripts/twister \
             ${{ matrix.platform_flags }} \
             --subset ${{ matrix.subset }}/2 \
@@ -576,6 +604,7 @@ jobs:
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/alp-console" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/blink" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/pwm-led-fade" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/qenc-readout" \
             --inline-logs \
             --no-detailed-test-id
 

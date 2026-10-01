@@ -4,7 +4,7 @@
 # and default board for this SKU; `scripts/alp_project.py` and
 # the alp-studio pin allocator read it at build time.
 
-schema_version: 1
+schema_version: 2
 
 sku: E1M-V2N101
 family: renesas-rzv2n
@@ -108,7 +108,7 @@ topology:
     zephyr_twister_name: "E1M-V2N101 Cortex-M33 system manager"
     # This board's .dts carries the OpenAMP/MHU-B reserved-memory block +
     # the CAN-FD-unavailable analysis (alp-sdk #683/#1146) -- see
-    # `openamp_ipc` in metadata/schemas/som-preset-v1.schema.json.
+    # `openamp_ipc` in metadata/schemas/som-preset-v2.schema.json.
     # E1M-V2M101 sets it too (#1948): same die, same MHU-B.
     openamp_ipc: true
 
@@ -329,7 +329,7 @@ helper_firmware:
     # what `update_channel` declares.
     flash_policy:   recovery_only
     update_channel: alp_ota_spi_bridge
-default_hw_rev:         r1
+default_hw_rev:         r2
 default_board:        E1M-X-EVK
 
 status:

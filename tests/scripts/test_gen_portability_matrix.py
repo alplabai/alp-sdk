@@ -156,7 +156,7 @@ def test_nx9101_cells_fail_honestly_on_the_tbd_hw_rev(generated):
 
 
 def test_notes_derive_from_metadata(generated):
-    # AEN801 carries a U85 alongside its U55 pair (npu_population).
+    # AEN801 carries a U85 alongside its U55 pair (SoC JSON npus[]).
     assert "Ethos-U U55+U85" in _cell(generated, "E1M-AEN801",
                                       "Notes (from metadata)")
     # AEN701 is U55-only.

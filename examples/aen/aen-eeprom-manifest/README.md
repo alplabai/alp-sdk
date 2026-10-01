@@ -17,7 +17,9 @@ driver, just the DT node (`i2c2@49012000`, authoritative `I2C2_BASE`/`I2C2_IRQ`
 from the AE822 DFP device header) + the portable backend.
 
 ```bash
-west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-eeprom-manifest
+# writes examples/aen/aen-eeprom-manifest/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/aen/aen-eeprom-manifest
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-eeprom-manifest -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 

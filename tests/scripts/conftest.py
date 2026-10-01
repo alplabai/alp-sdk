@@ -34,7 +34,6 @@ _CLANG_FORMAT_PIN = "22.1.5"
 _REPO_WRITER_MODULES = frozenset({
     "test_abi_snapshot_freeze_gate",  # docs/abi/v99.9x-snapshot.json
     "test_validate_metadata_slot0_address",  # metadata/e1m_modules/.test-*.yaml
-    "test_validate_metadata_memory_authority",  # metadata/e1m_modules/.test-*.yaml
     "test_validate_metadata_som_memory_population",  # metadata/e1m_modules/.test-*.yaml
     "test_validate_metadata_soc_peripheral_instance_uniqueness",  # metadata/e1m_modules/.test-*.yaml
     "test_validate_metadata_duplicate_keys",  # metadata/chips/.test-dup-*.{yaml,json}

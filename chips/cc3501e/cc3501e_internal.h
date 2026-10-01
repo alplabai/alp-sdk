@@ -133,6 +133,12 @@ void cc3501e_set_peer_polled(bool on);
 /* True when the host believes the peer is running the POLLED update-mode boot. */
 bool cc3501e_peer_is_polled(void);
 
+/* #1818: max data bytes per OTA_WRITE frame while the peer is polled.  Bench: the
+ * update-mode polled slave receives a request payload phase of <= 70 B intact and
+ * loses >= 71 B (-5, zero reply header); >= 1024 B misframes.  4 (offset) + 64 +
+ * 2 (CRC) = 70 B, the largest frame on the proven side of that boundary. */
+#define CC3501E_POLLED_OTA_CHUNK 64u
+
 /* True once cc3501e_reply_gate() has ever given up waiting on a stuck-LOW
  * ready_pin (CC3501E_READY_STUCK_LOW_STREAK consecutive full-budget
  * timeouts) and latched g_ready_ignored, process-wide.  Production code never

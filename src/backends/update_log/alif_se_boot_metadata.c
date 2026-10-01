@@ -94,18 +94,28 @@ alp_status_t alp_update_log_boot_metadata_read(alp_update_log_entry_t *entry_out
 			return ALP_ERR_NOSUPPORT;
 		}
 
+		uint32_t store = pkt.resp_toc_entry.resp_store_address;
+
+		if (store == 0u) {
+			/* SES v1.110 reports store_address 0 for every TOC entry
+			 * (bench, E1M-AEN803, including A32_APP and BOOTLOAD that
+			 * SETOOLS places at 0x80020000 / 0x80002000). Hashing
+			 * [0, size) would digest live TCM, not the image. */
+			return ALP_ERR_NOSUPPORT;
+		}
+
 		uint8_t hash[32];
 
-		ulog_sha256(
-		    (const unsigned char *)(uintptr_t)pkt.resp_toc_entry.resp_store_address, size, hash);
+		ulog_sha256((const unsigned char *)(uintptr_t)store, size, hash);
 
-		return ulog_alif_se_build_entry(got_id,
-		                                expect_id,
-		                                pkt.resp_toc_entry.resp_version,
-		                                pkt.resp_toc_entry.resp_flags,
-		                                hash,
-		                                true,
-		                                entry_out);
+		return ulog_alif_se_build_entry(
+		    got_id,
+		    expect_id,
+		    pkt.resp_toc_entry.resp_version,
+		    (char)pkt.resp_toc_entry.resp_flags_string[ULOG_ALIF_TOC_FLAG_STRING_VERIFY_IDX],
+		    hash,
+		    true,
+		    entry_out);
 	}
 
 	/* No TOC entry matched this build's configured image id: never

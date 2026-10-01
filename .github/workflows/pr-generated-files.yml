@@ -88,6 +88,8 @@ on:
       - 'docs/test-plan.md'
       - 'docs/verification-status.md'
       - 'scripts/gen_verification_status.py'
+      - 'scripts/gen_chip_driver_classification.py'
+      - 'docs/chip-driver-classification.md'
       - '.github/workflows/pr-generated-files.yml'
   push:
     branches: [main, dev]
@@ -103,6 +105,8 @@ on:
       - 'docs/test-plan.md'
       - 'docs/verification-status.md'
       - 'scripts/gen_verification_status.py'
+      - 'scripts/gen_chip_driver_classification.py'
+      - 'docs/chip-driver-classification.md'
       - '.github/workflows/pr-generated-files.yml'
   workflow_dispatch:
 
@@ -240,6 +244,11 @@ jobs:
       - name: Regenerate verification status page from the test-plan ledger
         run: python3 scripts/gen_verification_status.py
 
+      # docs/chip-driver-classification.md is projected from metadata/chips,
+      # e1m_modules and boards (issue #500); regenerate and let the diff gate flag drift.
+      - name: Regenerate chip-driver classification from metadata
+        run: python3 scripts/gen_chip_driver_classification.py
+
       # Single source: metadata/sdk_version.yaml declares MAJOR.MINOR.PATCH
       # and the CURRENT snapshot is docs/abi/vMAJOR.MINOR-snapshot.json
       # (docs/abi/README.md).  EVERY other docs/abi/v*-snapshot.json is a
@@ -317,6 +326,7 @@ jobs:
                         docs/peripheral-support-matrix.md \
                         docs/portability-matrix.md \
                         docs/verification-status.md \
+                     docs/chip-driver-classification.md \
                         examples/aen \
                         src/backends/gpio/cc3501e_rev_dependent_pins.c \
                         include/alp/chips/*_power_tree.h
@@ -339,6 +349,7 @@ jobs:
                      docs/peripheral-support-matrix.md \
                      docs/portability-matrix.md \
                      docs/verification-status.md \
+                     docs/chip-driver-classification.md \
                      examples/aen \
                      src/backends/gpio/cc3501e_rev_dependent_pins.c \
                      include/alp/chips/*_power_tree.h; then
@@ -354,6 +365,7 @@ jobs:
             echo "::error::  python3 scripts/gen_catalog.py"
             echo "::error::  python3 scripts/gen_error_catalog.py"
             echo "::error::  python3 scripts/gen_verification_status.py"
+            echo "::error::  python3 scripts/gen_chip_driver_classification.py"
             echo "::error::  python3 scripts/abi_snapshot.py --version $ABI_VERSION --output $ABI_SNAPSHOT"
             echo "::error::and commit the result."
             exit 1

@@ -312,7 +312,7 @@ inference:
   # Primary variant only.  Which Ethos-U instances the part carries (and their
   # subtype / MAC / paired core) is silicon-determined -- the SDK derives it
   # from the SoC JSON npus[] / capabilities.ethos_uNN_count -- so the preset
-  # does not enumerate them.  (The old `npu_population:` list is deprecated.)
+  # does not enumerate them.
   ethos_u_variant:      u85
 
 # SoM-side extensions to silicon capabilities.  The loader merges
@@ -441,11 +441,9 @@ allocator may land shared memory there. Six values, one row each:
 `write_authority` off one of them has not opted into the permissive
 case, it has left the question unanswered, and a consumer must treat
 that row as ineligible for both IPC carve-out and runtime write rather
-than default it. The field is not `required` in som-preset v1 — this
-guide is a public porting reference and a v1 `required` would break an
-already-authored customer `memory_map:` on schema upgrade —
-`scripts/validate_metadata.py` enforces its presence semantically
-instead, and v2 promotes it to `required`.
+than default it. som-preset v2 makes the field `required` on every
+`memory_map:` row, so the schema itself rejects a row that omits it
+(a v1 preset must bump `schema_version` to 2 and add it).
 
 Three independent consumers enforce this (`scripts/validate_metadata.py`
 at author time is the fourth, upstream of all three): `carveout.py`'s
@@ -472,7 +470,7 @@ after the verification above.
 
 ## 6. Step 3 — Update the schema `sku` pattern
 
-**Edit:** `metadata/schemas/som-preset-v1.schema.json` **and**
+**Edit:** `metadata/schemas/som-preset-v2.schema.json` **and**
 `metadata/schemas/board.schema.json` (`properties.som.properties.sku`) —
 the constraint is duplicated across both, by design (JSON Schema has
 no `$ref`-able cross-file pattern reuse here); a one-sided edit is
@@ -895,12 +893,12 @@ comment at the top of that file.
 - **Customer cookbook** — [`docs/portability.md`](portability.md)
   walks through the intra-family swap from the customer's side
   (one-line `som.sku:` edit, what the build does, when it
-  fails).  *In progress — Phase D.1.*
+  fails).
 - **Architectural rationale** —
   [`docs/adr/0011-intra-family-portability.md`](adr/0011-intra-family-portability.md)
   records the "swap SKU, no source change" guarantee as an ADR
   with explicit non-goals (cross-family portability is **not** a
-  goal).  *In progress — Phase D.6.*
+  goal).
 - **Broader SDK layout** — [`docs/architecture.md`](architecture.md)
   is the high-level map: OS targets, repository layout, public
   surface (`<alp/...>`), the SDK ↔ studio boundary.

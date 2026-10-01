@@ -111,8 +111,10 @@ rather than `tan`: `native_sim` is a Twister platform, not something
 so `tan build` always targets the real SKU and has no `-b` equivalent.
 
 ```bash
+# writes examples/peripheral-io/blink/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/blink
 west build -b native_sim/native/64 examples/peripheral-io/blink \
-    -- -DEXTRA_ZEPHYR_MODULES=$(pwd) -DCONFIG_COMPILER_OPT='"-DALP_BOARD_E1M_EVK"'
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd) -DCONFIG_COMPILER_OPT='"-DALP_BOARD_E1M_EVK"'
 west build -t run
 ```
 

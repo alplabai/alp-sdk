@@ -134,8 +134,10 @@ nodes (native_sim, V2N) it compiles out and nothing is spawned.
 ## Build & flash (E1M-AEN801)
 
 ```sh
+# writes examples/peripheral-io/alp-console/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/alp-console
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
-           -d build_console examples/peripheral-io/alp-console
+           -d build_console examples/peripheral-io/alp-console -- -DEXTRA_CONF_FILE=generated/alp.conf
 ```
 
 This app also ships an E1M-AEN803 twin of the AEN801 overlay + `.conf` pair

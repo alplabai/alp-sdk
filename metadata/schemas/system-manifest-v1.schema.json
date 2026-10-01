@@ -192,7 +192,7 @@
               "none",
               "composite"
             ],
-            "description": "WHO may write this region, passed through verbatim from som-preset-v1's `memory_region.write_authority`.  ABSENT means unresolved, never `customer_runtime` (ADR-0034 clause 4) -- a `soc_derived` row carries no authority field at all.  Two axes on purpose: `customer_image` (customer-owned, written at flash time) and `customer_runtime` (customer-owned, writable at runtime) are the distinction a single-axis owner vocabulary cannot express."
+            "description": "WHO may write this region, passed through verbatim from som-preset-v2's `memory_region.write_authority`.  ABSENT means unresolved, never `customer_runtime` (ADR-0034 clause 4) -- a `soc_derived` row carries no authority field at all.  Two axes on purpose: `customer_image` (customer-owned, written at flash time) and `customer_runtime` (customer-owned, writable at runtime) are the distinction a single-axis owner vocabulary cannot express."
           },
           "accessible_from": {
             "type": "array",

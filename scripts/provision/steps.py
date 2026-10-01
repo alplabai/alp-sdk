@@ -214,6 +214,7 @@ class Ctx:
                 _record_override(self, "emmc_cid_change", self.accept_cid_change)
             self.state["cid_anchor"] = seen.strip().lower()
             save_state(self.state_path, self.state)
+            self.accept_cid_change = None   # one adoption per run: a later swap is refused
             return
         raise Refused(f"{t.host} answers with eMMC CID {seen.strip().lower()}, but unit {self.serial} "
                       f"recorded {want.strip().lower()}: another unit is behind this address "
@@ -1284,6 +1285,28 @@ class Record(Step):
         # Steps finished in EARLIER invocations (--only/--from runs) left their facts
         # as evidence in the state file; this run's facts override them.
         facts: dict = {}
+        # A tool_rev-only change moves finished steps to ``superseded`` although the
+        # unit still carries the SAME bundle's bytes; a flash step finished there
+        # (same bundle_sha256) counts as done. A different bundle's flash does not.
+        flashed = {}
+        for n in FLASH_STEPS:
+            cur = ctx.state.get("steps", {}).get(n)
+            if cur is not None:
+                # The current run's own entry decides; no fallback past a failed/running one.
+                if cur.get("status") in ("done", "skipped"):
+                    flashed[n] = ("", cur)
+                continue
+            # The NEWEST superseded group holding an entry for n decides: an older
+            # same-bundle write was overwritten by whatever came after it.
+            g = next((g for g in reversed(ctx.state.get("superseded", [])) if n in g.get("steps", {})), None)
+            if g is None:
+                continue
+            old = g["steps"][n]
+            if g.get("bundle_sha256") == ctx.state.get("bundle_sha256") and old.get("status") in ("done", "skipped"):
+                flashed[n] = (f" (flash step {n} from superseded run, tool_rev {str(g.get('tool_rev'))[:12]}, "
+                              f"{old.get('finished') or old.get('ts') or old.get('at') or 'time n/a'})", old)
+        for n, (_, old) in flashed.items():
+            facts.update(old.get("evidence") or {})
         for n in STEP_NAMES:
             st = ctx.state.get("steps", {}).get(n, {})
             if st.get("status") in ("done", "skipped"):
@@ -1294,8 +1317,7 @@ class Record(Step):
         # Bundle facts describe what the bundle CONTAINS; they are ledger facts
         # about the unit only once every flash step succeeded (done, or skipped
         # because the probe found the bundle's bytes already on the unit).
-        if not all(ctx.state.get("steps", {}).get(n, {}).get("status") in ("done", "skipped")
-                   for n in FLASH_STEPS):
+        if len(flashed) < len(FLASH_STEPS):
             for k in BUNDLE_FACTS:
                 auto.pop(k, None)
         before = ledger_out.read_unit_yaml(unit_yaml)
@@ -1312,6 +1334,9 @@ class Record(Step):
         changed = ctx.mutate(f"merge {len(would)} key(s) into {unit_yaml.name}: {', '.join(would)}",
                              lambda: ledger_out.merge_unit_yaml(unit_yaml, auto, catalogue, defaults))
         body = "\n".join(f"- `{k}`: {v}" for k, v in sorted(auto.items()))
+        for note, _ in flashed.values():
+            if note:
+                body += f"\n- bundle facts from{note}"
         if legacy_defect:
             body += ("\n- `act88760_gpio4_defect` (legacy `yes`): informational only, no longer "
                      "ship-blocking; see `act88760_gpio4_workaround` / `act88760_gpio4_after_boot`")

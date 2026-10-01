@@ -80,9 +80,9 @@ static void mbox_inbound(uint32_t channel, const void *data, size_t len, void *u
 
 	printf("[mproc-peer] request offset=%u len=%u\n", (unsigned)offset, (unsigned)req_len);
 
-	/* Pull the request bytes out of shared memory.  Backend
-     * handles cache-invalidate so the HP's stale write-buffer
-     * can't leak into the read (cacheable=false at open). */
+	/* Pull the request bytes out of shared memory.  The region
+     * is non-cacheable (cacheable=false at open), so no cache
+     * invalidate is needed before the read. */
 	char request_buf[MAX_PAYLOAD + 1] = { 0 };
 	memcpy(request_buf, (const uint8_t *)g_peer.shmem_base + offset, req_len);
 	request_buf[req_len] = '\0';

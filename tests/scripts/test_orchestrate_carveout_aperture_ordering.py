@@ -249,7 +249,7 @@ class TestUnclassifiedWriteAuthorityLegCoverage:
     def test_outside_aperture_authored_row_with_no_write_authority_blocks(self):
         """Same hazard, absent `write_authority:` rather than a wrong
         value -- `ABSENT MEANS UNRESOLVED, NEVER customer_runtime`
-        (`som-preset-v1.schema.json`'s `write_authority` description)."""
+        (`som-preset-v2.schema.json`'s `write_authority` description)."""
         eligible, reason = _region_ipc_eligibility(
             {"base": _OUTSIDE_APERTURE_BASE, "size_kib": 1024},
             (_E8_APERTURE_BASE, 0x80580000),

@@ -55,7 +55,9 @@ motor mixer → ESCs.
 ## Build
 
 ```
-west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/peripheral-io/drone-autopilot
+# writes examples/peripheral-io/drone-autopilot/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/drone-autopilot
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/peripheral-io/drone-autopilot -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 

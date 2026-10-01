@@ -10,6 +10,7 @@ sample:
 
 tests:
   alp_sdk.example.blink.e1m_x_evk:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     platform_allow:
       - native_sim
       - native_sim/native/64
@@ -38,6 +39,7 @@ tests:
       - aen
     build_only: true
   alp_sdk.example.blink.e1m_evk:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     platform_allow:
       - native_sim
       - native_sim/native/64

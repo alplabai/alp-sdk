@@ -79,3 +79,5 @@ verification:
   smoke_tests:    none               # no chips/ portable driver surface exists to unit-test;
                                      # the streaming driver's coverage is
                                      # tests/zephyr/video_sensors/src/ov5647_test.c.
+tracking:
+  blocker: "no child issue filed; not scheduled, deferred until a product selects the part"

@@ -114,3 +114,5 @@ physical:
     - { pad: "E3",  signal: "GND" }
     - { pad: "B2",  signal: "GND" }
     - { pad: "C4",  signal: "GND" }
+tracking:
+  blocker: "ADR 0017 tier decision pending"

@@ -120,7 +120,7 @@ as designed.
 
 For the cookbook (validation steps, lint flow, common gotchas
 like `CONFIG_SPI=y` auto-enabling from CC3501E on AEN), read
-`docs/portability.md` (in-flight, Phase D.1).
+[`docs/portability.md`](../portability.md).
 
 ## The lint
 
@@ -164,7 +164,7 @@ tells the app exactly which SKU + revision it's running on.
   empirical SKU × example matrix.
 * [`docs/adr/0011-intra-family-portability.md`](../adr/0011-intra-family-portability.md)
   -- the architectural reasoning.
-* `docs/portability.md` (in-flight, Phase D.1) -- the customer
+* [`docs/portability.md`](../portability.md) -- the customer
   cookbook + capability validation flow.
 * [`scripts/check_example_portability.py`](../../scripts/check_example_portability.py)
   -- the CI-side enforcement.

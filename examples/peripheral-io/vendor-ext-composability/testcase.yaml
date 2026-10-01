@@ -11,6 +11,7 @@ sample:
 
 tests:
   alp_sdk.example.vendor_ext_composability:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     platform_allow:
       - native_sim
       - native_sim/native/64

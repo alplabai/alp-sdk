@@ -12,7 +12,7 @@ devicetree and layers on the on-module GD32G553 supervisor links from
 rather than a hardcoded literal.
 
 A new SoM preset field, `topology.m33_sm.openamp_ipc`
-(`metadata/schemas/som-preset-v1.schema.json`), gates the OpenAMP/MHU-B
+(`metadata/schemas/som-preset-v2.schema.json`), gates the OpenAMP/MHU-B
 reserved-memory block and the CAN-FD-unavailable analysis comment that
 only E1M-V2N101's committed tree carries today; it is unset for
 E1M-V2M101, so the generator reproduces that asymmetry byte-for-byte
