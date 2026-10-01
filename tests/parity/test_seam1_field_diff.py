@@ -311,6 +311,19 @@ def test_sysbuild_slice_image_scoped_extra_conf_file_stripped():
     oracle = _load("connectivity_iot-fleet-ota")
     mutated = copy.deepcopy(oracle)
     sl = mutated["slices"][0]
-    sl["command"]["args"] = list(sl["command"]["args"]) + [
-        "-Dm33_EXTRA_CONF_FILE=/some/path/alp.conf"]
+    args = list(sl["command"]["args"])
+    app = args[args.index("--sysbuild") - 1]
+    image = app.rstrip("/").rsplit("/", 1)[-1]
+    sl["command"]["args"] = args + [
+        f"-D{image}_EXTRA_CONF_FILE=/some/path/alp.conf"]
     assert not _fails(oracle, mutated)
+
+
+def test_sysbuild_slice_wrong_image_extra_conf_file_still_fails():
+    """#866: a prefix naming another image (e.g. mcuboot) is a regression."""
+    oracle = _load("connectivity_iot-fleet-ota")
+    mutated = copy.deepcopy(oracle)
+    sl = mutated["slices"][0]
+    sl["command"]["args"] = list(sl["command"]["args"]) + [
+        "-Dmcuboot_EXTRA_CONF_FILE=/some/path/alp.conf"]
+    assert _fails(oracle, mutated)

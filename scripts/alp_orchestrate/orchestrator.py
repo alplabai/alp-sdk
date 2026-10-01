@@ -489,6 +489,15 @@ def _slice_command(
         # `west build` is handed above -- so emit the image-prefixed form
         # (#866, the plan-native replacement for the per-example
         # CMakeLists.txt bridge #870).
+        #
+        # CAVEAT: the prefix is the app directory's real basename, but the
+        # command's app dir is a `${PROJECT_ROOT}` token. When the app dir
+        # IS the project root (`app: ./src` falls back to the example
+        # root), the image name is the project root's directory name, so a
+        # tokened plan materialised under a differently-named root names a
+        # stale image and Zephyr silently ignores the arg. A consumer that
+        # relocates the project root must re-derive the prefix from the
+        # substituted app dir (documented in docs/heterogeneous-builds.md).
         alp_conf = Path(slice_.build_dir) / "alp.conf"
         if not alp_conf.is_absolute():
             alp_conf = Path(base_dir) / alp_conf

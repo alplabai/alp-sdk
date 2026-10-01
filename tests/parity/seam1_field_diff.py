@@ -260,26 +260,38 @@ def _project_relpath(plan: dict) -> str:
 # This is a COMMAND-SHAPE delta (an arg present/absent), not a content delta,
 # so it stays even after content dropped out of scope below.
 #
-# Scoped to NON-sysbuild slices ONLY, detected the same way the emitter
-# itself decides (`orchestrator.py::_slice_command`): a sysbuild slice's
-# `command.args` carries the literal `--sysbuild` flag. Sysbuild slices
-# deliberately do NOT carry `-DEXTRA_CONF_FILE` (Option A, #871: a bare
-# -DEXTRA_CONF_FILE lands on the sysbuild image not the app, silently
-# dropping the per-core alp.conf on boot:/OTA projects -- ADR-0020 Amendment
-# item 4) -- stripping the arg unconditionally from EVERY slice, sysbuild
-# included, would silently hide exactly that regression (a sysbuild slice
-# wrongly gaining the arg) from the comparator instead of catching it.
+# Detected the same way the emitter itself decides
+# (`orchestrator.py::_slice_command`): a sysbuild slice's `command.args`
+# carries the literal `--sysbuild` flag. A NON-sysbuild slice carries the
+# bare `-DEXTRA_CONF_FILE=`; a sysbuild slice carries the image-scoped
+# `-D<image>_EXTRA_CONF_FILE=` instead (#866), where <image> is the basename
+# of the slice's west app-dir arg. A bare arg on a sysbuild slice (lands on
+# the sysbuild image, not the app) or a prefix naming another image (e.g.
+# mcuboot) is a regression and must still fail, so each form is stripped
+# only on the slice kind -- and, for sysbuild, the image -- it belongs to.
 # KEEP IN LOCKSTEP with tan-cli's vendored copy of this comparator.
-def _is_image_scoped_extra_conf(arg):
-    """`-D<image>_EXTRA_CONF_FILE=...` (the sysbuild per-image form)."""
-    name = arg.split("=", 1)[0]
-    return (name.startswith("-D") and name != "-DEXTRA_CONF_FILE"
-            and name.endswith("_EXTRA_CONF_FILE"))
+def _is_image_scoped_extra_conf(arg, image):
+    """`-D<image>_EXTRA_CONF_FILE=...` for exactly the app image `image`."""
+    return arg.split("=", 1)[0] == f"-D{image}_EXTRA_CONF_FILE"
+
+
+def _west_app_dir_basename(args):
+    """Basename of the `west build` app-dir arg (first non-option arg after
+    `build`), or None. Tokened paths use `/`."""
+    try:
+        i = args.index("build") + 1
+    except ValueError:
+        return None
+    while i < len(args) and args[i].startswith("-"):
+        i += 2 if args[i] in ("-b", "-d", "-p") else 1
+    if i >= len(args):
+        return None
+    return args[i].replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
 
 
 def _strip_863_extra_conf_file_arg(plan):
-    """Remove the intended #863/#871 `-DEXTRA_CONF_FILE=` command arg from
-    every NON-sysbuild slice's command in a (normalized) plan dict."""
+    """Remove the intended #863/#866/#871 per-core EXTRA_CONF_FILE command
+    arg from every slice: bare on non-sysbuild, `-D<app image>_` on sysbuild."""
     for slice_ in plan.get("slices", []) or []:
         cmd = slice_.get("command")
         if not (isinstance(cmd, dict) and isinstance(cmd.get("args"), list)):
@@ -288,9 +300,10 @@ def _strip_863_extra_conf_file_arg(plan):
         # `-D<image>_EXTRA_CONF_FILE=` (#866); a bare `-DEXTRA_CONF_FILE=`
         # there is the Option-A regression and must still fail.
         sysbuild = "--sysbuild" in cmd["args"]
+        image = _west_app_dir_basename(cmd["args"]) if sysbuild else None
         cmd["args"] = [a for a in cmd["args"]
                        if not (isinstance(a, str) and (
-                           _is_image_scoped_extra_conf(a) if sysbuild
+                           _is_image_scoped_extra_conf(a, image) if sysbuild
                            else a.startswith("-DEXTRA_CONF_FILE=")))]
     return plan
 

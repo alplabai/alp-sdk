@@ -9,8 +9,11 @@ emits the image-scoped form, `-D<image>_EXTRA_CONF_FILE=<buildDir>/alp.conf`,
 where `<image>` is the basename of the application directory handed to
 `west build` — the name sysbuild itself gives the application image. The
 `alp.conf` is the one already carried in the slice's `configArtefacts`; the
-plan schema is unchanged (only a command arg is added), so existing consumers
-such as tan-cli are unaffected.
+plan schema is unchanged (only a command arg is added), but tan-cli plans on
+its own (its relocated planner still emits no sysbuild per-core arg), so it
+needs a lockstep change before the bridge is retired. The prefix is the app
+directory's real basename: when the app directory is the project root, a
+tokened plan materialised under a differently-named root must re-derive it.
 
 The seam-1 comparator (`tests/parity/seam1_field_diff.py`) treats the
 image-scoped arg as an intended delta on sysbuild slices while a bare

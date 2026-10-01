@@ -213,13 +213,16 @@ blocked until the remediation is met. Tracked in #855.
    was originally handled the same probe-delta way (a bespoke strip inside
    the compared config-artefact CONTENT); that strip is now moot and
    deleted, because **seam-1 no longer compares config-artefact content at
-   all** — see the retune paragraph below. **Sysbuild slices deliberately
-   carry NO `-DEXTRA_CONF_FILE`** (Option A): a bare top-level
-   `-DEXTRA_CONF_FILE` under `--sysbuild` lands on the sysbuild image, not
-   the application image, so it would silently drop the per-core config on
-   `boot:`/OTA projects; those slices get the per-core `alp.conf` via the
-   app's `--core`-scoped `CMakeLists.txt` bridge (#870), and a plan-native
-   per-image sysbuild wiring stays #866. The seam-2 real-build proof of the
+   all** — see the retune paragraph below. **Sysbuild slices carry the
+   image-scoped `-D<image>_EXTRA_CONF_FILE`, never the bare form** (#866): a
+   bare top-level `-DEXTRA_CONF_FILE` under `--sysbuild` lands on the
+   sysbuild image, not the application image, and would silently drop the
+   per-core config on `boot:`/OTA projects; `<image>` is the basename of the
+   app directory handed to `west build` (sysbuild's own application image
+   name), so the plan wires the per-core `alp.conf` itself instead of via
+   the app's `--core`-scoped `CMakeLists.txt` bridge (#870). When the app
+   directory is the project root the name depends on the root's directory
+   name, so a consumer relocating a tokened plan must re-derive it. The seam-2 real-build proof of the
    sysbuild path (`iot-fleet-ota`) is the one deferred box on #871.
 
    **Seam-1 scope retune (2026-07-22, #874 follow-up — narrows this
