@@ -45,11 +45,24 @@ transmitted them. Fixes:
 - **Full callback queue.** 16 queued callbacks read as an empty queue
   (`head == tail`); the queue now holds 15 and `can_send()` returns `-EAGAIN`
   beyond that.
-- **Reset pulse re-applies more than the mode.** After `can_set_timing()` /
-  `can_set_timing_data()` the shared `can_cast_reapply_after_reset()` also
-  re-programs `TCTRL.FD_ISO`, `TCTRL.TSMODE` and the installed RX filters, so
-  filters added before `can_set_bitrate()` keep working. Neither the Alif DFP
-  nor the register map says what `CFG_STAT.RESET` clears, so this is defensive.
+- **Reset pulse.** Measured by register readback on E1M-AEN803, `CFG_STAT.RESET`
+  clears only `LBMI`; `TCTRL`, the timing/TDC registers, `ACFCTRL`, `ACF_EN` and the
+  filter code/mask registers survive it. `can_cast_reapply_after_reset()` therefore
+  only re-applies the mode bits.
+- **RX filters ignored by hardware.** The acceptance-filter code/mask registers
+  ignore writes unless `CFG_STAT.RESET` is set (the DFP configures filters only in
+  INIT mode, `Driver_CAN.c`), so a filter added after `can_set_mode()`, or replaced
+  while started, kept its reset defaults and only the ISR software filter ran.
+  `can_add_rx_filter()` now holds reset around the write and re-applies the mode
+  bits. While started this briefly takes the node off the bus.
+- **`can_stop()` then `can_start()` lost the mode.** `can_stop()` cleared the stored
+  mode and the reset dropped `LBMI`, so after a restart classic frames went to the
+  pins without a completion and FD frames returned `-EINVAL`. The mode now only
+  changes in `can_set_mode()`; `can_start()` re-applies the mode bits and the FD
+  enable.
+- **Known deviation: error counters.** Zephyr wants `can_start()` to reset TEC/REC.
+  The core has no control for that (the DFP reads `TECNT`/`RECNT` only, and a reset
+  pulse did not clear `TECNT`), so they carry over a stop/start.
 - **`can_send()` guards.** Argument checks (`-EINVAL`) run before state checks,
   `CFG_STAT` is read once, and a lost `LBMI` is logged as an internal fault
   (`-EIO`).

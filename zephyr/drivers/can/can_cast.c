@@ -409,8 +409,13 @@ static int can_cast_get_capabilities(const struct device *dev, can_mode_t *cap)
  * @param[in] dev : pointer to Runtime device structure
  * @return  Execution status
  */
+static void can_cast_apply_mode_bits(uint32_t can_base, can_mode_t mode);
+
 static int can_cast_start(const struct device *dev)
 {
+#if CONFIG_CAN_FD_MODE
+	const struct can_cast_config *config = DEV_CFG(dev);
+#endif
 	struct can_cast_data *data = DEV_DATA(dev);
 	uint32_t can_base;
 	uint32_t can_cnt_base;
@@ -428,6 +433,23 @@ static int can_cast_start(const struct device *dev)
 	CAN_STATS_RESET(dev);
 
 	can_cast_reset_disable(can_base);
+
+	/* stop() holds reset, which clears LBMI and the FD enable: re-apply the mode that
+	 * set_mode() stored (as can_mcan.c, mode only changes in set_mode).
+	 *
+	 * Deviation from Zephyr: can_start() should also reset the TEC/REC error counters.
+	 * The CAST core has no control for that: the DFP exposes TECNT/RECNT read-only
+	 * (drivers/include/canfd.h canfd_get_*_error_count) and a reset pulse was measured
+	 * not to clear TECNT, so the counters carry over from before stop().
+	 */
+	can_cast_apply_mode_bits(can_base, data->common.mode);
+#if CONFIG_CAN_FD_MODE
+	if ((data->common.mode & CAN_MODE_FD) && config->can_fd) {
+		sys_write32(sys_read32(config->can_fd_ctrl_reg) | BIT(config->can_fd_bit),
+		            config->can_fd_ctrl_reg);
+	}
+#endif
+
 	/* Enable interrupts */
 	if (!(data->common.mode & CAN_MODE_LISTENONLY)) {
 		can_cast_enable_tx_interrupts(can_base);
@@ -523,7 +545,7 @@ static int can_cast_stop(const struct device *dev)
 
 	}
 #endif
-	data->common.mode = 0U;
+	/* common.mode is kept: start() re-applies it (only set_mode changes it) */
 	data->common.started = false;
 	data->err_state = CAN_STATE_STOPPED;
 
@@ -556,38 +578,37 @@ static void can_cast_apply_mode_bits(uint32_t can_base, can_mode_t mode)
 }
 
 /*
- * Re-applies everything configured before a reset pulse (set_timing /
- * set_timing_data hold CFG_STAT.RESET to latch the bit-time registers).
- * Neither the Alif DFP (drivers/include/canfd.h, drivers/source/canfd.c,
- * Alif_CMSIS/Source/Driver_CAN.c) nor this driver's register map states which
- * registers RESET clears; the DFP only shows LBMI/LBME being cleared together with
- * RESET (canfd.c canfd_enable_*_mode) and the bench saw LBMI lost. So it
- * defensively re-programs the mode bits, the ISO/priority bits written once by init
- * (TCTRL.FD_ISO, TCTRL.TSMODE) and every installed acceptance filter.
- * Interrupt enables need no restore: they are only enabled by start(), after timing.
+ * Re-applies the mode bits after a reset pulse (set_timing / set_timing_data and
+ * the acceptance-filter write hold CFG_STAT.RESET). Measured on E1M-AEN803
+ * (internal loopback, register readback before/after a pulse): RESET clears only
+ * CFG_STAT.LBMI; TCTRL (FD_ISO, TSMODE), the bit-time and TDC registers, LIMIT,
+ * ACFCTRL, ACF_EN and the filter code/mask registers survive it. The DFP agrees that
+ * LBMI/LBME are cleared with RESET (drivers/source/canfd.c canfd_enable_*_mode).
  */
 static void can_cast_reapply_after_reset(const struct device *dev, uint32_t can_base)
 {
-	struct can_cast_data *data = DEV_DATA(dev);
+	can_cast_apply_mode_bits(can_base, DEV_DATA(dev)->common.mode);
+}
 
-	can_cast_apply_mode_bits(can_base, data->common.mode);
-	can_cast_set_iso_spec(can_base);
-	can_cast_set_tbuf_op_mode_priority(can_base);
+/*
+ * Programs one acceptance filter. The code/mask registers ignore writes unless
+ * CFG_STAT.RESET is set (measured on E1M-AEN803; the DFP likewise configures filters
+ * only in INIT mode: Alif_CMSIS/Source/Driver_CAN.c:713-715, INIT = canfd_reset). So
+ * hold reset around the write. While started this takes the node off the bus for the
+ * duration of the write and re-applies the mode bits (LBMI) afterwards.
+ * Caller holds inst_mutex.
+ */
+static void can_cast_write_acpt_fltr(const struct device   *dev,
+                                     uint32_t               can_base,
+                                     struct can_acpt_fltr_t filter_cfg)
+{
+	bool reset_was_off = !(sys_read8(can_base + CAN_CFG_STAT) & BIT(CAN_CFG_STAT_RESET));
 
-	for (uint8_t i = 0U; i < CONFIG_CAN_MAX_FILTER; i++) {
-		const struct can_cast_filter_t *f = &data->filter[i];
-		struct can_acpt_fltr_t          cfg;
-
-		if (f->rx_cb == NULL) {
-			continue;
-		}
-
-		cfg.frame_type = (f->rx_filter.flags & CAN_FILTER_IDE) ? CAN_ACPT_FILTER_CFG_EXT_FRAMES
-		                                                       : CAN_ACPT_FILTER_CFG_STD_FRAMES;
-		cfg.ac_code    = f->rx_filter.id;
-		cfg.ac_mask    = f->rx_filter.mask;
-		cfg.filter     = i;
-		can_cast_enable_acpt_fltr(can_base, cfg);
+	can_cast_reset_enable(can_base);
+	can_cast_enable_acpt_fltr(can_base, filter_cfg);
+	if (reset_was_off) {
+		can_cast_reset_disable(can_base);
+		can_cast_reapply_after_reset(dev, can_base);
 	}
 }
 
@@ -1041,7 +1062,7 @@ static int can_cast_add_rx_filter(const struct device *dev, can_rx_callback_t ca
 			filter_cfg.filter = filter_num;
 
 			/* If the filter is available, then configures the values*/
-			can_cast_enable_acpt_fltr(can_base, filter_cfg);
+			can_cast_write_acpt_fltr(dev, can_base, filter_cfg);
 			filter_avail = true;
 
 			msg_filter = &data->filter[filter_num];
