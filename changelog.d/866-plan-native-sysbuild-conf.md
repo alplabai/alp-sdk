@@ -20,9 +20,8 @@ image-scoped arg as an intended delta on sysbuild slices while a bare
 `-DEXTRA_CONF_FILE` there still fails. The `iot-fleet-ota` emit snapshot
 changed (one new arg per slice); no other snapshot did.
 
-Not yet done in this change: the per-example `CMakeLists.txt` bridge still
-runs and merges the same fragment, so the app image sees it twice (harmless,
-idempotent) until the bridge is retired in follow-up slices.
+The per-example `CMakeLists.txt` bridge that used to merge the same fragment
+is retired (see the last entry below), so the app image sees it exactly once.
 
 ### Changed — twister and a bare `west build` read a pre-generated `generated/alp.conf` (#866)
 
@@ -35,8 +34,7 @@ existing `native_sim.conf` / `overlay-*.conf` entry by `;` (twister's
 `extra_args` replaces rather than appends, so a second `-DEXTRA_CONF_FILE`
 would drop the first); later overlays still win. `pr-twister.yml`,
 `pr-twister-aen.yml` and `scripts/test-all.sh` run the generator before
-twister. The `CMakeLists.txt` bridge still runs alongside; it is retired in a
-follow-up slice.
+twister. The `CMakeLists.txt` bridge it replaces is retired (see the last entry below).
 
 `gen_example_alp_conf.py` now exits non-zero for a requested example directory
 that matches no `--core` zephyr-conf case (a typo or a non-zephyr-conf example)
@@ -47,6 +45,41 @@ into its temp tree before running twister (its copied `testcase.yaml` names
 `generated/alp.conf`), and the PR template, `docs/testing.md`,
 `docs/local-ci.md`, `docs/cross-platform-setup.md`, the native-sim container
 README and the example READMEs that run twister now run the generator first.
-Until the `CMakeLists.txt` bridge is retired a stale fragment is harmless (the
-bridge's fresh build-dir copy wins); the retiring slice must regenerate it
-before every build.
+With the bridge gone nothing regenerates the fragment at configure time, so
+run the generator before every twister / bare `west build` after a
+`board.yaml` or `metadata/` change.
+
+### Removed — the example `CMakeLists.txt` `alp_project.py --emit zephyr-conf` configure-time bridge (#866)
+
+Every example `CMakeLists.txt` (95 of them, including the per-core multicore
+subdirs) used to shell `alp_project.py --emit zephyr-conf --core <id>` during
+CMake configure and append the result to `EXTRA_CONF_FILE`. That put
+intermediate Python on every configure and duplicated what the build plan
+already does; it is deleted, along with the `find_package(Python3)` and
+`ALP_SDK_ROOT` resolution that only fed it (the multicore slices keep both for
+their `--emit ipc-contract-h` header step). The per-core Kconfig fragment now
+reaches each consumer one way: `tan build` via the plan's `configArtefacts` plus
+`-DEXTRA_CONF_FILE` (`-D<image>_EXTRA_CONF_FILE` under `--sysbuild`); twister
+and a bare `west build` via `scripts/gen_example_alp_conf.py`'s
+`<app dir>/generated/alp.conf`; a human via `alp_project.py --emit zephyr-conf
+--core <id> --output <file>` and `-DEXTRA_CONF_FILE` (`docs/board-config-emit.md`,
+`docs/tutorials/01-first-build.md`).
+
+Because the `--core <id>` literal in each `CMakeLists.txt` was the pre-generator's
+source of truth, discovery moved to `board.yaml`: `gen_example_alp_conf.py` and
+`check_zephyr_conf_parity.py` now walk every `examples/**/board.yaml`, take each
+enabled Zephyr core whose `app:` resolves to a customer app dir
+(`_zephyr_app_dir`), and write/compare that dir's fragment — the same 94 cores
+the CMake walk found (`rpmsg-imx93` stays excluded, its `hw_rev` is `tbd`).
+`check_zephyr_conf_parity.py` keeps its byte-parity check (generator output vs the
+`alp_project.py` CLI emit) and now also fails if a bridge is re-added.
+`check_core_cmakelists_mapping.py` drops its baked-literal assertion (nothing is
+baked any more) and keeps the no-two-cores-share-an-app-dir one, which now
+guards the shared `generated/alp.conf` slot. `alp_template.py` no longer
+re-derives a `--core` literal inside scaffolded `CMakeLists.txt` files
+(`_substitute_cmake_core`, `_cmake_core_map` are gone); the five scaffold emit
+snapshots were regenerated and the template catalog's generated-artefact notes
+point at `tan build` / the generator.
+
+A bare `west build` of an SDK example now needs the fragment passed explicitly
+(see above); before this change the CMake bridge supplied it silently.

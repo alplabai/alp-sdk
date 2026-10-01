@@ -245,10 +245,10 @@ keep it short:
   reused: `test-all.sh` deletes and rebuilds it every run
   (`--clobber-output`, so a long-lived checkout does not pile up
   `twister-out.1`, `.2`, ... at several GB each). That is deliberate:
-  example `CMakeLists.txt` files run `alp_project.py` at configure time
-  without declaring `board.yaml` or `metadata/` as configure dependencies,
-  so an incremental twister rebuild (`--no-clean`) could miss a metadata
-  change.
+  each example's `generated/alp.conf` is pre-generated from `board.yaml`
+  and `metadata/` (`scripts/gen_example_alp_conf.py`) outside CMake's
+  dependency graph, so an incremental twister rebuild (`--no-clean`) could
+  miss a metadata change.
 
 ## Cheap pre-push checks (no toolchain needed)
 

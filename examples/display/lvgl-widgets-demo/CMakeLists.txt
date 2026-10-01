@@ -1,50 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# CMakeLists.txt for the lvgl-widgets-demo example.  Invokes the
-# SDK's project loader at configure time so the generated alp.conf
-# overlays prj.conf.
+# CMakeLists.txt for the lvgl-widgets-demo example.  The generated
+# alp.conf (from board.yaml) overlays prj.conf via EXTRA_CONF_FILE.
 cmake_minimum_required(VERSION 3.20.0)
-
-# Resolve the alp-sdk root.  In-tree the SDK is the example's
-# grandparent directory; out-of-tree customers point ALP_SDK_ROOT
-# at their checkout.
-if(DEFINED ENV{ALP_SDK_ROOT})
-    set(ALP_SDK_ROOT $ENV{ALP_SDK_ROOT})
-else()
-    get_filename_component(ALP_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../.. ABSOLUTE)
-endif()
-
-# Run the SDK project loader BEFORE find_package(Zephyr ...) so the
-# generated overlay is in EXTRA_CONF_FILE when Zephyr starts parsing
-# Kconfig.  See examples/peripheral-io/i2c-scanner/CMakeLists.txt for the canonical
-# pattern this example follows.
-#
-# PYTHON_EXECUTABLE is only set after find_package(Zephyr); we need a
-# Python interpreter at configure time *before* that, so resolve one
-# ourselves here.
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
-
-# Emit into a generated/ subdir so the file escapes Zephyr's
-# ${APPLICATION_BINARY_DIR}/*.conf GLOB, and APPEND (don't overwrite)
-# EXTRA_CONF_FILE so a per-example native_sim.conf can also layer in.
-set(_alp_generated ${CMAKE_BINARY_DIR}/generated/alp.conf)
-execute_process(
-    COMMAND ${Python3_EXECUTABLE}
-            ${ALP_SDK_ROOT}/scripts/alp_project.py
-            --input  ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml
-            --output ${_alp_generated}
-            --emit zephyr-conf --core m55_hp
-    RESULT_VARIABLE rc
-    OUTPUT_VARIABLE _alp_stdout
-    ERROR_VARIABLE  _alp_stderr
-)
-if(NOT rc EQUAL 0)
-    message(FATAL_ERROR
-        "alp_project.py failed (rc=${rc}); "
-        "check ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml.\n"
-        "stderr: ${_alp_stderr}")
-endif()
-list(APPEND EXTRA_CONF_FILE ${_alp_generated})
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(lvgl_widgets_demo LANGUAGES C)

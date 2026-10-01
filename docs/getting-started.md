@@ -371,8 +371,8 @@ What this does:
 
 - `--project alp-sdk/examples/peripheral-io/gpio-button-led` — the
   application directory.  Each example under `examples/` ships a
-  `board.yaml` + an empty `prj.conf` + a CMakeLists.txt that invokes
-  the loader at configure time.  See
+  `board.yaml` + an empty `prj.conf` + a plain CMakeLists.txt; `tan`
+  runs the loader and hands the generated `alp.conf` to the build.  See
   [`docs/board-config-schema.md`](board-config-schema.md) for the
   schema.
 - The target comes entirely from that `board.yaml` — there is no

@@ -1,26 +1,29 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """
-Byte-parity gate: a Zephyr example's own `CMakeLists.txt` (which shells
-`alp_project.py --emit zephyr-conf --core <id>` at configure time) and the
-SDK reference build-plan `configArtefacts` MUST materialise the identical
-`alp.conf` for the same core; Python Tan tests its relocated producer against
-the same contract.
+Byte-parity gate for the per-core `alp.conf` the SDK hands to builds that do
+NOT read the build plan (twister, a bare `west build`).
 
-Both paths call the same function (`alp_orchestrate.kconfig._slice_alp_conf`)
--- this gate pins that invariant byte-for-byte so a future change to either
-call site (or to `_emit_library_hw_backends`, folded into `_slice_alp_conf`
-so both paths share it -- see docs/adr/0020-sdk-owns-build-execution.md
-addendum) can't silently fork the two paths again. Mirrors the
-`check_emit_snapshots.py` byte-identical-emit precedent, scoped to this one
-pinned invariant across the whole example corpus rather than a fixed golden
-set, so a NEW example inherits the check automatically.
+Those consumers get their Kconfig fragment from `scripts/gen_example_alp_conf.py`
+(`<app dir>/generated/alp.conf`, named by each example's `testcase.yaml`);
+`tan build` gets it from the build plan's `configArtefacts`; a human following
+the docs runs `alp_project.py --emit zephyr-conf --core <id>`. All three MUST
+produce the identical bytes for the same core -- this gate pins that for the
+whole example corpus, so a NEW example inherits the check automatically.
+Python Tan tests its relocated producer against the same contract.
 
-Scope: every example `CMakeLists.txt` under `examples/**` whose
-`alp_project.py --emit zephyr-conf --core <id>` invocation is `--core`-
-scoped (single-app examples AND per-core multicore subdirs alike). An
-unscoped (`--core`-less) invocation sums across cores by design and is out
-of scope for a per-core byte-parity check.
+All three call the same function (`alp_orchestrate.kconfig._slice_alp_conf`);
+this gate pins the invariant byte-for-byte so a change to one call site (or to
+`_emit_library_hw_backends`, folded into `_slice_alp_conf` -- see
+docs/adr/0020-sdk-owns-build-execution.md addendum) can't silently fork them.
+
+It also fails if an example `CMakeLists.txt` runs `alp_project.py --emit
+zephyr-conf` at configure time again: that bridge was retired (#866) because it
+put intermediate Python on every CMake configure, and re-adding it would hide a
+missing pre-generation step rather than fix it.
+
+Scope: every enabled Zephyr core of every `examples/**/board.yaml` whose `app:`
+resolves to a customer app dir (not the stock M-core shim).
 
 Usage:
 
@@ -37,24 +40,20 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 
-from alp_orchestrate import load_board_yaml, OrchestratorError  # noqa: E402
+from alp_orchestrate import (  # noqa: E402
+    iter_buildable_slices, load_board_yaml,
+)
 from alp_orchestrate.kconfig import _slice_alp_conf  # noqa: E402
+from alp_orchestrate.orchestrator import (  # noqa: E402
+    STOCK_SHIM_APP, _zephyr_app_dir,
+)
 from alp_orchestrate.sdk_compat import assert_exclusion_still_not_buildable  # noqa: E402
 
-# `--emit zephyr-conf ... --core <id>` -- tolerant of the flag order + the
-# `--input <path>` argument sitting on any adjacent line within the same
-# `execute_process(COMMAND ...)` block (the examples carry a handful of
-# harmless formatting variants; see `applying-the-alp-sdk-c-house-style`).
-_CORE_RE = re.compile(r"--emit\s+zephyr-conf\s+--core\s+(\S+)")
-_INPUT_RE = re.compile(
-    r"COMMAND\b.*?--input\s+\$\{CMAKE_CURRENT_SOURCE_DIR\}/(\S+?board\.yaml)",
-    re.DOTALL)
-# Any `--emit zephyr-conf`, `--core`-scoped or not. When a file's count of
-# these exceeds its `--core`-scoped count (`_CORE_RE`), some invocation is
-# UNSCOPED -- the cross-core Kconfig sum ADR-0020's addendum retired.
+# Any `--emit zephyr-conf` in an example CMakeLists.txt is the retired
+# configure-time bridge.
 _EMIT_RE = re.compile(r"--emit\s+zephyr-conf\b")
 
-# CMakeLists.txt whose `board.yaml` cannot load AT ALL right now, with the
+# board.yaml paths (repo-relative) that cannot load AT ALL right now, with the
 # reason -- same allowlist-with-reason shape as
 # check_cmake_chip_list_parity.py's CHIP_LIST_EXCLUDED_WITH_REASON. A gate
 # that can't even load a board.yaml has nothing to byte-diff; that's a
@@ -63,7 +62,7 @@ _EMIT_RE = re.compile(r"--emit\s+zephyr-conf\b")
 # assert_exclusion_still_not_buildable every run, and fails loudly the
 # moment a reason stops holding -- this dict alone is not self-enforcing.
 EXCLUDED_WITH_REASON: dict[str, str] = {
-    "examples/multicore/rpmsg-imx93/m33/CMakeLists.txt":
+    "examples/multicore/rpmsg-imx93/board.yaml":
         "E1M-NX9101's only hw_rev (imx93 r1) is `status: tbd` -- refused "
         "outright by the hw_rev-buildable gate (#1025). Remove this entry "
         "once metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a "
@@ -72,83 +71,66 @@ EXCLUDED_WITH_REASON: dict[str, str] = {
 # (family_dir, hw_rev) each excluded path's reason cites, for the ratchet
 # assertion above -- keyed the same as EXCLUDED_WITH_REASON.
 EXCLUDED_FAMILY_HWREV: dict[str, tuple[str, str]] = {
-    "examples/multicore/rpmsg-imx93/m33/CMakeLists.txt": ("imx93", "r1"),
+    "examples/multicore/rpmsg-imx93/board.yaml": ("imx93", "r1"),
 }
 
 
 def find_cases(root: Path = REPO / "examples") -> list[tuple[Path, Path, str]]:
-    """(CMakeLists.txt path, board.yaml path, core id) for every scoped
-    `--emit zephyr-conf --core <id>` invocation under `root` (default
-    `examples/`; public so gen_example_alp_conf.py and alp_template.py share it)."""
+    """(app dir, board.yaml path, core id) for every enabled Zephyr core whose
+    `app:` resolves to a customer app dir under `root` (default `examples/`;
+    public so gen_example_alp_conf.py and alp_template.py share it). The
+    per-core `generated/alp.conf` lives in the app dir. A board.yaml named in
+    EXCLUDED_WITH_REASON is skipped; any other that fails to load raises."""
+    excluded = {(REPO / rel).resolve() for rel in EXCLUDED_WITH_REASON}
     cases = []
-    for cmakelists in sorted(root.glob("**/CMakeLists.txt")):
-        text = cmakelists.read_text(encoding="utf-8")
-        core_m = _CORE_RE.search(text)
-        if core_m is None:
+    for board_yaml in sorted(root.glob("**/board.yaml")):
+        if board_yaml.resolve() in excluded:
             continue
-        input_m = _INPUT_RE.search(text)
-        board_rel = input_m.group(1) if input_m else "board.yaml"
-        board_yaml = (cmakelists.parent / board_rel).resolve()
-        cases.append((cmakelists, board_yaml, core_m.group(1)))
+        project = load_board_yaml(board_yaml)
+        for slice_ in iter_buildable_slices(project):
+            if (slice_.os != "zephyr" or not slice_.app
+                    or slice_.app == STOCK_SHIM_APP):
+                continue
+            cases.append((_zephyr_app_dir(slice_.app, board_yaml.parent),
+                          board_yaml, slice_.core_id))
     return cases
 
 
-def _find_unscoped_emits(repo: Path = REPO) -> list[Path]:
-    """CMakeLists.txt files with a `--emit zephyr-conf` invocation that is
-    NOT `--core`-scoped -- the cross-core Kconfig leak ADR-0020's addendum
-    retired. `find_cases` silently skips a `--core`-less invocation, so
-    without this guard a re-introduced unscoped emit would pass the gate
-    while shipping cross-core-contaminated firmware. Fail loudly instead."""
-    leaks = []
-    for cmakelists in sorted(repo.glob("examples/**/CMakeLists.txt")):
-        text = cmakelists.read_text(encoding="utf-8")
-        if len(_EMIT_RE.findall(text)) > len(_CORE_RE.findall(text)):
-            leaks.append(cmakelists)
-    return leaks
+def find_bridges(repo: Path = REPO) -> list[Path]:
+    """CMakeLists.txt files that still run `--emit zephyr-conf` at configure
+    time -- the retired bridge (#866)."""
+    return [c for c in sorted(repo.glob("examples/**/CMakeLists.txt"))
+            if _EMIT_RE.search(c.read_text(encoding="utf-8"))]
 
 
 def main() -> int:
-    leaks = _find_unscoped_emits()
-    if leaks:
-        print("check_zephyr_conf_parity: unscoped `--emit zephyr-conf` "
-              "(no --core) -- the cross-core Kconfig leak ADR-0020 retired; "
-              "scope each to the one Zephyr core its CMakeLists.txt builds:",
-              file=sys.stderr)
-        for leak in leaks:
-            print(f"  · {leak.relative_to(REPO).as_posix()}", file=sys.stderr)
-        return 1
+    failures: list[str] = []
+
+    for rel, (family_dir, hw_rev) in EXCLUDED_FAMILY_HWREV.items():
+        stale = assert_exclusion_still_not_buildable(
+            REPO / "metadata", family_dir, hw_rev,
+            gate=f"check_zephyr_conf_parity.py ({rel})")
+        if stale:
+            failures.append(stale)
+        else:
+            print(f"SKIP {rel}: {EXCLUDED_WITH_REASON[rel]}")
+
+    for cmakelists in find_bridges():
+        failures.append(
+            f"{cmakelists.relative_to(REPO).as_posix()}: runs `--emit "
+            f"zephyr-conf` at configure time -- the bridge retired in #866; "
+            f"per-core alp.conf comes from gen_example_alp_conf.py / the "
+            f"build plan")
 
     cases = find_cases()
     if not cases:
-        print("check_zephyr_conf_parity: no --core-scoped zephyr-conf "
-              "CMakeLists.txt found -- suspiciously empty corpus",
-              file=sys.stderr)
+        print("check_zephyr_conf_parity: no Zephyr example cores found "
+              "-- suspiciously empty corpus", file=sys.stderr)
         return 1
 
-    failures: list[str] = []
-    for cmakelists, board_yaml, core_id in cases:
-        rel = cmakelists.relative_to(REPO).as_posix()
-        if rel in EXCLUDED_WITH_REASON:
-            family_dir, hw_rev = EXCLUDED_FAMILY_HWREV[rel]
-            stale = assert_exclusion_still_not_buildable(
-                REPO / "metadata", family_dir, hw_rev,
-                gate=f"check_zephyr_conf_parity.py ({rel})")
-            if stale:
-                failures.append(stale)
-            else:
-                print(f"SKIP {rel}: {EXCLUDED_WITH_REASON[rel]}")
-            continue
-        if not board_yaml.is_file():
-            failures.append(f"{rel}: board.yaml not found at {board_yaml}")
-            continue
-        try:
-            project = load_board_yaml(board_yaml)
-        except OrchestratorError as e:
-            failures.append(f"{rel}: board.yaml failed to load ({e})")
-            continue
-        if core_id not in project.cores:
-            failures.append(f"{rel}: --core {core_id} not in board.yaml")
-            continue
+    for app_dir, board_yaml, core_id in cases:
+        rel = app_dir.relative_to(REPO).as_posix()
+        project = load_board_yaml(board_yaml)
         want = _slice_alp_conf(project, project.cores[core_id])
 
         proc = subprocess.run(
@@ -159,26 +141,26 @@ def main() -> int:
             env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=REPO)
         if proc.returncode != 0:
             failures.append(f"{rel}: alp_project.py --core {core_id} "
-                             f"failed (rc={proc.returncode}): {proc.stderr}")
+                            f"failed (rc={proc.returncode}): {proc.stderr}")
             continue
-        got = proc.stdout
-        if got != want:
+        if proc.stdout != want:
             failures.append(
-                f"{rel}: CMakeLists.txt-emitted alp.conf (core {core_id}) "
-                f"!= planner-materialised alp.conf -- the two paths have "
-                f"diverged")
+                f"{rel}: `alp_project.py --emit zephyr-conf --core "
+                f"{core_id}` != planner-materialised alp.conf -- the two "
+                f"paths have diverged")
         else:
             print(f"OK   {rel} (core {core_id})")
 
     if failures:
-        print(f"\ncheck_zephyr_conf_parity: {len(failures)} mismatch(es):",
+        print(f"\ncheck_zephyr_conf_parity: {len(failures)} problem(s):",
               file=sys.stderr)
         for f in failures:
             print(f"  · {f}", file=sys.stderr)
         return 1
 
-    print(f"\ncheck_zephyr_conf_parity: {len(cases)} example(s), "
-          f"CMakeLists.txt <-> build-plan alp.conf byte-identical.")
+    print(f"\ncheck_zephyr_conf_parity: {len(cases)} example core(s), "
+          f"no CMakeLists.txt bridge, alp_project.py emit <-> "
+          f"build-plan alp.conf byte-identical.")
     return 0
 
 

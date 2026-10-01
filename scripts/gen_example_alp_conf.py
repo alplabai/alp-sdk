@@ -11,9 +11,9 @@ Each example's ``testcase.yaml`` points ``EXTRA_CONF_FILE`` at
 ``generated/alp.conf``; it lives under ``generated/`` (git-ignored) because
 Zephyr auto-merges every ``*.conf`` beside ``prj.conf``.
 
-Walks every example ``CMakeLists.txt`` with a ``--core``-scoped
-``--emit zephyr-conf`` (the corpus ``check_zephyr_conf_parity.py`` pins) and
-writes ``<example dir>/generated/alp.conf`` for its core.
+Walks every example ``board.yaml`` (the corpus ``check_zephyr_conf_parity.py``
+pins) and writes ``<app dir>/generated/alp.conf`` for each enabled Zephyr core,
+where the app dir is the one ``west build`` is pointed at for that core.
 
 Usage:
 
@@ -34,12 +34,12 @@ from alp_orchestrate import load_board_yaml, OrchestratorError  # noqa: E402
 from alp_orchestrate.kconfig import _slice_alp_conf  # noqa: E402
 
 
-def generate(cmakelists: Path, board_yaml: Path, core_id: str) -> Path:
-    """Write and return ``<cmakelists dir>/generated/alp.conf``."""
+def generate(app_dir: Path, board_yaml: Path, core_id: str) -> Path:
+    """Write and return ``<app_dir>/generated/alp.conf``."""
     project = load_board_yaml(board_yaml)
     if core_id not in project.cores:
         raise OrchestratorError(f"--core {core_id} not in {board_yaml}")
-    out = cmakelists.parent / "generated" / "alp.conf"
+    out = app_dir / "generated" / "alp.conf"
     out.parent.mkdir(parents=True, exist_ok=True)
     # newline="" keeps the fragment byte-identical to the planner's on Windows.
     with open(out, "w", encoding="utf-8", newline="") as f:
@@ -51,21 +51,23 @@ def main(argv: list[str]) -> int:
     only = {Path(a).resolve() for a in argv}
     failures, n = [], 0
     seen: set[Path] = set()
-    for cmakelists, board_yaml, core_id in parity.find_cases():
-        if only and cmakelists.parent.resolve() not in only:
+    for app_dir, board_yaml, core_id in parity.find_cases():
+        if only and app_dir.resolve() not in only:
             continue
-        seen.add(cmakelists.parent.resolve())
-        rel = cmakelists.relative_to(REPO).as_posix()
-        if rel in parity.EXCLUDED_WITH_REASON:
-            print(f"SKIP {rel}: {parity.EXCLUDED_WITH_REASON[rel]}")
-            continue
+        seen.add(app_dir.resolve())
         try:
-            generate(cmakelists, board_yaml, core_id)
+            generate(app_dir, board_yaml, core_id)
             n += 1
         except (OrchestratorError, OSError) as e:
-            failures.append(f"{rel}: {e}")
+            failures.append(f"{app_dir.relative_to(REPO).as_posix()}: {e}")
     for d in sorted(only - seen):
-        failures.append(f"{d}: matches no --core zephyr-conf example")
+        for rel, why in parity.EXCLUDED_WITH_REASON.items():
+            bdir = (REPO / rel).parent.resolve()
+            if d == bdir or bdir in d.parents:
+                print(f"SKIP {rel}: {why}")
+                break
+        else:
+            failures.append(f"{d}: matches no Zephyr example core")
     for f in failures:
         print(f"gen_example_alp_conf: {f}", file=sys.stderr)
     print(f"gen_example_alp_conf: wrote {n} generated/alp.conf")

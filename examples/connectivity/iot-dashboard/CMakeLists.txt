@@ -1,20 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 cmake_minimum_required(VERSION 3.20.0)
 
-# Resolve the alp-sdk root.  In-tree the SDK is the example's
-# grandparent directory; out-of-tree customers point ALP_SDK_ROOT
-# at their checkout.
-if(DEFINED ENV{ALP_SDK_ROOT})
-    set(ALP_SDK_ROOT $ENV{ALP_SDK_ROOT})
-else()
-    get_filename_component(ALP_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../.. ABSOLUTE)
-endif()
-
-# PYTHON_EXECUTABLE is only set after find_package(Zephyr);
-# we need a Python interpreter at configure time *before*
-# that, so resolve one ourselves here.
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
-
 # Auto-apply the RK055HDMIPI4MA0 DSI shield on the AEN M55-HP board targets
 # this app's board.yaml actually names (`alp_e1m_aen801_m55_hp/...` and
 # `alp_e1m_aen803_m55_hp/...`) -- this app's only core (board.yaml
@@ -59,34 +45,6 @@ endif()
 if(DEFINED BOARD AND BOARD MATCHES "^alp_e1m_aen80[13]_m55_hp(/|$)" AND NOT DEFINED SHIELD)
     list(APPEND SHIELD e1m_evk_rk055hdmipi4ma0)
 endif()
-
-# Place alp.conf in the build-tree `generated/` subdir, NOT at the
-# build-dir root.  Zephyr's kconfig.cmake greps ${APPLICATION_BINARY_DIR}/*.conf
-# at the END of the merge-config-files list (cmake/modules/kconfig.cmake line 303
-# in v4.4.0), so any .conf file dropped in the build-root wins over every
-# `EXTRA_CONF_FILE=...` overlay passed via `extra_args` in testcase.yaml --
-# including the native_sim.conf overlay this app uses for its native_sim-only
-# panel wiring and its own CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y acknowledgement
-# (see native_sim.conf).  Burying the file one level deeper keeps that
-# overlay chain working as expected.
-set(_alp_generated ${CMAKE_CURRENT_BINARY_DIR}/generated/alp.conf)
-execute_process(
-    COMMAND ${Python3_EXECUTABLE}
-            ${ALP_SDK_ROOT}/scripts/alp_project.py
-            --input  ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml
-            --output ${_alp_generated}
-            --emit zephyr-conf --core m55_hp
-    RESULT_VARIABLE rc
-    OUTPUT_VARIABLE _alp_stdout
-    ERROR_VARIABLE  _alp_stderr
-)
-if(NOT rc EQUAL 0)
-    message(FATAL_ERROR
-        "alp_project.py failed (rc=${rc}); "
-        "check ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml.\n"
-        "stderr: ${_alp_stderr}")
-endif()
-list(APPEND EXTRA_CONF_FILE ${_alp_generated})
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(iot_dashboard LANGUAGES C)

@@ -2,32 +2,11 @@
 
 cmake_minimum_required(VERSION 3.20)
 
-if(DEFINED ENV{ALP_SDK_ROOT})
-    set(ALP_SDK_ROOT $ENV{ALP_SDK_ROOT})
-else()
-    get_filename_component(ALP_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../.. ABSOLUTE)
-endif()
-
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
-set(_alp_generated ${CMAKE_BINARY_DIR}/generated/alp.conf)
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${ALP_SDK_ROOT}/scripts/alp_project.py
-            --input ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml
-            --emit zephyr-conf --core m55_he
-            --output ${_alp_generated}
-    RESULT_VARIABLE _alp_rv
-    OUTPUT_VARIABLE _alp_stdout
-    ERROR_VARIABLE  _alp_stderr
-)
-if(NOT _alp_rv EQUAL 0)
-    message(FATAL_ERROR "alp_project.py failed (rv=${_alp_rv})\nstderr: ${_alp_stderr}")
-endif()
-list(APPEND EXTRA_CONF_FILE ${_alp_generated})
-
 # native_sim can't build board.yaml's `diagnostics.console: ram` (see
-# boards/native_sim_console.conf) -- append the override AFTER alp.conf so
-# it wins the merge, instead of relying on Zephyr's own `boards/<board>.conf`
-# auto-discovery (which merges BEFORE alp.conf and would lose).
+# boards/native_sim_console.conf) -- append the override AFTER the
+# generated alp.conf so it wins the merge, instead of relying on Zephyr's own
+# `boards/<board>.conf` auto-discovery (which merges BEFORE alp.conf and would
+# lose).
 if(BOARD MATCHES "^native_sim")
     list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_SOURCE_DIR}/boards/native_sim_console.conf)
 endif()

@@ -22,8 +22,7 @@ def _load():
 
 
 GEN = _load()
-CASES = [c for c in GEN.parity.find_cases()
-         if c[0].relative_to(REPO).as_posix() not in GEN.parity.EXCLUDED_WITH_REASON]
+CASES = GEN.parity.find_cases()
 
 
 def _example(rel):
@@ -38,7 +37,7 @@ def test_generated_conf_is_byte_identical_to_alp_project_emit(rel, core):
     d = _example(rel)
     assert GEN.main([str(d)]) == 0
     out = d / "generated" / "alp.conf"
-    case = next(c for c in CASES if c[0].parent == d)
+    case = next(c for c in CASES if c[0] == d)
     want = subprocess.run(
         [sys.executable, str(REPO / "scripts" / "alp_project.py"), "--input",
          str(case[1]), "--emit", "zephyr-conf", "--core", case[2]],
@@ -53,8 +52,8 @@ def test_unbuildable_example_is_skipped_not_failed(capsys):
 
 
 def _testcases():
-    for cmakelists, _board, _core in CASES:
-        tc = cmakelists.parent / "testcase.yaml"
+    for app_dir, _board, _core in CASES:
+        tc = app_dir / "testcase.yaml"
         if tc.is_file():
             yield tc
 
@@ -72,14 +71,15 @@ def test_every_test_loads_generated_alp_conf_first(tc):
         assert vals[0].split(";")[0] == "generated/alp.conf", f"{name}: {vals[0]}"
 
 
-def test_no_testcase_references_alp_conf_without_a_generating_cmakelists():
+def test_no_testcase_references_alp_conf_in_an_uncovered_dir():
     """Reverse guard: a testcase.yaml naming generated/alp.conf in a dir the
     generator doesn't cover would fail configure with 'File not found'."""
-    covered = {c[0].parent for c in CASES}
+    covered = {c[0] for c in CASES}
     for tc in (REPO / "examples").glob("**/testcase.yaml"):
         if "generated/alp.conf" in tc.read_text(encoding="utf-8"):
             assert tc.parent in covered, tc.relative_to(REPO).as_posix()
 
 
 def test_unmatched_dir_fails(capsys):
+    # aen-mcuboot-smoke has no board.yaml, so no per-core alp.conf to write.
     assert GEN.main([str(_example("examples/aen/aen-mcuboot-smoke"))]) == 1

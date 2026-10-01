@@ -220,7 +220,7 @@ blocked until the remediation is met. Tracked in #855.
    per-core config on `boot:`/OTA projects; `<image>` is the basename of the
    app directory handed to `west build` (sysbuild's own application image
    name), so the plan wires the per-core `alp.conf` itself instead of via
-   the app's `--core`-scoped `CMakeLists.txt` bridge (#870). When the app
+   the app's `--core`-scoped `CMakeLists.txt` bridge (#870; that bridge is since retired, #866). When the app
    directory is the project root the name depends on the root's directory
    name, so a consumer relocating a tokened plan must re-derive it. The seam-2 real-build proof of the
    sysbuild path (`iot-fleet-ota`) is the one deferred box on #871.

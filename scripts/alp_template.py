@@ -40,7 +40,7 @@ parameters, test wiring); this module actually materialises one --
     non-buildable scaffold, for any `sku` whose topology doesn't have
     that core (every cross-SoM-family sku the catalog declares, e.g.
     E1M-V2N101 for the AEN-canonical `minimal` template). `board.yaml`'s
-    `cores:` key and CMakeLists.txt's `--core` flag are re-derived from
+    `cores:` key is re-derived from
     `sku`'s own `metadata/e1m_modules/<sku>.yaml` `topology:` (see
     `_derive_core_renames`) whenever the canonical core isn't already
     valid for `sku`; a no-op (byte-identical) when it already is -- the
@@ -111,7 +111,6 @@ try:
 except ImportError:
     sys.exit("alp_template: PyYAML is required.  Install via `pip install pyyaml`.")
 
-from alp_orchestrate.orchestrator import _zephyr_app_dir
 from alp_project_loader import METADATA_ROOT
 
 REPO = Path(__file__).resolve().parent.parent
@@ -552,7 +551,7 @@ def _derive_core_renames(
     the shallow "byte-copy the example + swap som.sku" `render_to_
     envelope()` #864 shipped hard-coded the CANONICAL example's own
     core id -- e.g. `m55_hp`, an Alif-only Zephyr cluster -- into every
-    substituted board.yaml/CMakeLists.txt, emitting a non-buildable
+    substituted board.yaml, emitting a non-buildable
     scaffold for any cross-SoM-family sku: `alp_project.py --emit
     zephyr-conf --core m55_hp` against an E1M-V2N101 board.yaml fails
     with rc=1, "unknown core id ... did you mean ['a55_cluster',
@@ -574,8 +573,7 @@ def _derive_core_renames(
     replacement is `sku`'s own topology core sharing the same leading
     core-class letter (`m`/`a`), additionally requiring a Zephyr
     `board:` target for an `m`-class replacement (only that core is
-    ever `--core`-buildable, which is why CMakeLists.txt needs it too
-    -- see `_substitute_cmake_core`); an `a`-class utility core carries
+    ever `--core`-buildable); an `a`-class utility core carries
     no such requirement (it's only ever `os: off` in every template
     that declares one today).
 
@@ -1066,56 +1064,6 @@ def _substitute_board_yaml_pin_docs(text: str, renames: dict[str, str | None]) -
     return text
 
 
-def _substitute_cmake_core(text: str, old: str, new: str) -> str:
-    """Rewrite CMakeLists.txt's `alp_project.py --emit zephyr-conf
-    --core <old>` invocation to the re-derived core id."""
-    pattern = re.compile(rf"(--core\s+){re.escape(old)}\b")
-    new_text, n = pattern.subn(lambda m: f"{m.group(1)}{new}", text)
-    if n != 1:
-        raise TemplateError(
-            f"CMakeLists.txt must have exactly one `--core {old}` to "
-            f"re-derive to {new!r} (found {n})")
-    return new_text
-
-
-def _cmake_core_map(record: dict[str, Any], example_dir: Path) -> dict[str, str]:
-    """{CMakeLists.txt relpath (posix, example-root-relative): core_id}
-    for every ZEPHYR core the catalog's `cores` field declares (issue
-    #1275 item 1) -- the fix for the single-core assumption that used to
-    apply ONE re-derived `--core` rename to every `*CMakeLists.txt` file
-    a template happened to own, silently correct only by accident (every
-    shipped multi-CMakeLists template today has exactly one supported
-    sku, so the rename path was never actually exercised against a
-    second file -- see `_derive_core_renames`'s own docstring for the
-    same "unreachable but latently wrong" class of bug).
-
-    Reuses `alp_orchestrate.orchestrator._zephyr_app_dir` -- the SAME
-    function `west build`'s app-dir argument (and
-    `check_core_cmakelists_mapping.py`'s gate) resolve `cores.<id>.app`
-    through -- rather than re-deriving the "self-contained app dir vs.
-    sources-only dir whose CMakeLists.txt lives at the parent" rule a
-    second time; a resolver that disagreed would silently re-target the
-    wrong file. A non-Zephyr core (`os: yocto`/`off`/`baremetal`) is
-    skipped: it either has no `--core` literal to rewrite at all (a
-    Yocto CMakeLists.txt never invokes `--emit zephyr-conf`) or, for
-    `off`, no `dir` to resolve in the first place."""
-    out: dict[str, str] = {}
-    for core in record.get("cores", []):
-        if core.get("os") != "zephyr" or not core.get("dir"):
-            continue
-        # #1126 containment guard: validate core["dir"] the same way every
-        # other catalog-sourced path in this file is validated, BEFORE
-        # handing it to `_zephyr_app_dir` (which has no containment check
-        # of its own and would otherwise let `../x` walk out of
-        # `example_dir` and surface a bare ValueError from `.relative_to`
-        # below instead of PathEscapeError).
-        core_dir = _safe_join(example_dir, core["dir"], what="core dir")
-        app_dir = _zephyr_app_dir(str(core_dir), example_dir)
-        rel = (app_dir / "CMakeLists.txt").relative_to(example_dir).as_posix()
-        out[rel] = core["id"]
-    return out
-
-
 # ---------------------------------------------------------------------
 # --emit scaffold content adaptation (issue #864 follow-up)
 # ---------------------------------------------------------------------
@@ -1581,7 +1529,7 @@ def render_to_envelope(
     and top-level `preset:` are substituted for `sku`'s own default
     board (metadata/e1m_modules/<sku>.yaml `default_board:`). The app
     CORE is re-derived too (`_derive_core_renames`): `board.yaml`'s
-    `cores:` key(s) and CMakeLists.txt's `--core` flag are rewritten
+    `cores:` key(s) are rewritten
     from the canonical example's own SoM core (e.g. `m55_hp`) to
     `sku`'s own Zephyr-buildable core (e.g. `m33_sm` for E1M-V2N101)
     whenever the canonical core isn't already valid for `sku` -- this
@@ -1657,14 +1605,6 @@ def render_to_envelope(
     target_board = _core_board(
         sku, app_core_sub[1] if app_core_sub else app_core_old, metadata_root)
     docs_ref = _docs_ref(base)
-    # CMakeLists.txt per-core map (issue #1275 item 1): each Zephyr core
-    # the catalog's `cores` field declares gets its OWN `--core` rename
-    # applied to its OWN CMakeLists.txt -- fixes the single-core
-    # assumption above (app_core_sub) blindly re-applying ONE rename to
-    # every `*CMakeLists.txt` file a multi-core template owns. See
-    # `_cmake_core_map`'s docstring.
-    cmake_core_for = _cmake_core_map(record, example_dir)
-
     out: list[tuple[str, str]] = []
     for rel, data in _rendered_bytes(template_id, record, render_plan.files, resolved, base):
         try:
@@ -1702,10 +1642,6 @@ def render_to_envelope(
             # rewrite -- only README.md did.
             text = _scaffold_bare_repo_paths(text, docs_ref)
         elif rel.endswith("CMakeLists.txt"):
-            this_core = cmake_core_for.get(rel)
-            if this_core and core_renames and this_core in core_renames:
-                text = _substitute_cmake_core(
-                    text, this_core, core_renames[this_core])
             text = _scaffold_cmakelists(text)
         elif rel == "README.md":
             text = _scaffold_readme(
@@ -1797,8 +1733,8 @@ def validate(
         # EXTRA_CONF_FILE; nothing else writes it in a temp tree.
         import check_zephyr_conf_parity as _parity
         import gen_example_alp_conf as _gen
-        for cml, board_yaml, core_id in _parity.find_cases(tmp):
-            _gen.generate(cml, board_yaml, core_id)
+        for app_dir, board_yaml, core_id in _parity.find_cases(tmp):
+            _gen.generate(app_dir, board_yaml, core_id)
 
         outdir = tmp / "twister-out"
         env = {**os.environ, "PYTHONIOENCODING": "utf-8"}

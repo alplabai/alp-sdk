@@ -102,13 +102,12 @@ Concretely:
 
 - **Don't edit `prj.conf` directly.**  The minimum-correct
   `prj.conf` in a v0.3 alp-sdk app is empty (or carries only a
-  comment).  The application's `CMakeLists.txt` invokes
-  `scripts/alp_project.py` at configure time and layers the
-  generated `alp.conf` over `prj.conf` via Zephyr's
-  `EXTRA_CONF_FILE` cmake variable.  `rsource` is NOT valid in a
-  `.conf` file (it is a Kconfig-source directive only) -- see the
-  worked example at `examples/peripheral-io/gpio-button-led/CMakeLists.txt`
-  for the correct wiring.
+  comment).  `tan build` (or `scripts/gen_example_alp_conf.py` for twister
+  and a bare `west build`) generates `alp.conf` from `board.yaml` and
+  layers it over `prj.conf` via Zephyr's `EXTRA_CONF_FILE` cmake variable;
+  the application's `CMakeLists.txt` runs no loader step.  `rsource` is NOT
+  valid in a `.conf` file (it is a Kconfig-source directive only) -- see
+  [`board-config-emit.md`](board-config-emit.md) for the wiring.
 - **Don't pass extra `-D` flags to `cmake` for SDK options.**  The
   loader emits the right set; passing extra flags risks divergence
   from the declared config.
