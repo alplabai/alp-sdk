@@ -42,7 +42,7 @@
         "generated": [
           {
             "path": "build/generated/alp.conf",
-            "note": "Emitted by scripts/alp_project.py --emit zephyr-conf at CMake configure time; not committed."
+            "note": "Emitted by `tan build` (the build plan configArtefacts), or by scripts/gen_example_alp_conf.py for twister / bare west build; not committed."
           }
         ]
       },
@@ -112,7 +112,7 @@
         "generated": [
           {
             "path": "build/generated/alp.conf",
-            "note": "Emitted by scripts/alp_project.py --emit zephyr-conf at CMake configure time; not committed."
+            "note": "Emitted by `tan build` (the build plan configArtefacts), or by scripts/gen_example_alp_conf.py for twister / bare west build; not committed."
           }
         ]
       },
@@ -192,7 +192,7 @@
         "generated": [
           {
             "path": "build/generated/alp.conf",
-            "note": "Emitted by scripts/alp_project.py --emit zephyr-conf at CMake configure time; not committed."
+            "note": "Emitted by `tan build` (the build plan configArtefacts), or by scripts/gen_example_alp_conf.py for twister / bare west build; not committed."
           }
         ]
       },
@@ -270,7 +270,7 @@
         "generated": [
           {
             "path": "build/generated/alp.conf",
-            "note": "Emitted by scripts/alp_project.py --emit zephyr-conf at CMake configure time; not committed."
+            "note": "Emitted by `tan build` (the build plan configArtefacts), or by scripts/gen_example_alp_conf.py for twister / bare west build; not committed."
           },
           {
             "path": "build/generated/alp/system_ipc.h",
@@ -335,7 +335,7 @@
         "generated": [
           {
             "path": "build/generated/alp.conf",
-            "note": "Emitted by scripts/alp_project.py --emit zephyr-conf at CMake configure time; not committed."
+            "note": "Emitted by `tan build` (the build plan configArtefacts), or by scripts/gen_example_alp_conf.py for twister / bare west build; not committed."
           }
         ]
       },
@@ -409,7 +409,7 @@
         "generated": [
           {
             "path": "build/generated/alp.conf",
-            "note": "Emitted by scripts/alp_project.py --emit zephyr-conf at CMake configure time; not committed."
+            "note": "Emitted by `tan build` (the build plan configArtefacts), or by scripts/gen_example_alp_conf.py for twister / bare west build; not committed."
           }
         ]
       },
@@ -485,7 +485,7 @@
         "generated": [
           {
             "path": "build/generated/alp.conf",
-            "note": "Emitted by scripts/alp_project.py --emit zephyr-conf at CMake configure time; not committed."
+            "note": "Emitted by `tan build` (the build plan configArtefacts), or by scripts/gen_example_alp_conf.py for twister / bare west build; not committed."
           }
         ]
       },
@@ -550,7 +550,7 @@
         "generated": [
           {
             "path": "build/generated/alp.conf",
-            "note": "Emitted by scripts/alp_project.py --emit zephyr-conf at CMake configure time; not committed."
+            "note": "Emitted by `tan build` (the build plan configArtefacts), or by scripts/gen_example_alp_conf.py for twister / bare west build; not committed."
           }
         ]
       },
@@ -614,7 +614,7 @@
         "generated": [
           {
             "path": "build/generated/alp.conf",
-            "note": "Emitted by scripts/alp_project.py --emit zephyr-conf at CMake configure time (once per core); not committed."
+            "note": "Emitted by `tan build` (the build plan configArtefacts, once per core), or by scripts/gen_example_alp_conf.py for twister / bare west build; not committed."
           }
         ]
       },

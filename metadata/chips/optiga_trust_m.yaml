@@ -67,3 +67,5 @@ physical:
     - { pad: "08", signal: "SCL" }
     - { pad: "09", signal: "RST" }
     - { pad: "10", signal: "VCC" }
+tracking:
+  blocker: "vendor library licence review pending"

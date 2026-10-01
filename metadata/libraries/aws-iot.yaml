@@ -22,18 +22,15 @@
 #   cannot carry that key, so a project entry emitted by `--emit west-libraries`
 #   must add `submodules: true` by hand.  One umbrella pin (not per-library
 #   west projects) keeps the pin identical to what AWS tests together.
-#   The AWS SDK is still a generic CMake C SDK with NO official upstream Zephyr
-#   module.yml or master Kconfig symbol, so packaging/build glue is a follow-up;
-#   the pin at least makes the source revision reproducible and lets
-#   `--emit west-libraries` produce a concrete west project entry.
+#   The AWS SDK is a generic CMake C SDK with NO official upstream Zephyr
+#   module.yml or Kconfig symbol; the Zephyr build glue is in-tree
+#   (vendors/aws-iot/).
 #
-# Enablement is BY MODULE PRESENCE, not a Kconfig gate.  There is no single
-# upstream `CONFIG_AWS_IOT=y` enable symbol to transcribe (the SDK is configured
-# through per-library CMake options + app code, not one Zephyr master switch).
-# `integration.zephyr` therefore carries `module:` + a `west:` pin and NO
-# `kconfig:`; inventing a symbol is forbidden (ADR 0018).  The emitter renders
-# the selection tag with no CONFIG line until packaging confirms a real enable
-# symbol, if one exists.
+# Enablement: `CONFIG_ALP_AWS_IOT=y` (zephyr/Kconfig.alp-libraries, `depends on
+# ALP_SDK`).  The upstream SDK has no zephyr/module.yml or Kconfig of its own,
+# so the symbol is alp-sdk's own gate over in-tree build glue under
+# vendors/aws-iot/ that compiles the west-pinned checkout; see that README.
+# Needs `west update --group-filter +extras-cloud`.
 #
 # Version:  `202412.00` -- exact upstream LTS release tag from
 #   github.com/aws/aws-iot-device-sdk-embedded-C.
@@ -60,9 +57,10 @@ requires:
 
 integration:
   zephyr:
-    # Enable-by-presence source pin (see header): the REAL upstream repo is
-    # named, with NO invented Kconfig.  Emit renders a library tag plus a west
-    # project entry, but no CONFIG line until Zephyr packaging confirms one.
+    # Alp-owned enable symbol over in-tree glue (vendors/aws-iot/); the real
+    # upstream repo is named by `module:` + the exact west pin below.
+    kconfig:
+      - CONFIG_ALP_AWS_IOT=y
     module: aws-iot-device-sdk-embedded-C
     west:
       name: aws-iot-device-sdk-embedded-C

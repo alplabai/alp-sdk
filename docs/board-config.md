@@ -102,13 +102,12 @@ Concretely:
 
 - **Don't edit `prj.conf` directly.**  The minimum-correct
   `prj.conf` in an alp-sdk app is empty (or carries only a
-  comment).  The application's `CMakeLists.txt` invokes
-  `scripts/alp_project.py` at configure time and layers the
-  generated `alp.conf` over `prj.conf` via Zephyr's
-  `EXTRA_CONF_FILE` cmake variable.  `rsource` is NOT valid in a
-  `.conf` file (it is a Kconfig-source directive only) -- see the
-  worked example at `examples/peripheral-io/gpio-button-led/CMakeLists.txt`
-  for the correct wiring.
+  comment).  `tan build` (or `scripts/gen_example_alp_conf.py` for twister
+  and a bare `west build`) generates `alp.conf` from `board.yaml` and
+  layers it over `prj.conf` via Zephyr's `EXTRA_CONF_FILE` cmake variable;
+  the application's `CMakeLists.txt` runs no loader step.  `rsource` is NOT
+  valid in a `.conf` file (it is a Kconfig-source directive only) -- see
+  [`board-config-emit.md`](board-config-emit.md) for the wiring.
 - **Don't pass extra `-D` flags to `cmake` for SDK options.**  The
   loader emits the right set; passing extra flags risks divergence
   from the declared config.
@@ -119,20 +118,21 @@ If you find yourself reaching for a hand-edit because `board.yaml`
 can't express what you want, file an issue -- the right fix is to
 extend the schema, not to bypass it.
 
-### Today's gaps
+### Today's gaps (v0.3 -> v0.4)
 
 `board.yaml` covers the SoM + board + OS backend + inference + IoT
 features + optional libraries + Zephyr peripherals today.  DTS
 overlays for board wiring (`--emit dts-overlay`) and `west.yml`
 libraries auto-pinning (`--emit west-libraries`) were previously
-tracked as v0.4 gaps; both are closed -- both shipped in v0.3.  One
-gap remains where hand-written config still leaks in:
+tracked as v0.4 gaps; both are closed -- both ship in v0.3.  One
+gap remains where hand-written config still leaks in, targeted for
+v0.4:
 
 1. **Per-test `prj.conf` in `tests/zephyr/<area>/`.**  The
    in-repo test infrastructure still uses hand-written
    `prj.conf` files.  These are SDK-internal (not consumer-
    facing) and stay as-is until the loader handles test-style
-   configs.
+   configs in v0.4.
 
 The loader's `--emit dts-overlay` mode parses
 `include/alp/boards/<board>.h` and generates the bus aliases
@@ -145,11 +145,11 @@ in-tree Zephyr board file yet under
 [`zephyr/boards/alp/`](../zephyr/boards/alp/); the customer fills
 those in place without renumbering.
 
-Consumers writing apps from scratch should still use
+For v0.3, consumers writing apps from scratch should still use
 `board.yaml` as the canonical config and treat the per-test
 `prj.conf` gap as a short-term hand-override.  The migration path
-to the single-source-of-truth model is purely additive on top of
-the current schema.
+to the v0.4 single-source-of-truth model is purely additive on
+top of v0.3's schema.
 
 ## Why one file
 

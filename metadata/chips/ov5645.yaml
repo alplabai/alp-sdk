@@ -114,3 +114,5 @@ physical:
     - { pad: J5,  signal: EGND }
     - { pad: J6,  signal: EVDD }
     - { pad: J7,  signal: PVDD }
+tracking:
+  blocker: "ADR 0017 tier decision pending"

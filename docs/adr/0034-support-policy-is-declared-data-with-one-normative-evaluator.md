@@ -114,6 +114,7 @@ it under audit; they do not re-derive it from prose.**
    `alp_project.py` at all. An earlier draft of this clause said 251, which no
    measurement reproduces -- the figure is load-bearing for this clause and for
    the alternative rejected below, so it is stated with its command.
+   (Historical: #866 later retired the 96 `--emit zephyr-conf` configure-time calls; the `--emit ipc-contract-h` configure-time calls in four example `CMakeLists.txt` (`multicore/heterogeneous-offload/m33_sm`, `multicore/rpmsg-aen/m55_hp`, `multicore/rpmsg-imx93/m33`, `multicore/rpmsg-v2n/m33_sm`) and the `west alp-*` commands still reach the evaluator.)
    An evaluator those paths cannot reach is not an option.
 
 3. **Consumers call it or port it under a hash-pinned audit.** No consumer

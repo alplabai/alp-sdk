@@ -53,13 +53,15 @@ BMP581 datasheet BST-BMP581-DS004 s5.6, or
 
 ```bash
 # Standalone, native_sim (emul I2C; bmp581_init NACKs cleanly):
+# writes examples/peripheral-io/i2c-master/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/i2c-master
 west build -b native_sim/native/64 examples/peripheral-io/i2c-master \
-    -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
 west build -t run
 
 # On real silicon, point -b at the SoM's Zephyr board target.
 # Example for E1M-AEN801:
-west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/peripheral-io/i2c-master
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/peripheral-io/i2c-master -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 

@@ -350,15 +350,19 @@ It enables the console and (on Alif) binds the CC3501E companion.
 **Build for native_sim (host toolchain, no silicon):**
 
 ```sh
-west build -p -b native_sim/native/64 examples/peripheral-io/alp-console
+# writes examples/peripheral-io/alp-console/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/alp-console
+west build -p -b native_sim/native/64 examples/peripheral-io/alp-console -- -DEXTRA_CONF_FILE=generated/alp.conf
 ./build/zephyr/zephyr.exe
 ```
 
 **Build for the E1M-AEN801 bench board:**
 
 ```sh
+# writes examples/peripheral-io/alp-console/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/alp-console
 west build -p -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
-    examples/peripheral-io/alp-console
+    examples/peripheral-io/alp-console -- -DEXTRA_CONF_FILE=generated/alp.conf
 ```
 
 After flashing (see [bring-up-aen.md](bring-up-aen.md)):

@@ -133,3 +133,5 @@ physical:
     - { pad: A5,  signal: DGND }
     - { pad: A9,  signal: DVDD }
     - { pad: A10, signal: AGND }
+tracking:
+  blocker: "no child issue filed; not scheduled, deferred until a product selects the part"

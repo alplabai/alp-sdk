@@ -150,10 +150,12 @@ AEN SKU, not just a single-slot one; see `docs/secure-boot.md`).
 Direct build (without `tan build` orchestration):
 
 ```bash
+# writes examples/peripheral-io/gpio-button-led/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/gpio-button-led
 west build -b alif_e7_dk_rtss_he \
     examples/peripheral-io/gpio-button-led \
     --sysbuild \
-    -- -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf
+    -- -Dgpio-button-led_EXTRA_CONF_FILE=generated/alp.conf -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf
 ```
 
 Output artefacts under `build/`:
