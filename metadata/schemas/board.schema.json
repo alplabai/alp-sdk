@@ -734,7 +734,7 @@
         },
         "cacheable": {
           "type": "boolean",
-          "description": "Override the default cacheable hint.  Default carve-out is non-cacheable (cf. spec §6.8)."
+          "description": "Override the default cacheable hint.  Default carve-out is non-cacheable (cf. spec §6.8) and the generator emits CONFIG_DCACHE=n for its endpoint cores.  `true` is the `raw_shmem` opt-out for applications that own cache maintenance themselves (the SDK does none); rejected on `rpmsg`."
         },
         "address": {
           "type": "integer",
