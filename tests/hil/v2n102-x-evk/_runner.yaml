@@ -2,7 +2,9 @@
 #
 # Runner defaults for E1M-V2N102 (same silicon as V2N101, larger
 # memory) + E1M-X-EVK.  Inherits the portable spec set from
-# tests/hil/_common/.
+# tests/hil/_common/.  The SoM-agnostic ssh-run specs are the
+# v2n101-* set in ../v2n101-x-evk/ (the memory tier changes no
+# check; v2n101-emmc-block is size-independent).
 
 schema_version: 1
 board: alp_e1m_v2n102_m33_sm

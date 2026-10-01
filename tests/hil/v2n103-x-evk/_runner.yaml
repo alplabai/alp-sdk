@@ -3,7 +3,8 @@
 # Runner defaults for E1M-V2N103 (V2N101 silicon; catalogued 4 GB RAM /
 # 16 GB eMMC memory tier, metadata/e1m_modules/E1M-V2N103.yaml) +
 # E1M-X-EVK.  Inherits the portable spec set from tests/hil/_common/.
-# No SoM-specific specs exist in this dir yet.
+# No spec lives in this dir: the SoM-agnostic ssh-run specs are the
+# v2n101-* set in ../v2n101-x-evk/ (no check depends on the memory tier).
 #
 # NOTE: E1M-V2N101's OWN catalogue entry declares the same 4 GB
 # dram_mbit as this SKU, yet V2N101 currently ships the family-default
