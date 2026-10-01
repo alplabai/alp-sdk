@@ -19,3 +19,13 @@ chunk of more than 64 data bytes therefore failed, while the tiny `OTA_BEGIN` /
 - The `cc3501e_host_ota` fake slave now records frame count and size; new cases
   pin a 1024 B write as 16 frames with the image landing in order, a 130 B write
   as 64 + 64 + 2, and normal mode as a single frame.
+
+Bench, E1M-AEN803 serial 2026W36-0009, clean bridge firmware, with FINISH
+removed so nothing was ever staged. The first 64-byte `OTA_WRITE` now lands
+(device cursor 64), where every earlier run failed with `-5` at cursor 0. With
+the window holding the manifest's worth of bytes, the bridge calls
+`psa_fwu_start`. That call correctly rejects the example's *inert* demo blob,
+which carries no valid signed manifest: the device latches OTA ERROR, fault
+stage 1 (`psa_fwu_start`), and replies `RESP_ERR_BUSY`. The link stays healthy
+before and after. A complete OTA on silicon needs a signed TI image and a real
+FINISH, which this change does not exercise.
