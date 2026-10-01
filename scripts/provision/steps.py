@@ -1290,16 +1290,21 @@ class Record(Step):
         # (same bundle_sha256) counts as done. A different bundle's flash does not.
         flashed = {}
         for n in FLASH_STEPS:
-            cur = ctx.state.get("steps", {}).get(n, {})
-            if cur.get("status") in ("done", "skipped"):
-                flashed[n] = ("", cur)
+            cur = ctx.state.get("steps", {}).get(n)
+            if cur is not None:
+                # The current run's own entry decides; no fallback past a failed/running one.
+                if cur.get("status") in ("done", "skipped"):
+                    flashed[n] = ("", cur)
                 continue
-            for g in reversed(ctx.state.get("superseded", [])):
-                old = g.get("steps", {}).get(n, {})
-                if g.get("bundle_sha256") == ctx.state.get("bundle_sha256") and old.get("status") in ("done", "skipped"):
-                    flashed[n] = (f" (flash step {n} from superseded run, tool_rev {str(g.get('tool_rev'))[:12]}, "
-                                  f"{old.get('finished') or old.get('ts') or old.get('at') or 'time n/a'})", old)
-                    break
+            # The NEWEST superseded group holding an entry for n decides: an older
+            # same-bundle write was overwritten by whatever came after it.
+            g = next((g for g in reversed(ctx.state.get("superseded", [])) if n in g.get("steps", {})), None)
+            if g is None:
+                continue
+            old = g["steps"][n]
+            if g.get("bundle_sha256") == ctx.state.get("bundle_sha256") and old.get("status") in ("done", "skipped"):
+                flashed[n] = (f" (flash step {n} from superseded run, tool_rev {str(g.get('tool_rev'))[:12]}, "
+                              f"{old.get('finished') or old.get('ts') or old.get('at') or 'time n/a'})", old)
         for n, (_, old) in flashed.items():
             facts.update(old.get("evidence") or {})
         for n in STEP_NAMES:
