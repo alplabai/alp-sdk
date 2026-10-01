@@ -214,6 +214,7 @@ class Ctx:
                 _record_override(self, "emmc_cid_change", self.accept_cid_change)
             self.state["cid_anchor"] = seen.strip().lower()
             save_state(self.state_path, self.state)
+            self.accept_cid_change = None   # one adoption per run: a later swap is refused
             return
         raise Refused(f"{t.host} answers with eMMC CID {seen.strip().lower()}, but unit {self.serial} "
                       f"recorded {want.strip().lower()}: another unit is behind this address "
