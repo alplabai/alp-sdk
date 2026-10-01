@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from provision import gates, steps
+from provision import gates, ledger_out, steps
 from provision import linux_target as lt
 from provision.bench import Bench
 
@@ -1069,6 +1069,66 @@ def test_record_omits_bundle_facts_when_flashing_did_not_succeed(tmp_path):
 def test_record_writes_bundle_facts_after_successful_flashing(tmp_path):
     text = _record_with_bundle_facts(tmp_path, "done")
     assert "bl2_sha256" in text and "rootfs_bundle_version: som-9.9.9" in text, text
+
+
+def _record_after_supersession(tmp_path, old_sha, version="som-9.9.9", groups=None, cur_steps=None):
+    ctx = _ctx(tmp_path, execute=True)
+    cat = dict(CATALOGUE["keys"], **{k: {"group": "firmware", "source": "", "mode": "auto",
+                                        "ship_required": False}
+                                    for k in ("bl2_sha256", "rootfs_bundle_version")})
+    (ctx.ledger_root / "schema" / "v2n.keys.yaml").write_text(
+        yaml.safe_dump({"schema": 1, "family": "v2n", "keys": cat}), encoding="utf-8")
+    ev = {"bl2_sha256": "ab" * 32, "rootfs_bundle_version": version}
+    def grp(sha, status="done"):
+        return {"bundle_sha256": sha, "tool_rev": "oldrev",
+                "steps": {n: {"status": status, "at": "2026-09-30T20:42:45Z", "evidence": ev}
+                          for n in steps.FLASH_STEPS}}
+    ctx.state = {"bundle_sha256": "cur", "steps": cur_steps or {},
+                 "superseded": groups(grp) if groups else [grp(old_sha)]}
+    ctx.bundle["release_version"] = version
+    steps.run_steps(ctx, only=["record"])
+    u = ctx.unit_dir / f"{SERIAL}.unit.yaml"
+    return u.read_text(encoding="utf-8") if u.exists() else ""
+
+
+def test_record_takes_bundle_facts_from_a_tool_rev_only_supersession(tmp_path):
+    text = _record_after_supersession(tmp_path, "cur")
+    assert "rootfs_bundle_version: som-9.9.9" in text and "bl2_sha256" in text, text
+
+
+def _no_bundle_facts(text):
+    assert "rootfs_bundle_version" not in text and "bl2_sha256" not in text, text
+
+
+def test_record_ignores_flash_steps_superseded_by_a_different_bundle(tmp_path):
+    _no_bundle_facts(_record_after_supersession(tmp_path, "other"))
+
+
+def test_record_newer_different_bundle_hides_an_older_same_bundle_flash(tmp_path):
+    # Y (other bundle) was written AFTER X (current bundle): X's bytes are gone.
+    _no_bundle_facts(_record_after_supersession(
+        tmp_path, None, groups=lambda g: [g("cur"), g("other")]))
+
+
+def test_record_current_failed_flash_blocks_the_superseded_fallback(tmp_path):
+    _no_bundle_facts(_record_after_supersession(
+        tmp_path, "cur", cur_steps={"write_xspi": {"status": "failed"}}))
+
+
+def test_record_newest_superseded_same_bundle_failed_write_blocks_fallback(tmp_path):
+    _no_bundle_facts(_record_after_supersession(
+        tmp_path, None, groups=lambda g: [g("cur"), g("cur", "failed")]))
+
+
+def test_record_superseded_build_dir_provenance_still_blocks_ship(tmp_path):
+    text = _record_after_supersession(tmp_path, "cur", version="build-dir:/x")
+    assert "rootfs_bundle_version: build-dir:/x" in text
+    f = tmp_path / "written.unit.yaml"
+    f.write_text(text, encoding="utf-8")
+    unit = ledger_out.read_unit_yaml(f)
+    assert unit["disposition"] == "bench-only"       # record's build-dir default
+    assert any("unsigned --build-dir" in r for r in ledger_out.ship_check({**unit, "disposition": "ship"}, {}))
+
 
 
 def test_record_merges_evidence_of_steps_done_in_earlier_runs(tmp_path):
