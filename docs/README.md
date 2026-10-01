@@ -158,7 +158,7 @@ into the topic-specific docs.
 
 - `metadata/model_zoo/<id>.yaml` (schema:
   `metadata/schemas/model-zoo-v1.schema.json`, `schema_version: 1`;
-  directory doc: [metadata/model_zoo/README.md](../metadata/model_zoo/README.md))
+  directory doc: `metadata/model_zoo/README.md`)
   — the model-zoo data asset: per ADR-0028
   ([adr/0028-tan-owns-the-model-engine.md](adr/0028-tan-owns-the-model-engine.md),
   `Status: Proposed` — a working plan, not a decided architecture),
