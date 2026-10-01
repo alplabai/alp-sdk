@@ -1,9 +1,9 @@
 # board.yaml -- per-app project configuration for alp-console.
 #
 # Customer workflow: `tan init --from-example peripheral-io/alp-console`, change `som.sku` to your SoM MPN,
-# and `tan build`.  CMakeLists.txt invokes scripts/alp_project.py at
-# configure time and layers the generated alp.conf over prj.conf via
-# EXTRA_CONF_FILE.  The console rides the board's existing
+# and `tan build`, which plans alp.conf from this file; twister and a bare
+# west build read the pre-generated generated/alp.conf instead
+# (scripts/gen_example_alp_conf.py).  The console rides the board's existing
 # `chosen { zephyr,shell-uart }` / console UART -- no custom pins needed.
 
 som:

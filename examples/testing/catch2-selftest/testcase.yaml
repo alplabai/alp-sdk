@@ -13,6 +13,7 @@ sample:
 
 tests:
   alp_sdk.example.catch2_selftest:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     platform_allow:
       - native_sim
       - native_sim/native/64

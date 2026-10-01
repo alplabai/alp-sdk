@@ -319,8 +319,8 @@ def test_security_psa_attestation_optiga_rejected_when_som_lacks_it(
     real_meta = REPO / "metadata"
     shutil.copy(real_meta / "schemas" / "board.schema.json",
                 schemas / "board.schema.json")
-    shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
-                schemas / "som-preset-v1.schema.json")
+    shutil.copy(real_meta / "schemas" / "som-preset-v2.schema.json",
+                schemas / "som-preset-v2.schema.json")
     shutil.copy(real_meta / "schemas" / "soc-spec-v1.schema.json",
                 schemas / "soc-spec-v1.schema.json")
     real_soc_dir = real_meta / "socs" / "alif" / "ensemble"

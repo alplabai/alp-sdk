@@ -5,7 +5,7 @@
 # and default board for this SKU; `scripts/alp_project.py` and
 # the alp-studio pin allocator read it at build time.
 
-schema_version: 1
+schema_version: 2
 
 sku: E1M-V2N103
 family: renesas-rzv2n
@@ -320,7 +320,7 @@ helper_firmware:
     # what `update_channel` declares.
     flash_policy:   recovery_only
     update_channel: alp_ota_spi_bridge
-default_hw_rev:         r1
+default_hw_rev:         r2
 default_board:        E1M-X-EVK
 
 status:

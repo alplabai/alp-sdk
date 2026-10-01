@@ -24,4 +24,21 @@ typedef struct {
 	void *ctx;
 } alp_monotonic_counter_if;
 
+/* OPTIONAL external rollback anchor (issue #111 P2). A floor that lives
+ * OUTSIDE the store (SE NV counter, OTP version floor, ...), so a full
+ * reflash that rewinds the store AND its counter together still leaves the
+ * anchor ahead. Passed as a separate pointer to the *_anchored engine
+ * entry points; NULL = no anchor = behaviour identical to before.
+ *
+ * Contract: anchor_read() returns the highest entry count ever committed
+ * and anchored; anchor_advance(count) raises it to max(current, count) and
+ * never lowers it. The engine advances it only AFTER an append is fully
+ * committed, so the floor can lag the store by one entry but never lead it
+ * through a crash (see engine.c, "Anchor ordering"). */
+typedef struct {
+	alp_status_t (*read)(void *ctx, uint64_t *out_floor);
+	alp_status_t (*advance)(void *ctx, uint64_t count);
+	void *ctx;
+} alp_counter_anchor_if;
+
 #endif /* ALP_UPDATE_LOG_STORE_H */

@@ -270,6 +270,12 @@ RUHMI_DRPAI_TVM_DIR = "/path/to/built/rzv_drp-ai_tvm"
 #    automatically on the V2M MACHINEs once step 6's layer is present;
 #    set ALP_ENABLE_DEEPX_DXM1 = "0" in local.conf to leave it out.
 
+# 8b. The ONNX Runtime CPU floor (`PACKAGECONFIG[ort]`, own onnxruntime
+#     recipe) is on by default on V2N101/V2N102/V2N103 and, when the DEEPX
+#     runtime is off, V2M101/V2M102/V2M103 (`ALP_ENABLE_ORT_CPU`, "0" opts
+#     out).  With DEEPX on, V2M defaults it off: dx-rt brings its own
+#     libonnxruntime and the two packages collide.  AUTO never picks it.
+
 # 9. Build the image:
 bitbake alp-image-edge                 # dev image (passwordless root, bench tooling)
 # or the hardened production image, against the Alp distro identity:

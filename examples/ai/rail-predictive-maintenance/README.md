@@ -49,7 +49,9 @@ RAIL,100.0,59.334591,18.062400,6.2,CORRUGATION,0.81,120.0,0.0517,1
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/ai/rail-predictive-maintenance
+# writes examples/ai/rail-predictive-maintenance/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/ai/rail-predictive-maintenance
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/ai/rail-predictive-maintenance -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 

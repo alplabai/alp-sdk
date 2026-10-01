@@ -1563,6 +1563,30 @@ static int pdm_hw_bringup(const struct device *dev, bool cold_init)
 		 * must not do this.
 		 */
 		pdm_force_sleep(dev);
+
+		/* Issue #2167: quiesce residue from the previous image
+		 * BEFORE irq_config() enables the NVIC lines. A warm/Flow C
+		 * boot inherits PDM_INTERRUPT enables (0x303) and sticky
+		 * PDM_ERROR_IRQ/PDM_WARN_IRQ status; with the NVIC line then
+		 * live, pdm_error_handler() latched `overrun` and the first
+		 * START was refused with -EIO. Order: mask enables, read-clear
+		 * the sticky status (clear-on-read, Alif DFP drivers/source/
+		 * pdm.c:132,153), drop queued FIFO samples, clear the flag.
+		 */
+		sys_write32(0, reg_base + PDM_INTERRUPT_REGISTER);
+		(void)sys_read32(reg_base + PDM_ERROR_IRQ);
+		(void)sys_read32(reg_base + PDM_WARN_IRQ);
+		{
+			uint32_t cfg_val = sys_read32(reg_base + PDM_CONFIG_REGISTER);
+
+			pdm_ctl0_write_spacer(dev);
+			sys_write32(cfg_val | PDM_FIFO_CLEAR, reg_base + PDM_CONFIG_REGISTER);
+			pdm_ctl0_write_spacer(dev);
+			sys_write32(cfg_val, reg_base + PDM_CONFIG_REGISTER);
+		}
+		(void)sys_read32(reg_base + PDM_ERROR_IRQ);
+		(void)sys_read32(reg_base + PDM_WARN_IRQ);
+		pdata->overrun = false;
 	}
 
 	cfg->irq_config();

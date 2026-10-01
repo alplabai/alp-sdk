@@ -14,8 +14,10 @@ wave and writes it as 16-bit stereo PCM to ALP_E1M_I2S0.
 ## Build
 
 ```bash
+# writes examples/audio/i2s-tone/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/audio/i2s-tone
 west build -b native_sim/native/64 examples/audio/i2s-tone \
-    -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
 west build -t run
 ```
 

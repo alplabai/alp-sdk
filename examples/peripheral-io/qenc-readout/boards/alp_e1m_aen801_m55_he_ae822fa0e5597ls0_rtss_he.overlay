@@ -1,0 +1,33 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * E1M EVK rotary encoder on the Alif E8 (issue #2095). The E8's QEC block is
+ * an edge counter, not a quadrature decoder (#2037), so the encoder's two
+ * phases (ENC0_X/ENC0_Y on pads P3_0/P3_1) are decoded in software by
+ * Zephyr's gpio-qdec input driver; <alp/counter.h>'s gpio-qdec backend turns
+ * its INPUT_REL_WHEEL events into the position alp_qenc_get_position()
+ * returns. Same node as examples/aen/aen-qenc-readout's qdec_sw.
+ */
+
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+
+/ {
+	aliases {
+		alp-qenc0 = &qenc0;
+	};
+
+	qenc0: qenc0 {
+		compatible = "gpio-qdec";
+		gpios = <&gpio3 0 GPIO_ACTIVE_HIGH>, <&gpio3 1 GPIO_ACTIVE_HIGH>;
+		steps-per-period = <4>;
+		zephyr,axis = <INPUT_REL_WHEEL>;
+		sample-time-us = <500>;
+		idle-poll-time-us = <2000>;
+		idle-timeout-ms = <200>;
+	};
+};
+
+&gpio3 {
+	status = "okay";
+};

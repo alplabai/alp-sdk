@@ -155,7 +155,9 @@ before trusting `[2]`/`[3]` and the raw forensics slots.
 
 ```sh
 # from the repo root, native_sim build-only (CI artifact; bench-only at runtime)
-west build -b native_sim/native/64 examples/v2n/v2n-gd32-bridge-loopback
+# writes examples/v2n/v2n-gd32-bridge-loopback/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/v2n/v2n-gd32-bridge-loopback
+west build -b native_sim/native/64 examples/v2n/v2n-gd32-bridge-loopback -- -DEXTRA_CONF_FILE=generated/alp.conf
 ```
 
 This example is **V2N-only and jumpered-bench-only**. It builds clean

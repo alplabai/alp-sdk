@@ -130,6 +130,7 @@ On silicon with the CC3501E firmware up, expect `pass=8 fail=0`.
 ## Run under native_sim (CI gate)
 
 ```sh
+python3 scripts/gen_example_alp_conf.py examples/aen/aen-cc3501e-gpio   # writes generated/alp.conf (#866)
 west twister -T examples/aen/aen-cc3501e-gpio -p native_sim/native/64
 ```
 

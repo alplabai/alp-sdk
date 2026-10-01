@@ -6,6 +6,44 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "chip_id", "display_name", "vendor", "mpn_population", "datasheet", "bus", "kconfig", "families", "verification"],
+  "$defs": {
+    "rail_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "slave", "kind", "status_reg", "vset0_reg", "vset_mask", "dvs_regs", "enable_reg", "enable_bit", "range_reg", "range_bit", "ranges", "abs_min_mv", "abs_max_mv"],
+      "properties": {
+        "id": { "type": "string" }, "slave": { "type": "string" }, "kind": { "type": "string" }, "notes": { "type": "string" },
+        "status_reg": { "type": "integer", "minimum": 0 }, "vset0_reg": { "type": "integer", "minimum": 0 }, "vset_mask": { "type": "integer", "minimum": 0 },
+        "dvs_regs": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+        "enable_reg": { "type": "integer", "minimum": 0 }, "enable_bit": { "type": "integer", "minimum": 0 },
+        "range_reg": { "type": ["integer", "null"], "minimum": 0 }, "range_bit": { "type": ["integer", "null"], "minimum": 0 },
+        "ranges": { "type": "array" },
+        "abs_min_mv": { "type": "number" }, "abs_max_mv": { "type": "number" }
+      }
+    },
+    "channel_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "abs_min_mv", "abs_max_mv", "step_mv"],
+      "properties": {
+        "id": { "type": "string" }, "phases": { "type": "array" }, "role_v2n": { "type": "string" }, "role_v2n_m1": { "type": "string" }, "voltage_range": { "type": "string" },
+        "ctrl_reg": { "type": "integer", "minimum": 0 }, "en_bit": { "type": "integer", "minimum": 0 }, "vsel_bit": { "type": "integer", "minimum": 0 }, "dis_pd_bit": { "type": "integer", "minimum": 0 }, "vstep_bit": { "type": "integer", "minimum": 0 },
+        "vsel_lo_reg": { "type": "integer", "minimum": 0 }, "vsel_hi_reg": { "type": "integer", "minimum": 0 }, "vout_reg": { "type": "integer", "minimum": 0 },
+        "abs_min_mv": { "type": "number" }, "abs_max_mv": { "type": "number" },
+        "step_mv": { "type": "number" }, "base_mv": { "type": "number" }
+      }
+    },
+    "register_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type"],
+      "properties": {
+        "name": { "type": "string" }, "type": { "type": "string" }, "summary": { "type": "string" }, "slave": { "type": "string" },
+        "addr": { "type": "integer", "minimum": 0 }, "addr_range": { "type": "array" }, "default": {},
+        "write": { "enum": ["allow", "guarded", "deny"] }
+      }
+    }
+  },
   "properties": {
     "schema_version": { "type": "integer", "const": 1 },
     "chip_id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
@@ -35,14 +73,23 @@
     "cellular": { "type": "object" },
     "encoder": { "type": "object" },
     "protocol": { "type": "object" },
-    "register_table": { "type": "array" },
+    "register_table": { "type": "array", "items": { "$ref": "#/$defs/register_item" } },
     "interconnect": { "type": "object" },
-    "rails": { "type": "array" },
+    "rails": { "type": "array", "items": { "$ref": "#/$defs/rail_item" } },
     "crypto": { "type": "object" },
     "operation_mode": { "type": "string" },
-    "channels": { "type": "array" },
+    "channels": { "type": "array", "items": { "$ref": "#/$defs/channel_item" } },
     "control_lines": { "type": "array" },
     "upstream": { "type": "object" },
+    "license": { "type": "string" },
+    "tracking": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "issue": { "type": ["integer", "string"], "pattern": "^#?[0-9]+$" },
+        "blocker": { "type": "string" }
+      }
+    },
     "dependencies": { "type": "array" },
     "capacity": { "type": "object" },
     "pwm_routing": { "type": "object" },

@@ -3,7 +3,7 @@
 `metadata/registries/tier-a-library-ci.json`'s `familyMatrix[]` cells
 against each cell's SoM preset `topology.<core>`.
 
-`topology` is schema-typed as an object in som-preset-v1, but
+`topology` is schema-typed as an object in som-preset-v2, but
 `doc.get("topology") or {}` does not protect a non-empty scalar (e.g. a bare
 string, which is truthy) -- a malformed SoM preset used to reach
 `topology.get(core)` and raise `AttributeError`, aborting the whole gate

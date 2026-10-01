@@ -41,7 +41,7 @@ production firmware — there is no authentication on the serial port.
 ## Boot banner
 
 When `CONFIG_ALP_SDK_CONSOLE=y` is set, the boot-banner module
-(`src/zephyr/`, linked automatically) prints the SoM + SoC identity and a
+(`src/zephyr/alp_banner.c`, linked automatically) prints the SoM + SoC identity and a
 system summary before the shell prompt appears:
 
 ```
@@ -350,15 +350,19 @@ It enables the console and (on Alif) binds the CC3501E companion.
 **Build for native_sim (host toolchain, no silicon):**
 
 ```sh
-west build -p -b native_sim/native/64 examples/peripheral-io/alp-console
+# writes examples/peripheral-io/alp-console/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/alp-console
+west build -p -b native_sim/native/64 examples/peripheral-io/alp-console -- -DEXTRA_CONF_FILE=generated/alp.conf
 ./build/zephyr/zephyr.exe
 ```
 
 **Build for the E1M-AEN801 bench board:**
 
 ```sh
+# writes examples/peripheral-io/alp-console/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/alp-console
 west build -p -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
-    examples/peripheral-io/alp-console
+    examples/peripheral-io/alp-console -- -DEXTRA_CONF_FILE=generated/alp.conf
 ```
 
 After flashing (see [bring-up-aen.md](bring-up-aen.md)):
@@ -416,9 +420,6 @@ groups.  Dropping groups is most useful when code-size constraints are tight
 
 - **`alp pwm get`** — read back current PWM period/duty; blocked on
   portable `<alp/pwm.h>` having no duty-read surface (no `get` exists in v1).
-- **`alp companion ota status`** — query the CC3501E OTA slot state
-  (blocked on the PSA FWU session being owned by the OTA library;
-  re-enabling it from the shell needs a mutex, not yet wired).
 - **Full `alp clk` sub-tree** — per-node enable / rate-set verbs
   (SoC clock tree is read-only today; write verbs need the clock-control
   driver to expose a shell-safe rate-set path).

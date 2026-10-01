@@ -14,7 +14,7 @@
     "sku": {
       "type": "string",
       "pattern": "^E1M-(AEN[3-8][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3}|NX9[0-9]{3})$",
-      "description": "The SoM SKU this measurement was captured on. Same pattern as som-preset-v1.schema.json's `sku`; scripts/validate_metadata.py additionally requires `metadata/e1m_modules/<sku>.yaml` to actually exist -- a schema pattern match alone doesn't prove the preset is real."
+      "description": "The SoM SKU this measurement was captured on. Same pattern as som-preset-v2.schema.json's `sku`; scripts/validate_metadata.py additionally requires `metadata/e1m_modules/<sku>.yaml` to actually exist -- a schema pattern match alone doesn't prove the preset is real."
     },
     "hw_rev": {
       "type": "string",

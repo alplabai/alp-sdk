@@ -15,21 +15,25 @@ into eMMC boot partition 1 before the unit has any bootloader of its own:
 4. ``em_dcid`` runs ``EM_DCID`` and parses the CID the writer prints.
 
 Every prompt and error string is a module constant, copied from the
-Flash Writer's own output. The ROM banner has not been checked on this
-bench yet (see ``ROM_BANNER``). All console traffic goes through
+Flash Writer's own output. The ROM banner was checked on the bench on
+2026-10-01 ("SCI Download mode (Normal SCI boot)"). All console traffic goes through
 ``provision.bench.Console``; nothing here loops on console input itself.
 """
 
 from __future__ import annotations
 
 import re
+import time
 from pathlib import Path
 
 from provision.bench import BenchError, Console
 from provision.gates import BL2_MMC_SECTOR, FIP_SECTOR  # noqa: F401  (re-exported)
 
-# --- prompts (module constants; the ROM banner is still to be confirmed on the bench) ---
+# --- prompts (module constants) ---
 ROM_BANNER = r"SCI Download mode"
+# The ROM still prints after the banner; stream only after its full prompt line.
+ROM_READY = r"Load Program to SRAM\s*-+\r?\n"
+ROM_SETTLE_S = 0.3
 WRITER_PROMPT = r"\n>"
 AREA_PROMPT = r"Select area\(0-2\)>"
 SECTOR_PROMPT = r"Please Input Start Address in sector :"
@@ -71,6 +75,11 @@ def bin_to_srec(data: bytes, load_addr: int) -> bytes:
     return b"".join(out)
 
 
+def _crlf(blob: bytes) -> bytes:
+    """Normalise line endings to CRLF; the ROM rejects an LF-only S-record file."""
+    return re.sub(rb"\r?\n", b"\r\n", blob)
+
+
 def _stream(console: Console, blob: bytes) -> None:
     for i in range(0, len(blob), CHUNK):
         console.write(blob[i:i + CHUNK])
@@ -89,7 +98,9 @@ def load_writer(console: Console, mot: Path, timeout: float = 120.0) -> None:
     """Wait for the boot-ROM banner, stream the Flash Writer ``.mot``, wait for its prompt."""
     image = Path(mot).read_bytes()
     console.expect(ROM_BANNER, timeout)
-    _stream(console, image)
+    console.expect(ROM_READY, timeout)
+    time.sleep(ROM_SETTLE_S)
+    _stream(console, _crlf(image))
     console.expect(WRITER_PROMPT, timeout)
 
 

@@ -134,3 +134,5 @@ families:
 verification:
   hil_silicon:    untested
   smoke_tests:    null_arg_guard
+tracking:
+  blocker: "ADR 0017 tier decision pending"

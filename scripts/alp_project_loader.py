@@ -521,7 +521,8 @@ def resolve_memory_map(
          SoC `cores[]` list.
 
     The returned dicts have the keys defined by the memory_region
-    schema: `name`, `size_kib`, `accessible_from`, `cacheable` (plus
+    schema: `name`, `size_kib`, `accessible_from`, `cacheable`,
+    `write_authority` (always set explicitly on derived rows) (plus
     optional `base` only when the SoM preset's override declares one
     -- silicon-default bases stay unset, so downstream emitters know
     to use the silicon's defaults).
@@ -553,7 +554,10 @@ def resolve_memory_map(
     # authoritative base addresses (e.g. RZ/V2N OCRAM at 0x00010000).
     soc_memory_regions = soc_spec.get("memory_regions")
     if soc_memory_regions:
-        return list(soc_memory_regions)
+        # Every SoC-level region is RAM (no SoC declares a flash window
+        # here), so each is runtime-writable by the application.
+        return [{**r, "write_authority": "customer_runtime"}
+                for r in soc_memory_regions]
 
     # MRAM as one region (size in KiB; mram_mb -> *1024).
     mram_mb = variant.get("mram_mb")
@@ -563,6 +567,11 @@ def resolve_memory_map(
             "size_kib": int(mram_mb * 1024),
             "accessible_from": list(soc_cores),
             "cacheable": True,
+            # The whole-device alias spans MCUboot/ATOC/slot0/storage
+            # rows of differing authority, so no single value is true;
+            # `composite` is the schema's explicit word for that
+            # (ADR-0034 clause 4: stated, never defaulted).
+            "write_authority": "composite",
         })
 
     # SRAM banks. Per-core TCM banks get `accessible_from: [<core>]`;
@@ -585,6 +594,8 @@ def resolve_memory_map(
             "size_kib": int(size_kib),
             "accessible_from": accessible,
             "cacheable": not is_tcm,
+            # SRAM/TCM is RAM: runtime-writable by the application.
+            "write_authority": "customer_runtime",
         })
 
     return regions

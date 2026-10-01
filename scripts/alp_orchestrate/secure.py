@@ -85,7 +85,7 @@ def _boot_target_is_single_slot(project: BoardProject) -> bool:
     `loader._resolve_slot0_load_address` already call to answer this
     exact question -- instead of re-deriving the answer from
     `memory_map:` region NAMES.  The two disagree in general:
-    `metadata/schemas/som-preset-v1.schema.json` documents
+    `metadata/schemas/som-preset-v2.schema.json` documents
     `memory_map:` as an SDK build-policy override "ONLY for non-stock
     partitioning", not something only a disjoint-slot0 SoM sets --
     `docs/v0.6-tbd-and-assumptions.md` lists filling the V2N, AEN E7

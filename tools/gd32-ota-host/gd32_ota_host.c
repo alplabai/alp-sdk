@@ -28,8 +28,9 @@
 #include "alp/chips/gd32g553.h"
 #include "alp/peripheral.h"
 
-/* Wire ceiling for OTA_WRITE_CHUNK data: MAX_PAYLOAD (65) - offset(4) - len(1). */
-#define WIRE_CHUNK_MAX 60u
+/* Chunk data ceiling: the wire allows MAX_PAYLOAD (65) - offset(4) - len(1) = 60, but the
+ * firmware needs 8-aligned offsets, so every non-final chunk is a multiple of 8. */
+#define WIRE_CHUNK_MAX 56u
 
 static uint32_t crc32_zlib(const uint8_t *p, size_t n)
 {
@@ -65,27 +66,37 @@ static int sysfs_write(const char *path, const char *val)
 static void kernel_unbind(unsigned bus, unsigned addr)
 {
 	char link[128], tgt[256], path[256];
+	/* Block the signals across the detach so a signal cannot land between the
+	 * sysfs write and the state on_signal() needs to undo it. */
+	sigset_t all, old;
+	sigemptyset(&all);
+	sigaddset(&all, SIGINT);
+	sigaddset(&all, SIGTERM);
+	sigaddset(&all, SIGHUP);
+	sigprocmask(SIG_BLOCK, &all, &old);
 	snprintf(g_dev, sizeof(g_dev), "%u-%04x", bus, addr);
 	snprintf(link, sizeof(link), "/sys/bus/i2c/devices/%s/driver", g_dev);
 	ssize_t n = readlink(link, tgt, sizeof(tgt) - 1);
 	if (n < 0) {
 		printf("unbind: %s has no kernel driver bound\n", g_dev);
 		g_dev[0] = 0;
+		sigprocmask(SIG_SETMASK, &old, NULL);
 		return;
 	}
 	tgt[n] = 0;
 	snprintf(g_drv, sizeof(g_drv), "%s", basename(tgt));
+	snprintf(g_bind, sizeof(g_bind), "/sys/bus/i2c/drivers/%s/bind", g_drv);
 	snprintf(path, sizeof(path), "/sys/bus/i2c/drivers/%s/unbind", g_drv);
 	if (sysfs_write(path, g_dev) != 0) {
 		printf("unbind: %s from %s -> FAILED\n", g_dev, g_drv);
 		g_dev[0] = 0; /* nothing was detached, so nothing to re-bind */
-		return;
+	} else {
+		printf("unbind: %s from %s -> ok\n", g_dev, g_drv);
 	}
-	printf("unbind: %s from %s -> ok\n", g_dev, g_drv);
-	snprintf(g_bind, sizeof(g_bind), "/sys/bus/i2c/drivers/%s/bind", g_drv);
+	sigprocmask(SIG_SETMASK, &old, NULL);
 }
 
-/* SIGINT/SIGTERM mid-run: re-bind (async-signal-safe calls only) so the
+/* SIGINT/SIGTERM/SIGHUP mid-run: re-bind (async-signal-safe calls only) so the
  * bridge is not left without its kernel driver. */
 static void on_signal(int sig)
 {
@@ -237,6 +248,7 @@ int main(int argc, char **argv)
 
 	signal(SIGINT, on_signal);
 	signal(SIGTERM, on_signal);
+	signal(SIGHUP, on_signal);
 	if (do_unbind) kernel_unbind(bus, addr);
 
 	int        rc = 1;
@@ -252,6 +264,24 @@ int main(int argc, char **argv)
 	if (status_only) {
 		rc = 0;
 		goto out;
+	}
+
+	/* A previous run killed mid-session (SIGINT) leaves the bridge's OTA session open until
+	 * OTA_ABORT.  ERROR is left alone: BEGIN restarts from it.  Never sent from the signal
+	 * handler: it runs here, on the normal path, at startup. */
+	if (before.state == GD32G553_OTA_STATE_READY || before.state == GD32G553_OTA_STATE_BUSY ||
+	    before.state == GD32G553_OTA_STATE_VERIFIED) {
+		printf("stale OTA session (state=%s): sending OTA_ABORT
+", ota_state_name(before.state));
+		alp_status_t as = gd32g553_ota_abort(&g);
+		if (as != ALP_OK || gd32g553_ota_get_state(&g, &before) != ALP_OK ||
+		    before.state != GD32G553_OTA_STATE_IDLE) {
+			fprintf(stderr, "FAIL: OTA_ABORT status=%d, state=%s
+", (int)as, ota_state_name(before.state));
+			goto out;
+		}
+		printf("OTA_ABORT ok: state=%s
+", ota_state_name(before.state));
 	}
 
 	const uint32_t crc = crc32_zlib(buf, len);
@@ -291,7 +321,11 @@ int main(int argc, char **argv)
 		goto out;
 	}
 
+	/* chunk_max stays 0 after a lost BEGIN reply: fall back to the wire ceiling.  Every
+	 * non-final chunk must be a multiple of 8 so the next offset stays 8-aligned. */
 	size_t step = (chunk_max != 0 && chunk_max < WIRE_CHUNK_MAX) ? chunk_max : WIRE_CHUNK_MAX;
+	step &= ~(size_t)7;
+	if (step < 8) step = 8;
 
 	uint32_t got = 0;
 	for (size_t off = 0; off < len;) {
@@ -300,13 +334,26 @@ int main(int argc, char **argv)
 		for (;;) {
 			s = gd32g553_ota_write_chunk(&g, (uint32_t)off, buf + off, n, &got);
 			if (s == ALP_OK && got >= off + n) break;
-			if (++tries > 3) {
+			if (++tries <= 2) {
+				alp_delay_ms(20);
+				continue;
+			}
+			/* gd32-bridge-firmware#315: a BRD_I2C slave at 0x55 holds SDA low
+			 * after certain byte sequences, so the same frame times out every
+			 * time.  The same bytes framed at a different length pass: re-send
+			 * this chunk as a shorter 8-aligned piece, then resume full size. */
+			if (n <= 8) {
 				fprintf(stderr, "FAIL: chunk @%zu status=%d got=%u\n", off, (int)s, got);
 				goto out;
 			}
-			alp_delay_ms(20);
+			n     = ((n / 2) + 7) & ~(size_t)7;
+			tries = 0;
+			printf("chunk @%zu: stalled, retrying as %zu bytes\n", off, n);
 		}
-		off += n;
+		/* The reply's high-water is authoritative (only read after s == ALP_OK):
+		 * if an earlier lost-reply attempt already landed more than this piece,
+		 * resume from there instead of overlapping written data. */
+		off += (got > off + n && got <= len && (got % 8 == 0 || got == len)) ? got - off : n;
 	}
 	printf("WRITE ok: %zu bytes, high-water=%u, chunk=%zu\n", len, got, step);
 

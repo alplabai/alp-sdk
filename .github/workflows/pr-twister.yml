@@ -18,24 +18,37 @@
 # examples), only shard 1 runs -- its Zephyr-oracle checks still execute --
 # and its twister step is skipped; the aggregator still reports, so the
 # required context goes green instead of blocking the merge queue.  Any
-# doubt means the full 6-shard run.  push to dev/main, the nightly schedule
+# doubt means the full 8-shard run.  push to main, the nightly schedule
 # and workflow_dispatch are always full, so nothing reaches `main` without
 # a full twister run on `dev`.
+#
+# Merge-queue-only on `dev`: a pull_request targeting `dev` skips `select`
+# (and with it every shard) and the aggregator reports success at once, so
+# the PR can enter the queue without first holding ~9 runner slots.  The
+# real run happens on the `merge_group` event, against the exact commit
+# that will land.  On the free plan the org gets 20 concurrent jobs, and
+# PR-time runs were starving the queue's runs of runners.  PRs targeting
+# `main` still run on pull_request (main has no merge queue).  Nothing is
+# lost: every commit reaching `dev` is a merge-queue commit, and the
+# nightly full run on `dev` stays the backstop.
 
 name: pr-twister
 
 on:
   pull_request:
     branches: [main, dev]
+  # No `push: dev`: a dev push is the commit its merge_group run already
+  # tested, so a second full run only competed with the queue for runners.
   push:
-    branches: [main, dev]
+    branches: [main]
   # A queued PR waits on the branch's required contexts, and GitHub raises
   # `merge_group` -- not `push` or `pull_request` -- for a merge-queue entry.
   # `dev`'s and `main`'s required twister context is the aggregator
   # `twister · native_sim/native/64` from this file, so without this trigger
   # a queued PR would wait on a check that can never fire (#1415). Neither job here is gated to
-  # `pull_request`: `twister-shard` carries no job-level `if:` and `twister`
-  # carries `if: always()` -- read, not assumed.
+  # `pull_request`: `select` skips only when `github.base_ref` is `dev` (set
+  # on pull_request alone, never on merge_group), `twister-shard` carries no
+  # job-level `if:` and `twister` carries `if: always()` -- read, not assumed.
   merge_group:
   workflow_dispatch:
   # Nightly full run on the default branch (dev): the backstop behind
@@ -54,11 +67,16 @@ jobs:
   # in here falls back to full, never to skip.
   select:
     name: twister · select
+    # Skipped on a pull_request into `dev` (see the header): the shards
+    # skip with it and the aggregator passes; the merge_group run is the
+    # real gate.  `base_ref` is set only on pull_request events, so
+    # merge_group, push, schedule and dispatch always run.
+    if: github.base_ref != 'dev'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
       twister: ${{ steps.select.outputs.twister }}
-      shards: ${{ steps.select.outputs.twister == 'skip' && '[1]' || '[1, 2, 3, 4, 5, 6]' }}
+      shards: ${{ steps.select.outputs.twister == 'skip' && '[1]' || '[1, 2, 3, 4, 5, 6, 7, 8]' }}
     steps:
       # fetch-depth 2: a pull_request checkout is the merge commit, whose
       # first parent is the base-branch tip -- HEAD^1..HEAD is exactly what
@@ -98,10 +116,10 @@ jobs:
           fi
 
   twister-shard:
-    # NB: this job's checks (`twister-shard 1/6` ...) are NOT the
+    # NB: this job's checks (`twister-shard 1/8` ...) are NOT the
     # required context -- the aggregator `twister` job below is.  The
     # shard count can change here without touching branch protection.
-    name: twister-shard ${{ matrix.shard }}/6
+    name: twister-shard ${{ matrix.shard }}/8
     needs: select
     runs-on: ubuntu-latest
 
@@ -156,7 +174,7 @@ jobs:
       ZEPHYR_TOOLCHAIN_VARIANT: host
       # ccache is content-addressed; persisting it across runs turns
       # the per-shard cold builds warm.  Each shard caches its own
-      # objects (the `--subset i/6` partition is deterministic, so a
+      # objects (the `--subset i/8` partition is deterministic, so a
       # shard rebuilds the same suites run-to-run -> high hit rate).
       CCACHE_DIR: ${{ github.workspace }}/.ccache
 
@@ -311,7 +329,7 @@ jobs:
       # falls back to the latest cache for this shard so warm builds
       # reuse it.  Restore-only here; the save step after twister runs on
       # push/schedule alone.  Every PR and merge-queue run used to save
-      # its own ~3.1 GB set (6 shards) into the repo's 10 GB Actions
+      # its own ~3.1 GB set (measured at 6 shards; 8 now) into the repo's 10 GB Actions
       # cache -- usage sat at 11.1 GB on 2026-09-29 -- evicting dev's
       # entries, which are the only ones a PR run can restore anyway
       # (a PR sees its own ref, its base branch and the default branch;
@@ -380,7 +398,7 @@ jobs:
       # precedent's headroom ratio and leaving room for the suite to
       # grow with every new example -- it is a ceiling that makes a hang
       # legible under this step's own name, not a performance target.
-      - name: twister · run shard ${{ matrix.shard }}/6 on native_sim/native/64
+      - name: twister · run shard ${{ matrix.shard }}/8 on native_sim/native/64
         if: needs.select.outputs.twister != 'skip'
         working-directory: ${{ github.workspace }}/zephyrproject
         timeout-minutes: 45
@@ -392,19 +410,27 @@ jobs:
           # of the ${{ github.workspace }} expansion which the runner
           # may render as a host path on container jobs.
           #
-          # --subset i/6 deterministically partitions the SAME suite
-          # list across the 6 shards; their union == a single full run,
+          # --subset i/8 deterministically partitions the SAME suite
+          # list across the 8 shards; their union == a single full run,
           # so no test is dropped (coverage unchanged).  #2429: 4 shards
           # ran 12-25 min each (the partition splits by suite count, not
-          # time); 6 shortens the long pole on the dev merge queue.
+          # time).  6 shards still left a 13.4-13.7 min long pole (shards
+          # 4/5/6; shards 1/2/3 took 8-11 min; ~2.5 min of each is setup;
+          # dev merge_group runs 36766415005 / 36772820214, 2026-09-30),
+          # vs 23 min at 4 shards (run 36546876623, 2026-09-29); 8 cuts
+          # each slice by a quarter.
           ccache -z >/dev/null
+          # Each example's testcase.yaml points EXTRA_CONF_FILE at its
+          # generated/alp.conf; twister configures from the source tree, so
+          # write those fragments first (#866).
+          python3 "$GITHUB_WORKSPACE/alp-sdk/scripts/gen_example_alp_conf.py"
           python3 zephyr/scripts/twister \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/tests/unit" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/tests/zephyr" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/tests/console" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples" \
             -p native_sim/native/64 \
-            --subset ${{ matrix.shard }}/6 \
+            --subset ${{ matrix.shard }}/8 \
             --inline-logs \
             --no-detailed-test-id
           # Hit rate in the log, so a cold cache is visible, not guessed.
@@ -418,7 +444,12 @@ jobs:
       - name: Trim ccache to this run's working set (dev push + nightly only)
         if: github.ref == 'refs/heads/dev' && (github.event_name == 'push' || github.event_name == 'schedule')
         timeout-minutes: 5
-        run: ccache --evict-older-than 3h
+        # 10800s, not 3h: ubuntu-latest's apt ccache (4.9.1) accepts only
+        # the d and s suffixes and exits 1 on "3h", which failed this step
+        # and skipped the save below on every dev push and nightly run
+        # since #2440, freezing the shard caches at their 2026-09-29 set
+        # (#2541).
+        run: ccache --evict-older-than 10800s
       - name: Save ccache objects (dev push + nightly only)
         if: github.ref == 'refs/heads/dev' && (github.event_name == 'push' || github.event_name == 'schedule')
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
@@ -593,7 +624,7 @@ jobs:
       # job (moved out in PR review on #1212): this job's Zephyr pin
       # (`--mr v4.4.1` above) is the FULL twister oracle -- any future
       # bump that happens to touch dts/arm/renesas/rz/rzv/r9a09g056.dtsi
-      # would make `--check` go STALE here, failing `twister-shard 1/6`,
+      # would make `--check` go STALE here, failing `twister-shard 1/8`,
       # which fails the required aggregator `twister ·
       # native_sim/native/64` and blocks every PR to `dev`, not just V2N
       # ones, under a context name that says nothing about metadata. See
@@ -652,6 +683,10 @@ jobs:
           result='${{ needs.twister-shard.result }}'
           echo "select: ${{ needs.select.result }} (twister=${{ needs.select.outputs.twister }})"
           echo "twister-shard aggregate result: $result"
+          if [ '${{ github.event_name }}' = pull_request ] && [ '${{ github.base_ref }}' = dev ]              && [ '${{ needs.select.result }}' = skipped ] && [ "$result" = skipped ]; then
+            echo "pull_request into dev: twister deferred to the merge_group run"
+            exit 0
+          fi
           if [ "$result" != "success" ]; then
             echo "::error::one or more twister shards did not pass ($result)"
             exit 1

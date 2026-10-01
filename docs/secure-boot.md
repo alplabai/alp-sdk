@@ -166,6 +166,8 @@ via `storage:` if you want it explicit.
    (see [`keys/README.md`](../keys/README.md)).
 3. Build with sysbuild:
    ```bash
+   # A board.yaml-driven app needs its alp.conf first: prefer `tan build`, or pass
+   # -DEXTRA_CONF_FILE=<alp.conf> (docs/board-config-emit.md; #866).
    west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
        path/to/app \
        --sysbuild \
@@ -174,12 +176,22 @@ via `storage:` if you want it explicit.
    (Or, if your `board.yaml` carries a `boot:` block, the loader's
    emitted overlay at `build/alp_sysbuild.conf` is the canonical
    `-DSB_CONF_FILE` path.)
-4. `build/zephyr/zephyr.signed.bin` is your signed image.
+4. `build/<app>/zephyr/zephyr.signed.bin` is your signed image
+   (`build/mcuboot/zephyr/zephyr.bin` is the MCUboot bootloader).
 5. Flash both the MCUboot bootloader and the signed app:
    ```bash
    west flash --bin-file build/mcuboot/zephyr/zephyr.bin --domain mcuboot
-   west flash --bin-file build/zephyr/zephyr.signed.bin
+   west flash --bin-file build/<app>/zephyr/zephyr.signed.bin
    ```
+
+   On the E1M-AEN boards, `west flash` on a sysbuild (MCUboot) build
+   refuses (alp-sdk#2274): the `alif_flash` runner cannot stage both
+   domains' ATOC entries in one burn. Use `docs/aen-provisioning.md`
+   §0.5 (Option B for a module whose MCUboot is already provisioned;
+   the SETOOLS MCUboot provisioning in `zephyr/sysbuild/aen/README.md`
+   otherwise). Option B writes the app only; without a resident
+   MCUboot the module will not boot (recoverable via SETOOLS
+   re-provisioning).
 
 The dev key has signing power equivalent to "every developer
 who's ever cloned the repo".  Never use it in a fielded device.
@@ -294,5 +306,5 @@ safety net for OTA.
   key generation.
 - [`docs/cc3501e-bridge.md`](cc3501e-bridge.md) -- the CC3501E
   Wi-Fi bridge's role in OTA delivery on AEN.
-- [`VERSIONS.md`](../VERSIONS.md) -- versioned roadmap; secure
-  boot / OTA shipped together in v0.4.
+- [`VERSIONS.md`](../VERSIONS.md) -- versioned roadmap; the
+  secure-boot / OTA scaffolding landed in the v0.4 cycle.

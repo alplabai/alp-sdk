@@ -34,8 +34,10 @@ see prj.conf's comment on `CONFIG_REQUIRES_FULL_LIBCPP`).
 
 ```bash
 # Standalone, native_sim (host binary; no hardware needed):
+# writes examples/peripheral-io/fmt-formatting/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/fmt-formatting
 west build -b native_sim/native/64 examples/peripheral-io/fmt-formatting \
-    -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
 west build -t run
 ```
 

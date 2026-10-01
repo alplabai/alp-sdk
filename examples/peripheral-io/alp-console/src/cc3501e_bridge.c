@@ -7,18 +7,28 @@
 
 #include "cc3501e_bridge.h"
 
-#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HE)
+#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HE) || defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP)
 #include <zephyr/kernel.h>
 #include <zephyr/arch/cpu.h>
 #include <zephyr/sys/sys_io.h>
 /*
- * AEN LP-pad mux (Alif Ensemble E8, M55-HE).  WIFI_EN (P15_5) and nRESET (P15_1)
- * are on the Alif LP-GPIO island, bound by the generic snps,designware-gpio driver
- * which does NOT apply Alif pinctrl -- so the LP pads stay un-muxed and their output
- * drivers OFF (confirmed on silicon: WIFI_EN never powers the CC3501E until these
- * regs are set).  0x23 = the Alif GPIO-output pad config (driver + read-enable +
- * drive strength).  TODO: drop this raw poke once the Alif GPIO backend muxes the LP
- * island via pinctrl.
+ * AEN LP-pad mux (Alif Ensemble E8, both M55-HE and M55-HP cores).  WIFI_EN
+ * (P15_5) and nRESET (P15_1) are on the Alif LP-GPIO island, bound by the
+ * generic snps,designware-gpio driver which does NOT apply Alif pinctrl --
+ * so the LP pads stay un-muxed and their output drivers OFF (confirmed on
+ * silicon on M55-HE: WIFI_EN never powers the CC3501E until these regs are
+ * set).  0x23 = the Alif GPIO-output pad config (driver + read-enable +
+ * drive strength).  TODO: drop this raw poke once the Alif GPIO backend
+ * muxes the LP island via pinctrl.
+ *
+ * ALIF_LPGPIO_PADCTRL_BASE (0x42007000) is not an M55-HE-local address: the
+ * shared upstream `pin-controller@1a603000` node (ensemble_common.dtsi,
+ * included by both cores' SoC dtsi) declares this exact window as its
+ * second `reg` range, and `alp_e1m_aen801_m55_hp-pinctrl.dtsi` already
+ * muxes a different LP-GPIO pad (P15_0, RTC_ALARM) from the M55-HP pinctrl
+ * driver through it, so the poke below is equally applicable on M55-HP.
+ * Running it on M55-HP is NOT bench-proven -- only running it on M55-HE has
+ * been confirmed on silicon.
  */
 #define ALIF_LPGPIO_PADCTRL_BASE 0x42007000u
 #define ALIF_PAD_GPIO_OUTPUT     0x23u

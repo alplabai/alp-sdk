@@ -28,7 +28,7 @@ import pytest
 import yaml
 
 REPO = Path(__file__).resolve().parents[2]
-SOM_SCHEMA = REPO / "metadata/schemas/som-preset-v1.schema.json"
+SOM_SCHEMA = REPO / "metadata/schemas/som-preset-v2.schema.json"
 MODULES = REPO / "metadata/e1m_modules"
 
 V2N_V2M_SKUS = [

@@ -12,6 +12,7 @@ common:
 tests:
   # native_sim runs the full canned pipeline to completion (console-matched).
   alp_sdk.example.rail_predictive_maintenance.e1m_evk:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     extra_configs:
       - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
     platform_allow:
@@ -31,6 +32,7 @@ tests:
         - "\\[rail\\] done"
 
   alp_sdk.example.rail_predictive_maintenance.e1m_x_evk:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     extra_configs:
       - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
     platform_allow:
@@ -51,6 +53,7 @@ tests:
 
   # AEN silicon cross-build is build-only (no host runner; CI is the AEN gate).
   alp_sdk.example.rail_predictive_maintenance.aen_build:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     extra_configs:
       - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
     platform_allow:

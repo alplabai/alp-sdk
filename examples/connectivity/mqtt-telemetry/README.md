@@ -59,12 +59,14 @@ over `<alp/chips/bmp581.h>`) -- and the publish path is unchanged.
 ```bash
 # Standalone, native_sim (no radio, so the app prints the framing it
 # would publish; mbedTLS is built in):
+# writes examples/connectivity/mqtt-telemetry/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/connectivity/mqtt-telemetry
 west build -b native_sim/native/64 examples/connectivity/mqtt-telemetry \
-    -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
 west build -t run
 
 # On real silicon (E1M-AEN801):
-west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/connectivity/mqtt-telemetry
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/connectivity/mqtt-telemetry -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 

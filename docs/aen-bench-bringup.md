@@ -46,6 +46,7 @@ the flows here apply to both SKUs unchanged.
 | **HWSEM** (`hwsem_alif` / `alif,hwsem`, Tier-1.5) | ✅ PASS (RAM-run, 2026-06-19) | `hwsem@4902e000` take/give/count over the in-tree driver: count `0→1→0` across `take_busy`/`give` (master_id `0x410fd222`). Example: `examples/aen/aen-hwsem-regcheck`. |
 | **LPTIMER** (`counter_alif_lptimer` / `alif,lptimer`, Tier-1.5) | ✅ PASS (RAM-run, 2026-06-19) | Always-on `lptimer@42001000` ch0 — 32768 Hz down-counter advances (3456 ticks / ~100 ms) via the portable `counter_*` API. Example: `examples/aen/aen-lptimer-regcheck`. |
 | **Comparator (HSCMP)** (`comparator_alif` / `alif,cmp`, Tier-2) | ✅ PASS (RAM-run, 2026-06-19) | `cmp0@49023000` driven via the portable `comparator_*` API (output 1/1, internal DAC6 reference; the connect-but-don't-enable init held — no ISR storm). External pin/threshold edge-trigger = bench TBD (no analog stimulus). Example: `examples/aen/aen-cmp-regcheck`. |
+| **LPRTC** (`snps,dw-apb-rtc`, Tier-2) | ✅ PASS (RAM-run, 2026-06-17) | The always-on `lprtc@42000000` free-running 32-bit counter advances (delta 3467 ticks / ~100 ms at 32768 Hz) via the portable Zephyr counter API over the vendored `counter_dw_rtc` driver. `counter_start` returns `-EALREADY` → the **VBAT clock-gate is already on** (no `VBAT_LPRTC0_CLK_EN` write needed on the upstream-Zephyr build path). Fixed two driver bugs the link-only check missed: the missing `.get_top_value` (faulted PC=0x0) + `max_top_value`. It is a **counter**, not a calendar RTC — the `alp_rtc_*` calendar shim is still TBD. Example: `examples/aen/aen-rtc-regcheck`. |
 | **Secure boot** (MCUboot ECDSA-P256 chain) | ✅ PASS (bench-proven at `0da1f1b4`) | SES → MCUboot (ITCM) → slot0 (MRAM XIP) → application boots with `CONFIG_BOOT_SIGNATURE_TYPE_ECDSA_P256=y` + `CONFIG_BOOT_VALIDATE_SLOT0=y` (read back from the built `mcuboot/zephyr/.config`): `PC=80012FBC`, `VTOR=80010800`, `CFSR=00000000`, `IPSR=000`. Verification proven live, not inferred from a boot: flipping one byte of the TLV `0x22` signature (offset `0x4a30`, `0xda`→`0xdb`, TLV `0x10`/SHA-256 and TLV `0x01`/key intact) produces `D: bootutil_verify_sig: ECDSA builtin key 0` then `E: Unable to find bootable image` — the check runs to completion. `SIGNATURE_TYPE_NONE` + `VALIDATE_SLOT0=y` boots in twelve seconds (watched ten minutes, CycleCnt advancing). This verification run was `CONFIG_SINGLE_APPLICATION_SLOT=y`. Verified backend is TinyCrypt (`CONFIG_BOOT_ECDSA_TINYCRYPT=y`), not PSA; `.config` confirms `CONFIG_SINGLE_APPLICATION_SLOT=y` + `CONFIG_FLASH_BASE_ADDRESS=0x0`. **Separately, a swap-using-scratch build boots and logs** `I: Bootloader chainload address offset: 0x10000` — **boot only; the swap/rollback path itself was not exercised `[UNTESTED]`.** Still requires `CONFIG_DCACHE=n`, `ROM_START_OFFSET=0x800`, and the `zephyr/patches/mcuboot` `do_boot` patch. **Customer path proven too (second session):** a plain-J-Link `loadbin` of an imgtool-signed image to slot0 `0x80010000` — no SETOOLS/ATOC/SE-UART — is verified + chainloaded and survives repeated cold power-cycles; **proven at `0x80010000` only** (ATOC region / erasing MCUboot untested); both refusal shapes (tampered sig, non-MCUboot image) leave the debug port alive (`Secure debug: enabled`, halts + single-steps cleanly). Single-slot result (`CONFIG_SINGLE_APPLICATION_SLOT=y`) — A/B swap / OTA untested. See `docs/aen-provisioning.md` §0.5 and `docs/secure-boot.md`. |
 
 The flow-D batch (17 aen-* apps) booted on real E8 at **15 PASS, 2 PARTIAL** (both
@@ -123,13 +124,54 @@ A clean write ends `100% ... Done`; on reset the SES loads + boots the ATOC
 **`alif_flash`** runner — it does **not** use J-Link, and auto-detects this
 ITCM-load shape vs. the slot0-XIP shape (§ Flow D) from the app's own reset
 vector, so both provision over the SE-UART with no flag. Pre-provisioned Alp
-Lab modules ship a dev-signed MCUboot + self-test in slot0 (LCS=DM), so
-`west flash` works day-1; the manual path above is only for re-keying or
-recovering a bare module. A pre-provisioned module also takes a plain
-J-Link `loadbin` straight to slot0 at `0x80010000` **only** (ATOC region
-/ erasing MCUboot untested) with no SETOOLS/ATOC/SE-UART at all — see
-the **Secure boot** row in §1 above and `docs/aen-provisioning.md`
+Lab modules ship a dev-signed MCUboot + self-test in slot0 (LCS=DM), so SWD
+attach works day-1 — but plain `west flash` on such a module now REFUSES
+(#2262, see below) rather than silently delisting the factory MCUboot ATOC
+entry; use the plain J-Link `loadbin` path instead. The manual SETOOLS path
+above is for re-keying or recovering a bare module. A pre-provisioned module
+also takes a plain J-Link `loadbin` straight to slot0 at `0x80010000`
+**only** (ATOC region / erasing MCUboot untested) with no SETOOLS/ATOC/SE-UART
+at all — see the **Secure boot** row in §1 above and `docs/aen-provisioning.md`
 §0.5 for the exact sequence.
+
+**ATOC-replace guard (#2262).** Both `app-write-mram -p` above and the
+`alif_flash` west runner REPLACE the whole resident ATOC, not merge it —
+before burning, the runner now reads the resident ATOC back over the SE-UART
+(`maintenance -opt getbanner`/`gettoc`, the same non-destructive query
+`bench_atoc_replace_guard` in `scripts/bench/aen/bench-env.sh` uses for Flow
+A/D's shell helpers) and refuses the write if it would silently delist a
+resident entry outside this build's own `ALP-HE`/`ALP-HP` section, or if the
+read could not be verified. `--replace-atoc` is the explicit override (same
+spelling as `flash-run.sh`'s own flag) — on a pre-provisioned module the
+foreign entry is the factory `MCUBOOT-` bootloader itself, so
+`--replace-atoc` there deletes it rather than being a safe workaround; see
+`docs/aen-provisioning.md` §0.5's Option A warning.
+
+> **`west flash` is a Flow-A-class destructive MRAM/ATOC write, not a safe
+> incremental update.** It burns over the SE-UART exactly the way the manual
+> `app-write-mram -p` above does — REPLACE, not merge — so everything this
+> section says about Flow A applies to plain `west flash` too. The guard
+> narrows the blast radius; it does not make the write non-destructive. In
+> particular, the canonical `person_detect`-style slot0 restore recipe
+> (`scripts/bench/aen/flash-jlink-mramxip.sh`, §"Restore the canonical
+> person_detect slot0" below) stages its entry as `ALP-HE`
+> (`flash-jlink-mramxip.sh:258-264`) — the SAME section name an HE `west
+> flash` build's own `allowed` set contains (`_atoc_section_name`). So a
+> restored board's `ALP-HE` entry is *inside* this guard's allowed set, and
+> a subsequent `west flash` correctly, silently overwrites it — that is the
+> guard working as designed (an in-band section a build owns is never
+> "foreign"), not a bypass. Don't read the guard's `clear`/`ok` verdict on
+> such a run as "nothing was touched" — the whole point of a slot0 write is
+> that `ALP-HE` changes.
+
+Soften one more assumption while you're reading this: the runner's own log
+line after a successful burn only claims the ATOC write itself succeeded —
+it does NOT claim the board actually booted the new image (bench gotcha: the
+SE can boot a STALE resident slot0 image preferentially over a freshly
+written ITCM-load ATOC, with the remedy being an explicit erase over the
+SE-UART; `west flash`'s only write is `-p`, never an erase). Confirm the
+boot the same way you would after any other flow — read the console (§Flow
+B) or PC/IPSR over SWD — rather than trusting the log line alone.
 
 ### Flow A — Dual-core deferred-TOC boot
 
@@ -656,4 +698,3 @@ secure-boot verification — always write both consistent blobs.
 | Ethernet links but never gets a lease / no traffic | GMAC DMA descriptor rings + net_buf pool are in the M55 **DTCM** (`zephyr,sram = &dtcm`), off the DMA bus. Narrower fix, **silicon-verified on E1M-AEN803** (bench run 202: DHCP lease + ping, rings/pools in SRAM0, main RAM on DTCM) — build-verified only on AEN801: give the ethernet node a `memory-region` (default: `&sram0`, set by the SoC dtsi) + enable `CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION` + `CONFIG_DCACHE=n` (§3), main RAM stays on DTCM. Older whole-RAM fix: `zephyr,sram = &sram0` + `CONFIG_DCACHE=n` — but do NOT combine it with a `memory-region` still pointing at the same `&sram0` node: `zephyr/CMakeLists.txt` now FATAL_ERRORs on that combination (aliases main RAM on top of the relocated buffers with no linker warning); delete the `memory-region` property first if you go this route. Applies to any DMA-master block (GMAC/NPU/SDHC). |
 | I2S TX never clocks out / PDM `dmic_read` → `-EAGAIN` (FIFO=0) | The CGU master **76.8 MHz** source and (for the HP PDM) the `EXPMST0_CTRL` IPCLK/PCLK force bits are not set. These are now enabled by the Tier-1.5 clockctrl west-patch (`west patch apply`; §3) on `clock_control_on()` — confirm the patch is applied. The 76.8 MHz oscillator itself is SE-managed, so the PDM may also need the `se_services`/MHU clock request even with the CGU bit set. |
 | I2S sample rate looks wrong (pitch off) | The `I2Sx_CTRL` `CKDIV` divider the clockctrl `.set_rate` programs is **BENCH-UNVERIFIED** (field layout from the Alif `i2s_sync` reference, not the DFP/TRM). Confirm the divider width/position + N-vs-(N-1) convention against the Alif DFP/TRM; the hunk is separable in the patch so it can be held. |
-| **LPRTC** (`snps,dw-apb-rtc`, Tier-2) | ✅ PASS (RAM-run, 2026-06-17) | The always-on `lprtc@42000000` free-running 32-bit counter advances (delta 3467 ticks / ~100 ms at 32768 Hz) via the portable Zephyr counter API over the vendored `counter_dw_rtc` driver. `counter_start` returns `-EALREADY` → the **VBAT clock-gate is already on** (no `VBAT_LPRTC0_CLK_EN` write needed on the upstream-Zephyr build path). Fixed two driver bugs the link-only check missed: the missing `.get_top_value` (faulted PC=0x0) + `max_top_value`. It is a **counter**, not a calendar RTC — the `alp_rtc_*` calendar shim is still TBD. Example: `examples/aen/aen-rtc-regcheck`. |

@@ -113,7 +113,9 @@ underused).
 ### native_sim (framing test, no real sleep)
 
 ```bash
-west build -b native_sim/native/64 examples/power-timing/power-managed-sensor
+# writes examples/power-timing/power-managed-sensor/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/power-timing/power-managed-sensor
+west build -b native_sim/native/64 examples/power-timing/power-managed-sensor -- -DEXTRA_CONF_FILE=generated/alp.conf
 west build -t run
 ```
 
