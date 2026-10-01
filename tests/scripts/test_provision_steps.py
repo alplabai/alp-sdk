@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from provision import gates, steps
+from provision import gates, ledger_out, steps
 from provision import linux_target as lt
 from provision.bench import Bench
 
@@ -1069,6 +1069,41 @@ def test_record_omits_bundle_facts_when_flashing_did_not_succeed(tmp_path):
 def test_record_writes_bundle_facts_after_successful_flashing(tmp_path):
     text = _record_with_bundle_facts(tmp_path, "done")
     assert "bl2_sha256" in text and "rootfs_bundle_version: som-9.9.9" in text, text
+
+
+def _record_after_supersession(tmp_path, old_sha, version="som-9.9.9"):
+    ctx = _ctx(tmp_path, execute=True)
+    cat = dict(CATALOGUE["keys"], **{k: {"group": "firmware", "source": "", "mode": "auto",
+                                        "ship_required": False}
+                                    for k in ("bl2_sha256", "rootfs_bundle_version")})
+    (ctx.ledger_root / "schema" / "v2n.keys.yaml").write_text(
+        yaml.safe_dump({"schema": 1, "family": "v2n", "keys": cat}), encoding="utf-8")
+    ev = {"bl2_sha256": "ab" * 32, "rootfs_bundle_version": version}
+    ctx.state = {"bundle_sha256": "cur", "steps": {}, "superseded": [
+        {"bundle_sha256": old_sha, "tool_rev": "oldrev",
+         "steps": {n: {"status": "done", "at": "2026-09-30T20:42:45Z", "evidence": ev}
+                   for n in steps.FLASH_STEPS}}]}
+    ctx.bundle["release_version"] = version
+    steps.run_steps(ctx, only=["record"])
+    u = ctx.unit_dir / f"{SERIAL}.unit.yaml"
+    return u.read_text(encoding="utf-8") if u.exists() else ""
+
+
+def test_record_takes_bundle_facts_from_a_tool_rev_only_supersession(tmp_path):
+    text = _record_after_supersession(tmp_path, "cur")
+    assert "rootfs_bundle_version: som-9.9.9" in text and "bl2_sha256" in text, text
+
+
+def test_record_ignores_flash_steps_superseded_by_a_different_bundle(tmp_path):
+    text = _record_after_supersession(tmp_path, "other")
+    assert "rootfs_bundle_version" not in text and "bl2_sha256" not in text, text
+
+
+def test_record_superseded_build_dir_provenance_still_blocks_ship(tmp_path):
+    text = _record_after_supersession(tmp_path, "cur", version="build-dir:/x")
+    assert "rootfs_bundle_version: build-dir:/x" in text
+    assert any("unsigned --build-dir" in r for r in
+               ledger_out.ship_check({"rootfs_bundle_version": "build-dir:/x", "disposition": "ship"}, {}))
 
 
 def test_record_merges_evidence_of_steps_done_in_earlier_runs(tmp_path):
