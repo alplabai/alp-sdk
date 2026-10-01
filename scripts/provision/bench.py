@@ -116,6 +116,12 @@ class Console:
                 raise ExpectTimeout(shown, self._buf[-_TAIL:], timeout)
             self._pull(min(remaining, 0.5))
 
+    def pump(self, seconds: float) -> None:
+        """Read into the buffer for `seconds` (opens the port if needed); nothing is discarded."""
+        deadline = time.monotonic() + seconds
+        while (remaining := deadline - time.monotonic()) > 0:
+            self._pull(min(remaining, 0.2))
+
     def drain(self, quiet_s: float = 0.2, max_s: float = 10.0) -> str:
         """Read until the console is quiet for `quiet_s`; return and consume
         everything unconsumed. `max_s` bounds a console that never goes quiet."""
@@ -236,9 +242,14 @@ class Power:
     def off(self) -> None:
         raise NotImplementedError
 
-    def cycle(self, off_s: float = 3.0) -> None:
+    def cycle(self, off_s: float = 3.0, console: Console | None = None) -> None:
         self.off()
-        time.sleep(off_s)
+        # Keep reading the console while off: a one-shot ROM banner can land
+        # right at power-on, and an unread port may deliver nothing afterwards.
+        if console is not None:
+            console.pump(off_s)
+        else:
+            time.sleep(off_s)
         self.on()
 
     def is_on(self) -> bool | None:  # None = unknowable
@@ -338,7 +349,7 @@ class ManualPower(Power):
     def off(self) -> None:
         self.operator.confirm("Switch the unit's power OFF.")
 
-    def cycle(self, off_s: float = 3.0) -> None:
+    def cycle(self, off_s: float = 3.0, console: Console | None = None) -> None:
         self.operator.confirm(
             f"Power-cycle the unit: OFF, wait at least {off_s:g} s, then ON."
         )

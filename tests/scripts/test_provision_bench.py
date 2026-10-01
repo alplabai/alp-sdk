@@ -198,6 +198,15 @@ def test_labgrid_power():
         ).off()
 
 
+def test_cycle_buffers_console_output_during_off_window():
+    class P(bench.Power):
+        def on(self): pass
+        def off(self): con.feed("SCI Download mode\r\n")
+    con = FakeConsole([])
+    P().cycle(0.05, con)
+    assert con.expect("SCI Download mode", 0.05)    # banner kept, not discarded
+
+
 def test_fake_power_records_events():
     fed = []
     p = FakePower(on_hook=lambda: fed.append(1))
