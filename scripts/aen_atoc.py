@@ -417,11 +417,13 @@ def _is_table_structurally_complete(gettoc_text: str) -> bool:
     AND a closing `+---+` separator strictly AFTER the last parsed data
     row -- the BLOCKER finding of the second #2262 review round.
 
-    MEASURED (alp-sdk#2538, E1M-AEN803 serial 2026W36-0009, SES A1 v1.110.0): a stalled SE-UART read makes `maintenance -opt gettoc` exit 0 with a truncated
-    table (4/7/8 rows, or header only), because the host prints each row on arrival and
-    the closing `+---+` line ONLY when the 0xa8 end packet arrives. This rule is
-    therefore the PRIMARY defence against a stalled read. A closed port exits 1, and a
-    complete table followed by `[ERROR] ... readSerial reporting disconnected` is caught
+    MEASURED (alp-sdk#2538, E1M-AEN803 serial 2026W36-0009, SES A1
+    v1.110.0): a stalled SE-UART read makes `maintenance -opt gettoc` exit 0
+    with a truncated table (4/7/8 rows, or header only), because the host
+    prints each row on arrival and the closing `+---+` line ONLY when the
+    0xa8 end packet arrives. This rule is therefore the PRIMARY defence
+    against a stalled read. A closed port exits 1, and a complete table
+    followed by `[ERROR] ... readSerial reporting disconnected` is caught
     only by the exit code, so a non-zero exit is still refused.
 
     A `gettoc` read that stops mid-download (a serial timeout after the SE

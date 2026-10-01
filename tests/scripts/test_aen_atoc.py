@@ -624,11 +624,12 @@ _GETTOC_CLOSE = "+----------+--------+\n"
 @pytest.mark.parametrize(
     "text",
     [
+        _GETTOC_HEAD + "".join(_GETTOC_ROWS[:4]),
         _GETTOC_HEAD + "".join(_GETTOC_ROWS[:7]),
         _GETTOC_HEAD,
         _GETTOC_HEAD + "".join(_GETTOC_ROWS),
     ],
-    ids=["7-rows-no-close", "header-only", "8-rows-no-close"],
+    ids=["4-rows-no-close", "7-rows-no-close", "header-only", "8-rows-no-close"],
 )
 def test_compute_query_status_unverified_on_stalled_read_exit_zero(aen_atoc, text):
     assert aen_atoc.compute_query_status(
@@ -636,6 +637,8 @@ def test_compute_query_status_unverified_on_stalled_read_exit_zero(aen_atoc, tex
 
 
 def test_compute_query_status_unverified_on_complete_table_then_disconnect_exit_one(aen_atoc):
+    # Exit-code-only: the table is structurally complete, so only the
+    # non-zero exit code (1) makes this unverified.
     text = (
         _GETTOC_HEAD + "".join(_GETTOC_ROWS) + _GETTOC_CLOSE
         + "[ERROR] readSerial reporting disconnected\n"
