@@ -53,20 +53,26 @@ for a dual-M55 image. The SE ATOC package loads HP to its ITCM global alias
 log itself is stored in a dedicated MRAM `alp_ulog_partition` for NVS, kept away
 from the top-of-MRAM ATOC package used by the SE boot flow.
 
-The AEN bench config also sets
+The AEN HE config also sets
 `CONFIG_ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED=y`. That is deliberate: MRAM/NVS
 is durable, but not automatically application-immutable. The HE build enables
 the AEN dual-M55 client backend and fails closed unless both conditions are
 true:
 
 1. the HP owner image is running and answers the mailbox request; and
-2. the board profile enables `CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROVEN`
-   after provisioning has locked the MRAM log partition against HE writes and
-   the direct-write rejection has been proven on silicon.
+2. the build selects the **app-immutable profile**
+   (`CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_APP_IMMUTABLE_PROFILE`), which asserts that
+   provisioning has locked the MRAM log partition against HE writes and the
+   direct-write rejection has been proven on silicon.
 
-That Kconfig bit does not program the firewall. It is the public build-time
-latch saying the SE/device firewall policy has already been provisioned and
-silicon-proven for this board.
+The profile is the one provisioning assertion. It derives
+`CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROVEN` (no longer settable by hand)
+and selects `CONFIG_ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED`, so a profile image
+cannot silently degrade to the software tier on an unprovisioned board. In this
+example the profile is chosen with `-DALP_AEN_UPDATE_LOG_FIREWALL_PROVEN=ON`,
+which layers `boards/alp_e1m_aen801_m55_he_firewall_proven.conf`. The profile
+does not program the firewall; it is the public build-time latch saying the
+SE/device firewall policy has already been provisioned and silicon-proven.
 
 ### Hardware enforcement status (E8) — proven
 
@@ -121,6 +127,51 @@ A **single-core** variant of the same guarantee is proven in
 TrustZone-M (the SAU) marks the log window Secure, the Non-Secure app appends only via
 the Secure owner, and its own direct store faults. That is the path for single-M55 SKUs
 with no second core to own the log.
+
+### Deployment recipe: app-immutable profile (AEN dual-M55)
+
+Prerequisite, outside the SDK: the OEM must author the FC8 device-config policy
+described above (allow-all region plus a higher-priority HE-deny carve-out over
+the whole `alp_ulog_partition`) and provision it with the Alif SETOOLS. The SDK
+neither generates nor writes that policy. The steps below then take a board from
+that prerequisite to a verified `HW_ENFORCED` deployment, using the helpers in
+`scripts/bench/aen/`.
+
+1. **Build the HP owner and the HE probe** (the owner image is the same for
+   every profile):
+
+   ```
+   west build -p always -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp \
+       examples/connectivity/firmware-update-log -d build/firmware-update-log-hp
+   west build -p always -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
+       examples/connectivity/firmware-update-log \
+       -d build/firmware-update-log-he-probe \
+       -- -DALP_AEN_UPDATE_LOG_FIREWALL_PROBE=ON
+   ```
+
+2. **Run the negative probe** with `flash-update-log-firewall-probe.sh` and read
+   it back with `read-update-log-proof.sh --expect-firewall-probe`. Proceed only
+   on `firewall verdict: PASS`. A `FAIL` means the partition is writable: fix the
+   OEM device config, do not continue. (`--package-only` validates the ATOC
+   package without writing MRAM.)
+3. **Build the HE client with the profile**
+   (`-DALP_AEN_UPDATE_LOG_FIREWALL_PROVEN=ON`, command in "Running the example").
+   The generated `zephyr/.config` must contain
+   `CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROVEN=y`; the flash helper greps
+   for it to decide whether to demand `HW_ENFORCED` at readback.
+4. **Flash the dual-entry package** with `flash-update-log-dual.sh` (needs
+   `ALP_CONFIRM_DESTRUCTIVE_FLASH=yes`; it refuses to replace foreign ATOC
+   entries unless `--replace-atoc` is passed).
+5. **Read back** with `read-update-log-proof.sh --expect-hw`: the HP owner beacon
+   shows served requests, and the HE beacon's last status word is `0`.
+6. **Confirm on the console** that the HE application prints
+   `[update-log] assurance: HW_ENFORCED (secure tier)`.
+
+Rolling the same HE image onto a board that was *not* provisioned is safe: the
+profile still sets `REQUIRE_HW_ENFORCED`, so `alp_update_log_open()` returns
+`NULL` with `ALP_ERR_NOSUPPORT` instead of falling back to the software tier. The
+`SWD`-based readback cannot read the carved-out window on the HE debug port (see
+the notes above); use the SE `getmramdata` read for byte-level confirmation.
 
 ### Anti-rollback across a full reflash (#111)
 
@@ -178,8 +229,8 @@ A passing run prints (among other lines):
   #0  v=1.4.2  status=0  ts=1718000000
 ```
 
-With the current public AEN fail-closed config, the firewall-proof latch is not
-enabled, so the HE board prints:
+With the default AEN fail-closed config, the app-immutable profile is not
+selected, so the HE board prints:
 
 ```
 [update-log] HW_ENFORCED required, but no secure owner/firewall-backed backend is active
@@ -255,7 +306,7 @@ For the dual-core AEN package, use a two-entry ATOC: HP is `M55_HP`
 `0x58000000`. HP then releases HE at runtime with the portable
 `alp_mproc_boot_core()` path and serves HE's update-log requests over MHU.
 The bench helper below builds that exact package. Keep the normal HE build
-fail-closed. Use the `-DALP_AEN_UPDATE_LOG_FIREWALL_PROVEN=ON` build only after
+fail-closed. Use the `-DALP_AEN_UPDATE_LOG_FIREWALL_PROVEN=ON` (app-immutable profile) build only after
 the board has been provisioned so the MRAM log partition rejects HE writes.
 `--package-only` validates the app-only ATOC without writing MRAM.
 
@@ -289,8 +340,8 @@ beacons without reflashing. Use
 `scripts/bench/aen/read-update-log-proof.sh --expect-firewall-probe` to re-read
 and decode the direct-write firewall probe without reflashing.
 
-On a board that enables the TF-M owner or the AEN M55 owner with the firewall
-proof latch, the HE application's first line reports:
+On a board that enables the TF-M owner or the AEN M55 owner with the app-immutable
+profile, the HE application's first line reports:
 
 ```
 [update-log] assurance: HW_ENFORCED (secure tier)

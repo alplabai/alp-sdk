@@ -26,7 +26,7 @@
  * that policy HE boots and runs normally but bus-faults on any direct write to
  * the log partition -- silicon-proven on E8 (the probe below reports RESULT_FAULT
  * at STAGE_WRITE and the MRAM stays unchanged). HE reports HW_ENFORCED once that
- * FC8 policy is provisioned (CONFIG_..._FIREWALL_PROVEN) and the HP owner answers.
+ * FC8 policy is provisioned (the app-immutable profile) and the HP owner answers.
  *
  * Flow: open the log, append one update record (as MCUboot/a secure service
  * would after verifying an image), then verify the whole chain and print it.

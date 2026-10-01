@@ -76,3 +76,20 @@ tests:
     # regression here was invisible to CI. Build-only: the probe itself is
     # a negative bench proof, not a CI-console assertion.
     build_only: true
+
+  alp_sdk.examples.connectivity.firmware_update_log.he_client.app_immutable.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_args: ALP_AEN_UPDATE_LOG_FIREWALL_PROVEN=ON
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - update_log
+      - security
+      - rtss-he
+    # The provisioned app-immutable profile (#111 P1): the profile conf must
+    # keep deriving CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROVEN, which
+    # scripts/bench/aen/flash-update-log-dual.sh greps for. Build-only: the
+    # property itself is bench-proven on a firewall-provisioned board.
+    build_only: true
