@@ -4,9 +4,9 @@ The Alif E8 display chain (CDC200 -> DesignWare MIPI-DSI host -> D-PHY -> the
 upstream `himax,hx8394` driver) used to exist only inside
 `examples/aen/aen-dsi-display`: its overlay defined the SoC nodes, and its
 `src/main.c` did the SoC clock/power setup. It is now split so an app gets the
-whole chain by adding a shield; the app must also set `CONFIG_ALP_SDK=y`, as
-every alp-sdk AEN app does, because the Alif display-driver symbols live under
-`if ALP_SDK` (the shield does not turn the SDK on):
+whole chain by adding a shield; the shield defaults `CONFIG_ALP_SDK=y` itself
+(#2204's follow-up), because the Alif display-driver symbols live under
+`if ALP_SDK` and are unreachable without it:
 
 - **SoC nodes.** `zephyr/dts/alif/ensemble_e8_peripherals.dtsi` declares
   `cdc200: cdc200@49031000` (`tes,cdc-2.1`) and `mipi_dsi: mipi-dsi@49032000`

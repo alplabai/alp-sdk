@@ -75,6 +75,7 @@ SRC_URI:append = " \
     file://0010-mmc-renesas_sdhi-bounce-multi-segment-requests-in-internal-dmac.patch \
     file://0011-irqchip-renesas-rzv2h-mask-the-ICU-error-sources-the-handler-cannot-ack.patch \
     file://0012-uio-pdrv-genirq-default-of_id-to-generic-uio.patch \
+    file://0015-gpiolib-sysfs-reject-export-of-a-number-in-a-chipless-gpio_device.patch \
     file://uio.cfg \
 "
 
