@@ -927,19 +927,24 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
         names = net_ifaces(t)
         if not names:
             notes.append("network: no end*/eth* interface")
-        for n in names:
+        # The ledger catalogue keys are eth0_*/eth1_* (by port index); the
+        # interface names on the unit are end0/end1. Carrier, speed and the
+        # link-partner advertisement are folded into the one *_link value.
+        for i, n in enumerate(names[:2]):
             r = t.run(f"cat /sys/class/net/{n}/address /sys/class/net/{n}/operstate", check=False)
             lines = r.stdout.split()
             if r.rc != 0 or len(lines) != 2:
                 notes.append(f"{n}: address/operstate unreadable")
                 continue
-            facts[f"{n}_mac"], facts[f"{n}_link"] = lines
-            facts[f"{n}_carrier"] = "1" if net_carrier(t, n) else "0"
+            mac, state = lines
             spd = t.run(f"cat /sys/class/net/{n}/speed", check=False).stdout.strip()
-            facts[f"{n}_speed"] = spd if r.rc == 0 and re.fullmatch(r"\d+", spd) else "unknown"
             lp = re.search(r"Link partner advertised link modes:\s*(.+)",
                            t.run(f"ethtool {n} 2>/dev/null", check=False).stdout)
-            facts[f"{n}_anlpar"] = lp[1].strip() if lp else "unknown"
+            carrier = "1" if net_carrier(t, n) else "0"
+            speed = spd if spd.isdigit() else "unknown"
+            anlpar = lp[1].strip() if lp else "unknown"
+            facts[f"eth{i}_mac"] = mac
+            facts[f"eth{i}_link"] = f"{state} ({n}) carrier={carrier} speed={speed} anlpar={anlpar}"
 
     for name, fn in (("soc", soc), ("cpu_mem", cpu_mem), ("storage", storage), ("xspi", xspi),
                      ("identity", identity), ("power", power), ("clocks_rtc", clocks_rtc),

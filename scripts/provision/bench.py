@@ -246,11 +246,19 @@ class Power:
         self.off()
         # Keep reading the console while off: a one-shot ROM banner can land
         # right at power-on, and an unread port may deliver nothing afterwards.
-        if console is not None:
-            console.pump(off_s)
-        else:
-            time.sleep(off_s)
+        # A console error must not leave the unit off: finish the dwell, power
+        # on, then report it.
+        end, err = time.monotonic() + off_s, None
+        try:
+            if console is not None:
+                console.pump(off_s)
+        except BenchError as e:
+            err = e
+        if (rest := end - time.monotonic()) > 0:
+            time.sleep(rest)
         self.on()
+        if err is not None:
+            raise BenchError(f"console failed during the power-off window (power restored): {err}") from err
 
     def is_on(self) -> bool | None:  # None = unknowable
         return None

@@ -175,7 +175,7 @@ state recorded against a **different bundle or tool revision** is moved to
 | `pmic_verify` | compare registers against `--pmic-expect` |
 | `secure_page` | write the 64-byte Secure Data Page, read back, compare. Never locks |
 | `dsw1_xspi_remove_sd` | operator: boot switch to xSPI, remove the microSD |
-| `cold_boot_test` | `--cold-cycles N`: clean BL2, DRAM tier, rail line (`v2n-m1`), login, `SYS_LSI_MODE`, ACT88760 reg `0x10` after boot, I2C scans (GD32 exempted only while `0x10` still reads `0x88`). An `end0` without carrier (PHY latch, #2582) gets one extra cold cycle, recorded as `end0_no_carrier_retries` |
+| `cold_boot_test` | `--cold-cycles N`: clean BL2, DRAM tier, rail line (`v2n-m1`), login, `SYS_LSI_MODE`, ACT88760 reg `0x10` after boot, I2C scans (GD32 exempted only while `0x10` still reads `0x88`). An `end0` without carrier (PHY latch, #2582) gets one extra cold cycle, noted as `end0_no_carrier_retries` in the step evidence (not a ledger key); it fails if `end0` is still down |
 | `clkgen_verify` | the on-SoM 5L35023B (`BRD_I2C`, `0x69`) OTP image against U-Boot's fixup |
 | `hil_smoke` | optional `tests/hil/run_smoke.py` |
 | `record` | merge auto keys into `<serial>.unit.yaml` (manual keys never touched), append `<serial>.md`, logs, xlsx, ship check |

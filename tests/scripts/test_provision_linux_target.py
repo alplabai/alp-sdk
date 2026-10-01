@@ -799,9 +799,9 @@ def test_census_collects_ledger_keys_read_only():
     assert facts["tps_vout"].startswith("0x44=0x5a")
     assert facts["rtc_rv3028_reg_0x37"] == "0x10"
     assert facts["clkgen_5l35023b_regs"] == "ack at 0x69"
-    assert facts["end0_mac"] == "aa:bb:cc:00:00:01" and facts["end0_link"] == "up"
-    assert (facts["end0_carrier"], facts["end0_speed"]) == ("1", "1000")
-    assert facts["end0_anlpar"] == "1000baseT/Full"
+    assert facts["eth0_mac"] == "aa:bb:cc:00:00:01"      # ledger keys are eth0_*; the unit calls it end0
+    assert facts["eth0_link"] == "up (end0) carrier=1 speed=1000 anlpar=1000baseT/Full"
+    assert not [k for k in facts if k.startswith("end")]
     assert notes == ["end1: address/operstate unreadable"]
     # read-only: no writes of any kind reached the unit
     assert not [c for c in fake.commands if re.search(r"i2cset|flash_erase|mtd_debug write|\bdd\b[^|]*\bof=|mmc boot", c)]

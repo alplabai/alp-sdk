@@ -321,6 +321,24 @@ def boot_to_linux(ctx: Ctx, timeout: float = 240.0, need_ip: bool = True) -> str
     return text
 
 
+def cold_boot_phy_retry(ctx: Ctx, ev: dict) -> str:
+    """One cold boot. A PHY that latched dead (end0 without carrier, #2582) gets
+    exactly one extra cold cycle; end0 must then have carrier, because an IP on
+    end1 or a static host proves nothing about end0. The retry count goes in the
+    step evidence as ``end0_no_carrier_retries`` (not a ledger catalogue key)."""
+    text = boot_to_linux(ctx, need_ip=False)
+    sh = ctx.linux or ConsoleTarget(ctx.bench.console)
+    if "end0" in lt.net_ifaces(sh) and not lt.net_carrier(sh, "end0"):
+        ev["end0_no_carrier_retries"] = str(int(ev.get("end0_no_carrier_retries", "0")) + 1)
+        text += boot_to_linux(ctx, need_ip=False)
+        sh = ctx.linux or ConsoleTarget(ctx.bench.console)
+        if not lt.net_carrier(sh, "end0"):
+            raise BenchError("end0 still has no carrier after the extra cold cycle (PHY latch, #2582)")
+    if ctx.linux is None:
+        raise BenchError("no IP after the cold boot although end0 has carrier")
+    return text
+
+
 def connect_linux(ctx: Ctx, force: bool = False) -> None:
     """Attach ctx.linux: bench.yaml linux.host, else discover over the console."""
     if ctx.linux is not None and not force:
@@ -814,17 +832,17 @@ class Census(Step):
         facts, notes = lt.census(t, bus, sizes)
         if bus["pmic"] is not None:
             try:
-                # The value seen before any release: most production units'
-                # OTP is already 0x08 (fixed); only some early units (e.g.
-                # E1M-V2M103 2026W38-0001) still carry OTP 0x88 and need the
-                # GD32_NRST release workaround. A 0x08 seen here is already
-                # conclusive (no release has happened yet -- census runs
-                # before gd32_flash); "u-boot" is decided later, from
-                # cold_boot_test's own post-cold-cycle read.
-                raw = lt.i2c_get(t, bus["pmic"], lt.ACT88760_ADDR, lt.ACT88760_GPIO_REG)
-                facts["act88760_gpio4_otp"] = f"{raw:#04x}"
-                if raw == lt.ACT88760_GPIO4_RELEASED:
-                    facts["act88760_gpio4_workaround"] = "none"
+                # gd32_flash runs BEFORE census. When it applied the volatile
+                # release it already recorded the OTP value it saw (0x88) and
+                # the workaround; reading reg 0x10 now would see the released
+                # 0x08 and overwrite both, so census leaves them alone then.
+                # Otherwise no release happened and 0x08 is conclusive; "u-boot"
+                # is decided later, from cold_boot_test's post-cold-cycle read.
+                if not str(ctx.facts.get("act88760_gpio4_workaround", "")).startswith("provision"):
+                    raw = lt.i2c_get(t, bus["pmic"], lt.ACT88760_ADDR, lt.ACT88760_GPIO_REG)
+                    facts["act88760_gpio4_otp"] = f"{raw:#04x}"
+                    if raw == lt.ACT88760_GPIO4_RELEASED:
+                        facts["act88760_gpio4_workaround"] = "none"
             except BenchError as e:
                 notes.append(f"act88760_gpio4_otp: {e}")
         ctx.step_logs[self.name] = "\n".join(notes)
@@ -964,6 +982,7 @@ class Gd32Flash(Step):
             raise Refused(f"no network and the console-push SWD tools are missing in {tools_dir}: {missing}")
         lt.console_login(b.console, b.linux_user)
         t = ConsoleTarget(b.console)
+        ctx._check_unit_identity(t)          # the same eMMC-CID gate the SSH path gets in need_linux
         return t, ConsoleSwdProbe(t, tools_dir, tools), True
 
     def run(self, ctx):
@@ -1009,9 +1028,16 @@ class Gd32Flash(Step):
             ev["gd32_protocol"] = line
         ev.update(self._fw_version(ctx))
         if via_console:
-            ctx.mutate("cold cycle; the GD32 now runs, so gbeth has its RX clock; re-check the IP",
-                       lambda: boot_to_linux(ctx))
-            ev["network_after_gd32"] = ctx.linux.host
+            # The flash evidence is complete above; a failed re-check must not lose it.
+            try:
+                ctx.mutate("cold cycle; the GD32 now runs, so gbeth has its RX clock; re-check the IP",
+                           lambda: cold_boot_phy_retry(ctx, ev))
+                if ctx.execute:
+                    ev["network_after_gd32"] = ctx.linux.host
+            except BenchError as e:
+                ev["network_after_gd32"] = f"none: {e}"
+                return self.result(ctx, f"GD32 flashed and verified, but no network after the cold cycle: {e}",
+                                   ev, status="failed")
         return self.result(ctx, "GD32 flashed and verified" if ctx.execute else "would flash the GD32", ev)
 
 
@@ -1192,17 +1218,7 @@ class ColdBootTest(Step):
 
     @staticmethod
     def _cold_boot(ctx, ev) -> str:
-        """One cold boot. A PHY that latched dead (end0 without carrier, #2582)
-        gets exactly one extra cold cycle before the boot counts as failed; the
-        retry is recorded in the evidence."""
-        text = boot_to_linux(ctx, need_ip=False)
-        sh = ctx.linux or ConsoleTarget(ctx.bench.console)
-        if "end0" in lt.net_ifaces(sh) and not lt.net_carrier(sh, "end0"):
-            ev["end0_no_carrier_retries"] = str(int(ev.get("end0_no_carrier_retries", "0")) + 1)
-            return text + boot_to_linux(ctx)
-        if ctx.linux is None:
-            raise BenchError("no IP after the cold boot although end0 has carrier")
-        return text
+        return cold_boot_phy_retry(ctx, ev)
 
     def run(self, ctx):
         n = ctx.cold_cycles

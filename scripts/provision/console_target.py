@@ -30,6 +30,7 @@ RAW_CHUNK = 768         # bytes -> 1024 base64 chars per line, the size proven o
 REMOTE_DIR = "/tmp/v2n-swd"
 _DECODE = "import base64,sys;open(sys.argv[2],'wb').write(base64.b64decode(open(sys.argv[1]).read()))"
 _ENCODE = "import base64,sys;print(base64.encodebytes(open(sys.argv[1],'rb').read()).decode())"
+_marker = 0   # module-wide: a second ConsoleTarget must never reuse a marker still in the buffer
 _DPID = re.compile(r"id=(0x[0-9a-fA-F]{8})")
 
 
@@ -38,14 +39,14 @@ class ConsoleTarget:
 
     def __init__(self, console: Console) -> None:
         self.console = console
-        self._n = 0
 
     def run(self, cmd: str, timeout: float = 60.0, check: bool = True,
             stdin_path: Path | None = None) -> CmdResult:
         if stdin_path is not None:
             raise BenchError("console target cannot stream a file on stdin; use put()")
-        self._n += 1
-        n = self._n
+        global _marker
+        _marker += 1
+        n = _marker
         self.console.drain(0.1, 2.0)
         self.console.send_line(
             f'echo "@@B""{n}"; ( {cmd}\n) 2>&1; echo "@@E""{n}:$?"')
@@ -69,7 +70,10 @@ class ConsoleTarget:
     def get(self, remote: str, local: Path) -> None:
         q = shlex.quote(remote)
         out = self.run(f"python3 -c {shlex.quote(_ENCODE)} {q}", timeout=600.0).stdout
-        data = base64.b64decode(re.sub(r"\s+", "", out))
+        try:
+            data = base64.b64decode(re.sub(r"\s+", "", out), validate=True)
+        except ValueError as e:
+            raise BenchError(f"console pull {remote}: undecodable base64: {e}") from e
         self._check_md5(q, data, f"pull {remote}")
         Path(local).write_bytes(data)
 
