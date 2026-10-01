@@ -74,6 +74,8 @@ into the topic-specific docs.
   Raspberry-Pi-style MIPI CSI-2 camera-module sensor drivers (OV5647,
   OV9281, IMX296, IMX335) and their Zephyr shields; build command form +
   supported modes.
+- [chip-driver-classification.md](chip-driver-classification.md) — every
+  non-complete chip driver with ADR 0017 tier, proposed owner and gap (#500).
 - [glossary.md](glossary.md) — terms.
 - [adr/README.md](adr/README.md) — Architecture Decision Records
   index (35 ADRs; recount with `ls docs/adr/[0-9]*.md | wc -l`).
