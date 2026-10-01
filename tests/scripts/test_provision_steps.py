@@ -1270,3 +1270,16 @@ def test_accept_cid_change_adopts_once_then_refuses_another_swap(tmp_path, monke
     monkeypatch.setattr(lt, "read_emmc_cid", lambda t: third)
     with pytest.raises(steps.Refused):                # a second swap in the same run is not adopted
         ctx.need_linux()
+
+
+def test_census_after_gd32_flash_keeps_the_early_otp_evidence(tmp_path):
+    """gd32_flash runs before census: its volatile 0x08 write must not make census
+    record OTP 0x08 / workaround none over the 0x88 / provision (volatile) it recorded."""
+    board = Board(act_0x10=0x88)
+    ctx = _ctx(tmp_path, bench=_bench(), linux=board, gd32_fw=_gd32_fw(tmp_path), execute=True)
+    res = steps.run_steps(ctx, only=["gd32_flash", "census"])
+    assert board.regs[(8, 0x25, 0x10)] == 0x08                  # census would read the released value
+    assert ctx.facts["act88760_gpio4_otp"] == "0x88"
+    assert ctx.facts["act88760_gpio4_workaround"] == "provision (volatile 0x08)"
+    census = next(r for r in res if r.name == "census")
+    assert "act88760_gpio4_otp" not in census.evidence

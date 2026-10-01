@@ -108,7 +108,7 @@ class LinuxTarget:
     def _exec(self, argv: list[str], timeout: float, stdin_path: Path | None = None) -> CmdResult:
         try:
             if stdin_path is None:
-                p = self.runner(argv, capture_output=True, text=True, timeout=timeout)
+                p = self.runner(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout)
             else:
                 with open(stdin_path, "rb") as f:
                     p = self.runner(argv, stdin=f, capture_output=True, text=True, timeout=timeout)
@@ -798,6 +798,20 @@ def _devmem(t: LinuxTarget, addr: int) -> int:
     return int(out, 16)
 
 
+NET_IF_RE = re.compile(r"(?:end|eth)\d+")   # the Renesas gbeth ports are end0/end1
+
+
+def net_ifaces(t) -> list[str]:
+    return sorted(n for n in t.run("ls /sys/class/net", check=False).stdout.split()
+                  if NET_IF_RE.fullmatch(n))
+
+
+def net_carrier(t, name: str) -> bool:
+    """True when the PHY reports link (an administratively-down port reads as no carrier)."""
+    r = t.run(f"cat /sys/class/net/{name}/carrier", check=False)
+    return r.rc == 0 and r.stdout.strip() == "1"
+
+
 def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None = None,
            emmc: str | None = None) -> tuple[dict[str, str], list[str]]:
     """Read-only. Returns (auto ledger keys, notes on what could not be read).
@@ -910,13 +924,27 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
             f" at {CLKGEN_5L35023B_ADDR:#04x}"
 
     def network():
-        for i in (0, 1):
-            r = t.run(f"cat /sys/class/net/eth{i}/address /sys/class/net/eth{i}/operstate", check=False)
+        names = net_ifaces(t)
+        if not names:
+            notes.append("network: no end*/eth* interface")
+        # The ledger catalogue keys are eth0_*/eth1_* (by port index); the
+        # interface names on the unit are end0/end1. Carrier, speed and the
+        # link-partner advertisement are folded into the one *_link value.
+        for i, n in enumerate(names[:2]):
+            r = t.run(f"cat /sys/class/net/{n}/address /sys/class/net/{n}/operstate", check=False)
             lines = r.stdout.split()
-            if r.rc == 0 and len(lines) == 2:
-                facts[f"eth{i}_mac"], facts[f"eth{i}_link"] = lines
-            else:
-                notes.append(f"eth{i}: not present")
+            if r.rc != 0 or len(lines) != 2:
+                notes.append(f"{n}: address/operstate unreadable")
+                continue
+            mac, state = lines
+            spd = t.run(f"cat /sys/class/net/{n}/speed", check=False).stdout.strip()
+            lp = re.search(r"Link partner advertised link modes:\s*(.+)",
+                           t.run(f"ethtool {n} 2>/dev/null", check=False).stdout)
+            carrier = "1" if net_carrier(t, n) else "0"
+            speed = spd if spd.isdigit() else "unknown"
+            anlpar = lp[1].strip() if lp else "unknown"
+            facts[f"eth{i}_mac"] = mac
+            facts[f"eth{i}_link"] = f"{state} ({n}) carrier={carrier} speed={speed} anlpar={anlpar}"
 
     for name, fn in (("soc", soc), ("cpu_mem", cpu_mem), ("storage", storage), ("xspi", xspi),
                      ("identity", identity), ("power", power), ("clocks_rtc", clocks_rtc),
