@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: Apache-2.0
+
+tests:
+  alp_sdk.cloud_sdks.build:
+    # Skipped unless the extras-cloud sources are present: CMakeLists.txt only
+    # merges cloud.conf (which sets both symbols) when it finds both checkouts.
+    filter: CONFIG_ALP_AWS_IOT and CONFIG_ALP_AZURE_IOT
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - cloud

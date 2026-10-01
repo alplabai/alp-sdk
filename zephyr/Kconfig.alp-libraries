@@ -449,3 +449,25 @@ config ALP_SDK_MODEL_READER
 	  Selects ZCBOR for the manifest-map decode.  Off by default; the
 	  runtime model loader (and any hand-written firmware that consumes
 	  .alpmodel packages directly) opts in.
+
+# ----------------------------------------------------------------------
+# AWS IoT / Azure IoT embedded-C SDKs (west group `extras-cloud`)
+# ----------------------------------------------------------------------
+
+config ALP_AWS_IOT
+	bool "Build the AWS IoT Device SDK for Embedded C (coreMQTT + coreJSON)"
+	depends on ALP_SDK
+	help
+	  Compiles coreMQTT and coreJSON from the west-pinned
+	  aws-iot-device-sdk-embedded-C checkout (vendors/aws-iot/).  Needs
+	  `west update --group-filter +extras-cloud`.  The TLS transport
+	  (transport_interface.h) is application-supplied; no shim ships.
+
+config ALP_AZURE_IOT
+	bool "Build the Azure SDK for Embedded C (az_core + IoT Hub client)"
+	depends on ALP_SDK
+	help
+	  Compiles az_core (span/json/base64/context/log) and the az_iot hub
+	  client from the west-pinned azure-sdk-for-c checkout
+	  (vendors/azure-iot/).  Needs `west update --group-filter
+	  +extras-cloud`.  The MQTT/TLS transport is application-supplied.
