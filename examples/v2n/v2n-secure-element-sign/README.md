@@ -26,7 +26,10 @@ writes to the chip.
    kernel's `alplab,gd32-bridge-gpio` driver owns, so the app does not talk
    to the GD32: `src/se_reset_gpio.h` finds the `se-rst` line on the
    `gd32-bridge-gpio` gpiochip and passes it as the reset hook.  If the
-   part is silent the driver pulses SE_RST once and probes again.  Failing
+   part is silent the driver pulses SE_RST once and probes again.  The
+   driver keeps the hook, so the app keeps the line open until after
+   `optiga_trust_m_deinit`; a later open that finds the part idled out
+   pulses SE_RST once and opens again (#2517).  Failing
    after that means the chip is not on the bus, is not strapped to address
    0x30, or is held in reset.  An image whose kernel lacks the `se-rst`
    line gets no hook (plain probe).  Needs a kernel built with the
