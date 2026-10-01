@@ -307,6 +307,11 @@ config ALP_SDK_UPDATE_LOG_BOOT_ALIF_SE
 	  ALP_UPDATE_STATUS_VERIFY_FAILED; no matching or malformed entry
 	  reports ALP_ERR_NOSUPPORT rather than a fabricated entry.
 
+	  Stack: the provider plus the SHA-256 it runs needs about 0.7 KiB
+	  of the calling thread's stack (frames measured on the M55-HE
+	  build). A 1 KiB main stack overflowed on E1M-AEN803 when an
+	  interrupt landed mid-hash; give the caller at least 2 KiB.
+
 endchoice
 
 config ALP_SDK_UPDATE_LOG_BOOT_ALIF_SE_IMAGE_ID
