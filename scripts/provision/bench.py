@@ -116,6 +116,12 @@ class Console:
                 raise ExpectTimeout(shown, self._buf[-_TAIL:], timeout)
             self._pull(min(remaining, 0.5))
 
+    def pump(self, seconds: float) -> None:
+        """Read into the buffer for `seconds` (opens the port if needed); nothing is discarded."""
+        deadline = time.monotonic() + seconds
+        while (remaining := deadline - time.monotonic()) > 0:
+            self._pull(min(remaining, 0.2))
+
     def drain(self, quiet_s: float = 0.2, max_s: float = 10.0) -> str:
         """Read until the console is quiet for `quiet_s`; return and consume
         everything unconsumed. `max_s` bounds a console that never goes quiet."""
@@ -236,10 +242,23 @@ class Power:
     def off(self) -> None:
         raise NotImplementedError
 
-    def cycle(self, off_s: float = 3.0) -> None:
+    def cycle(self, off_s: float = 3.0, console: Console | None = None) -> None:
         self.off()
-        time.sleep(off_s)
+        # Keep reading the console while off: a one-shot ROM banner can land
+        # right at power-on, and an unread port may deliver nothing afterwards.
+        # A console error must not leave the unit off: finish the dwell, power
+        # on, then report it.
+        end, err = time.monotonic() + off_s, None
+        try:
+            if console is not None:
+                console.pump(off_s)
+        except BenchError as e:
+            err = e
+        if (rest := end - time.monotonic()) > 0:
+            time.sleep(rest)
         self.on()
+        if err is not None:
+            raise BenchError(f"console failed during the power-off window (power restored): {err}") from err
 
     def is_on(self) -> bool | None:  # None = unknowable
         return None
@@ -308,7 +327,7 @@ class LabgridPower(Power):
     def _lg(self, action: str) -> str:
         argv = [self._exe, "-p", self.place, "power", action]
         try:
-            r = self._runner(argv, capture_output=True, text=True, timeout=60)
+            r = self._runner(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
         except (OSError, subprocess.TimeoutExpired) as e:
             raise BenchError(f"{' '.join(argv)}: {e}") from e
         if r.returncode != 0:
@@ -338,7 +357,7 @@ class ManualPower(Power):
     def off(self) -> None:
         self.operator.confirm("Switch the unit's power OFF.")
 
-    def cycle(self, off_s: float = 3.0) -> None:
+    def cycle(self, off_s: float = 3.0, console: Console | None = None) -> None:
         self.operator.confirm(
             f"Power-cycle the unit: OFF, wait at least {off_s:g} s, then ON."
         )
@@ -413,7 +432,7 @@ class JLinkProbe(Probe):
                 "-CommanderScript", str(cmdfile),
             ]  # fmt: skip
             try:
-                r = self._runner(argv, capture_output=True, text=True, timeout=300)
+                r = self._runner(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=300)
             except (OSError, subprocess.TimeoutExpired) as e:
                 raise BenchError(f"J-Link {self.serial_no}: {e}") from e
         out = (r.stdout or "") + (r.stderr or "")
@@ -467,7 +486,7 @@ class ScriptProbe(Probe):
             *args,
         ]
         try:
-            r = self._runner(argv, capture_output=True, text=True, timeout=300)
+            r = self._runner(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=300)
         except (OSError, subprocess.TimeoutExpired) as e:
             raise BenchError(f"{' '.join(argv)}: {e}") from e
         if r.returncode != 0:
@@ -501,6 +520,10 @@ class ScriptProbe(Probe):
 # --------------------------------------------------------------------------
 
 
+DEFAULT_OFF_S = 15.0  # the V2N rails and the 5L35023B need this long to discharge
+CONSOLE_SWD_TOOLS = ("swd_bb.py", "gd32_swd_flash.py")
+
+
 @dataclass
 class Bench:
     console: Console
@@ -512,6 +535,13 @@ class Bench:
     i2c_bus: dict[str, int]  # values may be None while TBD
     scif: dict  # {"flash_writer": Path, "baud": int, "program_start": {"bl2_mmc": int|None, "fip": int|None}}
     raw: dict
+    # (dir, tool filenames) the console-push SWD fallback copies to the board
+    console_swd: tuple[Path, tuple[str, ...]] | None = None
+
+    @property
+    def off_s(self) -> float:
+        """Power-off dwell for a cold cycle: bench.yaml power.off_s, else DEFAULT_OFF_S."""
+        return float((self.raw.get("power") or {}).get("off_s", DEFAULT_OFF_S))
 
 
 def _need(d: dict, key: str, where: str):
@@ -584,6 +614,13 @@ def load_bench(path: Path, operator: Operator | None = None) -> Bench:
                 f"bench.yaml: probe.kind must be jlink|script, got {kind!r}"
             )
 
+    console_swd = None
+    if pr and pr.get("kind") == "script":
+        console_swd = (
+            rel(pr["wrapper"]).parent,
+            tuple(pr.get("console_tools") or CONSOLE_SWD_TOOLS),
+        )
+
     linux = raw.get("linux") or {}
 
     ib = _need(raw, "i2c_bus", "")
@@ -615,4 +652,5 @@ def load_bench(path: Path, operator: Operator | None = None) -> Bench:
         i2c_bus=i2c_bus,
         scif=scif,
         raw=raw,
+        console_swd=console_swd,
     )

@@ -667,10 +667,10 @@ channels.**  The allocator's default carve-out is non-cacheable on every
 SoM, V2N and AEN alike.  `cacheable: true` was once an explicit
 per-entry opt-in, meant to say "the orchestrator emits matching
 cache-maintenance hooks on both sides, don't write cache ops by hand" —
-**that emission was never built.**  `cfg->cacheable` is stored on the
-`<alp/rpc.h>` backend struct (`src/backends/rpc/zephyr_drv.c` /
-`yocto_drv.c`) and never read again; there is no `sys_cache_*` /
-`arch_dcache_*` call anywhere under `src/` or `include/`.
+**that emission was never built.**  `alp_rpc_config_t` had a `cacheable`
+field that the backends stored and never read (since removed); there is
+no `sys_cache_*` / `arch_dcache_*` call anywhere under `src/` or
+`include/`.
 
 Rather than leave a flag that selects an unimplemented safety path,
 `load_board_yaml` now **hard-rejects** `cacheable: true` on any
