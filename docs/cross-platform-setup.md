@@ -864,24 +864,6 @@ reader fill in their OS's convention.  The
 `scripts/check_cross_platform.py` lint catches hardcoded
 `/dev/...` paths in docs.
 
-### 7.8 Symlinks in git on Windows
-
-Git on Windows does not enable symlink support by default
-(requires Developer Mode or admin rights at clone time).  A few
-files in the SDK are symlinks for backward-compatibility
-filename aliases.  Either:
-
-```powershell
-# As admin, enable Developer Mode (Settings → System → For
-# developers), then:
-git config --global core.symlinks true
-git clone https://github.com/alplabai/alp-sdk
-```
-
-or accept that the symlinks land as plain text files containing
-the link target.  The SDK does not rely on these symlinks for
-build correctness; they're documentation aliases only.
-
 ---
 
 ## 8. What is Linux-only and why

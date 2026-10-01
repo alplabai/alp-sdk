@@ -374,8 +374,9 @@ JSON-shaping hermetically (a fake symbol list, no Zephyr installed),
 and `scripts/check_emit_kconfig_contract.py` -- a schema/smoke check,
 not a byte-golden, since the exact symbol set moves with the pinned
 Zephyr version -- runs against a real AEN core in the
-Zephyr-bootstrapped `pr-twister` CI job (`.github/workflows/
-pr-twister.yml`), never in the hermetic snapshot gate.
+Zephyr-bootstrapped `pr-twister` CI job
+(`.github/workflows/pr-twister.yml`), never in the hermetic snapshot
+gate.
 
 Python Tan's top-level `tan kconfig --core <id>` runs the relocated renderer in
 process and wraps the result in its versioned envelope. The direct SDK and west

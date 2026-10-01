@@ -895,12 +895,12 @@ comment at the top of that file.
 - **Customer cookbook** — [`docs/portability.md`](portability.md)
   walks through the intra-family swap from the customer's side
   (one-line `som.sku:` edit, what the build does, when it
-  fails).  *In progress — Phase D.1.*
+  fails).
 - **Architectural rationale** —
   [`docs/adr/0011-intra-family-portability.md`](adr/0011-intra-family-portability.md)
   records the "swap SKU, no source change" guarantee as an ADR
   with explicit non-goals (cross-family portability is **not** a
-  goal).  *In progress — Phase D.6.*
+  goal).
 - **Broader SDK layout** — [`docs/architecture.md`](architecture.md)
   is the high-level map: OS targets, repository layout, public
   surface (`<alp/...>`), the SDK ↔ studio boundary.

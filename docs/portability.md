@@ -847,7 +847,7 @@ until then the ladder pattern is the load-bearing answer.
 ## 6. Per-family portability matrix (link)
 
 The empirical guarantee — every cell a compile test, the diff
-catalogue, and the open gaps — lives in
+catalogue, and the gap history — lives in
 [`docs/portability-matrix.md`](portability-matrix.md).  Skim it
 when you're picking SKUs or when you suspect the SDK isn't keeping
 its promise.

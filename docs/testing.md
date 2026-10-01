@@ -116,7 +116,7 @@ It does **not** prove:
 | `<alp/display.h>` / `<alp/gui.h>` / `<alp/camera.h>` / `<alp/storage.h>` | compile-only via `tests/smoke.c` + headers-include test                                              | (real impls pending)                  |
 | Chip drivers (`chips/*/`)         | `tests/zephyr/chips/` with fakes for `lsm6dso`, `bme280`, `ssd1306`                                                    | per-chip on AEN bench         |
 | `<alp/soc_caps.h>` generation     | `pr-generated-files.yml` (drift gate)                                                                                  | n/a (generator-deterministic)         |
-| ABI snapshot                      | `scripts/abi_snapshot.py` + `docs/abi/v0.1-snapshot.json` (drift gate)                                                 | n/a                                   |
+| ABI snapshot                      | `scripts/abi_snapshot.py` + `docs/abi/v0.13-snapshot.json` (drift gate)                                                | n/a                                   |
 | `board.yaml` schema + loader      | `pr-metadata-validate.yml` smoke + `tests/scripts/test_project_*.py`                                                   | n/a                                   |
 
 ---
@@ -200,7 +200,7 @@ Every CI workflow has a local counterpart that runs the same coverage:
 | `pr-generated-files.yml`       | `python3 scripts/gen_soc_caps.py --check`                 |
 | `pr-metadata-validate.yml`     | `python3 scripts/validate_metadata.py` + alp_project.py   |
 | public/private classifier      | `python3 scripts/check_public_private.py`                 |
-| `pr-doxygen.yml`               | `doxygen Doxyfile` (zero-warnings)                        |
+| `pr-doxygen.yml`               | `bash scripts/test-all.sh` (doxygen stage; Doxyfile generated inline) |
 | (extension CI lives in `alplabai/alp-sdk-vscode`) | `cd ../alp-sdk-vscode && npm test`                     |
 | `coverity.yml`                 | none (Coverity Scan only)                                 |
 
@@ -237,8 +237,7 @@ The convention every new feature follows:
    the new function to its test(s).
 5. **CHANGELOG entry.**  Document the feature under `[Unreleased]`.
 
-The matching pull request template is at `.github/PULL_REQUEST_TEMPLATE.md`
-(when it lands).  The `CONTRIBUTING.md` walks through the same checklist.
+The matching pull request template is at `.github/PULL_REQUEST_TEMPLATE.md`.  The `CONTRIBUTING.md` walks through the same checklist.
 
 ---
 

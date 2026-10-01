@@ -44,7 +44,8 @@ broadcast-ish alias where phy_poll_reset misbehaves; address **2** is
 the clean unicast alias where the PHY attaches as `stmmac-N:02`.
 
 **Software workaround (shipped):** device tree uses `reg = <2>` on both
-phy nodes (DT patch 0013). Both PHYs then attach cleanly.
+phy nodes (the `mdio0`/`mdio1` blocks in `e1m-v2n-som.dtsi`). Both PHYs
+then attach cleanly.
 
 **Optional HW fix (deterministic address):** isolate the PHYAD straps
 from the MAC RGMII lines with series resistors, or hold the MAC RGMII
@@ -66,7 +67,8 @@ wired. Removing OVC from the pinctrl groups alone is insufficient
 software over-current-ignore knob (addressed by kernel patch 0003 in
 the second revision below).
 
-**Software workaround (shipped, since revised):** DT patch 0012 —
+**Software workaround (shipped, since revised):** the first-revision
+carrier DT —
 `/delete-node/ ovc` from usb20_pins/usb30_pins **and** a gpio-hog
 claiming P9.6 + PB.1 as GPIO inputs (deselects the OVC peripheral
 function → internal OVRCUR reads inactive). EHCI/OHCI stay enabled;
@@ -115,7 +117,7 @@ HW-verified when they land.
 ### Already correct in the SDK metadata (no action — listed for closure)
 - Chip BOM (TAS2563, RTL8211FDI, sensors, PMICs, GD32, etc.)
 - RIIC0/1/2/8 pad routing (renesas-peripheral-map.tsv) — RIIC3/6/7 are
-  not bonded out; DT patch 0011 disables them (matches the map).
+  not bonded out (matches the map).
 - PHY identity RTL8211F-VD (`0x001c.c878`).
 - TAS2563 on I2S0 with the I2S path-mux GPIOs (IO4 EN / IO5 SEL).
 
