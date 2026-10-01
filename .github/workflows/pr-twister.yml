@@ -18,24 +18,37 @@
 # examples), only shard 1 runs -- its Zephyr-oracle checks still execute --
 # and its twister step is skipped; the aggregator still reports, so the
 # required context goes green instead of blocking the merge queue.  Any
-# doubt means the full 8-shard run.  push to dev/main, the nightly schedule
+# doubt means the full 8-shard run.  push to main, the nightly schedule
 # and workflow_dispatch are always full, so nothing reaches `main` without
 # a full twister run on `dev`.
+#
+# Merge-queue-only on `dev`: a pull_request targeting `dev` skips `select`
+# (and with it every shard) and the aggregator reports success at once, so
+# the PR can enter the queue without first holding ~9 runner slots.  The
+# real run happens on the `merge_group` event, against the exact commit
+# that will land.  On the free plan the org gets 20 concurrent jobs, and
+# PR-time runs were starving the queue's runs of runners.  PRs targeting
+# `main` still run on pull_request (main has no merge queue).  Nothing is
+# lost: every commit reaching `dev` is a merge-queue commit, and the
+# nightly full run on `dev` stays the backstop.
 
 name: pr-twister
 
 on:
   pull_request:
     branches: [main, dev]
+  # No `push: dev`: a dev push is the commit its merge_group run already
+  # tested, so a second full run only competed with the queue for runners.
   push:
-    branches: [main, dev]
+    branches: [main]
   # A queued PR waits on the branch's required contexts, and GitHub raises
   # `merge_group` -- not `push` or `pull_request` -- for a merge-queue entry.
   # `dev`'s and `main`'s required twister context is the aggregator
   # `twister · native_sim/native/64` from this file, so without this trigger
   # a queued PR would wait on a check that can never fire (#1415). Neither job here is gated to
-  # `pull_request`: `twister-shard` carries no job-level `if:` and `twister`
-  # carries `if: always()` -- read, not assumed.
+  # `pull_request`: `select` skips only when `github.base_ref` is `dev` (set
+  # on pull_request alone, never on merge_group), `twister-shard` carries no
+  # job-level `if:` and `twister` carries `if: always()` -- read, not assumed.
   merge_group:
   workflow_dispatch:
   # Nightly full run on the default branch (dev): the backstop behind
@@ -54,6 +67,11 @@ jobs:
   # in here falls back to full, never to skip.
   select:
     name: twister · select
+    # Skipped on a pull_request into `dev` (see the header): the shards
+    # skip with it and the aggregator passes; the merge_group run is the
+    # real gate.  `base_ref` is set only on pull_request events, so
+    # merge_group, push, schedule and dispatch always run.
+    if: github.base_ref != 'dev'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -661,6 +679,10 @@ jobs:
           result='${{ needs.twister-shard.result }}'
           echo "select: ${{ needs.select.result }} (twister=${{ needs.select.outputs.twister }})"
           echo "twister-shard aggregate result: $result"
+          if [ '${{ github.event_name }}' = pull_request ] && [ '${{ github.base_ref }}' = dev ]              && [ '${{ needs.select.result }}' = skipped ] && [ "$result" = skipped ]; then
+            echo "pull_request into dev: twister deferred to the merge_group run"
+            exit 0
+          fi
           if [ "$result" != "success" ]; then
             echo "::error::one or more twister shards did not pass ($result)"
             exit 1
