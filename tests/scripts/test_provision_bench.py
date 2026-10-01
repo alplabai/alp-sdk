@@ -198,6 +198,15 @@ def test_labgrid_power():
         ).off()
 
 
+def test_cycle_buffers_console_output_during_off_window():
+    class P(bench.Power):
+        def on(self): pass
+        def off(self): con.feed("SCI Download mode\r\n")
+    con = FakeConsole([])
+    P().cycle(0.05, con)
+    assert con.expect("SCI Download mode", 0.05)    # banner kept, not discarded
+
+
 def test_fake_power_records_events():
     fed = []
     p = FakePower(on_hook=lambda: fed.append(1))
@@ -352,6 +361,8 @@ def test_load_bench(tmp_path):
     assert b.scif["flash_writer"] == tmp_path / "fw/writer.mot"
     assert b.scif["program_start"] == {"bl2_mmc": None, "fip": 0x1234}
     assert b.raw["console"]["host"] == "consolehost"
+    assert b.off_s == bench.DEFAULT_OFF_S == 15.0     # power.off_s absent -> 15 s dwell
+    assert b.console_swd == (tmp_path / "tools", bench.CONSOLE_SWD_TOOLS)
 
 
 @pytest.mark.parametrize(
