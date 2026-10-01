@@ -317,7 +317,7 @@ def test_eeprom_ack_poll_exits_zero_after_retries():
                 'return 0; }; ')
 
     def sh(cmd):
-        p = subprocess.run(["bash", "-c", fake_i2c + cmd], capture_output=True, text=True, check=False)
+        p = subprocess.run(["bash", "-c", fake_i2c + cmd], capture_output=True, text=True, encoding="utf-8", check=False)
         return p.returncode, p.stdout, p.stderr
 
     t, fake = target([(r"until", sh), (r"r16", _hx(data))])
