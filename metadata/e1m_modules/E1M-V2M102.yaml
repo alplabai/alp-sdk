@@ -1,6 +1,6 @@
 # Stock preset for E1M-V2M102 (V2N-M1 + DEEPX, larger memory).
 
-schema_version: 1
+schema_version: 2
 
 sku: E1M-V2M102
 family: renesas-rzv2n-deepx

@@ -402,8 +402,7 @@ def notes_for(preset: dict) -> str:
         tags.append("no external flash")
 
     # On-SoC Ethos-U variants -- from the SoC JSON npus[] (the silicon truth),
-    # not restated in the SoM preset (its `inference.npu_population` is
-    # deprecated).  Map `ethos-uNN` -> `uNN`.
+    # not restated in the SoM preset.  Map `ethos-uNN` -> `uNN`.
     variants: set[str] = set()
     silicon = preset.get("silicon") or ""
     if silicon:

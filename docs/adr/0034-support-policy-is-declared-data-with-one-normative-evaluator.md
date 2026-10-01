@@ -61,7 +61,7 @@ inherits that voice.
    `_cross_class_os` this reaches the refusal: an unclassified core has *both*
    real runtimes refused, and the error reads `(unclassified)`.
 3. **The field built to carry the decision is unused.**
-   `metadata/schemas/som-preset-v1.schema.json` `$defs/topology_entry/properties/os`
+   `metadata/schemas/som-preset-v2.schema.json` `$defs/topology_entry/properties/os`
    exists, described as "Default runtime for this core.  Customer's board.yaml
    `cores.<id>.os` overrides", and `loader.py:555` already prefers it:
    `os=str(entry.get("os") or _default_os_from_core_type(soc_core_type))`. All

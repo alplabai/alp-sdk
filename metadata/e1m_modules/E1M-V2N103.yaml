@@ -5,7 +5,7 @@
 # and default board for this SKU; `scripts/alp_project.py` and
 # the alp-studio pin allocator read it at build time.
 
-schema_version: 1
+schema_version: 2
 
 sku: E1M-V2N103
 family: renesas-rzv2n
