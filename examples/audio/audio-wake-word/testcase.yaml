@@ -13,7 +13,7 @@ tests:
   alp_sdk.examples.audio_wake_word.native_sim:
     platform_allow:
       - native_sim/native/64
-    extra_args: CONFIG_AUDIO_DMIC=y
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf CONFIG_AUDIO_DMIC=y
     tags:
       - alp-sdk
       - example
@@ -28,6 +28,7 @@ tests:
         - "\\[wake\\] done"
 
   alp_sdk.examples.audio_wake_word.aen:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     platform_allow:
       - ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp
     tags:

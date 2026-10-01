@@ -47,7 +47,9 @@ FUSE,5.0,UNCORROBORATED,0.50,3.0,0.0,0.0,1
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/ai/multimodal-fusion-pdm
+# writes examples/ai/multimodal-fusion-pdm/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/ai/multimodal-fusion-pdm
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/ai/multimodal-fusion-pdm -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 

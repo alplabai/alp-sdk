@@ -25,8 +25,10 @@ lifecycle.
 ## Build
 
 ```bash
+# writes examples/audio/audio-loopback/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/audio/audio-loopback
 west build -b native_sim/native/64 examples/audio/audio-loopback \
-    -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
 west build -t run
 ```
 

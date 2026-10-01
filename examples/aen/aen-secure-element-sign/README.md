@@ -23,8 +23,10 @@ The `src/` is intentionally parallel -- everything goes through the SoM-portable
   the same controller.
 
 ```bash
+# writes examples/aen/aen-secure-element-sign/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/aen/aen-secure-element-sign
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
-    examples/aen/aen-secure-element-sign
+    examples/aen/aen-secure-element-sign -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 

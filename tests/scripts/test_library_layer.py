@@ -595,8 +595,10 @@ def test_ros2_edge_image_pulls_rclcpp_and_alp_perception() -> None:
 # Grounding (2026-07-05):
 #   * CONFIG_LWM2M  $ZEPHYR_BASE/subsys/net/lib/lwm2m/Kconfig `menuconfig LWM2M`
 #   * CONFIG_COAP   $ZEPHYR_BASE/subsys/net/lib/coap/Kconfig  `config COAP`
-#   * aws-iot / azure-iot: no upstream Zephyr west module in `west list`; exact
-#     release pins live in integration.zephyr.west, no CONFIG is invented.
+#   * aws-iot / azure-iot: no upstream Zephyr module or Kconfig; exact release
+#     pins live in integration.zephyr.west and the enable symbols are alp-sdk's
+#     own (CONFIG_ALP_AWS_IOT / CONFIG_ALP_AZURE_IOT, zephyr/Kconfig.alp-libraries,
+#     glue in vendors/{aws-iot,azure-iot}/).
 # ---------------------------------------------------------------------
 
 CLOUD_LIBS = {"lwm2m", "coap", "aws-iot", "azure-iot"}
@@ -614,9 +616,9 @@ def test_lwm2m_coap_are_upstream_apache() -> None:
         assert doc["license"] == "Apache-2.0"
 
 
-def test_aws_azure_are_module_only_prerequisites() -> None:
-    """The cloud manifests name real upstream repos with exact west pins and NO
-    fabricated Kconfig (generic C SDKs, enable-by-presence)."""
+def test_aws_azure_pins_and_alp_enable_symbols() -> None:
+    """The cloud manifests name real upstream repos with exact west pins and the
+    alp-sdk-owned enable symbols that gate the in-tree vendors/ glue."""
     aws = yaml.safe_load((LIBRARIES_DIR / "aws-iot.yaml").read_text(encoding="utf-8"))
     assert aws["license"] == "MIT"
     assert aws["version"] == "202412.00"
@@ -624,7 +626,7 @@ def test_aws_azure_are_module_only_prerequisites() -> None:
     assert zephyr.get("module") == "aws-iot-device-sdk-embedded-C"
     assert zephyr["west"]["revision"] == "202412.00"
     assert zephyr["west"]["path"] == "modules/lib/aws-iot-device-sdk-embedded-C"
-    assert "kconfig" not in zephyr, "no Kconfig may be invented without a real symbol"
+    assert zephyr["kconfig"] == ["CONFIG_ALP_AWS_IOT=y"]
 
     azure = yaml.safe_load((LIBRARIES_DIR / "azure-iot.yaml").read_text(encoding="utf-8"))
     assert azure["license"] == "MIT"
@@ -633,7 +635,7 @@ def test_aws_azure_are_module_only_prerequisites() -> None:
     assert zephyr.get("module") == "azure-sdk-for-c"
     assert zephyr["west"]["revision"] == "1.5.0"
     assert zephyr["west"]["path"] == "modules/lib/azure-sdk-for-c"
-    assert "kconfig" not in zephyr
+    assert zephyr["kconfig"] == ["CONFIG_ALP_AZURE_IOT=y"]
 
 
 # --- emit: an upstream cloud lib lands its real CONFIG on a Zephyr M core ---
@@ -659,7 +661,7 @@ def test_emit_lwm2m_coap_zephyr_kconfig(tmp_path: Path) -> None:
     assert "lwm2m v4.4.1" in out  # version transcribed from the manifest
 
 
-# --- emit: a prerequisite cloud lib emits the tag with NO fabricated CONFIG ---
+# --- emit: aws-iot lands its alp-owned CONFIG alongside the selection tag ---
 
 _V2N_AWS = """
 som:
@@ -672,16 +674,15 @@ cores:
 """
 
 
-def test_emit_aws_iot_module_only_no_kconfig(tmp_path: Path) -> None:
+def test_emit_aws_iot_enable_symbol(tmp_path: Path) -> None:
     """aws-iot on the M33 emits the ADR 0018 selection tag naming the upstream
-    module and -- because the SDK has no confirmed enable symbol -- NO
-    fabricated CONFIG line."""
+    module plus the alp-sdk enable symbol."""
     project = load_board_yaml(_write_board(tmp_path, _V2N_AWS))
     out = _slice_alp_conf(project, project.cores["m33_sm"])
     assert "ADR 0018" in out
     assert "aws-iot-device-sdk-embedded-C" in out   # module named in the tag
     assert "aws-iot v202412.00" in out                  # version transcribed
-    assert "CONFIG_AWS" not in out                   # nothing invented
+    assert "CONFIG_ALP_AWS_IOT=y" in out
 
 
 # --- os constraint on an upstream cloud lib names the failing constraint ---

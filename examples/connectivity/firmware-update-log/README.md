@@ -215,6 +215,7 @@ stays intact and verifiable.
 ## Running the example
 
 ```
+python3 scripts/gen_example_alp_conf.py examples/connectivity/firmware-update-log   # writes generated/alp.conf (#866)
 west twister -p native_sim/native/64 \
     -T examples/connectivity/firmware-update-log --inline-logs
 ```

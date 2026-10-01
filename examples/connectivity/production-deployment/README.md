@@ -172,7 +172,9 @@ the rest stays quiet to save flash and console bandwidth.
 ### native_sim (framing test, no real ops)
 
 ```bash
-west build -b native_sim/native/64 examples/connectivity/production-deployment
+# writes examples/connectivity/production-deployment/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/connectivity/production-deployment
+west build -b native_sim/native/64 examples/connectivity/production-deployment -- -DEXTRA_CONF_FILE=generated/alp.conf
 west build -t run
 ```
 

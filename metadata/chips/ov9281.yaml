@@ -167,3 +167,5 @@ physical:
     - { pad: H5, signal: EVDD }
     - { pad: H6, signal: DOVDD }
     - { pad: H7, signal: AGND }
+tracking:
+  blocker: "ADR 0017 tier decision pending"

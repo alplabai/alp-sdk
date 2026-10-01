@@ -93,6 +93,8 @@ a standalone `mramAddress 0x80010000` config instead. Use the sysbuild flow
 so MCUboot signs your image into slot0:
 
 ```bash
+# A board.yaml-driven app needs its alp.conf first: prefer `tan build`, or pass
+# -DEXTRA_CONF_FILE=<alp.conf> (docs/board-config-emit.md; #866).
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <your-app> \
     --sysbuild -- -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf
 export SETOOLS_DIR=<...>/app-release-exec-linux   # license-gated; not shipped

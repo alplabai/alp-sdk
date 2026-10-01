@@ -86,7 +86,9 @@ Two J-Links: one on the Alif, one on the CC3501E.
 
 # 2. Build + flash this Alif app (use the FULL qualified board target so the
 #    per-board overlay boards/<target>.overlay is auto-applied):
-west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-cc3501e-bringup
+# writes examples/aen/aen-cc3501e-bringup/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/aen/aen-cc3501e-bringup
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-cc3501e-bringup -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash                      # over the Alif J-Link (AE822FA0E5597LS0_M55_HE)
 ```
 

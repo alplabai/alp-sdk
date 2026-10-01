@@ -1571,6 +1571,19 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_U8G2_VENDORED_CORE
     ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8g2_intersection.c
 )
 
+# AWS IoT / Azure IoT embedded-C SDKs: west-pinned sources (group
+# `extras-cloud`), in-tree glue under vendors/{aws-iot,azure-iot}/.  Each is
+# its own zephyr library in a subdirectory so zephyr_library_named() does not
+# redirect this file's later zephyr_library_sources() calls.
+if(CONFIG_ALP_AWS_IOT)
+    add_subdirectory(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/aws-iot
+                     ${CMAKE_CURRENT_BINARY_DIR}/vendors/aws-iot)
+endif()
+if(CONFIG_ALP_AZURE_IOT)
+    add_subdirectory(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/azure-iot
+                     ${CMAKE_CURRENT_BINARY_DIR}/vendors/azure-iot)
+endif()
+
 # Catch2's amalgamated single-TU distribution (vendors/catch2/README.md
 # -- no zephyr/module.yml upstream, same case as u8g2 above). Gated on
 # CONFIG_ALP_SDK_CATCH2_VENDORED, NOT CONFIG_ALP_CATCH2_SW (see the

@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2N101: systemd reports no failed units.  systemd-networkd-wait-online
+# is filtered out: the filter carries over from the V2M103 bench (end1
+# unplugged, #2450) and is not confirmed on a V2N unit -- drop it when
+# #2450 lands.  Read-only.
+
+schema_version: 1
+name: v2n101-systemd-no-failed-units
+description: |
+  No failed systemd units except the known #2450 wait-online failure.
+
+flash_method: ssh-run
+ssh_command: >-
+  n=$(systemctl --failed --no-legend --plain | grep -vc systemd-networkd-wait-online);
+  echo "HIL_UNEXPECTED_FAILED_UNITS=$n"
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "HIL_UNEXPECTED_FAILED_UNITS=0"

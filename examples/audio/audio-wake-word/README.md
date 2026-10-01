@@ -74,7 +74,9 @@ WIC (mic activity)  ──▶  M55 HE wakes from STOP
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/audio/audio-wake-word
+# writes examples/audio/audio-wake-word/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/audio/audio-wake-word
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/audio/audio-wake-word -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 
