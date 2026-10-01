@@ -13,7 +13,7 @@ parameters, test wiring); this module actually materialises one --
     files.user_owned path from the catalog record's canonical
     `example` directory into dest_dir, byte-for-byte, in sorted
     traversal order, never touching files.generated (those are
-    emitted later by scripts/alp_project.py at configure time, per
+    emitted later by `tan build` (or scripts/gen_example_alp_conf.py), per
     the catalog's own `generated_artifacts` note). Same inputs
     produce byte-identical output every time: no timestamps, no
     filesystem-metadata copy (shutil.copyfile-style, not copy2), no
@@ -434,8 +434,8 @@ def render(
     `example` directory into dest_dir, preserving the relative layout,
     byte-for-byte (shutil.copyfile-equivalent -- no filesystem metadata,
     no timestamp embedded in content). `files.generated` paths are never
-    copied -- those are emitted later, at build-configure time, by
-    scripts/alp_project.py.
+    copied -- those are emitted later, at build time, by `tan build`
+    (or scripts/gen_example_alp_conf.py for twister / a bare west build).
 
     Deterministic: given the same template_id/params, the file list and
     byte content written are identical on every call (sorted traversal,
