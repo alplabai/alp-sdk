@@ -101,7 +101,7 @@ by `scripts/alp_project.py`.
 Concretely:
 
 - **Don't edit `prj.conf` directly.**  The minimum-correct
-  `prj.conf` in a v0.3 alp-sdk app is empty (or carries only a
+  `prj.conf` in an alp-sdk app is empty (or carries only a
   comment).  The application's `CMakeLists.txt` invokes
   `scripts/alp_project.py` at configure time and layers the
   generated `alp.conf` over `prj.conf` via Zephyr's
@@ -119,21 +119,20 @@ If you find yourself reaching for a hand-edit because `board.yaml`
 can't express what you want, file an issue -- the right fix is to
 extend the schema, not to bypass it.
 
-### Today's gaps (v0.3 -> v0.4)
+### Today's gaps
 
 `board.yaml` covers the SoM + board + OS backend + inference + IoT
 features + optional libraries + Zephyr peripherals today.  DTS
 overlays for board wiring (`--emit dts-overlay`) and `west.yml`
 libraries auto-pinning (`--emit west-libraries`) were previously
-tracked as v0.4 gaps; both are closed -- both ship in v0.3.  One
-gap remains where hand-written config still leaks in, targeted for
-v0.4:
+tracked as v0.4 gaps; both are closed -- both shipped in v0.3.  One
+gap remains where hand-written config still leaks in:
 
 1. **Per-test `prj.conf` in `tests/zephyr/<area>/`.**  The
    in-repo test infrastructure still uses hand-written
    `prj.conf` files.  These are SDK-internal (not consumer-
    facing) and stay as-is until the loader handles test-style
-   configs in v0.4.
+   configs.
 
 The loader's `--emit dts-overlay` mode parses
 `include/alp/boards/<board>.h` and generates the bus aliases
@@ -146,11 +145,11 @@ in-tree Zephyr board file yet under
 [`zephyr/boards/alp/`](../zephyr/boards/alp/); the customer fills
 those in place without renumbering.
 
-For v0.3, consumers writing apps from scratch should still use
+Consumers writing apps from scratch should still use
 `board.yaml` as the canonical config and treat the per-test
 `prj.conf` gap as a short-term hand-override.  The migration path
-to the v0.4 single-source-of-truth model is purely additive on
-top of v0.3's schema.
+to the single-source-of-truth model is purely additive on top of
+the current schema.
 
 ## Why one file
 

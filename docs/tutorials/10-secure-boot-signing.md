@@ -102,7 +102,7 @@ and re-provision the module with the MCUboot that build produces.
 > embedded in the bootloader build via
 > `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE`, and burned to flash at
 > production time.  Full procedure in
-> [`docs/secure-boot.md`](../secure-boot.md) "Production key
+> [`docs/secure-boot.md`](../secure-boot.md) "Signing key
 > lifecycle".
 
 ## 2. Build the bootloader + signed app image

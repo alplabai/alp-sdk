@@ -165,7 +165,7 @@ CPU, dump RAM, reflash.
 - Production-side: lock the SWD interface via the SoC's
   debug-disable fuse + the secure-boot lock register.  See
   the per-SoM bring-up docs (e.g.
-  [`bring-up-v2n.md`](bring-up-v2n.md) "Production lock-down").
+  [`bring-up-v2n.md`](bring-up-v2n.md)).
 - Pre-production / dev builds: SWD open.  Customers should
   blow the lock fuse for production runs.
 

@@ -304,5 +304,5 @@ safety net for OTA.
   key generation.
 - [`docs/cc3501e-bridge.md`](cc3501e-bridge.md) -- the CC3501E
   Wi-Fi bridge's role in OTA delivery on AEN.
-- [`VERSIONS.md`](../VERSIONS.md) -- versioned roadmap; secure
-  boot / OTA shipped together in v0.4.
+- [`VERSIONS.md`](../VERSIONS.md) -- versioned roadmap; the
+  secure-boot / OTA scaffolding landed in the v0.4 cycle.
