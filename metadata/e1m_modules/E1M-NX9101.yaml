@@ -7,7 +7,7 @@
 # based) drop a sibling preset under metadata/e1m_modules/<MPN>/
 # and update default board.yaml references.
 
-schema_version: 1
+schema_version: 2
 
 sku: E1M-NX9101
 family: nxp-imx9
@@ -80,7 +80,7 @@ default_hw_rev:         r1                  # see metadata/e1m_modules/<family>/
 default_board:        E1M-EVK                # 35x35 board same as AEN family
 
 # Machine-visible placeholder marker (issue #43): `preliminary: true`
-# is the som-preset-v1 schema's canonical flag for "do not treat this
+# is the som-preset-v2 schema's canonical flag for "do not treat this
 # preset as a released, canonical MPN" -- here it covers BOTH the
 # preliminary BOM AND the fact that the E1M-NX9101 SKU string itself
 # is a placeholder (see the file header).  Tooling that needs "is this

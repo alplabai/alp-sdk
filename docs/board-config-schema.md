@@ -66,7 +66,7 @@ recipe `PACKAGECONFIG` tokens plus CA certificates.
 SoM presets under `metadata/e1m_modules/<MPN>.yaml` no longer
 declare `os: zephyr` / `os: yocto` per `topology.<core>` entry --
 the field is gone from every released preset and the schema
-([`metadata/schemas/som-preset-v1.schema.json`](../metadata/schemas/som-preset-v1.schema.json))
+([`metadata/schemas/som-preset-v2.schema.json`](../metadata/schemas/som-preset-v2.schema.json))
 no longer lists it under `topology_entry.required`.  Instead the
 loader picks the natural runtime from each core's `cores[].type`
 in the matching SoC JSON: `cortex-m*` -> `zephyr`, `cortex-a*`

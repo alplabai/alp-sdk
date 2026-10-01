@@ -19,7 +19,7 @@ shapes the shipped derivation cannot fill):
   this SoC at all, which is every non-Alif SoM).
 
 * the authority field is `write_authority`, passed through verbatim with
-  som-preset-v1's six values. The issue's 3-value `owner` was replaced
+  som-preset-v2's six values. The issue's 3-value `owner` was replaced
   during review because one axis cannot separate flash-time from runtime
   authority: `customer_image` and `customer_runtime` would both collapse to
   `customer`, which is the exact distinction the AEN `storage`-vs-`he_slot0`

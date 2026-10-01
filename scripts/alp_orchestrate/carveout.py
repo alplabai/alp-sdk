@@ -116,7 +116,7 @@ def _region_ipc_eligibility(
 
     AGREE contract (#1365 split B review, BLOCKER): `carveout:` is a
     LEGACY OVERRIDE that must AGREE with a resolvable derived class
-    (`metadata/schemas/som-preset-v1.schema.json`'s `carveout` field,
+    (`metadata/schemas/som-preset-v2.schema.json`'s `carveout` field,
     `docs/board-config-features.md`'s #1365-split-B paragraph). It is
     NOT a second vote that can silently win against `flash`/`ram`, nor
     against the `write_authority`-derived answer on an `unclassified`

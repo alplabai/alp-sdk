@@ -1318,8 +1318,7 @@ def _emit_inference(
     # silicon-determined capability counts (ethos_u{55,65,85}_count, resolved
     # from the SoC JSON npus[] via resolve_capabilities).  This is the single
     # source: an on-die NPU cannot be depopulated at the SoM level, so the SoM
-    # preset does NOT restate the variant list (the SoM `inference.npu_population`
-    # field is deprecated and no longer read here).
+    # preset does NOT restate the variant list.
     ethos_variants: set[str] = set()
     if (capabilities.get("ethos_u55_count") or 0) > 0:
         ethos_variants.add("u55")
