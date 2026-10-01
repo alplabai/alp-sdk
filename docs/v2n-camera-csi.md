@@ -83,7 +83,7 @@ Report the outcome on #1149 before treating any of this as verified.
 
 A monochrome OmniVision OV9281 (RPi-style 15-pin module) on the E1M-X-EVK
 CAM0 connector. Same receiver path as the IMX219 above (`csi20` -> `cru0`),
-selected with a second switch. **BENCH-UNVERIFIED.**
+selected with a second switch. **BENCH-UNVERIFIED**; needs patch 0016.
 
 ```
 # conf/local.conf  (mutually exclusive with ALP_ENABLE_CAM0_IMX219 -- the
@@ -110,10 +110,14 @@ Carrier facts the fragment encodes:
 
 6.1.141-cip43 `ov9282.c` facts: compatible is `ovti,ov9282` only (the
 OV9281 shares chip ID `0x9281`); 2 lanes; link frequency `400000000` Hz
-only; one mode, **1280x720 `Y10_1X10`** (no native 1280x800 mode). The
-RZ/G2L CSI-2/CRU format tables in this kernel list no Y10 code, so link
-or format validation may refuse the pipeline: that would need kernel
-work, not DT changes. Record what you see.
+only; one mode, **1280x720 `Y10_1X10`** (no native 1280x800 mode).
+Streaming needs kernel patch
+`0016-media-rzg2l-cru-add-Y10-Y8-greyscale-formats.patch` (applied
+unconditionally by `linux-renesas_%.bbappend`): without it the RZ/G2L CSI-2
+receiver has no Y10 entry, `media-ctl -V` of `Y10_1X10` on the `csi20` pad
+reads back as `UYVY8_1X16`, and `VIDIOC_STREAMON` fails with `-EPIPE`.
+With the patch the CRU captures it as `CR10` (RAW10, 64-bit packed: six
+10-bit pixels per 8 bytes, MSBs padded).
 
 Bench verification (needs `i2c-tools`, `v4l-utils`; find the RIIC2 bus
 number with `ls -l /sys/bus/i2c/devices/` -- the adapter whose device
@@ -131,8 +135,16 @@ Set the pipeline (entity names from `media-ctl -p`):
 ```
 media-ctl -d /dev/media0 -V "'ov9282 <bus>-0060':0 [fmt:Y10_1X10/1280x720]"
 media-ctl -d /dev/media0 -V "'<csi2 entity>':0 [fmt:Y10_1X10/1280x720]"
+media-ctl -d /dev/media0 -V "'cru-ip-16000000.video':0 [fmt:Y10_1X10/1280x720]"
+v4l2-ctl -d /dev/video0 --set-fmt-video=width=1280,height=720,pixelformat=CR10
+v4l2-ctl -d /dev/video0 --get-fmt-video   # 10240 bytesperline, 7372800 sizeimage
 v4l2-ctl -d /dev/video0 --stream-mmap --stream-count=10 --stream-to=/tmp/f.raw
 ```
+
+`CR10` bytesperline is `1280 * 8 = 10240` and sizeimage
+`10240 * 720 = 7372800` (the driver reserves 8 bytes per pixel; the CRU
+writes the 64-bit packed data into each line). An 8-bit greyscale sensor
+(`Y8_1X8`) uses `pixelformat=GREY` instead.
 
 Pass: 10 frames, no CSI errors in `dmesg`. If `i2cdetect` sees nothing,
 check the mux select (`gpioinfo | grep cam0-mux-sel` must read output,

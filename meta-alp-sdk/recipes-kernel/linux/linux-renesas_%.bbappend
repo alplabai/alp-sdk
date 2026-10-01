@@ -76,9 +76,16 @@ SRC_URI:append = " \
     file://0011-irqchip-renesas-rzv2h-mask-the-ICU-error-sources-the-handler-cannot-ack.patch \
     file://0012-uio-pdrv-genirq-default-of_id-to-generic-uio.patch \
     file://0015-gpiolib-sysfs-reject-export-of-a-number-in-a-chipless-gpio_device.patch \
+    file://0016-media-rzg2l-cru-add-Y10-Y8-greyscale-formats.patch \
     file://uio.cfg \
 "
 
+# 0016 (CRU greyscale, #2612): rzg2l-csi2 had no Y10/Y8 entry, so a mono
+# sensor's Y10_1X10 (OV9281 via ov9282) read back as UYVY8_1X16 on the
+# csi20 pad and STREAMON failed -EPIPE.  The patch adds Y10_1X10 (-> CR10,
+# RAW10) and Y8_1X8 (-> GREY, RAW8) to the CSI-2 and CRU tables; no other
+# sensor's behaviour changes, so it applies unconditionally.
+#
 # 0012 (UIO default match, #2374): uio_pdrv_genirq binds no DT node until
 # of_id is set, and the stored U-Boot bootargs cannot be relied on to carry
 # uio_pdrv_genirq.of_id=generic-uio; the patch defaults it to "generic-uio".
