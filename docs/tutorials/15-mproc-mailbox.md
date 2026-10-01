@@ -288,13 +288,17 @@ Each core can also be built standalone with `west build` directly
 
 ```bash
 # HP side.
+# writes examples/multicore/mproc-mailbox/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/multicore/mproc-mailbox
 west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp \
-    examples/multicore/mproc-mailbox
+    examples/multicore/mproc-mailbox -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 
 # HE side.
+# writes examples/multicore/mproc-mailbox/peer/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/multicore/mproc-mailbox/peer
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
-    examples/multicore/mproc-mailbox/peer
+    examples/multicore/mproc-mailbox/peer -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 

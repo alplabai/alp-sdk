@@ -72,7 +72,9 @@ build/parse is entirely in-RAM.
 ## Build
 
 ```bash
-west build -b native_sim/native/64 examples/connectivity/coap-client-get
+# writes examples/connectivity/coap-client-get/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/connectivity/coap-client-get
+west build -b native_sim/native/64 examples/connectivity/coap-client-get -- -DEXTRA_CONF_FILE=generated/alp.conf
 west build -t run
 ```
 
