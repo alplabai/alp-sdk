@@ -49,7 +49,7 @@ drivers it compiles into this app, none previously covered by this gate), and
 adds the
 example as the third `--testsuite-root` line in this job's (now
 seven-root) list
-(`.github/workflows/pr-twister-aen.yml:560`
+(`.github/workflows/pr-twister-aen.yml:600`
 ("alp-sdk/examples/connectivity/iot-dashboard")) — besides `examples/aen`,
 one of only two roots (with `camera-mjpeg-stream`, added by #2265) that
 contributes a scenario to *both* SKU matrix legs, since mqtt-telemetry and
