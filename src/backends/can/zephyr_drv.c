@@ -133,6 +133,9 @@ static void _rx_trampoline(const struct device *dev, struct can_frame *frame, vo
 		.brs         = (frame->flags & CAN_FRAME_BRS) != 0,
 		.payload_len = can_dlc_to_bytes(frame->dlc),
 	};
+	/* ISO 11898-1: classic frame, DLC 9..15 means 8 bytes (other drivers pass the raw DLC). */
+	if (!out.fd && out.payload_len > ALP_CAN_MAX_PAYLOAD_BYTES_CLASSIC)
+		out.payload_len = ALP_CAN_MAX_PAYLOAD_BYTES_CLASSIC;
 	/* #1631 review: can_dlc_to_bytes() maps DLC 9..15 to 12..64, which
 	 * is legal on the wire for a classic frame -- bound the copy by
 	 * BOTH the destination (out.data, the alp frame, 64 bytes) and the
