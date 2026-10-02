@@ -42,8 +42,10 @@ test framework with no hardware surface.
 
 ```bash
 # Standalone, native_sim (host binary; no hardware needed):
+# writes examples/testing/doctest-selftest/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/testing/doctest-selftest
 west build -b native_sim/native/64 examples/testing/doctest-selftest \
-    -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
 west build -t run
 ```
 

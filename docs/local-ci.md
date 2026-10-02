@@ -92,6 +92,7 @@ This is the path that matches GitHub Actions exactly.
    ```sh
    wsl -d Ubuntu -- bash -lc '
      cd ~/dev/alp-sdk &&
+     python3 scripts/gen_example_alp_conf.py &&
      python3 $ZEPHYR_BASE/scripts/twister \
         --testsuite-root examples \
         -p native_sim/native/64 \
@@ -171,7 +172,8 @@ builds are not supported on Windows by upstream Zephyr.
 
 7. **Run a cross-compiled build** to confirm everything's wired:
    ```pwsh
-   west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples\peripheral-io\drone-autopilot
+   py -3 scripts\gen_example_alp_conf.py examples\peripheral-io\drone-autopilot
+   west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples\peripheral-io\drone-autopilot -- -DEXTRA_CONF_FILE=generated/alp.conf
    ```
 
 `native_sim` builds on Windows will fail at the DTS preprocess
@@ -179,6 +181,75 @@ step with `Could not find CMAKE_C_COMPILER using the following
 names: gcc` (it expects a POSIX gcc; MSYS2 doesn't satisfy
 Zephyr's expected layout for `native_sim`).  Cross to the WSL
 path for those.
+
+## Faster reruns of `test-all.sh`
+
+Twister is most of a `bash scripts/test-all.sh --target dev` run. Four things
+keep it short:
+
+- **Overlap.** When twister runs, it starts in the background. The read-only
+  stages (clang-format, shellcheck, bash32-parse, metadata, the gate scripts,
+  the parallel half of pytest, ...) run as a bounded pool of at most
+  `ALP_GATE_STAGE_JOBS` (default 4) at once, slowest first, whether or not
+  twister runs -- so a docs-only run that skips twister still overlaps its
+  slow stages with each other. Their output is captured and printed in the
+  usual stage order at the end. The stages that write the checkout --
+  `generated-files`, `alp-lock`, `abi-strict` (main) and the
+  `pytest-repo-writes` row (the `repo_writes` pytest modules) -- run only
+  after twister and the whole pool have finished, because regenerating headers
+  under a live twister build flakes it. Every stage line and SUMMARY row
+  carries its wall seconds. The overlap is skipped automatically when
+  `ALP_TWISTER_JOBS` is set (the memory-tight signal) or `MemAvailable` is
+  below `ALP_GATE_MIN_MEM_KB` (default 12 GiB), and `ALP_GATE_SERIAL=1` turns
+  it off by hand for debugging: one stage at a time, live output, one
+  `pytest-scripts` row.
+- **No double work.** pytest tests marked `gate_duplicate` re-run, from
+  pytest, exactly the live-repo check that a gate stage of the same
+  `test-all.sh` run runs (public-private, `check_emit_snapshots.py`,
+  `check_zephyr_conf_parity.py`). A full `test-all.sh` run deselects them
+  whenever it schedules those stages; if one of those stages cannot run it
+  shows as `[GAP]` (exit 2), so nothing is dropped silently. The two gate
+  scripts' `byte-identical` success line, which the pytest twins also
+  asserted, is required by the `required-gate-scripts` stage itself.
+  `--zephyr-only` and a plain `pytest tests/scripts/` (CI) still run the
+  pytest twins.
+
+- **Change-aware selection, and a smoke subset instead of the full set.** The
+  twister stage (in the default run and in `--target dev`) first asks
+  `scripts/select_checks.py` whether the change
+  leaves every native_sim build input alone. It diffs against the merge base
+  with `origin/dev` (so `git fetch origin dev` first; `--select-base REF`
+  uses another ref) and counts uncommitted and untracked files too. A docs,
+  changelog, Yocto-layer or pytest-only change skips twister. Anything the
+  script cannot prove irrelevant does **not** run the full ~270-config set
+  locally: it runs a bounded **smoke** subset -- the suites the changed files
+  sit in plus a fixed set (`SMOKE_SUITES` in `scripts/select_checks.py`: the
+  core peripheral API, one chip-driver suite, the console, an errno and a
+  registry unit test, and `hello-world`), about 2-3 minutes on a warm
+  `ccache`. The stage row reads `PASS (smoke; full set runs in CI)` and the
+  summary ends with a note, so a local green is never mistaken for full
+  twister coverage. The full set is CI's job: `pr-twister.yml` runs it in six
+  shards in the merge queue (CI never uses the smoke mode). Pass `--full` to
+  run the whole set locally; `--target main` always does. See what it
+  decided, and why:
+
+  ```sh
+  python3 scripts/select_checks.py --base origin/dev --worktree --local
+  ```
+
+- **A warm ccache in any checkout.** Zephyr uses `ccache` when it is on
+  `PATH`. `test-all.sh` exports `CCACHE_BASEDIR=<checkout>` and
+  `CCACHE_NOHASHDIR=1` unless your ccache config already sets `base_dir`, so
+  objects built in one clone or worktree are hits in the next one at a
+  different path. Reusing one checkout (`git fetch` + `git checkout`) rather
+  than re-cloning also saves the clone itself. `twister-out/` is NOT
+  reused: `test-all.sh` deletes and rebuilds it every run
+  (`--clobber-output`, so a long-lived checkout does not pile up
+  `twister-out.1`, `.2`, ... at several GB each). That is deliberate:
+  each example's `generated/alp.conf` is pre-generated from `board.yaml`
+  and `metadata/` (`scripts/gen_example_alp_conf.py`) outside CMake's
+  dependency graph, so an incremental twister rebuild (`--no-clean`) could
+  miss a metadata change.
 
 ## Cheap pre-push checks (no toolchain needed)
 

@@ -27,6 +27,7 @@ No panel, no peripherals -- just RAM buffers.
 ## Build
 
 ```bash
+python3 scripts/gen_example_alp_conf.py examples/display/gfx-compat-blit   # writes generated/alp.conf (#866)
 west twister -T examples/display/gfx-compat-blit -p native_sim/native/64
 
 # Equivalent `west build`:

@@ -64,8 +64,9 @@ def merge_unit_yaml(path: Path, auto: dict[str, str], catalogue: dict[str, dict]
 
     A key the catalogue marks manual is never touched, and neither is any
     line not named in `auto`. `defaults` are inserted only when the key is
-    absent (e.g. ``disposition: bench-only`` for a GPIO4-defect unit) -- an
-    existing value, manual or not, is never replaced by a default.
+    absent (e.g. ``disposition: bench-only`` for a unit built from an
+    unsigned ``--build-dir``) -- an existing value, manual or not, is never
+    replaced by a default.
     """
     path = Path(path)
     for k, v in {**auto, **(defaults or {})}.items():
@@ -126,15 +127,23 @@ def regen_xlsx(ledger_root: Path, tool: Path, output: Path) -> subprocess.Comple
         env={**os.environ, "PYTHONIOENCODING": "utf-8"})
 
 
-def ship_check(unit: dict[str, str], catalogue: dict[str, dict]) -> list[str]:
+def ship_check(unit: dict[str, str], catalogue: dict[str, dict], family: str = "") -> list[str]:
     """Why this unit cannot ship; [] = shippable. Same rules as the private
     ledger_xlsx.py Ship check (minus its staged-manifest leg)."""
     reasons = []
     for key, spec in catalogue.items():
-        if spec.get("ship_required") and "*" not in key and not str(unit.get(key, "")).strip():
+        # ship_required_for: manifest families (e.g. v2n-m1, whose DX-M1 must be flashed)
+        # for which the key is required although the other families may leave it blank.
+        required = spec.get("ship_required") or family in spec.get("ship_required_for", ())
+        if required and "*" not in key and not str(unit.get(key, "")).strip():
             reasons.append(f"missing {key}")
-    if str(unit.get("act88760_gpio4_defect", "")).strip().lower() == "yes":
-        reasons.append("act88760_gpio4_defect: yes (bench-only until OTP fix)")
+    # The ACT88760 GPIO4 OTP default is an expected workaround, not a defect
+    # (maintainer decision 2026-09-29) -- U-Boot releases it every boot. Block
+    # only when cold_boot_test's own post-boot read shows it was NOT released;
+    # a legacy `act88760_gpio4_defect: yes` key on an existing unit is not
+    # itself a blocker any more.
+    if str(unit.get("act88760_gpio4_after_boot", "")).strip().lower() == "0x88":
+        reasons.append("act88760_gpio4_after_boot: 0x88 (image did not release GD32_NRST)")
     disposition = str(unit.get("disposition", "")).strip()
     if disposition != "ship":
         reasons.append(f"disposition is {disposition or 'unset'}, not ship")

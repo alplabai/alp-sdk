@@ -126,9 +126,10 @@ def test_operator_confirm_and_abort():
 def test_manual_power_asks_operator():
     op = FakeOperator()
     p = bench.ManualPower(op)
-    p.cycle(5)
+    p._sleep = lambda s: None
+    p.cycle(12)
     assert p.is_on() is None
-    assert any("wait at least 5 s" in m for m in op.messages)
+    assert any("wait at least 12 s" in m for m in op.messages)
 
 
 def test_scpi_power_commands_and_query():
@@ -143,6 +144,9 @@ def test_scpi_power_commands_and_query():
     srv, port = _serve_once(handler)
     try:
         p = bench.ScpiPower("127.0.0.1", port, 2)
+        p._sleep = lambda s: None   # fake time: the 10 s dwell must not run for real
+        t = [0.0]
+        p._clock = lambda: t.__setitem__(0, t[0] + 11) or t[0]
         p.cycle(0)
         assert p.is_on() is True
     finally:
@@ -189,13 +193,27 @@ def test_labgrid_power():
         return _cp(out="power for place p1 is off\n") if argv[-1] == "get" else _cp()
 
     p = bench.LabgridPower("p1", runner=runner)
+    p._sleep = lambda s: None
     p.on()
     assert p.is_on() is False
     assert calls[0] == ["labgrid-client", "-p", "p1", "power", "on"]
     with pytest.raises(BenchError, match="not acquired"):
-        bench.LabgridPower(
-            "p1", runner=lambda a, **k: _cp(1, err="place not acquired")
-        ).off()
+        q = bench.LabgridPower("p1", runner=lambda a, **k: _cp(1, err="place not acquired"))
+        q._sleep = lambda s: None
+        q.off()
+
+
+def test_cycle_buffers_console_output_during_off_window():
+    class P(bench.Power):
+        def on(self): pass
+        def off(self): con.feed("SCI Download mode\r\n")
+    con = FakeConsole([])
+    con.pump = lambda s: None
+    p = P()
+    p._sleep = lambda s: None
+    p._clock = lambda: 0.0
+    p.cycle(0.05, con)
+    assert con.expect("SCI Download mode", 0.05)    # banner kept, not discarded
 
 
 def test_fake_power_records_events():
@@ -352,6 +370,8 @@ def test_load_bench(tmp_path):
     assert b.scif["flash_writer"] == tmp_path / "fw/writer.mot"
     assert b.scif["program_start"] == {"bl2_mmc": None, "fip": 0x1234}
     assert b.raw["console"]["host"] == "consolehost"
+    assert b.off_s == bench.DEFAULT_OFF_S == 15.0     # power.off_s absent -> 15 s dwell
+    assert b.console_swd == (tmp_path / "tools", bench.CONSOLE_SWD_TOOLS)
 
 
 @pytest.mark.parametrize(

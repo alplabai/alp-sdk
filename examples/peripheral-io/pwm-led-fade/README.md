@@ -15,8 +15,10 @@ the canonical open / set-duty / close pattern.
 ## Build (standalone, native_sim)
 
 ```bash
+# writes examples/peripheral-io/pwm-led-fade/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/pwm-led-fade
 west build -b native_sim/native/64 examples/peripheral-io/pwm-led-fade \
-    -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
 west build -t run
 ```
 
@@ -33,7 +35,31 @@ wiring.  The shared EVK board tree
 carries only the base boot + console wiring, not this alias.  Build with:
 
 ```bash
+# writes examples/peripheral-io/pwm-led-fade/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/pwm-led-fade
 west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/peripheral-io/pwm-led-fade \
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
+west flash
+```
+
+This app also ships an E1M-AEN803 twin of that overlay,
+[`boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay`](boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay)
+(identical DT content to the AEN801 file above). This app declares only
+`cores: m55_hp` in `board.yaml` and ships no M55-HE twin: the AEN bench
+farm's default target (`scripts/bench/aen/bench-env.sh`'s `AEN_BOARD`)
+is M55-HE, an undeclared core for this app. `scripts/bench/aen/build.sh`,
+run with that default `AEN_BOARD`, refuses with exit 2 (its
+board-qualified preflight, alp-sdk#2094/#2235) rather than silently
+applying the M55-HP-derived config (which carries `CONFIG_PWM=y`) to
+the wrong core. For the bench, build M55-HP instead
+(`AEN_BOARD=alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp`). The
+preflight guards only `build.sh` itself, though --
+a raw `west build -b alp_e1m_aen803_m55_he/...` bypasses it, applies no
+overlay, and is unsupported. After setting `som.sku: E1M-AEN803` in
+`board.yaml`, build the HP target with:
+
+```bash
+west build -b alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp examples/peripheral-io/pwm-led-fade \
     -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
 west flash
 ```

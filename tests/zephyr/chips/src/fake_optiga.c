@@ -3,7 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Fake OPTIGA Trust M i2c-emul target.  Answers optiga_trust_m_init()'s
- * probe ([0x82] then a 4-byte I2C_STATE read) and, once armed with
+ * probe the way the silicon does: a write of the register address, a
+ * STOP, then a separate 4-byte read of I2C_STATE.  A repeated-start
+ * write-read is NACKed (bench, E1M-V2M103 2026W38-0001: `i2ctransfer
+ * w1@0x30 0x82 r4@0x30` always fails, the split form reads 08 80 00 00).
+ * Once armed with
  * fake_optiga_arm_sleep(n), NACKs (-EIO) the next n accesses first --
  * the part NACKs the first access after its idle sleep (bench, E1M-V2M103
  * 2026W38-0001).
@@ -26,6 +30,7 @@
 struct fake_optiga_data {
 	unsigned sleep_nacks;
 	uint32_t attempts;
+	uint8_t  reg; /* register pointer latched by the last write */
 };
 
 static struct fake_optiga_data *g_fake_optiga;
@@ -41,14 +46,18 @@ fake_optiga_transfer(const struct emul *target, struct i2c_msg *msgs, int num_ms
 		d->sleep_nacks--;
 		return -EIO;
 	}
-	if (num_msgs == 2 && (msgs[0].flags & I2C_MSG_READ) == 0 &&
-	    (msgs[1].flags & I2C_MSG_READ) != 0 && msgs[0].len == 1 &&
-	    msgs[0].buf[0] == REG_I2C_STATE && msgs[1].len == 4) {
+	if (num_msgs != 1) return -EIO; /* no repeated start */
+	if ((msgs[0].flags & I2C_MSG_READ) == 0) {
+		if (msgs[0].len < 1u) return -EIO;
+		d->reg = msgs[0].buf[0];
+		return 0;
+	}
+	if (d->reg == REG_I2C_STATE && msgs[0].len == 4u) {
 		/* I2C_STATE: nothing pending, max packet size 0x0110 (datasheet default). */
-		msgs[1].buf[0] = 0x08u;
-		msgs[1].buf[1] = 0x00u;
-		msgs[1].buf[2] = 0x01u;
-		msgs[1].buf[3] = 0x10u;
+		msgs[0].buf[0] = 0x08u;
+		msgs[0].buf[1] = 0x00u;
+		msgs[0].buf[2] = 0x01u;
+		msgs[0].buf[3] = 0x10u;
 		return 0;
 	}
 	return -EIO;

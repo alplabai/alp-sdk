@@ -33,7 +33,7 @@ not an implementation.
 
 The aiPM power surface (§4) is the exception: it already has a working
 generic backend, so the design question there is *what the vendor
-backend adds and why no AEN-specific stub lands pre-silicon*, not how
+backend adds and why no AEN-specific stub lands*, not how
 to replace a NOSUPPORT stub.
 
 For the per-surface verification rows see the v0.5 section of
@@ -319,9 +319,15 @@ now refuses a wake-source bitmap it can never honour at
 only at `request_sleep()`.
 **Real backend:** an `alif_aipm` power backend registered against
 `alif:ensemble:e3`…`e8` at priority **101** (above the wildcard
-policy), landing with the Alif aiPM / PMIC-sequencer HAL.
+policy), landing with the Alif aiPM / PMIC-sequencer HAL.  The
+operating-point-profile half has already landed without it:
+`src/backends/power/alif_se_profile.c` (class `power_profile` —
+separate from the `power` sleep class, so no ordering conflict —
+vendor `"alif"`, `alif:ensemble:e8`, priority 100) maps
+`alp_power_profile_get`/`_set` onto the SE's aiPM run/standby
+services; the full aiPM / PMIC-sequencer backend above remains owed.
 
-### Why no AEN-specific power stub lands pre-silicon
+### Why no AEN-specific power stub lands
 
 Unlike GPU2D / ISP / SecAES — which have *no* generic backend, so a
 NOSUPPORT stub is strictly additive — power already has a working
@@ -338,8 +344,10 @@ wildcard backend.  Adding an AEN-specific power backend now would be a
   `native_sim` twister gate (wrong silicon_ref), so it would be
   untested code until silicon.
 
-So the AEN power backend lands **with** the HAL + silicon, not before —
-this is the one audit gap that deliberately does *not* get a stub here.
+So the full AEN power backend (DVFS / PMIC sequencing / wake plumbing)
+still lands **with** the HAL, not before — the profile half is already
+served SE-mediated (see above), and this remains the one audit gap that
+deliberately does *not* get a stub here.
 
 ### What the real aiPM backend owns
 

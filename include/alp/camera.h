@@ -139,9 +139,12 @@ typedef struct {
  *         itself -- e.g. ALP_ERR_INVAL (zephyr_video / v2n_n44_isp /
  *         alif_isp_pico: out-of-range @c camera_id), ALP_ERR_NOT_READY
  *         (zephyr_video: no camera aliased in devicetree for the
- *         requested @c camera_id), ALP_ERR_NOSUPPORT (zephyr_video /
- *         v2n_n44_isp / alif_isp_pico: @c cfg->fps is nonzero and the
- *         terminal sensor device has no frame-rate control at all -- a
+ *         requested @c camera_id, OR the aliased device -- or a device
+ *         it depends on, e.g. an absent sensor that failed its own
+ *         chip-ID check at init -- never reached device_is_ready()),
+ *         ALP_ERR_NOSUPPORT (zephyr_video / v2n_n44_isp /
+ *         alif_isp_pico: @c cfg->fps is nonzero and the terminal
+ *         sensor device has no frame-rate control at all -- a
  *         backend's own internal default rate failing to apply never
  *         surfaces as an error), or ALP_ERR_NOT_IMPLEMENTED
  *         (zephyr_stub, on silicon with no real backend).

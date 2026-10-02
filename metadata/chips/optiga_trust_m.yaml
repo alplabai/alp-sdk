@@ -1,9 +1,9 @@
 # Alp SDK chip manifest: Infineon OPTIGA Trust M secure element.
 schema_version:   1
 chip_id:          optiga_trust_m
-driver_status:    partial          # I2C_STATE probe only; product-info/raw APDU return NOSUPPORT.
-                                   # Full APDU transport (CalcSign, GenKeyPair, ECDH) lands
-                                   # when Infineon's host library is integrated.
+driver_status:    partial          # Probe, Coprocessor UID and raw APDU sessions over Infineon's
+                                   # host library (vendors/optiga-trust-m).  No typed key/crypto
+                                   # calls or PSA driver yet; Shielded Connection off.
 display_name:     "Infineon OPTIGA Trust M secure element (ECC / RSA / AES / SHA / TRNG)"
 vendor:           infineon
 mpn_population:
@@ -36,7 +36,7 @@ capabilities:
 kconfig:
   zephyr:         ALP_SDK_CHIP_OPTIGA_TRUST_M
   baremetal:      ALP_SDK_CHIP_OPTIGA_TRUST_M
-  yocto:          "Infineon optiga-trust-m host library"
+  yocto:          "ALP_SDK_CHIP_OPTIGA_TRUST_M (libalp_chips; vendored host library)"
 
 families:
   - aen
@@ -45,8 +45,11 @@ families:
   - v2n-m1
 
 verification:
-  hil_silicon:    untested        # APDU/product-info blocked until host-library transport.
-  smoke_tests:    null_arg_guard + nosupport_contract
+  hil_silicon:    partial         # Bench 2026-09-29, E1M-V2M103 2026W38-0001 (A55, /dev/i2c-8):
+                                  # probe, UID read (fw 80101071, build 2564) and raw
+                                  # OpenApplication + GetDataObject(0xE0C2) pass 14/14 runs
+                                  # across 0-10 s idle.  Key/crypto commands not exercised.
+  smoke_tests:    null_arg_guard + wake_nack_split_probe
 
 physical:
   # pins per Infineon OPTIGA Trust M datasheet, Revision 3.70 (2024-10-09),
@@ -64,3 +67,5 @@ physical:
     - { pad: "08", signal: "SCL" }
     - { pad: "09", signal: "RST" }
     - { pad: "10", signal: "VCC" }
+tracking:
+  blocker: "vendor library licence review pending"

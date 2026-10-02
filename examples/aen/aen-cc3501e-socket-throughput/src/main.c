@@ -132,19 +132,20 @@
  * before dividing once, per size, for the same reason SOCKTP_BYTE_BUDGET
  * does -- see that macro's own comment for the arithmetic this one mirrors.
  *
- * THE 1024-BYTE TRAP -- do not extend BRIDGE_SIZES
- * -----------------------------------------------------
- * Measured, reproducible 3 of 3 on bench: 64 B and 256 B STREAM_WRITE calls
- * pass 5 of 5, while 1024 B and 4092 B (cc3501e_stream_write()'s own
- * ceiling, ALP_CC3501E_MAX_PAYLOAD - ALP_CC3501E_HEADER_BYTES) both fail
- * with rc=-5 (ALP_ERR_TIMEOUT) and the link does NOT recover for the rest
- * of that run. BRIDGE_SIZES below sweeps 64 / 128 / 256 / 512 and stops
- * there -- do not add 1024 or above; that would trade a working sweep for a
- * wedged bench session. 512 itself is UNTESTED and may wedge too, which is
- * exactly why the sweep function reports each size AS SOON AS it completes
- * and stops -- never discarding what already succeeded -- on the very first
- * STREAM_WRITE failure, instead of ploughing into a dead link and reporting
- * zeros as if they were data.
+ * THE 1024-BYTE TRAP -- gone on a matched host/firmware pair
+ * ------------------------------------------------------------
+ * An earlier bench (host and CC3501E firmware on MISMATCHED protocol
+ * revisions) passed 64 B and 256 B STREAM_WRITE calls but failed 1024 B and
+ * 4092 B with rc=-5 (ALP_ERR_TIMEOUT) and a link that never recovered, so
+ * this sweep used to stop at 512 B. Re-measured 2026-09-28 on E1M-AEN803
+ * 2026W36-0009 with this tree's host and a CC3501E running the bridge
+ * firmware's main branch (GET_VERSION v1024): 512 / 1024 / 2048 / 4092 B each
+ * pushed the full 1 MiB window, 2 of 2 runs, no rc=-5 and no wedge. The
+ * sweep now runs to cc3501e_stream_write()'s own ceiling (4092 B =
+ * ALP_CC3501E_MAX_PAYLOAD - ALP_CC3501E_HEADER_BYTES). It still reports each
+ * size AS SOON AS it completes and stops on the very first STREAM_WRITE
+ * failure, so an older firmware that does wedge costs only the sizes after
+ * the failure, never the ones already measured.
  *
  * Build target: alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he -- see this
  * app's README.md for the full west build invocation and the overlay's own
@@ -214,6 +215,10 @@
  * HOST-side accounting timeout gets the same window a real radio failure
  * would need to resolve. */
 #define SOCKTP_VERDICT_WAIT_MS SOCKTP_CONNECT_TIMEOUT_MS
+
+/* Connect attempts before STEP 3 gives up; only a firmware FAIL_TIMEOUT
+ * verdict is retried (see STEP 3). */
+#define SOCKTP_CONNECT_ATTEMPTS 3u
 
 /*
  * Wi-Fi STA credentials for the CONNECT step. DELIBERATELY EMPTY by
@@ -449,14 +454,14 @@ static void socktp_report(uint32_t body_bytes,
 /*
  * ======================================================================
  * BRIDGE-ONLY mode -- see the file header's BRIDGE-ONLY MODE section for
- * what this measures, why it is not comparable to an end-to-end figure, and
- * why the sweep must never go past 512 bytes.
+ * what this measures and why it is not comparable to an end-to-end figure.
  * ======================================================================
  */
 
-/* Sizes to sweep, ASCENDING -- see the file header's THE 1024-BYTE TRAP.
- * Never add 1024 or above to this list. */
-static const uint32_t BRIDGE_SIZES[] = { 64u, 128u, 256u, 512u };
+/* Sizes to sweep, ASCENDING, up to cc3501e_stream_write()'s 4092-byte
+ * ceiling -- see the file header's THE 1024-BYTE TRAP for why this once
+ * stopped at 512. */
+static const uint32_t BRIDGE_SIZES[] = { 64u, 128u, 256u, 512u, 1024u, 2048u, 4092u };
 
 /* Per-size window. >= 131072 (128 KiB) is the hard floor the file header's
  * WHY THIS APP EXISTS section derives; this app uses 1 MiB instead, the
@@ -472,13 +477,12 @@ static const uint32_t BRIDGE_SIZES[] = { 64u, 128u, 256u, 512u };
  * look like a stall, not a hang. */
 #define BRIDGE_PROGRESS_STEP_BYTES (128u * 1024u) /* 128 KiB */
 
-/* STATIC, sized for the LARGEST size this sweep ever sends (512 B) -- this
- * app never goes near ALP_CC3501E_MAX_PAYLOAD (see THE 1024-BYTE TRAP), so
- * command-sweep's full-ceiling shared buffer would only be wasted RAM here.
+/* STATIC, sized for the LARGEST size this sweep sends (4092 B, the
+ * wrapper's ceiling; the sweep loop refuses any larger BRIDGE_SIZES entry).
  * Content is a fixed, non-zero pattern (0x5A, matching command-sweep's own
  * STREAM_WRITE fill) because this is a byte-count exercise, not a
  * data-integrity test -- what value is written does not affect the rate. */
-static uint8_t g_bridge_buf[512];
+static uint8_t g_bridge_buf[4092];
 
 typedef struct {
 	uint32_t size;        /**< STREAM_WRITE payload size this result is for, bytes. */
@@ -528,6 +532,13 @@ static unsigned socktp_bridge_sweep(cc3501e_t *fw, bridge_result_t *results)
 
 	for (size_t i = 0u; i < ARRAY_SIZE(BRIDGE_SIZES); i++) {
 		uint32_t size = BRIDGE_SIZES[i];
+
+		if (size > sizeof(g_bridge_buf)) {
+			printk("  ** size=%u B exceeds the %u-byte send buffer; stopping. **\n",
+			       (unsigned)size,
+			       (unsigned)sizeof(g_bridge_buf));
+			break;
+		}
 		printk("\n--- STREAM_WRITE bridge sweep: size=%u B, window=%u KiB ---\n",
 		       (unsigned)size,
 		       (unsigned)(BRIDGE_BYTE_BUDGET / 1024u));
@@ -541,8 +552,9 @@ static unsigned socktp_bridge_sweep(cc3501e_t *fw, bridge_result_t *results)
 			alp_status_t rc = cc3501e_stream_write(fw, g_bridge_buf, size);
 			if (rc != ALP_OK) {
 				printk("  ** STREAM_WRITE failed at size=%u B (rc=%d) after %u successful "
-				       "call%s (%u bytes). The link may now be wedged -- see the file "
-				       "header's THE 1024-BYTE TRAP. Stopping the sweep here; NOT "
+				       "call%s (%u bytes). The link may now be wedged (an older bridge "
+				       "firmware did this at >= 1024 B -- see the file header's THE "
+				       "1024-BYTE TRAP). Stopping the sweep here; NOT "
 				       "attempting the next size. **\n",
 				       (unsigned)size,
 				       (int)rc,
@@ -708,15 +720,29 @@ int main(void)
 		return 0;
 	}
 
-	printk("STEP 3: WIFI_CONNECT -> SSID \"%s\" (sec %u)...\n",
-	       SOCKTP_WIFI_SSID,
-	       (unsigned)SOCKTP_WIFI_SECURITY);
-	rc = cc3501e_wifi_connect(&fw,
-	                          SOCKTP_WIFI_SSID,
-	                          (uint8_t)SOCKTP_WIFI_SECURITY,
-	                          SOCKTP_WIFI_PASS,
-	                          SOCKTP_CONNECT_TIMEOUT_MS);
-	if (rc != ALP_OK) {
+	/* Up to SOCKTP_CONNECT_ATTEMPTS tries, retrying ONLY on the firmware's
+	 * own CONN_FAILED + FAIL_TIMEOUT verdict (alp-sdk#2394).  The on-module
+	 * antenna hears a same-room AP around -80 dBm (~40 dB below a laptop
+	 * next to it), so an association can simply run out of time on a
+	 * marginal link and succeed on the next try.  Any other verdict -- a
+	 * credential/security rejection, or an unreadable status -- is not
+	 * something a retry fixes, so it stops here. */
+	bool associated = false;
+	for (unsigned attempt = 1u; attempt <= SOCKTP_CONNECT_ATTEMPTS && !associated; attempt++) {
+		printk("STEP 3: WIFI_CONNECT -> SSID \"%s\" (sec %u), attempt %u/%u...\n",
+		       SOCKTP_WIFI_SSID,
+		       (unsigned)SOCKTP_WIFI_SECURITY,
+		       attempt,
+		       (unsigned)SOCKTP_CONNECT_ATTEMPTS);
+		rc = cc3501e_wifi_connect(&fw,
+		                          SOCKTP_WIFI_SSID,
+		                          (uint8_t)SOCKTP_WIFI_SECURITY,
+		                          SOCKTP_WIFI_PASS,
+		                          SOCKTP_CONNECT_TIMEOUT_MS);
+		if (rc == ALP_OK) {
+			associated = true;
+			break;
+		}
 		/* A non-OK return here does NOT mean the radio failed to associate --
 		 * it can equally mean the HOST gave up on its own timeout_ms budget
 		 * while the association was still genuinely running (this is exactly
@@ -737,22 +763,33 @@ int main(void)
 		k_msleep(SOCKTP_VERDICT_WAIT_MS);
 		alp_cc3501e_wifi_status_t verdict = { 0 };
 		alp_status_t              vr      = cc3501e_wifi_status(&fw, &verdict);
-		if (vr == ALP_OK) {
-			printk("STEP 3: WIFI_STATUS verdict -- state=%u fail_reason=%u "
-			       "(CONNECTED=%u: radio associated, host accounting was wrong; "
-			       "CONN_FAILED=%u + FAIL_TIMEOUT=%u: firmware's own budget expired; "
-			       "CONN_FAILED + any other fail_reason: real credential/security/role "
-			       "rejection). Stopping here.\n",
-			       (unsigned)verdict.state,
-			       (unsigned)verdict.fail_reason,
-			       (unsigned)ALP_CC3501E_WIFI_CONNECTED,
-			       (unsigned)ALP_CC3501E_WIFI_CONN_FAILED,
-			       (unsigned)ALP_CC3501E_WIFI_FAIL_TIMEOUT);
-		} else {
+		if (vr != ALP_OK) {
 			printk("STEP 3: WIFI_STATUS verdict read failed too (rc=%d) -- state/fail_reason "
 			       "UNREAD, the real radio outcome stays unknown. Stopping here.\n",
 			       (int)vr);
+			return 0;
 		}
+		printk("STEP 3: WIFI_STATUS verdict -- state=%u fail_reason=%u "
+		       "(CONNECTED=%u: radio associated, host accounting was wrong; "
+		       "CONN_FAILED=%u + FAIL_TIMEOUT=%u: firmware's own budget expired; "
+		       "CONN_FAILED + any other fail_reason: real credential/security/role "
+		       "rejection).\n",
+		       (unsigned)verdict.state,
+		       (unsigned)verdict.fail_reason,
+		       (unsigned)ALP_CC3501E_WIFI_CONNECTED,
+		       (unsigned)ALP_CC3501E_WIFI_CONN_FAILED,
+		       (unsigned)ALP_CC3501E_WIFI_FAIL_TIMEOUT);
+		if (verdict.state == ALP_CC3501E_WIFI_CONNECTED) {
+			associated = true;
+		} else if (verdict.state != ALP_CC3501E_WIFI_CONN_FAILED ||
+		           verdict.fail_reason != ALP_CC3501E_WIFI_FAIL_TIMEOUT) {
+			printk("STEP 3: not a timeout -- a retry will not fix this. Stopping here.\n");
+			return 0;
+		}
+	}
+	if (!associated) {
+		printk("STEP 3: no association after %u attempts. Stopping here.\n",
+		       (unsigned)SOCKTP_CONNECT_ATTEMPTS);
 		return 0;
 	}
 	uint8_t ip[4] = { 0 };

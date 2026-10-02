@@ -203,7 +203,10 @@ def _setup(tmp_path: Path) -> dict:
     stub.write_text(_STUB, encoding="utf-8")
     stub.chmod(0o755)
     envf = d / "bench-env.sh"
-    envf.write_text(envf.read_text(encoding="utf-8") + _OVERRIDE, encoding="utf-8")
+    envf.write_text(envf.read_text(encoding="utf-8") + _OVERRIDE
+                    # #2234 extent guard: the copied tree has no ../../aen_atoc.py.
+                    + f'export AEN_ATOC_PY="{BENCH.parents[1] / "aen_atoc.py"}"\n',
+                    encoding="utf-8")
 
     sysfs = tmp_path / "sys" / "1-1"
     sysfs.mkdir(parents=True)

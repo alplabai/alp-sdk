@@ -3,9 +3,13 @@
 # Runner defaults for E1M-V2N101 (Renesas RZ/V2N quad A55 + M33-SM +
 # DRP-AI3) + E1M-X-EVK (45x65 board).  Inherits the portable spec
 # set from tests/hil/_common/.  SoM-specific specs present alongside
-# in this dir: v2n-gd32-bridge-ping.yaml (GD32 bridge ping),
-# v2n-temp-sensor.yaml (on-module TMP112).
-# TODO(#1160): not yet written — Ethernet, eMMC, xSPI, EEPROM, OPTIGA.
+# in this dir: v2n-gd32-bridge-ping, v2n-temp-sensor (on-module TMP112,
+# A55 app run over ssh-run), and the v2n101-* ssh-run set (bt-hci-up,
+# eeprom-read, emmc-block, ethernet-link, gd32-getversion-i2c,
+# gd32-gpiochip, optiga-present, rtc-ticks, systemd-no-failed-units,
+# thermal-zones, wifi-present, xspi-mtd).  The v2n101-* set is derived
+# from the v2m103 specs and is UNVERIFIED on a V2N unit.  V2N102/V2N103
+# runs must target this directory explicitly.
 
 schema_version: 1
 board: alp_e1m_v2n101_m33_sm        # V2N's M33 system-manager.

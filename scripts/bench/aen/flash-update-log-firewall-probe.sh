@@ -6,12 +6,11 @@
 # Runs under WSL2 on Windows. See docs/aen-bench-bringup.md.
 #
 # Build and optionally flash the HE direct-write MRAM firewall probe for
-# examples/connectivity/firmware-update-log. The default package is app-only so
-# it preserves the board's existing DEVICE policy (SETOOLS keeps DEVICE when a
-# JSON omits it, docs/aen-provisioning.md section 4). Set
-# ALP_AEN_INCLUDE_DEVICE_CONFIG=yes only when intentionally replacing that
-# policy; set ALP_AEN_DEVICE_CONFIG_JSON to a config filename under the SETOOLS
-# build/config directory when using a board-specific policy. Every OTHER
+# examples/connectivity/firmware-update-log. Set ALP_AEN_DEVICE_CONFIG_JSON to
+# the FC8 device config (a path, or a name under the SETOOLS build/config
+# directory): on SES v1.110 a package WITHOUT a DEVICE entry drops the board's
+# existing DEVICE/firewall policy (measured), so the helper warns loudly when it
+# is unset. Every OTHER
 # resident app entry NOT named HE-PROBE is a different matter: the `loadbin`
 # below writes the SAME signed ATOC structure `app-write-mram -p` would
 # (docs/debugging-aen.md), which REPLACES rather than merges, so a foreign app
@@ -104,16 +103,17 @@ esac
 
 HE_IMG=firmware-update-log-he-firewall-probe.bin
 cp -f "$HE_BIN" "$SET/build/images/$HE_IMG"
-DEVICE_CONFIG_JSON="${ALP_AEN_DEVICE_CONFIG_JSON:-app-device-config.json}"
+DEVICE_BIN=$(bench_stage_device_config "$SET") || { echo "could not stage DEVICE config" >&2; exit 1; }
 
 {
 	echo "{"
-	if [ "${ALP_AEN_INCLUDE_DEVICE_CONFIG:-no}" = "yes" ]; then
+	if [ -n "$DEVICE_BIN" ]; then
 		printf '    "DEVICE":   { "disabled": false, "binary": "%s", "version": "0.5.00", "signed": true },\n' \
-			"$DEVICE_CONFIG_JSON"
-		echo ">>> including DEVICE config in firewall-probe ATOC: $DEVICE_CONFIG_JSON" >&2
+			"$DEVICE_BIN"
+		echo ">>> including DEVICE config in firewall-probe ATOC: $DEVICE_BIN" >&2
 	else
-		echo ">>> app-only firewall-probe ATOC; preserving existing DEVICE/firewall policy" >&2
+		echo "!! WARNING: no DEVICE entry. The package REPLACES the ATOC, so on SES v1.110 this" >&2
+		echo "   removes any provisioned FC8 firewall; the probe will then FAIL by design." >&2
 	fi
 	cat <<JSON
     "HE-PROBE": { "disabled": false, "binary": "$HE_IMG", "version": "1.0.0", "signed": true,
@@ -126,6 +126,7 @@ cd "$SET"
 echo ">>> AEN firmware-update-log HE firewall-probe ATOC" >&2
 ./app-gen-toc -f build/config/firmware-update-log-firewall-probe.json >"${TMPDIR:-/tmp}/firmware-update-log-firewall-probe-gentoc.log" 2>&1 \
 	|| { echo "gen-toc FAILED"; tail -20 "${TMPDIR:-/tmp}/firmware-update-log-firewall-probe-gentoc.log"; exit 1; }
+bench_atoc_extent_guard build/app-package-map.txt || exit 1
 
 PKG="$SET/build/AppTocPackage.bin"
 ATOC_ADDR=$(awk '/APP Package Start Address:/{print $NF}' build/app-package-map.txt | tail -1)

@@ -81,22 +81,18 @@ The trust chain:
 For development / bring-up the dev key (under `keys/`) signs
 images.  Production key never enters this dir.
 
-## 1. Generate the dev key (one-time)
+## 1. The dev key
 
-```bash
-cd ~/work/alp-sdk
-bash keys/generate_dev_key.sh
-```
+Nothing to generate for a pre-provisioned module: the SDK commits a
+**shared development key**, `keys/mcuboot_shared_dev_ecdsa_p256.pem`,
+and the factory MCUboot trusts it (#2421).
+`zephyr/sysbuild/aen/sysbuild.conf` already signs with it. It is public,
+so it gives no security; it only makes day-one images boot.
 
-Expected output:
-
-```
-[generate_dev_key] writing keys/mcuboot_dev_ecdsa_p256.pem (chmod 600)
-[generate_dev_key] Done.  Reference from zephyr/sysbuild/aen/sysbuild.conf already points here.
-```
-
-The script is idempotent -- re-running it preserves the key if
-it exists.  The key is `.gitignored`; never commit it.
+To practise with your own key, run `bash keys/generate_dev_key.sh`
+(it writes the gitignored `keys/mcuboot_dev_ecdsa_p256.pem`), build with
+`-DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE=<abs>/keys/mcuboot_dev_ecdsa_p256.pem`,
+and re-provision the module with the MCUboot that build produces.
 
 > **Production-key flow** (for reference, not in this tutorial):
 >
@@ -106,7 +102,7 @@ it exists.  The key is `.gitignored`; never commit it.
 > embedded in the bootloader build via
 > `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE`, and burned to flash at
 > production time.  Full procedure in
-> [`docs/secure-boot.md`](../secure-boot.md) "Production key
+> [`docs/secure-boot.md`](../secure-boot.md) "Signing key
 > lifecycle".
 
 ## 2. Build the bootloader + signed app image
@@ -154,10 +150,12 @@ AEN SKU, not just a single-slot one; see `docs/secure-boot.md`).
 Direct build (without `tan build` orchestration):
 
 ```bash
+# writes examples/peripheral-io/gpio-button-led/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/gpio-button-led
 west build -b alif_e7_dk_rtss_he \
     examples/peripheral-io/gpio-button-led \
     --sysbuild \
-    -- -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf
+    -- -Dgpio-button-led_EXTRA_CONF_FILE=generated/alp.conf -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf
 ```
 
 Output artefacts under `build/`:
@@ -231,7 +229,7 @@ Two images, both signed, the new one buggy:
 # In practice: an app that calls k_panic() at start.
 tan build --project examples/buggy-app
 imgtool sign \
-    --key keys/mcuboot_dev_ecdsa_p256.pem \
+    --key keys/mcuboot_shared_dev_ecdsa_p256.pem \
     --version 0.2.0 \
     ...
     build/zephyr/zephyr.bin \

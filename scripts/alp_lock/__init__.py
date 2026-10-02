@@ -117,13 +117,17 @@ def _python_hashes(root: Path) -> dict:
 
 # Every machine-read file type under metadata/ that a build can actually
 # depend on: YAML/JSON data, TSV/CSV tables (pin/IO maps), C headers
-# (library-profiles), a protobuf schema, the vendored e1m-spec lock, and
-# board.yaml.example (parsed by tooling, not prose). `**/*.json`
+# (library-profiles), a protobuf schema, the vendored e1m-spec lock,
+# board.yaml.example (parsed by tooling, not prose), and the model-zoo
+# `.tflite` starters (ADR-0028, #2539) -- consumer-facing data `tan model
+# add` copies straight into a project, so it is a build INPUT the same way
+# a chip header or a pin table is, not documentation about one. `**/*.json`
 # deliberately covers GENERATED artifacts too (metadata/catalog.json,
 # metadata/error-catalog.json) -- a stale regenerated-but-uncommitted
 # file is exactly the drift this lock exists to catch, same as any
 # hand-written input. Deliberately OUTSIDE this tuple:
-# `.md` (documentation) and `.gitkeep` (placeholder) -- neither can change
+# `.md` (documentation), `.gitkeep` (placeholder), and the vendored
+# `metadata/svd/` debugger files (`.svd`, `License.txt`) -- none can change
 # what a build produces, so hashing them would only manufacture false drift
 # on doc-only edits. `tests/scripts/test_alp_lock_metadata_coverage.py`
 # asserts every tracked file under metadata/ is covered by one of these
@@ -131,7 +135,7 @@ def _python_hashes(root: Path) -> dict:
 # addition here.
 _METADATA_DIGEST_GLOBS = (
     "**/*.yaml", "**/*.json", "**/*.tsv", "**/*.csv", "**/*.h",
-    "**/*.proto", "**/*.lock", "**/*.example",
+    "**/*.proto", "**/*.lock", "**/*.example", "**/*.tflite",
 )
 
 
@@ -141,7 +145,7 @@ def _dir_digest(root: Path, rel: str, globs: str | tuple[str, ...]) -> str:
     if isinstance(globs, str):
         globs = (globs,)
     # Gather into a set before sorting/hashing so a file matched by more
-    # than one glob in `globs` is hashed exactly once. All eight suffixes in
+    # than one glob in `globs` is hashed exactly once. All nine suffixes in
     # `_METADATA_DIGEST_GLOBS` are disjoint today, so this never actually
     # fires there -- it's cheap insurance against a future overlapping
     # addition (e.g. a second glob that also matches `.json`), not a fix

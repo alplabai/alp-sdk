@@ -66,10 +66,13 @@ cores:
 ```
 
 `sleep_mode != disabled` emits `CONFIG_PM=y` + `CONFIG_PM_DEVICE=y`
-and lands the per-state hierarchy.  `wakeup_sources:` entries that
-name a subsystem (`uart`, `gpio`, ...) emit
-`CONFIG_PM_DEVICE_WAKE_<SUBSYS>=y`; `E1M_*` pad names emit a hint
-comment (per-silicon wake-pin Kconfig lands in v0.7).
+and lands the per-state hierarchy.  `wakeup_sources:` entries --
+subsystem names (`uart`, `gpio`, ...) and `E1M_*` pad names alike --
+emit a hint comment in the generated `alp.conf`: Zephyr marks wake
+capability via the DT `wakeup-source;` property + a runtime
+`pm_device_wakeup_enable()` call rather than a Kconfig symbol, so the
+customer wires them by hand (per-silicon DT-overlay plumbing
+pending).
 
 ### Per-module log levels (`diagnostics.modules:`)
 

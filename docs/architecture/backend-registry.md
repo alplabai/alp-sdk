@@ -134,6 +134,15 @@ MUST live at `src/backends/<class>/sw_fallback.c` and MUST carry
 `@par Cost:` and `@par Performance:` tags in its top comment block
 (enforced by `scripts/check_sw_fallback_tags.py` at CI time).
 
+Link it with
+`zephyr_library_sources_ifdef(CONFIG_ALP_SDK_<CLASS>_SW_FALLBACK ...)`,
+never plain `zephyr_library_sources()`. The Kconfig symbol defaults `y`
+only on native_sim (`default y if BOARD_NATIVE_SIM || ARCH_POSIX`) when the
+fallback fakes success. A fallback that is the real production
+implementation, or an honest NOSUPPORT stub, may instead be added to
+`ALLOWLIST` in `tests/scripts/test_sw_fallback_gating.py` with a reason.
+(`tests/scripts/test_sw_fallback_gating.py` enforces this.)
+
 If the class is reachable from the plain-CMake static build, add the
 static-archive anchor pair: `ALP_BACKEND_ANCHOR_DEFINE(<class>)` in the
 `sw_fallback.c` (next to `ALP_BACKEND_REGISTER`) and

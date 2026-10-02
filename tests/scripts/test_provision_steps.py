@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from provision import gates, steps
+from provision import gates, ledger_out, steps
 from provision import linux_target as lt
 from provision.bench import Bench
 
@@ -39,8 +39,12 @@ CATALOGUE = {
     "schema": 1, "family": "v2n",
     "keys": {
         "eeprom_unique_id": {"group": "identity", "source": "0x58", "mode": "auto", "ship_required": True},
+        # act88760_gpio4_defect: legacy, no longer written by the tool; kept here only
+        # so an existing unit.yaml carrying it still round-trips as informational.
         "act88760_gpio4_defect": {"group": "power", "source": "0x25", "mode": "auto", "ship_required": False},
+        "act88760_gpio4_otp": {"group": "power", "source": "0x25", "mode": "auto", "ship_required": False},
         "act88760_gpio4_workaround": {"group": "power", "source": "", "mode": "auto", "ship_required": False},
+        "act88760_gpio4_after_boot": {"group": "power", "source": "0x25", "mode": "auto", "ship_required": False},
         "gd32_dp_id": {"group": "gd32", "source": "", "mode": "auto", "ship_required": False},
         "disposition": {"group": "disposition", "source": "operator", "mode": "manual", "ship_required": True},
         "notes": {"group": "disposition", "source": "operator", "mode": "manual", "ship_required": False},
@@ -358,7 +362,7 @@ def test_refuses_fip_without_rail_string(tmp_path):
 
 def test_refuses_gd32_wrong_debug_port(tmp_path):
     ctx = _ctx(tmp_path, bench=_bench(probe=FakeProbe(dp_id_value=0x6BA02477)),
-               linux=Board(), gd32_fw=_gd32_fw(tmp_path))
+               linux=Board(), execute=True, gd32_fw=_gd32_fw(tmp_path))
     res = steps.run_steps(ctx, only=["gd32_flash"])
     assert res[-1].status == "failed" and "wrong target" in res[-1].detail
 
@@ -369,9 +373,11 @@ def _lock_ready(tmp_path, board, disposition="ship", done=True):
     (ctx.unit_dir / f"{SERIAL}.manifest.bin").write_bytes(bytes(board.array))
     (ctx.unit_dir / f"{SERIAL}.secure-page.staged.bin").write_bytes(bytes(board.page))
     (ctx.unit_dir / f"{SERIAL}.unit.yaml").write_text(
-        f"eeprom_unique_id: 00 11\ndisposition: {disposition}\n", encoding="utf-8")
+        f"eeprom_unique_id: 00 11\ndisposition: {disposition}\n"
+        "dxm1_fw_version: v\ndxm1_fw_md5: m\ndxm1_fw_uart_boot_md5: u\n", encoding="utf-8")
     if done:
         ctx.state = {"steps": {s: {"status": "done"} for s in ("secure_page", "cold_boot_test")}}
+        ctx.state["steps"]["cold_boot_test"]["evidence"] = {"cold_boots_passed": "3/3"}
     return ctx
 
 
@@ -401,9 +407,11 @@ def test_lock_success_and_dry_run_plan_only(tmp_path):
     assert board.lock & 0x02 and r.evidence["secure_page_state"] == "locked"
 
 
-# --- GPIO4 defect -> bench-only ------------------------------------------------------------------
+# --- ACT88760 GPIO4 early-OTP workaround ----------------------------------------------------------
 
-def test_gpio4_defect_unit_is_bench_only(tmp_path):
+def test_gd32_flash_applies_the_early_otp_workaround(tmp_path):
+    """An 0x88-OTP unit: gd32_flash applies the volatile release and records
+    how; this is no longer, by itself, a ship-blocking or bench-only fact."""
     fw = _gd32_fw(tmp_path)
     board = Board(act_0x10=0x88)
     ctx = _ctx(tmp_path, bench=_bench(), linux=board, gd32_fw=fw, execute=True)
@@ -416,18 +424,20 @@ def test_gpio4_defect_unit_is_bench_only(tmp_path):
     assert board.regs[(8, 0x25, 0x10)] == 0x08                     # volatile workaround applied
     assert "i2cset -y 8 0x25 0x10 0x08" in board.commands
     text = unit.read_text(encoding="utf-8")
-    assert "act88760_gpio4_defect: yes" in text
-    assert "act88760_gpio4_workaround: volatile 0x08" in text
-    assert "disposition: bench-only" in text
+    assert "act88760_gpio4_otp: 0x88" in text
+    assert "act88760_gpio4_workaround: provision (volatile 0x08)" in text
+    assert "disposition: bench-only" not in text                     # no longer auto-defaulted for this
     assert "notes: see repo#1234" in text                            # manual key, inline '#', untouched
-    assert "blocked" in res[-1].detail and "gpio4_defect" in res[-1].detail
+    # still blocked (disposition unset, eeprom_unique_id missing), just not because of GPIO4
+    assert "blocked" in res[-1].detail
+    assert "gpio4" not in res[-1].detail.lower()
     # verify used fresh probe sessions (savebin after the loadbins)
     kinds = [c[0] for c in ctx.bench.probe.calls]
     last_load = max(i for i, k in enumerate(kinds) if k == "loadbin")
     assert kinds[last_load + 1:kinds.index("reset_run")].count("savebin") == len(steps.GD32_IMAGES)
 
 
-def test_defect_never_replaces_an_operator_disposition(tmp_path):
+def test_gd32_flash_workaround_does_not_touch_an_operator_disposition(tmp_path):
     ctx = _ctx(tmp_path, bench=_bench(), linux=Board(act_0x10=0x88), gd32_fw=_gd32_fw(tmp_path), execute=True)
     unit = ctx.unit_dir / f"{SERIAL}.unit.yaml"
     unit.parent.mkdir(parents=True)
@@ -455,7 +465,9 @@ def test_mfg_date_is_monday_of_serial_week(tmp_path):
 def _login_console():
     """Console for one cold cycle to a login, then console_login + discover_host."""
     return FakeConsole([(r"^\r$", "\nroot@e1m:~# "),
-                        (r"^ip -4 -o addr", "2: eth0    inet 10.0.0.2/24 brd 10.0.0.255 scope global eth0\n")])
+                        (r"^export TERM=dumb", "export TERM=dumb\r\nroot@e1m:~# "),
+                        (r"^systemctl is-system-running", "systemctl is-system-running\r\nrunning\r\nroot@e1m:~# "),
+                        (r"^ip -4 -o addr", "ip -4 -o addr show scope global\r\n2: eth0    inet 10.0.0.2/24 brd 10.0.0.255 scope global eth0\n")])
 
 
 def test_eeprom_manifest_and_secure_page_execute(tmp_path):
@@ -480,6 +492,30 @@ def test_eeprom_manifest_and_secure_page_execute(tmp_path):
     assert board.lock == 0xFD                                        # secure_page never locks
     page_writes = [c for c in board.commands if "w66@0x58" in c]
     assert len(page_writes) == 1 and page_writes[0].startswith("i2ctransfer -y 0 w66@0x58 0x00 0x00 ")
+
+
+def test_eeprom_manifest_rediscovers_a_pinned_host_after_the_mac_change(tmp_path, monkeypatch):
+    board = Board(xspi_bl2=BL2, xspi_fip=FIP)
+    board.host = "10.0.0.9"                       # the pre-manifest (CID-MAC) address
+    console = _login_console()                    # DHCP now answers 10.0.0.2
+    bench = _bench(console=console)
+    bench.linux_host = "10.0.0.9"
+    bench.power.on_hook = lambda: console.feed("NOTICE:  BL2: v2.10\n\ne1m login: ")
+    ctx = _ctx(tmp_path, bench=bench, linux=board, execute=True)
+    attached = []
+    monkeypatch.setattr(ctx, "attach_linux", lambda h: (attached.append(h), setattr(board, "host", h)))
+    res = steps.run_steps(ctx, only=["eeprom_manifest"])
+    assert _statuses(res)["eeprom_manifest"] == "done", [(r.name, r.detail) for r in res]
+    assert attached == ["10.0.0.2"]
+
+
+def test_gd32_probe_discovers_the_host_when_only_starts_at_gd32_flash(tmp_path):
+    fw = _gd32_fw(tmp_path)
+    probe = FakeProbe(memory={a: (fw / n).read_bytes() for n, a, _k in steps.GD32_IMAGES})
+    probe.env = {}
+    ctx = _ctx(tmp_path, bench=_bench(console=_login_console(), probe=probe), gd32_fw=fw, execute=True)
+    assert isinstance(steps.Gd32Flash().probe(ctx), steps.Satisfied)
+    assert probe.env == {"ALP_PROVISION_HOST": "10.0.0.2"}
 
 
 def test_eeprom_manifest_refuses_locked_or_foreign_array(tmp_path):
@@ -514,22 +550,38 @@ def test_new_bundle_supersedes_recorded_steps(tmp_path):
     assert len(ctx.state["superseded"]) == 1
 
 
-def test_defect_is_sticky_and_census_detects_it(tmp_path):
+def test_legacy_defect_key_is_informational_not_sticky_and_not_blocking(tmp_path):
+    """A unit.yaml carrying the pre-decision `act88760_gpio4_defect: yes` key
+    (e.g. E1M-V2M103 2026W38-0001) is never overwritten -- the tool no longer
+    writes that key -- but it also no longer forces bench-only or blocks the
+    ship check by itself (see test_ship_check in test_provision_ledger_out.py
+    for the ship-check side)."""
     ctx = _ctx(tmp_path, bench=_bench(), linux=Board(act_0x10=0x08), execute=True)
     unit = ctx.unit_dir / f"{SERIAL}.unit.yaml"
     unit.parent.mkdir(parents=True)
-    unit.write_text("act88760_gpio4_defect: yes\nact88760_gpio4_workaround: volatile 0x08\n", encoding="utf-8")
-    ctx.facts.update(act88760_gpio4_defect="no", act88760_gpio4_workaround="none")
+    unit.write_text("act88760_gpio4_defect: yes\n", encoding="utf-8")
     steps.run_steps(ctx, only=["record"])
     text = unit.read_text(encoding="utf-8")
-    assert "act88760_gpio4_defect: yes" in text and "volatile 0x08" in text
-    assert "disposition: bench-only" in text
+    assert "act88760_gpio4_defect: yes" in text          # left alone, not in the auto set any more
+    assert "disposition: bench-only" not in text          # no longer auto-defaulted from the legacy key
+
+
+def test_census_records_otp_and_workaround_none_when_already_released(tmp_path):
+    ctx = _ctx(tmp_path / "c", bench=_bench(), linux=Board(act_0x10=0x08))
+    res = steps.run_steps(ctx, only=["census"])
+    assert res[-1].evidence["act88760_gpio4_otp"] == "0x08"
+    assert res[-1].evidence["act88760_gpio4_workaround"] == "none"
+    assert "act88760_gpio4_defect" not in res[-1].evidence
+
+
+def test_census_records_otp_default_without_a_workaround_verdict(tmp_path):
     ctx = _ctx(tmp_path / "c", bench=_bench(), linux=Board(act_0x10=0x88))
     res = steps.run_steps(ctx, only=["census"])
-    assert res[-1].evidence["act88760_gpio4_defect"] == "yes"
+    assert res[-1].evidence["act88760_gpio4_otp"] == "0x88"
+    assert "act88760_gpio4_workaround" not in res[-1].evidence   # decided later, by cold_boot_test
 
 
-def test_defect_unit_cold_boot_does_not_require_the_gd32(tmp_path):
+def test_cold_boot_early_otp_unit_not_released_exempts_the_gd32(tmp_path):
     board = Board(act_0x10=0x88)
     board.host = "10.0.0.2"
     board._answer_orig = board._answer
@@ -542,11 +594,86 @@ def test_defect_unit_cold_boot_does_not_require_the_gd32(tmp_path):
         "NOTICE:  BL2: v2.10\nNOTICE:  BL2: SYS_LSI_MODE: 0X3c06\nDRAM:  3.9 GiB\n"
         f"{gates.RAIL_PG}\n\ne1m login: ")
     ctx = _ctx(tmp_path, bench=bench, linux=board, execute=True, cold_cycles=1)
-    ctx.facts["act88760_gpio4_defect"] = "yes"
     res = steps.run_steps(ctx, only=["cold_boot_test"], force=["cold_boot_test"])
     cb = res[-1]
     assert cb.name == "cold_boot_test" and "0x70" not in cb.detail, cb.detail
     assert "0x70 not required" in cb.evidence.get("cold_boot_note", ""), cb.evidence
+    assert cb.evidence.get("act88760_gpio4_after_boot") == "0x88"
+    # the DRAM banner is recorded here too, for units that never run boot_sd_linux
+    assert cb.evidence.get("dram_size_mib"), cb.evidence
+    assert cb.evidence.get("uboot_dram_banner", "").startswith("DRAM:"), cb.evidence
+
+
+def _everyone_acks():
+    """i2cdetect output where every address 0x00..0x7f answers, including
+    0x70 (the GD32): used to test the "GD32 required" path without an
+    unrelated on-module device (e.g. the RTC, the PMIC) reporting missing."""
+    return "".join(f"{r:x}0: " + " ".join(f"{r * 16 + c:02x}" for c in range(16)) + "\n" for r in range(8))
+
+
+def test_cold_boot_released_unit_requires_the_gd32_and_records_after_boot(tmp_path):
+    """reg 0x10 == 0x08 after a plain cold boot: the GD32 is required like
+    any other on-module device (no exemption note), and the release is
+    attributed to U-Boot for an early-OTP unit (act88760_gpio4_otp was seen
+    at 0x88 earlier in this run)."""
+    board = Board(act_0x10=0x08)
+    board.host = "10.0.0.2"
+    board._answer_orig = board._answer
+    board._answer = lambda cmd: (0, _everyone_acks()) if cmd.startswith("i2cdetect") else board._answer_orig(cmd)
+    console = _login_console()
+    bench = _bench(console=console)
+    bench.power.on_hook = lambda: console.feed(
+        "NOTICE:  BL2: v2.10\nNOTICE:  BL2: SYS_LSI_MODE: 0X3c06\nDRAM:  3.9 GiB\n"
+        f"{gates.RAIL_PG}\n\ne1m login: ")
+    ctx = _ctx(tmp_path, bench=bench, linux=board, execute=True, cold_cycles=1)
+    ctx.facts["act88760_gpio4_otp"] = "0x88"    # this run's census/gd32_flash saw the early-OTP default
+    res = steps.run_steps(ctx, only=["cold_boot_test"], force=["cold_boot_test"])
+    cb = res[-1]
+    assert cb.status == "done", cb.detail
+    assert "0x70" not in cb.detail, cb.detail                       # no exemption note; GD32 was required
+    assert cb.evidence.get("act88760_gpio4_after_boot") == "0x08"
+    assert cb.evidence.get("act88760_gpio4_workaround") == "u-boot"
+
+
+def test_cold_boot_fixed_otp_unit_records_workaround_none(tmp_path):
+    board = Board(act_0x10=0x08)
+    board.host = "10.0.0.2"
+    board._answer_orig = board._answer
+    board._answer = lambda cmd: (0, _everyone_acks()) if cmd.startswith("i2cdetect") else board._answer_orig(cmd)
+    console = _login_console()
+    bench = _bench(console=console)
+    bench.power.on_hook = lambda: console.feed(
+        "NOTICE:  BL2: v2.10\nNOTICE:  BL2: SYS_LSI_MODE: 0X3c06\nDRAM:  3.9 GiB\n"
+        f"{gates.RAIL_PG}\n\ne1m login: ")
+    ctx = _ctx(tmp_path, bench=bench, linux=board, execute=True, cold_cycles=1)
+    res = steps.run_steps(ctx, only=["cold_boot_test"], force=["cold_boot_test"])
+    cb = res[-1]
+    assert cb.status == "done", cb.detail
+    assert cb.evidence.get("act88760_gpio4_after_boot") == "0x08"
+    assert cb.evidence.get("act88760_gpio4_workaround") == "none"
+
+
+def test_cold_boot_reads_the_uboot_gd32_nrst_line(tmp_path):
+    """U-Boot 0011 prints what it did to reg 0x10; that line, not a guess,
+    decides between an early-OTP unit (u-boot) and a fixed one (none)."""
+    for line, otp, how in (
+            ("ALP: ACT88760 GD32_NRST released (0x10: 0x88 -> 0x08)", "0x88", "u-boot"),
+            ("ALP: ACT88760 GD32_NRST already released (0x10=0x08)", "0x08", "none")):
+        board = Board(act_0x10=0x08)
+        board.host = "10.0.0.2"
+        board._answer_orig = board._answer
+        board._answer = lambda cmd, b=board: (0, _everyone_acks()) if cmd.startswith("i2cdetect") else b._answer_orig(cmd)
+        console = _login_console()
+        bench = _bench(console=console)
+        bench.power.on_hook = lambda c=console, ln=line: c.feed(
+            "NOTICE:  BL2: v2.10\nNOTICE:  BL2: SYS_LSI_MODE: 0X3c06\nDRAM:  3.9 GiB\n"
+            f"{ln}\n{gates.RAIL_PG}\n\ne1m login: ")
+        ctx = _ctx(tmp_path / how, bench=bench, linux=board, execute=True, cold_cycles=1)
+        res = steps.run_steps(ctx, only=["cold_boot_test"], force=["cold_boot_test"])
+        cb = res[-1]
+        assert cb.status == "done", cb.detail
+        assert cb.evidence.get("act88760_gpio4_otp") == otp, cb.evidence
+        assert cb.evidence.get("act88760_gpio4_workaround") == how, cb.evidence
 
 
 def test_build_dir_unit_defaults_to_bench_only(tmp_path):
@@ -556,6 +683,7 @@ def test_build_dir_unit_defaults_to_bench_only(tmp_path):
                                                         "ship_required": False})
     (ctx.ledger_root / "schema" / "v2n.keys.yaml").write_text(
         yaml.safe_dump({"schema": 1, "family": "v2n", "keys": cat}), encoding="utf-8")
+    ctx.state = {"steps": {n: {"status": "done"} for n in steps.FLASH_STEPS}}
     res = steps.run_steps(ctx, only=["record"])
     text = (ctx.unit_dir / f"{SERIAL}.unit.yaml").read_text(encoding="utf-8")
     assert "disposition: bench-only" in text and "--build-dir" in res[-1].detail
@@ -882,6 +1010,19 @@ def test_linux_up_attaches_the_configured_host_when_detect_was_skipped(tmp_path,
     assert not steps.Ctx.linux_up(_ctx(tmp_path / "b", bench=_bench()))
 
 
+def test_need_linux_attaches_the_configured_host_on_a_forced_step(tmp_path):
+    # --only gd32_flash --force-step gd32_flash on a board already up: the
+    # step calls need_linux() without any probe having attached ctx.linux,
+    # which refused with "boot_sd_linux has not run" (E1M-V2M103, 2026-09-29).
+    b = _bench()
+    b.linux_host = "192.0.2.7"
+    ctx = _ctx(tmp_path, bench=b, execute=True)
+    assert ctx.linux is None
+    assert ctx.need_linux().host == "192.0.2.7"
+    with pytest.raises(steps.Refused):
+        _ctx(tmp_path / "b", bench=_bench(), execute=True).need_linux()
+
+
 def test_preflight_refuses_execute_without_pmic_expect(tmp_path):
     ctx = _ctx(tmp_path, execute=True, expected_registers=None)
     res = steps.Preflight().run(ctx)
@@ -903,3 +1044,408 @@ def test_detect_keeps_the_bootstrap_record_when_bl2_prints(tmp_path):
     ctx.state = {"steps": {"bootstrap": {"status": "done"}}}
     steps.Detect().run(ctx)
     assert ctx.state_done("bootstrap")
+
+
+# --- fail-closed cold boots / record only after flashing (#2464, #2465) -------------------------
+
+@pytest.mark.parametrize("n", [0, -1])
+def test_cold_boot_test_with_no_cycles_fails_not_passes(tmp_path, n):
+    ctx = _ctx(tmp_path, bench=_bench(), linux=Board(), execute=True, cold_cycles=n)
+    res = steps.run_steps(ctx, only=["cold_boot_test"], force=["cold_boot_test"])
+    assert res[-1].status == "failed" and ">= 1" in res[-1].detail, res[-1]
+    assert not ctx.state_done("cold_boot_test")
+
+
+@pytest.mark.parametrize("evidence", [{}, {"cold_boots_passed": "0/0"}, {"cold_boots_passed": "1/3"}])
+def test_lock_refused_without_recorded_clean_cold_boots(tmp_path, evidence):
+    board = Board()
+    ctx = _lock_ready(tmp_path, board)
+    ctx.state["steps"]["cold_boot_test"]["evidence"] = evidence     # state says done, evidence says no boots
+    r = steps.run_steps(ctx, steps=[steps.SecurePageLock])[0]
+    assert r.status == "failed" and "no clean cold boots" in r.detail, r.detail
+    assert board.lock == 0xFD
+
+
+def test_lock_refused_when_any_step_failed_in_the_state(tmp_path):
+    board = Board()
+    ctx = _lock_ready(tmp_path, board)
+    ctx.state["steps"]["write_rootfs"] = {"status": "failed"}
+    r = steps.run_steps(ctx, steps=[steps.SecurePageLock])[0]
+    assert r.status == "failed" and "write_rootfs failed" in r.detail, r.detail
+
+
+def _record_with_bundle_facts(tmp_path, flash_status):
+    ctx = _ctx(tmp_path, execute=True)
+    cat = dict(CATALOGUE["keys"], **{k: {"group": "firmware", "source": "", "mode": "auto",
+                                        "ship_required": False}
+                                    for k in ("bl2_sha256", "rootfs_bundle_version")})
+    (ctx.ledger_root / "schema" / "v2n.keys.yaml").write_text(
+        yaml.safe_dump({"schema": 1, "family": "v2n", "keys": cat}), encoding="utf-8")
+    ctx.state = {"steps": {n: {"status": flash_status} for n in steps.FLASH_STEPS}}
+    ctx.facts.update(bl2_sha256="ab" * 32, rootfs_bundle_version="som-9.9.9", gd32_dp_id="0x1")
+    steps.run_steps(ctx, only=["record"])
+    return (ctx.unit_dir / f"{SERIAL}.unit.yaml").read_text(encoding="utf-8")
+
+
+def test_record_omits_bundle_facts_when_flashing_did_not_succeed(tmp_path):
+    text = _record_with_bundle_facts(tmp_path, "failed")
+    assert "bl2_sha256" not in text and "rootfs_bundle_version" not in text, text
+    assert "gd32_dp_id" in text          # facts observed on the unit still land
+
+
+def test_record_writes_bundle_facts_after_successful_flashing(tmp_path):
+    text = _record_with_bundle_facts(tmp_path, "done")
+    assert "bl2_sha256" in text and "rootfs_bundle_version: som-9.9.9" in text, text
+
+
+def _record_after_supersession(tmp_path, old_sha, version="som-9.9.9", groups=None, cur_steps=None):
+    ctx = _ctx(tmp_path, execute=True)
+    cat = dict(CATALOGUE["keys"], **{k: {"group": "firmware", "source": "", "mode": "auto",
+                                        "ship_required": False}
+                                    for k in ("bl2_sha256", "rootfs_bundle_version")})
+    (ctx.ledger_root / "schema" / "v2n.keys.yaml").write_text(
+        yaml.safe_dump({"schema": 1, "family": "v2n", "keys": cat}), encoding="utf-8")
+    ev = {"bl2_sha256": "ab" * 32, "rootfs_bundle_version": version}
+    def grp(sha, status="done"):
+        return {"bundle_sha256": sha, "tool_rev": "oldrev",
+                "steps": {n: {"status": status, "at": "2026-09-30T20:42:45Z", "evidence": ev}
+                          for n in steps.FLASH_STEPS}}
+    ctx.state = {"bundle_sha256": "cur", "steps": cur_steps or {},
+                 "superseded": groups(grp) if groups else [grp(old_sha)]}
+    ctx.bundle["release_version"] = version
+    steps.run_steps(ctx, only=["record"])
+    u = ctx.unit_dir / f"{SERIAL}.unit.yaml"
+    return u.read_text(encoding="utf-8") if u.exists() else ""
+
+
+def test_record_takes_bundle_facts_from_a_tool_rev_only_supersession(tmp_path):
+    text = _record_after_supersession(tmp_path, "cur")
+    assert "rootfs_bundle_version: som-9.9.9" in text and "bl2_sha256" in text, text
+
+
+def _no_bundle_facts(text):
+    assert "rootfs_bundle_version" not in text and "bl2_sha256" not in text, text
+
+
+def test_record_ignores_flash_steps_superseded_by_a_different_bundle(tmp_path):
+    _no_bundle_facts(_record_after_supersession(tmp_path, "other"))
+
+
+def test_record_newer_different_bundle_hides_an_older_same_bundle_flash(tmp_path):
+    # Y (other bundle) was written AFTER X (current bundle): X's bytes are gone.
+    _no_bundle_facts(_record_after_supersession(
+        tmp_path, None, groups=lambda g: [g("cur"), g("other")]))
+
+
+def test_record_current_failed_flash_blocks_the_superseded_fallback(tmp_path):
+    _no_bundle_facts(_record_after_supersession(
+        tmp_path, "cur", cur_steps={"write_xspi": {"status": "failed"}}))
+
+
+def test_record_newest_superseded_same_bundle_failed_write_blocks_fallback(tmp_path):
+    _no_bundle_facts(_record_after_supersession(
+        tmp_path, None, groups=lambda g: [g("cur"), g("cur", "failed")]))
+
+
+def _record_multi_revision(tmp_path, old_sha):
+    ctx = _ctx(tmp_path, execute=True)
+    ctx.state = {
+        "bundle_sha256": "cur",
+        "steps": {"cold_boot_test": {"status": "done", "evidence": {"act88760_gpio4_after_boot": "0x08"}}},
+        "superseded": [{"bundle_sha256": old_sha, "tool_rev": "oldrev", "steps": {
+            "eeprom_manifest": {"status": "done", "at": "2026-09-30T20:42:45Z",
+                                "evidence": {"eeprom_unique_id": "ab12"}},
+            "secure_page": {"status": "done", "evidence": {"act88760_gpio4_otp": "0x88"}},
+            "gd32_flash": {"status": "skipped", "evidence": {"gd32_dp_id": "0x0be12477"}}}}]}
+    steps.run_steps(ctx, only=["record"])
+    u = ctx.unit_dir / f"{SERIAL}.unit.yaml"
+    return ctx, u.read_text(encoding="utf-8") if u.exists() else ""
+
+
+def test_record_takes_every_steps_facts_from_a_same_bundle_older_revision(tmp_path):
+    ctx, text = _record_multi_revision(tmp_path, "cur")
+    for want in ("eeprom_unique_id", "act88760_gpio4_otp", "gd32_dp_id", "act88760_gpio4_after_boot"):
+        assert f"{want}:" in text, text
+    assert "step eeprom_manifest from superseded run, tool_rev oldrev" in (
+        ctx.unit_dir / f"{SERIAL}.md").read_text(encoding="utf-8")
+    f = tmp_path / "w.unit.yaml"
+    f.write_text(text, encoding="utf-8")
+    # only the operator-set disposition may still block; no recorded fact is missing
+    assert [r for r in ledger_out.ship_check(ledger_out.read_unit_yaml(f), CATALOGUE["keys"])
+            if r.startswith("missing") and "disposition" not in r] == []
+
+
+def test_record_ignores_other_bundle_older_revision_for_non_flash_steps(tmp_path):
+    _, text = _record_multi_revision(tmp_path, "other")
+    assert "eeprom_unique_id" not in text and "act88760_gpio4_otp" not in text, text
+
+
+def test_probe_satisfied_gd32_flash_records_dp_id(tmp_path):
+    fw = _gd32_fw(tmp_path)
+    mem = {a: (fw / n).read_bytes() for n, a, _k in steps.GD32_IMAGES}
+    ctx = _ctx(tmp_path, bench=_bench(probe=FakeProbe(memory=mem)), gd32_fw=fw)
+    r = steps.Gd32Flash().probe(ctx)
+    assert isinstance(r, steps.Satisfied) and r.evidence["gd32_dp_id"] == "0x0be12477", r
+
+
+def test_record_superseded_build_dir_provenance_still_blocks_ship(tmp_path):
+    text = _record_after_supersession(tmp_path, "cur", version="build-dir:/x")
+    assert "rootfs_bundle_version: build-dir:/x" in text
+    f = tmp_path / "written.unit.yaml"
+    f.write_text(text, encoding="utf-8")
+    unit = ledger_out.read_unit_yaml(f)
+    assert unit["disposition"] == "bench-only"       # record's build-dir default
+    assert any("unsigned --build-dir" in r for r in ledger_out.ship_check({**unit, "disposition": "ship"}, {}))
+
+
+
+def test_record_merges_evidence_of_steps_done_in_earlier_runs(tmp_path):
+    """--only/--from runs: a step finished earlier left its facts as state-file
+    evidence; Record folds them in, and this run's facts win on a clash."""
+    ctx = _ctx(tmp_path, execute=True)
+    ctx.state["steps"] = {
+        "gd32_flash": {"status": "done", "evidence": {"gd32_dp_id": "earlier", "act88760_gpio4_otp": "0x08"}},
+        "eeprom": {"status": "failed", "evidence": {"act88760_gpio4_workaround": "from-failed"}},
+    }
+    ctx.facts["act88760_gpio4_otp"] = "0x88"
+    steps.run_steps(ctx, only=["record"])
+    text = (ctx.unit_dir / f"{SERIAL}.unit.yaml").read_text(encoding="utf-8")
+    assert "gd32_dp_id: earlier" in text
+    assert "act88760_gpio4_otp: 0x88" in text and "0x08" not in text
+    assert "from-failed" not in text
+
+
+def test_gd32_fw_version_reads_the_version_file(tmp_path):
+    fw = _gd32_fw(tmp_path)
+    ctx = _ctx(tmp_path, gd32_fw=fw)
+    assert steps.Gd32Flash._fw_version(ctx) == {}
+    (fw / "VERSION").write_text("0.2.9\n", encoding="utf-8")
+    assert steps.Gd32Flash._fw_version(ctx) == {"gd32_fw_version": "0.2.9"}
+
+
+# --- unit identity: the eMMC CID behind the address must be this serial's --------------------------
+
+CID = "150100464e4d4e414d1234567890ab4f"
+
+
+def _cid_ctx(tmp_path, monkeypatch, seen, recorded):
+    b = _bench()
+    b.linux_host = "192.0.2.7"
+    ctx = _ctx(tmp_path, bench=b, execute=True)
+    if recorded:
+        ctx.state = {"steps": {"bootstrap": {"status": "done", "evidence": {"emmc_cid_raw": recorded}}}}
+    reads = []
+    monkeypatch.setattr(lt, "read_emmc_cid", lambda t: reads.append(t.host) or seen)
+    return ctx, reads
+
+
+def test_need_linux_refuses_a_different_unit_behind_the_address(tmp_path, monkeypatch):
+    ctx, _ = _cid_ctx(tmp_path, monkeypatch, "aa" + CID[2:], CID)
+    with pytest.raises(steps.Refused) as e:
+        ctx.need_linux()
+    msg = str(e.value)
+    assert "192.0.2.7" in msg and "aa" + CID[2:] in msg and CID in msg and SERIAL in msg
+
+
+def test_need_linux_proceeds_on_a_matching_cid_and_reads_fresh_every_time(tmp_path, monkeypatch):
+    # sysfs form: real last byte; bootstrap form: synthesised end byte, upper case
+    ctx, reads = _cid_ctx(tmp_path, monkeypatch, CID, CID[:30].upper() + "01")
+    assert ctx.need_linux().host == "192.0.2.7"
+    ctx.need_linux()
+    assert reads == ["192.0.2.7", "192.0.2.7"]       # no cache: two calls, two reads
+
+
+def test_need_linux_proceeds_on_first_contact_without_reading_the_cid(tmp_path, monkeypatch):
+    ctx, reads = _cid_ctx(tmp_path, monkeypatch, "00" * 16, None)
+    assert ctx.need_linux().host == "192.0.2.7" and reads == []
+
+
+def test_identity_of_the_parse_cid_output_matches_sysfs(tmp_path, monkeypatch):
+    from provision import scif_writer as sw
+    from tests.scripts.test_provision_scif_writer import CID_OUT
+
+    rec = sw.parse_cid(CID_OUT)["emmc_cid_raw"]
+    sysfs = rec[:30] + "00"                          # a host driver that drops CRC7 + end bit
+    ctx, _ = _cid_ctx(tmp_path, monkeypatch, sysfs, rec)
+    assert ctx.need_linux() is not None
+
+
+def test_recorded_cid_survives_a_superseded_state_and_the_unit_yaml(tmp_path, monkeypatch):
+    ctx, _ = _cid_ctx(tmp_path, monkeypatch, "aa" + CID[2:], None)
+    ctx.state = {"steps": {}, "superseded": [
+        {"steps": {"bootstrap": {"status": "done", "evidence": {"emmc_cid_raw": CID}}}}]}
+    with pytest.raises(steps.Refused):
+        ctx.need_linux()
+    ctx.state = {"steps": {}}
+    assert ctx.recorded_cid() == ""
+    ctx.unit_dir.mkdir(parents=True, exist_ok=True)
+    (ctx.unit_dir / f"{SERIAL}.unit.yaml").write_text(f"emmc_cid_raw: {CID}\n", encoding="utf-8")
+    assert ctx.recorded_cid() == CID
+    with pytest.raises(steps.Refused):
+        ctx.need_linux()
+
+
+def test_secure_page_lock_rechecks_identity_right_before_the_write(tmp_path, monkeypatch):
+    board = Board()
+    ctx = _lock_ready(tmp_path / "x", board)
+    calls = []
+    monkeypatch.setattr(type(ctx), "need_linux", lambda self: calls.append(board.lock) or self.linux)
+    assert steps.run_steps(ctx, steps=[steps.SecurePageLock])[0].status == "done"
+    assert calls == [0xFD]                            # checked while still unlocked, before the lock
+
+
+def test_secure_page_lock_refused_when_the_unit_changed(tmp_path, monkeypatch):
+    board = Board()
+    ctx = _lock_ready(tmp_path / "x", board)
+    monkeypatch.setattr(type(ctx), "need_linux",
+                        lambda self: (_ for _ in ()).throw(steps.Refused("another unit")))
+    assert steps.run_steps(ctx, steps=[steps.SecurePageLock])[0].status != "done"
+    assert board.lock == 0xFD
+
+
+def test_accept_cid_change_overrides_only_a_differing_recorded_cid(tmp_path, monkeypatch):
+    other = "aa" + CID[2:]
+    ctx, _ = _cid_ctx(tmp_path, monkeypatch, other, CID)
+    ctx.accept_cid_change = "eMMC replaced"
+    ctx.need_linux()
+    assert [o["gate"] for o in ctx.state["overrides"]] == ["emmc_cid_change"]
+    assert ctx.recorded_cid() == other
+    ctx.need_linux()                                  # anchor adopted: now matches, no new override
+    assert len(ctx.state["overrides"]) == 1
+    first, _ = _cid_ctx(tmp_path / "f", monkeypatch, other, None)
+    first.accept_cid_change = "first"
+    first.need_linux()
+    assert not first.state.get("overrides") and first.recorded_cid() == other
+
+
+def test_detect_in_uboot_then_bootstrap_is_not_refused(tmp_path, monkeypatch):
+    b = _bench(console=FakeConsole([]))
+    b.linux_host = "192.0.2.7"
+    ctx = _ctx(tmp_path, bench=b, execute=True)
+    monkeypatch.setattr(lt.LinuxTarget, "run", lambda self, cmd, **kw: lt.CmdResult(255, "", "no route"))
+    assert "silent" in steps.Detect().run(ctx).detail
+    assert ctx.mutate("anything", lambda: "ran") == "ran"
+    dry = _ctx(tmp_path / "d", bench=_bench(console=FakeConsole([])))
+    assert steps.Bootstrap().run(dry).status != "failed"
+
+
+def test_detect_then_bootstrap_cycles_power_exactly_once(tmp_path, monkeypatch):
+    from provision import scif_writer as sw
+    banner = "SCI Download mode (Normal SCI boot)\r\n-- Load Program to SRAM ---------------\r\n\r\n>"
+    b = _bench(console=FakeConsole([(None, banner)]))
+    (tmp_path / "w.mot").write_bytes(b"S0030000FC")
+    b.scif["flash_writer"] = tmp_path / "w.mot"
+    ctx = _ctx(tmp_path, bench=b, execute=True)
+    for fn in ("_stream", "em_w", "em_secsd", "em_dcid"):
+        monkeypatch.setattr(sw, fn, lambda *a, **k: None)
+    monkeypatch.setattr(steps.Ctx, "artefact_bytes", lambda self, k: b"x")
+    assert steps.Detect().run(ctx).status == "done" and ctx.boot_class == "scif-rom"
+    assert steps.Bootstrap().run(ctx).status == "done"
+    assert b.power.events == ["off", "on"]
+
+
+def test_detect_refuses_the_parameter_error_fallback_banner(tmp_path):
+    b = _bench(console=FakeConsole([(None, "SCI Download mode (Due to parameter error)\r\n")]))
+    ctx = _ctx(tmp_path, bench=b, execute=True)
+    res = steps.run_one(steps.Detect(), ctx)
+    assert res.status == "failed" and "parameter error" in res.detail
+
+
+def test_accept_cid_change_adopts_once_then_refuses_another_swap(tmp_path, monkeypatch):
+    other = "aa" + CID[2:]
+    ctx, _ = _cid_ctx(tmp_path, monkeypatch, other, CID)
+    ctx.accept_cid_change = "eMMC replaced"
+    ctx.need_linux()                                  # adopts `other`
+    third = "bb" + CID[2:]
+    monkeypatch.setattr(lt, "read_emmc_cid", lambda t: third)
+    with pytest.raises(steps.Refused):                # a second swap in the same run is not adopted
+        ctx.need_linux()
+
+
+def test_census_after_gd32_flash_keeps_the_early_otp_evidence(tmp_path):
+    """gd32_flash runs before census: its volatile 0x08 write must not make census
+    record OTP 0x08 / workaround none over the 0x88 / provision (volatile) it recorded."""
+    board = Board(act_0x10=0x88)
+    ctx = _ctx(tmp_path, bench=_bench(), linux=board, gd32_fw=_gd32_fw(tmp_path), execute=True)
+    res = steps.run_steps(ctx, only=["gd32_flash", "census"])
+    assert board.regs[(8, 0x25, 0x10)] == 0x08                  # census would read the released value
+    assert ctx.facts["act88760_gpio4_otp"] == "0x88"
+    assert ctx.facts["act88760_gpio4_workaround"] == "provision (volatile 0x08)"
+    census = next(r for r in res if r.name == "census")
+    assert "act88760_gpio4_otp" not in census.evidence
+
+
+# --- review round: identity on every attach, running entries, precedence, family ---------------
+
+def _ip_console():
+    return FakeConsole([(r"^ip -4 -o addr", "ip -4 -o addr show scope global\r\n"
+                         "2: eth0    inet 10.0.0.2/24 brd x scope global eth0\n")])
+
+
+def test_connect_linux_refuses_a_different_unit_behind_the_rediscovered_host(tmp_path, monkeypatch):
+    ctx, _ = _cid_ctx(tmp_path, monkeypatch, "aa" + CID[2:], CID)
+    ctx.bench.console = _ip_console()
+    with pytest.raises(steps.Refused, match="eMMC CID"):
+        steps.connect_linux(ctx, force=True, rediscover=True)
+
+
+def test_mac_change_flag_makes_every_later_attach_discover_instead_of_using_the_pin(tmp_path, monkeypatch):
+    ctx, reads = _cid_ctx(tmp_path, monkeypatch, CID, CID)
+    ctx.bench.console = _ip_console()           # DHCP answers 10.0.0.2; bench.yaml pins 192.0.2.7
+    ctx.rediscover_host = True
+    assert ctx.pinned_host is None
+    steps.connect_linux(ctx, force=True)           # no explicit rediscover: the flag decides
+    assert ctx.linux.host == "10.0.0.2" and reads == ["10.0.0.2"]
+
+
+def test_eeprom_manifest_sets_the_rediscover_flag(tmp_path, monkeypatch):
+    board = Board(xspi_bl2=BL2, xspi_fip=FIP)
+    board.host = "10.0.0.2"
+    console = _login_console()
+    bench = _bench(console=console)
+    bench.power.on_hook = lambda: console.feed("NOTICE:  BL2: v2.10\n\ne1m login: ")
+    ctx = _ctx(tmp_path, bench=bench, linux=board, execute=True)
+    steps.run_steps(ctx, only=["eeprom_manifest"])
+    assert ctx.rediscover_host is True
+
+
+def test_a_running_entry_is_saved_before_the_step_runs_and_blocks_the_superseded_fallback(tmp_path):
+    class Boom(steps.Step):
+        name = "census"
+        always_run = True
+
+        def run(self, ctx):
+            assert ctx.state["steps"]["census"]["status"] == "running"
+            assert json.loads(ctx.state_path.read_text(encoding="utf-8"))["steps"]["census"]["status"] == "running"
+            raise KeyboardInterrupt            # killed mid-step: nothing after run_one executes
+    ctx = _ctx(tmp_path, execute=True)
+    ctx.state = {"bundle_sha256": "cur", "steps": {}, "superseded": [{
+        "bundle_sha256": "cur", "tool_rev": "old",
+        "steps": {"census": {"status": "done", "evidence": {"eeprom_unique_id": "ab12"}}}}]}
+    with pytest.raises(KeyboardInterrupt):
+        steps.run_steps(ctx, steps=[Boom])
+    steps.run_steps(ctx, only=["record"])
+    u = ctx.unit_dir / f"{SERIAL}.unit.yaml"
+    assert "eeprom_unique_id" not in (u.read_text(encoding="utf-8") if u.exists() else "")
+
+
+def test_record_newest_group_wins_on_a_shared_key(tmp_path):
+    ctx = _ctx(tmp_path, execute=True)
+    ctx.state = {"bundle_sha256": "cur",
+                 "steps": {"cold_boot_test": {"status": "done", "evidence": {"act88760_gpio4_otp": "0x08"}}},
+                 "superseded": [{"bundle_sha256": "cur", "tool_rev": "old", "steps": {
+                     "secure_page": {"status": "done", "evidence": {"act88760_gpio4_otp": "0x88"}}}}]}
+    steps.run_steps(ctx, only=["record"])
+    assert "act88760_gpio4_otp: 0x08" in (ctx.unit_dir / f"{SERIAL}.unit.yaml").read_text(encoding="utf-8")
+
+
+def test_record_ship_check_uses_the_preset_family_not_the_bundle_field(tmp_path):
+    ctx = _ctx(tmp_path, execute=True)             # preset is a DEEPX (v2n-m1) SKU
+    cat = {**CATALOGUE["keys"], "dxm1_fw_version": {
+        "group": "dxm1", "source": "", "mode": "auto", "ship_required": False,
+        "ship_required_for": ["v2n-m1"]}}
+    (ctx.ledger_root / "schema" / "v2n.keys.yaml").write_text(
+        yaml.safe_dump({"schema": 1, "family": "v2n", "keys": cat}), encoding="utf-8")
+    ctx.bundle["family"] = "v2n"                   # a wrong/stale bundle field must not hide DX-M1
+    res = steps.run_steps(ctx, only=["record"])
+    assert "dxm1_fw_version" in res[-1].detail

@@ -50,7 +50,9 @@ customer-only licence -- see
 ### native_sim (framing test only)
 
 ```bash
-west build -b native_sim/native/64 examples/v2n/v2n-m1-deepx-inference
+# writes examples/v2n/v2n-m1-deepx-inference/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/v2n/v2n-m1-deepx-inference
+west build -b native_sim/native/64 examples/v2n/v2n-m1-deepx-inference -- -DEXTRA_CONF_FILE=generated/alp.conf
 west build -t run
 ```
 

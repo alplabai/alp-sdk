@@ -580,6 +580,14 @@ static alp_status_t isp_stop(alp_camera_backend_state_t *state)
 	int err = video_stream_stop(st->dev, VIDEO_BUF_TYPE_OUTPUT);
 	if (err == 0) {
 		st->streaming = false;
+		/* The stop's cancel flush parks every queued buffer in the done
+		 * queue; queue them again so the next isp_start() has buffers to
+		 * fill (#2351), as isp_capture()'s starve path does. */
+		struct video_buffer *vb = NULL;
+		while (video_dequeue(st->dev, &vb, K_NO_WAIT) == 0 && vb != NULL) {
+			(void)video_enqueue(st->dev, vb);
+			vb = NULL;
+		}
 	}
 	return _errno_to_alp(err);
 }

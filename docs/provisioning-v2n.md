@@ -29,11 +29,22 @@ the private repository.
    that differs is recorded as an override.
 3. **Secure Data Page: write + verify now, lock later.** `run --lock` is a
    separate invocation behind the preconditions below.
-4. **Known power-chip defect units are bench-only.** When the ACT88760
-   register `0x10` reads its known-bad value, the tool applies the volatile
-   workaround, records `act88760_gpio4_defect: yes` (never downgraded by a
-   later run), defaults `disposition` to `bench-only`, and the ship check
-   refuses the unit. The tool never sets a shippable disposition.
+4. **An ACT88760 GPIO4 OTP of `0x88` is an early-unit condition with a known
+   workaround, not a defect.** Most units' factory OTP already holds register
+   `0x10` at `0x08`; a few early units (e.g. E1M-V2M103 2026W38-0001) have OTP
+   `0x88`, which holds GD32_NRST in reset until released (maintainer decision
+   2026-09-29). U-Boot's `board_late_init` releases it every boot (a no-op on
+   an already-`0x08` unit). When the tool itself still finds `0x10 == 0x88`
+   (`census`, `gd32_flash`), it applies the same volatile release (`0x10 =
+   0x08`, lost at power-off) and records how the release happened in
+   `act88760_gpio4_workaround`: `none` (OTP already `0x08`), `u-boot` (an
+   0x88-OTP unit U-Boot released on its own by the last cold boot), or
+   `provision (volatile 0x08)` (the tool had to release it). `cold_boot_test`
+   re-reads `0x10` after every cold boot and records
+   `act88760_gpio4_after_boot`; the ship check refuses a unit only when that
+   read is still `0x88` -- i.e. the shipped image did not release the GD32 on
+   its own. A legacy `act88760_gpio4_defect: yes` key from before this
+   decision is informational only and no longer blocks shipping.
 
 ## Commands
 
@@ -64,6 +75,55 @@ always runs). `--build-dir` builds an unsigned bundle from a deploy
 directory for bench work; such a unit is recorded `bench-only` and the ship
 check refuses it.
 
+`run --hw-rev <key>` sets this unit's hardware revision when it differs from
+the bundle/preset default (a batch can mix revisions). The key must be
+status `production` in the family's `hw-revisions.yaml` (exact case, e.g.
+`r2`); anything else exits rc 2 and lists the production keys.
+
+### SSH and unit identity
+
+The tool SSHes into the unit with `StrictHostKeyChecking=no`,
+`UserKnownHostsFile=/dev/null`, `ConnectTimeout=5`, `LogLevel=ERROR` and
+`BatchMode=yes`: bench units get reused DHCP addresses and the SD and eMMC
+images carry different host keys by design, so a host key identifies nothing
+here.
+
+The real risk is mutating the wrong unit behind a stale IP, so identity is the
+eMMC CID. `bootstrap` records `emmc_cid_raw` (from `EM_DCID`) and `census`
+records it again from sysfs. Only `Ctx.need_linux()`, the gateway every
+Linux-mutating step goes through, checks: it reads the eMMC CID over SSH (found
+by sysfs `device/type`, like census) and compares it with the recorded one. The
+read is fresh on every call (nothing is cached, so a power cycle or DHCP renewal
+is caught), and `secure_page_lock` calls `need_linux()` again immediately before
+the irreversible lock write. Probes, `detect`, `linux_up()` and the console are
+not checked.
+
+The recorded CID is the first found of: `emmc_cid_raw` in any finished step of
+the current state, in a `superseded` state (the CID is hardware and survives a
+bundle or tool revision change), then `emmc_cid_raw` in the committed
+`<serial>.unit.yaml`. A `--accept-cid-change` anchor (`cid_anchor` in the state
+file) outranks all of them.
+
+The compare covers MID..MDT (first 15 bytes, lower-cased, whitespace stripped)
+with the reserved bits 119:114 masked. The last byte is not compared: the writer
+does print the CRC field, but `scif_writer.parse_cid` rebuilds the register with
+the reserved bits cleared and the end bit forced to 1, and kernel host drivers
+differ in the last byte they return (SDHCI drops the CRC7 + end-bit byte). A
+mismatch is refused:
+
+    <host> answers with eMMC CID <seen>, but unit <serial> recorded <expected>:
+    another unit is behind this address (stale DHCP lease?). Fix the address in
+    bench.yaml and re-run, or --accept-cid-change REASON if the eMMC was replaced.
+
+Limitation: first contact with no recorded CID is unchecked. On the normal
+blank-unit path `bootstrap`'s `EM_DCID` records the CID, so every later step is
+checked.
+
+`run --accept-cid-change REASON` is the escape for a legitimately replaced eMMC:
+it adopts the CID seen over SSH as the new anchor. The `emmc_cid_change`
+override (blocks shipping like the other overrides) is recorded only when a
+recorded CID existed and differed, not on first contact.
+
 ## Package `scripts/provision/`
 
 | module | responsibility |
@@ -86,7 +146,7 @@ walks the steps in order: probe; `Satisfied` → skip; otherwise run and
 (operator steps, `bootstrap` and `cold_boot_test`, whose result cannot be
 observed right away, count as done after a clean run). The first failure
 stops the run, but **`record` still runs**, so what was learnt (the census,
-a defect) reaches the ledger.
+a GPIO4 workaround applied) reaches the ledger.
 
 Progress is kept in `ledger/<SKU>/<serial>.state.json` in the private
 ledger: per-step status and evidence, the tool revision, the bundle
@@ -95,27 +155,37 @@ step recorded `done` whose probe now says `Unsatisfied` runs again, and a
 state recorded against a **different bundle or tool revision** is moved to
 `superseded` so every step runs again.
 
+## Power safety
+
+The RTL8211F(I) PHY needs both 3.3 V and its 1.0 V rail at 0 V when the 3.3 V
+source is toggled, with a period over 100 ms (datasheet Rev 1.7, Table 53 notes
+1-2). The tool therefore enforces, below any `bench.yaml` setting: an OFF dwell
+of at least **10 s** (`power.off_s` below that is raised to 10 s with a
+warning; default 15 s) and at least **5 s** ON before any OFF, counted from the
+last ON this process issued or, for a fresh process, assumed to be just now.
+Every PSU command is logged with a monotonic timestamp in the step log.
+
 ## Steps
 
 | step | what it does |
 |---|---|
 | `preflight` | offline gates: bundle schema, artefact sha256 / size / role set (`bl2`, `bl2_mmc`, `fip`, `system_image` -- enforced here, not by the bundle schema, because flat-flow bundles such as som-0.2.0 legitimately carry no `bl2_mmc`), xSPI and boot1 size limits, family, SKU triangle, DDR tier triangle, FIP rail string (`v2n-m1`), FDT present in the wic `/boot`, N24S128 frame-table self-check |
-| `detect` | power cycle and classify the console: SCIF ROM, BL2, U-Boot, Linux login, silent |
+| `detect` | power cycle and classify the console: SCIF ROM, BL2, U-Boot, Linux login, silent. The ROM banner `SCI Download mode (Due to parameter error)` is the ROM's fallback (DSW1 probably not in SCIF mode 3, or a board fault) and is **refused** with an operator message; only `(Normal SCI boot)` proceeds |
 | `dsw1_scif` | operator: boot switch to SCIF download |
-| `bootstrap` | Flash Writer: `EM_W` boot1 sector `0x1` ← `bl2_mmc`, sector `0x300` ← `fip`; `EM_SECSD` EXT_CSD `[177]=0x02` (BOOT_BUS_CONDITIONS), `[179]=0x08` (PARTITION_CONFIG); `EM_DCID` |
+| `bootstrap` | reuses the live SCIF ROM state `detect` left in this run (no second power cycle); cycles only if no ON has happened since. Flash Writer: `EM_W` boot1 sector `0x1` ← `bl2_mmc`, sector `0x300` ← `fip`; `EM_SECSD` EXT_CSD `[177]=0x02` (BOOT_BUS_CONDITIONS), `[179]=0x08` (PARTITION_CONFIG); `EM_DCID` |
 | `dsw1_emmc_insert_sd` | operator: boot switch to eMMC, insert the release microSD; U-Boot must autoboot |
-| `boot_sd_linux` | U-Boot boots the wic from microSD; log in, find the host, confirm the root is on the SD, then the live SoM check: every non-optional on-module I2C device the SoM preset declares must ACK (the GD32 excepted) before any destructive step runs. Fallback `--transfer xmodem`: `loadx` + `gzwrite` the wic from the U-Boot prompt |
+| `boot_sd_linux` | U-Boot boots the wic from microSD; log in, find the host, confirm the root is on the SD, then the live SoM check: every non-optional on-module I2C device the SoM preset declares must ACK (the GD32 excepted) before any destructive step runs. Fallback `--transfer xmodem`: `loadx` + `gzwrite` the wic from the U-Boot prompt. No IP is not a failure here: the checks run over the console and `gd32_flash` runs next |
+| `gd32_flash` | applies the ACT88760 GPIO4 volatile release if still at the OTP default, DP-ID gate (`0x0BE12477` only), `loadbin` × 3, verify with `savebin` in fresh probe sessions, bridge ACK at `0x70`. With no network (a blank GD32 leaves both gbeth ports dead) it pushes the SWD tools and the three images over the console (base64, md5-checked on the board), then cold-cycles and re-checks the IP; SSH is used when it is up |
 | `write_xspi` | from Linux: `bl2` → `mtd0`, `fip` → `mtd1`; md5 readback. A FIP whose erase would reach the CM33 image at `mtd1` + `0x1A0000` is refused |
 | `write_emmc_boot` | release `bl2_mmc` + `fip` into `mmcblk<N>boot1`, md5 readback, EXT_CSD via mmc-utils |
 | `write_rootfs` | stream the wic into the eMMC user area (refused while Linux runs from the eMMC), `fsck -n`, `/boot/<dtb>` present |
 | `census` | read-only: every auto ledger key the unit can provide |
 | `eeprom_manifest` | preconditions, 128-byte manifest in 8 × 16-byte page writes at `0x50`, readback, cold cycle, re-read; only then the staged blob is promoted to `<serial>.manifest.bin` |
-| `gd32_flash` | DP-ID gate (`0x0BE12477` only), `loadbin` × 3, verify with `savebin` in fresh probe sessions, bridge ACK at `0x70` |
 | `dxm1_npu_flash` | `v2n-m1` only, **skipped by default** (`--enable-dxm1-flash`): DX-M1 SPI-NAND over the UART recovery path. **BENCH-PENDING** -- see below |
 | `pmic_verify` | compare registers against `--pmic-expect` |
 | `secure_page` | write the 64-byte Secure Data Page, read back, compare. Never locks |
 | `dsw1_xspi_remove_sd` | operator: boot switch to xSPI, remove the microSD |
-| `cold_boot_test` | `--cold-cycles N`: clean BL2, DRAM tier, rail line (`v2n-m1`), login, `SYS_LSI_MODE`, I2C scans |
+| `cold_boot_test` | `--cold-cycles N`: clean BL2, DRAM tier, rail line (`v2n-m1`), login, `SYS_LSI_MODE`, ACT88760 reg `0x10` after boot, I2C scans (GD32 exempted only while `0x10` still reads `0x88`). An `end0` without carrier (PHY latch, #2582) gets one extra cold cycle, noted as `end0_no_carrier_retries` in the step evidence (not a ledger key); it fails if `end0` is still down |
 | `clkgen_verify` | the on-SoM 5L35023B (`BRD_I2C`, `0x69`) OTP image against U-Boot's fixup |
 | `hil_smoke` | optional `tests/hil/run_smoke.py` |
 | `record` | merge auto keys into `<serial>.unit.yaml` (manual keys never touched), append `<serial>.md`, logs, xlsx, ship check |
@@ -234,9 +304,10 @@ dxm1:
 All must hold: `secure_page` and `cold_boot_test` done for this bundle;
 `<serial>.manifest.bin` committed and byte-equal to the array; the Secure
 Data Page re-read equals `<serial>.secure-page.staged.bin`; Lock Status
-bit 1 clear; the unit passes the ledger ship check (disposition `ship`, no
-defect, no override, not a `--build-dir` unit); and the operator retypes the
-serial. After the lock frame, only a re-read with bit 1 set counts.
+bit 1 clear; the unit passes the ledger ship check (disposition `ship`, GD32
+released on its own by the last cold boot, no known defects, no override,
+not a `--build-dir` unit); and the operator retypes the serial. After the
+lock frame, only a re-read with bit 1 set counts.
 
 ## Hazards
 

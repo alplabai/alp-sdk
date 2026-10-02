@@ -246,6 +246,28 @@ A55 `0x40000000`, **256 MiB**, while `ddr_main` spans 4 GiB from
 `0x147f80000`, a 33-bit address that truncates to `0x47f80000` — below
 the DDR base — the moment it is cast to a pointer on the M33.
 
+**The A55 view of the CM33 OpenAMP window must be reserved no-map.**
+The CM33 board trees place `openamp_shm` at CM33-non-secure
+`0x9f700000`, size `0x900000` (9 MiB); the A55 sees the same physical
+memory at `0x4f700000` (`CM33-NS - 0x50000000`). Without a matching
+Linux `reserved-memory` entry that range is ordinary System RAM, so a
+CM33 image with IPC enabled writes its resource table and vrings into
+pages Linux has already handed out. `e1m-v2n-som.dtsi` reserves it
+no-map (#2374, tracked for downstream docs at #2415).
+
+The same file declares the seven `generic-uio` nodes the `alp_rpc` UIO
+backend opens, named for their sysfs `name` (`4f700000.rsctbl`,
+`4f701000.mhu-shm`, `4f800000.vring-ctl0`, `4f850000.vring-ctl1`,
+`4f900000.vring-shm0`, `4fc00000.vring-shm1` and `10480000.mhu-uio`).
+Only `mhu-uio` carries an interrupt (`GIC_SPI 404`). `uio.cfg` enables
+`CONFIG_UIO` and `CONFIG_UIO_PDRV_GENIRQ`, and patch 0012 makes
+`generic-uio` the default `uio_pdrv_genirq` match, so
+`uio_pdrv_genirq.of_id=generic-uio` no longer has to be in the bootargs.
+Bench-verified on E1M-V2M103 silicon (2026-09-30): all seven devices bind
+(`uio0` rsctbl `0x4f700000`/`0x1000` through `uio6` mhu-uio
+`0x10480000`/`0x1000`), `/proc/interrupts` shows `GICv3 436 Level mhu-uio`,
+and `0x4f700000-0x4fffffff` is listed `reserved` in `/proc/iomem`.
+
 For each `ipc:` entry, `tan build`
 emits a header both halves `#include`:
 
@@ -315,7 +337,7 @@ build/
 │   ├── conf/local.conf
 │   └── tmp/deploy/images/e1m-v2n101-a55/{rootfs.wic.gz, Image, *.dtb}
 ├── m33_sm-zephyr/
-│   ├── alp.conf                   (the slice's -DEXTRA_CONF_FILE fragment)
+│   ├── alp.conf                   (the slice's -DEXTRA_CONF_FILE fragment; -D<image>_EXTRA_CONF_FILE on --sysbuild)
 │   └── build/                     (west's own tree — `west build` runs here
 │       └── zephyr/zephyr.elf       with cwd=m33_sm-zephyr and no `-d`)
 ├── helper-gd32/
@@ -399,7 +421,11 @@ its own `schemaVersion` — see
 **Hermetic paths (`planPathMode: tokened`).**  Every checkout- or
 project-anchored absolute path the plan would otherwise embed —
 `env.ALP_SDK_ROOT`, `envAppendPath` entries, each slice's `appDir`,
-and the `-DPython3_EXECUTABLE=` / `-DEXTRA_CONF_FILE=` /
+and the `-DPython3_EXECUTABLE=` / `-DEXTRA_CONF_FILE=` (or, on a `--sysbuild` slice, the image-scoped
+`-D<image>_EXTRA_CONF_FILE=`, where `<image>` is the basename of the app
+directory; if that directory is the project root the name depends on the
+root's directory name, so a consumer that relocates the root must re-derive
+the prefix from the substituted app dir) /
 `-DSB_CONF_FILE=` / `west build`-appdir command args — is instead a
 literal `${SDK_ROOT}` / `${PROJECT_ROOT}` / `${PYTHON}` token, so the
 same plan is reusable across checkouts rather than baking in this
@@ -641,10 +667,10 @@ channels.**  The allocator's default carve-out is non-cacheable on every
 SoM, V2N and AEN alike.  `cacheable: true` was once an explicit
 per-entry opt-in, meant to say "the orchestrator emits matching
 cache-maintenance hooks on both sides, don't write cache ops by hand" —
-**that emission was never built.**  `cfg->cacheable` is stored on the
-`<alp/rpc.h>` backend struct (`src/backends/rpc/zephyr_drv.c` /
-`yocto_drv.c`) and never read again; there is no `sys_cache_*` /
-`arch_dcache_*` call anywhere under `src/` or `include/`.
+**that emission was never built.**  `alp_rpc_config_t` had a `cacheable`
+field that the backends stored and never read (since removed); there is
+no `sys_cache_*` / `arch_dcache_*` call anywhere under `src/` or
+`include/`.
 
 Rather than leave a flag that selects an unimplemented safety path,
 `load_board_yaml` now **hard-rejects** `cacheable: true` on any

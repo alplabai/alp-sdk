@@ -122,7 +122,9 @@ def test_status_reports_steps_and_ship_blockers(tmp_path):
     p = _run("status", "--sku", SKU, "--serial", SERIAL, "--ledger-root", ledger)
     assert p.returncode == 0          # a blocked ship check is normal after provisioning
     assert "preflight" in p.stdout and "done" in p.stdout and "override tier_triangle" in p.stdout
-    assert "gpio4_defect" in p.stdout and "missing eeprom_unique_id" in p.stdout
+    # the legacy act88760_gpio4_defect key is informational only, not a ship blocker;
+    # disposition (bench-only, not ship) + the missing required key still block
+    assert "missing eeprom_unique_id" in p.stdout and "not ship" in p.stdout
     p = _run("status", "--sku", SKU, "--serial", SERIAL, "--ledger-root", ledger,
              "--require-shippable")
     assert p.returncode == 1
@@ -144,3 +146,88 @@ def test_status_flags_a_state_run_would_supersede(tmp_path):
 def test_legacy_flat_flow_skips_bl2_mmc(tmp_path):
     p = _run("--bundle", _bundle(tmp_path), "--serial", SERIAL)
     assert "flash:bl2_mmc: skipped (emmc:boot1" in p.stdout, p.stdout
+
+
+def test_cold_cycles_below_one_is_a_usage_error(tmp_path):
+    ledger, markers = _inputs(tmp_path)
+    b = _bundle(tmp_path)
+    for n in ("0", "-1"):
+        p = _run("plan", "--sku", SKU, "--bundle", b, "--ledger-root", ledger,
+                 "--cold-cycles", n)
+        assert p.returncode == 2, p.stdout + p.stderr
+
+
+def _shippable_unit(tmp_path, failed_step):
+    from provision import steps
+    ledger, _ = _inputs(tmp_path)
+    d = ledger / SKU
+    d.mkdir()
+    st = {"write_xspi": {"status": "failed" if failed_step else "done", "at": "2026-09-24T00:00:00Z"}}
+    (d / f"{SERIAL}.state.json").write_text(json.dumps(
+        {"schema": 1, "tool_rev": steps.tool_rev(), "steps": st}), encoding="utf-8")
+    (d / f"{SERIAL}.unit.yaml").write_text(
+        "eeprom_unique_id: 00 11\ndisposition: ship\n"
+        "dxm1_fw_version: v\ndxm1_fw_md5: m\ndxm1_fw_uart_boot_md5: u\n", encoding="utf-8")
+    return _run("status", "--sku", SKU, "--serial", SERIAL, "--ledger-root", ledger, "--require-shippable")
+
+
+def test_require_shippable_passes_when_no_step_failed(tmp_path):
+    p = _shippable_unit(tmp_path, failed_step=False)
+    assert p.returncode == 0 and "SHIPPABLE" in p.stdout, p.stdout + p.stderr
+
+
+def test_require_shippable_rejects_a_unit_whose_latest_run_failed(tmp_path):
+    p = _shippable_unit(tmp_path, failed_step=True)
+    assert p.returncode == 1 and "SHIPPABLE" not in p.stdout.replace("not SHIPPABLE", ""), p.stdout
+    assert "step write_xspi failed" in p.stdout
+
+
+def test_hw_rev_overrides_the_bundle_after_the_hash(tmp_path, monkeypatch):
+    sys.path.insert(0, str(REPO / "scripts"))
+    import provision_som
+    from provision import steps
+    ledger, markers = _inputs(tmp_path)
+    bundle = _bundle(tmp_path)
+    seen = {}
+
+    def fake_run(ctx, **kw):
+        seen["hw_rev"] = ctx.bundle["hw_rev"]
+        seen["sha"] = ctx.state["bundle_sha256"]
+        return []
+
+    monkeypatch.setattr(steps, "run_steps", fake_run)
+    rc = provision_som.v2n_main(["plan", "--sku", SKU, "--serial", SERIAL, "--bundle", str(bundle),
+                                 "--ledger-root", str(ledger), "--tier-markers", str(markers),
+                                 "--hw-rev", "r2"])
+    assert rc == 0
+    assert seen["hw_rev"] == "r2"                                       # bundle.json says r1
+    assert seen["sha"] == hashlib.sha256((bundle / "bundle.json").read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize("rev", ["r3", "r9", "R2"])   # reserved, unknown, wrong case
+def test_hw_rev_refuses_non_production_keys(tmp_path, capsys, rev):
+    sys.path.insert(0, str(REPO / "scripts"))
+    import provision_som
+    ledger, markers = _inputs(tmp_path)
+    bundle = _bundle(tmp_path)
+    rc = provision_som.v2n_main(["plan", "--sku", SKU, "--serial", SERIAL, "--bundle", str(bundle),
+                                 "--ledger-root", str(ledger), "--tier-markers", str(markers),
+                                 "--hw-rev", rev])
+    assert rc == 2
+    assert f"--hw-rev {rev!r}" in capsys.readouterr().err
+
+
+def test_output_survives_a_cp1252_console():
+    """Serial text can carry U+FFFD; a cp1252 stdout must not crash the results print."""
+    code = "\n".join([
+        "import sys",
+        f"sys.path.insert(0, {str(REPO / 'scripts')!r})",
+        "import provision_som as p",
+        "from types import SimpleNamespace as N",
+        "p._robust_output()",
+        "p._print_results([N(status='done', name='n', detail='bad \ufffd', commands=[])], False)",
+    ])
+    env = {**os.environ, "PYTHONIOENCODING": "cp1252"}
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, env=env, check=False)
+    assert r.returncode == 0, r.stderr.decode(errors="replace")
+    assert b"bad ?" in r.stdout

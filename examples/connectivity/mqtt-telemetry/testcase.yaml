@@ -12,6 +12,7 @@ sample:
 
 tests:
   alp_sdk.example.mqtt_telemetry.native_sim:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     platform_allow:
       - native_sim
       - native_sim/native/64
@@ -47,8 +48,10 @@ tests:
   # build_only: there is no radio on a CI runner, so this asserts the
   # image links for the SoM its board.yaml names, nothing more.
   alp_sdk.example.mqtt_telemetry.aen:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     platform_allow:
       - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+      - alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp
     tags:
       - alp-sdk
       - example
@@ -56,14 +59,8 @@ tests:
       - mqtt
       - aen
     build_only: true
-    # There is no Alif Ensemble entropy driver in this tree or upstream
-    # (#2192), so this compile check has to acknowledge the weak RNG to run
-    # at all -- that is the honest state of AEN TLS today, and build_only
-    # means the image never leaves CI. The opt-in is deliberately here and
-    # not in the app's prj.conf: a scaffolded copy built for a real SoM gets
-    # the refusal, naming #2192 and the entropy driver it needs.
-    extra_configs:
-      - CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y
+    # No weak-RNG opt-in: every AEN board seeds its CSPRNG from the Secure
+    # Enclave TRNG by default (#2192), so this configures on real entropy.
     harness: console
     harness_config:
         type: one_line

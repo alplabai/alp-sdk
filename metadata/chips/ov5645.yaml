@@ -41,6 +41,7 @@ resolutions:
 
 mipi:
   lanes_supported: [1, 2]
+  role:            csi2_tx
 
 kconfig:
   zephyr:         ALP_SDK_CHIP_OV5645
@@ -114,3 +115,5 @@ physical:
     - { pad: J5,  signal: EGND }
     - { pad: J6,  signal: EVDD }
     - { pad: J7,  signal: PVDD }
+tracking:
+  blocker: "ADR 0017 tier decision pending"

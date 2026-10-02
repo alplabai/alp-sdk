@@ -190,7 +190,9 @@ without losing the U55 dispatch on the same SoM.
 **Build:**
 
 ```bash
-west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/peripheral-io/i2c-scanner
+# writes examples/peripheral-io/i2c-scanner/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/i2c-scanner
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/peripheral-io/i2c-scanner -- -DEXTRA_CONF_FILE=generated/alp.conf
 ```
 
 **Flash:** the `west flash` step is unchanged from any other AEN
@@ -578,16 +580,31 @@ check's scope by construction.
 
 ### 4.5  V2N/V2M analog and counter classes (bridge-served, no native leg)
 
-On V2N/V2M, `alp_adc_*`, `alp_pwm_*`, `alp_dac_*`, `alp_counter_*`,
-and `alp_qenc_*` are served entirely by the GD32 IO-MCU bridge. No
-SoC-native RZ/V2N leg exists: the wildcard `zephyr_drv` leg
-(`src/backends/{adc,pwm,dac,counter,qenc}/zephyr_drv.c`) is compiled
-on a V2N build but never selected, because an exact `silicon_ref`
-match beats the wildcard at equal backend priority. This is a
-routing fact, not a preference: no SoC pin reaches an E1M-standard
-analog or counter pad on this family, so a native leg would have
-nothing to attach to even if it were selected
+On V2N/V2M, `alp_adc_*`, `alp_pwm_*`, `alp_dac_*`, and `alp_counter_*`
+are served entirely by the GD32 IO-MCU bridge. No SoC-native RZ/V2N
+leg exists for those four: the wildcard `zephyr_drv` leg
+(`src/backends/{adc,pwm,dac,counter}/zephyr_drv.c`) is compiled on a
+V2N build but never selected, because an exact `silicon_ref` match
+beats the wildcard at equal backend priority. This is a routing
+fact, not a preference: no SoC pin reaches an E1M-standard analog or
+counter pad on this family, so a native leg would have nothing to
+attach to even if it were selected
 (`docs/adr/0024-v2n-analog-and-counter-classes-stay-on-the-gd32-bridge.md`).
+
+`alp_qenc_*` is the one exception to "bridge-served, no native leg":
+`src/backends/qenc/gpio_qdec.c` (issue #2095) is a **wildcard**
+backend at priority **110**, above `gd32_bridge`'s exact-match
+priority **100** -- and priority is the selector's first tiebreaker
+(section 4's `candidate_beats_best`), ahead of exact-vs-wildcard. So
+on a V2N build with `CONFIG_INPUT=y`, if an `alp-qenc<N>` alias
+resolves to a devicetree node compatible `gpio-qdec`, `gpio_qdec`
+wins the open and the GD32 bridge is never tried for that instance.
+`gpio_qdec` declines every other alias (a sensor-class QDEC, or no
+alias at all) with `ALP_ERR_NOSUPPORT`, and the dispatcher's
+open-time fall-through then walks down to `gd32_bridge` as before.
+No current V2N/V2M board wires a plain-GPIO quadrature pair through
+a `gpio-qdec` alias, so this is a live routing hazard, not (yet) an
+observed behaviour change.
 
 Capability deltas to plan around at the portable surface: the ADC
 backend advertises `base_caps = 0u` — an SDK-side gap at SDK v0.7,
@@ -832,7 +849,7 @@ until then the ladder pattern is the load-bearing answer.
 ## 6. Per-family portability matrix (link)
 
 The empirical guarantee — every cell a compile test, the diff
-catalogue, and the open gaps — lives in
+catalogue, and the gap history — lives in
 [`docs/portability-matrix.md`](portability-matrix.md).  Skim it
 when you're picking SKUs or when you suspect the SDK isn't keeping
 its promise.

@@ -97,3 +97,5 @@ physical:
     - { pad: F3, signal: DOGND }
     - { pad: F4, signal: D6 }
     - { pad: F5, signal: D4 }
+tracking:
+  blocker: "no child issue filed; not scheduled, deferred until a product selects the part"

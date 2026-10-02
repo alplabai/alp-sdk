@@ -11,6 +11,13 @@ notes: >
   board/SoM combination, must not race -- the userspace driver
   (`chips/tas2563/tas2563.c`) reachable over `alp_i2c_*` below, which
   remains the sole ownership path on Zephyr/baremetal targets (e.g. AEN).
+  Ownership is non-fighting by construction, not by a PACKAGECONFIG
+  lock-out: `tas2563_init()` propagates its bus call's status verbatim,
+  so on Yocto, if the kernel already owns an address, `ioctl(I2C_SLAVE)`
+  fails EBUSY and `tas2563_init()` returns `ALP_ERR_BUSY` -- a clear,
+  distinct refusal, not a register race or a misleading
+  ALP_ERR_NOT_READY. See `include/alp/chips/tas2563.h`'s `@retval
+  ALP_ERR_BUSY` note on `tas2563_init()`.
 display_name:     "TI TAS2563 mono digital-input Class-D smart amp (I2C ctrl + I2S data, I/V sense)"
 vendor:           ti
 mpn_population:
@@ -127,3 +134,5 @@ families:
 verification:
   hil_silicon:    untested
   smoke_tests:    null_arg_guard
+tracking:
+  blocker: "ADR 0017 tier decision pending"

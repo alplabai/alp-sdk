@@ -74,6 +74,16 @@ Output: `build/gd32-bridge.elf`, `.hex`, `.bin`.
   [`vendors/gd32_firmware_library/README.md`](../vendors/gd32_firmware_library/README.md)
   for the licence-redistribution constraints + the version-bump procedure.
 
+**A flashable image must link the IRC8M clock override.** This build
+takes its `SystemInit()` from the alp-sdk `overrides/system_gd32g5x3.c`
+(`__SYSTEM_CLOCK_216M_PLL_IRC8M`), not the vendor submodule's stock
+216M-PLL-HXTAL file -- on these SoMs the GD32 HXTAL input (fed by the
+5L35023B SE2) never starts, so the stock HXTAL init hangs forever
+before `main()` and the bridge never comes up. The firmware repo's
+`BRIDGE_ALLOW_STOCK_SYSTEM_INIT=ON` switch exists only to let CI
+compile the stock path for coverage; it must never be set for an image
+you intend to flash to a real board.
+
 ## Source layout
 
 ```
@@ -124,7 +134,7 @@ change.
 | Method                                | Status today      | Notes                                                                                                                                  |
 |---------------------------------------|-------------------|----------------------------------------------------------------------------------------------------------------------------------------|
 | External SWD probe (J-Link, ST-Link)  | **Supported.**    | SWDIO + SWCLK accessible on the V2N module's programming header.                                                                       |
-| In-system upgrade over SPI / I2C      | **Implemented, gated — silicon-validated 2026-06-04.** | Application-bootloader path; the `0xF0..0xFF` opcodes route through `src/bootloader/` into the OTA state machine in [`src/ota.c`](https://github.com/alplabai/gd32-bridge-firmware) (FMC backend `hal/fmc_ota.c`). Destructive flashing is armed only with `-DBRIDGE_OTA_PARTITIONED`; default builds reply `STATUS_NOSUPPORT` (can't brick the running image). The armed build emits the partitioned set (32 KB bootloader + slot-A/B apps); first-flash also needs the factory metadata record from [`tools/gen_ota_metadata.py`](https://github.com/alplabai/gd32-bridge-firmware) at `0x08008000`. Validated end-to-end on the bench: stream → verify → commit → boot new slot → rollback (protocol v0.6). See [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10 Path A. |
+| In-system upgrade over SPI / I2C      | **Implemented, gated — silicon-validated 2026-06-04.** | Application-bootloader path; the `0xF0..0xFF` opcodes route through `src/bootloader/` into the OTA state machine in [`src/ota.c`](https://github.com/alplabai/gd32-bridge-firmware) (FMC backend `hal/fmc_ota.c`). Destructive flashing is armed only with `-DBRIDGE_OTA_PARTITIONED`; default builds reply `STATUS_NOSUPPORT` (can't brick the running image). The armed build emits the partitioned set (32 KB bootloader + slot-A/B apps); first-flash also needs the factory metadata record from [`tools/gen_ota_metadata.py`](https://github.com/alplabai/gd32-bridge-firmware) at `0x08008000`, padded out to 8 KiB so the write covers -- and erases -- the second metadata record (`REC1`) along with `REC0`. Validated end-to-end on the bench: stream → verify → commit → boot new slot → rollback (protocol v0.6). See [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10 Path A. |
 | Host-driven SWD bit-bang from V2N     | **Scaffolded.**   | Renesas-side software SWD controller drives `GD32_SWDIO` + `GD32_SWCLK` (routed back to V2N pads per the 2026-05-12 HW decision); universal recovery + factory first-flash.  Driver lives at [`chips/gd32_swd/`](../chips/gd32_swd/) (`driver_status: partial` until exercised on real silicon).  See [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10 Path B. |
 
 ### Who flashes it, and when
@@ -362,6 +372,34 @@ measured GD32 DPIDR to arm a real guard against.
 from the CC3501E's `alp_ota_spi_otp`: this channel streams into the
 slot-A/B application bootloader with commit + rollback, it does not
 program an OTP the GD32 does not have.
+
+### Prebuilt recovery images (public) vs. manufacturing (internal)
+
+The recovery binaries are not in this repository. They are published as
+assets of a tagged GitHub Release of the public
+[`alplabai/gd32-bridge-firmware`](https://github.com/alplabai/gd32-bridge-firmware/releases)
+repository, named `gd32-bridge-vX.Y.Z-{bootloader,slot-a,slot-b,ota-meta-rec0,full-flash}.bin`
+(bootloader, slot A, slot B, the factory A/B metadata record,
+a full-flash image), plus `SHA256SUMS`, and detached ECDSA-P256 signatures when
+the release is signed; a release without signatures is labelled `UNSIGNED`
+in its notes and proves integrity only. Its
+[`docs/RECOVERY.md`](https://github.com/alplabai/gd32-bridge-firmware/blob/dev/docs/RECOVERY.md)
+is the flashing guide for both routes above (external SWD probe, and
+host-driven SWD from the V2N A55, for which this repository carries the
+working master, `examples/v2n/v2n-gd32-swd-flash/`) and the `GET_VERSION`
+check over BRD_I2C at `0x70`. Verify a signed release (`openssl dgst -sha256 -verify <key> -signature
+SHA256SUMS.sig SHA256SUMS`, then `sha256sum -c SHA256SUMS`) against
+[`keys/alp_release_signing_ecdsa_p256.pub.pem`](../keys/alp_release_signing_ecdsa_p256.pub.pem);
+see [`som-release-signing.md`](som-release-signing.md) for the key model.
+The binaries are published by the firmware repository, never committed
+here, and the private signing key is never stored in any repository.
+
+The boundary: **public recovery** is restoring a known image at the
+addresses (bootloader `0x08000000`, metadata record `0x08008000`, slot A
+`0x0800A000`, slot B `0x08040000`) with a probe or the on-SoM SWD route. **Manufacturing** is
+internal and out of scope for this SDK: option-byte provisioning (write
+protection, BOOTLK, SPC), per-unit records, factory fixtures and the bench
+scripts. Recovery never needs those to bring the bridge back.
 
 ## Cross-link
 

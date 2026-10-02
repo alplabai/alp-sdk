@@ -599,7 +599,11 @@ def _soc_cpu_complement(soc_spec: dict[str, Any], active_core_id: Optional[str])
         prefix = f"{int(count)}x " if isinstance(count, (int, float)) and count > 1 else ""
         freq_str = f" @{int(freq)}MHz" if isinstance(freq, (int, float)) else ""
         marker = " (active)" if core.get("id") == active_core_id else ""
-        parts.append(f"{prefix}{label}{freq_str}{marker}")
+        # `|<cluster>` lets alp_banner.c move the marker to the core the
+        # image is actually built for (#2469) -- see src/zephyr/alp_soc_cpus.h.
+        cluster = core.get("zephyr_cpucluster")
+        tag = f"|{cluster}" if cluster else ""
+        parts.append(f"{prefix}{label}{freq_str}{marker}{tag}")
     return " + ".join(parts)
 
 
@@ -1314,8 +1318,7 @@ def _emit_inference(
     # silicon-determined capability counts (ethos_u{55,65,85}_count, resolved
     # from the SoC JSON npus[] via resolve_capabilities).  This is the single
     # source: an on-die NPU cannot be depopulated at the SoM level, so the SoM
-    # preset does NOT restate the variant list (the SoM `inference.npu_population`
-    # field is deprecated and no longer read here).
+    # preset does NOT restate the variant list.
     ethos_variants: set[str] = set()
     if (capabilities.get("ethos_u55_count") or 0) > 0:
         ethos_variants.add("u55")
@@ -1452,12 +1455,11 @@ def _emit_cross_core_shmem_cache(
     declares a matching carve-out:
 
       - `kind: rpmsg` is covered too (#1088's conservative fix), for the
-        identical reason `raw_shmem` is: `cfg->cacheable` is stored on the
-        backend struct (`src/backends/rpc/{zephyr,yocto}_drv.c`) and never
-        read again -- there is no `sys_cache_*` call anywhere under `src/`
-        or `include/`.  A `cacheable: true` rpmsg channel would therefore
-        select a code path with no maintenance behind it, so the loader
-        (`loader.py`) rejects `cacheable: true` on a `rpmsg` entry outright
+        identical reason `raw_shmem` is: `<alp/rpc.h>` has no cache-
+        maintenance layer (no `sys_cache_*` call anywhere under `src/` or
+        `include/`, and no per-channel cache field).  A `cacheable: true`
+        rpmsg channel would therefore select a path with no maintenance
+        behind it, so the loader (`loader.py`) rejects `cacheable: true` on a `rpmsg` entry outright
         rather than silently honouring it -- any entry that reaches this
         function is already non-cacheable, and the D-cache goes off
         unconditionally for its endpoints.  The real fix --
@@ -2073,7 +2075,8 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     # §D.lib.loader -- per-`libraries:` HW-accelerator backend wiring
     # (CONFIG_ALP_<LIB>_<BACKEND>=y). This is the single source both the
     # planner's build-plan `configArtefacts` and `alp_project.py --emit
-    # zephyr-conf --core <id>` (the CMakeLists.txt-driven path) now share
+    # zephyr-conf --core <id>` (what gen_example_alp_conf.py's pre-generation
+    # for twister / bare `west build` mirrors) share
     # -- folded in here (2026-07-20) so the two paths cannot silently
     # diverge on a `libraries:` entry with a hw_backends matcher; see
     # docs/adr/0020-sdk-owns-build-execution.md addendum.

@@ -140,7 +140,7 @@
       "memory_mode": "Sram_Only",
       "system_config_requires_vendor_config": true,
       "vendor_config_filename": "ensemble_vela.ini",
-      "source": "examples/aen/aen-npu-inference-alp/CMakeLists.txt:43; examples/aen/aen-npu-inference-alp-u55/CMakeLists.txt:40"
+      "source": "examples/aen/aen-npu-inference-alp/CMakeLists.txt:43; examples/aen/aen-npu-inference-alp-u55/CMakeLists.txt:52"
     }
   },
   "soc_ram_kb": 9984,
@@ -245,7 +245,11 @@
         "pyocd_target": "AE822FA0E5597LS0",
         "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
         "jlink_flash_device": "AE822FA0E5597LS0_M55_HE",
-        "expect_dpidr": "0x4C013477"
+        "expect_dpidr": "0x4C013477",
+        "svd": {
+          "m55_hp": "metadata/svd/alif/AE822FA0E5597BS0_CM55_HP_View.svd",
+          "m55_he": "metadata/svd/alif/AE822FA0E5597BS0_CM55_HE_View.svd"
+        }
       }
     }
   ],

@@ -15,12 +15,13 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from provision.bench import BenchError
+from provision.bench import BenchError, ExpectTimeout
 from provision.gates import CM33_REGION_OFFSET
 
 if TYPE_CHECKING:
@@ -40,8 +41,16 @@ SYS_REGS_NOTE = "unverified addr"
 
 ACT88760_ADDR = 0x25
 ACT88760_GPIO_REG = 0x10
-ACT88760_GPIO4_DEFECT = 0x88   # known-bad reg 0x10 default on some units (bench-only; see the private runbook)
-ACT88760_GPIO4_RELEASE = 0x08  # volatile workaround, lost at power-off
+# OTP GPIO4 (GD32_NRST) default. Most units' factory OTP already holds this
+# reg at 0x08; a few early units (e.g. E1M-V2M103 2026W38-0001) have the OTP
+# default 0x88, which holds the GD32 in reset until released -- an expected,
+# known-workaround condition, not a defect (maintainer decision 2026-09-29).
+# U-Boot's board_late_init releases it every boot (a no-op on an already-0x08
+# unit); a provisioning tool run that still finds 0x88 applies the same
+# volatile release itself, so provisioning never depends on the U-Boot fix
+# having landed yet.
+ACT88760_GPIO4_OTP_DEFAULT = 0x88
+ACT88760_GPIO4_RELEASED = 0x08  # released (by U-Boot or the tool); volatile, lost at power-off
 DA9292_ADDR = 0x1E
 DA9292_REGS = {
     "da9292_status": (0x00, 0x01),
@@ -90,12 +99,17 @@ class LinuxTarget:
         self.runner = runner
         self.ssh = ssh
         self.scp = scp
-        self._opts = ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new"]
+        # Units get reused DHCP addresses and the SD and eMMC images carry different host
+        # keys by design, so host keys identify nothing here; unit identity is the eMMC CID
+        # check in Ctx.need_linux.
+        self._opts = ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no",
+                      "-o", "UserKnownHostsFile=/dev/null", "-o", "ConnectTimeout=5",
+                      "-o", "LogLevel=ERROR"]
 
     def _exec(self, argv: list[str], timeout: float, stdin_path: Path | None = None) -> CmdResult:
         try:
             if stdin_path is None:
-                p = self.runner(argv, capture_output=True, text=True, timeout=timeout)
+                p = self.runner(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout)
             else:
                 with open(stdin_path, "rb") as f:
                     p = self.runner(argv, stdin=f, capture_output=True, text=True, timeout=timeout)
@@ -159,22 +173,99 @@ def _host_md5(path: Path) -> str:
 _SHELL = r"(?:^|\n)[^\n]*[#$] $"
 
 
+_CPR_QUERY = "\x1b[6n"       # "report the cursor position": the image's profile runs a resize
+_CPR_REPLY = b"\x1b[24;80R"
+CONSOLE_SETTLE_S = 0.5
+
+
+def _expect_answering_cpr(console: Console, patterns: dict[str, str], timeout: float) -> str:
+    """expect_any(), but a cursor-position query on the way is answered (an
+    unanswered resize leaves the shell busy and garbles the next commands)."""
+    deadline = time.monotonic() + timeout
+    pats = {**patterns, "cpr": re.escape(_CPR_QUERY)}
+    while True:
+        key, _ = console.expect_any(pats, max(deadline - time.monotonic(), 0.1))
+        if key != "cpr":
+            return key
+        console.write(_CPR_REPLY)
+
+
+def _settle(console: Console) -> None:
+    """Let the login scripts finish: answer any late cursor query, wait for quiet."""
+    while True:
+        text = console.drain(CONSOLE_SETTLE_S, 10.0)
+        if _CPR_QUERY not in text:
+            return
+        console.write(_CPR_REPLY)
+
+
+def send_checked(console: Console, line: str, echo_timeout: float = 5.0) -> None:
+    """Send one command line paced, and verify the tty echoed it intact (head of
+    the line). On a mismatch: Ctrl-C, let the prompt settle, resend once."""
+    head = re.escape(line.split("\n")[0][:40])
+    for attempt in (1, 2):
+        console.send_line(line, paced=True)
+        try:
+            console.expect(head, echo_timeout)
+            return
+        except ExpectTimeout as e:
+            if attempt == 2:
+                raise BenchError(f"console echo of {line[:40]!r} never matched what was sent "
+                                 f"(corrupted RX?): {e.tail[-120:]!r}") from e
+            console.write(b"\x03")
+            console.drain(CONSOLE_SETTLE_S, 5.0)
+
+
+SYSTEM_SETTLE_CAP_S = 90.0
+SYSTEM_POLL_S = 2.0
+
+
+def wait_system_settled(console: Console, cap: float | None = None) -> bool:
+    """Poll ``systemctl is-system-running`` (paced, cheap) until it says running or
+    degraded. Right after login systemd is still starting units (logind restarting)
+    and the console RX can corrupt a byte; commands typed minutes later are clean.
+    Returns False when the cap ran out (the caller proceeds anyway) and True otherwise;
+    an image without systemctl counts as settled."""
+    deadline = time.monotonic() + (SYSTEM_SETTLE_CAP_S if cap is None else cap)
+    pats = {
+        "done": r"(?m)^(?:running|degraded)\r?$",
+        "busy": r"(?m)^(?:starting|initializing|stopping|offline|maintenance)\r?$",
+        "none": r"not found|No such file",
+    }
+    while time.monotonic() < deadline:
+        try:
+            send_checked(console, "systemctl is-system-running")
+            key, _ = console.expect_any(pats, 10.0)
+        except (ExpectTimeout, BenchError):
+            key = "busy"
+        if key in ("done", "none"):
+            console.drain(CONSOLE_SETTLE_S, 5.0)
+            return True
+        time.sleep(SYSTEM_POLL_S)
+        console.drain(CONSOLE_SETTLE_S, 5.0)
+    return False
+
+
 def console_login(console: Console, user: str = "root", timeout: float = 120.0) -> None:
     """Get a shell prompt on the Linux console (passwordless dev images only)."""
     console.send_line("")
-    key, _ = console.expect_any({"login": r"login: *$", "shell": _SHELL}, timeout)
-    if key == "shell":
-        return
-    console.send_line(user)
-    key, _ = console.expect_any({"password": r"[Pp]assword: *$", "shell": _SHELL}, 30.0)
-    if key == "password":
-        raise BenchError(f"console login for {user!r} asks for a password; only passwordless images are supported")
+    key = _expect_answering_cpr(console, {"login": r"login: *$", "shell": _SHELL}, timeout)
+    if key == "login":
+        console.send_line(user, paced=True)
+        key = _expect_answering_cpr(console, {"password": r"[Pp]assword: *$", "shell": _SHELL}, 30.0)
+        if key == "password":
+            raise BenchError(f"console login for {user!r} asks for a password; only passwordless images are supported")
+    _settle(console)
+    # no more escape-sequence queries from the shell or its profile
+    send_checked(console, "export TERM=dumb")
+    console.expect(_SHELL, 10.0)
+    wait_system_settled(console)
 
 
 def discover_host(console: Console, iface: str | None = None) -> str:
     """First global-scope IPv4 address, read over the logged-in console."""
     dev = f" dev {iface}" if iface else ""
-    console.send_line(f"ip -4 -o addr show scope global{dev}")
+    send_checked(console, f"ip -4 -o addr show scope global{dev}")
     m = console.expect(r"inet (\d{1,3}(?:\.\d{1,3}){3})/", 10.0)
     console.drain()
     return m.group(1)
@@ -401,7 +492,7 @@ def eeprom_write_pages(t: LinuxTarget, bus: int, offset: int, data: bytes,
         # ponytail: poll bound counts attempts (each i2ctransfer spawn >= ~1 ms), not wall time
         t.run(f"i2ctransfer -y {bus} w{take + 2}@{EEPROM_ADDR:#04x} {payload} || exit 2; "
               f"n=0; until i2ctransfer -y {bus} w2@{EEPROM_ADDR:#04x} {hi:#04x} {lo:#04x} "
-              f">/dev/null 2>&1; do n=$((n+1)); [ $n -ge {poll_ms} ] && exit 3; done")
+              f">/dev/null 2>&1; do n=$((n+1)); if [ $n -ge {poll_ms} ]; then exit 3; fi; done")
         pos += take
     got = eeprom_read(t, bus, offset, len(data))
     if got != data:
@@ -461,7 +552,8 @@ def gd32_bridge_version(t: LinuxTarget, bus: int, addr: int = 0x70) -> tuple[int
     repeated-start read [status][major][minor][patch][crc lo][crc hi], CRC-16/CCITT-FALSE
     over cmd (+payload) / status+payload.  `-f` because the kernel driver binds 0x70.
     Asking the bridge beats grepping dmesg: the driver logs the protocol only if the
-    GD32 answers AT PROBE, which a late-released GD32 (ACT88760 GPIO4 defect) never does."""
+    GD32 answers AT PROBE, which a GD32 still held in reset (ACT88760 GPIO4 not yet
+    released) never does."""
     crc = _crc16_ccitt_false(b"")
     r = t.run(f"i2ctransfer -f -y {bus} w4@{addr:#04x} 0x00 0x01 {crc & 0xFF:#04x} {crc >> 8:#04x} r6")
     rsp = _parse_bytes(r.stdout, 6)
@@ -494,18 +586,21 @@ def i2c_scan(t: LinuxTarget, bus: int, span: tuple[int, int] | None = None,
     return found
 
 
-def act88760_gpio4_defect(t: LinuxTarget, bus: int) -> bool:
-    return i2c_get(t, bus, ACT88760_ADDR, ACT88760_GPIO_REG) == ACT88760_GPIO4_DEFECT
+def act88760_gpio4_held(t: LinuxTarget, bus: int) -> bool:
+    """True while GD32_NRST is still held by the OTP GPIO4 default (0x88):
+    the GD32 has not been released yet, by U-Boot or by us."""
+    return i2c_get(t, bus, ACT88760_ADDR, ACT88760_GPIO_REG) == ACT88760_GPIO4_OTP_DEFAULT
 
 
 def act88760_gpio4_release(t: LinuxTarget, bus: int) -> None:
-    """Volatile workaround (lost at power-off): release GD32_NRST. Only on a defect unit."""
-    if not act88760_gpio4_defect(t, bus):
-        raise BenchError(f"ACT88760 reg {ACT88760_GPIO_REG:#04x} is not {ACT88760_GPIO4_DEFECT:#04x}; refusing to write")
-    i2c_set(t, bus, ACT88760_ADDR, ACT88760_GPIO_REG, ACT88760_GPIO4_RELEASE)
+    """Volatile workaround (lost at power-off): release GD32_NRST. Only when
+    reg 0x10 still holds the OTP default -- never writes EEPROM/OTP."""
+    if not act88760_gpio4_held(t, bus):
+        raise BenchError(f"ACT88760 reg {ACT88760_GPIO_REG:#04x} is not {ACT88760_GPIO4_OTP_DEFAULT:#04x}; refusing to write")
+    i2c_set(t, bus, ACT88760_ADDR, ACT88760_GPIO_REG, ACT88760_GPIO4_RELEASED)
     got = i2c_get(t, bus, ACT88760_ADDR, ACT88760_GPIO_REG)
-    if got != ACT88760_GPIO4_RELEASE:
-        raise BenchError(f"ACT88760 reg {ACT88760_GPIO_REG:#04x} reads {got:#04x} after writing {ACT88760_GPIO4_RELEASE:#04x}")
+    if got != ACT88760_GPIO4_RELEASED:
+        raise BenchError(f"ACT88760 reg {ACT88760_GPIO_REG:#04x} reads {got:#04x} after writing {ACT88760_GPIO4_RELEASED:#04x}")
 
 
 def expected_i2c(preset: dict, i2c_bus: dict[str, int]) -> dict[int, set[int]]:
@@ -728,6 +823,27 @@ def dxm1_pcie_present(t: LinuxTarget, vendor_id: str | None = None) -> bool:
 
 # --- census ----------------------------------------------------------------------------
 
+def cid_identity(raw: str) -> str:
+    """The comparable part of a 128-bit eMMC CID, as 30 lower-case hex chars.
+
+    Two sources must agree: bootstrap's EM_DCID parse (scif_writer.parse_cid) and the
+    sysfs `cid`. The writer does print the CRC field, but parse_cid still rebuilds the
+    register (reserved bits 119:114 forced to 0, end bit forced to 1), while the kernel
+    host drivers do not agree on the last byte (SDHCI returns an R2 response without the
+    CRC7 + end-bit byte). So byte 15 is not compared and the reserved bits of byte 1 are
+    masked; MID, CBX, OID, PNM, PRV, PSN and MDT are."""
+    raw = "".join(raw.split()).lower()
+    if not re.fullmatch(r"[0-9a-f]{32}", raw):
+        raise ValueError(f"CID must be 32 hex chars, got {raw!r}")
+    return raw[:2] + f"{int(raw[2:4], 16) & 0x03:02x}" + raw[4:30]
+
+
+def read_emmc_cid(t: LinuxTarget) -> str:
+    """Raw sysfs CID of the eMMC (found by sysfs type, as census does)."""
+    name = resolve_emmc(t).rsplit("/", 1)[-1]
+    return t.run(f"cat /sys/block/{name}/device/cid").stdout.strip()
+
+
 def parse_emmc_cid(raw: str) -> dict[str, str]:
     raw = raw.strip().lower()
     if not re.fullmatch(r"[0-9a-f]{32}", raw):
@@ -758,6 +874,20 @@ def _devmem(t: LinuxTarget, addr: int) -> int:
           f"print(hex(struct.unpack_from('<I',m,{off})[0]))")
     out = t.run(f"devmem {addr:#x} 32 2>/dev/null || python3 -c {shlex.quote(py)}").stdout.strip()
     return int(out, 16)
+
+
+NET_IF_RE = re.compile(r"(?:end|eth)\d+")   # the Renesas gbeth ports are end0/end1
+
+
+def net_ifaces(t) -> list[str]:
+    return sorted(n for n in t.run("ls /sys/class/net", check=False).stdout.split()
+                  if NET_IF_RE.fullmatch(n))
+
+
+def net_carrier(t, name: str) -> bool:
+    """True when the PHY reports link (an administratively-down port reads as no carrier)."""
+    r = t.run(f"cat /sys/class/net/{name}/carrier", check=False)
+    return r.rc == 0 and r.stdout.strip() == "1"
 
 
 def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None = None,
@@ -791,6 +921,10 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
             raise BenchError("MemTotal not in /proc/meminfo")
         facts["linux_memtotal_kb"] = m[1]
         facts["kernel_version"] = t.run("uname -r").stdout.strip()
+        compat = t.run(r"tr '\0' ' ' < /proc/device-tree/compatible", check=False).stdout.strip()
+        model = t.run(r"tr -d '\0' < /proc/device-tree/model", check=False).stdout.strip()
+        if compat:
+            facts["dtb_name"] = f"{model} (compatible {compat})" if model else compat
 
     def storage():
         dev = emmc or resolve_emmc(t)
@@ -868,13 +1002,27 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
             f" at {CLKGEN_5L35023B_ADDR:#04x}"
 
     def network():
-        for i in (0, 1):
-            r = t.run(f"cat /sys/class/net/eth{i}/address /sys/class/net/eth{i}/operstate", check=False)
+        names = net_ifaces(t)
+        if not names:
+            notes.append("network: no end*/eth* interface")
+        # The ledger catalogue keys are eth0_*/eth1_* (by port index); the
+        # interface names on the unit are end0/end1. Carrier, speed and the
+        # link-partner advertisement are folded into the one *_link value.
+        for i, n in enumerate(names[:2]):
+            r = t.run(f"cat /sys/class/net/{n}/address /sys/class/net/{n}/operstate", check=False)
             lines = r.stdout.split()
-            if r.rc == 0 and len(lines) == 2:
-                facts[f"eth{i}_mac"], facts[f"eth{i}_link"] = lines
-            else:
-                notes.append(f"eth{i}: not present")
+            if r.rc != 0 or len(lines) != 2:
+                notes.append(f"{n}: address/operstate unreadable")
+                continue
+            mac, state = lines
+            spd = t.run(f"cat /sys/class/net/{n}/speed", check=False).stdout.strip()
+            lp = re.search(r"Link partner advertised link modes:\s*(.+)",
+                           t.run(f"ethtool {n} 2>/dev/null", check=False).stdout)
+            carrier = "1" if net_carrier(t, n) else "0"
+            speed = spd if spd.isdigit() else "unknown"
+            anlpar = lp[1].strip() if lp else "unknown"
+            facts[f"eth{i}_mac"] = mac
+            facts[f"eth{i}_link"] = f"{state} ({n}) carrier={carrier} speed={speed} anlpar={anlpar}"
 
     for name, fn in (("soc", soc), ("cpu_mem", cpu_mem), ("storage", storage), ("xspi", xspi),
                      ("identity", identity), ("power", power), ("clocks_rtc", clocks_rtc),

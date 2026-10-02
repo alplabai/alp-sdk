@@ -10,10 +10,19 @@
 # `refs/pull/N/merge` with no `ref:` pinned -- so it grades the PR's merge
 # commit as it stood at the PR's LAST PUSH. That workflow carries no
 # `merge_group:` trigger at all, unlike `pr-twister.yml`,
-# `pr-static-analysis.yml`, and `cross-platform-zephyr.yml`. So a citation
-# `dev` breaks by moving between a PR's last push and the merge queue landing
-# the entry is never graded before it lands -- it only turns the gate red on
-# the *next*, unrelated PR (the #2122 treadmill).
+# `pr-static-analysis.yml`, and `cross-platform-zephyr.yml`.
+#
+# alp-sdk#2350 changed WHICH citations this window actually threatens: a
+# PRE-EXISTING citation that merely drifts to a new, unique, long-enough
+# line when `dev` moves underneath it now PASSES on its own (an advisory
+# note, no re-grading needed) -- the #2122 treadmill this job originally
+# closed for THAT case is gone. What still needs re-grading here is a
+# citation the PR itself just ADDED: alp-sdk#2350 round 2 gives a new
+# citation none of that drift tolerance (its line must already be right, no
+# exceptions), so if `dev` shifts the cited file between the PR's last push
+# and the merge queue landing the entry, a brand-new citation that was
+# correct at push time can still land wrong -- and nothing regrades it
+# before it merges without this job.
 #
 # DIFF_BASE is `github.event.merge_group.base_sha` -- the merge queue's own
 # base. Two alternatives rejected, for two different reasons:

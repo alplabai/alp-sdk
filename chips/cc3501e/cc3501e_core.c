@@ -577,6 +577,10 @@ bool cc3501e_fw_major_is_acceptable(uint8_t fw_major)
 	       fw_major == (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR_LEGACY;
 }
 
+/* #1937: bounded retry of the reset-time GET_VERSION. */
+#define CC3501E_RESET_VERSION_ATTEMPTS   3u
+#define CC3501E_RESET_VERSION_BACKOFF_MS 200u
+
 alp_status_t cc3501e_reset(cc3501e_t *ctx)
 {
 	/* RECOVERY PRIMITIVE: deliberately does NOT require ctx->initialised.
@@ -691,6 +695,7 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx)
 	const uint8_t prior_minor = ctx->fw_proto_minor;
 	ctx->fw_proto_major       = 0u;
 	ctx->fw_proto_minor       = 0u;
+	ctx->fw_fast_reply        = 0u;
 
 	/* Wire-protocol compatibility gate (issue #1371): cc3501e-bridge-firmware:DESIGN.md
      * has always documented "host refuses a mismatch" for GET_VERSION, but
@@ -721,17 +726,30 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx)
      * the context usable and let the caller's own retry loop keep trying. */
 	uint16_t     fw_version = 0u;
 	alp_status_t vs         = cc3501e_get_version(ctx, &fw_version);
+	/* #1937 (silicon, 1 of 5 cold boots): one missed GET_VERSION right after the
+	 * boot settle is common (slave not armed yet), so retry a bounded number of
+	 * times with a short back-off before concluding anything.  Each retry stays
+	 * CRC-less (fw_proto_major is still 0 here), which is correct: nothing is
+	 * negotiated yet. */
+	for (unsigned attempt = 1u; vs != ALP_OK && attempt < CC3501E_RESET_VERSION_ATTEMPTS;
+	     attempt++) {
+		alp_delay_ms(CC3501E_RESET_VERSION_BACKOFF_MS);
+		vs = cc3501e_get_version(ctx, &fw_version);
+	}
 	if (vs != ALP_OK) {
-		/* Transport hiccup reading the version, not a version disagreement:
-		 * restore the prior fw_proto_major/minor (zeroed a few lines up for
-		 * GET_VERSION's own framing) so the context really is left as it was,
-		 * and let the caller retry (the soaks treat GET_VERSION as a liveness
-		 * probe, not a compat gate). Without this restore a healthy MAJOR-4
-		 * peer whose GET_VERSION round trip misses -- the common case
-		 * immediately after this reset -- is left with fw_proto_major == 0
-		 * and initialised == true: want_req_crc() then frames every later
-		 * request CRC-less, and that firmware rejects each one until some
-		 * later reset happens to get a version through. */
+		/* Transport miss, not a version disagreement. */
+		if (prior_major == 0u) {
+			/* Fresh context: nothing was ever negotiated, so returning ALP_OK
+			 * would leave fw_proto_major == 0 with initialised == true -- every
+			 * later request framed CRC-less against a MAJOR-4 peer, failing -5
+			 * forever while a bare GET_VERSION still answers (the #1937 half-
+			 * working link).  Fail loudly and leave the ctx down instead; the
+			 * caller's hard-reset/reset retry loop re-arms it. */
+			ctx->initialised = false;
+			return ALP_ERR_TIMEOUT;
+		}
+		/* This context negotiated a major earlier (same peer, warm re-reset):
+		 * keep it, so the context really is left as it was. */
 		ctx->fw_proto_major = prior_major;
 		ctx->fw_proto_minor = prior_minor;
 		return ALP_OK;
@@ -788,6 +806,15 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx)
 	 * its version number implies. */
 	ctx->fw_proto_major = fw_major;
 	ctx->fw_proto_minor = fw_minor;
+
+	/* #2052: a firmware whose per-frame path runs from RAM arms its reply
+	 * header far sooner; only then may the reply gate shrink.  Any failure
+	 * here just keeps the conservative gate -- it is not a reset failure. */
+	uint32_t caps = 0u;
+	if (cc3501e_get_capabilities(ctx, &caps) == ALP_OK &&
+	    (caps & (uint32_t)ALP_CC3501E_CAP_FAST_REPLY) != 0u) {
+		ctx->fw_fast_reply = 1u;
+	}
 
 	return ALP_OK;
 }
@@ -1508,6 +1535,13 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
  * The value is empirical, not derived; the real fix is a readable READY line,
  * which needs a board revision that does not put it on SPI1_SCLK_A. */
 #define CC3501E_PHASE_SETTLE_US 250u
+/* #2052: a firmware reporting ALP_CC3501E_CAP_FAST_REPLY re-arms each phase
+ * from code TCM, not XIP flash.  Against it 50 us was clean through every
+ * frame size on E1M-AEN803 2026W36-0009 (2/2 full sweeps); 250 us stays for
+ * everything else. */
+#define CC3501E_PHASE_SETTLE_FAST_US 50u
+#define CC3501E_PHASE_SETTLE(ctx) \
+	((ctx)->fw_fast_reply ? CC3501E_PHASE_SETTLE_FAST_US : CC3501E_PHASE_SETTLE_US)
 
 /* READY gate for the r2 SS0 + host-IRQ bridge.  When ctx->ready_pin is
  * populated (the CC35 GPIO17 line is wired + opened as an input -- which
@@ -1788,11 +1822,21 @@ void cc3501e_set_peer_polled(bool on)
  * XFER) -- rather than at the measured 4093 B point itself, so the plateau
  * starts 1 B earlier than proven.  That is conservative, not risky: it only
  * ever hands out the full, already-proven 2000 us slightly sooner, never
- * less delay than the interpolation would otherwise give at 4092 B. */
+ * less delay than the interpolation would otherwise give at 4092 B.
+ *
+ * #2052 moved the plateau down to 2048 B.  With the host faster
+ * (CONFIG_SPI_DW_ALIF_PACK32, or the D-cache on) the interpolated ~970 us at
+ * 2048 B was too short: 2048-byte STREAM_WRITE failed rc=-5 in 4 of the 6
+ * failures seen on E1M-AEN803 2026W36-0009 on 2026-09-28, the link ring
+ * showing a reply-header read of all zeros (slave not re-armed) and every
+ * retry after it failing too.  With the full 2000 us from 2048 B up the same
+ * build ran 3/3 clean through 4092 B (a 1024 B plateau was also 3/3 clean but
+ * cost 1024 B frames 30%).  Below 2048 B the gate still interpolates from
+ * the 536 B floor. */
 #define CC3501E_REPLY_GATE_FLOOR_US 200u /* proven at bytes <= 536 (SOCK_RECV want 512) */
 #define CC3501E_REPLY_GATE_SMALL_BYTES \
 	536u /* sizeof(alp_cc3501e_sock_recv_resp_t) + 512 -- proven-floor boundary */
-#define CC3501E_REPLY_GATE_LARGE_BYTES (ALP_CC3501E_MAX_PAYLOAD - ALP_CC3501E_HEADER_BYTES)
+#define CC3501E_REPLY_GATE_LARGE_BYTES 2048u /* #2052: plateau from here up, see above */
 #define CC3501E_REPLY_GATE_LARGE_US    2000u /* proven at 4093 B (SOCK_RECV want 4071) */
 
 /* Reconstruct the reply size THIS request actually asks for, from (cmd,
@@ -1855,16 +1899,31 @@ static uint32_t cc3501e_expected_reply_bytes(alp_cc3501e_cmd_t cmd,
 	return (uint32_t)rx_cap;
 }
 
-static uint32_t cc3501e_reply_header_gate_us(uint32_t bytes)
+/* #2052: with ALP_CC3501E_CAP_FAST_REPLY firmware the reply header is armed
+ * in ~0.1 us per frame byte (measured on E1M-AEN803 2026W36-0009: a 4094 B
+ * STREAM_WRITE needed more than 300 us and less than 600 us; 2050 B was clean
+ * at 300 us).  cc3501e-bridge-firmware's slicing-by-4 request CRC and its SPI
+ * driver in code TCM brought that to between 300 and 400 us (a 300 us gate
+ * fails at 4092 B, 400 us is clean), so the fast gate interpolates 200 us at
+ * 536 B to 450 us at the 4092 B frame ceiling. */
+#define CC3501E_REPLY_GATE_FAST_LARGE_US 450u
+
+static uint32_t cc3501e_reply_header_gate_us(const cc3501e_t *ctx, uint32_t bytes)
 {
+	const uint32_t large_bytes =
+	    ctx->fw_fast_reply ? (uint32_t)(ALP_CC3501E_MAX_PAYLOAD - ALP_CC3501E_HEADER_BYTES)
+	                       : (uint32_t)CC3501E_REPLY_GATE_LARGE_BYTES;
+	const uint32_t large_us =
+	    ctx->fw_fast_reply ? CC3501E_REPLY_GATE_FAST_LARGE_US : CC3501E_REPLY_GATE_LARGE_US;
+
 	if (bytes <= CC3501E_REPLY_GATE_SMALL_BYTES) {
 		return CC3501E_REPLY_GATE_FLOOR_US;
 	}
-	if (bytes >= CC3501E_REPLY_GATE_LARGE_BYTES) {
-		return CC3501E_REPLY_GATE_LARGE_US;
+	if (bytes >= large_bytes) {
+		return large_us;
 	}
-	const uint32_t span_bytes = CC3501E_REPLY_GATE_LARGE_BYTES - CC3501E_REPLY_GATE_SMALL_BYTES;
-	const uint32_t span_us    = CC3501E_REPLY_GATE_LARGE_US - CC3501E_REPLY_GATE_FLOOR_US;
+	const uint32_t span_bytes = large_bytes - CC3501E_REPLY_GATE_SMALL_BYTES;
+	const uint32_t span_us    = large_us - CC3501E_REPLY_GATE_FLOOR_US;
 	const uint32_t over_bytes = bytes - CC3501E_REPLY_GATE_SMALL_BYTES;
 	return CC3501E_REPLY_GATE_FLOOR_US + (over_bytes * span_us) / span_bytes;
 }
@@ -1914,7 +1973,13 @@ static void cc3501e_reply_gate(const cc3501e_t *ctx, uint32_t fallback_us)
 	}
 	/* Unconditional -- see this function's header comment: READY only ever
 	 * ADDS to this wait, it never replaces it. */
-	alp_delay_us(fallback_us);
+	/* #2052: the settle is measured from the end of the previous transfer,
+	 * so work the caller did since then (building and CRCing the next
+	 * phase) counts toward it instead of being paid on top of it. */
+	const uint64_t since = alp_uptime_us() - ctx->last_xfer_end_us;
+	if (ctx->last_xfer_end_us == 0u || since < (uint64_t)fallback_us) {
+		alp_delay_us((ctx->last_xfer_end_us == 0u) ? fallback_us : (uint32_t)(fallback_us - since));
+	}
 }
 
 /* Marker cc3501e_request_locked() writes into ctx->rx_scratch[0] on every
@@ -2149,7 +2214,6 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 	 * dma_stream_iters stuck at 1).  READY tracks the actual header-arm; on a
 	 * CS-less r1 board with no ready_pin the fallback is the same short settle the
 	 * other phases use. */
-	cc3501e_reply_gate(ctx, CC3501E_PHASE_SETTLE_US);
 	/* req_seq rides flags bits 3..7 (proto v8).  Callers that have no retry
 	 * loop pass ALP_CC3501E_REQ_SEQ_NONE, which the firmware treats as "no
 	 * identity" and never latches -- so the masking here is the only place
@@ -2168,6 +2232,18 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 	const uint16_t wire_tx_len =
 	    (uint16_t)(tx_len + (want_req_crc ? (size_t)ALP_CC3501E_CRC_BYTES : 0u));
 	encode_header(ctx->tx_scratch, cmd, flags, wire_tx_len);
+	/* #2052: CRC the header and the first half of the payload now, inside the
+	 * settle before the request header (it counts from the previous transfer's
+	 * end); the second half is CRC'd after the header, inside the next settle.
+	 * Done serially this cost a 4 KiB frame ~150 us of dead time on an M55-HE. */
+	uint16_t req_crc  = 0u;
+	size_t   crc_done = 0u;
+	if (want_req_crc) {
+		req_crc  = alp_crc16_ccitt_false(ctx->tx_scratch, ALP_CC3501E_HEADER_BYTES);
+		crc_done = tx_len / 2u;
+		req_crc  = alp_crc16_ccitt_false_update(req_crc, tx_payload, crc_done);
+	}
+	cc3501e_reply_gate(ctx, CC3501E_PHASE_SETTLE(ctx));
 	/* READY sampled once here, before this exchange clocks anything, and
 	 * again at `out:` (issue #2136) -- so a ring entry can tell a slave
 	 * that was already down before this attempt started (frozen both
@@ -2181,6 +2257,7 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 	 * sample now happens once, in the failure path below, and is recorded as
 	 * the level AT FAILURE rather than a before/after pair. */
 	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
+	ctx->last_xfer_end_us = alp_uptime_us();
 	/* Ring evidence (#2136): the request-header phase's 4 MISO bytes -- a
 	 * later phase's transceive reuses rx_scratch, so this is the only
 	 * chance to capture them. #2136 review (MAJOR): captured ONLY when this
@@ -2253,21 +2330,25 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 		 * OTA_WRITE), so it is the worst one to send blind at a slave that has not
 		 * re-armed.  Gate it like the others; the delay stays as the fallback.
 		 */
-		cc3501e_reply_gate(ctx, CC3501E_PHASE_SETTLE_US);
 		const uint8_t *tx_ptr = tx_payload;
 		if (want_req_crc) {
-			/* Build payload+CRC as one contiguous buffer.  ctx->tx_scratch[0..3]
-			 * still holds the header this exchange just sent -- alp_spi_transceive
-			 * does not touch its own TX buffer -- so the CRC is computed from it
-			 * BEFORE this reuses the same scratch to carry the payload phase. */
-			uint16_t crc = alp_crc16_ccitt_false(ctx->tx_scratch, ALP_CC3501E_HEADER_BYTES);
-			crc          = alp_crc16_ccitt_false_update(crc, tx_payload, tx_len);
+			/* Build payload+CRC as one contiguous buffer.  The header's bytes
+			 * are already folded into req_crc (above), so reusing tx_scratch
+			 * for the payload here cannot corrupt the CRC. */
+			const uint16_t crc =
+			    alp_crc16_ccitt_false_update(req_crc, tx_payload + crc_done, tx_len - crc_done);
 			if (tx_len > 0) memcpy(ctx->tx_scratch, tx_payload, tx_len);
 			ctx->tx_scratch[tx_len]      = (uint8_t)(crc & 0xFFu);
 			ctx->tx_scratch[tx_len + 1u] = (uint8_t)((crc >> 8) & 0xFFu);
 			tx_ptr                       = ctx->tx_scratch;
 		}
-		s = alp_spi_transceive(ctx->bus, tx_ptr, ctx->rx_scratch, wire_tx_len);
+		cc3501e_reply_gate(ctx, CC3501E_PHASE_SETTLE(ctx));
+		/* TX-only (NULL rx): the slave drives dummy zeros during the payload
+		 * phase and nothing reads them.  Without an RX side the polled loop never waits
+		 * on RX FIFO drains and runs at wire speed (#2052: 1.31 ms for 4094 B
+		 * at 25 MHz, against 1.91 ms full-duplex). */
+		s                     = alp_spi_transceive(ctx->bus, tx_ptr, NULL, wire_tx_len);
+		ctx->last_xfer_end_us = alp_uptime_us();
 		if (s != ALP_OK) goto out;
 	}
 	link_phase = CC3501E_LINK_LOG_PHASE_REPLY_HEADER; /* #2136 ring */
@@ -2283,13 +2364,17 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 	const uint32_t expected_reply = cc3501e_expected_reply_bytes(cmd, tx_payload, tx_len, rx_cap);
 	const uint32_t gate_bytes =
 	    (expected_reply > (uint32_t)wire_tx_len) ? expected_reply : (uint32_t)wire_tx_len;
-	cc3501e_reply_gate(ctx, cc3501e_reply_header_gate_us(gate_bytes));
+	cc3501e_reply_gate(ctx, cc3501e_reply_header_gate_us(ctx, gate_bytes));
 
 	/* Dummies for the read transactions (MOSI is don't-care on a read). */
-	memset(ctx->tx_scratch, 0xFF, sizeof(ctx->tx_scratch));
+	/* Only the bytes each read phase clocks: the reply header now, the reply
+	 * payload once its length is known.  Clearing all 4100 B here cost up to
+	 * 165 us per request under -Os (#2052). */
+	memset(ctx->tx_scratch, 0xFF, ALP_CC3501E_HEADER_BYTES);
 
 	/* 3. Reply header -> learn the reply payload length. */
 	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
+	ctx->last_xfer_end_us = alp_uptime_us();
 	/* v4.0 (#2035): save the reply's own header bytes the moment this
 	 * transceive succeeds -- the payload-phase transceive below reuses
 	 * ctx->rx_scratch and overwrites them, and (#2136) a !hdr_ok bail below
@@ -2327,9 +2412,11 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 
 	/* Same READY gate before the reply PAYLOAD phase (the slave re-arms it in
 	 * its ISR only after the reply-header transfer completes). */
-	cc3501e_reply_gate(ctx, CC3501E_PHASE_SETTLE_US);
+	cc3501e_reply_gate(ctx, CC3501E_PHASE_SETTLE(ctx));
 	/* 4. Reply payload: status byte followed by the response data. */
+	memset(ctx->tx_scratch, 0xFF, resp_payload_len);
 	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, resp_payload_len);
+	ctx->last_xfer_end_us = alp_uptime_us();
 	if (s != ALP_OK) goto out;
 
 	{

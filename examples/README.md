@@ -235,7 +235,7 @@ SoM EEPROM manifest).
 | `v2n/v2n-eeprom-manifest-dump`  | Hexdump + decode the 128-byte EEPROM manifest at offset 0x0000.          |
 | `v2n/v2n-temp-sensor`           | Read the on-module TMP112 once per second; print degrees C.              |
 | `v2n/v2n-pwm-fan-control`       | Ramp a GD32-side PWM channel along a five-stop fan curve (25 kHz board). |
-| `v2n/v2n-secure-element-sign`   | OPTIGA Trust M I2C_STATE probe; product-info/raw-APDU return `ALP_ERR_NOSUPPORT`. |
+| `v2n/v2n-secure-element-sign`   | OPTIGA Trust M probe, Coprocessor UID read and raw APDU session. |
 | `v2n/v2n-xspi-flash-readwrite`  | Erase + write + read-back one page on the on-module xSPI NOR.            |
 | `v2n/v2n-emmc-block-stat`       | Disk-access ioctls + first-block read on the on-module eMMC.             |
 | `v2n/v2n-gd32-swd-flash`        | Host-driven SWD bit-bang -- connect, halt, erase, write, verify, reset.  |
@@ -243,6 +243,7 @@ SoM EEPROM manifest).
 | `v2n/v2n-gd32-bridge-functional` | Single-pass functional validation of the GD32G553 supervisor-MCU bridge, followed by a forever PWM7 duty staircase as a live oscilloscope observable. **(V2N-M1)** |
 | `v2n/v2n-gd32-bridge-hil-soak`  | Pass/fail soak of the whole GD32 bridge command set over the 25 MHz SPI fast path -- every opcode round-trips each cycle with self-contained verification. **(V2N-M1)** |
 | `v2n/v2n-gd32-bridge-loopback`  | Jumpered Tier-B loopback validation of the GD32 supervisor bridge -- three physical jumpers close the analog + timer signal paths on real silicon. **(V2N-M1)** |
+| `v2n/v2n-pmic-inspect`          | Read-only-by-default inspector for the on-module power chips (ACT88760, DA9292, TPS628640) from Linux/Yocto user-space on the V2N A55 -- rails, GPIOs, identity vs metadata; guarded `--write` actions (window-checked setpoint, enable/disable with critical rails refused, GPIO4 OTP fix, DEEPX rail sequence). |
 | `v2n/v2n-power-monitor`         | Live per-rail power table from the E1M-X EVK's on-board INA236 current/voltage monitors, read from Linux/Yocto user-space on the V2N Cortex-A55. |
 
 ### AEN platform
@@ -269,13 +270,13 @@ their filename (some of those internal dirs don't follow a
 | `aen/aen-cc3501e-gpio`          | CC3501E GPIO proxy + camera-enable demo over the inter-chip SPI bridge. |
 | `aen/aen-eeprom-manifest`       | Read + decode the 128-byte Alp hardware-info manifest from the on-module 24C128 EEPROM over the portable `<alp/*>` API. |
 | `aen/aen-eeprom-provision`      | Write (and lock down) the 128-byte Alp hardware-info manifest into the on-module 24C128 EEPROM -- the production sibling of `aen-eeprom-manifest`. |
-| `aen/aen-secure-element-sign`   | OPTIGA Trust M I2C_STATE probe over BRD_I2C (M55-HE); product-info/raw-APDU return `ALP_ERR_NOSUPPORT`. |
+| `aen/aen-secure-element-sign`   | OPTIGA Trust M probe and Coprocessor UID read over BRD_I2C (M55-HE). |
 
 ## Anatomy of a single-OS example
 
 ```
 examples/<name>/
-├── CMakeLists.txt    # invokes scripts/alp_project.py + delegates to west build
+├── CMakeLists.txt    # Zephyr app build (alp.conf comes from `tan build`)
 ├── prj.conf          # mostly empty -- feature selection is in board.yaml
 ├── board.yaml        # SoM + board + cores + peripherals + chip drivers
 ├── src/

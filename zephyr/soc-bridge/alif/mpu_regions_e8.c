@@ -28,10 +28,11 @@
  * hand-maintained `Kconfig`, see the placement note below) and, instead of
  * one "whole flash" region, always defines the two disjoint MRAM windows
  * (MRAM_EXEC / MRAM_DEVICE) plus the two other CPU-local memories (ITCM /
- * DTCM) as FOUR static regions, plus a FIFTH conditional region
- * (MRAM_RESERVED, see below) that appears only when this board's own
- * boot/slot0/storage partitions leave a span of mram_storage that neither
- * MRAM_EXEC nor MRAM_DEVICE covers. This is flow-aware WITHOUT any
+ * DTCM) as FOUR static regions, plus two conditional regions: MRAM_RESERVED
+ * (see below), present only when this board's own boot/slot0/storage
+ * partitions leave a span of mram_storage that neither MRAM_EXEC nor
+ * MRAM_DEVICE covers, and SRAM0, present only when `zephyr,flash = &sram0`
+ * (#2180). This is flow-aware WITHOUT any
  * `#if`-on-flow branching, because ITCM ([0x0, 0x40000)) and MRAM
  * ([0x80000000, 0x80580000)) are disjoint address ranges by construction:
  *
@@ -45,11 +46,15 @@
  *     region (REGION_FLASH_ATTR, matching what a generic FLASH_0 would have
  *     been) -- there is no SEPARATE FLASH_0 to duplicate it, so nothing
  *     collides with MRAM_DEVICE either.
+ *   - SRAM0-linked bench image (`zephyr,flash = &sram0`,
+ *     CONFIG_FLASH_BASE_ADDRESS=0x02000000, #2180): the conditional SRAM0
+ *     region covers the running code as flash-attr+executable; data must
+ *     live in DTCM (`zephyr,sram = &dtcm`). Disjoint from ITCM/DTCM/MRAM.
  *
  * The BUILD_ASSERT at the bottom makes that flow-awareness a checked
  * invariant instead of an implicit assumption: whichever memory
  * `zephyr,flash` currently designates (CONFIG_FLASH_BASE_ADDRESS) must
- * already be covered by ITCM or MRAM_EXEC below, or the build fails loudly
+ * already be covered by ITCM, SRAM0 or MRAM_EXEC below, or the build fails loudly
  * instead of silently producing an unprotected/uncovered image.
  *
  * MRAM_EXEC / MRAM_DEVICE boundaries mirror the Apache-2.0 zephyr_alif
@@ -177,6 +182,13 @@
 		.r_limit = REGION_LIMIT_ADDR(base, size),     /* Region Limit */  \
 	}
 
+/* Nested #if: DT_REG_ADDR() must not be expanded when sram0 is absent. */
+#if DT_NODE_EXISTS(DT_NODELABEL(sram0))
+#define SRAM0_IS_FLASH (CONFIG_FLASH_BASE_ADDRESS == DT_REG_ADDR(DT_NODELABEL(sram0)))
+#else
+#define SRAM0_IS_FLASH 0
+#endif
+
 static const struct arm_mpu_region mpu_regions[] = {
 	/* Region 0: executable MRAM (boot + slot0, minus the MCUboot trailer
 	 * sector under CONFIG_BOOTLOADER_MCUBOOT). RO even for privileged
@@ -216,6 +228,21 @@ static const struct arm_mpu_region mpu_regions[] = {
 	                 MRAM_RESERVED_BASE_ADDR,
 	                 REGION_MRAM_RESERVED_ATTR(MRAM_RESERVED_BASE_ADDR, MRAM_RESERVED_SIZE)),
 #endif
+#if SRAM0_IS_FLASH
+	/* Conditional: SRAM0 -- executable, RO, cacheable normal memory, exactly
+	 * the ITCM entry's attributes (REGION_FLASH_ATTR). Present ONLY when
+	 * `zephyr,flash = &sram0` (bench RAM-run of SRAM0-linked code, #2180),
+	 * so every other build's table stays byte-identical. The span is
+	 * disjoint from ITCM/DTCM/MRAM, so PMSAv8-M's no-overlap rule holds.
+	 * Base/size come from the sram0 node (0x02000000, 4 MiB); PMSAv8-M
+	 * needs only 32-byte alignment (REGION_LIMIT_ADDR keeps limit = last
+	 * byte), which 4 MiB at 0x02000000 satisfies. Data must then live in
+	 * DTCM (`zephyr,sram = &dtcm`): this region is RO. */
+	MPU_REGION_ENTRY(
+	    "SRAM0",
+	    DT_REG_ADDR(DT_NODELABEL(sram0)),
+	    REGION_FLASH_ATTR(DT_REG_ADDR(DT_NODELABEL(sram0)), DT_REG_SIZE(DT_NODELABEL(sram0)))),
+#endif
 };
 
 const struct arm_mpu_config mpu_config = {
@@ -224,12 +251,13 @@ const struct arm_mpu_config mpu_config = {
 };
 
 /* Flow-awareness, checked: whichever memory `zephyr,flash` currently
- * designates must already be covered by ITCM (Flow C) or MRAM_EXEC (Flow
- * D/A) above. If a future flow points `zephyr,flash` somewhere else, this
- * fails the build instead of silently shipping an unprotected/uncovered
- * image -- see the file header's "THE FIX" section for why no separate,
- * generic CONFIG_FLASH_BASE_ADDRESS-sized region is added here. */
+ * designates must already be covered by ITCM (Flow C), SRAM0 (Flow C
+ * variant, #2180) or MRAM_EXEC (Flow D/A) above. If a future flow points
+ * `zephyr,flash` somewhere else, this fails the build instead of silently
+ * shipping an unprotected/uncovered image -- see the file header's "THE
+ * FIX" section for why no separate, generic CONFIG_FLASH_BASE_ADDRESS-sized
+ * region is added here. */
 BUILD_ASSERT(CONFIG_FLASH_BASE_ADDRESS == DT_REG_ADDR(DT_NODELABEL(itcm)) ||
-                 CONFIG_FLASH_BASE_ADDRESS == MRAM_EXEC_BASE_ADDR,
+                 CONFIG_FLASH_BASE_ADDRESS == MRAM_EXEC_BASE_ADDR || SRAM0_IS_FLASH,
              "zephyr,flash targets a memory region this board's custom MPU table "
              "(mpu_regions_e8.c) does not cover -- add it before shipping");

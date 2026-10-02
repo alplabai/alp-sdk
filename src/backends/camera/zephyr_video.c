@@ -377,7 +377,18 @@ static alp_status_t z_stop(alp_camera_backend_state_t *state)
 	if (st == NULL) return ALP_ERR_NOT_READY;
 	if (!st->streaming) return ALP_OK;
 	int err = video_stream_stop(st->dev, VIDEO_BUF_TYPE_OUTPUT);
-	if (err == 0) st->streaming = false;
+	if (err == 0) {
+		st->streaming = false;
+		/* The stop's cancel flush moves every queued buffer to the done
+		 * queue as VIDEO_BUF_ABORTED.  Queue them again so the next
+		 * z_start() has buffers to fill (#2351); frames the caller still
+		 * holds come back through z_release() as usual. */
+		struct video_buffer *vb = NULL;
+		while (video_dequeue(st->dev, &vb, K_NO_WAIT) == 0 && vb != NULL) {
+			(void)video_enqueue(st->dev, vb);
+			vb = NULL;
+		}
+	}
 	return _errno_to_alp(err);
 }
 

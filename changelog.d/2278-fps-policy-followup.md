@@ -38,7 +38,7 @@ The policy is now graded by WHO asked, not by the errno a
     value, so comparing against that overwritten value instead of the
     original request made every "settled differently" case compare equal to
     itself and never log. A failed readback, or one reporting a zero
-    interval -- `src/backends/camera/camera_frmival.h:154`
+    interval -- `src/backends/camera/camera_frmival.h:155`
     ("if (get_rc != 0 || actual.numerator == 0u || actual.denominator == 0u) {")
     -- reports the original request as a best guess with a `LOG_WRN` that it
     is unverified, and never logs it as an exact settle.

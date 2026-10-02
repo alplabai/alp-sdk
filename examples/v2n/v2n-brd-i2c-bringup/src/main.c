@@ -47,9 +47,12 @@
  *              the report says so explicitly instead of printing
  *              nine cryptic per-device NAKs.  A kernel-owned address
  *              (EBUSY) is reported as present, not as a NAK.
- *   Phase 1 -- per-IC probe, strictly READ-ONLY: nothing in this
- *              example ever writes a voltage, enable, or control
- *              register, and the RTC is read through /dev/rtc0 rather
+ *   Phase 1 -- per-IC probe, READ-ONLY with one exception:
+ *              probe_optiga() pulses the Trust M's SE_RST line (the
+ *              kernel's "se-rst" GPIO), and only when the part has
+ *              stopped ACKing.  Nothing writes a voltage, enable, or
+ *              control register, and the RTC is read through /dev/rtc0
+ *              rather
  *              than the chip driver's own init handshake (which would
  *              both EBUSY against the kernel and, if it ever won that
  *              race, clear the RTC's power-on flag as a side effect --
@@ -77,6 +80,7 @@
 #include <alp/chips/tps628640.h>
 #include <alp/chips/optiga_trust_m.h>
 #include <alp/chips/gd32g553.h>
+#include "se_reset_gpio.h"
 
 /* BRD_I2C = Linux /dev/i2c-8 -- see the file header for the DT-alias
  * citation. */
@@ -208,8 +212,21 @@ static void probe_rtc(alp_i2c_t *bus)
 	}
 	struct rtc_time rt;
 	if (ioctl(fd, RTC_RD_TIME, &rt) < 0) {
-		report("rv3028c7 RTC", RV3028C7_I2C_ADDR, R_FAIL, "RTC_RD_TIME: %s", strerror(errno));
+		int err = errno;
 		close(fd);
+		if (err == EINVAL) {
+			/* rtc-rv3028 answers EINVAL after reading STATUS over I2C and
+			 * finding PORF set: the chip is alive, its time is not.  On the
+			 * E1M-X EVK V2 the RTC's VBACKUP (SoM VBAT, pad AQ25 +S_CAP)
+			 * only reaches header P10, so with nothing fitted there the
+			 * time is lost at every power-off.  `hwclock -w` sets it. */
+			report("rv3028c7 RTC",
+			       RV3028C7_I2C_ADDR,
+			       R_PASS,
+			       "alive, time not set since power loss (PORF); no backup on P10?");
+			return;
+		}
+		report("rv3028c7 RTC", RV3028C7_I2C_ADDR, R_FAIL, "RTC_RD_TIME: %s", strerror(err));
 		return;
 	}
 	close(fd);
@@ -367,12 +384,27 @@ static void probe_optiga(alp_i2c_t *bus)
 {
 	optiga_trust_m_t se;
 
-	if (optiga_trust_m_init(&se, bus, OPTIGA_TRUST_M_I2C_ADDR) != ALP_OK) {
+	/* After >~10 s idle the Trust M can stop ACKing entirely and only a
+	 * hardware reset revives it (#2507).  SE_RST hangs off the GD32
+	 * supervisor, which the kernel's bridge driver owns, so the reset goes
+	 * through the driver's "se-rst" GPIO line (se_reset_gpio.h), not the
+	 * bridge protocol.  With no such line: plain probe, no reset. */
+	se_reset_gpio_t rst;
+	bool            have_rst = se_reset_gpio_open(&rst) == 0;
+	alp_status_t    s        = optiga_trust_m_init_with_reset(&se,
+	                                                          bus,
+	                                                          OPTIGA_TRUST_M_I2C_ADDR,
+	                                                          have_rst ? se_reset_gpio_hook : NULL,
+	                                                          have_rst ? &rst : NULL);
+	if (s != ALP_OK) {
+		if (have_rst) se_reset_gpio_close(&rst);
 		report("optiga trust m", OPTIGA_TRUST_M_I2C_ADDR, R_FAIL, "no ACK on I2C_STATE");
 		return;
 	}
 	report("optiga trust m", OPTIGA_TRUST_M_I2C_ADDR, R_PASS, "I2C_STATE readable");
 	optiga_trust_m_deinit(&se);
+	/* The driver keeps the hook until deinit, so close the line after it. */
+	if (have_rst) se_reset_gpio_close(&rst);
 }
 
 static void probe_gd32(alp_i2c_t *bus)

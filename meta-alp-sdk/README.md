@@ -41,6 +41,9 @@ meta-alp-sdk/
 │       └── include/
 │           └── e1m-v2m-deepx.inc        # Shared DEEPX block `require`d by the three V2M confs above.
 ├── dynamic-layers/
+│   ├── meta-alif-ensemble/
+│   │   └── recipes-kernel/linux/
+│   │       └── linux-alif_%.bbappend    # E1M-AEN console routing (parsed only when meta-alif-ensemble is in bblayers.conf).
 │   └── meta-deepx-m1/
 │       └── recipes-runtime/dx-driver/
 │           └── dx-driver_%.bbappend     # Tightens the 99-dx-dma.rules udev MODE (parsed only when meta-deepx-m1 is in bblayers.conf).
@@ -270,6 +273,12 @@ RUHMI_DRPAI_TVM_DIR = "/path/to/built/rzv_drp-ai_tvm"
 #    automatically on the V2M MACHINEs once step 6's layer is present;
 #    set ALP_ENABLE_DEEPX_DXM1 = "0" in local.conf to leave it out.
 
+# 8b. The ONNX Runtime CPU floor (`PACKAGECONFIG[ort]`, own onnxruntime
+#     recipe) is on by default on V2N101/V2N102/V2N103 and, when the DEEPX
+#     runtime is off, V2M101/V2M102/V2M103 (`ALP_ENABLE_ORT_CPU`, "0" opts
+#     out).  With DEEPX on, V2M defaults it off: dx-rt brings its own
+#     libonnxruntime and the two packages collide.  AUTO never picks it.
+
 # 9. Build the image:
 bitbake alp-image-edge                 # dev image (passwordless root, bench tooling)
 # or the hardened production image, against the Alp distro identity:
@@ -278,6 +287,23 @@ DISTRO=alp bitbake alp-image-prod      # key-only SSH, no debug tooling, "Alp SD
 
 See the edge-vs-prod posture table + `DISTRO=alp` notes in
 [`../docs/build-yocto-v2n.md`](../docs/build-yocto-v2n.md#edge-vs-production-image).
+
+#### Verifying the ROS 2 payload lands (#372)
+
+The one supported command for a ROS 2-carrying image is steps 4b + 7 + 8
+above: `MACHINE = "e1m-v2n101-a55"` (or `e1m-v2m101-a55`), then
+`bitbake alp-image-edge`, with `meta-ros2-humble` added to `bblayers.conf`.
+`alp-image-edge.bb` turns on `IMAGE_FEATURES += "alp-ros"`, which
+`alp-image-common.inc`'s `FEATURE_PACKAGES_alp-ros` maps to
+`packagegroup-alp-ros` -- whose `RDEPENDS:${PN}` names both `rclcpp` and
+`alp-perception` (`recipes-core/packagegroups/packagegroup-alp-ros.bb`).
+Without a Yocto CI build lane in alp-sdk CI, that dependency chain --
+not a finished image manifest -- is the grounded proof this command puts
+both packages on the rootfs; `tests/scripts/test_library_layer.py`
+(`test_ros2_edge_image_pulls_rclcpp_and_alp_perception`) pins the chain so
+it can't silently drift. That gap (no real Yocto CI build) is also why
+`ros2.yaml` stays Tier B: ADR 0018 Tier A requires "built in CI for at
+least one board", which a doc-only proof cannot satisfy.
 
 The resulting `alp-image-edge-<machine>.wic[.gz]` is the kernel +
 rootfs (the bootloader is production-flashed by Alp).  See
@@ -350,6 +376,13 @@ E8 story is real for the M55 HP/HE cores (see
 [`../docs/bring-up-aen.md`](../docs/bring-up-aen.md)) — it is only the
 A32 Linux cluster's Yocto path that is unbuilt.  alp-sdk does **not**
 redistribute or fork the Alif BSP.
+
+Once this path builds, TF-A's BL32 console needs a carrier-specific
+UART base + pinmux, not the Alif DevKit's UART2 default — see
+`recipes-bsp/trusted-firmware-a/trusted-firmware-a/alif-console-uart-build-knobs.patch`
+and the `:e1m-aen801`/`:e1m-aen701` knobs in
+`trusted-firmware-a_%.bbappend` (#1979). That patch is inert today for
+the same reason this whole section is broken.
 
 ```bash
 # BROKEN -- kept for documentation only, see the callout above.

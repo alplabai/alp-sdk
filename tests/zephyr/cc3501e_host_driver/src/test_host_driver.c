@@ -1588,6 +1588,14 @@ uint64_t alp_uptime_ms(void)
 {
 	return g_fake_now_ms;
 }
+
+/* #2052: the bridge's settles count from the last transfer's end via
+ * alp_uptime_us(); derived from this suite's millisecond clock so both
+ * readings stay on the same (virtual) timeline. */
+uint64_t alp_uptime_us(void)
+{
+	return alp_uptime_ms() * 1000u;
+}
 alp_gpio_t *alp_gpio_open(uint32_t pin_id)
 {
 	(void)pin_id;
@@ -1793,21 +1801,54 @@ ZTEST(cc3501e_host_driver, test_reply_gate_ping_max_payload_reply_cap_reaches_pr
 
 ZTEST(cc3501e_host_driver, test_reply_gate_interpolates_between_the_two_measured_points)
 {
-	/* 2314 B sits exactly halfway between the 536 B floor and the 4092 B
-	 * ceiling anchors -- expect the gate exactly halfway between 200 us and
-	 * 2000 us (1100 us).  This size was never bench-measured; the formula
-	 * interpolates it linearly (see cc3501e_expected_reply_bytes()'s and
-	 * cc3501e_reply_header_gate_us()'s comments in cc3501e_core.c). */
-	static uint8_t reply[2314];
+	/* 1292 B sits exactly halfway between the 536 B floor and the 2048 B
+	 * plateau anchors (#2052) -- expect the gate exactly halfway between
+	 * 200 us and 2000 us (1100 us).  This size was never bench-measured; the
+	 * formula interpolates it linearly (see cc3501e_expected_reply_bytes()'s
+	 * and cc3501e_reply_header_gate_us()'s comments in cc3501e_core.c). */
+	static uint8_t reply[1292];
 	size_t         got = 0u;
 	memset(reply, 0, sizeof(reply));
 	delay_log_reset();
 	alp_status_t s =
 	    cc3501e_request(&fw, ALP_CC3501E_CMD_PING, NULL, 0, reply, sizeof(reply), &got, 100u);
-	zassert_equal(s, ALP_OK, "PING with a 2314 B reply cap -> OK");
+	zassert_equal(s, ALP_OK, "PING with a 1292 B reply cap -> OK");
 	zassert_equal(g_delay_us_log[1],
 	              1100u,
 	              "the exact byte-count midpoint interpolates to the gate midpoint");
+}
+
+ZTEST(cc3501e_host_driver, test_reply_gate_fast_reply_firmware_uses_short_table)
+{
+	/* #2052: firmware reporting ALP_CC3501E_CAP_FAST_REPLY gets 200 us at
+	 * 536 B rising to 450 us at the 4092 B ceiling (plateau from there). */
+	static uint8_t reply[4096];
+	size_t         got = 0u;
+
+	fw.fw_fast_reply = 1u;
+	delay_log_reset();
+	zassert_equal(
+	    cc3501e_request(&fw, ALP_CC3501E_CMD_PING, NULL, 0, reply, sizeof(reply), &got, 100u),
+	    ALP_OK);
+	zassert_equal(g_delay_us_log[1], 450u, "4096 B cap is past the 4092 B fast ceiling");
+	delay_log_reset();
+	zassert_equal(cc3501e_request(&fw, ALP_CC3501E_CMD_PING, NULL, 0, reply, 2314u, &got, 100u),
+	              ALP_OK);
+	zassert_equal(g_delay_us_log[1], 325u, "2314 B is halfway between 536 B and 4092 B");
+	fw.fw_fast_reply = 0u;
+}
+
+ZTEST(cc3501e_host_driver, test_reply_gate_2048_reaches_the_plateau)
+{
+	/* #2052: 2048 B frames failed at the interpolated ~970 us once the host
+	 * got faster; from 2048 B up the gate is the full 2000 us. */
+	static uint8_t reply[2048];
+	size_t         got = 0u;
+	delay_log_reset();
+	alp_status_t s =
+	    cc3501e_request(&fw, ALP_CC3501E_CMD_PING, NULL, 0, reply, sizeof(reply), &got, 100u);
+	zassert_equal(s, ALP_OK, "PING with a 2048 B reply cap -> OK");
+	zassert_equal(g_delay_us_log[1], 2000u, "2048 B is on the 2000 us plateau");
 }
 
 /* ---- the real key: SOCK_RECV's `want`, not its fixed rx_cap ---------------- *
@@ -2088,6 +2129,50 @@ ZTEST(cc3501e_host_driver, test_reset_tolerates_transport_failure_during_probe_1
 	uint16_t v = 0u;
 	zassert_equal(cc3501e_get_version(&fw, &v), ALP_OK, "a following GET_VERSION works");
 	zassert_equal(v, (uint16_t)ALP_CC3501E_PROTOCOL_VERSION, "and reads the real value");
+}
+
+/* #1937: a missed reset-time GET_VERSION is retried (bounded), and on a FRESH
+ * context a reset that never negotiated a MAJOR must fail, not return ALP_OK
+ * with fw_proto_major == 0 / initialised == true (silicon: every later PING
+ * failed -5 while a bare GET_VERSION kept answering). */
+ZTEST(cc3501e_host_driver, test_reset_retries_dropped_get_version_1937)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+
+	g_get_version_io_down_remaining = 2u; /* first two replies dropped, third lands */
+
+	zassert_equal(cc3501e_reset(&fw), ALP_OK, "retries ride out dropped GET_VERSIONs");
+	zassert_true(fw.initialised, "negotiated -> usable");
+	zassert_equal(
+	    fw.fw_proto_major, (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR, "MAJOR negotiated, not left at 0");
+	zassert_equal(g_get_version_io_down_remaining, 0u, "both drops were consumed by retries");
+}
+
+ZTEST(cc3501e_host_driver, test_reset_fresh_ctx_all_get_version_dropped_fails_1937)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+
+	g_get_version_io_down_remaining = 1000u; /* never answers */
+
+	zassert_equal(cc3501e_reset(&fw),
+	              ALP_ERR_TIMEOUT,
+	              "no MAJOR negotiated on a fresh ctx -> reset must not claim success");
+	zassert_false(fw.initialised, "left down");
+	zassert_equal(cc3501e_ping(&fw), ALP_ERR_NOT_READY, "later calls: NOT_READY, not -5");
+}
+
+ZTEST(cc3501e_host_driver, test_reset_keeps_prior_major_when_get_version_dropped_1937)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+
+	zassert_equal(cc3501e_reset(&fw), ALP_OK, "first reset negotiates");
+	g_get_version_io_down_remaining = 1000u;
+	zassert_equal(cc3501e_reset(&fw), ALP_OK, "same ctx keeps its negotiated MAJOR");
+	zassert_true(fw.initialised, NULL);
+	zassert_equal(fw.fw_proto_major, (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR, NULL);
 }
 
 /* ---- ADR 0033: MAJOR.MINOR wire versioning --------------------------------

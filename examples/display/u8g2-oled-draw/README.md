@@ -59,7 +59,9 @@ needs a second font or a real panel driver, extend
 ## Build
 
 ```bash
-west build -b native_sim/native/64 examples/display/u8g2-oled-draw
+# writes examples/display/u8g2-oled-draw/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/display/u8g2-oled-draw
+west build -b native_sim/native/64 examples/display/u8g2-oled-draw -- -DEXTRA_CONF_FILE=generated/alp.conf
 west build -t run
 ```
 

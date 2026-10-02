@@ -1,48 +1,25 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """
-Core-to-CMakeLists mapping gate: fails (exit 1) when an example's baked
-`--emit zephyr-conf --core <id>` literal disagrees with the board.yaml core
-whose `app:` resolves to it, or when two distinct Zephyr cores resolve to the
-same CMakeLists.txt.
+Core-to-CMakeLists mapping gate: fails (exit 1) when an enabled Zephyr core's
+`app:` resolves to no CMakeLists.txt, or when two distinct Zephyr cores
+resolve to the same CMakeLists.txt.
 
-On a dual-Zephyr-core SKU (e.g. E1M-AEN801, M55-HE + M55-HP), adding a
-second `cores.<id>.app:` that resolves to an ALREADY-WIRED sibling core's
-app directory leaves that sibling's baked-in
-`alp_project.py --emit zephyr-conf --core <id>` literal in place: the new
-core's `west build` configures with the OTHER core's Kconfig fragment while
-the orchestrator separately materialises the correct per-core `alp.conf` --
-two Kconfig fragments for two different cores in one build, silently, with
-no warning.
+The second is the load-bearing one. Each Zephyr core's per-core Kconfig
+fragment is written to `<app dir>/generated/alp.conf` (scripts/
+gen_example_alp_conf.py; the build plan materialises its own copy), so two
+cores sharing one app dir would share ONE fragment slot -- the second core
+silently configures with the first core's Kconfig. On a dual-Zephyr-core SKU
+(e.g. E1M-AEN801, M55-HE + M55-HP), adding a second `cores.<id>.app:` that
+resolves to an ALREADY-WIRED sibling core's app directory is exactly that trap.
 
-Two invariants, BOTH required:
-
-  1. Literal agreement -- resolving `app:` for every enabled Zephyr core
-     (via `alp_orchestrate.orchestrator._zephyr_app_dir`, the exact function
-     that decides `west build`'s app-dir argument -- see that module's
-     docstring for the two supported conventions) must land on a
-     CMakeLists.txt whose baked `--emit zephyr-conf --core <id>` literal is
-     THAT SAME core's id.
-  2. No sharing -- two DISTINCT cores must never resolve `app:` to the same
-     CMakeLists.txt.
-
-Both assertions are load-bearing, but be precise about when each one is the
-ONLY thing standing between you and the defect -- mutation-tested, not assumed:
-
-  * In the common shape of the trap (a second core added onto a sibling's
-    `./src`, that sibling's CMakeLists baking `--core <sibling>`), assertion 1
-    ALSO fires -- it catches the newly-added core, whose resolved literal is
-    the sibling's, not its own. Assertion 2 is not independently required here.
-  * Assertion 2 is independently required when the shared CMakeLists.txt bakes
-    NO `--core` literal at all: assertion 1 then has nothing to compare and
-    structurally cannot fire, while assertion 2 still reports the sharing.
-    No such file exists in the corpus today (all checked CMakeLists carry a
-    literal), so this is the case assertion 2 exists to keep catching as the
-    corpus changes.
+(An earlier invariant -- the `--core <id>` literal an example CMakeLists.txt
+baked in for `alp_project.py --emit zephyr-conf` must match the core whose
+`app:` resolves there -- retired with that configure-time bridge, #866.)
 
 The SDK-owned stock M-core shim (`alp-stock-shim`, firmware/alp-stock-shim/)
-is EXCLUDED from both checks: every core a board.yaml leaves at its SoM
-topology default resolves there BY DESIGN (metadata/e1m_modules/*.yaml
+is EXCLUDED: every core a board.yaml leaves at its SoM topology default
+resolves there BY DESIGN (metadata/e1m_modules/*.yaml
 `topology.<id>.app: alp-stock-shim`) -- that is intentional many-to-one
 sharing across the whole example corpus, not the drift this gate polices.
 
@@ -69,15 +46,6 @@ from alp_orchestrate.orchestrator import (  # noqa: E402
 from alp_orchestrate.sdk_compat import (  # noqa: E402
     assert_exclusion_still_not_buildable,
 )
-
-# Same shape as check_zephyr_conf_parity.py's `_CORE_RE`: the baked-in
-# `--core <id>` a Zephyr example's CMakeLists.txt passes to
-# `alp_project.py --emit zephyr-conf`. Defined independently here (not
-# imported) -- this gate's invariant (does the literal match the core
-# whose app: resolves to this file) is distinct from that gate's
-# (does the materialised alp.conf byte-match), so the two scripts stay
-# free to diverge on match tolerance without coupling to each other.
-_CORE_RE = re.compile(r"--emit\s+zephyr-conf\s+--core\s+(\S+)")
 
 # board.yaml paths (repo-relative) that cannot load AT ALL right now, with
 # the reason -- mirrors check_zephyr_conf_parity.py's
@@ -160,22 +128,6 @@ def find_problems(root: Path) -> list[str]:
             resolved_by_file.setdefault(cmakelists.resolve(), []).append(
                 (slice_.core_id, board_yaml, core_line))
 
-            text = cmakelists.read_text(encoding="utf-8")
-            m = _CORE_RE.search(text)
-            if m is None:
-                continue  # nothing baked to compare (assertion 2 still runs)
-            literal = m.group(1)
-            if literal != slice_.core_id:
-                rel_cmake = cmakelists.relative_to(root).as_posix()
-                line = _line_of(text, m.start())
-                problems.append(
-                    f"{rel_cmake}:{line}: baked `--core {literal}` but "
-                    f"board.yaml core '{slice_.core_id}' "
-                    f"({rel_board}"
-                    f"{f':{core_line}' if core_line else ''}) resolves "
-                    f"app: '{slice_.app}' here -- literal agreement "
-                    f"violated")
-
     for cmakelists, entries in sorted(resolved_by_file.items()):
         distinct_cores = sorted({core_id for core_id, _, _ in entries})
         if len(distinct_cores) > 1:
@@ -188,9 +140,9 @@ def find_problems(root: Path) -> list[str]:
                 f"{rel_cmake}: shared by {len(distinct_cores)} distinct "
                 f"Zephyr cores -- {sources} -- each core needs its own "
                 f"CMakeLists.txt (or its own per-core app dir); one shared "
-                f"file can only carry ONE core's baked `--core` literal, so "
-                f"every core but that one silently configures with the "
-                f"wrong Kconfig fragment")
+                f"app dir holds ONE generated/alp.conf, so every core but "
+                f"that one silently configures with the wrong Kconfig "
+                f"fragment")
 
     return problems
 
@@ -209,8 +161,7 @@ def main() -> int:
             print(f"  · {p}", file=sys.stderr)
         return 1
     print("check_core_cmakelists_mapping: OK -- every enabled Zephyr "
-          "core's app: resolves to a CMakeLists.txt baked with that core's "
-          "own --core literal, and no two cores share one.")
+          "core's app: resolves to a CMakeLists.txt, and no two cores share one.")
     return 0
 
 

@@ -16,6 +16,7 @@ tests:
   # of the gate is that the portable <alp/*> source builds clean off-target.
   # The real DAC->ADC loopback is a bench RAM-run on alp_e1m_aen801_m55_he.
   alp_sdk.examples.aen.analog_validate.native_sim:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     platform_allow:
       - native_sim/native/64
     tags:

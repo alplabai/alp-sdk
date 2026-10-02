@@ -35,6 +35,7 @@ from typing import TypeVar
 from provision import gates, ledger_out, uboot
 from provision import linux_target as lt
 from provision.bench import Bench, BenchError, ExpectTimeout
+from provision.console_target import ConsoleSwdProbe, ConsoleTarget
 
 T = TypeVar("T")
 SCRIPTS = Path(__file__).resolve().parents[1]
@@ -108,6 +109,7 @@ class Ctx:
     tier_markers: dict | None = None
     expected_registers: dict | None = None
     allow_tier_mismatch: str | None = None
+    accept_cid_change: str | None = None  # operator escape: the eMMC was legitimately replaced
     reprovision_from: Path | None = None
     cold_cycles: int = 3
     hil_spec: Path | None = None
@@ -125,6 +127,18 @@ class Ctx:
     ledger_xlsx: Path | None = None
     boot_text: str = ""                   # last console capture after a power cycle
     boot_class: str = ""
+    # Power.on_count when detect left the unit live at the SCIF ROM prompt
+    # (banner consumed); valid only while no later ON has happened.
+    rom_live_on_count: int | None = None
+    # (Power.on_count, console transcript mark) of the boot dsw1_emmc_insert_sd
+    # started and left running; boot_sd_linux continues it instead of re-cycling.
+    live_boot: tuple[int, int] | None = None
+    # Set once eeprom_manifest changed the MAC: the bench.yaml pinned host (CID-MAC
+    # era) is stale from then on, so every later attach rediscovers over the console.
+    rediscover_host: bool = False
+    # Power.on_count of a boot_sd_linux that reached a console login with no IP
+    # (blank GD32): its probe accepts that state; gd32_flash then works over the console.
+    console_linux_on_count: int | None = None
     step_logs: dict[str, str] = field(default_factory=dict)
     _cache: dict = field(default_factory=dict)
 
@@ -170,18 +184,75 @@ class Ctx:
             raise Refused("no --bench")
         return self.bench
 
+    def attach_linux(self, host: str) -> None:
+        """Attach the Linux target at ``host`` and hand the host to the bench's probe
+        wrapper (it reads ALP_PROVISION_HOST; the bench.yaml says to set it)."""
+        b = self.need_bench()
+        self.linux = lt.LinuxTarget(host, b.linux_user)
+        if getattr(b.probe, "env", None) is not None:
+            b.probe.env["ALP_PROVISION_HOST"] = host
+
+    @property
+    def pinned_host(self) -> str | None:
+        """bench.yaml linux.host, unless the MAC changed since (then None: discover)."""
+        return None if self.rediscover_host or self.bench is None else self.bench.linux_host
+
     def need_linux(self):
-        """The Linux target, or None in a dry run without one (plan only)."""
+        """The Linux target, or None in a dry run without one (plan only).
+        Like linux_up(), attach the bench's configured host when an --only /
+        --from / --force-step run starts past the step that normally
+        attaches it, instead of refusing a board that is already up."""
+        if self.linux is None and self.pinned_host:
+            self.attach_linux(self.pinned_host)
         if self.linux is None and self.execute:
             raise Refused("no Linux target: boot_sd_linux has not run")
+        if self.linux is not None and self.execute:
+            self._check_unit_identity(self.linux)
         return self.linux
+
+    def recorded_cid(self) -> str:
+        """The eMMC CID this serial is known by ("" before first contact). The CID is
+        hardware, so it outlives a bundle / tool_rev change: finished steps, then steps
+        moved to ``superseded``, then the committed unit.yaml. An explicit
+        ``--accept-cid-change`` anchor (``cid_anchor``) outranks all of them."""
+        if self.state.get("cid_anchor"):
+            return self.state["cid_anchor"]
+        groups = [self.state.get("steps", {})] + [g.get("steps", {}) for g in self.state.get("superseded", [])]
+        for steps_ in groups:
+            for st in steps_.values():
+                if st.get("status") in ("done", "skipped") and (st.get("evidence") or {}).get("emmc_cid_raw"):
+                    return st["evidence"]["emmc_cid_raw"]
+        return ledger_out.read_unit_yaml(self.unit_dir / f"{self.serial}.unit.yaml").get("emmc_cid_raw", "")
+
+    def _check_unit_identity(self, t) -> None:
+        """Refuse to mutate a Linux target whose eMMC is not this serial's (stale IP).
+        Read fresh on every call, never cached: a power cycle or DHCP renewal can put
+        another unit behind the same address. First contact with nothing recorded is
+        unchecked (bootstrap's EM_DCID records the CID on the normal blank-unit path)."""
+        want = self.recorded_cid()
+        if not want and not self.accept_cid_change:
+            return
+        seen = lt.read_emmc_cid(t)
+        if want and lt.cid_identity(seen) == lt.cid_identity(want):
+            return
+        if self.accept_cid_change:
+            if want:                          # first contact adopts silently; a changed CID is an override
+                _record_override(self, "emmc_cid_change", self.accept_cid_change)
+            self.state["cid_anchor"] = seen.strip().lower()
+            save_state(self.state_path, self.state)
+            self.accept_cid_change = None   # one adoption per run: a later swap is refused
+            return
+        raise Refused(f"{t.host} answers with eMMC CID {seen.strip().lower()}, but unit {self.serial} "
+                      f"recorded {want.strip().lower()}: another unit is behind this address "
+                      "(stale DHCP lease?). Fix the address in bench.yaml and re-run, or "
+                      "--accept-cid-change REASON if the eMMC was replaced.")
 
     def linux_up(self) -> bool:
         # --only/--from can start past detect, which is what normally attaches
         # ctx.linux; attach a configured host here so a probe does not report
         # Unknown and trigger a needless cold cycle on a board already up.
-        if self.linux is None and self.bench is not None and self.bench.linux_host:
-            self.linux = lt.LinuxTarget(self.bench.linux_host, self.bench.linux_user)
+        if self.linux is None and self.pinned_host:
+            self.attach_linux(self.pinned_host)
         if self.linux is None:
             return False
         try:
@@ -246,34 +317,97 @@ def _record_override(ctx: Ctx, gate: str, reason: str) -> None:
 # console / Linux helpers
 # --------------------------------------------------------------------------
 
+def _elide_long_lines(text: str, limit: int = 200) -> str:
+    """Collapse runs of very long lines (the gd32_flash base64 push echo) to
+    head + tail + a byte count, so a step log stays readable."""
+    out, run = [], []
+
+    def flush():
+        if len(run) > 2:
+            out.append(run[0][:60] + "...")
+            out.append(f"[{len(run) - 2} long lines, {sum(len(x) for x in run[1:-1])} bytes elided]")
+            out.append("..." + run[-1][-20:])
+        else:
+            out.extend(x[:60] + f"...[{len(x)} bytes]" for x in run)
+        run.clear()
+    for line in text.split("\n"):
+        if len(line) > limit:
+            run.append(line)
+        else:
+            flush()
+            out.append(line)
+    flush()
+    return "\n".join(out)
+
+
 def _since(console, n: int) -> str:
     return "".join(console.transcript[n:])
 
 
-def boot_to_linux(ctx: Ctx, timeout: float = 240.0) -> str:
+def boot_to_linux(ctx: Ctx, timeout: float = 240.0, need_ip: bool = True,
+                  resume_mark: int | None = None, rediscover: bool = False) -> str:
     """Cold cycle, let the unit autoboot to a login, log in, (re)discover the
-    Linux target. Returns the whole boot text. Execute-mode only."""
+    Linux target. Returns the whole boot text. Execute-mode only.
+
+    ``need_ip=False`` tolerates a unit with no network (blank GD32 or a latched
+    PHY, #2582): ctx.linux is then None and the console shell is the only way in.
+
+    ``resume_mark`` (a console transcript index) continues a boot that is already
+    running instead of cycling: the text is taken from that mark."""
     b = ctx.need_bench()
-    n = len(b.console.transcript)
-    b.console.drain()
-    b.power.cycle(float(b.raw.get("power", {}).get("off_s", 3.0)))
+    if resume_mark is None:
+        n = len(b.console.transcript)
+        b.console.drain()
+        b.power.cycle(b.off_s, b.console)
+    else:
+        n = resume_mark
     b.console.expect(LOGIN_RE, timeout)
     text = _since(b.console, n)
     ctx.boot_text = text
     lt.console_login(b.console, b.linux_user)
-    connect_linux(ctx, force=True)
+    try:
+        connect_linux(ctx, force=True, rediscover=rediscover)
+        if not need_ip:
+            ctx.linux.run("true")
+    except BenchError:
+        if need_ip:
+            raise
+        ctx.linux = None
     return text
 
 
-def connect_linux(ctx: Ctx, force: bool = False) -> None:
-    """Attach ctx.linux: bench.yaml linux.host, else discover over the console."""
+def cold_boot_phy_retry(ctx: Ctx, ev: dict) -> str:
+    """One cold boot. A PHY that latched dead (end0 without carrier, #2582) gets
+    exactly one extra cold cycle; end0 must then have carrier, because an IP on
+    end1 or a static host proves nothing about end0. The retry count goes in the
+    step evidence as ``end0_no_carrier_retries`` (not a ledger catalogue key)."""
+    text = boot_to_linux(ctx, need_ip=False)
+    sh = ctx.linux or ConsoleTarget(ctx.bench.console)
+    if "end0" in lt.net_ifaces(sh) and not lt.net_carrier(sh, "end0"):
+        ev["end0_no_carrier_retries"] = str(int(ev.get("end0_no_carrier_retries", "0")) + 1)
+        text += boot_to_linux(ctx, need_ip=False)
+        sh = ctx.linux or ConsoleTarget(ctx.bench.console)
+        if not lt.net_carrier(sh, "end0"):
+            raise BenchError("end0 still has no carrier after the extra cold cycle (PHY latch, #2582)")
+    if ctx.linux is None:
+        raise BenchError("no IP after the cold boot although end0 has carrier")
+    return text
+
+
+def connect_linux(ctx: Ctx, force: bool = False, rediscover: bool = False) -> None:
+    """Attach ctx.linux: bench.yaml linux.host, else discover over the console.
+    ``rediscover`` ignores a pinned host: DHCP may have handed a new address after
+    the MAC changed (eeprom_manifest)."""
     if ctx.linux is not None and not force:
         return
     b = ctx.need_bench()
-    host = b.linux_host or lt.discover_host(b.console)
-    if ctx.linux is not None and getattr(ctx.linux, "host", None) == host:
-        return
-    ctx.linux = lt.LinuxTarget(host, b.linux_user)
+    host = lt.discover_host(b.console) if rediscover or ctx.rediscover_host else (
+        b.linux_host or lt.discover_host(b.console))
+    if ctx.linux is None or getattr(ctx.linux, "host", None) != host:
+        ctx.attach_linux(host)
+    if ctx.execute:
+        # A new address after a power cycle may belong to another unit: never test it blind.
+        ctx._check_unit_identity(ctx.linux)
 
 
 def _manifest_sku(arr: bytes) -> str:
@@ -408,7 +542,7 @@ class Detect(Step):
             return self.result(ctx, "no --bench: offline plan", status="skipped")
         c = ctx.bench.console
         from provision import scif_writer
-        classes = {"scif-rom": scif_writer.ROM_BANNER, "linux-login": LOGIN_RE, "uboot": uboot.PROMPT}
+        classes = {"scif-rom": scif_writer.ROM_BANNER, "scif-fallback": scif_writer.ROM_FALLBACK, "linux-login": LOGIN_RE, "uboot": uboot.PROMPT}
         n = len(c.transcript)
         if ctx.execute:
             if ctx.linux is not None:
@@ -419,7 +553,7 @@ class Detect(Step):
                 except BenchError:
                     pass
             ctx.mutate("power cycle and classify the console",
-                       lambda: ctx.bench.power.cycle(float(ctx.bench.raw.get("power", {}).get("off_s", 3.0))))
+                       lambda: ctx.bench.power.cycle(ctx.bench.off_s, c))
             try:
                 key, _ = c.expect_any(classes, 240.0)
             except ExpectTimeout:
@@ -431,6 +565,9 @@ class Detect(Step):
         if key is None:
             key = "bl2" if uboot.BL2_VERSION_RE.search(text) else "silent"
         ctx.boot_class, ctx.boot_text = key, text
+        if key == "scif-fallback":
+            raise Refused(scif_writer.ROM_FALLBACK_MSG)
+        ctx.rom_live_on_count = ctx.bench.power.on_count if key == "scif-rom" and ctx.execute else None
         ev = {**uboot.parse_bl2(text), **uboot.parse_bl31(text)}
         ev.pop("bl2_boot_source", None)
         if v := uboot.parse_uboot_version(text):
@@ -438,8 +575,8 @@ class Detect(Step):
         if key == "linux-login" and ctx.execute:
             lt.console_login(c, ctx.bench.linux_user)
             connect_linux(ctx, force=True)
-        elif ctx.linux is None and ctx.bench.linux_host:
-            ctx.linux = lt.LinuxTarget(ctx.bench.linux_host, ctx.bench.linux_user)
+        elif ctx.linux is None and ctx.pinned_host:
+            ctx.attach_linux(ctx.pinned_host)
         up = ctx.linux_up()
         note = ""
         if key == "silent" and ctx.state_done("bootstrap"):
@@ -501,10 +638,18 @@ class Bootstrap(_PreLinux):
         c = b.console
 
         def load():
+            live = ctx.rom_live_on_count is not None and ctx.rom_live_on_count == b.power.on_count
+            ctx.rom_live_on_count = None  # one-shot: a retry must not trust a stale ROM state
+            if live:
+                # detect just left the unit at the ROM prompt: another cycle would
+                # be a second power toggle for nothing (and a PHY power-rule risk)
+                ctx.plan_log.append("reuse live SCIF ROM state from detect (no power cycle)")
+                sw.load_writer(c, Path(mot), banner_seen=True)
+                return
             c.drain()
-            b.power.cycle(float(b.raw.get("power", {}).get("off_s", 3.0)))
+            b.power.cycle(b.off_s, b.console)
             sw.load_writer(c, Path(mot))
-        ctx.mutate(f"power cycle; load Flash Writer {Path(mot).name} over SCIF", load)
+        ctx.mutate(f"power cycle (unless detect left the ROM live); load Flash Writer {Path(mot).name} over SCIF", load)
         ctx.mutate(f"EM_W area {sw.BOOT1_AREA} sector {sw.BL2_MMC_SECTOR:#x}: bl2_mmc ({len(bl2)} bytes)",
                    lambda: sw.em_w(c, sw.BOOT1_AREA, sw.BL2_MMC_SECTOR, ps["bl2_mmc"], bl2))
         ctx.mutate(f"EM_W area {sw.BOOT1_AREA} sector {sw.FIP_SECTOR:#x}: fip ({len(fip)} bytes)",
@@ -531,9 +676,10 @@ class OpDsw1EmmcInsertSd(_PreLinux):
         def check():
             n = len(b.console.transcript)
             b.console.drain()
-            b.power.cycle(float(b.raw.get("power", {}).get("off_s", 3.0)))
+            b.power.cycle(b.off_s, b.console)
             b.console.expect(uboot.AUTOBOOT, 60.0)
             ctx.boot_text = _since(b.console, n)
+            ctx.live_boot = (b.power.on_count, n)
         ctx.mutate("cold cycle; expect U-Boot autoboot from eMMC", check)
         return self.result(ctx, "U-Boot boots from eMMC boot1")
 
@@ -543,6 +689,9 @@ class BootSdLinux(Step):
 
     def probe(self, ctx):
         if not ctx.linux_up():
+            if ctx.bench is not None and ctx.console_linux_on_count == ctx.bench.power.on_count:
+                return Satisfied({}, "console login on the live boot, root on the microSD, no IP yet "
+                                     "(gd32_flash runs next over the console)")
             return Unknown("no Linux target reachable")
         try:
             root = lt.root_device(ctx.linux)
@@ -563,7 +712,7 @@ class BootSdLinux(Step):
             wic = ctx.artefact("system_image")
 
             def xm():
-                text = uboot.cold_to_prompt(b.console, b.power)
+                text = uboot.cold_to_prompt(b.console, b.power, b.off_s)
                 ctx.boot_text = text
                 uboot.loadx_gzwrite(b.console, wic, 0, int(addr), chunk)
                 n = len(b.console.transcript)
@@ -574,8 +723,16 @@ class BootSdLinux(Step):
                 return text + _since(b.console, n)
             text = ctx.mutate(f"U-Boot loadx + gzwrite {wic.name} into eMMC (slow fallback), boot", xm)
         else:
-            text = ctx.mutate("cold cycle; U-Boot bootcmd_check boots the release wic from microSD; "
-                              "console login; discover the IPv4 host", lambda: boot_to_linux(ctx))
+            def boot():
+                live, ctx.live_boot = ctx.live_boot, None   # one-shot
+                if live is not None and live[0] == b.power.on_count:
+                    # dsw1_emmc_insert_sd just booted the unit: continue that boot
+                    ctx.plan_log.append("continue the live boot from dsw1_emmc_insert_sd (no power cycle)")
+                    return boot_to_linux(ctx, need_ip=False, resume_mark=live[1])
+                return boot_to_linux(ctx, need_ip=False)
+            text = ctx.mutate("cold cycle (unless dsw1_emmc_insert_sd left the unit booting); U-Boot "
+                              "bootcmd_check boots the release wic from microSD; "
+                              "console login; discover the IPv4 host", boot)
         if text is None:
             return self.result(ctx, f"would boot Linux ({ctx.transfer} path)")
         mib = uboot.parse_dram_banner(text)
@@ -592,32 +749,41 @@ class BootSdLinux(Step):
         if not tier.ok:
             raise Refused(f"DRAM banner leg: {tier.detail}")
         t = ctx.linux
-        t.run("true")
+        if t is None:
+            # No IP yet: a blank GD32 leaves both gbeth ports without an RX clock.
+            # Everything below is read over the console; gd32_flash runs next.
+            t = ConsoleTarget(b.console)
+            ctx.console_linux_on_count = b.power.on_count
+            ev["network"] = "none yet (blank GD32 suspected); gd32_flash runs next over the console"
+        else:
+            t.run("true")
         if ctx.transfer == "sd":
             root, emmc = lt.root_device(t), lt.resolve_emmc(t)
             if root.startswith(emmc):
                 raise Refused(f"Linux root {root} is on the eMMC, not the microSD "
                               "(SDHI1 not up? SD mux? check U-Boot patch 0008)")
-        probs = som_presence_problems(ctx)
+        probs = som_presence_problems(ctx, t)
         if probs:
             raise Refused("the SoM on the bench does not match the preset "
                           f"({ctx.sku}): " + "; ".join(probs))
-        return self.result(ctx, f"Linux up on {getattr(t, 'host', '?')}", ev)
+        return self.result(ctx, f"Linux up on {getattr(t, 'host', '?')}" if ctx.linux is not None
+                           else "Linux up on the console, no network yet", ev)
 
 
-def som_presence_problems(ctx) -> list[str]:
+def som_presence_problems(ctx, t=None) -> list[str]:
     """The live board check: every non-optional on-module I2C device the
     SoM preset declares must ACK, checked once Linux runs and BEFORE the
     first destructive write. Declared data (bundle, preset, bench.yaml) can
     all agree while the module on the bench is a different SKU; the devices
     answering on the bus cannot. Same set ColdBootTest requires at the end,
     minus the GD32 bridge, which may legitimately be held in reset here."""
-    if ctx.bench is None or ctx.linux is None:
+    t = t or ctx.linux
+    if ctx.bench is None or t is None:
         return []
     expected = {bus: a - {GD32_BRIDGE_ADDR}
                 for bus, a in lt.expected_i2c(ctx.preset, ctx.bench.i2c_bus).items()
                 if bus is not None}
-    return lt.i2c_check(ctx.linux, expected)
+    return lt.i2c_check(t, expected)
 
 
 class WriteXspi(Step):
@@ -750,10 +916,19 @@ class Census(Step):
         facts, notes = lt.census(t, bus, sizes)
         if bus["pmic"] is not None:
             try:
-                if lt.act88760_gpio4_defect(t, bus["pmic"]):
-                    facts["act88760_gpio4_defect"] = "yes"   # "no" is never inferred from a live read
+                # gd32_flash runs BEFORE census. When it applied the volatile
+                # release it already recorded the OTP value it saw (0x88) and
+                # the workaround; reading reg 0x10 now would see the released
+                # 0x08 and overwrite both, so census leaves them alone then.
+                # Otherwise no release happened and 0x08 is conclusive; "u-boot"
+                # is decided later, from cold_boot_test's post-cold-cycle read.
+                if not str(ctx.facts.get("act88760_gpio4_workaround", "")).startswith("provision"):
+                    raw = lt.i2c_get(t, bus["pmic"], lt.ACT88760_ADDR, lt.ACT88760_GPIO_REG)
+                    facts["act88760_gpio4_otp"] = f"{raw:#04x}"
+                    if raw == lt.ACT88760_GPIO4_RELEASED:
+                        facts["act88760_gpio4_workaround"] = "none"
             except BenchError as e:
-                notes.append(f"act88760_gpio4_defect: {e}")
+                notes.append(f"act88760_gpio4_otp: {e}")
         ctx.step_logs[self.name] = "\n".join(notes)
         return self.result(ctx, f"{len(facts)} keys" + (f"; unread: {'; '.join(notes)}" if notes else ""),
                            facts, status="done")
@@ -817,7 +992,9 @@ class EepromManifest(Step):
                    lambda: lt.eeprom_write_pages(t, bus, 0, blob))
 
         def recheck():
-            boot_to_linux(ctx)
+            # the MAC just changed (CID- to serial-derived): DHCP may hand a new IP
+            ctx.rediscover_host = True
+            boot_to_linux(ctx, rediscover=True)
             got = lt.eeprom_read(ctx.linux, bus, 0, lt.MANIFEST_LEN)
             if got != blob:
                 raise BenchError("manifest differs after the cold cycle")
@@ -842,18 +1019,28 @@ class Gd32Flash(Step):
             raise Refused("no --gd32-fw DIR (bootloader.bin, ota-meta.bin, slot-a.bin)")
         return [(Path(ctx.gd32_fw) / f, a, k) for f, a, k in GD32_IMAGES]
 
-    def _readback(self, ctx, images) -> dict[str, str]:
+    def _readback(self, ctx, images, probe=None) -> dict[str, str]:
+        probe = probe or ctx.bench.probe
         ev = {}
         with tempfile.TemporaryDirectory(prefix="gd32_") as td:
             for i, (p, addr, key) in enumerate(images):
                 out = Path(td) / f"rb{i}.bin"
-                ctx.bench.probe.savebin(out, addr, p.stat().st_size)   # fresh session each
+                probe.savebin(out, addr, p.stat().st_size)   # fresh session each
                 ev[key] = _md5(out.read_bytes())
         return ev
 
     def probe(self, ctx):
         if ctx.bench is None or ctx.bench.probe is None or ctx.gd32_fw is None:
             return Unknown("no probe or no --gd32-fw")
+        if (ctx.execute and ctx.linux is None and not ctx.bench.linux_host
+                and getattr(ctx.bench.probe, "env", None) is not None):
+            # --only gd32_flash starts past the step that attaches the Linux target;
+            # the probe wrapper needs ALP_PROVISION_HOST, so discover it over the console.
+            try:
+                lt.console_login(ctx.bench.console, ctx.bench.linux_user, timeout=20.0)
+                connect_linux(ctx)
+            except BenchError:
+                pass   # no shell / no IP: the probe runs without a host, as before
         try:
             dp = ctx.bench.probe.dp_id()
             if dp != GD32_DP_OK:
@@ -865,38 +1052,88 @@ class Gd32Flash(Step):
         for p, _a, key in images:
             if ev[key] != _md5(p.read_bytes()):
                 return Unsatisfied(f"{p.name} not on the GD32")
-        return Satisfied(ev)
+        return Satisfied({**ev, "gd32_dp_id": f"0x{dp:08x}", **self._fw_version(ctx)})
+
+    @staticmethod
+    def _fw_version(ctx) -> dict[str, str]:
+        """`<gd32-fw>/VERSION` names the release the images came from; the md5
+        readback above is what ties that name to the bytes on the chip."""
+        v = Path(ctx.gd32_fw) / "VERSION"
+        return {"gd32_fw_version": v.read_text(encoding="utf-8").strip()} if v.is_file() else {}
+
+    @staticmethod
+    def _transport(ctx):
+        """(target, probe, via_console). SSH and the bench's own probe wrapper
+        are preferred. With no network (a blank GD32 kills both gbeth ports) and
+        a root shell on the console, the SWD tools are pushed over the console."""
+        b = ctx.need_bench()
+        if not ctx.execute:
+            # plan only: no probe or console traffic, but name the transport execute would take
+            return None, None, not ctx.linux_up()
+        if ctx.linux_up():
+            return ctx.need_linux(), b.probe, False
+        if b.console_swd is None:
+            raise Refused("no network and bench.yaml has no script probe to push over the console")
+        tools_dir, tools = b.console_swd
+        missing = [f for f in tools if not (tools_dir / f).is_file()]
+        if missing:
+            raise Refused(f"no network and the console-push SWD tools are missing in {tools_dir}: {missing}")
+        lt.console_login(b.console, b.linux_user)
+        t = ConsoleTarget(b.console)
+        ctx._check_unit_identity(t)          # the same eMMC-CID gate the SSH path gets in need_linux
+        return t, ConsoleSwdProbe(t, tools_dir, tools), True
+
+    def _plan(self, ctx, ev, via_console):
+        """Dry run: WOULD lines only. The probe wrapper is never invoked (it needs
+        a host/IP the dry run does not have)."""
+        images = self._images(ctx)
+        if via_console:
+            ctx.mutate("no reachable IP: console login, push the SWD tools and the images "
+                       "(base64, md5-checked on the board)", lambda: None)
+        ctx.mutate(f"DP-ID gate ({GD32_DP_OK:#010x} only)", lambda: None)
+        for p, addr, _key in images:
+            ctx.mutate(f"loadbin {p.name} @ {addr:#010x}", lambda: None)
+        ctx.mutate("verify each region with savebin in a FRESH probe session, md5", lambda: None)
+        ctx.mutate("reset/run the GD32", lambda: None)
+        ctx.mutate(f"GET_VERSION from the bridge at {GD32_BRIDGE_ADDR:#04x}", lambda: None)
+        if via_console:
+            ctx.mutate("cold cycle; re-check the IP", lambda: None)
+        return self.result(ctx, "would flash the GD32", ev)
 
     def run(self, ctx):
         ev: dict[str, str] = {}
-        t = ctx.need_linux()
+        t, probe, via_console = self._transport(ctx)
+        if via_console:
+            ev["gd32_flash_transport"] = "console (no network)"
+        if not ctx.execute:
+            return self._plan(ctx, ev, via_console)
         if t is not None:
             pmic = ctx.i2c("pmic")
-            if lt.act88760_gpio4_defect(t, pmic):
-                ev["act88760_gpio4_defect"] = "yes"
-                ev["act88760_gpio4_workaround"] = "volatile 0x08"
+            if lt.act88760_gpio4_held(t, pmic):
+                ev["act88760_gpio4_otp"] = f"{lt.ACT88760_GPIO4_OTP_DEFAULT:#04x}"
+                ev["act88760_gpio4_workaround"] = "provision (volatile 0x08)"
                 ctx.mutate("ACT88760 0x25 reg 0x10 = 0x08 (volatile GPIO4 / GD32_NRST release)",
                            lambda: lt.act88760_gpio4_release(t, pmic))
         b = ctx.need_bench()
-        if b.probe is None:
+        if probe is None:
             raise Refused("bench.yaml has no probe: this bench has no SWD path to the GD32")
         images = self._images(ctx)
-        dp = b.probe.dp_id()
+        dp = probe.dp_id()
         ev["gd32_dp_id"] = f"0x{dp:08x}"
         if dp != GD32_DP_OK:
             why = GD32_DP_REFUSE.get(dp, "an unknown debug port")
             raise Refused(f"DP-ID {dp:#010x} is {why}; want {GD32_DP_OK:#010x}")
         for p, addr, _key in images:
-            ctx.mutate(f"loadbin {p.name} @ {addr:#010x}", lambda q=p, a=addr: b.probe.loadbin(q, a))
+            ctx.mutate(f"loadbin {p.name} @ {addr:#010x}", lambda q=p, a=addr: probe.loadbin(q, a))
 
         def verify():
-            got = self._readback(ctx, images)
+            got = self._readback(ctx, images, probe)
             for p, _a, key in images:
                 if got[key] != _md5(p.read_bytes()):
                     raise BenchError(f"GD32 readback of {p.name} does not match")
             return got
         ev.update(ctx.mutate("verify each region with savebin in a FRESH probe session, md5", verify) or {})
-        ctx.mutate("reset/run the GD32", b.probe.reset_run)
+        ctx.mutate("reset/run the GD32", probe.reset_run)
 
         def bridge():
             # ponytail: fixed 5 s settle for the post-reset boot + clock-up; poll if it proves short
@@ -906,6 +1143,18 @@ class Gd32Flash(Step):
         line = ctx.mutate(f"GET_VERSION from the bridge at {GD32_BRIDGE_ADDR:#04x}", bridge)
         if line:
             ev["gd32_protocol"] = line
+        ev.update(self._fw_version(ctx))
+        if via_console:
+            # The flash evidence is complete above; a failed re-check must not lose it.
+            try:
+                ctx.mutate("cold cycle; the GD32 now runs, so gbeth has its RX clock; re-check the IP",
+                           lambda: cold_boot_phy_retry(ctx, ev))
+                if ctx.execute:
+                    ev["network_after_gd32"] = ctx.linux.host
+            except BenchError as e:
+                ev["network_after_gd32"] = f"none: {e}"
+                return self.result(ctx, f"GD32 flashed and verified, but no network after the cold cycle: {e}",
+                                   ev, status="failed")
         return self.result(ctx, "GD32 flashed and verified" if ctx.execute else "would flash the GD32", ev)
 
 
@@ -994,7 +1243,10 @@ class PmicVerify(Step):
         spec = ctx.expected_registers
         if not spec:
             raise Refused("no --pmic-expect (expected-registers) given")
-        defect = ctx.facts.get("act88760_gpio4_defect") == "yes"
+        # census/gd32_flash may have observed reg 0x10 still at the OTP default
+        # (workaround not applied/effective yet, e.g. a dry run) -- that is a
+        # known, already-explained mismatch, not a new failure.
+        otp_default_seen = ctx.facts.get("act88760_gpio4_otp") == f"{lt.ACT88760_GPIO4_OTP_DEFAULT:#04x}"
         bad, notes = [], []
         for dev, d in (spec.get("devices") or {}).items():
             fams = d.get("families")
@@ -1007,8 +1259,9 @@ class PmicVerify(Step):
                 if got & mask == int(r["expect"]) & mask:
                     continue
                 line = f"{dev} {int(d['addr']):#04x} reg {int(r['reg']):#04x} = {got:#04x}, want {int(r['expect']):#04x}"
-                if dev == "act88760" and int(r["reg"]) == lt.ACT88760_GPIO_REG and got == lt.ACT88760_GPIO4_DEFECT and defect:
-                    notes.append(line + " (known GPIO4 defect, recorded by gd32_flash)")
+                if (dev == "act88760" and int(r["reg"]) == lt.ACT88760_GPIO_REG
+                        and got == lt.ACT88760_GPIO4_OTP_DEFAULT and otp_default_seen):
+                    notes.append(line + " (ACT88760 GPIO4 workaround not yet applied; recorded by census/gd32_flash)")
                 else:
                     bad.append(line)
         ctx.step_logs[self.name] = "\n".join(bad + notes)
@@ -1080,8 +1333,15 @@ class ColdBootTest(Step):
             return Satisfied({}, "state file: done")
         return Unknown("not run")
 
+    @staticmethod
+    def _cold_boot(ctx, ev) -> str:
+        return cold_boot_phy_retry(ctx, ev)
+
     def run(self, ctx):
         n = ctx.cold_cycles
+        if n < 1:
+            # 0 boots must never satisfy the precondition of the irreversible lock.
+            raise Refused(f"cold_cycles must be >= 1 (got {n}): a run with no cold boots proves nothing")
         ev: dict[str, str] = {}
         if not ctx.execute:
             ctx.mutate(f"{n} cold cycles: clean BL2, DRAM tier, "
@@ -1090,28 +1350,63 @@ class ColdBootTest(Step):
             return self.result(ctx, f"would run {n} cold cycles")
         expected = {bus: a for bus, a in lt.expected_i2c(ctx.preset, ctx.bench.i2c_bus).items()
                     if bus is not None}
-        if ctx.facts.get("act88760_gpio4_defect") == "yes":
-            # the volatile release is lost at every power-off: the GD32 stays in reset
-            expected = {bus: a - {GD32_BRIDGE_ADDR} for bus, a in expected.items()}
-            ev["cold_boot_note"] = f"{GD32_BRIDGE_ADDR:#04x} not required: act88760_gpio4_defect recorded"
+        pmic_bus = ctx.i2c("pmic")
         for i in range(1, n + 1):
-            text = ctx.mutate(f"cold cycle {i}/{n}", lambda: boot_to_linux(ctx))
+            text = ctx.mutate(f"cold cycle {i}/{n}", lambda: self._cold_boot(ctx, ev))
             probs = [f"BL2: {e}" for e in uboot.bl2_errors(text)]
-            tier, tev = tier_gate(ctx, uboot.parse_dram_banner(text))
+            mib = uboot.parse_dram_banner(text)
+            tier, tev = tier_gate(ctx, mib)
             if not tier.ok:
                 probs.append(tier.detail)
+            if mib:
+                # boot_sd_linux records these too, but a unit that already
+                # boots from eMMC (phase B only) never runs it (#2301).
+                ev["dram_size_mib"] = str(mib)
+                ev["uboot_dram_banner"] = next(ln.strip() for ln in text.splitlines()
+                                               if ln.startswith("DRAM:"))
             if ctx.family == "v2n-m1" and not uboot.has_rail_pg(text):
                 probs.append(f"no {uboot.RAIL_PG!r}")
             mode = uboot.parse_sys_lsi(text).get("soc_sys_lsi_mode")
             if mode != SYS_LSI_MODE_XSPI:
                 probs.append(f"SYS_LSI_MODE {mode} != {SYS_LSI_MODE_XSPI}")
-            probs += lt.i2c_check(ctx.linux, expected)
+            # ACT88760 reg 0x10 after this (plain, tool-uninvolved) cold boot:
+            # most units' OTP is already 0x08 (production/fixed); an early-OTP
+            # unit (OTP 0x88, e.g. E1M-V2M103 2026W38-0001) needs U-Boot's
+            # board_late_init to release GD32_NRST every boot -- a no-op on a
+            # fixed unit. Only when it is STILL 0x88 here do we exempt the
+            # GD32 bridge from the i2c scan (it legitimately stays in reset).
+            after = lt.i2c_get(ctx.linux, pmic_bus, lt.ACT88760_ADDR, lt.ACT88760_GPIO_REG)
+            ev["act88760_gpio4_after_boot"] = f"{after:#04x}"
+            cycle_expected = expected
+            if after == lt.ACT88760_GPIO4_OTP_DEFAULT:
+                cycle_expected = {bus: a - {GD32_BRIDGE_ADDR} for bus, a in expected.items()}
+                ev["cold_boot_note"] = (f"{GD32_BRIDGE_ADDR:#04x} not required: image did not release "
+                                        "GD32_NRST (ACT88760 reg 0x10 = 0x88)")
+            else:
+                # census/gd32_flash having ever seen 0x88 marks this as an
+                # early-OTP unit; a clean 0x08 here (a plain cold boot, no
+                # provisioning-tool release in it) means U-Boot did it itself.
+                # U-Boot 0011's own console line says which case this boot
+                # was; fall back to what census/gd32_flash saw this run.
+                nrst = uboot.parse_gd32_nrst(text)
+                if nrst == "released":
+                    ev["act88760_gpio4_otp"] = f"{lt.ACT88760_GPIO4_OTP_DEFAULT:#04x}"
+                    ev["act88760_gpio4_workaround"] = "u-boot"
+                elif nrst == "already":
+                    ev["act88760_gpio4_otp"] = f"{lt.ACT88760_GPIO4_RELEASED:#04x}"
+                    ev["act88760_gpio4_workaround"] = "none"
+                else:
+                    otp_seen_88 = ctx.facts.get("act88760_gpio4_otp") == f"{lt.ACT88760_GPIO4_OTP_DEFAULT:#04x}"
+                    ev["act88760_gpio4_workaround"] = "u-boot" if otp_seen_88 else "none"
+            probs += lt.i2c_check(ctx.linux, cycle_expected)
             ev.update(tev)
             ev["soc_sys_lsi_mode"] = mode or ""
             ev["cold_boots_passed"] = f"{i - 1 if probs else i}/{n}"
             if probs:
                 ctx.facts.update(ev)
                 raise Refused(f"cold cycle {i}/{n}: " + "; ".join(probs))
+        if ev.get("cold_boots_passed") != f"{n}/{n}":
+            raise Refused(f"cold_boot_test observed {ev.get('cold_boots_passed', '0')} clean boots, want {n}/{n}")
         return self.result(ctx, f"{n}/{n} cold boots clean", ev)
 
 
@@ -1165,6 +1460,11 @@ class HilSmoke(Step):
         return self.result(ctx, "HiL smoke passed" if ctx.execute else "HiL spec validated", ev)
 
 
+FLASH_STEPS = ("write_xspi", "write_emmc_boot", "write_rootfs")
+BUNDLE_FACTS = ("bl2_sha256", "rootfs_wic_sha256", "rootfs_bundle_version", "fip_sha256",
+                "fip_fdtfile", "fip_rail_string")
+
+
 class Record(Step):
     name = "record"
     always_run = True
@@ -1173,20 +1473,64 @@ class Record(Step):
         cat_path = ctx.ledger_root / "schema" / "v2n.keys.yaml"
         catalogue = ledger_out.load_catalogue(cat_path)
         unit_yaml = ctx.unit_dir / f"{ctx.serial}.unit.yaml"
-        auto = {k: v for k, v in ctx.facts.items()
+        # Steps finished in EARLIER invocations (--only/--from runs) left their facts
+        # as evidence in the state file; this run's facts override them.
+        facts: dict = {}
+        # A tool_rev change (even test-only) moves finished steps to ``superseded``
+        # although the unit still carries the SAME bundle's bytes; a step finished
+        # there (same bundle_sha256) counts as done. A different bundle's does not.
+        # Applies to every step, so a unit provisioned across several tool revisions
+        # keeps its facts.
+        recovered = {}
+        for n in STEP_NAMES:
+            cur = ctx.state.get("steps", {}).get(n)
+            if cur is not None:
+                # The current run's own entry decides; no fallback past a failed/running one.
+                if cur.get("status") in ("done", "skipped"):
+                    recovered[n] = ("", cur)
+                continue
+            # The NEWEST superseded group holding an entry for n decides: an older
+            # same-bundle write was overwritten by whatever came after it.
+            g = next((g for g in reversed(ctx.state.get("superseded", [])) if n in g.get("steps", {})), None)
+            if g is None:
+                continue
+            old = g["steps"][n]
+            if g.get("bundle_sha256") == ctx.state.get("bundle_sha256") and old.get("status") in ("done", "skipped"):
+                recovered[n] = (f" (step {n} from superseded run, tool_rev {str(g.get('tool_rev'))[:12]}, "
+                                f"{old.get('finished') or old.get('ts') or old.get('at') or 'time n/a'})", old)
+        flashed = {n: v for n, v in recovered.items() if n in FLASH_STEPS}
+        # Newest wins: superseded-run facts first, then the current group's, then this run's.
+        for note, old in sorted(recovered.values(), key=lambda v: not v[0]):
+            facts.update(old.get("evidence") or {})
+        facts.update(ctx.facts)
+        auto = {k: v for k, v in facts.items()
                 if (catalogue.get(k, {}).get("mode") == "auto" or k.startswith("test_")) and v != ""}
+        # Bundle facts describe what the bundle CONTAINS; they are ledger facts
+        # about the unit only once every flash step succeeded (done, or skipped
+        # because the probe found the bundle's bytes already on the unit).
+        if len(flashed) < len(FLASH_STEPS):
+            for k in BUNDLE_FACTS:
+                auto.pop(k, None)
         before = ledger_out.read_unit_yaml(unit_yaml)
-        if before.get("act88760_gpio4_defect", "").lower() == "yes":   # sticky: never auto-downgraded
-            auto.pop("act88760_gpio4_defect", None)
-            auto.pop("act88760_gpio4_workaround", None)
+        # act88760_gpio4_defect is a legacy key from before the maintainer decision
+        # (2026-09-29) that the ACT88760 GPIO4 OTP default is an expected workaround,
+        # not a defect; the tool no longer writes it, doesn't block on it (see
+        # ledger_out.ship_check) and doesn't hold it sticky -- it is informational
+        # only, noted below.
+        legacy_defect = before.get("act88760_gpio4_defect", "").strip().lower() == "yes"
         merged = {**before, **auto}
-        bench_only = (merged.get("act88760_gpio4_defect", "").lower() == "yes"
-                      or merged.get("rootfs_bundle_version", "").startswith("build-dir:"))
+        bench_only = merged.get("rootfs_bundle_version", "").startswith("build-dir:")
         defaults = {"disposition": "bench-only"} if bench_only else {}
         would = [k for k, v in auto.items() if before.get(k) != str(v)] + [k for k in defaults if k not in before]
         changed = ctx.mutate(f"merge {len(would)} key(s) into {unit_yaml.name}: {', '.join(would)}",
                              lambda: ledger_out.merge_unit_yaml(unit_yaml, auto, catalogue, defaults))
         body = "\n".join(f"- `{k}`: {v}" for k, v in sorted(auto.items()))
+        for note, _ in recovered.values():
+            if note:
+                body += f"\n- facts from{note}"
+        if legacy_defect:
+            body += ("\n- `act88760_gpio4_defect` (legacy `yes`): informational only, no longer "
+                     "ship-blocking; see `act88760_gpio4_workaround` / `act88760_gpio4_after_boot`")
         who = f"by {ctx.by}" + (f" at {ctx.station}" if ctx.station else "")
         ctx.mutate(f"append a dated section to {ctx.serial}.md",
                    lambda: ledger_out.append_md_section(ctx.unit_dir / f"{ctx.serial}.md",
@@ -1205,7 +1549,7 @@ class Record(Step):
             ctx.mutate("regenerate shipped-units.xlsx", regen)
         after = {**before, **{k: str(v) for k, v in auto.items() if catalogue.get(k, {}).get("mode") != "manual"},
                  **{k: v for k, v in defaults.items() if k not in before}}
-        blockers = ledger_out.ship_check(after, catalogue)
+        blockers = ledger_out.ship_check(after, catalogue, expected_family(ctx.preset))
         detail = f"{len(changed) if changed is not None else len(would)} key(s) " \
                  f"{'updated' if ctx.execute else 'would change'}; ship check: " + \
                  ("SHIPPABLE" if not blockers else "blocked: " + "; ".join(blockers))
@@ -1221,6 +1565,15 @@ class SecurePageLock(Step):
         for s in ("secure_page", "cold_boot_test"):
             if not ctx.state_done(s):
                 bad.append(f"{s} not done in the state file")
+        # Fail closed: the recorded evidence must show >= 1 clean cold boot,
+        # all of the requested ones (a done state alone is not proof).
+        m = re.fullmatch(r"(\d+)/(\d+)",
+                         str(ctx.state.get("steps", {}).get("cold_boot_test", {})
+                             .get("evidence", {}).get("cold_boots_passed", "")))
+        if ctx.state_done("cold_boot_test") and not (m and int(m[1]) >= 1 and m[1] == m[2]):
+            bad.append("cold_boot_test recorded no clean cold boots (cold_boots_passed missing or < 1)")
+        bad += [f"{n} failed in the state file"
+                for n, v in ctx.state.get("steps", {}).items() if v.get("status") == "failed"]
         bus = ctx.i2c("eeprom")
         written = ctx.unit_dir / f"{ctx.serial}.manifest.bin"
         if not written.is_file():
@@ -1238,7 +1591,7 @@ class SecurePageLock(Step):
             bad.append(f"secure page differs from {staged.name}")
         unit = ledger_out.read_unit_yaml(ctx.unit_dir / f"{ctx.serial}.unit.yaml")
         catalogue = ledger_out.load_catalogue(ctx.ledger_root / "schema" / "v2n.keys.yaml")
-        bad += [f"ship check: {b}" for b in ledger_out.ship_check(unit, catalogue)]
+        bad += [f"ship check: {b}" for b in ledger_out.ship_check(unit, catalogue, expected_family(ctx.preset))]
         return bad
 
     def probe(self, ctx):
@@ -1262,14 +1615,15 @@ class SecurePageLock(Step):
                 f"PERMANENT: lock the N24S128 identity header of {ctx.sku}. Type the unit serial to confirm:")
             if typed != ctx.serial:
                 raise Refused(f"operator typed {typed!r}, not {ctx.serial!r}")
+        t = ctx.need_linux()                 # fresh identity check right before the irreversible write
         ctx.mutate(f"LOCK: 0x58 frame 04 00 ff on i2c-{bus} (irreversible)",
                    lambda: lt.i2c_transfer(t, bus, gates.identity_frame(gates.IdentityOp.LOCK)))
         return self.result(ctx, "identity header locked" if ctx.execute else "lock plan only (no --execute)")
 
 
 STEP_ORDER: list[type[Step]] = [
-    Preflight, Detect, OpDsw1Scif, Bootstrap, OpDsw1EmmcInsertSd, BootSdLinux, WriteXspi,
-    WriteEmmcBoot, WriteRootfs, Census, EepromManifest, Gd32Flash, Dxm1NpuFlash, PmicVerify,
+    Preflight, Detect, OpDsw1Scif, Bootstrap, OpDsw1EmmcInsertSd, BootSdLinux, Gd32Flash, WriteXspi,
+    WriteEmmcBoot, WriteRootfs, Census, EepromManifest, Dxm1NpuFlash, PmicVerify,
     SecurePage, OpDsw1XspiRemoveSd, ColdBootTest, ClkgenVerify, HilSmoke, Record,
 ]
 STEP_NAMES = [s.name for s in STEP_ORDER]
@@ -1335,10 +1689,25 @@ def run_one(step: Step, ctx: Ctx, force: bool = False) -> StepResult:
         if isinstance(probe, Unsatisfied) and ctx.state_done(step.name):
             ctx.plan_log.append(f"NOTE: {step.name} recorded done but probe says: {probe.reason}; re-running")
         start = len(ctx.plan_log)
+        plog = ctx.bench.power.log if ctx.bench is not None else []
+        pstart = len(plog)
+        tstart = len(ctx.bench.console.transcript) if ctx.bench is not None else 0
         try:
+            if ctx.execute and step.name not in ctx.state.get("steps", {}):
+                # A run killed mid-step must leave an entry, or Record would fall back
+                # to an older same-bundle done entry from a superseded group.
+                ctx.state.setdefault("steps", {})[step.name] = {"status": "running", "at": _now()}
+                save_state(ctx.state_path, ctx.state)
             res = step.run(ctx)
         except (BenchError, Refused, ValueError, OSError) as e:
             res = StepResult(step.name, "failed", str(e))
+        ctx.plan_log.extend(plog[pstart:])  # audit trail: every PSU command, timestamped
+        if ctx.bench is not None and ctx.execute:
+            # Everything the console said during the step, so a silicon failure is diagnosable.
+            seen = _elide_long_lines(_since(ctx.bench.console, tstart))
+            ctx.step_logs[step.name] = "\n".join(
+                filter(None, [ctx.step_logs.get(step.name, ""), *plog[pstart:],
+                              "--- console transcript ---", seen]))
         res.commands = ctx.plan_log[start:]
         if res.status == "done" and not step.always_run:
             post = _safe_probe(step, ctx)
@@ -1347,6 +1716,18 @@ def run_one(step: Step, ctx: Ctx, force: bool = False) -> StepResult:
             elif not (step.trust_run and isinstance(post, Unknown)):
                 res.status = "failed"
                 res.detail += f"; post-run probe: {getattr(post, 'reason', post)}"
+                if step.name in ctx.step_logs:
+                    ctx.step_logs[step.name] += f"\npost-run probe flipped the step to failed: {res.detail}"
+        if ctx.bench is not None and ctx.execute and step.name in ctx.step_logs:
+            # Written for every outcome (incl. a post-run probe flip): `--only` runs never
+            # reach Record, and a failure may end the run early.
+            try:
+                ledger_out.write_log(ctx.ledger_root, ctx.sku, ctx.serial, step.name, ctx.step_logs[step.name])
+            except OSError as e:
+                note = f"NOTE: could not write the {step.name} log: {e}"
+                ctx.plan_log.append(note)
+                res.commands.append(note)
+                print(f"provision: could not write the {step.name} log: {e}", file=sys.stderr)
     ctx.facts.update({k: v for k, v in res.evidence.items() if v is not None})
     return res
 
@@ -1381,8 +1762,9 @@ def run_steps(ctx: Ctx, only: list[str] | None = None, start: str | None = None,
                 "status": res.status, "at": _now(), "detail": res.detail, "evidence": res.evidence}
             save_state(ctx.state_path, ctx.state)
         if res.status == "failed":
-            # Record still runs: facts learnt so far (a defect, the census)
-            # must reach the ledger even when a later step stops the run.
+            # Record still runs: facts learnt so far (the census, a
+            # workaround applied) must reach the ledger even when a later
+            # step stops the run.
             if Record in selected and cls is not Record:
                 results.append(run_one(Record(), ctx))
             break

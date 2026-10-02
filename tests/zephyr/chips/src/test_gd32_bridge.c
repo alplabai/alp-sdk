@@ -35,6 +35,48 @@ ZTEST(alp_chips, test_gd32g553_frame_crc16_check_vector)
 	zassert_equal(crc, 0x29B1u, "CRC-16/CCITT-FALSE check-vector mismatch: got 0x%04x", crc);
 }
 
+/* The shared helper folds a byte at a time with shifts (it used to run an
+ * 8-step bit loop per byte, ~1 ms per 4 KiB bridge frame on an M55).  One
+ * check vector cannot catch a shortcut that is only wrong for some register
+ * values, so compare against the bit loop over every length up to a full
+ * CC3501E frame, from a non-default starting register, and across a split
+ * (the header-then-payload chaining the bridge does). */
+static uint16_t crc16_bitwise_ref(uint16_t crc, const uint8_t *buf, size_t len)
+{
+	for (size_t i = 0; i < len; ++i) {
+		crc ^= (uint16_t)buf[i] << 8;
+		for (unsigned b = 0; b < 8; ++b) {
+			crc = (crc & 0x8000u) ? (uint16_t)((crc << 1) ^ 0x1021u) : (uint16_t)(crc << 1);
+		}
+	}
+	return crc;
+}
+
+ZTEST(alp_chips, test_crc16_bytewise_matches_bitwise)
+{
+	static uint8_t buf[4096];
+	uint32_t       x = 0x12345678u;
+
+	for (size_t i = 0; i < sizeof(buf); i++) {
+		x      = x * 1664525u + 1013904223u;
+		buf[i] = (uint8_t)(x >> 24);
+	}
+	for (size_t len = 0; len <= sizeof(buf); len += 97u) {
+		const uint16_t seed = (uint16_t)(0xFFFFu - len);
+		zassert_equal(alp_crc16_ccitt_false_update(seed, buf, len),
+		              crc16_bitwise_ref(seed, buf, len),
+		              "len %u",
+		              (unsigned)len);
+	}
+	const uint16_t whole = alp_crc16_ccitt_false(buf, sizeof(buf));
+	const uint16_t split = alp_crc16_ccitt_false_update(
+	    alp_crc16_ccitt_false_update(ALP_CRC16_CCITT_FALSE_INIT, buf, 4u),
+	    buf + 4,
+	    sizeof(buf) - 4u);
+	zassert_equal(whole, split);
+	zassert_equal(whole, crc16_bitwise_ref(ALP_CRC16_CCITT_FALSE_INIT, buf, sizeof(buf)));
+}
+
 /* ------------------------------------------------------------------ */
 /* gd32g553 -- V2N supervisor MCU host driver, NULL-arg validation     */
 /* ------------------------------------------------------------------ */
@@ -602,6 +644,63 @@ ZTEST(alp_chips, test_gd32g553_ota_ops_reject_pre_v06_peer)
 	zassert_equal(gd32g553_ota_write_chunk(&v05, 0u, data, sizeof(data), &rx),
 	              ALP_ERR_NOSUPPORT,
 	              "ota_write_chunk must refuse a v0.5 peer");
+}
+
+/* ------------------------------------------------------------------ */
+/* gh#101 -- CMD_OTA_GET_STATE's reply widened 5 -> 6 bytes in         */
+/* protocol v0.14, adding an `err` byte.  gd32g553_ota_get_state()     */
+/* picks the reply width off ctx->version.minor (negotiated at         */
+/* init()), NOT a compile-time constant, so this pins BOTH shapes:     */
+/* an older peer must still decode cleanly at 5 bytes with err forced  */
+/* to NONE, and a >= 0.14 peer must decode the real cause at 6.        */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_gd32g553_ota_get_state_pre_v14_peer_has_no_err_byte)
+{
+	fake_gd32bridge_reset();
+	fake_gd32bridge_set_version(GD32G553_HOST_PROTOCOL_MAJOR, 13u, 0u);
+	/* err=0x05 (VERIFY_CRC) armed on the wire but at reply_width=5: a
+	 * pre-v0.14 peer never sends this byte, so the driver must not
+	 * read it -- and must report NONE, not accidentally see the
+	 * fake's backing byte through an off-by-one. */
+	fake_gd32bridge_arm_ota_get_state(4u /* ERROR */, 0u, 0xFFu, 7u, 0x05u, 5u);
+
+	gd32g553_t ctx;
+	alp_i2c_t *bus = open_fake_gd32bridge_bus();
+	zassert_equal(gd32g553_init(&ctx, NULL, bus, 0x2Cu), ALP_OK);
+
+	gd32g553_ota_state_info_t st = { 0 };
+	zassert_equal(gd32g553_ota_get_state(&ctx, &st), ALP_OK);
+	zassert_equal(st.state, GD32G553_OTA_STATE_ERROR);
+	zassert_equal(st.boot_count, 7u);
+	zassert_equal(
+	    st.err, GD32G553_OTA_ERR_NONE, "a pre-v0.14 peer must report NONE, not a stale byte");
+
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_gd32g553_ota_get_state_v14_peer_decodes_err_cause)
+{
+	fake_gd32bridge_reset();
+	fake_gd32bridge_set_version(
+	    GD32G553_HOST_PROTOCOL_MAJOR, GD32G553_OTA_ERR_MIN_PROTOCOL_MINOR, 0u);
+	fake_gd32bridge_arm_ota_get_state(
+	    4u /* ERROR */, 1u, 0xFFu, 3u, GD32G553_OTA_ERR_VERIFY_CRC, 6u);
+
+	gd32g553_t ctx;
+	alp_i2c_t *bus = open_fake_gd32bridge_bus();
+	zassert_equal(gd32g553_init(&ctx, NULL, bus, 0x2Cu), ALP_OK);
+
+	gd32g553_ota_state_info_t st = { 0 };
+	zassert_equal(gd32g553_ota_get_state(&ctx, &st), ALP_OK);
+	zassert_equal(st.state, GD32G553_OTA_STATE_ERROR);
+	zassert_equal(st.active_slot, GD32G553_OTA_SLOT_B);
+	zassert_equal(st.boot_count, 3u);
+	zassert_equal(st.err,
+	              GD32G553_OTA_ERR_VERIFY_CRC,
+	              "a >= v0.14 peer must attribute the ERROR to its real cause (gh#101)");
+
+	alp_i2c_close(bus);
 }
 
 /* ------------------------------------------------------------------ */

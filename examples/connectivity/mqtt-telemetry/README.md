@@ -40,13 +40,11 @@ knobs at all any more (see [`prj.conf`](../mqtt-telemetry/prj.conf), which is
 empty by design) and the `native_sim.conf` that used to hold the workaround is
 deleted.
 
-The record stays `preview` for a different reason: no Alif Ensemble entropy
-driver exists yet, in this tree or upstream. An ordinary AEN hardware build is
-therefore refused instead of silently using Zephyr's non-cryptographic
-fallback. The AEN Twister scenario sets
-`CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y` only because it is `build_only`; that
-image must never be flashed or shipped. A production AEN TLS build remains
-blocked until the SE TRNG is wired to a real entropy driver (issue #2192).
+AEN hardware builds seed the PSA core from the Secure Enclave TRNG entropy
+driver (`alif,se-trng`, bench-proven on both M55 cores, issue #2192), which
+every AEN board chooses as `zephyr,entropy` by default, so the AEN Twister
+scenario needs no weak-RNG opt-in. Only the native_sim scenario, which has no
+real entropy source, still sets `CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y`.
 
 ## The "sensor reading"
 
@@ -61,12 +59,14 @@ over `<alp/chips/bmp581.h>`) -- and the publish path is unchanged.
 ```bash
 # Standalone, native_sim (no radio, so the app prints the framing it
 # would publish; mbedTLS is built in):
+# writes examples/connectivity/mqtt-telemetry/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/connectivity/mqtt-telemetry
 west build -b native_sim/native/64 examples/connectivity/mqtt-telemetry \
-    -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
 west build -t run
 
 # On real silicon (E1M-AEN801):
-west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/connectivity/mqtt-telemetry
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/connectivity/mqtt-telemetry -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 

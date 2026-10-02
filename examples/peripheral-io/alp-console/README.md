@@ -134,7 +134,24 @@ nodes (native_sim, V2N) it compiles out and nothing is spawned.
 ## Build & flash (E1M-AEN801)
 
 ```sh
+# writes examples/peripheral-io/alp-console/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/alp-console
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
+           -d build_console examples/peripheral-io/alp-console -- -DEXTRA_CONF_FILE=generated/alp.conf
+```
+
+This app also ships an E1M-AEN803 twin of the AEN801 overlay + `.conf` pair
+above
+(`boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay`,
+`boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.conf`):
+`boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay` and
+`boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.conf` (identical
+DT/Kconfig content) -- it is the AEN bench farm's default target
+(`scripts/bench/aen/bench-env.sh`'s `AEN_BOARD`). After setting
+`som.sku: E1M-AEN803` in `board.yaml`:
+
+```sh
+west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
            -d build_console examples/peripheral-io/alp-console
 ```
 
