@@ -150,7 +150,7 @@ permissive allowlist (see "Licence allowlist" below). Per the
 ADR 0018 non-goal, a copyleft/proprietary licence must not ride in through a
 `libraries:` selection, and forcing a wrong SPDX id to pass validation is
 forbidden. It can only be added if a human legal review extends the allowlist
-(schema `license.enum` + this list, same change) with the Memfault licence — a
+(schema `license.enum` + that list, same change) with the Memfault licence — a
 deliberate decision, not a metadata edit.
 
 ## Manifest shape
