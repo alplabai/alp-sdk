@@ -81,8 +81,10 @@ Report the outcome on #1149 before treating any of this as verified.
 
 ## Sensor drivers available (#2618)
 
-`camera-sensors.cfg` builds these drivers as modules (`=m`) on every
-V2N/V2M machine, so a camera works once its devicetree node is in the dtb,
+`camera-sensors.cfg` builds these drivers, plus the RZ/G2L-family CSI-2
+receiver and CRU, into the kernel (`=y`) on every V2N/V2M machine -- built
+in rather than as modules because the `alp-image-*` images install no
+`kernel-modules` package -- so a camera works once its devicetree node is in the dtb,
 without any `ALP_ENABLE_CAM0_*` switch. Only the OV9281 and IMX219 have a
 shipped CAM0 fragment (above); the rest need your own node on the CAM0 I2C
 bus and a `csi20` endpoint.
