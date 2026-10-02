@@ -6,6 +6,7 @@ import base64
 import hashlib
 import re
 import shlex
+from pathlib import Path
 
 import pytest
 
@@ -94,6 +95,10 @@ class ShellConsole(Console):
             return base64.encodebytes(self.files[shlex.split(cmd)[3]]).decode(), 0
         elif cmd.startswith("mkdir -p"):
             pass
+        elif m := re.fullmatch(r"test -f (.+)", cmd):
+            return "", 0 if shlex.split(m[1])[0] in self.files else 1
+        elif cmd.startswith("sha256sum"):
+            return "-sh: sha256sum: not found\n", 127          # the board's busybox lacks the applet
         elif m := re.fullmatch(r"cd (\S+) && python3 swd_bb.py", cmd):
             return "SWD id=0x0be12477\n", 0
         elif m := re.fullmatch(r"cd (\S+) && python3 gd32_swd_flash.py dump (\S+) (\S+) (\S+)", cmd):
@@ -104,7 +109,7 @@ class ShellConsole(Console):
         elif "gd32_swd_flash.py" in cmd:
             pass
         else:
-            return f"unexpected: {cmd}\n", 127
+            return f"-sh: {cmd.split()[0]}: not found\n", 127
         return "", 0
 
 
@@ -570,3 +575,98 @@ def test_markers_are_alphanumeric_and_unique_per_attempt(monkeypatch):
     t.run("mkdir -p /x")
     ids = [re.search(r'"ALPB""(\w+)"', ln)[1] for ln in sh.lines]
     assert len(set(ids)) == 2 and all(i.isalnum() for i in ids)
+
+
+# --- md5 over the console, the 127 retry, long-running commands -------------------------------------
+
+def test_console_target_md5_serves_the_payload_store_when_sha256sum_is_missing(tmp_path):
+    from provision import payload_store as ps
+    sh = ShellConsole()
+    t = ct.ConsoleTarget(sh)
+    local = tmp_path / "fip.bin"
+    local.write_bytes(b"fip payload")
+    sh.files["/mnt/alp-payload/x/fip.bin"] = b"fip payload"
+    store = ps.PayloadStore(t, "/mnt/alp-payload/x")
+    assert t.md5("/mnt/alp-payload/x/fip.bin") == hashlib.md5(b"fip payload").hexdigest()
+    assert store._good("/mnt/alp-payload/x/fip.bin", local, hashlib.sha256(b"fip payload").hexdigest())
+    sh.files["/mnt/alp-payload/x/fip.bin"] = b"corrupted"
+    assert not store._good("/mnt/alp-payload/x/fip.bin", local, hashlib.sha256(b"fip payload").hexdigest())
+    assert t.md5("/nope") == ""
+
+
+def test_rc127_after_the_begin_marker_is_the_command_failing_and_is_not_resent(monkeypatch):
+    sh = ShellConsole()
+    t = ct.ConsoleTarget(sh)
+    with pytest.raises(BenchError, match="rc=127"):
+        t._run_unannounced("no-such-tool --x")          # the shell answers 127 AFTER the begin marker
+    assert sh.ran == ["no-such-tool --x"] and t.last_began
+
+
+def test_rc127_without_a_begin_marker_is_resent(monkeypatch):
+    sh = ShellConsole()
+    orig, flipped = sh._write_raw, []
+
+    def garble(data):
+        if data.startswith(b"echo") and not flipped:
+            flipped.append(1)
+            data = b"ecXo" + data[4:]
+        orig(data)
+    monkeypatch.setattr(sh, "_write_raw", garble)
+    monkeypatch.setattr(ct, "BEGIN_WINDOW_S", 0.05)
+    t = ct.ConsoleTarget(sh)
+    t._run_unannounced("mkdir -p /x")
+    assert sh.ran == ["mkdir -p /x"]                    # the garbled attempt never ran it; the resend did
+
+
+def _drop_first_command(sh, monkeypatch):
+    orig, dropped, writes = sh._write_raw, [], []
+
+    def write(data):
+        writes.append(data)
+        if data.startswith(b"echo") and not dropped:
+            dropped.append(1)                           # the whole command line is lost on the way in
+            return
+        orig(data)
+    monkeypatch.setattr(sh, "_write_raw", write)
+    monkeypatch.setattr(ct, "BEGIN_WINDOW_S", 0.05)
+    return writes
+
+
+def test_a_lost_command_is_retried_with_ctrl_c_by_default(monkeypatch):
+    sh = ShellConsole()
+    writes = _drop_first_command(sh, monkeypatch)
+    ct.ConsoleTarget(sh).run("mkdir -p /x")
+    assert b"\x03" in writes and sh.ran == ["mkdir -p /x"]
+
+
+def test_a_long_running_command_is_never_ctrl_c_ed_or_resent(monkeypatch):
+    sh = ShellConsole()
+    writes = _drop_first_command(sh, monkeypatch)
+    with pytest.raises(BenchError, match="long-running: never re-sent"):
+        ct.ConsoleTarget(sh).run("cd /x && python3 gd32_swd_flash.py write 0x0 /tmp/f", long_running=True)
+    assert b"\x03" not in writes and sh.ran == []
+    assert len([w for w in writes if w.startswith(b"echo")]) >= 1
+
+
+def test_swd_flash_write_is_long_running_but_reads_are_not(tmp_path):
+    calls = []
+
+    class T:
+        def run(self, cmd, **kw):
+            calls.append((cmd, kw.get("long_running", False)))
+            return type("R", (), {"stdout": ""})()
+
+        def put(self, local, remote):
+            pass
+
+        def get(self, remote, local):
+            Path(local).write_bytes(b"\0" * 16)
+
+    for f in ct_tools():
+        (tmp_path / f).write_bytes(b"x")
+    probe = ct.ConsoleSwdProbe(T(), tmp_path, ct_tools())
+    probe.loadbin(tmp_path / "img.bin", 0x08000000)
+    probe.savebin(tmp_path / "rb.bin", 0x08000000, 16)
+    writes = {c: lr for c, lr in calls if "gd32_swd_flash.py" in c}
+    assert [lr for c, lr in writes.items() if " write " in c] == [True]
+    assert [lr for c, lr in writes.items() if " dump " in c] == [False]

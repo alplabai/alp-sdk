@@ -446,7 +446,10 @@ def rootfs_write_verify_mapped(t: LinuxTarget, emmc: str, wic_gz: Path, bm: bmap
     """Write only the bmap's mapped ranges (host-verified first), then md5 them back.
 
     With the wic.gz in the SD store the board decompresses the WHOLE stream and discards each
-    gap between ranges (a pipe cannot seek); otherwise the host sends only the mapped bytes."""
+    gap between ranges (a pipe cannot seek); otherwise the host sends only the mapped bytes.
+    When ImageSize is not a multiple of BlockSize the last block is zero-padded on BOTH paths
+    (the host pads the stream it sends; the board's ``conv=sync`` pads the short final read),
+    which is what the whole-block readback md5 expects."""
     local = store.fetch(wic_gz) if store is not None else None
     with tempfile.TemporaryDirectory() as d:
         staged = Path(d) / "mapped.gz"
@@ -457,7 +460,7 @@ def rootfs_write_verify_mapped(t: LinuxTarget, emmc: str, wic_gz: Path, bm: bmap
             if local:
                 t.run(f"gunzip -c {shlex.quote(local)} | {{ pos=0; while read s c <&3; do g=$((s-pos)); "
                       f"if [ $g -gt 0 ]; then dd of=/dev/null bs={bs} count=$g iflag=fullblock 2>/dev/null "
-                      f"|| exit 1; fi; dd of={emmc} bs={bs} seek=$s count=$c iflag=fullblock conv=notrunc "
+                      f"|| exit 1; fi; dd of={emmc} bs={bs} seek=$s count=$c iflag=fullblock conv=notrunc,sync "
                       f"|| exit 1; pos=$((s+c)); done; }} 3<{RANGES_PATH} && sync", timeout=timeout)
             else:
                 t.run(f"gunzip -c | {{ while read s c <&3; do dd of={emmc} bs={bs} seek=$s "

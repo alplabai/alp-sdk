@@ -268,6 +268,10 @@ class Power:
     _sleep = staticmethod(time.sleep)
     _last_on: float | None = None
     on_count = 0  # ON events issued; lets a step tell whether the unit was cycled since it looked
+    _defer_confirm = False  # cycle(): confirm the ON AFTER the console settle, not before
+
+    def confirm_on(self) -> None:
+        """Verify the ON took effect (subclasses that can read the output state back)."""
 
     @property
     def log(self) -> list[str]:
@@ -312,7 +316,14 @@ class Power:
             err = e
         if (rest := end - self._clock()) > 0:
             self._sleep(rest)
-        self.on()
+        # The ON read-back (a PSU round trip, up to ~30 s of reconnect backoff) must not run
+        # between the ON edge and the first console read: the ROM banner lands within ms. So
+        # on() only sends here, and the read-back follows the settle read below.
+        self._defer_confirm = True
+        try:
+            self.on()
+        finally:
+            self._defer_confirm = False
         # Read continuously across the ON edge (not just up to it): whatever the
         # unit prints right at power-up is buffered for the caller's expect().
         try:
@@ -320,6 +331,7 @@ class Power:
                 console.pump(ON_SETTLE_S)
         except BenchError as e:
             err = e
+        self.confirm_on()
         if err is not None:
             raise BenchError(f"console failed during the power cycle (power restored): {err}") from err
 
@@ -346,6 +358,9 @@ class ScpiPower(Power):
         self, host: str, port: int, channel: int, connect=socket.create_connection
     ) -> None:
         self.host, self.port, self.channel = host, port, int(channel)
+        if self.channel not in (1, 2):
+            raise BenchError(f"SCPI power channel {channel}: only CH1 and CH2 have a SYST:STAT? "
+                             "output bit, so the output state cannot be confirmed; use 1 or 2")
         self._connect = connect
         self._sock = None
         self._lock = threading.Lock()
@@ -406,6 +421,10 @@ class ScpiPower(Power):
             self._send(f"OUTP CH{self.channel},ON")
         finally:  # the PSU may have acted even if the reply path failed
             self._mark_on()
+        if not self._defer_confirm:
+            self._confirm(True)
+
+    def confirm_on(self) -> None:
         self._confirm(True)
 
     def off(self) -> None:
@@ -421,6 +440,8 @@ class ScpiPower(Power):
                 return
             if attempt == 0:
                 self._send(f"OUTP CH{self.channel},{'ON' if want else 'OFF'}")
+                if want:        # the first ON was swallowed: the ON edge is now, not an extra ON event
+                    self._last_on = self._clock()
         raise BenchError(f"SCPI {self.host}:{self.port}: CH{self.channel} did not read back "
                          f"{'ON' if want else 'OFF'} after OUTP; check the PSU front panel")
 

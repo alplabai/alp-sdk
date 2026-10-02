@@ -345,6 +345,8 @@ Without it, every payload crosses a wire: the GD32 images go base64 over the 115
 python scripts/provision_som.py prepare-sd --bundle <bundle-dir> --device /dev/sdX --gd32-fw <dir>
 ```
 
+`--device` is overwritten from sector 0. A block device must be removable (`/sys/block/<dev>/removable` = 1, an SD in a reader); any other block device (a system disk, an eMMC) is refused, and the refusal prints its model and size. If it really is the provisioning SD, repeat its size back with `--i-know-this-is-the-sd <size in bytes>`. An image file needs neither.
+
 1. Every bundle file is checked against the sha256 in `bundle.json` first; a mismatch refuses before anything is written.
 2. The bundle's `system_image` wic is written to `--device` (a block device or an image file) exactly as before: p1/p2 untouched, U-Boot still finds `boot/Image` on p2. Only an MBR wic is supported.
 3. A new MBR partition is appended after the wic's, 1 MiB aligned, and made an ext4 filesystem labelled `alp-payload` (`mke2fs -d`, no mount). A separate partition, not a directory in p2, because the wic's rootfs has no guaranteed free space for the roughly 250 MB of payloads.
@@ -357,6 +359,10 @@ The store holds `<bundle sha256>/` with: every bundle component (bl2, bl2_mmc, f
 - miss, bad hash, or no partition: the file is pushed as before. A push is also copied into the store (lazy self-provisioning, so an empty `alp-payload` partition fills itself on the first unit); a store that cannot be written is reported, not fatal.
 
 Steps: `gd32_flash` over the console (SWD tools and images; over SSH the bench's probe wrapper still copies from the host), `dxm1_npu_flash` (DTB and payload, re-opened after each reboot), `write_rootfs`, `write_xspi`, `write_emmc_boot`. Each records `payload_source: sd-store` (every file came from the store) or `pushed`, plus `payload_store_note` when the store was off or a cache write failed. `--no-payload-store` disables it. `plan` never mounts.
+
+The store is mounted READ-ONLY (`ro,noatime`) because the tool cuts the PSU rail to power-cycle the unit, and a live read-write mount would be dirty at every cut. It is remounted rw only while a file is cached (then `sync` and back to ro), and the tool runs a best-effort `umount` before every power cycle or reboot it drives (`boot_to_linux`, the warm reboot, the clean poweroff).
+
+**Creating the partition from the board** (`run --execute --create-payload-store`, off by default), so the SD never has to go into a PC: when the board runs from the SD, no `alp-payload` label exists, and the SD has enough unpartitioned space after the last partition (payload bytes + 20 % + 64 MiB), the tool appends one MBR partition (`sfdisk --append`, 1 MiB aligned, type 83), adds it to the kernel (`partx -a`; `blockdev --rereadpt` would be EBUSY with the root mounted) and runs `mke2fs -t ext4 -L alp-payload` (or `mkfs.ext4`). The store then fills itself on the first unit. It needs `sfdisk`, `partx` and `mke2fs`/`mkfs.ext4` on the board image; if any is missing, or the table is GPT, has an extended partition, no free slot or overlapping entries, or the SD has too little room, nothing is written and `payload_store_note` says which, and every file is pushed as before. It never touches the eMMC and `plan` never runs it.
 
 `write_rootfs` with the stored wic.gz and a bmap: the board decompresses the whole stream and discards each gap between ranges (a pipe cannot seek), writing only the mapped ranges; the range list (small, from the host's bmap) is still pushed, and the readback md5 is compared with the host's, unchanged.
 

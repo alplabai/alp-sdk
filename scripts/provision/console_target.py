@@ -45,13 +45,18 @@ class ConsoleTarget:
 
     def __init__(self, console: Console) -> None:
         self.console = console
+        self.last_began = True      # did the last run()'s begin marker show (the command ran)?
+        self.last_out = ""          # that run()'s output
 
     def run(self, cmd: str, timeout: float = 60.0, check: bool = True,
-            stdin_path: Path | None = None) -> CmdResult:
+            stdin_path: Path | None = None, long_running: bool = False) -> CmdResult:
+        """``long_running`` (a flash/dd write): never Ctrl-C and never re-send. A re-send could
+        write twice and the Ctrl-C would kill a write that is in progress, so a begin marker
+        that does not show is an error for the operator, not a retry."""
         if stdin_path is not None:
             raise BenchError("console target cannot stream a file on stdin; use put()")
         global _marker
-        for attempt in range(RUN_ATTEMPTS):
+        for attempt in range(1 if long_running else RUN_ATTEMPTS):
             _marker += 1                       # a fresh marker per attempt: a stale one may still be buffered
             n = _marker
             self.console.drain(0.1, 2.0)
@@ -61,17 +66,23 @@ class ConsoleTarget:
             try:
                 # a corrupted command line never prints its begin marker
                 self.console.expect(rf"ALPB{n}\r?\n", BEGIN_WINDOW_S)
+                self.last_began = True
                 break
             except ExpectTimeout as e:
-                if attempt == RUN_ATTEMPTS - 1:
-                    raise BenchError(f"console command never started after {RUN_ATTEMPTS} tries "
-                                     f"(corrupted RX?): {cmd[:80]!r}: {e.tail[-120:]!r}") from e
                 if re.search(rf"ALPE{n}:\d+", self.console.peek()):
-                    break       # the command ran (only its begin marker was lost): never re-run it
+                    # No begin marker but an end marker: a garbled echo word, the `&&` guard kept the
+                    # command from running (rc=127). Never re-run it from here.
+                    self.last_began = False
+                    break
+                if long_running or attempt == RUN_ATTEMPTS - 1:
+                    tries = "1 try (long-running: never re-sent)" if long_running else f"{RUN_ATTEMPTS} tries"
+                    raise BenchError(f"console command never started after {tries} "
+                                     f"(corrupted RX?): {cmd[:80]!r}: {e.tail[-120:]!r}") from e
                 self.console.write(b"\x03")
                 self.console.drain(0.5, 5.0)
-        m =self.console.expect(rf"(?s)(?P<out>.*?)ALPE{n}:(?P<rc>\d+)", timeout)
+        m = self.console.expect(rf"(?s)(?P<out>.*?)ALPE{n}:(?P<rc>\d+)", timeout)
         out, rc = m.group("out").replace("\r\n", "\n"), int(m.group("rc"))
+        self.last_out = out
         if check and rc != 0:
             raise BenchError(f"rc={rc}: {cmd[:200]}: {out.strip()[-500:]}")
         return CmdResult(rc, out, "")
@@ -100,21 +111,31 @@ class ConsoleTarget:
         self._check_md5(q, data, f"push {local}")
 
     def _run_unannounced(self, cmd: str) -> CmdResult:
-        """run() for put()'s housekeeping: rc=127 means a garbled echo word kept the command
-        from running at all (the `&&` guard), so re-sending is safe."""
+        """run() for put()'s housekeeping: re-sent on rc=127 only when the command did not run.
+        That is (a) no begin marker (a garbled echo word, the `&&` guard skipped the command) or
+        (b) the shell says `<word>: not found` for a word that is not in the command we sent (RX
+        garbled the command word itself). A tool of ours that is missing on the board is named in
+        the command: that is the command running and failing, and is never re-run."""
         for attempt in range(RUN_ATTEMPTS):
             try:
                 return self.run(cmd)
             except BenchError as e:
-                if not str(e).startswith("rc=127") or attempt == RUN_ATTEMPTS - 1:
+                if (not str(e).startswith("rc=127") or not self._never_ran(cmd)
+                        or attempt == RUN_ATTEMPTS - 1):
                     raise
         raise AssertionError("unreachable")
+
+    def _never_ran(self, cmd: str) -> bool:
+        if not self.last_began:
+            return True
+        m = re.search(r"(\S+): (?:command )?not found", self.last_out)
+        return m is not None and m.group(1) not in cmd
 
     def _resync_verify(self, part: str) -> list[str]:
         """The end marker of a chunk never showed (the command or the marker was garbled on
         the way in): clear the shell line, then re-read the part file's md5 under a fresh
         marker, which doubles as the resync probe. [] if even that gets no answer."""
-        self.console.write(b"")
+        self.console.write(b"\x03")
         self.console.drain(0.5, 5.0)
         try:
             return self.run(f"md5sum < {part}", timeout=CHUNK_WAIT_S, check=False).stdout.split()
@@ -131,6 +152,12 @@ class ConsoleTarget:
         self._check_md5(q, data, f"pull {remote}")
         Path(local).write_bytes(data)
 
+    def md5(self, path: str) -> str:
+        """md5 of the file on the board ('' when md5sum yields nothing)."""
+        r = self.run(f"md5sum < {shlex.quote(path)}", check=False)
+        got = r.stdout.split()
+        return got[0] if r.rc == 0 and got else ""
+
     def _check_md5(self, q: str, data: bytes, what: str) -> None:
         got = self.run(f"md5sum < {q}").stdout.split()
         want = hashlib.md5(data).hexdigest()
@@ -145,13 +172,14 @@ class ConsoleSwdProbe(Probe):
         self.t, self.tools_dir, self.tools = target, Path(tools_dir), tools
         self._pushed = False
 
-    def _py(self, args: str, timeout: float = 600.0) -> str:
+    def _py(self, args: str, timeout: float = 600.0, long_running: bool = False) -> str:
         if not self._pushed:
             self.t.run(f"mkdir -p {REMOTE_DIR}")
             for f in self.tools:
                 self.t.put(self.tools_dir / f, f"{REMOTE_DIR}/{f}")
             self._pushed = True
-        return self.t.run(f"cd {REMOTE_DIR} && python3 {args}", timeout=timeout).stdout
+        extra = {"long_running": True} if long_running else {}    # a flash/dd write: never re-sent
+        return self.t.run(f"cd {REMOTE_DIR} && python3 {args}", timeout=timeout, **extra).stdout
 
     def dp_id(self) -> int:
         out = self._py("swd_bb.py")
@@ -162,7 +190,7 @@ class ConsoleSwdProbe(Probe):
 
     def loadbin(self, path: Path, addr: int) -> None:
         self.t.put(Path(path), f"{REMOTE_DIR}/img.bin")
-        self._py(f"gd32_swd_flash.py write {addr:#x} {REMOTE_DIR}/img.bin")
+        self._py(f"gd32_swd_flash.py write {addr:#x} {REMOTE_DIR}/img.bin", long_running=True)
 
     def savebin(self, path: Path, addr: int, size: int) -> None:
         self._py(f"gd32_swd_flash.py dump {addr:#x} {size:#x} {REMOTE_DIR}/rb.bin")

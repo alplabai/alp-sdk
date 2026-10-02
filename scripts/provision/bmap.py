@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Block-map (bmap) support for the system image: parse the .wic.bmap,
 verify every mapped range of the gunzipped wic against its checksum, and
 stage the mapped bytes as one gzip stream for a single ssh write.
@@ -65,7 +66,7 @@ def stage(wic_gz: Path, bm: Bmap, out_gz: Path | None) -> tuple[str, int]:
             pos = 0
             for first, count, want in bm.ranges:
                 start, length = first * bm.block_size, count * bm.block_size
-                _skip(f, start - pos)
+                _skip(f, start - pos, wic_gz.name)
                 h = hashlib.new(bm.checksum_type)
                 got = 0
                 want_len = min(length, max(bm.image_size - start, 0))
@@ -88,15 +89,25 @@ def stage(wic_gz: Path, bm: Bmap, out_gz: Path | None) -> tuple[str, int]:
                         sink.write(pad)
                 total += length
                 pos = start + got
+            _skip(f, None, wic_gz.name)                # the tail after the last range is unmapped too
     finally:
         if sink:
             sink.close()
     return md5.hexdigest(), total
 
 
-def _skip(f, n: int) -> None:
-    while n > 0:
-        blk = f.read(min(_CHUNK, n))
+def _skip(f, n: int | None, name: str) -> None:
+    """Consume n bytes (None: to EOF) that the bmap leaves unmapped. They must be zero: a
+    non-zero unmapped block means the bmap under-maps the image and the board would get
+    stale bytes there."""
+    while n is None or n > 0:
+        blk = f.read(_CHUNK if n is None else min(_CHUNK, n))
         if not blk:
+            if n is None:
+                return
             raise BenchError("wic ended before the next mapped range")
-        n -= len(blk)
+        if blk.count(0) != len(blk):
+            raise BenchError(f"{name}: a block the bmap leaves unmapped holds non-zero data; "
+                             "the bmap does not cover the image; nothing was written")
+        if n is not None:
+            n -= len(blk)

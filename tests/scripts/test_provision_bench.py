@@ -205,7 +205,10 @@ class _PsuSock:
         cmd = data.decode().strip()
         self.psu.sent.append(cmd)
         if cmd.startswith("OUTP CH1,"):
-            self.psu.on = cmd.endswith("ON")
+            if self.psu.swallow > 0:
+                self.psu.swallow -= 1
+            elif not (self.psu.stuck_on and cmd.endswith("OFF")):
+                self.psu.on = cmd.endswith("ON")
 
     def recv(self, n):
         return b"0x14" + bytes([10]) if self.psu.on else b"0x4" + bytes([10])
@@ -217,6 +220,7 @@ class _PsuSock:
 class _Psu:
     def __init__(self):
         self.sent, self.connects, self.reset_next, self.on = [], 0, False, False
+        self.swallow, self.stuck_on = 0, False   # OUTP commands eaten / OFF ignored
 
     def connect(self, addr, timeout):
         self.connects += 1
@@ -534,3 +538,79 @@ def test_fake_linux(tmp_path):
     src.write_bytes(b"abcdef")
     t.put(src, "/tmp/f.bin")
     assert t.md5("/tmp/f.bin", 2, 2) == __import__("hashlib").md5(b"cd").hexdigest()
+
+
+# --- ScpiPower._confirm --------------------------------------------------------------------------
+
+def test_scpi_confirm_resends_a_swallowed_on_without_a_second_on_event():
+    psu = _Psu()
+    p = psu.power(1)
+    psu.swallow = 1                      # the half-dead socket eats the first OUTP
+    p.on()
+    assert psu.sent == ["OUTP CH1,ON", "SYST:STAT?", "OUTP CH1,ON", "SYST:STAT?"]
+    assert p.is_on() is True
+    assert p.on_count == 1               # one ON event, however many times it was sent
+
+
+def test_scpi_resent_on_refreshes_the_min_on_clock():
+    psu = _Psu()
+    p = psu.power(1)
+    psu.swallow = 1
+    first = p._clock()
+    p.on()
+    assert p._last_on > first            # the ON edge is the resend, not the swallowed command
+
+
+def test_scpi_off_raises_when_the_output_stays_on():
+    psu = _Psu()
+    p = psu.power(1)
+    p.on()
+    psu.stuck_on = True                  # the PSU ignores OFF
+    with pytest.raises(BenchError, match="did not read back OFF"):
+        p.off()
+    assert psu.sent.count("OUTP CH1,OFF") == 2    # sent, resent once, then refused
+
+
+def test_scpi_on_raises_when_the_state_cannot_be_read():
+    def handler(conn):
+        try:
+            while conn.recv(100):
+                conn.sendall(b"garbage\n")
+        except OSError:                  # the client closed first
+            pass
+
+    srv, port = _serve_once(handler)
+    try:
+        p = bench.ScpiPower("127.0.0.1", port, 1)
+        p._sleep = lambda s: None
+        with pytest.raises(BenchError, match="did not read back ON"):
+            p.on()                       # is_on() is None: unknowable is not confirmed
+    finally:
+        srv.close()
+
+
+@pytest.mark.parametrize("channel", [0, 3, 4])
+def test_scpi_channel_without_a_status_bit_is_refused_up_front(channel):
+    with pytest.raises(BenchError, match="only CH1 and CH2"):
+        bench.ScpiPower("h", 1, channel)
+
+
+def test_cycle_confirms_the_on_only_after_the_console_settle_read():
+    """The ON read-back must not sit between the ON edge and the first console read."""
+    psu = _Psu()
+    p = psu.power(1)
+    order = []
+    orig = _PsuSock.sendall
+    _PsuSock.sendall = lambda self, d: (order.append(d.decode().strip()), orig(self, d))[1]
+
+    class Con:
+        def pump(self, seconds):
+            order.append(f"pump {seconds:g}")
+    try:
+        p._clock = lambda: 1e6
+        p.cycle(0, Con())
+    finally:
+        _PsuSock.sendall = orig
+    on = order.index("OUTP CH1,ON")
+    assert order[on + 1] == f"pump {bench.ON_SETTLE_S:g}"       # first thing after the ON edge: read
+    assert order[on + 2] == "SYST:STAT?"                       # then the read-back

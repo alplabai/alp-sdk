@@ -18,14 +18,14 @@ class StoreSwdProbe(ConsoleSwdProbe):
         super().__init__(target, tools_dir, tools)
         self.store = store
 
-    def _py(self, args: str, timeout: float = 600.0) -> str:
+    def _py(self, args: str, timeout: float = 600.0, long_running: bool = False) -> str:
         if not self._pushed:
             self.t.run(f"mkdir -p {REMOTE_DIR}")
             for f in self.tools:
                 stage(self.t, self.store, self.tools_dir / f, f"{REMOTE_DIR}/{f}")
             self._pushed = True
-        return super()._py(args, timeout)
+        return super()._py(args, timeout, long_running)
 
     def loadbin(self, path: Path, addr: int) -> None:
         stage(self.t, self.store, Path(path), f"{REMOTE_DIR}/img.bin")
-        self._py(f"gd32_swd_flash.py write {addr:#x} {REMOTE_DIR}/img.bin")
+        self._py(f"gd32_swd_flash.py write {addr:#x} {REMOTE_DIR}/img.bin", long_running=True)

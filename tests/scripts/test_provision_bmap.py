@@ -8,6 +8,8 @@ import gzip
 import hashlib
 import json
 import re
+import shutil
+import subprocess
 
 import pytest
 from provision import bmap, steps
@@ -183,3 +185,100 @@ def test_parse_rejects_garbage(tmp_path):
     p.write_text("<bmap><BlockSize>4096</BlockSize></bmap>", encoding="utf-8")
     with pytest.raises(BenchError, match="not a valid bmap"):
         bmap.parse(p)
+
+
+# --- the generated shell commands, run by a real sh/dd/gzip -------------------------------------
+# The fakes above only model the gunzip|dd loops; this harness executes them.
+
+needs_sh = pytest.mark.skipif(not (shutil.which("sh") and shutil.which("dd") and shutil.which("gzip")),
+                              reason="needs a POSIX sh with dd and gzip")
+
+
+class RealShell:
+    """A target whose run() is `sh -c` in a scratch dir: the device is the file dev.img."""
+
+    def __init__(self, work, monkeypatch):
+        self.work = work
+        work.mkdir(exist_ok=True)
+        monkeypatch.setattr(lt, "RANGES_PATH", "ranges.txt")
+
+    def run(self, cmd, timeout=60.0, check=True, stdin_path=None, **kw):
+        if cmd.startswith("blockdev"):
+            return lt.CmdResult(0, "", "")
+        stdin = open(stdin_path, "rb") if stdin_path else subprocess.DEVNULL
+        try:
+            p = subprocess.run(["sh", "-c", cmd], cwd=self.work, capture_output=True, text=True,
+                               timeout=120, stdin=stdin)
+        finally:
+            if stdin_path:
+                stdin.close()
+        if check and p.returncode:
+            raise BenchError(f"{cmd}: {p.stderr}")
+        return lt.CmdResult(p.returncode, p.stdout, p.stderr)
+
+    def put(self, local, remote):
+        shutil.copy(local, self.work / remote)
+
+
+def make_wic(tmp_path, raw: bytes):
+    """(wic.gz path, parsed bmap) for raw, mapping every non-zero block."""
+    wic = tmp_path / "x.wic.gz"
+    wic.write_bytes(gzip.compress(raw))
+    xml = tmp_path / "x.wic.bmap"
+    xml.write_text(make_bmap_xml(raw), encoding="utf-8")
+    return wic, bmap.parse(xml)
+
+
+@needs_sh
+def test_host_stream_write_in_a_real_shell(tmp_path, monkeypatch):
+    """No store: the host sends only the mapped bytes, the board's gunzip|dd loop places them."""
+    wic, bm = make_wic(tmp_path, RAW)
+    sh = RealShell(tmp_path / "w", monkeypatch)
+    (sh.work / "dev.img").write_bytes(bytes([STALE]) * (len(RAW) + BS))
+    ev = lt.rootfs_write_verify_mapped(sh, "dev.img", wic, bm)
+    dev = (sh.work / "dev.img").read_bytes()
+    for s, c, _ in bm.ranges:
+        assert dev[s * BS:(s + c) * BS] == RAW[s * BS:(s + c) * BS].ljust(c * BS, b"\0")
+    assert dev[BS:256 * BS] == bytes([STALE]) * (255 * BS)      # the gap was never touched
+    assert ev["rootfs_bytes_written"] == str(bm.mapped_bytes)
+
+
+@needs_sh
+@pytest.mark.parametrize("stored", [False, True])
+def test_image_not_a_whole_number_of_blocks_pads_the_last_block_on_both_paths(tmp_path, monkeypatch, stored):
+    raw = RAW + b"\x07" * 100                    # ImageSize % BlockSize != 0, the tail is data
+    assert len(raw) % BS
+    wic, bm = make_wic(tmp_path, raw)
+    assert bm.image_size == len(raw)
+    sh = RealShell(tmp_path / "w", monkeypatch)
+    (sh.work / "dev.img").write_bytes(bytes([STALE]) * (len(raw) + 2 * BS))
+    store = None
+    if stored:
+        shutil.copy(wic, sh.work / "payload.gz")
+        store = type("S", (), {"fetch": lambda self, local: "payload.gz"})()
+    lt.rootfs_write_verify_mapped(sh, "dev.img", wic, bm, store=store)     # raises on a readback mismatch
+    dev = (sh.work / "dev.img").read_bytes()
+    last = len(raw) // BS
+    assert dev[last * BS:(last + 1) * BS] == raw[last * BS:].ljust(BS, b"\0")    # the stale tail is zeroed
+
+
+def _undermapped(tmp_path, raw: bytes, drop: str):
+    xml = re.sub(rf'    <Range chksum="\w+"> {drop} </Range>\n', "", make_bmap_xml(raw))
+    (tmp_path / "x.bmap").write_text(xml, encoding="utf-8")
+    wic = tmp_path / "x.wic.gz"
+    wic.write_bytes(gzip.compress(raw))
+    return wic, bmap.parse(tmp_path / "x.bmap")
+
+
+def test_unmapped_non_zero_block_is_refused(tmp_path):
+    raw = b"\x01" * BS + b"\x02" * BS + bytes(BS) + b"\x03" * BS      # blocks 0-1 and 3 are data
+    wic, bm = _undermapped(tmp_path, raw, "0-1")                         # the bmap forgets blocks 0-1
+    with pytest.raises(BenchError, match="unmapped holds non-zero"):
+        bmap.stage(wic, bm, None)
+
+
+def test_non_zero_tail_after_the_last_range_is_refused(tmp_path):
+    raw = b"\x01" * BS + bytes(BS) + b"\x02" * BS
+    wic, bm = _undermapped(tmp_path, raw, "2")
+    with pytest.raises(BenchError, match="unmapped holds non-zero"):
+        bmap.stage(wic, bm, None)

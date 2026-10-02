@@ -18,7 +18,8 @@ from provision import linux_target as lt
 from provision import payload_store as ps
 from provision.store_swd_probe import StoreSwdProbe
 
-from .test_provision_bmap import BS, RAW, STALE, BmapBoard, with_bmap
+from .provision_fakes import FakeConsole
+from .test_provision_bmap import BS, RAW, STALE, BmapBoard, RealShell, needs_sh, with_bmap
 from .test_provision_steps import FIP, WritableBoard, _bench, _bundle, _ctx
 
 OLD = b"\xaa" * 40
@@ -35,16 +36,29 @@ class Store:
         self.partition = partition
         self.puts: list[str] = []
         self.cached: list[str] = []
+        self.rw = False                  # the store is mounted ro; only a remount makes it rw
+        self.cmp_missing = False
 
     def put(self, local, remote):
         self.puts.append(remote)
+        if remote.startswith(ps.MOUNT):
+            assert self.rw, f"wrote {remote} into a read-only store"
         super().put(local, remote)
 
     def _answer(self, cmd):
         if cmd.startswith("findfs LABEL=alp-payload"):
             return (0, "/dev/mmcblk1p3\n") if self.partition else (1, "")
+        if cmd.startswith("mount -o remount,rw"):
+            self.rw = True
+            return 0, ""
+        if cmd.startswith("sync; mount -o remount,ro"):
+            self.rw = False
+            return 0, ""
+        if cmd.startswith("sync; umount"):
+            return 0, ""
         if cmd.startswith("mkdir -p /mnt/alp-payload"):
             if "&& rm -f " in cmd:
+                assert self.rw, "cleaned a read-only store"
                 for p in shlex.split(cmd.split("&& rm -f ", 1)[1]):
                     self.files.pop(p, None)
             return 0, ""
@@ -54,14 +68,16 @@ class Store:
             if m[1] not in self.files:
                 return 1, ""
             return 0, hashlib.sha256(bytes(self.files[m[1]])).hexdigest() + "  -\n"
-        if m := re.match(r"cp -f (\S+) (\S+)$", cmd):
+        if m := re.match(r"cp -f (\S+) (\S+) && cmp -s \S+ \S+$", cmd):
             self.files[m[2]] = bytes(self.files[m[1]])
-            return 0, ""
+            return (127, "cmp: not found") if self.cmp_missing else (0, "")
         if m := re.match(r"mv (\S+) (\S+) && sync$", cmd):
+            assert self.rw
             self.files[m[2]] = self.files.pop(m[1])
             self.cached.append(m[2])
             return 0, ""
         if cmd.startswith("rm -f /mnt/alp-payload"):
+            assert self.rw
             for p in shlex.split(cmd[6:]):
                 self.files.pop(p, None)
             return 0, ""
@@ -279,42 +295,267 @@ def test_rootfs_full_image_runs_from_the_stored_wic_gz(tmp_path):
     assert board.puts == []
 
 
-@pytest.mark.skipif(not (shutil.which("sh") and shutil.which("dd") and shutil.which("gzip")),
-                    reason="needs a POSIX sh with dd and gzip")
+@needs_sh
 def test_local_gap_skipping_loop_in_a_real_shell(tmp_path, monkeypatch):
     """The stored-wic write streams the WHOLE image and must discard each gap between ranges;
     run the generated command under a real sh/dd (the fakes above only model it)."""
     bdir, _ = with_bmap(tmp_path)
     wic = bdir / "artifacts" / "img.wic.gz"
     bm = bmap.parse(bdir / "artifacts" / "img.wic.bmap")
-    work = tmp_path / "w"
-    work.mkdir()
-    shutil.copy(wic, work / "payload.gz")
-    (work / "dev.img").write_bytes(bytes([STALE]) * (len(RAW) + BS))
-    monkeypatch.setattr(lt, "RANGES_PATH", "ranges.txt")
-
-    class T:
-        def run(self, cmd, timeout=60.0, check=True, stdin_path=None):
-            if cmd.startswith("blockdev"):
-                return lt.CmdResult(0, "", "")
-            p = subprocess.run(["sh", "-c", cmd], cwd=work, capture_output=True, text=True, timeout=120)
-            if check and p.returncode:
-                raise lt.BenchError(f"{cmd}: {p.stderr}")
-            return lt.CmdResult(p.returncode, p.stdout, p.stderr)
-
-        def put(self, local, remote):
-            shutil.copy(local, work / remote)
+    sh = RealShell(tmp_path / "w", monkeypatch)
+    shutil.copy(wic, sh.work / "payload.gz")
+    (sh.work / "dev.img").write_bytes(bytes([STALE]) * (len(RAW) + BS))
 
     class S:
         def fetch(self, local):
             return "payload.gz"
 
-    ev = lt.rootfs_write_verify_mapped(T(), "dev.img", wic, bm, store=S())
-    dev = (work / "dev.img").read_bytes()
+    ev = lt.rootfs_write_verify_mapped(sh, "dev.img", wic, bm, store=S())
+    dev = (sh.work / "dev.img").read_bytes()
     for s, c, _ in bm.ranges:
         assert dev[s * BS:(s + c) * BS] == RAW[s * BS:(s + c) * BS].ljust(c * BS, b"\0")
     assert dev[BS:256 * BS] == bytes([STALE]) * (255 * BS)
     assert ev["rootfs_bytes_written"] == str(bm.mapped_bytes)
+
+
+# --- read-only mount, unmount before a power cycle ---------------------------------------------------
+
+def test_store_is_mounted_read_only_and_only_remounted_rw_while_caching(tmp_path):
+    board = StoreBoard(xspi_bl2=b"\x00" * 16, xspi_fip=OLD)
+    _, r = _xspi(tmp_path, board)
+    assert r.status == "done", r.detail
+    mounts = [c for c in board.commands if "|| mount " in c]
+    assert mounts and all("mount -o ro,noatime /dev/mmcblk1p3 " in c for c in mounts)
+    rw = [i for i, c in enumerate(board.commands) if c.startswith("mount -o remount,rw")]
+    ro = [i for i, c in enumerate(board.commands) if c.startswith("sync; mount -o remount,ro")]
+    assert len(rw) == len(ro) == 2 and all(a < b for a, b in zip(rw, ro))     # one window per cached file
+    assert board.rw is False                                                  # left read-only
+
+
+def test_store_is_remounted_read_only_even_when_caching_fails(tmp_path):
+    board = StoreBoard(xspi_bl2=b"\x00" * 16, xspi_fip=OLD)
+
+    def boom(local, remote):
+        raise lt.BenchError("link down")
+    board.put = boom
+    _, r = _xspi(tmp_path, board)
+    assert r.status == "failed"                                 # the push itself fails: nothing to hide
+    assert board.rw is False                                    # still left read-only after the failure
+
+
+def test_a_store_hit_never_goes_read_write(tmp_path):
+    board = StoreBoard(xspi_bl2=b"\x00" * 16, xspi_fip=OLD)
+    ctx = _ctx_on(tmp_path, board)
+    _put_store(board, ctx, "bl2")
+    _put_store(board, ctx, "fip")
+    steps.run_steps(ctx, only=["write_xspi"])
+    assert not any("remount" in c for c in board.commands)
+
+
+def test_stage_compares_md5_when_the_board_has_no_cmp(tmp_path):
+    board = StoreBoard(xspi_bl2=b"\x00" * 16, xspi_fip=OLD)
+    board.cmp_missing = True
+    ctx = _ctx_on(tmp_path, board)
+    _put_store(board, ctx, "bl2")
+    _put_store(board, ctx, "fip")
+    r = steps.run_steps(ctx, only=["write_xspi"])[-1]
+    assert r.status == "done", r.detail
+    assert board.files["/dev/mtd1"][:len(FIP)] == FIP
+
+
+def test_stage_fails_when_the_copy_differs(tmp_path):
+    board = StoreBoard()
+    board.files["/mnt/alp-payload/x/f"] = b"abc"
+    board.run = lambda cmd, timeout=60.0, check=True, stdin_path=None: lt.CmdResult(1, "differ", "")
+    local = tmp_path / "f"
+    local.write_bytes(b"abc")
+
+    class S:
+        def fetch(self, loc):
+            return "/mnt/alp-payload/x/f"
+    with pytest.raises(lt.BenchError, match="failed or differs"):
+        ps.stage(board, S(), local, "/tmp/f")
+
+
+def test_failed_push_cleanup_also_removes_the_console_chunk_files(tmp_path):
+    board = StoreBoard()
+    ctx = _ctx_on(tmp_path, board)
+    store = ctx.open_payload_store(board)
+    board.put = lambda local, remote: (_ for _ in ()).throw(lt.BenchError("garbled"))
+    store.fetch(ctx.artefact("fip"))
+    cleanup = [c for c in board.commands if c.startswith("rm -f /mnt/alp-payload")]
+    assert cleanup and all(".part.p*" in c and ".part.b64" in c for c in cleanup)
+    assert any(".part.p*" in c for c in board.commands if c.startswith("mkdir -p /mnt/alp-payload"))
+
+
+def _cycling_ctx(tmp_path, board, monkeypatch):
+    con = FakeConsole([])
+    b = _bench(console=con)
+    ctx = _ctx_on(tmp_path, board)
+    ctx.bench = b
+    ctx.linux = board
+    assert ctx.open_payload_store(board).dir                    # mounts, and is remembered
+    board.commands.clear()
+    return ctx, b, con
+
+
+def test_boot_to_linux_unmounts_the_store_before_the_power_cycle(tmp_path, monkeypatch):
+    board = StoreBoard()
+    ctx, b, con = _cycling_ctx(tmp_path, board, monkeypatch)
+    monkeypatch.setattr(steps.lt, "console_login", lambda c, u: None)
+    monkeypatch.setattr(steps, "connect_linux", lambda ctx, force=False, **kw: None)
+    seen = []
+    b.power.on_hook = lambda: (seen.append("sync; umount /mnt/alp-payload" in board.commands),
+                               con.feed("login: "))
+    steps.boot_to_linux(ctx, timeout=1)
+    assert seen == [True]
+    steps.boot_to_linux(ctx, timeout=1)                         # nothing mounted by the tool any more
+    assert board.commands.count("sync; umount /mnt/alp-payload") == 1
+
+
+def test_warm_reboot_unmounts_the_store_before_the_reboot(tmp_path, monkeypatch):
+    board = StoreBoard()
+    ctx, _, _ = _cycling_ctx(tmp_path, board, monkeypatch)
+    monkeypatch.setattr(steps, "boot_to_linux", lambda ctx, **kw: "")
+    steps.warm_reboot_to_linux(ctx)
+    assert board.commands[0] == "sync; umount /mnt/alp-payload"
+    assert any("reboot" in c for c in board.commands[1:])
+
+
+def test_poweroff_unmounts_the_store_first(tmp_path, monkeypatch):
+    board = StoreBoard()
+    ctx, _, con = _cycling_ctx(tmp_path, board, monkeypatch)
+    con.feed("reboot: Power down\n")
+    monkeypatch.setattr(steps, "boot_to_linux", lambda ctx, **kw: "")
+    steps.poweroff_and_cold_boot(ctx)
+    assert board.commands[0] == "sync; umount /mnt/alp-payload"
+    assert "poweroff" in board.commands
+
+
+# --- --create-payload-store ----------------------------------------------------------------------
+
+DISK_SECTORS = 10_000_000
+TABLE = [("/dev/mmcblk1p1", 2048, 16384, "c"), ("/dev/mmcblk1p2", 18432, 65536, "83")]    # ends at 83968
+
+
+class CreateBoard(StoreBoard):
+    """An SD with no alp-payload partition, a tiny sfdisk/partx/mke2fs model."""
+
+    def __init__(self, tools=("sfdisk", "partx", "mke2fs"), label="dos", table=None,
+                 sectors=DISK_SECTORS, **kw):
+        super().__init__(partition=False, **kw)
+        self.tools, self.label, self.sectors = set(tools), label, sectors
+        self.table = list(TABLE if table is None else table)
+        self.in_kernel = False
+
+    def _dump(self):
+        out = f"label: {self.label}\nlabel-id: 0x1234\ndevice: /dev/mmcblk1\nunit: sectors\n\n"
+        return out + "".join(f"{d} : start= {s}, size= {n}, type={t}\n" for d, s, n, t in self.table)
+
+    def _answer(self, cmd):
+        if m := re.match(r"command -v (\S+)$", cmd):
+            return (0 if m[1] in self.tools else 1), ""
+        if cmd == "sfdisk -d /dev/mmcblk1":
+            return 0, self._dump()
+        if cmd == "cat /sys/block/mmcblk1/size":
+            return 0, f"{self.sectors}\n"
+        if m := re.match(r"echo 'start=(\d+), size=(\d+), type=83' \| sfdisk --no-reread --append /dev/mmcblk1$", cmd):
+            self.table.append((f"/dev/mmcblk1p{len(self.table) + 1}", int(m[1]), int(m[2]), "83"))
+            return 0, ""
+        if cmd == "partx -a /dev/mmcblk1":
+            self.in_kernel = True
+            return 0, ""
+        if m := re.match(r"test -b (\S+)$", cmd):
+            return (0 if self.in_kernel else 1), ""
+        if cmd.startswith("mke2fs -F -q -t ext4 -L alp-payload /dev/mmcblk1p3"):
+            self.partition = True
+            return 0, ""
+        return super()._answer(cmd)
+
+
+def _created(tmp_path, board, **kw):
+    ctx = _ctx_on(tmp_path, board, create_payload_store=True, **kw)
+    return ctx, steps.run_steps(ctx, only=["write_xspi"])[-1]
+
+
+def test_create_payload_store_appends_a_partition_and_makes_the_filesystem(tmp_path):
+    board = CreateBoard(xspi_bl2=b"\x00" * 16, xspi_fip=OLD)
+    _, r = _created(tmp_path, board)
+    assert r.status == "done", r.detail
+    cmds = board.commands
+    appended = next(c for c in cmds if "sfdisk --no-reread --append" in c)
+    start, size = map(int, re.findall(r"=(\d+)", appended)[:2])
+    assert start == 83968 and start % 2048 == 0 and size % 2048 == 0
+    assert size * 512 >= 64 << 20                       # payload + 20 % + 64 MiB
+    assert board.table[-1][0] == "/dev/mmcblk1p3"
+    order = [next(i for i, c in enumerate(cmds) if p in c)
+             for p in ("--append", "partx -a", "mke2fs -F -q -t ext4 -L alp-payload /dev/mmcblk1p3", "|| mount -o ro")]
+    assert order == sorted(order)
+    assert "created alp-payload on /dev/mmcblk1p3" in r.evidence["payload_store_note"]
+    assert len(board.cached) == 2                       # the empty store filled itself
+    assert not any("/dev/mmcblk0" in c and ("sfdisk" in c or "mke2fs" in c) for c in cmds)
+
+
+def test_create_payload_store_is_off_by_default(tmp_path):
+    board = CreateBoard(xspi_bl2=b"\x00" * 16, xspi_fip=OLD)
+    _, r = _xspi(tmp_path, board)
+    assert "no alp-payload partition" in r.evidence["payload_store_note"]
+    assert not any("sfdisk" in c or "command -v" in c for c in board.commands)
+
+
+def test_create_payload_store_plan_changes_nothing(tmp_path):
+    board = CreateBoard(xspi_bl2=b"\x00" * 16, xspi_fip=OLD)
+    ctx = _ctx(tmp_path, bench=_bench(), linux=board, payload_store_on=True, create_payload_store=True)
+    steps.run_steps(ctx, only=["write_xspi"])
+    assert not any("sfdisk" in c or "mke2fs" in c or "mount " in c for c in board.commands)
+
+
+@pytest.mark.parametrize("tools, missing", [(("partx", "mke2fs"), "sfdisk"), (("sfdisk", "mke2fs"), "partx"),
+                                            (("sfdisk", "partx"), "mke2fs/mkfs.ext4")])
+def test_create_payload_store_names_the_missing_tool_and_falls_back_to_push(tmp_path, tools, missing):
+    board = CreateBoard(tools=tools, xspi_bl2=b"\x00" * 16, xspi_fip=OLD)
+    _, r = _created(tmp_path, board)
+    assert r.status == "done" and r.evidence["payload_source"] == "pushed"
+    assert f"the board has no {missing}" in r.evidence["payload_store_note"]
+    assert not any("--append" in c or "mke2fs -F" in c for c in board.commands)
+
+
+def test_create_payload_store_refuses_a_gpt_disk(tmp_path):
+    board = CreateBoard(label="gpt", xspi_bl2=b"\x00" * 16, xspi_fip=OLD)
+    _, r = _created(tmp_path, board)
+    assert r.status == "done" and "no MBR" in r.evidence["payload_store_note"]
+    assert not any("--append" in c for c in board.commands)
+
+
+@pytest.mark.parametrize("table", [
+    TABLE + [("/dev/mmcblk1p3", 90000, 100, "83"), ("/dev/mmcblk1p4", 91000, 100, "83")],   # no free slot
+    TABLE[:1] + [("/dev/mmcblk1p2", 18432, 65536, "5")],                                    # extended
+    [("/dev/mmcblk1p1", 2048, 100000, "83"), ("/dev/mmcblk1p2", 18432, 65536, "83")],       # overlap
+])
+def test_create_payload_store_refuses_an_unexpected_table(tmp_path, table):
+    board = CreateBoard(table=table, xspi_bl2=b"\x00" * 16, xspi_fip=OLD)
+    _, r = _created(tmp_path, board)
+    assert "unexpected partition table" in r.evidence["payload_store_note"]
+    assert not any("--append" in c for c in board.commands)
+
+
+def test_create_payload_store_refuses_when_the_sd_has_no_room(tmp_path):
+    board = CreateBoard(sectors=83968 + 100_000, xspi_bl2=b"\x00" * 16, xspi_fip=OLD)   # ~49 MiB free
+    _, r = _created(tmp_path, board)
+    assert "unpartitioned after the last partition, need" in r.evidence["payload_store_note"]
+    assert not any("--append" in c for c in board.commands)
+
+
+def test_create_payload_store_never_runs_from_the_emmc(tmp_path):
+    board = CreateBoard(root="mmcblk0p2", xspi_bl2=b"\x00" * 16, xspi_fip=OLD)
+    _, r = _created(tmp_path, board)
+    assert "eMMC" in r.evidence["payload_store_note"]
+    assert not any("sfdisk" in c or "mke2fs" in c for c in board.commands)
+
+
+def test_create_partition_refuses_the_emmc_disk_itself():
+    with pytest.raises(ps.NoStore, match="it is the eMMC"):
+        ps.create_partition(object(), "/dev/mmcblk0", "/dev/mmcblk0", 1)
 
 
 # --- prepare-sd ------------------------------------------------------------------------------------
@@ -379,3 +620,39 @@ def test_prepare_sd_refuses_a_file_that_differs_from_the_bundle(tmp_path):
 def test_prepare_sd_reports_mke2fs_failure(tmp_path):
     with pytest.raises(prepare_sd.PrepareError, match="mke2fs failed"):
         _prep(tmp_path, lambda argv, **k: subprocess.CompletedProcess(argv, 1, "", "boom"))
+
+
+def _block_device(monkeypatch, removable: str, model="Generic SD"):
+    monkeypatch.setattr(prepare_sd, "_is_block", lambda d: True)
+    monkeypatch.setattr(prepare_sd, "_sysfs", lambda d, a: removable if a == "removable" else model)
+
+
+def test_prepare_sd_refuses_a_non_removable_block_device(tmp_path, monkeypatch):
+    bdir, _ = _bundle(tmp_path)
+    dev = tmp_path / "sdb"
+    dev.write_bytes(bytes(4096))
+    _block_device(monkeypatch, "0")
+    with pytest.raises(prepare_sd.PrepareError, match="not a removable device.*--i-know-this-is-the-sd 4096"):
+        prepare_sd.prepare(bdir, dev, None, runner=lambda *a, **k: None)
+    assert dev.read_bytes() == bytes(4096)                     # nothing written
+
+
+def test_prepare_sd_refuses_a_wrong_confirmation(tmp_path, monkeypatch):
+    bdir, _ = _bundle(tmp_path)
+    dev = tmp_path / "sdb"
+    dev.write_bytes(bytes(4096))
+    _block_device(monkeypatch, "0")
+    with pytest.raises(prepare_sd.PrepareError, match="not a removable"):
+        prepare_sd.prepare(bdir, dev, None, runner=lambda *a, **k: None, confirm="1234")
+
+
+def test_prepare_sd_takes_a_removable_device_and_a_confirmed_one(tmp_path, monkeypatch):
+    bdir, _ = _bundle(tmp_path)
+    dev = tmp_path / "sdb"
+    dev.write_bytes(bytes(4096))
+    _block_device(monkeypatch, "1")
+    prepare_sd._refuse_non_removable(dev, None)                # removable: no flag needed
+    _block_device(monkeypatch, "0")
+    prepare_sd._refuse_non_removable(dev, "4096")              # the operator repeated the size
+    monkeypatch.setattr(prepare_sd, "_is_block", lambda d: False)
+    prepare_sd._refuse_non_removable(dev, None)                # an image file is exempt

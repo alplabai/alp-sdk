@@ -135,7 +135,7 @@ class Board(FakeLinux):
         self.root = root
         self.rail = rail_on_xspi
 
-    def run(self, cmd, timeout=60.0, check=True, stdin_path=None):
+    def run(self, cmd, timeout=60.0, check=True, stdin_path=None, long_running=False):
         self.commands.append(cmd)
         rc, out = self._answer(cmd)
         res = lt.CmdResult(rc, out, "" if rc == 0 else "fake: unscripted")

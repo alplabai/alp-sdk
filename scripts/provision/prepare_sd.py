@@ -90,6 +90,36 @@ def _refuse_mounted(device: Path) -> None:
         raise PrepareError(f"{device} has a mounted partition; unmount it first")
 
 
+def _is_block(device: Path) -> bool:
+    return device.is_block_device()
+
+
+def _sysfs(device: Path, attr: str) -> str:
+    try:
+        return (Path("/sys/block") / device.name / attr).read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return ""
+
+
+def _device_size(device: Path) -> int:
+    with open(device, "rb") as f:
+        return f.seek(0, os.SEEK_END)
+
+
+def _refuse_non_removable(device: Path, confirm: str | None) -> None:
+    """A block DEVICE is overwritten from sector 0: only a removable one (an SD in a reader) is
+    taken on trust. Anything else (a system disk, an eMMC) needs the operator to repeat its size
+    in bytes back via --i-know-this-is-the-sd. An image file is exempt."""
+    if not _is_block(device) or _sysfs(device, "removable") == "1":
+        return
+    size = _device_size(device)
+    if confirm == str(size):
+        return
+    model = _sysfs(device, "device/model") or "unknown model"
+    raise PrepareError(f"{device} ({model}, {size} bytes) is not a removable device: refusing to overwrite it. "
+                       f"If it IS the provisioning SD, repeat its size: --i-know-this-is-the-sd {size}")
+
+
 def write_wic(wic_gz: Path, device: Path) -> int:
     """Stream the decompressed wic to DEVICE; returns the byte count."""
     n = 0
@@ -149,12 +179,14 @@ def stage_tree(root: Path, sha: str, files: dict[str, Path]) -> None:
     (d / "manifest.sha256").write_text("".join(lines), encoding="ascii", newline="\n")
 
 
-def prepare(bundle_dir: Path, device: Path, gd32_fw: Path | None = None, runner=subprocess.run) -> str:
+def prepare(bundle_dir: Path, device: Path, gd32_fw: Path | None = None, runner=subprocess.run,
+            confirm: str | None = None) -> str:
     sha, files, bundle = collect(bundle_dir, gd32_fw)
     wic = _system_image(bundle_dir, bundle)
     if shutil.which("mke2fs") is None and runner is subprocess.run:
         raise PrepareError("mke2fs (e2fsprogs >= 1.43) not found: run prepare-sd under WSL or Linux")
     _refuse_mounted(device)
+    _refuse_non_removable(device, confirm)
     payload = sum(p.stat().st_size for p in files.values())
     n = write_wic(wic, device)
     start, sectors = add_partition(device, payload + payload // 10 + (64 << 20))

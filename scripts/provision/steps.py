@@ -128,6 +128,8 @@ class Ctx:
     # read payloads from the provisioning SD's alp-payload partition when it holds them
     # (prepare-sd); off by default so a bare Ctx never mounts anything
     payload_store_on: bool = False
+    # with no alp-payload partition on the boot SD, create one from the board (execute only)
+    create_payload_store: bool = False
     station: str | None = None
     by: str = "provision_som"
     ledger_xlsx: Path | None = None
@@ -194,7 +196,24 @@ class Ctx:
             root, emmc = lt.root_device(t), lt.resolve_emmc(t)
         except BenchError as e:
             return payload_store.PayloadStore(t, None, off=f"store off: cannot tell the boot device ({e})")
-        return payload_store.open_store(t, sha, self.bundle.get("components", []), root, emmc)
+        store = payload_store.open_store(t, sha, self.bundle.get("components", []), root, emmc,
+                                         self._payload_need() if self.create_payload_store else None)
+        if store.dir is not None:
+            self._cache.setdefault("store_targets", []).append(t)    # unmounted before a power cycle
+        return store
+
+    def _payload_need(self) -> int:
+        """Bytes the store partition must hold: every bundle file and GD32 image, +20 %, +64 MiB."""
+        files = [self.bundle_dir / c["file"] for c in self.bundle.get("components", []) if c.get("file")]
+        if self.gd32_fw:
+            files += list(Path(self.gd32_fw).iterdir())
+        n = sum(p.stat().st_size for p in files if p.is_file())
+        return n + n // 5 + (64 << 20)
+
+    def unmount_payload_stores(self) -> None:
+        """Best-effort umount of every store this run mounted, before a power cycle or reboot."""
+        for t in self._cache.pop("store_targets", []):
+            payload_store.unmount(t)
 
     # -- bench ----------------------------------------------------------------
     def need_bench(self) -> Bench:
@@ -403,6 +422,7 @@ def boot_to_linux(ctx: Ctx, timeout: float = 240.0, need_ip: bool = True,
     running instead of cycling: the text is taken from that mark."""
     b = ctx.need_bench()
     if resume_mark is None:
+        ctx.unmount_payload_stores()
         n = len(b.console.transcript)
         b.console.drain()
         b.power.cycle(b.off_s, b.console)
@@ -1322,6 +1342,7 @@ def warm_reboot_to_linux(ctx: Ctx) -> None:
     """Warm `reboot` from Linux (no PSU action), wait for the console login, re-attach.
     The DX-M1 DTB swap needs only a new device tree, not a power cycle."""
     b = ctx.need_bench()
+    ctx.unmount_payload_stores()
     n = len(b.console.transcript)
     b.console.drain()
     ctx.linux.run("sync; (sleep 1; reboot) </dev/null >/dev/null 2>&1 &", check=False)
@@ -1333,6 +1354,7 @@ def poweroff_and_cold_boot(ctx: Ctx) -> str:
     cold cycle (Power.cycle enforces MIN_ON_S / MIN_OFF_S) and login."""
     b = ctx.need_bench()
     t = ctx.linux
+    ctx.unmount_payload_stores()
     t.run("sync", check=False, timeout=120.0)
     try:
         t.run("poweroff", check=False, timeout=30.0)

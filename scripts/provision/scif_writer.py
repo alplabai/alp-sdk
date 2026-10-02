@@ -39,6 +39,15 @@ ROM_FALLBACK_MSG = (
     "normal SCIF boot): DSW1 is probably not set to SCIF download mode, or the board "
     "is faulty. Check DSW1 and the unit before retrying."
 )
+# The ROM answers this to the first S-record when the load address is not one it accepts
+# (the SoC is not running on the CA55). Seen on bench 2026-10-02, unit 2026W38-0005, caused
+# by a broken PMIC programming patch.
+ROM_ADDRESS_ERROR = r"Address Error!!!"
+ROM_ADDRESS_ERROR_MSG = (
+    "boot ROM rejected the Flash Writer load address: the SoC is probably not booting on the "
+    "CA55 (boot-CPU select / PMIC programming); supply current around 50 mA at 15 V instead of "
+    "~90 mA confirms it"
+)
 # The ROM still prints after the banner; stream only after its full prompt line.
 ROM_READY = r"Load Program to SRAM\s*-+\r?\n"
 ROM_SETTLE_S = 0.3
@@ -114,7 +123,9 @@ def load_writer(console: Console, mot: Path, timeout: float = 120.0, banner_seen
     console.expect(ROM_READY, timeout)
     time.sleep(ROM_SETTLE_S)
     _stream(console, _crlf(image))
-    console.expect(WRITER_PROMPT, timeout)
+    key, _ = console.expect_any({"err": ROM_ADDRESS_ERROR, "ok": WRITER_PROMPT}, timeout)
+    if key == "err":
+        raise BenchError(ROM_ADDRESS_ERROR_MSG)
 
 
 def em_w(console: Console, area: int, start_sector: int, program_start: int,
