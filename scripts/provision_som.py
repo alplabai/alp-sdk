@@ -394,6 +394,9 @@ def _v2n_parser() -> argparse.ArgumentParser:
     work.add_argument("--tier-markers", type=Path, help="PRIVATE DDR tier markers JSON")
     work.add_argument("--pmic-expect", type=Path,
                       help="PRIVATE expected PMIC registers (YAML or JSON)")
+    work.add_argument("--functest-expect", type=Path,
+                      help="PRIVATE expected values of functional_test (YAML), merged over "
+                           "scripts/provision/functest-expect-v2n.yaml")
     work.add_argument("--flash-writer", type=Path, help="Flash Writer .mot (overrides bench.yaml)")
     work.add_argument("--gd32-fw", type=Path,
                       help="dir with bootloader.bin, ota-meta.bin, slot-a.bin")
@@ -536,7 +539,7 @@ def _check_hw_rev(family: str, key: str) -> None:
 def v2n_main(argv: list[str]) -> int:
     import yaml
     from provision import bench as bench_mod
-    from provision import gates, steps
+    from provision import functest, gates, steps
 
     try:
         a = _v2n_parser().parse_args(argv)
@@ -566,6 +569,7 @@ def v2n_main(argv: list[str]) -> int:
             bundle = {**bundle, "hw_rev": a.hw_rev}
         markers = json.loads(a.tier_markers.read_text(encoding="utf-8")) if a.tier_markers else None
         regs = yaml.safe_load(a.pmic_expect.read_text(encoding="utf-8")) if a.pmic_expect else None
+        expect = functest.load_expect(a.functest_expect)
         if a.cmd == "run" and not a.bench:
             raise ValueError("run needs --bench")
         bench = bench_mod.load_bench(a.bench) if a.bench else None
@@ -607,7 +611,7 @@ def v2n_main(argv: list[str]) -> int:
         hil = REPO / "tests" / "hil" / f"{a.sku.lower().removeprefix('e1m-')}-{a.carrier}"
     ctx = steps.Ctx(sku=a.sku, serial=serial, bundle_dir=bundle_dir, bundle=bundle, preset=preset,
                     ledger_root=a.ledger_root, execute=execute, lock=getattr(a, "lock", False),
-                    bench=bench, tier_markers=markers, expected_registers=regs,
+                    bench=bench, tier_markers=markers, expected_registers=regs, functest_expect=expect,
                     allow_tier_mismatch=a.allow_tier_mismatch,
                     accept_cid_change=a.accept_cid_change, reprovision_from=a.reprovision_from,
                     cold_cycles=a.cold_cycles, hil_spec=hil, flash_writer=a.flash_writer,

@@ -35,7 +35,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import TypeVar
 
-from provision import bmap, dxm1, gates, ledger_out, payload_store, uboot
+from provision import bmap, dxm1, functest, gates, ledger_out, payload_store, uboot
 from provision import linux_target as lt
 from provision.bench import Bench, BenchError, ExpectTimeout
 from provision.console_target import ConsoleTarget
@@ -120,6 +120,7 @@ class Ctx:
     linux: object | None = None           # LinuxTarget (or a duck-typed fake)
     tier_markers: dict | None = None
     expected_registers: dict | None = None
+    functest_expect: dict | None = None   # functional_test pass criteria (None: the public defaults)
     allow_tier_mismatch: str | None = None
     accept_cid_change: str | None = None  # operator escape: the eMMC was legitimately replaced
     reprovision_from: Path | None = None
@@ -2013,6 +2014,11 @@ class ColdBootTest(Step):
             if probs:
                 ctx.facts.update(ev)
                 raise Refused(f"cold cycle {i}/{n}: " + "; ".join(probs))
+            if i == 1 and n >= 2 and (functest.config(ctx).get("fixtures") or {}).get("rtc_backup"):
+                # functional_test's rtc_retention then has the remaining cold cycles to judge
+                ev["rtc_set_boot_id"] = ctx.mutate(
+                    "set the RTC from the host clock (fixture rtc_backup: retention is checked after "
+                    "the remaining cold cycles)", lambda: functest.rtc_set(ctx.linux))
         if ev.get("cold_boots_passed") != f"{n}/{n}":
             raise Refused(f"cold_boot_test observed {ev.get('cold_boots_passed', '0')} clean boots, want {n}/{n}")
         return self.result(ctx, f"{n}/{n} cold boots clean", ev)
@@ -2045,6 +2051,53 @@ class ClkgenVerify(Step):
               "clkgen_i2c_addr": f"{lt.CLKGEN_5L35023B_ADDR:#04x}"}
         return self.result(ctx, f"5L35023B OTP image matches (dash code {image[0x01]:#04x}); "
                            f"boot line: {line!r}", ev, status="done")
+
+
+class FunctionalTest(Step):
+    """Every interface the unit can reach, tested on the unit as shipped: after cold_boot_test's
+    last cold boot (xSPI boot, eMMC root). The catalogue, the script and the judges are
+    provision/functest.py; the pass criteria are functest-expect-v2n.yaml + --functest-expect.
+
+    A step of its own rather than more of hil_smoke: hil_smoke shells out to the HiL runner
+    (built example binaries, one pass/fail for the whole spec directory, no bench.yaml
+    fixtures, nothing recorded per check), while this runs through the tool's own Linux
+    target in one remote invocation and records one `test_<check>` value per check.
+
+    A check that fails or cannot be read fails the step unless the expected-values file
+    lists it `informational`; a fixture the bench does not have is `skipped (no fixture:
+    ...)`, which never fails the step. The summary key `test_functional` is what the ship
+    check reads."""
+    name = "functional_test"
+    always_run = True
+
+    def run(self, ctx):
+        x = ctx.functest_expect or functest.load_expect()
+        checks = functest.build(ctx, x)
+        fixtures = functest.config(ctx).get("fixtures") or {}
+        lanes, wall = functest.estimate(functest.applicable(checks, fixtures))
+        budget = "estimated %.0f s (lanes: %s)" % (wall, ", ".join(f"{k} {v:.1f}" for k, v in sorted(lanes.items())))
+        if not ctx.execute:
+            for c in checks:
+                off = c.fixture is not None and not fixtures.get(c.fixture)
+                ctx.mutate(f"{c.name}: {c.what}" + (f" [skipped: no fixture {c.fixture}]" if off else ""),
+                           lambda: None)
+            return self.result(ctx, f"would run {len(checks)} functional checks, {budget}")
+        t = ctx.need_linux()
+        values, raw, seconds = functest.run(ctx, t, checks, x)
+        bad = functest.blocking(values, x)
+        info = sorted(n for n, v in values.items() if n not in bad and v.startswith(("fail", "unread")))
+        skipped = sorted(n for n, v in values.items() if v.startswith("skipped"))
+        ev = {f"test_{n}": v for n, v in values.items()}
+        ev[functest.SUMMARY_KEY] = "pass" if not bad else functest._value("fail", ", ".join(bad))
+        ev["functional_test_seconds"] = f"{seconds:.1f}"
+        ctx.step_logs[self.name] = "\n".join(
+            [f"{n}: {v}" for n, v in values.items()]
+            + [f"wall time {seconds:.1f} s; {budget}", "--- script output ---", _elide_long_lines(raw)])
+        detail = (f"{sum(v.startswith('pass') for v in values.values())}/{len(values)} passed in {seconds:.1f} s"
+                  + (f"; FAILED: {'; '.join(f'{n}: {values[n]}' for n in bad)}" if bad else "")
+                  + (f"; informational: {', '.join(info)}" if info else "")
+                  + (f"; skipped: {', '.join(skipped)}" if skipped else ""))
+        return StepResult(self.name, "failed" if bad else "done", detail, ev)
 
 
 class HilSmoke(Step):
@@ -2232,7 +2285,7 @@ class SecurePageLock(Step):
 STEP_ORDER: list[type[Step]] = [
     Preflight, Detect, OpDsw1Scif, Bootstrap, OpDsw1EmmcInsertSd, BootSdLinux, Gd32Flash, WriteXspi,
     WriteEmmcBoot, WriteRootfs, Census, EepromManifest, Dxm1NpuFlash, PmicVerify,
-    SecurePage, OpDsw1XspiRemoveSd, ColdBootTest, CensusFinal, ClkgenVerify, HilSmoke, Record,
+    SecurePage, OpDsw1XspiRemoveSd, ColdBootTest, CensusFinal, ClkgenVerify, FunctionalTest, HilSmoke, Record,
 ]
 STEP_NAMES = [s.name for s in STEP_ORDER]
 

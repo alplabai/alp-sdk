@@ -496,8 +496,9 @@ def _parse_bytes(out: str, n: int) -> bytes:
     return bytes(int(x, 16) for x in toks)
 
 
-def _xfer(t: LinuxTarget, bus: int, addr: int, write: bytes, read_len: int, check: bool = True) -> bytes | None:
-    """ONE i2ctransfer invocation: optional write msg, optional repeated-start read."""
+def xfer_cmd(bus: int, addr: int, write: bytes, read_len: int, force: bool = False) -> str:
+    """The ONE i2ctransfer command line of a transfer: optional write msg, optional
+    repeated-start read. ``force`` adds -f (an address a kernel driver owns)."""
     if not write and not read_len:
         raise ValueError("empty i2c transfer")
     msgs = []
@@ -505,7 +506,12 @@ def _xfer(t: LinuxTarget, bus: int, addr: int, write: bytes, read_len: int, chec
         msgs.append(f"w{len(write)}@{addr:#04x} " + " ".join(f"{b:#04x}" for b in write))
     if read_len:
         msgs.append(f"r{read_len}" if write else f"r{read_len}@{addr:#04x}")
-    r = t.run(f"i2ctransfer -y {bus} " + " ".join(msgs), check=check)
+    return f"i2ctransfer {'-f ' if force else ''}-y {bus} " + " ".join(msgs)
+
+
+def _xfer(t: LinuxTarget, bus: int, addr: int, write: bytes, read_len: int, check: bool = True) -> bytes | None:
+    """ONE i2ctransfer invocation: optional write msg, optional repeated-start read."""
+    r = t.run(xfer_cmd(bus, addr, write, read_len), check=check)
     if r.rc != 0:
         return None
     return _parse_bytes(r.stdout, read_len) if read_len else b""
@@ -625,9 +631,17 @@ def gd32_bridge_version(t: LinuxTarget, bus: int, addr: int = 0x70) -> tuple[int
     Asking the bridge beats grepping dmesg: the driver logs the protocol only if the
     GD32 answers AT PROBE, which a GD32 still held in reset (ACT88760 GPIO4 not yet
     released) never does."""
+    return gd32_parse_version(t.run(gd32_version_cmd(bus, addr)).stdout)
+
+
+def gd32_version_cmd(bus: int, addr: int = 0x70) -> str:
+    """The GET_VERSION i2ctransfer line (frame: see gd32_bridge_version)."""
     crc = _crc16_ccitt_false(b"\x01")
-    r = t.run(f"i2ctransfer -f -y {bus} w4@{addr:#04x} 0x00 0x01 {crc & 0xFF:#04x} {crc >> 8:#04x} r6")
-    rsp = _parse_bytes(r.stdout, 6)
+    return xfer_cmd(bus, addr, bytes((0x00, 0x01, crc & 0xFF, crc >> 8)), 6, force=True)
+
+
+def gd32_parse_version(out: str) -> tuple[int, int, int]:
+    rsp = _parse_bytes(out, 6)
     if _crc16_ccitt_false(rsp[:4]) != rsp[4] | rsp[5] << 8:
         raise BenchError(f"GD32 GET_VERSION reply CRC mismatch: {rsp.hex(' ')}")
     if rsp[0] != 0:
