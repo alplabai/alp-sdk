@@ -161,8 +161,9 @@ cores:
 ```
 
 With all three changed, the same `src/main.c` scans `ALP_E1M_X_I2C0`.
-Expected on an E1M-X EVK V2 as built (i2c-0 sweep on E1M-V2M103
-2026W38-0001, 2026-09-27; see #2343 for the two carrier defects below):
+Expected on an E1M-X EVK V2 (i2c-0 sweep on E1M-V2M103 2026W38-0001,
+2026-09-27, taken before the carrier rework, so it shows neither `0x42`
+nor `0x68`; both answered on 2026-10-02):
 
 ```
 0x40 ACK   -- INA236A U21, +3V3 rail current monitor
@@ -171,12 +172,10 @@ Expected on an E1M-X EVK V2 as built (i2c-0 sweep on E1M-V2M103
               (include/alp/boards/alp_e1m_x_evk_routes.h:131)
 0x47 ACK   -- BMP581 U14 barometer
               (include/alp/boards/alp_e1m_x_evk_routes.h:125)
-0x48 ACK   -- the TAS2563 pair's GLOBAL/broadcast address, NOT an
-              extra part.  U32 (INA236B, +VCAM2) is strapped to 0x48
-              too, which collides with that broadcast; U32 is removed
-              on the V2 build batch and re-strapped on the next
-              revision, so on V2 0x48 is only the amps.
-              (include/alp/boards/alp_e1m_x_evk_routes.h:132)
+0x48 ACK   -- the TAS2563 pair's shared (global) address, NOT an
+              extra part.  The camera-rail monitor that was strapped
+              here is not fitted, so 0x48 is only the amps.
+              (metadata/chips/tas2563.yaml)
 0x49 ACK   -- INA236B U34, +VCAM3 rail current monitor
               (include/alp/boards/alp_e1m_x_evk_routes.h:133)
 0x4D ACK   -- TAS2563 U27 smart amp, left channel
@@ -189,11 +188,9 @@ Expected on an E1M-X EVK V2 as built (i2c-0 sweep on E1M-V2M103
               (`1010` -> 0x50, `1011` -> 0x58, same A2/A1/A0 straps) --
               not a second chip, nothing to source (alp-sdk#1976)
               (metadata/e1m_modules/E1M-V2N101.yaml:71)
-0x69 ACK   -- ICM-42670 U12 IMU (canonical primary).  On an unreworked
-              V2 the BMI323 (U13) is strapped here too, so neither IMU
-              reads back cleanly and nothing answers at 0x68 (the
-              BMI323's intended address) until R48 is fitted and R47
-              removed (include/alp/boards/alp_e1m_x_evk_routes.h:123-124)
+0x69 ACK   -- ICM-42670 U12 IMU (canonical primary); the alternate
+              IMU, BMI323 U13, is at 0x68
+              (include/alp/boards/alp_e1m_x_evk_routes.h)
 0x71 ACK   -- TCAL9538 U37, PCIe I/O expander (behind the PCIE0_I2C
               level shifter) (include/alp/boards/alp_e1m_x_evk_routes.h:128)
 0x73 ACK   -- TCAL9538 U35, main I/O expander

@@ -643,15 +643,12 @@ def test_real_xevk_header_covers_i2c_device_macros(real_headers):
     must_define = {
         "XEVK_I2C_ADDR_INA236_3V3": "0x40u",
         "XEVK_I2C_ADDR_INA236_1V8": "0x41u",
-        "XEVK_I2C_ADDR_INA236_VCAM2": "0x48u",
         "XEVK_I2C_ADDR_INA236_VCAM3": "0x49u",
         "XEVK_I2C_ADDR_INA228_5V": "0x42u",
         "XEVK_INA236_SHUNT_3V3_OHMS": "0.020f",
         "XEVK_INA236_MAX_3V3_A": "4.0f",
         "XEVK_INA236_SHUNT_1V8_OHMS": "0.020f",
         "XEVK_INA236_MAX_1V8_A": "4.0f",
-        "XEVK_INA236_SHUNT_VCAM2_OHMS": "0.050f",
-        "XEVK_INA236_MAX_VCAM2_A": "1.6f",
         "XEVK_INA236_SHUNT_VCAM3_OHMS": "0.050f",
         "XEVK_INA236_MAX_VCAM3_A": "1.6f",
     }

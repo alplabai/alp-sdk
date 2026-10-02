@@ -80,7 +80,7 @@ extern "C" {
  * (VBUS-sense wiring under investigation); their shunt/current path
  * is unaffected.
  *
- * XEVK_I2C_ADDR_INA236_3V3, _1V8, _VCAM2 and _VCAM3 are defined in the
+ * XEVK_I2C_ADDR_INA236_3V3, _1V8 and _VCAM3 are defined in the
  * generated routes header (#1636).
  */
 
@@ -95,7 +95,7 @@ extern "C" {
  *               XEVK_INA236_MAX_3V3_A,
  *               INA236_ADCRANGE_81MV);
  *
- * XEVK_INA236_SHUNT_*_OHMS and XEVK_INA236_MAX_*_A (3V3, 1V8, VCAM2,
+ * XEVK_INA236_SHUNT_*_OHMS and XEVK_INA236_MAX_*_A (3V3, 1V8,
  * VCAM3) are defined in the generated routes header (#1636). */
 
 #ifdef __cplusplus

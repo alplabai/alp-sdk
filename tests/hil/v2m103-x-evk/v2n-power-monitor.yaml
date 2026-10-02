@@ -2,11 +2,9 @@
 #
 # E1M-X EVK INA236 rail monitors on XEVK_I2C_BUS_SENSORS, read from the
 # E1M-V2M103's A55.  3V3 (U21, 0x40), 1V8 (U31, 0x41) and VCAM3 (U34,
-# 0x49) must initialise and print a row.  VCAM2 (U32, 0x48) is removed on
-# the current E1M-X EVK V2 build batch (0x48 collides with the TAS2563
-# broadcast address), so its "init failed" line is expected and not
-# asserted either way.  The example loops forever; the runner stops it
-# after duration_s.
+# 0x49) must initialise and print a row.  There is no VCAM2 monitor: 0x48 on
+# this bus is the TAS2563 pair's shared address.  The example loops forever;
+# the runner stops it after duration_s.
 #
 # A55/Linux app: flash_method ssh-run.
 

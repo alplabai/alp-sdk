@@ -16,6 +16,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+import yaml
+
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts"))
 
@@ -183,10 +185,11 @@ def test_board_audio_codecs_collision_is_reported(tmp_path: Path) -> None:
 
 
 def test_allowlisted_collision_is_not_reported(tmp_path: Path) -> None:
-    """The #2343 E1M-X EVK U32-vs-TAS2563-broadcast collision on the real
-    tree must be silent -- proven against a scaffolded copy (board preset +
-    the TAS2563 chip manifest) so this test does not depend on the rest of
-    the real metadata staying exactly as it is today."""
+    """The E1M-X EVK board preset (the TAS2563 pair's shared 0x48 plus every
+    fitted device) must be silent against a scaffolded copy (board preset +
+    the TAS2563 chip manifest), and no I2C device entry may claim 0x48 -- the
+    camera-rail monitor that was strapped there is not fitted. The test does
+    not depend on the rest of the real metadata staying exactly as it is."""
     import shutil
 
     for rel in ("metadata/boards/e1m-x-evk.yaml",
@@ -195,6 +198,8 @@ def test_allowlisted_collision_is_not_reported(tmp_path: Path) -> None:
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(REPO / rel, dst)
     assert find_problems(tmp_path) == []
+    board = yaml.safe_load((REPO / "metadata/boards/e1m-x-evk.yaml").read_text(encoding="utf-8"))
+    assert [d["macro"] for d in board["i2c_devices"] if int(str(d["address"]), 0) == 0x48] == []
 
 
 def test_real_tree_is_clean() -> None:

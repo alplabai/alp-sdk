@@ -149,11 +149,11 @@ recorded for that pin has not been checked on a board (#2645).
 | Device | Part | Address | Address strap | Interrupt / reset / enable | Seen on a real unit | SDK support |
 |---|---|---|---|---|---|---|
 | IMU (primary) | ICM-42670-P | `0x69` | AD0 high | INT1, INT2, FSYNC on main I/O expander P4, P5, P6 | Yes (2026-09-26, 2026-10-02) | `chips/icm42670` |
-| IMU (alternate) | BMI323 | `0x68` | SDO low after the #2343 rework; an unreworked carrier straps it to `0x69` | INT1 on E1M-X IO32 (`XEVK_PIN_BMI323_INT1`) | `0x68` answered on 2026-10-02; nothing at `0x68` on 2026-09-26.  No ID read | `chips/bmi323` |
+| IMU (alternate) | BMI323 | `0x68` | SDO low | INT1 on E1M-X IO32 (`XEVK_PIN_BMI323_INT1`) | `0x68` answered on 2026-10-02.  No ID read | `chips/bmi323` |
 | Barometer | BMP581 | `0x47` | SDO high | INT on main I/O expander P7 | Yes; chip ID `0x50` read | `chips/bmp581` |
 | +3V3 rail monitor | INA236A | `0x40` | A0 = GND | Alert pin not connected | Yes; manufacturer ID `0x5449` read | `chips/ina236`, `examples/v2n/v2n-power-monitor` |
 | +1V8 rail monitor | INA236A | `0x41` | A0 = supply | Alert pin not connected | Yes; manufacturer ID `0x5449` read | same |
-| Camera rail monitor (VCAM2) | INA236B | `0x48` | A0 = GND | Alert pin not connected | `0x48` answers, but that is also the TAS2563 broadcast address; **not confirmed as this part** (see the next section) | same |
+| TAS2563 shared address (the camera-rail monitor at this address is not fitted) | n/a | `0x48` | Fixed by the TAS2563 pair | n/a | `0x48` answers; that is the amplifiers, not a monitor (see the section below) | Linux `tas2562` codec; no power-monitor macro |
 | Camera rail monitor (VCAM3) | INA236B | `0x49` | A0 = supply | Alert pin not connected | Yes; manufacturer ID `0x5449` read | same |
 | +5V input monitor | INA228 | `0x42` | A1 = GND, A0 = SDA | Alert pin not connected | `0x42` answered on 2026-10-02; nothing on 2026-09-26 (#2343).  No ID read.  On the current EVK revision the device's bus pins are documented as swapped and corrected by a hand rework; it answers only on carriers with that rework, so treat no answer as "part absent", not a fault | Manifest only (`metadata/chips/ina228.yaml`); no `chips/` driver: upstream Zephyr's `ti,ina228` driver is the intended one.  Sense shunt 100 mOhm |
 | Main I/O expander | TCAL9538 | `0x73` | A1 high, A0 high | Reset and interrupt pins are pulled up on the carrier and do not reach the SoM | Yes | `chips/tcal9538` |
@@ -211,22 +211,14 @@ Expected on `i2c-8` for an E1M-V2M: `1e 25 26 30 40 44 48 4f 52 69 70`
 (`52` and `70` print as `UU`; `30` may be missing, #2507).  An E1M-V2N has
 no `44`, `48` or `4f` on `i2c-8`.
 
-## I²C address collision (TAS2563 broadcast)
+## I²C address `0x48` (TAS2563 shared address)
 
-INA236B (U32) sits at `0x48` on `XEVK_I2C_BUS_SENSORS`
-(`XEVK_I2C_ADDR_INA236_VCAM2`, `metadata/boards/e1m-x-evk.yaml`),
-the same address as the TAS2563's global broadcast address
-(`TAS2563_I2C_ADDR_BROADCAST`, `include/alp/chips/tas2563.h`).  This
-is the identical strap collision recorded for the E1M-EVK's U32 at
-[`e1m-evk.md`](e1m-evk.md) — there, a respin re-strapped
-A0=SCL to move U32 off `0x48`; no such respin is recorded for the
-E1M-X EVK, so U32 is still at `0x48` on this board.  The SDK-side
-guard (`chips/tas2563/tas2563.c`) now refuses to target `0x48` at
-all — that closes the write-into-INA236's-CONFIG-register hazard (the
-`select_page()` write inside `tas2563_init()` would have landed on
-`INA236_REG_CONFIG`, `chips/ina236/ina236.c`), but it does not restore
-broadcast addressing to the TAS2563 amps.  Only a respin re-strapping
-U32's A0 off `0x48` does that.
+`0x48` on `XEVK_I2C_BUS_SENSORS` belongs to the two TAS2563 amplifiers (their
+shared / global-call address, per `metadata/chips/tas2563.yaml`).  The
+camera-rail monitor (an INA236B, +VCAM2) that the design strapped to the same
+address is not fitted, so nothing else may be assigned `0x48` on this bus and
+the SDK carries no macro for it.  `chips/tas2563/tas2563.c`
+still refuses to target `0x48` itself.
 
 ## MicroSD (SDHI1)
 

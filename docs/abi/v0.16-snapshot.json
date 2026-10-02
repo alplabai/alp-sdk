@@ -1,5 +1,5 @@
 {
-  "generated": "2026-10-01",
+  "generated": "2026-10-02",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -1395,10 +1395,6 @@
           "hash": "db2f615e7a9f47af",
           "value": "0x40u"
         },
-        "XEVK_I2C_ADDR_INA236_VCAM2": {
-          "hash": "54c31cdcf2773108",
-          "value": "0x48u"
-        },
         "XEVK_I2C_ADDR_INA236_VCAM3": {
           "hash": "8398c2143398040c",
           "value": "0x49u"
@@ -1439,10 +1435,6 @@
           "hash": "230bcba87b062cad",
           "value": "4.0f"
         },
-        "XEVK_INA236_MAX_VCAM2_A": {
-          "hash": "c59a2d78669ccdab",
-          "value": "1.6f"
-        },
         "XEVK_INA236_MAX_VCAM3_A": {
           "hash": "e26ab29d67af4a26",
           "value": "1.6f"
@@ -1454,10 +1446,6 @@
         "XEVK_INA236_SHUNT_3V3_OHMS": {
           "hash": "88f3faeabe5c8b6e",
           "value": "0.020f"
-        },
-        "XEVK_INA236_SHUNT_VCAM2_OHMS": {
-          "hash": "b15eb3300a05111b",
-          "value": "0.050f"
         },
         "XEVK_INA236_SHUNT_VCAM3_OHMS": {
           "hash": "9a8467d4d73bb732",

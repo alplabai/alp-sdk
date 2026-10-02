@@ -45,7 +45,7 @@
 #include "alp/boards/alp_e1m_x_evk_routes.h" /* XEVK_I2C_BUS_SENSORS                 */
 
 /*
- * The four INA236 rails.  Address + shunt + max-current come straight
+ * The three INA236 rails.  Address + shunt + max-current come straight
  * from the board header so the calibration constants live in one
  * place (the board definition), not scattered through app code.  The
  * +5V input monitor (U30) is an INA228, a different register map, so
@@ -59,7 +59,6 @@ static const struct rail_def {
 } k_rails[] = {
 	{ "3V3", XEVK_I2C_ADDR_INA236_3V3, XEVK_INA236_SHUNT_3V3_OHMS, XEVK_INA236_MAX_3V3_A },
 	{ "1V8", XEVK_I2C_ADDR_INA236_1V8, XEVK_INA236_SHUNT_1V8_OHMS, XEVK_INA236_MAX_1V8_A },
-	{ "VCAM2", XEVK_I2C_ADDR_INA236_VCAM2, XEVK_INA236_SHUNT_VCAM2_OHMS, XEVK_INA236_MAX_VCAM2_A },
 	{ "VCAM3", XEVK_I2C_ADDR_INA236_VCAM3, XEVK_INA236_SHUNT_VCAM3_OHMS, XEVK_INA236_MAX_VCAM3_A },
 };
 
@@ -68,7 +67,7 @@ static const struct rail_def {
 int main(void)
 {
 	/*
-	 * One bus handle shared by all four monitors.  400 kHz
+	 * One bus handle shared by all three monitors.  400 kHz
 	 * fast-mode is comfortable for the INA236 (it tolerates up to
 	 * ~2.94 MHz).
 	 */

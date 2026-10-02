@@ -16,7 +16,6 @@ power once a second.
 |-------|--------|------|-------|
 | 3V3   | U21    | 0x40 | 20 mΩ |
 | 1V8   | U31    | 0x41 | 20 mΩ |
-| VCAM2 | U32    | 0x48 | 50 mΩ |
 | VCAM3 | U34    | 0x49 | 50 mΩ |
 
 The +5V input monitor (U30) is an INA228 at `0x42`, a different
@@ -43,7 +42,6 @@ Copy `build/v2n-power-monitor` to the target and run it (Ctrl-C to stop):
 rail     bus_V     I_mA       P_mW
   3V3      0.099       0.00        0.0
   1V8      0.002       0.00        0.0
-  VCAM2    0.000       0.00        0.0
   VCAM3    0.000       0.00        0.0
 ```
 
@@ -54,8 +52,7 @@ rails just read low):
 
 - **3V3 / 1V8** read ~0 V on the bus-voltage register (VBUS-sense
   wiring); their shunt/current path is unaffected.
-- **VCAM2 / VCAM3** read ~0 — camera rails are off unless a camera
+- **VCAM3** reads ~0 — the camera rail is off unless a camera
   is powered.
-- **VCAM2 (U32)** is removed on the E1M-X EVK V2 build batch (its
-  `0x48` collides with the TAS2563 broadcast address); the app prints
-  `--` for it.
+- There is no VCAM2 monitor: `0x48` on this bus is the TAS2563 amplifiers'
+  shared address, so the table has no VCAM2 row.
