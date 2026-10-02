@@ -54,6 +54,10 @@
  * the other CAN/GPIO #756 regressions).
  */
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE /* the included yocto_drv.c uses pipe2() */
+#endif
+
 #include <pthread.h>
 #include <stdatomic.h>
 #include <string.h>
