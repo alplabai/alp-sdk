@@ -77,3 +77,81 @@ def test_serial_suffix(tmp_path, serial, expected):
 def test_no_serial_property_keeps_sku_name(tmp_path):
     kern, _ = _run(tmp_path, b"E1M-V2M103\0", None)
     assert kern == "e1m-v2m103"
+
+
+PROMPT = SCRIPT.parent / "alp-prompt.sh"
+
+
+def _banner(tmp_path: Path, raw: bytes, serial: bytes | None) -> str | None:
+    issue = tmp_path / "alp-module.issue"
+    prop = tmp_path / "alp,sku"
+    prop.write_bytes(raw)
+    sprop = tmp_path / "alp,serial"
+    if serial is not None:
+        sprop.write_bytes(serial)
+    env = {**os.environ, "ALP_SKU_PROP": str(prop), "ALP_SERIAL_PROP": str(sprop),
+           "ALP_HOSTNAME_FILE": str(tmp_path / "hostname"),
+           "ALP_KERNEL_HOSTNAME": str(tmp_path / "kernel_hostname"), "ALP_ISSUE_FILE": str(issue)}
+    proc = subprocess.run([SH, str(SCRIPT)], env=env, capture_output=True, text=True, encoding="utf-8")
+    assert proc.returncode == 0, proc.stderr
+    return issue.read_text(encoding="utf-8") if issue.exists() else None
+
+
+def test_banner_shows_module_and_serial_in_original_case(tmp_path):
+    assert _banner(tmp_path, b"E1M-V2M103\0", b"2026W38-0006\0") == "Module: E1M-V2M103  Serial: 2026W38-0006\n"
+
+
+def test_banner_without_serial_shows_module_only(tmp_path):
+    assert _banner(tmp_path, b"E1M-V2M103\0", None) == "Module: E1M-V2M103\n"
+
+
+def test_blank_manifest_writes_no_banner(tmp_path):
+    assert _banner(tmp_path, b"\0" * 24, b"\0" * 12) is None
+
+
+DISTRO_PS1 = r"\u@\h:\w\$ "     # what the distro profile sets
+
+
+def _prompt(tmp_path: Path, hostname: str, ps1: str | None) -> str:
+    hf = tmp_path / "host"
+    hf.write_text(hostname + "\n")
+    env = {k: v for k, v in os.environ.items() if k != "PS1"}
+    env["ALP_PROMPT_HOSTNAME_FILE"] = str(hf)
+    # A non-interactive shell drops PS1 from its environment, so seed it in the script.
+    seed = 'PS1=$T_PS1; ' if ps1 is not None else ""
+    env["T_PS1"] = ps1 or ""
+    proc = subprocess.run([SH, "-c", f'{seed}. "{PROMPT}"; printf "%s" "${{PS1-unset}}"'],
+                          env=env, capture_output=True, text=True, encoding="utf-8")
+    assert proc.returncode == 0, proc.stderr
+    return proc.stdout
+
+
+def test_prompt_drops_the_serial_suffix(tmp_path):
+    assert _prompt(tmp_path, "e1m-v2m103-2026w38-0006", DISTRO_PS1) == r"\u@e1m-v2m103:\w\$ "
+
+
+@pytest.mark.parametrize("hostname", ["e1m-v2m103", "e1m-v2m103-a55", "alp-e1m", "e1m-v2m103-2026w38", "",
+                                      "foo-1234w56-7anything", "e1m-v2m103-2026w38-00061"])
+def test_prompt_untouched_without_a_serial_suffix(tmp_path, hostname):
+    assert _prompt(tmp_path, hostname, DISTRO_PS1) == DISTRO_PS1
+
+
+def test_prompt_strips_a_letter_first_index(tmp_path):
+    assert _prompt(tmp_path, "e1m-v2m103-2026w38-a006", DISTRO_PS1) == r"\u@e1m-v2m103:\w\$ "
+
+
+def test_prompt_untouched_in_a_non_interactive_shell(tmp_path):
+    assert _prompt(tmp_path, "e1m-v2m103-2026w38-0006", None) == "unset"
+
+
+def test_banner_is_reachable_by_agetty():
+    """util-linux 2.39.3 agetty reads /etc/issue.d/*.issue only when /etc/issue exists
+    (the image ships one) and ignores /run/issue.d then, so the recipe must link a
+    *.issue file in /etc/issue.d at the path the script writes."""
+    recipe = (SCRIPT.parents[1] / "alp-hostname_0.1.bb").read_text(encoding="utf-8")
+    m = re.search(r"ln -sf (\S+) \$\{D\}\$\{sysconfdir\}/issue\.d/(\S+)", recipe)
+    assert m, "recipe does not link into /etc/issue.d"
+    target, name = m.groups()
+    assert name.endswith(".issue") and not name.startswith(".")
+    default = re.search(r"ALP_ISSUE_FILE:-([^}]+)\}", SCRIPT.read_text(encoding="utf-8"))
+    assert default and default.group(1) == target
