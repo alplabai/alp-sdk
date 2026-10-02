@@ -31,13 +31,14 @@ from provision.gates import BL2_MMC_SECTOR, FIP_SECTOR  # noqa: F401  (re-export
 
 # --- prompts (module constants) ---
 ROM_BANNER = r"SCI Download mode\s*\(Normal SCI boot\)"
-# The ROM falls back to download mode on a boot-parameter error, i.e. DSW1 is
-# probably not in SCIF mode 3 or the board is faulty: never proceed on it.
+# The ROM falls back to SCI download when the selected boot source has no valid
+# image. That mode still offers `-- Load Program to SRAM`, but the tool refuses it:
+# only the normal banner proves DSW1 is in SCIF mode 3.
 ROM_FALLBACK = r"SCI Download mode\s*\(Due to parameter error\)"
 ROM_FALLBACK_MSG = (
-    "boot ROM entered SCI download mode 'Due to parameter error' (fallback, not a "
-    "normal SCIF boot): DSW1 is probably not set to SCIF download mode, or the board "
-    "is faulty. Check DSW1 and the unit before retrying."
+    "boot ROM fell back to SCI download because the selected boot source has no valid "
+    "image (blank xSPI/eMMC, or DSW1 not in mode 3); set DSW1 to mode 3 for a clean "
+    "SCIF bootstrap"
 )
 # The ROM answers this to the first S-record when the load address is not one it accepts
 # (the SoC is not running on the CA55). Seen on bench 2026-10-02, unit 2026W38-0005, caused

@@ -56,6 +56,7 @@ LOGIN_RE = r"login: *$"
 IP_WAIT_S = 120.0     # boot_sd_linux: how long a console login may wait for DHCP
 IP_POLL_S = 5.0
 LOCK_BIT = 0x02
+PSU_CURRENT_WARN_A = 0.40   # census screen for the PHY-regulator fault; warns only, never fails
 
 
 # --------------------------------------------------------------------------
@@ -145,6 +146,9 @@ class Ctx:
     # Power.on_count of a boot_sd_linux that reached a console login with no IP
     # (GD32 flash pending): its probe accepts that state; gd32_flash then works over the console.
     console_linux_on_count: int | None = None
+    # Power.on_count of the boot this tool last logged in on over the console: Linux may be
+    # running with no SSH, and clean_shutdown() then halts it through the console shell.
+    console_login_on_count: int | None = None
     step_logs: dict[str, str] = field(default_factory=dict)
     _cache: dict = field(default_factory=dict)
 
@@ -387,6 +391,47 @@ def _wait_for_ip(ctx: Ctx, wait_s: float, rediscover: bool) -> None:
             ctx.linux = None
 
 
+HALT_RE = r"reboot: Power down|System halted"
+HALT_WAIT_S = 90.0
+HALT_FALLBACK_S = 5.0
+
+
+def clean_shutdown(ctx: Ctx) -> None:
+    """Halt a running Linux before any tool-driven power cut (a hard cut under a mounted
+    microSD root corrupted its journal, #2624). Execute-mode only; a no-op when no Linux
+    is reachable (SSH, else this boot's console login).
+
+    `poweroff` over that path, then wait HALT_WAIT_S for the kernel's halt line. Without
+    it: `sync` + HALT_FALLBACK_S of quiet, noted in the plan log. The supply current is
+    not a halt signal. The PSU stays ON; the caller's Power.cycle does the OFF dwell, so
+    a cold boot stays a cold boot."""
+    b = ctx.bench
+    if b is None or not ctx.execute:
+        return
+    if ctx.linux_up():
+        t = ctx.linux
+    elif ctx.console_login_on_count == b.power.on_count:
+        t = ConsoleTarget(b.console)
+    else:
+        return
+    b.console.drain()
+    try:
+        t.run("sync; poweroff", check=False, timeout=30.0)
+    except BenchError:
+        pass                    # ssh drops with the host
+    try:
+        b.console.expect(HALT_RE, HALT_WAIT_S)
+        ctx.plan_log.append("clean shutdown: poweroff, halt line seen")
+    except ExpectTimeout:
+        try:
+            t.run("sync", check=False, timeout=30.0)
+        except BenchError:
+            pass
+        b.console.pump(HALT_FALLBACK_S)
+        ctx.plan_log.append(f"clean shutdown FALLBACK: no halt line in {HALT_WAIT_S:g}s; "
+                            f"sync + {HALT_FALLBACK_S:g}s wait")
+
+
 def boot_to_linux(ctx: Ctx, timeout: float = 240.0, need_ip: bool = True,
                   resume_mark: int | None = None, rediscover: bool = False,
                   ip_wait_s: float = 0.0) -> str:
@@ -404,12 +449,7 @@ def boot_to_linux(ctx: Ctx, timeout: float = 240.0, need_ip: bool = True,
     b = ctx.need_bench()
     if resume_mark is None:
         n = len(b.console.transcript)
-        if ctx.linux is not None:
-            # best effort, as in Detect: the SD root now also holds the payload store (#2357)
-            try:
-                ctx.linux.run("sync", check=False, timeout=120.0)
-            except BenchError:
-                pass
+        clean_shutdown(ctx)
         b.console.drain()
         b.power.cycle(b.off_s, b.console)
     else:
@@ -418,6 +458,7 @@ def boot_to_linux(ctx: Ctx, timeout: float = 240.0, need_ip: bool = True,
     text = _since(b.console, n)
     ctx.boot_text = text
     lt.console_login(b.console, b.linux_user)
+    ctx.console_login_on_count = b.power.on_count
     try:
         connect_linux(ctx, force=True, rediscover=rediscover)
         if not need_ip:
@@ -643,13 +684,7 @@ class Detect(Step):
         classes = {"scif-rom": scif_writer.ROM_BANNER, "scif-fallback": scif_writer.ROM_FALLBACK, "linux-login": LOGIN_RE, "uboot": uboot.PROMPT}
         n = len(c.transcript)
         if ctx.execute:
-            if ctx.linux is not None:
-                # best effort: flush a running Linux's page cache before cutting
-                # power (a microSD root can hold seconds of writeback, #2357)
-                try:
-                    ctx.linux.run("sync", check=False, timeout=120.0)
-                except BenchError:
-                    pass
+            clean_shutdown(ctx)
             ctx.mutate("power cycle and classify the console",
                        lambda: ctx.bench.power.cycle(ctx.bench.off_s, c))
             try:
@@ -672,6 +707,7 @@ class Detect(Step):
             ev["uboot_version"] = v
         if key == "linux-login" and ctx.execute:
             lt.console_login(c, ctx.bench.linux_user)
+            ctx.console_login_on_count = ctx.bench.power.on_count
             connect_linux(ctx, force=True)
         elif ctx.linux is None and ctx.pinned_host:
             ctx.attach_linux(ctx.pinned_host)
@@ -744,6 +780,7 @@ class Bootstrap(_PreLinux):
                 ctx.plan_log.append("reuse live SCIF ROM state from detect (no power cycle)")
                 sw.load_writer(c, Path(mot), banner_seen=True)
                 return
+            clean_shutdown(ctx)
             c.drain()
             b.power.cycle(b.off_s, b.console)
             sw.load_writer(c, Path(mot))
@@ -773,6 +810,7 @@ class OpDsw1EmmcInsertSd(_PreLinux):
 
         def check():
             n = len(b.console.transcript)
+            clean_shutdown(ctx)
             b.console.drain()
             b.power.cycle(b.off_s, b.console)
             b.console.expect(uboot.AUTOBOOT, 60.0)
@@ -831,6 +869,7 @@ class BootSdLinux(Step):
             wic = ctx.artefact("system_image")
 
             def xm():
+                clean_shutdown(ctx)
                 text = uboot.cold_to_prompt(b.console, b.power, b.off_s)
                 ctx.boot_text = text
                 uboot.loadx_gzwrite(b.console, wic, 0, int(addr), chunk)
@@ -1095,10 +1134,27 @@ class Census(Step):
                     if raw == lt.ACT88760_GPIO4_RELEASED:
                         facts["act88760_gpio4_workaround"] = "none"
             except BenchError as e:
+                facts["act88760_gpio4_otp"] = f"unread ({e})"
                 notes.append(f"act88760_gpio4_otp: {e}")
-        ctx.step_logs[self.name] = "\n".join(notes)
-        return self.result(ctx, f"{len(facts)} keys" + (f"; unread: {'; '.join(notes)}" if notes else ""),
-                           facts, status="done")
+        warn = ""
+        if ctx.bench is not None:
+            try:
+                amps = ctx.bench.power.current()
+            except BenchError as e:
+                facts["psu_current_a"] = f"unread ({e})"
+                notes.append(f"psu_current_a: {e}")
+            else:
+                if amps is not None:
+                    facts["psu_current_a"] = f"{amps:.3f}"
+                    facts["psu_current_state"] = "linux-idle"
+                    if amps > PSU_CURRENT_WARN_A:
+                        # a screen, not a gate: the real threshold belongs in the private catalogue
+                        warn = (f"WARNING: supply current {amps:.3f} A > {PSU_CURRENT_WARN_A:.2f} A at "
+                                "linux-idle (normal 0.17-0.29 A): suspect the PHY regulator output "
+                                "capacitor fault")
+        ctx.step_logs[self.name] = "\n".join(notes + ([warn] if warn else []))
+        return self.result(ctx, f"{len(facts)} keys" + (f"; unread: {'; '.join(notes)}" if notes else "")
+                           + (f"; {warn}" if warn else ""), facts, status="done")
 
 
 class EepromManifest(Step):
@@ -1342,21 +1398,9 @@ def warm_reboot_to_linux(ctx: Ctx) -> None:
 
 
 def poweroff_and_cold_boot(ctx: Ctx) -> str:
-    """Clean `poweroff` (sync first, wait for the kernel's halt line), then the usual
-    cold cycle (Power.cycle enforces MIN_ON_S / MIN_OFF_S) and login."""
-    b = ctx.need_bench()
-    t = ctx.linux
-    t.run("sync", check=False, timeout=120.0)
-    try:
-        t.run("poweroff", check=False, timeout=30.0)
-    except BenchError:
-        pass                    # ssh drops with the host
-    try:
-        b.console.expect(r"Power down|System halted|reboot: Power", 60.0)
-    except ExpectTimeout:
-        # ponytail: a line the image does not print costs 15 s of quiet, not a hang;
-        # the disks were synced above. Pin the halt line once a bench log shows it.
-        b.console.drain(5.0, 15.0)
+    """Clean `poweroff` and the usual cold cycle and login, all in boot_to_linux
+    (clean_shutdown, then Power.cycle with MIN_ON_S / MIN_OFF_S)."""
+    ctx.need_bench()
     return boot_to_linux(ctx)
 
 
@@ -1573,7 +1617,11 @@ class PmicVerify(Step):
                 continue
             bus = ctx.i2c(d["bus"])
             for r in d.get("registers", []):
-                got = lt.i2c_get(t, bus, int(d["addr"]), int(r["reg"]))
+                try:
+                    got = lt.i2c_get(t, bus, int(d["addr"]), int(r["reg"]))
+                except BenchError as e:
+                    bad.append(f"{dev} {int(d['addr']):#04x} reg {int(r['reg']):#04x} unread ({e})")
+                    continue
                 mask = int(r.get("mask", 0xFF))
                 if got & mask == int(r["expect"]) & mask:
                     continue

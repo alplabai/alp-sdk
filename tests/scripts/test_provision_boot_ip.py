@@ -21,6 +21,7 @@ def fast(monkeypatch):
     monkeypatch.setattr(steps.time, "sleep", lambda s: None)
     monkeypatch.setattr(steps, "IP_WAIT_S", 0.05)
     monkeypatch.setattr(steps, "IP_POLL_S", 0.01)
+    monkeypatch.setattr(steps, "clean_shutdown", lambda ctx: None)    # covered in test_provision_clean_shutdown
 
 
 def _console_bench():

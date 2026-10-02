@@ -204,6 +204,7 @@ class _PsuSock:
             raise ConnectionResetError(10054, "reset")
         cmd = data.decode().strip()
         self.psu.sent.append(cmd)
+        self.psu.last = cmd
         if cmd.startswith("OUTP CH1,"):
             if self.psu.swallow > 0:
                 self.psu.swallow -= 1
@@ -211,6 +212,8 @@ class _PsuSock:
                 self.psu.on = cmd.endswith("ON")
 
     def recv(self, n):
+        if self.psu.last.startswith("MEAS:CURR?"):
+            return self.psu.amps.encode() + bytes([10])
         return b"0x14" + bytes([10]) if self.psu.on else b"0x4" + bytes([10])
 
     def close(self):
@@ -221,6 +224,7 @@ class _Psu:
     def __init__(self):
         self.sent, self.connects, self.reset_next, self.on = [], 0, False, False
         self.swallow, self.stuck_on = 0, False   # OUTP commands eaten / OFF ignored
+        self.last, self.amps = "", "0.172"       # last command seen / the MEAS:CURR? reply
 
     def connect(self, addr, timeout):
         self.connects += 1
@@ -614,3 +618,29 @@ def test_cycle_confirms_the_on_only_after_the_console_settle_read():
     on = order.index("OUTP CH1,ON")
     assert order[on + 1] == f"pump {bench.ON_SETTLE_S:g}"       # first thing after the ON edge: read
     assert order[on + 2] == "SYST:STAT?"                       # then the read-back
+
+
+def test_scpi_current_is_one_measurement_of_the_configured_channel_over_the_open_socket():
+    psu = _Psu()
+    p = psu.power(1)
+    p.on()
+    psu.amps = "0.451"
+    assert p.current() == 0.451
+    assert psu.sent[-1] == "MEAS:CURR? CH1" and psu.connects == 1
+    assert not any("CH2" in c for c in psu.sent)
+    p2 = _Psu().power(2)
+    p2.current()
+    assert p2._connect.__self__.sent == ["MEAS:CURR? CH2"]
+
+
+def test_scpi_current_rejects_a_reply_that_is_not_a_number():
+    psu = _Psu()
+    psu.amps = "ERR"
+    with pytest.raises(BenchError, match="not a number"):
+        psu.power(1).current()
+
+
+def test_power_kinds_without_a_meter_return_none_for_current():
+    from .provision_fakes import FakePower
+    assert FakePower().current() is None
+    assert bench.LabgridPower("place").current() is None

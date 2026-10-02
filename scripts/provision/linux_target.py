@@ -577,12 +577,25 @@ def secure_page_write_verify(t: LinuxTarget, bus: int, write_frame, read_frame,
     return got
 
 
+I2C_GET_TRIES = 3
+I2C_GET_GAP_S = 0.5     # bench 2026-10-02: `Error: Read failed` on reads that worked minutes later
+
+
 def i2c_get(t: LinuxTarget, bus: int, addr: int, reg: int) -> int:
+    """One register byte. A failed or unparsable read is retried (I2C_GET_TRIES attempts,
+    I2C_GET_GAP_S apart) before the last error is raised."""
     # -f: read even when a kernel driver owns the address (e.g. the RTC shows UU)
-    out = t.run(f"i2cget -y -f {bus} {addr:#04x} {reg:#04x}").stdout.strip()
-    if not re.fullmatch(r"0x[0-9a-fA-F]{2}", out):
-        raise BenchError(f"i2cget {bus} {addr:#04x} {reg:#04x}: unparsable {out!r}")
-    return int(out, 16)
+    for attempt in range(I2C_GET_TRIES):
+        try:
+            out = t.run(f"i2cget -y -f {bus} {addr:#04x} {reg:#04x}").stdout.strip()
+            if not re.fullmatch(r"0x[0-9a-fA-F]{2}", out):
+                raise BenchError(f"i2cget {bus} {addr:#04x} {reg:#04x}: unparsable {out!r}")
+            return int(out, 16)
+        except BenchError as e:
+            if attempt == I2C_GET_TRIES - 1:
+                raise BenchError(f"{e} (after {I2C_GET_TRIES} attempts)") from e
+        time.sleep(I2C_GET_GAP_S)
+    raise AssertionError("unreachable")
 
 
 def i2c_set(t: LinuxTarget, bus: int, addr: int, reg: int, value: int) -> None:
@@ -901,6 +914,23 @@ def _devmem(t: LinuxTarget, addr: int) -> int:
     return int(out, 16)
 
 
+# Raw MII registers 2/3 of each port, through SIOCGMIIPHY / SIOCGMIIREG (the image has python3 and no
+# mii-tool). One line per port: "<name> 0x<reg2><reg3>"; a port that fails prints nothing.
+MII_ID_REMOTE = "/tmp/alp_mii_id.py"
+MII_ID_PY = """
+import fcntl, socket, struct, sys
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+def io(n, c, p, r):
+    a = struct.pack('16sHHHH16x', n.encode(), p, r, 0, 0)
+    return struct.unpack('16sHHHH16x', fcntl.ioctl(s, c, a))
+for n in sys.argv[1:]:
+    try:
+        p = io(n, 0x8947, 0, 0)[1]
+        print(n, '0x%04x%04x' % (io(n, 0x8948, p, 2)[4], io(n, 0x8948, p, 3)[4]))
+    except OSError:
+        pass
+"""
+
 NET_IF_RE = re.compile(r"(?:end|eth)\d+")   # the Renesas gbeth ports are end0/end1
 
 
@@ -921,7 +951,8 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
 
     `sizes` = artefact byte lengths keyed by bundle role ("bl2", "fip",
     "bl2_mmc", "cm33"); an md5 key is produced only when its size is known.
-    Never issues a write to the unit (the only 0x58 frames are the sealed reads).
+    Never writes to the unit's storage or devices (the only 0x58 frames are the sealed reads;
+    the PHY-ID helper is a throwaway file in /tmp).
     """
     from provision import gates   # lazy: gates is the single source of 0x58 frames
 
@@ -1022,21 +1053,32 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
             if zlib.crc32(arr[:0x7C]) != int.from_bytes(arr[0x7C:0x80], "little"):
                 notes.append("manifest_crc32: stored CRC does not match bytes 0x00..0x7b")
 
+    def read_key(key, fn):
+        """One census key: a read that still fails after i2c_get's retries is recorded as
+        `unread (<error>)` and noted, so it can never pass as a value and never takes the
+        group's other keys down with it."""
+        try:
+            facts[key] = fn()
+        except (BenchError, ValueError) as e:
+            facts[key] = f"unread ({e})"
+            notes.append(f"{key}: {e}")
+
     def power():
         pmic = i2c_bus["pmic"]
-        facts["act88760_gpio_regs"] = _reg_dump(t, pmic, ACT88760_ADDR, (ACT88760_GPIO_REG,))
+        read_key("act88760_gpio_regs", lambda: _reg_dump(t, pmic, ACT88760_ADDR, (ACT88760_GPIO_REG,)))
         for key, regs in DA9292_REGS.items():
-            facts[key] = _reg_dump(t, pmic, DA9292_ADDR, regs)
+            read_key(key, lambda regs=regs: _reg_dump(t, pmic, DA9292_ADDR, regs))
         present = sorted(i2c_scan(t, pmic) & set(TPS628640_ADDRS))
         facts["tps_present"] = " ".join(f"{a:#04x}" for a in present) or "none"
         if present:
-            facts["tps_vout"] = " ".join(f"{a:#04x}={i2c_get(t, pmic, a, TPS628640_VOUT1):#04x}" for a in present)
+            read_key("tps_vout", lambda: " ".join(
+                f"{a:#04x}={i2c_get(t, pmic, a, TPS628640_VOUT1):#04x}" for a in present))
 
     def clocks_rtc():
         brd = i2c_bus["brd"]
-        facts["rtc_rv3028_reg_0x37"] = f"{i2c_get(t, brd, RV3028_ADDR, 0x37):#04x}"
-        facts["clkgen_5l35023b_regs"] = ("ack" if CLKGEN_5L35023B_ADDR in i2c_scan(t, brd) else "no ack") + \
-            f" at {CLKGEN_5L35023B_ADDR:#04x}"
+        read_key("rtc_rv3028_reg_0x37", lambda: f"{i2c_get(t, brd, RV3028_ADDR, 0x37):#04x}")
+        facts["clkgen_5l35023b_regs"] = ("ack" if CLKGEN_5L35023B_ADDR in i2c_scan(t, brd) else "no ack")
+        facts["clkgen_5l35023b_regs"] += f" at {CLKGEN_5L35023B_ADDR:#04x}"
 
     def network():
         names = net_ifaces(t)
@@ -1060,6 +1102,38 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
             anlpar = lp[1].strip() if lp else "unknown"
             facts[f"eth{i}_mac"] = mac
             facts[f"eth{i}_link"] = f"{state} ({n}) carrier={carrier} speed={speed} anlpar={anlpar}"
+        phy_ids(names[:2])
+        dma = t.run("dmesg | grep 'Failed to reset the dma'", check=False).stdout
+        ports = sorted(set(NET_IF_RE.findall(dma)))
+        facts["eth_dma_reset_failed"] = ",".join(ports) or ("unknown" if dma.strip() else "none")
+
+    def phy_ids(names):
+        """eth<i>_phy_id (sysfs: the DT-forced ethernet-phy-id), eth<i>_phy_id_raw (the silicon's
+        MII registers 2/3) and eth_phy_id_mismatch. Read-only."""
+        r = CmdResult(1, "", "")
+        if names:
+            with tempfile.TemporaryDirectory(prefix="miiid_") as td:
+                helper = Path(td) / "alp_mii_id.py"
+                helper.write_bytes(MII_ID_PY.encode("utf-8"))
+                try:
+                    t.put(helper, MII_ID_REMOTE)     # a file, not -c: the console path is one line
+                    r = t.run(f"python3 {MII_ID_REMOTE} {' '.join(names)}; rm -f {MII_ID_REMOTE}", check=False)
+                except BenchError as e:
+                    r = CmdResult(1, "", str(e))
+        raw = dict(re.findall(r"^(\w+) (0x[0-9a-f]{8})$", r.stdout, re.M))
+        differ = unread = False
+        for i, n in enumerate(names):
+            sysfs = t.run(f"cat /sys/class/net/{n}/phydev/phy_id", check=False).stdout.strip()
+            ok = re.fullmatch(r"0x[0-9a-fA-F]{1,8}", sysfs) is not None
+            facts[f"eth{i}_phy_id"] = f"0x{int(sysfs, 16):08x}" if ok else "unread (no phydev/phy_id)"
+            facts[f"eth{i}_phy_id_raw"] = raw.get(n) or "unread (" + ((r.stderr or r.stdout).strip()[-80:] or "no output") + ")"
+            if n not in raw or not ok:
+                unread = True
+                notes.append(f"{n}: phy id not fully readable")
+            else:
+                differ |= int(raw[n], 16) != int(sysfs, 16)
+        if names:
+            facts["eth_phy_id_mismatch"] = "yes" if differ else "unread" if unread else "no"
 
     for name, fn in (("soc", soc), ("cpu_mem", cpu_mem), ("storage", storage), ("xspi", xspi),
                      ("dxm1", dxm1), ("identity", identity), ("power", power), ("clocks_rtc", clocks_rtc),

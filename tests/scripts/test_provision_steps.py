@@ -1210,7 +1210,7 @@ def test_detect_refuses_the_parameter_error_fallback_banner(tmp_path):
     b = _bench(console=FakeConsole([(None, "SCI Download mode (Due to parameter error)\r\n")]))
     ctx = _ctx(tmp_path, bench=b, execute=True)
     res = steps.run_one(steps.Detect(), ctx)
-    assert res.status == "failed" and "parameter error" in res.detail
+    assert res.status == "failed" and "no valid image" in res.detail
 
 
 def test_accept_cid_change_adopts_once_then_refuses_another_swap(tmp_path, monkeypatch):

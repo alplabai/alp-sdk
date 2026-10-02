@@ -704,6 +704,10 @@ def _census_responses(array: bytes = b"\xff" * 128):
         (r"end0/carrier", "1\n"), (r"end0/speed", "1000\n"),
         (r"ethtool end0", "Settings for end0:\n\tLink partner advertised link modes:  1000baseT/Full\n"
                           "\t                                100baseT/Full\n"),
+        # the DT forces ethernet-phy-id001c.c878; the silicon's MII registers 2/3 say c916
+        (r"python3 /tmp/alp_mii_id\.py", "end0 0x001cc916\nend1 0x001cc916\n"),
+        (r"cat /sys/class/net/end\d/phydev/phy_id", "0x001cc878\n"),
+        (r"^dmesg \| grep", (1, "")),
     ]
 
 
@@ -741,6 +745,9 @@ def test_census_collects_ledger_keys_read_only():
     assert facts["eth0_link"] == "up (end0) carrier=1 speed=1000 anlpar=1000baseT/Full"
     assert not [k for k in facts if k.startswith("end")]
     assert notes == ["end1: address/operstate unreadable"]
+    assert [facts[f"eth{i}_phy_id"] for i in (0, 1)] == ["0x001cc878"] * 2
+    assert [facts[f"eth{i}_phy_id_raw"] for i in (0, 1)] == ["0x001cc916"] * 2
+    assert facts["eth_phy_id_mismatch"] == "yes" and facts["eth_dma_reset_failed"] == "none"
     # read-only: no writes of any kind reached the unit
     assert not [c for c in fake.commands if re.search(r"i2cset|flash_erase|mtd_debug write|\bdd\b[^|]*\bof=|mmc boot", c)]
     assert not [c for c in fake.commands if re.search(r"w(?!2@)\d+@0x5[08]", c)]
@@ -780,3 +787,67 @@ def test_gd32_bridge_version_frames_and_checks_crc():
     t, _ = target([("i2ctransfer -f", "0x00 0x00 0x0d 0x00 0x9c 0xf3\n")])
     with pytest.raises(BenchError, match="CRC mismatch"):
         lt.gd32_bridge_version(t, 8)
+
+
+# --- i2c_get retry / census unread keys / PHY id / gbeth DMA (#2624) ---------------------
+
+CENSUS_BUS = {"eeprom": 0, "pmic": 8, "brd": 8}
+
+
+def test_i2c_get_retries_a_transient_read_failure():
+    t, fake = target([("i2cget -y -f 8 0x25 0x10", [(2, "", "Error: Read failed"), (2, "", "Error: Read failed"),
+                                                    "0x08"])])
+    assert lt.i2c_get(t, 8, 0x25, 0x10) == 0x08
+    assert len(fake.commands) == 3
+
+
+def test_i2c_get_gives_up_after_three_attempts_and_says_so():
+    t, fake = target([("i2cget", (2, "", "Error: Read failed"))])
+    with pytest.raises(BenchError, match=r"Read failed.*after 3 attempts"):
+        lt.i2c_get(t, 8, 0x25, 0x10)
+    assert len(fake.commands) == 3
+
+
+def test_census_records_a_persistently_failing_read_as_unread_and_keeps_the_other_keys():
+    t, _ = target([(r"i2cget -y -f 8 0x25 0x10", (2, "", "Error: Read failed")),
+                   (r"i2cget -y -f 8 0x52 0x37", (2, "", "Error: Read failed"))] + _census_responses())
+    facts, notes = lt.census(t, CENSUS_BUS)
+    assert facts["act88760_gpio_regs"].startswith("unread (") and "Read failed" in facts["act88760_gpio_regs"]
+    assert facts["rtc_rv3028_reg_0x37"].startswith("unread (")
+    assert facts["da9292_ids"] == "0x19=0x92 0x1a=0x01 0x1b=0x02"       # the rest of the group is still read
+    assert facts["tps_vout"].startswith("0x44=0x5a")
+    assert any(n.startswith("act88760_gpio_regs:") for n in notes)
+    assert any(n.startswith("rtc_rv3028_reg_0x37:") for n in notes)
+
+
+def test_census_phy_id_matching_the_devicetree_is_no_mismatch():
+    t, _ = target([(r"python3 /tmp/alp_mii_id\.py", "end0 0x001cc878\nend1 0x001cc878\n")] + _census_responses())
+    facts, _ = lt.census(t, CENSUS_BUS)
+    assert facts["eth0_phy_id_raw"] == "0x001cc878" and facts["eth_phy_id_mismatch"] == "no"
+
+
+def test_census_phy_id_unreadable_is_not_a_silent_no():
+    t, _ = target([(r"python3 /tmp/alp_mii_id\.py", (1, "", "ioctl: Operation not supported"))] + _census_responses())
+    facts, notes = lt.census(t, CENSUS_BUS)
+    assert facts["eth0_phy_id_raw"].startswith("unread (") and facts["eth_phy_id_mismatch"] == "unread"
+    assert any("phy id not fully readable" in n for n in notes)
+
+
+def test_census_phy_id_helper_is_pushed_then_removed():
+    t, fake = target(_census_responses())
+    lt.census(t, CENSUS_BUS)
+    run = next(c for c in fake.commands if "alp_mii_id.py" in c)
+    assert run == "python3 /tmp/alp_mii_id.py end0 end1; rm -f /tmp/alp_mii_id.py"
+    assert any(a[0] == "scp" and a[-1].endswith(":/tmp/alp_mii_id.py") for a in fake.argvs)
+
+
+@pytest.mark.parametrize("dmesg, want", [
+    ("renesas-gbeth 15c30000.ethernet end0: Failed to reset the dma\n", "end0"),
+    ("renesas-gbeth 15c40000.ethernet end1: Failed to reset the dma\n", "end1"),
+    ("end1: Failed to reset the dma\nend0: Failed to reset the dma\n", "end0,end1"),
+    ("stmmac: Failed to reset the dma\n", "unknown"),
+])
+def test_census_records_the_gbeth_dma_reset_failure_ports(dmesg, want):
+    t, _ = target([(r"^dmesg \| grep", dmesg)] + _census_responses())
+    facts, _ = lt.census(t, CENSUS_BUS)
+    assert facts["eth_dma_reset_failed"] == want

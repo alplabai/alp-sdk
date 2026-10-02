@@ -167,12 +167,35 @@ warning; default 15 s) and at least **5 s** ON before any OFF, counted from the
 last ON this process issued or, for a fresh process, assumed to be just now.
 Every PSU command is logged with a monotonic timestamp in the step log.
 
+### Clean shutdown before every cut
+
+The tool never cuts power under a running Linux: a hard cut while the microSD root
+was mounted corrupted its ext4 journal (`JBD2: journal transaction ... is corrupt`,
+kernel panic on the next boot). Before **every** tool-driven power cycle (`detect`,
+`boot_to_linux` and so `boot_sd_linux`, the `eeprom_manifest` and `gd32_flash` cold
+cycles, each `cold_boot_test` cycle, `poweroff_and_cold_boot`, the `bootstrap` and
+`dsw1_emmc_insert_sd` cycles, the xmodem path) `clean_shutdown` runs:
+
+1. If Linux is reachable (SSH, including the `bench.yaml` `linux.host` of a unit a
+   previous run left up, else this boot's console login), it runs `sync; poweroff`.
+2. It waits up to 90 s for the console halt line (`reboot: Power down` or
+   `System halted`).
+3. No halt line: it runs `sync` again and waits 5 s, and the plan log records
+   `clean shutdown FALLBACK: no halt line in 90s; sync + 5s wait`.
+4. Only then does `Power.cycle` cut the PSU. The OFF dwell is unchanged, so a clean
+   poweroff followed by it is still a cold boot, and `cold_boot_test` keeps its
+   `--cold-cycles` (3) cold boots.
+
+The PSU current is not used as a halt signal. A unit that is not reachable (dead
+SSH, no console login, U-Boot, the SCIF ROM) is cycled directly. Not covered: Linux
+running from a previous process on a console only, with no pinned `linux.host`.
+
 ## Steps
 
 | step | what it does |
 |---|---|
 | `preflight` | offline gates: bundle schema, artefact sha256 / size / role set (`bl2`, `bl2_mmc`, `fip`, `system_image` -- enforced here, not by the bundle schema, because flat-flow bundles such as som-0.2.0 legitimately carry no `bl2_mmc`), xSPI and boot1 size limits, family, SKU triangle, DDR tier triangle, FIP rail string (`v2n-m1`), FDT present in the wic `/boot`, N24S128 frame-table self-check |
-| `detect` | power cycle and classify the console: SCIF ROM, BL2, U-Boot, Linux login, silent. The ROM banner `SCI Download mode (Due to parameter error)` is the ROM's fallback (DSW1 probably not in SCIF mode 3, or a board fault) and is **refused** with an operator message; only `(Normal SCI boot)` proceeds |
+| `detect` | clean shutdown if Linux is up, then power cycle and classify the console: SCIF ROM, BL2, U-Boot, Linux login, silent. The ROM banner `SCI Download mode (Due to parameter error)` is the ROM's fallback to SCI download, taken when the selected boot source has no valid image (blank xSPI/eMMC, or DSW1 not in mode 3). It still offers `-- Load Program to SRAM`, but it is **refused**: "boot ROM fell back to SCI download because the selected boot source has no valid image (blank xSPI/eMMC, or DSW1 not in mode 3); set DSW1 to mode 3 for a clean SCIF bootstrap". Only `(Normal SCI boot)` proceeds |
 | `dsw1_scif` | operator: boot switch to SCIF download |
 | `bootstrap` | reuses the live SCIF ROM state `detect` left in this run (no second power cycle); cycles only if no ON has happened since. Flash Writer: `EM_W` boot1 sector `0x1` ← `bl2_mmc`, sector `0x300` ← `fip`; `EM_SECSD` EXT_CSD `[177]=0x02` (BOOT_BUS_CONDITIONS), `[179]=0x08` (PARTITION_CONFIG); `EM_DCID` |
 | `dsw1_emmc_insert_sd` | operator: boot switch to eMMC, insert the release microSD; U-Boot must autoboot |
@@ -181,7 +204,7 @@ Every PSU command is logged with a monotonic timestamp in the step log.
 | `write_xspi` | from Linux: `bl2` → `mtd0`, `fip` → `mtd1`; md5 readback. A FIP whose erase would reach the CM33 image at `mtd1` + `0x1A0000` is refused |
 | `write_emmc_boot` | release `bl2_mmc` + `fip` into `mmcblk<N>boot1`, md5 readback, EXT_CSD via mmc-utils |
 | `write_rootfs` | stream the wic into the eMMC user area (refused while Linux runs from the eMMC), `fsck -n`, read-only mount (`-o ro,noload`, so the ext4 journal is never replayed), `/boot/<dtb>` present. With a `system_image_bmap` in the bundle only the mapped ranges are written and verified, see below |
-| `census` | read-only: every auto ledger key the unit can provide |
+| `census` | read-only (one throwaway file in `/tmp`): every auto ledger key the unit can provide, plus the keys listed under "Census keys" below |
 | `eeprom_manifest` | preconditions, 128-byte manifest in 8 × 16-byte page writes at `0x50`, readback, cold cycle, re-read; only then the staged blob is promoted to `<serial>.manifest.bin` |
 | `dxm1_npu_flash` | `v2n-m1` bundles that carry the DX-M1 set: firmware over the ROM UART path, probe = PCIe `0x0000` + `dxrt-cli -s` version, see below |
 | `pmic_verify` | compare registers against `--pmic-expect` |
@@ -308,7 +331,7 @@ holds firmware takes the `sf_erase` path first, the proven `dx_update.sh` step 1
 6. restore the release DTB and verify its md5 (also after any failure past
    step 2, also when the copy over the live DTB itself fails; a leftover `.release` from an interrupted run is healed before a
    new backup, never overwritten);
-7. `sync`, `poweroff`, wait for the halt line, cold cycle (the normal
+7. clean shutdown (see "Clean shutdown before every cut"), cold cycle (the normal
    `MIN_ON_S` / `MIN_OFF_S` rules of `Power.cycle`), log in;
 8. verify PCIe device `0x0000` and the `dxrt-cli -s` version.
 
@@ -334,6 +357,36 @@ bit 1 clear; the unit passes the ledger ship check (disposition `ship`, GD32
 released on its own by the last cold boot, no known defects, no override,
 not a `--build-dir` unit); and the operator retypes the serial. After the
 lock frame, only a re-read with bit 1 set counts.
+
+### Census keys (#2624)
+
+- **I2C reads retry.** Every `i2cget` the tool makes (census, `pmic_verify`,
+  `cold_boot_test`) is tried 3 times, 0.5 s apart (bench: `Error: Read failed` on
+  reads that worked minutes later). A read that still fails is recorded as
+  `unread (<error>)` for its census key (`act88760_gpio_regs`, `da9292_*`, `tps_vout`,
+  `rtc_rv3028_reg_0x37`, `act88760_gpio4_otp`) and listed in the step detail; it never
+  passes as a value and does not drop the group's other keys. `pmic_verify` reports it
+  as `<dev> <addr> reg <reg> unread (<error>)` and fails.
+- **Real PHY ID.** On these SoMs the devicetree forces `ethernet-phy-id001c.c878`, so
+  sysfs shows `0x001cc878`; the silicon's MII registers 2/3 read `0x001c`/`0xc916`.
+  `eth0_phy_id` / `eth1_phy_id` hold the sysfs value (`/sys/class/net/<if>/phydev/phy_id`),
+  `eth0_phy_id_raw` / `eth1_phy_id_raw` the raw registers (e.g. `0x001cc916`), read by a
+  small python3 `SIOCGMIIPHY` / `SIOCGMIIREG` helper pushed to `/tmp` and removed again
+  (the image has python3 and no `mii-tool`). `eth_phy_id_mismatch` is `yes` when a port's
+  raw and sysfs IDs differ, `no` when both ports match, `unread` when a value could not
+  be read.
+- **gbeth DMA reset.** `eth_dma_reset_failed` is `none`, `end0`, `end1` or `end0,end1`
+  from `Failed to reset the dma` in `dmesg` (`unknown` when the line names no port).
+- **Supply-current screen.** With SCPI power, `current()` sends one `MEAS:CURR? CH<n>`
+  (the configured channel only, over the persistent socket) and census records
+  `psu_current_a` (amps) and `psu_current_state` (`linux-idle`). A reading above
+  0.40 A adds `WARNING: supply current ... A > 0.40 A` to the step detail; the step still
+  passes, because the threshold belongs in the private catalogue. Background: a capacitor
+  on the PHY regulator output (a fault on one SoM revision) draws about 0.45 A as soon as
+  the PHYs leave reset, against 0.17 to 0.29 A normal. Labgrid and manual power have no
+  meter: the keys are absent. A failed query records `psu_current_a: unread (<error>)`.
+
+These keys reach the unit ledger only if the private catalogue lists them as `auto`.
 
 ## Provisioning SD payload store
 

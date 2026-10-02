@@ -82,7 +82,7 @@ def test_cycle_right_after_on_waits_min_on():
 
 def test_parameter_error_banner_refuses():
     con = FakeConsole([(None, "SCI Download mode (Due to parameter error)\r\n")])
-    with pytest.raises(bench.BenchError, match="parameter error"):
+    with pytest.raises(bench.BenchError, match="no valid image"):
         scif_writer.load_writer(con, __file__, 0.1)
 
 
@@ -267,6 +267,7 @@ def test_dsw1_emmc_insert_sd_then_boot_sd_linux_cycles_exactly_once(tmp_path, mo
     monkeypatch.setattr(steps, "_phy_latch_evidence", lambda c: "")      # no PHY fault: only the DHCP wait runs
     monkeypatch.setattr(steps, "IP_WAIT_S", 0.05)
     monkeypatch.setattr(steps.time, "sleep", lambda s: None)
+    monkeypatch.setattr(steps, "clean_shutdown", lambda ctx: None)    # covered in test_provision_clean_shutdown
     b = _bench(console=FakeConsole([]))
     b.power.on_hook = lambda: b.console.feed("Hit any key to stop autoboot: 3\r\nlogin: ")
     ctx = _ctx(tmp_path, bench=b, execute=True, gd32_fw=tmp_path)   # pending GD32 flash: console path after the wait

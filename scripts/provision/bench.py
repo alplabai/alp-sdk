@@ -338,6 +338,10 @@ class Power:
     def is_on(self) -> bool | None:  # None = unknowable
         return None
 
+    def current(self) -> float | None:
+        """Supply current in amps, one reading; None when this power kind cannot measure it."""
+        return None
+
 
 class ScpiPower(Power):
     """SCPI over ONE persistent raw TCP connection (the only SCPI socket in the tool).
@@ -457,6 +461,16 @@ class ScpiPower(Power):
         except (BenchError, ValueError):
             return None
         return bool(stat >> (3 + self.channel) & 1)
+
+    def current(self) -> float:
+        """One ``MEAS:CURR? CH<n>`` reading of the configured channel, in amps, over the
+        persistent socket. BenchError when the reply is not a number."""
+        reply = self._send(f"MEAS:CURR? CH{self.channel}", reply=True)
+        try:
+            return float(reply)
+        except ValueError:
+            raise BenchError(f"SCPI {self.host}:{self.port} MEAS:CURR? CH{self.channel}: "
+                             f"not a number: {reply!r}") from None
 
 
 class LabgridPower(Power):

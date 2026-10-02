@@ -202,6 +202,7 @@ def ct_tools():
 
 def test_boot_to_linux_without_ip_leaves_linux_unset_when_allowed(tmp_path, monkeypatch):
     monkeypatch.setattr(steps.lt, "console_login", lambda c, u: None)
+    monkeypatch.setattr(steps, "clean_shutdown", lambda ctx: None)    # covered in test_provision_clean_shutdown
 
     def no_ip(ctx, force=False, **kw):
         raise BenchError("no inet address")
