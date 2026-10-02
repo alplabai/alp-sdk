@@ -98,3 +98,9 @@ def test_docs_knob_value_must_be_a_generated_fragment(tree):
     msg = "\n".join(gate.find_problems(tree))
     assert 'ALP_CAMERA_CAM0 = "no_such_camera" has no generated fragment' in msg
     assert "innomaker_cam_ov9281" in msg
+
+
+def test_bench_verified_sku_must_exist(tree):
+    _edit(tree / "metadata/camera_modules/innomaker_cam_ov9281.yaml",
+          lambda d: d.update(linux_bench_verified_on="E1M-NOPE1"))
+    assert "linux_bench_verified_on E1M-NOPE1 is not a SoM" in "; ".join(gate.find_problems(tree))

@@ -25,6 +25,7 @@
         "additionalProperties": { "type": ["integer", "string", "boolean"] }
       }
     },
+    "linux_bench_verified_on": { "type": "string", "pattern": "^E1M-[A-Z0-9]+$", "description": "SKU of the SoM on which this module's generated Linux fragment was bench-verified (streams frames).  Absent = not bench-verified.  Drives the Bench status column of the generated supported-camera table." },
     "notes": { "type": "string" }
   }
 }

@@ -8,3 +8,4 @@ i2c_addr_7bit:  0x60
 xclk_hz:        24000000
 lanes:          2
 zephyr_shield:  innomaker_cam_ov9281
+linux_bench_verified_on: E1M-V2M103   # 30/30 frames on E1M-V2M103 + X-EVK J5

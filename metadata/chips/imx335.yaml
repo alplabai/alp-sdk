@@ -198,6 +198,8 @@ kconfig:
 
 families:
   - aen
+  - v2n
+  - v2n-m1
 
 verification:
   hil_silicon:    partial           # Bench-verified: 2x2-binned 1296x972 RAW10 raw capture

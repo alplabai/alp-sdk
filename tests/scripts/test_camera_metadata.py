@@ -384,3 +384,24 @@ def test_linux_driver_facts_consistent_with_modules():
             assert m["xclk_hz"] in lin["xclk_supported_hz"], p.stem
         if "link_freqs" in lin:
             assert m["lanes"] in {e["lanes"] for e in lin["link_freqs"]}, p.stem
+
+
+def test_cameras_module_without_a_linux_fragment_is_error(tmp_path):
+    """A module with metadata but no generated fragment for the project's
+    (Linux) SoM is rejected, naming the module and the supported ones."""
+    import shutil
+    root = tmp_path / "tree"
+    for d in ("boards", "camera_modules", "chips", "e1m_modules", "socs/renesas"):
+        shutil.copytree(META / d, root / "metadata" / d)
+    shutil.copytree(REPO / "meta-alp-sdk/recipes-kernel/linux/linux-renesas",
+                    root / "meta-alp-sdk/recipes-kernel/linux/linux-renesas")
+    mod = _load(META / "camera_modules" / "innomaker_cam_ov9281.yaml")
+    mod.update(module_id="acme_cam")
+    (root / "metadata/camera_modules/acme_cam.yaml").write_text(
+        yaml.safe_dump(mod), encoding="utf-8")
+    ok = _project(tmp_path, [{"connector": "CAM0", "module": "innomaker_cam_ov9281"}])
+    assert not validate_board_yaml(ok, metadata_root=root / "metadata").has_errors()
+    bad = _project(tmp_path, [{"connector": "CAM0", "module": "acme_cam"}])
+    msgs = [d.message for d in validate_board_yaml(bad, metadata_root=root / "metadata")]
+    assert any("'acme_cam' has no Linux devicetree fragment" in m
+               and "innomaker_cam_ov9281" in m for m in msgs), msgs

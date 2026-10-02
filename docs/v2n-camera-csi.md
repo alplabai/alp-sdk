@@ -34,10 +34,13 @@ what is missing, for a module that cannot be generated.
 
 <!-- BEGIN GENERATED: scripts/gen_camera_dt.py supported cameras -->
 
-| Module | Sensor | Connector | Lanes | I2C | Linux driver | `ALP_CAMERA_<connector>` |
-|---|---|---|---|---|---|---|
-| InnoMaker CAM-OV9281 (OV9281 global-shutter mono, 2-lane CSI-2) | `ov9281` | CAM0 (J5) | 2 | `0x60` | `ovti,ov9281` | `innomaker_cam_ov9281` |
-| Raspberry Pi Camera Module 2 (IMX219, 2-lane CSI-2) | `imx219` | CAM0 (J5) | 2 | `0x10` | `sony,imx219` | `raspberry_pi_camera_module_2` |
+| Module | Sensor | Connector | Lanes | I2C | Linux driver | Bench status | `ALP_CAMERA_<connector>` |
+|---|---|---|---|---|---|---|---|
+| INNO-MAKER CAM-IMX335-5MP (Sony IMX335, 2-lane CSI-2) | `imx335` | CAM0 (J5) | 2 | `0x1a` | `sony,imx335` | not bench-verified | `innomaker_cam_imx335` |
+| InnoMaker CAM-OV9281 (OV9281 global-shutter mono, 2-lane CSI-2) | `ov9281` | CAM0 (J5) | 2 | `0x60` | `ovti,ov9281` | verified on E1M-V2M103 | `innomaker_cam_ov9281` |
+| Raspberry Pi Camera Module 1 (OV5647, 2-lane CSI-2) | `ov5647` | CAM0 (J5) | 2 | `0x36` | `ovti,ov5647` | not bench-verified | `raspberry_pi_camera_module_1` |
+| Raspberry Pi Camera Module 2 (IMX219, 2-lane CSI-2) | `imx219` | CAM0 (J5) | 2 | `0x10` | `sony,imx219` | not bench-verified | `raspberry_pi_camera_module_2` |
+| Raspberry Pi Global Shutter Camera (IMX296LQR-C colour, 1-lane CSI-2) | `imx296` | CAM0 (J5) | 1 | `0x1a` | `sony,imx296` | not bench-verified | `raspberry_pi_global_shutter_camera` |
 
 <!-- END GENERATED: scripts/gen_camera_dt.py supported cameras -->
 
@@ -50,7 +53,8 @@ ALP_CAMERA_CAM0 = "raspberry_pi_camera_module_2"
 
 `alp` writes this line for a project `cameras:` entry
 (`cameras: [{connector: CAM0, module: <module_id>}]`). An unknown value
-aborts the bake and lists the valid ones.
+aborts the bake and lists the valid ones, and `alp validate` rejects a
+`cameras:` entry whose module has no fragment for the project's SoM.
 
 Bake as usual (`docs/build-yocto-v2n.md`). The cam0 dtb is built next to
 the stock one (`renesas/e1m-v2{n,m}101-x-evk-cam0.dtb`). Point the
@@ -104,6 +108,16 @@ bootloader `fdtfile` at it to use it; the stock dtb stays the fallback.
    `0x10` on I2C (power/enable sequencing, not modelled), probe fails
    (wrong sensor / lanes), no frames (lane count or graph mismatch).
 
+   Lane polarity: the generated IMX219 fragment applies the connector's
+   lane swap (`lane-polarities = <1 1 1>` on the `csi20` endpoint, from
+   `camera_connectors.CAM0.lane_polarity` in
+   `metadata/boards/e1m-x-evk.yaml`). That swap was bench-proven only with
+   the OV9281; for the IMX219 it is **unverified**. If `DLST0`/`DLST1 = 0x4`
+   (ErrControl) and no packets appear with the swap applied, the pairs are
+   not swapped for this module: change `lane_polarity` there to `[0, 0, 0]`
+   and regenerate (`python3 scripts/gen_camera_dt.py`). It is a connector
+   property, so it applies to every module on CAM0, the OV9281 included.
+
 Report the outcome on #1149 before treating any of this as verified.
 
 ## Sensor drivers available (#2618)
@@ -112,9 +126,10 @@ Report the outcome on #1149 before treating any of this as verified.
 receiver and CRU, into the kernel (`=y`) on every V2N/V2M machine -- built
 in rather than as modules because the `alp-image-*` images install no
 `kernel-modules` package -- so a camera works once its devicetree node is in
-the dtb. Every module in the table above has a generated CAM0 fragment; a
-sensor without a module needs your own node on the CAM0 I2C bus and a
-`csi20` endpoint.
+the dtb. A module gets a generated CAM0 fragment when a V2N/V2M SoM family is
+in its chip's `families` and its metadata is complete (see "Supported
+cameras"); the table above lists exactly those. A sensor without a module
+needs your own node on the CAM0 I2C bus and a `csi20` endpoint.
 
 | Sensor | Kernel driver | Lanes | Modes / formats | Notes |
 |---|---|---|---|---|
@@ -148,7 +163,10 @@ endpoint; lane polarity goes on the `csi20` endpoint, see patch 0017):
 
 A monochrome OmniVision OV9281 (RPi-style 15-pin module) on the E1M-X-EVK
 CAM0 connector. Same receiver path as every other module (`csi20` ->
-`cru0`). Bench-proven on E1M-V2M103 (30/30 frames, 16.9 fps); needs patches 0016 and 0017.
+`cru0`). The generated fragment is property-identical to the bench-proven
+hand-written one (30/30 frames, 16.9 fps on E1M-V2M103); the generated
+fragment itself has not been built by bitbake or booted. Needs patches 0016
+and 0017.
 
 ```
 # conf/local.conf
@@ -196,7 +214,7 @@ With the patch the CRU captures it as `CR10` (RAW10, 64-bit packed: six
 pairs arrive swapped at the RZ/V2N receiver. Without the swap the receiver
 sees `CSI2nRXST = 0`, `DLST0`/`DLST1 = 0x4` (ECT ErrControl on the data
 lanes), `PMST = 0x000F40CF` (clock-lane ULPS flags) and never a packet.
-the fragment sets `lane-polarities = <1 1 1>;` (clock + 2 data lanes
+The fragment sets `lane-polarities = <1 1 1>;` (clock + 2 data lanes
 inverted, from `camera_connectors.CAM0.lane_polarity`) on the `csi20`
 endpoint, and
 `0017-media-rzg2l-csi2-honour-lane-polarities-via-SWAPCTL.patch` (applied

@@ -76,6 +76,8 @@ kconfig:
 
 families:
   - aen
+  - v2n
+  - v2n-m1
 
 verification:
   hil_silicon:    partial           # Bench-verified (runs 52/61/62/63): CSI-2 streaming, a

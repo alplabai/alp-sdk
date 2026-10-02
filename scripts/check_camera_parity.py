@@ -17,6 +17,7 @@ listing exactly what is missing:
     module's lane count when the chip declares any, and the compatible/kconfig
     is listed in metadata/os/linux-kernel-drivers.yaml with every named patch
     present under meta-alp-sdk/;
+  * linux_bench_verified_on, when set, names a real SoM SKU;
   * the committed camera-sensors.cfg contains every module's kconfig as =y;
   * every `ALP_CAMERA_<connector> = "<module>"` value in docs/ names a module
     that has a generated fragment for that connector.
@@ -60,6 +61,9 @@ def find_problems(root: Path) -> list[str]:
 
     for mid, mod in tree.modules.items():
         who = f"camera module {mid}"
+        sku = mod.get("linux_bench_verified_on")
+        if sku and sku not in tree.soms:
+            out.append(f"{who}: linux_bench_verified_on {sku} is not a SoM in metadata/e1m_modules")
         chip = tree.chip(mod["chip"])
         if chip is None:
             out.append(f"{who}: chip {mod['chip']} has no metadata/chips/{mod['chip']}.yaml")

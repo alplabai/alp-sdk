@@ -103,6 +103,8 @@ kconfig:
 
 families:
   - aen
+  - v2n
+  - v2n-m1
 
 verification:
   hil_silicon:    partial           # Stage A+B bench-verified: I2C identity, CSI-2 streaming, a
