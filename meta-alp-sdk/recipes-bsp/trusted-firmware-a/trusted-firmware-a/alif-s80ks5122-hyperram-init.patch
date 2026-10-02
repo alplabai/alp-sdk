@@ -1,0 +1,571 @@
+From 8538d2ae3086bf187a0b6a2bdf83baabcbd667a0 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <dev@alplab.ai>
+Date: Thu, 1 Oct 2026 09:44:45 +0000
+Subject: [PATCH] alif devkit_e7: S80KS5122 HyperRAM init for OSPI0 (UNTESTED
+ ON SILICON)
+
+Add an opt-in driver (S80K_HYPERRAM_EN=1) that brings up the Infineon/
+Cypress S80KS5122 512 Mbit dual-die HyperRAM on OSPI0 and arms its XIP
+window, for the Alp Lab E1M-AEN803. Alif's TF-A has no init for this part
+(alp-sdk#1970).
+
+The register sequence is transcribed step for step from the Alif Ensemble
+CMSIS DFP -- ospi_psram_xip.c ospi_psram_xip_init() plus the device hook in
+S80K_HyperRAM.c -- with every write citing its DFP file:line. CR0, wait
+cycles and the second die follow the S80KS5122 datasheet where the DFP's
+single-die RTSS values would be wrong for this part.
+
+UNTESTED ON SILICON: the only board carrying the part (E1M-AEN803
+2626-r2) has CK/CK# crossed at the device, so the driver is gated by
+S80K_HYPERRAM_CLK_PAIR_CROSSED (default 1), which makes it log and leave
+the device untouched. Build with =0 for a corrected board.
+
+Off by default; an unset build differs from stock only in the build
+timestamp.
+
+Upstream-Status: Pending
+Signed-off-by: Alp Lab AB
+---
+ .../plat/alif/common/drivers/s80k_hyperram.h  |  25 ++
+ plat/alif/board/devkit_e7/platform.mk         |  21 +
+ .../devkit_e7/sp_min/devkit_e7_sp_min_setup.c |  15 +
+ plat/alif/common/drivers/ospi/s80k_hyperram.c | 414 ++++++++++++++++++
+ plat/alif/common/sp_min/alif_sp_min.mk        |   4 +
+ 5 files changed, 479 insertions(+)
+ create mode 100644 include/plat/alif/common/drivers/s80k_hyperram.h
+ create mode 100644 plat/alif/common/drivers/ospi/s80k_hyperram.c
+
+diff --git a/include/plat/alif/common/drivers/s80k_hyperram.h b/include/plat/alif/common/drivers/s80k_hyperram.h
+new file mode 100644
+index 0000000..f0bd5c9
+--- /dev/null
++++ b/include/plat/alif/common/drivers/s80k_hyperram.h
+@@ -0,0 +1,25 @@
++/*
++ * Copyright (c) 2026, Alp Lab AB. All rights reserved.
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ */
++
++#ifndef S80K_HYPERRAM_H
++#define S80K_HYPERRAM_H
++
++/**
++ * @brief Bring up the Infineon/Cypress S80KS5122 HyperRAM on OSPI0 and arm
++ *        its XIP window.
++ *
++ * UNTESTED ON SILICON.  Built only when S80K_HYPERRAM_EN=1.  See the header
++ * comment of s80k_hyperram.c for the sequence, its Alif DFP sources and the
++ * CK/CK# board-revision gate.
++ *
++ * @return 0 on success, negative errno on failure.  -ENODEV means the driver
++ *         deliberately did not touch the device (CK/CK# pair crossed on this
++ *         board revision).  Callers should continue without external RAM
++ *         rather than panic.
++ */
++int s80k_hyperram_init(void);
++
++#endif /* S80K_HYPERRAM_H */
+diff --git a/plat/alif/board/devkit_e7/platform.mk b/plat/alif/board/devkit_e7/platform.mk
+index 247fed9..0a2726d 100644
+--- a/plat/alif/board/devkit_e7/platform.mk
++++ b/plat/alif/board/devkit_e7/platform.mk
+@@ -18,6 +18,27 @@ $(eval $(call add_define,MX_FLASH_EN))
+ $(eval $(call add_define,AES_EN))
+ $(eval $(call add_define,AP_HYPERRAM_EN))
+ 
++# Infineon/Cypress S80KS5122 HyperRAM on OSPI0 (E1M-AEN803). alp-sdk#1970.
++# UNTESTED ON SILICON -- see plat/alif/common/drivers/ospi/s80k_hyperram.c.
++# Off by default, so E1M-AEN801 (no external memory) and every other build is
++# byte-identical.
++#
++# S80K_HYPERRAM_CLK_PAIR_CROSSED=1 (default) names the E1M-AEN803 2626-r2
++# board bug: CK/CK# are crossed at the HyperRAM, the part answered a bench
++# bit-bang (ID0=0x0F86, ID1=0x0001) only with the pair inverted, and no
++# firmware lever fixes it. While 1 the driver does not touch the device. Set
++# 0 for a board with the pair corrected (R3, or an r2 with the R17/R18 rework).
++S80K_HYPERRAM_EN		?=	0
++S80K_HYPERRAM_CLK_PAIR_CROSSED	?=	1
++S80K_HYPERRAM_SS		?=	0
++S80K_HYPERRAM_DUAL_DIE		?=	1
++$(eval $(call add_define,S80K_HYPERRAM_EN))
++ifeq "1" "${S80K_HYPERRAM_EN}"
++$(eval $(call add_define,S80K_HYPERRAM_CLK_PAIR_CROSSED))
++$(eval $(call add_define,S80K_HYPERRAM_SS))
++$(eval $(call add_define,S80K_HYPERRAM_DUAL_DIE))
++endif
++
+ # Ensemble E8 SoC selector. Used to select code blocks that are applicable
+ # only on the E8 SoC. Enabled by default. set ALIF_SOC_E8=0 to build for E7.
+ ALIF_SOC_E8		?=	1
+diff --git a/plat/alif/board/devkit_e7/sp_min/devkit_e7_sp_min_setup.c b/plat/alif/board/devkit_e7/sp_min/devkit_e7_sp_min_setup.c
+index 0f03fd6..2a4125a 100644
+--- a/plat/alif/board/devkit_e7/sp_min/devkit_e7_sp_min_setup.c
++++ b/plat/alif/board/devkit_e7/sp_min/devkit_e7_sp_min_setup.c
+@@ -12,6 +12,9 @@
+ #include <plat/alif/common/drivers/ospi.h>
+ #include <plat/alif/common/drivers/ap_memory_hyperram.h>
+ #include <plat/alif/common/drivers/issi_hyperram.h>
++#if S80K_HYPERRAM_EN
++#include <plat/alif/common/drivers/s80k_hyperram.h>
++#endif
+ #include <arch_helpers.h>
+ #include <lib/utils_def.h>
+ 
+@@ -201,6 +204,18 @@ void plat_alif_sp_min_platform_setup(void)
+     }
+ #endif
+ 
++#if S80K_HYPERRAM_EN
++    /*
++     * UNTESTED ON SILICON (alp-sdk#1970). Runs AFTER the NOR init above on
++     * purpose: OSPI0 is shared, and arming the HyperRAM XIP window is the last
++     * DR-mode-incompatible step. Deliberately not fatal -- a board that still
++     * reaches Linux without its external RAM beats one that stops in BL32.
++     */
++    if (s80k_hyperram_init() != 0) {
++        WARN("S80K HyperRAM unavailable; continuing without external RAM\n");
++    }
++#endif
++
+ #if ALIF_SOC_E8
+     /* set the NPU-HG in Non-secure, usermode state (E8-only registers) */
+     uint32_t value;
+diff --git a/plat/alif/common/drivers/ospi/s80k_hyperram.c b/plat/alif/common/drivers/ospi/s80k_hyperram.c
+new file mode 100644
+index 0000000..f1fa6b7
+--- /dev/null
++++ b/plat/alif/common/drivers/ospi/s80k_hyperram.c
+@@ -0,0 +1,414 @@
++/*
++ * Copyright (c) 2026, Alp Lab AB. All rights reserved.
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ */
++
++/*
++ * Infineon/Cypress S80KS5122 (512 Mbit, dual-die) HyperRAM init on OSPI0,
++ * E1M-AEN803 only (alp-sdk#1970).
++ *
++ * ===========================================================================
++ * UNTESTED ON SILICON.  Written build-only.  The only board that carries this
++ * part (E1M-AEN803, 2626-r2) has CK/CK# crossed at the device, so nothing in
++ * this file has ever run against a HyperRAM that answered.  Every step below
++ * is transcribed from the Alif Ensemble CMSIS DFP and is only as correct as
++ * that transcription; the bench-verified facts are listed in the CK/CK# block.
++ * ===========================================================================
++ *
++ * Sequence source: DFP drivers/source/ospi_psram_xip.c, ospi_psram_xip_init()
++ * (:85-176, RAM_TYPE_HYPERRAM branch :157-158), with the device hook from
++ * components/Source/S80K_HyperRAM.c, s80k_hyperram_init() (:31-72).  Every
++ * register write cites the DFP file:line it is copied from, so a reviewer can
++ * diff this file against the vendor one line by line.  Values are the AE822
++ * ones (DFP Device/soc/AE822FA0E5597/rte/RTE_Device.h, include/soc_features.h).
++ * DFP paths are relative to the AlifSemiconductor.Ensemble pack root.
++ *
++ * Deliberate, documented deviations from the DFP (each is a board/part fact,
++ * not a vendor-code opinion):
++ *
++ *   - CR0 value, wait cycles, dual-die: the DFP hook is written for a
++ *     single-die 32 MiB part (variable latency, latency = wait - 5).  The
++ *     S80KS5122 is a 512 Mbit dual-die stack that supports fixed latency only
++ *     (datasheet 002-31338 Rev. *C, Table 9: CR0[3]=0 is "Reserved") and wants
++ *     CR0 written to both dice (datasheet 6.3).  See S80K_HYPERRAM_CR0.
++ *   - Pads: SoM pads per metadata/e1m_modules/aen/alif-ospi.tsv, not the
++ *     DevKit's.  Pad control per DFP Boards/DevKit-e8/Templates/Baremetal/
++ *     demo_hyperram_xip.c.
++ *
++ * NOT done, on purpose:
++ *   - No ID0/ID1/CR0 read-back.  Not part of the DFP sequence, and the first
++ *     read through a HyperBus controller that has never been seen working is
++ *     the kind of thing that hung the bus before (see xip_ser below).
++ *   - No xip_ser / xip_xrxoicr access.  TF-A's ospi_regs_t declares them but
++ *     the AE822 map has them RESERVED (DFP Device/soc/AE822FA0E5597/include/
++ *     rtss_he/soc.h:3543-3545, soc_features.h:89 SOC_FEAT_OSPI_HAS_XIP_SER=0);
++ *     touching 0x10C hangs the bus with no timeout.  DFP step 10 is therefore
++ *     skipped exactly as the DFP skips it on this SoC.
++ *   - No RESET# pulse.  Not in the DFP; the part has an internal weak pull-up
++ *     on RESET# (datasheet Table 1).
++ *
++ * ---------------------------------------------------------------------------
++ * CK/CK# PAIR, E1M-AEN803 2626-r2  --  S80K_HYPERRAM_CLK_PAIR_CROSSED
++ * ---------------------------------------------------------------------------
++ * Bench result, e1m-aen-evk-01, 2026-09-06 (GPIO bit-bang, DWC_ssi and the
++ * AES/XIP shim out of the path): the HyperRAM returned ID0=0x0F86 and
++ * ID1=0x0001 ONLY with the differential clock pair INVERTED (CK idle HIGH).
++ * With the pair driven normally (CK idle LOW) nothing answered.  The netlist
++ * agrees: U9 has CK and CK# on the opposite nets to U10 (a schematic error,
++ * fixed on R3 by swapping OSPI0_SCLK_R_P/OSPI0_SCLK_R_N at U9 only).
++ *
++ * There is NO firmware fix: CTRLR0.SCPOL lands in the register but does not
++ * move the OSPI clock pads in HyperBus mode on AE822 (bench run 31), the
++ * pinmux cannot swap the pair, and the AES delay lines cannot invert.
++ *
++ * So the driver gates itself on the board revision.  With
++ * S80K_HYPERRAM_CLK_PAIR_CROSSED=1 (DEFAULT -- the only silicon that exists)
++ * it logs and returns -ENODEV without touching the device.  Arming XIP on a
++ * part that cannot answer would also unmap the NOR sharing the 0xA0000000
++ * window (AES_CONTROL_XIP_EN is per controller) and hang every later access.
++ * Build with S80K_HYPERRAM_CLK_PAIR_CROSSED=0 for an R3 board, or an r2 board
++ * with the R17/R18 clock-pair rework (which inverts the NOR's clock too --
++ * unverified for the IS25WX256).
++ *
++ * ---------------------------------------------------------------------------
++ * ORDERING.  OSPI0 carries the NOR on SS1 as well.  Arming XIP is the LAST
++ * thing this driver does and makes the controller serve only the AXI window,
++ * so any DR-mode OSPI0 traffic (the NOR's octal-DDR switch) must already be
++ * done.  The caller runs the NOR init first.
++ * ---------------------------------------------------------------------------
++ *
++ * printf: TF-A's printf discards the rest of a line on %-4u or %2u.  Only
++ * zero-padded widths (%02u, %04x, %08x) are used below.
++ */
++
++#include <lib/libc/errno.h>
++#include <stdbool.h>
++#include <stdint.h>
++
++#include <common/debug.h>
++#include <lib/mmio.h>
++#include <lib/utils_def.h>
++
++#include <plat/alif/common/drivers/ospi.h>
++#include <plat/alif/common/drivers/pinconf.h>
++#include <plat/alif/common/drivers/s80k_hyperram.h>
++#include <plat/alif/common/plat_alif.h>
++
++#ifndef S80K_HYPERRAM_CLK_PAIR_CROSSED
++#define S80K_HYPERRAM_CLK_PAIR_CROSSED	1
++#endif
++
++/* RTE_OSPI0_CHIP_SELECTION_PIN = 0 (DFP RTE_Device.h:2775).  A bitmask index. */
++#ifndef S80K_HYPERRAM_SS
++#define S80K_HYPERRAM_SS		0
++#endif
++
++/*
++ * 1 = write CR0 to die 1 as well.  Datasheet 6.3: "Since 512-Mb is a stack-die
++ * chip, any change in the configuration register setting should be performed
++ * on both dice independently".  Not in the DFP.
++ */
++#ifndef S80K_HYPERRAM_DUAL_DIE
++#define S80K_HYPERRAM_DUAL_DIE		1
++#endif
++
++/*
++ * Wait cycles for the XIP engine.  The DFP uses RTE_OSPI0_WAIT_CYCLES = 6
++ * (RTE_Device.h:2717), a single-die figure.  7 matches the CR0 initial latency
++ * of 7 clocks below (datasheet Table 9, POR default CR0[7:4]=0010).
++ */
++#ifndef S80K_HYPERRAM_WAIT_CYCLES
++#define S80K_HYPERRAM_WAIT_CYCLES	7
++#endif
++
++/*
++ * CR0 = 0x8F2D, fields from datasheet 002-31338 Rev. *C Table 9 (NOT the DFP
++ * formula, S80K_HyperRAM.c:51-57, whose field positions are
++ * components/Include/S80K_HyperRAM.h:29-34):
++ *   [15]=1 normal operation   [14:12]=000 34 ohm drive   [11:8]=1111 reserved,
++ *   "set to 1"   [7:4]=0010 latency 7   [3]=1 fixed latency (DFP writes 0, which
++ *   is Reserved at this density)   [2]=1 legacy wrapped burst   [1:0]=01 64 B
++ *   wrap, the Cortex-A32 line size (DFP writes 2 = 32 B for RTSS).
++ */
++#ifndef S80K_HYPERRAM_CR0
++#define S80K_HYPERRAM_CR0		0x8F2DU
++#endif
++
++/*
++ * Command/Address words for a CR0 write.  DFP S80K_HyperRAM.c:40-50:
++ * buff[0] = 0x60000100 (CA[47:16]), buff[1] = 0x0 (CA[15:0]), buff[2] = data.
++ * Die 1 sits at the 32 MiB die boundary of the 2x256 Mbit stack; that is word
++ * address 0x1000000, i.e. CA[37] = bit 21 of buff[0].  DERIVED from the
++ * HyperBus CA layout and the die size, not read from the datasheet -- the same
++ * bit Alif's ISSI driver uses (issi_hyperram.c IS66_CA_WRITE_CONF_REG0_DIE1).
++ */
++#define S80K_CA_CR0_WRITE_HI		0x60000100U
++#define S80K_CA_CR0_WRITE_LO		0x00000000U
++#define S80K_CA_DIE1_OFFSET		0x00200000U
++
++/* DFP drivers/include/ospi.h:45,64,77 -- CTRLR0 masks. */
++#define S80K_CTRLR0_DFS_MASK		0x1FU
++#define S80K_CTRLR0_SSTE_MASK		BIT(OSPI_CTRLR0_SSTE_OFFSET)
++
++/* DFP drivers/include/ospi.h:66 -- TMOD = send only. */
++#define S80K_CTRLR0_TMOD_SEND_ONLY	BIT(OSPI_CTRLR0_TMOD_OFFSET)
++
++/* DFP drivers/include/ospi.h:133 -- TXFTLR transfer-start level field. */
++#define S80K_TXFTLR_TXFTHR_SHIFT	16U
++#define S80K_TXFTLR_TFT_MASK		0xFFFFU
++
++/* DFP drivers/include/ospi.h:281 -- 48-bit address length (CA). */
++#define S80K_ADDR_L_48_BIT		0x0CU
++
++/* DFS: CR0 write S80K_HyperRAM.c:68 (16); XIP RTE_Device.h:2722 RTE_OSPI0_DFS (32). */
++#define S80K_DFS_CR0_WRITE		16U
++#define S80K_DFS_XIP			32U
++
++/*
++ * DFP RTE_Device.h:2712 (BUS_SPEED 100 MHz) over the AXI clock gives a divisor
++ * of 4 (ospi_psram_xip.c:49); the stock TF-A HyperRAM path writes the same
++ * 4 (devkit_e7_sp_min_setup.c ospi_controller_init).  At baud >= 4 the DFP
++ * skips aes_set_signal_delay() (ospi_psram_xip.c:55-63) -- which writes
++ * AES_RXD_DELAY_n and AES_TXD_DELAY_n registers TF-A's aes_regs_t does not
++ * declare -- so a smaller divisor is refused at build time.
++ */
++#ifndef S80K_HYPERRAM_BAUD_DIV
++#define S80K_HYPERRAM_BAUD_DIV		4
++#endif
++#if S80K_HYPERRAM_BAUD_DIV < 4
++#error "S80K_HYPERRAM_BAUD_DIV < 4 needs DFP aes_set_signal_delay(), not ported"
++#endif
++
++/* DFP RTE_Device.h:2785 RTE_OSPI0_DDR_DRIVE_EDGE */
++#define S80K_DDR_DRIVE_EDGE		1U
++
++/*
++ * DFP RTE_Device.h:2790 RTE_OSPI0_RXDS_DELAY = 11, replicated into both byte
++ * lanes: sys_ctrl_aes.h:80-83 (SOC_FEAT_AES_OSPI_SIGNALS_DELAY=1,
++ * soc_features.h:93) with AES_SIGNAL_0/1_DELAY_POS = 0/8 (sys_ctrl_aes.h:57-58).
++ */
++#define S80K_RXDS_DELAY			11U
++#define S80K_AES_RXDS_DELAY_VAL		((S80K_RXDS_DELAY << 0) | (S80K_RXDS_DELAY << 8))
++
++/* Bounded poll, no TF-A timer dependency: same scale as issi_hyperram.c. */
++#define S80K_POLL_MAX			1000000U
++
++/*
++ * Pads.  SoC pad per signal: metadata/e1m_modules/aen/alif-ospi.tsv:2-14, all
++ * alternate function 1.  Pad control: DFP demo_hyperram_xip.c data/RXDS
++ * READ_ENABLE|12MA (:110-113, :239-242), SCLK/SS 12MA (:257-260, :266-269).
++ * A shared-bus NOR driver must program the SAME control on the shared pads
++ * (SCLK/SCLKN/D0-D7/RXDS) or it silently strips one side's settings.
++ */
++#ifndef S80K_PAD_DATA
++#define S80K_PAD_DATA	(PADCTRL_READ_ENABLE | PADCTRL_OUTPUT_DRIVE_STRENGTH_12MA)
++#endif
++#ifndef S80K_PAD_CTRL
++#define S80K_PAD_CTRL	PADCTRL_OUTPUT_DRIVE_STRENGTH_12MA
++#endif
++
++static void s80k_pinmux(void)
++{
++	static const struct {
++		uint8_t port;
++		uint8_t pin;
++		uint8_t is_data;
++	} pads[] = {
++		{PORT_2, PIN_0, 1}, {PORT_2, PIN_1, 1},		/* D0 D1 */
++		{PORT_6, PIN_2, 1}, {PORT_6, PIN_3, 1},		/* D2 D3 */
++		{PORT_6, PIN_4, 1}, {PORT_6, PIN_5, 1},		/* D4 D5 */
++		{PORT_6, PIN_6, 1}, {PORT_0, PIN_7, 1},		/* D6 D7 */
++		{PORT_12, PIN_2, 1},				/* RXDS */
++		{PORT_12, PIN_0, 0}, {PORT_12, PIN_1, 0},	/* SCLK SCLKN */
++		{PORT_12, S80K_HYPERRAM_SS == 0 ? PIN_3 : PIN_4, 0},	/* SSn */
++	};
++	unsigned int i;
++
++	for (i = 0U; i < ARRAY_SIZE(pads); i++) {
++		pinconf_set(pads[i].port, pads[i].pin, PINMUX_ALTERNATE_FUNCTION_1,
++			    pads[i].is_data ? S80K_PAD_DATA : S80K_PAD_CTRL);
++	}
++}
++
++static int s80k_wait_idle(ospi_regs_t *o)
++{
++	unsigned int n;
++
++	/* DFP ospi.h:491-494 ospi_busy(): busy unless TFE set and BUSY clear. */
++	for (n = 0U; n < S80K_POLL_MAX; n++) {
++		if ((o->sr & (SR_BUSY | SR_TF_EMPTY)) == SR_TF_EMPTY) {
++			return 0;
++		}
++	}
++	return -ETIMEDOUT;
++}
++
++static int s80k_wait_tfnf(ospi_regs_t *o)
++{
++	unsigned int n;
++
++	for (n = 0U; n < S80K_POLL_MAX; n++) {
++		if ((o->sr & SR_TF_NOT_FULL) != 0U) {
++			return 0;
++		}
++	}
++	return -ETIMEDOUT;
++}
++
++/* DFP ospi.c:71-83 ospi_set_dfs(): dfs-1 into CTRLR0[4:0], bracketed disable/enable. */
++static void s80k_set_dfs(ospi_regs_t *o, uint32_t dfs)
++{
++	o->ssienr = 0;
++	o->ctrlr0 = (o->ctrlr0 & ~S80K_CTRLR0_DFS_MASK) | (dfs - 1U);
++	o->ssienr = 1;
++}
++
++/*
++ * DFP ospi.c:652-698 ospi_hyperbus_send(), with the transfer parameters
++ * S80K_HyperRAM.c:59-66 passes: octal, DDR, inst_len 0, addr_len 48-bit,
++ * dummy 0, three TX words.
++ */
++static int s80k_hyperbus_send3(ospi_regs_t *o, uint32_t w0, uint32_t w1, uint32_t w2)
++{
++	const uint32_t words[3] = { w0, w1, w2 };
++	uint32_t val;
++	unsigned int i;
++	int ret;
++
++	o->ssienr = 0;							/* :656 */
++
++	val = o->ctrlr0;						/* :658-662 */
++	val &= ~((3U << OSPI_CTRLR0_SPI_FRF_OFFSET) | OSPI_CTRLR0_TMOD_MASK |
++		 S80K_CTRLR0_SSTE_MASK);
++	val |= (SPI_OCTAL << OSPI_CTRLR0_SPI_FRF_OFFSET) | S80K_CTRLR0_TMOD_SEND_ONLY |
++	       BIT(OSPI_CTRLR0_SPI_HE_OFFSET);
++	o->ctrlr0 = val;
++
++	o->spi_ctrlr0 = OSPI_TRANS_TYPE_FRF_DEFINED |			/* :664-669 */
++			BIT(OSPI_SPI_CTRLR0_SPI_DDR_EN_OFFSET) |
++			(0U << OSPI_SPI_CTRLR0_INST_L_OFFSET) |
++			(S80K_ADDR_L_48_BIT << OSPI_SPI_CTRLR0_ADDR_L_OFFSET) |
++			(0U << OSPI_SPI_CTRLR0_WAIT_CYCLES_OFFSET);
++
++	o->ssienr = 1;							/* :671 */
++
++	/* :673-694.  Three entries always fit the 256-deep FIFO, so the DFP's
++	 * FIFO-level arithmetic reduces to: transfer-start level = count - 1. */
++	o->txftlr |= (3U - 1U) << S80K_TXFTLR_TXFTHR_SHIFT;
++	for (i = 0U; i < 3U; i++) {
++		ret = s80k_wait_tfnf(o);
++		if (ret != 0) {
++			return ret;
++		}
++		o->datareg = words[i];
++	}
++
++	return s80k_wait_idle(o);					/* :696-697 */
++}
++
++/* DFP S80K_HyperRAM.c:31-72 s80k_hyperram_init(), run once per die. */
++static int s80k_write_cr0(ospi_regs_t *o, uint32_t ca_hi)
++{
++	s80k_set_dfs(o, S80K_DFS_CR0_WRITE);				/* :68 */
++	return s80k_hyperbus_send3(o, ca_hi, S80K_CA_CR0_WRITE_LO,
++				   S80K_HYPERRAM_CR0);
++}
++
++int s80k_hyperram_init(void)
++{
++	ospi_regs_t *o = (ospi_regs_t *)OSPI0_BASE;
++	aes_regs_t *aes = (aes_regs_t *)AES0_BASE;
++	const uint32_t ser_bit = BIT(S80K_HYPERRAM_SS);	/* SER is a bitmask */
++	uint32_t val;
++	int ret;
++
++	NOTICE("S80K HyperRAM: UNTESTED ON SILICON (alp-sdk#1970)\n");
++
++	if (S80K_HYPERRAM_CLK_PAIR_CROSSED != 0) {
++		WARN("S80K HyperRAM: CK/CK# crossed on this board rev (S80K_HYPERRAM_CLK_PAIR_CROSSED=1); not touching the device\n");
++		return -ENODEV;
++	}
++
++	s80k_pinmux();
++
++	/*
++	 * Step 1, DFP ospi_psram_xip.c:129-131 enable_ospi_clk(): the OSPI0 clock
++	 * enable bit is set by devkit_e7_clocks_init() (PERIPH_CLK_ENA bit 0)
++	 * before this runs.
++	 */
++
++	/* Step 2, :133 ospi_set_ddr_drive_edge(1); ospi.c:158-163 */
++	o->ssienr = 0;
++	o->txd_drive_edge = S80K_DDR_DRIVE_EDGE;
++	o->ssienr = 1;
++
++	/* Step 3, :135 ospi_set_speed() (:41-74); ospi.h:376-381 ospi_set_baud() */
++	o->ssienr = 0;
++	o->baudr = S80K_HYPERRAM_BAUD_DIV;
++	o->ssienr = 1;
++
++	/* Step 4, :55-63: aes_set_signal_delay() only when baud < 4. Never here. */
++
++	/* Step 5, :139 aes_set_rxds_delay(aes, 11) */
++	aes->aes_rxds_delay = S80K_AES_RXDS_DELAY_VAL;
++
++	/* Step 6, :146-152: SS on, device hook, SS off.  ospi.c:173-183 */
++	o->ssienr = 0;
++	o->ser |= ser_bit;
++	o->ssienr = 1;
++
++	ret = s80k_write_cr0(o, S80K_CA_CR0_WRITE_HI);
++#if S80K_HYPERRAM_DUAL_DIE
++	if (ret == 0) {
++		ret = s80k_write_cr0(o, S80K_CA_CR0_WRITE_HI | S80K_CA_DIE1_OFFSET);
++	}
++#endif
++
++	o->ssienr = 0;
++	o->ser &= ~ser_bit;
++	o->ssienr = 1;
++
++	if (ret != 0) {
++		ERROR("S80K HyperRAM: CR0 write failed (%d)\n", ret);
++		return ret;
++	}
++
++	/* Step 7, :154 ospi_set_dfs(ospi, RTE_OSPI0_DFS = 32) */
++	s80k_set_dfs(o, S80K_DFS_XIP);
++
++	/*
++	 * Step 8, :157-158 ospi_hyperbus_xip_init(ospi, wait, is_dual_octal = 0),
++	 * ospi.c:614-643.  RTE_OSPI0_SPI_FRAME_FORMAT = 3 is plain octal
++	 * (RTE_Device.h:2707), so trans_type = FRF_DEFINED (ospi.c:616-622).
++	 */
++	o->ssienr = 0;
++	o->spi_ctrlr0 = BIT(OSPI_SPI_CTRLR0_SPI_DM_EN_OFFSET);		/* :626 */
++
++	o->xip_ctrl = BIT(OSPI_XIP_CTRL_XIP_HYPERBUS_EN_OFFSET) |	/* :628-631 */
++		      BIT(OSPI_XIP_CTRL_RXDS_SIG_EN_OFFSET) |
++		      (S80K_HYPERRAM_WAIT_CYCLES << OSPI_XIP_CTRL_WAIT_CYCLES_OFFSET) |
++		      BIT(OSPI_XIP_CTRL_DFS_HC_OFFSET) |
++		      (OSPI_TRANS_TYPE_FRF_DEFINED << OSPI_XIP_CTRL_TRANS_TYPE_OFFSET);
++
++	/* :633-640; DFS_HC set because SOC_FEAT_AES_OSPI_HAS_XIP_WRITE_HC_DFS=1 (soc_features.h:94) */
++	o->xip_write_ctrl = BIT(OSPI_XIP_WR_CTRL_WR_HYPERBUS_EN) |
++			    BIT(OSPI_XIP_WR_CTRL_WR_DM_EN) |
++			    BIT(OSPI_XIP_WR_CTRL_WR_RXDS_SIG_EN) |
++			    (OSPI_TRANS_TYPE_FRF_DEFINED << OSPI_XIP_WR_CTRL_WR_TRANS_TYPE) |
++			    BIT(OSPI_XIP_WR_CTRL_DFS_HC) |
++			    (S80K_HYPERRAM_WAIT_CYCLES << OSPI_XIP_WR_CTRL_WAIT_CYCLES);
++	o->ssienr = 1;
++
++	/* Step 9, :167 ospi_set_tx_threshold(ospi, 0); ospi.c:129-134 */
++	val = o->txftlr & ~S80K_TXFTLR_TFT_MASK;
++	o->txftlr = val;
++
++	/* Step 10, :169-171: SOC_FEAT_OSPI_HAS_XIP_SER = 0 on AE822; skipped. */
++
++	/* Step 11, :173 aes_enable_xip(aes); sys_ctrl_aes.h:37-40 */
++	aes->aes_control |= AES_CONTROL_XIP_EN;
++
++	INFO("S80K HyperRAM: XIP armed, SER=0x%08x\n", o->ser);
++	return 0;
++}
+diff --git a/plat/alif/common/sp_min/alif_sp_min.mk b/plat/alif/common/sp_min/alif_sp_min.mk
+index 6cc3e36..92ad5a0 100644
+--- a/plat/alif/common/sp_min/alif_sp_min.mk
++++ b/plat/alif/common/sp_min/alif_sp_min.mk
+@@ -22,6 +22,10 @@ ifeq "1" "${AP_HYPERRAM_EN}"
+ BL32_SOURCES		+=	plat/alif/common/drivers/ospi/ap_memory_hyperram.c
+ endif
+ 
++ifeq "1" "${S80K_HYPERRAM_EN}"
++BL32_SOURCES		+=	plat/alif/common/drivers/ospi/s80k_hyperram.c
++endif
++
+ ifeq "1" "${MX_FLASH_EN}"
+ BL32_SOURCES		+=	plat/alif/common/drivers/ospi/mx_ospi_flash_dtr.c
+ endif
+-- 
+2.43.0
+
