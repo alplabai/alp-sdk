@@ -20,6 +20,10 @@
  *   ctest --test-dir build -R alp_test_can_yocto_filter_ext_id
  */
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE /* the included yocto_drv.c uses pipe2() */
+#endif
+
 #include <string.h>
 
 #include <linux/can.h>

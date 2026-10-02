@@ -166,35 +166,12 @@
  *     src/backends/camera/v2n_n44_isp.c's DATA-GATED block.
  *
  *     See issue #1149.
- *   - CAN-FD (TCAN1044 x2).  DATA-GATED on the kernel side, same shape as
- *     the audio entry above.  The module bonds out two of the SoC's six
- *     controllers -- CANFD2 (CTX2 = P84, CRX2 = P85) and CANFD3
- *     (CTX3 = P86, CRX3 = P87), per
- *     metadata/e1m_modules/v2n/renesas-peripheral-map.tsv -- but this repo
- *     does not carry the linux-renesas 6.1.x r9a09g056 dtsi, so three
- *     values the nodes need are unverified here: the canfd node's label
- *     and its compatible string in that tree, the RZV2N_PORT_PINMUX
- *     function index for P84..P87 (metadata/pinmux/v2n.yaml still carries
- *     e1m_pad/e1m_function "TBD" on all four CANFD rows), and whether the
- *     BSP defconfig builds a CAN-FD driver at all.  Do not guess any of
- *     them -- read them out of the kernel tree at the SHA this port was
- *     generated against (6717c06).
  *
- *     Two facts that ARE settled and belong in the port when it lands.
- *     First, CAN_STBY is not a Renesas pad: the transceivers' standby line
- *     is owned by the GD32 IO-MCU on PB13 (metadata/pinmux/v2n.yaml,
- *     metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv), so it is reached
- *     through 0005-gpio-add-gd32-bridge-expander-driver.patch's expander,
- *     not through pinctrl.  Second, CANFD2/CANFD3 are unattributed in
- *     metadata/e1m_modules/v2n/core-ownership.yaml, whose "absence means
- *     not attributed" rule means check_amp_pad_claims.py cannot see an
- *     A55-vs-CM33 conflict on these pads until whichever core claims them
- *     is recorded there.
- *
- *     The CM33 side is analysed in alp-sdk#1146 and in this board's
- *     Zephyr dts (upstream ships the RZ CAN-FD driver, but hal_renesas has
- *     no rzv FSP CAN-FD module and the RZ/V2N SoC dtsi has no node); it is
- *     blocked for different reasons, so neither core unblocks the other.
+ * CAN-FD (TCAN1044 x2) is NOT a carrier feature: both transceivers
+ * (U15/U16) are on-module, so the canfd pinctrl + channel enable + the
+ * CAN_STBY gd32_gpio hog live in e1m-v2n-som.dtsi, not here. See that
+ * file for the transceiver-to-channel mapping, schematic source, and
+ * the CM33 side's separate (still-open) gap.
  */
 
 #include <dt-bindings/interrupt-controller/irq.h>

@@ -100,12 +100,27 @@ side of this bridge does not yet, so #2297 stays open for that half.
 
 Upstream-Status: Inappropriate [Alp Lab SoM-specific supervisor MCU protocol]
 
+Line 20 (can-stby) is the shared standby line for the two on-module
+TCAN1044 CAN-FD transceivers (U15/U16). It requires bridge protocol
+MINOR >= 13. Unlike lines 18/19 it is always granted at .request()
+time: its only consumer is a gpio-hog on this same gpiochip
+(e1m-v2n-som.dtsi's can-stby-hog), a hog's request runs synchronously
+inside of_gpiochip_add() during probe(), and an -EPROBE_DEFER there
+would fail registration of the whole chip (Display-1 panel reset,
+bt-reg-on, wl-reg-on, RTC) whenever the bridge is slow at that moment
+(the "pipeline hostage" failure Refs #2297 fixed for the rest of this
+driver). The wire is gated instead: gd32_bridge_gate_blocked() and
+replay masking never send a GPIO_WRITE for line 20 until
+gd32_bridge_version_poll_once() confirms MINOR >= 13. On a bridge
+reporting MINOR < 13 the write is never sent (can_stby_status =
+-ENODEV, one-shot dev_warn), so both transceivers stay in standby.
+
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  drivers/gpio/Kconfig            |   9 +
  drivers/gpio/Makefile           |   1 +
- drivers/gpio/gpio-gd32-bridge.c | 1008 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
- 3 files changed, 1018 insertions(+)
+ drivers/gpio/gpio-gd32-bridge.c | 1138 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 1148 insertions(+)
  create mode 100644 drivers/gpio/gpio-gd32-bridge.c
 
 diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
@@ -145,7 +160,7 @@ new file mode 100644
 index 000000000..b202babc2
 --- /dev/null
 +++ b/drivers/gpio/gpio-gd32-bridge.c
-@@ -0,0 +1,1008 @@
+@@ -0,0 +1,1138 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * GPIO driver for the Alp Lab GD32 IO-MCU bridge (I2C transport).
@@ -169,7 +184,7 @@ index 000000000..b202babc2
 + * the bridge pad map at firmware 0.2.12 / PROTOCOL_VERSION_MINOR 11
 + * (pad count 18 -> 20; GD32 boots them OUTPUT LOW).
 + *
-+ * The chip always registers all 20 lines now: a fixed line count
++ * The chip always registers all 22 lines now: a fixed line count
 + * decided from a single best-effort GET_VERSION at probe() bakes in
 + * whatever the bridge's boot race happened to answer at that instant
 + * (~1.5 s in, this consistently reads "bridge not answering (-6)" --
@@ -183,6 +198,21 @@ index 000000000..b202babc2
 + * pad bits it silently ignores would power nothing while reporting
 + * success. .request() fails with -ENODEV in that definitive case, and
 + * with -EPROBE_DEFER while the bridge is still silent.
++ *
++ * Line 20 (can-stby): the two on-module TCAN1044 CAN-FD transceivers'
++ * shared standby line, added to the bridge pad map at firmware 0.2.16 /
++ * PROTOCOL_VERSION_MINOR 13 (pad count 20 -> 21; GD32 boots it OUTPUT
++ * HIGH = standby). Its ONLY consumer in this devicetree is a gpio-hog
++ * on this same gpiochip (e1m-v2n-som.dtsi's can-stby-hog), not an
++ * independent device, so it is gated differently from lines 18/19:
++ * same replay masking (GD32_CAN_STBY_LINE_MASK) and the same cached
++ * "unresolved / confirmed unsupported / confirmed supported" status
++ * (can_stby_status), but .request() grants it immediately rather than
++ * returning -EPROBE_DEFER -- see gd32_bridge_gpio_request()'s comment
++ * for why gating a hog on its own chip's registration would be unsafe.
++ * Resolved from the SAME GET_VERSION round-trip as lines 18/19
++ * (gd32_bridge_version_poll_once() updates both cached statuses from
++ * one poll), not a second independent poller.
 + *
 + * Bug (Refs #2297, bench-observed 2026-09-26, E1M-V2M103): a bare
 + * -EPROBE_DEFER from .request() only gets retried by the kernel when some
@@ -265,10 +295,11 @@ index 000000000..b202babc2
 +
 +#define GD32_NGPIO_BASE		18
 +#define GD32_NGPIO_WIFI_BT	20
++#define GD32_NGPIO_CAN		21
 +
 +/*
 + * Line 21, "se-rst" (Refs #2507): the OPTIGA Trust M RESET pad. Unlike lines
-+ * 0..19 it is not a GPIO_READ/GPIO_WRITE pad -- .set() sends
++ * 0..20 it is not a GPIO_READ/GPIO_WRITE pad -- .set() sends
 + * CMD_SE_RESET(assert u8) instead, active-high assert = hold the secure
 + * element in reset. It exists so userspace can reset a Trust M that wedged
 + * idle WITHOUT opening the bridge behind this driver's back (an I2C_RDWR
@@ -277,16 +308,19 @@ index 000000000..b202babc2
 + * does not touch it: the bridge releases SE_RST on its own reset, which is
 + * exactly the safe state, and a stale "asserted" must never be replayed.
 + */
-+/* Line 20 is reserved for can-stby (bridge bit 20, protocol 0.13; the
-+ * CAN-FD bring-up in alp-sdk#2341). Until that lands, .request() refuses
-+ * it so nothing drives the transceivers' standby pad by accident. */
-+#define GD32_RESERVED_LINE	20
++/* Line 20 is can-stby (bridge bit 20, protocol 0.13; alp-sdk#2341),
++ * gated at the wire level, not in .request(). */
 +#define GD32_SE_RST_LINE	21
 +#define GD32_NGPIO_TOTAL	22
 +
 +/* Bridge protocol minor at which lines 18/19 (bt-reg-on/wl-reg-on) first
 + * exist. A bridge below this minor has no notion of them. */
 +#define GD32_PROTO_MINOR_WIFI_BT	11
++
++/* Bridge protocol minor at which line 20 (can-stby) first exists. A
++ * bridge below this minor has no notion of it -- see the file-header
++ * comment's Line 20 paragraph. */
++#define GD32_PROTO_MINOR_CAN_STBY	13
 +
 +/*
 + * Bounded retry for probe()'s best-effort GET_VERSION handshake (Refs
@@ -336,8 +370,14 @@ index 000000000..b202babc2
 +#define GD32_DEFERRED_KICK_DEVNAME	"gd32-bridge-deferred-kick"
 +
 +/* Bit mask covering lines 18/19 only, for masking them out of a replay
-+ * when the bridge has not (or not yet) confirmed it understands them. */
++ * when the bridge has not (or not yet) confirmed it understands them.
++ * See GD32_CAN_STBY_LINE_MASK below for the equivalent covering line 20. */
 +#define GD32_WIFI_BT_LINE_MASK	GENMASK(GD32_NGPIO_WIFI_BT - 1, GD32_NGPIO_BASE)
++
++/* Bit mask covering line 20 only, for masking it out of a replay when
++ * the bridge has not (or not yet) confirmed it understands it -- see
++ * GD32_WIFI_BT_LINE_MASK above for the same idea applied to 18/19. */
++#define GD32_CAN_STBY_LINE_MASK	GENMASK(GD32_NGPIO_CAN - 1, GD32_NGPIO_WIFI_BT)
 +
 +/* Output-state replay period: frequent enough that a bridge which just
 + * came up (post-reset or first power-on) is re-promoted within about a
@@ -392,6 +432,13 @@ index 000000000..b202babc2
 +	 * -- reusing one mutex for both would self-deadlock.
 +	 */
 +	int wifi_bt_reg_on_status;
++	/*
++	 * Line 20 (can-stby) gating -- same contract as
++	 * wifi_bt_reg_on_status just above (0/-ENODEV/-EPROBE_DEFER),
++	 * same status_lock, resolved from the SAME GET_VERSION poll (see
++	 * gd32_bridge_version_poll_once()) rather than a second round-trip.
++	 */
++	int can_stby_status;
 +	struct mutex status_lock;
 +	/*
 +	 * Independent lines-18/19 resolver, NOT under state_lock (it has
@@ -420,6 +467,22 @@ index 000000000..b202babc2
 +
 +	mutex_lock(&gd32->status_lock);
 +	status = gd32->wifi_bt_reg_on_status;
++	mutex_unlock(&gd32->status_lock);
++
++	return status;
++}
++
++/* Peek the cached line-20 (can-stby) status -- same contract as
++ * gd32_bridge_wifi_bt_status() above, but there is no
++ * .request()-time resolver for this line
++ * (see gd32_bridge_gpio_request()'s comment for why): only
++ * gd32_bridge_resolve_work()'s periodic poll actually resolves it. */
++static int gd32_bridge_can_stby_status(struct gd32_bridge_gpio *gd32)
++{
++	int status;
++
++	mutex_lock(&gd32->status_lock);
++	status = gd32->can_stby_status;
 +	mutex_unlock(&gd32->status_lock);
 +
 +	return status;
@@ -481,6 +544,22 @@ index 000000000..b202babc2
 +	return 0;
 +}
 +
++/* True if `mask` lands (in whole or in part) on a gated line group --
++ * 18/19 (wifi/bt) or 20 (can-stby) -- that the current bridge firmware
++ * has confirmed it does NOT understand. Callers skip the wire transfer
++ * for such bits rather than send GPIO_READ/WRITE against pads the
++ * firmware silently ignores (see gd32_bridge_gpio_get(),
++ * gd32_bridge_gpio_do_set(), gd32_bridge_replay_work()). Returns false
++ * (never blocks) for base E1M pads (0..17), which are never gated. */
++static bool gd32_bridge_gate_blocked(struct gd32_bridge_gpio *gd32, u32 mask)
++{
++	if ((mask & GD32_WIFI_BT_LINE_MASK) && gd32_bridge_wifi_bt_status(gd32) != 0)
++		return true;
++	if ((mask & GD32_CAN_STBY_LINE_MASK) && gd32_bridge_can_stby_status(gd32) != 0)
++		return true;
++	return false;
++}
++
 +static int gd32_bridge_gpio_get(struct gpio_chip *chip, unsigned int offset)
 +{
 +	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(chip);
@@ -495,11 +574,14 @@ index 000000000..b202babc2
 +	/*
 +	 * Defensive: .request() already refuses lines 18/19 until
 +	 * gd32_bridge_resolve_wifi_bt() confirms support, so an in-kernel
-+	 * consumer reaching .get() here without a granted request should not
-+	 * happen. Gate anyway rather than reading bits the firmware may not
-+	 * implement.
++	 * consumer reaching .get() here without a granted request should
++	 * not happen for those two. Line 20 (can-stby) CAN legitimately
++	 * reach here unresolved, though: its .request() always grants (see
++	 * gd32_bridge_gpio_request()'s comment), so this is the first real
++	 * gate a can-stby read passes through. Gate anyway in all three
++	 * cases rather than reading bits the firmware may not implement.
 +	 */
-+	if ((mask & GD32_WIFI_BT_LINE_MASK) && gd32_bridge_wifi_bt_status(gd32) != 0)
++	if (gd32_bridge_gate_blocked(gd32, mask))
 +		return -EAGAIN;
 +
 +	put_unaligned_le32(mask, req);
@@ -554,7 +636,6 @@ index 000000000..b202babc2
 +{
 +	u8 req[8];
 +	u32 mask = BIT(offset);
-+	bool is_wifi_bt = mask & GD32_WIFI_BT_LINE_MASK;
 +	int ret = 0;
 +
 +	if (offset == GD32_SE_RST_LINE)
@@ -575,15 +656,15 @@ index 000000000..b202babc2
 +		gd32->output_vals &= ~mask;
 +
 +	/*
-+	 * Defensive only: .request() refuses lines 18/19 until support is
-+	 * confirmed (gd32_bridge_gpio_request()), so do_set() should never
-+	 * actually reach this with is_wifi_bt true and status != 0. Skip the
-+	 * wire transfer for those bits anyway rather than assume that can
-+	 * never change -- the level is still latched above regardless, and
++	 * .request() refuses lines 18/19 until support is confirmed, so
++	 * for those this is defensive only; line 20 is always granted by
++	 * .request(), so for it this is the PRIMARY wire gate. Skip the
++	 * wire transfer for gated, unsupported bits -- the level is still
++	 * latched above regardless, and
 +	 * gd32_bridge_replay_work() would re-issue the write if support were
 +	 * ever (re)confirmed, so nothing would be lost even if this were hit.
 +	 */
-+	if (!is_wifi_bt || gd32_bridge_wifi_bt_status(gd32) == 0) {
++	if (!gd32_bridge_gate_blocked(gd32, mask)) {
 +		put_unaligned_le32(mask, &req[0]);
 +		put_unaligned_le32(value ? mask : 0, &req[4]);
 +		ret = gd32_bridge_xfer(gd32, GD32_CMD_GPIO_WRITE, req, 8, NULL, 0);
@@ -682,20 +763,26 @@ index 000000000..b202babc2
 +}
 +
 +/*
-+ * One non-blocking GET_VERSION attempt against the bridge, updating the
-+ * cached lines-18/19 status on success. Never sleeps or retries -- a
-+ * caller that needs a bounded wait loops this via
-+ * gd32_bridge_resolve_wifi_bt() instead; gd32_bridge_resolve_work() calls
-+ * this directly, once per tick, independently of any consumer request.
++ * One non-blocking GET_VERSION attempt against the bridge, updating BOTH
++ * cached gated-line statuses (lines 18/19 wifi/bt AND line 20 can-stby)
++ * from the single round-trip -- there is only one GET_VERSION reply to
++ * check two independent minor thresholds against, so one poll resolves
++ * both rather than running two separate pollers. Never sleeps or
++ * retries -- a caller that needs a bounded wait loops this via
++ * gd32_bridge_resolve_wifi_bt() instead (line 20/can-stby has no such
++ * wrapper -- see gd32_bridge_gpio_request()'s comment); either way
++ * gd32_bridge_resolve_work() also calls this directly, once per tick,
++ * independently of any consumer request.
 + *
-+ * Returns 0 and updates the cache on a successful GET_VERSION, or the
-+ * xfer error (typically -ETIMEDOUT/-EIO) with the cache left untouched
++ * Returns 0 and updates both caches on a successful GET_VERSION, or the
++ * xfer error (typically -ETIMEDOUT/-EIO) with both caches left untouched
 + * (still -EPROBE_DEFER) when the bridge stays silent.
 + */
-+static int gd32_bridge_wifi_bt_poll_once(struct gd32_bridge_gpio *gd32)
++static int gd32_bridge_version_poll_once(struct gd32_bridge_gpio *gd32)
 +{
 +	u8 ver[3];
 +	int ret;
++	bool major_ok;
 +
 +	ret = gd32_bridge_xfer(gd32, GD32_CMD_GET_VERSION, NULL, 0, ver, 3);
 +	if (ret)
@@ -708,7 +795,9 @@ index 000000000..b202babc2
 +	 * backward compatible, so treat it the same as "unsupported"
 +	 * rather than trusting the minor field under different semantics.
 +	 */
-+	if (ver[0] != 0 || ver[1] < GD32_PROTO_MINOR_WIFI_BT) {
++	major_ok = ver[0] == 0;
++
++	if (!major_ok || ver[1] < GD32_PROTO_MINOR_WIFI_BT) {
 +		if (gd32->wifi_bt_reg_on_status != -ENODEV)
 +			dev_warn(gd32->chip.parent,
 +				 "bridge protocol %u.%u.%u has no bt-reg-on/wl-reg-on lines (need major 0, minor >= %u); lines 18/19 (bt-reg-on/wl-reg-on) will never be driven on this firmware\n",
@@ -716,6 +805,16 @@ index 000000000..b202babc2
 +		gd32->wifi_bt_reg_on_status = -ENODEV;
 +	} else {
 +		gd32->wifi_bt_reg_on_status = 0;
++	}
++
++	if (!major_ok || ver[1] < GD32_PROTO_MINOR_CAN_STBY) {
++		if (gd32->can_stby_status != -ENODEV)
++			dev_warn(gd32->chip.parent,
++				 "bridge protocol %u.%u.%u has no can-stby line (need major 0, minor >= %u); line 20 (can-stby) will never be driven on this firmware\n",
++				 ver[0], ver[1], ver[2], GD32_PROTO_MINOR_CAN_STBY);
++		gd32->can_stby_status = -ENODEV;
++	} else {
++		gd32->can_stby_status = 0;
 +	}
 +	mutex_unlock(&gd32->status_lock);
 +
@@ -742,7 +841,7 @@ index 000000000..b202babc2
 +	if (cached != -EPROBE_DEFER)
 +		return cached;
 +
-+	if (gd32_bridge_wifi_bt_poll_once(gd32))
++	if (gd32_bridge_version_poll_once(gd32))
 +		return -EPROBE_DEFER;	/* still silent */
 +
 +	return gd32_bridge_wifi_bt_status(gd32);
@@ -752,9 +851,6 @@ index 000000000..b202babc2
 +				    unsigned int offset)
 +{
 +	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(chip);
-+
-+	if (offset == GD32_RESERVED_LINE)
-+		return -ENODEV;
 +
 +	/* Line 21 (se-rst) is not gated on the wifi/bt protocol minor. */
 +	if (offset < GD32_NGPIO_BASE || offset == GD32_SE_RST_LINE)
@@ -779,7 +875,44 @@ index 000000000..b202babc2
 +	 * its deferred-probe retry re-requests cleanly rather than getting
 +	 * stuck on stale request state.
 +	 */
-+	return gd32_bridge_resolve_wifi_bt(gd32);
++	if (offset < GD32_NGPIO_WIFI_BT)
++		return gd32_bridge_resolve_wifi_bt(gd32);
++
++	/*
++	 * Line 20 (can-stby) deliberately does NOT go through
++	 * a .request()-time resolver here, unlike 18/19 above --
++	 * its sole consumer in this devicetree is a gpio-hog on THIS
++	 * SAME gpiochip (e1m-v2n-som.dtsi's can-stby-hog), not an
++	 * independent device whose own probe can safely defer. A hog's
++	 * initial request is resolved synchronously inside
++	 * of_gpiochip_scan_gpios(), called from THIS driver's own
++	 * of_gpiochip_add() during devm_gpiochip_add_data() in probe():
++	 * if .request() returned -EPROBE_DEFER here, gpiod_hog() ->
++	 * gpiochip_request_own_desc() would propagate that failure back
++	 * up through of_gpiochip_add() and fail gpiochip registration
++	 * for the WHOLE chip -- deferring every OTHER line too (the
++	 * Display-1 panel reset, bt-reg-on, wl-reg-on) on account of one
++	 * hog on a line nothing else depends on. That is precisely the
++	 * "holding the entire pipeline hostage" failure mode Refs #2297
++	 * fixed for the rest of this driver; gating this hog's .request()
++	 * the same way as 18/19 would silently reintroduce it. Grant
++	 * immediately instead: gd32_bridge_gate_blocked() already stops
++	 * gd32_bridge_gpio_do_set() from sending a GPIO_WRITE for bits
++	 * the firmware hasn't confirmed, the requested level is still
++	 * latched into output_mask/output_vals, and
++	 * gd32_bridge_replay_work() applies it once
++	 * gd32_bridge_resolve_work()'s periodic poll (see
++	 * gd32_bridge_version_poll_once()) confirms support -- so an older
++	 * bridge really does defer the *effect* (the bus stays in
++	 * standby until support is confirmed), just not the .request()
++	 * call itself. If a future board ever adds a REAL external
++	 * consumer of this line (e.g. a can-transceiver phy node), give
++	 * ITS request the same resolve-then-defer treatment as 18/19
++	 * above (see gd32_bridge_resolve_wifi_bt()) -- the unsafe case is
++	 * specifically a hog on this chip's own node, not external
++	 * consumers in general.
++	 */
++	return 0;
 +}
 +
 +/*
@@ -828,18 +961,20 @@ index 000000000..b202babc2
 +	vals = gd32->output_vals;
 +
 +	/*
-+	 * Lines 18/19 only ever enter output_mask once .request() has
-+	 * resolved them supported (gd32_bridge_gpio_request() now refuses
-+	 * the request otherwise, see the file-header comment), so this is
-+	 * defensive rather than a live path: mask them out unless confirmed
-+	 * supported, so a replay never sends bits the firmware may not
-+	 * understand. Resolving a still-unresolved bridge is
++	 * Lines 18/19 only enter output_mask once .request() has resolved
++	 * them supported, so for them this is defensive. Line 20 is granted
++	 * unconditionally and the hog's output-low latches bit 20 while it
++	 * is still unresolved, so this masking is its primary gate: mask
++	 * them out unless confirmed supported, so a replay never sends bits
++	 * the firmware may not understand. Resolving a still-unresolved bridge is
 +	 * gd32_bridge_resolve_work()'s job, independent of this replay and
 +	 * NOT run under state_lock.
 +	 */
 +	xfer_mask = mask;
 +	if (gd32_bridge_wifi_bt_status(gd32) != 0)
 +		xfer_mask &= ~GD32_WIFI_BT_LINE_MASK;
++	if (gd32_bridge_can_stby_status(gd32) != 0)
++		xfer_mask &= ~GD32_CAN_STBY_LINE_MASK;
 +
 +	if (xfer_mask) {
 +		put_unaligned_le32(xfer_mask, &req[0]);
@@ -888,8 +1023,9 @@ index 000000000..b202babc2
 +};
 +
 +/*
-+ * Fire on lines 18/19 resolving either way (0 confirmed supported, -ENODEV
-+ * confirmed unsupported -- see gd32_bridge_resolve_work()). Registers a
++ * Fire on any gated line (18/19/20) resolving either way (0 confirmed
++ * supported, -ENODEV confirmed unsupported -- see
++ * gd32_bridge_resolve_work()). Registers a
 + * throwaway platform_device that matches gd32_bridge_kick_driver by name;
 + * its probe() always succeeds, so platform_device_register_simple() drives
 + * it synchronously through bus_probe_device() -> ... -> driver_bound(),
@@ -911,7 +1047,7 @@ index 000000000..b202babc2
 +						PLATFORM_DEVID_AUTO, NULL, 0);
 +	if (IS_ERR(pdev)) {
 +		dev_warn(gd32->chip.parent,
-+			 "failed to register %s (%ld); deferred consumers of lines 18/19 will only pick this up on their own next retry\n",
++			 "failed to register %s (%ld); deferred consumers of gated lines (18/19/20) will only pick this up on their own next retry\n",
 +			 GD32_DEFERRED_KICK_DEVNAME, PTR_ERR(pdev));
 +		return;
 +	}
@@ -920,14 +1056,15 @@ index 000000000..b202babc2
 +}
 +
 +/*
-+ * Independent lazy resolver for lines 18/19 (Refs #2297; see the
-+ * file-header comment for why this exists separately from both
++ * Independent lazy resolver for the gated lines (18/19/20; Refs #2297;
++ * see the file-header comment for why this exists separately from both
 + * .request() and gd32_bridge_replay_work()). Polls GET_VERSION, NOT under
 + * state_lock -- this has nothing to do with output_mask/output_vals --
 + * regardless of whether any consumer has requested the lines yet, so a
 + * bridge that is merely slow to boot still gets discovered even after the
 + * first .request() has already given up and returned -EPROBE_DEFER to its
-+ * caller.
++ * caller. One poll (gd32_bridge_version_poll_once()) resolves both the
++ * wifi/bt gate and the can-stby gate together.
 + */
 +static void gd32_bridge_resolve_work(struct work_struct *work)
 +{
@@ -936,7 +1073,7 @@ index 000000000..b202babc2
 +						     resolve_work);
 +	unsigned int shift, period_ms;
 +
-+	if (!gd32_bridge_wifi_bt_poll_once(gd32)) {
++	if (!gd32_bridge_version_poll_once(gd32)) {
 +		/*
 +		 * Resolved either way -- kick deferred probing once so
 +		 * mmc-pwrseq-simple / hci_bcm get a deterministic answer now
@@ -1008,6 +1145,7 @@ index 000000000..b202babc2
 +	INIT_DELAYED_WORK(&gd32->replay_work, gd32_bridge_replay_work);
 +	INIT_DELAYED_WORK(&gd32->resolve_work, gd32_bridge_resolve_work);
 +	gd32->wifi_bt_reg_on_status = -EPROBE_DEFER;	/* not yet resolved */
++	gd32->can_stby_status = -EPROBE_DEFER;		/* not yet resolved */
 +
 +	gd32->chip.label	  = "gd32-bridge-gpio";
 +	gd32->chip.parent	  = &client->dev;
@@ -1025,11 +1163,13 @@ index 000000000..b202babc2
 +	 * gd32_bridge_gpio_get/_set) and start working once the bridge is up.
 +	 *
 +	 * The chip always registers all GD32_NGPIO_TOTAL lines -- lines
-+	 * 18/19 are gated per-consumer in .request(), not by this probe-time
-+	 * handshake (see the file-header comment and
-+	 * gd32_bridge_resolve_wifi_bt()). If this handshake happens to land
-+	 * (the bridge was already up), seed the cache now so the first
-+	 * consumer of lines 18/19 doesn't pay for a second round-trip.
++	 * 18/19 are gated per-consumer in .request()
++	 * (gd32_bridge_resolve_wifi_bt()); line 20 is not (see that
++	 * function's comment for why a hog on this same chip can't be
++	 * gated the same way) but is still gated at the wire level via
++	 * gd32_bridge_gate_blocked(). If this handshake happens to land
++	 * (the bridge was already up), seed both caches now so the first
++	 * gated GPIO op doesn't pay for a second round-trip.
 +	 *
 +	 * Bounded retry (see GD32_PROBE_HANDSHAKE_RETRIES above): a boot-time
 +	 * miss here is routine, not fatal -- the "registering gpiochip
@@ -1054,6 +1194,10 @@ index 000000000..b202babc2
 +			gd32->wifi_bt_reg_on_status = -ENODEV;
 +		else
 +			gd32->wifi_bt_reg_on_status = 0;
++		if (ver[0] != 0 || ver[1] < GD32_PROTO_MINOR_CAN_STBY)
++			gd32->can_stby_status = -ENODEV;
++		else
++			gd32->can_stby_status = 0;
 +	}
 +
 +	gd32->chip.ngpio	  = GD32_NGPIO_TOTAL;
@@ -1094,11 +1238,12 @@ index 000000000..b202babc2
 +		return ret;
 +
 +	/*
-+	 * Kick off the independent lines-18/19 resolver now if the
++	 * Kick off the independent gated-line resolver now if the
 +	 * best-effort handshake above didn't already land -- see
 +	 * gd32_bridge_resolve_work() and the file-header comment. Not
-+	 * needed (and not started) if the handshake already resolved
-+	 * wifi_bt_reg_on_status to 0 or -ENODEV.
++	 * needed (and not started) if the handshake already resolved both
++	 * wifi_bt_reg_on_status and can_stby_status (one poll resolves
++	 * both, so checking either is equivalent here).
 +	 */
 +	if (gd32->wifi_bt_reg_on_status == -EPROBE_DEFER)
 +		queue_delayed_work(system_freezable_power_efficient_wq,

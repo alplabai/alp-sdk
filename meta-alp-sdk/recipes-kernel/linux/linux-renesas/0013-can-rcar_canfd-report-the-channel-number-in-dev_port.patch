@@ -1,0 +1,26 @@
+From: Alp Lab AB
+Subject: [PATCH] can: rcar_canfd: report the channel number in dev_port
+
+rcar_canfd names its netdevs in probe order, so with only channels 2
+and 3 enabled (RZ/V2N on the E1M-X SoMs) channel 2 becomes can0 and
+channel 3 becomes can1, and nothing in sysfs says which is which:
+dev_id and dev_port both read 0. User space that needs a specific
+channel (E1M_X_CAN0 is channel 3 on these SoMs) cannot find it.
+
+Set dev_port to the controller channel, as multi-port Ethernet drivers
+do, so /sys/class/net/canN/dev_port names the channel and a udev rule
+can match on it.
+
+Upstream-Status: Pending
+Signed-off-by: Alp Lab AB
+---
+--- a/drivers/net/can/rcar/rcar_canfd.c
++++ b/drivers/net/can/rcar/rcar_canfd.c
+@@ -1904,6 +1904,7 @@
+ 	priv->base = gpriv->base;
+ 	priv->transceiver = transceiver;
+ 	priv->channel = ch;
++	ndev->dev_port = ch;
+ 	priv->gpriv = gpriv;
+ 	if (transceiver)
+ 		priv->can.bitrate_max = transceiver->attrs.max_link_rate;

@@ -332,8 +332,8 @@ indefinitely; host code SHOULD NOT call it.
 
 `mask` selects which GD32 pads the host wants to read or write.  The
 mask is a **logical** index space owned by the GD32 firmware — the
-bit-to-pad mapping (bits 0..19) is documented in
-`gd32-bridge-firmware:README.md`; the host header names only bits 18/19
+bit-to-pad mapping (bits 0..20, 21 pads) is documented in
+`gd32-bridge-firmware:README.md`; the host header names only bits 18/19/20
 (below).  The host MUST NOT assume that
 bit `n` corresponds to GD32 pad `Pxn`.
 
@@ -344,19 +344,28 @@ cannot interleave a partial state.
 
 At protocol minor `>= 11` (firmware `0.2.12`), the pad map grows from
 18 to 20 lines, adding the on-module Murata LBEE5HY2FY-922 (Infineon
-CYW55513) Wi-Fi+BT module's two REG_ON enables:
+CYW55513) Wi-Fi+BT module's two REG_ON enables; at minor `>= 13`
+(firmware `0.2.16`) it grows to 21 lines (bits 0..20) with `can-stby`:
 
 | Bit | Name       | GD32 pad | Boot state   | Host macro |
 |-----|------------|----------|--------------|------------|
 | 18  | `bt-reg-on` | `PE14`  | OUTPUT LOW   | `GD32G553_GPIO_LINE_BT_REG_ON` |
 | 19  | `wl-reg-on` | `PE15`  | OUTPUT LOW   | `GD32G553_GPIO_LINE_WL_REG_ON` |
+| 20  | `can-stby`  | `PB13`  | OUTPUT HIGH  | `GD32G553_GPIO_LINE_CAN_STBY` |
+
+Bit 20 (`can-stby`, protocol minor `>= 13`, firmware `0.2.16`) is the shared
+standby line of the two on-module TCAN1044 CAN-FD transceivers (U15/U16);
+it boots HIGH (both transceivers in standby) and the host drives it low to
+enable them. A bridge below minor 13 rejects or ignores the bit, so a host
+must gate on `GD32G553_CAN_STBY_MIN_PROTOCOL_MINOR`.
 
 Both enables drive their module low-then-high: the host holds
 `GPIO_WRITE` low for >= 10 ms before the rising edge, matching the
 on-module Murata LBEE5HY2FY-922's REG_ON timing requirement.
 
-The Linux `gpio-gd32-bridge` driver additionally exports line 21 `se-rst` (line 20 is
-reserved for `can-stby`, bridge bit 20, #2341), which is not a `GPIO_WRITE` pad: setting it sends `CMD_SE_RESET`
+The Linux `gpio-gd32-bridge` driver exports 22 gpiochip lines: lines 0..20 map 1:1 to
+bridge pad bits 0..20 (line 20 is `can-stby`, #2341, a live hog-driven line), and
+line 21 `se-rst` is not a `GPIO_WRITE` pad: setting it sends `CMD_SE_RESET`
 (`0x41`, payload one byte, 1 = assert = hold the OPTIGA Trust M in reset) and
 it is never replayed, so a bridge reset leaves the part released. Userspace
 pulses it through the gpiochip labelled `gd32-bridge-gpio` instead of opening
@@ -1237,7 +1246,11 @@ bounded run of `STATUS_BUSY` right after an OTA reset committing a
 trial-capable image (firmware release >= 0.2.14, a separate axis from
 this wire-protocol version — see §10); a host that already treats
 `STATUS_BUSY` as retryable (as `gd32g553_init()` now does) sees no
-behaviour change beyond that widened retry window.  **v0.14**
+behaviour change beyond that widened retry window.  **v0.13**
+(firmware `0.2.16`) grows the GPIO expander pad map from 20 to 21 lines,
+adding `can-stby` (bit 20, `PB13`, boots OUTPUT HIGH, §3.1) and makes
+`GPIO_WRITE` reject a write to an unknown pad bit outright; `GET_VERSION`'s SPI
+reply for `0.13.0` is `A5 00 00 0D 00 63 6E`.  **v0.14**
 (gh#101) widens `OTA_GET_STATE`'s reply 5 -> 6 bytes, appending the
 `err` cause byte documented above (§10) -- additive per the
 opcode-derived-length rule, so a host below

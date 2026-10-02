@@ -265,9 +265,9 @@ e1m_routes:
   can:
     - { e1m: E1M_X_CAN0, macro: XEVK_CAN_BUS0,
         board_alias: BOARD_CAN0,
-        doc: "CAN0 via TCAN1044 transceiver (U51)." }
+        doc: "CAN0 via the on-module TCAN1044 transceiver U15 (SoM rev 2625-R2, SoC CANFD channel 3), not a carrier part." }
     - { e1m: E1M_X_CAN1, macro: XEVK_CAN_BUS1,
-        doc: "CAN1 via TCAN1044 transceiver (U52)." }
+        doc: "CAN1 via the on-module TCAN1044 transceiver U16 (SoM rev 2625-R2, SoC CANFD channel 2), not a carrier part." }
   qenc:
     - { e1m: E1M_X_ENC0, macro: XEVK_ENC_ROTARY,
         board_alias: BOARD_ENC_ROTARY,
@@ -430,4 +430,4 @@ hw_revisions:
 
 status:
   preliminary:              true                # routes connector-derived, pending HW-writeup ratification
-  partial_hw_config:        true                # board_id ADC = ANA_S7 (E1M_X_ADC7) now assigned; a few control pads (CAN_STBY, CAM1_RST) still TBD
+  partial_hw_config:        true                # board_id ADC = ANA_S7 (E1M_X_ADC7) now assigned; CAN_STBY resolved (GD32 PB13, metadata/e1m_modules/v2n/gd32-io-mcu-map.csv:38 -- see e1m-v2n-som.dtsi); CAM1_RST still TBD

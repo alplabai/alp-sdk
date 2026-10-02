@@ -79,6 +79,7 @@ SRC_URI:append = " \
     file://0016-media-rzg2l-cru-add-Y10-Y8-greyscale-formats.patch \
     file://0017-media-rzg2l-csi2-honour-lane-polarities-via-SWAPCTL.patch \
     file://uio.cfg \
+    file://0013-can-rcar_canfd-report-the-channel-number-in-dev_port.patch \
 "
 
 # 0016 (CRU greyscale, #2612): rzg2l-csi2 had no Y10/Y8 entry, so a mono

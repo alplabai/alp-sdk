@@ -191,6 +191,144 @@ regressed.
 [`errata-e1m-x-v2n.md`](errata-e1m-x-v2n.md) E1 — until the respin, a
 pair-mirror cable links at 100M.)
 
+### CAN-FD bring-up (on-module TCAN1044 x2)
+
+The two on-module CAN-FD channels come up as network interfaces but
+carry **no bit timing in the device tree**: the bitrate is an operator
+step, and the interfaces stay down (the controller is idle) until it is
+set. Netdev names follow the E1M bus, not the driver's probe order
+(`alp-canfd-udev`, #2352):
+
+| E1M bus | Netdev | SoC channel | Transceiver |
+|---|---|---|---|
+| `E1M_X_CAN0` | `can_e1m0` | CANFD3 (`dev_port` 3) | U15 |
+| `E1M_X_CAN1` | `can_e1m1` | CANFD2 (`dev_port` 2) | U16 |
+
+Both transceivers share one standby line, CAN_STBY, driven low by a
+`gpio-hog` on GD32 bridge line 20 (requires bridge protocol >= 0.13,
+firmware >= 0.2.16; on an older bridge the write is never sent and both
+transceivers stay in standby).
+
+```bash
+ip -br link | grep can_e1m                        # can_e1m0 + can_e1m1 present
+cat /sys/class/net/can_e1m0/dev_port              # 3   (can_e1m1 -> 2)
+ip link set can_e1m0 type can bitrate 500000 dbitrate 2000000 fd on      # repeat for can_e1m1; keep the driver's default sample points
+ip link set can_e1m0 up
+ip -d link show can_e1m0                          # shows the timing clock + bitrate + "fd on"
+```
+
+Nominal and data-phase timing must satisfy
+`f = f_can / (BRP * (1 + TSEG1 + TSEG2))`, sample point
+`(1 + TSEG1) / (1 + TSEG1 + TSEG2)`, `SJW <= min(TSEG1, TSEG2)`; the
+kernel derives them from the requested rate and the controller clock
+inherited from the SoC dtsi, so read the clock and limits from
+`ip -d link show`, not from this repo. `fd on` is required for the
+data phase (`dbitrate`); without it only classic CAN frames are sent.
+`<alp/can.h>` does not set the bitrate (see `src/backends/can/yocto_drv.c`),
+so configure it before opening the port.
+If `can_e1m<N>` is missing and `can<N>` is an `rcar_canfd` netdev whose
+`dev_port` is not the channel of E1M bus N, `alp_can_open()` returns
+`ALP_ERR_NOT_READY` instead of opening the swapped port (install
+`alp-canfd-udev`).
+
+#### CAN-FD data phase: TDC and bus-off triage
+
+Bench finding (E1M-V2M103, `can_clk` 80 MHz, `bitrate 500000 dbitrate
+2000000 fd on`): a classic frame on a lone node ends ERROR-PASSIVE (ACK
+errors only, as expected), but one FD frame with BRS
+(`cansend can_e1m0 123##1.11`) drives it BUS-OFF with bit errors in the
+data phase.
+
+What the BSP kernel already does (no kernel patch needed): `rcar_canfd`
+in the RZ/V BSP 6.1 tree implements transmitter delay compensation. When
+the data BRP is 1 or 2 the CAN core selects TDC-AUTO and the driver
+programs `CFDCnFDCFG.TDCE = 1`, `TDCOC = 0` (measured delay + offset) and
+`TDCO = tdco - 1`, where `tdco` is the data sample point in clock periods
+(80 MHz, 2 Mbit/s, 75 %: 40 clocks per bit, `tdco` 30). The register
+layout matches RZ/V2N manual R01UH1071 section 7.9 (CFDCnFDCFG, CFDCnDCFG,
+CFDCnNCFG) and section 7.9.4.1.5 (transmitter delay compensation). Manual
+control is available: `ip link set can_e1m0 type can ... tdc-mode
+auto|manual|off tdco N tdcv N` (needs an iproute2 with `tdc-mode`); in
+manual mode the driver programs the offset-only variant (`TDCOC = 1`,
+SSP = `tdcv + tdco`).
+
+Is BUS-OFF on a lone node with BRS expected? No.
+
+- A lone node gets no ACK. The ACK slot is sent at the nominal rate after
+  the data phase, so BRS does not change it. An error-passive transmitter
+  does not raise TEC for an ACK error (ISO 11898-1 fault confinement), so a
+  lone node parks at ERROR-PASSIVE for classic and FD frames alike.
+- BUS-OFF needs TEC > 255, i.e. repeated real bit errors (the node sent a
+  bit and read back a different level at its sample point). Those are not
+  produced by the missing ACK.
+- Loop delay is not a first-order suspect at 2 Mbit/s: the TCAN1044 loop
+  delay is about 100 to 175 ns (TI datasheet, loop-delay parameter) against
+  a data sample point of 375 ns, and TDC is enabled anyway. TDC starts to
+  matter near 5 Mbit/s and above (manual section 7.9.4.1.5). The maximum
+  compensable delay is 6 data bit times minus 2 DLL clocks.
+
+So the failure is a bench finding to localize, not something TDC alone
+explains. Run the steps below and keep the outputs.
+
+**Lone-node BRS test** (one port, nothing else on the bus, one 120 ohm
+termination across CANH/CANL, run per port):
+
+```bash
+IF=can_e1m0        # then repeat everything with can_e1m1
+ip link set $IF down
+ip link set $IF type can bitrate 500000 dbitrate 2000000 fd on
+ip link set $IF up
+ip -d link show $IF        # record: brp, dbrp, dsample-point, "tdc-mode auto tdco N"
+candump -e $IF &           # error frames decoded on the console
+cansend $IF 123#11         # 1. classic: expect ERROR-PASSIVE, TEC stops at 128
+ip -d -s link show $IF     # state ERROR-PASSIVE; restart-ms 0; note bus-error count
+ip link set $IF down; ip link set $IF up
+cansend $IF 123##1.11      # 2. FD + BRS: watch state, then repeat once per variant below
+ip -d -s link show $IF     # record state, tdcv, berr-counter
+```
+
+Variants (down / reconfigure / up between each; record the state after one
+BRS frame): (a) `dbitrate 1000000`, (b) `dbitrate 2000000 tdc-mode off`,
+(c) `dbitrate 2000000 tdc-mode manual tdco 30 tdcv 12`, (d) `dbitrate
+2000000 dsample-point 0.7`, (e) `cansend $IF 123##0.11` (FD format, no
+rate switch).
+
+Reading the result:
+
+- Only BRS frames fail, and (a) or (e) pass: the fault is in the
+  data-phase path. If `tdcv` reads 0 or a value near or above one bit
+  (40 clocks), the measured delay is wrong; if (b)/(c) change the outcome
+  the TDC setting matters and `tdco` needs adjusting.
+- (e) also fails: FD format itself, not the rate switch; look at the error
+  frame location bits in `candump -e`.
+- Nothing changes with TDC mode or sample point, and the error frames say
+  bit error at a fixed bit position: suspect the pad path (TXD/RXD pin
+  drive, slew or input filter) or the transceiver mode pins, not the
+  controller timing.
+- Both ports fail identically: controller/pinctrl. Only one fails: that
+  transceiver or its board wiring.
+
+**Two-node test** (the two on-module ports cabled to each other): wire
+`can_e1m0` CANH to `can_e1m1` CANH and CANL to CANL, with a 120 ohm
+resistor across CANH/CANL at each end of the cable, so the bus has two
+terminations. Configure both ports identically (same `bitrate`,
+`dbitrate`, `fd on`), bring both up, then:
+
+```bash
+candump -e can_e1m1 &
+cansend can_e1m0 123##1.11                 # single BRS frame, now ACKed
+ip -d -s link show can_e1m0                # ERROR-ACTIVE, TX packets 1, no bus errors
+cangen can_e1m0 -f -b -g 10 -I 123 -L 8 -n 1000
+ip -s -d link show can_e1m0; ip -s -d link show can_e1m1   # error counters stay 0
+```
+
+Then raise `dbitrate` to 4000000 and 5000000 (TDC is mandatory there; read
+`tdcv` in `ip -d link show`) and repeat `cangen`. If the two-node test is
+clean at 2 Mbit/s but the lone-node BRS test still goes BUS-OFF, the lone
+node case is an ACK-less bus-error corner to document rather than a
+hardware fault; if the two-node test also errors, use the variant table
+above on the two-node bus.
+
 ### Hand-building the kernel (outside bitbake)
 
 The bitbake kernel banner is branded automatically. A **manual** kernel
