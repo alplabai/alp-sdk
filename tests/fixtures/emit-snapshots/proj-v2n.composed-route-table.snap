@@ -141,7 +141,8 @@
       "board_role": null,
       "board_doc": "CAM0 module enable, active-low via N-FET on CAM_GPIO.",
       "active_low": true,
-      "dispatch": "TBD"
+      "dispatch": "unrouted",
+      "som_doc": "CAM0_EN: no Linux GPIO controller reaches this pad (V2M: DX-M1 GPIO/strap)."
     },
     {
       "e1m": "E1M_X_GPIO_IO20",
@@ -150,7 +151,8 @@
       "board_role": null,
       "board_doc": "Camera-0 reset (active-low).",
       "active_low": true,
-      "dispatch": "TBD"
+      "dispatch": "unrouted",
+      "som_doc": "CAM0_RST: no Linux GPIO controller reaches this pad."
     },
     {
       "e1m": "E1M_X_GPIO_IO24",

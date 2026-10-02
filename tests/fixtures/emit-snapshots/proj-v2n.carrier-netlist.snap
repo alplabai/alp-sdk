@@ -328,7 +328,7 @@
       "board_category": "gpio",
       "board_macro": "XEVK_PIN_CAM0_EN",
       "board_role": null,
-      "dispatch": "TBD",
+      "dispatch": "unrouted",
       "endpoints": [
         {
           "kind": "e1m",
@@ -340,11 +340,12 @@
         },
         {
           "kind": "som-dispatch",
-          "ref": "TBD"
+          "ref": "unrouted"
         }
       ],
       "board_doc": "CAM0 module enable, active-low via N-FET on CAM_GPIO.",
-      "active_low": true
+      "active_low": true,
+      "som_doc": "CAM0_EN: no Linux GPIO controller reaches this pad (V2M: DX-M1 GPIO/strap)."
     },
     {
       "net_id": "XEVK_PIN_CAM0_RST",
@@ -352,7 +353,7 @@
       "board_category": "gpio",
       "board_macro": "XEVK_PIN_CAM0_RST",
       "board_role": null,
-      "dispatch": "TBD",
+      "dispatch": "unrouted",
       "endpoints": [
         {
           "kind": "e1m",
@@ -364,11 +365,12 @@
         },
         {
           "kind": "som-dispatch",
-          "ref": "TBD"
+          "ref": "unrouted"
         }
       ],
       "board_doc": "Camera-0 reset (active-low).",
-      "active_low": true
+      "active_low": true,
+      "som_doc": "CAM0_RST: no Linux GPIO controller reaches this pad."
     },
     {
       "net_id": "XEVK_PIN_USB_MUX_SEL",

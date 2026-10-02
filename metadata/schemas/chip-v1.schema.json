@@ -91,7 +91,7 @@
           "additionalProperties": false,
           "required": ["compatible"],
           "properties": {
-            "compatible": { "type": "string", "pattern": "^[a-z0-9]+,[a-z0-9._-]+$", "description": "Linux devicetree compatible string the in-kernel driver matches (may differ from the part number, e.g. OV9281 probes as ovti,ov9282)." },
+            "compatible": { "type": "string", "pattern": "^[a-z0-9]+,[a-z0-9._-]+$", "description": "Linux devicetree compatible string the in-kernel driver matches (may differ from the part number when the kernel driver matches a sibling part)." },
             "kconfig": { "type": "string", "pattern": "^CONFIG_[A-Z0-9_]+$", "description": "Kernel config symbol that builds the driver." },
             "link_freqs": {
               "type": "array",

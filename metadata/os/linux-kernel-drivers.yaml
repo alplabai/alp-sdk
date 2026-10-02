@@ -28,6 +28,11 @@ kernels:
         native_lanes: [2]
         patches:    [0020-media-i2c-ov9282-add-1280x800-and-640x400-modes.patch]
         notes:      "Native driver has one 1280x720 mode; patch 0020 (pending) is the v6.6 driver with 1280x800/640x400 modes, supplies and clock-noncontinuous handling."
+      - compatible: "ovti,ov9281"
+        kconfig:    CONFIG_VIDEO_OV9282
+        native:     false
+        patches:    [0020-media-i2c-ov9282-add-1280x800-and-640x400-modes.patch]
+        notes:      "The 6.1 driver matches only ovti,ov9282; the v6.6 driver from patch 0020 also matches ovti,ov9281."
       - compatible: "sony,imx296"
         kconfig:    CONFIG_VIDEO_IMX296
         native:     false

@@ -259,8 +259,8 @@
   ],
 
   "linux_dt": {
-    "RIIC2": {"label": "i2c2", "pinmux": {"RIIC2_SDA2": 1, "RIIC2_SCL2": 1}},
-    "CSI0":  {"label": "csi20", "capture": "cru0"}
+    "RIIC2": {"label": "i2c2", "pinmux_macro": "RZV2N_PORT_PINMUX", "pinmux": {"RIIC2_SDA2": 1, "RIIC2_SCL2": 1}},
+    "CSI0":  {"label": "csi20", "capture": "cru0", "kconfig": ["CONFIG_VIDEO_RZG2L_CSI2", "CONFIG_VIDEO_RZG2L_CRU"]}
   },
 
   "notes": [

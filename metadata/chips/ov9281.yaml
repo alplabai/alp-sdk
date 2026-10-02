@@ -43,7 +43,7 @@ drivers:
   zephyr:
     compatible:    "ovti,ov9281"
   linux:
-    compatible:    "ovti,ov9282"        # OV9281 shares chip ID 0x9281; the 6.1 driver matches only ov9282
+    compatible:    "ovti,ov9281"        # the part actually fitted; the v6.6 driver (patch 0020) matches it as well as ov9282 (same chip ID 0x9281)
     kconfig:       CONFIG_VIDEO_OV9282
     link_freqs:                      # the driver accepts exactly one lane count + rate
       - { lanes: 2, link_freqs_hz: [400000000] }

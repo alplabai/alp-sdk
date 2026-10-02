@@ -44,7 +44,9 @@
         "properties": {
           "label": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
           "pinmux": { "type": "object", "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9_]*$" }, "additionalProperties": { "type": "integer", "minimum": 0 } },
-          "capture": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+          "pinmux_macro": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$", "description": "Name of the devicetree macro that builds one pinmux cell (e.g. RZV2N_PORT_PINMUX); the generator calls it as MACRO(port, pin, function).  Required when `pinmux` is present and a generator emits the pinctrl node." },
+          "capture": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "kconfig": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^CONFIG_[A-Z0-9_]+$" }, "description": "Kernel config symbols the Linux driver stack for this instance needs (built in, =y), e.g. the CSI-2 receiver and capture-unit drivers.  The camera config fragment is generated from the union of these and the camera chips' drivers.linux.kconfig." }
         }
       }
     },

@@ -273,11 +273,14 @@ pad_routes:
   # `linux_dt`.
   - { e1m: E1M_X_I2C2, dispatch: direct, dispatch_pin: RIIC2 }
   - { e1m: E1M_X_CSI0, dispatch: direct, dispatch_pin: CSI0 }
-  # CAM0_EN / CAM0_RST routing is not recorded yet (on V2M, IO18 is a DEEPX
-  # DX-M1 GPIO/strap, not a Linux GPIO).  TBD until the hand-written HW
-  # config lands.
-  - { e1m: E1M_X_GPIO_IO18, dispatch: TBD }
-  - { e1m: E1M_X_GPIO_IO20, dispatch: TBD }
+  # CAM0_EN (IO18) and CAM0_RST (IO20) reach no Linux GPIO controller: neither
+  # pad (AR26 / AR27) is in gd32-io-mcu-map.tsv or renesas-peripheral-map.tsv.
+  # `unrouted` here means "no Linux-controllable line", which is what the camera
+  # DT generator needs; on V2M, IO18 is a DEEPX DX-M1 GPIO/strap.
+  - { e1m: E1M_X_GPIO_IO18, dispatch: unrouted,
+      doc: "CAM0_EN: no Linux GPIO controller reaches this pad (V2M: DX-M1 GPIO/strap)." }
+  - { e1m: E1M_X_GPIO_IO20, dispatch: unrouted,
+      doc: "CAM0_RST: no Linux GPIO controller reaches this pad." }
 
 helper_firmware:
   - name:          gd32_bridge

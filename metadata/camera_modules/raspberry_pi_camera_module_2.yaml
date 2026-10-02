@@ -1,8 +1,6 @@
 # Alp SDK camera module: Raspberry Pi Camera Module 2 (Sony IMX219).
-# No Zephyr shield in this tree.  Values from the Linux fragment
-# meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk-cam0-imx219.dtsi, which is
-# BENCH-UNVERIFIED (its 24 MHz xclk, 0x10 address and 2-lane wiring are assumptions
-# that fragment states, not bench facts).
+# No Zephyr shield in this tree.  BENCH-UNVERIFIED: the 24 MHz xclk, the 0x10 address and
+# the 2-lane wiring are assumptions, not bench facts.
 schema_version: 1
 module_id:      raspberry_pi_camera_module_2
 display_name:   "Raspberry Pi Camera Module 2 (IMX219, 2-lane CSI-2)"
