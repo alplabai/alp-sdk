@@ -50,6 +50,11 @@ is clipped, it switches back to `163mv`.  Between the two it stays where it
 is, so a reading near a threshold does not flip the range.  Each switch
 prints one line and shows `--` for that one sample.  Switching resets the
 INA228's energy and charge accumulators (they were counted at the old scale).
+If a range switch fails part-way (a bus error), the part may hold half of the
+new setup, so the row shows `error: <status>` instead of numbers for that
+sample, the example resets the INA228 onto the range it was on before, and
+the next sample is normal.  If that recovery fails too, the `5V` row keeps
+showing the error (never a number) and the example retries every cycle.
 A reading that clips (`ina228_check_over_range()`: the shunt ADC at its
 limit, or the `MATHOF` flag) is reported as `over-range` instead of being
 printed as a valid number.  The decision logic is `src/range_policy.h`, a

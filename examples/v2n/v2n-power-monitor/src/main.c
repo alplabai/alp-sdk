@@ -178,6 +178,12 @@ int main(int argc, char **argv)
 	alp_status_t s5 = ina228_init(
 	    &mon5v, bus, XEVK_I2C_ADDR_INA228_5V, RAIL5V_SHUNT_UOHM, range_max_ua(range5v), range5v);
 	bool live5 = (s5 == ALP_OK);
+	/* Failure bookkeeping for a range switch that did not complete (see the loop):
+	 * broken5 = the monitor could not be brought back to a known state, err5 = the
+	 * status to show in its row until it is. */
+	ina228_adcrange_t cur_range5 = range5v;
+	bool              broken5    = false;
+	alp_status_t      err5       = ALP_OK;
 	if (s5 == INA228_ERR_NOT_PRESENT) {
 		fprintf(stderr,
 		        "INA228 5V    @0x%02x: not present (carrier without the bus-pin rework?); "
@@ -206,28 +212,76 @@ int main(int argc, char **argv)
 			       s.current_ua / 1000.0,
 			       s.power_uw / 1000.0);
 		}
-		int32_t  bus_uv = 0, cur_ua = 0, shunt_uv = 0;
-		uint64_t pwr_uw = 0;
-		bool     over   = false;
-		bool     ok5    = live5 && ina228_read_shunt_uv(&mon5v, &shunt_uv) == ALP_OK &&
-		                  ina228_check_over_range(&mon5v, &over) == ALP_OK;
+		int32_t      bus_uv = 0, cur_ua = 0, shunt_uv = 0;
+		uint64_t     pwr_uw  = 0;
+		bool         over    = false;
+		alp_status_t row_err = ALP_OK; /* != ALP_OK: show this status instead of values */
+		if (live5 && broken5) {
+			/* An earlier switch failed and the reset could not repair it: try to bring the
+			 * monitor back every cycle, on the range it was last known to be on. */
+			err5 = ina228_init(&mon5v,
+			                   bus,
+			                   XEVK_I2C_ADDR_INA228_5V,
+			                   RAIL5V_SHUNT_UOHM,
+			                   range_max_ua(cur_range5),
+			                   cur_range5);
+			if (err5 == ALP_OK) {
+				broken5 = false;
+				fprintf(stderr,
+				        "INA228 5V: recovered on the %s range\n",
+				        cur_range5 == INA228_ADCRANGE_40MV ? "40.96 mV" : "163.84 mV");
+			}
+		}
+		if (broken5) row_err = err5;
+		bool ok5 = live5 && !broken5 && ina228_read_shunt_uv(&mon5v, &shunt_uv) == ALP_OK &&
+		           ina228_check_over_range(&mon5v, &over) == ALP_OK;
 		if (ok5 && mode == RANGE_MODE_AUTO) {
 			/* Decide the range for the NEXT sample from this one; one line per switch. */
 			bool narrow = (mon5v.adcrange == INA228_ADCRANGE_40MV);
 			bool want   = range_policy_want_narrow(narrow, shunt_uv, over);
 			if (want != narrow) {
 				ina228_adcrange_t next = want ? INA228_ADCRANGE_40MV : INA228_ADCRANGE_163MV;
-				if (ina228_set_shunt_range(&mon5v, next, range_max_ua(next)) == ALP_OK) {
+				alp_status_t      ss   = ina228_set_shunt_range(&mon5v, next, range_max_ua(next));
+				if (ss == ALP_OK) {
+					cur_range5 = next;
 					printf("INA228 5V: switched to the %s range (shunt %d uV)\n",
 					       want ? "40.96 mV" : "163.84 mV",
 					       (int)shunt_uv);
 					/* A conversion taken at the old range may still be in the result
 					 * registers, so show no value for this one sample. */
 					ok5 = false;
+				} else {
+					/* The switch did not complete: the device may hold the new SHUNT_CAL or
+					 * range while the driver context still describes the old setup, so the
+					 * numbers could be off by 4x.  Show the error, not a value, for this
+					 * sample, then reset the part (which re-applies the context's, i.e. the
+					 * previous, range and calibration) and re-init if that fails too. */
+					ok5             = false;
+					row_err         = ss;
+					err5            = ss;
+					alp_status_t rs = ina228_reset(&mon5v);
+					if (rs != ALP_OK) {
+						rs = ina228_init(&mon5v,
+						                 bus,
+						                 XEVK_I2C_ADDR_INA228_5V,
+						                 RAIL5V_SHUNT_UOHM,
+						                 range_max_ua(cur_range5),
+						                 cur_range5);
+					}
+					broken5 = (rs != ALP_OK);
+					fprintf(stderr,
+					        "INA228 5V: range switch failed: %s (%d); %s\n",
+					        alp_status_name(ss),
+					        (int)ss,
+					        broken5 ? "recovery failed, will retry"
+					                : "reset onto the previous range");
 				}
 			}
 		}
-		if (ok5 && over) {
+		if (row_err != ALP_OK) {
+			/* Not trustworthy: an error row, never a number. */
+			printf("  %-5s  error: %s\n", "5V", alp_status_name(row_err));
+		} else if (ok5 && over) {
 			/* Clipped: the numbers are not valid, so say so instead of printing them. */
 			printf("  %-5s  over-range (shunt voltage clipped on the %s range)\n",
 			       "5V",
