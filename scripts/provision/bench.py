@@ -23,6 +23,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -327,35 +328,78 @@ class Power:
 
 
 class ScpiPower(Power):
-    """SCPI over raw TCP, one connection per command.
+    """SCPI over ONE persistent raw TCP connection (the only SCPI socket in the tool).
+
+    The SPD3303X LAN stack hangs (resets, WinError 10054) after many short
+    connections and only a PSU power-cycle clears it, so the connection is
+    kept open, commands are serialised under a lock with a small gap between
+    them, and a failure reconnects with backoff before giving up.
 
     Command syntax is the bench-proven ``OUTP CH<n>,ON|OFF`` form, not the
     IEEE ``(@n)`` channel-list form; output state is read from ``SYST:STAT?``.
     """
+
+    GAP_S = 0.05  # minimum spacing between commands
+    BACKOFF_S = (3.0, 6.0, 9.0, 12.0)  # reconnect waits: 5 attempts over ~30 s
 
     def __init__(
         self, host: str, port: int, channel: int, connect=socket.create_connection
     ) -> None:
         self.host, self.port, self.channel = host, port, int(channel)
         self._connect = connect
+        self._sock = None
+        self._lock = threading.Lock()
+        self._last_io: float | None = None
+
+    def close(self) -> None:
+        with self._lock:
+            self._drop()
+
+    def _drop(self) -> None:
+        if self._sock is not None:
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+            self._sock = None
+
+    def _io(self, cmd: str, reply: bool) -> str:
+        if self._sock is None:
+            self._sock = self._connect((self.host, self.port), timeout=3)
+        if self._last_io is not None and (
+            rest := self.GAP_S - (self._clock() - self._last_io)
+        ) > 0:
+            self._sleep(rest)
+        self._sock.sendall((cmd + "\n").encode())
+        self._last_io = self._clock()
+        if not reply:
+            return ""
+        data = b""
+        while not data.endswith(b"\n"):
+            chunk = self._sock.recv(256)
+            if not chunk:
+                raise ConnectionResetError("PSU closed the connection")
+            data += chunk
+        self._last_io = self._clock()
+        return data.decode(errors="replace").strip()
 
     def _send(self, cmd: str, reply: bool = False) -> str:
         self._note(f"SCPI {cmd}")
-        try:
-            with self._connect((self.host, self.port), timeout=3) as s:
-                s.sendall((cmd + "\n").encode())
-                if not reply:
-                    self._sleep(0.2)  # let the PSU act before the socket closes
-                    return ""
-                data = b""
-                while not data.endswith(b"\n"):
-                    chunk = s.recv(256)
-                    if not chunk:
-                        break
-                    data += chunk
-                return data.decode(errors="replace").strip()
-        except OSError as e:
-            raise BenchError(f"SCPI {self.host}:{self.port} {cmd!r}: {e}") from e
+        with self._lock:
+            err: OSError | None = None
+            for attempt in range(len(self.BACKOFF_S) + 1):
+                try:
+                    return self._io(cmd, reply)
+                except OSError as e:
+                    err = e
+                    self._drop()
+                    if attempt < len(self.BACKOFF_S):
+                        self._note(f"SCPI reconnect in {self.BACKOFF_S[attempt]:g}s: {e}")
+                        self._sleep(self.BACKOFF_S[attempt])
+            raise BenchError(
+                f"SCPI {self.host}:{self.port} {cmd!r}: still failing after "
+                f"{len(self.BACKOFF_S) + 1} attempts: {err}"
+            ) from err
 
     def on(self) -> None:
         try:

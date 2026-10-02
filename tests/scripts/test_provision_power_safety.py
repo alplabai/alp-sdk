@@ -26,6 +26,9 @@ class _Sock:
     def __exit__(self, *a):
         return False
 
+    def close(self):
+        pass
+
     def sendall(self, data):
         self.psu.events.append((self.psu.clock(), data.decode().strip()))
 

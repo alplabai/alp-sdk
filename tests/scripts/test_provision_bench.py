@@ -136,10 +136,14 @@ def test_scpi_power_commands_and_query():
     seen: list[bytes] = []
 
     def handler(conn):
-        data = conn.recv(100)
-        seen.append(data)
-        if data.startswith(b"SYST:STAT?"):
-            conn.sendall(b"0x24\n")   # SPD3303X: bit 5 = CH2 output on
+        buf = b""
+        while chunk := conn.recv(100):
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                seen.append(line + b"\n")
+                if line.startswith(b"SYST:STAT?"):
+                    conn.sendall(b"0x24\n")   # SPD3303X: bit 5 = CH2 output on
 
     srv, port = _serve_once(handler)
     try:
@@ -157,8 +161,8 @@ def test_scpi_power_commands_and_query():
 def test_scpi_power_is_on_reads_the_channel_bit():
     def serve(reply):
         def handler(conn):
-            conn.recv(100)
-            conn.sendall(reply)
+            while conn.recv(100):
+                conn.sendall(reply)
         return _serve_once(handler)
 
     srv, port = serve(b"0x14\n")                 # bench read: CH1 on, CH2 off
@@ -177,8 +181,83 @@ def test_scpi_power_unreachable_is_bench_error():
     def refuse(addr, timeout):
         raise ConnectionRefusedError("refused")
 
+    p = bench.ScpiPower("h", 1, 1, connect=refuse)
+    slept: list[float] = []
+    p._sleep = slept.append
     with pytest.raises(BenchError, match="OUTP CH1,ON"):
-        bench.ScpiPower("h", 1, 1, connect=refuse).on()
+        p.on()
+    assert len(slept) == len(p.BACKOFF_S) and sum(slept) >= 25   # ~30 s of retries, then a clear error
+
+
+class _PsuSock:
+    """A persistent fake PSU connection; `reset_next` makes the next sendall die once."""
+
+    def __init__(self, psu):
+        self.psu, self.closed = psu, False
+
+    def sendall(self, data):
+        if self.psu.reset_next:
+            self.psu.reset_next = False
+            raise ConnectionResetError(10054, "reset")
+        self.psu.sent.append(data.decode().strip())
+
+    def recv(self, n):
+        return b"0x14" + bytes([10])
+
+    def close(self):
+        self.closed = True
+
+
+class _Psu:
+    def __init__(self):
+        self.sent, self.connects, self.reset_next = [], 0, False
+
+    def connect(self, addr, timeout):
+        self.connects += 1
+        return _PsuSock(self)
+
+    def power(self, channel=1):
+        p = bench.ScpiPower("h", 1, channel, connect=self.connect)
+        t = [0.0]
+        p._clock = lambda: t[0]
+        p._sleep = lambda s: t.__setitem__(0, t[0] + s)
+        return p
+
+
+def test_scpi_reuses_one_connection_and_never_commands_ch2():
+    psu = _Psu()
+    p = psu.power(1)
+    p.on()
+    assert p.is_on() is True
+    p._clock = lambda: 1e6   # skip the min-ON wait
+    p.off()
+    assert psu.connects == 1
+    assert psu.sent == ["OUTP CH1,ON", "SYST:STAT?", "OUTP CH1,OFF"]
+    assert not any("CH2" in c for c in psu.sent)
+
+
+def test_scpi_spaces_commands_by_the_inter_command_gap():
+    psu = _Psu()
+    p = psu.power(1)
+    stamps = []
+    orig = _PsuSock.sendall
+    _PsuSock.sendall = lambda self, d: (stamps.append(p._clock()), orig(self, d))[1]
+    try:
+        p.is_on()
+        p.is_on()
+    finally:
+        _PsuSock.sendall = orig
+    assert stamps[1] - stamps[0] >= p.GAP_S
+
+
+def test_scpi_reconnects_after_a_reset_and_resends():
+    psu = _Psu()
+    p = psu.power(1)
+    p.on()
+    psu.reset_next = True
+    assert p.is_on() is True
+    assert psu.connects == 2
+    assert psu.sent == ["OUTP CH1,ON", "SYST:STAT?"]
 
 
 def _cp(rc=0, out="", err=""):
