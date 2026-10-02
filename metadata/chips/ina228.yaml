@@ -11,7 +11,9 @@ driver_status:    partial           # chips/ina228/ (#2645): probe + identity ch
                                      # the E1M-X EVK, where the INA228 is on E1M-X I2C0, owned by
                                      # Linux on the A55 (i2c-0), and the 6.1.141-cip43 kernel has no
                                      # INA228 driver (`ina238` matches `ti,ina238` only): read over
-                                     # i2c-dev, same position as chips/ina236.
+                                     # i2c-dev, same position as chips/ina236. Mainline Linux
+                                     # `drivers/hwmon/ina238.c` matches `ti,ina228`; a kernel bump
+                                     # or backport would retire the i2c-dev use of this driver.
 display_name:     "TI INA228 85 V 20-bit power / energy / charge monitor"
 vendor:           ti
 mpn_population:

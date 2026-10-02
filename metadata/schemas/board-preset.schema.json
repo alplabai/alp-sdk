@@ -489,7 +489,11 @@
             "max_current_a": {
               "type": "string",
               "pattern": "^[0-9]+\\.[0-9]+$",
-              "description": "Rail max current in amps, as a decimal string (see `shunt_ohms`)."
+              "description": "Reporting-scale max current in amps, as a decimal string (see `shunt_ohms`): the rail limit, or the shunt measurement full scale when the rail limit is not known."
+            },
+            "max_current_note": {
+              "type": "string",
+              "description": "Optional sentence appended to the generated doc comment of the max-current macro, e.g. to say the value is the shunt full scale rather than a rail limit."
             }
           }
         },

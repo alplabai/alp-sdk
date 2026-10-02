@@ -279,8 +279,10 @@ e1m_routes:
 # (E1M_X_I2C0).  Ref-des + rail + A0 strap per the board schematic
 # (Current Measurement.SchDoc); INA236A occupies 0x40..0x43, INA236B
 # occupies 0x48..0x4B (same A0 strap encoding). The VCAM2 monitor (U32,
-# would-be 0x48) is not fitted: 0x48 on this bus is the TAS2563 pair's shared
-# address (chip manifest `broadcast` row), so no device may be assigned there.  Single source of truth
+# would-be 0x48) is not fitted, and its entry is deleted rather than kept with
+# `assembled: false`: 0x48 on this bus is the TAS2563 pair's shared address
+# (chip manifest `broadcast` row), so probing 0x48 writes to the amplifiers and
+# no device entry may claim it.  Single source of truth
 # for the `XEVK_I2C_ADDR_INA2xx_*` / `XEVK_INA236_SHUNT_*` /
 # `XEVK_INA236_MAX_*` macros; `scripts/gen_board_header.py` reads this block and emits the
 # macros into `include/alp/boards/alp_e1m_x_evk_routes.h`. Do not
@@ -347,10 +349,10 @@ i2c_devices:
             A0 = SDA. The E1M-X EVK V2 design data nets U30's SDA to I2C0.SCL and its SCL to
             I2C0.SDA; a hand rework on the board corrects that, so it answers only on
             carriers with the rework applied (#2343). No answer means absent, not a fault.
-            100 mOhm shunt; the 1.6384 A max is the ADCRANGE = 0 shunt full scale
-            (163.84 mV / 100 mOhm), not a limit of the rail.",
+            100 mOhm shunt.",
       calibration: { shunt_macro: XEVK_INA228_SHUNT_5V_OHMS, shunt_ohms: "0.100",
-                     max_macro: XEVK_INA228_MAX_5V_A, max_current_a: "1.6384" } }
+                     max_macro: XEVK_INA228_MAX_5V_A, max_current_a: "1.6384",
+                     max_current_note: "This is the shunt measurement full scale (ADCRANGE = 0: 163.84 mV / 100 mOhm), not a limit of the rail." } }
 
 # Audio -- 2x TAS2563 boosted class-D smart-amp (U27/U28) on E1M_X_I2C0 +
 # E1M_X_I2S0.  Scripts that emit the Linux DT read this block; device-

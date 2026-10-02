@@ -173,7 +173,11 @@ def _emit_i2c_devices(devices: list[dict[str, Any]]) -> list[str]:
             (shunt_macro, f"{cal['shunt_ohms']}f", f"Shunt for {macro}.")
         )
         calib_lines.append(
-            (max_macro, f"{cal['max_current_a']}f", f"Max current for {macro}.")
+            (
+                max_macro,
+                f"{cal['max_current_a']}f",
+                f"Max current for {macro}." + (f" {cal['max_current_note']}" if cal.get("max_current_note") else ""),
+            )
         )
 
     out: list[str] = [
@@ -193,7 +197,7 @@ def _emit_i2c_devices(devices: list[dict[str, Any]]) -> list[str]:
     if calib_lines:
         out.extend([
             "/* ------------------------------------------------------------------ */",
-            "/* INA236 calibration constants (from `i2c_devices[].calibration`) */",
+            "/* INA2xx calibration constants (from `i2c_devices[].calibration`) */",
             "/* ------------------------------------------------------------------ */",
             "",
         ])
