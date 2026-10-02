@@ -135,7 +135,9 @@ def ship_check(unit: dict[str, str], catalogue: dict[str, dict], family: str = "
         # ship_required_for: manifest families (e.g. v2n-m1, whose DX-M1 must be flashed)
         # for which the key is required although the other families may leave it blank.
         required = spec.get("ship_required") or family in spec.get("ship_required_for", ())
-        if required and "*" not in key and not str(unit.get(key, "")).strip():
+        val = str(unit.get(key, "")).strip()
+        # `unread (<error>)` is the census's record of a read that failed: not a value
+        if required and "*" not in key and (not val or val.startswith("unread (")):
             reasons.append(f"missing {key}")
     # The ACT88760 GPIO4 OTP default is an expected workaround, not a defect
     # (maintainer decision 2026-09-29) -- U-Boot releases it every boot. Block
