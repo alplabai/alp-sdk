@@ -17,8 +17,8 @@ has a single 1280x720 Y10_1X10 mode; the v6.6 driver adds:
 
 The link frequency stays 400 MHz on 2 data lanes for every mode and
 format. The 6.1 tree already has the subdev ops the v6.6 source uses
-(init_cfg, v4l2_subdev_get_try_format/crop), so the only change is .probe to
-.probe_new for the 6.1 i2c_driver API.
+(init_cfg, v4l2_subdev_get_try_format/crop) and the single-argument
+probe, so no API adaptation was needed.
 
 Upstream-Status: Backport [v6.6 drivers/media/i2c/ov9282.c]
 Signed-off-by: Alp Lab AB <contact@alplab.ai>

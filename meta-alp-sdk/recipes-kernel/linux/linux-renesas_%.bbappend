@@ -317,10 +317,10 @@ SRC_URI:append:e1m-v2m101 = " file://display.cfg"
 # second :e1m-v2m101 append would add the patch twice and do_patch fails.
 SRC_URI:append:e1m-v2n101 = " file://tas2563-audio.cfg file://0009-ASoC-tas2562-reset-the-amplifier-at-probe.patch file://0014-ASoC-rsnd-let-SSI2-share-SSI1-SCK-WS-on-RZ-V2N.patch"
 
-# Sensor drivers (#2618): every camera driver the SDK supports is built as a
-# module on every V2N/V2M machine, so any camera works once its DT is
-# selected, without ALP_ENABLE_CAM0_*.  Unconditional, unlike camera-csi.cfg
-# below (opt-in receiver + built-in IMX219/OV9282).  A follow-up PR generates
+# Sensor drivers (#2618): every camera driver the SDK supports is built in
+# (=y, the images install no kernel-modules) on every V2N/V2M machine, so any
+# camera works once its DT is selected, without ALP_ENABLE_CAM0_*.
+# Unconditional, unlike camera-csi.cfg below (opt-in receiver DT).  A follow-up PR generates
 # this file from metadata.
 SRC_URI:append = " file://camera-sensors.cfg"
 
