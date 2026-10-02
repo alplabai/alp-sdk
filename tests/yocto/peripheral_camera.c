@@ -283,10 +283,11 @@ static void test_fps(void)
 	cam_t c;
 	make_chain(&c);
 
-	/* 100 MHz / ((12+400) * (4+vblank)) = 30 fps */
+	/* 10 MHz / ((12+400) * (4+vblank)) = 30 fps */
 	alp_camera_config_t cfg = cfg_of(ALP_PIXFMT_GREY8, 12, 4, 30);
+	g_pixel_rate            = 10000000;
 	ALP_ASSERT_EQ_INT(cam_configure(&c, &cfg), ALP_OK);
-	ALP_ASSERT_EQ_INT(g_vblank, 100000000 / (30 * 412) - 4);
+	ALP_ASSERT_EQ_INT(g_vblank, 10000000 / (30 * 412) - 4);
 	uint32_t fps = cam_read_fps_x1000(&c);
 	ALP_ASSERT_TRUE(fps > 29900u && fps < 30300u);
 
