@@ -134,6 +134,7 @@ def test_manual_power_asks_operator():
 
 def test_scpi_power_commands_and_query():
     seen: list[bytes] = []
+    state = [True]
 
     def handler(conn):
         buf = b""
@@ -142,8 +143,10 @@ def test_scpi_power_commands_and_query():
             while b"\n" in buf:
                 line, buf = buf.split(b"\n", 1)
                 seen.append(line + b"\n")
-                if line.startswith(b"SYST:STAT?"):
-                    conn.sendall(b"0x24\n")   # SPD3303X: bit 5 = CH2 output on
+                if line.startswith(b"OUTP CH2,"):
+                    state[0] = line.endswith(b"ON")
+                if line.startswith(b"SYST:STAT?"):   # SPD3303X: bit 5 = CH2 output on
+                    conn.sendall(b"0x24\n" if state[0] else b"0x4\n")
 
     srv, port = _serve_once(handler)
     try:
@@ -155,7 +158,7 @@ def test_scpi_power_commands_and_query():
         assert p.is_on() is True
     finally:
         srv.close()
-    assert seen == [b"OUTP CH2,OFF\n", b"OUTP CH2,ON\n", b"SYST:STAT?\n"]
+    assert seen == [b"OUTP CH2,OFF\n", b"SYST:STAT?\n", b"OUTP CH2,ON\n", b"SYST:STAT?\n", b"SYST:STAT?\n"]
 
 
 def test_scpi_power_is_on_reads_the_channel_bit():
@@ -199,10 +202,13 @@ class _PsuSock:
         if self.psu.reset_next:
             self.psu.reset_next = False
             raise ConnectionResetError(10054, "reset")
-        self.psu.sent.append(data.decode().strip())
+        cmd = data.decode().strip()
+        self.psu.sent.append(cmd)
+        if cmd.startswith("OUTP CH1,"):
+            self.psu.on = cmd.endswith("ON")
 
     def recv(self, n):
-        return b"0x14" + bytes([10])
+        return b"0x14" + bytes([10]) if self.psu.on else b"0x4" + bytes([10])
 
     def close(self):
         self.closed = True
@@ -210,7 +216,7 @@ class _PsuSock:
 
 class _Psu:
     def __init__(self):
-        self.sent, self.connects, self.reset_next = [], 0, False
+        self.sent, self.connects, self.reset_next, self.on = [], 0, False, False
 
     def connect(self, addr, timeout):
         self.connects += 1
@@ -232,7 +238,7 @@ def test_scpi_reuses_one_connection_and_never_commands_ch2():
     p._clock = lambda: 1e6   # skip the min-ON wait
     p.off()
     assert psu.connects == 1
-    assert psu.sent == ["OUTP CH1,ON", "SYST:STAT?", "OUTP CH1,OFF"]
+    assert psu.sent == ["OUTP CH1,ON", "SYST:STAT?", "SYST:STAT?", "OUTP CH1,OFF", "SYST:STAT?"]
     assert not any("CH2" in c for c in psu.sent)
 
 
@@ -257,7 +263,7 @@ def test_scpi_reconnects_after_a_reset_and_resends():
     psu.reset_next = True
     assert p.is_on() is True
     assert psu.connects == 2
-    assert psu.sent == ["OUTP CH1,ON", "SYST:STAT?"]
+    assert psu.sent == ["OUTP CH1,ON", "SYST:STAT?", "SYST:STAT?"]
 
 
 def _cp(rc=0, out="", err=""):

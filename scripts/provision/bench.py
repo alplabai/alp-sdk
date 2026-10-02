@@ -406,10 +406,23 @@ class ScpiPower(Power):
             self._send(f"OUTP CH{self.channel},ON")
         finally:  # the PSU may have acted even if the reply path failed
             self._mark_on()
+        self._confirm(True)
 
     def off(self) -> None:
         self._wait_min_on()
         self._send(f"OUTP CH{self.channel},OFF")
+        self._confirm(False)
+
+    def _confirm(self, want: bool) -> None:
+        """OUTP has no reply, so a half-dead socket can swallow it: read the
+        state back and resend once before giving up."""
+        for attempt in range(2):
+            if self.is_on() is want:
+                return
+            if attempt == 0:
+                self._send(f"OUTP CH{self.channel},{'ON' if want else 'OFF'}")
+        raise BenchError(f"SCPI {self.host}:{self.port}: CH{self.channel} did not read back "
+                         f"{'ON' if want else 'OFF'} after OUTP; check the PSU front panel")
 
     def is_on(self) -> bool | None:
         """Siglent SPD3303X has no ``OUTP?`` query (it times out); its output
