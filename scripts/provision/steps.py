@@ -33,7 +33,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import TypeVar
 
-from provision import dxm1, gates, ledger_out, uboot
+from provision import bmap, dxm1, gates, ledger_out, uboot
 from provision import linux_target as lt
 from provision.bench import Bench, BenchError, ExpectTimeout
 from provision.console_target import ConsoleSwdProbe, ConsoleTarget
@@ -955,6 +955,15 @@ def _wic_md5(ctx: Ctx) -> tuple[str, int]:
     return ctx._cache["wic_md5"]
 
 
+def _bmap(ctx: Ctx):
+    """The parsed system_image_bmap, or None when the bundle carries none."""
+    if not any(c.get("role") == "system_image_bmap" for c in ctx.bundle.get("components", [])):
+        return None
+    if "bmap" not in ctx._cache:
+        ctx._cache["bmap"] = bmap.parse(ctx.artefact("system_image_bmap"))
+    return ctx._cache["bmap"]
+
+
 class WriteRootfs(Step):
     name = "write_rootfs"
 
@@ -963,6 +972,17 @@ class WriteRootfs(Step):
         if t is None:
             return Unknown("no Linux target")
         emmc = lt.resolve_emmc(t)
+        if (bm := _bmap(ctx)) is not None:
+            if "bmap_md5" not in ctx._cache:
+                ctx._cache["bmap_md5"] = bmap.stage(ctx.artefact("system_image"), bm, None)[0]
+            lt.put_ranges(t, bm)
+            try:
+                got = lt.md5_ranges(t, emmc, bm)
+            finally:
+                t.run(f"rm -f {lt.RANGES_PATH}", check=False)
+            if got != ctx._cache["bmap_md5"]:
+                return Unsatisfied(f"{emmc} does not hold the bundle wic's mapped ranges")
+            return Satisfied({})
         want, n = _wic_md5(ctx)
         if t.md5(emmc, 0, n) != want:
             return Unsatisfied(f"{emmc} does not hold the bundle wic")
@@ -979,8 +999,19 @@ class WriteRootfs(Step):
         else:
             emmc = "/dev/<emmc>"
         dtb = gates.fip_fdtfile(ctx.artefact_bytes("fip"))
-        ctx.mutate(f"gunzip -c {wic.name} | dd of={emmc} bs=4M && sync (over SSH), md5 readback",
-                   lambda: lt.rootfs_write_verify(t, emmc, wic))
+        bm = _bmap(ctx)
+        ev: dict[str, str] = {}
+        if bm is not None and t is not None and not lt.dd_fullblock(t):
+            ctx.plan_log.append("board dd lacks iflag=fullblock: full-image write instead of bmap")
+            bm = None
+        if bm is not None:
+            ctx.mutate(f"bmap: write only the mapped ranges ({bm.mapped_bytes} of {bm.image_size} bytes, "
+                       f"{len(bm.ranges)} ranges) of {wic.name} (ranges host-verified first), "
+                       "md5 readback of the same ranges",
+                       lambda: ev.update(lt.rootfs_write_verify_mapped(t, emmc, wic, bm)))
+        else:
+            ctx.mutate(f"gunzip -c {wic.name} | dd of={emmc} bs=4M && sync (over SSH), md5 readback",
+                       lambda: lt.rootfs_write_verify(t, emmc, wic))
 
         def check():
             name = emmc.rsplit("/", 1)[-1]
@@ -993,9 +1024,10 @@ class WriteRootfs(Step):
                 except BenchError as e:
                     errs.append(f"p{p}: {e}")
             raise BenchError(f"no partition passes fsck + /boot/{dtb}: {'; '.join(errs)}")
-        part = ctx.mutate(f"fsck -n, mount ro, /boot/{dtb} present", check)
-        return self.result(ctx, f"wic written; rootfs p{part} holds /boot/{dtb}" if part
-                           else "would write the wic and check the rootfs")
+        part = ctx.mutate(f"fsck -n, mount ro,noload, /boot/{dtb} present", check)
+        how = (f"{ev['rootfs_bytes_written']} of {ev['rootfs_image_bytes']} bytes (bmap)" if ev else "full image")
+        return self.result(ctx, f"wic written ({how}); rootfs p{part} holds /boot/{dtb}" if part
+                           else "would write the wic and check the rootfs", ev)
 
 
 class Census(Step):

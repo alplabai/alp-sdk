@@ -15,6 +15,12 @@ inherit core-image
 
 IMAGE_FEATURES += "ssh-server-openssh"
 
+# Block map next to the .wic.gz: scripts/provision_som.py write_rootfs writes and
+# verifies only the mapped ranges (system_image_bmap bundle role) instead of the
+# full ~7 GB image. wic.bmap pulls in bmaptool-native (oe-core). The V2N family
+# is the one that ships a .wic.gz (vendor BSP IMAGE_FSTYPES).
+IMAGE_FSTYPES:append:rzv2n-family = " wic.bmap"
+
 # Core runtime payload (Linux side) -- present in EVERY Alp image: the SDK
 # (which carries the portable <alp/inference.h> dispatcher + the silicon's
 # NPU backend), the Mender OTA client, and the CA55-cluster watchdog policy.

@@ -178,7 +178,7 @@ Every PSU command is logged with a monotonic timestamp in the step log.
 | `gd32_flash` | applies the ACT88760 GPIO4 volatile release if still at the OTP default, DP-ID gate (`0x0BE12477` only), `loadbin` × 3, verify with `savebin` in fresh probe sessions, bridge ACK at `0x70`. With no network (a blank GD32 leaves both gbeth ports dead) it pushes the SWD tools and the three images over the console (base64, md5-checked on the board), then cold-cycles and re-checks the IP; SSH is used when it is up |
 | `write_xspi` | from Linux: `bl2` → `mtd0`, `fip` → `mtd1`; md5 readback. A FIP whose erase would reach the CM33 image at `mtd1` + `0x1A0000` is refused |
 | `write_emmc_boot` | release `bl2_mmc` + `fip` into `mmcblk<N>boot1`, md5 readback, EXT_CSD via mmc-utils |
-| `write_rootfs` | stream the wic into the eMMC user area (refused while Linux runs from the eMMC), `fsck -n`, `/boot/<dtb>` present |
+| `write_rootfs` | stream the wic into the eMMC user area (refused while Linux runs from the eMMC), `fsck -n`, read-only mount (`-o ro,noload`, so the ext4 journal is never replayed), `/boot/<dtb>` present. With a `system_image_bmap` in the bundle only the mapped ranges are written and verified, see below |
 | `census` | read-only: every auto ledger key the unit can provide |
 | `eeprom_manifest` | preconditions, 128-byte manifest in 8 × 16-byte page writes at `0x50`, readback, cold cycle, re-read; only then the staged blob is promoted to `<serial>.manifest.bin` |
 | `dxm1_npu_flash` | `v2n-m1` bundles that carry the DX-M1 set: firmware over the ROM UART path, probe = PCIe `0x0000` + `dxrt-cli -s` version, see below |
@@ -332,6 +332,17 @@ bit 1 clear; the unit passes the ledger ship check (disposition `ship`, GD32
 released on its own by the last cold boot, no known defects, no override,
 not a `--build-dir` unit); and the operator retypes the serial. After the
 lock frame, only a re-read with bit 1 set counts.
+
+## Block-map write of the system image
+
+The V2N image builds (`IMAGE_FSTYPES:append:rzv2n-family = " wic.bmap"`, `meta-alp-sdk/recipes-images/alp-image-common.inc`) emit `<image>.wic.bmap` next to the `.wic.gz`. A bundle that lists it as the optional `system_image_bmap` role (`flash_target` `emmc`, never flashed on its own) makes `write_rootfs` skip the unused blocks of the ~7 GB image:
+
+1. The host gunzips the wic once and checks every mapped range against the bmap checksum (`sha256` or `sha1`). A mismatch refuses **before** anything is written.
+2. The mapped bytes are gzipped into one stream and sent over a single ssh command: `gunzip -c | { while read s c <&3; do dd of=<emmc> bs=<BlockSize> seek=$s count=$c iflag=fullblock conv=notrunc || exit 1; done; } 3<ranges && sync`. The range list is pushed as a file first, so the command length does not depend on the range count. The board needs only `gunzip` and a `dd` with `iflag=fullblock` (probed first; a board whose dd lacks it falls back to the full-image write). No `bmaptool` on the board.
+3. The same ranges are read back on the board and md5-compared with the host's md5 of the concatenation. The `write_rootfs` probe uses the same mapped-range md5, so a rerun skips a finished write.
+4. The step evidence records `rootfs_bytes_written` against `rootfs_image_bytes`.
+
+Unmapped blocks are not touched: the eMMC outside the mapped ranges keeps whatever it held (a blank or previously provisioned part), and only the mapped ranges are verified. The last range is zero-padded to a whole block, so up to `BlockSize - 1` bytes past the image end are written. Without a `system_image_bmap` the full `gunzip | dd bs=4M` path and the full-span md5 are used, as before. `check_som_bundle.py` validates the bmap and compares its `ImageSize` with the gunzipped image when both files sit beside `bundle.json`.
 
 ## Hazards
 

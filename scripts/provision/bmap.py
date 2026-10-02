@@ -1,0 +1,102 @@
+"""Block-map (bmap) support for the system image: parse the .wic.bmap,
+verify every mapped range of the gunzipped wic against its checksum, and
+stage the mapped bytes as one gzip stream for a single ssh write.
+
+Host side only: the board needs nothing beyond gunzip and dd."""
+
+from __future__ import annotations
+
+import gzip
+import hashlib
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass
+from pathlib import Path
+
+from provision.bench import BenchError
+
+_CHUNK = 1 << 20
+
+
+@dataclass(frozen=True)
+class Bmap:
+    block_size: int
+    image_size: int
+    checksum_type: str
+    ranges: tuple[tuple[int, int, str], ...]      # (first block, block count, hex checksum)
+
+    @property
+    def mapped_bytes(self) -> int:
+        return sum(c for _, c, _ in self.ranges) * self.block_size
+
+
+def parse(path: Path) -> Bmap:
+    try:
+        root = ET.parse(path).getroot()
+        bs = int(root.findtext("BlockSize", "").strip())
+        size = int(root.findtext("ImageSize", "").strip())
+        ctype = (root.findtext("ChecksumType") or "sha1").strip().lower()
+        hashlib.new(ctype)
+        ranges, last_end = [], 0
+        for r in root.find("BlockMap"):
+            a, _, b = r.text.strip().partition("-")
+            first, end = int(a), int(b or a)
+            chk = r.get("chksum") or r.get("sha1") or ""
+            if first < last_end or end < first or not chk:
+                raise ValueError(f"bad or unsorted range {r.text.strip()!r}")
+            ranges.append((first, end - first + 1, chk.lower()))
+            last_end = end + 1
+        if bs < 512 or bs % 512 or not ranges:
+            raise ValueError("no ranges or bad BlockSize")
+    except (ET.ParseError, TypeError, ValueError, AttributeError, OSError) as e:
+        raise BenchError(f"{path.name}: not a valid bmap: {e}") from e
+    return Bmap(bs, size, ctype, tuple(ranges))
+
+
+def stage(wic_gz: Path, bm: Bmap, out_gz: Path | None) -> tuple[str, int]:
+    """Stream-gunzip the wic once, check every mapped range against the bmap,
+    and write the concatenation (the last range zero-padded to a whole block)
+    gzipped to out_gz. Returns (md5 of the concatenation, its byte length).
+    A checksum mismatch raises before anything has gone near the board."""
+    md5 = hashlib.md5()
+    total = 0
+    sink = gzip.open(out_gz, "wb", compresslevel=1) if out_gz else None
+    try:
+        with gzip.open(wic_gz, "rb") as f:
+            pos = 0
+            for first, count, want in bm.ranges:
+                start, length = first * bm.block_size, count * bm.block_size
+                _skip(f, start - pos)
+                h = hashlib.new(bm.checksum_type)
+                got = 0
+                want_len = min(length, max(bm.image_size - start, 0))
+                while got < want_len:
+                    blk = f.read(min(_CHUNK, want_len - got))
+                    if not blk:
+                        raise BenchError(f"{wic_gz.name} ends inside mapped blocks {first}+{count}")
+                    h.update(blk)
+                    got += len(blk)
+                    md5.update(blk)
+                    if sink:
+                        sink.write(blk)
+                if h.hexdigest() != want:
+                    raise BenchError(f"{wic_gz.name}: blocks {first}+{count} {bm.checksum_type} "
+                                     f"{h.hexdigest()} != bmap {want}; nothing was written")
+                if got < length:                       # image ends mid-block: pad to the block
+                    pad = b"\0" * (length - got)
+                    md5.update(pad)
+                    if sink:
+                        sink.write(pad)
+                total += length
+                pos = start + got
+    finally:
+        if sink:
+            sink.close()
+    return md5.hexdigest(), total
+
+
+def _skip(f, n: int) -> None:
+    while n > 0:
+        blk = f.read(min(_CHUNK, n))
+        if not blk:
+            raise BenchError("wic ended before the next mapped range")
+        n -= len(blk)

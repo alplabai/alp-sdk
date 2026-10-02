@@ -22,18 +22,20 @@
         "additionalProperties": false,
         "required": ["role", "file", "sha256", "size_bytes", "flash_target"],
         "properties": {
-          "role": { "type": "string", "enum": ["bl2", "bl2_mmc", "fip", "system_image", "dxm1_fw", "dxm1_fw_uart_boot", "dxm1_dxflash", "dxm1_dtb", "dxm1_dxcli"] },
+          "role": { "type": "string", "enum": ["bl2", "bl2_mmc", "fip", "system_image", "system_image_bmap", "dxm1_fw", "dxm1_fw_uart_boot", "dxm1_dxflash", "dxm1_dtb", "dxm1_dxcli"] },
           "file": { "type": "string", "minLength": 1 },
           "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
           "size_bytes": { "type": "integer", "minimum": 1 },
           "flash_target": { "type": "string", "enum": ["xspi:mtd0", "xspi:mtd1", "emmc", "emmc:boot1", "dxm1"] },
           "version": { "type": "string", "minLength": 1, "description": "Optional. The firmware release this file carries; required on the dxm1_fw role, which the dxm1_npu_flash step verifies against the DX-M1 (dxrt-cli -s)." }
         },
-        "description": "bl2_mmc is the eMMC-boot BL2 (bl2_bp_mmc) and is the only role flashed to emmc:boot1. The optional dxm1_* roles (V2M, v2n-m1 only) carry the license-gated DX-M1 NPU programming set -- dxm1_fw (application firmware), dxm1_fw_uart_boot (UART bootloader stage), dxm1_dxflash (the dxflash.py helper), dxm1_dtb (the dxuart2 device tree), dxm1_dxcli (dxcli.py, only to erase a NAND that already holds boot2nd) -- flash_target dxm1; the binaries live only in the private bundle, this schema is the public contract.",
+        "description": "system_image_bmap (optional) is the .wic.bmap of the system_image: when present, the V2N flow writes and verifies only the mapped ranges; flash_target emmc, never flashed on its own. bl2_mmc is the eMMC-boot BL2 (bl2_bp_mmc) and is the only role flashed to emmc:boot1. The optional dxm1_* roles (V2M, v2n-m1 only) carry the license-gated DX-M1 NPU programming set -- dxm1_fw (application firmware), dxm1_fw_uart_boot (UART bootloader stage), dxm1_dxflash (the dxflash.py helper), dxm1_dtb (the dxuart2 device tree), dxm1_dxcli (dxcli.py, only to erase a NAND that already holds boot2nd) -- flash_target dxm1; the binaries live only in the private bundle, this schema is the public contract.",
         "if": { "properties": { "role": { "const": "bl2_mmc" } }, "required": ["role"] },
         "then": { "properties": { "flash_target": { "const": "emmc:boot1" } } },
         "else": { "properties": { "flash_target": { "not": { "const": "emmc:boot1" } } } },
         "allOf": [
+          { "if": { "properties": { "role": { "const": "system_image_bmap" } }, "required": ["role"] },
+            "then": { "properties": { "flash_target": { "const": "emmc" } } } },
           { "if": { "properties": { "role": { "const": "dxm1_fw" } }, "required": ["role"] },
             "then": { "required": ["version"] } }
         ]

@@ -292,6 +292,8 @@ def provision(cfg: Cfg) -> int:
     bootloader_only = bundle["status"].startswith("bootloader-only")
     image_skipped = False
     for comp in sorted(bundle["components"], key=lambda c: _FLASH_ORDER.get(c["role"], 9)):
+        if comp["role"] == "system_image_bmap":       # companion of system_image, never flashed itself
+            continue
         if comp["role"] == "system_image" and bootloader_only:
             steps.append(Step("flash:system_image", True, "skipped (bundle is bootloader-only)"))
             image_skipped = True
@@ -444,6 +446,9 @@ def _bundle_from_build_dir(d: Path) -> dict:
             raise ValueError(f"--build-dir: want exactly one {pat}, found {[h.name for h in hits]}")
         comps.append({"role": role, "file": hits[0].name, "sha256": _sha256(hits[0]),
                       "size_bytes": hits[0].stat().st_size, "flash_target": target})
+    if len(bm := sorted(d.glob("*.wic.bmap"))) == 1:
+        comps.append({"role": "system_image_bmap", "file": bm[0].name, "sha256": _sha256(bm[0]),
+                      "size_bytes": bm[0].stat().st_size, "flash_target": "emmc"})
     return {"status": "complete", "release_version": f"build-dir:{d.name}", "components": comps}
 
 

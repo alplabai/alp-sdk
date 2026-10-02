@@ -241,3 +241,34 @@ def test_duplicate_role_fails(tmp_path):
     proc = _check(tmp_path, b)
     assert proc.returncode != 0
     assert "duplicate role" in proc.stdout
+
+
+def _bmap_bundle(tmp_path, image_size, bmap_text):
+    import gzip
+    d = tmp_path / "artifacts"
+    d.mkdir()
+    (d / "img.wic.gz").write_bytes(gzip.compress(b"\x01" * 8192))
+    (d / "img.wic.bmap").write_text(bmap_text, encoding="utf-8")
+    b = _valid_bundle()
+    b["components"].append({"role": "system_image_bmap", "file": "artifacts/img.wic.bmap",
+                            "sha256": "0" * 64, "size_bytes": 1, "flash_target": "emmc"})
+    p = tmp_path / "bundle.json"
+    p.write_text(json.dumps(b), encoding="utf-8")
+    return p
+
+
+_BMAP = ('<bmap version="2.0"><ImageSize> {n} </ImageSize><BlockSize> 4096 </BlockSize>'
+         '<ChecksumType> sha256 </ChecksumType><BlockMap><Range chksum="{h}"> 0-1 </Range></BlockMap></bmap>')
+
+
+def test_system_image_bmap_valid_and_size_checked(tmp_path):
+    ok = _run("--bundle", str(_bmap_bundle(tmp_path, 8192, _BMAP.format(n=8192, h="0" * 64))))
+    assert ok.returncode == 0, ok.stdout
+    (tmp_path / "x").mkdir()
+    bad = _run("--bundle", str(_bmap_bundle(tmp_path / "x", 4096, _BMAP.format(n=4096, h="0" * 64))))
+    assert bad.returncode == 1 and "ImageSize" in bad.stdout
+
+
+def test_system_image_bmap_garbage_rejected(tmp_path):
+    r = _run("--bundle", str(_bmap_bundle(tmp_path, 8192, "<bmap/>")))
+    assert r.returncode == 1 and "not a valid bmap" in r.stdout

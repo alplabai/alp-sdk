@@ -14,12 +14,14 @@ import hashlib
 import re
 import shlex
 import subprocess
+import tempfile
 import time
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from provision import bmap
 from provision.bench import BenchError, ExpectTimeout
 from provision.gates import CM33_REGION_OFFSET
 
@@ -407,12 +409,59 @@ def rootfs_write_verify(t: LinuxTarget, emmc: str, wic_gz: Path, timeout: float 
     return got
 
 
+RANGES_PATH = "/tmp/alp-bmap-ranges"
+
+
+def dd_fullblock(t: LinuxTarget) -> bool:
+    """Does the board's dd take iflag=fullblock (a pipe read must fill whole blocks)?"""
+    return t.run("dd if=/dev/zero of=/dev/null bs=1 count=1 iflag=fullblock 2>/dev/null",
+                 check=False).rc == 0
+
+
+def put_ranges(t: LinuxTarget, bm: bmap.Bmap) -> None:
+    # A file, not argv: a wic has thousands of ranges. fd 3 so dd keeps stdin for the data.
+    with tempfile.TemporaryDirectory() as d:
+        f = Path(d) / "ranges"
+        f.write_text("".join(f"{s} {c}\n" for s, c, _ in bm.ranges), encoding="ascii", newline="\n")
+        t.put(f, RANGES_PATH)
+
+
+def md5_ranges(t: LinuxTarget, dev: str, bm: bmap.Bmap) -> str:
+    """md5 of the mapped ranges of dev, concatenated (the ranges file must be on the board)."""
+    out = t.run(f"{{ while read s c <&3; do dd if={dev} bs={bm.block_size} skip=$s count=$c "
+                f"2>/dev/null; done; }} 3<{RANGES_PATH} | md5sum", timeout=1800.0).stdout.split()
+    if not out or not re.fullmatch(r"[0-9a-f]{32}", out[0]):
+        raise BenchError(f"unparsable md5sum output for the mapped ranges of {dev}")
+    return out[0]
+
+
+def rootfs_write_verify_mapped(t: LinuxTarget, emmc: str, wic_gz: Path, bm: bmap.Bmap,
+                               timeout: float = 3600.0) -> dict[str, str]:
+    """Write only the bmap's mapped ranges (host-verified first), then md5 them back."""
+    with tempfile.TemporaryDirectory() as d:
+        staged = Path(d) / "mapped.gz"
+        want, nbytes = bmap.stage(wic_gz, bm, staged)      # refuses on a checksum mismatch
+        put_ranges(t, bm)
+        try:
+            t.run(f"gunzip -c | {{ while read s c <&3; do dd of={emmc} bs={bm.block_size} seek=$s "
+                  f"count=$c iflag=fullblock conv=notrunc || exit 1; done; }} 3<{RANGES_PATH} && sync",
+                  timeout=timeout, stdin_path=staged)
+            t.run(f"blockdev --rereadpt {emmc} 2>/dev/null || python3 -c "
+                  f"\"import fcntl, os; fcntl.ioctl(os.open('{emmc}', os.O_RDONLY), 0x125f)\"")
+            got = md5_ranges(t, emmc, bm)
+        finally:
+            t.run(f"rm -f {RANGES_PATH}", check=False)
+    if got != want:
+        raise BenchError(f"{emmc} mapped-range readback md5 {got} != host md5 {want}")
+    return {"rootfs_md5": got, "rootfs_bytes_written": str(nbytes), "rootfs_image_bytes": str(bm.image_size)}
+
+
 def rootfs_check(t: LinuxTarget, emmc: str, part: int, dtb: str) -> None:
     """fsck -n, read-only mount, and the FDT gate's dtb present under /boot."""
     dev = f"{emmc}p{part}"
     mnt = "/mnt/alp-provision-rootfs"
     t.run(f"fsck.ext4 -n {dev}", timeout=600.0)
-    t.run(f"mkdir -p {mnt} && mount -o ro {dev} {mnt}")
+    t.run(f"mkdir -p {mnt} && mount -o ro,noload {dev} {mnt}")
     try:
         r = t.run(f"test -f {mnt}/boot/{shlex.quote(dtb)}", check=False)
     finally:
