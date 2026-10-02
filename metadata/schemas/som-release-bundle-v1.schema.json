@@ -32,7 +32,11 @@
         "description": "bl2_mmc is the eMMC-boot BL2 (bl2_bp_mmc) and is the only role flashed to emmc:boot1. The optional dxm1_* roles (V2M, v2n-m1 only) carry the license-gated DX-M1 NPU programming set -- dxm1_fw (application firmware), dxm1_fw_uart_boot (UART bootloader stage), dxm1_dxflash (the dxflash.py helper), dxm1_dtb (the dxuart2 device tree), dxm1_dxcli (dxcli.py, only to erase a NAND that already holds boot2nd) -- flash_target dxm1; the binaries live only in the private bundle, this schema is the public contract.",
         "if": { "properties": { "role": { "const": "bl2_mmc" } }, "required": ["role"] },
         "then": { "properties": { "flash_target": { "const": "emmc:boot1" } } },
-        "else": { "properties": { "flash_target": { "not": { "const": "emmc:boot1" } } } }
+        "else": { "properties": { "flash_target": { "not": { "const": "emmc:boot1" } } } },
+        "allOf": [
+          { "if": { "properties": { "role": { "const": "dxm1_fw" } }, "required": ["role"] },
+            "then": { "required": ["version"] } }
+        ]
       },
       "allOf": [
         { "contains": { "type": "object", "properties": { "role": { "const": "bl2" } }, "required": ["role"] } },

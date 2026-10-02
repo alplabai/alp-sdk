@@ -755,10 +755,29 @@ class OpDsw1EmmcInsertSd(_PreLinux):
         return self.result(ctx, "U-Boot boots from eMMC boot1")
 
 
+def leftover_dxuart2_swap(ctx) -> str:
+    """A refusal message when ``/boot/<fdtfile>.release`` exists on the live unit: a
+    dxm1_npu_flash run died after the DTB swap and could not restore it, so the unit boots
+    the dxuart2 DTB (PCIe off). "" when clean, not a DX-M1 SKU, or not checkable."""
+    if ctx.family != "v2n-m1" or ctx.linux is None:
+        return ""
+    try:
+        bak = f"/boot/{gates.fip_fdtfile(ctx.artefact_bytes('fip'))}.release"
+        if ctx.linux.run(f"test -e {shlex.quote(bak)}", check=False).rc != 0:
+            return ""
+    except (BenchError, Refused, ValueError, KeyError, OSError):
+        return ""
+    return (f"{bak} exists: an interrupted dxm1_npu_flash left the dxuart2 DTB installed. Copy "
+            f"{bak} back over its live DTB and remove it (or re-run dxm1_npu_flash, which heals it) "
+            "before provisioning further")
+
+
 class BootSdLinux(Step):
     name = "boot_sd_linux"
 
     def probe(self, ctx):
+        if ctx.linux_up() and leftover_dxuart2_swap(ctx):
+            return Unknown("leftover dxuart2 DTB swap on the unit")      # run() refuses with the reason
         if not ctx.linux_up():
             if ctx.bench is not None and ctx.console_linux_on_count == ctx.bench.power.on_count:
                 return Satisfied({}, "console login on the live boot, root on the microSD, no IP yet "
@@ -774,6 +793,8 @@ class BootSdLinux(Step):
 
     def run(self, ctx):
         b = ctx.need_bench()
+        if ctx.linux_up() and (why := leftover_dxuart2_swap(ctx)):
+            raise Refused(why)
         ev: dict[str, str] = {}
         if ctx.transfer == "xmodem":
             addr = (b.raw.get("uboot") or {}).get("load_addr")
@@ -989,7 +1010,9 @@ class Census(Step):
         bus["eeprom"] = bus["eeprom"] if bus["eeprom"] is not None else 0
         sizes = {r: len(ctx.artefact_bytes(r)) for r in ("bl2", "fip", "bl2_mmc")
                  if any(c.get("role") == r for c in ctx.bundle.get("components", []))}
-        facts, notes = lt.census(t, bus, sizes)
+        if why := leftover_dxuart2_swap(ctx):
+            raise Refused(why)
+        facts, notes = lt.census(t, bus, sizes, dxm1_present=ctx.family == "v2n-m1")
         if bus["pmic"] is not None:
             try:
                 # gd32_flash runs BEFORE census. When it applied the volatile
@@ -1312,8 +1335,12 @@ class Dxm1NpuFlash(Step):
             return ctx._cache["dxm1_flashed_md5"]
         groups = [ctx.state.get("steps", {})] + [g.get("steps", {}) for g in reversed(ctx.state.get("superseded", []))]
         for steps_ in groups:
-            st = steps_.get(name, {})
-            if st.get("status") in ("done", "skipped") and (st.get("evidence") or {}).get("dxm1_fw_md5"):
+            if name not in steps_:
+                continue
+            st = steps_[name]
+            if st.get("status") not in ("done", "skipped"):
+                return ""           # the newest entry failed / was interrupted: the NAND is unknown (as Record)
+            if (st.get("evidence") or {}).get("dxm1_fw_md5"):
                 return st["evidence"]["dxm1_fw_md5"]
         return ledger_out.read_unit_yaml(ctx.unit_dir / f"{ctx.serial}.unit.yaml").get("dxm1_fw_md5", "").strip()
 
@@ -1348,8 +1375,10 @@ class Dxm1NpuFlash(Step):
         if "gpio" in st:
             chip, mux, rst = st["gpio"]
             try:
-                dxm1.kill_dxflash(ctx.linux)         # never tear the GPIOs down under a live flasher
-                note = f"; {dxm1.unexport_gpios(ctx.linux, chip, (mux, rst))}"
+                if dxm1.kill_dxflash(ctx.linux):     # never tear the GPIOs down under a live flasher
+                    note = f"; {dxm1.unexport_gpios(ctx.linux, chip, (mux, rst))}"
+                else:
+                    note = "; flasher still alive after pkill -9, GPIOs left exported"
             except (BenchError, AttributeError) as e:
                 note = f"; GPIOs left exported ({e})"
         try:
@@ -1388,7 +1417,7 @@ class Dxm1NpuFlash(Step):
                 dxm1.push(ctx.linux, ctx.artefact(r), dxm1.REMOTE[r])
 
         def install():
-            st["release"] = dxm1.install_dtb(t, dtb_name, ctx.artefact(dxm1.ROLE_DTB))
+            dxm1.install_dtb(t, dtb_name, ctx.artefact(dxm1.ROLE_DTB), st)
 
         def flash():
             tt = ctx.linux
@@ -1396,7 +1425,7 @@ class Dxm1NpuFlash(Step):
             if erase:
                 ev["dxm1_nand_erase"] = dxm1.erase_nand(tt, chip, mux, rst)
             rc, log, timed_out = dxm1.run_dxflash(tt, chip, mux, rst)
-            ev["dxm1_dxflash_rc"] = "killed after its success markers" if rc is None and not timed_out else str(rc)
+            ev["dxm1_dxflash_rc"] = dxm1.rc_evidence(rc, log, timed_out)
             ctx.step_logs[self.name] = log
             return dxm1.classify(rc, log, timed_out)
 
@@ -1404,6 +1433,8 @@ class Dxm1NpuFlash(Step):
             ctx.mutate("push the dxuart2 DTB to /tmp, md5-checked on the target", push_dtb)
             ctx.mutate(f"back up /boot/{dtb_name} as .release, install the dxuart2 DTB (UART on, PCIe off)", install)
             ctx.mutate("warm reboot onto the dxuart2 DTB", lambda: warm_reboot_to_linux(ctx))
+            ctx.mutate("verify the dxuart2 DTB booted (serial@12801000 present, DX-M1 PCIe off)",
+                       lambda: dxm1.check_dxuart2_booted(ctx.linux))
             ctx.mutate(f"push {', '.join(payload)} to /tmp AFTER the reboot (tmpfs), md5-checked on the target",
                        push_payload)
             ctx.mutate(f"{'sf_erase 0 1000000 via dxcli.py (NAND holds boot2nd); ' if erase else ''}"
@@ -1412,8 +1443,10 @@ class Dxm1NpuFlash(Step):
                        flash)
         except dxm1.StrapError as e:
             raise Refused(f"{e}{self._heal(ctx, dtb_name, st)}") from e
-        except (BenchError, Refused) as e:
-            raise type(e)(f"{e}{self._heal(ctx, dtb_name, st)}") from e
+        except Refused as e:
+            raise Refused(f"{e}{self._heal(ctx, dtb_name, st)}") from e
+        except BenchError as e:         # not type(e)(...): ExpectTimeout takes (pattern, tail, timeout)
+            raise BenchError(f"{e}{self._heal(ctx, dtb_name, st)}") from e
         ctx.mutate(f"restore /boot/{dtb_name} from .release, verify its md5",
                    lambda: dxm1.restore_dtb(ctx.linux, dtb_name, st["release"]))
         ctx.mutate("clean poweroff, cold cycle, log in", lambda: poweroff_and_cold_boot(ctx))

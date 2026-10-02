@@ -663,7 +663,10 @@ DXM1_REFUSED_GPIO_LINES = {52: "P64", 53: "P65"}
 DXM1_PCIE_DEVICE = "/sys/bus/pci/devices/0000:01:00.0/device"
 DXM1_PCIE_FW_RUNNING = "0x0000"   # the firmware booted from the SPI-NAND
 DXM1_PCIE_ROM_BOOT = "0x0001"     # the ROM's own PCIe-boot endpoint: no firmware on the NAND
-_FW_LINE_RE = re.compile(r"(?i)\b(?:fw|firmware)\b[^\n]*?v?(\d+\.\d+\.\d+[\w.+-]*)")
+# pinned to the real `dxrt-cli -s` line " * FW version          : v2.4.0" (fixture
+# tests/scripts/fixtures/provision/dxrt-cli-s.txt); the "RT Driver version" and
+# "PCIe Driver version" lines beside it must never match
+_FW_LINE_RE = re.compile(r"(?m)^[ \t*]*FW version[ \t]*:[ \t]*v?(\d+\.\d+\.\d+[\w.+-]*)")
 
 
 def _sysfs_gpio_line_name(line: int) -> str:
@@ -765,9 +768,8 @@ def dxm1_pcie_device(t: LinuxTarget) -> str | None:
 
 
 def parse_dxm1_fw_version(text: str) -> str | None:
-    """The firmware version from `dxrt-cli -s` output (first fw/firmware line carrying
-    an x.y.z token), without a leading "v". ponytail: the line format is not pinned by
-    DEEPX; tighten the regex once a bench capture is committed as a fixture."""
+    """The firmware version from the `FW version : vX.Y.Z` line of `dxrt-cli -s`, without
+    the leading "v"; None when that line is absent (driver / runtime versions never count)."""
     m = _FW_LINE_RE.search(text)
     return m[1] if m else None
 
@@ -848,7 +850,7 @@ def net_carrier(t, name: str) -> bool:
 
 
 def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None = None,
-           emmc: str | None = None) -> tuple[dict[str, str], list[str]]:
+           emmc: str | None = None, dxm1_present: bool = True) -> tuple[dict[str, str], list[str]]:
     """Read-only. Returns (auto ledger keys, notes on what could not be read).
 
     `sizes` = artefact byte lengths keyed by bundle role ("bl2", "fip",
@@ -922,6 +924,8 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
                 facts[key] = t.md5(f"/dev/mtd{mtd}", off, sizes[role])
 
     def dxm1():
+        if not dxm1_present:
+            return
         dev = dxm1_pcie_device(t)
         facts["dxm1_pcie_device"] = dev or "absent"
         if dev == DXM1_PCIE_FW_RUNNING:

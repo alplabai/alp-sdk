@@ -632,12 +632,21 @@ def test_dxm1_pcie_device_reads_the_endpoint_id():
     assert lt.dxm1_pcie_device(t) is None
 
 
+DXRT_CLI_S = Path(__file__).parent / "fixtures" / "provision" / "dxrt-cli-s.txt"     # real `dxrt-cli -s` capture
+
+
+def test_parse_dxm1_fw_version_on_the_real_dxrt_cli_capture():
+    # the capture also carries "DXRT v3.2.0", "RT Driver version : v1.8.0", "PCIe Driver version : v1.6.0"
+    assert lt.parse_dxm1_fw_version(DXRT_CLI_S.read_text(encoding="utf-8")) == "2.4.0"
+
+
 @pytest.mark.parametrize("text, want", [
-    ("Firmware version : v2.4.0\n", "2.4.0"),
-    ("device 0\n  FW v2.5.1-rc1  (boot2nd)\n", "2.5.1-rc1"),
+    (" * FW version          : v2.5.1-rc1\n", "2.5.1-rc1"),
+    ("DXRT v3.2.0\n * RT Driver version   : v1.8.0\n * PCIe Driver version : v1.6.0\n", None),
+    ("Firmware version : v2.4.0\n", None),             # not the line dxrt-cli prints
     ("no version here\nrtos 7.8.9\n", None),
 ])
-def test_parse_dxm1_fw_version(text, want):
+def test_parse_dxm1_fw_version_matches_only_the_fw_version_line(text, want):
     assert lt.parse_dxm1_fw_version(text) == want
 
 
@@ -680,7 +689,7 @@ def _census_responses(array: bytes = b"\xff" * 128):
         (r"mmcblk1boot1 bs=1 skip=393216 count=200 ", "22" * 16 + "  -\n"),
         (r"spi-nor/jedec_id", "aabbcc\n"),
         (r"pci/devices/0000:01:00\.0/device", "0x0000\n"),
-        (r"^dxrt-cli -s$", "Firmware version : v2.4.0\n"),
+        (r"^dxrt-cli -s$", DXRT_CLI_S.read_text(encoding="utf-8")),
         (r"mtd\*; do", "393216\n66715648\n"),
         (r"if=/dev/mtd0 ", "33" * 16 + "  -\n"), (r"if=/dev/mtd1 bs=\d+ skip=0 ", "44" * 16 + "  -\n"),
         (r"if=/dev/mtd1 bs=\d+ skip=(416|1703936) ", "55" * 16 + "  -\n"),

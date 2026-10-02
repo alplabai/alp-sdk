@@ -275,33 +275,53 @@ holds firmware takes the `sf_erase` path first, the proven `dx_update.sh` step 1
 
 **Run**, serial, over the unit's network target:
 
-1. push the bundle files to `/tmp` (md5 checked on the target); remember
-   whether the NAND already runs boot2nd (PCIe device `0x0000`);
-2. back up `/boot/<fdtfile>` as `.release`, install the dxuart2 DTB, warm
-   `reboot` (the UART appears, the PCIe link is off);
-3. if boot2nd was running: `sf_erase 0 1000000` through `dxcli.py` (a blank
-   NAND answers NO PROMPT, which is fine);
-4. export `P75` (UART mux) and `PA6` (reset) high, start `dxflash.py
+1. push only the dxuart2 DTB to `/tmp` (md5 checked on the target); remember
+   whether the NAND already runs boot2nd (PCIe device `0x0000`). `/tmp` is
+   tmpfs, so the flash payload cannot be pushed yet;
+2. back up `/boot/<fdtfile>` as `.release` (the release md5 is recorded as
+   soon as the backup verifies, before the live file is touched), install the
+   dxuart2 DTB, warm `reboot` (the UART appears, the PCIe link is off), then
+   check the dxuart2 DTB really booted (`/sys/bus/platform/devices/12801000.serial`
+   present, DX-M1 PCIe device gone) before touching any GPIO;
+3. push `fw`, `uart_boot`, `dxflash.py` (and `dxcli.py` when erasing) to `/tmp`
+   AFTER the reboot, md5 checked on the target; a mismatch aborts before the
+   erase and the flash;
+4. if boot2nd was running: `sf_erase 0 1000000` through `dxcli.py`, read back
+   the first RTOS bytes. NO PROMPT from the boot2nd CLI is a **failure** (the
+   DX-M1 needs a cold cycle, as in `dx_update.sh`), and an RTOS slot that
+   does not read `40000000: ffffffff` after `sf_erase` fails with the readback;
+5. export `P75` (UART mux) and `PA6` (reset) high, start `dxflash.py
    <uart_boot.bin> <fw.bin>` in the background, 2 s later pulse `PA6` low for
-   0.5 s, wait for it. Success needs dxflash's **real exit code 0** (read from
-   a file, not a pipe) **and** `update_firmware end. 0` plus `good CRC` /
-   `jump to rtos`;
-5. restore the release DTB and verify its md5 (also after any failure past
-   step 2; a leftover `.release` from an interrupted run is healed before a
+   0.5 s, wait for it. Success is dxflash's **real exit code 0** (read from a
+   file, not a pipe) **or**, when the process is still alive, all of the
+   success markers (`update_firmware end. 0`, `good CRC`, no `bad CRC`,
+   `jump to rtos` or `### DONE`) seen and 30 s (`EXIT_GRACE_S`) passed without
+   it exiting: it is then killed (`pkill`, then `pkill -9`, and the tool waits
+   until it is gone; a survivor fails the step and leaves the GPIOs exported).
+   The markers print only after the NAND write: `update_firmware end. 0` follows
+   the last erase / write / verify and precedes the DX-M1's self reset, and
+   `good CRC` is printed by the second boot, from the NAND. The ledger records
+   the real exit code, or `killed after its success markers` /
+   `killed on timeout` / `killed (bad CRC)`;
+6. restore the release DTB and verify its md5 (also after any failure past
+   step 2, also when the copy over the live DTB itself fails; a leftover `.release` from an interrupted run is healed before a
    new backup, never overwritten);
-6. `sync`, `poweroff`, wait for the halt line, cold cycle (the normal
+7. `sync`, `poweroff`, wait for the halt line, cold cycle (the normal
    `MIN_ON_S` / `MIN_OFF_S` rules of `Power.cycle`), log in;
-7. verify PCIe device `0x0000` and the `dxrt-cli -s` version.
+8. verify PCIe device `0x0000` and the `dxrt-cli -s` version.
 
 `P75`/`PA6` are lines `61`/`86` on `10410000.pinctrl` by default; a bench.yaml
 `dxm1:` block may override `gpio_chip`, `uart_mux_line`, `reset_line` (distinct
 ints; `52`/`53` = `P64`/`P65`, the DEEPX 0.75 V rail, are refused before any
-export, here and again in `_sysfs_gpio_dir`). The `dxrt-cli -s` line format is
-not pinned by DEEPX: the parser takes the first `fw`/`firmware` line with an
-`x.y.z` token. Ledger facts: `dxm1_fw_version`, `dxm1_fw_md5`,
+export, here and again in `_sysfs_gpio_dir`). The `dxrt-cli -s` parser reads only
+the ` * FW version          : vX.Y.Z` line (pinned by a bench capture,
+`tests/scripts/fixtures/provision/dxrt-cli-s.txt`); the RT / PCIe driver versions
+printed beside it never match. A leftover `/boot/<fdtfile>.release` (an
+interrupted run whose restore also failed) makes `boot_sd_linux` and `census`
+refuse until it is copied back. Ledger facts: `dxm1_fw_version`, `dxm1_fw_md5`,
 `dxm1_fw_uart_boot_md5` (md5 of the bundle files used) when the step is done or
 already satisfied. `census` also reads `dxm1_pcie_device` and
-`dxm1_fw_version` (read-only) on any unit.
+`dxm1_fw_version` (read-only) on a V2M (`v2n-m1`) unit.
 
 ### Lock preconditions (`run --lock`)
 

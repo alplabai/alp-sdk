@@ -54,6 +54,7 @@ DXCLI_TIMEOUT_S = 480.0
 REMOTE = {ROLE_FW: "/tmp/dx_fw.bin", ROLE_UART_BOOT: "/tmp/dx_uart_boot.bin",
           ROLE_DXFLASH: "/tmp/dxflash.py", ROLE_DTB: "/tmp/dxuart2.dtb", ROLE_DXCLI: "/tmp/dxcli.py"}
 LOG, RC = "/tmp/dxflash.log", "/tmp/dxflash.rc"
+UART_SYSFS = "/sys/bus/platform/devices/12801000.serial"   # exists only with serial@12801000 okay
 
 # ROM console while the straps are wrong (BOOT_CFG not mode 0): it keeps trying PCIe
 # boot and never offers XMODEM.
@@ -110,9 +111,11 @@ def unexport_gpios(t, chip: str, lines: tuple[int, ...]) -> str:
     return f"GPIO {', '.join(bad)} could not be unexported" if bad else "P75/PA6 unexported"
 
 
-def install_dtb(t, dtb_name: str, new: Path) -> str:
+def install_dtb(t, dtb_name: str, new: Path, st: dict | None = None) -> str:
     """Back the release DTB up, install ``new`` (already pushed to REMOTE[ROLE_DTB])
-    over it, sync. Returns the release md5.
+    over it, sync. Returns the release md5. ``st["release"]`` is set the moment the
+    backup is verified, BEFORE the live DTB is overwritten, so a failed copy over it
+    can still be healed by the caller.
 
     A ``<dtb>.release`` that is already there is an interrupted earlier run (a finished
     run removes it after restoring): its content IS the release DTB, so it is restored
@@ -129,6 +132,8 @@ def install_dtb(t, dtb_name: str, new: Path) -> str:
     t.run(f"cp -p {shlex.quote(live)} {shlex.quote(bak)} && sync")
     if t.md5(bak) != release:
         raise BenchError(f"backup {bak} does not match {live}")
+    if st is not None:
+        st["release"] = release
     t.run(f"cp {shlex.quote(REMOTE[ROLE_DTB])} {shlex.quote(live)} && sync")
     if t.md5(live) != lt._host_md5(new):
         raise BenchError(f"{live} does not hold the dxuart2 DTB after the copy")
@@ -144,6 +149,19 @@ def restore_dtb(t, dtb_name: str, release_md5: str) -> None:
         raise BenchError(f"release DTB restore FAILED: {live} md5 {got} != {release_md5}; "
                          f"the unit boots the dxuart2 DTB (PCIe off) until {bak} is copied back")
     t.run(f"rm -f {shlex.quote(bak)} && sync", check=False)
+
+
+def check_dxuart2_booted(t) -> None:
+    """After the warm reboot: the unit really runs the dxuart2 DTB (serial@12801000 okay,
+    pcie@13400000 disabled). A md5 of /sys/firmware/fdt would not do: U-Boot fixes the tree
+    up (chosen, memory) before the kernel sees it. Driving P75 / PA6 and erasing the NAND
+    on the release DTB would hit a UART that is not there."""
+    if t.run(f"test -d {UART_SYSFS}", check=False).rc != 0:
+        raise BenchError(f"the dxuart2 DTB did not boot: {UART_SYSFS} is absent after the warm reboot "
+                         "(serial@12801000 is not enabled)")
+    if dev := lt.dxm1_pcie_device(t):
+        raise BenchError(f"the dxuart2 DTB did not boot: the DX-M1 PCIe device ({dev}) is still enumerated "
+                         "(pcie@13400000 should be disabled)")
 
 
 def erase_nand(t, chip: str, mux: int, rst: int) -> str:
@@ -162,7 +180,8 @@ def erase_nand(t, chip: str, mux: int, rst: int) -> str:
     if r.rc != 0:
         raise BenchError(f"dxcli sf_erase rc={r.rc}: ...{out.strip()[-300:]}")
     if not BLANK_RE.search(out):
-        return "NAND erased, WARNING: RTOS slot not blank after sf_erase (expected '40000000: ffffffff')"
+        raise BenchError("dxcli sf_erase returned 0 but the RTOS slot is not blank (expected "
+                         f"'40000000: ffffffff'): ...{out.strip()[-300:]}")
     return "NAND erased, RTOS slot blank (sf_erase 0 1000000)"
 
 
@@ -173,16 +192,25 @@ def markers_ok(log: str) -> bool:
             and ("jump to rtos" in log or "### DONE" in log))
 
 
-def kill_dxflash(t) -> None:
+def kill_dxflash(t) -> bool:
     """Stop a dxflash.py that is still running and wait until it is gone, so nothing
-    tears the GPIOs down under a live flasher. The bracket keeps pkill/pgrep from
-    matching the shell that carries this very command line."""
+    tears the GPIOs down under a live flasher. True when it is gone, False when it
+    survived even pkill -9. The bracket keeps pkill/pgrep from matching the shell that
+    carries this very command line."""
     t.run(f"pkill -f '{PROC}'", check=False)
     for _ in range(10):
         if t.run(f"pgrep -f '{PROC}'", check=False).rc != 0:
-            return
+            return True
         _sleep(1)
     t.run(f"pkill -9 -f '{PROC}'", check=False)
+    _sleep(1)
+    return t.run(f"pgrep -f '{PROC}'", check=False).rc != 0
+
+
+def _kill_or_raise(t) -> None:
+    if not kill_dxflash(t):
+        raise BenchError("flasher still alive after pkill -9: dxflash.py was not stopped, the GPIOs are "
+                         "left exported and the unit needs a cold cycle")
 
 
 def run_dxflash(t, chip: str, mux: int, rst: int) -> tuple[int | None, str, bool]:
@@ -219,8 +247,17 @@ def run_dxflash(t, chip: str, mux: int, rst: int) -> tuple[int | None, str, bool
     except BenchError:
         kill_dxflash(t)
         raise
-    kill_dxflash(t)
+    _kill_or_raise(t)
     return None, t.run(f"cat {LOG}", check=False).stdout, timed_out
+
+
+def rc_evidence(rc: int | None, log: str, timed_out: bool) -> str:
+    """The ledger string for dxflash's exit: the real code, or why it was killed."""
+    if rc is not None:
+        return str(rc)
+    if markers_ok(log):
+        return "killed after its success markers"
+    return "killed on timeout" if timed_out else "killed (bad CRC)"
 
 
 def classify(rc: int | None, log: str, timed_out: bool = False) -> str:
@@ -228,6 +265,8 @@ def classify(rc: int | None, log: str, timed_out: bool = False) -> str:
     BenchError for any other failure. Success = dxflash's success markers and an exit
     code of 0 (None: it printed them but had not exited yet and was stopped)."""
     ok = markers_ok(log)
+    # Deliberately BEFORE timed_out: success markers + a clean (or killed-after-markers)
+    # exit are what count, even if the clock also ran out.
     if ok and rc in (0, None):
         return "dxflash: update_firmware end. 0, firmware CRC good"
     if STRAP_FAIL_RE.search(log) and not XMODEM_RE.search(STRAP_FAIL_RE.sub("", log)):

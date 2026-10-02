@@ -12,13 +12,16 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from pathlib import Path
 
 import pytest
 from provision import dxm1, steps
 from provision import linux_target as lt
-from provision.bench import BenchError
+from provision.bench import BenchError, ExpectTimeout
 
 from .test_provision_steps import DTB, FIP, Board, _bench, _bundle, _ctx
+
+DXRT_CLI_S = Path(__file__).parent / "fixtures" / "provision" / "dxrt-cli-s.txt"
 
 FW = b"dx-fw-image" * 8
 UART_BOOT = b"dx-uart-boot" * 8
@@ -75,19 +78,31 @@ class DxBoard(Board):
         self.files[LIVE] = RELEASE_DTB
         self.gpio: list[str] = []
         self.events: list[str] = []
+        self.corrupt: set[str] = set()      # remotes whose copy on the target is damaged
+        self.fail_install = False           # the copy over the live DTB dies half way
+        self.warm_exc: Exception | None = None
+        self.stubborn = False               # dxflash survives every pkill
+        self.uart = False                   # serial@12801000 is up (set by the warm reboot)
 
     def put(self, local, remote):
         self.events.append(f"put {remote}")
         super().put(local, remote)
+        if remote in self.corrupt:
+            self.files[remote] = b"damaged in transit"
 
     def _answer(self, cmd):
         if cmd.startswith("cat /sys/bus/pci/devices/0000:01:00.0/device"):
             return (0, self.pcie + "\n") if self.pcie else (1, "")
         if cmd == "dxrt-cli -s":
-            return (0, f"Firmware version : v{self.fw}\n") if self.fw else (1, "")
+            return (0, DXRT_CLI_S.read_text(encoding="utf-8").replace("v2.4.0", f"v{self.fw}")) if self.fw else (1, "")
         if m := re.match(r"test -e (\S+)$", cmd):
             return (0 if m[1] in self.files else 1), ""
+        if cmd == f"test -d {dxm1.UART_SYSFS}":
+            return (0 if self.uart else 1), ""
         if m := re.match(r"cp (?:-p )?(\S+) (\S+) && sync$", cmd):
+            if self.fail_install and m[1] == dxm1.REMOTE[dxm1.ROLE_DTB] and m[2] == LIVE:
+                self.files[LIVE] = b"half-written"
+                return 1, ""
             self.files[m[2]] = self.files[m[1]]
             return 0, ""
         if m := re.match(r"rm -f (\S+) && sync$", cmd):
@@ -108,10 +123,12 @@ class DxBoard(Board):
             self.start = self.clock.now if self.clock else 0.0
             return 0, ""
         el = (self.clock.now - self.start) if self.timeline else None
-        if cmd.startswith("pkill -f"):
-            self.killed = True
+        if cmd.startswith("pkill"):
+            self.killed = not self.stubborn
             return 0, ""
         if cmd.startswith("pgrep -f"):
+            if self.stubborn:
+                return 0, "1234"
             return (1, "") if self.killed or (el is not None and el >= self.timeline["rc_at"]) else (0, "1234")
         if cmd.startswith("cat /tmp/dxflash.rc"):
             if self.timeline and (self.killed or el < self.timeline["rc_at"]):
@@ -137,9 +154,12 @@ def fake_boot(monkeypatch):
     def warm(ctx):
         b = holder["board"]
         b.events.append("warm reboot")
+        if b.warm_exc:
+            raise b.warm_exc
         for k in [k for k in b.files if k.startswith("/tmp/")]:
             del b.files[k]                      # /tmp is tmpfs on this image
-        b.pcie = None                           # dxuart2 DTB: pcie@13400000 disabled
+        if b.files[LIVE] == DX_DTB:             # only the dxuart2 DTB enables the UART and disables PCIe
+            b.pcie, b.uart = None, True
 
     def cold(ctx):
         b = holder["board"]
@@ -241,9 +261,11 @@ def test_erase_no_prompt_fails_with_the_cold_cycle_advice_and_restores_the_dtb(t
     assert "dxflash started" not in board.events and board.files[LIVE] == RELEASE_DTB
 
 
-def test_erase_warns_when_the_rtos_slot_is_not_blank(tmp_path, fake_boot):
-    ctx, _ = _setup(tmp_path, fake_boot, DxBoard(pcie="0x0000", fw="2.3.0", erase_out="40000000: 12345678\n"), cli=True)
-    assert "WARNING: RTOS slot not blank" in _run(ctx).evidence["dxm1_nand_erase"]
+def test_erase_fails_with_the_readback_when_the_rtos_slot_is_not_blank(tmp_path, fake_boot):
+    ctx, board = _setup(tmp_path, fake_boot, DxBoard(pcie="0x0000", fw="2.3.0", erase_out="40000000: 12345678\n"), cli=True)
+    r = _run(ctx)
+    assert r.status == "failed" and "RTOS slot is not blank" in r.detail and "40000000: 12345678" in r.detail
+    assert "dxflash started" not in board.events and board.files[LIVE] == RELEASE_DTB
 
 
 @pytest.mark.parametrize("pcie, fw, why", [
@@ -269,7 +291,7 @@ def test_skipped_without_dx_artefacts_or_on_a_non_deepx_family(tmp_path, fake_bo
 def test_the_bundle_must_declare_the_expected_firmware_version(tmp_path, fake_boot):
     ctx, _ = _setup(tmp_path, fake_boot, version=None)
     r = _run(ctx)
-    assert r.status == "failed" and "declares no version" in r.detail
+    assert r.status == "failed" and "'version' is a required property" in r.detail   # the schema (preflight) rejects it first
 
 
 # --- plan ----------------------------------------------------------------------------
@@ -324,7 +346,7 @@ def test_success_path(tmp_path, fake_boot):
 
 
 def test_no_flash_payload_is_pushed_before_the_reboot_and_all_of_it_after(tmp_path, fake_boot):
-    ctx, board = _setup(tmp_path, fake_boot, DxBoard(pcie="0x0000", fw="2.3.0", erase_out="x"), cli=True)
+    ctx, board = _setup(tmp_path, fake_boot, DxBoard(pcie="0x0000", fw="2.3.0"), cli=True)
     assert _run(ctx).status == "done"
     reboot = board.events.index("warm reboot")
     before = [e for e in board.events[:reboot] if e.startswith("put")]
@@ -431,6 +453,92 @@ def test_verify_fails_on_a_firmware_version_mismatch(tmp_path, fake_boot, monkey
                         or setattr(board, "fw", "2.3.9") or "")
     r = _run(ctx)
     assert r.status == "failed" and "firmware 2.3.9 != bundle 2.4.0" in r.detail
+
+
+def test_a_failed_copy_over_the_live_dtb_still_restores_the_release_dtb(tmp_path, fake_boot):
+    board = DxBoard()
+    board.fail_install = True
+    ctx, board = _setup(tmp_path, fake_boot, board)
+    r = _run(ctx)
+    assert r.status == "failed" and "release DTB restored" in r.detail
+    assert board.files[LIVE] == RELEASE_DTB and BAK not in board.files
+    assert "warm reboot" not in board.events
+
+
+def test_a_warm_reboot_timeout_fails_the_step_cleanly_and_heals_the_dtb(tmp_path, fake_boot):
+    board = DxBoard()
+    board.warm_exc = ExpectTimeout("login:", "tail", 240.0)
+    ctx, board = _setup(tmp_path, fake_boot, board)
+    r = _run(ctx)                                    # must not raise a TypeError out of run_one
+    assert r.status == "failed" and "no match for 'login:'" in r.detail and "release DTB restored" in r.detail
+    assert board.files[LIVE] == RELEASE_DTB and BAK not in board.files
+    assert ctx.state["steps"]["dxm1_npu_flash"]["status"] != "running"
+
+
+def test_the_dxuart2_dtb_must_have_booted_before_any_gpio_or_erase(tmp_path, fake_boot, monkeypatch):
+    ctx, board = _setup(tmp_path, fake_boot, DxBoard(pcie="0x0000", fw="2.3.0"), cli=True)
+    monkeypatch.setattr(steps, "warm_reboot_to_linux", lambda c: board.events.append("warm reboot"))   # U-Boot loaded the release DTB
+    r = _run(ctx)
+    assert r.status == "failed" and "the dxuart2 DTB did not boot" in r.detail and "12801000.serial" in r.detail
+    assert "sf_erase" not in board.events and "dxflash started" not in board.events and board.gpio == []
+    assert board.files[LIVE] == RELEASE_DTB
+
+
+def test_pcie_still_enumerated_after_the_reboot_means_the_dxuart2_dtb_did_not_boot():
+    board = DxBoard(pcie="0x0000")
+    board.uart = True
+    with pytest.raises(BenchError, match=r"still enumerated"):
+        dxm1.check_dxuart2_booted(board)
+
+
+@pytest.mark.parametrize("cli", [False, True])
+def test_a_damaged_payload_copy_aborts_before_the_erase_and_the_flash(tmp_path, fake_boot, cli):
+    board = DxBoard(pcie="0x0000" if cli else "0x0001", fw="2.3.0" if cli else None)
+    board.corrupt = {dxm1.REMOTE[dxm1.ROLE_UART_BOOT]}
+    ctx, board = _setup(tmp_path, fake_boot, board, cli=cli)
+    r = _run(ctx)
+    assert r.status == "failed" and "/tmp/dx_uart_boot.bin" in r.detail and "does not match" in r.detail
+    assert "sf_erase" not in board.events and "dxflash started" not in board.events and board.gpio == []
+    assert board.files[LIVE] == RELEASE_DTB and BAK not in board.files
+
+
+def test_a_flasher_that_survives_pkill_9_is_reported_and_the_gpios_stay_exported(tmp_path, fake_boot):
+    board = _slow(fake_boot, 100, 10**9)
+    board.stubborn = True
+    ctx, board = _setup(tmp_path, fake_boot, board)
+    r = _run(ctx)
+    assert r.status == "failed" and "flasher still alive" in r.detail
+    assert not any(g.startswith("unexport") for g in board.gpio)
+    assert board.files[LIVE] == RELEASE_DTB
+
+
+def test_the_dxflash_rc_evidence_is_always_a_real_string():
+    assert dxm1.rc_evidence(0, "", False) == "0"
+    assert dxm1.rc_evidence(None, OK_LOG, False) == "killed after its success markers"
+    assert dxm1.rc_evidence(None, "SENT", True) == "killed on timeout"
+    assert dxm1.rc_evidence(None, "bad CRC", False) == "killed (bad CRC)"
+
+
+def test_a_leftover_release_dtb_makes_census_refuse(tmp_path, fake_boot):
+    ctx, board = _setup(tmp_path, fake_boot)
+    board.files[BAK] = RELEASE_DTB
+    r = steps.run_steps(ctx, only=["census"])[-1]
+    assert r.status == "failed" and BAK in r.detail and "interrupted dxm1_npu_flash" in r.detail
+
+
+def test_a_leftover_release_dtb_makes_boot_sd_linux_refuse(tmp_path, fake_boot):
+    ctx, board = _setup(tmp_path, fake_boot)
+    board.files[BAK] = RELEASE_DTB
+    r = steps.run_steps(ctx, only=["boot_sd_linux"])[-1]
+    assert r.status == "failed" and BAK in r.detail
+
+
+def test_the_recorded_md5_does_not_fall_back_past_a_failed_current_entry(tmp_path, fake_boot):
+    ctx, _ = _setup(tmp_path, fake_boot)
+    _record(ctx, _md5(FW))                           # the ledger holds an older good record
+    ctx.state = {"steps": {"dxm1_npu_flash": {"status": "failed"}},
+                 "superseded": [{"steps": {"dxm1_npu_flash": {"status": "done", "evidence": {"dxm1_fw_md5": _md5(FW)}}}}]}
+    assert steps.Dxm1NpuFlash._recorded_md5(ctx) == ""
 
 
 # --- dxm1 helpers ----------------------------------------------------------------------
