@@ -11,6 +11,8 @@ acts, when run() completed and the probe is still Unknown -- ``trust_run``).
 Read-only checks (probes, census, write preconditions, the GD32 DP-ID gate,
 the PMIC register compare) run in dry run too whenever a Linux target or
 probe is available, so ``plan`` shows real refusals, not just intentions.
+"Read-only" means the unit's flash, eMMC and EEPROM: the write_rootfs probe
+with a bmap copies a reader script and a spans file into the unit's /tmp.
 
 See docs/provisioning-v2n.md.
 """
