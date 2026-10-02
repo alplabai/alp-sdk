@@ -130,7 +130,7 @@ extern "C" {
 #define XEVK_I2C_ADDR_INA236_3V3    0x40u  /**< U21 INA236A, +3V3 rail   (20 mOhm shunt, 4.0 A max). A0 = GND. */
 #define XEVK_I2C_ADDR_INA236_1V8    0x41u  /**< U31 INA236A, +1V8 rail   (20 mOhm shunt, 4.0 A max). A0 = V+. */
 #define XEVK_I2C_ADDR_INA236_VCAM3  0x49u  /**< U34 INA236B, +VCAM3 rail (50 mOhm shunt, 1.6 A max). A0 = V+. */
-#define XEVK_I2C_ADDR_INA228_5V     0x42u  /**< U30 INA228 (20-bit, not INA236-compatible), +5V input rail. A1 = GND, A0 = SDA. The E1M-X EVK V2 design data nets U30's SDA to I2C0.SCL and its SCL to I2C0.SDA; a hand rework on the board corrects that, so it answers only on carriers with the rework applied (#2343). No answer means absent, not a fault. */
+#define XEVK_I2C_ADDR_INA228_5V     0x42u  /**< U30 INA228 (20-bit, not INA236-compatible), +5V input rail. A1 = GND, A0 = SDA. The E1M-X EVK V2 design data nets U30's SDA to I2C0.SCL and its SCL to I2C0.SDA; a hand rework on the board corrects that, so it answers only on carriers with the rework applied (#2343). No answer means absent, not a fault. 100 mOhm shunt; the 1.6384 A max is the ADCRANGE = 0 shunt full scale (163.84 mV / 100 mOhm), not a limit of the rail. */
 
 /* ------------------------------------------------------------------ */
 /* INA236 calibration constants (from `i2c_devices[].calibration`) */
@@ -142,6 +142,8 @@ extern "C" {
 #define XEVK_INA236_MAX_1V8_A        4.0f  /**< Max current for XEVK_I2C_ADDR_INA236_1V8. */
 #define XEVK_INA236_SHUNT_VCAM3_OHMS 0.050f  /**< Shunt for XEVK_I2C_ADDR_INA236_VCAM3. */
 #define XEVK_INA236_MAX_VCAM3_A      1.6f  /**< Max current for XEVK_I2C_ADDR_INA236_VCAM3. */
+#define XEVK_INA228_SHUNT_5V_OHMS    0.100f  /**< Shunt for XEVK_I2C_ADDR_INA228_5V. */
+#define XEVK_INA228_MAX_5V_A         1.6384f  /**< Max current for XEVK_I2C_ADDR_INA228_5V. */
 
 /* ------------------------------------------------------------------ */
 /* Portable cross-EVK aliases (e1m-spec STANDARD.md §7.2 common set). */

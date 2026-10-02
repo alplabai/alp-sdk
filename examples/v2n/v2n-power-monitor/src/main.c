@@ -18,6 +18,10 @@
  *   - Reading bus voltage + current + power in one transaction via
  *     `ina236_read_all()` and converting the raw fixed-point fields
  *     to volts / milliamps / milliwatts.
+ *   - Treating an optional part as optional: the +5V input monitor
+ *     (an INA228, driven by `ina228_*`) answers only on carriers that
+ *     have the bus-pin rework, so "not present" is a normal result that
+ *     prints one line and leaves the rest of the table running.
  *
  * Scope
  * -----
@@ -40,6 +44,7 @@
 #include <unistd.h>
 
 #include "alp/peripheral.h"
+#include "alp/chips/ina228.h"
 #include "alp/chips/ina236.h"
 #include "alp/boards/alp_e1m_x_evk.h"        /* INA236 addresses + shunt calibration */
 #include "alp/boards/alp_e1m_x_evk_routes.h" /* XEVK_I2C_BUS_SENSORS                 */
@@ -63,6 +68,17 @@ static const struct rail_def {
 };
 
 #define N_RAILS (sizeof(k_rails) / sizeof(k_rails[0]))
+
+/*
+ * The +5V input monitor is an INA228 (20-bit registers, so a different
+ * driver).  The board header gives the shunt in ohms and a max current in
+ * amps; ina228_init() takes micro-ohms and micro-amps, so convert (+0.5f
+ * rounds the float product instead of truncating it).  The max current is
+ * the ADCRANGE = 0 shunt full scale (163.84 mV / 100 mOhm = 1.6384 A),
+ * derived from the shunt, NOT a limit of the rail.
+ */
+#define RAIL5V_SHUNT_UOHM ((uint32_t)(XEVK_INA228_SHUNT_5V_OHMS * 1000000.0f + 0.5f))
+#define RAIL5V_MAX_UA     ((uint32_t)(XEVK_INA228_MAX_5V_A * 1000000.0f + 0.5f))
 
 int main(void)
 {
@@ -103,6 +119,30 @@ int main(void)
 		}
 	}
 
+	/*
+	 * The INA228.  INA228_ERR_NOT_PRESENT means nothing acknowledged at its
+	 * address -- the normal result on a carrier without the bus-pin rework --
+	 * so say so once and carry on; the exit status is not affected.  Any other
+	 * failure is reported the same way the INA236 failures are.
+	 */
+	ina228_t     mon5v;
+	alp_status_t s5    = ina228_init(&mon5v,
+	                                 bus,
+	                                 XEVK_I2C_ADDR_INA228_5V,
+	                                 RAIL5V_SHUNT_UOHM,
+	                                 RAIL5V_MAX_UA,
+	                                 INA228_ADCRANGE_163MV);
+	bool         live5 = (s5 == ALP_OK);
+	if (s5 == INA228_ERR_NOT_PRESENT) {
+		fprintf(stderr,
+		        "INA228 5V    @0x%02x: not present (carrier without the bus-pin rework?); "
+		        "continuing without it\n",
+		        XEVK_I2C_ADDR_INA228_5V);
+	} else if (!live5) {
+		fprintf(
+		    stderr, "INA228 5V    @0x%02x: init failed (%d)\n", XEVK_I2C_ADDR_INA228_5V, (int)s5);
+	}
+
 	/* Poll + print until interrupted. */
 	for (;;) {
 		printf("rail     bus_V     I_mA       P_mW\n");
@@ -117,6 +157,19 @@ int main(void)
 			       s.bus_mv / 1000.0,
 			       s.current_ua / 1000.0,
 			       s.power_uw / 1000.0);
+		}
+		int32_t  bus_uv = 0, cur_ua = 0;
+		uint64_t pwr_uw = 0;
+		if (!live5 || ina228_read_bus_uv(&mon5v, &bus_uv) != ALP_OK ||
+		    ina228_read_current_ua(&mon5v, &cur_ua) != ALP_OK ||
+		    ina228_read_power_uw(&mon5v, &pwr_uw) != ALP_OK) {
+			printf("  %-5s    --        --         --\n", "5V");
+		} else {
+			printf("  %-5s %7.3f  %9.2f %10.1f\n",
+			       "5V",
+			       bus_uv / 1000000.0,
+			       cur_ua / 1000.0,
+			       (double)pwr_uw / 1000.0);
 		}
 		printf("\n");
 		sleep(1);

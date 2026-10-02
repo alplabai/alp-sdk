@@ -471,11 +471,11 @@
             "max_macro",
             "max_current_a"
           ],
-          "description": "INA236-style current-monitor calibration for this instance.",
+          "description": "INA236 / INA228 current-monitor calibration for this instance (shunt in ohms, max current in amps).",
           "properties": {
             "shunt_macro": {
               "type": "string",
-              "pattern": "^X?EVK_INA236_SHUNT_[A-Z0-9_]+_OHMS$"
+              "pattern": "^X?EVK_INA2(36|28)_SHUNT_[A-Z0-9_]+_OHMS$"
             },
             "shunt_ohms": {
               "type": "string",
@@ -484,7 +484,7 @@
             },
             "max_macro": {
               "type": "string",
-              "pattern": "^X?EVK_INA236_MAX_[A-Z0-9_]+_A$"
+              "pattern": "^X?EVK_INA2(36|28)_MAX_[A-Z0-9_]+_A$"
             },
             "max_current_a": {
               "type": "string",

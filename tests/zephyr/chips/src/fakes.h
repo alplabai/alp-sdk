@@ -150,6 +150,23 @@ uint32_t fake_ina236_read_count(uint8_t reg);
 void     fake_ina236_reset(void);
 
 /* ------------------------------------------------------------------ */
+/* fake INA228                                                         */
+/* ------------------------------------------------------------------ */
+/* Big-endian 16 / 24 / 40-bit register wire protocol -- see
+ * fake_ina228.c.  get_reg / set_reg take the register's RAW bytes as an
+ * integer (a 24-bit register's value is bits 23:0, so a 20-bit reading
+ * sits in bits 23:4). */
+
+uint64_t fake_ina228_get_reg(uint8_t reg);
+void     fake_ina228_set_reg(uint8_t reg, uint64_t raw);
+uint32_t fake_ina228_write_count(uint8_t reg);
+uint32_t fake_ina228_log_len(void);
+uint8_t  fake_ina228_log_reg(uint32_t idx);
+uint16_t fake_ina228_log_val(uint32_t idx);
+void     fake_ina228_set_absent(bool absent);
+void     fake_ina228_reset(void);
+
+/* ------------------------------------------------------------------ */
 /* fake TAS2563                                                        */
 /* ------------------------------------------------------------------ */
 /* Book/page-paged register file -- see fake_tas2563.c.  get_reg /

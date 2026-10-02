@@ -57,7 +57,8 @@ populated:
   tcal9538:                 true                # U35/U37 TCAL9538 (2x)
 
   # Power instrumentation
-  ina236:                   true                # U21/U31/U34 INA236 (3x current monitors; U30 is an INA228)
+  ina236:                   true                # U21/U31/U34 INA236 (3x current monitors)
+  ina228:                   true                # U30 INA228 (+5V input monitor; answers only on carriers with the bus-pin rework)
 
   # SDK-level block helpers (rotary encoder + RGB LED).
   button_led:               true                # E1 PEC12R-4222F encoder + RGB LED
@@ -345,7 +346,11 @@ i2c_devices:
       doc: "U30 INA228 (20-bit, not INA236-compatible), +5V input rail. A1 = GND,
             A0 = SDA. The E1M-X EVK V2 design data nets U30's SDA to I2C0.SCL and its SCL to
             I2C0.SDA; a hand rework on the board corrects that, so it answers only on
-            carriers with the rework applied (#2343). No answer means absent, not a fault." }
+            carriers with the rework applied (#2343). No answer means absent, not a fault.
+            100 mOhm shunt; the 1.6384 A max is the ADCRANGE = 0 shunt full scale
+            (163.84 mV / 100 mOhm), not a limit of the rail.",
+      calibration: { shunt_macro: XEVK_INA228_SHUNT_5V_OHMS, shunt_ohms: "0.100",
+                     max_macro: XEVK_INA228_MAX_5V_A, max_current_a: "1.6384" } }
 
 # Audio -- 2x TAS2563 boosted class-D smart-amp (U27/U28) on E1M_X_I2C0 +
 # E1M_X_I2S0.  Scripts that emit the Linux DT read this block; device-
