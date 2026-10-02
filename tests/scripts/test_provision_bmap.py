@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -211,6 +212,11 @@ def test_board_script_imports_only_os_and_sys():
 
 # --- linux_target: the same script, driven over (a local stand-in for) SSH -----------
 
+UNIT_STAGED = "/tmp/alp-board-bmap"      # prefix of the script + spans file on the unit
+# The stand-in runs the unit's shell pipeline through `sh`, as the real unit does.
+needs_posix_shell = pytest.mark.skipif(sys.platform == "win32", reason="runs the unit's sh pipeline locally")
+
+
 class LocalUnit:
     """subprocess.run stand-in that runs the remote command on this host:
     scp copies the file, the unit's /tmp is a directory under tmp_path, and
@@ -222,9 +228,14 @@ class LocalUnit:
         self.python_rc = python_rc
         self.commands: list[str] = []
 
+    def _local(self, text: str) -> str:
+        # Only the two files the tool stages: tmp_path itself sits under /tmp on
+        # Linux, so rewriting every "/tmp/" would mangle the device path too.
+        return text.replace(UNIT_STAGED, f"{self.tmp}/alp-board-bmap")
+
     def __call__(self, argv, stdin=None, **kw):
         if argv[0] == "scp":
-            remote = argv[-1].split(":", 1)[1].replace("/tmp/", f"{self.tmp}/")
+            remote = self._local(argv[-1].split(":", 1)[1])
             Path(remote).write_bytes(Path(argv[-2]).read_bytes())
             return subprocess.CompletedProcess(argv, 0, "", "")
         cmd = argv[-1]
@@ -233,7 +244,7 @@ class LocalUnit:
             return subprocess.CompletedProcess(argv, 0, "", "")
         if self.python_rc is not None and cmd.startswith("python3 -c"):
             return subprocess.CompletedProcess(argv, self.python_rc, "", "sh: python3: not found")
-        local = cmd.replace("/tmp/", f"{self.tmp}/").replace("python3", sys.executable)
+        local = self._local(cmd).replace("python3", shlex.quote(sys.executable))
         return subprocess.run(["sh", "-c", local], stdin=stdin, capture_output=True, text=True,
                               encoding="utf-8", timeout=60)
 
@@ -244,6 +255,7 @@ def unit(tmp_path, **kw):
     return lt, lt.LinuxTarget("unit", "root", runner=runner), runner
 
 
+@needs_posix_shell
 def test_rootfs_bmap_write_verify_writes_only_the_mapped_spans(tmp_path):
     lt, t, runner = unit(tmp_path)
     img = holes(image(16, tail=100), [(0, 1), (5, 5), (16, 16)])
@@ -261,6 +273,7 @@ def test_rootfs_bmap_write_verify_writes_only_the_mapped_spans(tmp_path):
     assert any("rereadpt" in c for c in runner.commands)
 
 
+@needs_posix_shell
 def test_rootfs_bmap_write_verify_raises_when_the_readback_differs(tmp_path):
     lt, t, _ = unit(tmp_path)
     img = image(16)
@@ -271,6 +284,7 @@ def test_rootfs_bmap_write_verify_raises_when_the_readback_differs(tmp_path):
         lt.rootfs_bmap_write_verify(t, str(dev), gz(tmp_path, img), bm, "0" * 32)
 
 
+@needs_posix_shell
 def test_rootfs_bmap_write_verify_raises_on_a_truncated_stream(tmp_path):
     lt, t, _ = unit(tmp_path)
     img = image(16)
@@ -281,6 +295,7 @@ def test_rootfs_bmap_write_verify_raises_on_a_truncated_stream(tmp_path):
         lt.rootfs_bmap_write_verify(t, str(dev), gz(tmp_path, img[:10 * BLOCK]), bm, "0" * 32)
 
 
+@needs_posix_shell
 def test_bmap_md5_ignores_what_sits_in_the_unmapped_blocks(tmp_path):
     lt, t, _ = unit(tmp_path)
     img = holes(image(16), [(0, 1), (9, 12)])
@@ -295,6 +310,7 @@ def test_bmap_md5_ignores_what_sits_in_the_unmapped_blocks(tmp_path):
     assert lt.bmap_md5(t, str(dev), bm) != bmap.verify_image(bm, gz(tmp_path, img))
 
 
+@needs_posix_shell
 def test_has_python3_reports_a_unit_without_the_interpreter(tmp_path):
     lt, t, _ = unit(tmp_path, python_rc=127)
     assert lt.has_python3(t) is False
@@ -580,6 +596,7 @@ def test_parse_rejects_a_backwards_range_and_a_bad_range_checksum():
             bmap.parse(body.replace("0" * 64, hashlib.sha256(body.encode()).hexdigest(), 1))
 
 
+@needs_posix_shell
 def test_bmap_md5_raises_when_the_unit_side_reader_fails(tmp_path):
     # `reader | md5sum` exits 0 whatever the reader did; a short device must
     # still surface as a reader failure, not as a digest of partial output.
@@ -601,6 +618,7 @@ def test_board_read_reports_the_byte_count_on_stderr(tmp_path):
     assert r.returncode == 0 and b"read 24576 bytes" in r.stderr
 
 
+@needs_posix_shell
 def test_has_python3_raises_on_a_failure_that_is_not_a_missing_interpreter(tmp_path):
     lt, t, _ = unit(tmp_path, python_rc=255)        # e.g. the ssh connection dropped
     with pytest.raises(lt.BenchError, match="python3"):
