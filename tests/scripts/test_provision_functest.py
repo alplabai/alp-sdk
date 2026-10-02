@@ -737,7 +737,7 @@ def test_every_tool_a_fragment_uses_is_guarded(tmp_path):
 def test_the_script_parses_as_posix_sh(tmp_path):
     p = tmp_path / "s.sh"
     p.write_bytes(_script(tmp_path).encode())
-    r = subprocess.run(["sh", "-n", str(p)], capture_output=True, text=True, check=False)
+    r = subprocess.run(["sh", "-n", str(p)], capture_output=True, text=True, encoding="utf-8", check=False)
     assert r.returncode == 0, r.stderr
 
 
@@ -764,10 +764,10 @@ def test_values_from_bench_yaml_and_the_expect_file_are_quoted(tmp_path):
         assert shlex.quote(HOSTILE) in cmd or shlex.quote("/sys/bus/platform/devices/" + HOSTILE + "/driver") in cmd
     p = tmp_path / "s.sh"
     p.write_bytes(functest.script(checks).encode())
-    assert subprocess.run(["sh", "-n", str(p)], capture_output=True, text=True, check=False).returncode == 0
+    assert subprocess.run(["sh", "-n", str(p)], capture_output=True, text=True, encoding="utf-8", check=False).returncode == 0
     # and run them for real (each stops at its "not there" test): the payload must not execute
     for name in names:
-        r = subprocess.run(["sh", "-c", by[name].cmd], capture_output=True, text=True, check=False, cwd=tmp_path,
+        r = subprocess.run(["sh", "-c", by[name].cmd], capture_output=True, text=True, encoding="utf-8", check=False, cwd=tmp_path,
                            env={"D": tmp_path.as_posix(), "PATH": __import__("os").environ["PATH"]})
         assert not list(tmp_path.glob("PWNED*")), (name, r.stdout, r.stderr)
 
@@ -799,7 +799,7 @@ def test_the_runner_frames_each_check_runs_lanes_concurrently_and_kills_an_overr
     p = tmp_path / "s.sh"
     p.write_bytes(functest.script(checks).replace("/tmp/alp-ft.", (tmp_path / "ft.").as_posix()).encode())
     t0 = time.monotonic()
-    r = subprocess.run(["sh", str(p)], capture_output=True, text=True, check=False, timeout=60)
+    r = subprocess.run(["sh", str(p)], capture_output=True, text=True, encoding="utf-8", check=False, timeout=60)
     took = time.monotonic() - t0
     got = functest.parse(r.stdout)
     assert list(got) == ["a", "slow1", "slow2", "hang", "rc", "nope", "tool"]    # catalogue order, not finish order
@@ -814,7 +814,7 @@ def test_the_runner_frames_each_check_runs_lanes_concurrently_and_kills_an_overr
     assert functest.judge(checks[5], got["nope"]).startswith("unread (missing tool: ")
     assert functest.judge(checks[6], got["tool"]) == "unread (missing tool: definitely-not-a-tool-xyz)"
     # the restore trap ran on the kill, with the state its setup recorded
-    assert Path(mark).read_text().strip() == "restored was-down"
+    assert Path(mark).read_text(encoding="utf-8").strip() == "restored was-down"
     assert not list(tmp_path.glob("ft.*"))                                    # the work directory is removed
     if shutil.which("setsid"):
         time.sleep(7)                                                         # past the child's own 6 s
