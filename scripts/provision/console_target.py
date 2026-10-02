@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import random
 import re
 import shlex
 from pathlib import Path
@@ -28,11 +29,14 @@ from provision.linux_target import CmdResult
 
 RUN_ATTEMPTS = 3        # a command whose begin marker never shows is re-sent (Ctrl-C first)
 BEGIN_WINDOW_S = 10.0
+CHUNK_WAIT_S = 10.0     # a chunk is one printf + md5sum: if its end marker takes longer it was garbled
 RAW_CHUNK = 768         # bytes -> 1024 base64 chars per line, the size proven on silicon
 REMOTE_DIR = "/tmp/v2n-swd"
 _DECODE = "import base64,sys;open(sys.argv[2],'wb').write(base64.b64decode(open(sys.argv[1]).read()))"
 _ENCODE = "import base64,sys;print(base64.encodebytes(open(sys.argv[1],'rb').read()).decode())"
-_marker = 0   # module-wide: a second ConsoleTarget must never reuse a marker still in the buffer
+# Module-wide, alphanumeric, per-attempt unique, random start per process: a stale or
+# garbled echo (even one left by an earlier run) can never satisfy a later wait.
+_marker = random.randrange(10**6) * 1000
 _DPID = re.compile(r"id=(0x[0-9a-fA-F]{8})")
 
 
@@ -77,19 +81,45 @@ class ConsoleTarget:
         # The board image has no base64 binary: collect the text, decode with python3.
         # Each chunk goes to its own numbered file and is md5-checked on arrival, so a
         # byte corrupted on the way is re-sent alone; the parts are assembled at the end.
-        self.run(f"rm -f {q}.p* {q}.b64")
+        self._run_unannounced(f"rm -f {q}.p* {q}.b64")
         for idx, i in enumerate(range(0, len(data), RAW_CHUNK)):
             b64 = base64.b64encode(data[i:i + RAW_CHUNK]).decode("ascii")
             part, want = f"{q}.p{idx:05d}", hashlib.md5(b64.encode()).hexdigest()
             for attempt in range(RUN_ATTEMPTS):
-                got = self.run(f"printf %s {b64} > {part}; md5sum < {part}", check=False).stdout.split()
+                try:
+                    got = self.run(f"printf %s {b64} > {part}; md5sum < {part}",
+                                   timeout=CHUNK_WAIT_S, check=False).stdout.split()
+                except ExpectTimeout:
+                    got = self._resync_verify(part)
                 if got and got[0] == want:
                     break
             else:
                 raise BenchError(f"console push {local}: chunk {idx} still corrupted after {RUN_ATTEMPTS} tries")
-        self.run(f"cat {q}.p* > {q}.b64 && rm -f {q}.p* && "
+        self._run_unannounced(f"cat {q}.p* > {q}.b64 && rm -f {q}.p* && "
                  f"python3 -c {shlex.quote(_DECODE)} {q}.b64 {q} && rm {q}.b64")
         self._check_md5(q, data, f"push {local}")
+
+    def _run_unannounced(self, cmd: str) -> CmdResult:
+        """run() for put()'s housekeeping: rc=127 means a garbled echo word kept the command
+        from running at all (the `&&` guard), so re-sending is safe."""
+        for attempt in range(RUN_ATTEMPTS):
+            try:
+                return self.run(cmd)
+            except BenchError as e:
+                if not str(e).startswith("rc=127") or attempt == RUN_ATTEMPTS - 1:
+                    raise
+        raise AssertionError("unreachable")
+
+    def _resync_verify(self, part: str) -> list[str]:
+        """The end marker of a chunk never showed (the command or the marker was garbled on
+        the way in): clear the shell line, then re-read the part file's md5 under a fresh
+        marker, which doubles as the resync probe. [] if even that gets no answer."""
+        self.console.write(b"")
+        self.console.drain(0.5, 5.0)
+        try:
+            return self.run(f"md5sum < {part}", timeout=CHUNK_WAIT_S, check=False).stdout.split()
+        except ExpectTimeout:
+            return []
 
     def get(self, remote: str, local: Path) -> None:
         q = shlex.quote(remote)
