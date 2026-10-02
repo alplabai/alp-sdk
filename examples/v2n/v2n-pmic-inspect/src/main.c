@@ -115,8 +115,8 @@ static const pmic_rail_limit_t v2n_da_limits[DA9292_CH_COUNT] = V2N_POWER_DA9292
 static const pmic_rail_limit_t v2n_m1_da_limits[DA9292_CH_COUNT] =
     V2N_M1_POWER_DA9292_CH_LIMITS_INIT;
 
-/* DA9292 channel nets (power-tree.yaml: CH1's net is still TBD there --
- * printed as such, never invented).  v2n-m1 is the superset. */
+/* DA9292 channel nets (power-tree.yaml; CH1 is VDD3G_0P8, CH2 is VDD_0P75).
+ * v2n-m1 is the superset. */
 static const char *const da_ch_nets[DA9292_CH_COUNT] = V2N_M1_POWER_DA9292_CH_NETS_INIT;
 
 /* TPS628640 instances: net, 7-bit address, guard entry. */
