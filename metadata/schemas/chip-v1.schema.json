@@ -62,7 +62,41 @@
     "resolutions": { "type": "object" },
     "peripherals": { "type": "object" },
     "sensor": { "type": "object" },
-    "mipi": { "type": "object" },
+    "mipi": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lanes_supported"],
+      "description": "MIPI interface capability of the part.  `lanes_supported` lists the data-lane counts the silicon can run; `role` is the direction the part drives (`csi2_tx` = a CSI-2 transmitter such as a camera sensor, `dsi_rx` = a DSI receiver such as a display controller).",
+      "properties": {
+        "lanes_supported": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "integer", "minimum": 1 } },
+        "role": { "enum": ["csi2_tx", "dsi_rx"] }
+      }
+    },
+    "drivers": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Per-OS driver binding facts for the part, consumed by the camera DT/overlay generators.  Only facts that are sourced in-tree belong here; an OS with no known driver is simply absent.",
+      "properties": {
+        "zephyr": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["compatible"],
+          "properties": {
+            "compatible": { "type": "string", "pattern": "^[a-z0-9]+,[a-z0-9._-]+$", "description": "Zephyr devicetree compatible string." }
+          }
+        },
+        "linux": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["compatible"],
+          "properties": {
+            "compatible": { "type": "string", "pattern": "^[a-z0-9]+,[a-z0-9._-]+$", "description": "Linux devicetree compatible string the in-kernel driver matches (may differ from the part number, e.g. OV9281 probes as ovti,ov9282)." },
+            "kconfig": { "type": "string", "pattern": "^CONFIG_[A-Z0-9_]+$", "description": "Kernel config symbol that builds the driver." },
+            "link_freqs_hz": { "type": "array", "minItems": 1, "items": { "type": "integer", "minimum": 1 }, "description": "CSI-2 link frequencies the Linux driver accepts on its endpoint." }
+          }
+        }
+      }
+    },
     "precision": { "type": "object" },
     "notes": { "type": "string" },
     "audio": { "type": "object" },

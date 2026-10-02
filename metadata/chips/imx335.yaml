@@ -170,6 +170,11 @@ i2c:
 
 mipi:
   lanes_supported: [2]
+  role:            csi2_tx
+
+drivers:
+  zephyr:
+    compatible:    "sony,imx335"
 
 resolutions:
   max:            [2592, 1944]

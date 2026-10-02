@@ -1,0 +1,10 @@
+# Alp SDK camera module: INNO-MAKER CAM-IMX335-5MP (Sony IMX335).
+# Values from zephyr/boards/shields/innomaker_cam_imx335/innomaker_cam_imx335.overlay.
+schema_version: 1
+module_id:      innomaker_cam_imx335
+display_name:   "INNO-MAKER CAM-IMX335-5MP (Sony IMX335, 2-lane CSI-2)"
+chip:           imx335
+i2c_addr_7bit:  0x1A
+xclk_hz:        24000000
+lanes:          2
+zephyr_shield:  innomaker_cam_imx335

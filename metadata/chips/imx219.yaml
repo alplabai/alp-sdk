@@ -18,6 +18,13 @@ i2c:
 
 mipi:
   lanes_supported: [1, 2, 4]
+  role:            csi2_tx
+
+drivers:
+  linux:
+    compatible:    "sony,imx219"
+    kconfig:       CONFIG_VIDEO_IMX219
+    link_freqs_hz: [456000000]   # from the unverified e1m-x-evk-cam0-imx219.dtsi
 
 signals:
   - { name: SDA,     type: bidir,  scope: "CCI/I2C data" }

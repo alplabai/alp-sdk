@@ -51,6 +51,11 @@ i2c:
 
 mipi:
   lanes_supported: [1, 2]
+  role:            csi2_tx
+
+drivers:
+  zephyr:
+    compatible:    "ovti,ov5647"
 
 resolutions:
   max:            [2592, 1944]

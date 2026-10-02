@@ -73,6 +73,11 @@ i2c:
 
 mipi:
   lanes_supported: [1]
+  role:            csi2_tx
+
+drivers:
+  zephyr:
+    compatible:    "sony,imx296"
 
 resolutions:
   max:            [1456, 1088]

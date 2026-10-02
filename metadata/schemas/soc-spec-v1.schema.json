@@ -34,6 +34,20 @@
       "enum": ["released", "preliminary", "deprecated"],
       "default": "released"
     },
+    "linux_dt": {
+      "type": "object",
+      "description": "Linux devicetree facts for on-die peripherals the Linux DT generators need, keyed by the instance name used in SoM `pad_routes` `dispatch_pin` (e.g. RIIC2, CSI0).  `label` is the SoC dtsi node label; `pinmux` maps a port pin to its pinmux function code (the third argument of the vendor PORT_PINMUX macro); `capture` is the label of the capture unit a CSI receiver feeds.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["label"],
+        "properties": {
+          "label": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "pinmux": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+          "capture": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+        }
+      }
+    },
     "pending_alif_datasheet": {
       "type": "boolean",
       "default": false,

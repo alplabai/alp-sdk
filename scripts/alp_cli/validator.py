@@ -36,6 +36,7 @@ SOM_DIR = METADATA / "e1m_modules"
 PRESET_DIR = METADATA / "boards"
 SOC_DIR = METADATA / "socs"
 CHIP_DIR = METADATA / "chips"
+CAMERA_MODULE_DIR = METADATA / "camera_modules"
 
 
 def load_board_schema(schema_path: Path | None = None) -> dict[str, Any]:
@@ -98,6 +99,7 @@ def validate_board_yaml(
     preset_dir = root / "boards"
     soc_dir = root / "socs"
     chip_dir = root / "chips"
+    camera_module_dir = root / "camera_modules"
     schema_path = root / "schemas" / "board.schema.json"
     if not schema_path.is_file():
         # Synthetic/partial metadata roots (e.g. test fixtures) may not
@@ -106,7 +108,7 @@ def validate_board_yaml(
 
     _schema_pass(data, path, collector, schema_path=schema_path)
     _xref_pass(data, path, collector, som_dir=som_dir, preset_dir=preset_dir,
-               chip_dir=chip_dir)
+               chip_dir=chip_dir, camera_module_dir=camera_module_dir)
     _compat_pass(data, path, collector, som_dir=som_dir, soc_dir=soc_dir)
     return collector
 
@@ -119,6 +121,7 @@ def _xref_pass(
     som_dir: Path = SOM_DIR,
     preset_dir: Path = PRESET_DIR,
     chip_dir: Path = CHIP_DIR,
+    camera_module_dir: Path = CAMERA_MODULE_DIR,
 ) -> None:
     som = data.get("som")
     # #602: a schema-invalid `som:` (wrong type, e.g. a string/list instead
@@ -173,6 +176,63 @@ def _xref_pass(
             preset_dir=preset_dir)
 
     _check_chips_known(data, path, collector, chip_dir=chip_dir)
+    # With a `preset:` the connectors come from that preset; if the preset is
+    # missing (ALP-B006 already reported) there is nothing to check against.
+    if not isinstance(preset, str):
+        _check_cameras(data, path, collector, data.get("camera_connectors"),
+                       camera_module_dir=camera_module_dir)
+    elif board_doc is not None:
+        _check_cameras(data, path, collector, board_doc.get("camera_connectors"),
+                       camera_module_dir=camera_module_dir)
+
+
+def _check_cameras(
+    data: dict[str, Any],
+    path: Path,
+    collector: DiagnosticCollector,
+    connectors: Any,
+    *,
+    camera_module_dir: Path = CAMERA_MODULE_DIR,
+) -> None:
+    """Reject a `cameras:` entry naming a connector the resolved board does
+    not expose, or a module with no `metadata/camera_modules/<module>.yaml`.
+
+    Both are valid identifiers to the schema, so without this a typo would
+    only surface when a generator looks the name up.  Reported as ALP-B003
+    (value outside the set the metadata allows); anchored on the `cameras`
+    key because the position loader does not track individual list items.
+    """
+    cameras = data.get("cameras")
+    if not isinstance(cameras, list):
+        return
+    known_connectors = sorted(connectors) if isinstance(connectors, dict) else []
+    line, col = node_position(data, "cameras", target="key")
+    for entry in cameras:
+        if not isinstance(entry, dict):
+            continue  # schema pass reports the wrong type
+        connector = entry.get("connector")
+        module = entry.get("module")
+        problems: list[str] = []
+        if isinstance(connector, str) and connector not in known_connectors:
+            problems.append(
+                f"cameras: connector '{connector}' is not a camera connector of "
+                f"this board (known: {', '.join(known_connectors) or 'none'})")
+        if isinstance(module, str) and not (camera_module_dir / f"{module}.yaml").is_file():
+            problems.append(
+                f"cameras: unknown camera module '{module}' "
+                f"(no metadata/camera_modules/{module}.yaml)")
+        for message in problems:
+            collector.add(
+                Diagnostic(
+                    severity="error",
+                    path=path,
+                    line=line,
+                    col=col,
+                    span=len("cameras"),
+                    code="ALP-B003",
+                    message=message,
+                )
+            )
 
 
 def _known_chip_slugs(*, chip_dir: Path = CHIP_DIR) -> set[str]:

@@ -79,6 +79,22 @@ populated:
 # SoM-side dispatch (the V2N GD32 IO-MCU bridge, etc.) lives in the
 # SoM preset's `pad_routes:` block, NOT here -- this board YAML is
 # SoM-agnostic.
+# Camera connectors.  Signals reference macros declared in `e1m_routes:` below
+# (never restate pads).  CAM1 (E1M-X I2C3 = XEVK_I2C_BUS_DSI_CSI1) is not
+# modelled: its CSI receiver, lane count and select/enable lines are not
+# recorded in this file yet.
+camera_connectors:
+  CAM0:
+    refdes:        J5
+    csi:           E1M_X_CSI0
+    lanes:         2
+    i2c:           XEVK_I2C_BUS_DSI_CSI0
+    select:
+      - { gpio: XEVK_PIN_CAM0_MUX_SEL, value: 0 }   # low selects J5 on the CSI mux
+    enable:        XEVK_PIN_CAM0_EN
+    reset:         XEVK_PIN_CAM0_RST
+    lane_polarity: [1, 1, 1]   # clock + 2 data lanes; physical segment TBD (bench-proven need on V2M103+J5)
+
 e1m_routes:
   gpio:
     # --- PCIe x4 slot: lane-mux + I2C control ---

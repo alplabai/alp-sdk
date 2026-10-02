@@ -258,6 +258,11 @@
     }
   ],
 
+  "linux_dt": {
+    "RIIC2": {"label": "i2c2", "pinmux": {"P34": 1, "P35": 1}},
+    "CSI0":  {"label": "csi20", "capture": "cru0"}
+  },
+
   "notes": [
     "Datasheet: 137 pages, R01DS0466EJ0120 v1.20, Sep 2025.",
     "Single die with 8 orderable SKUs that toggle Mali-G31 GPU, Mali-C55 ISP (RZ/V2NP suffix), and security-crypto extensions on/off.  N41/N42/N45/N46 are RZ/V2N (no ISP); N43/N44/N47/N48 are RZ/V2NP (with ISP).",
