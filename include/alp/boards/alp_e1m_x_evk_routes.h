@@ -126,7 +126,7 @@ extern "C" {
 #define XEVK_I2C_ADDR_TCAL9538_MAIN 0x73u  /**< U35 main I/O expander, A0 and A1 strapped high. CORRECTED 2026-09 from 0x72, a value never measured on this carrier: the E1M-X EVK V2 straps and a live i2c-0 sweep on an E1M-V2M103 both give 0x73. */
 #define XEVK_I2C_ADDR_TCAL9538      XEVK_I2C_ADDR_TCAL9538_MAIN  /**< Alias for XEVK_I2C_ADDR_TCAL9538_MAIN. */
 #define XEVK_I2C_ADDR_TCAL9538_PCIE 0x71u  /**< U37 PCIe I/O expander, A0 high and A1 low. It sits on PCIE0_I2C, which an LSF0102 level shifter joins to E1M_X_I2C0; confirmed by the same i2c-0 sweep. Its P0 drives the PCIe I2C mux select. */
-#define XEVK_I2C_ADDR_EEPROM        0x50u  /**< Board ID EEPROM (24-series). */
+#define XEVK_I2C_ADDR_EEPROM        0x50u  /**< SoM identity EEPROM. It is on the module, not on this carrier (the carrier has no EEPROM of its own), and shares E1M_X_I2C0 with the carrier sensors. The same part also answers at 0x58 (identity page), so keep 0x50 and 0x58 free here. */
 #define XEVK_I2C_ADDR_INA236_3V3    0x40u  /**< U21 INA236A, +3V3 rail   (20 mOhm shunt, 4.0 A max). A0 = GND. */
 #define XEVK_I2C_ADDR_INA236_1V8    0x41u  /**< U31 INA236A, +1V8 rail   (20 mOhm shunt, 4.0 A max). A0 = V+. */
 #define XEVK_I2C_ADDR_INA236_VCAM2  0x48u  /**< U32 INA236B, +VCAM2 rail (50 mOhm shunt, 1.6 A max). A0 = GND. DESIGN CONFLICT on E1M-X EVK V2: 0x48 is also the TAS2563 broadcast address on this bus, and TAS2563 page-select writes to reg 0x00 land in this part's CONFIG register. U32 is removed on the current build batch; a re-strap to 0x4A/0x4B is planned for the next carrier rev. */

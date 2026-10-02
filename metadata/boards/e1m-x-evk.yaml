@@ -295,6 +295,12 @@ e1m_routes:
 #     (mfg-ID "TI"), and a +5V monitor answered at 0x4A. Neither answers
 #     on the E1M-X EVK V2 (i2c-0 sweep on E1M-V2M103 2026W38-0001,
 #     2026-09-27); see U30 below (#2343).
+#   - 2026-10-02: i2c-0 sweeps with E1M-V2M103 2026W38-0002 and -0004 fitted
+#     show 0x42 and 0x68 answering next to 0x69. That matches a carrier with
+#     the #2343 rework done, but the recorded logs do not say which carrier
+#     was used, and no ID register was read at 0x42, 0x68 or 0x69. Treat the
+#     INA228 and BMI323 notes below as true for an unreworked carrier until a
+#     live ID read settles it (#2645).
 #   - The 3V3 (U21) and 1V8 (U31) monitors read ~0 V on the bus-
 #     voltage register (VBUS-sense wiring under investigation); their
 #     shunt/current path is unaffected.
@@ -324,7 +330,9 @@ i2c_devices:
             LSF0102 level shifter joins to E1M_X_I2C0; confirmed by the same i2c-0 sweep.
             Its P0 drives the PCIe I2C mux select." }
   - { macro: XEVK_I2C_ADDR_EEPROM, part: eeprom_24c128, address: "0x50",
-      doc: "Board ID EEPROM (24-series)." }
+      doc: "SoM identity EEPROM. It is on the module, not on this carrier (the carrier has
+            no EEPROM of its own), and shares E1M_X_I2C0 with the carrier sensors. The same
+            part also answers at 0x58 (identity page), so keep 0x50 and 0x58 free here." }
   - { macro: XEVK_I2C_ADDR_INA236_3V3, part: ina236, designator: U21, address: "0x40",
       doc: "U21 INA236A, +3V3 rail   (20 mOhm shunt, 4.0 A max). A0 = GND.",
       calibration: { shunt_macro: XEVK_INA236_SHUNT_3V3_OHMS, shunt_ohms: "0.020",
