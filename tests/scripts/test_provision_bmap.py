@@ -229,7 +229,7 @@ class RealShell:
             cmd = f'"{sys.executable}" ' + cmd[len("python3 "):]
         stdin = open(stdin_path, "rb") if stdin_path else subprocess.DEVNULL
         try:
-            p = subprocess.run(["sh", "-c", cmd], cwd=self.work, capture_output=True, text=True,
+            p = subprocess.run(["sh", "-c", cmd], cwd=self.work, capture_output=True, text=True, encoding="utf-8",
                                timeout=120, stdin=stdin)
         finally:
             if stdin_path:
@@ -315,7 +315,7 @@ def _write(tmp_path, stream: bytes, ranges, image_size: int, dev_size: int, bs=B
     gz.write_bytes(stream)
     with open(gz, "rb") as f:
         p = subprocess.run([sys.executable, str(bmap_writer.__file__), str(dev), str(bs), str(rng),
-                            str(image_size)], stdin=f, capture_output=True, text=True)
+                            str(image_size)], stdin=f, capture_output=True, text=True, encoding="utf-8")
     return p, dev.read_bytes()
 
 
@@ -378,7 +378,7 @@ def test_writer_reports_an_io_error(tmp_path):
     p, _ = _write(tmp_path, gzip.compress(b"\x01" * BS), [(0, 1)], 0, BS)
     with open(tmp_path / "in.gz", "rb") as f:
         q = subprocess.run([sys.executable, str(bmap_writer.__file__), str(tmp_path / "no" / "dev"), str(BS),
-                            str(tmp_path / "ranges"), "0"], stdin=f, capture_output=True, text=True)
+                            str(tmp_path / "ranges"), "0"], stdin=f, capture_output=True, text=True, encoding="utf-8")
     assert p.returncode == 0 and q.returncode == 1 and "bmap_writer:" in q.stderr
 
 
@@ -408,7 +408,7 @@ def test_writer_skips_a_large_zero_gap_without_buffering_it(tmp_path):
         argv = [sys.executable]
     with open(gz, "rb") as f:
         p = subprocess.run(argv + [str(bmap_writer.__file__), str(dev), str(BS), str(rng), str(size)],
-                           stdin=f, capture_output=True, text=True)
+                           stdin=f, capture_output=True, text=True, encoding="utf-8")
     assert p.returncode == 0, p.stderr
     with open(dev, "rb") as f:
         assert f.read(BS) == head

@@ -191,7 +191,8 @@ into the topic-specific docs.
   method (rail scan, conversion-ready sampling, idle-subtracted
   window integration), the whole-board PSU cross-check, a measured
   error budget, and the explicit list of what the figure is NOT
-  (not NPU energy, not silicon energy, not vendor-comparable).
+  (not NPU energy, not silicon energy, not vendor-comparable); also the
+  probe-based `scripts/alp_power.py` method (not yet validated on hardware).
 
 ## Security & release
 

@@ -77,10 +77,10 @@ def write_ranges(dev, bs, ranges, image_size, src):
 def main(argv):
     dev, bs, ranges_path, image_size = argv[1], int(argv[2]), argv[3], int(argv[4])
     if os.path.exists("/proc/mounts"):
-        with open("/proc/mounts") as f:
+        with open("/proc/mounts", encoding="utf-8") as f:
             if any(ln.split()[0].startswith(dev) for ln in f if ln.strip()):
                 raise ValueError("%s (or a partition of it) is mounted" % dev)
-    with open(ranges_path) as f:
+    with open(ranges_path, encoding="utf-8") as f:
         ranges = [tuple(map(int, ln.split())) for ln in f if ln.strip()]
     write_ranges(dev, bs, ranges, image_size, sys.stdin.buffer)
 
