@@ -790,7 +790,7 @@ class WriteXspi(Step):
     name = "write_xspi"
 
     def probe(self, ctx):
-        t = ctx.linux
+        t = ctx.need_linux()
         if t is None:
             return Unknown("no Linux target")
         ev = {}
@@ -816,7 +816,7 @@ class WriteEmmcBoot(Step):
     name = "write_emmc_boot"
 
     def probe(self, ctx):
-        t = ctx.linux
+        t = ctx.need_linux()
         if t is None:
             return Unknown("no Linux target")
         emmc = lt.resolve_emmc(t)
@@ -862,7 +862,7 @@ class WriteRootfs(Step):
     name = "write_rootfs"
 
     def probe(self, ctx):
-        t = ctx.linux
+        t = ctx.need_linux()
         if t is None:
             return Unknown("no Linux target")
         emmc = lt.resolve_emmc(t)
@@ -938,7 +938,7 @@ class EepromManifest(Step):
     name = "eeprom_manifest"
 
     def probe(self, ctx):
-        t = ctx.linux
+        t = ctx.need_linux()
         if t is None:
             return Unknown("no Linux target")
         arr = lt.eeprom_read(t, ctx.i2c("eeprom"), 0, lt.MANIFEST_LEN)
@@ -1275,7 +1275,7 @@ class SecurePage(Step):
     name = "secure_page"
 
     def probe(self, ctx):
-        t = ctx.linux
+        t = ctx.need_linux()
         if t is None:
             return Unknown("no Linux target")
         bus = ctx.i2c("eeprom")

@@ -319,6 +319,41 @@ def test_write_xspi_done_only_after_reprobe(tmp_path):
     assert any(c.startswith("flash_erase /dev/mtd1 0 1") for c in board.commands)
 
 
+def _pinned_bench(board, monkeypatch):
+    """A bench whose bench.yaml pins linux.host, with LinuxTarget(host) answering as `board`."""
+    bench = _bench()
+    bench.linux_host = "192.0.2.10"
+    monkeypatch.setattr(lt, "LinuxTarget", lambda host, user="root", **kw: board)
+    return bench
+
+
+def test_write_xspi_probe_attaches_the_pinned_host_like_census(tmp_path, monkeypatch):
+    """Regression: `--only write_xspi` (no step before it attaches ctx.linux) probed with
+    ctx.linux None -> Unknown("no Linux target") -> PLANNED although mtd0/mtd1 already held the
+    bundle's bytes (som-0.2.0 reuses som-0.1.0's bl2/fip). Census attached the pinned host via
+    need_linux() and read the matching md5s, which is why the two disagreed."""
+    board = Board(xspi_bl2=BL2, xspi_fip=FIP)           # padded mtds, bytes identical to the bundle
+    ctx = _ctx(tmp_path, bench=_pinned_bench(board, monkeypatch))
+    assert ctx.linux is None
+    res = steps.run_steps(ctx, only=["write_xspi"])
+    assert res[-1].status == "skipped", res[-1].detail
+    assert res[-1].evidence == {"xspi_bl2_md5": hashlib.md5(BL2).hexdigest(),
+                                "xspi_fip_md5": hashlib.md5(FIP).hexdigest()}
+
+
+@pytest.mark.parametrize("bl2, fip", [(BL2, OLD_FIP), (BL2[:-1] + b"\x00", FIP)])
+def test_write_xspi_probe_still_plans_the_flash_when_contents_differ(tmp_path, monkeypatch, bl2, fip):
+    board = Board(xspi_bl2=bl2, xspi_fip=fip)
+    ctx = _ctx(tmp_path, bench=_pinned_bench(board, monkeypatch))
+    res = steps.run_steps(ctx, only=["write_xspi"])
+    assert res[-1].status == "planned", res[-1].detail
+
+
+def test_probe_without_any_host_stays_unknown_and_plans(tmp_path):
+    ctx = _ctx(tmp_path, bench=_bench())               # no pinned host, no ctx.linux
+    assert steps.WriteXspi().probe(ctx).reason == "no Linux target"
+
+
 def test_state_done_with_unsatisfied_probe_reruns(tmp_path):
     board = WritableBoard(xspi_bl2=BL2, xspi_fip=OLD_FIP)
     ctx = _ctx(tmp_path, bench=_bench(), linux=board, execute=True)
