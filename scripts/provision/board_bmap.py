@@ -26,7 +26,7 @@ def fail(message):
 
 
 def load_spans(path):
-    with open(path) as f:
+    with open(path, "rb") as f:
         return [tuple(int(x) for x in line.split()) for line in f if line.strip()]
 
 

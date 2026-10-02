@@ -234,7 +234,8 @@ class LocalUnit:
         if self.python_rc is not None and cmd.startswith("python3 -c"):
             return subprocess.CompletedProcess(argv, self.python_rc, "", "sh: python3: not found")
         local = cmd.replace("/tmp/", f"{self.tmp}/").replace("python3", sys.executable)
-        return subprocess.run(["sh", "-c", local], stdin=stdin, capture_output=True, text=True, timeout=60)
+        return subprocess.run(["sh", "-c", local], stdin=stdin, capture_output=True, text=True,
+                              encoding="utf-8", timeout=60)
 
 
 def unit(tmp_path, **kw):

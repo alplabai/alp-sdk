@@ -442,7 +442,7 @@ def _bmap_stage(t: LinuxTarget, bm: Bmap) -> None:
     t.put(_BOARD_BMAP, _UNIT_BMAP_SCRIPT)
     with tempfile.TemporaryDirectory() as d:
         spans = Path(d) / "spans"
-        spans.write_text(spans_text(bm), encoding="ascii")
+        spans.write_bytes(spans_text(bm).encode("ascii"))
         t.put(spans, _UNIT_BMAP_SPANS)
 
 
