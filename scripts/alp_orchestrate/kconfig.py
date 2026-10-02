@@ -2161,6 +2161,15 @@ def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
     if slice_.image:
         lines.append(f"# bitbake target: {slice_.image}")
 
+    # Camera modules (board.yaml `cameras:`): one knob per connector, read by
+    # the linux-renesas bbappend, which stages the generated DT fragment for
+    # that module (scripts/gen_camera_dt.py).  Absent block = no lines.
+    cameras = [c for c in (project.raw.get("cameras") or []) if isinstance(c, dict)]
+    if cameras:
+        lines.append("# Cameras (board.yaml `cameras:` block)")
+        for cam in cameras:
+            lines.append(f'ALP_CAMERA_{cam["connector"]} = "{cam["module"]}"')
+
     # Mender OTA wiring (board.yaml `ota:` block).  Emits Mender
     # `?=` (weak) assignments so hand-edited local.conf values in
     # the build dir still win.

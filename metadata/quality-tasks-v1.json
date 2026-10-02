@@ -148,6 +148,20 @@
       "ci": null
     },
     {
+      "id": "camera-parity",
+      "description": "Every camera module has what its hosting SoMs need to generate a Linux fragment (compatible, kconfig, link frequencies, kernel driver), its lanes and I2C address fit the chip and carrier, the generated camera-sensors.cfg has every kconfig, and every documented ALP_CAMERA_<connector> value is a generated fragment (#2633).",
+      "runner": "check-script",
+      "script": "scripts/check_camera_parity.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "cc3501e-bridge-copies",
       "description": "Every cc3501e_bridge.{c,h} copied into an example is byte-identical to examples/aen/aen-cc3501e-bringup/src, except the copies the gate declares divergent by name, so a silicon fix cannot land in one copy of this hardware-sequencing code and silently miss the other fifteen (#2163).",
       "runner": "check-script",

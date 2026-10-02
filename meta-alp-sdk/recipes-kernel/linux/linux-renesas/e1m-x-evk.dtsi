@@ -118,8 +118,10 @@
  *   - 2x MIPI-CSI cameras (two separate, bare CSI connectors -- see
  *     docs/boards/e1m-x-evk.md's "Camera connectors" row).
  *
- *     An OPT-IN, bench-unverified IMX219 placeholder path now exists:
- *     e1m-x-evk-cam0-imx219.dtsi / docs/v2n-camera-csi.md (#1149).
+ *     An OPT-IN camera path now exists (ALP_CAMERA_CAM0; OV9281 bench-proven, the
+ *     rest unverified):
+ *     the generated e1m-x-evk-cam0-<module_id>.dtsi (scripts/gen_camera_dt.py) /
+ *     docs/v2n-camera-csi.md (#1149).
  *
  *     DATA-GATED, and gated on a product decision rather than on a
  *     document.  What the carrier DOES already carry is in tree: the

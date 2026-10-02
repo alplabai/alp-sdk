@@ -66,6 +66,9 @@ on:
       - 'scripts/gen_soc_caps.py'
       - 'scripts/gen_status_strings.py'
       - 'scripts/gen_board_header.py'
+      - 'scripts/gen_camera_dt.py'
+      - 'meta-alp-sdk/recipes-kernel/linux/**'
+      - 'docs/v2n-camera-csi.md'
       - 'scripts/gen_pinmux_capability.py'
       - 'scripts/gen_support_matrix.py'
       - 'scripts/gen_catalog.py'
@@ -195,6 +198,13 @@ jobs:
       # scripts/gen_power_tree.py.  Needs clang-format (installed above).
       - name: Regenerate PMIC power-tree guard tables from metadata
         run: python3 scripts/gen_power_tree.py
+
+      # Linux camera DT fragments, camera-sensors.cfg and the supported-camera
+      # table in docs/v2n-camera-csi.md are projected from the camera-module,
+      # chip, board, SoM and SoC metadata by scripts/gen_camera_dt.py (#2633).
+      # --check fails on drift AND on a metadata gap, naming the missing field.
+      - name: Verify camera DT fragments + kernel config are in sync with metadata
+        run: python3 scripts/gen_camera_dt.py --check
 
       - name: Regenerate pin-mux capability tables from the pinout TSVs
         run: python3 scripts/gen_pinmux_capability.py

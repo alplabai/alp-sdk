@@ -1378,7 +1378,7 @@ stage_generated_files() {
     # gap.  Gate at stage entry -- a drift check that regenerated only
     # some of its artifacts is not a drift check.
     require_jsonschema_2020 stage_generated_files || return 99
-    local gens=(gen_soc_caps gen_status_strings gen_board_header
+    local gens=(gen_soc_caps gen_status_strings gen_board_header gen_camera_dt
                 gen_cc3501e_gpio_routes gen_power_tree
                 gen_pinmux_capability gen_support_matrix
                 gen_portability_matrix gen_catalog gen_error_catalog
@@ -1530,6 +1530,7 @@ $(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null 
         docs/portability-matrix.md docs/peripheral-support-matrix.md \
         docs/verification-status.md \
         docs/chip-driver-classification.md \
+        meta-alp-sdk/recipes-kernel/linux/linux-renesas docs/v2n-camera-csi.md \
         examples/aen \
         src/backends/gpio/cc3501e_rev_dependent_pins.c \
         docs/diagnostics 2>/dev/null; then
@@ -1556,6 +1557,7 @@ $(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null 
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/verification-status.md \
             docs/chip-driver-classification.md \
+            meta-alp-sdk/recipes-kernel/linux/linux-renesas docs/v2n-camera-csi.md \
             examples/aen \
             src/backends/gpio/cc3501e_rev_dependent_pins.c \
             docs/diagnostics 2>/dev/null; then
@@ -1567,6 +1569,7 @@ $(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null 
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/verification-status.md \
             docs/chip-driver-classification.md \
+            meta-alp-sdk/recipes-kernel/linux/linux-renesas docs/v2n-camera-csi.md \
             examples/aen \
             src/backends/gpio/cc3501e_rev_dependent_pins.c \
             docs/diagnostics 2>/dev/null | tail -20

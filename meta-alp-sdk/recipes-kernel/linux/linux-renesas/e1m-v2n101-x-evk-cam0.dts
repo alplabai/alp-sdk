@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
 /*
- * e1m-v2n101-x-evk plus an opt-in CAM0 sensor path (#1149, #2612).  Built
- * only when ALP_ENABLE_CAM0_IMX219 = "1" (e1m-x-evk-cam0-imx219.dtsi) or
- * ALP_ENABLE_CAM0_OV9281 = "1" (e1m-x-evk-cam0-ov9281.dtsi); the bbappend
- * stages the matching fragment under the sensor-neutral name
- * e1m-x-evk-cam0-sensor.dtsi.  BENCH-UNVERIFIED.
+ * e1m-v2n101-x-evk plus an opt-in CAM0 sensor path (#1149, #2612, #2633).  Built
+ * only when ALP_CAMERA_CAM0 names a camera module (a metadata/camera_modules
+ * id); the bbappend stages the generated fragment
+ * e1m-x-evk-cam0-<module_id>.dtsi (scripts/gen_camera_dt.py) under the
+ * sensor-neutral name e1m-x-evk-cam0-sensor.dtsi. BENCH-UNVERIFIED.
  */
 #include "e1m-v2n101-x-evk.dts"
 #include "e1m-x-evk-cam0-sensor.dtsi"

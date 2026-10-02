@@ -120,6 +120,7 @@ alp-sdk/
 │   ├── alp_project.py               # reference per-slice config/overlay emit
 │   ├── gen_soc_caps.py              # SoC JSONs → include/alp/soc_caps.h
 │   ├── gen_board_header.py        # board YAML → include/alp/boards/<board>_routes.h
+│   ├── gen_camera_dt.py             # camera modules + carrier + SoM/SoC → Linux cam DT fragments + camera-sensors.cfg
 │   ├── validate_board_yaml.py       # board.yaml schema check
 │   ├── validate_metadata.py         # SoC / SoM / board preset schema check
 │   └── west_commands/               # `west alp-migrate`, `west alp-lock`, `west alp-quality`, `west alp-emit`
@@ -344,6 +345,7 @@ The active generators are:
 | `scripts/gen_soc_caps.py`               | `metadata/socs/**/*.json`                            | `include/alp/soc_caps.h` (per-SoC `ALP_SOC_*_COUNT` + `ALP_SOC_*_MAX_*` macros) |
 | `scripts/gen_soc_peripheral_instances.py` | vendored Zephyr SoC devicetree (`dts/arm/renesas/rz/rzv/r9a09g056.dtsi` today) | `metadata/socs/renesas/rzv2n/n44.json`'s `peripheral_instances` block (per-instance `reg`/`interrupts`, issue #1154) |
 | `scripts/gen_board_header.py`         | `metadata/boards/<name>.yaml`                       | `include/alp/boards/alp_<board>_routes.h` (board macro mapping)            |
+| `scripts/gen_camera_dt.py`            | `metadata/camera_modules/*.yaml` + chip `drivers.linux` + carrier `camera_connectors` + SoM `pad_routes` + SoC `linux_dt` | `meta-alp-sdk/.../linux-renesas/e1m-x-evk-<connector>-<module_id>.dtsi`, `camera-sensors.cfg`, the camera table in `docs/v2n-camera-csi.md` (#2633) |
 | `scripts/validate_board_yaml.py`        | `board.yaml`                                         | (validator only -- non-zero exit on schema/xref/consistency error)             |
 | `scripts/validate_metadata.py`          | `metadata/**/*.{json,yaml}`                          | (validator only)                                                               |
 

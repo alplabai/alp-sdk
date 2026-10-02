@@ -23,6 +23,8 @@ on:
       - 'zephyr/kconfigs/**'
       - 'scripts/alp_project_emit/**'
       - 'scripts/check_chip_subsystems_parity.py'
+      - 'scripts/gen_camera_dt.py'
+      - 'meta-alp-sdk/recipes-kernel/linux/**'
       - 'chips/**'
       - 'scripts/check_delay_us_literal.py'
       - '.github/workflows/pr-metadata-validate.yml'
@@ -120,6 +122,8 @@ on:
       - 'zephyr/kconfigs/**'
       - 'scripts/alp_project_emit/**'
       - 'scripts/check_chip_subsystems_parity.py'
+      - 'scripts/gen_camera_dt.py'
+      - 'meta-alp-sdk/recipes-kernel/linux/**'
       - 'chips/**'
       - 'scripts/check_delay_us_literal.py'
       - 'scripts/validate_board_yaml.py'
@@ -597,6 +601,9 @@ jobs:
 
       - name: Gate — driver_status claims outside metadata/chips/*.yaml are backed by a real driver
         run: python3 scripts/check_driver_status_backing.py
+
+      - name: "Gate — camera modules are complete and match their chip and carrier (#2633)"
+        run: python3 scripts/check_camera_parity.py
 
       - name: Gate — quality-task registry matches scripts/check_*.py on disk
         run: python3 scripts/check_quality_registry.py

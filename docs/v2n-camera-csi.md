@@ -12,21 +12,45 @@ not been through dtc. Nothing here is proof the pipeline streams.
 
 | Piece | File (`meta-alp-sdk/recipes-kernel/linux/linux-renesas/`) |
 |---|---|
-| Sensor + CSI-2 + CRU0 fragment | `e1m-x-evk-cam0-imx219.dtsi` |
+| Sensor + CSI-2 + CRU0 fragment, one per supported camera | `e1m-x-evk-cam0-<module_id>.dtsi` (**generated**, `scripts/gen_camera_dt.py`) |
 | Board dtbs = base board + fragment | `e1m-v2n101-x-evk-cam0.dts`, `e1m-v2m101-x-evk-cam0.dts` |
-| Kernel config | `camera-csi.cfg` |
-| Switch | `ALP_ENABLE_CAM0_IMX219` in `linux-renesas_%.bbappend` |
+| Kernel config | `camera-sensors.cfg` (**generated**, always built in) |
+| Switch | `ALP_CAMERA_CAM0 = "<module_id>"` in `linux-renesas_%.bbappend` |
 
-Sensor: Sony IMX219, 2 lanes, CCI `0x10` on E1M-X I2C2 (RIIC2), fixed
-24 MHz xclk. The sensor is a **placeholder**: the carrier metadata names
-no camera part (`metadata/boards/e1m-x-evk.yaml`, bare CSI connectors).
+## Supported cameras
+
+The fragments, the kernel config and this table are generated from
+metadata (`metadata/camera_modules/*.yaml`, the chip's `drivers.linux`,
+the carrier `camera_connectors`, the SoM `pad_routes`, the SoC `linux_dt`).
+Do not edit them by hand.
+
+**Adding a camera is a metadata-only change**: a `metadata/chips/<chip>.yaml`
+with a `drivers.linux` block, a `metadata/camera_modules/<module_id>.yaml`,
+and (only if the BSP kernel has no driver) a kernel patch plus its
+`metadata/os/linux-kernel-drivers.yaml` entry. Then run
+`python3 scripts/gen_camera_dt.py`; it writes the fragment, the kernel
+config and this table. `scripts/check_camera_parity.py` fails CI, naming
+what is missing, for a module that cannot be generated.
+
+<!-- BEGIN GENERATED: scripts/gen_camera_dt.py supported cameras -->
+
+| Module | Sensor | Connector | Lanes | I2C | Linux driver | `ALP_CAMERA_<connector>` |
+|---|---|---|---|---|---|---|
+| InnoMaker CAM-OV9281 (OV9281 global-shutter mono, 2-lane CSI-2) | `ov9281` | CAM0 (J5) | 2 | `0x60` | `ovti,ov9281` | `innomaker_cam_ov9281` |
+| Raspberry Pi Camera Module 2 (IMX219, 2-lane CSI-2) | `imx219` | CAM0 (J5) | 2 | `0x10` | `sony,imx219` | `raspberry_pi_camera_module_2` |
+
+<!-- END GENERATED: scripts/gen_camera_dt.py supported cameras -->
 
 ## Enable
 
 ```
 # conf/local.conf
-ALP_ENABLE_CAM0_IMX219 = "1"
+ALP_CAMERA_CAM0 = "raspberry_pi_camera_module_2"
 ```
+
+`alp` writes this line for a project `cameras:` entry
+(`cameras: [{connector: CAM0, module: <module_id>}]`). An unknown value
+aborts the bake and lists the valid ones.
 
 Bake as usual (`docs/build-yocto-v2n.md`). The cam0 dtb is built next to
 the stock one (`renesas/e1m-v2{n,m}101-x-evk-cam0.dtb`). Point the
@@ -34,8 +58,11 @@ bootloader `fdtfile` at it to use it; the stock dtb stays the fallback.
 
 ## Not modelled (open, see the CSI TODO in `e1m-x-evk.dtsi`)
 
-- CAM0 enable / reset / mux GPIOs and the GD32-owned camera LDOs: no
-  SoC-side crosswalk in tree, so Linux does not sequence sensor power.
+- CAM0 enable (E1M IO18) and reset (E1M IO20): `unrouted` in the SoM
+  `pad_routes` (no Linux GPIO controller reaches them), so the fragment
+  does not drive them. The CSI mux select (E1M IO16, GD32 bridge) is
+  modelled. The GD32-owned camera LDOs are not: Linux does not sequence
+  sensor power.
 - RIIC2 (P34/P35) A55 claim is not recorded in
   `metadata/e1m_modules/v2n/core-ownership.yaml`, so
   `check_amp_pad_claims.py` cannot see a CM33 conflict on those pads.
@@ -84,10 +111,10 @@ Report the outcome on #1149 before treating any of this as verified.
 `camera-sensors.cfg` builds these drivers, plus the RZ/G2L-family CSI-2
 receiver and CRU, into the kernel (`=y`) on every V2N/V2M machine -- built
 in rather than as modules because the `alp-image-*` images install no
-`kernel-modules` package -- so a camera works once its devicetree node is in the dtb,
-without any `ALP_ENABLE_CAM0_*` switch. Only the OV9281 and IMX219 have a
-shipped CAM0 fragment (above); the rest need your own node on the CAM0 I2C
-bus and a `csi20` endpoint.
+`kernel-modules` package -- so a camera works once its devicetree node is in
+the dtb. Every module in the table above has a generated CAM0 fragment; a
+sensor without a module needs your own node on the CAM0 I2C bus and a
+`csi20` endpoint.
 
 | Sensor | Kernel driver | Lanes | Modes / formats | Notes |
 |---|---|---|---|---|
@@ -120,17 +147,17 @@ endpoint; lane polarity goes on the `csi20` endpoint, see patch 0017):
 ## OV9281 on CAM0 (J5), opt-in (#2612)
 
 A monochrome OmniVision OV9281 (RPi-style 15-pin module) on the E1M-X-EVK
-CAM0 connector. Same receiver path as the IMX219 above (`csi20` -> `cru0`),
-selected with a second switch. Bench-proven on E1M-V2M103 (30/30 frames, 16.9 fps); needs patches 0016 and 0017.
+CAM0 connector. Same receiver path as every other module (`csi20` ->
+`cru0`). Bench-proven on E1M-V2M103 (30/30 frames, 16.9 fps); needs patches 0016 and 0017.
 
 ```
-# conf/local.conf  (mutually exclusive with ALP_ENABLE_CAM0_IMX219 -- the
-# bake aborts if both are "1")
-ALP_ENABLE_CAM0_OV9281 = "1"
+# conf/local.conf
+ALP_CAMERA_CAM0 = "innomaker_cam_ov9281"
 ```
 
-The fragment is `e1m-x-evk-cam0-ov9281.dtsi`; `camera-csi.cfg` builds
-`CONFIG_VIDEO_OV9282=y` in. The default dtb is unchanged with the switch off.
+The fragment is `e1m-x-evk-cam0-innomaker_cam_ov9281.dtsi`;
+`camera-sensors.cfg` builds `CONFIG_VIDEO_OV9282=y` in. The default dtb is
+unchanged while `ALP_CAMERA_CAM0` is empty.
 
 Carrier facts the fragment encodes:
 
@@ -169,8 +196,9 @@ With the patch the CRU captures it as `CR10` (RAW10, 64-bit packed: six
 pairs arrive swapped at the RZ/V2N receiver. Without the swap the receiver
 sees `CSI2nRXST = 0`, `DLST0`/`DLST1 = 0x4` (ECT ErrControl on the data
 lanes), `PMST = 0x000F40CF` (clock-lane ULPS flags) and never a packet.
-`e1m-x-evk-cam0-ov9281.dtsi` sets `lane-polarities = <1 1 1>;` (clock + 2
-data lanes inverted) on the `csi20` endpoint, and
+the fragment sets `lane-polarities = <1 1 1>;` (clock + 2 data lanes
+inverted, from `camera_connectors.CAM0.lane_polarity`) on the `csi20`
+endpoint, and
 `0017-media-rzg2l-csi2-honour-lane-polarities-via-SWAPCTL.patch` (applied
 unconditionally) programs `CRUm_SWAPCTL` from it: bit 5 `S_DPDN_SWAP_DAT`
 (all data lanes), bit 4 `S_DPDN_SWAP_CLK` (clock lane), bits 1/0 left 0
