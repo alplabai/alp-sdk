@@ -932,6 +932,12 @@ for n in sys.argv[1:]:
         sys.stderr.write('%s errno %s\\n' % (n, e.errno))
 """
 
+def unread(why) -> str:
+    """A census value for a read that failed. Whitespace is collapsed: a multi-line stderr must
+    not put a newline into a ledger value (merge_unit_yaml refuses one and the write is lost)."""
+    return "unread (" + " ".join(str(why).split()) + ")"
+
+
 NET_IF_RE = re.compile(r"(?:end|eth)\d+")   # the Renesas gbeth ports are end0/end1
 
 
@@ -1061,7 +1067,7 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
         try:
             facts[key] = fn()
         except (BenchError, ValueError) as e:
-            facts[key] = f"unread ({e})"
+            facts[key] = unread(e)
             notes.append(f"{key}: {e}")
 
     def power():
@@ -1129,20 +1135,20 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
         out = r.stdout + "\n" + r.stderr                 # the console path merges stderr into stdout
         raw = dict(re.findall(r"^(\w+) (0x[0-9a-f]{8})$", out, re.M))
         errno = dict(re.findall(r"^(\w+) errno (\d+)$", out, re.M))
-        differ = unread = False
+        differ = partial = False
         for i, n in enumerate(names):
             sysfs = t.run(f"cat /sys/class/net/{n}/phydev/phy_id", check=False).stdout.strip()
             ok = re.fullmatch(r"0x[0-9a-fA-F]{1,8}", sysfs) is not None
-            facts[f"eth{i}_phy_id"] = f"0x{int(sysfs, 16):08x}" if ok else "unread (no phydev/phy_id)"
+            facts[f"eth{i}_phy_id"] = f"0x{int(sysfs, 16):08x}" if ok else unread("no phydev/phy_id")
             why = f"{n} errno {errno[n]}" if n in errno else (r.stderr or r.stdout).strip()[-80:] or "no output"
-            facts[f"eth{i}_phy_id_raw"] = raw.get(n) or f"unread ({why})"
+            facts[f"eth{i}_phy_id_raw"] = raw.get(n) or unread(why)
             if n not in raw or not ok:
-                unread = True
+                partial = True
                 notes.append(f"{n}: phy id not fully readable")
             else:
                 differ |= int(raw[n], 16) != int(sysfs, 16)
         if names:
-            facts["eth_phy_id_mismatch"] = "yes" if differ else "unread" if unread else "no"
+            facts["eth_phy_id_mismatch"] = "yes" if differ else "unread" if partial else "no"
 
     for name, fn in (("soc", soc), ("cpu_mem", cpu_mem), ("storage", storage), ("xspi", xspi),
                      ("dxm1", dxm1), ("identity", identity), ("power", power), ("clocks_rtc", clocks_rtc),

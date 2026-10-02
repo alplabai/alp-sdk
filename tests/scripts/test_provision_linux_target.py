@@ -875,3 +875,14 @@ def test_census_removes_the_phy_helper_even_when_it_fails():
     lt.census(t, CENSUS_BUS)
     assert fake.commands.index("rm -f /tmp/alp_mii_id.py") > \
         next(i for i, c in enumerate(fake.commands) if c.startswith("python3 /tmp/alp_mii_id.py"))
+
+
+def test_unread_values_never_contain_a_newline_so_the_ledger_write_cannot_fail():
+    assert lt.unread("rc=2: i2cget -y -f 8 0x25 0x10:\n  Error: Read failed\r\n\tagain ") == \
+        "unread (rc=2: i2cget -y -f 8 0x25 0x10: Error: Read failed again)"
+    t, _ = target([(r"i2cget -y -f 8 0x25 0x10", (2, "", "Error:\nRead\nfailed")),
+                   (r"python3 /tmp/alp_mii_id\.py", (1, "", "Traceback:\n  File x\nOSError"))] + _census_responses())
+    facts, _ = lt.census(t, CENSUS_BUS)
+    bad = {k: v for k, v in facts.items() if v.startswith("unread")}
+    assert "act88760_gpio_regs" in bad and "eth0_phy_id_raw" in bad
+    assert not [k for k, v in facts.items() if "\n" in v or "\r" in v]
