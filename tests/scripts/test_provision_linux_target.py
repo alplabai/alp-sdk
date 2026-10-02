@@ -596,14 +596,14 @@ def test_dxm1_reset_pulse_is_one_ssh_round_trip_chained_with_and():
         (r"^test -e /sys/class/gpio/gpio502/value$", (1, "")),
         (r"^test -e /sys/class/gpio/PA6/value$", (0, "")),
         *_named_ownership_responses("/sys/class/gpio/PA6"),
-        (r"^echo low > /sys/class/gpio/PA6/direction && sleep 0\.1 && echo high > /sys/class/gpio/PA6/direction$", ""),
+        (r"^echo low > /sys/class/gpio/PA6/direction && sleep 0\.5 && echo high > /sys/class/gpio/PA6/direction$", ""),
     ])
     lt.dxm1_reset_pulse(t, "10410000.pinctrl", 86)
     assert fake.commands[-1] == ("echo low > /sys/class/gpio/PA6/direction && "
-                                 "sleep 0.1 && echo high > /sys/class/gpio/PA6/direction")
+                                 "sleep 0.5 && echo high > /sys/class/gpio/PA6/direction")
 
 
-def test_dxm1_uart_boot_drives_p75_via_sysfs_and_releases_it_afterward():
+def test_dxm1_drive_high_exports_and_sets_direction_high():
     t, fake = target([
         (r"^for d in /sys/class/gpio/gpiochip\*", "/sys/class/gpio/gpiochip416 10410000.pinctrl\n"),
         (r"^cat /sys/class/gpio/gpiochip416/base$", "416\n"),
@@ -611,115 +611,39 @@ def test_dxm1_uart_boot_drives_p75_via_sysfs_and_releases_it_afterward():
         (r"^test -e /sys/class/gpio/P75/value$", (0, "")),
         *_named_ownership_responses("/sys/class/gpio/P75"),
         (r"^echo high > /sys/class/gpio/P75/direction$", ""),
-        (r"^test -e /sys/class/gpio/gpio502/value$", (1, "")),
-        (r"^test -e /sys/class/gpio/PA6/value$", (0, "")),
-        *_named_ownership_responses("/sys/class/gpio/PA6"),
-        (r"^echo low > /sys/class/gpio/PA6/direction && sleep 0\.1 && echo high > /sys/class/gpio/PA6/direction$", ""),
-        (r"^uart_boot -d /dev/ttySC1 -f fw_uart_boot\.bin -b 115200$", "bootloader ok\n"),
-        (r"^uart_boot -d /dev/ttySC1 -F fw\.bin -U -b 115200$", "app ok\n"),
-        (r"^echo low > /sys/class/gpio/P75/direction$", ""),
     ])
-    out = lt.dxm1_uart_boot(t, "10410000.pinctrl", 61, 86, "/dev/ttySC1", "uart_boot",
-                            "fw_uart_boot.bin", "fw.bin")
-    assert out == "bootloader ok\napp ok\n"
-    assert fake.commands[-1] == "echo low > /sys/class/gpio/P75/direction"
+    assert lt.dxm1_drive_high(t, "10410000.pinctrl", 61) == "/sys/class/gpio/P75"
+    assert fake.commands[-1] == "echo high > /sys/class/gpio/P75/direction"
 
 
-def test_dxm1_uart_boot_releases_p75_even_if_the_transfer_fails():
-    t, fake = target([
-        (r"^for d in /sys/class/gpio/gpiochip\*", "/sys/class/gpio/gpiochip416 10410000.pinctrl\n"),
-        (r"^cat /sys/class/gpio/gpiochip416/base$", "416\n"),
-        (r"^test -e /sys/class/gpio/gpio477/value$", (1, "")),
-        (r"^test -e /sys/class/gpio/P75/value$", (0, "")),
-        *_named_ownership_responses("/sys/class/gpio/P75"),
-        (r"^echo high > /sys/class/gpio/P75/direction$", ""),
-        (r"^test -e /sys/class/gpio/gpio502/value$", (1, "")),
-        (r"^test -e /sys/class/gpio/PA6/value$", (0, "")),
-        *_named_ownership_responses("/sys/class/gpio/PA6"),
-        (r"^echo low > /sys/class/gpio/PA6/direction && sleep 0\.1 && echo high > /sys/class/gpio/PA6/direction$", ""),
-        (r"^uart_boot -d /dev/ttySC1 -f fw_uart_boot\.bin -b 115200$", (1, "", "no ROM response")),
-        (r"^echo low > /sys/class/gpio/P75/direction$", ""),
-    ])
-    with pytest.raises(BenchError, match="no ROM response"):
-        lt.dxm1_uart_boot(t, "10410000.pinctrl", 61, 86, "/dev/ttySC1", "uart_boot",
-                          "fw_uart_boot.bin", "fw.bin")
-    assert fake.commands[-1] == "echo low > /sys/class/gpio/P75/direction"
+def test_dxm1_drive_high_refuses_the_deepx_rail_lines_before_any_command():
+    t, fake = target([])
+    with pytest.raises(BenchError, match="DEEPX 0.75 V rail"):
+        lt.dxm1_drive_high(t, "10410000.pinctrl", 52)
+    assert fake.commands == []
 
 
-def test_dxm1_uart_boot_raises_if_release_fails_and_no_earlier_exception():
-    t, fake = target([
-        (r"^for d in /sys/class/gpio/gpiochip\*", "/sys/class/gpio/gpiochip416 10410000.pinctrl\n"),
-        (r"^cat /sys/class/gpio/gpiochip416/base$", "416\n"),
-        (r"^test -e /sys/class/gpio/gpio477/value$", (1, "")),
-        (r"^test -e /sys/class/gpio/P75/value$", (0, "")),
-        *_named_ownership_responses("/sys/class/gpio/P75"),
-        (r"^echo high > /sys/class/gpio/P75/direction$", ""),
-        (r"^test -e /sys/class/gpio/gpio502/value$", (1, "")),
-        (r"^test -e /sys/class/gpio/PA6/value$", (0, "")),
-        *_named_ownership_responses("/sys/class/gpio/PA6"),
-        (r"^echo low > /sys/class/gpio/PA6/direction && sleep 0\.1 && echo high > /sys/class/gpio/PA6/direction$", ""),
-        (r"^uart_boot -d /dev/ttySC1 -f fw_uart_boot\.bin -b 115200$", "bootloader ok\n"),
-        (r"^uart_boot -d /dev/ttySC1 -F fw\.bin -U -b 115200$", "app ok\n"),
-        (r"^echo low > /sys/class/gpio/P75/direction$", (1, "", "write error")),
-    ])
-    with pytest.raises(BenchError, match="could not release"):
-        lt.dxm1_uart_boot(t, "10410000.pinctrl", 61, 86, "/dev/ttySC1", "uart_boot",
-                          "fw_uart_boot.bin", "fw.bin")
-    assert fake.commands[-1] == "echo low > /sys/class/gpio/P75/direction"
+def test_dxm1_pcie_device_reads_the_endpoint_id():
+    t, _ = target([(r"^cat /sys/bus/pci/devices/0000:01:00\.0/device$", "0x0000\n")])
+    assert lt.dxm1_pcie_device(t) == "0x0000"
+    t, _ = target([(r"^cat /sys/bus/pci/devices/0000:01:00\.0/device$", "0x0001\n")])
+    assert lt.dxm1_pcie_device(t) == "0x0001"
+    t, _ = target([(r"^cat /sys/bus/pci/devices/0000:01:00\.0/device$", (1, ""))])
+    assert lt.dxm1_pcie_device(t) is None
 
 
-def test_dxm1_uart_boot_logs_but_does_not_mask_the_original_failure_when_release_also_fails():
-    t, fake = target([
-        (r"^for d in /sys/class/gpio/gpiochip\*", "/sys/class/gpio/gpiochip416 10410000.pinctrl\n"),
-        (r"^cat /sys/class/gpio/gpiochip416/base$", "416\n"),
-        (r"^test -e /sys/class/gpio/gpio477/value$", (1, "")),
-        (r"^test -e /sys/class/gpio/P75/value$", (0, "")),
-        *_named_ownership_responses("/sys/class/gpio/P75"),
-        (r"^echo high > /sys/class/gpio/P75/direction$", ""),
-        (r"^test -e /sys/class/gpio/gpio502/value$", (1, "")),
-        (r"^test -e /sys/class/gpio/PA6/value$", (0, "")),
-        *_named_ownership_responses("/sys/class/gpio/PA6"),
-        (r"^echo low > /sys/class/gpio/PA6/direction && sleep 0\.1 && echo high > /sys/class/gpio/PA6/direction$", ""),
-        (r"^uart_boot -d /dev/ttySC1 -f fw_uart_boot\.bin -b 115200$", (1, "", "no ROM response")),
-        (r"^echo low > /sys/class/gpio/P75/direction$", (1, "", "write error")),
-    ])
-    # the transfer's own error must win -- not the release failure.
-    with pytest.raises(BenchError, match="no ROM response"):
-        lt.dxm1_uart_boot(t, "10410000.pinctrl", 61, 86, "/dev/ttySC1", "uart_boot",
-                          "fw_uart_boot.bin", "fw.bin")
-    assert fake.commands[-1] == "echo low > /sys/class/gpio/P75/direction"
+@pytest.mark.parametrize("text, want", [
+    ("Firmware version : v2.4.0\n", "2.4.0"),
+    ("device 0\n  FW v2.5.1-rc1  (boot2nd)\n", "2.5.1-rc1"),
+    ("no version here\nrtos 7.8.9\n", None),
+])
+def test_parse_dxm1_fw_version(text, want):
+    assert lt.parse_dxm1_fw_version(text) == want
 
 
-def test_dxm1_pcie_present_excludes_bridges_and_root_ports_by_pci_class():
-    # root port only (bridge class): no endpoint
-    t, _ = target([("ls /sys/bus/pci/devices", "0000:00:00.0\n"),
-                   ("0000:00:00.0/class", "0x060400\n")])
-    assert not lt.dxm1_pcie_present(t)
-    # root port + an intermediate switch port, both bridge-class: still no endpoint
-    t, _ = target([("ls /sys/bus/pci/devices", "0000:00:00.0\n0000:01:00.0\n"),
-                   ("0000:00:00.0/class", "0x060400\n"),
-                   ("0000:01:00.0/class", "0x060400\n")])
-    assert not lt.dxm1_pcie_present(t)
-    # a real (non-bridge) endpoint
-    t, _ = target([("ls /sys/bus/pci/devices", "0000:00:00.0\n0000:01:00.0\n"),
-                   ("0000:00:00.0/class", "0x060400\n"),
-                   ("0000:01:00.0/class", "0x020000\n")])
-    assert lt.dxm1_pcie_present(t)
-    t, _ = target([("ls /sys/bus/pci/devices", "")])
-    assert not lt.dxm1_pcie_present(t)
-
-
-def test_dxm1_pcie_present_matches_vendor_id_when_given():
-    t, _ = target([("ls /sys/bus/pci/devices", "0000:00:00.0\n0000:01:00.0\n"),
-                   ("0000:00:00.0/class", "0x060400\n"),
-                   ("0000:01:00.0/class", "0x020000\n"),
-                   ("0000:01:00.0/vendor", "0x1f4b\n")])
-    assert lt.dxm1_pcie_present(t, "0x1f4b")
-    t, _ = target([("ls /sys/bus/pci/devices", "0000:00:00.0\n0000:01:00.0\n"),
-                   ("0000:00:00.0/class", "0x060400\n"),
-                   ("0000:01:00.0/class", "0x020000\n"),
-                   ("0000:01:00.0/vendor", "0xdead\n")])
-    assert not lt.dxm1_pcie_present(t, "0x1f4b")
+def test_dxm1_fw_version_is_none_without_dxrt_cli():
+    t, _ = target([(r"^dxrt-cli -s$", (127, "", "not found"))])
+    assert lt.dxm1_fw_version(t) is None
 
 
 # --- census --------------------------------------------------------------------------
@@ -755,6 +679,8 @@ def _census_responses(array: bytes = b"\xff" * 128):
         (r"mmcblk1boot1 bs=1 skip=512 count=100 ", "11" * 16 + "  -\n"),
         (r"mmcblk1boot1 bs=1 skip=393216 count=200 ", "22" * 16 + "  -\n"),
         (r"spi-nor/jedec_id", "aabbcc\n"),
+        (r"pci/devices/0000:01:00\.0/device", "0x0000\n"),
+        (r"^dxrt-cli -s$", "Firmware version : v2.4.0\n"),
         (r"mtd\*; do", "393216\n66715648\n"),
         (r"if=/dev/mtd0 ", "33" * 16 + "  -\n"), (r"if=/dev/mtd1 bs=\d+ skip=0 ", "44" * 16 + "  -\n"),
         (r"if=/dev/mtd1 bs=\d+ skip=(416|1703936) ", "55" * 16 + "  -\n"),
@@ -792,6 +718,7 @@ def test_census_collects_ledger_keys_read_only():
     assert facts["emmc_mode"] == "mmc HS200 200000000 Hz"
     assert (facts["emmc_ext_csd_177"], facts["emmc_ext_csd_179"]) == ("0x02", "0x08")
     assert facts["emmc_boot1_bl2_md5"] == "11" * 16 and facts["emmc_boot1_fip_md5"] == "22" * 16
+    assert (facts["dxm1_pcie_device"], facts["dxm1_fw_version"]) == ("0x0000", "2.4.0")
     assert facts["xspi_jedec_id"] == "0xaabbcc" and facts["xspi_size_bytes"] == str(393216 + 66715648)
     assert (facts["xspi_bl2_md5"], facts["xspi_fip_md5"], facts["xspi_cm33_md5"]) == \
         ("33" * 16, "44" * 16, "55" * 16)

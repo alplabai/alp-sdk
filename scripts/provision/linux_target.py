@@ -14,7 +14,6 @@ import hashlib
 import re
 import shlex
 import subprocess
-import sys
 import time
 import zlib
 from dataclasses import dataclass
@@ -73,13 +72,6 @@ CLKGEN_REG_COUNT = len(CLKGEN_OTP_IMAGE)  # 0x25 (37): reg 0x00..0x24 inclusive
 # registers every boot; a post-boot read must expect the fixed-up values, not
 # the factory ones.
 CLKGEN_FIXUP_REGS = {0x21: 0xC0, 0x24: 0x8E}
-# DX-M1 (V2M-only) vendor firmware + the vendor uart_boot (aarch64) tool
-# binary itself, all pinned by md5 -- see docs/provisioning-v2n.md.
-DXM1_FW_UART_BOOT_MD5 = "ae449610ca72f4ebd431e4e2f7ebe0ab"
-DXM1_FW_MD5 = "88641281169f35de5ed7e33c072c93a9"
-DXM1_FW_VERSION = "2.4.0"
-DXM1_UART_BOOT_TOOL_MD5 = "5971694fb5b616bffcadcc5e6d32c1db"
-
 # preset i2c_devices bus name -> bench.yaml i2c_bus key
 PRESET_BUS_TO_BENCH = {"e1m_i2c0": "eeprom", "brd_i2c": "brd"}
 
@@ -659,16 +651,19 @@ def clkgen_diff(image: bytes) -> list[str]:
             for i in range(CLKGEN_REG_COUNT) if image[i] != want[i]]
 
 
-# --- DX-M1 NPU (V2M-only): SPI-NAND recovery boot over UART -------------------------------
-
-# PCI-to-PCI bridge class (root ports and any intermediate switch port share
-# it); anything else enumerated under /sys/bus/pci/devices is an endpoint.
-PCI_CLASS_BRIDGE_PREFIX = "0x0604"
+# --- DX-M1 NPU (V2M-only): sysfs GPIO + read-only status ---------------------------------
+# The flash orchestration is provision/dxm1.py; these are the primitives it and the
+# census share.
 
 # the DEEPX 0.75 V rail; never a UART-mux/reset line -- gpiolib reconfigures
 # a pin on read and would kill it. Enforced at the single sysfs choke point
 # (_sysfs_gpio_dir) as well as steps.py's own bench.yaml validation.
 DXM1_REFUSED_GPIO_LINES = {52: "P64", 53: "P65"}
+# The DX-M1 is the only endpoint behind the root port, at bus 01.
+DXM1_PCIE_DEVICE = "/sys/bus/pci/devices/0000:01:00.0/device"
+DXM1_PCIE_FW_RUNNING = "0x0000"   # the firmware booted from the SPI-NAND
+DXM1_PCIE_ROM_BOOT = "0x0001"     # the ROM's own PCIe-boot endpoint: no firmware on the NAND
+_FW_LINE_RE = re.compile(r"(?i)\b(?:fw|firmware)\b[^\n]*?v?(\d+\.\d+\.\d+[\w.+-]*)")
 
 
 def _sysfs_gpio_line_name(line: int) -> str:
@@ -741,84 +736,46 @@ def _sysfs_gpio_dir(t: LinuxTarget, label: str, line: int) -> str:
                      f"{numeric} nor {named} appeared")
 
 
-def dxm1_reset_pulse(t: LinuxTarget, label: str, reset_line: int) -> None:
-    """Pulse PA6 (active-low M1_RESET) low for 100 ms then drive it high
-    again, in one ssh round trip so the 100 ms hold is timed by the board's
-    own `sleep`, not host-to-board latency. `direction`'s "high"/"low"
-    values set direction and value atomically (no separate value write to
-    glitch on). Chained with `&&` so a failed `echo low` short-circuits
-    instead of silently proceeding straight to the final `echo high`. DX-M1
-    PORES_N has an internal pull-up, so the final driven-high level is an
-    active drive that happens to match the pin's idle (deasserted) state,
-    not a "release" of the line."""
+def dxm1_reset_pulse(t: LinuxTarget, label: str, reset_line: int, hold_s: float = 0.5) -> None:
+    """Pulse PA6 (active-low M1_RESET) low for `hold_s` seconds then drive it high
+    again, in one ssh round trip so the hold is timed by the board's own `sleep`,
+    not host-to-board latency. `direction`'s "high"/"low" values set direction and
+    value atomically (no separate value write to glitch on). Chained with `&&` so a
+    failed `echo low` short-circuits instead of silently proceeding straight to the
+    final `echo high`. DX-M1 PORES_N has an internal pull-up, so the final
+    driven-high level is an active drive that happens to match the pin's idle
+    (deasserted) state, not a "release" of the line."""
     d = _sysfs_gpio_dir(t, label, reset_line)
-    t.run(f"echo low > {d}/direction && sleep 0.1 && echo high > {d}/direction")
+    t.run(f"echo low > {d}/direction && sleep {hold_s:g} && echo high > {d}/direction")
 
 
-def dxm1_uart_boot(t: LinuxTarget, label: str, uart_line: int, reset_line: int,
-                   uart_device: str, tool: str, fw_uart_boot: str, fw: str) -> str:
-    """Mux V2N P75 to the DX-M1 UART0 (driven high via sysfs for the whole
-    transfer -- a sysfs value write holds on its own, no background process
-    needed), pulse the PA6 reset (low 100 ms, high), then run the vendor
-    `uart_boot` twice against the ROM's XMODEM fallback ('C' prompt on an
-    empty NAND): once for the bootloader stage, once for the application
-    firmware (`-d <uart_device>` on both -- the vendor tool needs the device
-    path for either transfer mode). Drives P75 low again before returning,
-    even on failure (the mux-high write is inside the `try` too, so a
-    resolve-then-mux failure still runs the release). If the release itself
-    fails: raise loudly when it's the only failure (silently leaving the
-    DX-M1 UART0 muxed in would strand the console), but never mask an
-    already-propagating exception from the transfer -- that one is the real
-    root cause, so the release failure is only logged. Never touches V2N
-    P64/P65 (the DEEPX 0.75 V rail): this mechanism is a UART mux line and a
-    reset line only, enforced in `_sysfs_gpio_dir`."""
-    mux_dir = _sysfs_gpio_dir(t, label, uart_line)
-    try:
-        t.run(f"echo high > {mux_dir}/direction")
-        dxm1_reset_pulse(t, label, reset_line)
-        out1 = t.run(f"{shlex.quote(tool)} -d {shlex.quote(uart_device)} "
-                     f"-f {shlex.quote(fw_uart_boot)} -b 115200", timeout=120.0).stdout
-        out2 = t.run(f"{shlex.quote(tool)} -d {shlex.quote(uart_device)} "
-                     f"-F {shlex.quote(fw)} -U -b 115200", timeout=300.0).stdout
-    finally:
-        r = t.run(f"echo low > {mux_dir}/direction", check=False)
-        if r.rc != 0:
-            msg = (f"could not release {mux_dir} (P75 UART mux) after the DX-M1 "
-                   f"transfer (rc={r.rc}): {r.stderr.strip()[-200:]}")
-            if sys.exc_info()[0] is None:
-                raise BenchError(msg)
-            print(f"WARNING: {msg} -- not raised, masking an in-flight exception",
-                  file=sys.stderr)
-    return out1 + out2
+def dxm1_drive_high(t: LinuxTarget, label: str, line: int) -> str:
+    """Export `line` and drive it high (a sysfs direction write holds on its own)."""
+    d = _sysfs_gpio_dir(t, label, line)
+    t.run(f"echo high > {d}/direction")
+    return d
 
 
-def dxm1_pcie_present(t: LinuxTarget, vendor_id: str | None = None) -> bool:
-    """A DEEPX PCIe *endpoint* is enumerated, not just a bridge: every boot
-    lists the SoC's own root port, and any intermediate switch port shares
-    its PCI class (0x0604xx, read from `/sys/bus/pci/devices/*/class`); at
-    least one entry whose class does NOT start with that prefix must be
-    present. When `vendor_id` is given (bench.yaml `dxm1.pcie_vendor_id`,
-    e.g. "0xXXXX" -- the real ID is TBD, DEEPX has not published the DX-M1's
-    PCI vendor/device ID in any vendor material seen so far), an endpoint
-    must also match it via `/sys/bus/pci/devices/*/vendor`; until a
-    bench.yaml supplies one, any non-bridge entry counts."""
-    out = t.run("ls /sys/bus/pci/devices", check=False).stdout.split()
-    endpoints = []
-    for d in out:
-        r = t.run(f"cat /sys/bus/pci/devices/{shlex.quote(d)}/class", check=False)
-        if r.rc == 0 and r.stdout.strip().lower().startswith(PCI_CLASS_BRIDGE_PREFIX):
-            continue
-        endpoints.append(d)
-    if not endpoints:
-        return False
-    if vendor_id is None:
-        return True
-    want = vendor_id.lower()
-    for d in endpoints:
-        r = t.run(f"cat /sys/bus/pci/devices/{shlex.quote(d)}/vendor", check=False)
-        if r.rc == 0 and r.stdout.strip().lower() == want:
-            return True
-    return False
+def dxm1_pcie_device(t: LinuxTarget) -> str | None:
+    """The DX-M1's PCI device id ("0x0000" firmware running, "0x0001" ROM PCIe boot),
+    None when no endpoint is enumerated at 0000:01:00.0. Read-only."""
+    r = t.run(f"cat {DXM1_PCIE_DEVICE}", check=False)
+    out = r.stdout.strip().lower()
+    return out if r.rc == 0 and re.fullmatch(r"0x[0-9a-f]{4}", out) else None
+
+
+def parse_dxm1_fw_version(text: str) -> str | None:
+    """The firmware version from `dxrt-cli -s` output (first fw/firmware line carrying
+    an x.y.z token), without a leading "v". ponytail: the line format is not pinned by
+    DEEPX; tighten the regex once a bench capture is committed as a fixture."""
+    m = _FW_LINE_RE.search(text)
+    return m[1] if m else None
+
+
+def dxm1_fw_version(t: LinuxTarget) -> str | None:
+    """`dxrt-cli -s` firmware version, None when the tool is absent or prints none."""
+    r = t.run("dxrt-cli -s", timeout=60.0, check=False)
+    return parse_dxm1_fw_version(r.stdout) if r.rc == 0 else None
 
 
 # --- census ----------------------------------------------------------------------------
@@ -964,6 +921,16 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
             if role in sizes:
                 facts[key] = t.md5(f"/dev/mtd{mtd}", off, sizes[role])
 
+    def dxm1():
+        dev = dxm1_pcie_device(t)
+        facts["dxm1_pcie_device"] = dev or "absent"
+        if dev == DXM1_PCIE_FW_RUNNING:
+            ver = dxm1_fw_version(t)
+            if ver:
+                facts["dxm1_fw_version"] = ver
+            else:
+                notes.append("dxm1_fw_version: dxrt-cli -s printed no firmware version")
+
     def identity():
         bus = i2c_bus["eeprom"]
         rd = lambda op: i2c_transfer(t, bus, gates.identity_frame(op))  # noqa: E731
@@ -1025,7 +992,7 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
             facts[f"eth{i}_link"] = f"{state} ({n}) carrier={carrier} speed={speed} anlpar={anlpar}"
 
     for name, fn in (("soc", soc), ("cpu_mem", cpu_mem), ("storage", storage), ("xspi", xspi),
-                     ("identity", identity), ("power", power), ("clocks_rtc", clocks_rtc),
+                     ("dxm1", dxm1), ("identity", identity), ("power", power), ("clocks_rtc", clocks_rtc),
                      ("network", network)):
         group(name, fn)
     return facts, notes

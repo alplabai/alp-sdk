@@ -181,7 +181,7 @@ Every PSU command is logged with a monotonic timestamp in the step log.
 | `write_rootfs` | stream the wic into the eMMC user area (refused while Linux runs from the eMMC), `fsck -n`, `/boot/<dtb>` present |
 | `census` | read-only: every auto ledger key the unit can provide |
 | `eeprom_manifest` | preconditions, 128-byte manifest in 8 × 16-byte page writes at `0x50`, readback, cold cycle, re-read; only then the staged blob is promoted to `<serial>.manifest.bin` |
-| `dxm1_npu_flash` | `v2n-m1` only, **skipped by default** (`--enable-dxm1-flash`): DX-M1 SPI-NAND over the UART recovery path. **BENCH-PENDING** -- see below |
+| `dxm1_npu_flash` | `v2n-m1` bundles that carry the DX-M1 set: firmware over the ROM UART path, probe = PCIe `0x0000` + `dxrt-cli -s` version, see below |
 | `pmic_verify` | compare registers against `--pmic-expect` |
 | `secure_page` | write the 64-byte Secure Data Page, read back, compare. Never locks |
 | `dsw1_xspi_remove_sd` | operator: boot switch to xSPI, remove the microSD |
@@ -239,65 +239,65 @@ confirms the boot console showed U-Boot's own `ALP: 5L35023B clock:` line.
 a real defect, not a soft warning it can look past). Ledger facts:
 `clkgen_otp_raw` (all 37 bytes as read, hex), `clkgen_i2c_addr`.
 
-### `dxm1_npu_flash`: the DX-M1 NPU (V2M only) -- BENCH-PENDING
+### `dxm1_npu_flash`: the DX-M1 NPU firmware (V2M only)
 
-The DX-M1 must be strapped for SPI-NAND/UART recovery boot per the internal
-hardware notes before this step can do anything real, so it is **skipped by
-default** and needs `--enable-dxm1-flash`. **This path has never run on
-silicon and cannot succeed on the first V2M bench unit yet** (its DX-M1
-does not start its reference clock) -- do not pass `--enable-dxm1-flash` on
-that unit. When enabled, from Linux it drives V2N `P75` high via sysfs
-(UART mux to the DX-M1 UART0, default low; a sysfs `direction`/`value` write
-holds on its own for the whole transfer, no backgrounded process needed),
-pulses `PA6` (DX-M1 reset: low 100 ms, high), and -- with the NAND empty,
-the ROM's XMODEM fallback ('C' prompt @115200) -- runs the vendor
-`uart_boot` (aarch64) twice against `-d <dev>`: the bootloader stage
-(`-f fw_uart_boot.bin -b 115200`), then the application firmware
-(`-F fw.bin -U -b 115200`); `P75` is driven low again afterward. Verification
-is a cold boot followed by a DEEPX PCIe **endpoint** enumerating under
-`/sys/bus/pci/devices` -- the root port alone (`0000:00:00.0`) never counts;
-an optional `dxm1.pcie_vendor_id` in bench.yaml narrows the match further
-once DEEPX publishes the DX-M1's PCI IDs. **Never runs `sf_erase`** (vendor
-docs disagree on its size) and **never touches V2N `P64`/`P65`** (the DEEPX
-0.75 V rail -- `gpiolib` reconfigures a pin on read and would kill it; see
-#2288). The vendor `uart_boot` tool and firmware binaries are DEEPX files
-and are never committed here: their paths come from `bench.yaml`
-`dxm1.{uart_boot,fw_uart_boot,fw}` (alongside
-`dxm1.{gpio_chip,uart_mux_line,reset_line,uart_device}`), each `TBD (null)`
-until a bench has them. There is no `libgpiod`/`gpioset` on the shipping V2N
-image (`CONFIG_GPIO_SYSFS=y` only), so lines are driven via
-`/sys/class/gpio`: `gpio_chip` is the pinctrl device's sysfs **label**
-(e.g. `"10410000.pinctrl"`), used to read that chip's live `base` rather
-than trusting a fixed number, which shifts across kernel/DT revisions.
-`uart_mux_line`/`reset_line` are **within-chip line numbers**
-(`port * 8 + pin`, e.g. `P75` = 61, `PA6` = 86 -- add the chip's `base` to
-get the sysfs global number), must be distinct ints, and the tool refuses
-`52`/`53` (`P64`/`P65`, the DEEPX rail) outright, before any export or
-direction write -- at BOTH the `steps.py` bench.yaml-validation layer and,
-belt-and-braces, at `_sysfs_gpio_dir`, the single choke point every DX-M1
-GPIO helper resolves a line through (so any future caller that bypasses
-`steps.py` still can't reach the rail). A line the kernel already exports
-under its DT name (e.g. `/sys/class/gpio/P75` on this board) is only
-trusted after confirming that named entry's `device` symlink actually
-resolves under the labelled chip's own device, not a same-named line on
-some other chip. The step verifies both firmware files' md5 and the vendor
-`uart_boot` binary's own md5 against pinned values before touching
-hardware, and records `dxm1_fw_uart_boot_md5`, `dxm1_fw_md5`,
-`dxm1_fw_version`, `dxm1_uart_boot_tool_md5` in the ledger.
+Programs the DX-M1's SPI-NAND through the ROM's UART (XMODEM) path, so no
+manual procedure is left. It applies to a `v2n-m1` bundle that carries the
+DX-M1 programming set; without it (or on another family) the step is
+`skipped` with the reason. The firmware is license-gated and is **never in
+this repository**: the files ride in the alp-sdk-internal release bundle as
+optional components, `flash_target` `dxm1`
+(`metadata/schemas/som-release-bundle-v1.schema.json`):
 
-Example `bench.yaml` shape (every value `TBD (null)` until a bench has one):
+| role | file | notes |
+|---|---|---|
+| `dxm1_fw` | application firmware (`fw_no_pmic_gpio.bin`) | carries the expected firmware `version` (e.g. `2.4.0`), required |
+| `dxm1_fw_uart_boot` | UART bootloader stage (`fw_uart_boot_no_pmic_gpio.bin`) | |
+| `dxm1_dxflash` | the `dxflash.py` helper | |
+| `dxm1_dtb` | dxuart2 device tree (pinctrl `sci1-dx`, `serial@12801000` okay, `pcie@13400000` disabled, alias `serial1`) | |
+| `dxm1_dxcli` | `dxcli.py` | only needed to erase a NAND that already holds boot2nd |
 
-```yaml
-dxm1:
-  gpio_chip: null          # e.g. "10410000.pinctrl" (pinctrl chip's sysfs label)
-  uart_mux_line: null      # int, within-chip line number (P75 = 61)
-  reset_line: null         # int, within-chip line number (PA6 = 86); != uart_mux_line
-  uart_device: null        # e.g. "/dev/ttySC1"
-  uart_boot: null          # path to the vendor uart_boot binary
-  fw_uart_boot: null       # path to the pinned fw_uart_boot.bin
-  fw: null                 # path to the pinned fw.bin
-  pcie_vendor_id: null     # optional, e.g. "0xXXXX" (real ID TBD); narrows the PCIe endpoint match
-```
+**Precondition (hardware, not measurable by the tool):** the DX-M1
+BOOT_CFG straps must be mode 0, i.e. E1M `IO17`, `IO19` and `IO20` low. The
+X-EVK pulls them up, so the carrier needs a rework (1k to GND on each). A
+wrong strap is recognised from the ROM output (`pcie boot(1/3) .. (3/3) failed
+(0x1) PWD:` with no XMODEM `C`) and the step fails with a message naming the
+strap rework.
+
+**Probe (already satisfied):** the DX-M1 PCIe device
+`/sys/bus/pci/devices/0000:01:00.0/device` reads `0x0000` (firmware running;
+`0x0001` is the ROM's own PCIe boot) **and** `dxrt-cli -s` reports the
+bundle's firmware version.
+
+**Run**, serial, over the unit's network target:
+
+1. push the bundle files to `/tmp` (md5 checked on the target); remember
+   whether the NAND already runs boot2nd (PCIe device `0x0000`);
+2. back up `/boot/<fdtfile>` as `.release`, install the dxuart2 DTB, warm
+   `reboot` (the UART appears, the PCIe link is off);
+3. if boot2nd was running: `sf_erase 0 1000000` through `dxcli.py` (a blank
+   NAND answers NO PROMPT, which is fine);
+4. export `P75` (UART mux) and `PA6` (reset) high, start `dxflash.py
+   <uart_boot.bin> <fw.bin>` in the background, 2 s later pulse `PA6` low for
+   0.5 s, wait for it. Success needs dxflash's **real exit code 0** (read from
+   a file, not a pipe) **and** `update_firmware end. 0` plus `good CRC` /
+   `jump to rtos`;
+5. restore the release DTB and verify its md5 (also after any failure past
+   step 2; a leftover `.release` from an interrupted run is healed before a
+   new backup, never overwritten);
+6. `sync`, `poweroff`, wait for the halt line, cold cycle (the normal
+   `MIN_ON_S` / `MIN_OFF_S` rules of `Power.cycle`), log in;
+7. verify PCIe device `0x0000` and the `dxrt-cli -s` version.
+
+`P75`/`PA6` are lines `61`/`86` on `10410000.pinctrl` by default; a bench.yaml
+`dxm1:` block may override `gpio_chip`, `uart_mux_line`, `reset_line` (distinct
+ints; `52`/`53` = `P64`/`P65`, the DEEPX 0.75 V rail, are refused before any
+export, here and again in `_sysfs_gpio_dir`). The `dxrt-cli -s` line format is
+not pinned by DEEPX: the parser takes the first `fw`/`firmware` line with an
+`x.y.z` token. Ledger facts: `dxm1_fw_version`, `dxm1_fw_md5`,
+`dxm1_fw_uart_boot_md5` (md5 of the bundle files used) when the step is done or
+already satisfied. `census` also reads `dxm1_pcie_device` and
+`dxm1_fw_version` (read-only) on any unit.
 
 ### Lock preconditions (`run --lock`)
 
@@ -327,11 +327,7 @@ lock frame, only a re-read with bit 1 set counts.
   `--reprovision-from`, and never while the identity header is locked.
 - **The 5L35023B cannot be re-burned in-system.** `clkgen_verify` only reads;
   a bad OTP image means a bad unit, not a fixable one.
-- **`dxm1_npu_flash` is bench-pending and defaults off.** It has never run on
-  silicon and cannot succeed on the first V2M bench unit yet (its DX-M1 does
-  not start its reference clock). Do not pass `--enable-dxm1-flash` until the
-  mechanism is bench-verified; the DX-M1 UART mux and reset lines are
-  otherwise untested on real hardware.
+- **`dxm1_npu_flash` swaps the release DTB while it runs.** The release DTB is backed up as `/boot/<fdtfile>.release` and restored (md5-verified) on success and on failure; if a run is killed, the next run restores it first. The BOOT_CFG straps (E1M `IO17`/`IO19`/`IO20` low) are a carrier property the tool cannot measure.
 
 ## Testing
 

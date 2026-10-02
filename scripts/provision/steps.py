@@ -32,7 +32,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import TypeVar
 
-from provision import gates, ledger_out, uboot
+from provision import dxm1, gates, ledger_out, uboot
 from provision import linux_target as lt
 from provision.bench import Bench, BenchError, ExpectTimeout
 from provision.console_target import ConsoleSwdProbe, ConsoleTarget
@@ -120,7 +120,6 @@ class Ctx:
     mfg_date_override: date | None = None
     flash_writer: Path | None = None
     gd32_fw: Path | None = None
-    dxm1_flash: bool = False              # BENCH-PENDING: default skip, see Dxm1NpuFlash
     transfer: str = "sd"                  # "sd" | "xmodem"
     station: str | None = None
     by: str = "provision_som"
@@ -1158,78 +1157,165 @@ class Gd32Flash(Step):
         return self.result(ctx, "GD32 flashed and verified" if ctx.execute else "would flash the GD32", ev)
 
 
-DXM1_REFUSED_GPIO_LINES = lt.DXM1_REFUSED_GPIO_LINES  # single source: linux_target's sysfs choke point
+def warm_reboot_to_linux(ctx: Ctx) -> None:
+    """Warm `reboot` from Linux (no PSU action), wait for the console login, re-attach.
+    The DX-M1 DTB swap needs only a new device tree, not a power cycle."""
+    b = ctx.need_bench()
+    n = len(b.console.transcript)
+    b.console.drain()
+    ctx.linux.run("sync; (sleep 1; reboot) </dev/null >/dev/null 2>&1 &", check=False)
+    boot_to_linux(ctx, resume_mark=n)
+
+
+def poweroff_and_cold_boot(ctx: Ctx) -> str:
+    """Clean `poweroff` (sync first, wait for the kernel's halt line), then the usual
+    cold cycle (Power.cycle enforces MIN_ON_S / MIN_OFF_S) and login."""
+    b = ctx.need_bench()
+    t = ctx.linux
+    t.run("sync", check=False, timeout=120.0)
+    try:
+        t.run("poweroff", check=False, timeout=30.0)
+    except BenchError:
+        pass                    # ssh drops with the host
+    try:
+        b.console.expect(r"Power down|System halted|reboot: Power", 60.0)
+    except ExpectTimeout:
+        # ponytail: a line the image does not print costs 15 s of quiet, not a hang;
+        # the disks were synced above. Pin the halt line once a bench log shows it.
+        b.console.drain(5.0, 15.0)
+    return boot_to_linux(ctx)
+
+
+def _norm_ver(v: str) -> str:
+    return v.strip().lstrip("vV")
 
 
 class Dxm1NpuFlash(Step):
-    """BENCH-PENDING: DX-M1 SPI-NAND-over-UART recovery has never run on
-    silicon and cannot succeed on the first V2M bench unit yet (its DX-M1
-    does not start its reference clock). Skipped unless the caller passes
-    --enable-dxm1-flash, and only for a v2n-m1 (DEEPX) family bundle. The
-    DX-M1 must be strapped for SPI-NAND/UART boot per the internal hardware
-    notes before this step can run for real."""
+    """DX-M1 NPU firmware into its SPI-NAND over the ROM's UART path (V2M / v2n-m1).
+
+    Needs the BOOT_CFG straps in mode 0 (E1M IO17/IO19/IO20 low; the X-EVK needs a
+    carrier rework) and the license-gated firmware files from the release bundle
+    (``dxm1_*`` roles; without them the step is skipped). Run order: push files,
+    swap the release DTB for the dxuart2 DTB (UART on, PCIe off) and warm reboot,
+    [sf_erase when boot2nd already runs], dxflash.py + PA6 reset pulse, restore the
+    release DTB (md5-verified, also on failure), clean poweroff + cold cycle, verify
+    PCIe device 0x0000 and the ``dxrt-cli -s`` firmware version. See dxm1.py."""
     name = "dxm1_npu_flash"
-    always_run = True
+
+    @staticmethod
+    def _component(ctx, role):
+        return next((c for c in ctx.bundle.get("components", []) if c.get("role") == role), None)
+
+    def _inapplicable(self, ctx) -> str:
+        if ctx.family != "v2n-m1":
+            return "not a V2M/DEEPX SKU: no DX-M1 to flash"
+        missing = [r for r in dxm1.REQUIRED_ROLES if self._component(ctx, r) is None]
+        if missing:
+            return (f"bundle {ctx.bundle.get('release_version', '?')} carries no DX-M1 firmware "
+                    f"(missing {', '.join(missing)})")
+        return ""
+
+    def _expected_version(self, ctx) -> str:
+        v = self._component(ctx, dxm1.ROLE_FW).get("version")
+        if not v:
+            raise Refused(f"bundle component {dxm1.ROLE_FW} declares no version: nothing to verify the flash against")
+        return _norm_ver(v)
+
+    def _evidence(self, ctx, version: str) -> dict[str, str]:
+        return {"dxm1_fw_version": version, "dxm1_fw_md5": _md5(ctx.artefact_bytes(dxm1.ROLE_FW)),
+                "dxm1_fw_uart_boot_md5": _md5(ctx.artefact_bytes(dxm1.ROLE_UART_BOOT))}
+
+    def probe(self, ctx):
+        if why := self._inapplicable(ctx):
+            return Satisfied({}, why)
+        version = self._expected_version(ctx)
+        t = ctx.need_linux()
+        if t is None:
+            return Unknown("no Linux target")
+        dev = lt.dxm1_pcie_device(t)
+        if dev != lt.DXM1_PCIE_FW_RUNNING:
+            return Unsatisfied(f"DX-M1 PCIe device {dev or 'absent'}, want {lt.DXM1_PCIE_FW_RUNNING} (firmware running)")
+        got = lt.dxm1_fw_version(t)
+        if got is None or _norm_ver(got) != version:
+            return Unsatisfied(f"DX-M1 firmware {got or 'unreadable'} != bundle {version}")
+        return Satisfied({**self._evidence(ctx, version), "dxm1_pcie_device": dev})
+
+    @staticmethod
+    def _heal(ctx, dtb_name: str, st: dict) -> str:
+        """After a failure past the DTB swap: put the release DTB back (best effort)."""
+        if "release" not in st or not ctx.execute:
+            return ""
+        try:
+            dxm1.restore_dtb(ctx.linux, dtb_name, st["release"])
+            return "; release DTB restored (the unit runs the dxuart2 DTB until its next cold cycle)"
+        except (BenchError, AttributeError) as e:
+            return f"; ALSO could not restore the release DTB: {e}"
 
     def run(self, ctx):
-        if ctx.family != "v2n-m1":
-            return self.result(ctx, "not a V2M/DEEPX SKU: no DX-M1 to flash", status="skipped")
-        if not ctx.dxm1_flash:
-            return self.result(
-                ctx, "BENCH-PENDING: DX-M1 SPI-NAND-over-UART recovery has never run on silicon "
-                "and cannot succeed on the first V2M bench unit yet (its DX-M1 does not start its "
-                "reference clock); pass --enable-dxm1-flash once bench-verified",
-                status="skipped")
-        b = ctx.need_bench()
-        d = b.raw.get("dxm1") or {}
-        for key in ("gpio_chip", "uart_mux_line", "reset_line", "uart_device",
-                    "uart_boot", "fw_uart_boot", "fw"):
-            if d.get(key) is None:
-                raise Refused(f"bench.yaml dxm1.{key} is TBD (null)")
-        for key in ("uart_mux_line", "reset_line"):
-            line = d[key]
-            if not isinstance(line, int) or isinstance(line, bool):
-                raise Refused(f"bench.yaml dxm1.{key} must be an int gpiochip line number, got {line!r}")
-            if line in DXM1_REFUSED_GPIO_LINES:
-                raise Refused(f"bench.yaml dxm1.{key} = {line} is {DXM1_REFUSED_GPIO_LINES[line]} "
-                              "(the DEEPX 0.75 V rail): gpiolib reconfigures a pin on read and would "
-                              "kill the rail; refusing")
-        if d["uart_mux_line"] == d["reset_line"]:
-            raise Refused(f"bench.yaml dxm1.uart_mux_line == dxm1.reset_line ({d['uart_mux_line']}); "
-                          "these must be distinct gpiochip lines")
-        fw_boot_local, fw_local = Path(d["fw_uart_boot"]), Path(d["fw"])
-        uart_boot_local = Path(d["uart_boot"])
-        for path, want, label in ((fw_boot_local, lt.DXM1_FW_UART_BOOT_MD5, "fw_uart_boot"),
-                                  (fw_local, lt.DXM1_FW_MD5, "fw"),
-                                  (uart_boot_local, lt.DXM1_UART_BOOT_TOOL_MD5, "uart_boot")):
-            got = _md5(path.read_bytes())
-            if got != want:
-                raise Refused(f"{label} {path.name}: md5 {got} != pinned {want} "
-                              f"(want DEEPX release {lt.DXM1_FW_VERSION})")
+        if why := self._inapplicable(ctx):
+            return self.result(ctx, why, status="skipped")
+        version = self._expected_version(ctx)
+        try:
+            chip, mux, rst = dxm1.gpio_config(ctx.need_bench().raw)
+        except ValueError as e:
+            raise Refused(str(e)) from e
         t = ctx.need_linux()
-        remote_tool, remote_boot, remote_fw = "/tmp/uart_boot", "/tmp/fw_uart_boot.bin", "/tmp/fw.bin"
+        dtb_name = gates.fip_fdtfile(ctx.artefact_bytes("fip"))
+        before = lt.dxm1_pcie_device(t) if t is not None else None
+        # boot2nd already running from the NAND (device 0x0000): erase before reprogramming
+        erase = before == lt.DXM1_PCIE_FW_RUNNING
+        if erase and self._component(ctx, dxm1.ROLE_DXCLI) is None:
+            raise Refused("the DX-M1 NAND already holds boot2nd (PCIe device 0x0000) but the bundle has no "
+                          f"{dxm1.ROLE_DXCLI} (dxcli.py) to run sf_erase 0 1000000 first")
+        roles = list(dxm1.REQUIRED_ROLES) + ([dxm1.ROLE_DXCLI] if erase else [])
+        ev = self._evidence(ctx, version)
+        st: dict = {}
+
+        def push():
+            for r in roles:
+                dxm1.push(t, ctx.artefact(r), dxm1.REMOTE[r])
+
+        def install():
+            st["release"] = dxm1.install_dtb(t, dtb_name, ctx.artefact(dxm1.ROLE_DTB))
 
         def flash():
-            t.put(Path(d["uart_boot"]), remote_tool)
-            t.put(fw_boot_local, remote_boot)
-            t.put(fw_local, remote_fw)
-            t.run(f"chmod +x {remote_tool}")
-            return lt.dxm1_uart_boot(t, d["gpio_chip"], d["uart_mux_line"], d["reset_line"],
-                                     d["uart_device"], remote_tool, remote_boot, remote_fw)
-        ctx.mutate(f"hold P75 high, pulse PA6, run vendor uart_boot (bootloader then "
-                   f"firmware {lt.DXM1_FW_VERSION}), release P75", flash)
+            tt = ctx.linux
+            if erase:
+                ev["dxm1_nand_erase"] = dxm1.erase_nand(tt)
+            rc, log = dxm1.run_dxflash(tt, chip, mux, rst)
+            ev["dxm1_dxflash_rc"] = str(rc)
+            ctx.step_logs[self.name] = log
+            return dxm1.classify(rc, log)
+
+        try:
+            ctx.mutate(f"push {', '.join(roles)} to /tmp, md5-checked on the target", push)
+            ctx.mutate(f"back up /boot/{dtb_name} as .release, install the dxuart2 DTB (UART on, PCIe off)", install)
+            ctx.mutate("warm reboot onto the dxuart2 DTB", lambda: warm_reboot_to_linux(ctx))
+            ctx.mutate(f"{'sf_erase 0 1000000 via dxcli.py (NAND holds boot2nd); ' if erase else ''}"
+                       f"P75 + PA6 high, dxflash.py in the background, PA6 low {dxm1.RESET_HOLD_S:g} s after "
+                       f"{dxm1.RESET_AFTER_S:g} s, wait for 'update_firmware end. 0' + CRC, keep its real exit code",
+                       flash)
+        except dxm1.StrapError as e:
+            raise Refused(f"{e}{self._heal(ctx, dtb_name, st)}") from e
+        except (BenchError, Refused) as e:
+            raise type(e)(f"{e}{self._heal(ctx, dtb_name, st)}") from e
+        ctx.mutate(f"restore /boot/{dtb_name} from .release, verify its md5",
+                   lambda: dxm1.restore_dtb(ctx.linux, dtb_name, st["release"]))
+        ctx.mutate("clean poweroff, cold cycle, log in", lambda: poweroff_and_cold_boot(ctx))
 
         def verify():
-            boot_to_linux(ctx)
-            if not lt.dxm1_pcie_present(ctx.linux, d.get("pcie_vendor_id")):
-                raise Refused("cold boot: /sys/bus/pci/devices shows no DEEPX endpoint "
-                              "(root port only, or none at all); no DEEPX PCIe link")
-        ctx.mutate("cold boot; verify a DEEPX PCIe endpoint enumerates (not just the root port)", verify)
-        ev = {"dxm1_fw_uart_boot_md5": lt.DXM1_FW_UART_BOOT_MD5, "dxm1_fw_md5": lt.DXM1_FW_MD5,
-              "dxm1_fw_version": lt.DXM1_FW_VERSION, "dxm1_uart_boot_tool_md5": lt.DXM1_UART_BOOT_TOOL_MD5}
-        return self.result(ctx, "DX-M1 SPI-NAND programmed over UART recovery and verified "
-                           "(PCIe link up)" if ctx.execute
-                           else "would program the DX-M1 over UART recovery", ev)
+            dev = lt.dxm1_pcie_device(ctx.linux)
+            if dev != lt.DXM1_PCIE_FW_RUNNING:
+                raise BenchError(f"DX-M1 PCIe device {dev or 'absent'} after the cold boot, want "
+                                 f"{lt.DXM1_PCIE_FW_RUNNING} ({lt.DXM1_PCIE_ROM_BOOT} = the ROM's own PCIe boot: "
+                                 "no firmware on the NAND)")
+            got = lt.dxm1_fw_version(ctx.linux)
+            if got is None or _norm_ver(got) != version:
+                raise BenchError(f"dxrt-cli -s firmware {got or 'unreadable'} != bundle {version}")
+            ev["dxm1_pcie_device"] = dev
+        ctx.mutate("verify PCIe 0000:01:00.0 device 0x0000 and the dxrt-cli -s firmware version", verify)
+        return self.result(ctx, f"DX-M1 firmware {version} programmed over the ROM UART path and verified"
+                           if ctx.execute else f"would program the DX-M1 firmware {version} over the ROM UART path", ev)
 
 
 class PmicVerify(Step):
