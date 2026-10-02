@@ -577,6 +577,10 @@ bool cc3501e_fw_major_is_acceptable(uint8_t fw_major)
 	       fw_major == (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR_LEGACY;
 }
 
+/* #1937: bounded retry of the reset-time GET_VERSION. */
+#define CC3501E_RESET_VERSION_ATTEMPTS   3u
+#define CC3501E_RESET_VERSION_BACKOFF_MS 200u
+
 alp_status_t cc3501e_reset(cc3501e_t *ctx)
 {
 	/* RECOVERY PRIMITIVE: deliberately does NOT require ctx->initialised.
@@ -722,17 +726,30 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx)
      * the context usable and let the caller's own retry loop keep trying. */
 	uint16_t     fw_version = 0u;
 	alp_status_t vs         = cc3501e_get_version(ctx, &fw_version);
+	/* #1937 (silicon, 1 of 5 cold boots): one missed GET_VERSION right after the
+	 * boot settle is common (slave not armed yet), so retry a bounded number of
+	 * times with a short back-off before concluding anything.  Each retry stays
+	 * CRC-less (fw_proto_major is still 0 here), which is correct: nothing is
+	 * negotiated yet. */
+	for (unsigned attempt = 1u; vs != ALP_OK && attempt < CC3501E_RESET_VERSION_ATTEMPTS;
+	     attempt++) {
+		alp_delay_ms(CC3501E_RESET_VERSION_BACKOFF_MS);
+		vs = cc3501e_get_version(ctx, &fw_version);
+	}
 	if (vs != ALP_OK) {
-		/* Transport hiccup reading the version, not a version disagreement:
-		 * restore the prior fw_proto_major/minor (zeroed a few lines up for
-		 * GET_VERSION's own framing) so the context really is left as it was,
-		 * and let the caller retry (the soaks treat GET_VERSION as a liveness
-		 * probe, not a compat gate). Without this restore a healthy MAJOR-4
-		 * peer whose GET_VERSION round trip misses -- the common case
-		 * immediately after this reset -- is left with fw_proto_major == 0
-		 * and initialised == true: want_req_crc() then frames every later
-		 * request CRC-less, and that firmware rejects each one until some
-		 * later reset happens to get a version through. */
+		/* Transport miss, not a version disagreement. */
+		if (prior_major == 0u) {
+			/* Fresh context: nothing was ever negotiated, so returning ALP_OK
+			 * would leave fw_proto_major == 0 with initialised == true -- every
+			 * later request framed CRC-less against a MAJOR-4 peer, failing -5
+			 * forever while a bare GET_VERSION still answers (the #1937 half-
+			 * working link).  Fail loudly and leave the ctx down instead; the
+			 * caller's hard-reset/reset retry loop re-arms it. */
+			ctx->initialised = false;
+			return ALP_ERR_TIMEOUT;
+		}
+		/* This context negotiated a major earlier (same peer, warm re-reset):
+		 * keep it, so the context really is left as it was. */
 		ctx->fw_proto_major = prior_major;
 		ctx->fw_proto_minor = prior_minor;
 		return ALP_OK;

@@ -244,6 +244,19 @@ CMDS=(
 	-c "init"
 	"${SELECT_CMDS[@]}"
 	-c "halt"
+	# Reset-catch before loading (alp-sdk#2422). A plain halt can land while
+	# the resident app is inside an interrupt or PendSV handler; that exception
+	# stays ACTIVE through load_image and `reg xPSR`, so the new image runs its
+	# whole life in Handler mode and later faults on stale data (measured on
+	# E1M-AEN803 2026W36-0009: 6/6 faults with the resident caught in its
+	# IRQ 333 handler, 3/3 inside PendSV; 0/3 with this reset-catch). DEMCR
+	# TRCENA|VC_CORERESET, then AIRCR SYSRESETREQ: the core halts at its reset
+	# vector in Thread mode with every exception inactive and the NVIC cleared.
+	-c "mww 0xE000EDFC 0x01000001"
+	-c "mww 0xE000ED0C 0x05FA0004"
+	-c "sleep 100"
+	-c "halt"
+	-c "mww 0xE000EDFC 0x01000000"
 	-c "load_image $BIN 0x0 bin"
 	-c "reg msplim_s 0x00000000"
 	-c "reg msplim_ns 0x00000000"
@@ -278,17 +291,17 @@ CMDS=(
 	# Put the core back where a cold reset would leave it: Thread mode with
 	# the Thumb bit set and IPSR = 0, and MSP selected.
 	#
-	# These two cover the ordinary case. They do NOT rescue a core whose
-	# previous app died in a fault: an ACTIVE exception is architecturally
-	# sticky, and the only exits are an exception return or a real reset.
+	# These two cover the ordinary case. On their own they do NOT rescue a
+	# core whose previous app died in a fault: an ACTIVE exception is
+	# architecturally sticky, and the only exits are an exception return or a
+	# real reset -- which is why the reset-catch above (alp-sdk#2422) runs
+	# before load_image. The history below is why it is needed.
 	# Measured on E1M-AEN803 2026W36-0009 2026-09-20, on a halted core with the fault
 	# active: `mww 0xE000ED24 0x00000000` cleared SHCSR bits 16-18
 	# (MEM/BUS/USGFAULTENA) but bit 2 HARDFAULTACT read back SET, and after
 	# `resume` the core reported IPSR = 3 again. `reg xPSR` only updates
 	# OpenOCD's register cache in that state. So a debugger write cannot
-	# clear it -- if the pre-load halt reports "current mode: Handler
-	# HardFault", POWER CYCLE the board before running; nothing this script
-	# does will unwedge it.
+	# clear it; the SYSRESETREQ reset-catch above is what clears it now.
 	-c "reg xPSR 0x01000000"
 	-c "reg control 0x00000000"
 	-c "reg msp $MSP"

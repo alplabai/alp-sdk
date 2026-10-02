@@ -12,7 +12,7 @@ panel bring-up.
 
 `CMakeLists.txt` now appends the `e1m_evk_rk055hdmipi4ma0` shield before
 `find_package(Zephyr)`, but only for this app's own AEN M55-HP board targets
-(`examples/connectivity/iot-dashboard/CMakeLists.txt:60`
+(`examples/connectivity/iot-dashboard/CMakeLists.txt:46`
 ("list(APPEND SHIELD e1m_evk_rk055hdmipi4ma0)")) — a regex match on `BOARD`,
 resolved from a `-DBOARD=` cache entry or `$ENV{BOARD}` for a plain build, or
 read out of the sysbuild cache file for a `--sysbuild` build (the AEN flow's
@@ -49,7 +49,7 @@ drivers it compiles into this app, none previously covered by this gate), and
 adds the
 example as the third `--testsuite-root` line in this job's (now
 seven-root) list
-(`.github/workflows/pr-twister-aen.yml:462`
+(`.github/workflows/pr-twister-aen.yml:600`
 ("alp-sdk/examples/connectivity/iot-dashboard")) — besides `examples/aen`,
 one of only two roots (with `camera-mjpeg-stream`, added by #2265) that
 contributes a scenario to *both* SKU matrix legs, since mqtt-telemetry and

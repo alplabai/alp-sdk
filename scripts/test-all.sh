@@ -18,7 +18,7 @@
 #   1. Plain-CMake / Yocto build + ctest
 #   2. Plain-CMake / baremetal build (compile-only -- no tests yet)
 #   3. Zephyr twister (skipped if ZEPHYR_BASE is unset)
-#   4. clang-format diff vs HEAD~1 (skipped if no clang-format)
+#   4. clang-format diff vs merge-base origin/dev (skipped if no clang-format)
 #   5. shellcheck over every shipped *.sh (repo-wide `git ls-files
 #      '*.sh'`; skipped if that tool isn't installed)
 #   6. bash -n parse of every shipped *.sh under REAL bash 3.2.57 in a
@@ -702,6 +702,10 @@ stage_twister() {
                --testsuite-root "${REPO_ROOT}/tests/console"
                --testsuite-root "${REPO_ROOT}/examples")
     fi
+    # Examples' testcase.yaml files point EXTRA_CONF_FILE at their
+    # generated/alp.conf; twister configures from the source tree, so write
+    # those fragments first (#866).
+    python3 "${REPO_ROOT}/scripts/gen_example_alp_conf.py" || return 1
     python3 "${ZEPHYR_BASE}/scripts/twister" \
         "${twister_jobs[@]+"${twister_jobs[@]}"}" \
         "${roots[@]}" \
@@ -901,8 +905,21 @@ stage_clang_format() {
         echo "clang-format is installed but no clang-format-diff(.py) helper was found on PATH or under /usr/share/clang -- skipping"
         return 99
     fi
-    # Default to HEAD~1; consumers in CI override via $DIFF_BASE.
-    local base="${DIFF_BASE:-HEAD~1}"
+    # Default: the merge-base with origin/dev, the same base
+    # pr-static-analysis.yml diffs (`git merge-base $BASE_SHA HEAD`), so
+    # this grades every line the PR changes. HEAD~1 is NOT equivalent: on
+    # a batch branch built with `git merge --no-edit` (or any branch with
+    # more than one commit) it is only the LAST merge's delta and hides
+    # everything merged before it. Falls back to HEAD~1 when origin/dev is
+    # absent or HEAD sits on it (merge-base == HEAD would diff nothing),
+    # matching CI's push/merge_group `HEAD~1`. $DIFF_BASE overrides.
+    local base="${DIFF_BASE:-}"
+    if [ -z "${base}" ]; then
+        base=$(git merge-base origin/dev HEAD 2>/dev/null || true)
+        if [ -z "${base}" ] || [ "${base}" = "$(git rev-parse HEAD)" ]; then
+            base="HEAD~1"
+        fi
+    fi
     if ! git rev-parse "${base}" >/dev/null 2>&1; then
         # Shallow clone -- nothing to diff against.
         return 99
@@ -1365,7 +1382,7 @@ stage_generated_files() {
                 gen_cc3501e_gpio_routes gen_power_tree
                 gen_pinmux_capability gen_support_matrix
                 gen_portability_matrix gen_catalog gen_error_catalog
-                gen_verification_status)
+                gen_verification_status gen_chip_driver_classification)
     local g rc
     local gen_total=0 gen_skipped=0
     for g in "${gens[@]}"; do
@@ -1422,8 +1439,8 @@ stage_generated_files() {
     # what to install; otherwise it still skips, loudly.
     if [ -f scripts/gen_npu_ops.py ]; then
         local gen_npu_ops_out npu_ops_touched npu_ops_base
-        # DIFF_BASE overrides, same as the clang-format stage above, but the
-        # default here is merge-base(origin/dev, HEAD), not HEAD~1: a
+        # DIFF_BASE overrides; same default as the clang-format stage above,
+        # merge-base(origin/dev, HEAD) rather than HEAD~1: a
         # multi-commit branch (the normal case for a metadata change like
         # this) has npu_ops-touching commits older than HEAD~1, and HEAD~1
         # would miss them entirely.  If `origin/dev` is unreachable (no such
@@ -1512,6 +1529,7 @@ $(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null 
         metadata/socs/renesas/rzv2n/n44.json \
         docs/portability-matrix.md docs/peripheral-support-matrix.md \
         docs/verification-status.md \
+        docs/chip-driver-classification.md \
         examples/aen \
         src/backends/gpio/cc3501e_rev_dependent_pins.c \
         docs/diagnostics 2>/dev/null; then
@@ -1537,6 +1555,7 @@ $(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null 
             metadata/socs/renesas/rzv2n/n44.json \
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/verification-status.md \
+            docs/chip-driver-classification.md \
             examples/aen \
             src/backends/gpio/cc3501e_rev_dependent_pins.c \
             docs/diagnostics 2>/dev/null; then
@@ -1547,6 +1566,7 @@ $(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null 
             metadata/socs/renesas/rzv2n/n44.json \
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/verification-status.md \
+            docs/chip-driver-classification.md \
             examples/aen \
             src/backends/gpio/cc3501e_rev_dependent_pins.c \
             docs/diagnostics 2>/dev/null | tail -20

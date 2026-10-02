@@ -13,15 +13,6 @@ built on the **E1M open-standard form factor**. It gives you one C/C++ API
 vendor's SDK on top of ARM CMSIS. Change `som.sku:` in a project's
 `board.yaml`, rebuild, ship — within a SoM family, no source changes.
 
-> [!WARNING]
-> **Partially silicon-verified.** Every chip driver, peripheral wrapper, and
-> example builds clean and passes CI on `native_sim`. Two SoM families carry
-> real-silicon evidence today: **E1M-X V2N** (GD32-bridge stack, verified
-> v0.6) and **E1M-AEN801** (peripheral matrix + NPU inference + CC3501E
-> bridge, verified v0.8). The rest (i.MX 93, V2M/DEEPX, AEN301/401/501/601/701)
-> remain pre-silicon. Per-feature status: [`docs/test-plan.md`](docs/test-plan.md);
-> full caveats: [Status](README.md#status) below.
-
 Rendered docs: [**docs.alplab.ai/sdk/introduction**](https://docs.alplab.ai/sdk/introduction) ·
 community: [**community.alplab.ai**](https://community.alplab.ai/) ·
 issues: [**github.com/alplabai/alp-sdk/issues**](https://github.com/alplabai/alp-sdk/issues)
@@ -222,14 +213,13 @@ upstream `bitbake` constraint. Per-OS quickstart + gotchas:
 
 ## Status
 
-**Current ramp — paper-correct, mostly pre-HIL; partial silicon-verified
-additions.** Code merged ≠ verified: every claim is tracked in
+**Verification status.** Code merged ≠ verified: every claim is tracked in
 [`docs/test-plan.md`](docs/test-plan.md), and a release doesn't tag until
 its gating rows flip to ✅. Treat register addresses, timing values, and
 per-SoM accelerator wiring as paper-correct only until their test-plan row
 flips. Silicon-verified today: the V2N GD32-bridge campaign (since v0.6)
-and AEN801 (15/17 peripheral apps) + CC3501E (Wi-Fi/BLE, GPIO proxy) since
-v0.8; breadth beyond these families remains pre-HIL. Per-driver status also
+AEN801 (15/17 peripheral apps) + CC3501E (Wi-Fi/BLE, GPIO proxy) since
+v0.8, and E1M-V2M103 (DEEPX DX-M1 inference, GD32 bridge, provisioning flow); breadth beyond these families remains pre-HIL. Per-driver status also
 lives in `metadata/chips/<name>.yaml`'s `verification:` block and as
 `@par Verification status: [UNTESTED]` Doxygen tags.
 

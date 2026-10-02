@@ -3,8 +3,9 @@
 #
 # Customer workflow: `tan init --from-example peripheral-io/vendor-ext-composability`, change `som.sku` to your
 # MPN, edit `preset:` if you fork the EVK, and `tan build`.
-# CMakeLists.txt invokes scripts/alp_project.py at configure time and
-# layers the generated alp.conf over prj.conf via EXTRA_CONF_FILE.
+# `tan build` plans alp.conf from this file; twister and a bare
+# west build read the pre-generated generated/alp.conf instead
+# (scripts/gen_example_alp_conf.py).
 
 som:
   sku: E1M-AEN801          # Alif Ensemble E8 -- ships the <alp/ext/alif/adc.h>

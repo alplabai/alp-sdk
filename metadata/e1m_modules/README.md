@@ -43,13 +43,13 @@ legacy-compat alias).
 ## Schema + validation
 
 Every `E1M-<SKU>.yaml` preset validates against
-`metadata/schemas/som-preset-v1.schema.json`.  Since the 2026-07
+`metadata/schemas/som-preset-v2.schema.json`.  Since the 2026-07
 tightening the schema sets `additionalProperties: false` and pins
 **one canonical shape** per fact family — `memory:` (module DRAM /
 flash capacities), `on_module:` (incl. `pmic_main` and the
 `i2c_devices` address map), and `inference:` (`preferred_backend`
-always; `ethos_u_variant` where applicable — the deprecated
-`npu_population` list is silicon-derived, not authored) — so
+always; `ethos_u_variant` where applicable — the Ethos-U
+instance list is silicon-derived, not authored) — so
 a preset can no longer carry a misspelled or family-idiosyncratic
 key silently.  Unknown hardware facts stay explicit `TBD`s (values
 are never invented); `tan new-som` scaffolds a schema-valid preset
@@ -165,7 +165,7 @@ all — no bench transcript, no datasheet reference, no commit message)
 both circulate elsewhere in this repo; neither is a confirmed GD32
 reading — see #1440, #1369.
 
-See `metadata/schemas/som-preset-v1.schema.json`
+See `metadata/schemas/som-preset-v2.schema.json`
 `$defs/helper_firmware_entry` for the full contract.
 
 ## Consumed by

@@ -2131,6 +2131,50 @@ ZTEST(cc3501e_host_driver, test_reset_tolerates_transport_failure_during_probe_1
 	zassert_equal(v, (uint16_t)ALP_CC3501E_PROTOCOL_VERSION, "and reads the real value");
 }
 
+/* #1937: a missed reset-time GET_VERSION is retried (bounded), and on a FRESH
+ * context a reset that never negotiated a MAJOR must fail, not return ALP_OK
+ * with fw_proto_major == 0 / initialised == true (silicon: every later PING
+ * failed -5 while a bare GET_VERSION kept answering). */
+ZTEST(cc3501e_host_driver, test_reset_retries_dropped_get_version_1937)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+
+	g_get_version_io_down_remaining = 2u; /* first two replies dropped, third lands */
+
+	zassert_equal(cc3501e_reset(&fw), ALP_OK, "retries ride out dropped GET_VERSIONs");
+	zassert_true(fw.initialised, "negotiated -> usable");
+	zassert_equal(
+	    fw.fw_proto_major, (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR, "MAJOR negotiated, not left at 0");
+	zassert_equal(g_get_version_io_down_remaining, 0u, "both drops were consumed by retries");
+}
+
+ZTEST(cc3501e_host_driver, test_reset_fresh_ctx_all_get_version_dropped_fails_1937)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+
+	g_get_version_io_down_remaining = 1000u; /* never answers */
+
+	zassert_equal(cc3501e_reset(&fw),
+	              ALP_ERR_TIMEOUT,
+	              "no MAJOR negotiated on a fresh ctx -> reset must not claim success");
+	zassert_false(fw.initialised, "left down");
+	zassert_equal(cc3501e_ping(&fw), ALP_ERR_NOT_READY, "later calls: NOT_READY, not -5");
+}
+
+ZTEST(cc3501e_host_driver, test_reset_keeps_prior_major_when_get_version_dropped_1937)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+
+	zassert_equal(cc3501e_reset(&fw), ALP_OK, "first reset negotiates");
+	g_get_version_io_down_remaining = 1000u;
+	zassert_equal(cc3501e_reset(&fw), ALP_OK, "same ctx keeps its negotiated MAJOR");
+	zassert_true(fw.initialised, NULL);
+	zassert_equal(fw.fw_proto_major, (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR, NULL);
+}
+
 /* ---- ADR 0033: MAJOR.MINOR wire versioning --------------------------------
  *
  * cc3501e_reset()'s GET_VERSION gate now refuses ONLY on a MAJOR mismatch; a

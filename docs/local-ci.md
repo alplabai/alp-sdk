@@ -92,6 +92,7 @@ This is the path that matches GitHub Actions exactly.
    ```sh
    wsl -d Ubuntu -- bash -lc '
      cd ~/dev/alp-sdk &&
+     python3 scripts/gen_example_alp_conf.py &&
      python3 $ZEPHYR_BASE/scripts/twister \
         --testsuite-root examples \
         -p native_sim/native/64 \
@@ -171,7 +172,8 @@ builds are not supported on Windows by upstream Zephyr.
 
 7. **Run a cross-compiled build** to confirm everything's wired:
    ```pwsh
-   west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples\peripheral-io\drone-autopilot
+   py -3 scripts\gen_example_alp_conf.py examples\peripheral-io\drone-autopilot
+   west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples\peripheral-io\drone-autopilot -- -DEXTRA_CONF_FILE=generated/alp.conf
    ```
 
 `native_sim` builds on Windows will fail at the DTS preprocess
@@ -244,10 +246,10 @@ keep it short:
   reused: `test-all.sh` deletes and rebuilds it every run
   (`--clobber-output`, so a long-lived checkout does not pile up
   `twister-out.1`, `.2`, ... at several GB each). That is deliberate:
-  example `CMakeLists.txt` files run `alp_project.py` at configure time
-  without declaring `board.yaml` or `metadata/` as configure dependencies,
-  so an incremental twister rebuild (`--no-clean`) could miss a metadata
-  change.
+  each example's `generated/alp.conf` is pre-generated from `board.yaml`
+  and `metadata/` (`scripts/gen_example_alp_conf.py`) outside CMake's
+  dependency graph, so an incremental twister rebuild (`--no-clean`) could
+  miss a metadata change.
 
 ## Cheap pre-push checks (no toolchain needed)
 

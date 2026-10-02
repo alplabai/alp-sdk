@@ -13,6 +13,7 @@ common:
   tags: ai inference object-detection vision marketing showcase
 tests:
   alp_sdk.examples.ai_object_detection.native_sim:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     platform_allow:
       - native_sim/native/64
     tags:
@@ -27,6 +28,7 @@ tests:
       regex:
         - "\\[obj-det\\] done"
   alp_sdk.examples.ai_object_detection.v2n_m1:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     # V2N-M1 (E1M-V2M101) Zephyr board file is still in the
     # private Renesas fork; once it lands upstream this entry
     # flips to `rzv2n_evk` or the public successor.  Today we

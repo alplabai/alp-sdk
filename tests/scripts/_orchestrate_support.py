@@ -82,8 +82,8 @@ def _scratch_metadata_root(
     real_meta = REPO / "metadata"
     shutil.copy(real_meta / "schemas" / "board.schema.json",
                 schemas / "board.schema.json")
-    shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
-                schemas / "som-preset-v1.schema.json")
+    shutil.copy(real_meta / "schemas" / "som-preset-v2.schema.json",
+                schemas / "som-preset-v2.schema.json")
     shutil.copy(real_meta / "schemas" / "soc-spec-v1.schema.json",
                 schemas / "soc-spec-v1.schema.json")
     shutil.copy(real_meta / "socs" / soc_rel[0] / soc_rel[1] / soc_rel[2],

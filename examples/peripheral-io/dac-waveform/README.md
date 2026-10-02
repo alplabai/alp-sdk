@@ -48,13 +48,15 @@ under `supported_boards:`).
 ```bash
 # Standalone, native_sim (compiles + open returns NOT_READY -- no
 # DAC controller on the host build):
+# writes examples/peripheral-io/dac-waveform/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/dac-waveform
 west build -b native_sim/native/64 examples/peripheral-io/dac-waveform \
-    -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
 west build -t run
 
 # On real V2N silicon:
 west build -b alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33 \
-    examples/peripheral-io/dac-waveform
+    examples/peripheral-io/dac-waveform -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 

@@ -37,8 +37,10 @@ Credentials are **deliberately empty by default** — never hardcode them in a
 public example. Set them at build time without editing the source:
 
 ```sh
+# writes examples/aen/aen-cc3501e-companion-tour/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/aen/aen-cc3501e-companion-tour
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
-  examples/aen/aen-cc3501e-companion-tour -- \
+  examples/aen/aen-cc3501e-companion-tour -- -DEXTRA_CONF_FILE=generated/alp.conf \
   -DEXTRA_CFLAGS="-DTOUR_WIFI_SSID=\\\"myssid\\\" -DTOUR_WIFI_PASS=\\\"mypass\\\""
 ```
 

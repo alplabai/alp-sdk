@@ -127,6 +127,9 @@ static alp_status_t aen_mhu_sender_ready(void)
 #if defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT)
 
 #if defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROVEN)
+#if defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROBE)
+#error "The app-immutable profile and the firewall probe are mutually exclusive"
+#endif
 static alp_status_t aen_firewall_proven(void)
 {
 	return ALP_OK;

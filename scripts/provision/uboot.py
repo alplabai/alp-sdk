@@ -70,7 +70,7 @@ def cold_to_prompt(
 ) -> str:
     """Cold power cycle and hold U-Boot at its prompt; returns the boot text."""
     console.drain()
-    power.cycle(off_s)
+    power.cycle(off_s, console)
     return stop_autoboot(console, timeout)
 
 

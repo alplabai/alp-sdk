@@ -14,8 +14,10 @@ selection.
 ## Build + run (E1M-AEN803, ISP-Pico + Hantro)
 
 ```bash
+# writes examples/connectivity/camera-mjpeg-stream/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/connectivity/camera-mjpeg-stream
 west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
-    examples/connectivity/camera-mjpeg-stream -- \
+    examples/connectivity/camera-mjpeg-stream -- -DEXTRA_CONF_FILE=generated/alp.conf \
     "-DEXTRA_ZEPHYR_MODULES=<path-to-alp-sdk>;<path-to-hal_alif>" \
     "-DSHIELD=e1m_evk_rpi_csi raspberry_pi_camera_module_1"
 # flash + run per docs/aen-bench-bringup.md.
@@ -65,11 +67,13 @@ the send-window fix below, and 7.50 fps at ~109-133 KB frames in earlier
 runs — always 0 CSI/IPI errors and no banding.
 
 ```bash
+# writes examples/connectivity/camera-mjpeg-stream/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/connectivity/camera-mjpeg-stream
 west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
     examples/connectivity/camera-mjpeg-stream -- \
     "-DEXTRA_ZEPHYR_MODULES=<path-to-alp-sdk>;<path-to-hal_alif>" \
     "-DSHIELD=e1m_evk_rpi_csi raspberry_pi_camera_module_1" \
-    "-DEXTRA_CONF_FILE=boards/overlay-1280x960.conf"
+    "-DEXTRA_CONF_FILE=generated/alp.conf;boards/overlay-1280x960.conf"
 # flash + run per docs/aen-bench-bringup.md.
 ```
 
@@ -123,11 +127,13 @@ an IMX296 build falls through to the stock ARX3A0 AWB/CCM defaults,
 capture/encode/serve pipeline itself is exercised here).
 
 ```bash
+# writes examples/connectivity/camera-mjpeg-stream/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/connectivity/camera-mjpeg-stream
 west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
     examples/connectivity/camera-mjpeg-stream -- \
     "-DEXTRA_ZEPHYR_MODULES=<path-to-alp-sdk>;<path-to-hal_alif>" \
     "-DSHIELD=e1m_evk_rpi_csi raspberry_pi_global_shutter_camera" \
-    "-DEXTRA_CONF_FILE=boards/overlay-1280x960.conf"
+    "-DEXTRA_CONF_FILE=generated/alp.conf;boards/overlay-1280x960.conf"
 # flash + run per docs/aen-bench-bringup.md.
 ```
 
@@ -217,11 +223,13 @@ at the ISP's stock ARX3A0 default, same colour-uncalibrated caveat as the
 IMX296 variant above.
 
 ```bash
+# writes examples/connectivity/camera-mjpeg-stream/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/connectivity/camera-mjpeg-stream
 west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
     examples/connectivity/camera-mjpeg-stream -- \
     "-DEXTRA_ZEPHYR_MODULES=<path-to-alp-sdk>;<path-to-hal_alif>" \
     "-DSHIELD=e1m_evk_rpi_csi innomaker_cam_imx335" \
-    "-DEXTRA_CONF_FILE=boards/overlay-1280x960.conf" \
+    "-DEXTRA_CONF_FILE=generated/alp.conf;boards/overlay-1280x960.conf" \
     "-DCONFIG_CAMERA_MJPEG_STREAM_FPS=30"
 ```
 

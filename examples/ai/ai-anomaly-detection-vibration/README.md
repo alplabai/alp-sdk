@@ -39,7 +39,9 @@ Three customer questions get one answer:
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/ai/ai-anomaly-detection-vibration
+# writes examples/ai/ai-anomaly-detection-vibration/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/ai/ai-anomaly-detection-vibration
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/ai/ai-anomaly-detection-vibration -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 

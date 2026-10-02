@@ -193,7 +193,6 @@ struct rpc_be {
 	uint32_t src_ept;
 	uint32_t dst_ept;
 	uint32_t mbox_ch;
-	bool     cacheable;
 
 	int ept_fd;  /* /dev/rpmsgN */
 	int ctrl_fd; /* /dev/rpmsg_ctrlN (kept for close) */
@@ -704,10 +703,9 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 	}
 
 	strncpy(ch->name, cfg->name, sizeof(ch->name) - 1);
-	ch->src_ept   = cfg->src_ept != 0u ? cfg->src_ept : (0x400u | (fnv1a_32(cfg->name) & 0x0FFu));
-	ch->dst_ept   = cfg->dst_ept != 0u ? cfg->dst_ept : ch->src_ept + 1u;
-	ch->mbox_ch   = cfg->mbox_ch != 0u ? cfg->mbox_ch : ALP_RPC_DEFAULT_MBOX_CH;
-	ch->cacheable = cfg->cacheable;
+	ch->src_ept = cfg->src_ept != 0u ? cfg->src_ept : (0x400u | (fnv1a_32(cfg->name) & 0x0FFu));
+	ch->dst_ept = cfg->dst_ept != 0u ? cfg->dst_ept : ch->src_ept + 1u;
+	ch->mbox_ch = cfg->mbox_ch != 0u ? cfg->mbox_ch : ALP_RPC_DEFAULT_MBOX_CH;
 	ch->call_pending      = false;
 	ch->closing           = false;
 	ch->close_from_worker = false;

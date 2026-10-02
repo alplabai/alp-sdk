@@ -79,7 +79,7 @@ bridge over SWD (live reads, no halt): `JLink -device GD32G553MEY7TR`,
 (symbols from `gd32-bridge-firmware:build/gd32/gd32-bridge`:
 `spi_rx_buf@0x20000000`, `spi_tx_buf@0x2000004c`, `spi_tx_cursor@0x20000098`).
 
-## ⚠ Open: the M33→GD32 SPI link is SCI7 Simple-SPI, not the dedicated SPI_B
+## Resolved: the M33→GD32 SPI link is SCI7 Simple-SPI, not the dedicated SPI_B
 On-silicon J-Link verification showed the GD32 receiving **zero SPI bytes**. Root
 cause: the board wires the GD32 to **P76(MOSI)/P77(MISO)/P96(SCLK)/P97(CS)**, which
 per the RZ/V2N PFC (Table 1.2-3) are **`MOSI7/MISO7/SCK7/SS7` = SCI channel 7**
@@ -87,5 +87,8 @@ per the RZ/V2N PFC (Table 1.2-3) are **`MOSI7/MISO7/SCK7/SS7` = SCI channel 7**
 P96=2, P97=2** (the bring-up's `func5` was inferred and is wrong → routes to
 CTXDP3/ADC). So the `spi_renesas_rz_spi_b.c` (FSP `r_spi_b`, dedicated SPI) driver
 is the wrong peripheral, and the RZ FSP ships no SCI-SPI module (only RA has
-`r_sci_b_spi`). **Pending fix:** port RA `r_sci_b_spi` → RZ + a Zephyr
-`renesas,rz-sci-b-spi` driver/binding + a DT SCI7 SPI child + the corrected pinmux.
+`r_sci_b_spi`). **Fix landed:** the RA `r_sci_b_spi` port is in-tree as
+`zephyr/drivers/spi/spi_renesas_rz_sci_b.c` with the `renesas,rz-sci-b-spi`
+binding (`zephyr/dts/bindings/spi/renesas,rz-sci-b-spi.yaml`), the DT SCI7 SPI
+child, and the corrected pinmux; SCI7 Simple-SPI is silicon-validated and is
+the permanent transport — see `docs/gd32-link-sci7-next-rev.md`.
