@@ -237,7 +237,7 @@ are not yet confirmed by a run of this code on a bench.
 
 | step | what it does |
 |---|---|
-| `preflight` | offline gates: bundle schema, artefact sha256 / size / role set (`bl2`, `bl2_mmc`, `fip`, `system_image` -- enforced here, not by the bundle schema, because flat-flow bundles such as som-0.2.0 legitimately carry no `bl2_mmc`), xSPI and boot1 size limits, family, SKU triangle, DDR tier triangle, FIP rail string (`v2n-m1`), FDT present in the wic `/boot`, N24S128 frame-table self-check |
+| `preflight` | offline gates: the `functional_test` block of `bench.yaml` and its expected values, bundle schema, artefact sha256 / size / role set (`bl2`, `bl2_mmc`, `fip`, `system_image` -- enforced here, not by the bundle schema, because flat-flow bundles such as som-0.2.0 legitimately carry no `bl2_mmc`), xSPI and boot1 size limits, family, SKU triangle, DDR tier triangle, FIP rail string (`v2n-m1`), FDT present in the wic `/boot`, N24S128 frame-table self-check |
 | `detect` | clean shutdown if Linux is up, then power cycle and classify the console: SCIF ROM, BL2, U-Boot, Linux login, silent. The ROM banner `SCI Download mode (Due to parameter error)` is the ROM's fallback to SCI download, taken when the selected boot source has no valid image (blank xSPI/eMMC, or DSW1 not in mode 3). It still offers `-- Load Program to SRAM`, but it is **refused**: "boot ROM fell back to SCI download because the selected boot source has no valid image (blank xSPI/eMMC, or DSW1 not in mode 3); set DSW1 to mode 3 for a clean SCIF bootstrap". Only `(Normal SCI boot)` proceeds |
 | `dsw1_scif` | operator: boot switch to SCIF download |
 | `bootstrap` | reuses the live SCIF ROM state `detect` left in this run (no second power cycle); cycles only if no ON has happened since. Flash Writer: `EM_W` boot1 sector `0x1` ← `bl2_mmc`, sector `0x300` ← `fip`; `EM_SECSD` EXT_CSD `[177]=0x02` (BOOT_BUS_CONDITIONS), `[179]=0x08` (PARTITION_CONFIG); `EM_DCID` |
@@ -254,9 +254,9 @@ are not yet confirmed by a run of this code on a bench.
 | `secure_page` | write the 64-byte Secure Data Page, read back, compare. Never locks |
 | `dsw1_xspi_remove_sd` | operator: boot switch to xSPI, remove the microSD |
 | `cold_boot_test` | `--cold-cycles N`: clean BL2, DRAM tier, rail line (`v2n-m1`), login, `SYS_LSI_MODE`, ACT88760 reg `0x10` after boot, I2C scans (GD32 exempted only while `0x10` still reads `0x88`). An `end0` without carrier (PHY latch, #2582) gets one extra cold cycle, noted as `end0_no_carrier_retries` in the step evidence (not a ledger key); it fails if `end0` is still down. With the `rtc_backup` fixture and N >= 2 it also sets the RTC from the host clock after the first cycle, so `functional_test` can judge `rtc_retention` |
-| `census_final` | the census again, on the unit as shipped (after the last cold boot: xSPI boot, eMMC root). Its values replace the first census's, so a key that was `unread (...)` there is read here; one that is still unread blocks the ship check. It leaves the ACT88760 GPIO4 keys to `cold_boot_test` |
+| `census_final` | the census again, on the unit as shipped (after the last cold boot: xSPI boot, eMMC root). Every key it reads replaces the first census's value. A key the first census recorded and this one could **not** produce (a census group that fails drops its keys) is set to `unread (not re-read by census_final)`, so a value read in the microSD boot never stands in for the shipping boot; an unread ship-required key blocks the ship check. The ACT88760 GPIO4 keys are `cold_boot_test`'s and are left alone |
 | `clkgen_verify` | the on-SoM 5L35023B (`BRD_I2C`, `0x69`) OTP image against U-Boot's fixup |
-| `functional_test` | every interface the tool can reach, on the unit as shipped: one generated script, one remote invocation, one `test_<check>` value per check; a failing or unreadable check fails the step and blocks shipping unless it is listed informational. See "Functional test coverage" |
+| `functional_test` | every interface the tool can reach, on the unit as shipped: one generated script, one remote invocation, one `test_ft_<check>` value per check; a failing or unreadable check fails the step unless it is listed informational, and only `test_functional: pass` ships. See "Functional test coverage" |
 | `hil_smoke` | optional `tests/hil/run_smoke.py` |
 | `record` | merge auto keys into `<serial>.unit.yaml` (manual keys never touched), append `<serial>.md`, logs, xlsx, ship check |
 
@@ -407,8 +407,10 @@ the reference bench) is dead until the next power cycle: the kernel log repeats
 after a failed write or verify (in a `finally`, so also when the dump itself fails), then asks
 the bridge for `GET_VERSION` (10 tries, 1 s apart). The result is recorded as
 `gd32_bridge_after_readback` (probe) and `gd32_protocol` (run). If the bridge does not answer,
-the step fails and the run stops before `census`; a failed reset is reported as "core left
-halted". **`SCL is stuck low` on that bus during provisioning points at a GD32 left halted over
+the step fails and the run stops before `census`. A failed reset never hides the error it
+followed: it is appended to it ("... ALSO the reset-and-run failed, GD32 core left halted: ..."),
+and when it happens in the probe before the step, the step itself fails with "core left halted
+by the pre-run probe's readback" and writes nothing. **`SCL is stuck low` on that bus during provisioning points at a GD32 left halted over
 SWD**; a census that finds unread keys says so when the kernel log carries that line.
 `census_final` reads the same keys again after the final cold boot. That the halt is the cause
 is inferred from the probe tool's behaviour and from log timing on two units; it has not been
@@ -478,39 +480,73 @@ confirmed on a bench").
 
 ### How it runs
 
-1. The supply current is read first, while the unit is idle (SCPI power only).
+1. The supply current and voltage are read first, while the unit is idle (SCPI power only).
 2. One shell script is generated from the catalogue, pushed to `/tmp`, run in **one** remote
-   invocation and removed. Checks are grouped in lanes: the `main` lane runs in the foreground,
-   every other lane (eMMC read, network, radio, NPU, RTC, secure element, USB/SD, audio,
-   loopbacks) in the background. Each check writes to its own file and has its own timeout
-   (the check is killed and recorded `unread (timed out after N s)`); results are printed at
-   the end in catalogue order, so nothing interleaves.
+   invocation and removed. It works in a fresh `mktemp -d` directory, changes into it before
+   anything else runs (no tool can drop a file in the login directory on the root filesystem)
+   and removes it on any exit. Checks are grouped in lanes: the `main` lane runs in the
+   foreground, every other lane (eMMC read, network, radio, NPU, RTC, secure element, USB/SD,
+   audio, loopbacks) in the background. Each check is a file of its own, run in its own session
+   (`setsid`), writes to its own file and has its own timeout; results are printed at the end in
+   catalogue order, so nothing interleaves. A check that overruns gets TERM, so its restore
+   lines run, then its whole process group is killed (the `dd`, `aplay`, scan or model run it
+   started included) and it is recorded `unread (timed out after N s)`. On an image without
+   `setsid` only the check's own shell and its restore are covered; a child may run on.
 3. The host judges each output against the expected values.
 
-Each check is recorded as `test_<check>` with one of:
+Each check is recorded as `test_ft_<check>` (a prefix of its own: the ledger's `test_<name>`
+keys are also entered by operators, and the tool never writes one of those) with one of:
 
 | value | meaning |
 |---|---|
 | `pass` / `pass (<measured>)` | the criterion holds; the measured value rides along |
 | `fail (<reason>)` | the check ran and the unit does not meet the criterion |
-| `skipped (<reason>)` | no fixture (`no fixture: <name>`) or no expected value defined; never a pass |
-| `unread (<reason>)` | the check could not be evaluated: timed out, a tool is not on the image, a read error, output in an unexpected shape |
+| `skipped (<reason>)` | no fixture (`no fixture: <name>`); never a pass |
+| `unread (<reason>)` | the check could not be evaluated: timed out, `missing tool: <name>`, a read error, output in an unexpected shape, or `no expected value: <key>` (nobody defined the criterion) |
 
 Reasons are collapsed to one line (the census rule) and cut at 200 characters. A `fail` or
 `unread` of any check not listed `informational` fails the step, stops the run and sets the
-summary key `test_functional: fail (<checks>)`; `record` still runs, and the ship check refuses a
-unit whose `test_functional` starts with `fail` or `unread`. A `skipped` check and a failing
-informational check never block, but both are in the unit record and in the step detail. A unit
-on which the step never ran has no `test_functional` key: mark that key `ship_required` in the
-private catalogue to refuse such a unit.
+summary key `test_functional: fail (<checks>)`; `record` still runs. A `skipped` check and a
+failing informational check never block, but both are in the unit record and in the step detail
+(a missing expected value of an informational check is `skipped`).
+
+**The ship check ships only `test_functional: pass`.** A missing key (the step never ran or was
+skipped with `--skip`), `fail (...)`, `unread (...)` and anything else block, each with its
+reason. A run that cannot reach the unit, or a bad configuration, records
+`test_functional: unread (<error>)`. `record` writes the verdict of the step's **latest** run: a
+later failed or interrupted `--only functional_test` replaces an earlier `pass` in the unit record
+(with its recorded verdict, or `unread (functional_test <status> in its latest run)`), also
+when `record` runs alone afterwards. **Units provisioned before this step existed have no
+`test_functional` and are not shippable until the functional test has run on them. That is
+intended:** run `--from cold_boot_test` (or `--only functional_test,record` on a unit that is
+already booted from its eMMC) on each.
+
+A missing tool never passes and never fails: every check names the tools it needs, and the
+first one missing makes it `unread (missing tool: <name>)`; a command that ends with exit status
+127, or whose last line is the shell's `not found`, is read the same way.
 
 Nothing in the test writes a device register, an EEPROM, OTP, flash or the eMMC, binds or
 unbinds a driver, or locks anything. I2C traffic is register-pointer writes followed by reads
 (`-f` where a kernel driver owns the address), the identity page is read with the one sealed
-frame, and the bridge gets its read-only `GET_VERSION`. Transient state is put back: `wlan0`
-and `hci0` are brought down again if they were down, the CAN links are closed. One exception,
-off by default: with the `rtc_backup` fixture `cold_boot_test` sets the RTC's time from the host
-clock after its first cycle (see `rtc_retention`).
+frame, and the bridge gets its read-only `GET_VERSION`. No transfer is ever generated to an
+address that is another device's shared (broadcast) address on that bus: on this carrier `0x48`
+on the sensor bus, the amplifiers' shared address, read from the amplifier's chip description;
+no expected-values file can change that, and a carrier's `not_fitted` list is the union of the
+public and the private file. Every string that comes from `bench.yaml` or the expected values
+into the script is shell-quoted.
+
+Transient state is put back by a trap that also runs when the check is killed: `wlan0` and
+`hci0` go down again if they were down, and each CAN link gets its previous state back (down,
+its previous bitrate if it had one, up again only if it was up). The eMMC read drops the page
+cache first, as the write steps' readbacks do. One exception to "writes nothing", off by
+default: with the `rtc_backup` fixture `cold_boot_test` sets the RTC's time from the host clock
+after its first cycle (see `rtc_retention`).
+
+The Bluetooth scan uses `hcitool lescan` on the raw HCI socket, not `bluetoothctl`: it needs no
+`bluetoothd`, so nothing is cached under `/var/lib/bluetooth` on the read-write root (factory
+neighbours must not ship on the unit) and no device of an earlier scan is listed; its output
+goes to the script's temp directory. **Whether `hcitool` is on the image, and whether a raw LE
+scan works while `bluetoothd` runs, is unverified.**
 
 ### Expected values
 
@@ -523,12 +559,16 @@ the SoC description, the carrier's devices and shunt resistors from `metadata/bo
 the DX-M1 firmware version from the bundle, the PMIC registers from `--pmic-expect`, the MACs
 from the serial.
 
+An expected value that is missing or null makes its check `unread (no expected value: <key>)`,
+which blocks (`skipped` for an informational check): a criterion nobody defined is not a pass.
+
 Provisional bands (no population data yet; the first bench runs must confirm or tighten them):
 `mem_total_fraction` 0.70..1.00 of the SKU DRAM (one unit: 0.771), `emmc_size_fraction`
 0.85..1.00 (one unit: 0.911), `emmc_read_min_mib_s` 20, `board_temp_c` 10..85 degC,
-`soc_temp_c` 10..105 degC (the HiL spec's band), `supply_current_idle_a` 0.22..0.33 A **at a
-15 V supply** for `v2n-m1` (measured 0.26..0.29 A; no band for `v2n` yet, so that check is
-`skipped` there), carrier rails nominal +-5 %, rail currents 0..the monitor's full scale,
+`soc_temp_c` 10..105 degC (the HiL spec's band), `supply_power_idle_w` 3.30..4.95 W for
+`v2n-m1` (volts x amps as the supply measures them, so it holds at any supply voltage; derived
+from 0.26..0.29 A measured at 15 V, with 0.04 A added each side; **no band for `v2n` yet, so
+that check is `unread` there and blocks until one is measured**), carrier rails nominal +-5 %, rail currents 0..the monitor's full scale,
 `rtc_max_error_s` 30, the audio playback time 1.8..2.5 s.
 
 ### Fixtures: `bench.yaml`
@@ -539,7 +579,7 @@ functional_test:
   fixtures:                     # everything here is off unless set
     eth1_cable: true            # second Ethernet port cabled to the bench network
     wifi_ap: {ssid: <name>, min_signal_dbm: -70}    # or `true`: any network counts
-    ble_advertiser: {address: <AA:BB:..>}           # or `true`: any advertiser counts
+    ble_advertiser: {address: <AA:BB:..>}           # or `true`: any LE advertiser counts
     dxm1_model: /path/on/the/unit/model.dxnn        # a compiled model present on the unit
     usb_stick: true             # a USB mass-storage device in the host port
     sd_card: true               # a NON-bootable card in the SD slot (a bootable one boots instead of the eMMC)
@@ -551,8 +591,14 @@ functional_test:
 ```
 
 A fixture that is off records `skipped (no fixture: <name>)` and its command is not even in the
-script. The supply-current check needs no switch: it runs when the bench's power kind can
-measure (`scpi`), else it is `skipped (no fixture: a supply that measures current ...)`.
+script. The supply check needs no switch: it runs when the bench's power kind can measure
+(`scpi`: `MEAS:CURR?` and `MEAS:VOLT?` on the configured channel only), else it is
+`skipped (no fixture: a supply that measures current ...)`. A current without a readable voltage
+is `unread`. `preflight` validates the whole block (carrier name, fixtures mapping, the bus
+numbers it needs), so a bad `bench.yaml` fails before anything is flashed.
+
+The carrier's I2C bus number is not assumed: the carrier description names the E1M bus, and the
+bench's `i2c_bus` table gives its Linux number (a null `i2c_bus.eeprom` is refused).
 
 ### Coverage matrix
 
@@ -592,10 +638,10 @@ expected value; **data** = a data path was exercised end to end.
 | secure element | I2C scan with a wake retry (answers) | `secure_element`: protocol-level state read (ID) | - |
 | GD32 bridge | `gd32_flash`: md5 readback, `GET_VERSION` (data) | `gd32_bridge`: protocol version with CRC; `gd32_gpiochip` (ID) | - |
 | SoC thermal zones | not tested | `thermal` (value) | - |
-| CM33 | not tested | `cm33_firmware` (informational), `openamp_uio` (answers) | - |
+| CM33 | not tested | `cm33_firmware` (informational: not blank; **blocking with an md5 compare once the bundle carries a `cm33` component**), `openamp_uio` (answers) | - |
 | USB host | not tested | `usb_host`: controllers probed (answers); `usb_device` (data) | `usb_stick` |
 | SD slot | `boot_sd_linux` runs Linux from it (data) | `sd_host` (answers); `sd_card` (data) | `sd_card` |
-| supply current | census: one reading, warns above 0.40 A | `supply_current_idle` (value) | a supply that measures |
+| supply power | census: one current reading, warns above 0.40 A | `supply_power_idle` (value: volts x amps) | a supply that measures |
 | kernel log | census: gbeth DMA reset only | `dmesg_fatal` (known fault signatures), `dmesg_clean` (allowlist, informational) | - |
 | services | not tested | `systemd_failed` | - |
 | EEPROM manifest | `eeprom_manifest`: write, readback, cold cycle (data) | `eeprom_manifest`: re-read in the shipping boot (data) | - |
@@ -612,8 +658,8 @@ expected value; **data** = a data path was exercised end to end.
 | header UART | the console UART carries the whole flow (data) | `uart_loopback` (data) | `uart_loopback` |
 | push button | not tested | `gpio_keys`: input device registered (answers) | `carrier` |
 
-The carrier's camera-rail monitor at `0x48` is not fitted (that address is the amplifiers'
-shared address), so it has no check; the identity EEPROM at `0x50` is the SoM's and is covered
+The carrier's camera-rail monitor at `0x48` is not fitted and that address is the amplifiers'
+shared address, so nothing is ever sent there; the identity EEPROM at `0x50` is the SoM's and is covered
 by `eeprom_manifest`.
 
 ### Not covered, and why
@@ -629,8 +675,9 @@ by `eeprom_manifest`.
   reports a blank region on every unit today), the echo needs an example binary that is not in
   the image, and the HiL spec says one attach per CM33 boot.
 - **Secure-element cryptography.** Needs the host-library example binary.
-- **Supply current under load.** Known band for inference (0.42..0.44 A at 15 V), but the host
-  would have to sample the supply while the unit runs the model; not built.
+- **Supply power under load.** One figure exists (0.42..0.44 A at 15 V, measured on the bench on
+  2026-10-02 with the DX-M1 running inference), but the host would have to sample the supply
+  while the unit runs the model; not built.
 - **Anything a person has to see or hear:** a picture on the display, sound from the speakers,
   LED colours, a button press, the encoder. `display_dsi`, `audio` and `gpio_keys` stop at what
   software can observe.
@@ -644,7 +691,7 @@ by `eeprom_manifest`.
 
 Boot-mode switching (removes the three operator steps and allows a full unattended run), SD
 card insertion and the SD mux (`sd_card` without a person, and the SD steps), the console, power
-switching and current measurement on a bench without an SCPI supply (`supply_current_idle`),
+switching and current measurement on a bench without an SCPI supply (`supply_power_idle`),
 the header UART loopback (`uart_loopback`), a CAN node with a transceiver (`can_loopback`),
 reading the LED lines and driving the button and encoder lines (the operator-observed rows),
 and loopbacks for the GD32's PWM / ADC / DAC pins. It does not help the radio, camera, display
@@ -654,7 +701,7 @@ or audio rows.
 
 Time is an **estimate** of the typical run time on the unit, not a measurement. The automatic
 set is estimated at about 7 s on the unit (the `main` lane) plus the push and one SSH round
-trip; with every fixture on, about 13 s (the radio lane). `census_final` before it is roughly
+trip; with every fixture on, about 12 s (the radio lane). `census_final` before it is roughly
 60 SSH round trips, estimated 20 to 30 s. Both are far inside the 90 s target; the timeouts are
 bounds for a hung command, not the expected time.
 
@@ -668,7 +715,7 @@ bounds for a hung command, not the expected time.
 | `emmc_size` | `/sys/block/<emmc>/size` | 0.85..1.00 of the SKU eMMC size | 5 s | 0.1 s |
 | `emmc_health` | `mmc extcsd read` | life time A and B <= `0x01`, pre-EOL = `0x01` | 10 s | 0.3 s |
 | `emmc_mode` | mmc `ios` in debugfs, `dmesg` | timing `mmc HS200`, no `mmc_select_hs200 failed` | 5 s | 0.1 s |
-| `emmc_read` | `dd` 64 MiB from 1 GiB into the user area | `64+0 records out`, >= 20 MiB/s | 20 s | 2 s |
+| `emmc_read` | drop the page cache, then `dd` 64 MiB from 1 GiB into the user area | `64+0 records out`, >= 20 MiB/s | 20 s | 2 s |
 | `xspi` | `/proc/mtd`, spi-nor `jedec_id` | `mtd0` and `mtd1` with a size, a real JEDEC ID | 5 s | 0.1 s |
 | `eth_phy_id` | MII registers 2/3 of both ports (python3 ioctl helper) | both `0x001cc916` | 5 s | 0.3 s |
 | `eth_mac` | `/sys/class/net/<if>/address` | both = the MACs derived from the serial | 5 s | 0.1 s |
@@ -676,9 +723,9 @@ bounds for a hung command, not the expected time.
 | `wifi_present` | `wlan0`, `/sys/bus/sdio/devices`, `dmesg` | all present, firmware banner, no firmware failure | 5 s | 0.1 s |
 | `wifi_regdomain` | `iw reg get` | a country line (informational) | 5 s | 0.1 s |
 | `wifi_scan` | `iw dev wlan0 scan` | >= 1 network; the reference AP at >= the configured signal | 20 s | 5 s |
-| `bt_hci` | `hci0`, `hciconfig hci0 up` | registered, `UP RUNNING`, a non-zero address | 12 s | 1 s |
-| `bt_scan` | `bluetoothctl --timeout 6 scan on`, `devices` | >= 1 device; the reference advertiser | 20 s | 7 s |
-| `dxm1_pcie` | `/sys/bus/pci/devices/0000:01:00.0` | device `0x0000`, driver `dx_dma_pcie`, link width 2 | 5 s | 0.1 s |
+| `bt_hci` | `hci0`, `hciconfig hci0 up` | registered, `UP RUNNING`, a non-zero address (`hciconfig` missing: `unread`) | 12 s | 1 s |
+| `bt_scan` | `hcitool -i hci0 lescan` for 5 s | >= 1 address; the reference advertiser | 20 s | 6 s |
+| `dxm1_pcie` | `/sys/bus/pci/devices/0000:01:00.0` | device `0x0000`, driver `dx_dma_pcie`, link width 2, link speed `8.0 GT/s` (both measured: the kernel logs `8.0 GT/s PCIe x2 link`); an unreadable width or speed is `unread` | 5 s | 0.1 s |
 | `dxm1_runtime` | `/dev/dxrt0`, `dxrt.service`, `dxrt-cli -s` | node, service active, firmware = the bundle's | 20 s | 2 s |
 | `dxm1_inference` | `run_model -m <model> -l 30` | exit code 0 and an FPS line | 40 s | 8 s |
 | `drpai`, `gpu` | platform driver link, device node | driver bound, node exists | 5 s | 0.1 s |
@@ -686,7 +733,7 @@ bounds for a hung command, not the expected time.
 | `rtc_ticks` | the seconds register twice, 2 s apart | valid BCD, advanced by 1..4 s | 8 s | 2.2 s |
 | `rtc_time_set` | `rtc0/since_epoch` | readable (informational) | 5 s | 0.1 s |
 | `rtc_backup_mode` | register `0x37` | backup switchover enabled (informational) | 5 s | 0.1 s |
-| `rtc_retention` | `rtc0/since_epoch`, boot id | set by `cold_boot_test` on an earlier boot, within 30 s of the host clock | 5 s | 0.1 s |
+| `rtc_retention` | `rtc0/since_epoch`, boot id, `dmesg` | set by `cold_boot_test` on an earlier boot, no `hctosys: unable to read the hardware clock` in this boot's log, within 30 s of the host clock | 5 s | 0.1 s |
 | `board_temp` | TMP112 temperature register | 10..85 degC | 5 s | 0.1 s |
 | `secure_element` | the state-register read, up to 100 tries | an answer | 12 s | 0.5 s |
 | `gd32_bridge` | `GET_VERSION` frame | status 0, CRC good, protocol `0.14.0` | 5 s | 0.1 s |
@@ -694,62 +741,82 @@ bounds for a hung command, not the expected time.
 | `i2c_<chip>_<addr>` | one register read per on-module device | the ID where one is pinned (`0xEA` for the second PMIC), else an answer | 5 s | 0.1 s |
 | `pmic_registers` | every register of `--pmic-expect` | all equal under their masks | 15 s | 0.6 s |
 | `thermal` | every `thermal_zone*/temp` | >= 1 zone, all 10..105 degC | 5 s | 0.1 s |
-| `cm33_firmware` | md5 of 64 KiB at `mtd1` + `0x1A0000` | not blank (informational) | 5 s | 0.1 s |
+| `cm33_firmware` | md5 at `mtd1` + `0x1A0000` | no `cm33` in the bundle: 64 KiB not blank (informational). With one: md5 of exactly its size = the bundle's (blocking) | 5 s / 30 s | 0.1 s / 1 s |
 | `openamp_uio` | `/sys/class/uio/uio*/name` | the seven OpenAMP nodes | 5 s | 0.1 s |
 | `usb_host` | `/sys/bus/usb/devices/usb*` | >= 4 root hubs | 5 s | 0.1 s |
 | `usb_device`, `sd_card` | `dd` 4 MiB from the device | device present, `4+0 records out` | 15 s | 1 s |
 | `sd_host` | platform driver link | driver bound | 5 s | 0.1 s |
-| `systemd_failed` | `systemctl --failed` | no failed unit outside the allowlist | 5 s | 0.3 s |
+| `systemd_failed` | `systemctl --failed` | exit status 0 and no failed unit outside the allowlist; a failing `systemctl` or output that is not a unit list is `unread` | 5 s | 0.3 s |
 | `dmesg_fatal` | `dmesg -r` | none of the fault signatures (`SCL is stuck low`, `Failed to reset the dma`, `mmc_select_hs200 failed`, `I/O error`, `EXT4-fs error`, an oops, ...) | 5 s | 0.3 s |
 | `dmesg_clean` | the same output | no error-level line outside the allowlist (informational) | - | - |
 | `gpio_keys` | `/sys/class/input/input*/name` | `gpio-keys` registered | 5 s | 0.1 s |
 | `eeprom_manifest` | 128 bytes at `0x50` | = the committed `<serial>.manifest.bin`, else magic, CRC, SKU and serial | 5 s | 0.2 s |
 | `secure_page` | the sealed 64-byte read | = the staged secure page, else not blank | 5 s | 0.2 s |
-| `supply_current_idle` | host: `MEAS:CURR?` | 0.22..0.33 A at 15 V (`v2n-m1`) | - | 0.2 s |
+| `supply_power_idle` | host: `MEAS:CURR?`, `MEAS:VOLT?` | 3.30..4.95 W (`v2n-m1`); also records `psu_voltage_v`, `psu_current_a` | - | 0.3 s |
 | `carrier_<part>_<addr>` | one ID register read per carrier device | WHO_AM_I `0x67`, chip ID `0x43` / `0x50`, manufacturer ID `0x5449`; an answer for the expanders | 5 s | 0.1 s |
 | `rail_3v3`, `rail_1v8`, `rail_5v` | the monitor's configuration, bus and shunt registers | bus voltage nominal +-5 %, current within the monitor's range | 5 s | 0.1 s |
 | `audio` | codec driver links, `aplay` 2 s of silence | both amplifiers bound, `aplay` exit 0, 1.8..2.5 s | 10 s | 2.3 s |
 | `display_dsi` | `/sys/class/drm/card*-DSI-*/status` | a DSI connector is registered | 5 s | 0.1 s |
 | `camera` | `/sys/class/video4linux/*/name` | a device matching the fixture's regex | 5 s | 0.1 s |
-| `can_loopback` | both links at 500 kbit/s, one frame CAN0 to CAN1 (python3) | the frame arrives intact | 10 s | 1 s |
+| `can_loopback` | both links at 500 kbit/s, one frame CAN0 to CAN1 (python3), then both links back to their previous state | the frame arrives intact | 10 s | 1 s |
 | `uart_loopback` | 24 bytes at 115200 on the header UART (python3) | the same bytes come back | 10 s | 0.5 s |
 
-### Not yet confirmed on a bench
+### First bench run
 
-A first bench run must capture the script output (it is in the step log, after
-`--- script output ---`) and confirm, per check, the format the judge assumes:
+Nothing here has run on hardware. For the first run:
 
-- `mmc extcsd read`: the lines `Life Time Estimation A [...]: 0x..`, `... B ...` and
-  `Pre EOL information [...]: 0x..`.
-- mmc `ios`: a `timing spec:` line naming `mmc HS200` (census already parses it).
-- `dd`: `64+0 records out` / `4+0 records out`, and that the 64 MiB read is not served from
-  the page cache.
-- `iw reg get`: a `country XX:` line; `iw dev wlan0 scan`: `BSS `, `signal:` and `SSID:` lines,
-  and that the scan works while `wlan0` is otherwise unused.
-- `hciconfig`: present on the image, `UP RUNNING`, `BD Address:`; `bluetoothctl --timeout`,
-  `scan on`, `devices` printing `Device <addr>` lines.
-- `/sys/bus/pci/devices/0000:01:00.0/current_link_width` reading `2`.
+1. Use a **scratch `--ledger-root`** (a copy of the schema directory is enough), not the
+   production ledger: the first run exists to compare formats, not to record a unit.
+2. Supply at **15 V** (the idle figures behind `supply_power_idle_w` were taken there).
+3. `bench.yaml`: set `functional_test.carrier`, and leave `ble_advertiser`, `dxm1_model`,
+   `can_loopback` and `uart_loopback` **off** for the first pass (their tools and device nodes
+   are the least certain). `usb_stick`, `eth1_cable` and `wifi_ap` can be on if the bench has them.
+4. Run `--from cold_boot_test` on a provisioned unit, or `--only functional_test` on a unit
+   already booted from its eMMC.
+5. Keep the step log `logs/<serial>/functional_test-<stamp>.log`: every check's value, then
+   the raw script output after `--- script output ---`, framed `@@ALPFT <check> <rc>` ...
+   `@@ALPFT-END <check>`.
+6. Expect three informational failures on today's units: `rtc_time_set` (nothing sets the RTC),
+   `rtc_backup_mode` (backup switchover is disabled in the RTC's configuration) and
+   `cm33_firmware` (no step programs a CM33 image). Expect `dmesg_clean` to need its allowlist
+   adjusted (it was written from one boot log without levels).
+
+Output formats with **no real-log evidence yet**; compare each frame with what the judge
+assumes and fix the fragment, the judge or the expected value:
+
+- `mmc extcsd read`: the `Life Time Estimation A/B [...]: 0x..` and `Pre EOL information [...]: 0x..` lines.
+- `dd`: the `64+0 records out` / `4+0 records out` lines; `mountpoint -d /`.
+- `iw reg get` (a `country XX:` line) and `iw dev wlan0 scan` (`BSS `, `signal:`, `SSID:`), and
+  that the scan works while `wlan0` is otherwise unused.
+- `hciconfig` (`UP RUNNING`, `BD Address:`) and `hcitool lescan` (one `<address> <name>` line
+  per report); whether both are on the image; whether the raw scan works beside `bluetoothd`.
+  (`bluetoothctl` is no longer used.)
+- `/sys/bus/pci/devices/0000:01:00.0/current_link_width` (`2`) and `current_link_speed`
+  (`8.0 GT/s PCIe`): the values are from the kernel log, the sysfs strings are not.
 - `run_model`: its name, its `-m` / `-l` options and an output line containing `FPS`.
-- The DRP-AI and GPU device nodes (`/dev/drpai0`, `/dev/mali0`) and platform device names.
-- `/sys/class/rtc/rtc0/name` containing `rv3028`; the RTC's seconds register at `0x00`
-  counting while the clock is unset; register `0x37` bits 3:2 as the switchover mode (from the
-  datasheet, not re-read for this change).
-- The temperature register as two bytes, 12-bit left-justified, 0.0625 degC per count.
-- `thermal_zone*/temp` in millidegrees; four USB root hubs; seven UIO names.
-- The carrier ID registers: `0x75` (IMU 1), `0x00` after two dummy bytes (IMU 2), `0x01`
-  (barometer), `0x3E` (monitors), and that reading the expanders' input register is harmless.
-- The rail monitors: bus LSB 1.6 mV, shunt LSB 2.5 uV (0.625 uV with the range bit), the
-  input monitor's 24-bit bus register at 195.3125 uV per count.
+- `/dev/drpai0`, `/dev/mali0` and the platform device names.
+- `/sys/class/rtc/rtc0/name` containing `rv3028`; the RTC seconds register at `0x00` counting
+  while the clock is unset; register `0x37` bits 3:2 as the switchover mode (datasheet, not
+  re-read for this change).
+- The TMP112 temperature register: two bytes, 12-bit left-justified, 0.0625 degC per count.
+- `thermal_zone*/temp` in millidegrees.
+- Every carrier ID register (`0x75`; `0x00` after two dummy bytes; `0x01`; `0x3E`) and that
+  reading the expanders' input register is harmless; every rail register (bus LSB 1.6 mV,
+  shunt LSB 2.5 uV or 0.625 uV with the range bit; the input monitor's 24-bit bus register at
+  195.3125 uV per count).
 - `aplay` on the image, the card name, and 2 s of silence taking 1.8..2.5 s.
-- `dmesg -r` printing `<level>` prefixes, the level of each allowlisted line (the allowlist was
-  written from one boot log **without** levels), and that the scans and the playback add no
-  error-level line.
-- `systemctl --failed --no-legend --plain`: one unit per line, the unit name first.
-- The 0.22..0.33 A band, and that `MEAS:CURR?` right after login is an idle reading.
-- The time estimates, and that the concurrent lanes do not disturb each other (Wi-Fi and
+- `dmesg -r` printing `<level>` prefixes and the level of each allowlisted line.
+- `systemctl --failed --no-legend --plain`: one unit per line, the unit name first, exit status 0.
+- `can0` / `can1` existing at all; the header UART's device node; camera device names.
+- The SD card's `device/type` reading `SD`.
+- The `eth1_link` ping really leaving through that port (`ping -I`, and the port's RX counter
+  rising by the two replies).
+- Fractional `sleep` (`sleep 0.01`, `sleep 0.05` in the secure-element loop).
+- `setsid` and `mktemp -d` on the image.
+- `MEAS:VOLT? CH<n>` on the supply, the 3.30..4.95 W band, and that a reading right after login
+  is an idle reading.
+- Every time estimate, and that the concurrent lanes do not disturb each other (the Wi-Fi and
   Bluetooth scans share one lane on purpose; they share the radio).
-- CAN and UART loopbacks have no image support confirmed at all (`can0` / `can1` may not
-  exist; the header UART's device node is whatever the fixture names).
 
 ## Provisioning SD payload store
 
@@ -778,7 +845,7 @@ What the tool runs on the provisioning image (busybox is enough; checked on a Bu
 - `mount`, `fsck.ext4`: the rootfs check after the write.
 - `mmc` (mmc-utils), `flash_erase` and `mtd_debug` (mtd-utils), `i2cdetect` / `i2cget` / `i2cset` / `i2ctransfer` (i2c-tools), `ip`, `dmesg`: the eMMC boot config, the xSPI write, the census and the network checks.
 
-`functional_test` runs on the **shipping** image and additionally uses, where the check exists: `ping`, `iw`, `hciconfig` and `bluetoothctl` (bluez), `aplay`, `dxrt-cli`, `run_model` (fixture only), `systemctl`, `awk`, `cut`, `sed`, `seq`, `grep`. A tool that is missing makes its check `unread (a tool is not on the image: ...)`, which fails the step for a blocking check: that is how a missing tool is found on the first bench run.
+`functional_test` runs on the **shipping** image and additionally uses, where the check exists: `ping`, `iw`, `hciconfig` and `hcitool` (bluez, fixture only for the scan), `aplay`, `dxrt-cli`, `run_model` (fixture only), `systemctl`, `mktemp`, `setsid`, `awk`, `cut`, `sed`, `seq`, `sort`, `grep`. Each check names its tools and tests for them first: a missing one makes that check `unread (missing tool: <name>)`, never `pass` and never `fail`, which fails the step for a blocking check. That is how a missing tool is found on the first bench run.
 
 Not needed: `sfdisk`, `partx`, `findfs`, `parted`, `blockdev`, `bmaptool`, `mke2fs`, and `dd iflag=fullblock`.
 
