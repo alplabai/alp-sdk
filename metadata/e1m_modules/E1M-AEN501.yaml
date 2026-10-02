@@ -2,7 +2,7 @@
 # See E1M-AEN801.yaml header for the file's role + the
 # project memory note governing what stays TBD.
 
-schema_version: 1
+schema_version: 2
 
 sku: E1M-AEN501
 family: alif-ensemble
@@ -118,7 +118,7 @@ on_module:
         - { chip: eeprom_24c128,    role: eeprom_identity, address_7bit: "0x58" }
 
 # Off-SoC module memory in the canonical cross-family shape (see
-# som-preset-v1.schema.json `memory:`).  Values are DERIVED from the
+# som-preset-v2.schema.json `memory:`).  Values are DERIVED from the
 # on_module facts above, never invented:
 #   dram_mbit  <- TBD: on_module.hyperram is `assembled: optional` above --
 #                 whether this SKU's HyperRAM ships fitted is unconfirmed

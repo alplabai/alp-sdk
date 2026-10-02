@@ -10,6 +10,7 @@ sample:
 
 tests:
   alp_sdk.examples.v2n.gd32_swd_flash.native_sim:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     platform_allow:
       - native_sim/native/64
     tags:

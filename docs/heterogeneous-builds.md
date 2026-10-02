@@ -337,7 +337,7 @@ build/
 │   ├── conf/local.conf
 │   └── tmp/deploy/images/e1m-v2n101-a55/{rootfs.wic.gz, Image, *.dtb}
 ├── m33_sm-zephyr/
-│   ├── alp.conf                   (the slice's -DEXTRA_CONF_FILE fragment)
+│   ├── alp.conf                   (the slice's -DEXTRA_CONF_FILE fragment; -D<image>_EXTRA_CONF_FILE on --sysbuild)
 │   └── build/                     (west's own tree — `west build` runs here
 │       └── zephyr/zephyr.elf       with cwd=m33_sm-zephyr and no `-d`)
 ├── helper-gd32/
@@ -421,7 +421,11 @@ its own `schemaVersion` — see
 **Hermetic paths (`planPathMode: tokened`).**  Every checkout- or
 project-anchored absolute path the plan would otherwise embed —
 `env.ALP_SDK_ROOT`, `envAppendPath` entries, each slice's `appDir`,
-and the `-DPython3_EXECUTABLE=` / `-DEXTRA_CONF_FILE=` /
+and the `-DPython3_EXECUTABLE=` / `-DEXTRA_CONF_FILE=` (or, on a `--sysbuild` slice, the image-scoped
+`-D<image>_EXTRA_CONF_FILE=`, where `<image>` is the basename of the app
+directory; if that directory is the project root the name depends on the
+root's directory name, so a consumer that relocates the root must re-derive
+the prefix from the substituted app dir) /
 `-DSB_CONF_FILE=` / `west build`-appdir command args — is instead a
 literal `${SDK_ROOT}` / `${PROJECT_ROOT}` / `${PYTHON}` token, so the
 same plan is reusable across checkouts rather than baking in this
@@ -663,10 +667,10 @@ channels.**  The allocator's default carve-out is non-cacheable on every
 SoM, V2N and AEN alike.  `cacheable: true` was once an explicit
 per-entry opt-in, meant to say "the orchestrator emits matching
 cache-maintenance hooks on both sides, don't write cache ops by hand" —
-**that emission was never built.**  `cfg->cacheable` is stored on the
-`<alp/rpc.h>` backend struct (`src/backends/rpc/zephyr_drv.c` /
-`yocto_drv.c`) and never read again; there is no `sys_cache_*` /
-`arch_dcache_*` call anywhere under `src/` or `include/`.
+**that emission was never built.**  `alp_rpc_config_t` had a `cacheable`
+field that the backends stored and never read (since removed); there is
+no `sys_cache_*` / `arch_dcache_*` call anywhere under `src/` or
+`include/`.
 
 Rather than leave a flag that selects an unimplemented safety path,
 `load_board_yaml` now **hard-rejects** `cacheable: true` on any

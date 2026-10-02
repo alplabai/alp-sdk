@@ -107,8 +107,10 @@ both IMU rows fail until the respin.
 
 ```bash
 # Standalone, native_sim (emul I2C; every device reports absent):
+# writes examples/peripheral-io/i2c-device-hub/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/i2c-device-hub
 west build -b native_sim/native/64 examples/peripheral-io/i2c-device-hub \
-    -- -DEXTRA_ZEPHYR_MODULES=$(pwd) \
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd) \
        -DCONFIG_COMPILER_OPT='"-DALP_BOARD_E1M_EVK"'
 west build -t run
 

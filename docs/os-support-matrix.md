@@ -10,8 +10,8 @@ Status keys:
 - **planned** — declared roadmap, no code yet.
 - **n/a** — combination not targeted.
 
-> **Calibration note (2026-06-24; updated 2026-06-24).** v0.8.0 ships
-> silicon-verified silicon: V2N GD32-bridge campaign (since v0.6),
+> **Calibration note (2026-06-24).** v0.8.0 ships
+> silicon-verified work: V2N GD32-bridge campaign (since v0.6),
 > AEN801 (E8) peripheral matrix (15/17 apps PASS on real silicon, 2
 > PARTIAL hardware-gated), and cc3501e bridge (hardware SS0, real
 > BLE/Wi-Fi scan, GPIO proxy, production warm-program flow) — all on
@@ -208,8 +208,8 @@ their own `pkg_check_modules` check (`libmosquitto`, `alsa`,
 without the matching `-dev` package on the sysroot degrade to the
 priority-0 `sw_fallback` backend of the class (not the old
 stub_backend.c NOSUPPORT stubs).  Per-class
-`ALP_VENDOR_OVERRIDES_<CLASS>` macros in
-`src/common/stub_backend.c` let each surface roll out independently
+`ALP_VENDOR_OVERRIDES_<CLASS>` macros in the per-class stub sources
+under `src/common/stub/` let each surface roll out independently
 across backends -- the currently-defined class gates include `I2C`,
 `SPI`, `UART`, `GPIO`, `MQTT`, `AUDIO_IN`, `AUDIO_OUT`, `SECURITY`,
 `WIFI`, `BLE`, `CAN`, `PWM`, `ADC`, `I2S`, `COUNTER`, `RTC`, `WDT`,
@@ -244,7 +244,7 @@ hasn't been measured.
 | Peer-core boot | `mproc.h` (`alp_mproc_boot_core`, v0.9, `[ABI-EXPERIMENTAL]`) | M (Alif SE-service boot authority on **AEN801 / `alif:ensemble:e8`**); NOSUPPORT where the platform boots peers by other means | surface + E8 SE backend; **bench-gated** |
 | SDK version / ABI feature-test | `version.h` (v0.9, `[ABI-STABLE]`) | all OSes (compile-time macros + `alp_version_string()`) | present; value-sync CI-gated (`check_version_doc_sync.py`) |
 | Update audit log | `update_log.h` (v0.7, `[ABI-EXPERIMENTAL]`) | M (Zephyr only today): hash-chain engine + SW tier — **NVS-persistent** when the board carves an `alp_ulog_partition` (`CONFIG_ALP_SDK_UPDATE_LOG_PERSIST`), RAM fallback otherwise; tamper-EVIDENT, not tamper-proof; Yocto/baremetal: not built | code complete (native_sim unit-tested: chain verdicts, persist-across-reinit, persisted mutation/delete tamper verdicts, full-log NOMEM-no-wrap, RAM fallback, tier selection + degrade); on-silicon persistence proof remains board-port-specific. Trusted boot-metadata append API present; provider defaults to NOSUPPORT until MCUboot shared-data / Alif SE facts are wired — #263 |
-| Update audit log — HW_ENFORCED tier | `update_log.h` `ALP_UPDATE_LOG_HW_ENFORCED` (`CONFIG_ALP_SDK_UPDATE_LOG_TFM`, `CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT`) | M: app-immutable tier — application client -> trusted owner. TF-M route uses PSA Protected Storage. AEN route uses an M55 owner that writes MRAM while the app M55 talks to it over MHU | TF-M client + PSA owner source present. AEN E4/E8 dual-M55 client/owner source present; the AEN client reports `HW_ENFORCED` only when the HP owner answers and `CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROVEN` is enabled for a board profile whose MRAM log partition has been firewall-locked against app-core writes. Firewall lock is OEM-authorable and **silicon-proven on E8 (2026-07-06)**: HE's master-side firewall (FC8) via the ATOC device config (allow-all + higher-priority HE-deny carve-out over the log window) makes HE bus-fault on a direct write while running normally — no SE audit-log or NV-counter mailbox needed. Remaining follow-up = board-profile provisioning + the NV monotonic-counter rollback anchor — #111 |
+| Update audit log — HW_ENFORCED tier | `update_log.h` `ALP_UPDATE_LOG_HW_ENFORCED` (`CONFIG_ALP_SDK_UPDATE_LOG_TFM`, `CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT`) | M: app-immutable tier — application client -> trusted owner. TF-M route uses PSA Protected Storage. AEN route uses an M55 owner that writes MRAM while the app M55 talks to it over MHU | TF-M client + PSA owner source present. AEN E4/E8 dual-M55 client/owner source present; the AEN client reports `HW_ENFORCED` only when the HP owner answers and the provisioned app-immutable profile (`CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_APP_IMMUTABLE_PROFILE`, which derives `..._FIREWALL_PROVEN` and selects `CONFIG_ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED`) is selected, which asserts (the build does not check at runtime) that the board's MRAM log partition has been firewall-locked against app-core writes -- only the negative probe verifies it; a documented deployment recipe lives in the `firmware-update-log` example README. Firewall lock is OEM-authorable and **silicon-proven on E8 (2026-07-06)**: HE's master-side firewall (FC8) via the ATOC device config (allow-all + higher-priority HE-deny carve-out over the log window) makes HE bus-fault on a direct write while running normally — no SE audit-log or NV-counter mailbox needed. App-immutable, not reflash-immutable: remaining follow-up = the NV monotonic-counter rollback anchor — #111 |
 
 ## CMSIS-DSP per-SoM validation
 

@@ -4,7 +4,7 @@
   "generated_by": "scripts/alp_project.py --emit carrier-netlist",
   "board": "E1M-X-EVK",
   "som": "E1M-V2N101",
-  "hw_rev": "r1",
+  "hw_rev": "r2",
   "silicon_variant": "R9A09G056N44GBG",
   "nets": [
     {

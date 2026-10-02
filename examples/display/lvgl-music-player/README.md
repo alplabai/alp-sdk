@@ -27,7 +27,9 @@ does not decode or play any audio.
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/display/lvgl-music-player
+# writes examples/display/lvgl-music-player/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/display/lvgl-music-player
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/display/lvgl-music-player -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 

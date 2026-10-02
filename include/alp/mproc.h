@@ -194,11 +194,8 @@ typedef struct alp_shmem alp_shmem_t;
 
 /** Configuration for a shared-memory region. */
 typedef struct {
-	const char *name;      /**< Region name shared across cores (DT-anchored). */
-	size_t      size;      /**< Required bytes; rounded up to MMU/MPU page. */
-	bool        cacheable; /**< false ⇒ allocate non-cacheable; required for
-                                 the simple "core A writes, core B reads"
-                                 pattern. */
+	const char *name; /**< Region name shared across cores (DT-anchored). */
+	size_t      size; /**< Required bytes; rounded up to MMU/MPU page. */
 } alp_shmem_config_t;
 
 /**
@@ -209,24 +206,28 @@ typedef struct {
  * devicetree node, so @c size is advisory / backend-authoritative and
  * open() neither consults nor rejects it -- set it to document the
  * bytes both cores agreed to share (and for a future size-checking
- * backend), not because open() requires it. @c cacheable defaults to
- * false, the documented choice "required for the simple core A writes,
- * core B reads pattern."
+ * backend), not because open() requires it.
  *
  * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
  *       SDK's toolchains; standard through C23).  Usable as an initializer
  *       or an expression.  On a compiler that rejects compound literals in
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
-#define ALP_SHMEM_CONFIG_DEFAULT(id) \
-	((alp_shmem_config_t){ .name = (id), .size = 0u, .cacheable = false })
+#define ALP_SHMEM_CONFIG_DEFAULT(id) ((alp_shmem_config_t){ .name = (id), .size = 0u })
 
 /**
  * @brief Acquire access to a named shared-memory region.
  *
- * Both cores opening the same @c name see the same physical bytes;
- * cache coherency is the caller's responsibility unless
- * @c cacheable = false.
+ * Both cores opening the same @c name see the same physical bytes.
+ * Shared-memory carve-outs are non-cacheable by design and the SDK
+ * performs no cache flush or invalidate.  For board.yaml @c ipc:
+ * endpoints the generator emits @c CONFIG_DCACHE=n for every endpoint
+ * core; hand-written firmware must map the carve-out non-cacheable in
+ * the MPU on every core that opens it.  A region left cacheable is not
+ * coherent between cores unless the application does its own cache
+ * maintenance -- the board.yaml @c raw_shmem @c cacheable: @c true
+ * opt-out exists for that case and only suppresses the generated
+ * @c CONFIG_DCACHE=n; the SDK still does no maintenance.
  *
  * @param[in] cfg  Configuration.  Must be non-NULL with a non-empty name.
  * @return Open handle on success, or NULL if the region isn't declared
@@ -244,8 +245,9 @@ alp_shmem_t *alp_shmem_open(const alp_shmem_config_t *cfg);
 /**
  * @brief Get a pointer + length view of the region.
  *
- * Both cores receive the same bytes; cache flush/invalidate is
- * handled by the backend when @c cacheable = false at open.
+ * Both cores receive the same bytes.  The region is mapped
+ * non-cacheable (see @ref alp_shmem_open), so no cache maintenance is
+ * needed or provided.
  *
  * @param[in]  s         Region handle.
  * @param[out] base_out  Receives the region base pointer.

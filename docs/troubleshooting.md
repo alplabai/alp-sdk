@@ -150,8 +150,8 @@ chips:
 
 ## Runtime errors (return codes)
 
-The SDK returns negative `alp_status_t` values; positive 0 is
-success.  Decode tips:
+The SDK returns negative `alp_status_t` values on failure; 0 is
+success (`ALP_OK`).  Decode tips:
 
 | Return                  | Meaning                                                            | First thing to check                                  |
 |-------------------------|--------------------------------------------------------------------|-------------------------------------------------------|

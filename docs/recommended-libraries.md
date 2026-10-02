@@ -67,7 +67,7 @@ arm_fir_f32(&fir, in, out, 256);
 Enable: `CONFIG_CMSIS_DSP=y` in board.yaml-generated alp.conf
 (triggered automatically when the SoM's `capabilities:` block
 declares a backend that needs CMSIS-DSP, or when you explicitly
-add `cmsis_dsp` to a core's `libraries:` list).
+add `cmsis-dsp` to the `libraries:` list).
 
 ### ETLCPP
 
@@ -112,7 +112,7 @@ if (!doc.is_discarded()) {
 }
 ```
 
-Enable: `libraries: [nlohmann_json]`.  Profile sets
+Enable: `libraries: [nlohmann-json]`.  Profile sets
 `JSON_NOEXCEPTION=1` so `parse(...)` returns a discarded sentinel
 on malformed input instead of throwing.
 
@@ -191,7 +191,7 @@ needs one, a compile-time profile header under
 `json_config.h`, `doctest_config.h`) -- low friction once the case is
 made.
 
-## HW-backend profiles (per-library accelerator binding)
+## HW-backend bindings (per-library accelerator selection)
 
 Alongside the compile-time profile header (`etl_profile.h`,
 `fmt_config.h`, ...), 22 of the 35 library manifests under

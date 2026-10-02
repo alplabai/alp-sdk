@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/som-preset-v1.schema.json",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/som-preset-v2.schema.json",
   "title": "ALP SoM preset (metadata/e1m_modules/<SKU>.yaml) v1",
   "description": "Schema for the per-SKU SoM preset.  The SDK's loader resolves the customer's board.yaml `som.sku` to the matching preset here.  Every released-MPN preset shares ONE canonical shape: the top-level key set, `memory:`, `on_module:`, `inference:`, and `status:` are closed (additionalProperties: false) so cross-family key drift fails validation instead of passing silently.  The only deliberately-open spots are the ones where genuine per-family variance is legitimate, and each carries its own description saying why: `capabilities:` (open set of accelerator flags matched against each library's `integration.zephyr.hw_backends:` block in metadata/libraries/*.yaml), `i2c_devices` bus KEYS (bus identifiers differ per family), and `helper_firmware[].flash_args` (shape follows the flash backend).",
   "type": "object",
@@ -55,7 +55,7 @@
   "properties": {
     "schema_version": {
       "type": "integer",
-      "const": 1
+      "const": 2
     },
     "sku": {
       "type": "string",
@@ -209,7 +209,7 @@
       "required": [
         "preferred_backend"
       ],
-      "description": "Inference-accelerator selection.  `preferred_backend` is always required; `ethos_u_variant` (the primary variant) is required whenever the preferred backend is `ethos_u`.  Which Ethos-U variants the part carries is silicon-determined -- derived from the SoC JSON `npus[]` / capability counts -- so the SoM preset does NOT enumerate them (`npu_population` is deprecated, see below).  Non-Ethos backends (drpai, deepx_dxm1) have no per-instance table.",
+      "description": "Inference-accelerator selection.  `preferred_backend` is always required; `ethos_u_variant` (the primary variant) is required whenever the preferred backend is `ethos_u`.  Which Ethos-U variants the part carries is silicon-determined -- derived from the SoC JSON `npus[]` / capability counts -- so the SoM preset does NOT enumerate them.  Non-Ethos backends (drpai, deepx_dxm1) have no per-instance table.",
       "properties": {
         "preferred_backend": {
           "type": "string",
@@ -220,15 +220,6 @@
           "type": "string",
           "pattern": "^u[0-9]+$",
           "description": "Primary Ethos-U variant (`u55`, `u65`, `u85`) when multiple are populated."
-        },
-        "npu_population": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "$ref": "#/$defs/npu_instance"
-          },
-          "deprecated": true,
-          "description": "DEPRECATED \u2014 no longer read by the SDK.  Which Ethos-U instances a part carries is silicon-determined and sourced from the SoC JSON `npus[]` (+ the `ethos_u{55,65,85}_count` capabilities); an on-die NPU cannot be depopulated at the SoM level, so restating it here duplicated the SoC.  Retained as an optional field for back-compat with older consumers; do not author it in new presets.  Scheduled for removal in som-preset v2."
         }
       },
       "allOf": [
@@ -533,20 +524,6 @@
         }
       }
     },
-    "npu_instance": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "variant"
-      ],
-      "properties": {
-        "variant": {
-          "type": "string",
-          "pattern": "^u[0-9]+$",
-          "description": "Ethos-U variant of this instance (`u55`, `u65`, `u85`).  The instance's role/subtype, MAC size, and the host core it pairs with are silicon facts and live once in the SoC JSON (`npus[].subtype` / `mac_per_cycle` / `paired_core`) \u2014 a SoM preset does not restate them."
-        }
-      }
-    },
     "topology_entry": {
       "type": "object",
       "required": [],
@@ -637,7 +614,8 @@
       "required": [
         "name",
         "base",
-        "accessible_from"
+        "accessible_from",
+        "write_authority"
       ],
       "additionalProperties": false,
       "properties": {
@@ -705,7 +683,7 @@
         "write_authority": {
           "type": "string",
           "enum": ["customer_image", "vendor_image", "customer_runtime", "secure_enclave", "none", "composite"],
-          "description": "WHO may write this region, and WHEN.  Modelled on `helper_firmware_entry.flash_policy`, and deliberately two-axis: a one-axis customer/vendor/secure split collapses `he_slot0` onto `storage` (both customer) and cannot separate flash-time from runtime, which is the distinction the hazard needs.  `customer_image` = written only by the flash tool, never by running code (`he_slot0`, `hp_slot0`).  `vendor_image` = a factory-provisioned image (`mcuboot`).  `customer_runtime` = runtime-writable by the application, and the ONLY value a row may claim DIRECTLY for an IPC carve-out or a runtime mount to land on (`storage`).  `secure_enclave` = written by the Secure Enclave at provisioning (`atoc`); the SE is not a `topology:` core, so it can never appear in `accessible_from` and no core id can express this.  `none` = nobody writes it (`reserved` headroom) -- an explicit no-writer, not a catch-all.  `composite` = a whole-device alias spanning contained rows of DIFFERENT authority (`mram_main`), where a single value would be false by construction; consult the contained rows -- `scripts/alp_orchestrate/partition.py`'s `flash_device:` resolver is the one consumer that accepts `composite` as an explicit-pin target, and only once EVERY contained row independently resolves a concrete span, declares its own `write_authority`, and together they contiguously tile the alias with no gap and no overlap (alp-sdk#2088); every other consumer (an IPC carve-out, `carveout.py`) refuses a `composite` row outright, never descending into it.  ABSENT MEANS UNRESOLVED, NEVER `customer_runtime` -- a consumer must treat an authored region carrying no `write_authority` as ineligible for both IPC carve-out and runtime write, and say so, rather than defaulting permissively (ADR-0034 clause 4).  Not in `required` for som-preset v1 because `docs/porting-new-som.md` is a public porting guide and a customer preset that authored `memory_map:` rows would break at `tan validate` on upgrade; `scripts/validate_metadata.py` enforces presence semantically instead, and v2 promotes it.  NOTE `accessible_from:` is read/execute reachability only and says nothing about write authority: `atoc` lists `[m55_he, m55_hp]` and neither may write it (#1365).",
+          "description": "WHO may write this region, and WHEN.  Modelled on `helper_firmware_entry.flash_policy`, and deliberately two-axis: a one-axis customer/vendor/secure split collapses `he_slot0` onto `storage` (both customer) and cannot separate flash-time from runtime, which is the distinction the hazard needs.  `customer_image` = written only by the flash tool, never by running code (`he_slot0`, `hp_slot0`).  `vendor_image` = a factory-provisioned image (`mcuboot`).  `customer_runtime` = runtime-writable by the application, and the ONLY value a row may claim DIRECTLY for an IPC carve-out or a runtime mount to land on (`storage`).  `secure_enclave` = written by the Secure Enclave at provisioning (`atoc`); the SE is not a `topology:` core, so it can never appear in `accessible_from` and no core id can express this.  `none` = nobody writes it (`reserved` headroom) -- an explicit no-writer, not a catch-all.  `composite` = a whole-device alias spanning contained rows of DIFFERENT authority (`mram_main`), where a single value would be false by construction; consult the contained rows -- `scripts/alp_orchestrate/partition.py`'s `flash_device:` resolver is the one consumer that accepts `composite` as an explicit-pin target, and only once EVERY contained row independently resolves a concrete span, declares its own `write_authority`, and together they contiguously tile the alias with no gap and no overlap (alp-sdk#2088); every other consumer (an IPC carve-out, `carveout.py`) refuses a `composite` row outright, never descending into it.  ABSENT MEANS UNRESOLVED, NEVER `customer_runtime` -- a consumer must treat an authored region carrying no `write_authority` as ineligible for both IPC carve-out and runtime write, and say so, rather than defaulting permissively (ADR-0034 clause 4).  REQUIRED since som-preset v2: the schema itself rejects a `memory_map:` row that omits it.  NOTE `accessible_from:` is read/execute reachability only and says nothing about write authority: `atoc` lists `[m55_he, m55_hp]` and neither may write it (#1365).",
           "$comment": "ADR-0027's role->region mapping must consume this field rather than growing a parallel flag: a `role:` may only resolve onto a `customer_runtime` region -- never `composite`, unlike the explicit-pin `flash_device:` path (`scripts/alp_orchestrate/partition.py`, alp-sdk#2088), which DOES accept a `composite` whole-device alias, but only once every row it contains is independently verified `customer_runtime`-safe. `role:` is not implemented yet (ADR-0027 status: Proposed); when it is, it should resolve directly to the verified `customer_runtime` row itself, not to a `composite` alias it would then have to re-verify."
         },
         "access_windows": {

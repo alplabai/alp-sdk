@@ -53,6 +53,8 @@ The board file ships in-tree at
 [`zephyr/boards/alp/e1m_aen801_m55_hp/`](../../../zephyr/boards/alp/e1m_aen801_m55_hp/):
 
 ```bash
-west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/peripheral-io/vendor-ext-composability
+# writes examples/peripheral-io/vendor-ext-composability/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/vendor-ext-composability
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/peripheral-io/vendor-ext-composability -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```

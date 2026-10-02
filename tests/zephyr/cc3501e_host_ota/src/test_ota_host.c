@@ -32,6 +32,7 @@
 #include "alp/chips/cc3501e.h"
 #include "alp/protocol/cc3501e.h"
 #include "cc3501e_reply_model.h"
+#include "../../../../chips/cc3501e/cc3501e_internal.h"
 
 /* ---- software model of the firmware OTA slave ------------------------------ */
 
@@ -49,6 +50,8 @@ static struct {
 	enum slave_phase phase;
 	uint8_t          cmd;     /* opcode of the in-flight request         */
 	uint16_t         req_len; /* declared request payload length         */
+	uint32_t         write_frames;      /* OTA_WRITE frames seen (#1818)    */
+	uint16_t         write_max_req_len; /* largest OTA_WRITE payload (#1818) */
 	uint8_t          req_pl[ALP_CC3501E_MAX_PAYLOAD];
 
 	/* Sticky BEGIN witness.  cc3501e_ota_begin() (#1610) no longer trusts
@@ -138,6 +141,8 @@ static void slave_dispatch(void)
 		                          ((uint32_t)slave.req_pl[2] << 16) |
 		                          ((uint32_t)slave.req_pl[3] << 24);
 		const uint16_t data_len = (uint16_t)(slave.req_len - 4u);
+		slave.write_frames++;
+		if (slave.req_len > slave.write_max_req_len) slave.write_max_req_len = slave.req_len;
 		if (slave.fail_next_write) {
 			slave.fail_next_write = false;
 			/* NOT_READY (not INTERNAL/RADIO/PROTOCOL, which resp_to_status maps
@@ -430,6 +435,47 @@ ZTEST(cc3501e_host_ota, test_write_encodes_offset_and_data)
 	const uint8_t expect[8] = { 0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04 };
 	zassert_equal(slave.image_len, 8u, "all bytes landed");
 	zassert_mem_equal(slave.image, expect, 8u, "image reassembled in order");
+}
+
+/* #1818: a polled peer (update mode) gets a large buffer as <= 64 B frames at
+ * advancing offsets; a 1024 B write is 16 frames and the image lands in order.
+ * Outside update mode the same write is one frame. */
+ZTEST(cc3501e_host_ota, test_polled_write_splits_into_64b_frames_1818)
+{
+	static uint8_t blob[1024];
+	for (size_t i = 0; i < sizeof blob; i++) {
+		blob[i] = (uint8_t)(i * 7u + 3u);
+	}
+	zassert_equal(cc3501e_ota_update_mode(&fw, true, 100u), ALP_OK, "enter update mode");
+	zassert_equal(cc3501e_ota_begin(&fw, sizeof blob, 100u), ALP_OK, "BEGIN");
+	slave.write_frames = 0u;
+	zassert_equal(cc3501e_ota_write(&fw, 0u, blob, sizeof blob, 100u), ALP_OK, "1024 B WRITE");
+	zassert_equal(slave.write_frames, 16u, "16 frames of 64 B");
+	zassert_equal(slave.write_max_req_len, 4u + CC3501E_POLLED_OTA_CHUNK, "frame <= 4 + 64 B");
+	zassert_equal(slave.ota_cursor, sizeof blob, "cursor at end");
+	zassert_mem_equal(slave.image, blob, sizeof blob, "image in order (offsets advanced)");
+
+	/* Non-multiple tail: 130 B -> 64 + 64 + 2. */
+	slave_reset();
+	zassert_equal(cc3501e_ota_begin(&fw, 130u, 100u), ALP_OK, "BEGIN 130");
+	slave.write_frames = 0u;
+	zassert_equal(cc3501e_ota_write(&fw, 0u, blob, 130u, 100u), ALP_OK, "130 B WRITE");
+	zassert_equal(slave.write_frames, 3u, "64 + 64 + 2");
+	zassert_mem_equal(slave.image, blob, 130u, "tail intact");
+}
+
+/* #1818: normal mode (not polled) is unchanged -- one frame, however large. */
+ZTEST(cc3501e_host_ota, test_normal_mode_write_is_one_frame_1818)
+{
+	static uint8_t blob[512];
+	/* BEGIN itself requires a polled peer; drop the flag only for the WRITE. */
+	zassert_equal(cc3501e_ota_update_mode(&fw, true, 100u), ALP_OK, "enter update mode");
+	zassert_equal(cc3501e_ota_begin(&fw, sizeof blob, 100u), ALP_OK, "BEGIN");
+	cc3501e_set_peer_polled(false);
+	slave.write_frames = 0u;
+	zassert_equal(cc3501e_ota_write(&fw, 0u, blob, sizeof blob, 100u), ALP_OK, "WRITE");
+	zassert_equal(slave.write_frames, 1u, "single frame");
+	zassert_equal(slave.write_max_req_len, 4u + sizeof blob, "full payload");
 }
 
 /* WRITE rejects an over-sized chunk at the host BEFORE any transfer. */

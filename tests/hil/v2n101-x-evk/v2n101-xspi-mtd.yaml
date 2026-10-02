@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2N101 xSPI NOR (xSPI0): mtd0 and mtd1 are registered with non-zero
+# size, and the first 4 MiB of mtd0 hashes identically across two reads.
+# Read-only: /dev/mtd0ro, never a write/erase node.  /proc/mtd is echoed
+# so the partition names/sizes land in the run log.
+
+schema_version: 1
+name: v2n101-xspi-mtd
+description: |
+  mtd0/mtd1 present with size, mtd0 read is stable across two passes.
+
+flash_method: ssh-run
+ssh_command: |-
+  cat /proc/mtd
+  for m in mtd0 mtd1; do
+    awk -v m="$m:" '$1==m && $2!="00000000"{f=1} END{exit !f}' /proc/mtd && echo HIL_${m}_OK
+  done
+  a=$(head -c 4194304 /dev/mtd0ro | md5sum)
+  b=$(head -c 4194304 /dev/mtd0ro | md5sum)
+  [ -n "$a" ] && [ "$a" = "$b" ] && echo HIL_MTD0_STABLE
+
+serial:
+  duration_s: 60
+  expect_contains:
+    - "HIL_mtd0_OK"
+    - "HIL_mtd1_OK"
+    - "HIL_MTD0_STABLE"

@@ -18,9 +18,9 @@ common:
 tests:
   alp_sdk.examples.mproc_mailbox.native_sim:
     platform_allow: native_sim/native/64
-    extra_args: CONFIG_ALP_SDK_MPROC=y   # mproc surface is opt-in; the .aen sibling sets it too.
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf CONFIG_ALP_SDK_MPROC=y   # mproc surface is opt-in; the .aen sibling sets it too.
   alp_sdk.examples.mproc_mailbox.aen:
     platform_allow:
       - ensemble_e8_dk/ae822fa0e5597ls0/rtss_he
-    extra_args: CONFIG_ALP_SDK_MPROC=y
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf CONFIG_ALP_SDK_MPROC=y
     build_only: true   # real run needs the peer firmware (v0.4+).

@@ -7,8 +7,11 @@ from __future__ import annotations
 import gzip
 import hashlib
 import re
+import shutil
 import subprocess
+import sys
 import zlib
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -90,11 +93,21 @@ def test_run_argv_and_check():
     t, fake = target([("true", "ok\n"), ("false", (1, ""))])
     assert t.run("true").stdout == "ok\n"
     argv = fake.argvs[0]
-    assert argv[0] == "ssh" and "BatchMode=yes" in argv and "StrictHostKeyChecking=accept-new" in argv
+    assert argv[0] == "ssh" and "BatchMode=yes" in argv
     assert argv[-2:] == ["root@unit", "true"]
     with pytest.raises(BenchError, match="rc=1"):
         t.run("false")
     assert t.run("false", check=False).rc == 1
+
+
+def test_ssh_children_never_consume_stdin():
+    seen = {}
+
+    def runner(argv, **kw):
+        seen.update(kw)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+    lt.LinuxTarget("unit", runner=runner).run("true")
+    assert seen["stdin"] is subprocess.DEVNULL    # a piped operator answer must reach the prompt
 
 
 def test_run_timeout_is_bench_error():
@@ -126,7 +139,9 @@ def test_console_login_and_discover_host():
     con = FakeConsole([
         (r"^\r$", "\r\nunit login: "),
         (r"^root\r$", "root\r\nroot@unit:~# "),
-        (r"ip -4 -o addr show scope global", "2: eth0    inet 10.0.0.7/24 brd 10.0.0.255 scope global eth0\r\n# "),
+        (r"^export TERM=dumb", "export TERM=dumb\r\n# "),
+        (r"^systemctl is-system-running", "systemctl is-system-running\r\nrunning\r\n# "),
+        (r"ip -4 -o addr show scope global", "ip -4 -o addr show scope global\r\n2: eth0    inet 10.0.0.7/24 brd 10.0.0.255 scope global eth0\r\n# "),
     ])
     lt.console_login(con)
     assert lt.discover_host(con) == "10.0.0.7"
@@ -301,6 +316,50 @@ def test_eeprom_write_pages_never_crosses_a_chunk_boundary():
     assert sizes == ["10", "14"]          # 8 + 12 bytes, split at 0x10
     with pytest.raises(ValueError):
         lt.eeprom_write_pages(t, 0, 0, data, page=24)
+
+
+@pytest.mark.skipif(sys.platform.startswith("win") or shutil.which("bash") is None,
+                    reason="needs a POSIX shell (Windows bash is WSL/Git-Bash with different fd semantics)")
+def test_eeprom_ack_poll_exits_zero_after_retries():
+    """The poll loop used to end with a false `[ n -ge N ] && exit 3` as its last
+    command, so a write needing >=1 poll retry returned rc=1. Run the generated
+    shell against a fake i2ctransfer that NACKs the first two polls."""
+    data = b"Z" * 16
+    fake_i2c = ('c=0; i2ctransfer() { case "$3" in w2@*) c=$((c+1)); [ $c -gt 2 ] || return 1;; esac; '
+                'return 0; }; ')
+
+    def sh(cmd):
+        p = subprocess.run(["bash", "-c", fake_i2c + cmd], capture_output=True, text=True, encoding="utf-8", check=False)
+        return p.returncode, p.stdout, p.stderr
+
+    t, fake = target([(r"until", sh), (r"r16", _hx(data))])
+    lt.eeprom_write_pages(t, 0, 0, data)              # rc 0 despite two NACKed polls
+    cmd = next(c for c in fake.commands if "until" in c)
+    assert "; if [ $n -ge" in cmd and "; fi; done" in cmd and "&& exit 3" not in cmd
+
+
+def test_target_ssh_ignores_host_keys():
+    fake = FakeSSH([(r"true", "")])
+    t = lt.LinuxTarget("unit", runner=fake)
+    t.run("true")
+    t.put(Path("a"), "/tmp/a")
+    for argv in fake.argvs:
+        for o in ("StrictHostKeyChecking=no", "UserKnownHostsFile=/dev/null", "LogLevel=ERROR", "BatchMode=yes"):
+            assert o in argv
+        assert not any("HostKeyAlias" in a for a in argv)
+
+
+def test_cid_identity_of_the_em_dcid_fixture_equals_the_sysfs_form():
+    from tests.scripts.test_provision_scif_writer import CID_OUT
+    from provision import scif_writer as sw
+
+    cid = sw.parse_cid(CID_OUT)
+    # sysfs as a host that drops the CRC7 + end-bit byte shows it, reserved bits set
+    sysfs = "15fd00414C50544553210a1b2c3d9300\n"
+    assert lt.cid_identity(sysfs) == lt.cid_identity(cid["emmc_cid_raw"]) == "150100414c50544553210a1b2c3d93"
+    assert lt.cid_identity(sysfs) != lt.cid_identity("16" + cid["emmc_cid_raw"][2:])
+    with pytest.raises(ValueError):
+        lt.cid_identity("xyz")
 
 
 def test_eeprom_write_pages_readback_mismatch():
@@ -687,6 +746,8 @@ def _census_responses(array: bytes = b"\xff" * 128):
         (r"devmem 0x10430308", "0x00000002\n"),
         (r"cpuinfo_max_freq", "1800000\n"), (r"meminfo", "MemTotal:        3200000 kB\nMemFree: 1 kB\n"),
         (r"uname -r", "6.1.107-cip28\n"),
+        (r"device-tree/compatible", "alp,e1m-v2m101-x-evk renesas,r9a09g056\n"),
+        (r"device-tree/model", "ALP E1M-V2M101 on E1M-X-EVK\n"),
         (r"device/type", "mmcblk0 SD\nmmcblk1 MMC\nmmcblk1boot1 MMC\n"),
         (r"mmcblk1/device/cid", CID + "\n"), (r"mmcblk1/size", "30535680\n"),
         (r"extcsd read", EXTCSD.format(a=2, b=8)),
@@ -703,7 +764,11 @@ def _census_responses(array: bytes = b"\xff" * 128):
         (r"w2@0x50 0x00 0x00 r128", _hx(array)),
         (r"i2cget", i2cget),
         (r"i2cdetect -y -r 8", _i2cdetect({0x1E, 0x25, 0x26, 0x44, 0x48, 0x4F, 0x52, 0x69, 0x70})),
-        (r"eth0/", "aa:bb:cc:00:00:01\nup\n"), (r"eth1/", (1, "")),
+        (r"^ls /sys/class/net", "end0\nend1\nlo\n"),
+        (r"end0/address", "aa:bb:cc:00:00:01\nup\n"), (r"end1/address", (1, "")),
+        (r"end0/carrier", "1\n"), (r"end0/speed", "1000\n"),
+        (r"ethtool end0", "Settings for end0:\n\tLink partner advertised link modes:  1000baseT/Full\n"
+                          "\t                                100baseT/Full\n"),
     ]
 
 
@@ -718,6 +783,8 @@ def test_census_collects_ledger_keys_read_only():
     assert facts["secure_page_sha256"] == hashlib.sha256(b"\xff" * 64).hexdigest()
     assert "manifest_sha256" not in facts                      # blank array
     assert facts["soc_sys_lsi_mode"].startswith("0x3c06 (unverified")
+    assert facts["dtb_name"] == ("ALP E1M-V2M101 on E1M-X-EVK "
+                                 "(compatible alp,e1m-v2m101-x-evk renesas,r9a09g056)")
     assert facts["cpu_khz"] == "1800000" and facts["linux_memtotal_kb"] == "3200000"
     assert facts["emmc_cid_pnm"] == "EMMC01" and facts["emmc_cid_psn"] == "0x12345678"
     assert facts["emmc_cid_mid"] == "0xd6" and facts["emmc_cid_mdt"] == "0x9a"
@@ -734,8 +801,10 @@ def test_census_collects_ledger_keys_read_only():
     assert facts["tps_vout"].startswith("0x44=0x5a")
     assert facts["rtc_rv3028_reg_0x37"] == "0x10"
     assert facts["clkgen_5l35023b_regs"] == "ack at 0x69"
-    assert facts["eth0_mac"] == "aa:bb:cc:00:00:01" and facts["eth0_link"] == "up"
-    assert notes == ["eth1: not present"]
+    assert facts["eth0_mac"] == "aa:bb:cc:00:00:01"      # ledger keys are eth0_*; the unit calls it end0
+    assert facts["eth0_link"] == "up (end0) carrier=1 speed=1000 anlpar=1000baseT/Full"
+    assert not [k for k in facts if k.startswith("end")]
+    assert notes == ["end1: address/operstate unreadable"]
     # read-only: no writes of any kind reached the unit
     assert not [c for c in fake.commands if re.search(r"i2cset|flash_erase|mtd_debug write|\bdd\b[^|]*\bof=|mmc boot", c)]
     assert not [c for c in fake.commands if re.search(r"w(?!2@)\d+@0x5[08]", c)]
