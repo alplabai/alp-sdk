@@ -241,7 +241,7 @@ are not yet confirmed by a run of this code on a bench.
 | `bootstrap` | reuses the live SCIF ROM state `detect` left in this run (no second power cycle); cycles only if no ON has happened since. Flash Writer: `EM_W` boot1 sector `0x1` ← `bl2_mmc`, sector `0x300` ← `fip`; `EM_SECSD` EXT_CSD `[177]=0x02` (BOOT_BUS_CONDITIONS), `[179]=0x08` (PARTITION_CONFIG); `EM_DCID` |
 | `dsw1_emmc_insert_sd` | operator: boot switch to eMMC, insert the release microSD; U-Boot must autoboot |
 | `boot_sd_linux` | U-Boot boots the wic from microSD; log in, find the host, confirm the root is on the SD, then the live SoM check: every non-optional on-module I2C device the SoM preset declares must ACK (the GD32 excepted) before any destructive step runs. Fallback `--transfer xmodem`: `loadx` + `gzwrite` the wic from the U-Boot prompt. No IP is not a failure here: the checks run over the console and `gd32_flash` runs next |
-| `gd32_flash` | applies the ACT88760 GPIO4 volatile release if still at the OTP default, DP-ID gate (`0x0BE12477` only), `loadbin` × 3, verify with `savebin` in fresh probe sessions, bridge ACK at `0x70`. With no network (the `boot_sd_linux` evidence says why: `network: none (gbeth DMA reset failed on <ports>)` or `none (no carrier)`) it pushes the SWD tools and the three images over the console (base64, md5-checked on the board), then cold-cycles and re-checks the IP; SSH is used when it is up |
+| `gd32_flash` | applies the ACT88760 GPIO4 volatile release if still at the OTP default, DP-ID gate (`0x0BE12477` only), `loadbin` × 3, verify with `savebin` in fresh probe sessions, reset-and-run after every readback (see "The GD32 readback halts the MCU"), then `GET_VERSION` from the bridge at `0x70` (polled; the step fails if it never answers). With no network (the `boot_sd_linux` evidence says why: `network: none (gbeth DMA reset failed on <ports>)` or `none (no carrier)`) it pushes the SWD tools and the three images over the console (base64, md5-checked on the board), then cold-cycles and re-checks the IP; SSH is used when it is up |
 | `write_xspi` | from Linux: `bl2` → `mtd0`, `fip` → `mtd1`; md5 readback. A FIP whose erase would reach the CM33 image at `mtd1` + `0x1A0000` is refused |
 | `write_emmc_boot` | release `bl2_mmc` + `fip` into `mmcblk<N>boot1`, md5 readback, EXT_CSD via mmc-utils |
 | `write_rootfs` | stream the wic into the eMMC user area (refused while Linux runs from the eMMC), `fsck -n`, read-only mount (`-o ro,noload`, so the ext4 journal is never replayed), `/boot/<dtb>` present. With a `system_image_bmap` in the bundle only the mapped ranges are written and verified, see below |
@@ -252,6 +252,7 @@ are not yet confirmed by a run of this code on a bench.
 | `secure_page` | write the 64-byte Secure Data Page, read back, compare. Never locks |
 | `dsw1_xspi_remove_sd` | operator: boot switch to xSPI, remove the microSD |
 | `cold_boot_test` | `--cold-cycles N`: clean BL2, DRAM tier, rail line (`v2n-m1`), login, `SYS_LSI_MODE`, ACT88760 reg `0x10` after boot, I2C scans (GD32 exempted only while `0x10` still reads `0x88`). An `end0` without carrier (PHY latch, #2582) gets one extra cold cycle, noted as `end0_no_carrier_retries` in the step evidence (not a ledger key); it fails if `end0` is still down |
+| `census_final` | the census again, on the unit as shipped (after the last cold boot: xSPI boot, eMMC root). Its values replace the first census's, so a key that was `unread (...)` there is read here; one that is still unread blocks the ship check. It leaves the ACT88760 GPIO4 keys to `cold_boot_test` |
 | `clkgen_verify` | the on-SoM 5L35023B (`BRD_I2C`, `0x69`) OTP image against U-Boot's fixup |
 | `hil_smoke` | optional `tests/hil/run_smoke.py` |
 | `record` | merge auto keys into `<serial>.unit.yaml` (manual keys never touched), append `<serial>.md`, logs, xlsx, ship check |
@@ -388,6 +389,27 @@ refuse until it is copied back. Ledger facts: `dxm1_fw_version`, `dxm1_fw_md5`,
 `dxm1_fw_uart_boot_md5` (md5 of the bundle files used) when the step is done or
 already satisfied. `census` also reads `dxm1_pcie_device` and
 `dxm1_fw_version` (read-only) on a V2M (`v2n-m1`) unit.
+
+### The GD32 readback halts the MCU
+
+`gd32_flash` reads the three image regions back over SWD (`savebin`) in its probe (before the
+step runs, and again after it, also for a unit whose GD32 is already programmed, and in a
+`plan` with `--bench`) and in its verify. The dump halts the GD32 core and leaves it halted. A
+halted GD32 still acknowledges its I2C address `0x70` and stretches SCL, and the kernel's
+bridge driver retries about once a second, so the board-management bus (`BRD_I2C`, `i2c-8` on
+the reference bench) is dead until the next power cycle: the kernel log repeats
+`gpio-gd32-bridge 8-0070: output state replay failed (-110)` and
+`i2c i2c-8: SCL is stuck low, exit recovery`, and every later read on that bus fails
+(`Error: Read failed`). The tool therefore resets and runs the core after every readback and
+after a failed write or verify (in a `finally`, so also when the dump itself fails), then asks
+the bridge for `GET_VERSION` (10 tries, 1 s apart). The result is recorded as
+`gd32_bridge_after_readback` (probe) and `gd32_protocol` (run). If the bridge does not answer,
+the step fails and the run stops before `census`; a failed reset is reported as "core left
+halted". **`SCL is stuck low` on that bus during provisioning points at a GD32 left halted over
+SWD**; a census that finds unread keys says so when the kernel log carries that line.
+`census_final` reads the same keys again after the final cold boot. That the halt is the cause
+is inferred from the probe tool's behaviour and from log timing on two units; it has not been
+reproduced on a bench, and neither has this fix.
 
 ### Lock preconditions (`run --lock`)
 

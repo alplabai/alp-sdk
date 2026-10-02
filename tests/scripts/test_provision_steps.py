@@ -228,7 +228,9 @@ def test_blank_board_full_plan(tmp_path):
     assert not ctx.state_path.exists()             # dry run writes no state
     assert not (ctx.unit_dir / f"{SERIAL}.manifest.staged.bin").exists()
     assert ctx.bench.power.events == []
-    assert {c[0] for c in ctx.bench.probe.calls} == {"savebin", "dp_id"}   # read-only probe use
+    # no loadbin in a plan; the readback halts the core, so even a plan resumes it afterwards
+    assert {c[0] for c in ctx.bench.probe.calls} == {"savebin", "dp_id", "reset_run"}
+    assert ctx.bench.probe.calls[-1] == ("reset_run",)
 
 
 def test_offline_plan_without_bench(tmp_path):
@@ -469,7 +471,7 @@ def test_gd32_flash_applies_the_early_otp_workaround(tmp_path):
     # verify used fresh probe sessions (savebin after the loadbins)
     kinds = [c[0] for c in ctx.bench.probe.calls]
     last_load = max(i for i, k in enumerate(kinds) if k == "loadbin")
-    assert kinds[last_load + 1:kinds.index("reset_run")].count("savebin") == len(steps.GD32_IMAGES)
+    assert kinds[last_load + 1:kinds.index("reset_run", last_load)].count("savebin") == len(steps.GD32_IMAGES)
 
 
 def test_gd32_flash_workaround_does_not_touch_an_operator_disposition(tmp_path):
@@ -487,7 +489,7 @@ def test_select_steps_rules():
     assert names == ["preflight", "census"]
     names = [s.name for s in steps.select_steps(start="secure_page", skip=["hil_smoke"])]
     assert names == ["preflight", "secure_page", "dsw1_xspi_remove_sd", "cold_boot_test",
-                     "clkgen_verify", "record"]
+                     "census_final", "clkgen_verify", "record"]
     with pytest.raises(ValueError):
         steps.select_steps(only=["nope"])
 
@@ -544,10 +546,11 @@ def test_eeprom_manifest_rediscovers_a_pinned_host_after_the_mac_change(tmp_path
     assert attached == ["10.0.0.2"]
 
 
-def test_gd32_probe_discovers_the_host_when_only_starts_at_gd32_flash(tmp_path):
+def test_gd32_probe_discovers_the_host_when_only_starts_at_gd32_flash(tmp_path, monkeypatch):
     fw = _gd32_fw(tmp_path)
     probe = FakeProbe(memory={a: (fw / n).read_bytes() for n, a, _k in steps.GD32_IMAGES})
     probe.env = {}
+    monkeypatch.setattr(lt, "gd32_bridge_version", lambda t, bus, addr=0x70: (0, 14, 0))   # no real ssh
     ctx = _ctx(tmp_path, bench=_bench(console=_login_console(), probe=probe), gd32_fw=fw, execute=True)
     assert isinstance(steps.Gd32Flash().probe(ctx), steps.Satisfied)
     assert probe.env == {"ALP_PROVISION_HOST": "10.0.0.2"}

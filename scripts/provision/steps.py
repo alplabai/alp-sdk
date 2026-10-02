@@ -59,6 +59,11 @@ IP_WAIT_S = 120.0     # boot_sd_linux: how long a console login may wait for DHC
 IP_POLL_S = 5.0
 LOCK_BIT = 0x02
 PSU_CURRENT_WARN_A = 0.40   # census screen for the PHY-regulator fault; warns only, never fails
+# After a reset-and-run the GD32 needs its bootloader + clock-up before it answers GET_VERSION.
+# ponytail: 10 tries x 1 s, taken from the old fixed 5 s settle; no bench timing behind it yet.
+BRIDGE_TRIES = 10
+BRIDGE_GAP_S = 1.0
+I2C_WEDGE_DMESG = "SCL is stuck low"
 
 
 # --------------------------------------------------------------------------
@@ -1260,6 +1265,9 @@ class WriteRootfs(Step):
 class Census(Step):
     name = "census"
     always_run = True
+    # CensusFinal: the unit runs its shipping image after a plain cold boot, where
+    # cold_boot_test owns the ACT88760 GPIO4 keys (reg 0x10 reads released whoever released it).
+    reads_gpio4_otp = True
 
     def run(self, ctx):
         t = ctx.need_linux()
@@ -1272,7 +1280,7 @@ class Census(Step):
         if why := leftover_dxuart2_swap(ctx):
             raise Refused(why)
         facts, notes = lt.census(t, bus, sizes, dxm1_present=ctx.family == "v2n-m1")
-        if bus["pmic"] is not None:
+        if bus["pmic"] is not None and self.reads_gpio4_otp:
             try:
                 # gd32_flash runs BEFORE census. When it applied the volatile
                 # release it already recorded the OTP value it saw (0x88) and
@@ -1307,9 +1315,28 @@ class Census(Step):
                         warn = (f"WARNING: supply current {amps:.3f} A > {PSU_CURRENT_WARN_A:.2f} A at "
                                 "census (normal 0.17-0.29 A at idle): suspect the PHY regulator output "
                                 "capacitor fault")
+        if any(str(v).startswith("unread") for v in facts.values()):
+            # name the usual cause of unread I2C keys instead of leaving a bare read error
+            try:
+                n = t.run(f"dmesg | grep -c '{I2C_WEDGE_DMESG}'", check=False).stdout.strip()
+            except BenchError:
+                n = ""
+            if n.isdigit() and int(n):
+                notes.append(f"I2C bus wedged: {n} '{I2C_WEDGE_DMESG}' line(s) in dmesg (a GD32 left halted "
+                             "over SWD holds SCL); the bus stays dead until the next power cycle, "
+                             "census_final re-reads these keys after the final cold boot")
         ctx.step_logs[self.name] = "\n".join(notes + ([warn] if warn else []))
         return self.result(ctx, f"{len(facts)} keys" + (f"; unread: {'; '.join(notes)}" if notes else "")
                            + (f"; {warn}" if warn else ""), facts, status="done")
+
+
+class CensusFinal(Census):
+    """The census again, on the unit as shipped: after cold_boot_test's last cold boot (xSPI
+    boot, eMMC root). Its values replace the earlier census's, so a key the first census could
+    not read (`unread (...)`, e.g. on a wedged I2C bus) is read here; one that is still unread
+    stays unread and blocks the ship check."""
+    name = "census_final"
+    reads_gpio4_otp = False
 
 
 class EepromManifest(Step):
@@ -1397,14 +1424,53 @@ class Gd32Flash(Step):
             raise Refused("no --gd32-fw DIR (bootloader.bin, ota-meta.bin, slot-a.bin)")
         return [(Path(ctx.gd32_fw) / f, a, k) for f, a, k in GD32_IMAGES]
 
-    def _readback(self, ctx, images, probe=None) -> dict[str, str]:
+    @staticmethod
+    def _resume(ctx, probe) -> str:
+        """Reset-and-run after anything that halts the core: a savebin dump always does, a
+        loadbin does when it fails part-way. A halted GD32 still ACKs 0x70 and stretches SCL,
+        which wedges the board-management I2C bus for the rest of the boot. Never raises (it
+        runs in ``finally``); returns "" or the error."""
+        ctx.plan_log.append("reset/run the GD32 (a readback or a failed write leaves the core halted)")
+        try:
+            probe.reset_run()
+            return ""
+        except BenchError as e:
+            ctx.plan_log.append(f"NOTE: GD32 reset-and-run FAILED, the core may still be halted: {e}")
+            return str(e) or "reset-run failed"
+
+    @staticmethod
+    def _bridge_alive(ctx, t) -> str:
+        """GET_VERSION from the bridge, polled BRIDGE_TRIES times BRIDGE_GAP_S apart.
+        Returns "GD32 bridge protocol a.b.c"; BenchError when it never answers."""
+        bus, err = ctx.i2c("brd"), None
+        for attempt in range(BRIDGE_TRIES):
+            try:
+                return "GD32 bridge protocol %d.%d.%d" % lt.gd32_bridge_version(t, bus, GD32_BRIDGE_ADDR)
+            except BenchError as e:
+                err = e
+            if attempt < BRIDGE_TRIES - 1:
+                time.sleep(BRIDGE_GAP_S)
+        raise BenchError(f"the GD32 bridge at {GD32_BRIDGE_ADDR:#04x} did not answer GET_VERSION in "
+                         f"{BRIDGE_TRIES} tries after the reset-and-run: i2c-{bus} may be wedged by a core "
+                         f"left halted over SWD (dmesg: '{I2C_WEDGE_DMESG}'); power-cycle the unit. Last error: {err}")
+
+    def _readback(self, ctx, images, probe=None, resume: bool = True) -> dict[str, str]:
+        """md5 of each image region, read with savebin. savebin HALTS the core and leaves it
+        halted, so the core is reset-and-run afterwards, also when a savebin raises
+        (``resume=False`` only for a caller that does the same in its own ``finally``)."""
         probe = probe or ctx.bench.probe
-        ev = {}
-        with tempfile.TemporaryDirectory(prefix="gd32_") as td:
-            for i, (p, addr, key) in enumerate(images):
-                out = Path(td) / f"rb{i}.bin"
-                probe.savebin(out, addr, p.stat().st_size)   # fresh session each
-                ev[key] = _md5(out.read_bytes())
+        ev, err = {}, ""
+        try:
+            with tempfile.TemporaryDirectory(prefix="gd32_") as td:
+                for i, (p, addr, key) in enumerate(images):
+                    out = Path(td) / f"rb{i}.bin"
+                    probe.savebin(out, addr, p.stat().st_size)   # fresh session each
+                    ev[key] = _md5(out.read_bytes())
+        finally:
+            if resume:
+                err = self._resume(ctx, probe)
+        if err:
+            raise BenchError(f"GD32 left halted: the reset-and-run after the readback failed: {err}")
         return ev
 
     def probe(self, ctx):
@@ -1430,6 +1496,14 @@ class Gd32Flash(Step):
         for p, _a, key in images:
             if ev[key] != _md5(p.read_bytes()):
                 return Unsatisfied(f"{p.name} not on the GD32")
+        # The images are on the chip and the core was just reset: it must answer again, or the
+        # readback left the bus wedged and the next step (census) would read nothing on it.
+        # Without a Linux target (an external probe, unit not booted) nobody can ask.
+        if ctx.linux is not None:
+            try:
+                ev["gd32_bridge_after_readback"] = self._bridge_alive(ctx, ctx.linux)
+            except (BenchError, Refused) as e:
+                return Unknown(f"firmware matches, but {e}")
         return Satisfied({**ev, "gd32_dp_id": f"0x{dp:08x}", **self._fw_version(ctx)})
 
     @staticmethod
@@ -1476,8 +1550,8 @@ class Gd32Flash(Step):
         for p, addr, _key in images:
             ctx.mutate(f"loadbin {p.name} @ {addr:#010x}", lambda: None)
         ctx.mutate("verify each region with savebin in a FRESH probe session, md5", lambda: None)
-        ctx.mutate("reset/run the GD32", lambda: None)
-        ctx.mutate(f"GET_VERSION from the bridge at {GD32_BRIDGE_ADDR:#04x}", lambda: None)
+        ctx.mutate("reset/run the GD32 (also after a failed write or verify)", lambda: None)
+        ctx.mutate(f"GET_VERSION from the bridge at {GD32_BRIDGE_ADDR:#04x} (polled)", lambda: None)
         if via_console:
             ctx.mutate("cold cycle; re-check the IP", lambda: None)
         return self.result(ctx, "would flash the GD32", ev)
@@ -1491,7 +1565,14 @@ class Gd32Flash(Step):
             return self._plan(ctx, ev, via_console)
         if t is not None:
             pmic = ctx.i2c("pmic")
-            if lt.act88760_gpio4_held(t, pmic):
+            try:
+                held = lt.act88760_gpio4_held(t, pmic)
+            except BenchError as e:
+                # the pre-run probe's readback may have left the bus dead: say so, write nothing
+                raise BenchError(f"{e}; i2c-{pmic} is unreadable before the flash: if dmesg shows "
+                                 f"'{I2C_WEDGE_DMESG}', a GD32 left halted over SWD holds the bus; "
+                                 "power-cycle the unit and re-run") from e
+            if held:
                 ev["act88760_gpio4_otp"] = f"{lt.ACT88760_GPIO4_OTP_DEFAULT:#04x}"
                 ev["act88760_gpio4_workaround"] = "provision (volatile 0x08)"
                 ctx.mutate("ACT88760 0x25 reg 0x10 = 0x08 (volatile GPIO4 / GD32_NRST release)",
@@ -1505,26 +1586,25 @@ class Gd32Flash(Step):
         if dp != GD32_DP_OK:
             why = GD32_DP_REFUSE.get(dp, "an unknown debug port")
             raise Refused(f"DP-ID {dp:#010x} is {why}; want {GD32_DP_OK:#010x}")
-        for p, addr, _key in images:
-            ctx.mutate(f"loadbin {p.name} @ {addr:#010x}", lambda q=p, a=addr: probe.loadbin(q, a))
-
         def verify():
-            got = self._readback(ctx, images, probe)
+            got = self._readback(ctx, images, probe, resume=False)     # resumed in the finally below
             for p, _a, key in images:
                 if got[key] != _md5(p.read_bytes()):
                     raise BenchError(f"GD32 readback of {p.name} does not match")
             return got
-        ev.update(ctx.mutate("verify each region with savebin in a FRESH probe session, md5", verify) or {})
-        ctx.mutate("reset/run the GD32", probe.reset_run)
-
-        def bridge():
-            # ponytail: fixed 5 s settle for the post-reset boot + clock-up; poll if it proves short
-            t.run("sleep 5", check=False)
-            v = lt.gd32_bridge_version(t, ctx.i2c("brd"), GD32_BRIDGE_ADDR)
-            return "GD32 bridge protocol %d.%d.%d" % v
-        line = ctx.mutate(f"GET_VERSION from the bridge at {GD32_BRIDGE_ADDR:#04x}", bridge)
-        if line:
-            ev["gd32_protocol"] = line
+        try:
+            for p, addr, _key in images:
+                ctx.mutate(f"loadbin {p.name} @ {addr:#010x}", lambda q=p, a=addr: probe.loadbin(q, a))
+            ev.update(ctx.mutate("verify each region with savebin in a FRESH probe session, md5", verify) or {})
+        finally:
+            # a failed loadbin or verify must not leave the core halted either
+            resume_err = self._resume(ctx, probe)
+        if resume_err:
+            raise BenchError(f"GD32 written and verified, but the reset-and-run failed (core left halted): {resume_err}")
+        # The bridge must answer before the step returns: census reads the same bus next.
+        if t is not None:
+            ev["gd32_protocol"] = ctx.mutate(f"GET_VERSION from the bridge at {GD32_BRIDGE_ADDR:#04x} (polled)",
+                                             lambda: self._bridge_alive(ctx, t))
         ev.update(self._fw_version(ctx))
         # the SSH path's probe wrapper scp's from the host; only the console path reads the store
         ev.update(payload_store.evidence(ctx._cache.get("gd32_store") if via_console else None))
@@ -2152,7 +2232,7 @@ class SecurePageLock(Step):
 STEP_ORDER: list[type[Step]] = [
     Preflight, Detect, OpDsw1Scif, Bootstrap, OpDsw1EmmcInsertSd, BootSdLinux, Gd32Flash, WriteXspi,
     WriteEmmcBoot, WriteRootfs, Census, EepromManifest, Dxm1NpuFlash, PmicVerify,
-    SecurePage, OpDsw1XspiRemoveSd, ColdBootTest, ClkgenVerify, HilSmoke, Record,
+    SecurePage, OpDsw1XspiRemoveSd, ColdBootTest, CensusFinal, ClkgenVerify, HilSmoke, Record,
 ]
 STEP_NAMES = [s.name for s in STEP_ORDER]
 
