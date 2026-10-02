@@ -9,7 +9,7 @@
 # The +5V input monitor (INA228 at 0x42, "5V" row) answers only on carriers
 # with the I2C bus-pin rework, so nothing is asserted about it: on a carrier
 # without the rework the example prints one "not present" line to stderr and
-# a "--" row, and exits normally.
+# a "--" row, and the loop keeps running.
 #
 # A55/Linux app: flash_method ssh-run.
 

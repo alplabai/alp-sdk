@@ -83,7 +83,7 @@ static const struct rail_def {
 int main(void)
 {
 	/*
-	 * One bus handle shared by all three monitors.  400 kHz
+	 * One bus handle shared by all four monitors.  400 kHz
 	 * fast-mode is comfortable for the INA236 (it tolerates up to
 	 * ~2.94 MHz).
 	 */
@@ -122,8 +122,9 @@ int main(void)
 	/*
 	 * The INA228.  INA228_ERR_NOT_PRESENT means nothing acknowledged at its
 	 * address -- the normal result on a carrier without the bus-pin rework --
-	 * so say so once and carry on; the exit status is not affected.  Any other
-	 * failure is reported the same way the INA236 failures are.
+	 * so say so once and carry on (the poll loop below still runs).  Any other
+	 * failure -- BUSY, TIMEOUT, ... -- is a real bus fault and is printed with
+	 * its actual status, never as "not present".
 	 */
 	ina228_t     mon5v;
 	alp_status_t s5    = ina228_init(&mon5v,
@@ -139,8 +140,11 @@ int main(void)
 		        "continuing without it\n",
 		        XEVK_I2C_ADDR_INA228_5V);
 	} else if (!live5) {
-		fprintf(
-		    stderr, "INA228 5V    @0x%02x: init failed (%d)\n", XEVK_I2C_ADDR_INA228_5V, (int)s5);
+		fprintf(stderr,
+		        "INA228 5V    @0x%02x: init failed: %s (%d)\n",
+		        XEVK_I2C_ADDR_INA228_5V,
+		        alp_status_name(s5),
+		        (int)s5);
 	}
 
 	/* Poll + print until interrupted. */

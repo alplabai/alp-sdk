@@ -59,7 +59,7 @@ extern "C" {
 /* ================================================================== */
 
 /* BMI323 (alternate IMU), ICM-42670 (canonical primary IMU), BMP581
- * barometer, TCAL9538 I/O expander, and the board-ID EEPROM.
+ * barometer, TCAL9538 I/O expander, and the SoM identity EEPROM.
  * XEVK_I2C_ADDR_BMI323, _ICM42670, _BMP581, _TCAL9538 and _EEPROM
  * are defined in the generated routes header (#1636). */
 
@@ -67,9 +67,10 @@ extern "C" {
 /* INA236 high-side current-shunt monitors (one per power rail)       */
 /* ================================================================== */
 
-/* Four INA236 monitors (U21/U31/U32/U34) on XEVK_I2C_BUS_SENSORS.
- * INA236A occupies 0x40..0x43, INA236B occupies 0x48..0x4B (same A0
- * strap encoding).  The +5V input monitor U30 is an INA228 at 0x42
+/* Three INA236 monitors (U21/U31/U34) on XEVK_I2C_BUS_SENSORS: 3V3 at
+ * 0x40 and 1V8 at 0x41 (INA236A, 0x40..0x43), VCAM3 at 0x49 (INA236B,
+ * 0x48..0x4B, same A0 strap encoding).  0x48 is the TAS2563 pair's shared
+ * address; no monitor is fitted there.  The +5V input monitor U30 is an INA228 at 0x42
  * (XEVK_I2C_ADDR_INA228_5V), a different 20-bit register map that
  * ina236_init() does not drive.  Ref-des, rail, A0 strap and address
  * per device are in the generated routes header (from

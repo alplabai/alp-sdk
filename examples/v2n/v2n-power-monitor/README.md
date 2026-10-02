@@ -27,7 +27,9 @@ current, a value derived from the shunt, not a limit of the rail.
 The INA228 answers only on carriers with the I2C bus-pin rework applied.
 On a carrier without it the driver reports "not present": the example
 prints one line to stderr, shows `--` in the `5V` row and keeps running,
-and the exit status is unaffected.
+and the loop keeps running (an absent INA228 does not stop it).  Any other
+failure is printed with its actual status (for example `ALP_ERR_BUSY` when a
+kernel driver already holds the address), never as "not present".
 
 > **EVK-only / demo.** The INA236 monitors exist only on the EVK
 > carriers; production E1M-X SoMs do not carry them. This is a
@@ -43,14 +45,17 @@ cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=$OECORE_NATIVE_SYSROOT/usr/share/cmak
 cmake --build build
 ```
 
-Copy `build/v2n-power-monitor` to the target and run it (Ctrl-C to stop):
+Copy `build/v2n-power-monitor` to the target and run it (Ctrl-C to stop).
+Illustrative output, not captured from a board; the `5V` row shows `--` as it
+does on a carrier without the INA228 bus-pin rework (on a reworked carrier it
+shows the live +5V reading instead):
 
 ```
 rail     bus_V     I_mA       P_mW
   3V3      0.099       0.00        0.0
   1V8      0.002       0.00        0.0
   VCAM3    0.000       0.00        0.0
-  5V       0.000       0.00        0.0
+  5V         --        --         --
 ```
 
 ## Known board notes (current EVK revision)

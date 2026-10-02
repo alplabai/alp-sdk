@@ -197,14 +197,17 @@ nor `0x68`; both answered on 2026-10-02):
               (include/alp/boards/alp_e1m_x_evk_routes.h:126)
 ```
 
-The addresses come from the `XEVK_I2C_ADDR_*` macros
-(`include/alp/boards/alp_e1m_x_evk_routes.h:123-134`); the TAS2563 pair
-(0x4D/0x4E) comes from the board's `audio:` metadata
-(`metadata/boards/e1m-x-evk.yaml:342-343`).  One declared part does not
-show up on V2: the +5V input monitor U30 is an INA228 at 0x42
-(`XEVK_I2C_ADDR_INA228_5V`, routes.h:134), but the V2 carrier nets its
-SDA and SCL swapped, so it cannot answer until reworked -- and the
-`ina236` driver does not handle the INA228 register map in any case.
+The addresses come from the `XEVK_I2C_ADDR_*` macros in
+`include/alp/boards/alp_e1m_x_evk_routes.h`; the TAS2563 pair
+(0x4D/0x4E) comes from the board's `audio:` metadata in
+`metadata/boards/e1m-x-evk.yaml`.  One declared part is missing from the
+sweep above: the +5V input monitor U30, an INA228 at 0x42
+(`XEVK_I2C_ADDR_INA228_5V`).  Its bus pins are documented as swapped on this
+carrier revision and corrected by a hand rework, so it answers at 0x42 only
+on carriers with the rework (it did on 2026-10-02, no ID register read).  The
+`ina228` driver (`chips/ina228`, `<alp/chips/ina228.h>`) handles its register
+map; on a carrier without the rework `ina228_init()` returns
+`INA228_ERR_NOT_PRESENT`, which means "part absent", not a fault.
 
 ## On V2N's BRD_I2C (a different bus, different code)
 

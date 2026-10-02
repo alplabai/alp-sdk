@@ -184,7 +184,7 @@ def test_board_audio_codecs_collision_is_reported(tmp_path: Path) -> None:
     assert "U27" in problems[0] and "U99" in problems[0]
 
 
-def test_allowlisted_collision_is_not_reported(tmp_path: Path) -> None:
+def test_evk_board_preset_is_clean_and_has_no_device_claiming_0x48(tmp_path: Path) -> None:
     """The E1M-X EVK board preset (the TAS2563 pair's shared 0x48 plus every
     fitted device) must be silent against a scaffolded copy (board preset +
     the TAS2563 chip manifest), and no I2C device entry may claim 0x48 -- the
