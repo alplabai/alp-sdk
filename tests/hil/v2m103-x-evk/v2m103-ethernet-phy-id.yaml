@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 Ethernet PHY identity: both PHYs report MII ID 001c.c916
+# (PHYID1 0x001c, PHYID2 0xc916), as observed on the bench.  Linux exposes
+# it as /sys/bus/mdio_bus/devices/*/phy_id = 0x001cc916; exactly two PHYs
+# must match.  Read-only sysfs.  Link state is v2m103-ethernet-link.
+
+schema_version: 1
+name: v2m103-ethernet-phy-id
+description: |
+  Two MDIO PHYs with phy_id 0x001cc916 (MII ID 001c.c916).
+
+flash_method: ssh-run
+ssh_command: |-
+  n=0
+  for p in /sys/bus/mdio_bus/devices/*/phy_id; do
+    [ -e "$p" ] || continue
+    id=$(cat $p)
+    echo "HIL_PHY ${p%/phy_id} $id"
+    [ "$id" = 0x001cc916 ] && n=$((n+1))
+  done
+  echo "HIL_PHY_COUNT $n"
+  [ "$n" -eq 2 ] && echo HIL_PHY_ID_OK
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "HIL_PHY_ID_OK"
