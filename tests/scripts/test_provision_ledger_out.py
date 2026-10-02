@@ -54,7 +54,7 @@ def test_merge_refuses_newline(tmp_path):
 
 
 def test_ship_check():
-    ok = {"eeprom_unique_id": "06", "uboot_version": "U", "disposition": "ship", "known_defects": "none"}
+    ok = {"eeprom_unique_id": "06", "uboot_version": "U", "disposition": "ship", "test_functional": "pass", "known_defects": "none"}
     assert lo.ship_check(ok, CAT) == []
     r = lo.ship_check({**ok, "act88760_gpio4_defect": "yes", "disposition": "bench-only",
                        "uboot_version": ""}, CAT)
@@ -72,14 +72,14 @@ CAT_DXM1 = {**CAT, **{k: {"group": "dxm1", "source": "x", "mode": "auto", "ship_
 
 
 def test_ship_check_requires_catalogue_listed_keys_for_their_family_only():
-    ok = {"eeprom_unique_id": "06", "uboot_version": "U", "disposition": "ship", "known_defects": "none"}
+    ok = {"eeprom_unique_id": "06", "uboot_version": "U", "disposition": "ship", "test_functional": "pass", "known_defects": "none"}
     assert lo.ship_check(ok, CAT_DXM1, "v2n-m1") == [f"missing {k}" for k in DXM1]
     assert lo.ship_check({**ok, **{k: "x" for k in DXM1}}, CAT_DXM1, "v2n-m1") == []
     assert lo.ship_check(ok, CAT_DXM1, "v2n") == [] and lo.ship_check(ok, CAT_DXM1) == []
 
 
 def test_ship_check_blocks_only_when_the_image_did_not_release_the_gd32():
-    ok = {"eeprom_unique_id": "06", "uboot_version": "U", "disposition": "ship", "known_defects": "none"}
+    ok = {"eeprom_unique_id": "06", "uboot_version": "U", "disposition": "ship", "test_functional": "pass", "known_defects": "none"}
     assert lo.ship_check({**ok, "act88760_gpio4_after_boot": "0x08"}, CAT) == []
     r = lo.ship_check({**ok, "act88760_gpio4_after_boot": "0x88"}, CAT)
     assert any("act88760_gpio4_after_boot" in x and "0x88" in x for x in r)
@@ -118,7 +118,7 @@ def test_regen_xlsx_invokes_tool(tmp_path):
 
 def test_ship_check_treats_an_unread_census_value_as_missing():
     """census records a failed read as `unread (<error>)`; that must not satisfy ship_required."""
-    ok = {"eeprom_unique_id": "01 02", "uboot_version": "2024.07", "disposition": "ship"}
+    ok = {"eeprom_unique_id": "01 02", "uboot_version": "2024.07", "disposition": "ship", "test_functional": "pass"}
     assert lo.ship_check(ok, CAT) == []
     bad = {**ok, "eeprom_unique_id": "unread (rc=2: i2cget: Error: Read failed)"}
     assert lo.ship_check(bad, CAT) == ["missing eeprom_unique_id"]
@@ -126,7 +126,7 @@ def test_ship_check_treats_an_unread_census_value_as_missing():
 
 def test_ship_check_treats_a_bare_unread_as_missing_too():
     """eth_phy_id_mismatch is written as a bare `unread` when a PHY ID could not be read."""
-    ok = {"eeprom_unique_id": "01 02", "uboot_version": "2024.07", "disposition": "ship"}
+    ok = {"eeprom_unique_id": "01 02", "uboot_version": "2024.07", "disposition": "ship", "test_functional": "pass"}
     for bad in ("unread", " unread ", "unread (x)"):
         assert lo.ship_check({**ok, "eeprom_unique_id": bad}, CAT) == ["missing eeprom_unique_id"]
     assert lo.ship_check({**ok, "uboot_version": "unreadable-but-a-value"}, CAT) == []

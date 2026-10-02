@@ -412,6 +412,8 @@ def rootfs_write_verify(t: LinuxTarget, emmc: str, wic_gz: Path, timeout: float 
 
 
 RANGES_PATH = "/tmp/alp-bmap-ranges"
+# before any read that must come from the media (the bmap readback, functional_test's eMMC read)
+DROP_CACHES = "sync; echo 3 > /proc/sys/vm/drop_caches"
 WRITER = Path(__file__).with_name("bmap_writer.py")
 WRITER_PATH = "/tmp/alp-bmap-writer.py"
 
@@ -431,7 +433,7 @@ def put_ranges(t: LinuxTarget, bm: bmap.Bmap) -> None:
 def md5_ranges(t: LinuxTarget, dev: str, bm: bmap.Bmap) -> str:
     """md5 of the mapped ranges of dev, concatenated (the ranges file must be on the board)."""
     # drop the page cache first: the readback must come from the media, not from what was written
-    t.run("sync; echo 3 > /proc/sys/vm/drop_caches", check=False)
+    t.run(DROP_CACHES, check=False)
     out = t.run(f"{{ while read s c <&3; do dd if={dev} bs={bm.block_size} skip=$s count=$c "
                 f"2>/dev/null; done; }} 3<{RANGES_PATH} | md5sum", timeout=1800.0).stdout.split()
     if not out or not re.fullmatch(r"[0-9a-f]{32}", out[0]):

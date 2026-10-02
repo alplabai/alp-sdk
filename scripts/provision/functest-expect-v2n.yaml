@@ -22,7 +22,7 @@ schema: 1
 informational:
   - rtc_time_set        # nothing sets the RTC during provisioning today
   - rtc_backup_mode     # reports the RV-3028 backup switchover mode
-  - cm33_firmware       # the flow programs no CM33 image today
+  - cm33_firmware       # the flow programs no CM33 image today; BLOCKING by itself once the bundle carries one
   - dmesg_clean         # the allowlist below comes from ONE boot log
   - wifi_regdomain
 
@@ -46,6 +46,7 @@ wifi_country_regex: '^(00|[A-Z]{2})$'        # provisional: records the regulato
 # --- SoM: NPU, GPU, DRP-AI ------------------------------------------------------------------
 dxm1_pcie_driver_regex: '^dx_dma_pcie$'      # measured
 dxm1_link_width: 2                           # measured ("PCIe x2: link up")
+dxm1_link_speed_regex: '^8\.0 GT/s'           # measured: kernel log "8.0 GT/s PCIe x2 link"
 dxm1_inference_loops: 30                     # provisional
 dxm1_inference_pass_regex: '(?i)fps'         # provisional: the run_model output format is not pinned
 platform_devices:                            # measured (kernel log)
@@ -82,10 +83,12 @@ usb_root_hubs_min: 4                         # measured (xHCI x2, OHCI, EHCI)
 openamp_uio_names: [rsctbl, mhu-shm, vring-ctl0, vring-ctl1, vring-shm0, vring-shm1, mhu-uio]
 systemd_failed_allow:
   - systemd-networkd-wait-online.service     # end1 unplugged
-# Supply current at Linux idle, amps, per bundle family, AT A 15 V SUPPLY (the current scales
-# with the supply voltage). Measured 0.26..0.29 A with the DX-M1; the band adds 0.04 A each side.
-supply_current_idle_a:                       # provisional margin
-  v2n-m1: [0.22, 0.33]
+# Supply POWER at Linux idle, watts, per bundle family: volts x amps as the supply measures
+# them, so the band holds at any supply voltage. Derived from the measured 0.26..0.29 A at 15 V
+# with the DX-M1 (3.9..4.35 W), with 0.04 A (0.6 W) added each side. No band for `v2n` yet: the
+# check is `unread` there, which blocks, until one is measured.
+supply_power_idle_w:                         # provisional margin
+  v2n-m1: [3.30, 4.95]
 # Kernel log. `dmesg_deny`: any match fails `dmesg_fatal` (known real faults). `dmesg_allow`:
 # error-level lines a good unit prints; anything else at error level fails `dmesg_clean`.
 dmesg_error_regex: '(?i)\b(error|fail(ed|ure)?|unable|cannot|timed? ?out|nobody cared|bug|oops|panic)\b'
@@ -126,7 +129,10 @@ dmesg_allow:                                 # measured: one cold boot of one un
 # which supplies the device list, addresses and shunt resistors).
 carriers:
   e1m-x-evk:
-    not_fitted: [0x48]                       # camera-rail monitor removed; 0x48 is the amplifiers' shared address
+    # camera-rail monitor removed. A private file can add to this list, never shrink it; and 0x48,
+    # the amplifiers' shared address, is never addressed whatever these files say (the code reads
+    # that from the amplifier's chip description).
+    not_fitted: [0x48]
     fixture: {0x42: ina228_rework}           # answers only on carriers with the hand rework
     audio_card: e1m-x-evk-tas2563            # measured
     audio_elapsed_s: [1.8, 2.5]              # the HiL spec's band for a 2 s playback

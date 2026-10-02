@@ -410,7 +410,7 @@ def _lock_ready(tmp_path, board, disposition="ship", done=True):
     (ctx.unit_dir / f"{SERIAL}.manifest.bin").write_bytes(bytes(board.array))
     (ctx.unit_dir / f"{SERIAL}.secure-page.staged.bin").write_bytes(bytes(board.page))
     (ctx.unit_dir / f"{SERIAL}.unit.yaml").write_text(
-        f"eeprom_unique_id: 00 11\ndisposition: {disposition}\n"
+        f"eeprom_unique_id: 00 11\ndisposition: {disposition}\ntest_functional: pass\n"
         "dxm1_fw_version: v\ndxm1_fw_md5: m\ndxm1_fw_uart_boot_md5: u\n", encoding="utf-8")
     if done:
         ctx.state = {"steps": {s: {"status": "done"} for s in ("secure_page", "cold_boot_test")}}
@@ -1037,7 +1037,7 @@ def test_record_takes_every_steps_facts_from_a_same_bundle_older_revision(tmp_pa
     f.write_text(text, encoding="utf-8")
     # only the operator-set disposition may still block; no recorded fact is missing
     assert [r for r in ledger_out.ship_check(ledger_out.read_unit_yaml(f), CATALOGUE["keys"])
-            if r.startswith("missing") and "disposition" not in r] == []
+            if r.startswith("missing") and "disposition" not in r and "test_functional" not in r] == []
 
 
 def test_record_ignores_other_bundle_older_revision_for_non_flash_steps(tmp_path):

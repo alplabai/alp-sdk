@@ -14,6 +14,8 @@ format the judge ASSUMES and a first bench run must confirm (docs/provisioning-v
 
 from __future__ import annotations
 
+import re
+import shlex
 import shutil
 import subprocess
 import time
@@ -79,7 +81,7 @@ def _good(ctx) -> dict[str, str]:
         "wifi_scan": "BSS 02:00:00:00:00:01(on wlan0)\n\tsignal: -48.00 dBm\n\tSSID: bench-ap\n"
                      "BSS 02:00:00:00:00:02(on wlan0)\n\tsignal: -80.00 dBm\n\tSSID: other",
         "bt_hci": "HIL_BT_HCI_OK\nHIL_BT_UP_OK\n\tBD Address: 11:22:33:44:55:66  ACL MTU: 1021:8  SCO MTU: 64:1",
-        "bt_scan": "Device AA:BB:CC:DD:EE:FF bench-beacon",
+        "bt_scan": "AA:BB:CC:DD:EE:FF (unknown)\nAA:BB:CC:DD:EE:FF bench-beacon\nLE Scan ...",
         "dxm1_pcie": "present=1 device=0x0000 width=2 speed=8.0_GT/s_PCIe\ndriver=dx_dma_pcie",
         "dxm1_runtime": "dev=ok\nservice=active\n" + (FIXTURES / "dxrt-cli-s.txt").read_text(encoding="utf-8"),
         "dxm1_inference": "loops 30\nFPS : 412.3\nrc=0",
@@ -89,7 +91,7 @@ def _good(ctx) -> dict[str, str]:
         "rtc_ticks": "a=0x58 b=0x00",                             # BCD, across the minute
         "rtc_time_set": "1790000000",
         "rtc_backup_mode": "0x1c",
-        "rtc_retention": f"{int(time.time())}\nboot-now",
+        "rtc_retention": f"epoch={int(time.time())}\nboot=boot-now\nhctosys_failed=0",
         "board_temp": "0x2e 0xd0",                                 # 46.8 degC (the temperature one unit read)
         "secure_element": "HIL_OPTIGA_I2C_STATE 0x08 0x80 0x00 0x00\nHIL_OPTIGA_ACK",
         "gd32_bridge": "0x00 0x00 0x0e 0x00 0xcf 0xa7",           # real reply: protocol 0.14.0
@@ -155,7 +157,7 @@ BAD = {
     "wifi_regdomain": "global\ncountry 98: DFS-UNSET",
     "wifi_scan": "BSS 02:00:00:00:00:02(on wlan0)\n\tsignal: -80.00 dBm\n\tSSID: other",
     "bt_hci": "HIL_BT_HCI_OK\nHIL_BT_DOWN",
-    "bt_scan": "Device 01:02:03:04:05:06 someone-else",
+    "bt_scan": "01:02:03:04:05:06 someone-else\nLE Scan ...",
     "dxm1_pcie": "present=1 device=0x0001 width=2 speed=8.0_GT/s_PCIe\ndriver=dx_dma_pcie",
     "dxm1_runtime": "dev=ok\nservice=failed\n * FW version          : v2.4.0",
     "dxm1_inference": "error: device busy\nrc=1",
@@ -165,7 +167,7 @@ BAD = {
     "rtc_ticks": "a=0x12 b=0x12",                                  # oscillator stopped
     "rtc_time_set": "",
     "rtc_backup_mode": "0x10",                                     # real: what one unit reads today
-    "rtc_retention": "\nboot-now",
+    "rtc_retention": "epoch=\nboot=boot-now\nhctosys_failed=0",
     "board_temp": "0x7f 0xf0",                                     # 127.9 degC
     "secure_element": "",
     "gd32_bridge": "0x00 0x00 0x0d 0x00 0x9c 0xf2",                 # protocol 0.13.0
@@ -224,7 +226,7 @@ class Unit(FakeLinux):
         self.commands.append(cmd)
         if cmd == f"sh {functest.REMOTE_SCRIPT}":
             self.script = self.files[functest.REMOTE_SCRIPT].decode()
-            names = [ln[3:-4] for ln in self.script.splitlines() if ln.startswith("ft_") and ln.endswith("() {")]
+            names = re.findall(r'(?m)^cat > "\$D/(\w+)\.sh" <<', self.script)
             missing = [n for n in names if n not in self.answers]
             assert not missing, f"no scripted answer for {missing}"
             out = []
@@ -240,11 +242,17 @@ class Unit(FakeLinux):
 
 class MeteredPower(FakePower):
     amps = 0.27                                                    # measured idle with the DX-M1: 0.26..0.29 A
+    volts = 15.0                                                   # the supply those figures were taken at
 
     def current(self):
         if isinstance(self.amps, Exception):
             raise self.amps
         return self.amps
+
+    def voltage(self):
+        if isinstance(self.volts, Exception):
+            raise self.volts
+        return self.volts
 
 
 def _setup(tmp_path, answers=None, fixtures=ALL_FIXTURES, carrier="e1m-x-evk", execute=True, **kw):
@@ -263,7 +271,7 @@ def _run(ctx):
 
 
 def _val(res, name):
-    return res.evidence[f"test_{name}"]
+    return res.evidence[f"test_ft_{name}"]
 
 
 def test_names_of_this_file_match_the_catalogue(tmp_path):
@@ -272,7 +280,7 @@ def test_names_of_this_file_match_the_catalogue(tmp_path):
     on_unit = {c.name for c in functest.build(ctx) if c.cmd}
     assert set(_good(ctx)) == on_unit, set(_good(ctx)) ^ on_unit
     assert set(BAD) == on_unit, set(BAD) ^ on_unit
-    assert names - on_unit == {"dmesg_clean", "supply_current_idle"}
+    assert names - on_unit == {"dmesg_clean", "supply_power_idle"}
 
 
 # --- pass ---------------------------------------------------------------------------------
@@ -281,12 +289,14 @@ def test_a_good_unit_passes_every_check_in_one_remote_invocation(tmp_path):
     ctx, unit = _setup(tmp_path)
     res = _run(ctx)
     not_pass = {k: v for k, v in res.evidence.items() if k.startswith("test_") and not v.startswith("pass")}
+    assert all(k.startswith("test_ft_") or k == "test_functional" for k in res.evidence if k.startswith("test_"))
     assert not_pass == {}
     assert res.status == "done" and res.evidence["test_functional"] == "pass"
     assert [c for c in unit.commands if c.startswith("sh ")] == [f"sh {functest.REMOTE_SCRIPT}"]
     assert functest.REMOTE_SCRIPT not in unit.files or unit.commands[-1] == f"rm -f {functest.REMOTE_SCRIPT}"
     # measured values ride along as evidence
-    assert _val(res, "supply_current_idle") == "pass (0.27 A)"
+    assert _val(res, "supply_power_idle") == "pass (4.05 W: 15.00 V x 0.270 A)"
+    assert res.evidence["psu_voltage_v"] == "15.000" and res.evidence["psu_current_a"] == "0.270"
     assert _val(res, "board_temp") == "pass (46.8125 degC)"
     assert _val(res, "gd32_bridge") == "pass (protocol 0.14.0)"
     assert _val(res, "rail_3v3") == "pass (3.301 V, 0.5 A)"
@@ -306,7 +316,7 @@ def test_a_wrong_answer_fails_exactly_that_check(tmp_path, name):
     want = "unread (" if name in UNREAD_NOT_FAIL else "fail ("
     assert _val(res, name).startswith(want), _val(res, name)
     others = {k: v for k, v in res.evidence.items()
-              if k.startswith("test_") and k not in (f"test_{name}", "test_functional", "test_dmesg_clean")
+              if k.startswith("test_ft_") and k not in (f"test_ft_{name}", "test_ft_dmesg_clean")
               and not v.startswith("pass")}
     assert others == {}                                            # no collateral: one wrong answer, one check
     if name in x["informational"]:
@@ -342,18 +352,23 @@ def test_dmesg_clean_without_levels_falls_back_to_error_words(tmp_path):
     assert _val(_run(ctx), "dmesg_clean").startswith("fail (")
 
 
-@pytest.mark.parametrize("amps, want", [(0.45, "fail (0.45 A outside 0.22..0.33 A)"),      # the PHY-regulator fault
-                                        (0.12, "fail (0.12 A outside 0.22..0.33 A)"),
-                                        (float("nan"), "unread (not a finite number: nan)"),
-                                        (BenchError("PSU: no reply"), "unread (PSU: no reply)"),
-                                        (None, "skipped (no fixture: a supply that measures current "
-                                               "(bench.yaml power.kind scpi))")])
-def test_supply_current_band(tmp_path, amps, want):
+@pytest.mark.parametrize("amps, volts, want", [
+    (0.45, 15.0, "fail (6.75 W outside 3.3..4.95 W)"),                     # the PHY-regulator fault
+    (0.12, 15.0, "fail (1.8 W outside 3.3..4.95 W)"),
+    (0.34, 12.0, "pass (4.08 W: 12.00 V x 0.340 A)"),                      # the same power at another supply voltage
+    (0.27, 12.0, "fail (3.24 W outside 3.3..4.95 W)"),                     # ... and 0.27 A is NOT fine at 12 V
+    (float("nan"), 15.0, "unread (current is not a finite number: nan)"),
+    (BenchError("PSU: no reply"), 15.0, "unread (PSU: no reply)"),
+    (0.27, None, "unread (supply voltage not readable: None)"),
+    (0.27, BenchError("MEAS:VOLT? CH1: not a number: 'ERR'"),
+     "unread (supply voltage not readable: MEAS:VOLT? CH1: not a number: 'ERR')"),
+    (None, 15.0, "skipped (no fixture: a supply that measures current (bench.yaml power.kind scpi))")])
+def test_supply_power_band_needs_the_voltage(tmp_path, amps, volts, want):
     ctx, _ = _setup(tmp_path)
-    ctx.bench.power.amps = amps
+    ctx.bench.power.amps, ctx.bench.power.volts = amps, volts
     res = _run(ctx)
-    assert _val(res, "supply_current_idle") == want
-    assert (res.status == "failed") == (not want.startswith("skipped"))
+    assert _val(res, "supply_power_idle") == want
+    assert (res.status == "failed") == want.startswith(("fail", "unread"))
 
 
 def test_manifest_and_secure_page_are_compared_with_the_ledger_copies(tmp_path):
@@ -384,8 +399,11 @@ def test_rtc_retention_needs_a_set_before_and_a_reboot_since(tmp_path):
     ctx.facts["rtc_set_boot_id"] = "boot-now"
     assert _val(_run(ctx), "rtc_retention") == "fail (no reboot since the RTC was set: nothing proven)"
     ctx.facts["rtc_set_boot_id"] = "boot-before"
-    unit.answers["rtc_retention"] = f"{int(time.time()) - 3600}\nboot-now"
+    unit.answers["rtc_retention"] = f"epoch={int(time.time()) - 3600}\nboot=boot-now\nhctosys_failed=0"
     assert "from the host clock after the cold cycles" in _val(_run(ctx), "rtc_retention")
+    # the clock reads fine now, but this boot's kernel could not read it at start-up: it was lost
+    unit.answers["rtc_retention"] = f"epoch={int(time.time())}\nboot=boot-now\nhctosys_failed=1"
+    assert "hctosys: unable to read the hardware clock" in _val(_run(ctx), "rtc_retention")
 
 
 def test_the_dxm1_firmware_version_comes_from_the_bundle(tmp_path):
@@ -414,19 +432,18 @@ def test_a_timed_out_check_is_unread_and_fails_the_step(tmp_path):
 
 
 @pytest.mark.parametrize("name, answer, want", [
-    ("wifi_scan", "ALPUNREAD no iw on the image", "unread (no iw on the image)"),
-    ("emmc_health", ("127", "sh: mmc: not found"), "unread (a tool is not on the image: sh: mmc: not found)"),
+    ("wifi_scan", "ALPUNREAD missing tool: iw", "unread (missing tool: iw)"),
+    ("emmc_health", "ALPUNREAD missing tool: mmc", "unread (missing tool: mmc)"),
+    ("emmc_health", "", "unread (no life time estimation a in the output: '')"),
     ("emmc_mode", "hs200_failed=0", "unread (mmc ios not readable (debugfs not mounted?))"),
     ("eth_phy_id", "end0 0x001cc916\nend1 errno 22", "unread (1 of 2 ports readable: 'end0 0x001cc916 end1 errno 22')"),
     ("board_temp", "Error: Read failed", "unread (no reply: 'Error: Read failed')"),
     ("gd32_bridge", "Error: Read failed", "unread (i2ctransfer returned 0 bytes, wanted 6: Error: Read failed)"),
     ("rtc_ticks", "ALPUNREAD Error: Read failed", "unread (Error: Read failed)"),
-    ("audio", "bound=2\nALPUNREAD no aplay on the image", "unread (no aplay on the image)"),
+    ("audio", "ALPUNREAD missing tool: aplay", "unread (missing tool: aplay)"),
     ("rail_3v3", "0x41 0x27", "unread (want 3 register reads, got 1: '0x41 0x27')"),
     ("pmic_registers", "R act88760 0x25 0x40 Error: Read failed\nR act88760 0x25 0x10 0x08",
      "unread (act88760 reg 0x40: Error: Read failed)"),
-    ("eth0_link", "if=end0 carrier=1 speed=100 duplex=full\nping=ok\nrx_delta=sh: arithmetic",
-     "unread (unparsable output (ValueError: invalid literal for int() with base 10: 'sh:'))"),
 ])
 def test_unreadable_answers_are_unread_never_pass(tmp_path, name, answer, want):
     ctx, _ = _setup(tmp_path, {name: answer})
@@ -473,7 +490,7 @@ def test_every_fixture_check_is_skipped_by_default_and_never_runs(tmp_path):
     res = _run(ctx)
     for n, f in FIXTURE_CHECKS.items():
         assert _val(res, n) == f"skipped (no fixture: {f})"
-        assert f"ft_{n}()" not in unit.script
+        assert f"/{n}.sh" not in unit.script
     assert res.status == "done" and res.evidence["test_functional"] == "pass"
     assert "skipped: " in res.detail and "camera" in res.detail      # visible, not silent
 
@@ -485,7 +502,7 @@ def test_without_a_carrier_the_carrier_checks_are_one_visible_skip(tmp_path):
         unit.answers.pop(n)
     res = _run(ctx)
     assert _val(res, "carrier") == "skipped (no fixture: bench.yaml functional_test.carrier)"
-    assert not [k for k in res.evidence if k.startswith(("test_carrier_", "test_rail_"))]
+    assert not [k for k in res.evidence if k.startswith(("test_ft_carrier_", "test_ft_rail_"))]
     assert res.status == "done"
 
 
@@ -505,14 +522,18 @@ def test_a_v2n_unit_has_no_dxm1_checks(tmp_path):
     assert "i2c_tps628640_48" not in names                           # the DEEPX rails are V2M-only
 
 
-def test_a_missing_expected_value_is_a_skip_not_a_pass(tmp_path):
+def test_a_missing_expected_value_is_unread_for_a_blocking_check_and_skipped_for_an_informational_one(tmp_path):
     x = functest.load_expect()
     x.pop("kernel_release_regex")
-    x["supply_current_idle_a"] = {}
+    x["supply_power_idle_w"] = {}
+    x["rtc_bsm_enabled"] = None
     ctx, _ = _setup(tmp_path, functest_expect=x)
     res = _run(ctx)
-    assert _val(res, "kernel_release") == "skipped (no expected value: kernel_release_regex)"
-    assert _val(res, "supply_current_idle") == "skipped (no expected value: supply_current_idle_a.v2n-m1)"
+    assert _val(res, "kernel_release") == "unread (no expected value: kernel_release_regex)"
+    assert _val(res, "supply_power_idle") == "unread (no expected value: supply_power_idle_w.v2n-m1)"
+    assert _val(res, "rtc_backup_mode") == "skipped (no expected value: rtc_bsm_enabled)"      # informational
+    assert res.status == "failed"
+    assert res.evidence["test_functional"] == "fail (supply_power_idle, kernel_release)"
 
 
 # --- record / ship check ------------------------------------------------------------------------
@@ -539,8 +560,8 @@ def test_a_failing_functional_test_blocks_record(tmp_path):
     assert "ship check: blocked: test_functional: fail (eth_phy_id)" in res[-1].detail
     text = unit.read_text(encoding="utf-8")
     assert "test_functional: fail (eth_phy_id)" in text
-    assert "test_eth_phy_id: fail (PHY ID {'end1': '0x001cc878'}, want 0x001cc916)" in text
-    assert "test_cpu_count: pass (4)" in text                                 # every check is in the unit record
+    assert "test_ft_eth_phy_id: fail (PHY ID {'end1': '0x001cc878'}, want 0x001cc916)" in text
+    assert "test_ft_cpu_count: pass (4)" in text                                 # every check is in the unit record
     assert ctx.state["steps"]["functional_test"]["status"] == "failed"
 
 
@@ -552,8 +573,8 @@ def test_fixture_skipped_tests_do_not_block_record_and_stay_visible(tmp_path):
     assert "ship check: SHIPPABLE" in res[-1].detail
     text = unit.read_text(encoding="utf-8")
     assert "test_functional: pass" in text
-    assert "test_wifi_scan: skipped (no fixture: wifi_ap)" in text
-    assert "test_eth1_link: skipped (no fixture: eth1_cable)" in text
+    assert "test_ft_wifi_scan: skipped (no fixture: wifi_ap)" in text
+    assert "test_ft_eth1_link: skipped (no fixture: eth1_cable)" in text
 
 
 def test_an_informational_failure_does_not_block_record(tmp_path):
@@ -563,8 +584,8 @@ def test_an_informational_failure_does_not_block_record(tmp_path):
     res = steps.run_steps(ctx, only=["functional_test", "record"])
     assert "ship check: SHIPPABLE" in res[-1].detail
     text = unit.read_text(encoding="utf-8")
-    assert "test_rtc_backup_mode: fail (backup switchover disabled (reg 0x37=0x10, BSM=0b00)" in text
-    assert "test_cm33_firmware: fail (mtd1+0x1a0000 is blank: no CM33 image on the unit)" in text
+    assert "test_ft_rtc_backup_mode: fail (backup switchover disabled (reg 0x37=0x10, BSM=0b00)" in text
+    assert "test_ft_cm33_firmware: fail (mtd1+0x1a0000 is blank: no CM33 image on the unit)" in text
 
 
 def test_a_private_overlay_can_make_a_check_blocking_or_informational(tmp_path):
@@ -589,14 +610,20 @@ def test_expect_file_schema_is_checked(tmp_path):
         functest.load_expect(bad)
 
 
-@pytest.mark.parametrize("value, blocked", [("fail (eth_phy_id)", True), ("unread (x)", True), ("pass", False),
-                                            ("", False)])
-def test_ship_check_reads_the_summary_key(value, blocked):
+@pytest.mark.parametrize("value, reason", [
+    ("pass", None),
+    ("fail (eth_phy_id)", "test_functional: fail (eth_phy_id)"),
+    ("unread (ssh: connect timed out)", "test_functional: unread (ssh: connect timed out)"),
+    ("skipped (operator)", "test_functional: skipped (operator)"),
+    ("", "missing test_functional (functional_test has not run on this unit)"),
+    (None, "missing test_functional (functional_test has not run on this unit)")])
+def test_ship_check_ships_only_a_passed_functional_test(value, reason):
     cat = {"disposition": {"group": "d", "source": "", "mode": "manual", "ship_required": True}}
-    unit = {"disposition": "ship", "test_functional": value, "test_wifi_scan": "skipped (no fixture: wifi_ap)",
-            "test_rtc_backup_mode": "fail (informational)"}
-    reasons = ledger_out.ship_check(unit, cat)
-    assert (reasons == [f"test_functional: {value}"]) if blocked else reasons == []
+    unit = {"disposition": "ship", "test_ft_wifi_scan": "skipped (no fixture: wifi_ap)",
+            "test_ft_rtc_backup_mode": "fail (informational)"}
+    if value is not None:
+        unit["test_functional"] = value
+    assert ledger_out.ship_check(unit, cat) == ([reason] if reason else [])
 
 
 # --- plan, step order, time ---------------------------------------------------------------------
@@ -636,30 +663,74 @@ def test_a_bad_bench_config_fails_the_step_with_a_clear_message(tmp_path):
 
 # --- the generated script: safe and well-formed ----------------------------------------------------
 
-def _script(tmp_path):
-    ctx, _ = _setup(tmp_path)
-    ctx.expected_registers = PMIC
-    return functest.script(functest.applicable(functest.build(ctx), ALL_FIXTURES))
+def _checks(tmp_path, **kw):
+    ctx, _ = _setup(tmp_path, **kw)
+    return functest.applicable(functest.build(ctx), ctx.bench.raw["functional_test"]["fixtures"])
+
+
+def _script(tmp_path, **kw):
+    return functest.script(_checks(tmp_path, **kw))
 
 
 def test_the_script_writes_nothing_it_must_not(tmp_path):
-    import re
-    s = _script(tmp_path)
-    body = s.split("run() {", 1)[1]                                  # past the helper files
+    checks = _checks(tmp_path)
+    body = "\n".join(functest.fragment(c) for c in checks)          # every command that runs on the unit
     for forbidden in (r"\bi2cset\b", r"\bflash_erase\b", r"mtd_debug\s+write", r"\bmmc\s+(bootpart|bootbus|write)",
                       r"\bunbind\b", r"/bind\b", r"\bof=/dev/(?!null)", r"hwclock", r"\bdd\b[^\n|;]*\bof=(?!/dev/null)",
-                      r"force_ro", r"\bmkfs", r"\bfsck", r"/sys/class/gpio/export"):
+                      r"force_ro", r"\bmkfs", r"\bfsck", r"/sys/class/gpio/export", r"bluetoothctl", r"/var/lib"):
         assert not re.search(forbidden, body), forbidden
     # every I2C write message is a register pointer (1 byte), the EEPROM / identity 2-byte
     # pointer, or the bridge's read-only GET_VERSION frame; nothing carries data
     for m in re.finditer(r"i2ctransfer (?:-f )?-y \S+ (w(\d+)@(0x[0-9a-f]{2})[^\n;|]*)", body):
         n, addr, msg = int(m[2]), int(m[3], 16), m[1]
-        assert " r" in msg or "@ADDR@" in msg or msg.startswith("w1@0x30 0x82"), msg
+        assert " r" in msg or msg.startswith("w1@0x30 0x82"), msg
         assert n == 1 or (n == 2 and addr in (0x50, 0x58)) or (n == 4 and addr == 0x70), msg
     assert re.findall(r"@0x58[^\n;|]*", body) == ["@0x58 0x00 0x00 r64 2>&1"]     # only the sealed secure-page read
     assert "0x58 0x04" not in body and "0x58 0x06" not in body
-    # the only state it changes is brought back: wlan0, hci0, the can links
-    assert "ip link set wlan0 down" in body and "hciconfig hci0 down" in body and "ip link set can1 down" in body
+    # every redirect into a file stays inside the script's own temp directory (or /dev/null,
+    # or the page-cache knob the write steps' readbacks also use)
+    for target in re.findall(r"(?<![0-9&])>{1,2}\s*([^\s&;|)]+)", body):
+        assert target.startswith(('"$D/', "/dev/null", "/proc/sys/vm/drop_caches")), target
+
+
+def test_state_changing_checks_restore_in_a_trap_that_also_runs_when_killed(tmp_path):
+    by = {c.name: c for c in _checks(tmp_path)}
+    assert by["wifi_scan"].restore.endswith("ip link set wlan0 down")
+    assert by["bt_hci"].restore.endswith("hciconfig hci0 down") and by["bt_scan"].restore.endswith("hciconfig hci0 down")
+    assert "kill" in by["bt_scan"].restore                              # the running scan itself
+    # CAN: back to the previous state, not just "down"
+    assert 'bitrate "$b"' in by["can_loopback"].restore and "ip link set $c up" in by["can_loopback"].restore
+    assert "f_$c=" in by["can_loopback"].setup and "b_$c=" in by["can_loopback"].setup  # ... which it recorded first
+    for name in ("wifi_scan", "bt_hci", "bt_scan", "can_loopback"):
+        frag = functest.fragment(by[name])
+        assert "trap restore EXIT" in frag and "exit 143' TERM INT HUP" in frag
+        # the state is recorded, the trap armed, and only then anything changes; the commands run
+        # in the background so the waiting shell takes the TERM at once
+        assert frag.index(by[name].setup) < frag.index("trap restore EXIT") < frag.index(by[name].cmd)
+        assert frag.rstrip().endswith('body=$!\nwait "$body"\nexit $?')
+        assert "down" not in by[name].cmd.replace("ip link set $c down 2>/dev/null; ip link set $c type can", "")
+
+
+def test_the_emmc_read_drops_the_page_cache_first_with_the_readbacks_own_command(tmp_path):
+    cmd = {c.name: c for c in _checks(tmp_path)}["emmc_read"].cmd
+    assert cmd.startswith(lt.DROP_CACHES + "\n") and lt.DROP_CACHES == "sync; echo 3 > /proc/sys/vm/drop_caches"
+
+
+def test_the_script_works_in_its_own_temp_dir_and_removes_it(tmp_path):
+    lines = _script(tmp_path).splitlines()
+    assert lines[2] == "D=$(mktemp -d /tmp/alp-ft.XXXXXX) || exit 1"
+    assert lines[3] == "trap 'rm -rf \"$D\"' EXIT" and lines[4] == "trap 'exit 1' INT TERM HUP"
+    assert lines[5] == 'cd "$D" || exit 1'                               # before any tool runs
+
+
+def test_every_tool_a_fragment_uses_is_guarded(tmp_path):
+    guarded = ("mmc", "ping", "iw", "hciconfig", "hcitool", "i2cget", "i2ctransfer", "dxrt-cli", "systemctl",
+               "run_model", "aplay", "python3", "dmesg", "md5sum", "dd", "ip", "mountpoint", "seq", "awk")
+    for c in _checks(tmp_path):
+        used = {t for t in guarded if re.search(rf"(?:^|[\s;|(&$]){re.escape(t)}\s", c.cmd, re.M)}
+        assert used <= set(c.tools), (c.name, used - set(c.tools))
+        if c.tools:
+            assert f"for t in {' '.join(c.tools)}; do command -v" in functest.fragment(c)
 
 
 @pytest.mark.skipif(shutil.which("sh") is None, reason="no POSIX sh on this host")
@@ -670,30 +741,97 @@ def test_the_script_parses_as_posix_sh(tmp_path):
     assert r.returncode == 0, r.stderr
 
 
+HOSTILE = "a b; touch PWNED'\"$(touch PWNED2)"
+
+
+@pytest.mark.skipif(shutil.which("sh") is None, reason="no POSIX sh on this host")
+def test_values_from_bench_yaml_and_the_expect_file_are_quoted(tmp_path):
+    """A space, a semicolon, both quotes and a command substitution in every string that goes from
+    bench.yaml or the expected values into the script: the script still parses and each value
+    appears only as one shell word."""
+    x = functest.load_expect()
+    x["platform_devices"] = {k: HOSTILE for k in ("drpai", "gpu", "sd")}
+    x["gpu_device_node"] = HOSTILE
+    x["carriers"]["e1m-x-evk"]["audio_card"] = HOSTILE
+    fixtures = {**ALL_FIXTURES, "dxm1_model": HOSTILE, "uart_loopback": HOSTILE}
+    ctx, _ = _setup(tmp_path, fixtures=fixtures, functest_expect=x)
+    checks = functest.applicable(functest.build(ctx, x), fixtures)
+    by = {c.name: c for c in checks}
+    names = ("dxm1_inference", "uart_loopback", "audio", "drpai", "gpu", "sd_host")
+    for name in names:
+        cmd = by[name].cmd
+        assert HOSTILE not in cmd.replace(shlex.quote(HOSTILE), ""), name      # only ever in its quoted form
+        assert shlex.quote(HOSTILE) in cmd or shlex.quote("/sys/bus/platform/devices/" + HOSTILE + "/driver") in cmd
+    p = tmp_path / "s.sh"
+    p.write_bytes(functest.script(checks).encode())
+    assert subprocess.run(["sh", "-n", str(p)], capture_output=True, text=True, check=False).returncode == 0
+    # and run them for real (each stops at its "not there" test): the payload must not execute
+    for name in names:
+        r = subprocess.run(["sh", "-c", by[name].cmd], capture_output=True, text=True, check=False, cwd=tmp_path,
+                           env={"D": tmp_path.as_posix(), "PATH": __import__("os").environ["PATH"]})
+        assert not list(tmp_path.glob("PWNED*")), (name, r.stdout, r.stderr)
+
+
+def test_a_pmic_expect_device_name_cannot_carry_shell(tmp_path):
+    ctx, _ = _setup(tmp_path)
+    ctx.expected_registers = {"devices": {"act; reboot": {"bus": "pmic", "addr": 0x25, "registers": [
+        {"reg": 0x10, "expect": 0x08}]}}}
+    with pytest.raises(ValueError, match="device name"):
+        functest.build(ctx)
+
+
 @pytest.mark.skipif(shutil.which("sh") is None, reason="no POSIX sh on this host")
 def test_the_runner_frames_each_check_runs_lanes_concurrently_and_kills_an_overrun(tmp_path):
     """The shell runner itself, with harmless commands on the host's own sh: framing, one output
-    file per check (no interleaving), lanes in parallel, the timeout marker."""
+    file per check (no interleaving), lanes in parallel, the timeout: the hanging check's restore
+    trap runs, and what it left running is killed with it."""
     C = functest.Check
-    checks = [C("a", "", "echo first; echo err >&2", lambda o: None),
+    mark = (tmp_path / "restored").as_posix()
+    late = (tmp_path / "late").as_posix()
+    checks = [C("a", "", "echo first; echo err >&2; pwd", lambda o: None),
               C("slow1", "", "sleep 1; echo s1", lambda o: None, lane="x"),
               C("slow2", "", "sleep 1; echo s2", lambda o: None, lane="y"),
-              C("hang", "", "sleep 30", lambda o: None, timeout_s=1, lane="z"),
+              C("hang", "", f"( sleep 6; echo late > {late} ) &\necho started; sleep 30", lambda o: None,
+                timeout_s=1, lane="z", setup="state=was-down", restore=f"echo restored $state > {mark}"),
               C("rc", "", "echo before; exit 3", lambda o: None),
-              C("nope", "", "definitely-not-a-command-xyz", lambda o: None)]
+              C("nope", "", "definitely-not-a-command-xyz", lambda o: None),
+              C("tool", "", "echo never", lambda o: None, tools=("sh", "definitely-not-a-tool-xyz"))]
     p = tmp_path / "s.sh"
-    p.write_bytes(functest.script(checks).replace("/tmp/alp-ft", (tmp_path / "ft").as_posix()).encode())
+    p.write_bytes(functest.script(checks).replace("/tmp/alp-ft.", (tmp_path / "ft.").as_posix()).encode())
     t0 = time.monotonic()
     r = subprocess.run(["sh", str(p)], capture_output=True, text=True, check=False, timeout=60)
     took = time.monotonic() - t0
     got = functest.parse(r.stdout)
-    assert list(got) == ["a", "slow1", "slow2", "hang", "rc", "nope"]            # catalogue order, not finish order
-    assert got["a"] == ("0", "first\nerr") and got["slow1"] == ("0", "s1") and got["slow2"] == ("0", "s2")
-    assert got["hang"][0] == "T" and got["rc"] == ("3", "before") and got["nope"][0] == "127"
-    assert took < 10, took                                                    # 1 s lanes in parallel, the hang killed at 1 s
+    assert list(got) == ["a", "slow1", "slow2", "hang", "rc", "nope", "tool"]    # catalogue order, not finish order
+    rc_a, out_a = got["a"]
+    assert rc_a == "0" and out_a.splitlines()[:2] == ["first", "err"]
+    assert "/ft." in out_a.splitlines()[2].replace("\\", "/")                 # the check ran inside the temp dir
+    assert got["slow1"] == ("0", "s1") and got["slow2"] == ("0", "s2")
+    assert got["hang"] == ("T", "started") and got["rc"] == ("3", "before") and got["nope"][0] == "127"
+    assert got["tool"] == ("0", "ALPUNREAD missing tool: definitely-not-a-tool-xyz")
+    assert took < 15, took                                                    # 1 s lanes in parallel, the hang killed at 1 s
     assert functest.judge(checks[3], got["hang"]) == "unread (timed out after 1 s)"
-    assert functest.judge(checks[5], got["nope"]).startswith("unread (a tool is not on the image: ")
+    assert functest.judge(checks[5], got["nope"]).startswith("unread (missing tool: ")
+    assert functest.judge(checks[6], got["tool"]) == "unread (missing tool: definitely-not-a-tool-xyz)"
+    # the restore trap ran on the kill, with the state its setup recorded
+    assert Path(mark).read_text().strip() == "restored was-down"
     assert not list(tmp_path.glob("ft.*"))                                    # the work directory is removed
+    if shutil.which("setsid"):
+        time.sleep(7)                                                         # past the child's own 6 s
+        assert not Path(late).exists()                                        # the whole process group was killed
+
+
+def test_a_missing_tool_is_told_from_the_exit_status_or_the_last_line_only():
+    c = functest.Check("x", "", "true", lambda o: "judged")
+    assert functest.judge(c, ("127", "")) == "unread (missing tool: exit status 127)"
+    assert functest.judge(c, ("1", "sh: iw: not found")) == "unread (missing tool: sh: iw: not found)"
+    # a "not found" in the middle of a tool's own output (a kernel log, say) is judged normally
+    assert functest.judge(c, ("0", "firmware: blob: not found\nall good")) == "pass (judged)"
+
+
+def test_a_judge_that_meets_an_unexpected_shape_is_unread_not_a_crash():
+    c = functest.Check("x", "", "true", lambda o: str(int(o)))
+    assert functest.judge(c, ("0", "sh: arithmetic")).startswith("unread (unparsable output (ValueError: ")
 
 
 # --- cold_boot_test sets the RTC only with the fixture ----------------------------------------------
@@ -773,7 +911,18 @@ MORE_BAD = [
     ("wifi_scan", "command failed: Device or resource busy (-16)", "fail (the scan saw no network"),
     ("bt_hci", "", "fail (no hci0"),
     ("bt_hci", "HIL_BT_HCI_OK\nHIL_BT_UP_OK\n\tBD Address: 00:00:00:00:00:00  ACL MTU", "fail (hci0 has no BD address"),
-    ("bt_scan", "", "fail (the scan saw no advertiser"),
+    ("bt_scan", "LE Scan ...", "fail (the scan saw no advertiser"),
+    ("bt_scan", "Set scan parameters failed: Input/output error", "unread (the scan did not run"),
+    ("bt_scan", "ALPUNREAD missing tool: hcitool", "unread (missing tool: hcitool"),
+    ("bt_hci", "ALPUNREAD missing tool: hciconfig", "unread (missing tool: hciconfig"),
+    ("bt_hci", "HIL_BT_HCI_OK", "fail (hci0 does not come UP"),
+    ("eth0_link", "ALPUNREAD missing tool: ping", "unread (missing tool: ping"),
+    ("dxm1_pcie", "present=1 device=0x0000 width= speed=\ndriver=dx_dma_pcie", "unread (current_link_width"),
+    ("dxm1_pcie", "present=1 device=0x0000 width=2 speed=5.0_GT/s_PCIe\ndriver=dx_dma_pcie", "fail (PCIe link speed '5.0 GT/s PCIe'"),
+    ("systemd_failed", "ALPUNREAD systemctl rc=1: Failed to connect to bus: No such file or directory",
+     "unread (systemctl rc=1: Failed to connect to bus"),
+    ("systemd_failed", "Failed to connect to bus: No such file or directory", "unread (unexpected systemctl output"),
+    ("emmc_health", "ALPUNREAD mmc extcsd read rc=1: open: No such file or directory", "unread (mmc extcsd read rc=1"),
     ("dxm1_pcie", "present=0", "fail (no PCIe endpoint at 0000:01:00.0"),
     ("dxm1_pcie", "present=1 device=0x0000 width=2 speed=8.0_GT/s_PCIe\ndriver=none", "fail (bound driver"),
     ("dxm1_pcie", "present=1 device=0x0000 width=1 speed=8.0_GT/s_PCIe\ndriver=dx_dma_pcie", "fail (PCIe link width x1"),
@@ -821,13 +970,14 @@ def test_each_criterion_of_a_check_is_judged(tmp_path, name, answer, want):
 
 # --- the paths a mutation sweep found untested ----------------------------------------------------
 
-def test_missing_preset_or_soc_data_is_a_skip_not_a_pass(tmp_path):
+def test_missing_preset_or_soc_data_is_unread_not_a_pass(tmp_path):
     ctx, _ = _setup(tmp_path)
     ctx.preset = {**ctx.preset, "memory": {}, "silicon": "nobody:nothing:x"}
     res = _run(ctx)
-    assert _val(res, "cpu_count") == "skipped (no expected value: the SoC description's core count)"
-    assert _val(res, "mem_total") == "skipped (no expected value: preset memory.dram_mbit)"
-    assert _val(res, "emmc_size") == "skipped (no expected value: preset memory.flash_mbit)"
+    assert _val(res, "cpu_count") == "unread (no expected value: the SoC description's core count)"
+    assert _val(res, "mem_total") == "unread (no expected value: preset memory.dram_mbit)"
+    assert _val(res, "emmc_size") == "unread (no expected value: preset memory.flash_mbit)"
+    assert res.status == "failed"
 
 
 def test_no_wlan0_fails_even_when_the_sdio_function_and_firmware_are_there(tmp_path):
@@ -836,11 +986,11 @@ def test_no_wlan0_fails_even_when_the_sdio_function_and_firmware_are_there(tmp_p
     assert _val(_run(ctx), "wifi_present") == "fail (no wlan0)"
 
 
-def test_pmic_registers_without_a_pmic_expect_file_is_a_visible_skip(tmp_path):
+def test_pmic_registers_without_a_pmic_expect_file_is_unread(tmp_path):
     ctx, unit = _setup(tmp_path)
     ctx.expected_registers = None
     unit.answers["pmic_registers"] = ""
-    assert _val(_run(ctx), "pmic_registers") == "skipped (no --pmic-expect)"
+    assert _val(_run(ctx), "pmic_registers") == "unread (no expected value: --pmic-expect)"
 
 
 def test_an_empty_kernel_log_is_unread_for_both_dmesg_checks(tmp_path):
@@ -860,3 +1010,212 @@ def test_manifest_that_differs_from_the_committed_copy_or_has_a_bad_crc_fails(tm
     ctx.unit_dir.mkdir(parents=True, exist_ok=True)
     (ctx.unit_dir / f"{SERIAL}.manifest.bin").write_bytes(good)
     assert _val(_run(ctx), "eeprom_manifest") == f"fail (the array differs from the committed {SERIAL}.manifest.bin)"
+
+
+# --- review round: key namespace, the ship check, stale verdicts --------------------------------------
+
+def test_per_check_keys_never_touch_an_operator_entered_test_key(tmp_path):
+    root, unit = _shippable_ledger(tmp_path)
+    unit.write_text("disposition: ship\ntest_dxm1_inference: pass (operator, yolov8 on the bench)\n"
+                    "test_wifi_scan: pass (operator)\n", encoding="utf-8")
+    ctx, _ = _setup(tmp_path, fixtures={}, ledger_root=root)
+    steps.run_steps(ctx, only=["functional_test", "record"])
+    text = unit.read_text(encoding="utf-8")
+    assert "test_dxm1_inference: pass (operator, yolov8 on the bench)" in text      # untouched
+    assert "test_wifi_scan: pass (operator)" in text
+    assert "test_ft_dxm1_inference: skipped (no fixture: dxm1_model)" in text       # the tool's own key
+    keys = [ln.split(":")[0] for ln in text.splitlines() if ln.startswith("test_")]
+    assert all(k.startswith("test_ft_") or k in ("test_functional", "test_dxm1_inference", "test_wifi_scan")
+               for k in keys), keys
+
+
+def test_a_unit_on_which_the_functional_test_never_ran_cannot_ship(tmp_path):
+    root, unit = _shippable_ledger(tmp_path)
+    ctx, _ = _setup(tmp_path, ledger_root=root)
+    res = steps.run_steps(ctx, only=["record"])
+    assert "blocked: missing test_functional (functional_test has not run on this unit)" in res[-1].detail
+    res = steps.run_steps(ctx, only=["hil_smoke", "record"], skip=["functional_test"])
+    assert "missing test_functional" in res[-1].detail
+
+
+def _fresh_ctx(tmp_path, root, name, **kw):
+    """A new invocation of the tool on the same ledger: empty facts, the state from disk."""
+    ctx, unit = _setup(tmp_path / name, ledger_root=root, **kw)
+    ctx.state = steps.load_state(ctx.state_path)
+    return ctx, unit
+
+
+def test_record_does_not_keep_a_stale_pass_after_a_later_failed_run(tmp_path):
+    root, unit = _shippable_ledger(tmp_path)
+    ctx, _ = _fresh_ctx(tmp_path, root, "a")
+    res = steps.run_steps(ctx, only=["functional_test", "record"])
+    assert "ship check: SHIPPABLE" in res[-1].detail and "test_functional: pass" in unit.read_text(encoding="utf-8")
+    # a later `--only functional_test` fails (record is not part of that run) ...
+    ctx, _ = _fresh_ctx(tmp_path, root, "b", answers={"eth_phy_id": BAD["eth_phy_id"]})
+    res = steps.run_steps(ctx, only=["functional_test"])
+    assert _statuses(res)["functional_test"] == "failed"
+    assert "test_functional: pass" in unit.read_text(encoding="utf-8")              # still the old verdict on disk
+    # ... and a later `--only record` must write the latest verdict, not keep the pass
+    ctx, _ = _fresh_ctx(tmp_path, root, "c")
+    res = steps.run_steps(ctx, only=["record"])
+    text = unit.read_text(encoding="utf-8")
+    assert "test_functional: fail (eth_phy_id)" in text and "test_functional: pass" not in text
+    assert "test_ft_eth_phy_id: fail (" in text
+    assert "blocked: test_functional: fail (eth_phy_id)" in res[-1].detail
+
+
+@pytest.mark.parametrize("entry, want", [
+    ({"status": "running", "at": "t"}, "unread (functional_test running in its latest run)"),      # killed mid-step
+    ({"status": "failed", "at": "t", "detail": "boom", "evidence": {}}, "unread (functional_test failed in its latest run)"),
+])
+def test_record_turns_a_crashed_or_evidence_less_run_into_unread(tmp_path, entry, want):
+    root, unit = _shippable_ledger(tmp_path)
+    unit.write_text("disposition: ship\ntest_functional: pass\n", encoding="utf-8")
+    ctx, _ = _setup(tmp_path, ledger_root=root)
+    ctx.state = {"steps": {"functional_test": entry}}
+    res = steps.run_steps(ctx, only=["record"])
+    assert f"test_functional: {want}" in unit.read_text(encoding="utf-8")
+    assert f"blocked: test_functional: {want}" in res[-1].detail
+
+
+def test_a_run_that_cannot_reach_the_unit_records_an_unread_verdict(tmp_path):
+    root, unit = _shippable_ledger(tmp_path)
+    unit.write_text("disposition: ship\ntest_functional: pass\n", encoding="utf-8")
+    ctx, fake = _setup(tmp_path, ledger_root=root)
+    real = fake.run
+
+    def run(cmd, **kw):
+        if cmd.startswith("sh "):
+            raise BenchError("timed out after 320s: sh /tmp/alp-functest.sh")
+        return real(cmd, **kw)
+    fake.run = run
+    res = steps.run_steps(ctx, only=["functional_test", "record"])
+    ft = res[1]
+    assert ft.status == "failed" and ft.evidence == {"test_functional": "unread (timed out after 320s: sh /tmp/alp-functest.sh)"}
+    assert "test_functional: unread (timed out after 320s" in unit.read_text(encoding="utf-8")
+    assert "blocked: test_functional: unread (" in res[-1].detail
+    # no Linux target at all (Refused) is the same: a verdict, not silence
+    ctx, _ = _setup(tmp_path / "b", ledger_root=tmp_path / "b" / "none")
+    ctx.linux = None
+    r = steps.FunctionalTest().run(ctx)
+    assert r.status == "failed" and r.evidence["test_functional"].startswith("unread (no Linux target attached")
+
+
+# --- census_final marks what it could not re-read --------------------------------------------------
+
+def test_census_final_marks_a_key_it_could_not_re_read_instead_of_keeping_the_first_value(tmp_path):
+    from .test_provision_steps import Board
+    cat = {**CATALOGUE, "keys": {**CATALOGUE["keys"], **{
+        k: {"group": "power", "source": "", "mode": "auto", "ship_required": True}
+        for k in ("tps_present", "clkgen_5l35023b_regs", "act88760_gpio_regs")}}}
+    root = tmp_path / "ledger-cf"
+    (root / "schema").mkdir(parents=True)
+    (root / "schema" / "v2n.keys.yaml").write_text(yaml.safe_dump(cat), encoding="utf-8")
+    board = Board(act_0x10=0x08)
+    ctx = _ctx(tmp_path, bench=_bench(), linux=board, execute=True, ledger_root=root)
+    res = steps.run_steps(ctx, only=["census", "record"])
+    first = next(r for r in res if r.name == "census").evidence
+    assert first["tps_present"] == "none" and first["clkgen_5l35023b_regs"].startswith("no ack")
+    unit = ctx.unit_dir / f"{SERIAL}.unit.yaml"
+    assert "tps_present: none" in unit.read_text(encoding="utf-8")
+    # the final boot: the bus scan fails, so the groups that scan drop their keys
+    orig = board._answer
+    board._answer = lambda cmd: (1, "") if cmd.startswith("i2cdetect") else orig(cmd)
+    res = steps.run_steps(ctx, only=["census_final", "record"])
+    final = next(r for r in res if r.name == "census_final")
+    assert final.evidence["tps_present"] == "unread (not re-read by census_final)"
+    assert final.evidence["clkgen_5l35023b_regs"] == "unread (not re-read by census_final)"
+    assert final.evidence["act88760_gpio_regs"] == "0x10=0x08"                     # re-read fine: a real value
+    assert "tps_present" in final.detail and "not re-read" in final.detail
+    assert not [k for k in final.evidence if k.startswith("act88760_gpio4_")]        # cold_boot_test's keys
+    text = unit.read_text(encoding="utf-8")
+    assert "tps_present: unread (not re-read by census_final)" in text and "tps_present: none" not in text
+    assert "missing tps_present" in res[-1].detail and "missing clkgen_5l35023b_regs" in res[-1].detail
+
+
+# --- the shared address, the carrier bus, preflight, CM33 --------------------------------------------
+
+def test_no_override_can_produce_a_transfer_to_the_amplifiers_shared_address(tmp_path):
+    over = tmp_path / "expect.yaml"
+    over.write_text("carriers: {e1m-x-evk: {not_fitted: [], rails: {0x48: {name: cam2, volts: [1.0, 3.0]}}}}\n",
+                    encoding="utf-8")
+    x = functest.load_expect(over)
+    assert x["carriers"]["e1m-x-evk"]["not_fitted"] == [0x48]            # the union: an override cannot shrink it
+    x["carriers"]["e1m-x-evk"]["not_fitted"] = []                        # ... and even a hand-built dict cannot
+    ctx, _ = _setup(tmp_path, functest_expect=x)
+    checks = functest.build(ctx, x)
+    assert not [c.name for c in checks if c.name.endswith("_48") and c.name.startswith(("carrier_", "rail_"))]
+    assert "rail_cam2" not in {c.name for c in checks}
+    body = functest.script(functest.applicable(checks, ALL_FIXTURES))
+    assert not re.search(r"-y 0 [^\n;|]*@0x48\b", body)
+    assert re.search(r"-y 8 w1@0x48 ", body)                              # the SoM's own 0x48 on the other bus stays
+    board = functest._carrier("e1m-x-evk")
+    assert functest._shared_addresses(board, "E1M_X_I2C0") == {0x48: "tas2563"}     # from the chip manifest
+
+
+def test_the_shared_address_guard_refuses_whatever_built_the_command(tmp_path, monkeypatch):
+    """Belt and braces: if the per-device filter were ever bypassed, the final guard refuses."""
+    ctx, _ = _setup(tmp_path)
+    real = functest._add_id
+
+    def add_all(out, x, name, what, bus, addr, spec, **kw):
+        real(out, x, name, what, bus, addr, spec, **kw)
+        if name == "carrier_ina236_40":
+            real(out, x, "carrier_ina236_48", what, bus, 0x48, spec, **kw)
+    monkeypatch.setattr(functest, "_add_id", add_all)
+    with pytest.raises(ValueError, match="refusing an I2C transfer to 0x48 on bus 0"):
+        functest.build(ctx)
+
+
+def test_the_carrier_bus_comes_from_the_board_description_and_a_null_bus_is_refused(tmp_path):
+    ctx, _ = _setup(tmp_path)
+    ctx.bench.i2c_bus["eeprom"] = 3
+    by = {c.name: c for c in functest.build(ctx)}
+    assert by["carrier_bmp581_47"].cmd.startswith("i2ctransfer -f -y 3 w1@0x47 ")
+    assert by["eeprom_manifest"].cmd.startswith("i2ctransfer -y 3 w2@0x50 ")
+    assert "/sys/bus/i2c/devices/3-004d/driver" in by["audio"].cmd
+    ctx.bench.i2c_bus["eeprom"] = None
+    with pytest.raises(ValueError, match="i2c_bus.eeprom is null"):
+        functest.build(ctx)
+
+
+@pytest.mark.parametrize("raw, want", [
+    ({"functional_test": {"carrier": "no-such-board"}}, "no metadata/boards/no-such-board.yaml"),
+    ({"functional_test": {"fixtures": ["wifi_ap"]}}, "want a mapping"),
+    ({"functional_test": "yes"}, "want a mapping"),
+])
+def test_preflight_refuses_a_bad_functional_test_config_before_anything_is_flashed(tmp_path, raw, want):
+    ctx, _ = _setup(tmp_path, execute=False)
+    ctx.bench.raw = raw
+    res = steps.run_steps(ctx, only=["preflight"])
+    assert res[0].status == "failed" and "functional_test_config" in res[0].detail and want in res[0].detail
+    ctx.bench.raw = {"functional_test": {"carrier": "e1m-x-evk"}}
+    res = steps.run_steps(ctx, only=["preflight"])
+    assert "functional_test_config" not in res[0].detail
+
+
+def _cm33_bundle(tmp_path):
+    from .test_provision_steps import _bundle
+    d, b = _bundle(tmp_path)
+    image = bytes(range(256)) * 20 + b"tail"                              # 5124 B: one whole block + a remainder
+    (d / "artifacts" / "cm33.bin").write_bytes(image)
+    b["components"].append({"role": "cm33", "file": "artifacts/cm33.bin", "size_bytes": len(image),
+                            "sha256": functest.hashlib.sha256(image).hexdigest(), "flash_target": "xspi:mtd1"})
+    return (d, b), image
+
+
+def test_cm33_firmware_is_blocking_with_an_md5_compare_once_the_bundle_carries_an_image(tmp_path):
+    bundle, image = _cm33_bundle(tmp_path)
+    md5 = functest.hashlib.md5(image).hexdigest()
+    ctx, unit = _setup(tmp_path, {"cm33_firmware": f"{md5}  -"}, bundle=bundle)
+    x = functest.load_expect()
+    assert "cm33_firmware" in x["informational"]                           # listed, and overridden
+    by = {c.name: c for c in functest.build(ctx)}
+    assert by["cm33_firmware"].blocking and "cm33_firmware" not in functest.informational(list(by.values()), x)
+    assert by["cm33_firmware"].cmd == ("{ dd if=/dev/mtd1 bs=4096 skip=416 count=1 2>/dev/null; "
+                                       "dd if=/dev/mtd1 bs=1 skip=1708032 count=1028 2>/dev/null; } | md5sum")
+    assert _val(_run(ctx), "cm33_firmware") == f"pass (md5 {md5})"
+    unit.answers["cm33_firmware"] = "0123456789abcdef0123456789abcdef  -"
+    res = _run(ctx)
+    assert _val(res, "cm33_firmware").startswith("fail (mtd1+0x1a0000 md5 0123")
+    assert res.status == "failed" and res.evidence["test_functional"] == "fail (cm33_firmware)"

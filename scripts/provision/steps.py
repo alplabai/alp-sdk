@@ -30,6 +30,8 @@ import tempfile
 import time
 import zlib
 from collections.abc import Callable
+
+import yaml
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -808,6 +810,11 @@ class Preflight(Step):
             results.append(gates.GateResult("identity_table", True, "N24S128 frame table self-check ok"))
         except (ValueError, AssertionError) as e:
             results.append(gates.GateResult("identity_table", False, str(e)))
+        try:
+            n = len(functest.build(ctx))        # pure: bench.yaml functional_test + the expected values
+            results.append(gates.GateResult("functional_test_config", True, f"{n} checks"))
+        except (ValueError, KeyError, TypeError, OSError, yaml.YAMLError) as e:
+            results.append(gates.GateResult("functional_test_config", False, f"{type(e).__name__}: {e}"))
         if ctx.execute:
             # pmic_verify needs it; refuse here, not after every destructive step.
             results.append(gates.GateResult("pmic_expect", bool(ctx.expected_registers),
@@ -1263,6 +1270,16 @@ class WriteRootfs(Step):
                            else "would write the wic and check the rootfs", ev)
 
 
+def _latest_entry(ctx, name: str) -> dict | None:
+    """The newest state-file entry of step ``name``: this run's group, else the newest
+    superseded group that holds one. Whatever its status."""
+    cur = ctx.state.get("steps", {}).get(name)
+    if cur is not None:
+        return cur
+    g = next((g for g in reversed(ctx.state.get("superseded", [])) if name in g.get("steps", {})), None)
+    return g["steps"][name] if g else None
+
+
 class Census(Step):
     name = "census"
     always_run = True
@@ -1338,6 +1355,25 @@ class CensusFinal(Census):
     stays unread and blocks the ship check."""
     name = "census_final"
     reads_gpio4_otp = False
+    NOT_REREAD = "not re-read by census_final"
+
+    def run(self, ctx):
+        res = super().run(ctx)
+        if res.status != "done":
+            return res
+        # A census group that fails drops its keys, and a key that is absent here would leave
+        # the first census's value (read in the microSD boot) standing in the ledger. Every key
+        # the first census recorded and this one did not produce is therefore marked unread.
+        first = (_latest_entry(ctx, Census.name) or {}).get("evidence") or {}
+        lost = sorted(k for k in first if k not in res.evidence and not k.startswith("act88760_gpio4_")
+                      and k != "power_cut")
+        for k in lost:
+            res.evidence[k] = lt.unread(self.NOT_REREAD)
+        if lost:
+            res.detail += f"; {len(lost)} key(s) of the first census not re-read, marked unread: {', '.join(lost)}"
+            ctx.step_logs[self.name] = "\n".join(filter(None, [ctx.step_logs.get(self.name, ""),
+                                                               "not re-read: " + ", ".join(lost)]))
+        return res
 
 
 class EepromManifest(Step):
@@ -1434,10 +1470,13 @@ class Gd32Flash(Step):
         ctx.plan_log.append("reset/run the GD32 (a readback or a failed write leaves the core halted)")
         try:
             probe.reset_run()
+            ctx._cache.pop("gd32_halted", None)
             return ""
-        except BenchError as e:
-            ctx.plan_log.append(f"NOTE: GD32 reset-and-run FAILED, the core may still be halted: {e}")
-            return str(e) or "reset-run failed"
+        except Exception as e:      # noqa: BLE001 -- runs on a failure path: must never replace that failure
+            err = f"{type(e).__name__}: {e}" if not isinstance(e, BenchError) else (str(e) or "reset-run failed")
+            ctx.plan_log.append(f"NOTE: GD32 reset-and-run FAILED, the core may still be halted: {err}")
+            ctx._cache["gd32_halted"] = err      # run() refuses to go on with a core it knows is halted
+            return err
 
     @staticmethod
     def _bridge_alive(ctx, t) -> str:
@@ -1460,18 +1499,20 @@ class Gd32Flash(Step):
         halted, so the core is reset-and-run afterwards, also when a savebin raises
         (``resume=False`` only for a caller that does the same in its own ``finally``)."""
         probe = probe or ctx.bench.probe
-        ev, err = {}, ""
+        ev = {}
         try:
             with tempfile.TemporaryDirectory(prefix="gd32_") as td:
                 for i, (p, addr, key) in enumerate(images):
                     out = Path(td) / f"rb{i}.bin"
                     probe.savebin(out, addr, p.stat().st_size)   # fresh session each
                     ev[key] = _md5(out.read_bytes())
-        finally:
-            if resume:
-                err = self._resume(ctx, probe)
-        if err:
-            raise BenchError(f"GD32 left halted: the reset-and-run after the readback failed: {err}")
+        except (BenchError, OSError) as e:
+            # the readback's own error stays the reason; a failed resume is appended to it
+            if resume and (err := self._resume(ctx, probe)):
+                raise BenchError(f"{e}; ALSO the reset-and-run failed, GD32 core left halted: {err}") from e
+            raise
+        if resume and (err := self._resume(ctx, probe)):
+            raise BenchError(f"GD32 core left halted: the reset-and-run after the readback failed: {err}")
         return ev
 
     def probe(self, ctx):
@@ -1564,6 +1605,12 @@ class Gd32Flash(Step):
             ev["gd32_flash_transport"] = "console (no network)"
         if not ctx.execute:
             return self._plan(ctx, ev, via_console)
+        if halted := ctx._cache.get("gd32_halted"):
+            # the pre-run probe's readback halted the core and its reset failed: say so in the
+            # step result instead of running into a dead I2C bus
+            raise BenchError(f"GD32 core left halted by the pre-run probe's readback (the reset-and-run failed: "
+                             f"{halted}); i2c-{ctx.i2c('brd')} is wedged until the next power cycle: "
+                             "power-cycle the unit and re-run")
         if t is not None:
             pmic = ctx.i2c("pmic")
             try:
@@ -1597,10 +1644,14 @@ class Gd32Flash(Step):
             for p, addr, _key in images:
                 ctx.mutate(f"loadbin {p.name} @ {addr:#010x}", lambda q=p, a=addr: probe.loadbin(q, a))
             ev.update(ctx.mutate("verify each region with savebin in a FRESH probe session, md5", verify) or {})
-        finally:
-            # a failed loadbin or verify must not leave the core halted either
-            resume_err = self._resume(ctx, probe)
-        if resume_err:
+        except (BenchError, Refused, ValueError, OSError) as e:
+            # a failed loadbin or verify must not leave the core halted either; its own error
+            # stays the reason and a failed resume is appended to it
+            if err := self._resume(ctx, probe):
+                cls = Refused if isinstance(e, Refused) else BenchError
+                raise cls(f"{e}; ALSO the reset-and-run failed, GD32 core left halted: {err}") from e
+            raise
+        if resume_err := self._resume(ctx, probe):
             raise BenchError(f"GD32 written and verified, but the reset-and-run failed (core left halted): {resume_err}")
         # The bridge must answer before the step returns: census reads the same bus next.
         if t is not None:
@@ -2071,8 +2122,13 @@ class FunctionalTest(Step):
     always_run = True
 
     def run(self, ctx):
-        x = ctx.functest_expect or functest.load_expect()
-        checks = functest.build(ctx, x)
+        try:
+            x = ctx.functest_expect or functest.load_expect()
+            checks = functest.build(ctx, x)
+        except (ValueError, KeyError, TypeError, OSError, Refused) as e:
+            # preflight checks the same configuration; a run that starts past it still gets a verdict
+            return StepResult(self.name, "failed", f"functional test configuration: {e}",
+                              {functest.SUMMARY_KEY: lt.unread(e)} if ctx.execute else {})
         fixtures = functest.config(ctx).get("fixtures") or {}
         lanes, wall = functest.estimate(functest.applicable(checks, fixtures))
         budget = "estimated %.0f s (lanes: %s)" % (wall, ", ".join(f"{k} {v:.1f}" for k, v in sorted(lanes.items())))
@@ -2082,12 +2138,19 @@ class FunctionalTest(Step):
                 ctx.mutate(f"{c.name}: {c.what}" + (f" [skipped: no fixture {c.fixture}]" if off else ""),
                            lambda: None)
             return self.result(ctx, f"would run {len(checks)} functional checks, {budget}")
-        t = ctx.need_linux()
-        values, raw, seconds = functest.run(ctx, t, checks, x)
-        bad = functest.blocking(values, x)
+        try:
+            t = ctx.need_linux()
+            values, raw, seconds = functest.run(ctx, t, checks, x)
+        except (BenchError, Refused, OSError) as e:
+            # no verdict at all is recorded as one: the ship check needs `test_functional: pass`
+            return StepResult(self.name, "failed", f"functional test could not run: {e}",
+                              {functest.SUMMARY_KEY: lt.unread(e)})
+        bad = functest.blocking(values, checks, x)
         info = sorted(n for n, v in values.items() if n not in bad and v.startswith(("fail", "unread")))
         skipped = sorted(n for n, v in values.items() if v.startswith("skipped"))
-        ev = {f"test_{n}": v for n, v in values.items()}
+        # test_ft_<check>: a prefix of its own, so an operator-entered test_<name> is never touched
+        ev = {f"{functest.KEY_PREFIX}{n}": v for n, v in values.items()}
+        ev.update(functest.side_facts(ctx))
         ev[functest.SUMMARY_KEY] = "pass" if not bad else functest._value("fail", ", ".join(bad))
         ev["functional_test_seconds"] = f"{seconds:.1f}"
         ctx.step_logs[self.name] = "\n".join(
@@ -2160,6 +2223,16 @@ class Record(Step):
                 recovered[n] = (f" (step {n} from superseded run, tool_rev {str(g.get('tool_rev'))[:12]}, "
                                 f"{old.get('finished') or old.get('ts') or old.get('at') or 'time n/a'})", old)
         flashed = {n: v for n, v in recovered.items() if n in FLASH_STEPS}
+        # functional_test's verdict is its LATEST run's. A failed or interrupted run must not
+        # leave an earlier `test_functional: pass` standing in the unit record (e.g. `--only
+        # functional_test` failed, then `--only record`): its recorded verdict is written, or
+        # `unread` when it left none.
+        ft = _latest_entry(ctx, FunctionalTest.name)
+        if ft is not None and ft.get("status") not in ("done", "skipped"):
+            fev = {k: v for k, v in (ft.get("evidence") or {}).items() if k.startswith("test_")}
+            if not str(fev.get(functest.SUMMARY_KEY, "")).startswith(("fail", "unread")):
+                fev[functest.SUMMARY_KEY] = lt.unread(f"functional_test {ft.get('status')} in its latest run")
+            recovered[FunctionalTest.name] = ("", {"evidence": fev})
         # Newest wins: superseded-run facts first, then the current group's, then this run's.
         for note, old in sorted(recovered.values(), key=lambda v: not v[0]):
             facts.update(old.get("evidence") or {})

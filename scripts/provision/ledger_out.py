@@ -146,10 +146,15 @@ def ship_check(unit: dict[str, str], catalogue: dict[str, dict], family: str = "
     # itself a blocker any more.
     if str(unit.get("act88760_gpio4_after_boot", "")).strip().lower() == "0x88":
         reasons.append("act88760_gpio4_after_boot: 0x88 (image did not release GD32_NRST)")
-    # functional_test's summary: a blocking check failed or could not be read. Its per-check
-    # test_<name> keys are detail (informational failures and fixture skips never block).
+    # functional_test's summary. Its per-check test_ft_<check> keys are detail (informational
+    # failures and fixture skips never block).
+    # Only `pass` ships: a unit on which functional_test never ran, was skipped, crashed or failed
+    # has no proof that its interfaces work. (A unit provisioned before the step existed is
+    # blocked until the step has run on it: intended.)
     functional = str(unit.get("test_functional", "")).strip()
-    if functional.startswith(("fail", "unread")):
+    if not functional:
+        reasons.append("missing test_functional (functional_test has not run on this unit)")
+    elif not functional.startswith("pass"):
         reasons.append(f"test_functional: {functional}")
     disposition = str(unit.get("disposition", "")).strip()
     if disposition != "ship":

@@ -195,6 +195,48 @@ def test_step_fails_when_the_reset_itself_fails(tmp_path):
     assert any("reset-and-run FAILED" in ln for ln in ctx.plan_log)
 
 
+def test_a_failed_reset_in_the_pre_run_probe_is_the_step_result(tmp_path):
+    """The probe's readback halts the core and its reset fails: the step result must say "core
+    left halted" (not a bare I2C read error), and nothing is written."""
+    ctx, probe, _ = _setup(tmp_path, flashed=False, fail="reset_run", resume_ok=0)
+    r = steps.Gd32Flash().probe(ctx)
+    assert isinstance(r, (steps.Unknown, steps.Unsatisfied))
+    res = steps.run_steps(ctx, only=["gd32_flash", "census"])
+    st = _statuses(res)
+    assert st["gd32_flash"] == "failed" and "census" not in st
+    assert "core left halted by the pre-run probe's readback" in res[1].detail and "fake: no ack" in res[1].detail
+    assert "loadbin" not in _kinds(probe)
+
+
+def test_a_failed_reset_never_replaces_the_original_error(tmp_path):
+    # the verify md5 differs AND the reset then fails: both are in the reason, the verify error first
+    ctx, probe, _ = _setup(tmp_path, flashed=False, corrupt=True, fail="reset_run", resume_ok=1)
+    res = steps.run_steps(ctx, only=["gd32_flash"])
+    d = res[1].detail
+    assert "does not match" in d and "ALSO the reset-and-run failed, GD32 core left halted: fake: no ack" in d
+    assert d.index("does not match") < d.index("ALSO")
+    # the dump itself dies in the probe AND the reset fails: the probe's reason carries both
+    (tmp_path / "b").mkdir()
+    ctx, probe, _ = _setup(tmp_path / "b", resume_ok=0)
+    probe.fail = "savebin"
+
+    def boom():
+        probe.calls.append(("reset_run",))
+        raise RuntimeError("probe wrapper crashed")           # not even a BenchError
+    probe.reset_run = boom
+    r = steps.Gd32Flash().probe(ctx)
+    assert isinstance(r, steps.Unknown)
+    assert "dump died" in r.reason and "core left halted: RuntimeError: probe wrapper crashed" in r.reason
+
+
+def test_a_later_good_reset_clears_the_halted_marker(tmp_path):
+    ctx, probe, _ = _setup(tmp_path, fail="reset_run", resume_ok=0)
+    steps.Gd32Flash().probe(ctx)
+    assert ctx._cache.get("gd32_halted")
+    probe.resume_ok = 99
+    assert steps.Gd32Flash._resume(ctx, probe) == "" and "gd32_halted" not in ctx._cache
+
+
 # --- mutation: without the resume the modelled bus wedges and the tests above fail -----------
 
 def test_mutation_without_the_resume_the_bus_wedges_and_census_reads_nothing(tmp_path, monkeypatch):
