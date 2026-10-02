@@ -342,8 +342,7 @@ static alp_status_t cam_set_fps(const cam_t *c, uint8_t fps)
 	memset(&q, 0, sizeof(q));
 	q.id = V4L2_CID_VBLANK;
 	if (cam_ioctl(fd, VIDIOC_QUERY_EXT_CTRL, &q) < 0) {
-		fprintf(stderr, "alp_camera: sensor has no VBLANK range, fps request ignored
-");
+		fprintf(stderr, "alp_camera: sensor has no VBLANK range, fps request ignored\n");
 		return ALP_OK;
 	}
 
@@ -356,8 +355,7 @@ static alp_status_t cam_set_fps(const cam_t *c, uint8_t fps)
 	if (q.step > 1u) vblank = q.minimum + (vblank - q.minimum) / (int64_t)q.step * (int64_t)q.step;
 	if (vblank != want) {
 		fprintf(stderr,
-		        "alp_camera: %u fps is outside the sensor's range; using the nearest rate
-		        ",
+		        "alp_camera: %u fps is outside the sensor's range; using the nearest rate\n",
 		        (unsigned)fps);
 	}
 	if (!cam_set_ctrl(fd, V4L2_CID_VBLANK, (int32_t)vblank)) return ALP_ERR_IO;
@@ -856,8 +854,7 @@ y_capture(alp_camera_backend_state_t *st, alp_camera_frame_t *out, uint32_t time
 	 * (bytesused 0 = driver does not report), is never handed out. */
 	size_t need = (size_t)c->stride * c->height;
 	if ((b.flags & V4L2_BUF_FLAG_ERROR) != 0u || (b.bytesused != 0u && b.bytesused < need)) {
-		fprintf(stderr, "alp_camera: dropped a corrupt or short frame
-");
+		fprintf(stderr, "alp_camera: dropped a corrupt or short frame\n");
 		(void)cam_qbuf(c, b.index);
 		return ALP_ERR_IO;
 	}
