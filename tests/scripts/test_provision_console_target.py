@@ -31,6 +31,7 @@ class ShellConsole(Console):
         self.lines: list[str] = []
         self.ran: list[str] = []
         self.corrupt = corrupt_pushes
+        self.garble_end = 0     # garble the end marker of the next N printf/md5sum commands
         self.flashed: dict[int, bytes] = {}
         self._out = b""
 
@@ -64,7 +65,10 @@ class ShellConsole(Console):
         out, rc = self._exec(cmd)
         begin = "" if getattr(self, "lose_begin", False) else f"ALPB{n}\r\n"   # RX corrupted the marker
         # the tty echoes what was typed first; markers in the echo are split by ""
-        self._out = (line + "\r\n").encode("latin-1") + f"{begin}{out}ALPE{n}:{rc}\r\n".encode()
+        end = f"ALPE{n}"
+        if self.garble_end > 0 and cmd.startswith(("printf", "md5sum")):
+            self.garble_end, end = self.garble_end - 1, "AL?E" + n
+        self._out = (line + "\r\n").encode("latin-1") + f"{begin}{out}{end}:{rc}\r\n".encode()
 
     def _exec(self, cmd: str) -> tuple[str, int]:
         self.ran.append(cmd)
@@ -83,6 +87,8 @@ class ShellConsole(Console):
         elif re.search(r"(^|[ |;&])base64 ", cmd):
             return "-sh: base64: command not found\n", 127      # the board image has none
         elif m := re.fullmatch(r"md5sum < (.+)", cmd):
+            if shlex.split(m[1])[0] not in self.files:
+                return f"-sh: {m[1]}: No such file or directory\n", 1
             return hashlib.md5(self.files[shlex.split(m[1])[0]]).hexdigest() + "  -\n", 0
         elif cmd.startswith("python3 -c ") and "encodebytes" in cmd:
             return base64.encodebytes(self.files[shlex.split(cmd)[3]]).decode(), 0
@@ -510,3 +516,57 @@ def test_lost_begin_marker_with_the_end_marker_present_does_not_rerun(monkeypatc
     monkeypatch.setattr(ct, "BEGIN_WINDOW_S", 0.05)
     r = ct.ConsoleTarget(sh).run("mkdir -p /x", check=False)
     assert r.rc == 0 and len(sh.ran) == 1
+
+
+def _put_setup(tmp_path, monkeypatch):
+    _fast(monkeypatch)
+    monkeypatch.setattr(ct, "CHUNK_WAIT_S", 0.2)
+    data = bytes(range(256)) * 6
+    src = tmp_path / "img.bin"
+    src.write_bytes(data)
+    return data, src, ShellConsole()
+
+
+def test_garbled_end_marker_resyncs_reverifies_the_chunk_and_succeeds(tmp_path, monkeypatch):
+    data, src, sh = _put_setup(tmp_path, monkeypatch)
+    sh.garble_end = 1
+    ct.ConsoleTarget(sh).put(src, "/tmp/x/img.bin")
+    assert sh.files["/tmp/x/img.bin"] == data
+    # the printf ran once, then the part was re-verified (md5sum) instead of re-sent
+    assert sum(c.startswith("printf") for c in sh.ran) == len(range(0, len(data), ct.RAW_CHUNK))
+    assert any(c.startswith("md5sum < /tmp/x/img.bin.p00000") for c in sh.ran)
+
+
+def test_garbled_end_marker_with_missing_part_resends_the_chunk(tmp_path, monkeypatch):
+    data, src, sh = _put_setup(tmp_path, monkeypatch)
+    sh.garble_end = 1
+    orig = sh._exec
+
+    def lose_part(cmd):          # the garbled command never wrote the part file
+        out = orig(cmd)
+        if cmd.startswith("printf") and not getattr(sh, "dropped", 0):
+            sh.dropped = 1
+            sh.files.pop(next(iter(sh.files)))
+        return out
+    monkeypatch.setattr(sh, "_exec", lose_part)
+    ct.ConsoleTarget(sh).put(src, "/tmp/x/img.bin")
+    assert sh.files["/tmp/x/img.bin"] == data
+    assert sum(c.startswith("printf") for c in sh.ran) == len(range(0, len(data), ct.RAW_CHUNK)) + 1
+
+
+def test_repeated_end_marker_garbling_fails_after_the_bound(tmp_path, monkeypatch):
+    _, src, sh = _put_setup(tmp_path, monkeypatch)
+    sh.garble_end = 1000
+    with pytest.raises(BenchError, match="chunk 0 still corrupted after 3 tries"):
+        ct.ConsoleTarget(sh).put(src, "/tmp/x/img.bin")
+    assert sum(c.startswith("printf") for c in sh.ran) == ct.RUN_ATTEMPTS
+
+
+def test_markers_are_alphanumeric_and_unique_per_attempt(monkeypatch):
+    _fast(monkeypatch)
+    sh = ShellConsole()
+    t = ct.ConsoleTarget(sh)
+    t.run("mkdir -p /x")
+    t.run("mkdir -p /x")
+    ids = [re.search(r'"ALPB""(\w+)"', ln)[1] for ln in sh.lines]
+    assert len(set(ids)) == 2 and all(i.isalnum() for i in ids)

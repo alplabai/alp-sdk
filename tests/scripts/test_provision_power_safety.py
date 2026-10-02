@@ -26,14 +26,24 @@ class _Sock:
     def __exit__(self, *a):
         return False
 
+    def close(self):
+        pass
+
     def sendall(self, data):
-        self.psu.events.append((self.psu.clock(), data.decode().strip()))
+        cmd = data.decode().strip()
+        self.psu.events.append((self.psu.clock(), cmd))
+        if cmd.startswith("OUTP CH1,"):
+            self.psu.on = cmd.endswith("ON")
+
+    def recv(self, n):
+        return b"0x14" + bytes([10]) if self.psu.on else b"0x4" + bytes([10])
 
 
 class FakePsu:
     def __init__(self):
         self.clock = Clock()
         self.events = []
+        self.on = False
 
     def power(self):
         p = bench.ScpiPower("h", 1, 1, connect=lambda *a, **k: _Sock(self))
