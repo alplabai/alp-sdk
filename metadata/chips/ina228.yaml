@@ -1,13 +1,17 @@
 # Alp SDK chip manifest: TI INA228 power / energy / charge monitor.
 schema_version:   1
 chip_id:          ina228
-driver_status:    none              # catalogue-only (#2645): no chips/ina228/ driver exists.
-                                     # The INA228's 20-bit register map is NOT compatible with
-                                     # chips/ina236, and the 6.1.141-cip43 `ina238` hwmon driver
-                                     # matches `ti,ina238` only, so there is no kernel driver to
-                                     # consume either. Allowlisted in
+driver_status:    none              # no chips/ina228/ driver, by design (#2645): upstream Zephyr
+                                     # v4.4.1 already ships one, drivers/sensor/ti/ina2xx/ina237.c
+                                     # with the `ti,ina228` binding (CONFIG_INA228, selected by
+                                     # DT_HAS_TI_INA228_ENABLED), covering shunt / bus / die-temp /
+                                     # current / power / energy / charge and accumulator reset.
+                                     # Consumed as-is per ADR 0017 Tier 1 (upstream-native), the
+                                     # same catalogue-only shape as imx335.yaml. Allowlisted in
                                      # scripts/check_chip_manifest_parity.py's
-                                     # KNOWN_MANIFEST_NO_DRIVER until a driver lands.
+                                     # KNOWN_MANIFEST_NO_DRIVER. chips/ina236 is not reusable
+                                     # (16-bit registers), and the 6.1.141-cip43 `ina238` hwmon
+                                     # driver matches `ti,ina238` only, so Linux has no driver.
 display_name:     "TI INA228 85 V 20-bit power / energy / charge monitor"
 vendor:           ti
 mpn_population:
@@ -21,16 +25,28 @@ notes: |
   E1M_X_I2C0), address macro XEVK_I2C_ADDR_INA228_5V (0x42) from
   metadata/boards/e1m-x-evk.yaml.
 
-  What a driver needs (none of it exists yet):
-    - 24-bit shunt-voltage, bus-voltage and current registers (20 significant
-      bits), a 24-bit power register, and 40-bit energy / charge accumulators.
-      chips/ina236 reads 16-bit registers and cannot be reused as-is.
-    - SHUNT_CAL scaling from the board's shunt value. The E1M-X EVK shunt
-      value and rail current limit for this monitor are not recorded in the
-      board metadata yet (the four INA236 entries carry theirs under
-      `calibration:`).
-    - Identity check: manufacturer ID 0x5449 at register 0x3E, device ID
-      0x228x at register 0x3F.
+  Driver: upstream Zephyr v4.4.1 `ti,ina228` (drivers/sensor/ti/ina2xx),
+  not reimplemented here (ADR 0017: consume before writing). The part's
+  register facts were checked against SBOSA20: MANUFACTURER_ID (0x3E) reads
+  0x5449, DEVICE_ID (0x3F) DIEID[15:4] = 0x228 (reset value 0x2281); shunt
+  LSB 312.5 nV (ADCRANGE = 0) or 78.125 nV (ADCRANGE = 1); bus 195.3125
+  uV/LSB; die temperature 7.8125 m degC/LSB; SHUNT_CAL = 13107.2e6 x
+  CURRENT_LSB x R_SHUNT, multiplied by 4 for ADCRANGE = 1; power =
+  3.2 x CURRENT_LSB x POWER; energy = 16 x 3.2 x CURRENT_LSB x ENERGY.
+
+  Board wiring still to do for the upstream driver: a `ti,ina228` node at
+  0x42 on E1M-X I2C0 with `shunt-resistor-micro-ohms = <100000>`. The
+  sense shunt is 100 mOhm, 1 %, 1 W (from the carrier design data). With
+  that shunt the shunt-voltage full scale is 1.6384 A (ADCRANGE = 0,
+  +/-163.84 mV) or 0.4096 A (ADCRANGE = 1, +/-40.96 mV). The rail's
+  current limit is not recorded in the board metadata, so there is no
+  `calibration:` block for this entry (its schema needs one).
+
+  Hardware caveat: on the current E1M-X EVK revision this device's I2C bus
+  pins are documented as swapped in the design data and are corrected by a
+  hand rework on the board. It answers at 0x42 only on carriers with that
+  rework applied; a carrier without it will not answer, so a consumer must
+  treat "no ACK at 0x42" as the part being absent, not as a fault.
 
   Bench status: address 0x42 answered a read-probe on E1M-V2M103 units in the
   E1M-X EVK on 2026-10-02, and did not answer on an earlier unit (2026-09-26,
@@ -49,7 +65,7 @@ monitoring:
   current_resolution_bits: 20
 
 kconfig:
-  zephyr:         n/a               # no ALP_SDK_CHIP_INA228 symbol: there is no driver to gate
+  zephyr:         n/a               # no ALP_SDK_CHIP_INA228 symbol: upstream CONFIG_INA228 drives it
   baremetal:      n/a
 
 signals:
@@ -70,6 +86,6 @@ families:
 
 verification:
   hil_silicon:    untested
-  smoke_tests:    none               # no chips/ driver surface exists to unit-test
+  smoke_tests:    none               # no alp-sdk driver surface exists to unit-test
 tracking:
   issue: 2645

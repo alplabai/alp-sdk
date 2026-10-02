@@ -355,8 +355,9 @@ i2c_devices:
                      max_macro: XEVK_INA236_MAX_VCAM3_A, max_current_a: "1.6" } }
   - { macro: XEVK_I2C_ADDR_INA228_5V, part: ina228, designator: U30, address: "0x42",
       doc: "U30 INA228 (20-bit, not INA236-compatible), +5V input rail. A1 = GND,
-            A0 = SDA. E1M-X EVK V2 as built nets U30's SDA to I2C0.SCL and its SCL to
-            I2C0.SDA, so it cannot answer until the board is reworked (#2343)." }
+            A0 = SDA. The E1M-X EVK V2 design data nets U30's SDA to I2C0.SCL and its SCL to
+            I2C0.SDA; a hand rework on the board corrects that, so it answers only on
+            carriers with the rework applied (#2343). No answer means absent, not a fault." }
 
 # Audio -- 2x TAS2563 boosted class-D smart-amp (U27/U28) on E1M_X_I2C0 +
 # E1M_X_I2S0.  Scripts that emit the Linux DT read this block; device-

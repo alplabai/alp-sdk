@@ -67,9 +67,10 @@ KNOWN_MANIFEST_NO_DRIVER = {
     # the honest state, not aspirational.
     "ov5647",
     # TI INA228 (issue #2645): the E1M-X EVK's +5V input monitor. The board
-    # metadata names `part: ina228`, so the part needs a manifest, but its
-    # 20-bit register map is not chips/ina236's and no driver is written
-    # yet. Remove this entry when chips/ina228/ lands.
+    # metadata names `part: ina228`, so the part needs a manifest. Upstream
+    # Zephyr v4.4.1's `ti,ina228` driver (drivers/sensor/ti/ina2xx) is
+    # consumed as-is (ADR 0017 Tier 1), same catalogue-only shape as imx335;
+    # chips/ina236's 16-bit register map is not reusable.
     "ina228",
 }
 

@@ -131,7 +131,7 @@ extern "C" {
 #define XEVK_I2C_ADDR_INA236_1V8    0x41u  /**< U31 INA236A, +1V8 rail   (20 mOhm shunt, 4.0 A max). A0 = V+. */
 #define XEVK_I2C_ADDR_INA236_VCAM2  0x48u  /**< U32 INA236B, +VCAM2 rail (50 mOhm shunt, 1.6 A max). A0 = GND. DESIGN CONFLICT on E1M-X EVK V2: 0x48 is also the TAS2563 broadcast address on this bus, and TAS2563 page-select writes to reg 0x00 land in this part's CONFIG register. U32 is removed on the current build batch; a re-strap to 0x4A/0x4B is planned for the next carrier rev. */
 #define XEVK_I2C_ADDR_INA236_VCAM3  0x49u  /**< U34 INA236B, +VCAM3 rail (50 mOhm shunt, 1.6 A max). A0 = V+. */
-#define XEVK_I2C_ADDR_INA228_5V     0x42u  /**< U30 INA228 (20-bit, not INA236-compatible), +5V input rail. A1 = GND, A0 = SDA. E1M-X EVK V2 as built nets U30's SDA to I2C0.SCL and its SCL to I2C0.SDA, so it cannot answer until the board is reworked (#2343). */
+#define XEVK_I2C_ADDR_INA228_5V     0x42u  /**< U30 INA228 (20-bit, not INA236-compatible), +5V input rail. A1 = GND, A0 = SDA. The E1M-X EVK V2 design data nets U30's SDA to I2C0.SCL and its SCL to I2C0.SDA; a hand rework on the board corrects that, so it answers only on carriers with the rework applied (#2343). No answer means absent, not a fault. */
 
 /* ------------------------------------------------------------------ */
 /* INA236 calibration constants (from `i2c_devices[].calibration`) */
