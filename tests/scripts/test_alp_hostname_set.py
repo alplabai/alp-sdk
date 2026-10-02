@@ -114,11 +114,12 @@ DISTRO_PS1 = r"\u@\h:\w\$ "     # what the distro profile sets
 
 def _prompt(tmp_path: Path, hostname: str, ps1: str | None) -> str:
     hf = tmp_path / "host"
-    hf.write_text(hostname + "\n")
+    hf.write_text(hostname + "\n", encoding="utf-8")
     env = {k: v for k, v in os.environ.items() if k != "PS1"}
     env["ALP_PROMPT_HOSTNAME_FILE"] = str(hf)
     # A non-interactive shell drops PS1 from its environment, so seed it in the script.
-    seed = 'PS1=$T_PS1; ' if ps1 is not None else ""
+    # dash gives even a non-interactive shell a default PS1, so the "no PS1" case unsets it.
+    seed = 'PS1=$T_PS1; ' if ps1 is not None else "unset PS1; "
     env["T_PS1"] = ps1 or ""
     proc = subprocess.run([SH, "-c", f'{seed}. "{PROMPT}"; printf "%s" "${{PS1-unset}}"'],
                           env=env, capture_output=True, text=True, encoding="utf-8")
