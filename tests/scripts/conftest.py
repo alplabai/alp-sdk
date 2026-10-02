@@ -134,5 +134,9 @@ def _sandbox_tmpdir(tmp_path_factory, monkeypatch):
     A test that exports TMPDIR inside the script it runs still wins: this
     only changes what an unset TMPDIR falls back to. `tempfile` in the
     pytest process itself is unaffected -- it caches gettempdir() once.
+
+    Measured on Linux only. A bash that does not inherit this process's
+    environment (test_bench_jlink_run.py documents an MSYS bash where
+    `env=` did not arrive) still falls back to its own /tmp.
     """
     monkeypatch.setenv("TMPDIR", str(tmp_path_factory.mktemp("tmpdir")))
