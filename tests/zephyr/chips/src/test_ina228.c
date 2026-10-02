@@ -609,12 +609,15 @@ ZTEST(alp_chips, test_ina228_set_shunt_range_rewrites_range_and_cal_and_resets_a
 	uint32_t before = fake_ina228_log_len();
 	zassert_equal(ina228_set_shunt_range(&ctx, INA228_ADCRANGE_40MV, 0u), ALP_OK);
 	zassert_equal(fake_ina228_log_len(), before + 3u, "three writes");
-	/* 1: CONFIG = new ADCRANGE | RSTACC (accumulators cleared with the switch). */
-	zassert_equal(fake_ina228_log_reg(before), REG_CONFIG);
-	zassert_equal(fake_ina228_log_val(before), 0x4010u);
-	/* 2: SHUNT_CAL for the new range (x4 for the range, /4 for the LSB). */
-	zassert_equal(fake_ina228_log_reg(before + 1u), REG_SHUNT_CAL);
-	zassert_equal(fake_ina228_log_val(before + 1u), 4096u);
+	/* 1: SHUNT_CAL for the new range (x4 for the range, /4 for the LSB). */
+	zassert_equal(fake_ina228_log_reg(before), REG_SHUNT_CAL);
+	zassert_equal(fake_ina228_log_val(before), 4096u);
+	/* 2: CONFIG = new ADCRANGE | RSTACC: the accumulators are cleared at the
+	 * instant range and calibration are both new. */
+	zassert_equal(fake_ina228_log_reg(before + 1u), REG_CONFIG);
+	zassert_equal(fake_ina228_log_val(before + 1u), 0x4010u);
+	zassert_equal(fake_ina228_get_reg(REG_ENERGY), 0u);
+	zassert_equal(fake_ina228_get_reg(REG_CHARGE), 0u);
 	/* 3: CONFIG written back with RSTACC clear. */
 	zassert_equal(fake_ina228_log_reg(before + 2u), REG_CONFIG);
 	zassert_equal(fake_ina228_log_val(before + 2u), 0x0010u);
@@ -628,7 +631,8 @@ ZTEST(alp_chips, test_ina228_set_shunt_range_rewrites_range_and_cal_and_resets_a
 	/* Narrow -> wide; an explicit scale below the full scale is honoured. */
 	before = fake_ina228_log_len();
 	zassert_equal(ina228_set_shunt_range(&ctx, INA228_ADCRANGE_163MV, 819200u), ALP_OK);
-	zassert_equal(fake_ina228_log_val(before), 0x4000u, "ADCRANGE clear, RSTACC set");
+	zassert_equal(fake_ina228_log_val(before), 2048u, "SHUNT_CAL first");
+	zassert_equal(fake_ina228_log_val(before + 1u), 0x4000u, "ADCRANGE clear, RSTACC set");
 	zassert_equal(fake_ina228_get_reg(REG_CONFIG), 0x0000u);
 	zassert_equal(fake_ina228_get_reg(REG_SHUNT_CAL), 2048u, "half the 1.6384 A scale");
 
@@ -641,7 +645,41 @@ ZTEST(alp_chips, test_ina228_set_shunt_range_rewrites_range_and_cal_and_resets_a
 	zassert_equal(fake_ina228_log_len(), before);
 	zassert_equal(ctx.adcrange, INA228_ADCRANGE_163MV);
 
-	/* Bus error part-way: reported unchanged, the context keeps its old range. */
+	/* A bus error part-way through the three writes: reported unchanged, the
+	 * context keeps the old setup, the device may hold part of the new one, and
+	 * ina228_reset() makes the two agree again.  N = 1, 2, 3 fail the SHUNT_CAL,
+	 * the RSTACC CONFIG and the final CONFIG write. */
+	for (uint32_t n = 1u; n <= 3u; n++) {
+		fake_ina228_reset();
+		init_ref(&ctx, bus, INA228_ADCRANGE_163MV);
+		fake_ina228_fail_nth(n, (n == 2u) ? -ETIMEDOUT : -EBUSY);
+		zassert_equal(ina228_set_shunt_range(&ctx, INA228_ADCRANGE_40MV, 0u),
+		              (n == 2u) ? ALP_ERR_TIMEOUT : ALP_ERR_BUSY,
+		              "N=%u",
+		              (unsigned)n);
+		/* The context still describes the old (wide) setup. */
+		zassert_equal(ctx.adcrange, INA228_ADCRANGE_163MV, "N=%u", (unsigned)n);
+		zassert_equal(ctx.shunt_cal, 4096u, "N=%u", (unsigned)n);
+		zassert_equal(ctx.current_lsb_pa, 3125000u, "N=%u", (unsigned)n);
+		/* The device holds exactly the writes that landed before the failure. */
+		zassert_equal(fake_ina228_write_count(REG_SHUNT_CAL), (n >= 2u) ? 2u : 1u);
+		zassert_equal(fake_ina228_write_count(REG_CONFIG), (n >= 3u) ? 2u : 1u);
+		/* Recovery: reset re-applies the context's range and calibration. */
+		zassert_equal(ina228_reset(&ctx), ALP_OK, "N=%u", (unsigned)n);
+		zassert_equal(fake_ina228_get_reg(REG_CONFIG) & 0x0010u, 0u, "N=%u", (unsigned)n);
+		zassert_equal(
+		    fake_ina228_get_reg(REG_CONFIG) & 0x4000u, 0u, "RSTACC clear, N=%u", (unsigned)n);
+		zassert_equal(fake_ina228_get_reg(REG_SHUNT_CAL), 4096u, "N=%u", (unsigned)n);
+		zassert_equal(ctx.shunt_cal, 4096u);
+		/* ... and the switch then works. */
+		zassert_equal(ina228_set_shunt_range(&ctx, INA228_ADCRANGE_40MV, 0u), ALP_OK);
+		zassert_equal(fake_ina228_get_reg(REG_CONFIG) & 0x0010u, 0x0010u);
+		zassert_equal(ctx.adcrange, INA228_ADCRANGE_40MV);
+	}
+
+	/* Every transfer failing (the whole bus down) is reported unchanged too. */
+	fake_ina228_reset();
+	init_ref(&ctx, bus, INA228_ADCRANGE_163MV);
 	fake_ina228_set_error(-EBUSY);
 	zassert_equal(ina228_set_shunt_range(&ctx, INA228_ADCRANGE_40MV, 0u), ALP_ERR_BUSY);
 	fake_ina228_set_error(0);
@@ -671,7 +709,8 @@ ZTEST(alp_chips, test_ina228_pick_adcrange_boundaries)
 	r = INA228_ADCRANGE_40MV;
 	zassert_equal(ina228_pick_adcrange(100000u, 1638401u, &r), ALP_ERR_OUT_OF_RANGE);
 	zassert_equal(r, INA228_ADCRANGE_40MV);
-	/* Bad arguments. */
+	/* Bad arguments, including a request above the limit ina228_init() takes. */
+	zassert_equal(ina228_pick_adcrange(1u, INA228_MAX_CURRENT_LIMIT_UA + 1u, &r), ALP_ERR_INVAL);
 	zassert_equal(ina228_pick_adcrange(0u, 1000u, &r), ALP_ERR_INVAL);
 	zassert_equal(ina228_pick_adcrange(100000u, 0u, &r), ALP_ERR_INVAL);
 	zassert_equal(ina228_pick_adcrange(100000u, 1000u, NULL), ALP_ERR_INVAL);

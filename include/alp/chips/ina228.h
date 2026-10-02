@@ -15,7 +15,9 @@
  *
  * @par Driver status: [partial-impl] init / identity probe, ADC_CONFIG,
  *   SHUNT_CAL, shunt / bus / die-temperature / current / power / energy /
- *   charge reads, accumulator reset and the DIAG_ALRT read.  The alert
+ *   charge reads, accumulator reset, the DIAG_ALRT read, the selectable shunt
+ *   range (ina228_init(), ina228_set_shunt_range(), ina228_pick_adcrange())
+ *   and over-range detection (ina228_check_over_range()).  The alert
  *   threshold registers (SOVL, SUVL, BOVL, BUVL, TEMP_LIMIT, PWR_LIMIT) and
  *   SHUNT_TEMPCO are not exposed.
  *
@@ -83,11 +85,11 @@ extern "C" {
  * @brief Status ina228_init() returns when nothing acknowledges at the
  *        address, i.e. the part is not present (or not reachable).
  *
- * Returned only for a no-ACK from the bus (the backend reports ::ALP_ERR_IO
- * on Zephyr, and ::ALP_ERR_IO or ::ALP_ERR_NOT_READY, from ENXIO, on Linux
- * i2c-dev).  Any other bus failure (::ALP_ERR_BUSY when a kernel driver holds
- * the address, ::ALP_ERR_TIMEOUT, ...) is returned unchanged, so a real fault
- * is never reported as "absent".  Distinct from ::ALP_ERR_NOT_READY, which
+ * Returned for a no-ACK from the bus, or a bus error indistinguishable from
+ * one (the backend reports ::ALP_ERR_IO on Zephyr, and ::ALP_ERR_IO or
+ * ::ALP_ERR_NOT_READY, from ENXIO, on Linux i2c-dev).  Any other bus failure
+ * (::ALP_ERR_TIMEOUT, ::ALP_ERR_NOSUPPORT, ...) is returned unchanged, so a
+ * distinguishable fault is not reported as "absent".  Distinct from ::ALP_ERR_NOT_READY, which
  * ina228_init() returns when something answered but is not an INA228.  On a
  * carrier without the bus-pin rework this is the normal result.
  *
@@ -170,7 +172,8 @@ typedef enum {
 
 /**
  * A VSHUNT count this close to either end of its 20-bit range is treated as
- * a clipped (over-range) reading by ina228_check_over_range().
+ * a clipped (over-range) reading by ina228_check_over_range().  The value 8 is
+ * a driver choice, not a datasheet figure.
  */
 #define INA228_SATURATION_COUNTS 8
 
@@ -184,15 +187,16 @@ typedef enum {
  * serialises transfers.
  */
 typedef struct {
-	bool              initialised;      /**< True once ina228_init() succeeded. */
-	alp_i2c_t        *bus;              /**< Open I2C bus handle. */
-	uint8_t           addr;             /**< 7-bit I2C address. */
-	uint32_t          shunt_micro_ohms; /**< Shunt resistance as given to ina228_init(). */
-	uint32_t          max_current_ua;   /**< Requested reporting scale as given to ina228_init(). */
-	uint16_t          shunt_cal;        /**< SHUNT_CAL value programmed. */
-	uint64_t          current_lsb_pa;   /**< CURRENT_LSB in pico-amps, derived from shunt_cal. */
-	uint16_t          config_cache;     /**< Last CONFIG value written (RST / RSTACC clear). */
-	ina228_adcrange_t adcrange; /**< Current ADC range (init, or ina228_set_shunt_range()). */
+	bool       initialised;      /**< True once ina228_init() succeeded. */
+	alp_i2c_t *bus;              /**< Open I2C bus handle. */
+	uint8_t    addr;             /**< 7-bit I2C address. */
+	uint32_t   shunt_micro_ohms; /**< Shunt resistance as given to ina228_init(). */
+	uint32_t
+	    max_current_ua; /**< Reporting scale: ina228_init(), or the last ina228_set_shunt_range(). */
+	uint16_t          shunt_cal;      /**< SHUNT_CAL value programmed. */
+	uint64_t          current_lsb_pa; /**< CURRENT_LSB in pico-amps, derived from shunt_cal. */
+	uint16_t          config_cache;   /**< Last CONFIG value written (RST / RSTACC clear). */
+	ina228_adcrange_t adcrange;       /**< Current ADC range (init, or ina228_set_shunt_range()). */
 } ina228_t;
 
 /**
@@ -238,9 +242,9 @@ alp_status_t ina228_pick_adcrange(uint32_t           shunt_micro_ohms,
  * range's full scale: clamping would silently change the scale the caller
  * asked for, so here an out-of-range request is an error and any request up
  * to the full scale is honoured.  Pass ina228_full_scale_ua() for the finest
- * resolution the shunt allows.  (Within the full scale SHUNT_CAL stays
- * near 4096, far below the 0x7FFF register ceiling, which the function still
- * checks.)  The returned LSB is back-computed from the
+ * resolution the shunt allows.  (Within the full scale SHUNT_CAL is at most
+ * about 4096, i.e. 4096 x max current / range full scale, far below the 0x7FFF
+ * register ceiling, which the function still checks.)  The returned LSB is back-computed from the
  * rounded SHUNT_CAL, so it matches what the register actually does.
  *
  * @param[in]  shunt_micro_ohms  Shunt resistance, micro-ohms, > 0.
@@ -277,18 +281,23 @@ alp_status_t ina228_calibration_for(uint32_t          shunt_micro_ohms,
  *                               for 100 milli-ohms.  > 0.
  * @param[in]  max_current_ua    Reporting scale in micro-amps, at most the
  *                               range's full scale (see
- *                               ina228_calibration_for()).  Not a hardware
- *                               limit; clipping is set by @p adcrange and
- *                               the shunt.  Use ina228_pick_adcrange() to
- *                               choose the range for it.
+ *                               ina228_calibration_for()).  CURRENT_LSB is this
+ *                               value / 2^19, so a current above it overflows
+ *                               the 20-bit CURRENT register (and POWER) even
+ *                               when the shunt range is not exceeded; the
+ *                               shunt range itself is set by @p adcrange.
+ *                               Use ina228_pick_adcrange() to choose the
+ *                               range for it.
  * @param[in]  adcrange          ADC range.
  *
  * @return ALP_OK on success; ::INA228_ERR_NOT_PRESENT if the first register
  *         read gets no ACK (part absent / unreachable); ALP_ERR_NOT_READY
  *         if something answered but is not an INA228; ALP_ERR_INVAL for bad
  *         parameters; ALP_ERR_OUT_OF_RANGE when SHUNT_CAL cannot be encoded;
- *         any other bus error (ALP_ERR_BUSY, ALP_ERR_TIMEOUT, ...) unchanged,
- *         including from the first read.
+ *         any other bus error (ALP_ERR_TIMEOUT, ...) unchanged.  On Linux
+ *         ALP_ERR_BUSY (a kernel driver bound at the address) comes from the
+ *         first write, whose slave-address ioctl fails, not from the first
+ *         read, which is an I2C_RDWR transfer.
  */
 alp_status_t ina228_init(ina228_t         *ctx,
                          alp_i2c_t        *bus,
@@ -300,17 +309,23 @@ alp_status_t ina228_init(ina228_t         *ctx,
 /**
  * @brief Change the shunt range at run time and recompute SHUNT_CAL.
  *
- * Rewrites CONFIG.ADCRANGE and SHUNT_CAL (times 4 on the 40.96 mV range) so
+ * Rewrites SHUNT_CAL (times 4 on the 40.96 mV range) and CONFIG.ADCRANGE so
  * current, power, energy and charge stay correctly scaled after the switch,
  * and clears the ENERGY and CHARGE accumulators: they were accumulated at the
  * old scale, and SLYS021A does not say the device carries them across a range
- * change.  RSTACC is set in the same CONFIG write that changes the range and
- * is cleared again after SHUNT_CAL is written, so nothing accumulates between
- * the new range and the new calibration.  The call validates everything
- * before its first bus write, then does three writes (CONFIG, SHUNT_CAL,
- * CONFIG); on a bus error part-way the device state is unknown and the
- * context is left as it was, so call ina228_reset() or ina228_init() again.
- * Conversions already in flight during the switch may be one sample off.
+ * change.  The call validates everything before its first bus write, then
+ * does three writes in this order: SHUNT_CAL (new), CONFIG (new range |
+ * RSTACC), CONFIG (new range, RSTACC clear).  The datasheet says only RST
+ * self-clears and is silent on RSTACC, so the accumulators are cleared by the
+ * second write, at the instant range and calibration are both new, under
+ * either RSTACC behaviour, and the third write leaves the bit clear.  Between
+ * the first and second write the current and power registers are scaled with
+ * the new calibration and the OLD range (4x off) for at most one conversion:
+ * callers should discard the first sample after a switch.  On a bus error
+ * part-way the device may hold the new SHUNT_CAL and/or range while the
+ * context still describes the old setup, and the context is left as it was;
+ * call ina228_reset() (which re-applies the context's range and calibration)
+ * or ina228_init() again to make them agree.
  *
  * With the E1M-X EVK's 100 mOhm shunt the two scales are: ::INA228_ADCRANGE_163MV,
  * 1.6384 A full scale, 3.125 uA/LSB; ::INA228_ADCRANGE_40MV, 0.4096 A full
@@ -335,8 +350,10 @@ ina228_set_shunt_range(ina228_t *ctx, ina228_adcrange_t adcrange, uint32_t max_c
  *
  * True when DIAG_ALRT.MATHOF is set (an arithmetic overflow: current and
  * power may be invalid) or VSHUNT sits within ::INA228_SATURATION_COUNTS of
- * either end of its 20-bit range, where the ADC holds its limit once the input
- * passes the selected range.  A reader on the 40.96 mV range should check this
+ * either end of its 20-bit range.  The saturation test is inferred from
+ * SLYS021A section 7.3.5 (the detected shunt voltage stays constant once it
+ * exceeds the selected ADC range), not verified on silicon, and the margin is
+ * a driver choice.  A reader on the 40.96 mV range should check this
  * and not print the numbers as valid when it is true.  MATHOF is a flag only
  * cleared by another conversion or an accumulator reset; the saturation test
  * is on the live VSHUNT value.

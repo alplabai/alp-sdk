@@ -184,7 +184,8 @@ static bool mul_div_round_u64(uint64_t a, uint64_t b, uint32_t num, uint32_t den
 	return true;
 }
 
-/* The statuses a no-ACK (nothing answers at the address) produces:
+/* The statuses a no-ACK (nothing answers at the address), or a bus error that
+ * cannot be told apart from one, produces:
  *  - Zephyr: i2c_write_read() returns -EIO -> ALP_ERR_IO (alp_errno.h).
  *  - Linux i2c-dev: an address NACK on I2C_RDWR is ENXIO -> ALP_ERR_NOT_READY;
  *    a NACK after the address (EREMOTEIO, and anything unmapped) falls to
@@ -215,7 +216,9 @@ alp_status_t ina228_pick_adcrange(uint32_t           shunt_micro_ohms,
                                   uint32_t           max_current_ua,
                                   ina228_adcrange_t *range_out)
 {
-	if (range_out == NULL || shunt_micro_ohms == 0u || max_current_ua == 0u) return ALP_ERR_INVAL;
+	if (range_out == NULL || shunt_micro_ohms == 0u || max_current_ua == 0u ||
+	    max_current_ua > INA228_MAX_CURRENT_LIMIT_UA)
+		return ALP_ERR_INVAL;
 	uint64_t need = (uint64_t)max_current_ua * shunt_micro_ohms; /* uV * 1e6 */
 	if (need <= INA228_FS_UV_40MV * 1000000ull) {
 		*range_out = INA228_ADCRANGE_40MV;
@@ -305,10 +308,12 @@ alp_status_t ina228_init(ina228_t         *ctx,
 	ctx->max_current_ua   = max_current_ua;
 	ctx->adcrange         = adcrange;
 
-	/* The first read doubles as the presence test.  Only a no-ACK result
-	 * means "absent" (e.g. a carrier without the bus-pin rework); any other
-	 * bus failure (BUSY when a kernel driver holds the address, TIMEOUT on a
-	 * hung bus, NOSUPPORT, ...) is a real fault and is returned as is. */
+	/* The first read doubles as the presence test.  A no-ACK, or a bus error
+	 * indistinguishable from one, means "absent" (e.g. a carrier without the
+	 * bus-pin rework); any other bus failure (TIMEOUT on a hung bus,
+	 * NOSUPPORT, ...) is a real fault and is returned as is.  (On Linux a
+	 * kernel driver bound at the address shows up as BUSY on the first WRITE,
+	 * whose slave-address ioctl fails, not on this read, which is an I2C_RDWR.) */
 	uint16_t id;
 	s = reg_read16(ctx, INA228_REG_MFG_ID, &id);
 	if (is_no_ack(s)) return INA228_ERR_NOT_PRESENT;
@@ -361,14 +366,19 @@ ina228_set_shunt_range(ina228_t *ctx, ina228_adcrange_t adcrange, uint32_t max_c
 	if (adcrange == INA228_ADCRANGE_40MV) cfg |= INA228_CFG_ADCRANGE;
 
 	/* ENERGY and CHARGE accumulated at the old scale mean nothing at the new
-	 * one (the datasheet is silent on a range change), so clear them: RSTACC
-	 * is set in the same CONFIG write that changes ADCRANGE and stays set
-	 * across the SHUNT_CAL write, so nothing accumulates between the new range
-	 * and the new calibration.  Then the cached CONFIG is written back with
-	 * RSTACC clear. */
-	s = reg_write16(ctx, INA228_REG_CONFIG, (uint16_t)(cfg | INA228_CFG_RSTACC));
-	if (s != ALP_OK) return s;
+	 * one (the datasheet is silent on a range change), so clear them at the
+	 * instant range and calibration are both new.  Order: SHUNT_CAL first,
+	 * then CONFIG with the new range and RSTACC, then CONFIG with RSTACC
+	 * clear.  The datasheet says only RST self-clears and is silent on RSTACC,
+	 * so this does not rely on RSTACC holding the accumulators at zero or on
+	 * it self-clearing: the clearing write comes last, after both new values
+	 * are in place, and the final write leaves the bit clear either way.  The
+	 * price: between the first and second write the current / power registers
+	 * are scaled with the new calibration and the old range (4x off) for at
+	 * most one conversion. */
 	s = reg_write16(ctx, INA228_REG_SHUNT_CAL, cal);
+	if (s != ALP_OK) return s;
+	s = reg_write16(ctx, INA228_REG_CONFIG, (uint16_t)(cfg | INA228_CFG_RSTACC));
 	if (s != ALP_OK) return s;
 	s = reg_write16(ctx, INA228_REG_CONFIG, cfg);
 	if (s != ALP_OK) return s;
@@ -390,10 +400,12 @@ alp_status_t ina228_check_over_range(ina228_t *ctx, bool *over_out)
 	uint16_t diag;
 	s = reg_read16(ctx, INA228_REG_DIAG_ALRT, &diag);
 	if (s != ALP_OK) return s;
-	/* The ADC holds its limit once the input passes the selected range
-	 * (SLYS021A 7.3.5: the detected shunt voltage "will remain constant due to
-	 * the voltage exceeding the selected ADC range"), so a count within
-	 * INA228_SATURATION_COUNTS of either end is a clipped reading. */
+	/* Inferred from SLYS021A 7.3.5, not verified on silicon: the detected
+	 * shunt voltage "will remain constant due to the voltage exceeding the
+	 * selected ADC range" (the passage is about temperature compensation), so
+	 * the ADC is taken to hold its limit once the input passes the range, and
+	 * a count within INA228_SATURATION_COUNTS of either end (a driver choice,
+	 * not a datasheet value) is treated as a clipped reading. */
 	int32_t v = sign_extend20(raw);
 	*over_out = (diag & INA228_DIAG_MATHOF) != 0u || v >= (0x7FFFF - INA228_SATURATION_COUNTS) ||
 	            v <= (-0x80000 + INA228_SATURATION_COUNTS);

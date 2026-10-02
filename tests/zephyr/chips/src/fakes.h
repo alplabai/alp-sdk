@@ -164,6 +164,7 @@ uint32_t fake_ina228_log_len(void);
 uint8_t  fake_ina228_log_reg(uint32_t idx);
 uint16_t fake_ina228_log_val(uint32_t idx);
 void     fake_ina228_set_absent(bool absent);
+void     fake_ina228_fail_nth(uint32_t n, int neg_errno); /* the Nth transfer from now fails once */
 void     fake_ina228_set_error(int neg_errno); /* every transfer returns it; 0 = answer again */
 void     fake_ina228_reset(void);
 

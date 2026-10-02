@@ -10,7 +10,10 @@
  * `fake_ina228_set_absent(true)` makes every transfer fail the way an
  * unanswered address does (-EIO); `fake_ina228_set_error(-EBUSY)` etc. make
  * every transfer return that errno, to check that only a no-ACK is reported
- * as "not present".
+ * as "not present"; `fake_ina228_fail_nth(n, errno)` fails only the Nth
+ * transfer after it is called (once), to exercise a partial multi-write
+ * sequence.  A write of CONFIG.RST resets the registers and a write of
+ * CONFIG.RSTACC zeroes ENERGY and CHARGE.
  */
 
 #define DT_DRV_COMPAT alp_fake_ina228
@@ -34,7 +37,10 @@ struct fake_ina228_data {
 	uint8_t  log_reg[FAKE_INA228_LOG_CAP];
 	uint16_t log_val[FAKE_INA228_LOG_CAP];
 	uint32_t log_len;
-	int      fail_errno; /* 0 = answer; else every transfer returns this (negative errno) */
+	int      fail_errno;     /* 0 = answer; else every transfer returns this (negative errno) */
+	uint32_t fail_nth;       /* 0 = off; else the Nth transfer from arming fails once */
+	int      fail_nth_errno; /* ... with this negative errno */
+	uint32_t xfer_count;
 };
 
 static struct fake_ina228_data *g_fake_ina228;
@@ -56,19 +62,29 @@ static uint8_t reg_width(uint8_t reg)
 	}
 }
 
+/* Register power-on / RST defaults (the measurement registers are left alone). */
+static void reg_defaults(struct fake_ina228_data *d)
+{
+	d->regs[0x00] = 0x0000u;
+	d->regs[0x01] = 0xFB68u; /* ADC_CONFIG reset value */
+	d->regs[0x02] = 0x1000u; /* SHUNT_CAL reset value */
+	d->regs[0x0B] = 0x0001u; /* DIAG_ALRT reset value */
+	d->regs[0x3E] = 0x5449u;
+	d->regs[0x3F] = 0x2281u;
+}
+
 static void seed_defaults(struct fake_ina228_data *d)
 {
 	memset(d->regs, 0, sizeof d->regs);
 	memset(d->write_count, 0, sizeof d->write_count);
 	memset(d->log_reg, 0, sizeof d->log_reg);
 	memset(d->log_val, 0, sizeof d->log_val);
-	d->log_len    = 0;
-	d->fail_errno = 0;
-	d->regs[0x01] = 0xFB68u; /* ADC_CONFIG reset value */
-	d->regs[0x02] = 0x1000u; /* SHUNT_CAL reset value */
-	d->regs[0x0B] = 0x0001u; /* DIAG_ALRT reset value */
-	d->regs[0x3E] = 0x5449u;
-	d->regs[0x3F] = 0x2281u;
+	d->log_len        = 0;
+	d->fail_errno     = 0;
+	d->fail_nth       = 0;
+	d->fail_nth_errno = 0;
+	d->xfer_count     = 0;
+	reg_defaults(d);
 }
 
 static int
@@ -78,6 +94,10 @@ fake_ina228_transfer(const struct emul *target, struct i2c_msg *msgs, int num_ms
 	struct fake_ina228_data *d = target->data;
 
 	if (d->fail_errno != 0) return d->fail_errno;
+	if (d->fail_nth != 0u && ++d->xfer_count == d->fail_nth) {
+		d->fail_nth = 0u; /* one-shot */
+		return d->fail_nth_errno;
+	}
 
 	if (num_msgs == 1 && (msgs[0].flags & I2C_MSG_READ) == 0) {
 		/* 16-bit big-endian write: [reg, hi, lo]. */
@@ -86,6 +106,18 @@ fake_ina228_transfer(const struct emul *target, struct i2c_msg *msgs, int num_ms
 		const uint16_t v   = (uint16_t)(((uint16_t)msgs[0].buf[1] << 8) | msgs[0].buf[2]);
 		d->regs[reg]       = v;
 		d->write_count[reg]++;
+		if (reg == 0x00u) {
+			/* CONFIG.RST: every register back to its default (self-clearing).
+			 * CONFIG.RSTACC: ENERGY and CHARGE to zero (the bit itself is left
+			 * as written: the datasheet does not say whether it self-clears). */
+			if (v & 0x8000u) {
+				memset(d->regs, 0, sizeof d->regs);
+				reg_defaults(d);
+			} else if (v & 0x4000u) {
+				d->regs[0x09] = 0;
+				d->regs[0x0A] = 0;
+			}
+		}
 		if (d->log_len < FAKE_INA228_LOG_CAP) {
 			d->log_reg[d->log_len] = reg;
 			d->log_val[d->log_len] = v;
@@ -172,6 +204,14 @@ void fake_ina228_set_absent(bool absent)
 void fake_ina228_set_error(int neg_errno)
 {
 	if (g_fake_ina228) g_fake_ina228->fail_errno = neg_errno;
+}
+
+void fake_ina228_fail_nth(uint32_t n, int neg_errno)
+{
+	if (!g_fake_ina228) return;
+	g_fake_ina228->fail_nth       = n;
+	g_fake_ina228->fail_nth_errno = neg_errno;
+	g_fake_ina228->xfer_count     = 0;
 }
 
 void fake_ina228_reset(void)
