@@ -66,6 +66,11 @@ KNOWN_MANIFEST_NO_DRIVER = {
     # discoverable in the chip metadata system; `driver_status: none` is
     # the honest state, not aspirational.
     "ov5647",
+    # TI INA228 (issue #2645): the E1M-X EVK's +5V input monitor. The board
+    # metadata names `part: ina228`, so the part needs a manifest, but its
+    # 20-bit register map is not chips/ina236's and no driver is written
+    # yet. Remove this entry when chips/ina228/ lands.
+    "ina228",
 }
 
 

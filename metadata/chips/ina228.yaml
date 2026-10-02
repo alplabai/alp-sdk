@@ -1,0 +1,75 @@
+# Alp SDK chip manifest: TI INA228 power / energy / charge monitor.
+schema_version:   1
+chip_id:          ina228
+driver_status:    none              # catalogue-only (#2645): no chips/ina228/ driver exists.
+                                     # The INA228's 20-bit register map is NOT compatible with
+                                     # chips/ina236, and the 6.1.141-cip43 `ina238` hwmon driver
+                                     # matches `ti,ina238` only, so there is no kernel driver to
+                                     # consume either. Allowlisted in
+                                     # scripts/check_chip_manifest_parity.py's
+                                     # KNOWN_MANIFEST_NO_DRIVER until a driver lands.
+display_name:     "TI INA228 85 V 20-bit power / energy / charge monitor"
+vendor:           ti
+mpn_population:
+  - "INA228AIDGS"
+
+datasheet:
+  primary:        "TI INA228 SBOSA20"
+
+notes: |
+  +5V input-rail monitor on the E1M-X EVK sensor bus (XEVK_I2C_BUS_SENSORS =
+  E1M_X_I2C0), address macro XEVK_I2C_ADDR_INA228_5V (0x42) from
+  metadata/boards/e1m-x-evk.yaml.
+
+  What a driver needs (none of it exists yet):
+    - 24-bit shunt-voltage, bus-voltage and current registers (20 significant
+      bits), a 24-bit power register, and 40-bit energy / charge accumulators.
+      chips/ina236 reads 16-bit registers and cannot be reused as-is.
+    - SHUNT_CAL scaling from the board's shunt value. The E1M-X EVK shunt
+      value and rail current limit for this monitor are not recorded in the
+      board metadata yet (the four INA236 entries carry theirs under
+      `calibration:`).
+    - Identity check: manufacturer ID 0x5449 at register 0x3E, device ID
+      0x228x at register 0x3F.
+
+  Bench status: address 0x42 answered a read-probe on E1M-V2M103 units in the
+  E1M-X EVK on 2026-10-02, and did not answer on an earlier unit (2026-09-26,
+  #2343). No identity register has been read at 0x42, so `hil_silicon` stays
+  `untested`.
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x42, scope: "A1 = GND, A0 = SDA (E1M-X EVK +5V input monitor)" }
+  address_strap_range: "0x40..0x4F (A1 and A0 each to GND, VS, SDA or SCL)"
+  max_clock_hz:   2940000
+
+monitoring:
+  voltage_range_v: [0, 85]
+  current_resolution_bits: 20
+
+kconfig:
+  zephyr:         n/a               # no ALP_SDK_CHIP_INA228 symbol: there is no driver to gate
+  baremetal:      n/a
+
+signals:
+  - { name: SCL,   type: input,  scope: "I2C" }
+  - { name: SDA,   type: bidir,  scope: "I2C" }
+  - { name: A0,    type: input,  scope: "I2C address strap; tie to GND, VS, SDA or SCL" }
+  - { name: A1,    type: input,  scope: "I2C address strap; tie to GND, VS, SDA or SCL" }
+  - { name: ALERT, type: output, scope: "multifunction alert, open-drain" }
+  - { name: VS,    type: power }
+  - { name: GND,   type: ground }
+  - { name: VBUS,  type: analog, scope: "bus-voltage sense input" }
+  - { name: IN+,   type: analog, scope: "current-sense positive input" }
+  - { name: IN-,   type: analog, scope: "current-sense negative input" }
+
+families:
+  - v2n
+  - v2n-m1
+
+verification:
+  hil_silicon:    untested
+  smoke_tests:    none               # no chips/ driver surface exists to unit-test
+tracking:
+  issue: 2645
