@@ -370,7 +370,7 @@
       ],
       "board_doc": "Camera-0 reset (active-low).",
       "active_low": true,
-      "som_doc": "CAM0_RST: no Linux GPIO controller reaches this pad."
+      "som_doc": "CAM0_RST: no Linux GPIO controller reaches this pad (V2M: DX-M1 GPIO)."
     },
     {
       "net_id": "XEVK_PIN_USB_MUX_SEL",

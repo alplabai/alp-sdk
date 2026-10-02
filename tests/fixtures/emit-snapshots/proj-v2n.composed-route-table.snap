@@ -152,7 +152,7 @@
       "board_doc": "Camera-0 reset (active-low).",
       "active_low": true,
       "dispatch": "unrouted",
-      "som_doc": "CAM0_RST: no Linux GPIO controller reaches this pad."
+      "som_doc": "CAM0_RST: no Linux GPIO controller reaches this pad (V2M: DX-M1 GPIO)."
     },
     {
       "e1m": "E1M_X_GPIO_IO24",

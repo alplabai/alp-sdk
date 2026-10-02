@@ -275,11 +275,11 @@ pad_routes:
   # CAM0_EN (IO18) and CAM0_RST (IO20) reach no Linux GPIO controller: neither
   # pad (AR26 / AR27) is in gd32-io-mcu-map.tsv or renesas-peripheral-map.tsv.
   # `unrouted` here means "no Linux-controllable line", which is what the camera
-  # DT generator needs; on V2M, IO18 is a DEEPX DX-M1 GPIO/strap.
+  # DT generator needs; on the SoM both pads go only to the DEEPX DX-M1 (V2M).
   - { e1m: E1M_X_GPIO_IO18, dispatch: unrouted,
       doc: "CAM0_EN: no Linux GPIO controller reaches this pad (V2M: DX-M1 GPIO/strap)." }
   - { e1m: E1M_X_GPIO_IO20, dispatch: unrouted,
-      doc: "CAM0_RST: no Linux GPIO controller reaches this pad." }
+      doc: "CAM0_RST: no Linux GPIO controller reaches this pad (V2M: DX-M1 GPIO)." }
 
 # On-module helper MCUs whose firmware images the orchestrator
 # registers into the system manifest for Alp Lab's factory/production
