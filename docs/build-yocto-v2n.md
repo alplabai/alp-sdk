@@ -63,6 +63,11 @@ MACHINE=e1m-v2n101-a55 bitbake alp-image-edge
 Output (under `build/tmp/deploy/images/e1m-v2n101-a55/`):
 - `alp-image-edge-*.wic[.gz]` — full SD/eMMC image (bootloader excluded;
   it's already on xSPI).
+- `alp-image-edge-*.wic.bmap` — bmaptool block map of the uncompressed
+  `.wic` (`IMAGE_FSTYPES` gains `wic.bmap` for the `rzv2n-family` machines
+  in `alp-image-common.inc`). Ship it in the SoM release bundle as the
+  `system_image_bmap` component and `provision_som.py` writes and verifies
+  only the mapped blocks; see [provisioning-v2n.md](provisioning-v2n.md).
 - `Image` + `renesas/e1m-v2n101-x-evk.dtb` — kernel + the **carrier
   dtb** (composed from the SoC + SoM + E1M-X-EVK carrier dtsi and selected
   via the machine's `KERNEL_DEVICETREE`, so this is the e1m-x carrier dtb

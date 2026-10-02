@@ -7,7 +7,9 @@ V2N / V2N-M1 modules use the step machine instead
 (`provision_som.py plan|run|status`, see
 [provisioning-v2n.md](provisioning-v2n.md)). The flat form below is kept for
 the other families; on a bundle that carries a `bl2_mmc` (`emmc:boot1`)
-component it reports that component as skipped.
+component it reports that component as skipped. The same goes for a
+`system_image_bmap` side-car (`flash_target` `none`): the flat form never
+uses the block map and always writes the whole image.
 
 The flat form runs a linear, stop-on-first-failure sequence:
 

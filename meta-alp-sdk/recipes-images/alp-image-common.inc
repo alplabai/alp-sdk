@@ -225,3 +225,16 @@ IMAGE_LINGUAS = "en-us"
 # everything-on alp-image-edge so all variants share one Mender slot size.
 IMAGE_ROOTFS_EXTRA_SPACE = "1048576"
 IMAGE_ROOTFS_SIZE = "4194304"
+
+# Block map next to the wic: <image>.wic.bmap lists which blocks of the
+# uncompressed .wic hold data. scripts/provision_som.py write_rootfs takes it
+# as the bundle's system_image_bmap component and writes + verifies only
+# those blocks instead of the whole image (the 4 GB rootfs ceiling above is
+# mostly unmapped on a normal image). The bmap is built from the raw .wic,
+# so it describes the .wic.gz the bundle ships once that is decompressed.
+# Only the rzv2n-family machines (the E1M V2N/V2M ones, and the vendor
+# rzv2n-evk the override also matches): their BSP emits a wic, and they are
+# what the provisioning tool handles. oe-core's "bmap" conversion pulls in
+# bmaptool-native by itself. NOT yet build-verified: no bitbake run has
+# confirmed this line (alp-sdk#2623).
+IMAGE_FSTYPES:append:rzv2n-family = " wic.bmap"

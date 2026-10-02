@@ -15,6 +15,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
 import zlib
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from provision.bench import BenchError, ExpectTimeout
+from provision.bmap import Bmap, spans_text
 from provision.gates import CM33_REGION_OFFSET
 
 if TYPE_CHECKING:
@@ -406,12 +408,78 @@ def rootfs_write_verify(t: LinuxTarget, emmc: str, wic_gz: Path, timeout: float 
             n += len(block)
     want = h.hexdigest()
     t.run(f"gunzip -c | dd of={emmc} bs=4M && sync", timeout=timeout, stdin_path=wic_gz)
-    # busybox images may lack blockdev: fall back to the BLKRRPART ioctl
-    t.run(f"blockdev --rereadpt {emmc} 2>/dev/null || python3 -c "
-          f"\"import fcntl, os; fcntl.ioctl(os.open('{emmc}', os.O_RDONLY), 0x125f)\"")
+    _reread_partitions(t, emmc)
     got = t.md5(emmc, 0, n)
     if got != want:
         raise BenchError(f"{emmc} readback md5 {got} != uncompressed {wic_gz.name} md5 {want}")
+    return got
+
+
+def _reread_partitions(t: LinuxTarget, emmc: str) -> None:
+    # busybox images may lack blockdev: fall back to the BLKRRPART ioctl
+    t.run(f"blockdev --rereadpt {emmc} 2>/dev/null || python3 -c "
+          f"\"import fcntl, os; fcntl.ioctl(os.open('{emmc}', os.O_RDONLY), 0x125f)\"")
+
+
+# The bmap path: only the image's mapped blocks are written and read back. The
+# unit needs python3 (core only) and nothing else; see board_bmap.py.
+_BOARD_BMAP = Path(__file__).with_name("board_bmap.py")
+_UNIT_BMAP_SCRIPT = "/tmp/alp-board-bmap.py"
+_UNIT_BMAP_SPANS = "/tmp/alp-board-bmap.spans"
+
+
+def has_python3(t: LinuxTarget) -> bool:
+    """False only for the shell's command-not-found (127). Any other failure (a
+    dropped SSH connection is 255) raises: reading it as "no python3" would
+    silently turn a mapped-block write into a full-image one."""
+    r = t.run("python3 -c ''", check=False)
+    if r.rc not in (0, 127):
+        raise BenchError(f"cannot tell whether the unit has python3: rc={r.rc}: {r.stderr.strip()[-300:]}")
+    return r.rc == 0
+
+
+def _bmap_stage(t: LinuxTarget, bm: Bmap) -> None:
+    t.put(_BOARD_BMAP, _UNIT_BMAP_SCRIPT)
+    with tempfile.TemporaryDirectory() as d:
+        spans = Path(d) / "spans"
+        spans.write_text(spans_text(bm), encoding="ascii")
+        t.put(spans, _UNIT_BMAP_SPANS)
+
+
+def _bmap_read_md5(t: LinuxTarget, emmc: str, bm: Bmap) -> str:
+    # The pipeline's status is md5sum's, so a reader that died mid-way still
+    # yields a well-formed digest. The reader's closing count line on stderr is
+    # the proof it read every mapped byte.
+    r = t.run(f"python3 {_UNIT_BMAP_SCRIPT} read {emmc} {_UNIT_BMAP_SPANS} | md5sum", timeout=600.0)
+    if f"board_bmap: read {bm.mapped_bytes} bytes" not in r.stderr:
+        raise BenchError(f"unit-side read of the mapped blocks of {emmc} did not complete: "
+                         f"{r.stderr.strip()[-300:] or 'no output'}")
+    out = r.stdout.split()
+    if not out or not re.fullmatch(r"[0-9a-f]{32}", out[0]):
+        raise BenchError(f"unparsable md5sum output for the mapped blocks of {emmc}")
+    return out[0]
+
+
+def bmap_md5(t: LinuxTarget, emmc: str, bm: Bmap) -> str:
+    """md5 of the device's bytes at the bmap's mapped spans, in order. Copies the
+    reader script and the spans file into the unit's /tmp first; nothing on the
+    block device is written."""
+    _bmap_stage(t, bm)
+    return _bmap_read_md5(t, emmc, bm)
+
+
+def rootfs_bmap_write_verify(t: LinuxTarget, emmc: str, wic_gz: Path, bm: Bmap, want_md5: str,
+                             timeout: float = 3600.0) -> str:
+    """Stream the gzipped wic over SSH, write only its mapped blocks into the eMMC
+    user area, then md5 the same blocks. want_md5 is bmap.verify_image()'s result.
+    Blocks the bmap leaves out are not written: they keep whatever the eMMC held."""
+    _bmap_stage(t, bm)
+    t.run(f"gunzip -c | python3 {_UNIT_BMAP_SCRIPT} write {emmc} {_UNIT_BMAP_SPANS} {bm.image_size} && sync",
+          timeout=timeout, stdin_path=wic_gz)
+    _reread_partitions(t, emmc)
+    got = _bmap_read_md5(t, emmc, bm)
+    if got != want_md5:
+        raise BenchError(f"{emmc} mapped-block readback md5 {got} != {wic_gz.name} mapped-block md5 {want_md5}")
     return got
 
 

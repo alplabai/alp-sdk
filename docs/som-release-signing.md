@@ -16,7 +16,8 @@ bootable firmware images with a different, device-scoped key).
 - A signature is computed over the bundle manifest serialized in a canonical form (the
   document with its `signature` field set to `null`, sorted keys, compact separators),
   digested with SHA-256. The bundle manifest already records the SHA-256 of every
-  component (`bl2`/`fip`/`system_image`) and of the private repro-pin
+  component (`bl2`/`bl2_mmc`/`fip`/`system_image`, and the optional
+  `system_image_bmap`) and of the private repro-pin
   (`provenance_ref.sha256`), so one signature over the manifest transitively attests the
   whole release.
 - The signature is embedded in the manifest's `signature` field:

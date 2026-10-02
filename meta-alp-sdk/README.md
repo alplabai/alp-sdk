@@ -306,7 +306,9 @@ it can't silently drift. That gap (no real Yocto CI build) is also why
 least one board", which a doc-only proof cannot satisfy.
 
 The resulting `alp-image-edge-<machine>.wic[.gz]` is the kernel +
-rootfs (the bootloader is production-flashed by Alp).  See
+rootfs (the bootloader is production-flashed by Alp). On the V2N/V2M
+machines a `.wic.bmap` block map is emitted next to it; the provisioning
+tool uses it to write only the image's used blocks.  See
 [`../docs/build-yocto-v2n.md`](../docs/build-yocto-v2n.md) for the
 deploy + on-board verification steps.
 

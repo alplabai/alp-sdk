@@ -178,7 +178,7 @@ Every PSU command is logged with a monotonic timestamp in the step log.
 | `gd32_flash` | applies the ACT88760 GPIO4 volatile release if still at the OTP default, DP-ID gate (`0x0BE12477` only), `loadbin` × 3, verify with `savebin` in fresh probe sessions, bridge ACK at `0x70`. With no network (a blank GD32 leaves both gbeth ports dead) it pushes the SWD tools and the three images over the console (base64, md5-checked on the board), then cold-cycles and re-checks the IP; SSH is used when it is up |
 | `write_xspi` | from Linux: `bl2` → `mtd0`, `fip` → `mtd1`; md5 readback. A FIP whose erase would reach the CM33 image at `mtd1` + `0x1A0000` is refused |
 | `write_emmc_boot` | release `bl2_mmc` + `fip` into `mmcblk<N>boot1`, md5 readback, EXT_CSD via mmc-utils |
-| `write_rootfs` | stream the wic into the eMMC user area (refused while Linux runs from the eMMC), `fsck -n`, `/boot/<dtb>` present |
+| `write_rootfs` | stream the wic into the eMMC user area (refused while Linux runs from the eMMC), `fsck -n`, `/boot/<dtb>` present. With a `system_image_bmap` in the bundle only the image's mapped blocks are written and read back (see "Block map" below) |
 | `census` | read-only: every auto ledger key the unit can provide |
 | `eeprom_manifest` | preconditions, 128-byte manifest in 8 × 16-byte page writes at `0x50`, readback, cold cycle, re-read; only then the staged blob is promoted to `<serial>.manifest.bin` |
 | `dxm1_npu_flash` | `v2n-m1` only, **skipped by default** (`--enable-dxm1-flash`): DX-M1 SPI-NAND over the UART recovery path. **BENCH-PENDING** -- see below |
@@ -308,6 +308,61 @@ bit 1 clear; the unit passes the ledger ship check (disposition `ship`, GD32
 released on its own by the last cold boot, no known defects, no override,
 not a `--build-dir` unit); and the operator retypes the serial. After the
 lock frame, only a re-read with bit 1 set counts.
+
+## Block map
+
+A bundle may carry an optional `system_image_bmap` component: the bmaptool
+block map (`.wic.bmap`) that the Yocto build emits next to the `.wic.gz`
+(see [build-yocto-v2n.md](build-yocto-v2n.md)). Its `flash_target` is
+`none`; it is never flashed. `--build-dir` picks up a single `*.wic.bmap`
+when one is there.
+
+With it, `write_rootfs` still streams the same `.wic.gz` to the unit, but
+the unit writes only the blocks the bmap lists and the readback hashes only
+those blocks, instead of writing and reading the whole image. The unit side
+is `scripts/provision/board_bmap.py`, copied to `/tmp` over SSH; it needs
+`python3` and nothing else (no `bmaptool` on the unit). A unit without
+`python3` gets the full-image write, and the plan log says so.
+
+Before any write, the `preflight` gate `bmap` checks on the host:
+
+- the bmap's own `BmapFileChecksum`, a `MappedBlocksCount` that matches the
+  ranges, and sorted non-overlapping ranges inside the image;
+- every range's sha256 against the bundle's `system_image`;
+- that every image byte outside the ranges is zero. A bmap that lists too
+  few ranges would otherwise pass every later check, because the write, the
+  readback and the probe all look only at the listed blocks.
+
+During and after the write:
+
+- The unit-side writer fails unless the stream is exactly `ImageSize`
+  bytes. It writes as the stream arrives, so a truncated transfer fails the
+  step but leaves the spans before the cut on the eMMC.
+- The readback hashes the mapped blocks; the reader reports its byte count,
+  so a reader that died mid-way is a failure, not a digest of partial output.
+- The probe (is the wic already there?) compares the same mapped blocks. It
+  copies the reader script and the spans file to the unit's `/tmp` first,
+  dry runs included; the block device is only read.
+
+`gunzip`'s exit status is not seen (busybox `sh` has no `pipefail`). The host
+has already checked the `.wic.gz` sha256 and decompressed it once, and the
+stream-length and readback checks cover what reaches the eMMC.
+
+Blocks the bmap leaves out are **not written**: they keep whatever the eMMC
+held before. Those blocks are zero in the image, so on a unit that held
+another image the eMMC is not a byte-for-byte copy of the wic. `fsck -n` runs
+after the write; a mapped-block write over a different earlier image is on
+the bench list below.
+
+The step result says `wic written (mapped blocks only, N of M bytes)`. The
+ledger fact `rootfs_wic_sha256` is still the bundle's `.wic.gz` sha256 and
+does not record which write ran.
+
+**Not yet run on silicon.** The mapped-block path is covered by host tests
+only (`tests/scripts/test_provision_bmap.py`). Owed on the bench: a blank
+unit, a unit that already holds a different image, and the time per unit
+against the full write. No bmaptool-emitted file has been through the parser
+yet (the format rules were checked against bmaptool 3.9.0's source).
 
 ## Hazards
 

@@ -22,16 +22,25 @@
         "additionalProperties": false,
         "required": ["role", "file", "sha256", "size_bytes", "flash_target"],
         "properties": {
-          "role": { "type": "string", "enum": ["bl2", "bl2_mmc", "fip", "system_image"] },
+          "role": { "type": "string", "enum": ["bl2", "bl2_mmc", "fip", "system_image", "system_image_bmap"] },
           "file": { "type": "string", "minLength": 1 },
           "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
           "size_bytes": { "type": "integer", "minimum": 1 },
-          "flash_target": { "type": "string", "enum": ["xspi:mtd0", "xspi:mtd1", "emmc", "emmc:boot1"] }
+          "flash_target": { "type": "string", "enum": ["xspi:mtd0", "xspi:mtd1", "emmc", "emmc:boot1", "none"] }
         },
-        "description": "bl2_mmc is the eMMC-boot BL2 (bl2_bp_mmc) and is the only role flashed to emmc:boot1.",
-        "if": { "properties": { "role": { "const": "bl2_mmc" } }, "required": ["role"] },
-        "then": { "properties": { "flash_target": { "const": "emmc:boot1" } } },
-        "else": { "properties": { "flash_target": { "not": { "const": "emmc:boot1" } } } }
+        "description": "bl2_mmc is the eMMC-boot BL2 (bl2_bp_mmc) and is the only role flashed to emmc:boot1. system_image_bmap is optional: the bmaptool block map (.wic.bmap) of the uncompressed system_image. It is never flashed (flash_target none, which no other role may use); the provisioning tool uses it to write and verify only the image's mapped blocks.",
+        "allOf": [
+          {
+            "if": { "properties": { "role": { "const": "bl2_mmc" } }, "required": ["role"] },
+            "then": { "properties": { "flash_target": { "const": "emmc:boot1" } } },
+            "else": { "properties": { "flash_target": { "not": { "const": "emmc:boot1" } } } }
+          },
+          {
+            "if": { "properties": { "role": { "const": "system_image_bmap" } }, "required": ["role"] },
+            "then": { "properties": { "flash_target": { "const": "none" } } },
+            "else": { "properties": { "flash_target": { "not": { "const": "none" } } } }
+          }
+        ]
       },
       "allOf": [
         { "contains": { "type": "object", "properties": { "role": { "const": "bl2" } }, "required": ["role"] } },

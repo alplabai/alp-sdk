@@ -101,6 +101,8 @@ def _flash(cfg: Cfg, comp: dict) -> Step:
     if target == "emmc:boot1":
         return Step(f"flash:{comp['role']}", True,
                     "skipped (emmc:boot1 is written by the V2N flow: provision_som.py plan|run)")
+    if target == "none":
+        return Step(f"flash:{comp['role']}", True, "skipped (side-car, not flashed)")
     if spec is None:
         return Step(f"flash:{comp['role']}", False, f"no backend for {target}")
     method, partition = spec
@@ -440,13 +442,18 @@ def _v2n_parser() -> argparse.ArgumentParser:
 
 def _bundle_from_build_dir(d: Path) -> dict:
     comps = []
-    for role, pat, target in (("bl2", "bl2_bp_spi*.bin", "xspi:mtd0"),
-                              ("bl2_mmc", "bl2_bp_mmc*.bin", "emmc:boot1"),
-                              ("fip", "fip*.bin", "xspi:mtd1"),
-                              ("system_image", "*.wic.gz", "emmc")):
+    # (role, glob, flash_target, required); the bmap is used when the build emitted one
+    for role, pat, target, required in (("bl2", "bl2_bp_spi*.bin", "xspi:mtd0", True),
+                                        ("bl2_mmc", "bl2_bp_mmc*.bin", "emmc:boot1", True),
+                                        ("fip", "fip*.bin", "xspi:mtd1", True),
+                                        ("system_image", "*.wic.gz", "emmc", True),
+                                        ("system_image_bmap", "*.wic.bmap", "none", False)):
         hits = sorted(d.glob(pat))
+        if not hits and not required:
+            continue
         if len(hits) != 1:
-            raise ValueError(f"--build-dir: want exactly one {pat}, found {[h.name for h in hits]}")
+            want = "exactly one" if required else "at most one"
+            raise ValueError(f"--build-dir: want {want} {pat}, found {[h.name for h in hits]}")
         comps.append({"role": role, "file": hits[0].name, "sha256": _sha256(hits[0]),
                       "size_bytes": hits[0].stat().st_size, "flash_target": target})
     return {"status": "complete", "release_version": f"build-dir:{d.name}", "components": comps}

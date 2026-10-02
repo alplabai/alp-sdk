@@ -32,7 +32,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import TypeVar
 
-from provision import gates, ledger_out, uboot
+from provision import bmap, gates, ledger_out, uboot
 from provision import linux_target as lt
 from provision.bench import Bench, BenchError, ExpectTimeout
 from provision.console_target import ConsoleSwdProbe, ConsoleTarget
@@ -507,6 +507,13 @@ class Preflight(Step):
             results.append(gates.fdt(fip, ctx.artefact("system_image")))
         except (Refused, OSError) as e:
             results.append(gates.GateResult("fip", False, str(e)))
+        try:
+            mapped = _wic_bmap(ctx)
+            if mapped:
+                results.append(gates.GateResult(
+                    "bmap", True, f"{mapped[0].mapped_bytes} of {mapped[0].image_size} image bytes mapped"))
+        except Refused as e:
+            results.append(gates.GateResult("bmap", False, str(e)))
         for role, key in (("bl2", "bl2_sha256"), ("system_image", "rootfs_wic_sha256")):
             c = next((c for c in ctx.bundle.get("components", []) if c.get("role") == role), None)
             if c:
@@ -858,6 +865,24 @@ def _wic_md5(ctx: Ctx) -> tuple[str, int]:
     return ctx._cache["wic_md5"]
 
 
+BMAP_ROLE = "system_image_bmap"
+
+
+def _wic_bmap(ctx: Ctx) -> tuple[bmap.Bmap, str] | None:
+    """The bundle's optional block map, checked against the system image, plus the
+    md5 of the image's mapped bytes. None when the bundle ships no bmap."""
+    comp = next((c for c in ctx.bundle.get("components", []) if c.get("role") == BMAP_ROLE), None)
+    if comp is None:
+        return None
+    if "wic_bmap" not in ctx._cache:
+        try:
+            bm = bmap.load(ctx.bundle_dir / comp["file"])
+            ctx._cache["wic_bmap"] = (bm, bmap.verify_image(bm, ctx.artefact("system_image")))
+        except (OSError, ValueError) as e:
+            raise Refused(f"{BMAP_ROLE} {comp.get('file')}: {e}") from e
+    return ctx._cache["wic_bmap"]
+
+
 class WriteRootfs(Step):
     name = "write_rootfs"
 
@@ -866,6 +891,13 @@ class WriteRootfs(Step):
         if t is None:
             return Unknown("no Linux target")
         emmc = lt.resolve_emmc(t)
+        mapped = _wic_bmap(ctx)
+        if mapped and lt.has_python3(t):
+            # Reads the eMMC only, but copies the reader script + spans file into
+            # the unit's /tmp to do it: the one probe that leaves files on the unit.
+            if lt.bmap_md5(t, emmc, mapped[0]) != mapped[1]:
+                return Unsatisfied(f"{emmc} does not hold the bundle wic's mapped blocks")
+            return Satisfied({})
         want, n = _wic_md5(ctx)
         if t.md5(emmc, 0, n) != want:
             return Unsatisfied(f"{emmc} does not hold the bundle wic")
@@ -882,8 +914,18 @@ class WriteRootfs(Step):
         else:
             emmc = "/dev/<emmc>"
         dtb = gates.fip_fdtfile(ctx.artefact_bytes("fip"))
-        ctx.mutate(f"gunzip -c {wic.name} | dd of={emmc} bs=4M && sync (over SSH), md5 readback",
-                   lambda: lt.rootfs_write_verify(t, emmc, wic))
+        mapped = _wic_bmap(ctx)
+        if mapped and t is not None and not lt.has_python3(t):
+            ctx.plan_log.append("unit has no python3: the bmap is ignored, the full image is written")
+            mapped = None
+        if mapped:
+            bm, want = mapped
+            ctx.mutate(f"gunzip -c {wic.name} | board_bmap.py write {emmc} && sync (over SSH): "
+                       f"{bm.mapped_bytes} of {bm.image_size} bytes, md5 readback of the mapped blocks",
+                       lambda: lt.rootfs_bmap_write_verify(t, emmc, wic, bm, want))
+        else:
+            ctx.mutate(f"gunzip -c {wic.name} | dd of={emmc} bs=4M && sync (over SSH), md5 readback",
+                       lambda: lt.rootfs_write_verify(t, emmc, wic))
 
         def check():
             name = emmc.rsplit("/", 1)[-1]
@@ -897,7 +939,10 @@ class WriteRootfs(Step):
                     errs.append(f"p{p}: {e}")
             raise BenchError(f"no partition passes fsck + /boot/{dtb}: {'; '.join(errs)}")
         part = ctx.mutate(f"fsck -n, mount ro, /boot/{dtb} present", check)
-        return self.result(ctx, f"wic written; rootfs p{part} holds /boot/{dtb}" if part
+        # Say which write ran: a mapped-blocks write verified only those blocks.
+        how = (f"wic written (mapped blocks only, {mapped[0].mapped_bytes} of {mapped[0].image_size} bytes)"
+               if mapped else "wic written")
+        return self.result(ctx, f"{how}; rootfs p{part} holds /boot/{dtb}" if part
                            else "would write the wic and check the rootfs")
 
 
