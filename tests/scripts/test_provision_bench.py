@@ -644,3 +644,11 @@ def test_power_kinds_without_a_meter_return_none_for_current():
     from .provision_fakes import FakePower
     assert FakePower().current() is None
     assert bench.LabgridPower("place").current() is None
+
+
+@pytest.mark.parametrize("reply", ["nan", "inf", "-inf", "ERR"])
+def test_scpi_current_rejects_a_non_finite_reading(reply):
+    psu = _Psu()
+    psu.amps = reply
+    with pytest.raises(BenchError, match="not a number"):
+        psu.power(1).current()

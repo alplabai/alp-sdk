@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import codecs
 import logging
+import math
 import os
 import re
 import socket
@@ -467,10 +468,13 @@ class ScpiPower(Power):
         persistent socket. BenchError when the reply is not a number."""
         reply = self._send(f"MEAS:CURR? CH{self.channel}", reply=True)
         try:
-            return float(reply)
+            amps = float(reply)
         except ValueError:
+            amps = math.nan
+        if not math.isfinite(amps):
             raise BenchError(f"SCPI {self.host}:{self.port} MEAS:CURR? CH{self.channel}: "
-                             f"not a number: {reply!r}") from None
+                             f"not a number: {reply!r}")
+        return amps
 
 
 class LabgridPower(Power):
