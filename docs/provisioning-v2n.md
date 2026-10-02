@@ -53,6 +53,7 @@ the private repository.
 | `plan` | only with `--bench`, read-only probes | nothing |
 | `run` | yes | only with `--execute`; the lock only with `--lock` |
 | `status` | no | nothing |
+| `prepare-sd` | no board; writes `--device` | the provisioning SD (Linux / WSL only) |
 
 `status` exits 0 after printing; `--require-shippable` makes a blocked ship
 check, or a state `run` would supersede (another tool revision or, with
@@ -134,6 +135,7 @@ recorded CID existed and differed, not on first contact.
 | `linux_target.py` | SSH runner, console login, MTD / eMMC / I2C helpers, the read-only census |
 | `gates.py` | offline checks: SKU and DDR tier triangles, FIP rail string, FDT, artefact hashes, the N24S128 frame table, the `mfg_date` rule |
 | `steps.py` | the step machine and the state file |
+| `payload_store.py`, `store_swd_probe.py`, `prepare_sd.py` | the provisioning SD's `alp-payload` store: on-board hash-checked reads, the console SWD probe that uses it, the `prepare-sd` writer |
 | `ledger_out.py` | `unit.yaml` merge, markdown section, logs, xlsx regen, ship check |
 
 ## Step machine
@@ -332,6 +334,33 @@ bit 1 clear; the unit passes the ledger ship check (disposition `ship`, GD32
 released on its own by the last cold boot, no known defects, no override,
 not a `--build-dir` unit); and the operator retypes the serial. After the
 lock frame, only a re-read with bit 1 set counts.
+
+## Provisioning SD payload store
+
+Without it, every payload crosses a wire: the GD32 images go base64 over the 115200-baud console (the board has no network until the GD32 runs; about 13 min on 2026W38-0002), and the DX-M1 files, the DTBs and the 210 MB `wic.gz` go over SSH on a 100 Mbit switch. The board already boots Linux from the provisioning SD for every write step, so the SD carries the payloads and the steps read them locally.
+
+**Preparing the SD** (once per bundle, on Linux or WSL: it needs `mke2fs` from e2fsprogs >= 1.43; on the Windows bench host `wsl --mount \.\PHYSICALDRIVEn --bare` exposes the SD as `/dev/sdX`):
+
+```bash
+python scripts/provision_som.py prepare-sd --bundle <bundle-dir> --device /dev/sdX --gd32-fw <dir>
+```
+
+1. Every bundle file is checked against the sha256 in `bundle.json` first; a mismatch refuses before anything is written.
+2. The bundle's `system_image` wic is written to `--device` (a block device or an image file) exactly as before: p1/p2 untouched, U-Boot still finds `boot/Image` on p2. Only an MBR wic is supported.
+3. A new MBR partition is appended after the wic's, 1 MiB aligned, and made an ext4 filesystem labelled `alp-payload` (`mke2fs -d`, no mount). A separate partition, not a directory in p2, because the wic's rootfs has no guaranteed free space for the roughly 250 MB of payloads.
+
+The store holds `<bundle sha256>/` with: every bundle component (bl2, bl2_mmc, fip, the `system_image` wic.gz and its bmap, the `dxm1_*` roles and the DX-M1 DTB when the bundle has them); the `--gd32-fw` files (`bootloader.bin`, `ota-meta.bin`, `slot-a.bin`, `VERSION`); a copy of `bundle.json` and its `bundle.json.*` signature files; `manifest.sha256` (`sha256sum` format, every file). The SWD helper scripts the console probe pushes are not prepared: the first unit caches them.
+
+**Using it.** `run --execute` mounts the partition on the board (found by label, only if it sits on the same disk as the root, only when the board runs from the SD, never when its root is the eMMC) and, before any push, looks for the file in `<bundle sha256>/`:
+
+- hit and the hash computed ON THE BOARD (`sha256sum`, md5 when the image's busybox lacks it) equals the host's, which is itself checked against the signed bundle's sha256: the stored file is used in place (`cp` for small files, `gunzip -c <stored wic.gz>` for the rootfs). The SD content is never trusted without that hash.
+- miss, bad hash, or no partition: the file is pushed as before. A push is also copied into the store (lazy self-provisioning, so an empty `alp-payload` partition fills itself on the first unit); a store that cannot be written is reported, not fatal.
+
+Steps: `gd32_flash` over the console (SWD tools and images; over SSH the bench's probe wrapper still copies from the host), `dxm1_npu_flash` (DTB and payload, re-opened after each reboot), `write_rootfs`, `write_xspi`, `write_emmc_boot`. Each records `payload_source: sd-store` (every file came from the store) or `pushed`, plus `payload_store_note` when the store was off or a cache write failed. `--no-payload-store` disables it. `plan` never mounts.
+
+`write_rootfs` with the stored wic.gz and a bmap: the board decompresses the whole stream and discards each gap between ranges (a pipe cannot seek), writing only the mapped ranges; the range list (small, from the host's bmap) is still pushed, and the readback md5 is compared with the host's, unchanged.
+
+**The provisioning SD is internal-only.** It carries license-gated DEEPX binaries (`dxm1_*`) and is never shipped with a unit: it stays at the bench. Do not copy its image or hand it to a customer or a contract manufacturer.
 
 ## Block-map write of the system image
 
