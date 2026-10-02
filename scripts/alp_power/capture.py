@@ -6,49 +6,74 @@ one {"t_us":int,"flags":int,"data":hex} line per record (u32 timestamps already
 unwrapped), and a trailer {"type":"end","dropped":int}.
 """
 import json
+import signal
 import time
 
 from .analysis import Sample
 from .monitors import monitor_from_header, monitor_header
-from .transport import NO_MARKER, ProbeError, unwrap_ts
+from .transport import NO_MARKER, ProbeError, status_text, unwrap_ts
 
 FLAG_MARKER, FLAG_I2C_ERR, FLAG_DROPPED = 1, 2, 4
 
 
+def _read(probe):
+    st, dropped, recs = probe.stream_read()
+    if st:
+        raise ProbeError(f"stream read failed: {status_text(st)}")
+    return dropped, recs
+
+
+def _raise_on_signal(signum, _frame):
+    raise ProbeError(f"interrupted by signal {signum}")
+
+
 def capture(probe, monitors, marker, seconds, idle_s, period_us, i2c_hz):
-    """monitors: [(name, monitor)].  -> (header, [(t_us, flags, data)], dropped)."""
-    info = probe.require_stream()
-    marker_idx = NO_MARKER
-    if marker:
-        names = probe.pin_names()
-        if marker not in names:
-            raise ProbeError(f"probe has no pin named {marker!r} (pins: {', '.join(names)})")
-        marker_idx = names.index(marker)
-    probe.i2c_config(i2c_hz)
-    chans = []
-    for _, m in monitors:
-        for payload in m.configure():
-            probe.i2c_write(m.addr, payload)
-        chans += m.stream_channels()
-    probe.stream_config(period_us, marker_idx, chans)
+    """monitors: [(name, monitor)].  Captures idle_s (baseline) then `seconds`
+    (active).  -> (header, [(t_us, flags, data)], dropped)."""
+    info = probe.require_stream()  # before the handlers/STOP: old firmware may not know STOP
+    old = {}
+    for sig in (signal.SIGINT, signal.SIGTERM):  # so `finally` can STOP the probe
+        try:
+            old[sig] = signal.signal(sig, _raise_on_signal)
+        except ValueError:  # not the main thread
+            pass
     rows, dropped = [], 0
-    probe.stream_start()
-    end = time.monotonic() + seconds
     try:
+        probe.stream_stop()  # idempotent: clears a stream a killed earlier run left running
+        marker_idx = NO_MARKER
+        if marker:
+            names = probe.pin_names()
+            if marker not in names:
+                raise ProbeError(f"probe has no pin named {marker!r} (pins: "
+                                 f"{', '.join(n for n in names if n)})")
+            marker_idx = names.index(marker)
+        probe.i2c_config(i2c_hz)
+        chans = []
+        for _, m in monitors:
+            for payload in m.configure():
+                probe.i2c_write(m.addr, payload)
+            chans += m.stream_channels()
+        probe.stream_config(period_us, marker_idx, chans)
+        probe.stream_start()
+        end = time.monotonic() + idle_s + seconds
         while time.monotonic() < end:
-            _, dropped, recs = probe.stream_read()
+            dropped, recs = _read(probe)
             rows += recs
             if not recs:
                 time.sleep(0.001)
-    finally:  # never leave the probe sampling (and I2C busy) after a host error
-        probe.stream_stop()
+    finally:  # never leave the probe sampling (and I2C busy) after an error or signal
+        try:
+            probe.stream_stop()
+        finally:
+            for sig, h in old.items():
+                signal.signal(sig, h)
     while True:  # drain what the sampler left in the ring
-        _, dropped, recs = probe.stream_read()
+        dropped, recs = _read(probe)
         if not recs:
             break
         rows += recs
     header = {"type": "header", "version": 1, "protocol": info["version"],
-              "period_us": period_us, "idle_s": idle_s, "i2c_hz": i2c_hz,
+              "period_us": period_us, "idle_s": idle_s, "seconds": seconds, "i2c_hz": i2c_hz,
               "marker": marker, "monitors": [monitor_header(n, m) for n, m in monitors]}
     return header, unwrap_ts(rows), dropped
 

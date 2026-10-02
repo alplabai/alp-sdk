@@ -54,10 +54,16 @@ def enc_stream_config(period_us, marker, chans):
     return out
 
 
-def dec_stream_read(r):
-    """-> (status, dropped, [(ts_us, flags, data)])"""
+def dec_stream_read(r, recsize=None):
+    """-> (status, dropped, [(ts_us, flags, data)]); ProbeError on a malformed reply.
+    recsize: the record size the stream config implies (5 + channel bytes)."""
+    if len(r) < 8:
+        raise ProbeError(f"short stream reply ({len(r)} bytes)")
     assert r[0] == CMD_READ, r
     st, n, size = r[1], r[2], r[3]
+    if n and (size < 5 or 8 + n * size > len(r) or (recsize is not None and size != recsize)):
+        raise ProbeError(f"malformed stream reply: {n} records of {size} bytes in "
+                         f"{len(r)} bytes (expected record size {recsize})")
     dropped = struct.unpack("<I", bytes(r[4:8]))[0]
     recs = []
     for i in range(n):
@@ -113,25 +119,24 @@ class Probe:
                 return
         raise ProbeError("the probe has no CMSIS-DAP vendor interface")
 
-    def xfer(self, req):
+    def xfer(self, req, minlen=2):
         try:
             self.out.write(req, 1000)
             r = bytes(self.inp.read(64, 1000))
         except self._usb.core.USBError as e:
             raise ProbeError(f"USB transfer failed: {e}")
-        if not r or r[0] != req[0]:
+        if len(r) < minlen or r[0] != req[0]:
             raise ProbeError(f"unexpected reply to command 0x{req[0]:02X}: {r.hex()}")
         return r
 
     def info(self):
-        return dec_info(self.xfer(bytes([CMD_INFO])))
+        return dec_info(self.xfer(bytes([CMD_INFO]), 5))
 
     def pin_names(self):
         names = []
         for i in range(self.info()["npins"]):
-            st, name = dec_pin_info(self.xfer(bytes([CMD_PIN_INFO, i])))
-            if st == 0:
-                names.append(name)
+            st, name = dec_pin_info(self.xfer(bytes([CMD_PIN_INFO, i]), 4))
+            names.append(name if st == 0 else None)  # keep list index == probe pin index
         return names
 
     def i2c_write(self, addr, data):
@@ -141,7 +146,7 @@ class Probe:
                              + (" (is the monitor powered and the address right?)" if st == 1 else ""))
 
     def i2c_config(self, hz):
-        actual = struct.unpack("<I", self.xfer(enc_i2c_config(hz))[1:5])[0]
+        actual = struct.unpack("<I", self.xfer(enc_i2c_config(hz), 5)[1:5])[0]
         if actual == 0:
             raise ProbeError("I2C speed change refused (unavailable or stream busy)")
         return actual
@@ -153,6 +158,7 @@ class Probe:
 
     def stream_config(self, period_us, marker, chans):
         self._cmd(enc_stream_config(period_us, marker, chans), "stream config")
+        self.recsize = 5 + sum(n for _, _, n in chans)
 
     def stream_start(self):
         self._cmd(bytes([CMD_START]), "stream start")
@@ -161,7 +167,7 @@ class Probe:
         self.xfer(bytes([CMD_STOP]))
 
     def stream_read(self):
-        return dec_stream_read(self.xfer(bytes([CMD_READ])))
+        return dec_stream_read(self.xfer(bytes([CMD_READ]), 8), getattr(self, "recsize", None))
 
     def require_stream(self):
         info = self.info()

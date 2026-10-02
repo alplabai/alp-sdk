@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 import json
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -11,8 +12,8 @@ sys.path.insert(0, str(REPO / "scripts"))
 from alp_power import analysis, capture, cli  # noqa: E402
 from alp_power.analysis import Sample  # noqa: E402
 from alp_power.monitors import Ina236, parse_monitor  # noqa: E402
-from alp_power.transport import (dec_stream_read, enc_stream_config,  # noqa: E402
-                                 unwrap_ts)
+from alp_power.transport import (ProbeError, dec_stream_read,  # noqa: E402
+                                 enc_stream_config, unwrap_ts)
 
 FIXTURE = REPO / "tests/scripts/fixtures/alp_power/synthetic_capture.jsonl"
 
@@ -179,7 +180,123 @@ def test_capture_sequence_unwrap_and_stop():
     assert [r[0] for r in rows] == [0xFFFFFFF0, 0x100000010]
     p = FakeProbe()
     capture.capture(p, mon, "TARGET_DONE", 0.01, 0, 500, 1000000)
-    assert p.log == [("hz", 1000000), ("w", 0x4A, "005007"),
+    assert p.log == ["stop", ("hz", 1000000), ("w", 0x4A, "005007"),
                      ("w", 0x4A, "050800"), ("cfg", 500, 1, [(0x4A, 3, 2)]), "start", "stop"]
     with pytest.raises(capture.ProbeError):
         capture.capture(FakeProbe(stream=False), mon, None, 0.01, 0, 500, 1000000)
+
+
+MON = [parse_monitor("5V=ina236@0x4A,shunt=0.02,range=fine")]
+
+
+def test_capture_total_is_idle_plus_active(monkeypatch):
+    t = [0.0]
+    monkeypatch.setattr(capture.time, "monotonic", lambda: t[0])
+    monkeypatch.setattr(capture.time, "sleep", lambda s: t.__setitem__(0, t[0] + 1))
+    p = FakeProbe()
+    capture.capture(p, MON, None, 5, 3, 500, 1000000)
+    assert p.reads >= 8  # one read per simulated second over idle(3)+active(5)
+
+
+def test_signal_stops_stream():
+    class Sig(FakeProbe):
+        def stream_read(self):
+            signal.raise_signal(signal.SIGTERM)
+
+    p = Sig()
+    with pytest.raises(ProbeError, match="interrupted"):
+        capture.capture(p, MON, None, 5, 0, 500, 1000000)
+    assert p.log[-1] == "stop"
+    assert signal.getsignal(signal.SIGTERM) is not capture._raise_on_signal
+
+
+def test_stream_read_status_is_checked():
+    class Busy(FakeProbe):
+        def stream_read(self):
+            return 6, 0, []
+
+    p = Busy()
+    with pytest.raises(ProbeError, match="not configured"):
+        capture.capture(p, MON, None, 0.01, 0, 500, 1000000)
+    assert p.log[-1] == "stop"
+
+
+def test_dec_stream_read_validates_length():
+    with pytest.raises(ProbeError):
+        dec_stream_read(bytes([0x89, 0, 0]))
+    with pytest.raises(ProbeError):  # claims 2 records, carries 1
+        dec_stream_read(bytes([0x89, 0, 2, 7, 0, 0, 0, 0]) + bytes(7))
+    with pytest.raises(ProbeError):  # record size disagrees with the config
+        dec_stream_read(bytes([0x89, 0, 1, 7, 0, 0, 0, 0]) + bytes(7), recsize=9)
+
+
+def test_missing_active_samples_is_null_not_zero():
+    s2 = [Sample(i * 0.0005, [None], 1 if 4 <= i < 8 else 0, False)
+          for i in range(20)]
+    res, issues = analysis.analyze(s2, 1, 500, 1.0, names=["5V"])
+    assert res["inferences"] == 1
+    r = res["rails"][0]
+    assert r["avg_active_mw"] is None and r["energy_per_inference_mj"] is None
+    assert r["gross_energy_per_inference_mj"] is None
+    assert "no_active_samples" in codes(issues)
+
+
+def test_zero_idle_warns():
+    _, issues = analysis.analyze(_flat(), 1, 500, 0.0)
+    assert "no_idle_window" in codes(issues)
+
+
+def test_pin_names_keep_placeholder():
+    from alp_power.transport import Probe
+    p = Probe.__new__(Probe)
+    replies = {0x80: bytes([0x80, 2, 7, 3, 59]), (0x85, 0): bytes([0x85, 0, 0, 1]) + b"A",
+               (0x85, 1): bytes([0x85, 1, 0, 0]), (0x85, 2): bytes([0x85, 0, 0, 1]) + b"C"}
+    p.xfer = lambda req, minlen=2: replies[req[0] if req[0] == 0x80 else (req[0], req[1])]
+    assert p.pin_names() == ["A", None, "C"]
+
+
+def test_json_usage_error_and_internal_error(monkeypatch, capsys):
+    with pytest.raises(SystemExit) as ei:
+        cli.main(["measure", "--format", "json", "--bogus"])
+    assert ei.value.code == 1
+    env = json.loads(capsys.readouterr().out)
+    assert env["ok"] is False and env["issues"][0]["code"] == "usage_error"
+    monkeypatch.setattr(cli, "_measure", lambda a: 1 / 0)
+    assert cli.main(["measure", "--monitor", "x=ina236@0x4A,shunt=1", "--format", "json"]) == 1
+    env = json.loads(capsys.readouterr().out)
+    assert env["issues"][0]["code"] == "internal_error"
+    assert "ZeroDivisionError" in env["issues"][0]["message"]
+
+
+def test_write_failure_keeps_result(monkeypatch, tmp_path, capsys):
+    header, rows, dropped = capture.read_jsonl(FIXTURE)
+    monkeypatch.setattr(cli.cap, "capture", lambda *a: (header, rows, dropped))
+    monkeypatch.setattr(cli, "Probe", lambda: None)
+    out = str(tmp_path / "no" / "such" / "c.jsonl")
+    argv = ["measure", "--monitor", "5V=ina236@0x4A,shunt=0.02", "--out", out, "--format", "json"]
+    assert cli.main(argv) == 0
+    env = json.loads(capsys.readouterr().out)
+    assert env["ok"] and env["data"]["inferences"] == 20
+    assert "capture_write_failed" in codes(env["issues"])
+
+
+def _pulse_samples(spec):
+    """spec: marker string per sample, 'd' after a char = dropped before it."""
+    return [Sample(i * 0.0005, [0.1 + 0.1 * m], m, False) for i, m in enumerate(spec)]
+
+
+def test_partial_pulses_excluded():
+    s = _pulse_samples([1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1])
+    res, issues = analysis.analyze(s, 1, 500, 0.0)
+    assert res["inferences"] == 1
+    assert {"partial_pulse_start", "partial_pulse_end"} <= codes(issues)
+    assert res["rails"][0]["avg_active_mw"] == pytest.approx(200)
+    assert res["latency_us"]["median"] == pytest.approx(1000)
+
+
+def test_pulse_spanning_drop_excluded():
+    s = _pulse_samples([0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0])
+    s[3] = s[3]._replace(dropped=True)
+    res, issues = analysis.analyze(s, 1, 500, 0.0)
+    assert res["inferences"] == 1
+    assert "pulse_spans_drop" in codes(issues)

@@ -26,9 +26,10 @@ def _fail(fmt, code, message):
 
 def _note(header):
     return (f"Energy per inference = (integral of power over marker-high time - idle baseline "
-            f"x marker-high time) / marker rising edges; idle baseline = mean power while the "
-            f"marker is low in the first {header['idle_s']} s. Times are quantised to the "
-            f"{header['period_us']} us sample period. Not validated on hardware.")
+            f"x marker-high time) / complete marker pulses; idle baseline = mean power while "
+            f"the marker is low in the first {header['idle_s']} s (the idle window, captured "
+            f"before the active window). Times are quantised to the {header['period_us']} us "
+            f"sample period. Not validated on hardware.")
 
 
 def _r(v):
@@ -38,7 +39,8 @@ def _r(v):
 def _result(source, header, rows, dropped):
     samples = cap.to_samples(header, rows)
     res, issues = analysis.analyze(samples, len(header["monitors"]), header["period_us"],
-                                   header["idle_s"], dropped)
+                                   header["idle_s"], dropped,
+                                   [h["name"] for h in header["monitors"]])
     for r, h in zip(res["rails"], header["monitors"]):
         r.update(name=h["name"], part=h["part"], addr=h["addr"])
     data = {"source": source,
@@ -87,9 +89,14 @@ def _measure(a):
         raise ValueError("1..8 monitors supported")
     header, rows, dropped = cap.capture(Probe(), monitors, a.marker, a.seconds,
                                         a.idle_seconds, a.period_us, a.i2c_hz)
+    env = _result("probe", header, rows, dropped)
     if a.out:
-        cap.write_jsonl(a.out, header, rows, dropped)
-    return _result("probe", header, rows, dropped)
+        try:
+            cap.write_jsonl(a.out, header, rows, dropped)
+        except OSError as e:
+            env["issues"].append(_issue("capture_write_failed", f"could not write {a.out}: {e}",
+                                        "warning"))
+    return env
 
 
 def _probe_info(a):
@@ -101,15 +108,33 @@ def _probe_info(a):
         "i2c_max": info["i2c_max"], "pins": pins}, "issues": []}
 
 
+class _JsonArgs(argparse.ArgumentParser):
+    """With --format json, usage errors are a JSON envelope (exit 1), not stderr text."""
+    json_mode = False
+
+    def error(self, message):
+        if not _JsonArgs.json_mode:
+            super().error(message)
+        _fail("json", "usage_error", message)
+        sys.exit(1)
+
+
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="alp_power", description=__doc__)
+    argv = sys.argv[1:] if argv is None else argv
+    json_mode = any(x == "--format=json" or (x == "json" and argv[i - 1:i] == ["--format"])
+                    for i, x in enumerate(argv))
+    _JsonArgs.json_mode = json_mode
+    ap = _JsonArgs(prog="alp_power", description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
     m = sub.add_parser("measure", help="capture from the probe and analyse")
     m.add_argument("--monitor", action="append", required=True,
                    metavar="NAME=ina236@0x4A,shunt=0.02[,range=fine|wide]")
     m.add_argument("--marker", metavar="PIN_NAME")
-    m.add_argument("--seconds", type=float, default=10)
-    m.add_argument("--idle-seconds", type=float, default=3)
+    m.add_argument("--seconds", type=float, default=10,
+                   help="ACTIVE window (target inferring), captured after the idle window")
+    m.add_argument("--idle-seconds", type=float, default=3,
+                   help="extra idle baseline window captured FIRST (target idle); "
+                        "total capture = idle + seconds")
     m.add_argument("--period-us", type=int, default=500)
     m.add_argument("--i2c-hz", type=int, default=1_000_000)
     m.add_argument("--out", metavar="capture.jsonl")
@@ -128,6 +153,8 @@ def main(argv=None):
         return _fail(a.format, "probe_error", str(e))
     except (OSError, ValueError, KeyError) as e:
         return _fail(a.format, "invalid_input", str(e))
+    except Exception as e:  # last resort: consumers always get an envelope
+        return _fail(a.format, "internal_error", f"{type(e).__name__}: {e}")
     return _emit(env, a.format, _text if a.cmd != "probe-info" else
                  lambda e: json.dumps(e["data"], indent=2))
 
