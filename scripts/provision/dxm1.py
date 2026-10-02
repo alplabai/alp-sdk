@@ -90,6 +90,18 @@ def push(t, local: Path, remote: str) -> str:
     return want
 
 
+def unexport_gpios(t, chip: str, lines: tuple[int, ...]) -> str:
+    """Best-effort `unexport` of the DX-M1 lines (a failure must not leave P75 / PA6
+    exported high). A line the pinctrl driver owns refuses; that is reported, not raised."""
+    try:
+        base = lt._pinctrl_chip_base(t, chip)
+    except BenchError as e:
+        return f"GPIOs left exported ({e})"
+    bad = [str(base + n) for n in lines
+           if t.run(f"echo {base + n} > /sys/class/gpio/unexport", check=False).rc != 0]
+    return f"GPIO {', '.join(bad)} could not be unexported" if bad else "P75/PA6 unexported"
+
+
 def install_dtb(t, dtb_name: str, new: Path) -> str:
     """Back the release DTB up, install ``new`` (already pushed to REMOTE[ROLE_DTB])
     over it, sync. Returns the release md5.

@@ -1322,11 +1322,18 @@ class Dxm1NpuFlash(Step):
         """After a failure past the DTB swap: put the release DTB back (best effort)."""
         if "release" not in st or not ctx.execute:
             return ""
+        note = ""
+        if "gpio" in st:
+            chip, mux, rst = st["gpio"]
+            try:
+                note = f"; {dxm1.unexport_gpios(ctx.linux, chip, (mux, rst))}"
+            except (BenchError, AttributeError) as e:
+                note = f"; GPIOs left exported ({e})"
         try:
             dxm1.restore_dtb(ctx.linux, dtb_name, st["release"])
-            return "; release DTB restored (the unit runs the dxuart2 DTB until its next cold cycle)"
+            return note + "; release DTB restored (the unit runs the dxuart2 DTB until its next cold cycle)"
         except (BenchError, AttributeError) as e:
-            return f"; ALSO could not restore the release DTB: {e}"
+            return note + f"; ALSO could not restore the release DTB: {e}"
 
     def run(self, ctx):
         if why := self._inapplicable(ctx):
@@ -1344,19 +1351,25 @@ class Dxm1NpuFlash(Step):
         if erase and self._component(ctx, dxm1.ROLE_DXCLI) is None:
             raise Refused("the DX-M1 NAND already holds boot2nd (PCIe device 0x0000) but the bundle has no "
                           f"{dxm1.ROLE_DXCLI} (dxcli.py) to run sf_erase 0 1000000 first")
-        roles = list(dxm1.REQUIRED_ROLES) + ([dxm1.ROLE_DXCLI] if erase else [])
+        # /tmp is tmpfs: the warm reboot wipes it. Only the DTB (copied into /boot before
+        # the reboot) is pushed first; every flash payload is pushed after the reboot.
+        payload = [r for r in dxm1.REQUIRED_ROLES if r != dxm1.ROLE_DTB] + ([dxm1.ROLE_DXCLI] if erase else [])
         ev = self._evidence(ctx, version)
         st: dict = {}
 
-        def push():
-            for r in roles:
-                dxm1.push(t, ctx.artefact(r), dxm1.REMOTE[r])
+        def push_dtb():
+            dxm1.push(t, ctx.artefact(dxm1.ROLE_DTB), dxm1.REMOTE[dxm1.ROLE_DTB])
+
+        def push_payload():
+            for r in payload:
+                dxm1.push(ctx.linux, ctx.artefact(r), dxm1.REMOTE[r])
 
         def install():
             st["release"] = dxm1.install_dtb(t, dtb_name, ctx.artefact(dxm1.ROLE_DTB))
 
         def flash():
             tt = ctx.linux
+            st["gpio"] = (chip, mux, rst)
             if erase:
                 ev["dxm1_nand_erase"] = dxm1.erase_nand(tt)
             rc, log = dxm1.run_dxflash(tt, chip, mux, rst)
@@ -1365,9 +1378,11 @@ class Dxm1NpuFlash(Step):
             return dxm1.classify(rc, log)
 
         try:
-            ctx.mutate(f"push {', '.join(roles)} to /tmp, md5-checked on the target", push)
+            ctx.mutate("push the dxuart2 DTB to /tmp, md5-checked on the target", push_dtb)
             ctx.mutate(f"back up /boot/{dtb_name} as .release, install the dxuart2 DTB (UART on, PCIe off)", install)
             ctx.mutate("warm reboot onto the dxuart2 DTB", lambda: warm_reboot_to_linux(ctx))
+            ctx.mutate(f"push {', '.join(payload)} to /tmp AFTER the reboot (tmpfs), md5-checked on the target",
+                       push_payload)
             ctx.mutate(f"{'sf_erase 0 1000000 via dxcli.py (NAND holds boot2nd); ' if erase else ''}"
                        f"P75 + PA6 high, dxflash.py in the background, PA6 low {dxm1.RESET_HOLD_S:g} s after "
                        f"{dxm1.RESET_AFTER_S:g} s, wait for 'update_firmware end. 0' + CRC, keep its real exit code",

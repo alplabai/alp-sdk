@@ -64,6 +64,10 @@ class DxBoard(Board):
         self.gpio: list[str] = []
         self.events: list[str] = []
 
+    def put(self, local, remote):
+        self.events.append(f"put {remote}")
+        super().put(local, remote)
+
     def _answer(self, cmd):
         if cmd.startswith("cat /sys/bus/pci/devices/0000:01:00.0/device"):
             return (0, self.pcie + "\n") if self.pcie else (1, "")
@@ -81,6 +85,9 @@ class DxBoard(Board):
             return 0, ""
         if m := re.match(r"echo (high|low) > (\S+)/direction( && sleep ([\d.]+) && echo high > \S+/direction)?$", cmd):
             self.gpio.append(f"{m[2]}={m[1]}" + (f" {m[4]}s high" if m[3] else ""))
+            return 0, ""
+        if m := re.match(r"echo (\d+) > /sys/class/gpio/unexport$", cmd):
+            self.gpio.append(f"unexport {m[1]}")
             return 0, ""
         if cmd.startswith("rm -f /tmp/dxflash.log"):
             rc, log, self.lands = self.outcome
@@ -105,6 +112,8 @@ def fake_boot(monkeypatch):
     def warm(ctx):
         b = holder["board"]
         b.events.append("warm reboot")
+        for k in [k for k in b.files if k.startswith("/tmp/")]:
+            del b.files[k]                      # /tmp is tmpfs on this image
         b.pcie = None                           # dxuart2 DTB: pcie@13400000 disabled
 
     def cold(ctx):
@@ -116,6 +125,7 @@ def fake_boot(monkeypatch):
     monkeypatch.setattr(steps, "warm_reboot_to_linux", warm)
     monkeypatch.setattr(steps, "poweroff_and_cold_boot", cold)
     monkeypatch.setattr(lt, "_sysfs_gpio_dir", lambda t, label, line: f"/gpio{line}")
+    monkeypatch.setattr(lt, "_pinctrl_chip_base", lambda t, label: 416)
     return holder
 
 
@@ -174,7 +184,7 @@ def test_plan_lists_every_stage_and_touches_nothing(tmp_path, fake_boot):
     r = _run(ctx)
     assert r.status == "planned", r.detail
     log = "\n".join(ctx.plan_log)
-    for want in ("push dxm1_fw, dxm1_fw_uart_boot, dxm1_dxflash, dxm1_dtb", f"back up {LIVE} as .release",
+    for want in ("push the dxuart2 DTB to /tmp", "push dxm1_fw, dxm1_fw_uart_boot, dxm1_dxflash to /tmp AFTER the reboot", f"back up {LIVE} as .release",
                  "warm reboot onto the dxuart2 DTB", "P75 + PA6 high, dxflash.py in the background",
                  "PA6 low 0.5 s after 2 s", f"restore {LIVE} from .release", "clean poweroff, cold cycle",
                  "verify PCIe 0000:01:00.0 device 0x0000"):
@@ -203,7 +213,9 @@ def test_success_path(tmp_path, fake_boot):
     assert r.evidence["dxm1_fw_md5"] == _md5(FW) and r.evidence["dxm1_fw_uart_boot_md5"] == _md5(UART_BOOT)
     assert r.evidence["dxm1_pcie_device"] == "0x0000"
     # order: reboot onto dxuart2, flash, restore, power-off + cold cycle
-    assert board.events == ["warm reboot", "dxflash started", "poweroff + cold cycle"]
+    assert board.events == ["put /tmp/dxuart2.dtb", "warm reboot", "put /tmp/dx_fw.bin",
+                            "put /tmp/dx_uart_boot.bin", "put /tmp/dxflash.py", "dxflash started",
+                            "poweroff + cold cycle"]
     # P75 + PA6 high, then PA6 pulsed low 0.5 s and back high after the 2 s wait
     assert board.gpio == ["/gpio61=high", "/gpio86=high", "/gpio86=low 0.5s high"]
     assert "sleep 2" in board.commands and board.commands.index("sleep 2") < board.commands.index(
@@ -216,11 +228,23 @@ def test_success_path(tmp_path, fake_boot):
     assert OK_LOG in ctx.step_logs["dxm1_npu_flash"]
 
 
+def test_no_flash_payload_is_pushed_before_the_reboot_and_all_of_it_after(tmp_path, fake_boot):
+    ctx, board = _setup(tmp_path, fake_boot, DxBoard(pcie="0x0000", fw="2.3.0", erase_out="x"), cli=True)
+    assert _run(ctx).status == "done"
+    reboot = board.events.index("warm reboot")
+    before = [e for e in board.events[:reboot] if e.startswith("put")]
+    after = {e for e in board.events[reboot:] if e.startswith("put")}
+    assert before == ["put /tmp/dxuart2.dtb"]        # the DTB is copied into /boot before the reboot
+    assert after == {"put /tmp/dx_fw.bin", "put /tmp/dx_uart_boot.bin", "put /tmp/dxflash.py", "put /tmp/dxcli.py"}
+
+
 def test_reflash_of_a_running_unit_erases_the_nand_first(tmp_path, fake_boot):
     ctx, board = _setup(tmp_path, fake_boot, DxBoard(pcie="0x0000", fw="2.3.0", erase_out="erased\n"), cli=True)
     r = _run(ctx)
     assert r.status == "done", r.detail
-    assert board.events == ["warm reboot", "sf_erase", "dxflash started", "poweroff + cold cycle"]
+    assert board.events == ["put /tmp/dxuart2.dtb", "warm reboot", "put /tmp/dx_fw.bin",
+                            "put /tmp/dx_uart_boot.bin", "put /tmp/dxflash.py", "put /tmp/dxcli.py",
+                            "sf_erase", "dxflash started", "poweroff + cold cycle"]    # dxcli pushed before its use
     assert r.evidence["dxm1_nand_erase"] == "NAND erased (sf_erase 0 1000000)"
 
 
@@ -233,6 +257,7 @@ def test_wrong_strap_fails_with_the_rework_message_and_restores_the_dtb(tmp_path
         assert want in r.detail, want
     assert board.files[LIVE] == RELEASE_DTB and BAK not in board.files
     assert "poweroff + cold cycle" not in board.events
+    assert board.gpio[-2:] == ["unexport 477", "unexport 502"] and "P75/PA6 unexported" in r.detail
 
 
 def test_dxflash_failure_reports_the_real_exit_code_and_restores_the_dtb(tmp_path, fake_boot):
@@ -243,7 +268,8 @@ def test_dxflash_failure_reports_the_real_exit_code_and_restores_the_dtb(tmp_pat
     assert r.status == "failed"
     assert "exit code 3" in r.detail and "timeout waiting for ACK" in r.detail and "straps" not in r.detail
     assert board.files[LIVE] == RELEASE_DTB and BAK not in board.files
-    assert board.events == ["warm reboot", "dxflash started"]
+    assert board.events == ["put /tmp/dxuart2.dtb", "warm reboot", "put /tmp/dx_fw.bin",
+                            "put /tmp/dx_uart_boot.bin", "put /tmp/dxflash.py", "dxflash started"]
 
 
 def test_a_zero_exit_without_the_end_marker_is_still_a_failure(tmp_path, fake_boot):
