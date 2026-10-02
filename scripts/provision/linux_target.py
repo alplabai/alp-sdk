@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from provision import bmap
+from provision import bmap, payload_store
 from provision.bench import BenchError, ExpectTimeout
 from provision.gates import CM33_REGION_OFFSET
 
@@ -294,7 +294,7 @@ def mtd_erasesize(t: LinuxTarget, mtd: int) -> int:
     return int(t.run(f"cat /sys/class/mtd/mtd{mtd}/erasesize").stdout.strip())
 
 
-def mtd_write_verify(t: LinuxTarget, mtd: int, local: Path, limit: int | None = None) -> str:
+def mtd_write_verify(t: LinuxTarget, mtd: int, local: Path, limit: int | None = None, store=None) -> str:
     """Erase ceil(size/erasesize) blocks from 0, write, read back, md5-compare."""
     data_len = local.stat().st_size
     if data_len == 0:
@@ -308,7 +308,7 @@ def mtd_write_verify(t: LinuxTarget, mtd: int, local: Path, limit: int | None = 
         raise ValueError(f"{local.name} ({data_len} bytes) does not fit mtd{mtd} ({part:#x})")
     want = _host_md5(local)
     remote = f"/tmp/{local.name}"
-    t.put(local, remote)
+    payload_store.stage(t, store, local, remote)
     try:
         if t.md5(remote) != want:
             raise BenchError(f"{remote}: copy on the target does not match {local.name}")
@@ -325,7 +325,7 @@ def mtd_write_verify(t: LinuxTarget, mtd: int, local: Path, limit: int | None = 
 
 # --- eMMC boot area + EXT_CSD ------------------------------------------------------
 
-def emmc_boot1_write_verify(t: LinuxTarget, emmc: str, local: Path, sector: int) -> str:
+def emmc_boot1_write_verify(t: LinuxTarget, emmc: str, local: Path, sector: int, store=None) -> str:
     """dd into <emmc>boot1 at `sector` (512 B), force_ro cleared only for the write."""
     data_len = local.stat().st_size
     want = _host_md5(local)
@@ -339,7 +339,7 @@ def emmc_boot1_write_verify(t: LinuxTarget, emmc: str, local: Path, sector: int)
         raise BenchError(f"{local.name} ({data_len} B) at sector {sector:#x} does not fit "
                          f"{dev} ({part} B)")
     remote = f"/tmp/{local.name}"
-    t.put(local, remote)
+    payload_store.stage(t, store, local, remote)
     try:
         if t.md5(remote) != want:
             raise BenchError(f"{remote}: copy on the target does not match {local.name}")
@@ -390,7 +390,7 @@ def set_boot_config(t: LinuxTarget, emmc: str) -> None:
 
 # --- rootfs ----------------------------------------------------------------------------
 
-def rootfs_write_verify(t: LinuxTarget, emmc: str, wic_gz: Path, timeout: float = 3600.0) -> str:
+def rootfs_write_verify(t: LinuxTarget, emmc: str, wic_gz: Path, timeout: float = 3600.0, store=None) -> str:
     """Stream the gzipped wic over SSH into the eMMC user area, then md5 the written span."""
     h = hashlib.md5()
     n = 0
@@ -399,7 +399,9 @@ def rootfs_write_verify(t: LinuxTarget, emmc: str, wic_gz: Path, timeout: float 
             h.update(block)
             n += len(block)
     want = h.hexdigest()
-    t.run(f"gunzip -c | dd of={emmc} bs=4M && sync", timeout=timeout, stdin_path=wic_gz)
+    local = store.fetch(wic_gz) if store is not None else None      # hash-verified on the board
+    t.run(f"gunzip -c{' ' + shlex.quote(local) if local else ''} | dd of={emmc} bs=4M && sync",
+          timeout=timeout, stdin_path=None if local else wic_gz)
     # busybox images may lack blockdev: fall back to the BLKRRPART ioctl
     t.run(f"blockdev --rereadpt {emmc} 2>/dev/null || python3 -c "
           f"\"import fcntl, os; fcntl.ioctl(os.open('{emmc}', os.O_RDONLY), 0x125f)\"")
@@ -435,19 +437,33 @@ def md5_ranges(t: LinuxTarget, dev: str, bm: bmap.Bmap) -> str:
     return out[0]
 
 
+_REREADPT = ("blockdev --rereadpt {emmc} 2>/dev/null || python3 -c "
+             "\"import fcntl, os; fcntl.ioctl(os.open('{emmc}', os.O_RDONLY), 0x125f)\"")
+
+
 def rootfs_write_verify_mapped(t: LinuxTarget, emmc: str, wic_gz: Path, bm: bmap.Bmap,
-                               timeout: float = 3600.0) -> dict[str, str]:
-    """Write only the bmap's mapped ranges (host-verified first), then md5 them back."""
+                               timeout: float = 3600.0, store=None) -> dict[str, str]:
+    """Write only the bmap's mapped ranges (host-verified first), then md5 them back.
+
+    With the wic.gz in the SD store the board decompresses the WHOLE stream and discards each
+    gap between ranges (a pipe cannot seek); otherwise the host sends only the mapped bytes."""
+    local = store.fetch(wic_gz) if store is not None else None
     with tempfile.TemporaryDirectory() as d:
         staged = Path(d) / "mapped.gz"
-        want, nbytes = bmap.stage(wic_gz, bm, staged)      # refuses on a checksum mismatch
+        want, nbytes = bmap.stage(wic_gz, bm, None if local else staged)   # refuses on a checksum mismatch
         put_ranges(t, bm)
+        bs = bm.block_size
         try:
-            t.run(f"gunzip -c | {{ while read s c <&3; do dd of={emmc} bs={bm.block_size} seek=$s "
-                  f"count=$c iflag=fullblock conv=notrunc || exit 1; done; }} 3<{RANGES_PATH} && sync",
-                  timeout=timeout, stdin_path=staged)
-            t.run(f"blockdev --rereadpt {emmc} 2>/dev/null || python3 -c "
-                  f"\"import fcntl, os; fcntl.ioctl(os.open('{emmc}', os.O_RDONLY), 0x125f)\"")
+            if local:
+                t.run(f"gunzip -c {shlex.quote(local)} | {{ pos=0; while read s c <&3; do g=$((s-pos)); "
+                      f"if [ $g -gt 0 ]; then dd of=/dev/null bs={bs} count=$g iflag=fullblock 2>/dev/null "
+                      f"|| exit 1; fi; dd of={emmc} bs={bs} seek=$s count=$c iflag=fullblock conv=notrunc "
+                      f"|| exit 1; pos=$((s+c)); done; }} 3<{RANGES_PATH} && sync", timeout=timeout)
+            else:
+                t.run(f"gunzip -c | {{ while read s c <&3; do dd of={emmc} bs={bs} seek=$s "
+                      f"count=$c iflag=fullblock conv=notrunc || exit 1; done; }} 3<{RANGES_PATH} && sync",
+                      timeout=timeout, stdin_path=staged)
+            t.run(_REREADPT.format(emmc=emmc))
             got = md5_ranges(t, emmc, bm)
         finally:
             t.run(f"rm -f {RANGES_PATH}", check=False)

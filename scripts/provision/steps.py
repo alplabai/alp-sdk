@@ -33,10 +33,11 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import TypeVar
 
-from provision import bmap, dxm1, gates, ledger_out, uboot
+from provision import bmap, dxm1, gates, ledger_out, payload_store, uboot
 from provision import linux_target as lt
 from provision.bench import Bench, BenchError, ExpectTimeout
-from provision.console_target import ConsoleSwdProbe, ConsoleTarget
+from provision.console_target import ConsoleTarget
+from provision.store_swd_probe import StoreSwdProbe
 
 T = TypeVar("T")
 SCRIPTS = Path(__file__).resolve().parents[1]
@@ -124,6 +125,9 @@ class Ctx:
     flash_writer: Path | None = None
     gd32_fw: Path | None = None
     transfer: str = "sd"                  # "sd" | "xmodem"
+    # read payloads from the provisioning SD's alp-payload partition when it holds them
+    # (prepare-sd); off by default so a bare Ctx never mounts anything
+    payload_store_on: bool = False
     station: str | None = None
     by: str = "provision_som"
     ledger_xlsx: Path | None = None
@@ -179,6 +183,18 @@ class Ctx:
         if key not in self._cache:
             self._cache[key] = self.artefact(role).read_bytes()
         return self._cache[key]
+
+    def open_payload_store(self, t) -> payload_store.PayloadStore | None:
+        """The SD payload store on target ``t`` (execute only: opening it mounts the partition)."""
+        if not (self.payload_store_on and self.execute and t is not None):
+            return None
+        sha = self.state.get("bundle_sha256") or hashlib.sha256(
+            json.dumps(self.bundle, sort_keys=True).encode()).hexdigest()
+        try:
+            root, emmc = lt.root_device(t), lt.resolve_emmc(t)
+        except BenchError as e:
+            return payload_store.PayloadStore(t, None, off=f"store off: cannot tell the boot device ({e})")
+        return payload_store.open_store(t, sha, self.bundle.get("components", []), root, emmc)
 
     # -- bench ----------------------------------------------------------------
     def need_bench(self) -> Bench:
@@ -901,12 +917,14 @@ class WriteXspi(Step):
 
     def run(self, ctx):
         t = ctx.need_linux()
+        store = ctx.open_payload_store(t)
         for mtd, role, limit in ((0, "bl2", None), (1, "fip", gates.CM33_REGION_OFFSET)):
             p = ctx.artefact(role)
             ctx.mutate(f"mtd{mtd} <- {role} {p.name} ({p.stat().st_size} bytes): "
                        "flash_erase, mtd_debug write, md5 readback",
-                       lambda m=mtd, q=p, lim=limit: lt.mtd_write_verify(t, m, q, lim))
-        return self.result(ctx, "bl2 -> mtd0, fip -> mtd1 (CM33 region untouched)")
+                       lambda m=mtd, q=p, lim=limit: lt.mtd_write_verify(t, m, q, lim, store))
+        return self.result(ctx, "bl2 -> mtd0, fip -> mtd1 (CM33 region untouched)",
+                           payload_store.evidence(store) if ctx.execute else None)
 
 
 class WriteEmmcBoot(Step):
@@ -934,13 +952,15 @@ class WriteEmmcBoot(Step):
     def run(self, ctx):
         t = ctx.need_linux()
         emmc = lt.resolve_emmc(t) if t else "/dev/<emmc>"
+        store = ctx.open_payload_store(t)
         for role, sector in (("bl2_mmc", gates.BL2_MMC_SECTOR), ("fip", gates.FIP_SECTOR)):
             p = ctx.artefact(role)
             ctx.mutate(f"{emmc}boot1 sector {sector:#x} <- {role} {p.name} (force_ro cleared for the write)",
-                       lambda q=p, s=sector: lt.emmc_boot1_write_verify(t, emmc, q, s))
+                       lambda q=p, s=sector: lt.emmc_boot1_write_verify(t, emmc, q, s, store))
         ctx.mutate(f"mmc-utils on {emmc}: EXT_CSD[177]=0x02, [179]=0x08",
                    lambda: lt.set_boot_config(t, emmc))
-        return self.result(ctx, "release bl2_mmc + fip in eMMC boot1; boot config set")
+        return self.result(ctx, "release bl2_mmc + fip in eMMC boot1; boot config set",
+                           payload_store.evidence(store) if ctx.execute else None)
 
 
 def _wic_md5(ctx: Ctx) -> tuple[str, int]:
@@ -1001,6 +1021,7 @@ class WriteRootfs(Step):
         dtb = gates.fip_fdtfile(ctx.artefact_bytes("fip"))
         bm = _bmap(ctx)
         ev: dict[str, str] = {}
+        store = ctx.open_payload_store(t)
         if bm is not None and t is not None and not lt.dd_fullblock(t):
             ctx.plan_log.append("board dd lacks iflag=fullblock: full-image write instead of bmap")
             bm = None
@@ -1008,10 +1029,10 @@ class WriteRootfs(Step):
             ctx.mutate(f"bmap: write only the mapped ranges ({bm.mapped_bytes} of {bm.image_size} bytes, "
                        f"{len(bm.ranges)} ranges) of {wic.name} (ranges host-verified first), "
                        "md5 readback of the same ranges",
-                       lambda: ev.update(lt.rootfs_write_verify_mapped(t, emmc, wic, bm)))
+                       lambda: ev.update(lt.rootfs_write_verify_mapped(t, emmc, wic, bm, store=store)))
         else:
             ctx.mutate(f"gunzip -c {wic.name} | dd of={emmc} bs=4M && sync (over SSH), md5 readback",
-                       lambda: lt.rootfs_write_verify(t, emmc, wic))
+                       lambda: lt.rootfs_write_verify(t, emmc, wic, store=store))
 
         def check():
             name = emmc.rsplit("/", 1)[-1]
@@ -1026,6 +1047,8 @@ class WriteRootfs(Step):
             raise BenchError(f"no partition passes fsck + /boot/{dtb}: {'; '.join(errs)}")
         part = ctx.mutate(f"fsck -n, mount ro,noload, /boot/{dtb} present", check)
         how = (f"{ev['rootfs_bytes_written']} of {ev['rootfs_image_bytes']} bytes (bmap)" if ev else "full image")
+        if ctx.execute:
+            ev.update(payload_store.evidence(store))
         return self.result(ctx, f"wic written ({how}); rootfs p{part} holds /boot/{dtb}" if part
                            else "would write the wic and check the rootfs", ev)
 
@@ -1212,15 +1235,19 @@ class Gd32Flash(Step):
         lt.console_login(b.console, b.linux_user)
         t = ConsoleTarget(b.console)
         ctx._check_unit_identity(t)          # the same eMMC-CID gate the SSH path gets in need_linux
-        return t, ConsoleSwdProbe(t, tools_dir, tools), True
+        store = ctx.open_payload_store(t)
+        ctx._cache["gd32_store"] = store
+        return t, StoreSwdProbe(t, tools_dir, tools, store or payload_store.PayloadStore(t, None)), True
 
     def _plan(self, ctx, ev, via_console):
         """Dry run: WOULD lines only. The probe wrapper is never invoked (it needs
         a host/IP the dry run does not have)."""
         images = self._images(ctx)
         if via_console:
-            ctx.mutate("no reachable IP: console login, push the SWD tools and the images "
-                       "(base64, md5-checked on the board)", lambda: None)
+            ctx.mutate("no reachable IP: console login, mount the SD alp-payload store and copy the SWD tools "
+                       "and images from it (sha256-checked on the board); any file missing or "
+                       "mismatching is pushed over the console instead (base64, md5-checked) and "
+                       "cached in the store", lambda: None)
         ctx.mutate(f"DP-ID gate ({GD32_DP_OK:#010x} only)", lambda: None)
         for p, addr, _key in images:
             ctx.mutate(f"loadbin {p.name} @ {addr:#010x}", lambda: None)
@@ -1275,6 +1302,8 @@ class Gd32Flash(Step):
         if line:
             ev["gd32_protocol"] = line
         ev.update(self._fw_version(ctx))
+        # the SSH path's probe wrapper scp's from the host; only the console path reads the store
+        ev.update(payload_store.evidence(ctx._cache.get("gd32_store") if via_console else None))
         if via_console:
             # The flash evidence is complete above; a failed re-check must not lose it.
             try:
@@ -1441,12 +1470,16 @@ class Dxm1NpuFlash(Step):
         ev = self._evidence(ctx, version)
         st: dict = {}
 
+        stores: list = []     # one per boot: the reboot unmounts the SD partition
+
         def push_dtb():
-            dxm1.push(t, ctx.artefact(dxm1.ROLE_DTB), dxm1.REMOTE[dxm1.ROLE_DTB])
+            stores.append(ctx.open_payload_store(t))
+            dxm1.push(t, ctx.artefact(dxm1.ROLE_DTB), dxm1.REMOTE[dxm1.ROLE_DTB], stores[-1])
 
         def push_payload():
+            stores.append(ctx.open_payload_store(ctx.linux))
             for r in payload:
-                dxm1.push(ctx.linux, ctx.artefact(r), dxm1.REMOTE[r])
+                dxm1.push(ctx.linux, ctx.artefact(r), dxm1.REMOTE[r], stores[-1])
 
         def install():
             dxm1.install_dtb(t, dtb_name, ctx.artefact(dxm1.ROLE_DTB), st)
@@ -1495,6 +1528,12 @@ class Dxm1NpuFlash(Step):
             ev["dxm1_pcie_device"] = dev
             ctx._cache["dxm1_flashed_md5"] = ev["dxm1_fw_md5"]
         ctx.mutate("verify PCIe 0000:01:00.0 device 0x0000 and the dxrt-cli -s firmware version", verify)
+        if ctx.execute:
+            used = [x for x in stores if x is not None]
+            ev["payload_source"] = ("sd-store" if used and all(x.summary() == "sd-store" for x in used)
+                                    else "pushed")
+            if notes := [n for x in used for n in x.notes]:
+                ev["payload_store_note"] = "; ".join(notes)[:400]
         return self.result(ctx, f"DX-M1 firmware {version} programmed over the ROM UART path and verified"
                            if ctx.execute else f"would program the DX-M1 firmware {version} over the ROM UART path", ev)
 

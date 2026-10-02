@@ -22,6 +22,7 @@ import time
 from pathlib import Path
 
 from provision import linux_target as lt
+from provision import payload_store
 from provision.bench import BenchError
 
 # bundle component roles (all optional; the step is skipped without them)
@@ -90,9 +91,10 @@ def gpio_config(raw: dict) -> tuple[str, int, int]:
     return chip, mux, rst
 
 
-def push(t, local: Path, remote: str) -> str:
-    """Copy one file to the target and verify its md5 there (returns it)."""
-    t.put(local, remote)
+def push(t, local: Path, remote: str, store=None) -> str:
+    """Copy one file to the target (from the SD payload store when it holds a hash-verified
+    copy, else over the wire) and verify its md5 there (returns it)."""
+    payload_store.stage(t, store, local, remote)
     want = lt._host_md5(local)
     if (got := t.md5(remote)) != want:
         raise BenchError(f"{remote}: copy on the target ({got}) does not match {local.name} ({want})")
