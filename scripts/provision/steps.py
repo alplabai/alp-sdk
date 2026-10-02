@@ -404,6 +404,12 @@ def boot_to_linux(ctx: Ctx, timeout: float = 240.0, need_ip: bool = True,
     b = ctx.need_bench()
     if resume_mark is None:
         n = len(b.console.transcript)
+        if ctx.linux is not None:
+            # best effort, as in Detect: the SD root now also holds the payload store (#2357)
+            try:
+                ctx.linux.run("sync", check=False, timeout=120.0)
+            except BenchError:
+                pass
         b.console.drain()
         b.power.cycle(b.off_s, b.console)
     else:

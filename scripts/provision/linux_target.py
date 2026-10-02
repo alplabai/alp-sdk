@@ -430,6 +430,8 @@ def put_ranges(t: LinuxTarget, bm: bmap.Bmap) -> None:
 
 def md5_ranges(t: LinuxTarget, dev: str, bm: bmap.Bmap) -> str:
     """md5 of the mapped ranges of dev, concatenated (the ranges file must be on the board)."""
+    # drop the page cache first: the readback must come from the media, not from what was written
+    t.run("sync; echo 3 > /proc/sys/vm/drop_caches", check=False)
     out = t.run(f"{{ while read s c <&3; do dd if={dev} bs={bm.block_size} skip=$s count=$c "
                 f"2>/dev/null; done; }} 3<{RANGES_PATH} | md5sum", timeout=1800.0).stdout.split()
     if not out or not re.fullmatch(r"[0-9a-f]{32}", out[0]):
@@ -610,7 +612,7 @@ def gd32_bridge_version(t: LinuxTarget, bus: int, addr: int = 0x70) -> tuple[int
     Asking the bridge beats grepping dmesg: the driver logs the protocol only if the
     GD32 answers AT PROBE, which a GD32 still held in reset (ACT88760 GPIO4 not yet
     released) never does."""
-    crc = _crc16_ccitt_false(b"")
+    crc = _crc16_ccitt_false(b"\x01")
     r = t.run(f"i2ctransfer -f -y {bus} w4@{addr:#04x} 0x00 0x01 {crc & 0xFF:#04x} {crc >> 8:#04x} r6")
     rsp = _parse_bytes(r.stdout, 6)
     if _crc16_ccitt_false(rsp[:4]) != rsp[4] | rsp[5] << 8:

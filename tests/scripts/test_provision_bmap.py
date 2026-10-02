@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zlib
 from pathlib import Path
 
 import pytest
@@ -379,3 +380,43 @@ def test_writer_reports_an_io_error(tmp_path):
         q = subprocess.run([sys.executable, str(bmap_writer.__file__), str(tmp_path / "no" / "dev"), str(BS),
                             str(tmp_path / "ranges"), "0"], stdin=f, capture_output=True, text=True)
     assert p.returncode == 0 and q.returncode == 1 and "bmap_writer:" in q.stderr
+
+
+def test_writer_skips_a_large_zero_gap_without_buffering_it(tmp_path):
+    """A zero gap inflates ~1000:1; the writer must stay bounded and still land the tail range."""
+    gap_blocks = (256 << 20) // BS                      # 256 MiB of zeros between two blocks
+    head, tail = bytes([7]) * BS, bytes([9]) * BS
+    co = zlib.compressobj(6, zlib.DEFLATED, 16 + zlib.MAX_WBITS)
+    stream = co.compress(head)
+    zero = bytes(1 << 20)
+    for _ in range(256):
+        stream += co.compress(zero)
+    stream += co.compress(tail) + co.flush()
+    size = (gap_blocks + 2) * BS
+    dev, rng, gz = tmp_path / "dev.img", tmp_path / "ranges", tmp_path / "in.gz"
+    with open(dev, "wb") as f:
+        f.truncate(size)
+    rng.write_text("0 1" + chr(10) + f"{gap_blocks + 1} 1" + chr(10), encoding="ascii")
+    gz.write_bytes(stream)
+    code = ("import resource, runpy, sys; sys.argv = sys.argv[1:]; "
+            "resource.setrlimit(resource.RLIMIT_AS, (200 << 20, 200 << 20)); "
+            "runpy.run_path(sys.argv[0], run_name='__main__')")
+    try:
+        import resource  # noqa: F401  (POSIX only: the address-space cap proves the bound)
+        argv = [sys.executable, "-c", code]
+    except ImportError:
+        argv = [sys.executable]
+    with open(gz, "rb") as f:
+        p = subprocess.run(argv + [str(bmap_writer.__file__), str(dev), str(BS), str(rng), str(size)],
+                           stdin=f, capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr
+    with open(dev, "rb") as f:
+        assert f.read(BS) == head
+        f.seek((gap_blocks + 1) * BS)
+        assert f.read(BS) == tail
+
+
+def test_writer_refuses_data_after_the_gzip_stream(tmp_path):
+    wic, bm, stream = _mapped_stream(tmp_path, RAW)
+    p, _ = _write(tmp_path, stream + b"junk", [(s, c) for s, c, _ in bm.ranges], 0, len(RAW) + BS)
+    assert p.returncode == 1 and "after the end" in p.stderr

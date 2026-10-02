@@ -20,18 +20,22 @@ CHUNK = 1 << 20
 def write_ranges(dev, bs, ranges, image_size, src):
     fd = os.open(dev, os.O_WRONLY | getattr(os, "O_BINARY", 0))
     d = zlib.decompressobj(16 + zlib.MAX_WBITS)
-    buf = b""
+    pending = b""                              # compressed input not consumed yet
 
     def read(n):
-        """Up to n decompressed bytes; fewer only when the stream is over."""
-        nonlocal buf
-        while len(buf) < n and not d.eof:
-            c = src.read(CHUNK)
-            if not c:
-                break
-            buf += d.decompress(c)
-        out, buf = buf[:n], buf[n:]
-        return out
+        """Up to n decompressed bytes; fewer only when the stream is over. Bounded: a zero
+        gap inflates ~1000:1, so never decompress more than n at once."""
+        nonlocal pending
+        out = bytearray()
+        while len(out) < n and not d.eof:
+            if not pending:
+                pending = src.read(CHUNK)
+            got = d.decompress(pending, n - len(out))
+            if not pending and not got:
+                break                          # input over and nothing left inside zlib
+            pending = d.unconsumed_tail
+            out += got
+        return bytes(out)
 
     def put(data, off):
         os.lseek(fd, off, os.SEEK_SET)
@@ -64,12 +68,18 @@ def write_ranges(dev, bs, ranges, image_size, src):
         pass
     if not d.eof:
         raise ValueError("gzip stream is truncated")
+    if d.unused_data or pending or src.read(1):
+        raise ValueError("data after the end of the gzip stream")
     os.fsync(fd)
     os.close(fd)
 
 
 def main(argv):
     dev, bs, ranges_path, image_size = argv[1], int(argv[2]), argv[3], int(argv[4])
+    if os.path.exists("/proc/mounts"):
+        with open("/proc/mounts") as f:
+            if any(ln.split()[0].startswith(dev) for ln in f if ln.strip()):
+                raise ValueError("%s (or a partition of it) is mounted" % dev)
     with open(ranges_path) as f:
         ranges = [tuple(map(int, ln.split())) for ln in f if ln.strip()]
     write_ranges(dev, bs, ranges, image_size, sys.stdin.buffer)

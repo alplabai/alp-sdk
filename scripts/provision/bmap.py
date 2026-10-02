@@ -35,6 +35,8 @@ def parse(path: Path) -> Bmap:
         root = ET.parse(path).getroot()
         bs = int(root.findtext("BlockSize", "").strip())
         size = int(root.findtext("ImageSize", "").strip())
+        if size <= 0:                  # 0 is the writer's "mapped stream" sentinel
+            raise ValueError("ImageSize must be positive")
         ctype = (root.findtext("ChecksumType") or "sha1").strip().lower()
         hashlib.new(ctype)
         ranges, last_end = [], 0
