@@ -118,7 +118,8 @@
  *   - 2x MIPI-CSI cameras (two separate, bare CSI connectors -- see
  *     docs/boards/e1m-x-evk.md's "Camera connectors" row).
  *
- *     An OPT-IN camera path now exists (ALP_CAMERA_CAM0; OV9281 bench-proven, the
+ *     An OPT-IN camera path now exists (ALP_CAMERA_CAM0; the generated OV9281 fragment is
+ *     property-identical to the bench-proven one but not itself built or booted, the
  *     rest unverified):
  *     the generated e1m-x-evk-cam0-<module_id>.dtsi (scripts/gen_camera_dt.py) /
  *     docs/v2n-camera-csi.md (#1149).

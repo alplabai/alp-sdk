@@ -5,8 +5,9 @@
  * id); the bbappend stages the generated fragment
  * e1m-x-evk-cam0-<module_id>.dtsi (scripts/gen_camera_dt.py) under the
  * sensor-neutral name e1m-x-evk-cam0-sensor.dtsi.
- * OV9281 path: bench-proven on E1M-V2M103 +
- * X-EVK (2026-10-02).  Other modules: BENCH-UNVERIFIED.
+ * The OV9281 fragment is property-identical to the one bench-proven on
+ * E1M-V2M103 + X-EVK (2026-10-02); the generated file itself has not been
+ * built by bitbake or booted.  Other modules: BENCH-UNVERIFIED.
  */
 #include "e1m-v2m101-x-evk.dts"
 #include "e1m-x-evk-cam0-sensor.dtsi"
