@@ -267,7 +267,11 @@ strap rework.
 **Probe (already satisfied):** the DX-M1 PCIe device
 `/sys/bus/pci/devices/0000:01:00.0/device` reads `0x0000` (firmware running;
 `0x0001` is the ROM's own PCIe boot) **and** `dxrt-cli -s` reports the
-bundle's firmware version.
+bundle's firmware version. **And** the `dxm1_fw_md5` last recorded for this unit (state file, else ledger
+`unit.yaml`) equals the bundle's `dxm1_fw` md5: two firmware variants can report the
+same version. No record, or a different md5, runs the step (a NAND that already
+holds firmware takes the `sf_erase` path first, the proven `dx_update.sh` step 1).
+`--force-step dxm1_npu_flash` forces a run.
 
 **Run**, serial, over the unit's network target:
 

@@ -121,9 +121,11 @@ class DxBoard(Board):
             if self.timeline and el < self.timeline["marker_at"]:
                 return 0, "SENT fw.bin 635896 B\n"
             return 0, self.files[dxm1.LOG].decode()
-        if cmd.startswith("python3 /tmp/dxcli.py"):
+        if cmd.startswith("python3 -u /tmp/dxcli.py"):
             self.events.append("sf_erase")
-            return (0, self.erase_out) if self.erase_out else (0, "NO PROMPT")
+            self.gpio.append("erase")
+            self.dxcli_cmd = cmd
+            return 0, self.erase_out or "40000000: ffffffff ffffffff ffffffff ffffffff\n"
         return super()._answer(cmd)
 
 
@@ -163,6 +165,15 @@ def _setup(tmp_path, holder, board=None, execute=True, **bundle_kw):
     return ctx, board
 
 
+def _record(ctx, md5, via="unit"):
+    """What the unit's records say the NAND holds: the ledger unit.yaml or the state file."""
+    if via == "unit":
+        ctx.unit_dir.mkdir(parents=True, exist_ok=True)
+        (ctx.unit_dir / f"{ctx.serial}.unit.yaml").write_text(f"dxm1_fw_md5: {md5}\n", encoding="utf-8")
+    else:
+        ctx.state = {"steps": {"dxm1_npu_flash": {"status": "done", "evidence": {"dxm1_fw_md5": md5}}}}
+
+
 def _run(ctx):
     return steps.run_steps(ctx, only=["dxm1_npu_flash"])[-1]
 
@@ -171,11 +182,68 @@ def _run(ctx):
 
 def test_probe_satisfied_when_pcie_is_0x0000_and_the_firmware_version_matches(tmp_path, fake_boot):
     ctx, board = _setup(tmp_path, fake_boot, DxBoard(pcie="0x0000", fw=VERSION))
+    _record(ctx, _md5(FW))
     r = _run(ctx)
     assert r.status == "skipped"
     assert r.evidence == {"dxm1_fw_version": VERSION, "dxm1_fw_md5": _md5(FW),
                           "dxm1_fw_uart_boot_md5": _md5(UART_BOOT), "dxm1_pcie_device": "0x0000"}
     assert not any(c.startswith(("cp", "rm", "put")) for c in board.commands)
+
+
+def test_probe_satisfied_from_the_state_file_record_too(tmp_path, fake_boot):
+    ctx, _ = _setup(tmp_path, fake_boot, DxBoard(pcie="0x0000", fw=VERSION))
+    _record(ctx, _md5(FW), via="state")
+    assert isinstance(steps.Dxm1NpuFlash().probe(ctx), steps.Satisfied)
+
+
+OLD_FW_MD5 = "57eee8dd20ada70050491fd315f1f178"      # fw_no_pmic_gpio.bin: same v2.4.0, hangs on inference
+
+
+@pytest.mark.parametrize("via", ["unit", "state"])
+def test_same_version_but_a_different_recorded_md5_reflashes_through_the_erase_path(tmp_path, fake_boot, via):
+    ctx, board = _setup(tmp_path, fake_boot, DxBoard(pcie="0x0000", fw=VERSION), cli=True)
+    _record(ctx, OLD_FW_MD5, via=via)
+    probe = steps.Dxm1NpuFlash().probe(ctx)
+    assert isinstance(probe, steps.Unsatisfied) and OLD_FW_MD5 in probe.reason and _md5(FW) in probe.reason
+    r = _run(ctx)
+    assert r.status == "done", r.detail
+    assert board.events[:2] == ["put /tmp/dxuart2.dtb", "warm reboot"] and "sf_erase" in board.events
+    assert r.evidence["dxm1_fw_md5"] == _md5(FW)
+
+
+def test_no_recorded_md5_runs_the_step_even_when_pcie_and_version_match(tmp_path, fake_boot):
+    ctx, board = _setup(tmp_path, fake_boot, DxBoard(pcie="0x0000", fw=VERSION), cli=True)
+    probe = steps.Dxm1NpuFlash().probe(ctx)
+    assert isinstance(probe, steps.Unsatisfied) and "no dxm1_fw_md5 recorded" in probe.reason
+    assert _run(ctx).status == "done" and "sf_erase" in board.events
+
+
+def test_force_step_runs_a_satisfied_step(tmp_path, fake_boot):
+    ctx, board = _setup(tmp_path, fake_boot, DxBoard(pcie="0x0000", fw=VERSION), cli=True)
+    _record(ctx, _md5(FW))
+    assert _run(ctx).status == "skipped"
+    r = steps.run_steps(ctx, only=["dxm1_npu_flash"], force=["dxm1_npu_flash"])[-1]
+    assert r.status == "done" and "dxflash started" in board.events
+
+
+def test_erase_follows_the_proven_dx_update_sh_sequence(tmp_path, fake_boot):
+    ctx, board = _setup(tmp_path, fake_boot, DxBoard(pcie="0x0000", fw="2.3.0"), cli=True)
+    assert _run(ctx).status == "done"
+    assert board.dxcli_cmd == ("python3 -u /tmp/dxcli.py 'sf_erase 0 1000000@240' "
+                               "'sf_read 0x40000000 0x200000 0x10@5' 'md 0x40000000 4'")
+    assert board.gpio[:3] == ["/gpio61=high", "/gpio86=high", "erase"]        # SCI1 muxed, reset released first
+
+
+def test_erase_no_prompt_fails_with_the_cold_cycle_advice_and_restores_the_dtb(tmp_path, fake_boot):
+    ctx, board = _setup(tmp_path, fake_boot, DxBoard(pcie="0x0000", fw="2.3.0", erase_out="NO PROMPT\n"), cli=True)
+    r = _run(ctx)
+    assert r.status == "failed" and "NO PROMPT" in r.detail and "cold-cycle" in r.detail
+    assert "dxflash started" not in board.events and board.files[LIVE] == RELEASE_DTB
+
+
+def test_erase_warns_when_the_rtos_slot_is_not_blank(tmp_path, fake_boot):
+    ctx, _ = _setup(tmp_path, fake_boot, DxBoard(pcie="0x0000", fw="2.3.0", erase_out="40000000: 12345678\n"), cli=True)
+    assert "WARNING: RTOS slot not blank" in _run(ctx).evidence["dxm1_nand_erase"]
 
 
 @pytest.mark.parametrize("pcie, fw, why", [
@@ -266,13 +334,13 @@ def test_no_flash_payload_is_pushed_before_the_reboot_and_all_of_it_after(tmp_pa
 
 
 def test_reflash_of_a_running_unit_erases_the_nand_first(tmp_path, fake_boot):
-    ctx, board = _setup(tmp_path, fake_boot, DxBoard(pcie="0x0000", fw="2.3.0", erase_out="erased\n"), cli=True)
+    ctx, board = _setup(tmp_path, fake_boot, DxBoard(pcie="0x0000", fw="2.3.0", erase_out="sf_erase ok\n40000000: ffffffff\n"), cli=True)
     r = _run(ctx)
     assert r.status == "done", r.detail
     assert board.events == ["put /tmp/dxuart2.dtb", "warm reboot", "put /tmp/dx_fw.bin",
                             "put /tmp/dx_uart_boot.bin", "put /tmp/dxflash.py", "put /tmp/dxcli.py",
                             "sf_erase", "dxflash started", "poweroff + cold cycle"]    # dxcli pushed before its use
-    assert r.evidence["dxm1_nand_erase"] == "NAND erased (sf_erase 0 1000000)"
+    assert r.evidence["dxm1_nand_erase"] == "NAND erased, RTOS slot blank (sf_erase 0 1000000)"
 
 
 def test_wrong_strap_fails_with_the_rework_message_and_restores_the_dtb(tmp_path, fake_boot):

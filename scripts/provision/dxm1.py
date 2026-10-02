@@ -45,7 +45,11 @@ POLL_S = 3
 PROC = "[/]tmp/dxflash.py"   # bracketed so pkill/pgrep never match their own shell
 _clock = time.monotonic     # tests drive a fake clock through these two
 _sleep = time.sleep
-SF_ERASE = "sf_erase 0 1000000"
+# the proven manual dx_update.sh step 1 (boot2nd CLI over ttySC1): erase, read back, dump;
+# "@N" is dxcli's per-command timeout in seconds
+DXCLI_COMMANDS = ("sf_erase 0 1000000@240", "sf_read 0x40000000 0x200000 0x10@5", "md 0x40000000 4")
+BLANK_RE = re.compile(r"40000000: ffffffff")
+DXCLI_TIMEOUT_S = 480.0
 
 REMOTE = {ROLE_FW: "/tmp/dx_fw.bin", ROLE_UART_BOOT: "/tmp/dx_uart_boot.bin",
           ROLE_DXFLASH: "/tmp/dxflash.py", ROLE_DTB: "/tmp/dxuart2.dtb", ROLE_DXCLI: "/tmp/dxcli.py"}
@@ -142,16 +146,24 @@ def restore_dtb(t, dtb_name: str, release_md5: str) -> None:
     t.run(f"rm -f {shlex.quote(bak)} && sync", check=False)
 
 
-def erase_nand(t) -> str:
-    """sf_erase through dxcli.py. Only for a NAND whose boot2nd is running. A blank
-    NAND yields NO PROMPT, which is fine (nothing to erase)."""
-    r = t.run(f"python3 {REMOTE[ROLE_DXCLI]} {shlex.quote(SF_ERASE)}", timeout=180.0, check=False)
-    out = (r.stdout + r.stderr).strip()
-    if "NO PROMPT" in out.upper():
-        return "NAND blank (dxcli: NO PROMPT)"
+def erase_nand(t, chip: str, mux: int, rst: int) -> str:
+    """dx_update.sh step 1: P75 + PA6 high (SCI1 to the DX-M1, reset released), then the
+    boot2nd CLI through dxcli.py: sf_erase 0 1000000, sf_read the first RTOS bytes, md.
+    Only for a NAND whose boot2nd is running, so NO PROMPT is a failure here (the DX-M1
+    needs a cold cycle), as in the script."""
+    lt.dxm1_drive_high(t, chip, mux)
+    lt.dxm1_drive_high(t, chip, rst)
+    args = " ".join(shlex.quote(c) for c in DXCLI_COMMANDS)
+    r = t.run(f"python3 -u {REMOTE[ROLE_DXCLI]} {args}", timeout=DXCLI_TIMEOUT_S, check=False)
+    out = (r.stdout + r.stderr).replace("\r", "")
+    if "NO PROMPT" in out:
+        raise BenchError("dxcli: NO PROMPT from the DX-M1 boot2nd CLI; cold-cycle the unit (PSU off, "
+                         f"MIN_OFF_S, on) and re-run: ...{out.strip()[-200:]}")
     if r.rc != 0:
-        raise BenchError(f"dxcli {SF_ERASE!r} rc={r.rc}: {out[-300:]}")
-    return "NAND erased (sf_erase 0 1000000)"
+        raise BenchError(f"dxcli sf_erase rc={r.rc}: ...{out.strip()[-300:]}")
+    if not BLANK_RE.search(out):
+        return "NAND erased, WARNING: RTOS slot not blank after sf_erase (expected '40000000: ffffffff')"
+    return "NAND erased, RTOS slot blank (sf_erase 0 1000000)"
 
 
 def markers_ok(log: str) -> bool:

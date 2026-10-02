@@ -1302,6 +1302,21 @@ class Dxm1NpuFlash(Step):
         return {"dxm1_fw_version": version, "dxm1_fw_md5": _md5(ctx.artefact_bytes(dxm1.ROLE_FW)),
                 "dxm1_fw_uart_boot_md5": _md5(ctx.artefact_bytes(dxm1.ROLE_UART_BOOT))}
 
+    @staticmethod
+    def _recorded_md5(ctx) -> str:
+        """The dxm1_fw_md5 last recorded for THIS unit (the NAND content is the unit's, not
+        the bundle's): this run's / the newest earlier state entry that finished, else the
+        ledger unit.yaml. "" when nothing was ever recorded."""
+        name = Dxm1NpuFlash.name
+        if "dxm1_flashed_md5" in ctx._cache:        # flashed and verified by this very run
+            return ctx._cache["dxm1_flashed_md5"]
+        groups = [ctx.state.get("steps", {})] + [g.get("steps", {}) for g in reversed(ctx.state.get("superseded", []))]
+        for steps_ in groups:
+            st = steps_.get(name, {})
+            if st.get("status") in ("done", "skipped") and (st.get("evidence") or {}).get("dxm1_fw_md5"):
+                return st["evidence"]["dxm1_fw_md5"]
+        return ledger_out.read_unit_yaml(ctx.unit_dir / f"{ctx.serial}.unit.yaml").get("dxm1_fw_md5", "").strip()
+
     def probe(self, ctx):
         if why := self._inapplicable(ctx):
             return Satisfied({}, why)
@@ -1315,6 +1330,13 @@ class Dxm1NpuFlash(Step):
         got = lt.dxm1_fw_version(t)
         if got is None or _norm_ver(got) != version:
             return Unsatisfied(f"DX-M1 firmware {got or 'unreadable'} != bundle {version}")
+        # two firmware variants can report the same version: only the md5 tells them apart
+        want, rec = _md5(ctx.artefact_bytes(dxm1.ROLE_FW)), self._recorded_md5(ctx)
+        if not rec:
+            return Unsatisfied("no dxm1_fw_md5 recorded for this unit: cannot tell which firmware variant "
+                               f"the NAND holds (bundle {want})")
+        if rec != want:
+            return Unsatisfied(f"the NAND holds firmware md5 {rec}, bundle has {want}")
         return Satisfied({**self._evidence(ctx, version), "dxm1_pcie_device": dev})
 
     @staticmethod
@@ -1372,7 +1394,7 @@ class Dxm1NpuFlash(Step):
             tt = ctx.linux
             st["gpio"] = (chip, mux, rst)
             if erase:
-                ev["dxm1_nand_erase"] = dxm1.erase_nand(tt)
+                ev["dxm1_nand_erase"] = dxm1.erase_nand(tt, chip, mux, rst)
             rc, log, timed_out = dxm1.run_dxflash(tt, chip, mux, rst)
             ev["dxm1_dxflash_rc"] = "killed after its success markers" if rc is None and not timed_out else str(rc)
             ctx.step_logs[self.name] = log
@@ -1406,6 +1428,7 @@ class Dxm1NpuFlash(Step):
             if got is None or _norm_ver(got) != version:
                 raise BenchError(f"dxrt-cli -s firmware {got or 'unreadable'} != bundle {version}")
             ev["dxm1_pcie_device"] = dev
+            ctx._cache["dxm1_flashed_md5"] = ev["dxm1_fw_md5"]
         ctx.mutate("verify PCIe 0000:01:00.0 device 0x0000 and the dxrt-cli -s firmware version", verify)
         return self.result(ctx, f"DX-M1 firmware {version} programmed over the ROM UART path and verified"
                            if ctx.execute else f"would program the DX-M1 firmware {version} over the ROM UART path", ev)
