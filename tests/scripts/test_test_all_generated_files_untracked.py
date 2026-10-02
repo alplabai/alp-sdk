@@ -96,6 +96,11 @@ def fake_git_repo(tmp_path):
     (tmp_path / "metadata" / "error-catalog.json").write_text("{}\n", encoding="utf-8")
     (tmp_path / "metadata" / "socs" / "renesas" / "rzv2n").mkdir(parents=True)
     (tmp_path / "metadata" / "socs" / "renesas" / "rzv2n" / "n44.json").write_text("{}\n", encoding="utf-8")
+    # #2633: the camera generator's outputs are in the same pathspec.
+    (tmp_path / "meta-alp-sdk" / "recipes-kernel" / "linux" / "linux-renesas").mkdir(parents=True)
+    (tmp_path / "meta-alp-sdk" / "recipes-kernel" / "linux" / "linux-renesas" / "camera-sensors.cfg").write_text(
+        "x\n", encoding="utf-8")
+    (tmp_path / "docs" / "v2n-camera-csi.md").write_text("x\n", encoding="utf-8")
     (tmp_path / "examples" / "aen").mkdir(parents=True)
     (tmp_path / "examples" / "aen" / "existing.c").write_text("/* stub */\n", encoding="utf-8")
     subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
