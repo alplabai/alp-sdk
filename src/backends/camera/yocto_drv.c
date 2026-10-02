@@ -37,14 +37,25 @@
  *
  * @par Frame rate
  *      fps 0 keeps the driver default.  Otherwise V4L2_CID_VBLANK on the
- *      sensor is set from V4L2_CID_PIXEL_RATE and the current HBLANK;
- *      a rate the VBLANK range cannot reach is ALP_ERR_INVAL.
- *      alp_camera_get_fps() reports the resulting timing x1000.
+ *      sensor is set from V4L2_CID_PIXEL_RATE and the current HBLANK,
+ *      clamped to the control's [minimum, maximum] and rounded to its
+ *      step.  The request is a request (camera.h): a rate the sensor
+ *      cannot reach is logged and settles on the nearest one, never an
+ *      open failure.  alp_camera_get_fps() reports the settled rate x1000.
+ *
+ * @par Frame integrity
+ *      A dequeued buffer flagged V4L2_BUF_FLAG_ERROR, or one whose
+ *      bytesused is short of the negotiated frame, is requeued and
+ *      reported as ALP_ERR_IO; it is never handed to the caller.
  *
  * @par Status
  *      Compiled and unit-tested against an ioctl hook; on-target capture
  *      is BENCH-UNVERIFIED in this file's own CI.  configure_isp() is
- *      ALP_ERR_NOSUPPORT.
+ *      ALP_ERR_NOSUPPORT.  The Bayer8 -> V4L2_PIX_FMT_S*8 mapping (k_raw8)
+ *      is UNVERIFIED against the RZ CRU format table (RAW8 Bayer may be a
+ *      CRU-specific fourcc, as RAW10 is); a mismatch surfaces as a loud
+ *      ALP_ERR_INVAL from the S_FMT readback, never as silent corruption.
+ *      CR10 + Y10 (OV9281) is the bench-proven path.
  */
 
 #if defined(__linux__)
@@ -96,7 +107,7 @@ typedef struct {
 	int      fd;
 } cam_hop_t;
 
-typedef struct {
+typedef struct cam {
 	cam_hop_t hop[CAM_MAX_CHAIN]; /* [0] = sensor, [n-1] = video node */
 	unsigned  nhop;
 
@@ -114,7 +125,7 @@ typedef struct {
 	void    *map[CAM_NBUF];
 	size_t   map_len[CAM_NBUF];
 	uint8_t *out[CAM_NBUF];
-	bool     held[CAM_NBUF];
+	bool     held[CAM_NBUF]; /* app owns out[i] (unpack) / map[i] (direct) */
 	bool     streaming;
 	bool     got_frame;
 } cam_t;
@@ -129,6 +140,7 @@ static int (*g_cam_ioctl)(int fd, unsigned long req, void *arg);
 static int (*g_cam_poll)(struct pollfd *p, int timeout_ms);
 static void *(*g_cam_mmap)(int fd, size_t len, off_t off);
 static void (*g_cam_munmap)(void *p, size_t len);
+static alp_status_t (*g_cam_discover)(uint32_t camera_id, struct cam *c);
 
 static int cam_ioctl(int fd, unsigned long req, void *arg)
 {
@@ -188,18 +200,21 @@ static void cam_cr10_unpack(const uint8_t *src,
 {
 	for (uint32_t y = 0; y < h; ++y) {
 		const uint8_t *row = src + (size_t)y * stride;
-		for (uint32_t x = 0; x < w; ++x) {
+		for (uint32_t x = 0; x < w;) {
 			const uint8_t *wp   = row + (size_t)(x / 6u) * 8u;
 			uint64_t       word = 0;
 			for (unsigned b = 0; b < 8u; ++b) {
 				word |= (uint64_t)wp[b] << (8u * b);
 			}
-			uint32_t v = (uint32_t)((word >> ((x % 6u) * 10u)) & 0x3FFu) >> shift;
-			if (out_bytes == 1u) {
-				*dst++ = (uint8_t)v;
-			} else {
-				*dst++ = (uint8_t)(v & 0xFFu);
-				*dst++ = (uint8_t)(v >> 8);
+			/* one 64-bit word carries up to six pixels */
+			for (unsigned k = 0; k < 6u && x < w; ++k, ++x) {
+				uint32_t v = (uint32_t)((word >> (k * 10u)) & 0x3FFu) >> shift;
+				if (out_bytes == 1u) {
+					*dst++ = (uint8_t)v;
+				} else {
+					*dst++ = (uint8_t)(v & 0xFFu);
+					*dst++ = (uint8_t)(v >> 8);
+				}
 			}
 		}
 	}
@@ -326,12 +341,25 @@ static alp_status_t cam_set_fps(const cam_t *c, uint8_t fps)
 	struct v4l2_query_ext_ctrl q;
 	memset(&q, 0, sizeof(q));
 	q.id = V4L2_CID_VBLANK;
-	if (cam_ioctl(fd, VIDIOC_QUERY_EXT_CTRL, &q) < 0) return ALP_OK;
+	if (cam_ioctl(fd, VIDIOC_QUERY_EXT_CTRL, &q) < 0) {
+		fprintf(stderr, "alp_camera: sensor has no VBLANK range, fps request ignored
+");
+		return ALP_OK;
+	}
 
 	int64_t line = (int64_t)c->width + hb;
 	if (line <= 0) return ALP_ERR_IO;
-	int64_t vblank = pr / ((int64_t)fps * line) - (int64_t)c->height;
-	if (vblank < q.minimum || vblank > q.maximum) return ALP_ERR_INVAL;
+	int64_t want   = pr / ((int64_t)fps * line) - (int64_t)c->height;
+	int64_t vblank = want;
+	if (vblank > q.maximum) vblank = q.maximum;
+	if (vblank < q.minimum) vblank = q.minimum;
+	if (q.step > 1u) vblank = q.minimum + (vblank - q.minimum) / (int64_t)q.step * (int64_t)q.step;
+	if (vblank != want) {
+		fprintf(stderr,
+		        "alp_camera: %u fps is outside the sensor's range; using the nearest rate
+		        ",
+		        (unsigned)fps);
+	}
 	if (!cam_set_ctrl(fd, V4L2_CID_VBLANK, (int32_t)vblank)) return ALP_ERR_IO;
 	return ALP_OK;
 }
@@ -735,7 +763,7 @@ y_open(const alp_camera_config_t *cfg, alp_camera_backend_state_t *st, alp_capab
 	if (c == NULL) return ALP_ERR_NOMEM;
 	st->be_data = c;
 
-	alp_status_t rc = cam_discover(cfg->camera_id, c);
+	alp_status_t rc = (g_cam_discover != NULL ? g_cam_discover : cam_discover)(cfg->camera_id, c);
 	if (rc == ALP_OK) rc = cam_configure(c, cfg);
 	if (rc == ALP_OK) rc = cam_alloc_buffers(c);
 	if (rc != ALP_OK) {
@@ -751,14 +779,21 @@ static alp_status_t y_start(alp_camera_backend_state_t *st)
 	cam_t *c = st->be_data;
 	if (c == NULL) return ALP_ERR_NOT_READY;
 	if (c->streaming) return ALP_OK;
-	for (unsigned i = 0; i < c->nbuf; ++i) {
-		if (c->held[i]) continue; /* the app still owns it until release() */
-		alp_status_t rc = cam_qbuf(c, i);
-		if (rc != ALP_OK) return rc;
+	int          fd   = c->hop[c->nhop - 1u].fd;
+	int          type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	alp_status_t rc   = ALP_OK;
+	for (unsigned i = 0; i < c->nbuf && rc == ALP_OK; ++i) {
+		/* Unpacked frames live in out[]; the V4L2 buffer is always ours. */
+		if (!c->unpack && c->held[i]) continue; /* app still owns it until release() */
+		rc = cam_qbuf(c, i);
 	}
-	int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-	if (cam_ioctl(c->hop[c->nhop - 1u].fd, VIDIOC_STREAMON, &type) < 0) {
-		return alp_status_from_posix_errno(errno);
+	if (rc == ALP_OK && cam_ioctl(fd, VIDIOC_STREAMON, &type) < 0) {
+		rc = alp_status_from_posix_errno(errno);
+	}
+	if (rc != ALP_OK) {
+		/* Drop whatever was queued so a retry starts from an empty queue. */
+		(void)cam_ioctl(fd, VIDIOC_STREAMOFF, &type);
+		return rc;
 	}
 	c->streaming = true;
 	c->got_frame = false;
@@ -783,6 +818,15 @@ y_capture(alp_camera_backend_state_t *st, alp_camera_frame_t *out, uint32_t time
 	if (c == NULL || !c->streaming) return ALP_ERR_NOT_READY;
 	int fd = c->hop[c->nhop - 1u].fd;
 
+	/* Unpacked frames are decoded into an app-owned out[] slot, independent
+	 * of the V4L2 buffer index, so a held frame is never overwritten. */
+	unsigned slot = 0;
+	if (c->unpack) {
+		while (slot < c->nbuf && c->held[slot])
+			++slot;
+		if (slot == c->nbuf) return ALP_ERR_BUSY; /* release() a frame first */
+	}
+
 	struct pollfd p  = { .fd = fd, .events = POLLIN };
 	int           to = timeout_ms > (uint32_t)INT_MAX ? -1 : (int)timeout_ms;
 	int           pr = cam_poll(&p, to);
@@ -806,22 +850,31 @@ y_capture(alp_camera_backend_state_t *st, alp_camera_frame_t *out, uint32_t time
 		return errno == EAGAIN ? ALP_ERR_TIMEOUT : ALP_ERR_IO;
 	}
 	if (b.index >= c->nbuf) return ALP_ERR_IO;
-	c->got_frame     = true;
-	c->held[b.index] = true;
+	c->got_frame = true;
+
+	/* A frame the CRU flagged corrupt, or one shorter than negotiated
+	 * (bytesused 0 = driver does not report), is never handed out. */
+	size_t need = (size_t)c->stride * c->height;
+	if ((b.flags & V4L2_BUF_FLAG_ERROR) != 0u || (b.bytesused != 0u && b.bytesused < need)) {
+		fprintf(stderr, "alp_camera: dropped a corrupt or short frame
+");
+		(void)cam_qbuf(c, b.index);
+		return ALP_ERR_IO;
+	}
 
 	if (c->unpack) {
-		cam_cr10_unpack(c->map[b.index],
-		                c->stride,
-		                c->width,
-		                c->height,
-		                c->out[b.index],
-		                c->out_bytes,
-		                c->shift);
-		out->data = c->out[b.index];
-		out->size = (size_t)c->width * c->height * c->out_bytes;
+		cam_cr10_unpack(
+		    c->map[b.index], c->stride, c->width, c->height, c->out[slot], c->out_bytes, c->shift);
+		/* The V4L2 buffer is free again as soon as it is unpacked. */
+		alp_status_t qrc = cam_qbuf(c, b.index);
+		if (qrc != ALP_OK) return qrc;
+		c->held[slot] = true;
+		out->data     = c->out[slot];
+		out->size     = (size_t)c->width * c->height * c->out_bytes;
 	} else {
-		out->data = c->map[b.index];
-		out->size = b.bytesused != 0u ? b.bytesused : c->map_len[b.index];
+		c->held[b.index] = true;
+		out->data        = c->map[b.index];
+		out->size        = b.bytesused != 0u ? b.bytesused : c->map_len[b.index];
 	}
 	out->timestamp_us = (uint64_t)b.timestamp.tv_sec * 1000000u + (uint64_t)b.timestamp.tv_usec;
 	return ALP_OK;
@@ -835,8 +888,9 @@ static alp_status_t y_release(alp_camera_backend_state_t *st, alp_camera_frame_t
 		void *mine = c->unpack ? (void *)c->out[i] : c->map[i];
 		if (frame->data != mine || !c->held[i]) continue;
 		c->held[i] = false;
-		/* After stop() every buffer is already dequeued; start() re-queues. */
-		return c->streaming ? cam_qbuf(c, i) : ALP_OK;
+		/* Unpacked: the V4L2 buffer was requeued at capture.  Direct: it is
+		 * still dequeued; after stop() start() re-queues it. */
+		return (!c->unpack && c->streaming) ? cam_qbuf(c, i) : ALP_OK;
 	}
 	return ALP_ERR_INVAL;
 }

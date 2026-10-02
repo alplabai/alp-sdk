@@ -17,6 +17,7 @@
  *   ctest --test-dir build -R alp_test_peripheral_camera
  */
 
+#include <fcntl.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -44,6 +45,15 @@ static int      g_poll_ret;
 static uint32_t g_dq_index;
 static void    *g_maps[CAM_NBUF];
 static unsigned g_nmap;
+static int      g_munmap_calls;
+static bool     g_sfmt_adjust;     /* subdev "adjusts" the requested size */
+static bool     g_query_fail;      /* VBLANK query fails */
+static int64_t  g_vb_step;         /* VBLANK step */
+static uint32_t g_dq_flags;        /* flags on the dequeued buffer */
+static uint32_t g_dq_bytesused;    /* bytesused on the dequeued buffer (0 = unreported) */
+static int      g_qbuf_fail_after; /* QBUF fails once this many succeeded (-1 = never) */
+static bool     g_streamon_fail;
+static int      g_hop_fd[3];
 
 static int fake_ioctl(int fd, unsigned long req, void *arg)
 {
@@ -76,7 +86,8 @@ static int fake_ioctl(int fd, unsigned long req, void *arg)
 			g_sfmt_pad[g_sfmt_calls] = f->pad;
 		}
 		++g_sfmt_calls;
-		return 0; /* accept as requested */
+		if (g_sfmt_adjust) f->format.width -= 2u; /* silently adjusted */
+		return 0;
 	}
 	case VIDIOC_S_FMT: {
 		struct v4l2_format *f   = arg;
@@ -106,8 +117,13 @@ static int fake_ioctl(int fd, unsigned long req, void *arg)
 	}
 	case VIDIOC_QUERY_EXT_CTRL: {
 		struct v4l2_query_ext_ctrl *q = arg;
-		q->minimum                    = 10;
-		q->maximum                    = 5000;
+		if (g_query_fail) {
+			errno = EINVAL;
+			return -1;
+		}
+		q->minimum = 10;
+		q->maximum = 5000;
+		q->step    = (uint64_t)g_vb_step;
 		return 0;
 	}
 	case VIDIOC_REQBUFS: {
@@ -122,6 +138,10 @@ static int fake_ioctl(int fd, unsigned long req, void *arg)
 		return 0;
 	}
 	case VIDIOC_QBUF:
+		if (g_qbuf_fail_after >= 0 && g_qbuf >= g_qbuf_fail_after) {
+			errno = EINVAL;
+			return -1;
+		}
 		++g_qbuf;
 		return 0;
 	case VIDIOC_DQBUF: {
@@ -129,9 +149,15 @@ static int fake_ioctl(int fd, unsigned long req, void *arg)
 		b->index              = g_dq_index;
 		b->timestamp.tv_sec   = 5;
 		b->timestamp.tv_usec  = 250000;
+		b->flags              = g_dq_flags;
+		b->bytesused          = g_dq_bytesused;
 		return 0;
 	}
 	case VIDIOC_STREAMON:
+		if (g_streamon_fail) {
+			errno = EIO;
+			return -1;
+		}
 		++g_streamon;
 		return 0;
 	case VIDIOC_STREAMOFF:
@@ -161,6 +187,7 @@ static void *fake_mmap(int fd, size_t len, off_t off)
 static void fake_munmap(void *p, size_t len)
 {
 	(void)len;
+	++g_munmap_calls;
 	free(p);
 }
 
@@ -174,6 +201,15 @@ static void reset(void)
 	g_hblank                          = 400;
 	g_vblank                          = 100;
 	g_nmap                            = 0;
+	g_munmap_calls                    = 0;
+	g_sfmt_adjust                     = false;
+	g_query_fail                      = false;
+	g_vb_step                         = 1;
+	g_dq_flags                        = 0;
+	g_dq_bytesused                    = 0;
+	g_qbuf_fail_after                 = -1;
+	g_streamon_fail                   = false;
+	g_cam_discover                    = NULL;
 	g_cam_ioctl                       = fake_ioctl;
 	g_cam_poll                        = fake_poll;
 	g_cam_mmap                        = fake_mmap;
@@ -191,6 +227,18 @@ static void make_chain(cam_t *c)
 	c->hop[1].src_pad  = 1;
 	c->hop[2].fd       = FD_VIDEO;
 	c->hop[2].function = MEDIA_ENT_F_IO_V4L;
+}
+
+/* Discovery seam: a three-hop chain on real (closable) /dev/null fds. */
+static alp_status_t fake_discover(uint32_t camera_id, cam_t *c)
+{
+	(void)camera_id;
+	make_chain(c);
+	for (unsigned i = 0; i < 3u; ++i) {
+		g_hop_fd[i]  = open("/dev/null", O_RDWR | O_CLOEXEC);
+		c->hop[i].fd = g_hop_fd[i];
+	}
+	return ALP_OK;
 }
 
 static alp_camera_config_t cfg_of(alp_pixfmt_t f, uint16_t w, uint16_t h, uint8_t fps)
@@ -291,10 +339,48 @@ static void test_fps(void)
 	uint32_t fps = cam_read_fps_x1000(&c);
 	ALP_ASSERT_TRUE(fps > 29900u && fps < 30300u);
 
-	/* 1 MHz pixel clock cannot reach 255 fps: vblank below min -> INVAL. */
+	/* VBLANK step 8: rounded down onto min + n*step (10 + 8n). */
+	g_vb_step = 8;
+	ALP_ASSERT_EQ_INT(cam_configure(&c, &cfg), ALP_OK);
+	ALP_ASSERT_EQ_INT(g_vblank, 802);
+	g_vb_step = 1;
+
+	/* 1 MHz pixel clock cannot reach 255 fps: vblank clamps up to the
+	 * minimum (10) and open still succeeds at the nearest rate. */
 	cfg          = cfg_of(ALP_PIXFMT_GREY8, 12, 4, 255);
 	g_pixel_rate = 1000000;
+	ALP_ASSERT_EQ_INT(cam_configure(&c, &cfg), ALP_OK);
+	ALP_ASSERT_EQ_INT(g_vblank, 10);
+	fps = cam_read_fps_x1000(&c); /* 1e6 / (412 * 14) */
+	ALP_ASSERT_TRUE(fps > 173000u && fps < 173600u);
+
+	/* 1 fps is below what the sensor can slow to: clamps to the maximum. */
+	cfg          = cfg_of(ALP_PIXFMT_GREY8, 12, 4, 1);
+	g_pixel_rate = 100000000;
+	ALP_ASSERT_EQ_INT(cam_configure(&c, &cfg), ALP_OK);
+	ALP_ASSERT_EQ_INT(g_vblank, 5000);
+
+	/* No VBLANK range: request ignored (logged), open still OK. */
+	g_query_fail = true;
+	g_vblank     = 100;
+	cfg          = cfg_of(ALP_PIXFMT_GREY8, 12, 4, 30);
+	ALP_ASSERT_EQ_INT(cam_configure(&c, &cfg), ALP_OK);
+	ALP_ASSERT_EQ_INT(g_vblank, 100);
+}
+
+/* A subdev that silently adjusts the format did not accept it. */
+static void test_subdev_adjust_is_inval(void)
+{
+	reset();
+	g_sensor_codes[0] = MEDIA_BUS_FMT_Y10_1X10;
+	g_nsensor_codes   = 1;
+	cam_t c;
+	make_chain(&c);
+	alp_camera_config_t cfg = cfg_of(ALP_PIXFMT_GREY8, 12, 4, 0);
+	g_sfmt_adjust           = true;
 	ALP_ASSERT_EQ_INT(cam_configure(&c, &cfg), ALP_ERR_INVAL);
+	g_sfmt_adjust = false;
+	ALP_ASSERT_EQ_INT(cam_configure(&c, &cfg), ALP_OK);
 }
 
 /* Pack @p v (10-bit) pixel x of a row into the 6-per-64-bit-word layout. */
@@ -374,9 +460,10 @@ static void test_capture_release_and_timeout(void)
 	ALP_ASSERT_EQ_INT(((uint8_t *)fr.data)[12 + 7], 255);
 	ALP_ASSERT_EQ_INT(fr.timestamp_us, 5250000);
 
+	/* the unpacked frame's V4L2 buffer was requeued at capture time */
 	int q = g_qbuf;
 	ALP_ASSERT_EQ_INT(y_release(&st, &fr), ALP_OK);
-	ALP_ASSERT_EQ_INT(g_qbuf, q + 1);
+	ALP_ASSERT_EQ_INT(g_qbuf, q);
 	ALP_ASSERT_EQ_INT(y_release(&st, &fr), ALP_ERR_INVAL); /* double release */
 
 	ALP_ASSERT_EQ_INT(y_stop(&st), ALP_OK);
@@ -384,6 +471,134 @@ static void test_capture_release_and_timeout(void)
 	ALP_ASSERT_EQ_INT(g_streamoff, 1);
 
 	cam_free_buffers(&c);
+}
+
+/* Unpacked frames requeue the V4L2 buffer at capture; a held frame is
+ * never overwritten; corrupt/short frames are requeued and rejected. */
+static void test_capture_integrity(void)
+{
+	reset();
+	g_sensor_codes[0] = MEDIA_BUS_FMT_Y10_1X10;
+	g_nsensor_codes   = 1;
+	cam_t c;
+	make_chain(&c);
+	alp_camera_config_t cfg = cfg_of(ALP_PIXFMT_GREY8, 12, 4, 0);
+	ALP_ASSERT_EQ_INT(cam_configure(&c, &cfg), ALP_OK);
+	ALP_ASSERT_EQ_INT(cam_alloc_buffers(&c), ALP_OK);
+	alp_camera_backend_state_t st;
+	memset(&st, 0, sizeof(st));
+	st.be_data = &c;
+	alp_camera_frame_t fr;
+	ALP_ASSERT_EQ_INT(y_start(&st), ALP_OK);
+	g_poll_ret = 1;
+	g_dq_index = 1;
+
+	/* corrupt frame: requeued, IO, nothing held */
+	int q      = g_qbuf;
+	g_dq_flags = V4L2_BUF_FLAG_ERROR;
+	ALP_ASSERT_EQ_INT(y_capture(&st, &fr, 10), ALP_ERR_IO);
+	ALP_ASSERT_EQ_INT(g_qbuf, q + 1);
+	ALP_ASSERT_TRUE(!c.held[0] && !c.held[1]);
+
+	/* short frame (bytesused < stride*height = 384) */
+	g_dq_flags     = 0;
+	g_dq_bytesused = 100;
+	q              = g_qbuf;
+	ALP_ASSERT_EQ_INT(y_capture(&st, &fr, 10), ALP_ERR_IO);
+	ALP_ASSERT_EQ_INT(g_qbuf, q + 1);
+
+	/* good frame: V4L2 buffer requeued right away, app holds slot 0 */
+	g_dq_bytesused = 96u * 4u;
+	q              = g_qbuf;
+	ALP_ASSERT_EQ_INT(y_capture(&st, &fr, 10), ALP_OK);
+	ALP_ASSERT_EQ_INT(g_qbuf, q + 1);
+	void *first = fr.data;
+	ALP_ASSERT_TRUE(first == c.out[0]);
+
+	/* the same V4L2 index again must land in a different out[] slot */
+	ALP_ASSERT_EQ_INT(y_capture(&st, &fr, 10), ALP_OK);
+	ALP_ASSERT_TRUE(fr.data == c.out[1] && fr.data != first);
+
+	/* release returns the slot without another QBUF */
+	q = g_qbuf;
+	ALP_ASSERT_EQ_INT(y_release(&st, &fr), ALP_OK);
+	ALP_ASSERT_EQ_INT(g_qbuf, q);
+
+	/* all slots held -> BUSY */
+	c.held[1] = c.held[2] = c.held[3] = true;
+	ALP_ASSERT_EQ_INT(y_capture(&st, &fr, 10), ALP_ERR_BUSY);
+
+	c.streaming = false;
+	cam_free_buffers(&c);
+}
+
+/* A failed start() leaves the queue empty so a retry works. */
+static void test_start_failure_resets_queue(void)
+{
+	reset();
+	g_sensor_codes[0] = MEDIA_BUS_FMT_Y10_1X10;
+	g_nsensor_codes   = 1;
+	cam_t c;
+	make_chain(&c);
+	alp_camera_config_t cfg = cfg_of(ALP_PIXFMT_GREY8, 12, 4, 0);
+	ALP_ASSERT_EQ_INT(cam_configure(&c, &cfg), ALP_OK);
+	ALP_ASSERT_EQ_INT(cam_alloc_buffers(&c), ALP_OK);
+	alp_camera_backend_state_t st;
+	memset(&st, 0, sizeof(st));
+	st.be_data = &c;
+
+	g_qbuf_fail_after = 2; /* third QBUF fails */
+	ALP_ASSERT_EQ_INT(y_start(&st), ALP_ERR_IO);
+	ALP_ASSERT_TRUE(!c.streaming);
+	ALP_ASSERT_EQ_INT(g_streamoff, 1);
+
+	g_qbuf_fail_after = -1;
+	g_streamon_fail   = true;
+	ALP_ASSERT_EQ_INT(y_start(&st), ALP_ERR_IO);
+	ALP_ASSERT_EQ_INT(g_streamoff, 2);
+
+	g_streamon_fail = false;
+	ALP_ASSERT_EQ_INT(y_start(&st), ALP_OK);
+	ALP_ASSERT_TRUE(c.streaming);
+
+	c.streaming = false;
+	cam_free_buffers(&c);
+}
+
+/* y_open -> start -> y_close through the discovery seam. */
+static void test_open_close_lifecycle(void)
+{
+	reset();
+	g_sensor_codes[0] = MEDIA_BUS_FMT_Y10_1X10;
+	g_nsensor_codes   = 1;
+	g_cam_discover    = fake_discover;
+
+	alp_camera_config_t        cfg = cfg_of(ALP_PIXFMT_GREY8, 12, 4, 30);
+	alp_camera_backend_state_t st;
+	memset(&st, 0, sizeof(st));
+	g_pixel_rate = 10000000;
+	ALP_ASSERT_EQ_INT(y_open(&cfg, &st, NULL), ALP_OK);
+	ALP_ASSERT_TRUE(st.be_data != NULL);
+	ALP_ASSERT_TRUE(st.fps_x1000 > 29900u && st.fps_x1000 < 30300u);
+	ALP_ASSERT_EQ_INT(g_nmap, CAM_NBUF);
+	ALP_ASSERT_EQ_INT(y_start(&st), ALP_OK);
+
+	y_close(&st); /* stops, unmaps, closes fds, frees */
+	ALP_ASSERT_TRUE(st.be_data == NULL);
+	ALP_ASSERT_EQ_INT(g_streamoff, 1);
+	ALP_ASSERT_EQ_INT(g_munmap_calls, CAM_NBUF);
+	for (unsigned i = 0; i < 3u; ++i) {
+		ALP_ASSERT_TRUE(fcntl(g_hop_fd[i], F_GETFD) < 0); /* closed */
+	}
+
+	/* failure after discovery (no code for the format) cleans up too */
+	g_nsensor_codes = 0;
+	memset(&st, 0, sizeof(st));
+	ALP_ASSERT_EQ_INT(y_open(&cfg, &st, NULL), ALP_ERR_NOSUPPORT);
+	ALP_ASSERT_TRUE(st.be_data == NULL);
+	for (unsigned i = 0; i < 3u; ++i) {
+		ALP_ASSERT_TRUE(fcntl(g_hop_fd[i], F_GETFD) < 0);
+	}
 }
 
 /* ---- media-graph walk -------------------------------------------- */
@@ -442,8 +657,12 @@ int main(void)
 	test_negotiation_y10_grey8();
 	test_negotiation_other_pixfmts();
 	test_fps();
+	test_subdev_adjust_is_inval();
 	test_cr10_unpack();
 	test_capture_release_and_timeout();
+	test_capture_integrity();
+	test_start_failure_resets_queue();
+	test_open_close_lifecycle();
 	test_walk();
 
 	ALP_TEST_SUMMARY();

@@ -96,17 +96,20 @@ plan in `VERSIONS.md`.
 | **RTC** (`<alp/rtc.h>`)   | code complete¹                | code complete¹         | code complete¹            | code complete¹            |
 | **Watchdog** (`<alp/wdt.h>`) | code complete¹             | code complete¹         | code complete¹            | code complete¹            |
 | **Audio** (`<alp/audio.h>`) | code complete¹              | code complete¹         | code complete¹            | code complete¹            |
-| **Camera** (`<alp/camera.h>`) | planned                   | stub [^cam1]            | stub [^cam1]               | planned |
+| **Camera** (`<alp/camera.h>`) | planned                   | code complete¹ [^cam1]  | code complete¹ [^cam1]     | planned |
 | **IoT** (`<alp/iot.h>`)   | **GA**                        | **GA**                 | **GA**                    | planned |
 
-[^cam1]: The Yocto/A55 camera backend (`src/backends/camera/zephyr_stub.c`, linked
-    unconditionally at `src/yocto/CMakeLists.txt:323`, `silicon_ref = "*"`, priority
-    0) returns `ALP_ERR_NOT_IMPLEMENTED` for every op on every SoM, V2N/V2N-M1
-    included — that is a **stub** per the status key above, not GA.  The real
-    MIPI CSI-2 ISP-aware camera backend (`src/backends/camera/v2n_n44_isp.c`) is a
-    **Zephyr** backend for the V2N `m33_sm` core (`zephyr/CMakeLists.txt:812`,
-    opt-in via `CONFIG_ALP_SDK_CAMERA_V2N_N44_ISP`); it does not link on Yocto and
-    does not back this Cortex-A cell.
+[^cam1]: The Yocto/A55 camera backend (`src/backends/camera/yocto_drv.c`,
+    `silicon_ref = "*"`, priority 100) is a real V4L2 + media-controller backend:
+    it discovers the sensor -> CSI-2 -> capture-node chain from the media graph
+    and works with any sensor that has a mainline V4L2 subdev driver (GREY8 /
+    RAW8 / RAW10 only; colour formats return `ALP_ERR_NOSUPPORT`).  It is
+    unit-tested against an ioctl hook and **bench-unverified** as a backend; the
+    sensor must be named by an `alp-camera<N>` devicetree alias (see
+    `docs/v2n-camera-csi.md`).  The MIPI CSI-2 ISP-aware backend
+    (`src/backends/camera/v2n_n44_isp.c`) is a separate **Zephyr** backend for
+    the V2N `m33_sm` core (`zephyr/CMakeLists.txt:812`, opt-in via
+    `CONFIG_ALP_SDK_CAMERA_V2N_N44_ISP`); it does not link on Yocto.
 
 ### Cortex-M (Zephyr)
 

@@ -11,7 +11,7 @@ alias or sensor is `ALP_ERR_NOT_READY`. `ALP_PIXFMT_GREY8` / `RAW8` /
 `RAW10` negotiate the media-bus code the sensor offers and propagate it
 along the chain; the RZ CRU CR10 packed layout is unpacked to GREY8 or
 one uint16 per pixel. A requested fps programs `V4L2_CID_VBLANK` from
-`PIXEL_RATE` + `HBLANK` (`ALP_ERR_INVAL` if unreachable) and
+`PIXEL_RATE` + `HBLANK` (clamped to the sensor range, never an open failure) and
 `alp_camera_get_fps()` reports the result x1000. Colour formats and
 `configure_isp()` stay `ALP_ERR_NOSUPPORT`. Covered by
 `tests/yocto/peripheral_camera.c`; on-target capture is not yet
