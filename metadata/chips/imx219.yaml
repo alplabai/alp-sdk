@@ -21,10 +21,16 @@ mipi:
   role:            csi2_tx
 
 drivers:
+  zephyr:
+    compatible:    "sony,imx219"      # upstream Zephyr v4.4 drivers/video/imx219.c
   linux:
     compatible:    "sony,imx219"
     kconfig:       CONFIG_VIDEO_IMX219
-    link_freqs_hz: [456000000]   # from the unverified e1m-x-evk-cam0-imx219.dtsi
+    link_freqs:                  # 6.1 imx219.c: only 2 data lanes, only IMX219_DEFAULT_LINK_FREQ
+      - { lanes: 2, link_freqs_hz: [456000000] }
+    supplies:      [VANA, VDIG, VDDL]   # upper case as in imx219_supply_name[]
+    reset_property: reset-gpios
+    xclk_supported_hz: [24000000]
 
 signals:
   - { name: SDA,     type: bidir,  scope: "CCI/I2C data" }

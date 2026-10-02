@@ -259,7 +259,7 @@
   ],
 
   "linux_dt": {
-    "RIIC2": {"label": "i2c2", "pinmux": {"P34": 1, "P35": 1}},
+    "RIIC2": {"label": "i2c2", "pinmux": {"RIIC2_SDA2": 1, "RIIC2_SCL2": 1}},
     "CSI0":  {"label": "csi20", "capture": "cru0"}
   },
 

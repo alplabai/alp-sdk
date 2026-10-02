@@ -139,7 +139,8 @@
       "board_category": "gpio",
       "board_macro": "XEVK_PIN_CAM0_EN",
       "board_role": null,
-      "board_doc": "Camera-0 power enable.",
+      "board_doc": "CAM0 module enable, active-low via N-FET on CAM_GPIO.",
+      "active_low": true,
       "dispatch": "TBD"
     },
     {

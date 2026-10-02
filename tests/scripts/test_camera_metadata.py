@@ -3,6 +3,7 @@ carrier `camera_connectors`, the SoC `linux_dt` map, and the project
 board.yaml `cameras:` cross-checks."""
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -41,7 +42,11 @@ def test_ov9281_drivers_block():
     assert chip["drivers"]["linux"] == {
         "compatible": "ovti,ov9282",
         "kconfig": "CONFIG_VIDEO_OV9282",
-        "link_freqs_hz": [400000000],
+        "link_freqs": [{"lanes": 2, "link_freqs_hz": [400000000]}],
+        "supplies": ["avdd", "dovdd", "dvdd"],
+        "reset_property": "reset-gpios",
+        "xclk_supported_hz": [24000000],
+        "endpoint_flags": ["clock-noncontinuous"],
     }
 
 
@@ -51,6 +56,9 @@ def test_ov9281_drivers_block():
     {"mipi": {"role": "csi2_tx"}},
     {"drivers": {"linux": {"kconfig": "VIDEO_OV9282"}}},
     {"drivers": {"zephyr": {"compatible": "ov9281"}}},
+    {"drivers": {"linux": {"compatible": "ovti,ov9282",
+                           "link_freqs": [{"lanes": 2}]}}},
+    {"drivers": {"linux": {"compatible": "ovti,ov9282", "reset_property": "gpio"}}},
 ])
 def test_chip_schema_rejects_bad_mipi_and_drivers(patch):
     chip = {**_load(META / "chips" / "ov9281.yaml"), **patch}
@@ -78,10 +86,109 @@ def test_modules_valid(path):
     assert not validate_metadata._check_camera_module_semantics([path])
 
 
-def test_module_matches_shield_overlay():
-    m = _load(META / "camera_modules" / "innomaker_cam_ov9281.yaml")
-    assert (m["chip"], m["i2c_addr_7bit"], m["xclk_hz"], m["lanes"]) == (
-        "ov9281", 0x60, 24000000, 2)
+# --- Zephyr shield overlay parity -----------------------------------------
+
+SHIELDS = REPO / "zephyr" / "boards" / "shields"
+
+
+def _strip_comments(text):
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    return re.sub(r"//[^\n]*", "", text)
+
+
+def _block(text, header):
+    """Body of the first `<header> { ... };` (brace matched), or None."""
+    m = re.search(re.escape(header) + r"\s*\{", text)
+    if not m:
+        return None
+    depth, i = 1, m.end()
+    while depth and i < len(text):
+        depth += {"{": 1, "}": -1}.get(text[i], 0)
+        i += 1
+    return text[m.end():i - 1]
+
+
+def _props(body):
+    """Direct `name = <...>;` / `name = "str";` / bare `name;` properties of a
+    node body (child nodes are blanked out first)."""
+    flat, depth = [], 0
+    for ch in body:
+        if ch == "{":
+            depth += 1
+        flat.append(ch if depth == 0 else " ")
+        if ch == "}":
+            depth -= 1
+    out = {}
+    for stmt in "".join(flat).split(";"):
+        stmt = stmt.strip()
+        if not stmt or "{" in stmt:
+            continue
+        name, _, val = stmt.partition("=")
+        val = val.strip()
+        if not val:
+            out[name.strip()] = True
+        elif val.startswith('"'):
+            out[name.strip()] = val.strip('"')
+        elif val.startswith("<"):
+            out[name.strip()] = [int(x, 0) for x in
+                                 re.findall(r"0x[0-9a-fA-F]+|\d+", val)]
+    return out
+
+
+def _sensor_shields():
+    """Every shield overlay that selects a camera (`zephyr,camera`): found by
+    scanning, not from a list, so a new sensor shield is covered at once."""
+    found = {}
+    for ov in sorted(SHIELDS.glob("*/*.overlay")):
+        text = _strip_comments(ov.read_text(encoding="utf-8"))
+        if "zephyr,camera" in text:
+            found[ov.parent.name] = text
+    return found
+
+
+def _parse_overlay(text):
+    i2c = _block(text, "&csi_i2c")
+    node = re.search(r"\w+:\s*\w+@[0-9a-f]+", i2c).group(0)
+    sensor = _block(i2c, node)
+    clk = _block(text, re.search(r"\w+:\s*[\w-]+(?=\s*\{\s*compatible\s*=\s*\"fixed-clock\")",
+                                 text).group(0))
+    ep = _props(_block(sensor, "endpoint"))
+    return {
+        "compatible": _props(sensor)["compatible"],
+        "reg": _props(sensor)["reg"][0],
+        "clock": _props(clk)["clock-frequency"][0],
+        "lanes": len(ep["data-lanes"]),
+        "endpoint": ep,
+        "hosts": {"snps,designware-csi": _props(_block(text, "&csi") or ""),
+                  "vsi,isp-pico": _props(_block(text, "&isp") or "")},
+    }
+
+
+def test_sensor_shields_are_discovered():
+    assert len(_sensor_shields()) >= 4
+
+
+@pytest.mark.parametrize("shield", sorted(_sensor_shields()))
+def test_module_matches_shield_overlay(shield):
+    ov = _parse_overlay(_sensor_shields()[shield])
+    mods = [m for m in map(_load, MODULES) if m.get("zephyr_shield") == shield]
+    assert len(mods) == 1, f"shield {shield} needs exactly one camera module"
+    m = mods[0]
+    chip = _load(META / "chips" / f"{m['chip']}.yaml")
+    assert ov["compatible"] == chip["drivers"]["zephyr"]["compatible"]
+    assert ov["reg"] == m["i2c_addr_7bit"]
+    assert ov["clock"] == m["xclk_hz"]
+    assert ov["lanes"] == m["lanes"]
+    # Sensor-side endpoint booleans are chip facts.
+    flags = {k for k, v in ov["endpoint"].items() if v is True}
+    assert flags == set(chip["drivers"]["zephyr"].get("endpoint_flags", []))
+    # Every property the overlay sets on the shared host nodes is carried by
+    # the module, so a generator loses nothing.
+    declared = m.get("zephyr_host_overrides", {})
+    for host, props in ov["hosts"].items():
+        want = {k: (v[0] if isinstance(v, list) and len(v) == 1 else v)
+                for k, v in props.items() if k != "status"}
+        assert declared.get(host, {}) == want, (shield, host)
 
 
 def test_module_schema_rejects_missing_and_extra():
@@ -133,7 +240,7 @@ def test_som_camera_routes(sku):
 def test_soc_linux_dt():
     soc = json.loads((META / "socs/renesas/rzv2n/n44.json").read_text(encoding="utf-8"))
     assert not _errors(_validator("soc-spec-v1.schema.json"), soc)
-    assert soc["linux_dt"]["RIIC2"] == {"label": "i2c2", "pinmux": {"P34": 1, "P35": 1}}
+    assert soc["linux_dt"]["RIIC2"] == {"label": "i2c2", "pinmux": {"RIIC2_SDA2": 1, "RIIC2_SCL2": 1}}
     assert soc["linux_dt"]["CSI0"] == {"label": "csi20", "capture": "cru0"}
 
 
@@ -143,7 +250,7 @@ def _project(tmp_path, cameras):
     p = tmp_path / "board.yaml"
     p.write_text(yaml.safe_dump({
         "som": {"sku": "E1M-V2M103"}, "preset": "e1m-x-evk",
-        "cores": {"a55_cluster": {"os": "linux", "app": "./src"}},
+        "cores": {"a55_cluster": {"os": "yocto", "app": "./src"}},
         "cameras": cameras}), encoding="utf-8")
     return p
 
@@ -168,3 +275,107 @@ def test_cameras_schema_rejects_extra_key(tmp_path):
     c = validate_board_yaml(_project(
         tmp_path, [{"connector": "CAM0", "module": "innomaker_cam_ov9281", "x": 1}]))
     assert c.has_errors()
+
+
+def test_cameras_duplicate_connector_is_error(tmp_path):
+    entry = {"connector": "CAM0", "module": "innomaker_cam_ov9281"}
+    c = validate_board_yaml(_project(tmp_path, [entry, entry]))
+    assert any("more than once" in d.message and d.code == "ALP-B003" for d in c)
+
+
+def _inline_project(tmp_path, connector):
+    routes = {"gpio": [{"e1m": "E1M_X_GPIO_IO1", "macro": "MY_EN"}],
+              "buses": [{"e1m": "E1M_X_I2C2", "macro": "MY_I2C"}]}
+    p = tmp_path / "board.yaml"
+    p.write_text(yaml.safe_dump({
+        "name": "mine", "som": {"sku": "E1M-V2M103"},
+        "cores": {"a55_cluster": {"os": "yocto", "app": "./src"}},
+        "populated": {}, "e1m_routes": routes,
+        "camera_connectors": {"CAM0": {
+            "refdes": "J1", "csi": "E1M_X_CSI0", "lanes": 2, "i2c": "MY_I2C",
+            "enable": "MY_EN", **connector}}}), encoding="utf-8")
+    return p
+
+
+def test_inline_connector_ok(tmp_path):
+    c = validate_board_yaml(_inline_project(tmp_path, {"lane_polarity": [0, 0, 0]}))
+    assert not [d for d in c if d.code == "ALP-B003"], [d.message for d in c]
+
+
+@pytest.mark.parametrize("bad,needle", [
+    ({"enable": "NOPE"}, "not a macro"),
+    ({"lane_polarity": [1, 1]}, "expected 3"),
+])
+def test_inline_connector_bad_macro_or_polarity(tmp_path, bad, needle):
+    c = validate_board_yaml(_inline_project(tmp_path, bad))
+    assert any(needle in d.message and d.code == "ALP-B003" for d in c)
+
+
+def test_preset_connector_lane_polarity_length_checked(tmp_path):
+    doc = _load(META / "boards" / "e1m-x-evk.yaml")
+    doc["camera_connectors"]["CAM0"]["lane_polarity"] = [1, 1]
+    p = tmp_path / "board.yaml"
+    p.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    assert validate_metadata._check_board_camera_connectors([p])
+
+
+def test_preset_and_inline_camera_connectors_are_exclusive(tmp_path):
+    p = _project(tmp_path, [])
+    doc = _load(p)
+    doc["camera_connectors"] = {}
+    p.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    assert validate_board_yaml(p).has_errors()
+
+
+def test_camera_connector_def_identical_in_both_schemas():
+    # JSON-Schema $ref does not cross files in this repo's validators, so the
+    # connector definition is duplicated; this keeps the copies identical.
+    def d(name):
+        return json.loads((META / "schemas" / name).read_text(
+            encoding="utf-8"))["$defs"]["camera_connector"]
+    assert d("board.schema.json") == d("board-preset.schema.json")
+
+
+def test_cam0_enable_is_active_low_and_supply_modelled():
+    doc = _load(META / "boards" / "e1m-x-evk.yaml")
+    route = next(r for r in doc["e1m_routes"]["gpio"]
+                 if r["macro"] == doc["camera_connectors"]["CAM0"]["enable"])
+    assert route["active_low"] is True
+    assert doc["camera_connectors"]["CAM0"]["supply"] == "fixed-3v3"
+
+
+def test_soc_linux_dt_pinmux_resolves_against_peripheral_map(tmp_path):
+    soc = META / "socs/renesas/rzv2n/n44.json"
+    assert not validate_metadata._check_soc_linux_dt([soc])
+    bad = json.loads(soc.read_text(encoding="utf-8"))
+    p = tmp_path / "bad.json"
+    bad["linux_dt"]["RIIC2"]["pinmux"] = {"NOT_A_SIGNAL": 1}
+    p.write_text(json.dumps(bad), encoding="utf-8")
+    assert validate_metadata._check_soc_linux_dt([p])
+    bad["linux_dt"]["RIIC2"] = {"label": "i2c99", "pinmux": {"RIIC2_SDA2": 1}}
+    p.write_text(json.dumps(bad), encoding="utf-8")
+    assert validate_metadata._check_soc_linux_dt([p])
+
+
+def test_linux_kernel_drivers_file_valid():
+    doc = _load(META / "os" / "linux-kernel-drivers.yaml")
+    assert not _errors(_validator("linux-kernel-drivers-v1.schema.json"), doc)
+    drivers = doc["kernels"]["6.1.141-cip43"]["drivers"]
+    listed = {d["compatible"] for d in drivers}
+    for chip in (META / "chips").glob("*.yaml"):
+        lin = (_load(chip).get("drivers") or {}).get("linux")
+        if lin:
+            assert lin["compatible"] in listed, chip.stem
+
+
+def test_linux_driver_facts_consistent_with_modules():
+    for p in MODULES:
+        m = _load(p)
+        chip = _load(META / "chips" / f"{m['chip']}.yaml")
+        lin = (chip.get("drivers") or {}).get("linux")
+        if not lin:
+            continue
+        if "xclk_supported_hz" in lin:
+            assert m["xclk_hz"] in lin["xclk_supported_hz"], p.stem
+        if "link_freqs" in lin:
+            assert m["lanes"] in {e["lanes"] for e in lin["link_freqs"]}, p.stem

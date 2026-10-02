@@ -175,6 +175,15 @@ mipi:
 drivers:
   zephyr:
     compatible:    "sony,imx335"
+  linux:
+    compatible:    "sony,imx335"
+    kconfig:       CONFIG_VIDEO_IMX335
+    link_freqs:                      # 4-lane is native 6.1; 2-lane is alp kernel patch 0019
+      - { lanes: 2, link_freqs_hz: [594000000] }
+      - { lanes: 4, link_freqs_hz: [594000000] }
+    supplies:      [avdd, ovdd, dvdd]
+    reset_property: reset-gpios
+    xclk_supported_hz: [24000000]
 
 resolutions:
   max:            [2592, 1944]

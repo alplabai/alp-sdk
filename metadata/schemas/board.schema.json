@@ -11,7 +11,7 @@
   },
   "allOf": [
     {
-      "description": "`preset:` is mutually exclusive with inline `name:` / `populated:` / `e1m_routes:`.  Projects without any board declaration (headless / inference-only builds) are also valid -- they get no chip drivers and no E1M-pad routes header.",
+      "description": "`preset:` is mutually exclusive with inline `name:` / `populated:` / `e1m_routes:` / `camera_connectors:`.  Projects without any board declaration (headless / inference-only builds) are also valid -- they get no chip drivers and no E1M-pad routes header.",
       "not": {
         "anyOf": [
           {
@@ -30,6 +30,12 @@
             "allOf": [
               { "required": ["preset"] },
               { "required": ["e1m_routes"] }
+            ]
+          },
+          {
+            "allOf": [
+              { "required": ["preset"] },
+              { "required": ["camera_connectors"] }
             ]
           }
         ]
@@ -537,7 +543,7 @@
         },
         "select": {
           "type": "array",
-          "description": "GPIO levels that route this connector through any carrier CSI mux.",
+          "description": "GPIO levels that route this connector through any carrier CSI mux.  `value` is the raw pad level (not affected by the route's `active_low`).",
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -563,12 +569,17 @@
         "enable": {
           "type": "string",
           "pattern": "^[A-Z][A-Z0-9_]*$",
-          "description": "Macro of the e1m_routes `gpio` entry that enables the camera."
+          "description": "Macro of the e1m_routes `gpio` entry that enables the camera.  The referenced route's `active_low` is NORMATIVE here (generators emit GPIO_ACTIVE_LOW from it): an asserted enable means 'camera on', so a route behind an inverting stage (e.g. an N-FET pulling the module enable low) must carry `active_low: true`."
         },
         "reset": {
           "type": "string",
           "pattern": "^[A-Z][A-Z0-9_]*$",
-          "description": "Macro of the e1m_routes `gpio` entry that resets the camera."
+          "description": "Macro of the e1m_routes `gpio` entry that resets the camera.  As for `enable`, the route's `active_low` is normative: asserted means 'held in reset'."
+        },
+        "supply": {
+          "type": "string",
+          "pattern": "^fixed-[0-9]+v[0-9]+$",
+          "description": "What feeds the module's supply pin on this connector.  `fixed-3v3` = a fixed, always-on 3.3 V pin (the module generates its own sensor rails), so a generator binds every sensor `*-supply` to one fixed-regulator node instead of a controllable regulator.  Omit when the connector has no modelled supply."
         },
         "lane_polarity": {
           "type": "array",

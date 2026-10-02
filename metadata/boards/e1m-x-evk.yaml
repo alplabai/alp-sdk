@@ -43,6 +43,9 @@ populated:
   ssd1331:                  false
 
   # Camera -- dedicated CSI connectors (CAM0/CAM1); no on-board PI3WVR626 mux.
+  # CAM0 (J5) shares E1M-X CSI0 with the other CAM0 connector through a TI
+  # TS3DV642-Q1 2:1 CSI mux (SEL1 strapped high, SEL2 = CAM0_MUX_SEL; see
+  # camera_connectors.CAM0.select).
   ov5640:                   false
   cam_mux_pi3wvr626:        false
 
@@ -91,8 +94,16 @@ camera_connectors:
     i2c:           XEVK_I2C_BUS_DSI_CSI0
     select:
       - { gpio: XEVK_PIN_CAM0_MUX_SEL, value: 0 }   # low selects J5 on the CSI mux
+    # CAM0_EN drives the gate of an N-FET that pulls J5 pin 11 (CAM_GPIO, the
+    # module enable) LOW.  IO18 high therefore turns the camera OFF, so the
+    # route XEVK_PIN_CAM0_EN is `active_low: true` (asserted enable = pad low).
     enable:        XEVK_PIN_CAM0_EN
     reset:         XEVK_PIN_CAM0_RST
+    # J5 feeds the module from a fixed, always-on +3V3 pin; the module makes its
+    # own sensor rails.  Linux has no controllable regulator for the sensor's
+    # avdd/dvdd/ovdd/... supplies, so a generator binds every `*-supply` to one
+    # fixed-regulator node (regulator-always-on) instead of leaving them dummy.
+    supply:        fixed-3v3
     lane_polarity: [1, 1, 1]   # clock + 2 data lanes; physical segment TBD (bench-proven need on V2M103+J5)
 
 e1m_routes:
@@ -147,8 +158,8 @@ e1m_routes:
     # --- CSI camera 0 ---
     - { e1m: E1M_X_GPIO_IO16, macro: XEVK_PIN_CAM0_MUX_SEL,
         doc: "Camera-0 source/lane mux select." }
-    - { e1m: E1M_X_GPIO_IO18, macro: XEVK_PIN_CAM0_EN,
-        doc: "Camera-0 power enable." }
+    - { e1m: E1M_X_GPIO_IO18, macro: XEVK_PIN_CAM0_EN,    active_low: true,
+        doc: "CAM0 module enable, active-low via N-FET on CAM_GPIO." }
     - { e1m: E1M_X_GPIO_IO20, macro: XEVK_PIN_CAM0_RST,    active_low: true,
         doc: "Camera-0 reset (active-low)." }
     # --- USB / SD-card path muxes ---

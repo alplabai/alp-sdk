@@ -180,10 +180,50 @@ def _xref_pass(
     # missing (ALP-B006 already reported) there is nothing to check against.
     if not isinstance(preset, str):
         _check_cameras(data, path, collector, data.get("camera_connectors"),
-                       camera_module_dir=camera_module_dir)
+                       camera_module_dir=camera_module_dir, inline=True)
     elif board_doc is not None:
         _check_cameras(data, path, collector, board_doc.get("camera_connectors"),
                        camera_module_dir=camera_module_dir)
+
+
+def camera_connector_problems(connectors: Any, e1m_routes: Any) -> list[str]:
+    """Cross-checks of `camera_connectors:` that the schema cannot express,
+    shared by this validator (inline project boards) and
+    scripts/validate_metadata.py (board presets):
+
+    * every macro a connector names (`i2c`, `enable`, `reset`, `select[].gpio`)
+      must be declared in the same board's `e1m_routes:` (`buses` for `i2c`,
+      `gpio` for the rest) -- connectors reference routes, never restate pads;
+    * `lane_polarity` carries one flag per clock + data lane: `lanes + 1`.
+    """
+    if not isinstance(connectors, dict):
+        return []
+    routes = e1m_routes if isinstance(e1m_routes, dict) else {}
+
+    def macros(section: str) -> set[Any]:
+        return {e.get("macro") for e in (routes.get(section) or [])
+                if isinstance(e, dict)}
+
+    gpio, buses = macros("gpio"), macros("buses")
+    msgs: list[str] = []
+    for name, c in connectors.items():
+        if not isinstance(c, dict):
+            continue
+        refs = [("i2c", c.get("i2c"), buses, "buses"),
+                ("enable", c.get("enable"), gpio, "gpio"),
+                ("reset", c.get("reset"), gpio, "gpio")]
+        refs += [("select.gpio", sel.get("gpio"), gpio, "gpio")
+                 for sel in (c.get("select") or []) if isinstance(sel, dict)]
+        for field, macro, known, section in refs:
+            if macro is not None and macro not in known:
+                msgs.append(f"camera_connectors.{name}.{field}: `{macro}` is not a "
+                            f"macro in e1m_routes.{section}")
+        pol, lanes = c.get("lane_polarity"), c.get("lanes")
+        if isinstance(pol, list) and isinstance(lanes, int) and len(pol) != lanes + 1:
+            msgs.append(f"camera_connectors.{name}.lane_polarity: {len(pol)} entries "
+                        f"for {lanes} data lane(s); expected {lanes + 1} "
+                        f"(clock lane + data lanes)")
+    return msgs
 
 
 def _check_cameras(
@@ -193,46 +233,55 @@ def _check_cameras(
     connectors: Any,
     *,
     camera_module_dir: Path = CAMERA_MODULE_DIR,
+    inline: bool = False,
 ) -> None:
-    """Reject a `cameras:` entry naming a connector the resolved board does
-    not expose, or a module with no `metadata/camera_modules/<module>.yaml`.
+    """ALP-B003 for camera declarations the schema cannot judge:
 
-    Both are valid identifiers to the schema, so without this a typo would
-    only surface when a generator looks the name up.  Reported as ALP-B003
-    (value outside the set the metadata allows); anchored on the `cameras`
-    key because the position loader does not track individual list items.
+    * a `cameras:` entry naming a connector the resolved board does not
+      expose, a module with no `metadata/camera_modules/<module>.yaml`, or a
+      connector listed twice (both valid identifiers to the schema, so a typo
+      would only surface when a generator looks the name up);
+    * for an INLINE board, a `camera_connectors:` block whose macros do not
+      resolve in the project's own `e1m_routes:` or whose `lane_polarity` has
+      the wrong length (presets get the same check from validate_metadata.py).
+
+    Anchored on the `cameras` (or `camera_connectors`) key because the
+    position loader does not track individual list items.
     """
+    def report(key: str, message: str) -> None:
+        line, col = node_position(data, key, target="key")
+        collector.add(
+            Diagnostic(severity="error", path=path, line=line, col=col,
+                       span=len(key), code="ALP-B003", message=message))
+
+    if inline:
+        for message in camera_connector_problems(connectors, data.get("e1m_routes")):
+            report("camera_connectors", message)
+
     cameras = data.get("cameras")
     if not isinstance(cameras, list):
         return
     known_connectors = sorted(connectors) if isinstance(connectors, dict) else []
-    line, col = node_position(data, "cameras", target="key")
+    seen: set[str] = set()
     for entry in cameras:
         if not isinstance(entry, dict):
             continue  # schema pass reports the wrong type
         connector = entry.get("connector")
         module = entry.get("module")
-        problems: list[str] = []
-        if isinstance(connector, str) and connector not in known_connectors:
-            problems.append(
-                f"cameras: connector '{connector}' is not a camera connector of "
-                f"this board (known: {', '.join(known_connectors) or 'none'})")
+        if isinstance(connector, str):
+            if connector not in known_connectors:
+                report("cameras",
+                       f"cameras: connector '{connector}' is not a camera connector of "
+                       f"this board (known: {', '.join(known_connectors) or 'none'})")
+            if connector in seen:
+                report("cameras",
+                       f"cameras: connector '{connector}' is listed more than once "
+                       f"(one module per connector)")
+            seen.add(connector)
         if isinstance(module, str) and not (camera_module_dir / f"{module}.yaml").is_file():
-            problems.append(
-                f"cameras: unknown camera module '{module}' "
-                f"(no metadata/camera_modules/{module}.yaml)")
-        for message in problems:
-            collector.add(
-                Diagnostic(
-                    severity="error",
-                    path=path,
-                    line=line,
-                    col=col,
-                    span=len("cameras"),
-                    code="ALP-B003",
-                    message=message,
-                )
-            )
+            report("cameras",
+                   f"cameras: unknown camera module '{module}' "
+                   f"(no metadata/camera_modules/{module}.yaml)")
 
 
 def _known_chip_slugs(*, chip_dir: Path = CHIP_DIR) -> set[str]:

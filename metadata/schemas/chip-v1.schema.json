@@ -82,7 +82,8 @@
           "additionalProperties": false,
           "required": ["compatible"],
           "properties": {
-            "compatible": { "type": "string", "pattern": "^[a-z0-9]+,[a-z0-9._-]+$", "description": "Zephyr devicetree compatible string." }
+            "compatible": { "type": "string", "pattern": "^[a-z0-9]+,[a-z0-9._-]+$", "description": "Zephyr devicetree compatible string." },
+            "endpoint_flags": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }, "description": "Boolean properties the Zephyr driver's binding wants on the sensor's `port/endpoint` node (e.g. `no-lp11-clock-lane-park`).  A sensor property, so it lives on the chip; host-controller properties live in the camera module's `zephyr_host_overrides`." }
           }
         },
         "linux": {
@@ -92,7 +93,25 @@
           "properties": {
             "compatible": { "type": "string", "pattern": "^[a-z0-9]+,[a-z0-9._-]+$", "description": "Linux devicetree compatible string the in-kernel driver matches (may differ from the part number, e.g. OV9281 probes as ovti,ov9282)." },
             "kconfig": { "type": "string", "pattern": "^CONFIG_[A-Z0-9_]+$", "description": "Kernel config symbol that builds the driver." },
-            "link_freqs_hz": { "type": "array", "minItems": 1, "items": { "type": "integer", "minimum": 1 }, "description": "CSI-2 link frequencies the Linux driver accepts on its endpoint." }
+            "link_freqs": {
+              "type": "array",
+              "minItems": 1,
+              "description": "CSI-2 link frequencies the Linux driver accepts on its endpoint, per data-lane count (the accepted rate can depend on the lane count).  Omit when the driver parses no `link-frequencies`.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["lanes", "link_freqs_hz"],
+                "properties": {
+                  "lanes": { "type": "integer", "minimum": 1, "maximum": 4 },
+                  "link_freqs_hz": { "type": "array", "minItems": 1, "items": { "type": "integer", "minimum": 1 } }
+                }
+              }
+            },
+            "supplies": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*$" }, "description": "Regulator supply names the driver requests (`<name>-supply` DT properties), spelled exactly as in the driver (some use upper case)." },
+            "clock_name": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "description": "`clock-names` entry the driver passes to devm_clk_get().  Omit when the driver asks for the unnamed clock." },
+            "reset_property": { "enum": ["reset-gpios", "pwdn-gpios"], "description": "GPIO property the driver reads for its reset / power-down line." },
+            "endpoint_flags": { "type": "array", "uniqueItems": true, "items": { "enum": ["clock-noncontinuous"] }, "description": "Boolean properties the sensor's `port/endpoint` node needs for the driver to behave as bench-proven." },
+            "xclk_supported_hz": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "integer", "minimum": 1 }, "description": "Input-clock rates the driver accepts; a camera module's `xclk_hz` must be one of them." }
           }
         }
       }
