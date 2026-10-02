@@ -12,7 +12,9 @@
  * hub client only builds topics and credentials.  This is the socket both sit
  * on.  It is a client transport on Zephyr sockets and mbedtls, gated by
  * @c CONFIG_ALP_CLOUD_TRANSPORT; the coreMQTT adapter over it lives with the
- * AWS glue (`vendors/aws-iot/alp_cloud_transport_coremqtt.h`).
+ * AWS glue (`vendors/aws-iot/alp_cloud_transport_coremqtt.h`).  The baremetal
+ * and Yocto libraries have no backend for it: there every call returns
+ * @c ALP_ERR_NOSUPPORT.
  *
  * The caller owns an @ref alp_cloud_transport_t (no pool, no heap), connects
  * it with @ref alp_cloud_transport_connect, and moves bytes with
