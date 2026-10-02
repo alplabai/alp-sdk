@@ -137,7 +137,7 @@ def ship_check(unit: dict[str, str], catalogue: dict[str, dict], family: str = "
         required = spec.get("ship_required") or family in spec.get("ship_required_for", ())
         val = str(unit.get(key, "")).strip()
         # `unread (<error>)` is the census's record of a read that failed: not a value
-        if required and "*" not in key and (not val or val.startswith("unread (")):
+        if required and "*" not in key and (not val or val == "unread" or val.startswith("unread (")):
             reasons.append(f"missing {key}")
     # The ACT88760 GPIO4 OTP default is an expected workaround, not a defect
     # (maintainer decision 2026-09-29) -- U-Boot releases it every boot. Block

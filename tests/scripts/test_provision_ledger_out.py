@@ -122,3 +122,11 @@ def test_ship_check_treats_an_unread_census_value_as_missing():
     assert lo.ship_check(ok, CAT) == []
     bad = {**ok, "eeprom_unique_id": "unread (rc=2: i2cget: Error: Read failed)"}
     assert lo.ship_check(bad, CAT) == ["missing eeprom_unique_id"]
+
+
+def test_ship_check_treats_a_bare_unread_as_missing_too():
+    """eth_phy_id_mismatch is written as a bare `unread` when a PHY ID could not be read."""
+    ok = {"eeprom_unique_id": "01 02", "uboot_version": "2024.07", "disposition": "ship"}
+    for bad in ("unread", " unread ", "unread (x)"):
+        assert lo.ship_check({**ok, "eeprom_unique_id": bad}, CAT) == ["missing eeprom_unique_id"]
+    assert lo.ship_check({**ok, "uboot_version": "unreadable-but-a-value"}, CAT) == []
