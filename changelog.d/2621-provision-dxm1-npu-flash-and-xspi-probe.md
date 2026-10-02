@@ -23,3 +23,12 @@
   like `census` does, so `--only write_xspi` reports an already-flashed unit
   as satisfied instead of planning a flash (which also made `record` withhold
   the bundle facts).
+- `provision_som.py`: `boot_sd_linux` no longer reports done with no Linux
+  target attached. After a console login without an IPv4 host it recognises
+  the end0 PHY latch (#2582: the stmmac `Failed to reset the dma` line, or end0
+  down) and runs ONE extra cold cycle under the usual `MIN_OFF_S` rules, else
+  waits up to 120 s for a slow DHCP lease; it then fails with a message naming
+  #2582 and the dmesg line, or "no IPv4 on end0 ... check cable/DHCP". Only a
+  pending `--gd32-fw` flash (blank GD32: no RX clock) keeps the console-only
+  path. `write_rootfs` and the other steps report why no target is attached
+  instead of "boot_sd_linux has not run".

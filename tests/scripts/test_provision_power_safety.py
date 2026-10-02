@@ -256,7 +256,7 @@ def test_dsw1_emmc_insert_sd_then_boot_sd_linux_cycles_exactly_once(tmp_path, mo
     monkeypatch.setattr(steps, "connect_linux", lambda ctx, force=False, **kw: (_ for _ in ()).throw(bench.BenchError("no ip")))
     b = _bench(console=FakeConsole([]))
     b.power.on_hook = lambda: b.console.feed("Hit any key to stop autoboot: 3\r\nlogin: ")
-    ctx = _ctx(tmp_path, bench=b, execute=True)
+    ctx = _ctx(tmp_path, bench=b, execute=True, gd32_fw=tmp_path)   # pending GD32 flash: no PHY-retry cycle
     assert steps.OpDsw1EmmcInsertSd().run(ctx).status == "done"
     def stop(*a, **k):                       # everything after the boot is out of scope here
         raise steps.Refused("stop-after-boot")
@@ -305,7 +305,7 @@ def _console_only_ctx(tmp_path, monkeypatch):
     monkeypatch.setattr(steps, "tier_gate", lambda ctx, mib: (SimpleNamespace(ok=True, detail=""), {}))
     b = _bench(console=FakeConsole([]))
     b.power.on_hook = lambda: b.console.feed("Hit any key to stop autoboot: 3\r\nlogin: ")
-    return b, _ctx(tmp_path, bench=b, execute=True)
+    return b, _ctx(tmp_path, bench=b, execute=True, gd32_fw=tmp_path)   # blank GD32: its flash is pending
 
 
 def test_console_only_boot_sd_linux_stays_done_and_gd32_flash_goes_over_the_console(tmp_path, monkeypatch):

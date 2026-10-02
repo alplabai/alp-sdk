@@ -25,6 +25,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 import zlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -51,6 +52,8 @@ GD32_IMAGES = (("bootloader.bin", 0x08000000, "gd32_bootloader_md5"),
 GD32_BRIDGE_ADDR = 0x70
 SYS_LSI_MODE_XSPI = "0x3c06"
 LOGIN_RE = r"login: *$"
+IP_WAIT_S = 120.0     # boot_sd_linux: how long a console login may wait for DHCP
+IP_POLL_S = 5.0
 LOCK_BIT = 0x02
 
 
@@ -203,8 +206,19 @@ class Ctx:
         attaches it, instead of refusing a board that is already up."""
         if self.linux is None and self.pinned_host:
             self.attach_linux(self.pinned_host)
+        if self.linux is None and self.execute and self.bench is not None \
+                and self.console_linux_on_count == self.bench.power.on_count:
+            # boot_sd_linux logged in on this boot without an IP: DHCP may have answered since
+            try:
+                connect_linux(self, force=True)
+            except BenchError:
+                self.linux = None
         if self.linux is None and self.execute:
-            raise Refused("no Linux target: boot_sd_linux has not run")
+            if self.bench is not None and self.console_linux_on_count == self.bench.power.on_count:
+                raise Refused("Linux is up on the console but has no reachable IPv4 host (no DHCP lease on "
+                              "end0 and no bench.yaml linux.host that answers); check cable/DHCP, then re-run")
+            raise Refused("no Linux target attached: bench.yaml linux.host is unset or unreachable and this "
+                          "run has no console login to discover a host from; run boot_sd_linux (or set linux.host)")
         if self.linux is not None and self.execute:
             self._check_unit_identity(self.linux)
         return self.linux
@@ -343,13 +357,31 @@ def _since(console, n: int) -> str:
     return "".join(console.transcript[n:])
 
 
+def _wait_for_ip(ctx: Ctx, wait_s: float, rediscover: bool) -> None:
+    """Poll for an IPv4 host (pinned bench.yaml linux.host, else the console's
+    `ip -4 addr` view) until it answers or `wait_s` ran out; ctx.linux stays None then."""
+    deadline = time.monotonic() + wait_s
+    while (rest := deadline - time.monotonic()) > 0:
+        time.sleep(min(IP_POLL_S, rest))
+        try:
+            connect_linux(ctx, force=True, rediscover=rediscover)
+            ctx.linux.run("true")
+            return
+        except BenchError:
+            ctx.linux = None
+
+
 def boot_to_linux(ctx: Ctx, timeout: float = 240.0, need_ip: bool = True,
-                  resume_mark: int | None = None, rediscover: bool = False) -> str:
+                  resume_mark: int | None = None, rediscover: bool = False,
+                  ip_wait_s: float = 0.0) -> str:
     """Cold cycle, let the unit autoboot to a login, log in, (re)discover the
     Linux target. Returns the whole boot text. Execute-mode only.
 
     ``need_ip=False`` tolerates a unit with no network (blank GD32 or a latched
     PHY, #2582): ctx.linux is then None and the console shell is the only way in.
+
+    ``ip_wait_s`` keeps polling that long for a host before giving up on the network
+    (slow DHCP); 0 = one look, as before.
 
     ``resume_mark`` (a console transcript index) continues a boot that is already
     running instead of cycling: the text is taken from that mark."""
@@ -372,6 +404,46 @@ def boot_to_linux(ctx: Ctx, timeout: float = 240.0, need_ip: bool = True,
         if need_ip:
             raise
         ctx.linux = None
+        if ip_wait_s > 0:
+            _wait_for_ip(ctx, ip_wait_s, rediscover)
+    return text
+
+
+PHY_LATCH_DMESG = r"Failed to reset the dma|DMA engine initialization failed|Hw setup failed"
+
+
+def _gd32_flash_pending(ctx: Ctx) -> bool:
+    """A blank GD32 gives gbeth no RX clock, so 'no IP' is expected until gd32_flash runs."""
+    return ctx.gd32_fw is not None and not ctx.state_done("gd32_flash")
+
+
+def _phy_latch_evidence(ctx: Ctx) -> str:
+    """The end0 PHY-latch signature (#2582) over the console: the stmmac dmesg line, or
+    "end0 DOWN" (interface present, no carrier). "" when neither is there."""
+    sh = ConsoleTarget(ctx.need_bench().console)
+    line = sh.run(f"dmesg | grep -E '{PHY_LATCH_DMESG}' | tail -n 1", check=False).stdout.strip()
+    if line:
+        return line
+    return "end0 DOWN" if "end0" in lt.net_ifaces(sh) and not lt.net_carrier(sh, "end0") else ""
+
+
+def _net_after_boot(ctx: Ctx, ev: dict, text: str) -> str:
+    """boot_sd_linux's network tail after a console login without a host: on the #2582
+    signature ONE extra cold cycle (Power.cycle keeps MIN_OFF_S / MIN_ON_S), otherwise a
+    bounded wait for a slow DHCP lease. ctx.linux may still be None on return; the caller
+    decides (a pending GD32 flash is the only acceptable reason)."""
+    if ctx.linux is not None or _gd32_flash_pending(ctx):
+        return text
+    if line := _phy_latch_evidence(ctx):
+        ctx.plan_log.append(f"end0 has no network ({line}): PHY latch #2582, one extra cold cycle")
+        ev["end0_no_carrier_retries"] = "1"
+        text = boot_to_linux(ctx, need_ip=False, ip_wait_s=IP_WAIT_S)
+        if ctx.linux is None:
+            again = _phy_latch_evidence(ctx) or line
+            raise BenchError("Linux up on console but end0 has no network after the extra cold cycle: PHY "
+                             f"latch, alp-sdk #2582 ({again}); check cable, then power-cycle the unit")
+        return text
+    _wait_for_ip(ctx, IP_WAIT_S, False)
     return text
 
 
@@ -727,8 +799,8 @@ class BootSdLinux(Step):
                 if live is not None and live[0] == b.power.on_count:
                     # dsw1_emmc_insert_sd just booted the unit: continue that boot
                     ctx.plan_log.append("continue the live boot from dsw1_emmc_insert_sd (no power cycle)")
-                    return boot_to_linux(ctx, need_ip=False, resume_mark=live[1])
-                return boot_to_linux(ctx, need_ip=False)
+                    return _net_after_boot(ctx, ev, boot_to_linux(ctx, need_ip=False, resume_mark=live[1]))
+                return _net_after_boot(ctx, ev, boot_to_linux(ctx, need_ip=False))
             text = ctx.mutate("cold cycle (unless dsw1_emmc_insert_sd left the unit booting); U-Boot "
                               "bootcmd_check boots the release wic from microSD; "
                               "console login; discover the IPv4 host", boot)
@@ -749,8 +821,13 @@ class BootSdLinux(Step):
             raise Refused(f"DRAM banner leg: {tier.detail}")
         t = ctx.linux
         if t is None:
-            # No IP yet: a blank GD32 leaves both gbeth ports without an RX clock.
-            # Everything below is read over the console; gd32_flash runs next.
+            # No IP after the bounded wait. Only a pending GD32 flash explains it (a blank
+            # GD32 leaves both gbeth ports without an RX clock) and gd32_flash then works over
+            # the console; any other unit has a cable/DHCP problem: fail, never "done" with
+            # no Linux target attached.
+            if not _gd32_flash_pending(ctx):
+                raise BenchError(f"Linux up on console but no IPv4 on end0 after {IP_WAIT_S:g}s; "
+                                 "check cable/DHCP")
             t = ConsoleTarget(b.console)
             ctx.console_linux_on_count = b.power.on_count
             ev["network"] = "none yet (blank GD32 suspected); gd32_flash runs next over the console"

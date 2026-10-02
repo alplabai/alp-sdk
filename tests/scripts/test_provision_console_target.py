@@ -275,7 +275,8 @@ def test_get_rejects_garbage_base64(tmp_path):
 
 def test_boot_sd_linux_without_ip_does_not_fail(tmp_path, monkeypatch):
     sh = ShellConsole()
-    ctx = _ctx(tmp_path, bench=_bench(console=sh), execute=True)
+    # a pending GD32 flash is the one reason a console-only boot may be done (blank GD32: no RX clock)
+    ctx = _ctx(tmp_path, bench=_bench(console=sh), execute=True, gd32_fw=tmp_path)
 
     def boot(ctx_, timeout=240.0, need_ip=True):
         assert need_ip is False
