@@ -360,6 +360,42 @@ is supplied it must match the board's macro for that pad
 preset moved it).  Bare-string and object entries can mix in the
 same list.
 
+#### `cameras:` and `camera_connectors:` (camera modules)
+
+A camera is declared by naming the module in the connector it is plugged
+into; the sensor chip, I2C address, oscillator and lane count come from
+metadata, never from `board.yaml`:
+
+```yaml
+cameras:
+  - { connector: CAM0, module: innomaker_cam_ov9281 }
+```
+
+- `connector` must be a key of the resolved board's `camera_connectors:`
+  (CAM0, CAM1, ...); `module` must have a
+  `metadata/camera_modules/<module>.yaml` (schema
+  `camera-module-v1`).  Each connector appears at most once.
+- `camera_connectors:` is board data, next to `e1m_routes:` in a board
+  preset (`metadata/boards/<name>.yaml`) or inline at the top level of a
+  custom board's `board.yaml` (mutually exclusive with `preset:`, like
+  `populated:` and `e1m_routes:`).  Per connector: `refdes`, `csi` (E1M CSI
+  receiver), `lanes`, `i2c` (an `e1m_routes.buses` macro), and optionally
+  `select` (mux GPIO levels), `enable`, `reset` (`e1m_routes.gpio` macros),
+  `supply` (what feeds the module, e.g. `fixed-3v3`), `lane_polarity` and
+  `notes`.  Signals reference macros already declared in `e1m_routes:`;
+  pads are never restated.
+- The `active_low` flag of the route behind `enable` / `reset` is
+  **normative**: generators emit `GPIO_ACTIVE_LOW` from it.  An asserted
+  enable means "camera on", so on a carrier where the pad drives an N-FET
+  that pulls the module enable low (X-EVK CAM0), the route is
+  `active_low: true`.
+- `lane_polarity` holds one 0/1 inversion flag per lane, clock first:
+  `lanes + 1` entries.
+
+`tan validate` rejects an unknown connector, an unknown module, a
+duplicated connector, and (inline boards) an unresolvable macro or a wrong
+`lane_polarity` length, all as [ALP-B003](diagnostics/ALP-B003.md).
+
 #### Pin direction (NOT in `board.yaml`)
 
 Pin direction is **not** a board declaration.  It's a per-app

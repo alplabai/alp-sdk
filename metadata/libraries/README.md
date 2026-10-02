@@ -146,11 +146,11 @@ symbol) — the existing u8g2/catch2 vendoring exception is not widened here.
 **Memfault — deliberately NOT shipped.** Memfault's `memfault-firmware-sdk` is
 not pinned in `west.yml`, and its licence is the proprietary **Memfault SDK
 License** (source-available, use-with-Memfault-services), which is **not** in the
-permissive allowlist below (Apache-2.0/MIT/BSD-2/BSD-3/Zlib/MIT-0). Per the
+permissive allowlist (see "Licence allowlist" below). Per the
 ADR 0018 non-goal, a copyleft/proprietary licence must not ride in through a
 `libraries:` selection, and forcing a wrong SPDX id to pass validation is
 forbidden. It can only be added if a human legal review extends the allowlist
-(schema `license.enum` + this list, same change) with the Memfault licence — a
+(schema `license.enum` + that list, same change) with the Memfault licence — a
 deliberate decision, not a metadata edit.
 
 ## Manifest shape
