@@ -19,6 +19,7 @@ i2c:
 
 mipi:
   lanes_supported: [1, 2, 4]
+  role:            csi2_tx
 
 resolutions:
   max:            [1920, 1200]

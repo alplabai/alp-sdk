@@ -131,3 +131,27 @@ def _provision_no_real_waits(request, monkeypatch):
     # the Ctrl-C probe of an unknown console writes to it: strict fake consoles opt in explicitly
     monkeypatch.setattr(steps, "PROBE_UNKNOWN_CONSOLE", False)
     monkeypatch.setattr(linux_target, "I2C_GET_GAP_S", 0.0)
+
+
+@pytest.fixture(autouse=True)
+def _sandbox_tmpdir(tmp_path_factory, monkeypatch):
+    """Point TMPDIR at a per-test directory under pytest's own basetemp.
+
+    The bench scripts keep what they write under ${TMPDIR:-/tmp} on purpose
+    -- bench_atoc_replace_guard()'s `<tag>-atoc-before.<random>` transcript
+    is the audit record of what was resident before a destructive write, so
+    it is never removed. That is right on a bench and wrong in a unit test:
+    every test that sources bench-env.sh without exporting its own TMPDIR
+    left its files in the host's real /tmp, and one board-farm host
+    accumulated about 20,000 of them in three weeks. pytest prunes its
+    basetemp to the last three runs, so a sandbox there cleans itself up.
+
+    A test that exports TMPDIR inside the script it runs still wins: this
+    only changes what an unset TMPDIR falls back to. `tempfile` in the
+    pytest process itself is unaffected -- it caches gettempdir() once.
+
+    Measured on Linux only. A bash that does not inherit this process's
+    environment (test_bench_jlink_run.py documents an MSYS bash where
+    `env=` did not arrive) still falls back to its own /tmp.
+    """
+    monkeypatch.setenv("TMPDIR", str(tmp_path_factory.mktemp("tmpdir")))

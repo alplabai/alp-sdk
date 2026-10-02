@@ -1,0 +1,23 @@
+# Alp SDK camera module: Raspberry Pi Global Shutter Camera / InnoMaker GS (Sony IMX296LQR-C colour).
+# Values from zephyr/boards/shields/raspberry_pi_global_shutter_camera/raspberry_pi_global_shutter_camera.overlay.
+schema_version: 1
+module_id:      raspberry_pi_global_shutter_camera
+display_name:   "Raspberry Pi Global Shutter Camera (IMX296LQR-C colour, 1-lane CSI-2)"
+chip:           imx296
+i2c_addr_7bit:  0x1A
+xclk_hz:        54000000
+lanes:          1
+zephyr_shield:  raspberry_pi_global_shutter_camera
+# Host-node settings from the shield overlay (bench-proven IPI Controller-mode
+# timing, issue #2287).  csi-hline = hsa+hbp+hsd+hact = 3+10+503+1456;
+# csi-vtotal = vsa+vbp+vfp+vact = 1+4+25+1088 (= IMX296_VMAX).  The sensor-side
+# `no-lp11-clock-lane-park` flag is a chip fact: metadata/chips/imx296.yaml.
+zephyr_host_overrides:
+  snps,designware-csi:
+    ipi-mode:       "Controller"
+    csi-hsa:        3
+    csi-hbp:        10
+    csi-hline:      1972
+    csi-vsa:        1
+    csi-vbp:        4
+    csi-vtotal:     1118
