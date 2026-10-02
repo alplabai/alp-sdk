@@ -7,3 +7,8 @@ record the sanitised route: `PB_N` pulled up to the 1.8 V rail (not routed to th
 rail through a 0 ohm link, and `VSEL1`/`VSEL2` strapped to ground (the `_LO` VOUT register
 set). The U-Boot DEEPX rail patch comments that called the `VSEL2` routing undocumented
 now match.
+
+The same schematic export closes the CH1 gap: `metadata/e1m_modules/v2n/power-tree.yaml`
+`da9292_ch1` now has `net: VDD3G_0P8` (the RZ/V2N 0.8 V rail, DA9292 CH1 feedback) in place
+of `TBD`, so the regenerated `include/alp/chips/v2n_power_tree.h` carries the name and the
+`v2n-pmic-inspect` example comment no longer calls it unknown. `target_mv` stays null.

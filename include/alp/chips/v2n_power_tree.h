@@ -147,7 +147,7 @@
 /** v2n: DA9292 channel net names, indexed by da9292_channel_t. */
 #define V2N_POWER_DA9292_CH_NETS_INIT \
 	{ \
-		[DA9292_CH1] = "TBD", \
+		[DA9292_CH1] = "VDD3G_0P8", \
 		[DA9292_CH2] = "", \
 	}
 
@@ -263,7 +263,7 @@
 /** v2n-m1: DA9292 channel net names, indexed by da9292_channel_t. */
 #define V2N_M1_POWER_DA9292_CH_NETS_INIT \
 	{ \
-		[DA9292_CH1] = "TBD", \
+		[DA9292_CH1] = "VDD3G_0P8", \
 		[DA9292_CH2] = "VDD_0P75", \
 	}
 

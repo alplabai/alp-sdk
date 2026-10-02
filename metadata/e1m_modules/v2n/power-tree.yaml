@@ -290,7 +290,7 @@ rails:
     chip: da9292
     channel: ch1
     i2c_addr: 0x1E
-    net: TBD
+    net: VDD3G_0P8
     role: "RZ/V2N 0.8 V rail; enabled at power-up by the EN1 strap"
     target_mv: null            # OTP default not bench-confirmed; never touched by software
     range: null
@@ -299,7 +299,7 @@ rails:
     control: none
     owner: { a55_boot: hardware, cm33_boot: hardware }
     populated_on: [v2n, v2n-m1]
-    evidence: "da9292.h channel map; net + target not in the power-sequence report"
+    evidence: "module schematic: DA9292 CH1 feedback on the 0.8 V SoC rail net (VDD08_* supply pins); target not in the power-sequence report"
   - id: vdd_0p75
     chip: da9292
     channel: ch2
