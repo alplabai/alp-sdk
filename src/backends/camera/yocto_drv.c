@@ -96,6 +96,12 @@
  * V4L2_PIX_FMT_RAW_CRU10; the fourcc is the stable part. */
 #define CAM_FOURCC_CR10 v4l2_fourcc('C', 'R', '1', '0')
 
+/* media_v2_link.flags is __u32, but the uapi MEDIA_LNK_FL_LINK_TYPE mask is
+ * (0xf << 28), a signed-int overflow.  Unsigned copies keep the & and ==
+ * comparisons free of sign conversion. */
+#define CAM_LNK_TYPE_MASK      (0xfu << 28)
+#define CAM_LNK_TYPE_INTERFACE (1u << 28)
+
 /* One hop of the sensor -> capture-node chain. */
 typedef struct {
 	uint32_t ent_id;
@@ -555,7 +561,7 @@ static const struct media_v2_entity *cam_find_ent(const cam_topo_t *t, uint32_t 
 static bool cam_ent_devnode(const cam_topo_t *t, uint32_t ent_id, uint32_t *maj, uint32_t *min)
 {
 	for (uint32_t i = 0; i < t->nlnk; ++i) {
-		if ((t->lnk[i].flags & MEDIA_LNK_FL_LINK_TYPE) != MEDIA_LNK_FL_INTERFACE_LINK ||
+		if ((t->lnk[i].flags & CAM_LNK_TYPE_MASK) != CAM_LNK_TYPE_INTERFACE ||
 		    t->lnk[i].sink_id != ent_id) {
 			continue;
 		}
@@ -598,7 +604,7 @@ static alp_status_t cam_walk(const cam_topo_t *t, uint32_t sensor_ent, cam_t *c)
 		bool found = false;
 		for (uint32_t i = 0; i < t->nlnk && !found; ++i) {
 			const struct media_v2_link *l = &t->lnk[i];
-			if ((l->flags & MEDIA_LNK_FL_LINK_TYPE) == MEDIA_LNK_FL_INTERFACE_LINK ||
+			if ((l->flags & CAM_LNK_TYPE_MASK) == CAM_LNK_TYPE_INTERFACE ||
 			    !(l->flags & MEDIA_LNK_FL_ENABLED)) {
 				continue;
 			}
@@ -651,7 +657,7 @@ static bool cam_read_topology(int mfd, cam_topo_t *t, void **mem)
 	for (int attempt = 0; attempt < 3; ++attempt) {
 		memset(&top, 0, sizeof(top));
 		if (cam_ioctl(mfd, MEDIA_IOC_G_TOPOLOGY, &top) < 0) return false;
-		uint32_t ver = top.topology_version;
+		uint64_t ver = top.topology_version;
 		size_t   sz  = (size_t)top.num_entities * sizeof(*t->ent) +
 		               (size_t)top.num_interfaces * sizeof(*t->ifc) +
 		               (size_t)top.num_pads * sizeof(*t->pad) +
