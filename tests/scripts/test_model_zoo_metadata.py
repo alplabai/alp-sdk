@@ -49,6 +49,20 @@ def _write(tmp_path: Path, doc: dict, *, name: str = "example-tiny.yaml") -> Pat
     return p
 
 
+def _has_error(errors: list, path: list, validator_name: str) -> bool:
+    """True iff `errors` (a list of jsonschema ValidationError) contains one
+    whose `absolute_path` equals `path` and whose `validator` keyword
+    equals `validator_name`. Used to pin a rejection test to the SPECIFIC
+    schema constraint it claims to exercise, rather than accepting any
+    non-empty `errors` list -- several masking bugs in this file turned out
+    to be `kind: fixture`'s own `if`/`then` firing for an unrelated reason
+    (e.g. its `validated_soms.maxItems: 0` rejecting ANY populated list
+    regardless of whether the list also happened to contain a duplicate/
+    malformed SKU), making the real constraint under test untested."""
+    return any(list(e.absolute_path) == path and e.validator == validator_name
+               for e in errors)
+
+
 # --- positive controls -----------------------------------------------------
 
 def test_real_fixture_is_schema_valid():
@@ -79,31 +93,57 @@ def test_missing_validated_soms_is_rejected():
 
 
 def test_duplicate_validated_soms_entries_rejected():
+    """kind: model + a non-smoke task, NOT the inherited fixture base --
+    under kind: fixture, validated_soms.maxItems: 0 would reject ANY
+    populated list regardless of whether it also happens to contain a
+    duplicate, making the uniqueItems check itself untested. Asserting
+    the SPECIFIC uniqueItems error at the validated_soms path is what
+    catches that: it fails if uniqueItems is ever loosened/removed, not
+    just if SOME error fires for an unrelated reason."""
     doc = _base()
+    doc["kind"] = "model"
+    doc["task"] = "object-detection"
     doc["validated_soms"] = ["E1M-AEN801", "E1M-AEN801"]
     errors = _schema_errors(doc)
-    assert errors, "uniqueItems must reject a duplicated SKU"
+    assert _has_error(errors, ["validated_soms"], "uniqueItems"), (
+        "uniqueItems must reject a duplicated SKU")
 
 
 def test_malformed_sku_in_validated_soms_rejected():
+    """Same masking risk as above: under kind: fixture, a single-item
+    validated_soms would ALSO violate maxItems: 0 regardless of the SKU's
+    own pattern -- isolate with kind: model and assert the specific
+    per-item pattern violation."""
     doc = _base()
+    doc["kind"] = "model"
+    doc["task"] = "object-detection"
     doc["validated_soms"] = ["E1M-FOO123"]
     errors = _schema_errors(doc)
-    assert errors, "a SKU family not in the real vocabulary must fail the pattern"
+    assert _has_error(errors, ["validated_soms", 0], "pattern"), (
+        "a SKU family not in the real vocabulary must fail the pattern")
 
 
 # --- source: url requires sha256, exclusively of bundled --------------------
 
 def test_url_source_without_sha256_is_rejected():
+    """kind: fixture's `then` requires `source.required: [bundled]` --
+    a url-only source (no bundled) would ALREADY be rejected for that
+    reason regardless of whether sha256 is present, making the
+    dependentRequired check itself untested. Isolate with kind: model."""
     doc = _base()
+    doc["kind"] = "model"
+    doc["task"] = "object-detection"
     doc["source"] = {"url": "https://example.com/model.tflite"}
     errors = _schema_errors(doc)
-    assert errors, "a url source with no sha256 must fail schema validation"
+    assert (_has_error(errors, ["source"], "dependentRequired")
+            or _has_error(errors, ["source"], "oneOf")), (
+        "a url source with no sha256 must fail schema validation")
 
 
 def test_url_source_with_sha256_is_accepted():
     doc = _base()
     doc["kind"] = "model"  # kind: fixture's if/then requires a bundled source
+    doc["task"] = "object-detection"  # kind: model must not claim task: smoke
     doc["source"] = {
         "url": "https://example.com/model.tflite",
         "sha256": "a" * 64,
@@ -112,35 +152,48 @@ def test_url_source_with_sha256_is_accepted():
 
 
 def test_bad_sha256_format_is_rejected():
+    """kind: model + non-smoke task -- under the inherited fixture base, a
+    url+sha256 source is ALSO rejected outright for lacking `bundled`
+    (then's own requirement), masking whether the sha256 pattern itself
+    does anything."""
     doc = _base()
+    doc["kind"] = "model"
+    doc["task"] = "object-detection"
     doc["source"] = {
         "url": "https://example.com/model.tflite",
         "sha256": "not-a-real-hash",
     }
     errors = _schema_errors(doc)
-    assert errors, "a malformed sha256 (not 64 lowercase hex chars) must fail"
+    assert _has_error(errors, ["source", "sha256"], "pattern"), (
+        "a malformed sha256 (not 64 lowercase hex chars) must fail")
 
 
 def test_uppercase_sha256_is_rejected():
     doc = _base()
+    doc["kind"] = "model"
+    doc["task"] = "object-detection"
     doc["source"] = {
         "url": "https://example.com/model.tflite",
         "sha256": "A" * 64,
     }
     errors = _schema_errors(doc)
-    assert errors, "sha256 must be lowercase hex per the schema pattern"
+    assert _has_error(errors, ["source", "sha256"], "pattern"), (
+        "sha256 must be lowercase hex per the schema pattern")
 
 
 def test_file_url_scheme_is_rejected():
     """Published model-zoo data must never carry a local filesystem path --
     only https:// is a valid url source."""
     doc = _base()
+    doc["kind"] = "model"
+    doc["task"] = "object-detection"
     doc["source"] = {
         "url": "file:///home/dev/model.tflite",
         "sha256": "a" * 64,
     }
     errors = _schema_errors(doc)
-    assert errors, "file:// must be rejected -- https:// only"
+    assert _has_error(errors, ["source", "url"], "pattern"), (
+        "file:// must be rejected -- https:// only")
 
 
 def test_url_and_bundled_together_is_rejected():
@@ -251,6 +304,7 @@ def test_real_soms_in_validated_soms_pass(tmp_path):
     positive control is meaningless under kind: fixture."""
     doc = _base()
     doc["kind"] = "model"
+    doc["task"] = "object-detection"  # kind: model must not inherit task: smoke
     doc["validated_soms"] = ["E1M-AEN801"]
     p = _write(tmp_path, doc)
     failures = V._check_model_zoo_semantics([p])
@@ -277,7 +331,7 @@ def test_main_fails_when_a_model_zoo_entry_is_invalid(monkeypatch, capsys):
     try:
         bad = scratch / "broken.yaml"
         bad.write_text(
-            "id: broken\ntask: example\ndescription: x\nlicense: Apache-2.0\n"
+            "id: broken\ntask: smoke\ndescription: x\nlicense: Apache-2.0\n"
             "source:\n  bundled: starters/does-not-exist.tflite\n"
             "validated_soms: []\n",
             encoding="utf-8",
@@ -431,6 +485,7 @@ def test_schema_accepts_model_kind_with_url_and_soms():
     """Positive control: the if/then only fires for kind: fixture."""
     doc = _base()
     doc["kind"] = "model"
+    doc["task"] = "object-detection"
     doc["source"] = {"url": "https://example.com/model.tflite", "sha256": "a" * 64}
     doc["validated_soms"] = ["E1M-AEN801"]
     assert _schema_errors(doc) == []
@@ -441,6 +496,7 @@ def test_model_kind_with_url_source_and_soms_is_accepted():
     curated entry may carry both a url source and validated_soms."""
     doc = _base()
     doc["kind"] = "model"
+    doc["task"] = "object-detection"
     doc["source"] = {"url": "https://example.com/model.tflite", "sha256": "a" * 64}
     doc["validated_soms"] = ["E1M-AEN801"]
     assert _schema_errors(doc) == []
@@ -531,45 +587,59 @@ def test_compile_deepx_dxm1_valid_block_is_accepted():
 # --- url: tightened pattern (item 4) ----------------------------------------
 
 def test_bare_https_scheme_with_nothing_after_is_rejected():
+    """kind: model AND a non-smoke task -- without the task fix, this test
+    was vacuous: the inherited fixture base's `task: smoke` trips the
+    `else` branch's `task != smoke` requirement regardless of the url
+    pattern, so `errors` was truthy even with the url pattern loosened to
+    accept anything."""
     doc = _base()
     doc["kind"] = "model"
+    doc["task"] = "object-detection"
     doc["source"] = {"url": "https://", "sha256": "a" * 64}
     doc["validated_soms"] = []
     errors = _schema_errors(doc)
-    assert errors, "https:// with no host/path must be rejected"
+    assert _has_error(errors, ["source", "url"], "pattern"), (
+        "https:// with no host/path must be rejected")
 
 
 def test_url_with_embedded_space_is_rejected():
     doc = _base()
     doc["kind"] = "model"
+    doc["task"] = "object-detection"
     doc["source"] = {"url": "https:// evil.example.com/x", "sha256": "a" * 64}
     doc["validated_soms"] = []
     errors = _schema_errors(doc)
-    assert errors, "a url containing a space must be rejected"
+    assert _has_error(errors, ["source", "url"], "pattern"), (
+        "a url containing a space must be rejected")
 
 
 def test_url_with_embedded_newline_is_rejected():
     doc = _base()
     doc["kind"] = "model"
+    doc["task"] = "object-detection"
     doc["source"] = {"url": "https://example.com/\nmodel.tflite", "sha256": "a" * 64}
     doc["validated_soms"] = []
     errors = _schema_errors(doc)
-    assert errors, "a url containing a newline must be rejected"
+    assert _has_error(errors, ["source", "url"], "pattern"), (
+        "a url containing a newline must be rejected")
 
 
 def test_url_host_with_no_path_is_rejected():
     doc = _base()
     doc["kind"] = "model"
+    doc["task"] = "object-detection"
     doc["source"] = {"url": "https://evil", "sha256": "a" * 64}
     doc["validated_soms"] = []
     errors = _schema_errors(doc)
-    assert errors, "a url with a host but no path segment must be rejected"
+    assert _has_error(errors, ["source", "url"], "pattern"), (
+        "a url with a host but no path segment must be rejected")
 
 
 def test_well_formed_url_is_still_accepted():
     """Positive control for the tightened pattern."""
     doc = _base()
     doc["kind"] = "model"
+    doc["task"] = "object-detection"
     doc["source"] = {"url": "https://example.com/model.tflite", "sha256": "a" * 64}
     doc["validated_soms"] = []
     assert _schema_errors(doc) == []
@@ -580,10 +650,12 @@ def test_url_with_userinfo_credentials_is_rejected():
     belong in a public data asset."""
     doc = _base()
     doc["kind"] = "model"
+    doc["task"] = "object-detection"
     doc["source"] = {"url": "https://user:tok@host/x", "sha256": "a" * 64}
     doc["validated_soms"] = []
     errors = _schema_errors(doc)
-    assert errors, "a url with embedded userinfo/credentials must be rejected"
+    assert _has_error(errors, ["source", "url"], "pattern"), (
+        "a url with embedded userinfo/credentials must be rejected")
 
 
 # --- bundled: tightened in-schema pattern (item 5) --------------------------
@@ -792,6 +864,326 @@ def test_case_exact_wiring_fires_the_specific_message_on_any_host(tmp_path, monk
     failures = V._check_model_zoo_semantics([p])
     assert failures
     assert any("case-sensitive" in m for m in failures[0][1])
+
+
+# --- license: closed permissive SPDX allowlist (maintainer decision #1) ----
+
+def test_license_apache2_is_accepted():
+    doc = _base()
+    doc["license"] = "Apache-2.0"
+    assert _schema_errors(doc) == []
+
+
+@pytest.mark.parametrize("license_id", [
+    # Every AGPLv3 spelling: the two current SPDX ids AND the deprecated
+    # bare one, so admitting any of them to the enum turns this red.
+    "AGPL-3.0", "AGPL-3.0-only", "AGPL-3.0-or-later",
+    "GPL-3.0-only",      # copyleft
+    "CC-BY-NC-4.0",      # non-commercial
+    "LicenseRef-x",      # no LicenseRef escape -- the allowlist is closed
+    "Apache-2",          # malformed/truncated SPDX id
+])
+def test_license_outside_allowlist_is_rejected(license_id):
+    doc = _base()
+    doc["license"] = license_id
+    assert _has_error(_schema_errors(doc), ["license"], "enum")
+
+
+def test_license_enum_matches_readme_allowlist():
+    """metadata/model_zoo/README.md tells a maintainer to extend the schema
+    enum and its own allowlist block in the same change; this is what makes
+    that true rather than a convention."""
+    readme = (V.MODEL_ZOO / "README.md").read_text(encoding="utf-8")
+    section = readme.split("## Licence allowlist", 1)[1]
+    block = section.split("```", 2)[1]
+    readme_ids = [i.strip() for i in block.split(",")]
+    schema = json.loads(
+        (_ROOT / "metadata" / "schemas" / "model-zoo-v1.schema.json")
+        .read_text(encoding="utf-8"))
+    assert readme_ids == schema["properties"]["license"]["enum"]
+
+
+# --- task: closed kebab-case enum, smoke tied to kind (maintainer decision #2)
+
+def test_fixture_with_non_smoke_task_is_rejected():
+    doc = _base()
+    assert doc["kind"] == "fixture"
+    doc["task"] = "image-classification"
+    errors = _schema_errors(doc)
+    assert errors, "kind: fixture requires task: smoke"
+
+
+def test_model_with_smoke_task_is_rejected():
+    doc = _base()
+    doc["kind"] = "model"
+    doc["source"] = {"url": "https://example.com/model.tflite", "sha256": "a" * 64}
+    doc["task"] = "smoke"
+    errors = _schema_errors(doc)
+    assert errors, "kind: model must never claim task: smoke (the schema's kind: model if/then branch)"
+
+
+# --- task<->kind cross-check ALSO gets the friendlier semantic message -----
+# (item 3: this was schema-only; _check_model_zoo_semantics now repeats it
+# for a specific, readable message, same pattern as the kind:fixture
+# validated_soms/source checks above.)
+
+def test_semantic_check_flags_fixture_with_non_smoke_task(tmp_path):
+    doc = _base()
+    assert doc["kind"] == "fixture"
+    doc["task"] = "image-classification"
+    p = _write(tmp_path, doc)
+    failures = V._check_model_zoo_semantics([p])
+    assert failures
+    assert any("kind: fixture" in m and "task" in m for m in failures[0][1])
+
+
+def test_semantic_check_flags_model_with_smoke_task(tmp_path):
+    doc = _base()
+    doc["kind"] = "model"
+    doc["source"] = {"url": "https://example.com/model.tflite", "sha256": "a" * 64}
+    doc["task"] = "smoke"
+    p = _write(tmp_path, doc)
+    failures = V._check_model_zoo_semantics([p])
+    assert failures
+    assert any("kind: model" in m and "task" in m for m in failures[0][1])
+
+
+def test_unknown_task_is_rejected():
+    doc = _base()
+    doc["kind"] = "model"
+    doc["source"] = {"url": "https://example.com/model.tflite", "sha256": "a" * 64}
+    doc["task"] = "widget-detection"
+    errors = _schema_errors(doc)
+    assert errors, "task must be one of the closed enum values"
+
+
+def test_model_with_object_detection_task_is_accepted():
+    doc = _base()
+    doc["kind"] = "model"
+    doc["source"] = {"url": "https://example.com/model.tflite", "sha256": "a" * 64}
+    doc["task"] = "object-detection"
+    assert _schema_errors(doc) == []
+
+
+def test_real_fixture_declares_task_smoke():
+    assert _base()["task"] == "smoke"
+
+
+# --- io_spec / perf_ref removed (maintainer decisions #3, #4) --------------
+
+def test_io_spec_present_is_rejected():
+    doc = _base()
+    doc["io_spec"] = {}
+    errors = _schema_errors(doc)
+    assert errors, "io_spec was removed from the schema -- additionalProperties: false rejects it"
+
+
+def test_perf_ref_present_is_rejected():
+    doc = _base()
+    doc["perf_ref"] = "some-ref"
+    errors = _schema_errors(doc)
+    assert errors, "perf_ref was removed from the schema -- additionalProperties: false rejects it"
+
+
+# --- example_app: constrained pattern + existence/board.yaml check (#5) ----
+
+def test_example_app_trailing_slash_is_rejected():
+    doc = _base()
+    doc["example_app"] = "examples/aen/aen-npu-inference/"
+    errors = _schema_errors(doc)
+    assert errors, "a trailing slash must fail the two-segment pattern"
+
+
+def test_example_app_one_segment_is_rejected():
+    doc = _base()
+    doc["example_app"] = "examples/aen-npu-inference"
+    errors = _schema_errors(doc)
+    assert errors, "example_app must be exactly examples/<category>/<name>"
+
+
+def test_example_app_backslash_is_rejected():
+    doc = _base()
+    doc["example_app"] = "examples\\aen\\aen-npu-inference"
+    errors = _schema_errors(doc)
+    assert errors, "a backslash-separated path must be rejected"
+
+
+def test_example_app_uppercase_is_rejected():
+    doc = _base()
+    doc["example_app"] = "examples/AEN/aen-npu-inference"
+    errors = _schema_errors(doc)
+    assert errors, "example_app segments are lowercase kebab-case, same as template-catalog-v1's `example`"
+
+
+def test_example_app_well_formed_is_accepted():
+    doc = _base()
+    doc["example_app"] = "examples/ai/ai-anomaly-detection-vibration"
+    assert _schema_errors(doc) == []
+
+
+def test_semantic_check_flags_nonexistent_example_app_dir(tmp_path):
+    """examples/ genuinely exists in every real alp-sdk checkout (this is
+    not a metadata-only scratch tree), so there is nothing to skip here --
+    a prior `pytest.skip` guard on `(V.REPO / "examples").is_dir()` could
+    never actually fire and was dead weight."""
+    doc = _base()
+    doc["example_app"] = "examples/aen/does-not-exist-nobody-names-this"
+    p = _write(tmp_path, doc)
+    failures = V._check_model_zoo_semantics([p])
+    assert failures
+    assert any("example_app" in m and "does-not-exist-nobody-names-this" in m
+               for m in failures[0][1])
+
+
+def test_semantic_check_flags_example_app_dir_without_board_yaml(tmp_path, monkeypatch):
+    """A real directory under examples/ that simply never carries a
+    board.yaml (not every examples/ subdirectory does) must still be
+    flagged -- existence of the directory alone isn't proof it's a
+    tan-buildable example app. Maintainer decision: KEEP the board.yaml
+    requirement (only tan-buildable examples are linkable); loosening
+    this later is additive, not breaking."""
+    fake_examples = tmp_path / "examples"
+    no_board = fake_examples / "aen" / "no-board-here"
+    no_board.mkdir(parents=True)
+    (no_board / "main.c").write_text("/* no board.yaml next to this */\n", encoding="utf-8")
+    monkeypatch.setattr(V, "REPO", tmp_path)
+    doc = _base()
+    doc["example_app"] = "examples/aen/no-board-here"
+    p = _write(tmp_path, doc)
+    failures = V._check_model_zoo_semantics([p])
+    assert failures
+    assert any("example_app" in m and "board.yaml" in m for m in failures[0][1])
+
+
+def test_semantic_check_accepts_a_real_board_yaml_carrying_example(tmp_path):
+    """Positive control: a real, tan-buildable example (one that DOES
+    carry board.yaml) must not be flagged."""
+    doc = _base()
+    doc["example_app"] = "examples/ai/ai-anomaly-detection-vibration"
+    assert (V.REPO / doc["example_app"] / "board.yaml").is_file(), (
+        "test assumption broken: examples/ai/ai-anomaly-detection-vibration "
+        "no longer carries board.yaml")
+    p = _write(tmp_path, doc)
+    failures = V._check_model_zoo_semantics([p])
+    assert failures == []
+
+
+def test_semantic_check_is_a_no_op_when_examples_dir_is_absent(tmp_path, monkeypatch):
+    """Guard test: when `(REPO / "examples")` doesn't exist at all (a
+    metadata-only scratch checkout), the example_app check must be a
+    silent no-op, never a false failure -- monkeypatch V.REPO to a tmp
+    dir that has no examples/ subdirectory whatsoever."""
+    monkeypatch.setattr(V, "REPO", tmp_path)  # tmp_path has no examples/ child
+    doc = _base()
+    doc["example_app"] = "examples/aen/does-not-exist-nobody-names-this"
+    p = _write(tmp_path, doc)
+    failures = V._check_model_zoo_semantics([p])
+    assert not any("example_app" in m for msgs in
+                   [m for _, m in failures] for m in msgs), (
+        "no examples/ tree at all must suppress the example_app check "
+        "entirely, not just the directory-existence half of it")
+
+
+def test_semantic_check_skips_disk_probe_for_a_schema_invalid_example_app(tmp_path):
+    """A schema-invalid example_app (e.g. uppercase, wrong segment count)
+    must not ALSO trigger a misleading disk-probe message -- only a value
+    that fullmatches the schema pattern is meaningful to resolve on disk
+    at all. Without this guard, 'EXAMPLES/AEN/X' would probe
+    `REPO / "EXAMPLES/AEN/X"`, find it missing, and print a confusing
+    'is not a real directory' alongside the real schema-pattern error."""
+    doc = _base()
+    doc["example_app"] = "examples/AEN/aen-npu-inference"  # fails the pattern (uppercase)
+    p = _write(tmp_path, doc)
+    failures = V._check_model_zoo_semantics([p])
+    assert not any("example_app" in m for _, msgs in
+                   ([] if not failures else [(p, failures[0][1])]) for m in msgs)
+
+
+# --- metadata/model_zoo/README.md (#7) --------------------------------------
+
+def test_readme_exists_and_is_not_treated_as_stray_by_the_collector():
+    readme = V.MODEL_ZOO / "README.md"
+    assert readme.is_file()
+    entries, starters, failures = V._collect_model_zoo_files(V.MODEL_ZOO)
+    assert failures == [], (
+        "metadata/model_zoo/README.md must be silently skipped by the "
+        "collector, same as model_perf's own README.md allowance")
+
+
+# --- trailing-newline pattern hole (adversarial review) --------------------
+#
+# jsonschema's `pattern` keyword validates with `re.search`, and Python's
+# `$` matches EITHER at the true end of string OR immediately before a
+# single trailing `\n` -- so a value with a stray trailing newline can
+# sneak past every `...$`-anchored pattern in this schema. Each test below
+# appends exactly one `\n` to an otherwise well-formed value and asserts
+# the schema still rejects it.
+
+def test_id_with_trailing_newline_is_rejected():
+    doc = _base()
+    doc["id"] = "example-tiny\n"
+    errors = _schema_errors(doc)
+    assert _has_error(errors, ["id"], "pattern"), (
+        "a trailing newline on id must not bypass the pattern anchor")
+
+
+def test_url_with_trailing_newline_is_rejected():
+    doc = _base()
+    doc["kind"] = "model"
+    doc["task"] = "object-detection"
+    doc["source"] = {"url": "https://example.com/model.tflite\n", "sha256": "a" * 64}
+    doc["validated_soms"] = []
+    errors = _schema_errors(doc)
+    assert _has_error(errors, ["source", "url"], "pattern"), (
+        "a trailing newline on url must not bypass the pattern anchor")
+
+
+def test_sha256_with_trailing_newline_is_rejected():
+    doc = _base()
+    doc["kind"] = "model"
+    doc["task"] = "object-detection"
+    doc["source"] = {"url": "https://example.com/model.tflite", "sha256": ("a" * 64) + "\n"}
+    doc["validated_soms"] = []
+    errors = _schema_errors(doc)
+    assert _has_error(errors, ["source", "sha256"], "pattern"), (
+        "a trailing newline on sha256 must not bypass the pattern anchor")
+
+
+def test_bundled_with_trailing_newline_is_rejected():
+    doc = _base()
+    doc["source"] = {"bundled": "starters/example-tiny.tflite\n"}
+    errors = _schema_errors(doc)
+    assert _has_error(errors, ["source", "bundled"], "pattern"), (
+        "a trailing newline on bundled must not bypass the pattern anchor")
+
+
+def test_sku_with_trailing_newline_is_rejected():
+    doc = _base()
+    doc["kind"] = "model"
+    doc["task"] = "object-detection"
+    doc["validated_soms"] = ["E1M-AEN801\n"]
+    errors = _schema_errors(doc)
+    assert _has_error(errors, ["validated_soms", 0], "pattern"), (
+        "a trailing newline on a validated_soms SKU must not bypass the pattern anchor")
+
+
+def test_example_app_with_trailing_newline_is_rejected():
+    doc = _base()
+    doc["example_app"] = "examples/aen/aen-npu-inference\n"
+    errors = _schema_errors(doc)
+    assert _has_error(errors, ["example_app"], "pattern"), (
+        "a trailing newline on example_app must not bypass the pattern anchor")
+
+
+def test_example_app_re_constant_rejects_trailing_newline():
+    """Unit-level check on the validator's own mirror of the schema
+    pattern -- `fullmatch` already closes this hole independently of the
+    schema fix (fullmatch requires consuming the WHOLE string, so a
+    `$`-before-trailing-\\n match is not enough), but this pins that
+    behaviour directly against the constant so the two can never
+    silently diverge again."""
+    assert V._MODEL_ZOO_EXAMPLE_APP_RE.fullmatch(
+        "examples/aen/aen-npu-inference\n") is None
 
 
 if __name__ == "__main__":
