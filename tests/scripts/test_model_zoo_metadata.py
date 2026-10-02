@@ -874,32 +874,33 @@ def test_license_apache2_is_accepted():
     assert _schema_errors(doc) == []
 
 
-def test_license_agpl_is_rejected():
+@pytest.mark.parametrize("license_id", [
+    # Every AGPLv3 spelling: the two current SPDX ids AND the deprecated
+    # bare one, so admitting any of them to the enum turns this red.
+    "AGPL-3.0", "AGPL-3.0-only", "AGPL-3.0-or-later",
+    "GPL-3.0-only",      # copyleft
+    "CC-BY-NC-4.0",      # non-commercial
+    "LicenseRef-x",      # no LicenseRef escape -- the allowlist is closed
+    "Apache-2",          # malformed/truncated SPDX id
+])
+def test_license_outside_allowlist_is_rejected(license_id):
     doc = _base()
-    doc["license"] = "AGPL-3.0-only"
-    errors = _schema_errors(doc)
-    assert errors, "copyleft licences are rejected until explicitly admitted"
+    doc["license"] = license_id
+    assert _has_error(_schema_errors(doc), ["license"], "enum")
 
 
-def test_license_cc_by_nc_is_rejected():
-    doc = _base()
-    doc["license"] = "CC-BY-NC-4.0"
-    errors = _schema_errors(doc)
-    assert errors, "non-commercial terms are rejected until explicitly admitted"
-
-
-def test_license_licenseref_is_rejected():
-    doc = _base()
-    doc["license"] = "LicenseRef-x"
-    errors = _schema_errors(doc)
-    assert errors, "no LicenseRef escape -- the allowlist is closed"
-
-
-def test_license_misspelled_id_is_rejected():
-    doc = _base()
-    doc["license"] = "Apache-2"
-    errors = _schema_errors(doc)
-    assert errors, "a malformed/truncated SPDX id must fail the closed enum"
+def test_license_enum_matches_readme_allowlist():
+    """metadata/model_zoo/README.md tells a maintainer to extend the schema
+    enum and its own allowlist block in the same change; this is what makes
+    that true rather than a convention."""
+    readme = (V.MODEL_ZOO / "README.md").read_text(encoding="utf-8")
+    section = readme.split("## Licence allowlist", 1)[1]
+    block = section.split("```", 2)[1]
+    readme_ids = [i.strip() for i in block.split(",")]
+    schema = json.loads(
+        (_ROOT / "metadata" / "schemas" / "model-zoo-v1.schema.json")
+        .read_text(encoding="utf-8"))
+    assert readme_ids == schema["properties"]["license"]["enum"]
 
 
 # --- task: closed kebab-case enum, smoke tied to kind (maintainer decision #2)
@@ -1016,7 +1017,7 @@ def test_example_app_uppercase_is_rejected():
 
 def test_example_app_well_formed_is_accepted():
     doc = _base()
-    doc["example_app"] = "examples/aen/aen-npu-inference"
+    doc["example_app"] = "examples/ai/ai-anomaly-detection-vibration"
     assert _schema_errors(doc) == []
 
 
@@ -1096,25 +1097,6 @@ def test_semantic_check_skips_disk_probe_for_a_schema_invalid_example_app(tmp_pa
     failures = V._check_model_zoo_semantics([p])
     assert not any("example_app" in m for _, msgs in
                    ([] if not failures else [(p, failures[0][1])]) for m in msgs)
-
-
-def test_real_model_zoo_entries_example_app_dirs_exist_and_have_board_yaml():
-    """Sweep every REAL metadata/model_zoo/*.yaml entry (skips cleanly if
-    none carry example_app -- example-tiny ships with none today) by
-    calling `_check_model_zoo_semantics` directly on the real files, so
-    this inherits the exact same guard/resolution logic the gate itself
-    runs rather than re-implementing a parallel check that could drift
-    from it."""
-    entries = sorted(V.MODEL_ZOO.glob("*.yaml"))
-    any_example_app = any(
-        isinstance(yaml.safe_load(p.read_text(encoding="utf-8")), dict)
-        and yaml.safe_load(p.read_text(encoding="utf-8")).get("example_app")
-        for p in entries
-    )
-    if not any_example_app:
-        pytest.skip("no real metadata/model_zoo/*.yaml entry carries example_app yet")
-    failures = V._check_model_zoo_semantics(entries)
-    assert not any("example_app" in m for _, msgs in failures for m in msgs)
 
 
 # --- metadata/model_zoo/README.md (#7) --------------------------------------

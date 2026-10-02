@@ -172,7 +172,7 @@ into the topic-specific docs.
   (`Apache-2.0`/`MIT`/`BSD-2-Clause`/`BSD-3-Clause`/`CC0-1.0` — extending
   it is a maintainer legal-review decision recorded in
   metadata/model_zoo/README.md, same as metadata/libraries/README.md's own
-  process; AGPL-3.0 and non-commercial/vendor-customer-only terms are
+  process; AGPLv3 and non-commercial/vendor-customer-only terms are
   rejected until explicitly admitted). Every entry declares `kind: model`
   (a real, published entry, `task` never `smoke`) or `kind: fixture` (a
   wiring/smoke entry, `task` always `smoke`, never a hardware claim —

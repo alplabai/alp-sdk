@@ -38,7 +38,7 @@
     "license": {
       "type": "string",
       "enum": ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "CC0-1.0"],
-      "description": "SPDX id of the linked upstream model's own licence (its weights + graph), or of the bundled starter -- describes the WEIGHTS' terms, not the training dataset's. Validated against this permissive, closed allowlist (no `LicenseRef-*` escape): a copyleft (including AGPL-3.0, the terms real Ultralytics YOLO checkpoints (e.g. yolo11n) ship under), non-commercial, or vendor-customer-only licence is rejected until explicitly admitted. Extending this allowlist is a deliberate human decision (legal review), not a metadata edit -- add the id here AND in metadata/model_zoo/README.md's allowlist rationale in the same change, mirroring metadata/libraries/README.md's own licence-allowlist process."
+      "description": "SPDX id of the linked upstream model's own licence (its weights + graph), or of the bundled starter -- describes the WEIGHTS' terms, not the training dataset's. Validated against this permissive, closed allowlist (no `LicenseRef-*` escape): a copyleft (including AGPLv3 -- SPDX `AGPL-3.0-only` / `AGPL-3.0-or-later` -- the terms real Ultralytics YOLO checkpoints (e.g. yolo11n) ship under), non-commercial, or vendor-customer-only licence is rejected until explicitly admitted. Extending this allowlist is a deliberate human decision (legal review), not a metadata edit -- add the id here AND in metadata/model_zoo/README.md's allowlist rationale in the same change, mirroring metadata/libraries/README.md's own licence-allowlist process."
     },
     "source": {
       "type": "object",

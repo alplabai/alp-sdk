@@ -104,20 +104,22 @@ licence, which is a separate question this field does not answer.
 **Extending this allowlist is a deliberate human decision (legal review),
 not a metadata edit.** Add the SPDX id in BOTH
 `metadata/schemas/model-zoo-v1.schema.json` (`license.enum`) and this list,
-in the same change, with the legal rationale in the commit body -- mirroring
+in the same change (`tests/scripts/test_model_zoo_metadata.py` fails if
+the two differ), with the legal rationale in the commit body -- mirroring
 `metadata/libraries/README.md`'s own licence-allowlist process.
 
-Copyleft (including AGPL-3.0), non-commercial, and vendor-customer-only
-terms are rejected until explicitly admitted. This is not hypothetical:
-many popular real-time detector checkpoints are AGPL-3.0 and are therefore
+Copyleft (including AGPLv3 -- SPDX `AGPL-3.0-only` / `AGPL-3.0-or-later`),
+non-commercial, and vendor-customer-only terms are rejected until
+explicitly admitted. This is not hypothetical:
+many popular real-time detector checkpoints are AGPLv3 and are therefore
 **not** admitted here by policy -- Ultralytics YOLO checkpoints (e.g.
-`yolo11n`) ship under AGPL-3.0 (`docs/vendor-partnerships.md:242` records
-DEEPX's own `ultralytics-deepx` fork as AGPL-3.0) and cannot be added to
+`yolo11n`) ship under AGPLv3 (`docs/vendor-partnerships.md:242` records
+DEEPX's own `ultralytics-deepx` fork as AGPLv3) and cannot be added to
 this zoo under their current licence. DEEPX's `dx-modelzoo` is separately
 MIT (`docs/vendor-partnerships.md:241`) but that MIT licence covers
 DEEPX's OWN reference models -- it does not relicense an
 Ultralytics-derived checkpoint vendored or fine-tuned elsewhere; an
-AGPL-3.0 YOLO weight stays AGPL-3.0 regardless of which repository ships
+AGPLv3 YOLO weight stays AGPLv3 regardless of which repository ships
 it.
 
 Where a genuinely permissively-licensed equivalent exists it is the one
