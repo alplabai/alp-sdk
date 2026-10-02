@@ -842,3 +842,26 @@ def test_schema_rejects_an_unknown_ina228_range_or_a_range_without_its_macro():
     no_macro = _ina228_board("1.6384", "163mv")
     del no_macro["i2c_devices"][0]["calibration"]["adc_range_macro"]
     assert errors(no_macro), "adc_range without adc_range_macro must fail schema validation"
+
+
+def test_adc_range_is_rejected_on_a_part_other_than_ina228(gen_module):
+    """`adc_range` is INA228-only: the generator and the schema both refuse it
+    on an `ina236` entry (whose range enum and full scales differ)."""
+    board = _ina228_board("1.0", "163mv")
+    board["i2c_devices"][0]["part"] = "ina236"
+    with pytest.raises(SystemExit, match="INA228-only"):
+        gen_module.emit_board("TEST-INA228", board)
+
+    schema = json.loads(
+        (REPO / "metadata" / "schemas" / "board-preset.schema.json").read_text(encoding="utf-8")
+    )
+    validator = jsonschema.Draft202012Validator(schema)
+    doc = {**board, "e1m_routes": {}}
+    errs = [e for e in validator.iter_errors(doc) if "i2c_devices" in list(e.absolute_path)]
+    assert errs, "adc_range on an ina236 entry must fail schema validation"
+    # The same entry as an ina228 is accepted.
+    doc["i2c_devices"][0]["part"] = "ina228"
+    assert not [e for e in validator.iter_errors(doc) if "i2c_devices" in list(e.absolute_path)]
+    # An entry with no part at all, carrying adc_range, is rejected too.
+    del doc["i2c_devices"][0]["part"]
+    assert [e for e in validator.iter_errors(doc) if "i2c_devices" in list(e.absolute_path)]

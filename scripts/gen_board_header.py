@@ -128,12 +128,17 @@ _INA228_RANGE_BIT = {"163mv": 0, "40mv": 1}
 _INA228_RANGE_FULL_SCALE_V = {"163mv": 0.16384, "40mv": 0.04096}
 
 
-def _check_calibration_range(macro: str, cal: dict[str, Any]) -> None:
+def _check_calibration_range(macro: str, cal: dict[str, Any], part: str | None) -> None:
     """A calibration entry with an `adc_range` must not ask for a max current
     the shunt cannot measure on that range: full scale = range voltage /
     shunt resistance.  Fails the generation (the board YAML is wrong), the
     same way the driver's ina228_calibration_for() rejects it."""
     rng = cal.get("adc_range")
+    if (rng or cal.get("adc_range_macro")) and part != "ina228":
+        raise SystemExit(
+            f"gen_board_header: {macro}: adc_range / adc_range_macro are INA228-only, "
+            f"but part is {part!r}"
+        )
     if not rng:
         return
     shunt_ohms = float(cal["shunt_ohms"])
@@ -194,7 +199,7 @@ def _emit_i2c_devices(devices: list[dict[str, Any]]) -> list[str]:
         macro = _tag(entry["macro"], assembled)
         shunt_macro = _tag(cal["shunt_macro"], assembled)
         max_macro = _tag(cal["max_macro"], assembled)
-        _check_calibration_range(macro, cal)
+        _check_calibration_range(macro, cal, entry.get("part"))
         calib_lines.append(
             (shunt_macro, f"{cal['shunt_ohms']}f", f"Shunt for {macro}.")
         )
