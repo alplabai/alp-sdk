@@ -20,9 +20,9 @@
 #   module `open-amp`), <alp/rpc.h> frames RPMsg on the A side, and
 #   examples/multicore/rpmsg-v2n proves the A55<->M33 channel.  On V2N the
 #   A55 side is the UIO backend (src/backends/rpc/yocto_uio_drv.c), not
-#   kernel rpmsg.  But NOTHING wires the XRCE transport onto it today, and
-#   there is no ROS 2 agent packaged on the A side yet.  It must be proven on
-#   the bench -- it is NOT built here.
+#   kernel rpmsg.  examples/multicore/microros-ros2-v2n wires the XRCE custom
+#   transport onto it (ADR 0035 Option B); it has not been built or run on
+#   the bench yet, and no ROS 2 agent is packaged on the A side (#372).
 #
 # Version:  `humble` -- the micro-ROS Humble release line, chosen to pair with
 #   the meta-ros2-humble A-side that meta-alp-sdk already grounds (ros2.yaml).
@@ -34,8 +34,9 @@ name: micro-ros
 description: "micro-ROS -- ROS 2 client for microcontrollers (Cortex-M / Zephyr node)."
 # Tier B for now: the metadata/libraries/README.md promotion bar for Tier A is
 # CI-built + a shipped teaching example + breakage-blocks-release.  micro-ROS
-# meets only the pin + manifest part today.  It promotes to Tier A once the CI
-# build lane and the microros<->ros2 example land (its named follow-ups).
+# meets only the pin + manifest part today.  The teaching example now exists
+# (examples/multicore/microros-ros2-v2n); it promotes to Tier A once the CI
+# build lane and bench results exist.
 tier: B
 version: "humble"
 license: Apache-2.0

@@ -1500,6 +1500,36 @@
         "summary": "> `[UNTESTED]` -- v0.6 paper-correct. Builds against the same V2N > memory_map as rpmsg-v2n (no TBD addresses). HiL bring-up gates > on v0.8."
       },
       {
+        "board": "e1m-x-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./linux",
+            "id": "a55_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "./m33_sm",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": true,
+          "models": false,
+          "peripherals": true
+        },
+        "name": "microros-ros2-v2n",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
+        "path": "examples/multicore/microros-ros2-v2n",
+        "som": "E1M-V2N101",
+        "summary": "> **Status: not yet built or run on hardware.** The A55 bridge compiles > warning-free on a Linux host; the M33 firmware has never been built (it > needs `micro_ros_zephyr_module`'s colcon cross-build, and a small patch > to that module, see `m33_sm/patches/`). See [What is untested](#what-is-untested). Nothing here is > bench evidence."
+      },
+      {
         "board": "e1m-evk",
         "coreCount": 3,
         "cores": [
