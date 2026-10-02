@@ -149,6 +149,9 @@ def restore_dtb(t, dtb_name: str, release_md5: str) -> None:
         raise BenchError(f"release DTB restore FAILED: {live} md5 {got} != {release_md5}; "
                          f"the unit boots the dxuart2 DTB (PCIe off) until {bak} is copied back")
     t.run(f"rm -f {shlex.quote(bak)} && sync", check=False)
+    if t.run(f"test -e {shlex.quote(bak)}", check=False).rc == 0:
+        raise BenchError(f"release DTB restored but {bak} could not be removed; remove it by hand "
+                         "or boot_sd_linux/census will refuse this unit")
 
 
 def check_dxuart2_booted(t) -> None:

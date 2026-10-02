@@ -768,7 +768,7 @@ def leftover_dxuart2_swap(ctx) -> str:
     except (BenchError, Refused, ValueError, KeyError, OSError):
         return ""
     return (f"{bak} exists: an interrupted dxm1_npu_flash left the dxuart2 DTB installed. Copy "
-            f"{bak} back over its live DTB and remove it (or re-run dxm1_npu_flash, which heals it) "
+            f"{bak} back over its live DTB and remove it (or run `--only dxm1_npu_flash`, which heals it) "
             "before provisioning further")
 
 
@@ -1445,7 +1445,7 @@ class Dxm1NpuFlash(Step):
             raise Refused(f"{e}{self._heal(ctx, dtb_name, st)}") from e
         except Refused as e:
             raise Refused(f"{e}{self._heal(ctx, dtb_name, st)}") from e
-        except BenchError as e:         # not type(e)(...): ExpectTimeout takes (pattern, tail, timeout)
+        except (BenchError, OSError) as e:  # not type(e)(...): ExpectTimeout takes (pattern, tail, timeout)
             raise BenchError(f"{e}{self._heal(ctx, dtb_name, st)}") from e
         ctx.mutate(f"restore /boot/{dtb_name} from .release, verify its md5",
                    lambda: dxm1.restore_dtb(ctx.linux, dtb_name, st["release"]))
