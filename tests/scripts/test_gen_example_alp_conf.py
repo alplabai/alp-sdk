@@ -3,6 +3,8 @@
 `generated/alp.conf` pre-generation twister / bare `west build` rely on (#866)."""
 import importlib.util
 import os
+import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -129,3 +131,47 @@ def test_twins_only_for_examples_with_the_hook():
     assert hooked >= 5
     assert (_example("examples/peripheral-io/alp-console")
             / "generated/aen803/alp.conf").is_file()
+
+
+# --- the CMakeLists.txt selector, run by real CMake ------------------------------------
+
+def _hooked_examples():
+    return sorted(p.parent for p in (REPO / "examples").rglob("CMakeLists.txt") if GEN._has_hook(p.parent))
+
+
+def _selected_conf(cmakelists: Path, tmp_path: Path, board: str, twin_dirs: tuple[str, ...]) -> str:
+    """Run the example's own selector (everything above find_package) in CMake
+    script mode against a fake generated/ tree; return the EXTRA_CONF_FILE it picks."""
+    head = cmakelists.read_text(encoding="utf-8").split("find_package(Zephyr", 1)[0]
+    (tmp_path / "generated").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "generated" / "alp.conf").write_text("", encoding="utf-8")
+    for sku in twin_dirs:
+        (tmp_path / "generated" / sku).mkdir(exist_ok=True)
+        (tmp_path / "generated" / sku / "alp.conf").write_text("", encoding="utf-8")
+    script = tmp_path / "selector.cmake"
+    script.write_text('set(EXTRA_CONF_FILE "generated/alp.conf")\n' + head
+                      + 'message("SELECTED=${EXTRA_CONF_FILE}")\n', encoding="utf-8")
+    proc = subprocess.run(["cmake", f"-DBOARD={board}", "-P", str(script)], capture_output=True,
+                          text=True, encoding="utf-8", check=False)
+    assert proc.returncode == 0, proc.stderr
+    return re.search(r"SELECTED=(.*)", proc.stderr + proc.stdout)[1].strip()
+
+
+@pytest.mark.skipif(shutil.which("cmake") is None, reason="needs cmake")
+@pytest.mark.parametrize("app_dir", _hooked_examples(), ids=lambda p: p.name)
+def test_selector_keeps_the_base_fragment_when_the_board_has_no_twin_dir(app_dir, tmp_path):
+    # Only generated/aen803/ exists (the twin of an AEN801 board.yaml). A build
+    # for the AEN801 board must stay on generated/alp.conf: pointing it at a
+    # generated/aen801/alp.conf nobody wrote is a CMake "File not found".
+    cm = app_dir / "CMakeLists.txt"
+    got = _selected_conf(cm, tmp_path, "alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp", ("aen803",))
+    assert got == "generated/alp.conf"
+
+
+@pytest.mark.skipif(shutil.which("cmake") is None, reason="needs cmake")
+@pytest.mark.parametrize("app_dir", _hooked_examples(), ids=lambda p: p.name)
+def test_selector_picks_the_twin_fragment_when_it_exists(app_dir, tmp_path):
+    cm = app_dir / "CMakeLists.txt"
+    got = _selected_conf(cm, tmp_path, "alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp", ("aen803",))
+    assert got == "generated/aen803/alp.conf"
+    assert _selected_conf(cm, tmp_path, "native_sim/native/64", ("aen803",)) == "generated/alp.conf"
