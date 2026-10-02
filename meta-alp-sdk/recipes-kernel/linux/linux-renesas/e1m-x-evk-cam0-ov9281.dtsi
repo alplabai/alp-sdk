@@ -36,16 +36,25 @@
  *   - Clock: RPi-style modules carry their own 24 MHz oscillator; the
  *     driver still wants an xvclk handle, so a fixed-clock stands in.
  *
- * Sensor / driver facts (6.1.141-cip43, drivers/media/i2c/ov9282.c):
- *   - Matches only "ovti,ov9282"; the OV9281 shares chip ID 0x9281, so it
- *     probes with this compatible.
+ * Sensor / driver facts (drivers/media/i2c/ov9282.c, v6.6 backport, patch
+ * 0020):
+ *   - Matches "ovti,ov9282" and "ovti,ov9281"; the OV9281 shares chip ID
+ *     0x9281.  This node uses ovti,ov9281, the part actually fitted.
  *   - 2 data lanes, link frequency 400000000 Hz only (the endpoint is
- *     rejected otherwise), one mode: 1280x720 MEDIA_BUS_FMT_Y10_1X10.  The
- *     sensor's native 1280x800 mode is NOT in the 6.1 driver.
+ *     rejected otherwise).  Three modes: 1280x720 (default), 1280x800
+ *     (full array) and 640x400 (2x2 binned), each as MEDIA_BUS_FMT_Y10_1X10
+ *     or MEDIA_BUS_FMT_Y8_1X8.
+ *   - The driver writes the gated MIPI clock (0x4800 = 0x20) only when the
+ *     endpoint has clock-noncontinuous.  The bench-proven 0016/0017 run
+ *     used the gated clock, so the endpoint below sets it.
+ *   - The driver asks for avdd/dovdd/dvdd supplies; none is described
+ *     because the J5 3V3 rail is always on, so it logs three "using dummy
+ *     regulator" lines.  That is expected.
  *   - Optional reset-gpios; none is wired here.
  *   - I2C address 0x60 (typical RPi OV9281 modules); some modules strap
  *     0x70 -- change `reg` and the unit name if i2cdetect shows that.
- *   - Y10_1X10 -> CR10 via patch 0016.  See docs/v2n-camera-csi.md.
+ *   - Y10_1X10 -> CR10 and Y8_1X8 -> GREY via patch 0016.  See
+ *     docs/v2n-camera-csi.md.
  */
 
 / {
@@ -82,7 +91,7 @@
 	status = "okay";
 
 	cam0_sensor: camera@60 {
-		compatible = "ovti,ov9282";
+		compatible = "ovti,ov9281";
 		reg = <0x60>;
 		clocks = <&cam0_xclk>;
 
@@ -91,6 +100,8 @@
 				remote-endpoint = <&csi2_in>;
 				data-lanes = <1 2>;
 				link-frequencies = /bits/ 64 <400000000>;
+				/* Gated clock, as the bench-proven 6.1 driver ran it. */
+				clock-noncontinuous;
 			};
 		};
 	};
