@@ -169,26 +169,53 @@ Every PSU command is logged with a monotonic timestamp in the step log.
 
 ### Clean shutdown before every cut
 
-The tool never cuts power under a running Linux: a hard cut while the microSD root
-was mounted corrupted its ext4 journal (`JBD2: journal transaction ... is corrupt`,
-kernel panic on the next boot). Before **every** tool-driven power cycle (`detect`,
-`boot_to_linux` and so `boot_sd_linux`, the `eeprom_manifest` and `gd32_flash` cold
-cycles, each `cold_boot_test` cycle, `poweroff_and_cold_boot`, the `bootstrap` and
-`dsw1_emmc_insert_sd` cycles, the xmodem path) `clean_shutdown` runs:
+A hard power cut while the microSD root was mounted corrupted its ext4 journal
+(`JBD2: journal transaction ... is corrupt`, kernel panic on the next boot). Before
+every tool-driven power cut `clean_shutdown` tries to halt a running Linux. It does
+not promise that: it records what it did, and some cases are not covered.
 
-1. If Linux is reachable (SSH, including the `bench.yaml` `linux.host` of a unit a
-   previous run left up, else this boot's console login), it runs `sync; poweroff`.
-2. It waits up to 90 s for the console halt line (`reboot: Power down` or
-   `System halted`).
-3. No halt line: it runs `sync` again and waits 5 s, and the plan log records
-   `clean shutdown FALLBACK: no halt line in 90s; sync + 5s wait`.
-4. Only then does `Power.cycle` cut the PSU. The OFF dwell is unchanged, so a clean
-   poweroff followed by it is still a cold boot, and `cold_boot_test` keeps its
-   `--cold-cycles` (3) cold boots.
+Where it runs: `detect`, `boot_to_linux` (so `boot_sd_linux`, the `eeprom_manifest`
+and `gd32_flash` cold cycles, every `cold_boot_test` cycle, `poweroff_and_cold_boot`),
+the `bootstrap` cycle, the xmodem path of `boot_sd_linux`, and, before the operator is
+asked to switch power off or pull the card, `dsw1_emmc_insert_sd` and
+`dsw1_xspi_remove_sd` (their prompts say whether the unit was halted).
 
-The PSU current is not used as a halt signal. A unit that is not reachable (dead
-SSH, no console login, U-Boot, the SCIF ROM) is cycled directly. Not covered: Linux
-running from a previous process on a console only, with no pinned `linux.host`.
+How it reaches the unit, in this order:
+
+1. This boot's console login: one console line `sync; echo "ALPS<nonce>:$?"; poweroff`.
+2. SSH to the pinned (`bench.yaml` `linux.host`) or discovered host, but only after that
+   host has written a nonce to its `/dev/console` and the nonce was read on this unit's
+   serial console (a stale DHCP lease can point at another unit). Over SSH:
+   `sync; echo ALPSYNC:$?; poweroff`.
+3. A console whose state is unknown (no login of this tool on this power-on, no proven
+   SSH host): Ctrl-C only, read 2 s. A `=> ` prompt means U-Boot, no shutdown needed.
+   Otherwise a console login (5 s); on a shell, path 1. Never a bare Enter (U-Boot would
+   repeat its last command). A unit known to sit in the SCIF ROM or the Flash Writer
+   gets nothing sent: this tool's parsers send those only CR-terminated lines and never
+   `0x03`, so Ctrl-C there is untested.
+
+Then it waits up to 120 s for the console halt line (`reboot: Power down` or
+`System halted`), plus 5 s more before it gives up. It is done once per power-on.
+The PSU current is not a halt signal. The OFF dwell is unchanged, so a clean poweroff
+followed by it is still a cold boot, and `cold_boot_test` keeps its `--cold-cycles` (3).
+
+Every cut is recorded as the step evidence key `power_cut` (and in the step log and the
+plan log), one entry per cut:
+
+| value | meaning |
+|---|---|
+| `clean` | `poweroff` sent and the halt line seen (`(late)` if it came in the extra 5 s); `sync rc=` says what the first `sync` returned |
+| `fallback` | no halt line. Over SSH a second `sync` ran and its rc (or error) is recorded; on the console no second command is sent (the first may still be running, and a new command would Ctrl-C it) |
+| `blind` | no console shell and no SSH path proven to be this unit. If Linux is up the cut is hard; the entry says so |
+| `not-needed` | PSU already off, U-Boot prompt, SCIF ROM / Flash Writer, or already halted on this power-on |
+
+Not covered: a kernel that is still booting (no shell yet, so the probe finds nothing and
+the cut is `blind`), a console shell that does not answer, a unit that is hung, and the
+manual or labgrid power kinds (their prompts and commands are still preceded by this
+shutdown, but nobody checks what the operator does). The `reboot: Power down` line was
+seen on this image on 2026-10-02 in a manual session, not by this code; the halt-line
+text, the 120 s bound and all of the above are not yet confirmed by a run of this code on
+a bench.
 
 ## Steps
 
@@ -372,21 +399,29 @@ lock frame, only a re-read with bit 1 set counts.
   `eth0_phy_id` / `eth1_phy_id` hold the sysfs value (`/sys/class/net/<if>/phydev/phy_id`),
   `eth0_phy_id_raw` / `eth1_phy_id_raw` the raw registers (e.g. `0x001cc916`), read by a
   small python3 `SIOCGMIIPHY` / `SIOCGMIIREG` helper pushed to `/tmp` and removed again
-  (the image has python3 and no `mii-tool`). `eth_phy_id_mismatch` is `yes` when a port's
-  raw and sysfs IDs differ, `no` when both ports match, `unread` when a value could not
-  be read.
+  (the image has python3 and no `mii-tool`). A port the helper cannot read is
+  `unread (<if> errno <n>)` (a port that is down may answer `EINVAL`).
+  `eth_phy_id_mismatch` is `yes` when a readable port's raw and sysfs IDs differ, `no` when
+  both ports match, `unread` when a value could not be read and no readable port differs.
 - **gbeth DMA reset.** `eth_dma_reset_failed` is `none`, `end0`, `end1` or `end0,end1`
   from `Failed to reset the dma` in `dmesg` (`unknown` when the line names no port).
 - **Supply-current screen.** With SCPI power, `current()` sends one `MEAS:CURR? CH<n>`
   (the configured channel only, over the persistent socket) and census records
-  `psu_current_a` (amps) and `psu_current_state` (`linux-idle`). A reading above
+  `psu_current_a` (amps) and `psu_current_state` (`at-census`: one reading, taken when
+  census runs, with the load not controlled). A reply that is not a finite number is
+  `unread`. A reading above
   0.40 A adds `WARNING: supply current ... A > 0.40 A` to the step detail; the step still
   passes, because the threshold belongs in the private catalogue. Background: a capacitor
   on the PHY regulator output (a fault on one SoM revision) draws about 0.45 A as soon as
   the PHYs leave reset, against 0.17 to 0.29 A normal. Labgrid and manual power have no
   meter: the keys are absent. A failed query records `psu_current_a: unread (<error>)`.
 
-These keys reach the unit ledger only if the private catalogue lists them as `auto`.
+These keys reach the unit ledger only if the private catalogue lists them as `auto`. An
+`unread (...)` value never satisfies a `ship_required` key in the ship check.
+
+Not yet confirmed by a run of this code on a bench: the MII values `0x001c` / `0xc916` (seen
+on this SoM revision outside the tool), the 0.40 A threshold, the `MEAS:CURR?` reply format
+and the sysfs `phydev/phy_id` path.
 
 ## Provisioning SD payload store
 

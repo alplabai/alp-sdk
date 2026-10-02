@@ -120,11 +120,14 @@ def clang_format_text(tmp_path: Path, name: str, text: str) -> str:
 
 @pytest.fixture(autouse=True)
 def _provision_no_real_waits(request, monkeypatch):
-    """The provisioning tool's clean-shutdown halt wait (90 s) and I2C retry gap run on a real
+    """The provisioning tool's clean-shutdown waits (up to 120 s each) and I2C retry gap run on a real
     clock; a fake console that never prints a halt line must not stall a test for it."""
     if not request.module.__name__.rsplit(".", 1)[-1].startswith("test_provision"):
         return
     from provision import linux_target, steps
-    monkeypatch.setattr(steps, "HALT_WAIT_S", 0.05)
-    monkeypatch.setattr(steps, "HALT_FALLBACK_S", 0.01)
+    for name, value in (("HALT_WAIT_S", 0.05), ("HALT_LATE_S", 0.01), ("POWEROFF_TIMEOUT_S", 0.05),
+                        ("PROBE_S", 0.01), ("ID_WAIT_S", 0.02), ("DETECT_WAIT_S", 0.05)):
+        monkeypatch.setattr(steps, name, value)
+    # the Ctrl-C probe of an unknown console writes to it: strict fake consoles opt in explicitly
+    monkeypatch.setattr(steps, "PROBE_UNKNOWN_CONSOLE", False)
     monkeypatch.setattr(linux_target, "I2C_GET_GAP_S", 0.0)

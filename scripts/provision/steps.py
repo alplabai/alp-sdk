@@ -20,7 +20,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import math
 import re
+import secrets
 import shlex
 import subprocess
 import sys
@@ -149,6 +151,13 @@ class Ctx:
     # Power.on_count of the boot this tool last logged in on over the console: Linux may be
     # running with no SSH, and clean_shutdown() then halts it through the console shell.
     console_login_on_count: int | None = None
+    # Power.on_count at which clean_shutdown() already halted the unit (once per power-on);
+    # at which the unit is known to sit in the SCIF ROM / Flash Writer (nothing but its own
+    # CR-terminated lines may be sent there).
+    halted_on_count: int | None = None
+    rom_console_on_count: int | None = None
+    # one line per power cut (clean_shutdown outcome); run_one copies them into the step evidence
+    power_cuts: list[str] = field(default_factory=list)
     step_logs: dict[str, str] = field(default_factory=dict)
     _cache: dict = field(default_factory=dict)
 
@@ -392,44 +401,167 @@ def _wait_for_ip(ctx: Ctx, wait_s: float, rediscover: bool) -> None:
 
 
 HALT_RE = r"reboot: Power down|System halted"
-HALT_WAIT_S = 90.0
-HALT_FALLBACK_S = 5.0
+HALT_WAIT_S = 120.0          # the halt line after `poweroff`; a microSD root can hold seconds of writeback
+HALT_LATE_S = 5.0            # one more look before the cut is called a fallback
+POWEROFF_TIMEOUT_S = 120.0   # `sync; poweroff` itself
+PROBE_S = 2.0                # Ctrl-C probe of a console whose state is unknown
+ID_WAIT_S = 5.0              # the SSH identity nonce on this unit's console
+PROBE_UNKNOWN_CONSOLE = True
+DETECT_WAIT_S = 240.0
 
 
-def clean_shutdown(ctx: Ctx) -> None:
-    """Halt a running Linux before any tool-driven power cut (a hard cut under a mounted
-    microSD root corrupted its journal, #2624). Execute-mode only; a no-op when no Linux
-    is reachable (SSH, else this boot's console login).
-
-    `poweroff` over that path, then wait HALT_WAIT_S for the kernel's halt line. Without
-    it: `sync` + HALT_FALLBACK_S of quiet, noted in the plan log. The supply current is
-    not a halt signal. The PSU stays ON; the caller's Power.cycle does the OFF dwell, so
-    a cold boot stays a cold boot."""
-    b = ctx.bench
-    if b is None or not ctx.execute:
-        return
-    if ctx.linux_up():
-        t = ctx.linux
-    elif ctx.console_login_on_count == b.power.on_count:
-        t = ConsoleTarget(b.console)
+def console_login_ctx(ctx: Ctx, timeout: float | None = None) -> None:
+    """lt.console_login on the bench console, remembering which power-on it logged in on
+    (clean_shutdown() then halts that boot through the console shell)."""
+    b = ctx.need_bench()
+    if timeout is None:
+        lt.console_login(b.console, b.linux_user)
     else:
-        return
+        lt.console_login(b.console, b.linux_user, timeout=timeout)
+    ctx.console_login_on_count = b.power.on_count
+
+
+def _nonce() -> str:
+    return secrets.token_hex(4)
+
+
+def _record_cut(ctx: Ctx, outcome: str, why: str) -> str:
+    """Every power cut, durably: ``ctx.power_cuts`` (run_one copies it into the step's
+    ``power_cut`` evidence and its log) and the plan log."""
+    line = f"{outcome}: {why}"
+    ctx.power_cuts.append(line)
+    ctx.plan_log.append("power cut " + line)
+    return outcome
+
+
+def halt_note(outcome: str) -> str:
+    """The operator-prompt sentence for a clean_shutdown() outcome."""
+    if outcome == "clean":
+        return "The unit has been halted (poweroff, halt line seen)."
+    if outcome == "not-needed":
+        return "No running Linux was found, so nothing was halted."
+    return (f"WARNING: the unit was NOT cleanly halted ({outcome or 'no shutdown attempted'}); "
+            "a mounted microSD root may be dirty.")
+
+
+def _same_unit(ctx: Ctx, t) -> bool:
+    """Prove that the SSH host is the unit on THIS console: it must write a nonce to its
+    /dev/console and we must read it on our serial line (a stale DHCP lease may point at
+    another unit, which `poweroff` would then halt instead)."""
+    b = ctx.bench
+    nonce = _nonce()
     b.console.drain()
     try:
-        t.run("sync; poweroff", check=False, timeout=30.0)
+        t.run(f"echo ALPID{nonce} > /dev/console", check=False, timeout=15.0)
+        b.console.expect(f"ALPID{nonce}", ID_WAIT_S)
     except BenchError:
-        pass                    # ssh drops with the host
+        return False
+    return True
+
+
+def _probe_console(ctx: Ctx):
+    """A console whose state is unknown. Send Ctrl-C ONLY (never a bare Enter: U-Boot repeats
+    its last command on one), read PROBE_S: a U-Boot prompt means there is no Linux ("uboot");
+    otherwise try a console login (5 s). Returns a ConsoleTarget on a shell, else None.
+    Not sent to a unit known to be in the SCIF ROM / Flash Writer (clean_shutdown returns before):
+    this tool's parsers send those only CR-terminated lines and never 0x03."""
+    b = ctx.bench
+    b.console.drain()
+    b.console.write(b"\x03")
+    b.console.pump(PROBE_S)
+    if re.search(uboot.PROMPT, b.console.peek()):
+        return "uboot"
+    try:
+        console_login_ctx(ctx, timeout=5.0)
+    except BenchError:
+        return None
+    return ConsoleTarget(b.console)
+
+
+def clean_shutdown(ctx: Ctx) -> str:
+    """Halt a running Linux before ANY tool-driven power cut (a hard cut under a mounted
+    microSD root corrupted its journal, #2624). Execute-mode only. Returns and records
+    (``ctx.power_cuts`` -> the step's ``power_cut`` evidence) the outcome:
+
+    - ``clean``: `poweroff`, then the kernel's halt line;
+    - ``fallback``: no halt line in HALT_WAIT_S + HALT_LATE_S; says what the syncs did;
+    - ``blind``: no way to reach the unit (no console shell, no SSH proven to be this unit);
+      if Linux is up the cut is hard;
+    - ``not-needed``: PSU off, U-Boot, SCIF ROM / Flash Writer, or already halted on this ON.
+
+    Path: this boot's console login, else SSH to the pinned/discovered host after it has
+    echoed a nonce on this unit's console, else a Ctrl-C probe of the console. The PSU stays
+    ON; the caller's Power.cycle does the OFF dwell, so a cold boot stays a cold boot. The
+    supply current is not a halt signal. A kernel still booting is not covered."""
+    b = ctx.bench
+    if b is None or not ctx.execute:
+        return ""
+    count = b.power.on_count
+    if b.power.is_on() is False:
+        return _record_cut(ctx, "not-needed", "PSU already off")
+    if ctx.halted_on_count == count:
+        return _record_cut(ctx, "not-needed", "already halted on this power-on")
+    if ctx.rom_console_on_count == count:
+        return _record_cut(ctx, "not-needed", "SCIF ROM / Flash Writer live, no Linux; nothing sent")
+    t, via, skipped = None, "", ""
+    if ctx.console_login_on_count == count:
+        t, via = ConsoleTarget(b.console), "console"
+    elif ctx.linux_up():
+        if _same_unit(ctx, ctx.linux):
+            t, via = ctx.linux, "ssh"
+        else:
+            skipped = (f"ssh host {getattr(ctx.linux, 'host', '?')} did not echo this unit's console nonce "
+                       "(another unit / stale lease): no poweroff sent over ssh; ")
+    if t is None and PROBE_UNKNOWN_CONSOLE:
+        found = _probe_console(ctx)
+        if found == "uboot":
+            return _record_cut(ctx, "not-needed", "U-Boot prompt, no shutdown needed")
+        if found is not None:
+            t, via = found, "console"
+    if t is None:
+        return _record_cut(ctx, "blind", skipped + "no console shell and no proven ssh path; "
+                           "if Linux is up this cut is hard")
+    b.console.drain()
+    if via == "ssh":
+        try:
+            r = t.run("sync; echo ALPSYNC:$?; poweroff", check=False, timeout=POWEROFF_TIMEOUT_S)
+            m = re.search(r"ALPSYNC:(\d+)", r.stdout)
+            sync_rc = m[1] if m else "unknown"
+        except BenchError as e:                  # ssh may also drop with the host
+            sync_rc = f"unknown ({e})"
+    else:
+        nonce = _nonce()
+        # one console line, paced like ConsoleTarget (RX overruns on a burst); the marker is split
+        # in the typed line so its echo cannot match
+        b.console.send_line(f'sync; echo "ALPS""{nonce}:$?"; poweroff', paced=True)
+        try:
+            sync_rc = b.console.expect(rf"ALPS{nonce}:(\d+)", POWEROFF_TIMEOUT_S).group(1)
+        except ExpectTimeout:
+            sync_rc = "unknown (no marker; sync may still be running)"
+    late = ""
     try:
         b.console.expect(HALT_RE, HALT_WAIT_S)
-        ctx.plan_log.append("clean shutdown: poweroff, halt line seen")
+        halted, second = True, ""
     except ExpectTimeout:
+        # never a second command on the console: the first may still be running, and
+        # ConsoleTarget would Ctrl-C it, cancelling the poweroff
+        if via == "ssh":
+            try:
+                second = f"second sync rc={t.run('sync', check=False, timeout=30.0).rc}"
+            except BenchError as e:
+                second = f"second sync raised: {e}"
+        else:
+            second = "no second command sent on the console"
         try:
-            t.run("sync", check=False, timeout=30.0)
-        except BenchError:
-            pass
-        b.console.pump(HALT_FALLBACK_S)
-        ctx.plan_log.append(f"clean shutdown FALLBACK: no halt line in {HALT_WAIT_S:g}s; "
-                            f"sync + {HALT_FALLBACK_S:g}s wait")
+            b.console.expect(HALT_RE, HALT_LATE_S)
+            halted, late = True, " (late)"
+        except ExpectTimeout:
+            halted = False
+    ctx.halted_on_count, ctx.console_login_on_count = count, None   # once per power-on
+    if halted:
+        return _record_cut(ctx, "clean", f"{via} poweroff, halt line seen{late}; sync rc={sync_rc}")
+    return _record_cut(ctx, "fallback", f"{via}: no halt line in {HALT_WAIT_S:g}s + {HALT_LATE_S:g}s; "
+                       f"first sync rc={sync_rc}; {second}")
 
 
 def boot_to_linux(ctx: Ctx, timeout: float = 240.0, need_ip: bool = True,
@@ -457,8 +589,7 @@ def boot_to_linux(ctx: Ctx, timeout: float = 240.0, need_ip: bool = True,
     b.console.expect(LOGIN_RE, timeout)
     text = _since(b.console, n)
     ctx.boot_text = text
-    lt.console_login(b.console, b.linux_user)
-    ctx.console_login_on_count = b.power.on_count
+    console_login_ctx(ctx)
     try:
         connect_linux(ctx, force=True, rediscover=rediscover)
         if not need_ip:
@@ -688,7 +819,7 @@ class Detect(Step):
             ctx.mutate("power cycle and classify the console",
                        lambda: ctx.bench.power.cycle(ctx.bench.off_s, c))
             try:
-                key, _ = c.expect_any(classes, 240.0)
+                key, _ = c.expect_any(classes, DETECT_WAIT_S)
             except ExpectTimeout:
                 key = None
             text = _since(c, n)
@@ -701,13 +832,14 @@ class Detect(Step):
         if key == "scif-fallback":
             raise Refused(scif_writer.ROM_FALLBACK_MSG)
         ctx.rom_live_on_count = ctx.bench.power.on_count if key == "scif-rom" and ctx.execute else None
+        if key == "scif-rom" and ctx.execute:
+            ctx.rom_console_on_count = ctx.bench.power.on_count
         ev = {**uboot.parse_bl2(text), **uboot.parse_bl31(text)}
         ev.pop("bl2_boot_source", None)
         if v := uboot.parse_uboot_version(text):
             ev["uboot_version"] = v
         if key == "linux-login" and ctx.execute:
-            lt.console_login(c, ctx.bench.linux_user)
-            ctx.console_login_on_count = ctx.bench.power.on_count
+            console_login_ctx(ctx)
             connect_linux(ctx, force=True)
         elif ctx.linux is None and ctx.pinned_host:
             ctx.attach_linux(ctx.pinned_host)
@@ -779,11 +911,13 @@ class Bootstrap(_PreLinux):
                 # be a second power toggle for nothing (and a PHY power-rule risk)
                 ctx.plan_log.append("reuse live SCIF ROM state from detect (no power cycle)")
                 sw.load_writer(c, Path(mot), banner_seen=True)
+                ctx.rom_console_on_count = b.power.on_count
                 return
             clean_shutdown(ctx)
             c.drain()
             b.power.cycle(b.off_s, b.console)
             sw.load_writer(c, Path(mot))
+            ctx.rom_console_on_count = b.power.on_count
         ctx.mutate(f"power cycle (unless detect left the ROM live); load Flash Writer {Path(mot).name} over SCIF", load)
         ctx.mutate(f"EM_W area {sw.BOOT1_AREA} sector {sw.BL2_MMC_SECTOR:#x}: bl2_mmc ({len(bl2)} bytes)",
                    lambda: sw.em_w(c, sw.BOOT1_AREA, sw.BL2_MMC_SECTOR, ps["bl2_mmc"], bl2))
@@ -805,12 +939,15 @@ class OpDsw1EmmcInsertSd(_PreLinux):
 
     def run(self, ctx):
         b = ctx.need_bench()
-        ctx.mutate("operator: set DSW1 to eMMC boot and insert the release microSD",
-                   lambda: b.operator.confirm("Power OFF, set DSW1 to eMMC boot, insert the release microSD."))
+        def prompt():
+            # halt first: the unit runs from the provisioning SD, and the operator is about
+            # to switch it off and swap the card
+            note = halt_note(clean_shutdown(ctx))
+            b.operator.confirm(f"{note} Power OFF, set DSW1 to eMMC boot, insert the release microSD.")
+        ctx.mutate("clean shutdown; operator: set DSW1 to eMMC boot and insert the release microSD", prompt)
 
         def check():
             n = len(b.console.transcript)
-            clean_shutdown(ctx)
             b.console.drain()
             b.power.cycle(b.off_s, b.console)
             b.console.expect(uboot.AUTOBOOT, 60.0)
@@ -876,7 +1013,7 @@ class BootSdLinux(Step):
                 n = len(b.console.transcript)
                 b.console.send_line("boot")
                 b.console.expect(LOGIN_RE, 240.0)
-                lt.console_login(b.console, b.linux_user)
+                console_login_ctx(ctx)
                 connect_linux(ctx, force=True)
                 return text + _since(b.console, n)
             text = ctx.mutate(f"U-Boot loadx + gzwrite {wic.name} into eMMC (slow fallback), boot", xm)
@@ -1144,13 +1281,16 @@ class Census(Step):
                 facts["psu_current_a"] = f"unread ({e})"
                 notes.append(f"psu_current_a: {e}")
             else:
-                if amps is not None:
+                if amps is not None and not math.isfinite(amps):
+                    facts["psu_current_a"] = f"unread (not a finite number: {amps})"
+                    notes.append(f"psu_current_a: not a finite number: {amps}")
+                elif amps is not None:
                     facts["psu_current_a"] = f"{amps:.3f}"
-                    facts["psu_current_state"] = "linux-idle"
+                    facts["psu_current_state"] = "at-census"     # one reading taken here; load not controlled
                     if amps > PSU_CURRENT_WARN_A:
                         # a screen, not a gate: the real threshold belongs in the private catalogue
                         warn = (f"WARNING: supply current {amps:.3f} A > {PSU_CURRENT_WARN_A:.2f} A at "
-                                "linux-idle (normal 0.17-0.29 A): suspect the PHY regulator output "
+                                "census (normal 0.17-0.29 A at idle): suspect the PHY regulator output "
                                 "capacitor fault")
         ctx.step_logs[self.name] = "\n".join(notes + ([warn] if warn else []))
         return self.result(ctx, f"{len(facts)} keys" + (f"; unread: {'; '.join(notes)}" if notes else "")
@@ -1260,7 +1400,7 @@ class Gd32Flash(Step):
             # --only gd32_flash starts past the step that attaches the Linux target;
             # the probe wrapper needs ALP_PROVISION_HOST, so discover it over the console.
             try:
-                lt.console_login(ctx.bench.console, ctx.bench.linux_user, timeout=20.0)
+                console_login_ctx(ctx, timeout=20.0)
                 connect_linux(ctx)
             except BenchError:
                 pass   # no shell / no IP: the probe runs without a host, as before
@@ -1301,7 +1441,7 @@ class Gd32Flash(Step):
         missing = [f for f in tools if not (tools_dir / f).is_file()]
         if missing:
             raise Refused(f"no network and the console-push SWD tools are missing in {tools_dir}: {missing}")
-        lt.console_login(b.console, b.linux_user)
+        console_login_ctx(ctx)
         t = ConsoleTarget(b.console)
         ctx._check_unit_identity(t)          # the same eMMC-CID gate the SSH path gets in need_linux
         store = ctx.open_payload_store(t)
@@ -1686,8 +1826,12 @@ class OpDsw1XspiRemoveSd(Step):
 
     def run(self, ctx):
         b = ctx.need_bench()
-        ctx.mutate("operator: set DSW1 to xSPI boot and remove the microSD",
-                   lambda: b.operator.confirm("Power OFF, set DSW1 to xSPI boot, REMOVE the microSD."))
+        def prompt():
+            # Linux still runs from the provisioning SD here: halt it before the operator
+            # switches power off or pulls the card
+            note = halt_note(clean_shutdown(ctx))
+            b.operator.confirm(f"{note} Power OFF, set DSW1 to xSPI boot, REMOVE the microSD.")
+        ctx.mutate("clean shutdown; operator: set DSW1 to xSPI boot and remove the microSD", prompt)
         return self.result(ctx, "DSW1 on xSPI, microSD removed")
 
 
@@ -2059,6 +2203,7 @@ def run_one(step: Step, ctx: Ctx, force: bool = False) -> StepResult:
         plog = ctx.bench.power.log if ctx.bench is not None else []
         pstart = len(plog)
         tstart = len(ctx.bench.console.transcript) if ctx.bench is not None else 0
+        cstart = len(ctx.power_cuts)
         try:
             if ctx.execute and step.name not in ctx.state.get("steps", {}):
                 # A run killed mid-step must leave an entry, or Record would fall back
@@ -2069,6 +2214,11 @@ def run_one(step: Step, ctx: Ctx, force: bool = False) -> StepResult:
         except (BenchError, Refused, ValueError, OSError) as e:
             res = StepResult(step.name, "failed", str(e))
         ctx.plan_log.extend(plog[pstart:])  # audit trail: every PSU command, timestamped
+        if cuts := ctx.power_cuts[cstart:]:
+            # how every power cut of this step was made: clean | fallback | blind | not-needed
+            res.evidence["power_cut"] = " | ".join(cuts)
+            ctx.step_logs[step.name] = "\n".join(
+                filter(None, [ctx.step_logs.get(step.name, ""), *("power cut " + c for c in cuts)]))
         if ctx.bench is not None and ctx.execute:
             # Everything the console said during the step, so a silicon failure is diagnosable.
             seen = _elide_long_lines(_since(ctx.bench.console, tstart))
