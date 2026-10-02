@@ -915,7 +915,8 @@ def _devmem(t: LinuxTarget, addr: int) -> int:
 
 
 # Raw MII registers 2/3 of each port, through SIOCGMIIPHY / SIOCGMIIREG (the image has python3 and no
-# mii-tool). One line per port: "<name> 0x<reg2><reg3>"; a port that fails prints nothing.
+# mii-tool). One line per port: "<name> 0x<reg2><reg3>", or "<name> errno <n>" on stderr (a port that is
+# down may answer EINVAL).
 MII_ID_REMOTE = "/tmp/alp_mii_id.py"
 MII_ID_PY = """
 import fcntl, socket, struct, sys
@@ -927,8 +928,8 @@ for n in sys.argv[1:]:
     try:
         p = io(n, 0x8947, 0, 0)[1]
         print(n, '0x%04x%04x' % (io(n, 0x8948, p, 2)[4], io(n, 0x8948, p, 3)[4]))
-    except OSError:
-        pass
+    except OSError as e:
+        sys.stderr.write('%s errno %s\\n' % (n, e.errno))
 """
 
 NET_IF_RE = re.compile(r"(?:end|eth)\d+")   # the Renesas gbeth ports are end0/end1
@@ -1117,16 +1118,24 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
                 helper.write_bytes(MII_ID_PY.encode("utf-8"))
                 try:
                     t.put(helper, MII_ID_REMOTE)     # a file, not -c: the console path is one line
-                    r = t.run(f"python3 {MII_ID_REMOTE} {' '.join(names)}; rm -f {MII_ID_REMOTE}", check=False)
+                    r = t.run(f"python3 {MII_ID_REMOTE} {' '.join(names)}", check=False)
                 except BenchError as e:
                     r = CmdResult(1, "", str(e))
-        raw = dict(re.findall(r"^(\w+) (0x[0-9a-f]{8})$", r.stdout, re.M))
+                finally:
+                    try:
+                        t.run(f"rm -f {MII_ID_REMOTE}", check=False)
+                    except BenchError:
+                        pass
+        out = r.stdout + "\n" + r.stderr                 # the console path merges stderr into stdout
+        raw = dict(re.findall(r"^(\w+) (0x[0-9a-f]{8})$", out, re.M))
+        errno = dict(re.findall(r"^(\w+) errno (\d+)$", out, re.M))
         differ = unread = False
         for i, n in enumerate(names):
             sysfs = t.run(f"cat /sys/class/net/{n}/phydev/phy_id", check=False).stdout.strip()
             ok = re.fullmatch(r"0x[0-9a-fA-F]{1,8}", sysfs) is not None
             facts[f"eth{i}_phy_id"] = f"0x{int(sysfs, 16):08x}" if ok else "unread (no phydev/phy_id)"
-            facts[f"eth{i}_phy_id_raw"] = raw.get(n) or "unread (" + ((r.stderr or r.stdout).strip()[-80:] or "no output") + ")"
+            why = f"{n} errno {errno[n]}" if n in errno else (r.stderr or r.stdout).strip()[-80:] or "no output"
+            facts[f"eth{i}_phy_id_raw"] = raw.get(n) or f"unread ({why})"
             if n not in raw or not ok:
                 unread = True
                 notes.append(f"{n}: phy id not fully readable")

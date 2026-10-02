@@ -707,6 +707,7 @@ def _census_responses(array: bytes = b"\xff" * 128):
         # the DT forces ethernet-phy-id001c.c878; the silicon's MII registers 2/3 say c916
         (r"python3 /tmp/alp_mii_id\.py", "end0 0x001cc916\nend1 0x001cc916\n"),
         (r"cat /sys/class/net/end\d/phydev/phy_id", "0x001cc878\n"),
+        (r"^rm -f /tmp/alp_mii_id\.py$", ""),
         (r"^dmesg \| grep", (1, "")),
     ]
 
@@ -837,7 +838,8 @@ def test_census_phy_id_helper_is_pushed_then_removed():
     t, fake = target(_census_responses())
     lt.census(t, CENSUS_BUS)
     run = next(c for c in fake.commands if "alp_mii_id.py" in c)
-    assert run == "python3 /tmp/alp_mii_id.py end0 end1; rm -f /tmp/alp_mii_id.py"
+    assert run == "python3 /tmp/alp_mii_id.py end0 end1" and fake.commands[-1] != run
+    assert "rm -f /tmp/alp_mii_id.py" in fake.commands
     assert any(a[0] == "scp" and a[-1].endswith(":/tmp/alp_mii_id.py") for a in fake.argvs)
 
 
@@ -851,3 +853,25 @@ def test_census_records_the_gbeth_dma_reset_failure_ports(dmesg, want):
     t, _ = target([(r"^dmesg \| grep", dmesg)] + _census_responses())
     facts, _ = lt.census(t, CENSUS_BUS)
     assert facts["eth_dma_reset_failed"] == want
+
+
+def test_census_phy_id_reads_a_port_that_answers_errno_as_unread_with_the_errno():
+    """A port that is down may answer EINVAL: that port is the interesting one."""
+    t, _ = target([(r"python3 /tmp/alp_mii_id\.py", (0, "end0 0x001cc916\n", "end1 errno 22\n"))]
+                  + _census_responses())
+    facts, _ = lt.census(t, CENSUS_BUS)
+    assert facts["eth0_phy_id_raw"] == "0x001cc916"
+    assert facts["eth1_phy_id_raw"] == "unread (end1 errno 22)"
+    assert facts["eth_phy_id_mismatch"] == "yes"            # end0 differs; end1 is unread but not hidden
+
+
+def test_the_mii_helper_reports_the_errno_on_stderr():
+    compile(lt.MII_ID_PY, "mii", "exec")
+    assert "e.errno" in lt.MII_ID_PY and "sys.stderr.write" in lt.MII_ID_PY and "pass" not in lt.MII_ID_PY
+
+
+def test_census_removes_the_phy_helper_even_when_it_fails():
+    t, fake = target([(r"python3 /tmp/alp_mii_id\.py", (1, "", "Traceback"))] + _census_responses())
+    lt.census(t, CENSUS_BUS)
+    assert fake.commands.index("rm -f /tmp/alp_mii_id.py") > \
+        next(i for i, c in enumerate(fake.commands) if c.startswith("python3 /tmp/alp_mii_id.py"))
