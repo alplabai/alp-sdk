@@ -9,10 +9,6 @@
  */
 
 / {
-	aliases {
-		alp-camera0 = &cam0_sensor;
-	};
-
 	cam0_xclk: cam0-xclk {
 		compatible = "fixed-clock";
 		#clock-cells = <0>;

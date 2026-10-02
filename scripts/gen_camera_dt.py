@@ -67,8 +67,7 @@ TABLE_BEGIN = "<!-- BEGIN GENERATED: scripts/gen_camera_dt.py supported cameras 
 TABLE_END = "<!-- END GENERATED: scripts/gen_camera_dt.py supported cameras -->"
 
 # SoM dispatch kind -> (DT label of its GPIO controller, dtsi that defines it).
-# The line index is derived from the row order of gd32-io-mcu-map.tsv and
-# cross-checked against that dtsi's gpio-line-names.
+# The line index is the position of the pad's name in that dtsi's gpio-line-names.
 _GPIO_DISPATCH = {"gd32_bridge": ("gd32_gpio", "e1m-v2n-som.dtsi")}
 # Every Renesas SoC dtsi labels its pin controller `pinctrl`.
 _PINCTRL = "pinctrl"
@@ -165,29 +164,28 @@ def _resolve_gpio(tree: Tree, board: dict, som: dict, macro: str, what: str) -> 
     label, dtsi = _GPIO_DISPATCH[kind]
     tsv = tree.som_map(som, "gd32-io-mcu-map.tsv")
     n = re.fullmatch(r"E1M_X_GPIO_IO(\d+)", e1m)
-    rows = [r[0] for r in _tsv_rows(tsv) if re.fullmatch(r"E1M IO\d+", r[0])] if tsv else []
-    if not n or f"E1M IO{n.group(1)}" not in rows:
-        return ("gap", f"gd32-io-mcu-map.tsv has no `E1M IO{n.group(1) if n else '?'}` row "
-                       f"(needed by {what})")
-    line = rows.index(f"E1M IO{n.group(1)}")
-    bad = _check_line_names(tree, dtsi, label, f"IO{n.group(1)}", line)
-    if bad:
-        return ("gap", bad)
+    name = f"IO{n.group(1)}" if n else "?"
+    # The TSV only confirms the pad is a GD32 pad.  The line index is the
+    # position of its name in the DT's gpio-line-names: the TSV has no row for
+    # every named line (e.g. IO24), so its row order is not the line order.
+    if not tsv or f"E1M {name}" not in [r[0] for r in _tsv_rows(tsv)]:
+        return ("gap", f"gd32-io-mcu-map.tsv has no `E1M {name}` row (needed by {what})")
+    line, err = _line_index(tree, dtsi, label, name)
+    if err:
+        return ("gap", f"{err} (needed by {what})")
     return ("gpio", label, line, bool(entry.get("active_low")))
 
 
-def _check_line_names(tree: Tree, dtsi: str, label: str, name: str, line: int) -> str | None:
+def _line_index(tree: Tree, dtsi: str, label: str, name: str) -> tuple[int, str | None]:
+    """Line of `name` in the gpio-line-names of `&label` as defined in `dtsi`."""
     p = tree.root / LINUX_DIR / dtsi
     if not p.is_file():
-        return f"{LINUX_DIR / dtsi} is missing: cannot confirm GPIO line {line} of {label}"
-    text = p.read_text(encoding="utf-8")
-    m = re.search(rf"{label}:.*?gpio-line-names\s*=(.*?);", text, re.S)
+        return 0, f"{LINUX_DIR / dtsi} is missing: cannot find the {label} line of {name}"
+    m = re.search(rf"{label}:.*?gpio-line-names\s*=(.*?);", p.read_text(encoding="utf-8"), re.S)
     names = re.findall(r'"([^"]*)"', re.sub(r"/\*.*?\*/", "", m.group(1), flags=re.S)) if m else []
-    if name not in names or names.index(name) != line:
-        got = names.index(name) if name in names else "absent"
-        return (f"gd32-io-mcu-map.tsv row order puts {name} on {label} line {line} but "
-                f"{dtsi} gpio-line-names has it at {got}")
-    return None
+    if name not in names:
+        return 0, f"{dtsi} gpio-line-names of {label} has no {name}"
+    return names.index(name), None
 
 
 def _resolve_bus(tree: Tree, board: dict, som: dict, macro: str, what: str) -> tuple:
@@ -263,7 +261,6 @@ def _render(board_name: str, conn_name: str, conn: dict, mod: dict, chip: dict,
             res: dict, extra_gaps: list[str]) -> str:
     drv = chip["drivers"]["linux"]
     c = conn_name.lower()
-    idx = int(re.sub(r"\D", "", conn_name) or 0)
     lanes = mod["lanes"]
     dl = " ".join(str(i + 1) for i in range(lanes))
     gaps = _gaps(res) + extra_gaps
@@ -283,8 +280,7 @@ def _render(board_name: str, conn_name: str, conn: dict, mod: dict, chip: dict,
     hdr.append(" */")
     L = hdr + [""]
 
-    L += ["/ {", "\taliases {", f"\t\talp-camera{idx} = &{c}_sensor;", "\t};", "",
-          f"\t{c}_xclk: {c}-xclk {{", '\t\tcompatible = "fixed-clock";', "\t\t#clock-cells = <0>;",
+    L += ["/ {", f"\t{c}_xclk: {c}-xclk {{", '\t\tcompatible = "fixed-clock";', "\t\t#clock-cells = <0>;",
           f"\t\tclock-frequency = <{mod['xclk_hz']}>;", "\t};", "};", ""]
 
     # Connector GPIOs: select + enable are hogs, reset is a sensor property.
@@ -337,7 +333,7 @@ def _render(board_name: str, conn_name: str, conn: dict, mod: dict, chip: dict,
                       if e["lanes"] == lanes), None)
         if freqs:
             ep.append("\t\t\t\tlink-frequencies = /bits/ 64 <"
-                      + "> <".join(str(f) for f in freqs) + ">;")
+                      + " ".join(str(f) for f in freqs) + ">;")
         ep += [f"\t\t\t\t{f};" for f in drv.get("endpoint_flags") or []]
         sensor = [f"\t{c}_sensor: camera@{mod['i2c_addr_7bit']:x} {{",
                   f'\t\tcompatible = "{drv["compatible"]}";',
@@ -413,7 +409,11 @@ def _cfg(tree: Tree) -> str:
         k = (((tree.chip(mod["chip"]) or {}).get("drivers") or {}).get("linux") or {}).get("kconfig")
         if k:
             syms.add(k)
-    for som in tree.soms.values():
+    # Only the SoCs of SoMs that host a camera module chip: another vendor's
+    # SoC must not leak its symbols into the linux-renesas fragment.
+    hosts = {s["sku"]: s for m in tree.modules.values() if tree.chip(m["chip"])
+             for s in tree.hosts(tree.chip(m["chip"]))}
+    for som in hosts.values():
         for ent in (tree.soc(som["silicon"]).get("linux_dt") or {}).values():
             syms.update(ent.get("kconfig") or [])
     return ("# " + BANNER + " -- DO NOT EDIT BY HAND.\n"
@@ -425,15 +425,20 @@ def _cfg(tree: Tree) -> str:
             + "".join(f"{s}=y\n" for s in sorted(syms)))
 
 
+def _bench(mod: dict) -> str:
+    sku = mod.get("linux_bench_verified_on")
+    return f"verified on {sku}" if sku else "not bench-verified"
+
+
 def _table(tree: Tree, pairs: list[dict]) -> str:
     rows = [TABLE_BEGIN, "",
-            "| Module | Sensor | Connector | Lanes | I2C | Linux driver | `ALP_CAMERA_<connector>` |",
-            "|---|---|---|---|---|---|---|"]
+            "| Module | Sensor | Connector | Lanes | I2C | Linux driver | Bench status | `ALP_CAMERA_<connector>` |",
+            "|---|---|---|---|---|---|---|---|"]
     for p in sorted(pairs, key=lambda p: (p["connector"], p["module"])):
         m, ch = p["mod"], p["chip"]
         rows.append(f"| {m['display_name']} | `{m['chip']}` | {p['connector']} ({p['conn']['refdes']}) | "
                     f"{m['lanes']} | `{_hex(m['i2c_addr_7bit'])}` | "
-                    f"`{ch['drivers']['linux']['compatible']}` | `{m['module_id']}` |")
+                    f"`{ch['drivers']['linux']['compatible']}` | {_bench(m)} | `{m['module_id']}` |")
     rows += ["", TABLE_END]
     return "\n".join(rows)
 

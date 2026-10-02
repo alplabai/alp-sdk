@@ -72,10 +72,8 @@ def parse_dt(text: str) -> dict[str, dict[str, str]]:
     return out
 
 
-# The property set of the bench-proven hand-written OV9281 fragment
-# (e1m-x-evk-cam0-ov9281.dtsi before it became generated) plus the alias.
+# The bench-proven OV9281 property set.
 OV9281_EXPECTED = {
-    "/aliases": {"alp-camera0": "&cam0_sensor"},
     "/cam0-xclk": {"compatible": '"fixed-clock"', "#clock-cells": "<0>",
                    "clock-frequency": "<24000000>"},
     "&gd32_gpio/cam0-mux-sel-hog": {"gpio-hog": "true", "gpios": "<7 GPIO_ACTIVE_HIGH>",
@@ -133,7 +131,7 @@ def test_new_module_needs_metadata_only(tree):
     assert dt["&i2c2/camera@3c"]["clock-names"] == '"xvclk"'
     assert dt["&i2c2"]["clock-frequency"] == "<100000>"
     assert dt["&i2c2/camera@3c/port/endpoint"]["data-lanes"] == "<1>"
-    assert dt["&i2c2/camera@3c/port/endpoint"]["link-frequencies"] == "/bits/ 64 <123000000> <456000000>"
+    assert dt["&i2c2/camera@3c/port/endpoint"]["link-frequencies"] == "/bits/ 64 <123000000 456000000>"
     assert dt["&csi20/ports/port@0/endpoint"]["lane-polarities"] == "<1 1>"
     assert dt["/cam0-xclk"]["clock-frequency"] == "<27000000>"
     assert "CONFIG_VIDEO_NEWSENSOR=y" in out[gen.LINUX_DIR / gen.CFG_NAME]
@@ -188,12 +186,15 @@ def test_removed_module_deletes_its_generated_fragment(tree):
     assert not stale.exists()
 
 
-def test_gpio_line_must_match_the_som_dtsi_names(tree):
+def test_gpio_line_follows_the_som_dtsi_and_a_missing_name_is_a_gap(tree):
     p = tree / gen.LINUX_DIR / "e1m-v2n-som.dtsi"
-    p.write_text(p.read_text(encoding="utf-8").replace('"IO14", "IO16"', '"IO16", "IO14"'),
-                 encoding="utf-8")
+    text = p.read_text(encoding="utf-8")
+    p.write_text(text.replace('"IO14", "IO16"', '"IO16", "IO14"'), encoding="utf-8")
+    out, problems = gen.generate(tree)
+    assert problems == [] and "gpios = <6 GPIO_ACTIVE_HIGH>;" in out[OV9281]
+    p.write_text(text.replace('"IO16"', '"IO1X"'), encoding="utf-8")
     _, problems = gen.generate(tree)
-    assert any("gpio-line-names" in x and "IO16" in x for x in problems)
+    assert any("gpio-line-names" in x and "no IO16" in x for x in problems)
 
 
 def test_slice_local_conf_emits_the_camera_knob_only_with_cameras(tmp_path):
@@ -218,3 +219,37 @@ cores:
     assert 'ALP_CAMERA_CAM0 = "innomaker_cam_ov9281"' in with_cam
     assert with_cam.replace('# Cameras (board.yaml `cameras:` block)\n'
                             'ALP_CAMERA_CAM0 = "innomaker_cam_ov9281"\n', "") == without
+
+
+def test_gpio_line_is_the_gpio_line_names_index_not_the_tsv_row(tree):
+    """IO25 is the pad after IO24: the TSV has no IO24 row, so its row order
+    would put IO25 one line low.  gpio-line-names has IO25 at line 9."""
+    def board(doc):
+        doc["e1m_routes"]["gpio"].append({"e1m": "E1M_X_GPIO_IO25", "macro": "XEVK_PIN_TEST_RST"})
+        doc["camera_connectors"]["CAM0"]["reset"] = "XEVK_PIN_TEST_RST"
+    _edit_yaml(tree / "metadata/boards/e1m-x-evk.yaml", board)
+    out, problems = gen.generate(tree)
+    assert problems == []
+    assert "reset-gpios = <&gd32_gpio 9 GPIO_ACTIVE_HIGH>;" in out[OV9281]
+
+
+def test_no_alias_node(tree):
+    assert "aliases" not in gen.generate(tree)[0][OV9281]
+
+
+def test_table_bench_status_is_driven_by_metadata(tree):
+    doc = gen.generate(tree)[0][gen.DOC]
+    table = doc[doc.index(gen.TABLE_BEGIN):doc.index(gen.TABLE_END)]
+    rows = {ln.split("|")[1].strip(): ln for ln in table.splitlines() if ln.startswith("| ") and "`" in ln and "Bench status" not in ln}
+    ov = next(v for k, v in rows.items() if "OV9281" in k)
+    assert "verified on E1M-V2M103" in ov
+    others = [v for k, v in rows.items() if "OV9281" not in k]
+    assert others and all("not bench-verified" in v for v in others)
+
+
+def test_every_hosted_module_has_a_fragment(tree):
+    out, problems = gen.generate(tree)
+    assert problems == []
+    for mid in ("innomaker_cam_ov9281", "innomaker_cam_imx335", "raspberry_pi_camera_module_1",
+                "raspberry_pi_camera_module_2", "raspberry_pi_global_shutter_camera"):
+        assert gen.LINUX_DIR / f"e1m-x-evk-cam0-{mid}.dtsi" in out
