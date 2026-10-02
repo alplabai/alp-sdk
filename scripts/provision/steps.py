@@ -155,6 +155,7 @@ class Ctx:
     # at which the unit is known to sit in the SCIF ROM / Flash Writer (nothing but its own
     # CR-terminated lines may be sent there).
     halted_on_count: int | None = None
+    halted_outcome: str = ""             # clean_shutdown's outcome for that power-on
     rom_console_on_count: int | None = None
     # one line per power cut (clean_shutdown outcome); run_one copies them into the step evidence
     power_cuts: list[str] = field(default_factory=list)
@@ -436,8 +437,12 @@ def _record_cut(ctx: Ctx, outcome: str, why: str) -> str:
 
 def halt_note(outcome: str) -> str:
     """The operator-prompt sentence for a clean_shutdown() outcome."""
+    outcome = outcome or ""
     if outcome == "clean":
         return "The unit has been halted (poweroff, halt line seen)."
+    if outcome.startswith("clean ("):
+        return (f"The unit was halted (poweroff, halt line seen), but the final sync reported an error "
+                f"({outcome[7:-1]}); check the card before reusing it.")
     if outcome == "not-needed":
         return "No running Linux was found, so nothing was halted."
     return (f"WARNING: the unit was NOT cleanly halted ({outcome or 'no shutdown attempted'}); "
@@ -460,16 +465,17 @@ def _same_unit(ctx: Ctx, t) -> bool:
 
 
 def _probe_console(ctx: Ctx):
-    """A console whose state is unknown. Send Ctrl-C ONLY (never a bare Enter: U-Boot repeats
-    its last command on one), read PROBE_S: a U-Boot prompt means there is no Linux ("uboot");
-    otherwise try a console login (5 s). Returns a ConsoleTarget on a shell, else None.
+    """A console whose state is unknown. Send Ctrl-C ONLY and read PROBE_S: a U-Boot prompt at
+    the end of the text means there is no Linux ("uboot"). No Enter is sent until a U-Boot
+    prompt has been ruled out (U-Boot repeats its last command on one); only then a console
+    login (5 s), which starts with an Enter. Returns a ConsoleTarget on a shell, else None.
     Not sent to a unit known to be in the SCIF ROM / Flash Writer (clean_shutdown returns before):
     this tool's parsers send those only CR-terminated lines and never 0x03."""
     b = ctx.bench
     b.console.drain()
     b.console.write(b"\x03")
     b.console.pump(PROBE_S)
-    if re.search(uboot.PROMPT, b.console.peek()):
+    if re.search(rf"(?:^|\n){uboot.PROMPT}\Z", b.console.peek()):      # a prompt, not a `=> ` in a log line
         return "uboot"
     try:
         console_login_ctx(ctx, timeout=5.0)
@@ -500,7 +506,10 @@ def clean_shutdown(ctx: Ctx) -> str:
     if b.power.is_on() is False:
         return _record_cut(ctx, "not-needed", "PSU already off")
     if ctx.halted_on_count == count:
-        return _record_cut(ctx, "not-needed", "already halted on this power-on")
+        if ctx.halted_outcome == "clean":
+            return _record_cut(ctx, "not-needed", "already halted on this power-on")
+        # an earlier cut that was not a plain clean one stays what it was
+        return _record_cut(ctx, ctx.halted_outcome, f"earlier cut on this power-on was {ctx.halted_outcome}")
     if ctx.rom_console_on_count == count:
         return _record_cut(ctx, "not-needed", "SCIF ROM / Flash Writer live, no Linux; nothing sent")
     t, via, skipped = None, "", ""
@@ -535,7 +544,7 @@ def clean_shutdown(ctx: Ctx) -> str:
         # in the typed line so its echo cannot match
         b.console.send_line(f'sync; echo "ALPS""{nonce}:$?"; poweroff', paced=True)
         try:
-            sync_rc = b.console.expect(rf"ALPS{nonce}:(\d+)", POWEROFF_TIMEOUT_S).group(1)
+            sync_rc = b.console.expect(rf"ALPS{nonce}:(\d+)\r?\n", POWEROFF_TIMEOUT_S).group(1)
         except ExpectTimeout:
             sync_rc = "unknown (no marker; sync may still be running)"
     late = ""
@@ -559,7 +568,11 @@ def clean_shutdown(ctx: Ctx) -> str:
             halted = False
     ctx.halted_on_count, ctx.console_login_on_count = count, None   # once per power-on
     if halted:
-        return _record_cut(ctx, "clean", f"{via} poweroff, halt line seen{late}; sync rc={sync_rc}")
+        # `clean` means halted AND the first sync returned 0; any other rc is its own outcome
+        outcome = "clean" if sync_rc == "0" else f"clean (sync rc={sync_rc})"
+        ctx.halted_outcome = outcome
+        return _record_cut(ctx, outcome, f"{via} poweroff, halt line seen{late}; sync rc={sync_rc}")
+    ctx.halted_outcome = "fallback"
     return _record_cut(ctx, "fallback", f"{via}: no halt line in {HALT_WAIT_S:g}s + {HALT_LATE_S:g}s; "
                        f"first sync rc={sync_rc}; {second}")
 
@@ -943,7 +956,9 @@ class OpDsw1EmmcInsertSd(_PreLinux):
             # halt first: the unit runs from the provisioning SD, and the operator is about
             # to switch it off and swap the card
             note = halt_note(clean_shutdown(ctx))
-            b.operator.confirm(f"{note} Power OFF, set DSW1 to eMMC boot, insert the release microSD.")
+            b.operator.confirm(f"{note} Power OFF, set DSW1 to eMMC boot, insert the release microSD. "
+                               "Leave it OFF until the tool asks.")
+            ctx.halted_on_count = None     # the operator may have powered it back on: never trust the marker now
         ctx.mutate("clean shutdown; operator: set DSW1 to eMMC boot and insert the release microSD", prompt)
 
         def check():
@@ -1271,18 +1286,18 @@ class Census(Step):
                     if raw == lt.ACT88760_GPIO4_RELEASED:
                         facts["act88760_gpio4_workaround"] = "none"
             except BenchError as e:
-                facts["act88760_gpio4_otp"] = f"unread ({e})"
+                facts["act88760_gpio4_otp"] = lt.unread(e)
                 notes.append(f"act88760_gpio4_otp: {e}")
         warn = ""
         if ctx.bench is not None:
             try:
                 amps = ctx.bench.power.current()
             except BenchError as e:
-                facts["psu_current_a"] = f"unread ({e})"
+                facts["psu_current_a"] = lt.unread(e)
                 notes.append(f"psu_current_a: {e}")
             else:
                 if amps is not None and not math.isfinite(amps):
-                    facts["psu_current_a"] = f"unread (not a finite number: {amps})"
+                    facts["psu_current_a"] = lt.unread(f"not a finite number: {amps}")
                     notes.append(f"psu_current_a: not a finite number: {amps}")
                 elif amps is not None:
                     facts["psu_current_a"] = f"{amps:.3f}"
@@ -1760,7 +1775,7 @@ class PmicVerify(Step):
                 try:
                     got = lt.i2c_get(t, bus, int(d["addr"]), int(r["reg"]))
                 except BenchError as e:
-                    bad.append(f"{dev} {int(d['addr']):#04x} reg {int(r['reg']):#04x} unread ({e})")
+                    bad.append(f"{dev} {int(d['addr']):#04x} reg {int(r['reg']):#04x} {lt.unread(e)}")
                     continue
                 mask = int(r.get("mask", 0xFF))
                 if got & mask == int(r["expect"]) & mask:
@@ -1830,7 +1845,9 @@ class OpDsw1XspiRemoveSd(Step):
             # Linux still runs from the provisioning SD here: halt it before the operator
             # switches power off or pulls the card
             note = halt_note(clean_shutdown(ctx))
-            b.operator.confirm(f"{note} Power OFF, set DSW1 to xSPI boot, REMOVE the microSD.")
+            b.operator.confirm(f"{note} Power OFF, set DSW1 to xSPI boot, REMOVE the microSD. "
+                               "Leave it OFF until the tool asks.")
+            ctx.halted_on_count = None     # the operator may have powered it back on: never trust the marker now
         ctx.mutate("clean shutdown; operator: set DSW1 to xSPI boot and remove the microSD", prompt)
         return self.result(ctx, "DSW1 on xSPI, microSD removed")
 

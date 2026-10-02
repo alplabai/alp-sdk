@@ -186,11 +186,15 @@ How it reaches the unit, in this order:
 2. SSH to the pinned (`bench.yaml` `linux.host`) or discovered host, but only after that
    host has written a nonce to its `/dev/console` and the nonce was read on this unit's
    serial console (a stale DHCP lease can point at another unit). Over SSH:
-   `sync; echo ALPSYNC:$?; poweroff`.
+   `sync; echo ALPSYNC:$?; poweroff`. On a mismatch no `poweroff` is sent, but the
+   `echo ALPID<nonce> > /dev/console` line has already been printed on the other unit's
+   console (harmless, yet visible to anyone running parallel stations).
 3. A console whose state is unknown (no login of this tool on this power-on, no proven
-   SSH host): Ctrl-C only, read 2 s. A `=> ` prompt means U-Boot, no shutdown needed.
-   Otherwise a console login (5 s); on a shell, path 1. Never a bare Enter (U-Boot would
-   repeat its last command). A unit known to sit in the SCIF ROM or the Flash Writer
+   SSH host): Ctrl-C only, read 2 s. A `=> ` prompt at the end of the text means U-Boot,
+   no shutdown needed (a `=> ` inside a log line does not count). Otherwise a console
+   login (5 s), which starts with an Enter; on a shell, path 1. No Enter is sent until a
+   U-Boot prompt has been ruled out for 2 s after the Ctrl-C (U-Boot would repeat its last
+   command). A unit known to sit in the SCIF ROM or the Flash Writer
    gets nothing sent: this tool's parsers send those only CR-terminated lines and never
    `0x03`, so Ctrl-C there is untested.
 
@@ -199,23 +203,33 @@ Then it waits up to 120 s for the console halt line (`reboot: Power down` or
 The PSU current is not a halt signal. The OFF dwell is unchanged, so a clean poweroff
 followed by it is still a cold boot, and `cold_boot_test` keeps its `--cold-cycles` (3).
 
+The "already halted on this power-on" marker is cleared when the operator prompt of
+`dsw1_emmc_insert_sd` or `dsw1_xspi_remove_sd` returns: the operator may have powered the
+unit back on before pressing Enter, which the tool's ON count cannot see (this applies to
+SCPI power too). Both prompts say "Leave it OFF until the tool asks."
+
 Every cut is recorded as the step evidence key `power_cut` (and in the step log and the
 plan log), one entry per cut:
 
 | value | meaning |
 |---|---|
-| `clean` | `poweroff` sent and the halt line seen (`(late)` if it came in the extra 5 s); `sync rc=` says what the first `sync` returned |
+| `clean` | halted: `poweroff` sent, the halt line seen (`(late)` if it came in the extra 5 s) **and the first `sync` returned 0** |
+| `clean (sync rc=<n>)` | halted, but the first `sync` returned `<n>` (non-zero, or unknown): the operator prompt says so and the card should be checked |
 | `fallback` | no halt line. Over SSH a second `sync` ran and its rc (or error) is recorded; on the console no second command is sent (the first may still be running, and a new command would Ctrl-C it) |
 | `blind` | no console shell and no SSH path proven to be this unit. If Linux is up the cut is hard; the entry says so |
-| `not-needed` | PSU already off, U-Boot prompt, SCIF ROM / Flash Writer, or already halted on this power-on |
+| `not-needed` | PSU already off, U-Boot prompt, SCIF ROM / Flash Writer, or already halted (plain `clean`) on this power-on |
+
+A later cut on the same power-on repeats an earlier non-clean outcome (`fallback`,
+`clean (sync rc=<n>)`) as "earlier cut on this power-on was <outcome>" instead of reporting
+`not-needed`. A `blind` cut sets no marker, so the next cut tries again.
 
 Not covered: a kernel that is still booting (no shell yet, so the probe finds nothing and
 the cut is `blind`), a console shell that does not answer, a unit that is hung, and the
 manual or labgrid power kinds (their prompts and commands are still preceded by this
 shutdown, but nobody checks what the operator does). The `reboot: Power down` line was
-seen on this image on 2026-10-02 in a manual session, not by this code; the halt-line
-text, the 120 s bound and all of the above are not yet confirmed by a run of this code on
-a bench.
+seen in bench console logs of this image on 2026-10-02 (from earlier poweroff code, not from
+`clean_shutdown`); the halt-line text as matched here, the 120 s bound and all of the above
+are not yet confirmed by a run of this code on a bench.
 
 ## Steps
 

@@ -28,8 +28,8 @@ def fixed_nonce(monkeypatch):
 class LoggedConsole(FakeConsole):
     """A scripted console that records every write into the shared `order` list."""
 
-    def __init__(self, script, order):
-        super().__init__(script)
+    def __init__(self, script, order, chunk=None):
+        super().__init__(script, chunk=chunk)
         self.order = order
 
     def _write_raw(self, data):
@@ -60,10 +60,10 @@ class Unit(FakeLinux):
     `halts` = the halt line it prints on poweroff (True = the usual one, False/"" = none);
     `late` = the plain `sync` prints it instead (a slow halt)."""
 
-    def __init__(self, console, order, same=True, halts=True, late=False, sync_rc=0):
+    def __init__(self, console, order, same=True, halts=True, late=False, sync_rc=0, first_rc=0):
         super().__init__()
-        self.console, self.order, self.same, self.halts, self.late, self.sync_rc = (
-            console, order, same, halts, late, sync_rc)
+        self.console, self.order, self.same, self.halts, self.late, self.sync_rc, self.first_rc = (
+            console, order, same, halts, late, sync_rc, first_rc)
 
     def run(self, cmd, timeout=60.0, check=True, stdin_path=None, long_running=False):
         if cmd == "true":
@@ -78,7 +78,7 @@ class Unit(FakeLinux):
             self.order.append("poweroff")
             if self.halts and not self.late:
                 self.console.feed(HALT if self.halts is True else self.halts)
-            return lt.CmdResult(0, "ALPSYNC:0\n", "")
+            return lt.CmdResult(0, f"ALPSYNC:{self.first_rc}\n", "")
         if cmd == "sync":
             self.order.append("sync")
             if self.late:
@@ -332,7 +332,7 @@ def test_dsw1_xspi_remove_sd_halts_before_it_asks_the_operator_to_pull_the_card(
     assert res.status == "done"
     assert order[:3] == ["true", "ident", "poweroff"]
     assert order[3] == ("confirm: The unit has been halted (poweroff, halt line seen). "
-                        "Power OFF, set DSW1 to xSPI boot, REMOVE the microSD.")
+                        "Power OFF, set DSW1 to xSPI boot, REMOVE the microSD. Leave it OFF until the tool asks.")
     assert "psu-off" not in order                                    # the operator cuts power, not the tool
 
 
@@ -343,15 +343,6 @@ def test_the_operator_is_warned_when_the_unit_could_not_be_halted(tmp_path):
     ctx2, order2 = _setup(tmp_path / "b", ssh=False)
     steps.OpDsw1XspiRemoveSd().run(ctx2)
     assert "WARNING: the unit was NOT cleanly halted (blind)" in order2[-1]
-
-
-def test_cold_boot_after_the_xspi_prompt_does_not_type_into_the_halted_unit(tmp_path, monkeypatch):
-    ctx, order = _setup(tmp_path)
-    _boot_patches(monkeypatch, order)
-    steps.OpDsw1XspiRemoveSd().run(ctx)
-    n = len(order)
-    steps.boot_to_linux(ctx)
-    assert order[n:][0] == "psu-off" and ctx.power_cuts[-1] == "not-needed: already halted on this power-on"
 
 
 def test_the_xmodem_path_halts_before_its_cold_to_prompt(tmp_path, monkeypatch):
@@ -475,3 +466,107 @@ def test_pmic_verify_names_a_register_it_could_not_read_instead_of_passing(tmp_p
     with pytest.raises(steps.Refused, match=r"act88760 0x25 reg 0x10 unread \(.*after 3 attempts"):
         steps.PmicVerify().run(ctx)
     assert ctx.linux.commands.count("i2cget -y -f 8 0x25 0x10") == 3
+
+
+# --- review round 3 ----------------------------------------------------------------------------
+
+def test_a_second_call_after_a_fallback_keeps_the_fallback_not_a_not_needed(tmp_path):
+    ctx, order = _setup(tmp_path, halts=False)
+    assert steps.clean_shutdown(ctx) == "fallback"
+    n = len(order)
+    assert steps.clean_shutdown(ctx) == "fallback"                  # not "not-needed: nothing to halt"
+    assert len(order) == n                                          # and nothing is typed again
+    assert ctx.power_cuts[-1] == "fallback: earlier cut on this power-on was fallback"
+    assert steps.halt_note("fallback").startswith("WARNING: the unit was NOT cleanly halted")
+
+
+def test_a_second_call_after_a_clean_halt_is_still_not_needed(tmp_path):
+    ctx, _ = _setup(tmp_path)
+    steps.clean_shutdown(ctx)
+    assert steps.clean_shutdown(ctx) == "not-needed"
+
+
+def test_an_operator_who_powers_the_unit_back_on_before_enter_does_not_hide_the_next_cut(tmp_path):
+    """The marker is cleared when the prompt returns: the operator may have powered the unit back
+    on, and on_count (the tool's own ON count) cannot tell."""
+    ctx, order = _setup(tmp_path)
+    steps.OpDsw1XspiRemoveSd().run(ctx)
+    assert ctx.halted_on_count is None
+    assert "Leave it OFF until the tool asks." in order[-1]
+    n = len(order)
+    steps.clean_shutdown(ctx)                                       # the unit answers again: it is halted again
+    assert order[n:] == ["true", "ident", "poweroff"]
+    ctx2, order2 = _setup(tmp_path / "e")
+    ctx2.bench.power.on_hook = lambda: ctx2.bench.console.feed("Hit any key to stop autoboot: 3\r\n")
+    steps.OpDsw1EmmcInsertSd().run(ctx2)
+    assert "Leave it OFF until the tool asks." in order2[3]
+    assert ctx2.halted_on_count is None
+
+
+def test_a_clean_halt_with_a_failing_first_sync_is_its_own_outcome_on_the_console_path(tmp_path):
+    ctx, order = _setup(tmp_path, ssh=False, script=[(POWEROFF_LINE, "ALPSabc12345:1\r\n" + HALT)])
+    ctx.console_login_on_count = ctx.bench.power.on_count
+    assert steps.clean_shutdown(ctx) == "clean (sync rc=1)"
+    assert ctx.power_cuts == ["clean (sync rc=1): console poweroff, halt line seen; sync rc=1"]
+    assert "final sync reported an error (sync rc=1)" in steps.halt_note("clean (sync rc=1)")
+
+
+def test_a_clean_halt_with_a_failing_first_sync_is_its_own_outcome_on_the_ssh_path(tmp_path):
+    ctx, order = _setup(tmp_path, first_rc=5)
+    assert steps.clean_shutdown(ctx) == "clean (sync rc=5)"
+    ctx2, _ = _setup(tmp_path / "u")
+    ctx2.linux.first_rc = "?"                                       # no ALPSYNC marker at all
+    ctx2.linux.run = lambda cmd, **k: lt.CmdResult(0, "", "")
+    assert steps.clean_shutdown(ctx2) != "clean"
+
+
+def test_the_prompt_says_when_the_halt_came_with_a_sync_error(tmp_path):
+    ctx, order = _setup(tmp_path, first_rc=1)
+    steps.OpDsw1XspiRemoveSd().run(ctx)
+    assert "halted (poweroff, halt line seen), but the final sync reported an error (sync rc=1)" in order[-1]
+
+
+def test_a_sync_rc_split_across_reads_is_not_truncated(tmp_path):
+    """`127` must not be read as `1` because a read boundary fell between the digits."""
+    order: list[str] = []
+    console = LoggedConsole([(POWEROFF_LINE, "ALPSabc12345:127\r\n" + HALT)], order)
+    console.chunk = 1
+    b = _bench(console=console)
+    b.power = OrderedPower(order)
+    ctx = _ctx(tmp_path, bench=b, execute=True)
+    ctx.console_login_on_count = b.power.on_count
+    assert steps.clean_shutdown(ctx) == "clean (sync rc=127)"
+
+
+def test_a_log_line_containing_the_uboot_prompt_text_is_not_a_uboot_prompt(tmp_path, monkeypatch):
+    monkeypatch.setattr(steps, "PROBE_UNKNOWN_CONSOLE", True)
+    monkeypatch.setattr(lt, "console_login", lambda c, u, timeout=120.0: None)
+    shell = "^C\r\n[  812.1] foo: state a => b\r\nroot@board:~# "
+    ctx, order = _setup(tmp_path, ssh=False, script=[(r"^\x03$", shell)] + _poweroff_over_console())
+    assert steps.clean_shutdown(ctx) == "clean"                     # shut down through the shell, not skipped
+    assert order[1].startswith("console:sync; echo")
+
+
+def test_the_probe_runs_the_real_console_login_and_only_enters_after_ruling_out_uboot(tmp_path, monkeypatch):
+    """Not a stub: lt.console_login against a fake Linux console. Its first Enter comes after the
+    Ctrl-C was answered with something that is not a U-Boot prompt."""
+    from .test_provision_console_target import _Tty
+    monkeypatch.setattr(steps, "PROBE_UNKNOWN_CONSOLE", True)
+    monkeypatch.setattr(lt, "CONSOLE_SETTLE_S", 0.01)
+    tty = _Tty()
+    b = _bench(console=tty)
+    ctx = _ctx(tmp_path, bench=b, execute=True)
+    steps.clean_shutdown(ctx)
+    assert tty.writes[0] == b"\x03" and tty.writes[1] == b"\r"       # Ctrl-C first, the login's Enter after
+    assert any(w.startswith(b"export TERM=dumb") for w in tty.writes)
+    assert ctx.power_cuts[-1].startswith("fallback: console:")      # the fake never halts; the path was the shell
+
+
+def test_the_probe_sends_nothing_but_ctrl_c_when_the_console_shows_a_uboot_prompt(tmp_path, monkeypatch):
+    from .test_provision_console_target import _Tty
+    monkeypatch.setattr(steps, "PROBE_UNKNOWN_CONSOLE", True)
+    tty = _Tty()
+    tty._write_raw = lambda data: (tty.writes.append(data), setattr(tty, "_out", tty._out + b"\r\n=> "))[0]
+    ctx = _ctx(tmp_path, bench=_bench(console=tty), execute=True)
+    assert steps.clean_shutdown(ctx) == "not-needed"
+    assert tty.writes == [b"\x03"]
