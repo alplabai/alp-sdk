@@ -352,6 +352,7 @@ i2c_devices:
             100 mOhm shunt.",
       calibration: { shunt_macro: XEVK_INA228_SHUNT_5V_OHMS, shunt_ohms: "0.100",
                      max_macro: XEVK_INA228_MAX_5V_A, max_current_a: "1.6384",
+                     adc_range_macro: XEVK_INA228_ADCRANGE_5V, adc_range: "163mv",
                      max_current_note: "This is the shunt measurement full scale (ADCRANGE = 0: 163.84 mV / 100 mOhm), not a limit of the rail." } }
 
 # Audio -- 2x TAS2563 boosted class-D smart-amp (U27/U28) on E1M_X_I2C0 +

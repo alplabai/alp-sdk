@@ -38,6 +38,10 @@ project(alp_sdk_chips_test LANGUAGES C)
 # example's Phase 11 AMP_FAULT raw-pin mapping, pulled out for the same
 # reason (#2097 review follow-up) so test_audio.c can exercise it here.
 #
+# range_policy.h (examples/v2n/v2n-power-monitor/src/) is that example's
+# INA228 auto-range decision, a pure function kept in a header so
+# test_ina228.c can exercise it here without the Linux-only example main.c.
+#
 # hw_rev_verdict.h (examples/aen/aen-evk-demo/src/) is the same example's
 # Phase 11 r1/r2 IO8-safety gate, pulled out for the same reason (#2138) so
 # test_hw_rev_verdict.c can exercise it here against
@@ -47,7 +51,8 @@ project(alp_sdk_chips_test LANGUAGES C)
 target_include_directories(app PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../chips/da9292
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../chips/bme280
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../examples/aen/aen-evk-demo/src)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../examples/aen/aen-evk-demo/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../examples/v2n/v2n-power-monitor/src)
 
 target_sources(app PRIVATE
     src/main.c

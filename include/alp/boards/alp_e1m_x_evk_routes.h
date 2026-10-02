@@ -143,6 +143,7 @@ extern "C" {
 #define XEVK_INA236_SHUNT_VCAM3_OHMS 0.050f  /**< Shunt for XEVK_I2C_ADDR_INA236_VCAM3. */
 #define XEVK_INA236_MAX_VCAM3_A      1.6f  /**< Max current for XEVK_I2C_ADDR_INA236_VCAM3. */
 #define XEVK_INA228_SHUNT_5V_OHMS    0.100f  /**< Shunt for XEVK_I2C_ADDR_INA228_5V. */
+#define XEVK_INA228_ADCRANGE_5V      0  /**< INA228 shunt scale for XEVK_I2C_ADDR_INA228_5V: CONFIG.ADCRANGE = 0 (+/-163.84 mV full scale). */
 #define XEVK_INA228_MAX_5V_A         1.6384f  /**< Max current for XEVK_I2C_ADDR_INA228_5V. This is the shunt measurement full scale (ADCRANGE = 0: 163.84 mV / 100 mOhm), not a limit of the rail. */
 
 /* ------------------------------------------------------------------ */

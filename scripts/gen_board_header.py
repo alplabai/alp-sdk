@@ -122,6 +122,31 @@ def _is_assembled(entry: dict[str, Any]) -> bool:
     return bool(entry.get("assembled", True))
 
 
+# INA228 shunt scales (SLYS021A table 7-5): the ADCRANGE bit and the full-scale
+# shunt voltage in volts.
+_INA228_RANGE_BIT = {"163mv": 0, "40mv": 1}
+_INA228_RANGE_FULL_SCALE_V = {"163mv": 0.16384, "40mv": 0.04096}
+
+
+def _check_calibration_range(macro: str, cal: dict[str, Any]) -> None:
+    """A calibration entry with an `adc_range` must not ask for a max current
+    the shunt cannot measure on that range: full scale = range voltage /
+    shunt resistance.  Fails the generation (the board YAML is wrong), the
+    same way the driver's ina228_calibration_for() rejects it."""
+    rng = cal.get("adc_range")
+    if not rng:
+        return
+    shunt_ohms = float(cal["shunt_ohms"])
+    max_a = float(cal["max_current_a"])
+    full_scale_a = _INA228_RANGE_FULL_SCALE_V[rng] / shunt_ohms
+    if max_a > full_scale_a * (1 + 1e-9):
+        raise SystemExit(
+            f"gen_board_header: {macro}: max_current_a {cal['max_current_a']} A is above the "
+            f"{rng} range's full scale for a {cal['shunt_ohms']} ohm shunt "
+            f"({full_scale_a:.6f} A) -- lower max_current_a or pick the wider range"
+        )
+
+
 def _emit_i2c_devices(devices: list[dict[str, Any]]) -> list[str]:
     """Emit the on-board I2C device address block (+ any `alias`) and,
     for entries carrying a `calibration:` block, the paired INA236
@@ -169,9 +194,21 @@ def _emit_i2c_devices(devices: list[dict[str, Any]]) -> list[str]:
         macro = _tag(entry["macro"], assembled)
         shunt_macro = _tag(cal["shunt_macro"], assembled)
         max_macro = _tag(cal["max_macro"], assembled)
+        _check_calibration_range(macro, cal)
         calib_lines.append(
             (shunt_macro, f"{cal['shunt_ohms']}f", f"Shunt for {macro}.")
         )
+        if cal.get("adc_range_macro"):
+            rng = cal["adc_range"]
+            full_scale = _INA228_RANGE_FULL_SCALE_V[rng]
+            calib_lines.append(
+                (
+                    _tag(cal["adc_range_macro"], assembled),
+                    str(_INA228_RANGE_BIT[rng]),
+                    f"INA228 shunt scale for {macro}: CONFIG.ADCRANGE = "
+                    f"{_INA228_RANGE_BIT[rng]} (+/-{full_scale * 1000:.2f} mV full scale).",
+                )
+            )
         calib_lines.append(
             (
                 max_macro,

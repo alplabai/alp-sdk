@@ -169,6 +169,12 @@ typedef enum {
 } ina228_mode_t;
 
 /**
+ * A VSHUNT count this close to either end of its 20-bit range is treated as
+ * a clipped (over-range) reading by ina228_check_over_range().
+ */
+#define INA228_SATURATION_COUNTS 8
+
+/**
  * Driver context.  Treat as opaque; fields are exposed for diagnostics.
  *
  * Thread safety: none inside the driver.  One caller at a time per device
@@ -186,7 +192,7 @@ typedef struct {
 	uint16_t          shunt_cal;        /**< SHUNT_CAL value programmed. */
 	uint64_t          current_lsb_pa;   /**< CURRENT_LSB in pico-amps, derived from shunt_cal. */
 	uint16_t          config_cache;     /**< Last CONFIG value written (RST / RSTACC clear). */
-	ina228_adcrange_t adcrange;         /**< ADC range selected at init. */
+	ina228_adcrange_t adcrange; /**< Current ADC range (init, or ina228_set_shunt_range()). */
 } ina228_t;
 
 /**
@@ -202,19 +208,39 @@ typedef struct {
 uint64_t ina228_full_scale_ua(uint32_t shunt_micro_ohms, ina228_adcrange_t adcrange);
 
 /**
+ * @brief Pick the shunt range for a shunt and an expected maximum current.
+ *
+ * Chooses ::INA228_ADCRANGE_40MV (finer: four times the resolution) when
+ * max current x R_SHUNT fits +/-40.96 mV, otherwise ::INA228_ADCRANGE_163MV
+ * when it fits +/-163.84 mV.  For the E1M-X EVK's 100 mOhm shunt that is
+ * up to 0.4096 A on the narrow range and up to 1.6384 A on the wide one.
+ * Pure function; the boundary values are inclusive (0.4096 A -> narrow).
+ *
+ * @param[in]  shunt_micro_ohms  Shunt resistance, micro-ohms, > 0.
+ * @param[in]  max_current_ua    Expected maximum current, micro-amps, > 0.
+ * @param[out] range_out         The selected range.
+ *
+ * @return ALP_OK; ALP_ERR_INVAL for a NULL output or a zero shunt / current;
+ *         ALP_ERR_OUT_OF_RANGE when the current fits neither range.
+ */
+alp_status_t ina228_pick_adcrange(uint32_t           shunt_micro_ohms,
+                                  uint32_t           max_current_ua,
+                                  ina228_adcrange_t *range_out);
+
+/**
  * @brief Compute SHUNT_CAL and the CURRENT_LSB it yields, without touching
  *        the bus.
  *
  * SHUNT_CAL = 13107.2e6 * CURRENT_LSB * R_SHUNT (SLYS021A eq. 2), times 4
  * for ::INA228_ADCRANGE_40MV, with CURRENT_LSB = max current / 2^19 (eq. 3).
- * The reporting scale is not clamped: a @p max_current_ua above
- * ina228_full_scale_ua() only coarsens every reading, and SHUNT_CAL grows with
- * it until it passes the 15-bit register ceiling (0x7FFF), where the pair is
- * rejected.  This differs from ina236_calibration_for(), which clamps the
- * request to the range's full scale: clamping would silently change the scale
- * the caller asked for, so here an unencodable request is an error and any
- * encodable one is honoured.  Pass ina228_full_scale_ua() for the finest
- * resolution the shunt allows.  The returned LSB is back-computed from the
+ * A @p max_current_ua above ina228_full_scale_ua() for the range is rejected.
+ * This differs from ina236_calibration_for(), which clamps the request to the
+ * range's full scale: clamping would silently change the scale the caller
+ * asked for, so here an out-of-range request is an error and any request up
+ * to the full scale is honoured.  Pass ina228_full_scale_ua() for the finest
+ * resolution the shunt allows.  (Within the full scale SHUNT_CAL stays
+ * near 4096, far below the 0x7FFF register ceiling, which the function still
+ * checks.)  The returned LSB is back-computed from the
  * rounded SHUNT_CAL, so it matches what the register actually does.
  *
  * @param[in]  shunt_micro_ohms  Shunt resistance, micro-ohms, > 0.
@@ -225,8 +251,9 @@ uint64_t ina228_full_scale_ua(uint32_t shunt_micro_ohms, ina228_adcrange_t adcra
  * @param[out] lsb_pa_out        CURRENT_LSB in pico-amps.
  *
  * @return ALP_OK; ALP_ERR_INVAL for a NULL output, a zero shunt or a zero /
- *         over-limit current; ALP_ERR_OUT_OF_RANGE when SHUNT_CAL would round
- *         to 0 or exceed 0x7FFF (the shunt / current pair cannot be encoded).
+ *         over-limit current; ALP_ERR_OUT_OF_RANGE when @p max_current_ua is
+ *         above the range's full scale, or SHUNT_CAL would round to 0 or
+ *         exceed 0x7FFF (the pair cannot be encoded).
  */
 alp_status_t ina228_calibration_for(uint32_t          shunt_micro_ohms,
                                     uint32_t          max_current_ua,
@@ -248,12 +275,12 @@ alp_status_t ina228_calibration_for(uint32_t          shunt_micro_ohms,
  * @param[in]  addr_7bit         7-bit address, ::INA228_ADDR_MIN..::INA228_ADDR_MAX.
  * @param[in]  shunt_micro_ohms  Shunt resistance in micro-ohms, e.g. 100000
  *                               for 100 milli-ohms.  > 0.
- * @param[in]  max_current_ua    Reporting scale in micro-amps (see
+ * @param[in]  max_current_ua    Reporting scale in micro-amps, at most the
+ *                               range's full scale (see
  *                               ina228_calibration_for()).  Not a hardware
  *                               limit; clipping is set by @p adcrange and
- *                               the shunt.  Derive it from
- *                               ina228_full_scale_ua() unless the rail's own
- *                               limit is smaller.
+ *                               the shunt.  Use ina228_pick_adcrange() to
+ *                               choose the range for it.
  * @param[in]  adcrange          ADC range.
  *
  * @return ALP_OK on success; ::INA228_ERR_NOT_PRESENT if the first register
@@ -269,6 +296,57 @@ alp_status_t ina228_init(ina228_t         *ctx,
                          uint32_t          shunt_micro_ohms,
                          uint32_t          max_current_ua,
                          ina228_adcrange_t adcrange);
+
+/**
+ * @brief Change the shunt range at run time and recompute SHUNT_CAL.
+ *
+ * Rewrites CONFIG.ADCRANGE and SHUNT_CAL (times 4 on the 40.96 mV range) so
+ * current, power, energy and charge stay correctly scaled after the switch,
+ * and clears the ENERGY and CHARGE accumulators: they were accumulated at the
+ * old scale, and SLYS021A does not say the device carries them across a range
+ * change.  RSTACC is set in the same CONFIG write that changes the range and
+ * is cleared again after SHUNT_CAL is written, so nothing accumulates between
+ * the new range and the new calibration.  The call validates everything
+ * before its first bus write, then does three writes (CONFIG, SHUNT_CAL,
+ * CONFIG); on a bus error part-way the device state is unknown and the
+ * context is left as it was, so call ina228_reset() or ina228_init() again.
+ * Conversions already in flight during the switch may be one sample off.
+ *
+ * With the E1M-X EVK's 100 mOhm shunt the two scales are: ::INA228_ADCRANGE_163MV,
+ * 1.6384 A full scale, 3.125 uA/LSB; ::INA228_ADCRANGE_40MV, 0.4096 A full
+ * scale, 0.78125 uA/LSB (four times the resolution).
+ *
+ * @param[in,out] ctx             Initialised context.
+ * @param[in]     adcrange        New range.
+ * @param[in]     max_current_ua  Reporting scale for the new range, micro-amps;
+ *                                0 = the new range's full scale.  Above the
+ *                                full scale is rejected (see
+ *                                ina228_calibration_for()).
+ *
+ * @return ALP_OK; ALP_ERR_NOT_READY for a NULL / uninitialised @p ctx;
+ *         ALP_ERR_INVAL for a bad range; ALP_ERR_OUT_OF_RANGE when the scale
+ *         does not fit the range; a bus error unchanged.
+ */
+alp_status_t
+ina228_set_shunt_range(ina228_t *ctx, ina228_adcrange_t adcrange, uint32_t max_current_ua);
+
+/**
+ * @brief Report whether the last shunt reading is clipped (over range).
+ *
+ * True when DIAG_ALRT.MATHOF is set (an arithmetic overflow: current and
+ * power may be invalid) or VSHUNT sits within ::INA228_SATURATION_COUNTS of
+ * either end of its 20-bit range, where the ADC holds its limit once the input
+ * passes the selected range.  A reader on the 40.96 mV range should check this
+ * and not print the numbers as valid when it is true.  MATHOF is a flag only
+ * cleared by another conversion or an accumulator reset; the saturation test
+ * is on the live VSHUNT value.
+ *
+ * @param[in]  ctx       Initialised context.
+ * @param[out] over_out  True when the reading is clipped.
+ * @return ALP_OK; ALP_ERR_NOT_READY for a NULL / uninitialised @p ctx or NULL
+ *         output; a bus error unchanged.
+ */
+alp_status_t ina228_check_over_range(ina228_t *ctx, bool *over_out);
 
 /**
  * @brief Program ADC_CONFIG: operating mode, conversion times, averaging.

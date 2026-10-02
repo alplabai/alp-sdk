@@ -20,9 +20,40 @@ power once a second.
 
 The +5V input monitor (U30) is an INA228 at `0x42`, a different
 register map, so it is read through the `ina228` driver and printed as
-the last row (`5V`).  Its shunt is 100 mΩ; the example passes the
-ADCRANGE = 0 shunt full scale (163.84 mV / 100 mΩ = 1.6384 A) as the max
-current, a value derived from the shunt, not a limit of the rail.
+the last row (`5V`).  Its shunt is 100 mΩ.
+
+### INA228 shunt scale (`--ina228-range`)
+
+The INA228 measures the shunt on one of two scales (`CONFIG.ADCRANGE`).  With
+the 100 mΩ shunt:
+
+| Option | Shunt full scale | Current full scale | Resolution |
+|---|---|---|---|
+| `163mv` (board default) | ±163.84 mV | 1.6384 A | 3.125 µA/LSB |
+| `40mv` | ±40.96 mV | 0.4096 A | 0.78125 µA/LSB (4x finer) |
+| `auto` | starts on `163mv` | | |
+
+```sh
+./v2n-power-monitor --ina228-range auto      # or 163mv | 40mv
+```
+
+The default comes from the board header (`XEVK_INA228_ADCRANGE_5V`, the wide
+range): the +5V input current with the NPU active is not known to stay under
+0.4096 A, so the board default is not the narrow range.  The max current the
+example passes is the range's shunt full scale (1.6384 A on the wide range,
+0.4096 A on the narrow one), derived from the shunt, not a limit of the rail.
+
+`auto` starts on the wide range and decides from each reading's shunt
+voltage: below 75 % of the narrow full scale (30.72 mV) it switches to
+`40mv`; at or above 95 % of it (38.912 mV), or as soon as the narrow range
+is clipped, it switches back to `163mv`.  Between the two it stays where it
+is, so a reading near a threshold does not flip the range.  Each switch
+prints one line and shows `--` for that one sample.  Switching resets the
+INA228's energy and charge accumulators (they were counted at the old scale).
+A reading that clips (`ina228_check_over_range()`: the shunt ADC at its
+limit, or the `MATHOF` flag) is reported as `over-range` instead of being
+printed as a valid number.  The decision logic is `src/range_policy.h`, a
+pure function covered by `tests/zephyr/chips/src/test_ina228.c`.
 
 The INA228 answers only on carriers with the I2C bus-pin rework applied.
 On a carrier without it the driver reports "not present": the example

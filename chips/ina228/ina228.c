@@ -211,6 +211,23 @@ uint64_t ina228_full_scale_ua(uint32_t shunt_micro_ohms, ina228_adcrange_t adcra
 	return (fs_uv * 1000000ull) / shunt_micro_ohms;
 }
 
+alp_status_t ina228_pick_adcrange(uint32_t           shunt_micro_ohms,
+                                  uint32_t           max_current_ua,
+                                  ina228_adcrange_t *range_out)
+{
+	if (range_out == NULL || shunt_micro_ohms == 0u || max_current_ua == 0u) return ALP_ERR_INVAL;
+	uint64_t need = (uint64_t)max_current_ua * shunt_micro_ohms; /* uV * 1e6 */
+	if (need <= INA228_FS_UV_40MV * 1000000ull) {
+		*range_out = INA228_ADCRANGE_40MV;
+		return ALP_OK;
+	}
+	if (need <= INA228_FS_UV_163MV * 1000000ull) {
+		*range_out = INA228_ADCRANGE_163MV;
+		return ALP_OK;
+	}
+	return ALP_ERR_OUT_OF_RANGE;
+}
+
 alp_status_t ina228_calibration_for(uint32_t          shunt_micro_ohms,
                                     uint32_t          max_current_ua,
                                     ina228_adcrange_t adcrange,
@@ -221,10 +238,16 @@ alp_status_t ina228_calibration_for(uint32_t          shunt_micro_ohms,
 	if (shunt_micro_ohms == 0u) return ALP_ERR_INVAL;
 	if (max_current_ua == 0u || max_current_ua > INA228_MAX_CURRENT_LIMIT_UA) return ALP_ERR_INVAL;
 
-	/* CURRENT_LSB = max current / 2^19 in pico-amps, rounded to nearest;
-	 * (>= 2 pA for any request >= 1 uA).  Not clamped to the range's full scale: a request
-	 * beyond it only coarsens every reading (use ina228_full_scale_ua() to
-	 * pick the value), but it is the caller's stated scale. */
+	/* A reporting scale above what the shunt + range can measure is rejected,
+	 * not clamped (ina236_calibration_for() clamps): clamping would silently
+	 * change the scale the caller asked for.  Exact integer test:
+	 * max_ua * R_uohm <= FS_uV * 1e6. */
+	uint64_t fs_uv = (adcrange == INA228_ADCRANGE_40MV) ? INA228_FS_UV_40MV : INA228_FS_UV_163MV;
+	if ((uint64_t)max_current_ua * shunt_micro_ohms > fs_uv * 1000000ull)
+		return ALP_ERR_OUT_OF_RANGE;
+
+	/* CURRENT_LSB = max current / 2^19 in pico-amps, rounded to nearest
+	 * (>= 2 pA for any request >= 1 uA). */
 	uint64_t lsb_pa =
 	    ((uint64_t)max_current_ua * INA228_PA_PER_UA + (1ull << (INA228_CURRENT_BITS - 1))) >>
 	    INA228_CURRENT_BITS;
@@ -311,6 +334,69 @@ alp_status_t ina228_init(ina228_t         *ctx,
 	if (s != ALP_OK) return s;
 
 	ctx->initialised = true;
+	return ALP_OK;
+}
+
+alp_status_t
+ina228_set_shunt_range(ina228_t *ctx, ina228_adcrange_t adcrange, uint32_t max_current_ua)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (adcrange != INA228_ADCRANGE_163MV && adcrange != INA228_ADCRANGE_40MV) return ALP_ERR_INVAL;
+
+	/* 0 = the new range's full scale (clamped to the accepted request limit). */
+	if (max_current_ua == 0u) {
+		uint64_t fs = ina228_full_scale_ua(ctx->shunt_micro_ohms, adcrange);
+		max_current_ua =
+		    (fs > INA228_MAX_CURRENT_LIMIT_UA) ? INA228_MAX_CURRENT_LIMIT_UA : (uint32_t)fs;
+	}
+
+	/* Validate and compute before the first bus write. */
+	uint16_t     cal;
+	uint64_t     lsb;
+	alp_status_t s =
+	    ina228_calibration_for(ctx->shunt_micro_ohms, max_current_ua, adcrange, &cal, &lsb);
+	if (s != ALP_OK) return s;
+
+	uint16_t cfg = (uint16_t)(ctx->config_cache & ~INA228_CFG_ADCRANGE);
+	if (adcrange == INA228_ADCRANGE_40MV) cfg |= INA228_CFG_ADCRANGE;
+
+	/* ENERGY and CHARGE accumulated at the old scale mean nothing at the new
+	 * one (the datasheet is silent on a range change), so clear them: RSTACC
+	 * is set in the same CONFIG write that changes ADCRANGE and stays set
+	 * across the SHUNT_CAL write, so nothing accumulates between the new range
+	 * and the new calibration.  Then the cached CONFIG is written back with
+	 * RSTACC clear. */
+	s = reg_write16(ctx, INA228_REG_CONFIG, (uint16_t)(cfg | INA228_CFG_RSTACC));
+	if (s != ALP_OK) return s;
+	s = reg_write16(ctx, INA228_REG_SHUNT_CAL, cal);
+	if (s != ALP_OK) return s;
+	s = reg_write16(ctx, INA228_REG_CONFIG, cfg);
+	if (s != ALP_OK) return s;
+
+	ctx->adcrange       = adcrange;
+	ctx->max_current_ua = max_current_ua;
+	ctx->shunt_cal      = cal;
+	ctx->current_lsb_pa = lsb;
+	ctx->config_cache   = cfg;
+	return ALP_OK;
+}
+
+alp_status_t ina228_check_over_range(ina228_t *ctx, bool *over_out)
+{
+	if (ctx == NULL || !ctx->initialised || over_out == NULL) return ALP_ERR_NOT_READY;
+	uint32_t     raw;
+	alp_status_t s = reg_read24(ctx, INA228_REG_VSHUNT, &raw);
+	if (s != ALP_OK) return s;
+	uint16_t diag;
+	s = reg_read16(ctx, INA228_REG_DIAG_ALRT, &diag);
+	if (s != ALP_OK) return s;
+	/* The ADC holds its limit once the input passes the selected range
+	 * (SLYS021A 7.3.5: the detected shunt voltage "will remain constant due to
+	 * the voltage exceeding the selected ADC range"), so a count within
+	 * INA228_SATURATION_COUNTS of either end is a clipped reading. */
+	int32_t v = sign_extend20(raw);
+	*over_out = (diag & INA228_DIAG_MATHOF) != 0u || v >= (0x7FFFF - INA228_SATURATION_COUNTS) ||
+	            v <= (-0x80000 + INA228_SATURATION_COUNTS);
 	return ALP_OK;
 }
 

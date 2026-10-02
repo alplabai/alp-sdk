@@ -18,6 +18,7 @@
 #include "alp/peripheral.h"
 
 #include "fakes.h"
+#include "range_policy.h"
 
 #define SHUNT_100MOHM_UOHM 100000u
 /* 100 mOhm x 163.84 mV full scale = 1.6384 A. */
@@ -167,11 +168,20 @@ ZTEST(alp_chips, test_ina228_shunt_cal_programming)
 	zassert_equal(ctx.current_lsb_pa, 781250u);
 	zassert_equal(fake_ina228_get_reg(REG_CONFIG) & 0x0010u, 0x0010u, "ADCRANGE bit set");
 
-	/* The request is not clamped: 10 A on this shunt is 6.1x the full-scale
-	 * value, so SHUNT_CAL is 6.1x larger (4096 x 10 / 1.6384 = 25000). */
+	/* A request above the range's full scale is rejected (ina236 would clamp
+	 * it), with nothing written to the part: 10 A on this shunt is 6.1x the
+	 * 1.6384 A full scale. */
 	fake_ina228_reset();
-	zassert_equal(ina228_init(&ctx, bus, 0x42u, 100000u, 10000000u, INA228_ADCRANGE_163MV), ALP_OK);
-	zassert_true(ctx.shunt_cal >= 24999u && ctx.shunt_cal <= 25001u, "cal %u", ctx.shunt_cal);
+	zassert_equal(ina228_init(&ctx, bus, 0x42u, 100000u, 10000000u, INA228_ADCRANGE_163MV),
+	              ALP_ERR_OUT_OF_RANGE);
+	zassert_equal(fake_ina228_log_len(), 0u);
+	/* ... and the full-scale value itself is accepted, 1 uA more is not. */
+	zassert_equal(ina228_init(&ctx, bus, 0x42u, 100000u, 1638400u, INA228_ADCRANGE_163MV), ALP_OK);
+	zassert_equal(ina228_init(&ctx, bus, 0x42u, 100000u, 1638401u, INA228_ADCRANGE_163MV),
+	              ALP_ERR_OUT_OF_RANGE);
+	zassert_equal(ina228_init(&ctx, bus, 0x42u, 100000u, 409600u, INA228_ADCRANGE_40MV), ALP_OK);
+	zassert_equal(ina228_init(&ctx, bus, 0x42u, 100000u, 409601u, INA228_ADCRANGE_40MV),
+	              ALP_ERR_OUT_OF_RANGE);
 
 	alp_i2c_close(bus);
 }
@@ -201,27 +211,33 @@ ZTEST(alp_chips, test_ina228_calibration_for_edges)
 	                  100000u, INA228_MAX_CURRENT_LIMIT_UA + 1u, INA228_ADCRANGE_163MV, &cal, &lsb),
 	              ALP_ERR_INVAL);
 
-	/* SHUNT_CAL > 0x7FFF cannot be programmed: 20 A on 100 mOhm wants
-	 * 4096 x 20 / 1.6384 = 50000.  Rejected, not clamped. */
+	/* Above the range's full scale is rejected, not clamped (ina236 clamps):
+	 * 1.6384 A is the wide range's full scale on 100 mOhm. */
+	zassert_equal(ina228_calibration_for(100000u, 1638400u, INA228_ADCRANGE_163MV, &cal, &lsb),
+	              ALP_OK);
+	zassert_equal(cal, 4096u);
+	zassert_equal(ina228_calibration_for(100000u, 1638401u, INA228_ADCRANGE_163MV, &cal, &lsb),
+	              ALP_ERR_OUT_OF_RANGE);
 	zassert_equal(ina228_calibration_for(100000u, 20000000u, INA228_ADCRANGE_163MV, &cal, &lsb),
 	              ALP_ERR_OUT_OF_RANGE);
-	/* The 0x7FFF edge sits at 4096 x I / 1.6384 A = 32767, i.e. I = 13.1 A.
-	 * 13,106,999 uA is the largest request that still rounds to 0x7FFF; the
-	 * next microamp rounds to 0x8000 and is rejected. */
-	zassert_equal(ina228_calibration_for(100000u, 13106999u, INA228_ADCRANGE_163MV, &cal, &lsb),
+	/* The narrow range's full scale is a quarter of that, and the same 4096
+	 * SHUNT_CAL: x4 for the range, /4 for the LSB. */
+	zassert_equal(ina228_calibration_for(100000u, 409600u, INA228_ADCRANGE_40MV, &cal, &lsb),
 	              ALP_OK);
-	zassert_equal(cal, 0x7FFFu);
-	zassert_equal(ina228_calibration_for(100000u, 13107000u, INA228_ADCRANGE_163MV, &cal, &lsb),
+	zassert_equal(cal, 4096u);
+	zassert_equal(lsb, 781250u);
+	zassert_equal(ina228_calibration_for(100000u, 409601u, INA228_ADCRANGE_40MV, &cal, &lsb),
 	              ALP_ERR_OUT_OF_RANGE);
-	zassert_equal(ina228_calibration_for(100000u, 13200000u, INA228_ADCRANGE_163MV, &cal, &lsb),
-	              ALP_ERR_OUT_OF_RANGE);
-	/* ADCRANGE = 1 multiplies SHUNT_CAL by 4, so the same 5 A overflows there
-	 * (4096 x 5 / 0.4096 = 50000) but fits on range 0 (12500). */
-	zassert_equal(ina228_calibration_for(100000u, 5000000u, INA228_ADCRANGE_40MV, &cal, &lsb),
-	              ALP_ERR_OUT_OF_RANGE);
-	zassert_equal(ina228_calibration_for(100000u, 5000000u, INA228_ADCRANGE_163MV, &cal, &lsb),
+	/* The same request on both ranges: SHUNT_CAL is 4x on the narrow one. */
+	uint16_t cal_wide = 0, cal_narrow = 0;
+	zassert_equal(ina228_calibration_for(100000u, 400000u, INA228_ADCRANGE_163MV, &cal_wide, &lsb),
 	              ALP_OK);
-	zassert_true(cal >= 12499u && cal <= 12501u);
+	zassert_equal(ina228_calibration_for(100000u, 400000u, INA228_ADCRANGE_40MV, &cal_narrow, &lsb),
+	              ALP_OK);
+	zassert_true(cal_narrow >= 4u * cal_wide - 2u && cal_narrow <= 4u * cal_wide + 2u,
+	             "wide %u narrow %u",
+	             cal_wide,
+	             cal_narrow);
 
 	/* SHUNT_CAL that rounds to 0 is rejected too (it would report 0 A). */
 	zassert_equal(ina228_calibration_for(1u, 1u, INA228_ADCRANGE_163MV, &cal, &lsb),
@@ -541,4 +557,189 @@ ZTEST(alp_chips, test_ina228_uninitialised_context_is_rejected)
 	ina228_deinit(&ctx);
 	zassert_false(ctx.initialised);
 	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_ina228_both_ranges_report_the_same_engineering_values)
+{
+	alp_i2c_t *bus = open_bus();
+	ina228_t   ctx;
+	int32_t    i;
+	uint64_t   u;
+
+	/* 0.25 A through the 100 mOhm shunt = 25 mV across it, 5 V bus, 1.25 W. */
+	fake_ina228_reset();
+	init_ref(&ctx, bus, INA228_ADCRANGE_163MV);    /* 312.5 nV/LSB, 3.125 uA/LSB */
+	fake_ina228_set_reg(REG_VSHUNT, 80000u << 4);  /* 25 mV / 312.5 nV */
+	fake_ina228_set_reg(REG_CURRENT, 80000u << 4); /* 0.25 A / 3.125 uA */
+	fake_ina228_set_reg(REG_POWER, 125000u);       /* 1.25 W / (3.2 x 3.125 uA) */
+	zassert_equal(ina228_read_shunt_uv(&ctx, &i), ALP_OK);
+	zassert_equal(i, 25000);
+	zassert_equal(ina228_read_current_ua(&ctx, &i), ALP_OK);
+	zassert_equal(i, 250000);
+	zassert_equal(ina228_read_power_uw(&ctx, &u), ALP_OK);
+	zassert_equal(u, 1250000u);
+
+	fake_ina228_reset();
+	init_ref(&ctx, bus, INA228_ADCRANGE_40MV);      /* 78.125 nV/LSB, 0.78125 uA/LSB */
+	fake_ina228_set_reg(REG_VSHUNT, 320000u << 4);  /* 25 mV / 78.125 nV */
+	fake_ina228_set_reg(REG_CURRENT, 320000u << 4); /* 0.25 A / 0.78125 uA */
+	fake_ina228_set_reg(REG_POWER, 500000u);        /* 1.25 W / (3.2 x 0.78125 uA) */
+	zassert_equal(ina228_read_shunt_uv(&ctx, &i), ALP_OK);
+	zassert_equal(i, 25000);
+	zassert_equal(ina228_read_current_ua(&ctx, &i), ALP_OK);
+	zassert_equal(i, 250000);
+	zassert_equal(ina228_read_power_uw(&ctx, &u), ALP_OK);
+	zassert_equal(u, 1250000u);
+
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_ina228_set_shunt_range_rewrites_range_and_cal_and_resets_accumulators)
+{
+	alp_i2c_t *bus = open_bus();
+	ina228_t   ctx;
+	int32_t    i;
+
+	fake_ina228_reset();
+	init_ref(&ctx, bus, INA228_ADCRANGE_163MV);
+	fake_ina228_set_reg(REG_ENERGY, 123456u);
+	fake_ina228_set_reg(REG_CHARGE, 654321u);
+
+	/* Wide -> narrow, reporting scale = the new full scale (0). */
+	uint32_t before = fake_ina228_log_len();
+	zassert_equal(ina228_set_shunt_range(&ctx, INA228_ADCRANGE_40MV, 0u), ALP_OK);
+	zassert_equal(fake_ina228_log_len(), before + 3u, "three writes");
+	/* 1: CONFIG = new ADCRANGE | RSTACC (accumulators cleared with the switch). */
+	zassert_equal(fake_ina228_log_reg(before), REG_CONFIG);
+	zassert_equal(fake_ina228_log_val(before), 0x4010u);
+	/* 2: SHUNT_CAL for the new range (x4 for the range, /4 for the LSB). */
+	zassert_equal(fake_ina228_log_reg(before + 1u), REG_SHUNT_CAL);
+	zassert_equal(fake_ina228_log_val(before + 1u), 4096u);
+	/* 3: CONFIG written back with RSTACC clear. */
+	zassert_equal(fake_ina228_log_reg(before + 2u), REG_CONFIG);
+	zassert_equal(fake_ina228_log_val(before + 2u), 0x0010u);
+	zassert_equal(ctx.adcrange, INA228_ADCRANGE_40MV);
+	zassert_equal(ctx.current_lsb_pa, 781250u);
+	/* Scaling follows: the same CURRENT count now means a quarter the current. */
+	fake_ina228_set_reg(REG_CURRENT, 320000u << 4);
+	zassert_equal(ina228_read_current_ua(&ctx, &i), ALP_OK);
+	zassert_equal(i, 250000);
+
+	/* Narrow -> wide; an explicit scale below the full scale is honoured. */
+	before = fake_ina228_log_len();
+	zassert_equal(ina228_set_shunt_range(&ctx, INA228_ADCRANGE_163MV, 819200u), ALP_OK);
+	zassert_equal(fake_ina228_log_val(before), 0x4000u, "ADCRANGE clear, RSTACC set");
+	zassert_equal(fake_ina228_get_reg(REG_CONFIG), 0x0000u);
+	zassert_equal(fake_ina228_get_reg(REG_SHUNT_CAL), 2048u, "half the 1.6384 A scale");
+
+	/* Above the new range's full scale: rejected before the first write, and
+	 * the context is untouched. */
+	before = fake_ina228_log_len();
+	zassert_equal(ina228_set_shunt_range(&ctx, INA228_ADCRANGE_40MV, 409601u),
+	              ALP_ERR_OUT_OF_RANGE);
+	zassert_equal(ina228_set_shunt_range(&ctx, (ina228_adcrange_t)2, 0u), ALP_ERR_INVAL);
+	zassert_equal(fake_ina228_log_len(), before);
+	zassert_equal(ctx.adcrange, INA228_ADCRANGE_163MV);
+
+	/* Bus error part-way: reported unchanged, the context keeps its old range. */
+	fake_ina228_set_error(-EBUSY);
+	zassert_equal(ina228_set_shunt_range(&ctx, INA228_ADCRANGE_40MV, 0u), ALP_ERR_BUSY);
+	fake_ina228_set_error(0);
+	zassert_equal(ctx.adcrange, INA228_ADCRANGE_163MV);
+
+	ina228_t ctx_uninit = { 0 };
+	zassert_equal(ina228_set_shunt_range(&ctx_uninit, INA228_ADCRANGE_40MV, 0u), ALP_ERR_NOT_READY);
+	zassert_equal(ina228_set_shunt_range(NULL, INA228_ADCRANGE_40MV, 0u), ALP_ERR_NOT_READY);
+
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_ina228_pick_adcrange_boundaries)
+{
+	ina228_adcrange_t r = INA228_ADCRANGE_163MV;
+
+	/* 100 mOhm: narrow up to 0.4096 A inclusive, wide up to 1.6384 A inclusive. */
+	zassert_equal(ina228_pick_adcrange(100000u, 1u, &r), ALP_OK);
+	zassert_equal(r, INA228_ADCRANGE_40MV);
+	zassert_equal(ina228_pick_adcrange(100000u, 409600u, &r), ALP_OK);
+	zassert_equal(r, INA228_ADCRANGE_40MV);
+	zassert_equal(ina228_pick_adcrange(100000u, 409601u, &r), ALP_OK);
+	zassert_equal(r, INA228_ADCRANGE_163MV);
+	zassert_equal(ina228_pick_adcrange(100000u, 1638400u, &r), ALP_OK);
+	zassert_equal(r, INA228_ADCRANGE_163MV);
+	/* Fits neither: an error, and the output is left alone. */
+	r = INA228_ADCRANGE_40MV;
+	zassert_equal(ina228_pick_adcrange(100000u, 1638401u, &r), ALP_ERR_OUT_OF_RANGE);
+	zassert_equal(r, INA228_ADCRANGE_40MV);
+	/* Bad arguments. */
+	zassert_equal(ina228_pick_adcrange(0u, 1000u, &r), ALP_ERR_INVAL);
+	zassert_equal(ina228_pick_adcrange(100000u, 0u, &r), ALP_ERR_INVAL);
+	zassert_equal(ina228_pick_adcrange(100000u, 1000u, NULL), ALP_ERR_INVAL);
+	/* The same shunt-voltage boundary scales with R: 10 mOhm -> 4.096 A / 16.384 A. */
+	zassert_equal(ina228_pick_adcrange(10000u, 4096000u, &r), ALP_OK);
+	zassert_equal(r, INA228_ADCRANGE_40MV);
+	zassert_equal(ina228_pick_adcrange(10000u, 4096001u, &r), ALP_OK);
+	zassert_equal(r, INA228_ADCRANGE_163MV);
+}
+
+ZTEST(alp_chips, test_ina228_over_range_is_detected_not_reported_as_valid)
+{
+	alp_i2c_t *bus = open_bus();
+	ina228_t   ctx;
+	bool       over = true;
+
+	fake_ina228_reset();
+	init_ref(&ctx, bus, INA228_ADCRANGE_40MV);
+
+	/* Mid-scale, no flag: valid. */
+	fake_ina228_set_reg(REG_VSHUNT, 320000u << 4);
+	zassert_equal(ina228_check_over_range(&ctx, &over), ALP_OK);
+	zassert_false(over);
+	/* The ADC holds its limit when clipped: both ends, and a few counts in. */
+	fake_ina228_set_reg(REG_VSHUNT, 0x7FFFF0u);
+	zassert_equal(ina228_check_over_range(&ctx, &over), ALP_OK);
+	zassert_true(over);
+	fake_ina228_set_reg(REG_VSHUNT, 0x800000u);
+	zassert_equal(ina228_check_over_range(&ctx, &over), ALP_OK);
+	zassert_true(over);
+	fake_ina228_set_reg(REG_VSHUNT, (0x7FFFFu - INA228_SATURATION_COUNTS) << 4);
+	zassert_equal(ina228_check_over_range(&ctx, &over), ALP_OK);
+	zassert_true(over);
+	fake_ina228_set_reg(REG_VSHUNT, (0x7FFFFu - INA228_SATURATION_COUNTS - 1u) << 4);
+	zassert_equal(ina228_check_over_range(&ctx, &over), ALP_OK);
+	zassert_false(over);
+	/* MATHOF alone (current / power may be invalid) is over-range too. */
+	fake_ina228_set_reg(REG_DIAG_ALRT, INA228_DIAG_MEMSTAT | INA228_DIAG_MATHOF);
+	zassert_equal(ina228_check_over_range(&ctx, &over), ALP_OK);
+	zassert_true(over);
+
+	zassert_equal(ina228_check_over_range(&ctx, NULL), ALP_ERR_NOT_READY);
+	ina228_t ctx_uninit = { 0 };
+	zassert_equal(ina228_check_over_range(&ctx_uninit, &over), ALP_ERR_NOT_READY);
+
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_ina228_auto_range_policy_hysteresis)
+{
+	/* Wide range: drop to narrow only below 75 % of 40.96 mV (30720 uV). */
+	zassert_false(range_policy_want_narrow(false, 38000, false), "stay wide at 38 mV");
+	zassert_false(range_policy_want_narrow(false, 30720, false), "boundary: 30720 stays wide");
+	zassert_true(range_policy_want_narrow(false, 30719, false), "just below -> narrow");
+	zassert_true(range_policy_want_narrow(false, -30719, false), "sign is ignored");
+	zassert_true(range_policy_want_narrow(false, 0, false));
+	zassert_false(range_policy_want_narrow(false, 100, true), "a clipped reading never narrows");
+
+	/* Narrow range: back to wide at 95 % (38912 uV) or when clipped. */
+	zassert_true(range_policy_want_narrow(true, 38911, false), "just below -> stay narrow");
+	zassert_false(range_policy_want_narrow(true, 38912, false), "boundary: 38912 goes wide");
+	zassert_false(range_policy_want_narrow(true, -38912, false), "sign is ignored");
+	zassert_false(range_policy_want_narrow(true, 100, true), "clipped -> wide at once");
+	zassert_true(range_policy_want_narrow(true, 100, false));
+
+	/* Inside the 30720..38912 band neither range is left: no flapping. */
+	for (int32_t v = 30720; v < 38912; v += 512) {
+		zassert_false(range_policy_want_narrow(false, v, false), "wide holds at %d", (int)v);
+		zassert_true(range_policy_want_narrow(true, v, false), "narrow holds at %d", (int)v);
+	}
 }

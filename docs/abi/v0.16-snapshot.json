@@ -1427,6 +1427,10 @@
           "hash": "bcf0934921854bb9",
           "value": "ALP_E1M_X_I2S0"
         },
+        "XEVK_INA228_ADCRANGE_5V": {
+          "hash": "ee8820caaa6bd18a",
+          "value": "0"
+        },
         "XEVK_INA228_MAX_5V_A": {
           "hash": "f3b5c1c9c06f806b",
           "value": "1.6384f"
@@ -5408,6 +5412,10 @@
           "hash": "3ac963876ed16c52",
           "signature": "alp_status_t ina228_calibration_for(uint32_t shunt_micro_ohms, uint32_t max_current_ua, ina228_adcrange_t adcrange, uint16_t *shunt_cal_out, uint64_t *lsb_pa_out);"
         },
+        "ina228_check_over_range": {
+          "hash": "ad9c53625f1b4925",
+          "signature": "alp_status_t ina228_check_over_range(ina228_t *ctx, bool *over_out);"
+        },
         "ina228_configure": {
           "hash": "75fd8225d1943cce",
           "signature": "alp_status_t ina228_configure(ina228_t *ctx, ina228_avg_t avg, ina228_ct_t vbusct, ina228_ct_t vshct, ina228_ct_t vtct, ina228_mode_t mode);"
@@ -5423,6 +5431,10 @@
         "ina228_init": {
           "hash": "ac570d51a1fc66b4",
           "signature": "alp_status_t ina228_init(ina228_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, uint32_t shunt_micro_ohms, uint32_t max_current_ua, ina228_adcrange_t adcrange);"
+        },
+        "ina228_pick_adcrange": {
+          "hash": "5f3983a09345cc38",
+          "signature": "alp_status_t ina228_pick_adcrange(uint32_t shunt_micro_ohms, uint32_t max_current_ua, ina228_adcrange_t *range_out);"
         },
         "ina228_read_bus_uv": {
           "hash": "21ef2a269cbed5ec",
@@ -5463,6 +5475,10 @@
         "ina228_reset_accumulators": {
           "hash": "a679c160d778dd1b",
           "signature": "alp_status_t ina228_reset_accumulators(ina228_t *ctx);"
+        },
+        "ina228_set_shunt_range": {
+          "hash": "a5b8722ef27a9924",
+          "signature": "alp_status_t ina228_set_shunt_range(ina228_t *ctx, ina228_adcrange_t adcrange, uint32_t max_current_ua);"
         }
       },
       "macros": {
@@ -5533,6 +5549,10 @@
         "INA228_MFG_ID": {
           "hash": "2c014856d38a52b5",
           "value": "0x5449u"
+        },
+        "INA228_SATURATION_COUNTS": {
+          "hash": "dfead3c23c21363c",
+          "value": "8"
         }
       },
       "typedefs": {
