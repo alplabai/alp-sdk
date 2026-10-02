@@ -1326,6 +1326,7 @@ class Dxm1NpuFlash(Step):
         if "gpio" in st:
             chip, mux, rst = st["gpio"]
             try:
+                dxm1.kill_dxflash(ctx.linux)         # never tear the GPIOs down under a live flasher
                 note = f"; {dxm1.unexport_gpios(ctx.linux, chip, (mux, rst))}"
             except (BenchError, AttributeError) as e:
                 note = f"; GPIOs left exported ({e})"
@@ -1372,10 +1373,10 @@ class Dxm1NpuFlash(Step):
             st["gpio"] = (chip, mux, rst)
             if erase:
                 ev["dxm1_nand_erase"] = dxm1.erase_nand(tt)
-            rc, log = dxm1.run_dxflash(tt, chip, mux, rst)
-            ev["dxm1_dxflash_rc"] = str(rc)
+            rc, log, timed_out = dxm1.run_dxflash(tt, chip, mux, rst)
+            ev["dxm1_dxflash_rc"] = "killed after its success markers" if rc is None and not timed_out else str(rc)
             ctx.step_logs[self.name] = log
-            return dxm1.classify(rc, log)
+            return dxm1.classify(rc, log, timed_out)
 
         try:
             ctx.mutate("push the dxuart2 DTB to /tmp, md5-checked on the target", push_dtb)

@@ -53,11 +53,23 @@ def _dx_bundle(tmp_path, family="v2n-m1", roles=("fw", "boot", "flash", "dtb"), 
     return bdir, b
 
 
+class Clock:
+    """Fake time for dxm1: sleeping advances it, so a 400 s flash runs instantly."""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def sleep(self, s):
+        self.now += s
+
+
 class DxBoard(Board):
     """The unit: `pcie`/`fw` as dxrt-cli sees them, scripted dxflash outcome (rc, log, lands)."""
 
-    def __init__(self, pcie="0x0001", fw=None, outcome=(0, OK_LOG, True), erase_out="", **kw):
+    def __init__(self, pcie="0x0001", fw=None, outcome=(0, OK_LOG, True), erase_out="", timeline=None,
+                 clock=None, **kw):
         super().__init__(**kw)
+        self.timeline, self.clock, self.start, self.killed = timeline, clock, 0.0, False
         self.pcie, self.fw, self.outcome, self.erase_out = pcie, fw, outcome, erase_out
         self.lands = False
         self.files[LIVE] = RELEASE_DTB
@@ -93,10 +105,21 @@ class DxBoard(Board):
             rc, log, self.lands = self.outcome
             self.files[dxm1.LOG], self.files[dxm1.RC] = log.encode(), f"{rc}\n".encode()
             self.events.append("dxflash started")
+            self.start = self.clock.now if self.clock else 0.0
             return 0, ""
+        el = (self.clock.now - self.start) if self.timeline else None
+        if cmd.startswith("pkill -f"):
+            self.killed = True
+            return 0, ""
+        if cmd.startswith("pgrep -f"):
+            return (1, "") if self.killed or (el is not None and el >= self.timeline["rc_at"]) else (0, "1234")
         if cmd.startswith("cat /tmp/dxflash.rc"):
+            if self.timeline and (self.killed or el < self.timeline["rc_at"]):
+                return 0, ""                       # the process is still running
             return 0, self.files[dxm1.RC].decode()
         if cmd == "cat /tmp/dxflash.log":
+            if self.timeline and el < self.timeline["marker_at"]:
+                return 0, "SENT fw.bin 635896 B\n"
             return 0, self.files[dxm1.LOG].decode()
         if cmd.startswith("python3 /tmp/dxcli.py"):
             self.events.append("sf_erase")
@@ -126,6 +149,10 @@ def fake_boot(monkeypatch):
     monkeypatch.setattr(steps, "poweroff_and_cold_boot", cold)
     monkeypatch.setattr(lt, "_sysfs_gpio_dir", lambda t, label, line: f"/gpio{line}")
     monkeypatch.setattr(lt, "_pinctrl_chip_base", lambda t, label: 416)
+    clock = Clock()
+    holder["clock"] = clock
+    monkeypatch.setattr(dxm1, "_clock", lambda: clock.now)
+    monkeypatch.setattr(dxm1, "_sleep", clock.sleep)
     return holder
 
 
@@ -270,6 +297,50 @@ def test_dxflash_failure_reports_the_real_exit_code_and_restores_the_dtb(tmp_pat
     assert board.files[LIVE] == RELEASE_DTB and BAK not in board.files
     assert board.events == ["put /tmp/dxuart2.dtb", "warm reboot", "put /tmp/dx_fw.bin",
                             "put /tmp/dx_uart_boot.bin", "put /tmp/dxflash.py", "dxflash started"]
+
+
+def _slow(fake_boot, marker_at, rc_at, outcome=(0, OK_LOG, True)):
+    return DxBoard(outcome=outcome, clock=fake_boot["clock"], timeline={"marker_at": marker_at, "rc_at": rc_at})
+
+
+def test_a_flash_that_finishes_after_300_s_is_a_success(tmp_path, fake_boot):
+    # dxflash sits out a 240 s log window after SENT fw.bin: markers at ~395 s, exit at ~400 s
+    ctx, board = _setup(tmp_path, fake_boot, _slow(fake_boot, 395, 400))
+    r = _run(ctx)
+    assert r.status == "done", r.detail
+    assert fake_boot["clock"].now > 300 and r.evidence["dxm1_dxflash_rc"] == "0"
+    assert not any(c.startswith("pkill") for c in board.commands)       # it exited by itself
+
+
+def test_markers_then_a_lingering_process_is_a_success_and_the_flasher_is_stopped(tmp_path, fake_boot):
+    ctx, board = _setup(tmp_path, fake_boot, _slow(fake_boot, 100, 10**9))
+    r = _run(ctx)
+    assert r.status == "done", r.detail
+    assert r.evidence["dxm1_dxflash_rc"] == "killed after its success markers"
+    assert any(c.startswith("pkill -f") for c in board.commands)
+
+
+def test_timeout_kills_dxflash_before_the_gpios_and_the_dtb_are_touched(tmp_path, fake_boot):
+    ctx, board = _setup(tmp_path, fake_boot, _slow(fake_boot, 10**9, 10**9, (0, OK_LOG, False)))
+    r = _run(ctx)
+    assert r.status == "failed"
+    assert "did not finish in 600 s (killed)" in r.detail and "SENT fw.bin 635896 B" in r.detail
+    assert fake_boot["clock"].now >= 600
+    cmds = board.commands
+    kill = next(i for i, c in enumerate(cmds) if c.startswith("pkill -f '[/]tmp/dxflash.py'"))
+    assert any(c.startswith("pgrep -f") for c in cmds[kill:])           # waited for it to be gone
+    unexport = next(i for i, c in enumerate(cmds) if c.endswith("/sys/class/gpio/unexport"))
+    restore = next(i for i, c in enumerate(cmds) if c.startswith(f"cp -p {BAK} {LIVE}"))
+    assert kill < unexport < restore
+    assert board.files[LIVE] == RELEASE_DTB and "poweroff + cold cycle" not in board.events
+
+
+def test_a_bad_crc_fails_at_once_and_kills_the_flasher(tmp_path, fake_boot):
+    log = "SENT fw.bin 635896 B\nupdate_firmware end. 0\nbad CRC: 0x1 vs 0x2\njump to rtos\n"
+    ctx, board = _setup(tmp_path, fake_boot, _slow(fake_boot, 0, 10**9, (0, log, False)))
+    r = _run(ctx)
+    assert r.status == "failed" and "bad CRC" in r.detail and fake_boot["clock"].now < 100
+    assert any(c.startswith("pkill -f") for c in board.commands)
 
 
 def test_a_zero_exit_without_the_end_marker_is_still_a_failure(tmp_path, fake_boot):

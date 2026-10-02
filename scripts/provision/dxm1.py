@@ -39,8 +39,12 @@ DEFAULT_RESET_LINE = 86
 
 RESET_AFTER_S = 2.0       # dxflash must be listening before the reset
 RESET_HOLD_S = 0.5
-DXFLASH_TIMEOUT_S = 300.0
+DXFLASH_TIMEOUT_S = 600.0   # a good run is 400 s+: dxflash sits out a 240 s window after SENT fw.bin
+EXIT_GRACE_S = 30.0         # success markers seen: how long the process may take to exit by itself
 POLL_S = 3
+PROC = "[/]tmp/dxflash.py"   # bracketed so pkill/pgrep never match their own shell
+_clock = time.monotonic     # tests drive a fake clock through these two
+_sleep = time.sleep
 SF_ERASE = "sf_erase 0 1000000"
 
 REMOTE = {ROLE_FW: "/tmp/dx_fw.bin", ROLE_UART_BOOT: "/tmp/dx_uart_boot.bin",
@@ -150,9 +154,31 @@ def erase_nand(t) -> str:
     return "NAND erased (sf_erase 0 1000000)"
 
 
-def run_dxflash(t, chip: str, mux: int, rst: int, sleep=time.sleep) -> tuple[int, str]:
-    """P75 + PA6 high, dxflash.py in the background, PA6 pulse after 2 s, wait for
-    it. Returns (dxflash's real exit code, its log)."""
+def markers_ok(log: str) -> bool:
+    """dxflash's own success lines: the update ended 0, the firmware CRC is good and the
+    DX-M1 jumped to its rtos (or dxflash printed its final ### DONE); a bad CRC never passes."""
+    return ("update_firmware end. 0" in log and "good CRC" in log and "bad CRC" not in log
+            and ("jump to rtos" in log or "### DONE" in log))
+
+
+def kill_dxflash(t) -> None:
+    """Stop a dxflash.py that is still running and wait until it is gone, so nothing
+    tears the GPIOs down under a live flasher. The bracket keeps pkill/pgrep from
+    matching the shell that carries this very command line."""
+    t.run(f"pkill -f '{PROC}'", check=False)
+    for _ in range(10):
+        if t.run(f"pgrep -f '{PROC}'", check=False).rc != 0:
+            return
+        _sleep(1)
+    t.run(f"pkill -9 -f '{PROC}'", check=False)
+
+
+def run_dxflash(t, chip: str, mux: int, rst: int) -> tuple[int | None, str, bool]:
+    """P75 + PA6 high, dxflash.py in the background, PA6 pulse after 2 s, then wait on its
+    log markers (a good run takes 400 s or more: dxflash always sits out a 240 s log window
+    after SENT fw.bin). Returns (real exit code or None when it was killed, log, timed_out).
+    A flasher that is still running when we give up (timeout, bad CRC, or lingering after
+    its success markers) is killed, and waited for, before this returns."""
     lt.dxm1_drive_high(t, chip, mux)
     lt.dxm1_drive_high(t, chip, rst)
     cmd = (f"python3 {REMOTE[ROLE_DXFLASH]} {REMOTE[ROLE_UART_BOOT]} {REMOTE[ROLE_FW]} "
@@ -160,26 +186,42 @@ def run_dxflash(t, chip: str, mux: int, rst: int, sleep=time.sleep) -> tuple[int
     t.run(f"rm -f {LOG} {RC}; nohup sh -c {shlex.quote(cmd)} </dev/null >/dev/null 2>&1 &")
     t.run(f"sleep {RESET_AFTER_S:g}")
     lt.dxm1_reset_pulse(t, chip, rst, RESET_HOLD_S)
-    deadline = time.monotonic() + DXFLASH_TIMEOUT_S
-    while True:
-        rc = t.run(f"cat {RC} 2>/dev/null", check=False).stdout.strip()
-        if rc.isdigit():
-            break
-        if time.monotonic() > deadline:
-            tail = t.run(f"tail -c 600 {LOG}", check=False).stdout
-            raise BenchError(f"dxflash.py did not finish in {DXFLASH_TIMEOUT_S:g} s: ...{tail}")
-        sleep(POLL_S)
-    return int(rc), t.run(f"cat {LOG}", check=False).stdout
+    deadline = _clock() + DXFLASH_TIMEOUT_S
+    marked_at, timed_out = None, False
+    try:
+        while True:
+            rc = t.run(f"cat {RC} 2>/dev/null", check=False).stdout.strip()
+            log = t.run(f"cat {LOG}", check=False).stdout
+            if rc.isdigit():
+                return int(rc), log, False
+            if "bad CRC" in log:
+                break
+            if markers_ok(log):
+                marked_at = _clock() if marked_at is None else marked_at
+                if _clock() - marked_at > EXIT_GRACE_S:
+                    break
+            if _clock() > deadline:
+                timed_out = True
+                break
+            _sleep(POLL_S)
+    except BenchError:
+        kill_dxflash(t)
+        raise
+    kill_dxflash(t)
+    return None, t.run(f"cat {LOG}", check=False).stdout, timed_out
 
 
-def classify(rc: int, log: str) -> str:
+def classify(rc: int | None, log: str, timed_out: bool = False) -> str:
     """The success summary; StrapError for a wrongly strapped DX-M1's ROM output;
-    BenchError for any other failure. Success needs BOTH dxflash's real exit code 0
-    and its end marker with a good CRC / jump to rtos."""
-    ok = "update_firmware end. 0" in log and ("good CRC" in log or "jump to rtos" in log)
-    if rc == 0 and ok:
+    BenchError for any other failure. Success = dxflash's success markers and an exit
+    code of 0 (None: it printed them but had not exited yet and was stopped)."""
+    ok = markers_ok(log)
+    if ok and rc in (0, None):
         return "dxflash: update_firmware end. 0, firmware CRC good"
     if STRAP_FAIL_RE.search(log) and not XMODEM_RE.search(STRAP_FAIL_RE.sub("", log)):
         raise StrapError(STRAP_MSG)
+    if timed_out:
+        raise BenchError(f"dxflash.py did not finish in {DXFLASH_TIMEOUT_S:g} s (killed): ...{log.strip()[-400:]}")
     why = "end marker + CRC seen" if ok else "no 'update_firmware end. 0' with good CRC / jump to rtos"
-    raise BenchError(f"dxflash.py failed: exit code {rc}, {why}: ...{log.strip()[-400:]}")
+    code = "killed" if rc is None else rc
+    raise BenchError(f"dxflash.py failed: exit code {code}, {why}: ...{log.strip()[-400:]}")
