@@ -53,7 +53,6 @@ the private repository.
 | `plan` | only with `--bench`, read-only probes | nothing |
 | `run` | yes | only with `--execute`; the lock only with `--lock` |
 | `status` | no | nothing |
-| `prepare-sd` | no board; writes `--device` | the provisioning SD (Linux / WSL only) |
 
 `status` exits 0 after printing; `--require-shippable` makes a blocked ship
 check, or a state `run` would supersede (another tool revision or, with
@@ -135,7 +134,8 @@ recorded CID existed and differed, not on first contact.
 | `linux_target.py` | SSH runner, console login, MTD / eMMC / I2C helpers, the read-only census |
 | `gates.py` | offline checks: SKU and DDR tier triangles, FIP rail string, FDT, artefact hashes, the N24S128 frame table, the `mfg_date` rule |
 | `steps.py` | the step machine and the state file |
-| `payload_store.py`, `store_swd_probe.py`, `prepare_sd.py` | the provisioning SD's `alp-payload` store: on-board hash-checked reads, the console SWD probe that uses it, the `prepare-sd` writer |
+| `payload_store.py`, `store_swd_probe.py` | the provisioning SD's payload store: on-board hash-checked reads, the console SWD probe that uses it |
+| `bmap_writer.py` | the python3 range writer `write_rootfs` runs on the board |
 | `ledger_out.py` | `unit.yaml` merge, markdown section, logs, xlsx regen, ship check |
 
 ## Step machine
@@ -177,7 +177,7 @@ Every PSU command is logged with a monotonic timestamp in the step log.
 | `bootstrap` | reuses the live SCIF ROM state `detect` left in this run (no second power cycle); cycles only if no ON has happened since. Flash Writer: `EM_W` boot1 sector `0x1` ← `bl2_mmc`, sector `0x300` ← `fip`; `EM_SECSD` EXT_CSD `[177]=0x02` (BOOT_BUS_CONDITIONS), `[179]=0x08` (PARTITION_CONFIG); `EM_DCID` |
 | `dsw1_emmc_insert_sd` | operator: boot switch to eMMC, insert the release microSD; U-Boot must autoboot |
 | `boot_sd_linux` | U-Boot boots the wic from microSD; log in, find the host, confirm the root is on the SD, then the live SoM check: every non-optional on-module I2C device the SoM preset declares must ACK (the GD32 excepted) before any destructive step runs. Fallback `--transfer xmodem`: `loadx` + `gzwrite` the wic from the U-Boot prompt. No IP is not a failure here: the checks run over the console and `gd32_flash` runs next |
-| `gd32_flash` | applies the ACT88760 GPIO4 volatile release if still at the OTP default, DP-ID gate (`0x0BE12477` only), `loadbin` × 3, verify with `savebin` in fresh probe sessions, bridge ACK at `0x70`. With no network (a blank GD32 leaves both gbeth ports dead) it pushes the SWD tools and the three images over the console (base64, md5-checked on the board), then cold-cycles and re-checks the IP; SSH is used when it is up |
+| `gd32_flash` | applies the ACT88760 GPIO4 volatile release if still at the OTP default, DP-ID gate (`0x0BE12477` only), `loadbin` × 3, verify with `savebin` in fresh probe sessions, bridge ACK at `0x70`. With no network (the `boot_sd_linux` evidence says why: `network: none (gbeth DMA reset failed on <ports>)` or `none (no carrier)`) it pushes the SWD tools and the three images over the console (base64, md5-checked on the board), then cold-cycles and re-checks the IP; SSH is used when it is up |
 | `write_xspi` | from Linux: `bl2` → `mtd0`, `fip` → `mtd1`; md5 readback. A FIP whose erase would reach the CM33 image at `mtd1` + `0x1A0000` is refused |
 | `write_emmc_boot` | release `bl2_mmc` + `fip` into `mmcblk<N>boot1`, md5 readback, EXT_CSD via mmc-utils |
 | `write_rootfs` | stream the wic into the eMMC user area (refused while Linux runs from the eMMC), `fsck -n`, read-only mount (`-o ro,noload`, so the ext4 journal is never replayed), `/boot/<dtb>` present. With a `system_image_bmap` in the bundle only the mapped ranges are written and verified, see below |
@@ -337,45 +337,41 @@ lock frame, only a re-read with bit 1 set counts.
 
 ## Provisioning SD payload store
 
-Without it, every payload crosses a wire: the GD32 images go base64 over the 115200-baud console (the board has no network until the GD32 runs; about 13 min on 2026W38-0002), and the DX-M1 files, the DTBs and the 210 MB `wic.gz` go over SSH on a 100 Mbit switch. The board already boots Linux from the provisioning SD for every write step, so the SD carries the payloads and the steps read them locally.
+Without it, every payload crosses a wire: the GD32 images go base64 over the 115200-baud console (about 13 min on 2026W38-0002 when the board has no network), and the DX-M1 files, the DTBs and the 210 MB `wic.gz` go over SSH on a 100 Mbit switch. The board boots Linux from the provisioning SD for every write step, so the first unit caches each payload on the SD and every later unit reads it locally.
 
-**Preparing the SD** (once per bundle, on Linux or WSL: it needs `mke2fs` from e2fsprogs >= 1.43; on the Windows bench host `wsl --mount \.\PHYSICALDRIVEn --bare` exposes the SD as `/dev/sdX`):
+The store is a directory on the SD's root filesystem, `/var/lib/alp-payload/<bundle sha256>/`. It needs no SD preparation and no partition: the root has several GB free. It is used only when the board runs from the SD, never when its root is the eMMC, and it is on by default (`--no-payload-store` disables it). `plan` never touches it.
 
-```bash
-python scripts/provision_som.py prepare-sd --bundle <bundle-dir> --device /dev/sdX --gd32-fw <dir>
-```
+For each file `run --execute` looks in the directory before any push:
 
-`--device` is overwritten from sector 0. A block device must be removable (`/sys/block/<dev>/removable` = 1, an SD in a reader); any other block device (a system disk, an eMMC) is refused, and the refusal prints its model and size. If it really is the provisioning SD, repeat its size back with `--i-know-this-is-the-sd <size in bytes>`. An image file needs neither.
+- hit and the hash computed ON THE BOARD (`sha256sum`, md5 when the image's busybox lacks it) equals the host's, which is itself checked against the signed bundle's sha256: the stored file is used in place (`cp` for small files, the stored `wic.gz` for the rootfs). The SD content is never trusted without that hash.
+- miss or bad hash: the file is pushed as before and cached. Before caching, `df -k` must show free space of file size + 20 % + 64 MiB, else the file is only pushed and `payload_store_note` says why. A cached file is `sync`ed.
 
-1. Every bundle file is checked against the sha256 in `bundle.json` first; a mismatch refuses before anything is written.
-2. The bundle's `system_image` wic is written to `--device` (a block device or an image file) exactly as before: p1/p2 untouched, U-Boot still finds `boot/Image` on p2. Only an MBR wic is supported.
-3. A new MBR partition is appended after the wic's, 1 MiB aligned, and made an ext4 filesystem labelled `alp-payload` (`mke2fs -d`, no mount). A separate partition, not a directory in p2, because the wic's rootfs has no guaranteed free space for the roughly 250 MB of payloads.
+Steps: `gd32_flash` over the console (SWD tools and images; over SSH the bench's probe wrapper still copies from the host), `dxm1_npu_flash`, `write_rootfs`, `write_xspi`, `write_emmc_boot`. Each records `payload_source: sd-store` (every file came from the store) or `pushed`, plus `payload_store_note` when the store was off or a cache write failed.
 
-The store holds `<bundle sha256>/` with: every bundle component (bl2, bl2_mmc, fip, the `system_image` wic.gz and its bmap, the `dxm1_*` roles and the DX-M1 DTB when the bundle has them); the `--gd32-fw` files (`bootloader.bin`, `ota-meta.bin`, `slot-a.bin`, `VERSION`); a copy of `bundle.json` and its `bundle.json.*` signature files; `manifest.sha256` (`sha256sum` format, every file). The SWD helper scripts the console probe pushes are not prepared: the first unit caches them.
+`write_rootfs` with the stored wic.gz and a bmap: the board's `bmap_writer.py` decompresses the whole stream and skips each gap between ranges, writing only the mapped ranges; the range list (small, from the host's bmap) is still pushed, and the readback md5 is compared with the host's, unchanged.
 
-**Using it.** `run --execute` mounts the partition on the board (found by label, only if it sits on the same disk as the root, only when the board runs from the SD, never when its root is the eMMC) and, before any push, looks for the file in `<bundle sha256>/`:
+**The provisioning SD is internal-only.** It carries license-gated DEEPX binaries (`dxm1_*`) once the store is filled, and is never shipped with a unit: it stays at the bench. Do not copy its image or hand it to a customer or a contract manufacturer.
 
-- hit and the hash computed ON THE BOARD (`sha256sum`, md5 when the image's busybox lacks it) equals the host's, which is itself checked against the signed bundle's sha256: the stored file is used in place (`cp` for small files, `gunzip -c <stored wic.gz>` for the rootfs). The SD content is never trusted without that hash.
-- miss, bad hash, or no partition: the file is pushed as before. A push is also copied into the store (lazy self-provisioning, so an empty `alp-payload` partition fills itself on the first unit); a store that cannot be written is reported, not fatal.
+## Board image requirements
 
-Steps: `gd32_flash` over the console (SWD tools and images; over SSH the bench's probe wrapper still copies from the host), `dxm1_npu_flash` (DTB and payload, re-opened after each reboot), `write_rootfs`, `write_xspi`, `write_emmc_boot`. Each records `payload_source: sd-store` (every file came from the store) or `pushed`, plus `payload_store_note` when the store was off or a cache write failed. `--no-payload-store` disables it. `plan` never mounts.
+What the tool runs on the provisioning image (busybox is enough; checked on a BusyBox v1.36.1 image):
 
-The store is mounted READ-ONLY (`ro,noatime`) because the tool cuts the PSU rail to power-cycle the unit, and a live read-write mount would be dirty at every cut. It is remounted rw only while a file is cached (then `sync` and back to ro), and the tool runs a best-effort `umount` before every power cycle or reboot it drives (`boot_to_linux`, the warm reboot, the clean poweroff).
+- `python3`: `write_rootfs` runs `bmap_writer.py` with it (a board without it gets the full-image write), the partition-table re-read falls back to it when `blockdev` is missing, and `dxflash.py` runs on it.
+- `gunzip`, `dd`, `md5sum`: the full-image write, and every md5 readback (`dd` feeds `md5sum`; only plain `dd` operands are used).
+- `sha256sum` (md5 is the fallback), `cmp`, `cp`, `df`, `mv`, `sync`, `mkdir`, `rm`: the payload store.
+- `mount`, `fsck.ext4`: the rootfs check after the write.
+- `mmc` (mmc-utils), `flash_erase` and `mtd_debug` (mtd-utils), `i2cdetect` / `i2cget` / `i2cset` / `i2ctransfer` (i2c-tools), `ip`, `dmesg`: the eMMC boot config, the xSPI write, the census and the network checks.
 
-**Creating the partition from the board** (`run --execute --create-payload-store`, off by default), so the SD never has to go into a PC: when the board runs from the SD, no `alp-payload` label exists, and the SD has enough unpartitioned space after the last partition (payload bytes + 20 % + 64 MiB), the tool appends one MBR partition (`sfdisk --append`, 1 MiB aligned, type 83), adds it to the kernel (`partx -a`; `blockdev --rereadpt` would be EBUSY with the root mounted) and runs `mke2fs -t ext4 -L alp-payload` (or `mkfs.ext4`). The store then fills itself on the first unit. It needs `sfdisk`, `partx` and `mke2fs`/`mkfs.ext4` on the board image; if any is missing, or the table is GPT, has an extended partition, no free slot or overlapping entries, or the SD has too little room, nothing is written and `payload_store_note` says which, and every file is pushed as before. It never touches the eMMC and `plan` never runs it.
-
-`write_rootfs` with the stored wic.gz and a bmap: the board decompresses the whole stream and discards each gap between ranges (a pipe cannot seek), writing only the mapped ranges; the range list (small, from the host's bmap) is still pushed, and the readback md5 is compared with the host's, unchanged.
-
-**The provisioning SD is internal-only.** It carries license-gated DEEPX binaries (`dxm1_*`) and is never shipped with a unit: it stays at the bench. Do not copy its image or hand it to a customer or a contract manufacturer.
+Not needed: `sfdisk`, `partx`, `findfs`, `parted`, `blockdev`, `bmaptool`, `mke2fs`, and `dd iflag=fullblock`.
 
 ## Block-map write of the system image
 
 The V2N image builds (`IMAGE_FSTYPES:append:rzv2n-family = " wic.bmap"`, `meta-alp-sdk/recipes-images/alp-image-common.inc`) emit `<image>.wic.bmap` next to the `.wic.gz`. A bundle that lists it as the optional `system_image_bmap` role (`flash_target` `emmc`, never flashed on its own) makes `write_rootfs` skip the unused blocks of the ~7 GB image:
 
 1. The host gunzips the wic once and checks every mapped range against the bmap checksum (`sha256` or `sha1`). A mismatch refuses **before** anything is written.
-2. The mapped bytes are gzipped into one stream and sent over a single ssh command: `gunzip -c | { while read s c <&3; do dd of=<emmc> bs=<BlockSize> seek=$s count=$c iflag=fullblock conv=notrunc || exit 1; done; } 3<ranges && sync`. The range list is pushed as a file first, so the command length does not depend on the range count. The board needs only `gunzip` and a `dd` with `iflag=fullblock` (probed first; a board whose dd lacks it falls back to the full-image write). No `bmaptool` on the board.
+2. The mapped bytes are gzipped into one stream and sent over a single ssh command that runs `python3 /tmp/alp-bmap-writer.py <emmc> <BlockSize> <ranges> 0` with the stream on stdin (a stored `wic.gz` is read from the SD instead, with the image size as the last argument). The writer and the range list are pushed as files first, so the command length does not depend on the range count. It `pwrite`s each range, ends with `fsync`, and exits non-zero on a short or truncated stream or an IO error. The board needs only `python3` (probed first; a board without it falls back to the full-image write). No `bmaptool`, no `dd iflag=fullblock`.
 3. The same ranges are read back on the board and md5-compared with the host's md5 of the concatenation. The `write_rootfs` probe uses the same mapped-range md5, so a rerun skips a finished write.
-4. The step evidence records `rootfs_bytes_written` against `rootfs_image_bytes`.
+4. The step evidence always records `rootfs_write_mode` (`bmap-python` or `full-image`), `rootfs_bytes_written` and `rootfs_image_bytes`, and `rootfs_bmap_fallback: <reason>` when the full image was written (no bmap in the bundle, or no python3 on the board).
 
 Unmapped blocks are not touched: the eMMC outside the mapped ranges keeps whatever it held (a blank or previously provisioned part), and only the mapped ranges are verified. The last range is zero-padded to a whole block, so up to `BlockSize - 1` bytes past the image end are written. Without a `system_image_bmap` the full `gunzip | dd bs=4M` path and the full-span md5 are used, as before. `check_som_bundle.py` validates the bmap and compares its `ImageSize` with the gunzipped image when both files sit beside `bundle.json`.
 

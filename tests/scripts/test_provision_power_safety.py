@@ -264,9 +264,12 @@ def test_dsw1_emmc_insert_sd_then_boot_sd_linux_cycles_exactly_once(tmp_path, mo
 
     monkeypatch.setattr(lt, "console_login", lambda *a, **k: None)
     monkeypatch.setattr(steps, "connect_linux", lambda ctx, force=False, **kw: (_ for _ in ()).throw(bench.BenchError("no ip")))
+    monkeypatch.setattr(steps, "_phy_latch_evidence", lambda c: "")      # no PHY fault: only the DHCP wait runs
+    monkeypatch.setattr(steps, "IP_WAIT_S", 0.05)
+    monkeypatch.setattr(steps.time, "sleep", lambda s: None)
     b = _bench(console=FakeConsole([]))
     b.power.on_hook = lambda: b.console.feed("Hit any key to stop autoboot: 3\r\nlogin: ")
-    ctx = _ctx(tmp_path, bench=b, execute=True, gd32_fw=tmp_path)   # pending GD32 flash: no PHY-retry cycle
+    ctx = _ctx(tmp_path, bench=b, execute=True, gd32_fw=tmp_path)   # pending GD32 flash: console path after the wait
     assert steps.OpDsw1EmmcInsertSd().run(ctx).status == "done"
     def stop(*a, **k):                       # everything after the boot is out of scope here
         raise steps.Refused("stop-after-boot")
@@ -300,7 +303,7 @@ def test_gd32_flash_dry_run_plans_console_transport_without_the_probe(tmp_path, 
     assert any("WOULD: loadbin" in c for c in ctx.plan_log)
 
 
-# ---- console-only (blank GD32) boot_sd_linux stays done; probe flips keep their log ----
+# ---- console-only (GD32 flash pending) boot_sd_linux stays done; probe flips keep their log ----
 
 def _console_only_ctx(tmp_path, monkeypatch):
     from types import SimpleNamespace
@@ -312,10 +315,13 @@ def _console_only_ctx(tmp_path, monkeypatch):
     monkeypatch.setattr(lt, "resolve_emmc", lambda t: "mmcblk0")
     monkeypatch.setattr(steps, "connect_linux", lambda ctx, force=False, **kw: (_ for _ in ()).throw(bench.BenchError("no ip")))
     monkeypatch.setattr(steps, "som_presence_problems", lambda ctx, t: [])
+    monkeypatch.setattr(steps, "_phy_latch_evidence", lambda c: "")      # no PHY fault: only the DHCP wait runs
+    monkeypatch.setattr(steps, "IP_WAIT_S", 0.05)
+    monkeypatch.setattr(steps.time, "sleep", lambda s: None)
     monkeypatch.setattr(steps, "tier_gate", lambda ctx, mib: (SimpleNamespace(ok=True, detail=""), {}))
     b = _bench(console=FakeConsole([]))
     b.power.on_hook = lambda: b.console.feed("Hit any key to stop autoboot: 3\r\nlogin: ")
-    return b, _ctx(tmp_path, bench=b, execute=True, gd32_fw=tmp_path)   # blank GD32: its flash is pending
+    return b, _ctx(tmp_path, bench=b, execute=True, gd32_fw=tmp_path)   # its GD32 flash is pending
 
 
 def test_console_only_boot_sd_linux_stays_done_and_gd32_flash_goes_over_the_console(tmp_path, monkeypatch):

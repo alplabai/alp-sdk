@@ -390,7 +390,7 @@ def set_boot_config(t: LinuxTarget, emmc: str) -> None:
 
 # --- rootfs ----------------------------------------------------------------------------
 
-def rootfs_write_verify(t: LinuxTarget, emmc: str, wic_gz: Path, timeout: float = 3600.0, store=None) -> str:
+def rootfs_write_verify(t: LinuxTarget, emmc: str, wic_gz: Path, timeout: float = 3600.0, store=None) -> dict[str, str]:
     """Stream the gzipped wic over SSH into the eMMC user area, then md5 the written span."""
     h = hashlib.md5()
     n = 0
@@ -408,20 +408,20 @@ def rootfs_write_verify(t: LinuxTarget, emmc: str, wic_gz: Path, timeout: float 
     got = t.md5(emmc, 0, n)
     if got != want:
         raise BenchError(f"{emmc} readback md5 {got} != uncompressed {wic_gz.name} md5 {want}")
-    return got
+    return {"rootfs_md5": got, "rootfs_bytes_written": str(n), "rootfs_image_bytes": str(n)}
 
 
 RANGES_PATH = "/tmp/alp-bmap-ranges"
+WRITER = Path(__file__).with_name("bmap_writer.py")
+WRITER_PATH = "/tmp/alp-bmap-writer.py"
 
 
-def dd_fullblock(t: LinuxTarget) -> bool:
-    """Does the board's dd take iflag=fullblock (a pipe read must fill whole blocks)?"""
-    return t.run("dd if=/dev/zero of=/dev/null bs=1 count=1 iflag=fullblock 2>/dev/null",
-                 check=False).rc == 0
+def have_python3(t: LinuxTarget) -> bool:
+    return t.run("command -v python3", check=False).rc == 0
 
 
 def put_ranges(t: LinuxTarget, bm: bmap.Bmap) -> None:
-    # A file, not argv: a wic has thousands of ranges. fd 3 so dd keeps stdin for the data.
+    # A file, not argv: a wic has thousands of ranges.
     with tempfile.TemporaryDirectory() as d:
         f = Path(d) / "ranges"
         f.write_text("".join(f"{s} {c}\n" for s, c, _ in bm.ranges), encoding="ascii", newline="\n")
@@ -445,31 +445,27 @@ def rootfs_write_verify_mapped(t: LinuxTarget, emmc: str, wic_gz: Path, bm: bmap
                                timeout: float = 3600.0, store=None) -> dict[str, str]:
     """Write only the bmap's mapped ranges (host-verified first), then md5 them back.
 
-    With the wic.gz in the SD store the board decompresses the WHOLE stream and discards each
-    gap between ranges (a pipe cannot seek); otherwise the host sends only the mapped bytes.
+    The board runs bmap_writer.py (python3). With the wic.gz in the SD store it reads the WHOLE
+    stream and skips the gaps between ranges; otherwise the host sends only the mapped bytes.
     When ImageSize is not a multiple of BlockSize the last block is zero-padded on BOTH paths
-    (the host pads the stream it sends; the board's ``conv=sync`` pads the short final read),
-    which is what the whole-block readback md5 expects."""
+    (the host pads the stream it sends; the writer pads the short final block of the whole
+    image), which is what the whole-block readback md5 expects."""
     local = store.fetch(wic_gz) if store is not None else None
     with tempfile.TemporaryDirectory() as d:
         staged = Path(d) / "mapped.gz"
         want, nbytes = bmap.stage(wic_gz, bm, None if local else staged)   # refuses on a checksum mismatch
         put_ranges(t, bm)
-        bs = bm.block_size
+        t.put(WRITER, WRITER_PATH)
+        w = f"python3 {WRITER_PATH} {emmc} {bm.block_size} {RANGES_PATH}"
         try:
             if local:
-                t.run(f"gunzip -c {shlex.quote(local)} | {{ pos=0; while read s c <&3; do g=$((s-pos)); "
-                      f"if [ $g -gt 0 ]; then dd of=/dev/null bs={bs} count=$g iflag=fullblock 2>/dev/null "
-                      f"|| exit 1; fi; dd of={emmc} bs={bs} seek=$s count=$c iflag=fullblock conv=notrunc,sync "
-                      f"|| exit 1; pos=$((s+c)); done; }} 3<{RANGES_PATH} && sync", timeout=timeout)
+                t.run(f"{w} {bm.image_size} < {shlex.quote(local)}", timeout=timeout)
             else:
-                t.run(f"gunzip -c | {{ while read s c <&3; do dd of={emmc} bs={bs} seek=$s "
-                      f"count=$c iflag=fullblock conv=notrunc || exit 1; done; }} 3<{RANGES_PATH} && sync",
-                      timeout=timeout, stdin_path=staged)
+                t.run(f"{w} 0", timeout=timeout, stdin_path=staged)
             t.run(_REREADPT.format(emmc=emmc))
             got = md5_ranges(t, emmc, bm)
         finally:
-            t.run(f"rm -f {RANGES_PATH}", check=False)
+            t.run(f"rm -f {RANGES_PATH} {WRITER_PATH}", check=False)
     if got != want:
         raise BenchError(f"{emmc} mapped-range readback md5 {got} != host md5 {want}")
     return {"rootfs_md5": got, "rootfs_bytes_written": str(nbytes), "rootfs_image_bytes": str(bm.image_size)}

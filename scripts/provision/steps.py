@@ -125,11 +125,9 @@ class Ctx:
     flash_writer: Path | None = None
     gd32_fw: Path | None = None
     transfer: str = "sd"                  # "sd" | "xmodem"
-    # read payloads from the provisioning SD's alp-payload partition when it holds them
-    # (prepare-sd); off by default so a bare Ctx never mounts anything
+    # cache payloads in /var/lib/alp-payload on the provisioning SD's root (execute only);
+    # off by default so a bare Ctx never writes to the board
     payload_store_on: bool = False
-    # with no alp-payload partition on the boot SD, create one from the board (execute only)
-    create_payload_store: bool = False
     station: str | None = None
     by: str = "provision_som"
     ledger_xlsx: Path | None = None
@@ -145,7 +143,7 @@ class Ctx:
     # era) is stale from then on, so every later attach rediscovers over the console.
     rediscover_host: bool = False
     # Power.on_count of a boot_sd_linux that reached a console login with no IP
-    # (blank GD32): its probe accepts that state; gd32_flash then works over the console.
+    # (GD32 flash pending): its probe accepts that state; gd32_flash then works over the console.
     console_linux_on_count: int | None = None
     step_logs: dict[str, str] = field(default_factory=dict)
     _cache: dict = field(default_factory=dict)
@@ -187,7 +185,7 @@ class Ctx:
         return self._cache[key]
 
     def open_payload_store(self, t) -> payload_store.PayloadStore | None:
-        """The SD payload store on target ``t`` (execute only: opening it mounts the partition)."""
+        """The SD payload store on target ``t`` (execute only; never in a plan)."""
         if not (self.payload_store_on and self.execute and t is not None):
             return None
         sha = self.state.get("bundle_sha256") or hashlib.sha256(
@@ -196,24 +194,7 @@ class Ctx:
             root, emmc = lt.root_device(t), lt.resolve_emmc(t)
         except BenchError as e:
             return payload_store.PayloadStore(t, None, off=f"store off: cannot tell the boot device ({e})")
-        store = payload_store.open_store(t, sha, self.bundle.get("components", []), root, emmc,
-                                         self._payload_need() if self.create_payload_store else None)
-        if store.dir is not None:
-            self._cache.setdefault("store_targets", []).append(t)    # unmounted before a power cycle
-        return store
-
-    def _payload_need(self) -> int:
-        """Bytes the store partition must hold: every bundle file and GD32 image, +20 %, +64 MiB."""
-        files = [self.bundle_dir / c["file"] for c in self.bundle.get("components", []) if c.get("file")]
-        if self.gd32_fw:
-            files += list(Path(self.gd32_fw).iterdir())
-        n = sum(p.stat().st_size for p in files if p.is_file())
-        return n + n // 5 + (64 << 20)
-
-    def unmount_payload_stores(self) -> None:
-        """Best-effort umount of every store this run mounted, before a power cycle or reboot."""
-        for t in self._cache.pop("store_targets", []):
-            payload_store.unmount(t)
+        return payload_store.open_store(t, sha, self.bundle.get("components", []), root, emmc)
 
     # -- bench ----------------------------------------------------------------
     def need_bench(self) -> Bench:
@@ -412,7 +393,7 @@ def boot_to_linux(ctx: Ctx, timeout: float = 240.0, need_ip: bool = True,
     """Cold cycle, let the unit autoboot to a login, log in, (re)discover the
     Linux target. Returns the whole boot text. Execute-mode only.
 
-    ``need_ip=False`` tolerates a unit with no network (blank GD32 or a latched
+    ``need_ip=False`` tolerates a unit with no network (e.g. a latched
     PHY, #2582): ctx.linux is then None and the console shell is the only way in.
 
     ``ip_wait_s`` keeps polling that long for a host before giving up on the network
@@ -422,7 +403,6 @@ def boot_to_linux(ctx: Ctx, timeout: float = 240.0, need_ip: bool = True,
     running instead of cycling: the text is taken from that mark."""
     b = ctx.need_bench()
     if resume_mark is None:
-        ctx.unmount_payload_stores()
         n = len(b.console.transcript)
         b.console.drain()
         b.power.cycle(b.off_s, b.console)
@@ -449,18 +429,21 @@ PHY_LATCH_DMESG = r"Failed to reset the dma|DMA engine initialization failed|Hw 
 
 
 def _gd32_flash_pending(ctx: Ctx) -> bool:
-    """A blank GD32 gives gbeth no RX clock, so 'no IP' is expected until gd32_flash runs."""
+    """A GD32 flash is still to run: a unit with no network may then continue on the console
+    (gd32_flash and the later steps work over it); otherwise no network is a failure."""
     return ctx.gd32_fw is not None and not ctx.state_done("gd32_flash")
 
 
 def _phy_latch_evidence(ctx: Ctx) -> str:
-    """The end0 PHY-latch signature (#2582) over the console: the stmmac dmesg line, or
-    "end0 DOWN" (interface present, no carrier). "" when neither is there."""
+    """Why end0 has no network (#2582), read over the console: "gbeth DMA reset failed on
+    <ports>" from the stmmac dmesg lines, or "no carrier" (interface present, link down).
+    "" when neither is there."""
     sh = ConsoleTarget(ctx.need_bench().console)
-    line = sh.run(f"dmesg | grep -E '{PHY_LATCH_DMESG}' | tail -n 1", check=False).stdout.strip()
-    if line:
-        return line
-    return "end0 DOWN" if "end0" in lt.net_ifaces(sh) and not lt.net_carrier(sh, "end0") else ""
+    out = sh.run(f"dmesg | grep -E '{PHY_LATCH_DMESG}'", check=False).stdout
+    if out.strip():
+        ports = sorted(set(re.findall(r"\b(?:end|eth)\d+\b", out)))
+        return f"gbeth DMA reset failed on {', '.join(ports) or 'unknown ports'}"
+    return "no carrier" if "end0" in lt.net_ifaces(sh) and not lt.net_carrier(sh, "end0") else ""
 
 
 def _net_after_boot(ctx: Ctx, ev: dict, text: str) -> str:
@@ -468,16 +451,18 @@ def _net_after_boot(ctx: Ctx, ev: dict, text: str) -> str:
     signature ONE extra cold cycle (Power.cycle keeps MIN_OFF_S / MIN_ON_S), otherwise a
     bounded wait for a slow DHCP lease. ctx.linux may still be None on return; the caller
     decides (a pending GD32 flash is the only acceptable reason)."""
-    if ctx.linux is not None or _gd32_flash_pending(ctx):
+    if ctx.linux is not None:
         return text
-    if line := _phy_latch_evidence(ctx):
-        ctx.plan_log.append(f"end0 has no network ({line}): PHY latch #2582, one extra cold cycle")
+    if why := _phy_latch_evidence(ctx):
+        ctx.plan_log.append(f"end0 has no network ({why}): PHY latch #2582, one extra cold cycle")
         ev["end0_no_carrier_retries"] = "1"
         text = boot_to_linux(ctx, need_ip=False, ip_wait_s=IP_WAIT_S)
         if ctx.linux is None:
-            again = _phy_latch_evidence(ctx) or line
-            raise BenchError("Linux up on console but end0 has no network after the extra cold cycle: PHY "
-                             f"latch, alp-sdk #2582 ({again}); check cable, then power-cycle the unit")
+            why = _phy_latch_evidence(ctx) or why
+            if not _gd32_flash_pending(ctx):
+                raise BenchError("Linux up on console but end0 has no network after the extra cold cycle: "
+                                 f"alp-sdk #2582 ({why}); check cable, then power-cycle the unit")
+            ev["network"] = f"none ({why})"
         return text
     _wait_for_ip(ctx, IP_WAIT_S, False)
     return text
@@ -878,16 +863,15 @@ class BootSdLinux(Step):
             raise Refused(f"DRAM banner leg: {tier.detail}")
         t = ctx.linux
         if t is None:
-            # No IP after the bounded wait. Only a pending GD32 flash explains it (a blank
-            # GD32 leaves both gbeth ports without an RX clock) and gd32_flash then works over
-            # the console; any other unit has a cable/DHCP problem: fail, never "done" with
-            # no Linux target attached.
+            # No IP after the bounded wait (and the extra cold cycle on a PHY latch). A pending
+            # GD32 flash lets the unit continue: gd32_flash then works over the console. Any
+            # other unit has a cable/DHCP problem: fail, never "done" with no Linux target.
             if not _gd32_flash_pending(ctx):
                 raise BenchError(f"Linux up on console but no IPv4 on end0 after {IP_WAIT_S:g}s; "
                                  "check cable/DHCP")
             t = ConsoleTarget(b.console)
             ctx.console_linux_on_count = b.power.on_count
-            ev["network"] = "none yet (blank GD32 suspected); gd32_flash runs next over the console"
+            ev.setdefault("network", f"none (no IPv4 on end0 after {IP_WAIT_S:g}s, no PHY fault seen)")
         else:
             t.run("true")
         if ctx.transfer == "sd":
@@ -1042,17 +1026,19 @@ class WriteRootfs(Step):
         bm = _bmap(ctx)
         ev: dict[str, str] = {}
         store = ctx.open_payload_store(t)
-        if bm is not None and t is not None and not lt.dd_fullblock(t):
-            ctx.plan_log.append("board dd lacks iflag=fullblock: full-image write instead of bmap")
-            bm = None
-        if bm is not None:
-            ctx.mutate(f"bmap: write only the mapped ranges ({bm.mapped_bytes} of {bm.image_size} bytes, "
-                       f"{len(bm.ranges)} ranges) of {wic.name} (ranges host-verified first), "
-                       "md5 readback of the same ranges",
-                       lambda: ev.update(lt.rootfs_write_verify_mapped(t, emmc, wic, bm, store=store)))
-        else:
+        why = ("the bundle has no system_image_bmap" if bm is None
+               else "the board has no python3" if t is not None and not lt.have_python3(t) else "")
+        if why:
+            ctx.plan_log.append(f"{why}: full-image write instead of bmap")
             ctx.mutate(f"gunzip -c {wic.name} | dd of={emmc} bs=4M && sync (over SSH), md5 readback",
-                       lambda: lt.rootfs_write_verify(t, emmc, wic, store=store))
+                       lambda: ev.update(lt.rootfs_write_verify(t, emmc, wic, store=store),
+                                         rootfs_write_mode="full-image", rootfs_bmap_fallback=why))
+        else:
+            ctx.mutate(f"bmap: write only the mapped ranges ({bm.mapped_bytes} of {bm.image_size} bytes, "
+                       f"{len(bm.ranges)} ranges) of {wic.name} on the board via python3 (ranges "
+                       "host-verified first), md5 readback of the same ranges",
+                       lambda: ev.update(lt.rootfs_write_verify_mapped(t, emmc, wic, bm, store=store),
+                                         rootfs_write_mode="bmap-python"))
 
         def check():
             name = emmc.rsplit("/", 1)[-1]
@@ -1066,7 +1052,8 @@ class WriteRootfs(Step):
                     errs.append(f"p{p}: {e}")
             raise BenchError(f"no partition passes fsck + /boot/{dtb}: {'; '.join(errs)}")
         part = ctx.mutate(f"fsck -n, mount ro,noload, /boot/{dtb} present", check)
-        how = (f"{ev['rootfs_bytes_written']} of {ev['rootfs_image_bytes']} bytes (bmap)" if ev else "full image")
+        how = (f"{ev['rootfs_bytes_written']} of {ev['rootfs_image_bytes']} bytes, {ev['rootfs_write_mode']}"
+               if ev else "plan")
         if ctx.execute:
             ev.update(payload_store.evidence(store))
         return self.result(ctx, f"wic written ({how}); rootfs p{part} holds /boot/{dtb}" if part
@@ -1238,7 +1225,7 @@ class Gd32Flash(Step):
     @staticmethod
     def _transport(ctx):
         """(target, probe, via_console). SSH and the bench's own probe wrapper
-        are preferred. With no network (a blank GD32 kills both gbeth ports) and
+        are preferred. With no network and
         a root shell on the console, the SWD tools are pushed over the console."""
         b = ctx.need_bench()
         if not ctx.execute:
@@ -1264,7 +1251,7 @@ class Gd32Flash(Step):
         a host/IP the dry run does not have)."""
         images = self._images(ctx)
         if via_console:
-            ctx.mutate("no reachable IP: console login, mount the SD alp-payload store and copy the SWD tools "
+            ctx.mutate("no reachable IP: console login, open the SD payload store and copy the SWD tools "
                        "and images from it (sha256-checked on the board); any file missing or "
                        "mismatching is pushed over the console instead (base64, md5-checked) and "
                        "cached in the store", lambda: None)
@@ -1342,7 +1329,6 @@ def warm_reboot_to_linux(ctx: Ctx) -> None:
     """Warm `reboot` from Linux (no PSU action), wait for the console login, re-attach.
     The DX-M1 DTB swap needs only a new device tree, not a power cycle."""
     b = ctx.need_bench()
-    ctx.unmount_payload_stores()
     n = len(b.console.transcript)
     b.console.drain()
     ctx.linux.run("sync; (sleep 1; reboot) </dev/null >/dev/null 2>&1 &", check=False)
@@ -1354,7 +1340,6 @@ def poweroff_and_cold_boot(ctx: Ctx) -> str:
     cold cycle (Power.cycle enforces MIN_ON_S / MIN_OFF_S) and login."""
     b = ctx.need_bench()
     t = ctx.linux
-    ctx.unmount_payload_stores()
     t.run("sync", check=False, timeout=120.0)
     try:
         t.run("poweroff", check=False, timeout=30.0)
@@ -1492,7 +1477,7 @@ class Dxm1NpuFlash(Step):
         ev = self._evidence(ctx, version)
         st: dict = {}
 
-        stores: list = []     # one per boot: the reboot unmounts the SD partition
+        stores: list = []     # one per boot
 
         def push_dtb():
             stores.append(ctx.open_payload_store(t))

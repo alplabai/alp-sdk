@@ -10,9 +10,12 @@ import json
 import re
 import shutil
 import subprocess
+import sys
+import tempfile
+from pathlib import Path
 
 import pytest
-from provision import bmap, steps
+from provision import bmap, bmap_writer, steps
 from provision import linux_target as lt
 from provision.bench import BenchError
 
@@ -63,33 +66,41 @@ def with_bmap(tmp_path, **kw):
 
 
 class BmapBoard(WritableBoard):
-    """eMMC starts as STALE bytes; the gunzip|dd loop and the range md5 are interpreted."""
+    """eMMC starts as STALE bytes; the on-board python3 writer (the real script, on a temp file
+    standing in for the device) and the range md5 are interpreted."""
 
-    def __init__(self, fullblock=True, flip_readback=False, **kw):
+    def __init__(self, python3=True, flip_readback=False, **kw):
         super().__init__(**kw)
         self.files["/dev/mmcblk0"] = bytearray([STALE]) * (len(RAW) + BS)
-        self.fullblock, self.flip, self.written = fullblock, flip_readback, 0
+        self.python3, self.flip, self.written = python3, flip_readback, 0
 
     def _ranges(self):
         return [tuple(map(int, ln.split())) for ln in self.files[lt.RANGES_PATH].decode().splitlines()]
 
-    def run(self, cmd, timeout=60.0, check=True, stdin_path=None):
-        if cmd.startswith("gunzip -c | { while read"):
+    def run(self, cmd, timeout=60.0, check=True, stdin_path=None, long_running=False):
+        m = re.match(rf"python3 {lt.WRITER_PATH} (\S+) (\d+) {lt.RANGES_PATH} (\d+)(?: < (\S+))?$", cmd)
+        if g := re.match(r"gunzip -c \| dd of=(\S+) bs=4M && sync$", cmd):       # the full-image write
             self.commands.append(cmd)
-            m = re.search(r"of=(\S+) bs=(\d+)", cmd)
-            data, dev, bs = gzip.decompress(stdin_path.read_bytes()), self.files[m[1]], int(m[2])
-            pos = 0
-            for s, c in self._ranges():
-                dev[s * bs:(s + c) * bs] = data[pos:pos + c * bs]
-                pos += c * bs
-            self.written = pos
-            assert pos == len(data)
+            self.files[g[1]] = bytearray(gzip.decompress(stdin_path.read_bytes()))
             return lt.CmdResult(0, "", "")
-        return super().run(cmd, timeout, check, stdin_path)
+        if not m:
+            return super().run(cmd, timeout, check, stdin_path)
+        self.commands.append(cmd)
+        stream = stdin_path.read_bytes() if stdin_path else bytes(self.files[m[4]])
+        with tempfile.TemporaryDirectory() as d:
+            dev, rng = Path(d) / "dev", Path(d) / "ranges"
+            dev.write_bytes(bytes(self.files[m[1]]))
+            rng.write_bytes(self.files[lt.RANGES_PATH])
+            p = subprocess.run([sys.executable, str(bmap_writer.__file__), str(dev), m[2], str(rng), m[3]],
+                               input=stream, capture_output=True)
+            assert p.returncode == 0, p.stderr
+            self.files[m[1]] = bytearray(dev.read_bytes())
+        self.written = sum(c for _, c in self._ranges()) * int(m[2])
+        return lt.CmdResult(0, "", "")
 
     def _answer(self, cmd):
-        if cmd.startswith("dd if=/dev/zero") and "iflag=fullblock" in cmd:
-            return (0 if self.fullblock else 1), ""
+        if cmd == "command -v python3":
+            return (0 if self.python3 else 1), ""
         if cmd.startswith(("blockdev --rereadpt", "fsck.ext4", "umount", "test -f", "mkdir -p")):
             return 0, ""
         if m := re.match(r"ls -d /sys/block/(\w+)/", cmd):
@@ -121,8 +132,10 @@ def test_only_mapped_ranges_written(tmp_path):
     assert dev[BS:256 * BS] == bytes([STALE]) * (255 * BS)  # the zero gap was never touched
     assert r.evidence["rootfs_bytes_written"] == str(bm.mapped_bytes)
     assert r.evidence["rootfs_image_bytes"] == str(len(RAW))
-    assert not any(c.startswith("gunzip -c | dd") for c in board.commands)
-    assert any(c.endswith("&& sync") and "iflag=fullblock" in c for c in board.commands)
+    assert r.evidence["rootfs_write_mode"] == "bmap-python" and "rootfs_bmap_fallback" not in r.evidence
+    assert not any(c.startswith("gunzip -c | dd") or "fullblock" in c for c in board.commands)
+    assert any(c.startswith(f"python3 {lt.WRITER_PATH} /dev/mmcblk0 {BS} ") for c in board.commands)
+    assert f"rm -f {lt.RANGES_PATH} {lt.WRITER_PATH}" in board.commands
 
 
 def test_mount_is_read_only_noload(tmp_path):
@@ -150,22 +163,27 @@ def test_readback_mismatch_is_detected(tmp_path):
     assert r.status == "failed" and "readback md5" in r.detail
 
 
-def test_no_bmap_falls_back_to_full_dd(tmp_path, monkeypatch):
+def test_no_bmap_falls_back_to_full_dd(tmp_path):
     board = BmapBoard()
-    calls = []
-    monkeypatch.setattr(lt, "rootfs_write_verify", lambda *a, **k: calls.append(a) or "md5")
     ctx = _ctx(tmp_path, bench=_bench(), linux=board, execute=True)   # plain bundle: no bmap role
-    steps.run_steps(ctx, only=["write_rootfs"])
-    assert len(calls) == 1
-    assert not any("while read" in c for c in board.commands)
+    r = steps.run_steps(ctx, only=["write_rootfs"])[-1]
+    assert r.status == "done", r.detail
+    assert r.evidence["rootfs_write_mode"] == "full-image"
+    assert r.evidence["rootfs_bmap_fallback"] == "the bundle has no system_image_bmap"
+    assert r.evidence["rootfs_bytes_written"] == r.evidence["rootfs_image_bytes"] == str(len(RAW))
+    assert not any(c.startswith("python3 ") and "bmap-writer" in c for c in board.commands)
 
 
-def test_dd_without_fullblock_falls_back_to_full_image(tmp_path, monkeypatch):
-    board = BmapBoard(fullblock=False)
-    calls = []
-    monkeypatch.setattr(lt, "rootfs_write_verify", lambda *a, **k: calls.append(a) or "md5")
-    _step(tmp_path, board)
-    assert len(calls) == 1 and not any(c.startswith("gunzip -c | {") for c in board.commands)
+def test_no_python3_falls_back_to_full_image_and_says_why(tmp_path):
+    board = BmapBoard(python3=False)
+    ctx, r = _step(tmp_path, board)
+    assert r.status == "done", r.detail
+    assert r.evidence["rootfs_write_mode"] == "full-image"
+    assert r.evidence["rootfs_bmap_fallback"] == "the board has no python3"
+    assert r.evidence["rootfs_bytes_written"] == str(len(RAW))
+    assert any("gunzip -c" in c and "dd of=" in c for c in board.commands)
+    assert lt.WRITER_PATH not in board.files
+    assert any("no python3" in line for line in ctx.plan_log)
 
 
 def test_probe_satisfied_only_when_mapped_ranges_match(tmp_path):
@@ -188,7 +206,7 @@ def test_parse_rejects_garbage(tmp_path):
 
 
 # --- the generated shell commands, run by a real sh/dd/gzip -------------------------------------
-# The fakes above only model the gunzip|dd loops; this harness executes them.
+# The fakes above run the writer on a temp file; this harness runs the generated commands in sh.
 
 needs_sh = pytest.mark.skipif(not (shutil.which("sh") and shutil.which("dd") and shutil.which("gzip")),
                               reason="needs a POSIX sh with dd and gzip")
@@ -201,10 +219,13 @@ class RealShell:
         self.work = work
         work.mkdir(exist_ok=True)
         monkeypatch.setattr(lt, "RANGES_PATH", "ranges.txt")
+        monkeypatch.setattr(lt, "WRITER_PATH", "writer.py")
 
     def run(self, cmd, timeout=60.0, check=True, stdin_path=None, **kw):
         if cmd.startswith("blockdev"):
             return lt.CmdResult(0, "", "")
+        if cmd.startswith("python3 "):                  # the board's python3 is this interpreter
+            cmd = f'"{sys.executable}" ' + cmd[len("python3 "):]
         stdin = open(stdin_path, "rb") if stdin_path else subprocess.DEVNULL
         try:
             p = subprocess.run(["sh", "-c", cmd], cwd=self.work, capture_output=True, text=True,
@@ -231,7 +252,7 @@ def make_wic(tmp_path, raw: bytes):
 
 @needs_sh
 def test_host_stream_write_in_a_real_shell(tmp_path, monkeypatch):
-    """No store: the host sends only the mapped bytes, the board's gunzip|dd loop places them."""
+    """No store: the host sends only the mapped bytes, the board's python3 writer places them."""
     wic, bm = make_wic(tmp_path, RAW)
     sh = RealShell(tmp_path / "w", monkeypatch)
     (sh.work / "dev.img").write_bytes(bytes([STALE]) * (len(RAW) + BS))
@@ -282,3 +303,79 @@ def test_non_zero_tail_after_the_last_range_is_refused(tmp_path):
     wic, bm = _undermapped(tmp_path, raw, "2")
     with pytest.raises(BenchError, match="unmapped holds non-zero"):
         bmap.stage(wic, bm, None)
+
+
+# --- bmap_writer.py itself, run as the board runs it (a temp file stands in for the device) ----
+
+def _write(tmp_path, stream: bytes, ranges, image_size: int, dev_size: int, bs=BS):
+    dev, rng, gz = tmp_path / "dev.img", tmp_path / "ranges", tmp_path / "in.gz"
+    dev.write_bytes(bytes([STALE]) * dev_size)
+    rng.write_text("".join(f"{s} {c}\n" for s, c in ranges), encoding="ascii")
+    gz.write_bytes(stream)
+    with open(gz, "rb") as f:
+        p = subprocess.run([sys.executable, str(bmap_writer.__file__), str(dev), str(bs), str(rng),
+                            str(image_size)], stdin=f, capture_output=True, text=True)
+    return p, dev.read_bytes()
+
+
+def _mapped_stream(tmp_path, raw: bytes):
+    wic, bm = make_wic(tmp_path, raw)
+    out = tmp_path / "mapped.gz"
+    bmap.stage(wic, bm, out)
+    return wic, bm, out.read_bytes()
+
+
+def test_writer_mapped_source_places_every_range_and_leaves_the_gaps(tmp_path):
+    wic, bm, stream = _mapped_stream(tmp_path, RAW)
+    p, dev = _write(tmp_path, stream, [(s, c) for s, c, _ in bm.ranges], 0, len(RAW) + BS)
+    assert p.returncode == 0, p.stderr
+    for s, c, _ in bm.ranges:
+        assert dev[s * BS:(s + c) * BS] == RAW[s * BS:(s + c) * BS].ljust(c * BS, b"\0")
+    assert dev[BS:256 * BS] == bytes([STALE]) * (255 * BS)
+
+
+def test_writer_full_source_skips_the_gaps(tmp_path):
+    wic, bm, _ = _mapped_stream(tmp_path, RAW)
+    p, dev = _write(tmp_path, wic.read_bytes(), [(s, c) for s, c, _ in bm.ranges], len(RAW), len(RAW) + BS)
+    assert p.returncode == 0, p.stderr
+    for s, c, _ in bm.ranges:
+        assert dev[s * BS:(s + c) * BS] == RAW[s * BS:(s + c) * BS].ljust(c * BS, b"\0")
+    assert dev[BS:256 * BS] == bytes([STALE]) * (255 * BS)           # gaps are never written
+
+
+def test_writer_pads_a_last_block_that_is_not_block_aligned(tmp_path):
+    raw = RAW + b"\x07" * 100
+    wic, bm, stream = _mapped_stream(tmp_path, raw)
+    last = len(raw) // BS
+    for src, size in ((wic.read_bytes(), len(raw)), (stream, 0)):
+        p, dev = _write(tmp_path, src, [(s, c) for s, c, _ in bm.ranges], size, len(raw) + 2 * BS)
+        assert p.returncode == 0, p.stderr
+        assert dev[last * BS:(last + 1) * BS] == raw[last * BS:].ljust(BS, b"\0")    # the stale tail is zeroed
+
+
+@pytest.mark.parametrize("full", [False, True])
+def test_writer_refuses_a_truncated_stream(tmp_path, full):
+    wic, bm, stream = _mapped_stream(tmp_path, RAW)
+    src = wic.read_bytes() if full else stream
+    p, _ = _write(tmp_path, src[:len(src) // 2], [(s, c) for s, c, _ in bm.ranges],
+                  len(RAW) if full else 0, len(RAW) + BS)
+    assert p.returncode == 1 and "bmap_writer:" in p.stderr
+
+
+def test_writer_refuses_a_gzip_missing_only_its_trailer(tmp_path):
+    wic, bm, stream = _mapped_stream(tmp_path, RAW)
+    p, _ = _write(tmp_path, stream[:-8], [(s, c) for s, c, _ in bm.ranges], 0, len(RAW) + BS)
+    assert p.returncode == 1 and "truncated" in p.stderr
+
+
+def test_writer_refuses_a_stream_shorter_than_its_ranges(tmp_path):
+    p, _ = _write(tmp_path, gzip.compress(b"\x01" * BS), [(0, 2)], 0, 4 * BS)
+    assert p.returncode == 1 and "stream ends inside" in p.stderr
+
+
+def test_writer_reports_an_io_error(tmp_path):
+    p, _ = _write(tmp_path, gzip.compress(b"\x01" * BS), [(0, 1)], 0, BS)
+    with open(tmp_path / "in.gz", "rb") as f:
+        q = subprocess.run([sys.executable, str(bmap_writer.__file__), str(tmp_path / "no" / "dev"), str(BS),
+                            str(tmp_path / "ranges"), "0"], stdin=f, capture_output=True, text=True)
+    assert p.returncode == 0 and q.returncode == 1 and "bmap_writer:" in q.stderr

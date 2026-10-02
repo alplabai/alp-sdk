@@ -3,7 +3,7 @@
 verify every mapped range of the gunzipped wic against its checksum, and
 stage the mapped bytes as one gzip stream for a single ssh write.
 
-Host side only: the board needs nothing beyond gunzip and dd."""
+Host side only (the board runs bmap_writer.py)."""
 
 from __future__ import annotations
 

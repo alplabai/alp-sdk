@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """A LinuxTarget stand-in that talks over the serial console, for a unit with no network.
 
-A blank GD32 leaves both gbeth ports dead (no RX clock), so there is no SSH
-until the GD32 is flashed -- and the GD32 flash itself ran over SSH. This
+A unit can boot with no working gbeth port (a latched PHY, #2582), so there is
+no SSH -- and the GD32 flash itself ran over SSH. This
 module closes that loop: ``ConsoleTarget`` has the ``run``/``put``/``get``
 surface the provisioning steps use, over a logged-in root shell on the
 console, and ``ConsoleSwdProbe`` is the bench's SWD probe wrapper re-done on

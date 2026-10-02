@@ -12,7 +12,8 @@ from provision.bench import BenchError
 from .provision_fakes import FakeConsole, FakeLinux, FakePower
 from .test_provision_steps import Board, _bench, _ctx
 
-LATCH = "renesas-gbeth 15c30000.ethernet: Failed to reset the dma"
+LATCH = "renesas-gbeth 15c30000.ethernet end0: Failed to reset the dma"
+WHY = "gbeth DMA reset failed on end0"
 
 
 @pytest.fixture(autouse=True)
@@ -71,12 +72,17 @@ def _evidence_for(monkeypatch, tmp_path, dmesg, ifaces="end0\nend1\n", carrier="
     return steps._phy_latch_evidence(_ctx(tmp_path, bench=_console_bench(), execute=True))
 
 
-def test_latch_evidence_is_the_stmmac_dmesg_line(tmp_path, monkeypatch):
-    assert _evidence_for(monkeypatch, tmp_path, LATCH + "\n") == LATCH
+def test_latch_evidence_names_the_ports_from_the_stmmac_dmesg_lines(tmp_path, monkeypatch):
+    assert _evidence_for(monkeypatch, tmp_path / "a", LATCH + "\n") == WHY
+    end1 = LATCH.replace("end0", "end1").replace("Failed to reset the dma", "Hw setup failed")
+    assert _evidence_for(monkeypatch, tmp_path / "b", LATCH + "\n" + end1 + "\n") == \
+        "gbeth DMA reset failed on end0, end1"
+    assert _evidence_for(monkeypatch, tmp_path / "c", "stmmac: DMA engine initialization failed\n") == \
+        "gbeth DMA reset failed on unknown ports"
 
 
-def test_latch_evidence_falls_back_to_end0_down(tmp_path, monkeypatch):
-    assert _evidence_for(monkeypatch, tmp_path, "") == "end0 DOWN"
+def test_latch_evidence_falls_back_to_no_carrier(tmp_path, monkeypatch):
+    assert _evidence_for(monkeypatch, tmp_path, "") == "no carrier"
 
 
 def test_no_latch_evidence_when_end0_has_carrier(tmp_path, monkeypatch):
@@ -113,6 +119,30 @@ def test_phy_latch_that_persists_fails_naming_2582_and_the_dmesg_line(tmp_path, 
     assert "#2582" in str(e.value) and LATCH in str(e.value) and len(cycles) == 1   # never a second retry
 
 
+def test_a_pending_gd32_flash_does_not_suppress_the_retry_and_the_cause_is_recorded(tmp_path, monkeypatch):
+    # 2026W38-0005 booted with a blank GD32 and had Ethernet: no GD32 state excuses a dead gbeth
+    both = "gbeth DMA reset failed on end0, end1"
+    ctx, cycles = _tail(tmp_path, monkeypatch, both, [None], gd32_fw=tmp_path)
+    ev = {}
+    assert steps._net_after_boot(ctx, ev, "first boot") == "second boot"
+    assert ctx.linux is None and len(cycles) == 1 and ev["end0_no_carrier_retries"] == "1"
+    assert ev["network"] == f"none ({both})"
+
+
+def test_a_pending_gd32_flash_with_no_carrier_records_it(tmp_path, monkeypatch):
+    ctx, cycles = _tail(tmp_path, monkeypatch, "no carrier", [None], gd32_fw=tmp_path)
+    ev = {}
+    steps._net_after_boot(ctx, ev, "first boot")
+    assert len(cycles) == 1 and ev["network"] == "none (no carrier)"
+
+
+def test_a_pending_gd32_flash_whose_retry_recovers_has_a_network(tmp_path, monkeypatch):
+    ctx, cycles = _tail(tmp_path, monkeypatch, WHY, [Board()], gd32_fw=tmp_path)
+    ev = {}
+    steps._net_after_boot(ctx, ev, "first boot")
+    assert ctx.linux is not None and len(cycles) == 1 and "network" not in ev
+
+
 def test_extra_cold_cycle_goes_through_power_cycle_with_min_off(tmp_path):
     """Not a bare off/on: boot_to_linux cycles via Power.cycle(off_s), which clamps to MIN_OFF_S."""
     from provision.bench import MIN_OFF_S, Power
@@ -136,11 +166,13 @@ def test_without_the_signature_a_slow_lease_is_waited_for(tmp_path, monkeypatch)
     assert ctx.linux is board and cycles == []                # no extra power cycle
 
 
-def test_a_pending_gd32_flash_skips_the_retry(tmp_path, monkeypatch):
-    # blank GD32: gbeth has no RX clock until gd32_flash runs; do not burn a cycle on it
-    ctx, cycles = _tail(tmp_path, monkeypatch, LATCH, [], gd32_fw=tmp_path)
-    assert steps._net_after_boot(ctx, {}, "first boot") == "first boot"
-    assert ctx.linux is None and cycles == []
+def test_a_pending_gd32_flash_still_waits_for_a_slow_lease(tmp_path, monkeypatch):
+    ctx, cycles = _tail(tmp_path, monkeypatch, "", [], gd32_fw=tmp_path)
+    board = Board()
+    connect, _ = _connect_after(board, failures=2)
+    monkeypatch.setattr(steps, "connect_linux", connect)
+    steps._net_after_boot(ctx, {}, "first boot")
+    assert ctx.linux is board and cycles == []
 
 
 # --- the step ----------------------------------------------------------------------------
@@ -158,6 +190,22 @@ def test_boot_sd_linux_fails_when_the_latch_survives_the_extra_cold_cycle(tmp_pa
     ctx, r = _step(tmp_path, monkeypatch, LATCH, None)
     assert r.status == "failed" and "#2582" in r.detail and LATCH in r.detail
     assert ctx.linux is None and ctx.bench.power.events == ["off", "on", "off", "on"]   # first + one retry
+
+
+def test_boot_sd_linux_with_a_pending_gd32_flash_continues_on_the_console_and_records_why(tmp_path, monkeypatch):
+    ctx = _ctx(tmp_path, bench=_console_bench(), execute=True, gd32_fw=tmp_path)
+    monkeypatch.setattr(lt, "console_login", lambda *a, **k: None)
+    monkeypatch.setattr(lt, "root_device", lambda t: "mmcblk1p2")
+    monkeypatch.setattr(lt, "resolve_emmc", lambda t: "mmcblk0")
+    monkeypatch.setattr(steps, "som_presence_problems", lambda c, t=None: [])
+    monkeypatch.setattr(steps, "tier_gate", lambda c, mib=None: (type("T", (), {"ok": True, "detail": ""})(), {}))
+    monkeypatch.setattr(steps, "_phy_latch_evidence", lambda c: "no carrier")
+    monkeypatch.setattr(steps, "connect_linux",
+                        lambda c, force=False, rediscover=False: (_ for _ in ()).throw(BenchError("no inet")))
+    r = steps.run_one(steps.BootSdLinux(), ctx, force=True)
+    assert r.status == "done", r.detail
+    assert r.evidence["network"] == "none (no carrier)" and r.evidence["end0_no_carrier_retries"] == "1"
+    assert ctx.bench.power.events == ["off", "on", "off", "on"]       # the retry ran despite the pending flash
 
 
 def test_boot_sd_linux_fails_clearly_when_no_ipv4_appears(tmp_path, monkeypatch):

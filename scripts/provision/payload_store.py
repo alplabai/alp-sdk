@@ -1,44 +1,31 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The provisioning SD's payload store: read bundle payloads on the board, not over a wire.
+"""The provisioning SD's payload store: cache bundle payloads on the board, not over a wire.
 
-``provision_som.py prepare-sd`` writes the release wic to the provisioning SD and appends
-an ext4 partition labelled ``alp-payload`` holding ``<bundle sha256>/<file>`` for every
-bundle artefact the on-board steps need, plus the GD32 images (see prepare_sd.py). The
-board boots Linux from that SD, so a step can read a payload locally instead of
-receiving it over the 115200-baud console (GD32 images, no network yet) or SSH
-(DX-M1 files, DTBs, the 210 MB wic.gz).
+The store is a directory, ``/var/lib/alp-payload/<bundle sha256>/``, on the SD's root
+filesystem. The first unit pushes each file once (console or SSH); every later unit finds it
+there and reads it locally instead of receiving the GD32 images over the 115200-baud console or
+the 210 MB wic.gz over SSH. The provisioning SD carries license-gated DEEPX files and never
+ships with a unit.
 
-Trust: the SD is never trusted. Every use re-hashes the file ON THE BOARD (sha256sum,
-md5 when the image's busybox lacks it) against the host's copy, which is itself checked
-against the signed bundle.json's sha256 for bundle files. A miss or a mismatch falls
-back to the wire transfer and re-caches the file in the store (lazy self-provisioning:
-an empty ``alp-payload`` partition fills itself on the first unit).
+Trust: the SD is never trusted. Every use re-hashes the file ON THE BOARD (sha256sum, md5 when
+the image's busybox lacks it) against the host's copy, which is itself checked against the signed
+bundle.json's sha256 for bundle files. A miss or a mismatch falls back to the wire transfer and
+re-caches the file (after a free-space check).
 
-The store is mounted READ-ONLY (``ro,noatime``): the unit is powered off by cutting the rail,
-and a live rw mount would be dirty at every cut. It is remounted rw only while a file is being
-cached (then synced and remounted ro), and the tool unmounts it, best effort, before any power
-cycle or reboot it drives (steps.unmount_payload_stores).
-
-With ``--create-payload-store`` and no ``alp-payload`` partition, the board appends one itself
-(create_partition) to the unpartitioned tail of the boot SD, so the SD never has to go into a
-PC; a missing tool, a GPT or odd table, or too little space falls back to the push.
-
-The store is only opened when the board runs from the SD: on an eMMC root it would write
-into the unit being provisioned.
+The store is only opened when the board runs from the SD: on an eMMC root it would write into
+the unit being provisioned.
 """
 
 from __future__ import annotations
 
 import hashlib
-import re
 import shlex
 from functools import lru_cache
 from pathlib import Path
 
 from provision.bench import BenchError
 
-STORE_LABEL = "alp-payload"
-MOUNT = "/mnt/alp-payload"
+STORE_ROOT = "/var/lib/alp-payload"
 
 
 @lru_cache(maxsize=64)
@@ -95,25 +82,30 @@ class PayloadStore:
             return path
         # miss or bad hash: transfer once into the store so every later unit finds it
         self.sources[local.name] = "pushed"
-        try:
-            self.t.run(f"mount -o remount,rw {MOUNT}")
-        except BenchError as e:
-            self.notes.append(f"{local.name}: could not cache in the store ({e})")
-            return None
-        try:
-            if self._cache(local, path, q, sha):
-                return path
-        finally:                                # back to ro whatever happened above
-            self.t.run(f"sync; mount -o remount,ro {MOUNT}", check=False)
+        if self._cache(local, path, q, sha):
+            return path
         return None
 
+    def _free_kib(self) -> int | None:
+        """Free KiB on the store's filesystem (``df -k``: header line, then the data line)."""
+        out = self.t.run(f"df -k {shlex.quote(self.dir)}", check=False).stdout.splitlines()
+        cols = " ".join(out[1:]).split()
+        return int(cols[3]) if len(cols) > 3 and cols[3].isdigit() else None
+
     def _cache(self, local: Path, path: str, q: str, sha: str) -> bool:
-        """Transfer ``local`` into the rw-remounted store; False and a note on any failure.
+        """Transfer ``local`` into the store; False and a note on any failure.
         ConsoleTarget.put leaves ``<dest>.p*`` chunk files and ``<dest>.b64`` beside the
         destination, so a failed push is cleaned of those too."""
         junk = f"{q}.part {q}.part.p* {q}.part.b64"
         try:
             self.t.run(f"mkdir -p {shlex.quote(self.dir)} && rm -f {q} {junk}")
+            size = local.stat().st_size
+            need = size + size // 5 + (64 << 20)
+            free = self._free_kib()
+            if free is None or free * 1024 < need:
+                self.notes.append(f"{local.name}: not cached, {'unknown' if free is None else free >> 10} "
+                                  f"MiB free, need {need >> 20} MiB")
+                return False
             self.t.put(local, f"{path}.part")
             self.t.run(f"mv {q}.part {q} && sync")
             if self._good(path, local, sha):
@@ -151,95 +143,10 @@ def stage(t, store: PayloadStore | None, local: Path, remote: str) -> None:
         t.put(local, remote)
 
 
-def unmount(t) -> None:
-    """Best-effort umount before the tool cuts power or reboots; never raises."""
-    try:
-        t.run(f"sync; umount {MOUNT}", check=False, timeout=30.0)
-    except Exception:       # noqa: BLE001  a dead shell must not stop the power cycle
-        pass
-
-
-class NoStore(Exception):
-    """The partition cannot be created; the message names why (it becomes payload_store_note)."""
-
-
-_DUMP = re.compile(r"^(?P<dev>/\S+)\s*:\s*start=\s*(?P<start>\d+),\s*size=\s*(?P<size>\d+),\s*type=(?P<type>\w+)", re.M)
-_ALIGN = 2048           # sectors (1 MiB), as prepare_sd
-
-
-def _have(t, *tools: str) -> str | None:
-    """The first of ``tools`` the board has, else None."""
-    for tool in tools:
-        if t.run(f"command -v {tool}", check=False).rc == 0:
-            return tool
-    return None
-
-
-def create_partition(t, disk: str, emmc: str, need_bytes: int) -> str:
-    """Append ONE MBR partition labelled alp-payload to ``disk`` (the boot SD) on the board.
-
-    Refuses (NoStore) on the eMMC, a GPT or otherwise unexpected table, no free slot, too
-    little unpartitioned space after the last partition, or a missing tool. Returns the new
-    partition's device node."""
-    if disk.startswith(emmc) or emmc.startswith(disk):
-        raise NoStore(f"refusing to partition {disk}: it is the eMMC")
-    tools = {"sfdisk": _have(t, "sfdisk"), "partx": _have(t, "partx"), "mke2fs/mkfs.ext4": _have(t, "mkfs.ext4", "mke2fs")}
-    if missing := [k for k, v in tools.items() if v is None]:
-        raise NoStore(f"cannot create {STORE_LABEL}: the board has no {', '.join(missing)}")
-    dump = t.run(f"sfdisk -d {disk}", check=False)
-    if dump.rc != 0 or not re.search(r"^label:\s*dos\s*$", dump.stdout, re.M):
-        raise NoStore(f"cannot create {STORE_LABEL}: {disk} has no MBR (dos) partition table (GPT or unreadable)")
-    parts = [(m["dev"], int(m["start"]), int(m["size"]), m["type"].lower()) for m in _DUMP.finditer(dump.stdout)]
-    if (not parts or len(parts) > 3 or any(p[3] in ("5", "f", "85", "ee") for p in parts)
-            or any(a[1] + a[2] > b[1] for a, b in zip(parts, parts[1:]))):
-        raise NoStore(f"cannot create {STORE_LABEL}: unexpected partition table on {disk}")
-    total = t.run(f"cat /sys/block/{disk.rsplit('/', 1)[-1]}/size", check=False).stdout.split()
-    if not total or not total[0].isdigit():
-        raise NoStore(f"cannot create {STORE_LABEL}: cannot read the size of {disk}")
-    start = -(-max(p[1] + p[2] for p in parts) // _ALIGN) * _ALIGN
-    sectors = -(-need_bytes // 512 // _ALIGN) * _ALIGN
-    if start + sectors > int(total[0]):
-        raise NoStore(f"cannot create {STORE_LABEL}: {disk} has {max(int(total[0]) - start, 0) * 512 >> 20} MiB "
-                      f"unpartitioned after the last partition, need {sectors * 512 >> 20} MiB")
-    t.run(f"echo 'start={start}, size={sectors}, type=83' | sfdisk --no-reread --append {disk}", timeout=60.0)
-    t.run(f"partx -a {disk}", check=False)          # a partition is mounted: BLKRRPART would be EBUSY
-    after = t.run(f"sfdisk -d {disk}")
-    dev = next((m["dev"] for m in _DUMP.finditer(after.stdout) if int(m["start"]) == start), None)
-    if dev is None:
-        raise NoStore(f"cannot create {STORE_LABEL}: the new partition is not in the table of {disk}")
-    if t.run(f"test -b {dev}", check=False).rc != 0:
-        raise NoStore(f"cannot create {STORE_LABEL}: the kernel did not add {dev} (partx failed)")
-    t.run(f"{tools['mke2fs/mkfs.ext4']} -F -q -t ext4 -L {STORE_LABEL} {dev}", timeout=300.0)
-    return dev
-
-
-def open_store(t, bundle_sha: str, components: list[dict], root: str, emmc: str,
-               create_bytes: int | None = None) -> PayloadStore:
-    """Mount the SD's ``alp-payload`` partition and return the store for this bundle.
-    Any reason it cannot be used yields a store that is off (every file is pushed).
-    ``create_bytes`` (--create-payload-store): when the SD has no partition, try to append one
-    of at least that size."""
+def open_store(t, bundle_sha: str, components: list[dict], root: str, emmc: str) -> PayloadStore:
+    """The store for this bundle, or one that is off (every file is pushed) when Linux runs
+    from the eMMC."""
     known = {Path(c["file"]).name: c["sha256"] for c in components if c.get("sha256") and c.get("file")}
-
-    def off(why: str) -> PayloadStore:
-        return PayloadStore(t, None, known, f"store off: {why}")
-
     if root.startswith(emmc):
-        return off(f"Linux runs from the eMMC {emmc}, not the provisioning SD")
-    disk = re.sub(r"p?\d+$", "", root)
-    dev = t.run(f"findfs LABEL={STORE_LABEL}", check=False).stdout.strip()
-    created = ""
-    if not dev and create_bytes:
-        try:
-            dev = create_partition(t, disk, emmc, create_bytes)
-            created = f"created {STORE_LABEL} on {dev}"
-        except (NoStore, BenchError) as e:
-            return off(str(e))
-    if not dev:
-        return off(f"no {STORE_LABEL} partition (run provision_som.py prepare-sd)")
-    if not dev.startswith(disk) or dev == root:
-        return off(f"{dev} is not on the boot SD {disk}")
-    r = t.run(f"mkdir -p {MOUNT} && {{ mountpoint -q {MOUNT} || mount -o ro,noatime {dev} {MOUNT}; }}", check=False)
-    if r.rc != 0:
-        return off(f"cannot mount {dev}: {r.stdout.strip()[-120:] or r.stderr.strip()[-120:]}")
-    return PayloadStore(t, f"{MOUNT}/{bundle_sha}", known, created)
+        return PayloadStore(t, None, known, f"store off: Linux runs from the eMMC {emmc}, not the provisioning SD")
+    return PayloadStore(t, f"{STORE_ROOT}/{bundle_sha}", known)

@@ -252,7 +252,7 @@ def test_rootfs_write_verify_streams_and_compares(tmp_path):
     wic = tmp_path / "rootfs.wic.gz"
     wic.write_bytes(gzip.compress(raw))
     t, fake = target([("gunzip", ""), ("rereadpt", ""), ("md5sum", f"{md5(raw)}  -\n")])
-    assert lt.rootfs_write_verify(t, "/dev/mmcblk1", wic) == md5(raw)
+    assert lt.rootfs_write_verify(t, "/dev/mmcblk1", wic)["rootfs_md5"] == md5(raw)
     assert fake.commands[0] == "gunzip -c | dd of=/dev/mmcblk1 bs=4M && sync"
     assert fake.commands[-1] == f"dd if=/dev/mmcblk1 bs=4096 skip=0 count={len(raw) // 4096} 2>/dev/null | md5sum"
 

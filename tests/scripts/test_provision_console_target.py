@@ -286,7 +286,7 @@ def test_get_rejects_garbage_base64(tmp_path):
 
 def test_boot_sd_linux_without_ip_does_not_fail(tmp_path, monkeypatch):
     sh = ShellConsole()
-    # a pending GD32 flash is the one reason a console-only boot may be done (blank GD32: no RX clock)
+    # a pending GD32 flash is the one reason a console-only boot may be done (its console path keeps the unit provisionable)
     ctx = _ctx(tmp_path, bench=_bench(console=sh), execute=True, gd32_fw=tmp_path)
 
     def boot(ctx_, timeout=240.0, need_ip=True):
@@ -294,11 +294,15 @@ def test_boot_sd_linux_without_ip_does_not_fail(tmp_path, monkeypatch):
         ctx_.linux = None
         return "DRAM:  3.9 GiB\n"
     monkeypatch.setattr(steps, "boot_to_linux", boot)
+    monkeypatch.setattr(steps, "_phy_latch_evidence", lambda c: "")
+    monkeypatch.setattr(steps, "IP_WAIT_S", 0.05)
+    monkeypatch.setattr(steps.time, "sleep", lambda s: None)
+    monkeypatch.setattr(steps, "connect_linux", lambda c, force=False, rediscover=False: (_ for _ in ()).throw(BenchError("no inet")))
     monkeypatch.setattr(steps.lt, "root_device", lambda t: "mmcblk0p2")
     monkeypatch.setattr(steps.lt, "resolve_emmc", lambda t: "/dev/mmcblk1")
     monkeypatch.setattr(steps, "som_presence_problems", lambda c, t=None: [])
     r = steps.BootSdLinux().run(ctx)
-    assert "no network yet" in r.detail and r.evidence["network"].startswith("none yet")
+    assert "no network yet" in r.detail and r.evidence["network"].startswith("none (no IPv4 on end0")
 
 
 # --- gd32_flash over the console ----------------------------------------------------------------------
@@ -585,12 +589,12 @@ def test_console_target_md5_serves_the_payload_store_when_sha256sum_is_missing(t
     t = ct.ConsoleTarget(sh)
     local = tmp_path / "fip.bin"
     local.write_bytes(b"fip payload")
-    sh.files["/mnt/alp-payload/x/fip.bin"] = b"fip payload"
-    store = ps.PayloadStore(t, "/mnt/alp-payload/x")
-    assert t.md5("/mnt/alp-payload/x/fip.bin") == hashlib.md5(b"fip payload").hexdigest()
-    assert store._good("/mnt/alp-payload/x/fip.bin", local, hashlib.sha256(b"fip payload").hexdigest())
-    sh.files["/mnt/alp-payload/x/fip.bin"] = b"corrupted"
-    assert not store._good("/mnt/alp-payload/x/fip.bin", local, hashlib.sha256(b"fip payload").hexdigest())
+    sh.files["/var/lib/alp-payload/x/fip.bin"] = b"fip payload"
+    store = ps.PayloadStore(t, "/var/lib/alp-payload/x")
+    assert t.md5("/var/lib/alp-payload/x/fip.bin") == hashlib.md5(b"fip payload").hexdigest()
+    assert store._good("/var/lib/alp-payload/x/fip.bin", local, hashlib.sha256(b"fip payload").hexdigest())
+    sh.files["/var/lib/alp-payload/x/fip.bin"] = b"corrupted"
+    assert not store._good("/var/lib/alp-payload/x/fip.bin", local, hashlib.sha256(b"fip payload").hexdigest())
     assert t.md5("/nope") == ""
 
 
