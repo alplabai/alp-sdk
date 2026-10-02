@@ -1,0 +1,10 @@
+# Alp SDK camera module: InnoMaker CAM-OV9281 (OmniVision OV9281 global-shutter mono).
+# Values from zephyr/boards/shields/innomaker_cam_ov9281/innomaker_cam_ov9281.overlay.
+schema_version: 1
+module_id:      innomaker_cam_ov9281
+display_name:   "InnoMaker CAM-OV9281 (OV9281 global-shutter mono, 2-lane CSI-2)"
+chip:           ov9281
+i2c_addr_7bit:  0x60
+xclk_hz:        24000000
+lanes:          2
+zephyr_shield:  innomaker_cam_ov9281

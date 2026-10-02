@@ -323,6 +323,85 @@ Validating that contract in code is future work for the host-side model
 runner that lives in `tan-cli` (see alp-sdk#1470 / ADR-0028), tracked by
 `alplabai/tan-cli#674` — nothing in this repo enforces it today.
 
+## Probe-based measurement (`scripts/alp_power.py`)
+
+> **Not yet validated on hardware.** The on-board RP2040 debug probe arrives
+> with the next EVK revision. This path is tested against a synthetic capture
+> with known idle and active power (`tests/scripts/fixtures/alp_power/`), not
+> against a real board. The DWT-timestamped on-target method above remains
+> the measured one.
+
+The probe (CMSIS-DAP v2 vendor commands, protocol in
+`alplabai/rp2040-debugprobe-firmware`) samples I2C power monitors and one of
+its GPIO pins together every `--period-us`, with a shared microsecond
+timestamp, so the host needs no on-target instrumentation beyond a marker.
+
+**Wiring.** The target drives a GPIO high for the duration of each inference
+and low otherwise; that GPIO is wired to a probe pin. `--marker` takes the
+probe's name for that pin (`alp_power.py probe-info` lists them). The power
+monitor sits on the probe's I2C bus; today's EVK has the INA236 U30 @ 0x4A on
+the +5V whole-board rail (see "What this is NOT" for what that scope means).
+
+**Method.** Start the capture while the target is idle: the first
+`--idle-seconds` (default 3) are an extra idle baseline window, then
+`--seconds` (default 10) is the active window in which the target infers, so
+the total capture is idle + active. The idle baseline is the mean power while
+the marker is low in the idle window (all marker-low samples if the window
+holds none, with a warning when `--idle-seconds` is 0). Energy per inference is `(integral of P over marker-high time -
+baseline x marker-high time) / marker rising edges`; the gross figure skips
+the baseline subtraction. Each sample is held until the next. Latency is the
+marker-high duration.
+
+```
+python3 scripts/alp_power.py probe-info [--format json]
+python3 scripts/alp_power.py measure --monitor 5V=ina236@0x4A,shunt=0.02,range=fine \
+    --marker PIN_NAME --seconds 10 --idle-seconds 3 --period-us 500 \
+    --out capture.jsonl --format json
+python3 scripts/alp_power.py replay capture.jsonl --format json
+```
+
+Requires `pip install pyusb` for `measure` and `probe-info` (`replay` needs
+no pyusb). pyusb also needs libusb: on Linux install `libusb-1.0` and a udev
+rule granting your user access to the probe (USB `0x2E8A:0x000c`, a
+placeholder ID); on Windows bind the probe's CMSIS-DAP vendor interface to
+WinUSB (for example with Zadig).
+
+A killed or timed-out `measure` is safe to re-run: the probe is told to STOP
+before configuring (SIGINT/SIGTERM also stop it), so a stream left running
+by an earlier run does not make the next one fail as busy.
+
+`--monitor` repeats (1 to 8 rails). `range=fine` is the INA236's +/-20.48 mV
+ADC range, `wide` (default) +/-81.92 mV; pick `fine` only when the shunt
+voltage cannot exceed 20.48 mV. Only Power (register 0x03) is streamed: the
+chip computes P = V x I itself, and every extra register costs roughly 50 us (an estimate, not measured)
+of I2C time per sample per rail. SHUNT_CAL is 2048 on both ranges, giving
+CURRENT_LSB matched to the shunt ADC step (31.25 uA / 125 uA at 20 mOhm) and
+a Power LSB of 32 x CURRENT_LSB (1 mW / 4 mW at 20 mOhm).
+
+**JSON** (`--format json`): `{"ok", "data", "issues"}`. `data` holds `source`
+(`probe` or `replay`), `probe.protocol`, `period_us`, `duration_s`,
+`inferences`, `latency_us.{median,p90}`, `dropped`, `note`, and per rail
+`name`, `part`, `addr`, `avg_idle_mw`, `avg_active_mw`,
+`energy_per_inference_mj`, `gross_energy_per_inference_mj`, `samples`.
+Unknown values are `null`, never `0`. Every failure, including
+usage errors when `--format json` is given, prints `ok: false`, `data: null`
+and exits 1 (codes such as `probe_error`, `invalid_input`, `usage_error`,
+`internal_error`); without `--format json`, argparse usage errors print text
+and exit 2. Warnings (`issues`): no complete pulses, dropped samples, I2C
+errors (power held at the previous reading), pulses spanning a dropped gap,
+no active samples for a rail, a 0 s idle window, a failed `--out` write
+(`capture_write_failed`, the result is still returned), and a sample period
+longer than the median marker-high time.
+
+**Limits.** The marker and pulse edges are quantised to one sample period, so
+latency has +/- one period of resolution. When the period exceeds the pulse
+width, the per-inference energy is a statistical estimate over many pulses,
+not a per-pulse measurement. A pulse already high at the first sample, still high at the last, or
+spanning a dropped-sample gap is excluded from the count, the energy and the
+latency together (info/warning issues `partial_pulse_start`,
+`partial_pulse_end`, `pulse_spans_drop`). Measurement scope
+is whatever rail the monitor sits on; the "NOT" list above applies unchanged.
+
 ## Bench notes that cost time
 
 - **A J-Link `qc` leaves the core halted.** Every console read

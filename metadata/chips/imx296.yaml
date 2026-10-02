@@ -73,6 +73,23 @@ i2c:
 
 mipi:
   lanes_supported: [1]
+  role:            csi2_tx
+
+drivers:
+  zephyr:
+    compatible:    "sony,imx296"
+    # This sensor has no register that parks its clock lane at LP-11 short of
+    # full streaming (zephyr/dts/bindings/video/sony,imx296.yaml).
+    endpoint_flags: [no-lp11-clock-lane-park]
+  linux:
+    compatible:    "sony,imx296"      # alp kernel patch 0018 (v6.6 backport)
+    kconfig:       CONFIG_VIDEO_IMX296
+    # No link_freqs: the backported driver parses no link-frequencies and
+    # checks no lane count (single-lane part).
+    supplies:      [avdd, dvdd, ovdd]
+    clock_name:    inck
+    reset_property: reset-gpios
+    xclk_supported_hz: [37125000, 54000000, 74250000]
 
 resolutions:
   max:            [1456, 1088]

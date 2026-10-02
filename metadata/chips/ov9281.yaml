@@ -37,6 +37,24 @@ i2c:
 
 mipi:
   lanes_supported: [1, 2]
+  role:            csi2_tx
+
+drivers:
+  zephyr:
+    compatible:    "ovti,ov9281"
+  linux:
+    compatible:    "ovti,ov9282"        # OV9281 shares chip ID 0x9281; the 6.1 driver matches only ov9282
+    kconfig:       CONFIG_VIDEO_OV9282
+    link_freqs:                      # the driver accepts exactly one lane count + rate
+      - { lanes: 2, link_freqs_hz: [400000000] }
+    # Supplies/flags below are the v6.6-based driver delivered by alp kernel
+    # patch 0020 (metadata/os/linux-kernel-drivers.yaml); the native 6.1
+    # driver requests no supplies, which is harmless to the extra DT entries.
+    supplies:      [avdd, dovdd, dvdd]
+    reset_property: reset-gpios
+    xclk_supported_hz: [24000000]
+    # Needed to keep the bench-proven gated (non-continuous) clock lane.
+    endpoint_flags: [clock-noncontinuous]
 
 resolutions:
   max:            [1280, 800]

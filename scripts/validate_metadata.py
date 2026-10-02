@@ -105,6 +105,10 @@ BOARD_PRESETS = REPO / "metadata" / "boards"
 LIBRARIES = REPO / "metadata" / "libraries"
 CHIP_SCHEMA = REPO / "metadata" / "schemas" / "chip-v1.schema.json"
 CHIPS = REPO / "metadata" / "chips"
+CAMERA_MODULE_SCHEMA = REPO / "metadata" / "schemas" / "camera-module-v1.schema.json"
+CAMERA_MODULES = REPO / "metadata" / "camera_modules"
+LINUX_KERNEL_DRIVERS_SCHEMA = REPO / "metadata" / "schemas" / "linux-kernel-drivers-v1.schema.json"
+LINUX_KERNEL_DRIVERS = REPO / "metadata" / "os" / "linux-kernel-drivers.yaml"
 # The V2N/V2M on-module GD32G553 supervisor pin-wiring source
 # scripts/gen_zephyr_board.py's `_v2n_pinctrl_dtsi()` / `_v2n_defconfig()`
 # read (#655).  There is NO auto-discovery in this script -- an
@@ -904,6 +908,94 @@ def _check_peripheral_kconfig() -> list:
     return failures
 
 
+def _check_board_camera_connectors(board_files) -> list:
+    """Every macro a `camera_connectors:` entry names (`i2c`, `enable`,
+    `reset`, `select[].gpio`) must be declared in the same preset's
+    `e1m_routes:`, and `lane_polarity` must hold `lanes + 1` flags.  The rules
+    live in `alp_cli.validator.camera_connector_problems`, shared with the
+    inline-project-board check.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    from alp_cli.validator import camera_connector_problems  # noqa: E402
+
+    failures: list[tuple[Path, list[str]]] = []
+    for path in board_files:
+        try:
+            rel = path.relative_to(REPO).as_posix()
+        except ValueError:
+            rel = path.as_posix()
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+        msgs = camera_connector_problems(doc.get("camera_connectors"),
+                                         doc.get("e1m_routes"))
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
+def _check_soc_linux_dt(soc_files, *, peripheral_map=None) -> list:
+    """Cross-check a SoC's `linux_dt` map (camera DT generators read it):
+
+      1. each instance's `label` must be a `label` in the same SoC's
+         `peripheral_instances` (the dtsi node the generator will reference);
+      2. each `pinmux` key is a peripheral-signal name that must exist in the
+         SoM peripheral map TSV (`renesas-peripheral-map.tsv`) -- the pin the
+         pinmux applies to is RESOLVED from that file, never restated here;
+    A capture-only entry (CSI receiver) has no `pinmux`, and capture units are
+    not modelled in `peripheral_instances`, so check 1 skips it.
+    """
+    tsv = peripheral_map or (REPO / "metadata" / "e1m_modules" / "v2n"
+                             / "renesas-peripheral-map.tsv")
+    signals: set[str] = set()
+    if tsv.is_file():
+        for line in tsv.read_text(encoding="utf-8").splitlines()[1:]:
+            cols = line.split("\t")
+            if cols and cols[0]:
+                signals.add(cols[0])
+    failures: list[tuple[Path, list[str]]] = []
+    for path in soc_files:
+        try:
+            rel = path.relative_to(REPO).as_posix()
+        except ValueError:
+            rel = path.as_posix()
+        try:
+            doc = strict_json_loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        linux_dt = doc.get("linux_dt") if isinstance(doc, dict) else None
+        if not isinstance(linux_dt, dict):
+            continue
+        labels = {inst.get("label")
+                  for insts in (doc.get("peripheral_instances") or {}).values()
+                  if isinstance(insts, list)
+                  for inst in insts if isinstance(inst, dict)}
+        msgs: list[str] = []
+        for name, ent in linux_dt.items():
+            if not isinstance(ent, dict):
+                continue
+            label = ent.get("label")
+            if ent.get("pinmux") and label not in labels:
+                msgs.append(f"linux_dt.{name}.label: `{label}` is not a label in peripheral_instances")
+            for sig in (ent.get("pinmux") or {}):
+                if signals and sig not in signals:
+                    msgs.append(f"linux_dt.{name}.pinmux: signal `{sig}` is not in "
+                                f"{tsv.name}")
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
 def _check_board_i2c_address_collisions(board_files) -> list:
     """Reject two on-board I2C device instances sharing an address.
 
@@ -1024,6 +1116,42 @@ def _check_chip_semantics(chip_files) -> list:
                 f"chip_id: `{chip_id}` must match the manifest filename `{path.stem}` "
                 f"-- chip_id lookups resolve by filename")
 
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
+def _check_camera_module_semantics(module_files, *, chips_dir=None) -> list:
+    """Cross-check beyond schema: `module_id` == filename stem and `chip`
+    names a real chip manifest.
+
+    The lane/address parity against the chip manifest is deliberately NOT
+    here, nor is the `zephyr_shield` directory check: both belong to the
+    camera parity gate that lands with the generators.  Returns a failure list shaped like `_check_files()`.
+    """
+    chips_dir = chips_dir or CHIPS
+    failures: list[tuple[Path, list[str]]] = []
+    for path in module_files:
+        try:
+            rel = path.relative_to(REPO).as_posix()
+        except ValueError:
+            rel = path.as_posix()
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+        msgs: list[str] = []
+        mid = doc.get("module_id")
+        if isinstance(mid, str) and mid != path.stem:
+            msgs.append(f"module_id: `{mid}` must match the filename `{path.stem}`")
+        chip = doc.get("chip")
+        if isinstance(chip, str) and not (chips_dir / f"{chip}.yaml").is_file():
+            msgs.append(f"chip: `{chip}` has no metadata/chips/{chip}.yaml")
         if msgs:
             print(f"FAIL {rel}")
             for m in msgs:
@@ -3300,6 +3428,7 @@ def main() -> int:
     )
     # Semantic cross-ref the schema can't express: npus[].paired_core -> cores[].
     soc_failures += _check_soc_npu_pairing(soc_files)
+    soc_failures += _check_soc_linux_dt(soc_files)
     # #1470: npu_toolchain.vela vs npus[] / external_memory_interfaces on the SAME spec.
     soc_failures += _check_soc_vela_memory_profile(soc_files)
     # Semantic cross-ref the schema can't express: variants[].debug.jlink_device keys -> cores[].
@@ -3363,6 +3492,7 @@ def main() -> int:
             # #1845: two chips declaring the same (bus, address) reaches
             # silicon as two devices answering one address.
             board_failures += _check_board_i2c_address_collisions(board_files)
+            board_failures += _check_board_camera_connectors(board_files)
 
     # Chip manifests (YAML) against chip-v1 schema.
     chip_failures: list = []
@@ -3380,6 +3510,34 @@ def main() -> int:
             )
             chip_failures += _check_chip_semantics(chip_files)
             chip_failures += _check_chip_physical(chip_files)
+
+    # Camera modules (YAML) against camera-module-v1.
+    camera_module_failures: list = []
+    camera_module_files: list = []
+    if CAMERA_MODULE_SCHEMA.is_file():
+        camera_module_schema = json.loads(CAMERA_MODULE_SCHEMA.read_text(encoding="utf-8"))
+        camera_module_validator = jsonschema.Draft202012Validator(camera_module_schema)
+        camera_module_files = sorted(CAMERA_MODULES.glob("*.yaml"))
+        if camera_module_files:
+            print()
+            camera_module_failures = _check_files(
+                "YAML", camera_module_files, camera_module_validator,
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
+                "module_id",
+            )
+            camera_module_failures += _check_camera_module_semantics(camera_module_files)
+
+    # Per-BSP-kernel Linux sensor-driver availability (linux-kernel-drivers-v1).
+    kernel_driver_failures: list = []
+    if LINUX_KERNEL_DRIVERS_SCHEMA.is_file() and LINUX_KERNEL_DRIVERS.is_file():
+        kd_validator = jsonschema.Draft202012Validator(
+            json.loads(LINUX_KERNEL_DRIVERS_SCHEMA.read_text(encoding="utf-8")))
+        print()
+        kernel_driver_failures = _check_files(
+            "YAML", [LINUX_KERNEL_DRIVERS], kd_validator,
+            lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
+            "schema_version",
+        )
 
     # V2N/V2M on-module GD32G553 supervisor pin-wiring source (#655)
     # against supervisor-links-v1.
@@ -3616,6 +3774,7 @@ def main() -> int:
     print()
     total_failures = (len(soc_failures) + len(som_failures)
                       + len(hwrev_failures) + len(board_failures) + len(chip_failures)
+                      + len(camera_module_failures) + len(kernel_driver_failures)
                       + len(block_failures)
                       + len(npu_ops_failures)
                       + len(model_perf_failures)
@@ -3635,6 +3794,7 @@ def main() -> int:
     print(f"{len(soc_files)} SoC file(s) + {len(som_files)} SoM preset(s) + "
           f"{len(hwrev_files)} hw-revisions file(s) + "
           f"{len(board_files)} board preset(s) + {len(chip_files)} chip file(s) + "
+          f"{len(camera_module_files)} camera module(s) + "
           f"{len(block_files)} block file(s) + {len(npu_ops_files)} npu-ops file(s) + "
           f"{len(model_perf_files)} model-perf point(s) + "
           f"{len(model_zoo_files)} model-zoo entry(ies) + "

@@ -49,7 +49,7 @@ extern "C" {
 #define XEVK_PIN_LCD2_RST      ALP_E1M_X_GPIO_IO21  /**< DSI display panel 2 reset (active-low). Active-low. */
 #define XEVK_PIN_LCD2_PWR_EN   ALP_E1M_X_GPIO_IO22  /**< DSI display panel 2 power enable. */
 #define XEVK_PIN_CAM0_MUX_SEL  ALP_E1M_X_GPIO_IO16  /**< Camera-0 source/lane mux select. */
-#define XEVK_PIN_CAM0_EN       ALP_E1M_X_GPIO_IO18  /**< Camera-0 power enable. */
+#define XEVK_PIN_CAM0_EN       ALP_E1M_X_GPIO_IO18  /**< CAM0 module enable, active-low via N-FET on CAM_GPIO. Active-low. */
 #define XEVK_PIN_CAM0_RST      ALP_E1M_X_GPIO_IO20  /**< Camera-0 reset (active-low). Active-low. */
 #define XEVK_PIN_USB_MUX_SEL   ALP_E1M_X_GPIO_IO24  /**< USB path-mux select. */
 #define XEVK_PIN_SDIO_MUX_SEL  ALP_E1M_X_GPIO_IO27  /**< SDIO path-mux select. */

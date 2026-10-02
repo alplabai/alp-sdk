@@ -216,6 +216,17 @@ The warning rules (4 + 5) are informational: the build still
 succeeds.  Tightening one of them to ERROR is a v0.7+ tightening
 decision once enough field data confirms the heuristic.
 
+## Camera declarations
+
+`cameras:` (project) and `camera_connectors:` (board) are cross-checked by
+`tan validate` after the schema pass: a `cameras:` entry must name a connector
+the resolved board exposes and a module that exists under
+`metadata/camera_modules/`, a connector may be used once, and an inline
+board's connector macros must resolve in its own `e1m_routes:` with a
+`lane_polarity` of `lanes + 1` entries.  Violations are
+[ALP-B003](diagnostics/ALP-B003.md) errors.  Field reference:
+[board-config-schema.md](board-config-schema.md#cameras-and-camera_connectors-camera-modules).
+
 ## Versioning
 
 There is no explicit `schema_version` field -- the schema at
