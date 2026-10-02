@@ -372,7 +372,7 @@ def main() -> int:
 # V2N / V2N-M1 flow: plan | run | status (docs/provisioning-v2n.md)
 # --------------------------------------------------------------------------
 
-V2N_SUBCOMMANDS = ("plan", "run", "status")
+V2N_SUBCOMMANDS = ("plan", "run", "status", "prepare-sd")
 
 
 def _v2n_parser() -> argparse.ArgumentParser:
@@ -397,6 +397,9 @@ def _v2n_parser() -> argparse.ArgumentParser:
     work.add_argument("--flash-writer", type=Path, help="Flash Writer .mot (overrides bench.yaml)")
     work.add_argument("--gd32-fw", type=Path,
                       help="dir with bootloader.bin, ota-meta.bin, slot-a.bin")
+    work.add_argument("--no-payload-store", action="store_true",
+                      help="do not read payloads from the provisioning SD's alp-payload partition "
+                           "(prepare-sd); push everything over SSH / the console")
     work.add_argument("--hw-rev", metavar="rN",
                       help="this unit's hardware revision key (e.g. r2) when it differs from "
                            "the bundle/preset default; a batch can mix revisions")
@@ -426,6 +429,11 @@ def _v2n_parser() -> argparse.ArgumentParser:
     r.add_argument("--execute", action="store_true")
     r.add_argument("--lock", action="store_true",
                    help="ONLY lock the secure page (separate invocation; preconditions + serial retype)")
+    sd = sub.add_parser("prepare-sd", help="write the release wic + the alp-payload store to the provisioning SD "
+                                           "(Linux/WSL; the SD is INTERNAL ONLY: it carries license-gated binaries)")
+    sd.add_argument("--bundle", type=Path, required=True, help="release bundle dir (bundle.json + artifacts/)")
+    sd.add_argument("--device", type=Path, required=True, help="SD block device (/dev/sdX) or an image file")
+    sd.add_argument("--gd32-fw", type=Path, help="dir with bootloader.bin, ota-meta.bin, slot-a.bin (+ VERSION)")
     st = sub.add_parser("status", parents=[common])
     st.add_argument("--catalogue", type=Path)
     st.add_argument("--bundle", dest="status_bundle", type=Path,
@@ -541,6 +549,14 @@ def v2n_main(argv: list[str]) -> int:
         return 2 if e.code else 0
     if a.cmd == "status":
         return _status(a)
+    if a.cmd == "prepare-sd":
+        from provision import prepare_sd
+        try:
+            print(prepare_sd.prepare(a.bundle, a.device, a.gd32_fw))
+        except (prepare_sd.PrepareError, OSError, ValueError, KeyError) as e:
+            print(f"provision_som: prepare-sd: {e}", file=sys.stderr)
+            return 1
+        return 0
     execute = a.cmd == "run" and a.execute
     try:
         preset_path = REPO / "metadata" / "e1m_modules" / f"{a.sku}.yaml"
@@ -610,6 +626,7 @@ def v2n_main(argv: list[str]) -> int:
                     cold_cycles=a.cold_cycles, hil_spec=hil, flash_writer=a.flash_writer,
                     gd32_fw=a.gd32_fw,
                     transfer=a.transfer, station=a.station, by=a.by,
+                    payload_store_on=not a.no_payload_store,
                     ledger_xlsx=a.ledger_xlsx,
                     mfg_date_override=a.mfg_date if a.mfg_date and a.mfg_date != derived else None)
     ctx.state = steps.load_state(ctx.state_path)
