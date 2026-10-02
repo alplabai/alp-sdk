@@ -8,7 +8,9 @@
  * significant first.  Pre-populated with MANUFACTURER_ID (0x3E) = 0x5449 and
  * DEVICE_ID (0x3F) = 0x2281 so ina228_init()'s identity probe succeeds.
  * `fake_ina228_set_absent(true)` makes every transfer fail the way an
- * unanswered address does, to exercise the "not present" result.
+ * unanswered address does (-EIO); `fake_ina228_set_error(-EBUSY)` etc. make
+ * every transfer return that errno, to check that only a no-ACK is reported
+ * as "not present".
  */
 
 #define DT_DRV_COMPAT alp_fake_ina228
@@ -32,7 +34,7 @@ struct fake_ina228_data {
 	uint8_t  log_reg[FAKE_INA228_LOG_CAP];
 	uint16_t log_val[FAKE_INA228_LOG_CAP];
 	uint32_t log_len;
-	bool     absent;
+	int      fail_errno; /* 0 = answer; else every transfer returns this (negative errno) */
 };
 
 static struct fake_ina228_data *g_fake_ina228;
@@ -61,7 +63,7 @@ static void seed_defaults(struct fake_ina228_data *d)
 	memset(d->log_reg, 0, sizeof d->log_reg);
 	memset(d->log_val, 0, sizeof d->log_val);
 	d->log_len    = 0;
-	d->absent     = false;
+	d->fail_errno = 0;
 	d->regs[0x01] = 0xFB68u; /* ADC_CONFIG reset value */
 	d->regs[0x02] = 0x1000u; /* SHUNT_CAL reset value */
 	d->regs[0x0B] = 0x0001u; /* DIAG_ALRT reset value */
@@ -75,7 +77,7 @@ fake_ina228_transfer(const struct emul *target, struct i2c_msg *msgs, int num_ms
 	(void)addr;
 	struct fake_ina228_data *d = target->data;
 
-	if (d->absent) return -EIO;
+	if (d->fail_errno != 0) return d->fail_errno;
 
 	if (num_msgs == 1 && (msgs[0].flags & I2C_MSG_READ) == 0) {
 		/* 16-bit big-endian write: [reg, hi, lo]. */
@@ -163,7 +165,13 @@ uint16_t fake_ina228_log_val(uint32_t idx)
 
 void fake_ina228_set_absent(bool absent)
 {
-	if (g_fake_ina228) g_fake_ina228->absent = absent;
+	/* An unanswered address: i2c_write_read() returns -EIO. */
+	fake_ina228_set_error(absent ? -EIO : 0);
+}
+
+void fake_ina228_set_error(int neg_errno)
+{
+	if (g_fake_ina228) g_fake_ina228->fail_errno = neg_errno;
 }
 
 void fake_ina228_reset(void)

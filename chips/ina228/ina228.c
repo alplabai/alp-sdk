@@ -66,7 +66,7 @@
  *   cal = lsb_pa * r_uohm * 13107.2e6 * 1e-12 * 1e-6 = lsb_pa * r_uohm * 16 / 5^13,
  * and 5^13 = 1220703125.  The factor 16 becomes 64 for ADCRANGE = 1.
  */
-#define INA228_CAL_DIV 1220703125ull
+#define INA228_CAL_DIV 1220703125u
 
 /* Pico-amps per micro-amp. */
 #define INA228_PA_PER_UA 1000000ull
@@ -135,18 +135,67 @@ static int64_t div_round(int64_t num, int64_t den)
 	return (num >= 0) ? (num + den / 2) / den : -((-num + den / 2) / den);
 }
 
-/* a * num / den for unsigned values, rounded to nearest, without a 128-bit
- * type.  Fails (returns false) when a * b overflows 64 bits; otherwise splits
- * the product so the final *num cannot overflow either. */
-static bool mul_scale_u64(uint64_t a, uint64_t b, uint64_t num, uint64_t den, uint64_t *out)
+/* round(a * b * num / den) for unsigned values, half away from zero, exact
+ * and without a 128-bit type.  The product is built in 32-bit limbs (a * b is
+ * 128 bits, times num up to 160), `den / 2` is added for the rounding, and a
+ * limb-wise long division by `den` (< 2^32, so each step fits 64 bits) gives
+ * the quotient.  Fails (returns false) only when the RESULT does not fit 64
+ * bits; an intermediate product that is wider than 64 bits is fine. */
+static bool mul_div_round_u64(uint64_t a, uint64_t b, uint32_t num, uint32_t den, uint64_t *out)
 {
-	if (b != 0 && a > UINT64_MAX / b) return false;
-	uint64_t p = a * b;
-	uint64_t q = p / den;
-	uint64_t r = p % den;
-	if (q != 0 && num > UINT64_MAX / q) return false;
-	*out = q * num + (r * num + den / 2) / den;
+	uint32_t al[2] = { (uint32_t)a, (uint32_t)(a >> 32) };
+	uint32_t bl[2] = { (uint32_t)b, (uint32_t)(b >> 32) };
+	uint32_t p[5]  = { 0, 0, 0, 0, 0 };
+
+	for (int i = 0; i < 2; i++) {
+		uint64_t carry = 0;
+		for (int j = 0; j < 2; j++) {
+			uint64_t t = (uint64_t)al[i] * bl[j] + p[i + j] + carry;
+			p[i + j]   = (uint32_t)t;
+			carry      = t >> 32;
+		}
+		p[i + 2] = (uint32_t)carry;
+	}
+
+	uint64_t carry = 0;
+	for (int k = 0; k < 4; k++) {
+		uint64_t t = (uint64_t)p[k] * num + carry;
+		p[k]       = (uint32_t)t;
+		carry      = t >> 32;
+	}
+	p[4] = (uint32_t)carry;
+
+	carry = den / 2u;
+	for (int k = 0; k < 5; k++) {
+		uint64_t t = (uint64_t)p[k] + carry;
+		p[k]       = (uint32_t)t;
+		carry      = t >> 32;
+	}
+
+	uint32_t q[5];
+	uint64_t rem = 0;
+	for (int k = 4; k >= 0; k--) {
+		uint64_t cur = (rem << 32) | p[k];
+		q[k]         = (uint32_t)(cur / den);
+		rem          = cur % den;
+	}
+	if (q[4] != 0u || q[3] != 0u || q[2] != 0u) return false;
+	*out = ((uint64_t)q[1] << 32) | q[0];
 	return true;
+}
+
+/* The statuses a no-ACK (nothing answers at the address) produces:
+ *  - Zephyr: i2c_write_read() returns -EIO -> ALP_ERR_IO (alp_errno.h).
+ *  - Linux i2c-dev: an address NACK on I2C_RDWR is ENXIO -> ALP_ERR_NOT_READY;
+ *    a NACK after the address (EREMOTEIO, and anything unmapped) falls to
+ *    ALP_ERR_IO.
+ * ALP_ERR_NOT_READY also covers ENODEV / ENOENT (adapter gone), which is
+ * indistinguishable from here and reads as "no device" too.  Everything else
+ * -- ALP_ERR_BUSY (EBUSY / EAGAIN), ALP_ERR_TIMEOUT, ALP_ERR_NOSUPPORT,
+ * ALP_ERR_NOMEM -- says something other than "no one is there". */
+static bool is_no_ack(alp_status_t s)
+{
+	return s == ALP_ERR_IO || s == ALP_ERR_NOT_READY;
 }
 
 static bool addr_in_strap_range(uint8_t addr)
@@ -173,19 +222,16 @@ alp_status_t ina228_calibration_for(uint32_t          shunt_micro_ohms,
 	if (max_current_ua == 0u || max_current_ua > INA228_MAX_CURRENT_LIMIT_UA) return ALP_ERR_INVAL;
 
 	/* CURRENT_LSB = max current / 2^19 in pico-amps, rounded to nearest;
-	 * never below 1 pA.  Not clamped to the range's full scale: a request
+	 * (>= 2 pA for any request >= 1 uA).  Not clamped to the range's full scale: a request
 	 * beyond it only coarsens every reading (use ina228_full_scale_ua() to
 	 * pick the value), but it is the caller's stated scale. */
 	uint64_t lsb_pa =
 	    ((uint64_t)max_current_ua * INA228_PA_PER_UA + (1ull << (INA228_CURRENT_BITS - 1))) >>
 	    INA228_CURRENT_BITS;
-	if (lsb_pa == 0u) lsb_pa = 1u;
 
-	/* lsb_pa <= 1e9 * 1e6 / 2^19 < 1.91e9 and r < 2^32, so the product is
-	 * < 8.2e18 and fits u64. */
 	uint64_t mult = (adcrange == INA228_ADCRANGE_40MV) ? 64u : 16u;
 	uint64_t cal;
-	if (!mul_scale_u64(lsb_pa, shunt_micro_ohms, mult, INA228_CAL_DIV, &cal))
+	if (!mul_div_round_u64(lsb_pa, shunt_micro_ohms, (uint32_t)mult, INA228_CAL_DIV, &cal))
 		return ALP_ERR_OUT_OF_RANGE;
 	if (cal == 0u || cal > INA228_SHUNT_CAL_MAX) return ALP_ERR_OUT_OF_RANGE;
 
@@ -236,12 +282,14 @@ alp_status_t ina228_init(ina228_t         *ctx,
 	ctx->max_current_ua   = max_current_ua;
 	ctx->adcrange         = adcrange;
 
-	/* The first read doubles as the presence test: no ACK means the part is
-	 * absent (e.g. a carrier without the bus-pin rework), reported distinctly
-	 * from "something answered that is not an INA228". */
+	/* The first read doubles as the presence test.  Only a no-ACK result
+	 * means "absent" (e.g. a carrier without the bus-pin rework); any other
+	 * bus failure (BUSY when a kernel driver holds the address, TIMEOUT on a
+	 * hung bus, NOSUPPORT, ...) is a real fault and is returned as is. */
 	uint16_t id;
 	s = reg_read16(ctx, INA228_REG_MFG_ID, &id);
-	if (s != ALP_OK) return INA228_ERR_NOT_PRESENT;
+	if (is_no_ack(s)) return INA228_ERR_NOT_PRESENT;
+	if (s != ALP_OK) return s;
 	if (id != INA228_MFG_ID) return ALP_ERR_NOT_READY;
 
 	/* DEVICE_ID is DIEID[15:4] + REV[3:0]; the revision nibble varies, so
@@ -339,7 +387,7 @@ alp_status_t ina228_read_power_uw(ina228_t *ctx, uint64_t *uw_out)
 	alp_status_t s = reg_read24(ctx, INA228_REG_POWER, &raw);
 	if (s != ALP_OK) return s;
 	/* P[W] = 3.2 * lsb[A] * POWER, so uW = lsb_pa * POWER * 16 / 5e6. */
-	if (!mul_scale_u64(ctx->current_lsb_pa, raw, 16u, 5000000ull, uw_out))
+	if (!mul_div_round_u64(ctx->current_lsb_pa, raw, 16u, 5000000u, uw_out))
 		return ALP_ERR_OUT_OF_RANGE;
 	return ALP_OK;
 }
@@ -351,7 +399,7 @@ alp_status_t ina228_read_energy_uj(ina228_t *ctx, uint64_t *uj_out)
 	alp_status_t s = reg_read40(ctx, INA228_REG_ENERGY, &raw);
 	if (s != ALP_OK) return s;
 	/* E[J] = 16 * 3.2 * lsb[A] * ENERGY, so uJ = lsb_pa * ENERGY * 256 / 5e6. */
-	if (!mul_scale_u64(ctx->current_lsb_pa, raw, 256u, 5000000ull, uj_out))
+	if (!mul_div_round_u64(ctx->current_lsb_pa, raw, 256u, 5000000u, uj_out))
 		return ALP_ERR_OUT_OF_RANGE;
 	return ALP_OK;
 }
@@ -366,8 +414,7 @@ alp_status_t ina228_read_charge_uc(ina228_t *ctx, int64_t *uc_out)
 	uint64_t mag = (v < 0) ? (uint64_t)(-v) : (uint64_t)v;
 	uint64_t uc;
 	/* C = lsb[A] * CHARGE, so uC = lsb_pa * CHARGE / 1e6. */
-	if (!mul_scale_u64(ctx->current_lsb_pa, mag, 1u, INA228_PA_PER_UA, &uc) ||
-	    uc > (uint64_t)INT64_MAX)
+	if (!mul_div_round_u64(ctx->current_lsb_pa, mag, 1u, 1000000u, &uc) || uc > (uint64_t)INT64_MAX)
 		return ALP_ERR_OUT_OF_RANGE;
 	*uc_out = (v < 0) ? -(int64_t)uc : (int64_t)uc;
 	return ALP_OK;

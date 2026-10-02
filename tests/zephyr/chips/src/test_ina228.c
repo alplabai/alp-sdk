@@ -9,6 +9,8 @@
  * comments; the reference shunt is the E1M-X EVK's 100 mOhm.
  */
 
+#include <errno.h>
+
 #include <zephyr/ztest.h>
 
 #include "alp/chips/ina228.h"
@@ -95,6 +97,31 @@ ZTEST(alp_chips, test_ina228_init_distinguishes_absent_from_wrong_part)
 	zassert_not_equal(INA228_ERR_NOT_PRESENT, ALP_ERR_IO);
 	zassert_false(ctx.initialised);
 
+	/* Only a no-ACK is "absent".  Linux i2c-dev reports an address NACK as
+	 * ENXIO (-> ALP_ERR_NOT_READY); that is "absent" too. */
+	fake_ina228_reset();
+	fake_ina228_set_error(-ENXIO);
+	zassert_equal(ina228_init(&ctx, bus, 0x42u, 100000u, FS_1638MA_UA, INA228_ADCRANGE_163MV),
+	              INA228_ERR_NOT_PRESENT);
+
+	/* Real bus faults are propagated, not folded into "absent": a kernel
+	 * driver already bound at the address (EBUSY), a hung bus (ETIMEDOUT),
+	 * a controller without the transfer type (ENOSYS), no memory (ENOMEM). */
+	fake_ina228_reset();
+	fake_ina228_set_error(-EBUSY);
+	zassert_equal(ina228_init(&ctx, bus, 0x42u, 100000u, FS_1638MA_UA, INA228_ADCRANGE_163MV),
+	              ALP_ERR_BUSY);
+	fake_ina228_set_error(-ETIMEDOUT);
+	zassert_equal(ina228_init(&ctx, bus, 0x42u, 100000u, FS_1638MA_UA, INA228_ADCRANGE_163MV),
+	              ALP_ERR_TIMEOUT);
+	fake_ina228_set_error(-ENOSYS);
+	zassert_equal(ina228_init(&ctx, bus, 0x42u, 100000u, FS_1638MA_UA, INA228_ADCRANGE_163MV),
+	              ALP_ERR_NOSUPPORT);
+	fake_ina228_set_error(-ENOMEM);
+	zassert_equal(ina228_init(&ctx, bus, 0x42u, 100000u, FS_1638MA_UA, INA228_ADCRANGE_163MV),
+	              ALP_ERR_NOMEM);
+	zassert_false(ctx.initialised);
+
 	/* Wrong manufacturer ID. */
 	fake_ina228_reset();
 	fake_ina228_set_reg(REG_MFG_ID, 0x5450u);
@@ -178,11 +205,14 @@ ZTEST(alp_chips, test_ina228_calibration_for_edges)
 	 * 4096 x 20 / 1.6384 = 50000.  Rejected, not clamped. */
 	zassert_equal(ina228_calibration_for(100000u, 20000000u, INA228_ADCRANGE_163MV, &cal, &lsb),
 	              ALP_ERR_OUT_OF_RANGE);
-	/* The 0x7FFF edge sits at 4096 x I / 1.6384 A = 32767, i.e. I = 13.1 A:
-	 * 13 A (cal 32500) fits, 13.2 A (cal 32995) does not. */
-	zassert_equal(ina228_calibration_for(100000u, 13000000u, INA228_ADCRANGE_163MV, &cal, &lsb),
+	/* The 0x7FFF edge sits at 4096 x I / 1.6384 A = 32767, i.e. I = 13.1 A.
+	 * 13,106,999 uA is the largest request that still rounds to 0x7FFF; the
+	 * next microamp rounds to 0x8000 and is rejected. */
+	zassert_equal(ina228_calibration_for(100000u, 13106999u, INA228_ADCRANGE_163MV, &cal, &lsb),
 	              ALP_OK);
-	zassert_true(cal > 32000u && cal <= 0x7FFFu);
+	zassert_equal(cal, 0x7FFFu);
+	zassert_equal(ina228_calibration_for(100000u, 13107000u, INA228_ADCRANGE_163MV, &cal, &lsb),
+	              ALP_ERR_OUT_OF_RANGE);
 	zassert_equal(ina228_calibration_for(100000u, 13200000u, INA228_ADCRANGE_163MV, &cal, &lsb),
 	              ALP_ERR_OUT_OF_RANGE);
 	/* ADCRANGE = 1 multiplies SHUNT_CAL by 4, so the same 5 A overflows there
@@ -358,9 +388,22 @@ ZTEST(alp_chips, test_ina228_power_energy_charge)
 	zassert_equal(ina228_read_charge_uc(&ctx, &c), ALP_OK);
 	zassert_equal(c, 1717986918397ll);
 
-	/* An LSB so large the 64-bit product overflows is an error, not a wrap. */
-	ctx.current_lsb_pa = 1ull << 40;
+	/* The scaling fails only when the RESULT does not fit 64 bits, never
+	 * because the lsb x raw product is wider than 64 bits.  With all 40
+	 * ENERGY bits set (1,099,511,627,775 counts) an LSB of 1e9 pA makes a
+	 * 1.1e21 intermediate product, yet the result is a comfortable
+	 * 56,294,995,342,080,000 uJ. */
 	fake_ina228_set_reg(REG_ENERGY, 0xFFFFFFFFFFull);
+	ctx.current_lsb_pa = 1000000000ull;
+	zassert_equal(ina228_read_energy_uj(&ctx, &u), ALP_OK);
+	zassert_equal(u, 56294995342080000ull);
+	/* Exact boundary: 327,680,000,000 pA gives 18,446,744,073,692,774,400 uJ,
+	 * the largest LSB whose result is <= 2^64 - 1; one pA more overflows
+	 * (18,446,744,073,749,069,395 > 2^64 - 1) and is an error, not a wrap. */
+	ctx.current_lsb_pa = 327680000000ull;
+	zassert_equal(ina228_read_energy_uj(&ctx, &u), ALP_OK);
+	zassert_equal(u, 18446744073692774400ull);
+	ctx.current_lsb_pa = 327680000001ull;
 	zassert_equal(ina228_read_energy_uj(&ctx, &u), ALP_ERR_OUT_OF_RANGE);
 
 	alp_i2c_close(bus);

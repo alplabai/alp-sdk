@@ -83,9 +83,17 @@ extern "C" {
  * @brief Status ina228_init() returns when nothing acknowledges at the
  *        address, i.e. the part is not present (or not reachable).
  *
- * Distinct from ::ALP_ERR_NOT_READY, which means something answered but is
- * not an INA228.  On a carrier without the bus-pin rework this is the normal
- * result.
+ * Returned only for a no-ACK from the bus (the backend reports ::ALP_ERR_IO
+ * on Zephyr, and ::ALP_ERR_IO or ::ALP_ERR_NOT_READY, from ENXIO, on Linux
+ * i2c-dev).  Any other bus failure (::ALP_ERR_BUSY when a kernel driver holds
+ * the address, ::ALP_ERR_TIMEOUT, ...) is returned unchanged, so a real fault
+ * is never reported as "absent".  Distinct from ::ALP_ERR_NOT_READY, which
+ * ina228_init() returns when something answered but is not an INA228.  On a
+ * carrier without the bus-pin rework this is the normal result.
+ *
+ * alp_status_t has no dedicated "no such device" code.  ::ALP_ERR_NOT_FOUND
+ * ("the requested item is absent") is the closest, and no other peripheral
+ * uses it for a bus probe, so a caller can test for it unambiguously.
  */
 #define INA228_ERR_NOT_PRESENT ALP_ERR_NOT_FOUND
 
@@ -160,7 +168,15 @@ typedef enum {
 	INA228_MODE_ALL_CONT       = 0xF, /**< Continuous bus + shunt + temperature (reset default). */
 } ina228_mode_t;
 
-/** Driver context.  Treat as opaque; fields are exposed for diagnostics. */
+/**
+ * Driver context.  Treat as opaque; fields are exposed for diagnostics.
+ *
+ * Thread safety: none inside the driver.  One caller at a time per device
+ * (ina228_read_*() and the write calls are separate bus transactions and the
+ * context caches CONFIG), while the underlying bus handle may be shared
+ * between several devices, each with its own context, as the bus layer
+ * serialises transfers.
+ */
 typedef struct {
 	bool              initialised;      /**< True once ina228_init() succeeded. */
 	alp_i2c_t        *bus;              /**< Open I2C bus handle. */
@@ -193,7 +209,11 @@ uint64_t ina228_full_scale_ua(uint32_t shunt_micro_ohms, ina228_adcrange_t adcra
  * for ::INA228_ADCRANGE_40MV, with CURRENT_LSB = max current / 2^19 (eq. 3).
  * The reporting scale is not clamped: a @p max_current_ua above
  * ina228_full_scale_ua() only coarsens every reading, and SHUNT_CAL grows with
- * it until it no longer fits.  Pass ina228_full_scale_ua() for the finest
+ * it until it passes the 15-bit register ceiling (0x7FFF), where the pair is
+ * rejected.  This differs from ina236_calibration_for(), which clamps the
+ * request to the range's full scale: clamping would silently change the scale
+ * the caller asked for, so here an unencodable request is an error and any
+ * encodable one is honoured.  Pass ina228_full_scale_ua() for the finest
  * resolution the shunt allows.  The returned LSB is back-computed from the
  * rounded SHUNT_CAL, so it matches what the register actually does.
  *
@@ -237,10 +257,11 @@ alp_status_t ina228_calibration_for(uint32_t          shunt_micro_ohms,
  * @param[in]  adcrange          ADC range.
  *
  * @return ALP_OK on success; ::INA228_ERR_NOT_PRESENT if the first register
- *         read gets no answer (part absent / unreachable); ALP_ERR_NOT_READY
+ *         read gets no ACK (part absent / unreachable); ALP_ERR_NOT_READY
  *         if something answered but is not an INA228; ALP_ERR_INVAL for bad
  *         parameters; ALP_ERR_OUT_OF_RANGE when SHUNT_CAL cannot be encoded;
- *         the bus error for a later transfer failure.
+ *         any other bus error (ALP_ERR_BUSY, ALP_ERR_TIMEOUT, ...) unchanged,
+ *         including from the first read.
  */
 alp_status_t ina228_init(ina228_t         *ctx,
                          alp_i2c_t        *bus,
@@ -277,7 +298,8 @@ alp_status_t ina228_configure(ina228_t     *ctx,
  *
  * @param[in]  ctx     Initialised context.
  * @param[out] uv_out  Shunt voltage, micro-volts.
- * @return ALP_OK; ALP_ERR_NOT_READY for a NULL / uninitialised @p ctx or NULL output.
+ * @return ALP_OK; ALP_ERR_NOT_READY for a NULL / uninitialised @p ctx or NULL output;
+ *         a bus error from the transfer is returned unchanged.
  */
 alp_status_t ina228_read_shunt_uv(ina228_t *ctx, int32_t *uv_out);
 
@@ -286,7 +308,8 @@ alp_status_t ina228_read_shunt_uv(ina228_t *ctx, int32_t *uv_out);
  *
  * @param[in]  ctx     Initialised context.
  * @param[out] uv_out  Bus voltage, micro-volts.
- * @return ALP_OK; ALP_ERR_NOT_READY for a NULL / uninitialised @p ctx or NULL output.
+ * @return ALP_OK; ALP_ERR_NOT_READY for a NULL / uninitialised @p ctx or NULL output;
+ *         a bus error from the transfer is returned unchanged.
  */
 alp_status_t ina228_read_bus_uv(ina228_t *ctx, int32_t *uv_out);
 
@@ -295,7 +318,8 @@ alp_status_t ina228_read_bus_uv(ina228_t *ctx, int32_t *uv_out);
  *
  * @param[in]  ctx        Initialised context.
  * @param[out] mdegc_out  Die temperature, milli-degrees Celsius.
- * @return ALP_OK; ALP_ERR_NOT_READY for a NULL / uninitialised @p ctx or NULL output.
+ * @return ALP_OK; ALP_ERR_NOT_READY for a NULL / uninitialised @p ctx or NULL output;
+ *         a bus error from the transfer is returned unchanged.
  */
 alp_status_t ina228_read_temp_mdegc(ina228_t *ctx, int32_t *mdegc_out);
 
@@ -304,7 +328,8 @@ alp_status_t ina228_read_temp_mdegc(ina228_t *ctx, int32_t *mdegc_out);
  *
  * @param[in]  ctx     Initialised context.
  * @param[out] ua_out  Current, micro-amps.
- * @return ALP_OK; ALP_ERR_NOT_READY for a NULL / uninitialised @p ctx or NULL output.
+ * @return ALP_OK; ALP_ERR_NOT_READY for a NULL / uninitialised @p ctx or NULL output;
+ *         a bus error from the transfer is returned unchanged.
  */
 alp_status_t ina228_read_current_ua(ina228_t *ctx, int32_t *ua_out);
 
@@ -314,7 +339,10 @@ alp_status_t ina228_read_current_ua(ina228_t *ctx, int32_t *ua_out);
  *
  * @param[in]  ctx     Initialised context.
  * @param[out] uw_out  Power, micro-watts.
- * @return ALP_OK; ALP_ERR_NOT_READY for a NULL / uninitialised @p ctx or NULL output.
+ * @return ALP_OK; ALP_ERR_NOT_READY for a NULL / uninitialised @p ctx or NULL output;
+ *         ALP_ERR_OUT_OF_RANGE if the scaled value does not fit 64 bits (only
+ *         with a corrupt context); a bus error from the transfer is returned
+ *         unchanged.
  */
 alp_status_t ina228_read_power_uw(ina228_t *ctx, uint64_t *uw_out);
 
@@ -328,7 +356,8 @@ alp_status_t ina228_read_power_uw(ina228_t *ctx, uint64_t *uw_out);
  * @param[in]  ctx     Initialised context.
  * @param[out] uj_out  Energy, micro-joules.
  * @return ALP_OK; ALP_ERR_NOT_READY for a NULL / uninitialised @p ctx or NULL
- *         output; ALP_ERR_OUT_OF_RANGE if the scaled value does not fit 64 bits.
+ *         output; ALP_ERR_OUT_OF_RANGE if the scaled value does not fit its
+ *         result type; a bus error from the transfer is returned unchanged.
  */
 alp_status_t ina228_read_energy_uj(ina228_t *ctx, uint64_t *uj_out);
 
@@ -339,7 +368,8 @@ alp_status_t ina228_read_energy_uj(ina228_t *ctx, uint64_t *uj_out);
  * @param[in]  ctx     Initialised context.
  * @param[out] uc_out  Charge, micro-coulombs.
  * @return ALP_OK; ALP_ERR_NOT_READY for a NULL / uninitialised @p ctx or NULL
- *         output; ALP_ERR_OUT_OF_RANGE if the scaled value does not fit 64 bits.
+ *         output; ALP_ERR_OUT_OF_RANGE if the scaled value does not fit its
+ *         result type; a bus error from the transfer is returned unchanged.
  */
 alp_status_t ina228_read_charge_uc(ina228_t *ctx, int64_t *uc_out);
 
@@ -360,7 +390,8 @@ alp_status_t ina228_reset_accumulators(ina228_t *ctx);
  *
  * @param[in]  ctx        Initialised context.
  * @param[out] flags_out  Raw DIAG_ALRT value.
- * @return ALP_OK; ALP_ERR_NOT_READY for a NULL / uninitialised @p ctx or NULL output.
+ * @return ALP_OK; ALP_ERR_NOT_READY for a NULL / uninitialised @p ctx or NULL output;
+ *         a bus error from the transfer is returned unchanged.
  */
 alp_status_t ina228_read_diag(ina228_t *ctx, uint16_t *flags_out);
 
