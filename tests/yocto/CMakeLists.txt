@@ -971,6 +971,24 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_peripheral_pwm
              COMMAND alp_test_peripheral_pwm)
 
+    # Camera V4L2/media-controller backend: #includes the real
+    # src/backends/camera/yocto_drv.c and scripts every kernel call through
+    # its ioctl/poll/mmap seam.  Not linked against alp::sdk (same ODR
+    # rationale as alp_test_peripheral_pwm).
+    add_executable(alp_test_peripheral_camera
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_camera.c
+    )
+    target_include_directories(alp_test_peripheral_camera PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/camera
+    )
+    target_compile_features(alp_test_peripheral_camera PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_camera
+             COMMAND alp_test_peripheral_camera)
+
     # Edge-config rollback regression for issue #746 (Yocto GPIO chardev-v2
     # backend): alp_gpio_irq_enable() must restore plain-input if the IRQ
     # dispatcher fails to start (eventfd()/pthread_create() failure),

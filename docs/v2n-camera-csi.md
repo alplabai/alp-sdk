@@ -173,3 +173,40 @@ v4l2-ctl -d /dev/v4l-subdevN -c exposure=1000,analogue_gain=100
 Pass: 10 frames, no CSI errors in `dmesg`. If `i2cdetect` sees nothing,
 check the mux select (`gpioinfo | grep cam0-mux-sel` must read output,
 low) and the module's I2C address.
+
+## Using `<alp/camera.h>` on Linux
+
+The portable `alp_camera_open()` works on the A55 through the V4L2 /
+media-controller backend (`src/backends/camera/yocto_drv.c`). It is
+sensor-agnostic: nothing in it names a sensor, so any camera with a mainline
+V4L2 subdev driver and a media-graph path to a capture node works.
+**Bench-unverified as a backend** (unit-tested against an ioctl hook; the
+OV9281 Y10 -> `CR10` path above is the hardware-proven pipeline it targets).
+
+`camera_id` N is resolved through a device-tree alias. The carrier or sensor
+fragment **must** name the sensor node:
+
+```
+aliases {
+	alp-camera0 = &ov9281;   /* the sensor's i2c node label */
+};
+```
+
+Without that alias `alp_camera_open()` returns `ALP_ERR_NOT_READY` (as it
+does for an alias with no probed sensor). The backend then scans every
+`/dev/media*`, finds the `MEDIA_ENT_F_CAM_SENSOR` entity bound to that node,
+follows the enabled links to the capture node, and never changes a link.
+
+| Request | Result |
+|---|---|
+| `ALP_PIXFMT_GREY8` | Y8 sensor passes through; Y10 (`CR10`) is unpacked and `>>2` |
+| `ALP_PIXFMT_RAW8` | Bayer8 / Y8 passes through |
+| `ALP_PIXFMT_RAW10` | Bayer10 / Y10 (`CR10`) unpacked to one `uint16` per pixel |
+| colour (RGB/YUV) | `ALP_ERR_NOSUPPORT` (no ISP in the path) |
+| width x height | must be a size the sensor produces natively, else `ALP_ERR_INVAL` |
+| `fps` | a request: VBLANK is clamped to the sensor's range; read the settled rate with `alp_camera_get_fps()` |
+
+A frame the kernel marks corrupt (`V4L2_BUF_FLAG_ERROR`) or short is dropped
+and `alp_camera_capture()` returns `ALP_ERR_IO`. `configure_isp` is
+`ALP_ERR_NOSUPPORT`. RAW8 Bayer fourccs are unverified against the CRU format
+table.

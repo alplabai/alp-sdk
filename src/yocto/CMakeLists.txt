@@ -564,6 +564,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # gated below behind pkg_check_modules(ALSA), mirroring audio_yocto.c.)
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/can/yocto_drv.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/pwm/yocto_drv.c
+        # Camera: backends/camera/yocto_drv.c is the V4L2 + media-controller
+        # backend (sensor found via the alp-camera<N> DT alias, link chain
+        # walked to the capture node).  Self-gates on __linux__ and
+        # registers at priority 100 above the zephyr_stub wildcard.
+        ${CMAKE_CURRENT_SOURCE_DIR}/../backends/camera/yocto_drv.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/adc/yocto_drv.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/counter/yocto_drv.c
         # RTC + WDT are now REAL registry backends (#33), not stubs:
