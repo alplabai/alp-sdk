@@ -89,12 +89,12 @@ register_table:
 signals:
   - { name: TW_N,  type: open_drain_output, v2n_route: "Renesas P36 (DA9292_TW)",  notes: "active-low thermal-warning" }
   - { name: INT_N, type: open_drain_output, v2n_route: "Renesas P37 (DA9292_INT)", notes: "active-low generic interrupt; cleared by read+write-1 on PMC_EVENT_00/01" }
-  - { name: PB_N,  type: open_drain_output, v2n_route: TBD, notes: "active-low power-bad" }
-  - { name: EN1,   type: input,             v2n_route: TBD, notes: "CH1 enable -- strapped on V2N for boot-up" }
-  - { name: EN2,   type: input,             v2n_route: TBD, notes: "CH2 enable -- routed to host on V2N-M1" }
-  - { name: CE,    type: input,             v2n_route: TBD, notes: "chip enable" }
-  - { name: VSEL1, type: input,             v2n_route: TBD, notes: "selects between CHx_VOUT_VSEL_LO/_HI" }
-  - { name: VSEL2, type: input,             v2n_route: TBD, notes: "selects between CHx_VOUT_VSEL_LO/_HI" }
+  - { name: PB_N,  type: open_drain_output, v2n_route: "pulled up to the 1.8 V rail through a resistor; not routed to the host or any other device", notes: "active-low power-bad" }
+  - { name: EN1,   type: input,             v2n_route: "strapped to the 1.8 V rail (CH1 always enabled)", notes: "CH1 enable -- strapped on V2N for boot-up" }
+  - { name: EN2,   type: input,             v2n_route: "host DEEPX_CORE_0P75_EN (Renesas P64) through a series resistor", notes: "CH2 enable -- routed to host on V2N-M1" }
+  - { name: CE,    type: input,             v2n_route: "strapped to the 5 V input rail through a 0 ohm link (alternative link to the module-enable signal not populated)", notes: "chip enable" }
+  - { name: VSEL1, type: input,             v2n_route: "strapped to ground (selects the _LO VOUT register set)", notes: "selects between CHx_VOUT_VSEL_LO/_HI" }
+  - { name: VSEL2, type: input,             v2n_route: "strapped to ground (selects the _LO VOUT register set)", notes: "selects between CHx_VOUT_VSEL_LO/_HI" }
 
   # Remaining chip-native pins per Renesas DA9292 datasheet R16DS0518EJ0220
   # Rev 2.2 (Mar 2025) Table 1 "Pin Description" -- power/phase pins + the
