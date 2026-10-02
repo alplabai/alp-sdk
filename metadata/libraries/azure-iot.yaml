@@ -28,10 +28,10 @@
 #   in-tree LICENSE file, because the SDK is not in this checkout
 #   (not-in-tree-verified).
 #
-# TLS note (bench-gated follow-up): the Azure IoT Hub MQTT transport needs a TLS
-# stack; the workspace already pins mbedtls (west module `mbedtls`), the natural
-# provider, but wiring the transport shim onto it is app + packaging work, not
-# built here.
+# TLS note: the hub client builds topics and credentials only.
+# `CONFIG_ALP_CLOUD_TRANSPORT=y` builds <alp/cloud_transport.h>, the TLS socket
+# (Zephyr sockets + mbedtls, #2581); the application still brings the MQTT
+# client that runs over it.  A connection to a live IoT Hub is bench-gated.
 schema_version: 1
 name: azure-iot
 description: "Azure SDK for Embedded C -- Azure IoT Hub / DPS client for constrained devices."

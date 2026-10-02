@@ -460,8 +460,10 @@ config ALP_AWS_IOT
 	help
 	  Compiles coreMQTT and coreJSON from the west-pinned
 	  aws-iot-device-sdk-embedded-C checkout (vendors/aws-iot/).  Needs
-	  `west update --group-filter +extras-cloud`.  The TLS transport
-	  (transport_interface.h) is application-supplied; no shim ships.
+	  `west update --group-filter +extras-cloud`.  coreMQTT has no network
+	  transport of its own: enable ALP_CLOUD_TRANSPORT for the in-tree
+	  TransportInterface_t ("alp_cloud_transport_coremqtt.h"), or supply
+	  your own.
 
 config ALP_AWS_IOT_DEFAULT_CONFIG
 	bool "Use coreMQTT's default configuration"
@@ -479,4 +481,27 @@ config ALP_AZURE_IOT
 	  Compiles az_core (span/json/base64/context/log) and the az_iot hub
 	  client from the west-pinned azure-sdk-for-c checkout
 	  (vendors/azure-iot/).  Needs `west update --group-filter
-	  +extras-cloud`.  The MQTT/TLS transport is application-supplied.
+	  +extras-cloud`.  The hub client builds topics and credentials only:
+	  ALP_CLOUD_TRANSPORT provides the TLS socket, and the application
+	  still brings the MQTT client that runs over it.
+
+config ALP_CLOUD_TRANSPORT
+	bool "TLS-over-TCP client transport for cloud MQTT stacks (<alp/cloud_transport.h>)"
+	depends on ALP_SDK
+	depends on NET_SOCKETS && NET_TCP && NET_IPV4
+	# The send/receive timeouts are socket options that plain-TCP sockets
+	# only honour with these two; without them a connect with a timeout
+	# set would fail at setsockopt.
+	select NET_CONTEXT_RCVTIMEO
+	select NET_CONTEXT_SNDTIMEO
+	help
+	  Builds src/cloud_transport.c: a TLS client socket (connect / send /
+	  recv / close) with mandatory peer verification.  When ALP_AWS_IOT is
+	  also set, vendors/aws-iot/ adds a coreMQTT TransportInterface_t over
+	  it.
+
+	  TLS needs NET_SOCKETS_SOCKOPT_TLS and an mbedtls configuration with a
+	  ciphersuite the broker accepts; without it only the explicit
+	  plaintext mode works and a TLS connect returns ALP_ERR_NOSUPPORT.
+	  ALPN (AWS IoT Core on port 443) also needs MBEDTLS_SSL_ALPN.
+	  Credentials come from Zephyr's tls_credential_add() security tags.

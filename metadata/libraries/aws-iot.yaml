@@ -37,10 +37,10 @@
 # License:  MIT -- verified from the LICENSE blob at tag 202412.00 ("MIT License",
 #   Copyright Amazon.com, Inc.); not an in-tree file (SDK is not in this checkout).
 #
-# TLS note (bench-gated follow-up): the MQTT transport needs a TLS stack; the
-# workspace already pins mbedtls (west module `mbedtls`), the natural provider,
-# but wiring the transport-interface shim onto it is app + packaging work, not
-# built here.
+# TLS note: coreMQTT has no network transport.  `CONFIG_ALP_CLOUD_TRANSPORT=y`
+# builds <alp/cloud_transport.h> and, in vendors/aws-iot/, a
+# `TransportInterface_t` over it (Zephyr TLS sockets and mbedtls, #2581).  A connection to a live AWS IoT Core endpoint is
+# still bench-gated.
 schema_version: 1
 name: aws-iot
 description: "AWS IoT Device SDK for Embedded C -- MQTT / device-shadow / jobs client (202412.00 LTS umbrella)."

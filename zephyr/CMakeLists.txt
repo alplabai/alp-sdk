@@ -1143,6 +1143,12 @@ zephyr_compile_definitions_ifdef(CONFIG_CMSIS_DSP ALP_HAS_CMSIS_DSP=1)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_AHRS
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/ahrs.c)
 
+# TLS-over-TCP client transport for cloud MQTT stacks
+# (<alp/cloud_transport.h>), on Zephyr sockets + mbedtls.  The coreMQTT
+# adapter over it is built by vendors/aws-iot/.
+zephyr_library_sources_ifdef(CONFIG_ALP_CLOUD_TRANSPORT
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/cloud_transport.c)
+
 # Portable PID control surface (<alp/pid.h>).  Pure C, no vendor deps;
 # opt-in via `libraries: [pid]` (emits CONFIG_ALP_SDK_PID).
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PID

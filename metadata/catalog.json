@@ -3706,6 +3706,15 @@
       "header": "include/alp/cap_instance.h"
     },
     {
+      "functions": [
+        "alp_cloud_transport_close",
+        "alp_cloud_transport_connect",
+        "alp_cloud_transport_recv",
+        "alp_cloud_transport_send"
+      ],
+      "header": "include/alp/cloud_transport.h"
+    },
+    {
       "functions": [],
       "header": "include/alp/console.h"
     },
