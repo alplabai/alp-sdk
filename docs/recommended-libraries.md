@@ -319,6 +319,12 @@ When a new library candidate shows up:
    `metadata/schemas/library-v1.schema.json` enforces.  Anything
    outside it (ISC, any GPL/LGPL, proprietary) needs a maintainer
    legal review that extends the allowlist first.
+   LGPL is the one case with a narrower path: it is acceptable as a
+   dynamically linked binary package in a Yocto image, built by its
+   own recipe.  It is not acceptable where its source is compiled or
+   statically linked into firmware, or its headers are vendored.  A
+   `libraries:` manifest cannot express that path today, because the
+   schema rejects LGPL ids.
 3. **Maintenance test** — commit activity in the last 12 months,
    no single-bus-factor maintainers.
 4. **Footprint test** — sub-50 KB ROM / sub-4 KB RAM at typical
