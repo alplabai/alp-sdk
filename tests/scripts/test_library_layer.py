@@ -88,6 +88,18 @@ def test_schema_rejects_bad_license() -> None:
     assert list(_validator().iter_errors(doc)), "GPL licence must be rejected"
 
 
+def test_license_enum_matches_readme_allowlist() -> None:
+    """metadata/libraries/README.md tells a maintainer to extend the schema
+    enum and its own allowlist block in the same change; this is what makes
+    that true rather than a convention."""
+    readme = (LIBRARIES_DIR / "README.md").read_text(encoding="utf-8")
+    section = readme.split("## Licence allowlist", 1)[1]
+    block = section.split("```", 2)[1]
+    readme_ids = [i.strip() for i in block.replace("\n", " ").split(",")]
+    schema = json.loads(LIBRARY_SCHEMA.read_text(encoding="utf-8"))
+    assert readme_ids == schema["properties"]["license"]["enum"]
+
+
 def test_schema_requires_an_integration_section() -> None:
     doc = _valid_manifest()
     doc["integration"] = {}
