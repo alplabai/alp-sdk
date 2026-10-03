@@ -29,17 +29,21 @@ other units), not just the M33.  Use the bench flashing flow in the
 1. Build `tests/zephyr/wdt_rzv_cm33` for `alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33` (then the
    `v2m101` board).  Flash the CM33 image per the V2N bench skill.  Keep the A55 console open: the
    CM33 has no console of its own.
-2. Boot with the node enabled but the app **feeding every 50 ms** (the shipped test `main.c`).  Let
+2. Boot with the node enabled and the shipped test `main.c` (`timeout_ms = 1000`, feeding every
+   500 ms: EXTENDED mode).  For the direct-mode steps (3 in direct form, 4, 5) rebuild with
+   `.timeout_ms = 175` instead (direct mode, 174.8 ms period).  Let
    Linux run past the late-boot unused-clock sweep (>= 60 s).  Expected: the SoM stays up.  If the
    CM33 dies with a bus fault around that time, the WDT0 module clocks / bus-stop were gated by
    Linux: the CM33-owned clock hold below is required before this step can pass.
-3. Read back the armed configuration from the M33 (SWD / RAM console): `WDT0_WDTCR` should be
-   `TOPS=3 (16384 counts)`, `CKS=0x5 (/256)`, window `RPES=3 / RPSS=3`; `WDT0_WDTRCR.RSTIRQS=0`;
+3. Read back the armed configuration from the M33 (SWD / RAM console).  Extended mode
+   (`timeout_ms = 1000`): `WDT0_WDTCR` `TOPS=3 (16384 counts)`, `CKS=0xF (/128)`, i.e. 87.4 ms.
+   Direct mode (rebuild with `.timeout_ms = 175`): `TOPS=3`, `CKS=0x5 (/256)`, i.e. 174.8 ms.  Both:
+   window `RPES=3 / RPSS=3`; `WDT0_WDTRCR.RSTIRQS=0`;
    `CPG_ERRORRST_SEL2` bit 0 set.  (If the underflow does not reach the CPG, check whether the WDT0 error
    interrupt also has to be enabled in the ICU, as the manual's WDT1 example does for its source.)  A hung write here means the CM33 cannot reach that register.
 4. Starve it: build the app without the `alp_wdt_feed()` call.  Expected: the **whole SoM** resets
    (A55 console shows the reset / U-Boot banner), not just the M33.  Note which of the two happened.
-5. Measure the period: with `timeout_ms = 175` (the shipped test) the driver picks the longest period
+5. Measure the period: rebuild with `.timeout_ms = 175`; the driver picks the longest period
    not above it, `16384 x 256 / 24 MHz = 174.8 ms`, which is also the LONGEST period WDT0 can encode at
    24 MHz (a larger request, 176 ms and up, runs the software keeper, steps 7-9; the direct path is what 175 ms exercises).  Time last-feed to reset (scope on a
    CM33-driven GPIO released at the last feed, against the reset edge).  The real clock is `16384 x 256 / measured_seconds`.  If it
@@ -56,7 +60,10 @@ other units), not just the M33.  Use the bench flashing flow in the
    last-feed to reset as in step 5 and record it.
 9. Extended mode, lockup: with `timeout_ms = 1000` and the app still feeding, lock interrupts in a
    busy loop (`irq_lock()` then spin).  Expected: the keeper cannot run, so the SoM resets within
-   87.4 ms of the lock, not after 1000 ms.  Record the measured time.
+   87.4 ms of the lock, not after 1000 ms.  Record the measured time.  This is the documented
+   limit of the software-extended mode: a fed app still resets whenever interrupts are masked, or
+   the system timer ISR is starved, for longer than 87.4 ms minus one 20 ms keeper tick (~67 ms),
+   whatever `timeout_ms` is.  Bracket it (e.g. lock for 50 ms: expect no reset; 100 ms: reset).
 10. Only after steps 2-5 and 7-9 pass: flip the `test-plan.md` row for this feature from `⏳` and regenerate
    `docs/verification-status.md`.
 

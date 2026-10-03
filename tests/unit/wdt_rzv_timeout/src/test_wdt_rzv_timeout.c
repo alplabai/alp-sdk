@@ -37,6 +37,12 @@ ZTEST(wdt_rzv_timeout, test_direct_vs_extended_mode)
 	zassert_true(wdt_rzv_is_direct(CLK_24MHZ, 175U)); /* 175 ms stays direct */
 	zassert_false(wdt_rzv_is_direct(CLK_24MHZ, 176U));
 	zassert_false(wdt_rzv_is_direct(CLK_24MHZ, 1000U)); /* ALP_WDT_CONFIG_DEFAULT -> extended */
+	/* the picked period falls short of the request by more than one keeper period -> extended */
+	zassert_false(wdt_rzv_is_direct(CLK_24MHZ, 120U)); /* picks 87.4 ms, short by 32.6 ms */
+	zassert_false(wdt_rzv_is_direct(CLK_24MHZ, 174U)); /* picks 87.4 ms, short by 86.6 ms */
+	zassert_true(wdt_rzv_is_direct(CLK_24MHZ, 107U));  /* picks 87.4 ms, short by 19.6 ms */
+	zassert_true(
+	    wdt_rzv_is_direct(CLK_24MHZ, 0U)); /* no period fits: left to the pick -> -EINVAL */
 	zassert_equal(wdt_rzv_ceiling_ms(0), 0U);
 }
 
@@ -49,8 +55,8 @@ ZTEST(wdt_rzv_timeout, test_extended_hardware_period)
 	zassert_true(wdt_rzv_pick(CLK_24MHZ, WDT_RZV_EXT_HW_MAX_MS, &tops, &cks));
 	zassert_equal(tops, 3);
 	zassert_equal(cks, 0xF);
-	/* the keeper ticks at least 4x per hardware period */
-	zassert_true(WDT_RZV_EXT_KEEPER_MS * 4U <= 87U);
+	/* the keeper ticks at least 4x per hardware period (the driver rejects a smaller one) */
+	zassert_true(WDT_RZV_EXT_KEEPER_MS * 4ULL * 1000ULL <= wdt_rzv_period_us(CLK_24MHZ, tops, cks));
 }
 
 ZTEST(wdt_rzv_timeout, test_keeper_refreshes_until_deadline)
@@ -60,8 +66,6 @@ ZTEST(wdt_rzv_timeout, test_keeper_refreshes_until_deadline)
 	zassert_true(wdt_rzv_keeper_refresh(5999, 5000, 1000));
 	zassert_false(wdt_rzv_keeper_refresh(6000, 5000, 1000));
 	zassert_false(wdt_rzv_keeper_refresh(60000, 5000, 1000));
-	/* a feed stamped after now was sampled counts as just fed */
-	zassert_true(wdt_rzv_keeper_refresh(4999, 5000, 1000));
 }
 
 ZTEST(wdt_rzv_timeout, test_keeper_wrap_safe)

@@ -39,7 +39,11 @@
  *     stops and the hardware resets the SoM: reset lands in [timeout, timeout + 87.4 ms] after the
  *     last feed.  A kernel/IRQ lockup stops the keeper too, so it still resets within 87.4 ms.  In
  *     extended mode wdt_feed only stamps the deadline (the keeper is the sole hardware refresher,
- *     the refresh being a two-write sequence).  The clock
+ *     the refresh being a two-write sequence).  Caveat: the keeper
+ *     is a system-timer ISR, so a fed app still resets when interrupts stay masked or the timer ISR
+ *     is starved for longer than the hardware period minus one keeper tick (87.4 - 20 = ~67 ms),
+ *     whatever timeout_ms is.  A request whose picked period falls short of it by more than one
+ *     keeper period (20 ms, e.g. 120 or 174 ms) also runs extended.  The clock
  *     is the node's `clock-freq`, generated from the SoC spec's m33_sm `watchdog.counting_clock_hz`:
  *     24 MHz = WDT_0_clk_loco from the Main OSC (manual Table 4.4-2, "CWDT loco clock").
  *   - WDT_OPT_PAUSE_IN_SLEEP maps to WDTCSTPR.SLCSTP; WDT_OPT_PAUSE_HALTED_BY_DBG is -ENOTSUP.
@@ -77,6 +81,8 @@ struct wdt_rzv_data {
 	atomic_t            state;
 	/* Extended mode (request above the hardware ceiling): the keeper owns the hardware refresh. */
 	bool              extended;
+	uint8_t           tops; /* picked TOPS[1:0] / CKS[3:0] encodings, for the readback */
+	uint8_t           cks;
 	uint32_t          app_timeout_ms;
 	uint64_t          last_feed_ms; /* guarded by lock */
 	struct k_spinlock lock;
@@ -127,8 +133,15 @@ static int wdt_rzv_install_timeout(const struct device *dev, const struct wdt_ti
 		LOG_ERR("timeout %u ms is shorter than the shortest WDT0 period", config->window.max);
 		return -EINVAL;
 	}
+	if (!direct &&
+	    wdt_rzv_period_us(cfg->clock_freq, tops, cks) < 4ULL * WDT_RZV_EXT_KEEPER_MS * 1000ULL) {
+		LOG_ERR("extended-mode hardware period is under 4 keeper ticks; check clock-freq");
+		return -EINVAL;
+	}
 
 	data->extended           = !direct;
+	data->tops               = tops;
+	data->cks                = cks;
 	data->app_timeout_ms     = config->window.max;
 	data->cfg.timeout        = wdt_rzv_timeouts[tops];
 	data->cfg.clock_division = (wdt_clock_division_t)cks;
@@ -143,7 +156,8 @@ static int wdt_rzv_install_timeout(const struct device *dev, const struct wdt_ti
 
 /* System-timer ISR context.  Refreshes only while the app deadline has not passed; once it has, it
  * stops and the hardware expires within one hardware period.  The sole refresher in extended mode
- * (a refresh is a two-write sequence, so the app's feed must never interleave with it).
+ * (a refresh is a two-write sequence, so the app's feed must never interleave with it; with a
+ * single refresher "deadline passed" also means "no refresh since", which the expiry bound relies on).
  */
 static void wdt_rzv_keeper(struct k_timer *timer)
 {
@@ -170,6 +184,17 @@ static int wdt_rzv_arm(struct wdt_rzv_data *data, uint8_t options)
 	                                                                 : WDT_STOP_CONTROL_DISABLE;
 
 	if (g_wdt_on_wdt.open(&data->ctrl, &data->cfg) != FSP_SUCCESS) {
+		return -EIO;
+	}
+
+	/* One write per WDT reset (manual 5.4.3.2): an earlier boot stage may already have configured
+	 * WDT0, in which case our WDTCR/WDTRCR write was ignored.  Read back and refuse a mismatch.
+	 */
+	const uint16_t wdtcr = data->ctrl.p_reg->WDT0_WDTCR;
+
+	if ((wdtcr & 0x3U) != data->tops || ((wdtcr >> 4) & 0xFU) != data->cks ||
+	    data->ctrl.p_reg->WDT0_WDTRCR_b.RSTIRQS != 0) {
+		LOG_ERR("WDT0 readback mismatch (WDTCR 0x%04x): configured earlier since reset", wdtcr);
 		return -EIO;
 	}
 

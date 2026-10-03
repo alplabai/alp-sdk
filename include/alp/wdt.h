@@ -114,7 +114,11 @@ typedef struct {
 	                      *   above the hardware's longest period is either extended in
 	                      *   software by the backend (reset then lands up to one short
 	                      *   hardware period after the deadline) or rejected with
-	                      *   @ref ALP_ERR_INVAL; see the per-SoC doc. */
+	                      *   @ref ALP_ERR_INVAL; see the per-SoC doc.  In the software-
+	                      *   extended case a fed application still resets if interrupts
+	                      *   stay masked or the system timer ISR is starved for longer
+	                      *   than the hardware period minus one keeper tick, whatever
+	                      *   @c timeout_ms is. */
 	alp_wdt_action_t on_timeout; /**< Action when the deadline is missed. */
 	/** Required when @c on_timeout == @ref ALP_WDT_INTERRUPT_ONLY;
 	 *  ignored for the reset actions.  @ref alp_wdt_open fails with

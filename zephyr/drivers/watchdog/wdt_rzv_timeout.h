@@ -38,15 +38,6 @@ static inline uint32_t wdt_rzv_ceiling_ms(uint32_t clock_freq)
 	return clock_freq == 0 ? 0 : (uint32_t)((counts * 1000ULL + clock_freq - 1) / clock_freq);
 }
 
-/* Direct mode: the request fits one hardware period (the picked period is the longest <= the request).
- * Above it the driver runs EXTENDED mode: a short fixed hardware period kept alive by a software
- * keeper only while the application's own deadline has not passed.
- */
-static inline bool wdt_rzv_is_direct(uint32_t clock_freq, uint32_t ms)
-{
-	return ms <= wdt_rzv_ceiling_ms(clock_freq);
-}
-
 /* Extended mode: hardware period = longest encodable period <= this (87.4 ms at 24 MHz, half the
  * 174.8 ms ceiling: the keeper then has a whole period of margin against a late tick), and the
  * keeper ticks every WDT_RZV_EXT_KEEPER_MS (>= 4 refreshes per hardware period).
@@ -56,12 +47,26 @@ static inline bool wdt_rzv_is_direct(uint32_t clock_freq, uint32_t ms)
 
 /* Keeper decision, evaluated at each tick with a monotonic 64-bit uptime in ms: refresh the hardware
  * only while the app deadline (last_feed + timeout) is still in the future.  Unsigned subtraction is
- * wrap-safe; now < last_feed (a feed that landed after now was sampled) counts as "just fed".
+ * wrap-safe.  The driver samples now and last_feed under one lock and the feed stamps under the same
+ * lock, so now >= last_feed always holds.
  */
 static inline bool
 wdt_rzv_keeper_refresh(uint64_t now_ms, uint64_t last_feed_ms, uint32_t timeout_ms)
 {
-	return now_ms < last_feed_ms || now_ms - last_feed_ms < timeout_ms;
+	return now_ms - last_feed_ms < timeout_ms;
+}
+
+/* Period in us of a picked TOPS/CKS encoding. */
+static inline uint64_t wdt_rzv_period_us(uint32_t clock_freq, uint8_t tops, uint8_t cks)
+{
+	for (size_t d = 0; d < sizeof(wdt_rzv_cks_table) / sizeof(wdt_rzv_cks_table[0]); d++) {
+		if (wdt_rzv_cks_table[d].cks == cks) {
+			return (uint64_t)wdt_rzv_cks_table[d].divider * wdt_rzv_tops_counts[tops] * 1000000ULL /
+			       clock_freq;
+		}
+	}
+
+	return 0;
 }
 
 /* Longest period not exceeding max_ms; false when even the shortest is longer. */
@@ -87,6 +92,28 @@ static inline bool wdt_rzv_pick(uint32_t clock_freq, uint32_t max_ms, uint8_t *t
 	}
 
 	return best_us != 0;
+}
+
+/* Direct mode: the request fits one hardware period and the picked period (the longest <= the
+ * request) falls short of it by at most one keeper period.  Anything else runs EXTENDED mode: a
+ * short fixed hardware period kept alive by a software keeper only while the application's own
+ * deadline has not passed (so 174 ms is not served by an 87.4 ms period).  A request shorter than
+ * the shortest period stays "direct" so the caller's pick fails with -EINVAL.
+ */
+static inline bool wdt_rzv_is_direct(uint32_t clock_freq, uint32_t ms)
+{
+	uint8_t tops;
+	uint8_t cks;
+
+	if (ms > wdt_rzv_ceiling_ms(clock_freq)) {
+		return false;
+	}
+	if (!wdt_rzv_pick(clock_freq, ms, &tops, &cks)) {
+		return true;
+	}
+
+	return (uint64_t)ms * 1000ULL - wdt_rzv_period_us(clock_freq, tops, cks) <=
+	       (uint64_t)WDT_RZV_EXT_KEEPER_MS * 1000ULL;
 }
 
 #endif /* WDT_RZV_TIMEOUT_H_ */
