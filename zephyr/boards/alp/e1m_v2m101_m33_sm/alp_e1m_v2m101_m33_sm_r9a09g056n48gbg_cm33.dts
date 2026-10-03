@@ -147,9 +147,10 @@
  * devicetree (arm/renesas/rz/rzv/r9a09g056.dtsi, checked against the
  * pinned v4.4.0 tag) declares no watchdog node and no driver binds
  * this SoC's WDT hardware at all yet -- there is no label to
- * reference and no register base address in this tree to
- * hand-author one from (unlike mbox1 below, which had a real FSP
- * register map, bsp_mhu_b.h, to draw from).  Full analysis:
+ * reference.  The register base does exist: hal_renesas
+ * rzv/.../R9A09G056N/iodefines/wdt_iodefine.h defines
+ * R_WDT0_BASE 0x41C00400, so a node can be hand-authored from it
+ * once a driver exists to bind it.  Full analysis:
  * meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi's
  * &wdt1 comment block.  <alp/wdt.h> on this core returns
  * ALP_ERR_NOT_PRESENT_ON_THIS_SOC (src/wdt_dispatch.c).

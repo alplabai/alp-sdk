@@ -2353,17 +2353,6 @@ def _v2n_part_display(order_code: str) -> tuple[str, str]:
     return f"{base}-{variant_code}", f"arm/renesas/rz/rzv/{base.lower()}.dtsi"
 
 
-_V2N_WDT0_MID_OPENAMP: tuple[str, ...] = (
-    ' * hand-author one from (unlike mbox1 below, which had a real FSP',
-    ' * register map, bsp_mhu_b.h, to draw from).  Full analysis:',
-)
-
-_V2N_WDT0_MID_PLAIN: tuple[str, ...] = (
-    " * hand-author one from (contrast the V2N101 sibling board's mbox1",
-    ' * node, which had a real FSP register map, bsp_mhu_b.h, to draw',
-    ' * from).  Full analysis:',
-)
-
 _V2N_WDT0_TAIL: tuple[str, ...] = (
     " * meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi's",
     ' * &wdt1 comment block.  <alp/wdt.h> on this core returns',
@@ -2807,9 +2796,11 @@ def _v2n_dts(
         " * devicetree (arm/renesas/rz/rzv/r9a09g056.dtsi, checked against the",
         " * pinned v4.4.0 tag) declares no watchdog node and no driver binds",
         " * this SoC's WDT hardware at all yet -- there is no label to",
-        " * reference and no register base address in this tree to",
+        " * reference.  The register base does exist: hal_renesas",
+        " * rzv/.../R9A09G056N/iodefines/wdt_iodefine.h defines",
+        " * R_WDT0_BASE 0x41C00400, so a node can be hand-authored from it",
+        " * once a driver exists to bind it.  Full analysis:",
     ]
-    lines += list(_V2N_WDT0_MID_OPENAMP if has_openamp else _V2N_WDT0_MID_PLAIN)
     lines += list(_V2N_WDT0_TAIL)
     if has_openamp:
         lines += list(_V2N_OPENAMP_TAIL)

@@ -6,3 +6,4 @@
 ### Fixed
 
 - `spi_renesas_rz_sci_b.c`: the PM9 comments now use the real encoding (`0b01` is INPUT, `0b11` is OUTPUT with input enabled, there is no push-pull mode), the stale P94/SD1_CD clobber reference is gone (card detect is `PA1`), and `PWPR.REGWE` is left set instead of restoring a possibly stale value that could re-lock a concurrent Linux pinctrl write. `zephyr/CMakeLists.txt` notes that hal_renesas compiles `r_dmac_b` under `CONFIG_USE_RZ_FSP_DMAC_B`; the DMA path stays gated (audit CM33-03, CM33-04, CM33-10).
+- The generated V2N101/V2M101 CM33 board `.dts` no longer claims no WDT0 register base exists in-tree: hal_renesas defines `R_WDT0_BASE 0x41C00400` (`wdt_iodefine.h`). There is still no `wdt0` node because no driver binds the SoC's WDT yet.
