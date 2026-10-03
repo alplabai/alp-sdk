@@ -86,7 +86,7 @@ usb_root_hubs_min: 4                         # measured (xHCI x2, OHCI, EHCI)
 cm33_beacon:                                 # the firmware's own layout (README); not yet seen on a bench
   address: 0x4F700FF0
   magic: 0xA10D0683
-  version: 1
+  version: 0x100                             # image kind: < 0x100 = RPC firmware beacon version, 0x100 = idle shim (no RPC)
   heartbeat_advance: [1, 4]
 openamp_uio_names: [rsctbl, mhu-shm, vring-ctl0, vring-ctl1, vring-shm0, vring-shm1, mhu-uio]
 systemd_failed_allow:

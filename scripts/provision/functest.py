@@ -866,9 +866,9 @@ def build(ctx, x: dict | None = None) -> list[Check]:
         except (AttributeError, ValueError, TypeError):
             raise Unread(f"beacon not readable: {o.strip()[-80:]!r}") from None
         b = _want(x, "cm33_beacon")
-        got = f"magic {magic:#010x}, version {ver}, counter {c0} then {c1}"
+        got = f"magic {magic:#010x}, version {ver:#x}, counter {c0} then {c1}"
         if magic != b["magic"] or ver != b["version"]:
-            raise Fail(f"{got}: want magic {b['magic']:#010x}, version {b['version']}")
+            raise Fail(f"{got}: want magic {b['magic']:#010x}, version {b['version']:#x}")
         lo, hi = b["heartbeat_advance"]
         if not lo <= (c1 - c0) & 0xFFFFFFFF <= hi:
             raise Fail(f"{got}: the counter must advance by {lo}..{hi} in 2 s")

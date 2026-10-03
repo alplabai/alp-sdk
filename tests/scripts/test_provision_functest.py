@@ -106,7 +106,7 @@ def _good(ctx) -> dict[str, str]:
         "pmic_registers": "R act88760 0x25 0x40 0x80\nR act88760 0x25 0x10 0x08",
         "thermal": "Z thermal_zone0 46000\nZ thermal_zone1 47500",
         "cm33_firmware": "0123456789abcdef0123456789abcdef  -",
-        "cm33_running": "B 0xA10D0683 0x1 0x2a\nC 0x2c",
+        "cm33_running": "B 0xA10D0683 0x100 0x2a\nC 0x2c",
         "openamp_uio": "rsctbl\nmhu-shm\nvring-ctl0\nvring-ctl1\nvring-shm0\nvring-shm1\nmhu-uio",
         "usb_host": "4",
         "usb_device": "dev=sda\n4+0 records out",
@@ -183,7 +183,7 @@ BAD = {
     "pmic_registers": "R act88760 0x25 0x40 0x00\nR act88760 0x25 0x10 0x08",
     "thermal": "Z thermal_zone0 46000\nZ thermal_zone1 -274000",
     "cm33_firmware": "ecb99e6ffea7be1e5419350f725da86b  -",          # md5 of 64 KiB of 0xff
-    "cm33_running": "B 0xA10D0683 0x1 0x2a\nC 0x2a",                        # counter stuck
+    "cm33_running": "B 0xA10D0683 0x100 0x2a\nC 0x2a",                        # counter stuck
     "openamp_uio": "rsctbl\nmhu-shm",
     "usb_host": "2",
     "usb_device": "",
@@ -947,9 +947,9 @@ MORE_BAD = [
     ("thermal", "", "unread (no thermal zone reports"),
     ("thermal", "Z thermal_zone0 106000", "fail (thermal_zone0=106 degC outside 10..105 degC"),
     ("cm33_firmware", "d41d8cd98f00b204e9800998ecf8427e  -", "unread (mtd1 not readable"),
-    ("cm33_running", "B 0xA10D0683 0x1 0x2a\nC 0x2a", "fail (magic 0xa10d0683, version 1, counter 42 then 42: the counter must advance by 1..4 in 2 s"),
-    ("cm33_running", "B 0x0 0x0 0x0\nC 0x0", "fail (magic 0x00000000, version 0, counter 0 then 0: want magic 0xa10d0683, version 1"),
-    ("cm33_running", "B 0xA10D0683 0x2 0x5\nC 0x6", "fail (magic 0xa10d0683, version 2, counter 5 then 6: want magic"),
+    ("cm33_running", "B 0xA10D0683 0x100 0x2a\nC 0x2a", "fail (magic 0xa10d0683, version 0x100, counter 42 then 42: the counter must advance by 1..4 in 2 s"),
+    ("cm33_running", "B 0x0 0x0 0x0\nC 0x0", "fail (magic 0x00000000, version 0x0, counter 0 then 0: want magic 0xa10d0683, version 0x100"),
+    ("cm33_running", "B 0xA10D0683 0x2 0x5\nC 0x6", "fail (magic 0xa10d0683, version 0x2, counter 5 then 6: want magic"),
     ("cm33_running", "ALPUNREAD missing tool: devmem or python3", "unread (missing tool: devmem or python3)"),
     ("cm33_running", "B devmem: mmap: Operation not permitted", "unread (beacon not readable"),
     ("usb_device", "dev=sda\n0+0 records out", "fail (sda: read failed"),
