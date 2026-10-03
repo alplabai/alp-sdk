@@ -37,11 +37,9 @@
 
 static int g_fail_next_invoke;
 
-alp_status_t
-alp_inference_deepx_open(struct alp_inference *h, const alp_inference_config_t *cfg, unsigned bound)
+alp_status_t alp_inference_deepx_open(struct alp_inference *h, const alp_inference_config_t *cfg)
 {
 	(void)cfg;
-	(void)bound;
 	static int st;
 	h->be_state = &st;
 	return ALP_OK;
@@ -96,10 +94,10 @@ void alp_inference_deepx_close(struct alp_inference *h)
 
 /* <alp/ext/deepx/inference.h> hooks -- unused here, present so the
  * dispatcher links (see src/yocto/inference_yocto.c). */
-alp_status_t alp_inference_deepx_bind_cores(struct alp_inference *h, unsigned bound)
+alp_status_t alp_inference_deepx_bind_cores(struct alp_inference *h, uint32_t mask)
 {
 	(void)h;
-	(void)bound;
+	(void)mask;
 	return ALP_ERR_NOSUPPORT;
 }
 

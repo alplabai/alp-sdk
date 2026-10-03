@@ -416,20 +416,8 @@ ZTEST(alp_inference_registry, test_renesas_ext_zero_reserve_returns_oor)
 ZTEST(alp_inference_registry, test_deepx_ext_null_handle_returns_inval)
 {
 	alp_deepx_device_status_t status;
-	zassert_equal(alp_deepx_inference_bind_cores(NULL, ALP_DEEPX_NPU_CORE_0), ALP_ERR_INVAL);
+	zassert_equal(alp_deepx_inference_bind_cores(NULL, 0x1u), ALP_ERR_INVAL);
 	zassert_equal(alp_deepx_inference_get_status(NULL, &status), ALP_ERR_INVAL);
-}
-
-ZTEST(alp_inference_registry, test_deepx_ext_open_bad_args_and_no_libdxrt_on_zephyr)
-{
-	alp_inference_config_t cfg = { 0 };
-	zassert_is_null(alp_deepx_inference_open(NULL, ALP_DEEPX_NPU_CORE_0));
-	zassert_equal(alp_last_error(), ALP_ERR_INVAL);
-	zassert_is_null(alp_deepx_inference_open(&cfg, (alp_deepx_npu_cores_t)7u));
-	zassert_equal(alp_last_error(), ALP_ERR_INVAL);
-	/* No libdxrt on an M-class core. */
-	zassert_is_null(alp_deepx_inference_open(&cfg, ALP_DEEPX_NPU_CORES_01));
-	zassert_equal(alp_last_error(), ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
 }
 
 ZTEST(alp_inference_registry, test_deepx_ext_non_deepx_returns_not_present)
@@ -449,8 +437,7 @@ ZTEST(alp_inference_registry, test_deepx_ext_non_deepx_returns_not_present)
 		.in_use      = true,
 	};
 	alp_deepx_device_status_t status;
-	zassert_equal(alp_deepx_inference_bind_cores(&fake, ALP_DEEPX_NPU_CORE_0),
-	              ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
+	zassert_equal(alp_deepx_inference_bind_cores(&fake, 0x1u), ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
 	zassert_equal(alp_deepx_inference_get_status(&fake, &status), ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
 }
 
@@ -470,12 +457,11 @@ ZTEST(alp_inference_registry, test_deepx_ext_bad_args_and_no_libdxrt_on_zephyr)
 		.cached_caps = { 0 },
 		.in_use      = true,
 	};
-	/* Core set past the last libdxrt BOUND_OPTION value. */
-	zassert_equal(alp_deepx_inference_bind_cores(&fake, (alp_deepx_npu_cores_t)7u), ALP_ERR_INVAL);
+	/* A mask bit past NPU core 2 is unsupported. */
+	zassert_equal(alp_deepx_inference_bind_cores(&fake, 0x8u), ALP_ERR_NOSUPPORT);
 	zassert_equal(alp_deepx_inference_get_status(&fake, NULL), ALP_ERR_INVAL);
 	/* A DEEPX-vendor handle on an M-class core has no libdxrt behind it. */
 	alp_deepx_device_status_t status;
-	zassert_equal(alp_deepx_inference_bind_cores(&fake, ALP_DEEPX_NPU_CORES_ALL),
-	              ALP_ERR_NOSUPPORT);
+	zassert_equal(alp_deepx_inference_bind_cores(&fake, 0x7u), ALP_ERR_NOSUPPORT);
 	zassert_equal(alp_deepx_inference_get_status(&fake, &status), ALP_ERR_NOSUPPORT);
 }

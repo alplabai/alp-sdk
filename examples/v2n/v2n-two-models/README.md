@@ -7,6 +7,8 @@ Run two models at the same time on an E1M-V2M, one on the RZ/V2N's on-die **DRP-
 ## What this shows
 
 1. **Backend per handle.** `alp_inference_config_t.backend` picks the accelerator for that handle: `ALP_INFERENCE_BACKEND_DRPAI` for one, `ALP_INFERENCE_BACKEND_DEEPX_DXM1` for the other. Do not use `ALP_INFERENCE_BACKEND_AUTO`: it is fixed at build time and resolves to the DX-M1 on a build with both, so the DRP-AI handle must be named explicitly.
+
+   `alp_inference_config_t.accel_unit_mask` then picks the unit(s) *within* that backend (bit n = unit n, 0 = backend default). The DX-M1 handle sets `0x7` (all three NPU cores); give several DX-M1 models disjoint masks (for example `0x3` and `0x4`) to run them side by side. DRP-AI3 is one unit, so it takes only `0` or `0x1`; a mask a backend cannot honour fails the open with `ALP_ERR_NOSUPPORT`.
 2. **One thread per NPU.** Each NPU runs one job at a time; the two NPUs are independent hardware, so a thread on each overlaps their work. Two threads on the same NPU would only take turns (the SDK serialises DRP-AI jobs with a process-wide lock, and the DX-M1 time-shares between engines).
 3. **Only the NPUs the mode needs are opened.** `solo-drpai` never opens the DX-M1 and `solo-dx` never opens DRP-AI, so the two-process setup (one process per NPU) is safe: DRP-AI is one process per board (the SDK holds a lock file; a second process opening DRP-AI gets `ALP_ERR_BUSY`).
 4. **Solo, then both.** The default `all` mode runs DRP-AI alone, DX-M1 alone, then both, so the printed numbers show what sharing the A55 cores and DDR costs each NPU.

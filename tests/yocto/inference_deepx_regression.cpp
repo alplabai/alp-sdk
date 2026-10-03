@@ -48,10 +48,8 @@ extern "C" {
  * inference_deepx.cpp directly rather than through the dispatcher, so it
  * declares the same hook prototypes itself. */
 extern "C" {
-alp_status_t alp_inference_deepx_open(struct alp_inference         *h,
-                                      const alp_inference_config_t *cfg,
-                                      unsigned                      bound);
-alp_status_t alp_inference_deepx_bind_cores(struct alp_inference *h, unsigned bound);
+alp_status_t alp_inference_deepx_open(struct alp_inference *h, const alp_inference_config_t *cfg);
+alp_status_t alp_inference_deepx_bind_cores(struct alp_inference *h, uint32_t mask);
 alp_status_t
 alp_inference_deepx_get_output(struct alp_inference *h, size_t index, alp_inference_tensor_t *out);
 alp_status_t alp_inference_deepx_invoke(struct alp_inference *h);
@@ -93,6 +91,14 @@ alp_inference_config_t base_cfg()
 	return cfg;
 }
 
+/* Open with alp_inference_config_t::accel_unit_mask = @p mask. */
+alp_status_t open_mask(struct alp_inference *h, const alp_inference_config_t &base, uint32_t mask)
+{
+	alp_inference_config_t cfg = base;
+	cfg.accel_unit_mask        = mask;
+	return alp_inference_deepx_open(h, &cfg);
+}
+
 /* Test 1: open()-time refusal of a rank-5 DECLARED input (issue #1729). */
 void test_open_refuses_declared_rank_over_4()
 {
@@ -102,7 +108,7 @@ void test_open_refuses_declared_rank_over_4()
 
 	struct alp_inference   h   = {};
 	alp_inference_config_t cfg = base_cfg();
-	alp_status_t           rc  = alp_inference_deepx_open(&h, &cfg, 0u);
+	alp_status_t           rc  = alp_inference_deepx_open(&h, &cfg);
 
 	ALP_ASSERT_EQ_INT(rc, ALP_ERR_NOSUPPORT);
 	ALP_ASSERT_NULL(h.be_state);
@@ -118,7 +124,7 @@ void test_open_accepts_declared_rank_at_4()
 
 	struct alp_inference   h   = {};
 	alp_inference_config_t cfg = base_cfg();
-	alp_status_t           rc  = alp_inference_deepx_open(&h, &cfg, 0u);
+	alp_status_t           rc  = alp_inference_deepx_open(&h, &cfg);
 
 	ALP_ASSERT_EQ_INT(rc, ALP_OK);
 	ALP_ASSERT_TRUE(h.be_state != nullptr);
@@ -137,7 +143,7 @@ void test_get_output_refuses_live_rank_over_4()
 
 	struct alp_inference   h   = {};
 	alp_inference_config_t cfg = base_cfg();
-	ALP_ASSERT_EQ_INT(alp_inference_deepx_open(&h, &cfg, 0u), ALP_OK);
+	ALP_ASSERT_EQ_INT(alp_inference_deepx_open(&h, &cfg), ALP_OK);
 
 	static dxrt::Tensor live_out = make_tensor({ 1, 2, 3, 4, 5 }); /* live: rank 5 */
 	dxrt_test::g_run_outputs.push_back(&live_out);
@@ -161,7 +167,7 @@ void test_get_output_accepts_live_rank_at_4()
 
 	struct alp_inference   h   = {};
 	alp_inference_config_t cfg = base_cfg();
-	ALP_ASSERT_EQ_INT(alp_inference_deepx_open(&h, &cfg, 0u), ALP_OK);
+	ALP_ASSERT_EQ_INT(alp_inference_deepx_open(&h, &cfg), ALP_OK);
 
 	static dxrt::Tensor live_out = make_tensor({ 1, 2, 3, 4 }); /* live: rank 4 */
 	dxrt_test::g_run_outputs.push_back(&live_out);
@@ -192,7 +198,7 @@ void test_open_refuses_multi_input_model()
 
 	struct alp_inference   h   = {};
 	alp_inference_config_t cfg = base_cfg();
-	alp_status_t           rc  = alp_inference_deepx_open(&h, &cfg, 0u);
+	alp_status_t           rc  = alp_inference_deepx_open(&h, &cfg);
 
 	ALP_ASSERT_EQ_INT(rc, ALP_ERR_NOSUPPORT);
 	ALP_ASSERT_NULL(h.be_state);
@@ -208,7 +214,7 @@ void test_open_accepts_single_input_model()
 
 	struct alp_inference   h   = {};
 	alp_inference_config_t cfg = base_cfg();
-	alp_status_t           rc  = alp_inference_deepx_open(&h, &cfg, 0u);
+	alp_status_t           rc  = alp_inference_deepx_open(&h, &cfg);
 
 	ALP_ASSERT_EQ_INT(rc, ALP_OK);
 	ALP_ASSERT_TRUE(h.be_state != nullptr);
@@ -225,7 +231,7 @@ void test_open_builds_engine_on_requested_cores_only()
 
 	struct alp_inference   h   = {};
 	alp_inference_config_t cfg = base_cfg();
-	ALP_ASSERT_EQ_INT(alp_inference_deepx_open(&h, &cfg, 3u), ALP_OK); /* NPU_2 */
+	ALP_ASSERT_EQ_INT(open_mask(&h, cfg, 0x4u), ALP_OK); /* core 2 -> NPU_2 */
 	ALP_ASSERT_EQ_INT((int)dxrt_test::g_ctor_bounds.size(), 1);
 	ALP_ASSERT_EQ_INT((int)dxrt_test::g_ctor_bounds[0], 3);
 	alp_inference_deepx_close(&h);
@@ -241,21 +247,21 @@ void test_fourth_distinct_core_set_is_busy()
 
 	struct alp_inference   h[5] = {};
 	alp_inference_config_t cfg  = base_cfg();
-	ALP_ASSERT_EQ_INT(alp_inference_deepx_open(&h[0], &cfg, 1u), ALP_OK);
-	ALP_ASSERT_EQ_INT(alp_inference_deepx_open(&h[1], &cfg, 2u), ALP_OK);
-	ALP_ASSERT_EQ_INT(alp_inference_deepx_open(&h[2], &cfg, 3u), ALP_OK);
+	ALP_ASSERT_EQ_INT(open_mask(&h[0], cfg, 0x1u), ALP_OK);
+	ALP_ASSERT_EQ_INT(open_mask(&h[1], cfg, 0x2u), ALP_OK);
+	ALP_ASSERT_EQ_INT(open_mask(&h[2], cfg, 0x4u), ALP_OK);
 	/* 4th distinct set: refused, no engine built for it. */
 	const size_t built = dxrt_test::g_ctor_bounds.size();
-	ALP_ASSERT_EQ_INT(alp_inference_deepx_open(&h[3], &cfg, 4u), ALP_ERR_BUSY);
+	ALP_ASSERT_EQ_INT(open_mask(&h[3], cfg, 0x3u), ALP_ERR_BUSY);
 	ALP_ASSERT_EQ_INT((int)dxrt_test::g_ctor_bounds.size(), (int)built);
 	/* A set already live is shared, not counted again. */
-	ALP_ASSERT_EQ_INT(alp_inference_deepx_open(&h[3], &cfg, 2u), ALP_OK);
+	ALP_ASSERT_EQ_INT(open_mask(&h[3], cfg, 0x2u), ALP_OK);
 	/* bind_cores to a new set would be a 4th too. */
-	ALP_ASSERT_EQ_INT(alp_inference_deepx_bind_cores(&h[0], 4u), ALP_ERR_BUSY);
+	ALP_ASSERT_EQ_INT(alp_inference_deepx_bind_cores(&h[0], 0x3u), ALP_ERR_BUSY);
 
 	/* Free set 1 (h[0] is its only user): a new set fits again. */
 	alp_inference_deepx_close(&h[0]);
-	ALP_ASSERT_EQ_INT(alp_inference_deepx_open(&h[4], &cfg, 4u), ALP_OK);
+	ALP_ASSERT_EQ_INT(open_mask(&h[4], cfg, 0x3u), ALP_OK);
 
 	alp_inference_deepx_close(&h[1]);
 	alp_inference_deepx_close(&h[2]);
@@ -273,8 +279,7 @@ void test_failed_open_releases_core_slot()
 	struct alp_inference   h   = {};
 	alp_inference_config_t cfg = base_cfg();
 	for (int i = 0; i < 6; ++i) { /* would exhaust 3 slots if each leaked */
-		ALP_ASSERT_EQ_INT(alp_inference_deepx_open(&h, &cfg, 1u + (unsigned)(i % 3)),
-		                  ALP_ERR_NOSUPPORT);
+		ALP_ASSERT_EQ_INT(open_mask(&h, cfg, 1u << (i % 3)), ALP_ERR_NOSUPPORT);
 	}
 	for (int b = 0; b < 8; ++b) {
 		ALP_ASSERT_EQ_INT(dxrt_test::g_live_by_bound[b], 0);
@@ -293,20 +298,81 @@ void test_bind_cores_moves_the_slot()
 
 	struct alp_inference   m   = {};
 	alp_inference_config_t cfg = base_cfg();
-	ALP_ASSERT_EQ_INT(alp_inference_deepx_open(&m, &cfg, 1u), ALP_OK);
-	ALP_ASSERT_EQ_INT(alp_inference_deepx_bind_cores(&m, 4u), ALP_OK);
+	ALP_ASSERT_EQ_INT(open_mask(&m, cfg, 0x1u), ALP_OK);
+	ALP_ASSERT_EQ_INT(alp_inference_deepx_bind_cores(&m, 0x3u), ALP_OK);
 	ALP_ASSERT_EQ_INT(dxrt_test::g_live_by_bound[1], 0); /* old engine gone */
 	ALP_ASSERT_EQ_INT(dxrt_test::g_live_by_bound[4], 1);
 	alp_inference_deepx_close(&m);
 
 	struct alp_inference h[4] = {};
-	ALP_ASSERT_EQ_INT(alp_inference_deepx_open(&h[0], &cfg, 1u), ALP_OK);
-	ALP_ASSERT_EQ_INT(alp_inference_deepx_open(&h[1], &cfg, 4u), ALP_OK);
-	ALP_ASSERT_EQ_INT(alp_inference_deepx_open(&h[2], &cfg, 5u), ALP_OK);
-	ALP_ASSERT_EQ_INT(alp_inference_deepx_open(&h[3], &cfg, 6u), ALP_ERR_BUSY);
+	ALP_ASSERT_EQ_INT(open_mask(&h[0], cfg, 0x1u), ALP_OK);
+	ALP_ASSERT_EQ_INT(open_mask(&h[1], cfg, 0x3u), ALP_OK);
+	ALP_ASSERT_EQ_INT(open_mask(&h[2], cfg, 0x6u), ALP_OK);
+	ALP_ASSERT_EQ_INT(open_mask(&h[3], cfg, 0x5u), ALP_ERR_BUSY);
 	alp_inference_deepx_close(&h[0]);
 	alp_inference_deepx_close(&h[1]);
 	alp_inference_deepx_close(&h[2]);
+}
+
+/* Test 8: accel_unit_mask -> libdxrt BOUND_OPTION.  Mask 0 (default) and 0x7
+ * are both "all cores" (one shared set); a bit past core 2 is NOSUPPORT and
+ * builds no engine. */
+void test_mask_maps_to_bound_option()
+{
+	struct {
+		uint32_t mask;
+		unsigned bound;
+	} const k_map[] = {
+		{ 0x0u, 0u }, { 0x1u, 1u }, { 0x2u, 2u }, { 0x4u, 3u },
+		{ 0x3u, 4u }, { 0x6u, 5u }, { 0x5u, 6u }, { 0x7u, 0u },
+	};
+	for (const auto &e : k_map) {
+		reset_fakes();
+		dxrt_test::g_declared_inputs.push_back(make_tensor({ 1, 4 }));
+		dxrt_test::g_declared_outputs.push_back(make_tensor({ 1, 1 }));
+		struct alp_inference   h   = {};
+		alp_inference_config_t cfg = base_cfg();
+		ALP_ASSERT_EQ_INT(open_mask(&h, cfg, e.mask), ALP_OK);
+		ALP_ASSERT_EQ_INT((int)dxrt_test::g_ctor_bounds.size(), 1);
+		ALP_ASSERT_EQ_INT((int)dxrt_test::g_ctor_bounds[0], (int)e.bound);
+		alp_inference_deepx_close(&h);
+	}
+
+	reset_fakes();
+	struct alp_inference   h   = {};
+	alp_inference_config_t cfg = base_cfg();
+	ALP_ASSERT_EQ_INT(open_mask(&h, cfg, 0x8u), ALP_ERR_NOSUPPORT);
+	ALP_ASSERT_EQ_INT(open_mask(&h, cfg, 0x80000000u), ALP_ERR_NOSUPPORT);
+	ALP_ASSERT_EQ_INT((int)dxrt_test::g_ctor_bounds.size(), 0);
+	ALP_ASSERT_NULL(h.be_state);
+}
+
+/* Test 9: mask 0 and mask 0x7 are the same core set for admission -- they
+ * share one slot instead of counting as two of the three. */
+void test_default_and_all_cores_share_a_set()
+{
+	reset_fakes();
+	dxrt_test::g_declared_inputs.push_back(make_tensor({ 1, 4 }));
+	dxrt_test::g_declared_outputs.push_back(make_tensor({ 1, 1 }));
+
+	struct alp_inference   h[4] = {};
+	alp_inference_config_t cfg  = base_cfg();
+	ALP_ASSERT_EQ_INT(open_mask(&h[0], cfg, 0x0u), ALP_OK);
+	ALP_ASSERT_EQ_INT(open_mask(&h[1], cfg, 0x7u), ALP_OK);
+	ALP_ASSERT_EQ_INT(open_mask(&h[2], cfg, 0x1u), ALP_OK);
+	ALP_ASSERT_EQ_INT(open_mask(&h[3], cfg, 0x2u), ALP_OK); /* 2nd+3rd distinct sets */
+	alp_inference_deepx_close(&h[0]);
+	alp_inference_deepx_close(&h[1]);
+	alp_inference_deepx_close(&h[2]);
+	alp_inference_deepx_close(&h[3]);
+
+	/* bind_cores uses the same mask semantics. */
+	struct alp_inference m = {};
+	ALP_ASSERT_EQ_INT(open_mask(&m, cfg, 0x1u), ALP_OK);
+	ALP_ASSERT_EQ_INT(alp_inference_deepx_bind_cores(&m, 0x8u), ALP_ERR_NOSUPPORT);
+	ALP_ASSERT_EQ_INT(alp_inference_deepx_bind_cores(&m, 0x7u), ALP_OK);
+	ALP_ASSERT_EQ_INT(dxrt_test::g_live_by_bound[0], 1);
+	alp_inference_deepx_close(&m);
 }
 
 } /* namespace */
@@ -323,6 +389,8 @@ int main(void)
 	test_fourth_distinct_core_set_is_busy();
 	test_failed_open_releases_core_slot();
 	test_bind_cores_moves_the_slot();
+	test_mask_maps_to_bound_option();
+	test_default_and_all_cores_share_a_set();
 
 	ALP_TEST_SUMMARY();
 }

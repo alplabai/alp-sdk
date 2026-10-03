@@ -8,10 +8,11 @@
  * hardware; calls on a non-DEEPX handle return
  * @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC.
  *
- * Covers the two DX-M1 controls DEEPX's runtime (libdxrt) exposes
- * that the portable @ref alp_inference_config_t cannot express:
- * which of the DX-M1's three NPU cores a model runs on, and the
- * device's live temperature / clock / voltage telemetry.
+ * Covers the DX-M1 controls the portable surface does not carry:
+ * re-binding an open handle to a different set of the DX-M1's three NPU
+ * cores, and the device's live temperature / clock / voltage telemetry.
+ * Choosing the cores at open time is portable: set
+ * @ref alp_inference_config_t::accel_unit_mask.
  *
  * @note Linking `libdxrt` (which `libalp_sdk` does on V2M) installs
  *       SIGSEGV/SIGBUS/SIGABRT handlers that `exit(1)` -- see
@@ -51,18 +52,6 @@ extern "C" {
 /** Number of NPU cores on a DX-M1. */
 #define ALP_DEEPX_NPU_CORE_COUNT 3u
 
-/** Which DX-M1 NPU cores a model runs on.  Values and order match
- *  libdxrt's `dxrt::InferenceOption::BOUND_OPTION`. */
-typedef enum {
-	ALP_DEEPX_NPU_CORES_ALL = 0u, /**< All three cores (libdxrt default). */
-	ALP_DEEPX_NPU_CORE_0    = 1u, /**< Core 0 only. */
-	ALP_DEEPX_NPU_CORE_1    = 2u, /**< Core 1 only. */
-	ALP_DEEPX_NPU_CORE_2    = 3u, /**< Core 2 only. */
-	ALP_DEEPX_NPU_CORES_01  = 4u, /**< Cores 0 and 1. */
-	ALP_DEEPX_NPU_CORES_12  = 5u, /**< Cores 1 and 2. */
-	ALP_DEEPX_NPU_CORES_02  = 6u, /**< Cores 0 and 2. */
-} alp_deepx_npu_cores_t;
-
 /** Live DX-M1 telemetry, one entry per NPU core. */
 typedef struct {
 	int32_t  temperature_c[ALP_DEEPX_NPU_CORE_COUNT];  /**< Degrees Celsius. */
@@ -72,49 +61,15 @@ typedef struct {
 } alp_deepx_device_status_t;
 
 /**
- * @brief Open a DEEPX inference handle directly on a chosen set of NPU cores.
- *
- * @par Supported silicon: deepx:dx:m1
- *
- * Same as @ref alp_inference_open with the DEEPX backend, except the
- * libdxrt engine is built on @p cores from the start.  No temporary
- * all-cores engine is created, so no extra one of the DX-M1's three
- * driver queues is used (see the @warning on
- * @ref alp_deepx_inference_bind_cores for the 3-core-set limit).  Use it
- * to run two models side by side, e.g. one on
- * @ref ALP_DEEPX_NPU_CORES_01 and one on @ref ALP_DEEPX_NPU_CORE_2.
- * Release with @ref alp_inference_close like any other handle.
- *
- * @param[in] cfg    Model and options, as for @ref alp_inference_open.
- *                   @c backend must be @ref ALP_INFERENCE_BACKEND_AUTO
- *                   (treated as DEEPX here) or
- *                   @ref ALP_INFERENCE_BACKEND_DEEPX_DXM1;
- *                   @c format must be @ref ALP_INFERENCE_MODEL_DXNN.
- * @param[in] cores  Core set from @ref alp_deepx_npu_cores_t.
- *
- * @return  A handle, or NULL with the reason in @ref alp_last_error:
- *          @ref ALP_ERR_INVAL on NULL @p cfg, out-of-range @p cores, a
- *               non-DEEPX @c backend or a non-DXNN @c format.
- *          @ref ALP_ERR_BUSY if @p cores would be this process's fourth
- *               distinct core set.
- *          @ref ALP_ERR_NOMEM (also: handle pool full) /
- *               @ref ALP_ERR_IO / @ref ALP_ERR_NOSUPPORT as for
- *               @ref alp_inference_open.
- *          @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC when DEEPX is not built in
- *               (always, on a Zephyr build).
- */
-alp_inference_t *alp_deepx_inference_open(const alp_inference_config_t *cfg,
-                                          alp_deepx_npu_cores_t         cores);
-
-/**
  * @brief Run this handle's model on a chosen set of DX-M1 NPU cores.
  *
  * @par Supported silicon: deepx:dx:m1
  *
- * libdxrt fixes the core binding when it builds the inference engine,
- * so this call rebuilds the engine for @p inf from the model bytes
- * passed to @ref alp_inference_open.  Useful to keep two models from
- * sharing cores, or to measure per-core throughput.
+ * The core binding is fixed when the inference engine is built, so this
+ * call rebuilds the engine for @p inf from the model bytes passed to
+ * @ref alp_inference_open.  Useful to measure per-core throughput or to
+ * move a model between cores at run time.  To pick the cores up front, set
+ * @ref alp_inference_config_t::accel_unit_mask on open instead.
  *
  * @warning @c model_data from @ref alp_inference_open must still be
  *          valid.  Output tensors fetched before this call are invalid
@@ -123,19 +78,22 @@ alp_inference_t *alp_deepx_inference_open(const alp_inference_config_t *cfg,
  *
  * @warning At most three DISTINCT core sets can be live on one DX-M1
  *          (driver DX_NORMAL_QUEUE_MAX = 3; same-set engines share a
- *          queue; @ref ALP_DEEPX_NPU_CORES_ALL is a set).  A fourth makes
+ *          queue; all three cores, mask 0 or 0x7, is a set).  A fourth makes
  *          dx-rt abort the process or kill `dxrtd`.  This process refuses
  *          it with @ref ALP_ERR_BUSY; across processes nothing guards it.
  *          This call holds the old and new set while it swaps: prefer
- *          @ref alp_deepx_inference_open.  Two processes on dx-rt 3.2.0
+ *          @ref alp_inference_config_t::accel_unit_mask at open.  Two processes on dx-rt 3.2.0
  *          need the `dxrtd` service (#2398).
  *
  * @param[in] inf    Handle from @ref alp_inference_open opened
  *                   against DEEPX silicon.
- * @param[in] cores  Core set from @ref alp_deepx_npu_cores_t.
+ * @param[in] mask   Core mask, same meaning as DX-M1 in
+ *                   @ref alp_inference_config_t::accel_unit_mask: bits 0..2
+ *                   are NPU cores 0..2; 0 or 0x7 is all three.
  *
  * @return  @ref ALP_OK on success.
- *          @ref ALP_ERR_INVAL on NULL handle or out-of-range @p cores.
+ *          @ref ALP_ERR_INVAL on NULL handle.
+ *          @ref ALP_ERR_NOSUPPORT if @p mask has a bit above 2.
  *          @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC if @p inf is not
  *               DEEPX-backed (always, on a Zephyr build).
  *          @ref ALP_ERR_NOT_READY if @p inf is not open.
@@ -145,7 +103,7 @@ alp_inference_t *alp_deepx_inference_open(const alp_inference_config_t *cfg,
  *               build the new engine; @p inf keeps its previous
  *               binding and stays usable.
  */
-alp_status_t alp_deepx_inference_bind_cores(alp_inference_t *inf, alp_deepx_npu_cores_t cores);
+alp_status_t alp_deepx_inference_bind_cores(alp_inference_t *inf, uint32_t mask);
 
 /**
  * @brief Read the DX-M1's live temperature, clock and voltage.

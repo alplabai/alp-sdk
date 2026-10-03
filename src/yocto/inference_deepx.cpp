@@ -143,6 +143,31 @@ struct DeepxState {
 constexpr unsigned kDeepxBoundCount  = 7u; /* BOUND_OPTION values 0..6 */
 constexpr unsigned kDeepxMaxCoreSets = 3u;
 
+/* alp_inference_config_t::accel_unit_mask (bit n = NPU core n) ->
+ * dxrt::InferenceOption::BOUND_OPTION.  This table is the ONLY place libdxrt's
+ * numbering appears; the public headers speak masks.  Index = mask.  Mask 0
+ * (backend default) and 0x7 both mean all three cores = BOUND_OPTION 0. */
+constexpr unsigned kMaskToBound[8] = {
+	0u, /* 0x0 default  -> all  */
+	1u, /* 0x1 core 0   -> NPU_0 */
+	2u, /* 0x2 core 1   -> NPU_1 */
+	4u, /* 0x3 cores 01 -> NPU_01 */
+	3u, /* 0x4 core 2   -> NPU_2 */
+	6u, /* 0x5 cores 02 -> NPU_02 */
+	5u, /* 0x6 cores 12 -> NPU_12 */
+	0u, /* 0x7 all      -> all  */
+};
+
+/** Translate @p mask to a BOUND_OPTION; ALP_ERR_NOSUPPORT for a bit past core 2. */
+alp_status_t mask_to_bound(uint32_t mask, unsigned &bound)
+{
+	if (mask >= (sizeof(kMaskToBound) / sizeof(kMaskToBound[0]))) {
+		return ALP_ERR_NOSUPPORT;
+	}
+	bound = kMaskToBound[mask];
+	return ALP_OK;
+}
+
 std::mutex g_cores_mtx;
 unsigned   g_core_refs[kDeepxBoundCount];
 
@@ -277,10 +302,15 @@ bool fill_tensor_descriptor(dxrt::Tensor &t, void *data, alp_inference_tensor_t 
 /* ------------------------------------------------------------------ */
 
 extern "C" alp_status_t alp_inference_deepx_open(struct alp_inference         *h_,
-                                                 const alp_inference_config_t *cfg,
-                                                 unsigned                      bound)
+                                                 const alp_inference_config_t *cfg)
 {
 	struct alp_inference *h = h_;
+
+	unsigned     bound = 0u;
+	alp_status_t mrc   = mask_to_bound(cfg->accel_unit_mask, bound);
+	if (mrc != ALP_OK) {
+		return mrc;
+	}
 
 	/* Reserve the core-set slot BEFORE building the engine: the engine is
 	 * constructed directly on `bound`, so no transient all-cores engine
@@ -304,7 +334,7 @@ extern "C" alp_status_t alp_inference_deepx_open(struct alp_inference         *h
      * exception-free for C callers. */
 	try {
 		dxrt::InferenceOption opt = dxrt::DefaultInferenceOption;
-		opt.boundOption           = bound; /* alp_deepx_npu_cores_t == BOUND_OPTION order */
+		opt.boundOption           = bound;
 		st->engine                = new (std::nothrow) dxrt::InferenceEngine(
 		    static_cast<const uint8_t *>(cfg->model_data), cfg->model_size, opt);
 		if (st->engine == nullptr) {
@@ -475,11 +505,16 @@ extern "C" alp_status_t alp_inference_deepx_invoke(struct alp_inference *h_)
  * alp_deepx_inference_* with the handle op-counted and the backend
  * already checked. */
 
-extern "C" alp_status_t alp_inference_deepx_bind_cores(struct alp_inference *h_, unsigned bound)
+extern "C" alp_status_t alp_inference_deepx_bind_cores(struct alp_inference *h_, uint32_t mask)
 {
 	auto *st = static_cast<DeepxState *>(h_->be_state);
 	if (st == nullptr || st->model == nullptr) {
 		return ALP_ERR_NOT_READY;
+	}
+	unsigned     bound = 0u;
+	alp_status_t mrc   = mask_to_bound(mask, bound);
+	if (mrc != ALP_OK) {
+		return mrc;
 	}
 	if (bound == st->bound.load()) {
 		return ALP_OK; /* already on this core set */
@@ -488,13 +523,13 @@ extern "C" alp_status_t alp_inference_deepx_bind_cores(struct alp_inference *h_,
 	/* The new engine is built before the old one is deleted, so for that
 	 * window this handle holds BOTH core sets; admission therefore counts
 	 * the old one too and may answer ALP_ERR_BUSY.  Prefer
-	 * alp_deepx_inference_open() with the core set up front. */
+	 * alp_inference_config_t::accel_unit_mask at open. */
 	alp_status_t adm = cores_acquire(bound);
 	if (adm != ALP_OK) {
 		return adm;
 	}
 	dxrt::InferenceOption opt = dxrt::DefaultInferenceOption;
-	opt.boundOption           = bound; /* alp_deepx_npu_cores_t == BOUND_OPTION order */
+	opt.boundOption           = bound;
 
 	/* Build the new engine first: on failure the old one keeps serving. */
 	dxrt::InferenceEngine *fresh = nullptr;

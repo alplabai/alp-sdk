@@ -25,7 +25,6 @@
 #include <alp/peripheral.h>
 
 #include "../../inference/inference_ops.h"
-#include "alp_z_last_error.h"
 
 static bool _is_deepx_backend(const alp_inference_t *inf)
 {
@@ -33,9 +32,10 @@ static bool _is_deepx_backend(const alp_inference_t *inf)
 	       strcmp(inf->backend->vendor, "deepx") == 0;
 }
 
-alp_status_t alp_deepx_inference_bind_cores(alp_inference_t *inf, alp_deepx_npu_cores_t cores)
+alp_status_t alp_deepx_inference_bind_cores(alp_inference_t *inf, uint32_t mask)
 {
-	if (inf == NULL || (unsigned)cores > (unsigned)ALP_DEEPX_NPU_CORES_02) return ALP_ERR_INVAL;
+	if (inf == NULL) return ALP_ERR_INVAL;
+	if (mask > 0x7u) return ALP_ERR_NOSUPPORT;
 	if (!_is_deepx_backend(inf)) return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
 	return ALP_ERR_NOSUPPORT; /* no libdxrt on an M-class core */
 }
@@ -46,17 +46,4 @@ alp_status_t alp_deepx_inference_get_status(alp_inference_t           *inf,
 	if (inf == NULL || status_out == NULL) return ALP_ERR_INVAL;
 	if (!_is_deepx_backend(inf)) return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
 	return ALP_ERR_NOSUPPORT; /* no libdxrt on an M-class core */
-}
-
-alp_inference_t *alp_deepx_inference_open(const alp_inference_config_t *cfg,
-                                          alp_deepx_npu_cores_t         cores)
-{
-	if (cfg == NULL || (unsigned)cores > (unsigned)ALP_DEEPX_NPU_CORES_02 ||
-	    (cfg->backend != ALP_INFERENCE_BACKEND_AUTO &&
-	     cfg->backend != ALP_INFERENCE_BACKEND_DEEPX_DXM1)) {
-		alp_z_set_last_error(ALP_ERR_INVAL);
-		return NULL;
-	}
-	alp_z_set_last_error(ALP_ERR_NOT_PRESENT_ON_THIS_SOC); /* no libdxrt on an M-class core */
-	return NULL;
 }

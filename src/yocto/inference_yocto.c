@@ -103,9 +103,7 @@ static void pool_release(struct alp_inference *h)
 /* ------------------------------------------------------------------ */
 
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
-alp_status_t alp_inference_deepx_open(struct alp_inference         *h,
-                                      const alp_inference_config_t *cfg,
-                                      unsigned                      bound);
+alp_status_t alp_inference_deepx_open(struct alp_inference *h, const alp_inference_config_t *cfg);
 size_t       alp_inference_deepx_num_inputs(struct alp_inference *h);
 size_t       alp_inference_deepx_num_outputs(struct alp_inference *h);
 alp_status_t
@@ -114,7 +112,7 @@ alp_status_t
 alp_inference_deepx_get_output(struct alp_inference *h, size_t index, alp_inference_tensor_t *out);
 alp_status_t alp_inference_deepx_invoke(struct alp_inference *h);
 void         alp_inference_deepx_close(struct alp_inference *h);
-alp_status_t alp_inference_deepx_bind_cores(struct alp_inference *h, unsigned bound);
+alp_status_t alp_inference_deepx_bind_cores(struct alp_inference *h, uint32_t mask);
 alp_status_t alp_inference_deepx_get_status(struct alp_inference      *h,
                                             alp_deepx_device_status_t *out);
 #endif
@@ -188,14 +186,8 @@ static alp_inference_backend_t resolve_auto(void)
 /* Public API                                                          */
 /* ================================================================== */
 
-/* Shared body of alp_inference_open() and alp_deepx_inference_open().
- * @p deepx_bound is a dxrt BOUND_OPTION value (0 = all cores); only the
- * DEEPX backend reads it. */
-static alp_inference_t *open_with_cores(const alp_inference_config_t *cfg, unsigned deepx_bound)
+alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg)
 {
-#if !defined(ALP_SDK_USE_DEEPX_DXM1)
-	(void)deepx_bound;
-#endif
 	if (cfg == NULL || cfg->model_data == NULL || cfg->model_size == 0) {
 		alp_internal_set_last_error(ALP_ERR_INVAL);
 		return NULL;
@@ -236,7 +228,7 @@ static alp_inference_t *open_with_cores(const alp_inference_config_t *cfg, unsig
 	switch (backend) {
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
 	case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
-		rc = cfg->format == ALP_INFERENCE_MODEL_DXNN ? alp_inference_deepx_open(h, cfg, deepx_bound)
+		rc = cfg->format == ALP_INFERENCE_MODEL_DXNN ? alp_inference_deepx_open(h, cfg)
 		                                             : ALP_ERR_INVAL;
 		break;
 #endif
@@ -268,34 +260,6 @@ static alp_inference_t *open_with_cores(const alp_inference_config_t *cfg, unsig
 	 * as live (issue #629). */
 	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	return h;
-}
-
-alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg)
-{
-	return open_with_cores(cfg, 0u); /* 0 == ALP_DEEPX_NPU_CORES_ALL */
-}
-
-alp_inference_t *alp_deepx_inference_open(const alp_inference_config_t *cfg,
-                                          alp_deepx_npu_cores_t         cores)
-{
-	if (cfg == NULL || (unsigned)cores > (unsigned)ALP_DEEPX_NPU_CORES_02) {
-		alp_internal_set_last_error(ALP_ERR_INVAL);
-		return NULL;
-	}
-	if (cfg->backend != ALP_INFERENCE_BACKEND_AUTO &&
-	    cfg->backend != ALP_INFERENCE_BACKEND_DEEPX_DXM1) {
-		alp_internal_set_last_error(ALP_ERR_INVAL);
-		return NULL;
-	}
-#if defined(ALP_SDK_USE_DEEPX_DXM1)
-	/* AUTO is pinned to DEEPX: a core set means nothing to another NPU. */
-	alp_inference_config_t c = *cfg;
-	c.backend                = ALP_INFERENCE_BACKEND_DEEPX_DXM1;
-	return open_with_cores(&c, (unsigned)cores);
-#else
-	alp_internal_set_last_error(ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
-	return NULL;
-#endif
 }
 
 size_t alp_inference_num_inputs(alp_inference_t *inf)
@@ -582,14 +546,14 @@ void alp_inference_close(alp_inference_t *inf)
 /* <alp/ext/deepx/inference.h> (#482)                                  */
 /* ------------------------------------------------------------------ */
 
-alp_status_t alp_deepx_inference_bind_cores(alp_inference_t *inf, alp_deepx_npu_cores_t cores)
+alp_status_t alp_deepx_inference_bind_cores(alp_inference_t *inf, uint32_t mask)
 {
-	if (inf == NULL || (unsigned)cores > (unsigned)ALP_DEEPX_NPU_CORES_02) return ALP_ERR_INVAL;
+	if (inf == NULL) return ALP_ERR_INVAL;
 	if (!alp_handle_op_enter(&inf->lifecycle, &inf->active_ops)) return ALP_ERR_NOT_READY;
 	alp_status_t rc = ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
 	if (inf->backend == ALP_INFERENCE_BACKEND_DEEPX_DXM1) {
-		rc = alp_inference_deepx_bind_cores(inf, (unsigned)cores);
+		rc = alp_inference_deepx_bind_cores(inf, mask);
 	}
 #endif
 	alp_handle_op_leave(&inf->active_ops);

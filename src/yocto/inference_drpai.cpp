@@ -426,6 +426,10 @@ extern "C" alp_status_t alp_inference_drpai_open(struct alp_inference         *h
 	if (cfg->model_data == nullptr || cfg->model_size == 0) {
 		return ALP_ERR_INVAL;
 	}
+	/* DRP-AI3 is one unit: accel_unit_mask may only be 0 (default) or bit 0. */
+	if ((cfg->accel_unit_mask & ~1u) != 0u) {
+		return ALP_ERR_NOSUPPORT;
+	}
 	/* The tar is extracted into /tmp before LoadModel() reads it; bound it
 	 * so an oversized blob is a portable INVAL, not a tar ENOSPC on a
 	 * small rootfs.  64 MiB is generous for a DRP-AI YOLOX-S bundle. */

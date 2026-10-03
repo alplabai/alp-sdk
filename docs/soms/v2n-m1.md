@@ -182,15 +182,15 @@ v2.6.0. Bench evidence (#2398): three processes on `CORE_0`,
 `CORE_0`, `CORE_0` work; three on `CORE_0`/`CORE_1`/`CORE_2` hit
 `Failed to set NPU bound 3 ... ret: -16` and killed `dxrtd`
 (hypothesis, not confirmed: the engine the SDK used to build on all
-cores before rebinding took a queue -- `alp_deepx_inference_open()`
-now builds the engine on the requested cores directly). Inside one
+cores before rebinding took a queue -- `alp_inference_open()` now builds
+the engine on the cores named by `accel_unit_mask` directly). Inside one
 process the SDK refuses a fourth distinct set with `ALP_ERR_BUSY`;
 across processes nothing guards it. See `<alp/ext/deepx/inference.h>`
 and #2398.
 
 To run two models on the DX-M1 side by side, open them with
-`alp_deepx_inference_open(cfg, cores)` (e.g. `ALP_DEEPX_NPU_CORES_01`
-and `ALP_DEEPX_NPU_CORE_2`). To run one model on the DX-M1 and one on
+`alp_inference_config_t::accel_unit_mask` set to disjoint core masks
+(bit `n` = NPU core `n`; e.g. `0x3` for cores 0+1 and `0x4` for core 2). To run one model on the DX-M1 and one on
 the on-die DRP-AI3 at the same time, see
 `examples/v2n/v2n-two-models/` (not bench-verified).
 

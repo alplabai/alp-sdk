@@ -542,7 +542,11 @@ IRQs and DMA engines), so one model on each can run at the same time:
 open one handle with `.backend = ALP_INFERENCE_BACKEND_DRPAI` and one
 with `.backend = ALP_INFERENCE_BACKEND_DEEPX_DXM1`, and invoke each from
 its own thread. Do not use `ALP_INFERENCE_BACKEND_AUTO` -- it resolves to
-the same backend every time. `examples/v2n/v2n-two-models/` does exactly
+the same backend every time. `alp_inference_config_t.accel_unit_mask`
+chooses the unit(s) inside a backend (bit `n` = unit `n`, `0` = default):
+the DX-M1 handle can name NPU cores (`0x7` is all three), while DRP-AI3 is
+one unit and takes only `0` or `0x1`; any other mask fails the open with
+`ALP_ERR_NOSUPPORT`. `examples/v2n/v2n-two-models/` does exactly
 this and prints per-NPU latency and combined FPS.
 
 > **Not bench-verified.** The two backends have never run together. The

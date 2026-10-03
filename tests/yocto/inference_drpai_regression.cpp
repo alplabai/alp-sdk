@@ -142,6 +142,25 @@ void test_open_fails_cleanly_when_device_absent()
 	ALP_ASSERT_NULL(h.be_state);
 }
 
+/* Test 2b: DRP-AI3 is one unit -- accel_unit_mask 0 (default) and 0x1 pass the
+ * mask gate (and then hit the absent device -> IO); anything else is
+ * NOSUPPORT before the device is touched. */
+void test_open_accel_unit_mask_is_zero_or_one()
+{
+	struct alp_inference   h   = {};
+	alp_inference_config_t cfg = base_cfg();
+
+	for (uint32_t mask : { 0x2u, 0x3u, 0x80000000u }) {
+		cfg.accel_unit_mask = mask;
+		ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&h, &cfg), ALP_ERR_NOSUPPORT);
+		ALP_ASSERT_NULL(h.be_state);
+	}
+	for (uint32_t mask : { 0x0u, 0x1u }) {
+		cfg.accel_unit_mask = mask;
+		ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&h, &cfg), ALP_ERR_IO);
+	}
+}
+
 /* An empty tar archive (two zero blocks): what open() stages for the fake. */
 const std::vector<uint8_t> k_empty_tar(1024, 0);
 
@@ -468,8 +487,8 @@ void test_close_on_null_state_is_noop()
 void test_unopenable_lock_fails_open()
 {
 	fake_device(16 * kMiB);
-	alp_inference_config_t cfg = tar_cfg();
-	struct alp_inference   inf = {};
+	alp_inference_config_t cfg   = tar_cfg();
+	struct alp_inference   inf   = {};
 	const char            *saved = alp_drpai::g_lock_dir;
 
 	alp_drpai::g_lock_dir = "/nonexistent-alp-lock-dir";
@@ -489,6 +508,7 @@ int main(void)
 	test_open_rejects_null_model_data();
 	test_open_rejects_zero_model_size();
 	test_open_fails_cleanly_when_device_absent();
+	test_open_accel_unit_mask_is_zero_or_one();
 	test_handles_get_disjoint_arena_ranges();
 	test_oversized_model_is_refused();
 	test_closed_ranges_are_reclaimed();

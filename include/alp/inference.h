@@ -176,6 +176,28 @@ typedef struct {
 	 *  sized to the model.  @c arena = NULL for such a model is rejected
 	 *  with @ref ALP_ERR_INVAL (see examples/aen/aen-npu-inference-alp). */
 	void *arena;
+	/**
+	 * @brief Which accelerator unit(s) of the selected backend run the model.
+	 *        [ABI-EXPERIMENTAL]
+	 *
+	 * 0 = the backend's default (every unit it can use).  Bit @c n selects
+	 * accelerator unit @c n of the backend @c backend resolves to; a mask may
+	 * name several units where the backend supports it.  A mask the selected
+	 * backend cannot honour makes @ref alp_inference_open return NULL with
+	 * @ref ALP_ERR_NOSUPPORT -- it is never silently ignored or narrowed.
+	 *
+	 * Per backend:
+	 *  - DEEPX DX-M1: bits 0..2 are NPU cores 0..2; any non-empty subset
+	 *    (0x1..0x7) is valid.  0 and 0x7 both mean all three cores.  At most
+	 *    three DISTINCT core sets can be live in one process; a fourth makes
+	 *    open return @ref ALP_ERR_BUSY.
+	 *  - Renesas DRP-AI3: one unit; only 0 or 0x1 is valid.
+	 *  - Arm Ethos-U (Alif): the NPU instance visible to the calling core;
+	 *    only bit 0 is valid, on single-NPU cores.  Multi-NPU parts are
+	 *    unverified -- do not rely on bits above 0 there.
+	 *  - TFLM, ONNX Runtime and CPU backends: only 0.
+	 */
+	uint32_t accel_unit_mask;
 } alp_inference_config_t;
 
 /**
@@ -204,12 +226,13 @@ typedef struct {
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
 #define ALP_INFERENCE_CONFIG_DEFAULT(id) \
-	((alp_inference_config_t){ .model_data  = (id), \
-	                           .model_size  = 0u, \
-	                           .format      = ALP_INFERENCE_MODEL_TFLITE, \
-	                           .backend     = ALP_INFERENCE_BACKEND_AUTO, \
-	                           .arena_bytes = 0u, \
-	                           .arena       = NULL })
+	((alp_inference_config_t){ .model_data      = (id), \
+	                           .model_size      = 0u, \
+	                           .format          = ALP_INFERENCE_MODEL_TFLITE, \
+	                           .backend         = ALP_INFERENCE_BACKEND_AUTO, \
+	                           .arena_bytes     = 0u, \
+	                           .arena           = NULL, \
+	                           .accel_unit_mask = 0u })
 
 /**
  * @brief Load a compiled model and prepare it for invocation.

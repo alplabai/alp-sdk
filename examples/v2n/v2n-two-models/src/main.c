@@ -99,7 +99,6 @@
 #include <string.h>
 #include <time.h>
 
-#include "alp/ext/deepx/inference.h" /* alp_deepx_inference_open(): DX-M1 core set at open */
 #include "alp/inference.h"
 
 #define DEFAULT_SECONDS 10
@@ -463,18 +462,19 @@ int main(int argc, char **argv)
 			.model_size = dx_model_len,
 			.format     = ALP_INFERENCE_MODEL_DXNN,
 			.backend    = ALP_INFERENCE_BACKEND_DEEPX_DXM1,
+			/* accel_unit_mask picks WHICH accelerator unit(s) of the chosen
+			 * backend run this model: bit n = unit n, 0 = the backend default.
+			 * It is part of the portable config, so no vendor header is needed.
+			 * On a DX-M1 the units are its three NPU cores (bits 0..2): 0x7 is
+			 * all three, right for ONE model.  Give SEVERAL DX-M1 models
+			 * disjoint masks (e.g. 0x3 = cores 0+1 for one, 0x4 = core 2 for
+			 * another) to run them side by side.  A DX-M1 supports at most 3
+			 * distinct core sets at a time; a 4th fails with ALP_ERR_BUSY.  A
+			 * mask the backend cannot honour fails with ALP_ERR_NOSUPPORT --
+			 * DRP-AI3 below accepts only 0 or 0x1, so it keeps the default. */
+			.accel_unit_mask = 0x7u,
 		};
-		/* alp_deepx_inference_open() is alp_inference_open() plus the DX-M1
-		 * core set, chosen up front so no temporary engine on other cores is
-		 * ever built.  ALL cores is right for ONE model.  Pick a subset
-		 * (ALP_DEEPX_NPU_CORES_01, ALP_DEEPX_NPU_CORE_2, ...) when SEVERAL
-		 * DX-M1 models should run side by side on separate cores.  A DX-M1
-		 * supports at most 3 distinct core sets at a time; a 4th fails with
-		 * ALP_ERR_BUSY (see <alp/ext/deepx/inference.h>). */
-		dx = prepare_handle("deepx",
-		                    alp_deepx_inference_open(&cfg, ALP_DEEPX_NPU_CORES_ALL),
-		                    dx_frame,
-		                    dx_frame_len);
+		dx = prepare_handle("deepx", alp_inference_open(&cfg), dx_frame, dx_frame_len);
 		if (dx == NULL) {
 			goto out;
 		}

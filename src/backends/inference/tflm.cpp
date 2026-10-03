@@ -280,6 +280,20 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
 		return ALP_ERR_NOSUPPORT;
 	}
 
+	/* accel_unit_mask: the CPU executor has no selectable unit (0 only).  The
+	 * Ethos-U path serves the single NPU instance visible to this core, so bit
+	 * 0 is accepted when it is compiled in and the caller did not pin CPU.
+	 * Unverified for multi-NPU parts. */
+	uint32_t allowed_mask = 0u;
+#if defined(ALP_INFERENCE_TFLM_HAS_ETHOS_U)
+	if (cfg->backend != ALP_INFERENCE_BACKEND_CPU) {
+		allowed_mask = 1u;
+	}
+#endif
+	if ((cfg->accel_unit_mask & ~allowed_mask) != 0u) {
+		return ALP_ERR_NOSUPPORT;
+	}
+
 	/* One-shot variant log so HIL operators can confirm which
      * kernel set the build actually linked against.  Drops to
      * LOG_DBG after the first call to keep per-model open() noise
