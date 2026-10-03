@@ -32,7 +32,8 @@
  *     (manual Table 5.4-5: WDT0 "Interrupt to CPU: Not possible", error interrupt only).
  *   - no window: window.min must be 0 (the hardware window is fixed at 0..100 %).
  *   - the achieved timeout is the longest period <= window.max (never longer than asked); at 24 MHz
- *     that tops out at 16384 x 256 / 24 MHz = 174.8 ms, so a longer request is clamped to it.  The clock
+ *     that tops out at 16384 x 256 / 24 MHz = 174.8 ms, and a longer request is REJECTED with -EINVAL
+ *     (wdt_rzv_ceiling_ms(), 175 ms), never clamped: a silent shorter deadline is the wrong one.  The clock
  *     is the node's `clock-freq`, generated from the SoC spec's m33_sm `watchdog.counting_clock_hz`:
  *     24 MHz = WDT_0_clk_loco from the Main OSC (manual Table 4.4-2, "CWDT loco clock").
  *   - WDT_OPT_PAUSE_IN_SLEEP maps to WDTCSTPR.SLCSTP; WDT_OPT_PAUSE_HALTED_BY_DBG is -ENOTSUP.
@@ -104,6 +105,12 @@ static int wdt_rzv_install_timeout(const struct device *dev, const struct wdt_ti
 	}
 	if (atomic_test_bit(&data->state, WDT_RZV_ATOMIC_TIMEOUT_SET)) {
 		return -ENOMEM; /* a single channel */
+	}
+	if (config->window.max > wdt_rzv_ceiling_ms(cfg->clock_freq)) {
+		LOG_ERR("timeout %u ms exceeds the longest WDT0 period (%u ms)",
+		        config->window.max,
+		        wdt_rzv_ceiling_ms(cfg->clock_freq));
+		return -EINVAL; /* before any state is set: a later install_timeout() may retry */
 	}
 	if (!wdt_rzv_pick(cfg->clock_freq, config->window.max, &tops, &cks)) {
 		LOG_ERR("timeout %u ms is shorter than the shortest WDT0 period", config->window.max);

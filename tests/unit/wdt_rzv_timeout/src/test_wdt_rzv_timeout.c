@@ -30,6 +30,16 @@ ZTEST(wdt_rzv_timeout, test_longest_period_not_above_request)
 	zassert_equal(cks, 0x0);
 }
 
+ZTEST(wdt_rzv_timeout, test_request_above_max_rejected)
+{
+	/* 16384 x 256 / 24 MHz = 174.76 ms: 175 ms is the ceiling, 176 ms must be rejected (not clamped). */
+	zassert_equal(wdt_rzv_ceiling_ms(CLK_24MHZ), 175U);
+	zassert_true(175U <= wdt_rzv_ceiling_ms(CLK_24MHZ));
+	zassert_false(176U <= wdt_rzv_ceiling_ms(CLK_24MHZ));
+	zassert_false(1000U <= wdt_rzv_ceiling_ms(CLK_24MHZ)); /* ALP_WDT_CONFIG_DEFAULT */
+	zassert_equal(wdt_rzv_ceiling_ms(0), 0U);
+}
+
 ZTEST(wdt_rzv_timeout, test_only_manual_dividers_are_ever_chosen)
 {
 	static const uint8_t allowed[] = { 0x0, 0x2, 0x3, 0x4, 0xF, 0x5 };

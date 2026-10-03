@@ -34,14 +34,14 @@ other units), not just the M33.  Use the bench flashing flow in the
    CM33 dies with a bus fault around that time, the WDT0 module clocks / bus-stop were gated by
    Linux: the CM33-owned clock hold below is required before this step can pass.
 3. Read back the armed configuration from the M33 (SWD / RAM console): `WDT0_WDTCR` should be
-   `TOPS=2 (8192 counts)`, `CKS=0x5 (/256)`, window `RPES=3 / RPSS=3`; `WDT0_WDTRCR.RSTIRQS=0`;
+   `TOPS=3 (16384 counts)`, `CKS=0x5 (/256)`, window `RPES=3 / RPSS=3`; `WDT0_WDTRCR.RSTIRQS=0`;
    `CPG_ERRORRST_SEL2` bit 0 set.  (If the underflow does not reach the CPG, check whether the WDT0 error
    interrupt also has to be enabled in the ICU, as the manual's WDT1 example does for its source.)  A hung write here means the CM33 cannot reach that register.
 4. Starve it: build the app without the `alp_wdt_feed()` call.  Expected: the **whole SoM** resets
    (A55 console shows the reset / U-Boot banner), not just the M33.  Note which of the two happened.
 5. Measure the period: with `timeout_ms = 175` (the shipped test) the driver picks the longest period
    not above it, `16384 x 256 / 24 MHz = 174.8 ms`, which is also the LONGEST period WDT0 can encode at
-   24 MHz (a larger request is clamped to it, never lengthened).  Time last-feed to reset (scope on a
+   24 MHz (a larger request, 176 ms and up, is rejected with `ALP_ERR_INVAL`, never clamped; also try `ALP_WDT_CONFIG_DEFAULT` = 1000 ms, expect `ALP_ERR_INVAL`, then reopen with 175 ms in the same boot and expect it to arm: the reject-then-reinstall path).  Time last-feed to reset (scope on a
    CM33-driven GPIO released at the last feed, against the reset edge).  The real clock is `16384 x 256 / measured_seconds`.  If it
    is not 24 MHz, fix `counting_clock_hz` in `metadata/socs/renesas/rzv2n/n44.json` (`m33_sm` core,
    `watchdog`), regenerate the two boards, and record the measured value here.

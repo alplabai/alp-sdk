@@ -37,7 +37,10 @@
  * Pick conservatively long enough that legitimate worst-case
  * latency (say, a slow flash erase) doesn't trip a false reset,
  * but short enough that a genuine hang doesn't leave the
- * device unresponsive for too long.  5 seconds is typical. */
+ * device unresponsive for too long.  5 seconds is typical.
+ * A watchdog with a short hardware ceiling (the RZ/V2N Cortex-M33 WDT0,
+ * 174.8 ms) rejects a longer timeout with ALP_ERR_INVAL; size the
+ * deadline to the SoM's limit there. */
 #define WDT_TIMEOUT_MS 5000
 
 /* Feed every 500 ms -- 10x safety margin against the 5 s timeout.

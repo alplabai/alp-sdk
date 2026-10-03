@@ -30,6 +30,17 @@ static const struct wdt_rzv_cks wdt_rzv_cks_table[] = {
 /* Counts per timeout, indexed by the TOPS[1:0] encoding. */
 static const uint16_t wdt_rzv_tops_counts[] = { 1024, 4096, 8192, 16384 };
 
+/* Longest encodable period (/256 x 16384 counts) rounded UP to whole ms: 175 at 24 MHz (174.76 ms).
+ * A request above this is rejected by the driver, never clamped; the picked period itself is always
+ * <= the request, so a request equal to the ceiling selects the longest period.
+ */
+static inline uint32_t wdt_rzv_ceiling_ms(uint32_t clock_freq)
+{
+	const uint64_t counts = 256ULL * 16384ULL;
+
+	return clock_freq == 0 ? 0 : (uint32_t)((counts * 1000ULL + clock_freq - 1) / clock_freq);
+}
+
 /* Longest period not exceeding max_ms; false when even the shortest is longer. */
 static inline bool wdt_rzv_pick(uint32_t clock_freq, uint32_t max_ms, uint8_t *tops, uint8_t *cks)
 {
