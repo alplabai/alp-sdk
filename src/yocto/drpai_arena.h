@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Process-wide placement of DRP-AI models inside the reserved working-memory
- * arena, plus the lock that serialises DRP-AI jobs.  Split out of
+ * arena, plus the lock that serialises DRP-AI work.  Split out of
  * inference_drpai.cpp -- like drpai_deploy_shapes.h -- because none of it
- * needs MeraDrpRuntimeWrapper.h or the driver, so
- * tests/yocto/inference_drpai_arena.cpp can exercise the real code on a plain
- * host.
+ * needs MeraDrpRuntimeWrapper.h or the driver; tests/yocto/
+ * inference_drpai_regression.cpp exercises it through inference_drpai.cpp
+ * against the fakes in tests/yocto/fakes/drpai/.
  *
  * Why it exists: LoadModel(dir, start_address) writes the model's DRP
  * descriptors, weights and I/O buffers at start_address, and every
@@ -16,88 +16,123 @@
  * the first.  Renesas' own two-model sample gives each model its own range
  * and runs the models one after the other; this does the same.
  *
- * Policy: a bump allocator.  A model starts at the first aligned address after
- * the previous one (the runtime reports where a model ended via
- * GetLastAddress()).  Ranges are not recycled individually; the cursor goes
- * back to the arena base when the last handle closes (the driver resets the
- * NPU on the last close anyway).  The tail of the arena is kept free for
- * DRP-AI pre-processing objects, which PreRuntime places at the END of the
- * region.
+ * Policy: each model starts at the first aligned address at or after the end
+ * of the highest live range.  GetLastAddress() of the Renesas wrapper
+ * (rzv_drp-ai_tvm Release-2026-04-17, apps/MeraDrpRuntimeWrapper.h,
+ * `uint64_t GetLastAddress()`) returns the ABSOLUTE end address of the model
+ * just loaded, or 0 for a CPU-only model that used no DRP-AI memory; Renesas'
+ * own tutorial aligns the next start to 16 MiB, so that is the alignment
+ * here.  When a handle closes, its range is dropped and the cursor falls back
+ * to the highest end among the handles still open (the arena base if none),
+ * so a LIFO close, or closing a model and loading another, reuses the space.
+ * A hole below a still-open higher range is not reused.  The tail of the
+ * arena is kept free for DRP-AI pre-processing objects, which PreRuntime
+ * places at the END of the region.
  */
 #ifndef ALP_SDK_YOCTO_DRPAI_ARENA_H
 #define ALP_SDK_YOCTO_DRPAI_ARENA_H
 
+#include <algorithm>
 #include <cstdint>
 #include <mutex>
+#include <vector>
 
 namespace alp_drpai
 {
 
-/** Model ranges start on a 1 MiB boundary (page-aligned with margin; trivial
- *  against a 512 MiB arena). */
-constexpr uint64_t kArenaAlign = 1ull << 20;
+/** Model ranges start on a 16 MiB boundary, as Renesas' own tutorial does. */
+constexpr uint64_t kArenaAlign = 16ull << 20;
 
 /** Bytes kept free at the end of the arena for DRP-AI pre-processing.
  *  ponytail: an estimate -- no compiled bundle is available to measure it
  *  (alp-sdk#2236); retune once PreRuntime's real footprint is known. */
 constexpr uint64_t kArenaPreprocReserve = 32ull << 20;
 
+/** A model's [start, end) in the arena.  start == end means "uses none"
+ *  (CPU-only model); releasing it is a no-op. */
+struct Range {
+	uint64_t start = 0;
+	uint64_t end   = 0;
+};
+
 class Arena
 {
   public:
-	/** Held by open() from begin() until commit()/abort(), so two concurrent
+	/** Held by open() from begin() until commit() has run, so two concurrent
 	 *  opens cannot be handed the same range. */
 	std::mutex &mutex()
 	{
 		return mu_;
 	}
 
-	/** Where the next model should be loaded, or false when no room is left.
-	 *  Caller holds mutex().  @p base/@p size are the driver's area. */
+	/** Where the next model should be loaded, or false when no room is left
+	 *  or the driver's area changed under live handles.  Caller holds
+	 *  mutex().  @p base/@p size are the driver's area. */
 	bool begin(uint64_t base, uint64_t size, uint64_t &start)
 	{
-		if (live_ == 0 || base_ != base || size_ != size) {
-			base_   = base;
-			size_   = size;
-			cursor_ = base;
+		if (live_.empty()) {
+			base_ = base;
+			size_ = size;
+		} else if (base_ != base || size_ != size) {
+			return false;
 		}
-		const uint64_t limit = limit_();
-		start                = align_up(cursor_);
-		return start < limit && start >= base_;
+		start = align_up(cursor_());
+		return start < limit_() && start >= base_;
 	}
 
 	/** Record that the model loaded at @p start ends at @p last_address (the
-	 *  runtime's GetLastAddress()).  Caller holds mutex().
+	 *  runtime's GetLastAddress(); 0 = CPU-only, uses no arena).  Caller holds
+	 *  mutex().
 	 *  @return false when the model does not fit below the pre-processing
 	 *          reserve (or the runtime reported nonsense); nothing is
-	 *          recorded -- the caller unloads the model. */
-	bool commit(uint64_t start, uint64_t last_address)
+	 *          recorded -- the caller unloads the model.  On success @p out
+	 *          is what release() must be given back. */
+	bool commit(uint64_t start, uint64_t last_address, Range &out)
 	{
+		if (last_address == 0) {
+			out = Range{};
+			return true;
+		}
 		if (last_address <= start || last_address > limit_()) {
 			return false;
 		}
-		cursor_ = align_up(last_address);
-		++live_;
+		out = Range{ start, last_address };
+		live_.push_back(out);
 		return true;
 	}
 
-	/** One committed model went away.  Rewinds the cursor with the last. */
-	void release()
+	/** Drop @p r (a commit() result).  The cursor then falls back to the
+	 *  highest end among the remaining ranges. */
+	void release(const Range &r)
 	{
+		if (r.start == r.end) {
+			return;
+		}
 		std::lock_guard<std::mutex> lk(mu_);
-		if (live_ != 0 && --live_ == 0) {
-			cursor_ = base_;
+		auto it = std::find_if(live_.begin(), live_.end(), [&](const Range &x) {
+			return x.start == r.start && x.end == r.end;
+		});
+		if (it != live_.end()) {
+			live_.erase(it);
 		}
 	}
 
-	/** Test hook. */
-	unsigned live()
+	/** Test hook: ranges currently held. */
+	size_t live()
 	{
 		std::lock_guard<std::mutex> lk(mu_);
-		return live_;
+		return live_.size();
 	}
 
   private:
+	uint64_t cursor_() const
+	{
+		uint64_t c = base_;
+		for (const Range &r : live_) {
+			c = std::max(c, r.end);
+		}
+		return c;
+	}
 	uint64_t limit_() const
 	{
 		return size_ > kArenaPreprocReserve ? base_ + size_ - kArenaPreprocReserve : base_;
@@ -107,11 +142,10 @@ class Arena
 		return (v + kArenaAlign - 1u) & ~(kArenaAlign - 1u);
 	}
 
-	std::mutex mu_;
-	uint64_t   base_   = 0;
-	uint64_t   size_   = 0;
-	uint64_t   cursor_ = 0;
-	unsigned   live_   = 0;
+	std::mutex         mu_;
+	uint64_t           base_ = 0;
+	uint64_t           size_ = 0;
+	std::vector<Range> live_;
 };
 
 /** The one DRP-AI arena of this process. */
@@ -121,10 +155,13 @@ inline Arena &arena()
 	return a;
 }
 
-/** Held around SetInput()+Run().  DRP-AI runs one job at a time and the
- *  driver answers a second DRPAI_START with -EBUSY instead of queueing it;
- *  the closed runtime treats that as a hard failure.  One lock for every
- *  handle in the process makes concurrent invokes wait their turn.
+/** Held around SetInput()+Run() AND around every other call that touches the
+ *  DRP-AI device: the model load in open() and the runtime teardown in
+ *  close().  DRP-AI runs one job at a time and the driver answers a second
+ *  DRPAI_START with -EBUSY instead of queueing it; the closed runtime treats
+ *  that as a hard failure.  One lock for every handle in the process makes
+ *  concurrent users wait their turn.  Lock order: arena().mutex() first,
+ *  then run_mutex(); invoke never takes the arena lock.
  *  ponytail: plain mutex, no FIFO fairness; add a ticket lock if a starved
  *  handle is ever measured. */
 inline std::mutex &run_mutex()

@@ -281,6 +281,34 @@ void test_failed_open_releases_core_slot()
 	}
 }
 
+/* Test 7: a successful bind_cores() moves the handle's core-set slot instead
+ * of leaking the old one: open(1), bind 1->4, close, then three NEW distinct
+ * sets must all fit (and a fourth must still be refused) -- if either set had
+ * leaked, one of these would be ALP_ERR_BUSY too early. */
+void test_bind_cores_moves_the_slot()
+{
+	reset_fakes();
+	dxrt_test::g_declared_inputs.push_back(make_tensor({ 1, 4 }));
+	dxrt_test::g_declared_outputs.push_back(make_tensor({ 1, 1 }));
+
+	struct alp_inference   m   = {};
+	alp_inference_config_t cfg = base_cfg();
+	ALP_ASSERT_EQ_INT(alp_inference_deepx_open(&m, &cfg, 1u), ALP_OK);
+	ALP_ASSERT_EQ_INT(alp_inference_deepx_bind_cores(&m, 4u), ALP_OK);
+	ALP_ASSERT_EQ_INT(dxrt_test::g_live_by_bound[1], 0); /* old engine gone */
+	ALP_ASSERT_EQ_INT(dxrt_test::g_live_by_bound[4], 1);
+	alp_inference_deepx_close(&m);
+
+	struct alp_inference h[4] = {};
+	ALP_ASSERT_EQ_INT(alp_inference_deepx_open(&h[0], &cfg, 1u), ALP_OK);
+	ALP_ASSERT_EQ_INT(alp_inference_deepx_open(&h[1], &cfg, 4u), ALP_OK);
+	ALP_ASSERT_EQ_INT(alp_inference_deepx_open(&h[2], &cfg, 5u), ALP_OK);
+	ALP_ASSERT_EQ_INT(alp_inference_deepx_open(&h[3], &cfg, 6u), ALP_ERR_BUSY);
+	alp_inference_deepx_close(&h[0]);
+	alp_inference_deepx_close(&h[1]);
+	alp_inference_deepx_close(&h[2]);
+}
+
 } /* namespace */
 
 int main(void)
@@ -294,6 +322,7 @@ int main(void)
 	test_open_builds_engine_on_requested_cores_only();
 	test_fourth_distinct_core_set_is_busy();
 	test_failed_open_releases_core_slot();
+	test_bind_cores_moves_the_slot();
 
 	ALP_TEST_SUMMARY();
 }

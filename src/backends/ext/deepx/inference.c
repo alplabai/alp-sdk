@@ -51,7 +51,9 @@ alp_status_t alp_deepx_inference_get_status(alp_inference_t           *inf,
 alp_inference_t *alp_deepx_inference_open(const alp_inference_config_t *cfg,
                                           alp_deepx_npu_cores_t         cores)
 {
-	if (cfg == NULL || (unsigned)cores > (unsigned)ALP_DEEPX_NPU_CORES_02) {
+	if (cfg == NULL || (unsigned)cores > (unsigned)ALP_DEEPX_NPU_CORES_02 ||
+	    (cfg->backend != ALP_INFERENCE_BACKEND_AUTO &&
+	     cfg->backend != ALP_INFERENCE_BACKEND_DEEPX_DXM1)) {
 		alp_z_set_last_error(ALP_ERR_INVAL);
 		return NULL;
 	}

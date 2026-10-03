@@ -149,19 +149,24 @@ void fake_device(uint64_t model_bytes)
 {
 	drpai_test::g_device_present = true;
 	drpai_test::g_model_bytes    = model_bytes;
+	drpai_test::g_cpu_only       = false;
 	drpai_test::g_load_starts.clear();
-	drpai_test::g_max_in_flight = 0;
-	drpai_test::g_in_flight     = 0;
-	drpai_test::g_runs          = 0;
+	drpai_test::g_max_in_flight  = 0;
+	drpai_test::g_in_flight      = 0;
+	drpai_test::g_runs           = 0;
+	drpai_test::g_run_block      = false;
+	drpai_test::g_overlap_events = 0;
 }
 
-/* Test 2b: two open handles get DISJOINT, ordered, aligned ranges, and a
- * handle that does not fit is refused with ALP_ERR_NOMEM.  Before the
- * arena allocator every handle loaded at the arena base and overwrote the
- * previous one. */
+constexpr uint64_t kMiB = 1ull << 20;
+
+/* Test 2b: open handles get DISJOINT, ordered, 16 MiB-aligned ranges, and a
+ * handle that does not fit is refused with ALP_ERR_NOMEM.  Before the arena
+ * allocator every handle loaded at the arena base and overwrote the previous
+ * one. */
 void test_handles_get_disjoint_arena_ranges()
 {
-	fake_device(0x4000000ull); /* 64 MiB each */
+	fake_device(64 * kMiB);
 	alp_inference_config_t cfg = tar_cfg();
 	struct alp_inference   a = {}, b = {};
 
@@ -169,12 +174,11 @@ void test_handles_get_disjoint_arena_ranges()
 	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&b, &cfg), ALP_OK);
 	ALP_ASSERT_EQ_INT((int)drpai_test::g_load_starts.size(), 2);
 	ALP_ASSERT_TRUE(drpai_test::g_load_starts[0] == drpai_test::g_area_base);
-	ALP_ASSERT_TRUE(drpai_test::g_load_starts[1] == drpai_test::g_area_base + 0x4000000ull);
-	ALP_ASSERT_TRUE(drpai_test::g_load_starts[1] % (1ull << 20) == 0);
+	ALP_ASSERT_TRUE(drpai_test::g_load_starts[1] == drpai_test::g_area_base + 64 * kMiB);
+	ALP_ASSERT_TRUE(drpai_test::g_load_starts[1] % (16 * kMiB) == 0);
 
-	/* Fill the arena: 512 MiB - 32 MiB pre-processing reserve = 480 MiB
-	 * usable; 2 x 64 MiB used, so 5 more 64 MiB models fit and the 6th
-	 * does not. */
+	/* 512 MiB - 32 MiB pre-processing reserve = 480 MiB usable; 2 x 64 MiB
+	 * used, so 5 more 64 MiB models fit and the 6th does not. */
 	struct alp_inference more[6] = {};
 	int                  opened  = 0;
 	alp_status_t         last    = ALP_OK;
@@ -187,37 +191,89 @@ void test_handles_get_disjoint_arena_ranges()
 	}
 	ALP_ASSERT_EQ_INT(opened, 5);
 	ALP_ASSERT_EQ_INT(last, ALP_ERR_NOMEM);
+	ALP_ASSERT_NULL(more[opened].be_state); /* failed open left no state */
 
-	for (int i = 0; i < opened; ++i) {
+	for (int i = opened - 1; i >= 0; --i) {
 		alp_inference_drpai_close(&more[i]);
 	}
-	/* The failed open left no state behind. */
-	ALP_ASSERT_NULL(more[opened].be_state);
-
-	/* Bump allocator: closing a handle does not hand its range back while
-	 * another handle is still open (here b), so the cursor stays where it
-	 * was -- the arena is still full.  It rewinds with the LAST close. */
-	alp_inference_drpai_close(&a);
-	struct alp_inference c = {};
-	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&c, &cfg), ALP_ERR_NOMEM);
 	alp_inference_drpai_close(&b);
-
-	drpai_test::g_load_starts.clear();
-	struct alp_inference d = {};
-	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&d, &cfg), ALP_OK);
-	ALP_ASSERT_TRUE(drpai_test::g_load_starts[0] == drpai_test::g_area_base);
-	alp_inference_drpai_close(&d);
+	alp_inference_drpai_close(&a);
 	drpai_test::g_device_present = false;
 }
 
 /* Test 2c: a single model larger than the usable arena is refused. */
 void test_oversized_model_is_refused()
 {
-	fake_device(0x1f000000ull); /* 496 MiB > 480 MiB usable */
+	fake_device(496 * kMiB); /* > 480 MiB usable */
 	alp_inference_config_t cfg = tar_cfg();
 	struct alp_inference   h   = {};
 	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&h, &cfg), ALP_ERR_NOMEM);
 	ALP_ASSERT_NULL(h.be_state);
+	drpai_test::g_device_present = false;
+}
+
+/* Test 2e: ranges are reclaimed.  LIFO close then reopen reuses the space,
+ * and the "swap B while A stays open" cycle repeated far more often than the
+ * arena could hold never hits NOMEM. */
+void test_closed_ranges_are_reclaimed()
+{
+	fake_device(64 * kMiB);
+	alp_inference_config_t cfg = tar_cfg();
+	struct alp_inference   a = {}, b = {}, c = {};
+
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&a, &cfg), ALP_OK);
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&b, &cfg), ALP_OK);
+	alp_inference_drpai_close(&b); /* LIFO */
+	drpai_test::g_load_starts.clear();
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&c, &cfg), ALP_OK);
+	ALP_ASSERT_TRUE(drpai_test::g_load_starts[0] == drpai_test::g_area_base + 64 * kMiB);
+	alp_inference_drpai_close(&c);
+
+	for (int i = 0; i < 40; ++i) { /* 40 x 64 MiB >> 480 MiB */
+		struct alp_inference x = {};
+		ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&x, &cfg), ALP_OK);
+		alp_inference_drpai_close(&x);
+	}
+	/* Closing the LOWER handle first leaves the upper range live: the cursor
+	 * stays above it, then falls back once it closes too. */
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&b, &cfg), ALP_OK);
+	alp_inference_drpai_close(&a);
+	alp_inference_drpai_close(&b);
+	drpai_test::g_load_starts.clear();
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&a, &cfg), ALP_OK);
+	ALP_ASSERT_TRUE(drpai_test::g_load_starts[0] == drpai_test::g_area_base);
+	alp_inference_drpai_close(&a);
+	drpai_test::g_device_present = false;
+}
+
+/* Test 2f: a CPU-only model (GetLastAddress() == 0) opens and uses no arena. */
+void test_cpu_only_model_uses_no_arena()
+{
+	fake_device(64 * kMiB);
+	drpai_test::g_cpu_only     = true;
+	alp_inference_config_t cfg = tar_cfg();
+	struct alp_inference   a = {}, b = {};
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&a, &cfg), ALP_OK);
+	drpai_test::g_cpu_only = false;
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&b, &cfg), ALP_OK);
+	ALP_ASSERT_TRUE(drpai_test::g_load_starts[1] == drpai_test::g_area_base);
+	alp_inference_drpai_close(&b);
+	alp_inference_drpai_close(&a);
+	drpai_test::g_device_present = false;
+}
+
+/* Test 2g: a driver area that changes under live handles is refused. */
+void test_area_change_with_live_handle_is_refused()
+{
+	fake_device(64 * kMiB);
+	alp_inference_config_t cfg = tar_cfg();
+	struct alp_inference   a = {}, b = {};
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&a, &cfg), ALP_OK);
+	const uint64_t old_base = drpai_test::g_area_base;
+	drpai_test::g_area_base = old_base + 0x10000000ull;
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&b, &cfg), ALP_ERR_NOMEM);
+	drpai_test::g_area_base = old_base;
+	alp_inference_drpai_close(&a);
 	drpai_test::g_device_present = false;
 }
 
@@ -226,7 +282,7 @@ void test_oversized_model_is_refused()
  * window; without the process-wide lock the high-water mark reaches >1). */
 void test_concurrent_invokes_are_serialised()
 {
-	fake_device(0x1000000ull);
+	fake_device(16 * kMiB);
 	alp_inference_config_t cfg  = tar_cfg();
 	struct alp_inference   h[3] = {};
 	for (auto &x : h) {
@@ -250,6 +306,51 @@ void test_concurrent_invokes_are_serialised()
 	for (auto &x : h) {
 		alp_inference_drpai_close(&x);
 	}
+	drpai_test::g_device_present = false;
+}
+
+/* Test 2h: open() and close() of one handle wait for another handle's job:
+ * the model load and the runtime teardown touch the device, which runs one
+ * job at a time.  A job is held open on handle A; B is opened and C closed
+ * from other threads and neither may finish (nor touch the device) until
+ * A's Run() returns. */
+void test_open_and_close_wait_for_a_running_job()
+{
+	fake_device(64 * kMiB);
+	alp_inference_config_t cfg = tar_cfg();
+	struct alp_inference   a = {}, b = {}, c = {};
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&a, &cfg), ALP_OK);
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&c, &cfg), ALP_OK);
+
+	drpai_test::g_run_block = true;
+	std::thread run_a([&a]() { (void)alp_inference_drpai_invoke(&a); });
+	while (drpai_test::g_in_flight.load() == 0) { /* A is inside Run() */
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+
+	std::atomic<int> opened{ 0 }, closed{ 0 };
+	alp_status_t     open_rc = ALP_ERR_IO;
+	std::thread      open_b([&]() {
+		open_rc = alp_inference_drpai_open(&b, &cfg);
+		opened  = 1;
+	});
+	std::thread      close_c([&]() {
+		alp_inference_drpai_close(&c);
+		closed = 1;
+	});
+	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	ALP_ASSERT_EQ_INT(opened.load(), 0); /* still waiting for A's job */
+	ALP_ASSERT_EQ_INT(closed.load(), 0);
+
+	drpai_test::g_run_block = false;
+	run_a.join();
+	open_b.join();
+	close_c.join();
+	ALP_ASSERT_EQ_INT(open_rc, ALP_OK);
+	ALP_ASSERT_EQ_INT(drpai_test::g_overlap_events.load(), 0);
+
+	alp_inference_drpai_close(&b);
+	alp_inference_drpai_close(&a);
 	drpai_test::g_device_present = false;
 }
 
@@ -302,7 +403,11 @@ int main(void)
 	test_open_fails_cleanly_when_device_absent();
 	test_handles_get_disjoint_arena_ranges();
 	test_oversized_model_is_refused();
+	test_closed_ranges_are_reclaimed();
+	test_cpu_only_model_uses_no_arena();
+	test_area_change_with_live_handle_is_refused();
 	test_concurrent_invokes_are_serialised();
+	test_open_and_close_wait_for_a_running_job();
 	test_num_inputs_outputs_zero_when_not_open();
 	test_get_input_output_not_ready_when_not_open();
 	test_invoke_not_ready_when_not_open();

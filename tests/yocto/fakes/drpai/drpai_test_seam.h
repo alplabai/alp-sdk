@@ -40,4 +40,15 @@ inline std::atomic<int> g_in_flight{ 0 };
 inline std::atomic<int> g_max_in_flight{ 0 };
 inline std::atomic<int> g_runs{ 0 };
 
+/* While true, Run() blocks after counting itself in flight (lets a test hold
+ * a job open on the "NPU"). */
+inline std::atomic<bool> g_run_block{ false };
+
+/* LoadModel() or a runtime teardown that happened while a Run() was in
+ * flight -- the SDK must never allow either. */
+inline std::atomic<int> g_overlap_events{ 0 };
+
+/* When true, LoadModel() reports an end address of 0 (a CPU-only model). */
+inline bool g_cpu_only = false;
+
 } /* namespace drpai_test */

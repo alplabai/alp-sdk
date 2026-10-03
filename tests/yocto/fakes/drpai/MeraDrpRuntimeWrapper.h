@@ -45,13 +45,23 @@ class MeraDrpRuntimeWrapper
 	bool LoadModel(const std::string &model_dir, uint64_t start_address)
 	{
 		(void)model_dir;
+		if (drpai_test::g_in_flight.load() > 0) {
+			++drpai_test::g_overlap_events;
+		}
 		drpai_test::g_load_starts.push_back(start_address);
-		last_address_ = start_address + drpai_test::g_model_bytes;
+		last_address_ = drpai_test::g_cpu_only ? 0 : start_address + drpai_test::g_model_bytes;
 		return true;
 	}
 
+	~MeraDrpRuntimeWrapper()
+	{
+		if (drpai_test::g_in_flight.load() > 0) {
+			++drpai_test::g_overlap_events;
+		}
+	}
+
 	/* End of the model placed by LoadModel(), like the real wrapper. */
-	uint64_t GetLastAddress() const
+	uint64_t GetLastAddress()
 	{
 		return last_address_;
 	}
@@ -93,6 +103,9 @@ class MeraDrpRuntimeWrapper
 		while (now > prev && !drpai_test::g_max_in_flight.compare_exchange_weak(prev, now)) {
 		}
 		std::this_thread::sleep_for(std::chrono::milliseconds(5));
+		while (drpai_test::g_run_block.load()) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		}
 		++drpai_test::g_runs;
 		--drpai_test::g_in_flight;
 	}

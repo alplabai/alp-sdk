@@ -6,7 +6,7 @@
 # RUHMI_DRPAI_TVM_DIR set in local.conf -- the SDK's DRP-AI backend only
 # compiles with that account-gated Renesas checkout (see
 # docs/bring-up-drpai-v2n.md Sec 4).  Boot, then run
-#   v2n-two-models <drpai-model.tar> <drpai-frame.bin> #                  <model.dxnn> <dxnn-frame.bin> [seconds] [mode]
+#   v2n-two-models <drpai-model.tar> <drpai-frame.bin> \n#                  <model.dxnn> <dxnn-frame.bin> [seconds] [mode]
 #
 # E1M-V2M103 is the SKU the V2M HIL bench runs; the DRP-AI3 + DX-M1 pair is
 # the same on every V2M SKU.

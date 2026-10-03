@@ -107,7 +107,10 @@
  *   The NPU runs ONE job at a time and the driver has no queue (a second
  *   DRPAI_START gets -EBUSY).  So (a) each open handle is loaded into its
  *   own range of the arena -- drpai_arena.h places it after the previous
- *   one using the runtime's GetLastAddress(), leaving the arena tail free
+ *   one using the runtime's GetLastAddress() (real wrapper, rzv_drp-ai_tvm
+ *   Release-2026-04-17 apps/MeraDrpRuntimeWrapper.h: `uint64_t
+ *   GetLastAddress()`, an absolute end address, 0 for a CPU-only model),
+ *   leaving the arena tail free
  *   for pre-processing, and open() returns ALP_ERR_NOMEM when it no longer
  *   fits -- and (b) invoke() holds one process-wide mutex across SetInput +
  *   Run, so threads on different handles take turns.  Two PROCESSES are not
@@ -337,9 +340,9 @@ alp_status_t _stage_drpai_blob(const void *data, size_t len, std::string &out_di
 struct DrpaiState {
 	MeraDrpRuntimeWrapper runtime; /* default-constructed */
 	std::string           model_dir;
-	/* True once this handle's model range is committed to the process-wide
-	 * arena (drpai_arena.h); close() gives it back. */
-	bool in_arena = false;
+	/* This handle's range in the process-wide arena (drpai_arena.h);
+	 * close() gives it back. */
+	alp_drpai::Range arena_range;
 	/* mkdtemp() staging dir holding the extracted .dat object files; removed
      * (after the runtime is torn down) in close(). Empty if not staged. */
 	std::string staged_dir;
@@ -432,6 +435,15 @@ extern "C" alp_status_t alp_inference_drpai_open(struct alp_inference         *h
      * fails here, without the untar-then-rm_rf round trip.  No constant
      * fallback on failure: guessing this address is a memory-corruption
      * class bug, so a driver that cannot answer fails the open instead. */
+	/* Everything from the area probe to the end of LoadModel() runs under
+	 * the arena lock (so two opens cannot be handed the same range) AND the
+	 * DRP-AI run lock (so no job is running on the NPU while another model is
+	 * loaded or the area probe opens the device).  Order: arena, then run;
+	 * invoke() only ever takes the run lock. */
+	alp_drpai::Arena            &arena = alp_drpai::arena();
+	std::unique_lock<std::mutex> arena_lk(arena.mutex());
+	std::unique_lock<std::mutex> run_lk(alp_drpai::run_mutex());
+
 	uint64_t     mem_base = 0, mem_size = 0;
 	alp_status_t mem = _drpai_mem_start(mem_base, mem_size);
 	if (mem != ALP_OK) {
@@ -443,49 +455,46 @@ extern "C" alp_status_t alp_inference_drpai_open(struct alp_inference         *h
 		return ALP_ERR_NOMEM;
 	}
 
+	/* Failure exit: tear the runtime down while still holding the run lock
+	 * (its dtor talks to the device), then drop both locks and remove the
+	 * staging dir. */
+	auto fail = [&](alp_status_t rc) {
+		const std::string dir = st->staged_dir;
+		delete st; /* tears down the runtime before we remove the dir */
+		run_lk.unlock();
+		arena_lk.unlock();
+		_rm_rf(dir);
+		return rc;
+	};
+
 	/* Stage the tar out to a private dir; the .dat object files land flat. */
 	alp_status_t stage = _stage_drpai_blob(cfg->model_data, cfg->model_size, st->staged_dir);
 	if (stage != ALP_OK) {
-		delete st;
-		return stage;
+		return fail(stage);
 	}
 	st->model_dir = st->staged_dir;
 
 	/* Each handle gets its own range of the arena: every handle would
-	 * otherwise load at the base and overwrite the previous one.  The arena
-	 * lock is held across LoadModel() so two concurrent opens cannot be
-	 * handed the same start address. */
-	alp_drpai::Arena            &arena = alp_drpai::arena();
-	std::unique_lock<std::mutex> arena_lk(arena.mutex());
-	uint64_t                     mem_start = 0;
+	 * otherwise load at the base and overwrite the previous one. */
+	uint64_t mem_start = 0;
 	if (!arena.begin(mem_base, mem_size, mem_start)) {
-		arena_lk.unlock();
-		std::string dir = st->staged_dir;
-		delete st;
-		_rm_rf(dir);
-		return ALP_ERR_NOMEM; /* arena full: close a model first */
+		return fail(ALP_ERR_NOMEM); /* arena full: close a model first */
 	}
 
 	/* LoadModel returns false on a missing/corrupt object dir or a DRP-AI
      * memory-mapping failure. */
 	if (!st->runtime.LoadModel(st->model_dir, mem_start)) {
-		arena_lk.unlock();
-		std::string dir = st->staged_dir;
-		delete st; /* tears down the runtime before we remove the dir */
-		_rm_rf(dir);
-		return ALP_ERR_IO;
+		return fail(ALP_ERR_IO);
 	}
-	/* GetLastAddress() is where the model ended; the next handle starts
-	 * after it.  A model that overruns the arena (minus the pre-processing
-	 * reserve) is refused -- its tail would be outside the carve-out. */
-	if (!arena.commit(mem_start, st->runtime.GetLastAddress())) {
-		arena_lk.unlock();
-		std::string dir = st->staged_dir;
-		delete st;
-		_rm_rf(dir);
-		return ALP_ERR_NOMEM;
+	/* GetLastAddress() is the absolute end of the model (0 for a CPU-only
+	 * model that used no DRP-AI memory; see drpai_arena.h); the next handle
+	 * starts after it.  A model that overruns the arena (minus the
+	 * pre-processing reserve) is refused -- its tail would be outside the
+	 * carve-out. */
+	if (!arena.commit(mem_start, st->runtime.GetLastAddress(), st->arena_range)) {
+		return fail(ALP_ERR_NOMEM);
 	}
-	st->in_arena = true;
+	run_lk.unlock();
 	arena_lk.unlock();
 
 	st->in_info  = st->runtime.GetInputInfo();
@@ -703,12 +712,16 @@ extern "C" void alp_inference_drpai_close(struct alp_inference *h_)
 	/* MeraDrpRuntimeWrapper owns its DRP-AI mappings + releases them in
      * its dtor (unique_ptr<Impl>); deleting the state tears it down.  Remove
      * the staging dir AFTER the runtime is gone (it may hold the dir open). */
-	std::string dir      = st->staged_dir;
-	const bool  in_arena = st->in_arena;
-	delete st;
-	if (in_arena) {
-		alp_drpai::arena().release();
+	const std::string      dir   = st->staged_dir;
+	const alp_drpai::Range range = st->arena_range;
+	{
+		/* The runtime's teardown talks to the device: not while another
+		 * handle's job is running. */
+		std::lock_guard<std::mutex> run_lk(alp_drpai::run_mutex());
+		delete st;
 	}
+	/* Not nested inside the run lock: arena -> run is the only order. */
+	alp_drpai::arena().release(range);
 	_rm_rf(dir);
 	h->be_state = nullptr;
 }

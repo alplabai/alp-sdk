@@ -50,6 +50,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <atomic>
 #include <cstring>
 #include <mutex>
 #include <new>
@@ -101,8 +102,8 @@ struct DeepxState {
 
 	/* dxrt::InferenceOption::BOUND_OPTION this engine runs on, and whether
 	 * it holds a slot in the process-wide core-set table below. */
-	unsigned bound     = 0u;
-	bool     core_held = false;
+	std::atomic<unsigned> bound{ 0u };
+	bool                  core_held = false;
 
 	/* Guards `engine`, `outputs` and `last_outputs` against a rebind:
 	 * get_output takes it shared; invoke (writes last_outputs) and
@@ -177,7 +178,7 @@ void destroy_state(DeepxState *st)
 {
 	delete st->engine;
 	if (st->core_held) {
-		cores_release(st->bound);
+		cores_release(st->bound.load());
 	}
 	delete st;
 }
@@ -480,7 +481,7 @@ extern "C" alp_status_t alp_inference_deepx_bind_cores(struct alp_inference *h_,
 	if (st == nullptr || st->model == nullptr) {
 		return ALP_ERR_NOT_READY;
 	}
-	if (bound == st->bound) {
+	if (bound == st->bound.load()) {
 		return ALP_OK; /* already on this core set */
 	}
 
@@ -510,8 +511,7 @@ extern "C" alp_status_t alp_inference_deepx_bind_cores(struct alp_inference *h_,
 
 	std::unique_lock<std::shared_mutex> lk(st->engine_mtx); /* waits out in-flight invokes */
 	delete st->engine;
-	cores_release(st->bound);
-	st->bound   = bound;
+	cores_release(st->bound.exchange(bound)); /* under engine_mtx */
 	st->engine  = fresh;
 	st->outputs = fresh->GetOutputs();
 	st->last_outputs.clear(); /* pointed into the old engine */

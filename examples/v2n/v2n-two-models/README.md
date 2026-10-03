@@ -8,9 +8,10 @@ Run two models at the same time on an E1M-V2M, one on the RZ/V2N's on-die **DRP-
 
 1. **Backend per handle.** `alp_inference_config_t.backend` picks the accelerator for that handle: `ALP_INFERENCE_BACKEND_DRPAI` for one, `ALP_INFERENCE_BACKEND_DEEPX_DXM1` for the other. Do not use `ALP_INFERENCE_BACKEND_AUTO`: it is fixed at build time and resolves to the DX-M1 on a build with both, so the DRP-AI handle must be named explicitly.
 2. **One thread per NPU.** Each NPU runs one job at a time; the two NPUs are independent hardware, so a thread on each overlaps their work. Two threads on the same NPU would only take turns (the SDK serialises DRP-AI jobs with a process-wide lock, and the DX-M1 time-shares between engines).
-3. **Solo, then both.** The default `all` mode runs DRP-AI alone, DX-M1 alone, then both, so the printed numbers show what sharing the A55 cores and DDR costs each NPU.
-4. **CPU budget.** The program sets `TVM_NUM_THREADS=2` and `TVM_BIND_THREADS=0` (unless you exported them) so the DRP-AI TVM runtime's worker pool, which pins one thread per core by upstream TVM's default, does not fight the DX-M1 runtime's threads, `dxrtd` and the pre/post-processing for the 4 A55 cores. The values are a starting point; the effect is unmeasured.
-5. **Time-shared NPUs and failures.** A failed DRP-AI job is not detectable (the runtime's `Run()` returns void), so a fast result is not proof of a correct one.
+3. **Only the NPUs the mode needs are opened.** `solo-drpai` never opens the DX-M1 and `solo-dx` never opens DRP-AI, so the two-process setup (one process per NPU) is safe: the DRP-AI arena is managed per process, and two processes using DRP-AI would load at the same address. Keep DRP-AI to one process per board.
+4. **Solo, then both.** The default `all` mode runs DRP-AI alone, DX-M1 alone, then both, so the printed numbers show what sharing the A55 cores and DDR costs each NPU.
+5. **CPU budget.** The program sets `TVM_NUM_THREADS=2` and `TVM_BIND_THREADS=0` (unless you exported them) so the DRP-AI TVM runtime's worker pool, which pins one thread per core by upstream TVM's default, does not fight the DX-M1 runtime's threads, `dxrtd` and the pre/post-processing for the 4 A55 cores. The values are a starting point; the effect is unmeasured.
+6. **Time-shared NPUs and failures.** A failed DRP-AI job is not detectable (the runtime's `Run()` returns void), so a fast result is not proof of a correct one.
 
 ## Run
 

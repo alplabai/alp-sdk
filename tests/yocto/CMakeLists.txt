@@ -339,6 +339,25 @@ target_compile_features(alp_test_inference_format_gate PRIVATE c_std_99)
 add_test(NAME alp_test_inference_format_gate
          COMMAND alp_test_inference_format_gate)
 
+# alp_deepx_inference_open() at the dispatcher level (backend/format/cores
+# validation, AUTO pinned to DEEPX, pool exhaustion).  Same #include-the-.c
+# technique as alp_test_inference_format_gate, with fake DEEPX hooks.
+add_executable(alp_test_inference_deepx_open_dispatch
+    ${CMAKE_CURRENT_SOURCE_DIR}/inference_deepx_open_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
+)
+target_include_directories(alp_test_inference_deepx_open_dispatch PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+)
+target_compile_features(alp_test_inference_deepx_open_dispatch PRIVATE c_std_99)
+
+add_test(NAME alp_test_inference_deepx_open_dispatch
+         COMMAND alp_test_inference_deepx_open_dispatch)
+
 # Issue #1254 end-to-end regression: an "onnx" blob_format .alpmodel,
 # decoded by the REAL zcbor-backed alp_model_parse() (src/common/
 # alp_model.c, compiled in place of the ALP_ERR_NOSUPPORT stub only

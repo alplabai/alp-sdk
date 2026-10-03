@@ -502,15 +502,20 @@ driver has no queue (a second `DRPAI_START` while a job runs returns
 - **Each open handle gets its own range of the arena.** Without that,
   every handle loaded at the arena base (`0xd0000000`) and the second
   model silently overwrote the first. The SDK now places each model after
-  the previous one, using the runtime's `GetLastAddress()`, aligned to
-  1 MiB, and keeps the last 32 MiB of the 512 MiB region free for DRP-AI
+  the highest live one, using the runtime's `GetLastAddress()` (the
+  absolute end address of the model just loaded; `0` for a CPU-only model
+  that uses no DRP-AI memory), aligned to 16 MiB as Renesas' own tutorial
+  does, and keeps the last 32 MiB of the 512 MiB region free for DRP-AI
   pre-processing (an estimate -- no compiled bundle exists to measure it,
   #2236). A model that does not fit makes `alp_inference_open()` fail
-  with `ALP_ERR_NOMEM`. Ranges are not recycled one by one: the cursor
-  rewinds when the last handle closes.
+  with `ALP_ERR_NOMEM`. Closing a handle gives its range back: the next
+  model starts after the highest range still open (the arena base if none),
+  so closing a model and loading another reuses the space. A hole below a
+  still-open higher model is not reused.
 - **Jobs are serialised.** One process-wide mutex covers `SetInput` +
-  `Run` in `alp_inference_invoke()`, so threads on different handles wait
-  their turn instead of colliding on the driver. Two models on DRP-AI
+  `Run` in `alp_inference_invoke()`, and also the model load in `open()`
+  and the runtime teardown in `close()`, so threads on different handles
+  wait their turn instead of colliding on the driver. Two models on DRP-AI
   therefore cost the sum of their latencies.
 - **A failed job is not reported.** The runtime's `Run()` returns void,
   so a rejected or timed-out job still returns `ALP_OK`. A driver status

@@ -4,9 +4,9 @@
  *
  * v2n-two-models -- run two models at the same time on two different
  * NPUs of an E1M-V2M: one on the RZ/V2N's on-die DRP-AI3, one on the
- * DEEPX DX-M1 behind PCIe, each in its own thread, all through the
- * portable <alp/inference.h> surface.  Prints per-NPU latency and the
- * combined frame rate.
+ * DEEPX DX-M1 behind PCIe, each in its own thread, through the portable
+ * <alp/inference.h> surface.  Prints per-NPU latency and the combined
+ * frame rate.
  *
  * What this example shows
  * ========================
@@ -34,16 +34,23 @@
  *      the SDK times each successful invoke(), so each worker reads its
  *      own handle's figure after every call.
  *
- * Opening order matters a little
- * ===============================
+ * Only the NPUs the mode needs are opened
+ * ========================================
  *
- *   Both handles are opened on the MAIN thread, one after the other,
- *   before any worker starts.  Opening loads a model into the NPU (the
- *   DRP-AI backend places each model in its own range of the DRP-AI
- *   working-memory arena; the DX-M1 backend builds a dx_rt engine), and
- *   keeping that sequential gives a clear error message per NPU instead
- *   of two interleaved failures.  The SDK's handle pool defaults to 4
- *   slots (ALP_SDK_MAX_INFERENCE_HANDLES), plenty for this demo.
+ *   `all` and `both` open both handles; `solo-drpai` opens only DRP-AI and
+ *   `solo-dx` only the DX-M1.  That matters for the two-process setup
+ *   (one process per NPU, see tests/hil/v2m103-x-evk/): the DRP-AI arena
+ *   is managed per process, so a second process that also opened DRP-AI
+ *   would load its model at the same address and corrupt the first.
+ *   Keep DRP-AI to ONE process per board.
+ *
+ *   Handles are opened on the MAIN thread, one after the other, before any
+ *   worker starts.  Opening loads a model into the NPU (the DRP-AI backend
+ *   places each model in its own range of the DRP-AI working-memory arena;
+ *   the DX-M1 backend builds a dx_rt engine), and keeping that sequential
+ *   gives a clear error message per NPU instead of two interleaved
+ *   failures.  The SDK's handle pool defaults to 4 slots
+ *   (ALP_SDK_MAX_INFERENCE_HANDLES), plenty for this demo.
  *
  * Inputs
  * ======
@@ -65,21 +72,22 @@
  *   `seconds` (default 10) is how long each phase runs.  `mode` is
  *   `all` (default: DRP-AI alone, DX-M1 alone, then both -- the solo
  *   lines are the baseline that shows what sharing the A55 cores and DDR
- *   costs), `solo-drpai`, `solo-dx` or `both`.  The same frame
- *   is invoked over and over: this is a throughput demo, not an
- *   accuracy one, so the outputs are not decoded or printed.
+ *   costs), `solo-drpai`, `solo-dx` or `both`.  The same frame is invoked
+ *   over and over: this is a throughput demo, not an accuracy one, so the
+ *   outputs are not decoded or printed.
  *
  * What actually ran
  * ==================
  *
- *   NOT bench-verified.  This builds against the public header only; it
+ *   NOT bench-verified.  This builds against the public headers only; it
  *   has not been run on an E1M-V2M with both backends enabled.  The
- *   V2M image needs both stacks AND an alp-sdk built with the DRP-AI
+ *   image needs both stacks AND an alp-sdk built with the DRP-AI
  *   backend, which only compiles when RUHMI_DRPAI_TVM_DIR (an
  *   account-gated Renesas checkout) is configured; without it the DRP-AI
- *   open fails with ALP_ERR_NOSUPPORT (see docs/bring-up-drpai-v2n.md).  A failed DRP-AI invoke cannot be
- *   detected by the SDK (the vendor Run() returns void), so a model that
- *   fails on the NPU can still look like a fast, successful invoke here.
+ *   open fails with ALP_ERR_NOSUPPORT (see docs/bring-up-drpai-v2n.md).
+ *   A failed DRP-AI invoke cannot be detected by the SDK (the vendor
+ *   Run() returns void), so a model that fails on the NPU can still look
+ *   like a fast, successful invoke here.
  */
 
 #include <errno.h>
@@ -90,24 +98,28 @@
 #include <string.h>
 #include <time.h>
 
+#include "alp/ext/deepx/inference.h" /* alp_deepx_inference_open(): DX-M1 core set at open */
 #include "alp/inference.h"
 
 #define DEFAULT_SECONDS 10
 
 /* Everything one worker thread needs and reports.  `name` is only for the
- * log lines; `inf` is opened by main() and owned by it. */
+ * log lines; `inf` is opened by main() and owned by it.  Each worker has
+ * its own struct, so the threads never share a counter and need no lock. */
 struct worker {
-	const char      *name;
-	alp_inference_t *inf;
-	double           run_s;   /* how long to keep invoking */
-	uint64_t         invokes; /* out: successful invokes */
-	uint64_t         lat_sum_us;
-	uint64_t         lat_max_us;
-	alp_status_t     error; /* out: first failure, ALP_OK if none */
+	const char      *name;       /* "drpai" / "deepx": prefix of its log lines */
+	alp_inference_t *inf;        /* open handle this thread invokes; not owned */
+	double           run_s;      /* how long to keep invoking, seconds */
+	uint64_t         invokes;    /* out: successful invokes */
+	uint64_t         lat_sum_us; /* out: sum of per-invoke latencies, for the average */
+	uint64_t         lat_max_us; /* out: worst single invoke, shows jitter under sharing */
+	alp_status_t     error;      /* out: first failure, ALP_OK if none */
 };
 
 /* ---- small helpers ----------------------------------------------------- */
 
+/* Monotonic seconds.  CLOCK_MONOTONIC never jumps when the wall clock is
+ * set, so it is the right clock for measuring how long something took. */
 static double now_s(void)
 {
 	struct timespec ts;
@@ -115,8 +127,11 @@ static double now_s(void)
 	return (double)ts.tv_sec + (double)ts.tv_nsec / 1.0e9;
 }
 
-/* Read a whole file into a malloc'd buffer (caller frees).  NULL + message
- * on any error. */
+/* Read a whole file into a malloc'd buffer; the caller frees it.  Returns
+ * NULL after printing why on any error -- missing file, seek failure, OOM
+ * or a short read -- so the caller only has to check for NULL.  Model
+ * blobs and frames are small enough to read in one go; a streaming reader
+ * would only add code. */
 static void *read_file(const char *path, size_t *out_len)
 {
 	FILE *f = fopen(path, "rb");
@@ -124,6 +139,7 @@ static void *read_file(const char *path, size_t *out_len)
 		fprintf(stderr, "error: cannot open '%s': %s\n", path, strerror(errno));
 		return NULL;
 	}
+	/* Size the file with seek/tell, then rewind to read it. */
 	if (fseek(f, 0, SEEK_END) != 0) {
 		fprintf(stderr, "error: cannot seek '%s'\n", path);
 		fclose(f);
@@ -152,27 +168,16 @@ static void *read_file(const char *path, size_t *out_len)
 	return buf;
 }
 
-/* Open one model on a chosen backend and copy the frame into its input
- * tensor.  Returns the handle, or NULL after printing why.
+/* Prepare an opened handle for the benchmark loop: check the frame fits the
+ * model's input tensor and copy it in.  Returns the handle, or closes it and
+ * returns NULL after printing why (so callers treat "open + prepare" as one
+ * step that either yields a ready handle or NULL).
  *
- * `backend` is the whole point: the caller names the NPU for this handle.
- * `format` has to match what that backend loads (a DRP-AI bundle tar or a
- * DEEPX .dxnn); open() refuses a mismatch with ALP_ERR_INVAL. */
-static alp_inference_t *open_model(const char                  *tag,
-                                   alp_inference_backend_t      backend,
-                                   alp_inference_model_format_t format,
-                                   const void                  *model,
-                                   size_t                       model_len,
-                                   const void                  *frame,
-                                   size_t                       frame_len)
+ * The input buffer is owned by the SDK and stays valid until close(), so the
+ * frame is copied ONCE here and every invoke reuses it. */
+static alp_inference_t *
+prepare_handle(const char *tag, alp_inference_t *inf, const void *frame, size_t frame_len)
 {
-	alp_inference_config_t cfg = {
-		.model_data = model,
-		.model_size = model_len,
-		.format     = format,
-		.backend    = backend,
-	};
-	alp_inference_t *inf = alp_inference_open(&cfg);
 	if (inf == NULL) {
 		/* The reason is in the thread-local last error.  Typical here:
 		 * ALP_ERR_NOSUPPORT (that backend is not built into this image),
@@ -201,8 +206,6 @@ static alp_inference_t *open_model(const char                  *tag,
 		alp_inference_close(inf);
 		return NULL;
 	}
-	/* The input buffer is SDK-owned and stays valid until close(), so the
-	 * frame is copied ONCE here and every invoke reuses it. */
 	memcpy(in.data, frame, frame_len);
 
 	printf("[two-npu] %s: handle open (%zu input, %zu output)\n",
@@ -219,16 +222,23 @@ static alp_inference_t *open_model(const char                  *tag,
  * needed here; cross-handle serialisation (if any) happens inside the SDK. */
 static void *worker_main(void *arg)
 {
+	/* pthread passes one void pointer; ours is this worker's own struct. */
 	struct worker *w   = arg;
 	const double   end = now_s() + w->run_s;
 
 	while (now_s() < end) {
+		/* One blocking inference.  The frame is already in the input tensor
+		 * (copied once in prepare_handle()), so each call is the NPU's
+		 * steady-state cost with no host-side input copy mixed in.  The
+		 * output is not read: this demo measures speed, not accuracy. */
 		alp_status_t rc = alp_inference_invoke(w->inf);
 		if (rc != ALP_OK) {
-			w->error = rc;
+			w->error = rc; /* remember the first failure and stop */
 			break;
 		}
-		/* Per-call latency measured by the SDK around this invoke. */
+		/* Per-call latency measured by the SDK around this invoke.  It is
+		 * the LAST successful invoke on this handle, which is this
+		 * thread's call because no other thread uses the handle. */
 		uint64_t us = 0;
 		if (alp_inference_last_invoke_latency_us(w->inf, &us) == ALP_OK) {
 			w->lat_sum_us += us;
@@ -241,8 +251,12 @@ static void *worker_main(void *arg)
 	return NULL;
 }
 
+/* Print one worker's result line: invoke count, average and worst latency
+ * in milliseconds, and its own frame rate over the phase's wall time. */
 static void report(const struct worker *w, double wall_s)
 {
+	/* Guard the divisions below: a worker that failed on its first invoke
+	 * has nothing to average. */
 	if (w->invokes == 0u) {
 		printf("[two-npu] %s: 0 invokes\n", w->name);
 		return;
@@ -280,13 +294,16 @@ static void print_temps(const char *when)
 /* Run `n` workers at once for `seconds`, then print each one's numbers and,
  * for n > 1, the combined FPS.  Returns 0 on success, 1 on any failure.
  * Comparing the "solo" lines with the "both" line shows what running the
- * NPUs together costs each of them. */
+ * NPUs together costs each of them.  Combined FPS adds up every worker's
+ * invokes over the same wall time, which is the throughput the application
+ * would see if each invoke were one frame. */
 static int run_phase(const char *label, struct worker *ws, int n, int seconds)
 {
-	pthread_t tid[2];
+	pthread_t tid[2]; /* at most one worker per NPU */
 	int       started = 0, rc = 0;
 
 	printf("[two-npu] phase: %s\n", label);
+	/* Reset the counters so a phase never reports the previous one's. */
 	for (int i = 0; i < n; ++i) {
 		ws[i].run_s      = (double)seconds;
 		ws[i].invokes    = 0u;
@@ -294,6 +311,10 @@ static int run_phase(const char *label, struct worker *ws, int n, int seconds)
 		ws[i].lat_max_us = 0u;
 		ws[i].error      = ALP_OK;
 	}
+	/* Start all workers as close together as possible; the wall clock for
+	 * the phase begins just before the first thread exists and ends after
+	 * the last join, so FPS = invokes / wall time includes thread start-up
+	 * (microseconds against a many-second phase). */
 	const double t0 = now_s();
 	for (; started < n; ++started) {
 		if (pthread_create(&tid[started], NULL, worker_main, &ws[started]) != 0) {
@@ -307,6 +328,9 @@ static int run_phase(const char *label, struct worker *ws, int n, int seconds)
 	}
 	const double wall_s = now_s() - t0;
 
+	/* Per-worker lines first, then (for n > 1) the combined line.  A worker
+	 * that stopped on an error is reported too, so a failure is visible next
+	 * to the numbers it produced before failing. */
 	uint64_t total = 0;
 	for (int i = 0; i < started; ++i) {
 		report(&ws[i], wall_s);
@@ -342,18 +366,28 @@ int main(int argc, char **argv)
 		        argv[0]);
 		return 2;
 	}
+	/* Optional arguments: how long each phase runs, and which phases. */
 	int seconds = (argc >= 6) ? atoi(argv[5]) : DEFAULT_SECONDS;
 	if (seconds <= 0) {
 		fprintf(stderr, "error: seconds must be a positive integer\n");
 		return 2;
 	}
 
-	const char *mode = (argc == 7) ? argv[6] : "all";
-	if (strcmp(mode, "all") != 0 && strcmp(mode, "solo-drpai") != 0 &&
-	    strcmp(mode, "solo-dx") != 0 && strcmp(mode, "both") != 0) {
+	/* Three booleans decide everything below: which solo phases run, whether
+	 * the combined phase runs, and (derived from them) which NPUs and which
+	 * input files are needed at all. */
+	const char *mode          = (argc == 7) ? argv[6] : "all";
+	const int   do_solo_drpai = strcmp(mode, "all") == 0 || strcmp(mode, "solo-drpai") == 0;
+	const int   do_solo_dx    = strcmp(mode, "all") == 0 || strcmp(mode, "solo-dx") == 0;
+	const int   do_both       = strcmp(mode, "all") == 0 || strcmp(mode, "both") == 0;
+	if (!do_solo_drpai && !do_solo_dx && !do_both) {
 		fprintf(stderr, "error: mode must be all, solo-drpai, solo-dx or both\n");
 		return 2;
 	}
+	/* Which NPUs this run touches.  Open ONLY those: see "Only the NPUs the
+	 * mode needs are opened" above. */
+	const int need_drpai = do_solo_drpai || do_both;
+	const int need_dx    = do_solo_dx || do_both;
 
 	/* CPU budget.  The DRP-AI TVM runtime runs the model's CPU-side ops on
 	 * its own thread pool and, by upstream TVM's default, pins one worker to
@@ -367,61 +401,114 @@ int main(int argc, char **argv)
 	setenv("TVM_NUM_THREADS", "2", 0);
 	setenv("TVM_BIND_THREADS", "0", 0);
 
-	size_t drpai_model_len = 0, drpai_frame_len = 0, dx_model_len = 0, dx_frame_len = 0;
-	void  *drpai_model = read_file(argv[1], &drpai_model_len);
-	void  *drpai_frame = read_file(argv[2], &drpai_frame_len);
-	void  *dx_model    = read_file(argv[3], &dx_model_len);
-	void  *dx_frame    = read_file(argv[4], &dx_frame_len);
-
+	/* Load only the files the chosen mode needs, so a `solo-dx` process
+	 * never even reads the DRP-AI bundle and vice versa.  Every pointer
+	 * starts NULL and is released at `out:`, so the `goto out` error exits
+	 * below are safe from any point: free(NULL) is a no-op, and a handle is
+	 * only closed if it was opened.  (This is the one place a goto is the
+	 * clearest way to write C cleanup.) */
+	size_t           drpai_model_len = 0, drpai_frame_len = 0, dx_model_len = 0, dx_frame_len = 0;
+	void            *drpai_model = NULL, *drpai_frame = NULL, *dx_model = NULL, *dx_frame = NULL;
 	int              exit_code = 1;
 	alp_inference_t *drpai     = NULL;
 	alp_inference_t *dx        = NULL;
-	if (drpai_model == NULL || drpai_frame == NULL || dx_model == NULL || dx_frame == NULL) {
-		goto out;
+
+	if (need_drpai) {
+		drpai_model = read_file(argv[1], &drpai_model_len);
+		drpai_frame = read_file(argv[2], &drpai_frame_len);
+		if (drpai_model == NULL || drpai_frame == NULL) {
+			goto out;
+		}
+	}
+	if (need_dx) {
+		dx_model = read_file(argv[3], &dx_model_len);
+		dx_frame = read_file(argv[4], &dx_frame_len);
+		if (dx_model == NULL || dx_frame == NULL) {
+			goto out;
+		}
 	}
 
-	printf("[two-npu] v2n-two-models: DRP-AI + DX-M1, %d s\n", seconds);
+	/* A marker line the HIL specs wait for; it also records the mode. */
+	printf("[two-npu] v2n-two-models: mode %s, %d s per phase\n", mode, seconds);
 
-	/* ---- stage 1: open both models, sequentially, one per NPU ---- */
+	/* ---- stage 1: open the models, sequentially, one per NPU ----
+	 *
+	 * Each block builds the config for ITS backend, opens it and gets it
+	 * ready (frame size checked and copied into the input tensor).  The
+	 * config struct is a plain value: the model bytes are passed by pointer
+	 * and size, so the buffers must outlive the handle (they are freed only
+	 * at `out:`, after close). */
 
-	drpai = open_model("drpai",
-	                   ALP_INFERENCE_BACKEND_DRPAI,
-	                   ALP_INFERENCE_MODEL_DRPAI,
-	                   drpai_model,
-	                   drpai_model_len,
-	                   drpai_frame,
-	                   drpai_frame_len);
-	if (drpai == NULL) {
-		goto out;
+	if (need_drpai) {
+		/* The `backend` field names the NPU for THIS handle.  `format` must
+		 * match what that backend loads (a DRP-AI bundle tar here); open()
+		 * refuses a mismatch with ALP_ERR_INVAL. */
+		alp_inference_config_t cfg = {
+			.model_data = drpai_model,
+			.model_size = drpai_model_len,
+			.format     = ALP_INFERENCE_MODEL_DRPAI,
+			.backend    = ALP_INFERENCE_BACKEND_DRPAI,
+		};
+		/* alp_inference_open() returns NULL on failure with the reason in
+		 * alp_last_error(); prepare_handle() prints it. */
+		drpai = prepare_handle("drpai", alp_inference_open(&cfg), drpai_frame, drpai_frame_len);
+		if (drpai == NULL) {
+			goto out;
+		}
 	}
-	dx = open_model("deepx",
-	                ALP_INFERENCE_BACKEND_DEEPX_DXM1,
-	                ALP_INFERENCE_MODEL_DXNN,
-	                dx_model,
-	                dx_model_len,
-	                dx_frame,
-	                dx_frame_len);
-	if (dx == NULL) {
-		goto out;
+	if (need_dx) {
+		alp_inference_config_t cfg = {
+			.model_data = dx_model,
+			.model_size = dx_model_len,
+			.format     = ALP_INFERENCE_MODEL_DXNN,
+			.backend    = ALP_INFERENCE_BACKEND_DEEPX_DXM1,
+		};
+		/* alp_deepx_inference_open() is alp_inference_open() plus the DX-M1
+		 * core set, chosen up front so no temporary engine on other cores is
+		 * ever built.  ALL cores is right for ONE model.  Pick a subset
+		 * (ALP_DEEPX_NPU_CORES_01, ALP_DEEPX_NPU_CORE_2, ...) when SEVERAL
+		 * DX-M1 models should run side by side on separate cores.  A DX-M1
+		 * supports at most 3 distinct core sets at a time; a 4th fails with
+		 * ALP_ERR_BUSY (see <alp/ext/deepx/inference.h>). */
+		dx = prepare_handle("deepx",
+		                    alp_deepx_inference_open(&cfg, ALP_DEEPX_NPU_CORES_ALL),
+		                    dx_frame,
+		                    dx_frame_len);
+		if (dx == NULL) {
+			goto out;
+		}
 	}
 
-	/* ---- stage 2: run the phases ---- */
+	/* ---- stage 2: run the phases ----
+	 *
+	 * Each phase starts one thread per NPU involved and joins them, so
+	 * phases never overlap and each one's numbers are clean.  The worker
+	 * structs are reused across phases; run_phase() resets their counters. */
 
-	/* Three phases, so the cost of sharing is printed directly: each NPU
-	 * alone, then both together.  `mode` picks a subset. */
+	/* Up to three phases, so the cost of sharing is printed directly: each
+	 * NPU alone, then both together.  `mode` picks a subset.
+	 *
+	 * What to look for when it runs on a board: the "both" FPS of each NPU
+	 * against its "solo" FPS.  If they match, the NPUs really overlap and
+	 * the CPU/DDR sharing costs nothing; if one drops, the A55 cores (the
+	 * TVM thread cap above is the first knob) or DDR bandwidth are the
+	 * bottleneck, not the NPUs themselves.  The worst-case latency ("max")
+	 * shows how much one NPU's jitter grows while the other is busy. */
 	struct worker w[2] = {
 		{ .name = "drpai", .inf = drpai },
 		{ .name = "deepx", .inf = dx },
 	};
 	exit_code = 0;
+	/* Thermal readings bracket the run: a long run (see the HIL soak spec)
+	 * shows whether both NPUs busy together push the SoC toward throttling. */
 	print_temps("start");
-	if (strcmp(mode, "all") == 0 || strcmp(mode, "solo-drpai") == 0) {
+	if (do_solo_drpai) {
 		exit_code |= run_phase("solo drpai", &w[0], 1, seconds);
 	}
-	if (strcmp(mode, "all") == 0 || strcmp(mode, "solo-dx") == 0) {
+	if (do_solo_dx) {
 		exit_code |= run_phase("solo deepx", &w[1], 1, seconds);
 	}
-	if (strcmp(mode, "all") == 0 || strcmp(mode, "both") == 0) {
+	if (do_both) {
 		exit_code |= run_phase("both", w, 2, seconds);
 	}
 	print_temps("end");
