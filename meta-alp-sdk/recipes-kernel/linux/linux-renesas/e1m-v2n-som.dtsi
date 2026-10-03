@@ -388,6 +388,9 @@
 		 * carrier's own routed pins -- its Linux adapter alias lives here,
 		 * not in e1m-x-evk.dtsi's carrier-bus aliases block. */
 		i2c8 = &i2c8;
+		/* The eMMC is on the module (SDHI0), so mmc0 is the SoM's whatever the
+		 * carrier: /etc/fw_env.config's /dev/mmcblk0boot1 depends on it. */
+		mmc0 = &sdhi0;
 		rtc0 = &rv3028;
 		/* &rtc (SoC RTCA-3) below is enabled and probes before rtc0
 		 * above -- Linux's rtc class allocates ids in probe order

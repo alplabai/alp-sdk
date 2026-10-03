@@ -205,7 +205,6 @@
 		ethernet1 = &eth1;
 		i2c0 = &i2c0;
 		i2c1 = &i2c1;
-		mmc0 = &sdhi0;
 		mmc1 = &sdhi1;
 		serial0 = &scif;
 	};

@@ -25,6 +25,8 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
+import yaml
+
 
 @dataclass
 class GateResult:
@@ -41,14 +43,18 @@ XSPI_LIMIT = 16 * 1024 * 1024  # an xSPI component must be strictly smaller
 # mtd1 + 0x1a0000 onward is the CM33 image; the FIP at mtd1 offset 0 must end
 # before it. linux_target re-checks with the real erase-size rounding.
 CM33_REGION_OFFSET = 0x1A0000
-# eMMC boot1 layout: bl2_mmc from sector 1, the FIP from sector 0x300.
-BL2_MMC_SECTOR = 0x1
-FIP_SECTOR = 0x300
+# eMMC boot-partition layout: the SoM preset's on_module.emmc_boot block (every
+# V2N/V2M SKU carries the same one; the V2N101 preset is read here).
+_EMMC_BOOT = yaml.safe_load(
+    (Path(__file__).resolve().parents[2] / "metadata/e1m_modules/E1M-V2N101.yaml").read_text(encoding="utf-8")
+)["on_module"]["emmc_boot"]
+BL2_MMC_SECTOR = _EMMC_BOOT["bl2_mmc_sector"]
+FIP_SECTOR = _EMMC_BOOT["fip_sector"]
 BL2_MMC_MAX = (FIP_SECTOR - BL2_MMC_SECTOR) * 512
-# The U-Boot environment (redundant pair, 0x10000 each) starts here in eMMC
-# boot partition 2 (Linux boot1): meta-alp-sdk's uboot-env-emmc.cfg. A boot
-# write must end below it or it would erase the saved environment.
-BOOT_ENV_OFFSET = 0x220000
+# The U-Boot environment (redundant pair) starts here in the boot partition
+# `uboot_env.part`. A boot write must end below it or it would erase the
+# saved environment.
+BOOT_ENV_OFFSET = min(_EMMC_BOOT["uboot_env"]["offset"], _EMMC_BOOT["uboot_env"]["offset_redund"])
 
 
 def _sha256(path: Path) -> str:

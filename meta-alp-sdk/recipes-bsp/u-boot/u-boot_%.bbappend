@@ -346,13 +346,21 @@ SRC_URI:append:rzv2n-family = " file://0010-rzv2n-dev-ALP-E1M-serial-derived-eth
 # OTP already reads 0x08, so the step is a no-op there; see the patch header.
 SRC_URI:append:rzv2n-family = " file://0011-rzv2n-dev-ALP-E1M-gd32-nrst-release.patch"
 
-# 0013 (microSD card-detect): U-Boot reads SD1_SD1CD / PA1 (active-low, the
-# same net Linux uses as cd-gpios in e1m-x-evk.dtsi) through a new
-# "alp_sd_present" command, and CONFIG_BOOTCOMMAND probes mmc1 only when it
-# succeeds. sh_sdhi has no get_cd op, so an empty slot used to cost a full
-# init attempt and print "Card did not respond to voltage select! : -110"
-# on every boot. Lands after 0008 (mmc1 = SDHI1, PA1..PA3 board_init) and
+# 0013 (microSD card-detect): a new "alp_sd_present" command reads the SoM's
+# SD1_SD1CD pad and CONFIG_BOOTCOMMAND probes mmc1 only when it succeeds.
+# sh_sdhi has no get_cd op, so an empty slot used to cost a full init
+# attempt and print "Card did not respond to voltage select! : -110" on
+# every boot. Lands after 0008 (mmc1 = SDHI1, PA1..PA3 board_init) and
 # 0010 (it edits the CONFIG_BOOTCOMMAND form 0010 leaves).
+#
+# Whether a card-detect switch is wired to that pad is a CARRIER fact
+# (metadata/boards/<carrier>.yaml sd_slots.SD1.card_detect), so sd1-cd.cfg
+# (CONFIG_ALP_E1M_SD1_CD=y, pad = the SoM peripheral map's SD1_SD1CD) is
+# included only when ALP_CARRIER_SD1_CARD_DETECT is "1". The default "1" is
+# the E1M-X-EVK, the only carrier this layer builds for; a carrier without
+# the switch sets "0" and U-Boot boots from SD without a presence check.
+ALP_CARRIER_SD1_CARD_DETECT ?= "1"
+SRC_URI:append:e1m-v2n101 = "${@' file://sd1-cd.cfg' if d.getVar('ALP_CARRIER_SD1_CARD_DETECT') == '1' else ''}"
 SRC_URI:append:rzv2n-family = " file://0013-rzv2n-dev-ALP-E1M-sd-card-detect.patch"
 
 # 0014 + uboot-env-emmc.cfg (persistent environment): a redundant pair in
