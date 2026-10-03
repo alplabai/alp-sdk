@@ -709,7 +709,7 @@ bounds for a hung command, not the expected time.
 | check | runs on the unit | pass criterion | timeout | est. |
 |---|---|---|---|---|
 | `boot_source` | root device, eMMC by sysfs type | the root is on the eMMC | 5 s | 0.1 s |
-| `cpu_count` | `grep -c '^processor' /proc/cpuinfo` | = the SoC's application-core count | 5 s | 0.1 s |
+| `cpu_count` | `grep -c ^processor /proc/cpuinfo` | = the SoC's application-core count | 5 s | 0.1 s |
 | `mem_total` | `MemTotal` of `/proc/meminfo` | 0.70..1.00 of the SKU DRAM | 5 s | 0.1 s |
 | `kernel_release` | `uname -r` | matches `^6\.1\.141-cip43` | 5 s | 0.1 s |
 | `sku` | `/proc/device-tree/chosen/alp,sku` | = the SKU being provisioned | 5 s | 0.1 s |
@@ -743,7 +743,7 @@ bounds for a hung command, not the expected time.
 | `pmic_registers` | every register of `--pmic-expect` | all equal under their masks | 15 s | 0.6 s |
 | `thermal` | every `thermal_zone*/temp` | >= 1 zone, all 10..105 degC | 5 s | 0.1 s |
 | `cm33_firmware` | md5 at `mtd1` + `0x1A0000` | no `cm33` in the bundle: 64 KiB not blank (informational). With one: md5 of exactly its size = the bundle's (blocking) | 5 s / 30 s | 0.1 s / 1 s |
-| `cm33_running` | `devmem`, else a python3 `/dev/mem` read, of `0x4F700FF0` (magic), `+4` (version), `+8` (counter); the counter again after 2 s | magic `0xA10D0683`, version 1, counter advanced by 1..4; informational, blocking with a `cm33` in the bundle; `unread (missing tool: devmem or python3)` on an image with neither | 15 s | 2.2 s |
+| `cm33_running` | `devmem`, else a python3 `/dev/mem` read, of `0x4F700FF0` (magic), offset 4 (version), offset 8 (counter); the counter again after 2 s | magic `0xA10D0683`, version 1, counter advanced by 1 to 4; informational, blocking with a `cm33` in the bundle; recorded as unread (missing tool) on an image with neither devmem nor python3 | 15 s | 2.2 s |
 | `openamp_uio` | `/sys/class/uio/uio*/name` | the seven OpenAMP nodes | 5 s | 0.1 s |
 | `usb_host` | `/sys/bus/usb/devices/usb*` | >= 4 root hubs | 5 s | 0.1 s |
 | `usb_device`, `sd_card` | `dd` 4 MiB from the device | device present, `4+0 records out` | 15 s | 1 s |
