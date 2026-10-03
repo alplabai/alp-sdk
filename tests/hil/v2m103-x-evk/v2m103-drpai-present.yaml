@@ -1,35 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # E1M-V2M103 DRP-AI3 (drpai-rz, 17000000.drpai), model-free probe: the driver bound,
-# /dev/drpai0 exists, and DRPAI_GET_DRPAI_AREA resolves to the DT-reserved
-# window (base 0xd0000000, size 0x20000000), not to mmp_reserved
-# (docs/bring-up-drpai-v2n.md Sec 3).  Read-only; runs no inference and
-# needs no model.  The /dev/drpai0 mode/group is deliberately NOT asserted:
+# and /dev/drpai0 exists.  Read-only; runs no inference and needs no model.
+# The DRPAI_GET_DRPAI_AREA window (0xd0000000 / 0x20000000) is deliberately NOT
+# checked: it needs python3 or a C helper, and no ALP image ships either.  The /dev/drpai0 mode/group is deliberately NOT asserted:
 # that access policy is undecided.  Not bench-run by this change.
 
 schema_version: 1
 name: v2m103-drpai-present
 description: |
-  drpai-rz probed at 17000000.drpai, /dev/drpai0 present, DRPAI_GET_DRPAI_AREA
-  reports 0xd0000000 / 0x20000000.
+  drpai-rz bound to 17000000.drpai, /dev/drpai0 present.
 
 flash_method: ssh-run
 ssh_command: |-
-  dmesg | grep -q 'drpai-rz 17000000.drpai' && echo HIL_DRPAI_PROBED
+  test -e /sys/bus/platform/drivers/drpai-rz/17000000.drpai && echo HIL_DRPAI_PROBED
   test -c /dev/drpai0 && echo HIL_DRPAI_DEV_OK
-  python3 - <<'PY'
-  import fcntl, struct
-  DRPAI_GET_DRPAI_AREA = 0x80102e0b  # _IOR(46, 11, drpai_data_t): two uint64
-  with open("/dev/drpai0", "rb") as f:
-      buf = bytearray(16)
-      fcntl.ioctl(f, DRPAI_GET_DRPAI_AREA, buf)
-      addr, size = struct.unpack("QQ", buf)
-      print(f"HIL_DRPAI_AREA=0x{addr:x}/0x{size:x}")
-  PY
 
 serial:
   duration_s: 20
   expect_contains:
     - "HIL_DRPAI_PROBED"
     - "HIL_DRPAI_DEV_OK"
-    - "HIL_DRPAI_AREA=0xd0000000/0x20000000"

@@ -502,7 +502,7 @@
                   },
                   "input_name": { "type": "string", "minLength": 1, "description": "ONNX graph input tensor name; passed to the DRP-AI TVM driver as `-i`." },
                   "images": { "type": "string", "minLength": 1, "description": "Calibration image directory for post-training INT8 quantization (relative to this board.yaml); passed as `--images`." },
-                  "product": { "type": "string", "enum": ["V2N", "V2H"], "description": "DRP-AI TVM PRODUCT environment value. Defaults to V2N when omitted." }
+                  "product": { "type": "string", "pattern": "^([Vv]2[Nn]|[Vv]2[Hh])$", "description": "DRP-AI TVM PRODUCT environment value. Defaults to V2N when omitted." }
                 }
               }
             }

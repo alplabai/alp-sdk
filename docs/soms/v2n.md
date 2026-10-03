@@ -33,8 +33,8 @@ All three SKUs share the same silicon + PCB.  Pick by memory budget.
 | Wi-Fi 6 + BLE 5.4       | Murata LBEE5HY2FY-922      | SDIO + UART + I2S | [`<alp/chips/murata_lbee5hy2fy.h>`](../../include/alp/chips/murata_lbee5hy2fy.h) |
 | Ethernet PHY 0          | Realtek RTL8211FDI-VD-CG   | RGMII + MDIO     | [`<alp/chips/rtl8211fdi.h>`](../../include/alp/chips/rtl8211fdi.h) |
 | Ethernet PHY 1          | Realtek RTL8211FDI-VD-CG   | RGMII + MDIO     | (same driver, second instance)          |
-| eMMC                    | (variant per SKU)          | Renesas SD0      | Zephyr SD subsystem                     |
-| NOR flash               | (variant per SKU)          | Renesas xSPI0    | Zephyr flash subsystem                  |
+| eMMC                    | (variant per SKU)          | Renesas SD0      | A55 Linux mmc (A55-owned)               |
+| NOR flash               | (variant per SKU)          | Renesas xSPI0    | A55 Linux mtd (A55-owned)               |
 
 Full chip catalogue + manifest URLs:
 [`metadata/chips/`](../../metadata/chips/).
