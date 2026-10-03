@@ -40,8 +40,7 @@ this is fiddly.
 | DRP-AI kernel driver | `meta-rz-drpai`, patched into the kernel by `0002-enable-drpai-driver.patch` | Not a package — do not look for a `.ko` |
 | `drpai0` DT node + label | `meta-rz-drpai`, `0001-add-drpai-property-to-devicetree.patch` | **Creates** the label; it does not exist in the pristine tree |
 | `<linux/drpai.h>` UAPI header | `meta-rz-drpai` recipe `drpai` (1.4.0) | Headers only |
-| `libtvm_runtime.so` | `meta-rz-drpai` recipe `lib-tvm` | |
-| The MERA2 runtime closure: headers + **nine** staged libraries (a tenth, `libtvm_runtime.so`, comes from `lib-tvm` above) | `meta-alp-sdk/recipes-renesas/mera2-drpai-tvm/mera2-drpai-tvm_2.7.0.bb`, staged/compiled from a builder-supplied **`RUHMI_DRPAI_TVM_DIR`** checkout | The recipe vendors nothing — see §4. Note its `LICENSE = "CLOSED"`: the `rzv_drp-ai_tvm` **sources** are Apache-2.0, but the prebuilt MERA2 libraries staged alongside them are account-gated, so the package as a whole is not redistributable. Tracked as a licence-manifest gap. |
+| The MERA2 runtime closure: headers + **nine** staged libraries (the backend does not link `meta-rz-drpai`'s `libtvm_runtime.so`; `libdrp_tvm_rt.so` carries the `tvm::runtime` symbols) | `meta-alp-sdk/recipes-renesas/mera2-drpai-tvm/mera2-drpai-tvm_2.7.0.bb`, staged/compiled from a builder-supplied **`RUHMI_DRPAI_TVM_DIR`** checkout | The recipe vendors nothing — see §4. Note its `LICENSE = "CLOSED"`: the `rzv_drp-ai_tvm` **sources** are Apache-2.0, but the prebuilt MERA2 libraries staged alongside them are account-gated, so the package as a whole is not redistributable. Tracked as a licence-manifest gap. |
 
 Baseline this was worked against: **AI SDK platform 7.1 on BSP v6.30**
 (`RTK0EF0189F06300SJ`, linux-renesas `6.1.141-cip43`).
@@ -232,10 +231,9 @@ Enable the backend through the SDK recipe's PACKAGECONFIG:
 PACKAGECONFIG:append:pn-alp-sdk = " drpai"
 ```
 
-That switch (whose DEPENDS names `mera2-drpai-tvm`, `drpai` and `lib-tvm`)
+That switch (whose DEPENDS names `mera2-drpai-tvm` and `drpai`)
 flips `-DALP_SDK_USE_DRPAI_V2N=ON` and
-`-DALP_SDK_DRPAI_REQUIRED=ON`, and adds the `drpai` and `lib-tvm` build deps
-together.
+`-DALP_SDK_DRPAI_REQUIRED=ON`, and adds the `drpai` build dep.
 
 **The RUHMI libraries and wrapper header are now packaged**, closing the gap
 the earlier revision of this doc left as a manual staging step.
@@ -276,7 +274,8 @@ image.** That layer ships its payload through a `core-image-%.bbappend`, and
 that wildcard does not match `alp-image-edge`, so the bbappend never fires and
 the image comes out with no DRP-AI userspace at all — silently.
 `alp-image-common.inc` therefore installs `lib-tvm` and `kernel-module-mmngr`
-explicitly, gated on the layer being present. See issue #1176; the same trap
+explicitly (the `lib-tvm` install is kept pending a maintainer decision; the
+SDK backend no longer links it), gated on the layer being present. See issue #1176; the same trap
 applies to the other `meta-rz-*` feature layers.
 
 ## 5. Model compile
@@ -481,9 +480,9 @@ In order:
    On the V2N bench unit this returns `ADDR=0x00000000d0000000
    SIZE=0x0000000020000000`, matching the driver's own boot print, the DT
    `reg`, and `/proc/iomem` (`d0000000-efffffff : reserved`).
-4. `ls /usr/lib/libtvm_runtime.so*` and `ls /usr/lib/libmera2_runtime.so*` —
+4. `ls /usr/lib/libmera2_runtime.so*` —
    absent means the image did not get the vendor payload (§4); on
-   the V2N bench unit's current image neither exists yet (`ls
+   the V2N bench unit's current image it does not exist yet (`ls
    /usr/lib/libdrpai*` also finds nothing) — that userspace gap is what this
    branch's packaging is meant to close, once run through a `drpai`-enabled
    bake (§4).

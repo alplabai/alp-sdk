@@ -159,8 +159,7 @@ PACKAGECONFIG[rpc]      = ",,open-amp libmetal"
 # -- they come from meta-rz-drpai's mmngr-user-module /
 # mmngrbuf-user-module recipes. mera2-drpai-tvm now stages all eight
 # RUHMI libraries in its main package (so OE's automatic shlibs pass
-# picks up their DT_NEEDED entries, the same way it did before libtvm_runtime
-# left the link line) and RDEPENDS on the two mmngr
+# picks up their DT_NEEDED entries) and RDEPENDS on the two mmngr
 # packages explicitly, since nothing DEPENDS-time links against them for
 # shlibs to infer the RDEPENDS on its own. A first cut of this recipe
 # staged only the three libraries named above and shipped them into the

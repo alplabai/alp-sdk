@@ -58,9 +58,10 @@
  *      carries no CRU entry; and metadata/socs/renesas/rzv2n/n44.json's
  *      peripheral_instances block covers i2c / uart / gpt / gtm only, so
  *      the board generator has no base to emit either.  Source for the
- *      real value: the RZ/V2N Hardware User's Manual r01uh1003ej, CRU +
- *      MIPI CSI-2 register chapters (the Renesas BSP reference dts also
- *      carries it -- neither ships in this repo).
+ *      real value: the RZ/V2N Hardware User's Manual R01UH1071EJ0120 (CRU +
+ *      MIPI CSI-2 register chapters; details in R01UH1072EJ0120).  The
+ *      Renesas BSP reference dts also carries it; neither ships in this
+ *      repo.
  *   3. Its CM33 interrupt, which is NOT a datasheet constant here.
  *      hal_renesas's rzv2n bsp_irq_id.h lists CRU0_CSI2_LINK_INT_IRQSELn
  *      = 494 and CRU1_CSI2_LINK_INT_IRQSELn = 500 in IRQSELn_Type -- the
@@ -404,8 +405,8 @@ static alp_status_t isp_release(alp_camera_backend_state_t *state, alp_camera_fr
 }
 
 /* ============================================================== */
-/* ISP configure path -- latches the requested config into backend */
-/* state and reports ALP_ERR_NOSUPPORT (no register is written).    */
+/* ISP configure path -- validates and reports ALP_ERR_NOSUPPORT    */
+/* (no register is written).                                        */
 /* ============================================================== */
 
 static alp_status_t isp_configure_isp(alp_camera_backend_state_t    *state,
@@ -415,16 +416,12 @@ static alp_status_t isp_configure_isp(alp_camera_backend_state_t    *state,
 	if (st == NULL) return ALP_ERR_NOT_READY;
 	if (isp == NULL) return ALP_ERR_INVAL;
 
-	/* Latch verbatim so the vendor-ext readback
-     * (include/alp/ext/renesas/camera.h) sees what the app asked for,
-     * but report ALP_ERR_NOSUPPORT: nothing is written to the ISP.
+	/* Report ALP_ERR_NOSUPPORT: nothing is written to the ISP.
      * The ISP is section 9.8 of the RZ/V2N Hardware User's Manual
      * (R01UH1071EJ0120; details in the Additional Document
      * R01UH1072EJ0120), the Renesas CM33 FSP has no CRU/CSI/ISP module,
      * and CRU/CSI-2 belong to the A55 (Linux cru0/csi20).  Returning
      * ALP_OK here would claim AE/AWB/AF took effect when they did not. */
-	st->cfg            = *isp;
-	st->isp_configured = true;
 	return ALP_ERR_NOSUPPORT;
 }
 
