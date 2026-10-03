@@ -147,6 +147,20 @@
         }
       }
     },
+    "pad_levels": {
+      "type": "array",
+      "description": "Signal level this board puts on SoC pads that are NOT 3.3 V tolerant (metadata/socs/**/pad_tolerance).  scripts/check_pad_voltage.py requires one entry per such pad that an `e1m_routes` bus enables: `signal_v` at or below the SoC `max_signal_v`, or a `level_shifter` naming the part that translates a higher level.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["pad", "signal_v"],
+        "properties": {
+          "pad":           { "type": "string", "pattern": "^P[0-9A-Z][0-9]+$", "description": "Vendor pad name (e.g. P91)." },
+          "signal_v":      { "type": "number", "description": "Level the carrier drives or expects on the pad, volts." },
+          "level_shifter": { "type": "string", "description": "Part or net group that translates signal_v down to the pad's tolerated level." }
+        }
+      }
+    },
     "e1m_routes": {
       "$ref": "#/$defs/e1m_routes",
       "description": "Inline mode only.  Authoritative board-side E1M-pad routing.  scripts/gen_board_header.py reads this block and emits include/alp/boards/alp_<name>_routes.h.  Mutually exclusive with `preset:`."

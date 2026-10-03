@@ -25,6 +25,12 @@
  *      `<alp/soc_caps.h>` / `<alp/cap.h>`, which are generated per-SoC and
  *      would wrongly claim the sensor for every SoM sharing that die.
  *
+ * @par Die temperature.
+ *      alp_temperature_read_die_milli_c() reads the SoC's own junction sensor
+ *      through the upstream Zephyr `die-temp0` alias; it is a SoC fact (the
+ *      alias comes from the SoC / board devicetree), unlike the SoM-level
+ *      ambient part above.
+ *
  * @par Today's coverage.
  *      Implemented on the Zephyr AEN backend only, binding the
  *      metadata-emitted `alp-temp0` devicetree alias through the upstream
@@ -86,6 +92,31 @@ extern "C" {
  *          @ref ALP_ERR_IO on a transfer fault while reading.
  */
 alp_status_t alp_temperature_read_milli_c(int32_t *milli_c);
+
+/**
+ * @brief Read the SoC die temperature (junction sensor on the processor itself).
+ *
+ * Distinct from alp_temperature_read_milli_c(): that is the SoM's board-level
+ * ambient part; this is the silicon's own thermal sensor, which reads far
+ * above ambient under load.  Same units and sign (integer milli-degrees
+ * Celsius, signed).
+ *
+ * Zephyr binds the UPSTREAM `die-temp0` devicetree alias through the upstream
+ * sensor API (`SENSOR_CHAN_DIE_TEMP`), so any SoC or board tree that declares
+ * an upstream die-temperature node answers with no Alp driver.  Other builds
+ * (Yocto/Linux, plain CMake) return @ref ALP_ERR_NOSUPPORT.
+ *
+ * @param[out] milli_c  Set to the reading on @ref ALP_OK.  Left untouched
+ *                       on any error.
+ *
+ * @return  @ref ALP_OK on a valid read.
+ *          @ref ALP_ERR_INVAL when @p milli_c is NULL.
+ *          @ref ALP_ERR_NOSUPPORT when this build has no `die-temp0` node, or
+ *                                 no driver bound it.
+ *          @ref ALP_ERR_NOT_READY when the device bound but did not come up.
+ *          @ref ALP_ERR_IO on a transfer fault while reading.
+ */
+alp_status_t alp_temperature_read_die_milli_c(int32_t *milli_c);
 
 #ifdef __cplusplus
 } /* extern "C" */

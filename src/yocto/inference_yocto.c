@@ -11,12 +11,11 @@
  * CMake option is on.
  *
  * Backend dispatch (Yocto / V2N-M1 priority)
- *   ALP_INFERENCE_BACKEND_AUTO     -> picks the first available real
- *                                     backend in this order: DEEPX_DX,
- *                                     ETHOS_U, DRPAI, CPU.  DEEPX_DX
- *                                     comes first on V2N-M1 builds
- *                                     because that's the SoM's reason
- *                                     for shipping a companion NPU; CPU
+ *   ALP_INFERENCE_BACKEND_AUTO     -> picks the first compiled-in
+ *                                     backend in the SoM preset's
+ *                                     `inference.auto_order` (build
+ *                                     define ALP_SDK_INFERENCE_AUTO_ORDER),
+ *                                     default DEEPX_DXM1, DRPAI, CPU.  CPU
  *                                     is deliberately LAST -- an
  *                                     NPU-bearing SoM must never
  *                                     silently fall to CPU under AUTO.
@@ -56,6 +55,7 @@
 #include "alp/inference.h"
 
 #include "alp_internal.h"
+#include "backends/inference/alp_model_select.h"
 #include "common/alp_slot_claim.h"
 #include "inference_handle_internal.h"
 
@@ -150,24 +150,49 @@ void         alp_inference_ort_close(struct alp_inference *h);
 /* NPU-bearing SoM must never silently fall to the CPU floor.         */
 /* ------------------------------------------------------------------ */
 
+static bool backend_compiled_in(alp_inference_backend_t be)
+{
+	switch (be) {
+#if defined(ALP_SDK_USE_DEEPX_DXM1)
+	case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
+		return true;
+#endif
+#if defined(ALP_SDK_USE_DRPAI_V2N)
+	case ALP_INFERENCE_BACKEND_DRPAI:
+		return true;
+#endif
+#if defined(ALP_SDK_USE_ORT_CPU)
+	case ALP_INFERENCE_BACKEND_CPU:
+		return true;
+#endif
+	default:
+		return false;
+	}
+}
+
+/* SoM preset `inference.auto_order` (generated build config:
+ * -DALP_SDK_INFERENCE_AUTO_ORDER="deepx_dxm1,drpai,cpu"): the first entry
+ * compiled into this build wins.  Without it, the historical order applies
+ * (DEEPX DX-M1, DRP-AI3, then the CPU floor).  CPU is deliberately LAST in
+ * both: an NPU-bearing SoM must never silently fall to CPU under AUTO,
+ * because that is a 10-100x throughput cliff the caller did not ask for. */
+#if defined(ALP_SDK_INFERENCE_AUTO_ORDER)
+#define ALP_AUTO_ORDER_CSV ALP_SDK_INFERENCE_AUTO_ORDER
+#else
+#define ALP_AUTO_ORDER_CSV "deepx_dxm1,drpai,cpu"
+#endif
+
 static alp_inference_backend_t resolve_auto(void)
 {
-#if defined(ALP_SDK_USE_DEEPX_DXM1)
-	/* DEEPX DX-M1 wins first on V2N-M1: the companion NPU is the SoM's
-     * reason for shipping. */
-	return ALP_INFERENCE_BACKEND_DEEPX_DXM1;
-#elif defined(ALP_SDK_USE_DRPAI_V2N)
-	/* Plain V2N (no DX-M1): the on-SoC DRP-AI3 is the NPU. */
-	return ALP_INFERENCE_BACKEND_DRPAI;
-#elif defined(ALP_SDK_USE_ORT_CPU)
-	/* No NPU compiled in: the A55s run the model on CPU via ONNX Runtime.
-	 * Deliberately LAST -- an NPU-bearing SoM must never silently fall to
-	 * CPU under AUTO, because that is a 10-100x throughput cliff the caller
-	 * did not ask for. */
-	return ALP_INFERENCE_BACKEND_CPU;
-#else
+	alp_inference_backend_t order[ALP_AUTO_ORDER_MAX];
+	size_t                  n = alp_auto_order_parse(ALP_AUTO_ORDER_CSV, order, ALP_AUTO_ORDER_MAX);
+
+	for (size_t i = 0; i < n; ++i) {
+		if (backend_compiled_in(order[i])) {
+			return order[i];
+		}
+	}
 	return ALP_INFERENCE_BACKEND_AUTO; /* signals "nothing available" */
-#endif
 }
 
 /* ------------------------------------------------------------------ */

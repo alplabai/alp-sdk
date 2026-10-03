@@ -23,6 +23,7 @@ Top-level fields:
 | `preset`         | preset*  | SDK-internal: pulls a shared board definition from `metadata/boards/<preset>.yaml`.  Mutually exclusive with inline `populated:` / `e1m_routes:`. |
 | `populated`      | inline*  | Chips populated on this board.  Each `true` → `CONFIG_ALP_SDK_{CHIP,BLOCK}_<name>=y`.  Mutually exclusive with `preset:`. |
 | `e1m_routes`     | inline*  | E1M-pad → board-side macro routing.  Read by `gen_board_header.py` → `include/alp/boards/alp_<name>_routes.h`.  Mutually exclusive with `preset:`. |
+| `pad_levels`     | no       | Signal level the board puts on SoC pads that are **not 3.3 V tolerant** (`pad_tolerance` in the SoC JSON; RZ/V2N: P90-P92, P2x, PBx per manual R01UH1071EJ0120 4.2.3.1.1 Note 1).  `{pad, signal_v, level_shifter?}`; a `signal_v` above the SoC `max_signal_v` needs a `level_shifter`, and a bus in `e1m_routes` that enables such a pad needs an entry.  Enforced by `scripts/check_pad_voltage.py`.  The E1M I3C pads (P20/P21) are 1.2/1.8 V only. |
 | `pins`           | no       | Optional array naming the E1M pads the project actively uses.  Validated against the resolved board's `e1m_routes:`. |
 | `cores`          | yes      | Per-core app + library/peripheral knobs.  Each core's `os:` is optional; the SoM topology supplies the natural runtime per core class (Cortex-M → Zephyr, Cortex-A → Yocto). |
 | `ipc`            | no       | Cross-core IPC carve-outs (rpmsg / raw_shmem / mailbox_only). |

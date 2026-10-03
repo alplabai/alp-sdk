@@ -79,6 +79,9 @@ def _collect_preset_names(path: Path) -> tuple[bool, list[tuple[str, str, str]]]
     pb = inf.get("preferred_backend")
     if isinstance(pb, str):
         out.append(("inference.preferred_backend", "backend", pb))
+    for i, name in enumerate(inf.get("auto_order") or []):
+        if isinstance(name, str):
+            out.append((f"inference.auto_order[{i}]", "backend", name))
     for i, t in enumerate(inf.get("targets") or []):
         if isinstance(t, dict):
             if isinstance(t.get("backend"), str):
@@ -111,6 +114,14 @@ def main() -> int:
     for path in sorted(PRESETS.glob("E1M-*.yaml")):
         rel = path.relative_to(REPO)
         preliminary, names = _collect_preset_names(path)
+        inf = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("inference") or {}
+        order = inf.get("auto_order") or []
+        if order and order[0] != inf.get("preferred_backend"):
+            errors.append(f"{rel}: inference.auto_order[0] = {order[0]!r} must equal "
+                          f"preferred_backend {inf.get('preferred_backend')!r}")
+        if "cpu" in order and order[-1] != "cpu":
+            errors.append(f"{rel}: inference.auto_order lists 'cpu' before an accelerator; "
+                          f"cpu is the floor and must be last")
         for field, kind, value in names:
             checked += 1
             if kind == "backend" and value == "tbd":

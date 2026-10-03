@@ -216,6 +216,13 @@
           "pattern": "^[a-z][a-z0-9_]*$",
           "description": "Canonical backend key (`ethos_u`, `drpai`, `deepx_dxm1`, ...).  Cross-checked against the device dispatcher by scripts/check_inference_backend_parity.py."
         },
+        "auto_order": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "description": "Ordered accelerator preference for ALP_INFERENCE_BACKEND_AUTO, best first (canonical backend keys).  The first entry must equal `preferred_backend`; `cpu`, when listed, must be last (it is the floor, never chosen over an available NPU).  Generated into the build as ALP_SDK_INFERENCE_AUTO_ORDER (scripts/alp_orchestrate/kconfig.py, cmake-args emit); absent means the SDK built-in order.  Cross-checked by scripts/check_inference_backend_parity.py."
+        },
         "ethos_u_variant": {
           "type": "string",
           "pattern": "^u[0-9]+$",

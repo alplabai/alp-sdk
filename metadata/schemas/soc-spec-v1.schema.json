@@ -255,6 +255,18 @@
       }
     },
 
+    "pad_tolerance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_signal_v", "non_33v_tolerant_pads"],
+      "description": "Pads whose input is NOT 3.3 V tolerant (the rest of the port pads accept the VIO_33 range).  Consumed by scripts/check_pad_voltage.py against a board preset's `pad_levels:`.  `non_33v_tolerant_pads` are full-match regexes over the vendor pad name (the `silicon_pad` spelling in metadata/pinmux/*.yaml); `max_signal_v` is the highest signal level those pads accept without a level shifter.",
+      "properties": {
+        "source": { "type": "string" },
+        "max_signal_v": { "type": "number" },
+        "non_33v_tolerant_pads": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+      }
+    },
+
     "operating_temp_c": {
       "type": "object",
       "additionalProperties": false,

@@ -64,6 +64,13 @@ get_filename_component(_alp_sdk_yocto_root "${CMAKE_CURRENT_SOURCE_DIR}/../.."
 target_include_directories(alp_sdk PRIVATE ${_alp_sdk_yocto_root}/src)
 unset(_alp_sdk_yocto_root)
 
+set(ALP_SDK_INFERENCE_AUTO_ORDER "" CACHE STRING
+    "Comma-separated accelerator preference for ALP_INFERENCE_BACKEND_AUTO, best first (e.g. deepx_dxm1,drpai,cpu).  Generated from the SoM preset's inference.auto_order by alp_orchestrate (--emit cmake-args).  Empty keeps the built-in order (deepx_dxm1,drpai,cpu).")
+if(ALP_SDK_INFERENCE_AUTO_ORDER)
+    target_compile_definitions(alp_sdk PRIVATE
+        ALP_SDK_INFERENCE_AUTO_ORDER="${ALP_SDK_INFERENCE_AUTO_ORDER}")
+endif()
+
 option(ALP_SDK_USE_DEEPX_DXM1
     "Wire the DEEPX DX-M1 backend hook (src/yocto/inference_deepx.cpp) for \
 <alp/inference.h>.  Enable on e1m-x-v2n-m1 builds.  Links the proprietary \

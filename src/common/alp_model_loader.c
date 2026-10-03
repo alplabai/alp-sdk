@@ -47,6 +47,16 @@ static const char *const _avail_silicon[] = {
 };
 #define N_AVAIL_SILICON (sizeof(_avail_silicon) / sizeof(_avail_silicon[0]) - 1u)
 
+/* SoM preset `inference.auto_order` (metadata/e1m_modules/<SKU>.yaml), passed
+ * by the generated build config as -DALP_SDK_INFERENCE_AUTO_ORDER="a,b,cpu".
+ * Absent -> empty: the selector falls back to the SoM preferred_backend
+ * tiebreak (AUTO here). */
+#if defined(ALP_SDK_INFERENCE_AUTO_ORDER)
+#define ALP_AUTO_ORDER_CSV ALP_SDK_INFERENCE_AUTO_ORDER
+#else
+#define ALP_AUTO_ORDER_CSV ""
+#endif
+
 alp_inference_t *alp_inference_open_alpmodel(const alp_model_open_opts_t *opts)
 {
 	if (opts == NULL) {
@@ -64,6 +74,8 @@ alp_inference_t *alp_inference_open_alpmodel(const alp_model_open_opts_t *opts)
 		SET_ERR(ALP_ERR_INVAL);
 		return NULL;
 	}
+	alp_inference_backend_t order[ALP_AUTO_ORDER_MAX];
+	size_t       n_order = alp_auto_order_parse(ALP_AUTO_ORDER_CSV, order, ALP_AUTO_ORDER_MAX);
 	alp_model_t  mdl;
 	alp_status_t rc = alp_model_parse((const uint8_t *)opts->data, opts->size, &mdl);
 	if (rc != ALP_OK) {
@@ -86,7 +98,9 @@ alp_inference_t *alp_inference_open_alpmodel(const alp_model_open_opts_t *opts)
 		.avail_silicon     = _avail_silicon,
 		.n_avail_silicon   = N_AVAIL_SILICON,
 		.arena_sram_kib    = (uint32_t)ALP_SOC_NPU_ARENA_SRAM_KIB,
-		.preferred_backend = ALP_INFERENCE_BACKEND_AUTO, /* board define wiring is a follow-up */
+		.preferred_backend = ALP_INFERENCE_BACKEND_AUTO,
+		.auto_order        = order,
+		.n_auto_order      = n_order,
 	};
 	alp_model_select_result_t sel;
 	rc = alp_model_select(&mdl, &env, opts->backend, &sel);

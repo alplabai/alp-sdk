@@ -2229,6 +2229,12 @@ def _slice_cmake_args(project: BoardProject, slice_: Slice) -> str:
         lines.append("-DALP_SDK_USE_DRPAI_V2N=ON")
     if capabilities.get("deepx_dxm1"):
         lines.append("-DALP_SDK_USE_DEEPX_DXM1=ON")
+    # SoM-declared AUTO accelerator preference (consumed by
+    # src/yocto/inference_yocto.c + the .alpmodel loader).  Emitted only for
+    # presets that declare it, so every other SKU's output stays unchanged.
+    auto_order = (project.som_preset.get("inference") or {}).get("auto_order")
+    if auto_order:
+        lines.append(f"-DALP_SDK_INFERENCE_AUTO_ORDER={','.join(auto_order)}")
     # Project-wide curated third-party libraries (top-level `libraries:`,
     # ADR 0018) with a baremetal integration section.  Guard keeps a project
     # with no such libraries byte-identical.

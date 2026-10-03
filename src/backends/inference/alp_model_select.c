@@ -19,6 +19,48 @@ static alp_inference_backend_t _backend_enum(const char *s)
 	return ALP_INFERENCE_BACKEND_AUTO; /* sentinel: unknown */
 }
 
+size_t alp_auto_order_parse(const char *csv, alp_inference_backend_t *out, size_t max)
+{
+	size_t n = 0;
+
+	while (csv != NULL && *csv != '\0' && n < max) {
+		const char *end = strchr(csv, ',');
+		size_t      len = end ? (size_t)(end - csv) : strlen(csv);
+		char        key[ALP_MODEL_STR_MAX];
+
+		if (len > 0 && len < sizeof(key)) {
+			memcpy(key, csv, len);
+			key[len]                   = '\0';
+			alp_inference_backend_t be = _backend_enum(key);
+			if (be != ALP_INFERENCE_BACKEND_AUTO) {
+				out[n++] = be;
+				if (be == ALP_INFERENCE_BACKEND_CPU) {
+					break;
+				}
+			}
+		}
+		csv = end ? end + 1 : csv + len;
+	}
+	return n;
+}
+
+/* Tiebreak rank between two fitting NPU targets (lower wins): the SoM
+ * auto_order position, else 0 for the SoM preferred_backend and 1 for the rest. */
+static size_t _rank(alp_inference_backend_t be, const alp_model_select_env_t *env)
+{
+	if (env->n_auto_order > 0u) {
+		for (size_t i = 0; i < env->n_auto_order; ++i) {
+			if (env->auto_order[i] == be) {
+				return i;
+			}
+		}
+		return env->n_auto_order;
+	}
+	return (env->preferred_backend != ALP_INFERENCE_BACKEND_AUTO && be == env->preferred_backend)
+	           ? 0u
+	           : 1u;
+}
+
 /* Every format string the .alpmodel writer (scripts/alp_model/manifest.py)
  * can emit must have an explicit case here.  This used to default every
  * unrecognised string to ALP_INFERENCE_MODEL_TFLITE: a typo'd or newly added
@@ -147,11 +189,8 @@ alp_status_t alp_model_select(const alp_model_t            *m,
 			best = (int)i;
 			continue;
 		}
-		/* tiebreak: SoM preferred_backend wins */
-		alp_inference_backend_t cur = _backend_enum(m->targets[best].backend);
-
-		if (env->preferred_backend != ALP_INFERENCE_BACKEND_AUTO && be == env->preferred_backend &&
-		    cur != env->preferred_backend) {
+		/* tiebreak: SoM auto_order (else preferred_backend) wins */
+		if (_rank(be, env) < _rank(_backend_enum(m->targets[best].backend), env)) {
 			best = (int)i;
 		}
 	}

@@ -31,7 +31,25 @@ typedef struct {
 	uint32_t           arena_sram_kib; /* device NPU arena budget; 0 = unknown -> skip SRAM gate,
 					      loudly (see alp_model_select_result_t::arena_fit_unverified) */
 	alp_inference_backend_t preferred_backend; /* SoM preferred (tiebreak); AUTO if none */
+	/** SoM `inference.auto_order` (best first, from alp_auto_order_parse()).  When
+	 *  @c n_auto_order > 0 it ranks the tiebreak instead of @c preferred_backend:
+	 *  the lower index wins; a backend not listed ranks last. */
+	const alp_inference_backend_t *auto_order;
+	size_t                         n_auto_order;
 } alp_model_select_env_t;
+
+/** Max entries alp_auto_order_parse() writes (CPU, ETHOS_U, DRPAI, DEEPX_DXM1). */
+#define ALP_AUTO_ORDER_MAX 4u
+
+/**
+ * @brief Parse the SoM preset's `inference.auto_order`, delivered to the build as a
+ *        comma-separated list of canonical backend keys (`deepx_dxm1,drpai,cpu`).
+ * @param csv  NULL or "" -> 0 entries (no preset order; callers keep their default).
+ * @param out  Receives up to @p max backends, best first.
+ * @return Entries written.  Unknown keys are skipped; `cpu` ends the list (it is the
+ *         floor, never preferred over an available NPU).
+ */
+size_t alp_auto_order_parse(const char *csv, alp_inference_backend_t *out, size_t max);
 
 /** The chosen blob + its resolved descriptors. */
 typedef struct {
