@@ -872,7 +872,7 @@ class Detect(Step):
         up = ctx.linux_up()
         note = ""
         if key == "silent" and ctx.state_done("bootstrap"):
-            # A unit whose eMMC boot1 holds a good bootstrap prints BL2 after a
+            # A unit whose eMMC boot partition 1 holds a good bootstrap prints BL2 after a
             # power cycle. Silence means that record is stale (corrupt write,
             # erased part, wrong DSW1): drop it so bootstrap runs again instead
             # of the flow timing out later waiting for a Linux login.
@@ -952,7 +952,7 @@ class Bootstrap(_PreLinux):
         for idx, val in sw.EXT_CSD_WRITES:
             ctx.mutate(f"EM_SECSD EXT_CSD[{idx}] = {val:#04x}", lambda i=idx, v=val: sw.em_secsd(c, i, v))
         ev = ctx.mutate("EM_DCID (read eMMC CID)", lambda: sw.em_dcid(c)) or {}
-        return self.result(ctx, "transient bl2_mmc + fip in eMMC boot1, EXT_CSD 177/179 set", ev)
+        return self.result(ctx, "transient bl2_mmc + fip in eMMC boot partition 1, EXT_CSD 177/179 set", ev)
 
 
 class OpDsw1EmmcInsertSd(_PreLinux):
@@ -982,7 +982,7 @@ class OpDsw1EmmcInsertSd(_PreLinux):
             ctx.boot_text = _since(b.console, n)
             ctx.live_boot = (b.power.on_count, n)
         ctx.mutate("cold cycle; expect U-Boot autoboot from eMMC", check)
-        return self.result(ctx, "U-Boot boots from eMMC boot1")
+        return self.result(ctx, "U-Boot boots from eMMC boot partition 1")
 
 
 def leftover_dxuart2_swap(ctx) -> str:
@@ -1185,9 +1185,9 @@ class WriteEmmcBoot(Step):
         for key, role, sector in (("emmc_boot1_bl2_md5", "bl2_mmc", gates.BL2_MMC_SECTOR),
                                   ("emmc_boot1_fip_md5", "fip", gates.FIP_SECTOR)):
             data = ctx.artefact_bytes(role)
-            got = t.md5(f"{emmc}boot1", sector * 512, len(data))
+            got = t.md5(f"{emmc}{lt.EMMC_BOOT_PART}", sector * 512, len(data))
             if got != _md5(data):
-                return Unsatisfied(f"{emmc}boot1 sector {sector:#x} != bundle {role}")
+                return Unsatisfied(f"{emmc}{lt.EMMC_BOOT_PART} sector {sector:#x} != bundle {role}")
             ev[key] = got
         regs = lt.ext_csd(t, emmc)
         if regs[177] != 0x02 or regs[179] != 0x08:
@@ -1201,11 +1201,11 @@ class WriteEmmcBoot(Step):
         store = ctx.open_payload_store(t)
         for role, sector in (("bl2_mmc", gates.BL2_MMC_SECTOR), ("fip", gates.FIP_SECTOR)):
             p = ctx.artefact(role)
-            ctx.mutate(f"{emmc}boot1 sector {sector:#x} <- {role} {p.name} (force_ro cleared for the write)",
-                       lambda q=p, s=sector: lt.emmc_boot1_write_verify(t, emmc, q, s, store))
+            ctx.mutate(f"{emmc}{lt.EMMC_BOOT_PART} sector {sector:#x} <- {role} {p.name} (force_ro cleared for the write)",
+                       lambda q=p, s=sector: lt.emmc_boot_write_verify(t, emmc, q, s, store))
         ctx.mutate(f"mmc-utils on {emmc}: EXT_CSD[177]=0x02, [179]=0x08",
                    lambda: lt.set_boot_config(t, emmc))
-        return self.result(ctx, "release bl2_mmc + fip in eMMC boot1; boot config set",
+        return self.result(ctx, "release bl2_mmc + fip in eMMC boot partition 1 (Linux boot0); boot config set",
                            payload_store.evidence(store) if ctx.execute else None)
 
 

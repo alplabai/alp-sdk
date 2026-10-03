@@ -328,16 +328,22 @@ def mtd_write_verify(t: LinuxTarget, mtd: int, local: Path, limit: int | None = 
 
 # --- eMMC boot area + EXT_CSD ------------------------------------------------------
 
-def emmc_boot1_write_verify(t: LinuxTarget, emmc: str, local: Path, sector: int, store=None) -> str:
-    """dd into <emmc>boot1 at `sector` (512 B), force_ro cleared only for the write."""
+# Boot partition 1 = Linux `boot0`, the one EXT_CSD[179]=0x08 boots (and the one
+# Flash Writer `EM_W` area 1 writes). Linux `boot1` is boot partition 2, which is
+# never booted: every access to the boot loader goes through this constant.
+EMMC_BOOT_PART = "boot0"
+
+
+def emmc_boot_write_verify(t: LinuxTarget, emmc: str, local: Path, sector: int, store=None) -> str:
+    """dd into <emmc>boot0 (boot partition 1) at `sector` (512 B), force_ro cleared only for the write."""
     data_len = local.stat().st_size
     want = _host_md5(local)
     name = emmc.rsplit("/", 1)[-1]
-    force_ro = f"/sys/block/{name}boot1/force_ro"
-    dev = f"{emmc}boot1"
-    # boot1 is a few MiB: refuse before writing anything rather than leave a
+    force_ro = f"/sys/block/{name}{EMMC_BOOT_PART}/force_ro"
+    dev = f"{emmc}{EMMC_BOOT_PART}"
+    # the boot partition is a few MiB: refuse before writing anything rather than leave a
     # new BL2 next to a half-written FIP when the image runs off the end.
-    part = int(t.run(f"cat /sys/block/{name}boot1/size").stdout.strip()) * 512
+    part = int(t.run(f"cat /sys/block/{name}{EMMC_BOOT_PART}/size").stdout.strip()) * 512
     if sector * 512 + data_len > part:
         raise BenchError(f"{local.name} ({data_len} B) at sector {sector:#x} does not fit "
                          f"{dev} ({part} B)")
@@ -383,7 +389,7 @@ def ext_csd(t: LinuxTarget, emmc: str) -> dict[int, int]:
 
 
 def set_boot_config(t: LinuxTarget, emmc: str) -> None:
-    """[177]=0x02 (x8, SDR backward-compatible, reset to x1), [179]=0x08 (boot1, no ACK)."""
+    """[177]=0x02 (x8, SDR backward-compatible, reset to x1), [179]=0x08 (boot partition 1, no ACK)."""
     t.run(f"mmc bootbus set single_backward x1 x8 {emmc}")
     t.run(f"mmc bootpart enable 1 0 {emmc}")
     regs = ext_csd(t, emmc)
@@ -1017,9 +1023,9 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
         facts["emmc_ext_csd_177"] = f"{regs[177]:#04x}"
         facts["emmc_ext_csd_179"] = f"{regs[179]:#04x}"
         if "bl2_mmc" in sizes:
-            facts["emmc_boot1_bl2_md5"] = t.md5(f"{dev}boot1", 1 * 512, sizes["bl2_mmc"])
+            facts["emmc_boot1_bl2_md5"] = t.md5(f"{dev}{EMMC_BOOT_PART}", 1 * 512, sizes["bl2_mmc"])
         if "fip" in sizes:
-            facts["emmc_boot1_fip_md5"] = t.md5(f"{dev}boot1", 0x300 * 512, sizes["fip"])
+            facts["emmc_boot1_fip_md5"] = t.md5(f"{dev}{EMMC_BOOT_PART}", 0x300 * 512, sizes["fip"])
         ios = t.run(f'cat /sys/kernel/debug/$(basename $(dirname $(readlink -f /sys/block/{name}/device)))/ios',
                     check=False).stdout
         m = re.search(r"timing spec:\s*\d+ \(([^)]+)\)", ios)

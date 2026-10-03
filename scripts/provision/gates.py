@@ -48,7 +48,7 @@ CM33_REGION_OFFSET = 0x1A0000
 CM33_SRAM_BASE = 0x08000000
 CM33_PAD = 0x3000
 CM33_MAX = 0x30000        # BL2 silently truncates anything larger
-# eMMC boot1 layout: bl2_mmc from sector 1, the FIP from sector 0x300.
+# eMMC boot partition 1 layout: bl2_mmc from sector 1, the FIP from sector 0x300.
 BL2_MMC_SECTOR = 0x1
 FIP_SECTOR = 0x300
 BL2_MMC_MAX = (FIP_SECTOR - BL2_MMC_SECTOR) * 512
@@ -117,7 +117,7 @@ def artefacts(bundle_dir: Path, bundle: dict) -> GateResult:
         if role == "fip" and size > CM33_REGION_OFFSET:
             problems.append(f"fip: {size} bytes would reach the CM33 region at mtd1+{CM33_REGION_OFFSET:#x}")
         if role == "bl2_mmc" and size > BL2_MMC_MAX:
-            problems.append(f"bl2_mmc: {size} bytes would overlap the FIP at boot1 sector {FIP_SECTOR:#x}")
+            problems.append(f"bl2_mmc: {size} bytes would overlap the FIP at boot partition 1 sector {FIP_SECTOR:#x}")
     if problems:
         return GateResult("artefacts", False, "; ".join(problems))
     return GateResult("artefacts", True, f"{len(comps)} component(s) match bundle.json")

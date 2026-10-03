@@ -217,24 +217,24 @@ Extended CSD rev 1.8 [EXT_CSD_REV: 0x08]
 """
 
 
-def test_emmc_boot1_force_ro_restored_on_failure(tmp_path):
+def test_emmc_boot_force_ro_restored_on_failure(tmp_path):
     img = tmp_path / "bl2_mmc.bin"
     img.write_bytes(b"\x02" * 512)
-    t, fake = target([("boot1/size", "8192\n"), ("md5sum", f"{md5(img.read_bytes())}  -\n"), ("force_ro|rm -f", ""),
+    t, fake = target([("boot0/size", "8192\n"), ("md5sum", f"{md5(img.read_bytes())}  -\n"), ("force_ro|rm -f", ""),
                       (r"^dd ", (1, ""))])
     with pytest.raises(BenchError):
-        lt.emmc_boot1_write_verify(t, "/dev/mmcblk1", img, 1)
-    assert "echo 1 > /sys/block/mmcblk1boot1/force_ro" in fake.commands
+        lt.emmc_boot_write_verify(t, "/dev/mmcblk1", img, 1)
+    assert "echo 1 > /sys/block/mmcblk1boot0/force_ro" in fake.commands
 
 
-def test_emmc_boot1_write_verify(tmp_path):
+def test_emmc_boot_write_verify(tmp_path):
     img = tmp_path / "fip.bin"
     img.write_bytes(b"\x03" * 1000)
     good = md5(img.read_bytes())
-    t, fake = target([("boot1/size", "8192\n"), ("md5sum", f"{good}  -\n"), ("force_ro|rm -f|^dd ", "")])
-    assert lt.emmc_boot1_write_verify(t, "/dev/mmcblk1", img, 0x300) == good
-    assert "dd if=/tmp/fip.bin of=/dev/mmcblk1boot1 bs=512 seek=768 && sync" in fake.commands
-    assert "dd if=/dev/mmcblk1boot1 bs=1 skip=393216 count=1000 2>/dev/null | md5sum" in fake.commands
+    t, fake = target([("boot0/size", "8192\n"), ("md5sum", f"{good}  -\n"), ("force_ro|rm -f|^dd ", "")])
+    assert lt.emmc_boot_write_verify(t, "/dev/mmcblk1", img, 0x300) == good
+    assert "dd if=/tmp/fip.bin of=/dev/mmcblk1boot0 bs=512 seek=768 && sync" in fake.commands
+    assert "dd if=/dev/mmcblk1boot0 bs=1 skip=393216 count=1000 2>/dev/null | md5sum" in fake.commands
 
 
 def test_set_boot_config_verifies():
@@ -681,12 +681,12 @@ def _census_responses(array: bytes = b"\xff" * 128):
         (r"uname -r", "6.1.107-cip28\n"),
         (r"device-tree/compatible", "alp,e1m-v2m101-x-evk renesas,r9a09g056\n"),
         (r"device-tree/model", "ALP E1M-V2M101 on E1M-X-EVK\n"),
-        (r"device/type", "mmcblk0 SD\nmmcblk1 MMC\nmmcblk1boot1 MMC\n"),
+        (r"device/type", "mmcblk0 SD\nmmcblk1 MMC\nmmcblk1boot0 MMC\n"),
         (r"mmcblk1/device/cid", CID + "\n"), (r"mmcblk1/size", "30535680\n"),
         (r"extcsd read", EXTCSD.format(a=2, b=8)),
         (r"/ios", "actual clock:\t200000000 Hz\ntiming spec:\t9 (mmc HS200)\n"),
-        (r"mmcblk1boot1 bs=1 skip=512 count=100 ", "11" * 16 + "  -\n"),
-        (r"mmcblk1boot1 bs=1 skip=393216 count=200 ", "22" * 16 + "  -\n"),
+        (r"mmcblk1boot0 bs=1 skip=512 count=100 ", "11" * 16 + "  -\n"),
+        (r"mmcblk1boot0 bs=1 skip=393216 count=200 ", "22" * 16 + "  -\n"),
         (r"spi-nor/jedec_id", "aabbcc\n"),
         (r"pci/devices/0000:01:00\.0/device", "0x0000\n"),
         (r"^dxrt-cli -s$", DXRT_CLI_S.read_text(encoding="utf-8")),
@@ -770,12 +770,12 @@ def test_parse_emmc_cid_rejects_garbage():
         lt.parse_emmc_cid("xyz")
 
 
-def test_emmc_boot1_write_refuses_an_image_past_the_partition_end(tmp_path):
+def test_emmc_boot_write_refuses_an_image_past_the_partition_end(tmp_path):
     img = tmp_path / "fip.bin"
     img.write_bytes(b"\x03" * 1000)
-    t, fake = target([("boot1/size", "768\n")])     # 768 sectors: ends exactly at 0x300
+    t, fake = target([("boot0/size", "768\n")])     # 768 sectors: ends exactly at 0x300
     with pytest.raises(BenchError, match="does not fit"):
-        lt.emmc_boot1_write_verify(t, "/dev/mmcblk1", img, 0x300)
+        lt.emmc_boot_write_verify(t, "/dev/mmcblk1", img, 0x300)
     assert not any(c.startswith("dd ") and " of=" in c for c in fake.commands)
 
 
