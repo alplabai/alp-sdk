@@ -41,6 +41,23 @@ def _carrier_with_a_primary_backup_cell(monkeypatch):
 
 
 FIXTURES = REPO = Path(__file__).resolve().parent / "fixtures" / "provision"
+
+# The host clock the RTC-retention check compares against, frozen: a slow run (the gate
+# container took 32 s between building the answers and judging them) must not turn the
+# "RTC matches the host" fixture into a 30 s-tolerance failure.
+NOW = int(time.time())
+
+
+@pytest.fixture(autouse=True)
+def _frozen_host_clock(monkeypatch):
+    class _Clock:                     # the time module, with time() pinned to NOW
+        def __getattr__(self, name):
+            return getattr(time, name)
+
+        @staticmethod
+        def time():
+            return float(NOW)
+    monkeypatch.setattr(functest, "time", _Clock())
 ALL_FIXTURES = {"eth1_cable": True, "wifi_ap": {"ssid": "bench-ap", "min_signal_dbm": -70},
                 "ble_advertiser": {"address": "AA:BB:CC:DD:EE:FF"}, "dxm1_model": "/usr/share/model.dxnn",
                 "usb_stick": True, "sd_card": True, "rtc_backup": True, "ina228_rework": True,
@@ -102,7 +119,7 @@ def _good(ctx) -> dict[str, str]:
         "rtc_time_set": "1790000000",
         "rtc_backup_mode": "0x3f",
         "rtc_trickle": "0x1c",                                    # TCE off (no rechargeable element declared), BSM level
-        "rtc_retention": f"epoch={int(time.time())}\nboot=boot-now\nhctosys_failed=0",
+        "rtc_retention": f"epoch={NOW}\nboot=boot-now\nhctosys_failed=0",
         "board_temp": "0x2e 0xd0",                                 # 46.8 degC (the temperature one unit read)
         "secure_element": "HIL_OPTIGA_I2C_STATE 0x08 0x80 0x00 0x00\nHIL_OPTIGA_ACK",
         "gd32_bridge": "0x00 0x00 0x0e 0x00 0xcf 0xa7",           # real reply: protocol 0.14.0
@@ -413,10 +430,10 @@ def test_rtc_retention_needs_a_set_before_and_a_reboot_since(tmp_path):
     ctx.facts["rtc_set_boot_id"] = "boot-now"
     assert _val(_run(ctx), "rtc_retention") == "fail (no reboot since the RTC was set: nothing proven)"
     ctx.facts["rtc_set_boot_id"] = "boot-before"
-    unit.answers["rtc_retention"] = f"epoch={int(time.time()) - 3600}\nboot=boot-now\nhctosys_failed=0"
+    unit.answers["rtc_retention"] = f"epoch={NOW - 3600}\nboot=boot-now\nhctosys_failed=0"
     assert "from the host clock after the cold cycles" in _val(_run(ctx), "rtc_retention")
     # the clock reads fine now, but this boot's kernel could not read it at start-up: it was lost
-    unit.answers["rtc_retention"] = f"epoch={int(time.time())}\nboot=boot-now\nhctosys_failed=1"
+    unit.answers["rtc_retention"] = f"epoch={NOW}\nboot=boot-now\nhctosys_failed=1"
     assert "hctosys: unable to read the hardware clock" in _val(_run(ctx), "rtc_retention")
 
 
