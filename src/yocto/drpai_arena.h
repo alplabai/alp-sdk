@@ -36,12 +36,12 @@
  * flock() on a lock file and keeps it until the last DRP-AI handle in the
  * process closes; another process finds it held and its open() fails with
  * ALP_ERR_BUSY.  Handles inside one process share the one lock.  The file is
- * /run/alp/drpai.lock (directory created 0755 if missing); /run is tmpfs on
- * the target image and root-writable, which is where runtime lock files
- * belong and is cleared on every boot, so a stale file cannot matter (flock
- * state dies with the process anyway).  Only when /run/alp cannot be created
- * or opened (not writable, e.g. an unprivileged host run) does it fall back
- * to /tmp/alp-drpai.lock.
+ * ALWAYS /run/alp/drpai.lock, opened O_NOFOLLOW, mode 0660.  The directory is
+ * not created here: the image ships it (systemd tmpfiles.d, root:video 0775,
+ * the group the drpai udev rule uses), so root and non-root processes lock the
+ * SAME file.  There is deliberately no fallback to another path: two processes
+ * locking different files would both proceed and silently break the rule.  If
+ * the file cannot be opened, the DRP-AI open fails with ALP_ERR_IO.
  */
 #ifndef ALP_SDK_YOCTO_DRPAI_ARENA_H
 #define ALP_SDK_YOCTO_DRPAI_ARENA_H
@@ -49,6 +49,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include <cerrno>
@@ -68,10 +69,10 @@ constexpr uint64_t kArenaAlign = 16ull << 20;
  *  (alp-sdk#2236); retune once PreRuntime's real footprint is known. */
 constexpr uint64_t kArenaPreprocReserve = 32ull << 20;
 
-/** Lock file locations, in order of preference (see the file comment). */
-constexpr const char *kLockDir          = "/run/alp";
-constexpr const char *kLockPathPrimary  = "/run/alp/drpai.lock";
-constexpr const char *kLockPathFallback = "/tmp/alp-drpai.lock";
+/** Directory holding drpai.lock (see the file comment).  Production code
+ *  never changes it; host tests point it at a temp dir to avoid needing
+ *  /run/alp, and at a missing dir to prove an unopenable lock fails the open. */
+inline const char *g_lock_dir = "/run/alp";
 
 /** A model's [start, end) in the arena.  start == end means "uses none"
  *  (CPU-only model); releasing it is a no-op. */
@@ -188,15 +189,11 @@ class Arena
 	}
 
   private:
-	/** Open the lock file: /run/alp/drpai.lock, else /tmp/alp-drpai.lock. */
+	/** Open <g_lock_dir>/drpai.lock; no fallback path (see the file comment). */
 	static int open_lock_file_()
 	{
-		::mkdir(kLockDir, 0755); /* EEXIST and EACCES both fall through to open() */
-		int fd = ::open(kLockPathPrimary, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
-		if (fd < 0) {
-			fd = ::open(kLockPathFallback, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
-		}
-		return fd;
+		const std::string path = std::string(g_lock_dir) + "/drpai.lock";
+		return ::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0660);
 	}
 
 	uint64_t cursor_() const

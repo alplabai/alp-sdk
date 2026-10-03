@@ -525,13 +525,14 @@ driver has no queue (a second `DRPAI_START` while a job runs returns
 - **DRP-AI is one process per board.** The arena placement above is per
   process, so two processes would both load at the arena base and corrupt
   each other. The first DRP-AI handle in a process therefore takes an
-  exclusive, non-blocking `flock()` on `/run/alp/drpai.lock` (directory
-  created `0755` if missing; `/run` is tmpfs and cleared at boot) and keeps
-  it until the last DRP-AI handle in that process closes. A second process
-  gets `ALP_ERR_BUSY` from `alp_inference_open()`. Several handles inside
-  one process stay allowed. Only if `/run/alp` cannot be created or opened
-  (not writable, e.g. an unprivileged host run) the lock file is
-  `/tmp/alp-drpai.lock` instead. The DX-M1 has no such limit: a second
+  exclusive, non-blocking `flock()` on `/run/alp/drpai.lock` (the image
+  creates `/run/alp` at boot, `root:video 0775`, via a systemd tmpfiles.d
+  snippet in the `alp-sdk` recipe) and keeps it until the last DRP-AI handle
+  in that process closes. A second process gets `ALP_ERR_BUSY` from
+  `alp_inference_open()`. Several handles inside one process stay allowed.
+  There is no fallback path: a root and a non-root process must lock the
+  same file, so if the lock file cannot be opened `alp_inference_open()`
+  fails with `ALP_ERR_IO`. The DX-M1 has no such limit: a second
   process uses only the DX-M1, through `dxrtd`.
 
 ### One model per NPU (V2M)

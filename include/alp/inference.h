@@ -345,12 +345,7 @@ alp_inference_get_output(alp_inference_t *inf, size_t index, alp_inference_tenso
  * `examples/v2n/v2n-two-models/`.
  *
  * @par DRP-AI3 is one process per board
- * The first DRP-AI3 handle in a process takes an exclusive file lock
- * (`/run/alp/drpai.lock`, or `/tmp/alp-drpai.lock` if that is not writable)
- * and keeps it until the last DRP-AI3 handle in the process closes.
- * @ref alp_inference_open on a DRP-AI3 model from a second process returns
- * NULL with @ref ALP_ERR_BUSY.  Several handles inside one process are fine.
- * The DX-M1 has no such limit.
+ * DRP-AI3-only; see ext/renesas/inference.h.  The DX-M1 has no such limit.
  *
  * @par DRP-AI3 failures are not reported
  * The DRP-AI3 runtime's `Run()` returns void, so a job the driver

@@ -25,6 +25,16 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
+ * @par DRP-AI3 is one process per board
+ *      The first DRP-AI3 handle in a process takes an exclusive file lock
+ *      on `/run/alp/drpai.lock` and keeps it until the last DRP-AI3 handle
+ *      in the process closes.  @ref alp_inference_open on a DRP-AI3 model
+ *      from a second process returns NULL with @ref ALP_ERR_BUSY.  Several
+ *      handles inside one process are fine.  The directory is created at
+ *      boot by the image (`root:video 0775`, the group of the drpai udev
+ *      rule); there is no fallback path, so if the lock file cannot be
+ *      opened the open fails with @ref ALP_ERR_IO.
+ *
  * @par ABI status: [ABI-EXPERIMENTAL]
  *      Header lands ahead of the vendor pack body; every function
  *      returns @ref ALP_ERR_NOSUPPORT until Renesas DRP-AI HAL

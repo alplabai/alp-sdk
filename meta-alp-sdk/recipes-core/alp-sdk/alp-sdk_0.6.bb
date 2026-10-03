@@ -15,7 +15,8 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=787726818c896f394f6627ab59d98d69"
 # Track the alp-sdk default branch; CI repins SRCREV to the release-tag
 # commit when alp-sdk tags a new release (same pattern as the other
 # alp-* recipes in this layer, e.g. alp-chips_0.6.bb).
-SRC_URI = "git://github.com/alplabai/alp-sdk.git;protocol=https;branch=main"
+SRC_URI = "git://github.com/alplabai/alp-sdk.git;protocol=https;branch=main \
+           file://alp-sdk-tmpfiles.conf"
 SRCREV  = "${AUTOREV}"
 PV      = "0.6.0"
 
@@ -319,7 +320,14 @@ python () {
 # and apps pick per-handle at runtime via alp_inference_open(.backend =
 # ...).
 
-FILES:${PN}     += "${libdir}/libalp_sdk.so.*"
+# /run/alp (root:video 0775) for the DRP-AI one-process-per-board lock; the
+# SDK no longer falls back to /tmp when it is missing (src/yocto/drpai_arena.h).
+do_install:append() {
+    install -d ${D}${nonarch_libdir}/tmpfiles.d
+    install -m 0644 ${WORKDIR}/alp-sdk-tmpfiles.conf ${D}${nonarch_libdir}/tmpfiles.d/alp-sdk.conf
+}
+
+FILES:${PN}     += "${libdir}/libalp_sdk.so.* ${nonarch_libdir}/tmpfiles.d/alp-sdk.conf"
 FILES:${PN}-dev += "${libdir}/libalp_sdk.so    \
                     ${includedir}/alp/*.h      \
                     ${includedir}/alp/chips/*.h"

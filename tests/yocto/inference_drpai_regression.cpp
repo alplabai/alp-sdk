@@ -49,6 +49,8 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -283,17 +285,15 @@ void test_area_change_with_live_handle_is_refused()
 	drpai_test::g_device_present = false;
 }
 
-/* The lock file the SDK used: the first of its two locations that exists.
- * Returns an fd on it (or -1). */
+/* Point the SDK's lock dir at a private temp dir (the real /run/alp is
+ * image-provided and root/video-owned).  Done once, from main(). */
+char g_tmp_lock_dir[] = "/tmp/alp-drpai-test-XXXXXX";
+
+/* The lock file the SDK uses.  Returns an fd on it (or -1). */
 int open_lock_file()
 {
-	for (const char *path : { alp_drpai::kLockPathPrimary, alp_drpai::kLockPathFallback }) {
-		int fd = ::open(path, O_RDWR | O_CLOEXEC);
-		if (fd >= 0) {
-			return fd;
-		}
-	}
-	return -1;
+	const std::string path = std::string(alp_drpai::g_lock_dir) + "/drpai.lock";
+	return ::open(path.c_str(), O_RDWR | O_CLOEXEC);
 }
 
 /* True when some other open file description holds the lock (what a second
@@ -462,8 +462,30 @@ void test_close_on_null_state_is_noop()
 
 } /* namespace */
 
+/* Test 2j: an unopenable lock file fails the open (ALP_ERR_IO) instead of
+ * falling back to another path, where a second process could lock a
+ * different file and break the one-process-per-board rule. */
+void test_unopenable_lock_fails_open()
+{
+	fake_device(16 * kMiB);
+	alp_inference_config_t cfg = tar_cfg();
+	struct alp_inference   inf = {};
+	const char            *saved = alp_drpai::g_lock_dir;
+
+	alp_drpai::g_lock_dir = "/nonexistent-alp-lock-dir";
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&inf, &cfg), ALP_ERR_IO);
+	ALP_ASSERT_NULL(inf.be_state);
+	alp_drpai::g_lock_dir = saved;
+
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&inf, &cfg), ALP_OK); /* nothing leaked */
+	alp_inference_drpai_close(&inf);
+	drpai_test::g_device_present = false;
+}
+
 int main(void)
 {
+	ALP_ASSERT_TRUE(::mkdtemp(g_tmp_lock_dir) != nullptr);
+	alp_drpai::g_lock_dir = g_tmp_lock_dir;
 	test_open_rejects_null_model_data();
 	test_open_rejects_zero_model_size();
 	test_open_fails_cleanly_when_device_absent();
@@ -475,10 +497,14 @@ int main(void)
 	test_concurrent_invokes_are_serialised();
 	test_open_and_close_wait_for_a_running_job();
 	test_one_drpai_process_per_board();
+	test_unopenable_lock_fails_open();
 	test_num_inputs_outputs_zero_when_not_open();
 	test_get_input_output_not_ready_when_not_open();
 	test_invoke_not_ready_when_not_open();
 	test_close_on_null_state_is_noop();
+
+	::unlink((std::string(g_tmp_lock_dir) + "/drpai.lock").c_str());
+	::rmdir(g_tmp_lock_dir);
 
 	ALP_TEST_SUMMARY();
 }
