@@ -119,6 +119,18 @@ def cyw_bt_region_hcd(d):
               "btbcm actually loads)." % region)
 CYW_HCD_DEFAULT = "${@cyw_bt_region_hcd(d)}"
 
+# brcmfmac asks for BOARD-NAMED files first -- cyfmac55500-sdio.<board>.{trxse,
+# txt,clm_blob} -- where <board> is the first string of the DT root
+# "compatible" (a '/' would become '-'). Without them the first lookup logs
+# "Direct firmware load ... failed with error -2" and the driver falls back
+# to the generic names. Ship each board name as a symlink to the generic
+# file so the first lookup succeeds. This list is the first compatible string
+# of every V2N/V2M board DT this layer builds
+# (recipes-kernel/linux/linux-renesas/e1m-v2{m,n}101-x-evk.dts; the V2M102/
+# V2M103 and V2N102/V2N103 machines reuse those dtbs).
+# tests/scripts/test_cyw_fw_board_names.py keeps it in lockstep.
+CYW_BOARD_NAMES = "alp,e1m-v2m101-x-evk alp,e1m-v2n101-x-evk"
+
 do_install() {
     # WLAN: radio firmware + regulatory CLM + NVRAM -> /lib/firmware/cypress/
     # (brcmfmac loads the generic chip+bus names; rename CLM/NVRAM on install.)
@@ -129,6 +141,13 @@ do_install() {
         ${D}${nonarch_base_libdir}/firmware/cypress/cyfmac55500-sdio.clm_blob
     install -m 0644 ${CYW_NVRAM_S}/${NVRAM_SRC} \
         ${D}${nonarch_base_libdir}/firmware/cypress/cyfmac55500-sdio.txt
+
+    for board in ${CYW_BOARD_NAMES}; do
+        for ext in trxse txt clm_blob; do
+            ln -sf cyfmac55500-sdio.$ext \
+                ${D}${nonarch_base_libdir}/firmware/cypress/cyfmac55500-sdio.$board.$ext
+        done
+    done
 
     # Bluetooth: both regulatory .hcd variants -> /lib/firmware/brcm/,
     # kept under their full module-suffixed names for provenance/manual

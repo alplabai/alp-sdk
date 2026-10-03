@@ -138,8 +138,9 @@ MACHINE's `KERNEL_DEVICETREE` reuses its x101 sibling's dtb by design --
 see the memory-tier rationale in `e1m-v2n103-a55.conf` /
 `e1m-v2m103-a55.conf`) (issue #1175, closed as
 #1252). The vendor env's hardcoded `boot/r9a09g056n44-dev.dtb` is a
-filename **no Alp image builds**, on the eMMC branch as well as the SD
-one, which is why the reload exists. If the dtb is missing from
+filename **no Alp machine builds as a dtb**, on the eMMC branch as well as the
+SD one, which is why the reload exists (the image links that name to the board
+dtb so the vendor load succeeds harmlessly, #2637). If the dtb is missing from
 `/boot`, the bootloader prints an error and **stops** — it does not
 fall through and boot whatever devicetree is left in RAM.
 
