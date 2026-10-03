@@ -225,9 +225,11 @@ the DT-driven form is not yet bench-validated.
 A project whose resolved ownership differs from the default gets its own Linux
 fragment from the same renderer, with no extra variable: the
 kernel `.bbappend` renders the fragment from the system-manifest's `ownership:`
-(`ALP_SYSTEM_MANIFEST_PATH`, default `../alp-sdk/build/system-manifest.yaml`,
-required exactly as for `alp-dts-reservations`: a missing manifest fails the
-build) and label-checks it against `r9a09g056.dtsi` (`gen_linux_ownership_dt.py
+(`ALP_SYSTEM_MANIFEST_PATH`, default `../alp-sdk/build/system-manifest.yaml`).
+With no manifest the build fails unless `ALP_OWNERSHIP_SOM_DEFAULT = "1"` is set
+in `local.conf` (a generic SoM image such as a plain `alp-image-edge`, which
+then keeps the committed SoM-default fragment and logs a `bbnote`).  The
+fragment is label-checked it against `r9a09g056.dtsi` (`gen_linux_ownership_dt.py
 --manifest M --output F --vendor-dtsi V`). The fragment is as fresh as the
 manifest, i.e. the last `tan build`. `python3
 scripts/alp_project.py --input board.yaml --emit linux-ownership-dts` prints

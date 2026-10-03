@@ -114,6 +114,19 @@ not the distro.
 > to `"6.1%"` (linux-renesas 6.1.141-cip43) for BSP v6.30.  Leaving it at
 > the template default causes a recipe mismatch and build failure.
 
+> **Core ownership (kernel `do_configure`):** the linux-renesas bbappend needs
+> to know which cores own the assignable peripherals. For a project build it
+> renders the Linux fragment from the system-manifest
+> (`ALP_SYSTEM_MANIFEST_PATH`, default `../alp-sdk/build/system-manifest.yaml`,
+> written by `tan build`). For a generic SoM image with no manifest, add
+> `ALP_OWNERSHIP_SOM_DEFAULT = "1"` to `conf/local.conf` to keep the committed
+> SoM-default fragment; with neither the kernel build fails on purpose.
+>
+> ```bash
+> # conf/local.conf: generic SoM image (no tan build manifest)
+> ALP_OWNERSHIP_SOM_DEFAULT = "1"
+> ```
+
 > **Machine fragments:** `alp-image-edge` picks up per-machine `.cfg`
 > fragments from `meta-alp-sdk/recipes-kernel/linux/`.  For V2N with the
 > display feature enabled, the active fragment list is `display.cfg`.

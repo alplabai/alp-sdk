@@ -225,14 +225,26 @@ SRC_URI += "${@' file://e1m-v2n-drpai.dtsi' if d.getVar('ALP_DRPAI_DT_ENABLE') =
 # the SoM-DEFAULT ownership (kept in sync by the generated-files gate); do_configure
 # replaces it with the fragment of the project being built, rendered from the
 # `ownership:` that the orchestrator's system-manifest.yaml carries (the same
-# resolved map the CM33 overlay uses).  The manifest is REQUIRED, exactly like
-# alp-dts-reservations (same variable, same default, fatal when missing): the
-# image already needs it for the carve-outs, so it is always there.  Freshness
-# is the manifest's: it is only as current as the last `tan build`.
+# resolved map the CM33 overlay uses).  Three cases, no silent fallback:
+#   1. manifest present                  -> render the project fragment from it.
+#   2. no manifest, ALP_OWNERSHIP_SOM_DEFAULT = "1"
+#                                        -> keep the committed SoM-default
+#                                           fragment (generic SoM image).
+#   3. neither                           -> bbfatal.
+# ALP_OWNERSHIP_SOM_DEFAULT is deliberately NOT defaulted here: set it in the
+# local.conf of a generic image build (a default would defeat case 3).  The
+# manifest path variable and default match alp-dts-reservations.  Freshness is
+# the manifest's: it is only as current as the last `tan build`.
 ALP_SYSTEM_MANIFEST_PATH ??= "${TOPDIR}/../alp-sdk/build/system-manifest.yaml"
 ALP_OWN_SDK := "${THISDIR}/../../.."
 # Everything the render reads, so editing any of it re-runs do_configure.
-do_configure[file-checksums] += "${ALP_SYSTEM_MANIFEST_PATH}:${@os.path.exists(d.getVar('ALP_SYSTEM_MANIFEST_PATH'))}     ${ALP_OWN_SDK}/scripts/gen_linux_ownership_dt.py:True     ${ALP_OWN_SDK}/scripts/alp_orchestrate/linux_ownership.py:True     ${ALP_OWN_SDK}/scripts/alp_orchestrate/ownership.py:True     ${ALP_OWN_SDK}/metadata/e1m_modules/v2n/core-ownership.yaml:True     ${ALP_OWN_SDK}/metadata/e1m_modules/v2n/supervisor-links.yaml:True     ${ALP_OWN_SDK}/metadata/socs/renesas/rzv2n/n44.json:True"
+do_configure[file-checksums] += "${ALP_SYSTEM_MANIFEST_PATH}:${@os.path.exists(d.getVar('ALP_SYSTEM_MANIFEST_PATH'))} \
+    ${ALP_OWN_SDK}/scripts/gen_linux_ownership_dt.py:True \
+    ${ALP_OWN_SDK}/scripts/alp_orchestrate/linux_ownership.py:True \
+    ${ALP_OWN_SDK}/scripts/alp_orchestrate/ownership.py:True \
+    ${ALP_OWN_SDK}/metadata/e1m_modules/v2n/core-ownership.yaml:True \
+    ${ALP_OWN_SDK}/metadata/e1m_modules/v2n/supervisor-links.yaml:True \
+    ${ALP_OWN_SDK}/metadata/socs/renesas/rzv2n/n44.json:True"
 
 # Drop the ALP board dts + dtsi into the kernel DT source dir so they
 # compile next to the upstream Renesas dts (the board dts #include the
@@ -248,22 +260,34 @@ do_configure:prepend() {
         "${WORKDIR}/e1m-v2m101-x-evk.dts" \
         "${ALP_DTS_DST}/"
 
-    # Per-project ownership: rendered from the system-manifest's resolved
-    # `ownership:` over the SoM-default fragment installed above, and every
-    # node it names must exist in THIS kernel's SoC dtsi.  Required: no
-    # manifest, no SDK scripts or no PyYAML is fatal.
+    # Per-project ownership (see the three cases above).  A manifest renders
+    # over the SoM-default fragment installed above, and every node it names
+    # must exist in THIS kernel's SoC dtsi.
     ALP_OWN_GEN="${ALP_OWN_SDK}/scripts/gen_linux_ownership_dt.py"
     ALP_OWN_M="${ALP_SYSTEM_MANIFEST_PATH}"
-    [ -f "${ALP_OWN_M}" ] || bbfatal "alp-sdk system-manifest.yaml not found at '${ALP_OWN_M}': build with tan build first or set ALP_SYSTEM_MANIFEST_PATH (the per-project core ownership is rendered from it)"
-    [ -f "${ALP_OWN_GEN}" ] && python3 -c 'import yaml' 2>/dev/null         || bbfatal "gen_linux_ownership_dt.py or PyYAML unavailable: cannot render the ownership fragment for ${ALP_OWN_M}"
-    python3 "${ALP_OWN_GEN}" --manifest "${ALP_OWN_M}" --output "${ALP_DTS_DST}/e1m-v2n-ownership.dtsi"         --vendor-dtsi "${S}/arch/arm64/boot/dts/renesas/r9a09g056.dtsi"         || bbfatal "per-project ownership fragment for ${ALP_OWN_M} is invalid or names a node r9a09g056.dtsi lacks"
-    bbnote "per-project ownership fragment rendered from ${ALP_OWN_M}"
+    if [ -f "${ALP_OWN_M}" ]; then
+        [ -f "${ALP_OWN_GEN}" ] && python3 -c 'import yaml' 2>/dev/null \
+            || bbfatal "gen_linux_ownership_dt.py or PyYAML unavailable: cannot render the ownership fragment for ${ALP_OWN_M}"
+        python3 "${ALP_OWN_GEN}" --manifest "${ALP_OWN_M}" \
+            --output "${ALP_DTS_DST}/e1m-v2n-ownership.dtsi" \
+            --vendor-dtsi "${S}/arch/arm64/boot/dts/renesas/r9a09g056.dtsi" \
+            || bbfatal "per-project ownership fragment for ${ALP_OWN_M} is invalid or names a node r9a09g056.dtsi lacks"
+        bbnote "per-project ownership fragment rendered from ${ALP_OWN_M}"
+    elif [ "${ALP_OWNERSHIP_SOM_DEFAULT}" = "1" ]; then
+        bbnote "no system-manifest at '${ALP_OWN_M}': using the committed SoM-default ownership fragment (ALP_OWNERSHIP_SOM_DEFAULT = 1)"
+    else
+        bbfatal "no alp-sdk system-manifest.yaml at '${ALP_OWN_M}' and ALP_OWNERSHIP_SOM_DEFAULT is not 1: for a project build pass ALP_SYSTEM_MANIFEST_PATH (from tan build / alp_project emit), for a generic SoM image set ALP_OWNERSHIP_SOM_DEFAULT = \"1\" in local.conf"
+    fi
 
     # Opt-in CAM0 sources (#1149): the wrapper dts + fragment must sit next
     # to the board dts or the cam0 dtb has no rule to build.
     if [ -n "${ALP_CAM0_SENSOR}" ]; then
-        install -m 0644 "${WORKDIR}/e1m-x-evk-cam0-${ALP_CAM0_SENSOR}.dtsi"             "${ALP_DTS_DST}/e1m-x-evk-cam0-sensor.dtsi"
-        install -m 0644             "${WORKDIR}/e1m-v2n101-x-evk-cam0.dts"             "${WORKDIR}/e1m-v2m101-x-evk-cam0.dts"             "${ALP_DTS_DST}/"
+        install -m 0644 "${WORKDIR}/e1m-x-evk-cam0-${ALP_CAM0_SENSOR}.dtsi" \
+            "${ALP_DTS_DST}/e1m-x-evk-cam0-sensor.dtsi"
+        install -m 0644 \
+            "${WORKDIR}/e1m-v2n101-x-evk-cam0.dts" \
+            "${WORKDIR}/e1m-v2m101-x-evk-cam0.dts" \
+            "${ALP_DTS_DST}/"
     fi
 
     # Branch on the bitbake variable, not on the presence of the unpacked
