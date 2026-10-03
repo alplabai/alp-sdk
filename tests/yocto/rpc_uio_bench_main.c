@@ -126,7 +126,10 @@
 #include <openamp/remoteproc.h>
 
 #include <alp/peripheral.h>
+#include <alp/protocol/amp_beacon.h>
 #include <alp/rpc.h>
+
+#include "../../src/backends/rpc/alp_amp_window.h"
 
 /* ------------------------------------------------------------------ */
 /* Last-error plumbing (src/common/alp_z_last_error.h's contract)       */
@@ -240,8 +243,8 @@ struct diag_uio_region {
 };
 
 static const struct diag_uio_region g_diag_regions[] = {
-	{ "4f700000.rsctbl", "ALP_UIO_RSCTBL" },
-	{ "4f701000.mhu-shm", "ALP_UIO_MHU_SHM" },
+	{ ALP_AMP_UIO_RSCTBL_NAME, "ALP_UIO_RSCTBL" },
+	{ ALP_AMP_UIO_MHU_SHM_NAME, "ALP_UIO_MHU_SHM" },
 	{ "4f800000.vring-ctl0", "ALP_UIO_VRING_CTL0" },
 	{ "4f850000.vring-ctl1", "ALP_UIO_VRING_CTL1" },
 	{ "4f900000.vring-shm0", "ALP_UIO_VRING_SHM0" },
@@ -256,13 +259,12 @@ static const char *diag_uio_name(size_t i)
 	return (env != NULL && env[0] != '\0') ? env : g_diag_regions[i].dt_name;
 }
 
-/* Liveness beacon offsets -- see examples/multicore/rpmsg-v2n/m33_sm/
- * src/main.c's RSCTBL_BEACON_* macros (published at the TOP of the
- * rsctbl region, above the resource table itself). */
-#define DIAG_BEACON_MAGIC_OFFSET     0xFF0u
-#define DIAG_BEACON_VERSION_OFFSET   0xFF4u
-#define DIAG_BEACON_HEARTBEAT_OFFSET 0xFF8u
-#define DIAG_BEACON_MAGIC_EXPECT     0xA10D0683u
+/* Liveness beacon offsets: <alp/protocol/amp_beacon.h> (top 16 bytes of
+ * the rsctbl region, above the resource table itself). */
+#define DIAG_BEACON_MAGIC_OFFSET     ALP_AMP_BEACON_MAGIC_OFF(ALP_AMP_RSCTBL_SIZE)
+#define DIAG_BEACON_VERSION_OFFSET   ALP_AMP_BEACON_VERSION_OFF(ALP_AMP_RSCTBL_SIZE)
+#define DIAG_BEACON_HEARTBEAT_OFFSET ALP_AMP_BEACON_HEARTBEAT_OFF(ALP_AMP_RSCTBL_SIZE)
+#define DIAG_BEACON_MAGIC_EXPECT     ALP_AMP_BEACON_MAGIC
 
 static uint32_t diag_read_u32(const void *base, uint32_t off)
 {

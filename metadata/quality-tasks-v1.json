@@ -61,6 +61,20 @@
       "ci": "pr-metadata-validate.yml:validate"
     },
     {
+      "id": "amp-window",
+      "description": "The CM33 OpenAMP window is declared once (SoC openamp_carveout); the generated board .dts, the Linux reserved-memory/UIO nodes and the RPC backend's alp_amp_window.h must agree, and the beacon magic lives only in include/alp/protocol/amp_beacon.h.",
+      "runner": "check-script",
+      "script": "scripts/check_amp_window.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "board-id-doc-parity",
       "description": "docs/board-id.md's alp_hw_info_eeprom_t typedef struct (field names, order, widths) must match include/alp/hw_info.h, macros resolved (#1231).",
       "runner": "check-script",

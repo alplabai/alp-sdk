@@ -73,5 +73,7 @@ zephyr_compile_definitions(METAL_MAX_DEVICE_REGIONS=2)
 target_include_directories(app PRIVATE ${LIBMETAL_INCLUDE_DIR} ${OPENAMP_INCLUDE_DIR}
                             ${PLATFORM_DIR})
 target_include_directories(app PRIVATE src)
+# <alp/protocol/amp_beacon.h>: the beacon layout shared with the A55 backend.
+target_include_directories(app PRIVATE ${ZEPHYR_ALP_SDK_MODULE_DIR}/include)
 
 target_sources(app PRIVATE src/main.c src/resource_table.c)

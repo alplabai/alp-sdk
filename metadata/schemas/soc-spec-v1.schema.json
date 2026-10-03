@@ -139,6 +139,19 @@
       "type": "integer",
       "description": "Maximum on-die SRAM in KB across all variants. Per-variant overrides go into variants[].sram_kb."
     },
+    "openamp_carveout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["a55_base", "cm33_ns_base", "size", "rsctbl_size"],
+      "properties": {
+        "a55_base": {"type": "integer", "description": "A55-view base of the OpenAMP reservation."},
+        "cm33_ns_base": {"type": "integer", "description": "Base of the same reservation in the CM33 non-secure view (the board .dts openamp_shm / rsctbl address)."},
+        "size": {"type": "integer", "description": "Bytes in the reservation."},
+        "rsctbl_size": {"type": "integer", "description": "Bytes of the resource-table window at the start of it. The AMP liveness beacon (include/alp/protocol/amp_beacon.h) is the top 16 bytes of this window."},
+        "note": {"type": "string"}
+      },
+      "description": "OPTIONAL. The OpenAMP/MHU-B reservation shared by the A55 (Linux reserved-memory + UIO, RPC backend) and the CM33 board .dts. gen_zephyr_board.py, scripts/gen_amp_window.py (the backend header) and provisioning read it; scripts/check_amp_window.py pins the Linux DT to it."
+    },
     "inference_arena_sram_kib": {
       "type": "integer",
       "minimum": 0,

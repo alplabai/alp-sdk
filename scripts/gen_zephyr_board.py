@@ -2517,9 +2517,9 @@ _V2N_OPENAMP_TAIL: tuple[str, ...] = (
     '',
     '\t\t/* Whole OpenAMP region as one reservation to save MPU entries',
     "\t\t * (matches the vendor sample's rationale). */",
-    '\t\topenamp_shm: memory@9f700000 {',
+    '\t\topenamp_shm: memory@@OPENAMP_CM33_BASE_HEX@ {',
     '\t\t\tcompatible = "zephyr,memory-region";',
-    '\t\t\treg = <0x9f700000 0x900000>;',
+    '\t\t\treg = <@OPENAMP_CM33_BASE@ @OPENAMP_SIZE@>;',
     '\t\t\tzephyr,memory-region = "openamp_memory";',
     '\t\t\tzephyr,memory-attr = <DT_MEM_ARM(ATTR_MPU_IO)>;',
     '\t\t};',
@@ -2537,18 +2537,18 @@ _V2N_OPENAMP_TAIL: tuple[str, ...] = (
     '\t\tzephyr,ipc = &mbox_consumer;',
     '\t};',
     '',
-    '\trsctbl: memory@9f700000 {',
+    '\trsctbl: memory@@OPENAMP_CM33_BASE_HEX@ {',
     '\t\tcompatible = "mmio-sram";',
-    '\t\treg = <0x9f700000 0x1000>;',
+    '\t\treg = <@OPENAMP_CM33_BASE@ @OPENAMP_RSCTBL_SIZE@>;',
     '\t};',
     '',
     "\t/* Widened from the RZ/V2L layout's 8-byte mhu1_shm (@ +0x1008) to a",
     '\t * full 4 KiB region immediately after rsctbl, so it lines up with the',
     "\t * A55/kernel-overlay side's 4f701000.mhu-shm node 1:1 (alp-sdk #683",
     '\t * address fix). */',
-    '\tmhu1_shm: memory@9f701000 {',
+    '\tmhu1_shm: memory@@OPENAMP_MHU_SHM_HEX@ {',
     '\t\tcompatible = "mmio-sram";',
-    '\t\treg = <0x9f701000 0x1000>;',
+    '\t\treg = <@OPENAMP_MHU_SHM@ 0x1000>;',
     '\t};',
     '',
     '\tvring_ctrl0: memory@9f800000 {',
@@ -2599,6 +2599,29 @@ _V2N_OPENAMP_TAIL: tuple[str, ...] = (
     '\t};',
     '};',
 )
+
+
+def _openamp_subst(tail: tuple[str, ...], soc_spec: dict[str, Any]) -> list[str]:
+    """Fill the OpenAMP window tokens from the SoC's `openamp_carveout`
+    (metadata/socs/**.json; the one declaration the Linux DT, the beacon
+    header and scripts/check_amp_window.py also read).  The CM33-NS view is
+    `cm33_ns_base`; the mhu-shm page follows the rsctbl page."""
+    c = soc_spec["openamp_carveout"]
+    base = c["cm33_ns_base"]
+    tok = {
+        "@OPENAMP_CM33_BASE_HEX@": f"{base:x}",
+        "@OPENAMP_CM33_BASE@": f"{base:#x}",
+        "@OPENAMP_SIZE@": f"{c['size']:#x}",
+        "@OPENAMP_RSCTBL_SIZE@": f"{c['rsctbl_size']:#x}",
+        "@OPENAMP_MHU_SHM_HEX@": f"{base + c['rsctbl_size']:x}",
+        "@OPENAMP_MHU_SHM@": f"{base + c['rsctbl_size']:#x}",
+    }
+    out = []
+    for line in tail:
+        for k, v in tok.items():
+            line = line.replace(k, v)
+        out.append(line)
+    return out
 
 
 def _v2n_dts(
@@ -2790,7 +2813,7 @@ def _v2n_dts(
     lines += list(_V2N_WDT0_MID_OPENAMP if has_openamp else _V2N_WDT0_MID_PLAIN)
     lines += list(_V2N_WDT0_TAIL)
     if has_openamp:
-        lines += list(_V2N_OPENAMP_TAIL)
+        lines += _openamp_subst(_V2N_OPENAMP_TAIL, soc_spec)
     lines.append("")
     return "\n".join(lines)
 

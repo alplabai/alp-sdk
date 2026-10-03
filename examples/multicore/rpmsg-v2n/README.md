@@ -198,12 +198,14 @@ IPC-enabled CM33 image through `yocto_uio_drv.c`.  The CM33 window is
    replies.
 
    **CM33 beacon map** (top of `rsctbl`, A55 `0x4f700ff0`, CM33-NS
-   `0x9f700ff0`; read with `devmem`):
+   `0x9f700ff0`; read with `devmem`).  The layout is defined once in
+   `include/alp/protocol/amp_beacon.h` (offsets from the end of the window);
+   the window itself is the SoC metadata's `openamp_carveout`:
 
    | Offset  | A55 address  | Word                                                              |
    |---------|--------------|-------------------------------------------------------------------|
    | `+0xFF0`| `0x4f700ff0` | magic `0xA10D0683`                                                |
-   | `+0xFF4`| `0x4f700ff4` | version: `1` = RPC firmware without attach reset, `2` = with it; `>= 0x100` = image without RPC (`0x100` = idle stock shim *with the heartbeat beacon*, pending branch `feat/cm33-shim-heartbeat`) |
+   | `+0xFF4`| `0x4f700ff4` | version: `1` = RPC firmware without attach reset, `2` = with it; `>= 0x100` = image without RPC (`0x100` = idle stock shim *with the heartbeat beacon*) |
    | `+0xFF8`| `0x4f700ff8` | ~1 Hz heartbeat counter                                           |
    | `+0xFFC`| `0x4f700ffc` | attach epoch (version 2): `0` at boot; **odd = CM33 bound to a session, even = waiting for an attach** |
 

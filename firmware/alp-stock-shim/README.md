@@ -25,7 +25,7 @@ Only the V2N / V2M CM33 boards have the `rsctbl` window; on any other board
 The CM33 has no console on these SoMs, so the shim proves it is running with
 plain memory stores to the top of the `rsctbl` window (the board DTS's
 `openamp_shm` reservation, CM33 view `0x9F700FF0`, which the A55 DT keeps
-`no-map`). Layout and magic are the same as the `rpmsg-v2n` example:
+`no-map`). Layout and magic are the same as the `rpmsg-v2n` example, both from `include/alp/protocol/amp_beacon.h` (the window address is the SoC metadata's `openamp_carveout`):
 
 | A55 address  | Word      | Value                                          |
 |--------------|-----------|------------------------------------------------|

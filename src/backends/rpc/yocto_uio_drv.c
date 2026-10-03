@@ -289,8 +289,10 @@
 #include <metal/sys.h>
 #include <openamp/open_amp.h>
 
+#include <alp/protocol/amp_beacon.h>
 #include <alp/protocol/v2n_mhu_doorbell.h>
 
+#include "alp_amp_window.h"
 #include "alp_checked_arith.h"
 
 #ifndef ALP_RPC_SUBS_PER_CHANNEL
@@ -316,7 +318,7 @@
  * drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/bsp_slave_address.h) is CM33-secure
  * 0x80000000 / CM33-non-secure 0x90000000 / A55 0x40000000, so
  * da = pa + 0x50000000. */
-#define ALP_V2N_A55_TO_M33_NS_OFFSET 0x50000000u
+#define ALP_V2N_A55_TO_M33_NS_OFFSET ALP_AMP_A55_TO_CM33_NS_OFFSET
 
 enum uio_region_id {
 	UIO_RSCTBL = 0,
@@ -343,8 +345,11 @@ struct uio_region_def {
  * changed WHICH register block it maps -- see this file's header
  * comment's doorbell-fix note. */
 static const struct uio_region_def g_uio_regions[UIO_REGION_COUNT] = {
-	[UIO_RSCTBL]     = { "4f700000.rsctbl", "ALP_UIO_RSCTBL", 0x4F700000u, 0x1000u },
-	[UIO_MHU_SHM]    = { "4f701000.mhu-shm", "ALP_UIO_MHU_SHM", 0x4F701000u, 0x1000u },
+	[UIO_RSCTBL]  = { ALP_AMP_UIO_RSCTBL_NAME,
+	                  "ALP_UIO_RSCTBL",
+	                  ALP_AMP_A55_BASE,
+	                  ALP_AMP_RSCTBL_SIZE },
+	[UIO_MHU_SHM] = { ALP_AMP_UIO_MHU_SHM_NAME, "ALP_UIO_MHU_SHM", ALP_AMP_MHU_SHM_BASE, 0x1000u },
 	[UIO_VRING_CTL0] = { "4f800000.vring-ctl0", "ALP_UIO_VRING_CTL0", 0x4F800000u, 0x50000u },
 	[UIO_VRING_CTL1] = { "4f850000.vring-ctl1", "ALP_UIO_VRING_CTL1", 0x4F850000u, 0x50000u },
 	[UIO_VRING_SHM0] = { "4f900000.vring-shm0", "ALP_UIO_VRING_SHM0", 0x4F900000u, 0x300000u },
@@ -980,24 +985,17 @@ static int uio_rproc_notify_isr(int irq, void *arg)
 /* Attach reset handshake (#2586)                                      */
 /* ------------------------------------------------------------------ */
 
-/* CM33 beacon words at the top of the rsctbl region.  Writers: the RPC
- * firmware examples/multicore/rpmsg-v2n/m33_sm/src/main.c (RSCTBL_BEACON_*)
- * and the idle stock shim firmware/alp-stock-shim.  Map (A55 0x4F700FF0..):
- *   +0xFF0  magic 0xA10D0683
- *   +0xFF4  version: < 0x100 = RPC firmware beacon version (1, or 2 = attach
- *           reset supported); >= 0x100 = image without RPC (0x100 = idle
- *           stock shim with the heartbeat beacon, pending branch)
- *   +0xFF8  ~1 Hz heartbeat counter
- *   +0xFFC  attach epoch (version >= 2): ODD = CM33 bound to a session
- *           (set after rpmsg_init_vdev), EVEN = waiting for an attach */
-#define ALP_RSCTBL_BEACON_MAGIC_OFF   0xFF0u
-#define ALP_RSCTBL_BEACON_VERSION_OFF 0xFF4u
-#define ALP_RSCTBL_ATTACH_EPOCH_OFF   0xFFCu
-#define ALP_RSCTBL_BEACON_MAGIC       0xA10D0683u
-/* First beacon version whose CM33 acknowledges an attach reset. */
-#define ALP_RSCTBL_BEACON_VERSION_ATTACH_ACK 2u
-/* Beacon versions from here up are images that serve no RPC. */
-#define ALP_RSCTBL_BEACON_VERSION_NO_RPC 0x100u
+/* CM33 beacon words in the last 16 bytes of the rsctbl page: layout, magic
+ * and version meaning are defined once in <alp/protocol/amp_beacon.h>; the
+ * page size comes from the SoC metadata via alp_amp_window.h.  Writers: the
+ * RPC firmware examples/multicore/rpmsg-v2n/m33_sm and the idle stock shim
+ * firmware/alp-stock-shim. */
+#define ALP_RSCTBL_BEACON_MAGIC_OFF          ALP_AMP_BEACON_MAGIC_OFF(ALP_AMP_RSCTBL_SIZE)
+#define ALP_RSCTBL_BEACON_VERSION_OFF        ALP_AMP_BEACON_VERSION_OFF(ALP_AMP_RSCTBL_SIZE)
+#define ALP_RSCTBL_ATTACH_EPOCH_OFF          ALP_AMP_BEACON_EPOCH_OFF(ALP_AMP_RSCTBL_SIZE)
+#define ALP_RSCTBL_BEACON_MAGIC              ALP_AMP_BEACON_MAGIC
+#define ALP_RSCTBL_BEACON_VERSION_ATTACH_ACK ALP_AMP_BEACON_VERSION_ATTACH_ACK
+#define ALP_RSCTBL_BEACON_VERSION_NO_RPC     ALP_AMP_BEACON_VERSION_NO_RPC
 
 #ifndef ALP_UIO_ATTACH_ACK_TIMEOUT_MS
 #define ALP_UIO_ATTACH_ACK_TIMEOUT_MS 500u
@@ -1105,8 +1103,9 @@ static alp_status_t uio_attach_reset(struct rpc_be *ch)
 	uint32_t version = metal_io_read32(io, ALP_RSCTBL_BEACON_VERSION_OFF);
 	if (magic != ALP_RSCTBL_BEACON_MAGIC) {
 		fprintf(stderr,
-		        "alp_rpc: no CM33 beacon at rsctbl+0xFF0 (read 0x%08x, expect 0x%08x): the "
+		        "alp_rpc: no CM33 beacon at rsctbl+0x%x (read 0x%08x, expect 0x%08x): the "
 		        "CM33 is not running or its image publishes no beacon\n",
+		        (unsigned)ALP_RSCTBL_BEACON_MAGIC_OFF,
 		        (unsigned)magic,
 		        (unsigned)ALP_RSCTBL_BEACON_MAGIC);
 		return ALP_ERR_NOT_READY;
