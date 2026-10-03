@@ -96,9 +96,11 @@ _PINCTRL_GROUP_RE = re.compile(r"^\t(\w+):\s*[\w-]+\s*\{", re.M)
 _RZV_PINMUX_RE = re.compile(r"RZV_PINMUX\(\s*PORT_0([0-9A-Z])\s*,\s*(\d+)\s*,")
 
 
-def _pads_by_core(root: Path, core: str) -> dict[str, list[str]]:
+def _pads_by_core(root: Path, core: str,
+                  ownership: "dict[str, str] | None" = None) -> dict[str, list[str]]:
     """pad -> peripherals, for every pad resolved to `core`: the pinmux
-    table's fixed `core:` rows plus the assignable defaults.
+    table's fixed `core:` rows plus the assignable owners (SoM defaults, or a
+    project's resolved `ownership` when given).
 
     Keyed pad -> LIST, because `(peripheral, pad)` is the table's real key:
     one pad can carry more than one row, and the two ends of an inter-chip
@@ -114,7 +116,7 @@ def _pads_by_core(root: Path, core: str) -> dict[str, list[str]]:
     from alp_orchestrate.ownership import load_ownership_doc, resolve_ownership
     own = load_ownership_doc(root / "metadata", "v2n")
     if own:
-        for inst, owner in resolve_ownership(own).items():
+        for inst, owner in (ownership or resolve_ownership(own)).items():
             if owner == core:
                 for r in own["assignable"][inst]["rows"]:
                     out.setdefault(r["pad"], []).append(r["peripheral"])
@@ -152,6 +154,23 @@ def _cm33_claims(root: Path) -> list[tuple[str, int, str]]:
                     m = re.match(r'^\tstatus = "(\w+)";$', line)
                     if m:
                         node["status"] = m.group(1)
+    return out
+
+
+def find_project_problems(project) -> list[str]:
+    """The project's own Linux fragment (`--emit linux-ownership-dts`) must not
+    claim a pad its RESOLVED ownership gives the CM33 (override included)."""
+    from alp_orchestrate.linux_ownership import emit_linux_ownership_dts
+    root = project.effective_metadata_root().parent
+    m33 = _pads_by_core(root, "m33", project.ownership)
+    out = []
+    for lineno, line in enumerate(emit_linux_ownership_dts(project).splitlines(), 1):
+        for match in (*_GPIO_RE.finditer(line), *_PINMUX_RE.finditer(line)):
+            pad = f"P{match.group(1)}{match.group(2)}"
+            out += [f"project Linux fragment line {lineno}: claims {pad} "
+                    f"({match.group(0)}), resolved to the CM33 ({peripheral!r}) by "
+                    f"board.yaml `ownership:` / core-ownership.yaml"
+                    for peripheral in m33.get(pad, ()) if (peripheral, pad) not in EXEMPT]
     return out
 
 
@@ -217,9 +236,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=ROOT,
                         help="repository root to check (default: this repo)")
+    parser.add_argument("--project", type=Path, action="append", default=[],
+                        help="also check this board.yaml's resolved ownership "
+                             "(its Linux fragment vs the CM33 pads); repeatable")
     args = parser.parse_args()
 
     problems = find_problems(args.root)
+    if args.project:
+        from alp_orchestrate import load_board_yaml
+        for b in args.project:
+            problems += [f"{b}: {m}" for m in find_project_problems(
+                load_board_yaml(b, metadata_root=args.root / "metadata"))]
     if problems:
         for p in problems:
             print(f"amp-pad-claims: {p}", file=sys.stderr)

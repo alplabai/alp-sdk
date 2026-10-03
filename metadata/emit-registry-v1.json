@@ -313,6 +313,28 @@
       }
     },
     {
+      "mode": "linux-ownership-dts",
+      "owner": {
+        "cli": "alp_project",
+        "module": "scripts/alp_orchestrate/linux_ownership.py",
+        "function": "emit_linux_ownership_dts"
+      },
+      "scope": "system",
+      "options": {
+        "input": "optional",
+        "output": "optional",
+        "core": "ignored",
+        "build_root": false
+      },
+      "compatible": { "os": ["any"] },
+      "output": {
+        "media": "dts",
+        "schema_id": null,
+        "path": "build/generated/linux-ownership.dtsi",
+        "consumer_hint": "Yocto kernel DT -- per-project A55 core-ownership fragment (ALP_LINUX_OWNERSHIP_DTSI)"
+      }
+    },
+    {
       "mode": "os-topology",
       "owner": {
         "cli": "alp_project",

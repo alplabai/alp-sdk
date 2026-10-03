@@ -221,6 +221,18 @@ ALP_DRPAI_DT_ENABLE = "${@'1' if (d.getVar('ALP_DRPAI_LAYER') == '1' and d.getVa
 ALP_DRPAI_DT_ENABLE[vardepvalue] = "${ALP_DRPAI_DT_ENABLE}"
 SRC_URI += "${@' file://e1m-v2n-drpai.dtsi' if d.getVar('ALP_DRPAI_DT_ENABLE') == '1' else ''}"
 
+# Per-project core ownership (#2660).  The committed e1m-v2n-ownership.dtsi is
+# the SoM-DEFAULT ownership.  A project whose board.yaml `ownership:` differs
+# from it generates its own fragment with
+#   python3 scripts/alp_project.py --input board.yaml --emit linux-ownership-dts --output build/generated/linux-ownership.dtsi
+# (the same resolved ownership the CM33 overlay and system-manifest use) and
+# points this variable at it, e.g. in local.conf:
+#   ALP_LINUX_OWNERSHIP_DTSI = "/abs/path/build/generated/linux-ownership.dtsi"
+# It replaces the default fragment in the kernel tree, so the node status and
+# the CM33 clock hold (renesas,cm33-owned-clocks) follow the project.
+ALP_LINUX_OWNERSHIP_DTSI ??= ""
+do_configure[file-checksums] += "${@'%s:True' % d.getVar('ALP_LINUX_OWNERSHIP_DTSI') if d.getVar('ALP_LINUX_OWNERSHIP_DTSI') else ''}"
+
 # Drop the ALP board dts + dtsi into the kernel DT source dir so they
 # compile next to the upstream Renesas dts (the board dts #include the
 # SoC r9a09g056.dtsi and these dtsi by relative path).
@@ -235,15 +247,25 @@ do_configure:prepend() {
         "${WORKDIR}/e1m-v2m101-x-evk.dts" \
         "${ALP_DTS_DST}/"
 
-    # The generated ownership fragment must only name nodes THIS kernel's SoC
-    # dtsi defines, and must match the metadata.  --check never writes.  Skipped
-    # (with a warning) when the SDK scripts are not next to this layer or the
-    # host python lacks PyYAML.
+    # The ownership fragment must only name nodes THIS kernel's SoC dtsi
+    # defines.  Default fragment: also must match the metadata (--check never
+    # writes).  Project fragment (ALP_LINUX_OWNERSHIP_DTSI): installed over the
+    # default, label-checked only (it is generated per project, not committed).
+    # Skipped (with a warning) when the SDK scripts are not next to this layer or
+    # the host python lacks PyYAML.
     ALP_OWN_GEN="${THISDIR}/../../../scripts/gen_linux_ownership_dt.py"
+    ALP_OWN_VENDOR="${S}/arch/arm64/boot/dts/renesas/r9a09g056.dtsi"
+    if [ -n "${ALP_LINUX_OWNERSHIP_DTSI}" ]; then
+        [ -f "${ALP_LINUX_OWNERSHIP_DTSI}" ] || bbfatal "ALP_LINUX_OWNERSHIP_DTSI=${ALP_LINUX_OWNERSHIP_DTSI} does not exist"
+        install -m 0644 "${ALP_LINUX_OWNERSHIP_DTSI}" "${ALP_DTS_DST}/e1m-v2n-ownership.dtsi"
+        bbnote "using per-project ownership fragment ${ALP_LINUX_OWNERSHIP_DTSI}"
+        ALP_OWN_ARGS="--fragment ${ALP_LINUX_OWNERSHIP_DTSI}"
+    else
+        ALP_OWN_ARGS="--check"
+    fi
     if [ -f "${ALP_OWN_GEN}" ] && python3 -c 'import yaml' 2>/dev/null; then
-        python3 "${ALP_OWN_GEN}" --check \
-            --vendor-dtsi "${S}/arch/arm64/boot/dts/renesas/r9a09g056.dtsi" \
-            || bbfatal "e1m-v2n-ownership.dtsi is stale or names a node r9a09g056.dtsi lacks"
+        python3 "${ALP_OWN_GEN}" ${ALP_OWN_ARGS} --vendor-dtsi "${ALP_OWN_VENDOR}" \
+            || bbfatal "ownership fragment is stale or names a node r9a09g056.dtsi lacks"
     else
         bbwarn "gen_linux_ownership_dt.py or PyYAML unavailable: ownership fragment not verified against r9a09g056.dtsi"
     fi

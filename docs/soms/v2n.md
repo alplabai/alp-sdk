@@ -199,10 +199,11 @@ accepts `m33`. UART0 stays `a55` until the P51 RX pull-up is bench-proven,
 UART1 has no CM33 node, CAN-FD has no CM33 driver, and SPI0 pads P90-P92 are
 not 3.3 V tolerant.
 
-A `board.yaml` `ownership:` entry is accepted only if it restates the SoM
-default: the Linux fragment follows the default alone, so any other override is
-rejected with an explanation (change the default in `core-ownership.yaml`
-instead). `hw_blocked` instances reject every override. The CM33 board tree declares an assignable node `disabled` (pinctrl
+A `board.yaml` `ownership:` entry may differ from the SoM default only where
+both cores' trees can follow it: the instance lists `m33` in `candidates` and
+carries an `m33:` block (handing a node to `a55` also needs `linux_enable`).
+Anything else is rejected with an explanation. `hw_blocked` instances reject
+every override. The CM33 board tree declares an assignable node `disabled` (pinctrl
 from the metadata rows and the SoC `linux_dt` PFC codes) once the entry carries
 an `m33:` block; a project whose resolved owner is `m33` enables it through
 `--emit dts-overlay` / `zephyr-conf`. No entry has that block yet (RSPI0/CAN-FD
@@ -220,6 +221,18 @@ changes (`&sci0` in particular: no tty alias, floating RXD0); `&rspi0` is
 plus each instance whose SoM default owner is the M33), which
 the `0001-clk-renesas-rzv2h-cpg-cm33-owned-clocks.patch` kernel patch keeps on;
 the DT-driven form is not yet bench-validated.
+
+A project whose resolved ownership differs from the default gets its own Linux
+fragment from the same renderer: `python3 scripts/alp_project.py --input
+board.yaml --emit linux-ownership-dts --output build/generated/linux-ownership.dtsi`.
+An instance owned by the M33 is set `status = "disabled"` for Linux and its
+clocks join `renesas,cm33-owned-clocks`; the CM33 overlay and the Linux fragment
+come from the one resolved map. Set `ALP_LINUX_OWNERSHIP_DTSI` (kernel
+`.bbappend`) to that file and the build installs it over the default fragment
+and label-checks it against `r9a09g056.dtsi`. `check_amp_pad_claims.py --project
+board.yaml` checks the fragment against the project's resolved CM33 pads. No
+instance lists `m33` as a candidate today, so this path is exercised by tests
+only until one does.
 
 ## Boot + identification
 

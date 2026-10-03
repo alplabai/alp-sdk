@@ -247,6 +247,7 @@ def _run_v2_emit(args: argparse.Namespace) -> int:
             emit_system_manifest,
             load_board_yaml,
         )
+        from alp_orchestrate.linux_ownership import emit_linux_ownership_dts
     except ImportError as e:
         print(f"alp_project: failed to import alp_orchestrate: {e}",
               file=sys.stderr)
@@ -263,6 +264,8 @@ def _run_v2_emit(args: argparse.Namespace) -> int:
             out = emit_dts_reservations(project)
         elif args.emit == "os-topology":
             out = emit_os_topology(project)
+        elif args.emit == "linux-ownership-dts":
+            out = emit_linux_ownership_dts(project)
         else:
             print(f"alp_project: unknown v2 emit '{args.emit}'",
                   file=sys.stderr)
@@ -549,7 +552,7 @@ def main() -> int:
                                  "hw-info-h", "west-libraries",
                                  # v2 orchestration emits (Phase 2):
                                  "system-manifest", "dts-reservations",
-                                 "ipc-contract-h",
+                                 "ipc-contract-h", "linux-ownership-dts",
                                  # Per-core natural-vs-effective OS facts (issue #95).
                                  "os-topology",
                                  # Carrier routing / Studio handoff JSON.
@@ -607,7 +610,7 @@ def main() -> int:
     # Project-wide v2 emit modes (system-manifest, dts-reservations,
     # ipc-contract-h) route through alp_orchestrate/ directly.
     if args.emit in ("system-manifest", "dts-reservations",
-                     "ipc-contract-h", "os-topology"):
+                     "ipc-contract-h", "os-topology", "linux-ownership-dts"):
         return _run_v2_emit(args)
 
     project = _validate_and_load(args.input, args.metadata_root)

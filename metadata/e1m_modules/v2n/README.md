@@ -61,11 +61,12 @@ ownership:
 ```
 
 The loader rejects an unknown instance, a core outside `candidates`, a
-`hw_blocked` instance, and -- for now -- ANY core that differs from the SoM
-default: the Linux fragment below is generated from the SoM default only, so a
-per-project override would change the CM33 side but leave Linux claiming the
-node and not holding its clocks (a CM33 bus fault).  To hand an instance to the
-M33 today, change its `default` here.  The resolved map is emitted as
+`hw_blocked` instance, and a core that differs from the SoM default unless the
+instance lists `m33` in `candidates` AND carries an `m33:` block (handing a
+node to `a55` also needs `linux_enable`): both trees must be able to follow.
+The Linux side of a per-project override is `alp_project.py --emit
+linux-ownership-dts` (installed through `ALP_LINUX_OWNERSHIP_DTSI`).  The
+resolved map is emitted as
 `ownership:` in `--emit system-manifest`.  Caveats: `e1m_uart0` stays
 `a55`-only until the P51 (UART0_RXD0) RX pull-up is bench-proven (a floating
 RXD triggers the sci0 receive-error ISR on the CM33); `e1m_uart1` has no CM33
