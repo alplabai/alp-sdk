@@ -19,7 +19,7 @@
  * Offsets are given from the END of the rsctbl page so the layout does not
  * depend on where the page sits or how big it is.  Where it sits is
  * hardware, and lives once in the SoC metadata (`openamp_carveout.regions.
- * rsctbl`, metadata/socs/<vendor>/<family>/<part>.json).
+ * rsctbl`, metadata/socs/\<vendor\>/\<family\>/\<part\>.json).
  *
  *   end-0x10  magic       ALP_AMP_BEACON_MAGIC, written LAST, so a reader that
  *                         sees it also sees the other words of this boot

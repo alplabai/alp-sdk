@@ -90,6 +90,11 @@ def fake_git_repo(tmp_path):
         "/* stub */\n",
         encoding="utf-8"
     )
+    # gen_amp_window's output; same fail-closed `git add -N` contract.
+    (tmp_path / "src" / "backends" / "rpc").mkdir(parents=True)
+    (tmp_path / "src" / "backends" / "rpc" / "alp_amp_window.h").write_text(
+        "/* stub */\n", encoding="utf-8"
+    )
     (tmp_path / "metadata" / "pinmux").mkdir(parents=True)
     (tmp_path / "metadata" / "pinmux" / "existing.tsv").write_text("x\n", encoding="utf-8")
     (tmp_path / "metadata" / "catalog.json").write_text("{}\n", encoding="utf-8")

@@ -25,7 +25,7 @@ no line-number citation here since it no longer says "disabled"), with
 the carrier's conflicting override removed (SoM dtsi composes before the
 carrier dtsi, so leaving the carrier's `"okay"` in place would have
 silently won). A new `rtc@52` node under the existing `&i2c8` block,
-`meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi:379`
+`meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi:389`
 ("rv3028: rtc@52 {"), binds `compatible = "microcrystal,rv3028"`, and a
 new `aliases { rtc0 = &rv3028; };` makes it `/dev/rtc0`.
 `CONFIG_RTC_DRV_RV3028=y` is now built in,
