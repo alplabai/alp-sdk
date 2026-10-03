@@ -53,8 +53,8 @@ IMAGE_INSTALL += "${@' alp-drpai-inference' if d.getVar('ALP_ENABLE_DRPAI') == '
     'rzv2n-family' in (d.getVar('MACHINEOVERRIDES') or '').split(':') and \
     d.getVar('RUHMI_DRPAI_TVM_DIR') else ''}"
 
-# NOTE: the DRP-AI userspace RUNTIME PACKAGES (lib-tvm +
-# kernel-module-mmngr) and the SDK BACKEND compiled into libalp_sdk.so
+# NOTE: the DRP-AI userspace RUNTIME PACKAGES (kernel-module-mmngr;
+# lib-tvm is not installed) and the SDK BACKEND compiled into libalp_sdk.so
 # are two separate, independent concerns -- see
 # docs/bring-up-drpai-v2n.md section 4 for the full two-switch contract:
 #   1. alp-image-common.inc's ALP_RZ_DRPAI_INSTALL (issue #1176) is the
@@ -76,7 +76,7 @@ IMAGE_INSTALL += "${@' alp-drpai-inference' if d.getVar('ALP_ENABLE_DRPAI') == '
 # DEPENDS, which alp-sdk's PACKAGECONFIG[drpai] already carries. The
 # DRP-AI kernel driver itself is not a package either -- it is patched
 # into linux-renesas by the layer's 0002-enable-drpai-driver.patch.
-# mmngr{,buf}-user-module arrive via lib-tvm's own RDEPENDS.
+# mmngr{,buf}-user-module arrive via mera2-drpai-tvm's own RDEPENDS.
 #
 # meta-rz-codecs / meta-rz-opencva (hardware video codec, OpenCV-DRP
 # accel) are the other two members of the meta-rz-drpai/codecs/opencva
@@ -100,7 +100,7 @@ IMAGE_INSTALL += "${@' alp-drpai-inference' if d.getVar('ALP_ENABLE_DRPAI') == '
 # even though neither machine conf defines ALP_ENABLE_DRPAI at all and
 # neither wants the RZ layer.
 #
-# lib-tvm's install site is alp-image-common.inc alone (see the NOTE
+# kernel-module-mmngr's install site is alp-image-common.inc alone (see the NOTE
 # above), on every alp-image-* image; no RZ/V2N machine conf installs
 # it. The guard below still belongs in a recipe (for the ConfHandler
 # reason above), and this recipe is as good a place as any recipe that

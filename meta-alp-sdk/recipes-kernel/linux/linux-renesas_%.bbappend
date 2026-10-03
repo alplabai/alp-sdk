@@ -211,6 +211,25 @@ ALP_DRPAI_DT_ENABLE = "${@'1' if (d.getVar('ALP_DRPAI_LAYER') == '1' and d.getVa
 ALP_DRPAI_DT_ENABLE[vardepvalue] = "${ALP_DRPAI_DT_ENABLE}"
 SRC_URI += "${@' file://e1m-v2n-drpai.dtsi' if d.getVar('ALP_DRPAI_DT_ENABLE') == '1' else ''}"
 
+# DRP1 (OpenCVA + hardware codec) overlay -- CONDITIONAL on meta-rz-opencva
+# or meta-rz-codecs, whichever supplies the `drp1` label (each ships the
+# 0001-add-drp-property-to-devicetree*.patch that creates it).  Same
+# stub-or-real shape as ALP_DRPAI_DT_ENABLE above; the node is on-die on
+# every V2N/V2M SKU, so the layer is the only axis.
+ALP_DRP1_DT_ENABLE = "${@'1' if ('rz-opencva' in (d.getVar('BBFILE_COLLECTIONS') or '').split() or 'meta-rz-codecs' in (d.getVar('BBFILE_COLLECTIONS') or '').split()) else '0'}"
+ALP_DRP1_DT_ENABLE[vardepvalue] = "${ALP_DRP1_DT_ENABLE}"
+SRC_URI += "${@' file://e1m-v2n-drp1.dtsi' if d.getVar('ALP_DRP1_DT_ENABLE') == '1' else ''}"
+
+# 0018 (DRP-AI register ioctls): the vendor drpai driver lets any opener of
+# /dev/drpai0 read/write the DRP, DRP-AI and CPG register blocks (ioctls
+# 64-69; WRITE_CPG_REG can gate CM33-owned clocks).  The runtime never calls
+# them, so the patch demands CAP_SYS_RAWIO.  It patches drivers/drpai/, which
+# meta-rz-drpai's own patch adds, so it is installed only with that layer
+# (and must sort after it: meta-alp-sdk is listed after meta-rz-drpai).
+# Residual risk (documented in docs/bring-up-drpai-v2n.md): DMA descriptors
+# from DRPAI_ASSIGN / DRPAI_START still reach any physical address.
+SRC_URI += "${@' file://0018-drpai-require-CAP_SYS_RAWIO-for-the-register-ioctls.patch' if d.getVar('ALP_DRPAI_LAYER') == '1' else ''}"
+
 # Drop the ALP board dts + dtsi into the kernel DT source dir so they
 # compile next to the upstream Renesas dts (the board dts #include the
 # SoC r9a09g056.dtsi and these dtsi by relative path).
@@ -235,6 +254,15 @@ do_configure:prepend() {
     # file: dropping meta-rz-drpai from bblayers.conf does not scrub a
     # previously-unpacked ${WORKDIR}, so a file test would keep emitting the
     # real override into a tree that no longer has the label.
+    # Same reasoning as the DRPAI branch below: branch on the variable.
+    if [ "${ALP_DRP1_DT_ENABLE}" = "1" ]; then
+        install -m 0644 "${WORKDIR}/e1m-v2n-drp1.dtsi" "${ALP_DTS_DST}/"
+    else
+        printf '%s
+'             '/* DRP1 (OpenCVA + codec) node not claimed in this build.'             ' * Needs meta-rz-opencva or meta-rz-codecs in bblayers.conf: it'             ' * supplies the &drp1 label.  See e1m-v2n-drp1.dtsi in'             ' * meta-alp-sdk/recipes-kernel/linux/linux-renesas/. */'             > "${ALP_DTS_DST}/e1m-v2n-drp1.dtsi"
+        chmod 0644 "${ALP_DTS_DST}/e1m-v2n-drp1.dtsi"
+    fi
+
     if [ "${ALP_DRPAI_DT_ENABLE}" = "1" ]; then
         install -m 0644 "${WORKDIR}/e1m-v2n-drpai.dtsi" "${ALP_DTS_DST}/"
     else

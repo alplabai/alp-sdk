@@ -315,6 +315,12 @@
  */
 #include "e1m-v2n-drpai.dtsi"
 
+/*
+ * On-die DRP1 enable (OpenCVA + codec).  Conditional on meta-rz-opencva /
+ * meta-rz-codecs, which create the `drp1` label; see e1m-v2n-drp1.dtsi.
+ */
+#include "e1m-v2n-drp1.dtsi"
+
 /* On-module eMMC on SDHI0 (8-bit, HS200, non-removable). */
 &sdhi0 {
 	pinctrl-0 = <&sdhi0_emmc_pins>;

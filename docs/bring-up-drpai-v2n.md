@@ -40,7 +40,7 @@ this is fiddly.
 | DRP-AI kernel driver | `meta-rz-drpai`, patched into the kernel by `0002-enable-drpai-driver.patch` | Not a package — do not look for a `.ko` |
 | `drpai0` DT node + label | `meta-rz-drpai`, `0001-add-drpai-property-to-devicetree.patch` | **Creates** the label; it does not exist in the pristine tree |
 | `<linux/drpai.h>` UAPI header | `meta-rz-drpai` recipe `drpai` (1.4.0) | Headers only |
-| `libtvm_runtime.so` | `meta-rz-drpai` recipe `lib-tvm` | |
+| `libtvm_runtime.so` | `meta-rz-drpai` recipe `lib-tvm` | Build-time only: the images no longer install `lib-tvm` (it served a legacy TVM v2.5 path) |
 | The MERA2 runtime closure: headers + **nine** staged libraries (a tenth, `libtvm_runtime.so`, comes from `lib-tvm` above) | `meta-alp-sdk/recipes-renesas/mera2-drpai-tvm/mera2-drpai-tvm_2.7.0.bb`, staged/compiled from a builder-supplied **`RUHMI_DRPAI_TVM_DIR`** checkout | The recipe vendors nothing — see §4. Note its `LICENSE = "CLOSED"`: the `rzv_drp-ai_tvm` **sources** are Apache-2.0, but the prebuilt MERA2 libraries staged alongside them are account-gated, so the package as a whole is not redistributable. Tracked as a licence-manifest gap. |
 
 Baseline this was worked against: **AI SDK platform 7.1 on BSP v6.30**
@@ -200,8 +200,8 @@ both default OFF, deliberately not merged into one"):
   `ALP_ENABLE_DRPAI = "1"` and no `meta-rz-drpai` silently gets the
   comment-only `&drpai0` stub.
   `alp-image-common.inc`'s `ALP_RZ_DRPAI_INSTALL` (lines 81-85) is the
-  single packaging authority for the `lib-tvm` + `kernel-module-mmngr`
-  pair, on every `alp-image-*` image (the three recipes that `require
+  single packaging authority for `kernel-module-mmngr` (`lib-tvm` is
+  no longer installed), on every `alp-image-*` image (the three recipes that `require
   alp-image-common.inc` — `alp-image-base`/`-edge`/`-prod`), gated only
   on `rz-drpai` being in `BBFILE_COLLECTIONS` and `v2n` being in
   `MACHINE_FEATURES` (issue #1176), independent of `ALP_ENABLE_DRPAI`. A
@@ -275,9 +275,51 @@ is the step that would confirm the link and packaging end to end.
 image.** That layer ships its payload through a `core-image-%.bbappend`, and
 that wildcard does not match `alp-image-edge`, so the bbappend never fires and
 the image comes out with no DRP-AI userspace at all — silently.
-`alp-image-common.inc` therefore installs `lib-tvm` and `kernel-module-mmngr`
+`alp-image-common.inc` therefore installs `kernel-module-mmngr`
 explicitly, gated on the layer being present. See issue #1176; the same trap
 applies to the other `meta-rz-*` feature layers.
+
+### Access control
+
+`/dev/drpai0` is `0660 root:drpai` (udev rule in `alp-drpai-udev`, which also
+creates the `drpai` system group). The recipe is pulled in by alp-sdk's
+`PACKAGECONFIG[drpai]`, so the rule and the group exist only in images that
+carry the SDK DRP-AI backend. `/run/alp` (the one-process-per-board lock) uses
+the same group.
+
+- **Register ioctls are privileged.** Kernel patch
+  `0018-drpai-require-CAP_SYS_RAWIO-for-the-register-ioctls.patch` makes the
+  vendor driver's ioctls 64-69 (`DRPAI_READ/WRITE_DRP_REG`,
+  `DRPAI_READ/WRITE_DRPAI_REG`, `DRPAI_READ/WRITE_CPG_REG`) return `-EPERM`
+  without `CAP_SYS_RAWIO`. The runtime does not use them (confirm with the
+  strace step below). It is installed only with `meta-rz-drpai`, which adds
+  `drivers/drpai/`.
+- **Residual risk: DMA.** The patch does not bound the descriptors passed to
+  `DRPAI_ASSIGN` / `DRPAI_START`, so a process that can open the node can still
+  make the NPU DMA to or from any physical address. Treat membership of
+  `drpai` as a privileged grant (root-equivalent for memory), not as an
+  ordinary device group.
+
+## DRP1 (OpenCVA + codec)
+
+`e1m-v2n-drp1.dtsi` enables `&drp1` (`memory-region = <&drp_codec>`,
+`memory-oca-region = <&opencva_reserved>`,
+`memory-shared-for-drpai-ext-cont = <&shared_drp_reserved>`), the same three
+properties as the vendor EVK. The `drp1` label is created by
+`meta-rz-opencva` / `meta-rz-codecs`, so the bbappend installs the real file
+only when one of them is in `bblayers.conf` and a comment-only stub otherwise.
+`drp1` and `drpai0` share the `0x17000000` register window, as on the vendor EVK.
+
+### Bench steps (not yet run)
+
+1. Run an inference under `strace -f -e trace=ioctl` as root and confirm no
+   ioctl with request number 64-69 on `/dev/drpai0` (`DRPAI_*_REG`).
+2. As a user outside the `drpai` group, `open("/dev/drpai0")` must fail with
+   `EACCES`; as a `drpai` member an inference must succeed.
+3. As a `drpai` member without `CAP_SYS_RAWIO`, issue ioctl 64: expect `EPERM`.
+4. `ls /dev/drp*` / `dmesg | grep -i drp`: the DRP1 device is present on an
+   image with `meta-rz-opencva` or `meta-rz-codecs`.
+5. Run an OpenCV `cv::resize` through OpenCVA and confirm it executes on the DRP.
 
 ## 5. Model compile
 
@@ -526,7 +568,7 @@ driver has no queue (a second `DRPAI_START` while a job runs returns
   process, so two processes would both load at the arena base and corrupt
   each other. The first DRP-AI handle in a process therefore takes an
   exclusive, non-blocking `flock()` on `/run/alp/drpai.lock` (the image
-  creates `/run/alp` at boot, `root:video 0775`, via a systemd tmpfiles.d
+  creates `/run/alp` at boot, `root:drpai 0775` (`root:video` when the image has no DRP-AI backend), via a systemd tmpfiles.d
   snippet in the `alp-sdk` recipe) and keeps it until the last DRP-AI handle
   in that process closes. A second process gets `ALP_ERR_BUSY` from
   `alp_inference_open()`. Several handles inside one process stay allowed.

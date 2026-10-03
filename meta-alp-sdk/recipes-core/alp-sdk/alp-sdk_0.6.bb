@@ -207,7 +207,7 @@ PACKAGECONFIG[rpc]      = ",,open-amp libmetal"
 # all -- and separately, ALP_SDK_DRPAI_REQUIRED itself is emitted by
 # NOTHING in the tree (kconfig.py emits only the USE flag), so REQUIRED
 # can never be auto-flipped ON regardless of which slice is building.)
-PACKAGECONFIG[drpai]    = "-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=ON,-DALP_SDK_USE_DRPAI_V2N=OFF -DALP_SDK_DRPAI_REQUIRED=OFF,drpai lib-tvm mera2-drpai-tvm,mera2-drpai-tvm"
+PACKAGECONFIG[drpai]    = "-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=ON,-DALP_SDK_USE_DRPAI_V2N=OFF -DALP_SDK_DRPAI_REQUIRED=OFF,drpai lib-tvm mera2-drpai-tvm,mera2-drpai-tvm alp-drpai-udev"
 
 # Warn when the image will carry the DRP-AI driver + runtime (ALP_ENABLE_DRPAI)
 # but this SDK build has no DRP-AI backend because RUHMI is not configured:
@@ -320,11 +320,16 @@ python () {
 # and apps pick per-handle at runtime via alp_inference_open(.backend =
 # ...).
 
-# /run/alp (root:video 0775) for the DRP-AI one-process-per-board lock; the
+# /run/alp (root:drpai 0775) for the DRP-AI one-process-per-board lock; the
 # SDK no longer falls back to /tmp when it is missing (src/yocto/drpai_arena.h).
+# The drpai group comes from alp-drpai-udev, which PACKAGECONFIG[drpai]
+# RDEPENDS on; without that flag the group does not exist in the image, and a
+# tmpfiles entry naming it would fail, so fall back to video there.
+ALP_RUN_GROUP = "${@'drpai' if 'drpai' in (d.getVar('PACKAGECONFIG') or '').split() else 'video'}"
 do_install:append() {
     install -d ${D}${nonarch_libdir}/tmpfiles.d
     install -m 0644 ${WORKDIR}/alp-sdk-tmpfiles.conf ${D}${nonarch_libdir}/tmpfiles.d/alp-sdk.conf
+    sed -i 's/@ALP_RUN_GROUP@/${ALP_RUN_GROUP}/' ${D}${nonarch_libdir}/tmpfiles.d/alp-sdk.conf
 }
 
 FILES:${PN}     += "${libdir}/libalp_sdk.so.* ${nonarch_libdir}/tmpfiles.d/alp-sdk.conf"

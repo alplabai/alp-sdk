@@ -30,7 +30,8 @@ IMAGE_INSTALL = " \
 "
 
 # meta-rz-drpai vendor payload (DRP-AI3 NPU userspace runtime + kernel
-# driver): lib-tvm + kernel-module-mmngr. Unlike meta-rz-codecs /
+# driver): kernel-module-mmngr (lib-tvm is deliberately NOT installed: it
+# only served a legacy DRP-AI TVM v2.5 path). Unlike meta-rz-codecs /
 # meta-rz-opencva (whose RDEPENDS payload lives in
 # packagegroup-alp-camera.bb -- see that file), this is NOT
 # camera/display-tied -- DRP-AI3 is the SoC's core NPU accelerator,
@@ -45,8 +46,10 @@ IMAGE_INSTALL = " \
 # previously wired into alp-image-edge.bb only, silently omitted from
 # base/prod).
 #
-# mmngr-user-module / mmngrbuf-user-module ride in via lib-tvm's own
-# RDEPENDS. NOT ported from meta-rz-drpai's own vendor
+# mmngr-user-module / mmngrbuf-user-module ride in via mera2-drpai-tvm's
+# own RDEPENDS. The /dev/drpai* access rule (alp-drpai-udev) is NOT installed
+# here: alp-sdk's PACKAGECONFIG[drpai] pulls it, so it lands only in images
+# that carry the SDK DRP-AI backend. NOT ported from meta-rz-drpai's own vendor
 # core-image-%.bbappend: its python3-modules/-pip/-wheel/.../-opencv/
 # -pybind11 + sudo stack + libjpeg-turbo-dev (all serve the vendor's
 # Python demos; the Alp path is C through <alp/inference.h>, and a -dev
@@ -80,7 +83,7 @@ IMAGE_INSTALL = " \
 # citation that is the concrete failure this closes. Settled by
 # inspection only; unverified by an actual `bitbake` run.
 ALP_RZ_DRPAI_INSTALL = "${@bb.utils.contains('BBFILE_COLLECTIONS', 'rz-drpai', \
-    bb.utils.contains('MACHINE_FEATURES', 'v2n', 'lib-tvm kernel-module-mmngr alp-drpai-udev', '', d), '', d)}"
+    bb.utils.contains('MACHINE_FEATURES', 'v2n', 'kernel-module-mmngr', '', d), '', d)}"
 ALP_RZ_DRPAI_INSTALL[vardepvalue] = "${ALP_RZ_DRPAI_INSTALL}"
 
 IMAGE_INSTALL += " ${ALP_RZ_DRPAI_INSTALL}"
