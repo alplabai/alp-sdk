@@ -953,7 +953,7 @@ def _check_soc_linux_dt(soc_files, *, peripheral_map=None) -> list:
     if tsv.is_file():
         for line in tsv.read_text(encoding="utf-8").splitlines()[1:]:
             cols = line.split("\t")
-            if cols and cols[0]:
+            if cols and cols[0] and not cols[0].startswith("#"):
                 signals.add(cols[0])
     failures: list[tuple[Path, list[str]]] = []
     for path in soc_files:
