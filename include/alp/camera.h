@@ -47,7 +47,12 @@
  *     capture-node chain is discovered from the media graph, so any
  *     sensor with a mainline V4L2 subdev driver works with no
  *     per-sensor code.  Supports ALP_PIXFMT_GREY8 / RAW8 / RAW10 only
- *     (colour formats are ALP_ERR_NOSUPPORT).  RAW10 bench-verified
+ *     (colour formats are ALP_ERR_NOSUPPORT) -- except on an image built
+ *     with the opt-in RZ/V2N ISP Support Package (`ALP_ENABLE_ISP`), where
+ *     ALP_PIXFMT_RGB565 / ALP_PIXFMT_NV12 are served demosaiced from the
+ *     ISP node `/dev/video<camera_id>fr` and alp_camera_configure_isp()
+ *     stays ALP_ERR_NOSUPPORT (that ISP path is bench-unverified; see
+ *     docs/v2n-isp.md).  RAW10 bench-verified
  *     on E1M-V2M103 with an IMX296LQ (30.00 fps at a 30 fps request); RAW8
  *     and the direct Y8 path are not.  Known limits and the static-link
  *     caveat: docs/v2n-camera-csi.md.
