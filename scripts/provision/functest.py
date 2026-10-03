@@ -1192,18 +1192,21 @@ def script(checks: list[Check]) -> str:
     for n, body in sorted(files.items()):
         out += [f"cat > \"$D/{n}\" <<'ALPFTEOF'", body.strip("\n"), "ALPFTEOF"]
     out += ["SETSID=; command -v setsid >/dev/null 2>&1 && SETSID=setsid",
+            # signal $2's process group, else $2 alone. dash's kill rejects `kill -TERM -- -PID`
+            # ("Illegal number") but takes `kill -s TERM -- -PID`; the second form is the
+            # other shells' spelling. Tried in order; the last one reaches the leader only.
+            'gkill() { kill -s "$1" -- "-$2" 2>/dev/null || kill "-$1" "-$2" 2>/dev/null || kill -s "$1" "$2" 2>/dev/null; }',
             "run() {",
             '  $SETSID sh "$D/$1.sh" >"$D/$1.out" 2>&1 </dev/null &',
             "  p=$!",
             # TERM first so the fragment's restore trap runs, then KILL; the group when the check
             # leads one (setsid), else the process
-            '  ( sleep "$2"; : >"$D/$1.to"; kill -TERM -- "-$p" 2>/dev/null || kill -TERM "$p"; sleep 3; '
-            'kill -KILL -- "-$p" 2>/dev/null || kill -KILL "$p" ) >/dev/null 2>&1 </dev/null &',
+            '  ( sleep "$2"; : >"$D/$1.to"; gkill TERM "$p"; sleep 3; gkill KILL "$p" ) >/dev/null 2>&1 </dev/null &',
             "  w=$!",
             '  wait "$p"; echo $? >"$D/$1.rc"',
             '  kill "$w" 2>/dev/null; wait "$w" 2>/dev/null',
             # the fragment's shell is gone: reap whatever it left running (dd, aplay, a scan)
-            '  [ -e "$D/$1.to" ] && kill -KILL -- "-$p" 2>/dev/null',
+            '  [ -e "$D/$1.to" ] && gkill KILL "$p"',
             "  return 0",
             "}"]
     for lane, cs in lanes.items():

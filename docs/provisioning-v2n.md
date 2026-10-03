@@ -712,14 +712,14 @@ bounds for a hung command, not the expected time.
 | `mem_total` | `MemTotal` of `/proc/meminfo` | 0.70..1.00 of the SKU DRAM | 5 s | 0.1 s |
 | `kernel_release` | `uname -r` | matches `^6\.1\.141-cip43` | 5 s | 0.1 s |
 | `sku` | `/proc/device-tree/chosen/alp,sku` | = the SKU being provisioned | 5 s | 0.1 s |
-| `emmc_size` | `/sys/block/<emmc>/size` | 0.85..1.00 of the SKU eMMC size | 5 s | 0.1 s |
+| `emmc_size` | `/sys/block/{emmc}/size` | 0.85..1.00 of the SKU eMMC size | 5 s | 0.1 s |
 | `emmc_health` | `mmc extcsd read` | life time A and B <= `0x01`, pre-EOL = `0x01` | 10 s | 0.3 s |
 | `emmc_mode` | mmc `ios` in debugfs, `dmesg` | timing `mmc HS200`, no `mmc_select_hs200 failed` | 5 s | 0.1 s |
 | `emmc_read` | drop the page cache, then `dd` 64 MiB from 1 GiB into the user area | `64+0 records out`, >= 20 MiB/s | 20 s | 2 s |
 | `xspi` | `/proc/mtd`, spi-nor `jedec_id` | `mtd0` and `mtd1` with a size, a real JEDEC ID | 5 s | 0.1 s |
 | `eth_phy_id` | MII registers 2/3 of both ports (python3 ioctl helper) | both `0x001cc916` | 5 s | 0.3 s |
-| `eth_mac` | `/sys/class/net/<if>/address` | both = the MACs derived from the serial | 5 s | 0.1 s |
-| `eth0_link`, `eth1_link` | carrier, speed, duplex, `ping -c 2 -I <if>` the gateway, RX counter | carrier, 100 or 1000 Mbit/s, full duplex, ping ok, >= 2 packets received on that port | 10 s | 1.5 s |
+| `eth_mac` | `/sys/class/net/{if}/address` | both = the MACs derived from the serial | 5 s | 0.1 s |
+| `eth0_link`, `eth1_link` | carrier, speed, duplex, `ping -c 2 -I {if}` the gateway, RX counter | carrier, 100 or 1000 Mbit/s, full duplex, ping ok, >= 2 packets received on that port | 10 s | 1.5 s |
 | `wifi_present` | `wlan0`, `/sys/bus/sdio/devices`, `dmesg` | all present, firmware banner, no firmware failure | 5 s | 0.1 s |
 | `wifi_regdomain` | `iw reg get` | a country line (informational) | 5 s | 0.1 s |
 | `wifi_scan` | `iw dev wlan0 scan` | >= 1 network; the reference AP at >= the configured signal | 20 s | 5 s |
@@ -727,7 +727,7 @@ bounds for a hung command, not the expected time.
 | `bt_scan` | `hcitool -i hci0 lescan` for 5 s | >= 1 address; the reference advertiser | 20 s | 6 s |
 | `dxm1_pcie` | `/sys/bus/pci/devices/0000:01:00.0` | device `0x0000`, driver `dx_dma_pcie`, link width 2, link speed `8.0 GT/s` (both measured: the kernel logs `8.0 GT/s PCIe x2 link`); an unreadable width or speed is `unread` | 5 s | 0.1 s |
 | `dxm1_runtime` | `/dev/dxrt0`, `dxrt.service`, `dxrt-cli -s` | node, service active, firmware = the bundle's | 20 s | 2 s |
-| `dxm1_inference` | `run_model -m <model> -l 30` | exit code 0 and an FPS line | 40 s | 8 s |
+| `dxm1_inference` | `run_model -m {model} -l 30` | exit code 0 and an FPS line | 40 s | 8 s |
 | `drpai`, `gpu` | platform driver link, device node | driver bound, node exists | 5 s | 0.1 s |
 | `rtc_device` | `/sys/class/rtc/rtc0/name` | names the RV-3028 | 5 s | 0.1 s |
 | `rtc_ticks` | the seconds register twice, 2 s apart | valid BCD, advanced by 1..4 s | 8 s | 2.2 s |
@@ -738,7 +738,7 @@ bounds for a hung command, not the expected time.
 | `secure_element` | the state-register read, up to 100 tries | an answer | 12 s | 0.5 s |
 | `gd32_bridge` | `GET_VERSION` frame | status 0, CRC good, protocol `0.14.0` | 5 s | 0.1 s |
 | `gd32_gpiochip` | gpiochip `gd32-bridge-gpio` | >= 20 lines | 5 s | 0.1 s |
-| `i2c_<chip>_<addr>` | one register read per on-module device | the ID where one is pinned (`0xEA` for the second PMIC), else an answer | 5 s | 0.1 s |
+| `i2c_{chip}_{addr}` | one register read per on-module device | the ID where one is pinned (`0xEA` for the second PMIC), else an answer | 5 s | 0.1 s |
 | `pmic_registers` | every register of `--pmic-expect` | all equal under their masks | 15 s | 0.6 s |
 | `thermal` | every `thermal_zone*/temp` | >= 1 zone, all 10..105 degC | 5 s | 0.1 s |
 | `cm33_firmware` | md5 at `mtd1` + `0x1A0000` | no `cm33` in the bundle: 64 KiB not blank (informational). With one: md5 of exactly its size = the bundle's (blocking) | 5 s / 30 s | 0.1 s / 1 s |
@@ -750,10 +750,10 @@ bounds for a hung command, not the expected time.
 | `dmesg_fatal` | `dmesg -r` | none of the fault signatures (`SCL is stuck low`, `Failed to reset the dma`, `mmc_select_hs200 failed`, `I/O error`, `EXT4-fs error`, an oops, ...) | 5 s | 0.3 s |
 | `dmesg_clean` | the same output | no error-level line outside the allowlist (informational) | - | - |
 | `gpio_keys` | `/sys/class/input/input*/name` | `gpio-keys` registered | 5 s | 0.1 s |
-| `eeprom_manifest` | 128 bytes at `0x50` | = the committed `<serial>.manifest.bin`, else magic, CRC, SKU and serial | 5 s | 0.2 s |
+| `eeprom_manifest` | 128 bytes at `0x50` | = the committed `{serial}.manifest.bin`, else magic, CRC, SKU and serial | 5 s | 0.2 s |
 | `secure_page` | the sealed 64-byte read | = the staged secure page, else not blank | 5 s | 0.2 s |
 | `supply_power_idle` | host: `MEAS:CURR?`, `MEAS:VOLT?` | 3.30..4.95 W (`v2n-m1`); also records `psu_voltage_v`, `psu_current_a` | - | 0.3 s |
-| `carrier_<part>_<addr>` | one ID register read per carrier device | WHO_AM_I `0x67`, chip ID `0x43` / `0x50`, manufacturer ID `0x5449`; an answer for the expanders | 5 s | 0.1 s |
+| `carrier_{part}_{addr}` | one ID register read per carrier device | WHO_AM_I `0x67`, chip ID `0x43` / `0x50`, manufacturer ID `0x5449`; an answer for the expanders | 5 s | 0.1 s |
 | `rail_3v3`, `rail_1v8`, `rail_5v` | the monitor's configuration, bus and shunt registers | bus voltage nominal +-5 %, current within the monitor's range | 5 s | 0.1 s |
 | `audio` | codec driver links, `aplay` 2 s of silence | both amplifiers bound, `aplay` exit 0, 1.8..2.5 s | 10 s | 2.3 s |
 | `display_dsi` | `/sys/class/drm/card*-DSI-*/status` | a DSI connector is registered | 5 s | 0.1 s |
