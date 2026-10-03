@@ -426,7 +426,8 @@ def _v2n_parser() -> argparse.ArgumentParser:
     work.add_argument("--from", dest="start", metavar="STEP")
     work.add_argument("--skip", help="STEP[,STEP]")
     work.add_argument("--linux-host", metavar="HOST",
-                      help="pin the Linux target host for this run (overrides bench.yaml linux.host)")
+                      help="sets the target host for this run (overrides bench.yaml linux.host; an EEPROM MAC "
+                           "change still forces rediscovery)")
     work.add_argument("--force-step", help="STEP[,STEP]: run even if its probe is satisfied")
     sub.add_parser("plan", parents=[common, work], help="dry run; read-only probes with --bench")
     r = sub.add_parser("run", parents=[common, work], help="dry run unless --execute")

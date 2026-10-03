@@ -19,7 +19,7 @@ import pytest
 import yaml
 from provision import gates, ledger_out, steps
 from provision import linux_target as lt
-from provision.bench import Bench, BenchError
+from provision.bench import Bench
 
 from .provision_fakes import FakeConsole, FakeLinux, FakeOperator, FakePower, FakeProbe
 from .test_provision_gates import _ext4, _wic
@@ -895,7 +895,7 @@ def test_linux_up_attaches_the_configured_host_when_detect_was_skipped(tmp_path,
     assert not steps.Ctx.linux_up(_ctx(tmp_path / "b", bench=_bench()))
 
 
-def test_need_linux_attaches_the_configured_host_on_a_forced_step(tmp_path, monkeypatch):
+def test_need_linux_attaches_the_configured_host_on_a_forced_step(tmp_path):
     # --only gd32_flash --force-step gd32_flash on a board already up: the
     # step calls need_linux() without any probe having attached ctx.linux,
     # which refused with "boot_sd_linux has not run" (E1M-V2M103, 2026-09-29).
@@ -904,7 +904,6 @@ def test_need_linux_attaches_the_configured_host_on_a_forced_step(tmp_path, monk
     ctx = _ctx(tmp_path, bench=b, execute=True)
     assert ctx.linux is None
     assert ctx.need_linux().host == "192.0.2.7"
-    monkeypatch.setattr(steps, "console_login_ctx", lambda *a, **k: (_ for _ in ()).throw(BenchError("no shell")))
     with pytest.raises(steps.Refused):
         _ctx(tmp_path / "b", bench=_bench(), execute=True).need_linux()
 
