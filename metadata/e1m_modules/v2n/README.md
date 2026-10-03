@@ -13,7 +13,7 @@ modules without the DEEPX DX-M1 NPU).
 | `gd32-io-mcu-map.tsv`             | `peripheral \t gd32_pad`                   |
 | `gd32-io-mcu-map.csv`             | `row, peripheral, gd32_pad`                |
 | `hw-revisions.yaml`               | Per-rev SDK-version compatibility window   |
-| `core-ownership.yaml`             | `(peripheral, pad) -> core`, verified pads |
+| `core-ownership.yaml`             | `(peripheral, pad) -> core`, cited pads; `a55_only_resources` for blocks with no TSV row |
 | `supervisor-links.yaml`           | `supervisor-links-v1`                      |
 
 Not in `gd32-io-mcu-map.*` (they are not bridge-controllable GPIOs): E1M IO26 and
