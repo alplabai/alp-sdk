@@ -17,6 +17,12 @@ bitbake has not been run on the fragments.
 The `<alp/camera.h>` backend on top of it is bench-verified for RAW10 on
 E1M-V2M103 with an IMX296LQ (see "Using `<alp/camera.h>` on Linux").
 
+## Colour through the ISP
+
+This page is the raw CRU path (Bayer/mono frames, no colour). For demosaiced
+RGB565 / NV12 through the RZ/V2N Mali-C55 ISP (opt-in, licence-gated
+package, IMX415 only as shipped) see [`v2n-isp.md`](v2n-isp.md).
+
 ## What is wired
 
 The camera devicetree and kernel config are **generated** from metadata by

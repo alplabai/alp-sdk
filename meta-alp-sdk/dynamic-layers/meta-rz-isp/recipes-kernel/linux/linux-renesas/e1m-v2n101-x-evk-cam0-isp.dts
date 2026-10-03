@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+/*
+ * e1m-v2n101-x-evk CAM0 dtb (generated sensor fragment) plus the ISP nodes.
+ * Built only with ALP_ENABLE_ISP = "1" and a CAM0 sensor selected; see
+ * e1m-x-evk-cam0-isp.dtsi.  BENCH-UNVERIFIED.
+ */
+#include "e1m-v2n101-x-evk-cam0.dts"
+#include "e1m-x-evk-cam0-isp.dtsi"
