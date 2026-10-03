@@ -35,6 +35,55 @@ Applied by `trusted-firmware-a_%.bbappend` on every `rzv2n-family` MACHINE, so
    memory-mapped window (`0x20000000` + 256 MB) covers `0x20200000`, and the
    suspend-only `xspidrv` device stays out of the cold-boot path.
 
+## Every boot mode reads the CM33 image from xSPI — `0002-rzv2n-read-the-CM33-image-from-xSPI-in-every-boot-mode.patch`
+`bl2_bp_spi` and `bl2_bp_mmc` are the same `bl2.bin` behind different `bptool`
+headers, so both start the CM33. The vendor BL22 *source* follows the boot
+device, though: under eMMC boot (DSW1 mode 1) it is byte `0x200000` of the
+enabled eMMC boot partition, under eSD boot byte `0x200000` of the card. Nothing
+writes either, so under eMMC boot BL2 released the CM33 into unwritten
+boot-partition bytes (#2658). Patch 0002 points BL22 at the xSPI slot in every
+boot mode and, for eMMC/eSD boot, also runs `xspi_setup()` and opens the memmap
+device (the xSPI clock, reset and MSTOP are already released by `cpg_setup()` in
+every mode). The CM33 image has one home: xSPI `0x200000`. Not yet bench-verified.
+
+**xSPI0 pin outputs.** The boot ROM configures the xSPI0 pins only for xSPI boot.
+`PFC_OEN` (PFC base `0x10410000` + `0x3C40`) resets to `0x0000003F`, which leaves the
+xSPI0 output enables OFF (1 = OFF): `OEN_XSPI_CLKP` bit 5, `OEN_XSPI_CS0N` bit 3,
+`OEN_XSPI_RESET0N` bit 2. Under eMMC/eSD boot that left xSPI0 unconnected to the flash:
+bench 2026-10-03 (E1M-V2M103, `SYS_LSI_MODE` `0x3c05`) printed
+`BL2: xSPI for BL22, id 0x0` and the CM33 did not start; xSPI boot (`0x3c06`) was fine.
+Before `xspi_setup()` patch 0002 sets `PFC_PWPR` (`PFC_BASE` + `0x3C04`) `REGWE_B`
+(bit 5), clears **only** bits 5, 3 and 2 of `PFC_OEN`, restores `PFC_PWPR`, and waits 1 ms
+for the flash to leave reset (a conservative margin; the GD25 datasheet value is not in
+the repo). `OEN_ET1`/`OEN_ET0` (bits 1/0, ET1/ET0 TXC direction) are never touched, since
+that would break Ethernet. If no flash answers (id `0x0`, `0xffffff`, `0xffffffff`) BL2
+prints `BL2: no xSPI flash answered, CM33 NOT started`, skips loading BL22 and does not
+release the CM33.
+
+Bench check (read-only first, then write; boot0 only). The `PFC_OEN` values below are
+expectations from the reset value, not yet measured:
+
+1. In U-Boot, cold boot in DSW1 mode 1 and again in mode 2: `md.l 0x10413c40 1`. Expect
+   `0x0000003f` in mode 1 before this patch; with the patched BL2 in mode 1 U-Boot reads
+   `0x00000013` (bits 5, 3, 2 cleared, bits 4, 1, 0 as at reset). Mode 2 is whatever the ROM
+   left; the patch does not touch that path.
+2. Write the rebuilt `bl2_bp_mmc` to eMMC **boot0 only** and read it back byte-for-byte. Boot1
+   is **not** an automatic fallback. Recovery for a bad boot0: boot DSW1 mode 2 (xSPI) and
+   rewrite boot0.
+3. Cold boot in mode 1 and confirm on the console:
+   - `BL2: xSPI for BL22, id 0x<id>` shows the flash device id (not `0x0`).
+   - With the shim in `mtd1` + `0x1A0000`, Linux up: `devmem 0x4F700FF0 32` reads
+     `0xA10D0683` (the beacon magic) and `devmem 0x4F700FF8 32` advances between two reads.
+   - Ethernet and the NOR flash (`mtd`) still work.
+4. Regression: cold boot in mode 2; the CM33 still starts and the beacon increments.
+
+If the beacon is absent, check at least that the A55 still boots normally (Linux login),
+which shows the xSPI window setup did not disturb the eMMC boot.
+
+The FIP plays no part: BL22 is not a FIP image, and BL2 starts the CM33 in
+`bl2_el3_plat_prepare_exit()` before handing off to BL31. A FIP ToC with two
+entries (BL31, BL33) is the normal layout.
+
 ## The M33 firmware image
 `zephyr.bin` is linked at `0x08003000` (board `alp_e1m_v2m101_m33_sm`,
 `sram: memory@8003000`). BL2 loads the raw image at `0x08000000`, so the image is
