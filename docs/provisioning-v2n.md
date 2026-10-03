@@ -19,10 +19,10 @@ the private repository.
 
 1. **No SD boot ROM path.** A plain microSD is not a boot source on this
    SoC. The flow is: SCIF download mode → the Flash Writer's `EM_W` puts a
-   *transient* eMMC-boot BL2 (`bl2_mmc`) and the FIP into eMMC **boot1** →
+   *transient* eMMC-boot BL2 (`bl2_mmc`) and the FIP into eMMC **boot partition 1** (Linux `mmcblk<N>boot0`, the one EXT_CSD`[179]=0x08` boots; Linux `boot1` is partition 2 and is never booted) →
    the unit boots U-Boot from eMMC → U-Boot boots the release wic from the
    microSD (U-Boot patch 0008 enables SDHI1 as `mmc1`) → **Linux performs
-   every production write** (xSPI, eMMC boot1, eMMC user area, EEPROM, GD32,
+   every production write** (xSPI, eMMC boot partition 1, eMMC user area, EEPROM, GD32,
    secure page).
 2. **`mfg_date` is the Monday of the serial's ISO week**
    (`YYYYWww-NNNN` → `date.fromisocalendar(YYYY, ww, 1)`). A `--mfg-date`
@@ -235,15 +235,15 @@ are not yet confirmed by a run of this code on a bench.
 
 | step | what it does |
 |---|---|
-| `preflight` | offline gates: bundle schema, artefact sha256 / size / role set (`bl2`, `bl2_mmc`, `fip`, `system_image` -- enforced here, not by the bundle schema, because flat-flow bundles such as som-0.2.0 legitimately carry no `bl2_mmc`), xSPI and boot1 size limits, family, SKU triangle, DDR tier triangle, FIP rail string (`v2n-m1`), FDT present in the wic `/boot`, N24S128 frame-table self-check |
+| `preflight` | offline gates: bundle schema, artefact sha256 / size / role set (`bl2`, `bl2_mmc`, `fip`, `system_image` -- enforced here, not by the bundle schema, because flat-flow bundles such as som-0.2.0 legitimately carry no `bl2_mmc`), xSPI and eMMC boot partition size limits, family, SKU triangle, DDR tier triangle, FIP rail string (`v2n-m1`), FDT present in the wic `/boot`, N24S128 frame-table self-check |
 | `detect` | clean shutdown if Linux is up, then power cycle and classify the console: SCIF ROM, BL2, U-Boot, Linux login, silent. The ROM banner `SCI Download mode (Due to parameter error)` is the ROM's fallback to SCI download, taken when the selected boot source has no valid image (blank xSPI/eMMC, or DSW1 not in mode 3). It still offers `-- Load Program to SRAM`, but it is **refused**: "boot ROM fell back to SCI download because the selected boot source has no valid image (blank xSPI/eMMC, or DSW1 not in mode 3); set DSW1 to mode 3 for a clean SCIF bootstrap". Only `(Normal SCI boot)` proceeds |
 | `dsw1_scif` | operator: boot switch to SCIF download |
-| `bootstrap` | reuses the live SCIF ROM state `detect` left in this run (no second power cycle); cycles only if no ON has happened since. Flash Writer: `EM_W` boot1 sector `0x1` ← `bl2_mmc`, sector `0x300` ← `fip`; `EM_SECSD` EXT_CSD `[177]=0x02` (BOOT_BUS_CONDITIONS), `[179]=0x08` (PARTITION_CONFIG); `EM_DCID` |
+| `bootstrap` | reuses the live SCIF ROM state `detect` left in this run (no second power cycle); cycles only if no ON has happened since. Flash Writer: `EM_W` area 1 (boot partition 1) sector `0x1` ← `bl2_mmc`, sector `0x300` ← `fip`; `EM_SECSD` EXT_CSD `[177]=0x02` (BOOT_BUS_CONDITIONS), `[179]=0x08` (PARTITION_CONFIG); `EM_DCID` |
 | `dsw1_emmc_insert_sd` | operator: boot switch to eMMC, insert the release microSD; U-Boot must autoboot |
 | `boot_sd_linux` | U-Boot boots the wic from microSD; log in, find the host, confirm the root is on the SD, then the live SoM check: every non-optional on-module I2C device the SoM preset declares must ACK (the GD32 excepted) before any destructive step runs. Fallback `--transfer xmodem`: `loadx` + `gzwrite` the wic from the U-Boot prompt. No IP is not a failure here: the checks run over the console and `gd32_flash` runs next |
 | `gd32_flash` | applies the ACT88760 GPIO4 volatile release if still at the OTP default, DP-ID gate (`0x0BE12477` only), `loadbin` × 3, verify with `savebin` in fresh probe sessions, bridge ACK at `0x70`. With no network (the `boot_sd_linux` evidence says why: `network: none (gbeth DMA reset failed on <ports>)` or `none (no carrier)`) it pushes the SWD tools and the three images over the console (base64, md5-checked on the board), then cold-cycles and re-checks the IP; SSH is used when it is up |
 | `write_xspi` | from Linux: `bl2` → `mtd0`, `fip` → `mtd1`; md5 readback. A FIP whose erase would reach the CM33 image at `mtd1` + `0x1A0000` is refused |
-| `write_emmc_boot` | release `bl2_mmc` + `fip` into `mmcblk<N>boot1`, md5 readback, EXT_CSD via mmc-utils |
+| `write_emmc_boot` | release `bl2_mmc` + `fip` into `mmcblk<N>boot0` (boot partition 1, the one EXT_CSD`[179]=0x08` boots; `boot1` is never booted), md5 readback of the same device, EXT_CSD via mmc-utils |
 | `write_rootfs` | stream the wic into the eMMC user area (refused while Linux runs from the eMMC), `fsck -n`, read-only mount (`-o ro,noload`, so the ext4 journal is never replayed), `/boot/<dtb>` present. With a `system_image_bmap` in the bundle only the mapped ranges are written and verified, see below |
 | `census` | read-only (one throwaway file in `/tmp`): every auto ledger key the unit can provide, plus the keys listed under "Census keys" below |
 | `eeprom_manifest` | preconditions, 128-byte manifest in 8 × 16-byte page writes at `0x50`, readback, cold cycle, re-read; only then the staged blob is promoted to `<serial>.manifest.bin` |

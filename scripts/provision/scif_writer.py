@@ -69,7 +69,7 @@ WRITER_ERROR = (r"[^\r\n]*(?:ERROR!|ERR!|\bERR\b|FAIL|Syntax Error|Pa[lr]am Erro
                 r"|Size Over|Boundary Error|Unwritable Index|CMD8 error)[^\r\n]*")
 
 BOOT1_AREA = 1
-EXT_CSD_WRITES = ((177, 0x02), (179, 0x08))   # BOOT_BUS_CONDITIONS, PARTITION_CONFIG=boot1
+EXT_CSD_WRITES = ((177, 0x02), (179, 0x08))   # BOOT_BUS_CONDITIONS, PARTITION_CONFIG=boot partition 1
 
 CHUNK = 4096            # bytes per write while streaming an image
 SREC_DATA_LEN = 32      # data bytes per S3 record

@@ -121,11 +121,13 @@ class Board(FakeLinux):
     I2C registers live in `regs`, EEPROM array and identity header are modelled,
     and every write command mutates the model so re-probes see the result."""
 
-    def __init__(self, xspi_bl2=b"", xspi_fip=b"", boot1=b"", emmc=b"", act_0x10=0x08,
+    def __init__(self, xspi_bl2=b"", xspi_fip=b"", boot0=b"", emmc=b"", act_0x10=0x08,
                  lock=0xFD, rail_on_xspi=None, root="mmcblk1p2"):
         super().__init__()
         self.files = {"/dev/mtd0": xspi_bl2 + b"\xff" * 64, "/dev/mtd1": xspi_fip + b"\xff" * 64,
-                      "/dev/mmcblk0boot1": boot1 or b"\x00" * (0x300 * 512 + 1024),
+                      "/dev/mmcblk0boot0": boot0 or b"\x00" * (0x300 * 512 + 1024),
+                      # boot partition 2 is never booted: a probe or write aimed here must fail a test
+                      "/dev/mmcblk0boot1": b"\x00" * (0x300 * 512 + 1024),
                       "/dev/mmcblk0": emmc or b"\x00" * 1024}
         self.regs = {(8, 0x25, 0x10): act_0x10}
         self.array = bytearray(b"\xff" * 128)
@@ -271,12 +273,12 @@ def test_no_command_ever_writes_selector_0x06(tmp_path):
 # --- idempotence / done semantics ------------------------------------------------------
 
 def test_provisioned_unit_skips_writes(tmp_path):
-    boot1 = bytearray(b"\x00" * (0x300 * 512 + len(FIP)))
-    boot1[512:512 + len(BL2)] = BL2
-    boot1[0x300 * 512:] = FIP
+    boot0 = bytearray(b"\x00" * (0x300 * 512 + len(FIP)))
+    boot0[512:512 + len(BL2)] = BL2
+    boot0[0x300 * 512:] = FIP
     bdir, b = _bundle(tmp_path)
     wic = gzip.decompress((bdir / "artifacts" / "img.wic.gz").read_bytes())
-    board = Board(xspi_bl2=BL2, xspi_fip=FIP, boot1=bytes(boot1), emmc=wic)
+    board = Board(xspi_bl2=BL2, xspi_fip=FIP, boot0=bytes(boot0), emmc=wic)
     board.ext = {177: 0x02, 179: 0x08}
     ctx = _ctx(tmp_path, bundle=(bdir, b), bench=_bench(), linux=board, execute=True)
     res = steps.run_steps(ctx, only=["write_xspi", "write_emmc_boot", "write_rootfs"])
@@ -286,6 +288,24 @@ def test_provisioned_unit_skips_writes(tmp_path):
     state = json.loads(ctx.state_path.read_text(encoding="utf-8"))
     assert state["steps"]["write_xspi"]["status"] == "skipped"
     assert state["serial"] == SERIAL and state["schema"] == 1
+
+
+def test_write_emmc_boot_probe_reads_boot_partition_1_never_boot1(tmp_path):
+    """Boot partition 1 is Linux boot0 (EXT_CSD[179]=0x08 boots it); boot1 is never booted."""
+    img = bytearray(bytes(0x300 * 512 + len(FIP)))
+    img[512:512 + len(BL2)] = BL2
+    img[0x300 * 512:] = FIP
+    bdir, b = _bundle(tmp_path)
+
+    def probe(board, n):
+        board.ext = {177: 0x02, 179: 0x08}
+        ctx = _ctx(tmp_path / n, bundle=(bdir, b), bench=_bench(), linux=board, execute=True)
+        return steps.WriteEmmcBoot().probe(ctx)
+
+    assert isinstance(probe(Board(boot0=bytes(img)), "a"), steps.Satisfied)
+    stale = Board(boot0=bytes(0x300 * 512 + 1024))
+    stale.files["/dev/mmcblk0boot1"] = bytes(img)      # right bytes in the never-booted partition
+    assert isinstance(probe(stale, "b"), steps.Unsatisfied)
 
 
 class WritableBoard(Board):
