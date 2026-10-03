@@ -110,9 +110,11 @@ typedef void (*alp_wdt_expiry_cb_t)(alp_wdt_t *wdt, void *user);
 /** Configuration passed to @ref alp_wdt_open. */
 typedef struct {
 	uint32_t wdt_id;     /**< Form-factor WDT instance ID: ALP_E1M_WDT0..1 or ALP_E1M_X_WDT0..1. */
-	uint32_t timeout_ms; /**< Feed deadline in milliseconds; must be non-zero and
-	                      *   not above the hardware's longest period (a backend rejects
-	                      *   a larger value with @ref ALP_ERR_INVAL; see the per-SoC doc). */
+	uint32_t timeout_ms; /**< Feed deadline in milliseconds; must be non-zero.  A value
+	                      *   above the hardware's longest period is either extended in
+	                      *   software by the backend (reset then lands up to one short
+	                      *   hardware period after the deadline) or rejected with
+	                      *   @ref ALP_ERR_INVAL; see the per-SoC doc. */
 	alp_wdt_action_t on_timeout; /**< Action when the deadline is missed. */
 	/** Required when @c on_timeout == @ref ALP_WDT_INTERRUPT_ONLY;
 	 *  ignored for the reset actions.  @ref alp_wdt_open fails with

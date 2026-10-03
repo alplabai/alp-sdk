@@ -30,10 +30,7 @@ static const struct wdt_rzv_cks wdt_rzv_cks_table[] = {
 /* Counts per timeout, indexed by the TOPS[1:0] encoding. */
 static const uint16_t wdt_rzv_tops_counts[] = { 1024, 4096, 8192, 16384 };
 
-/* Longest encodable period (/256 x 16384 counts) rounded UP to whole ms: 175 at 24 MHz (174.76 ms).
- * A request above this is rejected by the driver, never clamped; the picked period itself is always
- * <= the request, so a request equal to the ceiling selects the longest period.
- */
+/* Longest encodable period (/256 x 16384 counts) rounded UP to whole ms: 175 at 24 MHz (174.76 ms). */
 static inline uint32_t wdt_rzv_ceiling_ms(uint32_t clock_freq)
 {
 	const uint64_t counts = 256ULL * 16384ULL;
@@ -41,10 +38,30 @@ static inline uint32_t wdt_rzv_ceiling_ms(uint32_t clock_freq)
 	return clock_freq == 0 ? 0 : (uint32_t)((counts * 1000ULL + clock_freq - 1) / clock_freq);
 }
 
-/* True when a request of ms is at or below the longest encodable period (else the driver rejects it). */
-static inline bool wdt_rzv_timeout_in_range(uint32_t clock_freq, uint32_t ms)
+/* Direct mode: the request fits one hardware period (the picked period is the longest <= the request).
+ * Above it the driver runs EXTENDED mode: a short fixed hardware period kept alive by a software
+ * keeper only while the application's own deadline has not passed.
+ */
+static inline bool wdt_rzv_is_direct(uint32_t clock_freq, uint32_t ms)
 {
 	return ms <= wdt_rzv_ceiling_ms(clock_freq);
+}
+
+/* Extended mode: hardware period = longest encodable period <= this (87.4 ms at 24 MHz, half the
+ * 174.8 ms ceiling: the keeper then has a whole period of margin against a late tick), and the
+ * keeper ticks every WDT_RZV_EXT_KEEPER_MS (>= 4 refreshes per hardware period).
+ */
+#define WDT_RZV_EXT_HW_MAX_MS 100U
+#define WDT_RZV_EXT_KEEPER_MS 20U
+
+/* Keeper decision, evaluated at each tick with a monotonic 64-bit uptime in ms: refresh the hardware
+ * only while the app deadline (last_feed + timeout) is still in the future.  Unsigned subtraction is
+ * wrap-safe; now < last_feed (a feed that landed after now was sampled) counts as "just fed".
+ */
+static inline bool
+wdt_rzv_keeper_refresh(uint64_t now_ms, uint64_t last_feed_ms, uint32_t timeout_ms)
+{
+	return now_ms < last_feed_ms || now_ms - last_feed_ms < timeout_ms;
 }
 
 /* Longest period not exceeding max_ms; false when even the shortest is longer. */

@@ -32,8 +32,14 @@
  *     (manual Table 5.4-5: WDT0 "Interrupt to CPU: Not possible", error interrupt only).
  *   - no window: window.min must be 0 (the hardware window is fixed at 0..100 %).
  *   - the achieved timeout is the longest period <= window.max (never longer than asked); at 24 MHz
- *     that tops out at 16384 x 256 / 24 MHz = 174.8 ms, and a longer request is REJECTED with -EINVAL
- *     (wdt_rzv_ceiling_ms(), 175 ms), never clamped: a silent shorter deadline is the wrong one.  The clock
+ *     that tops out at 16384 x 256 / 24 MHz = 174.8 ms (wdt_rzv_ceiling_ms(), 175 ms).  A longer request
+ *     runs EXTENDED mode: the hardware is armed with a fixed 87.4 ms period and a k_timer keeper (20 ms,
+ *     system-timer ISR) refreshes it only while the app deadline (window.max ms since the last
+ *     wdt_feed, 64-bit uptime, spinlock-guarded) has not passed.  After a missed deadline the keeper
+ *     stops and the hardware resets the SoM: reset lands in [timeout, timeout + 87.4 ms] after the
+ *     last feed.  A kernel/IRQ lockup stops the keeper too, so it still resets within 87.4 ms.  In
+ *     extended mode wdt_feed only stamps the deadline (the keeper is the sole hardware refresher,
+ *     the refresh being a two-write sequence).  The clock
  *     is the node's `clock-freq`, generated from the SoC spec's m33_sm `watchdog.counting_clock_hz`:
  *     24 MHz = WDT_0_clk_loco from the Main OSC (manual Table 4.4-2, "CWDT loco clock").
  *   - WDT_OPT_PAUSE_IN_SLEEP maps to WDTCSTPR.SLCSTP; WDT_OPT_PAUSE_HALTED_BY_DBG is -ENOTSUP.
@@ -50,6 +56,7 @@
 #include <zephyr/drivers/watchdog.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/spinlock.h>
 #include <zephyr/sys/atomic.h>
 
 #include "r_wdt.h"
@@ -68,6 +75,12 @@ struct wdt_rzv_data {
 	wdt_instance_ctrl_t ctrl;
 	wdt_cfg_t           cfg;
 	atomic_t            state;
+	/* Extended mode (request above the hardware ceiling): the keeper owns the hardware refresh. */
+	bool              extended;
+	uint32_t          app_timeout_ms;
+	uint64_t          last_feed_ms; /* guarded by lock */
+	struct k_spinlock lock;
+	struct k_timer    keeper;
 };
 
 /* Indexed by the TOPS[1:0] encoding (wdt_rzv_timeout.h). */
@@ -106,17 +119,17 @@ static int wdt_rzv_install_timeout(const struct device *dev, const struct wdt_ti
 	if (atomic_test_bit(&data->state, WDT_RZV_ATOMIC_TIMEOUT_SET)) {
 		return -ENOMEM; /* a single channel */
 	}
-	if (!wdt_rzv_timeout_in_range(cfg->clock_freq, config->window.max)) {
-		LOG_ERR("timeout %u ms exceeds the longest WDT0 period (%u ms)",
-		        config->window.max,
-		        wdt_rzv_ceiling_ms(cfg->clock_freq));
-		return -EINVAL; /* before any state is set: a later install_timeout() may retry */
-	}
-	if (!wdt_rzv_pick(cfg->clock_freq, config->window.max, &tops, &cks)) {
+	const bool direct = wdt_rzv_is_direct(cfg->clock_freq, config->window.max);
+
+	/* Above the hardware ceiling: a short fixed hardware period + a software keeper (see header). */
+	if (!wdt_rzv_pick(
+	        cfg->clock_freq, direct ? config->window.max : WDT_RZV_EXT_HW_MAX_MS, &tops, &cks)) {
 		LOG_ERR("timeout %u ms is shorter than the shortest WDT0 period", config->window.max);
 		return -EINVAL;
 	}
 
+	data->extended           = !direct;
+	data->app_timeout_ms     = config->window.max;
 	data->cfg.timeout        = wdt_rzv_timeouts[tops];
 	data->cfg.clock_division = (wdt_clock_division_t)cks;
 	data->cfg.window_start   = WDT_WINDOW_START_100;
@@ -126,6 +139,25 @@ static int wdt_rzv_install_timeout(const struct device *dev, const struct wdt_ti
 	atomic_set_bit(&data->state, WDT_RZV_ATOMIC_TIMEOUT_SET);
 
 	return 0;
+}
+
+/* System-timer ISR context.  Refreshes only while the app deadline has not passed; once it has, it
+ * stops and the hardware expires within one hardware period.  The sole refresher in extended mode
+ * (a refresh is a two-write sequence, so the app's feed must never interleave with it).
+ */
+static void wdt_rzv_keeper(struct k_timer *timer)
+{
+	struct wdt_rzv_data *data = CONTAINER_OF(timer, struct wdt_rzv_data, keeper);
+	bool                 refresh;
+
+	K_SPINLOCK(&data->lock)
+	{
+		refresh = wdt_rzv_keeper_refresh(
+		    (uint64_t)k_uptime_get(), data->last_feed_ms, data->app_timeout_ms);
+	}
+	if (refresh) {
+		(void)g_wdt_on_wdt.refresh(&data->ctrl);
+	}
 }
 
 static int wdt_rzv_arm(struct wdt_rzv_data *data, uint8_t options)
@@ -145,6 +177,12 @@ static int wdt_rzv_arm(struct wdt_rzv_data *data, uint8_t options)
 	R_BSP_WDT_SYSTEM_RESET_ENABLE(0, 1);
 	if (g_wdt_on_wdt.refresh(&data->ctrl) != FSP_SUCCESS) {
 		return -EIO;
+	}
+
+	if (data->extended) {
+		data->last_feed_ms = (uint64_t)k_uptime_get();
+		k_timer_init(&data->keeper, wdt_rzv_keeper, NULL);
+		k_timer_start(&data->keeper, K_NO_WAIT, K_MSEC(WDT_RZV_EXT_KEEPER_MS));
 	}
 
 	return 0;
@@ -185,7 +223,7 @@ static int wdt_rzv_disable(const struct device *dev)
 	}
 
 	LOG_ERR("WDT0 cannot be stopped once started unless the SoC gets a reset");
-	return -EPERM;
+	return -EPERM; /* the extended-mode keeper therefore never needs a stop path */
 }
 
 static int wdt_rzv_feed(const struct device *dev, int channel_id)
@@ -194,6 +232,14 @@ static int wdt_rzv_feed(const struct device *dev, int channel_id)
 
 	if (channel_id != 0 || !atomic_test_bit(&data->state, WDT_RZV_ATOMIC_ENABLE)) {
 		return -EINVAL;
+	}
+
+	if (data->extended) {
+		K_SPINLOCK(&data->lock)
+		{
+			data->last_feed_ms = (uint64_t)k_uptime_get();
+		}
+		return 0;
 	}
 
 	return g_wdt_on_wdt.refresh(&data->ctrl) == FSP_SUCCESS ? 0 : -EIO;

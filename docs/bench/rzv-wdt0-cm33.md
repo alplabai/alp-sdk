@@ -41,14 +41,23 @@ other units), not just the M33.  Use the bench flashing flow in the
    (A55 console shows the reset / U-Boot banner), not just the M33.  Note which of the two happened.
 5. Measure the period: with `timeout_ms = 175` (the shipped test) the driver picks the longest period
    not above it, `16384 x 256 / 24 MHz = 174.8 ms`, which is also the LONGEST period WDT0 can encode at
-   24 MHz (a larger request, 176 ms and up, is rejected with `ALP_ERR_INVAL`, never clamped; also try `ALP_WDT_CONFIG_DEFAULT` = 1000 ms, expect `ALP_ERR_INVAL`, then reopen with 175 ms in the same boot and expect it to arm: the reject-then-reinstall path).  Time last-feed to reset (scope on a
+   24 MHz (a larger request, 176 ms and up, runs the software keeper, steps 7-9; the direct path is what 175 ms exercises).  Time last-feed to reset (scope on a
    CM33-driven GPIO released at the last feed, against the reset edge).  The real clock is `16384 x 256 / measured_seconds`.  If it
    is not 24 MHz, fix `counting_clock_hz` in `metadata/socs/renesas/rzv2n/n44.json` (`m33_sm` core,
    `watchdog`), regenerate the two boards, and record the measured value here.
 6. Negative cases through `<alp/wdt.h>` on the same image: `ALP_WDT_INTERRUPT_ONLY`,
    `ALP_WDT_RESET_CPU` (see the CM33-only row above: a candidate to enable if SEL1 works),
    `window_min_ms != 0` and `ALP_WDT_PAUSE_HALTED_BY_DEBUG` must each return `ALP_ERR_NOSUPPORT`; `ALP_WDT_PAUSE_IN_SLEEP` should arm (WDTCSTPR.SLCSTP=1).
-7. Only after steps 2-5 pass: flip the `test-plan.md` row for this feature from `⏳` and regenerate
+7. Extended mode, no reset while fed: the shipped test `main.c` requests `timeout_ms = 1000` and
+   feeds every 500 ms.  Run 60 s.  Expected: the SoM stays up (the driver arms WDT0 at 87.4 ms,
+   CKS 0xF / TOPS 3, and the 20 ms keeper refreshes it).
+8. Extended mode, starve: stop feeding (drop the `alp_wdt_feed()` call) with `timeout_ms = 1000`.
+   Expected: the SoM resets between 1000 ms and 1000 ms + 87.4 ms after the last feed.  Measure
+   last-feed to reset as in step 5 and record it.
+9. Extended mode, lockup: with `timeout_ms = 1000` and the app still feeding, lock interrupts in a
+   busy loop (`irq_lock()` then spin).  Expected: the keeper cannot run, so the SoM resets within
+   87.4 ms of the lock, not after 1000 ms.  Record the measured time.
+10. Only after steps 2-5 and 7-9 pass: flip the `test-plan.md` row for this feature from `⏳` and regenerate
    `docs/verification-status.md`.
 
 ## Clock hold (not wired yet)

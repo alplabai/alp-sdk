@@ -30,15 +30,47 @@ ZTEST(wdt_rzv_timeout, test_longest_period_not_above_request)
 	zassert_equal(cks, 0x0);
 }
 
-ZTEST(wdt_rzv_timeout, test_request_above_max_rejected)
+ZTEST(wdt_rzv_timeout, test_direct_vs_extended_mode)
 {
-	/* 16384 x 256 / 24 MHz = 174.76 ms: 175 ms is the ceiling, 176 ms must be rejected (not clamped). */
 	zassert_equal(wdt_rzv_ceiling_ms(CLK_24MHZ), 175U);
-	zassert_true(wdt_rzv_timeout_in_range(CLK_24MHZ, 1U));
-	zassert_true(wdt_rzv_timeout_in_range(CLK_24MHZ, 175U));
-	zassert_false(wdt_rzv_timeout_in_range(CLK_24MHZ, 176U));
-	zassert_false(wdt_rzv_timeout_in_range(CLK_24MHZ, 1000U)); /* ALP_WDT_CONFIG_DEFAULT */
+	zassert_true(wdt_rzv_is_direct(CLK_24MHZ, 1U));
+	zassert_true(wdt_rzv_is_direct(CLK_24MHZ, 175U)); /* 175 ms stays direct */
+	zassert_false(wdt_rzv_is_direct(CLK_24MHZ, 176U));
+	zassert_false(wdt_rzv_is_direct(CLK_24MHZ, 1000U)); /* ALP_WDT_CONFIG_DEFAULT -> extended */
 	zassert_equal(wdt_rzv_ceiling_ms(0), 0U);
+}
+
+ZTEST(wdt_rzv_timeout, test_extended_hardware_period)
+{
+	uint8_t tops;
+	uint8_t cks;
+
+	/* longest period <= 100 ms: /128 x 16384 = 87381 us (CKS 1111b, TOPS 11b) */
+	zassert_true(wdt_rzv_pick(CLK_24MHZ, WDT_RZV_EXT_HW_MAX_MS, &tops, &cks));
+	zassert_equal(tops, 3);
+	zassert_equal(cks, 0xF);
+	/* the keeper ticks at least 4x per hardware period */
+	zassert_true(WDT_RZV_EXT_KEEPER_MS * 4U <= 87U);
+}
+
+ZTEST(wdt_rzv_timeout, test_keeper_refreshes_until_deadline)
+{
+	/* app timeout 1000 ms, last feed at t = 5000 */
+	zassert_true(wdt_rzv_keeper_refresh(5000, 5000, 1000));
+	zassert_true(wdt_rzv_keeper_refresh(5999, 5000, 1000));
+	zassert_false(wdt_rzv_keeper_refresh(6000, 5000, 1000));
+	zassert_false(wdt_rzv_keeper_refresh(60000, 5000, 1000));
+	/* a feed stamped after now was sampled counts as just fed */
+	zassert_true(wdt_rzv_keeper_refresh(4999, 5000, 1000));
+}
+
+ZTEST(wdt_rzv_timeout, test_keeper_wrap_safe)
+{
+	/* uptimes near the 32-bit and 64-bit limits: deadline arithmetic must not overflow */
+	zassert_true(wdt_rzv_keeper_refresh(0x100000010ULL, 0xFFFFFFF0ULL, 1000));
+	zassert_false(wdt_rzv_keeper_refresh(0x1000003F0ULL, 0xFFFFFFF0ULL, 1000));
+	zassert_true(wdt_rzv_keeper_refresh(UINT64_MAX, UINT64_MAX - 10, UINT32_MAX));
+	zassert_false(wdt_rzv_keeper_refresh(UINT64_MAX, UINT64_MAX - 2000, 1000));
 }
 
 ZTEST(wdt_rzv_timeout, test_only_manual_dividers_are_ever_chosen)

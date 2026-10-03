@@ -14,9 +14,12 @@
 
 int main(void)
 {
+	/* 1000 ms is above the longest WDT0 period (174.8 ms at 24 MHz): the driver runs its software
+	 * keeper (extended mode).  Use 175 for direct mode.
+	 */
 	alp_wdt_t *wdt = alp_wdt_open(&(alp_wdt_config_t){
 	    .wdt_id     = ALP_E1M_X_WDT0,
-	    .timeout_ms = 175, /* the longest WDT0 period at 24 MHz is 174.8 ms */
+	    .timeout_ms = 1000,
 	    .on_timeout = ALP_WDT_RESET_SOC,
 	});
 
@@ -27,7 +30,7 @@ int main(void)
 
 	while (1) {
 		(void)alp_wdt_feed(wdt);
-		k_sleep(K_MSEC(50));
+		k_sleep(K_MSEC(500));
 	}
 
 	return 0;
