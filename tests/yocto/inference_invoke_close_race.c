@@ -65,9 +65,11 @@ static pthread_barrier_t g_entered; /* invoke thread + closer thread */
 static atomic_int        g_saw_poison;
 static atomic_int        g_invoke_rc_ok;
 
-alp_status_t alp_inference_deepx_open(struct alp_inference *h, const alp_inference_config_t *cfg)
+alp_status_t
+alp_inference_deepx_open(struct alp_inference *h, const alp_inference_config_t *cfg, unsigned bound)
 {
 	(void)cfg;
+	(void)bound;
 	static fake_be_t st;
 	st.magic    = FAKE_MAGIC;
 	h->be_state = &st;

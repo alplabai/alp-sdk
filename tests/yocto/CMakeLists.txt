@@ -247,6 +247,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/yocto
     )
     target_compile_features(alp_test_inference_drpai_regression PRIVATE cxx_std_17)
+    # The concurrent-invoke test starts std::threads.
+    find_package(Threads REQUIRED)
+    target_link_libraries(alp_test_inference_drpai_regression PRIVATE Threads::Threads)
 
     add_test(NAME alp_test_inference_drpai_regression
              COMMAND alp_test_inference_drpai_regression)

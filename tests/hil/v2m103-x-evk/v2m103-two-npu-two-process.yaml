@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103: TWO processes, one per NPU -- `v2n-two-models ... solo-drpai`
+# and `v2n-two-models ... solo-dx` started together.  The DX-M1 process
+# goes through `dxrtd`; only one process may use the DRP-AI3 (two would
+# load at the same arena base).
+#
+# NOT BENCH-VERIFIED.  Nothing in this spec has run on hardware: the DRP-AI3
+# and DX-M1 backends have never run together.  Needs an image with BOTH NPU
+# stacks and a RUHMI-enabled libalp_sdk (RUHMI_DRPAI_TVM_DIR; see
+# docs/bring-up-drpai-v2n.md section 8), plus a DRP-AI `drpai_dir` bundle
+# tar and a DEEPX `.dxnn` -- neither is checked in (alp-sdk#2236), so
+# whoever runs this places them under --artifact-dir.
+#
+# SUPPLY CURRENT IS NOT MEASURED.  This harness has no PSU sampling (see
+# tests/hil/README.md, pending_hardware_support).  Reading the 15 V input
+# current with idle / DRP-AI only / DX-M1 only / both busy needs a bench PSU
+# sampler that does not exist yet; this spec only records SoC thermal zones
+# (the example prints them at start and end).
+#
+# An ssh_command spec has no copy step, so the binary and the models must
+# already be on the target: `v2n-two-models` on PATH (the
+# alp-two-models-inference recipe installs it to /usr/bin; add it to the
+# image) and the four input files under /opt/two-npu/ named as below.
+
+schema_version: 1
+name: v2m103-two-npu-two-process
+description: |
+  Two processes at once, one on DRP-AI3 and one on the DX-M1.
+
+flash_method: ssh-run
+pending_hardware_support: supply-current-sampling
+ssh_command: |-
+  d=/opt/two-npu
+  v2n-two-models $d/drpai-model.tar $d/drpai-frame.bin $d/model.dxnn $d/dxnn-frame.bin 30 solo-drpai > /tmp/two-npu-a.log 2>&1 &
+  a=$!
+  v2n-two-models $d/drpai-model.tar $d/drpai-frame.bin $d/model.dxnn $d/dxnn-frame.bin 30 solo-dx > /tmp/two-npu-b.log 2>&1 &
+  b=$!
+  wait $a; ra=$?
+  wait $b; rb=$?
+  cat /tmp/two-npu-a.log /tmp/two-npu-b.log
+  echo "HIL_TWO_NPU_RC drpai=$ra deepx=$rb"
+  [ "$ra" = 0 ] && [ "$rb" = 0 ] && echo HIL_TWO_NPU_PROCS_OK
+
+serial:
+  duration_s: 90
+  expect_contains:
+    - "[two-npu] phase: solo drpai"
+    - "[two-npu] phase: solo deepx"
+    - "HIL_TWO_NPU_PROCS_OK"
+  expect_absent:
+    - "open failed"
+    - "invoke failed"
+    - "IOCTL FAILED"
+    - "DRPAI_START failed"
+    - "Failed to set NPU bound"
+    - "PANIC"
+    - "ASSERT"

@@ -493,6 +493,65 @@ In order:
    the shared-memory exclusion lock is contended. **Not yet reachable: no model
    has been compiled (§5).**
 
+## 8. Running more than one model
+
+DRP-AI3 is **time-shared**: the hardware runs one job at a time and the
+driver has no queue (a second `DRPAI_START` while a job runs returns
+`-EBUSY`). What the SDK does about it, in one process:
+
+- **Each open handle gets its own range of the arena.** Without that,
+  every handle loaded at the arena base (`0xd0000000`) and the second
+  model silently overwrote the first. The SDK now places each model after
+  the previous one, using the runtime's `GetLastAddress()`, aligned to
+  1 MiB, and keeps the last 32 MiB of the 512 MiB region free for DRP-AI
+  pre-processing (an estimate -- no compiled bundle exists to measure it,
+  #2236). A model that does not fit makes `alp_inference_open()` fail
+  with `ALP_ERR_NOMEM`. Ranges are not recycled one by one: the cursor
+  rewinds when the last handle closes.
+- **Jobs are serialised.** One process-wide mutex covers `SetInput` +
+  `Run` in `alp_inference_invoke()`, so threads on different handles wait
+  their turn instead of colliding on the driver. Two models on DRP-AI
+  therefore cost the sum of their latencies.
+- **A failed job is not reported.** The runtime's `Run()` returns void,
+  so a rejected or timed-out job still returns `ALP_OK`. A driver status
+  query is not a cheap fix (it needs a second open of `/dev/drpai0`,
+  which takes the driver semaphore for up to 1000 ms and the
+  shared-memory lock), so the SDK makes none; sanity-check the outputs.
+- **Two processes are not coordinated.** Both would load at the arena
+  base and corrupt each other. Use one process per board for DRP-AI.
+
+### One model per NPU (V2M)
+
+An E1M-V2M has two NPUs, and they are independent hardware (own drivers,
+IRQs and DMA engines), so one model on each can run at the same time:
+open one handle with `.backend = ALP_INFERENCE_BACKEND_DRPAI` and one
+with `.backend = ALP_INFERENCE_BACKEND_DEEPX_DXM1`, and invoke each from
+its own thread. Do not use `ALP_INFERENCE_BACKEND_AUTO` -- it resolves to
+the same backend every time. `examples/v2n/v2n-two-models/` does exactly
+this and prints per-NPU latency and combined FPS.
+
+> **Not bench-verified.** The two backends have never run together. The
+> V2M machine configs already enable both stacks when their layers are
+> present (DEEPX with `meta-deepx-m1`, DRP-AI with `meta-rz-drpai`), so the
+> gap is RUHMI, not a switch: the SDK's DRP-AI backend is only compiled when
+> `RUHMI_DRPAI_TVM_DIR` points at an account-gated Renesas RUHMI checkout
+> (section 4). Without it the image carries the DRP-AI kernel driver and TVM
+> runtime but `libalp_sdk` has no DRP-AI backend, and
+> `.backend = ALP_INFERENCE_BACKEND_DRPAI` fails with `ALP_ERR_NOSUPPORT`
+> (the `alp-sdk` recipe warns at parse time when it sees this combination).
+> On a build with both backends, `ALP_INFERENCE_BACKEND_AUTO` resolves to
+> the DX-M1, so the DRP-AI handle must name `ALP_INFERENCE_BACKEND_DRPAI`
+> explicitly. Shared DDR bandwidth, CPU pre/post-processing, power and
+> thermal under both NPUs at full load are unmeasured.
+>
+> **CPU threads.** The DRP-AI TVM runtime starts a CPU worker pool
+> (`TVM_NUM_THREADS`, `TVM_BIND_THREADS`) and, by upstream TVM's default,
+> pins one worker per core (not confirmed for this build). The 4 A55 cores
+> are also used by dx-rt's worker threads, `dxrtd`, and both models'
+> pre/post-processing, so the example sets `TVM_NUM_THREADS=2` and
+> `TVM_BIND_THREADS=0` unless you already set them. The effect on latency
+> is unmeasured.
+
 ## Related
 
 - [bring-up-v2n.md](bring-up-v2n.md) — base V2N bring-up

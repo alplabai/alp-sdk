@@ -13,6 +13,10 @@
  * which of the DX-M1's three NPU cores a model runs on, and the
  * device's live temperature / clock / voltage telemetry.
  *
+ * @note Linking `libdxrt` (which `libalp_sdk` does on V2M) installs
+ *       SIGSEGV/SIGBUS/SIGABRT handlers that `exit(1)` -- see
+ *       docs/soms/v2n-m1.md.
+ *
  * The DX-M1 hangs off the Cortex-A55's PCIe and is driven by libdxrt
  * on Linux only, so on an M-class (Zephyr) build every call here
  * returns @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC after argument checks.
@@ -68,6 +72,41 @@ typedef struct {
 } alp_deepx_device_status_t;
 
 /**
+ * @brief Open a DEEPX inference handle directly on a chosen set of NPU cores.
+ *
+ * @par Supported silicon: deepx:dx:m1
+ *
+ * Same as @ref alp_inference_open with the DEEPX backend, except the
+ * libdxrt engine is built on @p cores from the start.  No temporary
+ * all-cores engine is created, so no extra one of the DX-M1's three
+ * driver queues is used (see the @warning on
+ * @ref alp_deepx_inference_bind_cores for the 3-core-set limit).  Use it
+ * to run two models side by side, e.g. one on
+ * @ref ALP_DEEPX_NPU_CORES_01 and one on @ref ALP_DEEPX_NPU_CORE_2.
+ * Release with @ref alp_inference_close like any other handle.
+ *
+ * @param[in] cfg    Model and options, as for @ref alp_inference_open.
+ *                   @c backend must be @ref ALP_INFERENCE_BACKEND_AUTO
+ *                   (treated as DEEPX here) or
+ *                   @ref ALP_INFERENCE_BACKEND_DEEPX_DXM1;
+ *                   @c format must be @ref ALP_INFERENCE_MODEL_DXNN.
+ * @param[in] cores  Core set from @ref alp_deepx_npu_cores_t.
+ *
+ * @return  A handle, or NULL with the reason in @ref alp_last_error:
+ *          @ref ALP_ERR_INVAL on NULL @p cfg, out-of-range @p cores, a
+ *               non-DEEPX @c backend or a non-DXNN @c format.
+ *          @ref ALP_ERR_BUSY if @p cores would be this process's fourth
+ *               distinct core set.
+ *          @ref ALP_ERR_NOMEM (also: handle pool full) /
+ *               @ref ALP_ERR_IO / @ref ALP_ERR_NOSUPPORT as for
+ *               @ref alp_inference_open.
+ *          @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC when DEEPX is not built in
+ *               (always, on a Zephyr build).
+ */
+alp_inference_t *alp_deepx_inference_open(const alp_inference_config_t *cfg,
+                                          alp_deepx_npu_cores_t         cores);
+
+/**
  * @brief Run this handle's model on a chosen set of DX-M1 NPU cores.
  *
  * @par Supported silicon: deepx:dx:m1
@@ -77,18 +116,19 @@ typedef struct {
  * passed to @ref alp_inference_open.  Useful to keep two models from
  * sharing cores, or to measure per-core throughput.
  *
- * @warning The @c model_data buffer given to @ref alp_inference_open
- *          must still be valid when this is called.  Output tensors
- *          returned by @ref alp_inference_get_output before this call
- *          point into the old engine and are invalid after it; fetch
- *          them again.  Input buffers from @ref alp_inference_get_input
- *          stay valid.  Blocks until any in-flight invoke on @p inf
- *          finishes.
+ * @warning @c model_data from @ref alp_inference_open must still be
+ *          valid.  Output tensors fetched before this call are invalid
+ *          after it; fetch them again.  Input buffers stay valid.  Blocks
+ *          until any in-flight invoke on @p inf finishes.
  *
- * @warning Processes sharing one DX-M1 must all use the same core set.
- *          On dx-rt 3.2.0 two processes need the `dxrtd` service at all,
- *          and with it, concurrent different bindings make the driver
- *          refuse the second one (-EBUSY) and the daemon abort (#2398).
+ * @warning At most three DISTINCT core sets can be live on one DX-M1
+ *          (driver DX_NORMAL_QUEUE_MAX = 3; same-set engines share a
+ *          queue; @ref ALP_DEEPX_NPU_CORES_ALL is a set).  A fourth makes
+ *          dx-rt abort the process or kill `dxrtd`.  This process refuses
+ *          it with @ref ALP_ERR_BUSY; across processes nothing guards it.
+ *          This call holds the old and new set while it swaps: prefer
+ *          @ref alp_deepx_inference_open.  Two processes on dx-rt 3.2.0
+ *          need the `dxrtd` service (#2398).
  *
  * @param[in] inf    Handle from @ref alp_inference_open opened
  *                   against DEEPX silicon.
@@ -99,6 +139,8 @@ typedef struct {
  *          @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC if @p inf is not
  *               DEEPX-backed (always, on a Zephyr build).
  *          @ref ALP_ERR_NOT_READY if @p inf is not open.
+ *          @ref ALP_ERR_BUSY if the new set would be this process's
+ *               fourth distinct core set; @p inf keeps its binding.
  *          @ref ALP_ERR_IO / @ref ALP_ERR_NOMEM if libdxrt cannot
  *               build the new engine; @p inf keeps its previous
  *               binding and stays usable.

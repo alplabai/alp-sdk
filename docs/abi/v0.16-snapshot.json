@@ -1,5 +1,5 @@
 {
-  "generated": "2026-10-01",
+  "generated": "2026-10-03",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -11002,6 +11002,10 @@
         "alp_deepx_inference_get_status": {
           "hash": "da530b42aff7691c",
           "signature": "alp_status_t alp_deepx_inference_get_status(alp_inference_t *inf, alp_deepx_device_status_t *status_out);"
+        },
+        "alp_deepx_inference_open": {
+          "hash": "46c9049fac034335",
+          "signature": "alp_inference_t * alp_deepx_inference_open(const alp_inference_config_t *cfg, alp_deepx_npu_cores_t cores);"
         }
       },
       "macros": {

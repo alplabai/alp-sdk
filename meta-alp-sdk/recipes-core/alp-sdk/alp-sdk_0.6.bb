@@ -250,6 +250,21 @@ PACKAGECONFIG:append = "${@bb.utils.contains('MACHINE_FEATURES', 'deepx-dxm1', '
 # bblayers.conf. Without this the same misconfiguration surfaces as a
 # cryptic "Nothing PROVIDES dx-rt" here and "Nothing RPROVIDES dx-driver"
 # at do_rootfs.
+# Warn when the image will carry the DRP-AI driver + runtime (ALP_ENABLE_DRPAI)
+# but this SDK build has no DRP-AI backend because RUHMI is not configured:
+# `.backend = ALP_INFERENCE_BACKEND_DRPAI` would then fail with NOSUPPORT.
+python () {
+    if ('rzv2n-family' in (d.getVar('MACHINEOVERRIDES') or '').split(':')
+            and d.getVar('ALP_ENABLE_DRPAI') == '1'
+            and not d.getVar('RUHMI_DRPAI_TVM_DIR')
+            and 'drpai' not in (d.getVar('PACKAGECONFIG') or '').split()):
+        bb.warn("alp-sdk: ALP_ENABLE_DRPAI = \"1\" but RUHMI_DRPAI_TVM_DIR is not "
+                "set, so libalp_sdk is built WITHOUT the DRP-AI backend "
+                "(alp_inference_open(.backend = ALP_INFERENCE_BACKEND_DRPAI) "
+                "returns ALP_ERR_NOSUPPORT). Set RUHMI_DRPAI_TVM_DIR to a "
+                "RUHMI rzv_drp-ai_tvm checkout, see docs/bring-up-drpai-v2n.md.")
+}
+
 python () {
     if d.getVar('ALP_ENABLE_DEEPX_DXM1') == '1' and 'meta-deepx-m1' not in (d.getVar('BBFILE_COLLECTIONS') or '').split():
         bb.fatal("ALP_ENABLE_DEEPX_DXM1 = \"1\" but the meta-deepx-m1 layer is "

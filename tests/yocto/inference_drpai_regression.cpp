@@ -16,8 +16,14 @@
  * MeraDrpRuntimeWrapper.h (see that file's own comment) plus a fake
  * linux/drpai.h for the DRP-AI driver uapi struct/ioctl it also needs.
  *
- * Coverage differs from the ORT/DEEPX regression tests in one load-
- * bearing way: inference_drpai.cpp's open() resolves the DRP-AI
+ * Two kinds of test below.  The device-absent tests run against the
+ * default fake (no /dev/drpai0).  The multi-model tests (arena
+ * placement, serialised Run()) flip drpai_test::g_device_present so the
+ * fake linux/drpai.h answers the area ioctl and open() reaches the fake
+ * MeraDrpRuntimeWrapper; they need a `tar` that accepts an empty
+ * archive (open() extracts the blob with `tar -xf -`).
+ *
+ * Coverage of the device-absent path: inference_drpai.cpp's open() resolves the DRP-AI
  * reserved-memory arena via a REAL `::open("/dev/drpai0", O_RDWR)` +
  * `::ioctl(..., DRPAI_GET_DRPAI_AREA, ...)` (see its own
  * "_drpai_mem_start" doc comment) -- a genuine host syscall, not
@@ -39,13 +45,17 @@
  *   ctest --test-dir build -R alp_test_inference_drpai_regression
  */
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <thread>
+#include <vector>
 
 extern "C" {
 #include "alp/inference.h"
 }
 
+#include "drpai_test_seam.h"
 #include "inference_handle_internal.h"
 #include "test_assert.h"
 
@@ -124,6 +134,125 @@ void test_open_fails_cleanly_when_device_absent()
 	ALP_ASSERT_NULL(h.be_state);
 }
 
+/* An empty tar archive (two zero blocks): what open() stages for the fake. */
+const std::vector<uint8_t> k_empty_tar(1024, 0);
+
+alp_inference_config_t tar_cfg()
+{
+	alp_inference_config_t cfg = base_cfg();
+	cfg.model_data             = k_empty_tar.data();
+	cfg.model_size             = k_empty_tar.size();
+	return cfg;
+}
+
+void fake_device(uint64_t model_bytes)
+{
+	drpai_test::g_device_present = true;
+	drpai_test::g_model_bytes    = model_bytes;
+	drpai_test::g_load_starts.clear();
+	drpai_test::g_max_in_flight = 0;
+	drpai_test::g_in_flight     = 0;
+	drpai_test::g_runs          = 0;
+}
+
+/* Test 2b: two open handles get DISJOINT, ordered, aligned ranges, and a
+ * handle that does not fit is refused with ALP_ERR_NOMEM.  Before the
+ * arena allocator every handle loaded at the arena base and overwrote the
+ * previous one. */
+void test_handles_get_disjoint_arena_ranges()
+{
+	fake_device(0x4000000ull); /* 64 MiB each */
+	alp_inference_config_t cfg = tar_cfg();
+	struct alp_inference   a = {}, b = {};
+
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&a, &cfg), ALP_OK);
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&b, &cfg), ALP_OK);
+	ALP_ASSERT_EQ_INT((int)drpai_test::g_load_starts.size(), 2);
+	ALP_ASSERT_TRUE(drpai_test::g_load_starts[0] == drpai_test::g_area_base);
+	ALP_ASSERT_TRUE(drpai_test::g_load_starts[1] == drpai_test::g_area_base + 0x4000000ull);
+	ALP_ASSERT_TRUE(drpai_test::g_load_starts[1] % (1ull << 20) == 0);
+
+	/* Fill the arena: 512 MiB - 32 MiB pre-processing reserve = 480 MiB
+	 * usable; 2 x 64 MiB used, so 5 more 64 MiB models fit and the 6th
+	 * does not. */
+	struct alp_inference more[6] = {};
+	int                  opened  = 0;
+	alp_status_t         last    = ALP_OK;
+	for (auto &h : more) {
+		last = alp_inference_drpai_open(&h, &cfg);
+		if (last != ALP_OK) {
+			break;
+		}
+		++opened;
+	}
+	ALP_ASSERT_EQ_INT(opened, 5);
+	ALP_ASSERT_EQ_INT(last, ALP_ERR_NOMEM);
+
+	for (int i = 0; i < opened; ++i) {
+		alp_inference_drpai_close(&more[i]);
+	}
+	/* The failed open left no state behind. */
+	ALP_ASSERT_NULL(more[opened].be_state);
+
+	/* Bump allocator: closing a handle does not hand its range back while
+	 * another handle is still open (here b), so the cursor stays where it
+	 * was -- the arena is still full.  It rewinds with the LAST close. */
+	alp_inference_drpai_close(&a);
+	struct alp_inference c = {};
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&c, &cfg), ALP_ERR_NOMEM);
+	alp_inference_drpai_close(&b);
+
+	drpai_test::g_load_starts.clear();
+	struct alp_inference d = {};
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&d, &cfg), ALP_OK);
+	ALP_ASSERT_TRUE(drpai_test::g_load_starts[0] == drpai_test::g_area_base);
+	alp_inference_drpai_close(&d);
+	drpai_test::g_device_present = false;
+}
+
+/* Test 2c: a single model larger than the usable arena is refused. */
+void test_oversized_model_is_refused()
+{
+	fake_device(0x1f000000ull); /* 496 MiB > 480 MiB usable */
+	alp_inference_config_t cfg = tar_cfg();
+	struct alp_inference   h   = {};
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&h, &cfg), ALP_ERR_NOMEM);
+	ALP_ASSERT_NULL(h.be_state);
+	drpai_test::g_device_present = false;
+}
+
+/* Test 2d: invoke() from several threads on several handles never has two
+ * Run()s in flight at once (the fake sleeps inside Run() to widen the
+ * window; without the process-wide lock the high-water mark reaches >1). */
+void test_concurrent_invokes_are_serialised()
+{
+	fake_device(0x1000000ull);
+	alp_inference_config_t cfg  = tar_cfg();
+	struct alp_inference   h[3] = {};
+	for (auto &x : h) {
+		ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&x, &cfg), ALP_OK);
+	}
+
+	std::vector<std::thread> th;
+	for (auto &x : h) {
+		th.emplace_back([&x]() {
+			for (int i = 0; i < 10; ++i) {
+				(void)alp_inference_drpai_invoke(&x);
+			}
+		});
+	}
+	for (auto &t : th) {
+		t.join();
+	}
+	ALP_ASSERT_EQ_INT(drpai_test::g_runs.load(), 30);
+	ALP_ASSERT_EQ_INT(drpai_test::g_max_in_flight.load(), 1);
+
+	for (auto &x : h) {
+		alp_inference_drpai_close(&x);
+	}
+	drpai_test::g_device_present = false;
+}
+
 /* Test 3: num_inputs()/num_outputs() on a never-opened handle report 0,
  * not a crash on a NULL be_state. */
 void test_num_inputs_outputs_zero_when_not_open()
@@ -171,6 +300,9 @@ int main(void)
 	test_open_rejects_null_model_data();
 	test_open_rejects_zero_model_size();
 	test_open_fails_cleanly_when_device_absent();
+	test_handles_get_disjoint_arena_ranges();
+	test_oversized_model_is_refused();
+	test_concurrent_invokes_are_serialised();
 	test_num_inputs_outputs_zero_when_not_open();
 	test_get_input_output_not_ready_when_not_open();
 	test_invoke_not_ready_when_not_open();

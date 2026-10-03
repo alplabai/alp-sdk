@@ -103,6 +103,16 @@
  *   bblayers.conf.)  None of it is restated here; this file only ASKS the
  *   driver.
  *
+ * Several models, one process
+ *   The NPU runs ONE job at a time and the driver has no queue (a second
+ *   DRPAI_START gets -EBUSY).  So (a) each open handle is loaded into its
+ *   own range of the arena -- drpai_arena.h places it after the previous
+ *   one using the runtime's GetLastAddress(), leaving the arena tail free
+ *   for pre-processing, and open() returns ALP_ERR_NOMEM when it no longer
+ *   fits -- and (b) invoke() holds one process-wide mutex across SetInput +
+ *   Run, so threads on different handles take turns.  Two PROCESSES are not
+ *   coordinated: both would load at the arena base.
+ *
  * Dispatcher contract
  *   Mirrors the 7-symbol hook shape the Yocto dispatcher in
  *   inference_yocto.c calls.  The handle layout (struct alp_inference)
@@ -115,6 +125,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <new>
 #include <string>
 #include <tuple>
@@ -134,6 +145,7 @@
 
 #include "MeraDrpRuntimeWrapper.h"
 
+#include "drpai_arena.h"
 #include "drpai_deploy_shapes.h"
 
 extern "C" {
@@ -214,12 +226,16 @@ alp_status_t _drpai_errno_to_status(int err)
  *  opens its own fd and initialises it again.  Cheap enough at open() time,
  *  but do not call this per inference.
  *
+ *  @p out_size receives the arena size (the runtime's GetLastAddress() is
+ *  checked against it so several handles can share the arena -- see
+ *  drpai_arena.h).
+ *
  *  @return ALP_OK on success; otherwise the mapped driver errno --
  *          ALP_ERR_TIMEOUT / ALP_ERR_BUSY when the driver is contended,
  *          ALP_ERR_IO when the node is absent (i.e. &drpai0 was never
  *          enabled) or the ioctl fails for any other reason.
  */
-alp_status_t _drpai_mem_start(uint64_t &out)
+alp_status_t _drpai_mem_start(uint64_t &out, uint64_t &out_size)
 {
 	const int fd = ::open(kDrpAiDevice, O_RDWR | O_CLOEXEC);
 	if (fd < 0) {
@@ -243,7 +259,8 @@ alp_status_t _drpai_mem_start(uint64_t &out)
 		return ALP_ERR_IO;
 	}
 
-	out = area.address;
+	out      = area.address;
+	out_size = area.size;
 	return ALP_OK;
 }
 
@@ -320,6 +337,9 @@ alp_status_t _stage_drpai_blob(const void *data, size_t len, std::string &out_di
 struct DrpaiState {
 	MeraDrpRuntimeWrapper runtime; /* default-constructed */
 	std::string           model_dir;
+	/* True once this handle's model range is committed to the process-wide
+	 * arena (drpai_arena.h); close() gives it back. */
+	bool in_arena = false;
 	/* mkdtemp() staging dir holding the extracted .dat object files; removed
      * (after the runtime is torn down) in close(). Empty if not staged. */
 	std::string staged_dir;
@@ -412,8 +432,8 @@ extern "C" alp_status_t alp_inference_drpai_open(struct alp_inference         *h
      * fails here, without the untar-then-rm_rf round trip.  No constant
      * fallback on failure: guessing this address is a memory-corruption
      * class bug, so a driver that cannot answer fails the open instead. */
-	uint64_t     mem_start = 0;
-	alp_status_t mem       = _drpai_mem_start(mem_start);
+	uint64_t     mem_base = 0, mem_size = 0;
+	alp_status_t mem = _drpai_mem_start(mem_base, mem_size);
 	if (mem != ALP_OK) {
 		return mem;
 	}
@@ -431,14 +451,42 @@ extern "C" alp_status_t alp_inference_drpai_open(struct alp_inference         *h
 	}
 	st->model_dir = st->staged_dir;
 
+	/* Each handle gets its own range of the arena: every handle would
+	 * otherwise load at the base and overwrite the previous one.  The arena
+	 * lock is held across LoadModel() so two concurrent opens cannot be
+	 * handed the same start address. */
+	alp_drpai::Arena            &arena = alp_drpai::arena();
+	std::unique_lock<std::mutex> arena_lk(arena.mutex());
+	uint64_t                     mem_start = 0;
+	if (!arena.begin(mem_base, mem_size, mem_start)) {
+		arena_lk.unlock();
+		std::string dir = st->staged_dir;
+		delete st;
+		_rm_rf(dir);
+		return ALP_ERR_NOMEM; /* arena full: close a model first */
+	}
+
 	/* LoadModel returns false on a missing/corrupt object dir or a DRP-AI
      * memory-mapping failure. */
 	if (!st->runtime.LoadModel(st->model_dir, mem_start)) {
+		arena_lk.unlock();
 		std::string dir = st->staged_dir;
 		delete st; /* tears down the runtime before we remove the dir */
 		_rm_rf(dir);
 		return ALP_ERR_IO;
 	}
+	/* GetLastAddress() is where the model ended; the next handle starts
+	 * after it.  A model that overruns the arena (minus the pre-processing
+	 * reserve) is refused -- its tail would be outside the carve-out. */
+	if (!arena.commit(mem_start, st->runtime.GetLastAddress())) {
+		arena_lk.unlock();
+		std::string dir = st->staged_dir;
+		delete st;
+		_rm_rf(dir);
+		return ALP_ERR_NOMEM;
+	}
+	st->in_arena = true;
+	arena_lk.unlock();
 
 	st->in_info  = st->runtime.GetInputInfo();
 	st->out_info = st->runtime.GetOutputInfo();
@@ -563,9 +611,9 @@ extern "C" alp_status_t alp_inference_drpai_get_output(struct alp_inference   *h
 
 	/* rank/shape: same deploy.json-derived, open()-time-resolved source
      * and same fail-safe (empty == rank 0) as get_input() above. */
-	const std::vector<uint16_t> &shape = st->out_shapes[index];
-	const std::size_t info_bytes = std::get<1>(st->out_info[index]);
-	std::size_t       elem_bytes = 0;
+	const std::vector<uint16_t> &shape      = st->out_shapes[index];
+	const std::size_t            info_bytes = std::get<1>(st->out_info[index]);
+	std::size_t                  elem_bytes = 0;
 	switch (dtype) {
 	case InOutDataType::FLOAT32:
 	case InOutDataType::INT32:
@@ -615,6 +663,11 @@ extern "C" alp_status_t alp_inference_drpai_invoke(struct alp_inference *h_)
 		return ALP_ERR_NOT_READY;
 	}
 
+	/* The NPU runs one job at a time and the driver rejects a concurrent
+	 * DRPAI_START (-EBUSY) rather than queueing it: hold one process-wide
+	 * lock across SetInput + Run so handles on other threads wait. */
+	std::lock_guard<std::mutex> run_lk(alp_drpai::run_mutex());
+
 	/* Push each SDK-owned input into the runtime.  SetInput is overloaded
      * on fp32 vs fp16; pick by the reported input dtype so fp16 models
      * route through the uint16_t overload (raw half-float bytes). */
@@ -629,7 +682,13 @@ extern "C" alp_status_t alp_inference_drpai_invoke(struct alp_inference *h_)
 	}
 
 	/* Run() is void and blocks until DRP-AI completes; it reports
-     * hard faults via its own logging/abort path, not a return code. */
+     * hard faults via its own logging/abort path, not a return code.
+	 * A failed job therefore CANNOT be detected here: this returns ALP_OK
+	 * even if the driver rejected DRPAI_START or timed out.  A driver status
+	 * query is not a cheap fix -- it needs another open() of /dev/drpai0,
+	 * which takes the driver semaphore (up to 1000 ms) and the shared-memory
+	 * lock and can itself fail -- so none is made.  Callers must sanity-check
+	 * outputs (see <alp/inference.h> and docs/bring-up-drpai-v2n.md). */
 	st->runtime.Run();
 	return ALP_OK;
 }
@@ -644,8 +703,12 @@ extern "C" void alp_inference_drpai_close(struct alp_inference *h_)
 	/* MeraDrpRuntimeWrapper owns its DRP-AI mappings + releases them in
      * its dtor (unique_ptr<Impl>); deleting the state tears it down.  Remove
      * the staging dir AFTER the runtime is gone (it may hold the dir open). */
-	std::string dir = st->staged_dir;
+	std::string dir      = st->staged_dir;
+	const bool  in_arena = st->in_arena;
 	delete st;
+	if (in_arena) {
+		alp_drpai::arena().release();
+	}
 	_rm_rf(dir);
 	h->be_state = nullptr;
 }

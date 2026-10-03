@@ -37,9 +37,11 @@
 
 static int g_fail_next_invoke;
 
-alp_status_t alp_inference_deepx_open(struct alp_inference *h, const alp_inference_config_t *cfg)
+alp_status_t
+alp_inference_deepx_open(struct alp_inference *h, const alp_inference_config_t *cfg, unsigned bound)
 {
 	(void)cfg;
+	(void)bound;
 	static int st;
 	h->be_state = &st;
 	return ALP_OK;

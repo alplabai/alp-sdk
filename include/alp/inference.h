@@ -88,7 +88,10 @@ extern "C" {
  *  Vela picks at model-compile time and the runtime dispatches via
  *  the matching driver shim emitted by `scripts/alp_project.py`. */
 typedef enum {
-	ALP_INFERENCE_BACKEND_AUTO    = 0,
+	ALP_INFERENCE_BACKEND_AUTO    = 0, /**< Whichever backend this build prefers.  Fixed at
+					 *   build time: on a Yocto build with both DEEPX and
+					 *   DRP-AI (E1M-V2M) it is always DEEPX_DXM1, so a
+					 *   DRP-AI model must name ::ALP_INFERENCE_BACKEND_DRPAI. */
 	ALP_INFERENCE_BACKEND_CPU     = 1, /**< Portable CPU floor: TFLM reference
 					    *   kernels on M-class/Zephyr, ONNX
 					    *   Runtime on the A55s under Yocto.
@@ -329,6 +332,22 @@ alp_inference_get_output(alp_inference_t *inf, size_t index, alp_inference_tenso
  * Dispatches to the bound backend.  On Ethos-U / DRP-AI / DX-M1
  * backends this offloads to the NPU and blocks the calling thread
  * until the result lands; on the CPU backend it executes in-thread.
+ *
+ * @par One job per NPU at a time
+ * Each NPU runs one job at a time.  Invokes on different handles that
+ * sit on the SAME NPU take turns: DRP-AI3 jobs are serialised by the SDK
+ * with a process-wide lock (the driver rejects a concurrent job instead
+ * of queueing it), and the DX-M1 time-shares between engines.  To get
+ * real concurrency run one model per NPU -- pick the accelerator per
+ * handle with @ref alp_inference_config_t::backend (never
+ * @ref ALP_INFERENCE_BACKEND_AUTO, which always resolves to the same
+ * backend) and invoke from one thread per NPU.  See
+ * `examples/v2n/v2n-two-models/`.
+ *
+ * @par DRP-AI3 failures are not reported
+ * The DRP-AI3 runtime's `Run()` returns void, so a job the driver
+ * rejected or that timed out still returns @ref ALP_OK here.  Check the
+ * output tensors if that matters to the application.
  *
  * @param[in] inf  Handle from @ref alp_inference_open.
  *

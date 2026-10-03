@@ -171,9 +171,51 @@ unit but commented out, and this image runs systemd rather than
 SysVinit, so the bbappend stages it directly rather than re-pinning).
 The `PREFERRED_VERSION_dx-rt = "3.2.0"` pin is unchanged (firmware
 lockstep). `run_model` and `dxrt-cli` still open the device directly
-and work unchanged against the running `dxrtd`; on dx-rt 3.2.0,
-processes sharing one DX-M1 must still bind the same NPU core set
-(see `<alp/ext/deepx/inference.h>`). See #2398.
+and work unchanged against the running `dxrtd`. The real limit is
+**at most 3 distinct NPU core sets live on one DX-M1 at a time**: the
+kernel driver keeps one hardware queue per distinct core set
+(`DX_NORMAL_QUEUE_MAX = 3`), engines on the same set share a queue,
+and "all cores" counts as a set. A fourth set is refused by the
+driver (`-EBUSY`) and dx-rt aborts the process (or kills `dxrtd`)
+instead of failing cleanly; the limit is unchanged in driver
+v2.6.0. Bench evidence (#2398): three processes on `CORE_0`,
+`CORE_0`, `CORE_0` work; three on `CORE_0`/`CORE_1`/`CORE_2` hit
+`Failed to set NPU bound 3 ... ret: -16` and killed `dxrtd`
+(hypothesis, not confirmed: the engine the SDK used to build on all
+cores before rebinding took a queue -- `alp_deepx_inference_open()`
+now builds the engine on the requested cores directly). Inside one
+process the SDK refuses a fourth distinct set with `ALP_ERR_BUSY`;
+across processes nothing guards it. See `<alp/ext/deepx/inference.h>`
+and #2398.
+
+To run two models on the DX-M1 side by side, open them with
+`alp_deepx_inference_open(cfg, cores)` (e.g. `ALP_DEEPX_NPU_CORES_01`
+and `ALP_DEEPX_NPU_CORE_2`). To run one model on the DX-M1 and one on
+the on-die DRP-AI3 at the same time, see
+`examples/v2n/v2n-two-models/` (not bench-verified).
+
+### Running DX-M1 next to other code on a V2M
+
+- **`libdxrt` installs crash handlers at load.** A static initialiser in
+  `libdxrt` registers handlers for `SIGSEGV`, `SIGBUS` and `SIGABRT` that
+  call `exit(1)`. Because `libalp_sdk` links `libdxrt` on V2M, this
+  affects every SDK application there, DX-M1 users or not: a crash or
+  `abort()` in the app, the DRP-AI runtime or an `assert` ends as a silent
+  exit code 1 with no core dump, the `exit()` runs from inside a signal
+  handler (not async-signal-safe, can hang), and any `SIGSEGV`/`SIGABRT`
+  handler the app installed before the library loaded is replaced.
+  Handlers installed after load win, so an app that needs core dumps
+  reinstalls `SIG_DFL` at start-up. Read from the library's behaviour and
+  symbols; the hang risk and the DRP-AI-only-process case are unverified
+  on the bench.
+- **`ALP_INFERENCE_BACKEND_AUTO` means DX-M1 here.** On a build with both
+  NPU backends, AUTO resolves to DEEPX at compile time. A model for the
+  on-die DRP-AI3 must name `.backend = ALP_INFERENCE_BACKEND_DRPAI`.
+- **One model on each NPU at the same time** (DRP-AI3 + DX-M1) is what
+  `examples/v2n/v2n-two-models/` does. The two stacks share no driver,
+  device node, memory carve-out or IRQ; they do share the 4 A55 cores and
+  DDR. Not bench-verified, and its DRP-AI half needs a RUHMI-enabled
+  `libalp_sdk` (see `docs/bring-up-drpai-v2n.md`).
 
 ### DX-M1 NAND firmware provisioning
 
