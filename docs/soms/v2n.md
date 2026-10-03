@@ -422,13 +422,10 @@ Both files are tab-delimited; consume directly or via
 |----------------------------------|-------------------------------------------------------------|
 | `v2n-gd32-bridge-ping`           | Round-trip PING + GET_VERSION on both transports.           |
 | `v2n-board-id-readout`           | SoM EEPROM manifest read + SKU assertion.                   |
-| `v2n-ethernet-dual`              | Bring up both RTL8211FDI PHYs (ET0 + ET1); WoL configuration.|
 | `v2n-eeprom-manifest-dump`       | Hexdump + decode the 128-byte EEPROM manifest.              |
 | `v2n-temp-sensor`                | TMP112 read loop -- classic starter app.                    |
 | `v2n-pwm-fan-control`            | Ramp a GD32-side PWM channel along a five-stop fan curve.   |
 | `v2n-secure-element-sign`        | OPTIGA Trust M probe, Coprocessor UID read and raw APDU session (host library). |
-| `v2n-xspi-flash-readwrite`       | Erase + write + verify one page on the on-module xSPI NOR.  |
-| `v2n-emmc-block-stat`            | Read on-module eMMC geometry + first block via disk-access. |
 | `v2n-gd32-swd-flash`             | Host-driven SWD bit-bang -- IDCODE read, halt, erase/write/verify, reset. |
 
 Plus every cross-family example
