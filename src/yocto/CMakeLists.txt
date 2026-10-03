@@ -64,6 +64,13 @@ get_filename_component(_alp_sdk_yocto_root "${CMAKE_CURRENT_SOURCE_DIR}/../.."
 target_include_directories(alp_sdk PRIVATE ${_alp_sdk_yocto_root}/src)
 unset(_alp_sdk_yocto_root)
 
+option(ALP_SDK_V2N_DOORBELL_RSP_CH8
+    "RZ/V2N: acknowledge the CM33 -> CA55 OpenAMP doorbell on Renesas' rsp_ch8_ns line (GIC_SPI 385) instead of MHU-B SWINT unit 12 (GIC_SPI 404). Must match the CM33 firmware (CONFIG_ALP_V2N_DOORBELL_RSP_CH8) and the kernel devicetree (ALP_V2N_DOORBELL_SPI).  Bench-pending; default OFF (404)."
+    OFF)
+if(ALP_SDK_V2N_DOORBELL_RSP_CH8)
+    target_compile_definitions(alp_sdk PRIVATE ALP_V2N_DOORBELL_RSP_CH8=1)
+endif()
+
 option(ALP_SDK_USE_DEEPX_DXM1
     "Wire the DEEPX DX-M1 backend hook (src/yocto/inference_deepx.cpp) for \
 <alp/inference.h>.  Enable on e1m-x-v2n-m1 builds.  Links the proprietary \

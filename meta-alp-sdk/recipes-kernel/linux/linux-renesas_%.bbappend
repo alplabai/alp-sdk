@@ -79,7 +79,31 @@ SRC_URI:append = " \
     file://0016-media-rzg2l-cru-add-Y10-Y8-greyscale-formats.patch \
     file://0017-media-rzg2l-csi2-honour-lane-polarities-via-SWAPCTL.patch \
     file://uio.cfg \
+    file://e1m-v2n-doorbell.dtsi \
 "
+
+# CM33 -> CA55 doorbell SPI (decision Q52): "404" = MHU-B SWINT unit 12, the
+# path bench-proven in #697 (default until the bench proves 385); "385" =
+# Renesas' documented rsp_ch8_ns.  This rewrites e1m-v2n-doorbell.dtsi; the
+# CM33 firmware (CONFIG_ALP_V2N_DOORBELL_RSP_CH8) and libalp_sdk
+# (ALP_SDK_V2N_DOORBELL_RSP_CH8, alp-sdk recipe) must be built to match --
+# one bitbake variable drives all three, offsets live in
+# include/alp/protocol/v2n_mhu_doorbell.h.
+ALP_V2N_DOORBELL_SPI ??= "404"
+
+# CM33 remoteproc, OPT-IN until the bench proves attach + stop/start/reload
+# (docs/rzv2n-m33-secure-boot.md "Lifecycle").  "1" applies the Renesas RZ
+# remoteproc driver (0019/0020, GPL-2.0, Renesas authorship kept), the Alp
+# changes on top (0018 CPG syscon, 0021 userspace-owned vrings),
+# remoteproc.cfg, and the real cm33_rproc node in e1m-v2n-remoteproc.dtsi.
+ALP_V2N_REMOTEPROC ??= "0"
+SRC_URI += "${@' file://0018-arm64-dts-r9a09g056-make-the-CPG-a-syscon.patch file://0019-dt-bindings-remoteproc-add-Renesas-RZ-remoteproc.patch file://0020-remoteproc-add-Renesas-RZ-remoteproc-driver.patch file://0021-remoteproc-rz-let-userspace-own-the-vrings.patch file://remoteproc.cfg file://e1m-v2n-remoteproc.dtsi' if d.getVar('ALP_V2N_REMOTEPROC') == '1' else ''}"
+python () {
+    if d.getVar('ALP_V2N_DOORBELL_SPI') not in ('404', '385'):
+        bb.fatal("ALP_V2N_DOORBELL_SPI must be 404 or 385")
+    if d.getVar('ALP_V2N_REMOTEPROC') not in ('0', '1'):
+        bb.fatal("ALP_V2N_REMOTEPROC must be 0 or 1")
+}
 
 # 0016 (CRU greyscale, #2612): rzg2l-csi2 had no Y10/Y8 entry, so a mono
 # sensor's Y10_1X10 (OV9281 via ov9282) read back as UYVY8_1X16 on the
@@ -222,7 +246,23 @@ do_configure:prepend() {
         "${WORKDIR}/e1m-v2m-deepx.dtsi" \
         "${WORKDIR}/e1m-v2n101-x-evk.dts" \
         "${WORKDIR}/e1m-v2m101-x-evk.dts" \
+        "${WORKDIR}/e1m-v2n-doorbell.dtsi" \
         "${ALP_DTS_DST}/"
+    sed -i 's/^#define ALP_V2N_DOORBELL_SPI .*/#define ALP_V2N_DOORBELL_SPI ${ALP_V2N_DOORBELL_SPI}/' \
+        "${ALP_DTS_DST}/e1m-v2n-doorbell.dtsi"
+
+    # CM33 remoteproc node: real body only when opted in (same branch-on-the-
+    # variable rule as the DRP-AI block below).
+    if [ "${ALP_V2N_REMOTEPROC}" = "1" ]; then
+        install -m 0644 "${WORKDIR}/e1m-v2n-remoteproc.dtsi" "${ALP_DTS_DST}/"
+    else
+        printf '%s\n' \
+            '/* CM33 remoteproc node not claimed: set ALP_V2N_REMOTEPROC = "1".' \
+            ' * See e1m-v2n-remoteproc.dtsi in' \
+            ' * meta-alp-sdk/recipes-kernel/linux/linux-renesas/. */' \
+            > "${ALP_DTS_DST}/e1m-v2n-remoteproc.dtsi"
+        chmod 0644 "${ALP_DTS_DST}/e1m-v2n-remoteproc.dtsi"
+    fi
 
     # Opt-in CAM0 sources (#1149): the wrapper dts + fragment must sit next
     # to the board dts or the cam0 dtb has no rule to build.

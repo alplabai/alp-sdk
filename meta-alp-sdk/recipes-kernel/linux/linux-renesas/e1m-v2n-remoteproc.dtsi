@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+/*
+ * ALP E1M-V2N SoM -- Linux remoteproc for the Cortex-M33 system manager.
+ *
+ * TF-A/BL2 starts the CM33 at power-on from the xSPI image (factory
+ * default, docs/rzv2n-m33-secure-boot.md).  The Renesas RZ remoteproc
+ * driver (patches 0019/0020, Alp changes 0021) probes with the CM33
+ * already out of reset, so the rproc comes up DETACHED:
+ *
+ *     echo start > /sys/class/remoteproc/remoteproc0/state    # attach
+ *     echo stop  > /sys/class/remoteproc/remoteproc0/state    # CM33 off
+ *
+ * and, after `echo <name>.elf > .../firmware`, `echo start` reloads it.
+ *
+ * Installed by the linux-renesas bbappend only when ALP_V2N_REMOTEPROC is
+ * "1" (it also applies the patches and remoteproc.cfg); otherwise a
+ * comment-only stub of the same name is installed.
+ *
+ * Notes on what is deliberately NOT here (see docs/rzv2n-m33-secure-boot.md):
+ *   - no "cm33_ddr" reg: Renesas maps A55 0x40000000..0x43EFFFFF, which on
+ *     this SoM lies in the 128 MB secure DRAM area ahead of memory@48000000,
+ *     and `stop` memsets every carveout.  The CM33 image lives in SRAM.
+ *   - no renesas,rz-rsctbl: alp,rz-userspace-ipc keeps the resource table
+ *     away from the kernel; the userspace OpenAMP master (UIO) reads it.
+ *   - no mailbox: the driver's kick op is a stub; the doorbell is the
+ *     mhu-uio node in e1m-v2n-som.dtsi.
+ */
+/ {
+	cm33_rproc: remoteproc-cm33 {
+		compatible = "renesas,rz-cm33";
+		reg = <0x0 0x08000000 0x0 0x100000>;
+		reg-names = "cm33_sram";
+		/* The OpenAMP window is zeroed on `stop`; close RPC clients first. */
+		memory-region = <&openamp_reserved>;
+		renesas,rz-cpg = <&cpg>;
+		renesas,rz-sysc = <&sys>;
+		/* BL22_S_VECTOR / non-secure vector (TF-A BL2 M33 boot). */
+		renesas,rz-bootaddrs = <0x08003000>, <0x18003000>;
+		alp,rz-userspace-ipc;
+		power-domains = <&cpg>;
+		status = "okay";
+	};
+};

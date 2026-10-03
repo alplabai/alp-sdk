@@ -1,0 +1,132 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tu Duong <tu.duong.zy@renesas.com>
+Date: Sat, 3 Oct 2026 10:00:00 +0200
+Subject: [PATCH] dt-bindings: remoteproc: Add bindings for RZ remoteproc driver
+
+Imported unmodified from the Renesas RZ Multi-OS Package v4.2.0
+(r01an8260ej0420), meta-rz-features/meta-rz-multi-os/meta-rzv/meta-rzv2n/recipes-kernel/linux/linux-renesas/0004-Add-bindings-for-RZ-remoteproc-driver.patch.
+The binding file is SPDX (GPL-2.0 OR BSD-2-Clause); Renesas Electronics
+authorship is kept.  Alp changes to it are in 0021.
+---
+diff --git a/Documentation/devicetree/bindings/remoteproc/renesas,rz-rproc.yaml b/Documentation/devicetree/bindings/remoteproc/renesas,rz-rproc.yaml
+new file mode 100644
+index 000000000000..d64c64b312c6
+--- /dev/null
++++ b/Documentation/devicetree/bindings/remoteproc/renesas,rz-rproc.yaml
+@@ -0,0 +1,113 @@
++# SPDX-License-Identifier: (GPL-2.0 OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: "http://devicetree.org/schemas/remoteproc/renesas,rz-rproc.yaml#"
++$schema: "http://devicetree.org/meta-schemas/core.yaml#"
++
++title: Renesas RZ remote processor controller bindings
++
++description:
++  This document defines the binding for the remoteproc component that loads and
++  boots firmwares on the RZ/V2N chipset.
++
++properties:
++  compatible:
++    const: renesas,rz
++
++  reg:
++    description:
++      Address ranges of the SRAM and DDR memories used by the remote
++      processor.
++    maxItems: 3
++
++  reg-names:
++    maxItems: 3
++
++  memory-region:
++    description:
++      List of phandles to the reserved memory regions associated with the
++      remoteproc device. This is variable and describes the memories shared with
++      the remote processor (e.g. remoteproc firmware and carveouts, rpmsg
++      vrings, ...).
++      (see ../reserved-memory/reserved-memory.txt)
++
++  renesas,rz-cpg:
++    description: phandle to regmap of Clock Pulse Generator (CPG)
++    maxItems: 1
++
++  renesas,rz-sysc:
++    description: phandle to regmap of System Controller (SYSC)
++    maxItems: 1
++
++  renesas,rz-bootaddrs:
++    description: remote processor's boot addresses. 
++        1st cell: secure vector address
++        2nd cell: non-secure vector address
++    maxItems: 2
++
++  renesas,rz-autoboot:
++    $ref: /schemas/types.yaml#/definitions/flag
++    description:
++      If defined, when remoteproc is probed, it loads the default firmware and
++      starts the remote processor.
++
++  renesas,rz-rsctbl:
++    description:
++      Physical address of resource table. When remote processor is already powered
++      up by u-boot, op-tee..., this value is used to parse the loaded resource table.
++    maxItems: 1
++
++  power-domains:
++    maxItems: 1
++
++required:
++  - compatible
++  - reg
++  - memory-region
++  - renesas,rz-cpg
++  - renesas,rz-sysc 
++  - renesas,rz-bootaddrs
++  - renesas,rz-rsctbl
++  - power-domains
++
++additionalProperties: false
++
++examples:
++  - |
++      #include <dt-bindings/interrupt-controller/arm-gic.h>
++      #include <dt-bindings/clock/r9a09g056-cpg.h>
++
++      reserved-memory {
++        vdev0vring0: vdev0vring0@0x43000000 {
++                compatible = "shared-dma-pool";
++                reg = <0x0 0x43000000 0x0 0x50000>;
++                no-map;
++        };
++
++        vdev0vring1: vdev0vring1@0x43050000 {
++                compatible = "shared-dma-pool";
++                reg = <0x0 0x43050000 0x0 0x50000>;
++                no-map;
++        };
++
++        vdev0buffer: vdev0buffer@0x43200000 {
++                compatible = "shared-dma-pool";
++                reg = <0x0 0x43200000 0x0 0x300000>;
++                no-map;
++        };
++      }
++
++      cm33_rproc: cm33 {
++        compatible = "renesas,rz-cm33";
++        reg = <0x0 0x08000000 0x0 0x000FFFFF>,
++              <0x0 0x40000000 0x0 0x03F00000>;
++        reg-names = "cm33_sram", "cm33_ddr";
++        memory-region = <&vdev0vring0>, <&vdev0vring1>, <&vdev0buffer>;
++        renesas,rz-cpg = <&cpg>;
++        renesas,rz-sysc = <&sysc>;
++        renesas,rz-bootaddrs = <0x08003000>, <0x18003000>;
++        renesas,rz-rsctbl = <0x42F00000>;
++        power-domains = <&cpg>;
++        status = "okay";
++      };
++    
+\ No newline at end of file
+-- 
+2.43.0

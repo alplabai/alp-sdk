@@ -51,6 +51,12 @@ EXTRA_OECMAKE = "-DALP_SDK_BUILD_SHARED=ON            \
                  -DALP_OS=yocto                       \
                  -DALP_SDK_MODEL_ZCBOR_REQUIRED=ON"
 
+# CM33 -> CA55 doorbell line (docs/rzv2n-m33-secure-boot.md): the SAME
+# ALP_V2N_DOORBELL_SPI the linux-renesas bbappend rewrites into the devicetree
+# ("404" default = MHU-B SWINT unit 12, "385" = Renesas rsp_ch8_ns).
+ALP_V2N_DOORBELL_SPI ??= "404"
+EXTRA_OECMAKE += "${@'-DALP_SDK_V2N_DOORBELL_RSP_CH8=ON' if d.getVar('ALP_V2N_DOORBELL_SPI') == '385' else ''}"
+
 # Regenerate the CMake toolchain file as a do_configure prefunc.
 #
 # cmake.bbclass sequences its generator as `addtask generate_toolchain_file

@@ -13,7 +13,9 @@
  * (1/4/16/64 B) + the GHSA-xhm8 external concurrent-close all pass end-to-end.
  * The doorbell is asymmetric -- forward A55->M33 via R_MHU_NS5.MSG (M33 NVIC
  * IRQ 293), reverse M33->A55 via a CA55-routed MHU-B SWINT unit (12 -> GIC_SPI
- * 404); see mailbox_notify() below and yocto_uio_drv.c for the register map.
+ * 404) or, with CONFIG_ALP_V2N_DOORBELL_RSP_CH8, Renesas' rsp_ch8_ns (GIC_SPI
+ * 385, bench-pending); see mailbox_notify() below and
+ * <alp/protocol/v2n_mhu_doorbell.h> for the register map.
  *
  * Adapted near-verbatim from Renesas's own sample --
  * zephyr/samples/boards/renesas/openamp_linux_zephyr/src/main_remote.c --
@@ -59,6 +61,8 @@
 
 #include <metal/device.h>
 #include <openamp/open_amp.h>
+
+#include <alp/protocol/v2n_mhu_doorbell.h>
 
 #include "resource_table.h"
 
@@ -248,20 +252,21 @@ static void new_service_cb(struct rpmsg_device *rdev, const char *name, uint32_t
  * in shared memory -- the mailbox only ever carries a wakeup, never
  * data). */
 /* #697 cycle 10 (GIC-measured): the A55 GIC only receives the MHU-B CA55-routed
- * SWINT units 12-15 (-> INTID 436-439 = GIC_SPI 404-407); the NS-channel RSP
- * interrupt the FSP/mbox send raises (R_MHU_NS5.RSP) routes to NO A55 GIC line,
- * so a reply sent that way is never delivered.  Ring the A55 by asserting SWINT
- * unit 12's SET directly instead.  (Forward A55->M33 is unaffected: it uses
- * R_MHU_NS5.MSG -> the M33's own NVIC IRQ 293.)  SWINT units live in the MHU-B
- * block at +0x800, 0x10 stride, STS/SET/CLR @ +0x00/04/08; unit 12 SET =
- * CM33 0x50480000 + 0x800 + 12*0x10 + 0x04. */
-#define ALP_M33_MHU_SWINT12_SET (0x504808C4U)
+ * SWINT units 12-15 (-> INTID 436-439 = GIC_SPI 404-407); the RSP interrupt of
+ * NS slot 5, which the FSP/mbox send raises, routes to NO A55 GIC line, so a
+ * reply sent that way is never delivered.  Ring the A55 by writing the
+ * doorbell's SET register directly instead.  (Forward A55->M33 is unaffected:
+ * it uses R_MHU_NS5.MSG -> the M33's own NVIC IRQ 293.)  Which register that
+ * is -- SWINT unit 12 SET (default) or RSP_INT_SET of NS slot 8 with
+ * CONFIG_ALP_V2N_DOORBELL_RSP_CH8 -- and its offset come from
+ * <alp/protocol/v2n_mhu_doorbell.h>; the A55 must be built for the same line. */
+#define ALP_M33_DOORBELL_SET (ALP_V2N_MHU_B_CM33_BASE + ALP_V2N_DOORBELL_SET_OFF)
 
 int mailbox_notify(void *priv, uint32_t id)
 {
 	ARG_UNUSED(priv);
 	ARG_UNUSED(id);
-	*(volatile uint32_t *)ALP_M33_MHU_SWINT12_SET = 1U;
+	*(volatile uint32_t *)ALP_M33_DOORBELL_SET = 1U;
 	return 0;
 }
 
