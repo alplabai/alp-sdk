@@ -638,7 +638,7 @@ expected value; **data** = a data path was exercised end to end.
 | clock generator | `clkgen_verify`: full OTP image (data) | unchanged | - |
 | secure element | I2C scan with a wake retry (answers) | `secure_element`: protocol-level state read (ID) | - |
 | GD32 bridge | `gd32_flash`: md5 readback, `GET_VERSION` (data) | `gd32_bridge`: protocol version with CRC; `gd32_gpiochip` (ID) | - |
-| boot mode (debug strap) | census: `soc_sys_lsi_mode`, `soc_boot_debug_en`, `soc_md_boot`, `soc_boot_device`; `cold_boot_test` refuses a debug-mode unit (data) | `boot_mode` (value) | - |
+| boot mode (debug strap) | census: `soc_sys_lsi_mode`, `soc_boot_debug_en`, `soc_md_boot`, `soc_boot_device`, `soc_boot_cpu`; `cold_boot_test` refuses a debug-mode unit (data) | `boot_mode` (value) | - |
 | SoC thermal zones | not tested | `thermal` (value) | - |
 | CM33 | not tested | `cm33_firmware` (informational: not blank; **blocking with an md5 compare once the bundle carries a `cm33` component**), `cm33_running` (the beacon counter advances; informational, **blocking once the bundle carries a `cm33` component**), `openamp_uio` (answers) | - |
 | USB host | not tested | `usb_host`: controllers probed (answers); `usb_device` (data) | `usb_stick` |
@@ -719,7 +719,7 @@ bounds for a hung command, not the expected time.
 | `emmc_mode` | mmc `ios` in debugfs, `dmesg` | timing `mmc HS200`, no `mmc_select_hs200 failed` | 5 s | 0.1 s |
 | `emmc_read` | drop the page cache, then `dd` 64 MiB from 1 GiB into the user area | `64+0 records out`, >= 20 MiB/s | 20 s | 2 s |
 | `xspi` | `/proc/mtd`, spi-nor `jedec_id` | `mtd0` and `mtd1` with a size, a real JEDEC ID | 5 s | 0.1 s |
-| `boot_mode` | `SYS_LSI_MODE` word (address and decode from the SoC description `boot_strap`) | debug-enable bit (MD_BOOT3) = `boot_mode.debug_enable` (0), `MD_BOOT[1:0]` device = `boot_mode.boot_device` (`xspi`) | 5 s | 0.1 s |
+| `boot_mode` | `SYS_LSI_MODE` word (address and decode from the SoC description `boot_strap`) | debug-enable bit (MD_BOOT3) = `boot_mode.debug_enable` (0), `MD_BOOT[1:0]` device = `boot_mode.boot_device` (`xspi`), bit 10 boot CPU = `boot_mode.boot_cpu` (`ca55`) | 5 s | 0.1 s |
 | `eth_phy_id` | MII registers 2/3 of both ports (python3 ioctl helper) | both `0x001cc916` | 5 s | 0.3 s |
 | `eth_mac` | `/sys/class/net/{if}/address` | both = the MACs derived from the serial | 5 s | 0.1 s |
 | `eth0_link`, `eth1_link` | carrier, speed, duplex, `ping -c 2 -I {if}` the gateway, RX counter | carrier, 100 or 1000 Mbit/s, full duplex, ping ok, >= 2 packets received on that port | 10 s | 1.5 s |
@@ -906,7 +906,7 @@ script's runner (framing, lanes, the timeout kill) on the host's own `sh`.
 
 ## Debug-mode strap (MD_BOOT3)
 
-A production SoM boots in normal mode: MD_BOOT3 low. `SYS_LSI_MODE` (`0x10430300`, RZ/V2N hardware manual R01UH1071EJ0120 4.3.3.2.75) latches the pins on the rising edge of `PRST_N`: bit 9 `STAT_DEBUGEN` is 1 in debug mode, bits 2..0 are `MD_BOOT[2:0]`. The address, bit and device table are the `boot_strap` block of `metadata/socs/renesas/rzv2n/n44.json`; the expected values are `boot_mode` in `scripts/provision/functest-expect-v2n.yaml`. `ship_check` blocks a unit whose `soc_boot_debug_en` is `1`. All three SYS registers (`0x300`, `0x304`, `0x308`) are confirmed against the manual; the census no longer marks them unverified. Decoded fields of `SYS_LSI_MODE` (figure of 4.3.3.2.75): `[2:0] STAT_MD_BOOT` and `[9] STAT_DEBUGEN` are judged; `[16] SEC_EN`, `[13] STAT_MD_CLKS`, `[12:11] STAT_BOOTPLLCA55` and `[10] STAT_BOOTSELECTER` are not (`0x3c06` has bit 10 set, which the manual labels CM55 cold boot, and the unit boots normally with it; no criterion is defined). `cold_boot_test` and `functional_test` judge the same word through `functest.judge_boot_mode`.
+A production SoM boots in normal mode: MD_BOOT3 low. `SYS_LSI_MODE` (`0x10430300`, RZ/V2N hardware manual R01UH1071EJ0120 4.3.3.2.75) latches the pins on the rising edge of `PRST_N`: bit 9 `STAT_DEBUGEN` is 1 in debug mode, bits 2..0 are `MD_BOOT[2:0]`. The address, bit and device table are the `boot_strap` block of `metadata/socs/renesas/rzv2n/n44.json`; the expected values are `boot_mode` in `scripts/provision/functest-expect-v2n.yaml`. `ship_check` blocks a unit whose `soc_boot_debug_en` is `1`. All three SYS registers (`0x300`, `0x304`, `0x308`) are confirmed against the manual; the census no longer marks them unverified. Decoded fields of `SYS_LSI_MODE` (figure of 4.3.3.2.75): `[2:0] STAT_MD_BOOT`, `[9] STAT_DEBUGEN` and `[10] STAT_BOOTSELECTER` are judged; `[10] STAT_BOOTSELECTER` (latched from the BOOTSELCPU pin) is judged too: 1 = CA55 boot (the manual labels it CM55 cold boot) is the intended strap, the SoM boots CA55-first like the EVK default (`0x3c06`), so `boot_mode.boot_cpu` is `ca55` and a word with bit 10 cleared (`0x3806`, census `soc_boot_cpu: cm33`) is refused. The expectation is "for now": a private overlay overrides `boot_mode.boot_cpu` per product (e.g. `cm33` makes `0x3806` pass). `[16] SEC_EN`, `[13] STAT_MD_CLKS` and `[12:11] STAT_BOOTPLLCA55` are not judged (no criterion is defined). `cold_boot_test` and `functional_test` judge the same word through `functest.judge_boot_mode`.
 
 Bench steps (not yet run on hardware), in order:
 

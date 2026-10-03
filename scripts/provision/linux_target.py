@@ -51,14 +51,17 @@ def sys_lsi_spec(silicon: str) -> dict:
 
 def decode_lsi_mode(value: int, spec: dict) -> dict[str, str]:
     """Ledger keys decoded from a SYS_LSI_MODE read: the latched debug-mode strap (MD_BOOT3,
-    1 = debug mode), MD_BOOT[2:0] and the boot device MD_BOOT[1:0] selects."""
+    1 = debug mode), MD_BOOT[2:0], the boot device MD_BOOT[1:0] selects and the boot CPU the BOOTSELCPU strap selects."""
     m = spec["strap_word"]
     md = (value >> m["boot_pins_shift"]) & ((1 << m["boot_pins_width"]) - 1)
     dev = md & ((1 << m["boot_device_pins_width"]) - 1)
     names = m["boot_device_names"]
+    cpus = m["boot_cpu_names"]
+    cpu = (value >> m["boot_cpu_bit"]) & 1
     return {"soc_boot_debug_en": str((value >> m["debug_enable_bit"]) & 1),
             "soc_md_boot": f"{md:#x}",
-            "soc_boot_device": names[dev] if dev < len(names) else "unknown"}
+            "soc_boot_device": names[dev] if dev < len(names) else "unknown",
+            "soc_boot_cpu": cpus[cpu] if cpu < len(cpus) else "unknown"}
 
 
 ACT88760_ADDR = 0x25

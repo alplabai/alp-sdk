@@ -715,9 +715,11 @@ def _census_responses(array: bytes = b"\xff" * 128):
 def test_decode_lsi_mode_seeded_debug_value():
     spec = lt.sys_lsi_spec("renesas:rzv2n:n44")
     assert spec["registers"]["soc_sys_lsi_mode"] == "0x10430300"
-    assert lt.decode_lsi_mode(0x3C06, spec) == {"soc_boot_debug_en": "0", "soc_md_boot": "0x6", "soc_boot_device": "xspi"}
+    assert lt.decode_lsi_mode(0x3C06, spec) == {"soc_boot_debug_en": "0", "soc_md_boot": "0x6", "soc_boot_device": "xspi",
+                                          "soc_boot_cpu": "ca55"}
     # the same unit with MD_BOOT3 strapped high (bit 9) and MD_BOOT[1:0] = eMMC
-    assert lt.decode_lsi_mode(0x3E05, spec) == {"soc_boot_debug_en": "1", "soc_md_boot": "0x5", "soc_boot_device": "emmc"}
+    assert lt.decode_lsi_mode(0x3E05, spec) == {"soc_boot_debug_en": "1", "soc_md_boot": "0x5", "soc_boot_device": "emmc", "soc_boot_cpu": "ca55"}
+    assert lt.decode_lsi_mode(0x3806, spec)["soc_boot_cpu"] == "cm33"      # bit 10 cleared
 
 
 def test_census_collects_ledger_keys_read_only():

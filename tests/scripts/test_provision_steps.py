@@ -1387,7 +1387,7 @@ def test_fip_write_leaves_the_cm33_region_untouched(tmp_path):
     assert blocks * 65536 <= gates.CM33_REGION_OFFSET                       # the erase stops below the region
 
 
-@pytest.mark.parametrize("word,why", [("0X3e06", "debug mode"), ("0X3c05", "emmc")])
+@pytest.mark.parametrize("word,why", [("0X3e06", "debug mode"), ("0X3c05", "emmc"), ("0X3806", "boot_cpu=cm33")])
 def test_cold_boot_refuses_a_wrong_boot_strap_word(tmp_path, word, why):
     board = Board(act_0x10=0x08)
     board.host = "10.0.0.2"
@@ -1402,6 +1402,8 @@ def test_cold_boot_refuses_a_wrong_boot_strap_word(tmp_path, word, why):
     cb = steps.run_steps(ctx, only=["cold_boot_test"], force=["cold_boot_test"])[-1]
     assert cb.status != "done" and "not the expected boot mode" in cb.detail, cb.detail
     assert (ledger_out.DEBUG_MODE_REASON in cb.detail) == (why == "debug mode")
+    if why == "boot_cpu=cm33":
+        assert why in cb.detail
 
 
 def test_cold_boot_without_a_boot_strap_description_is_a_problem_not_a_crash(tmp_path):

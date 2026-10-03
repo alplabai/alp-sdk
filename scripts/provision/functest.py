@@ -137,7 +137,7 @@ def _want(x: dict, key: str):
 
 
 def describe_boot_mode(got: dict) -> str:
-    return f"debug_en={got['soc_boot_debug_en']} boot_device={got['soc_boot_device']} md_boot={got['soc_md_boot']}"
+    return f"debug_en={got['soc_boot_debug_en']} boot_device={got['soc_boot_device']} md_boot={got['soc_md_boot']} boot_cpu={got['soc_boot_cpu']}"
 
 
 def judge_boot_mode(word: int, silicon: str, x: dict) -> tuple[dict, bool]:
@@ -147,7 +147,8 @@ def judge_boot_mode(word: int, silicon: str, x: dict) -> tuple[dict, bool]:
     got = lt.decode_lsi_mode(word, lt.sys_lsi_spec(silicon))
     # int(): an overlay may write the flag as bool or 0/1
     ok = (int(got["soc_boot_debug_en"]) == int(_want(x, "boot_mode.debug_enable"))
-          and got["soc_boot_device"] == _want(x, "boot_mode.boot_device"))
+          and got["soc_boot_device"] == _want(x, "boot_mode.boot_device")
+          and got["soc_boot_cpu"] == _want(x, "boot_mode.boot_cpu"))
     return got, ok
 
 

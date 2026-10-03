@@ -607,6 +607,18 @@ def test_a_private_overlay_can_make_a_check_blocking_or_informational(tmp_path):
     assert res.evidence["test_functional"] == "fail (rtc_backup_mode, i2c_tps628640_44)"   # eth_phy_id is informational now
 
 
+def test_boot_cpu_strap_is_judged_and_overridable(tmp_path):
+    ctx, _ = _setup(tmp_path, {})
+    si = str(ctx.preset["silicon"])
+    x = functest.load_expect()
+    assert functest.judge_boot_mode(0x3C06, si, x)[1]
+    got, ok = functest.judge_boot_mode(0x3806, si, x)                      # bit 10 cleared
+    assert not ok and got["soc_boot_cpu"] == "cm33" and "boot_cpu=cm33" in functest.describe_boot_mode(got)
+    over = tmp_path / "over.yaml"
+    over.write_text("boot_mode: {boot_cpu: cm33}\n", encoding="utf-8")
+    assert functest.judge_boot_mode(0x3806, si, functest.load_expect(over))[1]
+
+
 def test_boot_mode_stays_blocking_when_an_overlay_lists_it_informational_and_takes_a_bool_flag(tmp_path):
     over = tmp_path / "expect.yaml"
     over.write_text("informational: [boot_mode]\nboot_mode: {debug_enable: false}\n", encoding="utf-8")

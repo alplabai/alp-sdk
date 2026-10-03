@@ -264,7 +264,7 @@
   },
 
   "boot_strap": {
-    "source": "RZ/V2N Hardware Manual R01UH1071EJ0120 Rev.1.20, 4.3.3.2.75-77 (SYS_LSI_MODE/DEVID/PRR), 1.9.3 (debug mode). SYS_LSI_MODE fields: [2:0] STAT_MD_BOOT (device = MD_BOOT[1:0]), [9] STAT_DEBUGEN (MD_BOOT3), [10] STAT_BOOTSELECTER (BOOTSELCPU), [12:11] STAT_BOOTPLLCA55, [13] STAT_MD_CLKS, [16] SEC_EN; only [9] and [2:0] are judged",
+    "source": "RZ/V2N Hardware Manual R01UH1071EJ0120 Rev.1.20, 4.3.3.2.75-77 (SYS_LSI_MODE/DEVID/PRR), 1.9.3 (debug mode). SYS_LSI_MODE fields: [2:0] STAT_MD_BOOT (device = MD_BOOT[1:0]), [9] STAT_DEBUGEN (MD_BOOT3), [10] STAT_BOOTSELECTER (BOOTSELCPU), [12:11] STAT_BOOTPLLCA55, [13] STAT_MD_CLKS, [16] SEC_EN; [9], [2:0] and [10] are judged; [10]: 1 = CA55 boot (manual labels it CM55 cold boot) is the intended strap",
     "registers": {
       "soc_sys_lsi_mode": "0x10430300",
       "soc_lsi_devid": "0x10430304",
@@ -275,7 +275,9 @@
       "boot_pins_shift": 0,
       "boot_pins_width": 3,
       "boot_device_pins_width": 2,
-      "boot_device_names": ["esd", "emmc", "xspi", "scif-download"]
+      "boot_device_names": ["esd", "emmc", "xspi", "scif-download"],
+      "boot_cpu_bit": 10,
+      "boot_cpu_names": ["cm33", "ca55"]
     }
   },
   "notes": [
