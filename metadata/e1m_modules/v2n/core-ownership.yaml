@@ -412,8 +412,9 @@ assignable:
 # Resources with no row in v2n/renesas-peripheral-map.tsv (so they cannot be
 # a `core_ownership` entry above, which must match an emitted row) are
 # recorded under `a55_only_resources` instead.  Nothing consumes this list
-# yet: scripts/check_amp_pad_claims.py only compares Linux DT port-pad claims
-# against `core: "m33"` rows and has no IRQ or address awareness, so a CM33
+# yet: scripts/check_amp_pad_claims.py only compares port-pad claims (Linux DT
+# vs CM33-resolved pads, enabled CM33 board nodes vs A55-resolved pads) and
+# has no IRQ or address awareness, so a CM33
 # claim of the DRP-AI IRQSELs below is NOT caught by any gate today.
 a55_only_resources:
   - resource: "DRP-AI3 AI-MAC + DRP0"
