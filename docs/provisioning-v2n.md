@@ -72,7 +72,10 @@ python scripts/provision_som.py status --sku <SKU> --serial <serial> --ledger-ro
 ```
 
 Step selection: `--only`, `--from`, `--skip`, `--force-step` (`preflight`
-always runs). `--build-dir` builds an unsigned bundle from a deploy
+always runs). `--linux-host HOST` pins the Linux target for this run (it
+overrides `bench.yaml` `linux.host`). With no pinned host, an `--only` run that
+needs Linux does the same console login and IP discovery `boot_sd_linux` does,
+and refuses only when the console is busy or shows no IPv4. `--build-dir` builds an unsigned bundle from a deploy
 directory for bench work; such a unit is recorded `bench-only` and the ship
 check refuses it.
 
@@ -147,9 +150,11 @@ Other operator rules:
   Never let the tool allocate a serial for a unit that already has one.
 - **Cable `end0`.** The tool discovers the Linux host over `end0`; a gigabit link
   also shortens the rootfs transfer.
-- **Pace SCPI queries.** Send one query per connection, at least 1 s apart. A
-  burst of queries wedged the SPD3303X LAN socket (recovery: power-cycle the
-  supply). Use the channel `bench.yaml` names and leave the others alone.
+- **Pace SCPI queries.** A burst of queries wedged the SPD3303X LAN socket
+  (recovery: power-cycle the supply). The tool keeps one connection and spaces
+  commands by at least `bench.yaml` `power.min_gap_s` (default `0.3` s), retries
+  after a connection reset with backoff, and only ever addresses the configured
+  channel. Keep any manual queries just as sparse.
 - **Prompt resync.** `cold_boot_test` tolerates a kernel message printed after the
   shell prompt: the prompt wait sends a newline so a fresh prompt appears.
 
@@ -269,9 +274,9 @@ are not yet confirmed by a run of this code on a bench.
 | `detect` | clean shutdown if Linux is up, then power cycle and classify the console: SCIF ROM, BL2, U-Boot, Linux login, silent. The ROM banner `SCI Download mode (Due to parameter error)` is the ROM's fallback to SCI download, taken when the selected boot source has no valid image (blank xSPI/eMMC, or DSW1 not in mode 3). It still offers `-- Load Program to SRAM`, but it is **refused**: "boot ROM fell back to SCI download because the selected boot source has no valid image (blank xSPI/eMMC, or DSW1 not in mode 3); set DSW1 to mode 3 for a clean SCIF bootstrap". Only `(Normal SCI boot)` proceeds |
 | `dsw1_scif` | operator: boot switch to SCIF download |
 | `bootstrap` | reuses the live SCIF ROM state `detect` left in this run (no second power cycle); cycles only if no ON has happened since. Flash Writer: `EM_W` area 1 (boot partition 1) sector `0x1` ← `bl2_mmc`, sector `0x300` ← `fip`; `EM_SECSD` EXT_CSD `[177]=0x02` (BOOT_BUS_CONDITIONS), `[179]=0x08` (PARTITION_CONFIG); `EM_DCID` |
-| `dsw1_emmc_insert_sd` | operator: insert the release microSD; U-Boot must autoboot (see "Operator flow: DSW1 and the microSD" for the boot switch) |
+| `dsw1_emmc_insert_sd` | operator: insert the provisioning microSD (DSW1 may stay on xSPI); U-Boot must autoboot (see "Operator flow: DSW1 and the microSD"). The result names the boot mode BL2 reported (`xSPI` for `SYS_LSI_MODE` `0x3c06`, else the observed value, or "boot mode not reported by BL2") |
 | `boot_sd_linux` | U-Boot boots the wic from microSD; log in, find the host, confirm the root is on the SD, then the live SoM check: every non-optional on-module I2C device the SoM preset declares must ACK (the GD32 excepted) before any destructive step runs. Fallback `--transfer xmodem`: `loadx` + `gzwrite` the wic from the U-Boot prompt. No IP is not a failure here: the checks run over the console and `gd32_flash` runs next |
-| `gd32_flash` | applies the ACT88760 GPIO4 volatile release if still at the OTP default, DP-ID gate (`0x0BE12477` only), `loadbin` × 3, verify with `savebin` in fresh probe sessions, reset-and-run after every readback (see "The GD32 readback halts the MCU"), then `GET_VERSION` from the bridge at `0x70` (polled; the step fails if it never answers). With no network (the `boot_sd_linux` evidence says why: `network: none (gbeth DMA reset failed on <ports>)` or `none (no carrier)`) it pushes the SWD tools and the three images over the console (base64, md5-checked on the board), then cold-cycles and re-checks the IP; SSH is used when it is up |
+| `gd32_flash` | probe: when the ledger's `gd32_fw_version` equals `<gd32-fw>/VERSION` and the bridge answers `GET_VERSION` with the protocol recorded then, the step is satisfied by "bridge GET_VERSION + ledger" with no SWD readback (the readback halts the GD32 and can wedge i2c-8); `--force-step gd32_flash` still does the full SWD verify, and a ledger without `gd32_fw_version` keeps the readback probe. Run: applies the ACT88760 GPIO4 volatile release if still at the OTP default, DP-ID gate (`0x0BE12477` only), `loadbin` × 3, verify with `savebin` in fresh probe sessions, reset-and-run after every readback (see "The GD32 readback halts the MCU"), then `GET_VERSION` from the bridge at `0x70` (polled; the step fails if it never answers). With no network (the `boot_sd_linux` evidence says why: `network: none (gbeth DMA reset failed on <ports>)` or `none (no carrier)`) it pushes the SWD tools and the three images over the console (base64, md5-checked on the board), then cold-cycles and re-checks the IP; SSH is used when it is up |
 | `write_xspi` | from Linux: `bl2` → `mtd0`, `fip` → `mtd1`; md5 readback. A FIP whose erase would reach the CM33 image at `mtd1` + `0x1A0000` is refused |
 | `write_cm33` | from Linux: the bundle's `cm33` image → `mtd1` at `0x1A0000`; md5 readback of exactly the image size; probe = the same md5. Skipped (`bundle has no cm33 component`) when the bundle carries none. See "CM33 image" |
 | `write_emmc_boot` | release `bl2_mmc` + `fip` into `mmcblk<N>boot0` (boot partition 1, the one EXT_CSD`[179]=0x08` boots; `boot1` is never booted), md5 readback of the same device, EXT_CSD via mmc-utils |

@@ -217,6 +217,10 @@ def test_boot_sd_linux_fails_clearly_when_no_ipv4_appears(tmp_path, monkeypatch)
     assert ctx.bench.power.events == ["off", "on"]            # no retry cycle without the signature
 
 
+def _no_console(*a, **k):
+    raise BenchError("no console shell")
+
+
 # --- need_linux --------------------------------------------------------------------------
 
 def test_need_linux_picks_up_a_lease_that_arrived_after_boot_sd_linux(tmp_path, monkeypatch):
@@ -241,7 +245,8 @@ def test_need_linux_error_is_accurate_after_a_console_only_boot(tmp_path, monkey
     assert "has not run" not in str(e.value)
 
 
-def test_write_rootfs_without_a_target_names_the_real_cause(tmp_path):
+def test_write_rootfs_without_a_target_names_the_real_cause(tmp_path, monkeypatch):
+    monkeypatch.setattr(steps, "console_login_ctx", _no_console)
     ctx = _ctx(tmp_path, bench=_bench(), execute=True)          # nothing ran, nothing pinned
     res = steps.run_steps(ctx, only=["write_rootfs"])[-1]
     assert res.status == "failed" and "no Linux target attached" in res.detail

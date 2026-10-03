@@ -251,12 +251,19 @@ class Ctx:
                 connect_linux(self, force=True)
             except BenchError:
                 self.linux = None
+        if self.linux is None and self.execute and self.bench is not None and not self.pinned_host                 and self.console_linux_on_count != self.bench.power.on_count:
+            # --only run past boot_sd_linux, no pinned host: the same console login + IP discovery
+            try:
+                console_login_ctx(self, timeout=20.0)
+                connect_linux(self)
+            except BenchError:
+                self.linux = None      # console busy / no shell / no IP: the refusal below says so
         if self.linux is None and self.execute:
             if self.bench is not None and self.console_linux_on_count == self.bench.power.on_count:
                 raise Refused("Linux is up on the console but has no reachable IPv4 host (no DHCP lease on "
                               "end0 and no bench.yaml linux.host that answers); check cable/DHCP, then re-run")
-            raise Refused("no Linux target attached: bench.yaml linux.host is unset or unreachable and this "
-                          "run has no console login to discover a host from; run boot_sd_linux (or set linux.host)")
+            raise Refused("no Linux target attached: no pinned host (--linux-host / bench.yaml linux.host) and "
+                          "the console login + IP discovery found none; run boot_sd_linux, or pass --linux-host")
         if self.linux is not None and self.execute:
             self._check_unit_identity(self.linux)
         return self.linux
@@ -969,10 +976,10 @@ class OpDsw1EmmcInsertSd(_PreLinux):
             # halt first: the unit runs from the provisioning SD, and the operator is about
             # to switch it off and swap the card
             note = halt_note(clean_shutdown(ctx))
-            b.operator.confirm(f"{note} Power OFF, set DSW1 to eMMC boot, insert the release microSD. "
+            b.operator.confirm(f"{note} Power OFF, insert the provisioning microSD (DSW1 may stay on xSPI). "
                                "Leave it OFF until the tool asks.")
             ctx.halted_on_count = None     # the operator may have powered it back on: never trust the marker now
-        ctx.mutate("clean shutdown; operator: set DSW1 to eMMC boot and insert the release microSD", prompt)
+        ctx.mutate("clean shutdown; operator: insert the provisioning microSD (DSW1 may stay on xSPI)", prompt)
 
         def check():
             n = len(b.console.transcript)
@@ -981,8 +988,13 @@ class OpDsw1EmmcInsertSd(_PreLinux):
             b.console.expect(uboot.AUTOBOOT, 60.0)
             ctx.boot_text = _since(b.console, n)
             ctx.live_boot = (b.power.on_count, n)
-        ctx.mutate("cold cycle; expect U-Boot autoboot from eMMC", check)
-        return self.result(ctx, "U-Boot boots from eMMC boot partition 1")
+            return ctx.boot_text
+        text = ctx.mutate("cold cycle; expect U-Boot autoboot", check)
+        if text is None:
+            return self.result(ctx, "would expect U-Boot autoboot")
+        mode = uboot.parse_sys_lsi(text).get("soc_sys_lsi_mode")
+        seen = ("xSPI" if mode == SYS_LSI_MODE_XSPI else "SYS_LSI_MODE " + mode) if mode             else "boot mode not reported by BL2"
+        return self.result(ctx, f"U-Boot autoboot seen ({seen})")
 
 
 def leftover_dxuart2_swap(ctx) -> str:
@@ -1559,6 +1571,8 @@ class Gd32Flash(Step):
                 connect_linux(ctx)
             except BenchError:
                 pass   # no shell / no IP: the probe runs without a host, as before
+        if (sat := self._satisfied_by_bridge(ctx)) is not None:
+            return sat
         try:
             dp = ctx.bench.probe.dp_id()
             if dp != GD32_DP_OK:
@@ -1579,6 +1593,27 @@ class Gd32Flash(Step):
             except (BenchError, Refused) as e:
                 return Unknown(f"firmware matches, but {e}")
         return Satisfied({**ev, "gd32_dp_id": f"0x{dp:08x}", **self._fw_version(ctx)})
+
+    def _satisfied_by_bridge(self, ctx):
+        """Satisfied WITHOUT an SWD readback (it halts the GD32 and can wedge i2c-8) when the
+        ledger's gd32_flash evidence names the same gd32_fw_version as <gd32-fw>/VERSION and the
+        bridge answers GET_VERSION with the protocol recorded then. None: no such evidence
+        (no ledger version, no VERSION file, no network, a different answer): do the SWD probe."""
+        want = self._fw_version(ctx).get("gd32_fw_version")
+        groups = [ctx.state.get("steps", {})] + [g.get("steps", {}) for g in ctx.state.get("superseded", [])]
+        rec = next((st.get("evidence") or {} for g in groups for n, st in g.items()
+                    if n == "gd32_flash" and st.get("status") == "done"
+                    and (st.get("evidence") or {}).get("gd32_fw_version")), {})
+        if not want or rec.get("gd32_fw_version") != want or ctx.linux is None or "gd32_protocol" not in rec:
+            return None
+        try:
+            proto = self._bridge_alive(ctx, ctx.linux)
+        except (BenchError, Refused):
+            return None
+        if proto != rec["gd32_protocol"]:
+            return None
+        return Satisfied({"gd32_protocol": proto, "gd32_fw_version": want},
+                         "satisfied by bridge GET_VERSION + ledger")
 
     @staticmethod
     def _fw_version(ctx) -> dict[str, str]:

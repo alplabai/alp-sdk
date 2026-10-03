@@ -1156,7 +1156,7 @@ def test_record_turns_a_crashed_or_evidence_less_run_into_unread(tmp_path, entry
     assert f"blocked: test_functional: {want}" in res[-1].detail
 
 
-def test_a_run_that_cannot_reach_the_unit_records_an_unread_verdict(tmp_path):
+def test_a_run_that_cannot_reach_the_unit_records_an_unread_verdict(tmp_path, monkeypatch):
     root, unit = _shippable_ledger(tmp_path)
     unit.write_text("disposition: ship\ntest_functional: pass\n", encoding="utf-8")
     ctx, fake = _setup(tmp_path, ledger_root=root)
@@ -1175,6 +1175,7 @@ def test_a_run_that_cannot_reach_the_unit_records_an_unread_verdict(tmp_path):
     # no Linux target at all (Refused) is the same: a verdict, not silence
     ctx, _ = _setup(tmp_path / "b", ledger_root=tmp_path / "b" / "none")
     ctx.linux = None
+    monkeypatch.setattr(steps, "console_login_ctx", lambda *a, **k: (_ for _ in ()).throw(BenchError("no shell")))
     r = steps.FunctionalTest().run(ctx)
     assert r.status == "failed" and r.evidence["test_functional"].startswith("unread (no Linux target attached")
 
