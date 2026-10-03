@@ -47,16 +47,17 @@ device (the xSPI clock, reset and MSTOP are already released by `cpg_setup()` in
 every mode). The CM33 image has one home: xSPI `0x200000`. Not yet bench-verified.
 
 **xSPI0 pin outputs.** The boot ROM configures the xSPI0 pins only for xSPI boot.
-`PFC_OEN` (PFC base `0x10410000` + `0x3C40`) resets to `0x0000003F`, which leaves the
+`PFC_OEN` (PFC base `0x10410000` + `0x3C40`) is expected to reset to `0x0000003F` (RZ/V2N UM 4.2.2.31, OEN reset value; to be confirmed by the `md.l 0x10413c40 1` read below), which would leave the
 xSPI0 output enables OFF (1 = OFF): `OEN_XSPI_CLKP` bit 5, `OEN_XSPI_CS0N` bit 3,
-`OEN_XSPI_RESET0N` bit 2. Under eMMC/eSD boot that left xSPI0 unconnected to the flash:
+`OEN_XSPI_RESET0N` bit 2. Under eMMC/eSD boot that would leave xSPI0 unconnected to the flash (the observed symptom):
 bench 2026-10-03 (E1M-V2M103, `SYS_LSI_MODE` `0x3c05`) printed
 `BL2: xSPI for BL22, id 0x0` and the CM33 did not start; xSPI boot (`0x3c06`) was fine.
 Before `xspi_setup()` patch 0002 sets `PFC_PWPR` (`PFC_BASE` + `0x3C04`) `REGWE_B`
 (bit 5), clears **only** bits 5, 3 and 2 of `PFC_OEN`, restores `PFC_PWPR`, and waits 1 ms
 for the flash to leave reset (a conservative margin; the GD25 datasheet value is not in
 the repo). `OEN_ET1`/`OEN_ET0` (bits 1/0, ET1/ET0 TXC direction) are never touched, since
-that would break Ethernet. If no flash answers (id `0x0`, `0xffffff`, `0xffffffff`) BL2
+that would break Ethernet. If U-Boot already switched ET0/ET1 to RGMII, bits 1/0 may read
+differently from the reset value; only bits 5, 3 and 2 matter here. If no flash answers (id `0x0`, `0xffffff`, `0xffffffff`, or a first RDID byte of `0x00`/`0xff`) BL2
 prints `BL2: no xSPI flash answered, CM33 NOT started`, skips loading BL22 and does not
 release the CM33.
 

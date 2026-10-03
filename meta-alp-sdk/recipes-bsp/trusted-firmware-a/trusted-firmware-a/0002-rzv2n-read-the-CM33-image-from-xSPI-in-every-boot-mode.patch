@@ -21,16 +21,18 @@ flash device id (low 24 bits), 0 or 0xffffff when no device answered, or
 0xffffffff when the xSPI reset command failed. A bench log therefore shows
 whether xSPI came up in eMMC/eSD boot.
 
-The boot ROM configures the xSPI0 pins only for xSPI boot. PFC_OEN (PFC_BASE
-+ 0x3C40) resets to 0x3f, i.e. the xSPI0 CKP (bit 5), CS0N (bit 3) and
-RESET0N (bit 2) output enables are OFF, so in eMMC/eSD boot xSPI0 never
-reached the flash and the id read back 0 (bench 2026-10-03, E1M-V2M103,
-SYS_LSI_MODE 0x3c05). Before xspi_setup() BL2 now clears exactly those three
+The boot ROM configures the xSPI0 pins only for xSPI boot. The expected cause
+of the id 0 (bench 2026-10-03, E1M-V2M103, SYS_LSI_MODE 0x3c05) is PFC_OEN
+(PFC_BASE + 0x3C40): per RZ/V2N UM 4.2.2.31 its reset value is 0x3f, i.e. the
+xSPI0 CKP (bit 5), CS0N (bit 3) and RESET0N (bit 2) output enables are OFF, so
+in eMMC/eSD boot xSPI0 would never reach the flash. To be confirmed by the
+`md.l 0x10413c40 1` read in U-Boot. Before xspi_setup() BL2 now clears exactly those three
 OEN bits under PFC_PWPR REGWE_B (PFC_BASE + 0x3C04, bit 5), restoring PFC_PWPR
 afterwards, then waits 1 ms for the flash to leave reset. OEN_ET0/OEN_ET1
 (bits 0/1, ET0/ET1 TXC direction) and OEN_XSPI_CLKN (bit 4) are not touched.
 
-When no flash answers (id 0, 0xffffff or 0xffffffff) BL2 prints a NOTICE,
+When no flash answers (id 0, 0xffffff, 0xffffffff, or a first RDID byte of
+0x00/0xff) BL2 prints a NOTICE,
 skips loading BL22 and does not release the CM33, instead of starting it into
 bus garbage.
 
@@ -86,7 +88,7 @@ index 594da83..a42930c 100644
 -	if (!cpg_is_m33_core_booted()) {
 +	if (!rzv2n_bl22_xspi_ok) {
 +		/* plat_storage.c found no xSPI flash: never start the CM33 into garbage */
-+		NOTICE("BL2: CM33 not started (no xSPI flash)\n");
++		INFO("BL2: skipping the Cortex-M33 release (no xSPI flash)\n");
 +	} else if (!cpg_is_m33_core_booted()) {
  		INFO("Booting Cortex-M33\n");
  		bl_mem_params_node_t *bl22_mem_params = get_bl_mem_params_node(BL22_IMAGE_ID);
@@ -176,7 +178,7 @@ index 1d111da..7bf93d1 100644
  #endif
  		break;
  	default:
-@@ -385,6 +375,61 @@ void rz_io_setup(void)
+@@ -385,6 +375,65 @@ void rz_io_setup(void)
  		panic();
  	}
  
@@ -223,12 +225,16 @@ index 1d111da..7bf93d1 100644
 +		io_dev_open(memmap, 0, &memdrv_dev_handle);
 +
 +		/*
-+		 * No flash answered (id 0, 0xffffff, or -1 after a failed reset):
-+		 * BL22 would read bus garbage, so do not load it and do not
-+		 * release the CM33 (bl2_plat_setup.c checks this flag).
++		 * No flash answered (id 0, 0xffffff, or -1 after a failed reset),
++		 * or the first RDID byte (JEDEC manufacturer, low byte) is 0x00 or
++		 * 0xff: the vendor xspi_read_identification() returns the last
++		 * read after 1000 retries even if it never became stable. BL22
++		 * would read bus garbage, so do not load it and do not release
++		 * the CM33 (bl2_plat_setup.c checks this flag).
 +		 */
 +		if ((xspi_id & 0xffffffU) == 0U ||
-+			(xspi_id & 0xffffffU) == 0xffffffU) {
++			(xspi_id & 0xffffffU) == 0xffffffU ||
++			(xspi_id & 0xffU) == 0x00U || (xspi_id & 0xffU) == 0xffU) {
 +			NOTICE("BL2: no xSPI flash answered, CM33 NOT started\n");
 +			rzv2n_bl22_xspi_ok = false;
 +		}
