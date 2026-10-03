@@ -212,7 +212,11 @@ The Linux tree follows the SoM defaults through the generated
 `meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-ownership.dtsi`
 (`scripts/gen_linux_ownership_dt.py`): today `&sci0` is enabled for
 `e1m_uart0` on P50/P51; UART1 and both CAN-FD instances wait for their PFC
-function codes in `n44.json` `linux_dt`; `&rspi0` stays disabled.
+function codes in `n44.json` `linux_dt`; `&rspi0` stays disabled. The same
+fragment lists the M33-owned module clocks in `renesas,cm33-owned-clocks` on the
+CPG node (RSCI7 for the GD32 link always, plus each M33-assigned instance), which
+the `0001-clk-renesas-rzv2h-cpg-cm33-owned-clocks.patch` kernel patch keeps on;
+the DT-driven form is not yet bench-validated.
 
 ## Boot + identification
 

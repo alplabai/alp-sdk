@@ -96,7 +96,18 @@ missing codes (`e1m_uart1`, `e1m_can0`, `e1m_can1`) are a GAP comment and
 `e1m_spi0` stays disabled with its `hw_blocked` reason.  The fragment follows
 the SoM default, not a project's `ownership:` override.  `--vendor-dtsi
 <r9a09g056.dtsi>` verifies the referenced node labels exist in the kernel
-tree.  The GD32 link (SCI7) stays enabled
+tree.
+
+CM33-owned clocks: the same fragment sets `renesas,cm33-owned-clocks` on the
+CPG node -- the `linux_dt[...].cpg_clocks` of every enabled supervisor link
+(RSCI7 for the GD32, always) and of each assignable instance owned by the
+M33 (never a `hw_blocked` one).  The kernel patch
+`0001-clk-renesas-rzv2h-cpg-cm33-owned-clocks.patch` makes the CPG driver keep
+those clocks and their MSTOP gates on, so `clk_disable_unused` cannot stop a
+peripheral the CM33 is using.  The generic `protected-clocks` property is not
+honoured by rzv2h-cpg (and is index-based), hence the named vendor property.
+
+The GD32 link (SCI7) stays enabled
 on the board, not per project: moving it to the overlay would break every
 plain `west build` that does not run the emitter.
 

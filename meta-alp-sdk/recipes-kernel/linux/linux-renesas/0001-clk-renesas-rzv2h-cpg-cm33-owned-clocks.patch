@@ -1,0 +1,130 @@
+From: Alp Lab AB <contact@alplab.ai>
+Date: Sat, 3 Oct 2026 12:00:00 +0200
+Subject: [PATCH] clk: renesas: rzv2h-cpg: keep clocks listed in
+ renesas,cm33-owned-clocks on
+
+Copyright (c) 2026 Alp Lab AB
+SPDX-License-Identifier: GPL-2.0
+
+AMP clock-ownership fix for the ALP E1M V2N SoM family.  Some peripherals
+belong to the Cortex-M33 system manager, not to Linux -- today RSCI7 (SCI7
+Simple-SPI to the on-module GD32G553 supervisor MCU), and RSPI0 or other
+assignable blocks when a product hands them to the M33.
+
+The rzv2h-cpg driver couples each module clock to its CPG BUS_MSTOP bits:
+disabling the clock also asserts the module-stop, which gates *register
+access* to the peripheral.  At late init, clk_disable_unused walks every
+module clock with no Linux consumer, turns the clocks off and asserts their
+MSTOP bits.  The CM33, mid-operation on the peripheral at that moment,
+bus-faults on its next register access and is dead until the next power
+cycle (verified on silicon for RSCI7: all gates are still open at the
+U-Boot prompt and close during Linux boot, at the unused-clock sweep).  The
+CM33 cannot help itself: it can write its own CPG CLKON view, but the
+BUS_MSTOP registers are not writable from the CM33 master, so only the A55
+side can keep the bus gates open.
+
+Replace the earlier per-clock DEF_MOD_CRITICAL edits with a devicetree list.
+The CPG node may carry
+
+	renesas,cm33-owned-clocks = "rsci_7_pclk", "rsci_7_tclk", ...;
+
+naming module clocks by the name the driver registers them under.  A clock
+on the list is registered exactly like a DEF_MOD_CRITICAL one:
+CLK_IS_CRITICAL keeps it enabled so the unused-clock sweep skips it, and the
+critical-clock registration path seeds the MSTOP refcount, (re-)releasing
+the gates early in boot.  Every sharer of a BUS_MSTOP bit must be listed so
+the per-bit refcount cannot drop to zero through a non-listed sibling.  The
+generic `protected-clocks` property is not an option here: it is only
+honoured by individual clock drivers (qcom), not by the clk framework or
+rzv2h-cpg, and it takes provider-specific indices rather than names.
+
+RIIC8 (BRD_I2C) is not listed: Cortex-A55/Linux is its sole master, so
+Linux is a real consumer of riic_8_ckm and clk_disable_unused leaves it
+alone.
+
+The list is generated from the ALP SoM metadata by
+scripts/gen_linux_ownership_dt.py, so board files never carry it by hand.
+
+Upstream-Status: Inappropriate [board-specific AMP ownership policy; an
+upstream binding would need agreement on the property name and semantics]
+
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
+---
+ .../bindings/clock/renesas,rzv2h-cpg.yaml          |  9 +++++++++
+ drivers/clk/renesas/rzv2h-cpg.c                    | 20 +++++++++++++++++---
+ 2 files changed, 26 insertions(+), 3 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/clock/renesas,rzv2h-cpg.yaml b/Documentation/devicetree/bindings/clock/renesas,rzv2h-cpg.yaml
+index a3e0faf..1b98d64 100644
+--- a/Documentation/devicetree/bindings/clock/renesas,rzv2h-cpg.yaml
++++ b/Documentation/devicetree/bindings/clock/renesas,rzv2h-cpg.yaml
+@@ -49,6 +49,15 @@ properties:
+         calculation is (1 * 16 + 3) = 0x13.
+     const: 2
+ 
++  renesas,cm33-owned-clocks:
++    $ref: /schemas/types.yaml#/definitions/string-array
++    description:
++      Names of module clocks (the names the CPG driver registers them under,
++      e.g. rsci_7_pclk) that are used by the Cortex-M33 and not by Linux.
++      Linux keeps each of them, and the bus-master-stop gates coupled to it,
++      enabled so that clk_disable_unused does not stop a peripheral the other
++      core is using.
++
+   '#power-domain-cells':
+     const: 0
+ 
+diff --git a/drivers/clk/renesas/rzv2h-cpg.c b/drivers/clk/renesas/rzv2h-cpg.c
+index 3bd4edb..2f8aaed 100644
+--- a/drivers/clk/renesas/rzv2h-cpg.c
++++ b/drivers/clk/renesas/rzv2h-cpg.c
+@@ -1047,10 +1047,26 @@ static const struct clk_ops rzv2h_mod_clock_ops = {
+ 	.is_enabled = rzv2h_mod_clock_is_enabled,
+ };
+ 
++/*
++ * AMP clock ownership: the CPG node may list, by DEF_MOD name, module clocks
++ * that belong to the Cortex-M33 (renesas,cm33-owned-clocks).  Linux has no
++ * consumer for them, and the CM33 cannot release the CPG BUS_MSTOP gates
++ * itself, so clk_disable_unused would turn the clock off and assert the
++ * coupled MSTOP bits under the remote core.  Such a clock is registered
++ * exactly like a DEF_MOD_CRITICAL one.
++ */
++static bool __init rzv2h_cpg_cm33_owned(const struct rzv2h_cpg_priv *priv,
++					const char *name)
++{
++	return of_property_match_string(priv->dev->of_node,
++					"renesas,cm33-owned-clocks", name) >= 0;
++}
++
+ static void __init
+ rzv2h_cpg_register_mod_clk(const struct rzv2h_mod_clk *mod,
+ 			   struct rzv2h_cpg_priv *priv)
+ {
++	bool critical = mod->critical || rzv2h_cpg_cm33_owned(priv, mod->name);
+ 	struct mod_clock *clock = NULL;
+ 	struct device *dev = priv->dev;
+ 	struct clk_init_data init;
+@@ -1079,7 +1095,7 @@ rzv2h_cpg_register_mod_clk(const struct rzv2h_mod_clk *mod,
+ 	init.name = mod->name;
+ 	init.ops = &rzv2h_mod_clock_ops;
+ 	init.flags = CLK_SET_RATE_PARENT;
+-	if (mod->critical)
++	if (critical)
+ 		init.flags |= CLK_IS_CRITICAL;
+ 
+ 	parent_name = __clk_get_name(parent);
+@@ -1110,9 +1126,9 @@ rzv2h_cpg_register_mod_clk(const struct rzv2h_mod_clk *mod,
+ 	 * turned ON in an earlier boot stage.
+ 	 */
+ 	if (clock->mstop_data != BUS_MSTOP_NONE &&
+-	    !mod->critical && rzv2h_mod_clock_is_enabled(&clock->hw)) {
++	    !critical && rzv2h_mod_clock_is_enabled(&clock->hw)) {
+ 		rzv2h_mod_clock_mstop_enable(priv, clock->mstop_data);
+-	} else if (clock->mstop_data != BUS_MSTOP_NONE && mod->critical) {
++	} else if (clock->mstop_data != BUS_MSTOP_NONE && critical) {
+ 		unsigned long mstop_mask = FIELD_GET(BUS_MSTOP_BITS_MASK, clock->mstop_data);
+ 		u16 mstop_index = FIELD_GET(BUS_MSTOP_IDX_MASK, clock->mstop_data);
+ 		atomic_t *mstop = &priv->mstop_count[mstop_index * 16];
+--
+2.43.0

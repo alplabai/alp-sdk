@@ -68,7 +68,7 @@ SRC_URI:append = " \
     file://e1m-v2m-deepx.dtsi \
     file://e1m-v2n101-x-evk.dts \
     file://e1m-v2m101-x-evk.dts \
-    file://0001-clk-renesas-r9a09g056-keep-CM33-owned-RSCI7-on.patch \
+    file://0001-clk-renesas-rzv2h-cpg-cm33-owned-clocks.patch \
     file://0002-drm-renesas-rzg2l-mipi-dsi-pm_runtime-guard-host-tra.patch \
     file://0003-usb-ohci-platform-add-spurious-oc-DT-property.patch \
     file://0004-drm-panel-add-himax-hx8394-with-rocktech-rk055hdmipi.patch \
@@ -114,20 +114,27 @@ SRC_URI:append = " \
 # line storms ("irq 14: nobody cared") until genirq disables it. The patch
 # unmasks only the GPT overflow bits the handler services.
 
-# AMP clock ownership: RSCI7 belongs to the Cortex-M33 system manager
-# (GD32 supervisor SPI link).  Without this patch, Linux's
-# clk_disable_unused turns its module clocks off AND asserts the coupled
+# AMP clock ownership: peripherals that belong to the Cortex-M33 system
+# manager (RSCI7 = the GD32 supervisor SPI link, always; any assignable block
+# a product hands to the M33).  Without this patch, Linux's
+# clk_disable_unused turns their module clocks off AND asserts the coupled
 # CPG BUS_MSTOP bits (the rzv2h-cpg driver ties the two together), which
-# bus-faults the CM33 mid-operation ~15 s into every boot.  The patch
-# marks the five rsci_7_* clocks DEF_MOD_CRITICAL so both gates stay held
-# for the remote core.  Silicon-validated 2026-06-03 (two cold cycles +
-# warm reboot, link autonomous from ~2 s after power-on, no intervention).
+# bus-faults the CM33 mid-operation ~15 s into every boot.  The patch makes
+# the CPG driver keep every module clock named in the CPG node's
+# `renesas,cm33-owned-clocks` property critical, so both gates stay held for
+# the remote core.  The list is not hand-written: it is generated into
+# e1m-v2n-ownership.dtsi (scripts/gen_linux_ownership_dt.py) from the SoM
+# ownership metadata -- RSCI7 for the GD32 link, plus the clocks of each
+# assignable instance owned by the M33.  The earlier hard-coded
+# DEF_MOD_CRITICAL form of this fix was silicon-validated 2026-06-03 (two
+# cold cycles + warm reboot, link autonomous from ~2 s after power-on); this
+# DT-driven form applies to the BSP kernel (6717c06) but is NOT yet
+# bench-validated -- re-run that cold-cycle check on the first build.
 #
-# RIIC8 (BRD_I2C) is NOT in this patch: the maintainer decision that
+# RIIC8 (BRD_I2C) is not listed: the maintainer decision that
 # Cortex-A55/Linux is RIIC8's sole master (metadata/e1m_modules/v2n/
 # core-ownership.yaml) makes Linux the real consumer -- its own
-# clk_disable_unused correctly leaves riic_8_ckm alone.  See the
-# patch's own RETITLED note for the 2026-09-24 history.
+# clk_disable_unused correctly leaves riic_8_ckm alone.
 
 # 0002 (DSI shutdown SError): rzg2l_mipi_dsi's host transfer touched DSI
 # registers while the host was runtime-suspended (held in reset).  A panel

@@ -14,6 +14,8 @@ Inputs (nothing is restated here; every value is read):
   metadata/e1m_modules/v2n/core-ownership.yaml   assignable: per E1M instance,
                                                  default core, rows, hw_blocked,
                                                  soc_instance
+  metadata/e1m_modules/v2n/supervisor-links.yaml enabled links (the GD32 SCI7
+                                                 link) are always CM33-owned
   metadata/socs/renesas/rzv2n/n44.json           linux_dt[soc_instance]: Linux
                                                  node label, PFC function codes
                                                  (pinmux), CPG clock names
@@ -26,6 +28,12 @@ For every assignable instance at its SoM default core:
     comment, never a guessed number, and the node stays as the vendor dtsi has it;
   * hw_blocked: left untouched (disabled) and the reason is quoted;
   * owned by the CM33: left untouched for Linux.
+
+The CPG node also gets `renesas,cm33-owned-clocks` (honoured by the
+0001-clk-renesas-rzv2h-cpg-cm33-owned-clocks kernel patch): the `cpg_clocks`
+of every CM33-owned resource -- the enabled supervisor links (SCI7 to the
+GD32, always) and each assignable instance owned by the CM33 -- so Linux's
+clk_disable_unused never stops a peripheral the other core is using.
 
 `--vendor-dtsi <r9a09g056.dtsi>` additionally verifies that every node label
 (and CAN-FD channel node) the fragment references exists in the vendor SoC
@@ -57,25 +65,56 @@ from alp_orchestrate.ownership import (  # noqa: E402
 OUT = Path("meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-ownership.dtsi")
 SOC = Path("metadata/socs/renesas/rzv2n/n44.json")
 SRC = "metadata/e1m_modules/v2n/core-ownership.yaml"
+LINKS = "metadata/e1m_modules/v2n/supervisor-links.yaml"
 
 
 class GenError(Exception):
     pass
 
 
-def _load(root: Path) -> tuple[dict, dict]:
+def _load(root: Path) -> tuple[dict, dict, dict]:
     doc = load_ownership_doc(root / "metadata", "v2n")
     if not doc or not doc.get("assignable"):
         raise GenError(f"{SRC} has no assignable: block")
     soc = json.loads((root / SOC).read_text(encoding="utf-8"))
-    return doc, soc
+    links = yaml.safe_load((root / LINKS).read_text(encoding="utf-8"))["supervisor_links"]
+    return doc, soc, links
+
+
+def cm33_clocks(doc: dict, soc: dict, links: dict, own: dict[str, str]) -> list[str]:
+    """CPG clock names to keep on for the CM33: enabled supervisor links +
+    CM33-owned assignable instances (a hw_blocked instance is never enabled)."""
+    linux_dt = soc.get("linux_dt") or {}
+    by_label = {v["label"]: v for v in linux_dt.values() if v.get("cpg_clocks")}
+    clocks: list[str] = []
+
+    def add(names: list[str]) -> None:
+        clocks.extend(n for n in names if n not in clocks)
+
+    for name, link in sorted(links.items()):
+        if link.get("status") != "enabled":
+            continue
+        ent = by_label.get(link["dt_label"])
+        if ent is None:
+            raise GenError(f"supervisor link {name}: no cpg_clocks for &{link['dt_label']} in "
+                           f"{SOC.as_posix()} linux_dt")
+        add(ent["cpg_clocks"])
+    for inst, e in sorted(doc["assignable"].items()):
+        if own[inst] == "m33" and not e.get("hw_blocked"):
+            ent = linux_dt.get(e.get("soc_instance")) or {}
+            if not ent.get("cpg_clocks"):
+                raise GenError(f"assignable.{inst}: owned by m33 but linux_dt.{e.get('soc_instance')} "
+                               "has no cpg_clocks")
+            add(ent["cpg_clocks"])
+    return clocks
 
 
 def _group(inst: str) -> tuple[str, str]:
     return f"{inst}_pins", inst.replace("_", "-")
 
 
-def render(doc: dict, soc: dict, ownership: dict[str, str] | None = None) -> tuple[str, set[str]]:
+def render(doc: dict, soc: dict, links: dict,
+           ownership: dict[str, str] | None = None) -> tuple[str, set[str]]:
     """(dtsi text, node labels it references)."""
     own = ownership or resolve_ownership(doc)
     linux_dt = soc.get("linux_dt") or {}
@@ -132,6 +171,13 @@ def render(doc: dict, soc: dict, ownership: dict[str, str] | None = None) -> tup
     if pins:
         out += "&pinctrl {\n" + "\n".join(pins) + "};\n\n"
     out += "\n\n".join(nodes) + "\n"
+    names = ", ".join(f'"{c}"' for c in cm33_clocks(doc, soc, links, own))
+    out += ("\n/*\n * Module clocks the Cortex-M33 uses (enabled supervisor links + CM33-owned\n"
+            " * assignable instances): the CPG driver keeps them, and their bus-stop gates,\n"
+            " * on through clk_disable_unused (0001-clk-renesas-rzv2h-cpg-cm33-owned-clocks).\n"
+            " */\n"
+            f"&cpg {{\n\trenesas,cm33-owned-clocks = {names};\n}};\n")
+    labels.add("cpg")
     return out, labels
 
 
@@ -155,8 +201,8 @@ def main() -> int:
     ap.add_argument("--vendor-dtsi", type=Path, help="verify referenced labels exist in this r9a09g056.dtsi")
     args = ap.parse_args()
     try:
-        doc, soc = _load(args.root)
-        text, labels = render(doc, soc)
+        doc, soc, links = _load(args.root)
+        text, labels = render(doc, soc, links)
     except GenError as e:
         print(f"gen_linux_ownership_dt: {e}", file=sys.stderr)
         return 1

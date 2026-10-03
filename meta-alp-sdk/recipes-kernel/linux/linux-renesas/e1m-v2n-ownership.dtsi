@@ -36,3 +36,12 @@
 /* e1m_uart1 (UART1, &sci1): GAP -- no PFC function code in metadata/socs/renesas/rzv2n/n44.json
  * linux_dt.UART1.pinmux for ['UART1_RXD1', 'UART1_TXD1']; node left as the vendor
  * dtsi has it (disabled).  Not guessed. */
+
+/*
+ * Module clocks the Cortex-M33 uses (enabled supervisor links + CM33-owned
+ * assignable instances): the CPG driver keeps them, and their bus-stop gates,
+ * on through clk_disable_unused (0001-clk-renesas-rzv2h-cpg-cm33-owned-clocks).
+ */
+&cpg {
+	renesas,cm33-owned-clocks = "rsci_7_pclk", "rsci_7_tclk", "rsci_7_ps_ps3_n", "rsci_7_ps_ps2_n", "rsci_7_ps_ps1_n";
+};
