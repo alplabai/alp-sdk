@@ -7,7 +7,9 @@ Minimal Zephyr image for SoM preset M-core defaults that use
 
 The shim claims no peripheral, no interrupt and no IPC endpoint: no `sci0`
 (a floating RXD faults the core before `main`), no RIIC8 / `i2c-8`, no port 9
-(GD32 SPI), no DMAC, no MHU. It gives the orchestrator a buildable, bootable
+(GD32 SPI), no DMAC, no MHU. The board defaults enable the GD32 link for real
+CM33 firmware, so `prj.conf` turns SPI and GPIO off and `app.overlay` disables
+`&sci7` and `&gpio9`: P96 (SCK7) and P97 (chip-select) are left untouched. It gives the orchestrator a buildable, bootable
 peer-core image when a project leaves a secondary M-core at the SoM default,
 while customer applications can still override `cores.<id>.app` with their own
 firmware.
