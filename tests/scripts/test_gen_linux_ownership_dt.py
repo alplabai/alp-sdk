@@ -29,7 +29,7 @@ def _enabled(doc, *insts):
 
 
 def test_committed_fragment_is_in_sync():
-    r = subprocess.run([sys.executable, GEN, "--check"], capture_output=True, text=True)
+    r = subprocess.run([sys.executable, GEN, "--check"], capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stderr
 
 
