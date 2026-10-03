@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# Build-only: proves alias alp-wdt0 -> renesas,rzv-wdt (wdt_renesas_rzv.c) ->
+# vendored FSP r_wdt compile on both CM33 boards with the node enabled.  Running
+# it would arm a watchdog that cannot be stopped and resets the whole SoM; the
+# silicon proof is the ordered bench steps in docs/hil/rzv-wdt0-cm33.md.
+tests:
+  alp_sdk.wdt.rzv_cm33:
+    build_only: true
+    platform_allow:
+      - alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33
+      - alp_e1m_v2m101_m33_sm/r9a09g056n48gbg/cm33
+    tags:
+      - alp-sdk
+      - wdt
+      - v2n

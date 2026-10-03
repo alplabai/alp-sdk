@@ -2347,24 +2347,6 @@ def _v2n_part_display(order_code: str) -> tuple[str, str]:
     return f"{base}-{variant_code}", f"arm/renesas/rz/rzv/{base.lower()}.dtsi"
 
 
-_V2N_WDT0_MID_OPENAMP: tuple[str, ...] = (
-    ' * hand-author one from (unlike mbox1 below, which had a real FSP',
-    ' * register map, bsp_mhu_b.h, to draw from).  Full analysis:',
-)
-
-_V2N_WDT0_MID_PLAIN: tuple[str, ...] = (
-    " * hand-author one from (contrast the V2N101 sibling board's mbox1",
-    ' * node, which had a real FSP register map, bsp_mhu_b.h, to draw',
-    ' * from).  Full analysis:',
-)
-
-_V2N_WDT0_TAIL: tuple[str, ...] = (
-    " * meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi's",
-    ' * &wdt1 comment block.  <alp/wdt.h> on this core returns',
-    ' * ALP_ERR_NOT_PRESENT_ON_THIS_SOC (src/wdt_dispatch.c).',
-    ' */',
-)
-
 _V2N_OPENAMP_TAIL: tuple[str, ...] = (
     '',
     '/*',
@@ -2700,6 +2682,7 @@ def _v2n_dts(
         "",
         "\taliases {",
         f"\t\t{gd32_spi['alias']} = &gd32_spi;",
+        "\t\talp-wdt0 = &wdt0;",
         "\t};",
         "",
         "\tsram: memory@8003000 {",
@@ -2781,14 +2764,28 @@ def _v2n_dts(
         "};",
         "",
         "/*",
-        " * No wdt0 node here (alp-sdk#1153): the upstream Zephyr RZ/V2N SoC",
-        " * devicetree (arm/renesas/rz/rzv/r9a09g056.dtsi, checked against the",
-        " * pinned v4.4.0 tag) declares no watchdog node and no driver binds",
-        " * this SoC's WDT hardware at all yet -- there is no label to",
-        " * reference and no register base address in this tree to",
+        " * wdt0 = the Cortex-M33's own watchdog (R_WDT0_BASE 0x41C00400, hal_renesas",
+        " * R9A09G056N wdt_iodefine.h).  The upstream SoC devicetree",
+        " * (arm/renesas/rz/rzv/r9a09g056.dtsi) declares no watchdog, and upstream's",
+        " * `renesas,rz-wdt` driver cannot bind RZ/V2N, so the node uses the alp-sdk",
+        " * driver zephyr/drivers/watchdog/wdt_renesas_rzv.c (compatible",
+        " * `renesas,rzv-wdt`; alp-sdk#2660).  DISABLED by default: an expiry resets the",
+        " * WHOLE SoM, not just the M33, so a product opts in with `&wdt0 { status =",
+        ' * "okay"; };`.  <alp/wdt.h> then reaches it through alias alp-wdt0.  Enabling it',
+        " * also needs the CPG module clocks held for the CM33 (renesas,cm33-owned-clocks,",
+        " * docs/hil/rzv-wdt0-cm33.md).  clock-freq is the WDT0 counting clock, derived",
+        " * from the A55 side's fixed ~175 ms period (16384 counts at /256 = 24 MHz) and NOT yet",
+        " * read back on silicon.",
+        " */",
+        "&{/soc} {",
+        "\twdt0: watchdog@41c00400 {",
+        '\t\tcompatible = "renesas,rzv-wdt";',
+        "\t\treg = <0x41c00400 0x10>;",
+        "\t\tclock-freq = <24000000>;",
+        '\t\tstatus = "disabled";',
+        "\t};",
+        "};",
     ]
-    lines += list(_V2N_WDT0_MID_OPENAMP if has_openamp else _V2N_WDT0_MID_PLAIN)
-    lines += list(_V2N_WDT0_TAIL)
     if has_openamp:
         lines += list(_V2N_OPENAMP_TAIL)
     lines.append("")
