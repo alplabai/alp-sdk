@@ -1,4 +1,4 @@
-### Fixed — RZ/V2N kernel layer: hold the CM33 watchdog clocks, log ICU bus errors, add PDM clocks, drop the Linux P95 hog, trim PCIe endpoint options (RZ/V2N audit CM33-05, IO-02, MM-02/MM-X2, PCIE-4, PCIE-5)
+### Fixed — RZ/V2N kernel layer: hold the CM33 watchdog clocks, log ICU bus errors, add PDM clocks, drop the Linux P95 hog, trim PCIe endpoint options (RZ/V2N audit CM33-05, IO-02, MM-02/MM-X2, PCIE-4, PCIE-5) (#2660)
 
 Five kernel-recipe changes from the RZ/V2N bring-up audit, none bench-verified:
 
