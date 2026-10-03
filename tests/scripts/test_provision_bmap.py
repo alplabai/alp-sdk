@@ -486,10 +486,11 @@ def test_writer_skips_a_large_zero_gap_without_buffering_it(tmp_path):
     code = ("import resource, runpy, sys; sys.argv = sys.argv[1:]; "
             "resource.setrlimit(resource.RLIMIT_AS, (200 << 20, 200 << 20)); "
             "runpy.run_path(sys.argv[0], run_name='__main__')")
-    try:
-        import resource  # noqa: F401  (POSIX only: the address-space cap proves the bound)
+    # The address-space cap proves the bound; only Linux enforces RLIMIT_AS (macOS refuses
+    # to lower it with "current limit exceeds maximum limit", Windows has no resource module).
+    if sys.platform.startswith("linux"):
         argv = [sys.executable, "-c", code]
-    except ImportError:
+    else:
         argv = [sys.executable]
     with open(gz, "rb") as f:
         p = subprocess.run(argv + [str(bmap_writer.__file__), str(dev), str(BS), str(rng), str(size)],
