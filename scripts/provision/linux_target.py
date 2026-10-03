@@ -294,17 +294,20 @@ def mtd_erasesize(t: LinuxTarget, mtd: int) -> int:
     return int(t.run(f"cat /sys/class/mtd/mtd{mtd}/erasesize").stdout.strip())
 
 
-def mtd_write_verify(t: LinuxTarget, mtd: int, local: Path, limit: int | None = None, store=None) -> str:
-    """Erase ceil(size/erasesize) blocks from 0, write, read back, md5-compare."""
+def mtd_write_verify(t: LinuxTarget, mtd: int, local: Path, limit: int | None = None, store=None,
+                     offset: int = 0) -> str:
+    """Erase ceil(size/erasesize) blocks from `offset` (erase-aligned), write, read back, md5-compare."""
     data_len = local.stat().st_size
     if data_len == 0:
         raise ValueError(f"{local} is empty")
     es = mtd_erasesize(t, mtd)
+    if offset % es:
+        raise ValueError(f"{local.name}: offset {offset:#x} is not aligned to the {es:#x} erase size of mtd{mtd}")
     blocks = -(-data_len // es)
-    if limit is not None and blocks * es > limit:
+    if limit is not None and offset + blocks * es > limit:
         raise ValueError(f"{local.name}: erase of {blocks * es:#x} bytes on mtd{mtd} would reach {limit:#x}")
     part = int(t.run(f"cat /sys/class/mtd/mtd{mtd}/size").stdout.strip())
-    if blocks * es > part:
+    if offset + blocks * es > part:
         raise ValueError(f"{local.name} ({data_len} bytes) does not fit mtd{mtd} ({part:#x})")
     want = _host_md5(local)
     remote = f"/tmp/{local.name}"
@@ -313,9 +316,9 @@ def mtd_write_verify(t: LinuxTarget, mtd: int, local: Path, limit: int | None = 
         if t.md5(remote) != want:
             raise BenchError(f"{remote}: copy on the target does not match {local.name}")
         dev = f"/dev/mtd{mtd}"
-        t.run(f"flash_erase {dev} 0 {blocks}", timeout=600.0)
-        t.run(f"mtd_debug write {dev} 0 {data_len} {shlex.quote(remote)}", timeout=600.0)
-        got = t.md5(dev, 0, data_len)
+        t.run(f"flash_erase {dev} {offset} {blocks}", timeout=600.0)
+        t.run(f"mtd_debug write {dev} {offset} {data_len} {shlex.quote(remote)}", timeout=600.0)
+        got = t.md5(dev, offset, data_len)
     finally:
         t.run(f"rm -f {shlex.quote(remote)}", check=False)
     if got != want:
@@ -418,6 +421,8 @@ def rootfs_write_verify(t: LinuxTarget, emmc: str, wic_gz: Path, timeout: float 
 
 
 RANGES_PATH = "/tmp/alp-bmap-ranges"
+# before any read that must come from the media (the bmap readback, functional_test's eMMC read)
+DROP_CACHES = "sync; echo 3 > /proc/sys/vm/drop_caches"
 WRITER = Path(__file__).with_name("bmap_writer.py")
 WRITER_PATH = "/tmp/alp-bmap-writer.py"
 
@@ -437,7 +442,7 @@ def put_ranges(t: LinuxTarget, bm: bmap.Bmap) -> None:
 def md5_ranges(t: LinuxTarget, dev: str, bm: bmap.Bmap) -> str:
     """md5 of the mapped ranges of dev, concatenated (the ranges file must be on the board)."""
     # drop the page cache first: the readback must come from the media, not from what was written
-    t.run("sync; echo 3 > /proc/sys/vm/drop_caches", check=False)
+    t.run(DROP_CACHES, check=False)
     out = t.run(f"{{ while read s c <&3; do dd if={dev} bs={bm.block_size} skip=$s count=$c "
                 f"2>/dev/null; done; }} 3<{RANGES_PATH} | md5sum", timeout=1800.0).stdout.split()
     if not out or not re.fullmatch(r"[0-9a-f]{32}", out[0]):
@@ -502,8 +507,9 @@ def _parse_bytes(out: str, n: int) -> bytes:
     return bytes(int(x, 16) for x in toks)
 
 
-def _xfer(t: LinuxTarget, bus: int, addr: int, write: bytes, read_len: int, check: bool = True) -> bytes | None:
-    """ONE i2ctransfer invocation: optional write msg, optional repeated-start read."""
+def xfer_cmd(bus: int, addr: int, write: bytes, read_len: int, force: bool = False) -> str:
+    """The ONE i2ctransfer command line of a transfer: optional write msg, optional
+    repeated-start read. ``force`` adds -f (an address a kernel driver owns)."""
     if not write and not read_len:
         raise ValueError("empty i2c transfer")
     msgs = []
@@ -511,7 +517,12 @@ def _xfer(t: LinuxTarget, bus: int, addr: int, write: bytes, read_len: int, chec
         msgs.append(f"w{len(write)}@{addr:#04x} " + " ".join(f"{b:#04x}" for b in write))
     if read_len:
         msgs.append(f"r{read_len}" if write else f"r{read_len}@{addr:#04x}")
-    r = t.run(f"i2ctransfer -y {bus} " + " ".join(msgs), check=check)
+    return f"i2ctransfer {'-f ' if force else ''}-y {bus} " + " ".join(msgs)
+
+
+def _xfer(t: LinuxTarget, bus: int, addr: int, write: bytes, read_len: int, check: bool = True) -> bytes | None:
+    """ONE i2ctransfer invocation: optional write msg, optional repeated-start read."""
+    r = t.run(xfer_cmd(bus, addr, write, read_len), check=check)
     if r.rc != 0:
         return None
     return _parse_bytes(r.stdout, read_len) if read_len else b""
@@ -631,9 +642,17 @@ def gd32_bridge_version(t: LinuxTarget, bus: int, addr: int = 0x70) -> tuple[int
     Asking the bridge beats grepping dmesg: the driver logs the protocol only if the
     GD32 answers AT PROBE, which a GD32 still held in reset (ACT88760 GPIO4 not yet
     released) never does."""
+    return gd32_parse_version(t.run(gd32_version_cmd(bus, addr)).stdout)
+
+
+def gd32_version_cmd(bus: int, addr: int = 0x70) -> str:
+    """The GET_VERSION i2ctransfer line (frame: see gd32_bridge_version)."""
     crc = _crc16_ccitt_false(b"\x01")
-    r = t.run(f"i2ctransfer -f -y {bus} w4@{addr:#04x} 0x00 0x01 {crc & 0xFF:#04x} {crc >> 8:#04x} r6")
-    rsp = _parse_bytes(r.stdout, 6)
+    return xfer_cmd(bus, addr, bytes((0x00, 0x01, crc & 0xFF, crc >> 8)), 6, force=True)
+
+
+def gd32_parse_version(out: str) -> tuple[int, int, int]:
+    rsp = _parse_bytes(out, 6)
     if _crc16_ccitt_false(rsp[:4]) != rsp[4] | rsp[5] << 8:
         raise BenchError(f"GD32 GET_VERSION reply CRC mismatch: {rsp.hex(' ')}")
     if rsp[0] != 0:

@@ -53,6 +53,16 @@ def _bmap_problem(bundle_dir: Path, doc: dict) -> str | None:
     return None
 
 
+def _cm33_problem(bundle_dir: Path, doc: dict) -> str | None:
+    """cm33 is the stored (padded) image BL2 loads raw; run the flash runner's sanity checks on it.
+    Checked only when the file sits beside the bundle."""
+    c = next((c for c in doc["components"] if c["role"] == "cm33"), None)
+    if c is None or not (bundle_dir / c["file"]).is_file():
+        return None
+    from provision import gates  # lazy: only bundles carrying a cm33 image need it
+    return "; ".join(gates.cm33_problems((bundle_dir / c["file"]).read_bytes())) or None
+
+
 def _validate(path: Path, validator: jsonschema.Draft202012Validator, pubkey_path=None, require_signature=False) -> int:
     rel = path.name
     try:
@@ -77,6 +87,10 @@ def _validate(path: Path, validator: jsonschema.Draft202012Validator, pubkey_pat
     if (why := _bmap_problem(path.parent, doc)):
         print(f"FAIL {rel}")
         print(f"  · system_image_bmap: {why}")
+        return 1
+    if (why := _cm33_problem(path.parent, doc)):
+        print(f"FAIL {rel}")
+        print(f"  · cm33: {why}")
         return 1
     sig = doc.get("signature")
     if sig:

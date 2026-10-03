@@ -30,12 +30,14 @@ import tempfile
 import time
 import zlib
 from collections.abc import Callable
+
+import yaml
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import TypeVar
 
-from provision import bmap, dxm1, gates, ledger_out, payload_store, uboot
+from provision import bmap, dxm1, functest, gates, ledger_out, payload_store, uboot
 from provision import linux_target as lt
 from provision.bench import Bench, BenchError, ExpectTimeout
 from provision.console_target import ConsoleTarget
@@ -59,6 +61,11 @@ IP_WAIT_S = 120.0     # boot_sd_linux: how long a console login may wait for DHC
 IP_POLL_S = 5.0
 LOCK_BIT = 0x02
 PSU_CURRENT_WARN_A = 0.40   # census screen for the PHY-regulator fault; warns only, never fails
+# After a reset-and-run the GD32 needs its bootloader + clock-up before it answers GET_VERSION.
+# ponytail: 10 tries x 1 s, taken from the old fixed 5 s settle; no bench timing behind it yet.
+BRIDGE_TRIES = 10
+BRIDGE_GAP_S = 1.0
+I2C_WEDGE_DMESG = "SCL is stuck low"
 
 
 # --------------------------------------------------------------------------
@@ -115,6 +122,7 @@ class Ctx:
     linux: object | None = None           # LinuxTarget (or a duck-typed fake)
     tier_markers: dict | None = None
     expected_registers: dict | None = None
+    functest_expect: dict | None = None   # functional_test pass criteria (None: the public defaults)
     allow_tier_mismatch: str | None = None
     accept_cid_change: str | None = None  # operator escape: the eMMC was legitimately replaced
     reprovision_from: Path | None = None
@@ -802,6 +810,11 @@ class Preflight(Step):
             results.append(gates.GateResult("identity_table", True, "N24S128 frame table self-check ok"))
         except (ValueError, AssertionError) as e:
             results.append(gates.GateResult("identity_table", False, str(e)))
+        try:
+            n = len(functest.build(ctx))        # pure: bench.yaml functional_test + the expected values
+            results.append(gates.GateResult("functional_test_config", True, f"{n} checks"))
+        except (ValueError, KeyError, TypeError, OSError, yaml.YAMLError) as e:
+            results.append(gates.GateResult("functional_test_config", False, f"{type(e).__name__}: {e}"))
         if ctx.execute:
             # pmic_verify needs it; refuse here, not after every destructive step.
             results.append(gates.GateResult("pmic_expect", bool(ctx.expected_registers),
@@ -1128,6 +1141,38 @@ class WriteXspi(Step):
                            payload_store.evidence(store) if ctx.execute else None)
 
 
+class WriteCm33(Step):
+    """The CM33 image into mtd1 at 0x1A0000, where BL2 loads it from on an xSPI boot. The
+    bundle stores the padded image, so the md5 readback covers exactly what is written."""
+    name = "write_cm33"
+
+    @staticmethod
+    def _has_image(ctx) -> bool:
+        return any(c.get("role") == "cm33" for c in ctx.bundle.get("components", []))
+
+    def probe(self, ctx):
+        if not self._has_image(ctx):
+            return Satisfied(reason="bundle has no cm33 component")
+        t = ctx.need_linux()
+        if t is None:
+            return Unknown("no Linux target")
+        data = ctx.artefact_bytes("cm33")
+        got = t.md5("/dev/mtd1", gates.CM33_REGION_OFFSET, len(data))
+        if got != _md5(data):
+            return Unsatisfied(f"mtd1+{gates.CM33_REGION_OFFSET:#x} != bundle cm33")
+        return Satisfied({"xspi_cm33_md5": got, "xspi_cm33_size": str(len(data))})
+
+    def run(self, ctx):
+        t = ctx.need_linux()
+        store = ctx.open_payload_store(t)
+        p = ctx.artefact("cm33")
+        ctx.mutate(f"mtd1+{gates.CM33_REGION_OFFSET:#x} <- cm33 {p.name} ({p.stat().st_size} bytes): "
+                   "flash_erase, mtd_debug write, md5 readback",
+                   lambda: lt.mtd_write_verify(t, 1, p, store=store, offset=gates.CM33_REGION_OFFSET))
+        return self.result(ctx, f"cm33 -> mtd1+{gates.CM33_REGION_OFFSET:#x} (BL2 starts it on the next xSPI boot)",
+                           payload_store.evidence(store) if ctx.execute else None)
+
+
 class WriteEmmcBoot(Step):
     name = "write_emmc_boot"
 
@@ -1257,9 +1302,22 @@ class WriteRootfs(Step):
                            else "would write the wic and check the rootfs", ev)
 
 
+def _latest_entry(ctx, name: str) -> dict | None:
+    """The newest state-file entry of step ``name``: this run's group, else the newest
+    superseded group that holds one. Whatever its status."""
+    cur = ctx.state.get("steps", {}).get(name)
+    if cur is not None:
+        return cur
+    g = next((g for g in reversed(ctx.state.get("superseded", [])) if name in g.get("steps", {})), None)
+    return g["steps"][name] if g else None
+
+
 class Census(Step):
     name = "census"
     always_run = True
+    # CensusFinal: the unit runs its shipping image after a plain cold boot, where
+    # cold_boot_test owns the ACT88760 GPIO4 keys (reg 0x10 reads released whoever released it).
+    reads_gpio4_otp = True
 
     def run(self, ctx):
         t = ctx.need_linux()
@@ -1272,7 +1330,7 @@ class Census(Step):
         if why := leftover_dxuart2_swap(ctx):
             raise Refused(why)
         facts, notes = lt.census(t, bus, sizes, dxm1_present=ctx.family == "v2n-m1")
-        if bus["pmic"] is not None:
+        if bus["pmic"] is not None and self.reads_gpio4_otp:
             try:
                 # gd32_flash runs BEFORE census. When it applied the volatile
                 # release it already recorded the OTP value it saw (0x88) and
@@ -1307,9 +1365,47 @@ class Census(Step):
                         warn = (f"WARNING: supply current {amps:.3f} A > {PSU_CURRENT_WARN_A:.2f} A at "
                                 "census (normal 0.17-0.29 A at idle): suspect the PHY regulator output "
                                 "capacitor fault")
+        if any(str(v).startswith("unread") for v in facts.values()):
+            # name the usual cause of unread I2C keys instead of leaving a bare read error
+            try:
+                n = t.run(f"dmesg | grep -c '{I2C_WEDGE_DMESG}'", check=False).stdout.strip()
+            except BenchError:
+                n = ""
+            if n.isdigit() and int(n):
+                notes.append(f"I2C bus wedged: {n} '{I2C_WEDGE_DMESG}' line(s) in dmesg (a GD32 left halted "
+                             "over SWD holds SCL); the bus stays dead until the next power cycle, "
+                             "census_final re-reads these keys after the final cold boot")
         ctx.step_logs[self.name] = "\n".join(notes + ([warn] if warn else []))
         return self.result(ctx, f"{len(facts)} keys" + (f"; unread: {'; '.join(notes)}" if notes else "")
                            + (f"; {warn}" if warn else ""), facts, status="done")
+
+
+class CensusFinal(Census):
+    """The census again, on the unit as shipped: after cold_boot_test's last cold boot (xSPI
+    boot, eMMC root). Its values replace the earlier census's, so a key the first census could
+    not read (`unread (...)`, e.g. on a wedged I2C bus) is read here; one that is still unread
+    stays unread and blocks the ship check."""
+    name = "census_final"
+    reads_gpio4_otp = False
+    NOT_REREAD = "not re-read by census_final"
+
+    def run(self, ctx):
+        res = super().run(ctx)
+        if res.status != "done":
+            return res
+        # A census group that fails drops its keys, and a key that is absent here would leave
+        # the first census's value (read in the microSD boot) standing in the ledger. Every key
+        # the first census recorded and this one did not produce is therefore marked unread.
+        first = (_latest_entry(ctx, Census.name) or {}).get("evidence") or {}
+        lost = sorted(k for k in first if k not in res.evidence and not k.startswith("act88760_gpio4_")
+                      and k != "power_cut")
+        for k in lost:
+            res.evidence[k] = lt.unread(self.NOT_REREAD)
+        if lost:
+            res.detail += f"; {len(lost)} key(s) of the first census not re-read, marked unread: {', '.join(lost)}"
+            ctx.step_logs[self.name] = "\n".join(filter(None, [ctx.step_logs.get(self.name, ""),
+                                                               "not re-read: " + ", ".join(lost)]))
+        return res
 
 
 class EepromManifest(Step):
@@ -1397,14 +1493,58 @@ class Gd32Flash(Step):
             raise Refused("no --gd32-fw DIR (bootloader.bin, ota-meta.bin, slot-a.bin)")
         return [(Path(ctx.gd32_fw) / f, a, k) for f, a, k in GD32_IMAGES]
 
-    def _readback(self, ctx, images, probe=None) -> dict[str, str]:
+    @staticmethod
+    def _resume(ctx, probe) -> str:
+        """Reset-and-run after anything that halts the core: a savebin dump always does, a
+        loadbin does when it fails part-way. A halted GD32 still ACKs 0x70 and stretches SCL,
+        which wedges the board-management I2C bus for the rest of the boot. Never raises (it
+        runs in ``finally``); returns "" or the error."""
+        ctx.plan_log.append("reset/run the GD32 (a readback or a failed write leaves the core halted)")
+        try:
+            probe.reset_run()
+            ctx._cache.pop("gd32_halted", None)
+            return ""
+        except Exception as e:      # noqa: BLE001 -- runs on a failure path: must never replace that failure
+            err = f"{type(e).__name__}: {e}" if not isinstance(e, BenchError) else (str(e) or "reset-run failed")
+            ctx.plan_log.append(f"NOTE: GD32 reset-and-run FAILED, the core may still be halted: {err}")
+            ctx._cache["gd32_halted"] = err      # run() refuses to go on with a core it knows is halted
+            return err
+
+    @staticmethod
+    def _bridge_alive(ctx, t) -> str:
+        """GET_VERSION from the bridge, polled BRIDGE_TRIES times BRIDGE_GAP_S apart.
+        Returns "GD32 bridge protocol a.b.c"; BenchError when it never answers."""
+        bus, err = ctx.i2c("brd"), None
+        for attempt in range(BRIDGE_TRIES):
+            try:
+                return "GD32 bridge protocol %d.%d.%d" % lt.gd32_bridge_version(t, bus, GD32_BRIDGE_ADDR)
+            except BenchError as e:
+                err = e
+            if attempt < BRIDGE_TRIES - 1:
+                time.sleep(BRIDGE_GAP_S)
+        raise BenchError(f"the GD32 bridge at {GD32_BRIDGE_ADDR:#04x} did not answer GET_VERSION in "
+                         f"{BRIDGE_TRIES} tries after the reset-and-run: i2c-{bus} may be wedged by a core "
+                         f"left halted over SWD (dmesg: '{I2C_WEDGE_DMESG}'); power-cycle the unit. Last error: {err}")
+
+    def _readback(self, ctx, images, probe=None, resume: bool = True) -> dict[str, str]:
+        """md5 of each image region, read with savebin. savebin HALTS the core and leaves it
+        halted, so the core is reset-and-run afterwards, also when a savebin raises
+        (``resume=False`` only for a caller that does the same in its own ``finally``)."""
         probe = probe or ctx.bench.probe
         ev = {}
-        with tempfile.TemporaryDirectory(prefix="gd32_") as td:
-            for i, (p, addr, key) in enumerate(images):
-                out = Path(td) / f"rb{i}.bin"
-                probe.savebin(out, addr, p.stat().st_size)   # fresh session each
-                ev[key] = _md5(out.read_bytes())
+        try:
+            with tempfile.TemporaryDirectory(prefix="gd32_") as td:
+                for i, (p, addr, key) in enumerate(images):
+                    out = Path(td) / f"rb{i}.bin"
+                    probe.savebin(out, addr, p.stat().st_size)   # fresh session each
+                    ev[key] = _md5(out.read_bytes())
+        except (BenchError, OSError) as e:
+            # the readback's own error stays the reason; a failed resume is appended to it
+            if resume and (err := self._resume(ctx, probe)):
+                raise BenchError(f"{e}; ALSO the reset-and-run failed, GD32 core left halted: {err}") from e
+            raise
+        if resume and (err := self._resume(ctx, probe)):
+            raise BenchError(f"GD32 core left halted: the reset-and-run after the readback failed: {err}")
         return ev
 
     def probe(self, ctx):
@@ -1430,6 +1570,14 @@ class Gd32Flash(Step):
         for p, _a, key in images:
             if ev[key] != _md5(p.read_bytes()):
                 return Unsatisfied(f"{p.name} not on the GD32")
+        # The images are on the chip and the core was just reset: it must answer again, or the
+        # readback left the bus wedged and the next step (census) would read nothing on it.
+        # Without a Linux target (an external probe, unit not booted) nobody can ask.
+        if ctx.linux is not None:
+            try:
+                ev["gd32_bridge_after_readback"] = self._bridge_alive(ctx, ctx.linux)
+            except (BenchError, Refused) as e:
+                return Unknown(f"firmware matches, but {e}")
         return Satisfied({**ev, "gd32_dp_id": f"0x{dp:08x}", **self._fw_version(ctx)})
 
     @staticmethod
@@ -1476,8 +1624,8 @@ class Gd32Flash(Step):
         for p, addr, _key in images:
             ctx.mutate(f"loadbin {p.name} @ {addr:#010x}", lambda: None)
         ctx.mutate("verify each region with savebin in a FRESH probe session, md5", lambda: None)
-        ctx.mutate("reset/run the GD32", lambda: None)
-        ctx.mutate(f"GET_VERSION from the bridge at {GD32_BRIDGE_ADDR:#04x}", lambda: None)
+        ctx.mutate("reset/run the GD32 (also after a failed write or verify)", lambda: None)
+        ctx.mutate(f"GET_VERSION from the bridge at {GD32_BRIDGE_ADDR:#04x} (polled)", lambda: None)
         if via_console:
             ctx.mutate("cold cycle; re-check the IP", lambda: None)
         return self.result(ctx, "would flash the GD32", ev)
@@ -1489,9 +1637,22 @@ class Gd32Flash(Step):
             ev["gd32_flash_transport"] = "console (no network)"
         if not ctx.execute:
             return self._plan(ctx, ev, via_console)
+        if halted := ctx._cache.get("gd32_halted"):
+            # the pre-run probe's readback halted the core and its reset failed: say so in the
+            # step result instead of running into a dead I2C bus
+            raise BenchError(f"GD32 core left halted by the pre-run probe's readback (the reset-and-run failed: "
+                             f"{halted}); i2c-{ctx.i2c('brd')} is wedged until the next power cycle: "
+                             "power-cycle the unit and re-run")
         if t is not None:
             pmic = ctx.i2c("pmic")
-            if lt.act88760_gpio4_held(t, pmic):
+            try:
+                held = lt.act88760_gpio4_held(t, pmic)
+            except BenchError as e:
+                # the pre-run probe's readback may have left the bus dead: say so, write nothing
+                raise BenchError(f"{e}; i2c-{pmic} is unreadable before the flash: if dmesg shows "
+                                 f"'{I2C_WEDGE_DMESG}', a GD32 left halted over SWD holds the bus; "
+                                 "power-cycle the unit and re-run") from e
+            if held:
                 ev["act88760_gpio4_otp"] = f"{lt.ACT88760_GPIO4_OTP_DEFAULT:#04x}"
                 ev["act88760_gpio4_workaround"] = "provision (volatile 0x08)"
                 ctx.mutate("ACT88760 0x25 reg 0x10 = 0x08 (volatile GPIO4 / GD32_NRST release)",
@@ -1505,26 +1666,29 @@ class Gd32Flash(Step):
         if dp != GD32_DP_OK:
             why = GD32_DP_REFUSE.get(dp, "an unknown debug port")
             raise Refused(f"DP-ID {dp:#010x} is {why}; want {GD32_DP_OK:#010x}")
-        for p, addr, _key in images:
-            ctx.mutate(f"loadbin {p.name} @ {addr:#010x}", lambda q=p, a=addr: probe.loadbin(q, a))
-
         def verify():
-            got = self._readback(ctx, images, probe)
+            got = self._readback(ctx, images, probe, resume=False)     # resumed in the finally below
             for p, _a, key in images:
                 if got[key] != _md5(p.read_bytes()):
                     raise BenchError(f"GD32 readback of {p.name} does not match")
             return got
-        ev.update(ctx.mutate("verify each region with savebin in a FRESH probe session, md5", verify) or {})
-        ctx.mutate("reset/run the GD32", probe.reset_run)
-
-        def bridge():
-            # ponytail: fixed 5 s settle for the post-reset boot + clock-up; poll if it proves short
-            t.run("sleep 5", check=False)
-            v = lt.gd32_bridge_version(t, ctx.i2c("brd"), GD32_BRIDGE_ADDR)
-            return "GD32 bridge protocol %d.%d.%d" % v
-        line = ctx.mutate(f"GET_VERSION from the bridge at {GD32_BRIDGE_ADDR:#04x}", bridge)
-        if line:
-            ev["gd32_protocol"] = line
+        try:
+            for p, addr, _key in images:
+                ctx.mutate(f"loadbin {p.name} @ {addr:#010x}", lambda q=p, a=addr: probe.loadbin(q, a))
+            ev.update(ctx.mutate("verify each region with savebin in a FRESH probe session, md5", verify) or {})
+        except (BenchError, Refused, ValueError, OSError) as e:
+            # a failed loadbin or verify must not leave the core halted either; its own error
+            # stays the reason and a failed resume is appended to it
+            if err := self._resume(ctx, probe):
+                cls = Refused if isinstance(e, Refused) else BenchError
+                raise cls(f"{e}; ALSO the reset-and-run failed, GD32 core left halted: {err}") from e
+            raise
+        if resume_err := self._resume(ctx, probe):
+            raise BenchError(f"GD32 written and verified, but the reset-and-run failed (core left halted): {resume_err}")
+        # The bridge must answer before the step returns: census reads the same bus next.
+        if t is not None:
+            ev["gd32_protocol"] = ctx.mutate(f"GET_VERSION from the bridge at {GD32_BRIDGE_ADDR:#04x} (polled)",
+                                             lambda: self._bridge_alive(ctx, t))
         ev.update(self._fw_version(ctx))
         # the SSH path's probe wrapper scp's from the host; only the console path reads the store
         ev.update(payload_store.evidence(ctx._cache.get("gd32_store") if via_console else None))
@@ -1933,6 +2097,11 @@ class ColdBootTest(Step):
             if probs:
                 ctx.facts.update(ev)
                 raise Refused(f"cold cycle {i}/{n}: " + "; ".join(probs))
+            if i == 1 and n >= 2 and (functest.config(ctx).get("fixtures") or {}).get("rtc_backup"):
+                # functional_test's rtc_retention then has the remaining cold cycles to judge
+                ev["rtc_set_boot_id"] = ctx.mutate(
+                    "set the RTC from the host clock (fixture rtc_backup: retention is checked after "
+                    "the remaining cold cycles)", lambda: functest.rtc_set(ctx.linux))
         if ev.get("cold_boots_passed") != f"{n}/{n}":
             raise Refused(f"cold_boot_test observed {ev.get('cold_boots_passed', '0')} clean boots, want {n}/{n}")
         return self.result(ctx, f"{n}/{n} cold boots clean", ev)
@@ -1967,6 +2136,65 @@ class ClkgenVerify(Step):
                            f"boot line: {line!r}", ev, status="done")
 
 
+class FunctionalTest(Step):
+    """Every interface the unit can reach, tested on the unit as shipped: after cold_boot_test's
+    last cold boot (xSPI boot, eMMC root). The catalogue, the script and the judges are
+    provision/functest.py; the pass criteria are functest-expect-v2n.yaml + --functest-expect.
+
+    A step of its own rather than more of hil_smoke: hil_smoke shells out to the HiL runner
+    (built example binaries, one pass/fail for the whole spec directory, no bench.yaml
+    fixtures, nothing recorded per check), while this runs through the tool's own Linux
+    target in one remote invocation and records one `test_<check>` value per check.
+
+    A check that fails or cannot be read fails the step unless the expected-values file
+    lists it `informational`; a fixture the bench does not have is `skipped (no fixture:
+    ...)`, which never fails the step. The summary key `test_functional` is what the ship
+    check reads."""
+    name = "functional_test"
+    always_run = True
+
+    def run(self, ctx):
+        try:
+            x = ctx.functest_expect or functest.load_expect()
+            checks = functest.build(ctx, x)
+        except (ValueError, KeyError, TypeError, OSError, Refused) as e:
+            # preflight checks the same configuration; a run that starts past it still gets a verdict
+            return StepResult(self.name, "failed", f"functional test configuration: {e}",
+                              {functest.SUMMARY_KEY: lt.unread(e)} if ctx.execute else {})
+        fixtures = functest.config(ctx).get("fixtures") or {}
+        lanes, wall = functest.estimate(functest.applicable(checks, fixtures))
+        budget = "estimated %.0f s (lanes: %s)" % (wall, ", ".join(f"{k} {v:.1f}" for k, v in sorted(lanes.items())))
+        if not ctx.execute:
+            for c in checks:
+                off = c.fixture is not None and not fixtures.get(c.fixture)
+                ctx.mutate(f"{c.name}: {c.what}" + (f" [skipped: no fixture {c.fixture}]" if off else ""),
+                           lambda: None)
+            return self.result(ctx, f"would run {len(checks)} functional checks, {budget}")
+        try:
+            t = ctx.need_linux()
+            values, raw, seconds = functest.run(ctx, t, checks, x)
+        except (BenchError, Refused, OSError) as e:
+            # no verdict at all is recorded as one: the ship check needs `test_functional: pass`
+            return StepResult(self.name, "failed", f"functional test could not run: {e}",
+                              {functest.SUMMARY_KEY: lt.unread(e)})
+        bad = functest.blocking(values, checks, x)
+        info = sorted(n for n, v in values.items() if n not in bad and v.startswith(("fail", "unread")))
+        skipped = sorted(n for n, v in values.items() if v.startswith("skipped"))
+        # test_ft_<check>: a prefix of its own, so an operator-entered test_<name> is never touched
+        ev = {f"{functest.KEY_PREFIX}{n}": v for n, v in values.items()}
+        ev.update(functest.side_facts(ctx))
+        ev[functest.SUMMARY_KEY] = "pass" if not bad else functest._value("fail", ", ".join(bad))
+        ev["functional_test_seconds"] = f"{seconds:.1f}"
+        ctx.step_logs[self.name] = "\n".join(
+            [f"{n}: {v}" for n, v in values.items()]
+            + [f"wall time {seconds:.1f} s; {budget}", "--- script output ---", _elide_long_lines(raw)])
+        detail = (f"{sum(v.startswith('pass') for v in values.values())}/{len(values)} passed in {seconds:.1f} s"
+                  + (f"; FAILED: {'; '.join(f'{n}: {values[n]}' for n in bad)}" if bad else "")
+                  + (f"; informational: {', '.join(info)}" if info else "")
+                  + (f"; skipped: {', '.join(skipped)}" if skipped else ""))
+        return StepResult(self.name, "failed" if bad else "done", detail, ev)
+
+
 class HilSmoke(Step):
     name = "hil_smoke"
     trust_run = True
@@ -1988,7 +2216,7 @@ class HilSmoke(Step):
         return self.result(ctx, "HiL smoke passed" if ctx.execute else "HiL spec validated", ev)
 
 
-FLASH_STEPS = ("write_xspi", "write_emmc_boot", "write_rootfs")
+FLASH_STEPS = ("write_xspi", "write_cm33", "write_emmc_boot", "write_rootfs")
 BUNDLE_FACTS = ("bl2_sha256", "rootfs_wic_sha256", "rootfs_bundle_version", "fip_sha256",
                 "fip_fdtfile", "fip_rail_string")
 
@@ -2027,6 +2255,16 @@ class Record(Step):
                 recovered[n] = (f" (step {n} from superseded run, tool_rev {str(g.get('tool_rev'))[:12]}, "
                                 f"{old.get('finished') or old.get('ts') or old.get('at') or 'time n/a'})", old)
         flashed = {n: v for n, v in recovered.items() if n in FLASH_STEPS}
+        # functional_test's verdict is its LATEST run's. A failed or interrupted run must not
+        # leave an earlier `test_functional: pass` standing in the unit record (e.g. `--only
+        # functional_test` failed, then `--only record`): its recorded verdict is written, or
+        # `unread` when it left none.
+        ft = _latest_entry(ctx, FunctionalTest.name)
+        if ft is not None and ft.get("status") not in ("done", "skipped"):
+            fev = {k: v for k, v in (ft.get("evidence") or {}).items() if k.startswith("test_")}
+            if not str(fev.get(functest.SUMMARY_KEY, "")).startswith(("fail", "unread")):
+                fev[functest.SUMMARY_KEY] = lt.unread(f"functional_test {ft.get('status')} in its latest run")
+            recovered[FunctionalTest.name] = ("", {"evidence": fev})
         # Newest wins: superseded-run facts first, then the current group's, then this run's.
         for note, old in sorted(recovered.values(), key=lambda v: not v[0]):
             facts.update(old.get("evidence") or {})
@@ -2151,8 +2389,8 @@ class SecurePageLock(Step):
 
 STEP_ORDER: list[type[Step]] = [
     Preflight, Detect, OpDsw1Scif, Bootstrap, OpDsw1EmmcInsertSd, BootSdLinux, Gd32Flash, WriteXspi,
-    WriteEmmcBoot, WriteRootfs, Census, EepromManifest, Dxm1NpuFlash, PmicVerify,
-    SecurePage, OpDsw1XspiRemoveSd, ColdBootTest, ClkgenVerify, HilSmoke, Record,
+    WriteCm33, WriteEmmcBoot, WriteRootfs, Census, EepromManifest, Dxm1NpuFlash, PmicVerify,
+    SecurePage, OpDsw1XspiRemoveSd, ColdBootTest, CensusFinal, ClkgenVerify, FunctionalTest, HilSmoke, Record,
 ]
 STEP_NAMES = [s.name for s in STEP_ORDER]
 

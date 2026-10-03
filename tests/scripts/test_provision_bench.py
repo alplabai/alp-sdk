@@ -214,6 +214,8 @@ class _PsuSock:
     def recv(self, n):
         if self.psu.last.startswith("MEAS:CURR?"):
             return self.psu.amps.encode() + bytes([10])
+        if self.psu.last.startswith("MEAS:VOLT?"):
+            return self.psu.volts.encode() + bytes([10])
         return b"0x14" + bytes([10]) if self.psu.on else b"0x4" + bytes([10])
 
     def close(self):
@@ -225,6 +227,7 @@ class _Psu:
         self.sent, self.connects, self.reset_next, self.on = [], 0, False, False
         self.swallow, self.stuck_on = 0, False   # OUTP commands eaten / OFF ignored
         self.last, self.amps = "", "0.172"       # last command seen / the MEAS:CURR? reply
+        self.volts = "15.001"                    # the MEAS:VOLT? reply
 
     def connect(self, addr, timeout):
         self.connects += 1
@@ -652,3 +655,29 @@ def test_scpi_current_rejects_a_non_finite_reading(reply):
     psu.amps = reply
     with pytest.raises(BenchError, match="not a number"):
         psu.power(1).current()
+
+
+def test_scpi_voltage_is_one_measurement_of_the_configured_channel_only():
+    psu = _Psu()
+    p = psu.power(1)
+    p.on()
+    assert p.voltage() == 15.001
+    assert psu.sent[-1] == "MEAS:VOLT? CH1" and psu.connects == 1
+    assert not any("CH2" in c for c in psu.sent)
+    p2 = _Psu().power(2)
+    p2.voltage()
+    assert p2._connect.__self__.sent == ["MEAS:VOLT? CH2"]
+
+
+@pytest.mark.parametrize("reply", ["ERR", "", "nan", "inf"])
+def test_scpi_voltage_rejects_a_reply_that_is_not_a_finite_number(reply):
+    psu = _Psu()
+    psu.volts = reply
+    with pytest.raises(BenchError, match="MEAS:VOLT. CH1: not a number"):
+        psu.power(1).voltage()
+
+
+def test_power_kinds_without_a_meter_return_none_for_voltage():
+    from .provision_fakes import FakePower
+    assert FakePower().voltage() is None
+    assert bench.LabgridPower("place").voltage() is None

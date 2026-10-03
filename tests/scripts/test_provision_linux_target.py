@@ -886,3 +886,25 @@ def test_unread_values_never_contain_a_newline_so_the_ledger_write_cannot_fail()
     bad = {k: v for k, v in facts.items() if v.startswith("unread")}
     assert "act88760_gpio_regs" in bad and "eth0_phy_id_raw" in bad
     assert not [k for k, v in facts.items() if "\n" in v or "\r" in v]
+
+
+def test_mtd_write_at_offset_erases_writes_and_reads_back_there(tmp_path):
+    img = tmp_path / "cm33.bin"
+    img.write_bytes(b"\x5a" * 0x5000)
+    good = md5(img.read_bytes())
+    t, fake = target([("erasesize", "65536\n"), ("mtd1/size", "4194304\n"),
+                      ("md5sum", f"{good}  -\n"), ("flash_erase|mtd_debug|rm -f", "")])
+    assert lt.mtd_write_verify(t, 1, img, offset=lt.CM33_REGION_OFFSET) == good
+    assert "flash_erase /dev/mtd1 1703936 1" in fake.commands
+    assert "mtd_debug write /dev/mtd1 1703936 20480 /tmp/cm33.bin" in fake.commands
+
+
+def test_mtd_write_refuses_an_unaligned_offset_and_one_past_the_end(tmp_path):
+    img = tmp_path / "cm33.bin"
+    img.write_bytes(b"\0" * 16)
+    t, fake = target([("erasesize", "65536\n"), ("mtd1/size", "1703936\n")])
+    with pytest.raises(ValueError, match="not aligned"):
+        lt.mtd_write_verify(t, 1, img, offset=lt.CM33_REGION_OFFSET + 4096)
+    with pytest.raises(ValueError, match="does not fit"):
+        lt.mtd_write_verify(t, 1, img, offset=lt.CM33_REGION_OFFSET)
+    assert not any("flash_erase" in c for c in fake.commands)
