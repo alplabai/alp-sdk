@@ -136,15 +136,19 @@ def _want(x: dict, key: str):
     return cur
 
 
-def judge_boot_mode(word: int, silicon: str, x: dict) -> tuple[str, bool]:
-    """(decoded text, matches the expectation) for a latched boot-strap word, judged against
+def describe_boot_mode(got: dict) -> str:
+    return f"debug_en={got['soc_boot_debug_en']} boot_device={got['soc_boot_device']} md_boot={got['soc_md_boot']}"
+
+
+def judge_boot_mode(word: int, silicon: str, x: dict) -> tuple[dict, bool]:
+    """(decoded ledger keys, matches the expectation) for a latched boot-strap word, judged against
     ``boot_mode`` of the expectations file. The single judge of functional_test's boot_mode and
     cold_boot_test. Raises on a missing description/expectation (NoExpect, KeyError, ValueError)."""
     got = lt.decode_lsi_mode(word, lt.sys_lsi_spec(silicon))
-    val = f"debug_en={got['soc_boot_debug_en']} boot_device={got['soc_boot_device']} md_boot={got['soc_md_boot']}"
-    ok = (got["soc_boot_debug_en"] == str(_want(x, "boot_mode.debug_enable"))
+    # int(): an overlay may write the flag as bool or 0/1
+    ok = (int(got["soc_boot_debug_en"]) == int(_want(x, "boot_mode.debug_enable"))
           and got["soc_boot_device"] == _want(x, "boot_mode.boot_device"))
-    return val, ok
+    return got, ok
 
 
 # --------------------------------------------------------------------------
@@ -467,9 +471,10 @@ def build(ctx, x: dict | None = None) -> list[Check]:
 
     def j_boot_mode(o):
         try:
-            val, ok = judge_boot_mode(int(o.strip().splitlines()[-1], 16), str(ctx.preset["silicon"]), x)
+            got, ok = judge_boot_mode(int(o.strip().splitlines()[-1], 16), str(ctx.preset["silicon"]), x)
         except (KeyError, ValueError, OSError, IndexError) as e:
             raise Unread(f"SYS_LSI_MODE not readable or not described: {e}") from e
+        val = describe_boot_mode(got)
         if not ok:
             raise Fail(val)
         return val
@@ -478,7 +483,7 @@ def build(ctx, x: dict | None = None) -> list[Check]:
     except (KeyError, ValueError, OSError):
         _lsi_mode_cmd = "echo 'ALPUNREAD no sys_lsi description for this SoC'"
     add("boot_mode", "the SoC latched normal boot mode, not debug mode (MD_BOOT3 low), from the boot device it ships with",
-        _lsi_mode_cmd, j_boot_mode)
+        _lsi_mode_cmd, j_boot_mode, blocking=True)       # blocking: an overlay cannot demote the debug-mode check
 
     # ---- Ethernet -----------------------------------------------------------------------------
     nports = int((ctx.preset.get("on_module") or {}).get("ethernet_phy_count") or 2)

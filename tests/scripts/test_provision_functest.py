@@ -607,6 +607,20 @@ def test_a_private_overlay_can_make_a_check_blocking_or_informational(tmp_path):
     assert res.evidence["test_functional"] == "fail (rtc_backup_mode, i2c_tps628640_44)"   # eth_phy_id is informational now
 
 
+def test_boot_mode_stays_blocking_when_an_overlay_lists_it_informational_and_takes_a_bool_flag(tmp_path):
+    over = tmp_path / "expect.yaml"
+    over.write_text("informational: [boot_mode]\nboot_mode: {debug_enable: false}\n", encoding="utf-8")
+    x = functest.load_expect(over)
+    assert x["boot_mode"]["debug_enable"] is False
+    ctx, _ = _setup(tmp_path, {"boot_mode": BAD["boot_mode"]}, functest_expect=x)
+    by = {c.name: c for c in functest.build(ctx)}
+    assert by["boot_mode"].blocking and "boot_mode" not in functest.informational(list(by.values()), x)
+    got, ok = functest.judge_boot_mode(0x3C06, str(ctx.preset["silicon"]), x)       # debug_en=0 vs `false`
+    assert ok and got["soc_boot_debug_en"] == "0"
+    assert not functest.judge_boot_mode(0x3E06, str(ctx.preset["silicon"]), x)[1]
+    assert _val(_run(ctx), "boot_mode").startswith("fail (debug_en=1")
+
+
 def test_ship_check_blocks_a_debug_mode_unit():
     cat = {"disposition": {"group": "d", "source": "", "mode": "manual", "ship_required": True}}
     unit = {"disposition": "ship", "test_functional": "pass", "soc_boot_debug_en": "1"}

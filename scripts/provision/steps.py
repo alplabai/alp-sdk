@@ -2063,11 +2063,11 @@ class ColdBootTest(Step):
             try:
                 if not mode:
                     raise ValueError("no SYS_LSI_MODE notice from BL2")
-                decoded, ok = functest.judge_boot_mode(int(mode, 16), str(ctx.preset["silicon"]),
+                got, ok = functest.judge_boot_mode(int(mode, 16), str(ctx.preset["silicon"]),
                                                        ctx.functest_expect or functest.load_expect())
                 if not ok:
-                    probs.append(f"SYS_LSI_MODE {mode} ({decoded}) is not the expected boot mode")
-                    if lt.decode_lsi_mode(int(mode, 16), lt.sys_lsi_spec(ctx.preset["silicon"]))["soc_boot_debug_en"] == "1":
+                    probs.append(f"SYS_LSI_MODE {mode} ({functest.describe_boot_mode(got)}) is not the expected boot mode")
+                    if got["soc_boot_debug_en"] == "1":
                         probs.append(ledger_out.DEBUG_MODE_REASON)
             except (KeyError, ValueError, OSError, functest.NoExpect) as e:
                 probs.append(f"SYS_LSI_MODE {mode or 'unread'} not judged: {e}")

@@ -45,7 +45,7 @@ def sys_lsi_spec(silicon: str) -> dict:
     vendor, family, part = silicon.split(":")
     doc = json.loads((REPO / "metadata" / "socs" / vendor / family / f"{part}.json").read_text(encoding="utf-8"))
     if "boot_strap" not in doc:
-        raise ValueError(f"{silicon}: the SoC description has no boot_strap block")
+        raise ValueError(f"{silicon}: no boot_strap block in the SoC description")
     return doc["boot_strap"]
 
 
