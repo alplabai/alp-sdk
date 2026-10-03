@@ -1,8 +1,7 @@
-### Fixed — RZ/V2N kernel layer: hold the CM33 watchdog clocks, log ICU bus errors, add PDM clocks, drop the Linux P95 hog, trim PCIe endpoint options (RZ/V2N audit CM33-05, IO-02, MM-02/MM-X2, PCIE-4, PCIE-5) (#2660)
+### Fixed — RZ/V2N kernel layer: log ICU bus errors, add PDM clocks, drop the Linux P95 hog, trim PCIe endpoint options (RZ/V2N audit IO-02, MM-02/MM-X2, PCIE-4, PCIE-5) (#2660)
 
-Five kernel-recipe changes from the RZ/V2N bring-up audit, none bench-verified:
+Four kernel-recipe changes from the RZ/V2N bring-up audit, none bench-verified:
 
-- **WDT0 clocks held ahead of a planned CM33 watchdog (CM33-05):** patch `0001` now also marks `wdt_0_clkp` and `wdt_0_clk_loco` `DEF_MOD_CRITICAL`, so Linux's `clk_disable_unused` cannot close the gates once a CM33 watchdog exists. No CM33 WDT0 exists yet, so this is preemptive and not bench-verified. SCI0, GTM1, GPT unit 0 and RSPI0 are deliberately not touched until their ownership is decided.
 - **ICU bus errors are named, not just masked (IO-02):** patch `0011` keeps every unserviceable error source masked, now before the line is requested and kept across suspend/resume, and additionally logs `ICU_BEISR0-3` at probe, clears them through `ICU_BECLR0-3`, and reports `MCPU_LOCKUP` (group 0 bit 25). The CA55 handler still services only the GPT overflow bits, so there is no runtime report of either source, and the `MCPU_LOCKUP` check only works on a cold boot.
 - **PDM clocks and resets (MM-02, MM-X2):** new patch `0020` adds the PDM0/PDM1 module clocks (`CPG_CLKON_16` bits 1-6), resets (`CPG_RST_15` bits 2-5) and `BUS_MSTOP` bits to the V2N CPG driver. Parents come from the RZ/V2N hardware manual clock table: PCLK is the PLLCM33 gear divided by two, CCLK is QEXTAL divided by five (4.8 MHz). No pdm devicetree node uses them yet.
 - **No Linux P95 hog on V2M (PCIE-4):** `e1m-v2m-deepx.dtsi` drops `deepx-pcie-mux-sel-hog`; U-Boot already drives P95 low, and the Linux hog was the only second writer of the port 9 registers the CM33 shares. The P80 hog stays.

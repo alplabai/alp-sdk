@@ -131,8 +131,6 @@ SRC_URI:append = " \
 # marks the five rsci_7_* clocks DEF_MOD_CRITICAL so both gates stay held
 # for the remote core.  Silicon-validated 2026-06-03 (two cold cycles +
 # warm reboot, link autonomous from ~2 s after power-on, no intervention).
-# The same patch also holds the WDT0 clocks (wdt_0_clkp, wdt_0_clk_loco)
-# ahead of a planned CM33 watchdog (preemptive, not bench-verified).
 #
 # RIIC8 (BRD_I2C) is NOT in this patch: the maintainer decision that
 # Cortex-A55/Linux is RIIC8's sole master (metadata/e1m_modules/v2n/

@@ -39,13 +39,7 @@ CLKON_8 keeps bits 0-4 set and BUS11_MSTOP bit 10 released through and
 beyond clk_disable_unused (the rest of BUS11 reads stopped, as expected),
 and the CM33<->GD32 SPI link runs uninterrupted from ~2 s after power-on.
 
-WDT0 (wdt_0_clkp, wdt_0_clk_loco, BUS_MSTOP(3, BIT(10))) is marked the
-same way, ahead of the planned Cortex-M33 watchdog: no CM33 WDT0 exists
-yet, so this is preemptive and not bench-verified, and the unused-clock
-sweep must not close its gates once it does. The other Cortex-M33 blocks (SCI0 console, GTM1, GPT unit 0,
-RSPI0) are left alone until their ownership is decided.
-
-Only the five RSCI7 hunks of the original are needed for RSCI7: RIIC8 (BRD_I2C) is mastered by
+Only the five RSCI7 hunks are needed here: RIIC8 (BRD_I2C) is mastered by
 Cortex-A55/Linux (see metadata/e1m_modules/v2n/core-ownership.yaml), so
 Linux is a real consumer of riic_8_ckm (the rv3028 RTC + other BRD_I2C
 devices under i2c8) and clk_disable_unused correctly leaves it alone on
@@ -58,31 +52,14 @@ form later]
 
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
- drivers/clk/renesas/r9a09g056-cpg.c | 29 ++++++++++++++-----
- 1 file changed, 22 insertions(+), 7 deletions(-)
+ drivers/clk/renesas/r9a09g056-cpg.c | 20 +++++++++++++++-----
+ 1 file changed, 15 insertions(+), 5 deletions(-)
 
 diff --git a/drivers/clk/renesas/r9a09g056-cpg.c b/drivers/clk/renesas/r9a09g056-cpg.c
-index ca6129245a4d..bde9e45835e0 100644
+index ca6129245a4d..64dc9fa692be 100644
 --- a/drivers/clk/renesas/r9a09g056-cpg.c
 +++ b/drivers/clk/renesas/r9a09g056-cpg.c
-@@ -346,9 +346,14 @@
- 						BUS_MSTOP(11, BIT(15))),
- 	DEF_MOD("gtm_7_pclk",			CLK_PLLCLN_DIV16, 4, 10, 2, 10,
- 						BUS_MSTOP(12, BIT(0))),
--	DEF_MOD("wdt_0_clkp",			CLK_PLLCM33_DIV16, 4, 11, 2, 11,
-+	/*
-+	 * WDT0 is reserved for the planned Cortex-M33 watchdog. Preemptive,
-+	 * not bench-verified: held like RSCI7 below so a Linux
-+	 * clk_disable_unused sweep cannot close its BUS_MSTOP gate.
-+	 */
-+	DEF_MOD_CRITICAL("wdt_0_clkp",			CLK_PLLCM33_DIV16, 4, 11, 2, 11,
- 						BUS_MSTOP(3, BIT(10))),
--	DEF_MOD("wdt_0_clk_loco",		CLK_QEXTAL, 4, 12, 2, 12,
-+	DEF_MOD_CRITICAL("wdt_0_clk_loco",		CLK_QEXTAL, 4, 12, 2, 12,
- 						BUS_MSTOP(3, BIT(10))),
- 	DEF_MOD("wdt_1_clkp",			CLK_PLLCLN_DIV16, 4, 13, 2, 13,
- 						BUS_MSTOP(1, BIT(0))),
-@@ -452,15 +457,25 @@
+@@ -452,15 +452,25 @@ static const struct rzv2h_mod_clk r9a09g056_mod_clks[] __initconst = {
  						BUS_MSTOP(11, BIT(9))),
  	DEF_MOD("rsci_6_ps_ps1_n",		CLK_PLLCLN_DIV64, 7, 15, 3, 31,
  						BUS_MSTOP(11, BIT(9))),
@@ -113,3 +90,5 @@ index ca6129245a4d..bde9e45835e0 100644
  						BUS_MSTOP(11, BIT(10))),
  	DEF_MOD("rsci_8_pclk",			CLK_PLLCM33_DIV16, 8, 5, 4, 5,
  						BUS_MSTOP(11, BIT(11))),
+--
+2.43.0
