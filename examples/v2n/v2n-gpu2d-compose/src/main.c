@@ -16,6 +16,9 @@
  *      for blends -- see <alp/gpu2d.h>).
  *   2. How an app tells which one it got: the instance capabilities.  A
  *      hardware backend sets ALP_INSTANCE_CAP_DMA; the CPU path does not.
+ *      That flag only says a GPU context came up -- an individual op can
+ *      still fall back to the CPU (the GLES backend then prints
+ *      "[gpu2d/gles] ..." lines on stderr, including op totals at close).
  *      Use this for diagnostics and timing only -- never to branch the
  *      drawing code.
  *   3. The three operations: fill_rect (solid colour), blit (copy) and
@@ -80,22 +83,23 @@ static double ms_since(const struct timespec *t0)
 
 int main(void)
 {
-	uint32_t *bg    = malloc((size_t)W * H * 4u);
-	uint32_t *layer = malloc((size_t)W * H * 4u);
-	uint32_t *out   = malloc((size_t)W * H * 4u);
+	int       result = 1;
+	uint32_t *bg     = malloc((size_t)W * H * 4u);
+	uint32_t *layer  = malloc((size_t)W * H * 4u);
+	uint32_t *out    = malloc((size_t)W * H * 4u);
 	if (bg == NULL || layer == NULL || out == NULL) {
 		printf("[gpu2d] FAIL out of memory\n");
-		return 1;
+		goto free_bufs;
 	}
 
 	alp_gpu2d_t *g = alp_gpu2d_open();
 	if (g == NULL) {
 		printf("[gpu2d] FAIL open returned NULL (alp_last_error=%d)\n", (int)alp_last_error());
-		return 1;
+		goto free_bufs;
 	}
 	const alp_capabilities_t *caps = alp_gpu2d_capabilities(g);
 	printf("[gpu2d] engine: %s\n",
-	       (caps != NULL && (caps->flags & ALP_INSTANCE_CAP_DMA)) ? "GPU (EGL/GLES)"
+	       (caps != NULL && (caps->flags & ALP_INSTANCE_CAP_DMA)) ? "GPU context up (EGL/GLES)"
 	                                                              : "CPU fallback");
 
 	const alp_gpu2d_surface_t sbg = make_surface(bg), slayer = make_surface(layer),
@@ -110,8 +114,7 @@ int main(void)
 	rc |= alp_gpu2d_blend(g, &slayer, 0, 0, &sout, 0, 0, W, H, ALP_GPU2D_BLEND_SRC_OVER);
 	if (rc != ALP_OK) {
 		printf("[gpu2d] FAIL op status=%d\n", (int)rc);
-		alp_gpu2d_close(g);
-		return 1;
+		goto close_gpu;
 	}
 
 	/* Check one pixel in the middle against the documented formula. */
@@ -134,14 +137,22 @@ int main(void)
 	struct timespec t0;
 	clock_gettime(CLOCK_MONOTONIC, &t0);
 	for (int i = 0; i < 20; ++i) {
-		(void)alp_gpu2d_blend(g, &slayer, 0, 0, &sout, 0, 0, W, H, ALP_GPU2D_BLEND_SRC_OVER);
+		rc = alp_gpu2d_blend(g, &slayer, 0, 0, &sout, 0, 0, W, H, ALP_GPU2D_BLEND_SRC_OVER);
+		if (rc != ALP_OK) {
+			printf("[gpu2d] FAIL timed blend %d status=%d\n", i, (int)rc);
+			goto close_gpu;
+		}
 	}
 	printf("[gpu2d] 20 x blend %ux%u: %.2f ms total\n", W, H, ms_since(&t0));
 
+	printf(ok ? "[gpu2d] PASS\n" : "[gpu2d] FAIL pixel mismatch\n");
+	result = ok ? 0 : 1;
+
+close_gpu:
 	alp_gpu2d_close(g);
+free_bufs:
 	free(bg);
 	free(layer);
 	free(out);
-	printf(ok ? "[gpu2d] PASS\n" : "[gpu2d] FAIL pixel mismatch\n");
-	return ok ? 0 : 1;
+	return result;
 }

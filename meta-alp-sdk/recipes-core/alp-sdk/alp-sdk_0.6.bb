@@ -240,7 +240,7 @@ PACKAGECONFIG:append = "${@' drpai' if ('rzv2n-family' in (d.getVar('MACHINEOVER
 #         enable (same shape as `drpai`): a bake that asked for the GPU
 #         backend must not silently ship a CPU-only libalp_sdk.
 #         Auto-on only when the GPU stack is really there: a `mali-family`
-#         MACHINE with `opengles` in COMBINED_FEATURES, which meta-rz-graphics
+#         MACHINE with `opengles` in DISTRO_FEATURES, which meta-rz-graphics
 #         (rz-graphics.inc) sets in DISTRO_FEATURES -- so a build without that
 #         layer keeps the CPU fallback and does not fail.  :class-target keeps
 #         the -native/-nativesdk variants (BBCLASSEXTEND below) off the GPU stack.
@@ -250,7 +250,7 @@ PACKAGECONFIG:append = "${@' drpai' if ('rzv2n-family' in (d.getVar('MACHINEOVER
 #         CPU path.
 PACKAGECONFIG[gles]     = "-DALP_SDK_USE_GPU2D_GLES=ON -DALP_SDK_GPU2D_GLES_REQUIRED=ON,-DALP_SDK_USE_GPU2D_GLES=OFF,virtual/libgles2 virtual/egl,libegl libgles2"
 ALP_ENABLE_GPU2D_GLES ?= "1"
-PACKAGECONFIG:append:class-target = "${@' gles' if ('mali-family' in (d.getVar('MACHINEOVERRIDES') or '').split(':') and 'opengles' in (d.getVar('COMBINED_FEATURES') or '').split() and d.getVar('ALP_ENABLE_GPU2D_GLES') == '1') else ''}"
+PACKAGECONFIG:append:class-target = "${@' gles' if ('mali-family' in (d.getVar('MACHINEOVERRIDES') or '').split(':') and 'opengles' in (d.getVar('DISTRO_FEATURES') or '').split() and d.getVar('ALP_ENABLE_GPU2D_GLES') == '1') else ''}"
 
 # ort -> ONNX Runtime CPU floor (own recipe, recipes-devtools/onnxruntime).
 #       REQUIRED rides with the enable, same shape as `drpai`: a missing ORT

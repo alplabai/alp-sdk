@@ -33,11 +33,16 @@ layer and a running weston (`IMAGE_FEATURES += "alp-display"`) -- see
 Expected output:
 
 ```
-[gpu2d] engine: GPU (EGL/GLES)      # or "CPU fallback"
+[gpu2d] engine: GPU context up (EGL/GLES)      # or "CPU fallback"
 [gpu2d] centre pixel 0x... expected ~0xFF881018 # within 1 per channel of the formula
 [gpu2d] 20 x blend 640x360: ... ms total
 [gpu2d] PASS
 ```
+
+The GPU backend also writes `[gpu2d/gles] ...` lines to stderr: one on the
+first GL-error fallback, and at close the totals (`N op(s) ran on the GPU, M
+fell back`). Those show which engine really ran; `engine:` only shows that a
+GPU context came up.
 
 HIL: [`tests/hil/v2m103-x-evk/v2n-gpu2d-compose.yaml`](../../../tests/hil/v2m103-x-evk/v2n-gpu2d-compose.yaml)
 (not bench-run).

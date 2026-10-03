@@ -7,7 +7,9 @@
 # it runs over ssh (flash_method: ssh-run) like v2n-drpai-inference.yaml.
 #
 # NOT bench-run by the change that added it.  The PASS line only proves the
-# pixel maths; "engine: GPU (EGL/GLES)" is what proves the GPU path ran.  The
+# pixel maths; "engine: GPU context up" only proves a context exists.  The
+# stderr totals line "[gpu2d/gles] N op(s) ran on the GPU, M fell back" shows
+# what really ran (the spec fails on the first GL-error fallback line).  The
 # Mali `wayland` userspace variant needs weston up (alp-display); with no
 # compositor the example still passes but reports "CPU fallback" -- check
 # that line by hand on the first bench run.  The V2M103 and V2N101 board dirs
@@ -30,5 +32,6 @@ serial:
     - "[gpu2d] PASS"
   expect_absent:
     - "[gpu2d] FAIL"
+    - "[gpu2d/gles] GL op failed"
     - "PANIC"
     - "ASSERT"

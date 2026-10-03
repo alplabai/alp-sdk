@@ -136,7 +136,6 @@
   "capabilities": {
     "drp_ai":   true,
     "neon":     true,
-    "gpu2d":    true,
     "emmc_dma": true
   },
   "external_memory_interfaces": [

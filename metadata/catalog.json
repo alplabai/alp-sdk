@@ -4674,7 +4674,6 @@
       "capabilities": {
         "drp_ai": true,
         "emmc_dma": true,
-        "gpu2d": true,
         "neon": true
       },
       "family": "renesas-rzv2n-deepx",
@@ -4735,7 +4734,6 @@
       "capabilities": {
         "drp_ai": true,
         "emmc_dma": true,
-        "gpu2d": true,
         "neon": true
       },
       "family": "renesas-rzv2n-deepx",
@@ -4796,7 +4794,6 @@
       "capabilities": {
         "drp_ai": true,
         "emmc_dma": true,
-        "gpu2d": true,
         "neon": true
       },
       "family": "renesas-rzv2n-deepx",
@@ -4857,7 +4854,6 @@
       "capabilities": {
         "drp_ai": true,
         "emmc_dma": true,
-        "gpu2d": true,
         "neon": true
       },
       "family": "renesas-rzv2n",
@@ -4918,7 +4914,6 @@
       "capabilities": {
         "drp_ai": true,
         "emmc_dma": true,
-        "gpu2d": true,
         "neon": true
       },
       "family": "renesas-rzv2n",
@@ -4979,7 +4974,6 @@
       "capabilities": {
         "drp_ai": true,
         "emmc_dma": true,
-        "gpu2d": true,
         "neon": true
       },
       "family": "renesas-rzv2n",

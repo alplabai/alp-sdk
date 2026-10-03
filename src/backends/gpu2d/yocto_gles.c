@@ -40,8 +40,17 @@
  * Context: a 1x1 pbuffer on EGL_DEFAULT_DISPLAY.  On the Renesas default
  * Mali `wayland` userspace variant that needs a running Wayland compositor
  * (alp-display / weston); without one open() degrades to the CPU path.
- * Each op makes the context current on the calling thread and releases it,
- * under a backend mutex, so ops may come from different threads.
+ * Each op makes the context current on the calling thread under a backend
+ * mutex, so ops may come from different threads, and then puts back whatever
+ * EGL display/context/surface/API the caller had current: an application with
+ * its own EGL/GLES rendering is not disturbed.  The default display is shared
+ * by the whole process, so close() never calls eglTerminate() on it (the one
+ * eglInitialize() reference taken at open is kept until process exit).
+ *
+ * Observability: the handle counts ops that ran on the GPU and ops that fell
+ * back after a GL error.  The first GL-error fallback logs one line to
+ * stderr and close() logs the totals, so a run can show which engine
+ * actually did the work (ALP_INSTANCE_CAP_DMA only says a context came up).
  *
  * @par Cost: ROM ~6 KB; RAM ~100 B + GL driver allocations.
  * @par Performance: O(w * h) copies each way plus the GPU draw.  The
@@ -59,6 +68,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include <EGL/egl.h>
 #include <GLES3/gl3.h>
@@ -88,7 +98,42 @@ typedef struct {
 	GLuint          tex_src;
 	GLuint          tex_dst;
 	pthread_mutex_t lock;
+	uint32_t        gpu_ops;      /* ops completed on the GPU (under lock) */
+	uint32_t        gl_fallbacks; /* ops re-run on the CPU after a GL error */
 } gles_state_t;
+
+/* The calling thread's EGL binding, restored after every GPU touch so an
+ * app with its own EGL/GLES context keeps it. */
+typedef struct {
+	EGLDisplay dpy;
+	EGLContext ctx;
+	EGLSurface draw;
+	EGLSurface read;
+	EGLenum    api;
+} egl_binding_t;
+
+static void _binding_save(egl_binding_t *b)
+{
+	b->dpy  = eglGetCurrentDisplay();
+	b->ctx  = eglGetCurrentContext();
+	b->draw = eglGetCurrentSurface(EGL_DRAW);
+	b->read = eglGetCurrentSurface(EGL_READ);
+	b->api  = eglQueryAPI();
+}
+
+/* @p ours is released from this thread, then the saved binding is re-made. */
+static void _binding_restore(const egl_binding_t *b, EGLDisplay ours)
+{
+	if (ours != EGL_NO_DISPLAY) {
+		eglMakeCurrent(ours, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+	}
+	if (b->ctx != EGL_NO_CONTEXT) {
+		eglMakeCurrent(b->dpy, b->draw, b->read, b->ctx);
+	}
+	if (b->api != EGL_NONE) {
+		eglBindAPI(b->api);
+	}
+}
 
 /* The pool is one handle (gpu2d_dispatch.c), so one static state suffices;
  * be_data points at it while the handle is open and GL-capable. */
@@ -119,6 +164,7 @@ static GLuint _compile(GLenum type, const char *src)
 	return s;
 }
 
+/* Frees GL/EGL objects; leaves the thread with no current context. */
 static void _teardown(gles_state_t *g)
 {
 	if (g->dpy != EGL_NO_DISPLAY) {
@@ -139,7 +185,7 @@ static void _teardown(gles_state_t *g)
 		if (g->surf != EGL_NO_SURFACE) {
 			eglDestroySurface(g->dpy, g->surf);
 		}
-		eglTerminate(g->dpy);
+		/* No eglTerminate(): the default display is process-wide. */
 	}
 	g->dpy  = EGL_NO_DISPLAY;
 	g->ctx  = EGL_NO_CONTEXT;
@@ -148,7 +194,7 @@ static void _teardown(gles_state_t *g)
 
 /* Create the context + program once.  Returns true with the context
  * released from this thread; false leaves nothing allocated. */
-static bool _init(gles_state_t *g)
+static bool _init_inner(gles_state_t *g)
 {
 	*g = (gles_state_t){ .dpy = EGL_NO_DISPLAY, .ctx = EGL_NO_CONTEXT, .surf = EGL_NO_SURFACE };
 
@@ -226,6 +272,15 @@ fail:
 	return false;
 }
 
+static bool _init(gles_state_t *g)
+{
+	egl_binding_t saved;
+	_binding_save(&saved);
+	bool ok = _init_inner(g);
+	_binding_restore(&saved, ok ? g->dpy : EGL_NO_DISPLAY);
+	return ok;
+}
+
 /* ---- helpers ---------------------------------------------------------- */
 
 static bool _gl_ok_surface(const alp_gpu2d_surface_t *s)
@@ -299,9 +354,11 @@ static bool _gl_run(gles_state_t              *g,
                     alp_gpu2d_blend_mode_t     mode,
                     uint32_t                   fill)
 {
-	bool ok = false;
+	bool          ok = false;
+	egl_binding_t saved;
 
 	pthread_mutex_lock(&g->lock);
+	_binding_save(&saved);
 	if (eglMakeCurrent(g->dpy, g->surf, g->surf, g->ctx) != EGL_TRUE) {
 		goto out;
 	}
@@ -357,8 +414,16 @@ static bool _gl_run(gles_state_t              *g,
 
 done:
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	eglMakeCurrent(g->dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 out:
+	_binding_restore(&saved, g->dpy);
+	if (ok) {
+		g->gpu_ops++;
+	} else {
+		if (g->gl_fallbacks++ == 0u) {
+			fprintf(stderr, "[gpu2d/gles] GL op failed, falling back to the CPU path
+");
+		}
+	}
 	pthread_mutex_unlock(&g->lock);
 	return ok;
 }
@@ -383,8 +448,17 @@ static alp_status_t gl_open(alp_gpu2d_backend_state_t *state, alp_capabilities_t
 static void gl_close(alp_gpu2d_backend_state_t *state)
 {
 	if (state->be_data != NULL) {
-		_teardown((gles_state_t *)state->be_data);
-		pthread_mutex_destroy(&((gles_state_t *)state->be_data)->lock);
+		gles_state_t *g = (gles_state_t *)state->be_data;
+		fprintf(stderr,
+		        "[gpu2d/gles] %u op(s) ran on the GPU, %u fell back to the CPU after a GL error
+		        ",
+		        (unsigned)g->gpu_ops,
+		        (unsigned)g->gl_fallbacks);
+		egl_binding_t saved;
+		_binding_save(&saved);
+		_teardown(g);
+		_binding_restore(&saved, EGL_NO_DISPLAY);
+		pthread_mutex_destroy(&g->lock);
 		state->be_data = NULL;
 	}
 }

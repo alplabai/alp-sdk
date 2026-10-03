@@ -435,12 +435,15 @@ dependency of the recipe.
 | `e1m-v2m102-a55`     | Same as V2M101                       | Same as V2M101 (memory variant)                                       |
 | `e1m-v2m103-a55`     | Same as V2M101                       | Same as V2M101 (memory variant)                                       |
 
-The Mali-G31 GPU backend of `<alp/gpu2d.h>` (`PACKAGECONFIG[gles]`) is on for
-every row above when the Renesas `meta-rz-graphics` layer is in
-`bblayers.conf`; see [`docs/v2n-mali-gpu.md`](../docs/v2n-mali-gpu.md).
 | `e1m-nx9101-a55`     | Ethos-U65                            | NXP i.MX 93 Ethos-U userspace via the image                           |
 | `e1m-aen801-a32`     | Ethos-U85 + 2x U55                   | Ethos-U path inside the alp-sdk library                               |
 | `e1m-aen701-a32`     | 2x Ethos-U55                         | Ethos-U path inside the alp-sdk library                               |
+
+The Mali-G31 GPU backend of `<alp/gpu2d.h>` (`PACKAGECONFIG[gles]`) is on for
+the six RZ/V2N machines (`e1m-v2n101-a55`, `e1m-v2n102-a55`, `e1m-v2n103-a55`,
+`e1m-v2m101-a55`, `e1m-v2m102-a55`, `e1m-v2m103-a55`) when the Renesas
+`meta-rz-graphics` layer is in `bblayers.conf`; see
+[`docs/v2n-mali-gpu.md`](../docs/v2n-mali-gpu.md).
 
 See `docs/bring-up-drpai-v2n.md` section 4 for the full DRP-AI3 two-switch
 contract (what each of `ALP_ENABLE_DRPAI` / `PACKAGECONFIG[drpai]` actually

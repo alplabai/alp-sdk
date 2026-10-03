@@ -382,7 +382,7 @@
 #define ALP_SOC_DRP_AI                  1
 #define ALP_SOC_HELIUM_MVE              0
 #define ALP_SOC_NEON                    1
-#define ALP_SOC_GPU2D                   1
+#define ALP_SOC_GPU2D                   0
 #define ALP_SOC_DAVE2D                  0
 #define ALP_SOC_CRYPTOCELL              0
 #define ALP_SOC_INLINE_AES              0

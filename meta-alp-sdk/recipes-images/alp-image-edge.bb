@@ -31,7 +31,7 @@ IMAGE_INSTALL += " \
 # GPU stack (RZ/V2N Mali-G31).  The userspace (libEGL / libGLESv2 / libgbm) is
 # NOT listed here: the Renesas meta-rz-graphics layer already adds
 # `libegl libgles2` to every mali-family image (include/mali-graphics.inc,
-# IMAGE_INSTALL:append:mali-family) once `opengles` is in COMBINED_FEATURES,
+# IMAGE_INSTALL:append:mali-family) once `opengles` is in DISTRO_FEATURES,
 # and the alp-display group brings weston -- same shape as Renesas'
 # core-image-weston.  See docs/v2n-mali-gpu.md.  Not bench-verified.
 #
@@ -39,12 +39,6 @@ IMAGE_INSTALL += " \
 # mali-family machine: it runs on the CPU fallback too and reports which
 # engine served the ops, so it doubles as the GPU backend's on-target check.
 IMAGE_INSTALL += "${@' alp-gpu2d-compose' if 'mali-family' in (d.getVar('MACHINEOVERRIDES') or '').split(':') else ''}"
-
-# ALP_ENABLE_GPU_BENCH = "1" additionally installs glmark2 (OpenGL ES 2
-# benchmark, meta-openembedded; GPL-3.0, which is why it never reaches
-# alp-image-prod) so glmark2-es2-wayland can exercise the GPU under weston.
-ALP_ENABLE_GPU_BENCH ?= "0"
-IMAGE_INSTALL += "${@' glmark2' if d.getVar('ALP_ENABLE_GPU_BENCH') == '1' and 'mali-family' in (d.getVar('MACHINEOVERRIDES') or '').split(':') and 'opengles' in (d.getVar('COMBINED_FEATURES') or '').split() else ''}"
 
 # LVGL dashboard example (Linux/DRM panel) -- dev-only bench example app.
 # weston/libdrm/DEEPX/rootfs sizing now come from alp-image-common.inc;

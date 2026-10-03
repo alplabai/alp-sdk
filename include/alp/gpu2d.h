@@ -107,7 +107,9 @@ typedef enum {
  *   Blended channels may differ by 1 between backends: the software
  *   fallback divides by 255 with rounding, the Alif D/AVE 2D engine
  *   scales by 1/256 (bench: 0x80FF0000 over 0xFF0000FF gives red 0x80
- *   in software, 0x7F on the engine). REPLACE, fills and copies are
+ *   in software, 0x7F on the engine), and the Linux EGL/GLES backend
+ *   blends in the GPU's own fixed-point precision (tolerance the same
+ *   1 per channel, not measured on silicon). REPLACE, fills and copies are
  *   exact everywhere. */
 typedef enum {
 	ALP_GPU2D_BLEND_REPLACE  = 0,
