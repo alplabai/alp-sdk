@@ -237,7 +237,13 @@ kernel as `/chosen/alp,sku`; the `alp-hostname` unit in every ALP image
 turns it into the hostname. U-Boot patch 0010 also publishes the unit
 serial as `/chosen/alp,serial`, which the unit appends so each board gets
 its own name (for example `e1m-v2m103-2026w38-0001`; the whole serial,
-since its index restarts every ISO week). An unprovisioned
+since its index restarts every ISO week). The root shell prompt does not
+show the serial (`root@e1m-v2m103:~#`: `/etc/profile.d/alp-prompt.sh`
+strips it from the hostname for interactive shells), and the pre-login
+banner gains a `Module: <SKU>  Serial: <serial>` line: the same unit writes
+`/run/alp-module.issue` and the image links `/etc/issue.d/10-alp-module.issue`
+to it (agetty appends `/etc/issue.d/*.issue` to `/etc/issue`; the line is
+absent on a blank module). The hostname itself is unchanged. An unprovisioned
 module, or a bootloader older than u-boot patch 0009, publishes nothing
 and keeps the distro default hostname `alp-e1m`.
 

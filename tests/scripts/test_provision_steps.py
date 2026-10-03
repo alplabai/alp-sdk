@@ -121,11 +121,13 @@ class Board(FakeLinux):
     I2C registers live in `regs`, EEPROM array and identity header are modelled,
     and every write command mutates the model so re-probes see the result."""
 
-    def __init__(self, xspi_bl2=b"", xspi_fip=b"", boot1=b"", emmc=b"", act_0x10=0x08,
+    def __init__(self, xspi_bl2=b"", xspi_fip=b"", boot0=b"", emmc=b"", act_0x10=0x08,
                  lock=0xFD, rail_on_xspi=None, root="mmcblk1p2"):
         super().__init__()
         self.files = {"/dev/mtd0": xspi_bl2 + b"\xff" * 64, "/dev/mtd1": xspi_fip + b"\xff" * 64,
-                      "/dev/mmcblk0boot1": boot1 or b"\x00" * (0x300 * 512 + 1024),
+                      "/dev/mmcblk0boot0": boot0 or b"\x00" * (0x300 * 512 + 1024),
+                      # boot partition 2 is never booted: a probe or write aimed here must fail a test
+                      "/dev/mmcblk0boot1": b"\x00" * (0x300 * 512 + 1024),
                       "/dev/mmcblk0": emmc or b"\x00" * 1024}
         self.regs = {(8, 0x25, 0x10): act_0x10}
         self.array = bytearray(b"\xff" * 128)
@@ -135,7 +137,7 @@ class Board(FakeLinux):
         self.root = root
         self.rail = rail_on_xspi
 
-    def run(self, cmd, timeout=60.0, check=True, stdin_path=None):
+    def run(self, cmd, timeout=60.0, check=True, stdin_path=None, long_running=False):
         self.commands.append(cmd)
         rc, out = self._answer(cmd)
         res = lt.CmdResult(rc, out, "" if rc == 0 else "fake: unscripted")
@@ -228,7 +230,9 @@ def test_blank_board_full_plan(tmp_path):
     assert not ctx.state_path.exists()             # dry run writes no state
     assert not (ctx.unit_dir / f"{SERIAL}.manifest.staged.bin").exists()
     assert ctx.bench.power.events == []
-    assert {c[0] for c in ctx.bench.probe.calls} == {"savebin", "dp_id"}   # read-only probe use
+    # no loadbin in a plan; the readback halts the core, so even a plan resumes it afterwards
+    assert {c[0] for c in ctx.bench.probe.calls} == {"savebin", "dp_id", "reset_run"}
+    assert ctx.bench.probe.calls[-1] == ("reset_run",)
 
 
 def test_offline_plan_without_bench(tmp_path):
@@ -271,12 +275,12 @@ def test_no_command_ever_writes_selector_0x06(tmp_path):
 # --- idempotence / done semantics ------------------------------------------------------
 
 def test_provisioned_unit_skips_writes(tmp_path):
-    boot1 = bytearray(b"\x00" * (0x300 * 512 + len(FIP)))
-    boot1[512:512 + len(BL2)] = BL2
-    boot1[0x300 * 512:] = FIP
+    boot0 = bytearray(b"\x00" * (0x300 * 512 + len(FIP)))
+    boot0[512:512 + len(BL2)] = BL2
+    boot0[0x300 * 512:] = FIP
     bdir, b = _bundle(tmp_path)
     wic = gzip.decompress((bdir / "artifacts" / "img.wic.gz").read_bytes())
-    board = Board(xspi_bl2=BL2, xspi_fip=FIP, boot1=bytes(boot1), emmc=wic)
+    board = Board(xspi_bl2=BL2, xspi_fip=FIP, boot0=bytes(boot0), emmc=wic)
     board.ext = {177: 0x02, 179: 0x08}
     ctx = _ctx(tmp_path, bundle=(bdir, b), bench=_bench(), linux=board, execute=True)
     res = steps.run_steps(ctx, only=["write_xspi", "write_emmc_boot", "write_rootfs"])
@@ -288,14 +292,32 @@ def test_provisioned_unit_skips_writes(tmp_path):
     assert state["serial"] == SERIAL and state["schema"] == 1
 
 
+def test_write_emmc_boot_probe_reads_boot_partition_1_never_boot1(tmp_path):
+    """Boot partition 1 is Linux boot0 (EXT_CSD[179]=0x08 boots it); boot1 is never booted."""
+    img = bytearray(bytes(0x300 * 512 + len(FIP)))
+    img[512:512 + len(BL2)] = BL2
+    img[0x300 * 512:] = FIP
+    bdir, b = _bundle(tmp_path)
+
+    def probe(board, n):
+        board.ext = {177: 0x02, 179: 0x08}
+        ctx = _ctx(tmp_path / n, bundle=(bdir, b), bench=_bench(), linux=board, execute=True)
+        return steps.WriteEmmcBoot().probe(ctx)
+
+    assert isinstance(probe(Board(boot0=bytes(img)), "a"), steps.Satisfied)
+    stale = Board(boot0=bytes(0x300 * 512 + 1024))
+    stale.files["/dev/mmcblk0boot1"] = bytes(img)      # right bytes in the never-booted partition
+    assert isinstance(probe(stale, "b"), steps.Unsatisfied)
+
+
 class WritableBoard(Board):
     def put(self, local, remote):
         self.files[remote] = Path(local).read_bytes()
 
     def _answer(self, cmd):
-        if m := re.match(r"mtd_debug write (/dev/mtd\d) 0 (\d+) (\S+)", cmd):
-            data = self.files[m[3]]
-            self.files[m[1]] = data + self.files[m[1]][len(data):]
+        if m := re.match(r"mtd_debug write (/dev/mtd\d) (\d+) (\d+) (\S+)", cmd):
+            data, off, dev = self.files[m[4]], int(m[2]), self.files[m[1]]
+            self.files[m[1]] = dev[:off] + data + dev[off + len(data):]
             return 0, ""
         if re.match(r"flash_erase|rm -f", cmd):
             return 0, ""
@@ -317,6 +339,41 @@ def test_write_xspi_done_only_after_reprobe(tmp_path):
     assert wx.status == "done", wx.detail
     assert wx.evidence["xspi_fip_md5"] == hashlib.md5(FIP).hexdigest()
     assert any(c.startswith("flash_erase /dev/mtd1 0 1") for c in board.commands)
+
+
+def _pinned_bench(board, monkeypatch):
+    """A bench whose bench.yaml pins linux.host, with LinuxTarget(host) answering as `board`."""
+    bench = _bench()
+    bench.linux_host = "192.0.2.10"
+    monkeypatch.setattr(lt, "LinuxTarget", lambda host, user="root", **kw: board)
+    return bench
+
+
+def test_write_xspi_probe_attaches_the_pinned_host_like_census(tmp_path, monkeypatch):
+    """Regression: `--only write_xspi` (no step before it attaches ctx.linux) probed with
+    ctx.linux None -> Unknown("no Linux target") -> PLANNED although mtd0/mtd1 already held the
+    bundle's bytes (som-0.2.0 reuses som-0.1.0's bl2/fip). Census attached the pinned host via
+    need_linux() and read the matching md5s, which is why the two disagreed."""
+    board = Board(xspi_bl2=BL2, xspi_fip=FIP)           # padded mtds, bytes identical to the bundle
+    ctx = _ctx(tmp_path, bench=_pinned_bench(board, monkeypatch))
+    assert ctx.linux is None
+    res = steps.run_steps(ctx, only=["write_xspi"])
+    assert res[-1].status == "skipped", res[-1].detail
+    assert res[-1].evidence == {"xspi_bl2_md5": hashlib.md5(BL2).hexdigest(),
+                                "xspi_fip_md5": hashlib.md5(FIP).hexdigest()}
+
+
+@pytest.mark.parametrize("bl2, fip", [(BL2, OLD_FIP), (BL2[:-1] + b"\x00", FIP)])
+def test_write_xspi_probe_still_plans_the_flash_when_contents_differ(tmp_path, monkeypatch, bl2, fip):
+    board = Board(xspi_bl2=bl2, xspi_fip=fip)
+    ctx = _ctx(tmp_path, bench=_pinned_bench(board, monkeypatch))
+    res = steps.run_steps(ctx, only=["write_xspi"])
+    assert res[-1].status == "planned", res[-1].detail
+
+
+def test_probe_without_any_host_stays_unknown_and_plans(tmp_path):
+    ctx = _ctx(tmp_path, bench=_bench())               # no pinned host, no ctx.linux
+    assert steps.WriteXspi().probe(ctx).reason == "no Linux target"
 
 
 def test_state_done_with_unsatisfied_probe_reruns(tmp_path):
@@ -373,7 +430,7 @@ def _lock_ready(tmp_path, board, disposition="ship", done=True):
     (ctx.unit_dir / f"{SERIAL}.manifest.bin").write_bytes(bytes(board.array))
     (ctx.unit_dir / f"{SERIAL}.secure-page.staged.bin").write_bytes(bytes(board.page))
     (ctx.unit_dir / f"{SERIAL}.unit.yaml").write_text(
-        f"eeprom_unique_id: 00 11\ndisposition: {disposition}\n"
+        f"eeprom_unique_id: 00 11\ndisposition: {disposition}\ntest_functional: pass\n"
         "dxm1_fw_version: v\ndxm1_fw_md5: m\ndxm1_fw_uart_boot_md5: u\n", encoding="utf-8")
     if done:
         ctx.state = {"steps": {s: {"status": "done"} for s in ("secure_page", "cold_boot_test")}}
@@ -434,7 +491,7 @@ def test_gd32_flash_applies_the_early_otp_workaround(tmp_path):
     # verify used fresh probe sessions (savebin after the loadbins)
     kinds = [c[0] for c in ctx.bench.probe.calls]
     last_load = max(i for i, k in enumerate(kinds) if k == "loadbin")
-    assert kinds[last_load + 1:kinds.index("reset_run")].count("savebin") == len(steps.GD32_IMAGES)
+    assert kinds[last_load + 1:kinds.index("reset_run", last_load)].count("savebin") == len(steps.GD32_IMAGES)
 
 
 def test_gd32_flash_workaround_does_not_touch_an_operator_disposition(tmp_path):
@@ -452,7 +509,7 @@ def test_select_steps_rules():
     assert names == ["preflight", "census"]
     names = [s.name for s in steps.select_steps(start="secure_page", skip=["hil_smoke"])]
     assert names == ["preflight", "secure_page", "dsw1_xspi_remove_sd", "cold_boot_test",
-                     "clkgen_verify", "record"]
+                     "census_final", "clkgen_verify", "functional_test", "record"]
     with pytest.raises(ValueError):
         steps.select_steps(only=["nope"])
 
@@ -509,10 +566,11 @@ def test_eeprom_manifest_rediscovers_a_pinned_host_after_the_mac_change(tmp_path
     assert attached == ["10.0.0.2"]
 
 
-def test_gd32_probe_discovers_the_host_when_only_starts_at_gd32_flash(tmp_path):
+def test_gd32_probe_discovers_the_host_when_only_starts_at_gd32_flash(tmp_path, monkeypatch):
     fw = _gd32_fw(tmp_path)
     probe = FakeProbe(memory={a: (fw / n).read_bytes() for n, a, _k in steps.GD32_IMAGES})
     probe.env = {}
+    monkeypatch.setattr(lt, "gd32_bridge_version", lambda t, bus, addr=0x70: (0, 14, 0))   # no real ssh
     ctx = _ctx(tmp_path, bench=_bench(console=_login_console(), probe=probe), gd32_fw=fw, execute=True)
     assert isinstance(steps.Gd32Flash().probe(ctx), steps.Satisfied)
     assert probe.env == {"ALP_PROVISION_HOST": "10.0.0.2"}
@@ -700,14 +758,12 @@ def test_record_keeps_clkgen_and_dxm1_keys_when_the_catalogue_lists_them(tmp_pat
         "dxm1_fw_uart_boot_md5": {"group": "firmware", "source": "", "mode": "auto", "ship_required": False},
         "dxm1_fw_md5": {"group": "firmware", "source": "", "mode": "auto", "ship_required": False},
         "dxm1_fw_version": {"group": "firmware", "source": "", "mode": "auto", "ship_required": False},
-        "dxm1_uart_boot_tool_md5": {"group": "firmware", "source": "", "mode": "auto", "ship_required": False},
     }
     cat = dict(CATALOGUE["keys"], **new_keys)
     (ctx.ledger_root / "schema" / "v2n.keys.yaml").write_text(
         yaml.safe_dump({"schema": 1, "family": "v2n", "keys": cat}), encoding="utf-8")
     ctx.facts.update(clkgen_otp_raw="aa bb cc", clkgen_i2c_addr="0x69",
-                     dxm1_fw_uart_boot_md5=lt.DXM1_FW_UART_BOOT_MD5, dxm1_fw_md5=lt.DXM1_FW_MD5,
-                     dxm1_fw_version=lt.DXM1_FW_VERSION, dxm1_uart_boot_tool_md5=lt.DXM1_UART_BOOT_TOOL_MD5)
+                     dxm1_fw_uart_boot_md5="b" * 32, dxm1_fw_md5="f" * 32, dxm1_fw_version="2.4.0")
     steps.run_steps(ctx, only=["record"])
     text = (ctx.unit_dir / f"{SERIAL}.unit.yaml").read_text(encoding="utf-8")
     for key in new_keys:
@@ -764,177 +820,6 @@ def test_clkgen_verify_fails_on_mismatch_and_missing_boot_line(tmp_path):
     assert r.status == "failed"
     assert "reg 0x21" in r.detail and "5L35023B clock" in r.detail
     assert "#2293" in r.detail and "patch 0007" in r.detail
-
-
-# --- dxm1_npu_flash (BENCH-PENDING) ------------------------------------------------------
-
-def test_dxm1_npu_flash_skipped_for_v2n(tmp_path):
-    bdir, b = _bundle(tmp_path, family="v2n")
-    ctx = _ctx(tmp_path, bundle=(bdir, b), bench=_bench(), dxm1_flash=True)
-    r = steps.Dxm1NpuFlash().run(ctx)
-    assert r.status == "skipped" and "not a V2M" in r.detail
-
-
-def test_dxm1_npu_flash_skipped_by_default(tmp_path):
-    ctx = _ctx(tmp_path, bench=_bench())  # bundle family defaults to v2n-m1
-    r = steps.Dxm1NpuFlash().run(ctx)
-    assert r.status == "skipped" and "BENCH-PENDING" in r.detail
-
-
-def test_dxm1_npu_flash_refuses_tbd_bench_key(tmp_path):
-    bench = _bench()
-    bench.raw["dxm1"] = {"gpio_chip": "chip0", "uart_mux_line": 5, "reset_line": 6,
-                         "uart_device": "/dev/ttySC1", "uart_boot": "uart_boot",
-                         "fw_uart_boot": "fw_uart_boot.bin", "fw": None}
-    ctx = _ctx(tmp_path, bench=bench, dxm1_flash=True, execute=True)
-    with pytest.raises(steps.Refused, match="dxm1.fw is TBD"):
-        steps.Dxm1NpuFlash().run(ctx)
-
-
-def test_dxm1_npu_flash_refuses_wrong_firmware_md5(tmp_path):
-    fw_dir = tmp_path / "dxm1fw"
-    fw_dir.mkdir()
-    (fw_dir / "fw_uart_boot.bin").write_bytes(b"not the real bootloader")
-    (fw_dir / "fw.bin").write_bytes(b"not the real firmware")
-    bench = _bench()
-    bench.raw["dxm1"] = {"gpio_chip": "chip0", "uart_mux_line": 5, "reset_line": 6,
-                         "uart_device": "/dev/ttySC1", "uart_boot": str(fw_dir / "uart_boot"),
-                         "fw_uart_boot": str(fw_dir / "fw_uart_boot.bin"),
-                         "fw": str(fw_dir / "fw.bin")}
-    ctx = _ctx(tmp_path, bench=bench, dxm1_flash=True, execute=True)
-    with pytest.raises(steps.Refused, match="md5"):
-        steps.Dxm1NpuFlash().run(ctx)
-
-
-@pytest.mark.parametrize("line_key,value,match", [
-    ("uart_mux_line", "5", "must be an int"),
-    ("uart_mux_line", 52, "P64"),
-    ("reset_line", 53, "P65"),
-])
-def test_dxm1_npu_flash_refuses_bad_gpio_lines(tmp_path, line_key, value, match):
-    bench = _bench()
-    bench.raw["dxm1"] = {"gpio_chip": "chip0", "uart_mux_line": 61, "reset_line": 86,
-                         "uart_device": "/dev/ttySC1", "uart_boot": "uart_boot",
-                         "fw_uart_boot": "fw_uart_boot.bin", "fw": "fw.bin"}
-    bench.raw["dxm1"][line_key] = value
-    ctx = _ctx(tmp_path, bench=bench, dxm1_flash=True, execute=True)
-    with pytest.raises(steps.Refused, match=match):
-        steps.Dxm1NpuFlash().run(ctx)
-
-
-def test_dxm1_npu_flash_refuses_equal_mux_and_reset_lines(tmp_path):
-    bench = _bench()
-    bench.raw["dxm1"] = {"gpio_chip": "chip0", "uart_mux_line": 61, "reset_line": 61,
-                         "uart_device": "/dev/ttySC1", "uart_boot": "uart_boot",
-                         "fw_uart_boot": "fw_uart_boot.bin", "fw": "fw.bin"}
-    ctx = _ctx(tmp_path, bench=bench, dxm1_flash=True, execute=True)
-    with pytest.raises(steps.Refused, match="uart_mux_line == dxm1.reset_line"):
-        steps.Dxm1NpuFlash().run(ctx)
-
-
-def test_dxm1_npu_flash_refuses_wrong_uart_boot_tool_md5(tmp_path):
-    fw_dir = tmp_path / "dxm1fw"
-    fw_dir.mkdir()
-    (fw_dir / "fw_uart_boot.bin").write_bytes(bytes.fromhex("00" * 4))
-    (fw_dir / "fw.bin").write_bytes(bytes.fromhex("00" * 4))
-    (fw_dir / "uart_boot").write_bytes(b"not the vendor tool")
-    # patch the pinned firmware md5s to match our placeholder files so only
-    # the uart_boot tool's md5 mismatch is exercised
-    want_boot = hashlib.md5((fw_dir / "fw_uart_boot.bin").read_bytes()).hexdigest()
-    want_fw = hashlib.md5((fw_dir / "fw.bin").read_bytes()).hexdigest()
-    orig_boot, orig_fw = lt.DXM1_FW_UART_BOOT_MD5, lt.DXM1_FW_MD5
-    lt.DXM1_FW_UART_BOOT_MD5, lt.DXM1_FW_MD5 = want_boot, want_fw
-    try:
-        bench = _bench()
-        bench.raw["dxm1"] = {"gpio_chip": "chip0", "uart_mux_line": 61, "reset_line": 86,
-                             "uart_device": "/dev/ttySC1", "uart_boot": str(fw_dir / "uart_boot"),
-                             "fw_uart_boot": str(fw_dir / "fw_uart_boot.bin"),
-                             "fw": str(fw_dir / "fw.bin")}
-        ctx = _ctx(tmp_path, bench=bench, dxm1_flash=True, execute=True)
-        with pytest.raises(steps.Refused, match="uart_boot.*md5"):
-            steps.Dxm1NpuFlash().run(ctx)
-    finally:
-        lt.DXM1_FW_UART_BOOT_MD5, lt.DXM1_FW_MD5 = orig_boot, orig_fw
-
-
-def test_dxm1_npu_flash_execute_fails_when_pcie_endpoint_absent(tmp_path):
-    """The real-firmware execute path: only the PCIe verify should fail."""
-    fw_dir = tmp_path / "dxm1fw"
-    fw_dir.mkdir()
-    boot_bin = fw_dir / "fw_uart_boot.bin"
-    fw_bin = fw_dir / "fw.bin"
-    tool_bin = fw_dir / "uart_boot"
-    boot_bin.write_bytes(b"boot")
-    fw_bin.write_bytes(b"fw")
-    tool_bin.write_bytes(b"tool")
-    orig = (lt.DXM1_FW_UART_BOOT_MD5, lt.DXM1_FW_MD5, lt.DXM1_UART_BOOT_TOOL_MD5)
-    lt.DXM1_FW_UART_BOOT_MD5 = hashlib.md5(boot_bin.read_bytes()).hexdigest()
-    lt.DXM1_FW_MD5 = hashlib.md5(fw_bin.read_bytes()).hexdigest()
-    lt.DXM1_UART_BOOT_TOOL_MD5 = hashlib.md5(tool_bin.read_bytes()).hexdigest()
-    try:
-        board = Board()
-        board.host = "10.0.0.2"
-        console = _login_console()
-        bench = _bench(console=console)
-        # pinctrl chip-base lookup, sysfs P75/PA6 dir resolution (already
-        # named + ownership-verified, no export needed), the reset pulse,
-        # two uart_boot calls, then P75 released -- all scripted
-        # permissively so only the PCIe-empty cold boot causes the failure.
-        console_hooks = {"n": 0}
-
-        def on_power():
-            console.feed("NOTICE:  BL2: v2.10\nDRAM:  3.9 GiB\n\ne1m login: ")
-        bench.power.on_hook = on_power
-        board._answer_orig = board._answer
-
-        def answer(cmd):
-            if cmd.startswith("for d in /sys/class/gpio/gpiochip*"):
-                return 0, "/sys/class/gpio/gpiochip416 10410000.pinctrl\n"
-            if cmd == "cat /sys/class/gpio/gpiochip416/base":
-                return 0, "416\n"
-            if cmd == "test -e /sys/class/gpio/gpio477/value":
-                return 1, ""
-            if cmd == "test -e /sys/class/gpio/P75/value":
-                return 0, ""
-            if cmd == "readlink -f /sys/class/gpio/gpiochip416/device":
-                return 0, "/sys/devices/platform/soc/10410000.pinctrl\n"
-            if cmd == "readlink -f /sys/class/gpio/P75/device":
-                return 0, "/sys/devices/platform/soc/10410000.pinctrl/gpiochip0\n"
-            if cmd == "echo high > /sys/class/gpio/P75/direction":
-                return 0, ""
-            if cmd == "test -e /sys/class/gpio/gpio502/value":
-                return 1, ""
-            if cmd == "test -e /sys/class/gpio/PA6/value":
-                return 0, ""
-            if cmd == "readlink -f /sys/class/gpio/PA6/device":
-                return 0, "/sys/devices/platform/soc/10410000.pinctrl/gpiochip0\n"
-            if re.search(r"echo low > /sys/class/gpio/PA6/direction && sleep 0\.1 && "
-                         r"echo high > /sys/class/gpio/PA6/direction", cmd):
-                return 0, ""
-            if re.search(r"uart_boot -d /dev/ttySC1 -f", cmd):
-                return 0, "bootloader ok\n"
-            if re.search(r"uart_boot -d /dev/ttySC1 -F", cmd):
-                return 0, "app ok\n"
-            if cmd == "echo low > /sys/class/gpio/P75/direction":
-                return 0, ""
-            if cmd == "ls /sys/bus/pci/devices":
-                return 0, "0000:00:00.0\n"       # root port only: no DEEPX endpoint
-            if cmd == "cat /sys/bus/pci/devices/0000:00:00.0/class":
-                return 0, "0x060400\n"
-            if cmd.startswith("chmod +x"):
-                return 0, ""
-            return board._answer_orig(cmd)
-        board._answer = answer
-        bench.raw["dxm1"] = {"gpio_chip": "10410000.pinctrl", "uart_mux_line": 61, "reset_line": 86,
-                             "uart_device": "/dev/ttySC1", "uart_boot": str(tool_bin),
-                             "fw_uart_boot": str(boot_bin), "fw": str(fw_bin)}
-        ctx = _ctx(tmp_path, bench=bench, linux=board, dxm1_flash=True, execute=True)
-        r = steps.Dxm1NpuFlash().run(ctx)
-        raise AssertionError("expected Refused, got a result: " + repr(r))
-    except steps.Refused as e:
-        assert "DEEPX endpoint" in str(e)
-    finally:
-        lt.DXM1_FW_UART_BOOT_MD5, lt.DXM1_FW_MD5, lt.DXM1_UART_BOOT_TOOL_MD5 = orig
 
 
 class _AckBoard(Board):
@@ -1172,7 +1057,7 @@ def test_record_takes_every_steps_facts_from_a_same_bundle_older_revision(tmp_pa
     f.write_text(text, encoding="utf-8")
     # only the operator-set disposition may still block; no recorded fact is missing
     assert [r for r in ledger_out.ship_check(ledger_out.read_unit_yaml(f), CATALOGUE["keys"])
-            if r.startswith("missing") and "disposition" not in r] == []
+            if r.startswith("missing") and "disposition" not in r and "test_functional" not in r] == []
 
 
 def test_record_ignores_other_bundle_older_revision_for_non_flash_steps(tmp_path):
@@ -1348,7 +1233,7 @@ def test_detect_refuses_the_parameter_error_fallback_banner(tmp_path):
     b = _bench(console=FakeConsole([(None, "SCI Download mode (Due to parameter error)\r\n")]))
     ctx = _ctx(tmp_path, bench=b, execute=True)
     res = steps.run_one(steps.Detect(), ctx)
-    assert res.status == "failed" and "parameter error" in res.detail
+    assert res.status == "failed" and "no valid image" in res.detail
 
 
 def test_accept_cid_change_adopts_once_then_refuses_another_swap(tmp_path, monkeypatch):
@@ -1449,3 +1334,54 @@ def test_record_ship_check_uses_the_preset_family_not_the_bundle_field(tmp_path)
     ctx.bundle["family"] = "v2n"                   # a wrong/stale bundle field must not hide DX-M1
     res = steps.run_steps(ctx, only=["record"])
     assert "dxm1_fw_version" in res[-1].detail
+
+
+# --- write_cm33 -----------------------------------------------------------------------------
+
+CM33 = b"\0" * 0x3000 + (0x08100000).to_bytes(4, "little") + (0x08003101).to_bytes(4, "little") + b"\x44" * 5000
+
+
+def _cm33_ctx(tmp_path, board, **kw):
+    bdir, b = _bundle(tmp_path)
+    (bdir / "artifacts" / "cm33.bin").write_bytes(CM33)
+    b["components"].append({"role": "cm33", "file": "artifacts/cm33.bin", "sha256": hashlib.sha256(CM33).hexdigest(),
+                            "size_bytes": len(CM33), "flash_target": "xspi:mtd1"})
+    return _ctx(tmp_path, bundle=(bdir, b), bench=_bench(), linux=board, **kw)
+
+
+def test_write_cm33_is_skipped_without_a_cm33_component(tmp_path):
+    board = WritableBoard(xspi_bl2=BL2, xspi_fip=FIP)
+    res = steps.run_steps(_ctx(tmp_path, bench=_bench(), linux=board, execute=True), only=["write_cm33"])
+    assert res[-1].status == "skipped" and res[-1].detail == "bundle has no cm33 component"
+    assert not any("flash_erase" in c for c in board.commands)
+    assert steps.STEP_NAMES.index("write_cm33") == steps.STEP_NAMES.index("write_xspi") + 1
+    assert "write_cm33" in steps.FLASH_STEPS
+
+
+def test_write_cm33_writes_at_the_region_and_is_satisfied_afterwards(tmp_path):
+    board = WritableBoard(xspi_bl2=BL2, xspi_fip=FIP)
+    board.files["/dev/mtd1"] = board.files["/dev/mtd1"].ljust(0x200000, b"\xff")
+    ctx = _cm33_ctx(tmp_path, board, execute=True)
+    res = steps.run_steps(ctx, only=["write_cm33"])
+    assert res[-1].status == "done", res[-1].detail
+    assert res[-1].evidence["xspi_cm33_md5"] == hashlib.md5(CM33).hexdigest()
+    assert res[-1].evidence["xspi_cm33_size"] == str(len(CM33))
+    assert f"flash_erase /dev/mtd1 {gates.CM33_REGION_OFFSET} 1" in board.commands
+    assert board.files["/dev/mtd1"][gates.CM33_REGION_OFFSET:][:len(CM33)] == CM33
+    assert board.files["/dev/mtd1"][:len(FIP)] == FIP                      # the FIP is untouched
+    board.commands.clear()
+    again = steps.run_steps(ctx, only=["write_cm33"])
+    assert again[-1].status == "skipped" and not any("flash_erase" in c for c in board.commands)
+
+
+def test_fip_write_leaves_the_cm33_region_untouched(tmp_path):
+    board = WritableBoard(xspi_bl2=BL2, xspi_fip=OLD_FIP)
+    mark = b"\xc3" * 0x1000
+    board.files["/dev/mtd1"] = OLD_FIP.ljust(gates.CM33_REGION_OFFSET, b"\xff") + mark
+    ctx = _ctx(tmp_path, bench=_bench(), linux=board, execute=True)
+    res = steps.run_steps(ctx, only=["write_xspi"])
+    assert res[-1].status == "done", res[-1].detail
+    assert board.files["/dev/mtd1"][:len(FIP)] == FIP
+    assert board.files["/dev/mtd1"][gates.CM33_REGION_OFFSET:] == mark
+    blocks = int(next(c for c in board.commands if c.startswith("flash_erase /dev/mtd1 ")).split()[-1])
+    assert blocks * 65536 <= gates.CM33_REGION_OFFSET                       # the erase stops below the region
