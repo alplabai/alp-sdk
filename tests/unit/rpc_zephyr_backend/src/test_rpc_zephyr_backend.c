@@ -152,7 +152,15 @@
 #define CONFIG_OPENAMP                   1
 #define CONFIG_IPC_SERVICE_BACKEND_RPMSG 1
 
+/* z_call()'s timeout branch needs a request that "goes on the wire", and the
+ * zeroed endpoint these tests use has no transport: rename the one ipc_service
+ * call the driver makes to a test double that accepts the frame and never
+ * answers (#2586).  The renaming applies to the header's prototype too. */
+#define ipc_service_send test_ipc_service_send
+
 #include "../../../../src/backends/rpc/zephyr_drv.c"
+
+#undef ipc_service_send
 
 #include <string.h>
 
@@ -160,6 +168,16 @@
 #include <zephyr/ztest.h>
 
 ZTEST_SUITE(alp_rpc_zephyr_backend, NULL, NULL, NULL, NULL, NULL);
+
+static atomic_t g_sent_frames;
+
+int test_ipc_service_send(struct ipc_ept *ept, const void *data, size_t len)
+{
+	ARG_UNUSED(ept);
+	ARG_UNUSED(data);
+	atomic_inc(&g_sent_frames);
+	return (int)len;
+}
 
 /* ------------------------------------------------------------------ */
 /* Test double for the dispatcher's alp_rpc_close_finalize()           */
@@ -1073,4 +1091,41 @@ ZTEST(alp_rpc_zephyr_backend, test_2586_poisoned_channel_refuses_call)
 	zassert_equal(z_call(&st, "echo", g_2586_big_req, sizeof(g_2586_big_req), NULL, NULL, 10),
 	              ALP_ERR_NOMEM);
 	zassert_false(be.call_pending);
+}
+
+/* A call whose request is on the wire and gets no reply in time poisons the
+ * channel.  timeout_ms == 0 makes k_sem_take() return -EBUSY, which the old
+ * `== -EAGAIN` test missed (call slot left staged, channel not poisoned). */
+ZTEST(alp_rpc_zephyr_backend, test_2586_zero_timeout_call_poisons_channel)
+{
+	struct rpc_be           be;
+	alp_rpc_backend_state_t st = { 0 };
+
+	init_test_channel(&be, "zero_to");
+	st.be_data = &be;
+	atomic_clear(&g_sent_frames);
+
+	zassert_equal(z_call(&st, "echo", "A", 1, NULL, NULL, 0), ALP_ERR_TIMEOUT);
+	zassert_equal(atomic_get(&g_sent_frames), 1);
+	zassert_false(be.call_pending, "timeout must not leave the call slot staged");
+	zassert_true(be.call_poisoned);
+}
+
+ZTEST(alp_rpc_zephyr_backend, test_2586_timeout_poisons_then_refuses_without_sending)
+{
+	struct rpc_be           be;
+	alp_rpc_backend_state_t st = { 0 };
+
+	init_test_channel(&be, "to_poison");
+	st.be_data = &be;
+	atomic_clear(&g_sent_frames);
+
+	zassert_equal(z_call(&st, "echo", "A", 1, NULL, NULL, 10), ALP_ERR_TIMEOUT);
+	zassert_true(be.call_poisoned);
+	zassert_false(be.call_pending);
+
+	/* A late "A" reply would answer B (replies match by method name only);
+	 * B is refused before it is sent. */
+	zassert_equal(z_call(&st, "echo", "B", 1, NULL, NULL, 10), ALP_ERR_NOT_READY);
+	zassert_equal(atomic_get(&g_sent_frames), 1, "only A went out");
 }

@@ -7,19 +7,31 @@ causes, fixed separately:
 - **Attach reset.** The A55 backend (`src/backends/rpc/yocto_uio_drv.c`)
   re-creates its OpenAMP virtio driver on every open, which zeroes both
   vrings, while the CM33 (`examples/multicore/rpmsg-v2n/m33_sm`) kept its
-  ring indices for its whole boot. Before creating the virtio device, the
-  A55 now writes the resource table's `vdev.status = 0`, kicks the CM33,
-  and waits up to 500 ms for the attach-epoch word at `rsctbl+0xFFC`
-  (A55 `0x4f700ffc`) to change. The CM33 manager task treats a doorbell
-  without `DRIVER_OK` as a reset: it stops the responder, purges the echo
-  queue, tears down its virtio device, bumps the epoch and waits for the
-  next attach. The CM33 beacon version at `rsctbl+0xFF4` goes from `1` to
+  ring indices for its whole boot. The CM33 now publishes whether it is
+  bound through the attach-epoch word at `rsctbl+0xFFC` (A55
+  `0x4f700ffc`): odd = bound (bumped after `rpmsg_init_vdev()` returned),
+  even = waiting (bumped after its virtio device is torn down). Whenever
+  the A55 reads an odd epoch, whatever `vdev.status` says (a timed-out
+  earlier open leaves it 0), it writes the resource table's
+  `vdev.status = 0`, kicks the CM33, and waits up to 500 ms (monotonic
+  clock) for the epoch to turn even. The CM33 manager task treats a
+  doorbell without `DRIVER_OK` as a reset: it stops the responder, purges
+  the echo queue, tears down its virtio device, bumps the epoch and waits
+  for the next attach. `cleanup_system()` no longer writes `vdev.status`,
+  which could overwrite a `DRIVER_OK` the A55 had already set again. The
+  backend also takes `flock(LOCK_EX | LOCK_NB)` on the `rsctbl` UIO node:
+  a second process opening while another holds the link gets
+  `ALP_ERR_BUSY`. The CM33 beacon version at `rsctbl+0xFF4` goes from `1` to
   `2`. A CM33 still on version 1 cannot reset, so a second open in its
   boot now fails with `ALP_ERR_BUSY` and a message naming the reason. The
   same check fails the open with `ALP_ERR_NOT_READY` when the beacon
-  magic `0xA10D0683` is missing and with `ALP_ERR_NOSUPPORT` when the
-  version is `>= 0x100` (an image without RPC, `0x100` = the idle stock
-  shim). An old A55 binary never writes status 0, so its behaviour with
+  magic `0xA10D0683` is missing (this includes a stock shim without the
+  heartbeat beacon) and with `ALP_ERR_NOSUPPORT` when the version is
+  `>= 0x100` (an image without RPC, `0x100` = the idle stock shim with
+  the heartbeat beacon, which only exists on the unmerged branch
+  `feat/cm33-shim-heartbeat`). The `alp_rpc_open()` error list in
+  `include/alp/rpc.h` names these. The m33_sm `prj.conf` also sets
+  `CONFIG_ALP_SDK=y` so a bare `west build` links the MHU-B glue. An old A55 binary never writes status 0, so its behaviour with
   the new CM33 firmware is unchanged. `cleanup_system()` in the CM33
   example also freed nothing (it passed `rvdev.vdev` after
   `rpmsg_deinit_vdev()` had NULLed it); fixed, since it now runs once per

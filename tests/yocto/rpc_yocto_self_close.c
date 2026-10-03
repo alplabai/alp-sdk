@@ -948,6 +948,26 @@ static void *echo_peer(void *arg)
 	return NULL;
 }
 
+/* A peer that answers EVERY frame it receives with call A's stale reply
+ * ("echo" / "A") and counts what it received. */
+static atomic_int g_stale_rx;
+
+static void *stale_peer(void *arg)
+{
+	int     fd = *(int *)arg;
+	uint8_t buf[ALP_RPC_TX_FRAME_MAX];
+	uint8_t late[16];
+	int     late_len = frame_build(late, sizeof late, "echo", "A", 1);
+	while (!atomic_load(&g_echo_stop)) {
+		struct pollfd pfd = { .fd = fd, .events = POLLIN };
+		if (poll(&pfd, 1, 10) > 0 && recv(fd, buf, sizeof buf, 0) > 0) {
+			atomic_fetch_add(&g_stale_rx, 1);
+			(void)send(fd, late, (size_t)late_len, 0);
+		}
+	}
+	return NULL;
+}
+
 static void test_timeout_poisons_until_reopen(void)
 {
 	int sv[2];
@@ -963,16 +983,25 @@ static void test_timeout_poisons_until_reopen(void)
 	size_t  n       = sizeof resp;
 	ALP_ASSERT_EQ_INT(y_call(&st, "echo", "A", 1, resp, &n, 50), ALP_ERR_TIMEOUT);
 
-	/* A's reply arrives late.  Pre-fix, call B consumed it as its own. */
-	uint8_t late[16];
-	int     late_len = frame_build(late, sizeof late, "echo", "A", 1);
-	ALP_ASSERT_TRUE(send(sv[1], late, (size_t)late_len, 0) == late_len);
-	sleep_ms(50);
+	ALP_ASSERT_EQ_INT(count_frames(sv[1]), 1); /* A went out */
+
+	/* From here on the peer answers every frame it receives with A's STALE
+	 * reply.  Pre-fix, call B was sent, the peer's stale "A" arrived while B
+	 * was pending, and B returned 'A' (replies match by method name only):
+	 * every reply one call late.  With the fix B is refused before it is
+	 * sent, so the peer never sees a frame. */
+	atomic_store(&g_echo_stop, 0);
+	atomic_store(&g_stale_rx, 0);
+	pthread_t stale;
+	ALP_ASSERT_EQ_INT(pthread_create(&stale, NULL, stale_peer, &sv[1]), 0);
 
 	n = sizeof resp;
 	ALP_ASSERT_EQ_INT(y_call(&st, "echo", "B", 1, resp, &n, 1000), ALP_ERR_NOT_READY);
 	ALP_ASSERT_TRUE(resp[0] != 'A');
-	ALP_ASSERT_EQ_INT(count_frames(sv[1]), 1); /* only A ever went out */
+	sleep_ms(50);
+	atomic_store(&g_echo_stop, 1);
+	ALP_ASSERT_EQ_INT(pthread_join(stale, NULL), 0);
+	ALP_ASSERT_EQ_INT(atomic_load(&g_stale_rx), 0); /* B never went out */
 
 	do_close(&st);
 	ALP_ASSERT_TRUE(wait_until(&worker_done, TEST_TIMEOUT_MS));

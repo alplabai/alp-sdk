@@ -96,11 +96,14 @@ LOG_MODULE_REGISTER(rpmsg_v2n_m33_sm, LOG_LEVEL_INF);
  * heartbeat word lets a re-read tell "alive" apart from "wrote once, then
  * faulted".
  *
- * Version 2 (#2586) adds the attach-epoch word at +0xFFC: bumped once
- * every time this firmware has dropped its virtio device on an A55 attach
- * reset (see rpmsg_link_reset()).  The A55 backend
- * (src/backends/rpc/yocto_uio_drv.c, uio_attach_reset()) waits for it to
- * change, and refuses a re-attach outright when the version is below 2.
+ * Version 2 (#2586) adds the attach-epoch word at +0xFFC, which publishes
+ * whether this firmware is bound to an A55 session: ODD = bound (bumped
+ * after rpmsg_init_vdev() returned), EVEN = waiting for an attach (starts
+ * at 0, bumped again after cleanup_system() on an A55 attach reset; see
+ * rpmsg_link_reset()).  The A55 backend (src/backends/rpc/yocto_uio_drv.c,
+ * uio_attach_reset()) requests a reset whenever it reads ODD, whatever
+ * vdev.status says, and waits for EVEN.  It refuses a re-attach outright
+ * when the version is below 2.
  */
 #define RSCTBL_BEACON_MAGIC_OFFSET     (0xFF0)
 #define RSCTBL_BEACON_VERSION_OFFSET   (0xFF4)
@@ -339,9 +342,10 @@ static void platform_deinit(void)
 	metal_finish();
 }
 
+static void rsctbl_attach_epoch_bump(void);
+
 static void cleanup_system(void)
 {
-	struct fw_resource_table *rsc_tbl = (struct fw_resource_table *)RSC_TABLE_ADDR;
 	/* rpmsg_deinit_vdev() NULLs rvdev.vdev, so take it first or
 	 * rproc_virtio_remove_vdev() frees nothing (#2586: this path now runs
 	 * once per A55 re-attach, so the leak would add up). */
@@ -349,9 +353,9 @@ static void cleanup_system(void)
 
 	rpmsg_deinit_vdev(&rvdev);
 	rproc_virtio_remove_vdev(vdev);
-	/* The master doesn't always clear this on its own teardown path --
-	 * clear it here so a re-attach doesn't see a stale "live" vdev. */
-	rsc_tbl->vdev.status = 0;
+	/* vdev.status is deliberately NOT written here: on the reset path the
+	 * A55 already wrote 0 before kicking, and a store from this side could
+	 * overwrite a DRIVER_OK the A55 has since set for its next attach. */
 }
 
 struct rpmsg_device *platform_create_rpmsg_vdev(unsigned int vdev_index,
@@ -424,6 +428,7 @@ struct rpmsg_device *platform_create_rpmsg_vdev(unsigned int vdev_index,
 		goto failed;
 	}
 
+	rsctbl_attach_epoch_bump(); /* even -> odd: bound */
 	return rpmsg_virtio_get_rpmsg_device(&rvdev);
 
 failed:
@@ -477,8 +482,6 @@ static void app_rpmsg_client_sample(void *arg1, void *arg2, void *arg3)
 	}
 }
 
-static void rsctbl_attach_epoch_bump(void);
-
 /* The A55 asked for a link reset (#2586): stop the responder, drop queued
  * frames, tear the virtio device down and acknowledge, so the next attach
  * starts from fresh ring indices on both sides. */
@@ -498,7 +501,7 @@ static void rpmsg_link_reset(void)
 	sc_ept.name[0] = '\0';
 	cleanup_system();
 	atomic_set(&link_resetting, 0);
-	rsctbl_attach_epoch_bump();
+	rsctbl_attach_epoch_bump(); /* odd -> even: waiting; the A55 may proceed */
 }
 
 static void rpmsg_mng_task(void *arg1, void *arg2, void *arg3)
@@ -538,6 +541,7 @@ static void rpmsg_mng_task(void *arg1, void *arg2, void *arg3)
 		                     NULL) != 0) {
 			LOG_ERR("failed to create responder endpoint");
 			cleanup_system();
+			rsctbl_attach_epoch_bump(); /* odd -> even: no longer bound */
 			return;
 		}
 
@@ -562,14 +566,16 @@ static void rsctbl_beacon_publish(void)
 	volatile uint32_t *epoch = (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_ATTACH_EPOCH_OFFSET);
 
 	*epoch   = 0U;
-	*magic   = RSCTBL_BEACON_MAGIC;
 	*version = RSCTBL_BEACON_VERSION;
-	/* Make the writes visible to the A55 side before anything else runs. */
+	/* Magic last: the A55 trusts epoch + version only once it reads the magic. */
+	barrier_dsync_fence_full();
+	*magic = RSCTBL_BEACON_MAGIC;
 	barrier_dsync_fence_full();
 }
 
-/* Acknowledges an A55 attach reset -- see the RSCTBL_BEACON_* macros' header
- * comment.  Called only after the virtio device is gone. */
+/* Flips the attach epoch's parity (even <-> odd) -- see the RSCTBL_BEACON_*
+ * macros' header comment.  Called after the virtio device is bound (-> odd)
+ * and after it is gone (-> even). */
 static void rsctbl_attach_epoch_bump(void)
 {
 	volatile uint32_t *epoch = (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_ATTACH_EPOCH_OFFSET);

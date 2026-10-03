@@ -314,10 +314,21 @@ typedef void (*alp_rpc_link_cb_t)(alp_rpc_link_state_t state, void *user);
  *                                       method-name too long
  *           - @ref ALP_ERR_NOMEM     — channel pool exhausted
  *           - @ref ALP_ERR_NOT_READY — RPMsg device or memory
- *                                       region not yet up
+ *                                       region not yet up, or (Linux
+ *                                       UIO) no CM33 beacon
+ *           - @ref ALP_ERR_BUSY      — Linux UIO: the CM33 is still
+ *                                       attached to an earlier session
+ *                                       and cannot reset, or another
+ *                                       process holds the link; also
+ *                                       the single-link busy of a
+ *                                       second concurrent open
+ *           - @ref ALP_ERR_TIMEOUT   — Linux UIO: the CM33 did not
+ *                                       acknowledge the attach reset
  *           - @ref ALP_ERR_NOSUPPORT — SDK built without
  *                                       CONFIG_ALP_SDK_RPC / no
- *                                       OpenAMP backend available
+ *                                       OpenAMP backend available, or
+ *                                       (Linux UIO) the CM33 image
+ *                                       serves no RPC
  */
 alp_rpc_channel_t *alp_rpc_open(const alp_rpc_config_t *cfg);
 

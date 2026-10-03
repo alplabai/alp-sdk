@@ -200,13 +200,16 @@ IPC-enabled CM33 image through `yocto_uio_drv.c`.  The CM33 window is
    | Offset  | A55 address  | Word                                                              |
    |---------|--------------|-------------------------------------------------------------------|
    | `+0xFF0`| `0x4f700ff0` | magic `0xA10D0683`                                                |
-   | `+0xFF4`| `0x4f700ff4` | version: `1` = RPC firmware without attach reset, `2` = with it; `>= 0x100` = image without RPC (`0x100` = idle stock shim) |
+   | `+0xFF4`| `0x4f700ff4` | version: `1` = RPC firmware without attach reset, `2` = with it; `>= 0x100` = image without RPC (`0x100` = idle stock shim *with the heartbeat beacon*, pending branch `feat/cm33-shim-heartbeat`) |
    | `+0xFF8`| `0x4f700ff8` | ~1 Hz heartbeat counter                                           |
-   | `+0xFFC`| `0x4f700ffc` | attach epoch (version 2): `0` at boot, `+1` per acknowledged attach reset |
+   | `+0xFFC`| `0x4f700ffc` | attach epoch (version 2): `0` at boot; **odd = CM33 bound to a session, even = waiting for an attach** |
 
    `alp_rpc_open()` fails with `ALP_ERR_NOT_READY` when the magic is
-   missing (CM33 not running) and with `ALP_ERR_NOSUPPORT` on a
-   version `>= 0x100`, without writing anything the CM33 reads.
+   missing (CM33 not running, or a stock shim without the heartbeat
+   beacon) and with `ALP_ERR_NOSUPPORT` on a version `>= 0x100`, without
+   writing anything the CM33 reads.  A second process opening while
+   another holds the link gets `ALP_ERR_BUSY` (the backend takes
+   `flock(LOCK_EX | LOCK_NB)` on the `rsctbl` UIO node).
 
 3. **Check the A55 half**: `cat /sys/class/uio/uio*/name` lists `rsctbl`,
    `mhu-shm`, `vring-ctl0`, `vring-ctl1`, `vring-shm0`, `vring-shm1`,
