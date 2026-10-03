@@ -7,7 +7,7 @@
  * header verifies the handle's backend is Renesas before
  * touching hardware; calls on a non-Renesas handle return
  * @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC.  After argument validation
- * every function returns @ref ALP_ERR_NOSUPPORT: no ISP register is
+ * every function returns @ref ALP_ERR_NOSUPPORT -- no ISP register is
  * written, because the CM33 FSP has no CRU/CSI-2/ISP module and the
  * A55 owns them (RZ/V2N Hardware User's Manual R01UH1071EJ0120
  * section 9.8).
