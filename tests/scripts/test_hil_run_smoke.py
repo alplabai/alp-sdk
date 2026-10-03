@@ -722,8 +722,8 @@ def test_v2m103_observed_value_specs(spec_name: str, needles: tuple) -> None:
     # The observed literal is encoded in the command, not just the marker.
     literal = {
         "v2m103-pmic-i2c": "0x25",
-        "v2m103-ethernet-phy-id": "0x001cc916",
-        "v2m103-kernel-version": "6.1.141-cip43",
+        "v2m103-ethernet-phy-id": "001cc916",
+        "v2m103-kernel-version": "6.1.141-cip43-yocto-standard",
         "v2m103-rtc-ticks": "8-0052",
     }[spec_name]
     assert literal in spec.ssh_command

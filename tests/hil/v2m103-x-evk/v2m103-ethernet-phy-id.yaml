@@ -1,28 +1,54 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # E1M-V2M103 Ethernet PHY identity: both PHYs report MII ID 001c.c916
-# (PHYID1 0x001c, PHYID2 0xc916), as observed on the bench.  Linux exposes
-# it as /sys/bus/mdio_bus/devices/*/phy_id = 0x001cc916; exactly two PHYs
-# must match.  Read-only sysfs.  Link state is v2m103-ethernet-link.
+# (PHYID1 0x001c, PHYID2 0xc916), as read from the PHY registers on the
+# bench.  The ID is read from MII registers 2 and 3 through SIOCGMIIPHY /
+# SIOCGMIIREG, not from /sys/bus/mdio_bus/devices/*/phy_id: when the
+# device tree forces a PHY ID with an "ethernet-phy-idXXXX.XXXX"
+# compatible, sysfs reports the forced value, not the silicon's (seen on
+# 2026W38-0004 on 2026-10-03: sysfs 0x001cc878 from the older device tree).
+# stmmac answers these ioctls only while the interface is up, so a down
+# interface is brought up for the read and put back down afterwards.
+# Link state is v2m103-ethernet-link.
 
 schema_version: 1
 name: v2m103-ethernet-phy-id
 description: |
-  Two MDIO PHYs with phy_id 0x001cc916 (MII ID 001c.c916).
+  Both PHYs read MII ID 001c.c916 from registers 2 and 3.
 
 flash_method: ssh-run
 ssh_command: |-
-  n=0
-  for p in /sys/bus/mdio_bus/devices/*/phy_id; do
-    [ -e "$p" ] || continue
-    id=$(cat $p)
-    echo "HIL_PHY ${p%/phy_id} $id"
-    [ "$id" = 0x001cc916 ] && n=$((n+1))
-  done
-  echo "HIL_PHY_COUNT $n"
-  [ "$n" -eq 2 ] && echo HIL_PHY_ID_OK
+  python3 - <<'PY'
+  import fcntl, socket, struct, subprocess
+  FMT = "16sHHHH16x"
+  s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+  n = 0
+  for ifn in ("end0", "end1"):
+      flags = int(open("/sys/class/net/%s/flags" % ifn).read(), 16)
+      was_down = not (flags & 1)
+      if was_down:
+          subprocess.run(["ip", "link", "set", "dev", ifn, "up"], check=False)
+      try:
+          r = fcntl.ioctl(s, 0x8947, struct.pack(FMT, ifn.encode(), 0, 0, 0, 0))
+          addr = struct.unpack(FMT, r)[1]
+          ids = []
+          for reg in (2, 3):
+              r = fcntl.ioctl(s, 0x8948, struct.pack(FMT, ifn.encode(), addr, reg, 0, 0))
+              ids.append(struct.unpack(FMT, r)[4])
+          v = "%04x%04x" % tuple(ids)
+      except OSError as e:
+          v = "err%d" % e.errno
+      finally:
+          if was_down:
+              subprocess.run(["ip", "link", "set", "dev", ifn, "down"], check=False)
+      print("HIL_PHY", ifn, v)
+      n += v == "001cc916"
+  print("HIL_PHY_COUNT", n)
+  if n == 2:
+      print("HIL_PHY_ID_OK")
+  PY
 
 serial:
-  duration_s: 10
+  duration_s: 15
   expect_contains:
     - "HIL_PHY_ID_OK"
