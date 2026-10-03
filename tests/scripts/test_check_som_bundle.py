@@ -257,8 +257,20 @@ def _bmap_bundle(tmp_path, image_size, bmap_text):
     return p
 
 
-_BMAP = ('<bmap version="2.0"><ImageSize> {n} </ImageSize><BlockSize> 4096 </BlockSize>'
-         '<ChecksumType> sha256 </ChecksumType><BlockMap><Range chksum="{h}"> 0-1 </Range></BlockMap></bmap>')
+class _Bmap:
+    """A signed bmap: BmapFileChecksum is the sha256 of the file with that checksum zeroed."""
+
+    @staticmethod
+    def format(n, h):
+        import hashlib
+        xml = (f'<bmap version="2.0"><ImageSize> {n} </ImageSize><BlockSize> 4096 </BlockSize>'
+               f'<MappedBlocksCount> 2 </MappedBlocksCount><ChecksumType> sha256 </ChecksumType>'
+               f'<BmapFileChecksum> {"0" * 64} </BmapFileChecksum>'
+               f'<BlockMap><Range chksum="{h}"> 0-1 </Range></BlockMap></bmap>')
+        return xml.replace("0" * 64, hashlib.sha256(xml.encode()).hexdigest(), 1)
+
+
+_BMAP = _Bmap
 
 
 def test_system_image_bmap_valid_and_size_checked(tmp_path):

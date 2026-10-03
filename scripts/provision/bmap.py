@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,25 +32,45 @@ class Bmap:
 
 
 def parse(path: Path) -> Bmap:
+    """Parse a bmaptool format 2.x file written with sha256. Refuses what it cannot vouch for:
+    a DOCTYPE/ENTITY declaration, a wrong BmapFileChecksum, another format or checksum type,
+    and a MappedBlocksCount that disagrees with the ranges."""
     try:
-        root = ET.parse(path).getroot()
+        raw = path.read_bytes()
+        if b"<!DOCTYPE" in raw or b"<!ENTITY" in raw:      # entity expansion in xml.etree
+            raise ValueError("carries a DOCTYPE/ENTITY declaration")
+        root = ET.fromstring(raw)
+        if not (root.get("version") or "").startswith("2."):
+            raise ValueError(f"bmap format {root.get('version')!r}, only 2.x is supported")
+        ctype = (root.findtext("ChecksumType") or "").strip().lower()
+        if ctype != "sha256":
+            raise ValueError(f"ChecksumType {ctype!r}, only sha256 is supported")
+        stated = (root.findtext("BmapFileChecksum") or "").strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", stated):
+            raise ValueError("no valid BmapFileChecksum")
+        # bmaptool's rule: the file with the first occurrence of the checksum zeroed
+        got = hashlib.sha256(raw.replace(stated.encode(), b"0" * 64, 1)).hexdigest()
+        if got != stated:
+            raise ValueError(f"BmapFileChecksum {stated} does not match the file ({got})")
         bs = int(root.findtext("BlockSize", "").strip())
         size = int(root.findtext("ImageSize", "").strip())
         if size <= 0:                  # 0 is the writer's "mapped stream" sentinel
             raise ValueError("ImageSize must be positive")
-        ctype = (root.findtext("ChecksumType") or "sha1").strip().lower()
-        hashlib.new(ctype)
         ranges, last_end = [], 0
         for r in root.find("BlockMap"):
             a, _, b = r.text.strip().partition("-")
             first, end = int(a), int(b or a)
-            chk = r.get("chksum") or r.get("sha1") or ""
+            chk = r.get("chksum") or ""
             if first < last_end or end < first or not chk:
                 raise ValueError(f"bad or unsorted range {r.text.strip()!r}")
             ranges.append((first, end - first + 1, chk.lower()))
             last_end = end + 1
         if bs < 512 or bs % 512 or not ranges:
             raise ValueError("no ranges or bad BlockSize")
+        counted = sum(c for _, c, _ in ranges)
+        stated_n = int(root.findtext("MappedBlocksCount", "").strip())
+        if stated_n != counted:
+            raise ValueError(f"MappedBlocksCount {stated_n} but the ranges list {counted} blocks")
     except (ET.ParseError, TypeError, ValueError, AttributeError, OSError) as e:
         raise BenchError(f"{path.name}: not a valid bmap: {e}") from e
     return Bmap(bs, size, ctype, tuple(ranges))

@@ -44,10 +44,18 @@ def make_bmap_xml(raw: bytes, bs: int = BS, ctype: str = "sha256", corrupt: bool
             h = "0" * len(h)
         span = f"{a}-{b}" if a != b else f"{a}"
         body += f'    <Range chksum="{h}"> {span} </Range>\n'
-    return (f'<?xml version="1.0" ?>\n<bmap version="2.0">\n <ImageSize> {len(raw)} </ImageSize>\n'
-            f' <BlockSize> {bs} </BlockSize>\n <BlocksCount> {nblocks} </BlocksCount>\n'
-            f' <MappedBlocksCount> {len(used)} </MappedBlocksCount>\n'
-            f' <ChecksumType> {ctype} </ChecksumType>\n <BlockMap>\n{body} </BlockMap>\n</bmap>\n')
+    xml = (f'<?xml version="1.0" ?>\n<bmap version="2.0">\n <ImageSize> {len(raw)} </ImageSize>\n'
+           f' <BlockSize> {bs} </BlockSize>\n <BlocksCount> {nblocks} </BlocksCount>\n'
+           f' <MappedBlocksCount> {len(used)} </MappedBlocksCount>\n'
+           f' <ChecksumType> {ctype} </ChecksumType>\n'
+           f' <BmapFileChecksum> {"0" * 64} </BmapFileChecksum>\n <BlockMap>\n{body} </BlockMap>\n</bmap>\n')
+    return sign(xml)
+
+
+def sign(xml: str) -> str:
+    """Set BmapFileChecksum by bmaptool's rule: sha256 of the file with the checksum zeroed."""
+    zeros = "0" * 64
+    return xml.replace(zeros, hashlib.sha256(xml.encode()).hexdigest(), 1)
 
 
 RAW = _wic(_ext4(["Image", DTB]))
@@ -154,9 +162,54 @@ def test_bmap_checksum_mismatch_refuses_before_any_write(tmp_path):
     assert board.files["/dev/mmcblk0"] == bytes([STALE]) * (len(RAW) + BS)
 
 
-def test_sha1_bmap_is_accepted(tmp_path):
-    _, r = _step(tmp_path, BmapBoard(), ctype="sha1")
-    assert r.status == "done", r.detail
+def _parse_xml(tmp_path, xml: str):
+    p = tmp_path / "t.bmap"
+    p.write_bytes(xml.encode())
+    return bmap.parse(p)
+
+
+def _resign(xml: str) -> str:
+    """xml edited after signing: put the zeros back and sign again."""
+    return sign(re.sub(r"(?<=<BmapFileChecksum> )[0-9a-f]{64}", "0" * 64, xml))
+
+
+def test_good_file_parses_and_a_wrong_file_checksum_is_refused(tmp_path):
+    xml = make_bmap_xml(RAW)
+    assert _parse_xml(tmp_path, xml).image_size == len(RAW)
+    with pytest.raises(BenchError, match="BmapFileChecksum .* does not match the file"):
+        _parse_xml(tmp_path, xml.replace("<BlockSize> 4096", "<BlockSize> 8192"))     # edited after signing
+
+
+def test_mapped_blocks_count_must_match_the_ranges(tmp_path):
+    xml = make_bmap_xml(RAW)
+    n = re.search(r"<MappedBlocksCount> (\d+)", xml)[1]
+    bad = _resign(xml.replace(f"<MappedBlocksCount> {n}", f"<MappedBlocksCount> {int(n) + 1}"))
+    with pytest.raises(BenchError, match=f"MappedBlocksCount {int(n) + 1} but the ranges list {n} blocks"):
+        _parse_xml(tmp_path, bad)
+
+
+@pytest.mark.parametrize("decl", ["<!DOCTYPE bmap>", '<!DOCTYPE bmap [<!ENTITY a "b">]>', '<!ENTITY a "b">'])
+def test_doctype_and_entity_are_refused(tmp_path, decl):
+    xml = make_bmap_xml(RAW).replace("<bmap ", decl + "<bmap ", 1)
+    with pytest.raises(BenchError, match="DOCTYPE/ENTITY"):
+        _parse_xml(tmp_path, xml)
+
+
+def test_sha1_bmap_is_refused(tmp_path):
+    with pytest.raises(BenchError, match="ChecksumType 'sha1', only sha256"):
+        _parse_xml(tmp_path, make_bmap_xml(RAW, ctype="sha1"))
+
+
+def test_format_1_bmap_is_refused(tmp_path):
+    xml = _resign(make_bmap_xml(RAW).replace('version="2.0"', 'version="1.4"'))
+    with pytest.raises(BenchError, match="bmap format '1.4', only 2.x"):
+        _parse_xml(tmp_path, xml)
+    old = re.sub(r'chksum="', 'sha1="', make_bmap_xml(RAW)).replace('version="2.0"', 'version="1.2"')
+    with pytest.raises(BenchError, match="only 2.x"):
+        _parse_xml(tmp_path, old)
+    xml2 = _resign(re.sub(r'chksum="', 'sha1="', make_bmap_xml(RAW)))      # 2.0 but a sha1= range
+    with pytest.raises(BenchError, match="bad or unsorted range"):
+        _parse_xml(tmp_path, xml2)
 
 
 def test_readback_mismatch_is_detected(tmp_path):
@@ -254,7 +307,7 @@ def make_wic(tmp_path, raw: bytes):
     wic = tmp_path / "x.wic.gz"
     wic.write_bytes(gzip.compress(raw))
     xml = tmp_path / "x.wic.bmap"
-    xml.write_text(make_bmap_xml(raw), encoding="utf-8")
+    xml.write_bytes(make_bmap_xml(raw).encode())
     return wic, bmap.parse(xml)
 
 
@@ -313,8 +366,12 @@ def test_image_not_a_whole_number_of_blocks_pads_the_last_block_on_both_paths(tm
 
 
 def _undermapped(tmp_path, raw: bytes, drop: str):
-    xml = re.sub(rf'    <Range chksum="\w+"> {drop} </Range>\n', "", make_bmap_xml(raw))
-    (tmp_path / "x.bmap").write_text(xml, encoding="utf-8")
+    xml = make_bmap_xml(raw)
+    gone = int(drop.split("-")[-1]) - int(drop.split("-")[0]) + 1
+    n = int(re.search(r"<MappedBlocksCount> (\d+)", xml)[1])
+    xml = re.sub(rf'    <Range chksum="\w+"> {drop} </Range>\n', "", xml)
+    xml = _resign(xml.replace(f"<MappedBlocksCount> {n}", f"<MappedBlocksCount> {n - gone}"))
+    (tmp_path / "x.bmap").write_bytes(xml.encode())
     wic = tmp_path / "x.wic.gz"
     wic.write_bytes(gzip.compress(raw))
     return wic, bmap.parse(tmp_path / "x.bmap")
