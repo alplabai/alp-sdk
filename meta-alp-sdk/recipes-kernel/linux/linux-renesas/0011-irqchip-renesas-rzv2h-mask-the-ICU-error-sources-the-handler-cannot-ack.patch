@@ -14,12 +14,31 @@ Unmask only the GPT overflow bits the handler services and mask
 everything else in groups 0-3, warning once about any error status
 already pending at probe.
 
+So a masked source is not a hidden one: log the bus-error factor
+registers (ICU_BEISR0-3) at probe to identify the master or slave behind
+BUS_ERR_INT, clear them through ICU_BECLR0-3 (the bundled BUS_ERR_INT is
+not cleared through the ERINTA55 clear register), and name MCPU_LOCKUP
+(group 0 bit 25) when the Cortex-M33 is already locked up at probe.
+The masks stay as they are: the CA55 handler still services only the GPT
+overflow bits, so no runtime report of BUS_ERR_INT or MCPU_LOCKUP exists.
+
 Upstream-Status: Pending
 Signed-off-by: Alp Lab AB
 ---
 --- a/drivers/irqchip/irq-renesas-rzv2h.c
 +++ b/drivers/irqchip/irq-renesas-rzv2h.c
-@@ -750,26 +750,24 @@
+@@ -103,6 +103,10 @@
+ #define ERROR_INTSTAT_OFFSET(x)			(0x338 + 0x4 * (x))
+ #define ERROR_INTCLR_OFFSET(x)			(0x348 + 0x4 * (x))
+ #define ERROR_ERINTMSK_OFFSET(x)		(0x358 + 0x4 * (x))
++/* Bus-error factor status / clear, ICU_BEISRk / ICU_BECLRk (k = 0..3). */
++#define ERROR_BEISR_OFFSET(x)			(0x70 + 0x4 * (x))
++#define ERROR_BECLR_OFFSET(x)			(0x80 + 0x4 * (x))
++#define ERROR_GR0_MCPU_LOCKUP			BIT(25)
+ 
+ /**
+  * struct rzv2h_hw_info - Interrupt Control Unit controller hardware info structure.
+@@ -750,26 +754,37 @@
  		return -ENOENT;
  	}
  
@@ -41,6 +60,17 @@ Signed-off-by: Alp Lab AB
 +	 * Unmask the GPT overflow bits only; report anything already pending.
 +	 */
 +	for (u8 grp = 0; grp <= 3; grp++) {
++		u32 be = readl(rzv2h_icu_data->base + ERROR_BEISR_OFFSET(grp));
++
++		/* Name the bus-error master/slave, then clear the bundled factor. */
++		if (be) {
++			dev_warn(&pdev->dev, "bus error factor ICU_BEISR%u 0x%08x at probe, cleared\n",
++				 grp, be);
++			writel(be, rzv2h_icu_data->base + ERROR_BECLR_OFFSET(grp));
++		}
++	}
++
++	for (u8 grp = 0; grp <= 3; grp++) {
 +		u32 stat = readl(rzv2h_icu_data->base + ERROR_INTSTAT_OFFSET(grp));
 +		u32 keep = grp == 1 ? GPT_OVF_MASK(0) :
 +			   grp == 2 ? GPT_OVF_MASK(1) : 0;
@@ -59,6 +89,8 @@ Signed-off-by: Alp Lab AB
 +			dev_warn(&pdev->dev,
 +				 "error group %u status 0x%08x pending at probe, masked\n",
 +				 grp, stat & ~keep);
++		if (!grp && (stat & ERROR_GR0_MCPU_LOCKUP))
++			dev_warn(&pdev->dev, "Cortex-M33 is in lockup (MCPU_LOCKUP) at probe\n");
 +		writel(~keep, rzv2h_icu_data->base + ERROR_ERINTMSK_OFFSET(grp));
  	}
  

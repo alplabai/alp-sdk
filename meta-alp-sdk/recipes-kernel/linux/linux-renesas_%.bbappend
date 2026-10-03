@@ -78,9 +78,20 @@ SRC_URI:append = " \
     file://0015-gpiolib-sysfs-reject-export-of-a-number-in-a-chipless-gpio_device.patch \
     file://0016-media-rzg2l-cru-add-Y10-Y8-greyscale-formats.patch \
     file://0017-media-rzg2l-csi2-honour-lane-polarities-via-SWAPCTL.patch \
+    file://0020-clk-renesas-r9a09g056-add-the-PDM-module-clocks-and-resets.patch \
+    file://pcie-ep-trim.cfg \
     file://uio.cfg \
 "
 
+# 0020 (PDM clocks, audit MM-02/MM-X2): the V2N CPG driver had no PDM0/PDM1
+# module clocks or resets, so no pdm node could bind.  The patch adds them
+# with V2N parents from the RZ/V2N hardware manual (PCLK = PLLCM33 gear / 2,
+# CCLK = QEXTAL / 5 = 4.8 MHz).  No devicetree node uses them yet.
+#
+# pcie-ep-trim.cfg (audit PCIE-5): drops the PCIe endpoint-mode and test
+# options the Renesas defconfig enables for the EVK; E1M-V2M is root-complex
+# only.
+#
 # 0016 (CRU greyscale, #2612): rzg2l-csi2 had no Y10/Y8 entry, so a mono
 # sensor's Y10_1X10 (OV9281 via ov9282) read back as UYVY8_1X16 on the
 # csi20 pad and STREAMON failed -EPIPE.  The patch adds Y10_1X10 (-> CR10,
@@ -109,7 +120,9 @@ SRC_URI:append = " \
 # only for GPT overflow bits, but group 0 resets fully unmasked; once the
 # Cortex-M33 runs, group 0 bit 0 asserts, nobody acknowledges it, and the
 # line storms ("irq 14: nobody cared") until genirq disables it. The patch
-# unmasks only the GPT overflow bits the handler services.
+# unmasks only the GPT overflow bits the handler services.  It also logs and
+# clears the ICU bus-error factors (ICU_BEISR0-3 / ICU_BECLR0-3) at probe and
+# names MCPU_LOCKUP, so a masked source is not a silent one.
 
 # AMP clock ownership: RSCI7 belongs to the Cortex-M33 system manager
 # (GD32 supervisor SPI link).  Without this patch, Linux's
@@ -117,7 +130,8 @@ SRC_URI:append = " \
 # CPG BUS_MSTOP bits (the rzv2h-cpg driver ties the two together), which
 # bus-faults the CM33 mid-operation ~15 s into every boot.  The patch
 # marks the five rsci_7_* clocks DEF_MOD_CRITICAL so both gates stay held
-# for the remote core.  Silicon-validated 2026-06-03 (two cold cycles +
+# for the remote core.  The same patch holds the WDT0 clocks (wdt_0_clkp,
+# wdt_0_clk_loco) for the CM33 watchdog (not bench-verified).  Silicon-validated 2026-06-03 (two cold cycles +
 # warm reboot, link autonomous from ~2 s after power-on, no intervention).
 #
 # RIIC8 (BRD_I2C) is NOT in this patch: the maintainer decision that
