@@ -35,6 +35,9 @@ into the topic-specific docs.
   auto-generated SoM × peripheral-class presence matrix, projected
   from the single-source SoC metadata (presence only; driver
   maturity lives in the OS support matrix).
+- [display-support-matrix.md](display-support-matrix.md) — per SoM
+  family and display path: what exists in code, what has a recorded
+  bench run, and what is still open (issue #23).
 - [ADR 0011 — intra-family portability](adr/0011-intra-family-portability.md)
   — architectural decision: portability is INTRA-family;
   cross-form-factor is intentionally a separate product-line choice.
