@@ -844,3 +844,12 @@ def test_gd32_bridge_version_frames_and_checks_crc():
     t, _ = target([("i2ctransfer -f", "0x00 0x00 0x0d 0x00 0x9c 0xf3\n")])
     with pytest.raises(BenchError, match="CRC mismatch"):
         lt.gd32_bridge_version(t, 8)
+
+
+def test_emmc_boot1_write_refuses_an_image_that_reaches_the_uboot_env(tmp_path):
+    img = tmp_path / "fip.bin"
+    img.write_bytes(bytes([3]) * 1024)
+    t, fake = target([("boot1/size", "16384\n")])  # 8 MiB: the partition is not the limit here
+    with pytest.raises(BenchError, match="U-Boot environment"):
+        lt.emmc_boot1_write_verify(t, "/dev/mmcblk1", img, gates.BOOT_ENV_OFFSET // 512 - 1)
+    assert not any(c.startswith("dd ") and " of=" in c for c in fake.commands)

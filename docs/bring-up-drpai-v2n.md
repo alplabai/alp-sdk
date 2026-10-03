@@ -415,7 +415,7 @@ already, via the `CONFIG_BOOTCOMMAND` override in
 
 - The vendor env loads `boot/r9a09g056n44-dev.dtb`, a filename no ALP image
   builds, on **both** the SD and eMMC paths. `CONFIG_BOOTCOMMAND` re-loads the
-  correct dtb after the leading `env default -a` on both branches.
+  correct dtb on both branches.
 - The microSD root device was wrong. **Confirmed on hardware:** `mmcblk2`
   does not exist on this silicon at all — the board has exactly two SDHI
   controllers, `15c00000.mmc` -> `mmc0` -> eMMC (with `boot0`/`boot1`/`rpmb`

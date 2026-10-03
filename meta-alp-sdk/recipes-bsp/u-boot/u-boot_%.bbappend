@@ -72,8 +72,8 @@ SRC_URI:append:rzv2n-family = " \
 #     which stops the kernel replaying the early log across the
 #     console handover. The cmdline is rebuilt at CONFIG_BOOTCOMMAND
 #     (patch-safe vs the build-varying env block); the future per-SKU
-#     fdtfile derivation must also happen there, AFTER the leading
-#     'env default -a' wipe -- see the comment in the patch.
+#     fdtfile derivation must also happen there, at
+#     CONFIG_BOOTCOMMAND too (the environment is not saved, see 0014).
 # VALIDATION: bitbake-built dev + prod with config asserts; the FIP
 # (BL2+BL31+u-boot, manual flow) was built 2026-06-12 with both ALP
 # patches and the u-boot binary content-verified (alp_root bootcmd +
@@ -334,8 +334,8 @@ SRC_URI:append:rzv2n-family = " file://0009-rzv2n-dev-ALP-E1M-publish-sku-to-cho
 # ethaddr/eth1addr to 02:11:22:33:44:55/66 in CFG_EXTRA_ENV_SETTINGS;
 # this patch derives the real per-unit MAC at boot instead, both in
 # board_late_init() and via a bootcmd hook this same patch adds to
-# CONFIG_BOOTCOMMAND (include/configs/rzv2n-dev.h), right after "env
-# default -a" -- see docs/soms/v2n.md#ethernet-mac-address-policy and
+# CONFIG_BOOTCOMMAND (include/configs/rzv2n-dev.h), first in the
+# command -- see docs/soms/v2n.md#ethernet-mac-address-policy and
 # scripts/alp_eth_mac.py.
 SRC_URI:append:rzv2n-family = " file://0010-rzv2n-dev-ALP-E1M-serial-derived-eth-mac.patch"
 
@@ -345,6 +345,27 @@ SRC_URI:append:rzv2n-family = " file://0010-rzv2n-dev-ALP-E1M-serial-derived-eth
 # kernel, so the gpio-gd32-bridge driver finds the GD32 at probe. Production
 # OTP already reads 0x08, so the step is a no-op there; see the patch header.
 SRC_URI:append:rzv2n-family = " file://0011-rzv2n-dev-ALP-E1M-gd32-nrst-release.patch"
+
+# 0013 (microSD card-detect): U-Boot reads SD1_SD1CD / PA1 (active-low, the
+# same net Linux uses as cd-gpios in e1m-x-evk.dtsi) through a new
+# "alp_sd_present" command, and CONFIG_BOOTCOMMAND probes mmc1 only when it
+# succeeds. sh_sdhi has no get_cd op, so an empty slot used to cost a full
+# init attempt and print "Card did not respond to voltage select! : -110"
+# on every boot. Lands after 0008 (mmc1 = SDHI1, PA1..PA3 board_init) and
+# 0010 (it edits the CONFIG_BOOTCOMMAND form 0010 leaves).
+SRC_URI:append:rzv2n-family = " file://0013-rzv2n-dev-ALP-E1M-sd-card-detect.patch"
+
+# 0014 + uboot-env-emmc.cfg (persistent environment): a redundant pair in
+# eMMC boot partition 2 (Linux mmcblk0boot1; boot partition 1 holds the
+# bootloader the BootROM runs), and CONFIG_BOOTCOMMAND no longer starts with
+# "env default -a", so saveenv survives a reboot and Linux fw_setenv
+# (recipes-core/alp-system/alp-uboot-env, /etc/fw_env.config) is seen by
+# U-Boot. 0014 resets to the defaults on first boot or an ALP_ENV_VERSION
+# bump and re-applies bootcmd from the binary every boot. The cfg moves the
+# environment off the vendor default (end of the eMMC user area); its
+# offsets and /etc/fw_env.config must agree
+# (tests/scripts/test_uboot_env_layout.py).
+SRC_URI:append:rzv2n-family = "     file://0014-rzv2n-dev-ALP-E1M-persistent-environment.patch     file://uboot-env-emmc.cfg "
 
 # Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot
 # binary serves both families, so the dtb basename is a Kconfig string

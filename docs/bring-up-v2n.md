@@ -236,6 +236,55 @@ Expected: PHYID1 reads `0x001C` (Realtek OUI).  After ~3-5 s with a
   default `-1`.  Wire the right bus id (ALP_E1M_I2C0 on V2N) and the
   EEPROM address (`0x50` strap default) in `prj.conf`.
 
+## 7a. U-Boot environment and microSD card-detect (bench checks)
+
+Design in [`soms/v2n.md`](soms/v2n.md#uboot-environment). Not yet run on
+silicon; do them in order on a unit flashed with the new FIP and image.
+
+1. **Boot partition size.** From Linux: `cat /sys/block/mmcblk0boot1/size`
+   (512-byte sectors). Expect at least `0x1200` (the environment ends at
+   byte `0x240000`). If smaller, stop: the offsets do not fit this eMMC.
+2. **Which partition the ROM boots.** `mmc extcsd read /dev/mmcblk0 |
+   grep PARTITION_CONFIG` -> `0x08` (boot partition 1 = `mmcblk0boot0`).
+   Then compare `md5sum` of the first FIP-sized span of `mmcblk0boot0`
+   and `mmcblk0boot1` against the bundle's FIP: record which one holds
+   the running bootloader (open question: `write_emmc_boot` writes
+   `mmcblk0boot1`).
+3. **First boot.** Serial console on the first boot of the new FIP: expect
+   one `bad CRC, using default environment`, then
+   `ALP: environment initialised (version 1)` and `Saving Environment to
+   MMC... Writing to redundant MMC(0)... OK`.
+4. **Second boot is silent.** Reboot: no `bad CRC` line, no `initialised`
+   line, `Loading Environment from MMC... OK`.
+5. **`saveenv` survives a reboot.** At the U-Boot prompt:
+   `setenv alp_test 1; saveenv`, `reset`, then `printenv alp_test` ->
+   `alp_test=1`.
+6. **Redundancy.** After `saveenv`, corrupt copy 2 from Linux
+   (`echo 0 > /sys/block/mmcblk0boot1/force_ro`, `dd if=/dev/zero
+   of=/dev/mmcblk0boot1 bs=1 seek=$((0x230000)) count=16 conv=notrunc`,
+   `echo 1 > /sys/block/mmcblk0boot1/force_ro`), reboot: U-Boot still
+   loads `alp_test`; the next `saveenv` repairs the copy.
+7. **Linux -> U-Boot.** In Linux: `fw_printenv alp_test` -> `1`;
+   `fw_setenv alp_test 2`; reboot; U-Boot `printenv alp_test` -> `2`. If
+   `fw_setenv` fails with a read-only error, `mmcblk0boot1`'s `force_ro`
+   is set and the tool did not clear it; record it (the image then needs a
+   udev rule or the OTA client must clear it).
+8. **`bootcmd` is the firmware's.** `fw_setenv bootcmd 'echo old'`, reboot:
+   the unit still boots Linux (the binary's `bootcmd` replaced the saved
+   one). Clean up with `fw_setenv bootcmd` (unset).
+9. **Provisioning does not clobber it.** Run the provisioning
+   `write_emmc_boot` step on this unit, reboot, and confirm
+   `printenv alp_test` is still set.
+10. **Empty SD slot.** No card inserted, power-cycle, serial console: no
+    `Card did not respond to voltage select! : -110` and no `mmc1`
+    output; Linux boots from the eMMC.
+11. **Card inserted.** Card with `boot/Image` and the dtb on partition 2:
+    boots from the card (`root=/dev/mmcblk1p2`). Data-only card (no
+    `boot/Image`): boots from the eMMC. Remove the card, power-cycle:
+    step 10 again.
+12. **Card-detect level.** At the U-Boot prompt with a card inserted:
+    `alp_sd_present; echo $?` -> `0`; with the slot empty -> `1`.
+
 ## 8. Next steps
 
 After the basic bring-up clears:

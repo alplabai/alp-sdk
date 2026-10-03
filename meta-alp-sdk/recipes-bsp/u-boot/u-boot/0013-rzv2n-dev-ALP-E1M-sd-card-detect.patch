@@ -1,0 +1,97 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Sat, 3 Oct 2026 11:43:37 +0200
+Subject: [PATCH] rzv2n-dev: ALP E1M: skip the microSD probe when the slot
+ is empty
+
+sh_sdhi has no get_cd op, so the MMC core always treats SDHI1 (mmc1,
+the carrier microSD, patch 0008) as populated, and an empty slot only
+fails after a full CMD0/CMD8/ACMD41 sequence.  Every boot with no card
+printed "Card did not respond to voltage select! : -110".
+
+The slot's card-detect switch runs straight to SD1_SD1CD / PA1,
+active-low (0 = card present), pulled up to the switched card rail that
+board_init() powers (same net the Linux cd-gpios in e1m-x-evk.dtsi
+reads).  Add an "alp_sd_present" command that reads it, and make
+CONFIG_BOOTCOMMAND run the vendor bootcmd_check only when it succeeds;
+otherwise it runs emmcload directly, which is what bootcmd_check would
+have ended up running.  mmc1 is never probed on an empty slot.  Builds
+without CONFIG_ALP_E1M_SD1_MICROSD keep the old behaviour (the command
+always succeeds).
+
+Not verified on silicon.
+
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
+---
+ board/renesas/rzv2n-dev/rzv2n-dev.c | 32 +++++++++++++++++++++++++++++
+ include/configs/rzv2n-dev.h         | 11 ++++++++--
+ 2 files changed, 41 insertions(+), 2 deletions(-)
+
+diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
+index 8d2d510..906d014 100644
+--- a/board/renesas/rzv2n-dev/rzv2n-dev.c
++++ b/board/renesas/rzv2n-dev/rzv2n-dev.c
+@@ -1303,6 +1303,38 @@ static void alp_sd1_microsd_init(void)
+ }
+ #endif
+ 
++/*
++ * "alp_sd_present": succeed when a card sits in the carrier microSD slot.
++ *
++ * sh_sdhi has no get_cd op, so the MMC core always treats SDHI1 as
++ * populated and an empty slot only fails after a full CMD0/CMD8/ACMD41
++ * sequence: "Card did not respond to voltage select! : -110" on every
++ * boot.  The slot's card-detect switch runs straight to SD1_SD1CD / PA1
++ * (active-low: 0 = card present, pulled up to the switched card rail that
++ * board_init() powers above), so the boot command asks this first and
++ * never touches mmc1 when it is empty.  Builds without
++ * CONFIG_ALP_E1M_SD1_MICROSD have no known card-detect wiring and keep
++ * the old behaviour (always "present").
++ */
++#define ALP_SD1_CD_BANK	10	/* PA */
++#define ALP_SD1_CD_PIN	1
++
++static int do_alp_sd_present(struct cmd_tbl *cmdtp, int flag, int argc,
++			     char *const argv[])
++{
++	if (!IS_ENABLED(CONFIG_ALP_E1M_SD1_MICROSD))
++		return CMD_RET_SUCCESS;
++
++	alp_gpio_input_configure(ALP_SD1_CD_BANK, ALP_SD1_CD_PIN);
++	return alp_gpio_input_get(ALP_SD1_CD_BANK, ALP_SD1_CD_PIN) ?
++		CMD_RET_FAILURE : CMD_RET_SUCCESS;
++}
++
++U_BOOT_CMD(alp_sd_present, 1, 0, do_alp_sd_present,
++	   "succeed if a card is in the carrier microSD slot (PA1, active-low)",
++	   ""
++);
++
+ int board_init(void)
+ {
+ 	/* address of boot parameters */
+diff --git a/include/configs/rzv2n-dev.h b/include/configs/rzv2n-dev.h
+index e0c583b..d9f2d83 100644
+--- a/include/configs/rzv2n-dev.h
++++ b/include/configs/rzv2n-dev.h
+@@ -164,8 +164,15 @@
+  * fdt_fixup_ethernet() (boot/image-fdt.c's image_setup_libfdt(), which
+  * runs it BEFORE ft_system_setup() -- confirmed by reading this BSP's
+  * actual 2024.07 source, not assumed). */
+-#define CONFIG_BOOTCOMMAND	"env default -a;alp_eth_mac;run bootcmd_check;" \
+-	"if mmc dev 1 && ext4size mmc 1:2 boot/Image; then " \
++/* ALP: "alp_sd_present" (patch 0013) reads the microSD card-detect pin.
++ * An empty slot goes straight to the vendor eMMC loader, i.e. what
++ * bootcmd_check ("if mmc dev 1; then run sd2load; else run emmcload; fi")
++ * would end up running, without mmc1 ever being probed: sh_sdhi cannot
++ * report card presence, so "mmc dev 1" on an empty slot spends its time
++ * failing "Card did not respond to voltage select! : -110". */
++#define CONFIG_BOOTCOMMAND	"env default -a;alp_eth_mac;" \
++	"if alp_sd_present; then run bootcmd_check; else run emmcload; fi;" \
++	"if alp_sd_present && mmc dev 1 && ext4size mmc 1:2 boot/Image; then " \
+ 	"setenv alp_mmc 1:2;setenv alp_root /dev/mmcblk1p2; else " \
+ 	"setenv alp_mmc 0:2;setenv alp_root /dev/mmcblk0p2; fi;" \
+ 	"if ext4load mmc ${alp_mmc} 0x48080000 boot/Image" \
+-- 
+2.34.1
+

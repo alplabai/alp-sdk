@@ -45,6 +45,10 @@ CM33_REGION_OFFSET = 0x1A0000
 BL2_MMC_SECTOR = 0x1
 FIP_SECTOR = 0x300
 BL2_MMC_MAX = (FIP_SECTOR - BL2_MMC_SECTOR) * 512
+# The U-Boot environment (redundant pair, 0x10000 each) starts here in eMMC
+# boot partition 2 (Linux boot1): meta-alp-sdk's uboot-env-emmc.cfg. A boot
+# write must end below it or it would erase the saved environment.
+BOOT_ENV_OFFSET = 0x220000
 
 
 def _sha256(path: Path) -> str:
