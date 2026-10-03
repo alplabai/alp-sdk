@@ -38,6 +38,14 @@
  *      address is still unverified on real silicon -- returns
  *      @ref ALP_ERR_NOSUPPORT until a consumer needs it there.
  *
+ * @par SoC die temperature is a separate entry.
+ *      @ref alp_temperature_read_soc_milli_c reports the silicon's own
+ *      junction temperature (on V2N/V2M, the Linux thermal zones the
+ *      on-die TSU units feed).  It is a different physical quantity from
+ *      the on-module ambient sensor above and is never folded into
+ *      @ref alp_temperature_read_milli_c (issue #2066), so a SoM can
+ *      have either, both or neither.
+ *
  * @code
  * int32_t milli_c;
  * alp_status_t s = alp_temperature_read_milli_c(&milli_c);
@@ -86,6 +94,35 @@ extern "C" {
  *          @ref ALP_ERR_IO on a transfer fault while reading.
  */
 alp_status_t alp_temperature_read_milli_c(int32_t *milli_c);
+
+/**
+ * @brief Read the SoC die (junction) temperature.
+ *
+ * Distinct from @ref alp_temperature_read_milli_c: that is a SoM-level
+ * ambient sensor, this is the processor's own thermal sensing.  Units
+ * and sign match: integer milli-degrees Celsius, signed.  When the SoC
+ * has several die sensors the hottest one is reported -- the figure a
+ * throttling or protection decision cares about.
+ *
+ * @par Implemented on the Yocto backend only (Linux A-cluster).
+ *      It reads `/sys/class/thermal/thermal_zone[N]/temp` for every
+ *      zone whose `type` begins with `cpu-thermal` (zones are chosen by
+ *      type, never by index: the index depends on probe order).  The
+ *      kernel owns the TSU; nothing here touches its registers.  Zephyr
+ *      and baremetal builds return @ref ALP_ERR_NOSUPPORT.
+ *
+ * @param[out] milli_c  Set to the hottest reading on @ref ALP_OK.  Left
+ *                       untouched on any error.
+ *
+ * @return  @ref ALP_OK on a valid read.
+ *          @ref ALP_ERR_INVAL when @p milli_c is NULL.
+ *          @ref ALP_ERR_NOSUPPORT on a build with no SoC thermal source
+ *                                 (every non-Yocto target, or a Linux
+ *                                 kernel exposing no matching zone).
+ *          @ref ALP_ERR_IO when matching zones exist but none could be
+ *                          read.
+ */
+alp_status_t alp_temperature_read_soc_milli_c(int32_t *milli_c);
 
 #ifdef __cplusplus
 } /* extern "C" */
