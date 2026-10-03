@@ -3170,7 +3170,7 @@
         ],
         "path": "examples/v2n/v2n-power-monitor",
         "som": "E1M-V2N101",
-        "summary": "Live per-rail power table from the **E1M-X EVK**'s on-board INA236 current/voltage monitors, read from a Linux/Yocto user-space app on the V2N Cortex-A55."
+        "summary": "Live per-rail power table from the **E1M-X EVK**'s on-board INA236 current/voltage monitors and its INA228 +5V input monitor, read from a Linux/Yocto user-space app on the V2N Cortex-A55."
       },
       {
         "board": "e1m-x-evk",

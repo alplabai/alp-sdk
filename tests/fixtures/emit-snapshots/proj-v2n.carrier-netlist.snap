@@ -1653,6 +1653,46 @@
         ]
       },
       {
+        "item_id": "ina228",
+        "kind": "chip",
+        "scope": "carrier",
+        "source": "metadata/chips/ina228.yaml",
+        "display_name": "TI INA228 85 V 20-bit power / energy / charge monitor",
+        "vendor": "ti",
+        "mpn_population": [
+          "INA228AIDGS"
+        ],
+        "bus": "i2c",
+        "quantity": null,
+        "physical": {
+          "refdes_prefix": "U",
+          "package": "VSSOP-10",
+          "footprint": "vssop_10_3x3mm",
+          "visibility": "public",
+          "provenance": "web_provisional"
+        },
+        "passives": [
+          {
+            "role": "decouple",
+            "value": "100nF",
+            "net": "VS",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "pullup",
+            "value": "4k7",
+            "net": "SCL",
+            "refdes_prefix": "R"
+          },
+          {
+            "role": "pullup",
+            "value": "4k7",
+            "net": "SDA",
+            "refdes_prefix": "R"
+          }
+        ]
+      },
+      {
         "item_id": "ina236",
         "kind": "chip",
         "scope": "carrier",

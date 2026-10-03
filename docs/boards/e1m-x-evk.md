@@ -115,22 +115,110 @@ P46 (SSI1 SDATA, the amps' SDOUT net) is deliberately left unmuxed so the SoC
 never drives it; there is no capture or IV-sense path.  Bench listen is still
 pending (#2331).
 
-## I²C address collision (TAS2563 broadcast)
+## I²C buses and devices
 
-INA236B (U32) sits at `0x48` on `XEVK_I2C_BUS_SENSORS`
-(`XEVK_I2C_ADDR_INA236_VCAM2`, `metadata/boards/e1m-x-evk.yaml`),
-the same address as the TAS2563's global broadcast address
-(`TAS2563_I2C_ADDR_BROADCAST`, `include/alp/chips/tas2563.h`).  This
-is the identical strap collision recorded for the E1M-EVK's U32 at
-[`e1m-evk.md`](e1m-evk.md) — there, a respin re-strapped
-A0=SCL to move U32 off `0x48`; no such respin is recorded for the
-E1M-X EVK, so U32 is still at `0x48` on this board.  The SDK-side
-guard (`chips/tas2563/tas2563.c`) now refuses to target `0x48` at
-all — that closes the write-into-INA236's-CONFIG-register hazard (the
-`select_page()` write inside `tas2563_init()` would have landed on
-`INA236_REG_CONFIG`, `chips/ina236/ina236.c`), but it does not restore
-broadcast addressing to the TAS2563 amps.  Only a respin re-strapping
-U32's A0 off `0x48` does that.
+Every I²C bus the carrier exposes with an E1M-V2N / E1M-V2M SoM fitted, and
+every fixed device on it (#2645).  Addresses are 7-bit.  The machine-readable
+source is `metadata/boards/e1m-x-evk.yaml` (`i2c_devices:`, `audio.codecs`)
+for carrier parts and the SoM preset's `on_module.i2c_devices` for
+on-module parts; this section is the reading aid.
+
+"Seen on a real unit" means the address answered a read-probe
+(`i2cdetect -y -r`) on an E1M-V2M103 in this carrier.  It does not by
+itself prove which part answered; where an ID register was also read, the
+row says so.
+
+### Buses
+
+| E1M-X bus | Controller on V2N / V2M | Linux adapter | Speed | What is on it |
+|---|---|---|---|---|
+| I2C0 (`XEVK_I2C_BUS_SENSORS`) | RZ/V2N RIIC0 | `i2c-0` | 100 kHz | Carrier sensors, power monitors, I/O expanders, audio amplifiers; the SoM identity EEPROM; the PCIe / M.2 branch (below) |
+| I2C0, PCIe / M.2 branch | same bus, through a level shifter | `i2c-0` | 100 kHz | PCIe I/O expander, then a 2:1 switch to the M.2 E-key or M.2 M-key slot |
+| I2C1 | RZ/V2N RIIC1 | `i2c-1` | 400 kHz | 14-pin expansion header only; no fixed device |
+| I2C2 (`XEVK_I2C_BUS_DSI_CSI0`) | RZ/V2N RIIC2 | enabled only by the camera device trees; it has no alias, so read its number from `i2cdetect -l` | 400 kHz | Camera connectors (CAM0 pair and the parallel-camera connector); no fixed device |
+| I2C3 (`XEVK_I2C_BUS_DSI_CSI1`) | SoM bridge MCU (no RZ/V2N master) | none | n/a | CAM1 connector; no fixed device |
+| I3C | RZ/V2N I3C | none | n/a | 3-pin header, not fitted |
+| SoM-internal power / clock bus | RZ/V2N RIIC8 | `i2c-8` | 400 kHz | On-module parts only, see the last table |
+
+The PCIe / M.2 switch is enabled by `XEVK_PIN_PCIE0_I2C_EN` and its
+direction is set by line P0 of the PCIe I/O expander.  The enable polarity
+recorded for that pin has not been checked on a board (#2645).
+
+### Fixed devices on I2C0 (`i2c-0`)
+
+| Device | Part | Address | Address strap | Interrupt / reset / enable | Seen on a real unit | SDK support |
+|---|---|---|---|---|---|---|
+| IMU (primary) | ICM-42670-P | `0x69` | AD0 high | INT1, INT2, FSYNC on main I/O expander P4, P5, P6 | Yes (2026-09-26, 2026-10-02) | `chips/icm42670` |
+| IMU (alternate) | BMI323 | `0x68` | SDO low | INT1 on E1M-X IO32 (`XEVK_PIN_BMI323_INT1`) | `0x68` answered on 2026-10-02.  No ID read | `chips/bmi323` |
+| Barometer | BMP581 | `0x47` | SDO high | INT on main I/O expander P7 | Yes; chip ID `0x50` read | `chips/bmp581` |
+| +3V3 rail monitor | INA236A | `0x40` | A0 = GND | Alert pin not connected | Yes; manufacturer ID `0x5449` read | `chips/ina236`, `examples/v2n/v2n-power-monitor` |
+| +1V8 rail monitor | INA236A | `0x41` | A0 = supply | Alert pin not connected | Yes; manufacturer ID `0x5449` read | same |
+| TAS2563 shared address (the camera-rail monitor at this address is not fitted) | n/a | `0x48` | Fixed by the TAS2563 pair | n/a | `0x48` answers; that is the amplifiers, not a monitor (see the section below) | Linux `tas2562` codec; no power-monitor macro |
+| Camera rail monitor (VCAM3) | INA236B | `0x49` | A0 = supply | Alert pin not connected | Yes; manufacturer ID `0x5449` read | same |
+| +5V input monitor | INA228 | `0x42` | A1 = GND, A0 = SDA | Alert pin not connected | `0x42` answered on 2026-10-02; nothing on 2026-09-26 (#2343).  No ID read.  On the current EVK revision the device's bus pins are documented as swapped and corrected by a hand rework; it answers only on carriers with that rework, so treat no answer as "part absent", not a fault | `chips/ina228` (read over i2c-dev, as `chips/ina236`; `examples/v2n/v2n-power-monitor`); upstream Zephyr's `ti,ina228` is the path for a Zephyr-mastered bus.  Sense shunt 100 mOhm; two selectable shunt scales: +/-163.84 mV (1.6384 A full scale, 3.125 uA/LSB, the board default `XEVK_INA228_ADCRANGE_5V`) or +/-40.96 mV (0.4096 A, 0.78125 uA/LSB).  Not run on hardware |
+| Main I/O expander | TCAL9538 | `0x73` | A1 high, A0 high | Reset and interrupt pins are pulled up on the carrier and do not reach the SoM | Yes | `chips/tcal9538` |
+| PCIe I/O expander | TCAL9538 | `0x71` | A1 low, A0 high | Same.  P0 = PCIe / M.2 I²C switch select, P1 = M.2 E-key alert, P2 to P4 = E-key reset / wake / clock request, P5 to P7 = M-key reset / wake / clock request (port map from the design data, not bench-verified) | Yes | `chips/tcal9538` |
+| Audio amplifier, left | TAS2563 | `0x4D` | Strap resistor | Shutdown and fault lines are shared by both amplifiers, on the E1M-X I2S1_SCLK and I2S1_SDI pads | Yes; kernel codec bound | Linux `tas2562` codec (`e1m-x-evk.dtsi`); `chips/tas2563` |
+| Audio amplifier, right | TAS2563 | `0x4E` | Strap resistor | shared, as above | Yes; kernel codec bound | same |
+| SoM identity EEPROM (on the module) | N24S128 | `0x50`, plus `0x58` for its identity page | Fixed | none | Yes; written and read back during provisioning | `chips/eeprom_24c128` |
+
+The carrier has no EEPROM of its own: `XEVK_I2C_ADDR_EEPROM` is the SoM's
+part, which shares this bus.
+
+On Linux these parts are driven by the SDK's `chips/` drivers over
+`/dev/i2c-0`, not by kernel drivers (#2339).  A kernel binding claims the
+address and the SDK driver then fails with `ALP_ERR_BUSY`.  The two TAS2563
+amplifiers are the exception: the kernel owns them for ALSA.
+
+### Not on a scannable bus, or not resolved
+
+| Device | Part | Address | Status |
+|---|---|---|---|
+| Display 1 touch controller | Goodix GT911 (on the panel cable) | `0x5D` or `0x14`, chosen by the controller's reset sequence | Interrupt on E1M-X IO9, reset on IO11.  The bus is documented above as E1M-X I2C3, but which controller the touch lines reach has not been confirmed (#2645).  **Never seen on a real unit** |
+| mikroBUS socket I²C | plug-in | depends on the Click board | Controller not confirmed (#2645).  Never scanned |
+| M.2 E-key / M-key slot I²C | plug-in | depends on the card | Behind the PCIe / M.2 switch on I2C0.  Never scanned with a card fitted |
+| Camera modules | plug-in | depends on the sensor | On I2C2 (CAM0) or I2C3 (CAM1); see [`../v2n-camera-csi.md`](../v2n-camera-csi.md) |
+| USB-PD sink controller | CYPD3177 | n/a | Its I²C port is not connected to any host bus; it runs from its strap resistors |
+
+### On-module devices on the SoM-internal bus (`i2c-8`)
+
+Full detail is in [`../soms/v2n.md`](../soms/v2n.md).  Linux is the only
+master of this bus.
+
+| Device | Part | Address | Seen on a real unit | SDK support |
+|---|---|---|---|---|
+| Main PMIC | ACT88760 | `0x25` and `0x26` | Yes; register reads recorded | `chips/act8760` |
+| Secondary PMIC | DA9292 | `0x1E` | Yes; device ID `0xEA` read | `chips/da9292` |
+| NPU supply bucks (E1M-V2M only) | TPS628640 | `0x44`, `0x48`, `0x4F` | Yes | `chips/tps628640` |
+| Optional LPDDR4X buck | TPS628640 | `0x4D` | **No** (not fitted on the units swept) | `chips/tps628640` |
+| Temperature sensor | TMP112 | `0x40` | Yes; temperature read | `chips/tmp112`, `examples/v2n/v2n-temp-sensor` |
+| Clock generator | 5L35023B | `0x69` | Yes; programmed by U-Boot at every boot | `chips/clk_5l35023b` |
+| RTC | RV-3028-C7 | `0x52` | Yes; kernel `rtc-rv3028` bound (`/dev/rtc0`) | Linux RTC; `chips/rv3028c7` |
+| Secure element | OPTIGA Trust M | `0x30` | Intermittent (#2507) | `chips/optiga_trust_m` |
+| Bridge MCU (I²C slave) | GD32G553 | `0x70` | Yes; kernel `gpio-gd32-bridge` bound | Linux GPIO expander; `chips/gd32g553` |
+
+### Checking a board
+
+```sh
+i2cdetect -y -r 0     # carrier sensor bus + SoM identity EEPROM
+i2cdetect -y -r 1     # expansion header (empty unless something is plugged in)
+i2cdetect -y -r 8     # SoM-internal bus
+```
+
+Expected on `i2c-0`: `40 41 42 47 48 49 4d 4e 50 58 68 69 71 73`
+(`4d` and `4e` print as `UU` when the audio codec driver is bound).
+Expected on `i2c-8` for an E1M-V2M: `1e 25 26 30 40 44 48 4f 52 69 70`
+(`52` and `70` print as `UU`; `30` may be missing, #2507).  An E1M-V2N has
+no `44`, `48` or `4f` on `i2c-8`.
+
+## I²C address `0x48` (TAS2563 shared address)
+
+`0x48` on `XEVK_I2C_BUS_SENSORS` belongs to the two TAS2563 amplifiers (their
+shared / global-call address, per `metadata/chips/tas2563.yaml`).  The
+camera-rail monitor (an INA236B, +VCAM2) that the design strapped to the same
+address is not fitted, so nothing else may be assigned `0x48` on this bus and
+the SDK carries no macro for it.  `chips/tas2563/tas2563.c`
+still refuses to target `0x48` itself.
 
 ## MicroSD (SDHI1)
 
@@ -172,8 +260,9 @@ microSD.
 
 - Authoritative pad-by-pad routing (which E1M-X pad maps to which
   feature on the board).
-- I²C addresses for any on-board sensors / IO expanders / current
-  monitors.
+- The open I²C items listed under "Not on a scannable bus, or not
+  resolved" above (touch controller bus, mikroBUS I²C, PCIe / M.2 switch
+  enable polarity).
 - Boot-strap dipswitch positions for V2N vs V2N-M1.
 
 When that lands, this doc becomes the SDK-side cheat sheet for

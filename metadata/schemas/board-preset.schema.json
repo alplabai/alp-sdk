@@ -428,6 +428,18 @@
         "macro",
         "address"
       ],
+      "allOf": [
+        {
+          "if": {
+            "required": ["calibration"],
+            "properties": { "calibration": { "anyOf": [ { "required": ["adc_range"] }, { "required": ["adc_range_macro"] } ] } }
+          },
+          "then": {
+            "required": ["part"],
+            "properties": { "part": { "const": "ina228" } }
+          }
+        }
+      ],
       "description": "One on-board I2C device instance: schematic strap-selected address (+ optional current-monitor calibration).",
       "properties": {
         "macro": {
@@ -471,11 +483,11 @@
             "max_macro",
             "max_current_a"
           ],
-          "description": "INA236-style current-monitor calibration for this instance.",
+          "description": "INA236 / INA228 current-monitor calibration for this instance (shunt in ohms, max current in amps).",
           "properties": {
             "shunt_macro": {
               "type": "string",
-              "pattern": "^X?EVK_INA236_SHUNT_[A-Z0-9_]+_OHMS$"
+              "pattern": "^X?EVK_INA2(36|28)_SHUNT_[A-Z0-9_]+_OHMS$"
             },
             "shunt_ohms": {
               "type": "string",
@@ -484,13 +496,31 @@
             },
             "max_macro": {
               "type": "string",
-              "pattern": "^X?EVK_INA236_MAX_[A-Z0-9_]+_A$"
+              "pattern": "^X?EVK_INA2(36|28)_MAX_[A-Z0-9_]+_A$"
             },
             "max_current_a": {
               "type": "string",
               "pattern": "^[0-9]+\\.[0-9]+$",
-              "description": "Rail max current in amps, as a decimal string (see `shunt_ohms`)."
+              "description": "Reporting-scale max current in amps, as a decimal string (see `shunt_ohms`): the rail limit, or the shunt measurement full scale when the rail limit is not known."
+            },
+            "max_current_note": {
+              "type": "string",
+              "description": "Optional sentence appended to the generated doc comment of the max-current macro, e.g. to say the value is the shunt full scale rather than a rail limit."
+            },
+            "adc_range_macro": {
+              "type": "string",
+              "pattern": "^X?EVK_INA228_ADCRANGE_[A-Z0-9_]+$",
+              "description": "INA228 only. Macro emitted for the shunt measurement scale: the CONFIG.ADCRANGE bit value, 0 for `163mv`, 1 for `40mv`."
+            },
+            "adc_range": {
+              "type": "string",
+              "enum": ["163mv", "40mv"],
+              "description": "INA228 only (an `adc_range` / `adc_range_macro` on any other `part` fails validation). Shunt measurement scale: `163mv` = +/-163.84 mV full scale (312.5 nV/LSB, the wide range), `40mv` = +/-40.96 mV (78.125 nV/LSB, four times the resolution). scripts/gen_board_header.py rejects a `max_current_a` above this range's full scale for the shunt (full scale = range voltage / `shunt_ohms`)."
             }
+          },
+          "dependentRequired": {
+            "adc_range_macro": ["adc_range"],
+            "adc_range": ["adc_range_macro"]
           }
         },
         "assembled": {
