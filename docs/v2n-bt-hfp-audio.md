@@ -1,6 +1,6 @@
 # Bluetooth HFP/SCO audio (V2N / V2M)
 
-Status: **routing confirmed, device tree not written, bench-unverified.**
+Status: **pad routing confirmed, SSI channel assignment unconfirmed, device tree not written, bench-unverified.**
 BT HFP/SCO audio is a product requirement (maintainer decision 2026-10-03).
 
 ## What is wired
@@ -9,14 +9,14 @@ The on-module Murata LBEE5HY2FY (CYW55513) exposes a PCM/I2S link to the SoC
 (`metadata/e1m_modules/v2n/renesas-peripheral-map.tsv`, `BT_I2S.*`; names are
 in the module's frame, as with `BT_UART`):
 
-| Net | SoC pad | Role |
+| Net | SoC pad | Role (SSI, to confirm) |
 |---|---|---|
-| `BT_I2S.CLK` | P73 | bit clock, SSI7 SCK |
-| `BT_I2S.WS` | P82 | frame sync, SSI7 WS |
-| `BT_I2S.DI` | P83 | SSI7 SDATA (module input, SoC playback) |
-| `BT_I2S.DO` | P81 | SSI8 SDATA (module output, SoC capture) |
+| `BT_I2S.CLK` | P73 | bit clock, SSI7 SCK (to confirm) |
+| `BT_I2S.WS` | P82 | frame sync, SSI7 WS (to confirm) |
+| `BT_I2S.DI` | P83 | SSI7 SDATA (module input, SoC playback) (to confirm) |
+| `BT_I2S.DO` | P81 | SSI8 SDATA (module output, SoC capture) (to confirm) |
 
-The audit's SSI7/SSI8 split is why a plain single-SSI card does not fit:
+The SSI7/SSI8 split (from private audit notes, not in this repo) is why a plain single-SSI card does not fit:
 SCK/WS and one data line belong to SSI7, the other data line to SSI8, like
 the TAS2563 pair (SSI1 pin master, SSI2 slave; patch 0014). Treat the
 SSI7/SSI8 assignment as to-confirm against the pin-function table.

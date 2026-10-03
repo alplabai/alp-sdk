@@ -297,9 +297,10 @@ SRC_URI:append:e1m-v2m101 = " file://display.cfg"
 SRC_URI:append:e1m-v2n101 = " file://tas2563-audio.cfg file://0009-ASoC-tas2562-reset-the-amplifier-at-probe.patch file://0014-ASoC-rsnd-let-SSI2-share-SSI1-SCK-WS-on-RZ-V2N.patch"
 
 # USB device (gadget) mode on the E1M-X-EVK USB 2.0 port (docs/v2n-usb-otg.md).
-# Carrier-level, so keyed like tas2563-audio.cfg above (e1m-v2n101 is on
-# every V2N-family machine). BENCH-UNVERIFIED.
-SRC_URI:append:e1m-v2n101 = " file://usb-gadget.cfg"
+# OPT-IN, BENCH-UNVERIFIED: usb-gadget.cfg builds the Renesas USBHS driver
+# in, which binds the otg &hsusb node, so it is merged ONLY when
+# ALP_ENABLE_USB_GADGET = "1" (V2N-family machines; e1m-v2n101 is on all).
+SRC_URI:append:e1m-v2n101 = "${@' file://usb-gadget.cfg' if d.getVar('ALP_ENABLE_USB_GADGET') == '1' else ''}"
 
 # Camera (#1149): OPT-IN IMX219 on the E1M-X-EVK CAM0 connector ->
 # CSI-2 receiver -> CRU0.  BENCH-UNVERIFIED.  Off by default: the shipped

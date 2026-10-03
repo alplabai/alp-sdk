@@ -1,5 +1,5 @@
 [Unit]
-Description=Alp USB gadget (ECM + ACM) on the USB 2.0 device port
+Description=Alp USB gadget (NCM + ACM) on the USB 2.0 device port
 After=sys-kernel-config.mount
 
 [Service]

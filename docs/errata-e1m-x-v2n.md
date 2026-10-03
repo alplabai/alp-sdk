@@ -93,9 +93,9 @@ usb20 channel's OC processing is now disabled at the controllers —
 (kernel patch 0003 adds the same property, setting NOCP/clearing OCPM
 in root-hub descriptor A). This removes both the boot lines and the
 functional OC side-effects (hub port power-cycling on OC events).
-Disabling OC processing is correct on this carrier: there is no VBUS
-switch for OC to protect. (The USB 2.0 receptacle is a Type-C sink with
-no VBUS source of its own -- see [v2n-usb-otg.md](v2n-usb-otg.md).)
+Disabling OC processing is the workaround for the unusable OC sense
+wiring; the USB 2.0 VBUS/role situation is in
+[v2n-usb-otg.md](v2n-usb-otg.md).
 *Cold-boot-verified on the bench 2026-06-12 (patched kernel +
 spurious-oc dtb): zero over-current lines from either controller.*
 
