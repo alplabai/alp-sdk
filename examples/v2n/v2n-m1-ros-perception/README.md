@@ -85,8 +85,10 @@ ros2 topic echo /alp/rail_3v3  # 1 Hz +3V3 rail voltage/current
 
 ## Yocto packaging
 
-A skeleton recipe lives under `recipes-ros/alp-perception_0.5.bb`
-in `meta-alp-sdk`.  The recipe DEPENDS on `alp-sdk`,
+The recipe is `alp-perception_0.6.bb` under
+`meta-alp-sdk/dynamic-layers/ros2-humble-layer/recipes-ros/` (parsed only
+when `meta-ros2-humble` is in `bblayers.conf`; see
+[`docs/bring-up-ros2.md`](../../../docs/bring-up-ros2.md)).  The recipe DEPENDS on `alp-sdk`,
 `ros-rclcpp`, `ros-vision-msgs`, `ros-sensor-msgs`, and (on
 V2N-M1) `dx-rt`.
 

@@ -591,7 +591,7 @@ def test_ros2_edge_image_pulls_rclcpp_and_alp_perception() -> None:
     assert 'FEATURE_PACKAGES_alp-ros     = "packagegroup-alp-ros"' in common_inc
 
     packagegroup = (
-        meta / "recipes-core" / "packagegroups" / "packagegroup-alp-ros.bb"
+        meta / "dynamic-layers" / "ros2-humble-layer" / "recipes-core" / "packagegroups" / "packagegroup-alp-ros.bb"
     ).read_text(encoding="utf-8")
     rdepends = packagegroup.split('RDEPENDS:${PN} = "', 1)[1].split('"', 1)[0]
     assert "rclcpp" in rdepends

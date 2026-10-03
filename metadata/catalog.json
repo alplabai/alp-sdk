@@ -3212,6 +3212,36 @@
           }
         ],
         "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
+        "name": "v2n-ros2-som-temperature",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
+        "path": "examples/v2n/v2n-ros2-som-temperature",
+        "som": "E1M-V2N101",
+        "summary": "The smallest useful Alp SDK + ROS 2 node. It calls **one portable function**, `alp_temperature_read_milli_c()` from `<alp/temperature.h>`, and republishes the value as `sensor_msgs/Temperature` on `/alp/som_temperature`."
+      },
+      {
+        "board": "e1m-x-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "a55_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
           "chips": true,
           "ipc": false,
           "models": false,

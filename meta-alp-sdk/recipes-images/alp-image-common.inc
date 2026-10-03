@@ -160,6 +160,30 @@ FEATURE_PACKAGES_alp-camera  = "packagegroup-alp-camera"
 FEATURE_PACKAGES_alp-display = "packagegroup-alp-display"
 FEATURE_PACKAGES_alp-ros     = "packagegroup-alp-ros"
 
+# ROS 2 opt-in switch.  `alp-ros` (requested by alp-image-edge, or by a
+# customer image via IMAGE_FEATURES += "alp-ros") only takes effect when
+# ALP_ENABLE_ROS2 = "1".  The default follows the layer: on when upstream
+# meta-ros2-humble (collection `ros2-humble-layer`) is in bblayers.conf, off
+# otherwise -- so a bblayers.conf without meta-ros still builds every
+# alp-image-* (ROS-free) instead of failing on rclcpp.  Set it to "0" in
+# local.conf to leave ROS out with the layer present; "1" without the layer is
+# a parse-time error (python() block below).  Same shape as ALP_ENABLE_DRPAI.
+# Recommended (not required): Renesas' meta-rzv2-ros-humble (collection
+# `rzv2-ros-humble`) from github.com/renesas-rz/rzv_ros -- see
+# docs/bring-up-ros2.md.
+ALP_ENABLE_ROS2 ?= "${@'1' if 'ros2-humble-layer' in (d.getVar('BBFILE_COLLECTIONS') or '').split() else '0'}"
+ALP_ROS2_FEATURE_OFF = "${@'' if d.getVar('ALP_ENABLE_ROS2') == '1' else 'alp-ros'}"
+
+python () {
+    collections = (d.getVar('BBFILE_COLLECTIONS') or '').split()
+    if d.getVar('ALP_ENABLE_ROS2') == '1' and 'ros2-humble-layer' not in collections:
+        bb.fatal('ALP_ENABLE_ROS2 = "1" but upstream meta-ros2-humble '
+                 '(collection ros2-humble-layer) is not in bblayers.conf. '
+                 'Add meta-ros/meta-ros-common, meta-ros/meta-ros2 and '
+                 'meta-ros/meta-ros2-humble (branch scarthgap), or set '
+                 'ALP_ENABLE_ROS2 = "0". See docs/bring-up-ros2.md.')
+}
+
 # meta-rz-codecs / meta-rz-opencva's RDEPENDS payload (drp-fw / opencv
 # oca) is NOT wired here -- per this section's own rule ("a new
 # capability lands as another packagegroup here -- never an edit to the
@@ -208,7 +232,7 @@ IMAGE_INSTALL += " mmc-utils"
 # networkd on end0/end1 (address/resolv.conf flapping, and a hazard
 # for benches reached over SSH at a fixed address). Both images are
 # networkd-only.
-IMAGE_FEATURES:remove = "tools-testapps"
+IMAGE_FEATURES:remove = "tools-testapps ${ALP_ROS2_FEATURE_OFF}"
 
 # DEEPX runtime on V2M variants: the machine confs own this (see
 # conf/machine/include/e1m-v2m-deepx.inc), gated on

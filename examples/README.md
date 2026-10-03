@@ -128,6 +128,7 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | `v2n/v2n-drpai-inference`          | DRP-AI3 on-die NPU still-frame inference through `<alp/inference.h>` -- the exhibition booth demo. **(V2N, Yocto)** |
 | `v2n/v2n-m1-deepx-inference`       | DEEPX DX-M1 NPU bring-up + a single inference through `<alp/inference.h>`. **(V2N-M1)** |
 | `v2n/v2n-m1-ros-perception`        | ROS 2 perception node -- detection on DEEPX, DRP-AI3 fallback on plain V2N. **(V2N / V2N-M1, Yocto)** |
+| `v2n/v2n-ros2-som-temperature`     | Minimal ROS 2 node: portable `alp_temperature_read_milli_c()` -> `sensor_msgs/Temperature`. `[UNTESTED]` **(V2N / V2N-M1, Yocto)** |
 | `cold-chain-monitor`               | Pharma/food cold-chain integrity monitor -- BME280 T/RH/P samples → anomaly classification; v0.9 paper-correct, HiL bench-gated. |
 | `motor-current-signature`          | DC motor/load current-signature health monitor -- INA236 current sensing → 1D-CNN health classifier; v0.9 paper-correct, HiL bench-gated. |
 | `multimodal-fusion-pdm`            | Multi-sensor motor-health monitor fusing vibration (ICM-42670) + current + acoustic (PDM mic); v0.9 paper-correct, HiL bench-gated. |

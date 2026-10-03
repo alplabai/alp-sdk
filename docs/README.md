@@ -97,6 +97,9 @@ into the topic-specific docs.
   symptom + recovery.
 - [bring-up-v2n.md](bring-up-v2n.md) — Renesas RZ/V2N.
 - [bring-up-v2n-m1.md](bring-up-v2n-m1.md) — V2N + DEEPX.
+- [bring-up-ros2.md](bring-up-ros2.md) — ROS 2 Humble on the V2N/V2M A55
+  (upstream meta-ros + Renesas rzv_ros, opt-in `ALP_ENABLE_ROS2`,
+  portable-API example node).  BENCH-UNVERIFIED.
 - [bring-up-drpai-v2n.md](bring-up-drpai-v2n.md) — the RZ/V2N on-die
   DRP-AI3 NPU: host toolchain, the DT override the driver needs,
   image wiring, model compile and microSD deploy. Kernel driver

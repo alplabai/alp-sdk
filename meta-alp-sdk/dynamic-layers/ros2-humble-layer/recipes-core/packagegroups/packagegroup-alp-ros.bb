@@ -8,9 +8,13 @@
 # alp-perception is the ALP ROS node; the rest is its rclcpp + message /
 # transport closure.
 #
+# Lives in dynamic-layers/ros2-humble-layer/: parsed only when upstream
+# meta-ros2-humble is in bblayers.conf (and gated by ALP_ENABLE_ROS2 in
+# alp-image-common.inc).
+#
 # Copyright (C) 2026 Alp Lab AB
 
-SUMMARY = "ROS 2 Humble perception runtime (rclcpp + alp-perception)"
+SUMMARY = "ROS 2 Humble perception runtime (rclcpp + alp-perception + alp-ros2-temperature)"
 
 inherit packagegroup
 
@@ -21,4 +25,5 @@ RDEPENDS:${PN} = " \
     image-transport \
     cv-bridge \
     alp-perception \
+    alp-ros2-temperature \
 "
