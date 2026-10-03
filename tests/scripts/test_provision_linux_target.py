@@ -747,7 +747,7 @@ def _census_responses(array: bytes = b"\xff" * 128):
         (r"cpuinfo_max_freq", "1800000\n"), (r"meminfo", "MemTotal:        3200000 kB\nMemFree: 1 kB\n"),
         (r"uname -r", "6.1.107-cip28\n"),
         (r"device-tree/compatible", "alp,e1m-v2m101-x-evk renesas,r9a09g056\n"),
-        (r"device-tree/model", "ALP E1M-V2M101 on E1M-X-EVK\n"),
+        (r"device-tree/model", "ALP E1M-V2M on E1M-X-EVK\n"),
         (r"device/type", "mmcblk0 SD\nmmcblk1 MMC\nmmcblk1boot1 MMC\n"),
         (r"mmcblk1/device/cid", CID + "\n"), (r"mmcblk1/size", "30535680\n"),
         (r"extcsd read", EXTCSD.format(a=2, b=8)),
@@ -783,7 +783,7 @@ def test_census_collects_ledger_keys_read_only():
     assert facts["secure_page_sha256"] == hashlib.sha256(b"\xff" * 64).hexdigest()
     assert "manifest_sha256" not in facts                      # blank array
     assert facts["soc_sys_lsi_mode"].startswith("0x3c06 (unverified")
-    assert facts["dtb_name"] == ("ALP E1M-V2M101 on E1M-X-EVK "
+    assert facts["dtb_name"] == ("ALP E1M-V2M on E1M-X-EVK "
                                  "(compatible alp,e1m-v2m101-x-evk renesas,r9a09g056)")
     assert facts["cpu_khz"] == "1800000" and facts["linux_memtotal_kb"] == "3200000"
     assert facts["emmc_cid_pnm"] == "EMMC01" and facts["emmc_cid_psn"] == "0x12345678"
