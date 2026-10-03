@@ -2616,6 +2616,13 @@ def _v2n_dts(
     console = links["console"]
     gd32_spi = links["gd32_spi"]
     brd_i2c = links["brd_i2c"]
+    wdt = _find_core(soc_spec, "m33_sm").get("watchdog") or {}
+    if not wdt:
+        raise ZephyrBoardEmitError(
+            f"SoC spec {soc_spec.get('ref')} core m33_sm declares no `watchdog` "
+            "block (base/size/counting_clock_hz) -- the V2N/V2M board emits the "
+            "CM33 watchdog node and the alp-wdt0 alias from it")
+    wdt_base = wdt["base"]
     txd0 = _pin_by_peripheral(console["pins"], "UART0_TXD0")
     rxd0 = _pin_by_peripheral(console["pins"], "UART0_RXD0")
     mosi = _pin_by_peripheral(gd32_spi["pins"], "GD32_SPI.MOSI")
@@ -2764,8 +2771,9 @@ def _v2n_dts(
         "};",
         "",
         "/*",
-        " * wdt0 = the Cortex-M33's own watchdog (R_WDT0_BASE 0x41C00400, hal_renesas",
-        " * R9A09G056N wdt_iodefine.h).  The upstream SoC devicetree",
+        f" * wdt0 = the Cortex-M33's own watchdog (base {wdt_base} and counting clock",
+        " * from the SoC spec's m33_sm `watchdog` block; hal_renesas R9A09G056N",
+        " * wdt_iodefine.h R_WDT0_BASE).  The upstream SoC devicetree",
         " * (arm/renesas/rz/rzv/r9a09g056.dtsi) declares no watchdog, and upstream's",
         " * `renesas,rz-wdt` driver cannot bind RZ/V2N, so the node uses the alp-sdk",
         " * driver zephyr/drivers/watchdog/wdt_renesas_rzv.c (compatible",
@@ -2773,15 +2781,14 @@ def _v2n_dts(
         " * WHOLE SoM, not just the M33, so a product opts in with `&wdt0 { status =",
         ' * "okay"; };`.  <alp/wdt.h> then reaches it through alias alp-wdt0.  Enabling it',
         " * also needs the CPG module clocks held for the CM33 (renesas,cm33-owned-clocks,",
-        " * docs/hil/rzv-wdt0-cm33.md).  clock-freq is the WDT0 counting clock, derived",
-        " * from the A55 side's fixed ~175 ms period (16384 counts at /256 = 24 MHz) and NOT yet",
-        " * read back on silicon.",
+        " * docs/bench/rzv-wdt0-cm33.md).  clock-freq is the WDT0 counting clock",
+        " * (WDT_0_clk_loco, 24 MHz Main OSC; RZ/V2N hardware manual Table 4.4-2).",
         " */",
         "&{/soc} {",
-        "\twdt0: watchdog@41c00400 {",
+        f"\twdt0: watchdog@{wdt_base[2:]} {{",
         '\t\tcompatible = "renesas,rzv-wdt";',
-        "\t\treg = <0x41c00400 0x10>;",
-        "\t\tclock-freq = <24000000>;",
+        f"\t\treg = <{wdt_base} {wdt['size']}>;",
+        f"\t\tclock-freq = <{wdt['counting_clock_hz']}>;",
         '\t\tstatus = "disabled";',
         "\t};",
         "};",

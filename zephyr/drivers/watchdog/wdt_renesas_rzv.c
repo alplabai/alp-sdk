@@ -17,17 +17,27 @@
  * this from ever colliding with a real `renesas,rz-wdt` node and leaves `west update` clean.  The
  * timeout-selection idea is the upstream USE_ICU build's, minus the window/ICU parts.
  *
- * Behaviour:
- *   - reset-only: WDT_FLAG_RESET_SOC.  The expiry request is routed to a whole-SoC reset by
- *     R_BSP_WDT_SYSTEM_RESET_ENABLE(0, 1) (CPG_ERRORRST_SEL2), so an expiry resets the whole SoM, not
- *     just the M33.  Interrupt-only (callback) and WDT_FLAG_RESET_CPU_CORE are -ENOTSUP: hal_renesas
- *     rzv2n names no WDT NVIC line for the CM33, and the hardware has no per-core reset.
+ * Behaviour (RZ/V2N hardware manual R01UH1071EJ0120 Rev.1.20 = "the manual"):
+ *   - reset-only: WDT_FLAG_RESET_SOC.  WDTRCR.RSTIRQS is 0 (manual 5.4.2.2.4: "In this LSI, always set
+ *     RSTIRQS = 0 when using the WDT"), so an underflow raises WDT_CM33_iwdt_nmiundf_n, which
+ *     R_BSP_WDT_SYSTEM_RESET_ENABLE(0, 1) (CPG_ERRORRST_SEL2.ERRRSTSEL0, manual 4.4.4.14 + Table 4.4-29)
+ *     turns into an error SYSTEM reset: the CM33, CA55, CoreSight and all other units reset (manual
+ *     4.4.6.5 reset table, "System reset triggered by various errors"), i.e. the whole SoM.
+ *   - WDT_FLAG_RESET_CPU_CORE is -ENOTSUP.  With SEL2 = 0 the underflow is NOT a CM33-only reset: the
+ *     only CM33-only path is CPG_ERRORRST_SEL1.ERRRSTSEL2 (manual 4.4.4.13, "CM33 cold reset", hal
+ *     R_BSP_WDT_COLD_RESET_ENABLE), which answers a WDT *reset request* -- the RSTIRQS = 1 output the
+ *     manual forbids on this LSI.  Whether it works with RSTIRQS = 0 is not documented, so it is not
+ *     offered until a bench run shows it (see docs/bench/rzv-wdt0-cm33.md).
+ *   - interrupt-only (callback) is -ENOTSUP: hal_renesas rzv2n names no WDT NVIC line for the CM33
+ *     (manual Table 5.4-5: WDT0 "Interrupt to CPU: Not possible", error interrupt only).
  *   - no window: window.min must be 0 (the hardware window is fixed at 0..100 %).
- *   - the achieved timeout is the longest period <= window.max (never longer than asked); the clock
- *     comes from the node's `clock-freq`.
+ *   - the achieved timeout is the longest period <= window.max (never longer than asked); at 24 MHz
+ *     that tops out at 16384 x 256 / 24 MHz = 174.8 ms, so a longer request is clamped to it.  The clock
+ *     is the node's `clock-freq`, generated from the SoC spec's m33_sm `watchdog.counting_clock_hz`:
+ *     24 MHz = WDT_0_clk_loco from the Main OSC (manual Table 4.4-2, "CWDT loco clock").
  *   - WDT_OPT_PAUSE_IN_SLEEP maps to WDTCSTPR.SLCSTP; WDT_OPT_PAUSE_HALTED_BY_DBG is -ENOTSUP.
  *   - once started the watchdog cannot be stopped (wdt_disable() -> -EPERM), as on the other RZ WDTs.
- * Not verified on silicon: see docs/hil/rzv-wdt0-cm33.md for the ordered bench steps.
+ * Not verified on silicon: see docs/bench/rzv-wdt0-cm33.md for the ordered bench steps.
  * ============================================================================
  */
 
@@ -42,6 +52,7 @@
 #include <zephyr/sys/atomic.h>
 
 #include "r_wdt.h"
+#include "wdt_rzv_timeout.h"
 
 LOG_MODULE_REGISTER(wdt_renesas_rzv, CONFIG_WDT_LOG_LEVEL);
 
@@ -54,53 +65,28 @@ struct wdt_rzv_config {
 
 struct wdt_rzv_data {
 	wdt_instance_ctrl_t ctrl;
-	wdt_cfg_t cfg;
-	atomic_t state;
+	wdt_cfg_t           cfg;
+	atomic_t            state;
 };
 
-/* Every counter length / clock divider pair the WDT0 WDTCR can encode (rzt/rzn layout). */
-static const wdt_timeout_t wdt_rzv_timeouts[] = {WDT_TIMEOUT_1024, WDT_TIMEOUT_4096,
-						 WDT_TIMEOUT_8192, WDT_TIMEOUT_16384};
-static const uint32_t wdt_rzv_cycles[] = {1024, 4096, 8192, 16384};
+/* Indexed by the TOPS[1:0] encoding (wdt_rzv_timeout.h). */
+static const wdt_timeout_t wdt_rzv_timeouts[] = { WDT_TIMEOUT_1024,
+	                                              WDT_TIMEOUT_4096,
+	                                              WDT_TIMEOUT_8192,
+	                                              WDT_TIMEOUT_16384 };
 
-static const wdt_clock_division_t wdt_rzv_divisions[] = {
-	WDT_CLOCK_DIVISION_1,   WDT_CLOCK_DIVISION_4,   WDT_CLOCK_DIVISION_16,
-	WDT_CLOCK_DIVISION_32,  WDT_CLOCK_DIVISION_64,  WDT_CLOCK_DIVISION_128,
-	WDT_CLOCK_DIVISION_256, WDT_CLOCK_DIVISION_512, WDT_CLOCK_DIVISION_2048,
-	WDT_CLOCK_DIVISION_8192};
-static const uint32_t wdt_rzv_dividers[] = {1, 4, 16, 32, 64, 128, 256, 512, 2048, 8192};
-
-BUILD_ASSERT(ARRAY_SIZE(wdt_rzv_timeouts) == ARRAY_SIZE(wdt_rzv_cycles));
-BUILD_ASSERT(ARRAY_SIZE(wdt_rzv_divisions) == ARRAY_SIZE(wdt_rzv_dividers));
-
-/* Longest period not exceeding max_ms; false when even the shortest is longer. */
-static bool wdt_rzv_pick(uint32_t clock_freq, uint32_t max_ms, wdt_timeout_t *timeout,
-			 wdt_clock_division_t *division)
-{
-	uint64_t best_us = 0;
-
-	for (size_t d = 0; d < ARRAY_SIZE(wdt_rzv_divisions); d++) {
-		for (size_t t = 0; t < ARRAY_SIZE(wdt_rzv_timeouts); t++) {
-			uint64_t us = (uint64_t)wdt_rzv_dividers[d] * wdt_rzv_cycles[t] *
-				      1000000ULL / clock_freq;
-
-			if (us <= (uint64_t)max_ms * 1000ULL && us > best_us) {
-				best_us = us;
-				*timeout = wdt_rzv_timeouts[t];
-				*division = wdt_rzv_divisions[d];
-			}
-		}
-	}
-
-	return best_us != 0;
-}
+BUILD_ASSERT(ARRAY_SIZE(wdt_rzv_timeouts) == ARRAY_SIZE(wdt_rzv_tops_counts));
+/* The FSP enum values ARE the CKS[3:0] encodings (manual Table 5.4-3); the picker returns raw CKS. */
+BUILD_ASSERT(WDT_CLOCK_DIVISION_1 == 0x0 && WDT_CLOCK_DIVISION_16 == 0x2 &&
+             WDT_CLOCK_DIVISION_32 == 0x3 && WDT_CLOCK_DIVISION_64 == 0x4 &&
+             WDT_CLOCK_DIVISION_128 == 0xF && WDT_CLOCK_DIVISION_256 == 0x5);
 
 static int wdt_rzv_install_timeout(const struct device *dev, const struct wdt_timeout_cfg *config)
 {
-	const struct wdt_rzv_config *cfg = dev->config;
-	struct wdt_rzv_data *data = dev->data;
-	wdt_timeout_t timeout;
-	wdt_clock_division_t division;
+	const struct wdt_rzv_config *cfg  = dev->config;
+	struct wdt_rzv_data         *data = dev->data;
+	uint8_t                      tops;
+	uint8_t                      cks;
 
 	if (atomic_test_bit(&data->state, WDT_RZV_ATOMIC_ENABLE)) {
 		return -EBUSY;
@@ -108,8 +94,7 @@ static int wdt_rzv_install_timeout(const struct device *dev, const struct wdt_ti
 	if (config->window.max == 0 || config->window.min != 0) {
 		return -EINVAL;
 	}
-	if (config->callback != NULL ||
-	    (config->flags & WDT_FLAG_RESET_MASK) == WDT_FLAG_RESET_NONE) {
+	if (config->callback != NULL || (config->flags & WDT_FLAG_RESET_MASK) == WDT_FLAG_RESET_NONE) {
 		LOG_ERR("interrupt-only expiry unsupported: no WDT0 NVIC line known for the CM33");
 		return -ENOTSUP;
 	}
@@ -120,39 +105,30 @@ static int wdt_rzv_install_timeout(const struct device *dev, const struct wdt_ti
 	if (atomic_test_bit(&data->state, WDT_RZV_ATOMIC_TIMEOUT_SET)) {
 		return -ENOMEM; /* a single channel */
 	}
-	if (!wdt_rzv_pick(cfg->clock_freq, config->window.max, &timeout, &division)) {
-		LOG_ERR("timeout %u ms is shorter than the shortest WDT0 period",
-			config->window.max);
+	if (!wdt_rzv_pick(cfg->clock_freq, config->window.max, &tops, &cks)) {
+		LOG_ERR("timeout %u ms is shorter than the shortest WDT0 period", config->window.max);
 		return -EINVAL;
 	}
 
-	data->cfg.timeout = timeout;
-	data->cfg.clock_division = division;
-	data->cfg.window_start = WDT_WINDOW_START_100;
-	data->cfg.window_end = WDT_WINDOW_END_0;
-	data->cfg.reset_control = WDT_RESET_CONTROL_RESET;
+	data->cfg.timeout        = wdt_rzv_timeouts[tops];
+	data->cfg.clock_division = (wdt_clock_division_t)cks;
+	data->cfg.window_start   = WDT_WINDOW_START_100;
+	data->cfg.window_end     = WDT_WINDOW_END_0;
+	/* RSTIRQS = 0 on this LSI; the reset comes from CPG_ERRORRST_SEL2 (manual 5.4.2.2.4). */
+	data->cfg.reset_control = WDT_RESET_CONTROL_NMI;
 	atomic_set_bit(&data->state, WDT_RZV_ATOMIC_TIMEOUT_SET);
 
 	return 0;
 }
 
-static int wdt_rzv_setup(const struct device *dev, uint8_t options)
+static int wdt_rzv_arm(struct wdt_rzv_data *data, uint8_t options)
 {
-	struct wdt_rzv_data *data = dev->data;
-
 	if ((options & WDT_OPT_PAUSE_HALTED_BY_DBG) != 0) {
 		return -ENOTSUP;
 	}
-	if (atomic_test_bit(&data->state, WDT_RZV_ATOMIC_ENABLE)) {
-		return -EBUSY;
-	}
-	if (!atomic_test_bit(&data->state, WDT_RZV_ATOMIC_TIMEOUT_SET)) {
-		return -EINVAL;
-	}
 
-	data->cfg.stop_control = (options & WDT_OPT_PAUSE_IN_SLEEP) != 0
-					 ? WDT_STOP_CONTROL_ENABLE
-					 : WDT_STOP_CONTROL_DISABLE;
+	data->cfg.stop_control = (options & WDT_OPT_PAUSE_IN_SLEEP) != 0 ? WDT_STOP_CONTROL_ENABLE
+	                                                                 : WDT_STOP_CONTROL_DISABLE;
 
 	if (g_wdt_on_wdt.open(&data->ctrl, &data->cfg) != FSP_SUCCESS) {
 		return -EIO;
@@ -162,6 +138,30 @@ static int wdt_rzv_setup(const struct device *dev, uint8_t options)
 	R_BSP_WDT_SYSTEM_RESET_ENABLE(0, 1);
 	if (g_wdt_on_wdt.refresh(&data->ctrl) != FSP_SUCCESS) {
 		return -EIO;
+	}
+
+	return 0;
+}
+
+static int wdt_rzv_setup(const struct device *dev, uint8_t options)
+{
+	struct wdt_rzv_data *data = dev->data;
+	int                  ret;
+
+	if (atomic_test_bit(&data->state, WDT_RZV_ATOMIC_ENABLE)) {
+		return -EBUSY;
+	}
+	if (!atomic_test_bit(&data->state, WDT_RZV_ATOMIC_TIMEOUT_SET)) {
+		return -EINVAL;
+	}
+
+	ret = wdt_rzv_arm(data, options);
+	if (ret != 0) {
+		/* A rejected setup must free the single channel, or every later
+		 * install_timeout() would answer -ENOMEM for good.
+		 */
+		atomic_clear_bit(&data->state, WDT_RZV_ATOMIC_TIMEOUT_SET);
+		return ret;
 	}
 
 	atomic_set_bit(&data->state, WDT_RZV_ATOMIC_ENABLE);
@@ -193,18 +193,29 @@ static int wdt_rzv_feed(const struct device *dev, int channel_id)
 }
 
 static DEVICE_API(wdt, wdt_rzv_api) = {
-	.setup = wdt_rzv_setup,
-	.disable = wdt_rzv_disable,
+	.setup           = wdt_rzv_setup,
+	.disable         = wdt_rzv_disable,
 	.install_timeout = wdt_rzv_install_timeout,
-	.feed = wdt_rzv_feed,
+	.feed            = wdt_rzv_feed,
 };
 
-#define WDT_RZV_INIT(inst)                                                                         \
-	static struct wdt_rzv_data wdt_rzv_data_##inst;                                            \
-	static const struct wdt_rzv_config wdt_rzv_config_##inst = {                               \
-		.clock_freq = DT_INST_PROP(inst, clock_freq),                                      \
-	};                                                                                         \
-	DEVICE_DT_INST_DEFINE(inst, NULL, NULL, &wdt_rzv_data_##inst, &wdt_rzv_config_##inst,      \
-			      POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE, &wdt_rzv_api);
+#define WDT_RZV_INIT(inst) \
+	BUILD_ASSERT(DT_INST_REG_ADDR(inst) == R_WDT0_BASE, \
+	             "renesas,rzv-wdt: the glue drives R_WDT0 (the CM33 WDT) only"); \
+	static struct wdt_rzv_data         wdt_rzv_data_##inst; \
+	static const struct wdt_rzv_config wdt_rzv_config_##inst = { \
+		.clock_freq = DT_INST_PROP(inst, clock_freq), \
+	}; \
+	DEVICE_DT_INST_DEFINE(inst, \
+	                      NULL, \
+	                      NULL, \
+	                      &wdt_rzv_data_##inst, \
+	                      &wdt_rzv_config_##inst, \
+	                      POST_KERNEL, \
+	                      CONFIG_KERNEL_INIT_PRIORITY_DEVICE, \
+	                      &wdt_rzv_api);
+
+BUILD_ASSERT(DT_NUM_INST_STATUS_OKAY(DT_DRV_COMPAT) <= 1,
+             "renesas,rzv-wdt: one instance only (the vendored r_wdt is fixed to R_WDT0)");
 
 DT_INST_FOREACH_STATUS_OKAY(WDT_RZV_INIT)

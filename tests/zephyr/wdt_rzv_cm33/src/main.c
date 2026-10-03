@@ -4,7 +4,7 @@
  *
  * Build-only: arms the CM33 watchdog through the portable <alp/wdt.h> API.
  * Never run in CI -- a started WDT0 cannot be stopped and resets the whole SoM.
- * Bench steps: docs/hil/rzv-wdt0-cm33.md.
+ * Bench steps: docs/bench/rzv-wdt0-cm33.md.
  */
 
 #include <zephyr/kernel.h>
@@ -16,7 +16,7 @@ int main(void)
 {
 	alp_wdt_t *wdt = alp_wdt_open(&(alp_wdt_config_t){
 	    .wdt_id     = ALP_E1M_X_WDT0,
-	    .timeout_ms = 3000,
+	    .timeout_ms = 175, /* the longest WDT0 period at 24 MHz is 174.8 ms */
 	    .on_timeout = ALP_WDT_RESET_SOC,
 	});
 
@@ -27,7 +27,7 @@ int main(void)
 
 	while (1) {
 		(void)alp_wdt_feed(wdt);
-		k_sleep(K_MSEC(500));
+		k_sleep(K_MSEC(50));
 	}
 
 	return 0;

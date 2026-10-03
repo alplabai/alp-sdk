@@ -23,5 +23,7 @@ properties:
     type: int
     description: |
       Counting clock of the watchdog in Hz, before the WDTCR divider.  Sets the
-      timeout the driver derives from wdt_install_timeout().  Not read back from
-      the CPG: confirm on silicon (docs/hil/rzv-wdt0-cm33.md).
+      timeout the driver derives from wdt_install_timeout().  Generated from the
+      SoC spec's m33_sm `watchdog.counting_clock_hz` (24 MHz WDT_0_clk_loco, hardware
+      manual Table 4.4-2); not read back from the CPG and not yet measured on
+      silicon (docs/bench/rzv-wdt0-cm33.md).

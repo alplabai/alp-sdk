@@ -668,8 +668,8 @@
  * R_WDT0_BASE 0x41C00400) declared in its generated board dts, disabled by
  * default; <alp/wdt.h> on the M33 reaches it through alias alp-wdt0 once a
  * product enables it (alp-sdk#2660).  BENCH-UNVERIFIED -- see
- * docs/hil/rzv-wdt0-cm33.md; enabling it also needs WDT0's CPG clocks held
- * for the CM33 (renesas,cm33-owned-clocks, #2660 ownership work). */
+ * docs/bench/rzv-wdt0-cm33.md; enabling it also needs WDT0's CPG clocks held
+ * for the CM33 (renesas,cm33-owned-clocks, branch feat/v2n-assignable-ownership). */
 &wdt1 {
 	timeout-sec = <60>;
 	status = "okay";

@@ -294,6 +294,15 @@ static fsp_err_t r_wdt_parameter_checking (wdt_instance_ctrl_t * const p_instanc
      * included for other implementations of the watchdog interface). */
     FSP_ASSERT((p_cfg->timeout == WDT_TIMEOUT_1024) || (p_cfg->timeout == WDT_TIMEOUT_4096) || \
                (p_cfg->timeout == WDT_TIMEOUT_8192) || (p_cfg->timeout == WDT_TIMEOUT_16384));
+
+    /* The WDT0 CKS[3:0] field only encodes /1 /16 /32 /64 /128 /256 (hardware manual 5.4.2.2.2); the
+     * other wdt_clock_division_t values (/4 /512 /2048 /8192) are prohibited settings here. */
+    FSP_ASSERT((p_cfg->clock_division == WDT_CLOCK_DIVISION_1) ||
+               (p_cfg->clock_division == WDT_CLOCK_DIVISION_16) ||
+               (p_cfg->clock_division == WDT_CLOCK_DIVISION_32) ||
+               (p_cfg->clock_division == WDT_CLOCK_DIVISION_64) ||
+               (p_cfg->clock_division == WDT_CLOCK_DIVISION_128) ||
+               (p_cfg->clock_division == WDT_CLOCK_DIVISION_256));
 #else
     FSP_PARAMETER_NOT_USED(p_instance_ctrl);
     FSP_PARAMETER_NOT_USED(p_cfg);

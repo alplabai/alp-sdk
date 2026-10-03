@@ -3,7 +3,7 @@
 # Build-only: proves alias alp-wdt0 -> renesas,rzv-wdt (wdt_renesas_rzv.c) ->
 # vendored FSP r_wdt compile on both CM33 boards with the node enabled.  Running
 # it would arm a watchdog that cannot be stopped and resets the whole SoM; the
-# silicon proof is the ordered bench steps in docs/hil/rzv-wdt0-cm33.md.
+# silicon proof is the ordered bench steps in docs/bench/rzv-wdt0-cm33.md.
 tests:
   alp_sdk.wdt.rzv_cm33:
     build_only: true
