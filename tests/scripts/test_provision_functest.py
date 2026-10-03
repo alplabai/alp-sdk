@@ -807,7 +807,10 @@ def test_the_runner_frames_each_check_runs_lanes_concurrently_and_kills_an_overr
     assert rc_a == "0" and out_a.splitlines()[:2] == ["first", "err"]
     assert "/ft." in out_a.splitlines()[2].replace("\\", "/")                 # the check ran inside the temp dir
     assert got["slow1"] == ("0", "s1") and got["slow2"] == ("0", "s2")
-    assert got["hang"] == ("T", "started") and got["rc"] == ("3", "before") and got["nope"][0] == "127"
+    # the killed check's shell may add a job-status line (dash: "Terminated"); a timed-out check's
+    # output is never judged, only its T
+    assert got["hang"][0] == "T" and got["hang"][1].splitlines()[0] == "started"
+    assert got["rc"] == ("3", "before") and got["nope"][0] == "127"
     assert got["tool"] == ("0", "ALPUNREAD missing tool: definitely-not-a-tool-xyz")
     assert took < 15, took                                                    # 1 s lanes in parallel, the hang killed at 1 s
     assert functest.judge(checks[3], got["hang"]) == "unread (timed out after 1 s)"
