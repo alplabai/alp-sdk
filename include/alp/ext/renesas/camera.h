@@ -6,7 +6,11 @@
  * V2N silicon for the gated feature.  Every function in this
  * header verifies the handle's backend is Renesas before
  * touching hardware; calls on a non-Renesas handle return
- * @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC.
+ * @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC.  After argument validation
+ * every function returns @ref ALP_ERR_NOSUPPORT: no ISP register is
+ * written, because the CM33 FSP has no CRU/CSI-2/ISP module and the
+ * A55 owns them (RZ/V2N Hardware User's Manual R01UH1071EJ0120
+ * section 9.8).
  *
  * Covers finer-grained ISP knobs the portable
  * @ref alp_camera_isp_config_t struct can't carry without
@@ -88,9 +92,8 @@ typedef struct {
  *
  * Lets callers move the AE / AWB / AF metering rectangle off
  * the default centre-weighted position for spot-meter style
- * flows.  Safe to call before or after @ref alp_camera_start;
- * the backend latches the rectangle and applies on the next
- * frame boundary.
+ * flows.  Currently validates the arguments and returns
+ * @ref ALP_ERR_NOSUPPORT; nothing is applied to the ISP.
  *
  * Bypasses @ref alp_camera_configure_isp on purpose -- the
  * portable struct carries no rectangle fields and growing it to
@@ -102,7 +105,8 @@ typedef struct {
  * @param rect    Pixel-coordinate rectangle.  Non-NULL; rejects
  *                w == 0 or h == 0 with @ref ALP_ERR_INVAL.
  *
- * @return @ref ALP_OK on success;
+ * @return @ref ALP_ERR_NOSUPPORT after the arguments validate (no ISP
+ *           register is written);
  *         @ref ALP_ERR_INVAL on NULL handle / NULL rect /
  *           zero-sized rect / unknown region enum;
  *         @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC on non-Renesas backend;
@@ -118,11 +122,9 @@ alp_status_t alp_renesas_camera_isp_3a_window_set(alp_camera_t                  
  * @par Supported silicon: renesas:rzv2n:n44
  *
  * Each entry is a Q4.12 gain value (1.0 == 4096) applied to the
- * matching colour channel before AWB integration.  The table is
- * referenced -- not copied -- so the caller must keep the buffer
- * alive until either the camera handle closes or a subsequent
- * load supersedes it.  This avoids a hot-path copy for the
- * typical 256 / 512 / 1024-entry curves customers ship.
+ * matching colour channel before AWB integration.  Currently
+ * validates the arguments and returns @ref ALP_ERR_NOSUPPORT;
+ * the table is neither copied nor retained.
  *
  * @param camera   Handle from @ref alp_camera_open opened against
  *                 Renesas V2N silicon.  Non-NULL.
@@ -130,10 +132,10 @@ alp_status_t alp_renesas_camera_isp_3a_window_set(alp_camera_t                  
  * @param table    Pointer to a contiguous uint16_t array.
  *                 Non-NULL.
  * @param len      Number of entries; 16..1024 inclusive.  The
- *                 N44 ISP rejects lengths outside this range
- *                 (datasheet r01uh1003ej §18.5).
+ *                 SDK rejects lengths outside this range.
  *
- * @return @ref ALP_OK on success;
+ * @return @ref ALP_ERR_NOSUPPORT after the arguments validate (no ISP
+ *           register is written);
  *         @ref ALP_ERR_INVAL on NULL / out-of-range arguments;
  *         @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC on non-Renesas backend;
  *         @ref ALP_ERR_NOT_READY if the camera isn't open.
@@ -152,15 +154,16 @@ alp_status_t alp_renesas_camera_isp_gain_table_load(alp_camera_t                
  * as a flattened uint16_t grid; each entry is a Q4.12 gain
  * applied to the matching grid cell.  Grid dimensions are
  * implementation-defined -- callers pass the total cell count
- * via @p len.  As with the gain table the buffer is referenced
- * (not copied); keep it alive until close.
+ * via @p len.  Currently validates the arguments and returns
+ * @ref ALP_ERR_NOSUPPORT; the LUT is neither copied nor retained.
  *
  * @param camera  Handle from @ref alp_camera_open opened against
  *                Renesas V2N silicon.  Non-NULL.
  * @param lut     Pointer to the flattened LUT.  Non-NULL.
  * @param len     Total number of grid cells; 64..4096 inclusive.
  *
- * @return @ref ALP_OK / @ref ALP_ERR_INVAL /
+ * @return @ref ALP_ERR_NOSUPPORT after the arguments validate /
+ *         @ref ALP_ERR_INVAL /
  *         @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC /
  *         @ref ALP_ERR_NOT_READY.
  */

@@ -90,13 +90,12 @@ do_configure[prefuncs] += "do_generate_toolchain_file"
 #   audio    -> alsa-lib   (oe-core; also enables the I2S backend)
 #   rpc      -> open-amp + libmetal (meta-openamp; default OFF because
 #               the layer is not in the standard alp bblayers set yet)
-#   drpai    -> mera2-drpai-tvm + drpai + lib-tvm (RZ/V2N on-die DRP-AI3
-#               NPU; default OFF).  All THREE are needed, and the flag sets
+#   drpai    -> mera2-drpai-tvm + drpai (RZ/V2N on-die DRP-AI3
+#               NPU; default OFF).  BOTH are needed, and the flag sets
 #               ALP_SDK_DRPAI_REQUIRED=ON, so a missing one is a configure
 #               error rather than a silently backend-less library:
 #               src/yocto/CMakeLists.txt probes <linux/drpai.h> (from
-#               meta-rz-drpai's `drpai`), libtvm_runtime (its `lib-tvm`),
-#               and the MERA2 closure (mera2-drpai-tvm).  Requires
+#               meta-rz-drpai's `drpai`) and the MERA2 closure (mera2-drpai-tvm).  Requires
 #               meta-rz-drpai in bblayers.conf.  Turning this on is what
 #               makes src/yocto/inference_drpai.cpp compile in -- see #1145.
 #               Note this recipe carries BBCLASSEXTEND = "native nativesdk"
@@ -112,14 +111,13 @@ PACKAGECONFIG[rpc]      = ",,open-amp libmetal"
 # above this one is NOT a silent degrade and NOT dep-free: when
 # ALP_SDK_USE_DRPAI_V2N=ON, src/yocto/inference_drpai.cpp is added to the
 # target, #includes <linux/drpai.h> + MeraDrpRuntimeWrapper.h and links
-# five vendor libraries.  The -D flags and the build deps therefore have to
+# four vendor libraries.  The -D flags and the build deps therefore have to
 # move together, which is why they are routed through one PACKAGECONFIG
 # switch.
 #
-# What this switch supplies -- all 10 inputs src/yocto/CMakeLists.txt
+# What this switch supplies -- all 9 inputs src/yocto/CMakeLists.txt
 # looks for, across two recipes:
 #   drpai            -> ${includedir}/linux/drpai.h  (meta-rz-drpai, drpai_1.4.0)
-#   lib-tvm          -> libtvm_runtime.so            (meta-rz-drpai)
 #   mera2-drpai-tvm  -> MeraDrpRuntimeWrapper.h, the tvm/runtime/profiling.h +
 #                       dlpack/dlpack.h + dmlc/logging.h header tree it
 #                       hard-includes, libmera2_runtime.so / libmera2_plan_io.so /
@@ -161,8 +159,7 @@ PACKAGECONFIG[rpc]      = ",,open-amp libmetal"
 # -- they come from meta-rz-drpai's mmngr-user-module /
 # mmngrbuf-user-module recipes. mera2-drpai-tvm now stages all eight
 # RUHMI libraries in its main package (so OE's automatic shlibs pass
-# picks up their DT_NEEDED entries, the same way it already did for the
-# lib-tvm-provided libtvm_runtime.so) and RDEPENDS on the two mmngr
+# picks up their DT_NEEDED entries) and RDEPENDS on the two mmngr
 # packages explicitly, since nothing DEPENDS-time links against them for
 # shlibs to infer the RDEPENDS on its own. A first cut of this recipe
 # staged only the three libraries named above and shipped them into the
@@ -206,7 +203,7 @@ PACKAGECONFIG[rpc]      = ",,open-amp libmetal"
 # all -- and separately, ALP_SDK_DRPAI_REQUIRED itself is emitted by
 # NOTHING in the tree (kconfig.py emits only the USE flag), so REQUIRED
 # can never be auto-flipped ON regardless of which slice is building.)
-PACKAGECONFIG[drpai]    = "-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=ON,-DALP_SDK_USE_DRPAI_V2N=OFF -DALP_SDK_DRPAI_REQUIRED=OFF,drpai lib-tvm mera2-drpai-tvm,mera2-drpai-tvm"
+PACKAGECONFIG[drpai]    = "-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=ON,-DALP_SDK_USE_DRPAI_V2N=OFF -DALP_SDK_DRPAI_REQUIRED=OFF,drpai mera2-drpai-tvm,mera2-drpai-tvm"
 
 # deepx-dxm1 -> dx-rt (DEEPX's own meta-deepx-m1 layer; see
 #               conf/machine/include/e1m-v2m-deepx.inc).  Same
@@ -288,7 +285,7 @@ python () {
 # runtime install.
 #
 # DRP-AI3 is the exception, and only when PACKAGECONFIG[drpai] is on: its
-# DEPENDS field names `drpai` and `lib-tvm` explicitly.  That is required,
+# DEPENDS field names `drpai` explicitly.  That is required,
 # not belt-and-braces.  The userspace HEADERS (<linux/drpai.h>) do NOT
 # "come from meta-rz-drpai via the sysroot" merely by that layer being in
 # bblayers.conf -- meta-rz-drpai ships them through its own
