@@ -346,6 +346,14 @@ SRC_URI:append:rzv2n-family = " file://0010-rzv2n-dev-ALP-E1M-serial-derived-eth
 # OTP already reads 0x08, so the step is a no-op there; see the patch header.
 SRC_URI:append:rzv2n-family = " file://0011-rzv2n-dev-ALP-E1M-gd32-nrst-release.patch"
 
+# 0012 (reset cause + DX-M1 reset hold, alp-sdk#1153): board_late_init() first
+# reads CPG_ERROR_RST2 (survives an error system reset), prints "ALP: reset
+# cause: ...", clears the WDT flags and publishes env alp_reset_cause and
+# /chosen/alp,reset-cause. After a WDT reset on a v2n-m1 SoM it holds
+# M1_RESET (PA6) low before 0004/0001 release it. Applies after 0009 (shares
+# ft_system_setup()), 0010 and 0011 (board_late_init() context lines).
+SRC_URI:append:rzv2n-family = " file://0012-rzv2n-dev-ALP-E1M-reset-cause-and-deepx-reset-hold.patch"
+
 # Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot
 # binary serves both families, so the dtb basename is a Kconfig string
 # (CONFIG_ALP_E1M_FDTFILE, patch 0002) whose default suits the V2N SKUs;
