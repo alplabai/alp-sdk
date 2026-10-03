@@ -69,6 +69,19 @@ sci1 node; both CAN-FD instances are `a55`-only (no `r_canfd` in hal_renesas
 rzv); `e1m_spi0` pads P90-P92 are not 3.3 V tolerant -- enable no rspi0 node
 on either core until the carrier parts are confirmed safe.
 
+An override naming a core the project does not declare under `cores:` is
+rejected too.  Zephyr side: an entry may carry an `m33:` block (`dt_label`,
+`alias`, `kconfig`, `pinctrl` names) plus a `pfc_port`/`pfc_pin`/`pfc_func`
+triple on every row.  `gen_zephyr_board.py` then emits that node `disabled`
+with the pinctrl group built from the rows, and only a project that assigns
+the instance to `m33` gets it `okay` + the alias + the `kconfig` lines from
+`--emit dts-overlay` / `zephyr-conf`.  No entry carries an `m33:` block yet:
+the PFC function numbers for the RSPI0 and CAN-FD pads and the SPI_B CM33
+interrupt routing are not in metadata, so an `m33` assignment of `e1m_spi0`
+fails at emit with a message saying so.  The GD32 link (SCI7) stays enabled
+on the board, not per project: moving it to the overlay would break every
+plain `west build` that does not run the emitter.
+
 ## V2N-M1 vs V2N base
 
 `E1M-V2M101` / `E1M-V2M102` / `E1M-V2M103` (the V2N-M1 family) reuses this base

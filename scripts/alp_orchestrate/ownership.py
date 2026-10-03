@@ -91,4 +91,45 @@ def validate_assignable(doc: dict, pinmux_pairs: set[tuple[str, str]],
             if k in seen:
                 msgs.append(f"assignable.{inst}: row {k} already assigned to {seen[k]}")
             seen[k] = inst
+            if "pfc_port" in r:
+                pad = r["pad"]
+                if (len(pad) != 3 or r["pfc_port"] != f"PORT_0{pad[1]}"
+                        or str(r["pfc_pin"]) != pad[2]):
+                    msgs.append(f"assignable.{inst}: row {k} pfc_port/pfc_pin do not match the pad")
+            elif "m33" in e:
+                msgs.append(f"assignable.{inst}: has an m33: block but row {k} has no pfc_* triple")
     return msgs
+
+
+def m33_overlay(doc: Optional[dict], ownership: dict[str, str]) -> tuple[list[str], list[str]]:
+    """(dts lines, Kconfig lines) enabling every assignable instance this
+    project assigned to `m33`.  The board tree (gen_zephyr_board.py) carries
+    those nodes `disabled`; only an owning project turns them on.  An
+    m33-owned instance with no `m33:` devicetree block is an error, not a
+    silent no-op."""
+    assignable = (doc or {}).get("assignable") or {}
+    dts: list[str] = []
+    kconfig: list[str] = []
+    for inst, core in sorted(ownership.items()):
+        if core != "m33":
+            continue
+        b = assignable[inst].get("m33")
+        if not b:
+            raise OrchestratorError(
+                f"board.yaml ownership: {inst} is assigned to 'm33' but core-ownership.yaml "
+                f"carries no `m33:` devicetree block for it (the CM33 node, pinctrl and PFC "
+                f"data are not in metadata yet)")
+        dts += [f"&{b['dt_label']} {{", '	status = "okay";', "};",
+                "/ {", "	aliases {", f"		{b['alias']} = &{b['dt_label']};", "	};", "};"]
+        kconfig += b.get("kconfig") or []
+    return dts, kconfig
+
+
+def project_m33_overlay(project, core_id: Optional[str]) -> tuple[list[str], list[str]]:
+    """`m33_overlay` for a loaded project, scoped to a Cortex-M33 core id
+    (`core_id` None = any M33 core of the project)."""
+    from .loader import _sku_family_dir
+    if not project.ownership or not (core_id or "m33").startswith("m33"):
+        return [], []
+    doc = load_ownership_doc(project.effective_metadata_root(), _sku_family_dir(project.sku))
+    return m33_overlay(doc, project.ownership)

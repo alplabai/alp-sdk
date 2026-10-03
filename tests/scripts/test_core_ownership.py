@@ -102,3 +102,74 @@ def test_validate_assignable_catches_bad_metadata():
     assert "'zz' is not a core" in msgs
     assert "matches no owner=renesas row" in msgs
     assert "also a FIXED" in msgs
+
+
+# --- Zephyr emit: assignable nodes disabled on the board, enabled per project ---
+
+def _meta_with_m33_uart0(tmp_path):
+    """A metadata tree whose e1m_uart0 is m33-capable (the real one is not
+    until the P51 pull-up is bench-proven), with the PFC triples of its rows."""
+    root = tmp_path / "metadata"
+    shutil.copytree(REPO / "metadata", root)
+    f = root / "e1m_modules" / "v2n" / "core-ownership.yaml"
+    doc = yaml.safe_load(f.read_text(encoding="utf-8"))
+    e = doc["assignable"]["e1m_uart0"]
+    e["candidates"] = ["a55", "m33"]
+    e["rows"] = [dict(r, pfc_port="PORT_05", pfc_pin=int(r["pad"][2]), pfc_func=1) for r in e["rows"]]
+    e["m33"] = {"dt_label": "sci0", "alias": "alp-uart9", "kconfig": ["CONFIG_SERIAL=y"],
+                "pinctrl": {"group_label": "sci0_asg_pins", "node": "sci0_asg",
+                            "child_node": "sci0-asg-pinmux"}}
+    f.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    return root
+
+
+def test_board_tree_declares_assignable_node_disabled_with_metadata_pinctrl(tmp_path):
+    from gen_zephyr_board import emit_zephyr_board
+    root = _meta_with_m33_uart0(tmp_path)
+    files = emit_zephyr_board("E1M-V2N101", "m33_sm", root)
+    pin = next(v for k, v in files.items() if k.endswith("-pinctrl.dtsi"))
+    dts = next(v for k, v in files.items() if k.endswith(".dts"))
+    assert "sci0_asg_pins: sci0_asg {" in pin
+    assert "RZV_PINMUX(PORT_05, 0, 1)" in pin and "RZV_PINMUX(PORT_05, 1, 1)" in pin
+    assert "&sci0 {\n\tpinctrl-0 = <&sci0_asg_pins>;\n\tpinctrl-names = \"default\";\n\tstatus = \"disabled\";" in dts
+
+
+def test_board_tree_unchanged_without_m33_blocks(tmp_path):
+    from gen_zephyr_board import emit_zephyr_board
+    files = emit_zephyr_board("E1M-V2N101", "m33_sm", REPO / "metadata")
+    assert "sci0_asg" not in "".join(files.values())
+
+
+def test_project_overlay_and_conf_enable_only_the_owner(tmp_path):
+    root = _meta_with_m33_uart0(tmp_path)
+    b = _project(tmp_path, {"e1m_uart0": "m33"})
+    proj = load_board_yaml(b, metadata_root=root)
+    from alp_orchestrate import _slice_alp_conf
+    from alp_orchestrate.ownership import project_m33_overlay
+    dts, kc = project_m33_overlay(proj, "m33_sm")
+    dts = " ".join(dts)
+    assert "&sci0 {" in dts and "alp-uart9 = &sci0;" in dts and kc == ["CONFIG_SERIAL=y"]
+    assert "Assignable peripherals owned by this core" in _slice_alp_conf(proj, proj.cores["m33_sm"])
+    assert project_m33_overlay(proj, "a55_cluster") == ([], [])
+    # default project: nothing emitted
+    plain = load_board_yaml(_project(tmp_path / "d"), metadata_root=root)
+    assert project_m33_overlay(plain, "m33_sm") == ([], [])
+
+
+def test_m33_assignment_without_devicetree_block_is_a_clear_error(tmp_path):
+    from alp_orchestrate.ownership import project_m33_overlay
+    proj = load_board_yaml(_project(tmp_path, {"e1m_spi0": "m33"}))
+    with pytest.raises(OrchestratorError, match="e1m_spi0.*no `m33:` devicetree block"):
+        project_m33_overlay(proj, "m33_sm")
+
+
+def test_validate_assignable_pfc_must_match_pad_and_exist_for_m33_blocks():
+    pairs = {("X", "P50")}
+    ok = {"assignable": {"i": {"default": "a55", "candidates": ["a55"],
+          "rows": [{"peripheral": "X", "pad": "P50", "pfc_port": "PORT_05", "pfc_pin": 0, "pfc_func": 1}]}}}
+    assert validate_assignable(ok, pairs, {"cortex-a55"}) == []
+    ok["assignable"]["i"]["rows"][0]["pfc_pin"] = 1
+    assert "do not match the pad" in "\n".join(validate_assignable(ok, pairs, {"cortex-a55"}))
+    m33 = {"assignable": {"i": {"default": "a55", "candidates": ["a55"], "m33": {},
+           "rows": [{"peripheral": "X", "pad": "P50"}]}}}
+    assert "no pfc_* triple" in "\n".join(validate_assignable(m33, pairs, {"cortex-a55"}))

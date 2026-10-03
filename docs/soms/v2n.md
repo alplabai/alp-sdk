@@ -199,6 +199,13 @@ accepts `m33`. UART0 stays `a55` until the P51 RX pull-up is bench-proven,
 UART1 has no CM33 node, CAN-FD has no CM33 driver, and SPI0 pads P90-P92 are
 not 3.3 V tolerant.
 
+Overrides naming a core the project does not declare under `cores:` are
+rejected. The CM33 board tree declares an assignable node `disabled` (pinctrl
+from the metadata rows) once the entry carries an `m33:` block; a project that
+assigns it to `m33` enables it through `--emit dts-overlay` / `zephyr-conf`.
+No entry has that block yet (RSPI0/CAN-FD PFC functions are not in metadata),
+so assigning `e1m_spi0` to `m33` stops at emit with an explicit error.
+
 ## Boot + identification
 
 SoM identification is EEPROM-authoritative:

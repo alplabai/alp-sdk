@@ -14,8 +14,12 @@
       "required": ["peripheral", "pad"],
       "properties": {
         "peripheral": { "type": "string", "minLength": 1 },
-        "pad": { "type": "string", "minLength": 1 }
-      }
+        "pad": { "type": "string", "minLength": 1 },
+        "pfc_port": { "type": "string", "pattern": "^PORT_[0-9A-F]{2}$", "description": "RZ/V2N PFC port of the pad, e.g. PORT_05 for P50.  Optional: absent until the PFC function is cited from the hardware manual -- no generator guesses it." },
+        "pfc_pin": { "type": "integer", "minimum": 0, "maximum": 7 },
+        "pfc_func": { "type": "integer", "minimum": 0, "maximum": 15 }
+      },
+      "dependentRequired": { "pfc_port": ["pfc_pin", "pfc_func"], "pfc_pin": ["pfc_port", "pfc_func"], "pfc_func": ["pfc_port", "pfc_pin"] }
     }
   },
   "properties": {
@@ -50,7 +54,28 @@
             "items": { "$ref": "#/$defs/core" }
           },
           "rows": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/ref" } },
-          "note": { "type": "string" }
+          "note": { "type": "string" },
+          "m33": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["dt_label", "alias", "pinctrl"],
+            "description": "Zephyr (Cortex-M33) devicetree facts for this instance; present only when the SoC dtsi already carries the node and every row has a pfc_* triple.  gen_zephyr_board.py emits the node `disabled` + the pinctrl group from this; a project that assigns the instance to m33 gets `okay` + the alias + `kconfig` from `--emit dts-overlay` / `zephyr-conf`.",
+            "properties": {
+              "dt_label": { "type": "string", "minLength": 1 },
+              "alias": { "type": "string", "pattern": "^alp-[a-z0-9-]+$" },
+              "kconfig": { "type": "array", "items": { "type": "string", "pattern": "^CONFIG_[A-Z0-9_]+=.+$" } },
+              "pinctrl": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["group_label", "node", "child_node"],
+                "properties": {
+                  "group_label": { "type": "string", "minLength": 1 },
+                  "node": { "type": "string", "minLength": 1 },
+                  "child_node": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          }
         }
       }
     },
