@@ -23,7 +23,9 @@ This gate checks both directions:
 
 "Resolved" = the fixed `core:` rows of metadata/pinmux/v2n.yaml plus every
 `assignable:` instance of core-ownership.yaml at its SoM DEFAULT core
-(a board.yaml `ownership:` override is per project and not visible here).
+(a board.yaml `ownership:` override is per project: `--project board.yaml`
+re-runs both passes with the project's resolved ownership and its generated
+Linux fragment in place of the committed default).
 A `status = "disabled"` CM33 node (an assignable peripheral a project may
 enable) is not a claim; Linux claims stay textual, see below.
 
@@ -157,29 +159,29 @@ def _cm33_claims(root: Path) -> list[tuple[str, int, str]]:
     return out
 
 
+# The committed SoM-default fragment; a project replaces it with its own.
+DEFAULT_FRAGMENT = "e1m-v2n-ownership.dtsi"
+
+
 def find_project_problems(project) -> list[str]:
-    """The project's own Linux fragment (`--emit linux-ownership-dts`) must not
-    claim a pad its RESOLVED ownership gives the CM33 (override included)."""
+    """The Linux-DT-vs-CM33 pass (and the reverse) over the SoM dtsi + carrier
+    dtsi + the project's generated fragment (`--emit linux-ownership-dts`), with
+    the project's RESOLVED ownership (a board.yaml override included)."""
     from alp_orchestrate.linux_ownership import emit_linux_ownership_dts
-    root = project.effective_metadata_root().parent
-    m33 = _pads_by_core(root, "m33", project.ownership)
-    out = []
-    for lineno, line in enumerate(emit_linux_ownership_dts(project).splitlines(), 1):
-        for match in (*_GPIO_RE.finditer(line), *_PINMUX_RE.finditer(line)):
-            pad = f"P{match.group(1)}{match.group(2)}"
-            out += [f"project Linux fragment line {lineno}: claims {pad} "
-                    f"({match.group(0)}), resolved to the CM33 ({peripheral!r}) by "
-                    f"board.yaml `ownership:` / core-ownership.yaml"
-                    for peripheral in m33.get(pad, ()) if (peripheral, pad) not in EXEMPT]
-    return out
+    return find_problems(project.effective_metadata_root().parent, project.ownership,
+                         emit_linux_ownership_dts(project))
 
 
-def find_problems(root: Path) -> list[str]:
+def find_problems(root: Path, ownership: "dict[str, str] | None" = None,
+                  project_fragment: "str | None" = None) -> list[str]:
+    """`ownership` / `project_fragment` (None = SoM default): the project's
+    resolved ownership, and its generated Linux fragment, which stands in for
+    the committed default fragment."""
     problems: list[str] = []
     pinmux = root / PINMUX
     if not pinmux.is_file():
         return [f"{PINMUX.as_posix()}: missing -- this gate cannot run without it"]
-    m33 = _pads_by_core(root, "m33")
+    m33 = _pads_by_core(root, "m33", ownership)
 
     stale = [key for key in EXEMPT if key[0] not in m33.get(key[1], ())]
     for peripheral, pad in stale:
@@ -191,18 +193,19 @@ def find_problems(root: Path) -> list[str]:
         )
 
     dt_dir = root / LINUX_DT_DIR
-    for path in sorted(dt_dir.rglob("*.dts*")):
-        if path.suffix not in (".dts", ".dtsi"):
-            continue
-        for lineno, line in enumerate(
-            path.read_text(encoding="utf-8").splitlines(), start=1
-        ):
+    sources = [(path.relative_to(root).as_posix(), path.read_text(encoding="utf-8"))
+               for path in sorted(dt_dir.rglob("*.dts*"))
+               if path.suffix in (".dts", ".dtsi")
+               and not (project_fragment is not None and path.name == DEFAULT_FRAGMENT)]
+    if project_fragment is not None:
+        sources.append(("project Linux fragment", project_fragment))
+    for rel, text in sources:
+        for lineno, line in enumerate(text.splitlines(), start=1):
             for match in (*_GPIO_RE.finditer(line), *_PINMUX_RE.finditer(line)):
                 pad = f"P{match.group(1)}{match.group(2)}"
                 for peripheral in m33.get(pad, ()):
                     if (peripheral, pad) in EXEMPT:
                         continue
-                    rel = path.relative_to(root).as_posix()
                     problems.append(
                         f"{rel}:{lineno}: Linux devicetree claims {pad} "
                         f"({match.group(0)}), which {PINMUX.as_posix()} "
@@ -216,7 +219,7 @@ def find_problems(root: Path) -> list[str]:
                         f"metadata/e1m_modules/v2n/core-ownership.yaml with "
                         f"evidence"
                     )
-    a55 = _pads_by_core(root, "a55")
+    a55 = _pads_by_core(root, "a55", ownership)
     for rel, lineno, pad in _cm33_claims(root):
         for peripheral in a55.get(pad, ()):
             problems.append(
@@ -237,8 +240,8 @@ def main() -> int:
     parser.add_argument("--root", type=Path, default=ROOT,
                         help="repository root to check (default: this repo)")
     parser.add_argument("--project", type=Path, action="append", default=[],
-                        help="also check this board.yaml's resolved ownership "
-                             "(its Linux fragment vs the CM33 pads); repeatable")
+                        help="also run the full pass with this board.yaml's resolved "
+                             "ownership and generated Linux fragment; repeatable")
     args = parser.parse_args()
 
     problems = find_problems(args.root)

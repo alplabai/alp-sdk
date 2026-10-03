@@ -15,6 +15,8 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts"))
 
 import gen_linux_ownership_dt as g  # noqa: E402
+from alp_orchestrate import linux_ownership as lo  # noqa: E402
+from alp_orchestrate.ownership import resolve_ownership  # noqa: E402
 
 DOC, SOC, LINKS = g._load(REPO)
 GEN = str(REPO / "scripts" / "gen_linux_ownership_dt.py")
@@ -36,7 +38,7 @@ def test_committed_fragment_is_in_sync():
 def test_default_fragment_enables_nothing_new():
     """The shipped default must change no Linux behaviour: no node is turned
     on, no pinctrl group is added -- only the CM33 clock hold is emitted."""
-    text, labels = g.render(DOC, SOC, LINKS)
+    text, labels = lo.render(DOC, SOC, LINKS)
     assert "GENERATED (scripts/gen_linux_ownership_dt.py" in text and "DO NOT EDIT" in text
     assert 'status = "okay"' not in text and "&pinctrl" not in text and "PORT_PINMUX" not in text
     assert labels == {"cpg"}
@@ -49,26 +51,26 @@ def test_enabled_uart0_gets_pinctrl_from_the_soc_metadata():
     soc = copy.deepcopy(SOC)
     soc["linux_dt"]["UART0"]["pinmux"] = {"UART0_TXD0": 7, "UART0_RXD0": 7}
     soc["linux_dt"]["UART0"]["label"] = "sciX"
-    text, labels = g.render(_enabled(DOC, "e1m_uart0"), soc, LINKS)
+    text, labels = lo.render(_enabled(DOC, "e1m_uart0"), soc, LINKS)
     assert "RZV2N_PORT_PINMUX(5, 0, 7)" in text and "&sciX {" in text and 'status = "okay"' in text
     assert labels == {"sciX", "cpg"}
 
 
 def test_linux_enable_needs_evidence_and_a_pfc_code_is_never_guessed():
     doc = _enabled(DOC, "e1m_uart1")
-    text, _ = g.render(doc, SOC, LINKS)
+    text, _ = lo.render(doc, SOC, LINKS)
     assert "GAP -- no PFC function code" in text and "&sci1 {" not in text
     del doc["assignable"]["e1m_uart1"]["linux_evidence"]
-    with pytest.raises(g.GenError, match="needs linux_evidence"):
-        g.render(doc, SOC, LINKS)
+    with pytest.raises(lo.GenError, match="needs linux_evidence"):
+        lo.render(doc, SOC, LINKS)
 
 
 def test_can_channel_and_m33_owner():
     soc = copy.deepcopy(SOC)
     soc["linux_dt"]["CANFD3"]["pinmux"] = {"CANFD3_CRX3": 9, "CANFD3_CTX3": 9}
-    text, labels = g.render(_enabled(DOC, "e1m_can0"), soc, LINKS)
+    text, labels = lo.render(_enabled(DOC, "e1m_can0"), soc, LINKS)
     assert "&canfd {" in text and "channel3 {" in text and "canfd/channel3" in labels
-    text, _ = g.render(_enabled(DOC, "e1m_uart0"), SOC, LINKS, {**g.resolve_ownership(DOC), "e1m_uart0": "m33"})
+    text, _ = lo.render(_enabled(DOC, "e1m_uart0"), SOC, LINKS, {**resolve_ownership(DOC), "e1m_uart0": "m33"})
     assert "owned by m33; Linux must not claim it" in text
     assert '&sci0 {\n\tstatus = "disabled";' in text
 
@@ -77,17 +79,17 @@ def test_hw_blocked_wins_over_linux_enable():
     doc = _enabled(DOC, "e1m_spi0")
     soc = copy.deepcopy(SOC)
     soc["linux_dt"]["RSPI0"]["pinmux"] = {r["peripheral"]: 1 for r in doc["assignable"]["e1m_spi0"]["rows"]}
-    text, _ = g.render(doc, soc, LINKS)
+    text, _ = lo.render(doc, soc, LINKS)
     assert "&rspi0 {" not in text and "hardware-blocked" in text
     del doc["assignable"]["e1m_spi0"]["hw_blocked"]
-    assert "&rspi0 {" in g.render(doc, soc, LINKS)[0]
+    assert "&rspi0 {" in lo.render(doc, soc, LINKS)[0]
 
 
 def test_unknown_soc_instance_is_an_error():
     doc = copy.deepcopy(DOC)
     doc["assignable"]["e1m_uart0"]["soc_instance"] = "NOPE"
-    with pytest.raises(g.GenError, match="NOPE"):
-        g.render(doc, SOC, LINKS)
+    with pytest.raises(lo.GenError, match="NOPE"):
+        lo.render(doc, SOC, LINKS)
 
 
 def test_vendor_dtsi_check_rejects_a_missing_label(tmp_path):
@@ -101,10 +103,10 @@ def test_vendor_dtsi_check_rejects_a_missing_label(tmp_path):
 def _tree(tmp_path, mutate):
     """A throw-away --root with the generator's inputs, `mutate(doc)` applied
     to core-ownership.yaml."""
-    for rel in (g.SRC, g.LINKS, g.SOC.as_posix()):
+    for rel in (lo.SRC, g.LINKS, g.SOC.as_posix()):
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(REPO / rel, tmp_path / rel)
-    f = tmp_path / g.SRC
+    f = tmp_path / lo.SRC
     doc = yaml.safe_load(f.read_text(encoding="utf-8"))
     mutate(doc)
     f.write_text(yaml.safe_dump(doc), encoding="utf-8")
@@ -133,8 +135,8 @@ def test_main_emits_the_cm33_clock_hold_for_an_m33_default(tmp_path):
 def test_m33_owned_instance_without_cpg_clocks_is_an_error():
     soc = copy.deepcopy(SOC)
     del soc["linux_dt"]["UART0"]["cpg_clocks"]
-    with pytest.raises(g.GenError, match="no cpg_clocks"):
-        g.cm33_clocks(DOC, soc, LINKS, {**g.resolve_ownership(DOC), "e1m_uart0": "m33"})
+    with pytest.raises(lo.GenError, match="no cpg_clocks"):
+        lo.cm33_clocks(DOC, soc, LINKS, {**resolve_ownership(DOC), "e1m_uart0": "m33"})
 
 
 def test_project_emit_cli_and_fragment_verification(tmp_path):
@@ -153,3 +155,41 @@ def test_project_emit_cli_and_fragment_verification(tmp_path):
     assert subprocess.run(cmd, capture_output=True, text=True).returncode == 0
     out.write_text(out.read_text(encoding="utf-8") + '&nope {\n\tstatus = "disabled";\n};\n', encoding="utf-8")
     assert subprocess.run(cmd, capture_output=True, text=True).returncode == 1
+
+
+def _project_manifest(tmp_path, override=None):
+    board = REPO / "examples/multicore/rpmsg-v2n/board.yaml"
+    b = tmp_path / "board.yaml"
+    b.write_text(board.read_text(encoding="utf-8") + (override or ""), encoding="utf-8")
+    m = tmp_path / "system-manifest.yaml"
+    r = subprocess.run([sys.executable, str(REPO / "scripts" / "alp_project.py"), "--input", str(b),
+                        "--emit", "system-manifest", "--output", str(m)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    return m
+
+
+def test_manifest_render_and_installed_byte_compare(tmp_path):
+    """The bbappend path: render from the manifest's resolved ownership, then
+    --installed byte-compares what was installed against a fresh render."""
+    m, out = _project_manifest(tmp_path), tmp_path / "o.dtsi"
+    assert subprocess.run([sys.executable, GEN, "--manifest", str(m), "--output", str(out)]).returncode == 0
+    assert out.read_text(encoding="utf-8") == (REPO / g.OUT).read_text(encoding="utf-8")
+    cmd = [sys.executable, GEN, "--manifest", str(m), "--installed", str(out)]
+    assert subprocess.run(cmd).returncode == 0
+    out.write_text(out.read_text(encoding="utf-8") + "/* hand edit */\n", encoding="utf-8")
+    assert subprocess.run(cmd, capture_output=True, text=True).returncode == 1
+
+
+def test_manifest_with_a_stale_ownership_set_fails(tmp_path):
+    m = _project_manifest(tmp_path)
+    doc = yaml.safe_load(m.read_text(encoding="utf-8"))
+    doc["ownership"].pop("e1m_can1")
+    m.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    r = subprocess.run([sys.executable, GEN, "--manifest", str(m), "--output", str(tmp_path / "o")],
+                       capture_output=True, text=True)
+    assert r.returncode == 1 and "stale manifest" in r.stderr
+
+
+def test_fragment_labels_include_channel_children():
+    text = '&canfd {\n\tstatus = "okay";\n\n\tchannel3 {\n\t\tstatus = "okay";\n\t};\n};\n&cpg {\n};\n'
+    assert g.fragment_labels(text) == {"canfd", "canfd/channel3", "cpg"}

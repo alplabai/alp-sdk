@@ -331,7 +331,7 @@
         "media": "dts",
         "schema_id": null,
         "path": "build/generated/linux-ownership.dtsi",
-        "consumer_hint": "Yocto kernel DT -- per-project A55 core-ownership fragment (ALP_LINUX_OWNERSHIP_DTSI)"
+        "consumer_hint": "Per-project A55 core-ownership fragment (inspection and check_amp_pad_claims --project; the linux-renesas bbappend renders the same fragment from the system-manifest ownership)"
       }
     },
     {

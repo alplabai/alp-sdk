@@ -24,18 +24,21 @@ from .models import OrchestratorError
 CORE_TOKEN_TYPES = {"a55": "cortex-a55", "m33": "cortex-m33"}
 
 
-def load_ownership_doc(metadata_root: Path, family_dir: Optional[str]) -> Optional[dict]:
-    """The family's core-ownership.yaml, or None.  The V2M family
-    (`v2n-m1`) shares the V2N file."""
+def ownership_doc_rel(metadata_root: Path, family_dir: Optional[str]) -> Optional[str]:
+    """Repo-relative path of the family's core-ownership.yaml (the V2M family
+    `v2n-m1` shares the V2N file), or None."""
     if not family_dir:
         return None
     for fam in (family_dir, "v2n" if family_dir.startswith("v2n") else None):
-        if fam is None:
-            continue
-        p = metadata_root / "e1m_modules" / fam / "core-ownership.yaml"
-        if p.is_file():
-            return yaml.safe_load(p.read_text(encoding="utf-8"))
+        if fam and (metadata_root / "e1m_modules" / fam / "core-ownership.yaml").is_file():
+            return f"metadata/e1m_modules/{fam}/core-ownership.yaml"
     return None
+
+
+def load_ownership_doc(metadata_root: Path, family_dir: Optional[str]) -> Optional[dict]:
+    """The family's core-ownership.yaml, or None."""
+    rel = ownership_doc_rel(metadata_root, family_dir)
+    return yaml.safe_load((metadata_root.parent / rel).read_text(encoding="utf-8")) if rel else None
 
 
 def resolve_ownership(doc: Optional[dict],

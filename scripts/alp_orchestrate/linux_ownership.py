@@ -16,8 +16,9 @@ from typing import Optional
 import yaml
 
 from .models import OrchestratorError
-from .ownership import instance_pfc, load_ownership_doc, resolve_ownership
+from .ownership import instance_pfc, load_ownership_doc, ownership_doc_rel, resolve_ownership
 
+# The V2N SoM-default source; a project passes its own family's via render(src=).
 SRC = "metadata/e1m_modules/v2n/core-ownership.yaml"
 
 
@@ -43,7 +44,8 @@ def emit_linux_ownership_dts(project) -> str:
     doc = load_ownership_doc(root, fam)
     if not doc or not doc.get("assignable"):
         return "/* No assignable core ownership for this SoM family; nothing to emit. */\n"
-    return render(doc, project.soc_spec, load_supervisor_links(root, fam), project.ownership)[0]
+    return render(doc, project.soc_spec, load_supervisor_links(root, fam), project.ownership,
+                  src=ownership_doc_rel(root, fam))[0]
 
 
 def cm33_clocks(doc: dict, soc: dict, links: dict, own: dict[str, str]) -> list[str]:
@@ -79,8 +81,10 @@ def _group(inst: str) -> tuple[str, str]:
 
 
 def render(doc: dict, soc: dict, links: dict,
-           ownership: Optional[dict[str, str]] = None) -> tuple[str, set[str]]:
-    """(dtsi text, node labels it references)."""
+           ownership: Optional[dict[str, str]] = None,
+           src: str = SRC) -> tuple[str, set[str]]:
+    """(dtsi text, node labels it references).  `src` = the family's
+    core-ownership.yaml path, quoted in the output."""
     own = ownership or resolve_ownership(doc)
     linux_dt = soc.get("linux_dt") or {}
     pins: list[str] = []
@@ -106,7 +110,7 @@ def render(doc: dict, soc: dict, links: dict,
             raise GenError(f"assignable.{inst}: linux_enable needs linux_evidence")
         if not e.get("linux_enable"):
             nodes.append(f"{head}owned by a55; left at the vendor status (no `linux_enable` in\n"
-                         f" * {SRC} -- Linux enablement is not bench-evidenced). */")
+                         f" * {src} -- Linux enablement is not bench-evidenced). */")
             continue
         rows = instance_pfc(soc, e)
         gaps = [r["peripheral"] for r, p in rows if p is None]
@@ -134,7 +138,7 @@ def render(doc: dict, soc: dict, links: dict,
     out = (
         "/*\n"
         " * GENERATED (scripts/gen_linux_ownership_dt.py, or `--emit linux-ownership-dts`\n"
-        f" * for a project) from {SRC}\n"
+        f" * for a project) from {src}\n"
         " * and the SoC JSON linux_dt block -- DO NOT EDIT BY HAND.\n"
         " *\n"
         " * Per-product core ownership on the A55 side: each assignable resource\n"

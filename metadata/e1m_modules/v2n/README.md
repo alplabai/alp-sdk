@@ -65,7 +65,8 @@ The loader rejects an unknown instance, a core outside `candidates`, a
 instance lists `m33` in `candidates` AND carries an `m33:` block (handing a
 node to `a55` also needs `linux_enable`): both trees must be able to follow.
 The Linux side of a per-project override is `alp_project.py --emit
-linux-ownership-dts` (installed through `ALP_LINUX_OWNERSHIP_DTSI`).  The
+linux-ownership-dts`; the kernel bbappend renders the same fragment from the
+system-manifest `ownership:` (`ALP_SYSTEM_MANIFEST_PATH`).  The
 resolved map is emitted as
 `ownership:` in `--emit system-manifest`.  Caveats: `e1m_uart0` stays
 `a55`-only until the P51 (UART0_RXD0) RX pull-up is bench-proven (a floating

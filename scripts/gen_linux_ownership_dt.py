@@ -49,6 +49,10 @@ Usage:
     python3 scripts/gen_linux_ownership_dt.py            # (re)write the output
     python3 scripts/gen_linux_ownership_dt.py --check    # exit 1 on drift
     python3 scripts/gen_linux_ownership_dt.py --fragment F --vendor-dtsi PATH
+    # per project, straight from the orchestrator's system-manifest.yaml (its
+    # resolved `ownership:`), as the linux-renesas bbappend does:
+    python3 scripts/gen_linux_ownership_dt.py --manifest M --output F --vendor-dtsi PATH
+    python3 scripts/gen_linux_ownership_dt.py --manifest M --installed F   # byte-compare F to a fresh render
     python3 scripts/gen_linux_ownership_dt.py --vendor-dtsi PATH
 """
 
@@ -65,9 +69,11 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 import yaml  # noqa: E402
 
-from alp_orchestrate.linux_ownership import (  # noqa: E402,F401
-    SRC, GenError, cm33_clocks, render)
-from alp_orchestrate.ownership import load_ownership_doc, resolve_ownership  # noqa: E402,F401
+from alp_orchestrate.models import OrchestratorError  # noqa: E402
+from alp_orchestrate.linux_ownership import (  # noqa: E402
+    SRC, GenError, load_supervisor_links, render)
+from alp_orchestrate.ownership import (  # noqa: E402
+    load_ownership_doc, ownership_doc_rel, resolve_ownership)
 
 OUT = Path("meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-ownership.dtsi")
 SOC = Path("metadata/socs/renesas/rzv2n/n44.json")
@@ -81,6 +87,43 @@ def _load(root: Path) -> tuple[dict, dict, dict]:
     soc = json.loads((root / SOC).read_text(encoding="utf-8"))
     links = yaml.safe_load((root / LINKS).read_text(encoding="utf-8"))["supervisor_links"]
     return doc, soc, links
+
+
+def render_manifest(root: Path, manifest: Path) -> tuple[str, set[str]]:
+    """The fragment for the project a system-manifest.yaml describes: its
+    resolved `ownership:` (validated again by resolve_ownership), the family's
+    core-ownership.yaml and the SoC JSON the manifest's `hw_info.silicon` names."""
+    from alp_orchestrate.loader import _sku_family_dir
+    m = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    hw = m.get("hw_info") or {}
+    own = m.get("ownership")
+    if own is None:
+        raise GenError(f"{manifest}: no `ownership:` -- the SoM declares no assignable resources "
+                       "or the manifest predates it; re-run `alp_project.py --emit system-manifest`")
+    meta, fam = root / "metadata", _sku_family_dir(hw.get("sku", ""))
+    doc = load_ownership_doc(meta, fam)
+    if not doc or not doc.get("assignable"):
+        raise GenError(f"{manifest}: SoM {hw.get('sku')!r} has no assignable: core ownership")
+    if set(own) != set(doc["assignable"]):
+        raise GenError(f"{manifest}: ownership instances {sorted(own)} != metadata "
+                       f"{sorted(doc['assignable'])}; stale manifest, re-run the emit")
+    soc = json.loads((meta / "socs" / (hw["silicon"].replace(":", "/") + ".json")).read_text(encoding="utf-8"))
+    return render(doc, soc, load_supervisor_links(meta, fam), resolve_ownership(doc, own),
+                  src=ownership_doc_rel(meta, fam))
+
+
+def fragment_labels(text: str) -> set[str]:
+    """Node labels a fragment references: `&label {` plus its `channelN` children
+    (as `label/channelN`, the form check_vendor verifies)."""
+    labels, cur = set(), None
+    for line in text.splitlines():
+        m = re.match(r"^&([a-z][a-z0-9_]*)\s*\{", line)
+        if m:
+            cur = m.group(1)
+            labels.add(cur)
+        elif cur and (c := re.match(r"^	(channel\d+)\s*\{", line)):
+            labels.add(f"{cur}/{c.group(1)}")
+    return labels
 
 
 def check_vendor(labels: set[str], vendor_dtsi: Path) -> list[str]:
@@ -103,13 +146,20 @@ def main() -> int:
     ap.add_argument("--fragment", type=Path,
                     help="verify a per-project fragment (alp_project.py --emit linux-ownership-dts) "
                          "against --vendor-dtsi instead of writing/checking the SoM default")
+    ap.add_argument("--manifest", type=Path,
+                    help="render from this system-manifest.yaml's resolved ownership (per project) "
+                         "instead of the SoM default; needs --output or --installed")
+    ap.add_argument("--output", type=Path, help="with --manifest: write the fragment here")
+    ap.add_argument("--installed", type=Path,
+                    help="exit 1 unless this file is byte-identical to a fresh render "
+                         "(with --manifest: the project's; else the SoM default)")
     ap.add_argument("--vendor-dtsi", type=Path, help="verify referenced labels exist in this r9a09g056.dtsi")
     args = ap.parse_args()
     if args.fragment:
         if not args.vendor_dtsi:
             print("gen_linux_ownership_dt: --fragment needs --vendor-dtsi", file=sys.stderr)
             return 1
-        labels = set(re.findall(r"^&([a-z][a-z0-9_]*)\s*\{", args.fragment.read_text(encoding="utf-8"), re.M))
+        labels = fragment_labels(args.fragment.read_text(encoding="utf-8"))
         bad = check_vendor(labels, args.vendor_dtsi)
         for m in bad:
             print(f"gen_linux_ownership_dt: {m}", file=sys.stderr)
@@ -117,9 +167,12 @@ def main() -> int:
             print(f"OK   {args.fragment.name}: every node exists in {args.vendor_dtsi.name}: {sorted(labels)}")
         return 1 if bad else 0
     try:
-        doc, soc, links = _load(args.root)
-        text, labels = render(doc, soc, links)
-    except GenError as e:
+        if args.manifest:
+            text, labels = render_manifest(args.root, args.manifest)
+        else:
+            doc, soc, links = _load(args.root)
+            text, labels = render(doc, soc, links)
+    except (GenError, OrchestratorError) as e:
         print(f"gen_linux_ownership_dt: {e}", file=sys.stderr)
         return 1
     if args.vendor_dtsi:
@@ -129,6 +182,20 @@ def main() -> int:
         if bad:
             return 1
         print(f"OK   every referenced node exists in {args.vendor_dtsi.name}: {sorted(labels)}")
+    if args.installed:
+        if not args.installed.is_file() or args.installed.read_text(encoding="utf-8") != text:
+            print(f"gen_linux_ownership_dt: {args.installed} differs from a fresh render -- stale",
+                  file=sys.stderr)
+            return 1
+        print(f"OK   {args.installed.name} is byte-identical to a fresh render")
+        return 0
+    if args.manifest:
+        if not args.output:
+            print("gen_linux_ownership_dt: --manifest needs --output or --installed", file=sys.stderr)
+            return 1
+        args.output.write_text(text, encoding="utf-8", newline="\n")
+        print(f"wrote {args.output}")
+        return 0
     out = args.root / OUT
     if args.check:
         if not out.is_file() or out.read_text(encoding="utf-8") != text:
