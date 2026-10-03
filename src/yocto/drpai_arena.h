@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Process-wide placement of DRP-AI models inside the reserved working-memory
- * arena, plus the lock that serialises DRP-AI work.  Split out of
+ * arena, the lock that serialises DRP-AI work, and the one-process-per-board
+ * file lock.  Split out of
  * inference_drpai.cpp -- like drpai_deploy_shapes.h -- because none of it
  * needs MeraDrpRuntimeWrapper.h or the driver; tests/yocto/
  * inference_drpai_regression.cpp exercises it through inference_drpai.cpp
@@ -28,6 +29,19 @@
  * A hole below a still-open higher range is not reused.  The tail of the
  * arena is kept free for DRP-AI pre-processing objects, which PreRuntime
  * places at the END of the region.
+ *
+ * One process per board: the placement above is per process, and two
+ * processes would each load at the arena base and corrupt each other.  The
+ * first DRP-AI handle in a process therefore takes an exclusive, non-blocking
+ * flock() on a lock file and keeps it until the last DRP-AI handle in the
+ * process closes; another process finds it held and its open() fails with
+ * ALP_ERR_BUSY.  Handles inside one process share the one lock.  The file is
+ * /run/alp/drpai.lock (directory created 0755 if missing); /run is tmpfs on
+ * the target image and root-writable, which is where runtime lock files
+ * belong and is cleared on every boot, so a stale file cannot matter (flock
+ * state dies with the process anyway).  Only when /run/alp cannot be created
+ * or opened (not writable, e.g. an unprivileged host run) does it fall back
+ * to /tmp/alp-drpai.lock.
  */
 #ifndef ALP_SDK_YOCTO_DRPAI_ARENA_H
 #define ALP_SDK_YOCTO_DRPAI_ARENA_H
@@ -36,6 +50,12 @@
 #include <cstdint>
 #include <mutex>
 #include <vector>
+
+#include <cerrno>
+#include <fcntl.h>
+#include <sys/file.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace alp_drpai
 {
@@ -47,6 +67,11 @@ constexpr uint64_t kArenaAlign = 16ull << 20;
  *  ponytail: an estimate -- no compiled bundle is available to measure it
  *  (alp-sdk#2236); retune once PreRuntime's real footprint is known. */
 constexpr uint64_t kArenaPreprocReserve = 32ull << 20;
+
+/** Lock file locations, in order of preference (see the file comment). */
+constexpr const char *kLockDir          = "/run/alp";
+constexpr const char *kLockPathPrimary  = "/run/alp/drpai.lock";
+constexpr const char *kLockPathFallback = "/tmp/alp-drpai.lock";
 
 /** A model's [start, end) in the arena.  start == end means "uses none"
  *  (CPU-only model); releasing it is a no-op. */
@@ -117,6 +142,44 @@ class Arena
 		}
 	}
 
+	/** Take (or share, if this process already holds it) the one-process-per-
+	 *  board lock.  Caller holds mutex().  Returns 0, EWOULDBLOCK when another
+	 *  process holds it, or another errno.  Every success must be paired with
+	 *  one lock_release_locked() / lock_release(). */
+	int lock_acquire_locked()
+	{
+		if (lock_holders_ == 0) {
+			int fd = open_lock_file_();
+			if (fd < 0) {
+				return errno;
+			}
+			if (::flock(fd, LOCK_EX | LOCK_NB) != 0) {
+				const int err = errno;
+				::close(fd);
+				return err;
+			}
+			lock_fd_ = fd;
+		}
+		++lock_holders_;
+		return 0;
+	}
+
+	/** Drop one hold; the file lock goes with the last.  Caller holds mutex(). */
+	void lock_release_locked()
+	{
+		if (lock_holders_ != 0 && --lock_holders_ == 0) {
+			::close(lock_fd_); /* closing the fd drops the flock */
+			lock_fd_ = -1;
+		}
+	}
+
+	/** lock_release_locked() for a caller that does not hold mutex(). */
+	void lock_release()
+	{
+		std::lock_guard<std::mutex> lk(mu_);
+		lock_release_locked();
+	}
+
 	/** Test hook: ranges currently held. */
 	size_t live()
 	{
@@ -125,6 +188,17 @@ class Arena
 	}
 
   private:
+	/** Open the lock file: /run/alp/drpai.lock, else /tmp/alp-drpai.lock. */
+	static int open_lock_file_()
+	{
+		::mkdir(kLockDir, 0755); /* EEXIST and EACCES both fall through to open() */
+		int fd = ::open(kLockPathPrimary, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+		if (fd < 0) {
+			fd = ::open(kLockPathFallback, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+		}
+		return fd;
+	}
+
 	uint64_t cursor_() const
 	{
 		uint64_t c = base_;
@@ -146,6 +220,8 @@ class Arena
 	uint64_t           base_ = 0;
 	uint64_t           size_ = 0;
 	std::vector<Range> live_;
+	int                lock_fd_      = -1;
+	unsigned           lock_holders_ = 0;
 };
 
 /** The one DRP-AI arena of this process. */

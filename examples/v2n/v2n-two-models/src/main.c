@@ -42,7 +42,8 @@
  *   (one process per NPU, see tests/hil/v2m103-x-evk/): the DRP-AI arena
  *   is managed per process, so a second process that also opened DRP-AI
  *   would load its model at the same address and corrupt the first.
- *   Keep DRP-AI to ONE process per board.
+ *   DRP-AI is ONE process per board: the SDK holds a lock file, and a second
+ *   process opening DRP-AI gets ALP_ERR_BUSY.
  *
  *   Handles are opened on the MAIN thread, one after the other, before any
  *   worker starts.  Opening loads a model into the NPU (the DRP-AI backend

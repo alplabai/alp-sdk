@@ -45,16 +45,22 @@
  *   ctest --test-dir build -R alp_test_inference_drpai_regression
  */
 
+#include <cerrno>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <thread>
 #include <vector>
 
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
+
 extern "C" {
 #include "alp/inference.h"
 }
 
+#include "drpai_arena.h"
 #include "drpai_test_seam.h"
 #include "inference_handle_internal.h"
 #include "test_assert.h"
@@ -277,6 +283,66 @@ void test_area_change_with_live_handle_is_refused()
 	drpai_test::g_device_present = false;
 }
 
+/* The lock file the SDK used: the first of its two locations that exists.
+ * Returns an fd on it (or -1). */
+int open_lock_file()
+{
+	for (const char *path : { alp_drpai::kLockPathPrimary, alp_drpai::kLockPathFallback }) {
+		int fd = ::open(path, O_RDWR | O_CLOEXEC);
+		if (fd >= 0) {
+			return fd;
+		}
+	}
+	return -1;
+}
+
+/* True when some other open file description holds the lock (what a second
+ * process would see): a non-blocking flock() on our own fd fails EWOULDBLOCK. */
+bool lock_is_held_by_others()
+{
+	int fd = open_lock_file();
+	if (fd < 0) {
+		return false;
+	}
+	const bool held = ::flock(fd, LOCK_EX | LOCK_NB) != 0 && errno == EWOULDBLOCK;
+	::close(fd); /* also drops the lock if we got it */
+	return held;
+}
+
+/* Test 2i: one DRP-AI process per board.  The first handle takes a file
+ * lock that stays until the LAST handle in the process closes; handles in
+ * the same process share it; a lock held elsewhere (a second process -- a
+ * flock on another file description behaves the same as a fork()ed child)
+ * makes open() return ALP_ERR_BUSY and leaves nothing behind. */
+void test_one_drpai_process_per_board()
+{
+	fake_device(16 * kMiB);
+	alp_inference_config_t cfg = tar_cfg();
+	struct alp_inference   a = {}, b = {}, other = {};
+
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&a, &cfg), ALP_OK);
+	ALP_ASSERT_TRUE(lock_is_held_by_others());
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&b, &cfg), ALP_OK); /* same process: fine */
+	alp_inference_drpai_close(&a);
+	ALP_ASSERT_TRUE(lock_is_held_by_others()); /* b still open */
+	alp_inference_drpai_close(&b);
+	ALP_ASSERT_TRUE(!lock_is_held_by_others()); /* last close released it */
+
+	/* "Another process" holds the board. */
+	int fd = open_lock_file();
+	ALP_ASSERT_TRUE(fd >= 0);
+	ALP_ASSERT_EQ_INT(::flock(fd, LOCK_EX | LOCK_NB), 0);
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&other, &cfg), ALP_ERR_BUSY);
+	ALP_ASSERT_NULL(other.be_state);
+	::close(fd);
+
+	/* The refused open took nothing: once the other holder is gone it works. */
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&other, &cfg), ALP_OK);
+	alp_inference_drpai_close(&other);
+	ALP_ASSERT_TRUE(!lock_is_held_by_others());
+	drpai_test::g_device_present = false;
+}
+
 /* Test 2d: invoke() from several threads on several handles never has two
  * Run()s in flight at once (the fake sleeps inside Run() to widen the
  * window; without the process-wide lock the high-water mark reaches >1). */
@@ -408,6 +474,7 @@ int main(void)
 	test_area_change_with_live_handle_is_refused();
 	test_concurrent_invokes_are_serialised();
 	test_open_and_close_wait_for_a_running_job();
+	test_one_drpai_process_per_board();
 	test_num_inputs_outputs_zero_when_not_open();
 	test_get_input_output_not_ready_when_not_open();
 	test_invoke_not_ready_when_not_open();

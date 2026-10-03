@@ -138,6 +138,10 @@
  * into the RZ/V sysroot as ${includedir}/linux/drpai.h from meta-rz-drpai's
  * drpai_1.4.0 recipe, so the ALP_SDK_USE_DRPAI_V2N=ON build must carry a
  * `drpai` DEPENDS (recipe-side; not this file's to add). */
+/* Before <linux/drpai.h>: the test fake of that header redefines open()/ioctl()
+ * for the code that follows it, and drpai_arena.h opens its own lock file. */
+#include "drpai_arena.h"
+
 #include <pthread.h>
 #include <signal.h>
 #include <time.h>
@@ -148,7 +152,6 @@
 
 #include "MeraDrpRuntimeWrapper.h"
 
-#include "drpai_arena.h"
 #include "drpai_deploy_shapes.h"
 
 extern "C" {
@@ -444,14 +447,24 @@ extern "C" alp_status_t alp_inference_drpai_open(struct alp_inference         *h
 	std::unique_lock<std::mutex> arena_lk(arena.mutex());
 	std::unique_lock<std::mutex> run_lk(alp_drpai::run_mutex());
 
+	/* One DRP-AI process per board: take the cross-process file lock before
+	 * touching the device.  Another process holding it -> ALP_ERR_BUSY.
+	 * Handles in this process share the single lock (drpai_arena.h). */
+	const int lk = arena.lock_acquire_locked();
+	if (lk != 0) {
+		return (lk == EWOULDBLOCK || lk == EAGAIN) ? ALP_ERR_BUSY : ALP_ERR_IO;
+	}
+
 	uint64_t     mem_base = 0, mem_size = 0;
 	alp_status_t mem = _drpai_mem_start(mem_base, mem_size);
 	if (mem != ALP_OK) {
+		arena.lock_release_locked();
 		return mem;
 	}
 
 	auto *st = new (std::nothrow) DrpaiState();
 	if (st == nullptr) {
+		arena.lock_release_locked();
 		return ALP_ERR_NOMEM;
 	}
 
@@ -461,6 +474,7 @@ extern "C" alp_status_t alp_inference_drpai_open(struct alp_inference         *h
 	auto fail = [&](alp_status_t rc) {
 		const std::string dir = st->staged_dir;
 		delete st; /* tears down the runtime before we remove the dir */
+		arena.lock_release_locked();
 		run_lk.unlock();
 		arena_lk.unlock();
 		_rm_rf(dir);
@@ -722,6 +736,7 @@ extern "C" void alp_inference_drpai_close(struct alp_inference *h_)
 	}
 	/* Not nested inside the run lock: arena -> run is the only order. */
 	alp_drpai::arena().release(range);
+	alp_drpai::arena().lock_release(); /* the process lock goes with the last handle */
 	_rm_rf(dir);
 	h->be_state = nullptr;
 }

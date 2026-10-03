@@ -2,8 +2,9 @@
 #
 # E1M-V2M103: TWO processes, one per NPU -- `v2n-two-models ... solo-drpai`
 # and `v2n-two-models ... solo-dx` started together.  The DX-M1 process
-# goes through `dxrtd`; only one process may use the DRP-AI3 (two would
-# load at the same arena base).
+# goes through `dxrtd`.  Only one process may use the DRP-AI3 (the SDK
+# enforces it with a file lock; a second DRP-AI open is ALP_ERR_BUSY), so the
+# second process uses only the DX-M1 by design.
 #
 # NOT BENCH-VERIFIED.  Nothing in this spec has run on hardware: the DRP-AI3
 # and DX-M1 backends have never run together.  Needs an image with BOTH NPU
@@ -26,7 +27,9 @@
 schema_version: 1
 name: v2m103-two-npu-two-process
 description: |
-  Two processes at once, one on DRP-AI3 and one on the DX-M1.
+  Two processes at once, one on DRP-AI3 and one on the DX-M1.  By design the
+  second process uses ONLY the DX-M1: DRP-AI is one process per board (the SDK
+  holds a flock on /run/alp/drpai.lock; a second DRP-AI open is ALP_ERR_BUSY).
 
 flash_method: ssh-run
 pending_hardware_support: supply-current-sampling

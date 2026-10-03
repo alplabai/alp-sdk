@@ -522,8 +522,17 @@ driver has no queue (a second `DRPAI_START` while a job runs returns
   query is not a cheap fix (it needs a second open of `/dev/drpai0`,
   which takes the driver semaphore for up to 1000 ms and the
   shared-memory lock), so the SDK makes none; sanity-check the outputs.
-- **Two processes are not coordinated.** Both would load at the arena
-  base and corrupt each other. Use one process per board for DRP-AI.
+- **DRP-AI is one process per board.** The arena placement above is per
+  process, so two processes would both load at the arena base and corrupt
+  each other. The first DRP-AI handle in a process therefore takes an
+  exclusive, non-blocking `flock()` on `/run/alp/drpai.lock` (directory
+  created `0755` if missing; `/run` is tmpfs and cleared at boot) and keeps
+  it until the last DRP-AI handle in that process closes. A second process
+  gets `ALP_ERR_BUSY` from `alp_inference_open()`. Several handles inside
+  one process stay allowed. Only if `/run/alp` cannot be created or opened
+  (not writable, e.g. an unprivileged host run) the lock file is
+  `/tmp/alp-drpai.lock` instead. The DX-M1 has no such limit: a second
+  process uses only the DX-M1, through `dxrtd`.
 
 ### One model per NPU (V2M)
 
