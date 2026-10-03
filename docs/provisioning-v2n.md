@@ -259,7 +259,7 @@ are not yet confirmed by a run of this code on a bench.
 | `clkgen_verify` | the on-SoM 5L35023B (`BRD_I2C`, `0x69`) OTP image against U-Boot's fixup |
 | `functional_test` | every interface the tool can reach, on the unit as shipped: one generated script, one remote invocation, one `test_ft_<check>` value per check; a failing or unreadable check fails the step unless it is listed informational, and only `test_functional: pass` ships. See "Functional test coverage" |
 | `hil_smoke` | optional `tests/hil/run_smoke.py` |
-| `record` | merge auto keys into `<serial>.unit.yaml` (manual keys never touched), append `<serial>.md`, logs, xlsx, ship check |
+| `record` | merge auto keys into `<serial>.unit.yaml` (manual keys never touched), append `<serial>.md`, logs, xlsx, ship check (incl. `xspi_size_bytes` >= the preset's `on_module.nor_flash_class.min_size_bytes`: the xSPI NOR is multi-source, any approved part passes, none smaller than the smallest approved) |
 
 Every Linux step finds the eMMC by its sysfs type, never by an index: SD and
 eMMC numbering is not stable across kernels and boot sources.

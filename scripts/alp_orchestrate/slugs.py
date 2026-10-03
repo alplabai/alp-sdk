@@ -58,6 +58,7 @@ _ON_MODULE_NON_CHIP_FIELDS: frozenset[str] = frozenset({
     # them as CHIP_<NAME> trips the Zephyr build with an undefined-symbol
     # warning (no CONFIG_ALP_SDK_CHIP_XSPI / SD0 declaration exists).
     "nor_flash",
+    "nor_flash_class",  # sub-block: multi-source flash class (size/width/voltage), no chip slug
     "emmc",
 })
 

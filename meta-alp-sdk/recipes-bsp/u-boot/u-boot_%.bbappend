@@ -38,16 +38,16 @@ SRC_URI:append:rzv2n-family = " \
     file://0001-rzv2n-dev-EEPROM-gated-DEEPX-DX-M1-PCIe-bring-up.patch \
     file://0002-rzv2n-dev-ALP-E1M-production-boot.patch \
     file://no-dirty-version.cfg \
-    file://gigadevice-xspi.cfg \
+    file://xspi-multisource.cfg \
 "
 
-# gigadevice-xspi.cfg: enables CONFIG_SPI_FLASH_GIGADEVICE. Production E1M
-# V2N-family modules carry a GigaDevice LX-family xSPI NOR on some SKUs;
-# its JEDEC IDs are already upstream in spi-nor-ids.c, only the vendor
-# select was off. KNOWN LIMIT: this U-Boot's Renesas xSPI driver fails
-# reads that cross the 16 MiB boundary (bench-observed "Read: ERROR 1"
-# at 0xFFFF00+0x200) -- keep boot content below 16 MiB. Writes above
-# 16 MiB are untested. See the fragment for detail.
+# xspi-multisource.cfg: the on-module xSPI NOR is multi-source (several
+# approved vendors), so the vendor-select symbols for GigaDevice, Macronix,
+# Winbond, ISSI and Micron are all on; U-Boot matches the fitted part by
+# JEDEC id. Generic SFDP probing is NOT on: it requires BAR off, and this
+# U-Boot's Renesas xSPI driver only encodes 3-byte addresses (>16 MiB goes
+# through BAR). Same driver also fails reads crossing 16 MiB -- keep boot
+# content below 16 MiB. See the fragment for detail.
 
 # no-dirty-version.cfg: the vendor defconfig's CONFIG_LOCALVERSION_AUTO
 # appends `git describe --dirty` -- always "-dirty" here because the

@@ -140,6 +140,37 @@
           "$ref": "#/$defs/chip_ref",
           "description": "SoC controller / peripheral name that reaches the on-module NOR flash (routing annotation, not a chip slug -- e.g. `xspi`)."
         },
+        "nor_flash_class": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["interface", "data_width", "voltage_v", "min_size_bytes", "jedec_detect_required"],
+          "description": "The on-module NOR flash described as a CLASS, not a part: the slot is multi-source (several approved MPNs from different vendors), so nothing in the SDK may assume one MPN, vendor or size. The approved-MPN list lives in the private BOM, never here. Software identifies the fitted part at runtime (JEDEC id + SFDP) and checks it against this class.",
+          "properties": {
+            "interface": {
+              "type": "string",
+              "enum": ["xspi"],
+              "description": "SoC controller the flash is wired to (same vocabulary as `nor_flash:`)."
+            },
+            "data_width": {
+              "type": "integer",
+              "enum": [1, 2, 4, 8],
+              "description": "Data lines actually wired to the SoM connector-side of the flash (SIO0..SIO<n-1>). A part with a wider native bus is driven at this width."
+            },
+            "voltage_v": {
+              "type": "number",
+              "description": "Flash supply / I/O voltage in volts. Only parts of this voltage class are approved."
+            },
+            "min_size_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Capacity of the SMALLEST approved part, in bytes. The partition layout (DT, flash writer, provisioning) must fit inside this; a unit whose flash reports less is not shippable."
+            },
+            "jedec_detect_required": {
+              "type": "boolean",
+              "description": "true: firmware must detect the part at runtime via JEDEC id / SFDP (no part-specific compatible, no hard-coded size)."
+            }
+          }
+        },
         "nor_flash_driver_status": {
           "$ref": "#/$defs/driver_status",
           "description": "alp-sdk driver maturity for the on-module NOR flash reached via `nor_flash:`. `nor_flash:` names the SoC controller, not a chip slug, so there is no `chips/<part>/` driver to tier -- `none` is the honest (not aspirational) value per ADR 0017 (#1169)."

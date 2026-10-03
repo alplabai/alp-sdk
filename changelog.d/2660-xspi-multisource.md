@@ -1,0 +1,7 @@
+### Changed — the on-module xSPI NOR is a multi-source class, not one part (#2660)
+
+- **The SoM presets describe the flash as a class.** `on_module.nor_flash_class` (schema `som-preset-v2`) on all six V2N/V2M presets: xSPI, 4 data lines, 1.8 V, `min_size_bytes` 33554432 (32 MiB, assumed smallest approved part), JEDEC/SFDP detect required. The approved-MPN list stays in the private BOM.
+- **Linux DT names no part and fits the smallest part.** The SoM `&xspi` node is plain `jedec,spi-nor`; the layout is `bl2` 0x0, `fip` 0x60000 to 16 MiB, new `user` partition 16 MiB to 32 MiB (`min_size_bytes`), so one table works on every approved part. Hand-written; generating it from `nor_flash_class` is a follow-up.
+- **U-Boot enables every plausible vendor family.** `gigadevice-xspi.cfg` becomes `xspi-multisource.cfg` (GigaDevice, Macronix, Winbond, ISSI, Micron). `CONFIG_SPI_FLASH_SFDP_SUPPORT` is deliberately off: it depends on `!SPI_FLASH_BAR`, and the Renesas xSPI driver encodes only 3-byte addresses.
+- **Provisioning reads the real size and vendor.** The census takes `xspi_size_bytes` from the part's SFDP density (not the partition sum) and records `xspi_manufacturer` from the JEDEC id; the ship check blocks a unit whose size is below the preset's `min_size_bytes` or unreadable.
+- **Docs:** `docs/soms/v2n.md` xSPI section; the boot-ROM requirements a part must meet are listed in `docs/rzv2n-m33-secure-boot.md`.

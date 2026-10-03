@@ -430,7 +430,7 @@ def _lock_ready(tmp_path, board, disposition="ship", done=True):
     (ctx.unit_dir / f"{SERIAL}.manifest.bin").write_bytes(bytes(board.array))
     (ctx.unit_dir / f"{SERIAL}.secure-page.staged.bin").write_bytes(bytes(board.page))
     (ctx.unit_dir / f"{SERIAL}.unit.yaml").write_text(
-        f"eeprom_unique_id: 00 11\ndisposition: {disposition}\ntest_functional: pass\n"
+        f"eeprom_unique_id: 00 11\nxspi_size_bytes: 33554432\ndisposition: {disposition}\ntest_functional: pass\n"
         "dxm1_fw_version: v\ndxm1_fw_md5: m\ndxm1_fw_uart_boot_md5: u\n", encoding="utf-8")
     if done:
         ctx.state = {"steps": {s: {"status": "done"} for s in ("secure_page", "cold_boot_test")}}

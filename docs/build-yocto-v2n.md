@@ -267,13 +267,16 @@ When off (the default) the build is unchanged. When on, the kernel deploys
 
 ## Notes
 
-- **GigaDevice xSPI NOR (some SKUs).** Some production E1M V2N-family
-  modules carry a GigaDevice LX-family octal xSPI NOR in the "NOR flash
-  (variant per SKU)" slot — see [`soms/v2n.md`](soms/v2n.md).
-  The production bootloader build enables it via
-  `meta-alp-sdk/recipes-bsp/u-boot/u-boot/gigadevice-xspi.cfg`
-  (`CONFIG_SPI_FLASH_GIGADEVICE`); U-Boot's `sf probe` then detects it
-  and reports the correct capacity (bench-proven). **Known
+- **Multi-source xSPI NOR.** The on-module xSPI NOR is fitted from
+  several approved vendors (a class, not a part: see
+  [`soms/v2n.md`](soms/v2n.md#on-module-xspi-nor)). The production
+  bootloader build enables the GigaDevice, Macronix, Winbond, ISSI and
+  Micron vendor selects via
+  `meta-alp-sdk/recipes-bsp/u-boot/u-boot/xspi-multisource.cfg`; U-Boot's
+  `sf probe` matches the fitted part by JEDEC id (bench-proven on a
+  GigaDevice part). Generic SFDP probing stays off: it needs
+  `CONFIG_SPI_FLASH_BAR` off, and this U-Boot's Renesas xSPI driver only
+  encodes 3-byte addresses. **Known
   limit:** this U-Boot's Renesas xSPI driver fails reads that cross the
   16 MiB boundary (bench-observed `Read: ERROR 1` at `0xFFFF00+0x200`)
   — boot content must stay below 16 MiB. Writes above 16 MiB are

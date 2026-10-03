@@ -660,6 +660,19 @@ def test_dxm1_fw_version_is_none_without_dxrt_cli():
 CID = "d6" + "01" + "00" + "454d4d433031" + "10" + "12345678" + "9a" + "01"
 
 
+def sfdp_image(size_bytes: int) -> bytes:
+    """Minimal JESD216 image: header + BFPT header (ptr 0x30) + BFPT DWORD 1..2 (density)."""
+    raw = bytearray(128)
+    raw[0:8] = b"SFDP" + bytes([6, 1, 0, 0xFF])
+    raw[8:16] = bytes([0x00, 6, 1, 16, 0x30, 0, 0, 0xFF])
+    raw[0x34:0x38] = (size_bytes * 8 - 1).to_bytes(4, "little")
+    return bytes(raw)
+
+
+def _od(raw: bytes) -> str:
+    return "".join(" " + " ".join(f"{b:02x}" for b in raw[i:i + 16]) + "\n" for i in range(0, len(raw), 16))
+
+
 def _census_responses(array: bytes = b"\xff" * 128):
     pmic_regs = {0x10: 0x88, 0x00: 0x03, 0x01: 0x00, 0x06: 0x00, 0x07: 0x03, 0x08: 0x00,
                  0x09: 0x00, 0x0A: 0x46, 0x0B: 0x46, 0x0C: 0x46, 0x0D: 0x46, 0x19: 0x92,
@@ -690,7 +703,7 @@ def _census_responses(array: bytes = b"\xff" * 128):
         (r"spi-nor/jedec_id", "aabbcc\n"),
         (r"pci/devices/0000:01:00\.0/device", "0x0000\n"),
         (r"^dxrt-cli -s$", DXRT_CLI_S.read_text(encoding="utf-8")),
-        (r"mtd\*; do", "393216\n66715648\n"),
+        (r"spi-nor/sfdp", _od(sfdp_image(32 << 20))),
         (r"if=/dev/mtd0 ", "33" * 16 + "  -\n"), (r"if=/dev/mtd1 bs=\d+ skip=0 ", "44" * 16 + "  -\n"),
         (r"if=/dev/mtd1 bs=\d+ skip=(416|1703936) ", "55" * 16 + "  -\n"),
         (r"w2@0x58 0x02 0x00 r16", _hx(bytes.fromhex(UNIQUE_ID))),
@@ -733,7 +746,8 @@ def test_census_collects_ledger_keys_read_only():
     assert (facts["emmc_ext_csd_177"], facts["emmc_ext_csd_179"]) == ("0x02", "0x08")
     assert facts["emmc_boot1_bl2_md5"] == "11" * 16 and facts["emmc_boot1_fip_md5"] == "22" * 16
     assert (facts["dxm1_pcie_device"], facts["dxm1_fw_version"]) == ("0x0000", "2.4.0")
-    assert facts["xspi_jedec_id"] == "0xaabbcc" and facts["xspi_size_bytes"] == str(393216 + 66715648)
+    assert facts["xspi_jedec_id"] == "0xaabbcc" and facts["xspi_size_bytes"] == str(32 << 20)
+    assert facts["xspi_manufacturer"] == "unknown (0xaa)"
     assert (facts["xspi_bl2_md5"], facts["xspi_fip_md5"], facts["xspi_cm33_md5"]) == \
         ("33" * 16, "44" * 16, "55" * 16)
     assert facts["act88760_gpio_regs"] == "0x10=0x88"
@@ -908,3 +922,30 @@ def test_mtd_write_refuses_an_unaligned_offset_and_one_past_the_end(tmp_path):
     with pytest.raises(ValueError, match="does not fit"):
         lt.mtd_write_verify(t, 1, img, offset=lt.CM33_REGION_OFFSET)
     assert not any("flash_erase" in c for c in fake.commands)
+
+
+@pytest.mark.parametrize("size", [32 << 20, 64 << 20, 128 << 20])
+def test_sfdp_density_is_the_parts_own_size(size):
+    assert lt.sfdp_density_bytes(sfdp_image(size)) == size
+
+
+def test_sfdp_density_exponent_form_and_garbage():
+    raw = bytearray(sfdp_image(32 << 20))
+    raw[0x34:0x38] = (0x80000000 | 31).to_bytes(4, "little")     # bit31 set: density = 2**31 bits = 256 MiB
+    assert lt.sfdp_density_bytes(bytes(raw)) == 256 << 20
+    assert lt.sfdp_density_bytes(b"") is None and lt.sfdp_density_bytes(b"\xff" * 128) is None
+    assert lt.sfdp_density_bytes(sfdp_image(32 << 20)[:0x30]) is None
+
+
+@pytest.mark.parametrize("jedec, name", [("0xc2813a", "Macronix"), ("0xc8681b", "GigaDevice"), ("0xef8019", "Winbond"),
+                                         ("0x9d5b19", "ISSI"), ("0x20bb19", "Micron (ST)"), ("0x123456", "unknown (0x12)")])
+def test_jedec_manufacturer_names_the_vendor(jedec, name):
+    assert lt.jedec_manufacturer(jedec) == name
+
+
+def test_census_xspi_size_comes_from_sfdp_not_the_partitions():
+    t, _ = target([(r"spi-nor/jedec_id", "c8681bffc868\n"), (r"spi-nor/sfdp", _od(sfdp_image(64 << 20))),
+                   *_census_responses()])
+    facts, _ = lt.census(t, {"eeprom": 0, "pmic": 8, "brd": 8})
+    assert facts["xspi_size_bytes"] == str(64 << 20) and facts["xspi_manufacturer"] == "GigaDevice"
+    assert facts["xspi_jedec_id"] == "0xc8681bffc868"

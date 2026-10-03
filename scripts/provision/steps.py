@@ -339,6 +339,11 @@ def expected_family(preset: dict) -> str:
     return "v2n-m1" if str(preset.get("family", "")).endswith("-deepx") else "v2n"
 
 
+def xspi_min_bytes(preset: dict) -> int:
+    """on_module.nor_flash_class.min_size_bytes (smallest approved xSPI NOR), 0 if undeclared."""
+    return int(((preset.get("on_module") or {}).get("nor_flash_class") or {}).get("min_size_bytes", 0))
+
+
 def tier_gate(ctx: Ctx, uboot_mib: int | None = None) -> tuple[gates.GateResult, dict[str, str]]:
     """DDR tier triangle (gates.tier_triangle) over the bundle's BL2 images."""
     m = ctx.tier_markers
@@ -2315,7 +2320,8 @@ class Record(Step):
             ctx.mutate("regenerate shipped-units.xlsx", regen)
         after = {**before, **{k: str(v) for k, v in auto.items() if catalogue.get(k, {}).get("mode") != "manual"},
                  **{k: v for k, v in defaults.items() if k not in before}}
-        blockers = ledger_out.ship_check(after, catalogue, expected_family(ctx.preset))
+        blockers = ledger_out.ship_check(after, catalogue, expected_family(ctx.preset),
+                                       xspi_min_bytes(ctx.preset))
         detail = f"{len(changed) if changed is not None else len(would)} key(s) " \
                  f"{'updated' if ctx.execute else 'would change'}; ship check: " + \
                  ("SHIPPABLE" if not blockers else "blocked: " + "; ".join(blockers))
@@ -2357,7 +2363,8 @@ class SecurePageLock(Step):
             bad.append(f"secure page differs from {staged.name}")
         unit = ledger_out.read_unit_yaml(ctx.unit_dir / f"{ctx.serial}.unit.yaml")
         catalogue = ledger_out.load_catalogue(ctx.ledger_root / "schema" / "v2n.keys.yaml")
-        bad += [f"ship check: {b}" for b in ledger_out.ship_check(unit, catalogue, expected_family(ctx.preset))]
+        bad += [f"ship check: {b}" for b in ledger_out.ship_check(unit, catalogue, expected_family(ctx.preset),
+                                                         xspi_min_bytes(ctx.preset))]
         return bad
 
     def probe(self, ctx):

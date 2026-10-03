@@ -508,7 +508,7 @@ def _status(a) -> int:
     import yaml
     preset = yaml.safe_load((REPO / "metadata" / "e1m_modules" / f"{a.sku}.yaml").read_text(encoding="utf-8"))
     blockers = ledger_out.ship_check(ledger_out.read_unit_yaml(d / f"{a.serial}.unit.yaml"), cat,
-                                     steps.expected_family(preset))
+                                     steps.expected_family(preset), steps.xspi_min_bytes(preset))
     failed = [n for n, v in state.get("steps", {}).items() if v.get("status") == "failed"]
     print("ship check: " + ("SHIPPABLE" if not blockers and not failed else "blocked"))
     for b in blockers:

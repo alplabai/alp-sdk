@@ -977,6 +977,35 @@ def net_carrier(t, name: str) -> bool:
     return r.rc == 0 and r.stdout.strip() == "1"
 
 
+# JEDEC JEP106 manufacturer code (first byte of the SPI-NOR JEDEC id) -> name, for the
+# vendors a multi-source xSPI NOR slot plausibly carries. The approved-MPN list itself
+# lives in the private BOM; this only names the vendor of whatever was fitted.
+JEDEC_MANUFACTURERS = {
+    0x01: "Infineon (Spansion/Cypress)", 0x20: "Micron (ST)", 0x2C: "Micron", 0x34: "Infineon (Cypress)",
+    0x0B: "XTX", 0x1F: "Adesto (Renesas)", 0x5E: "Zbit", 0x68: "Boya", 0x85: "Puya", 0x8C: "ESMT",
+    0x9D: "ISSI", 0xA1: "Fudan Micro", 0xC2: "Macronix", 0xC8: "GigaDevice", 0xEF: "Winbond",
+}
+
+
+def jedec_manufacturer(jedec_id: str) -> str:
+    """Vendor name for a `0x<mfr><type><cap>...` JEDEC id; `unknown (0x<mfr>)` if not in the table."""
+    mfr = int(jedec_id[2:4], 16)
+    return JEDEC_MANUFACTURERS.get(mfr, f"unknown ({mfr:#04x})")
+
+
+def sfdp_density_bytes(raw: bytes) -> int | None:
+    """Flash capacity in bytes from the JESD216 Basic Flash Parameter Table (DWORD 2), or None
+    when `raw` (the first bytes of the SFDP image) is not a readable SFDP."""
+    if len(raw) < 16 or raw[:4] != b"SFDP":
+        return None
+    ptr = int.from_bytes(raw[12:15], "little")      # parameter header 0 = the BFPT
+    if raw[8] != 0x00 or raw[15] != 0xFF or len(raw) < ptr + 8:
+        return None
+    dw = int.from_bytes(raw[ptr + 4:ptr + 8], "little")
+    bits = 1 << (dw & 0x7FFFFFFF) if dw >> 31 else dw + 1
+    return bits // 8 if bits % 8 == 0 and 8 <= bits < 1 << 48 else None
+
+
 def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None = None,
            emmc: str | None = None, dxm1_present: bool = True) -> tuple[dict[str, str], list[str]]:
     """Read-only. Returns (auto ledger keys, notes on what could not be read).
@@ -1041,12 +1070,19 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
             facts["xspi_jedec_id"] = "0x" + jedec
         else:
             notes.append("xspi_jedec_id: no spi-nor/jedec_id in sysfs")
-        # ponytail: sum of NOR partitions = flash size only when the partitions
-        # tile the whole part; read the SFDP density if they ever stop doing so.
-        out = t.run('for m in /sys/class/mtd/mtd*; do [ "$(cat $m/type)" = nor ] && cat $m/size; done; true').stdout
-        total = sum(int(x) for x in out.split())
-        if total:
-            facts["xspi_size_bytes"] = str(total)
+        if re.fullmatch(r"0x[0-9a-f]{6,}", facts.get("xspi_jedec_id", "")):
+            facts["xspi_manufacturer"] = jedec_manufacturer(facts["xspi_jedec_id"])
+        # The flash is multi-source: its size is the part's own SFDP density, never a
+        # literal and never the partition sum (the layout fits the smallest approved
+        # part, so on a bigger one the partitions cover only a prefix).
+        sfdp = t.run("f=$(ls /sys/bus/spi/devices/*/spi-nor/sfdp 2>/dev/null | head -n1); "
+                     '[ -n "$f" ] && od -An -v -tx1 -N 128 "$f" 2>/dev/null; true',
+                     check=False).stdout
+        flash_bytes = sfdp_density_bytes(bytes.fromhex("".join(re.findall(r"[0-9a-f]{2}", sfdp))))
+        if flash_bytes:
+            facts["xspi_size_bytes"] = str(flash_bytes)
+        else:
+            notes.append("xspi_size_bytes: no readable SFDP density in sysfs")
         for key, mtd, off, role in (("xspi_bl2_md5", 0, 0, "bl2"), ("xspi_fip_md5", 1, 0, "fip"),
                                     ("xspi_cm33_md5", 1, CM33_REGION_OFFSET, "cm33")):
             if role in sizes:

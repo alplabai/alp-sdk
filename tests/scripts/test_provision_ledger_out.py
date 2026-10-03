@@ -130,3 +130,15 @@ def test_ship_check_treats_a_bare_unread_as_missing_too():
     for bad in ("unread", " unread ", "unread (x)"):
         assert lo.ship_check({**ok, "eeprom_unique_id": bad}, CAT) == ["missing eeprom_unique_id"]
     assert lo.ship_check({**ok, "uboot_version": "unreadable-but-a-value"}, CAT) == []
+
+
+def test_ship_check_xspi_size_against_the_presets_min_size():
+    """The xSPI NOR is multi-source: any size >= the preset's min_size_bytes ships, smaller or unread blocks."""
+    ok = {"eeprom_unique_id": "01 02", "uboot_version": "2024.07", "disposition": "ship", "test_functional": "pass"}
+    min_b = 32 << 20
+    assert lo.ship_check({**ok, "xspi_size_bytes": str(min_b)}, CAT, xspi_min_bytes=min_b) == []
+    assert lo.ship_check({**ok, "xspi_size_bytes": str(64 << 20)}, CAT, xspi_min_bytes=min_b) == []
+    assert any("< nor_flash_class.min_size_bytes" in r for r in lo.ship_check({**ok, "xspi_size_bytes": str(16 << 20)}, CAT, xspi_min_bytes=min_b))
+    assert any("unreadable" in r for r in lo.ship_check({**ok, "xspi_size_bytes": "unread (rc=1)"}, CAT, xspi_min_bytes=min_b))
+    assert any("unreadable" in r for r in lo.ship_check(ok, CAT, xspi_min_bytes=min_b))
+    assert lo.ship_check(ok, CAT) == []                      # no class declared: no size leg

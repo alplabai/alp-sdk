@@ -34,11 +34,48 @@ All three SKUs share the same silicon + PCB.  Pick by memory budget.
 | Ethernet PHY 0          | Realtek RTL8211FDI-VD-CG   | RGMII + MDIO     | [`<alp/chips/rtl8211fdi.h>`](../../include/alp/chips/rtl8211fdi.h) |
 | Ethernet PHY 1          | Realtek RTL8211FDI-VD-CG   | RGMII + MDIO     | (same driver, second instance)          |
 | eMMC                    | (variant per SKU)          | Renesas SD0      | Zephyr SD subsystem                     |
-| NOR flash               | (variant per SKU)          | Renesas xSPI0    | Zephyr flash subsystem                  |
+| NOR flash               | multi-source class, see [On-module xSPI NOR](#on-module-xspi-nor) | Renesas xSPI0    | Zephyr flash subsystem                  |
 
 Full chip catalogue + manifest URLs:
 [`metadata/chips/`](../../metadata/chips/).
 Per-SKU populated parts: [`metadata/e1m_modules/E1M-V2N10{1,2,3}.yaml`](../../metadata/e1m_modules/).
+
+## On-module xSPI NOR {#on-module-xspi-nor}
+
+The xSPI NOR flash is a **multi-source** slot: several approved parts from
+different vendors are fitted across production, so nothing in the SDK
+assumes one part number, one vendor or one size. The SoM presets describe
+it as a class (`on_module.nor_flash_class` in
+[`metadata/e1m_modules/E1M-V2N10x.yaml`](../../metadata/e1m_modules/) and
+`E1M-V2M10x.yaml`); the approved-vendor list lives in the private BOM.
+
+| Class field | Value | Meaning |
+|---|---|---|
+| `interface` | `xspi` | Renesas xSPI0, chip select 0 |
+| `data_width` | `4` | `XSPI0_IO0..IO3` wired (quad); a wider part is driven at x4 |
+| `voltage_v` | `1.8` | flash supply and I/O |
+| `min_size_bytes` | `33554432` (32 MiB) | capacity of the **smallest** approved part |
+| `jedec_detect_required` | `true` | the part is identified at run time, never assumed |
+
+- **Detect at run time.** The Linux DT node is plain `jedec,spi-nor` (no part
+  property); the kernel and U-Boot identify the fitted part by JEDEC id.
+  U-Boot has the GigaDevice, Macronix, Winbond, ISSI and Micron vendor
+  selects on (`xspi-multisource.cfg`). The provisioning census records the
+  JEDEC id, the vendor name derived from it (`xspi_manufacturer`) and the
+  size from the part's own SFDP density (`xspi_size_bytes`), never from the
+  partition table.
+- **The layout fits the smallest approved part.** `bl2` (mtd0) at `0x0`,
+  `fip` (mtd1) at `0x60000` to 16 MiB (the CM33 image sits inside it at
+  mtd1 + `0x1A0000`, flash `0x200000`), and `user` (mtd2) from 16 MiB to
+  `min_size_bytes`. On a bigger part the space past `user` is simply unused.
+  The partition table is hand-written for now; generating it from
+  `nor_flash_class` is a follow-up.
+- **Ship rule.** `provision_som.py status` and the `record` step block a unit
+  whose `xspi_size_bytes` is below the preset's `min_size_bytes` or could not
+  be read.
+- **Boot ROM.** Every approved part must also boot the RZ/V2N boot ROM
+  (boot mode 2); qualification is a BOM-owner task, see the requirements in
+  [`docs/rzv2n-m33-secure-boot.md`](../rzv2n-m33-secure-boot.md#xspi-boot-rom-requirements).
 
 ## Real-time clock {#real-time-clock}
 

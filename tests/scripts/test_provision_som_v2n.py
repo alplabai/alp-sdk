@@ -166,7 +166,7 @@ def _shippable_unit(tmp_path, failed_step):
     (d / f"{SERIAL}.state.json").write_text(json.dumps(
         {"schema": 1, "tool_rev": steps.tool_rev(), "steps": st}), encoding="utf-8")
     (d / f"{SERIAL}.unit.yaml").write_text(
-        "eeprom_unique_id: 00 11\ndisposition: ship\ntest_functional: pass\n"
+        "eeprom_unique_id: 00 11\nxspi_size_bytes: 33554432\ndisposition: ship\ntest_functional: pass\n"
         "dxm1_fw_version: v\ndxm1_fw_md5: m\ndxm1_fw_uart_boot_md5: u\n", encoding="utf-8")
     return _run("status", "--sku", SKU, "--serial", SERIAL, "--ledger-root", ledger, "--require-shippable")
 

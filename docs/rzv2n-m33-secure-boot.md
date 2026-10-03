@@ -21,6 +21,36 @@ The v6.30 TF-A has a built-in CM33 boot path, gated by `PLAT_M33_BOOT_SUPPORT`:
 So the M33 FW is a raw image at xSPI `0x200000`, loaded to `0x08000000`, and the
 CM33 boots at `0x08003000`.
 
+## xSPI boot ROM requirements {#xspi-boot-rom-requirements}
+
+The xSPI NOR is multi-source (`nor_flash_class`, [`soms/v2n.md`](soms/v2n.md#on-module-xspi-nor)),
+so every approved part must satisfy the RZ/V2N boot ROM, not only U-Boot and
+Linux. What the RZ/V2N Group User's Manual (R01UH1071EJ0120 Rev.1.20, 1.9)
+requires of the boot source, for the BOM owner to qualify parts against:
+
+- **Boot mode 2** = `MD_BOOT[1:0]` = High:Low; xSPI channel 0, chip select 0
+  (`XSPI0_CS0N`), single, quad or octa flash. `MD_BOOT2` selects the boot
+  device I/O voltage: 1 = 1.8 V, 0 = 3.3 V (this SoM: 1.8 V).
+- **Wiring for quad:** `XSPI0_IO0..IO3` carry data; the unused boot-time
+  pins (`XSPI0_CKN`, `XSPI0_DS`, `XSPI0_IO4..IO7`) are pulled up/down or open
+  as in Figure 1.9-7.
+- **Loader layout:** a 512-byte *loader program size block* at flash offset
+  `0` (external address `0_2000_0000h`): loader size (4 bytes, little endian),
+  load address, destination address, signature `0xAA55` in the last two bytes;
+  the loader follows at the load address. The ROM copies the size block to
+  SRAM `0_0810_1E00h`, then the loader to its destination and jumps to it.
+  All of this is in the first 16 MiB, so the ROM path needs no 4-byte
+  addressing.
+- **NOT specified in the manual:** the read opcode, address width, dummy
+  cycles / latency, clock rate, quad-enable (QE) handling, SFDP use, or any
+  per-vendor part list. The manual only says startup "is accompanied by
+  handshaking through the SPI protocol" and that the ROM program controls the
+  pins. A part's BL2-read compatibility (opcode set, dummy cycles, QE bit
+  default, 1.8 V I/O) must therefore be taken from the Renesas boot-ROM /
+  TF-A xSPI driver specification and proven by booting a unit with that part
+  (BL2 loads from xSPI before U-Boot runs). **The BOM owner must confirm this
+  per approved MPN; nothing in alp-sdk can.**
+
 ## The two-line TF-A enablement — `meta-alp-sdk/recipes-bsp/trusted-firmware-a/trusted-firmware-a/0001-rzv2n-boot-the-CM33-from-xSPI.patch`
 Applied by `trusted-firmware-a_%.bbappend` on every `rzv2n-family` MACHINE, so
 `bitbake firmware-pack` produces a BL2 that boots the CM33 (#2354).

@@ -549,7 +549,7 @@ def _shippable_ledger(tmp_path):
     (root / "schema" / "v2n.keys.yaml").write_text(yaml.safe_dump(cat), encoding="utf-8")
     unit = root / SKU / f"{SERIAL}.unit.yaml"
     unit.parent.mkdir(parents=True)
-    unit.write_text("disposition: ship\n", encoding="utf-8")
+    unit.write_text("disposition: ship\nxspi_size_bytes: 33554432\n", encoding="utf-8")
     return root, unit
 
 

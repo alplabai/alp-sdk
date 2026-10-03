@@ -30,6 +30,15 @@ on_module:
   # *_driver_status fields below rather than left to this comment (#1169).
   nor_flash:               xspi                # on-module via Renesas xSPI0; no alp-sdk driver yet
   nor_flash_driver_status: none
+  # Multi-source slot: described as a class, not a part. The approved-MPN
+  # list lives in the private BOM. min_size_bytes = 32 MiB (smallest part
+  # known to be approved/populated); wired data width = SIO0..SIO3 (quad).
+  nor_flash_class:
+    interface:             xspi
+    data_width:            4
+    voltage_v:             1.8
+    min_size_bytes:        33554432            # 32 MiB
+    jedec_detect_required: true
   emmc:                    sd0                 # on-module via Renesas SD0; no alp-sdk driver yet
   emmc_driver_status:      none
   npu:                  deepx_dxm1

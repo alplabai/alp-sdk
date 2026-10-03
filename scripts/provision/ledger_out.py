@@ -127,9 +127,14 @@ def regen_xlsx(ledger_root: Path, tool: Path, output: Path) -> subprocess.Comple
         env={**os.environ, "PYTHONIOENCODING": "utf-8"})
 
 
-def ship_check(unit: dict[str, str], catalogue: dict[str, dict], family: str = "") -> list[str]:
+def ship_check(unit: dict[str, str], catalogue: dict[str, dict], family: str = "",
+               xspi_min_bytes: int = 0) -> list[str]:
     """Why this unit cannot ship; [] = shippable. Same rules as the private
-    ledger_xlsx.py Ship check (minus its staged-manifest leg)."""
+    ledger_xlsx.py Ship check (minus its staged-manifest leg).
+
+    `xspi_min_bytes` = the SoM preset's on_module.nor_flash_class.min_size_bytes (the xSPI
+    NOR is multi-source: any approved part ships, none smaller than the smallest approved).
+    0 = the preset declares no class, no size leg."""
     reasons = []
     for key, spec in catalogue.items():
         # ship_required_for: manifest families (e.g. v2n-m1, whose DX-M1 must be flashed)
@@ -156,6 +161,12 @@ def ship_check(unit: dict[str, str], catalogue: dict[str, dict], family: str = "
         reasons.append("missing test_functional (functional_test has not run on this unit)")
     elif not functional.startswith("pass"):
         reasons.append(f"test_functional: {functional}")
+    if xspi_min_bytes:
+        size = str(unit.get("xspi_size_bytes", "")).strip()
+        if not size.isdigit():
+            reasons.append(f"xspi_size_bytes unreadable ({size or 'unset'}): cannot verify >= {xspi_min_bytes}")
+        elif int(size) < xspi_min_bytes:
+            reasons.append(f"xspi_size_bytes {size} < nor_flash_class.min_size_bytes {xspi_min_bytes}")
     disposition = str(unit.get("disposition", "")).strip()
     if disposition != "ship":
         reasons.append(f"disposition is {disposition or 'unset'}, not ship")
