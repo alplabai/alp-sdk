@@ -1043,3 +1043,34 @@ ZTEST(alp_rpc_zephyr_backend, test_error_after_closing_does_not_notify)
 
 	zassert_equal(atomic_get(&g_notify_calls), 0, "error after closing must not notify");
 }
+
+/* ------------------------------------------------------------------ */
+/* 6. #2586: a poisoned channel refuses calls until reopen.            */
+/* ------------------------------------------------------------------ */
+
+/* z_call() sets call_poisoned when a call times out with its request on the
+ * wire (its late reply would otherwise answer the next call).  The timeout
+ * branch itself needs a live ipc_service endpoint this test does not have;
+ * this pins the entry gate.  An oversized request makes the unpoisoned
+ * path fail in frame_build() (ALP_ERR_NOMEM, before any send), so a
+ * NOT_READY can only come from the gate. */
+static uint8_t g_2586_big_req[CONFIG_ALP_SDK_RPC_TX_FRAME_MAX];
+
+ZTEST(alp_rpc_zephyr_backend, test_2586_poisoned_channel_refuses_call)
+{
+	struct rpc_be           be;
+	alp_rpc_backend_state_t st = { 0 };
+
+	init_test_channel(&be, "poisoned");
+	st.be_data = &be;
+
+	be.call_poisoned = true;
+	zassert_equal(z_call(&st, "echo", g_2586_big_req, sizeof(g_2586_big_req), NULL, NULL, 10),
+	              ALP_ERR_NOT_READY);
+	zassert_false(be.call_pending);
+
+	be.call_poisoned = false;
+	zassert_equal(z_call(&st, "echo", g_2586_big_req, sizeof(g_2586_big_req), NULL, NULL, 10),
+	              ALP_ERR_NOMEM);
+	zassert_false(be.call_pending);
+}
