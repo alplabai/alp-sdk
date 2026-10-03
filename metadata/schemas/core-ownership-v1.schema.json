@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/core-ownership-v1.schema.json",
+  "title": "SoM-family AMP core ownership (core-ownership.yaml)",
+  "description": "Alp Lab policy for which core drives a SoM-family pad. `core_ownership` = FIXED facts (cited rows keyed by (peripheral, pad)); `assignable` = per-product choices keyed by E1M instance (a project overrides the default with board.yaml `ownership:`); `a55_only_resources` = resources with no pinmux row. Row references are validated against metadata/pinmux by scripts/validate_metadata.py.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["core_ownership"],
+  "$defs": {
+    "core": { "type": "string", "enum": ["a55", "m33"] },
+    "ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["peripheral", "pad"],
+      "properties": {
+        "peripheral": { "type": "string", "minLength": 1 },
+        "pad": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "properties": {
+    "core_ownership": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["peripheral", "pad", "core", "evidence"],
+        "properties": {
+          "peripheral": { "type": "string", "minLength": 1 },
+          "pad": { "type": "string", "minLength": 1 },
+          "core": { "$ref": "#/$defs/core" },
+          "evidence": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "assignable": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["default", "candidates", "rows"],
+        "properties": {
+          "default": { "$ref": "#/$defs/core" },
+          "candidates": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "description": "Only cores with a real backend today.",
+            "items": { "$ref": "#/$defs/core" }
+          },
+          "rows": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/ref" } },
+          "note": { "type": "string" }
+        }
+      }
+    },
+    "a55_only_resources": { "type": "array", "items": { "type": "object" } }
+  }
+}

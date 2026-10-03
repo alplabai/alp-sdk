@@ -347,17 +347,68 @@ core_ownership:
 # Decisions still open (renesas-audit plan section 7) -- deliberately NO row
 # until the maintainer picks ONE owner, so nothing here is attributed by
 # guess:
-#   - P50/P51 (UART0_TXD0/UART0_RXD0) and P52/P53 (UART1): the CM33 pinctrl
-#     keeps sci0_pins on P50/P51 (sci0 disabled) while an A55 &sci0 is
-#     proposed on the same pads (audit IO-M3 / IO-04 / CM33-01). Only one
-#     core's tree may carry the pin group.
-#   - P90-P94 (RSPI0_*): A55 spidev or the CM33 next-rev GD32 link (audit
-#     IO-05 / CM33-13). P90-P92 are not 3.3 V tolerant -- never enable an
-#     rspi0 node meanwhile.
-#   - P84-P87 (CANFD2/CANFD3): audit CM33-07 / CAN-1 asks for confirmation
-#     that CAN-FD is A55-owned; the Linux tree does not claim them yet.
 #   - DRP1 / OpenCVA: whether to enable it at all is open (audit NPU-03).
 #
+# Resources whose owner is a PER-PRODUCT choice are NOT `core_ownership`
+# facts (a default must never be frozen as fact) -- they live in
+# `assignable:` below.  A project overrides the default with a top-level
+# `ownership: {<instance>: <core>}` in board.yaml; the override is rejected
+# unless the core is in `candidates`.  Rows are REFERENCES to the
+# (peripheral, pad) pairs of metadata/pinmux/v2n.yaml, never copied pins,
+# and a pair listed here must NOT also be a `core_ownership` row.
+# Core tokens use the same vocabulary as `core_ownership`: "a55" = Linux on
+# the Cortex-A55 cluster, "m33" = Zephyr on the Cortex-M33 system manager
+# (board.yaml core id m33_sm).  `candidates` lists only cores with a real
+# backend TODAY; widen it only when the backend lands.
+assignable:
+  e1m_uart0:
+    default: "a55"
+    # "m33" is added once the P51 (UART0_RXD0) RX pull-up is bench-proven:
+    # an unpulled RXD floats into the sci0 receive-error ISR (NVIC 114) and
+    # the CM33 takes a Zephyr fatal (see the sci0 note in the generated
+    # alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33.dts).
+    candidates: ["a55"]
+    rows:
+      - { peripheral: "UART0_RXD0", pad: "P51" }
+      - { peripheral: "UART0_TXD0", pad: "P50" }
+    note: "Only one core's tree may carry the sci0 pin group on P50/P51 (audit IO-M3 / IO-04 / CM33-01)."
+  e1m_uart1:
+    default: "a55"
+    # The CM33 board tree has no sci1 node or pinctrl group for P52/P53, so
+    # there is no CM33 backend for this instance today.
+    candidates: ["a55"]
+    rows:
+      - { peripheral: "UART1_RXD1", pad: "P53" }
+      - { peripheral: "UART1_TXD1", pad: "P52" }
+    note: "Audit IO-M3 / CM33-01."
+  e1m_spi0:
+    default: "a55"
+    # m33: zephyr/drivers/spi/spi_renesas_rz_spi_b.c + hal_renesas rzv r_spi_b.
+    candidates: ["a55", "m33"]
+    rows:
+      - { peripheral: "RSPI0_MISOA", pad: "P91" }
+      - { peripheral: "RSPI0_MOSIA", pad: "P90" }
+      - { peripheral: "RSPI0_RSPCKA", pad: "P92" }
+      - { peripheral: "RSPI0_SSLA0", pad: "P93" }
+      - { peripheral: "RSPI0_SSLA1", pad: "P94" }
+    note: "P90-P92 are NOT 3.3 V tolerant (R01UH1071EJ0120 4.2.3.1.1 Note 1): never enable an rspi0 node on either core until the carrier parts on E1M SPI0 are confirmed not to drive 3.3 V (audit IO-05 / IO-M2 / CM33-13)."
+  e1m_can0:
+    default: "a55"
+    # a55 only: hal_renesas rzv has no r_canfd module, so the CM33 cannot
+    # drive CAN-FD.  E1M CAN0 = CANFD3 (B21/B22).
+    candidates: ["a55"]
+    rows:
+      - { peripheral: "CANFD3_CRX3", pad: "P87" }
+      - { peripheral: "CANFD3_CTX3", pad: "P86" }
+    note: "Audit CM33-07 / CAN-1; the Linux tree does not claim these pads yet."
+  e1m_can1:
+    default: "a55"
+    candidates: ["a55"]
+    rows:
+      - { peripheral: "CANFD2_CRX2", pad: "P85" }
+      - { peripheral: "CANFD2_CTX2", pad: "P84" }
+    note: "E1M CAN1 = CANFD2 (B24/B25). Same backend limit as e1m_can0."
+
 # Resources with no row in v2n/renesas-peripheral-map.tsv (so they cannot be
 # a `core_ownership` entry above, which must match an emitted row) are
 # recorded under `a55_only_resources` instead.  Nothing consumes this list

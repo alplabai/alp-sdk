@@ -35,6 +35,7 @@ from . import sdk_compat
 from .models import (BoardProject, IpcEntry, OrchestratorError,
                      SdkRevisionNotBuildable, SdkRevisionUnknown,
                      SdkRevisionUnsupported, Slice, StorageEntry)
+from .ownership import load_ownership_doc, resolve_ownership
 from .partition import _is_ospi_key_unassembled, _known_flash_devices
 from .paths import BOARD_SCHEMA, METADATA_ROOT, REPO
 from .topology import _default_os_from_core_type
@@ -1365,6 +1366,10 @@ def load_board_yaml(path: Path, *,
     security_block = _validate_cross_fields(
         project, som_preset, sku, storage_entries, metadata_root)
 
+    ownership = resolve_ownership(
+        load_ownership_doc(metadata_root, _sku_family_dir(sku)),
+        project.get("ownership"))
+
     out = BoardProject(
         sku=sku,
         hw_rev=hw_rev or som_preset.get("default_hw_rev"),
@@ -1383,6 +1388,7 @@ def load_board_yaml(path: Path, *,
         ota=dict(project.get("ota") or {}),
         storage=storage_entries,
         security=security_block,
+        ownership=ownership,
         raw=project,
         metadata_root=metadata_root,
     )

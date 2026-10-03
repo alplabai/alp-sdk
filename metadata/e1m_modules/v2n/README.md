@@ -13,7 +13,7 @@ modules without the DEEPX DX-M1 NPU).
 | `gd32-io-mcu-map.tsv`             | `peripheral \t gd32_pad`                   |
 | `gd32-io-mcu-map.csv`             | `row, peripheral, gd32_pad`                |
 | `hw-revisions.yaml`               | Per-rev SDK-version compatibility window   |
-| `core-ownership.yaml`             | `(peripheral, pad) -> core`, cited pads; `a55_only_resources` for blocks with no TSV row |
+| `core-ownership.yaml`             | `core_ownership:` FIXED `(peripheral, pad) -> core` facts, cited; `assignable:` per-product choices by E1M instance; `a55_only_resources` for blocks with no TSV row |
 | `supervisor-links.yaml`           | `supervisor-links-v1`                      |
 
 Not in `gd32-io-mcu-map.*` (they are not bridge-controllable GPIOs): E1M IO26 and
@@ -45,6 +45,29 @@ running Zephyr).  `core-ownership.yaml` attributes a small,
 silicon-verified subset of Renesas-owned pads to whichever core
 actually drives them; see
 [issue #1157](https://github.com/alplabai/alp-sdk/issues/1157).
+
+**Fixed vs assignable.**  `core_ownership:` holds only FIXED facts (the
+GD32 SPI link is always the CM33, RIIC8/BRD_I2C always the A55, ...).  A
+resource whose owner is a per-product choice is never a fixed row: it sits
+under `assignable:`, keyed by E1M instance (`e1m_uart0`, `e1m_uart1`,
+`e1m_spi0`, `e1m_can0`, `e1m_can1`), with a `default` (Linux/`a55`),
+`candidates` (only cores that have a real backend today) and `rows` that
+reference existing `(peripheral, pad)` pairs of `metadata/pinmux/v2n.yaml`.
+A project overrides a default in `board.yaml`:
+
+```yaml
+ownership:
+  e1m_spi0: m33        # core token: a55 | m33 (board.yaml core id m33_sm)
+```
+
+The loader rejects an unknown instance or a core outside `candidates`,
+naming the instance and the allowed cores; the resolved map is emitted as
+`ownership:` in `--emit system-manifest`.  Caveats: `e1m_uart0` stays
+`a55`-only until the P51 (UART0_RXD0) RX pull-up is bench-proven (a floating
+RXD triggers the sci0 receive-error ISR on the CM33); `e1m_uart1` has no CM33
+sci1 node; both CAN-FD instances are `a55`-only (no `r_canfd` in hal_renesas
+rzv); `e1m_spi0` pads P90-P92 are not 3.3 V tolerant -- enable no rspi0 node
+on either core until the carrier parts are confirmed safe.
 
 ## V2N-M1 vs V2N base
 

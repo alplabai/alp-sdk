@@ -180,6 +180,25 @@ RIIC8 master (see above).  Boot-mode ownership is recorded in
 blocked there.
 Bench tool: [`examples/v2n/v2n-pmic-inspect/`](../../examples/v2n/v2n-pmic-inspect/).
 
+## Core ownership: fixed vs assignable {#core-ownership}
+
+`metadata/e1m_modules/v2n/core-ownership.yaml` separates two kinds of fact.
+**Fixed** rows (`core_ownership:`) never change per product (GD32 SPI on the
+CM33, RIIC8/BRD_I2C on the A55). **Assignable** resources (`assignable:`) are
+a per-product choice with a Linux/A55 default: `e1m_uart0`, `e1m_uart1`,
+`e1m_spi0`, `e1m_can0`, `e1m_can1`. Override one in `board.yaml`:
+
+```yaml
+ownership:
+  e1m_spi0: m33   # allowed: the entry's `candidates`
+```
+
+A core outside `candidates` is rejected at load time, and the resolved map
+appears as `ownership:` in `--emit system-manifest`. Today only `e1m_spi0`
+accepts `m33`. UART0 stays `a55` until the P51 RX pull-up is bench-proven,
+UART1 has no CM33 node, CAN-FD has no CM33 driver, and SPI0 pads P90-P92 are
+not 3.3 V tolerant.
+
 ## Boot + identification
 
 SoM identification is EEPROM-authoritative:

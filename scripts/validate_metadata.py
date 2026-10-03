@@ -115,6 +115,8 @@ LINUX_KERNEL_DRIVERS = REPO / "metadata" / "os" / "linux-kernel-drivers.yaml"
 # unregistered schema is silently unvalidated -- so this constant pair is
 # load-bearing, not decorative.
 SUPERVISOR_LINKS_SCHEMA = REPO / "metadata" / "schemas" / "supervisor-links-v1.schema.json"
+CORE_OWNERSHIP_SCHEMA = REPO / "metadata" / "schemas" / "core-ownership-v1.schema.json"
+CORE_OWNERSHIP_DATA = REPO / "metadata" / "e1m_modules" / "v2n" / "core-ownership.yaml"
 SUPERVISOR_LINKS_DATA = REPO / "metadata" / "e1m_modules" / "v2n" / "supervisor-links.yaml"
 # SoM-family on-module power trees (runtime PMIC guard policy), projected
 # into include/alp/chips/<family>_power_tree.h by scripts/gen_power_tree.py.
@@ -2118,6 +2120,31 @@ def _check_supervisor_links_cross_refs(supervisor_links_files) -> list:
     return failures
 
 
+def _check_core_ownership(path: Path) -> list:
+    """core-ownership.yaml `assignable:` cross-checks the schema cannot
+    express: rows exist in metadata/pinmux/v2n.yaml, are not also FIXED
+    rows, default is a candidate, candidates are cores of the V2N SoC."""
+    from alp_orchestrate.ownership import validate_assignable
+    rel = path.relative_to(REPO).as_posix()
+    doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+    pm = strict_yaml_load((REPO / "metadata" / "pinmux" / "v2n.yaml").read_text(encoding="utf-8"),
+                          source=REPO / "metadata" / "pinmux" / "v2n.yaml")
+    pairs = {(r["silicon_peripheral"], r["silicon_pad"]) for r in _dict_entries(pm.get("pads"))
+             if r.get("owner") == "renesas"}
+    preset = strict_yaml_load((SOM_PRESETS / "E1M-V2N101.yaml").read_text(encoding="utf-8"),
+                              source=SOM_PRESETS / "E1M-V2N101.yaml")
+    soc = json.loads(resolve_soc_path(str(preset["silicon"]), SOM_PRESETS.parent).read_text(encoding="utf-8"))
+    types = {c.get("type") for c in _dict_entries(soc.get("cores"))}
+    msgs = validate_assignable(doc, pairs, types)
+    if msgs:
+        print(f"FAIL {rel}")
+        for m in msgs:
+            print(f"  · {m}")
+        return [(rel, msgs)]
+    print(f"OK   {rel}  (assignable cross-checked against metadata/pinmux/v2n.yaml + the V2N SoC cores)")
+    return []
+
+
 def _check_block_realizations(block_files, chip_files) -> list:
     """Semantic cross-checks for block `realizations[].parts[].chip`, `maps`, and `passives[].net`.
 
@@ -3527,6 +3554,20 @@ def main() -> int:
             # address) -- neither is expressible in the schema alone.
             supervisor_links_failures += _check_supervisor_links_cross_refs(supervisor_links_files)
 
+    # AMP core-ownership policy (fixed rows + assignable per-product choices).
+    core_ownership_failures: list = []
+    if CORE_OWNERSHIP_SCHEMA.is_file() and CORE_OWNERSHIP_DATA.is_file():
+        print()
+        co_validator = jsonschema.Draft202012Validator(
+            json.loads(CORE_OWNERSHIP_SCHEMA.read_text(encoding="utf-8")))
+        core_ownership_failures = _check_files(
+            "YAML", [CORE_OWNERSHIP_DATA], co_validator,
+            lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
+            "schemaVersion",
+        )
+        if not core_ownership_failures:
+            core_ownership_failures = _check_core_ownership(CORE_OWNERSHIP_DATA)
+
     # SoM-family power trees (YAML) against power-tree-v1, then the
     # cross-file checks the schema can't express: every rail resolves to a
     # chip rail/channel, addresses match the chip manifests AND every SoM
@@ -3745,6 +3786,7 @@ def main() -> int:
                       + len(peripheral_kconfig_failures)
                       + len(tier_a_library_ci_failures)
                       + len(supervisor_links_failures)
+                      + len(core_ownership_failures)
                       + len(power_tree_failures))
     print(f"{len(soc_files)} SoC file(s) + {len(som_files)} SoM preset(s) + "
           f"{len(hwrev_files)} hw-revisions file(s) + "
