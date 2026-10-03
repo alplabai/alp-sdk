@@ -305,7 +305,9 @@ e1m_routes:
 # RTC VBACKUP element this carrier fits. The SoM RV-3028 trickle charger must match: none/primary -> off;
 # supercap -> trickle_ohms (3000|5000|9000|15000), and the carrier dtsi sets the same
 # `&rv3028 { trickle-resistor-ohms = <...>; }`. NEVER trickle-charge a primary cell.
-rtc_backup: {element: none}
+# E1M-X EVK V2: rechargeable supercap on VBACKUP behind a jumper (maintainer, 2026-10-03).
+# 15 kOhm is provisional until the supercap charge current is measured on the bench.
+rtc_backup: {element: supercap, trickle_ohms: 15000}
 
 i2c_devices_bus: E1M_X_I2C0    # = *_I2C_BUS_SENSORS; see check_i2c_address_uniqueness.py
 i2c_devices:

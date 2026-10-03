@@ -919,3 +919,14 @@
 		line-name = "audio_clkb_oe";
 	};
 };
+
+/*
+ * RTC backup: this carrier fits a rechargeable supercap on the SoM's
+ * VBACKUP pin (behind a jumper), so it enables the RV-3028 trickle
+ * charger.  Must equal metadata/boards/e1m-x-evk.yaml rtc_backup.trickle_ohms.
+ * 15 kOhm is provisional until the charge current is measured.  Never set
+ * this on a carrier that fits a primary (non-rechargeable) cell.
+ */
+&rv3028 {
+	trickle-resistor-ohms = <15000>;
+};
