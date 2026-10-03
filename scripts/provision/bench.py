@@ -343,6 +343,10 @@ class Power:
         """Supply current in amps, one reading; None when this power kind cannot measure it."""
         return None
 
+    def voltage(self) -> float | None:
+        """Supply voltage in volts, one reading; None when this power kind cannot measure it."""
+        return None
+
 
 class ScpiPower(Power):
     """SCPI over ONE persistent raw TCP connection (the only SCPI socket in the tool).
@@ -463,18 +467,26 @@ class ScpiPower(Power):
             return None
         return bool(stat >> (3 + self.channel) & 1)
 
-    def current(self) -> float:
-        """One ``MEAS:CURR? CH<n>`` reading of the configured channel, in amps, over the
-        persistent socket. BenchError when the reply is not a number."""
-        reply = self._send(f"MEAS:CURR? CH{self.channel}", reply=True)
+    def _measure(self, what: str) -> float:
+        """One ``MEAS:<what>? CH<n>`` reading of the configured channel only, over the
+        persistent socket. BenchError when the reply is not a finite number."""
+        cmd = f"MEAS:{what}? CH{self.channel}"
+        reply = self._send(cmd, reply=True)
         try:
-            amps = float(reply)
+            value = float(reply)
         except ValueError:
-            amps = math.nan
-        if not math.isfinite(amps):
-            raise BenchError(f"SCPI {self.host}:{self.port} MEAS:CURR? CH{self.channel}: "
-                             f"not a number: {reply!r}")
-        return amps
+            value = math.nan
+        if not math.isfinite(value):
+            raise BenchError(f"SCPI {self.host}:{self.port} {cmd}: not a number: {reply!r}")
+        return value
+
+    def current(self) -> float:
+        """One ``MEAS:CURR? CH<n>`` reading, in amps."""
+        return self._measure("CURR")
+
+    def voltage(self) -> float:
+        """One ``MEAS:VOLT? CH<n>`` reading, in volts (same parsing rules as current())."""
+        return self._measure("VOLT")
 
 
 class LabgridPower(Power):

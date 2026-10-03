@@ -230,7 +230,9 @@ def test_blank_board_full_plan(tmp_path):
     assert not ctx.state_path.exists()             # dry run writes no state
     assert not (ctx.unit_dir / f"{SERIAL}.manifest.staged.bin").exists()
     assert ctx.bench.power.events == []
-    assert {c[0] for c in ctx.bench.probe.calls} == {"savebin", "dp_id"}   # read-only probe use
+    # no loadbin in a plan; the readback halts the core, so even a plan resumes it afterwards
+    assert {c[0] for c in ctx.bench.probe.calls} == {"savebin", "dp_id", "reset_run"}
+    assert ctx.bench.probe.calls[-1] == ("reset_run",)
 
 
 def test_offline_plan_without_bench(tmp_path):
@@ -313,9 +315,9 @@ class WritableBoard(Board):
         self.files[remote] = Path(local).read_bytes()
 
     def _answer(self, cmd):
-        if m := re.match(r"mtd_debug write (/dev/mtd\d) 0 (\d+) (\S+)", cmd):
-            data = self.files[m[3]]
-            self.files[m[1]] = data + self.files[m[1]][len(data):]
+        if m := re.match(r"mtd_debug write (/dev/mtd\d) (\d+) (\d+) (\S+)", cmd):
+            data, off, dev = self.files[m[4]], int(m[2]), self.files[m[1]]
+            self.files[m[1]] = dev[:off] + data + dev[off + len(data):]
             return 0, ""
         if re.match(r"flash_erase|rm -f", cmd):
             return 0, ""
@@ -428,7 +430,7 @@ def _lock_ready(tmp_path, board, disposition="ship", done=True):
     (ctx.unit_dir / f"{SERIAL}.manifest.bin").write_bytes(bytes(board.array))
     (ctx.unit_dir / f"{SERIAL}.secure-page.staged.bin").write_bytes(bytes(board.page))
     (ctx.unit_dir / f"{SERIAL}.unit.yaml").write_text(
-        f"eeprom_unique_id: 00 11\ndisposition: {disposition}\n"
+        f"eeprom_unique_id: 00 11\ndisposition: {disposition}\ntest_functional: pass\n"
         "dxm1_fw_version: v\ndxm1_fw_md5: m\ndxm1_fw_uart_boot_md5: u\n", encoding="utf-8")
     if done:
         ctx.state = {"steps": {s: {"status": "done"} for s in ("secure_page", "cold_boot_test")}}
@@ -489,7 +491,7 @@ def test_gd32_flash_applies_the_early_otp_workaround(tmp_path):
     # verify used fresh probe sessions (savebin after the loadbins)
     kinds = [c[0] for c in ctx.bench.probe.calls]
     last_load = max(i for i, k in enumerate(kinds) if k == "loadbin")
-    assert kinds[last_load + 1:kinds.index("reset_run")].count("savebin") == len(steps.GD32_IMAGES)
+    assert kinds[last_load + 1:kinds.index("reset_run", last_load)].count("savebin") == len(steps.GD32_IMAGES)
 
 
 def test_gd32_flash_workaround_does_not_touch_an_operator_disposition(tmp_path):
@@ -507,7 +509,7 @@ def test_select_steps_rules():
     assert names == ["preflight", "census"]
     names = [s.name for s in steps.select_steps(start="secure_page", skip=["hil_smoke"])]
     assert names == ["preflight", "secure_page", "dsw1_xspi_remove_sd", "cold_boot_test",
-                     "clkgen_verify", "record"]
+                     "census_final", "clkgen_verify", "functional_test", "record"]
     with pytest.raises(ValueError):
         steps.select_steps(only=["nope"])
 
@@ -564,10 +566,11 @@ def test_eeprom_manifest_rediscovers_a_pinned_host_after_the_mac_change(tmp_path
     assert attached == ["10.0.0.2"]
 
 
-def test_gd32_probe_discovers_the_host_when_only_starts_at_gd32_flash(tmp_path):
+def test_gd32_probe_discovers_the_host_when_only_starts_at_gd32_flash(tmp_path, monkeypatch):
     fw = _gd32_fw(tmp_path)
     probe = FakeProbe(memory={a: (fw / n).read_bytes() for n, a, _k in steps.GD32_IMAGES})
     probe.env = {}
+    monkeypatch.setattr(lt, "gd32_bridge_version", lambda t, bus, addr=0x70: (0, 14, 0))   # no real ssh
     ctx = _ctx(tmp_path, bench=_bench(console=_login_console(), probe=probe), gd32_fw=fw, execute=True)
     assert isinstance(steps.Gd32Flash().probe(ctx), steps.Satisfied)
     assert probe.env == {"ALP_PROVISION_HOST": "10.0.0.2"}
@@ -1054,7 +1057,7 @@ def test_record_takes_every_steps_facts_from_a_same_bundle_older_revision(tmp_pa
     f.write_text(text, encoding="utf-8")
     # only the operator-set disposition may still block; no recorded fact is missing
     assert [r for r in ledger_out.ship_check(ledger_out.read_unit_yaml(f), CATALOGUE["keys"])
-            if r.startswith("missing") and "disposition" not in r] == []
+            if r.startswith("missing") and "disposition" not in r and "test_functional" not in r] == []
 
 
 def test_record_ignores_other_bundle_older_revision_for_non_flash_steps(tmp_path):
@@ -1331,3 +1334,54 @@ def test_record_ship_check_uses_the_preset_family_not_the_bundle_field(tmp_path)
     ctx.bundle["family"] = "v2n"                   # a wrong/stale bundle field must not hide DX-M1
     res = steps.run_steps(ctx, only=["record"])
     assert "dxm1_fw_version" in res[-1].detail
+
+
+# --- write_cm33 -----------------------------------------------------------------------------
+
+CM33 = b"\0" * 0x3000 + (0x08100000).to_bytes(4, "little") + (0x08003101).to_bytes(4, "little") + b"\x44" * 5000
+
+
+def _cm33_ctx(tmp_path, board, **kw):
+    bdir, b = _bundle(tmp_path)
+    (bdir / "artifacts" / "cm33.bin").write_bytes(CM33)
+    b["components"].append({"role": "cm33", "file": "artifacts/cm33.bin", "sha256": hashlib.sha256(CM33).hexdigest(),
+                            "size_bytes": len(CM33), "flash_target": "xspi:mtd1"})
+    return _ctx(tmp_path, bundle=(bdir, b), bench=_bench(), linux=board, **kw)
+
+
+def test_write_cm33_is_skipped_without_a_cm33_component(tmp_path):
+    board = WritableBoard(xspi_bl2=BL2, xspi_fip=FIP)
+    res = steps.run_steps(_ctx(tmp_path, bench=_bench(), linux=board, execute=True), only=["write_cm33"])
+    assert res[-1].status == "skipped" and res[-1].detail == "bundle has no cm33 component"
+    assert not any("flash_erase" in c for c in board.commands)
+    assert steps.STEP_NAMES.index("write_cm33") == steps.STEP_NAMES.index("write_xspi") + 1
+    assert "write_cm33" in steps.FLASH_STEPS
+
+
+def test_write_cm33_writes_at_the_region_and_is_satisfied_afterwards(tmp_path):
+    board = WritableBoard(xspi_bl2=BL2, xspi_fip=FIP)
+    board.files["/dev/mtd1"] = board.files["/dev/mtd1"].ljust(0x200000, b"\xff")
+    ctx = _cm33_ctx(tmp_path, board, execute=True)
+    res = steps.run_steps(ctx, only=["write_cm33"])
+    assert res[-1].status == "done", res[-1].detail
+    assert res[-1].evidence["xspi_cm33_md5"] == hashlib.md5(CM33).hexdigest()
+    assert res[-1].evidence["xspi_cm33_size"] == str(len(CM33))
+    assert f"flash_erase /dev/mtd1 {gates.CM33_REGION_OFFSET} 1" in board.commands
+    assert board.files["/dev/mtd1"][gates.CM33_REGION_OFFSET:][:len(CM33)] == CM33
+    assert board.files["/dev/mtd1"][:len(FIP)] == FIP                      # the FIP is untouched
+    board.commands.clear()
+    again = steps.run_steps(ctx, only=["write_cm33"])
+    assert again[-1].status == "skipped" and not any("flash_erase" in c for c in board.commands)
+
+
+def test_fip_write_leaves_the_cm33_region_untouched(tmp_path):
+    board = WritableBoard(xspi_bl2=BL2, xspi_fip=OLD_FIP)
+    mark = b"\xc3" * 0x1000
+    board.files["/dev/mtd1"] = OLD_FIP.ljust(gates.CM33_REGION_OFFSET, b"\xff") + mark
+    ctx = _ctx(tmp_path, bench=_bench(), linux=board, execute=True)
+    res = steps.run_steps(ctx, only=["write_xspi"])
+    assert res[-1].status == "done", res[-1].detail
+    assert board.files["/dev/mtd1"][:len(FIP)] == FIP
+    assert board.files["/dev/mtd1"][gates.CM33_REGION_OFFSET:] == mark
+    blocks = int(next(c for c in board.commands if c.startswith("flash_erase /dev/mtd1 ")).split()[-1])
+    assert blocks * 65536 <= gates.CM33_REGION_OFFSET                       # the erase stops below the region

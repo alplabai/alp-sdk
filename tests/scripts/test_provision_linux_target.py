@@ -147,6 +147,32 @@ def test_console_login_and_discover_host():
     assert lt.discover_host(con) == "10.0.0.7"
 
 
+KERNEL_LOG = "[   13.500308] Bluetooth: MGMT ver 1.22"
+
+
+def test_console_login_resyncs_when_a_printk_lands_after_the_prompt(monkeypatch):
+    """The real cold_boot_test cycle 3 failure: `root@e1m-v2m103:~# [   13.500308] Bluetooth: ...`
+    never ends in a prompt; a newline makes the shell print a fresh one."""
+    con = FakeConsole([
+        (r"^\r$", "\r\ne1m login: "),
+        (r"^root\r$", f"root\r\nroot@e1m-v2m103:~# {KERNEL_LOG}"),
+        (r"^\r$", "\r\nroot@e1m-v2m103:~# "),
+        (r"^export TERM=dumb", "export TERM=dumb\r\n# "),
+        (r"^systemctl is-system-running", "systemctl is-system-running\r\nrunning\r\n# "),
+    ])
+    monkeypatch.setattr(lt, "CONSOLE_SETTLE_S", 0.01)
+    lt.console_login(con, timeout=2.0)
+    assert con.written.count("\r") == 2          # the first newline and one resync
+
+
+def test_console_resync_is_bounded_and_a_prompt_in_a_log_line_still_never_matches():
+    con = FakeConsole([(r"^\r$", f"something # {KERNEL_LOG}")] * (lt.RESYNC_TRIES + 1))
+    con.send_line("")
+    with pytest.raises(BenchError, match="no match"):
+        lt._expect_answering_cpr(con, {"shell": lt._SHELL}, 0.4)
+    assert len(con.written) == 1 + lt.RESYNC_TRIES
+
+
 def test_console_login_refuses_password():
     con = FakeConsole([(r"^\r$", "login: "), (r"^root\r$", "Password: ")])
     with pytest.raises(BenchError, match="password"):
@@ -886,3 +912,25 @@ def test_unread_values_never_contain_a_newline_so_the_ledger_write_cannot_fail()
     bad = {k: v for k, v in facts.items() if v.startswith("unread")}
     assert "act88760_gpio_regs" in bad and "eth0_phy_id_raw" in bad
     assert not [k for k, v in facts.items() if "\n" in v or "\r" in v]
+
+
+def test_mtd_write_at_offset_erases_writes_and_reads_back_there(tmp_path):
+    img = tmp_path / "cm33.bin"
+    img.write_bytes(b"\x5a" * 0x5000)
+    good = md5(img.read_bytes())
+    t, fake = target([("erasesize", "65536\n"), ("mtd1/size", "4194304\n"),
+                      ("md5sum", f"{good}  -\n"), ("flash_erase|mtd_debug|rm -f", "")])
+    assert lt.mtd_write_verify(t, 1, img, offset=lt.CM33_REGION_OFFSET) == good
+    assert "flash_erase /dev/mtd1 1703936 1" in fake.commands
+    assert "mtd_debug write /dev/mtd1 1703936 20480 /tmp/cm33.bin" in fake.commands
+
+
+def test_mtd_write_refuses_an_unaligned_offset_and_one_past_the_end(tmp_path):
+    img = tmp_path / "cm33.bin"
+    img.write_bytes(b"\0" * 16)
+    t, fake = target([("erasesize", "65536\n"), ("mtd1/size", "1703936\n")])
+    with pytest.raises(ValueError, match="not aligned"):
+        lt.mtd_write_verify(t, 1, img, offset=lt.CM33_REGION_OFFSET + 4096)
+    with pytest.raises(ValueError, match="does not fit"):
+        lt.mtd_write_verify(t, 1, img, offset=lt.CM33_REGION_OFFSET)
+    assert not any("flash_erase" in c for c in fake.commands)
