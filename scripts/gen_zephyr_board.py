@@ -344,12 +344,13 @@ def _twister_yaml(
 
     # Non-AEN families: no on-die MRAM/TCM concept surfaced here (the A55
     # cluster boots Linux from eMMC/xSPI; the M33 board file has no
-    # zephyr,flash of its own), so no ram:/flash:.  supported: reflects
-    # the on-module supervisor-MCU bridge (SPI + I2C + a GPIO chip-select)
-    # plus the always-declared (possibly disabled) console UART -- the
-    # shape shared by every current V2N-family SoM (same PCB, same GD32
-    # bridge; see the porting-a-new-som "same-PCB families" rule).
-    supported = ["gpio", "i2c", "spi", "uart"] if has_supervisor_mcu else ["uart"]
+    # zephyr,flash of its own), so no ram:/flash:.  supported: lists only
+    # what the board dts leaves `status = "okay"` (audit CM33-14): the GD32
+    # bridge's SCI7 Simple-SPI plus its GPIO chip-select port.  RIIC8
+    # (A55/Linux-exclusive) and the sci0 console UART are disabled, so
+    # i2c/uart are not advertised.  Same PCB, same GD32 bridge on every
+    # current V2N-family SoM (porting-a-new-som "same-PCB families" rule).
+    supported = ["gpio", "spi"] if has_supervisor_mcu else []
     lines = [
         f"identifier: {identifier}",
         f"name: {twister_name}",
@@ -358,7 +359,7 @@ def _twister_yaml(
         "toolchain:",
         "  - zephyr",
         "  - gnuarmemb",
-        "supported:",
+        "supported:" if supported else "supported: []",
     ]
     lines += [f"  - {p}" for p in supported]
     lines.append("vendor: alp")
@@ -2364,6 +2365,11 @@ def _v2n_pinctrl_dtsi(links: dict[str, Any], assignable: list = ()) -> str:
         f"\t\t{console['pinctrl_child_node']} {{\n"
         f"\t\t\tpinmux = <{_rzv_pinmux(txd0)}>, /* TXD */\n"
         f"\t\t\t\t <{_rzv_pinmux(rxd0)}>; /* RXD */\n"
+        "\t\t\t/* RXD resets Hi-Z with no pull: a floating RXD0 raises sci0 eri.\n"
+        "\t\t\t * Renesas' own RSCI UART pin groups always carry bias-pull-up\n"
+        "\t\t\t * (audit CM33-01/IO-01/CM33-M3).  Whole group; a pull-up on TXD is\n"
+        "\t\t\t * harmless. */\n"
+        "\t\t\tbias-pull-up;\n"
         "\t\t};\n"
         "\t};\n"
         "\n"
@@ -2748,6 +2754,7 @@ def _v2n_dts(
         "",
         "\tchosen {",
         "\t\tzephyr,sram = &sram;",
+        "\t\tzephyr,ram-console = &ram_console;",
         "\t\t/*",
         "\t\t * No CM33 serial console on this board.  The only console is the",
         "\t\t * A55's (Linux, on the shared debug UART); sci0 here is the EVK",
@@ -2768,6 +2775,19 @@ def _v2n_dts(
         "\tsram: memory@8003000 {",
         '\t\tcompatible = "mmio-sram";',
         "\t\treg = <0x08003000 0xfbfff>;",
+        "\t};",
+        "",
+        "\t/*",
+        "\t * RAM console buffer (audit CM33-M2): 16 KiB at CM33-NS 0x9f710000 (A55",
+        "\t * view 0x4f710000), inside the 9 MiB 0x9f700000 window Linux reserves",
+        "\t * no-map.  Clear of the rest of that window: the rsctbl page",
+        "\t * 0x9f700000..0x9f700fff (liveness beacon at 0x9f700ff0..0x9f700fff), the",
+        "\t * mhu-shm page 0x9f701000..0x9f701fff, and the vring/rpmsg regions from",
+        "\t * 0x9f800000 up.  Do not move it into any of those.",
+        "\t */",
+        "\tram_console: memory@9f710000 {",
+        '\t\tcompatible = "mmio-sram";',
+        "\t\treg = <0x9f710000 0x4000>;",
         "\t};",
         "",
         "\t/*",
@@ -2958,10 +2978,24 @@ def _v2n_defconfig(links: dict[str, Any]) -> str:
         "# CM33 serial console (sci0 = EVK \"Pmod USB-UART\") DISABLED on this board:\n"
         "# the only console is the A55's; sci0 is not wired as a CM33 console here, and\n"
         "# opening it faults on the floating RX (sci0 eri -> Zephyr fatal -> hang before\n"
-        "# main()).  Re-enable all three (and sci0 in the dts) only with a Pmod attached.\n"
+        "# main()).  Re-enable UART_CONSOLE (and sci0 in the dts) only with a Pmod\n"
+        "# attached AND once Linux cannot gate the rsci_0_* clocks (audit CM33-05).\n"
         "CONFIG_SERIAL=y\n"
-        "CONFIG_CONSOLE=n\n"
         "CONFIG_UART_CONSOLE=n\n"
+        "\n"
+        "# Second safety net for the day sci0 is enabled: the FSP always enables the\n"
+        "# rxi/eri IRQs, and the Zephyr driver only IRQ_CONNECTs them under\n"
+        "# UART_INTERRUPT_DRIVEN -- otherwise an unhandled NVIC line goes fatal.\n"
+        "CONFIG_UART_INTERRUPT_DRIVEN=y\n"
+        "\n"
+        "# RAM console: the CM33 has no UART and no SWD yet, so printk lands in a\n"
+        "# fixed buffer (zephyr,ram-console node in the dts, inside the 0x9f700000\n"
+        "# window Linux reserves) that the A55 reads post-mortem via /dev/mem at\n"
+        "# 0x4f710000.  CONFIG_CONSOLE=y only pulls the RAM console in; with\n"
+        "# UART_CONSOLE=n nothing touches sci0.  Size must equal the dts node's reg.\n"
+        "CONFIG_CONSOLE=y\n"
+        "CONFIG_RAM_CONSOLE=y\n"
+        "CONFIG_RAM_CONSOLE_BUFFER_SIZE=16384\n"
         "\n"
         "# On-module GD32G553 supervisor bridge transport.  SPI only: RIIC8/\n"
         "# BRD_I2C is Cortex-A55/Linux-exclusive, so no CONFIG_I2C here.\n"
