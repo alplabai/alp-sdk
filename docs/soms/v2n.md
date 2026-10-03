@@ -33,8 +33,8 @@ All three SKUs share the same silicon + PCB.  Pick by memory budget.
 | Wi-Fi 6 + BLE 5.4       | Murata LBEE5HY2FY-922      | SDIO + UART + I2S | [`<alp/chips/murata_lbee5hy2fy.h>`](../../include/alp/chips/murata_lbee5hy2fy.h) |
 | Ethernet PHY 0          | Realtek RTL8211FDI-VD-CG   | RGMII + MDIO     | [`<alp/chips/rtl8211fdi.h>`](../../include/alp/chips/rtl8211fdi.h) |
 | Ethernet PHY 1          | Realtek RTL8211FDI-VD-CG   | RGMII + MDIO     | (same driver, second instance)          |
-| eMMC                    | (variant per SKU)          | Renesas SD0      | Zephyr SD subsystem                     |
-| NOR flash               | (variant per SKU)          | Renesas xSPI0    | Zephyr flash subsystem                  |
+| eMMC                    | (variant per SKU)          | Renesas SD0      | Linux (A55) `mmc` block device; no CM33 SDHI driver |
+| NOR flash               | (variant per SKU)          | Renesas xSPI0    | Linux (A55) `mtd`; no CM33 xSPI driver  |
 
 Full chip catalogue + manifest URLs:
 [`metadata/chips/`](../../metadata/chips/).
@@ -330,7 +330,7 @@ side has no Wi-Fi role):
 
 * `meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi` --
   `&sdhi2` (WLAN, `mmc-pwrseq-simple` on line 19), `&sci4` (BT,
-  `brcm,bcm43438-bt` `shutdown-gpios` on line 18), the `sd2_wlan_pins` /
+  `infineon,cyw55572-bt` `shutdown-gpios` on line 18), the `sd2_wlan_pins` /
   `sci4_bt_pins` pinctrl groups.
 * `meta-alp-sdk/recipes-kernel/linux/linux-renesas/wifi-bt.cfg` --
   `CONFIG_CFG80211=m` + in-tree `CONFIG_BRCMFMAC` off (no CYW55513 ID
@@ -390,14 +390,37 @@ Re-run 2026-09-27 with the BT stack as modules: `bluetooth`/`hci_uart`/`btbcm`
 autoload after rootfs, the `brcm/BCM.hcd` patch loads (chip id 157), and
 `hci0` comes UP+RUNNING.
 
-## Linux UART ports (SCIF)
+## Linux UART ports (SCIF and RSCI)
 
-The on-module RZ/V2N SCIF UARTs enumerate as `/dev/ttySC<N>` (console on
-`ttySC0`, Bluetooth HCI on `ttySC4`). `alp_uart_open()` reaches them with
-`port_id = 300 + N` (300..399 -> `/dev/ttySC<N>`), so no hand-written tty
-wrapper is needed: `alp_uart_config_t cfg = ALP_UART_CONFIG_DEFAULT(300u + 1u);`
-opens `/dev/ttySC1`. Don't open a port the kernel already owns (the console or
-the BT UART).
+The A55 currently has exactly two UARTs, and they come from two different
+IP blocks (the RZ/V2N has both):
+
+| Linux node | Block | Device | Role |
+|------------|-------|--------|------|
+| `&scif` (alias `serial0`) | SCIF | `/dev/ttySC0` | console |
+| `&sci4` (alias `serial4`) | RSCI4 | `/dev/ttySC4` | on-module Bluetooth HCI |
+
+`alp_uart_open()` reaches `/dev/ttySC<N>` with `port_id = 300 + N`
+(300..399). Both ports above are owned by the kernel (console, BT), so do not
+open them. E1M UART0 (P50/P51) and UART1 (P52/P53) are RSCI0/RSCI1; no Linux
+device-tree node enables them yet, so `alp_uart_open(301)` finds no
+`/dev/ttySC1` today. They are unusable from the A55 until a node lands, and
+UART0 flow control and UART1 share P52/P53.
+
+## Pad voltage caveat (SPI0, I3C, SDIO)
+
+Per the RZ/V2N hardware manual (pin-function notes, 4.2.3.1.1 Note 1), every
+`Pxx` pin has 3.3 V tolerance except `P2x`, `P90`, `P91`, `P92` and `PBx`.
+The E1M-facing ones are E1M I3C (`P20`/`P21`), E1M SPI0 MOSI/MISO/SCLK (`P90`-`P92`) and
+the on-module SDIO pads. Before enabling an `rspi0` or `i3c` node, confirm
+that no carrier part on those buses drives 3.3 V into the pad; driving it
+can damage the SoC. The per-pad IO-group rail mapping is not recorded in the
+public metadata yet.
+
+## Not available on E1M-V2N / E1M-V2M
+
+SPDIF is not routed to any E1M pad (its candidate pins are used by the amp
+fault input, the BT host-wake line and the amp shutdown GPIO).
 
 ## Bring-up
 

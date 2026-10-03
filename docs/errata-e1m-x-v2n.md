@@ -30,29 +30,31 @@ has the identical reversal.
 
 **Confidence:** high (bench-proven). Confirm rev-wide.
 
-## E2: PHY latches MDIO address 0 (alias 2), not the strapped 4
+## E2: PHY answers MDIO address 0 as well as its strapped address 2 (not a defect; documentation correction, 2026-10-03)
 
-**Symptom (if DT uses reg=0):** `RTL8211F … stmmac-N:00 phy_poll_reset
-failed: -110`, "Cannot attach to PHY".
+**Status:** not a defect (documentation correction, 2026-10-03). An
+earlier revision of this entry blamed a PHY address strap latch fault
+driven by the MAC; that explanation was wrong and has been removed.
 
-**Root cause:** the RTL8211F-VD PHYAD strap pins are shared with the MAC
-RGMII RXD3/RXC/RXCTL lines. The MAC's push-pull drivers override the
-weak (~4.7k) strap pulls during the reset-latch window, so the PHY
-samples MAC-driven levels and latches **address 0** (with a mirror
-alias at 2) instead of the schematic-strapped 4. Address 0 is the
-broadcast-ish alias where phy_poll_reset misbehaves; address **2** is
-the clean unicast alias where the PHY attaches as `stmmac-N:02`.
+**Observation:** an MDIO scan sees each PHY at address 0 and at
+address 2. With the device tree on `reg = <0>` the driver logs
+`RTL8211F ... stmmac-N:00 phy_poll_reset failed: -110`, "Cannot attach to
+PHY".
 
-**Software workaround (shipped):** device tree uses `reg = <2>` on both
-phy nodes (the `mdio0`/`mdio1` blocks in `e1m-v2n-som.dtsi`). Both PHYs
-then attach cleanly.
+**Explanation (RTL8211F(D)(I)-VD datasheet):** the PHY address straps
+select address 2, which is what the device tree uses. Address 0 answers
+because MDIO address 0 is the RTL8211F broadcast address, enabled by
+default (PHY page 0xa43, register 24, bit 13). There is no strap-latch
+defect and no hardware fix is needed.
 
-**Optional HW fix (deterministic address):** isolate the PHYAD straps
-from the MAC RGMII lines with series resistors, or hold the MAC RGMII
-tristated until after PHYRSTB deasserts.
+**Requirement:** the device tree must use `reg = <2>` on both phy nodes
+(the `mdio0`/`mdio1` blocks in `e1m-v2n-som.dtsi`); the PHYs then attach
+as `stmmac-N:02`. Optionally the broadcast response can be disabled in
+software (page 0xa43, register 24, bit 13 = 0), after which a scan sees
+only address 2.
 
-**Confidence:** high (MDIO scan + driver attach, both ports, multiple
-sessions).
+**Confidence:** high (datasheet; MDIO scan and driver attach, both
+ports, multiple sessions).
 
 ## E3: USB2.0 over-current pins read permanently asserted
 
@@ -144,23 +146,79 @@ and keep the core-rail bulk capacitance within Realtek's limits.
 **Confidence:** high. Current before and after the rework was measured
 on two units, and Ethernet worked after it on both (2026-10-02).
 
-## E5: Carrier link LED loads the PHY's LED0 configuration strap
+**PHY power-sequence constraints (datasheet):**
+
+- 3.3 V rise time at least 0.5 ms; a faster rise (under 0.1 ms) can
+  damage the PHY's internal regulator.
+- 3.3 V off for at least 100 ms between power cycles.
+- PHY reset held low for at least 10 ms, then at least 72 ms after
+  release before any MDIO access.
+
+## E5: Carrier link LED is wired for the wrong polarity on the PHY's LED0 strap pin
 
 **Symptom:** the RJ45 green LED is driven from the PHY's `LED0` pin,
-which doubles as a configuration strap the PHY samples at reset. The
-module pulls that pin up through 4.7 kΩ. On the carrier, the LED's
-cathode resistor (1 kΩ to ground) loads the pin during the reset-latch
-window, so the strap can be sampled at the wrong level.
+which is also the `CFG_EXT` configuration strap, sampled at reset. The
+module pulls it high (the external 1.8 V RGMII I/O supply
+configuration).
 
-**HW fix:** remove the LED's series resistor on the carrier, on both
+**Root cause:** per the datasheet (LED and LDO configuration), a
+pulled-high strap makes that LED output active-low, so the LED must be
+wired with its anode to 3.3 V through a resistor and its cathode on the
+pin. The carrier wires the green LED with its anode on the pin and its
+cathode through a resistor to ground, which is correct only for a
+pulled-low strap. This loads the strap during reset (risk: the PHY reads
+external-supply = 0 and enables its internal LDO against the module's
+1.8 V rail) and inverts the LED. The yellow LED on `LED1` (strap pulled
+low, active-high) is wired correctly.
+
+**HW fix (next carrier revision):** reverse the LED on `LED0`, on both
+ports: anode to 3.3 V through about 510 Ω to 1 kΩ, cathode to the pad.
+**Interim rework (stays):** remove the `LED0` series resistor on both
 ports, so the strap is not loaded; the green LED then stays dark.
-Next carrier revision: drive the LED through a buffer, or from a
-different PHY LED pin that is not a strap.
 
 **Software workaround:** none.
 
-**Confidence:** medium. The rework is applied on the bench carrier
-(2026-10-02); the strap level before and after was not recorded.
+**Confidence:** high (datasheet and design check). The rework is applied
+on the bench carrier (2026-10-02); the bench strap level was not
+measured.
+
+## E6: DRP-AI vendor driver writes CPG bits the V2N manual marks reserved (software)
+
+**Symptom:** none observed. The DRP-AI probe and inference ran on silicon
+(#1268) with the driver unmodified.
+
+**Root cause:** the vendor DRP-AI driver we inherit (`meta-rz-drpai`
+`0002-enable-drpai-driver.patch`) initialises its clocks and bus-stop bits
+with a V2H-derived routine. It writes bits the RZ/V2N manual lists as
+reserved: `CPG_CLKON_1` bits 8-15, `CPG_CLKON_17` bits 0-2,
+`CPG_BUS_8_MSTOP` bits 10 and 12-15, `CPG_BUS_9_MSTOP` bits 0-3 and
+`CPG_BUS_12_MSTOP` bits 1-8. It does not touch `CPG_BUS_12_MSTOP` bits 9/10
+(the MCPU-ACPU bus), so there is no CM33 conflict.
+
+**HW fix:** none.
+
+**Software workaround:** none. We do not hand-patch the vendor driver; ask
+Renesas whether the reserved-bit writes are safe on V2N.
+
+**Confidence:** high for the register list (read from the patch and the
+manual); safety of the writes is unconfirmed.
+
+## E7: SWINT unit 12 raises GIC_SPI 404, which the manual lists as reserved (SoC documentation)
+
+**Symptom:** the CM33-to-A55 reverse doorbell uses MHU SWINT unit 12, which
+the manual does not document as an A55 interrupt source. The manual lists
+CA55 SPI 404-411 as reserved, `swint_ch22_ns`..`swint_ch25_ns` as SPI
+412-415, and `swint_ch12_ns` as not used.
+
+**Root cause:** manual and silicon disagree. The silicon measurement
+(#697 cycle 10) is that SWINT unit 12 fires CA55 INTID 436, i.e. GIC_SPI
+404. The device tree and the UIO driver follow the measurement.
+
+**Software workaround:** keep SPI 404. Do not "correct" the device tree to
+the manual's table; that breaks the reverse doorbell.
+
+**Confidence:** high on the measured behaviour, low on the vendor's
+intent; Renesas has not confirmed it.
 
 ---
 
