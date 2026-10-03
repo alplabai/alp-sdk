@@ -146,15 +146,15 @@ def test_project_emit_cli_and_fragment_verification(tmp_path):
     r = subprocess.run([sys.executable, str(REPO / "scripts" / "alp_project.py"),
                         "--input", str(REPO / "examples/multicore/rpmsg-v2n/board.yaml"),
                         "--emit", "linux-ownership-dts", "--output", str(out)],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stderr
     assert out.read_text(encoding="utf-8") == (REPO / g.OUT).read_text(encoding="utf-8")
     v = tmp_path / "r9a09g056.dtsi"
     v.write_text("\t\tcpg: clock-controller@10420000 {\n\t\t};\n", encoding="utf-8")
     cmd = [sys.executable, GEN, "--fragment", str(out), "--vendor-dtsi", str(v)]
-    assert subprocess.run(cmd, capture_output=True, text=True).returncode == 0
+    assert subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8").returncode == 0
     out.write_text(out.read_text(encoding="utf-8") + '&nope {\n\tstatus = "disabled";\n};\n', encoding="utf-8")
-    assert subprocess.run(cmd, capture_output=True, text=True).returncode == 1
+    assert subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8").returncode == 1
 
 
 def _project_manifest(tmp_path, override=None):
@@ -163,7 +163,7 @@ def _project_manifest(tmp_path, override=None):
     b.write_text(board.read_text(encoding="utf-8") + (override or ""), encoding="utf-8")
     m = tmp_path / "system-manifest.yaml"
     r = subprocess.run([sys.executable, str(REPO / "scripts" / "alp_project.py"), "--input", str(b),
-                        "--emit", "system-manifest", "--output", str(m)], capture_output=True, text=True)
+                        "--emit", "system-manifest", "--output", str(m)], capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stderr
     return m
 
@@ -177,7 +177,7 @@ def test_manifest_render_equals_project_emit_for_an_override_project(tmp_path):
     emit = tmp_path / "e.dtsi"
     r = subprocess.run([sys.executable, str(REPO / "scripts" / "alp_project.py"),
                         "--input", str(tmp_path / "board.yaml"), "--emit", "linux-ownership-dts",
-                        "--output", str(emit)], capture_output=True, text=True)
+                        "--output", str(emit)], capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stderr
     assert out.read_bytes() == emit.read_bytes()
     assert out.read_text(encoding="utf-8") == (REPO / g.OUT).read_text(encoding="utf-8")
@@ -189,7 +189,7 @@ def test_manifest_with_a_stale_ownership_set_fails(tmp_path):
     doc["ownership"].pop("e1m_can1")
     m.write_text(yaml.safe_dump(doc), encoding="utf-8")
     r = subprocess.run([sys.executable, GEN, "--manifest", str(m), "--output", str(tmp_path / "o")],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 1 and "stale manifest" in r.stderr
 
 
