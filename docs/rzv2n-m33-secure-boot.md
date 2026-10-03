@@ -35,6 +35,21 @@ Applied by `trusted-firmware-a_%.bbappend` on every `rzv2n-family` MACHINE, so
    memory-mapped window (`0x20000000` + 256 MB) covers `0x20200000`, and the
    suspend-only `xspidrv` device stays out of the cold-boot path.
 
+## Every boot mode reads the CM33 image from xSPI — `0002-rzv2n-read-the-CM33-image-from-xSPI-in-every-boot-mode.patch`
+`bl2_bp_spi` and `bl2_bp_mmc` are the same `bl2.bin` behind different `bptool`
+headers, so both start the CM33. The vendor BL22 *source* follows the boot
+device, though: under eMMC boot (DSW1 mode 1) it is byte `0x200000` of the
+enabled eMMC boot partition, under eSD boot byte `0x200000` of the card. Nothing
+writes either, so under eMMC boot BL2 released the CM33 into unwritten
+boot-partition bytes (#2658). Patch 0002 points BL22 at the xSPI slot in every
+boot mode and, for eMMC/eSD boot, also runs `xspi_setup()` and opens the memmap
+device (the xSPI clock, reset and MSTOP are already released by `cpg_setup()` in
+every mode). The CM33 image has one home: xSPI `0x200000`. Not yet bench-verified.
+
+The FIP plays no part: BL22 is not a FIP image, and BL2 starts the CM33 in
+`bl2_el3_plat_prepare_exit()` before handing off to BL31. A FIP ToC with two
+entries (BL31, BL33) is the normal layout.
+
 ## The M33 firmware image
 `zephyr.bin` is linked at `0x08003000` (board `alp_e1m_v2m101_m33_sm`,
 `sram: memory@8003000`). BL2 loads the raw image at `0x08000000`, so the image is
