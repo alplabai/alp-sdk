@@ -83,6 +83,8 @@ class TestZephyrEmit(unittest.TestCase):
 
     def test_schema_peripherals_emit_storage_network_usb_kconfig(self) -> None:
         """Non-wrapper Zephyr subsystem tokens must not silently no-op."""
+        # Token-to-Kconfig mapping only: the inline V2N101 m33_sm boards are
+        # not a claim that the CM33 owns these peripherals.
         cases = {
             "emmc": {
                 "periph": "emmc",

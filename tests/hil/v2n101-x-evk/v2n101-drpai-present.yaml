@@ -3,8 +3,9 @@
 # E1M-V2N101 DRP-AI3 (drpai-rz, 17000000.drpai), model-free probe: the driver bound,
 # and /dev/drpai0 exists.  Read-only; runs no inference and needs no model.
 # The DRPAI_GET_DRPAI_AREA window (0xd0000000 / 0x20000000) is deliberately NOT
-# checked: it needs python3 or a C helper, and no ALP image ships either.  The /dev/drpai0 mode/group is deliberately NOT asserted:
-# that access policy is undecided.  Not bench-run by this change.
+# checked: it needs python3 or a C helper, and no ALP image ships either.
+# The /dev/drpai0 mode/group is deliberately NOT asserted: that access policy is
+# undecided.  Not bench-run by this change.
 
 schema_version: 1
 name: v2n101-drpai-present
