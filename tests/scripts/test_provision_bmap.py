@@ -225,6 +225,13 @@ class RealShell:
     def run(self, cmd, timeout=60.0, check=True, stdin_path=None, **kw):
         if cmd.startswith("blockdev"):
             return lt.CmdResult(0, "", "")
+        # The board's whole-system `sync` and page-cache drop are never run on the HOST: a global
+        # sync waits for every dirty page of the machine (minutes on a CI host busy with other
+        # builds), and as root the drop would empty the host's cache. The file written here is
+        # read back through the same page cache either way.
+        if cmd == "sync; echo 3 > /proc/sys/vm/drop_caches":
+            return lt.CmdResult(0, "", "")
+        cmd = re.sub(r"(?:^|(?<=;)|(?<=&&))\s*sync\s*(?=;|&&|$)", " true ", cmd)
         if cmd.startswith("python3 "):                  # the board's python3 is this interpreter
             cmd = f'"{sys.executable}" ' + cmd[len("python3 "):]
         stdin = open(stdin_path, "rb") if stdin_path else subprocess.DEVNULL
@@ -263,6 +270,27 @@ def test_host_stream_write_in_a_real_shell(tmp_path, monkeypatch):
         assert dev[s * BS:(s + c) * BS] == RAW[s * BS:(s + c) * BS].ljust(c * BS, b"\0")
     assert dev[BS:256 * BS] == bytes([STALE]) * (255 * BS)      # the gap was never touched
     assert ev["rootfs_bytes_written"] == str(bm.mapped_bytes)
+
+
+@needs_sh
+@pytest.mark.skipif(sys.platform == "win32", reason="a PATH-shadowed `sync` needs a POSIX PATH")
+def test_the_real_shell_never_runs_the_hosts_global_sync(tmp_path, monkeypatch):
+    """A whole-machine `sync` on a busy CI host took over 120 s (the gate on 2026-10-03): the
+    harness must not run it. A `sync` that only leaves a mark shadows the real one."""
+    import os
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "sync"
+    fake.write_text('#!/bin/sh\ntouch "$SYNC_MARK"\n', encoding="utf-8", newline="\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("SYNC_MARK", str(tmp_path / "synced"))
+    wic, bm = make_wic(tmp_path, RAW)
+    sh = RealShell(tmp_path / "w", monkeypatch)
+    (sh.work / "dev.img").write_bytes(bytes([STALE]) * (len(RAW) + BS))
+    lt.rootfs_write_verify_mapped(sh, "dev.img", wic, bm)
+    sh.run("gunzip -c x.gz 2>/dev/null | cat > /dev/null && sync", check=False)
+    assert not (tmp_path / "synced").exists()
 
 
 @needs_sh
