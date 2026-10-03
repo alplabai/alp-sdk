@@ -61,7 +61,6 @@ DA9292_REGS = {
 }
 TPS628640_ADDRS = (0x44, 0x48, 0x4D, 0x4F)
 TPS628640_VOUT1 = 0x01
-RV3028_ADDR = 0x52
 CLKGEN_5L35023B_ADDR = 0x69
 # Bench-proven (2026-09-24/25) factory OTP image, reg 0x00..0x24 (37 bytes),
 # read ONE BYTE AT A TIME (i2cget): a combined i2ctransfer read bit-slips on
@@ -978,9 +977,11 @@ def net_carrier(t, name: str) -> bool:
 
 
 def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None = None,
-           emmc: str | None = None, dxm1_present: bool = True) -> tuple[dict[str, str], list[str]]:
+           emmc: str | None = None, dxm1_present: bool = True,
+           rtc_addr: int | None = None) -> tuple[dict[str, str], list[str]]:
     """Read-only. Returns (auto ledger keys, notes on what could not be read).
 
+    `rtc_addr` = the RV-3028 address from the SoM preset (rtc.rv3028_addr); None skips the RTC read.
     `sizes` = artefact byte lengths keyed by bundle role ("bl2", "fip",
     "bl2_mmc", "cm33"); an md5 key is produced only when its size is known.
     Never writes to the unit's storage or devices (the only 0x58 frames are the sealed reads;
@@ -1108,7 +1109,11 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
 
     def clocks_rtc():
         brd = i2c_bus["brd"]
-        read_key("rtc_rv3028_reg_0x37", lambda: f"{i2c_get(t, brd, RV3028_ADDR, 0x37):#04x}")
+        if rtc_addr is not None:
+            read_key("rtc_rv3028_reg_0x37", lambda: f"{i2c_get(t, brd, rtc_addr, 0x37):#04x}")
+            if facts["rtc_rv3028_reg_0x37"].startswith("0x"):
+                from provision import rtc
+                facts.update(rtc.decode(int(facts["rtc_rv3028_reg_0x37"], 16)))
         facts["clkgen_5l35023b_regs"] = ("ack" if CLKGEN_5L35023B_ADDR in i2c_scan(t, brd) else "no ack")
         facts["clkgen_5l35023b_regs"] += f" at {CLKGEN_5L35023B_ADDR:#04x}"
 

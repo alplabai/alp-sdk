@@ -20,8 +20,6 @@ schema: 1
 
 # Checks that are recorded but never fail the step or block shipping.
 informational:
-  - rtc_time_set        # nothing sets the RTC during provisioning today
-  - rtc_backup_mode     # reports the RV-3028 backup switchover mode
   - cm33_running        # BLOCKING by itself once the bundle carries a cm33 image, like cm33_firmware
   - cm33_firmware       # the flow programs no CM33 image today; BLOCKING by itself once the bundle carries one
   - dmesg_clean         # the allowlist below comes from ONE boot log
@@ -39,9 +37,9 @@ emmc_read_min_mib_s: 20                      # provisional
 xspi_jedec_regex: '^(?!0+$|f+$)[0-9a-f]{6,}$'   # any real JEDEC ID (not all-0 / all-f); pin the part privately
 
 # --- SoM: network ---------------------------------------------------------------------------
-eth_phy_id: 0x001cc916                       # measured: MII registers 2/3 of both PHYs
+# eth_phy_id: from metadata/chips/<on_module.ethernet_phy>.yaml phy_id_pattern (override here with a measured one)
 eth_link_speeds: [100, 1000]                 # Mbit/s; the bench switch decides which
-wifi_firmware_regex: 'Firmware: BCM55500'    # measured
+# wifi_firmware_regex: from metadata/chips/<on_module.wifi_ble>.yaml firmware_banner_regex
 wifi_country_regex: '^(00|[A-Z]{2})$'        # provisional: records the regulatory domain
 
 # --- SoM: NPU, GPU, DRP-AI ------------------------------------------------------------------
@@ -59,6 +57,7 @@ gpu_device_node: /dev/mali0                  # measured ("Probed as mali0")
 # --- SoM: board-management I2C --------------------------------------------------------------
 rtc_name_regex: 'rv3028'                     # measured
 rtc_bsm_enabled: [1, 3]                      # datasheet: BSM 01 direct / 11 level switching; 00 and 10 = disabled
+# rtc trickle: expected from metadata/boards/<carrier>.yaml rtc_backup (never charge a primary cell)
 rtc_max_error_s: 30                          # provisional: RTC vs host UTC after the cold cycles
 board_temp_c: [10, 85]                       # provisional; one unit read 46.8
 soc_temp_c: [10, 105]                        # the HiL spec's band
@@ -66,15 +65,15 @@ gd32_protocol: '0.14.0'                      # measured
 gd32_gpio_lines_min: 20                      # the HiL spec's floor
 # ID / presence reads, by chip slug as in the SoM preset and the carrier description:
 # write `reg`, read `read` bytes; the ID is `width` bytes at offset `at` (big-endian).
-# No `value` = "the device answers". `values` pins one address.
+# No `value` = the chip manifest's sensor.who_am_i, else "the device answers". `values` pins one address.
 i2c_ids:
   da9292:    {reg: 0x19, read: 1, value: 0xEA}            # measured (DEV_ID)
   tps628640: {reg: 0x01, read: 1, values: {0x48: 0x5A}}   # measured: VOUT1 code 0x5A = 0.85 V
   act8760:   {reg: 0x10, read: 1}                         # no ID register known: answers
   rv3028c7:  {reg: 0x28, read: 1}                         # ID register, value not pinned
-  icm42670:  {reg: 0x75, read: 1, value: 0x67}            # datasheet (WHO_AM_I)
-  bmi323:    {reg: 0x00, read: 4, at: 2, width: 1, value: 0x43}   # datasheet (CHIP_ID after 2 dummy bytes)
-  bmp581:    {reg: 0x01, read: 1, value: 0x50}            # measured (CHIP_ID)
+  icm42670:  {reg: 0x75, read: 1}                         # WHO_AM_I value: metadata/chips/icm42670.yaml
+  bmi323:    {reg: 0x00, read: 4, at: 2, width: 1}        # CHIP_ID after 2 dummy bytes; value: metadata/chips/bmi323.yaml
+  bmp581:    {reg: 0x01, read: 1}                         # CHIP_ID value: metadata/chips/bmp581.yaml
   ina236:    {reg: 0x3E, read: 2, value: 0x5449}          # measured (manufacturer ID)
   ina228:    {reg: 0x3E, read: 2, value: 0x5449}          # datasheet (manufacturer ID)
   tcal9538:  {reg: 0x00, read: 1}                         # no ID register: input port answers
@@ -84,7 +83,7 @@ usb_root_hubs_min: 4                         # measured (xHCI x2, OHCI, EHCI)
 # The beacon firmware/alp-stock-shim writes (A55 view of the rsctbl window, top 16 bytes): magic,
 # version, then a counter that grows ~1 per second. A re-read 2 s later must see it advance 1..4.
 cm33_beacon:                                 # the firmware's own layout (README); not yet seen on a bench
-  address: 0x4F700FF0
+  # address: derived from the SoC description's openamp_carveout (a55_base + rsctbl_size - 16 = 0x4F700FF0)
   magic: 0xA10D0683
   version: 0x100                             # image kind: < 0x100 = RPC firmware beacon version, 0x100 = idle shim (no RPC)
   heartbeat_advance: [1, 4]

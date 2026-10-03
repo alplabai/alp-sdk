@@ -14,6 +14,7 @@ format the judge ASSUMES and a first bench run must confirm (docs/provisioning-v
 
 from __future__ import annotations
 
+import json
 import re
 import shlex
 import shutil
@@ -29,6 +30,15 @@ from provision.bench import BenchError
 
 from .provision_fakes import FakeLinux, FakePower
 from .test_provision_steps import CATALOGUE, SERIAL, SKU, _bench, _ctx, _statuses
+
+_REAL_CARRIER = functest._carrier
+
+
+@pytest.fixture(autouse=True)
+def _carrier_with_a_primary_backup_cell(monkeypatch):
+    """The stock EVK declares no RTC backup element; these tests need the rtc_backup fixture on."""
+    monkeypatch.setattr(functest, "_carrier", lambda n: {**_REAL_CARRIER(n), "rtc_backup": {"element": "primary"}})
+
 
 FIXTURES = REPO = Path(__file__).resolve().parent / "fixtures" / "provision"
 ALL_FIXTURES = {"eth1_cable": True, "wifi_ap": {"ssid": "bench-ap", "min_signal_dbm": -70},
@@ -90,7 +100,8 @@ def _good(ctx) -> dict[str, str]:
         "rtc_device": "rtc-rv3028 8-0052",
         "rtc_ticks": "a=0x58 b=0x00",                             # BCD, across the minute
         "rtc_time_set": "1790000000",
-        "rtc_backup_mode": "0x1c",
+        "rtc_backup_mode": "0x3f",
+        "rtc_trickle": "0x1c",                                    # TCE off (no rechargeable element declared), BSM level
         "rtc_retention": f"epoch={int(time.time())}\nboot=boot-now\nhctosys_failed=0",
         "board_temp": "0x2e 0xd0",                                 # 46.8 degC (the temperature one unit read)
         "secure_element": "HIL_OPTIGA_I2C_STATE 0x08 0x80 0x00 0x00\nHIL_OPTIGA_ACK",
@@ -168,6 +179,7 @@ BAD = {
     "rtc_ticks": "a=0x12 b=0x12",                                  # oscillator stopped
     "rtc_time_set": "",
     "rtc_backup_mode": "0x10",                                     # real: what one unit reads today
+    "rtc_trickle": "0x3f",
     "rtc_retention": "epoch=\nboot=boot-now\nhctosys_failed=0",
     "board_temp": "0x7f 0xf0",                                     # 127.9 degC
     "secure_element": "",
@@ -533,9 +545,9 @@ def test_a_missing_expected_value_is_unread_for_a_blocking_check_and_skipped_for
     res = _run(ctx)
     assert _val(res, "kernel_release") == "unread (no expected value: kernel_release_regex)"
     assert _val(res, "supply_power_idle") == "unread (no expected value: supply_power_idle_w.v2n-m1)"
-    assert _val(res, "rtc_backup_mode") == "skipped (no expected value: rtc_bsm_enabled)"      # informational
+    assert _val(res, "rtc_backup_mode") == "unread (no expected value: rtc_bsm_enabled)"       # blocking since #2660
     assert res.status == "failed"
-    assert res.evidence["test_functional"] == "fail (supply_power_idle, kernel_release)"
+    assert res.evidence["test_functional"] == "fail (supply_power_idle, kernel_release, rtc_backup_mode)"
 
 
 # --- record / ship check ------------------------------------------------------------------------
@@ -581,13 +593,49 @@ def test_fixture_skipped_tests_do_not_block_record_and_stay_visible(tmp_path):
 
 def test_an_informational_failure_does_not_block_record(tmp_path):
     root, unit = _shippable_ledger(tmp_path)
-    ctx, _ = _setup(tmp_path, {"rtc_backup_mode": BAD["rtc_backup_mode"], "cm33_firmware": BAD["cm33_firmware"]},
-                    ledger_root=root)
+    ctx, _ = _setup(tmp_path, {"cm33_firmware": BAD["cm33_firmware"]}, ledger_root=root)
     res = steps.run_steps(ctx, only=["functional_test", "record"])
     assert "ship check: SHIPPABLE" in res[-1].detail
     text = unit.read_text(encoding="utf-8")
-    assert "test_ft_rtc_backup_mode: fail (backup switchover disabled (reg 0x37=0x10, BSM=0b00)" in text
     assert "test_ft_cm33_firmware: fail (mtd1+0x1a0000 is blank: no CM33 image on the unit)" in text
+
+
+def test_the_expected_trickle_comes_from_the_carriers_backup_element(tmp_path, monkeypatch):
+    base = _REAL_CARRIER("e1m-x-evk")
+    monkeypatch.setattr(functest, "_carrier",
+                        lambda n: {**base, "rtc_backup": {"element": "supercap", "trickle_ohms": 15000}})
+    ctx, _ = _setup(tmp_path / "a", {"rtc_trickle": "0x3f"})
+    assert _val(_run(ctx), "rtc_trickle") == "pass (15000 ohm)"
+    ctx, _ = _setup(tmp_path / "b", {"rtc_trickle": "0x1c"})
+    assert _val(_run(ctx), "rtc_trickle").startswith("fail (trickle charger off (reg 0x37=0x1c), want 15000 ohm")
+
+
+def test_the_rtc_backup_fixture_needs_a_carrier_with_a_backup_element(tmp_path, monkeypatch):
+    # a carrier that declares no backup element (the stock EVK fits a supercap)
+    monkeypatch.setattr(functest, "_carrier",
+                        lambda *a, **k: {**_REAL_CARRIER(*a, **k), "rtc_backup": {"element": "none"}})
+    ctx, _ = _setup(tmp_path)
+    with pytest.raises(ValueError, match="fits no RTC backup element"):
+        functest.config(ctx)
+
+
+def test_the_stock_evk_declares_a_supercap_with_trickle(tmp_path, monkeypatch):
+    monkeypatch.setattr(functest, "_carrier", _REAL_CARRIER)
+    ctx, _ = _setup(tmp_path)
+    functest.config(ctx)        # rtc_backup fixture allowed: the EVK fits a rechargeable supercap
+    assert _REAL_CARRIER("e1m-x-evk")["rtc_backup"] == {"element": "supercap", "trickle_ohms": 15000}
+
+
+def test_the_beacon_address_and_phy_id_come_from_metadata(tmp_path):
+    ctx, _ = _setup(tmp_path)
+    assert functest._beacon_address(ctx.preset) == 0x4F700FF0
+    assert functest._preset_chip(ctx.preset, "ethernet_phy")["phy_id_pattern"] == 0x001CC916
+    assert functest._chip_id("icm42670") == 0x67
+    # the carve-out in the SoC description is the one the generated CM33 board .dts quotes (CM33-NS = A55 + 0x50000000)
+    soc = json.loads((functest.REPO / "metadata/socs/renesas/rzv2n/n44.json").read_text(encoding="utf-8"))["openamp_carveout"]
+    dts = (functest.REPO / "zephyr/boards/alp/e1m_v2n101_m33_sm/alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33.dts").read_text(encoding="utf-8")
+    assert f"reg = <{soc['a55_base'] + 0x50000000:#x} {soc['rsctbl_size']:#x}>" in dts
+    assert f"reg = <{soc['a55_base'] + 0x50000000:#x} {soc['size']:#x}>" in dts
 
 
 def test_a_private_overlay_can_make_a_check_blocking_or_informational(tmp_path):
@@ -596,7 +644,7 @@ def test_a_private_overlay_can_make_a_check_blocking_or_informational(tmp_path):
                     encoding="utf-8")
     x = functest.load_expect(over)
     assert x["i2c_ids"]["tps628640"] == {"reg": 1, "read": 1, "values": {0x48: 0x5A, 0x44: 0x82}}   # merged
-    assert x["eth_phy_id"] == 0x001CC916                                                          # untouched
+    assert x["gd32_gpio_lines_min"] == 20                                                         # untouched
     ctx, _ = _setup(tmp_path, {"eth_phy_id": BAD["eth_phy_id"], "rtc_backup_mode": BAD["rtc_backup_mode"],
                                "gd32_bridge": BAD["gd32_bridge"], "i2c_tps628640_44": "0x80"}, functest_expect=x)
     res = _run(ctx)
@@ -640,7 +688,7 @@ def test_dry_run_lists_every_check_and_touches_nothing(tmp_path):
     ctx, unit = _setup(tmp_path, fixtures={}, execute=False)
     res = steps.run_steps(ctx, only=["functional_test"])
     ft = res[-1]
-    assert ft.status == "planned" and "would run 73 functional checks, estimated" in ft.detail
+    assert ft.status == "planned" and "would run 74 functional checks, estimated" in ft.detail
     assert unit.commands == [] and not unit.files
     assert any(c.startswith("WOULD: eth_phy_id: both PHYs answer on MDIO") for c in ft.commands)
     assert any("[skipped: no fixture wifi_ap]" in c for c in ft.commands)
@@ -852,13 +900,18 @@ def _cold_boot_ctx(tmp_path, monkeypatch, fixtures, cycles):
 
     from .test_provision_steps import Board, _everyone_acks
     board = Board(act_0x10=0x08)
-    board.rtc_sets, boots, orig = [], [], board._answer
+    board.rtc_sets, board.bsm_sets, boots, orig = [], [], [], board._answer
+    board.regs[(8, 0x52, 0x37)] = 0x30                              # TCE + FEDE, switchover off
 
     def answer(cmd):
         if cmd.startswith("i2cdetect"):
             return 0, _everyone_acks()
         if cmd.startswith("python3 -c") and "0x4024700a" in cmd:
             board.rtc_sets.append(len(boots))                      # after which cold cycle it was set
+            return 0, ""
+        if cmd.startswith("python3 -c") and "0x40187014" in cmd:
+            board.bsm_sets.append(len(boots))                      # RTC_PARAM_SET: level switching
+            board.regs[(8, 0x52, 0x37)] |= 0x0C
             return 0, ""
         if cmd == "cat /proc/sys/kernel/random/boot_id":
             return 0, f"boot-{len(boots)}\n"
@@ -877,6 +930,7 @@ def test_cold_boot_test_sets_the_rtc_after_its_first_cycle_when_the_fixture_is_o
     res = steps.run_steps(ctx, only=["cold_boot_test"], force=["cold_boot_test"])
     assert res[-1].status == "done", res[-1].detail
     assert board.rtc_sets == [1]                                    # once, with two real power cuts still to come
+    assert board.bsm_sets == [1]                                    # switchover on before the first cut it must survive
     assert res[-1].evidence["rtc_set_boot_id"] == "boot-1" == ctx.facts["rtc_set_boot_id"]
 
 
@@ -940,6 +994,8 @@ MORE_BAD = [
     ("rtc_ticks", "a=0x1a b=0x1c", "fail (seconds register not BCD"),
     ("rtc_ticks", "a=0x10 b=0x30", "fail (seconds went 0x10 -> 0x30"),
     ("rtc_backup_mode", "Error: Read failed", "unread (no register 0x37"),
+    ("rtc_trickle", "0x3f", "fail (trickle charger 15000 ohm (reg 0x37=0x3f), want off"),
+    ("rtc_trickle", "0x3d", "fail (trickle charger 5000 ohm (reg 0x37=0x3d), want off"),
     ("board_temp", "0xe7 0x00", "fail (-25 degC outside 10..85 degC"),
     ("gd32_bridge", "0x00 0x00 0x0e 0x00 0xcf 0xa8", "fail (GD32 GET_VERSION reply CRC mismatch"),
     ("gd32_gpiochip", "", "unread (no gpiochip gd32-bridge-gpio"),
