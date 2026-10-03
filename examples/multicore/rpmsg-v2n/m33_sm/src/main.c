@@ -95,7 +95,7 @@ LOG_MODULE_REGISTER(rpmsg_v2n_m33_sm, LOG_LEVEL_INF);
  * table itself gets memcpy'd into RSC_TABLE_ADDR by platform_init() below,
  * so it owns the low end of the `rsctbl` region -- the beacon lives at the
  * TOP of the region instead, out of the resource table's way.  A Linux-side
- * `devmem 0x4F700FF0` (rsctbl's A55 alias) read after this app boots proves,
+ * `devmem` of the beacon's A55 alias (see README.md) read after this app boots proves,
  * in one shot, that the M33 is alive, the DDR window is backed, and the
  * CM33<->A55 address translation in resource_table.h is correct -- and the
  * heartbeat word lets a re-read tell "alive" apart from "wrote once, then

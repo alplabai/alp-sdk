@@ -2517,9 +2517,9 @@ _V2N_OPENAMP_TAIL: tuple[str, ...] = (
     '',
     '\t\t/* Whole OpenAMP region as one reservation to save MPU entries',
     "\t\t * (matches the vendor sample's rationale). */",
-    '\t\topenamp_shm: memory@@OPENAMP_CM33_BASE_HEX@ {',
+    '\t\topenamp_shm: memory@@carveout.hex@ {',
     '\t\t\tcompatible = "zephyr,memory-region";',
-    '\t\t\treg = <@OPENAMP_CM33_BASE@ @OPENAMP_SIZE@>;',
+    '\t\t\treg = <@carveout.addr@ @carveout.size@>;',
     '\t\t\tzephyr,memory-region = "openamp_memory";',
     '\t\t\tzephyr,memory-attr = <DT_MEM_ARM(ATTR_MPU_IO)>;',
     '\t\t};',
@@ -2527,52 +2527,52 @@ _V2N_OPENAMP_TAIL: tuple[str, ...] = (
     '',
     '\tchosen {',
     '\t\t/* The A55 master (DRIVER role) allocates every rpmsg buffer from',
-    '\t\t * vring_shm1 (0x4fc00000 A55 / 0x9fc00000 CM33-NS) -- the',
+    '\t\t * vring_shm1 (@vring-shm1.a55@ A55 / @vring-shm1.addr@ CM33-NS) -- the',
     '\t\t * "mst-alloc = vring-shm1" contract in the backend REFERENCE.  The',
     "\t\t * M33's descriptor-translation window MUST cover that pool, so it",
     '\t\t * points at vring_shm1, not vring_shm0 (whose window ends exactly at',
-    '\t\t * 0x9fc00000, leaving every buffer outside it).  Silicon-root-caused',
+    '\t\t * @vring-shm0.end@, leaving every buffer outside it).  Silicon-root-caused',
     '\t\t * alongside the vring-DA fix (#683/#697 bench, 2026-07-11). */',
     '\t\tzephyr,ipc_shm = &vring_shm1;',
     '\t\tzephyr,ipc = &mbox_consumer;',
     '\t};',
     '',
-    '\trsctbl: memory@@OPENAMP_CM33_BASE_HEX@ {',
+    '\trsctbl: memory@@rsctbl.hex@ {',
     '\t\tcompatible = "mmio-sram";',
-    '\t\treg = <@OPENAMP_CM33_BASE@ @OPENAMP_RSCTBL_SIZE@>;',
+    '\t\treg = <@rsctbl.addr@ @rsctbl.size@>;',
     '\t};',
     '',
     "\t/* Widened from the RZ/V2L layout's 8-byte mhu1_shm (@ +0x1008) to a",
     '\t * full 4 KiB region immediately after rsctbl, so it lines up with the',
-    "\t * A55/kernel-overlay side's 4f701000.mhu-shm node 1:1 (alp-sdk #683",
+    "\t * A55/kernel-overlay side's @mhu-shm.a55hex@.mhu-shm node 1:1 (alp-sdk #683",
     '\t * address fix). */',
-    '\tmhu1_shm: memory@@OPENAMP_MHU_SHM_HEX@ {',
+    '\tmhu1_shm: memory@@mhu-shm.hex@ {',
     '\t\tcompatible = "mmio-sram";',
-    '\t\treg = <@OPENAMP_MHU_SHM@ 0x1000>;',
+    '\t\treg = <@mhu-shm.addr@ @mhu-shm.size@>;',
     '\t};',
     '',
-    '\tvring_ctrl0: memory@9f800000 {',
+    '\tvring_ctrl0: memory@@vring-ctl0.hex@ {',
     '\t\tcompatible = "mmio-sram";',
-    '\t\treg = <0x9f800000 0x50000>;',
+    '\t\treg = <@vring-ctl0.addr@ @vring-ctl0.size@>;',
     '\t};',
     '',
-    '\tvring_ctrl1: memory@9f850000 {',
+    '\tvring_ctrl1: memory@@vring-ctl1.hex@ {',
     '\t\tcompatible = "mmio-sram";',
-    '\t\treg = <0x9f850000 0x50000>;',
+    '\t\treg = <@vring-ctl1.addr@ @vring-ctl1.size@>;',
     '\t};',
     '',
-    '\tvring_shm0: memory@9f900000 {',
+    '\tvring_shm0: memory@@vring-shm0.hex@ {',
     '\t\tcompatible = "mmio-sram";',
-    '\t\treg = <0x9f900000 0x300000>;',
+    '\t\treg = <@vring-shm0.addr@ @vring-shm0.size@>;',
     '\t};',
     '',
     '\t/* The rpmsg buffer pool: the A55 master allocates from here, so this is',
     "\t * the M33's zephyr,ipc_shm window (see the chosen node above).",
     '\t * vring_shm0 is kept reserved so the region layout still matches the A55',
     "\t * kernel overlay's 6 nodes 1:1. */",
-    '\tvring_shm1: memory@9fc00000 {',
+    '\tvring_shm1: memory@@vring-shm1.hex@ {',
     '\t\tcompatible = "mmio-sram";',
-    '\t\treg = <0x9fc00000 0x300000>;',
+    '\t\treg = <@vring-shm1.addr@ @vring-shm1.size@>;',
     '\t};',
     '',
     '\tmbox_consumer: mbox-consumer {',
@@ -2603,19 +2603,28 @@ _V2N_OPENAMP_TAIL: tuple[str, ...] = (
 
 def _openamp_subst(tail: tuple[str, ...], soc_spec: dict[str, Any]) -> list[str]:
     """Fill the OpenAMP window tokens from the SoC's `openamp_carveout`
-    (metadata/socs/**.json; the one declaration the Linux DT, the beacon
-    header and scripts/check_amp_window.py also read).  The CM33-NS view is
-    `cm33_ns_base`; the mhu-shm page follows the rsctbl page."""
+    (metadata/socs/**.json; the one declaration the Linux DT, the backend
+    header and scripts/check_amp_window.py also read).  Tokens:
+    `@carveout.{addr,hex,size}@` for the whole reservation and, per name in
+    `regions`, `@<name>.{addr,hex,size,end,a55,a55hex}@` -- addr/hex/end in
+    the CM33-NS view, a55/a55hex in the A55 view."""
     c = soc_spec["openamp_carveout"]
-    base = c["cm33_ns_base"]
+    base, a55 = c["cm33_ns_base"], c["a55_base"]
     tok = {
-        "@OPENAMP_CM33_BASE_HEX@": f"{base:x}",
-        "@OPENAMP_CM33_BASE@": f"{base:#x}",
-        "@OPENAMP_SIZE@": f"{c['size']:#x}",
-        "@OPENAMP_RSCTBL_SIZE@": f"{c['rsctbl_size']:#x}",
-        "@OPENAMP_MHU_SHM_HEX@": f"{base + c['rsctbl_size']:x}",
-        "@OPENAMP_MHU_SHM@": f"{base + c['rsctbl_size']:#x}",
+        "@carveout.addr@": f"{base:#x}",
+        "@carveout.hex@": f"{base:x}",
+        "@carveout.size@": f"{c['size']:#x}",
     }
+    for name, r in c["regions"].items():
+        off, size = r["offset"], r["size"]
+        tok.update({
+            f"@{name}.addr@": f"{base + off:#x}",
+            f"@{name}.hex@": f"{base + off:x}",
+            f"@{name}.size@": f"{size:#x}",
+            f"@{name}.end@": f"{base + off + size:#x}",
+            f"@{name}.a55@": f"{a55 + off:#x}",
+            f"@{name}.a55hex@": f"{a55 + off:x}",
+        })
     out = []
     for line in tail:
         for k, v in tok.items():

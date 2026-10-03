@@ -227,8 +227,16 @@
       "shipment_suffixes": ["#AC0", "#AC1", "#BC0", "#BC1"]
     }
   ],
-  "openamp_carveout": {"a55_base": 1332740096, "cm33_ns_base": 2674917376, "size": 9437184, "rsctbl_size": 4096,
-    "note": "OpenAMP/MHU-B reservation: A55 view 0x4F700000..0x4FFFFFFF = CM33-NS 0x9F700000 (A55 = CM33-NS - 0x50000000); rsctbl is its first rsctbl_size (0x1000) bytes and the liveness beacon the top 16 bytes of that page (A55 0x4F700FF0). The generated CM33 board .dts, the Linux reserved-memory/UIO nodes and the RPC backend's alp_amp_window.h all quote this block."},
+  "openamp_carveout": {"a55_base": 1332740096, "cm33_ns_base": 2674917376, "size": 9437184,
+    "regions": {
+      "rsctbl":     {"offset": 0,       "size": 4096},
+      "mhu-shm":    {"offset": 4096,    "size": 4096},
+      "vring-ctl0": {"offset": 1048576, "size": 327680},
+      "vring-ctl1": {"offset": 1376256, "size": 327680},
+      "vring-shm0": {"offset": 2097152, "size": 3145728},
+      "vring-shm1": {"offset": 5242880, "size": 3145728}
+    },
+    "note": "OpenAMP/MHU-B reservation: A55 view 0x4F700000..0x4FFFFFFF = CM33-NS 0x9F700000 (A55 = CM33-NS - 0x50000000). regions[] are offsets+sizes inside it: rsctbl 0x0/0x1000 (the AMP liveness beacon is the top 16 bytes of this rsctbl page, A55 0x4F700FF0), mhu-shm 0x1000/0x1000, vring-ctl0 0x100000/0x50000, vring-ctl1 0x150000/0x50000, vring-shm0 0x200000/0x300000, vring-shm1 0x500000/0x300000. The generated CM33 board .dts, the RPC backend's generated alp_amp_window.h and the Linux reserved-memory/UIO nodes (checked by scripts/check_amp_window.py) all quote this block."},
   "memory_regions": [
     {
       "name":            "ddr_main",

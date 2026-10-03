@@ -1,6 +1,7 @@
 # AMP window from metadata: bench steps (NOT YET RUN)
 
-The OpenAMP shared window now comes from the SoC metadata's `openamp_carveout`
+The OpenAMP shared window and all its sub-regions (rsctbl, mhu-shm, vring-ctl0/1,
+vring-shm0/1) now come from the SoC metadata's `openamp_carveout`
 (`metadata/socs/renesas/rzv2n/n44.json`) and the beacon layout from
 `include/alp/protocol/amp_beacon.h`. Addresses are unchanged
 (A55 `0x4F700000`, `0x900000` bytes, CM33-NS `0x9F700000`, beacon `0x4F700FF0`),
@@ -20,9 +21,10 @@ Ordered steps on an E1M-V2N101 / E1M-V2M101 with the console on the A55:
 4. Flash `examples/multicore/rpmsg-v2n/m33_sm` instead; cold power-cycle. Repeat
    step 2: version is `0x2`, magic unchanged, heartbeat grows, epoch is even
    (`0x0`) until a session is open.
-5. Run the RPC echo test (`tests/hil/v2m103-x-evk/v2m103-rpmsg-echo-uio.yaml` flow):
-   epoch turns odd while the session is open and even after close; a second
-   open in the same CM33 boot still succeeds (attach reset).
+5. Run the RPC echo spec `tests/hil/v2m103-x-evk/v2m103-rpmsg-echo-uio.yaml`; both
+   opens in the same CM33 boot must succeed (attach reset). The spec does not
+   read the epoch, so check it by hand around a run: `devmem 0x4F700FFC 32` is
+   odd while a session is open and even after it closes.
 6. Any difference from steps 2-5 means the generated board `.dts`, the Linux DT
    or `alp_amp_window.h` has drifted from the metadata: run
    `python3 scripts/check_amp_window.py` first.

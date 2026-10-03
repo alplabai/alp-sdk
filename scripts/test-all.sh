@@ -1382,7 +1382,8 @@ stage_generated_files() {
                 gen_cc3501e_gpio_routes gen_power_tree
                 gen_pinmux_capability gen_support_matrix
                 gen_portability_matrix gen_catalog gen_error_catalog
-                gen_verification_status gen_chip_driver_classification)
+                gen_verification_status gen_chip_driver_classification
+                gen_amp_window)
     local g rc
     local gen_total=0 gen_skipped=0
     for g in "${gens[@]}"; do
@@ -1532,6 +1533,7 @@ $(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null 
         docs/chip-driver-classification.md \
         examples/aen \
         src/backends/gpio/cc3501e_rev_dependent_pins.c \
+        src/backends/rpc/alp_amp_window.h \
         docs/diagnostics 2>/dev/null; then
         echo "git add -N failed -- an expected generated path is missing from the tree"
         return 1
@@ -1558,6 +1560,7 @@ $(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null 
             docs/chip-driver-classification.md \
             examples/aen \
             src/backends/gpio/cc3501e_rev_dependent_pins.c \
+            src/backends/rpc/alp_amp_window.h \
             docs/diagnostics 2>/dev/null; then
         echo "generated files are OUT OF SYNC -- regenerated in place; git add + commit:"
         git --no-pager diff --stat -- \
@@ -1569,6 +1572,7 @@ $(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null 
             docs/chip-driver-classification.md \
             examples/aen \
             src/backends/gpio/cc3501e_rev_dependent_pins.c \
+            src/backends/rpc/alp_amp_window.h \
             docs/diagnostics 2>/dev/null | tail -20
         return 1
     fi

@@ -70,6 +70,11 @@ on:
       - 'scripts/gen_amp_window.py'
       - 'src/backends/rpc/alp_amp_window.h'
       - 'include/alp/protocol/amp_beacon.h'
+      - 'firmware/**'
+      - 'tests/yocto/**'
+      - 'tests/hil/**'
+      - 'src/backends/rpc/**'
+      - 'examples/multicore/**'
       - 'scripts/sync_e1m_spec.py'
       - 'metadata/templates/som-release-bundle.example.json'
       - 'tests/scripts/**'
@@ -167,6 +172,11 @@ on:
       - 'scripts/gen_amp_window.py'
       - 'src/backends/rpc/alp_amp_window.h'
       - 'include/alp/protocol/amp_beacon.h'
+      - 'firmware/**'
+      - 'tests/yocto/**'
+      - 'tests/hil/**'
+      - 'src/backends/rpc/**'
+      - 'examples/multicore/**'
       - 'scripts/sync_e1m_spec.py'
       - 'metadata/templates/som-release-bundle.example.json'
       - 'tests/scripts/**'
@@ -279,8 +289,8 @@ jobs:
 
       # The CM33 OpenAMP window is declared once (SoC `openamp_carveout`);
       # the generated board .dts, the Linux reserved-memory/UIO nodes and the
-      # RPC backend header must agree, and the beacon magic must be defined
-      # only in include/alp/protocol/amp_beacon.h.
+      # RPC backend header must agree (every sub-region), and the beacon magic
+      # and address must be defined only in include/alp/protocol/amp_beacon.h.
       - name: Check the OpenAMP window agrees across metadata, DT and backend
         run: python3 scripts/check_amp_window.py
 

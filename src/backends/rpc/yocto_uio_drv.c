@@ -49,7 +49,7 @@
  *      directly rather than assuming the callback is required.
  *   3. `remoteproc_add_mem()` for rsctbl / vring-ctl0 / vring-ctl1 /
  *      vring-shm0 / vring-shm1, each with `da = pa + 0x50000000`
- *      (`ALP_V2N_A55_TO_M33_NS_OFFSET` -- CORRECTED alp-sdk #683 from
+ *      (`ALP_AMP_A55_TO_CM33_NS_OFFSET` -- CORRECTED alp-sdk #683 from
  *      0x20000000, the RZ/V2L offset this file was ported from; see
  *      that macro's doc comment) and the metal-mapped `io` region.
  *   4. `remoteproc_set_rsc_table()` pointed at the rsctbl UIO mapping
@@ -309,7 +309,7 @@
 
 /* A55-side physical base of each named region; `da` (the M33 non-secure
  * device address the resource table / vring descriptors reference) is
- * always `pa + ALP_V2N_A55_TO_M33_NS_OFFSET`.
+ * always `pa + ALP_AMP_A55_TO_CM33_NS_OFFSET`.
  *
  * CORRECTED (alp-sdk #683, address root-cause fix): this used to be
  * 0x20000000 (the RZ/V2L offset), which put every region below the A55
@@ -317,8 +317,8 @@
  * V2N map (Renesas FSP
  * drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/bsp_slave_address.h) is CM33-secure
  * 0x80000000 / CM33-non-secure 0x90000000 / A55 0x40000000, so
- * da = pa + 0x50000000. */
-#define ALP_V2N_A55_TO_M33_NS_OFFSET ALP_AMP_A55_TO_CM33_NS_OFFSET
+ * da = pa + 0x50000000.  The offset and every region below come from the
+ * SoC metadata's `openamp_carveout` via the generated alp_amp_window.h. */
 
 enum uio_region_id {
 	UIO_RSCTBL = 0,
@@ -339,21 +339,36 @@ struct uio_region_def {
 };
 
 /* Addresses corrected (alp-sdk #683, address root-cause fix) to the
- * authoritative V2N map -- see ALP_V2N_A55_TO_M33_NS_OFFSET's comment
+ * authoritative V2N map -- see ALP_AMP_A55_TO_CM33_NS_OFFSET's comment
  * above and the board overlay's matching CM33-side nodes
  * (zephyr/boards/alp/e1m_v2n101_m33_sm/...cm33.dts). UIO_MHU also
  * changed WHICH register block it maps -- see this file's header
  * comment's doorbell-fix note. */
 static const struct uio_region_def g_uio_regions[UIO_REGION_COUNT] = {
-	[UIO_RSCTBL]  = { ALP_AMP_UIO_RSCTBL_NAME,
-	                  "ALP_UIO_RSCTBL",
-	                  ALP_AMP_A55_BASE,
-	                  ALP_AMP_RSCTBL_SIZE },
-	[UIO_MHU_SHM] = { ALP_AMP_UIO_MHU_SHM_NAME, "ALP_UIO_MHU_SHM", ALP_AMP_MHU_SHM_BASE, 0x1000u },
-	[UIO_VRING_CTL0] = { "4f800000.vring-ctl0", "ALP_UIO_VRING_CTL0", 0x4F800000u, 0x50000u },
-	[UIO_VRING_CTL1] = { "4f850000.vring-ctl1", "ALP_UIO_VRING_CTL1", 0x4F850000u, 0x50000u },
-	[UIO_VRING_SHM0] = { "4f900000.vring-shm0", "ALP_UIO_VRING_SHM0", 0x4F900000u, 0x300000u },
-	[UIO_VRING_SHM1] = { "4fc00000.vring-shm1", "ALP_UIO_VRING_SHM1", 0x4FC00000u, 0x300000u },
+	[UIO_RSCTBL]     = { ALP_AMP_UIO_RSCTBL_NAME,
+	                     "ALP_UIO_RSCTBL",
+	                     ALP_AMP_RSCTBL_A55_BASE,
+	                     ALP_AMP_RSCTBL_SIZE },
+	[UIO_MHU_SHM]    = { ALP_AMP_UIO_MHU_SHM_NAME,
+	                     "ALP_UIO_MHU_SHM",
+	                     ALP_AMP_MHU_SHM_A55_BASE,
+	                     ALP_AMP_MHU_SHM_SIZE },
+	[UIO_VRING_CTL0] = { ALP_AMP_UIO_VRING_CTL0_NAME,
+	                     "ALP_UIO_VRING_CTL0",
+	                     ALP_AMP_VRING_CTL0_A55_BASE,
+	                     ALP_AMP_VRING_CTL0_SIZE },
+	[UIO_VRING_CTL1] = { ALP_AMP_UIO_VRING_CTL1_NAME,
+	                     "ALP_UIO_VRING_CTL1",
+	                     ALP_AMP_VRING_CTL1_A55_BASE,
+	                     ALP_AMP_VRING_CTL1_SIZE },
+	[UIO_VRING_SHM0] = { ALP_AMP_UIO_VRING_SHM0_NAME,
+	                     "ALP_UIO_VRING_SHM0",
+	                     ALP_AMP_VRING_SHM0_A55_BASE,
+	                     ALP_AMP_VRING_SHM0_SIZE },
+	[UIO_VRING_SHM1] = { ALP_AMP_UIO_VRING_SHM1_NAME,
+	                     "ALP_UIO_VRING_SHM1",
+	                     ALP_AMP_VRING_SHM1_A55_BASE,
+	                     ALP_AMP_VRING_SHM1_SIZE },
 	[UIO_MHU]        = { "10480000.mhu-uio", "ALP_UIO_MHU", 0x10480000u, 0x1000u },
 };
 
@@ -990,13 +1005,6 @@ static int uio_rproc_notify_isr(int irq, void *arg)
  * page size comes from the SoC metadata via alp_amp_window.h.  Writers: the
  * RPC firmware examples/multicore/rpmsg-v2n/m33_sm and the idle stock shim
  * firmware/alp-stock-shim. */
-#define ALP_RSCTBL_BEACON_MAGIC_OFF          ALP_AMP_BEACON_MAGIC_OFF(ALP_AMP_RSCTBL_SIZE)
-#define ALP_RSCTBL_BEACON_VERSION_OFF        ALP_AMP_BEACON_VERSION_OFF(ALP_AMP_RSCTBL_SIZE)
-#define ALP_RSCTBL_ATTACH_EPOCH_OFF          ALP_AMP_BEACON_EPOCH_OFF(ALP_AMP_RSCTBL_SIZE)
-#define ALP_RSCTBL_BEACON_MAGIC              ALP_AMP_BEACON_MAGIC
-#define ALP_RSCTBL_BEACON_VERSION_ATTACH_ACK ALP_AMP_BEACON_VERSION_ATTACH_ACK
-#define ALP_RSCTBL_BEACON_VERSION_NO_RPC     ALP_AMP_BEACON_VERSION_NO_RPC
-
 #ifndef ALP_UIO_ATTACH_ACK_TIMEOUT_MS
 #define ALP_UIO_ATTACH_ACK_TIMEOUT_MS 500u
 #endif
@@ -1093,35 +1101,36 @@ static alp_status_t uio_rsctbl_lock(int *fd_out)
 static alp_status_t uio_attach_reset(struct rpc_be *ch)
 {
 	struct metal_io_region *io = metal_device_io_region(ch->dev[UIO_RSCTBL], 0);
-	if (io == NULL ||
-	    !alp_size_range_valid(ALP_RSCTBL_ATTACH_EPOCH_OFF, sizeof(uint32_t), io->size)) {
+	if (io == NULL || !alp_size_range_valid(ALP_AMP_BEACON_EPOCH_OFF(ALP_AMP_RSCTBL_SIZE),
+	                                        sizeof(uint32_t),
+	                                        io->size)) {
 		fprintf(stderr, "alp_rpc: rsctbl mapping too small for the CM33 beacon\n");
 		return ALP_ERR_NOT_READY;
 	}
 
-	uint32_t magic   = metal_io_read32(io, ALP_RSCTBL_BEACON_MAGIC_OFF);
-	uint32_t version = metal_io_read32(io, ALP_RSCTBL_BEACON_VERSION_OFF);
-	if (magic != ALP_RSCTBL_BEACON_MAGIC) {
+	uint32_t magic   = metal_io_read32(io, ALP_AMP_BEACON_MAGIC_OFF(ALP_AMP_RSCTBL_SIZE));
+	uint32_t version = metal_io_read32(io, ALP_AMP_BEACON_VERSION_OFF(ALP_AMP_RSCTBL_SIZE));
+	if (magic != ALP_AMP_BEACON_MAGIC) {
 		fprintf(stderr,
 		        "alp_rpc: no CM33 beacon at rsctbl+0x%x (read 0x%08x, expect 0x%08x): the "
 		        "CM33 is not running or its image publishes no beacon\n",
-		        (unsigned)ALP_RSCTBL_BEACON_MAGIC_OFF,
+		        (unsigned)ALP_AMP_BEACON_MAGIC_OFF(ALP_AMP_RSCTBL_SIZE),
 		        (unsigned)magic,
-		        (unsigned)ALP_RSCTBL_BEACON_MAGIC);
+		        (unsigned)ALP_AMP_BEACON_MAGIC);
 		return ALP_ERR_NOT_READY;
 	}
-	if (version >= ALP_RSCTBL_BEACON_VERSION_NO_RPC) {
+	if (version >= ALP_AMP_BEACON_VERSION_NO_RPC) {
 		fprintf(stderr,
 		        "alp_rpc: the CM33 runs an image without RPC (beacon version 0x%08x; 0x%08x = "
 		        "idle stock shim); flash an RPC firmware such as "
 		        "examples/multicore/rpmsg-v2n/m33_sm\n",
 		        (unsigned)version,
-		        (unsigned)ALP_RSCTBL_BEACON_VERSION_NO_RPC);
+		        (unsigned)ALP_AMP_BEACON_VERSION_NO_RPC);
 		return ALP_ERR_NOSUPPORT;
 	}
 
-	uint32_t epoch = metal_io_read32(io, ALP_RSCTBL_ATTACH_EPOCH_OFF);
-	if (version >= ALP_RSCTBL_BEACON_VERSION_ATTACH_ACK && (epoch & 1u) == 0u) {
+	uint32_t epoch = metal_io_read32(io, ALP_AMP_BEACON_EPOCH_OFF(ALP_AMP_RSCTBL_SIZE));
+	if (version >= ALP_AMP_BEACON_VERSION_ATTACH_ACK && (epoch & 1u) == 0u) {
 		return ALP_OK; /* CM33 waiting for an attach: nothing to reset */
 	}
 
@@ -1132,7 +1141,7 @@ static alp_status_t uio_attach_reset(struct rpc_be *ch)
 	}
 	size_t  status_off = vdev_off + offsetof(struct fw_rsc_vdev, status);
 	uint8_t status     = metal_io_read8(io, status_off);
-	if (version < ALP_RSCTBL_BEACON_VERSION_ATTACH_ACK) {
+	if (version < ALP_AMP_BEACON_VERSION_ATTACH_ACK) {
 		if ((status & VIRTIO_CONFIG_STATUS_DRIVER_OK) == 0u) {
 			return ALP_OK;
 		}
@@ -1143,7 +1152,7 @@ static alp_status_t uio_attach_reset(struct rpc_be *ch)
 		        "firmware or restart the CM33 (cold cycle).\n",
 		        (unsigned)status,
 		        (unsigned)version,
-		        (unsigned)ALP_RSCTBL_BEACON_VERSION_ATTACH_ACK);
+		        (unsigned)ALP_AMP_BEACON_VERSION_ATTACH_ACK);
 		return ALP_ERR_BUSY;
 	}
 
@@ -1160,7 +1169,7 @@ static alp_status_t uio_attach_reset(struct rpc_be *ch)
 	int64_t deadline_ns = (int64_t)now.tv_sec * 1000000000LL + now.tv_nsec +
 	                      (int64_t)ALP_UIO_ATTACH_ACK_TIMEOUT_MS * 1000000LL;
 	for (;;) {
-		epoch = metal_io_read32(io, ALP_RSCTBL_ATTACH_EPOCH_OFF);
+		epoch = metal_io_read32(io, ALP_AMP_BEACON_EPOCH_OFF(ALP_AMP_RSCTBL_SIZE));
 		if ((epoch & 1u) == 0u) {
 			return ALP_OK;
 		}
@@ -1335,7 +1344,7 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 		 * resource-table `da` up in these registered regions, and the M33
 		 * resource table publishes vring DAs in A55-physical space
 		 * (VRING_*_ADDR_A55 = 0x4f8xxxxx, resource_table.c).  The
-		 * ALP_V2N_A55_TO_M33_NS_OFFSET (+0x50000000) is the CM33-NS<->A55
+		 * ALP_AMP_A55_TO_CM33_NS_OFFSET (+0x50000000) is the CM33-NS<->A55
 		 * view translation for the M33's OWN addressing (resource_table.h,
 		 * m33_sm/main.c) -- it must NOT be applied to the master-side DA
 		 * registration, or the vring lookup (da=0x4f8xxxxx) matches no

@@ -199,8 +199,8 @@ IPC-enabled CM33 image through `yocto_uio_drv.c`.  The CM33 window is
 
    **CM33 beacon map** (top of `rsctbl`, A55 `0x4f700ff0`, CM33-NS
    `0x9f700ff0`; read with `devmem`).  The layout is defined once in
-   `include/alp/protocol/amp_beacon.h` (offsets from the end of the window);
-   the window itself is the SoC metadata's `openamp_carveout`:
+   `include/alp/protocol/amp_beacon.h` (offsets from the end of the rsctbl page);
+   the page itself is the SoC metadata's `openamp_carveout.regions.rsctbl`:
 
    | Offset  | A55 address  | Word                                                              |
    |---------|--------------|-------------------------------------------------------------------|

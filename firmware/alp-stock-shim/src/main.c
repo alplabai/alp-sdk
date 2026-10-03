@@ -9,10 +9,10 @@
  * The CM33 has no console on these SoMs (sci0 must stay disabled: a floating
  * RXD faults the core before main), so the only way to tell from Linux that
  * this core is running is memory.  The shim writes the liveness beacon into
- * the top of the `rsctbl` window -- the layout shared with the rpmsg-v2n
+ * the last 16 bytes of the `rsctbl` page -- the layout shared with the rpmsg-v2n
  * example and the A55 backend (<alp/protocol/amp_beacon.h>), so the A55 side
- * reads one format.  Linux sees it at 0x4F700FF0 (the SoC metadata's
- * `openamp_carveout`).
+ * reads one format.  Linux sees it at the rsctbl page's A55
+ * alias (see README.md; the page is the SoC metadata's `openamp_carveout`).
  *
  * Plain stores only.  No peripheral, no interrupt, no IPC (no MHU, no sci0,
  * no RIIC8, no port 9 / GD32 SPI, no DMAC).  The window is the board DTS's
@@ -32,7 +32,8 @@
  * firmware (examples/multicore/rpmsg-v2n/m33_sm) and the A55 backend use:
  * <alp/protocol/amp_beacon.h>.  The page address and size come from the board
  * .dts, generated from the SoC metadata's `openamp_carveout`.  This image
- * publishes the idle-shim version (no RPC) and never touches the attach epoch. */
+ * publishes the idle-shim version (no RPC); the attach epoch is zeroed once at boot
+ * (clearing a stale odd value from a previous image) and never written again. */
 #define RSCTBL_BASE DT_REG_ADDR(DT_NODELABEL(rsctbl))
 #define RSCTBL_SIZE DT_REG_SIZE(DT_NODELABEL(rsctbl))
 #define BEACON      ALP_AMP_BEACON_AT(RSCTBL_BASE, RSCTBL_SIZE)
