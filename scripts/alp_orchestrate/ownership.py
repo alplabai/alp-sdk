@@ -39,11 +39,14 @@ def load_ownership_doc(metadata_root: Path, family_dir: Optional[str]) -> Option
 
 
 def resolve_ownership(doc: Optional[dict],
-                      overrides: Optional[dict[str, str]] = None) -> dict[str, str]:
+                      overrides: Optional[dict[str, str]] = None,
+                      declared_core_types: Optional[set[str]] = None) -> dict[str, str]:
     """{instance: core} = assignable defaults + validated overrides.
 
     Fixed `core_ownership` rows are not in the result and cannot be
-    overridden (they are not instances).  Raises OrchestratorError.
+    overridden (they are not instances).  `declared_core_types` (SoC core
+    types of the project's `cores:` keys; None = skip) rejects an override
+    naming a core the project does not declare.  Raises OrchestratorError.
     """
     assignable = (doc or {}).get("assignable") or {}
     out = {inst: e["default"] for inst, e in assignable.items()}
@@ -57,6 +60,11 @@ def resolve_ownership(doc: Optional[dict],
             raise OrchestratorError(
                 f"board.yaml ownership: {inst} cannot be owned by {core!r}; "
                 f"allowed cores: {cands}")
+        if (declared_core_types is not None
+                and CORE_TOKEN_TYPES[core] not in declared_core_types):
+            raise OrchestratorError(
+                f"board.yaml ownership: {inst} is assigned to {core!r} but "
+                f"board.yaml `cores:` does not declare a {CORE_TOKEN_TYPES[core]} core")
         out[inst] = core
     return out
 

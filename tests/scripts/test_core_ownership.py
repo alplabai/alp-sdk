@@ -76,6 +76,17 @@ def test_loader_rejects_bad_override(tmp_path):
         load_board_yaml(_project(tmp_path, {"e1m_can0": "m33"}))
 
 
+def test_loader_rejects_override_to_undeclared_core(tmp_path):
+    b = _project(tmp_path, {"e1m_spi0": "m33"})
+    d = yaml.safe_load(b.read_text(encoding="utf-8"))
+    del d["cores"]["m33_sm"]
+    d.pop("libraries", None)
+    d["ipc"] = [e for e in d.get("ipc", []) if "m33_sm" not in e.get("cores", [])]
+    b.write_text(yaml.safe_dump(d), encoding="utf-8")
+    with pytest.raises(OrchestratorError, match="e1m_spi0 is assigned to 'm33'.*does not declare"):
+        load_board_yaml(b)
+
+
 def test_non_v2n_sku_has_no_ownership_key():
     out = yaml.safe_load(emit_system_manifest(
         load_board_yaml(REPO / "examples/multicore/rpmsg-aen/board.yaml")))

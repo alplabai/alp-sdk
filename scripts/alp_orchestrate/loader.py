@@ -1368,7 +1368,11 @@ def load_board_yaml(path: Path, *,
 
     ownership = resolve_ownership(
         load_ownership_doc(metadata_root, _sku_family_dir(sku)),
-        project.get("ownership"))
+        project.get("ownership"),
+        declared_core_types=(
+            {str(c.get("type") or "") for c in (soc_spec.get("cores") or [])
+             if c.get("id") in project["cores"]}
+            if project.get("cores") else None))
 
     out = BoardProject(
         sku=sku,
