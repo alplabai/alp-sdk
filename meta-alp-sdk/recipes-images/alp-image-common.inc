@@ -109,6 +109,12 @@ ALP_V2N_WIFI_BT_INSTALL[vardepvalue] = "${ALP_V2N_WIFI_BT_INSTALL}"
 
 IMAGE_INSTALL += " ${ALP_V2N_WIFI_BT_INSTALL}"
 
+# Opt-in USB gadget (ECM + ACM) helper for the E1M-X-EVK USB 2.0 device port
+# (docs/v2n-usb-otg.md). Installed but not enabled at boot. Set
+# ALP_USB_GADGET = "1" in local.conf to include it.
+ALP_USB_GADGET ??= "0"
+IMAGE_INSTALL += "${@' alp-usb-gadget' if d.getVar('ALP_USB_GADGET') == '1' and bb.utils.contains('MACHINE_FEATURES', 'v2n', True, False, d) else ''}"
+
 # SDK sysroot headers (populate_sdk) -- ports the vendor bbappends'
 # TOOLCHAIN_TARGET_TASK:append mechanism, without which `bitbake
 # alp-image-* -c populate_sdk` produces NO <linux/drpai.h> / <linux/drp.h>
