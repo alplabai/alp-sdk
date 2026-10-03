@@ -22,7 +22,7 @@ plain memory stores to the top of the `rsctbl` window (the board DTS's
 | A55 address  | Word      | Value                                          |
 |--------------|-----------|------------------------------------------------|
 | `0x4F700FF0` | magic     | `0xA10D0683`, written last                     |
-| `0x4F700FF4` | version   | `1`                                            |
+| `0x4F700FF4` | image kind/version | `0x00000100` (idle shim, no RPC) |
 | `0x4F700FF8` | heartbeat | 0 at boot, then +1 about every second (`k_sleep`) |
 
 Read it from Linux (`devmem` if the image has it, otherwise python3):
@@ -32,6 +32,6 @@ devmem 0x4F700FF0 32; devmem 0x4F700FF4 32; devmem 0x4F700FF8 32
 python3 -c "import mmap,os,struct;m=mmap.mmap(os.open('/dev/mem',os.O_RDONLY|os.O_SYNC),4096,mmap.MAP_SHARED,mmap.PROT_READ,offset=0x4F700000);print([hex(x) for x in struct.unpack_from('<3I',m,0xFF0)])"
 ```
 
-Magic and version match and the heartbeat grows between two reads: the CM33
+Magic `0xA10D0683` means "a CM33 image with an Alp beacon is running"; the word at `+0xFF4` says which: values below `0x100` are RPC firmware beacon versions (`1` today, `2` after #2586), `0x100` is this idle shim. If both match and the heartbeat grows between two reads, the CM33
 is alive. Do not run this image together with an OpenAMP application: both
 use the same beacon words.

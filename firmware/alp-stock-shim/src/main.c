@@ -24,8 +24,12 @@
 
 #define RSCTBL_ADDR DT_REG_ADDR(DT_NODELABEL(rsctbl))
 
-#define BEACON_MAGIC   (0xA10D0683U) /* "Alp Lab, #683" */
-#define BEACON_VERSION (1U)
+#define BEACON_MAGIC (0xA10D0683U) /* "Alp Lab, #683" */
+/* The word at +0xFF4 says which image is running: values below 0x100 are the RPC
+ * firmware's beacon versions (1 today, 2 after #2586); 0x100 is this idle shim
+ * (kind 1, revision 0, no RPC). An A55 RPC backend must not read 0x100 as an old
+ * RPC firmware. */
+#define BEACON_VERSION (0x100U)
 
 /* Same layout as examples/multicore/rpmsg-v2n/m33_sm: top 16 bytes of the
  * 4 KiB resource-table page, clear of the table at the low end. */
