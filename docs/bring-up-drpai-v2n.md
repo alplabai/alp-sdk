@@ -493,9 +493,9 @@ In order:
    the shared-memory exclusion lock is contended. **Not yet reachable: no model
    has been compiled (§5).**
 
-## Security note: `/dev/drpai0` access is root-equivalent (NPU-01)
+## Security note: `/dev/drpai0` access is root-equivalent
 
-The image's udev rule opens `/dev/drpai0` to the `video` group (mode `0660`),
+The image's udev rule (`meta-alp-sdk/recipes-bsp/alp-drpai-udev/files/99-alp-drpai.rules`) opens `/dev/drpai0` to the `video` group (mode `0660`),
 while the vendor driver creates the node root-only. Treat any process that can
 open it as root-equivalent:
 

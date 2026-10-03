@@ -411,7 +411,7 @@ UART0 flow control and UART1 share P52/P53.
 
 Per the RZ/V2N hardware manual (pin-function notes, 4.2.3.1.1 Note 1), every
 `Pxx` pin has 3.3 V tolerance except `P2x`, `P90`, `P91`, `P92` and `PBx`.
-Those are E1M I3C (`P20`/`P21`), E1M SPI0 MOSI/MISO/SCLK (`P90`-`P92`) and
+The E1M-facing ones are E1M I3C (`P20`/`P21`), E1M SPI0 MOSI/MISO/SCLK (`P90`-`P92`) and
 the on-module SDIO pads. Before enabling an `rspi0` or `i3c` node, confirm
 that no carrier part on those buses drives 3.3 V into the pad; driving it
 can damage the SoC. The per-pad IO-group rail mapping is not recorded in the
