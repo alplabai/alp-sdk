@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2N101 GD32 bridge IO15/IO26 GPIO lines (bridge GPIO bits 21/22, GD32 PB4
+# and PC2, protocol minor >= 15): GET_VERSION on 0x70 reports minor >= 0x0f and
+# the gd32-bridge-gpio gpiochip exposes >= 24 lines (line 22 = IO15, line 23 =
+# IO26).  Read-only on purpose: IO15 is the carrier's LCD1_PWR_EN (pulled high),
+# so this spec never reads or drives either pad.  Needs bridge firmware 0.3.1+
+# flashed first (HIL spec, not bench-verified yet).
+
+schema_version: 1
+name: v2n101-gd32-io15-io26-gpio
+description: |
+  GD32 protocol minor >= 15 and gd32-bridge-gpio gpiochip with >= 24 lines.
+
+flash_method: ssh-run
+ssh_command: |-
+  r=$(i2ctransfer -f -y 8 w4@0x70 0x00 0x01 0xd1 0xf1 r6) || exit 0
+  echo "HIL_GD32_REPLY $r"
+  set -- $r
+  [ "$1" = 0x00 ] && [ "$2" = 0x00 ] && [ $(( $3 )) -ge 15 ] && echo HIL_GD32_MINOR_OK
+  for c in /sys/class/gpio/gpiochip*; do
+    [ "$(cat $c/label 2>/dev/null)" = gd32-bridge-gpio ] || continue
+    n=$(cat $c/ngpio)
+    echo "HIL_GD32_GPIOCHIP ${c##*/} lines=$n"
+    [ "$n" -ge 24 ] && echo HIL_GD32_IO15_IO26_LINES_OK
+  done
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "HIL_GD32_MINOR_OK"
+    - "HIL_GD32_IO15_IO26_LINES_OK"

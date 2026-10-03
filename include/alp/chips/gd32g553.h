@@ -212,6 +212,15 @@ extern "C" {
  *  See docs/gd32-bridge-protocol.md's version-history table. */
 #define GD32G553_REG_ON_MIN_PROTOCOL_MINOR 11u
 
+/** GPIO expander line carrying the CAN transceiver standby (GD32 pad
+ *  `PB13`).  Valid only on bridges advertising protocol minor
+ *  @ref GD32G553_CAN_STBY_MIN_PROTOCOL_MINOR or newer. */
+#define GD32G553_GPIO_LINE_CAN_STBY 20u
+
+/** Minimum protocol MINOR that implements
+ *  @ref GD32G553_GPIO_LINE_CAN_STBY. */
+#define GD32G553_CAN_STBY_MIN_PROTOCOL_MINOR 13u
+
 /** GPIO expander bridge bit (not the Linux gpiochip line, which is 22)
  *  carrying E1M IO15 (GD32 pad `PB4`).  Valid only on
  *  bridges advertising protocol minor
