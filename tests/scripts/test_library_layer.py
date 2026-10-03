@@ -596,6 +596,33 @@ def test_ros2_edge_image_pulls_rclcpp_and_alp_perception() -> None:
     rdepends = packagegroup.split('RDEPENDS:${PN} = "', 1)[1].split('"', 1)[0]
     assert "rclcpp" in rdepends
     assert "alp-perception" in rdepends
+    # The node recipe floats on branch=main (AUTOREV) and its example is not on
+    # main until dev is promoted: keep it out of the image closure until then.
+    assert "alp-ros2-temperature" not in rdepends
+
+
+def test_ros2_is_opt_in_by_layer_presence() -> None:
+    """ROS recipes parse only with upstream meta-ros2-humble present, and
+    ALP_ENABLE_ROS2 defaults from that, so ROS-free builds stay ROS-free."""
+    meta = REPO / "meta-alp-sdk"
+    layer_conf = (meta / "conf" / "layer.conf").read_text(encoding="utf-8")
+    assert "ros2-humble-layer:${LAYERDIR}/dynamic-layers/ros2-humble-layer/" in layer_conf
+    # No static BBFILES glob may reach the dynamic layer (it would parse without meta-ros).
+    for line in layer_conf.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        if "BBFILES" in line and "BBFILES_DYNAMIC" not in line:
+            assert "dynamic-layers/ros2-humble-layer" not in line
+    assert not any(
+        "dynamic-layers" in ln and "BBFILES +=" in ln and "ros2-humble-layer" in ln
+        for ln in layer_conf.splitlines()
+        if not ln.lstrip().startswith("#")
+    )
+
+    common_inc = (meta / "recipes-images" / "alp-image-common.inc").read_text(encoding="utf-8")
+    assert "ALP_ENABLE_ROS2 ?=" in common_inc
+    assert "'ros2-humble-layer' in" in common_inc
+    assert "${ALP_ROS2_FEATURE_OFF}" in common_inc.split("IMAGE_FEATURES:remove", 1)[1].splitlines()[0]
 
 
 # ---------------------------------------------------------------------

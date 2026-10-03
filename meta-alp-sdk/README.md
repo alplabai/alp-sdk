@@ -239,7 +239,9 @@ bitbake-layers add-layer ../meta-econsys
 # 4b. ROS 2 (opt-in; docs/bring-up-ros2.md).  Upstream meta-ros is not in
 #     the BSP tarball.  Without these layers every alp-image-* still builds,
 #     ROS-free (ALP_ENABLE_ROS2 defaults to 0).  Optional Renesas compat layer
-#     from rzv_ros: add it ONLY together with meta-ros.
+#     from rzv_ros: add it ONLY together with meta-ros AND meta-rz-graphics
+#     (its bbappends are not dynamic and fail the parse otherwise; its licence
+#     is unasserted upstream -- docs/bring-up-ros2.md).
 git clone -b scarthgap https://github.com/ros/meta-ros ../meta-ros
 bitbake-layers add-layer ../meta-ros/meta-ros-common
 bitbake-layers add-layer ../meta-ros/meta-ros2

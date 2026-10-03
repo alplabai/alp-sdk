@@ -2,7 +2,8 @@
 #
 # Builds the minimal ROS 2 alp_som_temperature node from
 # alp-sdk/examples/v2n/v2n-ros2-som-temperature/ (portable <alp/temperature.h>
-# only).  Lives in dynamic-layers/ros2-humble-layer/ -- parsed only when
+# only).  NOT in packagegroup-alp-ros until the example is on main
+# (SRCREV floats on branch=main).  Lives in dynamic-layers/ros2-humble-layer/ -- parsed only when
 # upstream meta-ros2-humble is in bblayers.conf.  BENCH-UNVERIFIED.
 #
 # Copyright (C) 2026 Alp Lab AB

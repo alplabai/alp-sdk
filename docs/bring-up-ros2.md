@@ -16,7 +16,7 @@ opt-in switch plus one portable-API example on top (ADR 0017).
 | Piece | Source | ADR 0017 tier |
 |---|---|---|
 | ROS 2 Humble recipes (`rclcpp`, messages, `ament_*`) | upstream [`ros/meta-ros`](https://github.com/ros/meta-ros), branch `scarthgap` (`meta-ros-common` + `meta-ros2` + `meta-ros2-humble`) | Tier-1, consumed as-is |
-| RZ/V2N compat bbappends for that Humble set | Renesas [`renesas-rz/rzv_ros`](https://github.com/renesas-rz/rzv_ros), `yocto/meta-rz-features-ros/meta-rzv2-ros-humble` (collection `rzv2-ros-humble`) | Tier-1, consumed as-is, optional |
+| RZ/V2N compat bbappends for that Humble set | Renesas [`renesas-rz/rzv_ros`](https://github.com/renesas-rz/rzv_ros), `yocto/meta-rz-features-ros/meta-rzv2-ros-humble` (collection `rzv2-ros-humble`) | Tier-1 (licence unasserted, see below), optional, not recommended until resolved |
 | `ALP_ENABLE_ROS2` switch, `packagegroup-alp-ros`, node recipes | `meta-alp-sdk` (`conf/layer.conf` `BBFILES_DYNAMIC`, `recipes-images/alp-image-common.inc`, `dynamic-layers/ros2-humble-layer/`) | Alp glue (no driver) |
 | `alp_som_temperature` node | [`examples/v2n/v2n-ros2-som-temperature`](../examples/v2n/v2n-ros2-som-temperature/) | portable `<alp/temperature.h>` only |
 | micro-ROS on the CM33 | [ADR 0035](adr/0035-micro-ros-cross-core-transport.md) (Proposed, no implementation) | n/a |
@@ -25,7 +25,9 @@ opt-in switch plus one portable-API example on top (ADR 0017).
 **Humble** on **scarthgap** (`LAYERSERIES_COMPAT_rzv2-ros-humble = "scarthgap"`,
 `meta-ros2-humble` upstream). Its bbappends fix Renesas-BSP build problems of
 that set (for example ament packages installing into `share/share`, the
-darknet/DRP-AI sample recipes). We do **not** apply its `meta-ros-humble.patch`
+darknet/DRP-AI sample recipes). Its image-level scrub of the `/opt/ros/humble/share`
+TMPDIR leftovers is a bbappend on `core-image-minimal` and `core-image-weston`
+only, so it does **not** reach `alp-image-*`. We do **not** apply its `meta-ros-humble.patch`
 (it edits `local.conf` and installs a fixed package list into every
 `core-image-*`); the Alp images pick packages through the `alp-ros` feature
 group instead.
@@ -51,6 +53,22 @@ bitbake-layers add-layer ../meta-ros/meta-ros2-humble
 bitbake-layers add-layer ../rzv_ros/yocto/meta-rz-features-ros/meta-rzv2-ros-humble
 ```
 
+`rzv_ros` needs **both** `meta-ros` and `meta-rz-graphics` (the RZ AI SDK
+graphics layer): `meta-rzv2-ros-humble` registers its bbappends with a plain
+`BBFILES +=` (no `BBFILES_DYNAMIC`), so its `mali-library` bbappend is a
+dangling append and fails the parse whenever `meta-rz-graphics` is absent.
+
+**Licence.** GitHub reports the `rzv_ros` licence as `NOASSERTION`;
+`LICENSE.md` points at per-folder `licenses/` directories, and only
+`docker/humble/licenses/` exists, `yocto/` has none. Resolve that before
+making the layer a recommendation; the Alp wiring does not depend on it.
+
+**Do not put `darknet-drp-ros` or `drp-ai-tvm` from `rzv_ros` into an Alp
+image.** `recipes-darknet/drp-ai-tvm_2.5.1.bb` ships at `BBFILE_PRIORITY` 99
+with `PRODUCT="V2N"` hard-coded and installs a second `libtvm_runtime`, which
+collides with `meta-rz-drpai`'s `lib-tvm` (the duplicate runtime #2660
+removes).
+
 Pin both clones to the commits you validated; this page does not pin them
 because no build has been run.
 
@@ -59,7 +77,7 @@ because no build has been run.
 | `ALP_ENABLE_ROS2` | Effect |
 |---|---|
 | unset (default) | `"1"` if `ros2-humble-layer` is in `bblayers.conf`, else `"0"` |
-| `"1"` | `alp-ros` image feature honoured: `packagegroup-alp-ros` (rclcpp, message/transport stack, `alp-perception`, `alp-ros2-temperature`). Parse error if the layer is missing |
+| `"1"` | `alp-ros` image feature honoured: `packagegroup-alp-ros` (rclcpp, message/transport stack, `alp-perception`). Parse error if the layer is missing |
 | `"0"` | `alp-ros` is removed from `IMAGE_FEATURES` even if an image requests it |
 
 `alp-image-edge` requests `alp-ros`; `alp-image-base` / `alp-image-prod` do not
@@ -80,8 +98,11 @@ MACHINE=e1m-v2m103-a55 bitbake alp-image-edge
 MACHINE=e1m-v2n101-a55 bitbake alp-image-edge -c populate_sdk   # colcon SDK
 ```
 
-Build only the new node first when iterating:
-`bitbake alp-ros2-temperature`.
+The `alp-ros2-temperature` node recipe is **not** in `packagegroup-alp-ros`
+yet: it fetches `branch=main` at `${AUTOREV}` and the example is not on `main`
+until dev is promoted (otherwise `do_configure` fails with a missing source
+dir). Build it explicitly with `bitbake alp-ros2-temperature` once the example
+is on `main`, and add it to the packagegroup then.
 
 ### Out-of-image build (colcon in the Yocto SDK)
 
@@ -99,20 +120,24 @@ cd .. && colcon build --packages-select alp_som_temperature
 
 ```bash
 ros2 run alp_som_temperature som_temperature_node
-ros2 topic echo /alp/som_temperature      # sensor_msgs/Temperature, degC
+ros2 topic echo /alp/soc_temperature      # sensor_msgs/Temperature, degC (SoC die)
+ros2 topic echo /alp/som_temperature      # on-module sensor (see below)
 ```
 
-`alp_temperature_read_milli_c()` is implemented on the Zephyr AEN backend only
-today; the Linux build returns `ALP_ERR_NOSUPPORT` (see
-[`include/alp/temperature.h`](../include/alp/temperature.h)). On V2N/V2M the
-node therefore logs one NOSUPPORT warning and publishes nothing until a Linux
-backend lands; the node source does not change when it does.
+`/alp/soc_temperature` comes from `alp_temperature_read_soc_milli_c()`, whose
+Linux backend reads the thermal zones whose type starts with `cpu-thermal`
+([`include/alp/temperature.h`](../include/alp/temperature.h)). The on-module
+sensor call `alp_temperature_read_milli_c()` is implemented on the Zephyr AEN
+backend only today; on V2N/V2M it returns `ALP_ERR_NOSUPPORT`, so the node
+logs one notice and `/alp/som_temperature` stays silent until a Linux backend
+lands (it would read the upstream `tmp102` hwmon driver's sysfs; no user-space
+sensor driver). The node source does not change when it does.
 
 ## Licence-gated vendor packages (not in this repo)
 
 ROS 2 itself needs none. The Renesas packages that sit near it are gated and
 never enter the public repo: the Mali GPU DDK (`meta-rz-graphics`; the
-`rzv_ros` `mali-library` bbappend only applies where that layer is present),
+`rzv_ros` `mali-library` bbappend needs that layer, see above),
 the ISP support package, RUHMI and the DRP-AI translator. Public recipes only
 reference them opt-in (`ALP_ENABLE_DRPAI` / `RUHMI_DRPAI_TVM_DIR`); Alp-built
 images use the private mirror.
