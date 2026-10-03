@@ -854,6 +854,36 @@ def build(ctx, x: dict | None = None) -> list[Check]:
             f"dd if=/dev/mtd1 bs=4096 skip={off // 4096} count=16 2>/dev/null | md5sum", j_cm33,
             tools=("dd", "md5sum"))
 
+    # The CM33 stock image (firmware/alp-stock-shim) writes a beacon into the rsctbl window the A55
+    # DT reserves: magic, version, ~1 Hz counter. Read-only /dev/mem reads; a counter that moved
+    # proves the core is running, not that it ran once.
+    def j_cm33_running(o):
+        m = re.search(r"^B (\S+) (\S+) (\S+)$", o, re.M)
+        c = re.search(r"^C (\S+)$", o, re.M)
+        try:
+            magic, ver, c0 = (int(v, 16) for v in m.groups())
+            c1 = int(c[1], 16)
+        except (AttributeError, ValueError, TypeError):
+            raise Unread(f"beacon not readable: {o.strip()[-80:]!r}") from None
+        b = _want(x, "cm33_beacon")
+        got = f"magic {magic:#010x}, version {ver}, counter {c0} then {c1}"
+        if magic != b["magic"] or ver != b["version"]:
+            raise Fail(f"{got}: want magic {b['magic']:#010x}, version {b['version']}")
+        lo, hi = b["heartbeat_advance"]
+        if not lo <= (c1 - c0) & 0xFFFFFFFF <= hi:
+            raise Fail(f"{got}: the counter must advance by {lo}..{hi} in 2 s")
+        return f"counter {c0} then {c1}"
+    addr = (x.get("cm33_beacon") or {}).get("address", 0)      # the judge refuses a missing expectation
+    _rd = ("import mmap,os,struct,sys;a=int(sys.argv[1],16);"
+           "m=mmap.mmap(os.open('/dev/mem',os.O_RDONLY|os.O_SYNC),4096,mmap.MAP_SHARED,mmap.PROT_READ,offset=a&~4095);"
+           "print(hex(struct.unpack_from('<I',m,a&4095)[0]))")
+    add("cm33_running", "the CM33 liveness beacon is present and its counter advances",
+        "if command -v devmem >/dev/null 2>&1; then r() { devmem $1 32 2>&1; }\n"
+        f"elif py=$(command -v python3); then r() {{ \"$py\" -c {q(_rd)} $1 2>&1 | tail -n1; }}\n"
+        'else echo "ALPUNREAD missing tool: devmem or python3"; exit 0; fi\n'
+        f'echo "B $(r {addr:#x}) $(r {addr + 4:#x}) $(r {addr + 8:#x})"; sleep 2; echo "C $(r {addr + 8:#x})"',
+        j_cm33_running, timeout_s=15, est_s=2.2, blocking=cm33 is not None)
+
     def j_uio(o):
         missing = [n for n in _want(x, "openamp_uio_names") if n not in o.split()]
         if missing:

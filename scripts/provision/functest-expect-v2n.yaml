@@ -22,6 +22,7 @@ schema: 1
 informational:
   - rtc_time_set        # nothing sets the RTC during provisioning today
   - rtc_backup_mode     # reports the RV-3028 backup switchover mode
+  - cm33_running        # BLOCKING by itself once the bundle carries a cm33 image, like cm33_firmware
   - cm33_firmware       # the flow programs no CM33 image today; BLOCKING by itself once the bundle carries one
   - dmesg_clean         # the allowlist below comes from ONE boot log
   - wifi_regdomain
@@ -80,6 +81,13 @@ i2c_ids:
 
 # --- SoM: system ----------------------------------------------------------------------------
 usb_root_hubs_min: 4                         # measured (xHCI x2, OHCI, EHCI)
+# The beacon firmware/alp-stock-shim writes (A55 view of the rsctbl window, top 16 bytes): magic,
+# version, then a counter that grows ~1 per second. A re-read 2 s later must see it advance 1..4.
+cm33_beacon:                                 # the firmware's own layout (README); not yet seen on a bench
+  address: 0x4F700FF0
+  magic: 0xA10D0683
+  version: 1
+  heartbeat_advance: [1, 4]
 openamp_uio_names: [rsctbl, mhu-shm, vring-ctl0, vring-ctl1, vring-shm0, vring-shm1, mhu-uio]
 systemd_failed_allow:
   - systemd-networkd-wait-online.service     # end1 unplugged

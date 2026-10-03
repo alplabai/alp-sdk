@@ -639,7 +639,7 @@ expected value; **data** = a data path was exercised end to end.
 | secure element | I2C scan with a wake retry (answers) | `secure_element`: protocol-level state read (ID) | - |
 | GD32 bridge | `gd32_flash`: md5 readback, `GET_VERSION` (data) | `gd32_bridge`: protocol version with CRC; `gd32_gpiochip` (ID) | - |
 | SoC thermal zones | not tested | `thermal` (value) | - |
-| CM33 | not tested | `cm33_firmware` (informational: not blank; **blocking with an md5 compare once the bundle carries a `cm33` component**), `openamp_uio` (answers) | - |
+| CM33 | not tested | `cm33_firmware` (informational: not blank; **blocking with an md5 compare once the bundle carries a `cm33` component**), `cm33_running` (the beacon counter advances; informational, **blocking once the bundle carries a `cm33` component**), `openamp_uio` (answers) | - |
 | USB host | not tested | `usb_host`: controllers probed (answers); `usb_device` (data) | `usb_stick` |
 | SD slot | `boot_sd_linux` runs Linux from it (data) | `sd_host` (answers); `sd_card` (data) | `sd_card` |
 | supply power | census: one current reading, warns above 0.40 A | `supply_power_idle` (value: volts x amps) | a supply that measures |
@@ -672,8 +672,8 @@ by `eeprom_manifest`.
 - **Wi-Fi / Bluetooth transmit, association, throughput.** A scan proves receive only.
 - **DRP-AI inference and GPU rendering.** The image carries no model and no headless render
   test; only driver and device node are checked.
-- **CM33 running and its RPC echo.** Without a `cm33` component in the bundle the flow programs
-  no CM33 image (so `cm33_firmware` reports a blank region), the echo needs an example binary that is not in
+- **CM33 RPC echo.** `cm33_running` only reads the stock image's liveness beacon (see "CM33 image"); without a
+  `cm33` component in the bundle the flow programs no CM33 image (so `cm33_firmware` reports a blank region), the echo needs an example binary that is not in
   the image, and the HiL spec says one attach per CM33 boot.
 - **Secure-element cryptography.** Needs the host-library example binary.
 - **Supply power under load.** One figure exists (0.42..0.44 A at 15 V, measured on the bench on
@@ -743,6 +743,7 @@ bounds for a hung command, not the expected time.
 | `pmic_registers` | every register of `--pmic-expect` | all equal under their masks | 15 s | 0.6 s |
 | `thermal` | every `thermal_zone*/temp` | >= 1 zone, all 10..105 degC | 5 s | 0.1 s |
 | `cm33_firmware` | md5 at `mtd1` + `0x1A0000` | no `cm33` in the bundle: 64 KiB not blank (informational). With one: md5 of exactly its size = the bundle's (blocking) | 5 s / 30 s | 0.1 s / 1 s |
+| `cm33_running` | `devmem`, else a python3 `/dev/mem` read, of `0x4F700FF0` (magic), `+4` (version), `+8` (counter); the counter again after 2 s | magic `0xA10D0683`, version 1, counter advanced by 1..4; informational, blocking with a `cm33` in the bundle; `unread (missing tool: devmem or python3)` on an image with neither | 15 s | 2.2 s |
 | `openamp_uio` | `/sys/class/uio/uio*/name` | the seven OpenAMP nodes | 5 s | 0.1 s |
 | `usb_host` | `/sys/bus/usb/devices/usb*` | >= 4 root hubs | 5 s | 0.1 s |
 | `usb_device`, `sd_card` | `dd` 4 MiB from the device | device present, `4+0 records out` | 15 s | 1 s |
@@ -858,6 +859,7 @@ Every E1M-V2M103 is to ship with a CM33 firmware image (maintainer decision); wh
 - **Padding.** The bundle's `cm33` component (`flash_target` `xspi:mtd1`) is the stored image: `0x3000` zero bytes followed by Zephyr's `zephyr.bin`, the same bytes the `rzv2n_mtd_flash` west runner writes. `write_cm33` and `cm33_firmware` md5 exactly these bytes.
 - **Size limit.** At most `0x30000` bytes in all; BL2 silently truncates a larger image. `preflight` and `check_som_bundle.py` refuse a `cm33` whose first `0x3000` bytes are not zero, whose initial SP (word at `0x3000`) is outside SRAM0 (`0x08xxxxxx`, the runner's test), whose reset vector (word at `0x3004`) lacks the Thumb bit or lies outside `0x08003000..0x08033000`, or that exceeds `0x30000`. The FIP must still end below `0x1A0000`; its erase never reaches the CM33 region.
 - **First run.** BL2 starts the CM33 only on an xSPI boot, so the image first runs in `cold_boot_test`. The CM33 cannot be restarted from Linux.
+- **Liveness beacon.** `firmware/alp-stock-shim` writes a magic (`0xA10D0683`, written last), a version (`1`) and a counter (+1 about every second) into the `rsctbl` window the A55 DT reserves, A55 `0x4F700FF0` / `0x4F700FF4` / `0x4F700FF8` (the `rpmsg-v2n` example's layout). The CM33 has no console here, so `cm33_running` reads the three words, waits 2 s and reads the counter again; magic and version must match and the counter must advance by 1..4 (expected values: `cm33_beacon` in `functest-expect-v2n.yaml`). Read-only. It proves the stock image runs; a different CM33 image fails the check unless it writes the same beacon.
 - **No verification at boot.** No header, signature or checksum; only the tool's md5 readback and the blocking `cm33_firmware` check cover the image.
 
 ## Block-map write of the system image

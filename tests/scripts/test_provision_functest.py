@@ -106,6 +106,7 @@ def _good(ctx) -> dict[str, str]:
         "pmic_registers": "R act88760 0x25 0x40 0x80\nR act88760 0x25 0x10 0x08",
         "thermal": "Z thermal_zone0 46000\nZ thermal_zone1 47500",
         "cm33_firmware": "0123456789abcdef0123456789abcdef  -",
+        "cm33_running": "B 0xA10D0683 0x1 0x2a\nC 0x2c",
         "openamp_uio": "rsctbl\nmhu-shm\nvring-ctl0\nvring-ctl1\nvring-shm0\nvring-shm1\nmhu-uio",
         "usb_host": "4",
         "usb_device": "dev=sda\n4+0 records out",
@@ -182,6 +183,7 @@ BAD = {
     "pmic_registers": "R act88760 0x25 0x40 0x00\nR act88760 0x25 0x10 0x08",
     "thermal": "Z thermal_zone0 46000\nZ thermal_zone1 -274000",
     "cm33_firmware": "ecb99e6ffea7be1e5419350f725da86b  -",          # md5 of 64 KiB of 0xff
+    "cm33_running": "B 0xA10D0683 0x1 0x2a\nC 0x2a",                        # counter stuck
     "openamp_uio": "rsctbl\nmhu-shm",
     "usb_host": "2",
     "usb_device": "",
@@ -638,7 +640,7 @@ def test_dry_run_lists_every_check_and_touches_nothing(tmp_path):
     ctx, unit = _setup(tmp_path, fixtures={}, execute=False)
     res = steps.run_steps(ctx, only=["functional_test"])
     ft = res[-1]
-    assert ft.status == "planned" and "would run 72 functional checks, estimated" in ft.detail
+    assert ft.status == "planned" and "would run 73 functional checks, estimated" in ft.detail
     assert unit.commands == [] and not unit.files
     assert any(c.startswith("WOULD: eth_phy_id: both PHYs answer on MDIO") for c in ft.commands)
     assert any("[skipped: no fixture wifi_ap]" in c for c in ft.commands)
@@ -945,6 +947,11 @@ MORE_BAD = [
     ("thermal", "", "unread (no thermal zone reports"),
     ("thermal", "Z thermal_zone0 106000", "fail (thermal_zone0=106 degC outside 10..105 degC"),
     ("cm33_firmware", "d41d8cd98f00b204e9800998ecf8427e  -", "unread (mtd1 not readable"),
+    ("cm33_running", "B 0xA10D0683 0x1 0x2a\nC 0x2a", "fail (magic 0xa10d0683, version 1, counter 42 then 42: the counter must advance by 1..4 in 2 s"),
+    ("cm33_running", "B 0x0 0x0 0x0\nC 0x0", "fail (magic 0x00000000, version 0, counter 0 then 0: want magic 0xa10d0683, version 1"),
+    ("cm33_running", "B 0xA10D0683 0x2 0x5\nC 0x6", "fail (magic 0xa10d0683, version 2, counter 5 then 6: want magic"),
+    ("cm33_running", "ALPUNREAD missing tool: devmem or python3", "unread (missing tool: devmem or python3)"),
+    ("cm33_running", "B devmem: mmap: Operation not permitted", "unread (beacon not readable"),
     ("usb_device", "dev=sda\n0+0 records out", "fail (sda: read failed"),
     ("systemd_failed", "a.service loaded failed failed A\nb.mount loaded failed failed B", "fail (failed units: a.service b.mount"),
     ("dmesg_fatal", "<3>[ 9.0] renesas-gbeth 15c30000.ethernet end0: Failed to reset the dma", "fail (kernel log: "),
@@ -1205,6 +1212,20 @@ def _cm33_bundle(tmp_path):
     b["components"].append({"role": "cm33", "file": "artifacts/cm33.bin", "size_bytes": len(image),
                             "sha256": functest.hashlib.sha256(image).hexdigest(), "flash_target": "xspi:mtd1"})
     return (d, b), image
+
+
+def test_cm33_running_is_informational_without_a_cm33_component_and_blocking_with_one(tmp_path):
+    for d in ("a", "b"):
+        (tmp_path / d).mkdir()
+    bundle, _ = _cm33_bundle(tmp_path / "b")
+    x = functest.load_expect()
+    ctx, _u = _setup(tmp_path / "a", {"cm33_running": "B 0x0 0x0 0x0\nC 0x0"})
+    by = {c.name: c for c in functest.build(ctx)}
+    assert "cm33_running" in functest.informational(list(by.values()), x)       # no cm33 in the bundle
+    ctx, _u = _setup(tmp_path, {"cm33_running": "B 0x0 0x0 0x0\nC 0x0"}, bundle=bundle)
+    by = {c.name: c for c in functest.build(ctx)}
+    assert by["cm33_running"].blocking and "cm33_running" not in functest.informational(list(by.values()), x)
+    assert by["cm33_running"].cmd.count("0x4f700ff8") == 2 and "/dev/mem" in by["cm33_running"].cmd
 
 
 def test_cm33_firmware_is_blocking_with_an_md5_compare_once_the_bundle_carries_an_image(tmp_path):
