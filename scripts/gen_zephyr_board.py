@@ -2762,8 +2762,9 @@ def _v2n_dts(
         "\t\t * Bringing it up enables RX on a floating RXD, whose receive-error",
         "\t\t * interrupt (sci0 eri = NVIC 114) escalates to a Zephyr fatal",
         "\t\t * (arch_system_halt) and hangs the CM33 before main() ever runs.",
-        "\t\t * Leave the console unset (sci0 is disabled below).  Re-add these",
-        "\t\t * and re-enable sci0 only when a Pmod USB-UART is attached.",
+        "\t\t * Leave the UART console unset (sci0 is disabled below); only the",
+        "\t\t * RAM console is chosen.  Re-add zephyr,console/zephyr,shell-uart and",
+        "\t\t * re-enable sci0 only when a Pmod USB-UART is attached.",
         "\t\t */",
         "\t};",
         "",
@@ -2786,7 +2787,8 @@ def _v2n_dts(
         "\t * 0x9f800000 up.  Do not move it into any of those.",
         "\t */",
         "\tram_console: memory@9f710000 {",
-        '\t\tcompatible = "mmio-sram";',
+        '\t\tcompatible = "zephyr,memory-region";',
+        '\t\tzephyr,memory-region = "RAM_CONSOLE";',
         "\t\treg = <0x9f710000 0x4000>;",
         "\t};",
         "",
@@ -2986,6 +2988,9 @@ def _v2n_defconfig(links: dict[str, Any]) -> str:
         "# Second safety net for the day sci0 is enabled: the FSP always enables the\n"
         "# rxi/eri IRQs, and the Zephyr driver only IRQ_CONNECTs them under\n"
         "# UART_INTERRUPT_DRIVEN -- otherwise an unhandled NVIC line goes fatal.\n"
+        "# Inert while sci0 is disabled: the symbol depends on SERIAL_SUPPORT_INTERRUPT\n"
+        "# (selected only by an enabled SCI UART node), so Kconfig may warn that it\n"
+        "# was assigned y but got n.  It takes effect once sci0 is enabled.\n"
         "CONFIG_UART_INTERRUPT_DRIVEN=y\n"
         "\n"
         "# RAM console: the CM33 has no UART and no SWD yet, so printk lands in a\n"

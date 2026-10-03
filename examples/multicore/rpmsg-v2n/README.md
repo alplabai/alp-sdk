@@ -214,6 +214,9 @@ IPC-enabled CM33 image through `yocto_uio_drv.c`.  The CM33 window is
 3. **Check the A55 half**: `cat /sys/class/uio/uio*/name` lists `rsctbl`,
    `mhu-shm`, `vring-ctl0`, `vring-ctl1`, `vring-shm0`, `vring-shm1`,
    `mhu-uio`; `/proc/iomem` shows `4f700000-4fffffff : reserved`.
+   The CM33 RAM console (16 KiB, A55 view `0x4f710000`) can be dumped with
+   `dd if=/dev/mem bs=4096 skip=$((0x4f710000/4096)) count=4 | strings`
+   (see `docs/heterogeneous-builds.md`; not bench-verified).
 
 4. **Run the round trip.**  Either the HIL spec
    (`tests/hil/v2m103-x-evk/v2m103-rpmsg-echo-uio.yaml`, binary at

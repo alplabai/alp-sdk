@@ -268,6 +268,17 @@ Bench-verified on E1M-V2M103 silicon (2026-09-30): all seven devices bind
 `0x10480000`/`0x1000`), `/proc/interrupts` shows `GICv3 436 Level mhu-uio`,
 and `0x4f700000-0x4fffffff` is listed `reserved` in `/proc/iomem`.
 
+The same window also holds the CM33 RAM console: 16 KiB (`0x4000`) at
+CM33-NS `0x9f710000` (A55 view `0x4f710000`), clear of the rsctbl page
+(`0x9f700000..0x9f700fff`, liveness beacon at `0x9f700ff0..0x9f700fff`),
+the mhu-shm page (`0x9f701000..0x9f701fff`) and the vrings (from
+`0x9f800000`). The V2N101 and V2M101 CM33 board trees chose it as
+`zephyr,ram-console` with `CONFIG_RAM_CONSOLE=y`, because the CM33 has no
+UART console. Read it back from Linux after a CM33 boot:
+`devmem2`/`dd if=/dev/mem bs=4096 skip=$((0x4f710000/4096)) count=4` (needs
+`CONFIG_DEVMEM` and no `STRICT_DEVMEM` block on that range). Not
+bench-verified.
+
 For each `ipc:` entry, `tan build`
 emits a header both halves `#include`:
 

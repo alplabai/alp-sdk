@@ -17,6 +17,9 @@ CONFIG_UART_CONSOLE=n
 # Second safety net for the day sci0 is enabled: the FSP always enables the
 # rxi/eri IRQs, and the Zephyr driver only IRQ_CONNECTs them under
 # UART_INTERRUPT_DRIVEN -- otherwise an unhandled NVIC line goes fatal.
+# Inert while sci0 is disabled: the symbol depends on SERIAL_SUPPORT_INTERRUPT
+# (selected only by an enabled SCI UART node), so Kconfig may warn that it
+# was assigned y but got n.  It takes effect once sci0 is enabled.
 CONFIG_UART_INTERRUPT_DRIVEN=y
 
 # RAM console: the CM33 has no UART and no SWD yet, so printk lands in a
