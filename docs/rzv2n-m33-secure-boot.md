@@ -46,6 +46,16 @@ boot mode and, for eMMC/eSD boot, also runs `xspi_setup()` and opens the memmap
 device (the xSPI clock, reset and MSTOP are already released by `cpg_setup()` in
 every mode). The CM33 image has one home: xSPI `0x200000`. Not yet bench-verified.
 
+Bench check under eMMC boot (DSW1 mode 1, `bl2_bp_mmc`), on the console:
+
+1. Confirm BL2 printed `BL2: xSPI for BL22, id 0x<id>` (`id` is the flash device id in the low
+   24 bits; `0x0` or `0xffffff` means no device answered, `0xffffffff` means the xSPI reset
+   command failed). No such line means the BL2 is not the one carrying patch 0002.
+2. With the shim in `mtd1` + `0x1A0000`, Linux up: `devmem 0x4F700FF0 32` must read
+   `0xA10D0683` (the beacon magic), and `devmem 0x4F700FF8 32` must advance between two reads.
+   If the beacon is absent, check at least that the A55 still boots normally (Linux login), which
+   shows the xSPI window setup did not disturb the eMMC boot.
+
 The FIP plays no part: BL22 is not a FIP image, and BL2 starts the CM33 in
 `bl2_el3_plat_prepare_exit()` before handing off to BL31. A FIP ToC with two
 entries (BL31, BL33) is the normal layout.

@@ -16,6 +16,11 @@ which the vendor code did only for xSPI boot. cpg_setup() already releases the
 xSPI clock, reset and MSTOP in every boot mode, the BL2 MMU maps the xSPI
 window, and the xSPI TZC region is set in every boot mode.
 
+BL2 logs the result of xspi_setup() as "BL2: xSPI for BL22, id 0x%x": the
+flash device id (low 24 bits), 0 or 0xffffff when no device answered, or
+0xffffffff when the xSPI reset command failed. A bench log therefore shows
+whether xSPI came up in eMMC/eSD boot.
+
 Verification status:
 - Build-verified: compiles into bl2.bin for e1m-v2m103-a55 (bitbake,
   alplab-gw); both bl2_bp_spi and bl2_bp_mmc are cut from that one bl2.bin.
@@ -83,7 +88,7 @@ Signed-off-by: Alp Lab AB
  #endif
  		break;
  	default:
-@@ -385,6 +371,20 @@
+@@ -385,6 +371,23 @@
  		panic();
  	}
  
@@ -95,7 +100,10 @@ Signed-off-by: Alp Lab AB
 +	 */
 +	if (boot_mode != SYS_BOOT_MODE_SPI_1_8 &&
 +		boot_mode != SYS_BOOT_MODE_SPI_3_3) {
-+		xspi_setup();
++		/* xspi_setup() returns the device id (low 24 bits), or -1 if the reset failed */
++		unsigned int xspi_id = (unsigned int)xspi_setup();
++
++		NOTICE("BL2: xSPI for BL22, id 0x%x\n", xspi_id);
 +		register_io_dev_memmap(&memmap);
 +		io_dev_open(memmap, 0, &memdrv_dev_handle);
 +	}
