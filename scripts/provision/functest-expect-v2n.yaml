@@ -37,6 +37,9 @@ emmc_timing_regex: 'mmc HS200'               # measured
 emmc_read_mib: 64                            # the bounded read, as the HiL spec
 emmc_read_min_mib_s: 20                      # provisional
 xspi_jedec_regex: '^(?!0+$|f+$)[0-9a-f]{6,}$'   # any real JEDEC ID (not all-0 / all-f); pin the part privately
+boot_mode:                                   # datasheet R01DS0466EJ0120 / manual 1.9.3: production = normal mode
+  debug_enable: 0                            # MD_BOOT3 low; 1 = debug mode, never ships
+  boot_device: xspi                          # MD_BOOT[1:0] = High:Low; measured: all ledger units read 0x3c06
 
 # --- SoM: network ---------------------------------------------------------------------------
 eth_phy_id: 0x001cc916                       # measured: MII registers 2/3 of both PHYs

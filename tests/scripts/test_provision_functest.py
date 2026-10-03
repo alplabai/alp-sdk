@@ -71,6 +71,7 @@ def _good(ctx) -> dict[str, str]:
         "emmc_read": "64+0 records out\na=20.10 b=20.90",
         "xspi": 'dev:    size   erasesize  name\nmtd0: 00060000 00001000 "bl2"\nmtd1: 01fa0000 00001000 "fip"\n'
                 "jedec=1122aa",
+        "boot_mode": "0x00003c06",                                # measured: every ledger unit
         "eth_phy_id": "end0 0x001cc916\nend1 0x001cc916",          # real IDs
         "eth_mac": f"end0 {m0}\nend1 {m1}",
         "eth0_link": "if=end0 carrier=1 speed=100 duplex=full\nping=ok\nrx_delta=4",
@@ -150,6 +151,7 @@ BAD = {
     "emmc_mode": "timing spec:\t1 (mmc high-speed)\nhs200_failed=0",
     "emmc_read": "64+0 records out\na=20.10 b=40.10",              # 3 MiB/s
     "xspi": 'mtd0: 00060000 00001000 "bl2"\njedec=ffffff',
+    "boot_mode": "0x3e06",                                         # MD_BOOT3 high: strapped to debug mode
     "eth_phy_id": "end0 0x001cc916\nend1 0x001cc878",
     "eth_mac": "end0 02:00:00:00:00:01\nend1 02:00:00:00:00:02",     # the eMMC-CID fallback MAC
     "eth0_link": "if=end0 carrier=1 speed=10 duplex=half\nping=ok\nrx_delta=4",
@@ -605,6 +607,13 @@ def test_a_private_overlay_can_make_a_check_blocking_or_informational(tmp_path):
     assert res.evidence["test_functional"] == "fail (rtc_backup_mode, i2c_tps628640_44)"   # eth_phy_id is informational now
 
 
+def test_ship_check_blocks_a_debug_mode_unit():
+    cat = {"disposition": {"group": "d", "source": "", "mode": "manual", "ship_required": True}}
+    unit = {"disposition": "ship", "test_functional": "pass", "soc_boot_debug_en": "1"}
+    assert ledger_out.ship_check(unit, cat) == [ledger_out.DEBUG_MODE_REASON]
+    assert ledger_out.ship_check({**unit, "soc_boot_debug_en": "0"}, cat) == []
+
+
 def test_expect_file_schema_is_checked(tmp_path):
     bad = tmp_path / "e.yaml"
     bad.write_text("schema: 2\n", encoding="utf-8")
@@ -640,7 +649,7 @@ def test_dry_run_lists_every_check_and_touches_nothing(tmp_path):
     ctx, unit = _setup(tmp_path, fixtures={}, execute=False)
     res = steps.run_steps(ctx, only=["functional_test"])
     ft = res[-1]
-    assert ft.status == "planned" and "would run 73 functional checks, estimated" in ft.detail
+    assert ft.status == "planned" and "would run 74 functional checks, estimated" in ft.detail
     assert unit.commands == [] and not unit.files
     assert any(c.startswith("WOULD: eth_phy_id: both PHYs answer on MDIO") for c in ft.commands)
     assert any("[skipped: no fixture wifi_ap]" in c for c in ft.commands)
@@ -901,6 +910,9 @@ MORE_BAD = [
     ("emmc_read", "64+0 records out", "unread (no /proc/uptime stamps"),
     ("xspi", 'mtd0: 00060000 00001000 "bl2"\nmtd1: 00000000 00001000 "fip"\njedec=1122aa', "fail (mtd0/mtd1 not both"),
     ("xspi", 'mtd0: 00060000 00001000 "bl2"\nmtd1: 01fa0000 00001000 "fip"\njedec=000000', "fail (JEDEC ID"),
+    ("boot_mode", "0x3e06", "fail (debug_en=1 boot_device=xspi"),
+    ("boot_mode", "0x3c05", "fail (debug_en=0 boot_device=emmc"),
+    ("boot_mode", "garbage", "unread (SYS_LSI_MODE not readable"),
     ("eth_phy_id", "end0 0x00000000\nend1 0x001cc916", "fail (PHY ID {'end0': '0x00000000'}"),
     ("eth_mac", "end0 a2:c0:a6:00:00:10\nend1 a2:c0:a6:00:00:10", "fail (MACs"),
     ("eth0_link", "if=end0 carrier=0 speed=100 duplex=full\nping=ok\nrx_delta=4", "fail (end0: no carrier"),

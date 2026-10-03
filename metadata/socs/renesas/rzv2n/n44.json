@@ -263,6 +263,20 @@
     "CSI0":  {"label": "csi20", "capture": "cru0"}
   },
 
+  "sys_lsi": {
+    "source": "RZ/V2N Hardware Manual R01UH1071EJ0120 Rev.1.20, 4.3.3.2.75-77 (SYS_LSI_MODE/DEVID/PRR), 1.9.3 (debug mode)",
+    "registers": {
+      "soc_sys_lsi_mode": "0x10430300",
+      "soc_lsi_devid": "0x10430304",
+      "soc_prr": "0x10430308"
+    },
+    "lsi_mode": {
+      "debug_enable_bit": 9,
+      "md_boot_shift": 0,
+      "md_boot_width": 3,
+      "md_boot_device": ["esd", "emmc", "xspi", "scif-download"]
+    }
+  },
   "notes": [
     "Datasheet: 137 pages, R01DS0466EJ0120 v1.20, Sep 2025.",
     "Single die with 8 orderable SKUs that toggle Mali-G31 GPU, Mali-C55 ISP (RZ/V2NP suffix), and security-crypto extensions on/off.  N41/N42/N45/N46 are RZ/V2N (no ISP); N43/N44/N47/N48 are RZ/V2NP (with ISP).",

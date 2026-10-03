@@ -1329,7 +1329,8 @@ class Census(Step):
                  if any(c.get("role") == r for c in ctx.bundle.get("components", []))}
         if why := leftover_dxuart2_swap(ctx):
             raise Refused(why)
-        facts, notes = lt.census(t, bus, sizes, dxm1_present=ctx.family == "v2n-m1")
+        facts, notes = lt.census(t, bus, sizes, dxm1_present=ctx.family == "v2n-m1",
+                                  silicon=ctx.preset.get("silicon"))
         if bus["pmic"] is not None and self.reads_gpio4_otp:
             try:
                 # gd32_flash runs BEFORE census. When it applied the volatile
@@ -2061,6 +2062,8 @@ class ColdBootTest(Step):
             mode = uboot.parse_sys_lsi(text).get("soc_sys_lsi_mode")
             if mode != SYS_LSI_MODE_XSPI:
                 probs.append(f"SYS_LSI_MODE {mode} != {SYS_LSI_MODE_XSPI}")
+            if mode and lt.decode_lsi_mode(int(mode, 16), lt.sys_lsi_spec(ctx.preset["silicon"]))["soc_boot_debug_en"] == "1":
+                probs.append(ledger_out.DEBUG_MODE_REASON)
             # ACT88760 reg 0x10 after this (plain, tool-uninvolved) cold boot:
             # most units' OTP is already 0x08 (production/fixed); an early-OTP
             # unit (OTP 0x88, e.g. E1M-V2M103 2026W38-0001) needs U-Boot's

@@ -638,6 +638,7 @@ expected value; **data** = a data path was exercised end to end.
 | clock generator | `clkgen_verify`: full OTP image (data) | unchanged | - |
 | secure element | I2C scan with a wake retry (answers) | `secure_element`: protocol-level state read (ID) | - |
 | GD32 bridge | `gd32_flash`: md5 readback, `GET_VERSION` (data) | `gd32_bridge`: protocol version with CRC; `gd32_gpiochip` (ID) | - |
+| boot mode (debug strap) | census: `soc_sys_lsi_mode`, `soc_boot_debug_en`, `soc_md_boot`, `soc_boot_device`; `cold_boot_test` refuses a debug-mode unit (data) | `boot_mode` (value) | - |
 | SoC thermal zones | not tested | `thermal` (value) | - |
 | CM33 | not tested | `cm33_firmware` (informational: not blank; **blocking with an md5 compare once the bundle carries a `cm33` component**), `cm33_running` (the beacon counter advances; informational, **blocking once the bundle carries a `cm33` component**), `openamp_uio` (answers) | - |
 | USB host | not tested | `usb_host`: controllers probed (answers); `usb_device` (data) | `usb_stick` |
@@ -718,6 +719,7 @@ bounds for a hung command, not the expected time.
 | `emmc_mode` | mmc `ios` in debugfs, `dmesg` | timing `mmc HS200`, no `mmc_select_hs200 failed` | 5 s | 0.1 s |
 | `emmc_read` | drop the page cache, then `dd` 64 MiB from 1 GiB into the user area | `64+0 records out`, >= 20 MiB/s | 20 s | 2 s |
 | `xspi` | `/proc/mtd`, spi-nor `jedec_id` | `mtd0` and `mtd1` with a size, a real JEDEC ID | 5 s | 0.1 s |
+| `boot_mode` | `SYS_LSI_MODE` word (address and decode from the SoC description `sys_lsi`) | debug-enable bit (MD_BOOT3) = `boot_mode.debug_enable` (0), `MD_BOOT[1:0]` device = `boot_mode.boot_device` (`xspi`) | 5 s | 0.1 s |
 | `eth_phy_id` | MII registers 2/3 of both ports (python3 ioctl helper) | both `0x001cc916` | 5 s | 0.3 s |
 | `eth_mac` | `/sys/class/net/{if}/address` | both = the MACs derived from the serial | 5 s | 0.1 s |
 | `eth0_link`, `eth1_link` | carrier, speed, duplex, `ping -c 2 -I {if}` the gateway, RX counter | carrier, 100 or 1000 Mbit/s, full duplex, ping ok, >= 2 packets received on that port | 10 s | 1.5 s |
@@ -901,3 +903,13 @@ and `tests/scripts/test_provision_*.py`); no hardware is needed.
 `test_provision_functest.py` holds, for every functional check, a healthy
 answer and at least one wrong answer that must fail it, and runs the generated
 script's runner (framing, lanes, the timeout kill) on the host's own `sh`.
+
+## Debug-mode strap (MD_BOOT3)
+
+A production SoM boots in normal mode: MD_BOOT3 low. `SYS_LSI_MODE` (`0x10430300`, RZ/V2N hardware manual R01UH1071EJ0120 4.3.3.2.75) latches the pins on the rising edge of `PRST_N`: bit 9 `STAT_DEBUGEN` is 1 in debug mode, bits 2..0 are `MD_BOOT[2:0]`. The address, bit and device table are the `sys_lsi` block of `metadata/socs/renesas/rzv2n/n44.json`; the expected values are `boot_mode` in `scripts/provision/functest-expect-v2n.yaml`. `ship_check` blocks a unit whose `soc_boot_debug_en` is `1`. All three SYS registers (`0x300`, `0x304`, `0x308`) are confirmed against the manual; the census no longer marks them unverified.
+
+Bench steps (not yet run on hardware), in order:
+
+1. On a unit that reads `0x3c06` today, run `census` and confirm `soc_boot_debug_en: 0`, `soc_md_boot: 0x6`, `soc_boot_device: xspi`.
+2. Cold power-cycle the unit, run `functional_test`, confirm `test_ft_boot_mode: pass (debug_en=0 boot_device=xspi md_boot=0x6)`.
+3. On a sacrificial bench SoM only, strap MD_BOOT3 high, cold power-cycle (the strap is latched at `PRST_N`, a warm reset does not refresh it), run `census`: expect `soc_boot_debug_en: 1` and the register word `0x3e06`; `cold_boot_test` must refuse and `ship_check` must block with the debug-mode reason. Remove the strap afterwards.

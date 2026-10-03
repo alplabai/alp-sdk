@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import json
 import re
 import shlex
 import subprocess
@@ -34,11 +35,30 @@ EEPROM_SIZE = 0x4000           # N24S128: 16 KiB, 2-byte word address
 EEPROM_DEVICE_PAGE = 64        # hardware page; a page write must not cross it
 MANIFEST_LEN = 128
 
-# SoC SYS block. Offsets follow the RZ/V2H-family SYS layout (LSI_MODE / DEVID /
-# PRR at 0x300 / 0x304 / 0x308). UNVERIFIED for RZ/V2N against the hardware
-# manual -- every census value from here carries that marker.
-SYS_REGS = {"soc_sys_lsi_mode": 0x10430300, "soc_lsi_devid": 0x10430304, "soc_prr": 0x10430308}
-SYS_REGS_NOTE = "unverified addr"
+REPO = Path(__file__).resolve().parents[2]
+
+
+def sys_lsi_spec(silicon: str) -> dict:
+    """SYS_LSI register addresses and the MD_BOOT decode of a SoC, from its description
+    (``sys_lsi`` of metadata/socs/<vendor>/<family>/<part>.json); ``silicon`` is the preset's
+    ``vendor:family:part``. The hardware-manual facts live there, not in this file."""
+    vendor, family, part = silicon.split(":")
+    doc = json.loads((REPO / "metadata" / "socs" / vendor / family / f"{part}.json").read_text(encoding="utf-8"))
+    if "sys_lsi" not in doc:
+        raise ValueError(f"{silicon}: the SoC description has no sys_lsi block")
+    return doc["sys_lsi"]
+
+
+def decode_lsi_mode(value: int, spec: dict) -> dict[str, str]:
+    """Ledger keys decoded from a SYS_LSI_MODE read: the latched debug-mode strap (MD_BOOT3,
+    1 = debug mode), MD_BOOT[2:0] and the boot device MD_BOOT[1:0] selects."""
+    m = spec["lsi_mode"]
+    md = (value >> m["md_boot_shift"]) & ((1 << m["md_boot_width"]) - 1)
+    devices = m["md_boot_device"]
+    return {"soc_boot_debug_en": str((value >> m["debug_enable_bit"]) & 1),
+            "soc_md_boot": f"{md:#x}",
+            "soc_boot_device": devices[md & 3] if (md & 3) < len(devices) else "unknown"}
+
 
 ACT88760_ADDR = 0x25
 ACT88760_GPIO_REG = 0x10
@@ -930,13 +950,17 @@ def _reg_dump(t: LinuxTarget, bus: int, addr: int, regs) -> str:
     return " ".join(f"{r:#04x}={i2c_get(t, bus, addr, r):#04x}" for r in regs)
 
 
-def _devmem(t: LinuxTarget, addr: int) -> int:
+def devmem_cmd(addr: int) -> str:
+    """Shell fragment printing the 32-bit word at physical ``addr`` as ``0x...``."""
     page, off = addr & ~0xFFF, addr & 0xFFF
     py = ("import mmap,os,struct;f=os.open('/dev/mem',os.O_RDONLY|os.O_SYNC);"
           f"m=mmap.mmap(f,4096,mmap.MAP_SHARED,mmap.PROT_READ,offset={page});"
           f"print(hex(struct.unpack_from('<I',m,{off})[0]))")
-    out = t.run(f"devmem {addr:#x} 32 2>/dev/null || python3 -c {shlex.quote(py)}").stdout.strip()
-    return int(out, 16)
+    return f"devmem {addr:#x} 32 2>/dev/null || python3 -c {shlex.quote(py)}"
+
+
+def _devmem(t: LinuxTarget, addr: int) -> int:
+    return int(t.run(devmem_cmd(addr)).stdout.strip(), 16)
 
 
 # Raw MII registers 2/3 of each port, through SIOCGMIIPHY / SIOCGMIIREG (the image has python3 and no
@@ -978,7 +1002,8 @@ def net_carrier(t, name: str) -> bool:
 
 
 def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None = None,
-           emmc: str | None = None, dxm1_present: bool = True) -> tuple[dict[str, str], list[str]]:
+           emmc: str | None = None, dxm1_present: bool = True,
+           silicon: str | None = None) -> tuple[dict[str, str], list[str]]:
     """Read-only. Returns (auto ledger keys, notes on what could not be read).
 
     `sizes` = artefact byte lengths keyed by bundle role ("bl2", "fip",
@@ -999,8 +1024,12 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
             notes.append(f"{name}: {e}")
 
     def soc():
-        for key, addr in SYS_REGS.items():
-            facts[key] = f"{_devmem(t, addr):#x} ({SYS_REGS_NOTE} {addr:#x})"
+        if not silicon:
+            raise ValueError("no SoC reference (preset silicon:), SYS_LSI registers not read")
+        spec = sys_lsi_spec(silicon)
+        for key, addr in spec["registers"].items():
+            facts[key] = f"{_devmem(t, int(addr, 16)):#x}"
+        facts.update(decode_lsi_mode(int(facts["soc_sys_lsi_mode"], 16), spec))
 
     def cpu_mem():
         facts["cpu_khz"] = t.run("cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq").stdout.strip()

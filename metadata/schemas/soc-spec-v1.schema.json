@@ -34,6 +34,27 @@
       "enum": ["released", "preliminary", "deprecated"],
       "default": "released"
     },
+    "sys_lsi": {
+      "type": "object",
+      "description": "Boot-pin / identity registers a provisioning tool reads to judge a unit (RZ/V2N SYS block). `registers` maps a census ledger key to the register's absolute address. `lsi_mode` decodes the register holding the latched MD_BOOT pins: `debug_enable_bit` is the bit that is 1 when the unit is strapped to debug mode (a production unit must read 0), `md_boot_shift`/`md_boot_width` locate MD_BOOT[2:0], and `md_boot_device` names the boot device for MD_BOOT[1:0] (index = value).",
+      "additionalProperties": false,
+      "required": ["source", "registers", "lsi_mode"],
+      "properties": {
+        "source": { "type": "string" },
+        "registers": { "type": "object", "additionalProperties": { "type": "string", "pattern": "^0x[0-9a-f]{8}$" } },
+        "lsi_mode": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["debug_enable_bit", "md_boot_shift", "md_boot_width", "md_boot_device"],
+          "properties": {
+            "debug_enable_bit": { "type": "integer", "minimum": 0, "maximum": 31 },
+            "md_boot_shift": { "type": "integer", "minimum": 0, "maximum": 31 },
+            "md_boot_width": { "type": "integer", "minimum": 1, "maximum": 8 },
+            "md_boot_device": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
     "linux_dt": {
       "type": "object",
       "description": "Linux devicetree facts for on-die peripherals the Linux DT generators need, keyed by the instance name used in SoM `pad_routes` `dispatch_pin` (e.g. RIIC2, CSI0).  `label` is the SoC dtsi node label; `pinmux` maps a peripheral SIGNAL name (a key of the SoM peripheral map, e.g. RIIC2_SDA2 in v2n/renesas-peripheral-map.tsv; the port pin is resolved from that file) to its pinmux function code (the third argument of the vendor PORT_PINMUX macro); `capture` is the label of the capture unit a CSI receiver feeds.",

@@ -454,6 +454,24 @@ def build(ctx, x: dict | None = None) -> list[Check]:
         'cat /proc/mtd; echo "jedec=$(cat /sys/bus/spi/devices/*/spi-nor/jedec_id 2>/dev/null | head -n1)"', j_xspi,
         tools=("head",))
 
+    def j_boot_mode(o):
+        try:
+            spec = lt.sys_lsi_spec(str(ctx.preset["silicon"]))
+            got = lt.decode_lsi_mode(int(o.strip().splitlines()[-1], 16), spec)
+        except (KeyError, ValueError, OSError) as e:
+            raise Unread(f"SYS_LSI_MODE not readable or not described: {e}") from e
+        val = f"debug_en={got['soc_boot_debug_en']} boot_device={got['soc_boot_device']} md_boot={got['soc_md_boot']}"
+        if (got["soc_boot_debug_en"] != str(_want(x, "boot_mode.debug_enable"))
+                or got["soc_boot_device"] != _want(x, "boot_mode.boot_device")):
+            raise Fail(val)
+        return val
+    try:
+        _lsi_mode_cmd = lt.devmem_cmd(int(lt.sys_lsi_spec(str(ctx.preset["silicon"]))["registers"]["soc_sys_lsi_mode"], 16))
+    except (KeyError, ValueError, OSError):
+        _lsi_mode_cmd = "echo 'ALPUNREAD no sys_lsi description for this SoC'"
+    add("boot_mode", "the SoC latched normal boot mode, not debug mode (MD_BOOT3 low), from the boot device it ships with",
+        _lsi_mode_cmd, j_boot_mode, tools=("python3",))
+
     # ---- Ethernet -----------------------------------------------------------------------------
     nports = int((ctx.preset.get("on_module") or {}).get("ethernet_phy_count") or 2)
 
