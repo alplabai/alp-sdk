@@ -252,7 +252,7 @@ extern "C" {
 #define ALP_E1M_X_GPIO_IO12 12u  /**< pad AR23 */
 #define ALP_E1M_X_GPIO_IO13 13u  /**< pad AQ23 */
 #define ALP_E1M_X_GPIO_IO14 14u  /**< pad AR24 */
-#define ALP_E1M_X_GPIO_IO15 15u  /**< pad AQ24 */
+#define ALP_E1M_X_GPIO_IO15 15u  /**< pad AQ24 -> V2N PB4 via GD32 IO MCU */
 #define ALP_E1M_X_GPIO_IO16 16u  /**< pad AR25 */
 #define ALP_E1M_X_GPIO_IO17 17u  /**< pad AQ26 */
 #define ALP_E1M_X_GPIO_IO18 18u  /**< pad AR26 */
@@ -273,7 +273,7 @@ extern "C" {
  *
  * Trailing comment = E1M-X connector pad (x-v1.json) -> V2N routing.
  * IO33's pad exists on x-v1.0 but has no V2N route. */
-#define ALP_E1M_X_GPIO_IO26 26u  /**< pad F64 */
+#define ALP_E1M_X_GPIO_IO26 26u  /**< pad F64  -> V2N PC2  via GD32 IO MCU */
 #define ALP_E1M_X_GPIO_IO27 27u  /**< pad AN63 -> V2N PB11 via GD32 IO MCU */
 #define ALP_E1M_X_GPIO_IO28 28u  /**< pad AN64 -> V2N PE9  via GD32 IO MCU */
 #define ALP_E1M_X_GPIO_IO29 29u  /**< pad AO63 -> V2N PD11 via GD32 IO MCU */

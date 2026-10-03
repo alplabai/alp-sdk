@@ -104,8 +104,8 @@ Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  drivers/gpio/Kconfig            |   9 +
  drivers/gpio/Makefile           |   1 +
- drivers/gpio/gpio-gd32-bridge.c | 1008 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
- 3 files changed, 1018 insertions(+)
+ drivers/gpio/gpio-gd32-bridge.c | 1087 
+ 3 files changed, 1097 insertions(+)
  create mode 100644 drivers/gpio/gpio-gd32-bridge.c
 
 diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
@@ -145,7 +145,7 @@ new file mode 100644
 index 000000000..b202babc2
 --- /dev/null
 +++ b/drivers/gpio/gpio-gd32-bridge.c
-@@ -0,0 +1,1008 @@
+@@ -0,0 +1,1087 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * GPIO driver for the Alp Lab GD32 IO-MCU bridge (I2C transport).
@@ -282,7 +282,21 @@ index 000000000..b202babc2
 + * it so nothing drives the transceivers' standby pad by accident. */
 +#define GD32_RESERVED_LINE	20
 +#define GD32_SE_RST_LINE	21
-+#define GD32_NGPIO_TOTAL	22
++
++/*
++ * Lines 22/23: E1M IO15 (GD32 PB4) and IO26 (GD32 PC2), bridge GPIO bits
++ * 21/22 (protocol 0.15). Line 21 is already se-rst, so these two lines are
++ * one ABOVE their bridge bit: gd32_bridge_line_mask() translates a line
++ * offset to its GPIO_READ/GPIO_WRITE bit, and output_mask/output_vals
++ * hold BRIDGE bits, so the replay sends them unchanged.
++ */
++#define GD32_LINE_IO15		22
++#define GD32_LINE_IO26		23
++#define GD32_NGPIO_TOTAL	24
++
++/* Bridge protocol minor at which bits 21/22 (IO15/IO26) first exist. */
++#define GD32_PROTO_MINOR_IO_EXT		15
++#define GD32_IO_EXT_BIT_MASK		(BIT(21) | BIT(22))
 +
 +/* Bridge protocol minor at which lines 18/19 (bt-reg-on/wl-reg-on) first
 + * exist. A bridge below this minor has no notion of them. */
@@ -392,6 +406,10 @@ index 000000000..b202babc2
 +	 * -- reusing one mutex for both would self-deadlock.
 +	 */
 +	int wifi_bt_reg_on_status;
++	/* Same resolution rule for lines 22/23 (IO15/IO26, minor >= 15);
++	 * resolved by the same GET_VERSION as wifi_bt_reg_on_status, under
++	 * status_lock. */
++	int io_ext_status;
 +	struct mutex status_lock;
 +	/*
 +	 * Independent lines-18/19 resolver, NOT under state_lock (it has
@@ -423,6 +441,26 @@ index 000000000..b202babc2
 +	mutex_unlock(&gd32->status_lock);
 +
 +	return status;
++}
++
++/* Peek the cached lines-22/23 status; same contract as the wifi/bt one. */
++static int gd32_bridge_io_ext_status(struct gd32_bridge_gpio *gd32)
++{
++	int status;
++
++	mutex_lock(&gd32->status_lock);
++	status = gd32->io_ext_status;
++	mutex_unlock(&gd32->status_lock);
++
++	return status;
++}
++
++/* Line offset -> GPIO_READ/GPIO_WRITE bridge bit (lines 22/23 sit one above
++ * their bit because line 21 is se-rst). Line 21 itself never reaches the
++ * wire. */
++static u32 gd32_bridge_line_mask(unsigned int offset)
++{
++	return BIT(offset >= GD32_LINE_IO15 ? offset - 1 : offset);
 +}
 +
 +static int gd32_bridge_xfer(struct gd32_bridge_gpio *gd32, u8 cmd,
@@ -485,7 +523,7 @@ index 000000000..b202babc2
 +{
 +	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(chip);
 +	u8 req[4], rsp[4];
-+	u32 mask = BIT(offset), levels;
++	u32 mask = gd32_bridge_line_mask(offset), levels;
 +	int ret;
 +
 +	/* SE_RST has no read-back on the wire; report the last level sent. */
@@ -500,6 +538,9 @@ index 000000000..b202babc2
 +	 * implement.
 +	 */
 +	if ((mask & GD32_WIFI_BT_LINE_MASK) && gd32_bridge_wifi_bt_status(gd32) != 0)
++		return -EAGAIN;
++	/* Same gate for IO15/IO26: older firmware reads them back as 0. */
++	if ((mask & GD32_IO_EXT_BIT_MASK) && gd32_bridge_io_ext_status(gd32) != 0)
 +		return -EAGAIN;
 +
 +	put_unaligned_le32(mask, req);
@@ -553,8 +594,9 @@ index 000000000..b202babc2
 +				   unsigned int offset, int value)
 +{
 +	u8 req[8];
-+	u32 mask = BIT(offset);
++	u32 mask = gd32_bridge_line_mask(offset);
 +	bool is_wifi_bt = mask & GD32_WIFI_BT_LINE_MASK;
++	bool is_io_ext = mask & GD32_IO_EXT_BIT_MASK;
 +	int ret = 0;
 +
 +	if (offset == GD32_SE_RST_LINE)
@@ -583,7 +625,8 @@ index 000000000..b202babc2
 +	 * gd32_bridge_replay_work() would re-issue the write if support were
 +	 * ever (re)confirmed, so nothing would be lost even if this were hit.
 +	 */
-+	if (!is_wifi_bt || gd32_bridge_wifi_bt_status(gd32) == 0) {
++	if ((!is_wifi_bt || gd32_bridge_wifi_bt_status(gd32) == 0) &&
++	    (!is_io_ext || gd32_bridge_io_ext_status(gd32) == 0)) {
 +		put_unaligned_le32(mask, &req[0]);
 +		put_unaligned_le32(value ? mask : 0, &req[4]);
 +		ret = gd32_bridge_xfer(gd32, GD32_CMD_GPIO_WRITE, req, 8, NULL, 0);
@@ -665,7 +708,8 @@ index 000000000..b202babc2
 +	 * in the safe direction (a just-promoted pad briefly still reading
 +	 * as input), never the other way.
 +	 */
-+	if (offset == GD32_SE_RST_LINE || (READ_ONCE(gd32->output_mask) & BIT(offset)))
++	if (offset == GD32_SE_RST_LINE ||
++	    (READ_ONCE(gd32->output_mask) & gd32_bridge_line_mask(offset)))
 +		return -EPERM;
 +	return 0;	/* input; pull behaviour depends on bridge firmware version */
 +}
@@ -677,8 +721,8 @@ index 000000000..b202babc2
 +
 +	if (offset == GD32_SE_RST_LINE)
 +		return GPIO_LINE_DIRECTION_OUT;
-+	return (READ_ONCE(gd32->output_mask) & BIT(offset)) ? GPIO_LINE_DIRECTION_OUT
-+							     : GPIO_LINE_DIRECTION_IN;
++	return (READ_ONCE(gd32->output_mask) & gd32_bridge_line_mask(offset)) ?
++		GPIO_LINE_DIRECTION_OUT : GPIO_LINE_DIRECTION_IN;
 +}
 +
 +/*
@@ -717,6 +761,15 @@ index 000000000..b202babc2
 +	} else {
 +		gd32->wifi_bt_reg_on_status = 0;
 +	}
++	if (ver[0] != 0 || ver[1] < GD32_PROTO_MINOR_IO_EXT) {
++		if (gd32->io_ext_status != -ENODEV)
++			dev_warn(gd32->chip.parent,
++				 "bridge protocol %u.%u.%u has no IO15/IO26 lines (need major 0, minor >= %u); lines 22/23 will not be usable on this firmware\n",
++				 ver[0], ver[1], ver[2], GD32_PROTO_MINOR_IO_EXT);
++		gd32->io_ext_status = -ENODEV;
++	} else {
++		gd32->io_ext_status = 0;
++	}
 +	mutex_unlock(&gd32->status_lock);
 +
 +	return 0;
@@ -748,10 +801,29 @@ index 000000000..b202babc2
 +	return gd32_bridge_wifi_bt_status(gd32);
 +}
 +
++/* Lines 22/23: same single non-blocking attempt; the shared GET_VERSION in
++ * gd32_bridge_wifi_bt_poll_once() resolves both caches. */
++static int gd32_bridge_resolve_io_ext(struct gd32_bridge_gpio *gd32)
++{
++	int cached = gd32_bridge_io_ext_status(gd32);
++
++	if (cached != -EPROBE_DEFER)
++		return cached;
++
++	if (gd32_bridge_wifi_bt_poll_once(gd32))
++		return -EPROBE_DEFER;	/* still silent */
++
++	return gd32_bridge_io_ext_status(gd32);
++}
++
 +static int gd32_bridge_gpio_request(struct gpio_chip *chip,
 +				    unsigned int offset)
 +{
 +	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(chip);
++
++	/* IO15/IO26: gated on protocol minor >= 15, like lines 18/19 on 11. */
++	if (offset >= GD32_LINE_IO15)
++		return gd32_bridge_resolve_io_ext(gd32);
 +
 +	if (offset == GD32_RESERVED_LINE)
 +		return -ENODEV;
@@ -840,6 +912,8 @@ index 000000000..b202babc2
 +	xfer_mask = mask;
 +	if (gd32_bridge_wifi_bt_status(gd32) != 0)
 +		xfer_mask &= ~GD32_WIFI_BT_LINE_MASK;
++	if (gd32_bridge_io_ext_status(gd32) != 0)
++		xfer_mask &= ~GD32_IO_EXT_BIT_MASK;
 +
 +	if (xfer_mask) {
 +		put_unaligned_le32(xfer_mask, &req[0]);
@@ -1008,6 +1082,7 @@ index 000000000..b202babc2
 +	INIT_DELAYED_WORK(&gd32->replay_work, gd32_bridge_replay_work);
 +	INIT_DELAYED_WORK(&gd32->resolve_work, gd32_bridge_resolve_work);
 +	gd32->wifi_bt_reg_on_status = -EPROBE_DEFER;	/* not yet resolved */
++	gd32->io_ext_status = -EPROBE_DEFER;
 +
 +	gd32->chip.label	  = "gd32-bridge-gpio";
 +	gd32->chip.parent	  = &client->dev;
@@ -1054,6 +1129,10 @@ index 000000000..b202babc2
 +			gd32->wifi_bt_reg_on_status = -ENODEV;
 +		else
 +			gd32->wifi_bt_reg_on_status = 0;
++		if (ver[0] != 0 || ver[1] < GD32_PROTO_MINOR_IO_EXT)
++			gd32->io_ext_status = -ENODEV;
++		else
++			gd32->io_ext_status = 0;
 +	}
 +
 +	gd32->chip.ngpio	  = GD32_NGPIO_TOTAL;

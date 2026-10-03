@@ -670,10 +670,20 @@ static uint32_t get_le32(const uint8_t *p)
 	return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
+/* IO15/IO26 (bits 21/22) exist only from protocol minor 15; older firmware
+ * ignores them and reports success, so refuse here instead. */
+static bool gpio_mask_unsupported(const gd32g553_t *ctx, uint32_t mask)
+{
+	const uint32_t io_ext = ((uint32_t)1u << GD32G553_GPIO_LINE_E1M_IO15) |
+	                        ((uint32_t)1u << GD32G553_GPIO_LINE_E1M_IO26);
+	return (mask & io_ext) != 0u && ctx->version.minor < GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR;
+}
+
 alp_status_t gd32g553_gpio_read(gd32g553_t *ctx, uint32_t mask, uint32_t *levels)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (levels == NULL) return ALP_ERR_INVAL;
+	if (gpio_mask_unsupported(ctx, mask)) return ALP_ERR_NOSUPPORT;
 	uint8_t req[4];
 	put_le32(req, mask);
 	uint8_t      reply[4];
@@ -692,6 +702,7 @@ alp_status_t gd32g553_gpio_read(gd32g553_t *ctx, uint32_t mask, uint32_t *levels
 alp_status_t gd32g553_gpio_write(gd32g553_t *ctx, uint32_t mask, uint32_t levels)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (gpio_mask_unsupported(ctx, mask)) return ALP_ERR_NOSUPPORT;
 	uint8_t req[8];
 	put_le32(&req[0], mask);
 	put_le32(&req[4], levels);

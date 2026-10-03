@@ -373,7 +373,9 @@
 			"IO14", "IO16", "IO24", "IO25", "IO27", "IO28",
 			"IO29", "IO30", "IO31", "IO32", "IO34", "IO35",
 			"bt-reg-on", "wl-reg-on",
-			"" /* 20: reserved for can-stby, #2341 */, "se-rst";
+			"" /* 20: reserved for can-stby, #2341 */, "se-rst",
+			"IO15" /* 22: bridge bit 21, GD32 PB4 */,
+			"IO26" /* 23: bridge bit 22, GD32 PC2 */;
 	};
 
 	rv3028: rtc@52 {

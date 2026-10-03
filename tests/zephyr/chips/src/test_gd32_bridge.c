@@ -315,6 +315,22 @@ ZTEST(alp_chips, test_gd32g553_post_init_calls_reject_uninitialised)
 	zassert_equal(gd32g553_counter_read(&ctx, 0u, &ticks), ALP_ERR_NOT_READY);
 }
 
+/* IO15/IO26 (GPIO bits 21/22) need protocol minor >= 15: an older bridge
+ * ignores them and reports success, so the host refuses before any wire
+ * traffic.  Bits 0..20 are never gated. */
+ZTEST(alp_chips, test_gd32g553_gpio_io15_io26_need_minor_15)
+{
+	gd32g553_t ctx    = { 0 };
+	uint32_t   levels = 0u;
+	ctx.initialised   = true;
+	ctx.version.minor = GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR - 1u;
+
+	zassert_equal(gd32g553_gpio_read(&ctx, 1u << GD32G553_GPIO_LINE_E1M_IO15, &levels),
+	              ALP_ERR_NOSUPPORT);
+	zassert_equal(gd32g553_gpio_write(&ctx, 1u << GD32G553_GPIO_LINE_E1M_IO26, 0u),
+	              ALP_ERR_NOSUPPORT);
+}
+
 ZTEST(alp_chips, test_gd32g553_pwm_set_invalid_duty)
 {
 	gd32g553_t ctx = { .initialised = true };
