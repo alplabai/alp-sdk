@@ -16,6 +16,18 @@ ordered bench plan.
   `0021` adds `alp,rz-userspace-ipc` so the kernel never parses the CM33
   resource table, because the userspace OpenAMP master keeps the vrings. The
   driver already supports attach; no attach patch was needed.
+- **Production is attach-only (Q53).** The default `cm33_rproc` node carries
+  `alp,rz-attach-only` (new in `0021`): no start/stop/load, so a Linux root
+  process cannot stop or reload the CM33, whose SRAM stays secure. The opt-in
+  dev flag `ALP_V2N_CM33_SRAM_NS = "1"` (default `"0"`, no change) applies the
+  new TF-A patch `0002-rzv2n-optional-non-secure-access-to-CM33-SRAM.patch`
+  (`ALP_CM33_SRAM_NS=1`, TZC-400 SRAM 0/1 region 0 admits non-secure masters;
+  written from the public TF-A tree, not from the Renesas package), drops
+  `alp,rz-attach-only`, and installs `/lib/firmware/m33_sm.elf` through the new
+  `alp-cm33-firmware` recipe on `alp-image-edge`. With the flag on, a Linux
+  root process can rewrite CM33 code memory: dev images only, and
+  `alp-image-prod` now `bb.fatal`s if it is set. No provisioning ship-check
+  yet (the bundle carries no record of the flag).
 - **Window stays put.** The OpenAMP window remains A55 `0x4f700000` / CM33
   `0x9f700000` (9 MiB): Renesas' accepted range `0x40010000`–`0x43EFFFFF`
   lies in the secure 128 MB ahead of `memory@48000000` here, and the range

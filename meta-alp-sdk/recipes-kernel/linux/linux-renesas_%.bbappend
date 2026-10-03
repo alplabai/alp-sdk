@@ -97,6 +97,10 @@ ALP_V2N_DOORBELL_SPI ??= "404"
 # changes on top (0018 CPG syscon, 0021 userspace-owned vrings),
 # remoteproc.cfg, and the real cm33_rproc node in e1m-v2n-remoteproc.dtsi.
 ALP_V2N_REMOTEPROC ??= "0"
+# Dev-only (decision Q53): "1" lets Linux stop/reload the CM33 -- the node
+# loses alp,rz-attach-only.  Needs the matching TF-A (same variable, see
+# trusted-firmware-a_%.bbappend); production images refuse it.
+ALP_V2N_CM33_SRAM_NS ??= "0"
 SRC_URI += "${@' file://0018-arm64-dts-r9a09g056-make-the-CPG-a-syscon.patch file://0019-dt-bindings-remoteproc-add-Renesas-RZ-remoteproc.patch file://0020-remoteproc-add-Renesas-RZ-remoteproc-driver.patch file://0021-remoteproc-rz-let-userspace-own-the-vrings.patch file://remoteproc.cfg file://e1m-v2n-remoteproc.dtsi' if d.getVar('ALP_V2N_REMOTEPROC') == '1' else ''}"
 python () {
     if d.getVar('ALP_V2N_DOORBELL_SPI') not in ('404', '385'):
@@ -255,6 +259,10 @@ do_configure:prepend() {
     # variable rule as the DRP-AI block below).
     if [ "${ALP_V2N_REMOTEPROC}" = "1" ]; then
         install -m 0644 "${WORKDIR}/e1m-v2n-remoteproc.dtsi" "${ALP_DTS_DST}/"
+        # Stop/reload only on dev builds whose TF-A opens CM33 SRAM to Linux.
+        if [ "${ALP_V2N_CM33_SRAM_NS}" = "1" ]; then
+            sed -i '/alp,rz-attach-only;/d' "${ALP_DTS_DST}/e1m-v2n-remoteproc.dtsi"
+        fi
     else
         printf '%s\n' \
             '/* CM33 remoteproc node not claimed: set ALP_V2N_REMOTEPROC = "1".' \

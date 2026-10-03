@@ -15,6 +15,8 @@
 #     equivalent).  Without it `stop` takes a bus error, so that half only
 #     runs when the operator created /etc/alp-hil-rproc-stop after the docs'
 #     bench step 4 passed; otherwise the spec ends after the attach checks.
+#     Only a dev image (ALP_V2N_CM33_SRAM_NS = "1") has stop/start; the
+#     production image is attach-only and must never carry the marker.
 #   - No <alp/rpc.h> client is running (the stop zeroes the OpenAMP window).
 #
 # Beacon words (m33_sm/src/main.c): rsctbl+0xFF0 magic 0xA10D0683, +0xFF4

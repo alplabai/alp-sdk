@@ -177,7 +177,7 @@ IPC-enabled CM33 image through `yocto_uio_drv.c`.  The CM33 window is
    ```
 
    The two md5s must match.  Restarting the CM33 without a SoC reboot
-   needs the opt-in remoteproc (`docs/rzv2n-m33-secure-boot.md`,
+   needs the dev-only remoteproc stop/reload (`ALP_V2N_CM33_SRAM_NS = "1"`, `docs/rzv2n-m33-secure-boot.md`,
    "Lifecycle", bench-pending); otherwise do a full SoC reboot (or PSU
    cold-cycle).
    The board must boot in DSW1 mode 2 (xSPI BL2): under the mode 1

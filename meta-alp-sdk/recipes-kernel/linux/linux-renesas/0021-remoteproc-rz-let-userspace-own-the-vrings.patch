@@ -18,10 +18,13 @@ New DT flag alp,rz-userspace-ipc:
   - the binding documents the flag, no longer requires renesas,rz-rsctbl
     and matches the driver's compatible "renesas,rz-cm33".
 
-Attach, stop and reload semantics are otherwise Renesas'.
+New DT flag alp,rz-attach-only (production default, Q53): the driver
+registers without start/stop/load, so Linux can attach to the TF-A-started
+CM33 but cannot stop or reload it; probe fails if the CM33 is not running.
+Without the flag, attach, stop and reload semantics are Renesas'.
 ---
 diff --git a/Documentation/devicetree/bindings/remoteproc/renesas,rz-rproc.yaml b/Documentation/devicetree/bindings/remoteproc/renesas,rz-rproc.yaml
-index 3750590..3d58374 100644
+index 3750590..cd56a0c 100644
 --- a/Documentation/devicetree/bindings/remoteproc/renesas,rz-rproc.yaml
 +++ b/Documentation/devicetree/bindings/remoteproc/renesas,rz-rproc.yaml
 @@ -12,7 +12,7 @@ description:
@@ -33,13 +36,20 @@ index 3750590..3d58374 100644
  
    reg:
      description:
-@@ -55,8 +55,17 @@ properties:
+@@ -55,8 +55,24 @@ properties:
      description:
        Physical address of resource table. When remote processor is already powered
        up by u-boot, op-tee..., this value is used to parse the loaded resource table.
 +      Not needed with alp,rz-userspace-ipc.
      maxItems: 1
  
++  alp,rz-attach-only:
++    $ref: /schemas/types.yaml#/definitions/flag
++    description:
++      Only attach to a CM33 that TF-A already started. The driver registers
++      without start/stop/load operations, so Linux cannot stop or reload the
++      core, and probe fails if the CM33 is not running.
++
 +  alp,rz-userspace-ipc:
 +    $ref: /schemas/types.yaml#/definitions/flag
 +    description:
@@ -51,7 +61,7 @@ index 3750590..3d58374 100644
    power-domains:
      maxItems: 1
  
-@@ -67,7 +76,6 @@ required:
+@@ -67,7 +83,6 @@ required:
    - renesas,rz-cpg
    - renesas,rz-sysc 
    - renesas,rz-bootaddrs
@@ -60,7 +70,7 @@ index 3750590..3d58374 100644
  
  additionalProperties: false
 diff --git a/drivers/remoteproc/rz_rproc.c b/drivers/remoteproc/rz_rproc.c
-index 05967b1..dc2b1f6 100644
+index 05967b1..4ec8d61 100644
 --- a/drivers/remoteproc/rz_rproc.c
 +++ b/drivers/remoteproc/rz_rproc.c
 @@ -37,6 +37,7 @@ struct rz_rproc_pdata {
@@ -85,7 +95,44 @@ index 05967b1..dc2b1f6 100644
  	ret = rproc_elf_load_rsc_table(rproc, fw);
  	if (ret)
  		dev_warn(&rproc->dev, "no resource table found for this firmware\n");
-@@ -376,6 +382,8 @@ static int rz_rproc_probe(struct platform_device *pdev)
+@@ -333,12 +339,23 @@ static const struct rproc_ops rz_rproc_ops = {
+ 	.get_boot_addr		= rproc_elf_get_boot_addr,
+ };
+ 
++/* alp,rz-attach-only: no start/stop/load, so Linux can attach but never stop
++ * or reload a CM33 that TF-A started (production: CM33 SRAM stays secure).
++ */
++static const struct rproc_ops rz_rproc_attach_only_ops = {
++	.prepare		= rz_rproc_prepare,
++	.attach			= rz_rproc_attach,
++	.kick			= rz_rproc_kick,
++	.da_to_va		= rz_rproc_da_to_va,
++};
++
+ static int rz_rproc_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
+ 	struct device_node *np = dev->of_node;
+ 	struct rz_rproc_pdata *pdata;
+ 	struct rproc *rproc;
++	bool attach_only;
+ 	uint32_t val;
+ 	int ret;
+ 	int i;
+@@ -347,8 +364,10 @@ static int rz_rproc_probe(struct platform_device *pdev)
+ 	if (!pdata)
+ 		return -ENOMEM;
+ 
+-	rproc = devm_rproc_alloc(dev, np->name, &rz_rproc_ops, NULL,
+-				 sizeof(*pdata));
++	attach_only = of_property_read_bool(np, "alp,rz-attach-only");
++	rproc = devm_rproc_alloc(dev, np->name,
++				 attach_only ? &rz_rproc_attach_only_ops : &rz_rproc_ops,
++				 NULL, sizeof(*pdata));
+ 	if (!rproc)
+ 		return -ENOMEM;
+ 
+@@ -376,6 +395,8 @@ static int rz_rproc_probe(struct platform_device *pdev)
  		}
  	}
  
@@ -94,7 +141,7 @@ index 05967b1..dc2b1f6 100644
  	rproc->priv = pdata;
  	rproc->auto_boot = of_get_property(np, "renesas,rz-autoboot", NULL) ?
  			   true : false;
-@@ -395,6 +403,10 @@ static int rz_rproc_probe(struct platform_device *pdev)
+@@ -395,6 +416,10 @@ static int rz_rproc_probe(struct platform_device *pdev)
  
  		pm_runtime_get_sync(dev);
  
@@ -105,5 +152,16 @@ index 05967b1..dc2b1f6 100644
  		/* Get loaded rsc table */
  		if (of_property_read_u32_index(np, "renesas,rz-rsctbl", 0, &rsc_pa)) {
  			dev_warn(dev, "detached processor's firmware has no resource table\n");
+@@ -421,6 +446,10 @@ static int rz_rproc_probe(struct platform_device *pdev)
+ rproc_prepare:
+ 		/* Parse memory regions */
+ 		rz_rproc_prepare(rproc);
++	} else if (attach_only) {
++		dev_err(dev, "attach-only: the CM33 is not running\n");
++		pm_runtime_disable(dev);
++		return -ENODEV;
+ 	}
+ 	
+ 	platform_set_drvdata(pdev, rproc);
 -- 
 2.43.0

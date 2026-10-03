@@ -76,16 +76,19 @@ Recovery if a bad BL2 won't boot: SCIF Flash Writer + a known-good `bl2_bp_spi*.
 
 Decision (Q52): adopt Renesas' RZ/V2N Linux remoteproc driver and **keep TF-A
 boot**.  BL2 still starts the CM33 at power-on from the xSPI image (above);
-Linux then *attaches* to the running core and can stop, start and reload it,
-so a CM33 update no longer needs a SoC reboot.
+Linux then *attaches* to the running core.
+
+Decision (Q53): **production is attach-only with CM33 SRAM secure.**  Stop and
+reload exist only in an opt-in dev build, `ALP_V2N_CM33_SRAM_NS = "1"`
+(default `"0"`), so a dev CM33 update does not need a SoC reboot.
 
 | Phase | Who | What |
 |-------|-----|------|
 | power-on | TF-A BL2 | loads the xSPI M33 slot to `0x08000000`, sets `SYS_MCPU_CFG2/3`, releases the CM33 reset |
 | kernel probe | `rz_rproc` | sees the CM33 out of reset (`CPG_RSTMON_0`), rproc state `detached` |
 | attach | `echo start > state` | no-op attach (`rz_rproc_attach`), state `attached`, CM33 untouched |
-| stop | `echo stop > state` | CM33 clock off, reset asserted, the carveouts (CM33 SRAM `0x08000000`, 1 MiB, and the OpenAMP window `0x4f700000`, 9 MiB) zeroed |
-| reload | `echo <elf> > firmware; echo start > state` | ELF segments written to SRAM, `SYS_MCPU_CFG2/3` set, CM33 released |
+| stop (dev only) | `echo stop > state` | CM33 clock off, reset asserted, the carveouts (CM33 SRAM `0x08000000`, 1 MiB, and the OpenAMP window `0x4f700000`, 9 MiB) zeroed |
+| reload (dev only) | `echo <elf> > firmware; echo start > state` | ELF segments written to SRAM, `SYS_MCPU_CFG2/3` set, CM33 released |
 
 Enable it with `ALP_V2N_REMOTEPROC = "1"` in `local.conf` (default `"0"`
 until the bench proves it).  That applies
@@ -94,7 +97,26 @@ until the bench proves it).  That applies
 (`e1m-v2n-remoteproc.dtsi`).  The driver is the Renesas RZ Multi-OS Package
 v4.2.0's (`rz_rproc.c`, GPL-2.0, patches `0019`/`0020` imported unmodified
 with Renesas authorship); the Alp changes are `0018` (CPG is a syscon) and
-`0021` (`alp,rz-userspace-ipc`).
+`0021` (`alp,rz-userspace-ipc`, `alp,rz-attach-only`).
+
+### Production (default) vs dev (`ALP_V2N_CM33_SRAM_NS = "1"`)
+
+| | production, `"0"` | dev, `"1"` |
+|---|---|---|
+| TF-A | unchanged (SRAM 0/1 secure-only) | `0002-rzv2n-optional-non-secure-access-to-CM33-SRAM.patch`, `ALP_CM33_SRAM_NS=1`: TZC-400 region 0 of SRAM 0/1 also admits non-secure masters |
+| `cm33_rproc` node | `alp,rz-attach-only`: the driver has no start/stop/load; probe fails if the CM33 is not running | flag removed: Renesas' stop/start/reload |
+| `/lib/firmware/m33_sm.elf` | not installed | `alp-cm33-firmware` installs `${ALP_CM33_ELF}` (alp-image-edge) |
+
+**WARNING: with `"1"` any Linux root process can rewrite CM33 code memory.**
+Dev images only.  `alp-image-prod` refuses to build with the flag set
+(`bb.fatal`).  The TF-A it changes is a separate recipe, so also keep the flag
+out of any `local.conf` used for production builds.  There is no provisioning
+ship-check: the TF-A bundle carries no record of the flag (a bundle-metadata
+field plus a `check_som_bundle.py` rule is follow-up), so a provisioned unit
+cannot be audited for it today.  The TF-A patch was written from the public
+TF-A tree (tag `2.10.5/rzv2n_1.2.0`) and the TZC-400 access model, not from
+the RZ/V2N hardware manual or the Renesas package; the bench (step 4 below)
+is the check that the NS mask really reaches the CA55.
 
 Commands on the board:
 
@@ -128,14 +150,11 @@ Rules that follow from the design:
   `scripts/gen_zephyr_board.py` and the SoM dtsi, not derived from SoM
   metadata: a generator from `memory_map:` is follow-up.
 - **TZC.**  Attach touches no memory.  `stop` and reload write CM33 SRAM from
-  Linux, which needs the non-secure access Renesas' TF-A patch
-  `0001-Change-MCPU-sram-to-unpriv.patch` grants
-  (`ENABLE_SRAM_REGION_ACCESS_MCPU`: SRAM region 0 becomes NS-accessible,
-  which loosens the secure SRAM lock-down).  Our TF-A bbappend does not carry
-  it yet; **do not `stop` before it does and the security trade-off is
-  signed off** (a blocked write is a bus error).
-- `/lib/firmware/m33_sm.elf` is not installed by any recipe yet; copy
-  `zephyr.elf` over by hand for the bench.
+  Linux, which needs the dev TF-A above; without it a blocked write is a bus
+  error, which is why production has no stop operation at all.
+- Reload payload: `alp-cm33-firmware` (dev only) installs
+  `/lib/firmware/m33_sm.elf` from `ALP_CM33_ELF`, the `zephyr.elf` of the same
+  build as the xSPI image.
 
 ### Doorbell: SPI 404 default, SPI 385 selectable
 
@@ -156,7 +175,10 @@ Register offsets: `include/alp/protocol/v2n_mhu_doorbell.h` (CM33 SET
 
 ### Bench verification plan (none of this is verified yet)
 
-Run in this order; stop at the first failure.
+Run in this order; stop at the first failure.  Steps 1-3 use the production
+configuration; 4-8 need a dev build (`ALP_V2N_CM33_SRAM_NS = "1"`, TF-A
+included).  First check, on the production build, that `echo stop` is refused
+(`Invalid argument`) and the CM33 keeps running.
 
 1. Build with `ALP_V2N_REMOTEPROC = "1"`, flash, cold-cycle.  `dmesg | grep
    rz-rproc` shows `probed`; `cat $RP/state` is `detached`; the CM33 beacon
@@ -165,11 +187,11 @@ Run in this order; stop at the first failure.
    `/dev/rpmsg*` and no virtio device (`ls /sys/bus/virtio/devices` empty).
 3. Run `rpmsg_v2n_consumer` (`v2m103-rpmsg-echo-uio.yaml`): 4/4 echo on the
    default doorbell (404) with remoteproc attached.
-4. Probe NS access to CM33 SRAM from Linux
-   (`devmem 0x08003000 32` read) to learn whether TF-A needs the TZC change
-   before step 5.  If it faults, stop here and land the TF-A change first;
-   if it reads, `touch /etc/alp-hil-rproc-stop` to let the HIL spec run the
-   stop/start half.
+4. On the dev build, probe NS access to CM33 SRAM from Linux
+   (`devmem 0x08003000 32` read, then write back the same value) to confirm
+   the TF-A patch opens it.  If it faults, stop here; if not,
+   `touch /etc/alp-hil-rproc-stop` to let the HIL spec run the stop/start
+   half.
 5. With the TZC change: close clients, `echo stop > $RP/state`: state
    `offline`, beacon frozen (`devmem 0x4f700ff8 32` read twice, equal; the
    window reads zero after the zeroing, so also magic `0`), GD32 link silent.

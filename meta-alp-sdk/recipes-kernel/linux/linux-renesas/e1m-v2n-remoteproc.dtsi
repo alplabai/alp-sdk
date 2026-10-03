@@ -10,7 +10,9 @@
  *     echo start > /sys/class/remoteproc/remoteproc0/state    # attach
  *     echo stop  > /sys/class/remoteproc/remoteproc0/state    # CM33 off
  *
- * and, after `echo <name>.elf > .../firmware`, `echo start` reloads it.
+ * and, after `echo <name>.elf > .../firmware`, `echo start` reloads it --
+ * but only on dev builds (ALP_V2N_CM33_SRAM_NS = "1"): production keeps
+ * alp,rz-attach-only, so Linux can attach to the CM33 and nothing else.
  *
  * Installed by the linux-renesas bbappend only when ALP_V2N_REMOTEPROC is
  * "1" (it also applies the patches and remoteproc.cfg); otherwise a
@@ -37,6 +39,8 @@
 		/* BL22_S_VECTOR / non-secure vector (TF-A BL2 M33 boot). */
 		renesas,rz-bootaddrs = <0x08003000>, <0x18003000>;
 		alp,rz-userspace-ipc;
+		/* Removed by the bbappend when ALP_V2N_CM33_SRAM_NS = "1". */
+		alp,rz-attach-only;
 		power-domains = <&cpg>;
 		status = "okay";
 	};
