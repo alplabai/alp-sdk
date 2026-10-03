@@ -20,8 +20,6 @@ schema: 1
 
 # Checks that are recorded but never fail the step or block shipping.
 informational:
-  - rtc_time_set        # nothing sets the RTC during provisioning today
-  - rtc_backup_mode     # reports the RV-3028 backup switchover mode
   - cm33_running        # BLOCKING by itself once the bundle carries a cm33 image, like cm33_firmware
   - cm33_firmware       # the flow programs no CM33 image today; BLOCKING by itself once the bundle carries one
   - dmesg_clean         # the allowlist below comes from ONE boot log
@@ -59,6 +57,7 @@ gpu_device_node: /dev/mali0                  # measured ("Probed as mali0")
 # --- SoM: board-management I2C --------------------------------------------------------------
 rtc_name_regex: 'rv3028'                     # measured
 rtc_bsm_enabled: [1, 3]                      # datasheet: BSM 01 direct / 11 level switching; 00 and 10 = disabled
+rtc_trickle_ohms: 15000                      # maintainer 2026-10-03; datasheet TCR 11 = 15 k
 rtc_max_error_s: 30                          # provisional: RTC vs host UTC after the cold cycles
 board_temp_c: [10, 85]                       # provisional; one unit read 46.8
 soc_temp_c: [10, 105]                        # the HiL spec's band

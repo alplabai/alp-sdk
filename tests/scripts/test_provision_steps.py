@@ -509,7 +509,7 @@ def test_select_steps_rules():
     assert names == ["preflight", "census"]
     names = [s.name for s in steps.select_steps(start="secure_page", skip=["hil_smoke"])]
     assert names == ["preflight", "secure_page", "dsw1_xspi_remove_sd", "cold_boot_test",
-                     "census_final", "clkgen_verify", "functional_test", "record"]
+                     "census_final", "clkgen_verify", "rtc_set", "functional_test", "record"]
     with pytest.raises(ValueError):
         steps.select_steps(only=["nope"])
 

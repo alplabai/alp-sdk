@@ -37,7 +37,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import TypeVar
 
-from provision import bmap, dxm1, functest, gates, ledger_out, payload_store, uboot
+from provision import bmap, dxm1, functest, gates, ledger_out, payload_store, rtc, uboot
 from provision import linux_target as lt
 from provision.bench import Bench, BenchError, ExpectTimeout
 from provision.console_target import ConsoleTarget
@@ -2098,7 +2098,10 @@ class ColdBootTest(Step):
                 ctx.facts.update(ev)
                 raise Refused(f"cold cycle {i}/{n}: " + "; ".join(probs))
             if i == 1 and n >= 2 and (functest.config(ctx).get("fixtures") or {}).get("rtc_backup"):
-                # functional_test's rtc_retention then has the remaining cold cycles to judge
+                # functional_test's rtc_retention then has the remaining cold cycles to judge;
+                # switchover must be on before the first power cut it has to survive
+                ctx.mutate("enable the RTC's backup switchover (fixture rtc_backup)",
+                           lambda: rtc.enable_backup(ctx.linux, ctx.i2c("brd"), lt.RV3028_ADDR))
                 ev["rtc_set_boot_id"] = ctx.mutate(
                     "set the RTC from the host clock (fixture rtc_backup: retention is checked after "
                     "the remaining cold cycles)", lambda: functest.rtc_set(ctx.linux))
@@ -2134,6 +2137,43 @@ class ClkgenVerify(Step):
               "clkgen_i2c_addr": f"{lt.CLKGEN_5L35023B_ADDR:#04x}"}
         return self.result(ctx, f"5L35023B OTP image matches (dash code {image[0x01]:#04x}); "
                            f"boot line: {line!r}", ev, status="done")
+
+
+class RtcSet(Step):
+    """The RV-3028-C7 on the shipped unit: system time from this host (UTC), `hwclock -w`, read
+    back; backup switchover to level mode through the driver's RTC_PARAM_SET (provision/rtc.py).
+    The trickle charger is the kernel devicetree's `trickle-resistor-ohms`; it is only read back
+    here (`rtc_trickle`). Runs after clkgen_verify (the SoM's clocks are known good) and before
+    functional_test, whose rtc_time_set / rtc_backup_mode checks are blocking.
+
+    When cold_boot_test already set the clock for the rtc_backup fixture (`rtc_set_boot_id`),
+    the time is left alone: setting it again would void the retention proof."""
+    name = "rtc_set"
+    always_run = True
+
+    def run(self, ctx):
+        t = ctx.need_linux()
+        if t is None:
+            return self.result(ctx, "no Linux target: RTC set deferred", status="skipped")
+        bus = ctx.i2c("brd")
+        keep = bool(ctx.facts.get("rtc_set_boot_id"))
+        if not keep:
+            ctx.mutate("set the system time from the host (UTC) and hwclock -w", lambda: rtc.set_time(t, time.time()))
+        reg = ctx.mutate("enable backup switchover (level mode) through the rtc-rv3028 driver",
+                         lambda: rtc.enable_backup(t, bus, lt.RV3028_ADDR))
+        if not ctx.execute:
+            return self.result(ctx, "would set the RTC time and enable backup switchover")
+        try:
+            err = rtc.verify_time(t)
+        except BenchError as e:
+            raise Refused(str(e)) from e
+        ev = rtc.decode(reg)
+        ev["rtc_time_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(rtc.rtc_epoch(t)))
+        ctx.step_logs[self.name] = "\n".join(f"{k}: {v}" for k, v in ev.items())
+        if ev["rtc_trickle"] == "disabled":
+            ctx.step_logs[self.name] += "\nWARNING: trickle charger off: image lacks trickle-resistor-ohms"
+        return self.result(ctx, f"RTC {err} s from host, {'time kept (rtc_backup fixture)' if keep else 'set'}; "
+                           f"switchover {ev['rtc_backup_switch_mode']}, trickle {ev['rtc_trickle']}", ev, status="done")
 
 
 class FunctionalTest(Step):
@@ -2390,7 +2430,7 @@ class SecurePageLock(Step):
 STEP_ORDER: list[type[Step]] = [
     Preflight, Detect, OpDsw1Scif, Bootstrap, OpDsw1EmmcInsertSd, BootSdLinux, Gd32Flash, WriteXspi,
     WriteCm33, WriteEmmcBoot, WriteRootfs, Census, EepromManifest, Dxm1NpuFlash, PmicVerify,
-    SecurePage, OpDsw1XspiRemoveSd, ColdBootTest, CensusFinal, ClkgenVerify, FunctionalTest, HilSmoke, Record,
+    SecurePage, OpDsw1XspiRemoveSd, ColdBootTest, CensusFinal, ClkgenVerify, RtcSet, FunctionalTest, HilSmoke, Record,
 ]
 STEP_NAMES = [s.name for s in STEP_ORDER]
 

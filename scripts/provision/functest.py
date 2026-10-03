@@ -702,6 +702,17 @@ def build(ctx, x: dict | None = None) -> list[Check]:
             add("rtc_backup_mode", "the RTC switches to its backup supply when power is cut",
                 f"i2cget -f -y {brd} {rtc:#04x} 0x37 2>&1", j_bsm, tools=("i2cget",))
 
+            def j_trickle(o):
+                v = int(_num(o, r"^(0x[0-9a-fA-F]{2})$", "register 0x37"))
+                ohms = (3000, 5000, 9000, 15000)[v & 3] if v & 0x20 else None      # TCE bit 5, TCR bits 1:0
+                if ohms != _want(x, "rtc_trickle_ohms"):
+                    raise Fail(f"trickle charger {'off' if ohms is None else f'{ohms} ohm'} "
+                               f"(reg 0x37={v:#04x}), want {_want(x, 'rtc_trickle_ohms')} ohm: "
+                               "image lacks trickle-resistor-ohms on the rtc@52 node")
+                return f"{ohms} ohm"
+            add("rtc_trickle", "the RTC's backup supercap is trickle-charged",
+                f"i2cget -f -y {brd} {rtc:#04x} 0x37 2>&1", j_trickle, tools=("i2cget",))
+
             def j_keep(o):
                 kv = _kv(o)
                 was = str(ctx.facts.get("rtc_set_boot_id") or ((ctx.state.get("steps") or {}).get(

@@ -90,7 +90,8 @@ def _good(ctx) -> dict[str, str]:
         "rtc_device": "rtc-rv3028 8-0052",
         "rtc_ticks": "a=0x58 b=0x00",                             # BCD, across the minute
         "rtc_time_set": "1790000000",
-        "rtc_backup_mode": "0x1c",
+        "rtc_backup_mode": "0x3f",
+        "rtc_trickle": "0x3f",                                    # TCE, TCR 15 k, BSM level
         "rtc_retention": f"epoch={int(time.time())}\nboot=boot-now\nhctosys_failed=0",
         "board_temp": "0x2e 0xd0",                                 # 46.8 degC (the temperature one unit read)
         "secure_element": "HIL_OPTIGA_I2C_STATE 0x08 0x80 0x00 0x00\nHIL_OPTIGA_ACK",
@@ -168,6 +169,7 @@ BAD = {
     "rtc_ticks": "a=0x12 b=0x12",                                  # oscillator stopped
     "rtc_time_set": "",
     "rtc_backup_mode": "0x10",                                     # real: what one unit reads today
+    "rtc_trickle": "0x10",
     "rtc_retention": "epoch=\nboot=boot-now\nhctosys_failed=0",
     "board_temp": "0x7f 0xf0",                                     # 127.9 degC
     "secure_element": "",
@@ -533,9 +535,9 @@ def test_a_missing_expected_value_is_unread_for_a_blocking_check_and_skipped_for
     res = _run(ctx)
     assert _val(res, "kernel_release") == "unread (no expected value: kernel_release_regex)"
     assert _val(res, "supply_power_idle") == "unread (no expected value: supply_power_idle_w.v2n-m1)"
-    assert _val(res, "rtc_backup_mode") == "skipped (no expected value: rtc_bsm_enabled)"      # informational
+    assert _val(res, "rtc_backup_mode") == "unread (no expected value: rtc_bsm_enabled)"       # blocking since #2660
     assert res.status == "failed"
-    assert res.evidence["test_functional"] == "fail (supply_power_idle, kernel_release)"
+    assert res.evidence["test_functional"] == "fail (supply_power_idle, kernel_release, rtc_backup_mode)"
 
 
 # --- record / ship check ------------------------------------------------------------------------
@@ -581,12 +583,10 @@ def test_fixture_skipped_tests_do_not_block_record_and_stay_visible(tmp_path):
 
 def test_an_informational_failure_does_not_block_record(tmp_path):
     root, unit = _shippable_ledger(tmp_path)
-    ctx, _ = _setup(tmp_path, {"rtc_backup_mode": BAD["rtc_backup_mode"], "cm33_firmware": BAD["cm33_firmware"]},
-                    ledger_root=root)
+    ctx, _ = _setup(tmp_path, {"cm33_firmware": BAD["cm33_firmware"]}, ledger_root=root)
     res = steps.run_steps(ctx, only=["functional_test", "record"])
     assert "ship check: SHIPPABLE" in res[-1].detail
     text = unit.read_text(encoding="utf-8")
-    assert "test_ft_rtc_backup_mode: fail (backup switchover disabled (reg 0x37=0x10, BSM=0b00)" in text
     assert "test_ft_cm33_firmware: fail (mtd1+0x1a0000 is blank: no CM33 image on the unit)" in text
 
 
@@ -640,7 +640,7 @@ def test_dry_run_lists_every_check_and_touches_nothing(tmp_path):
     ctx, unit = _setup(tmp_path, fixtures={}, execute=False)
     res = steps.run_steps(ctx, only=["functional_test"])
     ft = res[-1]
-    assert ft.status == "planned" and "would run 73 functional checks, estimated" in ft.detail
+    assert ft.status == "planned" and "would run 74 functional checks, estimated" in ft.detail
     assert unit.commands == [] and not unit.files
     assert any(c.startswith("WOULD: eth_phy_id: both PHYs answer on MDIO") for c in ft.commands)
     assert any("[skipped: no fixture wifi_ap]" in c for c in ft.commands)
@@ -852,13 +852,18 @@ def _cold_boot_ctx(tmp_path, monkeypatch, fixtures, cycles):
 
     from .test_provision_steps import Board, _everyone_acks
     board = Board(act_0x10=0x08)
-    board.rtc_sets, boots, orig = [], [], board._answer
+    board.rtc_sets, board.bsm_sets, boots, orig = [], [], [], board._answer
+    board.regs[(8, 0x52, 0x37)] = 0x30                              # TCE + FEDE, switchover off
 
     def answer(cmd):
         if cmd.startswith("i2cdetect"):
             return 0, _everyone_acks()
         if cmd.startswith("python3 -c") and "0x4024700a" in cmd:
             board.rtc_sets.append(len(boots))                      # after which cold cycle it was set
+            return 0, ""
+        if cmd.startswith("python3 -c") and "0x40187014" in cmd:
+            board.bsm_sets.append(len(boots))                      # RTC_PARAM_SET: level switching
+            board.regs[(8, 0x52, 0x37)] |= 0x0C
             return 0, ""
         if cmd == "cat /proc/sys/kernel/random/boot_id":
             return 0, f"boot-{len(boots)}\n"
@@ -877,6 +882,7 @@ def test_cold_boot_test_sets_the_rtc_after_its_first_cycle_when_the_fixture_is_o
     res = steps.run_steps(ctx, only=["cold_boot_test"], force=["cold_boot_test"])
     assert res[-1].status == "done", res[-1].detail
     assert board.rtc_sets == [1]                                    # once, with two real power cuts still to come
+    assert board.bsm_sets == [1]                                    # switchover on before the first cut it must survive
     assert res[-1].evidence["rtc_set_boot_id"] == "boot-1" == ctx.facts["rtc_set_boot_id"]
 
 
@@ -940,6 +946,8 @@ MORE_BAD = [
     ("rtc_ticks", "a=0x1a b=0x1c", "fail (seconds register not BCD"),
     ("rtc_ticks", "a=0x10 b=0x30", "fail (seconds went 0x10 -> 0x30"),
     ("rtc_backup_mode", "Error: Read failed", "unread (no register 0x37"),
+    ("rtc_trickle", "0x1c", "fail (trickle charger off (reg 0x37=0x1c), want 15000 ohm"),
+    ("rtc_trickle", "0x3d", "fail (trickle charger 5000 ohm (reg 0x37=0x3d), want 15000 ohm"),
     ("board_temp", "0xe7 0x00", "fail (-25 degC outside 10..85 degC"),
     ("gd32_bridge", "0x00 0x00 0x0e 0x00 0xcf 0xa8", "fail (GD32 GET_VERSION reply CRC mismatch"),
     ("gd32_gpiochip", "", "unread (no gpiochip gd32-bridge-gpio"),

@@ -1109,6 +1109,9 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
     def clocks_rtc():
         brd = i2c_bus["brd"]
         read_key("rtc_rv3028_reg_0x37", lambda: f"{i2c_get(t, brd, RV3028_ADDR, 0x37):#04x}")
+        if facts["rtc_rv3028_reg_0x37"].startswith("0x"):
+            from provision import rtc
+            facts.update(rtc.decode(int(facts["rtc_rv3028_reg_0x37"], 16)))
         facts["clkgen_5l35023b_regs"] = ("ack" if CLKGEN_5L35023B_ADDR in i2c_scan(t, brd) else "no ack")
         facts["clkgen_5l35023b_regs"] += f" at {CLKGEN_5L35023B_ADDR:#04x}"
 

@@ -47,14 +47,18 @@ The on-module RV-3028-C7 is the RTC of record, bound as `/dev/rtc0`
 from userspace. **CA55 (Linux) is the sole master of the whole
 RIIC8/BRD_I2C bus** the RTC and every other BRD_I2C device sit on
 (`metadata/e1m_modules/v2n/core-ownership.yaml`); the CM33 must never
-issue I2C transactions there. **Confirmed 2026-09-29 on E1M-V2M103
-2026W38-0001:** the RV-3028-C7 has no time backup across a power cycle
-unless the carrier fits pad `P10` (VBACKUP); no `trickle-resistor-ohms`
-is configured for it. Without a backup source, the image resyncs the
-RTC on every boot: `systemd-timesyncd` pulls wall-clock over NTP once
-networked, and the kernel writes the result back to `rtc0`
-(`hwclock -w`-equivalent via `systemd-time-wait-sync` / `hwclock` unit)
-so `/dev/rtc0` reads the corrected time on the next cold boot. The
+issue I2C transactions there. **Backup:** VBACKUP is fed by an on-module supercapacitor (a carrier may add
+more). The image sets `trickle-resistor-ohms = <15000>` on the `rtc@52` node, so
+`rtc-rv3028` enables the trickle charger at probe (register `0x37` TCE = 1,
+TCR = `0b11`, 15 kOhm; RV-3028-C7 Application Manual Rev. 1.4, "EEPROM BACKUP
+REGISTER, 37h"). Backup switchover (BSM = `0b11`, level switching, VDD < 2.0 V)
+has no devicetree property in the 6.1 driver; provisioning's `rtc_set` step sets
+it through `RTC_PARAM_SET` and sets the time from the provisioning host (UTC) with
+`hwclock -w`, so a shipped unit holds valid time across a power cycle (bench-
+unverified until the HIL steps in `docs/provisioning-v2n.md` are run). Before
+2026-10-03 a unit read `0x10` (switchover and trickle off, no time kept); the
+NTP resync on every boot (`systemd-timesyncd`, written back to `rtc0`) remains the
+fallback for a unit whose supercap is flat. The
 alarm INT line isn't wired to a kernel interrupt yet -- that remains an
 open follow-up.
 
