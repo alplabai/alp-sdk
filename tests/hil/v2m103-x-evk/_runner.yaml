@@ -6,7 +6,7 @@
 # portable spec set from tests/hil/_common/.  SoM-specific specs
 # in this dir (A55, ssh-run): v2n-temp-sensor.yaml,
 # v2n-brd-i2c-bringup.yaml, v2n-secure-element-sign.yaml,
-# v2n-power-monitor.yaml, v2n-drpai-inference.yaml; ssh_command image
+# v2n-power-monitor.yaml, v2n-drpai-inference.yaml, v2n-gpu2d-compose.yaml; ssh_command image
 # checks: v2m103-gd32-bridge-linux, v2m103-dx-m1-present,
 # v2m103-boot-emmc-audio, v2m103-systemd-no-failed-units; read-only
 # peripheral checks: v2m103-ethernet-link, v2m103-emmc-block,
@@ -14,7 +14,7 @@
 # v2m103-gd32-getversion-i2c, v2m103-thermal-zones, v2m103-gd32-gpiochip,
 # v2m103-rtc-ticks, v2m103-wifi-present, v2m103-bt-hci-up, v2m103-dx-m1-pcie,
 # v2m103-audio-tas2563, v2m103-openamp-uio,
-# v2m103-optiga-se-rst-line; provisioning checks: v2m103-eeprom-manifest,
+# v2m103-optiga-se-rst-line, v2m103-mali-gpu-present; provisioning checks: v2m103-eeprom-manifest,
 # v2m103-emmc-boot-config, v2m103-mac-provisioned, v2m103-chosen-sku
 # (GET_VERSION on 0x70 is v2m103-gd32-getversion-i2c); A55<->CM33 RPC over
 # UIO: v2m103-rpmsg-echo-uio (needs the CM33 rpmsg-v2n image flashed and a

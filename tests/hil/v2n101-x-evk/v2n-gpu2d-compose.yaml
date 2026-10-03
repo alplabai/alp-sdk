@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# V2N-family HiL smoke for examples/v2n/v2n-gpu2d-compose: fill / blit /
+# SRC_OVER blend through <alp/gpu2d.h> on the A55, served by the Mali-G31
+# EGL/GLES backend (src/backends/gpu2d/yocto_gles.c) when the image carries
+# the Renesas graphics stack, else by the CPU fallback.  A55/Linux app, so
+# it runs over ssh (flash_method: ssh-run) like v2n-drpai-inference.yaml.
+#
+# NOT bench-run by the change that added it.  The PASS line only proves the
+# pixel maths; "engine: GPU (EGL/GLES)" is what proves the GPU path ran.  The
+# Mali `wayland` userspace variant needs weston up (alp-display); with no
+# compositor the example still passes but reports "CPU fallback" -- check
+# that line by hand on the first bench run.  The V2M103 and V2N101 board dirs
+# each carry an identical copy (board-local specs do not cross directories).
+
+schema_version: 1
+name: v2n-gpu2d-compose
+description: |
+  GPU2D layer composition on V2N-family: fill + blit + SRC_OVER blend of
+  640x360 ARGB8888 surfaces, centre pixel checked against the documented
+  formula (+-1 per channel), engine (GPU vs CPU) reported.
+
+example: examples/v2n/v2n-gpu2d-compose
+flash_method: ssh-run
+
+serial:
+  duration_s: 30
+  expect_contains:
+    - "[gpu2d] engine:"
+    - "[gpu2d] PASS"
+  expect_absent:
+    - "[gpu2d] FAIL"
+    - "PANIC"
+    - "ASSERT"

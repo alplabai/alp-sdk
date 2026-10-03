@@ -97,6 +97,9 @@ into the topic-specific docs.
   symptom + recovery.
 - [bring-up-v2n.md](bring-up-v2n.md) — Renesas RZ/V2N.
 - [bring-up-v2n-m1.md](bring-up-v2n-m1.md) — V2N + DEEPX.
+- [v2n-mali-gpu.md](v2n-mali-gpu.md) — the RZ/V2N Mali-G31: kernel +
+  vendor EGL/GLES stack, the `<alp/gpu2d.h>` GPU backend, image wiring,
+  licence placement, build steps. Bench-unverified.
 - [bring-up-drpai-v2n.md](bring-up-drpai-v2n.md) — the RZ/V2N on-die
   DRP-AI3 NPU: host toolchain, the DT override the driver needs,
   image wiring, model compile and microSD deploy. Kernel driver

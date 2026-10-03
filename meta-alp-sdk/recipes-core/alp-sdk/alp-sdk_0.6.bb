@@ -230,6 +230,28 @@ PACKAGECONFIG[drpai]    = "-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=O
 # to force it, or ALP_ENABLE_DRPAI = "0" to keep it out.
 PACKAGECONFIG:append = "${@' drpai' if ('rzv2n-family' in (d.getVar('MACHINEOVERRIDES') or '').split(':') and d.getVar('ALP_ENABLE_DRPAI') == '1' and d.getVar('RUHMI_DRPAI_TVM_DIR')) else ''}"
 
+# gles -> GPU backend for <alp/gpu2d.h> (src/backends/gpu2d/yocto_gles.c):
+#         fill/blit/blend on the Mali-G31 through the vendor EGL + GLES 3
+#         stack.  The userspace driver is the Renesas AI SDK's
+#         meta-rz-graphics `mali-library` (virtual/egl + virtual/libgles2,
+#         egl.pc/glesv2.pc); it is licence-gated and never copied into this
+#         layer -- Alp-built images take it from the private mirror, and
+#         ALP_ENABLE_GPU2D_GLES = "0" opts out.  REQUIRED rides with the
+#         enable (same shape as `drpai`): a bake that asked for the GPU
+#         backend must not silently ship a CPU-only libalp_sdk.
+#         Auto-on only when the GPU stack is really there: a `mali-family`
+#         MACHINE with `opengles` in COMBINED_FEATURES, which meta-rz-graphics
+#         (rz-graphics.inc) sets in DISTRO_FEATURES -- so a build without that
+#         layer keeps the CPU fallback and does not fail.  :class-target keeps
+#         the -native/-nativesdk variants (BBCLASSEXTEND below) off the GPU stack.
+#         BENCH-UNVERIFIED.
+#         Runtime: the Mali `wayland` userspace variant needs weston running
+#         (IMAGE_FEATURES += "alp-display"); without it open() degrades to the
+#         CPU path.
+PACKAGECONFIG[gles]     = "-DALP_SDK_USE_GPU2D_GLES=ON -DALP_SDK_GPU2D_GLES_REQUIRED=ON,-DALP_SDK_USE_GPU2D_GLES=OFF,virtual/libgles2 virtual/egl,libegl libgles2"
+ALP_ENABLE_GPU2D_GLES ?= "1"
+PACKAGECONFIG:append:class-target = "${@' gles' if ('mali-family' in (d.getVar('MACHINEOVERRIDES') or '').split(':') and 'opengles' in (d.getVar('COMBINED_FEATURES') or '').split() and d.getVar('ALP_ENABLE_GPU2D_GLES') == '1') else ''}"
+
 # ort -> ONNX Runtime CPU floor (own recipe, recipes-devtools/onnxruntime).
 #       REQUIRED rides with the enable, same shape as `drpai`: a missing ORT
 #       stack must fail the bake, not silently drop the CPU backend.  Auto-on

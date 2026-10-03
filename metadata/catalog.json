@@ -3064,6 +3064,30 @@
         "cores": [
           {
             "app": "./src",
+            "id": "a55_cluster",
+            "os": "yocto"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
+        "name": "v2n-gpu2d-compose",
+        "osSet": [
+          "yocto"
+        ],
+        "path": "examples/v2n/v2n-gpu2d-compose",
+        "som": "E1M-V2N101",
+        "summary": "Compose ARGB8888 layers through the portable `<alp/gpu2d.h>` surface and check the result -- on the RZ/V2N Mali-G31 when the image carries the Renesas graphics stack, on the CPU otherwise. The source does not change between the two."
+      },
+      {
+        "board": "e1m-x-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
             "id": "m33_sm",
             "os": "zephyr"
           }
@@ -4650,6 +4674,7 @@
       "capabilities": {
         "drp_ai": true,
         "emmc_dma": true,
+        "gpu2d": true,
         "neon": true
       },
       "family": "renesas-rzv2n-deepx",
@@ -4710,6 +4735,7 @@
       "capabilities": {
         "drp_ai": true,
         "emmc_dma": true,
+        "gpu2d": true,
         "neon": true
       },
       "family": "renesas-rzv2n-deepx",
@@ -4770,6 +4796,7 @@
       "capabilities": {
         "drp_ai": true,
         "emmc_dma": true,
+        "gpu2d": true,
         "neon": true
       },
       "family": "renesas-rzv2n-deepx",
@@ -4830,6 +4857,7 @@
       "capabilities": {
         "drp_ai": true,
         "emmc_dma": true,
+        "gpu2d": true,
         "neon": true
       },
       "family": "renesas-rzv2n",
@@ -4890,6 +4918,7 @@
       "capabilities": {
         "drp_ai": true,
         "emmc_dma": true,
+        "gpu2d": true,
         "neon": true
       },
       "family": "renesas-rzv2n",
@@ -4950,6 +4979,7 @@
       "capabilities": {
         "drp_ai": true,
         "emmc_dma": true,
+        "gpu2d": true,
         "neon": true
       },
       "family": "renesas-rzv2n",

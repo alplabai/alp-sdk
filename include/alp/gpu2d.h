@@ -22,9 +22,14 @@
  *   - AEN-family : D/AVE 2D hardware block (SDK backend; no vendor
  *                  SDK dependency in app code).  Bench-unverified
  *                  today -- see src/backends/gpu2d/alif_dave2d.c.
+ *   - RZ/V2N Linux: the Mali-G31 through the vendor EGL/GLES stack
+ *                  (src/backends/gpu2d/yocto_gles.c, opt-in
+ *                  ALP_SDK_USE_GPU2D_GLES, bench-unverified); falls
+ *                  back to the CPU path per op or when no GPU context
+ *                  exists.  See docs/v2n-mali-gpu.md.
  *   - all others : portable software fallback (CPU fill/blit/blend;
  *                  src/backends/gpu2d/sw_fallback.c).  This is what
- *                  V2N, i.MX 93 (whose 2D engine is PXP, not a
+ *                  V2N without the GPU stack, i.MX 93 (whose 2D engine is PXP, not a
  *                  GPU2D peer -- see ADR 0008), and ALP_OS=yocto
  *                  Linux builds use.  Plain-CMake bare-metal builds
  *                  still link the NOSUPPORT stub (no backend
