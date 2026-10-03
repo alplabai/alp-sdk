@@ -1049,8 +1049,7 @@ static alp_status_t uio_attach_reset(struct rpc_be *ch)
 	struct metal_io_region *io = metal_device_io_region(ch->dev[UIO_RSCTBL], 0);
 	if (io == NULL ||
 	    !alp_size_range_valid(ALP_RSCTBL_ATTACH_EPOCH_OFF, sizeof(uint32_t), io->size)) {
-		fprintf(stderr, "alp_rpc: rsctbl mapping too small for the CM33 beacon
-");
+		fprintf(stderr, "alp_rpc: rsctbl mapping too small for the CM33 beacon\n");
 		return ALP_ERR_NOT_READY;
 	}
 
@@ -1059,8 +1058,7 @@ static alp_status_t uio_attach_reset(struct rpc_be *ch)
 	if (magic != ALP_RSCTBL_BEACON_MAGIC) {
 		fprintf(stderr,
 		        "alp_rpc: no CM33 beacon at rsctbl+0xFF0 (read 0x%08x, expect 0x%08x): the "
-		        "CM33 is not running or its image publishes no beacon
-		        ",
+		        "CM33 is not running or its image publishes no beacon\n",
 		        (unsigned)magic,
 		        (unsigned)ALP_RSCTBL_BEACON_MAGIC);
 		return ALP_ERR_NOT_READY;
@@ -1069,8 +1067,7 @@ static alp_status_t uio_attach_reset(struct rpc_be *ch)
 		fprintf(stderr,
 		        "alp_rpc: the CM33 runs an image without RPC (beacon version 0x%08x; 0x%08x = "
 		        "idle stock shim); flash an RPC firmware such as "
-		        "examples/multicore/rpmsg-v2n/m33_sm
-		        ",
+		        "examples/multicore/rpmsg-v2n/m33_sm\n",
 		        (unsigned)version,
 		        (unsigned)ALP_RSCTBL_BEACON_VERSION_NO_RPC);
 		return ALP_ERR_NOSUPPORT;
@@ -1078,8 +1075,7 @@ static alp_status_t uio_attach_reset(struct rpc_be *ch)
 
 	size_t vdev_off;
 	if (!rsctbl_vdev_offset(io, &vdev_off)) {
-		fprintf(stderr, "alp_rpc: CM33 resource table has no readable vdev entry
-");
+		fprintf(stderr, "alp_rpc: CM33 resource table has no readable vdev entry\n");
 		return ALP_ERR_NOT_READY;
 	}
 	size_t  status_off = vdev_off + offsetof(struct fw_rsc_vdev, status);
@@ -1092,8 +1088,7 @@ static alp_status_t uio_attach_reset(struct rpc_be *ch)
 		        "alp_rpc: CM33 link is still attached from an earlier session (vdev.status=0x%02x) "
 		        "and this CM33 RPC firmware cannot reset it (beacon version %u, attach reset "
 		        "needs version >= %u); a second attach would desync the vrings. Update the CM33 "
-		        "firmware or restart the CM33 (cold cycle).
-		        ",
+		        "firmware or restart the CM33 (cold cycle).\n",
 		        (unsigned)status,
 		        (unsigned)version,
 		        (unsigned)ALP_RSCTBL_BEACON_VERSION_ATTACH_ACK);

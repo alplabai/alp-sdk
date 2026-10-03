@@ -741,7 +741,8 @@ static void fake_link_init(struct fake_link *l, uint32_t beacon_version, uint8_t
 
 static uint8_t fake_link_status(struct fake_link *l)
 {
-	return ((volatile struct fw_rsc_vdev *)((uint8_t *)l->rsctbl + T_RSCTBL_VDEV_OFF))->status;
+	struct fw_rsc_vdev *vdev = (struct fw_rsc_vdev *)((uint8_t *)l->rsctbl + T_RSCTBL_VDEV_OFF);
+	return __atomic_load_n(&vdev->status, __ATOMIC_SEQ_CST);
 }
 
 static uint32_t fake_link_doorbell(struct fake_link *l)
@@ -817,15 +818,15 @@ static void test_attach_reset_skipped_on_fresh_cm33(void)
 	ALP_ASSERT_EQ_INT((int)fake_link_doorbell(&l), 0);
 }
 
-/* Stands in for the v2 CM33: on the doorbell, require status 0, then ack. */
+/* Stands in for the v2 CM33: once status reads 0, ack.  It watches the
+ * status word rather than the doorbell (a plain MMIO store here, which
+ * ThreadSanitizer would flag); the test checks the doorbell after the join. */
 static void *fake_cm33_ack(void *arg)
 {
 	struct fake_link *l = (struct fake_link *)arg;
 	for (int i = 0; i < 2000; ++i) {
-		if (fake_link_doorbell(l) != 0u) {
-			if (fake_link_status(l) == 0u) {
-				__atomic_store_n(&l->rsctbl[ALP_RSCTBL_ATTACH_EPOCH_OFF / 4], 8u, __ATOMIC_SEQ_CST);
-			}
+		if (fake_link_status(l) == 0u) {
+			__atomic_store_n(&l->rsctbl[ALP_RSCTBL_ATTACH_EPOCH_OFF / 4], 8u, __ATOMIC_SEQ_CST);
 			return NULL;
 		}
 		sleep_ms(1);
