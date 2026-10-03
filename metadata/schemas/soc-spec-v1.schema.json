@@ -152,7 +152,7 @@
           "additionalProperties": false,
           "required": ["rsctbl", "mhu-shm", "vring-ctl0", "vring-ctl1", "vring-shm0", "vring-shm1"],
           "properties": {
-        "rsctbl": {"$ref": "#/$defs/openamp_region", "description": "Resource-table page."},
+        "rsctbl": {"allOf": [{"$ref": "#/$defs/openamp_region"}, {"properties": {"size": {"minimum": 16}}}], "description": "Resource-table page."},
         "mhu-shm": {"$ref": "#/$defs/openamp_region", "description": "MHU shared-memory page."},
         "vring-ctl0": {"$ref": "#/$defs/openamp_region", "description": "Vring control area 0."},
         "vring-ctl1": {"$ref": "#/$defs/openamp_region", "description": "Vring control area 1."},

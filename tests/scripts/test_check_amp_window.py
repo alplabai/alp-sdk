@@ -65,6 +65,7 @@ def test_generators_follow_a_moved_soc_spec():
     assert "rsctbl: memory@9f800000" in dts and "reg = <0x9f800000 0x2000>;" in dts
     assert "mhu1_shm: memory@9f802000" in dts
     assert "9f700000" not in dts
+    assert "alp,cm33-ns-to-a55-offset = <0x50100000>;" in dts
     assert not re.search(r"@[a-z0-9-]+\.[a-z0-9]+@", dts)
 
 
@@ -76,6 +77,15 @@ def test_moved_window_in_metadata_is_caught_everywhere(tmp_path):
     assert "reserved-memory node" in msgs
     assert "rsctbl uio node" in msgs
     assert "vring-shm1 uio node" in msgs
+    assert "alp,cm33-ns-to-a55-offset" in msgs
+
+
+def test_rsctbl_smaller_than_the_beacon_is_caught(tmp_path):
+    root = _tree(tmp_path)
+    soc = json.loads((root / gen.SOC_JSON).read_text(encoding="utf-8"))
+    soc["openamp_carveout"]["regions"]["rsctbl"]["size"] = 8
+    (root / gen.SOC_JSON).write_text(json.dumps(soc), encoding="utf-8")
+    assert "rsctbl size 0x8 < beacon" in "\n".join(gate.find_problems(root))
 
 
 def test_moved_region_in_metadata_is_caught_in_dtsi_and_board_dts(tmp_path):

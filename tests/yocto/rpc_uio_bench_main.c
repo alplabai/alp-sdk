@@ -231,8 +231,9 @@ static alp_rpc_channel_t *open_with_retry(const alp_rpc_config_t *cfg, long budg
 /*
  * Mirrors src/backends/rpc/yocto_uio_drv.c's g_uio_regions table
  * (device names + ALP_UIO_* env overrides) for READ-ONLY diagnostic
- * purposes only -- kept in sync by hand since that table is
- * file-local (`static`) to the backend TU.  Every device opened here
+ * purposes only.  The device names come from the generated
+ * alp_amp_window.h (the same source as that table); only the table
+ * itself is file-local (`static`) to the backend TU.  Every device opened here
  * is fully closed + metal_finish()'d before alp_rpc_open() runs
  * (metal_init() is refcounted -- see yocto_uio_drv.c's own header
  * comment -- so the two independent init/finish pairs are safe).
@@ -245,10 +246,10 @@ struct diag_uio_region {
 static const struct diag_uio_region g_diag_regions[] = {
 	{ ALP_AMP_UIO_RSCTBL_NAME, "ALP_UIO_RSCTBL" },
 	{ ALP_AMP_UIO_MHU_SHM_NAME, "ALP_UIO_MHU_SHM" },
-	{ "4f800000.vring-ctl0", "ALP_UIO_VRING_CTL0" },
-	{ "4f850000.vring-ctl1", "ALP_UIO_VRING_CTL1" },
-	{ "4f900000.vring-shm0", "ALP_UIO_VRING_SHM0" },
-	{ "4fc00000.vring-shm1", "ALP_UIO_VRING_SHM1" },
+	{ ALP_AMP_UIO_VRING_CTL0_NAME, "ALP_UIO_VRING_CTL0" },
+	{ ALP_AMP_UIO_VRING_CTL1_NAME, "ALP_UIO_VRING_CTL1" },
+	{ ALP_AMP_UIO_VRING_SHM0_NAME, "ALP_UIO_VRING_SHM0" },
+	{ ALP_AMP_UIO_VRING_SHM1_NAME, "ALP_UIO_VRING_SHM1" },
 	{ "10480000.mhu-uio", "ALP_UIO_MHU" },
 };
 #define DIAG_UIO_COUNT (sizeof(g_diag_regions) / sizeof(g_diag_regions[0]))

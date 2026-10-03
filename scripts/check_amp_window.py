@@ -115,6 +115,15 @@ def find_problems(root: Path) -> list[str]:
             elif not (cm33 <= got[0] and got[0] + got[1] <= cm33 + size):
                 out.append(f"{rel}: {label} lies outside [{cm33:#x}, {cm33 + size:#x})")
 
+    if regs["rsctbl"][1] < BEACON_BYTES:
+        out.append(f"openamp_carveout: rsctbl size {regs['rsctbl'][1]:#x} < beacon {BEACON_BYTES:#x} bytes")
+    for rel in BOARD_DTS:
+        p = root / rel
+        t = p.read_text(encoding="utf-8") if p.is_file() else ""
+        m = re.search(r"alp,cm33-ns-to-a55-offset\s*=\s*<(0x[0-9a-fA-F]+)>", t)
+        if not m or int(m.group(1), 16) != cm33 - a55:
+            out.append(f"{rel}: alp,cm33-ns-to-a55-offset = {m and m.group(1)}, openamp_carveout says {cm33 - a55:#x}")
+
     home = root / MAGIC_HOME
     mm = re.search(r"ALP_AMP_BEACON_MAGIC\s+(0x[0-9A-Fa-f]+)u", home.read_text(encoding="utf-8")) if home.is_file() else None
     if not mm:

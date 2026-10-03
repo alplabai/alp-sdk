@@ -2525,6 +2525,11 @@ _V2N_OPENAMP_TAIL: tuple[str, ...] = (
     '\t\t};',
     '\t};',
     '',
+    '\t/* CM33-NS view minus A55 view of the OpenAMP reservation (from metadata) */',
+    '\tzephyr,user {',
+    '\t\talp,cm33-ns-to-a55-offset = <@carveout.offset@>;',
+    '\t};',
+    '',
     '\tchosen {',
     '\t\t/* The A55 master (DRIVER role) allocates every rpmsg buffer from',
     '\t\t * vring_shm1 (@vring-shm1.a55@ A55 / @vring-shm1.addr@ CM33-NS) -- the',
@@ -2614,6 +2619,7 @@ def _openamp_subst(tail: tuple[str, ...], soc_spec: dict[str, Any]) -> list[str]
         "@carveout.addr@": f"{base:#x}",
         "@carveout.hex@": f"{base:x}",
         "@carveout.size@": f"{c['size']:#x}",
+        "@carveout.offset@": f"{base - a55:#x}",
     }
     for name, r in c["regions"].items():
         off, size = r["offset"], r["size"]

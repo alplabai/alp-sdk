@@ -297,6 +297,11 @@
 		};
 	};
 
+	/* CM33-NS view minus A55 view of the OpenAMP reservation (from metadata) */
+	zephyr,user {
+		alp,cm33-ns-to-a55-offset = <0x50000000>;
+	};
+
 	chosen {
 		/* The A55 master (DRIVER role) allocates every rpmsg buffer from
 		 * vring_shm1 (0x4fc00000 A55 / 0x9fc00000 CM33-NS) -- the
