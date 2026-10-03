@@ -327,10 +327,11 @@ bits 1:0 TCR (`00` 3 k, `01` 5 k, `10` 9 k, `11` 15 k). A fully set unit reads
 `rtc_rv3028_reg_0x37`, `rtc_backup_switch_mode` (`disabled`/`direct`/`level`),
 `rtc_trickle` (`disabled`/`<n> kOhm`), and `rtc_time_utc` in the step evidence;
 they reach `<serial>.unit.yaml` only once the ledger's `schema/v2n.keys.yaml`
-lists them as `auto`. `rtc_trickle_ohms` in `functest-expect-v2n.yaml` is the
-expected trickle for the carrier under test: `"off"` (the default: no
-rechargeable element is declared), or the same value as the carrier dtsi's
-`trickle-resistor-ohms`; the two are changed together. The resistor value for a
+lists them as `auto`. The expected trickle comes from the carrier's
+`rtc_backup` in `metadata/boards/<carrier>.yaml` (`element: none|supercap|primary`,
+`trickle_ohms: 3000|5000|9000|15000` only for `supercap`); the carrier dtsi's
+`&rv3028 { trickle-resistor-ohms }` must equal it. `none` and `primary` expect the
+charger off. The resistor value for a
 supercap carrier is provisional until step 5 measures the charge current.
 
 Bench steps (first run on a unit; nothing here is bench-verified yet):
@@ -432,7 +433,8 @@ holds firmware takes the `sf_erase` path first, the proven `dx_update.sh` step 1
    `MIN_ON_S` / `MIN_OFF_S` rules of `Power.cycle`), log in;
 8. verify PCIe device `0x0000` and the `dxrt-cli -s` version.
 
-`P75`/`PA6` are lines `61`/`86` on `10410000.pinctrl` by default; a bench.yaml
+`P75`/`PA6` come from the SoM preset's `on_module.dxm1` (`uart_mux_pin`, `reset_pin`,
+`gpio_chip`; line = 8 x port + bit, so lines `61`/`86` on `10410000.pinctrl`); a bench.yaml
 `dxm1:` block may override `gpio_chip`, `uart_mux_line`, `reset_line` (distinct
 ints; `52`/`53` = `P64`/`P65`, the DEEPX 0.75 V rail, are refused before any
 export, here and again in `_sysfs_gpio_dir`). The `dxrt-cli -s` parser reads only
@@ -635,7 +637,8 @@ functional_test:
     dxm1_model: /path/on/the/unit/model.dxnn        # a compiled model present on the unit
     usb_stick: true             # a USB mass-storage device in the host port
     sd_card: true               # a NON-bootable card in the SD slot (a bootable one boots instead of the eMMC)
-    rtc_backup: true            # a backup supply for the RTC; needs --cold-cycles >= 2
+    rtc_backup: true            # the retention fixture is wired at this station; needs --cold-cycles >= 2 and a
+                                # carrier whose metadata/boards/<carrier>.yaml rtc_backup.element is not `none`
     ina228_rework: true         # this carrier has the input-monitor rework
     camera: <regex>             # a camera is fitted; the regex names its sensor driver
     can_loopback: true          # CAN0 wired to CAN1, terminated
@@ -785,7 +788,7 @@ bounds for a hung command, not the expected time.
 | `rtc_ticks` | the seconds register twice, 2 s apart | valid BCD, advanced by 1..4 s | 8 s | 2.2 s |
 | `rtc_time_set` | `rtc0/since_epoch` | readable (the power-on flag is clear: `rtc_set` ran) | 5 s | 0.1 s |
 | `rtc_backup_mode` | register `0x37` | BSM is `01` or `11` | 5 s | 0.1 s |
-| `rtc_trickle` | register `0x37` | TCE = 0 when `rtc_trickle_ohms` is `"off"`, else TCE = 1 and TCR gives that resistor | 5 s | 0.1 s |
+| `rtc_trickle` | register `0x37` | TCE = 0 when the carrier's `rtc_backup` is not a `supercap`, else TCE = 1 and TCR gives its `trickle_ohms` | 5 s | 0.1 s |
 | `rtc_retention` | `rtc0/since_epoch`, boot id, `dmesg` | set by `cold_boot_test` on an earlier boot, no `hctosys: unable to read the hardware clock` in this boot's log, within 30 s of the host clock | 5 s | 0.1 s |
 | `board_temp` | TMP112 temperature register | 10..85 degC | 5 s | 0.1 s |
 | `secure_element` | the state-register read, up to 100 tries | an answer | 12 s | 0.5 s |
@@ -905,7 +908,7 @@ Not needed: `sfdisk`, `partx`, `findfs`, `parted`, `blockdev`, `bmaptool`, `mke2
 
 Every E1M-V2M103 is to ship with a CM33 firmware image (maintainer decision); which image is still open, so `cm33` is optional in the bundle and not in `V2N_REQUIRED_ROLES` yet (it becomes required once a bundle carries it).
 
-- **Where it lives.** xSPI byte `0x200000` = `mtd1` offset `0x1A0000` (`gates.CM33_REGION_OFFSET`). BL2 copies it raw to SRAM `0x08000000`; the CM33 starts at `0x08003000`.
+- **Where it lives.** xSPI byte `0x200000` = `mtd1` offset `0x1A0000` (`gates.CM33_REGION_OFFSET`). BL2 copies it raw to SRAM `0x08000000`; the CM33 starts at `0x08003000`. These figures, the pad and the size limit below are the SoC description's `cm33_boot` (`metadata/socs/renesas/rzv2n/n44.json`); `gates.py` reads them there.
 - **Padding.** The bundle's `cm33` component (`flash_target` `xspi:mtd1`) is the stored image: `0x3000` zero bytes followed by Zephyr's `zephyr.bin`, the same bytes the `rzv2n_mtd_flash` west runner writes. `write_cm33` and `cm33_firmware` md5 exactly these bytes.
 - **Size limit.** At most `0x30000` bytes in all; BL2 silently truncates a larger image. `preflight` and `check_som_bundle.py` refuse a `cm33` whose first `0x3000` bytes are not zero, whose initial SP (word at `0x3000`) is outside SRAM0 (`0x08xxxxxx`, the runner's test), whose reset vector (word at `0x3004`) lacks the Thumb bit or lies outside `0x08003000..0x08033000`, or that exceeds `0x30000`. The FIP must still end below `0x1A0000`; its erase never reaches the CM33 region.
 - **When it runs.** BL2 releases the CM33 in every boot mode. In eMMC or eSD boot today it loads the image from a location nothing wrote, so the CM33 faults and stays locked (harmless). With TF-A fix #2658 it loads the image from xSPI in every mode, so after `write_cm33` the CM33 image also runs alongside the provisioning Linux on later mode-1 boots, not only from `cold_boot_test` on. The CM33 cannot be restarted from Linux.

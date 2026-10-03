@@ -1329,7 +1329,8 @@ class Census(Step):
                  if any(c.get("role") == r for c in ctx.bundle.get("components", []))}
         if why := leftover_dxuart2_swap(ctx):
             raise Refused(why)
-        facts, notes = lt.census(t, bus, sizes, dxm1_present=ctx.family == "v2n-m1")
+        facts, notes = lt.census(t, bus, sizes, dxm1_present=ctx.family == "v2n-m1",
+                                 rtc_addr=rtc.rv3028_addr(ctx.preset))
         if bus["pmic"] is not None and self.reads_gpio4_otp:
             try:
                 # gd32_flash runs BEFORE census. When it applied the volatile
@@ -1829,7 +1830,7 @@ class Dxm1NpuFlash(Step):
             return self.result(ctx, why, status="skipped")
         version = self._expected_version(ctx)
         try:
-            chip, mux, rst = dxm1.gpio_config(ctx.need_bench().raw)
+            chip, mux, rst = dxm1.gpio_config(ctx.need_bench().raw, ctx.preset)
         except ValueError as e:
             raise Refused(str(e)) from e
         t = ctx.need_linux()
@@ -2097,11 +2098,12 @@ class ColdBootTest(Step):
             if probs:
                 ctx.facts.update(ev)
                 raise Refused(f"cold cycle {i}/{n}: " + "; ".join(probs))
-            if i == 1 and n >= 2 and (functest.config(ctx).get("fixtures") or {}).get("rtc_backup"):
+            rtc_addr = rtc.rv3028_addr(ctx.preset)
+            if i == 1 and n >= 2 and rtc_addr is not None and (functest.config(ctx).get("fixtures") or {}).get("rtc_backup"):
                 # functional_test's rtc_retention then has the remaining cold cycles to judge;
                 # switchover must be on before the first power cut it has to survive
                 ctx.mutate("enable the RTC's backup switchover (fixture rtc_backup)",
-                           lambda: rtc.enable_backup(ctx.linux, ctx.i2c("brd"), lt.RV3028_ADDR))
+                           lambda: rtc.enable_backup(ctx.linux, ctx.i2c("brd"), rtc_addr))
                 ev["rtc_set_boot_id"] = ctx.mutate(
                     "set the RTC from the host clock (fixture rtc_backup: retention is checked after "
                     "the remaining cold cycles)", lambda: functest.rtc_set(ctx.linux))
@@ -2156,12 +2158,16 @@ class RtcSet(Step):
         t = ctx.need_linux()
         if t is None:
             return self.result(ctx, "no Linux target: RTC set deferred", status="skipped")
+        addr = rtc.rv3028_addr(ctx.preset)
+        if addr is None:
+            return self.result(ctx, "the SoM preset has no rv3028c7 (role: rtc) on brd_i2c: RTC set skipped",
+                               status="skipped")
         bus = ctx.i2c("brd")
         keep = bool(functest.rtc_set_boot_id(ctx))
         if not keep:
             ctx.mutate("set the system time from the host (UTC) and hwclock -w", lambda: rtc.set_time(t, time.time()))
         reg = ctx.mutate("enable backup switchover (level mode) through the rtc-rv3028 driver",
-                         lambda: rtc.enable_backup(t, bus, lt.RV3028_ADDR))
+                         lambda: rtc.enable_backup(t, bus, addr))
         if not ctx.execute:
             return self.result(ctx, "would set the RTC time and enable backup switchover")
         try:

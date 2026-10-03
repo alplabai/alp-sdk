@@ -40,6 +40,22 @@ _BSM_LEVEL_PY = ("import fcntl,os,struct;fd=os.open('/dev/rtc0',os.O_RDONLY);"
                  "fcntl.ioctl(fd,0x40187014,struct.pack('QQII',2,2,0,0))")
 
 
+def preset_rtc(preset: dict) -> tuple[str, int] | None:
+    """(chip, 7-bit address) of the SoM preset's `role: rtc` device on brd_i2c, or None."""
+    spec = ((preset.get("on_module") or {}).get("i2c_devices") or {}).get("brd_i2c") or {}
+    for d in spec.get("devices", []):
+        if d.get("role") == "rtc":
+            return d["chip"], int(str(d["address_7bit"]), 16)
+    return None
+
+
+def rv3028_addr(preset: dict) -> int | None:
+    """The RV-3028 address on this SoM, or None (no RTC, or a chip this module cannot drive:
+    register 0x37 and RTC_PARAM_SET are RV-3028 specific)."""
+    found = preset_rtc(preset)
+    return found[1] if found and found[0] == "rv3028c7" else None
+
+
 def decode(reg: int) -> dict[str, str]:
     """Register 0x37 -> the three ledger-facing values."""
     return {"rtc_rv3028_reg_0x37": f"{reg:#04x}",

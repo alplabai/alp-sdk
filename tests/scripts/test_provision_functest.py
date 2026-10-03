@@ -14,6 +14,7 @@ format the judge ASSUMES and a first bench run must confirm (docs/provisioning-v
 
 from __future__ import annotations
 
+import json
 import re
 import shlex
 import shutil
@@ -29,6 +30,15 @@ from provision.bench import BenchError
 
 from .provision_fakes import FakeLinux, FakePower
 from .test_provision_steps import CATALOGUE, SERIAL, SKU, _bench, _ctx, _statuses
+
+_REAL_CARRIER = functest._carrier
+
+
+@pytest.fixture(autouse=True)
+def _carrier_with_a_primary_backup_cell(monkeypatch):
+    """The stock EVK declares no RTC backup element; these tests need the rtc_backup fixture on."""
+    monkeypatch.setattr(functest, "_carrier", lambda n: {**_REAL_CARRIER(n), "rtc_backup": {"element": "primary"}})
+
 
 FIXTURES = REPO = Path(__file__).resolve().parent / "fixtures" / "provision"
 ALL_FIXTURES = {"eth1_cable": True, "wifi_ap": {"ssid": "bench-ap", "min_signal_dbm": -70},
@@ -590,13 +600,42 @@ def test_an_informational_failure_does_not_block_record(tmp_path):
     assert "test_ft_cm33_firmware: fail (mtd1+0x1a0000 is blank: no CM33 image on the unit)" in text
 
 
+def test_the_expected_trickle_comes_from_the_carriers_backup_element(tmp_path, monkeypatch):
+    base = _REAL_CARRIER("e1m-x-evk")
+    monkeypatch.setattr(functest, "_carrier",
+                        lambda n: {**base, "rtc_backup": {"element": "supercap", "trickle_ohms": 15000}})
+    ctx, _ = _setup(tmp_path / "a", {"rtc_trickle": "0x3f"})
+    assert _val(_run(ctx), "rtc_trickle") == "pass (15000 ohm)"
+    ctx, _ = _setup(tmp_path / "b", {"rtc_trickle": "0x1c"})
+    assert _val(_run(ctx), "rtc_trickle").startswith("fail (trickle charger off (reg 0x37=0x1c), want 15000 ohm")
+
+
+def test_the_rtc_backup_fixture_needs_a_carrier_with_a_backup_element(tmp_path, monkeypatch):
+    monkeypatch.setattr(functest, "_carrier", _REAL_CARRIER)       # the stock EVK: element none
+    ctx, _ = _setup(tmp_path)
+    with pytest.raises(ValueError, match="fits no RTC backup element"):
+        functest.config(ctx)
+
+
+def test_the_beacon_address_and_phy_id_come_from_metadata(tmp_path):
+    ctx, _ = _setup(tmp_path)
+    assert functest._beacon_address(ctx.preset) == 0x4F700FF0
+    assert functest._preset_chip(ctx.preset, "ethernet_phy")["phy_id_pattern"] == 0x001CC916
+    assert functest._chip_id("icm42670") == 0x67
+    # the carve-out in the SoC description is the one the generated CM33 board .dts quotes (CM33-NS = A55 + 0x50000000)
+    soc = json.loads((functest.REPO / "metadata/socs/renesas/rzv2n/n44.json").read_text(encoding="utf-8"))["openamp_carveout"]
+    dts = (functest.REPO / "zephyr/boards/alp/e1m_v2n101_m33_sm/alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33.dts").read_text(encoding="utf-8")
+    assert f"reg = <{soc['a55_base'] + 0x50000000:#x} {soc['rsctbl_size']:#x}>" in dts
+    assert f"reg = <{soc['a55_base'] + 0x50000000:#x} {soc['size']:#x}>" in dts
+
+
 def test_a_private_overlay_can_make_a_check_blocking_or_informational(tmp_path):
     over = tmp_path / "expect.yaml"
     over.write_text("informational: [eth_phy_id]\ngd32_protocol: '0.13.0'\ni2c_ids: {tps628640: {values: {0x44: 0x82}}}\n",
                     encoding="utf-8")
     x = functest.load_expect(over)
     assert x["i2c_ids"]["tps628640"] == {"reg": 1, "read": 1, "values": {0x48: 0x5A, 0x44: 0x82}}   # merged
-    assert x["eth_phy_id"] == 0x001CC916                                                          # untouched
+    assert x["gd32_gpio_lines_min"] == 20                                                         # untouched
     ctx, _ = _setup(tmp_path, {"eth_phy_id": BAD["eth_phy_id"], "rtc_backup_mode": BAD["rtc_backup_mode"],
                                "gd32_bridge": BAD["gd32_bridge"], "i2c_tps628640_44": "0x80"}, functest_expect=x)
     res = _run(ctx)
