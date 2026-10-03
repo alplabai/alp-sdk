@@ -7,14 +7,20 @@ Minimal Zephyr image for SoM preset M-core defaults that use
 
 The shim claims no peripheral, no interrupt and no IPC endpoint: no `sci0`
 (a floating RXD faults the core before `main`), no RIIC8 / `i2c-8`, no port 9
-(GD32 SPI), no DMAC, no MHU. The board defaults enable the GD32 link for real
-CM33 firmware, so `prj.conf` turns SPI and GPIO off and `app.overlay` disables
-`&sci7` and `&gpio9`: P96 (SCK7) and P97 (chip-select) are left untouched. It gives the orchestrator a buildable, bootable
+(GD32 SPI), no DMAC, no MHU. On the V2N / V2M CM33 boards the board defaults
+enable the GD32 link for real CM33 firmware, so
+`boards/<board>.conf` turns SPI and GPIO off and `boards/<board>.overlay`
+disables `&sci7` and `&gpio9`: P96 (SCK7) and P97 (chip-select) are left
+untouched. Those files are per board because the other boards that default to
+this app (AEN M55 cores, NX9101) have no `sci7` / `gpio9` nodes. It gives the orchestrator a buildable, bootable
 peer-core image when a project leaves a secondary M-core at the SoM default,
 while customer applications can still override `cores.<id>.app` with their own
 firmware.
 
 ## Liveness beacon
+
+Only the V2N / V2M CM33 boards have the `rsctbl` window; on any other board
+`main.c` compiles to a plain idle loop with no beacon.
 
 The CM33 has no console on these SoMs, so the shim proves it is running with
 plain memory stores to the top of the `rsctbl` window (the board DTS's

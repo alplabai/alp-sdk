@@ -22,6 +22,9 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/barrier.h>
 
+/* Only the V2N / V2M CM33 boards have the `rsctbl` window; every other core
+ * (AEN M55, NX9101) gets the plain idle loop below. */
+#if DT_NODE_EXISTS(DT_NODELABEL(rsctbl))
 #define RSCTBL_ADDR DT_REG_ADDR(DT_NODELABEL(rsctbl))
 
 #define BEACON_MAGIC (0xA10D0683U) /* "Alp Lab, #683" */
@@ -40,9 +43,11 @@ struct beacon {
 };
 
 #define BEACON ((volatile struct beacon *)(RSCTBL_ADDR + 0xFF0))
+#endif /* DT_NODE_EXISTS(rsctbl) */
 
 int main(void)
 {
+#if DT_NODE_EXISTS(DT_NODELABEL(rsctbl))
 	uint32_t count = 0;
 
 	/* The window keeps its contents across a CM33 reset: clear the counter
@@ -59,6 +64,11 @@ int main(void)
 		BEACON->heartbeat = ++count;
 		barrier_dsync_fence_full();
 	}
+#else
+	while (1) {
+		k_sleep(K_FOREVER);
+	}
+#endif
 
 	return 0;
 }
