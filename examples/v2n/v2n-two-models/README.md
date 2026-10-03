@@ -6,9 +6,9 @@ Run two models at the same time on an E1M-V2M, one on the RZ/V2N's on-die **DRP-
 
 ## What this shows
 
-1. **Backend per handle.** `alp_inference_config_t.backend` picks the accelerator for that handle: `ALP_INFERENCE_BACKEND_DRPAI` for one, `ALP_INFERENCE_BACKEND_DEEPX_DXM1` for the other. Do not use `ALP_INFERENCE_BACKEND_AUTO`: it is fixed at build time and resolves to the DX-M1 on a build with both, so the DRP-AI handle must be named explicitly.
+1. **NPU per handle, chosen by model format.** `backend` stays `ALP_INFERENCE_BACKEND_AUTO` and `format` names the model: `ALP_INFERENCE_MODEL_DRPAI` resolves to DRP-AI3, `ALP_INFERENCE_MODEL_DXNN` to the DX-M1. The app has no SoM-specific code; on a SoM without one of the NPUs the open fails with `ALP_ERR_NOSUPPORT`.
 
-   `alp_inference_config_t.accel_unit_mask` then picks the unit(s) *within* that backend (bit n = unit n, 0 = backend default). The DX-M1 handle sets `0x7` (all three NPU cores); give several DX-M1 models disjoint masks (for example `0x3` and `0x4`) to run them side by side. DRP-AI3 is one unit, so it takes only `0` or `0x1`; a mask a backend cannot honour fails the open with `ALP_ERR_NOSUPPORT`.
+   `alp_inference_config_t.accel_unit_mask` stays `0` (every unit of the resolved NPU); a mask a backend cannot honour fails the open with `ALP_ERR_NOSUPPORT`.
 2. **One thread per NPU.** Each NPU runs one job at a time; the two NPUs are independent hardware, so a thread on each overlaps their work. Two threads on the same NPU would only take turns (the SDK serialises DRP-AI jobs with a process-wide lock, and the DX-M1 time-shares between engines).
 3. **Only the NPUs the mode needs are opened.** `solo-drpai` never opens the DX-M1 and `solo-dx` never opens DRP-AI, so the two-process setup (one process per NPU) is safe: DRP-AI is one process per board (the SDK holds a lock file; a second process opening DRP-AI gets `ALP_ERR_BUSY`).
 4. **Solo, then both.** The default `all` mode runs DRP-AI alone, DX-M1 alone, then both, so the printed numbers show what sharing the A55 cores and DDR costs each NPU.
@@ -60,7 +60,7 @@ Linux-only. Build it with the Yocto recipe `meta-alp-sdk/recipes-examples/alp-tw
 Both NPU stacks must be in the image **and** in `libalp_sdk`:
 
 - DEEPX: `meta-deepx-m1` in `bblayers.conf` (the V2M machine configs enable it).
-- DRP-AI3: `meta-rz-drpai` in `bblayers.conf`, **and** `RUHMI_DRPAI_TVM_DIR` set to an account-gated Renesas RUHMI checkout. Without RUHMI the SDK's DRP-AI backend is not compiled and `.backend = ALP_INFERENCE_BACKEND_DRPAI` fails with `ALP_ERR_NOSUPPORT`, even though the DRP-AI driver and runtime are in the image. See `docs/bring-up-drpai-v2n.md` section 8.
+- DRP-AI3: `meta-rz-drpai` in `bblayers.conf`, **and** `RUHMI_DRPAI_TVM_DIR` set to an account-gated Renesas RUHMI checkout. Without RUHMI the SDK's DRP-AI backend is not compiled and a DRP-AI model fails with `ALP_ERR_NOSUPPORT`, even though the DRP-AI driver and runtime are in the image. See `docs/bring-up-drpai-v2n.md` section 8.
 
 Applications on V2M should also know that `libdxrt` turns `SIGSEGV`/`SIGBUS`/`SIGABRT` into `exit(1)`; see `docs/soms/v2n-m1.md`.
 

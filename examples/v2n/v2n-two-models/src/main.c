@@ -11,13 +11,11 @@
  * What this example shows
  * ========================
  *
- *   1. Backend per HANDLE.  `alp_inference_config_t.backend` picks the
- *      accelerator for that one handle, so two handles in one process can
- *      sit on two different NPUs.  Here: ALP_INFERENCE_BACKEND_DRPAI for
- *      the first, ALP_INFERENCE_BACKEND_DEEPX_DXM1 for the second.  Do
- *      not use ALP_INFERENCE_BACKEND_AUTO for this -- AUTO is decided at
- *      build time and always resolves to the SAME backend (DEEPX if it is
- *      compiled in), so two AUTO handles would share one NPU.
+ *   1. NPU per HANDLE, chosen by model format.  `backend` stays AUTO and
+ *      `format` names the model: a DRP-AI bundle resolves to DRP-AI3, a
+ *      DXNN model to the DX-M1.  Two handles in one process therefore sit
+ *      on two different NPUs with no SoM-specific code, and the app fails
+ *      cleanly with ALP_ERR_NOSUPPORT on a SoM that lacks one of them.
  *   2. One thread per NPU.  An NPU executes one job at a time, so the way
  *      to keep both busy is one worker per NPU.  The two NPUs are
  *      independent hardware (separate drivers, IRQs and DMA engines), so
@@ -440,14 +438,14 @@ int main(int argc, char **argv)
 	 * at `out:`, after close). */
 
 	if (need_drpai) {
-		/* The `backend` field names the NPU for THIS handle.  `format` must
-		 * match what that backend loads (a DRP-AI bundle tar here); open()
-		 * refuses a mismatch with ALP_ERR_INVAL. */
+		/* `backend` stays AUTO (the zero default): the model `format` picks
+		 * the NPU, so this code is SoM-agnostic.  A DRP-AI bundle tar goes
+		 * to DRP-AI3; on a SoM without it open() fails with
+		 * ALP_ERR_NOSUPPORT. */
 		alp_inference_config_t cfg = {
 			.model_data = drpai_model,
 			.model_size = drpai_model_len,
 			.format     = ALP_INFERENCE_MODEL_DRPAI,
-			.backend    = ALP_INFERENCE_BACKEND_DRPAI,
 		};
 		/* alp_inference_open() returns NULL on failure with the reason in
 		 * alp_last_error(); prepare_handle() prints it. */
@@ -461,18 +459,8 @@ int main(int argc, char **argv)
 			.model_data = dx_model,
 			.model_size = dx_model_len,
 			.format     = ALP_INFERENCE_MODEL_DXNN,
-			.backend    = ALP_INFERENCE_BACKEND_DEEPX_DXM1,
-			/* accel_unit_mask picks WHICH accelerator unit(s) of the chosen
-			 * backend run this model: bit n = unit n, 0 = the backend default.
-			 * It is part of the portable config, so no vendor header is needed.
-			 * On a DX-M1 the units are its three NPU cores (bits 0..2): 0x7 is
-			 * all three, right for ONE model.  Give SEVERAL DX-M1 models
-			 * disjoint masks (e.g. 0x3 = cores 0+1 for one, 0x4 = core 2 for
-			 * another) to run them side by side.  A DX-M1 supports at most 3
-			 * distinct core sets at a time; a 4th fails with ALP_ERR_BUSY.  A
-			 * mask the backend cannot honour fails with ALP_ERR_NOSUPPORT --
-			 * DRP-AI3 below accepts only 0 or 0x1, so it keeps the default. */
-			.accel_unit_mask = 0x7u,
+			/* accel_unit_mask 0 (the default) = every unit of the NPU the
+			 * format resolves to; no per-NPU core count lives in app code. */
 		};
 		dx = prepare_handle("deepx", alp_inference_open(&cfg), dx_frame, dx_frame_len);
 		if (dx == NULL) {

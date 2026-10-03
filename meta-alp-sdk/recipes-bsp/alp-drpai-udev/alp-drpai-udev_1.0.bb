@@ -13,7 +13,8 @@ HOMEPAGE = "https://github.com/alplabai/alp-sdk"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-SRC_URI = "file://99-alp-drpai.rules"
+SRC_URI = "file://99-alp-drpai.rules \
+           file://alp-drpai-tmpfiles.conf"
 
 S = "${WORKDIR}"
 
@@ -26,6 +27,9 @@ inherit allarch
 do_install() {
 	install -Dm 0644 ${WORKDIR}/99-alp-drpai.rules \
 		${D}${sysconfdir}/udev/rules.d/99-alp-drpai.rules
+	install -Dm 0644 ${WORKDIR}/alp-drpai-tmpfiles.conf \
+		${D}${nonarch_libdir}/tmpfiles.d/alp-drpai.conf
 }
 
-FILES:${PN} = "${sysconfdir}/udev/rules.d/99-alp-drpai.rules"
+FILES:${PN} = "${sysconfdir}/udev/rules.d/99-alp-drpai.rules \
+               ${nonarch_libdir}/tmpfiles.d/alp-drpai.conf"

@@ -576,8 +576,8 @@ driver has no queue (a second `DRPAI_START` while a job runs returns
   process, so two processes would both load at the arena base and corrupt
   each other. The first DRP-AI handle in a process therefore takes an
   exclusive, non-blocking `flock()` on `/run/alp/drpai.lock` (the image
-  creates `/run/alp` at boot, `root:drpai 0775` (`root:video` when the image has no DRP-AI backend), via a systemd tmpfiles.d
-  snippet in the `alp-sdk` recipe) and keeps it until the last DRP-AI handle
+  creates `/run/alp` at boot, `root:drpai 0775`, via a systemd tmpfiles.d
+  snippet in the `alp-drpai-udev` recipe) and keeps it until the last DRP-AI handle
   in that process closes. A second process gets `ALP_ERR_BUSY` from
   `alp_inference_open()`. Several handles inside one process stay allowed.
   There is no fallback path: a root and a non-root process must lock the

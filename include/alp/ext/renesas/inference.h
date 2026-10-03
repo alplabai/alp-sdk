@@ -31,8 +31,8 @@
  *      in the process closes.  @ref alp_inference_open on a DRP-AI3 model
  *      from a second process returns NULL with @ref ALP_ERR_BUSY.  Several
  *      handles inside one process are fine.  The directory is created at
- *      boot by the image (`root:video 0775`, the group of the drpai udev
- *      rule); there is no fallback path, so if the lock file cannot be
+ *      boot by the image (group-writable, the group of the image's DRP-AI
+ *      access rule); there is no fallback path, so if the lock file cannot be
  *      opened the open fails with @ref ALP_ERR_IO.
  *
  * @par ABI status: [ABI-EXPERIMENTAL]

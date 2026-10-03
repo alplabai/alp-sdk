@@ -25,4 +25,4 @@ def test_udev_package_rides_packageconfig_drpai():
     s = _t("recipes-core/alp-sdk/alp-sdk_0.6.bb")
     line = next(x for x in s.splitlines() if x.startswith("PACKAGECONFIG[drpai]"))
     assert "alp-drpai-udev" in line
-    assert "@ALP_RUN_GROUP@" in _t("recipes-core/alp-sdk/files/alp-sdk-tmpfiles.conf")
+    assert "root drpai" in _t("recipes-bsp/alp-drpai-udev/files/alp-drpai-tmpfiles.conf")

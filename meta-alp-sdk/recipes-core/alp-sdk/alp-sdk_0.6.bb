@@ -320,19 +320,10 @@ python () {
 # and apps pick per-handle at runtime via alp_inference_open(.backend =
 # ...).
 
-# /run/alp (root:drpai 0775) for the DRP-AI one-process-per-board lock; the
-# SDK no longer falls back to /tmp when it is missing (src/yocto/drpai_arena.h).
-# The drpai group comes from alp-drpai-udev, which PACKAGECONFIG[drpai]
-# RDEPENDS on; without that flag the group does not exist in the image, and a
-# tmpfiles entry naming it would fail, so fall back to video there.
-ALP_RUN_GROUP = "${@'drpai' if 'drpai' in (d.getVar('PACKAGECONFIG') or '').split() else 'video'}"
-do_install:append() {
-    install -d ${D}${nonarch_libdir}/tmpfiles.d
-    install -m 0644 ${WORKDIR}/alp-sdk-tmpfiles.conf ${D}${nonarch_libdir}/tmpfiles.d/alp-sdk.conf
-    sed -i 's/@ALP_RUN_GROUP@/${ALP_RUN_GROUP}/' ${D}${nonarch_libdir}/tmpfiles.d/alp-sdk.conf
-}
+# The DRP-AI lock directory (/run/alp) is created by alp-drpai-udev, which
+# PACKAGECONFIG[drpai] pulls in; non-DRP-AI images get no such directory.
 
-FILES:${PN}     += "${libdir}/libalp_sdk.so.* ${nonarch_libdir}/tmpfiles.d/alp-sdk.conf"
+FILES:${PN}     += "${libdir}/libalp_sdk.so.*"
 FILES:${PN}-dev += "${libdir}/libalp_sdk.so    \
                     ${includedir}/alp/*.h      \
                     ${includedir}/alp/chips/*.h"
