@@ -8,3 +8,4 @@
 - `cold_boot_test` failing mid-way keeps the evidence of the cycles that passed:
   `cold_boots_passed` reads e.g. `2/3`, not a stale `0/3`.
 - `gd32_flash` has a test pinning that the path that flashes records `gd32_fw_version` too.
+- `docs/provisioning-v2n.md` documents the two-leg DSW1/microSD operator flow (xSPI mode throughout), unit identification before provisioning, SCPI pacing and the accepted `eth_phy_id` list (RTL8211F and RTL8211F-VD).
