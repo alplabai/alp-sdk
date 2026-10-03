@@ -162,6 +162,44 @@ different PHY LED pin that is not a strap.
 **Confidence:** medium. The rework is applied on the bench carrier
 (2026-10-02); the strap level before and after was not recorded.
 
+## E6: DRP-AI vendor driver writes CPG bits the V2N manual marks reserved (software)
+
+**Symptom:** none observed. The DRP-AI probe and inference ran on silicon
+(#1268) with the driver unmodified.
+
+**Root cause:** the vendor DRP-AI driver we inherit (`meta-rz-drpai`
+`0002-enable-drpai-driver.patch`) initialises its clocks and bus-stop bits
+with a V2H-derived routine. It writes bits the RZ/V2N manual lists as
+reserved: `CPG_CLKON_1` bits 8-15, `CPG_CLKON_17` bits 0-2,
+`CPG_BUS_8_MSTOP` bits 10 and 12-15, `CPG_BUS_9_MSTOP` bits 0-3 and
+`CPG_BUS_12_MSTOP` bits 1-8. It does not touch `CPG_BUS_12_MSTOP` bits 9/10
+(the MCPU-ACPU bus), so there is no CM33 conflict.
+
+**HW fix:** none.
+
+**Software workaround:** none. We do not hand-patch the vendor driver; ask
+Renesas whether the reserved-bit writes are safe on V2N.
+
+**Confidence:** high for the register list (read from the patch and the
+manual); safety of the writes is unconfirmed.
+
+## E7: SWINT unit 12 raises GIC_SPI 404, which the manual lists as reserved (SoC documentation)
+
+**Symptom:** the CM33-to-A55 reverse doorbell uses MHU SWINT unit 12, which
+the manual does not document as an A55 interrupt source. The manual lists
+CA55 SPI 404-411 as reserved, `swint_ch22_ns`..`swint_ch25_ns` as SPI
+412-415, and `swint_ch12_ns` as not used.
+
+**Root cause:** manual and silicon disagree. The silicon measurement
+(#697 cycle 10) is that SWINT unit 12 fires CA55 INTID 436, i.e. GIC_SPI
+404. The device tree and the UIO driver follow the measurement.
+
+**Software workaround:** keep SPI 404. Do not "correct" the device tree to
+the manual's table; that breaks the reverse doorbell.
+
+**Confidence:** high on the measured behaviour, low on the vendor's
+intent; Renesas has not confirmed it.
+
 ---
 
 ### Already correct in the SDK metadata (no action — listed for closure)

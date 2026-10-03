@@ -1,0 +1,6 @@
+### Documentation - V2N docs corrected after the Renesas audit (NPU-01, NPU-09, SYS-07, SYS-M2, IO-04, BT-1, IO-M2, XSPI-2, XSPI-3, MM-X4)
+
+- `docs/soms/v2n.md`: the Linux UART section now names the real ports (SCIF console, RSCI4 for Bluetooth) and says RSCI0/RSCI1 have no node yet; Bluetooth compatible is `infineon,cyw55572-bt`; eMMC and NOR are Linux (A55) devices, not Zephyr subsystems; new pad-voltage caveat for `P2x`, `P90`-`P92`, `PBx`; SPDIF is not available.
+- `docs/bring-up-drpai-v2n.md`: note that `/dev/drpai0` access is root-equivalent and the policy is under review.
+- `docs/adr/0025-v2n-dmac0-cm33-exclusive-channel-partition.md`: DMAC0 has 16 channels (ch2-15 unclaimed), not 8.
+- `docs/errata-e1m-x-v2n.md`: E6 (vendor DRP-AI driver writes reserved CPG bits) and E7 (SWINT 12 raises GIC_SPI 404 against the manual).

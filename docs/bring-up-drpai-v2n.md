@@ -493,6 +493,21 @@ In order:
    the shared-memory exclusion lock is contended. **Not yet reachable: no model
    has been compiled (§5).**
 
+## Security note: `/dev/drpai0` access is root-equivalent (NPU-01)
+
+The image's udev rule opens `/dev/drpai0` to the `video` group (mode `0660`),
+while the vendor driver creates the node root-only. Treat any process that can
+open it as root-equivalent:
+
+- the driver's DMA descriptors can reach any physical DRAM address (no IOMMU);
+- `DRPAI_WRITE_CPG_REG` writes CPG registers with only a bounds check, so a
+  caller can gate clocks of peripherals the CM33 owns or alter the bus
+  stop bits between the CM33 and the A55.
+
+The access policy (capability check in the driver versus a root-only node with
+a dedicated group) is under review. Until it is decided, add only trusted
+accounts to `video`. Not tested on silicon.
+
 ## Related
 
 - [bring-up-v2n.md](bring-up-v2n.md) — base V2N bring-up

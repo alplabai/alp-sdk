@@ -10,8 +10,9 @@ CM33 firmware arms it directly through the vendored Renesas FSP
 `r_dmac_b` module for the GD32 supervisor link's SCI7 SPI DMA fast
 path, and the upstream Linux SoC devicetree also declares a
 `dma-controller@11400000` node the `rz-dmac` driver binds
-unconditionally when enabled. Both sides reach the same 8 channels and
-their 8 GIC interrupts.
+unconditionally when enabled. Both sides reach the same 16 channels (the
+SoC dtsi declares `dma-channels = <16>`) and their GIC interrupts (16
+channel interrupts plus one error interrupt).
 
 Silicon evidence, recorded verbatim in
 `meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi:326-338`:
@@ -72,9 +73,9 @@ answer to write down as the contract, rather than merely undone work:
 
 **Within the CM33's exclusive ownership, the channel assignment is:**
 ch0 (RX, DMAINT0 → NVIC 89) + ch1 (TX, DMAINT1 → NVIC 90) reserved for
-the SCI7 SPI DMA fast path; ch2-7 are unclaimed margin for future
+the SCI7 SPI DMA fast path; ch2-15 are unclaimed margin for future
 CM33-side DMA consumers. This is recorded so a future CM33 DMA user
-knows ch0/ch1 are spoken for and picks ch2-7, and so nobody reads the
+knows ch0/ch1 are spoken for and picks ch2-15, and so nobody reads the
 whole-unit disable as accidental generosity that a partial Linux
 re-enable could safely claw back.
 
@@ -104,7 +105,7 @@ Good:
 - The ownership split is explicit and citable in one place instead of
   requiring a fresh code dig (FSP config struct here, dtsi comment
   there) each time the question comes up.
-- The channel-level detail (ch0/ch1 CM33, ch2-7 unclaimed) is on
+- The channel-level detail (ch0/ch1 CM33, ch2-15 unclaimed) is on
   record for whoever next touches CM33-side DMA.
 
 Bad / costs — stated honestly:
@@ -119,7 +120,7 @@ Bad / costs — stated honestly:
 **Revisit triggers, stated explicitly:**
 - A verified Linux-side per-channel DMA partition mechanism is found
   and silicon-proven not to claim ch0/ch1's IRQs.
-- CM33-side DMA use grows past ch0/ch1 and needs the documented ch2-7
+- CM33-side DMA use grows past ch0/ch1 and needs the documented ch2-15
   margin (update the reservation here, not just in code comments).
 - #84 resolves and the SCI7 DMAC path ships — re-verify the channel
   claim still matches `spi_renesas_rz_sci_b.c` at that point.
