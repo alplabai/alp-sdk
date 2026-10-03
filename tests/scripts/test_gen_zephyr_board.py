@@ -264,6 +264,32 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
         self.assertIn("openamp_shm: memory@9f700000", dts)
         self.assertIn("mbox1: mhu@", dts)
 
+    def test_v2n_v2m_audit_cm33_outputs(self) -> None:
+        """Pin the CM33 audit outputs (CM33-01/14/M2) on both SKUs: sci0 RXD
+        pull-up, enabled-only `supported:`, and the RAM console (node is a
+        `zephyr,memory-region`, size matches CONFIG_RAM_CONSOLE_BUFFER_SIZE)."""
+        for sku, d in (("E1M-V2N101", "e1m_v2n101_m33_sm"),
+                       ("E1M-V2M101", "e1m_v2m101_m33_sm")):
+            files = emit_zephyr_board(sku, "m33_sm", METADATA_ROOT)
+            base = f"alp_{d}/alp_{d}"
+            dts = files[f"{base}_r9a09g056n48gbg_cm33.dts"]
+            cfg = files[f"{base}_r9a09g056n48gbg_cm33_defconfig"]
+            yml = files[f"{base}_r9a09g056n48gbg_cm33.yaml"]
+            pin = files[f"{base}-pinctrl.dtsi"]
+            self.assertIn("bias-pull-up;", pin)
+            self.assertRegex(yml, r"supported:\s*- gpio\s*- spi\s")
+            self.assertNotRegex(yml, r"-\s*(i2c|uart)\b")
+            self.assertIn("CONFIG_UART_INTERRUPT_DRIVEN=y", cfg)
+            self.assertIn("CONFIG_RAM_CONSOLE=y", cfg)
+            self.assertIn("zephyr,ram-console = &ram_console;", dts)
+            m = re.search(r"ram_console: memory@9f710000 \{(.*?)\};", dts, re.S)
+            self.assertIsNotNone(m)
+            node = m.group(1)
+            self.assertIn('compatible = "zephyr,memory-region";', node)
+            self.assertIn('zephyr,memory-region = "RAM_CONSOLE";', node)
+            self.assertIn("reg = <0x9f710000 0x4000>;", node)
+            self.assertIn("CONFIG_RAM_CONSOLE_BUFFER_SIZE=16384", cfg)
+
     def test_openamp_ipc_false_drops_the_block(self) -> None:
         """No committed board sets `openamp_ipc: false` any more, so the
         shorter path is exercised on a preset with the flag cleared: it must
