@@ -141,9 +141,9 @@ e1m_routes:
     # --- MIPI-DSI display panels ---
     # Display 1 (J6, DSI0): LCD1_RST (IO13) is routed via the V2N-family bridge
     # GPIO expander on BRD_I2C.
-    # LCD1_PWR_EN (IO15) is a bridge GPIO on V2N SoMs (GD32 PB4, protocol
-    # minor >= 15) and pulled high on the carrier -- panel powers by default;
-    # no explicit firmware action needed.
+    # LCD1_PWR_EN (IO15) is a bridge GPIO on V2N SoMs (Linux gpiochip line 22 =
+    # bridge bit 21, GD32 PB4, protocol minor >= 15) and pulled high on the
+    # carrier -- panel powers by default; no explicit firmware action needed.
     # Display 2 (J28, DSI1): V2N/V2M SoMs have only one MIPI-DSI output; DSI1
     # lane set is unpopulated on the SoM -- LCD2_RST (IO21), LCD2_PWR_EN (IO22),
     # and the CTP2 sideband (IO17/IO19) are permanently unreachable on V2N/V2M.

@@ -252,7 +252,7 @@ extern "C" {
 #define ALP_E1M_X_GPIO_IO12 12u  /**< pad AR23 */
 #define ALP_E1M_X_GPIO_IO13 13u  /**< pad AQ23 */
 #define ALP_E1M_X_GPIO_IO14 14u  /**< pad AR24 */
-#define ALP_E1M_X_GPIO_IO15 15u  /**< pad AQ24 -> V2N PB4 via GD32 IO MCU */
+#define ALP_E1M_X_GPIO_IO15 15u  /**< pad AQ24 */
 #define ALP_E1M_X_GPIO_IO16 16u  /**< pad AR25 */
 #define ALP_E1M_X_GPIO_IO17 17u  /**< pad AQ26 */
 #define ALP_E1M_X_GPIO_IO18 18u  /**< pad AR26 */

@@ -368,8 +368,13 @@ moves; bit 20 is `CAN_STBY`):
 
 | Bit | E1M pad | GD32 pad | Boot state          | Host macro |
 |-----|---------|----------|---------------------|------------|
-| 21  | `IO15`  | `PB4`    | parked (no drive)   | `GD32G553_GPIO_LINE_E1M_IO15` |
-| 22  | `IO26`  | `PC2`    | parked (no drive)   | `GD32G553_GPIO_LINE_E1M_IO26` |
+| 21  | `IO15`  | `PB4`    | analog, no drive (PB4 parked explicitly) | `GD32G553_GPIO_LINE_E1M_IO15` |
+| 22  | `IO26`  | `PC2`    | analog, no drive    | `GD32G553_GPIO_LINE_E1M_IO26` |
+
+`PB4` resets as the JTAG `NJTRST` pin (alternate function, pull-up) on GD32
+parts, so firmware 0.3.1 parks it analog / no pull at boot; debug access on
+this board is SWD only. The `GD32G553_GPIO_LINE_*` host macros are bridge
+bit numbers, not Linux gpiochip line numbers.
 
 Like every other E1M pad they stay undriven until a host first reads or writes
 them. `PC14` (E1M IO24) is not part of this change. A bridge below minor 15
@@ -378,9 +383,13 @@ ignores bits 21/22 and still answers success, so `gd32g553_gpio_read` /
 when the cached protocol minor is below
 `GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR` (15), and the Linux
 `gpio-gd32-bridge` driver refuses `.request()` of lines 22/23 (`-ENODEV`)
-until `GET_VERSION` confirms it. Linux line numbers are one above the bridge
-bit for these two pads because line 21 is `se-rst` (below): line 22 = IO15
-(bit 21), line 23 = IO26 (bit 22).
+until `GET_VERSION` confirms it (`-EAGAIN` while the bridge has not answered
+yet; no kernel consumer uses these lines, so `-EPROBE_DEFER` would only leak
+errno 517 to userspace). Linux line numbers are one above the bridge bit for
+these two pads because line 21 is `se-rst` (below): line 22 = IO15 (bit 21),
+line 23 = IO26 (bit 22). `se-rst` keeps line 21 because its line number is
+already consumed by the optiga reset DT and HIL spec; renumbering it would
+churn a stable userspace-visible line for no functional gain.
 
 A bridge below minor 11 never learned these two bits; a host driving
 `GPIO_WRITE` against them on such a bridge silently powers nothing

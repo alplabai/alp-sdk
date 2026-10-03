@@ -14,11 +14,13 @@ description: |
   Kernel GD32 bridge driver answered GET_VERSION with protocol 0.14.x or 0.15.x.
 
 flash_method: ssh-run
-ssh_command: "dmesg | grep -i 'GD32 bridge'"
+ssh_command: |-
+  dmesg | grep -i 'GD32 bridge'
+  dmesg | grep -Eq 'GD32 bridge protocol 0\.(14|15)\.' && echo HIL_GD32_PROTOCOL_OK
 
 serial:
   duration_s: 10
   expect_contains:
-    - "GD32 bridge protocol 0.1"
+    - "HIL_GD32_PROTOCOL_OK"
   expect_absent:
     - "not answering"

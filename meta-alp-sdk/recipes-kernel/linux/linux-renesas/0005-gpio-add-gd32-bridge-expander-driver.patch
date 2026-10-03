@@ -104,8 +104,8 @@ Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  drivers/gpio/Kconfig            |   9 +
  drivers/gpio/Makefile           |   1 +
- drivers/gpio/gpio-gd32-bridge.c | 1087 
- 3 files changed, 1097 insertions(+)
+ drivers/gpio/gpio-gd32-bridge.c | 1089 ++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 1099 insertions(+)
  create mode 100644 drivers/gpio/gpio-gd32-bridge.c
 
 diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
@@ -145,7 +145,7 @@ new file mode 100644
 index 000000000..b202babc2
 --- /dev/null
 +++ b/drivers/gpio/gpio-gd32-bridge.c
-@@ -0,0 +1,1087 @@
+@@ -0,0 +1,1089 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * GPIO driver for the Alp Lab GD32 IO-MCU bridge (I2C transport).
@@ -802,7 +802,9 @@ index 000000000..b202babc2
 +}
 +
 +/* Lines 22/23: same single non-blocking attempt; the shared GET_VERSION in
-+ * gd32_bridge_wifi_bt_poll_once() resolves both caches. */
++ * gd32_bridge_wifi_bt_poll_once() resolves both caches.  No kernel consumer
++ * exists, so a silent bridge is -EAGAIN (libgpiod would see -EPROBE_DEFER
++ * as the kernel-internal errno 517). */
 +static int gd32_bridge_resolve_io_ext(struct gd32_bridge_gpio *gd32)
 +{
 +	int cached = gd32_bridge_io_ext_status(gd32);
@@ -811,7 +813,7 @@ index 000000000..b202babc2
 +		return cached;
 +
 +	if (gd32_bridge_wifi_bt_poll_once(gd32))
-+		return -EPROBE_DEFER;	/* still silent */
++		return -EAGAIN;	/* still silent */
 +
 +	return gd32_bridge_io_ext_status(gd32);
 +}

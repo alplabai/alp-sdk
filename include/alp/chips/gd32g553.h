@@ -212,12 +212,14 @@ extern "C" {
  *  See docs/gd32-bridge-protocol.md's version-history table. */
 #define GD32G553_REG_ON_MIN_PROTOCOL_MINOR 11u
 
-/** GPIO expander line carrying E1M IO15 (GD32 pad `PB4`).  Valid only on
+/** GPIO expander bridge bit (not the Linux gpiochip line, which is 22)
+ *  carrying E1M IO15 (GD32 pad `PB4`).  Valid only on
  *  bridges advertising protocol minor
  *  @ref GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR or newer. */
 #define GD32G553_GPIO_LINE_E1M_IO15 21u
 
-/** GPIO expander line carrying E1M IO26 (GD32 pad `PC2`).  Valid only on
+/** GPIO expander bridge bit (not the Linux gpiochip line, which is 23)
+ *  carrying E1M IO26 (GD32 pad `PC2`).  Valid only on
  *  bridges advertising protocol minor
  *  @ref GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR or newer. */
 #define GD32G553_GPIO_LINE_E1M_IO26 22u
@@ -226,8 +228,11 @@ extern "C" {
  *  21 to 23 lines, adding @ref GD32G553_GPIO_LINE_E1M_IO15 and
  *  @ref GD32G553_GPIO_LINE_E1M_IO26 (firmware 0.3.1).  A bridge below this
  *  minor ignores those bits and still answers success, so
- *  gd32g553_gpio_read() / gd32g553_gpio_write() return
- *  `ALP_ERR_NOSUPPORT` for a mask naming either bit on such a bridge.
+ *  gd32g553_gpio_write() returns `ALP_ERR_NOSUPPORT` for a mask naming
+ *  either bit on such a bridge (likewise for the REG_ON bits below minor
+ *  11 and CAN_STBY, bit 20, below minor 13); gd32g553_gpio_read() drops
+ *  the missing bits (they read 0) and refuses only a mask naming nothing
+ *  else.
  *  See docs/gd32-bridge-protocol.md's version-history table. */
 #define GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR 15u
 

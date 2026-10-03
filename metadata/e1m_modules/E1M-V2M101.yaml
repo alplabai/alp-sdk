@@ -272,8 +272,8 @@ pad_routes:
       doc: "Not a GD32 pad; driven by the DX-M1 on V2M. Bridge bit 8 answers STATUS_IO (#2453)." }
   - { e1m: E1M_X_GPIO_IO25, dispatch: gd32_bridge, dispatch_pin: PC15 }
 
-  # E1M-X form-factor GPIO extensions (IO27..IO35, IO33 absent on V2N).
-  # See `E1M_X_GPIO_IO27..IO35` in <alp/e1m_x_pinout.h>.
+  # E1M-X form-factor GPIO extensions (IO26..IO35, IO33 absent on V2N).
+  # See `E1M_X_GPIO_IO26..IO35` in <alp/e1m_x_pinout.h>.
   # Source: metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv
   - { e1m: E1M_X_GPIO_IO26, dispatch: gd32_bridge, dispatch_pin: PC2  }
   - { e1m: E1M_X_GPIO_IO27, dispatch: gd32_bridge, dispatch_pin: PB11 }
