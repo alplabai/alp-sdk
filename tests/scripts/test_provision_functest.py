@@ -1311,3 +1311,17 @@ def test_cm33_firmware_is_blocking_with_an_md5_compare_once_the_bundle_carries_a
     res = _run(ctx)
     assert _val(res, "cm33_firmware").startswith("fail (mtd1+0x1a0000 md5 0123")
     assert res.status == "failed" and res.evidence["test_functional"] == "fail (cm33_firmware)"
+
+
+def test_eth_phy_id_accepts_a_list_of_variants(tmp_path):
+    # RTL8211F (0x001cc916) and RTL8211F-VD (0x001cc878) both ship on V2M103 units
+    ctx, unit = _setup(tmp_path, {"eth_phy_id": "end0 0x001cc878\nend1 0x001cc878"})
+    over = tmp_path / "over.yaml"
+    over.write_text("schema: 1\neth_phy_id: [0x001CC916, 0x001CC878]\n", encoding="utf-8")
+    ctx.functest_expect = functest.load_expect(over)
+    res = _run(ctx)
+    assert _val(res, "eth_phy_id").startswith("pass"), _val(res, "eth_phy_id")
+    # the single-ID default still rejects the other variant
+    (tmp_path / "b").mkdir()
+    ctx2, _ = _setup(tmp_path / "b", {"eth_phy_id": "end0 0x001cc878\nend1 0x001cc878"})
+    assert "want 0x001cc916" in _val(_run(ctx2), "eth_phy_id")
