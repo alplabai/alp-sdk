@@ -19,6 +19,11 @@ have ended up running.  mmc1 is never probed on an empty slot.  Builds
 without CONFIG_ALP_E1M_SD1_MICROSD keep the old behaviour (the command
 always succeeds).
 
+The pin is read as a plain GPIO input (PMC/PM); its PFC input-enable bit is
+not set, and whether PA1 needs it on RZ/V2N is unconfirmed.  If the pin
+always reads 0 the slot always looks full and the -110 message stays, so
+the empty-slot bench step must pass before that message is called gone.
+
 Not verified on silicon.
 
 Signed-off-by: Alp Lab AB <contact@alplab.ai>

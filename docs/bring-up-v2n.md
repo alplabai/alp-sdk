@@ -252,29 +252,32 @@ silicon; do them in order on a unit flashed with the new FIP and image.
    `mmcblk0boot1`).
 3. **First boot.** Serial console on the first boot of the new FIP: expect
    one `bad CRC, using default environment`, then
-   `ALP: environment initialised (version 1)` and `Saving Environment to
+   `ALP: environment initialised` and `Saving Environment to
    MMC... Writing to redundant MMC(0)... OK`.
 4. **Second boot is silent.** Reboot: no `bad CRC` line, no `initialised`
    line, `Loading Environment from MMC... OK`.
-5. **`saveenv` survives a reboot.** At the U-Boot prompt:
-   `setenv alp_test 1; saveenv`, `reset`, then `printenv alp_test` ->
-   `alp_test=1`.
+5. **An allowlisted variable survives a reboot.** At the U-Boot prompt:
+   `setenv bootcount 3; saveenv`, `reset`, then `printenv bootcount` ->
+   `bootcount=3`. A variable not on the allowlist must NOT come back:
+   `setenv alp_test 1; saveenv`, `reset`, `printenv alp_test` -> not defined.
 6. **Redundancy.** After `saveenv`, corrupt copy 2 from Linux
    (`echo 0 > /sys/block/mmcblk0boot1/force_ro`, `dd if=/dev/zero
-   of=/dev/mmcblk0boot1 bs=1 seek=$((0x230000)) count=16 conv=notrunc`,
+   of=/dev/mmcblk0boot1 bs=1 seek=$((0x230000)) count=16`,
    `echo 1 > /sys/block/mmcblk0boot1/force_ro`), reboot: U-Boot still
-   loads `alp_test`; the next `saveenv` repairs the copy.
-7. **Linux -> U-Boot.** In Linux: `fw_printenv alp_test` -> `1`;
-   `fw_setenv alp_test 2`; reboot; U-Boot `printenv alp_test` -> `2`. If
+   loads `bootcount`; the next `saveenv` repairs the copy.
+7. **Linux -> U-Boot.** In Linux: `fw_printenv bootcount` -> `3`;
+   `fw_setenv bootcount 4`; reboot; U-Boot `printenv bootcount` -> `4`. If
    `fw_setenv` fails with a read-only error, `mmcblk0boot1`'s `force_ro`
    is set and the tool did not clear it; record it (the image then needs a
    udev rule or the OTA client must clear it).
-8. **`bootcmd` is the firmware's.** `fw_setenv bootcmd 'echo old'`, reboot:
-   the unit still boots Linux (the binary's `bootcmd` replaced the saved
-   one). Clean up with `fw_setenv bootcmd` (unset).
+8. **Boot control is the firmware's.** `fw_setenv bootcmd 'echo old'`,
+   `fw_setenv bootdelay 5`, reboot: the unit still boots Linux and
+   `printenv bootcmd bootdelay` shows the binary's values (on a production
+   build the console stays locked). Clean up with `fw_setenv bootcmd` and
+   `fw_setenv bootdelay` (unset).
 9. **Provisioning does not clobber it.** Run the provisioning
    `write_emmc_boot` step on this unit, reboot, and confirm
-   `printenv alp_test` is still set.
+   `printenv bootcount` is still set.
 10. **Empty SD slot.** No card inserted, power-cycle, serial console: no
     `Card did not respond to voltage select! : -110` and no `mmc1`
     output; Linux boots from the eMMC.

@@ -356,15 +356,20 @@ SRC_URI:append:rzv2n-family = " file://0011-rzv2n-dev-ALP-E1M-gd32-nrst-release.
 SRC_URI:append:rzv2n-family = " file://0013-rzv2n-dev-ALP-E1M-sd-card-detect.patch"
 
 # 0014 + uboot-env-emmc.cfg (persistent environment): a redundant pair in
-# eMMC boot partition 2 (Linux mmcblk0boot1; boot partition 1 holds the
-# bootloader the BootROM runs), and CONFIG_BOOTCOMMAND no longer starts with
-# "env default -a", so saveenv survives a reboot and Linux fw_setenv
-# (recipes-core/alp-system/alp-uboot-env, /etc/fw_env.config) is seen by
-# U-Boot. 0014 resets to the defaults on first boot or an ALP_ENV_VERSION
-# bump and re-applies bootcmd from the binary every boot. The cfg moves the
-# environment off the vendor default (end of the eMMC user area); its
-# offsets and /etc/fw_env.config must agree
+# eMMC boot partition 2 (Linux mmcblk0boot1), and CONFIG_BOOTCOMMAND no
+# longer starts with "env default -a", so saveenv survives a reboot and
+# Linux fw_setenv (recipes-core/alp-system/alp-uboot-env, /etc/fw_env.config)
+# is seen by U-Boot. CONFIG_ENV_WRITEABLE_LIST makes the built-in default
+# the baseline every boot and imports only the OTA variables, so bootcmd,
+# bootargs, bootdelay and the vendor boot scripts are always rebuilt from the
+# binary. The cfg moves the environment off the vendor default (end of the
+# eMMC user area); its offsets and /etc/fw_env.config must agree
 # (tests/scripts/test_uboot_env_layout.py).
+#
+# Scoped to rzv2n-family, not e1m-v2n101 like sd1-microsd.cfg: patch 0014
+# edits CONFIG_BOOTCOMMAND for every family member, and without the cfg the
+# plain EVK would persist the whole vendor-location environment with no
+# allowlist, so the patch and the cfg must travel together.
 SRC_URI:append:rzv2n-family = "     file://0014-rzv2n-dev-ALP-E1M-persistent-environment.patch     file://uboot-env-emmc.cfg "
 
 # Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot

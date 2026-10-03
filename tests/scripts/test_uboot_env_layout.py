@@ -44,3 +44,17 @@ def test_the_two_copies_do_not_overlap_and_sit_above_every_boot_write():
     assert min(a, b) >= fip_end_max
     assert max(a, b) + size <= 4 * 1024 * 1024      # smallest boot partition we assume
     assert a % 512 == 0 and b % 512 == 0 and size % 512 == 0
+
+
+PATCH_0014 = META / "recipes-bsp/u-boot/u-boot/0014-rzv2n-dev-ALP-E1M-persistent-environment.patch"
+
+
+def test_only_ota_variables_are_importable_from_the_saved_environment():
+    """The write allowlist is what stops fw_setenv from changing how a unit
+    boots: it must be on, and nothing that controls booting may be listed."""
+    assert _cfg()["CONFIG_ENV_WRITEABLE_LIST"] == "y"
+    names = set(re.findall(r"(\w+):sw", PATCH_0014.read_text()))
+    assert {"upgrade_available", "bootcount", "mender_boot_part"} <= names
+    assert not names & {"bootcmd", "bootargs", "bootdelay", "bootdelaykey", "preboot",
+                        "bootcmd_check", "emmcload", "sd2load"}
+    assert not any(n.startswith("bootstopkey") for n in names)

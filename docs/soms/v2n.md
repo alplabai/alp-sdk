@@ -256,9 +256,10 @@ week and an index would otherwise collide on the same MAC.
   **the derived MAC always applies whenever the serial parses**,
   unconditionally, every boot. There is no override slot --
   **conditional on autoboot actually running the compiled-in
-  `CONFIG_BOOTCOMMAND`.** U-Boot re-applies that command to the RAM
-  environment every boot, so a `bootcmd` saved by an older FIP cannot
-  keep running; a unit still on an older FIP that carries a *saved*
+  `CONFIG_BOOTCOMMAND`.** the write allowlist (see
+  [U-Boot environment](#uboot-environment)) rebuilds `bootcmd` from the
+  binary every boot, so a `bootcmd` saved by an older FIP cannot keep
+  running; a unit still on an older FIP that carries a *saved*
   `bootcmd` without the `alp_eth_mac` call (or from a manual
   `setenv bootcmd; saveenv`) runs THAT command instead, and Linux sees
   the DRP-AI vendor default `02:11:22:33:44:55`/`66` instead of the
@@ -298,22 +299,29 @@ in the image's `/etc/fw_env.config`
 `tests/scripts/test_uboot_env_layout.py` fails if they disagree. The
 vendor default (end of the eMMC user area) is no longer used.
 
-* **`saveenv` persists.** `CONFIG_BOOTCOMMAND` no longer starts with
-  `env default -a`. U-Boot patch `0014` writes the built-in defaults once,
-  on first boot (both copies unreadable, which also prints the usual
-  `bad CRC, using default environment` warning that one time) or after a
-  deliberate `ALP_ENV_VERSION` bump in the board code, and tags the
-  environment with `alp_envver`.
-* **`bootcmd` is owned by the firmware.** It is re-applied from the
-  binary to the RAM environment on every boot, so a copy saved by an
-  older U-Boot cannot keep running an older boot flow. Every other
-  variable persists.
+* **`saveenv` persists, but only the OTA variables are read back.**
+  `CONFIG_BOOTCOMMAND` no longer starts with `env default -a`. U-Boot is
+  built with `CONFIG_ENV_WRITEABLE_LIST`: the built-in default is the
+  baseline on every boot and only the variables listed in
+  `CFG_ENV_FLAGS_LIST_STATIC` (patch `0014`, `include/configs/rzv2n-dev.h`)
+  are imported from the saved copy: Mender's `upgrade_available`,
+  `bootcount`, `mender_boot_part`, `mender_boot_part_hex`,
+  `mender_saveenv_canary`, and the `alp_envinit` first-boot marker. At the
+  U-Boot prompt `setenv` / `saveenv` behave as before; a variable not on
+  the list simply is not restored on the next boot. The Mender names come
+  from Mender's documented U-Boot integration and are not yet checked
+  against the meta-mender release this repo will pin; a missing name is
+  ignored at boot, so check the list when wiring Mender.
+* **Everything that controls booting is the firmware's.** `bootcmd`,
+  `bootargs`, `bootdelay`, `bootstopkey*`, `preboot` and the vendor boot
+  scripts (`bootcmd_check`, `emmcload`, `sd2load`, ...) are rebuilt from
+  the binary on every boot, so neither an older FIP's saved copy nor
+  `fw_setenv` can change them. First boot (both copies unreadable) prints
+  the usual `bad CRC, using default environment` once; patch `0014` then
+  writes the defaults and the `alp_envinit` marker.
 * **Linux sees the same variables.** The image carries `libubootenv`
-  (`fw_printenv`, `fw_setenv`) and `/etc/fw_env.config`, so the OTA
-  client can switch the boot slot by writing the environment.
-* **Bumping `ALP_ENV_VERSION` discards the saved environment,** including
-  any variables an OTA client keeps in it. Bump it only when the default
-  layout changes incompatibly.
+  (`fw_printenv`, `fw_setenv`) and `/etc/fw_env.config`. This is groundwork
+  for the OTA design: the boot flow reads no boot-slot variable yet.
 * **Provisioning does not write the environment.** The Linux boot write
   (`write_emmc_boot`) refuses an image that would reach offset `0x220000`
   (`scripts/provision/gates.py`, `BOOT_ENV_OFFSET`).
@@ -322,10 +330,16 @@ vendor default (end of the eMMC user area) is no longer used.
   not wired to the offsets above yet: point
   `MENDER_UBOOT_ENV_STORAGE_DEVICE_OFFSET_*` at them and do not install
   `alp-uboot-env` alongside it.
-* **Console lockdown:** a saved `bootdelay` / `bootstopkey*` is read
-  before autoboot, and a root shell on the device can write them with
-  `fw_setenv`. The production-boot lockdown (`prod-boot.cfg`) does not yet
-  close this; see its KNOWN HOLE note.
+* **Console lockdown:** a production boot (`prod-boot.cfg`) ignores any
+  saved `bootdelay` / `bootstopkey*`, so a root shell's `fw_setenv` cannot
+  reopen the console.
+
+* **Why persistent, not env-nowhere.** Issue #2637 first recorded
+  `CONFIG_ENV_IS_NOWHERE` as the fix for the `bad CRC` line; the
+  maintainer's later decision (work ledger Q2, 2026-10-03: redundant
+  environment on the eMMC boot partition plus `fw_setenv` for OTA)
+  supersedes it, and the allowlist keeps the part of env-nowhere that
+  mattered, that no saved variable can change how the unit boots.
 
 ### microSD card-detect {#sd-card-detect}
 
