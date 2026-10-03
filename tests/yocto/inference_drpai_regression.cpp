@@ -305,7 +305,7 @@ void test_area_change_with_live_handle_is_refused()
 }
 
 /* Point the SDK's lock dir at a private temp dir (the real /run/alp is
- * image-provided and root/video-owned).  Done once, from main(). */
+ * image-provided and root:drpai-owned).  Done once, from main(). */
 char g_tmp_lock_dir[] = "/tmp/alp-drpai-test-XXXXXX";
 
 /* The lock file the SDK uses.  Returns an fd on it (or -1). */

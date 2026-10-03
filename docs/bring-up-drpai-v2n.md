@@ -40,7 +40,7 @@ this is fiddly.
 | DRP-AI kernel driver | `meta-rz-drpai`, patched into the kernel by `0002-enable-drpai-driver.patch` | Not a package — do not look for a `.ko` |
 | `drpai0` DT node + label | `meta-rz-drpai`, `0001-add-drpai-property-to-devicetree.patch` | **Creates** the label; it does not exist in the pristine tree |
 | `<linux/drpai.h>` UAPI header | `meta-rz-drpai` recipe `drpai` (1.4.0) | Headers only |
-| `libtvm_runtime.so` | `meta-rz-drpai` recipe `lib-tvm` | Build-time only: the images no longer install `lib-tvm` (it served a legacy TVM v2.5 path) |
+| `libtvm_runtime.so` | `meta-rz-drpai` recipe `lib-tvm` | No longer installed explicitly (it served a legacy TVM v2.5 path), but `libalp_sdk.so` still links `tvm_runtime`, so OE's shlibs pass pulls `lib-tvm` back in until the link fix on `fix/v2n-audit-yocto-sdk` lands |
 | The MERA2 runtime closure: headers + **nine** staged libraries (a tenth, `libtvm_runtime.so`, comes from `lib-tvm` above) | `meta-alp-sdk/recipes-renesas/mera2-drpai-tvm/mera2-drpai-tvm_2.7.0.bb`, staged/compiled from a builder-supplied **`RUHMI_DRPAI_TVM_DIR`** checkout | The recipe vendors nothing — see §4. Note its `LICENSE = "CLOSED"`: the `rzv_drp-ai_tvm` **sources** are Apache-2.0, but the prebuilt MERA2 libraries staged alongside them are account-gated, so the package as a whole is not redistributable. Tracked as a licence-manifest gap. |
 
 Baseline this was worked against: **AI SDK platform 7.1 on BSP v6.30**
@@ -199,14 +199,14 @@ both default OFF, deliberately not merged into one"):
   `alp-image-edge.bb`; `alp-image-prod` has none, so a prod build with
   `ALP_ENABLE_DRPAI = "1"` and no `meta-rz-drpai` silently gets the
   comment-only `&drpai0` stub.
-  `alp-image-common.inc`'s `ALP_RZ_DRPAI_INSTALL` (lines 81-85) is the
+  `alp-image-common.inc`'s `ALP_RZ_DRPAI_INSTALL` is the
   single packaging authority for `kernel-module-mmngr` (`lib-tvm` is
-  no longer installed), on every `alp-image-*` image (the three recipes that `require
+  no longer installed explicitly), on every `alp-image-*` image (the three recipes that `require
   alp-image-common.inc` — `alp-image-base`/`-edge`/`-prod`), gated only
   on `rz-drpai` being in `BBFILE_COLLECTIONS` and `v2n` being in
   `MACHINE_FEATURES` (issue #1176), independent of `ALP_ENABLE_DRPAI`. A
   non-`alp-image-*` build (a bare `core-image-*`) with
-  `ALP_ENABLE_DRPAI = "1"` does NOT get that pair from alp-sdk's tree at
+  `ALP_ENABLE_DRPAI = "1"` does NOT get that package from alp-sdk's tree at
   all — it would need its own install, or the vendor layer's own
   `core-image` bbappend (no such bbappend exists in this tree).
 
@@ -287,6 +287,10 @@ creates the `drpai` system group). The recipe is pulled in by alp-sdk's
 carry the SDK DRP-AI backend. `/run/alp` (the one-process-per-board lock) uses
 the same group.
 
+Nothing in the layer adds a user to `drpai`. A product's app user must opt in,
+e.g. `EXTRA_USERS_PARAMS += "usermod -a -G drpai <user>;"` in the image or
+`local.conf`; before this change `video` membership was enough.
+
 - **Register ioctls are privileged.** Kernel patch
   `0018-drpai-require-CAP_SYS_RAWIO-for-the-register-ioctls.patch` makes the
   vendor driver's ioctls 64-69 (`DRPAI_READ/WRITE_DRP_REG`,
@@ -309,6 +313,9 @@ properties as the vendor EVK. The `drp1` label is created by
 `meta-rz-opencva` / `meta-rz-codecs`, so the bbappend installs the real file
 only when one of them is in `bblayers.conf` and a comment-only stub otherwise.
 `drp1` and `drpai0` share the `0x17000000` register window, as on the vendor EVK.
+The vendor OpenCVA U-Boot change targets `rzv2n-evk.h`, not the
+`rzv2n-dev_defconfig` this build uses, so it may not take effect here; bench
+step 5 below is the gate.
 
 ### Bench steps (not yet run)
 
@@ -523,7 +530,8 @@ In order:
    On the V2N bench unit this returns `ADDR=0x00000000d0000000
    SIZE=0x0000000020000000`, matching the driver's own boot print, the DT
    `reg`, and `/proc/iomem` (`d0000000-efffffff : reserved`).
-4. `ls /usr/lib/libtvm_runtime.so*` and `ls /usr/lib/libmera2_runtime.so*` —
+4. `ls /usr/lib/libmera2_runtime.so*` (and `ls /usr/lib/libtvm_runtime.so*`,
+   present only while `libalp_sdk.so` still links it) —
    absent means the image did not get the vendor payload (§4); on
    the V2N bench unit's current image neither exists yet (`ls
    /usr/lib/libdrpai*` also finds nothing) — that userspace gap is what this

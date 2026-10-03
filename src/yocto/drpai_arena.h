@@ -37,8 +37,8 @@
  * process closes; another process finds it held and its open() fails with
  * ALP_ERR_BUSY.  Handles inside one process share the one lock.  The file is
  * ALWAYS /run/alp/drpai.lock, opened O_NOFOLLOW, mode 0660.  The directory is
- * not created here: the image ships it (systemd tmpfiles.d, root:video 0775,
- * the group the drpai udev rule uses), so root and non-root processes lock the
+ * not created here: the image ships it (systemd tmpfiles.d, root:drpai 0775;
+ * root:video without PACKAGECONFIG[drpai]), so root and non-root processes lock the
  * SAME file.  There is deliberately no fallback to another path: two processes
  * locking different files would both proceed and silently break the rule.  If
  * the file cannot be opened, the DRP-AI open fails with ALP_ERR_IO.

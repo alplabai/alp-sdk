@@ -30,8 +30,9 @@ IMAGE_INSTALL = " \
 "
 
 # meta-rz-drpai vendor payload (DRP-AI3 NPU userspace runtime + kernel
-# driver): kernel-module-mmngr (lib-tvm is deliberately NOT installed: it
-# only served a legacy DRP-AI TVM v2.5 path). Unlike meta-rz-codecs /
+# driver): kernel-module-mmngr (lib-tvm is deliberately NOT installed
+# explicitly: it only served a legacy DRP-AI TVM v2.5 path, but libalp_sdk.so's
+# tvm_runtime link still pulls it in via shlibs until the link fix lands). Unlike meta-rz-codecs /
 # meta-rz-opencva (whose RDEPENDS payload lives in
 # packagegroup-alp-camera.bb -- see that file), this is NOT
 # camera/display-tied -- DRP-AI3 is the SoC's core NPU accelerator,

@@ -6,4 +6,4 @@ V2N DRP-AI3 access is tightened and DRP1 is enabled. A new kernel patch
 still reaches any physical address, so `drpai` membership is privileged
 (documented in `docs/bring-up-drpai-v2n.md`). `&drp1` (OpenCVA + codec) is
 enabled by a dtsi fragment installed only with `meta-rz-opencva` or
-`meta-rz-codecs`. `lib-tvm` is no longer installed in the images.
+`meta-rz-codecs`. `lib-tvm` is no longer installed explicitly; it still arrives through `libalp_sdk.so`'s shared-library dependency on `libtvm_runtime` until the TVM link fix (branch `fix/v2n-audit-yocto-sdk`, which drops `tvm_runtime` from the link) lands.

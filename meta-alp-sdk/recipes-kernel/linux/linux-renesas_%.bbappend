@@ -225,10 +225,11 @@ SRC_URI += "${@' file://e1m-v2n-drp1.dtsi' if d.getVar('ALP_DRP1_DT_ENABLE') == 
 # 64-69; WRITE_CPG_REG can gate CM33-owned clocks).  The runtime never calls
 # them, so the patch demands CAP_SYS_RAWIO.  It patches drivers/drpai/, which
 # meta-rz-drpai's own patch adds, so it is installed only with that layer
-# (and must sort after it: meta-alp-sdk is listed after meta-rz-drpai).
+# (and must apply after it: SRC_URI:append is resolved at finalisation, so it
+# lands after meta-rz-drpai's own SRC_URI appends whatever the layer order).
 # Residual risk (documented in docs/bring-up-drpai-v2n.md): DMA descriptors
 # from DRPAI_ASSIGN / DRPAI_START still reach any physical address.
-SRC_URI += "${@' file://0018-drpai-require-CAP_SYS_RAWIO-for-the-register-ioctls.patch' if d.getVar('ALP_DRPAI_LAYER') == '1' else ''}"
+SRC_URI:append = "${@' file://0018-drpai-require-CAP_SYS_RAWIO-for-the-register-ioctls.patch' if d.getVar('ALP_DRPAI_LAYER') == '1' else ''}"
 
 # Drop the ALP board dts + dtsi into the kernel DT source dir so they
 # compile next to the upstream Renesas dts (the board dts #include the
@@ -250,11 +251,7 @@ do_configure:prepend() {
         install -m 0644             "${WORKDIR}/e1m-v2n101-x-evk-cam0.dts"             "${WORKDIR}/e1m-v2m101-x-evk-cam0.dts"             "${ALP_DTS_DST}/"
     fi
 
-    # Branch on the bitbake variable, not on the presence of the unpacked
-    # file: dropping meta-rz-drpai from bblayers.conf does not scrub a
-    # previously-unpacked ${WORKDIR}, so a file test would keep emitting the
-    # real override into a tree that no longer has the label.
-    # Same reasoning as the DRPAI branch below: branch on the variable.
+    # DRP1: branch on the variable, same reasoning as the DRPAI branch below.
     if [ "${ALP_DRP1_DT_ENABLE}" = "1" ]; then
         install -m 0644 "${WORKDIR}/e1m-v2n-drp1.dtsi" "${ALP_DTS_DST}/"
     else
@@ -263,6 +260,10 @@ do_configure:prepend() {
         chmod 0644 "${ALP_DTS_DST}/e1m-v2n-drp1.dtsi"
     fi
 
+    # Branch on the bitbake variable, not on the presence of the unpacked
+    # file: dropping meta-rz-drpai from bblayers.conf does not scrub a
+    # previously-unpacked ${WORKDIR}, so a file test would keep emitting the
+    # real override into a tree that no longer has the label.
     if [ "${ALP_DRPAI_DT_ENABLE}" = "1" ]; then
         install -m 0644 "${WORKDIR}/e1m-v2n-drpai.dtsi" "${ALP_DTS_DST}/"
     else

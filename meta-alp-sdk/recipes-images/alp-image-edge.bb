@@ -54,7 +54,7 @@ IMAGE_INSTALL += "${@' alp-drpai-inference' if d.getVar('ALP_ENABLE_DRPAI') == '
     d.getVar('RUHMI_DRPAI_TVM_DIR') else ''}"
 
 # NOTE: the DRP-AI userspace RUNTIME PACKAGES (kernel-module-mmngr;
-# lib-tvm is not installed) and the SDK BACKEND compiled into libalp_sdk.so
+# lib-tvm is not installed explicitly) and the SDK BACKEND compiled into libalp_sdk.so
 # are two separate, independent concerns -- see
 # docs/bring-up-drpai-v2n.md section 4 for the full two-switch contract:
 #   1. alp-image-common.inc's ALP_RZ_DRPAI_INSTALL (issue #1176) is the
