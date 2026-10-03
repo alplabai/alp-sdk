@@ -151,7 +151,9 @@ def ship_check(unit: dict[str, str], catalogue: dict[str, dict], family: str = "
     if str(unit.get("act88760_gpio4_after_boot", "")).strip().lower() == "0x88":
         reasons.append("act88760_gpio4_after_boot: 0x88 (image did not release GD32_NRST)")
     # The latched MD_BOOT3 strap (census/census_final: soc_boot_debug_en). Debug mode is for
-    # bring-up benches only; the register facts are in the SoC description (sys_lsi).
+    # bring-up benches only; the register facts are in the SoC description (boot_strap).
+    # No `missing soc_boot_debug_en` leg: functional_test's blocking boot_mode check reads the same
+    # word, so `test_functional: pass` below already proves the strap was read and judged.
     if str(unit.get("soc_boot_debug_en", "")).strip() == "1":
         reasons.append(DEBUG_MODE_REASON)
     # functional_test's summary. Its per-check test_ft_<check> keys are detail (informational

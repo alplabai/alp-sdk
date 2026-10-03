@@ -34,23 +34,24 @@
       "enum": ["released", "preliminary", "deprecated"],
       "default": "released"
     },
-    "sys_lsi": {
+    "boot_strap": {
       "type": "object",
-      "description": "Boot-pin / identity registers a provisioning tool reads to judge a unit (RZ/V2N SYS block). `registers` maps a census ledger key to the register's absolute address. `lsi_mode` decodes the register holding the latched MD_BOOT pins: `debug_enable_bit` is the bit that is 1 when the unit is strapped to debug mode (a production unit must read 0), `md_boot_shift`/`md_boot_width` locate MD_BOOT[2:0], and `md_boot_device` names the boot device for MD_BOOT[1:0] (index = value).",
+      "description": "Boot-strap and identity registers a provisioning tool reads to judge a unit. `registers` maps a census ledger key to the register's absolute address. `strap_word` decodes the register holding the latched boot pins: `debug_enable_bit` is the bit that is 1 when the unit is strapped to debug mode (a production unit must read 0), `boot_pins_shift`/`boot_pins_width` locate the boot-mode pin field, the low `boot_device_pins_width` bits of which select the boot device, and `boot_device_names` names it (index = pin value).",
       "additionalProperties": false,
-      "required": ["source", "registers", "lsi_mode"],
+      "required": ["source", "registers", "strap_word"],
       "properties": {
         "source": { "type": "string" },
         "registers": { "type": "object", "additionalProperties": { "type": "string", "pattern": "^0x[0-9a-f]{8}$" } },
-        "lsi_mode": {
+        "strap_word": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["debug_enable_bit", "md_boot_shift", "md_boot_width", "md_boot_device"],
+          "required": ["debug_enable_bit", "boot_pins_shift", "boot_pins_width", "boot_device_pins_width", "boot_device_names"],
           "properties": {
             "debug_enable_bit": { "type": "integer", "minimum": 0, "maximum": 31 },
-            "md_boot_shift": { "type": "integer", "minimum": 0, "maximum": 31 },
-            "md_boot_width": { "type": "integer", "minimum": 1, "maximum": 8 },
-            "md_boot_device": { "type": "array", "items": { "type": "string" } }
+            "boot_pins_shift": { "type": "integer", "minimum": 0, "maximum": 31 },
+            "boot_pins_width": { "type": "integer", "minimum": 1, "maximum": 8 },
+            "boot_device_pins_width": { "type": "integer", "minimum": 1, "maximum": 8 },
+            "boot_device_names": { "type": "array", "items": { "type": "string" } }
           }
         }
       }

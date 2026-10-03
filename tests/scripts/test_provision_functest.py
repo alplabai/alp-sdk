@@ -962,6 +962,7 @@ MORE_BAD = [
     ("cm33_running", "B 0xA10D0683 0x100 0x2a\nC 0x2a", "fail (magic 0xa10d0683, version 0x100, counter 42 then 42: the counter must advance by 1..4 in 2 s"),
     ("cm33_running", "B 0x0 0x0 0x0\nC 0x0", "fail (magic 0x00000000, version 0x0, counter 0 then 0: want magic 0xa10d0683, version 0x100"),
     ("cm33_running", "B 0xA10D0683 0x2 0x5\nC 0x6", "fail (magic 0xa10d0683, version 0x2, counter 5 then 6: want magic"),
+    ("boot_mode", "ALPUNREAD missing tool: devmem or python3", "unread (missing tool: devmem or python3)"),
     ("cm33_running", "ALPUNREAD missing tool: devmem or python3", "unread (missing tool: devmem or python3)"),
     ("cm33_running", "B devmem: mmap: Operation not permitted", "unread (beacon not readable"),
     ("usb_device", "dev=sda\n0+0 records out", "fail (sda: read failed"),

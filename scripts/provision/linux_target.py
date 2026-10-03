@@ -40,24 +40,25 @@ REPO = Path(__file__).resolve().parents[2]
 
 def sys_lsi_spec(silicon: str) -> dict:
     """SYS_LSI register addresses and the MD_BOOT decode of a SoC, from its description
-    (``sys_lsi`` of metadata/socs/<vendor>/<family>/<part>.json); ``silicon`` is the preset's
+    (``boot_strap`` of metadata/socs/<vendor>/<family>/<part>.json); ``silicon`` is the preset's
     ``vendor:family:part``. The hardware-manual facts live there, not in this file."""
     vendor, family, part = silicon.split(":")
     doc = json.loads((REPO / "metadata" / "socs" / vendor / family / f"{part}.json").read_text(encoding="utf-8"))
-    if "sys_lsi" not in doc:
-        raise ValueError(f"{silicon}: the SoC description has no sys_lsi block")
-    return doc["sys_lsi"]
+    if "boot_strap" not in doc:
+        raise ValueError(f"{silicon}: the SoC description has no boot_strap block")
+    return doc["boot_strap"]
 
 
 def decode_lsi_mode(value: int, spec: dict) -> dict[str, str]:
     """Ledger keys decoded from a SYS_LSI_MODE read: the latched debug-mode strap (MD_BOOT3,
     1 = debug mode), MD_BOOT[2:0] and the boot device MD_BOOT[1:0] selects."""
-    m = spec["lsi_mode"]
-    md = (value >> m["md_boot_shift"]) & ((1 << m["md_boot_width"]) - 1)
-    devices = m["md_boot_device"]
+    m = spec["strap_word"]
+    md = (value >> m["boot_pins_shift"]) & ((1 << m["boot_pins_width"]) - 1)
+    dev = md & ((1 << m["boot_device_pins_width"]) - 1)
+    names = m["boot_device_names"]
     return {"soc_boot_debug_en": str((value >> m["debug_enable_bit"]) & 1),
             "soc_md_boot": f"{md:#x}",
-            "soc_boot_device": devices[md & 3] if (md & 3) < len(devices) else "unknown"}
+            "soc_boot_device": names[dev] if dev < len(names) else "unknown"}
 
 
 ACT88760_ADDR = 0x25
@@ -950,13 +951,19 @@ def _reg_dump(t: LinuxTarget, bus: int, addr: int, regs) -> str:
     return " ".join(f"{r:#04x}={i2c_get(t, bus, addr, r):#04x}" for r in regs)
 
 
+_DEVMEM_PY = ("import mmap,os,struct,sys;a=int(sys.argv[1],16);"
+              "m=mmap.mmap(os.open('/dev/mem',os.O_RDONLY|os.O_SYNC),4096,mmap.MAP_SHARED,mmap.PROT_READ,offset=a&~4095);"
+              "print(hex(struct.unpack_from('<I',m,a&4095)[0]))")
+# Shell prelude defining `r <addr>` (one 32-bit /dev/mem word, read-only): devmem when present, else
+# python3; with neither, the whole script prints ALPUNREAD (the functional test's "cannot judge").
+DEVMEM_READ_FN = ("if command -v devmem >/dev/null 2>&1; then r() { devmem $1 32 2>&1; }\n"
+                  f"elif py=$(command -v python3); then r() {{ \"$py\" -c {shlex.quote(_DEVMEM_PY)} $1 2>&1 | tail -n1; }}\n"
+                  'else echo "ALPUNREAD missing tool: devmem or python3"; exit 0; fi\n')
+
+
 def devmem_cmd(addr: int) -> str:
-    """Shell fragment printing the 32-bit word at physical ``addr`` as ``0x...``."""
-    page, off = addr & ~0xFFF, addr & 0xFFF
-    py = ("import mmap,os,struct;f=os.open('/dev/mem',os.O_RDONLY|os.O_SYNC);"
-          f"m=mmap.mmap(f,4096,mmap.MAP_SHARED,mmap.PROT_READ,offset={page});"
-          f"print(hex(struct.unpack_from('<I',m,{off})[0]))")
-    return f"devmem {addr:#x} 32 2>/dev/null || python3 -c {shlex.quote(py)}"
+    """Shell script printing the 32-bit word at physical ``addr`` as ``0x...``."""
+    return f"{DEVMEM_READ_FN}r {addr:#x}"
 
 
 def _devmem(t: LinuxTarget, addr: int) -> int:

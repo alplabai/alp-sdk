@@ -675,8 +675,8 @@ def _census_responses(array: bytes = b"\xff" * 128):
         return f"0x{pmic_regs[reg]:02x}"
 
     return [
-        (r"devmem 0x10430300", "0x00003C06\n"), (r"devmem 0x10430304", "0x00000001\n"),
-        (r"devmem 0x10430308", "0x00000002\n"),
+        (r"\nr 0x10430300", "0x00003C06\n"), (r"\nr 0x10430304", "0x00000001\n"),
+        (r"\nr 0x10430308", "0x00000002\n"),
         (r"cpuinfo_max_freq", "1800000\n"), (r"meminfo", "MemTotal:        3200000 kB\nMemFree: 1 kB\n"),
         (r"uname -r", "6.1.107-cip28\n"),
         (r"device-tree/compatible", "alp,e1m-v2m101-x-evk renesas,r9a09g056\n"),
