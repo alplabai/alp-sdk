@@ -20,6 +20,7 @@
  */
 
 #include <zephyr/kernel.h>
+#include <zephyr/sys/barrier.h>
 
 #define RSCTBL_ADDR DT_REG_ADDR(DT_NODELABEL(rsctbl))
 
