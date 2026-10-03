@@ -4,7 +4,10 @@ The driver (Linux 6.1) owns every EEPROM access: it enters EERD, edits the regis
 commits the byte to the configuration EEPROM itself. This module only asks it to:
 
 * trickle charger: not here. It is the devicetree property ``trickle-resistor-ohms`` on the
-  ``rtc@52`` node (the driver writes TCE + TCR at probe); this module only reads it back.
+  ``rtc@52`` node, set only by a carrier whose VBACKUP element is rechargeable (a supercap).
+  NEVER on a primary (non-rechargeable) lithium cell. The 6.1 driver has no RTC_PARAM for it;
+  with the property set it writes TCE + TCR and issues the EEPROM update command at EVERY
+  probe, i.e. one configuration-EEPROM write per boot. This module only reads it back.
 * backup switchover mode: ``RTC_PARAM_SET`` / ``RTC_PARAM_BACKUP_SWITCH_MODE`` on /dev/rtc0
   (``rv3028_param_set``); no devicetree property exists for it in 6.1.
 
@@ -49,8 +52,12 @@ def read_backup(t, bus: int, addr: int) -> int:
 
 
 def enable_backup(t, bus: int, addr: int) -> int:
-    """Level switching mode on, through the driver. Skipped when it is already on (the driver
-    commits to the EEPROM on every write, which has a finite endurance). Returns register 0x37."""
+    """Level switching mode on, through the driver. ``rv3028_param_set`` issues the EEPROM update
+    command on every call (it does not compare first), so this skips the call when BSM is already
+    level: one EEPROM write per unit, at provisioning, instead of one per run. The configuration
+    EEPROM is rated 10'000 write cycles at 3.0 V / 25 C and only 100 at 5.5 V / 85 C
+    (RV-3028-C7 Application Manual Rev. 1.4, section 6.2, EEPROM characteristics, p. 98).
+    Returns register 0x37."""
     reg = read_backup(t, bus, addr)
     if (reg >> 2) & 3 != BSM_LSM:
         t.run(f"python3 -c {shlex.quote(_BSM_LEVEL_PY)}")

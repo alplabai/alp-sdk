@@ -346,15 +346,26 @@
  * (E1M-V2M103 board #1): with the fix applied, the SoC RTC (&rtc below)
  * starts and counts at 32.768 kHz. See &rtc's own comment below -- do
  * NOT re-disable it without also reverting that U-Boot fix.
- * VBACKUP is fed by an on-module supercapacitor (a carrier may add
- * more). trickle-resistor-ohms = <15000> makes rtc-rv3028 enable the
- * trickle charger at probe through that resistor: register 0x37 TCE = 1,
- * TCR = 0b11 (RV-3028-C7 Application Manual Rev. 1.4, "EEPROM BACKUP
- * REGISTER, 37h" and 4.3 "TRICKLE CHARGER"; the driver accepts 3000,
- * 5000, 9000 or 15000). The driver commits it to the RTC's configuration
- * EEPROM at every probe. Backup SWITCHOVER (BSM) has no devicetree
- * property in the 6.1 driver: provisioning sets it through RTC_PARAM_SET
- * (scripts/provision/rtc.py).
+ * Backup and trickle charge: the RV-3028-C7 keeps time across a power cut
+ * only with BOTH a source on VBACKUP and backup switchover on (register
+ * 0x37 BSM, bits 3:2). Switchover has no devicetree property in the 6.1
+ * driver; provisioning sets it through RTC_PARAM_SET
+ * (scripts/provision/rtc.py). This SoM dtsi deliberately does NOT set
+ * trickle-resistor-ohms: whether a VBACKUP element exists, and what it is,
+ * is a carrier fact (this SoM's own on-module supercap is unconfirmed).
+ * NEVER enable the trickle charger on a primary (non-rechargeable) lithium
+ * cell: charging it is a fire/venting hazard. Only a carrier that fits a
+ * rechargeable element (a supercap) adds, in its own dtsi:
+ *     &rv3028 { trickle-resistor-ohms = <15000>; };
+ * (3000, 5000, 9000 or 15000; TCE + TCR of register 0x37, RV-3028-C7
+ * Application Manual Rev. 1.4, "EEPROM BACKUP REGISTER, 37h" and 4.3
+ * "TRICKLE CHARGER"). That property costs EEPROM wear: rtc-rv3028 issues
+ * the configuration-EEPROM update command at EVERY probe, i.e. once per
+ * boot, and the EEPROM is rated 10'000 write cycles at 3.0 V / 25 C but
+ * only 100 at 5.5 V / 85 C (same manual, section 6.2, p. 98), so a
+ * watchdog reboot loop can exhaust it. The 6.1 driver offers no
+ * once-at-provisioning path for the trickle bits, so the choice is made
+ * per carrier, not by default.
  *
  * CA55/Linux is the sole master of the WHOLE RIIC8/BRD_I2C bus -- every
  * device on it, not just this one (metadata/e1m_modules/v2n/
@@ -385,7 +396,6 @@
 	rv3028: rtc@52 {
 		compatible = "microcrystal,rv3028";
 		reg = <0x52>;
-		trickle-resistor-ohms = <15000>;
 	};
 };
 

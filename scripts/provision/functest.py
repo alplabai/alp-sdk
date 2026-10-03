@@ -126,6 +126,15 @@ def load_expect(private: Path | None = None) -> dict:
     return doc
 
 
+def rtc_set_boot_id(ctx) -> str:
+    """Boot id at which cold_boot_test set the RTC for the rtc_backup fixture, or "". Facts first,
+    then the state file: on a resumed run cold_boot_test is satisfied from the state and leaves no
+    facts. rtc_set and rtc_retention must both use this, or rtc_set resets the clock in the current
+    boot and rtc_retention passes with no power cut tested."""
+    return str(ctx.facts.get("rtc_set_boot_id") or ((ctx.state.get("steps") or {}).get(
+        "cold_boot_test") or {}).get("evidence", {}).get("rtc_set_boot_id") or "")
+
+
 def _want(x: dict, key: str):
     """An expected value, or NoExpect: a criterion nobody has defined is not a pass."""
     cur = x
@@ -703,20 +712,22 @@ def build(ctx, x: dict | None = None) -> list[Check]:
                 f"i2cget -f -y {brd} {rtc:#04x} 0x37 2>&1", j_bsm, tools=("i2cget",))
 
             def j_trickle(o):
+                from provision import rtc          # lazy: rtc imports this module
                 v = int(_num(o, r"^(0x[0-9a-fA-F]{2})$", "register 0x37"))
-                ohms = (3000, 5000, 9000, 15000)[v & 3] if v & 0x20 else None      # TCE bit 5, TCR bits 1:0
-                if ohms != _want(x, "rtc_trickle_ohms"):
+                ohms = rtc.TCR_OHMS[v & 3] if v & 0x20 else None      # TCE bit 5, TCR bits 1:0
+                want = _want(x, "rtc_trickle_ohms")
+                want = None if want == "off" else want
+                if ohms != want:
                     raise Fail(f"trickle charger {'off' if ohms is None else f'{ohms} ohm'} "
-                               f"(reg 0x37={v:#04x}), want {_want(x, 'rtc_trickle_ohms')} ohm: "
-                               "image lacks trickle-resistor-ohms on the rtc@52 node")
-                return f"{ohms} ohm"
-            add("rtc_trickle", "the RTC's backup supercap is trickle-charged",
+                               f"(reg 0x37={v:#04x}), want {'off' if want is None else f'{want} ohm'}: the "
+                               "carrier's backup element and its rtc@52 trickle-resistor-ohms disagree")
+                return "off" if ohms is None else f"{ohms} ohm"
+            add("rtc_trickle", "the RTC's trickle charger matches the carrier's backup element",
                 f"i2cget -f -y {brd} {rtc:#04x} 0x37 2>&1", j_trickle, tools=("i2cget",))
 
             def j_keep(o):
                 kv = _kv(o)
-                was = str(ctx.facts.get("rtc_set_boot_id") or ((ctx.state.get("steps") or {}).get(
-                    "cold_boot_test") or {}).get("evidence", {}).get("rtc_set_boot_id") or "")
+                was = rtc_set_boot_id(ctx)
                 if not was:
                     raise Fail("the RTC was not set before the last cold cycle (cold_boot_test sets it after "
                                "its first cycle when this fixture is on and --cold-cycles >= 2)")

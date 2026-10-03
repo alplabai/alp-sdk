@@ -2142,8 +2142,9 @@ class ClkgenVerify(Step):
 class RtcSet(Step):
     """The RV-3028-C7 on the shipped unit: system time from this host (UTC), `hwclock -w`, read
     back; backup switchover to level mode through the driver's RTC_PARAM_SET (provision/rtc.py).
-    The trickle charger is the kernel devicetree's `trickle-resistor-ohms`; it is only read back
-    here (`rtc_trickle`). Runs after clkgen_verify (the SoM's clocks are known good) and before
+    The trickle charger is the carrier devicetree's `trickle-resistor-ohms` (only for a carrier
+    with a rechargeable backup element); it is only read back here (`rtc_trickle`).
+    Runs after clkgen_verify (the SoM's clocks are known good) and before
     functional_test, whose rtc_time_set / rtc_backup_mode checks are blocking.
 
     When cold_boot_test already set the clock for the rtc_backup fixture (`rtc_set_boot_id`),
@@ -2156,7 +2157,7 @@ class RtcSet(Step):
         if t is None:
             return self.result(ctx, "no Linux target: RTC set deferred", status="skipped")
         bus = ctx.i2c("brd")
-        keep = bool(ctx.facts.get("rtc_set_boot_id"))
+        keep = bool(functest.rtc_set_boot_id(ctx))
         if not keep:
             ctx.mutate("set the system time from the host (UTC) and hwclock -w", lambda: rtc.set_time(t, time.time()))
         reg = ctx.mutate("enable backup switchover (level mode) through the rtc-rv3028 driver",
@@ -2170,8 +2171,6 @@ class RtcSet(Step):
         ev = rtc.decode(reg)
         ev["rtc_time_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(rtc.rtc_epoch(t)))
         ctx.step_logs[self.name] = "\n".join(f"{k}: {v}" for k, v in ev.items())
-        if ev["rtc_trickle"] == "disabled":
-            ctx.step_logs[self.name] += "\nWARNING: trickle charger off: image lacks trickle-resistor-ohms"
         return self.result(ctx, f"RTC {err} s from host, {'time kept (rtc_backup fixture)' if keep else 'set'}; "
                            f"switchover {ev['rtc_backup_switch_mode']}, trickle {ev['rtc_trickle']}", ev, status="done")
 

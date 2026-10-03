@@ -302,7 +302,7 @@ Runs after `clkgen_verify` (the SoM's clocks are known good) and before
 `functional_test`. Order: `date -u -s @<host epoch>`, `hwclock --systohc --utc`
 (the `rtc0` ioctl when the image has no `hwclock`), `RTC_PARAM_SET` /
 `RTC_PARAM_BACKUP_SWITCH_MODE` = level on `/dev/rtc0`, then read back
-`rtc0/since_epoch` (BenchError beyond 30 s of the host) and register `0x37`.
+`rtc0/since_epoch` (refused beyond 30 s of the host) and register `0x37`.
 When `cold_boot_test` already set the clock for the `rtc_backup` fixture the
 time is left alone (re-setting it would void the retention proof); the
 switchover is enabled there too, before the first power cut.
@@ -310,30 +310,41 @@ switchover is enabled there too, before the first power cut.
 Nothing here writes the RTC's configuration EEPROM directly. The kernel's
 `rtc-rv3028` driver (mainline v6.1 `rv3028_param_set`, `rv3028_update_cfg`)
 enters EERD, edits the field and commits it, and only when switchover is not
-already level (the EEPROM has finite endurance). The trickle charger is the
-devicetree property `trickle-resistor-ohms = <15000>` on `rtc@52`, applied by
-the driver at probe. Register `0x37` (RV-3028-C7 Application Manual Rev. 1.4,
+already level: `rv3028_param_set` issues the EEPROM update command on every
+call, and the configuration EEPROM is rated 10'000 write cycles at 3.0 V / 25 C
+but only 100 at 5.5 V / 85 C (Application Manual Rev. 1.4, section 6.2, p. 98).
+The trickle charger is the devicetree property `trickle-resistor-ohms` on
+`rtc@52`, set only by a carrier dtsi whose VBACKUP element is rechargeable (a
+supercap); the SoM dtsi leaves it unset. **Trickle-charging a primary
+(non-rechargeable) lithium cell is forbidden: it can vent or burn.** With the
+property set, `rtc-rv3028` (6.1) commits the configuration EEPROM at every
+probe, one write per boot, and offers no once-at-provisioning parameter for the
+trickle bits; a reboot loop therefore consumes endurance. Register `0x37` (RV-3028-C7 Application Manual Rev. 1.4,
 "EEPROM BACKUP REGISTER, 37h"): bit 5 TCE (1 = trickle on), bit 4 FEDE (keep 1),
 bits 3:2 BSM (`00`/`10` off, `01` direct, `11` level, switch when VDD < 2.0 V),
 bits 1:0 TCR (`00` 3 k, `01` 5 k, `10` 9 k, `11` 15 k). A fully set unit reads
-`0x3f`. Ledger facts: `rtc_rv3028_reg_0x37`, `rtc_backup_switch_mode`
-(`disabled`/`direct`/`level`), `rtc_trickle` (`disabled`/`<n> kOhm`), and
-`rtc_time_utc` in the step evidence. The 15 kOhm default is the maintainer's
-2026-10-03 call (Q1); change `trickle-resistor-ohms` and `rtc_trickle_ohms`
-in `functest-expect-v2n.yaml` together.
+`0x3f` (switchover level and 15 kOhm trickle). Census facts:
+`rtc_rv3028_reg_0x37`, `rtc_backup_switch_mode` (`disabled`/`direct`/`level`),
+`rtc_trickle` (`disabled`/`<n> kOhm`), and `rtc_time_utc` in the step evidence;
+they reach `<serial>.unit.yaml` only once the ledger's `schema/v2n.keys.yaml`
+lists them as `auto`. `rtc_trickle_ohms` in `functest-expect-v2n.yaml` is the
+expected trickle for the carrier under test: `"off"` (the default: no
+rechargeable element is declared), or the same value as the carrier dtsi's
+`trickle-resistor-ohms`; the two are changed together. The resistor value for a
+supercap carrier is provisional until step 5 measures the charge current.
 
 Bench steps (first run on a unit; nothing here is bench-verified yet):
 
 1. Read register `0x37` on `i2c-8` (`i2cget -f -y 8 0x52 0x37`) before the new image and
    record it (`0x10` seen so far).
-2. Boot the image carrying `trickle-resistor-ohms`; confirm `0x37` bit 5 (TCE) is set and
-   bits 1:0 read `11`.
-3. Run the flow through `rtc_set`; confirm `0x37` reads `0x3f` and `since_epoch` is within
-   30 s of the host.
+2. Only for a carrier with a rechargeable VBACKUP element and `trickle-resistor-ohms` in its
+   dtsi: boot it and confirm `0x37` bit 5 (TCE) is set and bits 1:0 match the resistor.
+3. Run the flow through `rtc_set`; confirm `0x37` bit 3:2 reads `11` (and `0x3f` with a trickle
+   carrier) and `since_epoch` is within 30 s of the host.
 4. Cut power for a known interval (start with minutes, then hours), power on and compare
    `since_epoch` with the host clock; `dmesg` must not show `hctosys: unable to read the
    hardware clock`. Use `--cold-cycles 3` with the `rtc_backup` fixture for the automated form.
-5. Measure the supercap voltage rise before relying on the 15 kOhm choice.
+5. Supercap carriers only: measure the supercap voltage rise before relying on a resistor value.
 
 ### `clkgen_verify`: the 5L35023B clock generator (`0x69`)
 
@@ -669,7 +680,7 @@ expected value; **data** = a data path was exercised end to end.
 | DX-M1 inference | not tested | `dxm1_inference` (data) | `dxm1_model` |
 | DRP-AI | not tested | `drpai`: driver bound, device node (answers) | - |
 | GPU | not tested | `gpu`: driver bound, device node (answers) | - |
-| RTC | I2C scan (answers); census records one register | `rtc_device`, `rtc_ticks` (value: the seconds register advances), `rtc_time_set`, `rtc_backup_mode`, `rtc_trickle` (all blocking: the unit must ship with a valid time, switchover on and the trickle charger at the expected resistor) | - |
+| RTC | I2C scan (answers); census records one register | `rtc_device`, `rtc_ticks` (value: the seconds register advances), `rtc_time_set`, `rtc_backup_mode`, `rtc_trickle` (all blocking: the unit must ship with a valid time, switchover on and the trickle charger as the carrier expects: off by default) | - |
 | RTC keeps time | not tested | `rtc_retention` (data) | `rtc_backup` |
 | main PMIC | `pmic_verify` (value, in the microSD boot); `cold_boot_test` reads reg `0x10` | `pmic_registers`: the same compare after a plain cold boot (value) | - |
 | second PMIC | `pmic_verify`, census (ID) | `i2c_da9292_1e` (ID `0xEA`) + `pmic_registers` | - |
@@ -725,8 +736,8 @@ by `eeprom_manifest`.
 - **The GD32's own peripherals** (PWM, ADC, DAC, encoder inputs on the carrier headers), the
   microphones, the M.2 sockets, touch. No loopback exists for them on the bare carrier.
 - **The RTC keeping time** unless the `rtc_backup` fixture is on. `rtc_set` enables switchover
-  and the image sets the trickle resistor, but only the retention check across real power cuts
-  proves the supercap holds.
+  and a supercap carrier sets the trickle resistor, but only the retention check across real
+  power cuts proves the backup element holds.
 
 ### What an RP2040-based fixture would unlock
 
@@ -774,7 +785,7 @@ bounds for a hung command, not the expected time.
 | `rtc_ticks` | the seconds register twice, 2 s apart | valid BCD, advanced by 1..4 s | 8 s | 2.2 s |
 | `rtc_time_set` | `rtc0/since_epoch` | readable (the power-on flag is clear: `rtc_set` ran) | 5 s | 0.1 s |
 | `rtc_backup_mode` | register `0x37` | BSM is `01` or `11` | 5 s | 0.1 s |
-| `rtc_trickle` | register `0x37` | TCE = 1 and TCR gives `rtc_trickle_ohms` (15000) | 5 s | 0.1 s |
+| `rtc_trickle` | register `0x37` | TCE = 0 when `rtc_trickle_ohms` is `"off"`, else TCE = 1 and TCR gives that resistor | 5 s | 0.1 s |
 | `rtc_retention` | `rtc0/since_epoch`, boot id, `dmesg` | set by `cold_boot_test` on an earlier boot, no `hctosys: unable to read the hardware clock` in this boot's log, within 30 s of the host clock | 5 s | 0.1 s |
 | `board_temp` | TMP112 temperature register | 10..85 degC | 5 s | 0.1 s |
 | `secure_element` | the state-register read, up to 100 tries | an answer | 12 s | 0.5 s |

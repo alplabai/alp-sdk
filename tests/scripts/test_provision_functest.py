@@ -91,7 +91,7 @@ def _good(ctx) -> dict[str, str]:
         "rtc_ticks": "a=0x58 b=0x00",                             # BCD, across the minute
         "rtc_time_set": "1790000000",
         "rtc_backup_mode": "0x3f",
-        "rtc_trickle": "0x3f",                                    # TCE, TCR 15 k, BSM level
+        "rtc_trickle": "0x1c",                                    # TCE off (no rechargeable element declared), BSM level
         "rtc_retention": f"epoch={int(time.time())}\nboot=boot-now\nhctosys_failed=0",
         "board_temp": "0x2e 0xd0",                                 # 46.8 degC (the temperature one unit read)
         "secure_element": "HIL_OPTIGA_I2C_STATE 0x08 0x80 0x00 0x00\nHIL_OPTIGA_ACK",
@@ -169,7 +169,7 @@ BAD = {
     "rtc_ticks": "a=0x12 b=0x12",                                  # oscillator stopped
     "rtc_time_set": "",
     "rtc_backup_mode": "0x10",                                     # real: what one unit reads today
-    "rtc_trickle": "0x10",
+    "rtc_trickle": "0x3f",
     "rtc_retention": "epoch=\nboot=boot-now\nhctosys_failed=0",
     "board_temp": "0x7f 0xf0",                                     # 127.9 degC
     "secure_element": "",
@@ -946,8 +946,8 @@ MORE_BAD = [
     ("rtc_ticks", "a=0x1a b=0x1c", "fail (seconds register not BCD"),
     ("rtc_ticks", "a=0x10 b=0x30", "fail (seconds went 0x10 -> 0x30"),
     ("rtc_backup_mode", "Error: Read failed", "unread (no register 0x37"),
-    ("rtc_trickle", "0x1c", "fail (trickle charger off (reg 0x37=0x1c), want 15000 ohm"),
-    ("rtc_trickle", "0x3d", "fail (trickle charger 5000 ohm (reg 0x37=0x3d), want 15000 ohm"),
+    ("rtc_trickle", "0x3f", "fail (trickle charger 15000 ohm (reg 0x37=0x3f), want off"),
+    ("rtc_trickle", "0x3d", "fail (trickle charger 5000 ohm (reg 0x37=0x3d), want off"),
     ("board_temp", "0xe7 0x00", "fail (-25 degC outside 10..85 degC"),
     ("gd32_bridge", "0x00 0x00 0x0e 0x00 0xcf 0xa8", "fail (GD32 GET_VERSION reply CRC mismatch"),
     ("gd32_gpiochip", "", "unread (no gpiochip gd32-bridge-gpio"),

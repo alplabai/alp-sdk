@@ -72,6 +72,16 @@ def test_rtc_set_keeps_the_time_the_retention_fixture_set(tmp_path):
     assert r.status == "done" and b.sets == []
 
 
+def test_rtc_set_keeps_the_time_when_only_the_state_file_knows_the_retention_set(tmp_path):
+    """A resumed run: cold_boot_test is satisfied from the state file and left no facts."""
+    b = RtcBoard(reg=0x3C)
+    ctx = _ctx(tmp_path, bench=_bench(), linux=b, execute=True)
+    ctx.state.setdefault("steps", {})["cold_boot_test"] = {"evidence": {"rtc_set_boot_id": "boot-1"}}
+    assert "rtc_set_boot_id" not in ctx.facts
+    r = steps.run_steps(ctx, only=["rtc_set"])[-1]
+    assert r.status == "done" and b.sets == []
+
+
 def test_rtc_set_fails_when_the_clock_reads_back_unset_or_wrong(tmp_path):
     for n, epoch in enumerate(("", str(int(time.time()) - 3600))):
         ctx = _ctx(tmp_path / str(n), bench=_bench(), linux=RtcBoard(reg=0x3F, epoch=epoch), execute=True)

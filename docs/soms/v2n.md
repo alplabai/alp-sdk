@@ -47,18 +47,24 @@ The on-module RV-3028-C7 is the RTC of record, bound as `/dev/rtc0`
 from userspace. **CA55 (Linux) is the sole master of the whole
 RIIC8/BRD_I2C bus** the RTC and every other BRD_I2C device sit on
 (`metadata/e1m_modules/v2n/core-ownership.yaml`); the CM33 must never
-issue I2C transactions there. **Backup:** VBACKUP is fed by an on-module supercapacitor (a carrier may add
-more). The image sets `trickle-resistor-ohms = <15000>` on the `rtc@52` node, so
-`rtc-rv3028` enables the trickle charger at probe (register `0x37` TCE = 1,
-TCR = `0b11`, 15 kOhm; RV-3028-C7 Application Manual Rev. 1.4, "EEPROM BACKUP
-REGISTER, 37h"). Backup switchover (BSM = `0b11`, level switching, VDD < 2.0 V)
-has no devicetree property in the 6.1 driver; provisioning's `rtc_set` step sets
-it through `RTC_PARAM_SET` and sets the time from the provisioning host (UTC) with
-`hwclock -w`, so a shipped unit holds valid time across a power cycle (bench-
-unverified until the HIL steps in `docs/provisioning-v2n.md` are run). Before
-2026-10-03 a unit read `0x10` (switchover and trickle off, no time kept); the
-NTP resync on every boot (`systemd-timesyncd`, written back to `rtc0`) remains the
-fallback for a unit whose supercap is flat. The
+issue I2C transactions there. **Backup:** Confirmed 2026-09-29 on E1M-V2M103 2026W38-0001: no time backup
+across a power cycle unless the carrier fits pad `P10` (VBACKUP). That unit read
+register `0x37` = `0x10`: BSM (bits 3:2) = `00`, i.e. backup switchover disabled,
+and TCE (bit 5) = 0, trickle off (RV-3028-C7 Application Manual Rev. 1.4, "EEPROM
+BACKUP REGISTER, 37h"). With switchover off the chip never moves to VBACKUP even when
+a source is present, so that observation shows no working backup path but cannot by
+itself tell a missing source from the disabled switchover. Whether the module carries
+its own VBACKUP supercapacitor is **unconfirmed** (it rests on netlist reading, not on
+a bench result or an approved schematic), so this page does not claim one. Provisioning's
+`rtc_set` step now enables switchover (level mode, VDD < 2.0 V) through `RTC_PARAM_SET`
+(the 6.1 driver has no devicetree property for it) and sets the time from the
+provisioning host (UTC) with `hwclock -w`; this is bench-unverified until the HIL steps
+in `docs/provisioning-v2n.md` are run. **Trickle charge is a carrier decision**: the SoM
+dtsi does not set `trickle-resistor-ohms`. A carrier with a rechargeable element (a
+supercap) adds it; **a primary lithium cell on VBACKUP must never be trickle-charged**.
+The property makes `rtc-rv3028` rewrite the RTC's configuration EEPROM at every boot
+(rated 10'000 cycles at 3.0 V / 25 C, 100 at 5.5 V / 85 C). The NTP resync on every
+boot (`systemd-timesyncd`, written back to `rtc0`) remains the fallback. The
 alarm INT line isn't wired to a kernel interrupt yet -- that remains an
 open follow-up.
 
