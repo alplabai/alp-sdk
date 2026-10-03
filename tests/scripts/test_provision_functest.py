@@ -959,6 +959,57 @@ def test_cold_boot_test_leaves_the_rtc_alone_otherwise(tmp_path, monkeypatch, fi
     assert board.rtc_sets == [] and "rtc_set_boot_id" not in res[-1].evidence
 
 
+# --- cold_boot_test records the firmware versions and keeps the evidence of the cycles that passed ----
+
+FW_BANNERS = ("NOTICE:  BL2: v2.10.5(release):alp\nNOTICE:  BL31: v2.10.5(release):alp\n"
+              "U-Boot 2024.07-alp (Dec 16 2025 - 11:26:11 +0000)\n")
+
+
+def _good_boot():
+    from provision import gates
+    return FW_BANNERS + "NOTICE:  BL2: SYS_LSI_MODE: 0X3c06\nDRAM:  3.9 GiB\n" + gates.RAIL_PG + "\n"
+
+
+def _boot_texts(monkeypatch, texts):
+    it = iter(texts)
+    monkeypatch.setattr(steps.ColdBootTest, "_cold_boot", staticmethod(lambda ctx, ev: next(it)))
+
+
+def test_cold_boot_test_records_the_firmware_versions(tmp_path, monkeypatch):
+    ctx, _ = _cold_boot_ctx(tmp_path, monkeypatch, {}, 2)
+    _boot_texts(monkeypatch, [_good_boot()] * 2)
+    res = steps.run_steps(ctx, only=["cold_boot_test"], force=["cold_boot_test"])
+    assert res[-1].status == "done", res[-1].detail
+    assert res[-1].evidence["bl2_version"] == "v2.10.5(release):alp"
+    assert res[-1].evidence["bl31_version"] == "v2.10.5(release):alp"
+    assert res[-1].evidence["uboot_version"] == "U-Boot 2024.07-alp (Dec 16 2025 - 11:26:11 +0000)"
+
+
+def test_cold_boot_test_flags_a_firmware_change_between_cycles(tmp_path, monkeypatch):
+    ctx, _ = _cold_boot_ctx(tmp_path, monkeypatch, {}, 3)
+    _boot_texts(monkeypatch, [_good_boot(), _good_boot().replace("BL31: v2.10.5", "BL31: v2.10.6")])
+    res = steps.run_steps(ctx, only=["cold_boot_test"], force=["cold_boot_test"])
+    assert res[-1].status != "done" and "bl31_version changed between cold cycles" in res[-1].detail
+    # the passing cycle's values and the 1/3 count survive the failure
+    assert ctx.facts["cold_boots_passed"] == "1/3" and ctx.facts["bl31_version"] == "v2.10.5(release):alp"
+
+
+def test_cold_boot_test_keeps_the_passed_count_when_a_cycle_dies(tmp_path, monkeypatch):
+    from provision.bench import BenchError
+    ctx, _ = _cold_boot_ctx(tmp_path, monkeypatch, {}, 3)
+    texts = iter([_good_boot(), _good_boot()])
+
+    def boot(ctx, ev):
+        try:
+            return next(texts)
+        except StopIteration:
+            raise BenchError("no match for the shell prompt") from None
+    monkeypatch.setattr(steps.ColdBootTest, "_cold_boot", staticmethod(boot))
+    res = steps.run_steps(ctx, only=["cold_boot_test"], force=["cold_boot_test"])
+    assert res[-1].status != "done"
+    assert ctx.facts["cold_boots_passed"] == "2/3"
+
+
 # --- every criterion of the multi-criterion judges, one fault at a time ---------------------------
 
 MORE_BAD = [
