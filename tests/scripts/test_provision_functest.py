@@ -611,10 +611,19 @@ def test_the_expected_trickle_comes_from_the_carriers_backup_element(tmp_path, m
 
 
 def test_the_rtc_backup_fixture_needs_a_carrier_with_a_backup_element(tmp_path, monkeypatch):
-    monkeypatch.setattr(functest, "_carrier", _REAL_CARRIER)       # the stock EVK: element none
+    # a carrier that declares no backup element (the stock EVK fits a supercap)
+    monkeypatch.setattr(functest, "_carrier",
+                        lambda *a, **k: {**_REAL_CARRIER(*a, **k), "rtc_backup": {"element": "none"}})
     ctx, _ = _setup(tmp_path)
     with pytest.raises(ValueError, match="fits no RTC backup element"):
         functest.config(ctx)
+
+
+def test_the_stock_evk_declares_a_supercap_with_trickle(tmp_path, monkeypatch):
+    monkeypatch.setattr(functest, "_carrier", _REAL_CARRIER)
+    ctx, _ = _setup(tmp_path)
+    functest.config(ctx)        # rtc_backup fixture allowed: the EVK fits a rechargeable supercap
+    assert _REAL_CARRIER("e1m-x-evk")["rtc_backup"] == {"element": "supercap", "trickle_ohms": 15000}
 
 
 def test_the_beacon_address_and_phy_id_come_from_metadata(tmp_path):
