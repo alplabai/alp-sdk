@@ -1,4 +1,4 @@
-### Fixed — V2N camera ISP calls no longer report success without writing hardware (audit MM-06)
+### Fixed — V2N camera ISP calls no longer report success without writing hardware (audit MM-06) (#2660)
 
 `alp_camera_configure_isp()` on the `v2n_n44_isp` backend and the three
 `<alp/ext/renesas/camera.h>` calls (`alp_renesas_camera_isp_3a_window_set`,

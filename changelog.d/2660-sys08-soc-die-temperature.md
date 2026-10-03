@@ -1,4 +1,4 @@
-### Added — SoC die temperature on Linux: `alp_temperature_read_soc_milli_c()` (audit SYS-08)
+### Added — SoC die temperature on Linux: `alp_temperature_read_soc_milli_c()` (audit SYS-08) (#2660)
 
 `<alp/temperature.h>` gains a second entry that reports the processor's own
 junction temperature in signed milli-degrees Celsius, kept separate from the

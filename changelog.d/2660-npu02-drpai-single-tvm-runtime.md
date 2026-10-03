@@ -1,4 +1,4 @@
-### Fixed — the Yocto DRP-AI backend no longer links meta-rz-drpai's `libtvm_runtime` (audit NPU-02)
+### Fixed — the Yocto DRP-AI backend no longer links meta-rz-drpai's `libtvm_runtime` (audit NPU-02) (#2660)
 
 `src/yocto/CMakeLists.txt` linked `libtvm_runtime.so.2.5.1` from meta-rz-drpai's
 `lib-tvm` in addition to the RUHMI 2.7.0 libraries, so a process that used the
