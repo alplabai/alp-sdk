@@ -33,6 +33,7 @@
 
 	chosen {
 		zephyr,sram = &sram;
+		zephyr,ram-console = &ram_console;
 		/*
 		 * No CM33 serial console on this board.  The only console is the
 		 * A55's (Linux, on the shared debug UART); sci0 here is the EVK
@@ -52,6 +53,19 @@
 	sram: memory@8003000 {
 		compatible = "mmio-sram";
 		reg = <0x08003000 0xfbfff>;
+	};
+
+	/*
+	 * RAM console buffer (audit CM33-M2): 16 KiB at CM33-NS 0x9f710000 (A55
+	 * view 0x4f710000), inside the 9 MiB 0x9f700000 window Linux reserves
+	 * no-map.  Clear of the rest of that window: the rsctbl page
+	 * 0x9f700000..0x9f700fff (liveness beacon at 0x9f700ff0..0x9f700fff), the
+	 * mhu-shm page 0x9f701000..0x9f701fff, and the vring/rpmsg regions from
+	 * 0x9f800000 up.  Do not move it into any of those.
+	 */
+	ram_console: memory@9f710000 {
+		compatible = "mmio-sram";
+		reg = <0x9f710000 0x4000>;
 	};
 
 	/*
